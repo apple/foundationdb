@@ -7851,18 +7851,18 @@ static Future<Void> createCheckpointImpl(T tr, KeyRangeRef range, CheckpointForm
 
 		// The checkpoint request is sent to all replicas, in case any of them is unhealthy.
 		// An alternative is to choose a healthy replica.
-		const UID checkpointID = deterministicRandom()->randomUniqueID();
+		const UID checkpontId = deterministicRandom()->randomUniqueID();
 		for (int idx = 0; idx < src.size(); ++idx) {
-			CheckpointMetaData checkpoint(shard & range, format, src[idx], checkpointID);
+			CheckpointMetaData checkpoint(shard & range, format, src[idx], checkpontId);
 			checkpoint.setState(CheckpointMetaData::Pending);
-			tr->set(checkpointKeyFor(checkpointID), checkpointValue(checkpoint));
+			tr->set(checkpointKeyFor(checkpontId), checkpointValue(checkpoint));
 		}
 
 		TraceEvent("CreateCheckpointTransactionShard")
 		    .detail("Shard", shard)
 		    .detail("SrcServers", describe(src))
 		    .detail("ServerSelected", describe(src))
-		    .detail("CheckpointKey", checkpointKeyFor(checkpointID))
+		    .detail("CheckpointKey", checkpointKeyFor(checkpontId))
 		    .detail("ReadVersion", tr->getReadVersion().get());
 	}
 

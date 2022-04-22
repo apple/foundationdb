@@ -536,7 +536,7 @@ ACTOR Future<Void> fetchCheckpointFile(Database cx,
 			state Reference<IAsyncFile> asyncFile = wait(IAsyncFileSystem::filesystem()->open(localFile, flags, 0666));
 
 			state ReplyPromiseStream<FetchCheckpointReply> stream =
-			    ssi.fetchCheckpoint.getReplyStream(FetchCheckpointRequest(metaData->checkpointID, remoteFile));
+			    ssi.fetchCheckpoint.getReplyStream(FetchCheckpointRequest(metaData->checkpontId, remoteFile));
 			TraceEvent("FetchCheckpointFileReceivingData")
 			    .detail("RemoteFile", remoteFile)
 			    .detail("TargetUID", ssID.toString())
@@ -591,7 +591,7 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
                                         std::shared_ptr<rocksdb::SstFileWriter> writer,
                                         std::function<Future<Void>(const CheckpointMetaData&)> cFun,
                                         int maxRetries = 3) {
-	state std::string localFile = dir + "/" + metaData->checkpointID.toString() + ".sst";
+	state std::string localFile = dir + "/" + metaData->checkpontId.toString() + ".sst";
 	RocksDBCheckpoint rcp = getRocksCheckpoint(*metaData);
 	TraceEvent("FetchCheckpointRange")
 	    .detail("InitialState", metaData->toString())
@@ -628,7 +628,7 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
 		++attempt;
 		try {
 			TraceEvent("FetchCheckpointRangeBegin")
-			    .detail("CheckpointID", metaData->checkpointID)
+			    .detail("CheckpointID", metaData->checkpontId)
 			    .detail("Range", range.toString())
 			    .detail("TargetStorageServerUID", ssID)
 			    .detail("LocalFile", localFile)
@@ -647,9 +647,9 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
 
 			state ReplyPromiseStream<FetchCheckpointKeyValuesStreamReply> stream =
 			    ssi.fetchCheckpointKeyValues.getReplyStream(
-			        FetchCheckpointKeyValuesRequest(metaData->checkpointID, range));
+			        FetchCheckpointKeyValuesRequest(metaData->checkpontId, range));
 			TraceEvent(SevDebug, "FetchCheckpointKeyValuesReceivingData")
-			    .detail("CheckpointID", metaData->checkpointID)
+			    .detail("CheckpointID", metaData->checkpontId)
 			    .detail("Range", range.toString())
 			    .detail("TargetStorageServerUID", ssID.toString())
 			    .detail("LocalFile", localFile)
@@ -683,7 +683,7 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
 			if (err.code() != error_code_end_of_stream) {
 				TraceEvent("FetchCheckpointFileError")
 				    .errorUnsuppressed(err)
-				    .detail("CheckpointID", metaData->checkpointID)
+				    .detail("CheckpointID", metaData->checkpontId)
 				    .detail("Range", range.toString())
 				    .detail("TargetStorageServerUID", ssID.toString())
 				    .detail("LocalFile", localFile)
@@ -701,7 +701,7 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
 				}
 				if (!fileExists(localFile)) {
 					TraceEvent("FetchCheckpointRangeEndFileNotFound")
-					    .detail("CheckpointID", metaData->checkpointID)
+					    .detail("CheckpointID", metaData->checkpontId)
 					    .detail("Range", range.toString())
 					    .detail("TargetStorageServerUID", ssID.toString())
 					    .detail("LocalFile", localFile)
@@ -709,7 +709,7 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
 					    .detail("TotalBytes", totalBytes);
 				} else {
 					TraceEvent("FetchCheckpointRangeEnd")
-					    .detail("CheckpointID", metaData->checkpointID)
+					    .detail("CheckpointID", metaData->checkpontId)
 					    .detail("Range", range.toString())
 					    .detail("TargetStorageServerUID", ssID.toString())
 					    .detail("LocalFile", localFile)
@@ -778,8 +778,8 @@ ACTOR Future<Void> deleteRocksCheckpoint(CheckpointMetaData checkpoint) {
 	state std::unordered_set<std::string> dirs;
 	if (format == RocksDBColumnFamily) {
 		RocksDBColumnFamilyCheckpoint rocksCF = getRocksCF(checkpoint);
-		TraceEvent("DeleteRocksColumnFamilyCheckpoint", checkpoint.checkpointID)
-		    .detail("CheckpointID", checkpoint.checkpointID)
+		TraceEvent("DeleteRocksColumnFamilyCheckpoint", checkpoint.checkpontId)
+		    .detail("CheckpointID", checkpoint.checkpontId)
 		    .detail("RocksCF", rocksCF.toString());
 
 		for (const LiveFileMetaData& file : rocksCF.sstFiles) {
@@ -787,8 +787,8 @@ ACTOR Future<Void> deleteRocksCheckpoint(CheckpointMetaData checkpoint) {
 		}
 	} else if (format == RocksDB) {
 		RocksDBCheckpoint rocksCheckpoint = getRocksCheckpoint(checkpoint);
-		TraceEvent("DeleteRocksCheckpoint", checkpoint.checkpointID)
-		    .detail("CheckpointID", checkpoint.checkpointID)
+		TraceEvent("DeleteRocksCheckpoint", checkpoint.checkpontId)
+		    .detail("CheckpointID", checkpoint.checkpontId)
 		    .detail("RocksCheckpoint", rocksCheckpoint.toString());
 		dirs.insert(rocksCheckpoint.checkpointDir);
 	} else {
@@ -799,8 +799,8 @@ ACTOR Future<Void> deleteRocksCheckpoint(CheckpointMetaData checkpoint) {
 	for (; it != dirs.end(); ++it) {
 		const std::string dir = *it;
 		platform::eraseDirectoryRecursive(dir);
-		TraceEvent("DeleteCheckpointRemovedDir", checkpoint.checkpointID)
-		    .detail("CheckpointID", checkpoint.checkpointID)
+		TraceEvent("DeleteCheckpointRemovedDir", checkpoint.checkpontId)
+		    .detail("CheckpointID", checkpoint.checkpontId)
 		    .detail("Dir", dir);
 		wait(delay(0, TaskPriority::FetchKeys));
 	}

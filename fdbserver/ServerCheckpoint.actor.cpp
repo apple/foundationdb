@@ -50,7 +50,7 @@ ACTOR Future<CheckpointMetaData> fetchCheckpoint(Database cx,
                                                  CheckpointMetaData initialState,
                                                  std::string dir,
                                                  std::function<Future<Void>(const CheckpointMetaData&)> cFun) {
-	TraceEvent("FetchCheckpointBegin", initialState.checkpointID).detail("CheckpointMetaData", initialState.toString());
+	TraceEvent("FetchCheckpointBegin", initialState.checkpontId).detail("CheckpointMetaData", initialState.toString());
 	state CheckpointMetaData result;
 	const CheckpointFormat format = initialState.getFormat();
 	if (format == RocksDBColumnFamily || format == RocksDB) {
@@ -60,7 +60,7 @@ ACTOR Future<CheckpointMetaData> fetchCheckpoint(Database cx,
 		throw not_implemented();
 	}
 
-	TraceEvent("FetchCheckpointEnd", initialState.checkpointID).detail("CheckpointMetaData", result.toString());
+	TraceEvent("FetchCheckpointEnd", initialState.checkpontId).detail("CheckpointMetaData", result.toString());
 	return result;
 }
 

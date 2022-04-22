@@ -46,7 +46,7 @@ struct RelocateData {
 
 	double startTime;
 	UID randomId;
-	UID dataMoveID;
+	UID dataMoveId;
 	int workFactor;
 	std::vector<UID> src;
 	std::vector<UID> completeSources;
@@ -62,7 +62,7 @@ struct RelocateData {
 	explicit RelocateData(RelocateShard const& rs)
 	  : keys(rs.keys), priority(rs.priority), boundaryPriority(isBoundaryPriority(rs.priority) ? rs.priority : -1),
 	    healthPriority(isHealthPriority(rs.priority) ? rs.priority : -1), startTime(now()), restore(rs.restore),
-	    randomId(deterministicRandom()->randomUniqueID()), dataMoveID(rs.dataMoveId), workFactor(0),
+	    randomId(deterministicRandom()->randomUniqueID()), dataMoveId(rs.dataMoveId), workFactor(0),
 	    // src(rs.dataMove.present() ? rs.dataMove.get().src : std::vector<UID>()),
 	    wantsNewServers(rs.priority == SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM ||
 	                    rs.priority == SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM ||
@@ -98,7 +98,7 @@ struct RelocateData {
 		       healthPriority == rhs.healthPriority && keys == rhs.keys && startTime == rhs.startTime &&
 		       workFactor == rhs.workFactor && src == rhs.src && completeSources == rhs.completeSources &&
 		       completeDests == rhs.completeDests && wantsNewServers == rhs.wantsNewServers &&
-		       randomId == rhs.randomId && dataMoveID == rhs.dataMoveID;
+		       randomId == rhs.randomId && dataMoveId == rhs.dataMoveId;
 	}
 	bool operator!=(const RelocateData& rhs) const { return !(*this == rhs); }
 };
@@ -1041,9 +1041,9 @@ struct DDQueueData {
 				rrs.keys = ranges[r];
 				if (rd.keys == ranges[r] && rd.restore) {
 					ASSERT(rd.dataMove != nullptr);
-					rrs.dataMoveID = rd.dataMove->meta.id;
+					rrs.dataMoveId = rd.dataMove->meta.id;
 				} else {
-					rrs.dataMoveID = deterministicRandom()->randomUniqueID();
+					rrs.dataMoveId = deterministicRandom()->randomUniqueID();
 				}
 
 				launch(rrs, busymap, singleRegionTeamSize);
@@ -1074,7 +1074,6 @@ ACTOR Future<Void> cancelDataMove(struct DDQueueData* self, KeyRange range, cons
 
 	std::vector<Future<Void>> cleanup;
 	auto f = self->dataMoves.intersectingRanges(range);
-	// std::unordered_map<UID, DDDataMove> dms;
 	for (auto it = f.begin(); it != f.end(); ++it) {
 		if (!it->value().isValid()) {
 			continue;
@@ -1169,9 +1168,9 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 			for (auto it = f.begin(); it != f.end(); ++it) {
 				KeyRangeRef kr(it->range().begin, it->range().end);
 				const UID mId = it->value().id;
-				if (mId.isValid() && mId != rd.dataMoveID) {
+				if (mId.isValid() && mId != rd.dataMoveId) {
 					TraceEvent("DDRelocatorConflictingDataMove", distributorId)
-					    .detail("CurrentDataMoveID", rd.dataMoveID)
+					    .detail("CurrentDataMoveID", rd.dataMoveId)
 					    .detail("DataMoveID", mId)
 					    .detail("Range", kr);
 					if (!signalledTransferComplete) {
@@ -1181,7 +1180,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 					return Void();
 				}
 			}
-			self->dataMoves.insert(rd.keys, DDQueueData::DDDataMove(rd.dataMoveID));
+			self->dataMoves.insert(rd.keys, DDQueueData::DDDataMove(rd.dataMoveId));
 		}
 
 		state StorageMetrics metrics =
@@ -1409,7 +1408,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 			                                         &self->finishMoveKeysParallelismLock,
 			                                         self->teamCollections.size() > 1,
 			                                         relocateShardInterval.pairID,
-			                                         rd.dataMoveID,
+			                                         rd.dataMoveId,
 			                                         false,
 			                                         ddEnabledState);
 			state Future<Void> pollHealth =
@@ -1434,7 +1433,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 								                      &self->finishMoveKeysParallelismLock,
 								                      self->teamCollections.size() > 1,
 								                      relocateShardInterval.pairID,
-								                      rd.dataMoveID,
+								                      rd.dataMoveId,
 								                      false,
 								                      ddEnabledState);
 							} else {
@@ -1443,10 +1442,10 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 								// 	auto f = self->dataMoves.intersectingRanges(rd.keys);
 								// 	for (auto it = f.begin(); it != f.end(); ++it) {
 								// 		KeyRangeRef kr(it->range().begin, it->range().end);
-								// 		if (it->value() == rd.dataMoveID) {
+								// 		if (it->value() == rd.dataMoveId) {
 								// 			self->dataMoves.insert(kr, UID());
 								// 			TraceEvent("DequeueDataMoveOnSuccess", self->distributorId)
-								// 			    .detail("DataMoveID", rd.dataMoveID)
+								// 			    .detail("DataMoveID", rd.dataMoveId)
 								// 			    .detail("DataMoveRange", rd.keys)
 								// 			    .detail("Range", kr);
 								// 		}
@@ -1478,7 +1477,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 			} catch (Error& e) {
 				TraceEvent("DequeueDataMove", self->distributorId)
 				    .error(error)
-				    .detail("DataMoveID", rd.dataMoveID)
+				    .detail("DataMoveID", rd.dataMoveId)
 				    .detail("Range", rd.keys);
 				error = e;
 			}
@@ -1488,16 +1487,16 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 			// 	TraceEvent("DequeueDataMove", self->distributorId)
 			// 	    .error(error)
 			// 	    .detail("Range", rd.keys)
-			// 	    .detail("DataMoveID", rd.dataMoveID);
+			// 	    .detail("DataMoveID", rd.dataMoveId);
 			// 	auto f = self->dataMoves.intersectingRanges(rd.keys);
 			// 	std::vector<Future<Void>> actors;
 			// 	for (auto it = f.begin(); it != f.end(); ++it) {
-			// 		if (it->value() == rd.dataMoveID) {
+			// 		if (it->value() == rd.dataMoveId) {
 			// 			KeyRange kr = KeyRangeRef(it->range().begin, it->range().end);
 			// 			actors.push_back(cancelDataMove(self, kr, ddEnabledState));
 			// 			TraceEvent("CancelDataMoveOnError", self->distributorId)
 			// 			    .detail("Range", kr)
-			// 			    .detail("DataMoveID", rd.dataMoveID);
+			// 			    .detail("DataMoveID", rd.dataMoveId);
 			// 		}
 			// 	}
 			// 	wait(waitForAll(actors));

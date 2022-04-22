@@ -47,7 +47,7 @@ struct DataMove {
 
 	double startTime;
 	// UID randomId;
-	// UID dataMoveID;
+	// UID dataMoveId;
 	// int workFactor;
 	std::vector<std::vector<UID>> primarySrc;
 	std::vector<std::vector<UID>> remoteSrc;

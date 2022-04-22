@@ -49,6 +49,9 @@ extern const KeyRef afterAllKeys;
 //	An internal mapping of where shards are located in the database. [[begin]] is the start of the shard range
 //	and the result is a list of serverIDs or Tags where these shards are located. These values can be changed
 //	as data movement occurs.
+//  With ShardEncodLocationMetaData, the encoding format is:
+//    "\xff/keyServers/[[begin]]" := "[[std::vector<serverID>, std::vector<serverID>], srcID, destID]", where srcID
+//  and destID are the source and destination `shard id`, respectively.
 extern const KeyRangeRef keyServersKeys, keyServersKeyServersKeys;
 extern const KeyRef keyServersPrefix, keyServersEnd, keyServersKeyServersKey;
 extern const UID unassignedShardId;
@@ -89,19 +92,19 @@ extern const KeyRef clusterIdKey;
 // "\xff/checkpoint/[[UID]] := [[CheckpointMetaData]]"
 extern const KeyRangeRef checkpointKeys;
 extern const KeyRef checkpointPrefix;
-const Key checkpointKeyFor(UID checkpointID);
-const Key checkpointKeyFor(UID ssID, UID moveDataID, UID checkpointID);
+const Key checkpointKeyFor(UID checkpontId);
+const Key checkpointKeyFor(UID ssID, UID moveDataID, UID checkpontId);
 const Key checkpointKeyPrefixFor(UID ssID, UID moveDataID);
 const KeyRange checkpointKeyRangeFor(UID ssID, UID moveDataID);
-void decodeCheckpointKeyRange(const KeyRangeRef& key, UID& ssID, UID& dataMoveID);
+void decodeCheckpointKeyRange(const KeyRangeRef& key, UID& ssID, UID& dataMoveId);
 const Value checkpointValue(const CheckpointMetaData& checkpoint);
 UID decodeCheckpointKey(const KeyRef& key);
-void decodeCheckpointKey(const KeyRef& key, UID& ssID, UID& dataMoveID, UID& checkpointID);
+void decodeCheckpointKey(const KeyRef& key, UID& ssID, UID& dataMoveId, UID& checkpontId);
 CheckpointMetaData decodeCheckpointValue(const ValueRef& value);
 
 // "\xff/dataMoves/[[UID]] := [[DataMoveMetaData]]"
 extern const KeyRangeRef dataMoveKeys;
-const Key dataMoveKeyFor(UID checkpointID);
+const Key dataMoveKeyFor(UID checkpontId);
 const Value dataMoveValue(const DataMoveMetaData& checkpoint);
 UID decodeDataMoveKey(const KeyRef& key);
 DataMoveMetaData decodeDataMoveValue(const ValueRef& value);

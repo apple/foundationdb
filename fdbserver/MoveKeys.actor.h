@@ -76,7 +76,7 @@ ACTOR Future<Void> moveKeys(Database occ,
                             FlowLock* finishMoveKeysParallelismLock,
                             bool hasRemote,
                             UID relocationIntervalId, // for logging only
-                            UID dataMoveID,
+                            UID dataMoveId,
                             bool cancelConflictingDataMoves,
                             const DDEnabledState* ddEnabledState);
 // Eventually moves the given keys to the given destination team
@@ -85,7 +85,7 @@ ACTOR Future<Void> moveKeys(Database occ,
 // it returns (since it needs to execute the finishMoveKeys transaction).
 
 ACTOR Future<Void> cleanUpDataMove(Database occ,
-                                   UID dataMoveID,
+                                   UID dataMoveId,
                                    MoveKeysLock lock,
                                    FlowLock* cleanUpDataMoveParallelismLock,
                                    KeyRange range,

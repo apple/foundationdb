@@ -94,7 +94,7 @@ const Value keyServersValue(const std::vector<UID>& src,
                             const std::vector<UID>& dest,
                             const UID& srcID,
                             const UID& destID) {
-	BinaryWriter wr(IncludeVersion(ProtocolVersion::withTeamEncodedLocationMetaData()));
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withShardEncodLocationMetaData()));
 	wr << src << dest << srcID << destID;
 	return wr.toValue();
 }
@@ -128,7 +128,7 @@ void decodeKeyServersValue(RangeResult result,
 	}
 
 	BinaryReader rd(value, IncludeVersion());
-	if (rd.protocolVersion().hasTeamEncodedLocationMetaData()) {
+	if (rd.protocolVersion().hasShardEncodLocationMetaData()) {
 		UID srcId, destId;
 		decodeKeyServersValue(result, value, src, dest, srcId, destId);
 		return;
@@ -190,8 +190,14 @@ void decodeKeyServersValue(RangeResult result,
 	}
 
 	BinaryReader rd(value, IncludeVersion());
-	if (rd.protocolVersion().hasTeamEncodedLocationMetaData()) {
-		rd >> src >> dest >> srcID >> destID;
+	if (rd.protocolVersion().hasShardEncodLocationMetaData()) {
+		rd >> src >> dest >> srcID;
+		if (rd.empty()) {
+			ASSERT(dest.empty());
+		} else {
+			rd >> destID;
+			rd.assertEnd();
+		}
 	} else {
 		decodeKeyServersValue(result, value, src, dest, missingIsError);
 		srcID = unassignedShardId;
@@ -221,7 +227,7 @@ void decodeKeyServersValue(std::map<Tag, UID> const& tag_uid,
 	if (value.size() !=
 	    sizeof(ProtocolVersion) + sizeof(int) + srcLen * sizeof(Tag) + sizeof(int) + destLen * sizeof(Tag)) {
 		rd >> src >> dest;
-		if (rd.protocolVersion().hasTeamEncodedLocationMetaData()) {
+		if (rd.protocolVersion().hasShardEncodLocationMetaData()) {
 			UID srcId, destId;
 			rd >> srcId >> destId;
 		}
@@ -276,21 +282,21 @@ const KeyRef clusterIdKey = LiteralStringRef("\xff/clusterId");
 const KeyRangeRef checkpointKeys = KeyRangeRef("\xff/checkpoints/"_sr, "\xff/checkpoints0"_sr);
 const KeyRef checkpointPrefix = checkpointKeys.begin;
 
-const Key checkpointKeyFor(UID checkpointID) {
+const Key checkpointKeyFor(UID checkpontId) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(checkpointPrefix);
-	wr << checkpointID;
+	wr << checkpontId;
 	return wr.toValue();
 }
 
-const Key checkpointKeyFor(UID ssID, UID moveDataID, UID checkpointID) {
+const Key checkpointKeyFor(UID ssID, UID moveDataID, UID checkpontId) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(checkpointPrefix);
 	wr << ssID;
 	wr.serializeBytes("/"_sr);
 	wr << moveDataID;
 	wr.serializeBytes("/"_sr);
-	wr << checkpointID;
+	wr << checkpontId;
 	return wr.toValue();
 }
 
@@ -314,11 +320,11 @@ const KeyRange checkpointKeyRangeFor(UID ssID, UID moveDataID) {
 	return prefixRange(wr.toValue());
 }
 
-void decodeCheckpointKeyRange(const KeyRangeRef& range, UID& ssID, UID& dataMoveID) {
+void decodeCheckpointKeyRange(const KeyRangeRef& range, UID& ssID, UID& dataMoveId) {
 	BinaryReader rd(range.begin.removePrefix(checkpointPrefix), Unversioned());
 	rd >> ssID;
 	rd.readBytes(1); // Skip "/".
-	rd >> dataMoveID;
+	rd >> dataMoveId;
 }
 
 const Value checkpointValue(const CheckpointMetaData& checkpoint) {
@@ -326,19 +332,19 @@ const Value checkpointValue(const CheckpointMetaData& checkpoint) {
 }
 
 UID decodeCheckpointKey(const KeyRef& key) {
-	UID checkpointID;
+	UID checkpontId;
 	BinaryReader rd(key.removePrefix(checkpointPrefix), Unversioned());
-	rd >> checkpointID;
-	return checkpointID;
+	rd >> checkpontId;
+	return checkpontId;
 }
 
-void decodeCheckpointKey(const KeyRef& key, UID& ssID, UID& dataMoveID, UID& checkpointID) {
+void decodeCheckpointKey(const KeyRef& key, UID& ssID, UID& dataMoveId, UID& checkpontId) {
 	BinaryReader rd(key.removePrefix(checkpointPrefix), Unversioned());
 	rd >> ssID;
 	rd.readBytes(1); // Skip "/".
-	rd >> dataMoveID;
+	rd >> dataMoveId;
 	rd.readBytes(1); // Skip "/".
-	rd >> checkpointID;
+	rd >> checkpontId;
 }
 
 CheckpointMetaData decodeCheckpointValue(const ValueRef& value) {
@@ -350,10 +356,10 @@ CheckpointMetaData decodeCheckpointValue(const ValueRef& value) {
 
 // "\xff/dataMoves/[[UID]] := [[DataMoveMetaData]]"
 const KeyRangeRef dataMoveKeys("\xff/dataMoves/"_sr, "\xff/dataMoves0"_sr);
-const Key dataMoveKeyFor(UID dataMoveID) {
+const Key dataMoveKeyFor(UID dataMoveId) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(dataMoveKeys.begin);
-	wr << dataMoveID;
+	wr << dataMoveId;
 	return wr.toValue();
 }
 
@@ -467,7 +473,7 @@ bool serverHasKey(ValueRef storedValue) {
 
 const Value serverKeysValue(const UID& id) {
 	ASSERT(CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
-	BinaryWriter wr(IncludeVersion(ProtocolVersion::withTeamEncodedLocationMetaData()));
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withShardEncodLocationMetaData()));
 	wr << id;
 	return wr.toValue();
 }
@@ -488,7 +494,7 @@ void decodeServerKeysValue(const ValueRef& value, bool& assigned, bool& emptyRan
 		emptyRange = false;
 	} else {
 		BinaryReader rd(value, IncludeVersion());
-		ASSERT(rd.protocolVersion().hasTeamEncodedLocationMetaData());
+		ASSERT(rd.protocolVersion().hasShardEncodLocationMetaData());
 		rd >> id;
 		assigned = id.isValid();
 		emptyRange = false; // TODO: support assigning empty range.
@@ -1615,7 +1621,7 @@ TEST_CASE("/SystemData/SerDes/SSI") {
 }
 
 // unit test for serialization since tss stuff had bugs
-TEST_CASE("/SystemData/SerDes/KeyServers") {
+TEST_CASE("/SystemData/compat/KeyServers") {
 	printf("testing keyServers serdes\n");
 	std::vector<UID> src, dest;
 	std::map<Tag, UID> tag_uid;
@@ -1638,6 +1644,9 @@ TEST_CASE("/SystemData/SerDes/KeyServers") {
 	RangeResult idTag;
 	for (int i = 0; i < src.size(); ++i) {
 		idTag.push_back_deep(idTag.arena(), KeyValueRef(serverTagKeyFor(src[i]), serverTagValue(uid_tag[src[i]])));
+	}
+	for (int i = 0; i < dest.size(); ++i) {
+		idTag.push_back_deep(idTag.arena(), KeyValueRef(serverTagKeyFor(dest[i]), serverTagValue(uid_tag[dest[i]])));
 	}
 
 	auto decodeAndVerify =

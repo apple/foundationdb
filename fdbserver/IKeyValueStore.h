@@ -30,7 +30,7 @@ struct CheckpointRequest {
 	const Version version; // The FDB version at which the checkpoint is created.
 	const KeyRange range; // Keyrange this checkpoint must contain.
 	const CheckpointFormat format;
-	const UID checkpointID;
+	const UID checkpontId;
 	const std::string checkpointDir; // The local directory where the checkpoint file will be created.
 
 	CheckpointRequest(const Version version,
@@ -38,7 +38,7 @@ struct CheckpointRequest {
 	                  const CheckpointFormat format,
 	                  const UID& id,
 	                  const std::string& checkpointDir)
-	  : version(version), range(range), format(format), checkpointID(id), checkpointDir(checkpointDir) {}
+	  : version(version), range(range), format(format), checkpontId(id), checkpointDir(checkpointDir) {}
 };
 
 class IClosable {

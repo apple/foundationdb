@@ -1833,7 +1833,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			for (const std::string dir : dirs) {
 				platform::eraseDirectoryRecursive(dir);
 				TraceEvent("DeleteCheckpointRemovedDir", id)
-				    .detail("CheckpointID", checkpoint.checkpointID)
+				    .detail("CheckpointID", checkpoint.checkpontId)
 				    .detail("Dir", dir);
 			}
 		} else if (checkpoint.format == RocksDB) {
@@ -1880,7 +1880,7 @@ void RocksDBKeyValueStore::Writer::action(CheckpointAction& a) {
 	    .detail("PersistVersion", version);
 
 	// TODO: set the range as the actual shard range.
-	CheckpointMetaData res(version, a.request.range, a.request.format, a.request.checkpointID);
+	CheckpointMetaData res(version, a.request.range, a.request.format, a.request.checkpontId);
 	const std::string& checkpointDir = a.request.checkpointDir;
 
 	if (a.request.format == RocksDBColumnFamily) {

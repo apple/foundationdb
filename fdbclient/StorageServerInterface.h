@@ -858,7 +858,7 @@ struct GetCheckpointRequest {
 	Version version; // The FDB version at which the checkpoint is created.
 	KeyRange range;
 	int16_t format; // CheckpointFormat.
-	Optional<UID> checkpointID; // When present, look for the checkpoint with the exact UID.
+	Optional<UID> checkpontId; // When present, look for the checkpoint with the exact UID.
 	ReplyPromise<CheckpointMetaData> reply;
 
 	GetCheckpointRequest() {}
@@ -867,7 +867,7 @@ struct GetCheckpointRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, range, format, checkpointID, reply);
+		serializer(ar, version, range, format, checkpontId, reply);
 	}
 };
 
@@ -891,16 +891,16 @@ struct FetchCheckpointReply : public ReplyPromiseStreamReply {
 // Request to fetch checkpoint from a storage server.
 struct FetchCheckpointRequest {
 	constexpr static FileIdentifier file_identifier = 13804344;
-	UID checkpointID;
+	UID checkpontId;
 	Standalone<StringRef> token; // Serialized data specific to a particular checkpoint format.
 	ReplyPromiseStream<FetchCheckpointReply> reply;
 
 	FetchCheckpointRequest() = default;
-	FetchCheckpointRequest(UID checkpointID, StringRef token) : checkpointID(checkpointID), token(token) {}
+	FetchCheckpointRequest(UID checkpontId, StringRef token) : checkpontId(checkpontId), token(token) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, checkpointID, token, reply);
+		serializer(ar, checkpontId, token, reply);
 	}
 };
 
@@ -921,16 +921,16 @@ struct FetchCheckpointKeyValuesStreamReply : public ReplyPromiseStreamReply {
 
 struct FetchCheckpointKeyValuesRequest {
 	constexpr static FileIdentifier file_identifier = 13804354;
-	UID checkpointID;
+	UID checkpontId;
 	KeyRange range;
 	ReplyPromiseStream<FetchCheckpointKeyValuesStreamReply> reply;
 
 	FetchCheckpointKeyValuesRequest() {}
-	FetchCheckpointKeyValuesRequest(UID checkpointID, KeyRange range) : checkpointID(checkpointID), range(range) {}
+	FetchCheckpointKeyValuesRequest(UID checkpontId, KeyRange range) : checkpontId(checkpontId), range(range) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, checkpointID, range, reply);
+		serializer(ar, checkpontId, range, reply);
 	}
 };
 

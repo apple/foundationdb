@@ -207,12 +207,12 @@ struct SSCheckpointWorkload : TestWorkload {
 				// wait(tr.commit());
 				state int i = 0;
 				for (; i < dataMoves.size(); ++i) {
-					UID dataMoveID = decodeDataMoveKey(dataMoves[i].key);
+					UID dataMoveId = decodeDataMoveKey(dataMoves[i].key);
 					state DataMoveMetaData dataMove = decodeDataMoveValue(dataMoves[i].value);
-					ASSERT(dataMoveID == dataMove.id);
+					ASSERT(dataMoveId == dataMove.id);
 					TraceEvent("TestCancelDataMoveBegin").detail("DataMove", dataMove.toString());
 					wait(cleanUpDataMove(cx,
-					                     dataMoveID,
+					                     dataMoveId,
 					                     moveKeysLock,
 					                     &self->cleanUpDataMoveParallelismLock,
 					                     dataMove.range,

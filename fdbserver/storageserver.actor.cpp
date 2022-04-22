@@ -2127,14 +2127,14 @@ ACTOR Future<Void> deleteCheckpointQ(StorageServer* self, Version version, Check
 
 	TraceEvent("DeleteCheckpointBegin", self->thisServerID).detail("Checkpoint", checkpoint.toString());
 
-	auto it = self->dataMoveCheckpointsMap.find(checkpoint.dataMoveID);
+	auto it = self->dataMoveCheckpointsMap.find(checkpoint.dataMoveId);
 	if (it != self->dataMoveCheckpointsMap.end()) {
-		it->second.erase(checkpoint.dataMoveID);
+		it->second.erase(checkpoint.dataMoveId);
 		if (it->second.empty()) {
 			self->dataMoveCheckpointsMap.erase(it);
 		}
 	}
-	self->checkpoints.erase(checkpoint.checkpointID);
+	self->checkpoints.erase(checkpoint.checkpontId);
 
 	try {
 		wait(deleteCheckpoint(checkpoint));
@@ -2143,8 +2143,8 @@ ACTOR Future<Void> deleteCheckpointQ(StorageServer* self, Version version, Check
 		throw;
 	}
 
-	state Key persistCheckpointKey(persistCheckpointKeys.begin.toString() + checkpoint.checkpointID.toString());
-	state Key pendingCheckpointKey(persistPendingCheckpointKeys.begin.toString() + checkpoint.checkpointID.toString());
+	state Key persistCheckpointKey(persistCheckpointKeys.begin.toString() + checkpoint.checkpontId.toString());
+	state Key pendingCheckpointKey(persistPendingCheckpointKeys.begin.toString() + checkpoint.checkpontId.toString());
 	Version version = self->data().getLatestVersion();
 	auto& mLV = self->addVersionToMutationLog(version);
 	self->addMutationToMutationLog(
@@ -2174,16 +2174,16 @@ ACTOR Future<Void> deleteMoveInShardQ(StorageServer* self, Version version, Move
 // Serves FetchCheckpointRequests.
 ACTOR Future<Void> fetchCheckpointQ(StorageServer* self, FetchCheckpointRequest req) {
 	TraceEvent("ServeFetchCheckpointBegin", self->thisServerID)
-	    .detail("CheckpointID", req.checkpointID)
+	    .detail("CheckpointID", req.checkpontId)
 	    .detail("Token", req.token);
 
 	req.reply.setByteLimit(SERVER_KNOBS->CHECKPOINT_TRANSFER_BLOCK_BYTES);
 
 	// Returns error is the checkpoint cannot be found.
-	const auto it = self->checkpoints.find(req.checkpointID);
+	const auto it = self->checkpoints.find(req.checkpontId);
 	if (it == self->checkpoints.end()) {
 		req.reply.sendError(checkpoint_not_found());
-		TraceEvent("ServeFetchCheckpointNotFound", self->thisServerID).detail("CheckpointID", req.checkpointID);
+		TraceEvent("ServeFetchCheckpointNotFound", self->thisServerID).detail("CheckpointID", req.checkpontId);
 		return Void();
 	}
 
@@ -2202,12 +2202,12 @@ ACTOR Future<Void> fetchCheckpointQ(StorageServer* self, FetchCheckpointRequest 
 		if (e.code() == error_code_end_of_stream) {
 			req.reply.sendError(end_of_stream());
 			TraceEvent("ServeFetchCheckpointEnd", self->thisServerID)
-			    .detail("CheckpointID", req.checkpointID)
+			    .detail("CheckpointID", req.checkpontId)
 			    .detail("Token", req.token);
 		} else {
 			TraceEvent(SevWarnAlways, "ServerFetchCheckpointFailure")
 			    .errorUnsuppressed(e)
-			    .detail("CheckpointID", req.checkpointID)
+			    .detail("CheckpointID", req.checkpontId)
 			    .detail("Token", req.token);
 			if (!canReplyWith(e)) {
 				throw e;
@@ -2225,16 +2225,16 @@ ACTOR Future<Void> fetchCheckpointKeyValuesQ(StorageServer* self, FetchCheckpoin
 	state FlowLock::Releaser holder(self->serveFetchCheckpointParallelismLock);
 
 	TraceEvent("ServeFetchCheckpointKeyValuesBegin", self->thisServerID)
-	    .detail("CheckpointID", req.checkpointID)
+	    .detail("CheckpointID", req.checkpontId)
 	    .detail("Range", req.range);
 
 	req.reply.setByteLimit(SERVER_KNOBS->CHECKPOINT_TRANSFER_BLOCK_BYTES);
 
 	// Returns error is the checkpoint cannot be found.
-	const auto it = self->checkpoints.find(req.checkpointID);
+	const auto it = self->checkpoints.find(req.checkpontId);
 	if (it == self->checkpoints.end()) {
 		req.reply.sendError(checkpoint_not_found());
-		TraceEvent("ServeFetchCheckpointNotFound", self->thisServerID).detail("CheckpointID", req.checkpointID);
+		TraceEvent("ServeFetchCheckpointNotFound", self->thisServerID).detail("CheckpointID", req.checkpontId);
 		return Void();
 	}
 
@@ -2247,13 +2247,13 @@ ACTOR Future<Void> fetchCheckpointKeyValuesQ(StorageServer* self, FetchCheckpoin
 			    wait(reader->nextKeyValues(CLIENT_KNOBS->REPLY_BYTE_LIMIT, CLIENT_KNOBS->REPLY_BYTE_LIMIT));
 			if (!res.empty()) {
 				TraceEvent(SevDebug, "FetchCheckpontKeyValuesReadRange", self->thisServerID)
-				    .detail("CheckpointID", req.checkpointID)
+				    .detail("CheckpointID", req.checkpontId)
 				    .detail("Begin", res.front().key)
 				    .detail("End", res.back().key)
 				    .detail("Size", res.size());
 			} else {
 				TraceEvent(SevWarn, "FetchCheckpontKeyValuesEmptyRange", self->thisServerID)
-				    .detail("CheckpointID", req.checkpointID);
+				    .detail("CheckpointID", req.checkpontId);
 			}
 
 			wait(req.reply.onReady());
@@ -2270,12 +2270,12 @@ ACTOR Future<Void> fetchCheckpointKeyValuesQ(StorageServer* self, FetchCheckpoin
 		if (e.code() == error_code_end_of_stream) {
 			req.reply.sendError(end_of_stream());
 			TraceEvent("ServeFetchCheckpointKeyValuesEnd", self->thisServerID)
-			    .detail("CheckpointID", req.checkpointID)
+			    .detail("CheckpointID", req.checkpontId)
 			    .detail("Range", req.range);
 		} else {
 			TraceEvent(SevWarnAlways, "ServerFetchCheckpointKeyValuesFailure")
 			    .errorUnsuppressed(e)
-			    .detail("CheckpointID", req.checkpointID)
+			    .detail("CheckpointID", req.checkpontId)
 			    .detail("Range", req.range);
 			if (!canReplyWith(e)) {
 				throw e;
@@ -6531,7 +6531,7 @@ Key MoveInUpdates::getPersistKey(const Version version, const int idx) {
 
 // void MoveInUpdates::bufferWrite() {
 // 	// TraceEvent("MoveInUpdatesBufferWrite", id).detail("Version", version).detail("Mutation", mutation);
-// 	// Key persistUpdateKey(.toString() + checkpoint.checkpointID.toString());
+// 	// Key persistUpdateKey(.toString() + checkpoint.checkpontId.toString());
 
 // 	while (!newUpdates.empty()) {
 // 		const Version version = newUpdates.front().version;
@@ -6553,7 +6553,7 @@ void MoveInUpdates::addMutation(Version version, bool fromFetch, MutationRef con
 	if (version <= oldestVersion)
 		return;
 
-	// Key persistUpdateKey(.toString() + checkpoint.checkpointID.toString());
+	// Key persistUpdateKey(.toString() + checkpoint.checkpontId.toString());
 
 	// BinaryWriter wr(Unversioned());
 	// wr.serializeBytes(persistMoveInShardKeys.begin);
@@ -7713,13 +7713,13 @@ private:
 	void registerPendingCheckpoint(StorageServer* data, const MutationRef& m, Version ver) {
 		CheckpointMetaData checkpoint = decodeCheckpointValue(m.param2);
 		ASSERT(checkpoint.getState() == CheckpointMetaData::Pending);
-		const UID checkpointID = decodeCheckpointKey(m.param1.substr(1));
+		const UID checkpontId = decodeCheckpointKey(m.param1.substr(1));
 		checkpoint.version = ver;
 		data->pendingCheckpoints[ver].push_back(checkpoint);
 
 		auto& mLV = data->addVersionToMutationLog(ver);
 		const Key pendingCheckpointKey(persistPendingCheckpointKeys.begin.toString() +
-		                               checkpoint.checkpointID.toString());
+		                               checkpoint.checkpontId.toString());
 		data->addMutationToMutationLog(
 		    mLV, MutationRef(MutationRef::SetValue, pendingCheckpointKey, checkpointValue(checkpoint)));
 
@@ -7733,8 +7733,8 @@ private:
 		UID ssId, dataMoveId;
 		decodeCheckpointKeyRange(range, ssId, dataMoveId);
 		for (auto [id, checkpoint] : data->checkpoints) {
-			if (checkpoint.dataMoveID == dataMoveId) {
-				Key persistCheckpointKey(persistCheckpointKeys.begin.toString() + checkpoint.checkpointID.toString());
+			if (checkpoint.dataMoveId == dataMoveId) {
+				Key persistCheckpointKey(persistCheckpointKeys.begin.toString() + checkpoint.checkpontId.toString());
 				checkpoint.setState(CheckpointMetaData::Deleting);
 				auto& mLV = data->addVersionToMutationLog(ver);
 				data->addMutationToMutationLog(
@@ -8271,17 +8271,17 @@ ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData meta
 	const CheckpointRequest req(metaData.version,
 	                            metaData.range,
 	                            static_cast<CheckpointFormat>(metaData.format),
-	                            metaData.checkpointID,
-	                            data->folder + rocksdbCheckpointDirPrefix + metaData.checkpointID.toString());
+	                            metaData.checkpontId,
+	                            data->folder + rocksdbCheckpointDirPrefix + metaData.checkpontId.toString());
 	state CheckpointMetaData checkpointResult;
 	try {
 		state CheckpointMetaData res = wait(data->storage.checkpoint(req));
 		checkpointResult = res;
 		checkpointResult.ssID = data->thisServerID;
-		checkpointResult.dataMoveID = metaData.dataMoveID;
+		checkpointResult.dataMoveId = metaData.dataMoveId;
 		ASSERT(checkpointResult.getState() == CheckpointMetaData::Complete);
-		data->checkpoints[checkpointResult.checkpointID] = checkpointResult;
-		data->dataMoveCheckpointsMap[checkpointResult.dataMoveID].insert(checkpointResult.checkpointID);
+		data->checkpoints[checkpointResult.checkpontId] = checkpointResult;
+		data->dataMoveCheckpointsMap[checkpointResult.dataMoveId].insert(checkpointResult.checkpontId);
 		TraceEvent("StorageCreatedCheckpoint", data->thisServerID).detail("Checkpoint", checkpointResult.toString());
 	} catch (Error& e) {
 		// If checkpoint creation fails, the failure is persisted.
@@ -8294,8 +8294,8 @@ ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData meta
 	// Persist the checkpoint meta data.
 	try {
 		Key pendingCheckpointKey(persistPendingCheckpointKeys.begin.toString() +
-		                         checkpointResult.checkpointID.toString());
-		Key persistCheckpointKey(persistCheckpointKeys.begin.toString() + checkpointResult.checkpointID.toString());
+		                         checkpointResult.checkpontId.toString());
+		Key persistCheckpointKey(persistCheckpointKeys.begin.toString() + checkpointResult.checkpontId.toString());
 		data->storage.clearRange(singleKeyRange(pendingCheckpointKey));
 		data->storage.writeKeyValue(KeyValueRef(persistCheckpointKey, checkpointValue(checkpointResult)));
 		wait(data->storage.commit());
@@ -8306,8 +8306,8 @@ ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData meta
 		TraceEvent("StorageCreateCheckpointPersistFailure", data->thisServerID)
 		    .errorUnsuppressed(e)
 		    .detail("Checkpoint", checkpointResult.toString());
-		data->checkpoints[checkpointResult.checkpointID].setState(CheckpointMetaData::Deleting);
-		// data->checkpoints.erase(checkpointResult.checkpointID);
+		data->checkpoints[checkpointResult.checkpontId].setState(CheckpointMetaData::Deleting);
+		// data->checkpoints.erase(checkpointResult.checkpontId);
 		data->actors.add(deleteCheckpointQ(data, metaData.version, checkpointResult));
 	}
 
@@ -8638,7 +8638,7 @@ void setAvailableStatus(StorageServer* self, KeyRangeRef keys, bool available) {
 		for (auto& [id, checkpoint] : self->checkpoints) {
 			// if (checkpoint.range.intersects(keys)) {
 			if (keys.contains(checkpoint.range)) {
-				Key persistCheckpointKey(persistCheckpointKeys.begin.toString() + checkpoint.checkpointID.toString());
+				Key persistCheckpointKey(persistCheckpointKeys.begin.toString() + checkpoint.checkpontId.toString());
 				checkpoint.setState(CheckpointMetaData::Deleting);
 				self->addMutationToMutationLog(
 				    mLV, MutationRef(MutationRef::SetValue, persistCheckpointKey, checkpointValue(checkpoint)));
@@ -9018,7 +9018,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	state int cLoc;
 	for (cLoc = 0; cLoc < checkpoints.size(); ++cLoc) {
 		CheckpointMetaData metaData = decodeCheckpointValue(checkpoints[cLoc].value);
-		data->checkpoints[metaData.checkpointID] = metaData;
+		data->checkpoints[metaData.checkpontId] = metaData;
 		if (metaData.getState() == CheckpointMetaData::Deleting) {
 			data->actors.add(deleteCheckpointQ(data, version, metaData));
 		}
