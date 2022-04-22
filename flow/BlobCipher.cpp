@@ -138,6 +138,7 @@ Reference<BlobCipherKey> BlobCipherKeyIdCache::getLatestCipherKey() {
 	if (latestBaseCipherKeyId == ENCRYPT_INVALID_CIPHER_KEY_ID) {
 		return Reference<BlobCipherKey>();
 	}
+
 	return getCipherByBaseCipherId(latestBaseCipherKeyId, latestRandomSalt);
 }
 
@@ -302,7 +303,7 @@ void BlobCipherKeyCache::insertCipherKey(const EncryptCipherDomainId& domainId,
 
 Reference<BlobCipherKey> BlobCipherKeyCache::getLatestCipherKey(const EncryptCipherDomainId& domainId) {
 	if (domainId == ENCRYPT_INVALID_DOMAIN_ID) {
-		TraceEvent("GetLatestCipherKey_DomainNotFound").detail("DomainId", domainId);
+		TraceEvent("GetLatestCipherKey_InvalidID").detail("DomainId", domainId);
 		throw encrypt_invalid_id();
 	}
 	auto domainItr = domainCacheMap.find(domainId);
