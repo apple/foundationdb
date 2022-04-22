@@ -105,6 +105,8 @@ if __name__ == "__main__":
                 cmd_args.append(str(cluster.log))
             elif cmd == "@ETC_DIR@":
                 cmd_args.append(str(cluster.etc))
+            elif cmd == "@TMP_DIR@":
+                cmd_args.append(str(cluster.tmp_dir))
             else:
                 cmd_args.append(cmd)
         env = dict(**os.environ)
