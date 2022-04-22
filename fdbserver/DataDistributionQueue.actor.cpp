@@ -1176,7 +1176,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 
 					auto req =
 					    GetTeamRequest(WantNewServers(rd.wantsNewServers),
-					                   WantTrueBest(rd.priority == SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM),
+					                   WantTrueBest(isValleyFillerPriority(rd.priority)),
 					                   PreferLowerUtilization::True,
 					                   TeamMustHaveShards::False,
 					                   inflightPenalty);
@@ -1522,10 +1522,10 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
 		return false;
 	}
 
-	// TODO: set 100 as a knob
+	// TODO: set 10 as a knob
 	// randomly choose topK shards
 	state Future<HealthMetrics> healthMetrics = self->cx->getHealthMetrics(true);
-	state GetMetricsRequest req(shards, 100);
+	state GetMetricsRequest req(shards, 10);
 	req.comparator = [](const StorageMetrics& a, const StorageMetrics& b) {
 		return a.bytesReadPerKSecond / std::max(a.bytes * 1.0, 1.0 * SERVER_KNOBS->MIN_SHARD_BYTES) <
 		       b.bytesReadPerKSecond / std::max(b.bytes * 1.0, 1.0 * SERVER_KNOBS->MIN_SHARD_BYTES);
@@ -1538,7 +1538,7 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
 	}
 
 	int chosenIdx = -1;
-	for (int i = 0; i < SERVER_KNOBS->REBALANCE_MAX_RETRIES; ++i) {
+	for (int i = 0; i < 10; ++i) {
 		int idx = deterministicRandom()->randomInt(0, metricsList.size());
 		if (metricsList[idx].keys.present() && metricsList[i].bytes > 0) {
 			chosenIdx = idx;
