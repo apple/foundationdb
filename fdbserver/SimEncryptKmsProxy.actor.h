@@ -71,26 +71,43 @@ struct SimKmsProxyInterface {
 	}
 };
 
+struct SimEncryptKeyDetails {
+	constexpr static FileIdentifier file_identifier = 1227025;
+	SimEncryptDomainId encryptDomainId;
+	SimEncryptKeyId encryptKeyId;
+	StringRef encryptKey;
+
+	SimEncryptKeyDetails() {}
+	explicit SimEncryptKeyDetails(SimEncryptDomainId domainId, SimEncryptKeyId keyId, StringRef key, Arena& arena)
+	  : encryptDomainId(domainId), encryptKeyId(keyId), encryptKey(StringRef(arena, key)) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, encryptDomainId, encryptKeyId, encryptKey);
+	}
+};
+
 struct SimGetEncryptKeysByKeyIdsReply {
 	constexpr static FileIdentifier file_identifier = 2313778;
 	Arena arena;
-	std::unordered_map<SimEncryptKeyId, StringRef> encryptKeyMap;
+	std::vector<SimEncryptKeyDetails> encryptKeyDetails;
 
 	SimGetEncryptKeysByKeyIdsReply() {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, arena, encryptKeyMap);
+		serializer(ar, arena, encryptKeyDetails);
 	}
 };
 
 struct SimGetEncryptKeysByKeyIdsRequest {
 	constexpr static FileIdentifier file_identifier = 6913396;
-	std::vector<SimEncryptKeyId> encryptKeyIds;
+	std::vector<std::pair<SimEncryptKeyId, SimEncryptDomainId>> encryptKeyIds;
 	ReplyPromise<SimGetEncryptKeysByKeyIdsReply> reply;
 
 	SimGetEncryptKeysByKeyIdsRequest() {}
-	explicit SimGetEncryptKeysByKeyIdsRequest(const std::vector<SimEncryptKeyId>& keyIds) : encryptKeyIds(keyIds) {}
+	explicit SimGetEncryptKeysByKeyIdsRequest(const std::vector<std::pair<SimEncryptKeyId, SimEncryptDomainId>>& keyIds)
+	  : encryptKeyIds(keyIds) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -98,31 +115,16 @@ struct SimGetEncryptKeysByKeyIdsRequest {
 	}
 };
 
-struct SimEncryptKeyDetails {
-	constexpr static FileIdentifier file_identifier = 1227025;
-	SimEncryptKeyId encryptKeyId;
-	StringRef encryptKey;
-
-	SimEncryptKeyDetails() {}
-	explicit SimEncryptKeyDetails(SimEncryptKeyId keyId, StringRef key, Arena& arena)
-	  : encryptKeyId(keyId), encryptKey(StringRef(arena, key)) {}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, encryptKeyId, encryptKey);
-	}
-};
-
 struct SimGetEncryptKeyByDomainIdReply {
 	constexpr static FileIdentifier file_identifier = 3009025;
 	Arena arena;
-	std::unordered_map<SimEncryptDomainId, SimEncryptKeyDetails> encryptKeyMap;
+	std::vector<SimEncryptKeyDetails> encryptKeyDetails;
 
 	SimGetEncryptKeyByDomainIdReply() {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, arena, encryptKeyMap);
+		serializer(ar, arena, encryptKeyDetails);
 	}
 };
 

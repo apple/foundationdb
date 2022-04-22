@@ -53,6 +53,9 @@ def run_tester(args, test_file):
            args.cluster_file, "--test-file", test_file]
     if args.external_client_library is not None:
         cmd += ["--external-client-library", args.external_client_library]
+    
+    if args.blob_granule_local_file_path is not None:
+        cmd += ["--blob-granule-local-file-path", args.blob_granule_local_file_path]
 
     get_logger().info('\nRunning tester \'%s\'...' % ' '.join(cmd))
     proc = Popen(cmd, stdout=sys.stdout, stderr=sys.stderr)
@@ -79,11 +82,9 @@ def run_tester(args, test_file):
     get_logger().info('')
     return ret_code
 
-
 def run_tests(args):
     num_failed = 0
-    test_files = [f for f in os.listdir(args.test_dir)
-                  if os.path.isfile(os.path.join(args.test_dir, f)) and f.endswith(".toml")]
+    test_files = [f for f in os.listdir(args.test_dir) if os.path.isfile(os.path.join(args.test_dir, f)) and f.endswith(".toml")]
 
     for test_file in test_files:
         get_logger().info('=========================================================')
@@ -111,6 +112,8 @@ def parse_args(argv):
                         help='The timeout in seconds for running each individual test. (default 300)')
     parser.add_argument('--logging-level', type=str, default='INFO',
                         choices=['ERROR', 'WARNING', 'INFO', 'DEBUG'], help='Specifies the level of detail in the tester output (default=\'INFO\').')
+    parser.add_argument('--blob-granule-local-file-path', type=str, default=None,
+                        help='Enable blob granule tests if set, value is path to local blob granule files')
 
     return parser.parse_args(argv)
 

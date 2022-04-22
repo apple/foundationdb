@@ -66,6 +66,7 @@ public-address = {ip_address}:$ID
 listen-address = public
 datadir = {datadir}/$ID
 logdir = {logdir}
+{bg_knob_line}
 # logsize = 10MiB
 # maxlogssize = 100MiB
 # machine-id =
@@ -82,7 +83,7 @@ logdir = {logdir}
 """
 
     def __init__(self, basedir: str, fdbserver_binary: str, fdbmonitor_binary: str, fdbcli_binary: str,
-                 process_number: int, create_config=True, port=None, ip_address=None):
+                 process_number: int, create_config=True, port=None, ip_address=None, blob_granules_enabled: bool=False):
         self.basedir = Path(basedir)
         self.etc = self.basedir.joinpath('etc')
         self.log = self.basedir.joinpath('log')
@@ -100,6 +101,11 @@ logdir = {logdir}
         self.process_number = process_number
         self.ip_address = '127.0.0.1' if ip_address is None else ip_address
         self.first_port = port
+        self.blob_granules_enabled = blob_granules_enabled
+        if (blob_granules_enabled):
+            # add extra process for blob_worker
+            self.process_number += 1
+
         if (self.first_port is not None):
             self.last_used_port = int(self.first_port)-1
         self.server_ports = [self.__next_port()
@@ -111,6 +117,7 @@ logdir = {logdir}
         self.process = None
         self.fdbmonitor_logfile = None
         self.use_legacy_conf_syntax = False
+        
         if create_config:
             self.create_cluster_file()
             self.save_config()
@@ -126,14 +133,18 @@ logdir = {logdir}
         new_conf_file = self.conf_file.parent / (self.conf_file.name + '.new')
         with open(new_conf_file, 'x') as f:
             conf_template = LocalCluster.configuration_template
+            bg_knob_line = ""
             if (self.use_legacy_conf_syntax):
                 conf_template = conf_template.replace("-", "_")
+            if (self.blob_granules_enabled):
+                bg_knob_line = "knob_bg_url=file://" + str(self.data) + "/fdbblob/"
             f.write(conf_template.format(
                 etcdir=self.etc,
                 fdbserver_bin=self.fdbserver_binary,
                 datadir=self.data,
                 logdir=self.log,
-                ip_address=self.ip_address
+                ip_address=self.ip_address,
+                bg_knob_line=bg_knob_line
             ))
             # By default, the cluster only has one process
             # If a port number is given and process_number > 1, we will use subsequent numbers
@@ -143,6 +154,9 @@ logdir = {logdir}
             for port in self.server_ports:
                 f.write('[fdbserver.{server_port}]\n'.format(
                     server_port=port))
+            if (self.blob_granules_enabled):
+                # make last process a blob_worker class
+                f.write('class = blob_worker')
             f.flush()
             os.fsync(f.fileno())
 
@@ -202,11 +216,20 @@ logdir = {logdir}
         db_config = 'configure new single {}'.format(storage)
         if (enable_tenants):
             db_config += " tenant_mode=optional_experimental"
+        if (self.blob_granules_enabled):
+            db_config += " blob_granules_enabled:=1"
         args = [self.fdbcli_binary, '-C',
                 self.cluster_file, '--exec', db_config]
+
         res = subprocess.run(args, env=self.process_env())
         assert res.returncode == 0, "Create database failed with {}".format(
             res.returncode)
+
+        if (self.blob_granules_enabled):
+            bg_args = [self.fdbcli_binary, '-C',
+                self.cluster_file, '--exec', 'blobrange start \\x00 \\xff']
+            bg_res = subprocess.run(bg_args, env=self.process_env())
+            assert bg_res.returncode == 0, "Start blob granules failed with {}".format(bg_res.returncode)
 
     def get_status(self):
         args = [self.fdbcli_binary, '-C', self.cluster_file, '--exec',

@@ -55,6 +55,9 @@ public:
 	// Mark the transaction as completed without committing it (for read transactions)
 	virtual void done() = 0;
 
+	// Plumbing for blob granule base path
+	virtual std::string getBGBasePath() = 0;
+
 	// A continuation to be executed when all of the given futures get ready
 	virtual void continueAfterAll(std::vector<Future> futures, TTaskFct cont);
 };
@@ -136,7 +139,7 @@ struct TransactionExecutorOptions {
 class ITransactionExecutor {
 public:
 	virtual ~ITransactionExecutor() {}
-	virtual void init(IScheduler* sched, const char* clusterFile) = 0;
+	virtual void init(IScheduler* sched, const char* clusterFile, const std::string& bgBasePath) = 0;
 	virtual void execute(std::shared_ptr<ITransactionActor> tx, TTaskFct cont) = 0;
 };
 
