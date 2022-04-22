@@ -154,17 +154,6 @@ public:
 	}
 };
 
-struct pair_hash {
-	template <class T1, class T2>
-	std::size_t operator()(const std::pair<T1, T2>& pair) const {
-		auto hash1 = std::hash<T1>{}(pair.first);
-		auto hash2 = std::hash<T2>{}(pair.second);
-
-		// Equal hashes XOR would be ZERO.
-		return hash1 == hash2 ? hash1 : hash1 ^ hash2;
-	}
-};
-
 ACTOR Future<Void> getCipherKeysByBaseCipherKeyIds(Reference<EncryptKeyProxyData> ekpProxyData,
                                                    KmsConnectorInterface kmsConnectorInf,
                                                    EKPGetBaseCipherKeysByIdsRequest req) {
@@ -179,7 +168,9 @@ ACTOR Future<Void> getCipherKeysByBaseCipherKeyIds(Reference<EncryptKeyProxyData
 
 	// Dedup the requested pair<baseCipherId, encryptDomainId>
 	// TODO: endpoint serialization of std::unordered_set isn't working at the moment
-	std::unordered_set<std::pair<EncryptCipherBaseKeyId, EncryptCipherDomainId>, pair_hash> dedupedCipherIds;
+	std::unordered_set<std::pair<EncryptCipherBaseKeyId, EncryptCipherDomainId>,
+	                   boost::hash<std::pair<EncryptCipherBaseKeyId, EncryptCipherDomainId>>>
+	    dedupedCipherIds;
 	for (const auto& item : req.baseCipherIds) {
 		dedupedCipherIds.emplace(item);
 	}

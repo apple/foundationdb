@@ -2633,7 +2633,11 @@ public:
 										    .detail("TSSID", tssId)
 										    .detail("Reason",
 										            self->zeroHealthyTeams->get() ? "ZeroHealthyTeams" : "TooMany");
+										Promise<Void> shutdown = self->shutdown;
 										killPromise.send(Void());
+										if (!shutdown.canBeSet()) {
+											return Void(); // "self" got destroyed, so return.
+										}
 									}
 								}
 							}
@@ -3584,6 +3588,8 @@ DDTeamCollection::DDTeamCollection(Database const& cx,
 
 DDTeamCollection::~DDTeamCollection() {
 	TraceEvent("DDTeamCollectionDestructed", distributorId).detail("Primary", primary);
+	// Signal that the object is being destroyed.
+	shutdown.send(Void());
 
 	// Cancel the teamBuilder to avoid creating new teams after teams are cancelled.
 	teamBuilder.cancel();
