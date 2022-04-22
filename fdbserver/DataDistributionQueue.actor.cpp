@@ -910,6 +910,7 @@ struct DDQueueData {
 		for (int i = 0; i < results.src.size(); i++) {
 			queue[results.src[i]].insert(results);
 		}
+		updateLastAsSource(results.src);
 	}
 
 	void logRelocation(const RelocateData& rd, const char* title) {
@@ -1076,13 +1077,19 @@ struct DDQueueData {
 		return highestPriority;
 	}
 
-	bool canQueue(const std::vector<UID>& ids) const {
-		return std::all_of(ids.begin(), ids.end(), [this](const UID& id) {
-			if (this->queue.count(id) && this->queue.at(id).size()) {
-				return now() - this->queue.at(id).rbegin()->startTime >= 60.0;
+	// return true if the servers are throttled as source for read rebalance
+	bool timeThrottle(const std::vector<UID>& ids) const {
+		return std::any_of(ids.begin(), ids.end(), [this](const UID& id) {
+			if (this->lastAsSource.count(id)) {
+				return (now() - this->lastAsSource.at(id)) * 3.0 < SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL;
 			}
-			return true;
+			return false;
 		});
+	}
+
+	void updateLastAsSource(const std::vector<UID>& ids, double t = now()) {
+		for (auto& id : ids)
+			lastAsSource[id] = t;
 	}
 };
 
@@ -1504,8 +1511,9 @@ inline double getWorstCpu(const HealthMetrics& metrics) {
 	}
 	return cpu;
 }
-// Move the shard with highest read density of sourceTeam's to destTeam if sourceTeam has much more read load than
-// destTeam
+
+// Move the shard with the top K highest read density of sourceTeam's to destTeam if sourceTeam has much more read load
+// than destTeam
 ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
                                      int priority,
                                      Reference<IDataDistributionTeam> sourceTeam,
@@ -1515,6 +1523,10 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
 	if (g_network->isSimulated() && g_simulator.speedUpSimulation) {
 		traceEvent->detail("CancelingDueToSimulationSpeedup", true);
 		return false;
+	}
+	// check lastAsSource
+	if (self->timeThrottle(sourceTeam->getServerIDs())) {
+		traceEvent->detail("SkipReason", "SourceTeamThrottle");
 	}
 
 	state std::vector<KeyRange> shards = self->shardsAffectedByTeamFailure->getShardsFor(
@@ -1573,6 +1585,7 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
 	for (int i = 0; i < shards.size(); i++) {
 		if (metrics.keys == shards[i]) {
 			self->output.send(RelocateShard(metrics.keys.get(), priority, RelocateReason::REBALANCE_READ));
+			self->updateLastAsSource(sourceTeam->getServerIDs());
 			return true;
 		}
 	}
@@ -1776,9 +1789,7 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueueData* self, int teamCollectionIndex,
 				wait(getSrcDestTeams(self, teamCollectionIndex, srcReq, destReq, &sourceTeam, &destTeam,ddPriority,&traceEvent));
 				if (sourceTeam.isValid() && destTeam.isValid()) {
 					if (readRebalance) {
-						if(self->canQueue(sourceTeam->getServerIDs())) {
-							wait(store(moved,rebalanceReadLoad(self, ddPriority, sourceTeam, destTeam, teamCollectionIndex == 0, &traceEvent)));
-						}
+						wait(store(moved,rebalanceReadLoad(self, ddPriority, sourceTeam, destTeam, teamCollectionIndex == 0, &traceEvent)));
 					} else {
 						wait(store(moved,rebalanceTeams(self, ddPriority, sourceTeam, destTeam, teamCollectionIndex == 0, &traceEvent)));
 					}
