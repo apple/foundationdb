@@ -25,6 +25,7 @@
 #include "flow/ActorCollection.h"
 #include "flow/EncryptUtils.h"
 #include "flow/Error.h"
+#include "flow/FastRef.h"
 #include "flow/IRandom.h"
 #include "flow/ITrace.h"
 #include "flow/network.h"
@@ -36,18 +37,39 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-SimKmsConnector::SimKmsConnector() : simKmsConnCtx(SERVER_KNOBS->SIM_KMS_MAX_KEYS) {
-	ASSERT(simKmsConnCtx.simEncryptKeyStore.size() == SERVER_KNOBS->SIM_KMS_MAX_KEYS);
-}
+using SimEncryptKey = std::string;
+struct SimEncryptKeyCtx {
+	EncryptCipherBaseKeyId id;
+	SimEncryptKey key;
 
-Future<Void> SimKmsConnector::connectorCore(KmsConnectorInterface interf) {
-	return simConnectorCore(std::addressof(simKmsConnCtx), interf);
-}
+	explicit SimEncryptKeyCtx(EncryptCipherBaseKeyId kId, const char* data) : id(kId), key(data) {}
+};
 
-ACTOR Future<Void> SimKmsConnector::simConnectorCore(SimKmsConnectorContext* ctx, KmsConnectorInterface interf) {
+struct SimKmsConnectorContext {
+	uint32_t maxEncryptionKeys;
+	std::unordered_map<EncryptCipherBaseKeyId, std::unique_ptr<SimEncryptKeyCtx>> simEncryptKeyStore;
+
+	explicit SimKmsConnectorContext(uint32_t keyCount) : maxEncryptionKeys(keyCount) {
+		uint8_t buffer[AES_256_KEY_LENGTH];
+
+		// Construct encryption keyStore.
+		for (int i = 0; i < maxEncryptionKeys; i++) {
+			generateRandomData(&buffer[0], AES_256_KEY_LENGTH);
+			SimEncryptKeyCtx ctx(i, reinterpret_cast<const char*>(buffer));
+			simEncryptKeyStore[i] = std::make_unique<SimEncryptKeyCtx>(i, reinterpret_cast<const char*>(buffer));
+		}
+	}
+};
+
+ACTOR Future<Void> simKmsConnectorCore_impl(KmsConnectorInterface interf) {
 	TraceEvent("SimEncryptKmsProxy_Init", interf.id()).detail("MaxEncryptKeys", SERVER_KNOBS->SIM_KMS_MAX_KEYS);
 
 	state bool success = true;
+	state std::unique_ptr<SimKmsConnectorContext> ctx =
+	    std::make_unique<SimKmsConnectorContext>(SERVER_KNOBS->SIM_KMS_MAX_KEYS);
+
+	ASSERT_EQ(ctx->simEncryptKeyStore.size(), SERVER_KNOBS->SIM_KMS_MAX_KEYS);
+
 	loop {
 		choose {
 			when(KmsConnLookupEKsByKeyIdsReq req = waitNext(interf.ekLookupByIds.getFuture())) {
@@ -101,6 +123,9 @@ ACTOR Future<Void> SimKmsConnector::simConnectorCore(SimKmsConnectorContext* ctx
 	}
 }
 
+Future<Void> SimKmsConnector::connectorCore(KmsConnectorInterface interf) {
+	return simKmsConnectorCore_impl(interf);
+}
 void forceLinkSimKmsConnectorTests() {}
 
 namespace {

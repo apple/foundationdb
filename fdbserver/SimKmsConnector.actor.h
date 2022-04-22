@@ -31,41 +31,10 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-using SimEncryptKey = std::string;
-struct SimEncryptKeyCtx {
-	EncryptCipherBaseKeyId id;
-	SimEncryptKey key;
-
-	SimEncryptKeyCtx() : id(0) {}
-	explicit SimEncryptKeyCtx(EncryptCipherBaseKeyId kId, const char* data) : id(kId), key(data) {}
-};
-
-struct SimKmsConnectorContext {
-	uint32_t maxEncryptionKeys;
-	std::unordered_map<EncryptCipherBaseKeyId, std::unique_ptr<SimEncryptKeyCtx>> simEncryptKeyStore;
-
-	SimKmsConnectorContext() : maxEncryptionKeys(0) {}
-	explicit SimKmsConnectorContext(uint32_t keyCount) : maxEncryptionKeys(keyCount) {
-		uint8_t buffer[AES_256_KEY_LENGTH];
-
-		// Construct encryption keyStore.
-		for (int i = 0; i < maxEncryptionKeys; i++) {
-			generateRandomData(&buffer[0], AES_256_KEY_LENGTH);
-			SimEncryptKeyCtx ctx(i, reinterpret_cast<const char*>(buffer));
-			simEncryptKeyStore[i] = std::make_unique<SimEncryptKeyCtx>(i, reinterpret_cast<const char*>(buffer));
-		}
-	}
-};
-
 class SimKmsConnector : public KmsConnector {
 public:
-	SimKmsConnector();
+	SimKmsConnector() = default;
 	Future<Void> connectorCore(KmsConnectorInterface interf);
-
-private:
-	ACTOR Future<Void> simConnectorCore(SimKmsConnectorContext* ctx, KmsConnectorInterface interf);
-
-	SimKmsConnectorContext simKmsConnCtx;
 };
 
 #endif
