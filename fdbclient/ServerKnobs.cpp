@@ -364,6 +364,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// If true, enables dynamic adjustment of ROCKSDB_WRITE_RATE_LIMITER_BYTES according to the recent demand of background IO.
 	init( ROCKSDB_WRITE_RATE_LIMITER_AUTO_TUNE,                 true );
 	init( ROCKSDB_ENABLE_SHARDING,								true );
+	init(ROCKSDB_NUM_INSTANCES,										5);
  	// RocksDB metrics
  	init( ROCKSDB_ENABLE_STATISTIC,                           	true ); if( randomize && BUGGIFY ) ROCKSDB_ENABLE_STATISTIC = deterministicRandom()->coinflip() ? false : true;
  	init( ROCKSDB_PERFCONTEXT_SAMPLE_RATE, 					    0.01 ); if( randomize && BUGGIFY ) ROCKSDB_PERFCONTEXT_SAMPLE_RATE = 0; //set zero to disable

@@ -100,21 +100,12 @@ public:
 	shards, closes and destroys (may not be synchronous) the physical instance.
 	*/
 
-	virtual void addShard(KeyRangeRef range, UID uid) {}
+	virtual Future<Void> addShard(KeyRangeRef range, UID id) { return Void(); }
 
-	virtual void updateShard(KeyRangeRef range) {}
+	// TODO: manage shard by shard id.
+	virtual Future<Void> removeShard(KeyRangeRef range, Optional<UID> id) { return Void(); }
 
-	virtual void persistShard(KeyRangeRef range) {} // To be removed.
-
-	virtual Standalone<VectorRef<MutationRef>> getPersistShardMutations(KeyRangeRef range) {
-		return Standalone<VectorRef<MutationRef>>();
-	}
-
-	virtual void disposeRange(KeyRangeRef range) {}
-
-	virtual Standalone<VectorRef<MutationRef>> getDisposeRangeMutations(KeyRangeRef range) {
-		return Standalone<VectorRef<MutationRef>>();
-	};
+	virtual void persistShardMapping(KeyRangeRef range, bool isAdd);
 
 	/*
 	Concurrency contract
