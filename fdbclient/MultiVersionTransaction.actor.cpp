@@ -2522,7 +2522,8 @@ void MultiVersionApi::loadEnvironmentVariableNetworkOptions() {
 
 MultiVersionApi::MultiVersionApi()
   : callbackOnMainThread(true), localClientDisabled(false), networkStartSetup(false), networkSetup(false),
-    bypassMultiClientApi(false), externalClient(false), apiVersion(0), threadCount(0), envOptionsLoaded(false) {}
+    bypassMultiClientApi(false), externalClient(false), apiVersion(0), threadCount(0), tmpDir("/tmp"),
+    envOptionsLoaded(false) {}
 
 MultiVersionApi* MultiVersionApi::api = new MultiVersionApi();
 
