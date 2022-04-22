@@ -188,7 +188,7 @@ inline IKeyValueStore* openKVStore(KeyValueStoreType storeType,
 	case KeyValueStoreType::SSD_ROCKSDB_V1:
 		return keyValueStoreRocksDB(filename, logID, storeType);
 	case KeyValueStoreType::SSD_SHARDED_ROCKSDB:
-		return keyValueStoreRocksDB(filename, logID, storeType);
+		return keyValueStoreRocksDB(filename, logID, storeType); // TODO: to replace the KVS in the future
 	case KeyValueStoreType::MEMORY_RADIXTREE:
 		return keyValueStoreMemory(filename,
 		                           logID,

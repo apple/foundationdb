@@ -1811,7 +1811,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 	KeyValueStoreType getType() const override {
 		if (SERVER_KNOBS->ENABLE_SHARDED_ROCKSDB)
-			// pretend KVSRocks as KVSShardedRocks
+			// KVSRocks pretends as KVSShardedRocksDB
+			// TODO: to remove when the ShardedRocksDB KVS implementation is added in the future
 			return KeyValueStoreType(KeyValueStoreType::SSD_SHARDED_ROCKSDB);
 		else
 			return KeyValueStoreType(KeyValueStoreType::SSD_ROCKSDB_V1);
