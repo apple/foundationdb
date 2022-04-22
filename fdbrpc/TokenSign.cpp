@@ -109,10 +109,10 @@ Standalone<KeyPairRef> generateEcdsaKeyPair() {
 
 Standalone<SignedAuthTokenRef> signToken(AuthTokenRef token, StringRef keyName, StringRef privateKeyDer) {
 	auto ret = Standalone<SignedAuthTokenRef>{};
-	auto arena = ret.arena();
+	auto& arena = ret.arena();
 	auto writer = ObjectWriter([&arena](size_t len) { return new (arena) uint8_t[len]; }, Unversioned());
 	writer.serialize(token);
-	auto tokenStr = writer.toStringRef();
+	auto tokenStr = StringRef(arena, writer.toStringRef());
 
 	auto rawPrivKeyDer = privateKeyDer.begin();
 	auto key = ::d2i_AutoPrivateKey(nullptr, &rawPrivKeyDer, privateKeyDer.size());

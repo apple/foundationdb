@@ -851,10 +851,6 @@ struct PacketWriter {
 	}
 	ProtocolVersion protocolVersion() const { return m_protocolVersion; }
 	void setProtocolVersion(ProtocolVersion pv) { m_protocolVersion = pv; }
-
-private:
-	void serializeBytesAcrossBoundary(const void* data, int bytes);
-	void nextBuffer(size_t size = 0 /* downstream it will default to at least 4k minus some padding */);
 	uint8_t* writeBytes(size_t size) {
 		if (size > buffer->bytes_unwritten()) {
 			nextBuffer(size);
@@ -865,6 +861,9 @@ private:
 		return result;
 	}
 
+private:
+	void serializeBytesAcrossBoundary(const void* data, int bytes);
+	void nextBuffer(size_t size = 0 /* downstream it will default to at least 4k minus some padding */);
 	template <class, class>
 	friend class MakeSerializeSource;
 

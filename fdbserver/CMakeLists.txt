@@ -207,6 +207,7 @@ set(FDBSERVER_SRCS
   workloads/ConflictRange.actor.cpp
   workloads/ConsistencyCheck.actor.cpp
   workloads/CpuProfiler.actor.cpp
+  workloads/CreateTenant.actor.cpp
   workloads/Cycle.actor.cpp
   workloads/DataDistributionMetrics.actor.cpp
   workloads/DataLossRecovery.actor.cpp

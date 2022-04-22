@@ -370,7 +370,9 @@ ACTOR Future<Reference<TestWorkload>> getWorkloadIface(WorkloadRequest work,
 	wcx.sharedRandomNumber = work.sharedRandomNumber;
 
 	workload = IWorkloadFactory::create(testName.toString(), wcx);
-	wait(workload->initialized());
+	if (workload) {
+		wait(workload->initialized());
+	}
 
 	auto unconsumedOptions = checkAllOptionsConsumed(workload ? workload->options : VectorRef<KeyValueRef>());
 	if (!workload || unconsumedOptions.size()) {
