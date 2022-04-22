@@ -325,7 +325,7 @@ ACTOR Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getSe
 	state Future<RangeResult> serverList = tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
 
 	// Inject a long delay to trigger a timeout in the getServerListAndProcessClasses
-	if (BUGGIFY) {
+	if (g_network->isSimulated() && BUGGIFY && deterministicRandom()->random01() < 0.1) {
 		wait(delay(5.0));
 	}
 
