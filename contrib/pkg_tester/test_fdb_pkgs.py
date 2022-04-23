@@ -115,6 +115,13 @@ def ubuntu_image_with_fdb_helper(versioned: bool) -> Iterator[Optional[Image]]:
         container.run(
             ["bash", "-c", "apt-get install --yes execstack"]
         )  # this is for testing libfdb_c execstack permissions
+        container.run(
+            [
+                "bash",
+                "-c",
+                "DEBIAN_FRONTEND=noninteractive DEBCONF_NONINTERACTIVE_SEEN=true apt-get install --yes gcc pkg-config cmake",
+            ]
+        )  # this is for testing building client apps
         container.run(["bash", "-c", "dpkg -i /opt/*.deb"])
         container.run(["bash", "-c", "rm /opt/*.deb"])
         image = container.commit()
@@ -162,6 +169,9 @@ def centos_image_with_fdb_helper(versioned: bool) -> Iterator[Optional[Image]]:
         container.run(
             ["bash", "-c", "yum install -y prelink"]
         )  # this is for testing libfdb_c execstack permissions
+        container.run(
+            ["bash", "-c", "yum install -y gcc pkg-config cmake make"]
+        )  # this is for testing building client apps
         container.run(["bash", "-c", "yum install -y /opt/*.rpm"])
         container.run(["bash", "-c", "rm /opt/*.rpm"])
         image = container.commit()
@@ -240,6 +250,70 @@ def linux_container(
 
 def test_db_available(linux_container: Container):
     linux_container.run(["fdbcli", "--exec", "get x"])
+
+
+def test_client_app(linux_container: Container):
+    test_client_app_script = r"""#!/bin/bash
+
+set -euxo pipefail
+
+cat > app.c << EOF
+// FDB_API_VERSION doesn't necessarily need to be kept up to date here
+#define FDB_API_VERSION 700
+#include <foundationdb/fdb_c.h>
+#include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+static void check(fdb_error_t e) {
+    if (e) {
+        fprintf(stderr, "%s\n", fdb_get_error(e));
+        fflush(NULL);
+        abort();
+    }
+}
+
+int result = 0;
+
+static void callback(FDBFuture* f, void* _ignored) {
+    check(fdb_stop_network());
+}
+
+int main() {
+    check(fdb_select_api_version(700));
+    check(fdb_setup_network());
+    FDBDatabase* db;
+    check(fdb_create_database(NULL, &db));
+    FDBTransaction* tr;
+    check(fdb_database_create_transaction(db, &tr));
+    FDBFuture* f = fdb_transaction_get_read_version(tr);
+    check(fdb_future_set_callback(f, callback, NULL));
+    check(fdb_run_network());
+    fdb_future_destroy(f);
+    fdb_transaction_destroy(tr);
+    fdb_database_destroy(db);
+    return 0;
+}
+EOF
+
+cc app.c `pkg-config foundationdb-client --cflags --libs`
+./a.out
+
+cat > CMakeLists.txt << EOF
+project(app C)
+find_package(FoundationDB-Client REQUIRED)
+add_executable(app app.c)
+target_link_libraries(app PRIVATE fdb_c)
+EOF
+
+mkdir build
+cd build
+cmake ..
+make
+./app
+
+"""
+    linux_container.run(["bash", "-c", test_client_app_script])
 
 
 def test_write(linux_container: Container, snapshot):
