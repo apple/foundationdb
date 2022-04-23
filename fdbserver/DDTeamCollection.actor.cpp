@@ -995,14 +995,12 @@ public:
 		state Future<Void> metricsTracker = server->serverMetricsPolling();
 
 		state Future<std::pair<StorageServerInterface, ProcessClass>> interfaceChanged = server->onInterfaceChanged;
-
-		state Future<Void> storeTypeTracker = (isTss) ? Never() : keyValueStoreTypeTracker(self, server);
 		state bool hasWrongDC = !self->isCorrectDC(*server);
 		state bool hasInvalidLocality =
 		    !self->isValidLocality(self->configuration.storagePolicy, server->getLastKnownInterface().locality);
 		state int targetTeamNumPerServer =
 		    (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (self->configuration.storageTeamSize + 1)) / 2;
-		state Future<Void> storageMetadataTracker = (isTss) ? Never() : self->readOrCreateStorageMetadata(server);
+		state Future<Void> storageMetadataTracker = self->updateStorageMetadata(server, isTss);
 		try {
 			loop {
 				status.isUndesired = !self->disableFailingLaggingServers.get() && server->ssVersionTooFarBehind.get();
@@ -1325,8 +1323,8 @@ public:
 						recordTeamCollectionInfo = true;
 						// Restart the storeTracker for the new interface. This will cancel the previous
 						// keyValueStoreTypeTracker
-						storeTypeTracker = (isTss) ? Never() : keyValueStoreTypeTracker(self, server);
-						storageMetadataTracker = (isTss) ? Never() : readOrCreateStorageMetadata(self, server);
+						// storeTypeTracker = (isTss) ? Never() : keyValueStoreTypeTracker(self, server);
+						storageMetadataTracker = updateStorageMetadata(self, server, isTss);
 						hasWrongDC = !self->isCorrectDC(*server);
 						hasInvalidLocality = !self->isValidLocality(self->configuration.storagePolicy,
 						                                            server->getLastKnownInterface().locality);
@@ -1346,7 +1344,7 @@ public:
 						    .detail("WrongStoreTypeRemoved", server->wrongStoreTypeToRemove.get());
 					}
 					when(wait(server->wakeUpTracker.getFuture())) { server->wakeUpTracker = Promise<Void>(); }
-					when(wait(storageMetadataTracker || storeTypeTracker)) {}
+					when(wait(storageMetadataTracker)) {}
 					when(wait(server->ssVersionTooFarBehind.onChange())) {}
 					when(wait(self->disableFailingLaggingServers.onChange())) {}
 				}
@@ -2876,11 +2874,18 @@ public:
 		return Void();
 	}
 
-	ACTOR static Future<Void> readOrCreateStorageMetadata(DDTeamCollection* self, TCServerInfo* server) {
+	ACTOR static Future<Void> updateStorageMetadata(DDTeamCollection* self, TCServerInfo* server, bool isTss) {
 		state KeyBackedObjectMap<UID, StorageMetadataType, decltype(IncludeVersion())> metadataMap(
 		    serverMetadataKeys.begin, IncludeVersion());
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
-		state StorageMetadataType data(StorageMetadataType::currentTime());
+
+		// Update server's storeType, especially when it was created
+		wait(server->updateStoreType());
+		state StorageMetadataType data(
+		    StorageMetadataType::currentTime(),
+		    server->getStoreType(),
+		    isTss ? !server->isCorrectStoreType(self->configuration.testingStorageServerStoreType)
+		          : !server->isCorrectStoreType(self->configuration.storageServerStoreType));
 		// printf("------ read metadata %s\n", server->getId().toString().c_str());
 		// read storage metadata
 		loop {
@@ -2890,10 +2895,9 @@ public:
 				Optional<StorageMetadataType> metadata = wait(property.get(tr));
 				// NOTE: in upgrade testing, there may not be any metadata
 				if (metadata.present()) {
-					data = metadata.get();
-				} else {
-					metadataMap.set(tr, server->getId(), data);
+					data.createdTime = metadata.get().createdTime;
 				}
+				metadataMap.set(tr, server->getId(), data);
 				wait(tr->commit());
 				break;
 			} catch (Error& e) {
@@ -2901,11 +2905,19 @@ public:
 			}
 		}
 
-		// add server to wiggler
-		if (self->storageWiggler->contains(server->getId())) {
-			self->storageWiggler->updateMetadata(server->getId(), data);
-		} else {
-			self->storageWiggler->addServer(server->getId(), data);
+		if (!isTss) {
+			// wrong store type handler
+			if (!server->isCorrectStoreType(self->configuration.storageServerStoreType) &&
+			    self->wrongStoreTypeRemover.isReady()) {
+				self->wrongStoreTypeRemover = removeWrongStoreType(self);
+				self->addActor.send(self->wrongStoreTypeRemover);
+			}
+			// add server to wiggler
+			if (self->storageWiggler->contains(server->getId())) {
+				self->storageWiggler->updateMetadata(server->getId(), data);
+			} else {
+				self->storageWiggler->addServer(server->getId(), data);
+			}
 		}
 
 		return Never();
@@ -3512,8 +3524,8 @@ Future<Void> DDTeamCollection::readStorageWiggleMap() {
 	return DDTeamCollectionImpl::readStorageWiggleMap(this);
 }
 
-Future<Void> DDTeamCollection::readOrCreateStorageMetadata(TCServerInfo* server) {
-	return DDTeamCollectionImpl::readOrCreateStorageMetadata(this, server);
+Future<Void> DDTeamCollection::updateStorageMetadata(TCServerInfo* server, bool isTss) {
+	return DDTeamCollectionImpl::updateStorageMetadata(this, server, isTss);
 }
 
 void DDTeamCollection::resetLocalitySet() {

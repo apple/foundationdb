@@ -487,7 +487,7 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	}
 
 	// Read storage metadata from database, and do necessary updates
-	Future<Void> readOrCreateStorageMetadata(TCServerInfo* server);
+	Future<Void> updateStorageMetadata(TCServerInfo* server, bool isTss);
 
 	Future<Void> serverGetTeamRequests(TeamCollectionInterface tci);
 

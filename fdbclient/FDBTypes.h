@@ -1421,16 +1421,34 @@ struct StorageMetadataType {
 	constexpr static FileIdentifier file_identifier = 732123;
 	// when the SS is initialized, in epoch seconds, comes from currentTime()
 	double createdTime;
+	KeyValueStoreType storeType;
+
+	// no need to serialize part (should be assigned after initialization)
+	bool wrongConfigured = false;
+
 	StorageMetadataType() : createdTime(0) {}
-	StorageMetadataType(uint64_t t) : createdTime(t) {}
+	StorageMetadataType(uint64_t t, KeyValueStoreType storeType = KeyValueStoreType::END, bool wrongConfigured = false)
+	  : createdTime(t), storeType(storeType), wrongConfigured(wrongConfigured) {}
 
 	static double currentTime() { return g_network->timer(); }
+
+	bool operator==(const StorageMetadataType& b) const {
+		return createdTime == b.createdTime && storeType == b.storeType;
+	}
+
+	bool operator<(const StorageMetadataType& b) const {
+		if (wrongConfigured == b.wrongConfigured) {
+			// the younger, the less
+			return createdTime > b.createdTime;
+		}
+		return wrongConfigured < b.wrongConfigured;
+	}
 
 	// To change this serialization, ProtocolVersion::StorageMetadata must be updated, and downgrades need
 	// to be considered
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, createdTime);
+		serializer(ar, createdTime, storeType);
 	}
 };
 
