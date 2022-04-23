@@ -23,6 +23,7 @@
 #include "fdbrpc/sim_validation.h"
 #include "fdbserver/Knobs.h"
 #include "flow/ActorCollection.h"
+#include "flow/BlobCipher.h"
 #include "flow/EncryptUtils.h"
 #include "flow/Error.h"
 #include "flow/FastRef.h"
@@ -50,13 +51,16 @@ struct SimKmsConnectorContext {
 	std::unordered_map<EncryptCipherBaseKeyId, std::unique_ptr<SimEncryptKeyCtx>> simEncryptKeyStore;
 
 	explicit SimKmsConnectorContext(uint32_t keyCount) : maxEncryptionKeys(keyCount) {
-		uint8_t buffer[AES_256_KEY_LENGTH];
+		const unsigned char SHA_KEY[] = "0c39e7906db6d51ac0573d328ce1b6be";
+		HmacSha256DigestGen hmac(SHA_KEY, AES_256_KEY_LENGTH);
 
 		// Construct encryption keyStore.
+		// Note the keys generated must be the same after restart.
 		for (int i = 1; i <= maxEncryptionKeys; i++) {
-			generateRandomData(&buffer[0], AES_256_KEY_LENGTH);
-			SimEncryptKeyCtx ctx(i, reinterpret_cast<const char*>(buffer));
-			simEncryptKeyStore[i] = std::make_unique<SimEncryptKeyCtx>(i, reinterpret_cast<const char*>(buffer));
+			Arena arena;
+			StringRef digest = hmac.digest(reinterpret_cast<const unsigned char*>(&i), sizeof(i), arena);
+			simEncryptKeyStore[i] =
+			    std::make_unique<SimEncryptKeyCtx>(i, reinterpret_cast<const char*>(digest.begin()));
 		}
 	}
 };
