@@ -262,7 +262,7 @@ void StorageWiggler::updateMetadata(const UID& serverId, const StorageMetadataTy
 	//	std::cout << "size: " << pq_handles.size() << " update " << serverId.toString()
 	//	          << " DC: " << teamCollection->isPrimary() << std::endl;
 	auto handle = pq_handles.at(serverId);
-	if ((*handle).first.createdTime == metadata.createdTime) {
+	if ((*handle).first == metadata) {
 		return;
 	}
 	wiggle_pq.update(handle, std::make_pair(metadata, serverId));
