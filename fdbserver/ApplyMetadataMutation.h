@@ -87,7 +87,7 @@ Reference<StorageInfo> getStorageInfo(UID id,
                                       std::map<UID, Reference<StorageInfo>>* storageCache,
                                       IKeyValueStore* txnStateStore);
 
-void applyMetadataMutations(SpanContext const& spanContext,
+void applyMetadataMutations(SpanID const& spanContext,
                             ProxyCommitData& proxyCommitData,
                             Arena& arena,
                             Reference<ILogSystem> logSystem,
@@ -97,7 +97,7 @@ void applyMetadataMutations(SpanContext const& spanContext,
                             Version version,
                             Version popVersion,
                             bool initialCommit);
-void applyMetadataMutations(SpanContext const& spanContext,
+void applyMetadataMutations(SpanID const& spanContext,
                             const UID& dbgid,
                             Arena& arena,
                             const VectorRef<MutationRef>& mutations,
@@ -140,7 +140,7 @@ inline bool containsMetadataMutation(const VectorRef<MutationRef>& mutations) {
 }
 
 // Resolver's version
-void applyMetadataMutations(SpanContext const& spanContext,
+void applyMetadataMutations(SpanID const& spanContext,
                             ResolverData& resolverData,
                             const VectorRef<MutationRef>& mutations);
 

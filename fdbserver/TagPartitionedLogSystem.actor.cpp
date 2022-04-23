@@ -507,7 +507,7 @@ Future<Version> TagPartitionedLogSystem::push(Version prevVersion,
                                               Version knownCommittedVersion,
                                               Version minKnownCommittedVersion,
                                               LogPushData& data,
-                                              SpanContext const& spanContext,
+                                              SpanID const& spanContext,
                                               Optional<UID> debugID,
                                               Optional<std::unordered_map<uint16_t, Version>> tpcvMap) {
 	// FIXME: Randomize request order as in LegacyLogSystem?

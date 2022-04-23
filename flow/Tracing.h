@@ -33,43 +33,90 @@ inline Location operator"" _loc(const char* str, size_t size) {
 	return Location{ StringRef(reinterpret_cast<const uint8_t*>(str), size) };
 }
 
-enum class TraceFlags : uint8_t { unsampled = 0b00000000, sampled = 0b00000001 };
-
-inline TraceFlags operator&(TraceFlags lhs, TraceFlags rhs) {
-	return static_cast<TraceFlags>(static_cast<std::underlying_type_t<TraceFlags>>(lhs) &
-	                               static_cast<std::underlying_type_t<TraceFlags>>(rhs));
-}
-
-struct SpanContext {
-	UID traceID;
-	uint64_t spanID;
-	TraceFlags m_Flags;
-	SpanContext() : traceID(UID()), spanID(0), m_Flags(TraceFlags::unsampled) {}
-	SpanContext(UID traceID, uint64_t spanID, TraceFlags flags) : traceID(traceID), spanID(spanID), m_Flags(flags) {}
-	SpanContext(UID traceID, uint64_t spanID) : traceID(traceID), spanID(spanID), m_Flags(TraceFlags::unsampled) {}
-	SpanContext(Arena arena, const SpanContext& span)
-	  : traceID(span.traceID), spanID(span.spanID), m_Flags(span.m_Flags) {}
-	bool isSampled() const { return (m_Flags & TraceFlags::sampled) == TraceFlags::sampled; }
-	std::string toString() const { return format("%016llx%016llx%016llx", traceID.first(), traceID.second(), spanID); };
-	bool isValid() const { return traceID.first() != 0 && traceID.second() != 0 && spanID != 0; }
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, traceID, spanID, m_Flags);
+struct Span {
+	Span(SpanID context, Location location, std::initializer_list<SpanID> const& parents = {})
+	  : context(context), begin(g_network->now()), location(location), parents(arena, parents.begin(), parents.end()) {
+		if (parents.size() > 0) {
+			// If the parents' token is 0 (meaning the trace should not be
+			// recorded), set the child token to 0 as well. Otherwise, generate
+			// a new, random token.
+			uint64_t traceId = 0;
+			if ((*parents.begin()).second() > 0) {
+				traceId = deterministicRandom()->randomUInt64();
+			}
+			this->context = SpanID((*parents.begin()).first(), traceId);
+		}
 	}
+	Span(Location location, std::initializer_list<SpanID> const& parents = {})
+	  : Span(UID(deterministicRandom()->randomUInt64(),
+	             deterministicRandom()->random01() < FLOW_KNOBS->TRACING_SAMPLE_RATE
+	                 ? deterministicRandom()->randomUInt64()
+	                 : 0),
+	         location,
+	         parents) {}
+	Span(Location location, SpanID context) : Span(location, { context }) {}
+	Span(const Span&) = delete;
+	Span(Span&& o) {
+		arena = std::move(o.arena);
+		context = o.context;
+		begin = o.begin;
+		end = o.end;
+		location = o.location;
+		parents = std::move(o.parents);
+		o.context = UID();
+		o.begin = 0.0;
+		o.end = 0.0;
+	}
+	Span() {}
+	~Span();
+	Span& operator=(Span&& o);
+	Span& operator=(const Span&) = delete;
+	void swap(Span& other) {
+		std::swap(arena, other.arena);
+		std::swap(context, other.context);
+		std::swap(begin, other.begin);
+		std::swap(end, other.end);
+		std::swap(location, other.location);
+		std::swap(parents, other.parents);
+	}
+
+	void addParent(SpanID span) {
+		if (parents.size() == 0) {
+			uint64_t traceId = 0;
+			if (span.second() > 0) {
+				traceId = context.second() == 0 ? deterministicRandom()->randomUInt64() : context.second();
+			}
+			// Use first parent to set trace ID. This is non-ideal for spans
+			// with multiple parents, because the trace ID will associate the
+			// span with only one trace. A workaround is to look at the parent
+			// relationships instead of the trace ID. Another option in the
+			// future is to keep a list of trace IDs.
+			context = SpanID(span.first(), traceId);
+		}
+		parents.push_back(arena, span);
+	}
+
+	void addTag(const StringRef& key, const StringRef& value) { tags[key] = value; }
+
+	Arena arena;
+	UID context = UID();
+	double begin = 0.0, end = 0.0;
+	Location location;
+	SmallVectorRef<SpanID> parents;
+	std::unordered_map<StringRef, StringRef> tags;
 };
 
-// Span
+// OTELSpan
 //
-// Span is a tracing implementation which, for the most part, complies with the W3C Trace Context specification
+// OTELSpan is a tracing implementation which, for the most part, complies with the W3C Trace Context specification
 // https://www.w3.org/TR/trace-context/ and the OpenTelemetry API
 // https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/api.md.
 //
-// The major differences between Span and the 7.0 Span implementation, which is based off the OpenTracing.io
+// The major differences between OTELSpan and the current Span implementation, which is based off the OpenTracing.io
 // specification https://opentracing.io/ are as follows.
 // https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/api.md#span
 //
-// OpenTelemetry Spans have...
+// OTELSpans have...
 // 1. A SpanContext which consists of 3 attributes.
 //
 // TraceId - A valid trace identifier is a 16-byte array with at least one non-zero byte.
@@ -99,61 +146,82 @@ enum class SpanKind : uint8_t { INTERNAL = 0, CLIENT = 1, SERVER = 2, PRODUCER =
 
 enum class SpanStatus : uint8_t { UNSET = 0, OK = 1, ERR = 2 };
 
-struct SpanEventRef {
-	SpanEventRef() {}
-	SpanEventRef(const StringRef& name,
+struct OTELEventRef {
+	OTELEventRef() {}
+	OTELEventRef(const StringRef& name,
 	             const double& time,
 	             const SmallVectorRef<KeyValueRef>& attributes = SmallVectorRef<KeyValueRef>())
 	  : name(name), time(time), attributes(attributes) {}
-	SpanEventRef(Arena& arena, const SpanEventRef& other)
+	OTELEventRef(Arena& arena, const OTELEventRef& other)
 	  : name(arena, other.name), time(other.time), attributes(arena, other.attributes) {}
 	StringRef name;
 	double time = 0.0;
 	SmallVectorRef<KeyValueRef> attributes;
 };
 
-class Span {
+class OTELSpan {
 public:
-	// Construct a Span with a given context, location, parentContext and optional links.
-	//
-	// N.B. While this constructor receives a parentContext it does not overwrite the traceId of the Span's context.
-	// Therefore it is the responsibility of the caller to ensure the traceID and m_Flags of both the context and
-	// parentContext are identical if the caller wishes to establish a parent/child relationship between these spans. We
-	// do this to avoid needless comparisons or copies as this constructor is only called once in NativeAPI.actor.cpp
-	// and from below in the by the Span(location, parent, links) constructor. The Span(location, parent, links)
-	// constructor is used broadly and performs the copy of the parent's traceID and m_Flags.
-	Span(const SpanContext& context,
-	     const Location& location,
-	     const SpanContext& parentContext,
-	     const std::initializer_list<SpanContext>& links = {})
+	OTELSpan(const SpanContext& context,
+	         const Location& location,
+	         const SpanContext& parentContext,
+	         const std::initializer_list<SpanContext>& links = {})
 	  : context(context), location(location), parentContext(parentContext), links(arena, links.begin(), links.end()),
 	    begin(g_network->now()) {
+		// We've simplified the logic here, essentially we're now always setting trace and span ids and relying on the
+		// TraceFlags to determine if we're sampling. Therefore if the parent is sampled, we simply overwrite this
+		// span's traceID with the parent trace id.
+		if (parentContext.isSampled()) {
+			this->context.traceID = UID(parentContext.traceID.first(), parentContext.traceID.second());
+			this->context.m_Flags = TraceFlags::sampled;
+		} else {
+			// However there are two other cases.
+			// 1. A legitamite parent span exists but it was not selected for tracing.
+			// 2. There is no actual parent, just a default arg parent provided by the constructor AND the "child" span
+			// was selected for sampling. For case 1. we handle below by marking the child as unsampled. For case 2 we
+			// needn't do anything, and can rely on the values in this OTELSpan
+			if (parentContext.traceID.first() != 0 && parentContext.traceID.second() != 0 &&
+			    parentContext.spanID != 0) {
+				this->context.m_Flags = TraceFlags::unsampled;
+			}
+		}
 		this->kind = SpanKind::SERVER;
 		this->status = SpanStatus::OK;
 		this->attributes.push_back(
 		    this->arena, KeyValueRef("address"_sr, StringRef(this->arena, g_network->getLocalAddress().toString())));
 	}
 
-	// Construct Span with a location, parent, and optional links.
-	// This constructor copies the parent's traceID creating a parent->child relationship between Spans.
-	// Additionally we inherit the m_Flags of the parent, thus enabling or disabling sampling to match the parent.
-	Span(const Location& location, const SpanContext& parent, const std::initializer_list<SpanContext>& links = {})
-	  : Span(SpanContext(parent.traceID, deterministicRandom()->randomUInt64(), parent.m_Flags),
-	         location,
-	         parent,
-	         links) {}
+	OTELSpan(const Location& location,
+	         const SpanContext& parent = SpanContext(),
+	         const std::initializer_list<SpanContext>& links = {})
+	  : OTELSpan(
+	        SpanContext(UID(deterministicRandom()->randomUInt64(), deterministicRandom()->randomUInt64()), // traceID
+	                    deterministicRandom()->randomUInt64(), // spanID
+	                    deterministicRandom()->random01() < FLOW_KNOBS->TRACING_SAMPLE_RATE // sampled or unsampled
+	                        ? TraceFlags::sampled
+	                        : TraceFlags::unsampled),
+	        location,
+	        parent,
+	        links) {}
 
-	// Construct Span without parent. Used for creating a root span, or when the parent is not known at construction
-	// time.
-	Span(const SpanContext& context, const Location& location) : Span(context, location, SpanContext()) {}
+	OTELSpan(const Location& location, const SpanContext parent, const SpanContext& link)
+	  : OTELSpan(location, parent, { link }) {}
 
-	// We've determined for initial tracing release, spans with only a location will not be traced.
-	// Generally these are for background processes, some are called infrequently, while others may be high volume.
-	// TODO: review and address in subsequent PRs.
-	Span(const Location& location) : location(location), begin(g_network->now()) {}
+	// NOTE: This constructor is primarly for unit testing until we sort out how to enable/disable a Knob dynamically in
+	// a test.
+	OTELSpan(const Location& location,
+	         const std::function<double()>& rateProvider,
+	         const SpanContext& parent = SpanContext(),
+	         const std::initializer_list<SpanContext>& links = {})
+	  : OTELSpan(SpanContext(UID(deterministicRandom()->randomUInt64(), deterministicRandom()->randomUInt64()),
+	                         deterministicRandom()->randomUInt64(),
+	                         deterministicRandom()->random01() < rateProvider() ? TraceFlags::sampled
+	                                                                            : TraceFlags::unsampled),
+	             location,
+	             parent,
+	             links) {}
 
-	Span(const Span&) = delete;
-	Span(Span&& o) {
+	OTELSpan(const OTELSpan&) = delete;
+	OTELSpan(OTELSpan&& o) {
 		arena = std::move(o.arena);
 		context = o.context;
 		location = o.location;
@@ -171,11 +239,11 @@ public:
 		o.end = 0.0;
 		o.status = SpanStatus::UNSET;
 	}
-	Span() {}
-	~Span();
-	Span& operator=(Span&& o);
-	Span& operator=(const Span&) = delete;
-	void swap(Span& other) {
+	OTELSpan() {}
+	~OTELSpan();
+	OTELSpan& operator=(OTELSpan&& o);
+	OTELSpan& operator=(const OTELSpan&) = delete;
+	void swap(OTELSpan& other) {
 		std::swap(arena, other.arena);
 		std::swap(context, other.context);
 		std::swap(location, other.location);
@@ -188,59 +256,31 @@ public:
 		std::swap(events, other.events);
 	}
 
-	Span& addLink(const SpanContext& linkContext) {
+	OTELSpan& addLink(const SpanContext& linkContext) {
 		links.push_back(arena, linkContext);
-		// Check if link is sampled, if so sample this span.
-		if (!context.isSampled() && linkContext.isSampled()) {
-			context.m_Flags = TraceFlags::sampled;
-			// If for some reason this span isn't valid, we need to give it a
-			// traceID and spanID. This case is currently hit in CommitProxyServer
-			// CommitBatchContext::CommitBatchContext and CommitBatchContext::setupTraceBatch.
-			if (!context.isValid()) {
-				context.traceID = deterministicRandom()->randomUniqueID();
-				context.spanID = deterministicRandom()->randomUInt64();
-			}
-		}
 		return *this;
 	}
 
-	Span& addLinks(const std::initializer_list<SpanContext>& linkContexts = {}) {
+	OTELSpan& addLinks(const std::initializer_list<SpanContext>& linkContexts = {}) {
 		for (auto const& sc : linkContexts) {
-			addLink(sc);
+			links.push_back(arena, sc);
 		}
 		return *this;
 	}
 
-	Span& addEvent(const SpanEventRef& event) {
+	OTELSpan& addEvent(const OTELEventRef& event) {
 		events.push_back_deep(arena, event);
 		return *this;
 	}
 
-	Span& addEvent(const StringRef& name,
-	               const double& time,
-	               const SmallVectorRef<KeyValueRef>& attrs = SmallVectorRef<KeyValueRef>()) {
-		return addEvent(SpanEventRef(name, time, attrs));
+	OTELSpan& addEvent(const StringRef& name,
+	                   const double& time,
+	                   const SmallVectorRef<KeyValueRef>& attrs = SmallVectorRef<KeyValueRef>()) {
+		return addEvent(OTELEventRef(name, time, attrs));
 	}
 
-	Span& addAttribute(const StringRef& key, const StringRef& value) {
+	OTELSpan& addAttribute(const StringRef& key, const StringRef& value) {
 		attributes.push_back_deep(arena, KeyValueRef(key, value));
-		return *this;
-	}
-
-	Span& setParent(const SpanContext& parent) {
-		parentContext = parent;
-		context.traceID = parent.traceID;
-		context.spanID = deterministicRandom()->randomUInt64();
-		context.m_Flags = parent.m_Flags;
-		return *this;
-	}
-
-	Span& addParentOrLink(const SpanContext& other) {
-		if (!parentContext.isValid()) {
-			parentContext = other;
-		} else {
-			links.push_back(arena, other);
-		}
 		return *this;
 	}
 
@@ -252,7 +292,7 @@ public:
 	SmallVectorRef<SpanContext> links;
 	double begin = 0.0, end = 0.0;
 	SmallVectorRef<KeyValueRef> attributes; // not necessarily sorted
-	SmallVectorRef<SpanEventRef> events;
+	SmallVectorRef<OTELEventRef> events;
 	SpanStatus status;
 };
 
@@ -271,6 +311,7 @@ struct ITracer {
 	virtual TracerType type() const = 0;
 	// passed ownership to the tracer
 	virtual void trace(Span const& span) = 0;
+	virtual void trace(OTELSpan const& span) = 0;
 };
 
 void openTracer(TracerType type);
@@ -283,6 +324,19 @@ struct SpannedDeque : Deque<T> {
 	SpannedDeque(SpannedDeque const&) = delete;
 	SpannedDeque& operator=(SpannedDeque const&) = delete;
 	SpannedDeque& operator=(SpannedDeque&& other) {
+		*static_cast<Deque<T>*>(this) = std::move(other);
+		span = std::move(other.span);
+	}
+};
+
+template <class T>
+struct OTELSpannedDeque : Deque<T> {
+	OTELSpan span;
+	explicit OTELSpannedDeque(Location loc) : span(loc) {}
+	OTELSpannedDeque(OTELSpannedDeque&& other) : Deque<T>(std::move(other)), span(std::move(other.span)) {}
+	OTELSpannedDeque(OTELSpannedDeque const&) = delete;
+	OTELSpannedDeque& operator=(OTELSpannedDeque const&) = delete;
+	OTELSpannedDeque& operator=(OTELSpannedDeque&& other) {
 		*static_cast<Deque<T>*>(this) = std::move(other);
 		span = std::move(other.span);
 	}

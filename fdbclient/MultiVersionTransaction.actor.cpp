@@ -1111,13 +1111,13 @@ VersionVector MultiVersionTransaction::getVersionVector() {
 	return VersionVector();
 }
 
-SpanContext MultiVersionTransaction::getSpanContext() {
+UID MultiVersionTransaction::getSpanID() {
 	auto tr = getTransaction();
 	if (tr.transaction) {
-		return tr.transaction->getSpanContext();
+		return tr.transaction->getSpanID();
 	}
 
-	return SpanContext();
+	return UID();
 }
 
 ThreadFuture<int64_t> MultiVersionTransaction::getApproximateSize() {
