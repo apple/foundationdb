@@ -203,3 +203,46 @@ static_assert(minInvalidProtocolVersion.version() >=
 // The min invalid protocol version should be the smallest possible protocol version associated with a minor release
 // version.
 static_assert((minInvalidProtocolVersion.version() & 0xFFFFFFLL) == 0, "Unexpected min invalid protocol version");
+
+struct SWVersion {
+	constexpr static FileIdentifier file_identifier = 13943914;
+
+private:
+	uint64_t _newestProtocolVersion;
+	uint64_t _lastRunProtocolVersion;
+	uint64_t _lowestCompatibleProtocolVersion;
+
+public:
+	SWVersion() {
+		_newestProtocolVersion = 0;
+		_lastRunProtocolVersion = 0;
+		_lowestCompatibleProtocolVersion = 0;
+	}
+
+	SWVersion(ProtocolVersion latestVersion, ProtocolVersion lastVersion, ProtocolVersion minCompatibleVersion)
+	  : _newestProtocolVersion(latestVersion.version()), _lastRunProtocolVersion(lastVersion.version()),
+	    _lowestCompatibleProtocolVersion(minCompatibleVersion.version()) {}
+
+	bool isValid() const {
+		return (_newestProtocolVersion != 0 && _lastRunProtocolVersion != 0 && _lowestCompatibleProtocolVersion != 0);
+	}
+
+	uint64_t newestProtocolVersion() const { return _newestProtocolVersion; }
+	uint64_t lastRunProtocolVersion() const { return _lastRunProtocolVersion; }
+	uint64_t lowestCompatibleProtocolVersion() const { return _lowestCompatibleProtocolVersion; }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, _newestProtocolVersion, _lastRunProtocolVersion, _lowestCompatibleProtocolVersion);
+	}
+};
+
+template <>
+struct Traceable<SWVersion> : std::true_type {
+	static std::string toString(const SWVersion& swVersion) {
+		return format("Newest: 0x%016lX, Last: 0x%016lX, MinCompatible: 0x%016lX",
+		              swVersion.newestProtocolVersion(),
+		              swVersion.lastRunProtocolVersion(),
+		              swVersion.lowestCompatibleProtocolVersion());
+	}
+};
