@@ -1527,6 +1527,7 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
 	// check lastAsSource
 	if (self->timeThrottle(sourceTeam->getServerIDs())) {
 		traceEvent->detail("SkipReason", "SourceTeamThrottle");
+		return false;
 	}
 
 	state std::vector<KeyRange> shards = self->shardsAffectedByTeamFailure->getShardsFor(
