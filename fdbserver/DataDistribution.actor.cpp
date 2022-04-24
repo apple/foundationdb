@@ -189,15 +189,13 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution(Data
 				}
 			}
 
-			if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
-				RangeResult dataMoves = wait(tr.getRange(dataMoveKeys, CLIENT_KNOBS->TOO_MANY));
-				ASSERT(!dataMoves.more && dataMoves.size() < CLIENT_KNOBS->TOO_MANY);
-				for (int i = 0; i < dataMoves.size(); ++i) {
-					result->dataMoves.push_back(decodeDataMoveValue(dataMoves[i].value));
-				}
-				Version readVersion = wait(tr.getReadVersion());
-				TraceEvent("GetInitialDataMove", distributorId).detail("ReadVersion", readVersion);
+			RangeResult dataMoves = wait(tr.getRange(dataMoveKeys, CLIENT_KNOBS->TOO_MANY));
+			ASSERT(!dataMoves.more && dataMoves.size() < CLIENT_KNOBS->TOO_MANY);
+			for (int i = 0; i < dataMoves.size(); ++i) {
+				result->dataMoves.push_back(decodeDataMoveValue(dataMoves[i].value));
 			}
+			Version readVersion = wait(tr.getReadVersion());
+			TraceEvent("GetInitialDataMove", distributorId).detail("ReadVersion", readVersion);
 
 			succeeded = true;
 
@@ -234,12 +232,14 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution(Data
 
 				// for each range
 				for (int i = 0; i < keyServers.size() - 1; i++) {
-					DDShardInfo info(keyServers[i].key);
 					if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 						decodeKeyServersValue(UIDtoTagMap, keyServers[i].value, src, dest, srcId, destId);
 					} else {
 						decodeKeyServersValue(UIDtoTagMap, keyServers[i].value, src, dest);
+						srcId = uninitializedShardId;
+						destId = dest.empty() ? UID() : uninitializedShardId;
 					}
+					DDShardInfo info(keyServers[i].key, srcId, destId);
 					if (remoteDcIds.size()) {
 						auto srcIter = team_cache.find(src);
 						if (srcIter == team_cache.end()) {
@@ -761,12 +761,17 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			state Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure(new ShardsAffectedByTeamFailure);
 
 			state KeyRangeMap<std::shared_ptr<DataMove>> dataMoveMap(std::make_shared<DataMove>());
-			if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
-				for (int i = 0; i < initData->dataMoves.size(); ++i) {
-					const auto& meta = initData->dataMoves[i];
-					TraceEvent("DDInitFoundDataMove", self->ddId)
-					    .detail("DataMoveID", meta.id)
-					    .detail("DataMove", meta.toString());
+			for (int i = 0; i < initData->dataMoves.size(); ++i) {
+				const auto& meta = initData->dataMoves[i];
+				TraceEvent("DDInitFoundDataMove", self->ddId)
+				    .detail("DataMoveID", meta.id)
+				    .detail("DataMove", meta.toString());
+				if (meta.getPhase() == DataMoveMetaData::Deleting || !CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+					RelocateShard rs(meta.range, SERVER_KNOBS->PRIORITY_RECOVER_MOVE);
+					rs.dataMoveId = meta.id;
+					rs.cancelled = true;
+					output.send(rs);
+				} else {
 					auto ranges = dataMoveMap.intersectingRanges(meta.range);
 					for (auto& r : ranges) {
 						ASSERT(!r.value()->valid);
@@ -777,37 +782,38 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 
 			state int shard = 0;
 			for (; shard < initData->shards.size() - 1; shard++) {
-				KeyRangeRef keys = KeyRangeRef(initData->shards[shard].key, initData->shards[shard + 1].key);
+				const DDShardInfo& iShard = initData->shards[shard];
+				KeyRangeRef keys = KeyRangeRef(iShard.key, initData->shards[shard + 1].key);
 				shardsAffectedByTeamFailure->defineShard(keys);
 				std::vector<ShardsAffectedByTeamFailure::Team> teams;
-				teams.push_back(ShardsAffectedByTeamFailure::Team(initData->shards[shard].primarySrc, true));
+				teams.push_back(ShardsAffectedByTeamFailure::Team(iShard.primarySrc, true));
 				if (configuration.usableRegions > 1) {
-					teams.push_back(ShardsAffectedByTeamFailure::Team(initData->shards[shard].remoteSrc, false));
+					teams.push_back(ShardsAffectedByTeamFailure::Team(iShard.remoteSrc, false));
 				}
 				if (g_network->isSimulated()) {
 					TraceEvent("DDInitShard")
 					    .detail("Keys", keys)
-					    .detail("PrimarySrc", describe(initData->shards[shard].primarySrc))
-					    .detail("RemoteSrc", describe(initData->shards[shard].remoteSrc))
-					    .detail("PrimaryDest", describe(initData->shards[shard].primaryDest))
-					    .detail("RemoteDest", describe(initData->shards[shard].remoteDest));
+					    .detail("PrimarySrc", describe(iShard.primarySrc))
+					    .detail("RemoteSrc", describe(iShard.remoteSrc))
+					    .detail("PrimaryDest", describe(iShard.primaryDest))
+					    .detail("RemoteDest", describe(iShard.remoteDest));
 				}
 
 				shardsAffectedByTeamFailure->moveShard(keys, teams);
-				if (initData->shards[shard].hasDest && CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+				if (iShard.hasDest && iShard.destId == uninitializedShardId) {
 					// This shard is already in flight.  Ideally we should use dest in ShardsAffectedByTeamFailure and
 					// generate a dataDistributionRelocator directly in DataDistributionQueue to track it, but it's
 					// easier to just (with low priority) schedule it for movement.
-					bool unhealthy = initData->shards[shard].primarySrc.size() != configuration.storageTeamSize;
+					bool unhealthy = iShard.primarySrc.size() != configuration.storageTeamSize;
 					if (!unhealthy && configuration.usableRegions > 1) {
-						unhealthy = initData->shards[shard].remoteSrc.size() != configuration.storageTeamSize;
+						unhealthy = iShard.remoteSrc.size() != configuration.storageTeamSize;
 					}
 					output.send(RelocateShard(
 					    keys, unhealthy ? SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY : SERVER_KNOBS->PRIORITY_RECOVER_MOVE));
 				}
 
-				if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
-					dataMoveMap[keys.begin]->addShard(initData->shards[shard]);
+				if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA && iShard.srcId != uninitializedShardId) {
+					dataMoveMap[keys.begin]->addShard(iShard);
 				}
 
 				wait(yield(TaskPriority::DataDistribution));
@@ -817,8 +823,6 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 				state int idx = 0;
 				for (; idx < initData->dataMoves.size(); ++idx) {
 					const auto& meta = initData->dataMoves[idx];
-					// auto ranges = dataMoveMap.intersectingRanges(meta.range);
-					// ASSERT(ranges.size() == 1);
 					if (dataMoveMap[meta.range.begin]->valid) {
 						RelocateShard rs(meta.range, SERVER_KNOBS->PRIORITY_RECOVER_MOVE, true);
 						rs.dataMove = dataMoveMap[meta.range.begin];

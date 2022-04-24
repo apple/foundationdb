@@ -65,13 +65,15 @@ struct RelocateShard {
 	KeyRange keys;
 	int priority;
 	const bool restore;
+	bool cancelled;
 	std::shared_ptr<DataMove> dataMove;
 	UID dataMoveId;
 
-	RelocateShard() : priority(0), restore(false) {}
-	RelocateShard(KeyRange const& keys, int priority) : keys(keys), priority(priority), restore(false) {}
+	RelocateShard() : priority(0), restore(false), cancelled(false) {}
+	RelocateShard(KeyRange const& keys, int priority)
+	  : keys(keys), priority(priority), restore(false), cancelled(false) {}
 	RelocateShard(KeyRange const& keys, int priority, bool restore)
-	  : keys(keys), priority(priority), restore(restore) {}
+	  : keys(keys), priority(priority), restore(restore), cancelled(false) {}
 };
 
 struct IDataDistributionTeam {
@@ -249,11 +251,12 @@ struct DDShardInfo {
 	std::vector<UID> primaryDest;
 	std::vector<UID> remoteDest;
 	bool hasDest;
-	UID id;
+	UID srcId;
+	UID destId;
 
-	explicit DDShardInfo(Key key) : DDShardInfo(key, unassignedShardId) {}
+	explicit DDShardInfo(Key key) : key(key) {}
 
-	DDShardInfo(Key key, UID id) : key(key), hasDest(false), id(id) {}
+	DDShardInfo(Key key, UID srcId, UID destId) : key(key), hasDest(false), srcId(srcId), destId(destId) {}
 };
 
 struct InitialDataDistribution : ReferenceCounted<InitialDataDistribution> {

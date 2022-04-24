@@ -1067,11 +1067,32 @@ struct DDQueueData {
 
 		validate();
 	}
+
+	void enqueueCancelledDataMove(UID dataMoveId, KeyRange range, const DDEnabledState* ddEnabledState) {
+		std::vector<Future<Void>> cleanup;
+		auto f = this->dataMoves.intersectingRanges(range);
+		for (auto it = f.begin(); it != f.end(); ++it) {
+			if (it->value().isValid()) {
+				TraceEvent(SevDebug, "DDEnqueueCancelledDataMoveConflict", this->distributorId)
+				    .detail("DataMoveID", dataMoveId)
+				    .detail("CancelledRange", range)
+				    .detail("ConflictingDataMoveID", it->value().id)
+				    .detail("ConflictingRange", KeyRangeRef(it->range().begin, it->range().end));
+				return;
+			}
+		}
+
+		DDQueueData::DDDataMove dataMove(dataMoveId);
+		dataMove.cancel = cleanUpDataMove(
+		    this->cx, dataMoveId, this->lock, &this->cleanUpDataMoveParallelismLock, range, true, ddEnabledState);
+		this->dataMoves.insert(range, DDQueueData::DDDataMove());
+		TraceEvent(SevDebug, "DDEnqueuedCancelledDataMove", this->distributorId)
+		    .detail("DataMoveID", dataMoveId)
+		    .detail("Range", range);
+	}
 };
 
 ACTOR Future<Void> cancelDataMove(struct DDQueueData* self, KeyRange range, const DDEnabledState* ddEnabledState) {
-	ASSERT(CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
-
 	std::vector<Future<Void>> cleanup;
 	auto f = self->dataMoves.intersectingRanges(range);
 	for (auto it = f.begin(); it != f.end(); ++it) {
@@ -1934,6 +1955,8 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 						ASSERT(rs.dataMoveId.isValid());
 						// self.startRelocation(rd.priority, rd.healthPriority);
 						self.launchQueuedWork(RelocateData(rs), ddEnabledState);
+					} else if (rs.cancelled) {
+						self.enqueueCancelledDataMove(rs.dataMoveId, rs.keys, ddEnabledState);
 					} else {
 						bool wasEmpty = serversToLaunchFrom.empty();
 						self.queueRelocation(rs, serversToLaunchFrom);

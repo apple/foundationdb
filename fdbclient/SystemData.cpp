@@ -43,7 +43,7 @@ const KeyRangeRef keyServersKeyServersKeys(LiteralStringRef("\xff/keyServers/\xf
                                            LiteralStringRef("\xff/keyServers/\xff/keyServers0"));
 const KeyRef keyServersKeyServersKey = keyServersKeyServersKeys.begin;
 
-const UID unassignedShardId = UID(666666, 88888888);
+const UID uninitializedShardId = UID(666666, 88888888);
 
 const Key keyServersKey(const KeyRef& k) {
 	return k.withPrefix(keyServersPrefix);
@@ -182,10 +182,10 @@ void decodeKeyServersValue(RangeResult result,
                            bool missingIsError) {
 	src.clear();
 	dest.clear();
+	srcID = UID();
+	destID = UID();
 
 	if (value.size() == 0) {
-		srcID = UID();
-		destID = UID();
 		return;
 	}
 
@@ -200,8 +200,11 @@ void decodeKeyServersValue(RangeResult result,
 		}
 	} else {
 		decodeKeyServersValue(result, value, src, dest, missingIsError);
-		srcID = unassignedShardId;
-		destID = unassignedShardId;
+		ASSERT(!src.empty());
+		srcID = uninitializedShardId;
+		if (!dest.empty()) {
+			destID = uninitializedShardId;
+		}
 	}
 }
 
@@ -1688,7 +1691,7 @@ TEST_CASE("/SystemData/compat/KeyServers") {
 	printf("ssi serdes test part.1 complete\n");
 
 	v = keyServersValue(idTag, src, dest);
-	decodeAndVerify(v, unassignedShardId, unassignedShardId);
+	decodeAndVerify(v, uninitializedShardId, uninitializedShardId);
 
 	printf("ssi serdes test complete\n");
 	return Void();
