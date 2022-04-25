@@ -1978,7 +1978,7 @@ ACTOR static Future<std::vector<std::pair<StorageServerInterface, EventMap>>> ge
 			TraceEventFields metadataField;
 			metadataField.addField("CreatedTimeTimestamp", "0");
 			metadataField.addField("CreatedTimeDatetime", "[removed]");
-			metadataField.addField("StoreType", "[unknown]");
+			metadataField.addField("StoreType", getTypeString(KeyValueStoreType::END));
 			results[i].second.emplace("Metadata", metadataField);
 		}
 	}
