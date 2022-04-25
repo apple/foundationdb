@@ -101,7 +101,7 @@ const std::array<Operation, MAX_OP> opTable{
 	                          0 /*target_bytes*/,
 	                          args.streaming_mode,
 	                          0 /*iteration*/,
-	                          false /*snapshot*/,
+	                          true /*snapshot*/,
 	                          args.txnspec.ops[OP_GETRANGE][OP_REVERSE])
 	                .eraseType();
 	        },
