@@ -2888,7 +2888,7 @@ public:
 		    server->getStoreType(),
 		    isTss ? !server->isCorrectStoreType(self->configuration.testingStorageServerStoreType)
 		          : !server->isCorrectStoreType(self->configuration.storageServerStoreType));
-		// printf("------ read metadata %s\n", server->getId().toString().c_str());
+
 		// read storage metadata
 		loop {
 			try {
@@ -2906,7 +2906,7 @@ public:
 				wait(tr->onError(e));
 			}
 		}
-
+		// printf("------ updated metadata %s\n", server->getId().toString().c_str());
 		if (!isTss) {
 			// wrong store type handler
 			if (!server->isCorrectStoreType(self->configuration.storageServerStoreType) &&

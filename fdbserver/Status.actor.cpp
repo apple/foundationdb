@@ -587,10 +587,10 @@ struct RolesInfo {
 			TraceEventFields const& metadata = metrics.at("Metadata");
 			JsonBuilderObject metadataObj;
 			metadataObj["created_time_datetime"] = metadata.getValue("CreatedTimeDatetime");
-			metadataObj["created_time_timestamp"] = metadata.getUint64("CreatedTimeTimestamp");
+			metadataObj["created_time_timestamp"] = metadata.getDouble("CreatedTimeTimestamp");
 			metadataObj["storage_engine"] = metadata.getValue("StoreType");
 			obj["storage_metadata"] = metadataObj;
-
+			// printf("%s\n", metadataObj.getJson().c_str());
 		} catch (Error& e) {
 			if (e.code() != error_code_attribute_not_found)
 				throw e;
@@ -1974,7 +1974,7 @@ ACTOR static Future<std::vector<std::pair<StorageServerInterface, EventMap>>> ge
 			metadataField.addField("CreatedTimeDatetime", epochsToGMTString(metadata[i].get().createdTime));
 			metadataField.addField("StoreType", metadata[i].get().storeType.toString());
 			results[i].second.emplace("Metadata", metadataField);
-		} else if (!servers[i].isTss()) {
+		} else {
 			TraceEventFields metadataField;
 			metadataField.addField("CreatedTimeTimestamp", "0");
 			metadataField.addField("CreatedTimeDatetime", "[removed]");
