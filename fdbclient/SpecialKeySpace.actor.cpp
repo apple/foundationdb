@@ -1719,18 +1719,19 @@ ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWrite
 			if (parse_error) {
 				std::string error = "ERROR: \'" + process_address_or_hostname_strs[index] +
 				                    "\' is not a valid network endpoint address\n";
-				if (process_address_or_hostname_strs[index].find(":tls") != std::string::npos)
-					error += "        Do not include the `:tls' suffix when naming a process\n";
 				return ManagementAPIError::toJsonString(false, "coordinators", error);
 			}
 		}
 	}
 
 	std::vector<NetworkAddress> addressesVec = wait(conn.tryResolveHostnames());
-	if (addressesVec.size())
+	if (addressesVec.size() != conn.hostnames.size() + conn.coordinators().size()) {
+		return ManagementAPIError::toJsonString(false, "coordinators", "One or more hostnames are not resolvable.");
+	} else if (addressesVec.size()) {
 		change = specifiedQuorumChange(addressesVec);
-	else
+	} else {
 		change = noQuorumChange();
+	}
 
 	// check update for cluster_description
 	Key cluster_decription_key = LiteralStringRef("cluster_description").withPrefix(kr.begin);
@@ -1742,8 +1743,8 @@ ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWrite
 			change = nameQuorumChange(entry.second.get().toString(), change);
 		} else {
 			// throw the error
-			return Optional<std::string>(ManagementAPIError::toJsonString(
-			    false, "coordinators", "Cluster description must match [A-Za-z0-9_]+"));
+			return ManagementAPIError::toJsonString(
+			    false, "coordinators", "Cluster description must match [A-Za-z0-9_]+");
 		}
 	}
 
