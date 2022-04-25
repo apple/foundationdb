@@ -148,24 +148,31 @@ class UpgradeTest:
         local_file = self.binary_path(version, target_bin_name)
         if (local_file.exists()):
             return
+
+        # Download to a temporary file and then replace the target file atomically
+        # to avoid consistency errors in case of multiple tests are downloading the
+        # same file in parallel
+        local_file_tmp = Path("{}.{}".format(
+            str(local_file), random_secret_string(8)))
         self.download_dir.joinpath(version).mkdir(
             parents=True, exist_ok=True)
         remote_file = "{}{}/{}".format(FDB_DOWNLOAD_ROOT,
                                        version, remote_bin_name)
         remote_sha256 = "{}.sha256".format(remote_file)
-        local_sha256 = Path("{}.sha256".format(local_file))
+        local_sha256 = Path("{}.sha256".format(local_file_tmp))
 
         for attempt_cnt in range(MAX_DOWNLOAD_ATTEMPTS):
-            print("Downloading '{}' to '{}'...".format(remote_file, local_file))
-            request.urlretrieve(remote_file, local_file)
+            print("Downloading '{}' to '{}'...".format(
+                remote_file, local_file_tmp))
+            request.urlretrieve(remote_file, local_file_tmp)
             print("Downloading '{}' to '{}'...".format(
                 remote_sha256, local_sha256))
             request.urlretrieve(remote_sha256, local_sha256)
             print("Download complete")
-            assert local_file.exists(), "{} does not exist".format(local_file)
+            assert local_file_tmp.exists(), "{} does not exist".format(local_file_tmp)
             assert local_sha256.exists(), "{} does not exist".format(local_sha256)
             expected_checksum = read_to_str(local_sha256)
-            actual_checkum = compute_sha256(local_file)
+            actual_checkum = compute_sha256(local_file_tmp)
             if (expected_checksum == actual_checkum):
                 print("Checksum OK")
                 break
@@ -173,7 +180,10 @@ class UpgradeTest:
                 expected_checksum, actual_checkum))
             if attempt_cnt == MAX_DOWNLOAD_ATTEMPTS-1:
                 assert False, "Failed to download {} after {} attempts".format(
-                    local_file, MAX_DOWNLOAD_ATTEMPTS)
+                    local_file_tmp, MAX_DOWNLOAD_ATTEMPTS)
+
+        os.rename(local_file_tmp, local_file)
+        os.remove(local_sha256)
 
         if makeExecutable:
             make_executable(local_file)
