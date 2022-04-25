@@ -1078,10 +1078,11 @@ struct DDQueueData {
 	}
 
 	// return true if the servers are throttled as source for read rebalance
-	bool timeThrottle(const std::vector<UID>& ids) const {
-		return std::any_of(ids.begin(), ids.end(), [this](const UID& id) {
+	bool timeThrottle(const std::vector<UID>& ids, int shardCount) const {
+		return std::any_of(ids.begin(), ids.end(), [this, shardCount](const UID& id) {
 			if (this->lastAsSource.count(id)) {
-				return (now() - this->lastAsSource.at(id)) * 5.0 < SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL;
+				return (now() - this->lastAsSource.at(id)) * shardCount <
+				       SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL;
 			}
 			return false;
 		});
@@ -1529,11 +1530,6 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
 		traceEvent->detail("CancelingDueToSimulationSpeedup", true);
 		return false;
 	}
-	// check lastAsSource
-	if (self->timeThrottle(sourceTeam->getServerIDs())) {
-		traceEvent->detail("SkipReason", "SourceTeamThrottle");
-		return false;
-	}
 
 	state std::vector<KeyRange> shards = self->shardsAffectedByTeamFailure->getShardsFor(
 	    ShardsAffectedByTeamFailure::Team(sourceTeam->getServerIDs(), primary));
@@ -1546,10 +1542,17 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
 		return false;
 	}
 
+	// check lastAsSource, at most 10% of shards can be moved within a sample period
+	if (self->timeThrottle(sourceTeam->getServerIDs(), 0.1 * shards.size())) {
+		traceEvent->detail("SkipReason", "SourceTeamThrottle");
+		return false;
+	}
+
 	// TODO: set 10 as a knob
 	// randomly choose topK shards
+	int topK = std::min(int(0.1 * shards.size()), 10);
 	state Future<HealthMetrics> healthMetrics = self->cx->getHealthMetrics(true);
-	state GetMetricsRequest req(shards, 10);
+	state GetMetricsRequest req(shards, topK);
 	req.comparator = [](const StorageMetrics& a, const StorageMetrics& b) {
 		return a.bytesReadPerKSecond / std::max(a.bytes * 1.0, 1.0 * SERVER_KNOBS->MIN_SHARD_BYTES) >
 		       b.bytesReadPerKSecond / std::max(b.bytes * 1.0, 1.0 * SERVER_KNOBS->MIN_SHARD_BYTES);
@@ -2183,9 +2186,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 						debug_setCheckRelocationDuration(false);
 					}
 				}
-				when(KeyRange done = waitNext(rangesComplete.getFuture())) {
-					keysToLaunchFrom = done;
-				}
+				when(KeyRange done = waitNext(rangesComplete.getFuture())) { keysToLaunchFrom = done; }
 				when(wait(recordMetrics)) {
 					Promise<int64_t> req;
 					getAverageShardBytes.send(req);
@@ -2232,9 +2233,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 				}
 				when(wait(self.error.getFuture())) {} // Propagate errors from dataDistributionRelocator
 				when(wait(waitForAll(balancingFutures))) {}
-				when(Promise<int> r = waitNext(getUnhealthyRelocationCount)) {
-					r.send(self.unhealthyRelocations);
-				}
+				when(Promise<int> r = waitNext(getUnhealthyRelocationCount)) { r.send(self.unhealthyRelocations); }
 			}
 		}
 	} catch (Error& e) {
