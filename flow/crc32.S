@@ -34,8 +34,8 @@
 #define __ALTIVEC__
 #endif
 #include "ppc-asm.h"
-#else
-#include <ppc-asm.h>
+//#else
+//#include <ppc-asm.h>
 #endif
 #include "ppc-opcode.h"
 
