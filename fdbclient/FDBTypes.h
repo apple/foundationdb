@@ -1433,7 +1433,7 @@ struct StorageMetadataType {
 	static double currentTime() { return g_network->timer(); }
 
 	bool operator==(const StorageMetadataType& b) const {
-		return createdTime == b.createdTime && storeType == b.storeType;
+		return createdTime == b.createdTime && storeType == b.storeType && wrongConfigured && b.wrongConfigured;
 	}
 
 	bool operator<(const StorageMetadataType& b) const {

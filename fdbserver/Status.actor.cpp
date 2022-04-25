@@ -583,13 +583,12 @@ struct RolesInfo {
 				}
 			}
 
-			if (!iface.isTss()) { // only storage server has Metadata field
-				TraceEventFields const& metadata = metrics.at("Metadata");
-				JsonBuilderObject metadataObj;
-				metadataObj["created_time_datetime"] = metadata.getValue("CreatedTimeDatetime");
-				metadataObj["created_time_timestamp"] = metadata.getUint64("CreatedTimeTimestamp");
-				obj["storage_metadata"] = metadataObj;
-			}
+			TraceEventFields const& metadata = metrics.at("Metadata");
+			JsonBuilderObject metadataObj;
+			metadataObj["created_time_datetime"] = metadata.getValue("CreatedTimeDatetime");
+			metadataObj["created_time_timestamp"] = metadata.getUint64("CreatedTimeTimestamp");
+			metadataObj["storage_engine"] = metadata.getValue("StoreType");
+			obj["storage_metadata"] = metadataObj;
 
 		} catch (Error& e) {
 			if (e.code() != error_code_attribute_not_found)
@@ -1937,11 +1936,13 @@ ACTOR static Future<std::vector<std::pair<StorageServerInterface, EventMap>>> ge
 			TraceEventFields metadataField;
 			metadataField.addField("CreatedTimeTimestamp", std::to_string(metadata[i].get().createdTime));
 			metadataField.addField("CreatedTimeDatetime", epochsToGMTString(metadata[i].get().createdTime));
+			metadataField.addField("StoreType", metadata[i].get().storeType.toString());
 			results[i].second.emplace("Metadata", metadataField);
 		} else if (!servers[i].isTss()) {
 			TraceEventFields metadataField;
 			metadataField.addField("CreatedTimeTimestamp", "0");
 			metadataField.addField("CreatedTimeDatetime", "[removed]");
+			metadataField.addField("StoreType", "[unknown]");
 			results[i].second.emplace("Metadata", metadataField);
 		}
 	}
