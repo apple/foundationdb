@@ -184,7 +184,7 @@ int populate(Transaction tx,
 		stats.incrOpCount(OP_INSERT);
 
 		/* commit every 100 inserts (default) or if this is the last key */
-		if (i == key_end || (i - key_begin + 1) % num_commit_every == 0) {
+		if ((i % num_commit_every == 0) || i == key_end) {
 			const auto do_sample = (stats.getOpCount(OP_TRANSACTION) % args.sampling) == 0;
 			auto watch_commit = Stopwatch(StartAtCtor{});
 			auto future_commit = tx.commit();
