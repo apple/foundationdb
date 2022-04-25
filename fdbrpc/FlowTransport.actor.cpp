@@ -406,21 +406,21 @@ TransportData::TransportData(uint64_t transportId, int maxWellKnownEndpoints, IP
 struct ConnectPacket {
 	// The value does not include the size of `connectPacketLength` itself,
 	// but only the other fields of this structure.
-	uint32_t connectPacketLength;
+	uint32_t connectPacketLength = 0;
 	ProtocolVersion protocolVersion; // Expect currentProtocolVersion
 
-	uint16_t canonicalRemotePort; // Port number to reconnect to the originating process
-	uint64_t connectionId; // Multi-version clients will use the same Id for both connections, other connections will
-	                       // set this to zero. Added at protocol Version 0x0FDB00A444020001.
+	uint16_t canonicalRemotePort = 0; // Port number to reconnect to the originating process
+	uint64_t connectionId = 0; // Multi-version clients will use the same Id for both connections, other connections
+	                           // will set this to zero. Added at protocol Version 0x0FDB00A444020001.
 
 	// IP Address to reconnect to the originating process. Only one of these must be populated.
-	uint32_t canonicalRemoteIp4;
+	uint32_t canonicalRemoteIp4 = 0;
 
 	enum ConnectPacketFlags { FLAG_IPV6 = 1 };
-	uint16_t flags;
-	uint8_t canonicalRemoteIp6[16];
+	uint16_t flags = 0;
+	uint8_t canonicalRemoteIp6[16] = { 0 };
 
-	ConnectPacket() { memset(this, 0, sizeof(*this)); }
+	ConnectPacket() = default;
 
 	IPAddress canonicalRemoteIp() const {
 		if (isIPv6()) {

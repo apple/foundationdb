@@ -5,21 +5,19 @@ import os
 import shutil
 import subprocess
 import sys
-from local_cluster import LocalCluster
+from local_cluster import LocalCluster, random_secret_string
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
-from random import choice
 from pathlib import Path
 
 
 class TempCluster:
-    def __init__(self, build_dir: str, process_number: int = 1, port: str = None):
+    def __init__(self, build_dir: str, process_number: int = 1, port: str = None, blob_granules_enabled: bool = False):
         self.build_dir = Path(build_dir).resolve()
         assert self.build_dir.exists(), "{} does not exist".format(build_dir)
         assert self.build_dir.is_dir(), "{} is not a directory".format(build_dir)
         tmp_dir = self.build_dir.joinpath(
             "tmp",
-            "".join(choice(LocalCluster.valid_letters_for_secret)
-                    for i in range(16)),
+            random_secret_string(16)
         )
         tmp_dir.mkdir(parents=True)
         self.cluster = LocalCluster(
@@ -29,6 +27,7 @@ class TempCluster:
             self.build_dir.joinpath("bin", "fdbcli"),
             process_number,
             port=port,
+            blob_granules_enabled=blob_granules_enabled
         )
         self.log = self.cluster.log
         self.etc = self.cluster.etc
@@ -90,9 +89,14 @@ if __name__ == "__main__":
         help='Do not dump cluster log on error',
         action="store_true"
     )
+    parser.add_argument(
+        '--blob-granules-enabled',
+        help='Enable blob granules',
+        action="store_true"
+    )
     args = parser.parse_args()
     errcode = 1
-    with TempCluster(args.build_dir, args.process_number) as cluster:
+    with TempCluster(args.build_dir, args.process_number, blob_granules_enabled=args.blob_granules_enabled) as cluster:
         print("log-dir: {}".format(cluster.log))
         print("etc-dir: {}".format(cluster.etc))
         print("data-dir: {}".format(cluster.data))
@@ -107,6 +111,10 @@ if __name__ == "__main__":
                 cmd_args.append(str(cluster.log))
             elif cmd == "@ETC_DIR@":
                 cmd_args.append(str(cluster.etc))
+            elif cmd == "@TMP_DIR@":
+                cmd_args.append(str(cluster.tmp_dir))
+            elif cmd.startswith("@DATA_DIR@"):
+                cmd_args.append(str(cluster.data) + cmd[len("@DATA_DIR@"):])
             else:
                 cmd_args.append(cmd)
         env = dict(**os.environ)

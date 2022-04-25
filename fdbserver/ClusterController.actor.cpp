@@ -1097,18 +1097,24 @@ void haltRegisteringOrCurrentSingleton(ClusterControllerData* self,
 	}
 }
 
-void registerWorker(RegisterWorkerRequest req,
-                    ClusterControllerData* self,
-                    std::unordered_set<NetworkAddress> coordinatorAddresses,
-                    ConfigBroadcaster* configBroadcaster) {
+ACTOR Future<Void> registerWorker(RegisterWorkerRequest req,
+                                  ClusterControllerData* self,
+                                  ClusterConnectionString cs,
+                                  ConfigBroadcaster* configBroadcaster) {
+	std::vector<NetworkAddress> coordinatorAddresses = wait(cs.tryResolveHostnames());
+
 	const WorkerInterface& w = req.wi;
 	ProcessClass newProcessClass = req.processClass;
 	auto info = self->id_worker.find(w.locality.processId());
 	ClusterControllerPriorityInfo newPriorityInfo = req.priorityInfo;
 	newPriorityInfo.processClassFitness = newProcessClass.machineClassFitness(ProcessClass::ClusterController);
+
 	bool isCoordinator =
-	    (coordinatorAddresses.count(req.wi.address()) > 0) ||
-	    (req.wi.secondaryAddress().present() && coordinatorAddresses.count(req.wi.secondaryAddress().get()) > 0);
+	    (std::find(coordinatorAddresses.begin(), coordinatorAddresses.end(), req.wi.address()) !=
+	     coordinatorAddresses.end()) ||
+	    (req.wi.secondaryAddress().present() &&
+	     std::find(coordinatorAddresses.begin(), coordinatorAddresses.end(), req.wi.secondaryAddress().get()) !=
+	         coordinatorAddresses.end());
 
 	for (auto it : req.incompatiblePeers) {
 		self->db.incompatibleConnections[it] = now() + SERVER_KNOBS->INCOMPATIBLE_PEERS_LOGGING_INTERVAL;
@@ -1271,6 +1277,8 @@ void registerWorker(RegisterWorkerRequest req,
 	if (!req.reply.isSet() && newPriorityInfo != req.priorityInfo) {
 		req.reply.send(RegisterWorkerReply(newProcessClass, newPriorityInfo));
 	}
+
+	return Void();
 }
 
 #define TIME_KEEPER_VERSION LiteralStringRef("1")
@@ -2543,30 +2551,12 @@ ACTOR Future<Void> clusterControllerCore(Reference<IClusterConnectionRecord> con
 		when(RecruitBlobWorkerRequest req = waitNext(interf.recruitBlobWorker.getFuture())) {
 			clusterRecruitBlobWorker(&self, req);
 		}
-		when(state RegisterWorkerRequest req = waitNext(interf.registerWorker.getFuture())) {
+		when(RegisterWorkerRequest req = waitNext(interf.registerWorker.getFuture())) {
 			++self.registerWorkerRequests;
-			state ClusterConnectionString ccs = coordinators.ccr->getConnectionString();
-
-			state std::unordered_set<NetworkAddress> coordinatorAddresses;
-			std::vector<Future<Void>> fs;
-			for (auto& hostname : ccs.hostnames) {
-				fs.push_back(map(hostname.resolve(), [&](Optional<NetworkAddress> const& addr) -> Void {
-					if (addr.present()) {
-						coordinatorAddresses.insert(addr.get());
-					}
-					return Void();
-				}));
-			}
-			wait(waitForAll(fs));
-
-			for (const auto& coord : ccs.coordinators()) {
-				coordinatorAddresses.insert(coord);
-			}
-
-			registerWorker(req,
-			               &self,
-			               coordinatorAddresses,
-			               (configDBType == ConfigDBType::DISABLED) ? nullptr : &configBroadcaster);
+			self.addActor.send(registerWorker(req,
+			                                  &self,
+			                                  coordinators.ccr->getConnectionString(),
+			                                  (configDBType == ConfigDBType::DISABLED) ? nullptr : &configBroadcaster));
 		}
 		when(GetWorkersRequest req = waitNext(interf.getWorkers.getFuture())) {
 			++self.getWorkersRequests;

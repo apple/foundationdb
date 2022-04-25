@@ -123,6 +123,7 @@ if(NOT WIN32)
     test/apitester/TesterApiWrapper.h
     test/apitester/TesterTestSpec.cpp
     test/apitester/TesterTestSpec.h
+    test/apitester/TesterBlobGranuleCorrectnessWorkload.cpp
     test/apitester/TesterCancelTransactionWorkload.cpp
     test/apitester/TesterCorrectnessWorkload.cpp
     test/apitester/TesterKeyValueStore.cpp
@@ -272,7 +273,61 @@ endif()
             ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c_external.so
             --test-dir
             ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests
+            --tmp-dir
+            @TMP_DIR@
             )
+
+  add_fdbclient_test(
+    NAME fdb_c_api_tests_blob_granule
+    DISABLE_LOG_DUMP
+    API_TEST_BLOB_GRANULES_ENABLED
+    COMMAND ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/run_c_api_tests.py
+            --cluster-file
+            @CLUSTER_FILE@
+            --tester-binary
+            $<TARGET_FILE:fdb_c_api_tester>
+            --external-client-library
+            ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c_external.so
+            --test-dir
+            ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/blobgranuletests
+            --blob-granule-local-file-path
+            @DATA_DIR@/fdbblob/
+            )
+
+  if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" AND NOT USE_SANITIZER)
+    add_test(NAME fdb_c_upgrade_single_threaded_630api
+      COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
+            --build-dir ${CMAKE_BINARY_DIR}
+            --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadSingleThr.toml
+            --upgrade-path "6.3.23" "7.0.0" "7.2.0"
+            --process-number 1
+            )
+
+    add_test(NAME fdb_c_upgrade_single_threaded_700api
+      COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
+            --build-dir ${CMAKE_BINARY_DIR}
+            --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadSingleThr.toml
+            --upgrade-path "7.0.0" "7.2.0"
+            --process-number 1
+            )
+
+    add_test(NAME fdb_c_upgrade_multi_threaded_630api
+        COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
+            --build-dir ${CMAKE_BINARY_DIR}
+            --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
+            --upgrade-path "6.3.23" "7.0.0" "7.2.0"
+            --process-number 3
+          )
+
+    add_test(NAME fdb_c_upgrade_multi_threaded_700api
+        COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
+            --build-dir ${CMAKE_BINARY_DIR}
+            --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
+            --upgrade-path "7.0.0" "7.2.0"
+            --process-number 3
+          )
+  endif()
+
 endif()
 
 set(c_workloads_srcs
@@ -316,6 +371,7 @@ fdb_install(
   FILES foundationdb/fdb_c.h
   ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/fdb_c_options.g.h
   ${CMAKE_SOURCE_DIR}/fdbclient/vexillographer/fdb.options
+  ${CMAKE_SOURCE_DIR}/bindings/c/foundationdb/fdb_c_types.h
   DESTINATION include
   DESTINATION_SUFFIX /foundationdb
   COMPONENT clients)

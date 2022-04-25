@@ -33,6 +33,7 @@
 
 #include <atomic>
 #include <boost/range/const_iterator.hpp>
+#include <utility>
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -76,10 +77,17 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 			if (rep.present()) {
 
 				ASSERT(!rep.get().error.present());
-				ASSERT_EQ(rep.get().baseCipherDetailMap.size(), self->domainIds.size());
+				ASSERT_EQ(rep.get().baseCipherDetails.size(), self->domainIds.size());
 
 				for (const uint64_t id : self->domainIds) {
-					ASSERT(rep.get().baseCipherDetailMap.find(id) != rep.get().baseCipherDetailMap.end());
+					bool found = false;
+					for (const auto& item : rep.get().baseCipherDetails) {
+						if (item.baseCipherId == id) {
+							found = true;
+							break;
+						}
+					}
+					ASSERT(found);
 				}
 
 				// Ensure no hits reported by the cache.
@@ -127,10 +135,17 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 			ErrorOr<EKPGetLatestBaseCipherKeysReply> rep = wait(self->ekpInf.getLatestBaseCipherKeys.tryGetReply(req));
 			if (rep.present()) {
 				ASSERT(!rep.get().error.present());
-				ASSERT_EQ(rep.get().baseCipherDetailMap.size(), self->domainIds.size());
+				ASSERT_EQ(rep.get().baseCipherDetails.size(), self->domainIds.size());
 
 				for (const uint64_t id : self->domainIds) {
-					ASSERT(rep.get().baseCipherDetailMap.find(id) != rep.get().baseCipherDetailMap.end());
+					bool found = false;
+					for (const auto& item : rep.get().baseCipherDetails) {
+						if (item.baseCipherId == id) {
+							found = true;
+							break;
+						}
+					}
+					ASSERT(found);
 				}
 
 				// Ensure desired cache-hit counts
@@ -165,16 +180,23 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 		EKPGetLatestBaseCipherKeysReply rep = wait(self->ekpInf.getLatestBaseCipherKeys.getReply(req));
 
 		ASSERT(!rep.error.present());
-		ASSERT_EQ(rep.baseCipherDetailMap.size(), self->domainIds.size());
+		ASSERT_EQ(rep.baseCipherDetails.size(), self->domainIds.size());
 		for (const uint64_t id : self->domainIds) {
-			ASSERT(rep.baseCipherDetailMap.find(id) != rep.baseCipherDetailMap.end());
+			bool found = false;
+			for (const auto& item : rep.baseCipherDetails) {
+				if (item.baseCipherId == id) {
+					found = true;
+					break;
+				}
+			}
+			ASSERT(found);
 		}
 
 		self->cipherIdMap.clear();
 		self->cipherIds.clear();
-		for (auto& item : rep.baseCipherDetailMap) {
-			self->cipherIdMap.emplace(item.second.baseCipherId, StringRef(self->arena, item.second.baseCipherKey));
-			self->cipherIds.emplace_back(item.second.baseCipherId);
+		for (auto& item : rep.baseCipherDetails) {
+			self->cipherIdMap.emplace(item.baseCipherId, StringRef(self->arena, item.baseCipherKey));
+			self->cipherIds.emplace_back(item.baseCipherId);
 		}
 
 		state int numIterations = deterministicRandom()->randomInt(512, 786);
@@ -184,28 +206,28 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 
 			EKPGetBaseCipherKeysByIdsRequest req;
 			for (int i = idx; i < nIds && i < self->cipherIds.size(); i++) {
-				req.baseCipherIds.emplace_back(self->cipherIds[i]);
+				req.baseCipherIds.emplace_back(std::make_pair(self->cipherIds[i], 1));
 			}
 			expectedHits = req.baseCipherIds.size();
 			EKPGetBaseCipherKeysByIdsReply rep = wait(self->ekpInf.getBaseCipherKeysByIds.getReply(req));
 
 			ASSERT(!rep.error.present());
-			ASSERT_EQ(rep.baseCipherMap.size(), expectedHits);
+			ASSERT_EQ(rep.baseCipherDetails.size(), expectedHits);
 			ASSERT_EQ(rep.numHits, expectedHits);
 			// Valdiate the 'cipherKey' content against the one read while querying by domainIds
-			for (auto& item : rep.baseCipherMap) {
-				const auto itr = self->cipherIdMap.find(item.first);
+			for (auto& item : rep.baseCipherDetails) {
+				const auto itr = self->cipherIdMap.find(item.baseCipherId);
 				ASSERT(itr != self->cipherIdMap.end());
-				Standalone<StringRef> toCompare = self->cipherIdMap[item.first];
-				if (toCompare.compare(item.second) != 0) {
+				Standalone<StringRef> toCompare = self->cipherIdMap[item.baseCipherId];
+				if (toCompare.compare(item.baseCipherKey) != 0) {
 					TraceEvent("Mismatch")
-					    .detail("Id", item.first)
+					    .detail("Id", item.baseCipherId)
 					    .detail("CipherMapDataHash", XXH3_64bits(toCompare.begin(), toCompare.size()))
 					    .detail("CipherMapSize", toCompare.size())
 					    .detail("CipherMapValue", toCompare.toString())
-					    .detail("ReadDataHash", XXH3_64bits(item.second.begin(), item.second.size()))
-					    .detail("ReadValue", item.second.toString())
-					    .detail("ReadDataSize", item.second.size());
+					    .detail("ReadDataHash", XXH3_64bits(item.baseCipherKey.begin(), item.baseCipherKey.size()))
+					    .detail("ReadValue", item.baseCipherKey.toString())
+					    .detail("ReadDataSize", item.baseCipherKey.size());
 					ASSERT(false);
 				}
 			}
@@ -219,12 +241,15 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 		TraceEvent("SimLookupInvalidKeyId_Start").log();
 
 		// Prepare a lookup with valid and invalid keyIds - SimEncryptKmsProxy should throw encrypt_key_not_found()
-		std::vector<uint64_t> baseCipherIds(self->cipherIds);
-		baseCipherIds.emplace_back(SERVER_KNOBS->SIM_KMS_MAX_KEYS + 10);
+		std::vector<std::pair<uint64_t, int64_t>> baseCipherIds;
+		for (auto id : self->cipherIds) {
+			baseCipherIds.emplace_back(std::make_pair(id, 1));
+		}
+		baseCipherIds.emplace_back(std::make_pair(SERVER_KNOBS->SIM_KMS_MAX_KEYS + 10, 1));
 		EKPGetBaseCipherKeysByIdsRequest req(deterministicRandom()->randomUniqueID(), baseCipherIds);
 		EKPGetBaseCipherKeysByIdsReply rep = wait(self->ekpInf.getBaseCipherKeysByIds.getReply(req));
 
-		ASSERT_EQ(rep.baseCipherMap.size(), 0);
+		ASSERT_EQ(rep.baseCipherDetails.size(), 0);
 		ASSERT(rep.error.present());
 		ASSERT_EQ(rep.error.get().code(), error_code_encrypt_key_not_found);
 

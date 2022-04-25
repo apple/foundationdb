@@ -53,9 +53,9 @@ struct GenerationRegInterface {
 	// the v2 of the previous generation is the v1 of the next.
 
 	GenerationRegInterface() {}
-	GenerationRegInterface(NetworkAddress remote);
+	GenerationRegInterface(NetworkAddress const& remote);
 	GenerationRegInterface(INetwork* local);
-	GenerationRegInterface(Hostname hostname) : hostname(hostname){};
+	GenerationRegInterface(Hostname const& hostname) : hostname(hostname){};
 };
 
 struct UniqueGeneration {
@@ -128,9 +128,9 @@ struct LeaderElectionRegInterface : ClientLeaderRegInterface {
 	RequestStream<struct ForwardRequest> forward;
 
 	LeaderElectionRegInterface() {}
-	LeaderElectionRegInterface(NetworkAddress remote);
+	LeaderElectionRegInterface(NetworkAddress const& remote);
 	LeaderElectionRegInterface(INetwork* local);
-	LeaderElectionRegInterface(Hostname hostname) : ClientLeaderRegInterface(hostname) {}
+	LeaderElectionRegInterface(Hostname const& hostname) : ClientLeaderRegInterface(hostname) {}
 };
 
 struct CandidacyRequest {
@@ -220,7 +220,7 @@ class ConfigNode;
 
 class ServerCoordinators : public ClientCoordinators {
 public:
-	explicit ServerCoordinators(Reference<IClusterConnectionRecord>);
+	explicit ServerCoordinators(Reference<IClusterConnectionRecord> ccr);
 
 	std::vector<LeaderElectionRegInterface> leaderElectionServers;
 	std::vector<GenerationRegInterface> stateServers;

@@ -542,7 +542,7 @@ ACTOR Future<Void> lastCommitUpdater(GrvProxyData* self, PromiseStream<Future<Vo
 	}
 }
 
-ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(SpanID parentSpan,
+ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(SpanContext parentSpan,
                                                           GrvProxyData* grvProxyData,
                                                           uint32_t flags,
                                                           Optional<UID> debugID,
@@ -581,8 +581,10 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(SpanID parentSpan,
 	GetRawCommittedVersionReply repFromMaster = wait(replyFromMasterFuture);
 	grvProxyData->minKnownCommittedVersion =
 	    std::max(grvProxyData->minKnownCommittedVersion, repFromMaster.minKnownCommittedVersion);
-	// TODO add to "status json"
-	grvProxyData->ssVersionVectorCache.applyDelta(repFromMaster.ssVersionVectorDelta);
+	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
+		// TODO add to "status json"
+		grvProxyData->ssVersionVectorCache.applyDelta(repFromMaster.ssVersionVectorDelta);
+	}
 	grvProxyData->stats.grvGetCommittedVersionRpcDist->sampleSeconds(now() - grvConfirmEpochLive);
 	GetReadVersionReply rep;
 	rep.version = repFromMaster.version;
@@ -646,8 +648,10 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture,
 		}
 		reply.midShardSize = midShardSize;
 		reply.tagThrottleInfo.clear();
-		grvProxyData->ssVersionVectorCache.getDelta(request.maxVersion, reply.ssVersionVectorDelta);
-		grvProxyData->versionVectorSizeOnGRVReply.addMeasurement(reply.ssVersionVectorDelta.size());
+		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
+			grvProxyData->ssVersionVectorCache.getDelta(request.maxVersion, reply.ssVersionVectorDelta);
+			grvProxyData->versionVectorSizeOnGRVReply.addMeasurement(reply.ssVersionVectorDelta.size());
+		}
 		reply.proxyId = grvProxyData->dbgid;
 
 		if (!request.tags.empty()) {
@@ -941,7 +945,7 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 		int batchGRVProcessed = 0;
 		for (int i = 0; i < start.size(); i++) {
 			if (start[i].size()) {
-				Future<GetReadVersionReply> readVersionReply = getLiveCommittedVersion(UID() /*span.context*/,
+				Future<GetReadVersionReply> readVersionReply = getLiveCommittedVersion(SpanContext(),
 				                                                                       grvProxyData,
 				                                                                       i,
 				                                                                       debugID,

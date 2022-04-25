@@ -548,6 +548,8 @@ void SpecialKeySpace::registerKeyRange(SpecialKeySpace::MODULE module,
                                        SpecialKeySpace::IMPLTYPE type,
                                        const KeyRangeRef& kr,
                                        SpecialKeyRangeReadImpl* impl) {
+	// Not allowed to register an empty range
+	ASSERT(!kr.empty());
 	// module boundary check
 	if (module == SpecialKeySpace::MODULE::TESTONLY) {
 		ASSERT(normalKeys.contains(kr));
@@ -1593,10 +1595,10 @@ Future<RangeResult> TracingOptionsImpl::getRange(ReadYourWritesTransaction* ryw,
 
 		if (key.endsWith(kTracingTransactionIdKey)) {
 			result.push_back_deep(result.arena(),
-			                      KeyValueRef(key, std::to_string(ryw->getTransactionState()->spanID.first())));
+			                      KeyValueRef(key, ryw->getTransactionState()->spanContext.traceID.toString()));
 		} else if (key.endsWith(kTracingTokenKey)) {
 			result.push_back_deep(result.arena(),
-			                      KeyValueRef(key, std::to_string(ryw->getTransactionState()->spanID.second())));
+			                      KeyValueRef(key, std::to_string(ryw->getTransactionState()->spanContext.spanID)));
 		}
 	}
 	return result;
@@ -1610,7 +1612,7 @@ void TracingOptionsImpl::set(ReadYourWritesTransaction* ryw, const KeyRef& key, 
 	}
 
 	if (key.endsWith(kTracingTransactionIdKey)) {
-		ryw->setTransactionID(std::stoul(value.toString()));
+		ryw->setTransactionID(UID::fromString(value.toString()));
 	} else if (key.endsWith(kTracingTokenKey)) {
 		if (value.toString() == "true") {
 			ryw->setToken(deterministicRandom()->randomUInt64());
@@ -1999,7 +2001,6 @@ ACTOR static Future<RangeResult> ClientProfilingGetRangeActor(ReadYourWritesTran
 	return result;
 }
 
-// TODO : add limitation on set operation
 Future<RangeResult> ClientProfilingImpl::getRange(ReadYourWritesTransaction* ryw,
                                                   KeyRangeRef kr,
                                                   GetRangeLimits limitsHint) const {
