@@ -26,14 +26,19 @@
 #include <cstdint>
 #include "stats.hpp"
 
+/* shared memory */
+constexpr const int SIGNAL_RED = 0;
+constexpr const int SIGNAL_GREEN = 1;
+constexpr const int SIGNAL_OFF = 2;
+
 // controlled, safer access to shared memory
 namespace mako::shared_memory {
 
 struct Header {
-	std::atomic<int> signal;
-	std::atomic<int> readycount;
-	std::atomic<double> throttle_factor;
-	std::atomic<int> stopcount;
+	std::atomic<int> signal = ATOMIC_VAR_INIT(SIGNAL_OFF);
+	std::atomic<int> readycount = ATOMIC_VAR_INIT(0);
+	std::atomic<double> throttle_factor = ATOMIC_VAR_INIT(1.0);
+	std::atomic<int> stopcount = ATOMIC_VAR_INIT(0);
 };
 
 struct LayoutHelper {
@@ -71,7 +76,7 @@ public:
 	size_t size() const noexcept { return storageSize(num_processes, num_threads); }
 
 	void initMemory() noexcept {
-		memset(&header(), 0, sizeof(Header));
+		new (&header()) Header{};
 		for (auto i = 0; i < num_processes; i++)
 			for (auto j = 0; j < num_threads; j++)
 				new (&statsSlot(i, j)) ThreadStatistics();

@@ -163,11 +163,6 @@ struct Arguments {
 	char bg_file_path[PATH_MAX];
 };
 
-/* shared memory */
-constexpr const int SIGNAL_RED = 0;
-constexpr const int SIGNAL_GREEN = 1;
-constexpr const int SIGNAL_OFF = 2;
-
 } // namespace mako
 
 #endif /* MAKO_HPP */

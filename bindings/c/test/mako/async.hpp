@@ -26,6 +26,7 @@
 #include <boost/asio.hpp>
 #include "logger.hpp"
 #include "mako.hpp"
+#include "shm.hpp"
 #include "stats.hpp"
 #include "time.hpp"
 
