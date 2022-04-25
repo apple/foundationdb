@@ -1595,10 +1595,10 @@ Future<RangeResult> TracingOptionsImpl::getRange(ReadYourWritesTransaction* ryw,
 
 		if (key.endsWith(kTracingTransactionIdKey)) {
 			result.push_back_deep(result.arena(),
-			                      KeyValueRef(key, ryw->getTransactionState()->spanContext.traceID.toString()));
+			                      KeyValueRef(key, std::to_string(ryw->getTransactionState()->spanID.first())));
 		} else if (key.endsWith(kTracingTokenKey)) {
 			result.push_back_deep(result.arena(),
-			                      KeyValueRef(key, std::to_string(ryw->getTransactionState()->spanContext.spanID)));
+			                      KeyValueRef(key, std::to_string(ryw->getTransactionState()->spanID.second())));
 		}
 	}
 	return result;
@@ -1612,7 +1612,7 @@ void TracingOptionsImpl::set(ReadYourWritesTransaction* ryw, const KeyRef& key, 
 	}
 
 	if (key.endsWith(kTracingTransactionIdKey)) {
-		ryw->setTransactionID(UID::fromString(value.toString()));
+		ryw->setTransactionID(std::stoul(value.toString()));
 	} else if (key.endsWith(kTracingTokenKey)) {
 		if (value.toString() == "true") {
 			ryw->setToken(deterministicRandom()->randomUInt64());

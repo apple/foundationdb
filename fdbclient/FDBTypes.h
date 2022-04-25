@@ -29,9 +29,29 @@
 #include <unordered_set>
 #include <boost/functional/hash.hpp>
 
+#include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/flow.h"
+
+enum class TraceFlags : uint8_t { unsampled = 0b00000000, sampled = 0b00000001 };
+
+inline TraceFlags operator&(TraceFlags lhs, TraceFlags rhs) {
+	return static_cast<TraceFlags>(static_cast<std::underlying_type_t<TraceFlags>>(lhs) &
+	                               static_cast<std::underlying_type_t<TraceFlags>>(rhs));
+}
+
+struct SpanContext {
+	UID traceID;
+	uint64_t spanID;
+	TraceFlags m_Flags;
+	SpanContext() : traceID(UID()), spanID(0), m_Flags(TraceFlags::unsampled) {}
+	SpanContext(UID traceID, uint64_t spanID, TraceFlags flags) : traceID(traceID), spanID(spanID), m_Flags(flags) {}
+	SpanContext(UID traceID, uint64_t spanID) : traceID(traceID), spanID(spanID), m_Flags(TraceFlags::unsampled) {}
+	SpanContext(Arena arena, const SpanContext& span)
+	  : traceID(span.traceID), spanID(span.spanID), m_Flags(span.m_Flags) {}
+	bool isSampled() const { return (m_Flags & TraceFlags::sampled) == TraceFlags::sampled; }
+};
 
 typedef int64_t Version;
 typedef uint64_t LogEpoch;
