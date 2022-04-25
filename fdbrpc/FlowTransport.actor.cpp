@@ -333,14 +333,20 @@ public:
 
 using SignedAuthTokenTTL = std::pair<double, SignedAuthToken>;
 struct SignedAuthTokenTTLCmp {
-	constexpr bool operator()(const SignedAuthTokenTTL& lhs, const SignedAuthTokenTTL& rhs) const { return lhs.first > rhs.first; }
+	constexpr bool operator()(const SignedAuthTokenTTL& lhs, const SignedAuthTokenTTL& rhs) const {
+		return lhs.first > rhs.first;
+	}
 };
 struct SignedAuthTokenCmp {
-	constexpr bool operator()(const SignedAuthTokenTTL& lhs, const SignedAuthTokenTTL& rhs) const { return lhs.second.signature == rhs.second.signature; }
+	constexpr bool operator()(const SignedAuthTokenTTL& lhs, const SignedAuthTokenTTL& rhs) const {
+		return lhs.second.signature == rhs.second.signature;
+	}
 };
 
-
-using TokenQueue = IterableUniquePriorityQueue<SignedAuthTokenTTL, std::vector<SignedAuthTokenTTL>, SignedAuthTokenTTLCmp, SignedAuthTokenCmp>;
+using TokenQueue = IterableUniquePriorityQueue<SignedAuthTokenTTL,
+                                               std::vector<SignedAuthTokenTTL>,
+                                               SignedAuthTokenTTLCmp,
+                                               SignedAuthTokenCmp>;
 
 class TransportData {
 public:
@@ -964,7 +970,7 @@ void Peer::prependConnectPacket() {
 	pkt.protocolVersion.addObjectSerializerFlag();
 	pkt.connectionId = transport->transportId;
 
-	PacketBuffer* pb_first = PacketBuffer::create(), *pb_end = nullptr;
+	PacketBuffer *pb_first = PacketBuffer::create(), *pb_end = nullptr;
 	auto checksumPb = pb_first;
 	PacketWriter wr(pb_first, nullptr, Unversioned());
 	pkt.serialize(wr);
@@ -2072,7 +2078,8 @@ void FlowTransport::authorizationTokenAdd(StringRef signedToken) {
 	reader.deserialize(tokenRef);
 	SignedAuthToken token(tokenRef);
 	// we need the TTL to invalidate tokens on the client side
-	auto authToken = ObjectReader::fromStringRef<AuthTokenRef>(token.token, AssumeVersion(g_network->protocolVersion()));
+	auto authToken =
+	    ObjectReader::fromStringRef<AuthTokenRef>(token.token, AssumeVersion(g_network->protocolVersion()));
 	if (authToken.expiresAt < now()) {
 		TraceEvent(SevWarnAlways, "AddedExpiredToken").detail("Expired", authToken.expiresAt);
 		return;
