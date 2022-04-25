@@ -19,6 +19,7 @@
  */
 
 #include "flow/Tracing.h"
+#include "flow/IRandom.h"
 #include "flow/UnitTest.h"
 #include "flow/Knobs.h"
 #include "flow/network.h"
@@ -42,28 +43,11 @@ constexpr float kQueueSizeLogInterval = 5.0;
 struct NoopTracer : ITracer {
 	TracerType type() const override { return TracerType::DISABLED; }
 	void trace(Span const& span) override {}
-	void trace(OTELSpan const& span) override {}
 };
 
 struct LogfileTracer : ITracer {
 	TracerType type() const override { return TracerType::LOG_FILE; }
 	void trace(Span const& span) override {
-		TraceEvent te(SevInfo, "TracingSpan", span.context);
-		te.detail("Location", span.location.name)
-		    .detail("Begin", format("%.6f", span.begin))
-		    .detail("End", format("%.6f", span.end));
-		if (span.parents.size() == 1) {
-			te.detail("Parent", *span.parents.begin());
-		} else {
-			for (auto parent : span.parents) {
-				TraceEvent(SevInfo, "TracingSpanAddParent", span.context).detail("AddParent", parent);
-			}
-		}
-		for (const auto& [key, value] : span.tags) {
-			TraceEvent(SevInfo, "TracingSpanTag", span.context).detail("Key", key).detail("Value", value);
-		}
-	}
-	void trace(OTELSpan const& span) override {
 		TraceEvent te(SevInfo, "TracingSpan", span.context.traceID);
 		te.detail("SpanID", span.context.spanID)
 		    .detail("Location", span.location.name)
@@ -183,31 +167,6 @@ struct UDPTracer : public ITracer {
 	// Serializes span fields as an array into the supplied TraceRequest
 	// buffer.
 	void serialize_span(const Span& span, TraceRequest& request) {
-		// If you change the serialization format here, make sure to update the
-		// fluentd filter to be able to correctly parse the updated format! See
-		// the msgpack specification for more info on the bit patterns used
-		// here.
-		uint8_t size = 8;
-		if (span.parents.size() == 0)
-			--size;
-		request.write_byte(size | 0b10010000); // write as array
-
-		serialize_string(g_network->getLocalAddress().toString(), request); // ip:port
-
-		serialize_value(span.context.first(), request, 0xcf); // trace id
-		serialize_value(span.context.second(), request, 0xcf); // token (span id)
-
-		serialize_value(span.begin, request, 0xcb); // start time
-		serialize_value(span.end - span.begin, request, 0xcb); // duration
-
-		serialize_string(span.location.name.toString(), request);
-
-		serialize_map(span.tags, request);
-
-		serialize_vector(span.parents, request);
-	}
-
-	void serialize_span(const OTELSpan& span, TraceRequest& request) {
 		uint16_t size = 14;
 		request.write_byte(size | 0b10010000); // write as array
 		serialize_value(span.context.traceID.first(), request, 0xcf); // trace id
@@ -274,30 +233,6 @@ private:
 		serialize_string(reinterpret_cast<const uint8_t*>(str.data()), str.size(), request);
 	}
 
-	// Writes the given vector of SpanIDs to the request. If the vector is
-	// empty, the request is not modified.
-	inline void serialize_vector(const SmallVectorRef<SpanID>& vec, TraceRequest& request) {
-		int size = vec.size();
-		if (size == 0) {
-			return;
-		}
-		if (size <= 15) {
-			request.write_byte(static_cast<uint8_t>(size) | 0b10010000);
-		} else if (size <= 65535) {
-			request.write_byte(0xdc);
-			request.write_byte(reinterpret_cast<const uint8_t*>(&size)[1]);
-			request.write_byte(reinterpret_cast<const uint8_t*>(&size)[0]);
-		} else {
-			TraceEvent(SevWarn, "TracingSpanSerializeVector")
-			    .detail("Failed to MessagePack encode very large vector", size);
-			ASSERT_WE_THINK(false);
-		}
-
-		for (const auto& parentContext : vec) {
-			serialize_value(parentContext.second(), request, 0xcf);
-		}
-	}
-
 	// Writes the given vector of linked SpanContext's to the request. If the vector is
 	// empty, the request is not modified.
 	inline void serialize_vector(const SmallVectorRef<SpanContext>& vec, TraceRequest& request) {
@@ -322,7 +257,7 @@ private:
 
 	// Writes the given vector of linked SpanContext's to the request. If the vector is
 	// empty, the request is not modified.
-	inline void serialize_vector(const SmallVectorRef<OTELEventRef>& vec, TraceRequest& request) {
+	inline void serialize_vector(const SmallVectorRef<SpanEventRef>& vec, TraceRequest& request) {
 		int size = vec.size();
 		if (size <= 15) {
 			request.write_byte(static_cast<uint8_t>(size) | 0b10010000);
@@ -453,12 +388,6 @@ struct FastUDPTracer : public UDPTracer {
 		request_.reset();
 	}
 
-	void trace(OTELSpan const& span) override {
-		prepare(span.location.name.size());
-		serialize_span(span, request_);
-		write();
-	}
-
 	void trace(Span const& span) override {
 		prepare(span.location.name.size());
 		serialize_span(span, request_);
@@ -513,28 +442,6 @@ void openTracer(TracerType type) {
 ITracer::~ITracer() {}
 
 Span& Span::operator=(Span&& o) {
-	if (begin > 0.0 && context.second() > 0) {
-		end = g_network->now();
-		g_tracer->trace(*this);
-	}
-	arena = std::move(o.arena);
-	context = o.context;
-	begin = o.begin;
-	end = o.end;
-	location = o.location;
-	parents = std::move(o.parents);
-	o.begin = 0;
-	return *this;
-}
-
-Span::~Span() {
-	if (begin > 0.0 && context.second() > 0) {
-		end = g_network->now();
-		g_tracer->trace(*this);
-	}
-}
-
-OTELSpan& OTELSpan::operator=(OTELSpan&& o) {
 	if (begin > 0.0 && o.context.isSampled() > 0) {
 		end = g_network->now();
 		g_tracer->trace(*this);
@@ -558,7 +465,7 @@ OTELSpan& OTELSpan::operator=(OTELSpan&& o) {
 	return *this;
 }
 
-OTELSpan::~OTELSpan() {
+Span::~Span() {
 	if (begin > 0.0 && context.isSampled()) {
 		end = g_network->now();
 		g_tracer->trace(*this);
@@ -567,16 +474,15 @@ OTELSpan::~OTELSpan() {
 
 TEST_CASE("/flow/Tracing/CreateOTELSpan") {
 	// Sampling disabled, no parent.
-	OTELSpan notSampled("foo"_loc);
+	Span notSampled("foo"_loc);
 	ASSERT(!notSampled.context.isSampled());
 
 	// Force Sampling
-	OTELSpan sampled("foo"_loc, []() { return 1.0; });
-	ASSERT(sampled.context.isSampled());
+	// Span sampled("foo"_loc, []() { return 1.0; });
+	// ASSERT(sampled.context.isSampled());
 
 	// Ensure child traceID matches parent, when parent is sampled.
-	OTELSpan childTraceIDMatchesParent(
-	    "foo"_loc, []() { return 1.0; }, SpanContext(UID(100, 101), 200, TraceFlags::sampled));
+	Span childTraceIDMatchesParent("foo"_loc, SpanContext(UID(100, 101), 200, TraceFlags::sampled));
 	ASSERT(childTraceIDMatchesParent.context.traceID.first() ==
 	       childTraceIDMatchesParent.parentContext.traceID.first());
 	ASSERT(childTraceIDMatchesParent.context.traceID.second() ==
@@ -584,22 +490,20 @@ TEST_CASE("/flow/Tracing/CreateOTELSpan") {
 
 	// When the parent isn't sampled AND it has legitimate values we should not sample a child,
 	// even if the child was randomly selected for sampling.
-	OTELSpan parentNotSampled(
-	    "foo"_loc, []() { return 1.0; }, SpanContext(UID(1, 1), 1, TraceFlags::unsampled));
+	Span parentNotSampled("foo"_loc, SpanContext(UID(1, 1), 1, TraceFlags::unsampled));
 	ASSERT(!parentNotSampled.context.isSampled());
 
 	// When the parent isn't sampled AND it has zero values for traceID and spanID this means
 	// we should defer to the child as the new root of the trace as there was no actual parent.
 	// If the child was sampled we should send the child trace with a null parent.
-	OTELSpan noParent(
-	    "foo"_loc, []() { return 1.0; }, SpanContext(UID(0, 0), 0, TraceFlags::unsampled));
-	ASSERT(noParent.context.isSampled());
+	// Span noParent("foo"_loc, SpanContext(UID(0, 0), 0, TraceFlags::unsampled));
+	// ASSERT(noParent.context.isSampled());
 	return Void();
 };
 
 TEST_CASE("/flow/Tracing/AddEvents") {
 	// Use helper method to add an OTELEventRef to an OTELSpan.
-	OTELSpan span1("span_with_event"_loc);
+	Span span1("span_with_event"_loc);
 	auto arena = span1.arena;
 	SmallVectorRef<KeyValueRef> attrs;
 	attrs.push_back(arena, KeyValueRef("foo"_sr, "bar"_sr));
@@ -610,14 +514,14 @@ TEST_CASE("/flow/Tracing/AddEvents") {
 	ASSERT(span1.events[0].attributes.begin()->value.toString() == "bar");
 
 	// Use helper method to add an OTELEventRef with no attributes to an OTELSpan
-	OTELSpan span2("span_with_event"_loc);
+	Span span2("span_with_event"_loc);
 	span2.addEvent(StringRef(span2.arena, LiteralStringRef("commit_succeed")), 1234567.100);
 	ASSERT(span2.events[0].name.toString() == "commit_succeed");
 	ASSERT(span2.events[0].time == 1234567.100);
 	ASSERT(span2.events[0].attributes.size() == 0);
 
 	// Add fully constructed OTELEventRef to OTELSpan passed by value.
-	OTELSpan span3("span_with_event"_loc);
+	Span span3("span_with_event"_loc);
 	auto s3Arena = span3.arena;
 	SmallVectorRef<KeyValueRef> s3Attrs;
 	s3Attrs.push_back(s3Arena, KeyValueRef("xyz"_sr, "123"_sr));
@@ -636,7 +540,10 @@ TEST_CASE("/flow/Tracing/AddEvents") {
 };
 
 TEST_CASE("/flow/Tracing/AddAttributes") {
-	OTELSpan span1("span_with_attrs"_loc);
+	Span span1("span_with_attrs"_loc,
+	           SpanContext(deterministicRandom()->randomUniqueID(),
+	                       deterministicRandom()->randomUInt64(),
+	                       TraceFlags::sampled));
 	auto arena = span1.arena;
 	span1.addAttribute(StringRef(arena, LiteralStringRef("foo")), StringRef(arena, LiteralStringRef("bar")));
 	span1.addAttribute(StringRef(arena, LiteralStringRef("operation")), StringRef(arena, LiteralStringRef("grv")));
@@ -644,25 +551,34 @@ TEST_CASE("/flow/Tracing/AddAttributes") {
 	ASSERT(span1.attributes[1] == KeyValueRef("foo"_sr, "bar"_sr));
 	ASSERT(span1.attributes[2] == KeyValueRef("operation"_sr, "grv"_sr));
 
-	OTELSpan span3("span_with_attrs"_loc);
-	auto s3Arena = span3.arena;
-	span3.addAttribute(StringRef(s3Arena, LiteralStringRef("a")), StringRef(s3Arena, LiteralStringRef("1")))
-	    .addAttribute(StringRef(s3Arena, LiteralStringRef("b")), LiteralStringRef("2"))
-	    .addAttribute(StringRef(s3Arena, LiteralStringRef("c")), LiteralStringRef("3"));
+	Span span2("span_with_attrs"_loc,
+	           SpanContext(deterministicRandom()->randomUniqueID(),
+	                       deterministicRandom()->randomUInt64(),
+	                       TraceFlags::sampled));
+	auto s2Arena = span2.arena;
+	span2.addAttribute(StringRef(s2Arena, LiteralStringRef("a")), StringRef(s2Arena, LiteralStringRef("1")))
+	    .addAttribute(StringRef(s2Arena, LiteralStringRef("b")), LiteralStringRef("2"))
+	    .addAttribute(StringRef(s2Arena, LiteralStringRef("c")), LiteralStringRef("3"));
 
-	ASSERT_EQ(span3.attributes.size(), 4); // Includes default attribute of "address"
-	ASSERT(span3.attributes[1] == KeyValueRef("a"_sr, "1"_sr));
-	ASSERT(span3.attributes[2] == KeyValueRef("b"_sr, "2"_sr));
-	ASSERT(span3.attributes[3] == KeyValueRef("c"_sr, "3"_sr));
+	ASSERT_EQ(span2.attributes.size(), 4); // Includes default attribute of "address"
+	ASSERT(span2.attributes[1] == KeyValueRef("a"_sr, "1"_sr));
+	ASSERT(span2.attributes[2] == KeyValueRef("b"_sr, "2"_sr));
+	ASSERT(span2.attributes[3] == KeyValueRef("c"_sr, "3"_sr));
 	return Void();
 };
 
 TEST_CASE("/flow/Tracing/AddLinks") {
-	OTELSpan span1("span_with_links"_loc);
+	Span span1("span_with_links"_loc);
+	ASSERT(!span1.context.isSampled());
+	ASSERT(!span1.context.isValid());
 	span1.addLink(SpanContext(UID(100, 101), 200, TraceFlags::sampled));
 	span1.addLink(SpanContext(UID(200, 201), 300, TraceFlags::unsampled))
 	    .addLink(SpanContext(UID(300, 301), 400, TraceFlags::sampled));
 
+	// Ensure the root span is now sampled and traceID and spanIDs are set.
+	ASSERT(span1.context.isSampled());
+	ASSERT(span1.context.isValid());
+	// Ensure links are present.
 	ASSERT(span1.links[0].traceID == UID(100, 101));
 	ASSERT(span1.links[0].spanID == 200);
 	ASSERT(span1.links[0].m_Flags == TraceFlags::sampled);
@@ -673,11 +589,16 @@ TEST_CASE("/flow/Tracing/AddLinks") {
 	ASSERT(span1.links[2].spanID == 400);
 	ASSERT(span1.links[2].m_Flags == TraceFlags::sampled);
 
-	OTELSpan span2("span_with_links"_loc);
+	Span span2("span_with_links"_loc);
+	ASSERT(!span2.context.isSampled());
+	ASSERT(!span2.context.isValid());
 	auto link1 = SpanContext(UID(1, 1), 1, TraceFlags::sampled);
 	auto link2 = SpanContext(UID(2, 2), 2, TraceFlags::sampled);
 	auto link3 = SpanContext(UID(3, 3), 3, TraceFlags::sampled);
 	span2.addLinks({ link1, link2 }).addLinks({ link3 });
+	// Ensure the root span is now sampled and traceID and spanIDs are set.
+	ASSERT(span2.context.isSampled());
+	ASSERT(span2.context.isValid());
 	ASSERT(span2.links[0].traceID == UID(1, 1));
 	ASSERT(span2.links[0].spanID == 1);
 	ASSERT(span2.links[0].m_Flags == TraceFlags::sampled);
@@ -741,7 +662,7 @@ std::string readMPString(uint8_t* index) {
 // Windows doesn't like lack of header and declaration of constructor for FastUDPTracer
 #ifndef WIN32
 TEST_CASE("/flow/Tracing/FastUDPMessagePackEncoding") {
-	OTELSpan span1("encoded_span"_loc);
+	Span span1("encoded_span"_loc);
 	auto request = TraceRequest{ .buffer = std::make_unique<uint8_t[]>(kTraceBufferSize),
 		                         .data_size = 0,
 		                         .buffer_size = kTraceBufferSize };
@@ -753,9 +674,9 @@ TEST_CASE("/flow/Tracing/FastUDPMessagePackEncoding") {
 
 	// Test - constructor OTELSpan(const Location& location, const SpanContext parent, const SpanContext& link)
 	// Will delegate to other constructors.
-	OTELSpan span2("encoded_span"_loc,
-	               SpanContext(UID(100, 101), 1, TraceFlags::sampled),
-	               SpanContext(UID(200, 201), 2, TraceFlags::sampled));
+	Span span2("encoded_span"_loc,
+	           SpanContext(UID(100, 101), 1, TraceFlags::sampled),
+	           { SpanContext(UID(200, 201), 2, TraceFlags::sampled) });
 	tracer.serialize_span(span2, request);
 	data = request.buffer.get();
 	ASSERT(data[0] == 0b10011110); // 14 element array.
@@ -801,7 +722,7 @@ TEST_CASE("/flow/Tracing/FastUDPMessagePackEncoding") {
 	request.reset();
 
 	// Exercise all fluent interfaces, include links, events, and attributes.
-	OTELSpan span3("encoded_span_3"_loc);
+	Span span3("encoded_span_3"_loc, SpanContext());
 	auto s3Arena = span3.arena;
 	SmallVectorRef<KeyValueRef> attrs;
 	attrs.push_back(s3Arena, KeyValueRef("foo"_sr, "bar"_sr));
@@ -870,7 +791,7 @@ TEST_CASE("/flow/Tracing/FastUDPMessagePackEncoding") {
 	                         "SGKKUrpIb/7zePhBDi+gzUzyAcbQ2zUbFWI1KNi3zQk58uUG6wWJZkw+GCs7Cc3V"
 	                         "OUxOljwCJkC4QTgdsbbFhxUC+rtoHV5xAqoTQwR0FXnWigUjP7NtdL6huJUr3qRv"
 	                         "40c4yUI1a4+P5vJa";
-	auto span4 = OTELSpan();
+	Span span4;
 	auto location = Location();
 	location.name = StringRef(span4.arena, longString);
 	span4.location = location;

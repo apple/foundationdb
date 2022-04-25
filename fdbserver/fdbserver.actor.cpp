@@ -663,7 +663,7 @@ static void printUsage(const char* name, bool devhelp) {
 	                 "  collector_endpoint -- IP:PORT of the fluentd server\n"
 	                 "  collector_protocol -- UDP or TCP (default is UDP)");
 #ifndef TLS_DISABLED
-	printf(TLS_HELP);
+	printf("%s", TLS_HELP);
 #endif
 	printOptionUsage("-v, --version", "Print version information and exit.");
 	printOptionUsage("-h, -?, --help", "Display this help and exit.");

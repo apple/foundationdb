@@ -284,7 +284,7 @@ std::string epochsToGMTString(double epochs);
 
 void setMemoryQuota(size_t limit);
 
-void* allocate(size_t length, bool allowLargePages);
+void* allocate(size_t length, bool allowLargePages, bool includeGuardPages);
 
 void setAffinity(int proc);
 

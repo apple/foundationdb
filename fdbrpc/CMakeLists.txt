@@ -35,6 +35,8 @@ set(FDBRPC_SRCS
   sim2.actor.cpp
   sim_validation.cpp
   TimedRequest.h
+  TokenSign.h
+  TokenSign.cpp
   TraceFileIO.cpp
   TSSComparison.h)
 
