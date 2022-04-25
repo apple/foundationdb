@@ -1644,13 +1644,10 @@ void TracingOptionsImpl::clear(ReadYourWritesTransaction* ryw, const KeyRef& key
 
 CoordinatorsImpl::CoordinatorsImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
 
-Future<RangeResult> CoordinatorsImpl::getRange(ReadYourWritesTransaction* ryw,
-                                               KeyRangeRef kr,
-                                               GetRangeLimits limitsHint) const {
+ACTOR Future<RangeResult> coordinatorsGetRangeActor(ReadYourWritesTransaction* ryw, KeyRef prefix, KeyRangeRef kr) {
+	state ClusterConnectionString cs = ryw->getDatabase()->getConnectionRecord()->getConnectionString();
+	state std::vector<NetworkAddress> coordinator_processes = wait(cs.tryResolveHostnames());
 	RangeResult result;
-	KeyRef prefix(getKeyRange().begin);
-	auto cs = ryw->getDatabase()->getConnectionRecord()->getConnectionString();
-	auto coordinator_processes = cs.coordinators();
 	Key cluster_decription_key = prefix.withSuffix(LiteralStringRef("cluster_description"));
 	if (kr.contains(cluster_decription_key)) {
 		result.push_back_deep(result.arena(), KeyValueRef(cluster_decription_key, cs.clusterKeyName()));
@@ -1673,10 +1670,16 @@ Future<RangeResult> CoordinatorsImpl::getRange(ReadYourWritesTransaction* ryw,
 	return rywGetRange(ryw, kr, result);
 }
 
+Future<RangeResult> CoordinatorsImpl::getRange(ReadYourWritesTransaction* ryw,
+                                               KeyRangeRef kr,
+                                               GetRangeLimits limitsHint) const {
+	KeyRef prefix(getKeyRange().begin);
+	return coordinatorsGetRangeActor(ryw, prefix, kr);
+}
+
 ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
 	state Reference<IQuorumChange> change;
-	state ClusterConnectionString
-	    conn; // We don't care about the Key here, it will be overrode in changeQuorumChecker().
+	state ClusterConnectionString conn; // We don't care about the Key here.
 	state std::vector<std::string> process_address_or_hostname_strs;
 	state Optional<std::string> msg;
 	state int index;
@@ -1723,8 +1726,9 @@ ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWrite
 		}
 	}
 
-	if (conn.coordinators().size())
-		change = specifiedQuorumChange(conn.coordinators());
+	std::vector<NetworkAddress> addressesVec = wait(conn.tryResolveHostnames());
+	if (addressesVec.size())
+		change = specifiedQuorumChange(addressesVec);
 	else
 		change = noQuorumChange();
 
@@ -1746,11 +1750,10 @@ ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWrite
 	ASSERT(change.isValid());
 
 	TraceEvent(SevDebug, "SKSChangeCoordinatorsStart")
-	    .detail("NewHostnames", conn.hostnames.size() ? describe(conn.hostnames) : "N/A")
-	    .detail("NewAddresses", describe(conn.coordinators()))
+	    .detail("NewAddresses", describe(addressesVec))
 	    .detail("Description", entry.first ? entry.second.get().toString() : "");
 
-	Optional<CoordinatorsResult> r = wait(changeQuorumChecker(&ryw->getTransaction(), change, &conn));
+	Optional<CoordinatorsResult> r = wait(changeQuorumChecker(&ryw->getTransaction(), change, addressesVec));
 
 	TraceEvent(SevDebug, "SKSChangeCoordinatorsFinish")
 	    .detail("Result", r.present() ? static_cast<int>(r.get()) : -1); // -1 means success
@@ -1802,9 +1805,10 @@ ACTOR static Future<RangeResult> CoordinatorsAutoImplActor(ReadYourWritesTransac
 	state ClusterConnectionString old(currentKey.get().toString());
 	state CoordinatorsResult result = CoordinatorsResult::SUCCESS;
 
+	std::vector<NetworkAddress> oldCoordinators = wait(old.tryResolveHostnames());
 	std::vector<NetworkAddress> _desiredCoordinators = wait(autoQuorumChange()->getDesiredCoordinators(
 	    &tr,
-	    old.coordinators(),
+	    oldCoordinators,
 	    Reference<ClusterConnectionMemoryRecord>(new ClusterConnectionMemoryRecord(old)),
 	    result));
 

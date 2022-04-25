@@ -239,12 +239,21 @@ struct OpenDatabaseCoordRequest {
 	Standalone<VectorRef<ClientVersionRef>> supportedVersions;
 	UID knownClientInfoID;
 	Key clusterKey;
+	std::vector<Hostname> hostnames;
 	std::vector<NetworkAddress> coordinators;
 	ReplyPromise<CachedSerialization<struct ClientDBInfo>> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, issues, supportedVersions, traceLogGroup, knownClientInfoID, clusterKey, coordinators, reply);
+		serializer(ar,
+		           issues,
+		           supportedVersions,
+		           traceLogGroup,
+		           knownClientInfoID,
+		           clusterKey,
+		           hostnames,
+		           coordinators,
+		           reply);
 	}
 };
 

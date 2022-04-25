@@ -266,7 +266,6 @@ ACTOR Future<Void> remoteMonitorLeader(int* clientCount,
                                        Reference<AsyncVar<bool>> hasConnectedClients,
                                        Reference<AsyncVar<Optional<LeaderInfo>>> currentElectedLeader,
                                        ElectionResultRequest req) {
-	state bool coordinatorsChangeDetected = false;
 	state Future<Void> currentElectedLeaderOnChange = currentElectedLeader->onChange();
 	++(*clientCount);
 	hasConnectedClients->set(true);
@@ -322,7 +321,7 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 			} else {
 				if (!leaderMon.isValid()) {
 					leaderMon = monitorLeaderAndGetClientInfo(
-					    req.clusterKey, req.coordinators, &clientData, currentElectedLeader);
+					    req.clusterKey, req.hostnames, req.coordinators, &clientData, currentElectedLeader);
 				}
 				actors.add(
 				    openDatabase(&clientData, &clientCount, hasConnectedClients, req, canConnectToLeader.checkStuck()));
@@ -334,8 +333,8 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 				req.reply.send(currentElectedLeader->get());
 			} else {
 				if (!leaderMon.isValid()) {
-					leaderMon =
-					    monitorLeaderAndGetClientInfo(req.key, req.coordinators, &clientData, currentElectedLeader);
+					leaderMon = monitorLeaderAndGetClientInfo(
+					    req.key, req.hostnames, req.coordinators, &clientData, currentElectedLeader);
 				}
 				actors.add(remoteMonitorLeader(&clientCount, hasConnectedClients, currentElectedLeader, req));
 			}

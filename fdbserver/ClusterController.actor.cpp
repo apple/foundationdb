@@ -1110,10 +1110,10 @@ ACTOR Future<Void> registerWorker(RegisterWorkerRequest req,
 	newPriorityInfo.processClassFitness = newProcessClass.machineClassFitness(ProcessClass::ClusterController);
 
 	bool isCoordinator =
-	    (std::find(coordinatorAddresses.begin(), coordinatorAddresses.end(), req.wi.address()) !=
+	    (std::find(coordinatorAddresses.begin(), coordinatorAddresses.end(), w.address()) !=
 	     coordinatorAddresses.end()) ||
-	    (req.wi.secondaryAddress().present() &&
-	     std::find(coordinatorAddresses.begin(), coordinatorAddresses.end(), req.wi.secondaryAddress().get()) !=
+	    (w.secondaryAddress().present() &&
+	     std::find(coordinatorAddresses.begin(), coordinatorAddresses.end(), w.secondaryAddress().get()) !=
 	         coordinatorAddresses.end());
 
 	for (auto it : req.incompatiblePeers) {

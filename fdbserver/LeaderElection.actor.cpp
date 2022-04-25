@@ -34,10 +34,23 @@ ACTOR Future<Void> submitCandidacy(Key key,
                                    AsyncTrigger* nomineeChange,
                                    Optional<LeaderInfo>* nominee) {
 	loop {
-		state Optional<LeaderInfo> li = wait(retryBrokenPromise(
-		    coord.candidacy,
-		    CandidacyRequest(key, myInfo, nominee->present() ? nominee->get().changeID : UID(), prevChangeID),
-		    TaskPriority::CoordinationReply));
+		state Optional<LeaderInfo> li;
+		if (coord.hostname.present()) {
+			wait(store(
+			    li,
+			    retryGetReplyFromHostname(
+			        CandidacyRequest(key, myInfo, nominee->present() ? nominee->get().changeID : UID(), prevChangeID),
+			        coord.hostname.get(),
+			        WLTOKEN_LEADERELECTIONREG_CANDIDACY,
+			        TaskPriority::CoordinationReply)));
+		} else {
+			wait(store(
+			    li,
+			    retryBrokenPromise(
+			        coord.candidacy,
+			        CandidacyRequest(key, myInfo, nominee->present() ? nominee->get().changeID : UID(), prevChangeID),
+			        TaskPriority::CoordinationReply)));
+		}
 
 		wait(Future<Void>(Void())); // Make sure we weren't cancelled
 
@@ -76,9 +89,16 @@ Future<Void> buggifyDelayedAsyncVar(Reference<AsyncVar<T>>& var) {
 ACTOR Future<Void> changeLeaderCoordinators(ServerCoordinators coordinators, Value forwardingInfo) {
 	std::vector<Future<Void>> forwardRequests;
 	forwardRequests.reserve(coordinators.leaderElectionServers.size());
-	for (int i = 0; i < coordinators.leaderElectionServers.size(); i++)
-		forwardRequests.push_back(retryBrokenPromise(coordinators.leaderElectionServers[i].forward,
-		                                             ForwardRequest(coordinators.clusterKey, forwardingInfo)));
+	for (int i = 0; i < coordinators.leaderElectionServers.size(); i++) {
+		if (coordinators.leaderElectionServers[i].hostname.present()) {
+			forwardRequests.push_back(retryGetReplyFromHostname(ForwardRequest(coordinators.clusterKey, forwardingInfo),
+			                                                    coordinators.leaderElectionServers[i].hostname.get(),
+			                                                    WLTOKEN_LEADERELECTIONREG_FORWARD));
+		} else {
+			forwardRequests.push_back(retryBrokenPromise(coordinators.leaderElectionServers[i].forward,
+			                                             ForwardRequest(coordinators.clusterKey, forwardingInfo)));
+		}
+	}
 	int quorum_size = forwardRequests.size() / 2 + 1;
 	wait(quorum(forwardRequests, quorum_size));
 	return Void();
@@ -212,10 +232,17 @@ ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators,
 		state std::vector<Future<Void>> true_heartbeats;
 		state std::vector<Future<Void>> false_heartbeats;
 		for (int i = 0; i < coordinators.leaderElectionServers.size(); i++) {
-			Future<LeaderHeartbeatReply> hb =
-			    retryBrokenPromise(coordinators.leaderElectionServers[i].leaderHeartbeat,
-			                       LeaderHeartbeatRequest(coordinators.clusterKey, myInfo, prevChangeID),
-			                       TaskPriority::CoordinationReply);
+			Future<LeaderHeartbeatReply> hb;
+			if (coordinators.leaderElectionServers[i].hostname.present()) {
+				hb = retryGetReplyFromHostname(LeaderHeartbeatRequest(coordinators.clusterKey, myInfo, prevChangeID),
+				                               coordinators.leaderElectionServers[i].hostname.get(),
+				                               WLTOKEN_LEADERELECTIONREG_LEADERHEARTBEAT,
+				                               TaskPriority::CoordinationReply);
+			} else {
+				hb = retryBrokenPromise(coordinators.leaderElectionServers[i].leaderHeartbeat,
+				                        LeaderHeartbeatRequest(coordinators.clusterKey, myInfo, prevChangeID),
+				                        TaskPriority::CoordinationReply);
+			}
 			true_heartbeats.push_back(onEqual(hb, LeaderHeartbeatReply{ true }));
 			false_heartbeats.push_back(onEqual(hb, LeaderHeartbeatReply{ false }));
 		}

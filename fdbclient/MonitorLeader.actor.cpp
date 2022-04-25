@@ -284,6 +284,7 @@ ACTOR Future<std::vector<NetworkAddress>> tryResolveHostnamesImpl(ClusterConnect
 		allCoordinatorsSet.insert(coord);
 	}
 	std::vector<NetworkAddress> allCoordinators(allCoordinatorsSet.begin(), allCoordinatorsSet.end());
+	std::sort(allCoordinators.begin(), allCoordinators.end());
 	return allCoordinators;
 }
 
@@ -491,16 +492,27 @@ ACTOR Future<Void> monitorNominee(Key key,
                                   AsyncTrigger* nomineeChange,
                                   Optional<LeaderInfo>* info) {
 	loop {
-		state Optional<LeaderInfo> li =
-		    wait(retryBrokenPromise(coord.getLeader,
-		                            GetLeaderRequest(key, info->present() ? info->get().changeID : UID()),
-		                            TaskPriority::CoordinationReply));
+		state Optional<LeaderInfo> li;
+		if (coord.hostname.present()) {
+			wait(store(li,
+			           retryGetReplyFromHostname(GetLeaderRequest(key, info->present() ? info->get().changeID : UID()),
+			                                     coord.hostname.get(),
+			                                     WLTOKEN_CLIENTLEADERREG_GETLEADER,
+			                                     TaskPriority::CoordinationReply)));
+		} else {
+			wait(store(li,
+			           retryBrokenPromise(coord.getLeader,
+			                              GetLeaderRequest(key, info->present() ? info->get().changeID : UID()),
+			                              TaskPriority::CoordinationReply)));
+		}
 
 		wait(Future<Void>(Void())); // Make sure we weren't cancelled
 
 		TraceEvent("GetLeaderReply")
 		    .suppressFor(1.0)
-		    .detail("Coordinator", coord.getLeader.getEndpoint().getPrimaryAddress())
+		    .detail("Coordinator",
+		            coord.hostname.present() ? coord.hostname.get().toString()
+		                                     : coord.getLeader.getEndpoint().getPrimaryAddress().toString())
 		    .detail("Nominee", li.present() ? li.get().changeID : UID())
 		    .detail("ClusterKey", key.printable());
 
@@ -747,6 +759,7 @@ ACTOR Future<Void> getClientInfoFromLeader(Reference<AsyncVar<Optional<ClusterCo
 }
 
 ACTOR Future<Void> monitorLeaderAndGetClientInfo(Key clusterKey,
+                                                 std::vector<Hostname> hostnames,
                                                  std::vector<NetworkAddress> coordinators,
                                                  ClientData* clientData,
                                                  Reference<AsyncVar<Optional<LeaderInfo>>> leaderInfo) {
@@ -757,8 +770,12 @@ ACTOR Future<Void> monitorLeaderAndGetClientInfo(Key clusterKey,
 	state Reference<AsyncVar<Optional<ClusterControllerClientInterface>>> knownLeader(
 	    new AsyncVar<Optional<ClusterControllerClientInterface>>{});
 
-	for (auto s = coordinators.begin(); s != coordinators.end(); ++s) {
-		clientLeaderServers.push_back(ClientLeaderRegInterface(*s));
+	clientLeaderServers.reserve(hostnames.size() + coordinators.size());
+	for (auto h : hostnames) {
+		clientLeaderServers.push_back(ClientLeaderRegInterface(h));
+	}
+	for (auto s : coordinators) {
+		clientLeaderServers.push_back(ClientLeaderRegInterface(s));
 	}
 
 	nominees.resize(clientLeaderServers.size());
@@ -849,7 +866,8 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
     Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> supportedVersions,
     Key traceLogGroup) {
 	state ClusterConnectionString cs = info.intermediateConnRecord->getConnectionString();
-	state std::vector<NetworkAddress> addrs = cs.coordinators();
+	state std::vector<Hostname> hostnames = cs.hostnames;
+	state int coordinatorsSize = hostnames.size() + cs.coordinators().size();
 	state int index = 0;
 	state int successIndex = 0;
 	state Optional<double> incorrectTime;
@@ -857,15 +875,26 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 	state std::vector<CommitProxyInterface> lastCommitProxies;
 	state std::vector<UID> lastGrvProxyUIDs;
 	state std::vector<GrvProxyInterface> lastGrvProxies;
+	state std::vector<ClientLeaderRegInterface> clientLeaderServers;
 
-	deterministicRandom()->randomShuffle(addrs);
+	clientLeaderServers.reserve(coordinatorsSize);
+	for (const auto& h : hostnames) {
+		clientLeaderServers.push_back(ClientLeaderRegInterface(h));
+	}
+	for (const auto& c : cs.coordinators()) {
+		clientLeaderServers.push_back(ClientLeaderRegInterface(c));
+	}
+
+	deterministicRandom()->randomShuffle(clientLeaderServers);
+
 	loop {
-		state ClientLeaderRegInterface clientLeaderServer(addrs[index]);
+		state ClientLeaderRegInterface clientLeaderServer = clientLeaderServers[index];
 		state OpenDatabaseCoordRequest req;
 
 		coordinator->set(clientLeaderServer);
 
 		req.clusterKey = cs.clusterKey();
+		req.hostnames = hostnames;
 		req.coordinators = cs.coordinators();
 		req.knownClientInfoID = clientInfo->get().id;
 		req.supportedVersions = supportedVersions->get();
@@ -894,8 +923,16 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 			incorrectTime = Optional<double>();
 		}
 
-		state ErrorOr<CachedSerialization<ClientDBInfo>> rep =
-		    wait(clientLeaderServer.openDatabase.tryGetReply(req, TaskPriority::CoordinationReply));
+		state ErrorOr<CachedSerialization<ClientDBInfo>> rep;
+		if (clientLeaderServer.hostname.present()) {
+			wait(store(rep,
+			           tryGetReplyFromHostname(req,
+			                                   clientLeaderServer.hostname.get(),
+			                                   WLTOKEN_CLIENTLEADERREG_OPENDATABASE,
+			                                   TaskPriority::CoordinationReply)));
+		} else {
+			wait(store(rep, clientLeaderServer.openDatabase.tryGetReply(req, TaskPriority::CoordinationReply)));
+		}
 		if (rep.present()) {
 			if (rep.get().read().forward.present()) {
 				TraceEvent("MonitorProxiesForwarding")
@@ -926,7 +963,8 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 			successIndex = index;
 		} else {
 			TEST(rep.getError().code() == error_code_failed_to_progress); // Coordinator cant talk to cluster controller
-			index = (index + 1) % addrs.size();
+			TEST(rep.getError().code() == error_code_lookup_failed); // Coordinator hostname resolving failure
+			index = (index + 1) % coordinatorsSize;
 			if (index == successIndex) {
 				wait(delay(CLIENT_KNOBS->COORDINATOR_RECONNECTION_DELAY));
 			}

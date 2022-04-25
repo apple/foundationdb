@@ -312,17 +312,31 @@ ACTOR Future<Optional<StatusObject>> clientCoordinatorsStatusFetcher(Reference<I
 
 		state std::vector<Future<Optional<LeaderInfo>>> leaderServers;
 		leaderServers.reserve(coord.clientLeaderServers.size());
-		for (int i = 0; i < coord.clientLeaderServers.size(); i++)
-			leaderServers.push_back(retryBrokenPromise(coord.clientLeaderServers[i].getLeader,
-			                                           GetLeaderRequest(coord.clusterKey, UID()),
-			                                           TaskPriority::CoordinationReply));
+		for (int i = 0; i < coord.clientLeaderServers.size(); i++) {
+			if (coord.clientLeaderServers[i].hostname.present()) {
+				leaderServers.push_back(retryGetReplyFromHostname(GetLeaderRequest(coord.clusterKey, UID()),
+				                                                  coord.clientLeaderServers[i].hostname.get(),
+				                                                  WLTOKEN_CLIENTLEADERREG_GETLEADER,
+				                                                  TaskPriority::CoordinationReply));
+			} else {
+				leaderServers.push_back(retryBrokenPromise(coord.clientLeaderServers[i].getLeader,
+				                                           GetLeaderRequest(coord.clusterKey, UID()),
+				                                           TaskPriority::CoordinationReply));
+			}
+		}
 
 		state std::vector<Future<ProtocolInfoReply>> coordProtocols;
 		coordProtocols.reserve(coord.clientLeaderServers.size());
 		for (int i = 0; i < coord.clientLeaderServers.size(); i++) {
-			RequestStream<ProtocolInfoRequest> requestStream{ Endpoint::wellKnown(
-				{ coord.clientLeaderServers[i].getLeader.getEndpoint().addresses }, WLTOKEN_PROTOCOL_INFO) };
-			coordProtocols.push_back(retryBrokenPromise(requestStream, ProtocolInfoRequest{}));
+			RequestStream<ProtocolInfoRequest> requestStream;
+			if (coord.clientLeaderServers[i].hostname.present()) {
+				coordProtocols.push_back(retryGetReplyFromHostname(
+				    ProtocolInfoRequest{}, coord.clientLeaderServers[i].hostname.get(), WLTOKEN_PROTOCOL_INFO));
+			} else {
+				requestStream = RequestStream<ProtocolInfoRequest>(Endpoint::wellKnown(
+				    { coord.clientLeaderServers[i].getLeader.getEndpoint().addresses }, WLTOKEN_PROTOCOL_INFO));
+				coordProtocols.push_back(retryBrokenPromise(requestStream, ProtocolInfoRequest{}));
+			}
 		}
 
 		wait(smartQuorum(leaderServers, leaderServers.size() / 2 + 1, 1.5) &&
@@ -336,8 +350,12 @@ ACTOR Future<Optional<StatusObject>> clientCoordinatorsStatusFetcher(Reference<I
 		int coordinatorsUnavailable = 0;
 		for (int i = 0; i < leaderServers.size(); i++) {
 			StatusObject coordStatus;
-			coordStatus["address"] =
-			    coord.clientLeaderServers[i].getLeader.getEndpoint().getPrimaryAddress().toString();
+			if (coord.clientLeaderServers[i].hostname.present()) {
+				coordStatus["address"] = coord.clientLeaderServers[i].hostname.get().toString();
+			} else {
+				coordStatus["address"] =
+				    coord.clientLeaderServers[i].getLeader.getEndpoint().getPrimaryAddress().toString();
+			}
 
 			if (leaderServers[i].isReady()) {
 				coordStatus["reachable"] = true;

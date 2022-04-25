@@ -75,6 +75,7 @@ Future<Void> monitorLeader(Reference<IClusterConnectionRecord> const& connFile,
 // nominees, the nominee with the most nomination is the leader, and collects client data from the leader. This function
 // also monitors the change of the leader.
 Future<Void> monitorLeaderAndGetClientInfo(Key const& clusterKey,
+                                           std::vector<Hostname> const& hostnames,
                                            std::vector<NetworkAddress> const& coordinators,
                                            ClientData* const& clientData,
                                            Reference<AsyncVar<Optional<LeaderInfo>>> const& leaderInfo);
