@@ -591,7 +591,7 @@ template class FastAllocator<8192>;
 template class FastAllocator<16384>;
 
 #ifdef USE_JEMALLOC
-#include <jemalloc/include/jemalloc/jemalloc.h>
+#include <jemalloc/jemalloc.h>
 TEST_CASE("/jemalloc/4k_aligned_usable_size") {
 	void* ptr;
 	try {
