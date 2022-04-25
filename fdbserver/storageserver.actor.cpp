@@ -2405,6 +2405,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		}
 	}
 
+	// FIXME: clean all of this up, and just rely on client-side check
 	// This check is done just before returning, after all waits in this function
 	// Check if pop happened concurently
 	if (!req.canReadPopped && req.begin <= feedInfo->emptyVersion) {
@@ -2426,7 +2427,8 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 			    .detail("EmptyVersion", feedInfo->emptyVersion)
 			    .detail("AtLatest", atLatest)
 			    .detail("MinVersionSent", minVersion);
-			throw change_feed_popped();
+			// Disabling this check because it returns false positives when forcing a delta file flush at an empty
+			// version that was not a mutation version throw change_feed_popped();
 		}
 	}
 
@@ -5044,9 +5046,6 @@ ACTOR Future<Void> tryGetRange(PromiseStream<RangeResult> results, Transaction* 
 	}
 }
 
-// global validation that missing refreshed feeds were previously destroyed
-static std::unordered_set<Key> allDestroyedChangeFeeds;
-
 // We have to store the version the change feed was stopped at in the SS instead of just the stopped status
 // In addition to simplifying stopping logic, it enables communicating stopped status when fetching change feeds
 // from other SS correctly
@@ -5433,8 +5432,9 @@ ACTOR Future<Version> fetchChangeFeed(StorageServer* data,
 			    .detail("Range", changeFeedInfo->range.toString())
 			    .detail("Version", cleanupVersion);
 
-			// FIXME: do simulated validation that feed was destroyed, but needs to be added when client starts
-			// destroying a change feed instead of when server recieves private mutation for it
+			if (g_network->isSimulated()) {
+				ASSERT(g_simulator.validationData.allDestroyedChangeFeedIDs.count(changeFeedInfo->id.toString()));
+			}
 
 			Key beginClearKey = changeFeedInfo->id.withPrefix(persistChangeFeedKeys.begin);
 
@@ -5667,7 +5667,7 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 		    .detail("FKID", fetchKeysID);
 
 		if (g_network->isSimulated()) {
-			ASSERT(allDestroyedChangeFeeds.count(feedId));
+			ASSERT(g_simulator.validationData.allDestroyedChangeFeedIDs.count(feedId.toString()));
 		}
 
 		Key beginClearKey = feedId.withPrefix(persistChangeFeedKeys.begin);
@@ -6809,10 +6809,6 @@ private:
 
 				feed->second->destroy(currentVersion);
 				data->changeFeedCleanupDurable[feed->first] = cleanupVersion;
-
-				if (g_network->isSimulated()) {
-					allDestroyedChangeFeeds.insert(changeFeedId);
-				}
 			}
 
 			if (status == ChangeFeedStatus::CHANGE_FEED_DESTROY) {

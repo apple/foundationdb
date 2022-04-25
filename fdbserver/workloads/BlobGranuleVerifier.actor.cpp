@@ -291,6 +291,10 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 						if (e.code() == error_code_blob_granule_transaction_too_old) {
 							self->timeTravelTooOld++;
 							// TODO: add debugging info for when this is a failure
+							fmt::print("BGV ERROR: TTO [{0} - {1}) @ {2}\n",
+							           oldRead.range.begin.printable(),
+							           oldRead.range.end.printable(),
+							           oldRead.v);
 						}
 					}
 				}

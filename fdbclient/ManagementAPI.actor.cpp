@@ -2128,13 +2128,14 @@ ACTOR Future<Void> updateChangeFeed(Transaction* tr, Key rangeID, ChangeFeedStat
 		}
 	} else if (status == ChangeFeedStatus::CHANGE_FEED_DESTROY) {
 		if (val.present()) {
+			if (g_network->isSimulated()) {
+				g_simulator.validationData.allDestroyedChangeFeedIDs.insert(rangeID.toString());
+			}
 			tr->set(rangeIDKey,
 			        changeFeedValue(std::get<0>(decodeChangeFeedValue(val.get())),
 			                        std::get<1>(decodeChangeFeedValue(val.get())),
 			                        status));
 			tr->clear(rangeIDKey);
-		} else {
-			throw unsupported_operation();
 		}
 	}
 	return Void();
@@ -2165,13 +2166,14 @@ ACTOR Future<Void> updateChangeFeed(Reference<ReadYourWritesTransaction> tr,
 		}
 	} else if (status == ChangeFeedStatus::CHANGE_FEED_DESTROY) {
 		if (val.present()) {
+			if (g_network->isSimulated()) {
+				g_simulator.validationData.allDestroyedChangeFeedIDs.insert(rangeID.toString());
+			}
 			tr->set(rangeIDKey,
 			        changeFeedValue(std::get<0>(decodeChangeFeedValue(val.get())),
 			                        std::get<1>(decodeChangeFeedValue(val.get())),
 			                        status));
 			tr->clear(rangeIDKey);
-		} else {
-			throw unsupported_operation();
 		}
 	}
 	return Void();

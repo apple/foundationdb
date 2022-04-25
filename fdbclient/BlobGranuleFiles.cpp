@@ -135,12 +135,16 @@ static void applyDeltas(const GranuleDeltas& deltas,
 	const MutationsAndVersionRef* mutationIt = deltas.begin();
 	// prune beginVersion if necessary
 	if (beginVersion > deltas.front().version) {
-		ASSERT(beginVersion <= deltas.back().version);
-		// binary search for beginVersion
-		mutationIt = std::lower_bound(deltas.begin(),
-		                              deltas.end(),
-		                              MutationsAndVersionRef(beginVersion, 0),
-		                              MutationsAndVersionRef::OrderByVersion());
+		if (beginVersion > deltas.back().version) {
+			// can happen with force flush
+			mutationIt = deltas.end();
+		} else {
+			// binary search for beginVersion
+			mutationIt = std::lower_bound(deltas.begin(),
+			                              deltas.end(),
+			                              MutationsAndVersionRef(beginVersion, 0),
+			                              MutationsAndVersionRef::OrderByVersion());
+		}
 	}
 
 	while (mutationIt != deltas.end()) {
