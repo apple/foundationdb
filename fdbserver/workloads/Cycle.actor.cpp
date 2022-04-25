@@ -76,7 +76,13 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 		}
 	}
 
-	std::string description() const override { return "CycleWorkload"; }
+	std::string description() const override {
+		if constexpr (MultiTenancy) {
+			return "TenantCycleWorkload";
+		} else {
+			return "CycleWorkload";
+		}
+	}
 	Future<Void> setup(Database const& cx) override {
 		if constexpr (MultiTenancy) {
 			cx->defaultTenant = this->tenant;

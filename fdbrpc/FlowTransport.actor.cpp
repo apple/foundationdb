@@ -338,7 +338,7 @@ struct SignedAuthTokenTTLCmp {
 	}
 };
 struct SignedAuthTokenCmp {
-	constexpr bool operator()(const SignedAuthTokenTTL& lhs, const SignedAuthTokenTTL& rhs) const {
+	bool operator()(const SignedAuthTokenTTL& lhs, const SignedAuthTokenTTL& rhs) const {
 		return lhs.second.signature == rhs.second.signature;
 	}
 };
