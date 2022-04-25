@@ -149,7 +149,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                      "memory",
                      "memory-1",
                      "memory-2",
-                     "memory-radixtree-beta"
+                     "memory-radixtree-beta",
+                     "unknown"
                      ]}
                   },
                   "data_version":12341234,
