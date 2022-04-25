@@ -29,29 +29,9 @@
 #include <unordered_set>
 #include <boost/functional/hash.hpp>
 
-#include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/flow.h"
-
-enum class TraceFlags : uint8_t { unsampled = 0b00000000, sampled = 0b00000001 };
-
-inline TraceFlags operator&(TraceFlags lhs, TraceFlags rhs) {
-	return static_cast<TraceFlags>(static_cast<std::underlying_type_t<TraceFlags>>(lhs) &
-	                               static_cast<std::underlying_type_t<TraceFlags>>(rhs));
-}
-
-struct SpanContext {
-	UID traceID;
-	uint64_t spanID;
-	TraceFlags m_Flags;
-	SpanContext() : traceID(UID()), spanID(0), m_Flags(TraceFlags::unsampled) {}
-	SpanContext(UID traceID, uint64_t spanID, TraceFlags flags) : traceID(traceID), spanID(spanID), m_Flags(flags) {}
-	SpanContext(UID traceID, uint64_t spanID) : traceID(traceID), spanID(spanID), m_Flags(TraceFlags::unsampled) {}
-	SpanContext(Arena arena, const SpanContext& span)
-	  : traceID(span.traceID), spanID(span.spanID), m_Flags(span.m_Flags) {}
-	bool isSampled() const { return (m_Flags & TraceFlags::sampled) == TraceFlags::sampled; }
-};
 
 typedef int64_t Version;
 typedef uint64_t LogEpoch;
@@ -845,7 +825,16 @@ struct KeyValueStoreType {
 	// These enumerated values are stored in the database configuration, so should NEVER be changed.
 	// Only add new ones just before END.
 	// SS storeType is END before the storageServerInterface is initialized.
-	enum StoreType { SSD_BTREE_V1, MEMORY, SSD_BTREE_V2, SSD_REDWOOD_V1, MEMORY_RADIXTREE, SSD_ROCKSDB_V1, END };
+	enum StoreType {
+		SSD_BTREE_V1,
+		MEMORY,
+		SSD_BTREE_V2,
+		SSD_REDWOOD_V1,
+		MEMORY_RADIXTREE,
+		SSD_ROCKSDB_V1,
+		SSD_SHARDED_ROCKSDB,
+		END
+	};
 
 	KeyValueStoreType() : type(END) {}
 	KeyValueStoreType(StoreType type) : type(type) {
@@ -870,6 +859,8 @@ struct KeyValueStoreType {
 			return "ssd-redwood-1-experimental";
 		case SSD_ROCKSDB_V1:
 			return "ssd-rocksdb-v1";
+		case SSD_SHARDED_ROCKSDB:
+			return "ssd-sharded-rocksdb";
 		case MEMORY:
 			return "memory";
 		case MEMORY_RADIXTREE:

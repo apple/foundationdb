@@ -120,7 +120,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 };
 
 ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionRequest req) {
-	state Span span("M:getVersion"_loc, { req.spanContext });
+	state Span span("M:getVersion"_loc, req.spanContext);
 	state std::map<UID, CommitProxyVersionReplies>::iterator proxyItr =
 	    self->lastCommitProxyVersionReplies.find(req.requestingProxy); // lastCommitProxyVersionReplies never changes
 
@@ -275,8 +275,10 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 				reply.locked = self->databaseLocked;
 				reply.metadataVersion = self->proxyMetadataVersion;
 				reply.minKnownCommittedVersion = self->minKnownCommittedVersion;
-				self->ssVersionVector.getDelta(req.maxVersion, reply.ssVersionVectorDelta);
-				self->versionVectorSizeOnCVReply.addMeasurement(reply.ssVersionVectorDelta.size());
+				if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
+					self->ssVersionVector.getDelta(req.maxVersion, reply.ssVersionVectorDelta);
+					self->versionVectorSizeOnCVReply.addMeasurement(reply.ssVersionVectorDelta.size());
+				}
 				req.reply.send(reply);
 			}
 			when(ReportRawCommittedVersionRequest req =

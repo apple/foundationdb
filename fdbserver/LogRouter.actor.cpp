@@ -18,21 +18,24 @@
  * limitations under the License.
  */
 
-#include "flow/ActorCollection.h"
-#include "fdbclient/NativeAPI.actor.h"
-#include "fdbrpc/Stats.h"
-#include "fdbserver/WorkerInterface.actor.h"
-#include "fdbserver/WaitFailure.h"
-#include "fdbserver/Knobs.h"
-#include "fdbserver/ServerDBInfo.h"
-#include "fdbserver/LogSystem.h"
-#include "fdbclient/SystemData.h"
-#include "fdbserver/ApplyMetadataMutation.h"
-#include "fdbserver/RecoveryState.h"
 #include "fdbclient/Atomic.h"
+#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/SystemData.h"
+#include "fdbrpc/Stats.h"
+#include "fdbserver/ApplyMetadataMutation.h"
+#include "fdbserver/Knobs.h"
+#include "fdbserver/LogSystem.h"
+#include "fdbserver/WaitFailure.h"
+#include "fdbserver/WorkerInterface.actor.h"
+#include "fdbserver/RecoveryState.h"
+#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/TLogInterface.h"
+#include "flow/ActorCollection.h"
 #include "flow/Arena.h"
 #include "flow/Histogram.h"
 #include "flow/TDMetric.actor.h"
+#include "flow/network.h"
+
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct LogRouterData {
@@ -526,6 +529,10 @@ Future<Void> logRouterPeekMessages(PromiseType replyPromise,
 		    .detail("Begin", reqBegin)
 		    .detail("Popped", poppedVer)
 		    .detail("Start", self->startVersion);
+		if (std::is_same<PromiseType, Promise<TLogPeekReply>>::value) {
+			// kills logRouterPeekStream actor, otherwise that actor becomes stuck
+			throw operation_obsolete();
+		}
 		replyPromise.send(Never());
 		if (reqSequence.present()) {
 			auto& trackerData = self->peekTracker[peekId];
