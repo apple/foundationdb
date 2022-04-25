@@ -22,12 +22,18 @@
 #include <tuple>
 #include <boost/lexical_cast.hpp>
 
+#include "fdbclient/FDBTypes.h"
+#include "fdbrpc/IAsyncFile.h"
 #include "fdbrpc/Locality.h"
 #include "fdbclient/GlobalConfig.actor.h"
 #include "fdbclient/ProcessInterface.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbserver/Knobs.h"
 #include "flow/ActorCollection.h"
+#include "flow/Error.h"
+#include "flow/FileIdentifier.h"
+#include "flow/ObjectSerializer.h"
+#include "flow/Platform.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/SystemMonitor.h"
 #include "flow/TDMetric.actor.h"
@@ -57,7 +63,9 @@
 #include "flow/ThreadHelper.actor.h"
 #include "flow/Trace.h"
 #include "flow/flow.h"
+#include "flow/genericactors.actor.h"
 #include "flow/network.h"
+#include "flow/serialize.h"
 
 #ifdef __linux__
 #include <fcntl.h>
@@ -2624,6 +2632,291 @@ ACTOR Future<Void> monitorAndWriteCCPriorityInfo(std::string filePath,
 	}
 }
 
+static const std::string versionFileName = "sw-version";
+
+ACTOR Future<SWVersion> testSoftwareVersionCompatibility(std::string folder, ProtocolVersion currentVersion) {
+	try {
+		state std::string versionFilePath = joinPath(folder, versionFileName);
+		state ErrorOr<Reference<IAsyncFile>> versionFile = wait(
+		    errorOr(IAsyncFileSystem::filesystem(g_network)->open(versionFilePath, IAsyncFile::OPEN_READONLY, 0600)));
+
+		if (versionFile.isError()) {
+			if (versionFile.getError().code() == error_code_file_not_found && !fileExists(versionFilePath)) {
+				// If a version file does not exist, we assume this is either a fresh
+				// installation or an upgrade from a version that does not support version files.
+				// Either way, we can safely continue running this version of software.
+				TraceEvent(SevInfo, "NoPreviousSWVersion").log();
+				return SWVersion();
+			} else {
+				// Dangerous to continue if we cannot do a software compatibility test
+				throw versionFile.getError();
+			}
+		} else {
+			// Test whether the most newest software version that has been run on this cluster is
+			// compatible with the current software version
+			state int64_t filesize = wait(versionFile.get()->size());
+			state Standalone<StringRef> buf = makeString(filesize);
+			int readLen = wait(versionFile.get()->read(mutateString(buf), filesize, 0));
+			if (filesize == 0 || readLen != filesize) {
+				throw file_corrupt();
+			}
+
+			try {
+				SWVersion swversion = ObjectReader::fromStringRef<SWVersion>(buf, IncludeVersion());
+				ProtocolVersion lowestCompatibleVersion(swversion.lowestCompatibleProtocolVersion());
+				if (currentVersion >= lowestCompatibleVersion) {
+					return swversion;
+				} else {
+					throw incompatible_software_version();
+				}
+			} catch (Error& e) {
+				throw e;
+			}
+		}
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
+		// TODO(bvr): Inject faults
+		TraceEvent(SevWarnAlways, "OpenReadSWVersionFileError").error(e);
+		throw;
+	}
+}
+
+ACTOR Future<Void> updateNewestSoftwareVersion(std::string folder,
+                                               ProtocolVersion currentVersion,
+                                               ProtocolVersion latestVersion,
+                                               ProtocolVersion minCompatibleVersion) {
+
+	ASSERT(currentVersion >= minCompatibleVersion);
+
+	try {
+		state std::string versionFilePath = joinPath(folder, versionFileName);
+		ErrorOr<Reference<IAsyncFile>> versionFile = wait(
+		    errorOr(IAsyncFileSystem::filesystem(g_network)->open(versionFilePath, IAsyncFile::OPEN_READONLY, 0600)));
+
+		if (versionFile.isError() &&
+		    (versionFile.getError().code() != error_code_file_not_found || fileExists(versionFilePath))) {
+			throw versionFile.getError();
+		}
+
+		state Reference<IAsyncFile> newVersionFile = wait(IAsyncFileSystem::filesystem()->open(
+		    versionFilePath,
+		    IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE,
+		    0600));
+
+		SWVersion swVersion(latestVersion, currentVersion, minCompatibleVersion);
+		auto s = swVersionValue(swVersion);
+		ErrorOr<Void> e = wait(errorOr(newVersionFile->write(s.toString().c_str(), s.size(), 0)));
+		if (e.isError()) {
+			throw e.getError();
+		}
+		wait(newVersionFile->sync());
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
+		TraceEvent(SevWarnAlways, "OpenWriteSWVersionFileError").error(e);
+		throw;
+	}
+
+	return Void();
+}
+
+ACTOR Future<Void> testAndUpdateSoftwareVersionCompatibility(std::string dataFolder, UID processIDUid) {
+	ErrorOr<SWVersion> swVersion = wait(errorOr(testSoftwareVersionCompatibility(dataFolder, currentProtocolVersion)));
+	if (swVersion.isError()) {
+		TraceEvent(SevWarnAlways, "SWVersionCompatibilityCheckError", processIDUid).error(swVersion.getError());
+		throw swVersion.getError();
+	}
+
+	TraceEvent(SevInfo, "SWVersionCompatible", processIDUid).detail("SWVersion", swVersion.get());
+
+	if (!swVersion.get().isValid() ||
+	    currentProtocolVersion > ProtocolVersion(swVersion.get().newestProtocolVersion())) {
+		ErrorOr<Void> updatedSWVersion = wait(errorOr(updateNewestSoftwareVersion(
+		    dataFolder, currentProtocolVersion, currentProtocolVersion, minCompatibleProtocolVersion)));
+		if (updatedSWVersion.isError()) {
+			throw updatedSWVersion.getError();
+		}
+	} else if (currentProtocolVersion < ProtocolVersion(swVersion.get().newestProtocolVersion())) {
+		ErrorOr<Void> updatedSWVersion = wait(
+		    errorOr(updateNewestSoftwareVersion(dataFolder,
+		                                        currentProtocolVersion,
+		                                        ProtocolVersion(swVersion.get().newestProtocolVersion()),
+		                                        ProtocolVersion(swVersion.get().lowestCompatibleProtocolVersion()))));
+		if (updatedSWVersion.isError()) {
+			throw updatedSWVersion.getError();
+		}
+	}
+
+	ErrorOr<SWVersion> newSWVersion =
+	    wait(errorOr(testSoftwareVersionCompatibility(dataFolder, currentProtocolVersion)));
+	if (newSWVersion.isError()) {
+		TraceEvent(SevWarnAlways, "SWVersionCompatibilityCheckError", processIDUid).error(newSWVersion.getError());
+		throw newSWVersion.getError();
+	}
+
+	TraceEvent(SevInfo, "VerifiedNewSoftwareVersion", processIDUid).detail("SWVersion", newSWVersion.get());
+
+	return Void();
+}
+
+static const std::string swversionTestDirName = "sw-version-test";
+
+TEST_CASE("/fdbserver/worker/swversion/noversionhistory") {
+	if (!platform::createDirectory("sw-version-test")) {
+		TraceEvent(SevWarnAlways, "FailedToCreateDirectory").detail("Directory", "sw-version-test");
+		return Void();
+	}
+
+	ErrorOr<SWVersion> swversion = wait(errorOr(
+	    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
+
+	if (!swversion.isError()) {
+		ASSERT(!swversion.get().isValid());
+	}
+
+	wait(IAsyncFileSystem::filesystem()->deleteFile(joinPath(swversionTestDirName, versionFileName), true));
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/worker/swversion/writeVerifyVersion") {
+	if (!platform::createDirectory("sw-version-test")) {
+		TraceEvent(SevWarnAlways, "FailedToCreateDirectory").detail("Directory", "sw-version-test");
+		return Void();
+	}
+
+	ErrorOr<Void> f = wait(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
+	                                                           ProtocolVersion::withStorageInterfaceReadiness(),
+	                                                           ProtocolVersion::withStorageInterfaceReadiness(),
+	                                                           ProtocolVersion::withTSS())));
+
+	ErrorOr<SWVersion> swversion = wait(errorOr(
+	    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
+
+	if (!swversion.isError()) {
+		ASSERT(swversion.get().newestProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
+		ASSERT(swversion.get().lastRunProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
+		ASSERT(swversion.get().lowestCompatibleProtocolVersion() == ProtocolVersion::withTSS().version());
+	}
+
+	wait(IAsyncFileSystem::filesystem()->deleteFile(joinPath(swversionTestDirName, versionFileName), true));
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/worker/swversion/runCompatibleOlder") {
+	if (!platform::createDirectory("sw-version-test")) {
+		TraceEvent(SevWarnAlways, "FailedToCreateDirectory").detail("Directory", "sw-version-test");
+		return Void();
+	}
+
+	ErrorOr<Void> f = wait(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
+	                                                           ProtocolVersion::withStorageInterfaceReadiness(),
+	                                                           ProtocolVersion::withStorageInterfaceReadiness(),
+	                                                           ProtocolVersion::withTSS())));
+
+	ErrorOr<SWVersion> swversion = wait(errorOr(
+	    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
+
+	if (!swversion.isError()) {
+		ASSERT(swversion.get().newestProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
+		ASSERT(swversion.get().lastRunProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
+		ASSERT(swversion.get().lowestCompatibleProtocolVersion() == ProtocolVersion::withTSS().version());
+
+		TraceEvent(SevInfo, "UT/swversion/runCompatibleOlder").detail("SWVersion", swversion.get());
+	}
+
+	ErrorOr<Void> f = wait(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
+	                                                           ProtocolVersion::withTSS(),
+	                                                           ProtocolVersion::withStorageInterfaceReadiness(),
+	                                                           ProtocolVersion::withTSS())));
+
+	ErrorOr<SWVersion> swversion = wait(errorOr(
+	    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
+
+	if (!swversion.isError()) {
+		ASSERT(swversion.get().newestProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
+		ASSERT(swversion.get().lastRunProtocolVersion() == ProtocolVersion::withTSS().version());
+		ASSERT(swversion.get().lowestCompatibleProtocolVersion() == ProtocolVersion::withTSS().version());
+	}
+
+	wait(IAsyncFileSystem::filesystem()->deleteFile(joinPath(swversionTestDirName, versionFileName), true));
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/worker/swversion/runIncompatibleOlder") {
+	if (!platform::createDirectory("sw-version-test")) {
+		TraceEvent(SevWarnAlways, "FailedToCreateDirectory").detail("Directory", "sw-version-test");
+		return Void();
+	}
+
+	ErrorOr<Void> f = wait(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
+	                                                           ProtocolVersion::withStorageInterfaceReadiness(),
+	                                                           ProtocolVersion::withStorageInterfaceReadiness(),
+	                                                           ProtocolVersion::withTSS())));
+
+	ErrorOr<SWVersion> swversion = wait(errorOr(
+	    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
+
+	if (!swversion.isError()) {
+		ASSERT(swversion.get().newestProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
+		ASSERT(swversion.get().lastRunProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
+		ASSERT(swversion.get().lowestCompatibleProtocolVersion() == ProtocolVersion::withTSS().version());
+	}
+
+	ErrorOr<SWVersion> swversion =
+	    wait(errorOr(testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withCacheRole())));
+
+	ASSERT(swversion.isError() && swversion.getError().code() == error_code_incompatible_software_version);
+
+	wait(IAsyncFileSystem::filesystem()->deleteFile(joinPath(swversionTestDirName, versionFileName), true));
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/worker/swversion/runNewer") {
+	if (!platform::createDirectory("sw-version-test")) {
+		TraceEvent(SevWarnAlways, "FailedToCreateDirectory").detail("Directory", "sw-version-test");
+		return Void();
+	}
+
+	ErrorOr<Void> f = wait(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
+	                                                           ProtocolVersion::withTSS(),
+	                                                           ProtocolVersion::withTSS(),
+	                                                           ProtocolVersion::withCacheRole())));
+
+	ErrorOr<SWVersion> swversion = wait(errorOr(
+	    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
+
+	if (!swversion.isError()) {
+		ASSERT(swversion.get().newestProtocolVersion() == ProtocolVersion::withTSS().version());
+		ASSERT(swversion.get().lastRunProtocolVersion() == ProtocolVersion::withTSS().version());
+		ASSERT(swversion.get().lowestCompatibleProtocolVersion() == ProtocolVersion::withCacheRole().version());
+	}
+
+	ErrorOr<Void> f = wait(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
+	                                                           ProtocolVersion::withStorageInterfaceReadiness(),
+	                                                           ProtocolVersion::withStorageInterfaceReadiness(),
+	                                                           ProtocolVersion::withTSS())));
+
+	ErrorOr<SWVersion> swversion = wait(errorOr(
+	    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
+
+	if (!swversion.isError()) {
+		ASSERT(swversion.get().newestProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
+		ASSERT(swversion.get().lastRunProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
+		ASSERT(swversion.get().lowestCompatibleProtocolVersion() == ProtocolVersion::withTSS().version());
+	}
+
+	wait(IAsyncFileSystem::filesystem()->deleteFile(joinPath(swversionTestDirName, versionFileName), true));
+
+	return Void();
+}
+
 ACTOR Future<UID> createAndLockProcessIdFile(std::string folder) {
 	state UID processIDUid;
 	platform::createDirectory(folder);
@@ -2922,6 +3215,8 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 		state UID processIDUid = wait(createAndLockProcessIdFile(dataFolder));
 		localities.set(LocalityData::keyProcessId, processIDUid.toString());
 		// Only one process can execute on a dataFolder from this point onwards
+
+		wait(testAndUpdateSoftwareVersionCompatibility(dataFolder, processIDUid));
 
 		std::string fitnessFilePath = joinPath(dataFolder, "fitness");
 		auto cc = makeReference<AsyncVar<Optional<ClusterControllerFullInterface>>>();
