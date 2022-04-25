@@ -14,12 +14,13 @@ from threading import Thread, Event
 import traceback
 import time
 from urllib import request
+import hashlib
 
 from local_cluster import LocalCluster, random_secret_string
 
 
 SUPPORTED_PLATFORMS = ["x86_64"]
-SUPPORTED_VERSIONS = ["7.2.0", "7.1.0", "7.0.0", "6.3.24", "6.3.23",
+SUPPORTED_VERSIONS = ["7.2.0", "7.1.1", "7.1.0", "7.0.0", "6.3.24", "6.3.23",
                       "6.3.22", "6.3.18", "6.3.17", "6.3.16", "6.3.15", "6.3.13", "6.3.12", "6.3.9", "6.2.30",
                       "6.2.29", "6.2.28", "6.2.27", "6.2.26", "6.2.25", "6.2.24", "6.2.23", "6.2.22", "6.2.21",
                       "6.2.20", "6.2.19", "6.2.18", "6.2.17", "6.2.16", "6.2.15", "6.2.10", "6.1.13", "6.1.12",
@@ -30,6 +31,7 @@ CURRENT_VERSION = "7.2.0"
 HEALTH_CHECK_TIMEOUT_SEC = 5
 PROGRESS_CHECK_TIMEOUT_SEC = 30
 TRANSACTION_RETRY_LIMIT = 100
+MAX_DOWNLOAD_ATTEMPTS = 5
 RUN_WITH_GDB = False
 
 
@@ -64,6 +66,23 @@ def random_sleep(minSec, maxSec):
     timeSec = random.uniform(minSec, maxSec)
     print("Sleeping for {0:.3f}s".format(timeSec))
     time.sleep(timeSec)
+
+
+def compute_sha256(filename):
+    hash = hashlib.sha256()
+    with open(filename, 'rb') as f:
+        while True:
+            data = f.read(128*1024)
+            if not data:
+                break
+            hash.update(data)
+
+    return hash.hexdigest()
+
+
+def read_to_str(filename):
+    with open(filename, 'r') as f:
+        return f.read()
 
 
 class UpgradeTest:
@@ -133,10 +152,29 @@ class UpgradeTest:
             parents=True, exist_ok=True)
         remote_file = "{}{}/{}".format(FDB_DOWNLOAD_ROOT,
                                        version, remote_bin_name)
-        print("Downloading '{}' to '{}'...".format(remote_file, local_file))
-        request.urlretrieve(remote_file, local_file)
-        print("Download complete")
-        assert local_file.exists(), "{} does not exist".format(local_file)
+        remote_sha256 = "{}.sha256".format(remote_file)
+        local_sha256 = Path("{}.sha256".format(local_file))
+
+        for attempt_cnt in range(MAX_DOWNLOAD_ATTEMPTS):
+            print("Downloading '{}' to '{}'...".format(remote_file, local_file))
+            request.urlretrieve(remote_file, local_file)
+            print("Downloading '{}' to '{}'...".format(
+                remote_sha256, local_sha256))
+            request.urlretrieve(remote_sha256, local_sha256)
+            print("Download complete")
+            assert local_file.exists(), "{} does not exist".format(local_file)
+            assert local_sha256.exists(), "{} does not exist".format(local_sha256)
+            expected_checksum = read_to_str(local_sha256)
+            actual_checkum = compute_sha256(local_file)
+            if (expected_checksum == actual_checkum):
+                print("Checksum OK")
+                break
+            print("Checksum mismatch. Expected: {} Actual: {}".format(
+                expected_checksum, actual_checkum))
+            if attempt_cnt == MAX_DOWNLOAD_ATTEMPTS-1:
+                assert False, "Failed to download {} after {} attempts".format(
+                    local_file, MAX_DOWNLOAD_ATTEMPTS)
+
         if makeExecutable:
             make_executable(local_file)
 
@@ -246,6 +284,7 @@ class UpgradeTest:
                         '--api-version', str(self.api_version),
                         '--log',
                         '--log-dir', self.log,
+                        '--tmp-dir', self.tmp_dir,
                         '--transaction-retry-limit', str(TRANSACTION_RETRY_LIMIT)]
             if (RUN_WITH_GDB):
                 cmd_args = ['gdb', '-ex', 'run', '--args'] + cmd_args
@@ -353,6 +392,17 @@ class UpgradeTest:
                 test_retcode = self.tester_retcode
         return test_retcode
 
+    def grep_logs_for_events(self, severity):
+        return (
+            subprocess.getoutput(
+                "grep -r 'Severity=\"{}\"' {}".format(
+                    severity,
+                    self.cluster.log.as_posix())
+            )
+            .rstrip()
+            .splitlines()
+        )
+
     # Check the cluster log for errors
     def check_cluster_logs(self, error_limit=100):
         sev40s = (
@@ -380,8 +430,27 @@ class UpgradeTest:
             print(
                 ">>>>>>>>>>>>>>>>>>>> Found {} severity 40 events - the test fails", err_cnt)
         else:
-            print("No error found in logs")
+            print("No errors found in logs")
         return err_cnt == 0
+
+    # Check the server and client logs for warnings and dump them
+    def dump_warnings_in_logs(self, limit=100):
+        sev30s = (
+            subprocess.getoutput(
+                "grep -r 'Severity=\"30\"' {}".format(
+                    self.cluster.log.as_posix())
+            )
+            .rstrip()
+            .splitlines()
+        )
+
+        if (len(sev30s) == 0):
+            print("No warnings found in logs")
+        else:
+            print(">>>>>>>>>>>>>>>>>>>> Found {} severity 30 events (warnings):".format(
+                len(sev30s)))
+            for line in sev30s[:limit]:
+                print(line)
 
     # Dump the last cluster configuration and cluster logs
     def dump_cluster_logs(self):
@@ -457,6 +526,7 @@ if __name__ == "__main__":
         errcode = test.exec_test(args)
         if not test.check_cluster_logs():
             errcode = 1 if errcode == 0 else errcode
+        test.dump_warnings_in_logs()
         if errcode != 0 and not args.disable_log_dump:
             test.dump_cluster_logs()
 

@@ -30,12 +30,9 @@
 #include <vector>
 #include <mutex>
 
-namespace FdbApiTester {
+#include "TesterUtil.h"
 
-struct KeyValue {
-	std::string key;
-	std::string value;
-};
+namespace FdbApiTester {
 
 class KeyValueStore {
 public:
