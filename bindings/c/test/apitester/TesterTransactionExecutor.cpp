@@ -75,9 +75,10 @@ public:
 	                       std::shared_ptr<ITransactionActor> txActor,
 	                       TTaskFct cont,
 	                       IScheduler* scheduler,
-	                       int retryLimit)
+	                       int retryLimit,
+	                       std::string bgBasePath)
 	  : fdbTx(tx), txActor(txActor), contAfterDone(cont), scheduler(scheduler), retryLimit(retryLimit),
-	    txState(TxState::IN_PROGRESS), commitCalled(false) {}
+	    txState(TxState::IN_PROGRESS), commitCalled(false), bgBasePath(bgBasePath) {}
 
 	// A state machine:
 	// IN_PROGRESS -> (ON_ERROR -> IN_PROGRESS)* [-> ON_ERROR] -> DONE
@@ -122,6 +123,8 @@ public:
 		cleanUp();
 		contAfterDone();
 	}
+
+	std::string getBGBasePath() override { return bgBasePath; }
 
 protected:
 	virtual void doContinueAfter(Future f, TTaskFct cont, bool retryOnError) = 0;
@@ -217,6 +220,9 @@ protected:
 
 	// A history of errors on which the transaction was retried
 	std::vector<fdb_error_t> retriedErrors;
+
+	// blob granule base path
+	std::string bgBasePath;
 };
 
 /**
@@ -228,8 +234,9 @@ public:
 	                           std::shared_ptr<ITransactionActor> txActor,
 	                           TTaskFct cont,
 	                           IScheduler* scheduler,
-	                           int retryLimit)
-	  : TransactionContextBase(tx, txActor, cont, scheduler, retryLimit) {}
+	                           int retryLimit,
+	                           std::string bgBasePath)
+	  : TransactionContextBase(tx, txActor, cont, scheduler, retryLimit, bgBasePath) {}
 
 protected:
 	void doContinueAfter(Future f, TTaskFct cont, bool retryOnError) override {
@@ -316,8 +323,9 @@ public:
 	                        std::shared_ptr<ITransactionActor> txActor,
 	                        TTaskFct cont,
 	                        IScheduler* scheduler,
-	                        int retryLimit)
-	  : TransactionContextBase(tx, txActor, cont, scheduler, retryLimit) {}
+	                        int retryLimit,
+	                        std::string bgBasePath)
+	  : TransactionContextBase(tx, txActor, cont, scheduler, retryLimit, bgBasePath) {}
 
 protected:
 	void doContinueAfter(Future f, TTaskFct cont, bool retryOnError) override {
@@ -482,9 +490,10 @@ class TransactionExecutorBase : public ITransactionExecutor {
 public:
 	TransactionExecutorBase(const TransactionExecutorOptions& options) : options(options), scheduler(nullptr) {}
 
-	void init(IScheduler* scheduler, const char* clusterFile) override {
+	void init(IScheduler* scheduler, const char* clusterFile, const std::string& bgBasePath) override {
 		this->scheduler = scheduler;
 		this->clusterFile = clusterFile;
+		this->bgBasePath = bgBasePath;
 	}
 
 protected:
@@ -499,10 +508,10 @@ protected:
 			std::shared_ptr<ITransactionContext> ctx;
 			if (options.blockOnFutures) {
 				ctx = std::make_shared<BlockingTransactionContext>(
-				    tx, txActor, cont, scheduler, options.transactionRetryLimit);
+				    tx, txActor, cont, scheduler, options.transactionRetryLimit, bgBasePath);
 			} else {
 				ctx = std::make_shared<AsyncTransactionContext>(
-				    tx, txActor, cont, scheduler, options.transactionRetryLimit);
+				    tx, txActor, cont, scheduler, options.transactionRetryLimit, bgBasePath);
 			}
 			txActor->init(ctx);
 			txActor->start();
@@ -511,6 +520,7 @@ protected:
 
 protected:
 	TransactionExecutorOptions options;
+	std::string bgBasePath;
 	std::string clusterFile;
 	IScheduler* scheduler;
 };
@@ -524,8 +534,8 @@ public:
 
 	~DBPoolTransactionExecutor() override { release(); }
 
-	void init(IScheduler* scheduler, const char* clusterFile) override {
-		TransactionExecutorBase::init(scheduler, clusterFile);
+	void init(IScheduler* scheduler, const char* clusterFile, const std::string& bgBasePath) override {
+		TransactionExecutorBase::init(scheduler, clusterFile, bgBasePath);
 		for (int i = 0; i < options.numDatabases; i++) {
 			FDBDatabase* db;
 			fdb_error_t err = fdb_create_database(clusterFile, &db);

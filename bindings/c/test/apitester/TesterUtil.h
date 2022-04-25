@@ -49,6 +49,11 @@ struct formatter<std::optional<T>> : fmt::formatter<T> {
 
 namespace FdbApiTester {
 
+struct KeyValue {
+	std::string key;
+	std::string value;
+};
+
 std::string lowerCase(const std::string& str);
 
 class Random {

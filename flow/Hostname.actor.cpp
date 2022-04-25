@@ -84,13 +84,15 @@ ACTOR Future<Optional<NetworkAddress>> resolveImpl(Hostname* self) {
 }
 
 ACTOR Future<NetworkAddress> resolveWithRetryImpl(Hostname* self) {
+	state double resolveInterval = FLOW_KNOBS->HOSTNAME_RESOLVE_INIT_INTERVAL;
 	loop {
 		try {
 			Optional<NetworkAddress> address = wait(resolveImpl(self));
 			if (address.present()) {
 				return address.get();
 			}
-			wait(delay(FLOW_KNOBS->HOSTNAME_RESOLVE_DELAY));
+			wait(delay(resolveInterval));
+			resolveInterval = std::min(2 * resolveInterval, FLOW_KNOBS->HOSTNAME_RESOLVE_MAX_INTERVAL);
 		} catch (Error& e) {
 			ASSERT(e.code() == error_code_actor_cancelled);
 			throw;

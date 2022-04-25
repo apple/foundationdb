@@ -14,6 +14,7 @@ from threading import Thread, Event
 import traceback
 import time
 from urllib import request
+import hashlib
 
 from local_cluster import LocalCluster, random_secret_string
 
@@ -30,6 +31,7 @@ CURRENT_VERSION = "7.2.0"
 HEALTH_CHECK_TIMEOUT_SEC = 5
 PROGRESS_CHECK_TIMEOUT_SEC = 30
 TRANSACTION_RETRY_LIMIT = 100
+MAX_DOWNLOAD_ATTEMPTS = 5
 RUN_WITH_GDB = False
 
 
@@ -64,6 +66,23 @@ def random_sleep(minSec, maxSec):
     timeSec = random.uniform(minSec, maxSec)
     print("Sleeping for {0:.3f}s".format(timeSec))
     time.sleep(timeSec)
+
+
+def compute_sha256(filename):
+    hash = hashlib.sha256()
+    with open(filename, 'rb') as f:
+        while True:
+            data = f.read(128*1024)
+            if not data:
+                break
+            hash.update(data)
+
+    return hash.hexdigest()
+
+
+def read_to_str(filename):
+    with open(filename, 'r') as f:
+        return f.read()
 
 
 class UpgradeTest:
@@ -129,14 +148,43 @@ class UpgradeTest:
         local_file = self.binary_path(version, target_bin_name)
         if (local_file.exists()):
             return
+
+        # Download to a temporary file and then replace the target file atomically
+        # to avoid consistency errors in case of multiple tests are downloading the
+        # same file in parallel
+        local_file_tmp = Path("{}.{}".format(
+            str(local_file), random_secret_string(8)))
         self.download_dir.joinpath(version).mkdir(
             parents=True, exist_ok=True)
         remote_file = "{}{}/{}".format(FDB_DOWNLOAD_ROOT,
                                        version, remote_bin_name)
-        print("Downloading '{}' to '{}'...".format(remote_file, local_file))
-        request.urlretrieve(remote_file, local_file)
-        print("Download complete")
-        assert local_file.exists(), "{} does not exist".format(local_file)
+        remote_sha256 = "{}.sha256".format(remote_file)
+        local_sha256 = Path("{}.sha256".format(local_file_tmp))
+
+        for attempt_cnt in range(MAX_DOWNLOAD_ATTEMPTS):
+            print("Downloading '{}' to '{}'...".format(
+                remote_file, local_file_tmp))
+            request.urlretrieve(remote_file, local_file_tmp)
+            print("Downloading '{}' to '{}'...".format(
+                remote_sha256, local_sha256))
+            request.urlretrieve(remote_sha256, local_sha256)
+            print("Download complete")
+            assert local_file_tmp.exists(), "{} does not exist".format(local_file_tmp)
+            assert local_sha256.exists(), "{} does not exist".format(local_sha256)
+            expected_checksum = read_to_str(local_sha256)
+            actual_checkum = compute_sha256(local_file_tmp)
+            if (expected_checksum == actual_checkum):
+                print("Checksum OK")
+                break
+            print("Checksum mismatch. Expected: {} Actual: {}".format(
+                expected_checksum, actual_checkum))
+            if attempt_cnt == MAX_DOWNLOAD_ATTEMPTS-1:
+                assert False, "Failed to download {} after {} attempts".format(
+                    local_file_tmp, MAX_DOWNLOAD_ATTEMPTS)
+
+        os.rename(local_file_tmp, local_file)
+        os.remove(local_sha256)
+
         if makeExecutable:
             make_executable(local_file)
 
@@ -246,6 +294,7 @@ class UpgradeTest:
                         '--api-version', str(self.api_version),
                         '--log',
                         '--log-dir', self.log,
+                        '--tmp-dir', self.tmp_dir,
                         '--transaction-retry-limit', str(TRANSACTION_RETRY_LIMIT)]
             if (RUN_WITH_GDB):
                 cmd_args = ['gdb', '-ex', 'run', '--args'] + cmd_args

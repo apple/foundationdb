@@ -388,6 +388,9 @@ ACTOR Future<Void> testKVStore(KVStoreTestWorkload* workload) {
 		test.store = keyValueStoreRedwoodV1(fn, id);
 	else if (workload->storeType == "ssd-rocksdb-v1")
 		test.store = keyValueStoreRocksDB(fn, id, KeyValueStoreType::SSD_ROCKSDB_V1);
+	else if (workload->storeType == "ssd-sharded-rocksdb")
+		test.store = keyValueStoreRocksDB(
+		    fn, id, KeyValueStoreType::SSD_SHARDED_ROCKSDB); // TODO: to replace the KVS in the future
 	else if (workload->storeType == "memory")
 		test.store = keyValueStoreMemory(fn, id, 500e6);
 	else if (workload->storeType == "memory-radixtree-beta")

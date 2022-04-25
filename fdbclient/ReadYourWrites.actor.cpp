@@ -1982,7 +1982,7 @@ void ReadYourWritesTransaction::getWriteConflicts(KeyRangeMap<bool>* result) {
 	}
 }
 
-void ReadYourWritesTransaction::setTransactionID(UID id) {
+void ReadYourWritesTransaction::setTransactionID(uint64_t id) {
 	tr.setTransactionID(id);
 }
 
