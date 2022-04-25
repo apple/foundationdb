@@ -84,7 +84,6 @@ set(FLOW_SRCS
   actorcompiler.h
   crc32c.h
   crc32c.cpp
-  crc32.S
   crc32_wrapper.h
   crc32_wrapper.c
   error_definitions.h
@@ -125,7 +124,7 @@ elseif(USE_TSAN)
 endif()
 
 if(UNIX AND NOT APPLE)
-  list(APPEND FLOW_SRCS folly_memcpy.S)
+  list(APPEND FLOW_SRCS folly_memcpy.S crc32.S)
 endif()
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
