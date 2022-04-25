@@ -73,6 +73,20 @@ Future<REPLY_TYPE(Req)> retryBrokenPromise(RequestStream<Req, P> to, Req request
 }
 
 ACTOR template <class Req>
+Future<Void> tryInitializeRequestStream(RequestStream<Req>* stream, Hostname hostname, WellKnownEndpoints token) {
+	Optional<NetworkAddress> address = wait(hostname.resolve());
+	if (!address.present()) {
+		return Void();
+	}
+	if (stream == nullptr) {
+		stream = new RequestStream<Req>(Endpoint::wellKnown({ address.get() }, token));
+	} else {
+		*stream = RequestStream<Req>(Endpoint::wellKnown({ address.get() }, token));
+	}
+	return Void();
+}
+
+ACTOR template <class Req>
 Future<ErrorOr<REPLY_TYPE(Req)>> tryGetReplyFromHostname(Req request, Hostname hostname, WellKnownEndpoints token) {
 	// A wrapper of tryGetReply(request), except that the request is sent to an address resolved from a hostname.
 	// If resolving fails, return lookup_failed().
