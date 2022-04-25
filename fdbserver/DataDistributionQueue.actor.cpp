@@ -1081,7 +1081,7 @@ struct DDQueueData {
 	bool timeThrottle(const std::vector<UID>& ids) const {
 		return std::any_of(ids.begin(), ids.end(), [this](const UID& id) {
 			if (this->lastAsSource.count(id)) {
-				return (now() - this->lastAsSource.at(id)) * 3.0 < SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL;
+				return (now() - this->lastAsSource.at(id)) * 5.0 < SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL;
 			}
 			return false;
 		});
@@ -1504,10 +1504,15 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 	}
 }
 
-inline double getWorstCpu(const HealthMetrics& metrics) {
+inline double getWorstCpu(const HealthMetrics& metrics, const std::vector<UID>& ids) {
 	double cpu = 0;
-	for (auto p : metrics.storageStats) {
-		cpu = std::max(cpu, p.second.cpuUsage);
+	for (auto& id : ids) {
+		if (metrics.storageStats.count(id)) {
+			cpu = std::max(cpu, metrics.storageStats.at(id).cpuUsage);
+		} else {
+			// assume the server is too busy to report its stats
+			cpu = std::max(cpu, 100.0);
+		}
 	}
 	return cpu;
 }
@@ -1546,12 +1551,12 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
 	state Future<HealthMetrics> healthMetrics = self->cx->getHealthMetrics(true);
 	state GetMetricsRequest req(shards, 10);
 	req.comparator = [](const StorageMetrics& a, const StorageMetrics& b) {
-		return a.bytesReadPerKSecond / std::max(a.bytes * 1.0, 1.0 * SERVER_KNOBS->MIN_SHARD_BYTES) <
+		return a.bytesReadPerKSecond / std::max(a.bytes * 1.0, 1.0 * SERVER_KNOBS->MIN_SHARD_BYTES) >
 		       b.bytesReadPerKSecond / std::max(b.bytes * 1.0, 1.0 * SERVER_KNOBS->MIN_SHARD_BYTES);
 	};
 	state std::vector<StorageMetrics> metricsList = wait(brokenPromiseToNever(self->getShardMetrics.getReply(req)));
 	wait(ready(healthMetrics));
-	if (getWorstCpu(healthMetrics.get()) < 25.0) { // 25%
+	if (getWorstCpu(healthMetrics.get(), sourceTeam->getServerIDs()) < 25.0) { // 25%
 		traceEvent->detail("SkipReason", "LowReadLoad");
 		return false;
 	}
@@ -1559,7 +1564,7 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
 	deterministicRandom()->randomShuffle(metricsList);
 	int chosenIdx = -1;
 	for (int i = 0; i < metricsList.size(); ++i) {
-		if (metricsList[i].keys.present() && metricsList[i].bytes > 0) {
+		if (metricsList[i].keys.present() && metricsList[i].bytesReadPerKSecond > 0) {
 			chosenIdx = i;
 			break;
 		}

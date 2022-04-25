@@ -856,6 +856,7 @@ ACTOR Future<Void> fetchShardMetrics_impl(DataDistributionTracker* self, GetMetr
 				}
 
 				if (req.comparator.present()) {
+					metrics.keys = range;
 					returnMetrics.push_back(metrics);
 				} else {
 					returnMetrics[0] += metrics;
@@ -867,11 +868,11 @@ ACTOR Future<Void> fetchShardMetrics_impl(DataDistributionTracker* self, GetMetr
 					req.reply.send(returnMetrics);
 				else if (req.comparator.present()) {
 					std::nth_element(returnMetrics.begin(),
-					                 returnMetrics.end() - req.topK,
+					                 returnMetrics.begin() + req.topK - 1,
 					                 returnMetrics.end(),
 					                 req.comparator.get());
 					req.reply.send(
-					    std::vector<StorageMetrics>(returnMetrics.rbegin(), returnMetrics.rbegin() + req.topK));
+					    std::vector<StorageMetrics>(returnMetrics.begin(), returnMetrics.begin() + req.topK));
 				}
 				return Void();
 			}
