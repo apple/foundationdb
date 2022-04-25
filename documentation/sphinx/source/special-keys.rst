@@ -191,7 +191,6 @@ that process, and wait for necessary data to be moved away.
 #. ``\xff\xff/management/options/excluded/force`` Read/write. Setting this key disables safety checks for writes to ``\xff\xff/management/excluded/<exclusion>``. Setting this key only has an effect in the current transaction and is not persisted on commit.
 #. ``\xff\xff/management/options/failed/force`` Read/write. Setting this key disables safety checks for writes to ``\xff\xff/management/failed/<exclusion>``. Setting this key only has an effect in the current transaction and is not persisted on commit.
 #. ``\xff\xff/management/min_required_commit_version`` Read/write. Changing this key will change the corresponding system key ``\xff/minRequiredCommitVersion = [[Version]]``. The value of this special key is the literal text of the underlying ``Version``, which is ``int64_t``. If you set the key with a value failed to be parsed as ``int64_t``, ``special_keys_api_failure`` will be thrown. In addition, the given ``Version`` should be larger than the current read version and smaller than the upper bound(``2**63-1-version_per_second*3600*24*365*1000``). Otherwise, ``special_keys_api_failure`` is thrown. For more details, see help text of ``fdbcli`` command ``advanceversion``.
-#. ``\xff\xff/management/profiling/<client_txn_sample_rate|client_txn_size_limit>`` Read/write. Changing these two keys will change the corresponding system keys ``\xff\x02/fdbClientInfo/<client_txn_sample_rate|client_txn_size_limit>``, respectively. The value of ``\xff\xff/management/client_txn_sample_rate`` is a literal text of ``double``, and the value of ``\xff\xff/management/client_txn_size_limit`` is a literal text of ``int64_t``. A special value ``default`` can be set to or read from these two keys, representing the client profiling is disabled. In addition, ``clear`` in this range is not allowed. For more details, see help text of ``fdbcli`` command ``profile client``.
 #. ``\xff\xff/management/maintenance/<zone_id> := <seconds>`` Read/write. Set/clear a key in this range will change the corresponding system key ``\xff\x02/healthyZone``. The value is a literal text of a non-negative ``double`` which represents the remaining time for the zone to be in maintenance. Commiting with an invalid value will throw ``special_keys_api_failure``. Only one zone is allowed to be in maintenance at the same time. Setting a new key in the range will override the old one and the transaction will throw ``special_keys_api_failure`` error if more than one zone is given. For more details, see help text of ``fdbcli`` command ``maintenance``.
    In addition, a special key ``\xff\xff/management/maintenance/IgnoreSSFailures`` in the range, if set, will disable datadistribution for storage server failures.
    It is doing the same thing as the fdbcli command ``datadistribution disable ssfailure``.
@@ -263,6 +262,26 @@ clients can connect FoundationDB transactions to outside events.
 
 #. ``\xff\xff/tracing/transaction_id := <transaction_id>`` Read/write. A 64-bit integer transaction ID which follows the transaction as it moves through FoundationDB. All transactions are assigned a random transaction ID on creation, and this key can be read to surface the randomly generated ID. Alternatively, set this key to provide a custom identifier. When setting this key, provide a string in the form of a 64-bit integer, which will be automatically converted to the appropriate type.
 #. ``\xff\xff/tracing/token := <tracing_enabled>`` Read/write. Set to true/false to enable or disable tracing for the transaction, respectively. If read, returns a 64-bit integer set to 0 if tracing has been disabled, or a random 64-bit integer otherwise (this integers value has no meaning to the client other than to determine whether the transaction will be traced).
+
+.. _special-key-space-deprecation:
+
+Deprecated Keys
+===============
+
+Listed below are the special keys that have been deprecated. Special key(s) will no longer be accessible when the client specifies an API version equal to or larger than the version where they were deprecated. Clients specifying older API versions will be able to continue using the deprecated key(s).
+
+#. ``\xff\xff/management/profiling/<client_txn_sample_rate|client_txn_size_limit>`` Deprecated as of API version 7.2. The corresponding functionalities are now covered by the global configuration module. For details, see :doc:`global-configuration`. Read/write. Changing these two keys will change the corresponding system keys ``\xff\x02/fdbClientInfo/<client_txn_sample_rate|client_txn_size_limit>``, respectively. The value of ``\xff\xff/management/client_txn_sample_rate`` is a literal text of ``double``, and the value of ``\xff\xff/management/client_txn_size_limit`` is a literal text of ``int64_t``. A special value ``default`` can be set to or read from these two keys, representing the client profiling is disabled. In addition, ``clear`` in this range is not allowed. For more details, see help text of ``fdbcli`` command ``profile client``.
+
+Versioning
+==========
+
+For how FDB clients deal with versioning, see :ref:`api-versions`. The special key space deals with versioning by using the ``API_VERSION`` passed to initialize the client. Any module added at a version larger than the API version set by the client will be inaccessible. For example, if a module is added in version 7.0 and the client sets its API version to 630, then the module will not available. When removing or updating existing modules, module developers need to continue to provide the old behavior for clients that specify old API versions.
+
+To remove the functionality of a certain special key(s), specify the API version where the function is being deprecated in the ``registerSpecialKeysImpl`` function. When a client specifies an API version greater than or equal to the deprecation version, the functionality will not be available. Move and update its documentation to :ref:`special-key-space-deprecation`.
+
+To update the implementation of any special keys, add the new implementation and use ``API_VERSION`` to switch between different implementations.
+
+Add notes in ``api-version-upgrade-guide.rst`` if you either remove or update a special key(s) implementation.
 
 .. [#conflicting_keys] In practice, the transaction probably committed successfully. However, if you're running multiple resolvers then it's possible for a transaction to cause another to abort even if it doesn't commit successfully.
 .. [#max_read_transaction_life_versions] The number 5000000 comes from the server knob MAX_READ_TRANSACTION_LIFE_VERSIONS

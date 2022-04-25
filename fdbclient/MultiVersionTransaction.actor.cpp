@@ -300,7 +300,9 @@ ThreadResult<RangeResult> DLTransaction::readBlobGranules(const KeyRangeRef& key
 	int count;
 	FdbCApi::fdb_bool_t more;
 	FdbCApi::fdb_error_t error = api->resultGetKeyValueArray(r, &kvs, &count, &more);
-	ASSERT(!error);
+	if (error) {
+		return ThreadResult<RangeResult>(Error(error));
+	}
 
 	// The memory for this is stored in the FDBResult and is released when the result gets destroyed
 	return ThreadResult<RangeResult>(
@@ -1996,8 +1998,9 @@ std::vector<std::pair<std::string, bool>> MultiVersionApi::copyExternalLibraryPe
 		for (int ii = 0; ii < threadCount; ++ii) {
 			std::string filename = basename(path);
 
-			char tempName[PATH_MAX + 12];
-			sprintf(tempName, "/tmp/%s-XXXXXX", filename.c_str());
+			constexpr int MAX_TMP_NAME_LENGTH = PATH_MAX + 12;
+			char tempName[MAX_TMP_NAME_LENGTH];
+			snprintf(tempName, MAX_TMP_NAME_LENGTH, "%s/%s-XXXXXX", tmpDir.c_str(), filename.c_str());
 			int tempFd = mkstemp(tempName);
 			int fd;
 
@@ -2143,6 +2146,9 @@ void MultiVersionApi::setNetworkOptionInternal(FDBNetworkOptions::Option option,
 		// multiple client threads are not supported on windows.
 		threadCount = extractIntOption(value, 1, 1);
 #endif
+	} else if (option == FDBNetworkOptions::CLIENT_TMP_DIR) {
+		validateOption(value, true, false, false);
+		tmpDir = abspath(value.get().toString());
 	} else {
 		forwardOption = true;
 	}
@@ -2518,7 +2524,8 @@ void MultiVersionApi::loadEnvironmentVariableNetworkOptions() {
 
 MultiVersionApi::MultiVersionApi()
   : callbackOnMainThread(true), localClientDisabled(false), networkStartSetup(false), networkSetup(false),
-    bypassMultiClientApi(false), externalClient(false), apiVersion(0), threadCount(0), envOptionsLoaded(false) {}
+    bypassMultiClientApi(false), externalClient(false), apiVersion(0), threadCount(0), tmpDir("/tmp"),
+    envOptionsLoaded(false) {}
 
 MultiVersionApi* MultiVersionApi::api = new MultiVersionApi();
 

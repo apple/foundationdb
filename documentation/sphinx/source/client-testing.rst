@@ -113,8 +113,8 @@ Implementing a C++ Workload
 ===========================
 
 In order to implement a workload, one has to build a shared library that links against the fdb client library. This library has to
-exppse a function (with C linkage) called workloadFactory which needs to return a pointer to an object of type ``FDBWorkloadFactory``.
-This mechanism allows the other to implement as many workloads within one library as she wants. To do this the pure virtual classes
+expose a function (with C linkage) called workloadFactory which needs to return a pointer to an object of type ``FDBWorkloadFactory``.
+This mechanism allows the author to implement as many workloads within one library as she wants. To do this the pure virtual classes
 ``FDBWorkloadFactory`` and ``FDBWorkload`` have to be implemented.
 
 .. function:: FDBWorkloadFactory* workloadFactory(FDBLogger*)

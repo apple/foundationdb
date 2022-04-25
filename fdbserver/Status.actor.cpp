@@ -24,6 +24,7 @@
 #include "fdbclient/KeyBackedTypes.h"
 #include "fdbserver/Status.h"
 #include "flow/ITrace.h"
+#include "flow/ProtocolVersion.h"
 #include "flow/Trace.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
@@ -1527,6 +1528,41 @@ ACTOR static Future<Void> logRangeWarningFetcher(Database cx,
 	return Void();
 }
 
+struct ProtocolVersionData {
+	ProtocolVersion runningProtocolVersion;
+	ProtocolVersion newestProtocolVersion;
+	ProtocolVersion lowestCompatibleProtocolVersion;
+	ProtocolVersionData() : runningProtocolVersion(currentProtocolVersion) {}
+
+	ProtocolVersionData(uint64_t newestProtocolVersionValue, uint64_t lowestCompatibleProtocolVersionValue)
+	  : runningProtocolVersion(currentProtocolVersion), newestProtocolVersion(newestProtocolVersionValue),
+	    lowestCompatibleProtocolVersion(lowestCompatibleProtocolVersionValue) {}
+};
+
+ACTOR Future<ProtocolVersionData> getNewestProtocolVersion(Database cx, WorkerDetails ccWorker) {
+
+	try {
+		state Future<TraceEventFields> swVersionF = timeoutError(
+		    ccWorker.interf.eventLogRequest.getReply(EventLogRequest("SWVersionCompatibilityChecked"_sr)), 1.0);
+
+		wait(success(swVersionF));
+		const TraceEventFields& swVersionTrace = swVersionF.get();
+		int64_t newestProtocolVersionValue =
+		    std::stoull(swVersionTrace.getValue("NewestProtocolVersion").c_str(), nullptr, 16);
+		int64_t lowestCompatibleProtocolVersionValue =
+		    std::stoull(swVersionTrace.getValue("LowestCompatibleProtocolVersion").c_str(), nullptr, 16);
+
+		return ProtocolVersionData(newestProtocolVersionValue, lowestCompatibleProtocolVersionValue);
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled)
+			throw;
+
+		TraceEvent(SevWarnAlways, "SWVersionStatusFailed").error(e);
+
+		return ProtocolVersionData();
+	}
+}
+
 struct LoadConfigurationResult {
 	bool fullReplication;
 	Optional<Key> healthyZone;
@@ -2880,6 +2916,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			messages.push_back(message);
 		}
 
+		state ProtocolVersionData protocolVersion = wait(getNewestProtocolVersion(cx, ccWorker));
+
 		// construct status information for cluster subsections
 		state int statusCode = (int)RecoveryStatus::END;
 		state JsonBuilderObject recoveryStateStatus = wait(
@@ -2917,6 +2955,9 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		statusObj["protocol_version"] = format("%" PRIx64, g_network->protocolVersion().version());
 		statusObj["connection_string"] = coordinators.ccr->getConnectionString().toString();
 		statusObj["bounce_impact"] = getBounceImpactInfo(statusCode);
+		statusObj["newest_protocol_version"] = format("%" PRIx64, protocolVersion.newestProtocolVersion.version());
+		statusObj["lowest_compatible_protocol_version"] =
+		    format("%" PRIx64, protocolVersion.lowestCompatibleProtocolVersion.version());
 
 		state Optional<DatabaseConfiguration> configuration;
 		state Optional<LoadConfigurationResult> loadResult;
