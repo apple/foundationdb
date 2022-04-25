@@ -310,6 +310,7 @@ public:
 	//	2 = "memory-radixtree-beta"
 	//	3 = "ssd-redwood-1-experimental"
 	//	4 = "ssd-rocksdb-v1"
+	//	5 = "ssd-sharded-rocksdb"
 	// Requires a comma-separated list of numbers WITHOUT whitespaces
 	std::vector<int> storageEngineExcludeTypes;
 	// Set the maximum TLog version that can be selected for a test
@@ -635,7 +636,8 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 					printf("SimulatedFDBDTerminated: %s\n", e.what());
 				ASSERT(destructed ||
 				       g_simulator.getCurrentProcess() == process); // simulatedFDBD catch called on different process
-				TraceEvent(e.code() == error_code_actor_cancelled || e.code() == error_code_file_not_found || destructed
+				TraceEvent(e.code() == error_code_actor_cancelled || e.code() == error_code_file_not_found ||
+				                   e.code() == error_code_incompatible_software_version || destructed
 				               ? SevInfo
 				               : SevError,
 				           "SimulatedFDBDTerminated")
@@ -1420,6 +1422,16 @@ void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
 		noUnseed = true;
 		break;
 	}
+	case 5: {
+		TEST(true); // Simulated cluster using Sharded RocksDB storage engine
+		set_config("ssd-sharded-rocksdb");
+		// Tests using the RocksDB engine are necessarily non-deterministic because of RocksDB
+		// background threads.
+		TraceEvent(SevWarnAlways, "RocksDBNonDeterminism")
+		    .detail("Explanation", "The Sharded RocksDB storage engine is threaded and non-deterministic");
+		noUnseed = true;
+		break;
+	}
 	default:
 		ASSERT(false); // Programmer forgot to adjust cases.
 	}
@@ -1968,8 +1980,8 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	TEST(useIPv6); // Use IPv6
 	TEST(!useIPv6); // Use IPv4
 
-	// Use hostname 25% of the time, unless it is disabled
-	bool useHostname = !testConfig.disableHostname && deterministicRandom()->random01() < 0.25;
+	// TODO(renxuan): Use hostname 25% of the time, unless it is disabled
+	bool useHostname = false; // !testConfig.disableHostname && deterministicRandom()->random01() < 0.25;
 	TEST(useHostname); // Use hostname
 	TEST(!useHostname); // Use IP address
 	NetworkAddressFromHostname fromHostname =

@@ -195,6 +195,12 @@ ACTOR Future<bool> configureCommandActor(Reference<IDatabase> db,
 		fprintf(stderr,
 		        "WARN: RocksDB storage engine type is still in experimental stage, not yet production tested.\n");
 		break;
+	case ConfigurationResult::DATABASE_CREATED_WARN_SHARDED_ROCKSDB_EXPERIMENTAL:
+		printf("Database created\n");
+		fprintf(
+		    stderr,
+		    "WARN: Sharded RocksDB storage engine type is still in experimental stage, not yet production tested.\n");
+		break;
 	case ConfigurationResult::DATABASE_UNAVAILABLE:
 		fprintf(stderr, "ERROR: The database is unavailable\n");
 		fprintf(stderr, "Type `configure FORCE <TOKEN...>' to configure without this check\n");
@@ -259,6 +265,12 @@ ACTOR Future<bool> configureCommandActor(Reference<IDatabase> db,
 		printf("Configuration changed\n");
 		fprintf(stderr,
 		        "WARN: RocksDB storage engine type is still in experimental stage, not yet production tested.\n");
+		break;
+	case ConfigurationResult::SUCCESS_WARN_SHARDED_ROCKSDB_EXPERIMENTAL:
+		printf("Configuration changed\n");
+		fprintf(
+		    stderr,
+		    "WARN: Sharded RocksDB storage engine type is still in experimental stage, not yet production tested.\n");
 		break;
 	default:
 		ASSERT(false);

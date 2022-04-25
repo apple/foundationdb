@@ -24,21 +24,10 @@ namespace FdbApiTester {
 
 class CancelTransactionWorkload : public ApiWorkload {
 public:
-	CancelTransactionWorkload(const WorkloadConfig& config) : ApiWorkload(config) {
-		numRandomOperations = config.getIntOption("numRandomOperations", 1000);
-		numOpLeft = numRandomOperations;
-	}
-
-	void runTests() override { randomOperations(); }
+	CancelTransactionWorkload(const WorkloadConfig& config) : ApiWorkload(config) {}
 
 private:
 	enum OpType { OP_CANCEL_GET, OP_CANCEL_AFTER_FIRST_GET, OP_LAST = OP_CANCEL_AFTER_FIRST_GET };
-
-	// The number of operations to be executed
-	int numRandomOperations;
-
-	// Operations counter
-	int numOpLeft;
 
 	// Start multiple concurrent gets and cancel the transaction
 	void randomCancelGetTx(TTaskFct cont) {
@@ -87,7 +76,7 @@ private:
 		    [this, cont]() { schedule(cont); });
 	}
 
-	void randomOperation(TTaskFct cont) {
+	void randomOperation(TTaskFct cont) override {
 		OpType txType = (OpType)Random::get().randomInt(0, OP_LAST);
 		switch (txType) {
 		case OP_CANCEL_GET:
@@ -97,14 +86,6 @@ private:
 			randomCancelAfterFirstResTx(cont);
 			break;
 		}
-	}
-
-	void randomOperations() {
-		if (numOpLeft == 0)
-			return;
-
-		numOpLeft--;
-		randomOperation([this]() { randomOperations(); });
 	}
 };
 
