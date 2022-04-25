@@ -138,19 +138,19 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "storage_metadata":{
                      "created_time_datetime":"1970-01-01 00:00:00.000 +0000",
                      "created_time_timestamp": 0,
-					 "storage_engine":{
-						"$enum":[
-						"ssd",
-						"ssd-1",
-						"ssd-2",
-						"ssd-redwood-1-experimental",
-						"ssd-rocksdb-v1",
-						"ssd-sharded-rocksdb",
-						"memory",
-						"memory-1",
-						"memory-2",
-						"memory-radixtree-beta"
-					]}
+                     "storage_engine":{
+                     "$enum":[
+                     "ssd",
+                     "ssd-1",
+                     "ssd-2",
+                     "ssd-redwood-1-experimental",
+                     "ssd-rocksdb-v1",
+                     "ssd-sharded-rocksdb",
+                     "memory",
+                     "memory-1",
+                     "memory-2",
+                     "memory-radixtree-beta"
+                     ]}
                   },
                   "data_version":12341234,
                   "durable_version":12341234,
