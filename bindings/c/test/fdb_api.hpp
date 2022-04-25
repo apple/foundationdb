@@ -376,28 +376,20 @@ struct KeySelector {
 
 namespace key_select {
 
-inline KeySelector firstGreaterThan(KeyRef key, int offset=0) {
-	return KeySelector{
-		FDB_KEYSEL_FIRST_GREATER_THAN(key.data(), intSize(key)) + offset
-	};
+inline KeySelector firstGreaterThan(KeyRef key, int offset = 0) {
+	return KeySelector{ FDB_KEYSEL_FIRST_GREATER_THAN(key.data(), intSize(key)) + offset };
 }
 
-inline KeySelector firstGreaterOrEqual(KeyRef key, int offset=0) {
-	return KeySelector{
-		FDB_KEYSEL_FIRST_GREATER_OR_EQUAL(key.data(), intSize(key)) + offset
-	};
+inline KeySelector firstGreaterOrEqual(KeyRef key, int offset = 0) {
+	return KeySelector{ FDB_KEYSEL_FIRST_GREATER_OR_EQUAL(key.data(), intSize(key)) + offset };
 }
 
-inline KeySelector lastLessThan(KeyRef key, int offset=0) {
-	return KeySelector{
-		FDB_KEYSEL_LAST_LESS_THAN(key.data(), intSize(key)) + offset
-	};
+inline KeySelector lastLessThan(KeyRef key, int offset = 0) {
+	return KeySelector{ FDB_KEYSEL_LAST_LESS_THAN(key.data(), intSize(key)) + offset };
 }
 
-inline KeySelector lastLessOrEqual(KeyRef key, int offset=0) {
-	return KeySelector{
-		FDB_KEYSEL_LAST_LESS_OR_EQUAL(key.data(), intSize(key)) + offset
-	};
+inline KeySelector lastLessOrEqual(KeyRef key, int offset = 0) {
+	return KeySelector{ FDB_KEYSEL_LAST_LESS_OR_EQUAL(key.data(), intSize(key)) + offset };
 }
 
 } // namespace key_select
@@ -479,20 +471,20 @@ public:
 	                                                bool snapshot,
 	                                                bool reverse) {
 		return native::fdb_transaction_get_range(tr.get(),
-												 first.key,
-												 first.keyLength,
-												 first.orEqual,
-												 first.offset,
-												 last.key,
-												 last.keyLength,
-												 last.orEqual,
-												 last.offset,
-												 limit,
-												 target_bytes,
-												 mode,
-												 iteration,
-												 snapshot,
-												 reverse);
+		                                         first.key,
+		                                         first.keyLength,
+		                                         first.orEqual,
+		                                         first.offset,
+		                                         last.key,
+		                                         last.keyLength,
+		                                         last.orEqual,
+		                                         last.offset,
+		                                         limit,
+		                                         target_bytes,
+		                                         mode,
+		                                         iteration,
+		                                         snapshot,
+		                                         reverse);
 	}
 
 	Result readBlobGranules(KeyRef begin,
