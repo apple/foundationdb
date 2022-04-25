@@ -85,6 +85,7 @@ if(NOT WIN32)
     test/mako/blob_granules.hpp
     test/mako/blob_granules.cpp
     test/mako/future.hpp
+    test/mako/limit.hpp
     test/mako/logger.hpp
     test/mako/mako.cpp
     test/mako/mako.hpp

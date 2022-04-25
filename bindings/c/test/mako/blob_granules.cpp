@@ -19,6 +19,7 @@
  */
 
 #include "blob_granules.hpp"
+#include "limit.hpp"
 #include "logger.hpp"
 #include <cstdio>
 #include <fdb_api.hpp>

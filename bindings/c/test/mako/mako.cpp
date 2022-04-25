@@ -39,16 +39,6 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/stat.h>
-#if defined(__linux__)
-#include <linux/limits.h>
-#elif defined(__FreeBSD__)
-#include <sys/stat.h>
-#elif defined(__APPLE__)
-#include <sys/syslimits.h>
-#else
-#include <limits.h>
-#endif
-
 #include <boost/asio.hpp>
 #include <fmt/format.h>
 #include <fmt/printf.h>
