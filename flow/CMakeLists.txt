@@ -84,6 +84,7 @@ set(FLOW_SRCS
   actorcompiler.h
   crc32c.h
   crc32c.cpp
+  ppc-asm.h
   crc32_wrapper.h
   crc32_wrapper.c
   error_definitions.h
