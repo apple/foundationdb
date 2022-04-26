@@ -89,6 +89,7 @@ ERROR( blob_manager_replaced, 1065, "This blob manager has been replaced." )
 ERROR( change_feed_popped, 1066, "Tried to read a version older than what has been popped from the change feed" )
 ERROR( remote_kvs_cancelled, 1067, "The remote key-value store is cancelled" )
 ERROR( data_move_cancelled, 1068, "Data move was cancelled" )
+ERROR( data_move_dest_team_not_found, 1069, "Dest team was not found for data move" )
 
 ERROR( broken_promise, 1100, "Broken promise" )
 ERROR( operation_cancelled, 1101, "Asynchronous operation cancelled" )

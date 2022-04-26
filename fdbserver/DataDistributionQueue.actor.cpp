@@ -1043,6 +1043,7 @@ struct DDQueueData {
 					ASSERT(rd.dataMove != nullptr);
 					rrs.dataMoveId = rd.dataMove->meta.id;
 				} else {
+					// TODO(psm): The shard id is determined by DD.
 					rrs.dataMoveId = deterministicRandom()->randomUniqueID();
 				}
 
@@ -1179,6 +1180,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 		}
 
 		wait(prevCleanup);
+
 		if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 			auto inFlightRange = self->inFlight.rangeContaining(rd.keys.begin);
 			ASSERT(inFlightRange.range() == rd.keys);
@@ -1243,6 +1245,9 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 						}
 						if (!bestTeam.first.present()) {
 							foundTeams = false;
+							if (stuckCount >= 50) {
+								throw data_move_dest_team_not_found();
+							}
 							break;
 						}
 						anyHealthy = true;
@@ -1580,28 +1585,35 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 			}
 		}
 	} catch (Error& e) {
+		state Error err = e;
 		TraceEvent(relocateShardInterval.end(), distributorId)
-		    .errorUnsuppressed(e)
+		    .errorUnsuppressed(err)
 		    .detail("Duration", now() - startTime);
 		if (now() - startTime > 600) {
 			TraceEvent(SevWarnAlways, "RelocateShardTooLong")
-			    .errorUnsuppressed(e)
+			    .errorUnsuppressed(err)
 			    .detail("Duration", now() - startTime)
 			    .detail("Dest", describe(destIds))
 			    .detail("Src", describe(rd.src));
 		}
+
+		if (err.code() == error_code_data_move_dest_team_not_found) {
+			wait(cancelDataMove(self, rd.keys, ddEnabledState));
+		}
+
 		if (!signalledTransferComplete)
 			dataTransferComplete.send(rd);
 
 		relocationComplete.send(rd);
 
 		// if (e.code() != error_code_actor_cancelled) {
-		if (e.code() != error_code_actor_cancelled && e.code() != error_code_data_move_cancelled) {
+		if (err.code() != error_code_actor_cancelled && err.code() != error_code_data_move_cancelled &&
+		    err.code() != error_code_data_move_dest_team_not_found) {
 			if (errorOut.canBeSet()) {
-				errorOut.sendError(e);
+				errorOut.sendError(err);
 			}
 		}
-		throw;
+		throw err;
 	}
 }
 

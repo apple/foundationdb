@@ -823,13 +823,18 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 				state int idx = 0;
 				for (; idx < initData->dataMoves.size(); ++idx) {
 					const auto& meta = initData->dataMoves[idx];
+					TraceEvent(SevDebug, "DDInitProcessingRestoredDataMove", self->ddId)
+					    .detail("DataMove", meta.toString());
+					if (meta.getPhase() == DataMoveMetaData::Deleting) {
+						continue;
+					}
 					if (dataMoveMap[meta.range.begin]->valid) {
 						RelocateShard rs(meta.range, SERVER_KNOBS->PRIORITY_RECOVER_MOVE, true);
 						rs.dataMove = dataMoveMap[meta.range.begin];
 						rs.dataMoveId = meta.id;
 						// TODO: Persist priority in DataMoveMetaData.
 						// rs.priority = SERVER_KNOBS->PRIORITY_RECOVER_MOVE;
-						TraceEvent("DDInitRestoredDataMove", self->ddId)
+						TraceEvent(SevInfo, "DDInitRestoredDataMove", self->ddId)
 						    .detail("DataMoveID", dataMoveMap[meta.range.begin]->meta.id)
 						    .detail("DataMove", dataMoveMap[meta.range.begin]->meta.toString());
 						output.send(rs);
