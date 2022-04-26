@@ -274,11 +274,8 @@ bool verifyPrefix(ProxyCommitData* const commitData, const CommitTransactionRequ
 		return true;
 	}
 
-	auto te = tenantEntry.get();
-	if (te.present()) {
-		Key tenantPrefix = te.get().prefix;
-
-		// auto& tenantPrefix = tenantEntry.get().get().prefix;
+	if (tenantEntry.get().present()) {
+		Key tenantPrefix = tenantEntry.get().get().prefix;
 		for (auto& m : req.transaction.mutations) {
 			if (m.param1 != metadataVersionKey) {
 				if (!m.param1.startsWith(tenantPrefix)) {
