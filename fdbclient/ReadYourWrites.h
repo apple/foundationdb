@@ -140,7 +140,7 @@ public:
 	[[nodiscard]] Future<Void> commit() override;
 	Version getCommittedVersion() const override { return tr.getCommittedVersion(); }
 	VersionVector getVersionVector() const override { return tr.getVersionVector(); }
-	SpanContext getSpanContext() const override { return tr.getSpanContext(); }
+	UID getSpanID() const override { return tr.getSpanID(); }
 
 	int64_t getApproximateSize() const override { return approximateSize; }
 	[[nodiscard]] Future<Standalone<StringRef>> getVersionstamp() override;
@@ -177,7 +177,7 @@ public:
 
 	Reference<const TransactionState> getTransactionState() const { return tr.trState; }
 
-	void setTransactionID(UID id);
+	void setTransactionID(uint64_t id);
 	void setToken(uint64_t token);
 
 	// Read from the special key space readConflictRangeKeysRange

@@ -162,7 +162,7 @@ struct CommitTransactionRequest : TimedRequest {
 	bool firstInBatch() const { return (flags & FLAG_FIRST_IN_BATCH) != 0; }
 
 	Arena arena;
-	SpanContext spanContext;
+	SpanID spanContext;
 	CommitTransactionRef transaction;
 	ReplyPromise<CommitID> reply;
 	uint32_t flags;
@@ -172,8 +172,8 @@ struct CommitTransactionRequest : TimedRequest {
 
 	TenantInfo tenantInfo;
 
-	CommitTransactionRequest() : CommitTransactionRequest(SpanContext()) {}
-	CommitTransactionRequest(SpanContext const& context) : spanContext(context), flags(0) {}
+	CommitTransactionRequest() : CommitTransactionRequest(SpanID()) {}
+	CommitTransactionRequest(SpanID const& context) : spanContext(context), flags(0) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -242,7 +242,7 @@ struct GetReadVersionRequest : TimedRequest {
 		FLAG_PRIORITY_MASK = PRIORITY_SYSTEM_IMMEDIATE,
 	};
 
-	SpanContext spanContext;
+	SpanID spanContext;
 	uint32_t transactionCount;
 	uint32_t flags;
 	TransactionPriority priority;
@@ -255,7 +255,7 @@ struct GetReadVersionRequest : TimedRequest {
 	Version maxVersion; // max version in the client's version vector cache
 
 	GetReadVersionRequest() : transactionCount(1), flags(0), maxVersion(invalidVersion) {}
-	GetReadVersionRequest(SpanContext spanContext,
+	GetReadVersionRequest(SpanID spanContext,
 	                      uint32_t transactionCount,
 	                      TransactionPriority priority,
 	                      Version maxVersion,
@@ -325,7 +325,7 @@ struct GetKeyServerLocationsReply {
 struct GetKeyServerLocationsRequest {
 	constexpr static FileIdentifier file_identifier = 9144680;
 	Arena arena;
-	SpanContext spanContext;
+	SpanID spanContext;
 	Optional<TenantNameRef> tenant;
 	KeyRef begin;
 	Optional<KeyRef> end;
@@ -340,7 +340,7 @@ struct GetKeyServerLocationsRequest {
 	Version minTenantVersion;
 
 	GetKeyServerLocationsRequest() : limit(0), reverse(false), minTenantVersion(latestVersion) {}
-	GetKeyServerLocationsRequest(SpanContext spanContext,
+	GetKeyServerLocationsRequest(SpanID spanContext,
 	                             Optional<TenantNameRef> const& tenant,
 	                             KeyRef const& begin,
 	                             Optional<KeyRef> const& end,
@@ -378,12 +378,12 @@ struct GetRawCommittedVersionReply {
 
 struct GetRawCommittedVersionRequest {
 	constexpr static FileIdentifier file_identifier = 12954034;
-	SpanContext spanContext;
+	SpanID spanContext;
 	Optional<UID> debugID;
 	ReplyPromise<GetRawCommittedVersionReply> reply;
 	Version maxVersion; // max version in the grv proxy's version vector cache
 
-	explicit GetRawCommittedVersionRequest(SpanContext spanContext,
+	explicit GetRawCommittedVersionRequest(SpanID spanContext,
 	                                       Optional<UID> const& debugID = Optional<UID>(),
 	                                       Version maxVersion = invalidVersion)
 	  : spanContext(spanContext), debugID(debugID), maxVersion(maxVersion) {}

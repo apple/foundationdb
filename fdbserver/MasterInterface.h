@@ -133,14 +133,14 @@ struct GetCommitVersionReply {
 
 struct GetCommitVersionRequest {
 	constexpr static FileIdentifier file_identifier = 16683181;
-	SpanContext spanContext;
+	SpanID spanContext;
 	uint64_t requestNum;
 	uint64_t mostRecentProcessedRequestNum;
 	UID requestingProxy;
 	ReplyPromise<GetCommitVersionReply> reply;
 
 	GetCommitVersionRequest() {}
-	GetCommitVersionRequest(SpanContext spanContext,
+	GetCommitVersionRequest(SpanID spanContext,
 	                        uint64_t requestNum,
 	                        uint64_t mostRecentProcessedRequestNum,
 	                        UID requestingProxy)
