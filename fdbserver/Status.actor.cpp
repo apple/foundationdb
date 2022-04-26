@@ -472,11 +472,16 @@ struct RolesInfo {
 	                           StorageServerInterface& iface,
 	                           EventMap const& metrics,
 	                           Version maxTLogVersion,
-	                           double* pDataLagSeconds) {
+	                           double* pDataLagSeconds,
+	                           ErrorOr<KeyValueStoreType> keyValueStoreType) {
 		JsonBuilderObject obj;
 		double dataLagSeconds = -1.0;
 		obj["id"] = iface.id().shortString();
 		obj["role"] = role;
+		if (keyValueStoreType.present()) {
+			obj["storage_engine_type"] = keyValueStoreType.get().toString();
+		}
+
 		try {
 			TraceEventFields const& storageMetrics = metrics.at("StorageMetrics");
 
@@ -862,7 +867,10 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 	state std::map<NetworkAddress, double> ssLag;
 	state double lagSeconds;
 	for (ss = storageServers.begin(); ss != storageServers.end(); ++ss) {
-		roles.addRole("storage", ss->first, ss->second, maxTLogVersion, &lagSeconds);
+		ReplyPromise<KeyValueStoreType> typeReply;
+		ErrorOr<KeyValueStoreType> keyValueStoreType =
+		    wait(ss->first.getKeyValueStoreType.getReplyUnlessFailedFor(typeReply, 2, 0));
+		roles.addRole("storage", ss->first, ss->second, maxTLogVersion, &lagSeconds, keyValueStoreType);
 		if (lagSeconds != -1.0) {
 			ssLag[ss->first.address()] = lagSeconds;
 		}

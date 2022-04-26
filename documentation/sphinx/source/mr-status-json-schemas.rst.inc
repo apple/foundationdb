@@ -79,6 +79,7 @@
                      "counter":0,
                      "roughness":0.0
                   },
+                  "storage_engine_type":"ssd-2",
                   "stored_bytes":12341234,
                   "kvstore_used_bytes":12341234,
                   "kvstore_available_bytes":12341234,
