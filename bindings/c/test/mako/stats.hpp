@@ -32,8 +32,14 @@
 
 namespace mako {
 
+/* rough cap on the number of samples to avoid OOM hindering benchmark */
+constexpr const size_t SAMPLE_CAP = 2000000;
+
 /* size of each block to get detailed latency for each operation */
 constexpr const size_t LAT_BLOCK_SIZE = 4093;
+
+/* hard cap on the number of sample blocks = 488 */
+constexpr const size_t MAX_LAT_BLOCKS = SAMPLE_CAP / LAT_BLOCK_SIZE;
 
 /* memory block allocated to each operation when collecting detailed latency */
 class LatencySampleBlock {
@@ -56,7 +62,7 @@ public:
 /* collect sampled latencies until OOM is hit */
 class LatencySampleBin {
 	std::list<LatencySampleBlock> blocks;
-	bool noMoreAlloc{false};
+	bool noMoreAlloc{ false };
 
 	bool tryAlloc() {
 		try {
@@ -76,7 +82,8 @@ public:
 
 	void put(timediff_t td) {
 		if (blocks.empty() || blocks.back().full()) {
-			if (noMoreAlloc || !tryAlloc()) return;
+			if (blocks.size() >= MAX_LAT_BLOCKS || noMoreAlloc || !tryAlloc())
+				return;
 		}
 		blocks.back().put(td);
 	}
