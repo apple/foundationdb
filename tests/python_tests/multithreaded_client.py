@@ -30,7 +30,6 @@ sys.path.append(args.build_dir + '/bindings/python')
 import fdb
 import os
 import random
-import time
 fdb.api_version(630)
 
 if not os.path.exists(args.client_log_dir):
@@ -55,6 +54,6 @@ for i in range(100):
     key = b"test_%d" % random.randrange(0, 100000000)
     val = b"value_%d" % random.randrange(0, 10000000)
     db = dbs[i % len(dbs)]
-    print ("Writing: ", key, val, db)
+    print("Writing: ", key, val, db)
     db[key] = val
     assert (val == db[key])

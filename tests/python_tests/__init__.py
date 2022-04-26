@@ -49,6 +49,7 @@ class Result(object):
 class PythonTest(object):
     def __init__(self):
         self.result = Result()
+        self.args = None
 
     def run_test(self):
         pass
@@ -94,7 +95,7 @@ class PythonTest(object):
 
         try:
             self.run_test()
-        except:
+        except Exception:
             self.result.add_error(traceback.format_exc())
 
         self.result.save(self.args.output_directory)

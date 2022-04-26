@@ -57,7 +57,7 @@ class PythonPerformance(PythonTest):
         super(PythonPerformance, self).__init__()
         self.key_count = key_count
         self.key_size = key_size
-        self.value_str = ''.join(['x' for i in range(value_size)])
+        self.value_str = ''.join(['x' for _ in range(value_size)])
 
     # Python Performance Tests (checks if functions run and yield correct results, gets performance indicators)
     def run_test(self):
@@ -65,7 +65,7 @@ class PythonPerformance(PythonTest):
             db = fdb.open(None, 'DB')
         except KeyboardInterrupt:
             raise
-        except:
+        except Exception:
             self.result.add_error(self.get_error('fdb.open failed'))
             return
 
@@ -73,7 +73,7 @@ class PythonPerformance(PythonTest):
             self.test_performance(db)
         except KeyboardInterrupt:
             raise
-        except:
+        except Exception:
             self.result.add_error(self.get_error('Failed to complete all tests'))
 
     def random_key(self):
@@ -86,12 +86,12 @@ class PythonPerformance(PythonTest):
         return self.value_str
 
     def insert_data(self, db):
-        print 'Loading database'
+        print('Loading database')
         del db[:]
         num_keys = 100000 / (self.key_size + len(self.value_str))
 
-        trs = [db.create_transaction() for i in range(int(math.ceil(float(self.key_count) / num_keys)))]
-        success = [False for i in range(len(trs))]
+        trs = [db.create_transaction() for _ in range(int(math.ceil(float(self.key_count) / num_keys)))]
+        success = [False for _ in range(len(trs))]
 
         while not all(success):
             futures = {}
@@ -142,7 +142,7 @@ class PythonPerformance(PythonTest):
                     results.append(getattr(self, fxn_name)(db))
                 except KeyboardInterrupt:
                     raise
-                except:
+                except Exception:
                     self.result.add_error(self.get_error('Performance test failed: ' + PythonPerformance.tests[test]))
                     break
 
@@ -233,7 +233,7 @@ class PythonPerformance(PythonTest):
         tr.options.set_retry_limit(5)
 
         if count > self.key_count / 2:
-            keys = [self.random_key() for i in range(count)]
+            keys = [self.random_key() for _ in range(count)]
         else:
             key_set = OrderedDict()
             while len(key_set) < count:
@@ -295,9 +295,9 @@ class PythonPerformance(PythonTest):
 
     # Adds the stack trace to an error message
     def get_error(self, message):
-        errorMessage = message + "\n" + traceback.format_exc()
-        print('%s' % errorMessage)
-        return errorMessage
+        error_message = message + "\n" + traceback.format_exc()
+        print('%s' % error_message)
+        return error_message
 
 
 if __name__ == '__main__':

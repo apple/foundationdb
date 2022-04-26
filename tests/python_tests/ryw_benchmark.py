@@ -53,7 +53,7 @@ class RYWBenchmark(PythonTest):
             db = fdb.open(None, 'DB')
         except KeyboardInterrupt:
             raise
-        except:
+        except Exception:
             self.result.add_error(self.get_error('fdb.open failed'))
             return
 
@@ -61,7 +61,7 @@ class RYWBenchmark(PythonTest):
             self.test_performance(db)
         except KeyboardInterrupt:
             raise
-        except:
+        except Exception:
             self.result.add_error(self.get_error('Failed to complete all tests'))
 
     def key(self, num):
@@ -69,9 +69,9 @@ class RYWBenchmark(PythonTest):
 
     # Adds the stack trace to an error message
     def get_error(self, message):
-        errorMessage = message + "\n" + traceback.format_exc()
-        print(errorMessage)
-        return errorMessage
+        error_message = message + "\n" + traceback.format_exc()
+        print(error_message)
+        return error_message
 
     def test_performance(self, db):
         tr = db.create_transaction()
@@ -99,7 +99,7 @@ class RYWBenchmark(PythonTest):
                     results.append(getattr(self, fxn_name)(tr))
                 except KeyboardInterrupt:
                     raise
-                except:
+                except Exception:
                     self.result.add_error(self.get_error('Performance test failed: ' + RYWBenchmark.tests[test]))
                     break
 
