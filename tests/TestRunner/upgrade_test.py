@@ -34,7 +34,7 @@ MAX_DOWNLOAD_ATTEMPTS = 5
 RUN_WITH_GDB = False
 
 
-def make_executable(path):
+def make_executable_path(path):
     st = os.stat(path)
     os.chmod(path, st.st_mode | stat.S_IEXEC)
 
@@ -68,15 +68,15 @@ def random_sleep(min_sec, max_sec):
 
 
 def compute_sha256(filename):
-    hash = hashlib.sha256()
+    hash_function = hashlib.sha256()
     with open(filename, 'rb') as f:
         while True:
             data = f.read(128*1024)
             if not data:
                 break
-            hash.update(data)
+            hash_function.update(data)
 
-    return hash.hexdigest()
+    return hash_function.hexdigest()
 
 
 def read_to_str(filename):
@@ -179,7 +179,7 @@ class UpgradeTest:
             assert local_sha256.exists(), "{} does not exist".format(local_sha256)
             expected_checksum = read_to_str(local_sha256)
             actual_checkum = compute_sha256(local_file_tmp)
-            if (expected_checksum == actual_checkum):
+            if expected_checksum == actual_checkum:
                 print("Checksum OK")
                 break
             print("Checksum mismatch. Expected: {} Actual: {}".format(
@@ -192,7 +192,7 @@ class UpgradeTest:
         os.remove(local_sha256)
 
         if make_executable:
-            make_executable(local_file)
+            make_executable_path(local_file)
 
     # Download all old binaries required for testing the specified upgrade path
     def download_old_binaries(self):
