@@ -20,6 +20,7 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/Knobs.h"
+#include "fdbclient/NativeAPI.actor.h"
 
 KeyRef keyBetween(const KeyRangeRef& keys) {
 	int pos = 0; // will be the position of the first difference between keys.begin and keys.end
@@ -40,16 +41,14 @@ KeyRef keyBetween(const KeyRangeRef& keys) {
 }
 
 void KeySelectorRef::setKey(KeyRef const& key) {
-	// There are no keys in the database with size greater than KEY_SIZE_LIMIT, so if this key selector has a key
+	// There are no keys in the database with size greater than the max key size, so if this key selector has a key
 	// which is large, then we can translate it to an equivalent key selector with a smaller key
-	if (key.size() >
-	    (key.startsWith(LiteralStringRef("\xff")) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT))
-		this->key = key.substr(0,
-		                       (key.startsWith(LiteralStringRef("\xff")) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT
-		                                                                 : CLIENT_KNOBS->KEY_SIZE_LIMIT) +
-		                           1);
-	else
+	int64_t maxKeySize = getMaxKeySize(key);
+	if (key.size() > maxKeySize) {
+		this->key = key.substr(0, maxKeySize + 1);
+	} else {
 		this->key = key;
+	}
 }
 
 void KeySelectorRef::setKeyUnlimited(KeyRef const& key) {
