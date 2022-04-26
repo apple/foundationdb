@@ -25,6 +25,7 @@
 #include <cstdint>
 #include <cstring>
 #include <list>
+#include <new>
 #include <utility>
 #include "operations.hpp"
 #include "time.hpp"
@@ -32,14 +33,14 @@
 namespace mako {
 
 /* size of each block to get detailed latency for each operation */
-constexpr const size_t LAT_BLOCK_SIZE = 4095;
+constexpr const size_t LAT_BLOCK_SIZE = 4093;
 
 /* memory block allocated to each operation when collecting detailed latency */
 class LatencySampleBlock {
 	uint64_t samples[LAT_BLOCK_SIZE]{
 		0,
 	};
-	uint32_t index{ 0 };
+	uint64_t index{ 0 };
 
 public:
 	LatencySampleBlock() noexcept = default;
@@ -52,19 +53,31 @@ public:
 	std::pair<uint64_t const*, size_t> data() const noexcept { return { samples, index }; }
 };
 
-/* collect sampled latencies */
+/* collect sampled latencies until OOM is hit */
 class LatencySampleBin {
 	std::list<LatencySampleBlock> blocks;
+	bool noMoreAlloc{false};
+
+	bool tryAlloc() {
+		try {
+			blocks.emplace_back();
+		} catch (const std::bad_alloc&) {
+			noMoreAlloc = true;
+			return false;
+		}
+		return true;
+	}
 
 public:
 	void reserveOneBlock() {
 		if (blocks.empty())
-			blocks.emplace_back();
+			tryAlloc();
 	}
 
 	void put(timediff_t td) {
-		if (blocks.empty() || blocks.back().full())
-			blocks.emplace_back();
+		if (blocks.empty() || blocks.back().full()) {
+			if (noMoreAlloc || !tryAlloc()) return;
+		}
 		blocks.back().put(td);
 	}
 

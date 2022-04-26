@@ -58,7 +58,8 @@ Arguments
 
 - | ``--async_xacts <xacts>``
   | Number of transactions per worker process to run asynchronously (Default: 0)
-  | ``<xacts>`` > 0 switches the execution mode to non-blocking (See ``-t | --threads``)
+  | ``<xacts>`` > 0 switches the execution mode to non-blocking (See ``-t | --threads``), with the exception of blob granules API
+  | Note: throttling options, e.g. ``--tpsmax``, ``--tpsmin``, ``--tpschange``, ``--tpsinterval``, are ignored in asynchronous mode
 
 - | ``-r | --rows <rows>``
   | Number of rows initially populated (Default: 100000)
