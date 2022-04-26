@@ -276,6 +276,8 @@ endif()
             ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests
             --tmp-dir
             @TMP_DIR@
+            --log-dir
+            @LOG_DIR@
             )
 
   add_fdbclient_test(
@@ -293,6 +295,10 @@ endif()
             ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/blobgranuletests
             --blob-granule-local-file-path
             @DATA_DIR@/fdbblob/
+            --tmp-dir
+            @TMP_DIR@
+            --log-dir
+            @LOG_DIR@
             )
 
   if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" AND NOT USE_SANITIZER)
