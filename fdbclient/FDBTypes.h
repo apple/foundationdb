@@ -869,8 +869,8 @@ struct KeyValueStoreType {
 		serializer(ar, type);
 	}
 
-	std::string toString() const {
-		switch (type) {
+	static std::string getStoreTypeStr(const StoreType& storeType) {
+		switch (storeType) {
 		case SSD_BTREE_V1:
 			return "ssd-1";
 		case SSD_BTREE_V2:
@@ -889,6 +889,7 @@ struct KeyValueStoreType {
 			return "unknown";
 		}
 	}
+	std::string toString() const { return getStoreTypeStr((StoreType)type); }
 
 private:
 	uint32_t type;
