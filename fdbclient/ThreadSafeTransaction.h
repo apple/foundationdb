@@ -167,7 +167,7 @@ public:
 	ThreadFuture<Void> commit() override;
 	Version getCommittedVersion() override;
 	VersionVector getVersionVector() override;
-	SpanContext getSpanContext() override;
+	UID getSpanID() override;
 	ThreadFuture<int64_t> getApproximateSize() override;
 
 	ThreadFuture<uint64_t> getProtocolVersion();

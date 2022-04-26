@@ -272,6 +272,12 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 
 	LocalityMap<UID> machineLocalityMap; // locality info of machines
 
+	// A mechanism to tell actors that reference a DDTeamCollection object through a direct
+	// pointer (without doing reference counting) that the object is being destroyed.
+	// (Introduced to solve the problem of "self" getting destroyed from underneath the
+	// "storageRecruiter" actor).
+	Promise<Void> shutdown;
+
 	// Randomly choose one machine team that has chosenServer and has the correct size
 	// When configuration is changed, we may have machine teams with old storageTeamSize
 	Reference<TCMachineTeamInfo> findOneRandomMachineTeam(TCServerInfo const& chosenServer) const;

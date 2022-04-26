@@ -55,6 +55,8 @@ set(FDBSERVER_SRCS
   KeyValueStoreMemory.actor.cpp
   KeyValueStoreRocksDB.actor.cpp
   KeyValueStoreSQLite.actor.cpp
+  KmsConnector.h
+  KmsConnectorInterface.h
   KnobProtectiveGroups.cpp
   KnobProtectiveGroups.h
   Knobs.h
@@ -86,7 +88,6 @@ set(FDBSERVER_SRCS
   OldTLogServer_4_6.actor.cpp
   OldTLogServer_6_0.actor.cpp
   OldTLogServer_6_2.actor.cpp
-  OTELSpanContextMessage.h
   OnDemandStore.actor.cpp
   OnDemandStore.h
   PaxosConfigConsumer.actor.cpp
@@ -134,8 +135,8 @@ set(FDBSERVER_SRCS
   ServerDBInfo.actor.h
   ServerDBInfo.h
   SigStack.cpp
-  SimEncryptKmsProxy.actor.cpp
-  SimEncryptKmsProxy.actor.h
+  SimKmsConnector.actor.h
+  SimKmsConnector.actor.cpp
   SimpleConfigConsumer.actor.cpp
   SimpleConfigConsumer.h
   SimulatedCluster.actor.cpp

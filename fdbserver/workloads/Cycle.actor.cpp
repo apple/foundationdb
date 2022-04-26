@@ -106,9 +106,10 @@ struct CycleWorkload : TestWorkload {
 				state Transaction tr(cx);
 				if (deterministicRandom()->random01() >= self->traceParentProbability) {
 					state Span span("CycleClient"_loc);
-					TraceEvent("CycleTracingTransaction", span.context.traceID).log();
+					// TraceEvent("CycleTracingTransaction", span.context).log();
+					TraceEvent("CycleTracingTransaction", span.context).log();
 					tr.setOption(FDBTransactionOptions::SPAN_PARENT,
-					             BinaryWriter::toValue(span.context, IncludeVersion()));
+					             BinaryWriter::toValue(span.context, Unversioned()));
 				}
 				while (true) {
 					try {
