@@ -49,19 +49,38 @@ extern const KeyRef afterAllKeys;
 //	An internal mapping of where shards are located in the database. [[begin]] is the start of the shard range
 //	and the result is a list of serverIDs or Tags where these shards are located. These values can be changed
 //	as data movement occurs.
+//  With ShardEncodLocationMetaData, the encoding format is:
+//    "\xff/keyServers/[[begin]]" := "[[std::vector<serverID>, std::vector<serverID>], srcID, destID]", where srcID
+//  and destID are the source and destination `shard id`, respectively.
 extern const KeyRangeRef keyServersKeys, keyServersKeyServersKeys;
 extern const KeyRef keyServersPrefix, keyServersEnd, keyServersKeyServersKey;
+extern const UID uninitializedShardId;
 const Key keyServersKey(const KeyRef& k);
 const KeyRef keyServersKey(const KeyRef& k, Arena& arena);
 const Value keyServersValue(RangeResult result,
                             const std::vector<UID>& src,
                             const std::vector<UID>& dest = std::vector<UID>());
+const Value keyServersValue(const std::vector<UID>& src,
+                            const std::vector<UID>& dest,
+                            const UID& srcID,
+                            const UID& destID);
 const Value keyServersValue(const std::vector<Tag>& srcTag, const std::vector<Tag>& destTag = std::vector<Tag>());
+const Value keyServersValue(const std::vector<Tag>& srcTag,
+                            const std::vector<Tag>& destTag,
+                            const UID& srcId,
+                            const UID& destId);
 // `result` must be the full result of getting serverTagKeys
 void decodeKeyServersValue(RangeResult result,
                            const ValueRef& value,
                            std::vector<UID>& src,
                            std::vector<UID>& dest,
+                           bool missingIsError = true);
+void decodeKeyServersValue(RangeResult result,
+                           const ValueRef& value,
+                           std::vector<UID>& src,
+                           std::vector<UID>& dest,
+                           UID& srcID,
+                           UID& destID,
                            bool missingIsError = true);
 void decodeKeyServersValue(std::map<Tag, UID> const& tag_uid,
                            const ValueRef& value,
@@ -71,11 +90,24 @@ void decodeKeyServersValue(std::map<Tag, UID> const& tag_uid,
 extern const KeyRef clusterIdKey;
 
 // "\xff/checkpoint/[[UID]] := [[CheckpointMetaData]]"
+extern const KeyRangeRef checkpointKeys;
 extern const KeyRef checkpointPrefix;
-const Key checkpointKeyFor(UID checkpointID);
+const Key checkpointKeyFor(UID checkpontId);
+const Key checkpointKeyFor(UID ssID, UID moveDataID, UID checkpontId);
+const Key checkpointKeyPrefixFor(UID ssID, UID moveDataID);
+const KeyRange checkpointKeyRangeFor(UID ssID, UID moveDataID);
+void decodeCheckpointKeyRange(const KeyRangeRef& key, UID& ssID, UID& dataMoveId);
 const Value checkpointValue(const CheckpointMetaData& checkpoint);
 UID decodeCheckpointKey(const KeyRef& key);
+void decodeCheckpointKey(const KeyRef& key, UID& ssID, UID& dataMoveId, UID& checkpontId);
 CheckpointMetaData decodeCheckpointValue(const ValueRef& value);
+
+// "\xff/dataMoves/[[UID]] := [[DataMoveMetaData]]"
+extern const KeyRangeRef dataMoveKeys;
+const Key dataMoveKeyFor(UID checkpontId);
+const Value dataMoveValue(const DataMoveMetaData& checkpoint);
+UID decodeDataMoveKey(const KeyRef& key);
+DataMoveMetaData decodeDataMoveValue(const ValueRef& value);
 
 // "\xff/storageCacheServer/[[UID]] := StorageServerInterface"
 // This will be added by the cache server on initialization and removed by DD
@@ -105,6 +137,8 @@ const Key serverKeysKey(UID serverID, const KeyRef& keys);
 const Key serverKeysPrefixFor(UID serverID);
 UID serverKeysDecodeServer(const KeyRef& key);
 bool serverHasKey(ValueRef storedValue);
+const Value serverKeysValue(const UID& id);
+void decodeServerKeysValue(const ValueRef& value, bool& assigned, bool& emptyRange, UID& id);
 
 extern const KeyRangeRef conflictingKeysRange;
 extern const ValueRef conflictingKeysTrue, conflictingKeysFalse;
@@ -204,9 +238,6 @@ const Key serverListKeyFor(UID serverID);
 const Value serverListValue(StorageServerInterface const&);
 UID decodeServerListKey(KeyRef const&);
 StorageServerInterface decodeServerListValue(ValueRef const&);
-
-Value swVersionValue(SWVersion const& swversion);
-SWVersion decodeSWVersionValue(ValueRef const&);
 
 //    "\xff/processClass/[[processID]]" := "[[ProcessClass]]"
 // Contains a mapping from processID to processClass
@@ -350,11 +381,6 @@ extern const KeyRef logsKey;
 //	"\xff/minRequiredCommitVersion" = "[[Version]]"
 //	Used during backup/recovery to restrict version requirements
 extern const KeyRef minRequiredCommitVersionKey;
-
-//	"\xff/versionEpochKey" = "[[uint64_t]]"
-//	Defines the base epoch representing version 0. The value itself is the
-//	number of microseconds since the Unix epoch.
-extern const KeyRef versionEpochKey;
 
 const Value logsValue(const std::vector<std::pair<UID, NetworkAddress>>& logs,
                       const std::vector<std::pair<UID, NetworkAddress>>& oldLogs);
@@ -572,9 +598,9 @@ extern const KeyRangeRef blobGranuleSplitKeys;
 extern const KeyRangeRef blobGranuleHistoryKeys;
 
 // \xff\x02/bgp/(start,end) = (version, force)
-extern const KeyRangeRef blobGranulePurgeKeys;
+extern const KeyRangeRef blobGranulePruneKeys;
 extern const KeyRangeRef blobGranuleVersionKeys;
-extern const KeyRef blobGranulePurgeChangeKey;
+extern const KeyRef blobGranulePruneChangeKey;
 
 const Key blobGranuleFileKeyFor(UID granuleID, Version fileVersion, uint8_t fileType);
 std::tuple<UID, Version, uint8_t> decodeBlobGranuleFileKey(KeyRef const& key);
@@ -583,8 +609,8 @@ const KeyRange blobGranuleFileKeyRangeFor(UID granuleID);
 const Value blobGranuleFileValueFor(StringRef const& filename, int64_t offset, int64_t length, int64_t fullFileLength);
 std::tuple<Standalone<StringRef>, int64_t, int64_t, int64_t> decodeBlobGranuleFileValue(ValueRef const& value);
 
-const Value blobGranulePurgeValueFor(Version version, KeyRange range, bool force);
-std::tuple<Version, KeyRange, bool> decodeBlobGranulePurgeValue(ValueRef const& value);
+const Value blobGranulePruneValueFor(Version version, KeyRange range, bool force);
+std::tuple<Version, KeyRange, bool> decodeBlobGranulePruneValue(ValueRef const& value);
 
 const Value blobGranuleMappingValueFor(UID const& workerID);
 UID decodeBlobGranuleMappingValue(ValueRef const& value);

@@ -24,20 +24,56 @@
 #elif !defined(FDBSERVER_DATA_DISTRIBUTION_ACTOR_H)
 #define FDBSERVER_DATA_DISTRIBUTION_ACTOR_H
 
-#include <boost/heap/skew_heap.hpp>
-#include <boost/heap/policies.hpp>
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/MoveKeys.actor.h"
-#include "fdbserver/LogSystem.h"
 #include "fdbclient/RunTransaction.actor.h"
+#include "fdbserver/Knobs.h"
+#include "fdbserver/LogSystem.h"
+#include "fdbserver/MoveKeys.actor.h"
+#include <boost/heap/policies.hpp>
+#include <boost/heap/skew_heap.hpp>
+
 #include "flow/actorcompiler.h" // This must be the last #include.
+
+struct DDShardInfo;
+
+struct DataMove {
+	const DataMoveMetaData meta;
+	// KeyRange keys;
+	// int priority;
+	// int boundaryPriority;
+	// int healthPriority;
+	bool restore;
+	bool valid;
+
+	double startTime;
+	// UID randomId;
+	// UID dataMoveId;
+	// int workFactor;
+	std::vector<std::vector<UID>> primarySrc;
+	std::vector<std::vector<UID>> remoteSrc;
+	std::vector<UID> primaryDest;
+	std::vector<UID> remoteDest;
+
+	DataMove() : meta(DataMoveMetaData()), restore(false), startTime(-1), valid(false) {}
+	explicit DataMove(const DataMoveMetaData& meta, bool restore)
+	  : meta(meta), restore(restore), valid(true), startTime(now()) {}
+
+	void addShard(const DDShardInfo& shard, int priority = SERVER_KNOBS->PRIORITY_RECOVER_MOVE);
+};
 
 struct RelocateShard {
 	KeyRange keys;
 	int priority;
+	const bool restore;
+	bool cancelled;
+	std::shared_ptr<DataMove> dataMove;
+	UID dataMoveId;
 
-	RelocateShard() : priority(0) {}
-	RelocateShard(KeyRange const& keys, int priority) : keys(keys), priority(priority) {}
+	RelocateShard() : priority(0), restore(false), cancelled(false) {}
+	RelocateShard(KeyRange const& keys, int priority)
+	  : keys(keys), priority(priority), restore(false), cancelled(false) {}
+	RelocateShard(KeyRange const& keys, int priority, bool restore)
+	  : keys(keys), priority(priority), restore(restore), cancelled(false) {}
 };
 
 struct IDataDistributionTeam {
@@ -76,29 +112,28 @@ struct IDataDistributionTeam {
 	}
 };
 
-FDB_DECLARE_BOOLEAN_PARAM(WantNewServers);
-FDB_DECLARE_BOOLEAN_PARAM(WantTrueBest);
-FDB_DECLARE_BOOLEAN_PARAM(PreferLowerUtilization);
-FDB_DECLARE_BOOLEAN_PARAM(TeamMustHaveShards);
-
 struct GetTeamRequest {
 	bool wantsNewServers;
 	bool wantsTrueBest;
 	bool preferLowerUtilization;
 	bool teamMustHaveShards;
 	double inflightPenalty;
+	bool findTeamByServers;
 	std::vector<UID> completeSources;
 	std::vector<UID> src;
 	Promise<std::pair<Optional<Reference<IDataDistributionTeam>>, bool>> reply;
 
 	GetTeamRequest() {}
-	GetTeamRequest(WantNewServers wantsNewServers,
-	               WantTrueBest wantsTrueBest,
-	               PreferLowerUtilization preferLowerUtilization,
-	               TeamMustHaveShards teamMustHaveShards,
+	GetTeamRequest(bool wantsNewServers,
+	               bool wantsTrueBest,
+	               bool preferLowerUtilization,
+	               bool teamMustHaveShards,
 	               double inflightPenalty = 1.0)
 	  : wantsNewServers(wantsNewServers), wantsTrueBest(wantsTrueBest), preferLowerUtilization(preferLowerUtilization),
-	    teamMustHaveShards(teamMustHaveShards), inflightPenalty(inflightPenalty) {}
+	    teamMustHaveShards(teamMustHaveShards), inflightPenalty(inflightPenalty), findTeamByServers(false) {}
+	GetTeamRequest(std::vector<UID> servers)
+	  : wantsNewServers(false), wantsTrueBest(false), preferLowerUtilization(false), teamMustHaveShards(false),
+	    inflightPenalty(1.0), findTeamByServers(true), src(std::move(servers)) {}
 
 	std::string getDesc() const {
 		std::stringstream ss;
@@ -216,8 +251,12 @@ struct DDShardInfo {
 	std::vector<UID> primaryDest;
 	std::vector<UID> remoteDest;
 	bool hasDest;
+	UID srcId;
+	UID destId;
 
-	explicit DDShardInfo(Key key) : key(key), hasDest(false) {}
+	explicit DDShardInfo(Key key) : key(key) {}
+
+	DDShardInfo(Key key, UID srcId, UID destId) : key(key), hasDest(false), srcId(srcId), destId(destId) {}
 };
 
 struct InitialDataDistribution : ReferenceCounted<InitialDataDistribution> {
@@ -227,6 +266,7 @@ struct InitialDataDistribution : ReferenceCounted<InitialDataDistribution> {
 	std::set<std::vector<UID>> remoteTeams;
 	std::vector<DDShardInfo> shards;
 	Optional<Key> initHealthyZoneValue;
+	std::vector<DataMoveMetaData> dataMoves;
 };
 
 struct ShardMetrics {
@@ -272,7 +312,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
                                          Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
                                          MoveKeysLock lock,
                                          PromiseStream<Promise<int64_t>> getAverageShardBytes,
-                                         FutureStream<Promise<int>> getUnhealthyRelocationCount,
+                                         PromiseStream<Promise<int>> getUnhealthyRelocationCount,
                                          UID distributorId,
                                          int teamSize,
                                          int singleRegionTeamSize,
