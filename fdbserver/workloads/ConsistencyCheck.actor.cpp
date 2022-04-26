@@ -708,7 +708,13 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					if (firstValidServer >= 0 && keyValueFutures[firstValidServer].get().get().more) {
 						VectorRef<KeyValueRef> result = keyValueFutures[firstValidServer].get().get().data;
 						ASSERT(result.size() > 0);
-						begin = firstGreaterThan(result[result.size() - 1].key);
+
+						// It's possible the last key read is inside a tenant and is too long as a raw key
+						// If that happens, we can set it using setKeyUnlimited to avoid truncating it.
+						// TODO: remove this workaround when we have better raw key support for long tenant keys.
+						begin = firstGreaterThan(""_sr);
+						begin.setKeyUnlimited(result[result.size() - 1].key);
+
 						ASSERT(begin.getKey() != allKeys.end);
 						lastStartSampleKey = lastSampleKey;
 						TraceEvent(SevDebug, "CacheConsistencyCheckNextBeginKey").detail("Key", begin);
