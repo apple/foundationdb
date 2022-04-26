@@ -28,6 +28,7 @@
 #include "fdbclient/Knobs.h"
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/TransactionLineage.h"
 #include "fdbrpc/sim_validation.h"
@@ -236,6 +237,80 @@ struct ResolutionRequestBuilder {
 	}
 };
 
+ErrorOr<Optional<TenantMapEntry>> getTenantEntry(ProxyCommitData* commitData,
+                                                 Optional<TenantNameRef> tenant,
+                                                 Optional<int64_t> tenantId,
+                                                 bool logOnFailure) {
+	if (tenant.present()) {
+		auto itr = commitData->tenantMap.find(tenant.get());
+		if (itr == commitData->tenantMap.end()) {
+			if (logOnFailure) {
+				TraceEvent(SevWarn, "CommitProxyUnknownTenant", commitData->dbgid).detail("Tenant", tenant.get());
+			}
+
+			return unknown_tenant();
+		} else if (tenantId.present() && tenantId.get() != itr->second.id) {
+			if (logOnFailure) {
+				TraceEvent(SevWarn, "CommitProxyTenantIdMismatch", commitData->dbgid)
+				    .detail("Tenant", tenant.get())
+				    .detail("TenantId", tenantId)
+				    .detail("ExistingId", itr->second.id);
+			}
+
+			return unknown_tenant();
+		}
+
+		return ErrorOr<Optional<TenantMapEntry>>(Optional<TenantMapEntry>(itr->second));
+	}
+
+	return Optional<TenantMapEntry>();
+}
+
+bool verifyPrefix(ProxyCommitData* const commitData, const CommitTransactionRequest& req) {
+	ErrorOr<Optional<TenantMapEntry>> tenantEntry =
+	    getTenantEntry(commitData, req.tenantInfo.name.castTo<TenantNameRef>(), req.tenantInfo.tenantId, true);
+
+	if (tenantEntry.isError()) {
+		return true;
+	}
+
+	auto te = tenantEntry.get();
+	if (te.present()) {
+		Key tenantPrefix = te.get().prefix;
+
+		// auto& tenantPrefix = tenantEntry.get().get().prefix;
+		for (auto& m : req.transaction.mutations) {
+			if (m.param1 != metadataVersionKey) {
+				if (!m.param1.startsWith(tenantPrefix)) {
+					return false;
+				}
+				if (m.type == MutationRef::ClearRange && !m.param2.startsWith(tenantPrefix)) {
+					return false;
+				} else if (m.type != MutationRef::SetVersionstampedKey) {
+					// TODO: How should this be handled?
+					// Maybe skip checking this for now? If so, fall-through.
+				}
+			}
+		}
+
+		for (auto& rc : req.transaction.read_conflict_ranges) {
+			if (rc.begin != metadataVersionKey &&
+			    (!rc.begin.startsWith(tenantPrefix) || !rc.end.startsWith(tenantPrefix))) {
+				return false;
+			}
+		}
+
+		for (auto& wc : req.transaction.write_conflict_ranges) {
+			if (wc.begin != metadataVersionKey &&
+			    (!wc.begin.startsWith(tenantPrefix) || !wc.end.startsWith(tenantPrefix))) {
+				return false;
+			}
+		}
+	}
+
+	return true;
+}
+
 ACTOR Future<Void> commitBatcher(ProxyCommitData* commitData,
                                  PromiseStream<std::pair<std::vector<CommitTransactionRequest>, int>> out,
                                  FutureStream<CommitTransactionRequest> in,
@@ -282,6 +357,14 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData* commitData,
 						    .detail("Size", bytes)
 						    .detail("Client", req.reply.getEndpoint().getPrimaryAddress());
 					}
+
+					if (!verifyPrefix(commitData, req)) {
+						++commitData->stats.txnCommitErrors;
+						req.reply.sendError(illegal_tenant_access());
+						TraceEvent(SevWarnAlways, "TenantPrefixMismatch").suppressFor(60);
+						continue;
+					}
+
 					++commitData->stats.txnCommitIn;
 
 					if (req.debugID.present()) {
@@ -448,35 +531,6 @@ ACTOR static Future<ResolveTransactionBatchReply> trackResolutionMetrics(Referen
 	ResolveTransactionBatchReply reply = wait(in);
 	dist->sampleSeconds(now() - startTime);
 	return reply;
-}
-
-ErrorOr<Optional<TenantMapEntry>> getTenantEntry(ProxyCommitData* commitData,
-                                                 Optional<TenantNameRef> tenant,
-                                                 Optional<int64_t> tenantId,
-                                                 bool logOnFailure) {
-	if (tenant.present()) {
-		auto itr = commitData->tenantMap.find(tenant.get());
-		if (itr == commitData->tenantMap.end()) {
-			if (logOnFailure) {
-				TraceEvent(SevWarn, "CommitProxyUnknownTenant", commitData->dbgid).detail("Tenant", tenant.get());
-			}
-
-			return unknown_tenant();
-		} else if (tenantId.present() && tenantId.get() != itr->second.id) {
-			if (logOnFailure) {
-				TraceEvent(SevWarn, "CommitProxyTenantIdMismatch", commitData->dbgid)
-				    .detail("Tenant", tenant.get())
-				    .detail("TenantId", tenantId)
-				    .detail("ExistingId", itr->second.id);
-			}
-
-			return unknown_tenant();
-		}
-
-		return ErrorOr<Optional<TenantMapEntry>>(Optional<TenantMapEntry>(itr->second));
-	}
-
-	return Optional<TenantMapEntry>();
 }
 
 namespace CommitBatch {
