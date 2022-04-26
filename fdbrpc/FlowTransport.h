@@ -191,7 +191,7 @@ struct Peer : public ReferenceCounted<Peer> {
 
 class IPAllowList;
 
-class FlowTransport {
+class FlowTransport : NonCopyable {
 public:
 	FlowTransport(uint64_t transportId, int maxWellKnownEndpoints, IPAllowList const* allowList);
 	~FlowTransport();

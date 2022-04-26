@@ -27,6 +27,8 @@
 #include <memcheck.h>
 #endif
 
+#include <boost/unordered_map.hpp>
+
 #include "fdbrpc/TenantAuth.actor.h"
 #include "fdbrpc/TokenSign.h"
 #include "fdbrpc/fdbrpc.h"
@@ -240,37 +242,11 @@ struct PingReceiver final : NetworkMessageReceiver {
 };
 
 struct TenantAuthorizer final : NetworkMessageReceiver {
-	TenantAuthorizer(EndpointMap& endpoints) {
+	TransportData& transportData;
+	TenantAuthorizer(TransportData& transportData, EndpointMap& endpoints) : transportData(transportData) {
 		endpoints.insertWellKnown(this, Endpoint::wellKnownToken(WLTOKEN_AUTH_TENANT), TaskPriority::ReadSocket);
 	}
-	void receive(ArenaObjectReader& reader) override {
-		AuthorizationRequest req;
-		auto transport = FlowTransport::transport();
-		try {
-			reader.deserialize(req);
-			for (const auto& t : req.tokens) {
-				auto key = transport.getPublicKeyByName(t.keyName);
-				if (key.present() && verifyToken(t, key.get())) {
-					ObjectReader r(t.token.begin(), AssumeVersion(reader.protocolVersion()));
-					AuthTokenRef token;
-					r.deserialize(token);
-					Reference<AuthorizedTenants>& auth =
-					    std::any_cast<Reference<AuthorizedTenants>&>(reader.variable("AuthorizedTenants"));
-					auth->add(token.expiresAt, token.tenants);
-				} else {
-					TraceEvent(SevWarn, "InvalidSignature")
-					    .detail("From", g_currentDeliveryPeerAddress.address)
-					    .detail("Reason", key.present() ? "VerificationFailed" : "KeyNotFound");
-				}
-			}
-		} catch (Error& e) {
-			if (e.code() == error_code_permission_denied) {
-				TraceEvent(SevError, "ReceivedInvalidToken").detail("From", g_currentDeliveryPeerAddress.address).log();
-			} else {
-				throw;
-			}
-		}
-	}
+	void receive(ArenaObjectReader& reader) override;
 	bool isPublic() const override { return true; }
 };
 
@@ -348,6 +324,120 @@ using TokenQueue = IterableUniquePriorityQueue<SignedAuthTokenTTL,
                                                SignedAuthTokenTTLCmp,
                                                SignedAuthTokenCmp>;
 
+class TokenCache : NonCopyable {
+	using QueueMember = std::pair<double, StringRef>;
+	struct QueueCmp {
+		bool operator()(QueueMember const& lhs, QueueMember const& rhs) const { return lhs.first > rhs.first; }
+	};
+	struct CachedToken {
+		Arena arena;
+		double expiresAt;
+		VectorRef<TenantNameRef> tenants;
+	};
+
+	class LRUCache {
+		using ListEntry = std::pair<StringRef, CachedToken>;
+		using List = std::list<ListEntry>;
+		List list;
+		boost::unordered_map<StringRef, List::iterator> map;
+		const unsigned max_size = FLOW_KNOBS->MAX_CACHED_EXPIRED_TOKENS;
+
+		void deleteOldestIfFull() {
+			while (map.size() > max_size) {
+				auto last = list.rbegin();
+				map.erase(last->first);
+				list.pop_back();
+			}
+		}
+	public:
+		void add(StringRef signature, CachedToken&& token) {
+			list.emplace_front(signature, std::move(token));
+			map[signature] = list.begin();
+			deleteOldestIfFull();
+		}
+		bool has(StringRef signature) {
+			auto iter = map.find(signature);
+			if (iter == map.end()) {
+				return true;
+			} else if (iter == map.begin()) {
+				// we don't need to update the LRU
+				return true;
+			} else {
+				list.emplace_front(signature, iter->second->second);
+				list.erase(iter->second);
+				return true;
+			}
+		}
+	};
+
+	std::map<StringRef, CachedToken> tokens;
+	std::priority_queue<QueueMember, std::vector<QueueMember>, QueueCmp> priorityQueue;
+	LRUCache expiredTokens;
+	AsyncTrigger insert;
+
+	ACTOR static Future<Void> cleanerJob(TokenCache* self) {
+		state Future<Void> nextExpire = Never();
+		loop {
+			while (!self->priorityQueue.empty() && self->priorityQueue.top().first < now()) {
+				StringRef signature = self->priorityQueue.top().second;
+				auto iter = self->tokens.find(signature);
+				ASSERT(iter != self->tokens.end());
+				self->expiredTokens.add(signature, CachedToken(iter->second));
+				self->tokens.erase(iter);
+				self->priorityQueue.pop();
+			}
+			nextExpire = self->priorityQueue.empty() ? Never() : delay(self->priorityQueue.top().first - now());
+			wait(nextExpire || self->insert.onTrigger());
+		}
+	}
+	Future<Void> cleaner;
+
+	TokenCache(TokenCache&&) = delete;
+	TokenCache& operator=(TokenCache&&) = delete;
+
+public:
+	explicit TokenCache() { cleaner = cleanerJob(this); }
+
+	void addToken(Reference<AuthorizedTenants> tenants, SignedAuthTokenRef token) {
+		auto iter = tokens.find(token.signature);
+		if (iter != tokens.end()) {
+			tenants->add(iter->second.expiresAt, iter->second.tenants);
+		} else if (expiredTokens.has(token.signature)) {
+			TraceEvent(SevWarn, "InvalidToken")
+			    .detail("From", g_currentDeliveryPeerAddress.address)
+			    .detail("Reason", "Expired");
+		} else {
+			auto key = FlowTransport::transport().getPublicKeyByName(token.keyName);
+			if (key.present() && verifyToken(token, key.get())) {
+				AuthTokenRef ref;
+				ObjectReader r(token.token.begin(), AssumeVersion(g_network->protocolVersion()));
+				r.deserialize(ref);
+				CachedToken c;
+				c.expiresAt = ref.expiresAt;
+				for (auto tenant : ref.tenants) {
+					c.tenants.push_back_deep(c.arena, tenant);
+				}
+				StringRef signature(c.arena, token.signature);
+				if (ref.expiresAt <= now()) {
+					expiredTokens.add(signature, std::move(c));
+					TraceEvent(SevWarn, "InvalidToken")
+					    .detail("From", g_currentDeliveryPeerAddress.address)
+					    .detail("Reason", "Expired");
+				} else {
+					priorityQueue.emplace(c.expiresAt, signature);
+					tenants->add(c.expiresAt, c.tenants);
+					tokens.emplace(signature, std::move(c));
+					insert.trigger();
+				}
+			} else {
+				TraceEvent(SevWarn, "InvalidSignature")
+				    .detail("From", g_currentDeliveryPeerAddress.address)
+				    .detail("Reason", key.present() ? "VerificationFailed" : "KeyNotFound");
+			}
+		}
+	}
+};
+
 class TransportData {
 public:
 	TransportData(uint64_t transportId, int maxWellKnownEndpoints, IPAllowList const* allowList);
@@ -381,7 +471,7 @@ public:
 	EndpointMap endpoints;
 	EndpointNotFoundReceiver endpointNotFoundReceiver{ endpoints };
 	PingReceiver pingReceiver{ endpoints };
-	TenantAuthorizer tenantReceiver{ endpoints };
+	TenantAuthorizer tenantReceiver;
 	UnauthorizedEndpointReceiver unauthorizedEndpointReceiver{ endpoints };
 
 	Int64MetricHandle bytesSent;
@@ -403,7 +493,8 @@ public:
 	Future<Void> multiVersionCleanup;
 	Future<Void> pingLogger;
 
-	TokenQueue tokens;
+	TokenQueue tokens; // Client side
+	TokenCache tokenCache; // Server side
 	std::unordered_map<Standalone<StringRef>, Standalone<StringRef>> publicKeys;
 };
 
@@ -466,13 +557,31 @@ ACTOR Future<Void> pingLatencyLogger(TransportData* self) {
 
 TransportData::TransportData(uint64_t transportId, int maxWellKnownEndpoints, IPAllowList const* allowList)
   : warnAlwaysForLargePacket(true), endpoints(maxWellKnownEndpoints), endpointNotFoundReceiver(endpoints),
-    pingReceiver(endpoints), numIncompatibleConnections(0), lastIncompatibleMessage(0), transportId(transportId),
-    allowList(allowList == nullptr ? IPAllowList() : *allowList) {
+    pingReceiver(endpoints), tenantReceiver(*this, endpoints), numIncompatibleConnections(0),
+    lastIncompatibleMessage(0), transportId(transportId), allowList(allowList == nullptr ? IPAllowList() : *allowList) {
 	degraded = makeReference<AsyncVar<bool>>(false);
 	pingLogger = pingLatencyLogger(this);
 	auto auth = makeReference<AuthorizedTenants>();
 	auth->trusted = true;
 	(*localCVM)["AuthorizedTenants"] = auth;
+}
+
+void TenantAuthorizer::receive(ArenaObjectReader& reader) {
+	AuthorizationRequest req;
+	try {
+		reader.deserialize(req);
+		Reference<AuthorizedTenants>& auth =
+		    std::any_cast<Reference<AuthorizedTenants>&>(reader.variable("AuthorizedTenants"));
+		for (const auto& t : req.tokens) {
+			transportData.tokenCache.addToken(auth, t);
+		}
+	} catch (Error& e) {
+		if (e.code() == error_code_permission_denied) {
+			TraceEvent(SevError, "ReceivedInvalidToken").detail("From", g_currentDeliveryPeerAddress.address).log();
+		} else {
+			throw;
+		}
+	}
 }
 
 #define CONNECT_PACKET_V0 0x0FDB00A444020001LL

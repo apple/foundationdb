@@ -37,41 +37,32 @@
 
 class AuthorizedTenants : public ReferenceCounted<AuthorizedTenants> {
 	friend class TransportData;
-	using QueueMember = std::pair<double, TenantNameRef>;
-	struct Cmp {
-		bool operator()(QueueMember const& lhs, QueueMember const& rhs) const { return lhs.first > rhs.first; }
-	};
 	bool trusted;
-	Future<Void> cleaner;
-	ACTOR static Future<Void> clean(AuthorizedTenants* self) {
-		loop {
-			while (!self->queue.empty() && self->queue.top().first <= now()) {
-				auto const& t = self->queue.top();
-				self->authorizedTenants.erase(t.second);
-				self->queue.pop();
-			}
-			Future<Void> nextExpire = self->queue.empty() ? Never() : delay(self->queue.top().first - now());
-			choose {
-				when(wait(nextExpire)) {}
-				when(wait(self->insert.onTrigger())) {}
-			}
-		}
-	}
-	std::priority_queue<QueueMember, std::vector<QueueMember>, Cmp> queue;
-	std::set<TenantName> authorizedTenants;
-	AsyncTrigger insert;
+	std::set<std::pair<double, TenantName>> authorizedTenants;
 
 public:
-	AuthorizedTenants(bool trusted = false) : trusted(trusted) { cleaner = clean(this); }
+	AuthorizedTenants(bool trusted = false) : trusted(trusted) {}
 	void add(double expire, VectorRef<TenantNameRef> const& tenants) {
 		for (auto tenant : tenants) {
-			TenantName t(tenant);
-			queue.emplace(expire, t);
-			authorizedTenants.insert(std::move(t));
+			authorizedTenants.emplace(expire, TenantName(tenant));
 		}
-		insert.trigger();
 	}
-	bool contains(TenantNameRef tenant) const { return authorizedTenants.count(tenant) != 0; }
+
+	void cleanTenants() {
+		while (authorizedTenants.begin()->first < now()) {
+			authorizedTenants.erase(authorizedTenants.begin());
+		}
+	}
+
+	bool contains(TenantNameRef tenant) const {
+		const_cast<AuthorizedTenants*>(this)->cleanTenants();
+		for (const auto& t : authorizedTenants) {
+			if (t.second == tenant) {
+				return true;
+			}
+		}
+		return false;
+	}
 	bool isTrusted() const { return trusted; }
 };
 

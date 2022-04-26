@@ -124,6 +124,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( NETWORK_TEST_REQUEST_COUNT,                            0 ); // 0 -> run forever
 	init( NETWORK_TEST_REQUEST_SIZE,                             1 );
 	init( NETWORK_TEST_SCRIPT_MODE,                          false );
+	init( MAX_CACHED_EXPIRED_TOKENS,                          1024 );
 
 	//AsyncFileCached
 	init( PAGE_CACHE_4K,                                   2LL<<30 );
