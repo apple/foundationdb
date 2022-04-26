@@ -3444,23 +3444,39 @@ ACTOR Future<GetRangeReqAndResultRef> quickGetKeyValues(
 			getRange.result = RangeResultRef(reply.data, reply.more);
 			return getRange;
 		}
+		TraceEvent("QuickGetKeyValuesErrorInReply")
+		    .error(reply.error.get())
+		    .detail("ServerID", data->thisServerID)
+		    .detail("Prefix", prefix);
 		// Otherwise fallback.
 	} catch (Error& e) {
+		TraceEvent("QuickGetKeyValuesErrorCaught")
+		    .error(e)
+		    .detail("ServerID", data->thisServerID)
+		    .detail("Prefix", prefix);
 		// Fallback.
 	}
 
 	++data->counters.quickGetKeyValuesMiss;
 	if (SERVER_KNOBS->QUICK_GET_KEY_VALUES_FALLBACK) {
-		state Transaction tr(data->cx, pOriginalReq->tenantInfo.name);
-		tr.setVersion(version);
-		// TODO: is DefaultPromiseEndpoint the best priority for this?
-		tr.trState->taskID = TaskPriority::DefaultPromiseEndpoint;
-		Future<RangeResult> rangeResultFuture = tr.getRange(prefixRange(prefix), Snapshot::True);
-		// TODO: async in case it needs to read from other servers.
-		RangeResult rangeResult = wait(rangeResultFuture);
-		a->dependsOn(rangeResult.arena());
-		getRange.result = rangeResult;
-		return getRange;
+		try {
+			state Transaction tr(data->cx, pOriginalReq->tenantInfo.name);
+			tr.setVersion(version);
+			// TODO: is DefaultPromiseEndpoint the best priority for this?
+			tr.trState->taskID = TaskPriority::DefaultPromiseEndpoint;
+			Future<RangeResult> rangeResultFuture = tr.getRange(prefixRange(prefix), Snapshot::True);
+			// TODO: async in case it needs to read from other servers.
+			RangeResult rangeResult = wait(rangeResultFuture);
+			a->dependsOn(rangeResult.arena());
+			getRange.result = rangeResult;
+			return getRange;
+		} catch (Error& e) {
+			TraceEvent("QuickGetKeyValuesErrorDuringFallBack")
+			    .error(e)
+			    .detail("ServerID", data->thisServerID)
+			    .detail("Prefix", prefix);
+			throw e;
+		}
 	} else {
 		throw quick_get_key_values_miss();
 	}
