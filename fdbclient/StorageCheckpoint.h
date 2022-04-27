@@ -86,4 +86,45 @@ struct CheckpointMetaData {
 	}
 };
 
+struct DataMoveMetaData {
+ 	enum Phase {
+ 		InvalidPhase = 0,
+ 		Prepare= 1, // System keyspace has been modified, data move in action.
+ 		Running = 2, // System keyspace has been modified, data move in action.
+ 		Completing = 3, // Data transfer has finished, finalizing system keyspace.
+ 		Deleting = 4, // Data move is cancelled.
+ 	};
+
+ 	constexpr static FileIdentifier file_identifier = 13804362;
+ 	UID id; // A unique id for this data move.
+ 	Version version;
+ 	KeyRange range;
+ 	int priority;
+ 	std::set<UID> src;
+ 	std::set<UID> dest;
+ 	int16_t phase; // DataMoveMetaData::Phase.
+
+ 	DataMoveMetaData() = default;
+ 	DataMoveMetaData(UID id, Version version, KeyRange const& range)
+ 	  : id(id), version(version), range(range), priority(0) {}
+ 	DataMoveMetaData(UID id, KeyRange const& range) : id(id), version(invalidVersion), range(range), priority(0) {}
+
+ 	Phase getPhase() const { return static_cast<Phase>(phase); }
+
+ 	void setPhase(Phase phase) { this->phase = static_cast<int16_t>(phase); }
+
+ 	std::string toString() const {
+ 		std::string res = "DataMoveMetaData:\nID: " + id.shortString() + "\nRange: " + range.toString() +
+ 		                  //   "\nVersion: " + std::to_string(version) + "\nPriority: " + std::to_string(priority) +
+ 		                  "\nPhase: " + std::to_string(static_cast<int>(phase)) + "\nSource Servers: " + describe(src) +
+ 		                  "\nDestination Servers: " + describe(dest) + "\n";
+ 		return res;
+ 	}
+
+ 	template <class Ar>
+ 	void serialize(Ar& ar) {
+ 		serializer(ar, id, version, range, phase, src, dest);
+ 	}
+ };
+
 #endif

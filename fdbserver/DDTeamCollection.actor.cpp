@@ -154,6 +154,18 @@ public:
 		return Void();
 	}
 
+	static void getTeamByServers(DDTeamCollection* self, GetTeamRequest req) {
+ 		const std::string servers = TCTeamInfo::serversToString(req.src);
+ 		Optional<Reference<IDataDistributionTeam>> res;
+ 		for (const auto& team : self->teams) {
+ 			if (team->getServerIDsStr() == servers) {
+ 				res = team;
+ 				break;
+ 			}
+ 		}
+ 		req.reply.send(std::make_pair(res, false));
+ 	}
+
 	// SOMEDAY: Make bestTeam better about deciding to leave a shard where it is (e.g. in PRIORITY_TEAM_HEALTHY case)
 	//		    use keys, src, dest, metrics, priority, system load, etc.. to decide...
 	ACTOR static Future<Void> getTeam(DDTeamCollection* self, GetTeamRequest req) {
@@ -2698,7 +2710,11 @@ public:
 	ACTOR static Future<Void> serverGetTeamRequests(DDTeamCollection* self, TeamCollectionInterface tci) {
 		loop {
 			GetTeamRequest req = waitNext(tci.getTeam.getFuture());
-			self->addActor.send(self->getTeam(req));
+			if (req.findTeamByServers) {
+ 				getTeamByServers(self, req);
+ 			} else {
+ 				self->addActor.send(self->getTeam(req));
+ 			}
 		}
 	}
 

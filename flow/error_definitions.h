@@ -95,6 +95,9 @@ ERROR( page_encoding_not_supported, 1071, "Page encoding type is not supported o
 ERROR( page_decoding_failed, 1072, "Page content decoding failed" )
 ERROR( unexpected_encoding_type, 1073, "Page content decoding failed" )
 ERROR( encryption_key_not_found, 1074, "Encryption key not found" )
+ERROR( stale_version_vector, 1075, "Client version vector is stale" )
+ERROR( data_move_cancelled, 1076, "Data move was cancelled" )
+ERROR( data_move_dest_team_not_found, 1077, "Dest team was not found for data move" )
 
 ERROR( broken_promise, 1100, "Broken promise" )
 ERROR( operation_cancelled, 1101, "Asynchronous operation cancelled" )
