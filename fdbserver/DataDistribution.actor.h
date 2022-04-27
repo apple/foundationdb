@@ -70,6 +70,8 @@ struct RelocateShard {
 
 	RelocateShard() : priority(0), cancelled(false) {}
 	RelocateShard(KeyRange const& keys, int priority) : keys(keys), priority(priority), cancelled(false) {}
+
+	bool isRestore() const { return this->dataMove != nullptr; }
 };
 
 struct IDataDistributionTeam {

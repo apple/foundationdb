@@ -432,6 +432,10 @@ bool serverHasKey(ValueRef storedValue) {
 }
 
 const Value serverKeysValue(const UID& id) {
+	if (!id.isValid()) {
+		return serverKeysFalse;
+	}
+
  	ASSERT(CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
  	BinaryWriter wr(IncludeVersion(ProtocolVersion::withShardEncodLocationMetaData()));
  	wr << id;

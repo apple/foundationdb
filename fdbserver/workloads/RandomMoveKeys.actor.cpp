@@ -143,6 +143,7 @@ struct MoveKeysWorkload : TestWorkload {
 			state Promise<Void> signal;
 			state DDEnabledState ddEnabledState;
 			wait(moveKeys(cx,
+			              UID(),
 			              keys,
 			              destinationTeamIDs,
 			              destinationTeamIDs,

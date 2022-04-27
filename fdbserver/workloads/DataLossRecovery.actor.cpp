@@ -204,6 +204,7 @@ struct DataLossRecoveryWorkload : TestWorkload {
 				moveKeysLock.myOwner = owner;
 
 				wait(moveKeys(cx,
+							  UID(),
 				              keys,
 				              dest,
 				              dest,
