@@ -37,6 +37,10 @@ private:
 	enum OpType { OP_INSERT, OP_CLEAR, OP_CLEAR_RANGE, OP_READ, OP_GET_RANGES, OP_LAST = OP_GET_RANGES };
 	std::vector<OpType> excludedOpTypes;
 
+	// Allow reads at the start to get blob_granule_transaction_too_old if BG data isn't initialized yet
+	// FIXME: should still guarantee a read succeeds eventually somehow
+	bool seenReadSuccess = false;
+
 	void randomReadOp(TTaskFct cont) {
 		std::string begin = randomKeyName();
 		std::string end = randomKeyName();
@@ -45,15 +49,23 @@ private:
 			std::swap(begin, end);
 		}
 		execTransaction(
-		    [begin, end, results](auto ctx) {
+		    [this, begin, end, results](auto ctx) {
 			    ctx->tx()->setOption(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE);
 			    KeyValuesResult res = ctx->tx()->readBlobGranules(begin, end, ctx->getBGBasePath());
 			    bool more;
 			    (*results) = res.getKeyValues(&more);
 			    ASSERT(!more);
+			    if (res.getError() == error_code_blob_granule_transaction_too_old) {
+				    ASSERT(!seenReadSuccess);
+				    ctx->done();
+			    }
 			    if (res.getError() != error_code_success) {
 				    ctx->onError(res.getError());
 			    } else {
+				    if (!seenReadSuccess) {
+					    info("BlobGranuleCorrectness::randomReadOp first success\n");
+				    }
+				    seenReadSuccess = true;
 				    ctx->done();
 			    }
 		    },
@@ -110,9 +122,11 @@ private:
 			        true);
 		    },
 		    [this, begin, end, results, cont]() {
-			    ASSERT(results->size() > 0);
-			    ASSERT(results->front().key <= begin);
-			    ASSERT(results->back().value >= end);
+			    if (seenReadSuccess) {
+				    ASSERT(results->size() > 0);
+				    ASSERT(results->front().key <= begin);
+				    ASSERT(results->back().value >= end);
+			    }
 
 			    for (int i = 0; i < results->size(); i++) {
 				    // no empty or inverted ranges
