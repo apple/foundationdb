@@ -85,6 +85,15 @@ public:
 		_forward = forward(db, std::addressof(dbInfoChanged));
 	}
 
+	// Given a list of insertions and clears, applies the necessary changes to
+	// the given transaction to update the global configuration database. Keys
+	// in the list of mutations should not include the global configuration
+	// prefix (`\xff\xff/global_config/`). The caller must still commit the
+	// given transaction in order to persist the changes.
+	static void applyChanges(Transaction& tr,
+	                         const VectorRef<KeyValueRef>& insertions,
+	                         const VectorRef<KeyRangeRef>& clears);
+
 	// Use this function to turn a global configuration key defined above into
 	// the full path needed to set the value in the database.
 	//
