@@ -174,6 +174,8 @@ public:
 
 	explicit TCTeamInfo(std::vector<Reference<TCServerInfo>> const& servers);
 
+	static std::string serversToString(std::vector<UID> servers);
+
 	std::string getTeamID() const override { return id.shortString(); }
 
 	std::vector<StorageServerInterface> getLastKnownServerInterfaces() const override;

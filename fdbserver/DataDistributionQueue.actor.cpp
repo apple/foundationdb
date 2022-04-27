@@ -45,6 +45,7 @@ struct RelocateData {
 
 	double startTime;
 	UID randomId;
+	UID dataMoveId;
 	int workFactor;
 	std::vector<UID> src;
 	std::vector<UID> completeSources;
@@ -52,19 +53,24 @@ struct RelocateData {
 	bool wantsNewServers;
 	bool cancellable;
 	TraceInterval interval;
+	std::shared_ptr<DataMove> dataMove;
 
 	RelocateData()
-	  : priority(-1), boundaryPriority(-1), healthPriority(-1), startTime(-1), workFactor(0), wantsNewServers(false),
-	    cancellable(false), interval("QueuedRelocation") {}
+	  : priority(-1), boundaryPriority(-1), healthPriority(-1), startTime(-1), dataMoveId(UID()), workFactor(0),
+	    wantsNewServers(false), cancellable(false), interval("QueuedRelocation") {}
 	explicit RelocateData(RelocateShard const& rs)
 	  : keys(rs.keys), priority(rs.priority), boundaryPriority(isBoundaryPriority(rs.priority) ? rs.priority : -1),
 	    healthPriority(isHealthPriority(rs.priority) ? rs.priority : -1), startTime(now()),
-	    randomId(deterministicRandom()->randomUniqueID()), workFactor(0),
+	    randomId(deterministicRandom()->randomUniqueID()), dataMoveId(rs.dataMoveId), workFactor(0),
 	    wantsNewServers(rs.priority == SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM ||
 	                    rs.priority == SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM ||
 	                    rs.priority == SERVER_KNOBS->PRIORITY_SPLIT_SHARD ||
 	                    rs.priority == SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT),
-	    cancellable(true), interval("QueuedRelocation") {}
+	    cancellable(true), interval("QueuedRelocation"), dataMove(rs.dataMove) {
+		if (dataMove != nullptr) {
+			this->src.insert(this->src.end(), dataMove->meta.src.begin(), dataMove->meta.src.end());
+		}
+	}
 
 	static bool isHealthPriority(int priority) {
 		return priority == SERVER_KNOBS->PRIORITY_POPULATE_REGION ||
@@ -78,6 +84,8 @@ struct RelocateData {
 	static bool isBoundaryPriority(int priority) {
 		return priority == SERVER_KNOBS->PRIORITY_SPLIT_SHARD || priority == SERVER_KNOBS->PRIORITY_MERGE_SHARD;
 	}
+
+	bool isRestore() const { return this->dataMove != nullptr; }
 
 	bool operator>(const RelocateData& rhs) const {
 		return priority != rhs.priority
@@ -401,11 +409,23 @@ void complete(RelocateData const& relocation, std::map<UID, Busyness>& busymap, 
 	completeDest(relocation, destBusymap);
 }
 
+ACTOR Future<Void> cancelDataMove(struct DDQueueData* self, KeyRange range, const DDEnabledState* ddEnabledState);
+
 ACTOR Future<Void> dataDistributionRelocator(struct DDQueueData* self,
                                              RelocateData rd,
                                              const DDEnabledState* ddEnabledState);
 
 struct DDQueueData {
+	struct DDDataMove {
+		DDDataMove() = default;
+		explicit DDDataMove(UID id) : id(id) {}
+
+		bool isValid() const { return id.isValid(); }
+
+		UID id;
+		Future<Void> cancel;
+	};
+
 	UID distributorId;
 	MoveKeysLock lock;
 	Database cx;
@@ -416,6 +436,7 @@ struct DDQueueData {
 
 	FlowLock startMoveKeysParallelismLock;
 	FlowLock finishMoveKeysParallelismLock;
+	FlowLock cleanUpDataMoveParallelismLock;
 	Reference<FlowLock> fetchSourceLock;
 
 	int activeRelocations;
@@ -437,6 +458,7 @@ struct DDQueueData {
 	KeyRangeMap<RelocateData> inFlight;
 	// Track all actors that relocates specified keys to a good place; Key: keyRange; Value: actor
 	KeyRangeActorMap inFlightActors;
+	KeyRangeMap<DDDataMove> dataMoves;
 
 	Promise<Void> error;
 	PromiseStream<RelocateData> dataTransferComplete;
@@ -515,6 +537,7 @@ struct DDQueueData {
 	    getAverageShardBytes(getAverageShardBytes),
 	    startMoveKeysParallelismLock(SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM),
 	    finishMoveKeysParallelismLock(SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM),
+	    cleanUpDataMoveParallelismLock(SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM),
 	    fetchSourceLock(new FlowLock(SERVER_KNOBS->DD_FETCH_SOURCE_PARALLELISM)), activeRelocations(0),
 	    queuedRelocations(0), bytesWritten(0), teamSize(teamSize), singleRegionTeamSize(singleRegionTeamSize),
 	    output(output), input(input), getShardMetrics(getShardMetrics), lastLimited(lastLimited), lastInterval(0),
@@ -954,6 +977,7 @@ struct DDQueueData {
 			}
 
 			if (overlappingInFlight) {
+				ASSERT(!rd.isRestore());
 				// logRelocation( rd, "SkippingOverlappingInFlight" );
 				continue;
 			}
@@ -972,7 +996,7 @@ struct DDQueueData {
 			// SOMEDAY: the list of source servers may be outdated since they were fetched when the work was put in the
 			// queue
 			// FIXME: we need spare capacity even when we're just going to be cancelling work via TEAM_HEALTHY
-			if (!canLaunchSrc(rd, teamSize, singleRegionTeamSize, busymap, cancellableRelocations)) {
+			if (!rd.isRestore() && !canLaunchSrc(rd, teamSize, singleRegionTeamSize, busymap, cancellableRelocations)) {
 				// logRelocation( rd, "SkippingQueuedRelocation" );
 				continue;
 			}
@@ -983,13 +1007,18 @@ struct DDQueueData {
 			// logRelocation( rd, "LaunchingRelocation" );
 
 			//TraceEvent(rd.interval.end(), distributorId).detail("Result","Success");
-			queuedRelocations--;
-			finishRelocation(rd.priority, rd.healthPriority);
+			if (!rd.isRestore()) {
+				queuedRelocations--;
+				finishRelocation(rd.priority, rd.healthPriority);
 
-			// now we are launching: remove this entry from the queue of all the src servers
-			for (int i = 0; i < rd.src.size(); i++) {
-				ASSERT(queue[rd.src[i]].erase(rd));
+				// now we are launching: remove this entry from the queue of all the src servers
+				for (int i = 0; i < rd.src.size(); i++) {
+					ASSERT(queue[rd.src[i]].erase(rd));
+				}
 			}
+
+			Future<Void> fCleanup =
+			    CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA ? cancelDataMove(this, rd.keys, ddEnabledState) : Void();
 
 			// If there is a job in flight that wants data relocation which we are about to cancel/modify,
 			//     make sure that we keep the relocation intent for the job that we launch
@@ -1009,12 +1038,19 @@ struct DDQueueData {
 			for (int r = 0; r < ranges.size(); r++) {
 				RelocateData& rrs = inFlight.rangeContaining(ranges[r].begin)->value();
 				rrs.keys = ranges[r];
+				if (rd.keys == ranges[r] && rd.restore) {
+					ASSERT(rd.dataMove != nullptr);
+					rrs.dataMoveId = rd.dataMove->meta.id;
+				} else if (!rrs.dataMoveId.isValid()) {
+					// TODO(psm): The shard id is determined by DD.
+					rrs.dataMoveId = deterministicRandom()->randomUniqueID();
+				}
 
 				launch(rrs, busymap, singleRegionTeamSize);
 				activeRelocations++;
 				startRelocation(rrs.priority, rrs.healthPriority);
 				// Start the actor that relocates data in the rrs.keys
-				inFlightActors.insert(rrs.keys, dataDistributionRelocator(this, rrs, ddEnabledState));
+				inFlightActors.insert(rrs.keys, dataDistributionRelocator(this, rrs, fCleanup, ddEnabledState));
 			}
 
 			// logRelocation( rd, "LaunchedRelocation" );
@@ -1043,6 +1079,62 @@ struct DDQueueData {
 	}
 };
 
+void enqueueCancelledDataMove(UID dataMoveId, KeyRange range, const DDEnabledState* ddEnabledState) {
+ 		std::vector<Future<Void>> cleanup;
+ 		auto f = this->dataMoves.intersectingRanges(range);
+ 		for (auto it = f.begin(); it != f.end(); ++it) {
+ 			if (it->value().isValid()) {
+ 				TraceEvent(SevDebug, "DDEnqueueCancelledDataMoveConflict", this->distributorId)
+ 				    .detail("DataMoveID", dataMoveId)
+ 				    .detail("CancelledRange", range)
+ 				    .detail("ConflictingDataMoveID", it->value().id)
+ 				    .detail("ConflictingRange", KeyRangeRef(it->range().begin, it->range().end));
+ 				return;
+ 			}
+ 		}
+
+ 		DDQueueData::DDDataMove dataMove(dataMoveId);
+ 		dataMove.cancel = cleanUpDataMove(
+ 		    this->cx, dataMoveId, this->lock, &this->cleanUpDataMoveParallelismLock, range, true, ddEnabledState);
+ 		this->dataMoves.insert(range, DDQueueData::DDDataMove());
+ 		TraceEvent(SevDebug, "DDEnqueuedCancelledDataMove", this->distributorId)
+ 		    .detail("DataMoveID", dataMoveId)
+ 		    .detail("Range", range);
+ 	}
+ };
+
+ ACTOR Future<Void> cancelDataMove(struct DDQueueData* self, KeyRange range, const DDEnabledState* ddEnabledState) {
+ 	std::vector<Future<Void>> cleanup;
+ 	auto f = self->dataMoves.intersectingRanges(range);
+ 	for (auto it = f.begin(); it != f.end(); ++it) {
+ 		if (!it->value().isValid()) {
+ 			continue;
+ 		}
+ 		KeyRange keys = KeyRangeRef(it->range().begin, it->range().end);
+ 		TraceEvent(SevDebug, "DDQueueCancelDataMove", self->distributorId)
+ 		    .detail("DataMoveID", it->value().id)
+ 		    .detail("Range", keys);
+ 		// auto [iter, inserted] = dms.insert(it->value());
+ 		// ASSERT(inserted);
+ 		if (!it->value().cancel.isValid()) {
+ 			it->value().cancel = cleanUpDataMove(self->cx,
+ 			                                     it->value().id,
+ 			                                     self->lock,
+ 			                                     &self->cleanUpDataMoveParallelismLock,
+ 			                                     keys,
+ 			                                     true,
+ 			                                     ddEnabledState);
+ 		}
+ 		cleanup.push_back(it->value().cancel);
+ 	}
+ 	wait(waitForAll(cleanup));
+ 	auto ranges = self->dataMoves.getAffectedRangesAfterInsertion(range);
+ 	if (!ranges.empty()) {
+ 		self->dataMoves.insert(KeyRangeRef(ranges.front().begin, ranges.back().end), DDQueueData::DDDataMove());
+ 	}
+ 	return Void();
+ }
+
 static std::string destServersString(std::vector<std::pair<Reference<IDataDistributionTeam>, bool>> const& bestTeams) {
 	std::stringstream ss;
 
@@ -1057,7 +1149,10 @@ static std::string destServersString(std::vector<std::pair<Reference<IDataDistri
 
 // This actor relocates the specified keys to a good place.
 // The inFlightActor key range map stores the actor for each RelocateData
-ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd, const DDEnabledState* ddEnabledState) {
+	ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
+                                              RelocateData rd,
+                                              Future<Void> prevCleanup,
+                                              const DDEnabledState* ddEnabledState) {
 	state Promise<Void> errorOut(self->error);
 	state TraceInterval relocateShardInterval("RelocateShard");
 	state PromiseStream<RelocateData> dataTransferComplete(self->dataTransferComplete);
