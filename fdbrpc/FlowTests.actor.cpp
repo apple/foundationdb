@@ -284,6 +284,9 @@ struct YieldMockNetwork final : INetwork, ReferenceCounted<YieldMockNetwork> {
 		static TLSConfig emptyConfig;
 		return emptyConfig;
 	}
+	std::string getLocalAddressAsString() const override {
+		return baseNetwork->getLocalAddress().toString();
+	}
 #ifdef ENABLE_SAMPLING
 	ActorLineageSet& getActorLineageSet() override { throw std::exception(); }
 #endif

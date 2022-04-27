@@ -1054,6 +1054,9 @@ public:
 	}
 
 	bool checkRunnable() override { return net2->checkRunnable(); }
+	std::string getLocalAddressAsString() const override {
+		return g_sim2.getLocalAddress().toString();
+	}
 
 #ifdef ENABLE_SAMPLING
 	ActorLineageSet& getActorLineageSet() override { return actorLineageSet; }

@@ -221,6 +221,10 @@ public:
 
 	const TLSConfig& getTLSConfig() const override { return tlsConfig; }
 
+	std::string getLocalAddressAsString() const override {
+		return getLocalAddress().toString();
+	}
+
 	bool checkRunnable() override;
 
 #ifdef ENABLE_SAMPLING

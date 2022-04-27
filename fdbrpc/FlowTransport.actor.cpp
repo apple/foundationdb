@@ -300,6 +300,8 @@ public:
 	bool isLocalAddress(const NetworkAddress& address) const;
 
 	NetworkAddressList localAddresses;
+	NetworkAddress *firstAddrPtr;
+	std::string cachedAddressString;
 	std::vector<Future<Void>> listeners;
 	std::unordered_map<NetworkAddress, Reference<struct Peer>> peers;
 	std::unordered_map<NetworkAddress, std::pair<double, double>> closedPeers;
@@ -1561,6 +1563,14 @@ NetworkAddress FlowTransport::getLocalAddress() const {
 	return self->localAddresses.address;
 }
 
+std::string FlowTransport::getLocalAddressAsString() const {
+	if (self->firstAddrPtr != &self->localAddresses.address) {
+		self->firstAddrPtr = &self->localAddresses.address;
+		self->cachedAddressString = self->localAddresses.address.toString();
+	}
+	return self->cachedAddressString;
+}
+
 void FlowTransport::setLocalAddress(NetworkAddress const& address) {
 	self->localAddresses.address = address;
 }
@@ -1591,6 +1601,7 @@ Future<Void> FlowTransport::bind(NetworkAddress publicAddress, NetworkAddress li
 	} else {
 		self->localAddresses.secondaryAddress = publicAddress;
 	}
+	//reformatLocalAddress()
 	TraceEvent("Binding").detail("PublicAddress", publicAddress).detail("ListenAddress", listenAddress);
 
 	Future<Void> listenF = listen(self, listenAddress);

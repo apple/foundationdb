@@ -215,6 +215,10 @@ public:
 	// Returns first local NetworkAddress.
 	NetworkAddress getLocalAddress() const;
 
+	// Returns first local NetworkAddress as std::string. Caches value
+	// to avoid unnecessary calls to toString() and fmt overhead.
+	std::string getLocalAddressAsString() const;
+
 	// Returns first local NetworkAddress.
 	void setLocalAddress(NetworkAddress const&);
 
