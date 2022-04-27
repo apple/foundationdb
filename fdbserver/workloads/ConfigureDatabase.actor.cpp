@@ -231,6 +231,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 	bool storageMigrationCompatibleConf; // only allow generating configuration suitable for storage migration test
 	bool waitStoreTypeCheck;
 	bool downgradeTest1; // if this is true, don't pick up downgrade incompatible config
+	double failCheckAfter;
 	std::vector<Future<Void>> clients;
 	PerfIntCounter retries;
 
@@ -243,6 +244,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 		storageMigrationCompatibleConf = getOption(options, "storageMigrationCompatibleConf"_sr, false);
 		waitStoreTypeCheck = getOption(options, "waitStoreTypeCheck"_sr, false);
 		downgradeTest1 = getOption(options, "downgradeTest1"_sr, false);
+		failCheckAfter = getOption(options, "failCheckAfter"_sr, 1000.0);
 		g_simulator.usableRegions = 1;
 	}
 
@@ -287,6 +289,8 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 		// only storage_migration_type=gradual && perpetual_storage_wiggle=1 need this check because in QuietDatabase
 		// perpetual wiggle will be forced to close For other cases, later ConsistencyCheck will check KV store type
 		// there
+		state double lastVerbosePrint = 0.0;
+		state double checkStart = now();
 		if (self->allowTestStorageMigration || self->waitStoreTypeCheck) {
 			loop {
 				// There exists a race where the check can start before the last transaction that singleDB issued
@@ -318,20 +322,35 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 						ErrorOr<KeyValueStoreType> keyValueStoreType =
 						    wait(storageServers[i].getKeyValueStoreType.getReplyUnlessFailedFor(typeReply, 2, 0));
 						if (keyValueStoreType.present() && keyValueStoreType.get() != conf.storageServerStoreType) {
-							TraceEvent(SevWarn, "ConfigureDatabase_WrongStoreType")
-							    .suppressFor(5.0)
-							    .detail("ServerID", storageServers[i].id())
+							TraceEvent evt(SevWarn, "ConfigureDatabase_WrongStoreType");
+							bool doVerbosePrint = now() - lastVerbosePrint > 5.0;
+							if (doVerbosePrint) {
+								lastVerbosePrint = now();
+							} else {
+								evt.suppressFor(5.0);
+							}
+							evt.detail("ServerID", storageServers[i].id())
 							    .detail("ProcessID", storageServers[i].locality.processId())
 							    .detail("ServerStoreType",
 							            keyValueStoreType.present() ? keyValueStoreType.get().toString() : "?")
-							    .detail("ConfigStoreType", conf.storageServerStoreType.toString());
+							    .detail("ConfigStoreType", conf.storageServerStoreType.toString())
+							    .log();
 							pass = false;
-							break;
+							if (!doVerbosePrint) {
+								break;
+							}
 						}
 					}
 				}
-				if (pass)
+				if (pass) {
 					break;
+				} else if (now() - checkStart > self->failCheckAfter) {
+					TraceEvent(SevError, "PerpetualWiggleNotMakingProgress")
+						.detail("RanFor", now() - checkStart)
+						.detail("ConfiguredFailAfter", self->failCheckAfter)
+						.log();
+				}
+				ASSERT(now() - checkStart <= self->failCheckAfter);
 				wait(delay(g_network->isSimulated() ? 2.0 : 30.0));
 			}
 		}
