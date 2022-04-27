@@ -80,10 +80,23 @@ endif()
 # The tests don't build on windows
 if(NOT WIN32)
   set(MAKO_SRCS
-    test/mako/mako.c
-    test/mako/mako.h
-    test/mako/utils.c
-    test/mako/utils.h)
+    test/mako/async.hpp
+    test/mako/async.cpp
+    test/mako/blob_granules.hpp
+    test/mako/blob_granules.cpp
+    test/mako/future.hpp
+    test/mako/limit.hpp
+    test/mako/logger.hpp
+    test/mako/mako.cpp
+    test/mako/mako.hpp
+    test/mako/operations.hpp
+    test/mako/operations.cpp
+    test/mako/process.hpp
+    test/mako/shm.hpp
+    test/mako/stats.hpp
+    test/mako/time.hpp
+    test/mako/utils.cpp
+    test/mako/utils.hpp)
   add_subdirectory(test/unit/third_party)
   find_package(Threads REQUIRED)
   set(UNIT_TEST_SRCS
@@ -97,6 +110,11 @@ if(NOT WIN32)
     test/unit/disconnected_timeout_tests.cpp
     test/unit/fdb_api.cpp
     test/unit/fdb_api.hpp)
+
+  add_library(fdb_cpp INTERFACE)
+  target_sources(fdb_cpp INTERFACE test/fdb_api.hpp)
+  target_include_directories(fdb_cpp INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/test)
+  target_link_libraries(fdb_cpp INTERFACE fmt::fmt)
 
   set(API_TESTER_SRCS
     test/apitester/fdb_c_api_tester.cpp
@@ -179,7 +197,11 @@ endif()
 
   # do not set RPATH for mako
   set_property(TARGET mako PROPERTY SKIP_BUILD_RPATH TRUE)
-  target_link_libraries(mako PRIVATE fdb_c fdbclient)
+  if (USE_SANITIZER)
+	target_link_libraries(mako PRIVATE fdb_c fdbclient fmt::fmt Threads::Threads fdb_cpp boost_asan)
+  else()
+	target_link_libraries(mako PRIVATE fdb_c fdbclient fmt::fmt Threads::Threads fdb_cpp boost_target)
+  endif()
 
   if(NOT OPEN_FOR_IDE)
     # Make sure that fdb_c.h is compatible with c90
