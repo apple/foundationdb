@@ -45,18 +45,21 @@ private:
 		std::string begin = randomKeyName();
 		std::string end = randomKeyName();
 		auto results = std::make_shared<std::vector<KeyValue>>();
+		auto tooOld = std::make_shared<bool>(false);
 		if (begin > end) {
 			std::swap(begin, end);
 		}
 		execTransaction(
-		    [this, begin, end, results](auto ctx) {
+		    [this, begin, end, results, tooOld](auto ctx) {
 			    ctx->tx()->setOption(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE);
 			    KeyValuesResult res = ctx->tx()->readBlobGranules(begin, end, ctx->getBGBasePath());
 			    bool more;
 			    (*results) = res.getKeyValues(&more);
 			    ASSERT(!more);
 			    if (res.getError() == error_code_blob_granule_transaction_too_old) {
+				    info("BlobGranuleCorrectness::randomReadOp bg too old\n");
 				    ASSERT(!seenReadSuccess);
+				    *tooOld = true;
 				    ctx->done();
 			    }
 			    if (res.getError() != error_code_success) {
@@ -69,35 +72,37 @@ private:
 				    ctx->done();
 			    }
 		    },
-		    [this, begin, end, results, cont]() {
-			    std::vector<KeyValue> expected = store.getRange(begin, end, store.size(), false);
-			    if (results->size() != expected.size()) {
-				    error(fmt::format("randomReadOp result size mismatch. expected: {} actual: {}",
-				                      expected.size(),
-				                      results->size()));
-			    }
-			    ASSERT(results->size() == expected.size());
-
-			    for (int i = 0; i < results->size(); i++) {
-				    if ((*results)[i].key != expected[i].key) {
-					    error(fmt::format("randomReadOp key mismatch at {}/{}. expected: {} actual: {}",
-					                      i,
-					                      results->size(),
-					                      expected[i].key,
-					                      (*results)[i].key));
+		    [this, begin, end, results, tooOld, cont]() {
+			    if (!*tooOld) {
+				    std::vector<KeyValue> expected = store.getRange(begin, end, store.size(), false);
+				    if (results->size() != expected.size()) {
+					    error(fmt::format("randomReadOp result size mismatch. expected: {} actual: {}",
+					                      expected.size(),
+					                      results->size()));
 				    }
-				    ASSERT((*results)[i].key == expected[i].key);
+				    ASSERT(results->size() == expected.size());
 
-				    if ((*results)[i].value != expected[i].value) {
-					    error(
-					        fmt::format("randomReadOp value mismatch at {}/{}. key: {} expected: {:.80} actual: {:.80}",
-					                    i,
-					                    results->size(),
-					                    expected[i].key,
-					                    expected[i].value,
-					                    (*results)[i].value));
+				    for (int i = 0; i < results->size(); i++) {
+					    if ((*results)[i].key != expected[i].key) {
+						    error(fmt::format("randomReadOp key mismatch at {}/{}. expected: {} actual: {}",
+						                      i,
+						                      results->size(),
+						                      expected[i].key,
+						                      (*results)[i].key));
+					    }
+					    ASSERT((*results)[i].key == expected[i].key);
+
+					    if ((*results)[i].value != expected[i].value) {
+						    error(fmt::format(
+						        "randomReadOp value mismatch at {}/{}. key: {} expected: {:.80} actual: {:.80}",
+						        i,
+						        results->size(),
+						        expected[i].key,
+						        expected[i].value,
+						        (*results)[i].value));
+					    }
+					    ASSERT((*results)[i].value == expected[i].value);
 				    }
-				    ASSERT((*results)[i].value == expected[i].value);
 			    }
 			    schedule(cont);
 		    });
