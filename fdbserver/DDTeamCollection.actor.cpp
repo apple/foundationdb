@@ -127,7 +127,9 @@ public:
 
 		loop {
 			choose {
-				when(wait(self->buildTeams())) { return Void(); }
+				when(wait(self->buildTeams())) {
+					return Void();
+				}
 				when(wait(self->restartTeamBuilder.onTrigger())) {}
 			}
 		}
@@ -505,7 +507,9 @@ public:
 		while (self->pauseWiggle && !self->pauseWiggle->get() && self->waitUntilRecruited.get()) {
 			choose {
 				when(wait(self->waitUntilRecruited.onChange() || self->pauseWiggle->onChange())) {}
-				when(wait(delay(SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY, g_network->getCurrentTask()))) { break; }
+				when(wait(delay(SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY, g_network->getCurrentTask()))) {
+					break;
+				}
 			}
 		}
 
@@ -1318,7 +1322,7 @@ public:
 						// Restart the storeTracker for the new interface. This will cancel the previous
 						// keyValueStoreTypeTracker
 						// storeTypeTracker = (isTss) ? Never() : keyValueStoreTypeTracker(self, server);
-						storageMetadataTracker = updateStorageMetadata(self, server, isTss);
+						storageMetadataTracker = self->updateStorageMetadata(server, isTss);
 						hasWrongDC = !self->isCorrectDC(*server);
 						hasInvalidLocality = !self->isValidLocality(self->configuration.storagePolicy,
 						                                            server->getLastKnownInterface().locality);
@@ -1337,7 +1341,9 @@ public:
 						    .detail("ConfigStoreType", self->configuration.storageServerStoreType)
 						    .detail("WrongStoreTypeRemoved", server->wrongStoreTypeToRemove.get());
 					}
-					when(wait(server->wakeUpTracker.getFuture())) { server->wakeUpTracker = Promise<Void>(); }
+					when(wait(server->wakeUpTracker.getFuture())) {
+						server->wakeUpTracker = Promise<Void>();
+					}
 					when(wait(storageMetadataTracker)) {}
 					when(wait(server->ssVersionTooFarBehind.onChange())) {}
 					when(wait(self->disableFailingLaggingServers.onChange())) {}
@@ -1486,20 +1492,6 @@ public:
 		    .detail("TotalBytesLost", bytesLost);
 
 		return Void();
-	}
-
-	ACTOR static Future<Void> keyValueStoreTypeTracker(DDTeamCollection* self, TCServerInfo* server) {
-		// Update server's storeType, especially when it was created
-		wait(server->updateStoreType());
-
-		if (server->getStoreType() != self->configuration.storageServerStoreType) {
-			if (self->wrongStoreTypeRemover.isReady()) {
-				self->wrongStoreTypeRemover = removeWrongStoreType(self);
-				self->addActor.send(self->wrongStoreTypeRemover);
-			}
-		}
-
-		return Never();
 	}
 
 	ACTOR static Future<Void> storageServerFailureTracker(DDTeamCollection* self,
@@ -2061,7 +2053,9 @@ public:
 							    .detail("ExtraHealthyTeamCount", extraTeamCount)
 							    .detail("HealthyTeamCount", self->healthyTeamCount);
 						}
-						when(wait(pauseChanged)) { continue; }
+						when(wait(pauseChanged)) {
+							continue;
+						}
 					}
 				}
 			}
@@ -2585,7 +2579,9 @@ public:
 							}
 						}
 					}
-					when(wait(recruitStorage->onChange())) { fCandidateWorker = Future<RecruitStorageReply>(); }
+					when(wait(recruitStorage->onChange())) {
+						fCandidateWorker = Future<RecruitStorageReply>();
+					}
 					when(wait(self->zeroHealthyTeams->onChange())) {
 						if (!pendingTSSCheck && self->zeroHealthyTeams->get() &&
 						    (self->isTssRecruiting || self->tss_info_by_pair.size() > 0)) {
@@ -2870,18 +2866,16 @@ public:
 		return Void();
 	}
 
-	ACTOR static Future<Void> updateStorageMetadata(DDTeamCollection* self, TCServerInfo* server, bool isTss) {
+	ACTOR static Future<Void> updateStorageMetadata(DDTeamCollection* self, TCServerInfo* server) {
 		state KeyBackedObjectMap<UID, StorageMetadataType, decltype(IncludeVersion())> metadataMap(
 		    serverMetadataKeys.begin, IncludeVersion());
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
 
 		// Update server's storeType, especially when it was created
 		wait(server->updateStoreType());
-		state StorageMetadataType data(
-		    StorageMetadataType::currentTime(),
-		    server->getStoreType(),
-		    isTss ? !server->isCorrectStoreType(self->configuration.testingStorageServerStoreType)
-		          : !server->isCorrectStoreType(self->configuration.storageServerStoreType));
+		state StorageMetadataType data(StorageMetadataType::currentTime(),
+		                               server->getStoreType(),
+		                               !server->isCorrectStoreType(self->configuration.storageServerStoreType));
 
 		// read storage metadata
 		loop {
@@ -2901,19 +2895,18 @@ public:
 			}
 		}
 		// printf("------ updated metadata %s\n", server->getId().toString().c_str());
-		if (!isTss) {
-			// wrong store type handler
-			if (!server->isCorrectStoreType(self->configuration.storageServerStoreType) &&
-			    self->wrongStoreTypeRemover.isReady()) {
-				self->wrongStoreTypeRemover = removeWrongStoreType(self);
-				self->addActor.send(self->wrongStoreTypeRemover);
-			}
-			// add server to wiggler
-			if (self->storageWiggler->contains(server->getId())) {
-				self->storageWiggler->updateMetadata(server->getId(), data);
-			} else {
-				self->storageWiggler->addServer(server->getId(), data);
-			}
+
+		// wrong store type handler
+		if (!server->isCorrectStoreType(self->configuration.storageServerStoreType) &&
+		    self->wrongStoreTypeRemover.isReady()) {
+			self->wrongStoreTypeRemover = removeWrongStoreType(self);
+			self->addActor.send(self->wrongStoreTypeRemover);
+		}
+		// add server to wiggler
+		if (self->storageWiggler->contains(server->getId())) {
+			self->storageWiggler->updateMetadata(server->getId(), data);
+		} else {
+			self->storageWiggler->addServer(server->getId(), data);
 		}
 
 		return Never();
@@ -3421,10 +3414,6 @@ Future<Void> DDTeamCollection::removeBadTeams() {
 	return DDTeamCollectionImpl::removeBadTeams(this);
 }
 
-Future<Void> DDTeamCollection::keyValueStoreTypeTracker(TCServerInfo* server) {
-	return DDTeamCollectionImpl::keyValueStoreTypeTracker(this, server);
-}
-
 Future<Void> DDTeamCollection::storageServerFailureTracker(TCServerInfo* server,
                                                            Database cx,
                                                            ServerStatus* status,
@@ -3521,7 +3510,7 @@ Future<Void> DDTeamCollection::readStorageWiggleMap() {
 }
 
 Future<Void> DDTeamCollection::updateStorageMetadata(TCServerInfo* server, bool isTss) {
-	return DDTeamCollectionImpl::updateStorageMetadata(this, server, isTss);
+	return isTss ? Never() : DDTeamCollectionImpl::updateStorageMetadata(this, server);
 }
 
 void DDTeamCollection::resetLocalitySet() {
