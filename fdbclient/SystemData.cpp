@@ -43,7 +43,7 @@ const KeyRangeRef keyServersKeyServersKeys(LiteralStringRef("\xff/keyServers/\xf
                                            LiteralStringRef("\xff/keyServers/\xff/keyServers0"));
 const KeyRef keyServersKeyServersKey = keyServersKeyServersKeys.begin;
 
-const UID uninitializedShardId = UID(666666, 88888888);
+const UID anonymousShardId = UID(666666, 88888888);
 
 const Key keyServersKey(const KeyRef& k) {
 	return k.withPrefix(keyServersPrefix);
@@ -200,9 +200,9 @@ void decodeKeyServersValue(RangeResult result,
 	} else {
 		decodeKeyServersValue(result, value, src, dest, missingIsError);
 		ASSERT(!src.empty());
-		srcID = uninitializedShardId;
+		srcID = anonymousShardId;
 		if (!dest.empty()) {
-			destID = uninitializedShardId;
+			destID = anonymousShardId;
 		}
 	}
 }
@@ -234,7 +234,7 @@ void decodeKeyServersValue(std::map<Tag, UID> const& tag_uid,
 			rd >> srcId;
 			if (rd.empty()) {
 				ASSERT(dest.empty());
-				destId = uninitializedShardId;
+				destId = anonymousShardId;
 			} else {
 				rd >> destId;
 			}
@@ -1666,7 +1666,7 @@ TEST_CASE("/SystemData/SerDes/SSI") {
  	printf("ssi serdes test part.1 complete\n");
 
  	v = keyServersValue(idTag, src, dest);
- 	decodeAndVerify(v, uninitializedShardId, uninitializedShardId);
+ 	decodeAndVerify(v, anonymousShardId, anonymousShardId);
 
  	printf("ssi serdes test complete\n");
  	return Void();

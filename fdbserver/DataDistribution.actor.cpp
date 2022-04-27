@@ -228,8 +228,8 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution(Data
 						decodeKeyServersValue(UIDtoTagMap, keyServers[i].value, src, dest, srcId, destId);
 					} else {
 						decodeKeyServersValue(UIDtoTagMap, keyServers[i].value, src, dest);
-						srcId = uninitializedShardId;
-						destId = dest.empty() ? UID() : uninitializedShardId;
+						srcId = anonymousShardId;
+						destId = dest.empty() ? UID() : anonymousShardId;
 					}
 					DDShardInfo info(keyServers[i].key, srcId, destId);
 					if (remoteDcIds.size()) {
@@ -793,7 +793,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 
 				shardsAffectedByTeamFailure->moveShard(keys, teams);
 				if (iShard.hasDest &&
-				    (!CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA || iShard.destId == uninitializedShardId)) {
+				    (!CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA || iShard.destId == anonymousShardId)) {
 					// This shard is already in flight.  Ideally we should use dest in ShardsAffectedByTeamFailure and
 					// generate a dataDistributionRelocator directly in DataDistributionQueue to track it, but it's
 					// easier to just (with low priority) schedule it for movement.
@@ -805,7 +805,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 					    keys, unhealthy ? SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY : SERVER_KNOBS->PRIORITY_RECOVER_MOVE));
 				}
 
-				if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA && iShard.srcId != uninitializedShardId) {
+				if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA && iShard.srcId != anonymousShardId) {
 					dataMoveMap[keys.begin]->addShard(iShard);
 				}
 

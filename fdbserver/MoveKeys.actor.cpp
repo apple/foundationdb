@@ -324,7 +324,7 @@ ACTOR Future<Void> cleanUpSingleShardDataMove(Database occ,
 			UID srcId, destId;
 			decodeKeyServersValue(UIDtoTagMap, currentShards[0].value, src, dest, srcId, destId);
 
-			if (dest.empty() || destId != uninitializedShardId) {
+			if (dest.empty() || destId != anonymousShardId) {
 				return Void();
 			}
 
@@ -1337,7 +1337,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 							continue;
 						}
 
-						if (destId == uninitializedShardId) {
+						if (destId == anonymousShardId) {
 							wait(cleanUpSingleShardDataMove(
 							    occ, rangeIntersectKeys, lock, startMoveKeysLock, dataMoveId, ddEnabledState));
 						} else {

@@ -54,7 +54,7 @@ extern const KeyRef afterAllKeys;
 //  and destID are the source and destination `shard id`, respectively.
 extern const KeyRangeRef keyServersKeys, keyServersKeyServersKeys;
 extern const KeyRef keyServersPrefix, keyServersEnd, keyServersKeyServersKey;
-extern const UID uninitializedShardId;
+extern const UID anonymousShardId;
 const Key keyServersKey(const KeyRef& k);
 const KeyRef keyServersKey(const KeyRef& k, Arena& arena);
 const Value keyServersValue(RangeResult result,
