@@ -132,8 +132,9 @@ public:
 		this->kind = SpanKind::SERVER;
 		this->status = SpanStatus::OK;
 		this->attributes.push_back(
-		    //this->arena, KeyValueRef("address"_sr, StringRef(this->arena, "localhost:4000")));
-		    this->arena, KeyValueRef("address"_sr, StringRef(this->arena, FlowTransport::transport().getLocalAddressAsString())));
+		    // this->arena, KeyValueRef("address"_sr, StringRef(this->arena, "localhost:4000")));
+		    this->arena,
+		    KeyValueRef("address"_sr, StringRef(this->arena, FlowTransport::transport().getLocalAddressAsString())));
 	}
 
 	// Construct Span with a location, parent, and optional links.

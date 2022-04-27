@@ -280,31 +280,24 @@ struct UnauthorizedEndpointReceiver final : NetworkMessageReceiver {
 };
 
 class NetworkAddressCachedString {
-	public:
-	  	NetworkAddressCachedString() {
-			setAddressList(NetworkAddressList());
-		}
-	 	NetworkAddressCachedString(NetworkAddressList const& list) {
-			 setAddressList(list);
-		 }
-		NetworkAddressList const& getAddressList() const {
-			return addressList;
-		}
-		void setAddressList(NetworkAddressList const& list)  {
-			cachedStr = Standalone<StringRef>(StringRef(list.address.toString()));
-			addressList = list;
-		}
-		void setNetworkAddress(NetworkAddress const& addr) {
-			addressList.address = addr;
-			setAddressList(addressList); // force the recaching of the string.
-		}
-		Standalone<StringRef> getLocalAddressAsString() const {
-			return cachedStr;
-		}
-		operator NetworkAddressList const&() { return addressList; }
-	private:
-		NetworkAddressList addressList;
-		Standalone<StringRef> cachedStr;
+public:
+	NetworkAddressCachedString() { setAddressList(NetworkAddressList()); }
+	NetworkAddressCachedString(NetworkAddressList const& list) { setAddressList(list); }
+	NetworkAddressList const& getAddressList() const { return addressList; }
+	void setAddressList(NetworkAddressList const& list) {
+		cachedStr = Standalone<StringRef>(StringRef(list.address.toString()));
+		addressList = list;
+	}
+	void setNetworkAddress(NetworkAddress const& addr) {
+		addressList.address = addr;
+		setAddressList(addressList); // force the recaching of the string.
+	}
+	Standalone<StringRef> getLocalAddressAsString() const { return cachedStr; }
+	operator NetworkAddressList const&() { return addressList; }
+
+private:
+	NetworkAddressList addressList;
+	Standalone<StringRef> cachedStr;
 };
 
 class TransportData {
@@ -1537,7 +1530,8 @@ Reference<Peer> TransportData::getOrOpenPeer(NetworkAddress const& address, bool
 
 bool TransportData::isLocalAddress(const NetworkAddress& address) const {
 	return address == localAddresses.getAddressList().address ||
-	       (localAddresses.getAddressList().secondaryAddress.present() && address == localAddresses.getAddressList().secondaryAddress.get());
+	       (localAddresses.getAddressList().secondaryAddress.present() &&
+	        address == localAddresses.getAddressList().secondaryAddress.get());
 }
 
 ACTOR static Future<Void> multiVersionCleanupWorker(TransportData* self) {
@@ -1628,7 +1622,7 @@ Future<Void> FlowTransport::bind(NetworkAddress publicAddress, NetworkAddress li
 		addrList.secondaryAddress = publicAddress;
 		self->localAddresses.setAddressList(addrList);
 	}
-	//reformatLocalAddress()
+	// reformatLocalAddress()
 	TraceEvent("Binding").detail("PublicAddress", publicAddress).detail("ListenAddress", listenAddress);
 
 	Future<Void> listenF = listen(self, listenAddress);
