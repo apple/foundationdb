@@ -66,7 +66,12 @@ void seedShardServers(Arena& trArena, CommitTransactionRef& tr, std::vector<Stor
 // Called by the master server to write the very first transaction to the database
 // establishing a set of shard servers and all invariants of the systemKeys.
 
+// Eventually moves the given keys to the given destination team
+// Caller is responsible for cancelling it before issuing an overlapping move,
+// for restarting the remainder, and for not otherwise cancelling it before
+// it returns (since it needs to execute the finishMoveKeys transaction).
 ACTOR Future<Void> moveKeys(Database occ,
+                            UID dataMoveId,
                             KeyRange keys,
                             std::vector<UID> destinationTeam,
                             std::vector<UID> healthyDestinations,
@@ -77,10 +82,14 @@ ACTOR Future<Void> moveKeys(Database occ,
                             bool hasRemote,
                             UID relocationIntervalId, // for logging only
                             const DDEnabledState* ddEnabledState);
-// Eventually moves the given keys to the given destination team
-// Caller is responsible for cancelling it before issuing an overlapping move,
-// for restarting the remainder, and for not otherwise cancelling it before
-// it returns (since it needs to execute the finishMoveKeys transaction).
+
+ACTOR Future<Void> cleanUpDataMove(Database occ,
+                                    UID dataMoveId,
+                                    MoveKeysLock lock,
+                                    FlowLock* cleanUpDataMoveParallelismLock,
+                                    KeyRange range,
+                                    bool removeFromDest,
+                                    const DDEnabledState* ddEnabledState);
 
 ACTOR Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServerInterface server);
 // Adds a newly recruited storage server to a database (e.g. adding it to FF/serverList)

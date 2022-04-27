@@ -72,6 +72,8 @@ struct RelocateShard {
 	RelocateShard() : priority(0), cancelled(false), reason(RelocateReason::INVALID) {}
 	RelocateShard(KeyRange const& keys, int priority, RelocateReason reason)
 	  : keys(keys), priority(priority), cancelled(false), reason(reason) {}
+
+	bool isRestore() const { return this->dataMove != nullptr; }
 };
 
 struct IDataDistributionTeam {
