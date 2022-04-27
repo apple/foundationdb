@@ -24,6 +24,7 @@
 
 #include "contrib/fmt-8.1.1/include/fmt/format.h"
 #include "fdbrpc/simulator.h"
+#include "flow/Arena.h"
 #define BOOST_SYSTEM_NO_LIB
 #define BOOST_DATE_TIME_NO_LIB
 #define BOOST_REGEX_NO_LIB
@@ -1054,9 +1055,6 @@ public:
 	}
 
 	bool checkRunnable() override { return net2->checkRunnable(); }
-	std::string getLocalAddressAsString() const override {
-		return g_sim2.getLocalAddress().toString();
-	}
 
 #ifdef ENABLE_SAMPLING
 	ActorLineageSet& getActorLineageSet() override { return actorLineageSet; }

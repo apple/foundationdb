@@ -21,6 +21,7 @@
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
+#include "fdbrpc/FlowTransport.h"
 #include "flow/IRandom.h"
 #include <unordered_set>
 #include <atomic>
@@ -132,7 +133,7 @@ public:
 		this->status = SpanStatus::OK;
 		this->attributes.push_back(
 		    //this->arena, KeyValueRef("address"_sr, StringRef(this->arena, "localhost:4000")));
-		    this->arena, KeyValueRef("address"_sr, StringRef(this->arena, g_network->getLocalAddressAsString())));
+		    this->arena, KeyValueRef("address"_sr, StringRef(this->arena, FlowTransport::transport().getLocalAddressAsString())));
 	}
 
 	// Construct Span with a location, parent, and optional links.

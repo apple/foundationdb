@@ -20,6 +20,7 @@
 
 // Unit tests for the flow language and libraries
 
+#include "flow/Arena.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/UnitTest.h"
 #include "flow/DeterministicRandom.h"
@@ -283,9 +284,6 @@ struct YieldMockNetwork final : INetwork, ReferenceCounted<YieldMockNetwork> {
 	const TLSConfig& getTLSConfig() const override {
 		static TLSConfig emptyConfig;
 		return emptyConfig;
-	}
-	std::string getLocalAddressAsString() const override {
-		return baseNetwork->getLocalAddress().toString();
 	}
 #ifdef ENABLE_SAMPLING
 	ActorLineageSet& getActorLineageSet() override { throw std::exception(); }

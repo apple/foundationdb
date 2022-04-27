@@ -617,8 +617,6 @@ public:
 
 	virtual ProtocolVersion protocolVersion() const = 0;
 
-	virtual std::string getLocalAddressAsString() const = 0;
-	
 	// Shorthand for transport().getLocalAddress()
 	static NetworkAddress getLocalAddress() {
 		flowGlobalType netAddressFuncPtr =

@@ -281,7 +281,9 @@ struct UnauthorizedEndpointReceiver final : NetworkMessageReceiver {
 
 class NetworkAddressCachedString {
 	public:
-	  	NetworkAddressCachedString() : addressList(NetworkAddressList()) {}
+	  	NetworkAddressCachedString() {
+			setAddressList(NetworkAddressList());
+		}
 	 	NetworkAddressCachedString(NetworkAddressList const& list) {
 			 setAddressList(list);
 		 }

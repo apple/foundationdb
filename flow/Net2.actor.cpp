@@ -21,6 +21,7 @@
 #include "boost/asio/buffer.hpp"
 #include "boost/asio/ip/address.hpp"
 #include "boost/system/system_error.hpp"
+#include "flow/Arena.h"
 #include "flow/Platform.h"
 #include "flow/Trace.h"
 #include <algorithm>
@@ -220,10 +221,6 @@ public:
 	std::vector<flowGlobalType> globals;
 
 	const TLSConfig& getTLSConfig() const override { return tlsConfig; }
-
-	std::string getLocalAddressAsString() const override {
-		return getLocalAddress().toString();
-	}
 
 	bool checkRunnable() override;
 
