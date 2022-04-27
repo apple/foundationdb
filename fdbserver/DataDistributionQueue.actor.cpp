@@ -1081,7 +1081,7 @@ struct DDQueueData {
 				if (rd.keys == ranges[r] && rd.isRestore()) {
 					ASSERT(rd.dataMove != nullptr);
 					rrs.dataMoveId = rd.dataMove->meta.id;
-				} else if (!rrs.dataMoveId.isValid()) {
+				} else {
 					// TODO(psm): The shard id is determined by DD.
 					rrs.dataMoveId = deterministicRandom()->randomUniqueID();
 				}
@@ -1536,25 +1536,25 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 								                      ddEnabledState);
 							} else {
 								self->fetchKeysComplete.insert(rd);
-								if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
-									auto f = self->dataMoves.intersectingRanges(rd.keys);
-									for (auto it = f.begin(); it != f.end(); ++it) {
-										KeyRangeRef kr(it->range().begin, it->range().end);
-										if (it->value().id == rd.dataMoveId && rd.keys.contains(kr)) {
-											self->dataMoves.insert(kr, DDQueueData::DDDataMove());
-											TraceEvent(SevInfo, "DequeueDataMoveOnSuccess", self->distributorId)
-											    .detail("DataMoveID", rd.dataMoveId)
-											    .detail("DataMoveRange", rd.keys)
-											    .detail("Range", kr);
-										} else {
-											TraceEvent(SevWarnAlways, "DataMoveConflictOnSuccess", self->distributorId)
-											    .detail("DataMoveID", rd.dataMoveId)
-											    .detail("DataMoveRange", rd.keys)
-											    .detail("CurrentID", it->value().id)
-											    .detail("CurrentRange", kr);
-										}
-									}
-								}
+								// if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+								// 	auto f = self->dataMoves.intersectingRanges(rd.keys);
+								// 	for (auto it = f.begin(); it != f.end(); ++it) {
+								// 		KeyRangeRef kr(it->range().begin, it->range().end);
+								// 		if (it->value().id == rd.dataMoveId && rd.keys.contains(kr)) {
+								// 			self->dataMoves.insert(kr, DDQueueData::DDDataMove());
+								// 			TraceEvent(SevInfo, "DequeueDataMoveOnSuccess", self->distributorId)
+								// 			    .detail("DataMoveID", rd.dataMoveId)
+								// 			    .detail("DataMoveRange", rd.keys)
+								// 			    .detail("Range", kr);
+								// 		} else {
+								// 			TraceEvent(SevWarnAlways, "DataMoveConflictOnSuccess", self->distributorId)
+								// 			    .detail("DataMoveID", rd.dataMoveId)
+								// 			    .detail("DataMoveRange", rd.keys)
+								// 			    .detail("CurrentID", it->value().id)
+								// 			    .detail("CurrentRange", kr);
+								// 		}
+								// 	}
+								// }
 								break;
 							}
 						}
