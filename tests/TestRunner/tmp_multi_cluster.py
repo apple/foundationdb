@@ -27,19 +27,34 @@ from pathlib import Path
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from tmp_cluster import TempCluster
 
-if __name__ == '__main__':
-    parser = ArgumentParser(formatter_class=RawDescriptionHelpFormatter, description="""
+if __name__ == "__main__":
+    parser = ArgumentParser(
+        formatter_class=RawDescriptionHelpFormatter,
+        description="""
 	This script automatically configures N temporary local clusters on the machine and then
 	calls a command while these clusters are running. As soon as the command returns, all
 	configured clusters are killed and all generated data is deleted.
 
 	The purpose of this is to support testing a set of integration tests using multiple clusters
 	(i.e. using the Multi-threaded client). 
-	""")
-    parser.add_argument('--build-dir', '-b', metavar='BUILD_DIRECTORY', help='FDB build director', required=True)
-    parser.add_argument('--clusters', '-c', metavar='NUM_CLUSTERS', type=int, help='The number of clusters to run',
-                        required=True)
-    parser.add_argument('cmd', metavar='COMMAND', nargs='+', help='The command to run')
+	""",
+    )
+    parser.add_argument(
+        "--build-dir",
+        "-b",
+        metavar="BUILD_DIRECTORY",
+        help="FDB build director",
+        required=True,
+    )
+    parser.add_argument(
+        "--clusters",
+        "-c",
+        metavar="NUM_CLUSTERS",
+        type=int,
+        help="The number of clusters to run",
+        required=True,
+    )
+    parser.add_argument("cmd", metavar="COMMAND", nargs="+", help="The command to run")
     args = parser.parse_args()
     errcode = 1
 
@@ -48,7 +63,7 @@ if __name__ == '__main__':
     num_clusters = args.clusters
 
     build_dir = Path(base_dir)
-    bin_dir = build_dir.joinpath('bin')
+    bin_dir = build_dir.joinpath("bin")
 
     clusters = []
     for c in range(1, num_clusters + 1):
@@ -60,11 +75,15 @@ if __name__ == '__main__':
 
     # all clusters should be running now, so run the subcommand
     # TODO (bfines): pass through the proper ENV commands so that the client can find everything
-    cluster_paths = ';'.join([str(cluster.etc.joinpath('fdb.cluster')) for cluster in clusters])
+    cluster_paths = ";".join(
+        [str(cluster.etc.joinpath("fdb.cluster")) for cluster in clusters]
+    )
     print(cluster_paths)
     env = dict(**os.environ)
-    env['FDB_CLUSTERS'] = env.get('FDB_CLUSTERS', cluster_paths)
-    errcode = subprocess.run(args.cmd, stdout=sys.stdout, stderr=sys.stderr, env=env).returncode
+    env["FDB_CLUSTERS"] = env.get("FDB_CLUSTERS", cluster_paths)
+    errcode = subprocess.run(
+        args.cmd, stdout=sys.stdout, stderr=sys.stderr, env=env
+    ).returncode
 
     # shutdown all the running clusters
     for tc in clusters:

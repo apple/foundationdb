@@ -26,11 +26,12 @@ import time
 import random
 import traceback
 
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 from python_tests import PythonTest
 
 import fdb
 import fdb.tuple
+
 fdb.api_version(400)
 
 
@@ -55,17 +56,19 @@ class KeyValueStore:
         for index, key in enumerate(sorted_keys):
             if key >= key_selector.key:
                 index += key_selector.offset
-                if (key == key_selector.key and not key_selector.or_equal) or key != key_selector.key:
+                if (
+                    key == key_selector.key and not key_selector.or_equal
+                ) or key != key_selector.key:
                     index -= 1
 
                 if index < 0 or index >= len(sorted_keys):
-                    return ''
+                    return ""
                 else:
                     return sorted_keys[index]
 
         index = len(sorted_keys) + key_selector.offset - 1
         if index < 0 or index >= len(sorted_keys):
-            return ''
+            return ""
         else:
             return sorted_keys[index]
 
@@ -128,46 +131,64 @@ class KeyValueStore:
 
 class PythonCorrectness(PythonTest):
     callback = False
-    callbackError = ''
+    callbackError = ""
 
     # Python correctness tests (checks if functions run and yield correct results)
     def run_test(self):
         try:
-            db = fdb.open(None, 'DB')
+            db = fdb.open(None, "DB")
         except KeyboardInterrupt:
             raise
         except Exception:
-            self.result.add_error(self.get_error('fdb.open failed'))
+            self.result.add_error(self.get_error("fdb.open failed"))
             return
 
         try:
-            print('Testing functions...')
+            print("Testing functions...")
             self.test_functions(db)
 
-            print('Testing correctness...')
+            print("Testing correctness...")
             del db[:]
             self.test_correctness(db)
         except KeyboardInterrupt:
             raise
         except Exception:
-            self.result.add_error(self.get_error('Failed to complete all tests'))
+            self.result.add_error(self.get_error("Failed to complete all tests"))
 
     # Generates a random set of keys and values
-    def generate_data(self, num_keys, min_key_length, max_key_length, min_value_length, max_value_length, prefix='', allow_duplicates=True):
+    def generate_data(
+        self,
+        num_keys,
+        min_key_length,
+        max_key_length,
+        min_value_length,
+        max_value_length,
+        prefix="",
+        allow_duplicates=True,
+    ):
         data = list()
         keys = set()
         while len(data) < num_keys:
             # key = prefix + ''.join(random.choice(string.ascii_lowercase)
             #                        for i in range(0, random.randint(minKeyLength - len(prefix), maxKeyLength - len(prefix))))
-            key = prefix + ''.join(chr(random.randint(0, 254))
-                                   for _ in range(0, random.randint(min_key_length - len(prefix), max_key_length - len(prefix))))
+            key = prefix + "".join(
+                chr(random.randint(0, 254))
+                for _ in range(
+                    0,
+                    random.randint(
+                        min_key_length - len(prefix), max_key_length - len(prefix)
+                    ),
+                )
+            )
             if not allow_duplicates:
                 if key in keys:
                     continue
                 else:
                     keys.add(key)
 
-            value = ''.join('x' for _ in range(0, random.randint(max_key_length, max_value_length)))
+            value = "".join(
+                "x" for _ in range(0, random.randint(max_key_length, max_value_length))
+            )
             data.append([key, value])
 
         return data
@@ -179,26 +200,26 @@ class PythonCorrectness(PythonTest):
         except KeyboardInterrupt:
             raise
         except Exception:
-            self.callbackError = self.get_error('Callback future get failed')
+            self.callbackError = self.get_error("Callback future get failed")
 
         self.callback = True
 
     # Tests that all of the functions in the python API can be called without failing
     def test_functions(self, db):
         self.callback = False
-        self.callbackError = ''
+        self.callbackError = ""
 
         try:
             tr = db.create_transaction()
         except KeyboardInterrupt:
             raise
         except Exception:
-            self.result.add_error(self.get_error('db.create_transaction failed'))
+            self.result.add_error(self.get_error("db.create_transaction failed"))
             return
 
         try:
-            tr['testkey'] = 'testvalue'
-            value = tr['testkey']
+            tr["testkey"] = "testvalue"
+            value = tr["testkey"]
             value.is_ready()
             value.block_until_ready()
             value.wait()
@@ -206,32 +227,34 @@ class PythonCorrectness(PythonTest):
         except KeyboardInterrupt:
             raise
         except Exception:
-            self.result.add_error(self.get_error('Set/Get value failed (block until ready)'))
+            self.result.add_error(
+                self.get_error("Set/Get value failed (block until ready)")
+            )
 
         try:
-            value = tr['testkey']
+            value = tr["testkey"]
             value.wait()
         except KeyboardInterrupt:
             raise
         except Exception:
-            self.result.add_error(self.get_error('Get value failed'))
+            self.result.add_error(self.get_error("Get value failed"))
 
         try:
-            tr['testkey'] = 'newtestvalue'
+            tr["testkey"] = "newtestvalue"
         except KeyboardInterrupt:
             raise
         except Exception:
-            self.result.add_error(self.get_error('Replace value failed'))
+            self.result.add_error(self.get_error("Replace value failed"))
 
         try:
-            value = tr['fakekey']
+            value = tr["fakekey"]
             # The following line would generate a segfault
             # value.capi.fdb_future_block_until_ready(0)
             value.wait()
         except KeyboardInterrupt:
             raise
         except Exception:
-            self.result.add_error(self.get_error('Get non-existent key failed'))
+            self.result.add_error(self.get_error("Get non-existent key failed"))
 
         try:
             tr.commit().wait()
@@ -239,186 +262,186 @@ class PythonCorrectness(PythonTest):
         except KeyboardInterrupt:
             raise
         except Exception:
-            self.result.add_error(self.get_error('Commit failed'))
+            self.result.add_error(self.get_error("Commit failed"))
 
         try:
             tr.reset()
         except KeyboardInterrupt:
             raise
         except Exception:
-            self.result.add_error(self.get_error('Reset failed'))
+            self.result.add_error(self.get_error("Reset failed"))
 
         try:
             version = tr.get_read_version()
         except KeyboardInterrupt:
             raise
         except Exception:
-            self.result.add_error(self.get_error('tr.get_read_version failed'))
+            self.result.add_error(self.get_error("tr.get_read_version failed"))
 
         try:
-            value = tr['testkey']
+            value = tr["testkey"]
             value.wait()
             tr.reset()
         except KeyboardInterrupt:
             raise
         except Exception:
-            self.result.add_error(self.get_error('Get and reset failed'))
+            self.result.add_error(self.get_error("Get and reset failed"))
 
         try:
             tr.set_read_version(version.wait())
         except KeyboardInterrupt:
             raise
         except Exception:
-            self.result.add_error(self.get_error('Set read version failed'))
+            self.result.add_error(self.get_error("Set read version failed"))
 
         try:
-            value = tr['testkey']
+            value = tr["testkey"]
             callback_time = time.time()
             value.on_ready(self.test_callback)
         except KeyboardInterrupt:
             raise
         except Exception:
-            self.result.add_error(self.get_error('Get future and set callback failed'))
+            self.result.add_error(self.get_error("Get future and set callback failed"))
 
         try:
-            del tr['testkey']
+            del tr["testkey"]
         except KeyboardInterrupt:
             raise
         except Exception:
-            self.result.add_error(self.get_error('Delete key failed'))
+            self.result.add_error(self.get_error("Delete key failed"))
 
         try:
-            del tr['fakekey']
+            del tr["fakekey"]
         except KeyboardInterrupt:
             raise
         except Exception:
-            self.result.add_error(self.get_error('Delete non-existent key failed'))
+            self.result.add_error(self.get_error("Delete non-existent key failed"))
 
         try:
-            tr.set('testkey', 'testvalue')
-            value = tr.get('testkey')
+            tr.set("testkey", "testvalue")
+            value = tr.get("testkey")
             value.wait()
         except KeyboardInterrupt:
             raise
         except Exception:
-            self.result.add_error(self.get_error('Future.get failed'))
+            self.result.add_error(self.get_error("Future.get failed"))
 
         try:
-            tr.clear('testkey')
+            tr.clear("testkey")
         except KeyboardInterrupt:
             raise
         except Exception:
-            self.result.add_error(self.get_error('Clear key failed'))
+            self.result.add_error(self.get_error("Clear key failed"))
 
         try:
-            tr['testkey1'] = 'testvalue1'
-            tr['testkey2'] = 'testvalue2'
-            tr['testkey3'] = 'testvalue3'
+            tr["testkey1"] = "testvalue1"
+            tr["testkey2"] = "testvalue2"
+            tr["testkey3"] = "testvalue3"
 
-            for k, v in tr.get_range('testkey1', 'testkey3'):
-                v += ''
+            for k, v in tr.get_range("testkey1", "testkey3"):
+                v += ""
 
-            for k, v in tr.get_range('testkey1', 'testkey2', 2):
-                v += ''
+            for k, v in tr.get_range("testkey1", "testkey2", 2):
+                v += ""
 
-            for k, v in tr['testkey1':'testkey3']:
-                v += ''
+            for k, v in tr["testkey1":"testkey3"]:
+                v += ""
         except KeyboardInterrupt:
             raise
         except Exception:
-            self.result.add_error(self.get_error('Get range failed'))
+            self.result.add_error(self.get_error("Get range failed"))
 
         try:
-            tr['otherkey1'] = 'othervalue1'
-            tr['otherkey2'] = 'othervalue2'
+            tr["otherkey1"] = "othervalue1"
+            tr["otherkey2"] = "othervalue2"
 
-            for k, v in tr.get_range_startswith('testkey'):
-                v += ''
+            for k, v in tr.get_range_startswith("testkey"):
+                v += ""
         except KeyboardInterrupt:
             raise
         except Exception:
-            self.result.add_error(self.get_error('Get range starts with failed'))
+            self.result.add_error(self.get_error("Get range starts with failed"))
 
         try:
-            tr.clear_range_startswith('otherkey')
+            tr.clear_range_startswith("otherkey")
         except KeyboardInterrupt:
             raise
         except Exception:
-            self.result.add_error(self.get_error('Clear range starts with failed'))
+            self.result.add_error(self.get_error("Clear range starts with failed"))
 
         try:
-            tr.clear_range('testkey1', 'testkey3')
+            tr.clear_range("testkey1", "testkey3")
         except KeyboardInterrupt:
             raise
         except Exception:
-            self.result.add_error(self.get_error('Clear range failed'))
+            self.result.add_error(self.get_error("Clear range failed"))
 
         try:
-            tr['testkey1'] = 'testvalue1'
-            tr['testkey2'] = 'testvalue2'
-            tr['testkey3'] = 'testvalue3'
+            tr["testkey1"] = "testvalue1"
+            tr["testkey2"] = "testvalue2"
+            tr["testkey3"] = "testvalue3"
 
-            begin = fdb.KeySelector('testkey2', 0, 0)
-            end = fdb.KeySelector('testkey2', 0, 1)
+            begin = fdb.KeySelector("testkey2", 0, 0)
+            end = fdb.KeySelector("testkey2", 0, 1)
         except KeyboardInterrupt:
             raise
         except Exception:
-            self.result.add_error(self.get_error('Create key selector failed'))
+            self.result.add_error(self.get_error("Create key selector failed"))
 
         try:
             for k, v in tr.get_range(begin, end):
-                v += ''
+                v += ""
 
             for k, v in tr.get_range(begin, end, 2):
-                v += ''
+                v += ""
 
             for k, v in tr[begin:end]:
-                v += ''
+                v += ""
         except KeyboardInterrupt:
             raise
         except Exception:
-            self.result.add_error(self.get_error('Get range (key selectors) failed'))
+            self.result.add_error(self.get_error("Get range (key selectors) failed"))
 
         try:
             tr.clear_range(begin, end)
 
-            tr['testkey1'] = 'testvalue1'
-            tr['testkey2'] = 'testvalue2'
-            tr['testkey3'] = 'testvalue3'
+            tr["testkey1"] = "testvalue1"
+            tr["testkey2"] = "testvalue2"
+            tr["testkey3"] = "testvalue3"
 
             del tr[begin:end]
 
-            tr['testkey1'] = 'testvalue1'
-            tr['testkey2'] = 'testvalue2'
-            tr['testkey3'] = 'testvalue3'
+            tr["testkey1"] = "testvalue1"
+            tr["testkey2"] = "testvalue2"
+            tr["testkey3"] = "testvalue3"
         except KeyboardInterrupt:
             raise
         except Exception:
-            self.result.add_error(self.get_error('Clear range (key selectors) failed'))
+            self.result.add_error(self.get_error("Clear range (key selectors) failed"))
 
         try:
-            begin = fdb.KeySelector.last_less_than('testkey2')
-            end = fdb.KeySelector.first_greater_or_equal('testkey2')
+            begin = fdb.KeySelector.last_less_than("testkey2")
+            end = fdb.KeySelector.first_greater_or_equal("testkey2")
 
             for k, v in tr.get_range(begin, end):
-                v += ''
+                v += ""
 
-            begin = fdb.KeySelector.last_less_or_equal('testkey2')
-            end = fdb.KeySelector.first_greater_than('testkey2')
+            begin = fdb.KeySelector.last_less_or_equal("testkey2")
+            end = fdb.KeySelector.first_greater_than("testkey2")
 
             for k, v in tr.get_range(begin, end):
-                v += ''
+                v += ""
         except KeyboardInterrupt:
             raise
         except Exception:
-            self.result.add_error(self.get_error('Builtin key selectors failed'))
+            self.result.add_error(self.get_error("Builtin key selectors failed"))
 
         try:
-            del tr['testkey1':'testkey3']
+            del tr["testkey1":"testkey3"]
         except KeyboardInterrupt:
             raise
         except Exception:
-            self.result.add_error(self.get_error('Delete key range failed'))
+            self.result.add_error(self.get_error("Delete key range failed"))
 
         try:
             tr.commit().wait()
@@ -426,52 +449,57 @@ class PythonCorrectness(PythonTest):
         except KeyboardInterrupt:
             raise
         except Exception:
-            self.result.add_error(self.get_error('Commit failed'))
+            self.result.add_error(self.get_error("Commit failed"))
 
         try:
-            key = fdb.tuple.pack(('k1', 'k2', 'k3'))
+            key = fdb.tuple.pack(("k1", "k2", "k3"))
             k_tuple = fdb.tuple.unpack(key)
-            if k_tuple[0] != 'k1' and k_tuple[1] != 'k2' and k_tuple[2] != 'k3':
-                self.result.add_error('Tuple <-> key conversion yielded incorrect results')
+            if k_tuple[0] != "k1" and k_tuple[1] != "k2" and k_tuple[2] != "k3":
+                self.result.add_error(
+                    "Tuple <-> key conversion yielded incorrect results"
+                )
         except KeyboardInterrupt:
             raise
         except Exception:
-            self.result.add_error(self.get_error('Tuple <-> key conversion failed'))
+            self.result.add_error(self.get_error("Tuple <-> key conversion failed"))
 
         try:
-            tr[fdb.tuple.pack(('k1', 'k2'))] = 'v'
-            tr[fdb.tuple.pack(('k1', 'k2', 'k3'))] = 'v1'
-            tr[fdb.tuple.pack(('k1', 'k2', 'k3', 'k4'))] = 'v2'
+            tr[fdb.tuple.pack(("k1", "k2"))] = "v"
+            tr[fdb.tuple.pack(("k1", "k2", "k3"))] = "v1"
+            tr[fdb.tuple.pack(("k1", "k2", "k3", "k4"))] = "v2"
 
-            for k, v in tr[fdb.tuple.range(('k1', 'k2'))]:
-                v += ''
+            for k, v in tr[fdb.tuple.range(("k1", "k2"))]:
+                v += ""
 
         except KeyboardInterrupt:
             raise
         except Exception:
-            self.result.add_error(self.get_error('Tuple get range failed'))
+            self.result.add_error(self.get_error("Tuple get range failed"))
 
         try:
-            tr['testint'] = '10'
-            y = int(tr['testint']) + 1
+            tr["testint"] = "10"
+            y = int(tr["testint"]) + 1
             if y != 11:
-                self.result.add_error('Value retrieval yielded incorrect results')
+                self.result.add_error("Value retrieval yielded incorrect results")
         except KeyboardInterrupt:
             raise
         except Exception:
-            self.result.add_error(self.get_error('Future value retrieval failed'))
+            self.result.add_error(self.get_error("Future value retrieval failed"))
 
         if not self.callback:
             time.sleep(5)
             if not self.callback:
-                self.result.add_error('Warning: Future callback not called after %f seconds' % (time.time() - callback_time))
+                self.result.add_error(
+                    "Warning: Future callback not called after %f seconds"
+                    % (time.time() - callback_time)
+                )
         if len(self.callbackError) > 0:
             self.result.add_error(self.callbackError)
 
     # Compares a FoundationDB database with an in-memory key-value store
     def compare_database_to_memory(self, db, store):
-        db_result = self.correctness_get_range_transactional(db, '\x00', '\xff')
-        store_result = store.get_range('\x00', '\xff')
+        db_result = self.correctness_get_range_transactional(db, "\x00", "\xff")
+        store_result = store.get_range("\x00", "\xff")
 
         return self.compare_results(db_result, store_result)
 
@@ -485,7 +513,10 @@ class PythonCorrectness(PythonTest):
             # if i >= len(storeResults):
             #    print 'mismatched key: ' + dbResults[i].key
             #    return False
-            if db_results[i].key != store_results[i][0] or db_results[i].value != store_results[i][1]:
+            if (
+                db_results[i].key != store_results[i][0]
+                or db_results[i].value != store_results[i][1]
+            ):
                 # print 'mismatched key: ' + dbResults[i].key + ' - ' + storeResults[i][0]
                 return False
 
@@ -512,44 +543,70 @@ class PythonCorrectness(PythonTest):
         num_range_clears = 10
         num_prefix_clears = 10
 
-        max_keys_per_transaction = max(1, int(max_transaction_bytes / (max_value_length + max_long_key_length)))
+        max_keys_per_transaction = max(
+            1, int(max_transaction_bytes / (max_value_length + max_long_key_length))
+        )
 
         try:
             store = KeyValueStore()
 
             # Generate some random data
-            data = self.generate_data(num_keys * ratio_short_keys, min_short_key_length, max_short_key_length, min_value_length, max_value_length)
-            data.extend(self.generate_data(num_keys * (1 - ratio_short_keys), min_long_key_length, max_long_key_length, min_value_length, max_value_length))
+            data = self.generate_data(
+                num_keys * ratio_short_keys,
+                min_short_key_length,
+                max_short_key_length,
+                min_value_length,
+                max_value_length,
+            )
+            data.extend(
+                self.generate_data(
+                    num_keys * (1 - ratio_short_keys),
+                    min_long_key_length,
+                    max_long_key_length,
+                    min_value_length,
+                    max_value_length,
+                )
+            )
 
             # Insert the data
             self.correctness_set(db, store, data, max_keys_per_transaction)
             if not self.compare_database_to_memory(db, store):
-                self.result.add_error('transaction.set resulted in incorrect database')
+                self.result.add_error("transaction.set resulted in incorrect database")
 
             # Compare the results of single key reads
-            if not self.correctness_get(db, store, data, num_reads, max_keys_per_transaction):
-                self.result.add_error('transaction.get returned incorrect result')
+            if not self.correctness_get(
+                db, store, data, num_reads, max_keys_per_transaction
+            ):
+                self.result.add_error("transaction.get returned incorrect result")
 
             # Compare the results of range reads
             for i in range(0, num_range_reads):
                 if not self.correctness_get_range(db, store, data):
-                    self.result.add_error('transaction.get_range returned incorrect results')
+                    self.result.add_error(
+                        "transaction.get_range returned incorrect results"
+                    )
                     break
 
             # Compare the results of prefix reads
             for i in range(0, num_prefix_reads):
                 if not self.correctness_get_prefix(db, store, data):
-                    self.result.add_error('transaction.get_range_startswith returned incorrect results')
+                    self.result.add_error(
+                        "transaction.get_range_startswith returned incorrect results"
+                    )
                     break
 
             # Compare the results of get key
-            if not self.correctness_get_key(db, store, data, num_get_keys, max_keys_per_transaction):
-                self.result.add_error('transaction.get_key returned incorrect results')
+            if not self.correctness_get_key(
+                db, store, data, num_get_keys, max_keys_per_transaction
+            ):
+                self.result.add_error("transaction.get_key returned incorrect results")
 
             # Compare the results of clear
             # clearedKeys = self.correctnessClear(db, store, data, num_clears, max_keys_per_transaction)
             if not self.compare_database_to_memory(db, store):
-                self.result.add_error('transaction.clear resulted in incorrect database')
+                self.result.add_error(
+                    "transaction.clear resulted in incorrect database"
+                )
 
             #    for key in clearedKeys:
             #         print 'clearing key ' + key
@@ -559,7 +616,7 @@ class PythonCorrectness(PythonTest):
             # Fill the database back up with data
             self.correctness_set(db, store, data, max_keys_per_transaction)
             if not self.compare_database_to_memory(db, store):
-                self.result.add_error('transaction.set resulted in incorrect database')
+                self.result.add_error("transaction.set resulted in incorrect database")
 
             # Compare the results of clear_range
             for i in range(0, num_range_clears):
@@ -567,12 +624,16 @@ class PythonCorrectness(PythonTest):
 
                 success = self.compare_database_to_memory(db, store)
                 if not success:
-                    self.result.add_error('transaction.clear_range resulted in incorrect database')
+                    self.result.add_error(
+                        "transaction.clear_range resulted in incorrect database"
+                    )
 
                 # Fill the database back up with data
                 self.correctness_set(db, store, data, max_keys_per_transaction)
                 if not self.compare_database_to_memory(db, store):
-                    self.result.add_error('transaction.set resulted in incorrect database')
+                    self.result.add_error(
+                        "transaction.set resulted in incorrect database"
+                    )
                     break
 
                 if not success:
@@ -581,12 +642,14 @@ class PythonCorrectness(PythonTest):
             # Compare the results of clear_range_startswith
             self.correctness_clear_prefix(db, store, data, num_prefix_clears)
             if not self.compare_database_to_memory(db, store):
-                self.result.add_error('transaction.clear_range_startswith resulted in incorrect database')
+                self.result.add_error(
+                    "transaction.clear_range_startswith resulted in incorrect database"
+                )
 
         except KeyboardInterrupt:
             raise
         except Exception:
-            self.result.add_error(self.get_error('Database error in correctness test'))
+            self.result.add_error(self.get_error("Database error in correctness test"))
 
     # Stores data in the database and a memory key-value store
     def correctness_set(self, db, store, data, max_keys_per_transaction):
@@ -595,7 +658,9 @@ class PythonCorrectness(PythonTest):
 
         keys_committed = 0
         while keys_committed < len(data):
-            self.correctness_set_transactional(db, data[keys_committed: keys_committed + max_keys_per_transaction])
+            self.correctness_set_transactional(
+                db, data[keys_committed : keys_committed + max_keys_per_transaction]
+            )
             keys_committed += max_keys_per_transaction
 
     # Stores data in the database
@@ -613,12 +678,12 @@ class PythonCorrectness(PythonTest):
 
         keys_retrieved = 0
         while keys_retrieved < len(keys):
-            sub_keys = keys[keys_retrieved: keys_retrieved + max_keys_per_transaction]
+            sub_keys = keys[keys_retrieved : keys_retrieved + max_keys_per_transaction]
 
             values = self.correctness_get_transactional(db, sub_keys)
             for i in range(0, num_reads):
                 if values[i] != store.get(sub_keys[i]):
-                    print('mismatch: %s', sub_keys[i])
+                    print("mismatch: %s", sub_keys[i])
                     return False
             keys_retrieved += max_keys_per_transaction
 
@@ -660,7 +725,9 @@ class PythonCorrectness(PythonTest):
 
     # Compares the results of the get_range_startswith operation from the database and a memory key-value store
     def correctness_get_prefix(self, db, store, data):
-        prefix = ''.join(chr(random.randint(0, 254)) for _ in range(0, random.randint(1, 3)))
+        prefix = "".join(
+            chr(random.randint(0, 254)) for _ in range(0, random.randint(1, 3))
+        )
         db_results = self.correctness_get_prefix_transactional(db, prefix)
         store_results = store.get_range_startswith(prefix)
 
@@ -672,12 +739,17 @@ class PythonCorrectness(PythonTest):
         return list(tr.get_range_startswith(prefix))
 
     # Compares the results of the get_key operation from the database and a memory key-value store
-    def correctness_get_key(self, db, store, data, num_get_keys, max_keys_per_transaction):
+    def correctness_get_key(
+        self, db, store, data, num_get_keys, max_keys_per_transaction
+    ):
         selectors = []
         for i in range(0, num_get_keys):
             index = random.randint(0, len(data) - 1)
             or_equal = random.randint(0, 1)
-            offset = random.randint(max(-index + (1 - or_equal), -10), min(len(data) - index - 1 + or_equal, 10))
+            offset = random.randint(
+                max(-index + (1 - or_equal), -10),
+                min(len(data) - index - 1 + or_equal, 10),
+            )
 
             key = sorted(data)[index][0]
             selector = fdb.KeySelector(key, or_equal, offset)
@@ -685,7 +757,9 @@ class PythonCorrectness(PythonTest):
 
         keys_retrieved = 0
         while keys_retrieved < len(selectors):
-            sub_selectors = selectors[keys_retrieved: keys_retrieved + max_keys_per_transaction]
+            sub_selectors = selectors[
+                keys_retrieved : keys_retrieved + max_keys_per_transaction
+            ]
             db_keys = self.correctness_get_key_transactional(db, sub_selectors)
             for i in range(0, num_get_keys):
                 if db_keys[i] != store.get_key(sub_selectors[i]):
@@ -721,7 +795,9 @@ class PythonCorrectness(PythonTest):
 
         keys_cleared = 0
         while keys_cleared < len(cleared_keys):
-            self.correctness_clear_transactional(db, cleared_keys[keys_cleared: keys_cleared + max_keys_per_transaction])
+            self.correctness_clear_transactional(
+                db, cleared_keys[keys_cleared : keys_cleared + max_keys_per_transaction]
+            )
             keys_cleared += max_keys_per_transaction
 
         return cleared_keys
@@ -752,7 +828,9 @@ class PythonCorrectness(PythonTest):
     def correctness_clear_prefix(self, db, store, data, num_prefix_clears):
         prefixes = []
         for i in range(0, num_prefix_clears):
-            prefix = ''.join(chr(random.randint(0, 254)) for _ in range(0, random.randint(1, 3)))
+            prefix = "".join(
+                chr(random.randint(0, 254)) for _ in range(0, random.randint(1, 3))
+            )
             prefixes.append(prefix)
             store.clear_range_startswith(prefix)
 
@@ -767,12 +845,20 @@ class PythonCorrectness(PythonTest):
     # Adds the stack trace to an error message
     def get_error(self, message):
         error_message = message + "\n" + traceback.format_exc()
-        print('%s', error_message)
+        print("%s", error_message)
         return error_message
 
 
-if __name__ == '__main__':
-    print("Running PythonCorrectness test on Python version %d.%d.%d%s%d" %
-          (sys.version_info[0], sys.version_info[1], sys.version_info[2], sys.version_info[3][0], sys.version_info[4]))
+if __name__ == "__main__":
+    print(
+        "Running PythonCorrectness test on Python version %d.%d.%d%s%d"
+        % (
+            sys.version_info[0],
+            sys.version_info[1],
+            sys.version_info[2],
+            sys.version_info[3][0],
+            sys.version_info[4],
+        )
+    )
 
     PythonCorrectness().run()
