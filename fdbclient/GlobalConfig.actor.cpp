@@ -45,6 +45,33 @@ GlobalConfig& GlobalConfig::globalConfig() {
 	return *reinterpret_cast<GlobalConfig*>(res);
 }
 
+void GlobalConfig::applyChanges(Transaction& tr,
+                                const VectorRef<KeyValueRef>& insertions,
+                                const VectorRef<KeyRangeRef>& clears) {
+	VersionHistory vh{ 0 };
+	for (const auto& kv : insertions) {
+		vh.mutations.emplace_back_deep(vh.mutations.arena(), MutationRef(MutationRef::SetValue, kv.key, kv.value));
+		tr.set(kv.key.withPrefix(globalConfigKeysPrefix), kv.value);
+	}
+	for (const auto& range : clears) {
+		vh.mutations.emplace_back_deep(vh.mutations.arena(),
+		                               MutationRef(MutationRef::ClearRange, range.begin, range.end));
+		tr.clear(
+		    KeyRangeRef(range.begin.withPrefix(globalConfigKeysPrefix), range.end.withPrefix(globalConfigKeysPrefix)));
+	}
+
+	// Record the mutations in this commit into the global configuration history.
+	Key historyKey = addVersionStampAtEnd(globalConfigHistoryPrefix);
+	ObjectWriter historyWriter(IncludeVersion());
+	historyWriter.serialize(vh);
+	tr.atomicOp(historyKey, historyWriter.toStringRef(), MutationRef::SetVersionstampedKey);
+
+	// Write version key to trigger update in cluster controller.
+	tr.atomicOp(globalConfigVersionKey,
+	            LiteralStringRef("0123456789\x00\x00\x00\x00"), // versionstamp
+	            MutationRef::SetVersionstampedValue);
+}
+
 Key GlobalConfig::prefixedKey(KeyRef key) {
 	return key.withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::GLOBALCONFIG).begin);
 }
