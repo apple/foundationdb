@@ -740,7 +740,7 @@ Future<Optional<TenantMapEntry>> createTenantTransaction(Transaction tr, TenantN
 		TraceEvent(SevWarnAlways, "TenantPrefixTooLarge")
 		    .detail("TenantSubspace", tenantDataPrefix.get())
 		    .detail("TenantSubspaceLength", tenantDataPrefix.get().size())
-			.detail("RootPrefixLength", TenantMapEntry::ROOT_PREFIX_SIZE)
+		    .detail("RootPrefixLength", TenantMapEntry::ROOT_PREFIX_SIZE)
 		    .detail("MaxTenantPrefixSize", CLIENT_KNOBS->TENANT_PREFIX_SIZE_LIMIT);
 
 		throw client_invalid_operation();
