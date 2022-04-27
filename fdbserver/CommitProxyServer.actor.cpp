@@ -279,13 +279,32 @@ bool verifyPrefix(ProxyCommitData* const commitData, const CommitTransactionRequ
 		for (auto& m : req.transaction.mutations) {
 			if (m.param1 != metadataVersionKey) {
 				if (!m.param1.startsWith(tenantPrefix)) {
+					TraceEvent(SevWarnAlways, "TenantPrefixMismatch")
+					    .suppressFor(60)
+					    .detail("Prefix", tenantPrefix.toHexString())
+					    .detail("Key", m.param1.toHexString())
+					    .detail("KeyType", "Key");
 					return false;
 				}
+
 				if (m.type == MutationRef::ClearRange && !m.param2.startsWith(tenantPrefix)) {
+					TraceEvent(SevWarnAlways, "TenantPrefixMismatch")
+					    .suppressFor(60)
+					    .detail("Prefix", tenantPrefix.toHexString())
+					    .detail("Key", m.param2.toHexString())
+					    .detail("KeyType", "ClearRangeKey");
 					return false;
-				} else if (m.type != MutationRef::SetVersionstampedKey) {
-					// TODO: How should this be handled?
-					// Maybe skip checking this for now? If so, fall-through.
+				} else if (m.type == MutationRef::SetVersionstampedKey) {
+					uint8_t* key = const_cast<uint8_t*>(m.param1.begin());
+					int* offset = reinterpret_cast<int*>(&key[m.param1.size() - 4]);
+					if (*offset <= tenantPrefix.size()) {
+						TraceEvent(SevWarnAlways, "TenantPrefixMismatch")
+						    .suppressFor(60)
+						    .detail("Prefix", tenantPrefix.toHexString())
+						    .detail("Key", m.param1.toHexString())
+						    .detail("KeyType", "VersionstampedKey");
+						return false;
+					}
 				}
 			}
 		}
@@ -293,6 +312,11 @@ bool verifyPrefix(ProxyCommitData* const commitData, const CommitTransactionRequ
 		for (auto& rc : req.transaction.read_conflict_ranges) {
 			if (rc.begin != metadataVersionKey &&
 			    (!rc.begin.startsWith(tenantPrefix) || !rc.end.startsWith(tenantPrefix))) {
+				TraceEvent(SevWarnAlways, "TenantPrefixMismatch")
+				    .suppressFor(60)
+				    .detail("Prefix", tenantPrefix.toHexString())
+				    .detail("BeginKey", rc.begin.toHexString())
+				    .detail("EndKey", rc.end.toHexString());
 				return false;
 			}
 		}
@@ -300,6 +324,11 @@ bool verifyPrefix(ProxyCommitData* const commitData, const CommitTransactionRequ
 		for (auto& wc : req.transaction.write_conflict_ranges) {
 			if (wc.begin != metadataVersionKey &&
 			    (!wc.begin.startsWith(tenantPrefix) || !wc.end.startsWith(tenantPrefix))) {
+				TraceEvent(SevWarnAlways, "TenantPrefixMismatch")
+				    .suppressFor(60)
+				    .detail("Prefix", tenantPrefix.toHexString())
+				    .detail("BeginKey", wc.begin.toHexString())
+				    .detail("EndKey", wc.end.toHexString());
 				return false;
 			}
 		}
@@ -358,7 +387,6 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData* commitData,
 					if (!verifyPrefix(commitData, req)) {
 						++commitData->stats.txnCommitErrors;
 						req.reply.sendError(illegal_tenant_access());
-						TraceEvent(SevWarnAlways, "TenantPrefixMismatch").suppressFor(60);
 						continue;
 					}
 
