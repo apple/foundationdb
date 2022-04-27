@@ -587,7 +587,7 @@ struct RolesInfo {
 				TraceEventFields const& metadata = metrics.at("Metadata");
 				JsonBuilderObject metadataObj;
 				metadataObj["created_time_datetime"] = metadata.getValue("CreatedTimeDatetime");
-				metadataObj["created_time_timestamp"] = metadata.getUint64("CreatedTimeTimestamp");
+				metadataObj["created_time_timestamp"] = metadata.getDouble("CreatedTimeTimestamp");
 				obj["storage_metadata"] = metadataObj;
 			}
 
