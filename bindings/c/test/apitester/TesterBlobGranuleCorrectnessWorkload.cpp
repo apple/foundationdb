@@ -61,8 +61,7 @@ private:
 				    ASSERT(!seenReadSuccess);
 				    *tooOld = true;
 				    ctx->done();
-			    }
-			    if (res.getError() != error_code_success) {
+			    } else if (res.getError() != error_code_success) {
 				    ctx->onError(res.getError());
 			    } else {
 				    if (!seenReadSuccess) {
