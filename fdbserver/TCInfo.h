@@ -21,8 +21,10 @@
 #pragma once
 
 #include "fdbserver/DDTeamCollection.h"
+#include "flow/FastRef.h"
 
 class TCTeamInfo;
+class TCTenantInfo;
 class TCMachineInfo;
 class TCMachineTeamInfo;
 
@@ -163,6 +165,7 @@ class TCTeamInfo final : public ReferenceCounted<TCTeamInfo>, public IDataDistri
 	friend class TCTeamInfoImpl;
 	std::vector<Reference<TCServerInfo>> servers;
 	std::vector<UID> serverIDs;
+	Reference<TCTenantInfo> tenant;
 	bool healthy;
 	bool wrongConfiguration; // True if any of the servers in the team have the wrong configuration
 	int priority;
@@ -172,7 +175,9 @@ public:
 	Reference<TCMachineTeamInfo> machineTeam;
 	Future<Void> tracker;
 
-	explicit TCTeamInfo(std::vector<Reference<TCServerInfo>> const& servers);
+	explicit TCTeamInfo(std::vector<Reference<TCServerInfo>> const& servers, Reference<TCTenantInfo> tenant);
+
+	Reference<TCTenantInfo>& getTenant() { return tenant; }
 
 	std::string getTeamID() const override { return id.shortString(); }
 
@@ -225,4 +230,20 @@ private:
 	int64_t getLoadAverage() const;
 
 	bool allServersHaveHealthyAvailableSpace() const;
+};
+
+class TCTenantInfo : public ReferenceCounted<TCTenantInfo> {
+private:
+	TenantInfo t_info;
+	std::vector<Reference<TCTeamInfo>> t_teams;
+
+public:
+	TCTenantInfo(TenantInfo tinfo) : t_info(tinfo) {}
+	std::vector<Reference<TCTeamInfo>>& teams() { return t_teams; }
+
+	void addTeam(TCTeamInfo team);
+	void removeTeam(TCTeamInfo team);
+
+	void addref() const /*override*/ { ReferenceCounted<TCTenantInfo>::addref(); }
+	void delref() const /*override*/ { ReferenceCounted<TCTenantInfo>::delref(); }
 };

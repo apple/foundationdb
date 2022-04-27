@@ -3825,7 +3825,9 @@ int DDTeamCollection::overlappingMachineMembers(std::vector<Standalone<StringRef
 void DDTeamCollection::addTeam(const std::vector<Reference<TCServerInfo>>& newTeamServers,
                                IsInitialTeam isInitialTeam,
                                IsRedundantTeam redundantTeam) {
-	auto teamInfo = makeReference<TCTeamInfo>(newTeamServers);
+	TenantInfo tinfo;
+	auto tenant = makeReference<TCTenantInfo>(tinfo);
+	auto teamInfo = makeReference<TCTeamInfo>(newTeamServers, tenant);
 
 	// Move satisfiesPolicy to the end for performance benefit
 	auto badTeam = IsBadTeam{ redundantTeam || teamInfo->size() != configuration.storageTeamSize ||
