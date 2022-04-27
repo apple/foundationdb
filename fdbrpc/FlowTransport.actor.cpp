@@ -329,7 +329,6 @@ public:
 	bool isLocalAddress(const NetworkAddress& address) const;
 
 	NetworkAddressCachedString localAddresses;
-	std::string cachedAddressString;
 	std::vector<Future<Void>> listeners;
 	std::unordered_map<NetworkAddress, Reference<struct Peer>> peers;
 	std::unordered_map<NetworkAddress, std::pair<double, double>> closedPeers;
