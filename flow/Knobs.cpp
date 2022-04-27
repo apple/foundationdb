@@ -283,6 +283,19 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( RESTCLIENT_MAX_CONNECTION_LIFE,                      120 );
 	init( RESTCLIENT_REQUEST_TRIES,                             10 );
 	init( RESTCLIENT_REQUEST_TIMEOUT_SEC,                      120 );
+
+	// HTTP KMS Connector
+	init( REST_KMS_CONNECTOR_KMS_DISCOVERY_URLS,                 "");
+	// Configuration mode to enable HttpKmsConnector to procure validation tokens.
+	init( REST_KMS_CONNECTOR_VALIDATION_TOKEN_MODE,          "file");
+	// Details to fetch validation token from a localhost file
+	// acceptable format: "<token_name1>:<absolute_file_path1>,<token_namw2><absolute_file_path2>,.."
+	init( REST_KMS_CONNECTOR_VALIDATION_TOKEN_FILE_DETAILS,      "");
+	init( REST_KMS_CONNECTOR_VALIDATION_TOKEN_MAX_SIZE,        1024);
+	init( REST_KMS_CONNECTOR_VALIDATION_TOKENS_MAX_PAYLOAD_SIZE, 10 * 1024);
+	init( REST_KMS_CONNECTOR_REFRESH_KMS_URLS,                 true);
+	init( REST_KMS_CONNECTOR_REFRESH_KMS_URLS_INTERVAL_SEC,     600);
+	init( REST_KMS_CONNECTOR_GET_ENCRYPTION_KEYS_ENDPOINT,       "");
 }
 // clang-format on
 
