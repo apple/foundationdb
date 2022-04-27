@@ -930,15 +930,15 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(
 			listenNetworkAddresses.secondaryAddress = currentListenAddress;
 		}
 
-		bool matchCoordinatosTls = std::all_of(coords.begin(), coords.end(), [&](const NetworkAddress& address) {
+		bool matchCoordinatorsTls = std::all_of(coords.begin(), coords.end(), [&](const NetworkAddress& address) {
 			if (address.ip == currentPublicAddress.ip && address.port == currentPublicAddress.port) {
 				return address.isTLS() == currentPublicAddress.isTLS();
 			}
 			return true;
 		});
 		// If true, further check hostnames.
-		if (matchCoordinatosTls) {
-			matchCoordinatosTls = std::all_of(hostnames.begin(), hostnames.end(), [&](Hostname& hostname) {
+		if (matchCoordinatorsTls) {
+			matchCoordinatorsTls = std::all_of(hostnames.begin(), hostnames.end(), [&](Hostname& hostname) {
 				Optional<NetworkAddress> resolvedAddress = hostname.resolveBlocking();
 				if (resolvedAddress.present()) {
 					NetworkAddress address = resolvedAddress.get();
@@ -949,7 +949,7 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(
 				return true;
 			});
 		}
-		if (!matchCoordinatosTls) {
+		if (!matchCoordinatorsTls) {
 			fprintf(stderr,
 			        "ERROR: TLS state of public address %s does not match in coordinator list.\n",
 			        publicAddressStr.c_str());
