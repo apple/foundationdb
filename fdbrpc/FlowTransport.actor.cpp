@@ -19,6 +19,7 @@
  */
 
 #include "fdbrpc/FlowTransport.h"
+#include "flow/Arena.h"
 #include "flow/network.h"
 
 #include <cstdint>
@@ -278,6 +279,32 @@ struct UnauthorizedEndpointReceiver final : NetworkMessageReceiver {
 	bool isPublic() const override { return true; }
 };
 
+class NetworkAddressCachedString {
+	public:
+	  	NetworkAddressCachedString() : addressList(NetworkAddressList()) {}
+	 	NetworkAddressCachedString(NetworkAddressList const& list) {
+			 setAddressList(list);
+		 }
+		NetworkAddressList const& getAddressList() const {
+			return addressList;
+		}
+		void setAddressList(NetworkAddressList const& list)  {
+			cachedStr = Standalone<StringRef>(StringRef(list.address.toString()));
+			addressList = list;
+		}
+		void setNetworkAddress(NetworkAddress const& addr) {
+			addressList.address = addr;
+			setAddressList(addressList); // force the recaching of the string.
+		}
+		Standalone<StringRef> getLocalAddressAsString() const {
+			return cachedStr;
+		}
+		operator NetworkAddressList const&() { return addressList; }
+	private:
+		NetworkAddressList addressList;
+		Standalone<StringRef> cachedStr;
+};
+
 class TransportData {
 public:
 	TransportData(uint64_t transportId, int maxWellKnownEndpoints, IPAllowList const* allowList);
@@ -299,8 +326,7 @@ public:
 	// Returns true if given network address 'address' is one of the address we are listening on.
 	bool isLocalAddress(const NetworkAddress& address) const;
 
-	NetworkAddressList localAddresses;
-	NetworkAddress *firstAddrPtr;
+	NetworkAddressCachedString localAddresses;
 	std::string cachedAddressString;
 	std::vector<Future<Void>> listeners;
 	std::unordered_map<NetworkAddress, Reference<struct Peer>> peers;
@@ -879,12 +905,12 @@ void Peer::send(PacketBuffer* pb, ReliablePacket* rp, bool firstUnsent) {
 void Peer::prependConnectPacket() {
 	// Send the ConnectPacket expected at the beginning of a new connection
 	ConnectPacket pkt;
-	if (transport->localAddresses.address.isTLS() == destination.isTLS()) {
-		pkt.canonicalRemotePort = transport->localAddresses.address.port;
-		pkt.setCanonicalRemoteIp(transport->localAddresses.address.ip);
-	} else if (transport->localAddresses.secondaryAddress.present()) {
-		pkt.canonicalRemotePort = transport->localAddresses.secondaryAddress.get().port;
-		pkt.setCanonicalRemoteIp(transport->localAddresses.secondaryAddress.get().ip);
+	if (transport->localAddresses.getAddressList().address.isTLS() == destination.isTLS()) {
+		pkt.canonicalRemotePort = transport->localAddresses.getAddressList().address.port;
+		pkt.setCanonicalRemoteIp(transport->localAddresses.getAddressList().address.ip);
+	} else if (transport->localAddresses.getAddressList().secondaryAddress.present()) {
+		pkt.canonicalRemotePort = transport->localAddresses.getAddressList().secondaryAddress.get().port;
+		pkt.setCanonicalRemoteIp(transport->localAddresses.getAddressList().secondaryAddress.get().ip);
 	} else {
 		// a "mixed" TLS/non-TLS connection is like a client/server connection - there's no way to reverse it
 		pkt.canonicalRemotePort = 0;
@@ -921,10 +947,10 @@ void Peer::onIncomingConnection(Reference<Peer> self, Reference<IConnection> con
 	++self->connectIncomingCount;
 	if (!destination.isPublic() && !outgoingConnectionIdle)
 		throw address_in_use();
-	NetworkAddress compatibleAddr = transport->localAddresses.address;
-	if (transport->localAddresses.secondaryAddress.present() &&
-	    transport->localAddresses.secondaryAddress.get().isTLS() == destination.isTLS()) {
-		compatibleAddr = transport->localAddresses.secondaryAddress.get();
+	NetworkAddress compatibleAddr = transport->localAddresses.getAddressList().address;
+	if (transport->localAddresses.getAddressList().secondaryAddress.present() &&
+	    transport->localAddresses.getAddressList().secondaryAddress.get().isTLS() == destination.isTLS()) {
+		compatibleAddr = transport->localAddresses.getAddressList().secondaryAddress.get();
 	}
 
 	if (!destination.isPublic() || outgoingConnectionIdle || destination > compatibleAddr ||
@@ -1457,10 +1483,10 @@ ACTOR static Future<Void> listen(TransportData* self, NetworkAddress listenAddr)
 	state ActorCollectionNoErrors
 	    incoming; // Actors monitoring incoming connections that haven't yet been associated with a peer
 	state Reference<IListener> listener = INetworkConnections::net()->listen(listenAddr);
-	if (!g_network->isSimulated() && self->localAddresses.address.port == 0) {
+	if (!g_network->isSimulated() && self->localAddresses.getAddressList().address.port == 0) {
 		TraceEvent(SevInfo, "UpdatingListenAddress")
 		    .detail("AssignedListenAddress", listener->getListenAddress().toString());
-		self->localAddresses.address = listener->getListenAddress();
+		self->localAddresses.setNetworkAddress(listener->getListenAddress());
 	}
 	state uint64_t connectionCount = 0;
 	try {
@@ -1509,8 +1535,8 @@ Reference<Peer> TransportData::getOrOpenPeer(NetworkAddress const& address, bool
 }
 
 bool TransportData::isLocalAddress(const NetworkAddress& address) const {
-	return address == localAddresses.address ||
-	       (localAddresses.secondaryAddress.present() && address == localAddresses.secondaryAddress.get());
+	return address == localAddresses.getAddressList().address ||
+	       (localAddresses.getAddressList().secondaryAddress.present() && address == localAddresses.getAddressList().secondaryAddress.get());
 }
 
 ACTOR static Future<Void> multiVersionCleanupWorker(TransportData* self) {
@@ -1556,23 +1582,21 @@ void FlowTransport::initMetrics() {
 }
 
 NetworkAddressList FlowTransport::getLocalAddresses() const {
-	return self->localAddresses;
+	return self->localAddresses.getAddressList();
 }
 
 NetworkAddress FlowTransport::getLocalAddress() const {
-	return self->localAddresses.address;
+	return self->localAddresses.getAddressList().address;
 }
 
-std::string FlowTransport::getLocalAddressAsString() const {
-	if (self->firstAddrPtr != &self->localAddresses.address) {
-		self->firstAddrPtr = &self->localAddresses.address;
-		self->cachedAddressString = self->localAddresses.address.toString();
-	}
-	return self->cachedAddressString;
+Standalone<StringRef> FlowTransport::getLocalAddressAsString() const {
+	return self->localAddresses.getLocalAddressAsString();
 }
 
 void FlowTransport::setLocalAddress(NetworkAddress const& address) {
-	self->localAddresses.address = address;
+	auto newAddress = self->localAddresses.getAddressList();
+	newAddress.address = address;
+	self->localAddresses.setAddressList(newAddress);
 }
 
 const std::unordered_map<NetworkAddress, Reference<Peer>>& FlowTransport::getAllPeers() const {
@@ -1596,10 +1620,12 @@ Future<Void> FlowTransport::onIncompatibleChanged() {
 
 Future<Void> FlowTransport::bind(NetworkAddress publicAddress, NetworkAddress listenAddress) {
 	ASSERT(publicAddress.isPublic());
-	if (self->localAddresses.address == NetworkAddress()) {
-		self->localAddresses.address = publicAddress;
+	if (self->localAddresses.getAddressList().address == NetworkAddress()) {
+		self->localAddresses.setNetworkAddress(publicAddress);
 	} else {
-		self->localAddresses.secondaryAddress = publicAddress;
+		auto addrList = self->localAddresses.getAddressList();
+		addrList.secondaryAddress = publicAddress;
+		self->localAddresses.setAddressList(addrList);
 	}
 	//reformatLocalAddress()
 	TraceEvent("Binding").detail("PublicAddress", publicAddress).detail("ListenAddress", listenAddress);
@@ -1652,7 +1678,7 @@ void FlowTransport::removePeerReference(const Endpoint& endpoint, bool isStream)
 void FlowTransport::addEndpoint(Endpoint& endpoint, NetworkMessageReceiver* receiver, TaskPriority taskID) {
 	endpoint.token = deterministicRandom()->randomUniqueID();
 	if (receiver->isStream()) {
-		endpoint.addresses = self->localAddresses;
+		endpoint.addresses = self->localAddresses.getAddressList();
 		endpoint.token = UID(endpoint.token.first() | TOKEN_STREAM_FLAG, endpoint.token.second());
 	} else {
 		endpoint.addresses = NetworkAddressList();
@@ -1662,7 +1688,7 @@ void FlowTransport::addEndpoint(Endpoint& endpoint, NetworkMessageReceiver* rece
 }
 
 void FlowTransport::addEndpoints(std::vector<std::pair<FlowReceiver*, TaskPriority>> const& streams) {
-	self->endpoints.insert(self->localAddresses, streams);
+	self->endpoints.insert(self->localAddresses.getAddressList(), streams);
 }
 
 void FlowTransport::removeEndpoint(const Endpoint& endpoint, NetworkMessageReceiver* receiver) {
@@ -1670,7 +1696,7 @@ void FlowTransport::removeEndpoint(const Endpoint& endpoint, NetworkMessageRecei
 }
 
 void FlowTransport::addWellKnownEndpoint(Endpoint& endpoint, NetworkMessageReceiver* receiver, TaskPriority taskID) {
-	endpoint.addresses = self->localAddresses;
+	endpoint.addresses = self->localAddresses.getAddressList();
 	ASSERT(receiver->isStream());
 	self->endpoints.insertWellKnown(receiver, endpoint.token, taskID);
 }

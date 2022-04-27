@@ -20,6 +20,7 @@
 
 #ifndef FLOW_TRANSPORT_H
 #define FLOW_TRANSPORT_H
+#include "flow/Arena.h"
 #pragma once
 
 #include <algorithm>
@@ -217,7 +218,7 @@ public:
 
 	// Returns first local NetworkAddress as std::string. Caches value
 	// to avoid unnecessary calls to toString() and fmt overhead.
-	std::string getLocalAddressAsString() const;
+	Standalone<StringRef> getLocalAddressAsString() const;
 
 	// Returns first local NetworkAddress.
 	void setLocalAddress(NetworkAddress const&);
