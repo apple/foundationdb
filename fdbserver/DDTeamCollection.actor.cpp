@@ -127,9 +127,7 @@ public:
 
 		loop {
 			choose {
-				when(wait(self->buildTeams())) {
-					return Void();
-				}
+				when(wait(self->buildTeams())) { return Void(); }
 				when(wait(self->restartTeamBuilder.onTrigger())) {}
 			}
 		}
@@ -507,9 +505,7 @@ public:
 		while (self->pauseWiggle && !self->pauseWiggle->get() && self->waitUntilRecruited.get()) {
 			choose {
 				when(wait(self->waitUntilRecruited.onChange() || self->pauseWiggle->onChange())) {}
-				when(wait(delay(SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY, g_network->getCurrentTask()))) {
-					break;
-				}
+				when(wait(delay(SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY, g_network->getCurrentTask()))) { break; }
 			}
 		}
 
@@ -1341,9 +1337,7 @@ public:
 						    .detail("ConfigStoreType", self->configuration.storageServerStoreType)
 						    .detail("WrongStoreTypeRemoved", server->wrongStoreTypeToRemove.get());
 					}
-					when(wait(server->wakeUpTracker.getFuture())) {
-						server->wakeUpTracker = Promise<Void>();
-					}
+					when(wait(server->wakeUpTracker.getFuture())) { server->wakeUpTracker = Promise<Void>(); }
 					when(wait(storageMetadataTracker)) {}
 					when(wait(server->ssVersionTooFarBehind.onChange())) {}
 					when(wait(self->disableFailingLaggingServers.onChange())) {}
@@ -2053,9 +2047,7 @@ public:
 							    .detail("ExtraHealthyTeamCount", extraTeamCount)
 							    .detail("HealthyTeamCount", self->healthyTeamCount);
 						}
-						when(wait(pauseChanged)) {
-							continue;
-						}
+						when(wait(pauseChanged)) { continue; }
 					}
 				}
 			}
@@ -2579,9 +2571,7 @@ public:
 							}
 						}
 					}
-					when(wait(recruitStorage->onChange())) {
-						fCandidateWorker = Future<RecruitStorageReply>();
-					}
+					when(wait(recruitStorage->onChange())) { fCandidateWorker = Future<RecruitStorageReply>(); }
 					when(wait(self->zeroHealthyTeams->onChange())) {
 						if (!pendingTSSCheck && self->zeroHealthyTeams->get() &&
 						    (self->isTssRecruiting || self->tss_info_by_pair.size() > 0)) {
