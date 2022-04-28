@@ -265,11 +265,11 @@ void DatabaseContext::getLatestCommitVersions(const Reference<LocationInfo>& loc
 void updateCachedReadVersionShared(double t, Version v, DatabaseSharedState* p) {
 	MutexHolder mutex(p->mutexLock);
 	if (v >= p->grvCacheSpace.cachedReadVersion) {
-		TraceEvent(SevDebug, "CacheReadVersionUpdate")
-		    .detail("Version", v)
-		    .detail("CurTime", t)
-		    .detail("LastVersion", p->grvCacheSpace.cachedReadVersion)
-		    .detail("LastTime", p->grvCacheSpace.lastGrvTime);
+		//TraceEvent(SevDebug, "CacheReadVersionUpdate")
+		//    .detail("Version", v)
+		//    .detail("CurTime", t)
+		//    .detail("LastVersion", p->grvCacheSpace.cachedReadVersion)
+		//    .detail("LastTime", p->grvCacheSpace.lastGrvTime);
 		p->grvCacheSpace.cachedReadVersion = v;
 		if (t > p->grvCacheSpace.lastGrvTime) {
 			p->grvCacheSpace.lastGrvTime = t;
@@ -282,11 +282,11 @@ void DatabaseContext::updateCachedReadVersion(double t, Version v) {
 		return updateCachedReadVersionShared(t, v, sharedStatePtr);
 	}
 	if (v >= cachedReadVersion) {
-		TraceEvent(SevDebug, "CachedReadVersionUpdate")
-		    .detail("Version", v)
-		    .detail("GrvStartTime", t)
-		    .detail("LastVersion", cachedReadVersion)
-		    .detail("LastTime", lastGrvTime);
+		//TraceEvent(SevDebug, "CachedReadVersionUpdate")
+		//    .detail("Version", v)
+		//    .detail("GrvStartTime", t)
+		//    .detail("LastVersion", cachedReadVersion)
+		//    .detail("LastTime", lastGrvTime);
 		cachedReadVersion = v;
 		// Since the time is based on the start of the request, it's possible that we
 		// get a newer version with an older time.
@@ -5100,10 +5100,10 @@ Future<Optional<Value>> Transaction::get(const Key& key, Snapshot snapshot) {
 	++trState->cx->transactionGetValueRequests;
 	// ASSERT (key < allKeys.end);
 
-	// There are no keys in the database with size greater than KEY_SIZE_LIMIT
-	if (key.size() >
-	    (key.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT))
+	// There are no keys in the database with size greater than the max key size
+	if (key.size() > getMaxReadKeySize(key)) {
 		return Optional<Value>();
+	}
 
 	auto ver = getReadVersion();
 
@@ -5484,23 +5484,19 @@ Future<Void> Transaction::getRangeStream(const PromiseStream<RangeResult>& resul
 void Transaction::addReadConflictRange(KeyRangeRef const& keys) {
 	ASSERT(!keys.empty());
 
-	// There aren't any keys in the database with size larger than KEY_SIZE_LIMIT, so if range contains large keys
+	// There aren't any keys in the database with size larger than the max key size, so if range contains large keys
 	// we can translate it to an equivalent one with smaller keys
 	KeyRef begin = keys.begin;
 	KeyRef end = keys.end;
 
-	if (begin.size() >
-	    (begin.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT))
-		begin = begin.substr(
-		    0,
-		    (begin.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT) +
-		        1);
-	if (end.size() >
-	    (end.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT))
-		end = end.substr(
-		    0,
-		    (end.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT) +
-		        1);
+	int64_t beginMaxSize = getMaxReadKeySize(begin);
+	int64_t endMaxSize = getMaxReadKeySize(end);
+	if (begin.size() > beginMaxSize) {
+		begin = begin.substr(0, beginMaxSize + 1);
+	}
+	if (end.size() > endMaxSize) {
+		end = end.substr(0, endMaxSize + 1);
+	}
 
 	KeyRangeRef r = KeyRangeRef(begin, end);
 
@@ -5522,8 +5518,7 @@ void Transaction::makeSelfConflicting() {
 
 void Transaction::set(const KeyRef& key, const ValueRef& value, AddConflictRange addConflictRange) {
 	++trState->cx->transactionSetMutations;
-	if (key.size() >
-	    (key.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT))
+	if (key.size() > getMaxWriteKeySize(key, trState->options.rawAccess))
 		throw key_too_large();
 	if (value.size() > CLIENT_KNOBS->VALUE_SIZE_LIMIT)
 		throw value_too_large();
@@ -5544,8 +5539,7 @@ void Transaction::atomicOp(const KeyRef& key,
                            MutationRef::Type operationType,
                            AddConflictRange addConflictRange) {
 	++trState->cx->transactionAtomicMutations;
-	if (key.size() >
-	    (key.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT))
+	if (key.size() > getMaxWriteKeySize(key, trState->options.rawAccess))
 		throw key_too_large();
 	if (operand.size() > CLIENT_KNOBS->VALUE_SIZE_LIMIT)
 		throw value_too_large();
@@ -5578,20 +5572,16 @@ void Transaction::clear(const KeyRangeRef& range, AddConflictRange addConflictRa
 	KeyRef begin = range.begin;
 	KeyRef end = range.end;
 
-	// There aren't any keys in the database with size larger than KEY_SIZE_LIMIT, so if range contains large keys
+	// There aren't any keys in the database with size larger than the max key size, so if range contains large keys
 	// we can translate it to an equivalent one with smaller keys
-	if (begin.size() >
-	    (begin.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT))
-		begin = begin.substr(
-		    0,
-		    (begin.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT) +
-		        1);
-	if (end.size() >
-	    (end.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT))
-		end = end.substr(
-		    0,
-		    (end.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT) +
-		        1);
+	int64_t beginMaxSize = getMaxClearKeySize(begin);
+	int64_t endMaxSize = getMaxClearKeySize(end);
+	if (begin.size() > beginMaxSize) {
+		begin = begin.substr(0, beginMaxSize + 1);
+	}
+	if (end.size() > endMaxSize) {
+		end = end.substr(0, endMaxSize + 1);
+	}
 
 	auto r = KeyRangeRef(req.arena, KeyRangeRef(begin, end));
 	if (r.empty())
@@ -5604,10 +5594,10 @@ void Transaction::clear(const KeyRangeRef& range, AddConflictRange addConflictRa
 }
 void Transaction::clear(const KeyRef& key, AddConflictRange addConflictRange) {
 	++trState->cx->transactionClearMutations;
-	// There aren't any keys in the database with size larger than KEY_SIZE_LIMIT
-	if (key.size() >
-	    (key.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT))
+	// There aren't any keys in the database with size larger than the max key size
+	if (key.size() > getMaxClearKeySize(key)) {
 		return;
+	}
 
 	auto& req = tr;
 	auto& t = req.transaction;
@@ -5626,24 +5616,19 @@ void Transaction::addWriteConflictRange(const KeyRangeRef& keys) {
 	auto& req = tr;
 	auto& t = req.transaction;
 
-	// There aren't any keys in the database with size larger than KEY_SIZE_LIMIT, so if range contains large keys
+	// There aren't any keys in the database with size larger than the max key size, so if range contains large keys
 	// we can translate it to an equivalent one with smaller keys
 	KeyRef begin = keys.begin;
 	KeyRef end = keys.end;
 
-	if (begin.size() >
-	    (begin.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT))
-		begin = begin.substr(
-		    0,
-		    (begin.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT) +
-		        1);
-	if (end.size() >
-	    (end.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT))
-		end = end.substr(
-		    0,
-		    (end.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT) +
-		        1);
-
+	int64_t beginMaxSize = getMaxKeySize(begin);
+	int64_t endMaxSize = getMaxKeySize(end);
+	if (begin.size() > beginMaxSize) {
+		begin = begin.substr(0, beginMaxSize + 1);
+	}
+	if (end.size() > endMaxSize) {
+		end = end.substr(0, endMaxSize + 1);
+	}
 	KeyRangeRef r = KeyRangeRef(begin, end);
 
 	if (r.empty()) {
@@ -9394,4 +9379,22 @@ ACTOR Future<Void> waitPurgeGranulesCompleteActor(Reference<DatabaseContext> db,
 
 Future<Void> DatabaseContext::waitPurgeGranulesComplete(Key purgeKey) {
 	return waitPurgeGranulesCompleteActor(Reference<DatabaseContext>::addRef(this), purgeKey);
+}
+
+int64_t getMaxKeySize(KeyRef const& key) {
+	return getMaxWriteKeySize(key, true);
+}
+
+int64_t getMaxReadKeySize(KeyRef const& key) {
+	return getMaxKeySize(key);
+}
+
+int64_t getMaxWriteKeySize(KeyRef const& key, bool hasRawAccess) {
+	int64_t tenantSize = hasRawAccess ? CLIENT_KNOBS->TENANT_PREFIX_SIZE_LIMIT : 0;
+	return key.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT
+	                                        : CLIENT_KNOBS->KEY_SIZE_LIMIT + tenantSize;
+}
+
+int64_t getMaxClearKeySize(KeyRef const& key) {
+	return getMaxKeySize(key);
 }
