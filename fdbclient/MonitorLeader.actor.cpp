@@ -866,8 +866,7 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
     Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> supportedVersions,
     Key traceLogGroup) {
 	state ClusterConnectionString cs = info.intermediateConnRecord->getConnectionString();
-	state std::vector<Hostname> hostnames = cs.hostnames;
-	state int coordinatorsSize = hostnames.size() + cs.coordinators().size();
+	state int coordinatorsSize = cs.hostnames.size() + cs.coordinators().size();
 	state int index = 0;
 	state int successIndex = 0;
 	state Optional<double> incorrectTime;
@@ -878,7 +877,7 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 	state std::vector<ClientLeaderRegInterface> clientLeaderServers;
 
 	clientLeaderServers.reserve(coordinatorsSize);
-	for (const auto& h : hostnames) {
+	for (const auto& h : cs.hostnames) {
 		clientLeaderServers.push_back(ClientLeaderRegInterface(h));
 	}
 	for (const auto& c : cs.coordinators()) {
@@ -894,7 +893,7 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 		coordinator->set(clientLeaderServer);
 
 		req.clusterKey = cs.clusterKey();
-		req.hostnames = hostnames;
+		req.hostnames = cs.hostnames;
 		req.coordinators = cs.coordinators();
 		req.knownClientInfoID = clientInfo->get().id;
 		req.supportedVersions = supportedVersions->get();
