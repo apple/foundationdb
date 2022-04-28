@@ -839,7 +839,10 @@ ACTOR Future<Void> fetchShardMetrics_impl(DataDistributionTracker* self, GetMetr
 			std::vector<StorageMetrics> returnMetrics;
 			if (!req.comparator.present())
 				returnMetrics.push_back(StorageMetrics());
-			for (auto range : req.keys) {
+
+			// TODO: shall we do random shuffle to make the selection uniform distributed over the shard space?
+			for (int i = 0; i < SERVER_KNOBS->DD_SHARD_COMPARE_LIMIT && i < req.keys.size(); ++i) {
+				auto range = req.keys[i];
 				StorageMetrics metrics;
 				for (auto t : self->shards.intersectingRanges(range)) {
 					auto& stats = t.value().stats;
@@ -864,7 +867,7 @@ ACTOR Future<Void> fetchShardMetrics_impl(DataDistributionTracker* self, GetMetr
 			}
 
 			if (!onChange.isValid()) {
-				if (req.topK >= returnMetrics.size())
+				if (!req.comparator.present() || req.topK >= returnMetrics.size())
 					req.reply.send(returnMetrics);
 				else if (req.comparator.present()) {
 					std::nth_element(returnMetrics.begin(),

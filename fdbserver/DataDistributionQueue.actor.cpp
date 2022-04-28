@@ -1078,11 +1078,11 @@ struct DDQueueData {
 	}
 
 	// return true if the servers are throttled as source for read rebalance
-	bool timeThrottle(const std::vector<UID>& ids, int shardCount) const {
-		return std::any_of(ids.begin(), ids.end(), [this, shardCount](const UID& id) {
+	bool timeThrottle(const std::vector<UID>& ids) const {
+		return std::any_of(ids.begin(), ids.end(), [this](const UID& id) {
 			if (this->lastAsSource.count(id)) {
-				return (now() - this->lastAsSource.at(id)) * shardCount <
-				       SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL;
+				// TODO: set 5.0 as a knob
+				return (now() - this->lastAsSource.at(id)) * 5.0 < SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL;
 			}
 			return false;
 		});
@@ -1543,7 +1543,7 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
 	}
 
 	// check lastAsSource, at most 10% of shards can be moved within a sample period
-	if (self->timeThrottle(sourceTeam->getServerIDs(), 0.1 * shards.size())) {
+	if (self->timeThrottle(sourceTeam->getServerIDs())) {
 		traceEvent->detail("SkipReason", "SourceTeamThrottle");
 		return false;
 	}
