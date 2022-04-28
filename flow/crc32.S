@@ -1,3 +1,4 @@
+#if defined(__powerpc64__)
 /*
  * Calculate the checksum of data that is 16 byte aligned and a multiple of
  * 16 bytes.
@@ -787,3 +788,4 @@ FUNC_START(CRC32_FUNCTION_ASM)
 	b	.Lout
 
 FUNC_END(CRC32_FUNCTION_ASM)
+#endif
