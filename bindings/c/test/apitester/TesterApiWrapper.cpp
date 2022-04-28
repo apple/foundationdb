@@ -169,7 +169,7 @@ public:
 		// if there was an error or not all loads finished, delete data
 		for (auto& it : loadsInProgress) {
 			uint8_t* dataToFree = it.second;
-			delete dataToFree;
+			delete[] dataToFree;
 		}
 	}
 };
@@ -203,7 +203,7 @@ static void granule_free_load(int64_t loadId, void* context) {
 	TesterGranuleContext* ctx = (TesterGranuleContext*)context;
 	auto it = ctx->loadsInProgress.find(loadId);
 	uint8_t* dataToFree = it->second;
-	delete dataToFree;
+	delete[] dataToFree;
 
 	ctx->loadsInProgress.erase(it);
 }
