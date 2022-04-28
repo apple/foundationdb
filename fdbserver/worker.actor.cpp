@@ -2669,21 +2669,43 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderWithDelayedCandidacyImplOneGenerati
     Reference<IClusterConnectionRecord> connRecord,
     Reference<AsyncVar<Value>> result,
     MonitorLeaderInfo info) {
-	state ClusterConnectionString ccf = info.intermediateConnRecord->getConnectionString();
-	state std::vector<NetworkAddress> addrs = ccf.coordinators();
+	ClusterConnectionString cs = info.intermediateConnRecord->getConnectionString();
+	std::vector<Hostname> hostnames;
+	state int coordinatorsSize = cs.hostnames.size() + cs.coordinators().size();
 	state ElectionResultRequest request;
 	state int index = 0;
 	state int successIndex = 0;
-	request.key = ccf.clusterKey();
-	request.coordinators = ccf.coordinators();
+	state std::vector<LeaderElectionRegInterface> leaderElectionServers;
 
-	deterministicRandom()->randomShuffle(addrs);
+	hostnames.reserve(cs.hostnames.size());
+	leaderElectionServers.reserve(coordinatorsSize);
+	for (const auto& h : cs.hostnames) {
+		hostnames.push_back(h);
+		leaderElectionServers.push_back(LeaderElectionRegInterface(h));
+	}
+	for (const auto& c : cs.coordinators()) {
+		leaderElectionServers.push_back(LeaderElectionRegInterface(c));
+	}
+	deterministicRandom()->randomShuffle(leaderElectionServers);
+
+	request.key = cs.clusterKey();
+	request.hostnames = hostnames;
+	request.coordinators = cs.coordinators();
 
 	loop {
-		LeaderElectionRegInterface interf(addrs[index]);
+		LeaderElectionRegInterface interf = leaderElectionServers[index];
+		bool usingHostname = interf.hostname.present();
 		request.reply = ReplyPromise<Optional<LeaderInfo>>();
 
-		ErrorOr<Optional<LeaderInfo>> leader = wait(interf.electionResult.tryGetReply(request));
+		state ErrorOr<Optional<LeaderInfo>> leader;
+		if (usingHostname) {
+			wait(store(
+			    leader,
+			    tryGetReplyFromHostname(request, interf.hostname.get(), WLTOKEN_LEADERELECTIONREG_ELECTIONRESULT)));
+		} else {
+			wait(store(leader, interf.electionResult.tryGetReply(request)));
+		}
+
 		if (leader.present()) {
 			if (leader.get().present()) {
 				if (leader.get().get().forward) {
@@ -2719,14 +2741,9 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderWithDelayedCandidacyImplOneGenerati
 			}
 			successIndex = index;
 		} else {
-			if (leader.isError() && leader.getError().code() == error_code_coordinators_changed) {
-				info.intermediateConnRecord->getConnectionString().resetToUnresolved();
-				throw coordinators_changed();
-			}
-			index = (index + 1) % addrs.size();
+			index = (index + 1) % coordinatorsSize;
 			if (index == successIndex) {
 				wait(delay(CLIENT_KNOBS->COORDINATOR_RECONNECTION_DELAY));
-				throw coordinators_changed();
 			}
 		}
 	}
@@ -2734,22 +2751,11 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderWithDelayedCandidacyImplOneGenerati
 
 ACTOR Future<Void> monitorLeaderWithDelayedCandidacyImplInternal(Reference<IClusterConnectionRecord> connRecord,
                                                                  Reference<AsyncVar<Value>> outSerializedLeaderInfo) {
-	wait(connRecord->resolveHostnames());
 	state MonitorLeaderInfo info(connRecord);
 	loop {
-		try {
-			wait(info.intermediateConnRecord->resolveHostnames());
-			MonitorLeaderInfo _info =
-			    wait(monitorLeaderWithDelayedCandidacyImplOneGeneration(connRecord, outSerializedLeaderInfo, info));
-			info = _info;
-		} catch (Error& e) {
-			if (e.code() == error_code_coordinators_changed) {
-				TraceEvent("MonitorLeaderWithDelayedCandidacyCoordinatorsChanged").suppressFor(1.0);
-				info.intermediateConnRecord->getConnectionString().resetToUnresolved();
-			} else {
-				throw e;
-			}
-		}
+		MonitorLeaderInfo _info =
+		    wait(monitorLeaderWithDelayedCandidacyImplOneGeneration(connRecord, outSerializedLeaderInfo, info));
+		info = _info;
 	}
 }
 
@@ -2883,6 +2889,7 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 	actors.push_back(serveProcess());
 
 	try {
+		ServerCoordinators coordinators(connRecord);
 		if (g_network->isSimulated()) {
 			whitelistBinPaths = ",, random_path,  /bin/snap_create.sh,,";
 		}
