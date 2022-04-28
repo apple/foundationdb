@@ -682,8 +682,8 @@ struct QuietDatabaseChecker {
 
 		Impl(double start, const std::string& phase) : start(start), phase(phase) {}
 
-		template <class T, class Comparison = std::less<>>
-		Impl& add(BaseTraceEvent& evt, const char* name, T value, T expected, Comparison const& cmp = std::less<>()) {
+		template <class T, class Comparison = std::less_equal<>>
+		Impl& add(BaseTraceEvent& evt, const char* name, T value, T expected, Comparison const& cmp = std::less_equal<>()) {
 			std::string k = fmt::format("{}Gate", name);
 			evt.detail(name, value).detail(k.c_str(), expected);
 			if (!cmp(value, expected)) {
