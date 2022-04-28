@@ -117,9 +117,21 @@ class GetCommittedVersionQuorum {
 				                                       &ConfigFollowerInterface::getChanges,
 				                                       ConfigFollowerGetChangesRequest{ lastSeenVersion, target }),
 				                      SERVER_KNOBS->GET_COMMITTED_VERSION_TIMEOUT));
-				wait(timeoutError(cfi.rollforward.getReply(ConfigFollowerRollforwardRequest{
-				                      rollback, nodeVersion.lastCommitted, target, reply.changes, reply.annotations }),
-				                  SERVER_KNOBS->GET_COMMITTED_VERSION_TIMEOUT));
+
+				if (cfi.hostname.present()) {
+					wait(timeoutError(
+					    retryGetReplyFromHostname(
+					        ConfigFollowerRollforwardRequest{
+					            rollback, nodeVersion.lastCommitted, target, reply.changes, reply.annotations },
+					        cfi.hostname.get(),
+					        WLTOKEN_CONFIGFOLLOWER_ROLLFORWARD),
+					    SERVER_KNOBS->GET_COMMITTED_VERSION_TIMEOUT));
+				} else {
+					wait(timeoutError(
+					    cfi.rollforward.getReply(ConfigFollowerRollforwardRequest{
+					        rollback, nodeVersion.lastCommitted, target, reply.changes, reply.annotations }),
+					    SERVER_KNOBS->GET_COMMITTED_VERSION_TIMEOUT));
+				}
 			} catch (Error& e) {
 				if (e.code() == error_code_transaction_too_old) {
 					// Seeing this trace is not necessarily a problem. There
