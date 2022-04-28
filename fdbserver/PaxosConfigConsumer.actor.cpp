@@ -99,8 +99,17 @@ class GetCommittedVersionQuorum {
 
 			// Now roll node forward to match the largest committed version of
 			// the replies.
-			state Reference<ConfigFollowerInfo> quorumCfi(new ConfigFollowerInfo(self->replies[target]));
 			try {
+				state std::vector<ConfigFollowerInterface> interfs = self->replies[target];
+				std::vector<Future<Void>> fs;
+				for (ConfigFollowerInterface& interf : interfs) {
+					if (interf.hostname.present()) {
+						fs.push_back(tryInitializeRequestStream(
+						    &interf.getChanges, interf.hostname.get(), WLTOKEN_CONFIGFOLLOWER_GETCHANGES));
+					}
+				}
+				wait(waitForAll(fs));
+				state Reference<ConfigFollowerInfo> quorumCfi(new ConfigFollowerInfo(interfs));
 				state Version lastSeenVersion = std::max(
 				    rollback.present() ? rollback.get() : nodeVersion.lastCommitted, self->largestCompactedResponse);
 				ConfigFollowerGetChangesReply reply =
@@ -129,9 +138,18 @@ class GetCommittedVersionQuorum {
 
 	ACTOR static Future<Void> getCommittedVersionActor(GetCommittedVersionQuorum* self, ConfigFollowerInterface cfi) {
 		try {
-			ConfigFollowerGetCommittedVersionReply reply =
-			    wait(timeoutError(cfi.getCommittedVersion.getReply(ConfigFollowerGetCommittedVersionRequest{}),
-			                      SERVER_KNOBS->GET_COMMITTED_VERSION_TIMEOUT));
+			state ConfigFollowerGetCommittedVersionReply reply;
+			if (cfi.hostname.present()) {
+				wait(timeoutError(store(reply,
+				                        retryGetReplyFromHostname(ConfigFollowerGetCommittedVersionRequest{},
+				                                                  cfi.hostname.get(),
+				                                                  WLTOKEN_CONFIGFOLLOWER_GETCOMMITTEDVERSION)),
+				                  SERVER_KNOBS->GET_COMMITTED_VERSION_TIMEOUT));
+			} else {
+				wait(timeoutError(
+				    store(reply, cfi.getCommittedVersion.getReply(ConfigFollowerGetCommittedVersionRequest{})),
+				    SERVER_KNOBS->GET_COMMITTED_VERSION_TIMEOUT));
+			}
 
 			++self->totalRepliesReceived;
 			self->largestCompactedResponse = std::max(self->largestCompactedResponse, reply.lastCompacted);
@@ -279,7 +297,15 @@ class PaxosConfigConsumerImpl {
 			std::vector<Future<Void>> compactionRequests;
 			compactionRequests.reserve(compactionRequests.size());
 			for (const auto& cfi : self->cfis) {
-				compactionRequests.push_back(cfi.compact.getReply(ConfigFollowerCompactRequest{ compactionVersion }));
+				if (cfi.hostname.present()) {
+					compactionRequests.push_back(
+					    retryGetReplyFromHostname(ConfigFollowerCompactRequest{ compactionVersion },
+					                              cfi.hostname.get(),
+					                              WLTOKEN_CONFIGFOLLOWER_COMPACT));
+				} else {
+					compactionRequests.push_back(
+					    cfi.compact.getReply(ConfigFollowerCompactRequest{ compactionVersion }));
+				}
 			}
 			try {
 				wait(timeoutError(waitForAll(compactionRequests), 1.0));
@@ -294,8 +320,18 @@ class PaxosConfigConsumerImpl {
 			self->resetCommittedVersionQuorum(); // TODO: This seems to fix a segfault, investigate more
 			try {
 				state Version committedVersion = wait(getCommittedVersion(self));
-				state Reference<ConfigFollowerInfo> configNodes(
-				    new ConfigFollowerInfo(self->getCommittedVersionQuorum.getReadReplicas()));
+				state std::vector<ConfigFollowerInterface> readReplicas =
+				    self->getCommittedVersionQuorum.getReadReplicas();
+				std::vector<Future<Void>> fs;
+				for (ConfigFollowerInterface& readReplica : readReplicas) {
+					if (readReplica.hostname.present()) {
+						fs.push_back(tryInitializeRequestStream(&readReplica.getSnapshotAndChanges,
+						                                        readReplica.hostname.get(),
+						                                        WLTOKEN_CONFIGFOLLOWER_GETSNAPSHOTANDCHANGES));
+					}
+				}
+				wait(waitForAll(fs));
+				state Reference<ConfigFollowerInfo> configNodes(new ConfigFollowerInfo(readReplicas));
 				ConfigFollowerGetSnapshotAndChangesReply reply =
 				    wait(timeoutError(basicLoadBalance(configNodes,
 				                                       &ConfigFollowerInterface::getSnapshotAndChanges,
@@ -349,8 +385,18 @@ class PaxosConfigConsumerImpl {
 				// returned would be 1.
 				if (committedVersion > self->lastSeenVersion) {
 					ASSERT(self->getCommittedVersionQuorum.getReadReplicas().size() >= self->cfis.size() / 2 + 1);
-					state Reference<ConfigFollowerInfo> configNodes(
-					    new ConfigFollowerInfo(self->getCommittedVersionQuorum.getReadReplicas()));
+					state std::vector<ConfigFollowerInterface> readReplicas =
+					    self->getCommittedVersionQuorum.getReadReplicas();
+					std::vector<Future<Void>> fs;
+					for (ConfigFollowerInterface& readReplica : readReplicas) {
+						if (readReplica.hostname.present()) {
+							fs.push_back(tryInitializeRequestStream(&readReplica.getChanges,
+							                                        readReplica.hostname.get(),
+							                                        WLTOKEN_CONFIGFOLLOWER_GETCHANGES));
+						}
+					}
+					wait(waitForAll(fs));
+					state Reference<ConfigFollowerInfo> configNodes(new ConfigFollowerInfo(readReplicas));
 					ConfigFollowerGetChangesReply reply = wait(timeoutError(
 					    basicLoadBalance(configNodes,
 					                     &ConfigFollowerInterface::getChanges,

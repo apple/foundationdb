@@ -15,6 +15,7 @@ set(FDBRPC_SRCS
   genericactors.actor.h
   genericactors.actor.cpp
   HealthMonitor.actor.cpp
+  HTTP.actor.cpp
   IAsyncFile.actor.cpp
   IPAllowList.cpp
   LoadBalance.actor.cpp
@@ -28,6 +29,10 @@ set(FDBRPC_SRCS
   ReplicationPolicy.cpp
   ReplicationTypes.cpp
   ReplicationUtils.cpp
+  RESTClient.h
+  RESTClient.actor.cpp
+  RESTUtils.h
+  RESTUtils.actor.cpp
   SimExternalConnection.actor.cpp
   SimExternalConnection.h
   Stats.actor.cpp
