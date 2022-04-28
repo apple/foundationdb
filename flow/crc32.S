@@ -27,15 +27,13 @@
  *  b) the Apache License, Version 2.0
  */
 
-//clang-format off
-
 #if defined (__clang__)
 #ifndef __ALTIVEC__
 #define __ALTIVEC__
 #endif
 #include "ppc-asm.h"
-//#else
-//#include <ppc-asm.h>
+#else
+#include <ppc-asm.h>
 #endif
 #include "ppc-opcode.h"
 
@@ -97,6 +95,8 @@
 #ifndef CRC32_FUNCTION_ASM
 #define CRC32_FUNCTION_ASM __crc32_vpmsum
 #endif
+
+//clang-format off
 
 /* unsigned int __crc32_vpmsum(unsigned int crc, void *p, unsigned long len) */
 FUNC_START(CRC32_FUNCTION_ASM)
@@ -787,5 +787,3 @@ FUNC_START(CRC32_FUNCTION_ASM)
 	b	.Lout
 
 FUNC_END(CRC32_FUNCTION_ASM)
-
-//clang-format on
