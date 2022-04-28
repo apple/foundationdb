@@ -322,6 +322,7 @@ public:
 	int ROCKSDB_CAN_COMMIT_DELAY_TIMES_ON_OVERLOAD;
 	int64_t ROCKSDB_COMPACTION_READAHEAD_SIZE;
 	int64_t ROCKSDB_BLOCK_SIZE;
+	bool ENABLE_SHARDED_ROCKSDB;
 
 	// Leader election
 	int MAX_NOTIFICATIONS;
@@ -373,6 +374,7 @@ public:
 	int MAX_COMMIT_UPDATES;
 	double MAX_PROXY_COMPUTE;
 	double MAX_COMPUTE_PER_OPERATION;
+	double MAX_COMPUTE_DURATION_LOG_CUTOFF;
 	int PROXY_COMPUTE_BUCKETS;
 	double PROXY_COMPUTE_GROWTH_RATE;
 	int TXN_STATE_SEND_AMOUNT;
@@ -820,6 +822,9 @@ public:
 	bool ENABLE_ENCRYPTION;
 	std::string ENCRYPTION_MODE;
 	int SIM_KMS_MAX_KEYS;
+
+	// Key Management Service (KMS) Connector
+	std::string KMS_CONNECTOR_TYPE;
 
 	// blob granule stuff
 	// FIXME: configure url with database configuration instead of knob eventually

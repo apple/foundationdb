@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
+#include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbclient/ReadYourWrites.h"
@@ -113,7 +114,17 @@ struct WriteDuringReadWorkload : TestWorkload {
 
 	std::string description() const override { return "WriteDuringRead"; }
 
-	Future<Void> setup(Database const& cx) override { return Void(); }
+	ACTOR Future<Void> setupImpl(WriteDuringReadWorkload* self, Database cx) {
+		// If we are operating in the default tenant but enable raw access, we should only write keys
+		// in the tenant's key-space.
+		if (self->useSystemKeys && cx->defaultTenant.present() && self->keyPrefix < systemKeys.begin) {
+			TenantMapEntry entry = wait(ManagementAPI::getTenant(cx.getReference(), cx->defaultTenant.get()));
+			self->keyPrefix = entry.prefix.withSuffix(self->keyPrefix).toString();
+		}
+		return Void();
+	}
+
+	Future<Void> setup(Database const& cx) override { return setupImpl(this, cx); }
 
 	Future<Void> start(Database const& cx) override {
 		if (clientId == 0)
@@ -642,9 +653,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 						for (int j = i; j < end; j++) {
 							if (deterministicRandom()->random01() < self->initialKeyDensity) {
 								Key key = self->getKeyForIndex(j);
-								if (key.size() <= (key.startsWith(systemKeys.begin)
-								                       ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT
-								                       : CLIENT_KNOBS->KEY_SIZE_LIMIT)) {
+								if (key.size() <= getMaxWriteKeySize(key, false)) {
 									Value value = self->getRandomValue();
 									value =
 									    value.substr(0, std::min<int>(value.size(), CLIENT_KNOBS->VALUE_SIZE_LIMIT));
@@ -694,7 +703,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 	Key getKeyForIndex(int idx) {
 		idx += minNode;
 		if (adjacentKeys) {
-			return Key(idx ? keyPrefix + std::string(idx, '\x00') : "");
+			return Key(keyPrefix + (idx ? std::string(idx, '\x00') : ""));
 		} else {
 			return Key(keyPrefix + format("%010d", idx));
 		}
@@ -887,18 +896,10 @@ struct WriteDuringReadWorkload : TestWorkload {
 								tr.clear(range);
 								if (!noConflict) {
 									KeyRangeRef conflict(
-									    range.begin.substr(0,
-									                       std::min<int>(range.begin.size(),
-									                                     (range.begin.startsWith(systemKeys.begin)
-									                                          ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT
-									                                          : CLIENT_KNOBS->KEY_SIZE_LIMIT) +
-									                                         1)),
-									    range.end.substr(0,
-									                     std::min<int>(range.end.size(),
-									                                   (range.end.startsWith(systemKeys.begin)
-									                                        ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT
-									                                        : CLIENT_KNOBS->KEY_SIZE_LIMIT) +
-									                                       1)));
+									    range.begin.substr(
+									        0, std::min<int>(range.begin.size(), getMaxClearKeySize(range.begin) + 1)),
+									    range.end.substr(
+									        0, std::min<int>(range.end.size(), getMaxClearKeySize(range.end) + 1)));
 									self->addedConflicts.insert(conflict, true);
 								}
 								self->memoryDatabase.erase(self->memoryDatabase.lower_bound(range.begin),
@@ -911,9 +912,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 								if (noConflict)
 									tr.setOption(FDBTransactionOptions::NEXT_WRITE_NO_WRITE_CONFLICT_RANGE);
 								tr.clear(key);
-								if (!noConflict && key.size() <= (key.startsWith(systemKeys.begin)
-								                                      ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT
-								                                      : CLIENT_KNOBS->KEY_SIZE_LIMIT)) {
+								if (!noConflict && key.size() <= getMaxClearKeySize(key)) {
 									self->addedConflicts.insert(key, true);
 								}
 								self->memoryDatabase.erase(key);
@@ -925,18 +924,9 @@ struct WriteDuringReadWorkload : TestWorkload {
 								//TraceEvent("WDRAddWriteConflict").detail("Range", range);
 								tr.addWriteConflictRange(range);
 								KeyRangeRef conflict(
-								    range.begin.substr(0,
-								                       std::min<int>(range.begin.size(),
-								                                     (range.begin.startsWith(systemKeys.begin)
-								                                          ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT
-								                                          : CLIENT_KNOBS->KEY_SIZE_LIMIT) +
-								                                         1)),
-								    range.end.substr(0,
-								                     std::min<int>(range.end.size(),
-								                                   (range.end.startsWith(systemKeys.begin)
-								                                        ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT
-								                                        : CLIENT_KNOBS->KEY_SIZE_LIMIT) +
-								                                       1)));
+								    range.begin.substr(
+								        0, std::min<int>(range.begin.size(), getMaxKeySize(range.begin) + 1)),
+								    range.end.substr(0, std::min<int>(range.end.size(), getMaxKeySize(range.end) + 1)));
 								self->addedConflicts.insert(conflict, true);
 							} else if (operationType == 8 && !disableDelay) {
 								double maxTime = 6.0;
@@ -980,18 +970,10 @@ struct WriteDuringReadWorkload : TestWorkload {
 									tr.atomicOp(versionStampKey, value, MutationRef::SetVersionstampedKey);
 									tr.clear(range);
 									KeyRangeRef conflict(
-									    range.begin.substr(0,
-									                       std::min<int>(range.begin.size(),
-									                                     (range.begin.startsWith(systemKeys.begin)
-									                                          ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT
-									                                          : CLIENT_KNOBS->KEY_SIZE_LIMIT) +
-									                                         1)),
-									    range.end.substr(0,
-									                     std::min<int>(range.end.size(),
-									                                   (range.end.startsWith(systemKeys.begin)
-									                                        ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT
-									                                        : CLIENT_KNOBS->KEY_SIZE_LIMIT) +
-									                                       1)));
+									    range.begin.substr(
+									        0, std::min<int>(range.begin.size(), getMaxClearKeySize(range.begin) + 1)),
+									    range.end.substr(
+									        0, std::min<int>(range.end.size(), getMaxClearKeySize(range.end) + 1)));
 									self->addedConflicts.insert(conflict, true);
 									self->memoryDatabase.erase(self->memoryDatabase.lower_bound(range.begin),
 									                           self->memoryDatabase.lower_bound(range.end));
@@ -1032,10 +1014,9 @@ struct WriteDuringReadWorkload : TestWorkload {
 										tr.setOption(FDBTransactionOptions::NEXT_WRITE_NO_WRITE_CONFLICT_RANGE);
 									tr.atomicOp(key, value, opType);
 									//TraceEvent("WDRAtomicOpSuccess").detail("Key", key).detail("Value", value.size());
-									if (!noConflict && key.size() <= (key.startsWith(systemKeys.begin)
-									                                      ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT
-									                                      : CLIENT_KNOBS->KEY_SIZE_LIMIT))
+									if (!noConflict && key.size() <= getMaxWriteKeySize(key, false)) {
 										self->addedConflicts.insert(key, true);
+									}
 									Optional<Value> existing = self->memoryGet(&self->memoryDatabase, key);
 									self->memoryDatabase[key] =
 									    self->applyAtomicOp(existing.present() ? Optional<StringRef>(existing.get())
@@ -1052,10 +1033,9 @@ struct WriteDuringReadWorkload : TestWorkload {
 								if (noConflict)
 									tr.setOption(FDBTransactionOptions::NEXT_WRITE_NO_WRITE_CONFLICT_RANGE);
 								tr.set(key, value);
-								if (!noConflict && key.size() <= (key.startsWith(systemKeys.begin)
-								                                      ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT
-								                                      : CLIENT_KNOBS->KEY_SIZE_LIMIT))
+								if (!noConflict && key.size() <= getMaxWriteKeySize(key, false)) {
 									self->addedConflicts.insert(key, true);
+								}
 								//TraceEvent("WDRSetSuccess").detail("Key", key).detail("Value", value.size());
 								self->memoryDatabase[key] = value;
 							}

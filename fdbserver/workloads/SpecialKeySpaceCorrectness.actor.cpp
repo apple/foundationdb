@@ -957,9 +957,9 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				boost::split(
 				    process_addresses, coordinator_processes_key.get().toString(), [](char c) { return c == ','; });
 				ASSERT(process_addresses.size() == cs.coordinators().size() + cs.hostnames.size());
-				wait(cs.resolveHostnames());
 				// compare the coordinator process network addresses one by one
-				for (const auto& network_address : cs.coordinators()) {
+				std::vector<NetworkAddress> coordinators = wait(cs.tryResolveHostnames());
+				for (const auto& network_address : coordinators) {
 					ASSERT(std::find(process_addresses.begin(), process_addresses.end(), network_address.toString()) !=
 					       process_addresses.end());
 				}
@@ -1077,19 +1077,20 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 					Optional<Value> res = wait(tx->get(coordinatorsKey));
 					ASSERT(res.present()); // Otherwise, database is in a bad state
-					state ClusterConnectionString csNew(res.get().toString());
-					wait(csNew.resolveHostnames());
-					ASSERT(csNew.coordinators().size() == old_coordinators_processes.size() + 1);
+					ClusterConnectionString csNew(res.get().toString());
+					// verify the cluster decription
+					ASSERT(new_cluster_description == csNew.clusterKeyName().toString());
+					ASSERT(csNew.hostnames.size() + csNew.coordinators().size() ==
+					       old_coordinators_processes.size() + 1);
+					std::vector<NetworkAddress> newCoordinators = wait(csNew.tryResolveHostnames());
 					// verify the coordinators' addresses
-					for (const auto& network_address : csNew.coordinators()) {
+					for (const auto& network_address : newCoordinators) {
 						std::string address_str = network_address.toString();
 						ASSERT(std::find(old_coordinators_processes.begin(),
 						                 old_coordinators_processes.end(),
 						                 address_str) != old_coordinators_processes.end() ||
 						       new_coordinator_process == address_str);
 					}
-					// verify the cluster decription
-					ASSERT(new_cluster_description == csNew.clusterKeyName().toString());
 					tx->reset();
 				} catch (Error& e) {
 					wait(tx->onError(e));
@@ -1171,137 +1172,6 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			tx->reset();
 		} catch (Error& e) {
 			wait(tx->onError(e));
-		}
-		// profile client get
-		loop {
-			try {
-				tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				// client_txn_sample_rate
-				state Optional<Value> txnSampleRate =
-				    wait(tx->get(LiteralStringRef("client_txn_sample_rate")
-				                     .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("profile"))));
-				ASSERT(txnSampleRate.present());
-				Optional<Value> txnSampleRateKey = wait(tx->get(fdbClientInfoTxnSampleRate));
-				if (txnSampleRateKey.present()) {
-					const double sampleRateDbl =
-					    BinaryReader::fromStringRef<double>(txnSampleRateKey.get(), Unversioned());
-					if (!std::isinf(sampleRateDbl)) {
-						ASSERT(txnSampleRate.get().toString() == boost::lexical_cast<std::string>(sampleRateDbl));
-					} else {
-						ASSERT(txnSampleRate.get().toString() == "default");
-					}
-				} else {
-					ASSERT(txnSampleRate.get().toString() == "default");
-				}
-				// client_txn_size_limit
-				state Optional<Value> txnSizeLimit =
-				    wait(tx->get(LiteralStringRef("client_txn_size_limit")
-				                     .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("profile"))));
-				ASSERT(txnSizeLimit.present());
-				Optional<Value> txnSizeLimitKey = wait(tx->get(fdbClientInfoTxnSizeLimit));
-				if (txnSizeLimitKey.present()) {
-					const int64_t sizeLimit =
-					    BinaryReader::fromStringRef<int64_t>(txnSizeLimitKey.get(), Unversioned());
-					if (sizeLimit != -1) {
-						ASSERT(txnSizeLimit.get().toString() == boost::lexical_cast<std::string>(sizeLimit));
-					} else {
-						ASSERT(txnSizeLimit.get().toString() == "default");
-					}
-				} else {
-					ASSERT(txnSizeLimit.get().toString() == "default");
-				}
-				tx->reset();
-				break;
-			} catch (Error& e) {
-				TraceEvent(SevDebug, "ProfileClientGet").error(e);
-				wait(tx->onError(e));
-			}
-		}
-		{
-			state double r_sample_rate = deterministicRandom()->random01();
-			state int64_t r_size_limit = deterministicRandom()->randomInt64(1e3, 1e6);
-			// update the sample rate and size limit
-			loop {
-				try {
-					tx->setOption(FDBTransactionOptions::RAW_ACCESS);
-					tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-					tx->set(LiteralStringRef("client_txn_sample_rate")
-					            .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("profile")),
-					        Value(boost::lexical_cast<std::string>(r_sample_rate)));
-					tx->set(LiteralStringRef("client_txn_size_limit")
-					            .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("profile")),
-					        Value(boost::lexical_cast<std::string>(r_size_limit)));
-					wait(tx->commit());
-					tx->reset();
-					break;
-				} catch (Error& e) {
-					wait(tx->onError(e));
-				}
-			}
-			// commit successfully, verify the system key changed
-			loop {
-				try {
-					tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-					Optional<Value> sampleRate = wait(tx->get(fdbClientInfoTxnSampleRate));
-					ASSERT(sampleRate.present());
-					ASSERT(r_sample_rate == BinaryReader::fromStringRef<double>(sampleRate.get(), Unversioned()));
-					Optional<Value> sizeLimit = wait(tx->get(fdbClientInfoTxnSizeLimit));
-					ASSERT(sizeLimit.present());
-					ASSERT(r_size_limit == BinaryReader::fromStringRef<int64_t>(sizeLimit.get(), Unversioned()));
-					tx->reset();
-					break;
-				} catch (Error& e) {
-					wait(tx->onError(e));
-				}
-			}
-			// Change back to default
-			loop {
-				try {
-					tx->setOption(FDBTransactionOptions::RAW_ACCESS);
-					tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-					tx->set(LiteralStringRef("client_txn_sample_rate")
-					            .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("profile")),
-					        LiteralStringRef("default"));
-					tx->set(LiteralStringRef("client_txn_size_limit")
-					            .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("profile")),
-					        LiteralStringRef("default"));
-					wait(tx->commit());
-					tx->reset();
-					break;
-				} catch (Error& e) {
-					wait(tx->onError(e));
-				}
-			}
-			// Test invalid values
-			loop {
-				try {
-					tx->setOption(FDBTransactionOptions::RAW_ACCESS);
-					tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-					tx->set((deterministicRandom()->coinflip() ? LiteralStringRef("client_txn_sample_rate")
-					                                           : LiteralStringRef("client_txn_size_limit"))
-					            .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("profile")),
-					        LiteralStringRef("invalid_value"));
-					wait(tx->commit());
-					ASSERT(false);
-				} catch (Error& e) {
-					if (e.code() == error_code_special_keys_api_failure) {
-						Optional<Value> errorMsg =
-						    wait(tx->get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin));
-						ASSERT(errorMsg.present());
-						std::string errorStr;
-						auto valueObj = readJSONStrictly(errorMsg.get().toString()).get_obj();
-						auto schema = readJSONStrictly(JSONSchemas::managementApiErrorSchema.toString()).get_obj();
-						// special_key_space_management_api_error_msg schema validation
-						ASSERT(schemaMatch(schema, valueObj, errorStr, SevError, true));
-						ASSERT(valueObj["command"].get_str() == "profile" && !valueObj["retriable"].get_bool());
-						tx->reset();
-						break;
-					} else {
-						wait(tx->onError(e));
-					}
-					wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
-				}
-			}
 		}
 		// data_distribution & maintenance get
 		loop {

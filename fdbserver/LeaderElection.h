@@ -37,7 +37,7 @@ class ServerCoordinators;
 // eventually be set.  If the return value is cancelled, the candidacy or leadership of the proposedInterface
 // will eventually end.
 template <class LeaderInterface>
-Future<Void> tryBecomeLeader(Reference<IClusterConnectionRecord> const& connRecord,
+Future<Void> tryBecomeLeader(ServerCoordinators const& coordinators,
                              LeaderInterface const& proposedInterface,
                              Reference<AsyncVar<Optional<LeaderInterface>>> const& outKnownLeader,
                              bool hasConnected,
@@ -50,20 +50,20 @@ Future<Void> changeLeaderCoordinators(ServerCoordinators const& coordinators, Va
 #pragma region Implementation
 #endif // __INTEL_COMPILER
 
-Future<Void> tryBecomeLeaderInternal(Reference<IClusterConnectionRecord> const& connRecord,
+Future<Void> tryBecomeLeaderInternal(ServerCoordinators const& coordinators,
                                      Value const& proposedSerializedInterface,
                                      Reference<AsyncVar<Value>> const& outSerializedLeader,
                                      bool const& hasConnected,
                                      Reference<AsyncVar<ClusterControllerPriorityInfo>> const& asyncPriorityInfo);
 
 template <class LeaderInterface>
-Future<Void> tryBecomeLeader(Reference<IClusterConnectionRecord> const& connRecord,
+Future<Void> tryBecomeLeader(ServerCoordinators const& coordinators,
                              LeaderInterface const& proposedInterface,
                              Reference<AsyncVar<Optional<LeaderInterface>>> const& outKnownLeader,
                              bool hasConnected,
                              Reference<AsyncVar<ClusterControllerPriorityInfo>> const& asyncPriorityInfo) {
 	auto serializedInfo = makeReference<AsyncVar<Value>>();
-	Future<Void> m = tryBecomeLeaderInternal(connRecord,
+	Future<Void> m = tryBecomeLeaderInternal(coordinators,
 	                                         ObjectWriter::toValue(proposedInterface, IncludeVersion()),
 	                                         serializedInfo,
 	                                         hasConnected,

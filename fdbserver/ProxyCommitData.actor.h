@@ -73,6 +73,8 @@ struct ProxyStats {
 
 	LatencySample commitBatchingWindowSize;
 
+	LatencySample computeLatency;
+
 	Future<Void> logger;
 
 	int64_t maxComputeNS;
@@ -126,6 +128,10 @@ struct ProxyStats {
 	                             id,
 	                             SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
 	                             SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+	    computeLatency("ComputeLatency",
+	                   id,
+	                   SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+	                   SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
 	    maxComputeNS(0), minComputeNS(1e12),
 	    commitBatchQueuingDist(Histogram::getHistogram(LiteralStringRef("CommitProxy"),
 	                                                   LiteralStringRef("CommitBatchQueuing"),

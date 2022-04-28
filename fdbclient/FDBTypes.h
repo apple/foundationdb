@@ -845,7 +845,16 @@ struct KeyValueStoreType {
 	// These enumerated values are stored in the database configuration, so should NEVER be changed.
 	// Only add new ones just before END.
 	// SS storeType is END before the storageServerInterface is initialized.
-	enum StoreType { SSD_BTREE_V1, MEMORY, SSD_BTREE_V2, SSD_REDWOOD_V1, MEMORY_RADIXTREE, SSD_ROCKSDB_V1, END };
+	enum StoreType {
+		SSD_BTREE_V1,
+		MEMORY,
+		SSD_BTREE_V2,
+		SSD_REDWOOD_V1,
+		MEMORY_RADIXTREE,
+		SSD_ROCKSDB_V1,
+		SSD_SHARDED_ROCKSDB,
+		END
+	};
 
 	KeyValueStoreType() : type(END) {}
 	KeyValueStoreType(StoreType type) : type(type) {
@@ -870,6 +879,8 @@ struct KeyValueStoreType {
 			return "ssd-redwood-1-experimental";
 		case SSD_ROCKSDB_V1:
 			return "ssd-rocksdb-v1";
+		case SSD_SHARDED_ROCKSDB:
+			return "ssd-sharded-rocksdb";
 		case MEMORY:
 			return "memory";
 		case MEMORY_RADIXTREE:

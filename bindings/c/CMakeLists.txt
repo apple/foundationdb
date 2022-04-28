@@ -80,10 +80,23 @@ endif()
 # The tests don't build on windows
 if(NOT WIN32)
   set(MAKO_SRCS
-    test/mako/mako.c
-    test/mako/mako.h
-    test/mako/utils.c
-    test/mako/utils.h)
+    test/mako/async.hpp
+    test/mako/async.cpp
+    test/mako/blob_granules.hpp
+    test/mako/blob_granules.cpp
+    test/mako/future.hpp
+    test/mako/limit.hpp
+    test/mako/logger.hpp
+    test/mako/mako.cpp
+    test/mako/mako.hpp
+    test/mako/operations.hpp
+    test/mako/operations.cpp
+    test/mako/process.hpp
+    test/mako/shm.hpp
+    test/mako/stats.hpp
+    test/mako/time.hpp
+    test/mako/utils.cpp
+    test/mako/utils.hpp)
   add_subdirectory(test/unit/third_party)
   find_package(Threads REQUIRED)
   set(UNIT_TEST_SRCS
@@ -98,6 +111,11 @@ if(NOT WIN32)
     test/unit/fdb_api.cpp
     test/unit/fdb_api.hpp)
 
+  add_library(fdb_cpp INTERFACE)
+  target_sources(fdb_cpp INTERFACE test/fdb_api.hpp)
+  target_include_directories(fdb_cpp INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/test)
+  target_link_libraries(fdb_cpp INTERFACE fmt::fmt)
+
   set(API_TESTER_SRCS
     test/apitester/fdb_c_api_tester.cpp
     test/apitester/TesterApiWorkload.cpp
@@ -106,6 +124,7 @@ if(NOT WIN32)
     test/apitester/TesterApiWrapper.h
     test/apitester/TesterTestSpec.cpp
     test/apitester/TesterTestSpec.h
+    test/apitester/TesterBlobGranuleCorrectnessWorkload.cpp
     test/apitester/TesterCancelTransactionWorkload.cpp
     test/apitester/TesterCorrectnessWorkload.cpp
     test/apitester/TesterKeyValueStore.cpp
@@ -178,7 +197,11 @@ endif()
 
   # do not set RPATH for mako
   set_property(TARGET mako PROPERTY SKIP_BUILD_RPATH TRUE)
-  target_link_libraries(mako PRIVATE fdb_c fdbclient)
+  if (USE_SANITIZER)
+	target_link_libraries(mako PRIVATE fdb_c fdbclient fmt::fmt Threads::Threads fdb_cpp boost_asan)
+  else()
+	target_link_libraries(mako PRIVATE fdb_c fdbclient fmt::fmt Threads::Threads fdb_cpp boost_target)
+  endif()
 
   if(NOT OPEN_FOR_IDE)
     # Make sure that fdb_c.h is compatible with c90
@@ -251,25 +274,66 @@ endif()
             ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c_external.so
             --test-dir
             ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests
+            --tmp-dir
+            @TMP_DIR@
+            --log-dir
+            @LOG_DIR@
             )
 
-  add_test(NAME fdb_c_upgrade_single_threaded
+  add_fdbclient_test(
+    NAME fdb_c_api_tests_blob_granule
+    DISABLE_LOG_DUMP
+    API_TEST_BLOB_GRANULES_ENABLED
+    COMMAND ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/run_c_api_tests.py
+            --cluster-file
+            @CLUSTER_FILE@
+            --tester-binary
+            $<TARGET_FILE:fdb_c_api_tester>
+            --external-client-library
+            ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c_external.so
+            --test-dir
+            ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/blobgranuletests
+            --blob-granule-local-file-path
+            @DATA_DIR@/fdbblob/
+            --tmp-dir
+            @TMP_DIR@
+            --log-dir
+            @LOG_DIR@
+            )
+
+  if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" AND NOT USE_SANITIZER)
+    add_test(NAME fdb_c_upgrade_single_threaded_630api
       COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
             --build-dir ${CMAKE_BINARY_DIR}
-            --disable-log-dump
             --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadSingleThr.toml
-            --upgrade-path "6.3.23" "7.0.0" "6.3.23"
+            --upgrade-path "6.3.23" "7.0.0" "7.2.0"
             --process-number 1
-    )
+            )
 
-    add_test(NAME fdb_c_upgrade_multi_threaded
-    COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
-          --build-dir ${CMAKE_BINARY_DIR}
-          --disable-log-dump
-          --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
-          --upgrade-path "6.3.23" "7.0.0" "6.3.23"
-          --process-number 3
-    )
+    add_test(NAME fdb_c_upgrade_single_threaded_700api
+      COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
+            --build-dir ${CMAKE_BINARY_DIR}
+            --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadSingleThr.toml
+            --upgrade-path "7.0.0" "7.2.0"
+            --process-number 1
+            )
+
+    add_test(NAME fdb_c_upgrade_multi_threaded_630api
+        COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
+            --build-dir ${CMAKE_BINARY_DIR}
+            --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
+            --upgrade-path "6.3.23" "7.0.0" "7.2.0"
+            --process-number 3
+          )
+
+    add_test(NAME fdb_c_upgrade_multi_threaded_700api
+        COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
+            --build-dir ${CMAKE_BINARY_DIR}
+            --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
+            --upgrade-path "7.0.0" "7.2.0"
+            --process-number 3
+          )
+  endif()
 
 endif()
 
@@ -314,6 +378,7 @@ fdb_install(
   FILES foundationdb/fdb_c.h
   ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/fdb_c_options.g.h
   ${CMAKE_SOURCE_DIR}/fdbclient/vexillographer/fdb.options
+  ${CMAKE_SOURCE_DIR}/bindings/c/foundationdb/fdb_c_types.h
   DESTINATION include
   DESTINATION_SUFFIX /foundationdb
   COMPONENT clients)

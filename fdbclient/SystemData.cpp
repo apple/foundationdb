@@ -619,6 +619,19 @@ StorageServerInterface decodeServerListValue(ValueRef const& value) {
 	return decodeServerListValueFB(value);
 }
 
+Value swVersionValue(SWVersion const& swversion) {
+	auto protocolVersion = currentProtocolVersion;
+	protocolVersion.addObjectSerializerFlag();
+	return ObjectWriter::toValue(swversion, IncludeVersion(protocolVersion));
+}
+
+SWVersion decodeSWVersionValue(ValueRef const& value) {
+	SWVersion s;
+	ObjectReader reader(value.begin(), IncludeVersion());
+	reader.deserialize(s);
+	return s;
+}
+
 // processClassKeys.contains(k) iff k.startsWith( processClassKeys.begin ) because '/'+1 == '0'
 const KeyRangeRef processClassKeys(LiteralStringRef("\xff/processClass/"), LiteralStringRef("\xff/processClass0"));
 const KeyRef processClassPrefix = processClassKeys.begin;
