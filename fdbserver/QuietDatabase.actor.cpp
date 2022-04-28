@@ -711,7 +711,7 @@ struct QuietDatabaseChecker {
 					// This assertion is here to make the test fail more quickly. If quietDatabase takes this
 					// long without completing, we can assume that the test will eventually time out. However,
 					// time outs are more annoying to debug. This will hopefully be easier to track down.
-					ASSERT(!ddGotStuck);
+					ASSERT(!ddGotStuck || !g_network->isSimulated());
 				}
 				return false;
 			}
