@@ -3455,7 +3455,8 @@ ACTOR Future<GetRangeReqAndResultRef> quickGetKeyValues(
 		tr.setVersion(version);
 		// TODO: is DefaultPromiseEndpoint the best priority for this?
 		tr.trState->taskID = TaskPriority::DefaultPromiseEndpoint;
-		Future<RangeResult> rangeResultFuture = tr.getRange(prefixRange(prefix), Snapshot::True);
+		Future<RangeResult> rangeResultFuture =
+		    tr.getRange(prefixRange(prefix), GetRangeLimits::ROW_LIMIT_UNLIMITED, Snapshot::True);
 		// TODO: async in case it needs to read from other servers.
 		RangeResult rangeResult = wait(rangeResultFuture);
 		a->dependsOn(rangeResult.arena());
