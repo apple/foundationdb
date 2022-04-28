@@ -167,6 +167,7 @@ struct AddingShard : NonCopyable {
 	struct StorageServer* server;
 	Version transferredVersion;
 	Version fetchVersion;
+	Future<Void> addRangeFuture;
 
 	// To learn more details of the phase transitions, see function fetchKeys(). The phases below are sorted in
 	// chronological order and do not go back.
@@ -304,6 +305,11 @@ struct StorageServerDisk {
 	Future<Void> deleteCheckpoint(const CheckpointMetaData& checkpoint) {
 		return storage->deleteCheckpoint(checkpoint);
 	}
+
+	Future<Void> addRange(KeyRange range, UID id) { return storage->addRange(range, id); };
+	std::vector<std::string> removeRange(KeyRange range) { return storage->removeRange(range); }
+	void persistRangeMapping(KeyRangeRef range, bool isAdd) { return storage->persistRangeMapping(range, isAdd); }
+	Future<Void> cleanUpShardsIfNeeded(std::vector<UID>& shardIds) { return storage->cleanUpShardsIfNeeded(shardIds); };
 
 	KeyValueStoreType getKeyValueStoreType() const { return storage->getType(); }
 	StorageBytes getStorageBytes() const { return storage->getStorageBytes(); }
@@ -752,6 +758,9 @@ public:
 	}
 
 	StorageServerDisk storage;
+	std::vector<KeyRange> addedRanges;
+	std::vector<KeyRange> removedRanges;
+	std::vector<std::string> affectedShards;
 
 	KeyRangeMap<Reference<ShardInfo>> shards;
 	uint64_t shardChangeCounter; // max( shards->changecounter )
@@ -5528,6 +5537,10 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		wait(delay(0));
 	}
 
+	if (SERVER_KNOBS->ENABLE_SHARDED_ROCKSDB) {
+		wait(shard->addRangeFuture);
+	}
+
 	try {
 		DEBUG_KEY_RANGE("fetchKeysBegin", data->version.get(), shard->keys, data->thisServerID);
 
@@ -6009,7 +6022,7 @@ void ShardInfo::addMutation(Version version, bool fromFetch, MutationRef const& 
 }
 
 enum ChangeServerKeysContext { CSK_UPDATE, CSK_RESTORE, CSK_ASSIGN_EMPTY };
-const char* changeServerKeysContextName[] = { "Update", "Restore" };
+const char* changeServerKeysContextName[] = { "Update", "Restore", "AssignEmpty" };
 
 void changeServerKeys(StorageServer* data,
                       const KeyRangeRef& keys,
@@ -6094,6 +6107,7 @@ void changeServerKeys(StorageServer* data,
 			    .detail("End", range.end);
 			newEmptyRanges.push_back(range);
 			data->addShard(ShardInfo::newReadWrite(range, data));
+			data->addedRanges.push_back(*r);
 		} else if (!nowAssigned) {
 			if (dataAvailable) {
 				ASSERT(r->value() ==
@@ -6101,6 +6115,7 @@ void changeServerKeys(StorageServer* data,
 				ASSERT(data->mutableData().getLatestVersion() > version || context == CSK_RESTORE);
 				changeNewestAvailable.emplace_back(range, version);
 				removeRanges.push_back(range);
+				data->removedRanges.push_back(*r);
 			}
 			data->addShard(ShardInfo::newNotAssigned(range));
 			data->watches.triggerRange(range.begin, range.end);
@@ -6113,14 +6128,18 @@ void changeServerKeys(StorageServer* data,
 				    .detail("End", range.end);
 				changeNewestAvailable.emplace_back(range, latestVersion);
 				data->addShard(ShardInfo::newReadWrite(range, data));
+				data->addedRanges.push_back(*r);
 				setAvailableStatus(data, range, true);
 			} else {
 				auto& shard = data->shards[range.begin];
-				if (!shard->assigned() || shard->keys != range)
+				if (!shard->assigned() || shard->keys != range) {
+					data->addedRanges.push_back(*r);
 					data->addShard(ShardInfo::newAdding(data, range));
+				}
 			}
 		} else {
 			changeNewestAvailable.emplace_back(range, latestVersion);
+			// Corresponding range should exist in KVS.
 			data->addShard(ShardInfo::newReadWrite(range, data));
 		}
 	}
@@ -7327,6 +7346,22 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 			data->storage.makeVersionDurable(newOldestVersion);
 		data->storageUpdatesDurableLatencyHistogram->sampleSeconds(now() - beforeStorageUpdates);
 
+		std::vector<Future<Void>> addRangeFutures;
+		for (const auto& r : data->addedRanges) {
+			// TODO: replace id with shard id.
+			UID id = deterministicRandom()->randomUniqueID();
+			addRangeFutures.push_back(data->storage.addRange(r, id));
+			data->storage.persistRangeMapping(r, true);
+		}
+		data->addedRanges.clear();
+		// Waits for shard creation in KVS.
+		wait(waitForAll(addRangeFutures));
+
+		// Set metadata for unassigned ranges.
+		for (const auto& r : data->removedRanges) {
+			data->storage.persistRangeMapping(r, false);
+		}
+
 		debug_advanceMaxCommittedVersion(data->thisServerID, newOldestVersion);
 		state double beforeStorageCommit = now();
 		wait(data->storage.canCommit());
@@ -7342,6 +7377,18 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		data->storageCommitLatencyHistogram->sampleSeconds(now() - beforeStorageCommit);
 
 		debug_advanceMinCommittedVersion(data->thisServerID, newOldestVersion);
+
+		// Remove unassigned ranges from KVS.
+		for (const auto& r : data->removedRanges) {
+			data->affectedShards.push_back(data->storage.removeRange(r));
+		}
+		data->removedRanges.clear();
+
+		// An empty shard should only be deleted after the corresponding range mapping is committed.
+		// We may not need to clean up empty shards on every commit.
+		Future<Void> cleanUpShardsFuture = data->storage.cleanUpShardsIfNeeded(data->affectedShards);
+		wait(cleanUpShardsFuture);
+		data->affectedShards.clear();
 
 		if (requireCheckpoint) {
 			ASSERT(newOldestVersion == data->pendingCheckpoints.begin()->first);
