@@ -1096,7 +1096,7 @@ struct DDQueueData {
 		DDQueueData::DDDataMove dataMove(dataMoveId);
 		dataMove.cancel = cleanUpDataMove(
 		    this->cx, dataMoveId, this->lock, &this->cleanUpDataMoveParallelismLock, range, true, ddEnabledState);
-		this->dataMoves.insert(range, DDQueueData::DDDataMove());
+		this->dataMoves.insert(range, DDQueueData::DDDataMove(dataMoveId));
 		TraceEvent(SevDebug, "DDEnqueuedCancelledDataMove", this->distributorId)
 		    .detail("DataMoveID", dataMoveId)
 		    .detail("Range", range);
@@ -1207,11 +1207,6 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 					    .detail("CurrentDataMoveID", rd.dataMoveId)
 					    .detail("DataMoveID", mId)
 					    .detail("Range", kr);
-					if (!signalledTransferComplete) {
-						dataTransferComplete.send(rd);
-					}
-					relocationComplete.send(rd);
-					return Void();
 				}
 			}
 			self->dataMoves.insert(rd.keys, DDQueueData::DDDataMove(rd.dataMoveId));
@@ -2051,7 +2046,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 	} catch (Error& e) {
 		if (e.code() != error_code_broken_promise && // FIXME: Get rid of these broken_promise errors every time we are
 		                                             // killed by the master dying
-		    e.code() != error_code_movekeys_conflict)
+		    e.code() != error_code_movekeys_conflict && e.code() != error_code_data_move_cancelled)
 			TraceEvent(SevError, "DataDistributionQueueError", distributorId).error(e);
 		throw e;
 	}
