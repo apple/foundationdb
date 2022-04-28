@@ -232,11 +232,6 @@ Future<Void> recurring(Func what, double interval, TaskPriority taskID = TaskPri
 	}
 }
 
-// run what every interval sec
-ACTOR Future<Void> recurringFuture(Future<Void> what,
-                                   double interval,
-                                   TaskPriority taskID = TaskPriority::DefaultDelay);
-
 ACTOR template <class Func>
 Future<Void> trigger(Func what, Future<Void> signal) {
 	wait(signal);
