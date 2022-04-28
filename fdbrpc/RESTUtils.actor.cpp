@@ -237,37 +237,31 @@ TEST_CASE("fdbrpc/RESTUtils") {
 	}
 
 	// valid URI with service
-	try {
+	{
 		std::string uri("https://host:80/foo/bar");
 		RESTUrl r(uri, true);
 		ASSERT_EQ(r.host.compare("host"), 0);
 		ASSERT_EQ(r.service.compare("80"), 0);
 		ASSERT_EQ(r.resource.compare("foo/bar"), 0);
-	} catch (Error& e) {
-		throw e;
 	}
 
 	// valid URI with-out service
-	try {
+	{
 		std::string uri("https://host/foo/bar");
 		RESTUrl r(uri, true);
 		ASSERT_EQ(r.host.compare("host"), 0);
 		ASSERT(r.service.empty());
 		ASSERT_EQ(r.resource.compare("foo/bar"), 0);
-	} catch (Error& e) {
-		throw e;
 	}
 
 	// valid URI with parameters
-	try {
+	{
 		std::string uri("https://host/foo/bar?param1,param2");
 		RESTUrl r(uri, true);
 		ASSERT_EQ(r.host.compare("host"), 0);
 		ASSERT(r.service.empty());
 		ASSERT_EQ(r.resource.compare("foo/bar"), 0);
 		ASSERT_EQ(r.reqParameters.compare("param1,param2"), 0);
-	} catch (Error& e) {
-		throw e;
 	}
 
 	// ensure RESTClient::Knob default values and updates

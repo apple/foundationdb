@@ -38,11 +38,13 @@
 #include "flow/UnitTest.h"
 
 #include <cstdio>
-#include <filesystem>
 #include <fstream>
+#include <ios>
 #include <memory>
 #include <queue>
 #include <sstream>
+#include <sys/fcntl.h>
+#include <unistd.h>
 #include <unordered_map>
 #include <utility>
 
@@ -66,7 +68,9 @@ struct KmsUrlCtx {
 	uint64_t nFailedResponses;
 	uint64_t nResponseParseFailures;
 
-	KmsUrlCtx(const std::string u) : url(u), nRequests(0), nFailedResponses(0), nResponseParseFailures(0) {}
+	KmsUrlCtx() : url(""), nRequests(0), nFailedResponses(0), nResponseParseFailures(0) {}
+	explicit KmsUrlCtx(const std::string& u) : url(u), nRequests(0), nFailedResponses(0), nResponseParseFailures(0) {}
+
 	bool operator<(const KmsUrlCtx& toCompare) const {
 		if (nFailedResponses != toCompare.nFailedResponses) {
 			return nFailedResponses > toCompare.nFailedResponses;
@@ -80,11 +84,18 @@ typedef enum {
 	VALIDATION_TOKEN_SOURCE_LAST // Always the last element
 } ValidationTokenSource;
 
-struct ValidationToken {
+struct ValidationTokenCtx {
 	std::string name;
 	std::string value;
 	ValidationTokenSource source;
 	Optional<std::string> filePath;
+
+	explicit ValidationTokenCtx(const std::string& n, ValidationTokenSource s)
+	  : name(n), value(""), source(s), filePath(Optional<std::string>()), readTS(now()) {}
+	double getReadTS() const { return readTS; }
+
+private:
+	double readTS; // Approach assists refreshing token based on time of creation
 };
 
 using KmsUrlMinHeap = std::priority_queue<std::shared_ptr<KmsUrlCtx>,
@@ -96,7 +107,7 @@ struct RESTKmsConnectorCtx : public ReferenceCounted<RESTKmsConnectorCtx> {
 	KmsUrlMinHeap kmsUrlHeap;
 	double lastKmsUrlsRefreshTs;
 	RESTClient restClient;
-	std::unordered_map<std::string, ValidationToken> validationTokens;
+	std::unordered_map<std::string, ValidationTokenCtx> validationTokens;
 
 	RESTKmsConnectorCtx() : uid(deterministicRandom()->randomUniqueID()), lastKmsUrlsRefreshTs(0) {}
 	explicit RESTKmsConnectorCtx(const UID& id) : uid(id), lastKmsUrlsRefreshTs(0) {}
@@ -107,16 +118,17 @@ std::string getEncryptionFullUrl(const std::string& url) {
 	return fullUrl.append("/").append(FLOW_KNOBS->REST_KMS_CONNECTOR_GET_ENCRYPTION_KEYS_ENDPOINT);
 }
 
-void dropCachedKmsUrlss(Reference<RESTKmsConnectorCtx> ctx) {
+void dropCachedKmsUrls(Reference<RESTKmsConnectorCtx> ctx) {
 	while (!ctx->kmsUrlHeap.empty()) {
 		std::shared_ptr<KmsUrlCtx> curUrl = ctx->kmsUrlHeap.top();
-		ctx->kmsUrlHeap.pop();
 
 		TraceEvent("DropCachedKmsUrls", ctx->uid)
-		    .detail("Url", curUrl->url)
+		    .detail("Url", Traceable<std::string>::toString(curUrl->url))
 		    .detail("NumRequests", curUrl->nRequests)
 		    .detail("NumFailedResponses", curUrl->nFailedResponses)
 		    .detail("NumRespParseFailures", curUrl->nResponseParseFailures);
+
+		ctx->kmsUrlHeap.pop();
 	}
 }
 
@@ -128,19 +140,25 @@ bool shouldRefreshKmsUrls(Reference<RESTKmsConnectorCtx> ctx) {
 	return (now() - ctx->lastKmsUrlsRefreshTs) > FLOW_KNOBS->REST_KMS_CONNECTOR_REFRESH_KMS_URLS_INTERVAL_SEC;
 }
 
-void extractKmsUrls(Reference<RESTKmsConnectorCtx> ctx, rapidjson::Document& doc, const std::string& responseContent) {
+void extractKmsUrls(Reference<RESTKmsConnectorCtx> ctx, rapidjson::Document& doc, Reference<HTTP::Response> httpResp) {
 	// Refresh KmsUrls cache
-	dropCachedKmsUrlss(ctx);
+	dropCachedKmsUrls(ctx);
 	ASSERT(ctx->kmsUrlHeap.empty());
 
 	for (const auto& url : doc[KMS_URLS_TAG].GetArray()) {
 		if (!url.IsString()) {
-			TraceEvent("DiscoverKmsUrlss_MalformedResp", ctx->uid).detail("ResponseContent", responseContent);
+			TraceEvent("DiscoverKmsUrls_MalformedResp", ctx->uid)
+			    .detail("ResponseContent", Traceable<std::string>::toString(httpResp->content));
 			throw operation_failed();
 		}
 
-		ctx->kmsUrlHeap.emplace(std::make_shared<KmsUrlCtx>(url.GetString()));
-		TraceEvent("DiscoverKmsUrls_AddUrl", ctx->uid).detail("Url", url.GetString());
+		std::string urlStr;
+		urlStr.resize(url.GetStringLength());
+		memcpy(urlStr.data(), url.GetString(), url.GetStringLength());
+
+		TraceEvent("DiscoverKmsUrls_AddUrl", ctx->uid).detail("Url", Traceable<std::string>::toString(urlStr));
+
+		ctx->kmsUrlHeap.emplace(std::make_shared<KmsUrlCtx>(urlStr));
 	}
 
 	// Update Kms URLs refresh timestamp
@@ -155,18 +173,20 @@ void parseDiscoverKmsUrlsResp(Reference<RESTKmsConnectorCtx> ctx, Reference<HTTP
 	// response_json_payload {
 	//   "kmsUrls" : [ url1, url2, ...]
 	// }
+
 	TraceEvent("ParseDiscoverKmsUrls_Response", ctx->uid)
 	    .detail("RespCode", resp->code)
-	    .detail("RespContent", resp->content);
+	    .detail("RespContent", Traceable<std::string>::toString(resp->content));
 
 	rapidjson::Document doc;
 	doc.Parse(resp->content.c_str());
 	if (!doc.HasMember(KMS_URLS_TAG) || !doc[KMS_URLS_TAG].IsArray()) {
-		TraceEvent("DiscoverKmsUrls_MalformedResp", ctx->uid).detail("ResponseContent", resp->content);
+		TraceEvent("DiscoverKmsUrls_MalformedResp", ctx->uid)
+		    .detail("ResponseContent", Traceable<std::string>::toString(resp->content));
 		throw operation_failed();
 	}
 
-	extractKmsUrls(ctx, doc, resp->content);
+	extractKmsUrls(ctx, doc, resp);
 }
 
 ACTOR Future<Void> discoverKmsUrls(Reference<RESTKmsConnectorCtx> ctx) {
@@ -188,7 +208,7 @@ ACTOR Future<Void> discoverKmsUrls(Reference<RESTKmsConnectorCtx> ctx) {
 	state int i = 0;
 	for (; i < urls.size(); i++) {
 		try {
-			TraceEvent("DiscoverKmsUrls", ctx->uid).detail("Url", urls[i]);
+			TraceEvent("DiscoverKmsUrls", ctx->uid).detail("Url", Traceable<std::string>::toString(urls[i]));
 
 			Reference<HTTP::Response> _r = wait(ctx->restClient.doGet(urls[i]));
 
@@ -266,15 +286,18 @@ void parseKmsResponse(Reference<RESTKmsConnectorCtx> ctx,
 			throw operation_failed();
 		}
 
+		const int cipherKeyLen = cipherDetail[BASE_CIPHER_TAG].GetStringLength();
+		std::unique_ptr<uint8_t[]> cipherKey = std::make_unique<uint8_t[]>(cipherKeyLen);
+		memcpy(cipherKey.get(), cipherDetail[BASE_CIPHER_TAG].GetString(), cipherKeyLen);
 		outCipherKeyDetails.emplace_back(cipherDetail[ENCRYPT_DOMAIN_ID_TAG].GetInt64(),
 		                                 cipherDetail[BASE_CIPHER_ID_TAG].GetUint64(),
-		                                 StringRef(cipherDetail[BASE_CIPHER_TAG].GetString()),
+		                                 StringRef(cipherKey.get(), cipherKeyLen),
 		                                 arena);
 	}
 
 	if (doc.HasMember(KMS_URLS_TAG)) {
 		try {
-			extractKmsUrls(ctx, doc, resp->content);
+			extractKmsUrls(ctx, doc, resp);
 		} catch (Error& e) {
 			TraceEvent("RefreshKmsUrls_Failed", ctx->uid).error(e);
 			// Given cipherKeyDetails extraction was done successfully, ignore KmsUrls parsing error
@@ -296,7 +319,8 @@ void addValidationTokensSectionToJsonDoc(Reference<RESTKmsConnectorCtx> ctx, rap
 
 		// Add "value" - token value
 		key.SetString(VALIDATION_TOKEN_VALUE_TAG, doc.GetAllocator());
-		rapidjson::Value tokenValue(token.second.value.c_str(), doc.GetAllocator());
+		rapidjson::Value tokenValue;
+		tokenValue.SetString(token.second.value.c_str(), token.second.value.size(), doc.GetAllocator());
 		validationToken.AddMember(key, tokenValue, doc.GetAllocator());
 
 		validationTokens.PushBack(validationToken, doc.GetAllocator());
@@ -318,7 +342,7 @@ void addRefreshKmsUrlsSectionToJsonDoc(Reference<RESTKmsConnectorCtx> ctx,
 	doc.AddMember(key, refreshUrls, doc.GetAllocator());
 }
 
-void constructFetchEncryptKeyByKeyIdJsonReqStr(Reference<RESTKmsConnectorCtx> ctx,
+void populateGetEncryptKeysByKeyIdsRequestBody(Reference<RESTKmsConnectorCtx> ctx,
                                                const KmsConnLookupEKsByKeyIdsReq& req,
                                                const bool refreshKmsUrls,
                                                std::string& outJsonStr) {
@@ -383,7 +407,7 @@ void constructFetchEncryptKeyByKeyIdJsonReqStr(Reference<RESTKmsConnectorCtx> ct
 	rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
 	doc.Accept(writer);
 	outJsonStr.resize(sb.GetSize());
-	outJsonStr.assign(sb.GetString(), sb.GetSize());
+	memcpy(outJsonStr.data(), sb.GetString(), sb.GetSize());
 }
 
 ACTOR Future<KmsConnLookupEKsByKeyIdsRep> fetchEncryptionKeyByKeyId(Reference<RESTKmsConnectorCtx> ctx,
@@ -393,7 +417,13 @@ ACTOR Future<KmsConnLookupEKsByKeyIdsRep> fetchEncryptionKeyByKeyId(Reference<RE
 	state bool refreshKmsUrls = shouldRefreshKmsUrls(ctx);
 	state std::string requestBody;
 
-	constructFetchEncryptKeyByKeyIdJsonReqStr(ctx, req, refreshKmsUrls, requestBody);
+	populateGetEncryptKeysByKeyIdsRequestBody(ctx, req, refreshKmsUrls, requestBody);
+
+	// Follow 2-phase scheme:
+	// Phase-1: Attempt to fetch encryption keys by reaching out to cached KmsUrls in the order of
+	//          past success requests success counts.
+	// Phase-2: For some reason if none of the cached KmsUrls worked, re-discover the KmsUrls and
+	//          repeat phase-1.
 
 	state int pass = 1;
 	for (; pass <= 2; pass++) {
@@ -408,7 +438,7 @@ ACTOR Future<KmsConnLookupEKsByKeyIdsRep> fetchEncryptionKeyByKeyId(Reference<RE
 			try {
 				std::string kmsEncryptionFullUrl = getEncryptionFullUrl(curUrl->url);
 				TraceEvent("FetchEncryptionKeyByKeyId_Start", ctx->uid)
-				    .detail("KmsEncryptionFullUrl", kmsEncryptionFullUrl);
+				    .detail("KmsEncryptionFullUrl", Traceable<std::string>::toString(kmsEncryptionFullUrl));
 				Reference<HTTP::Response> _resp = wait(ctx->restClient.doPost(kmsEncryptionFullUrl, requestBody));
 				resp = _resp;
 				curUrl->nRequests++;
@@ -422,7 +452,8 @@ ACTOR Future<KmsConnLookupEKsByKeyIdsRep> fetchEncryptionKeyByKeyId(Reference<RE
 						tempStack.pop();
 					}
 
-					TraceEvent("FetchEncryptionKeyByKeyId_Success", ctx->uid).detail("KmsUrl", curUrl->url);
+					TraceEvent("FetchEncryptionKeyByKeyId_Success", ctx->uid)
+					    .detail("KmsUrl", Traceable<std::string>::toString(curUrl->url));
 					return reply;
 				} catch (Error& e) {
 					TraceEvent("FetchEncryptionKeyByKeyId_RespParseFailure").error(e);
@@ -443,10 +474,10 @@ ACTOR Future<KmsConnLookupEKsByKeyIdsRep> fetchEncryptionKeyByKeyId(Reference<RE
 	}
 
 	// Failed to fetch encryption keys from remote Kms
-	throw operation_failed();
+	throw encrypt_keys_fetch_failed();
 }
 
-void constructFetchEncryptKeyByDomainIdJsonReqStr(Reference<RESTKmsConnectorCtx> ctx,
+void populateGetEncryptKeysByDomainIdsRequestBody(Reference<RESTKmsConnectorCtx> ctx,
                                                   const KmsConnLookupEKsByDomainIdsReq& req,
                                                   const bool refreshKmsUrls,
                                                   std::string& outJsonStr) {
@@ -503,7 +534,7 @@ void constructFetchEncryptKeyByDomainIdJsonReqStr(Reference<RESTKmsConnectorCtx>
 	rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
 	doc.Accept(writer);
 	outJsonStr.resize(sb.GetSize());
-	outJsonStr.assign(sb.GetString(), sb.GetSize());
+	memcpy(outJsonStr.data(), sb.GetString(), sb.GetSize());
 }
 
 ACTOR Future<KmsConnLookupEKsByDomainIdsRep> fetchEncryptionKeyByDomainId(Reference<RESTKmsConnectorCtx> ctx,
@@ -513,7 +544,13 @@ ACTOR Future<KmsConnLookupEKsByDomainIdsRep> fetchEncryptionKeyByDomainId(Refere
 	state bool refreshKmsUrls = shouldRefreshKmsUrls(ctx);
 	state std::string requestBody;
 
-	constructFetchEncryptKeyByDomainIdJsonReqStr(ctx, req, refreshKmsUrls, requestBody);
+	populateGetEncryptKeysByDomainIdsRequestBody(ctx, req, refreshKmsUrls, requestBody);
+
+	// Follow 2-phase scheme:
+	// Phase-1: Attempt to fetch encryption keys by reaching out to cached KmsUrls in the order of
+	//          past success requests success counts.
+	// Phase-2: For some reason if none of the cached KmsUrls worked, re-discover the KmsUrls and
+	//          repeat phase-1.
 
 	state int pass = 1;
 	for (; pass <= 2; pass++) {
@@ -528,7 +565,7 @@ ACTOR Future<KmsConnLookupEKsByDomainIdsRep> fetchEncryptionKeyByDomainId(Refere
 			try {
 				std::string kmsEncryptionFullUrl = getEncryptionFullUrl(curUrl->url);
 				TraceEvent("FetchEncryptionKeyByDomainId_Start", ctx->uid)
-				    .detail("KmsEncryptionFullUrl", kmsEncryptionFullUrl);
+				    .detail("KmsEncryptionFullUrl", Traceable<std::string>::toString(kmsEncryptionFullUrl));
 				Reference<HTTP::Response> _resp = wait(ctx->restClient.doPost(kmsEncryptionFullUrl, requestBody));
 				resp = _resp;
 				curUrl->nRequests++;
@@ -542,7 +579,8 @@ ACTOR Future<KmsConnLookupEKsByDomainIdsRep> fetchEncryptionKeyByDomainId(Refere
 						tempStack.pop();
 					}
 
-					TraceEvent("FetchEncryptionKeyByDomainId_Success", ctx->uid).detail("KmsUrl", curUrl->url);
+					TraceEvent("FetchEncryptionKeyByDomainId_Success", ctx->uid)
+					    .detail("KmsUrl", Traceable<std::string>::toString(curUrl->url));
 					return reply;
 				} catch (Error& e) {
 					TraceEvent("FetchEncryptionKeyByDomainId_RespParseFailure").error(e);
@@ -563,7 +601,7 @@ ACTOR Future<KmsConnLookupEKsByDomainIdsRep> fetchEncryptionKeyByDomainId(Refere
 	}
 
 	// Failed to fetch encryption keys from remote KmsUrls.
-	throw operation_failed();
+	throw encrypt_keys_fetch_failed();
 }
 
 void procureValidationTokensFromFiles(Reference<RESTKmsConnectorCtx> ctx, StringRef details) {
@@ -572,9 +610,9 @@ void procureValidationTokensFromFiles(Reference<RESTKmsConnectorCtx> ctx, String
 		throw operation_failed();
 	}
 
-	TraceEvent("ValidationToken", ctx->uid).detail("DetailsStr", details.toString());
+	TraceEvent("ValidationToken", ctx->uid).detail("DetailsStr", Traceable<std::string>::toString(details.toString()));
 
-	std::unordered_map<std::string, std::string> filePathMap;
+	std::unordered_map<std::string, std::string> tokenFilePathMap;
 	while (!details.empty()) {
 		StringRef name = details.eat(":");
 		if (name.empty()) {
@@ -582,66 +620,79 @@ void procureValidationTokensFromFiles(Reference<RESTKmsConnectorCtx> ctx, String
 		}
 		StringRef path = details.eat(",");
 		if (path.empty()) {
-			TraceEvent("ValidationToken_FileDetailsMalformed", ctx->uid).detail("FileDetails", details.toString());
+			TraceEvent("ValidationToken_FileDetailsMalformed", ctx->uid)
+			    .detail("FileDetails", Traceable<std::string>::toString(details.toString()));
 			throw operation_failed();
 		}
 
-		filePathMap.emplace(name.toString(), path.toString());
-		TraceEvent("ValidationToken", ctx->uid).detail("FName", name.toString()).detail("Path", path.toString());
+		tokenFilePathMap.emplace(name.toString(), path.toString());
+		TraceEvent("ValidationToken", ctx->uid)
+		    .detail("FName", Traceable<std::string>::toString(name.toString()))
+		    .detail("Path", Traceable<std::string>::toString(path.toString()));
 	}
 
-	// Clear existing validation tokens if any
+	// Clear existing cached validation tokens
 	ctx->validationTokens.clear();
 
+	// Enumerate all token files and extract details
 	uint64_t tokensPayloadSize = 0;
-	for (const auto& item : filePathMap) {
+	for (const auto& item : tokenFilePathMap) {
+		const std::string& tokenName = item.first;
+		const std::string& tokenFile = item.second;
 		std::ifstream ifs;
-		ifs.open(item.second, std::ios::in | std::ios::binary);
-		if (!ifs.good()) {
-			TraceEvent("ValidationToken_ReadFileFailure", ctx->uid).detail("FileName", item.second);
-			throw io_error();
-		}
+		try {
+			ifs.open(tokenFile, std::ios::in | std::ios::binary);
+			if (!ifs.good()) {
+				TraceEvent("ValidationToken_ReadFileFailure", ctx->uid)
+				    .detail("FileName", Traceable<std::string>::toString(tokenFile));
+				throw io_error();
+			}
 
-		const std::size_t& tokenSize = std::filesystem::file_size(item.second);
-		if (tokenSize > FLOW_KNOBS->REST_KMS_CONNECTOR_VALIDATION_TOKEN_MAX_SIZE) {
-			TraceEvent("ValidationToken_FileTooLarge", ctx->uid)
-			    .detail("FileName", item.first)
-			    .detail("Size", tokenSize)
-			    .detail("MaxAllowedSize", FLOW_KNOBS->REST_KMS_CONNECTOR_VALIDATION_TOKEN_MAX_SIZE);
+			ifs.seekg(0, std::ios_base::end);
+			const size_t fileSize = ifs.tellg();
+			if (fileSize > FLOW_KNOBS->REST_KMS_CONNECTOR_VALIDATION_TOKEN_MAX_SIZE) {
+				TraceEvent("ValidationToken_FileTooLarge", ctx->uid)
+				    .detail("FileName", Traceable<std::string>::toString(tokenFile))
+				    .detail("Size", fileSize)
+				    .detail("MaxAllowedSize", FLOW_KNOBS->REST_KMS_CONNECTOR_VALIDATION_TOKEN_MAX_SIZE);
+				throw file_too_large();
+			}
+
+			tokensPayloadSize += fileSize;
+			if (tokensPayloadSize > FLOW_KNOBS->REST_KMS_CONNECTOR_VALIDATION_TOKENS_MAX_PAYLOAD_SIZE) {
+				TraceEvent("ValidationToken_PayloadTooLarge", ctx->uid)
+				    .detail("MaxAllowedSize", FLOW_KNOBS->REST_KMS_CONNECTOR_VALIDATION_TOKENS_MAX_PAYLOAD_SIZE);
+				throw value_too_large();
+			}
+
+			// Populate validation token details
+			ValidationTokenCtx tokenCtx = ValidationTokenCtx(tokenName, VALIDATION_TOKEN_SOURCE_FILE);
+			tokenCtx.value.resize(fileSize);
+			ifs.seekg(0, std::ios_base::beg);
+			ifs.read((char*)tokenCtx.value.data(), fileSize);
+			tokenCtx.filePath = tokenFile;
+
+			// NOTE: avoid logging token-value to prevent token leaks in log files..
+			TraceEvent("ValidationToken_ReadFile", ctx->uid)
+			    .detail("TokenName", Traceable<std::string>::toString(tokenCtx.name))
+			    .detail("TokenSize", tokenCtx.value.size())
+			    .detail("TokenFilePath", Traceable<std::string>::toString(tokenCtx.filePath.get()))
+			    .detail("TotalPayloadSize", tokensPayloadSize);
+
+			ctx->validationTokens.emplace(tokenName, std::move(tokenCtx));
+
 			ifs.close();
-			throw file_too_large();
+		} catch (Error& e) {
+			if (ifs.is_open()) {
+				ifs.close();
+			}
+			throw e;
 		}
-
-		tokensPayloadSize += tokenSize;
-		if (tokensPayloadSize > FLOW_KNOBS->REST_KMS_CONNECTOR_VALIDATION_TOKENS_MAX_PAYLOAD_SIZE) {
-			TraceEvent("ValidationToken_PayloadTooLarge", ctx->uid)
-			    .detail("MaxAllowedSize", FLOW_KNOBS->REST_KMS_CONNECTOR_VALIDATION_TOKENS_MAX_PAYLOAD_SIZE);
-			ifs.close();
-			throw value_too_large();
-		}
-
-		// Populate validation token details
-		ValidationToken token;
-		token.name = item.first;
-		token.value.resize(tokenSize);
-		ifs.read((char*)token.value.data(), tokenSize);
-		token.filePath = item.second;
-		token.source = VALIDATION_TOKEN_SOURCE_FILE;
-		ctx->validationTokens.emplace(item.first, token);
-
-		// NOTE: avoid logging token-value to prevent token leaks in log files..
-		TraceEvent("ValidationToken_ReadFile", ctx->uid)
-		    .detail("TokenName", token.name)
-		    .detail("TokenSize", token.value.size())
-		    .detail("TokenPath", token.filePath.get())
-		    .detail("TotalPayloadSize", tokensPayloadSize);
-
-		ifs.close();
 	}
 }
 
 void procureValidationTokens(Reference<RESTKmsConnectorCtx> ctx) {
-	const std::string mode = FLOW_KNOBS->REST_KMS_CONNECTOR_VALIDATION_TOKEN_MODE;
+	const std::string& mode = FLOW_KNOBS->REST_KMS_CONNECTOR_VALIDATION_TOKEN_MODE;
 
 	if (mode.compare("file") == 0) {
 		procureValidationTokensFromFiles(ctx, StringRef(FLOW_KNOBS->REST_KMS_CONNECTOR_VALIDATION_TOKEN_FILE_DETAILS));
@@ -698,9 +749,10 @@ void forceLinkRESTKmsConnectorTest() {}
 
 namespace {
 const std::string KMS_URL_NAME_TEST = "http://foo/bar";
-const std::string BASE_CIPHER_KEY_TEST = "best-cipher-key-ever";
+uint8_t BASE_CIPHER_KEY_TEST[32];
 
 void testFileValidationTokens(Reference<RESTKmsConnectorCtx> ctx) {
+
 	// Case-I: Empty validation token file details
 	{
 		try {
@@ -727,14 +779,18 @@ void testFileValidationTokens(Reference<RESTKmsConnectorCtx> ctx) {
 		uint8_t buff[tokenLen];
 		generateRandomData(&buff[0], tokenLen);
 
-		const char* fName = std::tmpnam(NULL);
-		std::ofstream ofs;
-		ofs.open(fName, std::ios::out | std::ios::binary);
-		ofs.write((char*)&buff[0], tokenLen);
-		ofs.close();
+		char tmpFile[] = "/tmp/restkmsconn-XXXXXX";
+		int fd = mkstemp(tmpFile);
+		if (fd == -1) {
+			throw io_error();
+		}
+		if (write(fd, buff, tokenLen) == -1) {
+			throw io_error();
+		}
+		close(fd);
 
 		std::string details;
-		details.append(name).append(":").append(fName);
+		details.append(name).append(":").append(tmpFile);
 
 		try {
 			procureValidationTokensFromFiles(ctx, StringRef(details));
@@ -743,7 +799,7 @@ void testFileValidationTokens(Reference<RESTKmsConnectorCtx> ctx) {
 			ASSERT_EQ(e.code(), error_code_file_too_large);
 		}
 
-		remove(fName);
+		remove(tmpFile);
 	}
 	// Case-IV: Validation token payload size (aggregate) too large
 	{
@@ -753,20 +809,23 @@ void testFileValidationTokens(Reference<RESTKmsConnectorCtx> ctx) {
 		                    2;
 		uint8_t buff[tokenLen];
 		generateRandomData(&buff[0], tokenLen);
-
 		std::string details;
 		std::unordered_set<std::string> fNames;
 		for (int i = 0; i < nTokens; i++) {
-			const char* fName = std::tmpnam(NULL);
-			std::ofstream ofs;
-			ofs.open(fName, std::ios::out | std::ios::binary);
-			ofs.write((char*)&buff[0], tokenLen);
-			ofs.close();
+			char tmpFile[] = "/tmp/restkmsconn-XXXXXX";
+			int fd = mkstemp(tmpFile);
+			if (fd == -1) {
+				throw io_error();
+			}
+			if (write(fd, buff, tokenLen) == -1) {
+				throw io_error();
+			}
+			close(fd);
 
-			details.append(std::to_string(i)).append(":").append(fName);
+			details.append(std::to_string(i)).append(":").append(tmpFile);
 			if (i < nTokens)
 				details.append(",");
-			fNames.emplace(fName);
+			fNames.emplace(tmpFile);
 		}
 
 		try {
@@ -776,8 +835,8 @@ void testFileValidationTokens(Reference<RESTKmsConnectorCtx> ctx) {
 			ASSERT_EQ(e.code(), error_code_value_too_large);
 		}
 
-		for (const auto& name : fNames) {
-			remove(name.c_str());
+		for (const auto& fName : fNames) {
+			remove(fName.c_str());
 		}
 	}
 	// Case-V: Valid multiple validation token files (withing file size and total payload size limits)
@@ -786,22 +845,24 @@ void testFileValidationTokens(Reference<RESTKmsConnectorCtx> ctx) {
 		std::unordered_map<std::string, std::string> tokenNameFilePathMap;
 		std::unordered_map<std::string, std::string> tokenNameValueMap;
 		std::string tokenDetailsStr;
-
 		const int tokenLen = deterministicRandom()->randomInt(26, 75);
-		uint8_t buf[tokenLen];
+		uint8_t buff[tokenLen];
+		generateRandomData(&buff[0], tokenLen);
 		for (int i = 1; i <= numFiles; i++) {
-			const char* fName = std::tmpnam(NULL);
-			generateRandomData(&buf[0], tokenLen);
+			char tmpFile[] = "/tmp/restkmsconn-XXXXXX";
+			int fd = mkstemp(tmpFile);
+			if (fd == -1) {
+				throw io_error();
+			}
+			if (write(fd, buff, tokenLen) == -1) {
+				throw io_error();
+			}
+			close(fd);
 
-			std::ofstream ofs;
-			ofs.open(fName, std::ios::out | std::ios::binary);
-			ofs.write((char*)&buf[0], tokenLen);
-			ofs.close();
-
-			std::string token((char*)&buf[0], tokenLen);
-			tokenNameFilePathMap.emplace(std::to_string(i), fName);
+			std::string token((char*)&buff[0], tokenLen);
+			tokenNameFilePathMap.emplace(std::to_string(i), tmpFile);
 			tokenNameValueMap.emplace(std::to_string(i), token);
-			tokenDetailsStr.append(std::to_string(i)).append(":").append(fName);
+			tokenDetailsStr.append(std::to_string(i)).append(":").append(tmpFile);
 			if (i < numFiles)
 				tokenDetailsStr.append(",");
 
@@ -813,16 +874,16 @@ void testFileValidationTokens(Reference<RESTKmsConnectorCtx> ctx) {
 		ASSERT_EQ(ctx->validationTokens.size(), tokenNameValueMap.size());
 		for (const auto& token : ctx->validationTokens) {
 			const auto& itr = tokenNameValueMap.find(token.first);
+			const ValidationTokenCtx& tokenCtx = token.second;
 
 			ASSERT(itr != tokenNameValueMap.end());
 			ASSERT_EQ(token.first.compare(itr->first), 0);
-			ASSERT_EQ(token.second.source, VALIDATION_TOKEN_SOURCE_FILE);
-			ASSERT_EQ(token.second.value.compare(itr->second), 0);
-			ASSERT(token.second.filePath.present());
-			ASSERT_EQ(token.second.filePath.get().compare(tokenNameFilePathMap[token.second.name]), 0);
-		}
+			ASSERT_EQ(tokenCtx.value.compare(itr->second), 0);
+			ASSERT_EQ(tokenCtx.source, VALIDATION_TOKEN_SOURCE_FILE);
+			ASSERT(tokenCtx.filePath.present());
+			ASSERT_EQ(tokenCtx.filePath.compare(tokenNameFilePathMap[tokenCtx.name]), 0);
+			ASSERT_NE(tokenCtx.getReadTS(), 0);
 
-		for (const auto& token : tokenNameFilePathMap) {
 			remove(token.first.c_str());
 		}
 	}
@@ -839,7 +900,9 @@ EncryptCipherDomainId getRandomDomainId() {
 	}
 }
 
-void constructFakeKmsResponse(const std::string& jsonReqStr, const bool baseCipherIdPresent, std::string& outJsonStr) {
+void getFakeKmsResponse(const std::string& jsonReqStr,
+                        const bool baseCipherIdPresent,
+                        Reference<HTTP::Response> httpResponse) {
 	rapidjson::Document reqDoc;
 	reqDoc.Parse(jsonReqStr.c_str());
 
@@ -871,7 +934,7 @@ void constructFakeKmsResponse(const std::string& jsonReqStr, const bool baseCiph
 
 		key.SetString(BASE_CIPHER_TAG, resDoc.GetAllocator());
 		rapidjson::Value baseCipher;
-		baseCipher.SetString(BASE_CIPHER_KEY_TEST.c_str(), resDoc.GetAllocator());
+		baseCipher.SetString((char*)&BASE_CIPHER_KEY_TEST[0], sizeof(BASE_CIPHER_KEY_TEST), resDoc.GetAllocator());
 		keyDetail.AddMember(key, baseCipher, resDoc.GetAllocator());
 
 		cipherKeyDetails.PushBack(keyDetail, resDoc.GetAllocator());
@@ -895,8 +958,8 @@ void constructFakeKmsResponse(const std::string& jsonReqStr, const bool baseCiph
 	rapidjson::StringBuffer sb;
 	rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
 	resDoc.Accept(writer);
-	outJsonStr.resize(sb.GetSize());
-	outJsonStr.assign(sb.GetString(), sb.GetSize());
+	httpResponse->content.resize(sb.GetSize(), '\0');
+	memcpy(httpResponse->content.data(), sb.GetString(), sb.GetSize());
 }
 
 void validateKmsUrls(Reference<RESTKmsConnectorCtx> ctx) {
@@ -905,7 +968,7 @@ void validateKmsUrls(Reference<RESTKmsConnectorCtx> ctx) {
 	ASSERT_EQ(urlCtx->url.compare(KMS_URL_NAME_TEST), 0);
 }
 
-void testFetchEncryptKeysByKeyIdsJsonReqStrOps(Reference<RESTKmsConnectorCtx> ctx, Arena arena) {
+void testGetEncryptKeysByKeyIdsRequestBody(Reference<RESTKmsConnectorCtx> ctx, Arena arena) {
 	KmsConnLookupEKsByKeyIdsReq req;
 	std::unordered_map<EncryptCipherBaseKeyId, EncryptCipherDomainId> keyMap;
 	const int nKeys = deterministicRandom()->randomInt(7, 8);
@@ -918,12 +981,16 @@ void testFetchEncryptKeysByKeyIdsJsonReqStrOps(Reference<RESTKmsConnectorCtx> ct
 	bool refreshKmsUrls = deterministicRandom()->randomInt(0, 100) < 50;
 
 	std::string jsonReqStr;
-	constructFetchEncryptKeyByKeyIdJsonReqStr(ctx, req, refreshKmsUrls, jsonReqStr);
-	//TraceEvent("FetchKeysByKeyIds", ctx->uid).setMaxFieldLength(10000).detail("JsonReqStr", jsonReqStr);
+	populateGetEncryptKeysByKeyIdsRequestBody(ctx, req, refreshKmsUrls, jsonReqStr);
+	TraceEvent("FetchKeysByKeyIds", ctx->uid)
+	    .setMaxFieldLength(10000)
+	    .detail("JsonReqStr", Traceable<std::string>::toString(jsonReqStr));
 	Reference<HTTP::Response> httpResp = makeReference<HTTP::Response>();
 	httpResp->code = HTTP::HTTP_STATUS_CODE_OK;
-	constructFakeKmsResponse(jsonReqStr, true, httpResp->content);
-	//TraceEvent("FetchKeysByKeyIds", ctx->uid).setMaxFieldLength(10000).detail("HttpRespStr", httpResp->content);
+	getFakeKmsResponse(jsonReqStr, true, httpResp);
+	TraceEvent("FetchKeysByKeyIds", ctx->uid)
+	    .setMaxFieldLength(10000)
+	    .detail("HttpRespStr", Traceable<std::string>::toString(httpResp->content));
 
 	std::vector<EncryptCipherKeyDetails> cipherDetails;
 	parseKmsResponse(ctx, httpResp, arena, cipherDetails);
@@ -931,14 +998,15 @@ void testFetchEncryptKeysByKeyIdsJsonReqStrOps(Reference<RESTKmsConnectorCtx> ct
 	for (const auto& detail : cipherDetails) {
 		ASSERT(keyMap.find(detail.encryptKeyId) != keyMap.end());
 		ASSERT_EQ(keyMap[detail.encryptKeyId], detail.encryptDomainId);
-		ASSERT_EQ(detail.encryptKey.compare(BASE_CIPHER_KEY_TEST), 0);
+		ASSERT_EQ(detail.encryptKey.size(), sizeof(BASE_CIPHER_KEY_TEST));
+		ASSERT_EQ(memcmp(detail.encryptKey.begin(), &BASE_CIPHER_KEY_TEST[0], sizeof(BASE_CIPHER_KEY_TEST)), 0);
 	}
 	if (refreshKmsUrls) {
 		validateKmsUrls(ctx);
 	}
 }
 
-void testFetchEncryptKeysByDomainIdsJsonReqStrOps(Reference<RESTKmsConnectorCtx> ctx, Arena arena) {
+void testGetEncryptKeysByDomainIdsRequestBody(Reference<RESTKmsConnectorCtx> ctx, Arena arena) {
 	KmsConnLookupEKsByDomainIdsReq req;
 	std::unordered_set<EncryptCipherDomainId> domainIdsSet;
 	const int nKeys = deterministicRandom()->randomInt(7, 25);
@@ -950,19 +1018,21 @@ void testFetchEncryptKeysByDomainIdsJsonReqStrOps(Reference<RESTKmsConnectorCtx>
 	bool refreshKmsUrls = deterministicRandom()->randomInt(0, 100) < 50;
 
 	std::string jsonReqStr;
-	constructFetchEncryptKeyByDomainIdJsonReqStr(ctx, req, refreshKmsUrls, jsonReqStr);
-	//TraceEvent("FetchKeysByDomainIds", ctx->uid).detail("JsonReqStr", jsonReqStr);
+	populateGetEncryptKeysByDomainIdsRequestBody(ctx, req, refreshKmsUrls, jsonReqStr);
+	TraceEvent("FetchKeysByDomainIds", ctx->uid).detail("JsonReqStr", Traceable<std::string>::toString(jsonReqStr));
 	Reference<HTTP::Response> httpResp = makeReference<HTTP::Response>();
 	httpResp->code = HTTP::HTTP_STATUS_CODE_OK;
-	constructFakeKmsResponse(jsonReqStr, false, httpResp->content);
-	TraceEvent("FetchKeysByDomainIds", ctx->uid).detail("HttpRespStr", httpResp->content);
+	getFakeKmsResponse(jsonReqStr, false, httpResp);
+	TraceEvent("FetchKeysByDomainIds", ctx->uid)
+	    .detail("HttpRespStr", Traceable<std::string>::toString(httpResp->content));
 
 	std::vector<EncryptCipherKeyDetails> cipherDetails;
 	parseKmsResponse(ctx, httpResp, arena, cipherDetails);
 	ASSERT_EQ(domainIdsSet.size(), cipherDetails.size());
 	for (const auto& detail : cipherDetails) {
 		ASSERT(domainIdsSet.find(detail.encryptDomainId) != domainIdsSet.end());
-		ASSERT_EQ(detail.encryptKey.compare(BASE_CIPHER_KEY_TEST), 0);
+		ASSERT_EQ(detail.encryptKey.size(), sizeof(BASE_CIPHER_KEY_TEST));
+		ASSERT_EQ(memcmp(detail.encryptKey.begin(), &BASE_CIPHER_KEY_TEST[0], sizeof(BASE_CIPHER_KEY_TEST)), 0);
 	}
 	if (refreshKmsUrls) {
 		validateKmsUrls(ctx);
@@ -988,8 +1058,8 @@ void testParseKmsResponseFailure(Reference<RESTKmsConnectorCtx> ctx) {
 		rapidjson::StringBuffer sb;
 		rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
 		doc.Accept(writer);
-		httpResp->content.resize(sb.GetSize());
-		httpResp->content.assign(sb.GetString(), sb.GetSize());
+		httpResp->content.resize(sb.GetSize(), '\0');
+		memcpy(httpResp->content.data(), sb.GetString(), sb.GetSize());
 
 		try {
 			parseKmsResponse(ctx, httpResp, arena, cipherDetails);
@@ -1012,8 +1082,8 @@ void testParseKmsResponseFailure(Reference<RESTKmsConnectorCtx> ctx) {
 		rapidjson::StringBuffer sb;
 		rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
 		doc.Accept(writer);
-		httpResp->content.resize(sb.GetSize());
-		httpResp->content.assign(sb.GetString(), sb.GetSize());
+		httpResp->content.resize(sb.GetSize(), '\0');
+		memcpy(httpResp->content.data(), sb.GetString(), sb.GetSize());
 
 		try {
 			parseKmsResponse(ctx, httpResp, arena, cipherDetails);
@@ -1041,8 +1111,8 @@ void testParseKmsResponseFailure(Reference<RESTKmsConnectorCtx> ctx) {
 		rapidjson::StringBuffer sb;
 		rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
 		doc.Accept(writer);
-		httpResp->content.resize(sb.GetSize());
-		httpResp->content.assign(sb.GetString(), sb.GetSize());
+		httpResp->content.resize(sb.GetSize(), '\0');
+		memcpy(httpResp->content.data(), sb.GetString(), sb.GetSize());
 
 		try {
 			parseKmsResponse(ctx, httpResp, arena, cipherDetails);
@@ -1058,13 +1128,16 @@ TEST_CASE("fdbserver/RESTKmsConnector") {
 	Reference<RESTKmsConnectorCtx> ctx = makeReference<RESTKmsConnectorCtx>();
 	Arena arena;
 
+	// initialize cipher key used for testing
+	generateRandomData(&BASE_CIPHER_KEY_TEST[0], 32);
+
 	testFileValidationTokens(ctx);
 	testParseKmsResponseFailure(ctx);
 
 	const int numIterations = deterministicRandom()->randomInt(512, 786);
 	for (int i = 0; i < numIterations; i++) {
-		testFetchEncryptKeysByKeyIdsJsonReqStrOps(ctx, arena);
-		testFetchEncryptKeysByDomainIdsJsonReqStrOps(ctx, arena);
+		testGetEncryptKeysByKeyIdsRequestBody(ctx, arena);
+		testGetEncryptKeysByDomainIdsRequestBody(ctx, arena);
 	}
 	return Void();
 }
