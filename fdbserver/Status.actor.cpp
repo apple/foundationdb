@@ -831,7 +831,8 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 		}
 	}
 
-	for (auto& coordinator : coordinators.ccr->getConnectionString().coordinators()) {
+	std::vector<NetworkAddress> addressVec = wait(coordinators.ccr->getConnectionString().tryResolveHostnames());
+	for (const auto& coordinator : addressVec) {
 		roles.addCoordinatorRole(coordinator);
 	}
 
@@ -1689,8 +1690,7 @@ static JsonBuilderObject configurationFetcher(Optional<DatabaseConfiguration> co
 			}
 			statusObj["excluded_servers"] = excludedServersArr;
 		}
-		std::vector<ClientLeaderRegInterface> coordinatorLeaderServers = coordinators.clientLeaderServers;
-		int count = coordinatorLeaderServers.size();
+		int count = coordinators.clientLeaderServers.size();
 		statusObj["coordinators_count"] = count;
 	} catch (Error&) {
 		incomplete_reasons->insert("Could not retrieve all configuration status information.");
@@ -2505,7 +2505,8 @@ static JsonBuilderArray tlogFetcher(int* logFaultTolerance,
 
 static JsonBuilderObject faultToleranceStatusFetcher(DatabaseConfiguration configuration,
                                                      ServerCoordinators coordinators,
-                                                     std::vector<WorkerDetails>& workers,
+                                                     const std::vector<NetworkAddress>& coordinatorAddresses,
+                                                     const std::vector<WorkerDetails>& workers,
                                                      int extraTlogEligibleZones,
                                                      int minStorageReplicasRemaining,
                                                      int oldLogFaultTolerance,
@@ -2521,11 +2522,11 @@ static JsonBuilderObject faultToleranceStatusFetcher(DatabaseConfiguration confi
 	int maxCoordinatorFailures = (coordinators.clientLeaderServers.size() - 1) / 2;
 
 	std::map<NetworkAddress, StringRef> workerZones;
-	for (auto& worker : workers) {
+	for (const auto& worker : workers) {
 		workerZones[worker.interf.address()] = worker.interf.locality.zoneId().orDefault(LiteralStringRef(""));
 	}
 	std::map<StringRef, int> coordinatorZoneCounts;
-	for (auto& coordinator : coordinators.ccr->getConnectionString().coordinators()) {
+	for (const auto& coordinator : coordinatorAddresses) {
 		auto zone = workerZones[coordinator];
 		coordinatorZoneCounts[zone] += 1;
 	}
@@ -3061,6 +3062,9 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			state std::vector<JsonBuilderObject> workerStatuses = wait(getAll(futures2));
 			wait(success(primaryDCFO));
 
+			std::vector<NetworkAddress> coordinatorAddresses =
+			    wait(coordinators.ccr->getConnectionString().tryResolveHostnames());
+
 			int logFaultTolerance = 100;
 			if (db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
 				statusObj["logs"] = tlogFetcher(&logFaultTolerance, db, address_workers);
@@ -3070,6 +3074,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			statusObj["fault_tolerance"] =
 			    faultToleranceStatusFetcher(configuration.get(),
 			                                coordinators,
+			                                coordinatorAddresses,
 			                                workers,
 			                                extraTlogEligibleZones,
 			                                minStorageReplicasRemaining,
