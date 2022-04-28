@@ -683,7 +683,11 @@ struct QuietDatabaseChecker {
 		Impl(double start, const std::string& phase) : start(start), phase(phase) {}
 
 		template <class T, class Comparison = std::less_equal<>>
-		Impl& add(BaseTraceEvent& evt, const char* name, T value, T expected, Comparison const& cmp = std::less_equal<>()) {
+		Impl& add(BaseTraceEvent& evt,
+		          const char* name,
+		          T value,
+		          T expected,
+		          Comparison const& cmp = std::less_equal<>()) {
 			std::string k = fmt::format("{}Gate", name);
 			evt.detail(name, value).detail(k.c_str(), expected);
 			if (!cmp(value, expected)) {
@@ -698,10 +702,17 @@ struct QuietDatabaseChecker {
 				std::string traceMessage = fmt::format("QuietDatabase{}Fail", phase);
 				std::string reasons = fmt::format("{}", fmt::join(failReasons, ", "));
 				TraceEvent(timedOut ? SevError : SevWarnAlways, traceMessage.c_str())
-				    .detail(failReasons.size() == 1 ? "Reason" : "Reasons", reasons)
+				    .detail("Reasons", reasons)
 				    .detail("FailedAfter", now() - start)
 				    .detail("Timeout", maxDDRunTime);
-				ASSERT(!timedOut);
+				if (timedOut) {
+					// this bool is just created to make the assertion more readable
+					bool ddGotStuck = true;
+					// This assertion is here to make the test fail more quickly. If quietDatabase takes this
+					// long without completing, we can assume that the test will eventually time out. However,
+					// time outs are more annoying to debug. This will hopefully be easier to track down.
+					ASSERT(!ddGotStuck);
+				}
 				return false;
 			}
 			return true;
