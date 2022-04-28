@@ -1133,32 +1133,30 @@ struct DDQueueData {
 		for (auto& id : ids)
 			lastAsSource[id] = t;
 	}
-};
 
-void enqueueCancelledDataMove(UID dataMoveId, KeyRange range, const DDEnabledState* ddEnabledState) {
-	std::vector<Future<Void>> cleanup;
-	auto f = this->dataMoves.intersectingRanges(range);
-	for (auto it = f.begin(); it != f.end(); ++it) {
-		if (it->value().isValid()) {
-			TraceEvent(SevDebug, "DDEnqueueCancelledDataMoveConflict", this->distributorId)
-			    .detail("DataMoveID", dataMoveId)
-			    .detail("CancelledRange", range)
-			    .detail("ConflictingDataMoveID", it->value().id)
-			    .detail("ConflictingRange", KeyRangeRef(it->range().begin, it->range().end));
-			return;
+	void enqueueCancelledDataMove(UID dataMoveId, KeyRange range, const DDEnabledState* ddEnabledState) {
+		std::vector<Future<Void>> cleanup;
+		auto f = this->dataMoves.intersectingRanges(range);
+		for (auto it = f.begin(); it != f.end(); ++it) {
+			if (it->value().isValid()) {
+				TraceEvent(SevDebug, "DDEnqueueCancelledDataMoveConflict", this->distributorId)
+				    .detail("DataMoveID", dataMoveId)
+				    .detail("CancelledRange", range)
+				    .detail("ConflictingDataMoveID", it->value().id)
+				    .detail("ConflictingRange", KeyRangeRef(it->range().begin, it->range().end));
+				return;
+			}
 		}
-	}
 
-	DDQueueData::DDDataMove dataMove(dataMoveId);
-	dataMove.cancel = cleanUpDataMove(
-	    this->cx, dataMoveId, this->lock, &this->cleanUpDataMoveParallelismLock, range, true, ddEnabledState);
-	this->dataMoves.insert(range, DDQueueData::DDDataMove());
-	TraceEvent(SevDebug, "DDEnqueuedCancelledDataMove", this->distributorId)
-	    .detail("DataMoveID", dataMoveId)
-	    .detail("Range", range);
-}
-}
-;
+		DDQueueData::DDDataMove dataMove(dataMoveId);
+		dataMove.cancel = cleanUpDataMove(
+		    this->cx, dataMoveId, this->lock, &this->cleanUpDataMoveParallelismLock, range, true, ddEnabledState);
+		this->dataMoves.insert(range, DDQueueData::DDDataMove(dataMoveId));
+		TraceEvent(SevDebug, "DDEnqueuedCancelledDataMove", this->distributorId)
+		    .detail("DataMoveID", dataMoveId)
+		    .detail("Range", range);
+	}
+};
 
 ACTOR Future<Void> cancelDataMove(struct DDQueueData* self, KeyRange range, const DDEnabledState* ddEnabledState) {
 	std::vector<Future<Void>> cleanup;
@@ -1264,11 +1262,6 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 					    .detail("CurrentDataMoveID", rd.dataMoveId)
 					    .detail("DataMoveID", mId)
 					    .detail("Range", kr);
-					if (!signalledTransferComplete) {
-						dataTransferComplete.send(rd);
-					}
-					relocationComplete.send(rd);
-					return Void();
 				}
 			}
 			self->dataMoves.insert(rd.keys, DDQueueData::DDDataMove(rd.dataMoveId));
@@ -2361,7 +2354,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 	} catch (Error& e) {
 		if (e.code() != error_code_broken_promise && // FIXME: Get rid of these broken_promise errors every time we
 		                                             // are killed by the master dying
-		    e.code() != error_code_movekeys_conflict)
+		    e.code() != error_code_movekeys_conflict && e.code() != error_code_data_move_cancelled)
 			TraceEvent(SevError, "DataDistributionQueueError", distributorId).error(e);
 		throw e;
 	}

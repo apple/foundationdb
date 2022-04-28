@@ -1,3 +1,5 @@
+disableTss=true
+
 [[test]]
 testTitle = 'ApiCorrectnessTest'
 clearAfterTest = true
