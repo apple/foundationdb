@@ -192,7 +192,7 @@ class UpgradeTest:
         if version == CURRENT_VERSION:
             return self.build_dir.joinpath("bin", bin_name)
         elif self.version_in_local_repo(version):
-            return self.local_binary_repo.joinpath(version, "{}-{}".format(bin_name, version))
+            return self.local_binary_repo.joinpath(version, "bin", "{}-{}".format(bin_name, version))
         else:
             return self.download_dir.joinpath(version, bin_name)
 
@@ -259,7 +259,7 @@ class UpgradeTest:
         dest_lib_file = self.download_dir.joinpath(version, "libfdb_c.so")
         if dest_lib_file.exists():
             return
-        src_lib_file = self.local_binary_repo.joinpath(version, "libfdb_c-{}.so".format(version))
+        src_lib_file = self.local_binary_repo.joinpath(version, "lib", "libfdb_c-{}.so".format(version))
         assert src_lib_file.exists(), "Missing file {} in the local old binaries repository".format(src_lib_file)
         shutil.copyfile(src_lib_file, dest_lib_file)
         assert dest_lib_file.exists(), "{} does not exist".format(dest_lib_file)
