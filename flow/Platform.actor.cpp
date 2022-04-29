@@ -2974,6 +2974,35 @@ std::string readFileBytes(std::string const& filename, int maxSize) {
 	return s;
 }
 
+size_t readFileBytes(std::string const& filename, uint8_t* buff, size_t len) {
+	FILE* f = fopen(filename.c_str(), "rb" FOPEN_CLOEXEC_MODE);
+	if (!f) {
+		TraceEvent(SevWarn, "FileOpenError")
+		    .detail("Filename", filename)
+		    .detail("Errno", errno)
+		    .detail("ErrorDescription", strerror(errno));
+		throw file_not_readable();
+	}
+
+	size_t bytesRead = 0;
+	try {
+		fseek(f, 0, SEEK_END);
+		size_t size = ftell(f);
+		size_t toRead = std::min(size, len);
+		fseek(f, 0, SEEK_SET);
+		bytesRead = fread(buff, toRead, 1, f);
+		if (bytesRead == 0) {
+			TraceEvent(SevError, "FileReadError").detail("Filename", filename);
+			throw file_not_readable();
+		}
+	} catch (...) {
+		fclose(f);
+		throw;
+	}
+	fclose(f);
+	return bytesRead;
+}
+
 void writeFileBytes(std::string const& filename, const uint8_t* data, size_t count) {
 	FILE* f = fopen(filename.c_str(), "wb" FOPEN_CLOEXEC_MODE);
 	if (!f) {
@@ -3256,6 +3285,68 @@ bool isHwCrcSupported() {
 #else
 #error Port me!
 #endif
+}
+
+TmpFile::TmpFile() : filename("") {
+#ifdef __unixish__
+	createFile(defaultDir.data(), defaultPattern.data());
+#else
+	throw not_implemented();
+#endif
+}
+
+TmpFile::TmpFile(const std::string& tmpDir, const std::string& pattern) : filename("") {
+	std::string dir = removeWhitespace(tmpDir);
+	std::string pat = removeWhitespace(pattern);
+#ifdef __unixish__
+	createFile(dir.c_str(), pat.c_str());
+#else
+	throw not_implemented();
+#endif
+}
+
+TmpFile::~TmpFile() {
+	if (!filename.empty()) {
+		destroyFile();
+	}
+}
+
+void TmpFile::createFile(const char* dir, const char* pattern) {
+#ifdef __unixish__
+	constexpr int MAX_TEMP_NAME_LENGTH = PATH_MAX + 12;
+	char tmpFilename[MAX_TEMP_NAME_LENGTH] = { 0 };
+	snprintf(tmpFilename, MAX_TEMP_NAME_LENGTH, "%s/%s-XXXXXX", dir, pattern);
+
+	int fd = mkstemp(tmpFilename);
+	if (fd == -1) {
+		TraceEvent("CreateTmpFile_Failed").log();
+		throw io_error();
+	}
+
+	filename.assign(tmpFilename);
+	TraceEvent("CreateTmpFile_Success").detail("Filename", filename);
+	close(fd);
+#else
+	throw not_implemented();
+#endif
+}
+
+size_t TmpFile::read(uint8_t* buff, size_t len) {
+	return readFileBytes(filename, buff, len);
+}
+
+void TmpFile::write(const uint8_t* buff, size_t len) {
+	writeFileBytes(filename, buff, len);
+}
+
+bool TmpFile::destroyFile() {
+	bool deleted = deleteFile(filename);
+	if (deleted) {
+		TraceEvent("TmpFileDestory_Success").detail("Filename", filename);
+	} else {
+		TraceEvent("TmpFileDestory_Failed").detail("Filename", filename);
+	}
+	return deleted;
 }
 
 } // namespace platform
