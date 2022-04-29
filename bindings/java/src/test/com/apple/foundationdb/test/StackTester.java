@@ -20,6 +20,8 @@
 
 package com.apple.foundationdb.test;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -429,12 +431,27 @@ public class StackTester {
 				byte[] tenantName = (byte[])inst.popParam().join();
 				inst.push(TenantManagement.deleteTenant(inst.context.db, tenantName));
 			}
-			else if (op == StackOperation.TENANT_LIST) {
+			else if (op == StackOperation.TENANT_LIST_NAMES) {
 				List<Object> params = inst.popParams(3).join();
 				byte[] begin = (byte[])params.get(0);
 				byte[] end = (byte[])params.get(1);
 				int limit = StackUtils.getInt(params.get(2));
-				inst.push(TenantManagement.listTenants(inst.context.db, begin, end, limit));
+				CloseableAsyncIterator<KeyValue> tenantIter = TenantManagement.listTenants(inst.context.db, begin, end, limit);
+				ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+				try {
+					while (tenantIter.hasNext()) {
+						try {
+							KeyValue next = tenantIter.next();
+							outputStream.write(next.getKey());
+						} catch (IOException e) {
+							continue;
+						}
+					}
+				} finally {
+					tenantIter.close();
+				}
+				byte[] output = outputStream.toByteArray();
+				inst.push(output);
 			}
 			else if (op == StackOperation.TENANT_SET_ACTIVE) {
 				byte[] tenantName = (byte[])inst.popParam().join();

@@ -33,6 +33,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 
 import com.apple.foundationdb.Database;
 import com.apple.foundationdb.FDB;
@@ -48,6 +50,7 @@ import com.apple.foundationdb.Transaction;
 import com.apple.foundationdb.async.AsyncUtil;
 import com.apple.foundationdb.tuple.ByteArrayUtil;
 import com.apple.foundationdb.tuple.Tuple;
+import com.apple.foundationdb.async.CloseableAsyncIterator;
 
 public class AsyncStackTester {
 	static final String DIRECTORY_PREFIX = "DIRECTORY_";
@@ -483,12 +486,27 @@ public class AsyncStackTester {
 				inst.push(TenantManagement.deleteTenant(inst.context.db, tenantName));
 			}, FDB.DEFAULT_EXECUTOR);
 		}
-		else if (op == StackOperation.TENANT_LIST) {
+		else if (op == StackOperation.TENANT_LIST_NAMES) {
 			return inst.popParams(3).thenAcceptAsync(params -> {
 				byte[] begin = (byte[])params.get(0);
 				byte[] end = (byte[])params.get(1);
 				int limit = StackUtils.getInt(params.get(2));
-				inst.push(TenantManagement.listTenants(inst.context.db, begin, end, limit));
+				CloseableAsyncIterator<KeyValue> tenantIter = TenantManagement.listTenants(inst.context.db, begin, end, limit);
+				ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+				try {
+					while (tenantIter.hasNext()) {
+						try {
+							KeyValue next = tenantIter.next();
+							outputStream.write(next.getKey());
+						} catch (IOException e) {
+							continue;
+						}
+					}
+				} finally {
+					tenantIter.close();
+				}
+				byte[] output = outputStream.toByteArray();
+				inst.push(output);
 			}, FDB.DEFAULT_EXECUTOR);
 		}
 		else if (op == StackOperation.TENANT_SET_ACTIVE) {

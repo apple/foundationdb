@@ -92,11 +92,9 @@ class FDBTenantList(object):
         return list(self.__iter__())
 
     def __iter__(self):
-        while True:
-            result = self._iter.__next__()
-
-            tenant_name = _impl.remove_prefix(result.key, _tenant_map_prefix)
-            yield _impl.KeyValue(tenant_name, result.value)
+        for next_item in self._iter:
+            tenant_name = _impl.remove_prefix(next_item.key, _tenant_map_prefix)
+            yield _impl.KeyValue(tenant_name, next_item.value)
 
 # Lists the tenants created in the cluster, specified by the begin and end range.
 # Also limited in number of results by the limit parameter.
