@@ -178,6 +178,7 @@ class UpgradeTest:
         self.tester_proc = None
         self.output_pipe = None
         self.tester_bin = None
+        self.ctrl_pipe = None
 
     def binary_path(self, version, bin_name):
         if version == CURRENT_VERSION:
@@ -387,12 +388,18 @@ class UpgradeTest:
         except Exception:
             print("Execution of test workload failed")
             print(traceback.format_exc())
+        finally:
+            # If the tester failed to initialize, other threads of the test may stay
+            # blocked on trying to open the named pipes
+            if self.ctrl_pipe is None or self.output_pipe is None:
+                print("Tester failed before initializing named pipes. Aborting the test")
+                os._exit(1)
 
     # Perform a progress check: Trigger it and wait until it is completed
 
-    def progress_check(self, ctrl_pipe):
+    def progress_check(self):
         self.progress_event.clear()
-        os.write(ctrl_pipe, b"CHECK\n")
+        os.write(self.ctrl_pipe, b"CHECK\n")
         self.progress_event.wait(None if RUN_WITH_GDB else PROGRESS_CHECK_TIMEOUT_SEC)
         if self.progress_event.is_set():
             print("Progress check: OK")
@@ -421,18 +428,18 @@ class UpgradeTest:
     # upgrade path: perform the upgrade steps and check success after each step
     def exec_upgrade_test(self):
         print("Opening pipe {} for writing".format(self.input_pipe_path))
-        ctrl_pipe = os.open(self.input_pipe_path, os.O_WRONLY)
+        self.ctrl_pipe = os.open(self.input_pipe_path, os.O_WRONLY)
         try:
             self.health_check()
-            self.progress_check(ctrl_pipe)
+            self.progress_check()
             for version in self.upgrade_path[1:]:
                 random_sleep(0.0, 2.0)
                 self.upgrade_to(version)
                 self.health_check()
-                self.progress_check(ctrl_pipe)
-            os.write(ctrl_pipe, b"STOP\n")
+                self.progress_check()
+            os.write(self.ctrl_pipe, b"STOP\n")
         finally:
-            os.close(ctrl_pipe)
+            os.close(self.ctrl_pipe)
 
     # Kill the tester process if it is still alive
     def kill_tester_if_alive(self, workload_thread):
