@@ -1853,6 +1853,12 @@ Future<RangeResult> AdvanceVersionImpl::getRange(ReadYourWritesTransaction* ryw,
 }
 
 ACTOR static Future<Optional<std::string>> advanceVersionCommitActor(ReadYourWritesTransaction* ryw, Version v) {
+	Optional<Standalone<StringRef>> versionEpochValue = wait(ryw->getTransaction().get(versionEpochKey));
+	if (versionEpochValue.present()) {
+		return ManagementAPIError::toJsonString(
+		    false, "advanceversion", "Illegal to modify the version while the version epoch is enabled");
+	}
+
 	// Max version we can set for minRequiredCommitVersionKey,
 	// making sure the cluster can still be alive for 1000 years after the recovery
 	static const Version maxAllowedVerion =
