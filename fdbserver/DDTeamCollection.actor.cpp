@@ -4762,6 +4762,7 @@ bool DDTeamCollection::removeTeam(Reference<TCTeamInfo> team) {
 
 	ASSERT_WE_THINK(foundInMachineTeam);
 	team->tracker.cancel();
+	team->setHealthy(false);
 	if (g_network->isSimulated()) {
 		// Update server team information for consistency check in simulation
 		traceTeamCollectionInfo();
