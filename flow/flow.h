@@ -963,36 +963,63 @@ private:
 
 template <class T>
 struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>> {
+
+	class Queue : NonCopyable {
+	private:
+		std::queue<T, Deque<T>> queue;
+		virtual void addElement() {}
+		virtual void removeElement() {}
+
+	public: // types
+		using container_type = Deque<T>;
+		using reference = typename container_type::reference;
+		using const_reference = typename container_type::const_reference;
+
+	public:
+		static Queue* create();
+
+		virtual ~Queue() {}
+		reference front() { return queue.front(); }
+		const_reference front() const { return queue.front(); }
+		virtual void pop() { queue.pop(); }
+		[[nodiscard]] bool empty() const { return queue.empty(); }
+		template <class... Args>
+		decltype(auto) emplace(Args&&... args) {
+			addElement();
+			return queue.emplace(std::forward<Args>(args)...);
+		}
+		size_t size() const { return queue.size(); }
+	};
 	int promises; // one for each promise (and one for an active actor if this is an actor)
 	int futures; // one for each future and one more if there are any callbacks
 
 	// Invariant: SingleCallback<T>::next==this || (queue.empty() && !error.isValid())
-	std::queue<T, Deque<T>> queue;
+	std::unique_ptr<Queue> queue;
 	Promise<Void> onEmpty;
 	Error error;
 	Promise<Void> onError;
 
 	NotifiedQueue(int futures, int promises)
-	  : promises(promises), futures(futures), onEmpty(nullptr), onError(nullptr) {
+	  : promises(promises), futures(futures), queue(Queue::create()), onEmpty(nullptr), onError(nullptr) {
 		SingleCallback<T>::next = this;
 	}
 
 	virtual ~NotifiedQueue() = default;
 
-	bool isReady() const { return !queue.empty() || error.isValid(); }
-	bool isError() const { return queue.empty() && error.isValid(); } // the *next* thing queued is an error
+	bool isReady() const { return !queue->empty() || error.isValid(); }
+	bool isError() const { return queue->empty() && error.isValid(); } // the *next* thing queued is an error
 	bool hasError() const { return error.isValid(); } // there is an error queued
-	uint32_t size() const { return queue.size(); }
+	uint32_t size() const { return queue->size(); }
 
 	virtual T pop() {
-		if (queue.empty()) {
+		if (queue->empty()) {
 			if (error.isValid())
 				throw error;
 			throw internal_error();
 		}
-		auto copy = std::move(queue.front());
-		queue.pop();
-		if (onEmpty.isValid() && queue.empty()) {
+		auto copy = std::move(queue->front());
+		queue->pop();
+		if (onEmpty.isValid() && queue->empty()) {
 			Promise<Void> hold = onEmpty;
 			onEmpty = Promise<Void>(nullptr);
 			hold.send(Void());
@@ -1008,7 +1035,7 @@ struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>
 		if (SingleCallback<T>::next != this) {
 			SingleCallback<T>::next->fire(std::forward<U>(value));
 		} else {
-			queue.emplace(std::forward<U>(value));
+			queue->emplace(std::forward<U>(value));
 		}
 	}
 
@@ -1068,14 +1095,14 @@ struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>
 
 protected:
 	T popImpl() {
-		if (queue.empty()) {
+		if (queue->empty()) {
 			if (error.isValid())
 				throw error;
 			throw internal_error();
 		}
-		auto copy = std::move(queue.front());
-		queue.pop();
-		if (onEmpty.isValid() && queue.empty()) {
+		auto copy = std::move(queue->front());
+		queue->pop();
+		if (onEmpty.isValid() && queue->empty()) {
 			Promise<Void> hold = onEmpty;
 			onEmpty = Promise<Void>(nullptr);
 			hold.send(Void());

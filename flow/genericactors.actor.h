@@ -2082,6 +2082,53 @@ private:
 template <class T>
 std::unordered_map<NetworkAddress, Reference<T>> FlowSingleton<T>::instanceMap;
 
+template <class T>
+class SimTimeoutQueue : public NotifiedQueue<T>::Queue {
+	using Parent = typename NotifiedQueue<T>::Queue;
+	Future<Void> timeoutFuture;
+	std::string backtrace;
+	AsyncTrigger add, remove;
+
+	void addElement() override { add.trigger(); }
+	void removeElement() override { remove.trigger(); }
+
+	ACTOR static Future<Void> observer(SimTimeoutQueue<T>* self) {
+		state Future<Void> timeout = Never();
+		loop {
+			if (self->empty()) {
+				timeout = Never();
+			}
+			choose {
+				when(wait(timeout)) {
+					TraceEvent(SevError, "NotifiedQueueIsntConsumed")
+					    .detail("Timeout", 240)
+					    .detail("OriginalBacktrace", self->backtrace);
+					// we'll only report this once
+					return Void();
+				}
+				when(wait(self->add.onTrigger())) {
+					if (self->empty()) {
+						timeout = delay(240);
+					}
+				}
+				when(wait(self->remove.onTrigger())) {}
+			}
+		}
+	}
+
+public:
+	SimTimeoutQueue() : timeoutFuture(observer(this)), backtrace(platform::get_backtrace()) {}
+};
+
+template <class T>
+typename NotifiedQueue<T>::Queue* NotifiedQueue<T>::Queue::create() {
+	if (!g_network->isSimulated()) {
+		return new NotifiedQueue<T>::Queue();
+	} else {
+		return new SimTimeoutQueue<T>();
+	}
+}
+
 #include "flow/unactorcompiler.h"
 
 #endif
