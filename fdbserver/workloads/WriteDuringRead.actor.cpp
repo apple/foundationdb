@@ -1014,7 +1014,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 										tr.setOption(FDBTransactionOptions::NEXT_WRITE_NO_WRITE_CONFLICT_RANGE);
 									tr.atomicOp(key, value, opType);
 									//TraceEvent("WDRAtomicOpSuccess").detail("Key", key).detail("Value", value.size());
-									if (!noConflict && key.size() <= getMaxWriteKeySize(key, false)) {
+									if (!noConflict && key.size() <= getMaxWriteKeySize(key, self->useSystemKeys)) {
 										self->addedConflicts.insert(key, true);
 									}
 									Optional<Value> existing = self->memoryGet(&self->memoryDatabase, key);
@@ -1033,7 +1033,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 								if (noConflict)
 									tr.setOption(FDBTransactionOptions::NEXT_WRITE_NO_WRITE_CONFLICT_RANGE);
 								tr.set(key, value);
-								if (!noConflict && key.size() <= getMaxWriteKeySize(key, false)) {
+								if (!noConflict && key.size() <= getMaxWriteKeySize(key, self->useSystemKeys)) {
 									self->addedConflicts.insert(key, true);
 								}
 								//TraceEvent("WDRSetSuccess").detail("Key", key).detail("Value", value.size());
