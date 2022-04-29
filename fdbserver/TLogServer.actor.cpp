@@ -1536,7 +1536,7 @@ Version poppedVersion(Reference<LogData> self, Tag tag) {
 		if (tag == txsTag || tag.locality == tagLocalityTxs) {
 			return 0;
 		}
-		return self->recoveryTxnVersion;
+		return std::max(self->recoveredAt + 1, self->recoveryTxnVersion);
 	}
 	return tagData->popped;
 }
