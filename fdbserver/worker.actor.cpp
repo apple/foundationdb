@@ -2978,17 +2978,14 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderWithDelayedCandidacyImplOneGenerati
     Reference<AsyncVar<Value>> result,
     MonitorLeaderInfo info) {
 	ClusterConnectionString cs = info.intermediateConnRecord->getConnectionString();
-	std::vector<Hostname> hostnames;
 	state int coordinatorsSize = cs.hostnames.size() + cs.coordinators().size();
 	state ElectionResultRequest request;
 	state int index = 0;
 	state int successIndex = 0;
 	state std::vector<LeaderElectionRegInterface> leaderElectionServers;
 
-	hostnames.reserve(cs.hostnames.size());
 	leaderElectionServers.reserve(coordinatorsSize);
 	for (const auto& h : cs.hostnames) {
-		hostnames.push_back(h);
 		leaderElectionServers.push_back(LeaderElectionRegInterface(h));
 	}
 	for (const auto& c : cs.coordinators()) {
@@ -2997,7 +2994,7 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderWithDelayedCandidacyImplOneGenerati
 	deterministicRandom()->randomShuffle(leaderElectionServers);
 
 	request.key = cs.clusterKey();
-	request.hostnames = hostnames;
+	request.hostnames = cs.hostnames;
 	request.coordinators = cs.coordinators();
 
 	loop {
