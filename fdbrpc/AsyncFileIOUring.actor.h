@@ -36,12 +36,22 @@
 #include <sys/eventfd.h>
 #include <sys/syscall.h>
 #include <liburing.h>
-//#include "fdbrpc/linux_kaio.h"
 #include "flow/Knobs.h"
+#include "flow/Histogram.h"
+#include "fdbrpc/ContinuousSample.h"
 #include "flow/UnitTest.h"
 #include <stdio.h>
 #include "flow/crc32c.h"
 #include "flow/genericactors.actor.h"
+#include "fdbrpc/AsyncFileKAIO.actor.h"
+#include "flow/Platform.h"
+#include "flow/Trace.h"
+#include "flow/flow.h"
+
+// Test case
+#include <algorithm>
+#include <random>
+
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // Set this to true to enable detailed IOUring request logging, which currently is written to a hardcoded location
@@ -52,6 +62,19 @@
 
 enum { UIO_CMD_PREAD = 0, UIO_CMD_PWRITE = 1, UIO_CMD_FSYNC = 2, UIO_CMD_FDSYNC = 3 };
 
+struct AsyncFileIOUringMetrics {
+	Reference<Histogram> readLatencyDist;
+	Reference<Histogram> writeLatencyDist;
+	Reference<Histogram> syncLatencyDist;
+	Reference<Histogram> ioSubmitLatencyDist;
+	ContinuousSample<double> writeLatencySamples;
+	ContinuousSample<double> ioSubmitLatencySamples;
+
+	AsyncFileIOUringMetrics() : writeLatencySamples(10000), ioSubmitLatencySamples(10000) {}
+} g_asyncFileIOUringMetrics;
+
+Future<Void> g_asyncFileIOUringHistogramLogger;
+
 DESCR struct SlowIOUringSubmit {
 	int64_t submitDuration; // ns
 	int64_t truncateDuration; // ns
@@ -61,107 +84,9 @@ DESCR struct SlowIOUringSubmit {
 };
 
 typedef struct io_uring io_uring_t;
-static void consume();
 class AsyncFileIOUring : public IAsyncFile, public ReferenceCounted<AsyncFileIOUring> {
 public:
-
-#if IOUring_LOGGING
-private:
-#pragma pack(push, 1)
-	struct OpLogEntry {
-		OpLogEntry() : result(0) {}
-		enum EOperation{ READ = 1, WRITE = 2, SYNC = 3, TRUNCATE = 4 };
-		enum EStage{ START = 1, LAUNCH = 2, REQUEUE = 3, COMPLETE = 4, READY = 5 };
-		int64_t timestamp;
-		uint32_t id;
-		uint32_t checksum;
-		uint32_t pageOffset;
-		uint8_t pageCount;
-		uint8_t op;
-		uint8_t stage;
-		uint32_t result;
-
-		static uint32_t nextID() {
-			static uint32_t last = 0;
-			return ++last;
-		}
-
-		void log(FILE* file) {
-			if (ftell(file) > (int64_t)50 * 1e9)
-				fseek(file, 0, SEEK_SET);
-			if (!fwrite(this, sizeof(OpLogEntry), 1, file))
-				throw io_error();
-		}
-	};
-#pragma pop
-
-	FILE* logFile;
-	struct IOBlock;
-	static void IOUringLogBlockEvent(IOBlock* ioblock, OpLogEntry::EStage stage, uint32_t result = 0);
-	static void IOUringLogBlockEvent(FILE* logFile, IOBlock* ioblock, OpLogEntry::EStage stage, uint32_t result = 0);
-	static void IOUringLogEvent(FILE* logFile,
-	                            uint32_t id,
-	                            OpLogEntry::EOperation op,
-	                            OpLogEntry::EStage stage,
-	                            uint32_t pageOffset = 0,
-	                            uint32_t result = 0);
-
-public:
-#else
-#define IOUringLogBlockEvent(...)
-#define IOUringLogEvent(...)
-#endif
-
-	static void complete_io_cqe(struct io_uring_cqe* const cqe) {
-		// struct io_uring_cqe *cqe=ctx.cqe;
-		// thr.join();r
-		// if(rc != -EAGAIN && rc != -ETIME && rc != -EINTR){//ERROR
-		//   printf("io_uring_wait_cqe failed: %d %s\n", rc, strerror(-rc));
-		//   TraceEvent("IOGetEventsError").GetLastError();
-		//   throw io_error();
-		// }
-
-		// loop{ //loop as long as there are ready events. Grab at least one
-		// 	rc = io_uring_peek_cqe(&ctx.ring, &cqe);
-		// We've got an event. Let's consume it
-		IOBlock* const iob = static_cast<IOBlock*>(io_uring_cqe_get_data(cqe));
-		ASSERT(iob != nullptr);
-		IOUringLogBlockEvent(iob, OpLogEntry::COMPLETE, cqe->res);
-		// if(ctx.ioTimeout > 0 && !AVOID_STALLS) {
-		// 	ctx.removeFromRequestList(iob);
-		// }
-		if (IOUring_TRACING)
-			printf("Op result on io %p %d %s\n", iob, cqe->res, strerror(-cqe->res));
-		iob->setResult(cqe->res);
-		io_uring_cqe_seen(&ctx.ring, cqe);
-		// }
-		/*
-		 * If nothing was peeked (bc of the dangling eventfd described above), do nothing
-		 */
-
-		if (1) {
-
-			{
-				// ++ctx.countAIOCollect;
-				// double t = timer_monotonic();
-				// double elapsed = t - ctx.ioStallBegin;
-				// ctx.ioStallBegin = t;
-				// g_network->networkInfo.metrics.secSquaredDiskStall += elapsed*elapsed/2;
-			}
-
-			// if(ctx.ioTimeout > 0 && !AVOID_STALLS) {
-			// 	double currentTime = now();
-			// 	while(ctx.submittedRequestList && currentTime - ctx.submittedRequestList->startTime > ctx.ioTimeout) {
-			// 		ctx.submittedRequestList->timeout(ctx.timeoutWarnOnly);
-			// 		ctx.removeFromRequestList(ctx.submittedRequestList);
-			// 	}
-			// }
-			ctx.submitted -= 1;
-		}
-	}
-
 	static Future<Reference<IAsyncFile>> open(std::string filename, int flags, int mode) {
-		//TraceEvent("AsyncFileCachedOpen").detail("Filename", filename);
 		if (openFiles.find(filename) == openFiles.end()) {
 			auto f = open_impl(filename, flags, mode);
 			if (f.isReady() && f.isError())
@@ -203,9 +128,6 @@ public:
 			    .GetLastError();
 			if (ecode == EINVAL)
 				ev.detail("Description", "Invalid argument - Does the target filesystem support IOUring?");
-#if IOUring_TRACING
-			printf("IOUR failed to open file %s err=%s\n", open_filename.c_str(), strerror(errno));
-#endif
 			return e;
 		} else {
 			TraceEvent("AsyncFileIOUringOpen")
@@ -214,13 +136,7 @@ public:
 			    .detail("Mode", mode)
 			    .detail("Fd", fd);
 		}
-#if IOUring_TRACING
-		printf("IOUR Opened %s fd=%u uncached=%d unbuffered=%d\n",
-		       open_filename.c_str(),
-		       fd,
-		       !!(flags & IAsyncFile::OPEN_UNCACHED),
-		       !!(flags & IAsyncFile::OPEN_UNBUFFERED));
-#endif
+
 		AsyncFileIOUring* const ptr = new AsyncFileIOUring(fd, flags, filename);
 		auto& of = openFiles[filename];
 		of.f = ptr;
@@ -252,11 +168,13 @@ public:
 
 		r->lastFileSize = r->nextFileSize = buf.st_size;
 		if (FLOW_KNOBS->IO_URING_POLL) {
+			// TODO: FIX IO_URING_POLL BUG
 			int ret __attribute__((unused)) = io_uring_register_files(&ctx.ring, &fd, 1);
 
-#if IOUring_TRACING
-			printf("IOUR  Registering file %s fd=%u with ret %d\n", open_filename.c_str(), fd, ret);
-#endif
+			TraceEvent(SevDebug, "AsyncFileIOUringRegisterFile")
+			    .detail("Filename", open_filename)
+			    .detail("fd", fd)
+			    .detail("ret", ret);
 		}
 		return Reference<IAsyncFile>(std::move(r));
 	}
@@ -272,43 +190,38 @@ public:
 			ctx.slowAioSubmitMetric.init(LiteralStringRef("AsyncFile.SlowIOUringSubmit"));
 		}
 
+		// Initialize io_uring
 		int rc;
 		if (FLOW_KNOBS->IO_URING_POLL) {
 			struct io_uring_params params;
 			memset(&params, 0, sizeof(params));
-			params.flags |= IORING_SETUP_SQPOLL;
+			// params.flags |= IORING_SETUP_SQPOLL;
+			params.flags |= (IORING_SETUP_SQPOLL & IORING_SETUP_IOPOLL);
 			params.sq_thread_idle = 2000;
+
 			rc = io_uring_queue_init_params(FLOW_KNOBS->MAX_OUTSTANDING, &ctx.ring, &params);
 		} else {
 			rc = io_uring_queue_init(FLOW_KNOBS->MAX_OUTSTANDING, &ctx.ring, 0);
 		}
+
 		if (rc < 0) {
 			TraceEvent("IOSetupError").GetLastError();
 			printf("Error in iou setup %d %s\n", rc, strerror(-rc));
 			throw io_error();
 		}
-#if IOUring_TRACING
-		printf("Inited iouring with rc %d. evfd %d queue size=%lu \n", rc, ev->getFD(), FLOW_KNOBS->MAX_OUTSTANDING);
-#endif
 
-		if (!FLOW_KNOBS->IO_URING_EVENTFD) {
-			printf("thread\n");
-			ctx.thr = std::thread([]() {
-				while (true) {
-					struct io_uring_cqe* cqe;
-					io_uring_wait_cqe(&ctx.ring, &cqe);
-					complete_io_cqe(cqe);
-				}
-			});
-		} else {
-			ctx.evfd = ev->getFD();
-			io_uring_register_eventfd(&ctx.ring, ctx.evfd);
-			if (FLOW_KNOBS->ENABLE_IO_URING && FLOW_KNOBS->IO_URING_BATCH) {
-				poll_batch(ev);
-			} else {
-				poll(ev);
-			}
-		}
+		TraceEvent(SevDebug, "AsyncFileIOUringInit")
+		    .detail("rc", rc)
+		    .detail("eventfd", ev->getFD())
+		    .detail("QD", FLOW_KNOBS->MAX_OUTSTANDING);
+
+		// Register eventfd
+		ctx.evfd = ev->getFD();
+		io_uring_register_eventfd(&ctx.ring, ctx.evfd);
+
+		// Start poll loop
+		poll_batch(ev);
+
 		setTimeout(ioTimeout);
 		g_network->setGlobal(INetwork::enRunCycleFunc, (flowGlobalType)&AsyncFileIOUring::launch);
 	}
@@ -316,15 +229,13 @@ public:
 	static int get_eventfd() { return ctx.evfd; }
 	static void setTimeout(double ioTimeout) { ctx.setIOTimeout(ioTimeout); }
 
-	virtual void addref() { ReferenceCounted<AsyncFileIOUring>::addref(); }
-	virtual void delref() { ReferenceCounted<AsyncFileIOUring>::delref(); }
+	void addref() override { ReferenceCounted<AsyncFileIOUring>::addref(); }
+	void delref() override { ReferenceCounted<AsyncFileIOUring>::delref(); }
 
 	Future<int> read(void* data, int length, int64_t offset) override {
 		++countFileLogicalReads;
 		++countLogicalReads;
-#if IOUring_TRACING
-		printf("Begin logical read %s\n", filename.c_str());
-#endif
+
 		if (failed) {
 			return io_timeout();
 		}
@@ -340,9 +251,6 @@ public:
 			double startT = now();
 			struct io_uring_sqe* sqe = io_uring_get_sqe(&ctx.ring);
 			if (nullptr == sqe) {
-#if IOUring_TRACING
-				printf("Enqueueing due to failed get_sqe\n");
-#endif
 				enqueue(io, "read", this);
 			} else {
 				io->startTime = startT;
@@ -350,51 +258,40 @@ public:
 				struct iovec* iov = &io->iovec;
 				iov->iov_base = io->buf;
 				iov->iov_len = io->nbytes;
-				io_uring_prep_readv(sqe, io->aio_fildes, iov, 1, io->offset);
-				if (FLOW_KNOBS->IO_URING_POLL)
-					sqe->flags |= IOSQE_FIXED_FILE;
-
-				sqe->flags |= IOSQE_ASYNC;
+				if (FLOW_KNOBS->IO_URING_POLL) {
+					io_uring_prep_readv(sqe, 0, iov, 1, io->offset);
+					io_uring_sqe_set_flags(sqe, IOSQE_FIXED_FILE);
+				} else {
+					io_uring_prep_readv(sqe, io->aio_fildes, iov, 1, io->offset);
+				}
 
 				io_uring_sqe_set_data(sqe, io);
 				ASSERT(!bool(flags & IAsyncFile::OPEN_UNBUFFERED) || int64_t(io->buf) % 4096 == 0);
 				ASSERT(!bool(flags & IAsyncFile::OPEN_UNBUFFERED) || io->offset % 4096 == 0);
 				ASSERT(!bool(flags & IAsyncFile::OPEN_UNBUFFERED) || io->nbytes % 4096 == 0);
 
-				IOUringLogBlockEvent(owner->logFile, io, OpLogEntry::START);
-
 				io->prio = (int64_t(g_network->getCurrentTask()) << 32) - (++ctx.opsIssued);
 				io->owner = Reference<AsyncFileIOUring>::addRef(this);
 
 				int rc = io_uring_submit(&ctx.ring);
+
 				if (rc <= 0) {
-#if IOUring_TRACING
-					printf("Direct submit failed on read\n");
-#endif
-					// For now, just throw an error
 					throw io_error();
 				} else {
-#if IOUring_TRACING
-					printf("Directly submitted read on io %p\n", io);
-#endif
 					ctx.submitted++;
 				}
 			}
 		} else {
 			enqueue(io, "read", this);
-#if IOUring_LOGGING
-			// result = map(result, [=](int r) mutable { IOUringLogBlockEvent(io, OpLogEntry::READY, r); return r; });
-#endif
 		}
 		Future<int> result = io->result.getFuture();
 		return result;
 	}
+
 	Future<Void> write(void const* data, int length, int64_t offset) override {
 		++countFileLogicalWrites;
 		++countLogicalWrites;
-#if IOUring_TRACING
-		printf("Begin logical write on %s %d\n", filename.c_str(), fd);
-#endif
+
 		if (failed) {
 			return io_timeout();
 		}
@@ -405,21 +302,11 @@ public:
 		io->offset = offset;
 
 		nextFileSize = std::max(nextFileSize, offset + length);
-#if IOUring_TRACING
-		printf("Writing %d bytes at offset %d from buffer %p  %lu\n",
-		       io->nbytes,
-		       io->offset,
-		       io->buf,
-		       uint64_t(io->buf) % 4096);
-#endif
 
 		if (FLOW_KNOBS->IO_URING_DIRECT_SUBMIT && ctx.submitted < FLOW_KNOBS->MAX_OUTSTANDING) {
 			double startT = now();
 			struct io_uring_sqe* sqe = io_uring_get_sqe(&ctx.ring);
 			if (nullptr == sqe) {
-#if IOUring_TRACING
-				printf("Enqueueing due to failed get_sqe\n");
-#endif
 				enqueue(io, "write", this);
 			} else {
 				io->startTime = startT;
@@ -427,19 +314,18 @@ public:
 				struct iovec* iov = &io->iovec;
 				iov->iov_base = io->buf;
 				iov->iov_len = io->nbytes;
-				io_uring_prep_writev(sqe, io->aio_fildes, iov, 1, io->offset);
-				if (FLOW_KNOBS->IO_URING_POLL)
-					sqe->flags |= IOSQE_FIXED_FILE;
-
-				sqe->flags |= IOSQE_ASYNC;
+				if (FLOW_KNOBS->IO_URING_POLL) {
+					io_uring_prep_writev(sqe, 0, iov, 1, io->offset);
+					io_uring_sqe_set_flags(sqe, IOSQE_FIXED_FILE);
+				} else {
+					io_uring_prep_writev(sqe, io->aio_fildes, iov, 1, io->offset);
+				}
 
 				io_uring_sqe_set_data(sqe, io);
 
 				ASSERT(!bool(flags & IAsyncFile::OPEN_UNBUFFERED) || int64_t(io->buf) % 4096 == 0);
 				ASSERT(!bool(flags & IAsyncFile::OPEN_UNBUFFERED) || io->offset % 4096 == 0);
 				ASSERT(!bool(flags & IAsyncFile::OPEN_UNBUFFERED) || io->nbytes % 4096 == 0);
-
-				IOUringLogBlockEvent(owner->logFile, io, OpLogEntry::START);
 
 				io->prio = (int64_t(g_network->getCurrentTask()) << 32) - (++ctx.opsIssued);
 				io->owner = Reference<AsyncFileIOUring>::addRef(this);
@@ -449,21 +335,15 @@ public:
 					int64_t truncateSize = this->nextFileSize - this->lastFileSize;
 					ASSERT(truncateSize > 0);
 					ctx.preSubmitTruncateBytes += truncateSize;
-					int64_t largestTruncate = std::max(largestTruncate, truncateSize);
 					this->truncate(io->owner->nextFileSize);
 				}
-
+				double start = timer_monotonic();
 				int rc = io_uring_submit(&ctx.ring);
+				g_asyncFileIOUringMetrics.ioSubmitLatencySamples.addSample((timer_monotonic() - start) * 1000000);
+
 				if (rc <= 0) {
-#if IOUring_TRACING
-					printf("DIrect submit failed on write\n", io);
-#endif
-					// For now, just throw an error
 					throw io_error();
 				} else {
-#if IOUring_TRACING
-					printf("Directly submitted write on io %p\n", io);
-#endif
 					ctx.submitted++;
 				}
 			}
@@ -471,13 +351,9 @@ public:
 			enqueue(io, "write", this);
 		}
 		Future<int> result = io->result.getFuture();
-
-#if IOUring_LOGGING
-		// result = map(result, [=](int r) mutable { IOUringLogBlockEvent(io, OpLogEntry::READY, r); return r; });
-#endif
 		return success(result);
 	}
-	// TODO(alexmiller): Remove when we upgrade the dev docker image to >14.10
+// TODO(alexmiller): Remove when we upgrade the dev docker image to >14.10
 #ifndef FALLOC_FL_ZERO_RANGE
 #define FALLOC_FL_ZERO_RANGE 0x10
 #endif
@@ -494,6 +370,7 @@ public:
 		}
 		return success ? Void() : IAsyncFile::zeroRange(offset, length);
 	}
+
 	Future<Void> truncate(int64_t size) override {
 		++countFileLogicalWrites;
 		++countLogicalWrites;
@@ -502,11 +379,8 @@ public:
 			return io_timeout();
 		}
 
-#if IOUring_LOGGING
-		uint32_t id = OpLogEntry::nextID();
-#endif
 		int result = -1;
-		IOUringLogEvent(logFile, id, OpLogEntry::TRUNCATE, OpLogEntry::START, size / 4096);
+
 		bool completed = false;
 		double begin = timer_monotonic();
 
@@ -523,7 +397,7 @@ public:
 					// Mark fallocate as unsupported. Try again with truncate.
 					ctx.fallocateSupported = false;
 				} else {
-					IOUringLogEvent(logFile, id, OpLogEntry::TRUNCATE, OpLogEntry::COMPLETE, size / 4096, result);
+
 					return io_error();
 				}
 			} else {
@@ -539,7 +413,6 @@ public:
 			    .detail("TruncateTime", end - begin)
 			    .detail("TruncateBytes", size - lastFileSize);
 		}
-		IOUringLogEvent(logFile, id, OpLogEntry::TRUNCATE, OpLogEntry::COMPLETE, size / 4096, result);
 
 		if (result != 0) {
 			TraceEvent("AsyncFileIOUringTruncateError").detail("Fd", fd).detail("Filename", filename).GetLastError();
@@ -560,9 +433,6 @@ public:
 	}
 
 	Future<Void> sync() override {
-#if IOUring_TRACING
-		printf("Begin logical fsync on %s\n", filename.c_str());
-#endif
 		++countFileLogicalWrites;
 		++countLogicalWrites;
 
@@ -570,44 +440,31 @@ public:
 			return io_timeout();
 		}
 
-#if IOUring_LOGGING
-		uint32_t id = OpLogEntry::nextID();
-#endif
-
-		IOUringLogEvent(logFile, id, OpLogEntry::SYNC, OpLogEntry::START);
-
 		IOBlock* io = new IOBlock(UIO_CMD_FSYNC, fd);
 		if (FLOW_KNOBS->IO_URING_DIRECT_SUBMIT && ctx.submitted < FLOW_KNOBS->MAX_OUTSTANDING) {
 
 			double startT = now();
 			struct io_uring_sqe* sqe = io_uring_get_sqe(&ctx.ring);
 			if (nullptr == sqe) {
-#if IOUring_TRACING
-				printf("Enqueueing due to failed get_sqe\n");
-#endif
 				enqueue(io, "fsync", this);
 			} else {
 				io->startTime = startT;
-				io_uring_prep_fsync(sqe, io->aio_fildes, 0);
-				if (FLOW_KNOBS->IO_URING_POLL)
-					sqe->flags |= IOSQE_FIXED_FILE;
-
-				sqe->flags |= IOSQE_ASYNC;
+				if (FLOW_KNOBS->IO_URING_POLL) {
+					io_uring_prep_fsync(sqe, 0, 0);
+					io_uring_sqe_set_flags(sqe, IOSQE_FIXED_FILE);
+				} else {
+					io_uring_prep_fsync(sqe, io->aio_fildes, 0);
+				}
 
 				io_uring_sqe_set_data(sqe, io);
-				IOUringLogBlockEvent(owner->logFile, io, OpLogEntry::START);
 
 				io->prio = (int64_t(g_network->getCurrentTask()) << 32) - (++ctx.opsIssued);
 				io->owner = Reference<AsyncFileIOUring>::addRef(this);
 
 				int rc = io_uring_submit(&ctx.ring);
 				if (rc <= 0) {
-					// For now, just throw an error
 					throw io_error();
 				} else {
-#if IOUring_TRACING
-					printf("Directly submitted fsync on io %p\n", io);
-#endif
 					ctx.submitted++;
 				}
 			}
@@ -616,13 +473,6 @@ public:
 			enqueue(io, "fsync", this);
 		}
 		Future<Void> fsync = success(io->result.getFuture());
-
-#if IOUring_LOGGING
-		fsync = map(fsync, [=](Void r) mutable {
-			IOUringLogEvent(logFile, id, OpLogEntry::SYNC, OpLogEntry::COMPLETE);
-			return r;
-		});
-#endif
 
 		if (flags & OPEN_ATOMIC_WRITE_AND_CREATE) {
 			flags &= ~OPEN_ATOMIC_WRITE_AND_CREATE;
@@ -636,21 +486,11 @@ public:
 	~AsyncFileIOUring() {
 		close(fd);
 
-#if IOUring_LOGGING
-		if (logFile != nullptr)
-			fclose(logFile);
-#endif
+		// TODO: unregister fixed file?
 	}
 
 	static void launch() {
-#if IOUring_TRACING
-		if (ctx.outstanding + ctx.queue.size() + ctx.submitted)
-			printf("Launch on %p. Outstanding %d enqueued %d %d submitted\n",
-			       &ctx,
-			       ctx.outstanding,
-			       ctx.queue.size(),
-			       ctx.submitted); // submitted.load() if using atomic
-#endif
+
 		// We enter the loop if: 1) there's stuff to push and we can submit at least MIN_SUBMIT without overflowing
 		// MAX_OUTSTANDING
 		if (!(ctx.queue.size() && ctx.submitted < FLOW_KNOBS->MAX_OUTSTANDING - FLOW_KNOBS->MIN_SUBMIT))
@@ -673,14 +513,6 @@ public:
 			if (!ctx.submitted)
 				ctx.ioStallBegin = begin;
 
-#if IOUring_TRACING
-			printf("%d events in queue. Outstanding %d Submitted %d max %d. Going to push %d\n",
-			       ctx.queue.size(),
-			       ctx.outstanding,
-			       ctx.submitted,
-			       FLOW_KNOBS->MAX_OUTSTANDING,
-			       to_push);
-#endif
 			int64_t previousTruncateCount = ctx.countPreSubmitTruncate;
 			int64_t previousTruncateBytes = ctx.preSubmitTruncateBytes;
 			int64_t largestTruncate = 0;
@@ -691,46 +523,47 @@ public:
 				struct io_uring_sqe* sqe = io_uring_get_sqe(&ctx.ring);
 				io->startTime = startT;
 
-				IOUringLogBlockEvent(io, OpLogEntry::LAUNCH);
-
 				switch (io->opcode) {
 				case UIO_CMD_PREAD: {
-#if IOUring_TRACING
-					printf("fd %d Reading %d bytes at offset %d\n", io->aio_fildes, io->nbytes, io->offset);
-#endif
+
 					struct iovec* iov = &io->iovec;
 					iov->iov_base = io->buf;
 					iov->iov_len = io->nbytes;
-					io_uring_prep_readv(sqe, io->aio_fildes, iov, 1, io->offset);
+
 					if (FLOW_KNOBS->IO_URING_POLL)
-						sqe->flags |= IOSQE_FIXED_FILE;
+						io_uring_prep_readv(sqe, 0, iov, 1, io->offset);
+					else
+						io_uring_prep_readv(sqe, io->aio_fildes, iov, 1, io->offset);
 
 					break;
 				}
 				case UIO_CMD_PWRITE: {
-#if IOUring_TRACING
-					printf("fd %d Writing %d bytes at offset %d\n", io->aio_fildes, io->nbytes, io->offset);
-#endif
+
 					struct iovec* iov = &io->iovec;
 					iov->iov_base = io->buf;
 					iov->iov_len = io->nbytes;
-					io_uring_prep_writev(sqe, io->aio_fildes, iov, 1, io->offset);
 					if (FLOW_KNOBS->IO_URING_POLL)
-						sqe->flags |= IOSQE_FIXED_FILE;
+						io_uring_prep_writev(sqe, 0, iov, 1, io->offset);
+					else
+						io_uring_prep_writev(sqe, io->aio_fildes, iov, 1, io->offset);
 
 					break;
 				}
 				case UIO_CMD_FSYNC:
-					io_uring_prep_fsync(sqe, io->aio_fildes, 0);
 					if (FLOW_KNOBS->IO_URING_POLL)
-						sqe->flags |= IOSQE_FIXED_FILE;
+						io_uring_prep_fsync(sqe, 0, 0);
+					else
+						io_uring_prep_fsync(sqe, io->aio_fildes, 0);
 
 					break;
 				default:
 					UNSTOPPABLE_ASSERT(false);
 				}
 				ctx.queue.pop();
-				sqe->flags |= IOSQE_ASYNC;
+
+				if (FLOW_KNOBS->IO_URING_POLL)
+					io_uring_sqe_set_flags(sqe, IOSQE_FIXED_FILE);
+
 				io_uring_sqe_set_data(sqe, io);
 
 				if (ctx.ioTimeout > 0) {
@@ -756,28 +589,27 @@ public:
 				// It is not clear how io_uring handles cqes that are prepared but not pushed
 				throw io_error();
 			}
-#if IOUring_TRACING
-			printf("io_uring_submit submitted %d items\n", rc);
 
-#endif
+			g_asyncFileIOUringMetrics.ioSubmitLatencyDist->sampleSeconds(end - truncateComplete);
+			g_asyncFileIOUringMetrics.ioSubmitLatencySamples.addSample((end - truncateComplete) * 1000000);
 
-			// if(end-begin > FLOW_KNOBS->SLOW_LOOP_CUTOFF) {
-			ctx.slowAioSubmitMetric->submitDuration = end - truncateComplete;
-			ctx.slowAioSubmitMetric->truncateDuration = truncateComplete - begin;
-			ctx.slowAioSubmitMetric->numTruncates = ctx.countPreSubmitTruncate - previousTruncateCount;
-			ctx.slowAioSubmitMetric->truncateBytes = ctx.preSubmitTruncateBytes - previousTruncateBytes;
-			ctx.slowAioSubmitMetric->largestTruncate = largestTruncate;
-			ctx.slowAioSubmitMetric->log();
+			if (end - begin > FLOW_KNOBS->SLOW_LOOP_CUTOFF) {
+				ctx.slowAioSubmitMetric->submitDuration = end - truncateComplete;
+				ctx.slowAioSubmitMetric->truncateDuration = truncateComplete - begin;
+				ctx.slowAioSubmitMetric->numTruncates = ctx.countPreSubmitTruncate - previousTruncateCount;
+				ctx.slowAioSubmitMetric->truncateBytes = ctx.preSubmitTruncateBytes - previousTruncateBytes;
+				ctx.slowAioSubmitMetric->largestTruncate = largestTruncate;
+				ctx.slowAioSubmitMetric->log();
 
-			// if(nondeterministicRandom()->random01() < end-begin) {
-			TraceEvent("SlowIOUringLaunch")
-			    .detail("IOSubmitTime", end - truncateComplete)
-			    .detail("TruncateTime", truncateComplete - begin)
-			    .detail("TruncateCount", ctx.countPreSubmitTruncate - previousTruncateCount)
-			    .detail("TruncateBytes", ctx.preSubmitTruncateBytes - previousTruncateBytes)
-			    .detail("LargestTruncate", largestTruncate);
-			// }
-			// }
+				if (nondeterministicRandom()->random01() < end - begin) {
+					TraceEvent("SlowIOUringLaunch")
+					    .detail("IOSubmitTime", end - truncateComplete)
+					    .detail("TruncateTime", truncateComplete - begin)
+					    .detail("TruncateCount", ctx.countPreSubmitTruncate - previousTruncateCount)
+					    .detail("TruncateBytes", ctx.preSubmitTruncateBytes - previousTruncateBytes)
+					    .detail("LargestTruncate", largestTruncate);
+				}
+			}
 
 			ctx.submitMetric = false;
 			++ctx.countAIOSubmit;
@@ -790,6 +622,25 @@ public:
 	}
 
 	bool failed;
+
+	static void getIOSubmitMetrics() {
+
+		auto& metrics = g_asyncFileIOUringMetrics;
+
+		printf("\n=== Write Latencies (us) === \n");
+		printf("Mean Latency: %f\n", metrics.writeLatencySamples.mean());
+		printf("Median Latency: %f\n", metrics.writeLatencySamples.median());
+		printf("95%% Latency: %f\n", metrics.writeLatencySamples.percentile(0.95));
+		printf("99%% Latency: %f\n", metrics.writeLatencySamples.percentile(0.99));
+		printf("99.9%% Latency: %f\n", metrics.writeLatencySamples.percentile(0.999));
+
+		printf("\n === io_submit Latencies (us) === \n");
+		printf("Mean Latency: %f\n", metrics.ioSubmitLatencySamples.mean());
+		printf("Median Latency: %f\n", metrics.ioSubmitLatencySamples.median());
+		printf("95%% Latency: %f\n", metrics.ioSubmitLatencySamples.percentile(0.95));
+		printf("99%% Latency: %f\n", metrics.ioSubmitLatencySamples.percentile(0.99));
+		printf("99.9%% Latency: %f\n", metrics.ioSubmitLatencySamples.percentile(0.999));
+	}
 
 private:
 	struct OpenFileInfo;
@@ -833,36 +684,16 @@ private:
 		double startTime;
 		// int buffer_index;
 		// struct io_uring_cqe *batch_cqes[1024];
-#if IOUring_LOGGING
-		int32_t iolog_id;
-#endif
-
 		struct indirect_order_by_priority {
 			bool operator()(IOBlock* a, IOBlock* b) { return a->prio < b->prio; }
 		};
 
-		IOBlock(int op, int fd) : opcode(op), prio(0), aio_fildes(fd), buf(nullptr), nbytes(0), offset(0) {
-#if IOUring_LOGGING
-			iolog_id = 0;
-#endif
-		}
+		IOBlock(int op, int fd) : opcode(op), prio(0), aio_fildes(fd), buf(nullptr), nbytes(0), offset(0) {}
 
 		TaskPriority getTask() const { return static_cast<TaskPriority>((prio >> 32) + 1); }
 
-		// ACTOR static void deliver( Promise<int> result, bool failed, int r, TaskPriority task ) {
-		// 	printf("Waiting in deliver %d\n",0);
-		// 	//wait( delay(0, task) );
-		// 	//wait(delay(0));
-		// 	printf("Waited in deliver \n");
-		// 	if (failed) result.sendError(io_timeout());
-		// 	else if (r < 0) result.sendError(io_error());
-		// 	else result.send(r);
-		// }
 		static void deliver(Promise<int> result, bool failed, int r, TaskPriority task) {
-			// printf("Waiting in deliver %d\n",0);
-			// wait( delay(0, task) );
-			// wait(delay(0));
-			// printf("Waited in deliver \n");
+
 			if (failed)
 				result.sendError(io_timeout());
 			else if (r < 0)
@@ -912,10 +743,9 @@ private:
 		Promise<int> waitPromise;
 		struct io_uring_cqe* cqe;
 		io_uring_t ring;
-		/* io_context_t iocx; */
 		int evfd;
 		int outstanding;
-		// std::atomic<int> submitted;
+
 		int submitted; // TODO if not eventfd this is going to brea
 		double ioStallBegin;
 		bool fallocateSupported;
@@ -941,8 +771,8 @@ private:
 		uint32_t opsIssued;
 
 		Context()
-		  : ring(), evfd(-1), outstanding(0), submitted(0), opsIssued(0), ioStallBegin(0), fallocateSupported(true),
-		    fallocateZeroSupported(true), submittedRequestList(nullptr) {
+		  : ring(), evfd(-1), outstanding(0), submitted(0), ioStallBegin(0), fallocateSupported(true),
+		    fallocateZeroSupported(true), submittedRequestList(nullptr), opsIssued(0) {
 			setIOTimeout(0);
 		}
 
@@ -992,77 +822,43 @@ private:
 	static Context ctx;
 
 	explicit AsyncFileIOUring(int fd, int flags, std::string const& filename)
-	  : fd(fd), flags(flags), filename(filename), failed(false) {
+	  : failed(false), fd(fd), flags(flags), filename(filename) {
 		ASSERT(!FLOW_KNOBS->DISABLE_POSIX_KERNEL_AIO);
 		if (!g_network->isSimulated()) {
 			countFileLogicalWrites.init(LiteralStringRef("AsyncFile.CountFileLogicalWrites"), filename);
 			countFileLogicalReads.init(LiteralStringRef("AsyncFile.CountFileLogicalReads"), filename);
 			countLogicalWrites.init(LiteralStringRef("AsyncFile.CountLogicalWrites"));
 			countLogicalReads.init(LiteralStringRef("AsyncFile.CountLogicalReads"));
-		}
 
-#if IOUring_LOGGING
-		logFile = nullptr;
-		// TODO:  Don't do this hacky investigation-specific thing
-		StringRef fname(filename);
-		if (fname.endsWith(LiteralStringRef(".sqlite")) || fname.endsWith(LiteralStringRef(".sqlite-wal"))) {
-			std::string logFileName = basename(filename);
-			while (logFileName.find("/") != std::string::npos)
-				logFileName = logFileName.substr(logFileName.find("/") + 1);
-			if (!logFileName.empty()) {
-				// TODO: don't hardcode this path
-				std::string logPath("/data/v7/fdb/");
-				try {
-					platform::createDirectory(logPath);
-					logFileName = logPath + format("%s.iolog", logFileName.c_str());
-					logFile = fopen(logFileName.c_str(), "r+");
-					if (logFile == nullptr)
-						logFile = fopen(logFileName.c_str(), "w");
-					if (logFile != nullptr)
-						TraceEvent("IOUringLogOpened").detail("File", filename).detail("LogFile", logFileName);
-					else {
-						TraceEvent(SevWarn, "IOUringLogOpenFailure")
-						    .detail("File", filename)
-						    .detail("LogFile", logFileName)
-						    .detail("ErrorCode", errno)
-						    .detail("ErrorDesc", strerror(errno));
-					}
-				} catch (Error& e) {
-					TraceEvent(SevError, "IOUringLogOpenFailure").error(e);
-				}
+			if (!g_asyncFileIOUringHistogramLogger.isValid()) {
+				auto& metrics = g_asyncFileIOUringMetrics;
+				metrics.readLatencyDist = Reference<Histogram>(new Histogram(
+				    Reference<HistogramRegistry>(), "AsyncFileIOUring", "ReadLatency", Histogram::Unit::microseconds));
+				metrics.writeLatencyDist = Reference<Histogram>(new Histogram(
+				    Reference<HistogramRegistry>(), "AsyncFileIOUring", "WriteLatency", Histogram::Unit::microseconds));
+				metrics.syncLatencyDist = Reference<Histogram>(new Histogram(
+				    Reference<HistogramRegistry>(), "AsyncFileIOUring", "SyncLatency", Histogram::Unit::microseconds));
+				metrics.ioSubmitLatencyDist = Reference<Histogram>(new Histogram(Reference<HistogramRegistry>(),
+				                                                                 "AsyncFileIOUring",
+				                                                                 "IoSubmitLatency",
+				                                                                 Histogram::Unit::microseconds));
+				g_asyncFileIOUringHistogramLogger = histogramLogger(SERVER_KNOBS->DISK_METRIC_LOGGING_INTERVAL);
 			}
 		}
-#endif
 	}
 
 	void enqueue(IOBlock* io, const char* op, AsyncFileIOUring* owner) {
-#if IOUring_TRACING
-		printf("URING enquein file %p (io %p) data size %ld off=%ld for op %s on file %s. Uncached is %d\n",
-		       this,
-		       io,
-		       io->nbytes,
-		       io->offset,
-		       op,
-		       owner->filename.c_str(),
-		       bool(flags & IAsyncFile::OPEN_UNCACHED));
-#endif
 		if (io->opcode != UIO_CMD_FSYNC) {
 			ASSERT(!bool(flags & IAsyncFile::OPEN_UNBUFFERED) || int64_t(io->buf) % 4096 == 0);
 			ASSERT(!bool(flags & IAsyncFile::OPEN_UNBUFFERED) || io->offset % 4096 == 0);
 			ASSERT(!bool(flags & IAsyncFile::OPEN_UNBUFFERED) || io->nbytes % 4096 == 0);
 		}
-		IOUringLogBlockEvent(owner->logFile, io, OpLogEntry::START);
 
-		// io->flags |= 1;
-		// io->eventfd = ctx.evfd;
 		io->prio = (int64_t(g_network->getCurrentTask()) << 32) - (++ctx.opsIssued);
-		// io->prio = - (++ctx.opsIssued);
+
 		io->owner = Reference<AsyncFileIOUring>::addRef(owner);
 
 		ctx.queue.push(io);
-#if IOUringTRACE
-		printf("File %p Enqueued op %s on ctx %p. Io %p queue size=%lu\n", this, op, &ctx, io, ctx.queue.size());
-#endif
 	}
 
 	static int openFlags(int flags) {
@@ -1089,22 +885,13 @@ private:
 		state int64_t to_consume;
 		state int r = 0;
 		loop {
-			if (IOUring_TRACING) {
-				printf("Waiting\n");
-				int64_t ev_r = wait(ev->read());
-				to_consume = ev_r;
-				printf("Waited %lu\n", ev_r);
-				wait(delay(0, TaskPriority::DiskIOComplete));
-				printf("Rescheduled\n");
-			} else {
-				int64_t ev_r = wait(ev->read());
-				to_consume = ev_r;
-				wait(delay(0, TaskPriority::DiskIOComplete));
-			}
+
+			int64_t ev_r = wait(ev->read());
+			to_consume = ev_r;
+			wait(delay(0, TaskPriority::DiskIOComplete));
 
 			rc = io_uring_peek_batch_cqe(&ctx.ring, ctx.cqes_batch, to_consume);
 			if (rc < to_consume) {
-				printf("io_uring_batch failed: expected %d got %d\n", to_consume, rc);
 				TraceEvent("IOGetEventsError").GetLastError();
 				throw io_error();
 			}
@@ -1113,20 +900,31 @@ private:
 				struct io_uring_cqe* cqe = ctx.cqes_batch[e];
 				IOBlock* const iob = static_cast<IOBlock*>(io_uring_cqe_get_data(cqe));
 				ASSERT(iob != nullptr);
-				IOUringLogBlockEvent(iob, OpLogEntry::COMPLETE, cqe->res);
+
 				if (ctx.ioTimeout > 0 && !AVOID_STALLS) {
 					ctx.removeFromRequestList(iob);
 				}
-				if (IOUring_TRACING)
-					printf("Op result %d %s\n", cqe->res, strerror(-cqe->res));
+				// printf("Op result %d %s\n", cqe->res, strerror(-cqe->res));
+
+				auto& metrics = g_asyncFileIOUringMetrics;
+				switch (iob->opcode) {
+				case UIO_CMD_PREAD:
+					metrics.readLatencyDist->sampleSeconds(now() - iob->startTime);
+					break;
+				case UIO_CMD_PWRITE:
+					metrics.writeLatencyDist->sampleSeconds(now() - iob->startTime);
+					metrics.writeLatencySamples.addSample((now() - iob->startTime) * 1000000);
+					break;
+				case UIO_CMD_FSYNC:
+					metrics.syncLatencyDist->sampleSeconds(now() - iob->startTime);
+					break;
+				}
+
 				iob->setResult(cqe->res);
 				io_uring_cqe_seen(&ctx.ring, cqe);
 			}
 
 			if (1) {
-
-				if (IOUring_TRACING)
-					printf("REACTOR POLLED  %d events \n", to_consume);
 
 				{
 					++ctx.countAIOCollect;
@@ -1149,233 +947,20 @@ private:
 		}
 	}
 
-	ACTOR static void poll(Reference<IEventFD> ev) {
-		state int rc = 0;
-		state io_uring_cqe* cqe;
-		state int64_t to_consume;
+	ACTOR static Future<Void> histogramLogger(double interval) {
+		state double currentTime;
 		loop {
-			state int r = 0;
-			if (IOUring_TRACING) {
-				printf("Waiting\n");
-				int64_t ev_r = wait(ev->read());
-				to_consume = ev_r;
-				printf("Waited %lu\n", ev_r);
-				wait(delay(0, TaskPriority::DiskIOComplete));
-				printf("Rescheduled\n");
-			} else {
-				int64_t ev_r = wait(ev->read());
-				to_consume = ev_r;
-				wait(delay(0, TaskPriority::DiskIOComplete));
-			}
-
-			loop {
-				rc = io_uring_peek_cqe(&ctx.ring, &cqe);
-				if (rc < 0) {
-					if (rc != -EAGAIN && rc != -ETIME && rc != -EINTR) { // ERROR
-						printf("io_uring_wait_cqe failed: %d %s\n", rc, strerror(-rc));
-						TraceEvent("IOGetEventsError").GetLastError();
-						throw io_error();
-					}
-					break;
-				}
-				IOBlock* const iob = static_cast<IOBlock*>(io_uring_cqe_get_data(cqe));
-				ASSERT(iob != nullptr);
-				IOUringLogBlockEvent(iob, OpLogEntry::COMPLETE, cqe->res);
-				if (ctx.ioTimeout > 0 && !AVOID_STALLS) {
-					ctx.removeFromRequestList(iob);
-				}
-				if (IOUring_TRACING)
-					printf("Op result %d %s\n", cqe->res, strerror(-cqe->res));
-				iob->setResult(cqe->res);
-				io_uring_cqe_seen(&ctx.ring, cqe);
-				r++;
-			}
-
-			if (r) {
-
-				if (IOUring_TRACING)
-					printf("REACTOR POLLED  %d events \n", r);
-
-				{
-					++ctx.countAIOCollect;
-					double t = timer_monotonic();
-					double elapsed = t - ctx.ioStallBegin;
-					ctx.ioStallBegin = t;
-					g_network->networkInfo.metrics.secSquaredDiskStall += elapsed * elapsed / 2;
-				}
-
-				if (ctx.ioTimeout > 0 && !AVOID_STALLS) {
-					double currentTime = now();
-					while (ctx.submittedRequestList &&
-					       currentTime - ctx.submittedRequestList->startTime > ctx.ioTimeout) {
-						ctx.submittedRequestList->timeout(ctx.timeoutWarnOnly);
-						ctx.removeFromRequestList(ctx.submittedRequestList);
-					}
-				}
-				ctx.submitted -= r;
-			}
-		}
-	}
-
-	ACTOR static void poll_th(Reference<IEventFD> ev) {
-		state int rc = 0;
-		state io_uring_cqe* cqe;
-		state int64_t to_consume;
-		loop {
-			state int r = 0;
-			// if(IOUring_TRACING){
-			// 	printf("Waiting\n");
-			// 	int64_t ev_r = wait( ev->read());
-			// 	to_consume=ev_r;
-			// 	printf("Waited %lu\n",ev_r);
-			// 	wait(delay(0, TaskPriority::DiskIOComplete));
-			// 	printf("Rescheduled\n");
-			// }else{
-			// 	int64_t ev_r = wait( ev->read());
-			// 	to_consume=ev_r;
-			// 	wait(delay(0, TaskPriority::DiskIOComplete));
-			// }
-			printf("Waiting future\n");
-			Future<int> fut = ctx.promise.getFuture();
-			int tmp = wait(fut);
-			ctx.promise.reset();
-			printf("Waited future\n");
-			cqe = ctx.cqe;
-			// thr.join();r
-			rc = tmp;
-			// if(rc != -EAGAIN && rc != -ETIME && rc != -EINTR){//ERROR
-			//   printf("io_uring_wait_cqe failed: %d %s\n", rc, strerror(-rc));
-			//   TraceEvent("IOGetEventsError").GetLastError();
-			//   throw io_error();
-			// }
-
-			// loop{ //loop as long as there are ready events. Grab at least one
-			// 	rc = io_uring_peek_cqe(&ctx.ring, &cqe);
-			if (rc < 0) {
-				if (rc != -EAGAIN && rc != -ETIME && rc != -EINTR) { // ERROR
-					printf("io_uring_wait_cqe failed: %d %s\n", rc, strerror(-rc));
-					TraceEvent("IOGetEventsError").GetLastError();
-					throw io_error();
-				}
-				/*
-				 * eventfd never wakes up up if nothing can be consumed
-				 * i.e. --> we wake up implies we can peek successfully
-				 * It can happen, however, that we wake up because X events are ready
-				 * but we consume X+Y events, b/c Y events wre completed in the meantime
-				 * Then, eventfd will still notify us of the extra Y, but we have already
-				 * consumed them
-				 */
-				break;
-			}
-			// We've got an event. Let's consume it
-			IOBlock* const iob = static_cast<IOBlock*>(io_uring_cqe_get_data(cqe));
-			ASSERT(iob != nullptr);
-			IOUringLogBlockEvent(iob, OpLogEntry::COMPLETE, cqe->res);
-			if (ctx.ioTimeout > 0 && !AVOID_STALLS) {
-				ctx.removeFromRequestList(iob);
-			}
-			if (IOUring_TRACING)
-				printf("Op result %d %s\n", cqe->res, strerror(-cqe->res));
-			iob->setResult(cqe->res);
-			io_uring_cqe_seen(&ctx.ring, cqe);
-			r++;
-			// }
-			/*
-			 * If nothing was peeked (bc of the dangling eventfd described above), do nothing
-			 */
-
-			if (r) {
-
-				if (IOUring_TRACING)
-					printf("REACTOR POLLED  %d events \n", r);
-
-				{
-					++ctx.countAIOCollect;
-					double t = timer_monotonic();
-					double elapsed = t - ctx.ioStallBegin;
-					ctx.ioStallBegin = t;
-					g_network->networkInfo.metrics.secSquaredDiskStall += elapsed * elapsed / 2;
-				}
-
-				if (ctx.ioTimeout > 0 && !AVOID_STALLS) {
-					double currentTime = now();
-					while (ctx.submittedRequestList &&
-					       currentTime - ctx.submittedRequestList->startTime > ctx.ioTimeout) {
-						ctx.submittedRequestList->timeout(ctx.timeoutWarnOnly);
-						ctx.removeFromRequestList(ctx.submittedRequestList);
-					}
-				}
-				ctx.submitted -= r;
-			}
+			currentTime = now();
+			wait(delay(interval));
+			double elapsed = now() - currentTime;
+			auto& metrics = g_asyncFileIOUringMetrics;
+			metrics.readLatencyDist->writeToLog(elapsed);
+			metrics.writeLatencyDist->writeToLog(elapsed);
+			metrics.syncLatencyDist->writeToLog(elapsed);
+			metrics.ioSubmitLatencyDist->writeToLog(elapsed);
 		}
 	}
 };
-
-#if IOUring_LOGGING
-// Call from contexts where only an ioblock is available, log if its owner is set
-void AsyncFileIOUring::IOUringLogBlockEvent(IOBlock* ioblock, OpLogEntry::EStage stage, uint32_t result) {
-	if (ioblock->owner)
-		return IOUringLogBlockEvent(ioblock->owner->logFile, ioblock, stage, result);
-}
-
-void AsyncFileIOUring::IOUringLogBlockEvent(FILE* logFile,
-                                            IOBlock* ioblock,
-                                            OpLogEntry::EStage stage,
-                                            uint32_t result) {
-	if (logFile != nullptr) {
-		// Figure out what type of operation this is
-		OpLogEntry::EOperation op;
-		if (ioblock->opcode == UIO_CMD_PREAD)
-			op = OpLogEntry::READ;
-		else if (ioblock->opcode == UIO_CMD_PWRITE)
-			op = OpLogEntry::WRITE;
-		else
-			return;
-
-		// Assign this IO operation an io log id number if it doesn't already have one
-		if (ioblock->iolog_id == 0)
-			ioblock->iolog_id = OpLogEntry::nextID();
-
-		OpLogEntry e;
-		e.timestamp = timer_int();
-		e.op = (uint8_t)op;
-		e.id = ioblock->iolog_id;
-		e.stage = (uint8_t)stage;
-		e.pageOffset = (uint32_t)(ioblock->offset / 4096);
-		e.pageCount = (uint8_t)(ioblock->nbytes / 4096);
-		e.result = result;
-
-		// Log a checksum for Writes up to the Complete stage or Reads starting from the Complete stage
-		if ((op == OpLogEntry::WRITE && stage <= OpLogEntry::COMPLETE) ||
-		    (op == OpLogEntry::READ && stage >= OpLogEntry::COMPLETE))
-			e.checksum = crc32c_append(0xab12fd93, ioblock->buf, ioblock->nbytes);
-		else
-			e.checksum = 0;
-
-		e.log(logFile);
-	}
-}
-
-void AsyncFileIOUring::IOUringLogEvent(FILE* logFile,
-                                       uint32_t id,
-                                       OpLogEntry::EOperation op,
-                                       OpLogEntry::EStage stage,
-                                       uint32_t pageOffset,
-                                       uint32_t result) {
-	if (logFile != nullptr) {
-		OpLogEntry e;
-		e.timestamp = timer_int();
-		e.id = id;
-		e.op = (uint8_t)op;
-		e.stage = (uint8_t)stage;
-		e.pageOffset = pageOffset;
-		e.pageCount = 0;
-		e.checksum = 0;
-		e.result = result;
-		e.log(logFile);
-	}
-}
-#endif
 
 ACTOR Future<Void> runTestIOUringOps(Reference<IAsyncFile> f, int numIterations, int fileSize, bool expectedToSucceed) {
 	state void* buf =
@@ -1457,6 +1042,122 @@ TEST_CASE("/fdbrpc/AsyncFileIOUring/RequestList") {
 
 		wait(AsyncFileEIO::deleteFile(f->getFilename(), true));
 	}
+
+	return Void();
+}
+
+ACTOR Future<double> writeBlock(int i, Reference<IAsyncFile> f, void* buf) {
+
+	state double startTime = now();
+
+	wait(f->write(buf, 4096, i * 4096));
+
+	return now() - startTime;
+}
+
+TEST_CASE("/fdbrpc/AsyncFileIOUring/CallbackTest") {
+
+	state int num_blocks = params.getInt("num_blocks").orDefault(1000);
+	state std::string file_path = params.get("file_path").orDefault("");
+
+	printf("num_blocks: %d\n", num_blocks);
+	printf("file_path: %s\n", file_path.c_str());
+
+	ASSERT(!file_path.empty());
+
+	state Reference<IAsyncFile> f;
+	try {
+		Reference<IAsyncFile> f_ = wait(IAsyncFileSystem::filesystem()->open(
+		    file_path, IAsyncFile::OPEN_UNBUFFERED | IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE, 0666));
+
+		f = f_;
+
+		state void* buf = FastAllocator<4096>::allocate();
+
+		state std::vector<Future<double>> futures;
+		for (int i = 0; i < num_blocks; ++i) {
+			futures.push_back(writeBlock(i, f, buf));
+		}
+
+		state double sum = 0.0;
+		state int i = 0;
+		for (; i < num_blocks; ++i) {
+			double time = wait(futures.at(i));
+			sum += time;
+		}
+
+		FastAllocator<4096>::release(buf);
+
+		printf("avg: %f\n", sum / num_blocks);
+
+	} catch (Error& e) {
+		state Error err = e;
+		if (f) {
+			wait(AsyncFileEIO::deleteFile(f->getFilename(), true));
+		}
+
+		throw err;
+	}
+
+	wait(AsyncFileEIO::deleteFile(f->getFilename(), true));
+
+	return Void();
+}
+
+TEST_CASE("/fdbrpc/AsyncFileIOUring/metadata") {
+	state std::string file_path = params.get("file_path").orDefault("");
+	state int num_blocks = params.getInt("num_blocks").orDefault(1000);
+	state int seed = params.getInt("seed").orDefault(getpid());
+	state int fsync = params.getInt("fsync").orDefault(1);
+
+	printf("Writing %d blocks to %s, using seed %d.\n", num_blocks, file_path.c_str(), seed);
+	printf("Backend: %s\n", FLOW_KNOBS->ENABLE_IO_URING ? "io_uring" : "kaio");
+
+	// Open file
+	state Reference<IAsyncFile> f;
+
+	Reference<IAsyncFile> f_ = wait(IAsyncFileSystem::filesystem()->open(
+	    file_path,
+	    IAsyncFile::OPEN_UNBUFFERED | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE,
+	    0666));
+
+	f = f_;
+
+	// Allocate buffer
+	state char* buf = (char*)FastAllocator<4096>::allocate();
+
+	for (int i = 0; i < 4096; i++) {
+		buf[i] = 'A' + (i % 26);
+	}
+
+	// Randomize indexes
+	state std::vector<int> indexes(num_blocks); // vector with 100 ints.
+	std::iota(std::begin(indexes), std::end(indexes), 0);
+
+	auto rng = std::default_random_engine{};
+	rng.seed(seed);
+	std::shuffle(std::begin(indexes), std::end(indexes), rng);
+
+	// Write blocks
+	state int i;
+	for (i = 0; i < indexes.size(); ++i) {
+		wait(f->write(buf, 4096, indexes.at(i) * 4096));
+		if (i % fsync == 0)
+			wait(f->sync());
+	}
+
+	// wait(f->sync());
+
+	// Printing stats
+	if (FLOW_KNOBS->ENABLE_IO_URING)
+		AsyncFileIOUring::getIOSubmitMetrics();
+	else
+		AsyncFileKAIO::getIOSubmitMetrics();
+
+	// Clean up
+	FastAllocator<4096>::release(buf);
+
+	wait(AsyncFileEIO::deleteFile(f->getFilename(), true));
 
 	return Void();
 }

@@ -223,9 +223,7 @@ public:
 	// AsyncFileIOUring
 	bool ENABLE_IO_URING;
 	bool IO_URING_DIRECT_SUBMIT;
-	bool IO_URING_BATCH;
 	bool IO_URING_POLL;
-	bool IO_URING_EVENTFD;
 
 	// AsyncFileNonDurable
 	double NON_DURABLE_MAX_WRITE_DELAY;

@@ -156,10 +156,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	//AsyncFileIOUring
 	init( ENABLE_IO_URING,                                    false); //Use io_uring instead of kaio
 	init( IO_URING_DIRECT_SUBMIT,                             false); //Bypass the op queue and dispatch  ops to the io_uring ring directly
-	init( IO_URING_BATCH,                                     false);
 	init( IO_URING_POLL,                                      false);
-	init( IO_URING_EVENTFD,                                   false);
-
 
 	//AsyncFileNonDurable
 	init( NON_DURABLE_MAX_WRITE_DELAY,                         2.0 ); if( randomize && BUGGIFY ) NON_DURABLE_MAX_WRITE_DELAY = 5.0;
