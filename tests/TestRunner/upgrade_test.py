@@ -66,6 +66,7 @@ SUPPORTED_VERSIONS = [
     "5.1.6",
 ]
 FDB_DOWNLOAD_ROOT = "https://github.com/apple/foundationdb/releases/download/"
+LOCAL_OLD_BINARY_REPO = "/opt/foundationdb/old/"
 CURRENT_VERSION = "7.2.0"
 HEALTH_CHECK_TIMEOUT_SEC = 5
 PROGRESS_CHECK_TIMEOUT_SEC = 30
@@ -147,6 +148,9 @@ class UpgradeTest:
         self.tmp_dir = self.build_dir.joinpath("tmp", random_secret_string(16))
         self.tmp_dir.mkdir(parents=True)
         self.download_dir = self.build_dir.joinpath("tmp", "old_binaries")
+        self.local_binary_repo = Path(LOCAL_OLD_BINARY_REPO)
+        if not self.local_binary_repo.exists():
+            self.local_binary_repo = None
         self.download_old_binaries()
         self.create_external_lib_dir()
         init_version = upgrade_path[0]
@@ -180,9 +184,15 @@ class UpgradeTest:
         self.tester_bin = None
         self.ctrl_pipe = None
 
+    # Check if the binaries for the given version are available in the local old binaries repository
+    def version_in_local_repo(self, version):
+        return (self.local_binary_repo is not None) and (self.local_binary_repo.joinpath(version).exists())
+
     def binary_path(self, version, bin_name):
         if version == CURRENT_VERSION:
             return self.build_dir.joinpath("bin", bin_name)
+        elif self.version_in_local_repo(version):
+            return self.local_binary_repo.joinpath(version, "{}-{}".format(bin_name, version))
         else:
             return self.download_dir.joinpath(version, bin_name)
 
@@ -196,7 +206,7 @@ class UpgradeTest:
     def download_old_binary(
         self, version, target_bin_name, remote_bin_name, make_executable
     ):
-        local_file = self.binary_path(version, target_bin_name)
+        local_file = self.download_dir.joinpath(version, target_bin_name)
         if local_file.exists():
             return
 
@@ -238,11 +248,27 @@ class UpgradeTest:
         if make_executable:
             make_executable_path(local_file)
 
+    # Copy a client library file from the local old binaries repository
+    # The file needs to be renamed to libfdb_c.so, because it is loaded with this name by fdbcli
+    def copy_clientlib_from_local_repo(self, version):
+        dest_lib_file = self.download_dir.joinpath(version, "libfdb_c.so")
+        if dest_lib_file.exists():
+            return
+        src_lib_file = self.local_binary_repo.joinpath(version, "libfdb_c-{}.so".format(version))
+        assert src_lib_file.exists(), "Missing file {} in the local old binaries repository".format(src_lib_file)
+        shutil.copyfile(src_lib_file, dest_lib_file)
+        assert dest_lib_file.exists(), "{} does not exist".format(dest_lib_file)
+
     # Download all old binaries required for testing the specified upgrade path
     def download_old_binaries(self):
         for version in self.upgrade_path:
             if version == CURRENT_VERSION:
                 continue
+
+            if self.version_in_local_repo(version):
+                self.copy_clientlib_from_local_repo(version)
+                continue
+
             self.download_old_binary(
                 version, "fdbserver", "fdbserver.{}".format(self.platform), True
             )
