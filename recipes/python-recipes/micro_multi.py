@@ -19,6 +19,7 @@
 #
 
 import struct
+import time
 
 import fdb
 
@@ -70,21 +71,19 @@ def multi_is_element(tr, index, value):
     return tr[multi[index][value]].present()
 
 
-import time
-
 N = 10000
 
 
 @fdb.transactional
 def time_atomic_add(tr):
-    for i in xrange(N):
+    for i in range(N):
         multi_add(db, "foo", "bar")
 
 
 @fdb.transactional
 def time_atomic_subtract(tr):
     start = time.time()
-    for i in xrange(N):
+    for i in range(N):
         multi_subtract(tr, "foo", "bar")
     end = time.time()
     print("{} seconds for atomic subtract".format(end - start))

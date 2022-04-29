@@ -40,17 +40,17 @@ def _next_count(tr, priority):
 
 
 @fdb.transactional
-def pop(tr, max=False):
+def pop(tr, rev=False):
     r = pq.range()
-    for item in tr.get_range(r.start, r.stop, limit=1, reverse=max):
+    for item in tr.get_range(r.start, r.stop, limit=1, reverse=rev):
         del tr[item.key]
         return item.value
 
 
 @fdb.transactional
-def peek(tr, max=False):
+def peek(tr, rev=False):
     r = pq.range()
-    for item in tr.get_range(r.start, r.stop, limit=1, reverse=max):
+    for item in tr.get_range(r.start, r.stop, limit=1, reverse=rev):
         return item.value
 
 
@@ -75,7 +75,7 @@ def smoke_test():
     print(pop(db))
     print(pop(db))
     print(pop(db))
-    print("Peek none:", peek(db, max=True))
+    print("Peek none:", peek(db, rev=True))
     push(db, "a1", 1)
     push(db, "a2", 1)
     push(db, "a3", 1)
@@ -85,15 +85,15 @@ def smoke_test():
     push(db, "d", 4)
     push(db, "e", 3)
     print("peek in max order")
-    print(peek(db, max=True))
-    print(peek(db, max=True))
+    print(peek(db, rev=True))
+    print(peek(db, rev=True))
     print("pop in max order")
-    print(pop(db, max=True))
-    print(pop(db, max=True))
-    print(pop(db, max=True))
-    print(pop(db, max=True))
-    print(pop(db, max=True))
-    print(pop(db, max=True))
+    print(pop(db, rev=True))
+    print(pop(db, rev=True))
+    print(pop(db, rev=True))
+    print(pop(db, rev=True))
+    print(pop(db, rev=True))
+    print(pop(db, rev=True))
 
 
 if __name__ == "__main__":
