@@ -5870,7 +5870,8 @@ ACTOR void checkWrites(Reference<TransactionState> trState,
 ACTOR static Future<Void> commitDummyTransaction(Reference<TransactionState> trState, KeyRange range) {
 	state Transaction tr(trState->cx);
 	state int retries = 0;
-	state Span span(trState->spanContext, "NAPI:dummyTransaction"_loc, span.context);
+	state Span span("NAPI:dummyTransaction"_loc, trState->spanContext);
+	tr.span.setParent(span.context);
 	loop {
 		try {
 			TraceEvent("CommitDummyTransaction").detail("Key", range.begin).detail("Retries", retries);
