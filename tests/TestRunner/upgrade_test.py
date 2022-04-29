@@ -173,8 +173,6 @@ class UpgradeTest:
         os.mkfifo(self.input_pipe_path)
         os.mkfifo(self.output_pipe_path)
         self.progress_event = Event()
-        self.external_lib_dir = None
-        self.cluster_version = None
         self.api_version = None
         self.tester_retcode = None
         self.tester_proc = None
