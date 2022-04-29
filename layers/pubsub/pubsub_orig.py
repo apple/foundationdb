@@ -18,7 +18,7 @@
 # limitations under the License.
 #
 
-'''
+"""
 Created on May 14, 2012
 
 * General FDB data model of Pub/Sub model *
@@ -55,82 +55,94 @@ Created on May 14, 2012
       and appear in historical lists as well.  This could lead to odd behavior
       if paging through the contents of an inbox while a new subscription was added
 
-'''
+"""
 
 import os
 import sys
 
-sys.path[:0] = [os.path.join(os.path.dirname(__file__), '..', '..', 'bindings', 'python')]
+sys.path[:0] = [
+    os.path.join(os.path.dirname(__file__), "..", "..", "bindings", "python")
+]
 import fdb
 import struct
 
 
 def key_for_feed(feed):
-    return fdb.tuple_to_key('f', struct.pack('>Q', feed))
+    return fdb.tuple_to_key("f", struct.pack(">Q", feed))
 
 
 def key_for_feed_subscriber_count(feed):
-    return fdb.tuple_to_key('f', struct.pack('>Q', feed), 'subCount')
+    return fdb.tuple_to_key("f", struct.pack(">Q", feed), "subCount")
 
 
 def key_for_feed_message_count(feed):
-    return fdb.tuple_to_key('f', struct.pack('>Q', feed), 'messCount')
+    return fdb.tuple_to_key("f", struct.pack(">Q", feed), "messCount")
 
 
 def key_for_feed_subscriber(feed, inbox):
-    return fdb.tuple_to_key('f', struct.pack('>Q', feed), 'subs', struct.pack('>Q', inbox))
+    return fdb.tuple_to_key(
+        "f", struct.pack(">Q", feed), "subs", struct.pack(">Q", inbox)
+    )
 
 
 def prefix_for_feed_subscribers(feed):
-    return fdb.tuple_to_key('f', struct.pack('>Q', feed), 'subs')
+    return fdb.tuple_to_key("f", struct.pack(">Q", feed), "subs")
 
 
 def key_for_feed_watcher(feed, inbox):
-    return fdb.tuple_to_key('f', struct.pack('>Q', feed), 'watchers', struct.pack('>Q', inbox))
+    return fdb.tuple_to_key(
+        "f", struct.pack(">Q", feed), "watchers", struct.pack(">Q", inbox)
+    )
 
 
 def key_for_feed_message(feed, message):
-    return fdb.tuple_to_key('f', struct.pack('>Q', feed), 'message', struct.pack('>Q', message))
+    return fdb.tuple_to_key(
+        "f", struct.pack(">Q", feed), "message", struct.pack(">Q", message)
+    )
 
 
 def prefix_for_feed_messages(feed):
-    return fdb.tuple_to_key('f', struct.pack('>Q', feed), 'message')
+    return fdb.tuple_to_key("f", struct.pack(">Q", feed), "message")
 
 
 def key_for_inbox(inbox):
-    return fdb.tuple_to_key('i', struct.pack('>Q', inbox))
+    return fdb.tuple_to_key("i", struct.pack(">Q", inbox))
 
 
 def key_for_inbox_subscription_count(inbox):
-    return fdb.tuple_to_key('i', struct.pack('>Q', inbox), 'subCount')
+    return fdb.tuple_to_key("i", struct.pack(">Q", inbox), "subCount")
 
 
 def key_for_inbox_subscription(inbox, feed):
-    return fdb.tuple_to_key('i', struct.pack('>Q', inbox), 'subs', struct.pack('>Q', feed))
+    return fdb.tuple_to_key(
+        "i", struct.pack(">Q", inbox), "subs", struct.pack(">Q", feed)
+    )
 
 
 def prefix_for_inbox_subscriptions(inbox):
-    return fdb.tuple_to_key('i', struct.pack('>Q', inbox), 'subs')
+    return fdb.tuple_to_key("i", struct.pack(">Q", inbox), "subs")
 
 
 def key_for_inbox_stale_feed(inbox, feed):
-    return fdb.tuple_to_key('i', struct.pack('>Q', inbox), 'stale', struct.pack('>Q', feed))
+    return fdb.tuple_to_key(
+        "i", struct.pack(">Q", inbox), "stale", struct.pack(">Q", feed)
+    )
 
 
 def key_for_message(message):
-    return fdb.tuple_to_key('m', struct.pack('>Q', message))
+    return fdb.tuple_to_key("m", struct.pack(">Q", message))
 
 
 @fdb.transactional
 def _create_feed_internal(tr, feed, metadata):
     key = key_for_feed(feed)
     if tr[key] != None:
-        print 'Feed', feed, 'already exists'
+        print("Feed", feed, "already exists")
         return feed
 
     tr[key] = metadata
-    tr[key_for_feed_subscriber_count(feed)] = struct.pack('>Q', 0)
-    tr[key_for_feed_message_count(feed)] = struct.pack('>Q', 0)
+    tr[key_for_feed_subscriber_count(feed)] = struct.pack(">Q", 0)
+    tr[key_for_feed_message_count(feed)] = struct.pack(">Q", 0)
 
     return feed
 
@@ -142,7 +154,7 @@ def _create_inbox_internal(tr, inbox, metadata):
         return inbox
 
     tr[key] = metadata
-    tr[key_for_inbox_subscription_count(inbox)] = struct.pack('>Q', 0)
+    tr[key_for_inbox_subscription_count(inbox)] = struct.pack(">Q", 0)
 
     return inbox
 
@@ -160,21 +172,23 @@ def _create_subscription_internal(tr, feed, inbox):
     i_count = tr[key_for_inbox_subscription_count(inbox)]
     # print f_count, 'and', i_count
     if f_count == None or i_count == None:
-        print 'There is not a feed or inbox'
+        print("There is not a feed or inbox")
         return False  # Either the inbox or the feed do not exist
 
     # Update the subscriptions of the inbox
-    tr[key] = ''
-    tr[key_for_feed_subscriber_count(feed)] = \
-        struct.pack('>Q', struct.unpack('>Q', f_count + '')[0] + 1)
+    tr[key] = ""
+    tr[key_for_feed_subscriber_count(feed)] = struct.pack(
+        ">Q", struct.unpack(">Q", f_count + "")[0] + 1
+    )
 
     # Update the subscribers of the feed
-    tr[key_for_feed_subscriber(feed, inbox)] = ''
-    tr[key_for_inbox_subscription_count(inbox)] = \
-        struct.pack('>Q', struct.unpack('>Q', i_count + '')[0] + 1)
+    tr[key_for_feed_subscriber(feed, inbox)] = ""
+    tr[key_for_inbox_subscription_count(inbox)] = struct.pack(
+        ">Q", struct.unpack(">Q", i_count + "")[0] + 1
+    )
 
     # Add inbox as watcher of feed.
-    tr[key_for_feed_watcher(feed, inbox)] = ''
+    tr[key_for_feed_watcher(feed, inbox)] = ""
 
     return True
 
@@ -190,18 +204,19 @@ def _post_message_internal(tr, feed, contents):
     first_key = tr.get_key(fdb.KeySelector.first_greater_than(zero_key))
     last_message = tr[last_key]
     if last_message == None:
-        print 'There are not other messages in the database'
+        print("There are not other messages in the database")
         message_id = sys.maxint
     else:
-        print fdb.key_to_tuple(first_key)
-        message_id = struct.unpack('>Q', fdb.key_to_tuple(first_key)[1])[0] - 1
-    print "MessageID", message_id
+        print(fdb.key_to_tuple(first_key))
+        message_id = struct.unpack(">Q", fdb.key_to_tuple(first_key)[1])[0] - 1
+    print("MessageID", message_id)
 
     tr[key_for_message(message_id)] = contents
-    tr[key_for_feed_message(feed, message_id)] = ''
+    tr[key_for_feed_message(feed, message_id)] = ""
     f_count = tr[key_for_feed_message_count(feed)]
-    tr[key_for_feed_message_count(feed)] = \
-        struct.pack('>Q', struct.unpack('>Q', f_count + '')[0] + 1)
+    tr[key_for_feed_message_count(feed)] = struct.pack(
+        ">Q", struct.unpack(">Q", f_count + "")[0] + 1
+    )
 
     # update the watchers on the feed to mark those inboxes as stale
     # prefix = fdb.tuple_to_key(key_for_feed(feed), 'watchers')
@@ -219,19 +234,19 @@ def _list_messages_internal(tr, inbox):
     if tr[key_for_inbox(inbox)] == None:
         return messages  # this inbox does not exist!
 
-    print 'Messages in %s''s inbox' % tr[key_for_inbox(inbox)]
+    print("Messages in %s" "s inbox" % tr[key_for_inbox(inbox)])
     prefix = prefix_for_inbox_subscriptions(inbox)
     for k, _ in tr.get_range_startswith(prefix):
         # print "inbox sub:", fdb.key_to_tuple(k)
-        feed = struct.unpack('>Q', fdb.key_to_tuple(k)[3])[0]
+        feed = struct.unpack(">Q", fdb.key_to_tuple(k)[3])[0]
         # print "messages from feed:", feed
-        print ' from %s:' % tr[key_for_feed(feed)]
+        print(" from %s:" % tr[key_for_feed(feed)])
         feed_prefix = prefix_for_feed_messages(feed)
         for key, _ in tr.get_range_startswith(feed_prefix):
             # print "feed message:", fdb.key_to_tuple(key)
-            message_id = struct.unpack('>Q', fdb.key_to_tuple(key)[3])[0]
+            message_id = struct.unpack(">Q", fdb.key_to_tuple(key)[3])[0]
             message = tr[key_for_message(message_id)]
-            print "  ", message
+            print("  ", message)
             messages.append(message)
 
     return messages
@@ -241,7 +256,7 @@ def _list_messages_internal(tr, inbox):
 def _print_internal(tr, feed):
     countKey = key_for_feed_message_count(feed)
     f_count = tr[countKey]
-    print 'Messages in feed', feed, ':', struct.unpack('>Q', f_count + '')[0]
+    print("Messages in feed", feed, ":", struct.unpack(">Q", f_count + "")[0])
 
 
 class PubSub(object):
@@ -249,11 +264,11 @@ class PubSub(object):
         self.db = db
 
     def create_feed(self, metadata):
-        feed_id = struct.unpack('>Q', os.urandom(8))[0]
+        feed_id = struct.unpack(">Q", os.urandom(8))[0]
         return _create_feed_internal(self.db, feed_id, metadata)
 
     def create_inbox(self, metadata):
-        inbox_id = struct.unpack('>Q', os.urandom(8))[0]
+        inbox_id = struct.unpack(">Q", os.urandom(8))[0]
         return _create_inbox_internal(self.db, inbox_id, metadata)
 
     def create_subscription(self, feed, inbox):

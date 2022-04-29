@@ -37,7 +37,7 @@ fdb.api_version(22)
 ###################################
 
 
-class Subspace (object):
+class Subspace(object):
     def __init__(self, prefixTuple, rawPrefix=""):
         self.rawPrefix = rawPrefix + fdb.tuple.pack(prefixTuple)
 
@@ -52,7 +52,7 @@ class Subspace (object):
 
     def unpack(self, key):
         assert key.startswith(self.rawPrefix)
-        return fdb.tuple.unpack(key[len(self.rawPrefix):])
+        return fdb.tuple.unpack(key[len(self.rawPrefix) :])
 
     def range(self, tuple=()):
         p = fdb.tuple.range(tuple)
@@ -81,7 +81,7 @@ class _ImplicitTransaction:
 
     def __enter__(self):
         if self.initialValue is not None and self.vector.local.tr != self.tr:
-            raise Exception('use_transaction cannot be nested')
+            raise Exception("use_transaction cannot be nested")
 
         self.vector.local.tr = self.tr
 
@@ -111,7 +111,7 @@ class Vector:
 
     # Public functions
 
-    def __init__(self, subspace, defaultValue=''):
+    def __init__(self, subspace, defaultValue=""):
         self.subspace = subspace
         self.defaultValue = defaultValue
         self.local = threading.local()
@@ -243,7 +243,7 @@ class Vector:
         v2 = tr[k2]
 
         if i1 > currentSize or i2 > currentSize or i1 < 0 or i2 < 0:
-            raise IndexError('vector.swap: indices (%d, %d) out of range' % (i1, i2))
+            raise IndexError("vector.swap: indices (%d, %d) out of range" % (i1, i2))
 
         if v2.present():
             tr[k1] = v2
@@ -258,7 +258,7 @@ class Vector:
     @fdb.transactional
     def _get(self, index, tr):
         if index < 0:
-            raise IndexError('vector.get: index \'%d\' out of range' % index)
+            raise IndexError("vector.get: index '%d' out of range" % index)
 
         start = self._key_at(index)
         end = self.subspace.range().stop
@@ -266,14 +266,14 @@ class Vector:
         output = tr.get_range(start, end, 1)
         for k, v in output:
             # The requested index had an associated key
-            if(start == k):
+            if start == k:
                 return fdb.tuple.unpack(v)[0]
 
             # The requested index is sparsely represented
             return self.defaultValue
 
         # We requested a value past the end of the vector
-        raise IndexError('vector.get: index \'%d\' out of range' % index)
+        raise IndexError("vector.get: index '%d' out of range" % index)
 
     def _get_range(self, startIndex, endIndex, step, tr):
         size = self._size(tr)
@@ -288,7 +288,7 @@ class Vector:
             else:
                 step = -1
         elif step == 0:
-            raise ValueError('vector.get_range: step cannot be zero')
+            raise ValueError("vector.get_range: step cannot be zero")
 
         if startIndex is None:
             if step > 0:
@@ -326,7 +326,9 @@ class Vector:
 
         for k, v in result:
             keyIndex = self.subspace.unpack(k)[0]
-            while (step > 0 and currentIndex < keyIndex) or (step < 0 and currentIndex > keyIndex):
+            while (step > 0 and currentIndex < keyIndex) or (
+                step < 0 and currentIndex > keyIndex
+            ):
                 currentIndex = currentIndex + step
                 yield self.defaultValue
 
@@ -350,9 +352,9 @@ class Vector:
     @fdb.transactional
     def _resize(self, length, tr):
         currentSize = self.size()
-        if(length == currentSize):
+        if length == currentSize:
             return
-        if(length < currentSize):
+        if length < currentSize:
             self._shrink(tr, length, currentSize)
         else:
             self._expand(tr, length, currentSize)
@@ -376,7 +378,9 @@ class Vector:
     def _to_transaction(self, tr):
         if tr is None:
             if self.local.tr is None:
-                raise Exception('No transaction specified and use_transaction has not been called')
+                raise Exception(
+                    "No transaction specified and use_transaction has not been called"
+                )
             else:
                 return self.local.tr
         else:
@@ -394,13 +398,13 @@ class Vector:
 # caution: modifies the database!
 @fdb.transactional
 def vector_test(tr):
-    vector = Vector(Subspace(('test_vector',)), 0)
+    vector = Vector(Subspace(("test_vector",)), 0)
 
     with vector.use_transaction(tr):
-        print 'Clearing any previous values in the vector'
+        print("Clearing any previous values in the vector")
         vector.clear()
 
-        print '\nMODIFIERS'
+        print("\nMODIFIERS")
 
         # Set + Push
         vector[0] = 1
@@ -413,105 +417,105 @@ def vector_test(tr):
         _print_vector(vector, tr)
 
         # Pop
-        print 'Popped:', vector.pop()
+        print("Popped:", vector.pop())
         _print_vector(vector, tr)
 
         # Clear
         vector.clear()
 
-        print 'Pop empty:', vector.pop()
+        print("Pop empty:", vector.pop())
         _print_vector(vector, tr)
 
-        vector.push('Foo')
-        print 'Pop size 1:', vector.pop()
+        vector.push("Foo")
+        print("Pop size 1:", vector.pop())
         _print_vector(vector, tr)
 
-        print '\nCAPACITY OPERATIONS'
+        print("\nCAPACITY OPERATIONS")
 
         # Capacity
-        print 'Size:', vector.size()
-        print 'Empty:', vector.empty()
+        print("Size:", vector.size())
+        print("Empty:", vector.empty())
 
-        print 'Resizing to length 5'
+        print("Resizing to length 5")
         vector.resize(5)
         _print_vector(vector, tr)
-        print 'Size:', vector.size()
+        print("Size:", vector.size())
 
-        print 'Setting values'
-        vector[0] = 'The'
-        vector[1] = 'Quick'
-        vector[2] = 'Brown'
-        vector[3] = 'Fox'
-        vector[4] = 'Jumps'
-        vector[5] = 'Over'
+        print("Setting values")
+        vector[0] = "The"
+        vector[1] = "Quick"
+        vector[2] = "Brown"
+        vector[3] = "Fox"
+        vector[4] = "Jumps"
+        vector[5] = "Over"
         _print_vector(vector, tr)
 
-        print '\nFRONT'
-        print vector.front()
+        print("\nFRONT")
+        print(vector.front())
 
-        print '\nBACK'
-        print vector.back()
+        print("\nBACK")
+        print(vector.back())
 
-        print '\nELEMENT ACCESS'
-        print 'Index 0:', vector[0]
-        print 'Index 5:', vector[5]
+        print("\nELEMENT ACCESS")
+        print("Index 0:", vector[0])
+        print("Index 5:", vector[5])
 
         _print_vector(vector, tr)
-        print 'Size:', vector.size()
+        print("Size:", vector.size())
 
-        print '\nRESIZING'
-        print 'Resizing to 3'
+        print("\nRESIZING")
+        print("Resizing to 3")
         vector.resize(3)
         _print_vector(vector, tr)
-        print 'Size:', vector.size()
+        print("Size:", vector.size())
 
-        print 'Resizing to 3 again'
+        print("Resizing to 3 again")
         vector.resize(3)
         _print_vector(vector, tr)
-        print 'Size:', vector.size()
+        print("Size:", vector.size())
 
-        print 'Resizing to 6'
+        print("Resizing to 6")
         vector.resize(6)
         _print_vector(vector, tr)
-        print 'Size:', vector.size()
+        print("Size:", vector.size())
 
-        print '\nSPARSE TESTS'
-        print 'Popping sparse vector'
+        print("\nSPARSE TESTS")
+        print("Popping sparse vector")
         vector.pop()
 
         _print_vector(vector, tr)
-        print 'Size:', vector.size()
+        print("Size:", vector.size())
 
-        print 'Resizing to 4'
+        print("Resizing to 4")
         vector.resize(4)
 
         _print_vector(vector, tr)
-        print 'Size:', vector.size()
+        print("Size:", vector.size())
 
-        print 'Adding "word" to index 10, resize to 25'
-        vector[10] = 'word'
+        print('Adding "word" to index 10, resize to 25')
+        vector[10] = "word"
         vector.resize(25)
 
         _print_vector(vector, tr)
-        print 'Size:', vector.size()
+        print("Size:", vector.size())
 
-        print 'Popping sparse vector'
+        print("Popping sparse vector")
         vector.pop()
 
         _print_vector(vector, tr)
-        print 'Size:', vector.size()
+        print("Size:", vector.size())
 
-        print 'Swapping with sparse element'
+        print("Swapping with sparse element")
         vector.swap(10, 15)
 
         _print_vector(vector, tr)
-        print 'Size:', vector.size()
+        print("Size:", vector.size())
 
-        print 'Swapping sparse elements'
+        print("Swapping sparse elements")
         vector.swap(12, 13)
 
         _print_vector(vector, tr)
-        print 'Size:', vector.size()
+        print("Size:", vector.size())
 
 
 ##############################
@@ -525,7 +529,7 @@ import sys
 # caution: modifies the database!
 @fdb.transactional
 def vector_example(tr):
-    vector = Vector(Subspace(('my_vector',)), 0)
+    vector = Vector(Subspace(("my_vector",)), 0)
 
     with vector.use_transaction(tr):
         vector.clear()
@@ -535,7 +539,7 @@ def vector_example(tr):
 
         _print_vector(vector, tr)
 
-        print 'Pop last item: %d' % vector.pop()
+        print("Pop last item: %d" % vector.pop())
         _print_vector(vector, tr)
 
         vector[1] = 10
@@ -551,16 +555,16 @@ def _print_vector(vector, tr):
     with vector.use_transaction(tr):
         for v in vector:
             if not first:
-                sys.stdout.write(',')
+                sys.stdout.write(",")
 
             first = False
             sys.stdout.write(repr(v))
 
-    print
+    print()
 
 
 # caution: modifies the database!
-if __name__ == '__main__':
+if __name__ == "__main__":
     db = fdb.open()
     vector_example(db)
     # vector_test(db)

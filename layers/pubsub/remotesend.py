@@ -23,13 +23,16 @@
 import os
 import sys
 
-sys.path[:0] = [os.path.join(os.path.dirname(__file__), '..', '..', 'bindings', 'python')]
+sys.path[:0] = [
+    os.path.join(os.path.dirname(__file__), "..", "..", "bindings", "python")
+]
 import fdb
 import argparse
 import random
 import gevent
 
 from gevent import monkey
+
 monkey.patch_thread()
 
 from pubsub_bigdoc import PubSub
@@ -52,7 +55,7 @@ db = fdb.open(args.zkAddr, args.database, event_model="gevent")
 ps = PubSub(db)
 name = os.uname()[1]
 
-print 'sending messages',
+print("sending messages", end=" ")
 
 
 def message_client():
@@ -61,13 +64,15 @@ def message_client():
     while messages_sent < args.messages / args.threads:
         user = random.randint(0, args.totalUsers)
         if random.random() < 0.1:
-            ps.post_message(ps.get_feed_by_name('%09d' % user), 'Message %d from %s' % (i, name))
+            ps.post_message(
+                ps.get_feed_by_name("%09d" % user), "Message %d from %s" % (i, name)
+            )
             messages_sent += 1
         else:
-            ps.get_inbox_messages(ps.get_inbox_by_name('%09d' % user), 10)
+            ps.get_inbox_messages(ps.get_inbox_by_name("%09d" % user), 10)
 
 
 jobs = [gevent.spawn(message_client) for i in range(0, args.threads)]
 gevent.joinall(jobs)
 
-print 'done'
+print("done")

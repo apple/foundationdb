@@ -31,7 +31,7 @@ def nextStopToNone(gen):
         return None
 
 
-class FdbSet (object):
+class FdbSet(object):
     def __init__(self, path):
         self._path = path
 
@@ -147,9 +147,9 @@ class FdbSet (object):
         lastValue = fdb.tuple.pack((self._path,))
         for k in self.intersection(tr, t):
             if k != lastValue:
-                del tr[lastValue + '\x00':fdb.tuple.pack((self._path, k))]
+                del tr[lastValue + "\x00" : fdb.tuple.pack((self._path, k))]
             lastValue = fdb.tuple.pack((self._path, k))
-        del tr[lastValue + '\x00':fdb.tuple.pack((self._path + chr(0),))]
+        del tr[lastValue + "\x00" : fdb.tuple.pack((self._path + chr(0),))]
 
     @fdb.transactional
     def difference_update(self, tr, t):  # s -= t
@@ -205,14 +205,18 @@ class FdbSet (object):
 
     @fdb.transactional
     def first_greater_than(self, tr, x):
-        key = tr.get_key(fdb.KeySelector.first_greater_than(fdb.tuple.pack((self._path, x))))
+        key = tr.get_key(
+            fdb.KeySelector.first_greater_than(fdb.tuple.pack((self._path, x)))
+        )
         if self._keyInRange(key):
             return fdb.tuple.unpack(key)[1]
         return None
 
     @fdb.transactional
     def first_greater_or_equal(self, tr, x):
-        key = tr.get_key(fdb.KeySelector.first_greater_or_equal(fdb.tuple.pack((self._path, x))))
+        key = tr.get_key(
+            fdb.KeySelector.first_greater_or_equal(fdb.tuple.pack((self._path, x)))
+        )
         if self._keyInRange(key):
             return fdb.tuple.unpack(key)[1]
         return None
@@ -222,7 +226,7 @@ class FdbSet (object):
 
 
 def test(db):
-    print "starting set test"
+    print("starting set test")
     tr = db.create_transaction()
 
     del tr[:]
@@ -240,105 +244,105 @@ def test(db):
     c = FdbSet("c")
     c.add(tr, "grape")
 
-    print "set a:"
+    print("set a:")
     for k in a.iterate(tr):
-        print k
+        print(k)
 
-    print "set b:"
+    print("set b:")
     for k in b.iterate(tr):
-        print k
+        print(k)
 
-    print "set c:"
+    print("set c:")
     for k in c.iterate(tr):
-        print k
+        print(k)
 
-    print "b contains strawberry: {0}".format(b.contains(tr, "strawberry"))
-    print "remove strawberry from b"
+    print("b contains strawberry: {0}".format(b.contains(tr, "strawberry")))
+    print("remove strawberry from b")
 
     b.remove(tr, "strawberry")
 
-    print "b contains strawberry: {0}".format(b.contains(tr, "strawberry"))
+    print("b contains strawberry: {0}".format(b.contains(tr, "strawberry")))
 
     try:
         b.remove(tr, "strawberry")
-        print "survived second remove of strawberry"
+        print("survived second remove of strawberry")
     except KeyError:
-        print "failed second remove of strawberry"
+        print("failed second remove of strawberry")
 
-    print "insert strawberry into b"
+    print("insert strawberry into b")
 
     b.add(tr, "strawberry")
 
-    print "b contains strawberry: {0}".format(b.contains(tr, "strawberry"))
+    print("b contains strawberry: {0}".format(b.contains(tr, "strawberry")))
 
-    print "discard strawberry from b"
-
-    b.discard(tr, "strawberry")
-
-    print "b contains strawberry: {0}".format(b.contains(tr, "strawberry"))
+    print("discard strawberry from b")
 
     b.discard(tr, "strawberry")
 
-    print "b length: {0}".format(b.length(tr))
+    print("b contains strawberry: {0}".format(b.contains(tr, "strawberry")))
 
-    print "c issubset a: {0}".format(c.issubset(tr, a))
+    b.discard(tr, "strawberry")
 
-    print "c issubset b: {0}".format(c.issubset(tr, b))
+    print("b length: {0}".format(b.length(tr)))
 
-    print "a union b:"
+    print("c issubset a: {0}".format(c.issubset(tr, a)))
+
+    print("c issubset b: {0}".format(c.issubset(tr, b)))
+
+    print("a union b:")
     for k in a.union(tr, b):
-        print k
+        print(k)
 
-    print "a intersection b:"
+    print("a intersection b:")
     for k in a.intersection(tr, b):
-        print k
+        print(k)
 
-    print "a difference b:"
+    print("a difference b:")
     for k in a.difference(tr, b):
-        print k
+        print(k)
 
-    print "b difference a:"
+    print("b difference a:")
     for k in b.difference(tr, a):
-        print k
+        print(k)
 
-    print "a symmetric_difference b:"
+    print("a symmetric_difference b:")
     for k in a.symmetric_difference(tr, b):
-        print k
+        print(k)
 
-    print "a update c:"
+    print("a update c:")
     a.update(tr, c)
     for k in a.iterate(tr):
-        print k
+        print(k)
 
-    print "b intersection_update a:"
+    print("b intersection_update a:")
     b.intersection_update(tr, a)
     for k in b.iterate(tr):
-        print k
+        print(k)
 
-    print "a difference_update c"
+    print("a difference_update c")
     a.difference_update(tr, c)
     for k in a.iterate(tr):
-        print k
+        print(k)
 
-    print "b symmetric_difference_update a"
+    print("b symmetric_difference_update a")
     b.symmetric_difference_update(tr, a)
     for k in b.iterate(tr):
-        print k
+        print(k)
 
-    print "popping items from a"
+    print("popping items from a")
     try:
         while True:
-            print "popped {0}".format(a.pop(tr))
+            print("popped {0}".format(a.pop(tr)))
     except KeyError:
-        print "finished popping"
+        print("finished popping")
 
-    print "a length: {0}".format(a.length(tr))
+    print("a length: {0}".format(a.length(tr)))
 
-    print "clearing b"
+    print("clearing b")
 
     b.clear(tr)
 
-    print "b length: {0}".format(b.length(tr))
+    print("b length: {0}".format(b.length(tr)))
 
 
 db = fdb.open()

@@ -19,6 +19,7 @@
 #
 
 import fdb
+
 fdb.api_version(300)
 db = fdb.open()
 
@@ -26,7 +27,7 @@ import itertools
 import json
 import random
 
-doc_space = fdb.Subspace(('D',))
+doc_space = fdb.Subspace(("D",))
 
 EMPTY_OBJECT = -2
 EMPTY_ARRAY = -1
@@ -56,10 +57,10 @@ def from_tuples(tuples):
     if first == (EMPTY_ARRAY, None):
         return []
     # For an object or array, we need to group the tuples by their first element
-    groups = [list(g) for k, g in itertools.groupby(tuples, lambda t:t[0])]
-    if first[0] == 0:   # array
+    groups = [list(g) for k, g in itertools.groupby(tuples, lambda t: t[0])]
+    if first[0] == 0:  # array
         return [from_tuples([t[1:] for t in g]) for g in groups]
-    else:    # object
+    else:  # object
         return dict((g[0][0], from_tuples([t[1:] for t in g])) for g in groups)
 
 
@@ -67,18 +68,18 @@ def from_tuples(tuples):
 def insert_doc(tr, doc):
     if type(doc) == str:
         doc = json.loads(doc)
-    if 'doc_id' not in doc:
+    if "doc_id" not in doc:
         new_id = _get_new_id(tr)
-        doc['doc_id'] = new_id
+        doc["doc_id"] = new_id
     for tup in to_tuples(doc):
-        tr[doc_space.pack((doc['doc_id'],) + tup[:-1])] = fdb.tuple.pack((tup[-1],))
-    return doc['doc_id']
+        tr[doc_space.pack((doc["doc_id"],) + tup[:-1])] = fdb.tuple.pack((tup[-1],))
+    return doc["doc_id"]
 
 
 @fdb.transactional
 def _get_new_id(tr):
     found = False
-    while (not found):
+    while not found:
         new_id = random.randint(0, 100000000)
         found = True
         for _ in tr[doc_space[new_id].range()]:
@@ -93,14 +94,18 @@ def get_doc(tr, doc_id, prefix=()):
     if v.present():
         return from_tuples([prefix + fdb.tuple.unpack(v)])
     else:
-        return from_tuples([doc_space.unpack(k)[1:] + fdb.tuple.unpack(v)
-                            for k, v in tr[doc_space.range((doc_id,) + prefix)]])
+        return from_tuples(
+            [
+                doc_space.unpack(k)[1:] + fdb.tuple.unpack(v)
+                for k, v in tr[doc_space.range((doc_id,) + prefix)]
+            ]
+        )
 
 
 @fdb.transactional
 def print_subspace(tr, subspace):
     for k, v in tr[subspace.range()]:
-        print subspace.unpack(k), fdb.tuple.unpack(v)[0]
+        print(subspace.unpack(k), fdb.tuple.unpack(v)[0])
 
 
 @fdb.transactional
@@ -112,9 +117,14 @@ clear_subspace(db, doc_space)
 
 
 def smoke_test():
-    h1 = {'user': {'jones': {'friend_of': 'smith', 'group': ['sales', 'service']}, 'smith': {'friend_of': 'jones', 'group': ['dev', 'research']}}}
+    h1 = {
+        "user": {
+            "jones": {"friend_of": "smith", "group": ["sales", "service"]},
+            "smith": {"friend_of": "jones", "group": ["dev", "research"]},
+        }
+    }
     id = insert_doc(db, h1)
-    print get_doc(db, id, ('user', 'smith', 'group'))
+    print(get_doc(db, id, ("user", "smith", "group")))
 
 
 if __name__ == "__main__":

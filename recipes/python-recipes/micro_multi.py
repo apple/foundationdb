@@ -21,6 +21,7 @@
 import struct
 
 import fdb
+
 fdb.api_version(300)
 db = fdb.open()
 
@@ -30,7 +31,7 @@ def clear_subspace(tr, subspace):
     tr.clear_range_startswith(subspace.key())
 
 
-multi = fdb.Subspace(('M',))
+multi = fdb.Subspace(("M",))
 clear_subspace(db, multi)
 
 
@@ -39,14 +40,14 @@ clear_subspace(db, multi)
 
 @fdb.transactional
 def multi_add(tr, index, value):
-    tr.add(multi[index][value], struct.pack('<q', 1))
+    tr.add(multi[index][value], struct.pack("<q", 1))
 
 
 @fdb.transactional
 def multi_subtract(tr, index, value):
     v = tr[multi[index][value]]
-    if v.present() and struct.unpack('<q', str(v))[0] > 1:
-        tr.add(multi[index][value], struct.pack('<q', -1))
+    if v.present() and struct.unpack("<q", str(v))[0] > 1:
+        tr.add(multi[index][value], struct.pack("<q", -1))
     else:
         del tr[multi[index][value]]
 
@@ -58,8 +59,10 @@ def multi_get(tr, index):
 
 @fdb.transactional
 def multi_get_counts(tr, index):
-    return {multi.unpack(k)[1]: struct.unpack('<q', v)[0]
-            for k, v in tr[multi[index].range()]}
+    return {
+        multi.unpack(k)[1]: struct.unpack("<q", v)[0]
+        for k, v in tr[multi[index].range()]
+    }
 
 
 @fdb.transactional
@@ -75,18 +78,18 @@ N = 10000
 @fdb.transactional
 def time_atomic_add(tr):
     for i in xrange(N):
-        multi_add(db, 'foo', 'bar')
+        multi_add(db, "foo", "bar")
 
 
 @fdb.transactional
 def time_atomic_subtract(tr):
     start = time.time()
     for i in xrange(N):
-        multi_subtract(tr, 'foo', 'bar')
+        multi_subtract(tr, "foo", "bar")
     end = time.time()
-    print "{} seconds for atomic subtract".format(end - start)
+    print("{} seconds for atomic subtract".format(end - start))
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     time_atomic_add(db)
     time_atomic_subtract(db)

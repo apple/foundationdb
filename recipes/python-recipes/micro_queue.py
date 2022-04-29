@@ -21,6 +21,7 @@
 import os
 
 import fdb
+
 fdb.api_version(300)
 db = fdb.open()
 
@@ -30,7 +31,7 @@ def clear_subspace(tr, subspace):
     tr.clear_range_startswith(subspace.key())
 
 
-queue = fdb.Subspace(('Q',))
+queue = fdb.Subspace(("Q",))
 clear_subspace(db, queue)
 
 
@@ -64,32 +65,32 @@ def first_item(tr):
 
 
 def smoke_test():
-    enqueue(db, 'a')
-    enqueue(db, 'b')
-    enqueue(db, 'c')
-    enqueue(db, 'd')
-    enqueue(db, 'e')
-    print "dequeue"
-    print dequeue(db)
-    print dequeue(db)
-    print dequeue(db)
-    print dequeue(db)
-    print dequeue(db)
-    enqueue(db, 'a1')
-    enqueue(db, 'a2')
-    enqueue(db, 'a3')
-    enqueue(db, 'a4')
-    enqueue(db, 'b')
-    enqueue(db, 'c')
-    enqueue(db, 'd')
-    enqueue(db, 'e')
-    print "dequeue"
-    print dequeue(db)
-    print dequeue(db)
-    print dequeue(db)
-    print dequeue(db)
-    print dequeue(db)
-    print dequeue(db)
+    enqueue(db, "a")
+    enqueue(db, "b")
+    enqueue(db, "c")
+    enqueue(db, "d")
+    enqueue(db, "e")
+    print("dequeue")
+    print(dequeue(db))
+    print(dequeue(db))
+    print(dequeue(db))
+    print(dequeue(db))
+    print(dequeue(db))
+    enqueue(db, "a1")
+    enqueue(db, "a2")
+    enqueue(db, "a3")
+    enqueue(db, "a4")
+    enqueue(db, "b")
+    enqueue(db, "c")
+    enqueue(db, "d")
+    enqueue(db, "e")
+    print("dequeue")
+    print(dequeue(db))
+    print(dequeue(db))
+    print(dequeue(db))
+    print(dequeue(db))
+    print(dequeue(db))
+    print(dequeue(db))
 
 
 if __name__ == "__main__":

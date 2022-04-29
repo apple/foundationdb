@@ -23,7 +23,9 @@
 import os
 import sys
 
-sys.path[:0] = [os.path.join(os.path.dirname(__file__), '..', '..', 'bindings', 'python')]
+sys.path[:0] = [
+    os.path.join(os.path.dirname(__file__), "..", "..", "bindings", "python")
+]
 import fdb
 import argparse
 import random
@@ -44,16 +46,17 @@ args = parser.parse_args()
 db = fdb.open(args.zkAddr, args.database)
 ps = PubSub(db)
 
-print 'creating subscriptions',
+print("creating subscriptions", end=" ")
 for i in range(0, args.followers):
     u1 = random.randint(0, args.totalUsers)
     u2 = random.randint(0, args.totalUsers)
     if u1 != u2:
-        ps.create_subscription(ps.get_feed_by_name('%09d' % u1),
-                               ps.get_inbox_by_name('%09d' % u2))
+        ps.create_subscription(
+            ps.get_feed_by_name("%09d" % u1), ps.get_inbox_by_name("%09d" % u2)
+        )
     if i > 0 and i % 100 == 0:
-        print i,
-print 'done'
+        print(i, end=" ")
+print("done")
 
 # @fdb.transactional
 # def done(tr):

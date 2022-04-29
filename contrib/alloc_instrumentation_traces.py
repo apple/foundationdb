@@ -41,34 +41,33 @@ totalSize = 0
 lastTimestamp = ""
 
 for line in sys.stdin:
-  ev = json.loads(line.rstrip())
-  type = ev["Type"]
-  
-  if (type != 'MemSample'):
-    continue
-  bt = ev["Bt"]
+    ev = json.loads(line.rstrip())
+    type = ev["Type"]
 
-  if (bt == "na"):
-    continue
+    if type != "MemSample":
+        continue
+    bt = ev["Bt"]
 
-  timestamp = ev["Time"]
-  cnt = int(ev["Count"])
-  scnt = int(ev["SampleCount"])
-  size = int(ev["TotalSize"])
-  h = ev["Hash"]
+    if bt == "na":
+        continue
 
-  if (timestamp != lastTimestamp):
-    byCnt = []
-    bySize = []
-    totalSize = 0
-    lastTimestamp = timestamp
+    timestamp = ev["Time"]
+    cnt = int(ev["Count"])
+    scnt = int(ev["SampleCount"])
+    size = int(ev["TotalSize"])
+    h = ev["Hash"]
 
+    if timestamp != lastTimestamp:
+        byCnt = []
+        bySize = []
+        totalSize = 0
+        lastTimestamp = timestamp
 
-  # print(str(cnt) + " " + str(scnt) + " " + str(size) + " " + h)
+    # print(str(cnt) + " " + str(scnt) + " " + str(size) + " " + h)
 
-  byCnt.append( (cnt, scnt, size, h, bt) )
-  bySize.append( (size, cnt, size, h, bt) )
-  totalSize += size
+    byCnt.append((cnt, scnt, size, h, bt))
+    bySize.append((size, cnt, size, h, bt))
+    totalSize += size
 
 byCnt.sort(reverse=True)
 bySize.sort(reverse=True)
@@ -76,25 +75,45 @@ bySize.sort(reverse=True)
 btByHash = {}
 
 byte_suffix = ["Bytes", "KB", "MB", "GB", "TB"]
+
+
 def byte_str(bytes):
-  suffix_idx = 0
-  while (bytes >= 1024 * 10):
-    suffix_idx += 1
-    bytes //= 1024
-  return str(bytes) + ' ' + byte_suffix[suffix_idx]
+    suffix_idx = 0
+    while bytes >= 1024 * 10:
+        suffix_idx += 1
+        bytes //= 1024
+    return str(bytes) + " " + byte_suffix[suffix_idx]
+
 
 print("By Size")
 print("-------\r\n")
 for x in bySize[:10]:
-  # print(str(x[0]) + ": " + x[3])
-  print(str(x[1]) + " / " + byte_str(x[0]) + " (" + byte_str(x[0] // x[1]) + " per alloc):\r\n" + x[4] + "\r\n")
-  btByHash[x[3]] = x[4]
+    # print(str(x[0]) + ": " + x[3])
+    print(
+        str(x[1])
+        + " / "
+        + byte_str(x[0])
+        + " ("
+        + byte_str(x[0] // x[1])
+        + " per alloc):\r\n"
+        + x[4]
+        + "\r\n"
+    )
+    btByHash[x[3]] = x[4]
 
 print()
 print("By Count")
 print("--------\r\n")
 for x in byCnt[:5]:
-  # print(str(x[0]) + ": " + x[3])
-  print(str(x[0]) + " / " + byte_str(x[2]) + " (" + byte_str(x[2] // x[0]) + " per alloc):\r\n" + x[4] + "\r\n")
-  btByHash[x[3]] = x[4]
-
+    # print(str(x[0]) + ": " + x[3])
+    print(
+        str(x[0])
+        + " / "
+        + byte_str(x[2])
+        + " ("
+        + byte_str(x[2] // x[0])
+        + " per alloc):\r\n"
+        + x[4]
+        + "\r\n"
+    )
+    btByHash[x[3]] = x[4]

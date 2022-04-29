@@ -74,11 +74,11 @@ def _post_message_internal(feed, message_id, contents):
 
 @simpledoc.transactional
 def _list_messages_internal(inbox):
-    print "messages in %s's inbox:" % inbox.get_value()
+    print("messages in %s's inbox:" % inbox.get_value())
     for feed in inbox.subs.get_children():
-        print " from %s:" % feeds[feed.get_name()].get_value()
+        print(" from %s:" % feeds[feed.get_name()].get_value())
         for message in feed_messages.find_all(feed.get_name()):
-            print "   ", message.get_value()
+            print("   ", message.get_value())
 
 
 @simpledoc.transactional
@@ -139,7 +139,7 @@ def _get_inbox_messages_internal(inbox, limit):
     # message_ids.sort()
     if inbox_changed and len(message_ids) > 0:
         inbox.latest_message = message_ids[0]
-    message_ids = message_ids[:max(limit, len(message_ids))]
+    message_ids = message_ids[: max(limit, len(message_ids))]
 
     return [messages[mid].get_value() for mid in message_ids]
 
@@ -152,9 +152,9 @@ def _clear_all_messages():
 @simpledoc.transactional
 def _print_internals(feed_or_inbox=None):
     if feed_or_inbox is None:
-        print simpledoc.root.get_json(False)
+        print(simpledoc.root.get_json(False))
     else:
-        print feed_or_inbox.get_json(False)
+        print(feed_or_inbox.get_json(False))
 
 
 class PubSub(object):

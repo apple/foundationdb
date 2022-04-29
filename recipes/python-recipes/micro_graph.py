@@ -19,18 +19,19 @@
 #
 
 import fdb
+
 fdb.api_version(300)
 db = fdb.open()
 
-graph = fdb.Subspace(('G',))
-edge = graph['E']
-inverse = graph['I']
+graph = fdb.Subspace(("G",))
+edge = graph["E"]
+inverse = graph["I"]
 
 
 @fdb.transactional
 def set_edge(tr, node, neighbor):
-    tr[edge[node][neighbor]] = ''
-    tr[inverse[neighbor][node]] = ''
+    tr[edge[node][neighbor]] = ""
+    tr[inverse[neighbor][node]] = ""
 
 
 @fdb.transactional

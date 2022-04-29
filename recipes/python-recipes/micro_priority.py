@@ -20,9 +20,10 @@
 
 import os
 import fdb
+
 fdb.api_version(300)
 
-pq = fdb.Subspace(('P',))
+pq = fdb.Subspace(("P",))
 
 
 @fdb.transactional
@@ -59,40 +60,40 @@ def clear_subspace(tr, subspace):
 
 
 def smoke_test():
-    print "Peek none:", peek(db)
-    push(db, 'a', 1)
-    push(db, 'b', 5)
-    push(db, 'c', 2)
-    push(db, 'd', 4)
-    push(db, 'e', 3)
-    print "peek in min order"
-    print peek(db)
-    print peek(db)
-    print "pop in min order"
-    print pop(db)
-    print pop(db)
-    print pop(db)
-    print pop(db)
-    print pop(db)
-    print "Peek none:", peek(db, max=True)
-    push(db, 'a1', 1)
-    push(db, 'a2', 1)
-    push(db, 'a3', 1)
-    push(db, 'a4', 1)
-    push(db, 'b', 5)
-    push(db, 'c', 2)
-    push(db, 'd', 4)
-    push(db, 'e', 3)
-    print "peek in max order"
-    print peek(db, max=True)
-    print peek(db, max=True)
-    print "pop in max order"
-    print pop(db, max=True)
-    print pop(db, max=True)
-    print pop(db, max=True)
-    print pop(db, max=True)
-    print pop(db, max=True)
-    print pop(db, max=True)
+    print("Peek none:", peek(db))
+    push(db, "a", 1)
+    push(db, "b", 5)
+    push(db, "c", 2)
+    push(db, "d", 4)
+    push(db, "e", 3)
+    print("peek in min order")
+    print(peek(db))
+    print(peek(db))
+    print("pop in min order")
+    print(pop(db))
+    print(pop(db))
+    print(pop(db))
+    print(pop(db))
+    print(pop(db))
+    print("Peek none:", peek(db, max=True))
+    push(db, "a1", 1)
+    push(db, "a2", 1)
+    push(db, "a3", 1)
+    push(db, "a4", 1)
+    push(db, "b", 5)
+    push(db, "c", 2)
+    push(db, "d", 4)
+    push(db, "e", 3)
+    print("peek in max order")
+    print(peek(db, max=True))
+    print(peek(db, max=True))
+    print("pop in max order")
+    print(pop(db, max=True))
+    print(pop(db, max=True))
+    print(pop(db, max=True))
+    print(pop(db, max=True))
+    print(pop(db, max=True))
+    print(pop(db, max=True))
 
 
 if __name__ == "__main__":

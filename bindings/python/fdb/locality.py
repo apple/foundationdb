@@ -40,13 +40,15 @@ def _get_boundary_keys(db_or_tr, begin, end):
             lastbegin = begin
             tr.options.set_read_system_keys()
             tr.options.set_lock_aware()
-            kvs = tr.snapshot.get_range(b'\xff' + b'/keyServers/' + begin, b'\xff' + b'/keyServers/' + end)
+            kvs = tr.snapshot.get_range(
+                b"\xff" + b"/keyServers/" + begin, b"\xff" + b"/keyServers/" + end
+            )
             if first_time:
                 first_time = False
                 yield None  # trick to get the above get_range to be asynchronously dispatched before get_boundary_keys() returns.
             for kv in kvs:
                 yield kv.key[13:]
-                begin = kv.key[13:] + b'\x00'
+                begin = kv.key[13:] + b"\x00"
             begin = end
         except _impl.FDBError as e:
             # if we get a transaction_too_old and *something* has happened, then we are no longer transactional
@@ -71,4 +73,8 @@ def get_boundary_keys(db_or_tr, begin, end):
 @_impl.transactional
 def get_addresses_for_key(tr, key):
     keyBytes = _impl.keyToBytes(key)
-    return _impl.FutureStringArray(tr.capi.fdb_transaction_get_addresses_for_key(tr.tpointer, keyBytes, len(keyBytes)))
+    return _impl.FutureStringArray(
+        tr.capi.fdb_transaction_get_addresses_for_key(
+            tr.tpointer, keyBytes, len(keyBytes)
+        )
+    )

@@ -32,26 +32,28 @@ import string
 
 
 def random_string(len):
-    return ''.join(random.choice(string.ascii_letters + string.digits) for i in range(len))
+    return "".join(
+        random.choice(string.ascii_letters + string.digits) for i in range(len)
+    )
 
 
 def get_logger():
-    return logging.getLogger('foundationdb.run_c_api_tests')
+    return logging.getLogger("foundationdb.run_c_api_tests")
 
 
 def initialize_logger_level(logging_level):
     logger = get_logger()
 
-    assert logging_level in ['DEBUG', 'INFO', 'WARNING', 'ERROR']
+    assert logging_level in ["DEBUG", "INFO", "WARNING", "ERROR"]
 
-    logging.basicConfig(format='%(message)s')
-    if logging_level == 'DEBUG':
+    logging.basicConfig(format="%(message)s")
+    if logging_level == "DEBUG":
         logger.setLevel(logging.DEBUG)
-    elif logging_level == 'INFO':
+    elif logging_level == "INFO":
         logger.setLevel(logging.INFO)
-    elif logging_level == 'WARNING':
+    elif logging_level == "WARNING":
         logger.setLevel(logging.WARNING)
-    elif logging_level == 'ERROR':
+    elif logging_level == "ERROR":
         logger.setLevel(logging.ERROR)
 
 
@@ -64,9 +66,13 @@ def dump_client_logs(log_dir):
 
 
 def run_tester(args, test_file):
-    cmd = [args.tester_binary,
-           "--cluster-file", args.cluster_file,
-           "--test-file", test_file]
+    cmd = [
+        args.tester_binary,
+        "--cluster-file",
+        args.cluster_file,
+        "--test-file",
+        test_file,
+    ]
     if args.external_client_library is not None:
         cmd += ["--external-client-library", args.external_client_library]
     if args.tmp_dir is not None:
@@ -75,13 +81,12 @@ def run_tester(args, test_file):
     if args.log_dir is not None:
         log_dir = Path(args.log_dir).joinpath(random_string(8))
         log_dir.mkdir(exist_ok=True)
-        cmd += ['--log', "--log-dir", str(log_dir)]
+        cmd += ["--log", "--log-dir", str(log_dir)]
 
     if args.blob_granule_local_file_path is not None:
-        cmd += ["--blob-granule-local-file-path",
-                args.blob_granule_local_file_path]
+        cmd += ["--blob-granule-local-file-path", args.blob_granule_local_file_path]
 
-    get_logger().info('\nRunning tester \'%s\'...' % ' '.join(cmd))
+    get_logger().info("\nRunning tester '%s'..." % " ".join(cmd))
     proc = Popen(cmd, stdout=sys.stdout, stderr=sys.stderr)
     timed_out = False
     ret_code = 1
@@ -91,33 +96,37 @@ def run_tester(args, test_file):
         proc.kill()
         timed_out = True
     except Exception as e:
-        raise Exception('Unable to run tester (%s)' % e)
+        raise Exception("Unable to run tester (%s)" % e)
 
     if ret_code != 0:
         if timed_out:
-            reason = 'timed out after %d seconds' % args.timeout
+            reason = "timed out after %d seconds" % args.timeout
         elif ret_code < 0:
             reason = signal.Signals(-ret_code).name
         else:
-            reason = 'exit code: %d' % ret_code
-        get_logger().error('\n\'%s\' did not complete succesfully (%s)' %
-                           (cmd[0], reason))
-        if (log_dir is not None):
+            reason = "exit code: %d" % ret_code
+        get_logger().error(
+            "\n'%s' did not complete succesfully (%s)" % (cmd[0], reason)
+        )
+        if log_dir is not None:
             dump_client_logs(log_dir)
 
-    get_logger().info('')
+    get_logger().info("")
     return ret_code
 
 
 def run_tests(args):
     num_failed = 0
-    test_files = [f for f in os.listdir(args.test_dir) if os.path.isfile(
-        os.path.join(args.test_dir, f)) and f.endswith(".toml")]
+    test_files = [
+        f
+        for f in os.listdir(args.test_dir)
+        if os.path.isfile(os.path.join(args.test_dir, f)) and f.endswith(".toml")
+    ]
 
     for test_file in test_files:
-        get_logger().info('=========================================================')
-        get_logger().info('Running test %s' % test_file)
-        get_logger().info('=========================================================')
+        get_logger().info("=========================================================")
+        get_logger().info("Running test %s" % test_file)
+        get_logger().info("=========================================================")
         ret_code = run_tester(args, os.path.join(args.test_dir, test_file))
         if ret_code != 0:
             num_failed += 1
@@ -126,26 +135,63 @@ def run_tests(args):
 
 
 def parse_args(argv):
-    parser = argparse.ArgumentParser(description='FoundationDB C API Tester')
+    parser = argparse.ArgumentParser(description="FoundationDB C API Tester")
 
-    parser.add_argument('--cluster-file', type=str, default="fdb.cluster",
-                        help='The cluster file for the cluster being connected to. (default: fdb.cluster)')
-    parser.add_argument('--tester-binary', type=str, default="fdb_c_api_tester",
-                        help='Path to the fdb_c_api_tester executable. (default: fdb_c_api_tester)')
-    parser.add_argument('--external-client-library', type=str, default=None,
-                        help='Path to the external client library. (default: None)')
-    parser.add_argument('--test-dir', type=str, default="./",
-                        help='Path to a directory with test definitions. (default: ./)')
-    parser.add_argument('--timeout', type=int, default=300,
-                        help='The timeout in seconds for running each individual test. (default 300)')
-    parser.add_argument('--log-dir', type=str, default=None,
-                        help='The directory for storing logs (default: None)')
-    parser.add_argument('--logging-level', type=str, default='INFO',
-                        choices=['ERROR', 'WARNING', 'INFO', 'DEBUG'], help='Specifies the level of detail in the tester output (default=\'INFO\').')
-    parser.add_argument('--tmp-dir', type=str, default=None,
-                        help='The directory for storing temporary files (default: None)')
-    parser.add_argument('--blob-granule-local-file-path', type=str, default=None,
-                        help='Enable blob granule tests if set, value is path to local blob granule files')
+    parser.add_argument(
+        "--cluster-file",
+        type=str,
+        default="fdb.cluster",
+        help="The cluster file for the cluster being connected to. (default: fdb.cluster)",
+    )
+    parser.add_argument(
+        "--tester-binary",
+        type=str,
+        default="fdb_c_api_tester",
+        help="Path to the fdb_c_api_tester executable. (default: fdb_c_api_tester)",
+    )
+    parser.add_argument(
+        "--external-client-library",
+        type=str,
+        default=None,
+        help="Path to the external client library. (default: None)",
+    )
+    parser.add_argument(
+        "--test-dir",
+        type=str,
+        default="./",
+        help="Path to a directory with test definitions. (default: ./)",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=300,
+        help="The timeout in seconds for running each individual test. (default 300)",
+    )
+    parser.add_argument(
+        "--log-dir",
+        type=str,
+        default=None,
+        help="The directory for storing logs (default: None)",
+    )
+    parser.add_argument(
+        "--logging-level",
+        type=str,
+        default="INFO",
+        choices=["ERROR", "WARNING", "INFO", "DEBUG"],
+        help="Specifies the level of detail in the tester output (default='INFO').",
+    )
+    parser.add_argument(
+        "--tmp-dir",
+        type=str,
+        default=None,
+        help="The directory for storing temporary files (default: None)",
+    )
+    parser.add_argument(
+        "--blob-granule-local-file-path",
+        type=str,
+        default=None,
+        help="Enable blob granule tests if set, value is path to local blob granule files",
+    )
 
     return parser.parse_args(argv)
 
@@ -156,5 +202,5 @@ def main(argv):
     return run_tests(args)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     sys.exit(main(sys.argv[1:]))

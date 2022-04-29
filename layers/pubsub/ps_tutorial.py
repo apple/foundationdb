@@ -39,6 +39,7 @@ import os
 import sys
 import fdb
 from pubsub_bigdoc import PubSub
+
 fdb.api_version(14)
 
 # Start by opening the default FoundationDB database (see documentation)
@@ -51,19 +52,19 @@ db = fdb.open()
 ps = PubSub(db)
 
 # Create a single feed (for Alice)
-feed_a = ps.create_feed('alice_feed')
+feed_a = ps.create_feed("alice_feed")
 
 # Create an inbox for Bob
-inbox_b = ps.create_inbox('bob_inbox')
+inbox_b = ps.create_inbox("bob_inbox")
 
 # Subscribe bob to alice's feed
 assert ps.create_subscription(feed_a, inbox_b)
 
 # Post a couple of messages to alice's feed
-ps.post_message(feed_a, 'hi from alice')
-ps.post_message(feed_a, 'hi from alice again!')
+ps.post_message(feed_a, "hi from alice")
+ps.post_message(feed_a, "hi from alice again!")
 
 # Print all the messages in bob's inbox (which subscribes to alice's feed)
-print "Messages to Bob:"
+print("Messages to Bob:")
 for m in ps.get_inbox_messages(inbox_b):
-    print " ->", m
+    print(" ->", m)

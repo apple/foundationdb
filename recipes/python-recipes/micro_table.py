@@ -19,12 +19,13 @@
 #
 
 import fdb
+
 fdb.api_version(300)
 db = fdb.open()
 
-table = fdb.Subspace(('T',))
-row_index = table['R']
-col_index = table['C']
+table = fdb.Subspace(("T",))
+row_index = table["R"]
+col_index = table["C"]
 
 
 def _pack(value):
@@ -74,5 +75,6 @@ def table_get_col(tr, col):
 @fdb.transactional
 def clear_subspace(tr, subspace):
     tr.clear_range_startswith(subspace.key())
+
 
 # clear_subspace(db, table)

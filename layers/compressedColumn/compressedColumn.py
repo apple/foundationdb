@@ -22,8 +22,8 @@ import fdb
 import fdb.tuple
 import struct
 
-_unpackedPrefix = 'unpacked'
-_packedPrefix = 'packed'
+_unpackedPrefix = "unpacked"
+_packedPrefix = "packed"
 
 fdb.api_version(16)
 
@@ -82,7 +82,7 @@ class Column:
                         packedData = _PackedData(v)
 
             elif found:
-                keyRange = (keyRange[0], '\xff')
+                keyRange = (keyRange[0], "\xff")
 
         if strictRange:
             return [keyRange, packedData]
@@ -90,17 +90,33 @@ class Column:
             return [packedKeyRange, keyRange, packedData]
 
     def _getPackedRange(self, tr, key):
-        return tr.get_range(fdb.KeySelector.last_less_than(fdb.tuple.pack((self.columnName, _packedPrefix, key + chr(0)))),
-                            fdb.tuple.pack((self.columnName, _packedPrefix + chr(0))), 2)
+        return tr.get_range(
+            fdb.KeySelector.last_less_than(
+                fdb.tuple.pack((self.columnName, _packedPrefix, key + chr(0)))
+            ),
+            fdb.tuple.pack((self.columnName, _packedPrefix + chr(0))),
+            2,
+        )
 
     def _getUnpackedData(self, tr, key):
         return tr[fdb.tuple.pack((self.columnName, _unpackedPrefix, key))]
 
     def _getUnpackedRange(self, tr, keyBegin, keyEnd, limit):
-        return tr.get_range(fdb.tuple.pack((self.columnName, _unpackedPrefix, keyBegin)),
-                            fdb.tuple.pack((self.columnName, _unpackedPrefix, keyEnd)), limit)
+        return tr.get_range(
+            fdb.tuple.pack((self.columnName, _unpackedPrefix, keyBegin)),
+            fdb.tuple.pack((self.columnName, _unpackedPrefix, keyEnd)),
+            limit,
+        )
 
-    def _mergeResults(self, packed, unpacked, totalUnpacked, packedIndex=0, minPackedKey='', maxKey=None):
+    def _mergeResults(
+        self,
+        packed,
+        unpacked,
+        totalUnpacked,
+        packedIndex=0,
+        minPackedKey="",
+        maxKey=None,
+    ):
         data = _MergedData()
         if packed is None:
             # print 'No merge necessary'
@@ -109,7 +125,9 @@ class Column:
             data.packedIndex = 0
 
             if maxKey is None:
-                data.results = [fdb.KeyValue(self._getSubKey(k), v) for k, v in unpacked]
+                data.results = [
+                    fdb.KeyValue(self._getSubKey(k), v) for k, v in unpacked
+                ]
             else:
                 for k, v in unpacked:
                     if k < maxKey:
@@ -128,11 +146,16 @@ class Column:
                     break
 
                 exactMatch = False
-                while packedIndex < len(packed.rows) \
-                        and packed.rows[packedIndex].key <= subKey \
-                        and (maxKey is None or packed.rows[packedIndex].key < maxKey):
+                while (
+                    packedIndex < len(packed.rows)
+                    and packed.rows[packedIndex].key <= subKey
+                    and (maxKey is None or packed.rows[packedIndex].key < maxKey)
+                ):
                     exactMatch = packed.rows[packedIndex].key == subKey
-                    if packed.rows[packedIndex].key < subKey and packed.rows[packedIndex].key >= minPackedKey:
+                    if (
+                        packed.rows[packedIndex].key < subKey
+                        and packed.rows[packedIndex].key >= minPackedKey
+                    ):
                         data.results.append(packed.rows[packedIndex])
 
                     packedIndex += 1
@@ -149,7 +172,9 @@ class Column:
 
             # print "Packed index: %d, Unpacked: %d, total: %d" % (packedIndex, unpackedCount, totalUnpacked)
             if unpackedCount < totalUnpacked:
-                while packedIndex < len(packed.rows) and (maxKey is None or packed.rows[packedIndex].key < maxKey):
+                while packedIndex < len(packed.rows) and (
+                    maxKey is None or packed.rows[packedIndex].key < maxKey
+                ):
                     if packed.rows[packedIndex].key >= minPackedKey:
                         data.results.append(packed.rows[packedIndex])
 
@@ -188,11 +213,11 @@ class Column:
     def delete(self, tr):
         tr.clear_range_startswith(self.columnName)
 
-    def getColumnStream(self, db, startRow=''):
+    def getColumnStream(self, db, startRow=""):
         return _ColumnStream(db, self, startRow)
 
     # This function is not fully transactional.  Each compressed block will be created in a transaction
-    def pack(self, db, startRow='', endRow='\xff'):
+    def pack(self, db, startRow="", endRow="\xff"):
         currentRow = startRow
         numFetched = self.packFetchCount
 
@@ -208,7 +233,9 @@ class Column:
 
                 while True:
                     # print 'inner: \'' + repr(currentRow) + '\''
-                    unpacked = list(self._getUnpackedRange(tr, lastRow, endRow, self.packFetchCount))
+                    unpacked = list(
+                        self._getUnpackedRange(tr, lastRow, endRow, self.packFetchCount)
+                    )
 
                     unpackedCount = len(unpacked)
                     if len(unpacked) == 0:
@@ -217,24 +244,46 @@ class Column:
                     if packedData is None:
                         subKey = self._getSubKey(unpacked[0].key)
                         packedRange = self._getPackedRange(tr, subKey)
-                        [packedKeyRange, keyRange, packedData] = self._getPackedData(subKey, packedRange, False, False)
+                        [packedKeyRange, keyRange, packedData] = self._getPackedData(
+                            subKey, packedRange, False, False
+                        )
                         if packedKeyRange is not None:
                             # print 'Deleting old rows'
-                            oldRows.append(fdb.tuple.pack((self.columnName, _packedPrefix, packedKeyRange[0], packedKeyRange[1])))
+                            oldRows.append(
+                                fdb.tuple.pack(
+                                    (
+                                        self.columnName,
+                                        _packedPrefix,
+                                        packedKeyRange[0],
+                                        packedKeyRange[1],
+                                    )
+                                )
+                            )
 
                     maxKey = None
                     if keyRange is not None:
                         maxKey = keyRange[1]
 
-                    merged = self._mergeResults(packedData, unpacked, self.packFetchCount, packedIndex, lastRow, maxKey)
+                    merged = self._mergeResults(
+                        packedData,
+                        unpacked,
+                        self.packFetchCount,
+                        packedIndex,
+                        lastRow,
+                        maxKey,
+                    )
                     for row in merged.results:
-                        oldRows.append(fdb.tuple.pack((self.columnName, _unpackedPrefix, row.key)))
+                        oldRows.append(
+                            fdb.tuple.pack((self.columnName, _unpackedPrefix, row.key))
+                        )
                         newPack.addRow(row)
                         lastRow = row.key
                         # print 'Set lastRow = \'' + repr(lastRow) + '\''
 
                     lastRow = lastRow + chr(0)
-                    if (maxKey is not None and merged.finishedPack) or (maxKey is None and newPack.bytes > self.targetChunkSize):
+                    if (maxKey is not None and merged.finishedPack) or (
+                        maxKey is None and newPack.bytes > self.targetChunkSize
+                    ):
                         break
 
                 # print 'Deleting rows'
@@ -242,7 +291,9 @@ class Column:
                     # print 'Deleting row ' + repr(row)
                     del tr[row]
 
-                for k, v in newPack.getPackedKeyValues(self, self.targetChunkSize, self.maxChunkSize):
+                for k, v in newPack.getPackedKeyValues(
+                    self, self.targetChunkSize, self.maxChunkSize
+                ):
                     tr[k] = v
 
                 tr.commit().wait()
@@ -256,7 +307,6 @@ class Column:
 
 
 class _ColumnStream:
-
     def __init__(self, db, column, startKey):
         self.column = column
         self.db = db
@@ -310,13 +360,17 @@ class _ColumnStream:
         # Read next packed and unpacked entries
         # FIXME: Should we read unpacked after getting the result of the packed data?  If we do, then we can more accurately limit the number
         # of results that we get back
-        unpacked = self.column._getUnpackedRange(tr, startKey, '\xff', self.fetchCount)
+        unpacked = self.column._getUnpackedRange(tr, startKey, "\xff", self.fetchCount)
 
         if self.packedData is None:
             packedRange = self.column._getPackedRange(tr, startKey)
-            [keyRange, self.packedData] = self.column._getPackedData(startKey, packedRange, False)
+            [keyRange, self.packedData] = self.column._getPackedData(
+                startKey, packedRange, False
+            )
 
-        merged = self.column._mergeResults(self.packedData, unpacked, self.fetchCount, self.packedIndex, startKey)
+        merged = self.column._mergeResults(
+            self.packedData, unpacked, self.fetchCount, self.packedIndex, startKey
+        )
 
         if merged.finishedPack:
             # print 'reset packed'
@@ -372,7 +426,10 @@ class _PackedData:
             packBytes = 0
             while rowIndex < len(self.rows) and packBytes < size:
                 row = self.rows[rowIndex]
-                headerItems.append(struct.pack('iii', len(row.key), len(row.value), bodyLength) + row.key)
+                headerItems.append(
+                    struct.pack("iii", len(row.key), len(row.value), bodyLength)
+                    + row.key
+                )
                 bodyLength += len(row.value)
                 packBytes += len(row.key) + len(row.value) + 12
                 rowIndex += 1
@@ -381,26 +438,34 @@ class _PackedData:
                     startKey = row.key
                 endKey = row.key
 
-            header = ''.join(headerItems)
-            body = ''.join(row.value for row in self.rows[startRowIndex:rowIndex])
+            header = "".join(headerItems)
+            body = "".join(row.value for row in self.rows[startRowIndex:rowIndex])
 
-            results.append(fdb.KeyValue(fdb.tuple.pack((column.columnName, _packedPrefix, startKey, endKey)),
-                                        struct.pack('i', len(header)) + header + body))
+            results.append(
+                fdb.KeyValue(
+                    fdb.tuple.pack(
+                        (column.columnName, _packedPrefix, startKey, endKey)
+                    ),
+                    struct.pack("i", len(header)) + header + body,
+                )
+            )
             currentByte += packBytes
 
         return results
 
     def _unpack(self, str):
         self.bytes = len(str)
-        headerLength = struct.unpack('i', str[0:4])[0]
-        header = str[4:4 + headerLength]
-        body = str[4 + headerLength:]
+        headerLength = struct.unpack("i", str[0:4])[0]
+        header = str[4 : 4 + headerLength]
+        body = str[4 + headerLength :]
 
         index = 0
         while index < headerLength:
             # print 'header length: %d, %d' % (len(self.header), index)
-            (keyLength, valueLength, valueOffset) = struct.unpack('iii', header[index:index + 12])
-            key = header[index + 12:index + 12 + keyLength]
+            (keyLength, valueLength, valueOffset) = struct.unpack(
+                "iii", header[index : index + 12]
+            )
+            key = header[index + 12 : index + 12 + keyLength]
             index = index + 12 + keyLength
-            value = body[valueOffset:valueOffset + valueLength]
+            value = body[valueOffset : valueOffset + valueLength]
             self.rows.append(fdb.KeyValue(key, value))

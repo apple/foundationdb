@@ -19,6 +19,7 @@
 #
 
 import fdb
+
 fdb.api_version(300)
 db = fdb.open()
 
@@ -30,7 +31,7 @@ def clear_subspace(tr, subspace):
 
 CHUNK_LARGE = 5
 
-blob = fdb.Subspace(('B',))
+blob = fdb.Subspace(("B",))
 
 
 @fdb.transactional
@@ -46,12 +47,12 @@ def write_blob(tr, data):
 
 @fdb.transactional
 def read_blob(tr):
-    value = ''
+    value = ""
     for k, v in tr[blob.range()]:
         value += v
     return value
 
 
 clear_subspace(db, blob)
-write_blob(db, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ')
-print read_blob(db)
+write_blob(db, "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+print(read_blob(db))

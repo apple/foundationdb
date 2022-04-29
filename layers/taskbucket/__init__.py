@@ -26,12 +26,13 @@ import time
 import struct
 import fdb
 import fdb.tuple
+
 fdb.api_version(200)
 
 # TODO: Make this fdb.tuple.subspace() or similar?
 
 
-class Subspace (object):
+class Subspace(object):
     def __init__(self, prefixTuple, rawPrefix=""):
         self.rawPrefix = rawPrefix + fdb.tuple.pack(prefixTuple)
 
@@ -46,7 +47,7 @@ class Subspace (object):
 
     def unpack(self, key):
         assert key.startswith(self.rawPrefix)
-        return fdb.tuple.unpack(key[len(self.rawPrefix):])
+        return fdb.tuple.unpack(key[len(self.rawPrefix) :])
 
     def range(self, tuple=()):
         p = fdb.tuple.range(tuple)
@@ -58,7 +59,7 @@ def random_key():
 
 
 def _pack_value(v):
-    if hasattr(v, 'pack'):
+    if hasattr(v, "pack"):
         return v.pack()
     else:
         return v
@@ -68,7 +69,7 @@ class TaskTimedOutException(Exception):
     pass
 
 
-class TaskBucket (object):
+class TaskBucket(object):
     """A TaskBucket represents an unordered collection of tasks, stored
     in a database and available to any number of clients.  A program may
     use one or many TaskBuckets.  TaskBucket represents a task as a
@@ -118,20 +119,28 @@ class TaskBucket (object):
         If there are no tasks in the bucket, returns None."""
         if self.system_access:
             tr.options.set_access_system_keys()
-        k = tr.snapshot.get_key(fdb.KeySelector.last_less_or_equal(self.available.pack((random_key(),))))
+        k = tr.snapshot.get_key(
+            fdb.KeySelector.last_less_or_equal(self.available.pack((random_key(),)))
+        )
         if not k or k < self.available.pack(("",)):
-            k = tr.snapshot.get_key(fdb.KeySelector.last_less_or_equal(self.available.pack((chr(255) * 16,))))
+            k = tr.snapshot.get_key(
+                fdb.KeySelector.last_less_or_equal(
+                    self.available.pack((chr(255) * 16,))
+                )
+            )
             if not k or k < self.available.pack(("",)):
                 if self.check_timeouts(tr):
                     return self.get_one(tr)
                 return None
         key = self.available.unpack(k)[0]
         avail = self.available[key]
-        timeout = tr.get_read_version().wait() + long(self.timeout * (0.9 + 0.2 * random.random()))
+        timeout = tr.get_read_version().wait() + long(
+            self.timeout * (0.9 + 0.2 * random.random())
+        )
 
         taskDict = {}
         for k, v in tr[avail.range(())]:
-            tk, = avail.unpack(k)
+            (tk,) = avail.unpack(k)
             taskDict[tk] = v
 
             if tk != "type" or v != "":
@@ -147,7 +156,9 @@ class TaskBucket (object):
     def is_empty(self, tr):
         if self.system_access:
             tr.options.set_read_system_keys()
-        k = tr.get_key(fdb.KeySelector.last_less_or_equal(self.available.pack((chr(255) * 16,))))
+        k = tr.get_key(
+            fdb.KeySelector.last_less_or_equal(self.available.pack((chr(255) * 16,)))
+        )
         if k and k >= self.available.pack(("",)):
             return False
         return not bool(next(iter(tr[self.timeouts.range()]), False))
@@ -156,7 +167,9 @@ class TaskBucket (object):
     def is_busy(self, tr):
         if self.system_access:
             tr.options.set_read_system_keys()
-        k = tr.get_key(fdb.KeySelector.last_less_or_equal(self.available.pack((chr(255) * 16,))))
+        k = tr.get_key(
+            fdb.KeySelector.last_less_or_equal(self.available.pack((chr(255) * 16,)))
+        )
         return k and k >= self.available.pack(("",))
 
     @fdb.transactional
@@ -216,7 +229,9 @@ class TaskBucket (object):
         end = tr.get_read_version().wait()
         rng = slice(self.timeouts.range((0,)).start, self.timeouts.range((end,)).stop)
         anyTimeouts = False
-        for k, v in tr.get_range(rng.start, rng.stop, streaming_mode=fdb.StreamingMode.want_all):
+        for k, v in tr.get_range(
+            rng.start, rng.stop, streaming_mode=fdb.StreamingMode.want_all
+        ):
             timeout, taskKey, param = self.timeouts.unpack(k)
             anyTimeouts = True
             tr.set(self.available.pack((taskKey, param)), v)
@@ -225,7 +240,7 @@ class TaskBucket (object):
         return anyTimeouts
 
 
-class TaskDispatcher (object):
+class TaskDispatcher(object):
     def __init__(self):
         self.taskTypes = {}
 
@@ -243,7 +258,7 @@ class TaskDispatcher (object):
         which has already been passed to self.taskType() and keyword parameters
         for it."""
         assert self.taskTypes.get(f.__name__) == f
-        assert 'type' not in kw
+        assert "type" not in kw
         d = dict(kw)
         d["type"] = f.__name__
         return d
@@ -265,7 +280,7 @@ class TaskDispatcher (object):
         return True
 
 
-class FutureBucket (object):
+class FutureBucket(object):
     """A factory for Futures, and a location in the database to store them."""
 
     def __init__(self, subspace, system_access=False):
@@ -298,7 +313,9 @@ class FutureBucket (object):
         return joined
 
     def _add_task(self, tr, taskType, taskBucket, **task):
-        bucket = TaskBucket(Subspace((), rawPrefix=taskBucket), system_access=self.system_access)
+        bucket = TaskBucket(
+            Subspace((), rawPrefix=taskBucket), system_access=self.system_access
+        )
         task["type"] = taskType
         bucket.add(tr, task)
 
@@ -311,7 +328,7 @@ class FutureBucket (object):
             future.perform_all_actions(tr)
 
 
-class Future (object):
+class Future(object):
     """Represents a state which will become true ("set") at some point, and a set
     of actions to perform as soon as the state is true.  The state can change
     only once."""
@@ -395,7 +412,12 @@ class Future (object):
         for blockid in ids:
             self._add_block(tr, blockid)
         for f, blockid in zip(futures, ids):
-            f.on_set(tr, self.dispatcher.makeTask(self.bucket._unblock_future, future=self.pack(), blockid=blockid))
+            f.on_set(
+                tr,
+                self.dispatcher.makeTask(
+                    self.bucket._unblock_future, future=self.pack(), blockid=blockid
+                ),
+            )
 
     def _add_block(self, tr, blockid):
         tr[self.prefix["bl"][blockid].key()] = ""

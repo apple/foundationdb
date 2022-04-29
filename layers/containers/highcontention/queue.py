@@ -47,7 +47,7 @@ fdb.api_version(22)
 ###################################
 
 
-class Subspace (object):
+class Subspace(object):
     def __init__(self, prefixTuple, rawPrefix=""):
         self.rawPrefix = rawPrefix + fdb.tuple.pack(prefixTuple)
 
@@ -62,7 +62,7 @@ class Subspace (object):
 
     def unpack(self, key):
         assert key.startswith(self.rawPrefix)
-        return fdb.tuple.unpack(key[len(self.rawPrefix):])
+        return fdb.tuple.unpack(key[len(self.rawPrefix) :])
 
     def range(self, tuple=()):
         p = fdb.tuple.range(tuple)
@@ -80,9 +80,9 @@ class Queue:
         self.subspace = subspace
         self.highContention = highContention
 
-        self._conflictedPop = self.subspace['pop']
-        self._conflictedItem = self.subspace['conflict']
-        self._queueItem = self.subspace['item']
+        self._conflictedPop = self.subspace["pop"]
+        self._conflictedItem = self.subspace["conflict"]
+        self._queueItem = self.subspace["item"]
 
     @fdb.transactional
     def clear(self, tr):
@@ -128,7 +128,9 @@ class Queue:
         return self._conflictedItem.pack((subKey,))
 
     def _randID(self):
-        return os.urandom(20)  # this relies on good random data from the OS to avoid collisions
+        return os.urandom(
+            20
+        )  # this relies on good random data from the OS to avoid collisions
 
     def _encodeValue(self, value):
         return fdb.tuple.pack((value,))
@@ -180,7 +182,7 @@ class Queue:
 
         waitKey = self._conflictedPop.pack((index, self._randID()))
         read = tr[waitKey]
-        tr[waitKey] = ''
+        tr[waitKey] = ""
         return waitKey
 
     def _getWaitingPops(self, tr, numPops):
@@ -291,25 +293,25 @@ class Queue:
 
 
 def queue_test(db):
-    queue = Queue(Subspace(('queue_test',)), False)
-    print 'Clear Queue'
+    queue = Queue(Subspace(("queue_test",)), False)
+    print("Clear Queue")
     queue.clear(db)
-    print 'Empty? %s' % queue.empty(db)
-    print 'Push 10, 8, 6'
+    print("Empty? %s" % queue.empty(db))
+    print("Push 10, 8, 6")
     queue.push(db, 10)
     queue.push(db, 8)
     queue.push(db, 6)
-    print 'Empty? %s' % queue.empty(db)
-    print 'Pop item: %d' % queue.pop(db)
-    print 'Next item: %d' % queue.peek(db)
-    print 'Pop item: %d' % queue.pop(db)
-    print 'Pop item: %d' % queue.pop(db)
-    print 'Empty? %s' % queue.empty(db)
-    print 'Push 5'
+    print("Empty? %s" % queue.empty(db))
+    print("Pop item: %d" % queue.pop(db))
+    print("Next item: %d" % queue.peek(db))
+    print("Pop item: %d" % queue.pop(db))
+    print("Pop item: %d" % queue.pop(db))
+    print("Empty? %s" % queue.empty(db))
+    print("Push 5")
     queue.push(db, 5)
-    print 'Clear Queue'
+    print("Clear Queue")
     queue.clear(db)
-    print 'Empty? %s' % queue.empty(db)
+    print("Empty? %s" % queue.empty(db))
 
 
 ######################
@@ -319,26 +321,26 @@ def queue_test(db):
 
 # caution: modifies the database!
 def queue_single_client_example(db):
-    queue = Queue(Subspace(('queue_example',)), False)
+    queue = Queue(Subspace(("queue_example",)), False)
     queue.clear(db)
 
     for i in range(10):
         queue.push(db, i)
 
     for i in range(10):
-        print queue.pop(db)
+        print(queue.pop(db))
 
 
 def push_thread(queue, db, id, num):
     for i in range(num):
-        queue.push(db, '%d.%d' % (id, i))
+        queue.push(db, "%d.%d" % (id, i))
 
 
 def pop_thread(queue, db, id, num):
     for i in range(num):
         queue.pop(db)
 
-    print 'Finished pop thread %d' % id
+    print("Finished pop thread %d" % id)
 
 
 import threading
@@ -348,12 +350,18 @@ def queue_multi_client_example(db):
     descriptions = ["simple queue", "high contention queue"]
 
     for highContention in range(2):
-        print 'Starting %s test' % descriptions[highContention]
-        queue = Queue(Subspace(('queue_example',)), highContention > 0)
+        print("Starting %s test" % descriptions[highContention])
+        queue = Queue(Subspace(("queue_example",)), highContention > 0)
         queue.clear(db)
 
-        pushThreads = [threading.Thread(target=push_thread, args=(queue, db, i, 100)) for i in range(10)]
-        popThreads = [threading.Thread(target=pop_thread, args=(queue, db, i, 100)) for i in range(10)]
+        pushThreads = [
+            threading.Thread(target=push_thread, args=(queue, db, i, 100))
+            for i in range(10)
+        ]
+        popThreads = [
+            threading.Thread(target=pop_thread, args=(queue, db, i, 100))
+            for i in range(10)
+        ]
 
         start = time.time()
 
@@ -367,19 +375,19 @@ def queue_multi_client_example(db):
             pop.join()
 
         end = time.time()
-        print 'Finished %s in %f seconds' % (descriptions[highContention], end - start)
+        print("Finished %s in %f seconds" % (descriptions[highContention], end - start))
 
 
 def queue_example(db):
-    print "Running single client example:"
+    print("Running single client example:")
     queue_single_client_example(db)
 
-    print "\nRunning multi-client example:"
+    print("\nRunning multi-client example:")
     queue_multi_client_example(db)
 
 
 # caution: modifies the database!
-if __name__ == '__main__':
+if __name__ == "__main__":
     db = fdb.open()
 
     queue_example(db)

@@ -23,7 +23,9 @@
 import os
 import sys
 
-sys.path[:0] = [os.path.join(os.path.dirname(__file__), '..', '..', 'bindings', 'python')]
+sys.path[:0] = [
+    os.path.join(os.path.dirname(__file__), "..", "..", "bindings", "python")
+]
 import fdb
 import argparse
 from pubsub_bigdoc import PubSub
@@ -43,12 +45,12 @@ args = parser.parse_args()
 db = fdb.open(args.zkAddr, args.database)
 ps = PubSub(db)
 
-print 'creating users',
+print("creating users", end=" ")
 for i in range(args.userStart, args.userCount):
-    ps.create_inbox_and_feed('%09d' % i)
+    ps.create_inbox_and_feed("%09d" % i)
     if i > 0 and i % 100 == 0:
-        print i,
-print 'done'
+        print(i, end=" ")
+print("done")
 
 # @fdb.transactional
 # def done(tr):

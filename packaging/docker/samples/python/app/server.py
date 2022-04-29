@@ -23,10 +23,12 @@ import fdb
 
 app = Flask(__name__)
 
-fdb.api_version(int(os.getenv('FDB_API_VERSION')))
+fdb.api_version(int(os.getenv("FDB_API_VERSION")))
 db = fdb.open()
 
-COUNTER_KEY = fdb.tuple.pack(('counter',))
+COUNTER_KEY = fdb.tuple.pack(("counter",))
+
+
 def _increment_counter(tr):
     counter_value = tr[COUNTER_KEY]
     if counter_value == None:
@@ -36,14 +38,16 @@ def _increment_counter(tr):
     tr[COUNTER_KEY] = fdb.tuple.pack((counter,))
     return counter
 
-@app.route("/counter", methods=['GET'])
+
+@app.route("/counter", methods=["GET"])
 def get_counter():
     counter_value = db[COUNTER_KEY]
     if counter_value == None:
-        return '0'
+        return "0"
 
     return str(fdb.tuple.unpack(counter_value)[0])
 
-@app.route("/counter/increment", methods=['POST'])
+
+@app.route("/counter/increment", methods=["POST"])
 def increment_counter():
     return str(_increment_counter(db))
