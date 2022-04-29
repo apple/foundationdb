@@ -219,12 +219,21 @@ class UpgradeTest:
         remote_sha256 = "{}.sha256".format(remote_file)
         local_sha256 = Path("{}.sha256".format(local_file_tmp))
 
-        for attempt_cnt in range(MAX_DOWNLOAD_ATTEMPTS):
-            print("Downloading '{}' to '{}'...".format(remote_file, local_file_tmp))
-            request.urlretrieve(remote_file, local_file_tmp)
-            print("Downloading '{}' to '{}'...".format(remote_sha256, local_sha256))
-            request.urlretrieve(remote_sha256, local_sha256)
-            print("Download complete")
+        for attempt_cnt in range(MAX_DOWNLOAD_ATTEMPTS + 1):
+            if attempt_cnt == MAX_DOWNLOAD_ATTEMPTS:
+                assert False, "Failed to download {} after {} attempts".format(
+                    local_file_tmp, MAX_DOWNLOAD_ATTEMPTS
+                )
+            try:
+                print("Downloading '{}' to '{}'...".format(remote_file, local_file_tmp))
+                request.urlretrieve(remote_file, local_file_tmp)
+                print("Downloading '{}' to '{}'...".format(remote_sha256, local_sha256))
+                request.urlretrieve(remote_sha256, local_sha256)
+                print("Download complete")
+            except Exception as e:
+                print("Retrying on error:", e)
+                continue
+
             assert local_file_tmp.exists(), "{} does not exist".format(local_file_tmp)
             assert local_sha256.exists(), "{} does not exist".format(local_sha256)
             expected_checksum = read_to_str(local_sha256)
@@ -237,10 +246,6 @@ class UpgradeTest:
                     expected_checksum, actual_checkum
                 )
             )
-            if attempt_cnt == MAX_DOWNLOAD_ATTEMPTS - 1:
-                assert False, "Failed to download {} after {} attempts".format(
-                    local_file_tmp, MAX_DOWNLOAD_ATTEMPTS
-                )
 
         os.rename(local_file_tmp, local_file)
         os.remove(local_sha256)
