@@ -371,7 +371,6 @@ struct TLogData : NonCopyable {
 	std::vector<TagsAndMessage> tempTagMessages;
 
 	Reference<Histogram> commitLatencyDist;
-	Promise<Void> recoveryTxnReceived;
 
 	TLogData(UID dbgid,
 	         UID workerID,
@@ -569,6 +568,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	Promise<Void> recoveryComplete, committingQueue;
 	Version unrecoveredBefore, recoveredAt;
 	Version recoveryTxnVersion;
+	Promise<Void> recoveryTxnReceived;
 
 	struct PeekTrackerData {
 		std::map<int, Promise<std::pair<Version, bool>>>
@@ -1748,22 +1748,21 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 
 	DisabledTraceEvent("TLogPeekMessages0", self->dbgid)
 	    .detail("LogId", logData->logId)
+	    .detail("Tag", reqTag.toString())
 	    .detail("ReqBegin", reqBegin)
 	    .detail("Version", logData->version.get())
-	    .detail("RecoveredAt", logData->recoveredAt)
-	    .detail("Tag", reqTag.toString());
+	    .detail("RecoveredAt", logData->recoveredAt);
 	// Wait until we have something to return that the caller doesn't already have
 	if (logData->version.get() < reqBegin) {
 		wait(logData->version.whenAtLeast(reqBegin));
 		wait(delay(SERVER_KNOBS->TLOG_PEEK_DELAY, g_network->getCurrentTask()));
 	}
-	if (!logData->stopped && reqBegin >= logData->recoveredAt &&
-	    (reqTag.locality != tagLocalityTxs || reqTag == txsTag)) {
+	if (!logData->stopped && reqTag.locality != tagLocalityTxs && reqTag != txsTag) {
 		// Make sure the peek reply has the recovery txn for the current TLog.
 		// Older generation TLog has been stopped and doesn't wait here.
 		// Similarly during recovery, reading transaction state store
 		// doesn't wait here.
-		wait(self->recoveryTxnReceived.getFuture());
+		wait(logData->recoveryTxnReceived.getFuture());
 	}
 
 	if (logData->locality != tagLocalitySatellite && reqTag.locality == tagLocalityLogRouter) {
@@ -1806,8 +1805,8 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 
 	DisabledTraceEvent("TLogPeekMessages1", self->dbgid)
 	    .detail("LogId", logData->logId)
-	    .detail("ReqBegin", reqBegin)
 	    .detail("Tag", reqTag.toString())
+	    .detail("ReqBegin", reqBegin)
 	    .detail("PoppedVer", poppedVer);
 	if (poppedVer > reqBegin) {
 		TLogPeekReply rep;
@@ -2016,7 +2015,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 	reply.end = endVersion;
 	reply.onlySpilled = onlySpilled;
 
-	DisabledTraceEvent("TlogPeekMessages4", self->dbgid)
+	DisabledTraceEvent("TLogPeekMessages4", self->dbgid)
 	    .detail("LogId", logData->logId)
 	    .detail("Tag", reqTag.toString())
 	    .detail("ReqBegin", reqBegin)
@@ -2299,13 +2298,14 @@ ACTOR Future<Void> tLogCommit(TLogData* self,
 		}
 		// Notifies the commitQueue actor to commit persistentQueue, and also unblocks tLogPeekMessages actors
 		logData->version.set(req.version);
-		if (self->recoveryTxnReceived.canBeSet() && (req.prevVersion == 0 || req.prevVersion == logData->recoveredAt)) {
+		if (logData->recoveryTxnReceived.canBeSet() &&
+		    (req.prevVersion == 0 || req.prevVersion == logData->recoveredAt)) {
 			TraceEvent("TLogInfo", self->dbgid)
 			    .detail("Log", logData->logId)
 			    .detail("Prev", req.prevVersion)
 			    .detail("RecoveredAt", logData->recoveredAt)
 			    .detail("RecoveryTxnVersion", req.version);
-			self->recoveryTxnReceived.send(Void());
+			logData->recoveryTxnReceived.send(Void());
 		}
 		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
 			self->unknownCommittedVersions.push_front(std::make_tuple(req.version, req.tLogCount));
@@ -2848,12 +2848,12 @@ ACTOR Future<Void> pullAsyncData(TLogData* self,
 					// Notifies the commitQueue actor to commit persistentQueue, and also unblocks tLogPeekMessages
 					// actors
 					logData->version.set(ver);
-					if (!pullingRecoveryData && ver > logData->recoveredAt && self->recoveryTxnReceived.canBeSet()) {
+					if (logData->recoveryTxnReceived.canBeSet() && !pullingRecoveryData && ver > logData->recoveredAt) {
 						TraceEvent("TLogInfo", self->dbgid)
 						    .detail("Log", logData->logId)
 						    .detail("RecoveredAt", logData->recoveredAt)
 						    .detail("RecoveryTxnVersion", ver);
-						self->recoveryTxnReceived.send(Void());
+						logData->recoveryTxnReceived.send(Void());
 					}
 					wait(yield(TaskPriority::TLogCommit));
 				}
