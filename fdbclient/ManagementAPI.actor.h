@@ -56,7 +56,7 @@ struct IQuorumChange : ReferenceCounted<IQuorumChange> {
 // Change to use the given set of coordination servers
 ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
                                                                Reference<IQuorumChange> change,
-                                                               ClusterConnectionString* conn);
+                                                               std::vector<NetworkAddress> desiredCoordinators);
 ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChange> change);
 Reference<IQuorumChange> autoQuorumChange(int desired = -1);
 Reference<IQuorumChange> noQuorumChange();
@@ -146,7 +146,7 @@ ACTOR Future<bool> setHealthyZone(Database cx, StringRef zoneId, double seconds,
 ACTOR Future<Void> waitForPrimaryDC(Database cx, StringRef dcId);
 
 // Gets the cluster connection string
-ACTOR Future<std::vector<NetworkAddress>> getCoordinators(Database cx);
+ACTOR Future<Optional<ClusterConnectionString>> getConnectionString(Database cx);
 
 void schemaCoverage(std::string const& spath, bool covered = true);
 bool schemaMatch(json_spirit::mValue const& schema,

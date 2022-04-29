@@ -20,12 +20,19 @@
 #
 
 import sys
-import subprocess
 import argparse
 import os
 from subprocess import Popen, TimeoutExpired
 import logging
 import signal
+from pathlib import Path
+import glob
+import random
+import string
+
+
+def random_string(len):
+    return ''.join(random.choice(string.ascii_letters + string.digits) for i in range(len))
 
 
 def get_logger():
@@ -48,6 +55,14 @@ def initialize_logger_level(logging_level):
         logger.setLevel(logging.ERROR)
 
 
+def dump_client_logs(log_dir):
+    for log_file in glob.glob(os.path.join(log_dir, "*")):
+        print(">>>>>>>>>>>>>>>>>>>> Contents of {}:".format(log_file))
+        with open(log_file, "r") as f:
+            print(f.read())
+        print(">>>>>>>>>>>>>>>>>>>> End of {}:".format(log_file))
+
+
 def run_tester(args, test_file):
     cmd = [args.tester_binary,
            "--cluster-file", args.cluster_file,
@@ -56,6 +71,12 @@ def run_tester(args, test_file):
         cmd += ["--external-client-library", args.external_client_library]
     if args.tmp_dir is not None:
         cmd += ["--tmp-dir", args.tmp_dir]
+    log_dir = None
+    if args.log_dir is not None:
+        log_dir = Path(args.log_dir).joinpath(random_string(8))
+        log_dir.mkdir(exist_ok=True)
+        cmd += ['--log', "--log-dir", str(log_dir)]
+
     if args.blob_granule_local_file_path is not None:
         cmd += ["--blob-granule-local-file-path",
                 args.blob_granule_local_file_path]
@@ -63,6 +84,7 @@ def run_tester(args, test_file):
     get_logger().info('\nRunning tester \'%s\'...' % ' '.join(cmd))
     proc = Popen(cmd, stdout=sys.stdout, stderr=sys.stderr)
     timed_out = False
+    ret_code = 1
     try:
         ret_code = proc.wait(args.timeout)
     except TimeoutExpired:
@@ -72,15 +94,16 @@ def run_tester(args, test_file):
         raise Exception('Unable to run tester (%s)' % e)
 
     if ret_code != 0:
-        if ret_code < 0:
+        if timed_out:
+            reason = 'timed out after %d seconds' % args.timeout
+        elif ret_code < 0:
             reason = signal.Signals(-ret_code).name
         else:
             reason = 'exit code: %d' % ret_code
-        if timed_out:
-            reason = 'timed out after %d seconds' % args.timeout
-            ret_code = 1
         get_logger().error('\n\'%s\' did not complete succesfully (%s)' %
                            (cmd[0], reason))
+        if (log_dir is not None):
+            dump_client_logs(log_dir)
 
     get_logger().info('')
     return ret_code
@@ -115,6 +138,8 @@ def parse_args(argv):
                         help='Path to a directory with test definitions. (default: ./)')
     parser.add_argument('--timeout', type=int, default=300,
                         help='The timeout in seconds for running each individual test. (default 300)')
+    parser.add_argument('--log-dir', type=str, default=None,
+                        help='The directory for storing logs (default: None)')
     parser.add_argument('--logging-level', type=str, default='INFO',
                         choices=['ERROR', 'WARNING', 'INFO', 'DEBUG'], help='Specifies the level of detail in the tester output (default=\'INFO\').')
     parser.add_argument('--tmp-dir', type=str, default=None,
