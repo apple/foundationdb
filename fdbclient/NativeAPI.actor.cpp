@@ -3485,7 +3485,7 @@ ACTOR Future<Version> waitForCommittedVersion(Database cx, Version version, Span
 }
 
 ACTOR Future<Version> getRawVersion(Reference<TransactionState> trState) {
-	state Span span("NAPI:getRawVersion"_loc, { trState->spanContext });
+	state Span span("NAPI:getRawVersion"_loc, trState->spanContext);
 	loop {
 		choose {
 			when(wait(trState->cx->onProxiesChanged())) {}
