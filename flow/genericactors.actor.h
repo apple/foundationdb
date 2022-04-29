@@ -2111,7 +2111,7 @@ class SimTimeoutQueue : public NotifiedQueue<T>::Queue {
 						timeout = delay(240);
 					}
 				}
-				when(wait(self->remove.onTrigger())) {}
+				when(wait(self->remove.onTrigger())) { timeout = delay(240); }
 			}
 		}
 	}
