@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '7.1.0',
+        VERSION:     '7.1.3',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -148,13 +148,13 @@
 <div class="section" id="summary">
 <span id="perpetual-storage-wiggle-introduction"></span><h2>Summary</h2>
 <p>Perpetual storage wiggle is a feature that forces the data distributor to constantly build new storage teams when the cluster is healthy. On a high-level note, the process is like this:</p>
-<p>Order storage servers by process id. For each storage server n:</p>
+<p>Order storage servers by their created time, from oldest to newest. For each storage server n:</p>
 <ol class="loweralpha simple">
 <li>Exclude storage server n.</li>
 <li>Wait until all data has been moved off the storage server.</li>
 <li>Include storage n</li>
 </ol>
-<p>Goto a to wiggle the next storage process with different process id.</p>
+<p>Goto step a to wiggle the next storage server.</p>
 <p>With a perpetual wiggle, storage migrations will be much less impactful. The wiggler will detect the healthy status based on healthy teams, available disk space and the number of unhealthy relocations. It will pause the wiggle until the cluster is healthy again.</p>
 </div>
 <div class="section" id="configuration">
@@ -171,7 +171,10 @@
 </div>
 <div class="section" id="monitor">
 <h2>Monitor</h2>
-<p>The <code class="docutils literal"><span class="pre">status</span></code> command in the FDB <a class="reference internal" href="command-line-interface.html#command-line-interface"><span class="std std-ref">command line interface</span></a> will show the current perpetual_storage_wiggle value.</p>
+<ul class="simple">
+<li>The <code class="docutils literal"><span class="pre">status</span></code> command will report the IP address of the Storage Server under wiggling.</li>
+<li>The <code class="docutils literal"><span class="pre">status</span> <span class="pre">json</span></code> command in the FDB <a class="reference internal" href="command-line-interface.html#command-line-interface"><span class="std std-ref">command line interface</span></a> will show the current <code class="docutils literal"><span class="pre">perpetual_storage_wiggle</span></code> value. Plus, the <code class="docutils literal"><span class="pre">cluster.storage_wiggler</span></code> field reports storage wiggle details.</li>
+</ul>
 <div class="section" id="trace-events">
 <h3>Trace Events</h3>
 <p><code class="docutils literal"><span class="pre">PerpetualStorageWiggleOpen</span></code> shows up when you switch on perpetual storage wiggle, while <code class="docutils literal"><span class="pre">PerpetualStorageWiggleClose</span></code> appears when you turn it off;</p>
@@ -203,7 +206,7 @@
     </p>
     <p>
         &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Apr 09, 2022.<br/>
+      Last updated on Apr 28, 2022.<br/>
     </p>
   </div>
 </footer>
