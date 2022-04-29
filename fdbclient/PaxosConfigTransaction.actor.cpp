@@ -59,8 +59,14 @@ class CommitQuorum {
 	                                          ConfigGeneration generation,
 	                                          ConfigTransactionInterface cti) {
 		try {
-			wait(timeoutError(cti.commit.getReply(self->getCommitRequest(generation)),
-			                  CLIENT_KNOBS->COMMIT_QUORUM_TIMEOUT));
+			if (cti.hostname.present()) {
+				wait(timeoutError(retryGetReplyFromHostname(
+				                      self->getCommitRequest(generation), cti.hostname.get(), WLTOKEN_CONFIGTXN_COMMIT),
+				                  CLIENT_KNOBS->COMMIT_QUORUM_TIMEOUT));
+			} else {
+				wait(timeoutError(cti.commit.getReply(self->getCommitRequest(generation)),
+				                  CLIENT_KNOBS->COMMIT_QUORUM_TIMEOUT));
+			}
 			++self->successful;
 		} catch (Error& e) {
 			// self might be destroyed if this actor is cancelled
@@ -122,9 +128,20 @@ class GetGenerationQuorum {
 	ACTOR static Future<Void> addRequestActor(GetGenerationQuorum* self, ConfigTransactionInterface cti) {
 		loop {
 			try {
-				ConfigTransactionGetGenerationReply reply = wait(timeoutError(
-				    cti.getGeneration.getReply(ConfigTransactionGetGenerationRequest{ self->lastSeenLiveVersion }),
-				    CLIENT_KNOBS->GET_GENERATION_QUORUM_TIMEOUT));
+				state ConfigTransactionGetGenerationReply reply;
+				if (cti.hostname.present()) {
+					wait(timeoutError(store(reply,
+					                        retryGetReplyFromHostname(
+					                            ConfigTransactionGetGenerationRequest{ self->lastSeenLiveVersion },
+					                            cti.hostname.get(),
+					                            WLTOKEN_CONFIGTXN_GETGENERATION)),
+					                  CLIENT_KNOBS->GET_GENERATION_QUORUM_TIMEOUT));
+				} else {
+					wait(timeoutError(store(reply,
+					                        cti.getGeneration.getReply(
+					                            ConfigTransactionGetGenerationRequest{ self->lastSeenLiveVersion })),
+					                  CLIENT_KNOBS->GET_GENERATION_QUORUM_TIMEOUT));
+				}
 
 				++self->totalRepliesReceived;
 				auto gen = reply.generation;
@@ -225,9 +242,18 @@ class PaxosConfigTransactionImpl {
 		state ConfigKey configKey = ConfigKey::decodeKey(key);
 		loop {
 			try {
-				ConfigGeneration generation = wait(self->getGenerationQuorum.getGeneration());
-				state Reference<ConfigTransactionInfo> configNodes(
-				    new ConfigTransactionInfo(self->getGenerationQuorum.getReadReplicas()));
+				state ConfigGeneration generation = wait(self->getGenerationQuorum.getGeneration());
+				state std::vector<ConfigTransactionInterface> readReplicas =
+				    self->getGenerationQuorum.getReadReplicas();
+				std::vector<Future<Void>> fs;
+				for (ConfigTransactionInterface& readReplica : readReplicas) {
+					if (readReplica.hostname.present()) {
+						fs.push_back(tryInitializeRequestStream(
+						    &readReplica.get, readReplica.hostname.get(), WLTOKEN_CONFIGTXN_GET));
+					}
+				}
+				wait(waitForAll(fs));
+				state Reference<ConfigTransactionInfo> configNodes(new ConfigTransactionInfo(readReplicas));
 				ConfigTransactionGetReply reply =
 				    wait(timeoutError(basicLoadBalance(configNodes,
 				                                       &ConfigTransactionInterface::get,
@@ -248,9 +274,17 @@ class PaxosConfigTransactionImpl {
 	}
 
 	ACTOR static Future<RangeResult> getConfigClasses(PaxosConfigTransactionImpl* self) {
-		ConfigGeneration generation = wait(self->getGenerationQuorum.getGeneration());
-		state Reference<ConfigTransactionInfo> configNodes(
-		    new ConfigTransactionInfo(self->getGenerationQuorum.getReadReplicas()));
+		state ConfigGeneration generation = wait(self->getGenerationQuorum.getGeneration());
+		state std::vector<ConfigTransactionInterface> readReplicas = self->getGenerationQuorum.getReadReplicas();
+		std::vector<Future<Void>> fs;
+		for (ConfigTransactionInterface& readReplica : readReplicas) {
+			if (readReplica.hostname.present()) {
+				fs.push_back(tryInitializeRequestStream(
+				    &readReplica.getClasses, readReplica.hostname.get(), WLTOKEN_CONFIGTXN_GETCLASSES));
+			}
+		}
+		wait(waitForAll(fs));
+		state Reference<ConfigTransactionInfo> configNodes(new ConfigTransactionInfo(readReplicas));
 		ConfigTransactionGetConfigClassesReply reply =
 		    wait(basicLoadBalance(configNodes,
 		                          &ConfigTransactionInterface::getClasses,
@@ -264,9 +298,17 @@ class PaxosConfigTransactionImpl {
 	}
 
 	ACTOR static Future<RangeResult> getKnobs(PaxosConfigTransactionImpl* self, Optional<Key> configClass) {
-		ConfigGeneration generation = wait(self->getGenerationQuorum.getGeneration());
-		state Reference<ConfigTransactionInfo> configNodes(
-		    new ConfigTransactionInfo(self->getGenerationQuorum.getReadReplicas()));
+		state ConfigGeneration generation = wait(self->getGenerationQuorum.getGeneration());
+		state std::vector<ConfigTransactionInterface> readReplicas = self->getGenerationQuorum.getReadReplicas();
+		std::vector<Future<Void>> fs;
+		for (ConfigTransactionInterface& readReplica : readReplicas) {
+			if (readReplica.hostname.present()) {
+				fs.push_back(tryInitializeRequestStream(
+				    &readReplica.getKnobs, readReplica.hostname.get(), WLTOKEN_CONFIGTXN_GETKNOBS));
+			}
+		}
+		wait(waitForAll(fs));
+		state Reference<ConfigTransactionInfo> configNodes(new ConfigTransactionInfo(readReplicas));
 		ConfigTransactionGetKnobsReply reply =
 		    wait(basicLoadBalance(configNodes,
 		                          &ConfigTransactionInterface::getKnobs,
@@ -366,10 +408,13 @@ public:
 	Future<Void> commit() { return commit(this); }
 
 	PaxosConfigTransactionImpl(Database const& cx) : cx(cx) {
-		auto coordinators = cx->getConnectionRecord()->getConnectionString().coordinators();
-		ctis.reserve(coordinators.size());
-		for (const auto& coordinator : coordinators) {
-			ctis.emplace_back(coordinator);
+		const ClusterConnectionString& cs = cx->getConnectionRecord()->getConnectionString();
+		ctis.reserve(cs.hostnames.size() + cs.coordinators().size());
+		for (const auto& h : cs.hostnames) {
+			ctis.emplace_back(h);
+		}
+		for (const auto& c : cs.coordinators()) {
+			ctis.emplace_back(c);
 		}
 		getGenerationQuorum = GetGenerationQuorum{ ctis };
 		commitQuorum = CommitQuorum{ ctis };
