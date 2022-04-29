@@ -18,6 +18,10 @@
  * limitations under the License.
  */
 
+#ifdef ADDRESS_SANITIZER
+#include <sanitizer/lsan_interface.h>
+#endif
+
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/GenericManagementAPI.actor.h"
@@ -2762,6 +2766,11 @@ ACTOR Future<Void> checkUndestroyedFutures(std::vector<ThreadSingleAssignmentVar
 template <class T>
 THREAD_FUNC runSingleAssignmentVarTest(void* arg) {
 	noUnseed = true;
+
+// This test intentionally leaks memory
+#ifdef ADDRESS_SANITIZER
+	__lsan::ScopedDisabler disableLeakChecks;
+#endif
 
 	volatile bool* done = (volatile bool*)arg;
 	try {
