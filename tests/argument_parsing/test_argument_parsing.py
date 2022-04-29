@@ -53,7 +53,7 @@ def is_cli_usage(output):
 
 
 def test_fdbserver(build_dir):
-    command = [args.build_dir + "/bin/fdbserver", "-r", "unittests"]
+    command = [build_dir + "/bin/fdbserver", "-r", "unittests"]
 
     check(is_unknown_option(run_command(command, ["--unknown-option"])))
 
@@ -69,7 +69,7 @@ def test_fdbserver(build_dir):
 
 
 def test_fdbcli(build_dir):
-    command = [args.build_dir + "/bin/fdbcli", "--exec", "begin"]
+    command = [build_dir + "/bin/fdbcli", "--exec", "begin"]
 
     check(is_cli_usage(run_command(command, ["--unknown-option"])))
 
@@ -85,7 +85,7 @@ def test_fdbcli(build_dir):
 
 
 def test_fdbbackup(build_dir):
-    command = [args.build_dir + "/bin/fdbbackup", "list"]
+    command = [build_dir + "/bin/fdbbackup", "list"]
 
     check(is_unknown_option(run_command(command, ["--unknown-option"])))
 
