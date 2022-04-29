@@ -236,6 +236,105 @@ struct ResolutionRequestBuilder {
 	}
 };
 
+ErrorOr<Optional<TenantMapEntry>> getTenantEntry(ProxyCommitData* commitData,
+                                                 Optional<TenantNameRef> tenant,
+                                                 Optional<int64_t> tenantId,
+                                                 bool logOnFailure) {
+	if (tenant.present()) {
+		auto itr = commitData->tenantMap.find(tenant.get());
+		if (itr == commitData->tenantMap.end()) {
+			if (logOnFailure) {
+				TraceEvent(SevWarn, "CommitProxyUnknownTenant", commitData->dbgid).detail("Tenant", tenant.get());
+			}
+
+			return unknown_tenant();
+		} else if (tenantId.present() && tenantId.get() != itr->second.id) {
+			if (logOnFailure) {
+				TraceEvent(SevWarn, "CommitProxyTenantIdMismatch", commitData->dbgid)
+				    .detail("Tenant", tenant.get())
+				    .detail("TenantId", tenantId)
+				    .detail("ExistingId", itr->second.id);
+			}
+
+			return unknown_tenant();
+		}
+
+		return ErrorOr<Optional<TenantMapEntry>>(Optional<TenantMapEntry>(itr->second));
+	}
+
+	return Optional<TenantMapEntry>();
+}
+
+bool verifyTenantPrefix(ProxyCommitData* const commitData, const CommitTransactionRequest& req) {
+	ErrorOr<Optional<TenantMapEntry>> tenantEntry =
+	    getTenantEntry(commitData, req.tenantInfo.name.castTo<TenantNameRef>(), req.tenantInfo.tenantId, true);
+
+	if (tenantEntry.isError()) {
+		return true;
+	}
+
+	if (tenantEntry.get().present()) {
+		Key tenantPrefix = tenantEntry.get().get().prefix;
+		for (auto& m : req.transaction.mutations) {
+			if (m.param1 != metadataVersionKey) {
+				if (!m.param1.startsWith(tenantPrefix)) {
+					TraceEvent(SevWarnAlways, "TenantPrefixMismatch")
+					    .suppressFor(60)
+					    .detail("Prefix", tenantPrefix.toHexString())
+					    .detail("Key", m.param1.toHexString());
+					return false;
+				}
+
+				if (m.type == MutationRef::ClearRange && !m.param2.startsWith(tenantPrefix)) {
+					TraceEvent(SevWarnAlways, "TenantClearRangePrefixMismatch")
+					    .suppressFor(60)
+					    .detail("Prefix", tenantPrefix.toHexString())
+					    .detail("Key", m.param2.toHexString());
+					return false;
+				} else if (m.type == MutationRef::SetVersionstampedKey) {
+					ASSERT(m.param1.size() >= 4);
+					uint8_t* key = const_cast<uint8_t*>(m.param1.begin());
+					int* offset = reinterpret_cast<int*>(&key[m.param1.size() - 4]);
+					if (*offset < tenantPrefix.size()) {
+						TraceEvent(SevWarnAlways, "TenantVersionstampInvalidOffset")
+						    .suppressFor(60)
+						    .detail("Prefix", tenantPrefix.toHexString())
+						    .detail("Key", m.param1.toHexString())
+						    .detail("Offset", *offset);
+						return false;
+					}
+				}
+			}
+		}
+
+		for (auto& rc : req.transaction.read_conflict_ranges) {
+			if (rc.begin != metadataVersionKey &&
+			    (!rc.begin.startsWith(tenantPrefix) || !rc.end.startsWith(tenantPrefix))) {
+				TraceEvent(SevWarnAlways, "TenantReadConflictPrefixMismatch")
+				    .suppressFor(60)
+				    .detail("Prefix", tenantPrefix.toHexString())
+				    .detail("BeginKey", rc.begin.toHexString())
+				    .detail("EndKey", rc.end.toHexString());
+				return false;
+			}
+		}
+
+		for (auto& wc : req.transaction.write_conflict_ranges) {
+			if (wc.begin != metadataVersionKey &&
+			    (!wc.begin.startsWith(tenantPrefix) || !wc.end.startsWith(tenantPrefix))) {
+				TraceEvent(SevWarnAlways, "TenantWriteConflictPrefixMismatch")
+				    .suppressFor(60)
+				    .detail("Prefix", tenantPrefix.toHexString())
+				    .detail("BeginKey", wc.begin.toHexString())
+				    .detail("EndKey", wc.end.toHexString());
+				return false;
+			}
+		}
+	}
+
+	return true;
+}
+
 ACTOR Future<Void> commitBatcher(ProxyCommitData* commitData,
                                  PromiseStream<std::pair<std::vector<CommitTransactionRequest>, int>> out,
                                  FutureStream<CommitTransactionRequest> in,
@@ -282,6 +381,13 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData* commitData,
 						    .detail("Size", bytes)
 						    .detail("Client", req.reply.getEndpoint().getPrimaryAddress());
 					}
+
+					if (!verifyTenantPrefix(commitData, req)) {
+						++commitData->stats.txnCommitErrors;
+						req.reply.sendError(illegal_tenant_access());
+						continue;
+					}
+
 					++commitData->stats.txnCommitIn;
 
 					if (req.debugID.present()) {
@@ -358,7 +464,7 @@ ACTOR Future<Void> addBackupMutations(ProxyCommitData* self,
 	state int yieldBytes = 0;
 	state BinaryWriter valueWriter(Unversioned());
 
-	toCommit->addTransactionInfo(SpanContext());
+	toCommit->addTransactionInfo(SpanID());
 
 	// Serialize the log range mutations within the map
 	for (; logRangeMutation != logRangeMutations->cend(); ++logRangeMutation) {
@@ -448,35 +554,6 @@ ACTOR static Future<ResolveTransactionBatchReply> trackResolutionMetrics(Referen
 	ResolveTransactionBatchReply reply = wait(in);
 	dist->sampleSeconds(now() - startTime);
 	return reply;
-}
-
-ErrorOr<Optional<TenantMapEntry>> getTenantEntry(ProxyCommitData* commitData,
-                                                 Optional<TenantNameRef> tenant,
-                                                 Optional<int64_t> tenantId,
-                                                 bool logOnFailure) {
-	if (tenant.present()) {
-		auto itr = commitData->tenantMap.find(tenant.get());
-		if (itr == commitData->tenantMap.end()) {
-			if (logOnFailure) {
-				TraceEvent(SevWarn, "CommitProxyUnknownTenant", commitData->dbgid).detail("Tenant", tenant.get());
-			}
-
-			return unknown_tenant();
-		} else if (tenantId.present() && tenantId.get() != itr->second.id) {
-			if (logOnFailure) {
-				TraceEvent(SevWarn, "CommitProxyTenantIdMismatch", commitData->dbgid)
-				    .detail("Tenant", tenant.get())
-				    .detail("TenantId", tenantId)
-				    .detail("ExistingId", itr->second.id);
-			}
-
-			return unknown_tenant();
-		}
-
-		return ErrorOr<Optional<TenantMapEntry>>(Optional<TenantMapEntry>(itr->second));
-	}
-
-	return Optional<TenantMapEntry>();
 }
 
 namespace CommitBatch {
@@ -654,7 +731,7 @@ void CommitBatchContext::setupTraceBatch() {
 
 			g_traceBatch.addAttach("CommitAttachID", tr.debugID.get().first(), debugID.get().first());
 		}
-		span.addLink(tr.spanContext);
+		span.addParent(tr.spanContext);
 	}
 
 	if (debugID.present()) {
@@ -685,6 +762,11 @@ bool canReject(const std::vector<CommitTransactionRequest>& trs) {
 	return true;
 }
 
+double computeReleaseDelay(CommitBatchContext* self, double latencyBucket) {
+	return std::min(SERVER_KNOBS->MAX_PROXY_COMPUTE,
+	                self->batchOperations * self->pProxyCommitData->commitComputePerOperation[latencyBucket]);
+}
+
 ACTOR Future<Void> preresolutionProcessing(CommitBatchContext* self) {
 
 	state ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
@@ -708,6 +790,7 @@ ACTOR Future<Void> preresolutionProcessing(CommitBatchContext* self) {
 	// Pre-resolution the commits
 	TEST(pProxyCommitData->latestLocalCommitBatchResolving.get() < localBatchNumber - 1); // Wait for local batch
 	wait(pProxyCommitData->latestLocalCommitBatchResolving.whenAtLeast(localBatchNumber - 1));
+	pProxyCommitData->stats.computeLatency.addMeasurement(now() - timeStart);
 	double queuingDelay = g_network->now() - timeStart;
 	pProxyCommitData->stats.commitBatchQueuingDist->sampleSeconds(queuingDelay);
 	if ((queuingDelay > (double)SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS / SERVER_KNOBS->VERSIONS_PER_SECOND ||
@@ -736,10 +819,7 @@ ACTOR Future<Void> preresolutionProcessing(CommitBatchContext* self) {
 		return Void();
 	}
 
-	self->releaseDelay =
-	    delay(std::min(SERVER_KNOBS->MAX_PROXY_COMPUTE,
-	                   self->batchOperations * pProxyCommitData->commitComputePerOperation[latencyBucket]),
-	          TaskPriority::ProxyMasterVersionReply);
+	self->releaseDelay = delay(computeReleaseDelay(self, latencyBucket), TaskPriority::ProxyMasterVersionReply);
 
 	if (debugID.present()) {
 		g_traceBatch.addEvent(
@@ -880,7 +960,7 @@ void applyMetadataEffect(CommitBatchContext* self) {
 				committed =
 				    committed && self->resolution[resolver].stateMutations[versionIndex][transactionIndex].committed;
 			if (committed) {
-				applyMetadataMutations(SpanContext(),
+				applyMetadataMutations(SpanID(),
 				                       *self->pProxyCommitData,
 				                       self->arena,
 				                       self->pProxyCommitData->logSystem,
@@ -1300,7 +1380,8 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 			// simulation
 			TEST(true); // Semi-committed pipeline limited by MVCC window
 			//TraceEvent("ProxyWaitingForCommitted", pProxyCommitData->dbgid).detail("CommittedVersion", pProxyCommitData->committedVersion.get()).detail("NeedToCommit", commitVersion);
-			waitVersionSpan = Span("MP:overMaxReadTransactionLifeVersions"_loc, span.context);
+			waitVersionSpan = Span(
+			    deterministicRandom()->randomUniqueID(), "MP:overMaxReadTransactionLifeVersions"_loc, { span.context });
 			choose {
 				when(wait(pProxyCommitData->committedVersion.whenAtLeast(
 				    self->commitVersion - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS))) {
@@ -1384,8 +1465,10 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 
 	self->computeDuration += g_network->timer() - self->computeStart;
 	if (self->batchOperations > 0) {
+		double estimatedDelay = computeReleaseDelay(self, self->latencyBucket);
 		double computePerOperation =
 		    std::min(SERVER_KNOBS->MAX_COMPUTE_PER_OPERATION, self->computeDuration / self->batchOperations);
+
 		if (computePerOperation <= pProxyCommitData->commitComputePerOperation[self->latencyBucket]) {
 			pProxyCommitData->commitComputePerOperation[self->latencyBucket] = computePerOperation;
 		} else {
@@ -1400,6 +1483,20 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 		pProxyCommitData->stats.minComputeNS =
 		    std::min<int64_t>(pProxyCommitData->stats.minComputeNS,
 		                      1e9 * pProxyCommitData->commitComputePerOperation[self->latencyBucket]);
+
+		if (estimatedDelay >= SERVER_KNOBS->MAX_COMPUTE_DURATION_LOG_CUTOFF ||
+		    self->computeDuration >= SERVER_KNOBS->MAX_COMPUTE_DURATION_LOG_CUTOFF) {
+			TraceEvent(SevInfo, "LongComputeDuration", pProxyCommitData->dbgid)
+			    .suppressFor(10.0)
+			    .detail("EstimatedComputeDuration", estimatedDelay)
+			    .detail("ComputeDuration", self->computeDuration)
+			    .detail("ComputePerOperation", computePerOperation)
+			    .detail("LatencyBucket", self->latencyBucket)
+			    .detail("UpdatedComputePerOperationEstimate",
+			            pProxyCommitData->commitComputePerOperation[self->latencyBucket])
+			    .detail("BatchBytes", self->batchBytes)
+			    .detail("BatchOperations", self->batchOperations);
+		}
 	}
 
 	pProxyCommitData->stats.processingMutationDist->sampleSeconds(now() - postResolutionQueuing);
@@ -1680,7 +1777,7 @@ void addTagMapping(GetKeyServerLocationsReply& reply, ProxyCommitData* commitDat
 ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsRequest req, ProxyCommitData* commitData) {
 	// We can't respond to these requests until we have valid txnStateStore
 	getCurrentLineage()->modify(&TransactionLineage::operation) = TransactionLineage::Operation::GetKeyServersLocations;
-	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID;
+	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.first();
 	wait(commitData->validState.getFuture());
 	wait(delay(0, TaskPriority::DefaultEndpoint));
 
@@ -2200,7 +2297,7 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 
 		Arena arena;
 		bool confChanges;
-		applyMetadataMutations(SpanContext(),
+		applyMetadataMutations(SpanID(),
 		                       *pContext->pCommitData,
 		                       arena,
 		                       Reference<ILogSystem>(),

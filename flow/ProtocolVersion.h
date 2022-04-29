@@ -19,8 +19,8 @@
  */
 
 #pragma once
-#include <cstdint>
 #include "flow/Trace.h"
+#include <cstdint>
 
 // This version impacts both communications and the deserialization of certain database and IKeyValueStore keys.
 //
@@ -36,6 +36,9 @@ constexpr uint64_t currentProtocolVersionValue = 0x0FDB00B072000000LL;
 // The first protocol version that cannot be downgraded from. Ordinarily, this will be two release versions larger
 // than the current version, meaning that we only support downgrades between consecutive release versions.
 constexpr uint64_t minInvalidProtocolVersionValue = 0x0FDB00B074000000LL;
+
+// The lowest protocol version that can be downgraded to.
+constexpr uint64_t minCompatibleProtocolVersionValue = 0x0FDB00B071000000LL;
 
 #define PROTOCOL_VERSION_FEATURE(v, x)                                                                                 \
 	static_assert((v & 0xF0FFFFLL) == 0 || v < 0x0FDB00B071000000LL, "Unexpected feature protocol version");           \
@@ -59,6 +62,7 @@ public: // constants
 	static constexpr uint64_t objectSerializerFlag = 0x1000000000000000LL;
 	static constexpr uint64_t compatibleProtocolVersionMask = 0xFFFFFFFFFFFF0000LL;
 	static constexpr uint64_t minValidProtocolVersion = 0x0FDB00A200060001LL;
+	static constexpr uint64_t invalidProtocolVersion = 0x0FDB00A100000000LL;
 
 public:
 	constexpr explicit ProtocolVersion(uint64_t version) : _version(version) {}
@@ -73,6 +77,8 @@ public:
 		return ProtocolVersion(_version & compatibleProtocolVersionMask);
 	}
 	constexpr bool isValid() const { return version() >= minValidProtocolVersion; }
+
+	constexpr bool isInvalid() const { return version() == invalidProtocolVersion; }
 
 	constexpr uint64_t version() const { return _version & versionFlagMask; }
 	constexpr uint64_t versionWithFlags() const { return _version; }
@@ -164,7 +170,7 @@ public: // introduced features
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B071010000LL, Tenants);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B071010000LL, StorageInterfaceReadiness);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B071010000LL, ResolverPrivateMutations);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B072000000LL, OTELSpanContext);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B072000000LL, SWVersionTracking);
 };
 
 template <>
@@ -176,6 +182,7 @@ struct Traceable<ProtocolVersion> : std::true_type {
 
 constexpr ProtocolVersion currentProtocolVersion(currentProtocolVersionValue);
 constexpr ProtocolVersion minInvalidProtocolVersion(minInvalidProtocolVersionValue);
+constexpr ProtocolVersion minCompatibleProtocolVersion(minCompatibleProtocolVersionValue);
 
 // This assert is intended to help prevent incrementing the leftmost digits accidentally. It will probably need to
 // change when we reach version 10.
@@ -195,3 +202,46 @@ static_assert(minInvalidProtocolVersion.version() >=
 // The min invalid protocol version should be the smallest possible protocol version associated with a minor release
 // version.
 static_assert((minInvalidProtocolVersion.version() & 0xFFFFFFLL) == 0, "Unexpected min invalid protocol version");
+
+struct SWVersion {
+	constexpr static FileIdentifier file_identifier = 13943914;
+
+private:
+	uint64_t _newestProtocolVersion;
+	uint64_t _lastRunProtocolVersion;
+	uint64_t _lowestCompatibleProtocolVersion;
+
+public:
+	SWVersion() {
+		_newestProtocolVersion = 0;
+		_lastRunProtocolVersion = 0;
+		_lowestCompatibleProtocolVersion = 0;
+	}
+
+	SWVersion(ProtocolVersion latestVersion, ProtocolVersion lastVersion, ProtocolVersion minCompatibleVersion)
+	  : _newestProtocolVersion(latestVersion.version()), _lastRunProtocolVersion(lastVersion.version()),
+	    _lowestCompatibleProtocolVersion(minCompatibleVersion.version()) {}
+
+	bool isValid() const {
+		return (_newestProtocolVersion != 0 && _lastRunProtocolVersion != 0 && _lowestCompatibleProtocolVersion != 0);
+	}
+
+	uint64_t newestProtocolVersion() const { return _newestProtocolVersion; }
+	uint64_t lastRunProtocolVersion() const { return _lastRunProtocolVersion; }
+	uint64_t lowestCompatibleProtocolVersion() const { return _lowestCompatibleProtocolVersion; }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, _newestProtocolVersion, _lastRunProtocolVersion, _lowestCompatibleProtocolVersion);
+	}
+};
+
+template <>
+struct Traceable<SWVersion> : std::true_type {
+	static std::string toString(const SWVersion& swVersion) {
+		return format("Newest: 0x%016lX, Last: 0x%016lX, MinCompatible: 0x%016lX",
+		              swVersion.newestProtocolVersion(),
+		              swVersion.lastRunProtocolVersion(),
+		              swVersion.lowestCompatibleProtocolVersion());
+	}
+};

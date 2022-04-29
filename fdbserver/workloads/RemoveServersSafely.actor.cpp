@@ -541,7 +541,12 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		state AddressExclusion coordExcl;
 		// Exclude a coordinator under buggify, but only if fault tolerance is > 0 and kill set is non-empty already
 		if (BUGGIFY && toKill.size()) {
-			std::vector<NetworkAddress> coordinators = wait(getCoordinators(cx));
+			Optional<ClusterConnectionString> csOptional = wait(getConnectionString(cx));
+			state std::vector<NetworkAddress> coordinators;
+			if (csOptional.present()) {
+				ClusterConnectionString cs = csOptional.get();
+				wait(store(coordinators, cs.tryResolveHostnames()));
+			}
 			if (coordinators.size() > 2) {
 				auto randomCoordinator = deterministicRandom()->randomChoice(coordinators);
 				coordExcl = AddressExclusion(randomCoordinator.ip, randomCoordinator.port);

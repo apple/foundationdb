@@ -243,7 +243,7 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 
 	Optional<UID> debugID;
 	TaskPriority taskID;
-	SpanContext spanContext;
+	SpanID spanID;
 	UseProvisionalProxies useProvisionalProxies = UseProvisionalProxies::False;
 	bool readVersionObtainedFromGrvProxy;
 
@@ -259,14 +259,13 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 	std::shared_ptr<CoalescedKeyRangeMap<Value>> conflictingKeys;
 
 	// Only available so that Transaction can have a default constructor, for use in state variables
-	TransactionState(TaskPriority taskID, SpanContext spanContext)
-	  : taskID(taskID), spanContext(spanContext), tenantSet(false) {}
+	TransactionState(TaskPriority taskID, SpanID spanID) : taskID(taskID), spanID(spanID), tenantSet(false) {}
 
 	// VERSION_VECTOR changed default values of readVersionObtainedFromGrvProxy
 	TransactionState(Database cx,
 	                 Optional<TenantName> tenant,
 	                 TaskPriority taskID,
-	                 SpanContext spanContext,
+	                 SpanID spanID,
 	                 Reference<TransactionLogInfo> trLogInfo);
 
 	Reference<TransactionState> cloneAndReset(Reference<TransactionLogInfo> newTrLogInfo, bool generateNewSpan) const;
@@ -436,7 +435,7 @@ public:
 
 	void debugTransaction(UID dID) { trState->debugID = dID; }
 	VersionVector getVersionVector() const;
-	SpanContext getSpanContext() const { return trState->spanContext; }
+	UID getSpanID() const { return trState->spanID; }
 
 	Future<Void> commitMutations();
 	void setupWatches();
@@ -448,7 +447,7 @@ public:
 	Database getDatabase() const { return trState->cx; }
 	static Reference<TransactionLogInfo> createTrLogInfoProbabilistically(const Database& cx);
 
-	void setTransactionID(UID id);
+	void setTransactionID(uint64_t id);
 	void setToken(uint64_t token);
 
 	const std::vector<Future<std::pair<Key, Key>>>& getExtraReadConflictRanges() const { return extraConflictRanges; }
@@ -491,7 +490,7 @@ private:
 	Future<Void> committing;
 };
 
-ACTOR Future<Version> waitForCommittedVersion(Database cx, Version version, SpanContext spanContext);
+ACTOR Future<Version> waitForCommittedVersion(Database cx, Version version, SpanID spanContext);
 ACTOR Future<Standalone<VectorRef<DDMetricsRef>>> waitDataDistributionMetricsList(Database cx,
                                                                                   KeyRange keys,
                                                                                   int shardLimit);
@@ -539,6 +538,20 @@ ACTOR Future<Void> setPerpetualStorageWiggle(Database cx, bool enable, LockAware
 ACTOR Future<std::vector<std::pair<UID, StorageWiggleValue>>> readStorageWiggleValues(Database cx,
                                                                                       bool primary,
                                                                                       bool use_system_priority);
+
+// Returns the maximum legal size of a key. This size will be determined by the prefix of the passed in key
+// (system keys have a larger maximum size). This should be used for generic max key size requests.
+int64_t getMaxKeySize(KeyRef const& key);
+
+// Returns the maximum legal size of a key that can be read. Keys larger than this will be assumed not to exist.
+int64_t getMaxReadKeySize(KeyRef const& key);
+
+// Returns the maximum legal size of a key that can be written. If using raw access, writes to normal keys will
+// be allowed to be slighly larger to accommodate the prefix.
+int64_t getMaxWriteKeySize(KeyRef const& key, bool hasRawAccess);
+
+// Returns the maximum legal size of a key that can be cleared. Keys larger than this will be assumed not to exist.
+int64_t getMaxClearKeySize(KeyRef const& key);
 
 #include "flow/unactorcompiler.h"
 #endif

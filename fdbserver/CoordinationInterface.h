@@ -153,17 +153,21 @@ struct CandidacyRequest {
 struct ElectionResultRequest {
 	constexpr static FileIdentifier file_identifier = 11815465;
 	Key key;
+	std::vector<Hostname> hostnames;
 	std::vector<NetworkAddress> coordinators;
 	UID knownLeader;
 	ReplyPromise<Optional<LeaderInfo>> reply;
 
 	ElectionResultRequest() = default;
-	ElectionResultRequest(Key key, std::vector<NetworkAddress> coordinators, UID knownLeader)
-	  : key(key), coordinators(std::move(coordinators)), knownLeader(knownLeader) {}
+	ElectionResultRequest(Key key,
+	                      std::vector<Hostname> hostnames,
+	                      std::vector<NetworkAddress> coordinators,
+	                      UID knownLeader)
+	  : key(key), hostnames(std::move(hostnames)), coordinators(std::move(coordinators)), knownLeader(knownLeader) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, key, coordinators, knownLeader, reply);
+		serializer(ar, key, hostnames, coordinators, knownLeader, reply);
 	}
 };
 

@@ -123,6 +123,7 @@ ERROR( failed_to_progress, 1216, "Process has failed to make sufficient progress
 ERROR( invalid_cluster_id, 1217, "Attempted to join cluster with a different cluster ID" )
 ERROR( restart_cluster_controller, 1218, "Restart cluster controller process" )
 ERROR( please_reboot_remote_kv_store, 1219, "Need to reboot the storage engine process as it died abnormally")
+ERROR( incompatible_software_version, 1220, "Current software does not support database format" )
 
 // 15xx Platform errors
 ERROR( platform_error, 1500, "Platform error" )
@@ -145,6 +146,10 @@ ERROR( file_corrupt, 1522, "A structurally corrupt data file was detected" )
 ERROR( http_request_failed, 1523, "HTTP response code not received or indicated failure" )
 ERROR( http_auth_failed, 1524, "HTTP request failed due to bad credentials" )
 ERROR( http_bad_request_id, 1525, "HTTP response contained an unexpected X-Request-ID header" )
+ERROR( rest_invalid_uri, 1526, "Invalid REST URI")
+ERROR( rest_invalid_rest_client_knob, 1527, "Invalid RESTClient knob")
+ERROR( rest_connectpool_key_not_found, 1528, "ConnectKey not found in connection pool")
+
 
 // 2xxx Attempt (presumably by a _client_) to do something illegal.  If an error is known to
 // be internally caused, it should be 41xx
@@ -225,6 +230,7 @@ ERROR( invalid_tenant_name, 2134, "Tenant name cannot begin with \\xff");
 ERROR( tenant_prefix_allocator_conflict, 2135, "The database already has keys stored at the prefix allocated for the tenant");
 ERROR( tenants_disabled, 2136, "Tenants have been disabled in the cluster");
 ERROR( unknown_tenant, 2137, "Tenant is not available from this server")
+ERROR( illegal_tenant_access, 2138, "Illegal tenant access")
 
 // 2200 - errors from bindings and official APIs
 ERROR( api_version_unset, 2200, "API version is not set" )
@@ -305,7 +311,7 @@ ERROR( encrypt_key_not_found, 2702, "Expected encryption key is missing")
 ERROR( encrypt_key_ttl_expired, 2703, "Expected encryption key TTL has expired")
 ERROR( encrypt_header_authtoken_mismatch, 2704, "Encryption header authentication token mismatch")
 ERROR( encrypt_update_cipher, 2705, "Attempt to update encryption cipher key")
-ERROR( encrypt_invalid_id, 2706, "Invalid encryption domainId or encryption cipher key id")
+ERROR( encrypt_invalid_id, 2706, "Invalid encryption cipher details")
 
 // 4xxx Internal errors (those that should be generated only by bugs) are decimal 4xxx
 ERROR( unknown_error, 4000, "An unknown error occurred" )  // C++ exception not of type Error

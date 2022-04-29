@@ -25,7 +25,7 @@
 #include <unordered_map>
 #include <vector>
 
-#if (!defined(TLS_DISABLED) && !defined(_WIN32))
+#if (!defined(TLS_DISABLED))
 #define ENCRYPTION_ENABLED 1
 #else
 #define ENCRYPTION_ENABLED 0
@@ -39,6 +39,9 @@
 #include "flow/flow.h"
 #include "flow/genericactors.actor.h"
 
+#if defined(HAVE_WOLFSSL)
+#include <wolfssl/options.h>
+#endif
 #include <openssl/aes.h>
 #include <openssl/engine.h>
 #include <openssl/evp.h>
@@ -233,20 +236,12 @@ private:
 // required encryption key, however, CPs/SSs cache-miss would result in RPC to
 // EncryptKeyServer to refresh the desired encryption key.
 
-struct pair_hash {
-	template <class T1, class T2>
-	std::size_t operator()(const std::pair<T1, T2>& pair) const {
-		auto hash1 = std::hash<T1>{}(pair.first);
-		auto hash2 = std::hash<T2>{}(pair.second);
-
-		// Equal hashes XOR would be ZERO.
-		return hash1 == hash2 ? hash1 : hash1 ^ hash2;
-	}
-};
 using BlobCipherKeyIdCacheKey = std::pair<EncryptCipherBaseKeyId, EncryptCipherRandomSalt>;
-using BlobCipherKeyIdCacheMap = std::unordered_map<BlobCipherKeyIdCacheKey, Reference<BlobCipherKey>, pair_hash>;
+using BlobCipherKeyIdCacheKeyHash = boost::hash<BlobCipherKeyIdCacheKey>;
+using BlobCipherKeyIdCacheMap =
+    std::unordered_map<BlobCipherKeyIdCacheKey, Reference<BlobCipherKey>, BlobCipherKeyIdCacheKeyHash>;
 using BlobCipherKeyIdCacheMapCItr =
-    std::unordered_map<BlobCipherKeyIdCacheKey, Reference<BlobCipherKey>, pair_hash>::const_iterator;
+    std::unordered_map<BlobCipherKeyIdCacheKey, Reference<BlobCipherKey>, BlobCipherKeyIdCacheKeyHash>::const_iterator;
 
 struct BlobCipherKeyIdCache : ReferenceCounted<BlobCipherKeyIdCache> {
 public:

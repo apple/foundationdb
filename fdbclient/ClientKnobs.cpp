@@ -21,6 +21,7 @@
 #include "fdbclient/Knobs.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/SystemData.h"
+#include "fdbclient/Tenant.h"
 #include "flow/UnitTest.h"
 
 #define init(...) KNOB_FN(__VA_ARGS__, INIT_ATOMIC_KNOB, INIT_KNOB)(__VA_ARGS__)
@@ -82,6 +83,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( CHANGE_FEED_CACHE_SIZE,               100000 ); if( randomize && BUGGIFY ) CHANGE_FEED_CACHE_SIZE = 1;
 	init( CHANGE_FEED_POP_TIMEOUT,                 5.0 );
 	init( CHANGE_FEED_STREAM_MIN_BYTES,            1e4 ); if( randomize && BUGGIFY ) CHANGE_FEED_STREAM_MIN_BYTES = 1;
+	init( TENANT_PREFIX_SIZE_LIMIT,                 28 ); ASSERT(TENANT_PREFIX_SIZE_LIMIT >= TenantMapEntry::ROOT_PREFIX_SIZE); // includes 8-byte ID and optional tenant subspace
 
 	init( MAX_BATCH_SIZE,                         1000 ); if( randomize && BUGGIFY ) MAX_BATCH_SIZE = 1;
 	init( GRV_BATCH_TIMEOUT,                     0.005 ); if( randomize && BUGGIFY ) GRV_BATCH_TIMEOUT = 0.1;
