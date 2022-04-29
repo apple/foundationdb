@@ -28,6 +28,7 @@
 #include "fdbclient/RunTransaction.actor.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/SystemData.h"
+#include "fdbclient/Tenant.h"
 #include "fdbrpc/Replication.h"
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/DDTeamCollection.h"
@@ -48,6 +49,38 @@
 #include "flow/UnitTest.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
+
+ACTOR Future<Void> buildDDTenantCache(Database cx, UID distributorId) {
+	state Transaction tr(cx);
+	state std::map<int64_t, Reference<TCTenantInfo>> tenantCache;
+
+	TraceEvent(SevInfo, "BuildingDDTenantCache", distributorId).log();
+
+	try {
+		tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+		tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+
+		state Future<RangeResult> tenantList = tr.getRange(tenantMapKeys, CLIENT_KNOBS->TOO_MANY);
+		wait(success(tenantList));
+		ASSERT(!tenantList.get().more && tenantList.get().size() < CLIENT_KNOBS->TOO_MANY);
+
+		for (int i = 0; i < tenantList.get().size(); i++) {
+			TenantName tname = tenantList.get()[i].key.removePrefix(tenantMapPrefix);
+			TenantMapEntry t = decodeTenantEntry(tenantList.get()[i].value);
+
+			TenantInfo tinfo(tname, t.id);
+			tenantCache[t.id] = makeReference<TCTenantInfo>(tinfo);
+
+			TraceEvent(SevInfo, "DDTenantFound", distributorId).detail("TenantName", tname).detail("TenantID", t.id);
+		}
+	} catch (Error& e) {
+		wait(tr.onError(e));
+	}
+
+	TraceEvent(SevInfo, "BuiltDDTenantCache", distributorId).log();
+
+	return Void();
+}
 
 // Read keyservers, return unique set of teams
 ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution(Database cx,
@@ -121,6 +154,8 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution(Data
 					tss_servers.emplace_back(ssi, id_data[ssi.locality.processId()].processClass);
 				}
 			}
+
+			wait(buildDDTenantCache(cx, distributorId));
 
 			break;
 		} catch (Error& e) {
