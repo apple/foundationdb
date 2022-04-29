@@ -261,6 +261,7 @@ class UpgradeTest:
             return
         src_lib_file = self.local_binary_repo.joinpath(version, "lib", "libfdb_c-{}.so".format(version))
         assert src_lib_file.exists(), "Missing file {} in the local old binaries repository".format(src_lib_file)
+        self.download_dir.joinpath(version).mkdir(parents=True, exist_ok=True)
         shutil.copyfile(src_lib_file, dest_lib_file)
         assert dest_lib_file.exists(), "{} does not exist".format(dest_lib_file)
 
