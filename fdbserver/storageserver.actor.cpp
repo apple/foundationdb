@@ -5183,7 +5183,11 @@ ACTOR Future<Version> fetchChangeFeed(StorageServer* data,
 			++data->counters.kvSystemClearRanges;
 
 			changeFeedInfo->destroy(cleanupVersion);
-			data->changeFeedCleanupDurable[changeFeedInfo->id] = cleanupVersion;
+
+			if (data->uidChangeFeed.count(changeFeedInfo->id)) {
+				// only register range for cleanup if it has not been already cleaned up
+				data->changeFeedCleanupDurable[changeFeedInfo->id] = cleanupVersion;
+			}
 
 			for (auto& it : data->changeFeedRemovals) {
 				it.second.send(changeFeedInfo->id);
