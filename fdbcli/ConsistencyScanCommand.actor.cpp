@@ -31,10 +31,9 @@
 
 namespace fdb_cli {
 
-//const KeyRef consistencyCheckSpecialKey = LiteralStringRef("\xff\xff/management/consistency_check_suspended");
+// const KeyRef consistencyCheckSpecialKey = LiteralStringRef("\xff\xff/management/consistency_check_suspended");
 
-ACTOR Future<bool> consistencyScanCommandActor(Database db,
-											   std::vector<StringRef> tokens) {
+ACTOR Future<bool> consistencyScanCommandActor(Database db, std::vector<StringRef> tokens) {
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
 	// Here we do not proceed in a try-catch loop since the transaction is always supposed to succeed.
 	// If not, the outer loop catch block(fdbcli.actor.cpp) will handle the error and print out the error message
@@ -45,19 +44,22 @@ ACTOR Future<bool> consistencyScanCommandActor(Database db,
 		state Optional<Value> consistencyScanInfo = wait(ConsistencyScanInfo::getInfo(tr));
 		wait(tr->commit());
 		if (consistencyScanInfo.present()) {
-			printf("Consistency Scan Info: %s\n", ObjectReader::fromStringRef<ConsistencyScanInfo>(consistencyScanInfo.get(), IncludeVersion()).toString().c_str());
+			printf("Consistency Scan Info: %s\n",
+			       ObjectReader::fromStringRef<ConsistencyScanInfo>(consistencyScanInfo.get(), IncludeVersion())
+			           .toString()
+			           .c_str());
 		}
 	} else if ((tokens.size() == 2) && tokencmp(tokens[1], "off")) {
-		ConsistencyScanInfo ckInfo = ConsistencyScanInfo();
-		wait(ConsistencyScanInfo::setInfo(tr, ckInfo));
+		ConsistencyScanInfo csInfo = ConsistencyScanInfo();
+		wait(ConsistencyScanInfo::setInfo(tr, csInfo));
 	} else if ((tokencmp(tokens[1], "on") && tokens.size() == 8)) {
-		ConsistencyScanInfo ckInfo = ConsistencyScanInfo();
-		ckInfo.consistency_scan_enabled = true;
+		ConsistencyScanInfo csInfo = ConsistencyScanInfo();
+		csInfo.consistency_scan_enabled = true;
 		if (tokencmp(tokens[2], "restart")) {
 			if (tokencmp(tokens[3], "0")) {
-				ckInfo.restart = false;
+				csInfo.restart = false;
 			} else if (tokencmp(tokens[3], "1")) {
-				ckInfo.restart = true;
+				csInfo.restart = true;
 			} else
 				usageError = 1;
 		} else {
@@ -66,7 +68,7 @@ ACTOR Future<bool> consistencyScanCommandActor(Database db,
 
 		if (tokencmp(tokens[4], "maxRate")) {
 			char* end;
-			ckInfo.max_rate = std::strtod((const char*)tokens[5].begin(), &end);
+			csInfo.max_rate = std::strtod((const char*)tokens[5].begin(), &end);
 			if (!std::isspace(*end)) {
 				fprintf(stderr, "ERROR: %s failed to parse.\n", printable(tokens[5]).c_str());
 				return false;
@@ -77,7 +79,7 @@ ACTOR Future<bool> consistencyScanCommandActor(Database db,
 
 		if (tokencmp(tokens[6], "targetInterval")) {
 			char* end;
-			ckInfo.target_interval = std::strtod((const char*)tokens[7].begin(), &end);
+			csInfo.target_interval = std::strtod((const char*)tokens[7].begin(), &end);
 			if (*end != '\0') {
 				fprintf(stderr, "ERROR: %s failed to parse.\n", printable(tokens[7]).c_str());
 				return false;
@@ -85,8 +87,8 @@ ACTOR Future<bool> consistencyScanCommandActor(Database db,
 		} else {
 			usageError = 1;
 		}
-		//tr->set(consistencyScanInfoKey, ckInfo);
-		wait(ConsistencyScanInfo::setInfo(tr, ckInfo));
+		// tr->set(consistencyScanInfoKey, csInfo);
+		wait(ConsistencyScanInfo::setInfo(tr, csInfo));
 		wait(tr->commit());
 		// TODO: remove (printing for debug purpose)
 		tr->reset();
@@ -94,13 +96,16 @@ ACTOR Future<bool> consistencyScanCommandActor(Database db,
 		state Optional<Value> consistencyScanInfoGet = wait(ConsistencyScanInfo::getInfo(tr));
 		wait(tr->commit());
 		if (consistencyScanInfoGet.present()) {
-			printf("Consistency Scan Info: %s\n", ObjectReader::fromStringRef<ConsistencyScanInfo>(consistencyScanInfoGet.get(), IncludeVersion()).toString().c_str());
+			printf("Consistency Scan Info: %s\n",
+			       ObjectReader::fromStringRef<ConsistencyScanInfo>(consistencyScanInfoGet.get(), IncludeVersion())
+			           .toString()
+			           .c_str());
 		}
 	} else {
 		usageError = 1;
 	}
 
-	if  (usageError) {
+	if (usageError) {
 		printUsage(tokens[0]);
 		return false;
 	}
@@ -109,10 +114,10 @@ ACTOR Future<bool> consistencyScanCommandActor(Database db,
 
 CommandFactory consistencyScanFactory(
     "consistencyscan",
-    CommandHelp(
-        "consistencyscan [on|off] <ARGS>",
-        "enables or disables consistency scan",
-        "Calling this command with `on' enables the consistency scan processe to run the scan with given arguments and `off' will halt the scan. "
-        "Calling this command with no arguments will display if consistency scan is currently enabled.\n"));
+    CommandHelp("consistencyscan [on|off] <ARGS>",
+                "enables or disables consistency scan",
+                "Calling this command with `on' enables the consistency scan processe to run the scan with given "
+                "arguments and `off' will halt the scan. "
+                "Calling this command with no arguments will display if consistency scan is currently enabled.\n"));
 
 } // namespace fdb_cli

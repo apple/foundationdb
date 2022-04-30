@@ -22,6 +22,7 @@
 #define FDBSERVER_CONSISTENCYSCANINTERFACE_H
 
 #include "fdbclient/CommitProxyInterface.h"
+#include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/RunTransaction.actor.h"
 #include "fdbrpc/fdbrpc.h"
@@ -33,7 +34,6 @@ struct ConsistencyScanInterface {
 	RequestStream<struct HaltConsistencyScanRequest> haltConsistencyScan;
 	struct LocalityData locality;
 	UID myId;
-	// RequestStream<struct ConsistencyCheckRequest> consistencyScanCheckReq;
 
 	ConsistencyScanInterface() {}
 	explicit ConsistencyScanInterface(const struct LocalityData& l, UID id) : locality(l), myId(id) {}
@@ -64,35 +64,15 @@ struct HaltConsistencyScanRequest {
 	}
 };
 
-// TODO: NEELAM: mpst likely will be removed
-// struct ConsistencyCheckRequest {
-//	constexpr static FileIdentifier file_identifier = 3485239;
-//	bool state;
-//	double maxRate;
-//	double targetInterval;
-//	UID requesterID;
-//	ReplyPromise<Void> reply;
-//
-//	explicit ConsistencyCheckRequest(Optional<UID> const& requesterID = Optional<UID>()) : requesterID(requesterID) {}
-//	explicit ConsistencyCheckRequest(bool state, double maxRate, double targetInterval, UID reqUID, Optional<UID>
-// requesterID = Optional<UID>()) 		: state(state), maxRate(maxRate), targetInterval(targetInterval),
-// requesterID(reqUID), requesterID(requesterID) {}
-//
-//	template <class Ar>
-//	void serialize(Ar& ar) {
-//		serializer(ar, state, maxRate, targetInterval, requesterID, reply);
-//	}
-// };
-
 // consistency scan configuration and metrics
 struct ConsistencyScanInfo {
 	constexpr static FileIdentifier file_identifier = 732125;
 	bool consistency_scan_enabled = false;
 	bool restart = false;
-	double max_rate = 0;
-	double target_interval = 0;
-	KeyRef progress_key;
-	//int64_t bytes_read_prev_round = 0;
+	int64_t max_rate = 0;
+	int64_t target_interval = 0;
+	int64_t bytes_read_prev_round = 0;
+	KeyRef progress_key = KeyRef();
 
 	// Round Metrics - one round of complete validation across all SSs
 	// Start and finish are in epoch seconds
@@ -102,8 +82,9 @@ struct ConsistencyScanInfo {
 	int finished_rounds = 0;
 
 	ConsistencyScanInfo() : smoothed_round_duration(20.0 * 60) {}
-	ConsistencyScanInfo(bool enabled, bool r, uint64_t rate, uint64_t interval) :
-		consistency_scan_enabled(enabled), restart(r), max_rate(rate), target_interval(interval), smoothed_round_duration(20.0 * 60){}
+	ConsistencyScanInfo(bool enabled, bool r, uint64_t rate, uint64_t interval)
+	  : consistency_scan_enabled(enabled), restart(r), max_rate(rate), target_interval(interval),
+	    smoothed_round_duration(20.0 * 60) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -112,11 +93,11 @@ struct ConsistencyScanInfo {
 			round_total = smoothed_round_duration.getTotal();
 		}
 		serializer(ar,
-				   consistency_scan_enabled,
-				   restart,
-				   max_rate,
-				   target_interval,
-		           progress_key,
+		           consistency_scan_enabled,
+		           restart,
+		           max_rate,
+		           target_interval,
+		           bytes_read_prev_round,
 		           last_round_start,
 		           last_round_finish,
 		           round_total,
@@ -126,8 +107,7 @@ struct ConsistencyScanInfo {
 		}
 	}
 
-	static Future<Void> setInfo(Reference<ReadYourWritesTransaction> tr,
-	                                      ConsistencyScanInfo info) {
+	static Future<Void> setInfo(Reference<ReadYourWritesTransaction> tr, ConsistencyScanInfo info) {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		tr->set(consistencyScanInfoKey, ObjectWriter::toValue(info, IncludeVersion()));
@@ -135,9 +115,8 @@ struct ConsistencyScanInfo {
 	}
 
 	static Future<Void> setInfo(Database cx, ConsistencyScanInfo info) {
-		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
-			return setInfo(tr, info);
-		});
+		return runRYWTransaction(
+		    cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> { return setInfo(tr, info); });
 	}
 
 	static Future<Optional<Value>> getInfo(Reference<ReadYourWritesTransaction> tr) {
@@ -147,9 +126,8 @@ struct ConsistencyScanInfo {
 	}
 
 	static Future<Optional<Value>> getInfo(Database cx) {
-		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> {
-			return getInfo(tr);
-		});
+		return runRYWTransaction(
+		    cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> { return getInfo(tr); });
 	}
 
 	StatusObject toJSON() const {
@@ -158,7 +136,7 @@ struct ConsistencyScanInfo {
 		result["restart"] = restart;
 		result["max_rate"] = max_rate;
 		result["target_interval"] = target_interval;
-		result["progress_key"] = progress_key.toString();
+		result["bytes_read_prev_round"] = bytes_read_prev_round;
 		result["last_round_start_datetime"] = epochsToGMTString(last_round_start);
 		result["last_round_finish_datetime"] = epochsToGMTString(last_round_finish);
 		result["last_round_start_timestamp"] = last_round_start;
@@ -170,8 +148,40 @@ struct ConsistencyScanInfo {
 
 	std::string toString() const {
 		return format("consistency_scan_enabled = %d, restart =  %d, max_rate = %lf, target_interval = %lf",
-					  consistency_scan_enabled, restart, max_rate, target_interval);
+		              consistency_scan_enabled,
+		              restart,
+		              max_rate,
+		              target_interval);
 	}
 };
 
+Future<Version> getVersion(Database const& cx);
+Future<bool> getKeyServers(
+    Database const& cx,
+    Promise<std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>>> const& keyServersPromise,
+    KeyRangeRef const& kr);
+Future<bool> getKeyLocations(Database const& cx,
+                             std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>> const& shards,
+                             Promise<Standalone<VectorRef<KeyValueRef>>> const& keyLocationPromise,
+                             bool const& performQuiescentChecks);
+Future<bool> checkDataConsistency(Database const& cx,
+                                  VectorRef<KeyValueRef> const& keyLocations,
+                                  DatabaseConfiguration const& configuration,
+                                  std::map<UID, StorageServerInterface> const& tssMapping,
+                                  bool const& performQuiescentChecks,
+                                  bool const& performTSSCheck,
+                                  bool const& firstClient,
+                                  bool const& failureIsError,
+                                  int const& clientId,
+                                  int const& clientCount,
+                                  bool const& distributed,
+                                  bool const& shuffleShards,
+                                  int const& shardSampleFactor,
+                                  int64_t const& sharedRandomNumber,
+                                  int64_t const& repetitions,
+                                  int64_t* const& bytesReadInPreviousRound,
+                                  int const& restart,
+                                  int64_t const& maxRate,
+                                  int64_t const& targetInterval,
+                                  KeyRef const& progressKey);
 #endif // FDBSERVER_CONSISTENCYSCANINTERFACE_H

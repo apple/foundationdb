@@ -125,9 +125,7 @@ extern const KeyRef cacheChangePrefix;
 const Key cacheChangeKeyFor(uint16_t idx);
 uint16_t cacheChangeKeyDecodeIndex(const KeyRef& key);
 
-// "\xff/consistencyCheckProgressKey" := "prevReadKey"
-// For remembering the last key read by the consistency check workload
-extern const KeyRef consistencyCheckProgressKey;
+// For persisting the consistency scan configuration and metrics
 extern const KeyRef consistencyScanInfoKey;
 
 // "\xff/tss/[[serverId]]" := "[[tssId]]"

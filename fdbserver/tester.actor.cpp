@@ -196,8 +196,8 @@ int64_t getOption(VectorRef<KeyValueRef> options, Key key, int64_t defaultValue)
 double getOption(VectorRef<KeyValueRef> options, Key key, double defaultValue) {
 	for (int i = 0; i < options.size(); i++)
 		if (options[i].key == key) {
-			double r;
-			if (sscanf(options[i].value.toString().c_str(), "%lf", &r)) {
+			float r;
+			if (sscanf(options[i].value.toString().c_str(), "%f", &r)) {
 				options[i].value = LiteralStringRef("");
 				return r;
 			}
@@ -355,16 +355,6 @@ Reference<TestWorkload> getWorkloadIface(WorkloadRequest work,
 
 	auto workload = IWorkloadFactory::create(testName.toString(), wcx);
 
-	for (int q = 0; q < options.size(); q++)
-		fprintf(stdout, " '%s' = '%s'\n", options[q].key.toString().c_str(), options[q].value.toString().c_str());
-	if (workload) {
-		fprintf(stdout, "TestName: %s\n. Workload Options:", printable(testName).c_str());
-		for (int p = 0; p < workload->options.size(); p++)
-			fprintf(stdout,
-			        " '%s' = '%s'\n",
-			        workload->options[p].key.toString().c_str(),
-			        workload->options[p].value.toString().c_str());
-	}
 	auto unconsumedOptions = checkAllOptionsConsumed(workload ? workload->options : VectorRef<KeyValueRef>());
 	if (!workload || unconsumedOptions.size()) {
 		TraceEvent evt(SevError, "TestCreationError");
@@ -394,7 +384,6 @@ Reference<TestWorkload> getWorkloadIface(WorkloadRequest work, Reference<AsyncVa
 		fprintf(stderr, "ERROR: No options were provided for workload.\n");
 		throw test_specification_invalid();
 	}
-	fprintf(stdout, "Workloads #options: %d\n", work.options.size());
 	if (work.options.size() == 1)
 		return getWorkloadIface(work, work.options[0], dbInfo);
 
@@ -563,8 +552,7 @@ ACTOR Future<Void> runWorkloadAsync(Database cx,
 					TraceEvent(SevError, "TestSetupError", workIface.id())
 					    .error(e)
 					    .detail("Workload", workload->description());
-					if (e.code() == error_code_please_reboot || e.code() == error_code_please_reboot_delete ||
-					    e.code() == error_code_actor_cancelled)
+					if (e.code() == error_code_please_reboot || e.code() == error_code_please_reboot_delete)
 						throw;
 				}
 			}
@@ -579,8 +567,7 @@ ACTOR Future<Void> runWorkloadAsync(Database cx,
 					startResult = Void();
 				} catch (Error& e) {
 					startResult = operation_failed();
-					if (e.code() == error_code_please_reboot || e.code() == error_code_please_reboot_delete ||
-					    e.code() == error_code_actor_cancelled)
+					if (e.code() == error_code_please_reboot || e.code() == error_code_please_reboot_delete)
 						throw;
 					TraceEvent(SevError, "TestFailure", workIface.id())
 					    .errorUnsuppressed(e)
@@ -604,8 +591,7 @@ ACTOR Future<Void> runWorkloadAsync(Database cx,
 					checkResult = CheckReply{ (!startResult.present() || !startResult.get().isError()) && check };
 				} catch (Error& e) {
 					checkResult = operation_failed(); // was: checkResult = false;
-					if (e.code() == error_code_please_reboot || e.code() == error_code_please_reboot_delete ||
-					    e.code() == error_code_actor_cancelled)
+					if (e.code() == error_code_please_reboot || e.code() == error_code_please_reboot_delete)
 						throw;
 					TraceEvent(SevError, "TestFailure", workIface.id())
 					    .error(e)
@@ -626,8 +612,7 @@ ACTOR Future<Void> runWorkloadAsync(Database cx,
 				TraceEvent("WorkloadSendMetrics", workIface.id()).detail("Count", m.size());
 				req.send(m);
 			} catch (Error& e) {
-				if (e.code() == error_code_please_reboot || e.code() == error_code_please_reboot_delete ||
-				    e.code() == error_code_actor_cancelled)
+				if (e.code() == error_code_please_reboot || e.code() == error_code_please_reboot_delete)
 					throw;
 				TraceEvent(SevError, "WorkloadSendMetrics", workIface.id()).error(e);
 				s_req.sendError(operation_failed());
@@ -939,7 +924,6 @@ ACTOR Future<Void> checkConsistency(Database cx,
 		g_simulator.speedUpSimulation = true;
 	}
 
-	printf("checkConsistency\n");
 	Standalone<VectorRef<KeyValueRef>> options;
 	StringRef performQuiescent = LiteralStringRef("false");
 	StringRef performCacheCheck = LiteralStringRef("false");
@@ -954,8 +938,6 @@ ACTOR Future<Void> checkConsistency(Database cx,
 	if (doTSSCheck) {
 		performTSSCheck = LiteralStringRef("true");
 	}
-	TraceEvent("TesterCheckConsistency").detail("PerformQuiescent", performQuiescent);
-	performQuiescent = LiteralStringRef("false");
 	spec.title = LiteralStringRef("ConsistencyCheck");
 	spec.databasePingDelay = databasePingDelay;
 	spec.timeout = 32000;
@@ -997,7 +979,6 @@ ACTOR Future<bool> runTest(Database cx,
                            Optional<TenantName> defaultTenant) {
 	state DistributedTestResults testResults;
 
-	printf("runTest\n");
 	try {
 		Future<DistributedTestResults> fTestResults = runWorkload(cx, testers, spec, defaultTenant);
 		if (spec.timeout > 0) {
@@ -1007,7 +988,6 @@ ACTOR Future<bool> runTest(Database cx,
 		testResults = _testResults;
 		logMetrics(testResults.metrics);
 	} catch (Error& e) {
-		TraceEvent(SevDebug, "TestFailure").error(e);
 		if (e.code() == error_code_timed_out) {
 			TraceEvent(SevError, "TestFailure")
 			    .error(e)
@@ -1704,14 +1684,14 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
 	auto cc = makeReference<AsyncVar<Optional<ClusterControllerFullInterface>>>();
 	auto ci = makeReference<AsyncVar<Optional<ClusterInterface>>>();
 	std::vector<Future<Void>> actors;
-	if (connRecord && whatToRun != TEST_TYPE_CONSISTENCY_CHECK) {
+	if (connRecord) {
 		actors.push_back(reportErrors(monitorLeader(connRecord, cc), "MonitorLeader"));
 		actors.push_back(reportErrors(extractClusterInterface(cc, ci), "ExtractClusterInterface"));
 	}
+
 	if (whatToRun == TEST_TYPE_CONSISTENCY_CHECK) {
 		TestSpec spec;
 		Standalone<VectorRef<KeyValueRef>> options;
-		TraceEvent(SevDebug, "TestHarnessConsistencyCheck").detail("File", fileName.c_str());
 		spec.title = LiteralStringRef("ConsistencyCheck");
 		spec.databasePingDelay = 0;
 		spec.timeout = 0;
@@ -1720,29 +1700,16 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
 		std::string rateLimitMax = format("%d", CLIENT_KNOBS->CONSISTENCY_CHECK_RATE_LIMIT_MAX);
 		options.push_back_deep(options.arena(),
 		                       KeyValueRef(LiteralStringRef("testName"), LiteralStringRef("ConsistencyCheck")));
+		options.push_back_deep(options.arena(),
+		                       KeyValueRef(LiteralStringRef("performQuiescentChecks"), LiteralStringRef("false")));
+		options.push_back_deep(options.arena(),
+		                       KeyValueRef(LiteralStringRef("distributed"), LiteralStringRef("false")));
+		options.push_back_deep(options.arena(),
+		                       KeyValueRef(LiteralStringRef("failureIsError"), LiteralStringRef("true")));
+		options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("indefinite"), LiteralStringRef("true")));
 		options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("rateLimitMax"), StringRef(rateLimitMax)));
-		// Use unit test options as test spec options when provided
-		if (testOptions.params.size()) {
-			for (auto& kv : testOptions.params) {
-				options.push_back_deep(options.arena(), KeyValueRef(kv.first, kv.second));
-			}
-			//spec.runConsistencyCheck = false;
-		} else {
-			options.push_back_deep(options.arena(),
-			                       KeyValueRef(LiteralStringRef("performQuiescentChecks"), LiteralStringRef("false")));
-			options.push_back_deep(options.arena(),
-			                       KeyValueRef(LiteralStringRef("distributed"), LiteralStringRef("false")));
-			options.push_back_deep(options.arena(),
-			                       KeyValueRef(LiteralStringRef("failureIsError"), LiteralStringRef("true")));
-			options.push_back_deep(options.arena(),
-			                       KeyValueRef(LiteralStringRef("indefinite"), LiteralStringRef("true")));
-			options.push_back_deep(options.arena(),
-			                       KeyValueRef(LiteralStringRef("shuffleShards"), LiteralStringRef("true")));
-		}
-		// TODO: remove
-		//printf("runTests: Options:\n");
-		//for (int q = 0; q < options.size(); q++)
-		//	fprintf(stdout, " '%s' = '%s'\n", options[q].key.toString().c_str(), options[q].value.toString().c_str());
+		options.push_back_deep(options.arena(),
+		                       KeyValueRef(LiteralStringRef("shuffleShards"), LiteralStringRef("true")));
 		spec.options.push_back_deep(spec.options.arena(), options);
 		testSpecs.push_back(spec);
 	} else if (whatToRun == TEST_TYPE_UNIT_TESTS) {
@@ -1791,7 +1758,6 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
 	if (at == TEST_HERE) {
 		auto db = makeReference<AsyncVar<ServerDBInfo>>();
 		std::vector<TesterInterface> iTesters(1);
-		TraceEvent(SevDebug, "TestHarnessRun").detail("File", fileName.c_str());
 		actors.push_back(
 		    reportErrors(monitorServerDBInfo(cc, LocalityData(), db), "MonitorServerDBInfo")); // FIXME: Locality
 		actors.push_back(reportErrors(testerServerCore(iTesters[0], connRecord, db, locality), "TesterServerCore"));

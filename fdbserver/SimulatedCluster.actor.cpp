@@ -627,9 +627,6 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 					throw onShutdown.getError();
 				if (e.code() != error_code_actor_cancelled)
 					printf("SimulatedFDBDTerminated: %s\n", e.what());
-				TraceEvent("SimulatedFDBDAssertionError").detail("Destructed", destructed)
-					.detail("CurProcessAddress", g_simulator.getCurrentProcess()->address)
-					.detail("Address", process->address).detail("Erorr", e.what());
 				ASSERT(destructed ||
 				       g_simulator.getCurrentProcess() == process); // simulatedFDBD catch called on different process
 				TraceEvent(e.code() == error_code_actor_cancelled || e.code() == error_code_file_not_found || destructed
@@ -658,9 +655,6 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 			onShutdown = e;
 		}
 
-		TraceEvent("SimulatedFDBDAssertion").detail("Destructed", destructed)
-			.detail("CurProcessAddress", g_simulator.getCurrentProcess()->address)
-			.detail("Address", process->address);
 		ASSERT(destructed || g_simulator.getCurrentProcess() == process);
 
 		if (!process->shutdownSignal.isSet() && !destructed) {
@@ -842,30 +836,29 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 				    .detail("ZoneId", localities.zoneId())
 				    .detail("DataHall", localities.dataHallId())
 				    .detail("Folder", myFolders[i]);
-
 			}
 
 			// set up consistency scan config
 			// TODO: check if this is the right place for it
-			std::string p = joinPath(myFolders[0], "fdb.cluster");
-			Reference<IClusterConnectionRecord> connRecord(
-				useSeedFile ? new ClusterConnectionFile(p, connStr.toString())
-				: new ClusterConnectionFile(p));
-			ConsistencyScanInfo ckInfo = ConsistencyScanInfo();
-			if (deterministicRandom()->random01() < 0.5) {
-				TraceEvent("SimulatedConsistencyScanConfigRandom1").detail("ConsistencyScanEnabled", 0);
-				ckInfo.consistency_scan_enabled = false;
-			} else {
-				TraceEvent("SimulatedConsistencyScanConfigRandom2").detail("ConsistencyScanEnabled", 1);
-				ckInfo.consistency_scan_enabled = true;
-				ckInfo.restart = false;
-				ckInfo.max_rate = 50e6;
-				ckInfo.target_interval = 24*7*60*60;
-			}
-			Database cx = Database::createDatabase(connRecord, -1);
-			state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
-			wait(ConsistencyScanInfo::setInfo(tr, ckInfo));
-			wait(tr->commit());
+			// std::string p = joinPath(myFolders[0], "fdb.cluster");
+			// Reference<IClusterConnectionRecord> connRecord(
+			//	useSeedFile ? new ClusterConnectionFile(p, connStr.toString())
+			//	: new ClusterConnectionFile(p));
+			// ConsistencyScanInfo ckInfo = ConsistencyScanInfo();
+			// if (deterministicRandom()->random01() < 0.5) {
+			//	TraceEvent("SimulatedConsistencyScanConfigRandom1").detail("ConsistencyScanEnabled", 0);
+			//	ckInfo.consistency_scan_enabled = false;
+			//} else {
+			//	TraceEvent("SimulatedConsistencyScanConfigRandom2").detail("ConsistencyScanEnabled", 1);
+			//	ckInfo.consistency_scan_enabled = true;
+			//	ckInfo.restart = false;
+			//	ckInfo.max_rate = 50e6;
+			//	ckInfo.target_interval = 24*7*60*60;
+			//}
+			// Database cx = Database::createDatabase(connRecord, -1);
+			// state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+			// wait(ConsistencyScanInfo::setInfo(tr, ckInfo));
+			// wait(tr->commit());
 
 			TEST(bootCount >= 1); // Simulated machine rebooted
 			TEST(bootCount >= 2); // Simulated machine rebooted twice
@@ -1907,7 +1900,6 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 			                        json_spirit::write_string(json_spirit::mValue(kv.second.get_array()),
 			                                                  json_spirit::Output_options::none);
 		} else {
-			printf("kv-first: %s\n", kv.first.c_str());
 			ASSERT(false);
 		}
 	}

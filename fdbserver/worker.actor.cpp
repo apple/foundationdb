@@ -1949,15 +1949,12 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					DUMPTOKEN(recruited.waitFailure);
 					DUMPTOKEN(recruited.haltConsistencyScan);
 
-					Future<Void> consistencyScanProcess =
-					    consistencyScan(recruited, dbInfo, connRecord);
-					//consistencyScan(recruited, dbInfo, req.restart, req.maxRate, req.targetInterval, req.progressKey, connRecord);
-					errorForwarders.add(forwardError(errors,
-					                                 Role::CONSISTENCYSCAN,
-					                                 recruited.id(),
-					                                 setWhenDoneOrError(consistencyScanProcess,
-					                                                    csInterf,
-					                                                    Optional<ConsistencyScanInterface>())));
+					Future<Void> consistencyScanProcess = consistencyScan(recruited, dbInfo);
+					errorForwarders.add(forwardError(
+					    errors,
+					    Role::CONSISTENCYSCAN,
+					    recruited.id(),
+					    setWhenDoneOrError(consistencyScanProcess, csInterf, Optional<ConsistencyScanInterface>())));
 					csInterf->set(Optional<ConsistencyScanInterface>(recruited));
 				}
 				TraceEvent("ConsistencyScan_InitRequest", req.reqId).detail("ConsistencyScanId", recruited.id());

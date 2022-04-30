@@ -729,20 +729,13 @@ struct InitializeRatekeeperRequest {
 struct InitializeConsistencyScanRequest {
 	constexpr static FileIdentifier file_identifier = 3104275;
 	UID reqId;
-	//int64_t restart;
-	//double maxRate;
-	//double targetInterval;
-	//KeyRef progressKey;
 	ReplyPromise<ConsistencyScanInterface> reply;
 
 	InitializeConsistencyScanRequest() {}
 	explicit InitializeConsistencyScanRequest(UID uid) : reqId(uid) {}
-	//explicit InitializeConsistencyScanRequest(UID uid, int64_t restart, double maxRate, double targetInterval, KeyRef progressKey)
-	//	: reqId(uid), restart(restart), maxRate(maxRate), targetInterval(targetInterval), progressKey(progressKey) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, reqId, reply);
-		//serializer(ar, reqId, restart, maxRate, targetInterval, reply);
 	}
 };
 
@@ -1161,13 +1154,7 @@ ACTOR Future<Void> logRouter(TLogInterface interf,
                              Reference<AsyncVar<ServerDBInfo> const> db);
 ACTOR Future<Void> dataDistributor(DataDistributorInterface ddi, Reference<AsyncVar<ServerDBInfo> const> db);
 ACTOR Future<Void> ratekeeper(RatekeeperInterface rki, Reference<AsyncVar<ServerDBInfo> const> db);
-ACTOR Future<Void> consistencyScan(ConsistencyScanInterface csInterf,
-								   Reference<AsyncVar<ServerDBInfo> const> dbInfo,
-								   //int64_t restart,
-								   //double maxRate,
-								   //double targetInterval,
-								   //KeyRef progressKey,
-								   Reference<IClusterConnectionRecord> connRecord);
+ACTOR Future<Void> consistencyScan(ConsistencyScanInterface csInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo);
 ACTOR Future<Void> blobManager(BlobManagerInterface bmi, Reference<AsyncVar<ServerDBInfo> const> db, int64_t epoch);
 ACTOR Future<Void> storageCacheServer(StorageServerInterface interf,
                                       uint16_t id,

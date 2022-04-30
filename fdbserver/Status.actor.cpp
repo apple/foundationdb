@@ -3252,8 +3252,6 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		}
 
 		// Fetch Consistency Scan Information
-		//state Future<Optional<Value>> consistencyScan = consistencyScanInfoFetcher(cx);
-		//wait(success(consistencyScan));
 		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 		state Optional<Value> val;
 		loop {
@@ -3267,10 +3265,9 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			}
 		}
 		if (val.present()) {
-			ConsistencyScanInfo consistencyScanInfo = ObjectReader::fromStringRef<ConsistencyScanInfo>(val.get(), IncludeVersion());
+			ConsistencyScanInfo consistencyScanInfo =
+			    ObjectReader::fromStringRef<ConsistencyScanInfo>(val.get(), IncludeVersion());
 			TraceEvent("StatusConsistencyScanGotVal").log();
-			//if (consistencyScan.get().present()) {
-			//statusObj["consistency_scan_info"] = ObjectReader::fromStringRef<ConsistencyScanInfo>(consistencyScan.get().get(), IncludeVersion()).toJSON();
 			statusObj["consistency_scan_info"] = consistencyScanInfo.toJSON();
 		}
 

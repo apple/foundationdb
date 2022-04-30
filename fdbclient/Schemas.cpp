@@ -818,11 +818,20 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
              "disabled",
              "optional_experimental",
              "required_experimental"
-         ]},
-         "consistency_scan_enabled":0,
-         "consistency_scan_restart":0,
-         "consistency_scan_rate":0,
-         "consistency_scan_interval":0
+         ]}
+      },
+      "consistency_scan_info":{
+        "consistency_scan_enabled":false,
+        "restart":false,
+        "max_rate":0,
+        "target_interval":0,
+        "bytes_read_prev_round":0,
+        "last_round_start_datetime":"2022-04-20 00:05:05.123 +0000",
+        "last_round_finish_datetime":"1970-01-01 00:00:00.000 +0000",
+        "last_round_start_timestamp":1648857905.123,
+        "last_round_finish_timestamp":0,
+        "smoothed_round_seconds":1,
+        "finished_rounds":1
       },
       "data":{
          "least_operating_space_bytes_log_server":0,

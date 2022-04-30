@@ -671,10 +671,10 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 
 	//TraceEvent("QuietDatabaseWaitingOnFullRecovery").log();
 	TraceEvent("QuietDatabaseWaitingOnRecovery").detail("State", dbInfo->get().recoveryState);
-	//while (dbInfo->get().recoveryState != RecoveryState::FULLY_RECOVERED) {
+	// while (dbInfo->get().recoveryState != RecoveryState::FULLY_RECOVERED) {
 	//	TraceEvent("QuietDatabaseWaitingOnRecovery").detail("State", dbInfo->get().recoveryState);
 	//	wait(delay(10.0));
-	//}
+	// }
 	while (dbInfo->get().recoveryState != RecoveryState::FULLY_RECOVERED) {
 		wait(dbInfo->onChange());
 	}
@@ -684,9 +684,7 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 	// To get around this, quiet Database will disable the perpetual wiggle in the setup phase.
 
 	printf("Set perpetual_storage_wiggle=0 ...\n");
-	TraceEvent("QuietDatabaseSetPerpetualStorageWiggle").log();
 	wait(setPerpetualStorageWiggle(cx, false, LockAware::True));
-	TraceEvent("QuietDatabaseSetPerpetualStorageWiggleDone").log();
 	printf("Set perpetual_storage_wiggle=0 Done.\n");
 
 	// Require 3 consecutive successful quiet database checks spaced 2 second apart
