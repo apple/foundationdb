@@ -245,6 +245,7 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 	TaskPriority taskID;
 	SpanID spanID;
 	UseProvisionalProxies useProvisionalProxies = UseProvisionalProxies::False;
+	bool readVersionObtainedFromGrvProxy;
 
 	int numErrors = 0;
 	double startTime = 0;
@@ -260,6 +261,7 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 	// Only available so that Transaction can have a default constructor, for use in state variables
 	TransactionState(TaskPriority taskID, SpanID spanID) : taskID(taskID), spanID(spanID), tenantSet(false) {}
 
+	// VERSION_VECTOR changed default values of readVersionObtainedFromGrvProxy
 	TransactionState(Database cx,
 	                 Optional<TenantName> tenant,
 	                 TaskPriority taskID,
@@ -430,7 +432,10 @@ public:
 	void reset();
 	void fullReset();
 	double getBackoff(int errCode);
+
 	void debugTransaction(UID dID) { trState->debugID = dID; }
+	VersionVector getVersionVector() const;
+	UID getSpanID() const { return trState->spanID; }
 
 	Future<Void> commitMutations();
 	void setupWatches();
@@ -458,6 +463,10 @@ public:
 	Reference<TransactionState> trState;
 	std::vector<Reference<Watch>> watches;
 	Span span;
+
+	// used in template functions as returned Future type
+	template <typename Type>
+	using FutureT = Future<Type>;
 
 private:
 	Future<Version> getReadVersion(uint32_t flags);
@@ -529,6 +538,20 @@ ACTOR Future<Void> setPerpetualStorageWiggle(Database cx, bool enable, LockAware
 ACTOR Future<std::vector<std::pair<UID, StorageWiggleValue>>> readStorageWiggleValues(Database cx,
                                                                                       bool primary,
                                                                                       bool use_system_priority);
+
+// Returns the maximum legal size of a key. This size will be determined by the prefix of the passed in key
+// (system keys have a larger maximum size). This should be used for generic max key size requests.
+int64_t getMaxKeySize(KeyRef const& key);
+
+// Returns the maximum legal size of a key that can be read. Keys larger than this will be assumed not to exist.
+int64_t getMaxReadKeySize(KeyRef const& key);
+
+// Returns the maximum legal size of a key that can be written. If using raw access, writes to normal keys will
+// be allowed to be slighly larger to accommodate the prefix.
+int64_t getMaxWriteKeySize(KeyRef const& key, bool hasRawAccess);
+
+// Returns the maximum legal size of a key that can be cleared. Keys larger than this will be assumed not to exist.
+int64_t getMaxClearKeySize(KeyRef const& key);
 
 #include "flow/unactorcompiler.h"
 #endif

@@ -26,6 +26,7 @@
 #include <toml.hpp>
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/simulator.h"
+#include "fdbrpc/IPAllowList.h"
 #include "fdbclient/ClusterConnectionFile.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/DatabaseContext.h"
@@ -309,6 +310,7 @@ public:
 	//	2 = "memory-radixtree-beta"
 	//	3 = "ssd-redwood-1-experimental"
 	//	4 = "ssd-rocksdb-v1"
+	//	5 = "ssd-sharded-rocksdb"
 	// Requires a comma-separated list of numbers WITHOUT whitespaces
 	std::vector<int> storageEngineExcludeTypes;
 	// Set the maximum TLog version that can be selected for a test
@@ -520,6 +522,10 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 	state ISimulator::ProcessInfo* simProcess = g_simulator.getCurrentProcess();
 	state UID randomId = nondeterministicRandom()->randomUniqueID();
 	state int cycles = 0;
+	state IPAllowList allowList;
+
+	allowList.addTrustedSubnet("0.0.0.0/2"sv);
+	allowList.addTrustedSubnet("abcd::/16"sv);
 
 	loop {
 		auto waitTime =
@@ -579,7 +585,8 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 				// making progress
 				FlowTransport::createInstance(processClass == ProcessClass::TesterClass || runBackupAgents == AgentOnly,
 				                              1,
-				                              WLTOKEN_RESERVED_COUNT);
+				                              WLTOKEN_RESERVED_COUNT,
+				                              &allowList);
 				Sim2FileSystem::newFileSystem();
 
 				std::vector<Future<Void>> futures;
@@ -629,7 +636,8 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 					printf("SimulatedFDBDTerminated: %s\n", e.what());
 				ASSERT(destructed ||
 				       g_simulator.getCurrentProcess() == process); // simulatedFDBD catch called on different process
-				TraceEvent(e.code() == error_code_actor_cancelled || e.code() == error_code_file_not_found || destructed
+				TraceEvent(e.code() == error_code_actor_cancelled || e.code() == error_code_file_not_found ||
+				                   e.code() == error_code_incompatible_software_version || destructed
 				               ? SevInfo
 				               : SevError,
 				           "SimulatedFDBDTerminated")
@@ -915,7 +923,7 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 				ASSERT(it.second.get().canGet());
 			}
 
-			for (auto it : g_simulator.getMachineById(localities.machineId())->deletingFiles) {
+			for (auto it : g_simulator.getMachineById(localities.machineId())->deletingOrClosingFiles) {
 				filenames.insert(it);
 				closingStr += it + ", ";
 			}
@@ -1433,6 +1441,16 @@ void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
 		// background threads.
 		TraceEvent(SevWarnAlways, "RocksDBNonDeterminism")
 		    .detail("Explanation", "The RocksDB storage engine is threaded and non-deterministic");
+		noUnseed = true;
+		break;
+	}
+	case 5: {
+		TEST(true); // Simulated cluster using Sharded RocksDB storage engine
+		set_config("ssd-sharded-rocksdb");
+		// Tests using the RocksDB engine are necessarily non-deterministic because of RocksDB
+		// background threads.
+		TraceEvent(SevWarnAlways, "RocksDBNonDeterminism")
+		    .detail("Explanation", "The Sharded RocksDB storage engine is threaded and non-deterministic");
 		noUnseed = true;
 		break;
 	}
@@ -2356,10 +2374,14 @@ ACTOR void setupAndRun(std::string dataFolder,
 	state Standalone<StringRef> startingConfiguration;
 	state int testerCount = 1;
 	state TestConfig testConfig;
+	state IPAllowList allowList;
 	testConfig.readFromConfig(testFile);
 	g_simulator.hasDiffProtocolProcess = testConfig.startIncompatibleProcess;
 	g_simulator.setDiffProtocol = false;
 
+	// Build simulator allow list
+	allowList.addTrustedSubnet("0.0.0.0/2"sv);
+	allowList.addTrustedSubnet("abcd::/16"sv);
 	state bool allowDefaultTenant = testConfig.allowDefaultTenant;
 	state bool allowDisablingTenants = testConfig.allowDisablingTenants;
 
@@ -2404,7 +2426,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 	}
 
 	// TODO (IPv6) Use IPv6?
-	wait(g_simulator.onProcess(
+	auto testSystem =
 	    g_simulator.newProcess("TestSystem",
 	                           IPAddress(0x01010101),
 	                           1,
@@ -2417,10 +2439,11 @@ ACTOR void setupAndRun(std::string dataFolder,
 	                           ProcessClass(ProcessClass::TesterClass, ProcessClass::CommandLineSource),
 	                           "",
 	                           "",
-	                           currentProtocolVersion),
-	    TaskPriority::DefaultYield));
+	                           currentProtocolVersion);
+	testSystem->excludeFromRestarts = true;
+	wait(g_simulator.onProcess(testSystem, TaskPriority::DefaultYield));
 	Sim2FileSystem::newFileSystem();
-	FlowTransport::createInstance(true, 1, WLTOKEN_RESERVED_COUNT);
+	FlowTransport::createInstance(true, 1, WLTOKEN_RESERVED_COUNT, &allowList);
 	TEST(true); // Simulation start
 
 	state Optional<TenantName> defaultTenant;

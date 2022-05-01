@@ -26,42 +26,10 @@ namespace FdbApiTester {
 
 class ApiCorrectnessWorkload : public ApiWorkload {
 public:
-	ApiCorrectnessWorkload(const WorkloadConfig& config) : ApiWorkload(config) {
-		numRandomOperations = config.getIntOption("numRandomOperations", 1000);
-		numOpLeft = numRandomOperations;
-	}
-
-	void runTests() override { randomOperations(); }
+	ApiCorrectnessWorkload(const WorkloadConfig& config) : ApiWorkload(config) {}
 
 private:
 	enum OpType { OP_INSERT, OP_GET, OP_CLEAR, OP_CLEAR_RANGE, OP_COMMIT_READ, OP_LAST = OP_COMMIT_READ };
-
-	// The number of operations to be executed
-	int numRandomOperations;
-
-	// Operations counter
-	int numOpLeft;
-
-	void randomInsertOp(TTaskFct cont) {
-		int numKeys = Random::get().randomInt(1, maxKeysPerTransaction);
-		auto kvPairs = std::make_shared<std::vector<KeyValue>>();
-		for (int i = 0; i < numKeys; i++) {
-			kvPairs->push_back(KeyValue{ randomNotExistingKey(), randomValue() });
-		}
-		execTransaction(
-		    [kvPairs](auto ctx) {
-			    for (const KeyValue& kv : *kvPairs) {
-				    ctx->tx()->set(kv.key, kv.value);
-			    }
-			    ctx->commit();
-		    },
-		    [this, kvPairs, cont]() {
-			    for (const KeyValue& kv : *kvPairs) {
-				    store.set(kv.key, kv.value);
-			    }
-			    schedule(cont);
-		    });
-	}
 
 	void randomCommitReadOp(TTaskFct cont) {
 		int numKeys = Random::get().randomInt(1, maxKeysPerTransaction);
@@ -82,9 +50,11 @@ private:
 			    }
 			    auto results = std::make_shared<std::vector<std::optional<std::string>>>();
 			    execTransaction(
-			        [kvPairs, results](auto ctx) {
-				        // TODO: Enable after merging with GRV caching
-				        // ctx->tx()->setOption(FDB_TR_OPTION_USE_GRV_CACHE);
+			        [kvPairs, results, this](auto ctx) {
+				        if (apiVersion >= 710) {
+					        // Test GRV caching in 7.1 and later
+					        ctx->tx()->setOption(FDB_TR_OPTION_USE_GRV_CACHE);
+				        }
 				        auto futures = std::make_shared<std::vector<Future>>();
 				        for (const auto& kv : *kvPairs) {
 					        futures->push_back(ctx->tx()->get(kv.key, false));
@@ -154,44 +124,6 @@ private:
 		    });
 	}
 
-	void randomClearOp(TTaskFct cont) {
-		int numKeys = Random::get().randomInt(1, maxKeysPerTransaction);
-		auto keys = std::make_shared<std::vector<std::string>>();
-		for (int i = 0; i < numKeys; i++) {
-			keys->push_back(randomExistingKey());
-		}
-		execTransaction(
-		    [keys](auto ctx) {
-			    for (const auto& key : *keys) {
-				    ctx->tx()->clear(key);
-			    }
-			    ctx->commit();
-		    },
-		    [this, keys, cont]() {
-			    for (const auto& key : *keys) {
-				    store.clear(key);
-			    }
-			    schedule(cont);
-		    });
-	}
-
-	void randomClearRangeOp(TTaskFct cont) {
-		std::string begin = randomKeyName();
-		std::string end = randomKeyName();
-		if (begin > end) {
-			std::swap(begin, end);
-		}
-		execTransaction(
-		    [begin, end](auto ctx) {
-			    ctx->tx()->clearRange(begin, end);
-			    ctx->commit();
-		    },
-		    [this, begin, end, cont]() {
-			    store.clear(begin, end);
-			    schedule(cont);
-		    });
-	}
-
 	void randomOperation(TTaskFct cont) {
 		OpType txType = (store.size() == 0) ? OP_INSERT : (OpType)Random::get().randomInt(0, OP_LAST);
 		switch (txType) {
@@ -211,14 +143,6 @@ private:
 			randomCommitReadOp(cont);
 			break;
 		}
-	}
-
-	void randomOperations() {
-		if (numOpLeft == 0)
-			return;
-
-		numOpLeft--;
-		randomOperation([this]() { randomOperations(); });
 	}
 };
 

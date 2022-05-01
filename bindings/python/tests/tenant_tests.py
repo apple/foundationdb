@@ -24,7 +24,7 @@ import json
 from fdb.tuple import pack
 
 if __name__ == '__main__':
-    fdb.api_version(710)
+    fdb.api_version(720)
 
 def cleanup_tenant(db, tenant_name):
     try:

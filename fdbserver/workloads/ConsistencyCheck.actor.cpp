@@ -1251,7 +1251,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					return false;
 				}
 
-				state ClusterConnectionString old(currentKey.get().toString());
+				ClusterConnectionString old(currentKey.get().toString());
+				state std::vector<NetworkAddress> oldCoordinators = wait(old.tryResolveHostnames());
 
 				std::vector<ProcessData> workers = wait(::getWorkers(&tr));
 
@@ -1261,7 +1262,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				}
 
 				std::set<Optional<Standalone<StringRef>>> checkDuplicates;
-				for (const auto& addr : old.coordinators()) {
+				for (const auto& addr : oldCoordinators) {
 					auto findResult = addr_locality.find(addr);
 					if (findResult != addr_locality.end()) {
 						if (checkDuplicates.count(findResult->second.zoneId())) {

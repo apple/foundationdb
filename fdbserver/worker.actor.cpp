@@ -22,12 +22,18 @@
 #include <tuple>
 #include <boost/lexical_cast.hpp>
 
+#include "fdbclient/FDBTypes.h"
+#include "fdbrpc/IAsyncFile.h"
 #include "fdbrpc/Locality.h"
 #include "fdbclient/GlobalConfig.actor.h"
 #include "fdbclient/ProcessInterface.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbserver/Knobs.h"
 #include "flow/ActorCollection.h"
+#include "flow/Error.h"
+#include "flow/FileIdentifier.h"
+#include "flow/ObjectSerializer.h"
+#include "flow/Platform.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/SystemMonitor.h"
 #include "flow/TDMetric.actor.h"
@@ -57,7 +63,9 @@
 #include "flow/ThreadHelper.actor.h"
 #include "flow/Trace.h"
 #include "flow/flow.h"
+#include "flow/genericactors.actor.h"
 #include "flow/network.h"
+#include "flow/serialize.h"
 
 #ifdef __linux__
 #include <fcntl.h>
@@ -143,7 +151,7 @@ ACTOR static Future<Void> extractClientInfo(Reference<AsyncVar<ServerDBInfo> con
 	loop {
 		ClientDBInfo ni = db->get().client;
 		shrinkProxyList(ni, lastCommitProxyUIDs, lastCommitProxies, lastGrvProxyUIDs, lastGrvProxies);
-		info->set(ni);
+		info->setUnconditional(ni);
 		wait(db->onChange());
 	}
 }
@@ -210,18 +218,10 @@ ACTOR Future<Void> handleIOErrors(Future<Void> actor, IClosable* store, UID id, 
 	state Future<ErrorOr<Void>> storeError = actor.isReady() ? Never() : errorOr(store->getError());
 	choose {
 		when(state ErrorOr<Void> e = wait(errorOr(actor))) {
-			TraceEvent(SevDebug, "HandleIOErrorsActorIsReady")
-			    .detail("Error", e.isError() ? e.getError().code() : -1)
-			    .detail("UID", id);
 			if (e.isError() && e.getError().code() == error_code_please_reboot) {
 				// no need to wait.
 			} else {
-				TraceEvent(SevDebug, "HandleIOErrorsActorBeforeOnClosed").detail("IsClosed", onClosed.isReady());
 				wait(onClosed);
-				TraceEvent(SevDebug, "HandleIOErrorsActorOnClosedFinished")
-				    .detail("StoreError",
-				            storeError.isReady() ? (storeError.get().isError() ? storeError.get().getError().code() : 0)
-				                                 : -1);
 			}
 			if (e.isError() && e.getError().code() == error_code_broken_promise && !storeError.isReady()) {
 				wait(delay(0.00001 + FLOW_KNOBS->MAX_BUGGIFIED_DELAY));
@@ -331,6 +331,9 @@ KeyValueStoreSuffix redwoodSuffix = { KeyValueStoreType::SSD_REDWOOD_V1, ".redwo
 KeyValueStoreSuffix rocksdbSuffix = { KeyValueStoreType::SSD_ROCKSDB_V1,
 	                                  ".rocksdb",
 	                                  FilesystemCheck::DIRECTORIES_ONLY };
+KeyValueStoreSuffix shardedRocksdbSuffix = { KeyValueStoreType::SSD_SHARDED_ROCKSDB,
+	                                         ".shardedrocksdb",
+	                                         FilesystemCheck::DIRECTORIES_ONLY };
 
 std::string validationFilename = "_validate";
 
@@ -344,6 +347,8 @@ std::string filenameFromSample(KeyValueStoreType storeType, std::string folder, 
 	else if (storeType == KeyValueStoreType::SSD_REDWOOD_V1)
 		return joinPath(folder, sample_filename);
 	else if (storeType == KeyValueStoreType::SSD_ROCKSDB_V1)
+		return joinPath(folder, sample_filename);
+	else if (storeType == KeyValueStoreType::SSD_SHARDED_ROCKSDB)
 		return joinPath(folder, sample_filename);
 	UNREACHABLE();
 }
@@ -360,6 +365,8 @@ std::string filenameFromId(KeyValueStoreType storeType, std::string folder, std:
 		return joinPath(folder, prefix + id.toString() + ".redwood-v1");
 	else if (storeType == KeyValueStoreType::SSD_ROCKSDB_V1)
 		return joinPath(folder, prefix + id.toString() + ".rocksdb");
+	else if (storeType == KeyValueStoreType::SSD_SHARDED_ROCKSDB)
+		return joinPath(folder, prefix + id.toString() + ".shardedrocksdb");
 
 	TraceEvent(SevError, "UnknownStoreType").detail("StoreType", storeType.toString());
 	UNREACHABLE();
@@ -536,6 +543,9 @@ std::vector<DiskStore> getDiskStores(std::string folder) {
 	result.insert(result.end(), result4.begin(), result4.end());
 	auto result5 = getDiskStores(folder, rocksdbSuffix.suffix, rocksdbSuffix.type, rocksdbSuffix.check);
 	result.insert(result.end(), result5.begin(), result5.end());
+	auto result6 =
+	    getDiskStores(folder, shardedRocksdbSuffix.suffix, shardedRocksdbSuffix.type, shardedRocksdbSuffix.check);
+	result.insert(result.end(), result6.begin(), result6.end());
 	return result;
 }
 
@@ -777,16 +787,92 @@ TEST_CASE("/fdbserver/worker/addressInDbAndPrimaryDc") {
 	NetworkAddress grvProxyAddress(IPAddress(0x26262626), 1);
 	GrvProxyInterface grvProxyInterf;
 	grvProxyInterf.getConsistentReadVersion =
-	    RequestStream<struct GetReadVersionRequest>(Endpoint({ grvProxyAddress }, UID(1, 2)));
+	    PublicRequestStream<struct GetReadVersionRequest>(Endpoint({ grvProxyAddress }, UID(1, 2)));
 	testDbInfo.client.grvProxies.push_back(grvProxyInterf);
 	ASSERT(addressInDbAndPrimaryDc(grvProxyAddress, makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
 
 	NetworkAddress commitProxyAddress(IPAddress(0x37373737), 1);
 	CommitProxyInterface commitProxyInterf;
 	commitProxyInterf.commit =
-	    RequestStream<struct CommitTransactionRequest>(Endpoint({ commitProxyAddress }, UID(1, 2)));
+	    PublicRequestStream<struct CommitTransactionRequest>(Endpoint({ commitProxyAddress }, UID(1, 2)));
 	testDbInfo.client.commitProxies.push_back(commitProxyInterf);
 	ASSERT(addressInDbAndPrimaryDc(commitProxyAddress, makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
+
+	return Void();
+}
+
+} // namespace
+
+// Returns true if `address` is used in the db (indicated by `dbInfo`) transaction system and in the db's primary
+// satellite DC.
+bool addressInDbAndPrimarySatelliteDc(const NetworkAddress& address, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+	for (const auto& logSet : dbInfo->get().logSystemConfig.tLogs) {
+		if (logSet.isLocal && logSet.locality == tagLocalitySatellite) {
+			for (const auto& tlog : logSet.tLogs) {
+				if (tlog.present() && tlog.interf().addresses().contains(address)) {
+					return true;
+				}
+			}
+		}
+	}
+
+	return false;
+}
+
+bool addressesInDbAndPrimarySatelliteDc(const NetworkAddressList& addresses,
+                                        Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+	return addressInDbAndPrimarySatelliteDc(addresses.address, dbInfo) ||
+	       (addresses.secondaryAddress.present() &&
+	        addressInDbAndPrimarySatelliteDc(addresses.secondaryAddress.get(), dbInfo));
+}
+
+namespace {
+
+TEST_CASE("/fdbserver/worker/addressInDbAndPrimarySatelliteDc") {
+	// Setup a ServerDBInfo for test.
+	ServerDBInfo testDbInfo;
+	LocalityData testLocal;
+	testLocal.set(LiteralStringRef("dcid"), StringRef(std::to_string(1)));
+	testDbInfo.master.locality = testLocal;
+
+	// First, create an empty TLogInterface, and check that it shouldn't be considered as in satellite DC.
+	testDbInfo.logSystemConfig.tLogs.push_back(TLogSet());
+	testDbInfo.logSystemConfig.tLogs.back().isLocal = true;
+	testDbInfo.logSystemConfig.tLogs.back().locality = tagLocalitySatellite;
+	testDbInfo.logSystemConfig.tLogs.back().tLogs.push_back(OptionalInterface<TLogInterface>());
+	ASSERT(!addressInDbAndPrimarySatelliteDc(g_network->getLocalAddress(),
+	                                         makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
+
+	// Create a satellite tlog, and it should be considered as in primary satellite DC.
+	NetworkAddress satelliteTLogAddress(IPAddress(0x13131313), 1);
+	TLogInterface satelliteTLog(testLocal);
+	satelliteTLog.initEndpoints();
+	satelliteTLog.peekMessages = RequestStream<struct TLogPeekRequest>(Endpoint({ satelliteTLogAddress }, UID(1, 2)));
+	testDbInfo.logSystemConfig.tLogs.back().tLogs.push_back(OptionalInterface(satelliteTLog));
+	ASSERT(addressInDbAndPrimarySatelliteDc(satelliteTLogAddress, makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
+
+	// Create a primary TLog, and it shouldn't be considered as in primary Satellite DC.
+	NetworkAddress primaryTLogAddress(IPAddress(0x26262626), 1);
+	testDbInfo.logSystemConfig.tLogs.push_back(TLogSet());
+	testDbInfo.logSystemConfig.tLogs.back().isLocal = true;
+	TLogInterface primaryTLog(testLocal);
+	primaryTLog.initEndpoints();
+	primaryTLog.peekMessages = RequestStream<struct TLogPeekRequest>(Endpoint({ primaryTLogAddress }, UID(1, 2)));
+	testDbInfo.logSystemConfig.tLogs.back().tLogs.push_back(OptionalInterface(primaryTLog));
+	ASSERT(!addressInDbAndPrimarySatelliteDc(primaryTLogAddress, makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
+
+	// Create a remote TLog, and it should be considered as in remote DC.
+	NetworkAddress remoteTLogAddress(IPAddress(0x37373737), 1);
+	LocalityData fakeRemote;
+	fakeRemote.set(LiteralStringRef("dcid"), StringRef(std::to_string(2)));
+	TLogInterface remoteTLog(fakeRemote);
+	remoteTLog.initEndpoints();
+	remoteTLog.peekMessages = RequestStream<struct TLogPeekRequest>(Endpoint({ remoteTLogAddress }, UID(1, 2)));
+
+	testDbInfo.logSystemConfig.tLogs.push_back(TLogSet());
+	testDbInfo.logSystemConfig.tLogs.back().isLocal = false;
+	testDbInfo.logSystemConfig.tLogs.back().tLogs.push_back(OptionalInterface(remoteTLog));
+	ASSERT(!addressInDbAndPrimarySatelliteDc(remoteTLogAddress, makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
 
 	return Void();
 }
@@ -887,19 +973,18 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 			const auto& allPeers = FlowTransport::transport().getAllPeers();
 			UpdateWorkerHealthRequest req;
 
-			bool workerInDb = false;
-			bool workerInPrimary = false;
+			enum WorkerLocation { None, Primary, Remote };
+			WorkerLocation workerLocation = None;
 			if (addressesInDbAndPrimaryDc(interf.addresses(), dbInfo)) {
-				workerInDb = true;
-				workerInPrimary = true;
+				workerLocation = Primary;
 			} else if (addressesInDbAndRemoteDc(interf.addresses(), dbInfo)) {
-				workerInDb = true;
-				workerInPrimary = false;
+				workerLocation = Remote;
 			}
 
-			if (workerInDb) {
+			if (workerLocation != None) {
 				for (const auto& [address, peer] : allPeers) {
-					if (peer->pingLatencies.getPopulationSize() < SERVER_KNOBS->PEER_LATENCY_CHECK_MIN_POPULATION) {
+					if (peer->connectFailedCount == 0 &&
+					    peer->pingLatencies.getPopulationSize() < SERVER_KNOBS->PEER_LATENCY_CHECK_MIN_POPULATION) {
 						// Ignore peers that don't have enough samples.
 						// TODO(zhewu): Currently, FlowTransport latency monitor clears ping latency samples on a
 						// regular
@@ -909,33 +994,69 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 						//              last ping latencies logged.
 						continue;
 					}
+					bool degradedPeer = false;
+					if ((workerLocation == Primary && addressInDbAndPrimaryDc(address, dbInfo)) ||
+					    (workerLocation == Remote && addressInDbAndRemoteDc(address, dbInfo))) {
+						// Monitors intra DC latencies between servers that in the primary or remote DC's transaction
+						// systems. Note that currently we are not monitor storage servers, since lagging in storage
+						// servers today already can trigger server exclusion by data distributor.
 
-					if ((workerInPrimary && addressInDbAndPrimaryDc(address, dbInfo)) ||
-					    (!workerInPrimary && addressInDbAndRemoteDc(address, dbInfo))) {
-						// Only monitoring the servers that in the primary or remote DC's transaction systems.
-						// Note that currently we are not monitor storage servers, since lagging in storage servers
-						// today already can trigger server exclusion by data distributor.
-
-						if (peer->pingLatencies.percentile(SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE) >
+						if (peer->connectFailedCount >= SERVER_KNOBS->PEER_DEGRADATION_CONNECTION_FAILURE_COUNT ||
+						    peer->pingLatencies.percentile(SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE) >
 						        SERVER_KNOBS->PEER_LATENCY_DEGRADATION_THRESHOLD ||
 						    peer->timeoutCount / (double)(peer->pingLatencies.getPopulationSize()) >
 						        SERVER_KNOBS->PEER_TIMEOUT_PERCENTAGE_DEGRADATION_THRESHOLD) {
-							// This is a degraded peer.
-							TraceEvent("HealthMonitorDetectDegradedPeer")
-							    .suppressFor(30)
-							    .detail("Peer", address)
-							    .detail("Elapsed", now() - peer->lastLoggedTime)
-							    .detail("MinLatency", peer->pingLatencies.min())
-							    .detail("MaxLatency", peer->pingLatencies.max())
-							    .detail("MeanLatency", peer->pingLatencies.mean())
-							    .detail("MedianLatency", peer->pingLatencies.median())
-							    .detail("CheckedPercentile", SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE)
-							    .detail(
-							        "CheckedPercentileLatency",
-							        peer->pingLatencies.percentile(SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE))
-							    .detail("Count", peer->pingLatencies.getPopulationSize())
-							    .detail("TimeoutCount", peer->timeoutCount);
+							degradedPeer = true;
+						}
+					} else if (workerLocation == Primary && addressInDbAndPrimarySatelliteDc(address, dbInfo)) {
+						// Monitors inter DC latencies between servers in primary and primary satellite DC. Note that
+						// TLog workers in primary satellite DC are on the critical path of serving a commit.
+						if (peer->connectFailedCount >= SERVER_KNOBS->PEER_DEGRADATION_CONNECTION_FAILURE_COUNT ||
+						    peer->pingLatencies.percentile(
+						        SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE_SATELLITE) >
+						        SERVER_KNOBS->PEER_LATENCY_DEGRADATION_THRESHOLD_SATELLITE ||
+						    peer->timeoutCount / (double)(peer->pingLatencies.getPopulationSize()) >
+						        SERVER_KNOBS->PEER_TIMEOUT_PERCENTAGE_DEGRADATION_THRESHOLD) {
+							degradedPeer = true;
+						}
+					}
 
+					if (degradedPeer) {
+						TraceEvent("HealthMonitorDetectDegradedPeer")
+						    .suppressFor(30)
+						    .detail("Peer", address)
+						    .detail("Elapsed", now() - peer->lastLoggedTime)
+						    .detail("MinLatency", peer->pingLatencies.min())
+						    .detail("MaxLatency", peer->pingLatencies.max())
+						    .detail("MeanLatency", peer->pingLatencies.mean())
+						    .detail("MedianLatency", peer->pingLatencies.median())
+						    .detail("CheckedPercentile", SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE)
+						    .detail("CheckedPercentileLatency",
+						            peer->pingLatencies.percentile(SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE))
+						    .detail("PingCount", peer->pingLatencies.getPopulationSize())
+						    .detail("PingTimeoutCount", peer->timeoutCount)
+						    .detail("ConnectionFailureCount", peer->connectFailedCount);
+
+						req.degradedPeers.push_back(address);
+					}
+				}
+
+				if (SERVER_KNOBS->WORKER_HEALTH_REPORT_RECENT_DESTROYED_PEER) {
+					// When the worker cannot connect to a remote peer, the peer maybe erased from the list returned
+					// from getAllPeers(). Therefore, we also look through all the recent closed peers in the flow
+					// transport's health monitor. Note that all the closed peers stored here are caused by connection
+					// failure, but not normal connection close. Therefore, we report all such peers if they are also
+					// part of the transaction sub system.
+					for (const auto& address : FlowTransport::transport().healthMonitor()->getRecentClosedPeers()) {
+						if (allPeers.find(address) != allPeers.end()) {
+							// We have checked this peer in the above for loop.
+							continue;
+						}
+
+						if ((workerLocation == Primary && addressInDbAndPrimaryDc(address, dbInfo)) ||
+						    (workerLocation == Remote && addressInDbAndRemoteDc(address, dbInfo)) ||
+						    (workerLocation == Primary && addressInDbAndPrimarySatelliteDc(address, dbInfo))) {
+							TraceEvent("HealthMonitorDetectRecentClosedPeer").suppressFor(30).detail("Peer", address);
 							req.degradedPeers.push_back(address);
 						}
 					}
@@ -1560,8 +1681,12 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				    memoryLimit,
 				    false,
 				    validateDataFiles,
-				    SERVER_KNOBS->REMOTE_KV_STORE && /* testing mixed mode in simulation if remote kvs enabled*/
-				        (g_network->isSimulated() ? deterministicRandom()->coinflip() : true));
+				    SERVER_KNOBS->REMOTE_KV_STORE && /* testing mixed mode in simulation if remote kvs enabled */
+				        (g_network->isSimulated()
+				             ? (/* Disable for RocksDB */ s.storeType != KeyValueStoreType::SSD_ROCKSDB_V1 &&
+				                s.storeType != KeyValueStoreType::SSD_SHARDED_ROCKSDB &&
+				                deterministicRandom()->coinflip())
+				             : true));
 				Future<Void> kvClosed = kv->onClosed();
 				filesClosed.add(kvClosed);
 
@@ -1908,8 +2033,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				LocalLineage _;
 				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::Ratekeeper;
 				RatekeeperInterface recruited(locality, req.reqId);
-				printf("Ratekeeper_InitRequest\n");
-				TraceEvent("Ratekeeper_InitRequest", req.reqId).log();
 				recruited.initEndpoints();
 
 				if (rkInterf->get().present()) {
@@ -1931,13 +2054,11 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					rkInterf->set(Optional<RatekeeperInterface>(recruited));
 				}
 				TraceEvent("Ratekeeper_InitRequest", req.reqId).detail("RatekeeperId", recruited.id());
-				printf("Ratekeeper_InitRequestDone\n");
 				req.reply.send(recruited);
 			}
 			when(InitializeConsistencyScanRequest req = waitNext(interf.consistencyScan.getFuture())) {
 				LocalLineage _;
 				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::ConsistencyScan;
-				TraceEvent("ConsistencyScan_InitRequest", req.reqId).log();
 				ConsistencyScanInterface recruited(locality, req.reqId);
 				recruited.initEndpoints();
 
@@ -1957,7 +2078,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					    setWhenDoneOrError(consistencyScanProcess, csInterf, Optional<ConsistencyScanInterface>())));
 					csInterf->set(Optional<ConsistencyScanInterface>(recruited));
 				}
-				TraceEvent("ConsistencyScan_InitRequest", req.reqId).detail("ConsistencyScanId", recruited.id());
+				TraceEvent("ConsistencyScanReceived", req.reqId).detail("ConsistencyScanId", recruited.id());
 				req.reply.send(recruited);
 			}
 			when(InitializeBlobManagerRequest req = waitNext(interf.blobManager.getFuture())) {
@@ -2117,6 +2238,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				                 [&req](const auto& p) { return p.second != req.storeType; }) ||
 				     req.seedTag != invalidTag)) {
 					ASSERT(req.clusterId.isValid());
+					ASSERT(req.initialClusterVersion >= 0);
 					LocalLineage _;
 					getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::Storage;
 					bool isTss = req.tssPairIDAndVersion.present();
@@ -2164,8 +2286,12 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					    memoryLimit,
 					    false,
 					    false,
-					    SERVER_KNOBS->REMOTE_KV_STORE && /* testing mixed mode in simulation if remote kvs enabled*/
-					        (g_network->isSimulated() ? deterministicRandom()->coinflip() : true));
+					    SERVER_KNOBS->REMOTE_KV_STORE && /* testing mixed mode in simulation if remote kvs enabled */
+					        (g_network->isSimulated()
+					             ? (/* Disable for RocksDB */ req.storeType != KeyValueStoreType::SSD_ROCKSDB_V1 &&
+					                req.storeType != KeyValueStoreType::SSD_SHARDED_ROCKSDB &&
+					                deterministicRandom()->coinflip())
+					             : true));
 
 					Future<Void> kvClosed = data->onClosed();
 					filesClosed.add(kvClosed);
@@ -2175,6 +2301,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                               recruited,
 					                               req.seedTag,
 					                               req.clusterId,
+					                               req.initialClusterVersion,
 					                               isTss ? req.tssPairIDAndVersion.get().second : 0,
 					                               storageReady,
 					                               dbInfo,
@@ -2361,6 +2488,9 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 						} else if (d.storeType == KeyValueStoreType::SSD_ROCKSDB_V1) {
 							included = fileExists(joinPath(d.filename, "CURRENT")) &&
 							           fileExists(joinPath(d.filename, "IDENTITY"));
+						} else if (d.storeType == KeyValueStoreType::SSD_SHARDED_ROCKSDB) {
+							included = fileExists(joinPath(d.filename, "CURRENT")) &&
+							           fileExists(joinPath(d.filename, "IDENTITY"));
 						} else if (d.storeType == KeyValueStoreType::MEMORY) {
 							included = fileExists(d.filename + "1.fdq");
 						} else {
@@ -2538,6 +2668,291 @@ ACTOR Future<Void> monitorAndWriteCCPriorityInfo(std::string filePath,
 	}
 }
 
+static const std::string versionFileName = "sw-version";
+
+ACTOR Future<SWVersion> testSoftwareVersionCompatibility(std::string folder, ProtocolVersion currentVersion) {
+	try {
+		state std::string versionFilePath = joinPath(folder, versionFileName);
+		state ErrorOr<Reference<IAsyncFile>> versionFile = wait(
+		    errorOr(IAsyncFileSystem::filesystem(g_network)->open(versionFilePath, IAsyncFile::OPEN_READONLY, 0600)));
+
+		if (versionFile.isError()) {
+			if (versionFile.getError().code() == error_code_file_not_found && !fileExists(versionFilePath)) {
+				// If a version file does not exist, we assume this is either a fresh
+				// installation or an upgrade from a version that does not support version files.
+				// Either way, we can safely continue running this version of software.
+				TraceEvent(SevInfo, "NoPreviousSWVersion").log();
+				return SWVersion();
+			} else {
+				// Dangerous to continue if we cannot do a software compatibility test
+				throw versionFile.getError();
+			}
+		} else {
+			// Test whether the most newest software version that has been run on this cluster is
+			// compatible with the current software version
+			state int64_t filesize = wait(versionFile.get()->size());
+			state Standalone<StringRef> buf = makeString(filesize);
+			int readLen = wait(versionFile.get()->read(mutateString(buf), filesize, 0));
+			if (filesize == 0 || readLen != filesize) {
+				throw file_corrupt();
+			}
+
+			try {
+				SWVersion swversion = ObjectReader::fromStringRef<SWVersion>(buf, IncludeVersion());
+				ProtocolVersion lowestCompatibleVersion(swversion.lowestCompatibleProtocolVersion());
+				if (currentVersion >= lowestCompatibleVersion) {
+					return swversion;
+				} else {
+					throw incompatible_software_version();
+				}
+			} catch (Error& e) {
+				throw e;
+			}
+		}
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
+		// TODO(bvr): Inject faults
+		TraceEvent(SevWarnAlways, "OpenReadSWVersionFileError").error(e);
+		throw;
+	}
+}
+
+ACTOR Future<Void> updateNewestSoftwareVersion(std::string folder,
+                                               ProtocolVersion currentVersion,
+                                               ProtocolVersion latestVersion,
+                                               ProtocolVersion minCompatibleVersion) {
+
+	ASSERT(currentVersion >= minCompatibleVersion);
+
+	try {
+		state std::string versionFilePath = joinPath(folder, versionFileName);
+		ErrorOr<Reference<IAsyncFile>> versionFile = wait(
+		    errorOr(IAsyncFileSystem::filesystem(g_network)->open(versionFilePath, IAsyncFile::OPEN_READONLY, 0600)));
+
+		if (versionFile.isError() &&
+		    (versionFile.getError().code() != error_code_file_not_found || fileExists(versionFilePath))) {
+			throw versionFile.getError();
+		}
+
+		state Reference<IAsyncFile> newVersionFile = wait(IAsyncFileSystem::filesystem()->open(
+		    versionFilePath,
+		    IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE,
+		    0600));
+
+		SWVersion swVersion(latestVersion, currentVersion, minCompatibleVersion);
+		auto s = swVersionValue(swVersion);
+		ErrorOr<Void> e = wait(errorOr(newVersionFile->write(s.toString().c_str(), s.size(), 0)));
+		if (e.isError()) {
+			throw e.getError();
+		}
+		wait(newVersionFile->sync());
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
+		TraceEvent(SevWarnAlways, "OpenWriteSWVersionFileError").error(e);
+		throw;
+	}
+
+	return Void();
+}
+
+ACTOR Future<Void> testAndUpdateSoftwareVersionCompatibility(std::string dataFolder, UID processIDUid) {
+	ErrorOr<SWVersion> swVersion = wait(errorOr(testSoftwareVersionCompatibility(dataFolder, currentProtocolVersion)));
+	if (swVersion.isError()) {
+		TraceEvent(SevWarnAlways, "SWVersionCompatibilityCheckError", processIDUid).error(swVersion.getError());
+		throw swVersion.getError();
+	}
+
+	TraceEvent(SevInfo, "SWVersionCompatible", processIDUid).detail("SWVersion", swVersion.get());
+
+	if (!swVersion.get().isValid() ||
+	    currentProtocolVersion > ProtocolVersion(swVersion.get().newestProtocolVersion())) {
+		ErrorOr<Void> updatedSWVersion = wait(errorOr(updateNewestSoftwareVersion(
+		    dataFolder, currentProtocolVersion, currentProtocolVersion, minCompatibleProtocolVersion)));
+		if (updatedSWVersion.isError()) {
+			throw updatedSWVersion.getError();
+		}
+	} else if (currentProtocolVersion < ProtocolVersion(swVersion.get().newestProtocolVersion())) {
+		ErrorOr<Void> updatedSWVersion = wait(
+		    errorOr(updateNewestSoftwareVersion(dataFolder,
+		                                        currentProtocolVersion,
+		                                        ProtocolVersion(swVersion.get().newestProtocolVersion()),
+		                                        ProtocolVersion(swVersion.get().lowestCompatibleProtocolVersion()))));
+		if (updatedSWVersion.isError()) {
+			throw updatedSWVersion.getError();
+		}
+	}
+
+	ErrorOr<SWVersion> newSWVersion =
+	    wait(errorOr(testSoftwareVersionCompatibility(dataFolder, currentProtocolVersion)));
+	if (newSWVersion.isError()) {
+		TraceEvent(SevWarnAlways, "SWVersionCompatibilityCheckError", processIDUid).error(newSWVersion.getError());
+		throw newSWVersion.getError();
+	}
+
+	TraceEvent(SevInfo, "VerifiedNewSoftwareVersion", processIDUid).detail("SWVersion", newSWVersion.get());
+
+	return Void();
+}
+
+static const std::string swversionTestDirName = "sw-version-test";
+
+TEST_CASE("/fdbserver/worker/swversion/noversionhistory") {
+	if (!platform::createDirectory("sw-version-test")) {
+		TraceEvent(SevWarnAlways, "FailedToCreateDirectory").detail("Directory", "sw-version-test");
+		return Void();
+	}
+
+	ErrorOr<SWVersion> swversion = wait(errorOr(
+	    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
+
+	if (!swversion.isError()) {
+		ASSERT(!swversion.get().isValid());
+	}
+
+	wait(IAsyncFileSystem::filesystem()->deleteFile(joinPath(swversionTestDirName, versionFileName), true));
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/worker/swversion/writeVerifyVersion") {
+	if (!platform::createDirectory("sw-version-test")) {
+		TraceEvent(SevWarnAlways, "FailedToCreateDirectory").detail("Directory", "sw-version-test");
+		return Void();
+	}
+
+	ErrorOr<Void> f = wait(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
+	                                                           ProtocolVersion::withStorageInterfaceReadiness(),
+	                                                           ProtocolVersion::withStorageInterfaceReadiness(),
+	                                                           ProtocolVersion::withTSS())));
+
+	ErrorOr<SWVersion> swversion = wait(errorOr(
+	    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
+
+	if (!swversion.isError()) {
+		ASSERT(swversion.get().newestProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
+		ASSERT(swversion.get().lastRunProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
+		ASSERT(swversion.get().lowestCompatibleProtocolVersion() == ProtocolVersion::withTSS().version());
+	}
+
+	wait(IAsyncFileSystem::filesystem()->deleteFile(joinPath(swversionTestDirName, versionFileName), true));
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/worker/swversion/runCompatibleOlder") {
+	if (!platform::createDirectory("sw-version-test")) {
+		TraceEvent(SevWarnAlways, "FailedToCreateDirectory").detail("Directory", "sw-version-test");
+		return Void();
+	}
+
+	ErrorOr<Void> f = wait(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
+	                                                           ProtocolVersion::withStorageInterfaceReadiness(),
+	                                                           ProtocolVersion::withStorageInterfaceReadiness(),
+	                                                           ProtocolVersion::withTSS())));
+
+	ErrorOr<SWVersion> swversion = wait(errorOr(
+	    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
+
+	if (!swversion.isError()) {
+		ASSERT(swversion.get().newestProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
+		ASSERT(swversion.get().lastRunProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
+		ASSERT(swversion.get().lowestCompatibleProtocolVersion() == ProtocolVersion::withTSS().version());
+
+		TraceEvent(SevInfo, "UT/swversion/runCompatibleOlder").detail("SWVersion", swversion.get());
+	}
+
+	ErrorOr<Void> f = wait(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
+	                                                           ProtocolVersion::withTSS(),
+	                                                           ProtocolVersion::withStorageInterfaceReadiness(),
+	                                                           ProtocolVersion::withTSS())));
+
+	ErrorOr<SWVersion> swversion = wait(errorOr(
+	    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
+
+	if (!swversion.isError()) {
+		ASSERT(swversion.get().newestProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
+		ASSERT(swversion.get().lastRunProtocolVersion() == ProtocolVersion::withTSS().version());
+		ASSERT(swversion.get().lowestCompatibleProtocolVersion() == ProtocolVersion::withTSS().version());
+	}
+
+	wait(IAsyncFileSystem::filesystem()->deleteFile(joinPath(swversionTestDirName, versionFileName), true));
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/worker/swversion/runIncompatibleOlder") {
+	if (!platform::createDirectory("sw-version-test")) {
+		TraceEvent(SevWarnAlways, "FailedToCreateDirectory").detail("Directory", "sw-version-test");
+		return Void();
+	}
+
+	ErrorOr<Void> f = wait(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
+	                                                           ProtocolVersion::withStorageInterfaceReadiness(),
+	                                                           ProtocolVersion::withStorageInterfaceReadiness(),
+	                                                           ProtocolVersion::withTSS())));
+
+	ErrorOr<SWVersion> swversion = wait(errorOr(
+	    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
+
+	if (!swversion.isError()) {
+		ASSERT(swversion.get().newestProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
+		ASSERT(swversion.get().lastRunProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
+		ASSERT(swversion.get().lowestCompatibleProtocolVersion() == ProtocolVersion::withTSS().version());
+	}
+
+	ErrorOr<SWVersion> swversion =
+	    wait(errorOr(testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withCacheRole())));
+
+	ASSERT(swversion.isError() && swversion.getError().code() == error_code_incompatible_software_version);
+
+	wait(IAsyncFileSystem::filesystem()->deleteFile(joinPath(swversionTestDirName, versionFileName), true));
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/worker/swversion/runNewer") {
+	if (!platform::createDirectory("sw-version-test")) {
+		TraceEvent(SevWarnAlways, "FailedToCreateDirectory").detail("Directory", "sw-version-test");
+		return Void();
+	}
+
+	ErrorOr<Void> f = wait(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
+	                                                           ProtocolVersion::withTSS(),
+	                                                           ProtocolVersion::withTSS(),
+	                                                           ProtocolVersion::withCacheRole())));
+
+	ErrorOr<SWVersion> swversion = wait(errorOr(
+	    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
+
+	if (!swversion.isError()) {
+		ASSERT(swversion.get().newestProtocolVersion() == ProtocolVersion::withTSS().version());
+		ASSERT(swversion.get().lastRunProtocolVersion() == ProtocolVersion::withTSS().version());
+		ASSERT(swversion.get().lowestCompatibleProtocolVersion() == ProtocolVersion::withCacheRole().version());
+	}
+
+	ErrorOr<Void> f = wait(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
+	                                                           ProtocolVersion::withStorageInterfaceReadiness(),
+	                                                           ProtocolVersion::withStorageInterfaceReadiness(),
+	                                                           ProtocolVersion::withTSS())));
+
+	ErrorOr<SWVersion> swversion = wait(errorOr(
+	    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
+
+	if (!swversion.isError()) {
+		ASSERT(swversion.get().newestProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
+		ASSERT(swversion.get().lastRunProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
+		ASSERT(swversion.get().lowestCompatibleProtocolVersion() == ProtocolVersion::withTSS().version());
+	}
+
+	wait(IAsyncFileSystem::filesystem()->deleteFile(joinPath(swversionTestDirName, versionFileName), true));
+
+	return Void();
+}
+
 ACTOR Future<UID> createAndLockProcessIdFile(std::string folder) {
 	state UID processIDUid;
 	platform::createDirectory(folder);
@@ -2598,21 +3013,40 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderWithDelayedCandidacyImplOneGenerati
     Reference<IClusterConnectionRecord> connRecord,
     Reference<AsyncVar<Value>> result,
     MonitorLeaderInfo info) {
-	state ClusterConnectionString ccf = info.intermediateConnRecord->getConnectionString();
-	state std::vector<NetworkAddress> addrs = ccf.coordinators();
+	ClusterConnectionString cs = info.intermediateConnRecord->getConnectionString();
+	state int coordinatorsSize = cs.hostnames.size() + cs.coordinators().size();
 	state ElectionResultRequest request;
 	state int index = 0;
 	state int successIndex = 0;
-	request.key = ccf.clusterKey();
-	request.coordinators = ccf.coordinators();
+	state std::vector<LeaderElectionRegInterface> leaderElectionServers;
 
-	deterministicRandom()->randomShuffle(addrs);
+	leaderElectionServers.reserve(coordinatorsSize);
+	for (const auto& h : cs.hostnames) {
+		leaderElectionServers.push_back(LeaderElectionRegInterface(h));
+	}
+	for (const auto& c : cs.coordinators()) {
+		leaderElectionServers.push_back(LeaderElectionRegInterface(c));
+	}
+	deterministicRandom()->randomShuffle(leaderElectionServers);
+
+	request.key = cs.clusterKey();
+	request.hostnames = cs.hostnames;
+	request.coordinators = cs.coordinators();
 
 	loop {
-		LeaderElectionRegInterface interf(addrs[index]);
+		LeaderElectionRegInterface interf = leaderElectionServers[index];
+		bool usingHostname = interf.hostname.present();
 		request.reply = ReplyPromise<Optional<LeaderInfo>>();
 
-		ErrorOr<Optional<LeaderInfo>> leader = wait(interf.electionResult.tryGetReply(request));
+		state ErrorOr<Optional<LeaderInfo>> leader;
+		if (usingHostname) {
+			wait(store(
+			    leader,
+			    tryGetReplyFromHostname(request, interf.hostname.get(), WLTOKEN_LEADERELECTIONREG_ELECTIONRESULT)));
+		} else {
+			wait(store(leader, interf.electionResult.tryGetReply(request)));
+		}
+
 		if (leader.present()) {
 			if (leader.get().present()) {
 				if (leader.get().get().forward) {
@@ -2648,14 +3082,9 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderWithDelayedCandidacyImplOneGenerati
 			}
 			successIndex = index;
 		} else {
-			if (leader.isError() && leader.getError().code() == error_code_coordinators_changed) {
-				info.intermediateConnRecord->getConnectionString().resetToUnresolved();
-				throw coordinators_changed();
-			}
-			index = (index + 1) % addrs.size();
+			index = (index + 1) % coordinatorsSize;
 			if (index == successIndex) {
 				wait(delay(CLIENT_KNOBS->COORDINATOR_RECONNECTION_DELAY));
-				throw coordinators_changed();
 			}
 		}
 	}
@@ -2663,22 +3092,11 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderWithDelayedCandidacyImplOneGenerati
 
 ACTOR Future<Void> monitorLeaderWithDelayedCandidacyImplInternal(Reference<IClusterConnectionRecord> connRecord,
                                                                  Reference<AsyncVar<Value>> outSerializedLeaderInfo) {
-	wait(connRecord->resolveHostnames());
 	state MonitorLeaderInfo info(connRecord);
 	loop {
-		try {
-			wait(info.intermediateConnRecord->resolveHostnames());
-			MonitorLeaderInfo _info =
-			    wait(monitorLeaderWithDelayedCandidacyImplOneGeneration(connRecord, outSerializedLeaderInfo, info));
-			info = _info;
-		} catch (Error& e) {
-			if (e.code() == error_code_coordinators_changed) {
-				TraceEvent("MonitorLeaderWithDelayedCandidacyCoordinatorsChanged").suppressFor(1.0);
-				info.intermediateConnRecord->getConnectionString().resetToUnresolved();
-			} else {
-				throw e;
-			}
-		}
+		MonitorLeaderInfo _info =
+		    wait(monitorLeaderWithDelayedCandidacyImplOneGeneration(connRecord, outSerializedLeaderInfo, info));
+		info = _info;
 	}
 }
 
@@ -2812,6 +3230,7 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 	actors.push_back(serveProcess());
 
 	try {
+		ServerCoordinators coordinators(connRecord);
 		if (g_network->isSimulated()) {
 			whitelistBinPaths = ",, random_path,  /bin/snap_create.sh,,";
 		}
@@ -2836,6 +3255,8 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 		state UID processIDUid = wait(createAndLockProcessIdFile(dataFolder));
 		localities.set(LocalityData::keyProcessId, processIDUid.toString());
 		// Only one process can execute on a dataFolder from this point onwards
+
+		wait(testAndUpdateSoftwareVersionCompatibility(dataFolder, processIDUid));
 
 		std::string fitnessFilePath = joinPath(dataFolder, "fitness");
 		auto cc = makeReference<AsyncVar<Optional<ClusterControllerFullInterface>>>();

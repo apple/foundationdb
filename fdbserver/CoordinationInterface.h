@@ -31,6 +31,7 @@ struct GenerationRegInterface {
 	constexpr static FileIdentifier file_identifier = 16726744;
 	RequestStream<struct GenerationRegReadRequest> read;
 	RequestStream<struct GenerationRegWriteRequest> write;
+	Optional<Hostname> hostname;
 
 	// read(key,gen2) returns (value,gen,rgen).
 	//   If there was no prior write(_,_,0) or a data loss fault,
@@ -52,8 +53,9 @@ struct GenerationRegInterface {
 	// the v2 of the previous generation is the v1 of the next.
 
 	GenerationRegInterface() {}
-	GenerationRegInterface(NetworkAddress remote);
+	GenerationRegInterface(NetworkAddress const& remote);
 	GenerationRegInterface(INetwork* local);
+	GenerationRegInterface(Hostname const& hostname) : hostname(hostname){};
 };
 
 struct UniqueGeneration {
@@ -126,8 +128,9 @@ struct LeaderElectionRegInterface : ClientLeaderRegInterface {
 	RequestStream<struct ForwardRequest> forward;
 
 	LeaderElectionRegInterface() {}
-	LeaderElectionRegInterface(NetworkAddress remote);
+	LeaderElectionRegInterface(NetworkAddress const& remote);
 	LeaderElectionRegInterface(INetwork* local);
+	LeaderElectionRegInterface(Hostname const& hostname) : ClientLeaderRegInterface(hostname) {}
 };
 
 struct CandidacyRequest {
@@ -150,17 +153,21 @@ struct CandidacyRequest {
 struct ElectionResultRequest {
 	constexpr static FileIdentifier file_identifier = 11815465;
 	Key key;
+	std::vector<Hostname> hostnames;
 	std::vector<NetworkAddress> coordinators;
 	UID knownLeader;
 	ReplyPromise<Optional<LeaderInfo>> reply;
 
 	ElectionResultRequest() = default;
-	ElectionResultRequest(Key key, std::vector<NetworkAddress> coordinators, UID knownLeader)
-	  : key(key), coordinators(std::move(coordinators)), knownLeader(knownLeader) {}
+	ElectionResultRequest(Key key,
+	                      std::vector<Hostname> hostnames,
+	                      std::vector<NetworkAddress> coordinators,
+	                      UID knownLeader)
+	  : key(key), hostnames(std::move(hostnames)), coordinators(std::move(coordinators)), knownLeader(knownLeader) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, key, coordinators, knownLeader, reply);
+		serializer(ar, key, hostnames, coordinators, knownLeader, reply);
 	}
 };
 
@@ -217,7 +224,7 @@ class ConfigNode;
 
 class ServerCoordinators : public ClientCoordinators {
 public:
-	explicit ServerCoordinators(Reference<IClusterConnectionRecord>);
+	explicit ServerCoordinators(Reference<IClusterConnectionRecord> ccr);
 
 	std::vector<LeaderElectionRegInterface> leaderElectionServers;
 	std::vector<GenerationRegInterface> stateServers;

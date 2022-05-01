@@ -476,6 +476,16 @@ public:
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
 };
 
+class VersionEpochImpl : public SpecialKeyRangeRWImpl {
+public:
+	explicit VersionEpochImpl(KeyRangeRef kr);
+	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
+	                             KeyRangeRef kr,
+	                             GetRangeLimits limitsHint) const override;
+	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
+};
+
+// Deprecated as of 7.2
 class ClientProfilingImpl : public SpecialKeyRangeRWImpl {
 public:
 	explicit ClientProfilingImpl(KeyRangeRef kr);

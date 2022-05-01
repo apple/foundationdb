@@ -1,3 +1,5 @@
+storageEngineExcludeTypes=3
+
 ;write 1000 Keys ending with even numbers
 testTitle=SnapTestPre
 clearAfterTest=false
@@ -28,6 +30,9 @@ clearAfterTest=false
         maxSnapDelay=10.0
         testID=1
 
+        testName=Attrition
+        testDuration=10.0
+
 ;write 1000 Keys ending with odd numbers
 testTitle=SnapTestPost
 clearAfterTest=false
@@ -37,8 +42,8 @@ clearAfterTest=false
         maxSnapDelay=25.0
         testID=2
 
-;save and shutdown
-testTitle=SnapTestShutdown
+; save and shutdown
+testTitle=SnapSimpleShutdown
         testName=SaveAndKill
         restartInfoLocation=simfdb/restartInfo.ini
         testDuration=10.0

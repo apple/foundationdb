@@ -69,7 +69,7 @@ ACTOR Future<Version> getVersion(Database cx) {
 	}
 }
 
-void testFailure(std::string message, bool performQuiescentChecks, bool isError = false) {
+void testFailure(std::string message, bool performQuiescentChecks, bool isError) {
 	TraceEvent failEvent((isError ? SevError : SevWarn, "TestFailure"));
 	if (performQuiescentChecks)
 		failEvent.detail("Workload", "QuiescentCheck");
@@ -384,7 +384,7 @@ ACTOR Future<bool> checkDataConsistency(Database cx,
 	state std::vector<KeyRangeRef> ranges;
 
 	for (int k = 0; k < keyLocations.size() - 1; k++) {
-		// TODO: NEELAM: check if this is sufficient
+		// TODO: check if this is sufficient
 		if (resume && keyLocations[k].key < progressKey) {
 			TraceEvent("ConsistencyCheck_SkippingRange")
 			    .detail("KeyBegin", keyLocations[k].key.toString())
@@ -524,7 +524,6 @@ ACTOR Future<bool> checkDataConsistency(Database cx,
 					Version version = wait(getVersion(cx));
 
 					state GetKeyValuesRequest req;
-					// state GetKeyValuesStreamRequest req;
 					req.begin = begin;
 					req.end = firstGreaterOrEqual(range.end);
 					req.limit = 1e4;
@@ -534,26 +533,21 @@ ACTOR Future<bool> checkDataConsistency(Database cx,
 
 					// Try getting the entries in the specified range
 					state std::vector<Future<ErrorOr<GetKeyValuesReply>>> keyValueFutures;
-					// state std::vector<FutureStream<GetKeyValuesStreamReply>> keyValueFutures;
 					state int j = 0;
 					TraceEvent("ConsistencyCheck_StoringGetFutures").detail("SSISize", storageServerInterfaces.size());
 					for (j = 0; j < storageServerInterfaces.size(); j++) {
 						resetReply(req);
 						keyValueFutures.push_back(
 						    storageServerInterfaces[j].getKeyValues.getReplyUnlessFailedFor(req, 2, 0));
-						// keyValueFutures.push_back(
-						//   storageServerInterfaces[j].getKeyValuesStream.getReplyStream(req).getFuture());
 					}
 
 					wait(waitForAll(keyValueFutures));
 
 					// Read the resulting entries
 					state int firstValidServer = -1;
-					// state GetKeyValuesStreamReply reference;
 					totalReadAmount = 0;
 					for (j = 0; j < storageServerInterfaces.size(); j++) {
 						ErrorOr<GetKeyValuesReply> rangeResult = keyValueFutures[j].get();
-						// state GetKeyValuesStreamReply current;
 
 						// Compare the results with other storage servers
 						if (rangeResult.present() && !rangeResult.get().error.present()) {
@@ -835,9 +829,10 @@ ACTOR Future<bool> checkDataConsistency(Database cx,
 
 						break;
 					} else if (estimatedBytes[j] < 0 &&
-					           (g_network->isSimulated() || !storageServerInterfaces[j].isTss())) {
-						testFailure(
-						    "Could not get storage metrics from server", performQuiescentChecks, failureIsError);
+							   ((g_network->isSimulated() &&
+								 g_simulator.tssMode <= ISimulator::TSSMode::EnabledNormal) ||
+								!storageServerInterfaces[j].isTss())) {
+						// Ignore a non-responding TSS outside of simulation, or if tss fault injection is enabled
 						break;
 					}
 				}
@@ -908,6 +903,7 @@ ACTOR Future<bool> checkDataConsistency(Database cx,
 	*bytesReadInPrevRound = bytesReadInthisRound;
 	return true;
 }
+
 ACTOR Future<Void> runDataValidationCheck(ConsistencyScanData* self) {
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->db);
 	state ConsistencyScanInfo csInfo = ConsistencyScanInfo();
@@ -916,7 +912,6 @@ ACTOR Future<Void> runDataValidationCheck(ConsistencyScanData* self) {
 	csInfo.max_rate = self->maxRate;
 	csInfo.target_interval = self->targetInterval;
 	csInfo.last_round_start = StorageMetadataType::currentTime();
-	TraceEvent("ConsistencyScan_StartingConfig").detail("MaxRate", csInfo.max_rate);
 	try {
 		// Get a list of key servers; verify that the TLogs and master all agree about who the key servers are
 		state Promise<std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>>> keyServerPromise;
@@ -966,7 +961,6 @@ ACTOR Future<Void> runDataValidationCheck(ConsistencyScanData* self) {
 
 	TraceEvent("ConsistencyScan_FinishedCheck");
 
-	// TODO
 	//  Update the ConsistencyScanInfo object and persist to the database
 	csInfo.last_round_finish = StorageMetadataType::currentTime();
 	csInfo.finished_rounds = self->finishedRounds + 1;
@@ -974,7 +968,6 @@ ACTOR Future<Void> runDataValidationCheck(ConsistencyScanData* self) {
 	csInfo.smoothed_round_duration.setTotal((double)duration);
 	csInfo.progress_key = self->progressKey;
 	csInfo.bytes_read_prev_round = self->bytesReadInPrevRound;
-	TraceEvent("ConsistencyScan_UpdateConfig").detail("MaxRate", csInfo.max_rate);
 	loop {
 		try {
 			tr->reset();
@@ -993,7 +986,6 @@ ACTOR Future<Void> runDataValidationCheck(ConsistencyScanData* self) {
 ACTOR Future<Void> watchConsistencyScanInfoKey(ConsistencyScanData* self) {
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->db);
 
-	TraceEvent("ConsistencyScan_Watch", self->id).log();
 	loop {
 		try {
 			tr->reset();
@@ -1010,10 +1002,10 @@ ACTOR Future<Void> watchConsistencyScanInfoKey(ConsistencyScanData* self) {
 				self->bytesReadInPrevRound = consistencyScanInfo.bytes_read_prev_round;
 				self->finishedRounds = consistencyScanInfo.finished_rounds;
 				self->consistencyScanEnabled.set(consistencyScanInfo.consistency_scan_enabled);
-				TraceEvent("ConsistencyScan_WatchGotVal", self->id)
-				    .detail("Enabled", consistencyScanInfo.consistency_scan_enabled)
-				    .detail("MaxRateRead", consistencyScanInfo.max_rate)
-				    .detail("MaxRateSelf", self->maxRate);
+				//TraceEvent("ConsistencyScan_WatchGotVal", self->id)
+				//  .detail("Enabled", consistencyScanInfo.consistency_scan_enabled)
+				//  .detail("MaxRateRead", consistencyScanInfo.max_rate)
+				//  .detail("MaxRateSelf", self->maxRate);
 			}
 			state Future<Void> watch = tr->watch(consistencyScanInfoKey);
 			wait(tr->commit());
@@ -1059,19 +1051,6 @@ ACTOR Future<Void> consistencyScan(ConsistencyScanInterface csInterf, Reference<
 				wait(tr->onError(e));
 			}
 		}
-		// TODO: remove (printing for debug purpose)
-		tr->reset();
-		tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-		state Optional<Value> val = wait(ConsistencyScanInfo::getInfo(tr));
-		if (val.present()) {
-			ConsistencyScanInfo consistencyScanInfo =
-			    ObjectReader::fromStringRef<ConsistencyScanInfo>(val.get(), IncludeVersion());
-			TraceEvent("ConsistencyScan_WrittenVal")
-			    .detail("Enabled", consistencyScanInfo.consistency_scan_enabled)
-			    .detail("MaxRateRead", consistencyScanInfo.max_rate)
-			    .detail("SelfEnabled", self.consistencyScanEnabled.get())
-			    .detail("SelfRate", self.maxRate);
-		}
 	}
 
 	self.addActor.send(waitFailureServer(csInterf.waitFailure.getFuture()));
@@ -1080,9 +1059,6 @@ ACTOR Future<Void> consistencyScan(ConsistencyScanInterface csInterf, Reference<
 
 	loop {
 		if (self.consistencyScanEnabled.get()) {
-			TraceEvent("ConsistencyScan_Enabled")
-			    .detail("SelfEnabled", self.consistencyScanEnabled.get())
-			    .detail("SelfRate", self.maxRate);
 			try {
 				loop choose {
 					when(wait(runDataValidationCheck(&self))) {

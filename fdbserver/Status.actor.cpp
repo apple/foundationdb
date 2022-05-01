@@ -24,6 +24,7 @@
 #include "fdbclient/KeyBackedTypes.h"
 #include "fdbserver/Status.h"
 #include "flow/ITrace.h"
+#include "flow/ProtocolVersion.h"
 #include "flow/Trace.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
@@ -835,7 +836,8 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 		}
 	}
 
-	for (auto& coordinator : coordinators.ccr->getConnectionString().coordinators()) {
+	std::vector<NetworkAddress> addressVec = wait(coordinators.ccr->getConnectionString().tryResolveHostnames());
+	for (const auto& coordinator : addressVec) {
 		roles.addCoordinatorRole(coordinator);
 	}
 
@@ -1299,6 +1301,8 @@ ACTOR static Future<double> doCommitProbe(Future<double> grvProbe, Transaction* 
 
 	ASSERT(sourceTr->getReadVersion().isReady());
 	tr->setVersion(sourceTr->getReadVersion().get());
+	tr->getDatabase()->ssVersionVectorCache = sourceTr->getDatabase()->ssVersionVectorCache;
+	tr->trState->readVersionObtainedFromGrvProxy = sourceTr->trState->readVersionObtainedFromGrvProxy;
 
 	state double start = g_network->timer_monotonic();
 
@@ -1530,6 +1534,41 @@ ACTOR static Future<Void> logRangeWarningFetcher(Database cx,
 	return Void();
 }
 
+struct ProtocolVersionData {
+	ProtocolVersion runningProtocolVersion;
+	ProtocolVersion newestProtocolVersion;
+	ProtocolVersion lowestCompatibleProtocolVersion;
+	ProtocolVersionData() : runningProtocolVersion(currentProtocolVersion) {}
+
+	ProtocolVersionData(uint64_t newestProtocolVersionValue, uint64_t lowestCompatibleProtocolVersionValue)
+	  : runningProtocolVersion(currentProtocolVersion), newestProtocolVersion(newestProtocolVersionValue),
+	    lowestCompatibleProtocolVersion(lowestCompatibleProtocolVersionValue) {}
+};
+
+ACTOR Future<ProtocolVersionData> getNewestProtocolVersion(Database cx, WorkerDetails ccWorker) {
+
+	try {
+		state Future<TraceEventFields> swVersionF = timeoutError(
+		    ccWorker.interf.eventLogRequest.getReply(EventLogRequest("SWVersionCompatibilityChecked"_sr)), 1.0);
+
+		wait(success(swVersionF));
+		const TraceEventFields& swVersionTrace = swVersionF.get();
+		int64_t newestProtocolVersionValue =
+		    std::stoull(swVersionTrace.getValue("NewestProtocolVersion").c_str(), nullptr, 16);
+		int64_t lowestCompatibleProtocolVersionValue =
+		    std::stoull(swVersionTrace.getValue("LowestCompatibleProtocolVersion").c_str(), nullptr, 16);
+
+		return ProtocolVersionData(newestProtocolVersionValue, lowestCompatibleProtocolVersionValue);
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled)
+			throw;
+
+		TraceEvent(SevWarnAlways, "SWVersionStatusFailed").error(e);
+
+		return ProtocolVersionData();
+	}
+}
+
 struct LoadConfigurationResult {
 	bool fullReplication;
 	Optional<Key> healthyZone;
@@ -1656,8 +1695,7 @@ static JsonBuilderObject configurationFetcher(Optional<DatabaseConfiguration> co
 			}
 			statusObj["excluded_servers"] = excludedServersArr;
 		}
-		std::vector<ClientLeaderRegInterface> coordinatorLeaderServers = coordinators.clientLeaderServers;
-		int count = coordinatorLeaderServers.size();
+		int count = coordinators.clientLeaderServers.size();
 		statusObj["coordinators_count"] = count;
 	} catch (Error&) {
 		incomplete_reasons->insert("Could not retrieve all configuration status information.");
@@ -2472,7 +2510,8 @@ static JsonBuilderArray tlogFetcher(int* logFaultTolerance,
 
 static JsonBuilderObject faultToleranceStatusFetcher(DatabaseConfiguration configuration,
                                                      ServerCoordinators coordinators,
-                                                     std::vector<WorkerDetails>& workers,
+                                                     const std::vector<NetworkAddress>& coordinatorAddresses,
+                                                     const std::vector<WorkerDetails>& workers,
                                                      int extraTlogEligibleZones,
                                                      int minStorageReplicasRemaining,
                                                      int oldLogFaultTolerance,
@@ -2488,11 +2527,11 @@ static JsonBuilderObject faultToleranceStatusFetcher(DatabaseConfiguration confi
 	int maxCoordinatorFailures = (coordinators.clientLeaderServers.size() - 1) / 2;
 
 	std::map<NetworkAddress, StringRef> workerZones;
-	for (auto& worker : workers) {
+	for (const auto& worker : workers) {
 		workerZones[worker.interf.address()] = worker.interf.locality.zoneId().orDefault(LiteralStringRef(""));
 	}
 	std::map<StringRef, int> coordinatorZoneCounts;
-	for (auto& coordinator : coordinators.ccr->getConnectionString().coordinators()) {
+	for (const auto& coordinator : coordinatorAddresses) {
 		auto zone = workerZones[coordinator];
 		coordinatorZoneCounts[zone] += 1;
 	}
@@ -2917,6 +2956,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			messages.push_back(message);
 		}
 
+		state ProtocolVersionData protocolVersion = wait(getNewestProtocolVersion(cx, ccWorker));
+
 		// construct status information for cluster subsections
 		state int statusCode = (int)RecoveryStatus::END;
 		state JsonBuilderObject recoveryStateStatus = wait(
@@ -2954,6 +2995,9 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		statusObj["protocol_version"] = format("%" PRIx64, g_network->protocolVersion().version());
 		statusObj["connection_string"] = coordinators.ccr->getConnectionString().toString();
 		statusObj["bounce_impact"] = getBounceImpactInfo(statusCode);
+		statusObj["newest_protocol_version"] = format("%" PRIx64, protocolVersion.newestProtocolVersion.version());
+		statusObj["lowest_compatible_protocol_version"] =
+		    format("%" PRIx64, protocolVersion.lowestCompatibleProtocolVersion.version());
 
 		state Optional<DatabaseConfiguration> configuration;
 		state Optional<LoadConfigurationResult> loadResult;
@@ -3057,6 +3101,9 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			state std::vector<JsonBuilderObject> workerStatuses = wait(getAll(futures2));
 			wait(success(primaryDCFO));
 
+			std::vector<NetworkAddress> coordinatorAddresses =
+			    wait(coordinators.ccr->getConnectionString().tryResolveHostnames());
+
 			int logFaultTolerance = 100;
 			if (db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
 				statusObj["logs"] = tlogFetcher(&logFaultTolerance, db, address_workers);
@@ -3066,6 +3113,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			statusObj["fault_tolerance"] =
 			    faultToleranceStatusFetcher(configuration.get(),
 			                                coordinators,
+			                                coordinatorAddresses,
 			                                workers,
 			                                extraTlogEligibleZones,
 			                                minStorageReplicasRemaining,

@@ -21,7 +21,7 @@
 // Unit tests for the FoundationDB C API.
 
 #include "fdb_c_options.g.h"
-#define FDB_API_VERSION 710
+#define FDB_API_VERSION 720
 #include <foundationdb/fdb_c.h>
 #include <assert.h>
 #include <string.h>
@@ -2592,7 +2592,6 @@ TEST_CASE("Blob Granule Functions") {
 	}
 
 	// write some data
-
 	insert_data(db, create_data({ { "bg1", "a" }, { "bg2", "b" }, { "bg3", "c" } }));
 
 	// because wiring up files is non-trivial, just test the calls complete with the expected no_materialize error
@@ -2709,6 +2708,42 @@ TEST_CASE("Blob Granule Functions") {
 		tr.reset();
 		break;
 	}
+
+	// do a purge + wait at that version to purge everything before originalReadVersion
+
+	fdb::KeyFuture purgeKeyFuture =
+	    fdb::Database::purge_blob_granules(db, key("bg"), key("bh"), originalReadVersion, false);
+
+	fdb_check(wait_future(purgeKeyFuture));
+
+	const uint8_t* purgeKeyData;
+	int purgeKeyLen;
+
+	fdb_check(purgeKeyFuture.get(&purgeKeyData, &purgeKeyLen));
+
+	std::string purgeKey((const char*)purgeKeyData, purgeKeyLen);
+
+	fdb::EmptyFuture waitPurgeFuture = fdb::Database::wait_purge_granules_complete(db, purgeKey);
+	fdb_check(wait_future(waitPurgeFuture));
+
+	// re-read again at the purge version to make sure it is still valid
+
+	while (1) {
+		fdb_check(tr.set_option(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE, nullptr, 0));
+		fdb::KeyValueArrayResult r =
+		    tr.read_blob_granules(key("bg"), key("bh"), 0, originalReadVersion, granuleContext);
+		fdb_error_t err = r.get(&out_kv, &out_count, &out_more);
+		if (err && err != 2037 /* blob_granule_not_materialized */) {
+			fdb::EmptyFuture f2 = tr.on_error(err);
+			fdb_check(wait_future(f2));
+			continue;
+		}
+
+		CHECK(err == 2037 /* blob_granule_not_materialized */);
+
+		tr.reset();
+		break;
+	}
 }
 
 int main(int argc, char** argv) {
@@ -2718,7 +2753,7 @@ int main(int argc, char** argv) {
 		          << std::endl;
 		return 1;
 	}
-	fdb_check(fdb_select_api_version(710));
+	fdb_check(fdb_select_api_version(720));
 	if (argc >= 4) {
 		std::string externalClientLibrary = argv[3];
 		if (externalClientLibrary.substr(0, 2) != "--") {

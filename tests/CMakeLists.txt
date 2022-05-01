@@ -143,6 +143,8 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/ChangeFeeds.toml)
   add_fdb_test(TEST_FILES fast/DataLossRecovery.toml)
   add_fdb_test(TEST_FILES fast/EncryptionOps.toml)
+  # TODO: fix failures and renable the test
+  add_fdb_test(TEST_FILES fast/EncryptKeyProxyTest.toml IGNORE)
   add_fdb_test(TEST_FILES fast/FuzzApiCorrectness.toml)
   add_fdb_test(TEST_FILES fast/FuzzApiCorrectnessClean.toml)
   add_fdb_test(TEST_FILES fast/IncrementalBackup.toml)
@@ -159,6 +161,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/MoveKeysCycle.toml)
   add_fdb_test(TEST_FILES fast/MutationLogReaderCorrectness.toml)
   add_fdb_test(TEST_FILES fast/GetMappedRange.toml)
+  add_fdb_test(TEST_FILES fast/PrivateEndpoints.toml)
   add_fdb_test(TEST_FILES fast/ProtocolVersion.toml)
   add_fdb_test(TEST_FILES fast/RandomSelector.toml)
   add_fdb_test(TEST_FILES fast/RandomUnitTests.toml)
@@ -218,8 +221,8 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES rare/StatusBuilderPerf.toml)
   add_fdb_test(TEST_FILES rare/TLogVersionMessagesOverheadFactor.toml)
   add_fdb_test(
-    TEST_FILES restarting/from_7.0.0/SnapIncrementalRestore-1.txt
-               restarting/from_7.0.0/SnapIncrementalRestore-2.txt)
+    TEST_FILES restarting/from_7.1.0/SnapIncrementalRestore-1.txt
+               restarting/from_7.1.0/SnapIncrementalRestore-2.txt)
   add_fdb_test(
     TEST_FILES restarting/from_7.1.0/ConfigureTestRestart-1.toml
                restarting/from_7.1.0/ConfigureTestRestart-2.toml)
@@ -251,20 +254,20 @@ if(WITH_PYTHON)
     TEST_FILES restarting/from_7.0.0/UpgradeAndBackupRestore-1.toml
                restarting/from_7.0.0/UpgradeAndBackupRestore-2.toml)
   add_fdb_test(
-    TEST_FILES restarting/to_7.0.0/CycleTestRestart-1.txt
-               restarting/to_7.0.0/CycleTestRestart-2.txt)
+    TEST_FILES restarting/to_7.1.0/CycleTestRestart-1.txt
+               restarting/to_7.1.0/CycleTestRestart-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_7.0.0/SnapTestAttrition-1.txt
-               restarting/from_7.0.0/SnapTestAttrition-2.txt)
+    TEST_FILES restarting/from_7.1.0/SnapTestAttrition-1.txt
+               restarting/from_7.1.0/SnapTestAttrition-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_7.0.0/SnapTestSimpleRestart-1.txt
-               restarting/from_7.0.0/SnapTestSimpleRestart-2.txt)
+    TEST_FILES restarting/from_7.1.0/SnapTestSimpleRestart-1.txt
+               restarting/from_7.1.0/SnapTestSimpleRestart-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_7.0.0/SnapTestRestart-1.txt
-               restarting/from_7.0.0/SnapTestRestart-2.txt)
+    TEST_FILES restarting/from_7.1.0/SnapTestRestart-1.txt
+               restarting/from_7.1.0/SnapTestRestart-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_7.0.0/SnapCycleRestart-1.txt
-               restarting/from_7.0.0/SnapCycleRestart-2.txt)
+    TEST_FILES restarting/from_7.1.0/SnapCycleRestart-1.txt
+               restarting/from_7.1.0/SnapCycleRestart-2.txt)
   add_fdb_test(
     TEST_FILES restarting/to_7.1.0/ConfigureStorageMigrationTestRestart-1.toml
                restarting/to_7.1.0/ConfigureStorageMigrationTestRestart-2.toml)

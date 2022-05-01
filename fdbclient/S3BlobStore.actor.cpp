@@ -25,13 +25,20 @@
 #include "fdbclient/sha1/SHA1.h"
 #include <time.h>
 #include <iomanip>
+#if defined(HAVE_WOLFSSL)
+#include <wolfssl/options.h>
+#endif
 #include <openssl/sha.h>
 #include <openssl/evp.h>
 #include <openssl/hmac.h>
+#if defined(HAVE_WOLFSSL)
+#undef SHA1 // wolfSSL will will shadow FDB SHA1.h
+#endif
 #include <boost/algorithm/string/split.hpp>
 #include <boost/algorithm/string/classification.hpp>
 #include <boost/algorithm/string.hpp>
 #include "fdbrpc/IAsyncFile.h"
+#include "flow/Hostname.h"
 #include "flow/UnitTest.h"
 #include "fdbclient/rapidxml/rapidxml.hpp"
 #include "fdbclient/FDBAWSCredentialsProvider.h"

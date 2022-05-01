@@ -22,6 +22,7 @@
 
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
 // version.
+#include "flow/Trace.h"
 #include <utility>
 
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_CLUSTERRECOVERY_ACTOR_G_H)
@@ -169,6 +170,7 @@ struct ClusterRecoveryData : NonCopyable, ReferenceCounted<ClusterRecoveryData> 
 	AsyncTrigger registrationTrigger;
 	Version lastEpochEnd, // The last version in the old epoch not (to be) rolled back in this recovery
 	    recoveryTransactionVersion; // The first version in this epoch
+	Optional<int64_t> versionEpoch; // The epoch which all versions are based off of
 	double lastCommitTime;
 
 	Version liveCommittedVersion; // The largest live committed version reported by commit proxies.
@@ -209,6 +211,7 @@ struct ClusterRecoveryData : NonCopyable, ReferenceCounted<ClusterRecoveryData> 
 	std::map<UID, CommitProxyVersionReplies> lastCommitProxyVersionReplies;
 
 	UID clusterId;
+	Version initialClusterVersion = -1;
 	Standalone<StringRef> dbId;
 
 	MasterInterface masterInterface;
@@ -242,6 +245,7 @@ struct ClusterRecoveryData : NonCopyable, ReferenceCounted<ClusterRecoveryData> 
 
 	Future<Void> logger;
 
+	Reference<EventCacheHolder> swVersionCheckedEventHolder;
 	Reference<EventCacheHolder> recoveredConfigEventHolder;
 	Reference<EventCacheHolder> clusterRecoveryStateEventHolder;
 	Reference<EventCacheHolder> clusterRecoveryGenerationsEventHolder;
@@ -271,6 +275,7 @@ struct ClusterRecoveryData : NonCopyable, ReferenceCounted<ClusterRecoveryData> 
 	    backupWorkerDoneRequests("BackupWorkerDoneRequests", cc),
 	    getLiveCommittedVersionRequests("GetLiveCommittedVersionRequests", cc),
 	    reportLiveCommittedVersionRequests("ReportLiveCommittedVersionRequests", cc),
+	    swVersionCheckedEventHolder(makeReference<EventCacheHolder>("SWVersionCompatibilityChecked")),
 	    recoveredConfigEventHolder(makeReference<EventCacheHolder>("RecoveredConfig")) {
 		clusterRecoveryStateEventHolder = makeReference<EventCacheHolder>(
 		    getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_STATE_EVENT_NAME));

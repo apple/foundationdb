@@ -88,6 +88,14 @@ ERROR( blob_granule_transaction_too_old, 1064, "Read version is older than blob 
 ERROR( blob_manager_replaced, 1065, "This blob manager has been replaced." )
 ERROR( change_feed_popped, 1066, "Tried to read a version older than what has been popped from the change feed" )
 ERROR( remote_kvs_cancelled, 1067, "The remote key-value store is cancelled" )
+ERROR( page_header_wrong_page_id, 1068, "Page header does not match location on disk" )
+ERROR( page_header_checksum_failed, 1069, "Page header checksum failed" )
+ERROR( page_header_version_not_supported, 1070, "Page header version is not supported" )
+ERROR( page_encoding_not_supported, 1071, "Page encoding type is not supported or not valid" )
+ERROR( page_decoding_failed, 1072, "Page content decoding failed" )
+ERROR( unexpected_encoding_type, 1073, "Page content decoding failed" )
+ERROR( encryption_key_not_found, 1074, "Encryption key not found" )
+ERROR( stale_version_vector, 1075, "Client version vector is stale" )
 
 ERROR( broken_promise, 1100, "Broken promise" )
 ERROR( operation_cancelled, 1101, "Asynchronous operation cancelled" )
@@ -115,6 +123,7 @@ ERROR( failed_to_progress, 1216, "Process has failed to make sufficient progress
 ERROR( invalid_cluster_id, 1217, "Attempted to join cluster with a different cluster ID" )
 ERROR( restart_cluster_controller, 1218, "Restart cluster controller process" )
 ERROR( please_reboot_remote_kv_store, 1219, "Need to reboot the storage engine process as it died abnormally")
+ERROR( incompatible_software_version, 1220, "Current software does not support database format" )
 
 // 15xx Platform errors
 ERROR( platform_error, 1500, "Platform error" )
@@ -137,6 +146,10 @@ ERROR( file_corrupt, 1522, "A structurally corrupt data file was detected" )
 ERROR( http_request_failed, 1523, "HTTP response code not received or indicated failure" )
 ERROR( http_auth_failed, 1524, "HTTP request failed due to bad credentials" )
 ERROR( http_bad_request_id, 1525, "HTTP response contained an unexpected X-Request-ID header" )
+ERROR( rest_invalid_uri, 1526, "Invalid REST URI")
+ERROR( rest_invalid_rest_client_knob, 1527, "Invalid RESTClient knob")
+ERROR( rest_connectpool_key_not_found, 1528, "ConnectKey not found in connection pool")
+
 
 // 2xxx Attempt (presumably by a _client_) to do something illegal.  If an error is known to
 // be internally caused, it should be 41xx
@@ -217,6 +230,7 @@ ERROR( invalid_tenant_name, 2134, "Tenant name cannot begin with \\xff");
 ERROR( tenant_prefix_allocator_conflict, 2135, "The database already has keys stored at the prefix allocated for the tenant");
 ERROR( tenants_disabled, 2136, "Tenants have been disabled in the cluster");
 ERROR( unknown_tenant, 2137, "Tenant is not available from this server")
+ERROR( illegal_tenant_access, 2138, "Illegal tenant access")
 
 // 2200 - errors from bindings and official APIs
 ERROR( api_version_unset, 2200, "API version is not set" )
@@ -290,19 +304,24 @@ ERROR( snap_log_anti_quorum_unsupported, 2507, "Unsupported when log anti quorum
 ERROR( snap_with_recovery_unsupported, 2508, "Cluster recovery during snapshot operation not supported")
 ERROR( snap_invalid_uid_string, 2509, "The given uid string is not a 32-length hex string")
 
-// 3XXX - Encryption operations errors
-ERROR( encrypt_ops_error, 3000, "Encryption operation error")
-ERROR( encrypt_header_metadata_mismatch, 3001, "Encryption header metadata mismatch")
-ERROR( encrypt_key_not_found, 3002, "Expected encryption key is missing")
-ERROR( encrypt_key_ttl_expired, 3003, "Expected encryption key TTL has expired")
-ERROR( encrypt_header_checksum_mismatch, 3004, "Encryption header checksum mismatch")
-ERROR( encrypt_update_cipher, 3005, "Attempt to update encryption cipher key")
-ERROR( encrypt_invalid_id, 3006, "Invalid encryption domainId or encryption cipher key id")
+// 27XX - Encryption operations errors
+ERROR( encrypt_ops_error, 2700, "Encryption operation error")
+ERROR( encrypt_header_metadata_mismatch, 2701, "Encryption header metadata mismatch")
+ERROR( encrypt_key_not_found, 2702, "Expected encryption key is missing")
+ERROR( encrypt_key_ttl_expired, 2703, "Expected encryption key TTL has expired")
+ERROR( encrypt_header_authtoken_mismatch, 2704, "Encryption header authentication token mismatch")
+ERROR( encrypt_update_cipher, 2705, "Attempt to update encryption cipher key")
+ERROR( encrypt_invalid_id, 2706, "Invalid encryption cipher details")
 
 // 4xxx Internal errors (those that should be generated only by bugs) are decimal 4xxx
 ERROR( unknown_error, 4000, "An unknown error occurred" )  // C++ exception not of type Error
 ERROR( internal_error, 4100, "An internal error occurred" )
 ERROR( not_implemented, 4200, "Not implemented yet" )
+
+// 6xxx Authorization and authentication error codes
+ERROR( permission_denied, 6000, "Client tried to access unauthorized data" )
+ERROR( unauthorized_attempt, 6001, "A untrusted client tried to send a message to a private endpoint" )
+ERROR( digital_signature_ops_error, 6002, "Digital signature operation error" )
 // clang-format on
 
 #undef ERROR

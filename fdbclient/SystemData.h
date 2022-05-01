@@ -208,6 +208,9 @@ const Value serverListValue(StorageServerInterface const&);
 UID decodeServerListKey(KeyRef const&);
 StorageServerInterface decodeServerListValue(ValueRef const&);
 
+Value swVersionValue(SWVersion const& swversion);
+SWVersion decodeSWVersionValue(ValueRef const&);
+
 //    "\xff/processClass/[[processID]]" := "[[ProcessClass]]"
 // Contains a mapping from processID to processClass
 extern const KeyRangeRef processClassKeys;
@@ -350,6 +353,11 @@ extern const KeyRef logsKey;
 //	"\xff/minRequiredCommitVersion" = "[[Version]]"
 //	Used during backup/recovery to restrict version requirements
 extern const KeyRef minRequiredCommitVersionKey;
+
+//	"\xff/versionEpochKey" = "[[uint64_t]]"
+//	Defines the base epoch representing version 0. The value itself is the
+//	number of microseconds since the Unix epoch.
+extern const KeyRef versionEpochKey;
 
 const Value logsValue(const std::vector<std::pair<UID, NetworkAddress>>& logs,
                       const std::vector<std::pair<UID, NetworkAddress>>& oldLogs);
@@ -567,9 +575,9 @@ extern const KeyRangeRef blobGranuleSplitKeys;
 extern const KeyRangeRef blobGranuleHistoryKeys;
 
 // \xff\x02/bgp/(start,end) = (version, force)
-extern const KeyRangeRef blobGranulePruneKeys;
+extern const KeyRangeRef blobGranulePurgeKeys;
 extern const KeyRangeRef blobGranuleVersionKeys;
-extern const KeyRef blobGranulePruneChangeKey;
+extern const KeyRef blobGranulePurgeChangeKey;
 
 const Key blobGranuleFileKeyFor(UID granuleID, Version fileVersion, uint8_t fileType);
 std::tuple<UID, Version, uint8_t> decodeBlobGranuleFileKey(KeyRef const& key);
@@ -578,8 +586,8 @@ const KeyRange blobGranuleFileKeyRangeFor(UID granuleID);
 const Value blobGranuleFileValueFor(StringRef const& filename, int64_t offset, int64_t length, int64_t fullFileLength);
 std::tuple<Standalone<StringRef>, int64_t, int64_t, int64_t> decodeBlobGranuleFileValue(ValueRef const& value);
 
-const Value blobGranulePruneValueFor(Version version, KeyRange range, bool force);
-std::tuple<Version, KeyRange, bool> decodeBlobGranulePruneValue(ValueRef const& value);
+const Value blobGranulePurgeValueFor(Version version, KeyRange range, bool force);
+std::tuple<Version, KeyRange, bool> decodeBlobGranulePurgeValue(ValueRef const& value);
 
 const Value blobGranuleMappingValueFor(UID const& workerID);
 UID decodeBlobGranuleMappingValue(ValueRef const& value);

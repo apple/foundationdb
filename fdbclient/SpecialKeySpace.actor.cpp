@@ -106,6 +106,8 @@ std::unordered_map<std::string, KeyRange> SpecialKeySpace::managementApiCommandT
 	{ "advanceversion",
 	  singleKeyRange(LiteralStringRef("min_required_commit_version"))
 	      .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
+	{ "versionepoch",
+	  singleKeyRange(LiteralStringRef("version_epoch")).withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
 	{ "profile",
 	  KeyRangeRef(LiteralStringRef("profiling/"), LiteralStringRef("profiling0"))
 	      .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
@@ -546,6 +548,8 @@ void SpecialKeySpace::registerKeyRange(SpecialKeySpace::MODULE module,
                                        SpecialKeySpace::IMPLTYPE type,
                                        const KeyRangeRef& kr,
                                        SpecialKeyRangeReadImpl* impl) {
+	// Not allowed to register an empty range
+	ASSERT(!kr.empty());
 	// module boundary check
 	if (module == SpecialKeySpace::MODULE::TESTONLY) {
 		ASSERT(normalKeys.contains(kr));
@@ -1640,13 +1644,10 @@ void TracingOptionsImpl::clear(ReadYourWritesTransaction* ryw, const KeyRef& key
 
 CoordinatorsImpl::CoordinatorsImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
 
-Future<RangeResult> CoordinatorsImpl::getRange(ReadYourWritesTransaction* ryw,
-                                               KeyRangeRef kr,
-                                               GetRangeLimits limitsHint) const {
+ACTOR Future<RangeResult> coordinatorsGetRangeActor(ReadYourWritesTransaction* ryw, KeyRef prefix, KeyRangeRef kr) {
+	state ClusterConnectionString cs = ryw->getDatabase()->getConnectionRecord()->getConnectionString();
+	state std::vector<NetworkAddress> coordinator_processes = wait(cs.tryResolveHostnames());
 	RangeResult result;
-	KeyRef prefix(getKeyRange().begin);
-	auto cs = ryw->getDatabase()->getConnectionRecord()->getConnectionString();
-	auto coordinator_processes = cs.coordinators();
 	Key cluster_decription_key = prefix.withSuffix(LiteralStringRef("cluster_description"));
 	if (kr.contains(cluster_decription_key)) {
 		result.push_back_deep(result.arena(), KeyValueRef(cluster_decription_key, cs.clusterKeyName()));
@@ -1669,10 +1670,16 @@ Future<RangeResult> CoordinatorsImpl::getRange(ReadYourWritesTransaction* ryw,
 	return rywGetRange(ryw, kr, result);
 }
 
+Future<RangeResult> CoordinatorsImpl::getRange(ReadYourWritesTransaction* ryw,
+                                               KeyRangeRef kr,
+                                               GetRangeLimits limitsHint) const {
+	KeyRef prefix(getKeyRange().begin);
+	return coordinatorsGetRangeActor(ryw, prefix, kr);
+}
+
 ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
 	state Reference<IQuorumChange> change;
-	state ClusterConnectionString
-	    conn; // We don't care about the Key here, it will be overrode in changeQuorumChecker().
+	state ClusterConnectionString conn; // We don't care about the Key here.
 	state std::vector<std::string> process_address_or_hostname_strs;
 	state Optional<std::string> msg;
 	state int index;
@@ -1696,7 +1703,6 @@ ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWrite
 			try {
 				if (Hostname::isHostname(process_address_or_hostname_strs[index])) {
 					conn.hostnames.push_back(Hostname::parse(process_address_or_hostname_strs[index]));
-					conn.status = ClusterConnectionString::ConnectionStringStatus::UNRESOLVED;
 				} else {
 					NetworkAddress a = NetworkAddress::parse(process_address_or_hostname_strs[index]);
 					if (!a.isValid()) {
@@ -1713,18 +1719,19 @@ ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWrite
 			if (parse_error) {
 				std::string error = "ERROR: \'" + process_address_or_hostname_strs[index] +
 				                    "\' is not a valid network endpoint address\n";
-				if (process_address_or_hostname_strs[index].find(":tls") != std::string::npos)
-					error += "        Do not include the `:tls' suffix when naming a process\n";
 				return ManagementAPIError::toJsonString(false, "coordinators", error);
 			}
 		}
 	}
 
-	wait(conn.resolveHostnames());
-	if (conn.coordinators().size())
-		change = specifiedQuorumChange(conn.coordinators());
-	else
+	std::vector<NetworkAddress> addressesVec = wait(conn.tryResolveHostnames());
+	if (addressesVec.size() != conn.hostnames.size() + conn.coordinators().size()) {
+		return ManagementAPIError::toJsonString(false, "coordinators", "One or more hostnames are not resolvable.");
+	} else if (addressesVec.size()) {
+		change = specifiedQuorumChange(addressesVec);
+	} else {
 		change = noQuorumChange();
+	}
 
 	// check update for cluster_description
 	Key cluster_decription_key = LiteralStringRef("cluster_description").withPrefix(kr.begin);
@@ -1736,19 +1743,18 @@ ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWrite
 			change = nameQuorumChange(entry.second.get().toString(), change);
 		} else {
 			// throw the error
-			return Optional<std::string>(ManagementAPIError::toJsonString(
-			    false, "coordinators", "Cluster description must match [A-Za-z0-9_]+"));
+			return ManagementAPIError::toJsonString(
+			    false, "coordinators", "Cluster description must match [A-Za-z0-9_]+");
 		}
 	}
 
 	ASSERT(change.isValid());
 
 	TraceEvent(SevDebug, "SKSChangeCoordinatorsStart")
-	    .detail("NewHostnames", conn.hostnames.size() ? describe(conn.hostnames) : "N/A")
-	    .detail("NewAddresses", describe(conn.coordinators()))
+	    .detail("NewAddresses", describe(addressesVec))
 	    .detail("Description", entry.first ? entry.second.get().toString() : "");
 
-	Optional<CoordinatorsResult> r = wait(changeQuorumChecker(&ryw->getTransaction(), change, &conn));
+	Optional<CoordinatorsResult> r = wait(changeQuorumChecker(&ryw->getTransaction(), change, addressesVec));
 
 	TraceEvent(SevDebug, "SKSChangeCoordinatorsFinish")
 	    .detail("Result", r.present() ? static_cast<int>(r.get()) : -1); // -1 means success
@@ -1800,9 +1806,10 @@ ACTOR static Future<RangeResult> CoordinatorsAutoImplActor(ReadYourWritesTransac
 	state ClusterConnectionString old(currentKey.get().toString());
 	state CoordinatorsResult result = CoordinatorsResult::SUCCESS;
 
+	std::vector<NetworkAddress> oldCoordinators = wait(old.tryResolveHostnames());
 	std::vector<NetworkAddress> _desiredCoordinators = wait(autoQuorumChange()->getDesiredCoordinators(
 	    &tr,
-	    old.coordinators(),
+	    oldCoordinators,
 	    Reference<ClusterConnectionMemoryRecord>(new ClusterConnectionMemoryRecord(old)),
 	    result));
 
@@ -1909,6 +1916,42 @@ Future<Optional<std::string>> AdvanceVersionImpl::commit(ReadYourWritesTransacti
 	return Optional<std::string>();
 }
 
+ACTOR static Future<RangeResult> getVersionEpochActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
+	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
+	ryw->getTransaction().setOption(FDBTransactionOptions::RAW_ACCESS);
+	Optional<Value> val = wait(ryw->getTransaction().get(versionEpochKey));
+	RangeResult result;
+	if (val.present()) {
+		int64_t versionEpoch = BinaryReader::fromStringRef<int64_t>(val.get(), Unversioned());
+		ValueRef version(result.arena(), boost::lexical_cast<std::string>(versionEpoch));
+		result.push_back_deep(result.arena(), KeyValueRef(kr.begin, version));
+	}
+	return result;
+}
+
+VersionEpochImpl::VersionEpochImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
+
+Future<RangeResult> VersionEpochImpl::getRange(ReadYourWritesTransaction* ryw,
+                                               KeyRangeRef kr,
+                                               GetRangeLimits limitsHint) const {
+	ASSERT(kr == getKeyRange());
+	return getVersionEpochActor(ryw, kr);
+}
+
+Future<Optional<std::string>> VersionEpochImpl::commit(ReadYourWritesTransaction* ryw) {
+	auto versionEpoch =
+	    ryw->getSpecialKeySpaceWriteMap()[SpecialKeySpace::getManagementApiCommandPrefix("versionepoch")].second;
+	if (versionEpoch.present()) {
+		int64_t epoch = BinaryReader::fromStringRef<int64_t>(versionEpoch.get(), Unversioned());
+		ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
+		ryw->getTransaction().setOption(FDBTransactionOptions::RAW_ACCESS);
+		ryw->getTransaction().set(versionEpochKey, BinaryWriter::toValue(epoch, Unversioned()));
+	} else {
+		ryw->getTransaction().clear(versionEpochKey);
+	}
+	return Optional<std::string>();
+}
+
 ClientProfilingImpl::ClientProfilingImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
 
 ACTOR static Future<RangeResult> ClientProfilingGetRangeActor(ReadYourWritesTransaction* ryw,
@@ -1961,7 +2004,6 @@ ACTOR static Future<RangeResult> ClientProfilingGetRangeActor(ReadYourWritesTran
 	return result;
 }
 
-// TODO : add limitation on set operation
 Future<RangeResult> ClientProfilingImpl::getRange(ReadYourWritesTransaction* ryw,
                                                   KeyRangeRef kr,
                                                   GetRangeLimits limitsHint) const {

@@ -192,6 +192,8 @@ struct LogSystemConfig {
 
 	std::vector<TLogInterface> allLocalLogs(bool includeSatellite = true) const;
 
+	int numLogs() const;
+
 	std::vector<TLogInterface> allPresentLogs() const;
 
 	std::pair<int8_t, int8_t> getLocalityForDcId(Optional<Key> dcId) const;

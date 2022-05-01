@@ -30,6 +30,8 @@ set(FLOW_SRCS
   Hash3.h
   Histogram.cpp
   Histogram.h
+  Hostname.actor.cpp
+  Hostname.h
   IDispatched.h
   IRandom.h
   IThreadPoolTest.actor.cpp
@@ -82,6 +84,10 @@ set(FLOW_SRCS
   actorcompiler.h
   crc32c.h
   crc32c.cpp
+  ppc-asm.h
+  crc32.S
+  crc32_wrapper.h
+  crc32_wrapper.c
   error_definitions.h
   ${CMAKE_CURRENT_BINARY_DIR}/SourceVersion.h
   flat_buffers.cpp
@@ -136,6 +142,7 @@ target_link_libraries(flow PUBLIC fmt::fmt)
 
 add_flow_target(STATIC_LIBRARY NAME flow_sampling SRCS ${FLOW_SRCS})
 target_link_libraries(flow_sampling PRIVATE stacktrace)
+target_link_libraries(flow_sampling PUBLIC fmt::fmt)
 target_compile_definitions(flow_sampling PRIVATE -DENABLE_SAMPLING)
 if(WIN32)
   add_dependencies(flow_sampling_actors flow_actors)
@@ -169,6 +176,10 @@ if(NOT WITH_TLS)
 else()
   target_link_libraries(flow PUBLIC OpenSSL::SSL)
   target_link_libraries(flow_sampling PUBLIC OpenSSL::SSL)
+  if(USE_WOLFSSL)
+    target_include_directories(flow SYSTEM BEFORE PUBLIC ${WOLFSSL_INCLUDE_DIR}/wolfssl)
+    target_include_directories(flow_sampling SYSTEM BEFORE PUBLIC ${WOLFSSL_INCLUDE_DIR}/wolfssl)
+  endif()
 endif()
 target_link_libraries(flow PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
 target_link_libraries(flow_sampling PUBLIC Threads::Threads ${CMAKE_DL_LIBS})

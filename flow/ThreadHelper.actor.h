@@ -689,7 +689,7 @@ private:
 // If instead, this actor is cancelled, we will also cancel the underlying "threadFuture"
 // Note: we are required to have unique ownership of the "threadFuture"
 ACTOR template <class T>
-Future<T> safeThreadFutureToFuture(ThreadFuture<T> threadFuture) {
+Future<T> safeThreadFutureToFutureImpl(ThreadFuture<T> threadFuture) {
 	Promise<Void> ready;
 	Future<Void> onReady = ready.getFuture();
 	UtilCallback<T>* callback = new UtilCallback<T>(threadFuture, ready.extractRawPointer());
@@ -698,9 +698,12 @@ Future<T> safeThreadFutureToFuture(ThreadFuture<T> threadFuture) {
 	try {
 		wait(onReady);
 	} catch (Error& e) {
-		ASSERT(e.code() == error_code_actor_cancelled);
+		// broken_promise can be thrown if the network is already shut down
+		ASSERT(e.code() == error_code_operation_cancelled || e.code() == error_code_broken_promise);
 		// prerequisite: we have exclusive ownership of the threadFuture
-		threadFuture.cancel();
+		if (e.code() == error_code_operation_cancelled) {
+			threadFuture.cancel();
+		}
 		throw e;
 	}
 	// threadFuture should be ready
@@ -710,10 +713,45 @@ Future<T> safeThreadFutureToFuture(ThreadFuture<T> threadFuture) {
 	return threadFuture.get();
 }
 
-// do nothing, just for template functions' calls
+// The allow anonymous_future type is used to prevent misuse of ThreadFutures.
+// For Standalone types, the memory in some cases is actually stored in the ThreadFuture object,
+// in which case we expect the caller to keep that ThreadFuture around until the result is no
+// longer needed.
+//
+// We can provide some compile-time detection of this misuse by disallowing anonymous thread futures
+// being passed in for certain types.
+template <typename T>
+struct allow_anonymous_future : std::true_type {};
+
+template <typename T>
+struct allow_anonymous_future<Standalone<T>> : std::false_type {};
+
+template <typename T>
+struct allow_anonymous_future<Optional<Standalone<T>>> : std::false_type {};
+
 template <class T>
-Future<T> safeThreadFutureToFuture(Future<T> future) {
-	// do nothing
+typename std::enable_if<allow_anonymous_future<T>::value, Future<T>>::type safeThreadFutureToFuture(
+    const ThreadFuture<T>& threadFuture) {
+	return safeThreadFutureToFutureImpl(threadFuture);
+}
+
+template <class T>
+typename std::enable_if<!allow_anonymous_future<T>::value, Future<T>>::type safeThreadFutureToFuture(
+    ThreadFuture<T>& threadFuture) {
+	return safeThreadFutureToFutureImpl(threadFuture);
+}
+
+template <class T>
+typename std::enable_if<allow_anonymous_future<T>::value, Future<T>>::type safeThreadFutureToFuture(
+    const Future<T>& future) {
+	// Do nothing
+	return future;
+}
+
+template <class T>
+typename std::enable_if<!allow_anonymous_future<T>::value, Future<T>>::type safeThreadFutureToFuture(
+    Future<T>& future) {
+	// Do nothing
 	return future;
 }
 

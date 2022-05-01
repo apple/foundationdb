@@ -313,6 +313,9 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 	} else if (tLogDataStoreType == KeyValueStoreType::SSD_BTREE_V2 &&
 	           storageServerStoreType == KeyValueStoreType::SSD_ROCKSDB_V1) {
 		result["storage_engine"] = "ssd-rocksdb-v1";
+	} else if (tLogDataStoreType == KeyValueStoreType::SSD_BTREE_V2 &&
+	           storageServerStoreType == KeyValueStoreType::SSD_SHARDED_ROCKSDB) {
+		result["storage_engine"] = "ssd-sharded-rocksdb";
 	} else if (tLogDataStoreType == KeyValueStoreType::MEMORY && storageServerStoreType == KeyValueStoreType::MEMORY) {
 		result["storage_engine"] = "memory-1";
 	} else if (tLogDataStoreType == KeyValueStoreType::SSD_BTREE_V2 &&
@@ -335,6 +338,8 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 			result["tss_storage_engine"] = "ssd-redwood-1-experimental";
 		} else if (testingStorageServerStoreType == KeyValueStoreType::SSD_ROCKSDB_V1) {
 			result["tss_storage_engine"] = "ssd-rocksdb-v1";
+		} else if (testingStorageServerStoreType == KeyValueStoreType::SSD_SHARDED_ROCKSDB) {
+			result["tss_storage_engine"] = "ssd-sharded-rocksdb";
 		} else if (testingStorageServerStoreType == KeyValueStoreType::MEMORY_RADIXTREE) {
 			result["tss_storage_engine"] = "memory-radixtree-beta";
 		} else if (testingStorageServerStoreType == KeyValueStoreType::MEMORY) {
@@ -668,6 +673,11 @@ void DatabaseConfiguration::applyMutation(MutationRef m) {
 			clear(range & configKeys);
 		}
 	}
+}
+
+bool DatabaseConfiguration::involveMutation(MutationRef m) {
+	return (m.type == MutationRef::SetValue && m.param1.startsWith(configKeysPrefix)) ||
+	       (m.type == MutationRef::ClearRange && KeyRangeRef(m.param1, m.param2).intersects(configKeys));
 }
 
 bool DatabaseConfiguration::set(KeyRef key, ValueRef value) {

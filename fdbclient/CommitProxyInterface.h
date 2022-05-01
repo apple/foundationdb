@@ -30,6 +30,7 @@
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/TagThrottle.actor.h"
 #include "fdbclient/GlobalConfig.h"
+#include "fdbclient/VersionVector.h"
 
 #include "fdbrpc/Stats.h"
 #include "fdbrpc/TimedRequest.h"
@@ -42,13 +43,13 @@ struct CommitProxyInterface {
 
 	Optional<Key> processId;
 	bool provisional;
-	RequestStream<struct CommitTransactionRequest> commit;
-	RequestStream<struct GetReadVersionRequest>
+	PublicRequestStream<struct CommitTransactionRequest> commit;
+	PublicRequestStream<struct GetReadVersionRequest>
 	    getConsistentReadVersion; // Returns a version which (1) is committed, and (2) is >= the latest version reported
 	                              // committed (by a commit response) when this request was sent
 	                              //   (at some point between when this request is sent and when its response is
 	                              //   received, the latest version reported committed)
-	RequestStream<struct GetKeyServerLocationsRequest> getKeyServersLocations;
+	PublicRequestStream<struct GetKeyServerLocationsRequest> getKeyServersLocations;
 	RequestStream<struct GetStorageServerRejoinInfoRequest> getStorageServerRejoinInfo;
 
 	RequestStream<ReplyPromise<Void>> waitFailure;
@@ -71,9 +72,9 @@ struct CommitProxyInterface {
 		serializer(ar, processId, provisional, commit);
 		if (Archive::isDeserializing) {
 			getConsistentReadVersion =
-			    RequestStream<struct GetReadVersionRequest>(commit.getEndpoint().getAdjustedEndpoint(1));
+			    PublicRequestStream<struct GetReadVersionRequest>(commit.getEndpoint().getAdjustedEndpoint(1));
 			getKeyServersLocations =
-			    RequestStream<struct GetKeyServerLocationsRequest>(commit.getEndpoint().getAdjustedEndpoint(2));
+			    PublicRequestStream<struct GetKeyServerLocationsRequest>(commit.getEndpoint().getAdjustedEndpoint(2));
 			getStorageServerRejoinInfo =
 			    RequestStream<struct GetStorageServerRejoinInfoRequest>(commit.getEndpoint().getAdjustedEndpoint(3));
 			waitFailure = RequestStream<ReplyPromise<Void>>(commit.getEndpoint().getAdjustedEndpoint(4));
@@ -205,6 +206,9 @@ struct GetReadVersionReply : public BasicLoadBalancedReply {
 
 	TransactionTagMap<ClientTagThrottleLimits> tagThrottleInfo;
 
+	VersionVector ssVersionVectorDelta;
+	UID proxyId; // GRV proxy ID to detect old GRV proxies at client side
+
 	GetReadVersionReply() : version(invalidVersion), locked(false) {}
 
 	template <class Ar>
@@ -217,7 +221,9 @@ struct GetReadVersionReply : public BasicLoadBalancedReply {
 		           tagThrottleInfo,
 		           midShardSize,
 		           rkDefaultThrottled,
-		           rkBatchThrottled);
+		           rkBatchThrottled,
+		           ssVersionVectorDelta,
+		           proxyId);
 	}
 };
 
@@ -246,15 +252,18 @@ struct GetReadVersionRequest : TimedRequest {
 	Optional<UID> debugID;
 	ReplyPromise<GetReadVersionReply> reply;
 
-	GetReadVersionRequest() : transactionCount(1), flags(0) {}
+	Version maxVersion; // max version in the client's version vector cache
+
+	GetReadVersionRequest() : transactionCount(1), flags(0), maxVersion(invalidVersion) {}
 	GetReadVersionRequest(SpanID spanContext,
 	                      uint32_t transactionCount,
 	                      TransactionPriority priority,
+	                      Version maxVersion,
 	                      uint32_t flags = 0,
 	                      TransactionTagMap<uint32_t> tags = TransactionTagMap<uint32_t>(),
 	                      Optional<UID> debugID = Optional<UID>())
 	  : spanContext(spanContext), transactionCount(transactionCount), flags(flags), priority(priority), tags(tags),
-	    debugID(debugID) {
+	    debugID(debugID), maxVersion(maxVersion) {
 		flags = flags & ~FLAG_PRIORITY_MASK;
 		switch (priority) {
 		case TransactionPriority::BATCH:
@@ -275,7 +284,7 @@ struct GetReadVersionRequest : TimedRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, transactionCount, flags, tags, debugID, reply, spanContext);
+		serializer(ar, transactionCount, flags, tags, debugID, reply, spanContext, maxVersion);
 
 		if (ar.isDeserializing) {
 			if ((flags & PRIORITY_SYSTEM_IMMEDIATE) == PRIORITY_SYSTEM_IMMEDIATE) {
@@ -300,9 +309,16 @@ struct GetKeyServerLocationsReply {
 	// if any storage servers in results have a TSS pair, that mapping is in here
 	std::vector<std::pair<UID, StorageServerInterface>> resultsTssMapping;
 
+	// maps storage server interfaces (captured in "results") to the tags of
+	// their corresponding storage servers
+	// @note this map allows the client to identify the latest commit versions
+	// of storage servers (the version vector, which captures the latest commit
+	// versions of storage servers, identifies storage servers by their tags).
+	std::vector<std::pair<UID, Tag>> resultsTagMapping;
+
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, results, resultsTssMapping, tenantEntry, arena);
+		serializer(ar, results, resultsTssMapping, tenantEntry, arena, resultsTagMapping);
 	}
 };
 
@@ -348,6 +364,7 @@ struct GetRawCommittedVersionReply {
 	bool locked;
 	Optional<Value> metadataVersion;
 	Version minKnownCommittedVersion;
+	VersionVector ssVersionVectorDelta;
 
 	GetRawCommittedVersionReply()
 	  : debugID(Optional<UID>()), version(invalidVersion), locked(false), metadataVersion(Optional<Value>()),
@@ -355,7 +372,7 @@ struct GetRawCommittedVersionReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, debugID, version, locked, metadataVersion, minKnownCommittedVersion);
+		serializer(ar, debugID, version, locked, metadataVersion, minKnownCommittedVersion, ssVersionVectorDelta);
 	}
 };
 
@@ -364,14 +381,17 @@ struct GetRawCommittedVersionRequest {
 	SpanID spanContext;
 	Optional<UID> debugID;
 	ReplyPromise<GetRawCommittedVersionReply> reply;
+	Version maxVersion; // max version in the grv proxy's version vector cache
 
-	explicit GetRawCommittedVersionRequest(SpanID spanContext, Optional<UID> const& debugID = Optional<UID>())
-	  : spanContext(spanContext), debugID(debugID) {}
-	explicit GetRawCommittedVersionRequest() : spanContext(), debugID() {}
+	explicit GetRawCommittedVersionRequest(SpanID spanContext,
+	                                       Optional<UID> const& debugID = Optional<UID>(),
+	                                       Version maxVersion = invalidVersion)
+	  : spanContext(spanContext), debugID(debugID), maxVersion(maxVersion) {}
+	explicit GetRawCommittedVersionRequest() : spanContext(), debugID(), maxVersion(invalidVersion) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, debugID, reply, spanContext);
+		serializer(ar, debugID, reply, spanContext, maxVersion);
 	}
 };
 

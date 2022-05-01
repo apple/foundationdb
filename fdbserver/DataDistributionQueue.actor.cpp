@@ -386,15 +386,19 @@ void launchDest(RelocateData& relocation,
 	}
 }
 
+void completeDest(RelocateData const& relocation, std::map<UID, Busyness>& destBusymap) {
+	int destWorkFactor = getDestWorkFactor();
+	for (UID id : relocation.completeDests) {
+		destBusymap[id].removeWork(relocation.priority, destWorkFactor);
+	}
+}
+
 void complete(RelocateData const& relocation, std::map<UID, Busyness>& busymap, std::map<UID, Busyness>& destBusymap) {
 	ASSERT(relocation.workFactor > 0);
 	for (int i = 0; i < relocation.src.size(); i++)
 		busymap[relocation.src[i]].removeWork(relocation.priority, relocation.workFactor);
 
-	int destWorkFactor = getDestWorkFactor();
-	for (UID id : relocation.completeDests) {
-		destBusymap[id].removeWork(relocation.priority, destWorkFactor);
-	}
+	completeDest(relocation, destBusymap);
 }
 
 ACTOR Future<Void> dataDistributionRelocator(struct DDQueueData* self,
@@ -1027,6 +1031,16 @@ struct DDQueueData {
 
 		validate();
 	}
+
+	int getHighestPriorityRelocation() const {
+		int highestPriority{ 0 };
+		for (const auto& [priority, count] : priority_relocations) {
+			if (count > 0) {
+				highestPriority = std::max(highestPriority, priority);
+			}
+		}
+		return highestPriority;
+	}
 };
 
 static std::string destServersString(std::vector<std::pair<Reference<IDataDistributionTeam>, bool>> const& bestTeams) {
@@ -1107,11 +1121,12 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 					    rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT)
 						inflightPenalty = SERVER_KNOBS->INFLIGHT_PENALTY_ONE_LEFT;
 
-					auto req = GetTeamRequest(rd.wantsNewServers,
-					                          rd.priority == SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM,
-					                          true,
-					                          false,
-					                          inflightPenalty);
+					auto req =
+					    GetTeamRequest(WantNewServers(rd.wantsNewServers),
+					                   WantTrueBest(rd.priority == SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM),
+					                   PreferLowerUtilization::True,
+					                   TeamMustHaveShards::False,
+					                   inflightPenalty);
 					req.src = rd.src;
 					req.completeSources = rd.completeSources;
 					// bestTeam.second = false if the bestTeam in the teamCollection (in the DC) does not have any
@@ -1378,6 +1393,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 			} else {
 				TEST(true); // move to removed server
 				healthyDestinations.addDataInFlightToTeam(-metrics.bytes);
+
+				completeDest(rd, self->destBusymap);
 				rd.completeDests.clear();
 				wait(delay(SERVER_KNOBS->RETRY_RELOCATESHARD_DELAY, TaskPriority::DataDistributionLaunch));
 			}
@@ -1522,7 +1539,10 @@ ACTOR Future<Void> BgDDMountainChopper(DDQueueData* self, int teamCollectionInde
 			    SERVER_KNOBS->DD_REBALANCE_PARALLELISM) {
 				std::pair<Optional<Reference<IDataDistributionTeam>>, bool> _randomTeam =
 				    wait(brokenPromiseToNever(self->teamCollections[teamCollectionIndex].getTeam.getReply(
-				        GetTeamRequest(true, false, true, false))));
+				        GetTeamRequest(WantNewServers::True,
+				                       WantTrueBest::False,
+				                       PreferLowerUtilization::True,
+				                       TeamMustHaveShards::False))));
 				randomTeam = _randomTeam;
 				traceEvent.detail("DestTeam",
 				                  printable(randomTeam.first.map<std::string>(
@@ -1531,7 +1551,10 @@ ACTOR Future<Void> BgDDMountainChopper(DDQueueData* self, int teamCollectionInde
 				if (randomTeam.first.present()) {
 					std::pair<Optional<Reference<IDataDistributionTeam>>, bool> loadedTeam =
 					    wait(brokenPromiseToNever(self->teamCollections[teamCollectionIndex].getTeam.getReply(
-					        GetTeamRequest(true, true, false, true))));
+					        GetTeamRequest(WantNewServers::True,
+					                       WantTrueBest::True,
+					                       PreferLowerUtilization::False,
+					                       TeamMustHaveShards::True))));
 
 					traceEvent.detail(
 					    "SourceTeam",
@@ -1628,7 +1651,10 @@ ACTOR Future<Void> BgDDValleyFiller(DDQueueData* self, int teamCollectionIndex) 
 			    SERVER_KNOBS->DD_REBALANCE_PARALLELISM) {
 				std::pair<Optional<Reference<IDataDistributionTeam>>, bool> _randomTeam =
 				    wait(brokenPromiseToNever(self->teamCollections[teamCollectionIndex].getTeam.getReply(
-				        GetTeamRequest(true, false, false, true))));
+				        GetTeamRequest(WantNewServers::True,
+				                       WantTrueBest::False,
+				                       PreferLowerUtilization::False,
+				                       TeamMustHaveShards::True))));
 				randomTeam = _randomTeam;
 				traceEvent.detail("SourceTeam",
 				                  printable(randomTeam.first.map<std::string>(
@@ -1637,7 +1663,10 @@ ACTOR Future<Void> BgDDValleyFiller(DDQueueData* self, int teamCollectionIndex) 
 				if (randomTeam.first.present()) {
 					std::pair<Optional<Reference<IDataDistributionTeam>>, bool> unloadedTeam =
 					    wait(brokenPromiseToNever(self->teamCollections[teamCollectionIndex].getTeam.getReply(
-					        GetTeamRequest(true, true, true, false))));
+					        GetTeamRequest(WantNewServers::True,
+					                       WantTrueBest::True,
+					                       PreferLowerUtilization::True,
+					                       TeamMustHaveShards::False))));
 
 					traceEvent.detail(
 					    "DestTeam",
@@ -1698,7 +1727,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
                                          Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
                                          MoveKeysLock lock,
                                          PromiseStream<Promise<int64_t>> getAverageShardBytes,
-                                         PromiseStream<Promise<int>> getUnhealthyRelocationCount,
+                                         FutureStream<Promise<int>> getUnhealthyRelocationCount,
                                          UID distributorId,
                                          int teamSize,
                                          int singleRegionTeamSize,
@@ -1792,12 +1821,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 
 					recordMetrics = delay(SERVER_KNOBS->DD_QUEUE_LOGGING_INTERVAL, TaskPriority::FlushTrace);
 
-					int highestPriorityRelocation = 0;
-					for (auto it = self.priority_relocations.begin(); it != self.priority_relocations.end(); ++it) {
-						if (it->second) {
-							highestPriorityRelocation = std::max(highestPriorityRelocation, it->first);
-						}
-					}
+					auto const highestPriorityRelocation = self.getHighestPriorityRelocation();
 
 					TraceEvent("MovingData", distributorId)
 					    .detail("InFlight", self.activeRelocations)
@@ -1833,9 +1857,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 				}
 				when(wait(self.error.getFuture())) {} // Propagate errors from dataDistributionRelocator
 				when(wait(waitForAll(balancingFutures))) {}
-				when(Promise<int> r = waitNext(getUnhealthyRelocationCount.getFuture())) {
-					r.send(self.unhealthyRelocations);
-				}
+				when(Promise<int> r = waitNext(getUnhealthyRelocationCount)) { r.send(self.unhealthyRelocations); }
 			}
 		}
 	} catch (Error& e) {

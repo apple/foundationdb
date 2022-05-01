@@ -221,41 +221,41 @@ struct TenantManagementWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> deleteTenant(Database cx, TenantManagementWorkload* self) {
-		state TenantName tenant = self->chooseTenantName(true);
+		state TenantName beginTenant = self->chooseTenantName(true);
 		state OperationType operationType = TenantManagementWorkload::randomOperationType();
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 
 		state Optional<TenantName> endTenant = operationType != OperationType::MANAGEMENT_DATABASE &&
-		                                               !tenant.startsWith("\xff"_sr) &&
+		                                               !beginTenant.startsWith("\xff"_sr) &&
 		                                               deterministicRandom()->random01() < 0.2
 		                                           ? Optional<TenantName>(self->chooseTenantName(false))
 		                                           : Optional<TenantName>();
 
-		if (endTenant.present() && endTenant < tenant) {
-			TenantName temp = tenant;
-			tenant = endTenant.get();
+		if (endTenant.present() && endTenant < beginTenant) {
+			TenantName temp = beginTenant;
+			beginTenant = endTenant.get();
 			endTenant = temp;
 		}
 
-		auto itr = self->createdTenants.find(tenant);
+		auto itr = self->createdTenants.find(beginTenant);
 		state bool alreadyExists = itr != self->createdTenants.end();
 		state bool isEmpty = true;
 
 		state std::vector<TenantName> tenants;
 		if (!endTenant.present()) {
-			tenants.push_back(tenant);
+			tenants.push_back(beginTenant);
 		} else if (endTenant.present()) {
-			for (auto itr = self->createdTenants.lower_bound(tenant);
+			for (auto itr = self->createdTenants.lower_bound(beginTenant);
 			     itr != self->createdTenants.end() && itr->first < endTenant.get();
 			     ++itr) {
 				tenants.push_back(itr->first);
 			}
 		}
 
+		state int tenantIndex;
 		try {
 			if (alreadyExists || endTenant.present()) {
-				state int tenantIndex = 0;
-				for (; tenantIndex < tenants.size(); ++tenantIndex) {
+				for (tenantIndex = 0; tenantIndex < tenants.size(); ++tenantIndex) {
 					if (deterministicRandom()->random01() < 0.9) {
 						state Transaction clearTr(cx, tenants[tenantIndex]);
 						loop {
@@ -280,7 +280,7 @@ struct TenantManagementWorkload : TestWorkload {
 		} catch (Error& e) {
 			TraceEvent(SevError, "DeleteTenantFailure")
 			    .error(e)
-			    .detail("TenantName", tenant)
+			    .detail("TenantName", beginTenant)
 			    .detail("EndTenant", endTenant);
 			return Void();
 		}
@@ -289,7 +289,7 @@ struct TenantManagementWorkload : TestWorkload {
 			try {
 				if (operationType == OperationType::SPECIAL_KEYS) {
 					tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-					Key key = self->specialKeysTenantMapPrefix.withSuffix(tenant);
+					Key key = self->specialKeysTenantMapPrefix.withSuffix(beginTenant);
 					if (endTenant.present()) {
 						tr->clear(KeyRangeRef(key, self->specialKeysTenantMapPrefix.withSuffix(endTenant.get())));
 					} else {
@@ -298,15 +298,17 @@ struct TenantManagementWorkload : TestWorkload {
 					wait(tr->commit());
 				} else if (operationType == OperationType::MANAGEMENT_DATABASE) {
 					ASSERT(tenants.size() == 1);
-					for (auto tenant : tenants) {
-						wait(ManagementAPI::deleteTenant(cx.getReference(), tenant));
+					for (tenantIndex = 0; tenantIndex != tenants.size(); ++tenantIndex) {
+						wait(ManagementAPI::deleteTenant(cx.getReference(), tenants[tenantIndex]));
 					}
 				} else {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					for (auto tenant : tenants) {
-						wait(ManagementAPI::deleteTenantTransaction(tr, tenant));
+					std::vector<Future<Void>> deleteFutures;
+					for (tenantIndex = 0; tenantIndex != tenants.size(); ++tenantIndex) {
+						deleteFutures.push_back(ManagementAPI::deleteTenantTransaction(tr, tenants[tenantIndex]));
 					}
 
+					wait(waitForAll(deleteFutures));
 					wait(tr->commit());
 				}
 
@@ -330,7 +332,7 @@ struct TenantManagementWorkload : TestWorkload {
 					} else {
 						TraceEvent(SevError, "DeleteTenantFailure")
 						    .error(e)
-						    .detail("TenantName", tenant)
+						    .detail("TenantName", beginTenant)
 						    .detail("EndTenant", endTenant);
 					}
 					return Void();
@@ -340,7 +342,7 @@ struct TenantManagementWorkload : TestWorkload {
 					} catch (Error& e) {
 						TraceEvent(SevError, "DeleteTenantFailure")
 						    .error(e)
-						    .detail("TenantName", tenant)
+						    .detail("TenantName", beginTenant)
 						    .detail("EndTenant", endTenant);
 						return Void();
 					}

@@ -44,7 +44,18 @@ struct BlobWorkerInterface {
 	BlobWorkerInterface() {}
 	explicit BlobWorkerInterface(const struct LocalityData& l, UID id) : locality(l), myId(id) {}
 
-	void initEndpoints() {}
+	void initEndpoints() {
+		// TODO: specify endpoint priorities?
+		std::vector<std::pair<FlowReceiver*, TaskPriority>> streams;
+		streams.push_back(waitFailure.getReceiver());
+		streams.push_back(blobGranuleFileRequest.getReceiver());
+		streams.push_back(assignBlobRangeRequest.getReceiver());
+		streams.push_back(revokeBlobRangeRequest.getReceiver());
+		streams.push_back(granuleAssignmentsRequest.getReceiver());
+		streams.push_back(granuleStatusStreamRequest.getReceiver());
+		streams.push_back(haltBlobWorker.getReceiver());
+		FlowTransport::transport().addEndpoints(streams);
+	}
 	UID id() const { return myId; }
 	NetworkAddress address() const { return blobGranuleFileRequest.getEndpoint().getPrimaryAddress(); }
 	NetworkAddress stableAddress() const { return blobGranuleFileRequest.getEndpoint().getStableAddress(); }
@@ -54,16 +65,22 @@ struct BlobWorkerInterface {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar,
-		           waitFailure,
-		           blobGranuleFileRequest,
-		           assignBlobRangeRequest,
-		           revokeBlobRangeRequest,
-		           granuleAssignmentsRequest,
-		           granuleStatusStreamRequest,
-		           haltBlobWorker,
-		           locality,
-		           myId);
+		// use adjusted endpoints
+		serializer(ar, myId, locality, waitFailure);
+		if (Archive::isDeserializing) {
+			blobGranuleFileRequest =
+			    RequestStream<struct BlobGranuleFileRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(1));
+			assignBlobRangeRequest =
+			    RequestStream<struct AssignBlobRangeRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(2));
+			revokeBlobRangeRequest =
+			    RequestStream<struct RevokeBlobRangeRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(3));
+			granuleAssignmentsRequest =
+			    RequestStream<struct GetGranuleAssignmentsRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(4));
+			granuleStatusStreamRequest =
+			    RequestStream<struct GranuleStatusStreamRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(5));
+			haltBlobWorker =
+			    RequestStream<struct HaltBlobWorkerRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(6));
+		}
 	}
 };
 
