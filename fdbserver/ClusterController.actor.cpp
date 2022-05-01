@@ -153,8 +153,8 @@ struct ConsistencyScanSingleton : Singleton<ConsistencyScanInterface> {
 	}
 	void halt(ClusterControllerData* cc, Optional<Standalone<StringRef>> pid) const {
 		if (interface.present()) {
-			cc->id_worker[pid].haltConsistencyScan = brokenPromiseToNever(
-			    interface.get().haltConsistencyScan.getReply(HaltConsistencyScanRequest(cc->id)));
+			cc->id_worker[pid].haltConsistencyScan =
+			    brokenPromiseToNever(interface.get().haltConsistencyScan.getReply(HaltConsistencyScanRequest(cc->id)));
 		}
 	}
 	void recruit(ClusterControllerData* cc) const {
@@ -682,7 +682,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	    self, newDDWorker, ddSingleton, bestFitnessForDD, self->recruitingDistributorID);
 
 	bool csHealthy = isHealthySingleton<ConsistencyScanInterface>(
-		self, newCSWorker, csSingleton, bestFitnessForCS, self->recruitingConsistencyScanID);
+	    self, newCSWorker, csSingleton, bestFitnessForCS, self->recruitingConsistencyScanID);
 
 	bool bmHealthy = true;
 	if (self->db.blobGranulesEnabled.get()) {
@@ -2200,7 +2200,6 @@ ACTOR Future<Void> startConsistencyScan(ClusterControllerData* self) {
 			                                                                self->db.config,
 			                                                                id_used);
 
-
 			InitializeConsistencyScanRequest req(deterministicRandom()->randomUniqueID());
 			state WorkerDetails worker = csWorker.worker;
 			if (self->onMasterIsBetter(worker, ProcessClass::ConsistencyScan)) {
@@ -2226,8 +2225,7 @@ ACTOR Future<Void> startConsistencyScan(ClusterControllerData* self) {
 					TraceEvent("CCHaltConsistencyScanAfterRecruit", self->id)
 					    .detail("CKID", consistencyScan.get().id())
 					    .detail("DcID", printable(self->clusterControllerDcId));
-					ConsistencyScanSingleton(consistencyScan)
-					    .halt(self, consistencyScan.get().locality.processId());
+					ConsistencyScanSingleton(consistencyScan).halt(self, consistencyScan.get().locality.processId());
 				}
 				if (!consistencyScan.present() || consistencyScan.get().id() != interf.get().id()) {
 					self->db.setConsistencyScan(interf.get());
@@ -2256,16 +2254,16 @@ ACTOR Future<Void> monitorConsistencyScan(ClusterControllerData* self) {
 	TraceEvent("CCMonitorConsistencyScan", self->id).log();
 	loop {
 		if (self->db.serverInfo->get().consistencyScan.present() && !self->recruitConsistencyScan.get()) {
-			state Future<Void> wfClient = waitFailureClient(self->db.serverInfo->get().consistencyScan.get().waitFailure,
-															SERVER_KNOBS->CONSISTENCYSCAN_FAILURE_TIME);
+			state Future<Void> wfClient =
+			    waitFailureClient(self->db.serverInfo->get().consistencyScan.get().waitFailure,
+			                      SERVER_KNOBS->CONSISTENCYSCAN_FAILURE_TIME);
 			choose {
 				when(wait(wfClient)) {
 					TraceEvent("CCMonitorConsistencyScanDied", self->id)
-						.detail("CKID", self->db.serverInfo->get().consistencyScan.get().id());
+					    .detail("CKID", self->db.serverInfo->get().consistencyScan.get().id());
 					self->db.clearInterf(ProcessClass::ConsistencyScanClass);
 				}
-				when(wait(self->recruitConsistencyScan.onChange())) {
-				}
+				when(wait(self->recruitConsistencyScan.onChange())) {}
 			}
 		} else {
 			TraceEvent("CCMonitorConsistencyScanStarting", self->id).log();

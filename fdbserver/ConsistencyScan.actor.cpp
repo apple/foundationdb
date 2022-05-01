@@ -828,10 +828,9 @@ ACTOR Future<bool> checkDataConsistency(Database cx,
 						}
 
 						break;
-					} else if (estimatedBytes[j] < 0 &&
-							   ((g_network->isSimulated() &&
-								 g_simulator.tssMode <= ISimulator::TSSMode::EnabledNormal) ||
-								!storageServerInterfaces[j].isTss())) {
+					} else if (estimatedBytes[j] < 0 && ((g_network->isSimulated() &&
+					                                      g_simulator.tssMode <= ISimulator::TSSMode::EnabledNormal) ||
+					                                     !storageServerInterfaces[j].isTss())) {
 						// Ignore a non-responding TSS outside of simulation, or if tss fault injection is enabled
 						break;
 					}
