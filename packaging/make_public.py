@@ -30,18 +30,18 @@ import subprocess
 import os
 
 
-def invalidClusterFile(clusterFile):
-    print("ERROR: '%s' is not a valid cluster file" % clusterFile)
+def invalid_cluster_file(cluster_file):
+    print("ERROR: '%s' is not a valid cluster file" % cluster_file)
     sys.exit(1)
 
 
-def getOrValidateAddress(address):
+def get_or_validate_address(address):
     if address is None:
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             s.connect(("www.foundationdb.org", 80))
             return s.getsockname()[0]
-        except Exception as e:
+        except Exception:
             print("ERROR: Could not determine an address")
             exit(1)
     else:
@@ -58,30 +58,30 @@ def getOrValidateAddress(address):
                 exit(1)
 
 
-def makePublic(clusterFile, newAddress, makeTLS):
-    newAddress = getOrValidateAddress(newAddress)
+def make_public(cluster_file, new_address, make_tls):
+    new_address = get_or_validate_address(new_address)
 
-    f = open(clusterFile, "r")
-    clusterStr = None
+    f = open(cluster_file, "r")
+    cluster_str = None
     for line in f:
         line = line.strip()
         if len(line) > 0:
-            if clusterStr is not None:
-                invalidClusterFile(clusterFile)
+            if cluster_str is not None:
+                invalid_cluster_file(cluster_file)
                 return
-            clusterStr = line
+            cluster_str = line
 
-    if clusterStr is None:
-        invalidClusterFile(clusterFile)
+    if cluster_str is None:
+        invalid_cluster_file(cluster_file)
 
     if not re.match(
         "^[a-zA-Z0-9_]*:[a-zA-Z0-9]*@([0-9\\.]*:[0-9]*(:tls)?,)*[0-9\\.]*:[0-9]*(:tls)?$",
-        clusterStr,
+        cluster_str,
     ):
-        invalidClusterFile(clusterFile)
+        invalid_cluster_file(cluster_file)
     if not re.match(
         "^.*@(127\\.0\\.0\\.1:[0-9]*(:tls)?,)*127\\.0\\.0\\.1:[0-9]*(:tls)?$",
-        clusterStr,
+        cluster_str,
     ):
         print(
             "ERROR: Cannot modify cluster file whose coordinators are not at address 127.0.0.1"
@@ -90,20 +90,20 @@ def makePublic(clusterFile, newAddress, makeTLS):
 
     f.close()
 
-    f = open(clusterFile, "w")
-    clusterStr = clusterStr.replace("127.0.0.1", newAddress)
-    if makeTLS:
-        clusterStr = re.sub("([0-9]),", "\\1:tls,", clusterStr)
-        if not clusterStr.endswith(":tls"):
-            clusterStr += ":tls"
+    f = open(cluster_file, "w")
+    cluster_str = cluster_str.replace("127.0.0.1", new_address)
+    if make_tls:
+        cluster_str = re.sub("([0-9]),", "\\1:tls,", cluster_str)
+        if not cluster_str.endswith(":tls"):
+            cluster_str += ":tls"
 
-    f.write(clusterStr + "\n")
+    f.write(cluster_str + "\n")
     f.close()
 
-    return newAddress, clusterStr.count(":tls") != 0
+    return new_address, cluster_str.count(":tls") != 0
 
 
-def restartServer():
+def restart_server():
     subprocess.call(["service", "foundationdb", "restart"])
 
 
@@ -143,8 +143,8 @@ if __name__ == "__main__":
         print("ERROR: this script must be run as root")
         sys.exit(1)
 
-    address, hasTLS = makePublic(args.clusterFile, args.address, args.tls)
-    restartServer()
+    address, hasTLS = make_public(args.clusterFile, args.address, args.tls)
+    restart_server()
 
     print(
         "%s is now using address %s%s"

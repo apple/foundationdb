@@ -22,24 +22,20 @@
 import argparse
 import hashlib
 import ipaddress
-import logging
 import json
+import logging
 import os
-import re
 import shutil
 import socket
 import ssl
-import stat
-import time
-import traceback
 import sys
 import tempfile
+import time
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 
-from http.server import HTTPServer, ThreadingHTTPServer, BaseHTTPRequestHandler
-
-from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
+from watchdog.observers import Observer
 
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
@@ -60,7 +56,7 @@ class Config(object):
         parser.add_argument("--bind-address", help="IP and port to bind on")
         parser.add_argument(
             "--tls",
-            help=("This flag enables TLS for incoming connections"),
+            help="This flag enables TLS for incoming connections",
             action="store_true",
         )
         parser.add_argument(
@@ -105,7 +101,7 @@ class Config(object):
         )
         parser.add_argument(
             "--input-dir",
-            help=("The directory containing the input files the config map."),
+            help="The directory containing the input files the config map.",
             default="/var/input-files",
         )
         parser.add_argument(
@@ -127,26 +123,26 @@ class Config(object):
         )
         parser.add_argument(
             "--copy-file",
-            help=("A file to copy from the config map to the output directory."),
+            help="A file to copy from the config map to the output directory.",
             action="append",
         )
         parser.add_argument(
             "--copy-binary",
-            help=("A binary to copy from the to the output directory."),
+            help="A binary to copy from the to the output directory.",
             action="append",
         )
         parser.add_argument(
             "--copy-library",
-            help=("A version of the client library to copy to the output directory."),
+            help="A version of the client library to copy to the output directory.",
             action="append",
         )
         parser.add_argument(
             "--input-monitor-conf",
-            help=("The name of a monitor conf template in the input files"),
+            help="The name of a monitor conf template in the input files",
         )
         parser.add_argument(
             "--main-container-version",
-            help=("The version of the main foundationdb container in the pod"),
+            help="The version of the main foundationdb container in the pod",
         )
         parser.add_argument(
             "--public-ip-family",
@@ -563,7 +559,7 @@ class Server(BaseHTTPRequestHandler):
             raise e
         except RequestException as e:
             self.send_error(400, e.message)
-        except e:
+        except Exception:
             log.error("Error processing request", exc_info=True)
             self.send_error(500)
             self.end_headers()
