@@ -65,7 +65,6 @@ set(FDBCLIENT_SRCS
   GlobalConfig.actor.cpp
   GrvProxyInterface.h
   HighContentionPrefixAllocator.actor.h
-  HTTP.actor.cpp
   IClientApi.h
   IConfigTransaction.cpp
   IConfigTransaction.h
