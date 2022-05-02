@@ -867,7 +867,6 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		return true;
 	}
 
-	// Gets a version at which to read from the storage servers
 	// Comparison function used to compare map elements by value
 	template <class K, class T>
 	static bool compareByValue(std::pair<K, T> a, std::pair<K, T> b) {

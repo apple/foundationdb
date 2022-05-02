@@ -114,7 +114,7 @@ Standalone<KeyPairRef> generateEcdsaKeyPair() {
 
 Standalone<SignedAuthTokenRef> signToken(AuthTokenRef token, StringRef keyName, StringRef privateKeyDer) {
 	auto ret = Standalone<SignedAuthTokenRef>{};
-	auto arena = ret.arena();
+	auto& arena = ret.arena();
 	auto writer = ObjectWriter([&arena](size_t len) { return new (arena) uint8_t[len]; }, IncludeVersion());
 	writer.serialize(token);
 	auto tokenStr = writer.toStringRef();
@@ -181,7 +181,7 @@ TEST_CASE("/fdbrpc/TokenSign") {
 	for (auto i = 0; i < numIters; i++) {
 		auto keyPair = generateEcdsaKeyPair();
 		auto token = Standalone<AuthTokenRef>{};
-		auto arena = token.arena();
+		auto& arena = token.arena();
 		auto& rng = *deterministicRandom();
 		token.expiresAt = timer_monotonic() * (0.5 + rng.random01());
 		if (auto setIp = rng.randomInt(0, 3)) {

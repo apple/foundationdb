@@ -141,7 +141,7 @@ struct WatchParameters : public ReferenceCounted<WatchParameters> {
 
 	const Version version;
 	const TagSet tags;
-	const SpanID spanID;
+	const SpanContext spanContext;
 	const TaskPriority taskID;
 	const Optional<UID> debugID;
 	const UseProvisionalProxies useProvisionalProxies;
@@ -151,11 +151,11 @@ struct WatchParameters : public ReferenceCounted<WatchParameters> {
 	                Optional<Value> value,
 	                Version version,
 	                TagSet tags,
-	                SpanID spanID,
+	                SpanContext spanContext,
 	                TaskPriority taskID,
 	                Optional<UID> debugID,
 	                UseProvisionalProxies useProvisionalProxies)
-	  : tenant(tenant), key(key), value(value), version(version), tags(tags), spanID(spanID), taskID(taskID),
+	  : tenant(tenant), key(key), value(value), version(version), tags(tags), spanContext(spanContext), taskID(taskID),
 	    debugID(debugID), useProvisionalProxies(useProvisionalProxies) {}
 };
 
@@ -416,12 +416,12 @@ public:
 	Optional<TenantName> defaultTenant;
 
 	struct VersionRequest {
-		SpanID spanContext;
+		SpanContext spanContext;
 		Promise<GetReadVersionReply> reply;
 		TagSet tags;
 		Optional<UID> debugID;
 
-		VersionRequest(SpanID spanContext, TagSet tags = TagSet(), Optional<UID> debugID = Optional<UID>())
+		VersionRequest(SpanContext spanContext, TagSet tags = TagSet(), Optional<UID> debugID = Optional<UID>())
 		  : spanContext(spanContext), tags(tags), debugID(debugID) {}
 	};
 

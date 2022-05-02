@@ -38,10 +38,10 @@ T waitNext(const FutureStream<T>&) = delete;
 #ifndef POST_ACTOR_COMPILER
 
 template <typename T>
-struct Future;
-struct Never;
+class Future;
+class Never;
 template <typename T>
-struct FutureStream;
+class FutureStream;
 
 // These are for intellisense to do proper type inferring, etc. They are no included at build time.
 #ifndef NO_INTELLISENSE
