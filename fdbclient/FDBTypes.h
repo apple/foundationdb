@@ -1459,11 +1459,13 @@ struct StorageMetadataType {
 
 	bool operator<(const StorageMetadataType& b) const {
 		if (wrongConfigured == b.wrongConfigured) {
-			// the younger, the less
-			return createdTime > b.createdTime;
+			// the older SS has smaller createdTime
+			return createdTime < b.createdTime;
 		}
-		return wrongConfigured < b.wrongConfigured;
+		return wrongConfigured > b.wrongConfigured;
 	}
+
+	bool operator>(const StorageMetadataType& b) const { return b < *this; }
 
 	// To change this serialization, ProtocolVersion::StorageMetadata must be updated, and downgrades need
 	// to be considered

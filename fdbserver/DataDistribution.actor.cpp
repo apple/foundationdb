@@ -1344,3 +1344,20 @@ TEST_CASE("/DataDistribution/WaitForMost") {
 	}
 	return Void();
 }
+
+TEST_CASE("/DataDistributor/StorageWiggler/Order") {
+	StorageWiggler wiggler(nullptr);
+	wiggler.addServer(UID(1, 0), StorageMetadataType(1, KeyValueStoreType::SSD_BTREE_V2));
+	wiggler.addServer(UID(2, 0), StorageMetadataType(2, KeyValueStoreType::MEMORY, true));
+	wiggler.addServer(UID(3, 0), StorageMetadataType(3, KeyValueStoreType::SSD_ROCKSDB_V1, true));
+	wiggler.addServer(UID(4, 0), StorageMetadataType(4, KeyValueStoreType::SSD_BTREE_V2));
+
+	std::vector<UID> correctOrder{ UID(2, 0), UID(3, 0), UID(1, 0), UID(4, 0) };
+	for (int i = 0; i < correctOrder.size(); ++i) {
+		auto id = wiggler.getNextServerId();
+		std::cout << "Get " << id.get().shortString() << "\n";
+		ASSERT(id == correctOrder[i]);
+	}
+	ASSERT(!wiggler.getNextServerId().present());
+	return Void();
+}
