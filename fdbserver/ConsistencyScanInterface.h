@@ -70,7 +70,7 @@ struct ConsistencyScanInfo {
 	bool consistency_scan_enabled = false;
 	bool restart = false;
 	int64_t max_rate = 0;
-	int64_t target_interval = 0;
+	int64_t target_interval = CLIENT_KNOBS->CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME;
 	int64_t bytes_read_prev_round = 0;
 	KeyRef progress_key = KeyRef();
 
@@ -147,7 +147,7 @@ struct ConsistencyScanInfo {
 	}
 
 	std::string toString() const {
-		return format("consistency_scan_enabled = %d, restart =  %d, max_rate = %lf, target_interval = %lf",
+		return format("consistency_scan_enabled = %d, restart =  %d, max_rate = %ld, target_interval = %ld",
 		              consistency_scan_enabled,
 		              restart,
 		              max_rate,

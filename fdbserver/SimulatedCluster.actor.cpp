@@ -846,28 +846,6 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 				    .detail("Folder", myFolders[i]);
 			}
 
-			// set up consistency scan config
-			// TODO: check if this is the right place for it
-			// std::string p = joinPath(myFolders[0], "fdb.cluster");
-			// Reference<IClusterConnectionRecord> connRecord(
-			//	useSeedFile ? new ClusterConnectionFile(p, connStr.toString())
-			//	: new ClusterConnectionFile(p));
-			// ConsistencyScanInfo ckInfo = ConsistencyScanInfo();
-			// if (deterministicRandom()->random01() < 0.5) {
-			//	TraceEvent("SimulatedConsistencyScanConfigRandom1").detail("ConsistencyScanEnabled", 0);
-			//	ckInfo.consistency_scan_enabled = false;
-			//} else {
-			//	TraceEvent("SimulatedConsistencyScanConfigRandom2").detail("ConsistencyScanEnabled", 1);
-			//	ckInfo.consistency_scan_enabled = true;
-			//	ckInfo.restart = false;
-			//	ckInfo.max_rate = 50e6;
-			//	ckInfo.target_interval = 24*7*60*60;
-			//}
-			// Database cx = Database::createDatabase(connRecord, -1);
-			// state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
-			// wait(ConsistencyScanInfo::setInfo(tr, ckInfo));
-			// wait(tr->commit());
-
 			TEST(bootCount >= 1); // Simulated machine rebooted
 			TEST(bootCount >= 2); // Simulated machine rebooted twice
 			TEST(bootCount >= 3); // Simulated machine rebooted three times

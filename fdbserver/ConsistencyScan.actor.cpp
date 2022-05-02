@@ -37,6 +37,11 @@
 #include "flow/DeterministicRandom.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+// Core of the data consistency checking (checkDataConsistency) and many of the supporting functions are shared between
+// the ConsistencyScan role and the ConsistencyCheck workload. They are currently part of this file. ConsistencyScan
+// role's main goal is to simply validate data across all shards, while ConsistencyCheck workload does more than that.
+// Potentially a re-factor candidate!
+
 struct ConsistencyScanData {
 	UID id;
 	Database db;
@@ -44,6 +49,7 @@ struct ConsistencyScanData {
 	DatabaseConfiguration configuration;
 	PromiseStream<Future<Void>> addActor;
 
+	// TODO: Consider holding a ConsistencyScanInfo object to use as its state, as many of the members are the same.
 	int64_t restart = 1;
 	int64_t maxRate = 0;
 	int64_t targetInterval = 0;
@@ -332,6 +338,7 @@ ACTOR Future<int64_t> getDatabaseSize(Database cx) {
 
 // Checks that the data in each shard is the same on each storage server that it resides on.  Also performs some
 // sanity checks on the sizes of shards and storage servers. Returns false if there is a failure
+// TODO: Future optimization: Use streaming reads
 ACTOR Future<bool> checkDataConsistency(Database cx,
                                         VectorRef<KeyValueRef> keyLocations,
                                         DatabaseConfiguration configuration,
@@ -717,11 +724,36 @@ ACTOR Future<bool> checkDataConsistency(Database cx,
 					}
 
 					if (firstValidServer >= 0) {
-						VectorRef<KeyValueRef> data = keyValueFutures[firstValidServer].get().get().data;
+						state VectorRef<KeyValueRef> data = keyValueFutures[firstValidServer].get().get().data;
 
-						// Remember the last key of the range we just verified
-						if (data.size())
+						// Persist the last key of the range we just verified as the progressKey
+						if (data.size()) {
+							state Reference<ReadYourWritesTransaction> csInfoTr =
+							    makeReference<ReadYourWritesTransaction>(cx);
 							progressKey = data[data.size() - 1].key;
+							loop {
+								try {
+									csInfoTr->reset();
+									csInfoTr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
+									state Optional<Value> val = wait(ConsistencyScanInfo::getInfo(csInfoTr));
+									wait(csInfoTr->commit());
+									if (val.present()) {
+										ConsistencyScanInfo consistencyScanInfo =
+										    ObjectReader::fromStringRef<ConsistencyScanInfo>(val.get(),
+										                                                     IncludeVersion());
+										consistencyScanInfo.progress_key = progressKey;
+										csInfoTr->reset();
+										csInfoTr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+										wait(ConsistencyScanInfo::setInfo(csInfoTr, consistencyScanInfo));
+										wait(csInfoTr->commit());
+									}
+									break;
+								} catch (Error& e) {
+									wait(csInfoTr->onError(e));
+								}
+							}
+						}
 
 						// Calculate the size of the shard, the variance of the shard size estimate, and the correct
 						// shard size estimate
