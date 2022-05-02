@@ -279,6 +279,12 @@ struct UnauthorizedEndpointReceiver final : NetworkMessageReceiver {
 	bool isPublic() const override { return true; }
 };
 
+// NetworkAddressCachedString retains a cached Standalone<StringRef> of
+// a NetworkAddressList.address.toString() value. This cached value is useful
+// for features in the hot path (i.e. Tracing), which need the String formatted value
+// frequently and do not wish to pay the formatting cost. If the underlying NetworkAddressList
+// needs to change, do not attempt to update it directly, use the setNetworkAddress API as it
+// will ensure the new toString() cached value is updated.
 class NetworkAddressCachedString {
 public:
 	NetworkAddressCachedString() { setAddressList(NetworkAddressList()); }
