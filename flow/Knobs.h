@@ -271,6 +271,7 @@ public:
 	double MAX_BUGGIFIED_DELAY;
 	int SIM_CONNECT_ERROR_MODE;
 	double SIM_SPEEDUP_AFTER_SECONDS;
+	int MAX_TRACE_LINES;
 
 	// Tracefiles
 	int ZERO_LENGTH_FILE_PAD;
@@ -342,6 +343,14 @@ public:
 	// Encryption
 	int64_t ENCRYPT_CIPHER_KEY_CACHE_TTL;
 	int64_t ENCRYPT_KEY_REFRESH_INTERVAL;
+
+	// RESTClient
+	int RESTCLIENT_MAX_CONNECTIONPOOL_SIZE;
+	int RESTCLIENT_CONNECT_TRIES;
+	int RESTCLIENT_CONNECT_TIMEOUT;
+	int RESTCLIENT_MAX_CONNECTION_LIFE;
+	int RESTCLIENT_REQUEST_TRIES;
+	int RESTCLIENT_REQUEST_TIMEOUT_SEC;
 
 	FlowKnobs(class Randomize, class IsSimulated);
 	void initialize(class Randomize, class IsSimulated);

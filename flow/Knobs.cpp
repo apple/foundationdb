@@ -217,6 +217,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( MAX_TRACE_EVENT_LENGTH,                             4000 ); // If the value of this is changed, the corresponding default in Trace.cpp should be changed as well
 	init( ALLOCATION_TRACING_ENABLED,                         true );
 	init( SIM_SPEEDUP_AFTER_SECONDS,                           450 );
+	init( MAX_TRACE_LINES,                               1'000'000 );
 	init( CODE_COV_TRACE_EVENT_SEVERITY,                        10 ); // Code coverage TraceEvent severity level
 
 	//TDMetrics
@@ -275,6 +276,14 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	if ( randomize && BUGGIFY) { ENCRYPT_CIPHER_KEY_CACHE_TTL = deterministicRandom()->randomInt(50, 100); }
 	init( ENCRYPT_KEY_REFRESH_INTERVAL,   isSimulated ? 60 : 8 * 60 );
 	if ( randomize && BUGGIFY) { ENCRYPT_KEY_REFRESH_INTERVAL = deterministicRandom()->randomInt(20, 40); }
+
+	// REST Client
+	init( RESTCLIENT_MAX_CONNECTIONPOOL_SIZE,                   10 );
+	init( RESTCLIENT_CONNECT_TRIES,                             10 );
+	init( RESTCLIENT_CONNECT_TIMEOUT,                           10 );
+	init( RESTCLIENT_MAX_CONNECTION_LIFE,                      120 );
+	init( RESTCLIENT_REQUEST_TRIES,                             10 );
+	init( RESTCLIENT_REQUEST_TIMEOUT_SEC,                      120 );
 }
 // clang-format on
 

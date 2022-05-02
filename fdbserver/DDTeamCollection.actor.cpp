@@ -718,18 +718,19 @@ public:
 				bool recheck = !healthy && (lastReady != self->initialFailureReactionDelay.isReady() ||
 				                            (lastZeroHealthy && !self->zeroHealthyTeams->get()) || containsFailed);
 
-				// TraceEvent("TeamHealthChangeDetected", self->distributorId)
-				//     .detail("Team", team->getDesc())
-				//     .detail("ServersLeft", serversLeft)
-				//     .detail("LastServersLeft", lastServersLeft)
-				//     .detail("AnyUndesired", anyUndesired)
-				//     .detail("LastAnyUndesired", lastAnyUndesired)
-				//     .detail("AnyWrongConfiguration", anyWrongConfiguration)
-				//     .detail("LastWrongConfiguration", lastWrongConfiguration)
-				//     .detail("Recheck", recheck)
-				//     .detail("BadTeam", badTeam)
-				//     .detail("LastZeroHealthy", lastZeroHealthy)
-				//     .detail("ZeroHealthyTeam", self->zeroHealthyTeams->get());
+				//TraceEvent("TeamHealthChangeDetected", self->distributorId)
+				//    .detail("Team", team->getDesc())
+				//    .detail("ServersLeft", serversLeft)
+				//    .detail("LastServersLeft", lastServersLeft)
+				//    .detail("AnyUndesired", anyUndesired)
+				//    .detail("LastAnyUndesired", lastAnyUndesired)
+				//    .detail("AnyWrongConfiguration", anyWrongConfiguration)
+				//    .detail("LastWrongConfiguration", lastWrongConfiguration)
+				//    .detail("ContainsWigglingServer", anyWigglingServer)
+				//    .detail("Recheck", recheck)
+				//    .detail("BadTeam", badTeam)
+				//    .detail("LastZeroHealthy", lastZeroHealthy)
+				//    .detail("ZeroHealthyTeam", self->zeroHealthyTeams->get());
 
 				lastReady = self->initialFailureReactionDelay.isReady();
 				lastZeroHealthy = self->zeroHealthyTeams->get();
@@ -1101,9 +1102,8 @@ public:
 				if (worstStatus == DDTeamCollection::Status::WIGGLING && invalidWiggleServer(worstAddr, self, server)) {
 					TraceEvent(SevInfo, "InvalidWiggleServer", self->distributorId)
 					    .detail("Address", worstAddr.toString())
-					    .detail("ProcessId", server->getLastKnownInterface().locality.processId())
-					    .detail("WigglingId", self->wigglingId.present());
-					self->excludedServers.set(worstAddr, DDTeamCollection::Status::NONE);
+					    .detail("ServerId", server->getId())
+					    .detail("WigglingId", self->wigglingId.present() ? self->wigglingId.get().toString() : "");
 					worstStatus = DDTeamCollection::Status::NONE;
 				}
 				otherChanges.push_back(self->excludedServers.onChange(worstAddr));
@@ -1125,10 +1125,9 @@ public:
 					if (testStatus == DDTeamCollection::Status::WIGGLING &&
 					    invalidWiggleServer(testAddr, self, server)) {
 						TraceEvent(SevInfo, "InvalidWiggleServer", self->distributorId)
-						    .detail("Address", testAddr.toString())
-						    .detail("ProcessId", server->getLastKnownInterface().locality.processId())
-						    .detail("ValidWigglingId", self->wigglingId.present());
-						self->excludedServers.set(testAddr, DDTeamCollection::Status::NONE);
+						    .detail("Address", worstAddr.toString())
+						    .detail("ServerId", server->getId())
+						    .detail("WigglingId", self->wigglingId.present() ? self->wigglingId.get().toString() : "");
 						testStatus = DDTeamCollection::Status::NONE;
 					}
 
@@ -2036,7 +2035,7 @@ public:
 					           "PerpetualStorageWigglePause",
 					           self->distributorId)
 					    .detail("Primary", self->primary)
-					    .detail("ProcessId", id)
+					    .detail("ServerId", id)
 					    .detail("BestTeamKeepStuckCount", self->bestTeamKeepStuckCount)
 					    .detail("ExtraHealthyTeamCount", extraTeamCount)
 					    .detail("HealthyTeamCount", self->healthyTeamCount);
@@ -2049,7 +2048,7 @@ public:
 							moveFinishFuture = fv;
 							TraceEvent("PerpetualStorageWiggleStart", self->distributorId)
 							    .detail("Primary", self->primary)
-							    .detail("ProcessId", id)
+							    .detail("ServerId", id)
 							    .detail("ExtraHealthyTeamCount", extraTeamCount)
 							    .detail("HealthyTeamCount", self->healthyTeamCount);
 						}
@@ -2075,7 +2074,7 @@ public:
 					self->includeStorageServersForWiggle();
 					TraceEvent("PerpetualStorageWiggleFinish", self->distributorId)
 					    .detail("Primary", self->primary)
-					    .detail("ProcessId", self->wigglingId.get());
+					    .detail("ServerId", self->wigglingId.get());
 
 					wait(self->eraseStorageWiggleMap(&metadataMap, self->wigglingId.get()) &&
 					     self->storageWiggler->finishWiggle());
@@ -2096,7 +2095,7 @@ public:
 			self->includeStorageServersForWiggle();
 			TraceEvent("PerpetualStorageWiggleExitingPause", self->distributorId)
 			    .detail("Primary", self->primary)
-			    .detail("ProcessId", self->wigglingId.get());
+			    .detail("ServerId", self->wigglingId.get());
 			self->wigglingId.reset();
 		}
 
@@ -4754,6 +4753,7 @@ bool DDTeamCollection::removeTeam(Reference<TCTeamInfo> team) {
 
 	ASSERT_WE_THINK(foundInMachineTeam);
 	team->tracker.cancel();
+	team->setHealthy(false);
 	if (g_network->isSimulated()) {
 		// Update server team information for consistency check in simulation
 		traceTeamCollectionInfo();
