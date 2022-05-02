@@ -44,6 +44,8 @@
 #include "fdbclient/Tuple.h"
 
 #include "flow/config.h"
+#include "flow/DeterministicRandom.h"
+#include "flow/IRandom.h"
 
 #include "fdb_api.hpp"
 
@@ -2021,15 +2023,17 @@ TEST_CASE("fdb_transaction_add_conflict_range") {
 TEST_CASE("special-key-space valid transaction ID") {
 	auto value = get_value("\xff\xff/tracing/transaction_id", /* snapshot */ false, {});
 	REQUIRE(value.has_value());
-	uint64_t transaction_id = std::stoul(value.value());
-	CHECK(transaction_id > 0);
+	UID transaction_id = UID::fromString(value.value());
+	CHECK(transaction_id.first() > 0);
+	CHECK(transaction_id.second() > 0);
 }
 
 TEST_CASE("special-key-space custom transaction ID") {
 	fdb::Transaction tr(db);
 	fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, nullptr, 0));
 	while (1) {
-		tr.set("\xff\xff/tracing/transaction_id", std::to_string(ULONG_MAX));
+		UID randomTransactionID = UID(deterministicRandom()->randomUInt64(), deterministicRandom()->randomUInt64());
+		tr.set("\xff\xff/tracing/transaction_id", randomTransactionID.toString());
 		fdb::ValueFuture f1 = tr.get("\xff\xff/tracing/transaction_id",
 		                             /* snapshot */ false);
 
@@ -2046,8 +2050,8 @@ TEST_CASE("special-key-space custom transaction ID") {
 		fdb_check(f1.get(&out_present, (const uint8_t**)&val, &vallen));
 
 		REQUIRE(out_present);
-		uint64_t transaction_id = std::stoul(std::string(val, vallen));
-		CHECK(transaction_id == ULONG_MAX);
+		UID transaction_id = UID::fromString(val);
+		CHECK(transaction_id == randomTransactionID);
 		break;
 	}
 }
@@ -2074,8 +2078,9 @@ TEST_CASE("special-key-space set transaction ID after write") {
 		fdb_check(f1.get(&out_present, (const uint8_t**)&val, &vallen));
 
 		REQUIRE(out_present);
-		uint64_t transaction_id = std::stoul(std::string(val, vallen));
-		CHECK(transaction_id != 0);
+		UID transaction_id = UID::fromString(val);
+		CHECK(transaction_id.first() > 0);
+		CHECK(transaction_id.second() > 0);
 		break;
 	}
 }
@@ -2140,7 +2145,9 @@ TEST_CASE("special-key-space tracing get range") {
 		CHECK(out_count == 2);
 
 		CHECK(std::string((char*)out_kv[1].key, out_kv[1].key_length) == tracingBegin + "transaction_id");
-		CHECK(std::stoul(std::string((char*)out_kv[1].value, out_kv[1].value_length)) > 0);
+		UID transaction_id = UID::fromString(std::string((char*)out_kv[1].value));
+		CHECK(transaction_id.first() > 0);
+		CHECK(transaction_id.second() > 0);
 		break;
 	}
 }
