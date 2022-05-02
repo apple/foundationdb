@@ -430,6 +430,27 @@ TEST_CASE("/fdbclient/WriteMap/emptiness") {
 	return Void();
 }
 
+TEST_CASE("/fdbclient/WriteMap/VersionstampedvalueAfterSet") {
+	Arena arena = Arena();
+	SnapshotCache cache(&arena);
+	WriteMap writes = WriteMap(&arena);
+
+	ASSERT(writes.empty());
+	writes.mutate("apple"_sr, MutationRef::SetValue, "red"_sr, true);
+	writes.mutate("apple"_sr, MutationRef::SetVersionstampedValue, metadataVersionRequiredValue, true);
+
+	RYWIterator it(&cache, &writes);
+	it.bypassUnreadableProtection();
+	it.skip("apple"_sr);
+	ASSERT(it.is_unreadable());
+	ASSERT(it.is_kv());
+	const KeyValueRef* kv = it.kv(arena);
+	ASSERT(kv->key == "apple"_sr);
+	ASSERT(kv->value == metadataVersionRequiredValue);
+
+	return Void();
+}
+
 TEST_CASE("/fdbclient/WriteMap/clear") {
 	Arena arena = Arena();
 	WriteMap writes = WriteMap(&arena);
