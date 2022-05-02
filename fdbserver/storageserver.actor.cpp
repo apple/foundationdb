@@ -3455,7 +3455,8 @@ ACTOR Future<GetRangeReqAndResultRef> quickGetKeyValues(
 		tr.setVersion(version);
 		// TODO: is DefaultPromiseEndpoint the best priority for this?
 		tr.trState->taskID = TaskPriority::DefaultPromiseEndpoint;
-		Future<RangeResult> rangeResultFuture = tr.getRange(prefixRange(prefix), Snapshot::True);
+		Future<RangeResult> rangeResultFuture =
+		    tr.getRange(prefixRange(prefix), GetRangeLimits::ROW_LIMIT_UNLIMITED, Snapshot::True);
 		// TODO: async in case it needs to read from other servers.
 		RangeResult rangeResult = wait(rangeResultFuture);
 		a->dependsOn(rangeResult.arena());
@@ -5182,7 +5183,11 @@ ACTOR Future<Version> fetchChangeFeed(StorageServer* data,
 			++data->counters.kvSystemClearRanges;
 
 			changeFeedInfo->destroy(cleanupVersion);
-			data->changeFeedCleanupDurable[changeFeedInfo->id] = cleanupVersion;
+
+			if (data->uidChangeFeed.count(changeFeedInfo->id)) {
+				// only register range for cleanup if it has not been already cleaned up
+				data->changeFeedCleanupDurable[changeFeedInfo->id] = cleanupVersion;
+			}
 
 			for (auto& it : data->changeFeedRemovals) {
 				it.second.send(changeFeedInfo->id);
@@ -7747,6 +7752,7 @@ ACTOR Future<UID> getClusterId(StorageServer* self) {
 	state ReadYourWritesTransaction tr(self->cx);
 	loop {
 		try {
+			self->cx->invalidateCache(Key(), systemKeys);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			Optional<Value> clusterId = wait(tr.get(clusterIdKey));
