@@ -39,6 +39,9 @@
 #include "flow/flow.h"
 #include "flow/genericactors.actor.h"
 
+#if defined(HAVE_WOLFSSL)
+#include <wolfssl/options.h>
+#endif
 #include <openssl/aes.h>
 #include <openssl/engine.h>
 #include <openssl/evp.h>

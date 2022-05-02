@@ -1873,8 +1873,7 @@ ACTOR Future<Void> deleteCheckpointQ(StorageServer* self, Version version, Check
 
 	state Key persistCheckpointKey(persistCheckpointKeys.begin.toString() + checkpoint.checkpointID.toString());
 	state Key pendingCheckpointKey(persistPendingCheckpointKeys.begin.toString() + checkpoint.checkpointID.toString());
-	Version version = self->data().getLatestVersion();
-	auto& mLV = self->addVersionToMutationLog(version);
+	auto& mLV = self->addVersionToMutationLog(self->data().getLatestVersion());
 	self->addMutationToMutationLog(
 	    mLV, MutationRef(MutationRef::ClearRange, pendingCheckpointKey, keyAfter(pendingCheckpointKey)));
 	self->addMutationToMutationLog(
@@ -1885,6 +1884,7 @@ ACTOR Future<Void> deleteCheckpointQ(StorageServer* self, Version version, Check
 
 // Serves FetchCheckpointRequests.
 ACTOR Future<Void> fetchCheckpointQ(StorageServer* self, FetchCheckpointRequest req) {
+	state ICheckpointReader* reader = nullptr;
 	TraceEvent("ServeFetchCheckpointBegin", self->thisServerID)
 	    .detail("CheckpointID", req.checkpointID)
 	    .detail("Token", req.token);
@@ -1900,7 +1900,7 @@ ACTOR Future<Void> fetchCheckpointQ(StorageServer* self, FetchCheckpointRequest 
 	}
 
 	try {
-		state ICheckpointReader* reader = newCheckpointReader(it->second, deterministicRandom()->randomUniqueID());
+		reader = newCheckpointReader(it->second, deterministicRandom()->randomUniqueID());
 		wait(reader->init(req.token));
 
 		loop {
@@ -2630,14 +2630,13 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 					// throw to delete from changeFeedClientVersions if present
 					throw unknown_change_feed();
 				}
-				state Version emptyBefore = feed->second->emptyVersion;
 				choose {
 					when(wait(feed->second->newMutations.onTrigger())) {}
 					when(wait(req.end == std::numeric_limits<Version>::max() ? Future<Void>(Never())
 					                                                         : data->version.whenAtLeast(req.end))) {}
 				}
-				auto feed = data->uidChangeFeed.find(req.rangeID);
-				if (feed == data->uidChangeFeed.end() || feed->second->removing) {
+				auto feedItr = data->uidChangeFeed.find(req.rangeID);
+				if (feedItr == data->uidChangeFeed.end() || feedItr->second->removing) {
 					req.reply.sendError(unknown_change_feed());
 					// throw to delete from changeFeedClientVersions if present
 					throw unknown_change_feed();
@@ -3455,7 +3454,8 @@ ACTOR Future<GetRangeReqAndResultRef> quickGetKeyValues(
 		tr.setVersion(version);
 		// TODO: is DefaultPromiseEndpoint the best priority for this?
 		tr.trState->taskID = TaskPriority::DefaultPromiseEndpoint;
-		Future<RangeResult> rangeResultFuture = tr.getRange(prefixRange(prefix), Snapshot::True);
+		Future<RangeResult> rangeResultFuture =
+		    tr.getRange(prefixRange(prefix), GetRangeLimits::ROW_LIMIT_UNLIMITED, Snapshot::True);
 		// TODO: async in case it needs to read from other servers.
 		RangeResult rangeResult = wait(rangeResultFuture);
 		a->dependsOn(rangeResult.arena());
@@ -5182,7 +5182,11 @@ ACTOR Future<Version> fetchChangeFeed(StorageServer* data,
 			++data->counters.kvSystemClearRanges;
 
 			changeFeedInfo->destroy(cleanupVersion);
-			data->changeFeedCleanupDurable[changeFeedInfo->id] = cleanupVersion;
+
+			if (data->uidChangeFeed.count(changeFeedInfo->id)) {
+				// only register range for cleanup if it has not been already cleaned up
+				data->changeFeedCleanupDurable[changeFeedInfo->id] = cleanupVersion;
+			}
 
 			for (auto& it : data->changeFeedRemovals) {
 				it.second.send(changeFeedInfo->id);
@@ -5589,7 +5593,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		// Get the history
 		state int debug_getRangeRetries = 0;
 		state int debug_nextRetryToLog = 1;
-		state Error lastError();
+		state Error lastError;
 
 		// FIXME: The client cache does not notice when servers are added to a team. To read from a local storage server
 		// we must refresh the cache manually.
@@ -7747,6 +7751,7 @@ ACTOR Future<UID> getClusterId(StorageServer* self) {
 	state ReadYourWritesTransaction tr(self->cx);
 	loop {
 		try {
+			self->cx->invalidateCache(Key(), systemKeys);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			Optional<Value> clusterId = wait(tr.get(clusterIdKey));

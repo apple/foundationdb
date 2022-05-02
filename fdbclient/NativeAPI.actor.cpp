@@ -6927,11 +6927,18 @@ Future<Standalone<StringRef>> Transaction::getVersionstamp() {
 }
 
 // Gets the protocol version reported by a coordinator via the protocol info interface
-ACTOR Future<ProtocolVersion> getCoordinatorProtocol(NetworkAddressList coordinatorAddresses) {
-	RequestStream<ProtocolInfoRequest> requestStream{ Endpoint::wellKnown({ coordinatorAddresses },
-		                                                                  WLTOKEN_PROTOCOL_INFO) };
-	ProtocolInfoReply reply = wait(retryBrokenPromise(requestStream, ProtocolInfoRequest{}));
-
+ACTOR Future<ProtocolVersion> getCoordinatorProtocol(
+    Reference<AsyncVar<Optional<ClientLeaderRegInterface>> const> coordinator) {
+	state ProtocolInfoReply reply;
+	if (coordinator->get().get().hostname.present()) {
+		wait(store(reply,
+		           retryGetReplyFromHostname(
+		               ProtocolInfoRequest{}, coordinator->get().get().hostname.get(), WLTOKEN_PROTOCOL_INFO)));
+	} else {
+		RequestStream<ProtocolInfoRequest> requestStream(
+		    Endpoint::wellKnown({ coordinator->get().get().getLeader.getEndpoint().addresses }, WLTOKEN_PROTOCOL_INFO));
+		wait(store(reply, retryBrokenPromise(requestStream, ProtocolInfoRequest{})));
+	}
 	return reply.version;
 }
 
@@ -6940,8 +6947,16 @@ ACTOR Future<ProtocolVersion> getCoordinatorProtocol(NetworkAddressList coordina
 // function will return with an unset result.
 // If an expected version is given, this future won't return if the actual protocol version matches the expected version
 ACTOR Future<Optional<ProtocolVersion>> getCoordinatorProtocolFromConnectPacket(
-    NetworkAddress coordinatorAddress,
+    Reference<AsyncVar<Optional<ClientLeaderRegInterface>> const> coordinator,
     Optional<ProtocolVersion> expectedVersion) {
+	state NetworkAddress coordinatorAddress;
+	if (coordinator->get().get().hostname.present()) {
+		Hostname h = coordinator->get().get().hostname.get();
+		wait(store(coordinatorAddress, h.resolveWithRetry()));
+	} else {
+		coordinatorAddress = coordinator->get().get().getLeader.getEndpoint().getPrimaryAddress();
+	}
+
 	state Reference<AsyncVar<Optional<ProtocolVersion>> const> protocolVersion =
 	    FlowTransport::transport().getPeerProtocolAsyncVar(coordinatorAddress);
 
@@ -6976,11 +6991,10 @@ ACTOR Future<ProtocolVersion> getClusterProtocolImpl(
 		if (!coordinator->get().present()) {
 			wait(coordinator->onChange());
 		} else {
-			Endpoint coordinatorEndpoint = coordinator->get().get().getLeader.getEndpoint();
 			if (needToConnect) {
 				// Even though we typically rely on the connect packet to get the protocol version, we need to send some
 				// request in order to start a connection. This protocol version request serves that purpose.
-				protocolVersion = getCoordinatorProtocol(coordinatorEndpoint.addresses);
+				protocolVersion = getCoordinatorProtocol(coordinator);
 				needToConnect = false;
 			}
 			choose {
@@ -6996,8 +7010,8 @@ ACTOR Future<ProtocolVersion> getClusterProtocolImpl(
 
 				// Older versions of FDB don't have an endpoint to return the protocol version, so we get this info from
 				// the connect packet
-				when(Optional<ProtocolVersion> pv = wait(getCoordinatorProtocolFromConnectPacket(
-				         coordinatorEndpoint.getPrimaryAddress(), expectedVersion))) {
+				when(Optional<ProtocolVersion> pv =
+				         wait(getCoordinatorProtocolFromConnectPacket(coordinator, expectedVersion))) {
 					if (pv.present()) {
 						return pv.get();
 					} else {
@@ -8171,14 +8185,20 @@ ACTOR Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion
 		throw;
 	}
 	TraceEvent("ExclusionSafetyCheckCoordinators").log();
-	wait(cx->getConnectionRecord()->resolveHostnames());
 	state ClientCoordinators coordinatorList(cx->getConnectionRecord());
 	state std::vector<Future<Optional<LeaderInfo>>> leaderServers;
 	leaderServers.reserve(coordinatorList.clientLeaderServers.size());
 	for (int i = 0; i < coordinatorList.clientLeaderServers.size(); i++) {
-		leaderServers.push_back(retryBrokenPromise(coordinatorList.clientLeaderServers[i].getLeader,
-		                                           GetLeaderRequest(coordinatorList.clusterKey, UID()),
-		                                           TaskPriority::CoordinationReply));
+		if (coordinatorList.clientLeaderServers[i].hostname.present()) {
+			leaderServers.push_back(retryGetReplyFromHostname(GetLeaderRequest(coordinatorList.clusterKey, UID()),
+			                                                  coordinatorList.clientLeaderServers[i].hostname.get(),
+			                                                  WLTOKEN_CLIENTLEADERREG_GETLEADER,
+			                                                  TaskPriority::CoordinationReply));
+		} else {
+			leaderServers.push_back(retryBrokenPromise(coordinatorList.clientLeaderServers[i].getLeader,
+			                                           GetLeaderRequest(coordinatorList.clusterKey, UID()),
+			                                           TaskPriority::CoordinationReply));
+		}
 	}
 	// Wait for quorum so we don't dismiss live coordinators as unreachable by acting too fast
 	choose {
