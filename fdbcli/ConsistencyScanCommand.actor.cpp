@@ -115,7 +115,7 @@ CommandFactory consistencyScanFactory(
     "consistencyscan",
     CommandHelp("consistencyscan <on|off> <restart 0|1> <maxRate val> <targetInterval val>",
                 "enables or disables consistency scan",
-                "Calling this command with `on' enables the consistency scan processe to run the scan with given "
+                "Calling this command with `on' enables the consistency scan process to run the scan with given "
                 "arguments and `off' will halt the scan. "
                 "Calling this command with no arguments will display if consistency scan is currently enabled.\n"));
 
