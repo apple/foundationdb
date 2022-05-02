@@ -171,6 +171,7 @@ public:
 		ERRORMSG, // A single key space contains a json string which describes the last error in special-key-space
 		GLOBALCONFIG, // Global configuration options synchronized to all nodes
 		MANAGEMENT, // Management-API
+		METACLUSTER, // Configuration for a metacluster
 		METRICS, // data-distribution metrics
 		TESTONLY, // only used by correctness tests
 		TRACING, // Distributed tracing options
@@ -228,6 +229,9 @@ public:
 	static KeyRef getActorLineageApiCommandPrefix(const std::string& command) {
 		return actorLineageApiCommandToRange.at(command).begin;
 	}
+	static KeyRangeRef getMetaclusterApiCommandRange(const std::string& command) {
+		return metaclusterApiCommandToRange.at(command);
+	}
 	static Key getManagementApiCommandOptionSpecialKey(const std::string& command, const std::string& option);
 	static const std::set<std::string>& getManagementApiOptionsSet() { return options; }
 	static const std::set<std::string>& getTracingOptions() { return tracingOptions; }
@@ -257,9 +261,10 @@ private:
 
 	static std::unordered_map<SpecialKeySpace::MODULE, KeyRange> moduleToBoundary;
 
-	// management command to its special keys' range
+	// module command to special keys range
 	static std::unordered_map<std::string, KeyRange> managementApiCommandToRange;
 	static std::unordered_map<std::string, KeyRange> actorLineageApiCommandToRange;
+	static std::unordered_map<std::string, KeyRange> metaclusterApiCommandToRange;
 
 	// "<command>/<option>"
 	static std::set<std::string> options;
@@ -543,6 +548,17 @@ public:
 	const static KeyRangeRef submoduleRange;
 
 	explicit TenantMapRangeImpl(KeyRangeRef kr);
+	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
+	                             KeyRangeRef kr,
+	                             GetRangeLimits limitsHint) const override;
+	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
+};
+
+class DataClusterMapRangeImpl : public SpecialKeyRangeRWImpl {
+public:
+	const static KeyRangeRef submoduleRange;
+
+	explicit DataClusterMapRangeImpl(KeyRangeRef kr);
 	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;

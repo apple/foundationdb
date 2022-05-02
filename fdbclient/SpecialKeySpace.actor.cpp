@@ -36,6 +36,7 @@
 #include "flow/Arena.h"
 #include "flow/UnitTest.h"
 #include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/MetaclusterManagement.actor.h"
 #include "fdbclient/StatusClient.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -56,6 +57,7 @@ static bool isAlphaNumeric(const std::string& key) {
 } // namespace
 
 const KeyRangeRef TenantMapRangeImpl::submoduleRange = KeyRangeRef("tenant_map/"_sr, "tenant_map0"_sr);
+const KeyRangeRef DataClusterMapRangeImpl::submoduleRange = KeyRangeRef("data_cluster/"_sr, "data_cluster0"_sr);
 
 std::unordered_map<SpecialKeySpace::MODULE, KeyRange> SpecialKeySpace::moduleToBoundary = {
 	{ SpecialKeySpace::MODULE::TRANSACTION,
@@ -80,7 +82,9 @@ std::unordered_map<SpecialKeySpace::MODULE, KeyRange> SpecialKeySpace::moduleToB
 	  KeyRangeRef(LiteralStringRef("\xff\xff/actor_lineage/"), LiteralStringRef("\xff\xff/actor_lineage0")) },
 	{ SpecialKeySpace::MODULE::ACTOR_PROFILER_CONF,
 	  KeyRangeRef(LiteralStringRef("\xff\xff/actor_profiler_conf/"),
-	              LiteralStringRef("\xff\xff/actor_profiler_conf0")) }
+	              LiteralStringRef("\xff\xff/actor_profiler_conf0")) },
+	{ SpecialKeySpace::MODULE::METACLUSTER,
+	  KeyRangeRef(LiteralStringRef("\xff\xff/metacluster/"), LiteralStringRef("\xff\xff/metacluster0")) }
 };
 
 std::unordered_map<std::string, KeyRange> SpecialKeySpace::managementApiCommandToRange = {
@@ -127,6 +131,11 @@ std::unordered_map<std::string, KeyRange> SpecialKeySpace::actorLineageApiComman
 	{ "time",
 	  KeyRangeRef(LiteralStringRef("time/"), LiteralStringRef("time0"))
 	      .withPrefix(moduleToBoundary[MODULE::ACTORLINEAGE].begin) }
+};
+
+std::unordered_map<std::string, KeyRange> SpecialKeySpace::metaclusterApiCommandToRange = {
+	{ "dataclustermap",
+	  DataClusterMapRangeImpl::submoduleRange.withPrefix(moduleToBoundary[MODULE::METACLUSTER].begin) }
 };
 
 std::set<std::string> SpecialKeySpace::options = { "excluded/force",
@@ -2842,4 +2851,110 @@ Future<Optional<std::string>> TenantMapRangeImpl::commit(ReadYourWritesTransacti
 	}
 
 	return tag(waitForAll(tenantManagementFutures), Optional<std::string>());
+}
+
+DataClusterMapRangeImpl::DataClusterMapRangeImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
+
+ACTOR Future<RangeResult> getDataClusterList(ReadYourWritesTransaction* ryw,
+                                             KeyRangeRef kr,
+                                             GetRangeLimits limitsHint) {
+	state KeyRef metaclusterPrefix =
+	    kr.begin.substr(0,
+	                    SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::METACLUSTER).begin.size() +
+	                        DataClusterMapRangeImpl::submoduleRange.begin.size());
+
+	kr = kr.removePrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::METACLUSTER).begin);
+	ClusterNameRef beginCluster = kr.begin.removePrefix(DataClusterMapRangeImpl::submoduleRange.begin);
+
+	ClusterNameRef endCluster = kr.end;
+	if (endCluster.startsWith(DataClusterMapRangeImpl::submoduleRange.begin)) {
+		endCluster = endCluster.removePrefix(TenantMapRangeImpl::submoduleRange.begin);
+	} else {
+		endCluster = "\xff"_sr;
+	}
+
+	std::map<ClusterName, DataClusterMetadata> clusters = wait(
+	    MetaclusterAPI::listClustersTransaction(&ryw->getTransaction(), beginCluster, endCluster, limitsHint.rows));
+
+	RangeResult results;
+	for (auto cluster : clusters) {
+		json_spirit::mObject clusterEntry;
+		clusterEntry["id"] = cluster.second.entry.id;
+		clusterEntry["connection_string"] = cluster.second.connectionString.toString();
+		clusterEntry["capacity"] = cluster.second.entry.capacity.toJson();
+		clusterEntry["allocation"] = cluster.second.entry.allocated.toJson();
+		std::string clusterEntryString = json_spirit::write_string(json_spirit::mValue(clusterEntry));
+		ValueRef clusterEntryBytes(results.arena(), clusterEntryString);
+		results.push_back(results.arena(),
+		                  KeyValueRef(cluster.first.withPrefix(metaclusterPrefix, results.arena()), clusterEntryBytes));
+	}
+
+	return results;
+}
+
+Future<RangeResult> DataClusterMapRangeImpl::getRange(ReadYourWritesTransaction* ryw,
+                                                      KeyRangeRef kr,
+                                                      GetRangeLimits limitsHint) const {
+	return getDataClusterList(ryw, kr, limitsHint);
+}
+
+ACTOR Future<Void> removeClusterRange(ReadYourWritesTransaction* ryw,
+                                      ClusterName beginCluster,
+                                      ClusterName endCluster) {
+	std::map<ClusterName, DataClusterMetadata> clusters = wait(MetaclusterAPI::listClustersTransaction(
+	    &ryw->getTransaction(), beginCluster, endCluster, CLIENT_KNOBS->TOO_MANY));
+
+	if (clusters.size() == CLIENT_KNOBS->TOO_MANY) {
+		TraceEvent(SevWarn, "RemoveClustersRangeTooLange")
+		    .detail("BeginCluster", beginCluster)
+		    .detail("EndCluster", endCluster);
+		ryw->setSpecialKeySpaceErrorMsg("too many cluster to range remove");
+		throw special_keys_api_failure();
+	}
+
+	std::vector<Future<Void>> removeFutures;
+	for (auto cluster : clusters) {
+		removeFutures.push_back(MetaclusterAPI::removeClusterTransaction(&ryw->getTransaction(), cluster.first));
+	}
+
+	wait(waitForAll(removeFutures));
+	return Void();
+}
+
+Future<Optional<std::string>> DataClusterMapRangeImpl::commit(ReadYourWritesTransaction* ryw) {
+	auto ranges = ryw->getSpecialKeySpaceWriteMap().containedRanges(range);
+	std::vector<Future<Void>> clusterManagementFutures;
+	for (auto range : ranges) {
+		if (!range.value().first) {
+			continue;
+		}
+
+		ClusterNameRef clusterName =
+		    range.begin()
+		        .removePrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::METACLUSTER).begin)
+		        .removePrefix(DataClusterMapRangeImpl::submoduleRange.begin);
+
+		if (range.value().second.present()) {
+			DataClusterEntry entry;
+			clusterManagementFutures.push_back(success(MetaclusterAPI::registerClusterTransaction(
+			    &ryw->getTransaction(), clusterName, range.value().second.get().toString(), entry)));
+		} else {
+			// For a single key clear, just issue the delete
+			if (KeyRangeRef(range.begin(), range.end()).singleKeyRange()) {
+				clusterManagementFutures.push_back(
+				    MetaclusterAPI::removeClusterTransaction(&ryw->getTransaction(), clusterName));
+			} else {
+				ClusterNameRef endCluster = range.end().removePrefix(
+				    SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::METACLUSTER).begin);
+				if (endCluster.startsWith(submoduleRange.begin)) {
+					endCluster = endCluster.removePrefix(submoduleRange.begin);
+				} else {
+					endCluster = "\xff"_sr;
+				}
+				clusterManagementFutures.push_back(removeClusterRange(ryw, clusterName, endCluster));
+			}
+		}
+	}
+
+	return tag(waitForAll(clusterManagementFutures), Optional<std::string>());
 }

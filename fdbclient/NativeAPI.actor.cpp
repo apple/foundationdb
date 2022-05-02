@@ -1479,6 +1479,12 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 
 	smoothMidShardSize.reset(CLIENT_KNOBS->INIT_MID_SHARD_BYTES);
 
+	if (apiVersionAtLeast(720)) {
+		registerSpecialKeysImpl(
+		    SpecialKeySpace::MODULE::METACLUSTER,
+		    SpecialKeySpace::IMPLTYPE::READWRITE,
+		    std::make_unique<DataClusterMapRangeImpl>(SpecialKeySpace::getMetaclusterApiCommandRange("dataclustermap")));
+	}
 	if (apiVersionAtLeast(710)) {
 		registerSpecialKeysImpl(
 		    SpecialKeySpace::MODULE::MANAGEMENT,

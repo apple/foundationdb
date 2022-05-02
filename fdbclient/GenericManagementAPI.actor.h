@@ -36,6 +36,7 @@ the contents of the system key space.
 #include <map>
 #include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/DatabaseConfiguration.h"
+#include "fdbclient/GenericTransactionHelper.h"
 #include "fdbclient/Status.h"
 #include "fdbclient/Subspace.h"
 #include "fdbclient/DatabaseConfiguration.h"
@@ -128,21 +129,6 @@ ConfigurationResult buildConfiguration(
 bool isCompleteConfiguration(std::map<std::string, std::string> const& options);
 
 ConfigureAutoResult parseConfig(StatusObject const& status);
-
-template <typename Transaction, class T>
-struct transaction_future_type {
-	using type = typename Transaction::template FutureT<T>;
-};
-
-template <typename Transaction, class T>
-struct transaction_future_type<Transaction*, T> {
-	using type = typename transaction_future_type<Transaction, T>::type;
-};
-
-template <typename Transaction, class T>
-struct transaction_future_type<Reference<Transaction>, T> {
-	using type = typename transaction_future_type<Transaction, T>::type;
-};
 
 // Management API written in template code to support both IClientAPI and NativeAPI
 namespace ManagementAPI {

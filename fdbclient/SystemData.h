@@ -26,6 +26,7 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/BlobWorkerInterface.h" // TODO move the functions that depend on this out of here and into BlobWorkerInterface.h to remove this depdendency
+#include "fdbclient/Metacluster.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "Tenant.h"
 
@@ -626,6 +627,16 @@ extern const KeyRef tenantDataPrefixKey;
 
 Value encodeTenantEntry(TenantMapEntry const& tenantEntry);
 TenantMapEntry decodeTenantEntry(ValueRef const& value);
+
+// Metacluster keys
+extern const KeyRangeRef dataClusterMetadataKeys;
+extern const KeyRef dataClusterMetadataPrefix;
+extern const KeyRangeRef dataClusterConnectionRecordKeys;
+extern const KeyRef dataClusterConnectionRecordPrefix;
+extern const KeyRef dataClusterLastIdKey;
+
+Value encodeDataClusterEntry(DataClusterEntry const& dataClusterEntry);
+DataClusterEntry decodeDataClusterEntry(ValueRef const& value);
 
 #pragma clang diagnostic pop
 

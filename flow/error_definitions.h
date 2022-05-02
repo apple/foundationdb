@@ -232,6 +232,11 @@ ERROR( tenants_disabled, 2136, "Tenants have been disabled in the cluster");
 ERROR( unknown_tenant, 2137, "Tenant is not available from this server")
 ERROR( illegal_tenant_access, 2138, "Illegal tenant access")
 
+ERROR( invalid_cluster_name, 2150, "Data cluster name cannot begin with \\xff" )
+ERROR( invalid_metacluster_operation, 2151, "Metacluster operation performed on non-metacluster" )
+ERROR( cluster_already_exists, 2152, "A data cluster with the given name already exists" )
+ERROR( cluster_not_found, 2153, "Data cluster does not exist" )
+
 // 2200 - errors from bindings and official APIs
 ERROR( api_version_unset, 2200, "API version is not set" )
 ERROR( api_version_already_set, 2201, "API version may be set only once" )

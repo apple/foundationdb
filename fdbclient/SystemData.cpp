@@ -1408,6 +1408,26 @@ const KeyRef tenantMapPrivatePrefix = "\xff\xff/tenantMap/"_sr;
 const KeyRef tenantLastIdKey = "\xff/tenantLastId/"_sr;
 const KeyRef tenantDataPrefixKey = "\xff/tenantDataPrefix"_sr;
 
+// Metacluster keys
+const KeyRangeRef dataClusterMetadataKeys("\xff/metacluster/dataCluster/metadata/"_sr,
+                                          "\xff/metacluster/dataCluster/metadata0"_sr);
+const KeyRef dataClusterMetadataPrefix = dataClusterMetadataKeys.begin;
+const KeyRangeRef dataClusterConnectionRecordKeys("\xff/metacluster/dataCluster/connectionString/"_sr,
+                                                  "\xff/metacluster/dataCluster/connectionString0"_sr);
+const KeyRef dataClusterConnectionRecordPrefix = dataClusterConnectionRecordKeys.begin;
+const KeyRef dataClusterLastIdKey = "\xff/metacluster/dataCluster/lastId/"_sr;
+
+Value encodeDataClusterEntry(DataClusterEntry const& dataClusterEntry) {
+	return ObjectWriter::toValue(dataClusterEntry, IncludeVersion());
+}
+
+DataClusterEntry decodeDataClusterEntry(ValueRef const& value) {
+	DataClusterEntry entry;
+	ObjectReader reader(value.begin(), IncludeVersion());
+	reader.deserialize(entry);
+	return entry;
+}
+
 // for tests
 void testSSISerdes(StorageServerInterface const& ssi) {
 	printf("ssi=\nid=%s\nlocality=%s\nisTss=%s\ntssId=%s\nacceptingRequests=%s\naddress=%s\ngetValue=%s\n\n\n",

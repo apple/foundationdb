@@ -27,8 +27,10 @@ In order to use tenants, the cluster must be configured with an appropriate tena
 FoundationDB clusters support the following tenant modes:
 
 * ``disabled`` - Tenants cannot be created or used. Disabled is the default tenant mode.
-* ``optional_experimental`` - Tenants can be created. Each transaction can choose whether or not to use a tenant. This mode is primarily intended for migration and testing purposes, and care should be taken to avoid conflicts between tenant and non-tenant data.
-* ``required_experimental`` - Tenants can be created. Each normal transaction must use a tenant. To support special access needs, transactions will be permitted to access the raw key-space using the ``RAW_ACCESS`` transaction option.
+* ``optional`` - Tenants can be created. Each transaction can choose whether or not to use a tenant. This mode is primarily intended for migration and testing purposes, and care should be taken to avoid conflicts between tenant and non-tenant data.
+* ``required`` - Tenants can be created. Each normal transaction must use a tenant. To support special access needs, transactions will be permitted to access the raw key-space using the ``RAW_ACCESS`` transaction option.
+* ``management`` - The cluster is configured as the management cluster in a metacluster. Subordinate data clusters can be registered with this management cluster and created tenants will be assigned to them. This cluster is not allowed to store data.
+* ``subordinate`` - The cluster is configured as a data cluster in a metacluster. Like ``required`` mode, except tenants cannot be created and deleted directly on a ``subordinate`` cluster.
 
 Creating and deleting tenants
 =============================
@@ -51,7 +53,7 @@ All operations performed within a tenant transaction will occur within the tenan
 Raw access
 ----------
 
-When operating in the tenant mode ``required_experimental``, transactions are not ordinarily permitted to run without using a tenant. In order to access the system keys or perform maintenance operations that span multiple tenants, it is required to use the ``RAW_ACCESS`` transaction option to access the global key-space. It is an error to specify ``RAW_ACCESS`` on a transaction that is configured to use a tenant.
+When operating in the tenant mode ``required`` or using a metacluster, transactions are not ordinarily permitted to run without using a tenant. In order to access the system keys or perform maintenance operations that span multiple tenants, it is required to use the ``RAW_ACCESS`` transaction option to access the global key-space. It is an error to specify ``RAW_ACCESS`` on a transaction that is configured to use a tenant.
 
 .. note :: Setting the ``READ_SYSTEM_KEYS`` or ``ACCESS_SYSTEM_KEYS`` options implies ``RAW_ACCESS`` for your transaction.
 

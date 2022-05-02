@@ -36,9 +36,30 @@ namespace fdb_cli {
 const KeyRangeRef tenantSpecialKeyRange(LiteralStringRef("\xff\xff/management/tenant_map/"),
                                         LiteralStringRef("\xff\xff/management/tenant_map0"));
 
+std::pair<bool, Optional<TenantMapEntry>> parseTenantConfiguration(std::vector<StringRef> const& tokens,
+                                                                   TenantMapEntry const& defaults,
+                                                                   int startIndex) {
+	Optional<TenantMapEntry> entry;
+
+	for (int tokenNum = startIndex; tokenNum < tokens.size(); ++tokenNum) {
+		StringRef token = tokens[tokenNum];
+		StringRef param = token.eat("=");
+		std::string value = token.toString();
+		if (tokencmp(param, "tenant_group")) {
+			entry = defaults;
+			// TODO: store tenant group
+		} else {
+			fprintf(stderr, "ERROR: unrecognized configuration parameter %s\n", param.toString().c_str());
+			return std::make_pair(false, Optional<TenantMapEntry>());
+		}
+	}
+
+	return std::make_pair(true, entry);
+}
+
 // createtenant command
 ACTOR Future<bool> createTenantCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
-	if (tokens.size() != 2) {
+	if (tokens.size() < 2 || tokens.size() > 3) {
 		printUsage(tokens[0]);
 		return false;
 	}
@@ -46,6 +67,13 @@ ACTOR Future<bool> createTenantCommandActor(Reference<IDatabase> db, std::vector
 	state Key tenantNameKey = fdb_cli::tenantSpecialKeyRange.begin.withSuffix(tokens[1]);
 	state Reference<ITransaction> tr = db->createTransaction();
 	state bool doneExistenceCheck = false;
+
+	auto configuration = parseTenantConfiguration(tokens, TenantMapEntry(), 2);
+	if (!configuration.first) {
+		return false;
+	}
+
+	// TODO: use the tenant group
 
 	loop {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
@@ -78,10 +106,12 @@ ACTOR Future<bool> createTenantCommandActor(Reference<IDatabase> db, std::vector
 	return true;
 }
 
-CommandFactory createTenantFactory("createtenant",
-                                   CommandHelp("createtenant <TENANT_NAME>",
-                                               "creates a new tenant in the cluster",
-                                               "Creates a new tenant in the cluster with the specified name."));
+CommandFactory createTenantFactory(
+    "createtenant",
+    CommandHelp("createtenant <TENANT_NAME> [tenant_group=<TENANT_GROUP>]",
+                "creates a new tenant in the cluster",
+                "Creates a new tenant in the cluster with the specified name. An optional group can be specified"
+                "that will require this tenant to be placed on the same cluster as other tenants in the same group."));
 
 // deletetenant command
 ACTOR Future<bool> deleteTenantCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
@@ -155,7 +185,7 @@ ACTOR Future<bool> listTenantsCommandActor(Reference<IDatabase> db, std::vector<
 	}
 	if (tokens.size() == 4) {
 		int n = 0;
-		if (sscanf(tokens[3].toString().c_str(), "%d%n", &limit, &n) != 1 || n != tokens[3].size()) {
+		if (sscanf(tokens[3].toString().c_str(), "%d%n", &limit, &n) != 1 || n != tokens[3].size() || limit < 0) {
 			fprintf(stderr, "ERROR: invalid limit %s\n", tokens[3].toString().c_str());
 			return false;
 		}

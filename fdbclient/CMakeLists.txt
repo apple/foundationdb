@@ -36,7 +36,6 @@ set(FDBCLIENT_SRCS
   ClientWorkerInterface.h
   ClusterConnectionFile.actor.cpp
   ClusterConnectionFile.h
-  ClusterConnectionKey.actor.cpp
   ClusterConnectionKey.actor.h
   ClusterConnectionMemoryRecord.actor.cpp
   ClusterConnectionMemoryRecord.h
@@ -60,6 +59,7 @@ set(FDBCLIENT_SRCS
   FluentDSampleIngestor.cpp
   FileBackupAgent.actor.cpp
   GenericManagementAPI.actor.h
+  GenericTransactionHelper.h
   GlobalConfig.h
   GlobalConfig.actor.h
   GlobalConfig.actor.cpp
@@ -82,6 +82,9 @@ set(FDBCLIENT_SRCS
   LocalClientAPI.h
   ManagementAPI.actor.cpp
   ManagementAPI.actor.h
+  Metacluster.cpp
+  Metacluster.h
+  MetaclusterManagement.actor.h
   MonitorLeader.actor.cpp
   MonitorLeader.h
   MultiVersionAssignmentVars.h
