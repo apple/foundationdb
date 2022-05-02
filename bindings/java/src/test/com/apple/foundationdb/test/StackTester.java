@@ -453,6 +453,36 @@ public class StackTester {
 				byte[] output = outputStream.toByteArray();
 				inst.push(output);
 			}
+			else if (op == StackOperation.TENANT_LIST_METADATA) {
+				List<Object> params = inst.popParams(3).join();
+				byte[] begin = (byte[])params.get(0);
+				byte[] end = (byte[])params.get(1);
+				int limit = StackUtils.getInt(params.get(2));
+				CloseableAsyncIterator<KeyValue> tenantIter =
+				    TenantManagement.listTenants(inst.context.db, begin, end, limit);
+				ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+				boolean validData = true;
+				try {
+					while (tenantIter.hasNext()) {
+						KeyValue next = tenantIter.next();
+						String metadata = new String(next.getValue());
+						// Without a JSON parsing library, we try to validate that the metadata consists
+						// of a select few properties using simple string comparison
+						if (metadata.charAt(0) != '{' || metadata.charAt(metadata.length() - 1) != '}' ||
+						    !metadata.contains("id") || !metadata.contains("prefix")) {
+							validData = false;
+							break;
+						}
+					}
+				} finally {
+					tenantIter.close();
+				}
+				if (validData) {
+					inst.push("VALID_TENANT_METADATA".getBytes());
+				} else {
+					inst.push("INVALID_TENANT_METADATA".getBytes());
+				}
+			}
 			else if (op == StackOperation.TENANT_SET_ACTIVE) {
 				byte[] tenantName = (byte[])inst.popParam().join();
 				inst.context.setTenant(Optional.of(tenantName));
@@ -460,7 +490,7 @@ public class StackTester {
 			else if (op == StackOperation.TENANT_CLEAR_ACTIVE) {
 				inst.context.setTenant(Optional.empty());
 			}
-			else if(op == StackOperation.UNIT_TESTS) {
+			else if (op == StackOperation.UNIT_TESTS) {
 				try {
 					inst.context.db.options().setLocationCacheSize(100001);
 					inst.context.db.run(tr -> {
@@ -538,7 +568,7 @@ public class StackTester {
 					throw new RuntimeException("Unit tests failed: " + e.getMessage());
 				}
 			}
-			else if(op == StackOperation.LOG_STACK) {
+			else if (op == StackOperation.LOG_STACK) {
 				List<Object> params = inst.popParams(1).join();
 				byte[] prefix = (byte[]) params.get(0);
 
