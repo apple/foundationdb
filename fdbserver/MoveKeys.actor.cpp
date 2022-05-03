@@ -1476,6 +1476,72 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 	return Void();
 }
 
+ACTOR static Future<Void> checkDataMoveComplete(Database occ,
+                                                UID dataMoveId,
+                                                KeyRange keys,
+                                                UID relocationIntervalId) {
+	try {
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(occ);
+		state Key begin = keys.begin;
+		while (begin < keys.end) {
+			loop {
+				try {
+					tr->getTransaction().trState->taskID = TaskPriority::MoveKeys;
+					tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+
+					// Get all existing shards overlapping keys (exclude any that have been processed in a previous
+					// iteration of the outer loop)
+					state KeyRange currentKeys = KeyRangeRef(begin, keys.end);
+
+					state RangeResult keyServers = wait(krmGetRanges(tr,
+					                                                 keyServersPrefix,
+					                                                 currentKeys,
+					                                                 SERVER_KNOBS->MOVE_SHARD_KRM_ROW_LIMIT,
+					                                                 SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT));
+
+					// Determine the last processed key (which will be the beginning for the next iteration)
+					state Key endKey = keyServers.back().key;
+					currentKeys = KeyRangeRef(currentKeys.begin, endKey);
+
+					// Check that enough servers for each shard are in the correct state
+					state RangeResult UIDtoTagMap = wait(tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
+					ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
+
+					for (int i = 0; i < keyServers.size() - 1; ++i) {
+						KeyRangeRef rangeIntersectKeys(keyServers[i].key, keyServers[i + 1].key);
+						std::vector<UID> src;
+						std::vector<UID> dest;
+						UID srcId;
+						UID destId;
+						decodeKeyServersValue(UIDtoTagMap, keyServers[i].value, src, dest, srcId, destId);
+						const KeyRange currentRange = KeyRangeRef(keyServers[i].key, keyServers[i + 1].key);
+						TraceEvent(SevDebug, "CheckDataMoveCompleteShard", relocationIntervalId)
+						    .detail("Range", currentRange)
+						    .detail("SrcID", srcId)
+						    .detail("Src", describe(src))
+						    .detail("DestID", destId)
+						    .detail("Dest", describe(dest));
+						if (!dest.empty() || srcId != dataMoveId) {
+							throw data_move_cancelled();
+						}
+					}
+
+					begin = endKey;
+					break;
+				} catch (Error& e) {
+					wait(tr->onError(e));
+				}
+			}
+		}
+	} catch (Error& e) {
+		TraceEvent(SevDebug, "CheckDataMoveCompleteError", relocationIntervalId).errorUnsuppressed(e);
+		throw;
+	}
+
+	return Void();
+}
+
 ACTOR static Future<Void> finishMoveShards(Database occ,
                                            UID dataMoveId,
                                            KeyRange targetKeys,
@@ -1537,7 +1603,8 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 				} else {
 					TraceEvent(SevWarn, "FinishMoveShardsDataMoveDeleted", relocationIntervalId)
 					    .detail("DataMoveID", dataMoveId);
-					throw data_move_cancelled();
+					wait(checkDataMoveComplete(occ, dataMoveId, targetKeys, relocationIntervalId));
+					return Void();
 				}
 
 				state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
@@ -1712,7 +1779,7 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 
 		TraceEvent(SevDebug, "FinishMoveShardsEnd", relocationIntervalId).detail("DataMoveID", dataMoveId);
 	} catch (Error& e) {
-		TraceEvent(SevWarnAlways, "FinishMoveKeysError", relocationIntervalId).errorUnsuppressed(e);
+		TraceEvent(SevWarnAlways, "FinishMoveShardsError", relocationIntervalId).errorUnsuppressed(e);
 		throw;
 	}
 	return Void();
