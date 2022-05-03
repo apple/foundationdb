@@ -33,6 +33,7 @@
 #include "flow/FastRef.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/flow.h"
+#include "fdbclient/Status.h"
 
 enum class TraceFlags : uint8_t { unsampled = 0b00000000, sampled = 0b00000001 };
 
@@ -1472,6 +1473,14 @@ struct StorageMetadataType {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, createdTime, storeType);
+	}
+
+	StatusObject toJSON() const {
+		StatusObject result;
+		result["created_time_timestamp"] = createdTime;
+		result["created_time_datetime"] = epochsToGMTString(createdTime);
+		result["storage_engine"] = storeType.toString();
+		return result;
 	}
 };
 
