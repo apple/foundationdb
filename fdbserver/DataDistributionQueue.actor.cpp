@@ -1168,7 +1168,8 @@ ACTOR Future<Void> cancelDataMove(struct DDQueueData* self, KeyRange range, cons
 		KeyRange keys = KeyRangeRef(it->range().begin, it->range().end);
 		TraceEvent(SevDebug, "DDQueueCancelDataMove", self->distributorId)
 		    .detail("DataMoveID", it->value().id)
-		    .detail("Range", keys);
+		    .detail("DataMoveRange", keys)
+		    .detail("Range", range);
 		// auto [iter, inserted] = dms.insert(it->value());
 		// ASSERT(inserted);
 		if (!it->value().cancel.isValid()) {
