@@ -125,7 +125,7 @@ BlobCipherKeyIdCache::BlobCipherKeyIdCache(EncryptCipherDomainId dId)
 
 BlobCipherKeyIdCacheKey BlobCipherKeyIdCache::getCacheKey(const EncryptCipherBaseKeyId& baseCipherKeyId,
                                                           const EncryptCipherRandomSalt& salt) {
-	if (baseCipherKeyId == ENCRYPT_INVALID_CIPHER_KEY_ID) {
+	if (baseCipherKeyId == ENCRYPT_INVALID_CIPHER_KEY_ID || salt == ENCRYPT_INVALID_RANDOM_SALT) {
 		throw encrypt_invalid_id();
 	}
 	return std::make_pair(baseCipherKeyId, salt);
@@ -137,6 +137,7 @@ Reference<BlobCipherKey> BlobCipherKeyIdCache::getLatestCipherKey() {
 	}
 	ASSERT_NE(latestBaseCipherKeyId.get(), ENCRYPT_INVALID_CIPHER_KEY_ID);
 	ASSERT(latestRandomSalt.present());
+	ASSERT_NE(latestRandomSalt.get(), ENCRYPT_INVALID_RANDOM_SALT);
 
 	return getCipherByBaseCipherId(latestBaseCipherKeyId.get(), latestRandomSalt.get());
 }
@@ -189,7 +190,8 @@ void BlobCipherKeyIdCache::insertBaseCipherKey(const EncryptCipherBaseKeyId& bas
                                                const uint8_t* baseCipher,
                                                int baseCipherLen,
                                                const EncryptCipherRandomSalt& salt) {
-	ASSERT_GT(baseCipherId, ENCRYPT_INVALID_CIPHER_KEY_ID);
+	ASSERT_NE(baseCipherId, ENCRYPT_INVALID_CIPHER_KEY_ID);
+	ASSERT_NE(salt, ENCRYPT_INVALID_RANDOM_SALT);
 
 	BlobCipherKeyIdCacheKey cacheKey = getCacheKey(baseCipherId, salt);
 
@@ -268,7 +270,8 @@ void BlobCipherKeyCache::insertCipherKey(const EncryptCipherDomainId& domainId,
                                          const uint8_t* baseCipher,
                                          int baseCipherLen,
                                          const EncryptCipherRandomSalt& salt) {
-	if (domainId == ENCRYPT_INVALID_DOMAIN_ID || baseCipherId == ENCRYPT_INVALID_CIPHER_KEY_ID) {
+	if (domainId == ENCRYPT_INVALID_DOMAIN_ID || baseCipherId == ENCRYPT_INVALID_CIPHER_KEY_ID ||
+	    salt == ENCRYPT_INVALID_RANDOM_SALT) {
 		throw encrypt_invalid_id();
 	}
 
