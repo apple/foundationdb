@@ -26,6 +26,7 @@
 #include <vector>
 
 #include "fdbserver/SpanContextMessage.h"
+#include "fdbserver/OTELSpanContextMessage.h"
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbclient/DatabaseConfiguration.h"
@@ -519,7 +520,7 @@ struct ILogSystem {
 	                             Version knownCommittedVersion,
 	                             Version minKnownCommittedVersion,
 	                             LogPushData& data,
-	                             SpanID const& spanContext,
+	                             SpanContext const& spanContext,
 	                             Optional<UID> debugID = Optional<UID>(),
 	                             Optional<std::unordered_map<uint16_t, Version>> tpcvMap =
 	                                 Optional<std::unordered_map<uint16_t, Version>>()) = 0;
@@ -762,7 +763,7 @@ struct LogPushData : NonCopyable {
 	}
 
 	// Add transaction info to be written before the first mutation in the transaction.
-	void addTransactionInfo(SpanID const& context);
+	void addTransactionInfo(SpanContext const& context);
 
 	// copy written_tags, after filtering, into given set
 	void saveTags(std::set<Tag>& filteredTags) const {
@@ -832,7 +833,7 @@ private:
 	// field.
 	std::unordered_set<int> writtenLocations;
 	uint32_t subsequence;
-	SpanID spanContext;
+	SpanContext spanContext;
 	bool shardChanged = false; // if keyServers has any changes, i.e., shard boundary modifications.
 
 	// Writes transaction info to the message stream at the given location if
