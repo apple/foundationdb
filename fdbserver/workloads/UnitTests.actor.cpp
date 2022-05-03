@@ -28,7 +28,7 @@ void forceLinkFlowTests();
 void forceLinkVersionedMapTests();
 void forceLinkMemcpyTests();
 void forceLinkMemcpyPerfTests();
-#if (!defined(TLS_DISABLED) && !defined(_WIN32))
+#if (!defined(_WIN32))
 void forceLinkStreamCipherTests();
 void forceLinkBlobCipherTests();
 #endif
@@ -79,7 +79,7 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkVersionedMapTests();
 		forceLinkMemcpyTests();
 		forceLinkMemcpyPerfTests();
-#if (!defined(TLS_DISABLED) && !defined(_WIN32))
+#if (!defined(_WIN32))
 		forceLinkStreamCipherTests();
 		void forceLinkBlobCipherTests();
 #endif

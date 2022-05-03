@@ -20,7 +20,7 @@
 
 #include "fdbclient/AsyncFileS3BlobStore.actor.h"
 #include "fdbclient/BackupContainerS3BlobStore.h"
-#if (!defined(TLS_DISABLED) && !defined(_WIN32))
+#if (!defined(_WIN32))
 #include "fdbrpc/AsyncFileEncrypted.h"
 #endif
 #include "fdbrpc/AsyncFileReadAhead.actor.h"

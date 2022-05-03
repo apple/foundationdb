@@ -25,13 +25,7 @@
 #include <unordered_map>
 #include <vector>
 
-#if (!defined(TLS_DISABLED))
 #define ENCRYPTION_ENABLED 1
-#else
-#define ENCRYPTION_ENABLED 0
-#endif
-
-#if ENCRYPTION_ENABLED
 
 #include "flow/Arena.h"
 #include "flow/EncryptUtils.h"
@@ -468,5 +462,3 @@ StringRef computeAuthToken(const uint8_t* payload,
                            const uint8_t* key,
                            const int keyLen,
                            Arena& arena);
-
-#endif // ENCRYPTION_ENABLED

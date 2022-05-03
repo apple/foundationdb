@@ -125,12 +125,7 @@ CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONNFILE, "-C", SO_REQ_SEP },
 	                                  { OPT_DEBUG_TLS, "--debug-tls", SO_NONE },
 	                                  { OPT_API_VERSION, "--api-version", SO_REQ_SEP },
 	                                  { OPT_MEMORY, "--memory", SO_REQ_SEP },
-
-#ifndef TLS_DISABLED
-	                                  TLS_OPTION_FLAGS
-#endif
-
-	                                      SO_END_OF_OPTIONS };
+	                                  TLS_OPTION_FLAGS SO_END_OF_OPTIONS };
 
 void printAtCol(const char* text, int col, FILE* stream = stdout) {
 	const char* iter = text;
@@ -449,9 +444,7 @@ static void printProgramUsage(const char* name) {
 	       "                 the CLI.\n"
 	       "  --api-version  APIVERSION\n"
 	       "                 Specifies the version of the API for the CLI to use.\n"
-#ifndef TLS_DISABLED
 	       TLS_HELP
-#endif
 	       "  --knob-KNOBNAME KNOBVALUE\n"
 	       "                 Changes a knob option. KNOBNAME should be lowercase.\n"
 	       "  --debug-tls    Prints the TLS configuration and certificate chain, then exits.\n"
@@ -1091,7 +1084,6 @@ struct CLIOptions {
 		case OPT_NO_HINTS:
 			cliHints = false;
 
-#ifndef TLS_DISABLED
 		// TLS Options
 		case TLSConfig::OPT_TLS_PLUGIN:
 			args.OptionArg();
@@ -1111,7 +1103,7 @@ struct CLIOptions {
 		case TLSConfig::OPT_TLS_VERIFY_PEERS:
 			tlsVerifyPeers = args.OptionArg();
 			break;
-#endif
+
 		case OPT_HELP:
 			printProgramUsage(program_name.c_str());
 			return 0;
@@ -2224,7 +2216,6 @@ int main(int argc, char** argv) {
 	}
 
 	if (opt.debugTLS) {
-#ifndef TLS_DISABLED
 		// Backdoor into NativeAPI's tlsConfig, which is where the above network option settings ended up.
 		extern TLSConfig tlsConfig;
 		printf("TLS Configuration:\n");
@@ -2241,9 +2232,6 @@ int main(int argc, char** argv) {
 			printf("Use --log and look at the trace logs for more detailed information on the failure.\n");
 			return 1;
 		}
-#else
-		printf("This fdbcli was built with TLS disabled.\n");
-#endif
 		return 0;
 	}
 
