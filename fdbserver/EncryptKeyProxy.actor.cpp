@@ -24,6 +24,7 @@
 #include "fdbserver/KmsConnector.h"
 #include "fdbserver/KmsConnectorInterface.h"
 #include "fdbserver/Knobs.h"
+#include "fdbserver/RESTKmsConnector.actor.h"
 #include "fdbserver/ServerDBInfo.actor.h"
 #include "fdbserver/SimKmsConnector.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
@@ -335,8 +336,8 @@ void refreshEncryptionKeys(Reference<EncryptKeyProxyData> ekpProxyData, KmsConne
 void activateKmsConnector(Reference<EncryptKeyProxyData> ekpProxyData, KmsConnectorInterface kmsConnectorInf) {
 	if (g_network->isSimulated()) {
 		ekpProxyData->kmsConnector = std::make_unique<SimKmsConnector>();
-	} else if (SERVER_KNOBS->KMS_CONNECTOR_TYPE.compare("HttpKmsConnector")) {
-		throw not_implemented();
+	} else if (SERVER_KNOBS->KMS_CONNECTOR_TYPE.compare("RESTKmsConnector")) {
+		ekpProxyData->kmsConnector = std::make_unique<RESTKmsConnector>();
 	} else {
 		throw not_implemented();
 	}

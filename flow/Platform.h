@@ -316,7 +316,7 @@ std::string readFileBytes(std::string const& filename, int maxSize);
 
 // Read a file into memory supplied by the caller
 // If 'len' is greater than file size, then read the filesize bytes.
-size_t readFileBytes(std::string const& filename, uint8_t* buff, size_t len);
+void readFileBytes(std::string const& filename, uint8_t* buff, int64_t len);
 
 // Write data buffer into file
 void writeFileBytes(std::string const& filename, const char* data, size_t count);
@@ -423,12 +423,13 @@ int eraseDirectoryRecursive(std::string const& directory);
 bool isHwCrcSupported();
 
 // Creates a temporary file; file gets destroyed/deleted along with object destruction.
-// If 'tmpDir' is empty, code defaults to '/tmp/'
-// If 'pattern' is empty, code defaults to 'fdbtemp'
+// If 'tmpDir' is empty, code defaults to 'boost::filesystem::temp_directory_path()'
+// If 'pattern' is empty, code defaults to 'fdbtmp'
 struct TmpFile {
 public:
 	TmpFile();
-	TmpFile(const std::string& tempDir, const std::string& pattern);
+	TmpFile(const std::string& tempDir);
+	TmpFile(const std::string& tempDir, std::string const& prefix);
 	~TmpFile();
 	size_t read(uint8_t* buff, size_t len);
 	void write(const uint8_t* buff, size_t len);
@@ -437,10 +438,9 @@ public:
 
 private:
 	std::string filename;
-	constexpr static std::string_view defaultDir{ "/tmp" };
-	constexpr static std::string_view defaultPattern{ "fdbtmp" };
+	constexpr static std::string_view defaultPrefix = "fdbtmp";
 
-	void createFile(const char* dir, const char* pattern);
+	void createTmpFile(const std::string_view dir, const std::string_view prefix);
 };
 
 } // namespace platform

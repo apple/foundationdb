@@ -284,7 +284,6 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( RESTCLIENT_MAX_CONNECTION_LIFE,                      120 );
 	init( RESTCLIENT_REQUEST_TRIES,                             10 );
 	init( RESTCLIENT_REQUEST_TIMEOUT_SEC,                      120 );
-
 }
 // clang-format on
 
