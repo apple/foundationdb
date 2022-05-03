@@ -1381,13 +1381,8 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 						const UID checkpontId = deterministicRandom()->randomUniqueID();
 						for (const UID& ssId : src) {
 							dataMove.src.insert(ssId);
+							// TODO(psm): Create checkpoint for the range.
 						}
-						TraceEvent("InitiatedCheckpoint")
-						    .detail("Shard", rangeIntersectKeys.toString())
-						    .detail("CheckpointID", checkpontId)
-						    .detail("DataMoveID", dataMoveId)
-						    .detail("SrcServers", describe(src))
-						    .detail("ReadVersion", tr.getReadVersion().get());
 					}
 
 					// Remove old dests from serverKeys.
@@ -1505,6 +1500,7 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 			state std::unordered_set<UID> allServers;
 			state KeyRange range;
 			state Transaction tr(occ);
+			complete = false;
 			try {
 				tr.trState->taskID = TaskPriority::MoveKeys;
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
@@ -1528,8 +1524,8 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 					ASSERT(dataMove.getPhase() == DataMoveMetaData::Running);
 					range = dataMove.range;
 				} else {
-					TraceEvent(SevWarn, "FinishMoveKeysDataMoveDeleted", relocationIntervalId)
-					    .detail("DataID", dataMoveId);
+					TraceEvent(SevWarn, "FinishMoveShardsDataMoveDeleted", relocationIntervalId)
+					    .detail("DataMoveID", dataMoveId);
 					throw data_move_cancelled();
 				}
 
@@ -1665,11 +1661,10 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 					if (range.end == dataMove.range.end) {
 						tr.clear(dataMoveKeyFor(dataMoveId));
 						complete = true;
-						TraceEvent("CleanUpDataMoveCheckpoint", dataMoveId)
-						    .detail("DataMoveID", dataMoveId)
-						    .detail("SrcServers", describe(dataMove.src));
+						TraceEvent("FinishMoveShardsDeleteMetaData", dataMoveId)
+						    .detail("DataMove", dataMove.toString());
 					} else {
-						TraceEvent("CleanUpDataMovePartial", dataMoveId)
+						TraceEvent("FinishMoveShardsPartialComplete", dataMoveId)
 						    .detail("DataMoveID", dataMoveId)
 						    .detail("CurrentRange", range)
 						    .detail("NewDataMoveMetaData", dataMove.toString());
@@ -1912,6 +1907,12 @@ ACTOR Future<bool> canRemoveStorageServer(Reference<ReadYourWritesTransaction> t
 	UID teamId;
 	bool assigned, emptyRange;
 	decodeServerKeysValue(keys[0].value, assigned, emptyRange, teamId);
+	TraceEvent("CanRemoveStorageServer")
+	    .detail("ServerID", serverID)
+	    .detail("Key1", keys[0].key)
+	    .detail("Value1", keys[0].value)
+	    .detail("Key2", keys[1].key)
+	    .detail("Value2", keys[1].value);
 	return !assigned && keys[1].key == allKeys.end;
 }
 
@@ -2278,9 +2279,7 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 				if (range.end == dataMove.range.end) {
 					tr.clear(dataMoveKeyFor(dataMoveId));
 					complete = true;
-					TraceEvent("CleanUpDataMoveCheckpoint", dataMoveId)
-					    .detail("DataMoveID", dataMoveId)
-					    .detail("SrcServers", describe(dataMove.src));
+					TraceEvent("CleanUpDataMoveDeleteMetaData", dataMoveId).detail("DataMoveID", dataMove.toString());
 
 				} else {
 					dataMove.range = KeyRangeRef(range.end, dataMove.range.end);
