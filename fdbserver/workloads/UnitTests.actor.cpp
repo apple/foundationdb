@@ -28,10 +28,8 @@ void forceLinkFlowTests();
 void forceLinkVersionedMapTests();
 void forceLinkMemcpyTests();
 void forceLinkMemcpyPerfTests();
-#if (!defined(_WIN32))
 void forceLinkStreamCipherTests();
 void forceLinkBlobCipherTests();
-#endif
 void forceLinkParallelStreamTests();
 void forceLinkSimExternalConnectionTests();
 void forceLinkMutationLogReaderTests();
@@ -79,10 +77,8 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkVersionedMapTests();
 		forceLinkMemcpyTests();
 		forceLinkMemcpyPerfTests();
-#if (!defined(_WIN32))
 		forceLinkStreamCipherTests();
 		void forceLinkBlobCipherTests();
-#endif
 		forceLinkParallelStreamTests();
 		forceLinkSimExternalConnectionTests();
 		forceLinkMutationLogReaderTests();

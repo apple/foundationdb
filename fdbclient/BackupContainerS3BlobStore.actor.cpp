@@ -20,9 +20,7 @@
 
 #include "fdbclient/AsyncFileS3BlobStore.actor.h"
 #include "fdbclient/BackupContainerS3BlobStore.h"
-#if (!defined(_WIN32))
 #include "fdbrpc/AsyncFileEncrypted.h"
-#endif
 #include "fdbrpc/AsyncFileReadAhead.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
