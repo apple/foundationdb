@@ -204,7 +204,7 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_FLOW_PROCESS_NAME,     "--process-name",              SO_REQ_SEP },
 	{ OPT_FLOW_PROCESS_ENDPOINT, "--process-endpoint",          SO_REQ_SEP },
 	{ OPT_IP_TRUSTED_MASK,       "--trusted-subnet-",           SO_REQ_SEP },
-	TLS_OPTION_FLAGS
+	TLS_OPTION_FLAGS,
 	SO_END_OF_OPTIONS
 };
 

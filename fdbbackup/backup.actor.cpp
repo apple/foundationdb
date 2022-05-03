@@ -220,7 +220,8 @@ CSimpleOpt::SOption g_rgAgentOptions[] = {
 	{ OPT_HELP, "--help", SO_NONE },
 	{ OPT_DEVHELP, "--dev-help", SO_NONE },
 	{ OPT_BLOB_CREDENTIALS, "--blob-credentials", SO_REQ_SEP },
-	TLS_OPTION_FLAGS SO_END_OF_OPTIONS
+	TLS_OPTION_FLAGS,
+	SO_END_OF_OPTIONS
 };
 
 CSimpleOpt::SOption g_rgBackupStartOptions[] = {
@@ -266,7 +267,8 @@ CSimpleOpt::SOption g_rgBackupStartOptions[] = {
 	{ OPT_BLOB_CREDENTIALS, "--blob-credentials", SO_REQ_SEP },
 	{ OPT_INCREMENTALONLY, "--incremental", SO_NONE },
 	{ OPT_ENCRYPTION_KEY_FILE, "--encryption-key-file", SO_REQ_SEP },
-	TLS_OPTION_FLAGS SO_END_OF_OPTIONS
+	TLS_OPTION_FLAGS,
+	SO_END_OF_OPTIONS
 };
 
 CSimpleOpt::SOption g_rgBackupModifyOptions[] = {
@@ -329,7 +331,8 @@ CSimpleOpt::SOption g_rgBackupStatusOptions[] = {
 	{ OPT_DEVHELP, "--dev-help", SO_NONE },
 	{ OPT_JSON, "--json", SO_NONE },
 	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
-	TLS_OPTION_FLAGS SO_END_OF_OPTIONS
+	TLS_OPTION_FLAGS,
+	SO_END_OF_OPTIONS
 };
 
 CSimpleOpt::SOption g_rgBackupAbortOptions[] = {
@@ -355,7 +358,8 @@ CSimpleOpt::SOption g_rgBackupAbortOptions[] = {
 	{ OPT_HELP, "--help", SO_NONE },
 	{ OPT_DEVHELP, "--dev-help", SO_NONE },
 	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
-	TLS_OPTION_FLAGS SO_END_OF_OPTIONS
+	TLS_OPTION_FLAGS,
+	SO_END_OF_OPTIONS
 };
 
 CSimpleOpt::SOption g_rgBackupCleanupOptions[] = {
@@ -381,7 +385,8 @@ CSimpleOpt::SOption g_rgBackupCleanupOptions[] = {
 	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
 	{ OPT_DELETE_DATA, "--delete-data", SO_NONE },
 	{ OPT_MIN_CLEANUP_SECONDS, "--min-cleanup-seconds", SO_REQ_SEP },
-	TLS_OPTION_FLAGS SO_END_OF_OPTIONS
+	TLS_OPTION_FLAGS,
+	SO_END_OF_OPTIONS
 };
 
 CSimpleOpt::SOption g_rgBackupDiscontinueOptions[] = {
@@ -409,7 +414,8 @@ CSimpleOpt::SOption g_rgBackupDiscontinueOptions[] = {
 	{ OPT_HELP, "--help", SO_NONE },
 	{ OPT_DEVHELP, "--dev-help", SO_NONE },
 	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
-	TLS_OPTION_FLAGS SO_END_OF_OPTIONS
+	TLS_OPTION_FLAGS,
+	SO_END_OF_OPTIONS
 };
 
 CSimpleOpt::SOption g_rgBackupWaitOptions[] = {
@@ -437,7 +443,8 @@ CSimpleOpt::SOption g_rgBackupWaitOptions[] = {
 	{ OPT_HELP, "--help", SO_NONE },
 	{ OPT_DEVHELP, "--dev-help", SO_NONE },
 	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
-	TLS_OPTION_FLAGS SO_END_OF_OPTIONS
+	TLS_OPTION_FLAGS,
+	SO_END_OF_OPTIONS
 };
 
 CSimpleOpt::SOption g_rgBackupPauseOptions[] = {
@@ -461,7 +468,8 @@ CSimpleOpt::SOption g_rgBackupPauseOptions[] = {
 	{ OPT_HELP, "--help", SO_NONE },
 	{ OPT_DEVHELP, "--dev-help", SO_NONE },
 	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
-	TLS_OPTION_FLAGS SO_END_OF_OPTIONS
+	TLS_OPTION_FLAGS,
+	SO_END_OF_OPTIONS
 };
 
 CSimpleOpt::SOption g_rgBackupExpireOptions[] = {
@@ -497,7 +505,8 @@ CSimpleOpt::SOption g_rgBackupExpireOptions[] = {
 	{ OPT_EXPIRE_BEFORE_DATETIME, "--expire-before-timestamp", SO_REQ_SEP },
 	{ OPT_EXPIRE_MIN_RESTORABLE_DAYS, "--min-restorable-days", SO_REQ_SEP },
 	{ OPT_EXPIRE_DELETE_BEFORE_DAYS, "--delete-before-days", SO_REQ_SEP },
-	TLS_OPTION_FLAGS SO_END_OF_OPTIONS
+	TLS_OPTION_FLAGS,
+	SO_END_OF_OPTIONS
 };
 
 CSimpleOpt::SOption g_rgBackupDeleteOptions[] = {
@@ -523,7 +532,8 @@ CSimpleOpt::SOption g_rgBackupDeleteOptions[] = {
 	{ OPT_DEVHELP, "--dev-help", SO_NONE },
 	{ OPT_BLOB_CREDENTIALS, "--blob-credentials", SO_REQ_SEP },
 	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
-	TLS_OPTION_FLAGS SO_END_OF_OPTIONS
+	TLS_OPTION_FLAGS,
+	SO_END_OF_OPTIONS
 };
 
 CSimpleOpt::SOption g_rgBackupDescribeOptions[] = {
@@ -554,7 +564,8 @@ CSimpleOpt::SOption g_rgBackupDescribeOptions[] = {
 	{ OPT_DESCRIBE_DEEP, "--deep", SO_NONE },
 	{ OPT_DESCRIBE_TIMESTAMPS, "--version-timestamps", SO_NONE },
 	{ OPT_JSON, "--json", SO_NONE },
-	TLS_OPTION_FLAGS SO_END_OF_OPTIONS
+	TLS_OPTION_FLAGS,
+	SO_END_OF_OPTIONS
 };
 
 CSimpleOpt::SOption g_rgBackupDumpOptions[] = {
@@ -583,7 +594,8 @@ CSimpleOpt::SOption g_rgBackupDumpOptions[] = {
 	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
 	{ OPT_DUMP_BEGIN, "--begin", SO_REQ_SEP },
 	{ OPT_DUMP_END, "--end", SO_REQ_SEP },
-	TLS_OPTION_FLAGS SO_END_OF_OPTIONS
+	TLS_OPTION_FLAGS,
+	SO_END_OF_OPTIONS
 };
 
 CSimpleOpt::SOption g_rgBackupTagsOptions[] = {
@@ -598,7 +610,8 @@ CSimpleOpt::SOption g_rgBackupTagsOptions[] = {
 	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
 	{ OPT_QUIET, "-q", SO_NONE },
 	{ OPT_QUIET, "--quiet", SO_NONE },
-	TLS_OPTION_FLAGS SO_END_OF_OPTIONS
+	TLS_OPTION_FLAGS,
+	SO_END_OF_OPTIONS
 };
 
 CSimpleOpt::SOption g_rgBackupListOptions[] = {
@@ -623,7 +636,8 @@ CSimpleOpt::SOption g_rgBackupListOptions[] = {
 	{ OPT_DEVHELP, "--dev-help", SO_NONE },
 	{ OPT_BLOB_CREDENTIALS, "--blob-credentials", SO_REQ_SEP },
 	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
-	TLS_OPTION_FLAGS SO_END_OF_OPTIONS
+	TLS_OPTION_FLAGS,
+	SO_END_OF_OPTIONS
 };
 
 CSimpleOpt::SOption g_rgBackupQueryOptions[] = {
@@ -656,7 +670,8 @@ CSimpleOpt::SOption g_rgBackupQueryOptions[] = {
 	{ OPT_DEVHELP, "--dev-help", SO_NONE },
 	{ OPT_BLOB_CREDENTIALS, "--blob-credentials", SO_REQ_SEP },
 	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
-	TLS_OPTION_FLAGS SO_END_OF_OPTIONS
+	TLS_OPTION_FLAGS,
+	SO_END_OF_OPTIONS
 };
 
 // g_rgRestoreOptions is used by fdbrestore and fastrestore_tool
@@ -702,7 +717,8 @@ CSimpleOpt::SOption g_rgRestoreOptions[] = {
 	{ OPT_RESTORE_BEGIN_VERSION, "--begin-version", SO_REQ_SEP },
 	{ OPT_RESTORE_INCONSISTENT_SNAPSHOT_ONLY, "--inconsistent-snapshot-only", SO_NONE },
 	{ OPT_ENCRYPTION_KEY_FILE, "--encryption-key-file", SO_REQ_SEP },
-	TLS_OPTION_FLAGS SO_END_OF_OPTIONS
+	TLS_OPTION_FLAGS,
+	SO_END_OF_OPTIONS
 };
 
 CSimpleOpt::SOption g_rgDBAgentOptions[] = {
@@ -732,7 +748,8 @@ CSimpleOpt::SOption g_rgDBAgentOptions[] = {
 	{ OPT_HELP, "-h", SO_NONE },
 	{ OPT_HELP, "--help", SO_NONE },
 	{ OPT_DEVHELP, "--dev-help", SO_NONE },
-	TLS_OPTION_FLAGS SO_END_OF_OPTIONS
+	TLS_OPTION_FLAGS,
+	SO_END_OF_OPTIONS
 };
 
 CSimpleOpt::SOption g_rgDBStartOptions[] = {
@@ -762,7 +779,8 @@ CSimpleOpt::SOption g_rgDBStartOptions[] = {
 	{ OPT_HELP, "--help", SO_NONE },
 	{ OPT_DEVHELP, "--dev-help", SO_NONE },
 	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
-	TLS_OPTION_FLAGS SO_END_OF_OPTIONS
+	TLS_OPTION_FLAGS,
+	SO_END_OF_OPTIONS
 };
 
 CSimpleOpt::SOption g_rgDBStatusOptions[] = {
@@ -792,7 +810,8 @@ CSimpleOpt::SOption g_rgDBStatusOptions[] = {
 	{ OPT_HELP, "--help", SO_NONE },
 	{ OPT_DEVHELP, "--dev-help", SO_NONE },
 	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
-	TLS_OPTION_FLAGS SO_END_OF_OPTIONS
+	TLS_OPTION_FLAGS,
+	SO_END_OF_OPTIONS
 };
 
 CSimpleOpt::SOption g_rgDBSwitchOptions[] = {
@@ -821,7 +840,8 @@ CSimpleOpt::SOption g_rgDBSwitchOptions[] = {
 	{ OPT_HELP, "--help", SO_NONE },
 	{ OPT_DEVHELP, "--dev-help", SO_NONE },
 	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
-	TLS_OPTION_FLAGS SO_END_OF_OPTIONS
+	TLS_OPTION_FLAGS,
+	SO_END_OF_OPTIONS
 };
 
 CSimpleOpt::SOption g_rgDBAbortOptions[] = {
@@ -851,7 +871,8 @@ CSimpleOpt::SOption g_rgDBAbortOptions[] = {
 	{ OPT_HELP, "--help", SO_NONE },
 	{ OPT_DEVHELP, "--dev-help", SO_NONE },
 	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
-	TLS_OPTION_FLAGS SO_END_OF_OPTIONS
+	TLS_OPTION_FLAGS,
+	SO_END_OF_OPTIONS
 };
 
 CSimpleOpt::SOption g_rgDBPauseOptions[] = {
@@ -877,7 +898,8 @@ CSimpleOpt::SOption g_rgDBPauseOptions[] = {
 	{ OPT_HELP, "--help", SO_NONE },
 	{ OPT_DEVHELP, "--dev-help", SO_NONE },
 	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
-	TLS_OPTION_FLAGS SO_END_OF_OPTIONS
+	TLS_OPTION_FLAGS,
+	SO_END_OF_OPTIONS
 };
 
 const KeyRef exeAgent = LiteralStringRef("backup_agent");

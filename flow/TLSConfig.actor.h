@@ -257,8 +257,9 @@ public:
 	    { TLSConfig::OPT_TLS_CERTIFICATES, TLS_CERTIFICATE_FILE_FLAG, SO_REQ_SEP },                                    \
 	    { TLSConfig::OPT_TLS_KEY, TLS_KEY_FILE_FLAG, SO_REQ_SEP },                                                     \
 	    { TLSConfig::OPT_TLS_VERIFY_PEERS, TLS_VERIFY_PEERS_FLAG, SO_REQ_SEP },                                        \
-	    { TLSConfig::OPT_TLS_PASSWORD, TLS_PASSWORD_FLAG, SO_REQ_SEP },                                                \
-	    { TLSConfig::OPT_TLS_CA_FILE, TLS_CA_FILE_FLAG, SO_REQ_SEP },
+	    { TLSConfig::OPT_TLS_PASSWORD, TLS_PASSWORD_FLAG, SO_REQ_SEP }, {                                              \
+		TLSConfig::OPT_TLS_CA_FILE, TLS_CA_FILE_FLAG, SO_REQ_SEP                                                       \
+	}
 
 #define TLS_HELP                                                                                                       \
 	"  " TLS_CERTIFICATE_FILE_FLAG " CERTFILE\n"                                                                       \

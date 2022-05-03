@@ -125,7 +125,8 @@ CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONNFILE, "-C", SO_REQ_SEP },
 	                                  { OPT_DEBUG_TLS, "--debug-tls", SO_NONE },
 	                                  { OPT_API_VERSION, "--api-version", SO_REQ_SEP },
 	                                  { OPT_MEMORY, "--memory", SO_REQ_SEP },
-	                                  TLS_OPTION_FLAGS SO_END_OF_OPTIONS };
+	                                  TLS_OPTION_FLAGS,
+	                                  SO_END_OF_OPTIONS };
 
 void printAtCol(const char* text, int col, FILE* stream = stdout) {
 	const char* iter = text;
