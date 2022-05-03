@@ -48,29 +48,25 @@
 ---
 # name: test_execstack_permissions_libfdb_c[centos-versioned]
   '
-    GNU_STACK      0x0000000000000000 0x0000000000000000 0x0000000000000000
-                   0x0000000000000000 0x0000000000000000  RW     0x0
+  - /lib64/libfdb_c.so
   
   '
 ---
 # name: test_execstack_permissions_libfdb_c[centos]
   '
-    GNU_STACK      0x0000000000000000 0x0000000000000000 0x0000000000000000
-                   0x0000000000000000 0x0000000000000000  RW     0x0
+  - /lib64/libfdb_c.so
   
   '
 ---
 # name: test_execstack_permissions_libfdb_c[ubuntu-versioned]
   '
-    GNU_STACK      0x0000000000000000 0x0000000000000000 0x0000000000000000
-                   0x0000000000000000 0x0000000000000000  RW     0x0
+  - /lib/libfdb_c.so
   
   '
 ---
 # name: test_execstack_permissions_libfdb_c[ubuntu]
   '
-    GNU_STACK      0x0000000000000000 0x0000000000000000 0x0000000000000000
-                   0x0000000000000000 0x0000000000000000  RW     0x0
+  - /lib/libfdb_c.so
   
   '
 ---

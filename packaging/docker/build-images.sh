@@ -254,7 +254,8 @@ push_docker_images="false"
 if [ -n "${OKTETO_NAMESPACE+x}" ]; then
     logg "RUNNING IN OKTETO/AWS"
     # these are defaults for the Apple development environment
-    aws_region=$(curl -s "http://169.254.169.254/latest/meta-data/placement/region")
+    imdsv2_token=$(curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+    aws_region=$(curl -H "X-aws-ec2-metadata-token: ${imdsv2_token}" "http://169.254.169.254/latest/meta-data/placement/region")
     aws_account_id=$(aws --output text sts get-caller-identity --query 'Account')
     build_output_directory="${HOME}/build_output"
     fdb_library_versions=( "${fdb_version}" )

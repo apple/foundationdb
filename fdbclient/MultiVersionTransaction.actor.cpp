@@ -18,6 +18,10 @@
  * limitations under the License.
  */
 
+#ifdef ADDRESS_SANITIZER
+#include <sanitizer/lsan_interface.h>
+#endif
+
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/GenericManagementAPI.actor.h"
@@ -296,17 +300,7 @@ ThreadResult<RangeResult> DLTransaction::readBlobGranules(const KeyRangeRef& key
 	                                                         beginVersion,
 	                                                         rv,
 	                                                         context);
-	const FdbCApi::FDBKeyValue* kvs;
-	int count;
-	FdbCApi::fdb_bool_t more;
-	FdbCApi::fdb_error_t error = api->resultGetKeyValueArray(r, &kvs, &count, &more);
-	if (error) {
-		return ThreadResult<RangeResult>(Error(error));
-	}
-
-	// The memory for this is stored in the FDBResult and is released when the result gets destroyed
-	return ThreadResult<RangeResult>(
-	    RangeResult(RangeResultRef(VectorRef<KeyValueRef>((KeyValueRef*)kvs, count), more), Arena()));
+	return ThreadResult<RangeResult>((ThreadSingleAssignmentVar<RangeResult>*)(r));
 }
 
 void DLTransaction::addReadConflictRange(const KeyRangeRef& keys) {
@@ -2762,6 +2756,11 @@ ACTOR Future<Void> checkUndestroyedFutures(std::vector<ThreadSingleAssignmentVar
 template <class T>
 THREAD_FUNC runSingleAssignmentVarTest(void* arg) {
 	noUnseed = true;
+
+// This test intentionally leaks memory
+#ifdef ADDRESS_SANITIZER
+	__lsan::ScopedDisabler disableLeakChecks;
+#endif
 
 	volatile bool* done = (volatile bool*)arg;
 	try {

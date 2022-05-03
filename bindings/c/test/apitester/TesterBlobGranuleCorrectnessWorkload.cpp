@@ -37,55 +37,71 @@ private:
 	enum OpType { OP_INSERT, OP_CLEAR, OP_CLEAR_RANGE, OP_READ, OP_GET_RANGES, OP_LAST = OP_GET_RANGES };
 	std::vector<OpType> excludedOpTypes;
 
+	// Allow reads at the start to get blob_granule_transaction_too_old if BG data isn't initialized yet
+	// FIXME: should still guarantee a read succeeds eventually somehow
+	bool seenReadSuccess = false;
+
 	void randomReadOp(TTaskFct cont) {
 		std::string begin = randomKeyName();
 		std::string end = randomKeyName();
 		auto results = std::make_shared<std::vector<KeyValue>>();
+		auto tooOld = std::make_shared<bool>(false);
 		if (begin > end) {
 			std::swap(begin, end);
 		}
 		execTransaction(
-		    [begin, end, results](auto ctx) {
+		    [this, begin, end, results, tooOld](auto ctx) {
 			    ctx->tx()->setOption(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE);
 			    KeyValuesResult res = ctx->tx()->readBlobGranules(begin, end, ctx->getBGBasePath());
 			    bool more;
 			    (*results) = res.getKeyValues(&more);
 			    ASSERT(!more);
-			    if (res.getError() != error_code_success) {
+			    if (res.getError() == error_code_blob_granule_transaction_too_old) {
+				    info("BlobGranuleCorrectness::randomReadOp bg too old\n");
+				    ASSERT(!seenReadSuccess);
+				    *tooOld = true;
+				    ctx->done();
+			    } else if (res.getError() != error_code_success) {
 				    ctx->onError(res.getError());
 			    } else {
+				    if (!seenReadSuccess) {
+					    info("BlobGranuleCorrectness::randomReadOp first success\n");
+				    }
+				    seenReadSuccess = true;
 				    ctx->done();
 			    }
 		    },
-		    [this, begin, end, results, cont]() {
-			    std::vector<KeyValue> expected = store.getRange(begin, end, store.size(), false);
-			    if (results->size() != expected.size()) {
-				    error(fmt::format("randomReadOp result size mismatch. expected: {} actual: {}",
-				                      expected.size(),
-				                      results->size()));
-			    }
-			    ASSERT(results->size() == expected.size());
-
-			    for (int i = 0; i < results->size(); i++) {
-				    if ((*results)[i].key != expected[i].key) {
-					    error(fmt::format("randomReadOp key mismatch at {}/{}. expected: {} actual: {}",
-					                      i,
-					                      results->size(),
-					                      expected[i].key,
-					                      (*results)[i].key));
+		    [this, begin, end, results, tooOld, cont]() {
+			    if (!*tooOld) {
+				    std::vector<KeyValue> expected = store.getRange(begin, end, store.size(), false);
+				    if (results->size() != expected.size()) {
+					    error(fmt::format("randomReadOp result size mismatch. expected: {} actual: {}",
+					                      expected.size(),
+					                      results->size()));
 				    }
-				    ASSERT((*results)[i].key == expected[i].key);
+				    ASSERT(results->size() == expected.size());
 
-				    if ((*results)[i].value != expected[i].value) {
-					    error(
-					        fmt::format("randomReadOp value mismatch at {}/{}. key: {} expected: {:.80} actual: {:.80}",
-					                    i,
-					                    results->size(),
-					                    expected[i].key,
-					                    expected[i].value,
-					                    (*results)[i].value));
+				    for (int i = 0; i < results->size(); i++) {
+					    if ((*results)[i].key != expected[i].key) {
+						    error(fmt::format("randomReadOp key mismatch at {}/{}. expected: {} actual: {}",
+						                      i,
+						                      results->size(),
+						                      expected[i].key,
+						                      (*results)[i].key));
+					    }
+					    ASSERT((*results)[i].key == expected[i].key);
+
+					    if ((*results)[i].value != expected[i].value) {
+						    error(fmt::format(
+						        "randomReadOp value mismatch at {}/{}. key: {} expected: {:.80} actual: {:.80}",
+						        i,
+						        results->size(),
+						        expected[i].key,
+						        expected[i].value,
+						        (*results)[i].value));
+					    }
+					    ASSERT((*results)[i].value == expected[i].value);
 				    }
-				    ASSERT((*results)[i].value == expected[i].value);
 			    }
 			    schedule(cont);
 		    });
@@ -110,9 +126,11 @@ private:
 			        true);
 		    },
 		    [this, begin, end, results, cont]() {
-			    ASSERT(results->size() > 0);
-			    ASSERT(results->front().key <= begin);
-			    ASSERT(results->back().value >= end);
+			    if (seenReadSuccess) {
+				    ASSERT(results->size() > 0);
+				    ASSERT(results->front().key <= begin);
+				    ASSERT(results->back().value >= end);
+			    }
 
 			    for (int i = 0; i < results->size(); i++) {
 				    // no empty or inverted ranges
