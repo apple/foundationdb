@@ -25,8 +25,6 @@
 #include <unordered_map>
 #include <vector>
 
-#define ENCRYPTION_ENABLED 1
-
 #include "flow/Arena.h"
 #include "flow/EncryptUtils.h"
 #include "flow/FastRef.h"

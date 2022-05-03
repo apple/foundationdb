@@ -20,8 +20,6 @@
 
 #pragma once
 
-#define ENCRYPTION_ENABLED 1
-
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/flow.h"
