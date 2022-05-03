@@ -2038,16 +2038,47 @@ static void enableLargePages() {
 }
 
 #ifndef _WIN32
+static void* mmapSafe(void* addr, size_t len, int prot, int flags, int fd, off_t offset) {
+	void* result = mmap(addr, len, prot, flags, fd, offset);
+	if (result == MAP_FAILED) {
+		int err = errno;
+		fprintf(stderr,
+		        "Error calling mmap(%p, %zu, %d, %d, %d, %jd): %s\n",
+		        addr,
+		        len,
+		        prot,
+		        flags,
+		        fd,
+		        (intmax_t)offset,
+		        strerror(err));
+		fflush(stderr);
+		std::abort();
+	}
+	return result;
+}
+
+static void mprotectSafe(void* p, size_t s, int prot) {
+	if (mprotect(p, s, prot) != 0) {
+		int err = errno;
+		fprintf(stderr, "Error calling mprotect(%p, %zu, %d): %s\n", p, s, prot, strerror(err));
+		fflush(stderr);
+		std::abort();
+	}
+}
+
 static void* mmapInternal(size_t length, int flags, bool guardPages) {
 	if (guardPages) {
-		constexpr size_t pageSize = 4096;
+		static size_t pageSize = sysconf(_SC_PAGESIZE);
+		length = RightAlign(length, pageSize);
 		length += 2 * pageSize; // Map enough for the guard pages
-		void* resultWithGuardPages = mmap(nullptr, length, PROT_READ | PROT_WRITE, flags, -1, 0);
-		mprotect(resultWithGuardPages, pageSize, PROT_NONE); // left guard page
-		mprotect((void*)(uintptr_t(resultWithGuardPages) + length - pageSize), pageSize, PROT_NONE); // right guard page
+		void* resultWithGuardPages = mmapSafe(nullptr, length, PROT_READ | PROT_WRITE, flags, -1, 0);
+		// left guard page
+		mprotectSafe(resultWithGuardPages, pageSize, PROT_NONE);
+		// right guard page
+		mprotectSafe((void*)(uintptr_t(resultWithGuardPages) + length - pageSize), pageSize, PROT_NONE);
 		return (void*)(uintptr_t(resultWithGuardPages) + pageSize);
 	} else {
-		return mmap(nullptr, length, PROT_READ | PROT_WRITE, flags, -1, 0);
+		return mmapSafe(nullptr, length, PROT_READ | PROT_WRITE, flags, -1, 0);
 	}
 }
 #endif
