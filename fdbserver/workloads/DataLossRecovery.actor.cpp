@@ -204,7 +204,7 @@ struct DataLossRecoveryWorkload : TestWorkload {
 				moveKeysLock.myOwner = owner;
 
 				wait(moveKeys(cx,
-							  UID(),
+				              deterministicRandom()->randomUniqueID(),
 				              keys,
 				              dest,
 				              dest,
@@ -214,7 +214,8 @@ struct DataLossRecoveryWorkload : TestWorkload {
 				              &self->finishMoveKeysParallelismLock,
 				              false,
 				              UID(), // for logging only
-				              &ddEnabledState));
+				              &ddEnabledState,
+				              true));
 				break;
 			} catch (Error& e) {
 				if (e.code() == error_code_movekeys_conflict) {

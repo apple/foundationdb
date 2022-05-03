@@ -81,15 +81,15 @@ ACTOR Future<Void> moveKeys(Database occ,
                             FlowLock* finishMoveKeysParallelismLock,
                             bool hasRemote,
                             UID relocationIntervalId, // for logging only
-                            const DDEnabledState* ddEnabledState);
+                            const DDEnabledState* ddEnabledState,
+                            bool cancelConflictingDataMoves);
 
 ACTOR Future<Void> cleanUpDataMove(Database occ,
-                                    UID dataMoveId,
-                                    MoveKeysLock lock,
-                                    FlowLock* cleanUpDataMoveParallelismLock,
-                                    KeyRange range,
-                                    bool removeFromDest,
-                                    const DDEnabledState* ddEnabledState);
+                                   UID dataMoveId,
+                                   MoveKeysLock lock,
+                                   FlowLock* cleanUpDataMoveParallelismLock,
+                                   KeyRange range,
+                                   const DDEnabledState* ddEnabledState);
 
 ACTOR Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServerInterface server);
 // Adds a newly recruited storage server to a database (e.g. adding it to FF/serverList)

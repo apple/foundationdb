@@ -1095,7 +1095,7 @@ struct DDQueueData {
 
 		DDQueueData::DDDataMove dataMove(dataMoveId);
 		dataMove.cancel = cleanUpDataMove(
-		    this->cx, dataMoveId, this->lock, &this->cleanUpDataMoveParallelismLock, range, true, ddEnabledState);
+		    this->cx, dataMoveId, this->lock, &this->cleanUpDataMoveParallelismLock, range, ddEnabledState);
 		this->dataMoves.insert(range, DDQueueData::DDDataMove(dataMoveId));
 		TraceEvent(SevDebug, "DDEnqueuedCancelledDataMove", this->distributorId)
 		    .detail("DataMoveID", dataMoveId)
@@ -1118,13 +1118,8 @@ ACTOR Future<Void> cancelDataMove(struct DDQueueData* self, KeyRange range, cons
 		// auto [iter, inserted] = dms.insert(it->value());
 		// ASSERT(inserted);
 		if (!it->value().cancel.isValid()) {
-			it->value().cancel = cleanUpDataMove(self->cx,
-			                                     it->value().id,
-			                                     self->lock,
-			                                     &self->cleanUpDataMoveParallelismLock,
-			                                     keys,
-			                                     true,
-			                                     ddEnabledState);
+			it->value().cancel = cleanUpDataMove(
+			    self->cx, it->value().id, self->lock, &self->cleanUpDataMoveParallelismLock, keys, ddEnabledState);
 		}
 		cleanup.push_back(it->value().cancel);
 	}
@@ -1443,7 +1438,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 			                                         &self->finishMoveKeysParallelismLock,
 			                                         self->teamCollections.size() > 1,
 			                                         relocateShardInterval.pairID,
-			                                         ddEnabledState);
+			                                         ddEnabledState,
+			                                         false);
 			state Future<Void> pollHealth =
 			    signalledTransferComplete ? Never()
 			                              : delay(SERVER_KNOBS->HEALTH_POLL_TIME, TaskPriority::DataDistributionLaunch);
@@ -1467,7 +1463,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 								                      &self->finishMoveKeysParallelismLock,
 								                      self->teamCollections.size() > 1,
 								                      relocateShardInterval.pairID,
-								                      ddEnabledState);
+								                      ddEnabledState,
+								                      false);
 							} else {
 								self->fetchKeysComplete.insert(rd);
 								// if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {

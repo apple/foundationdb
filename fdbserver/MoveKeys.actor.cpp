@@ -1214,7 +1214,8 @@ ACTOR static Future<Void> startMoveShards(Database occ,
                                           MoveKeysLock lock,
                                           FlowLock* startMoveKeysLock,
                                           UID relocationIntervalId,
-                                          const DDEnabledState* ddEnabledState) {
+                                          const DDEnabledState* ddEnabledState,
+                                          bool cancelConflictingDataMoves) {
 	ASSERT(CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
 	state Future<Void> warningLogger = logWarningAfter("StartMoveShardsTooLong", 600, servers);
 
@@ -1347,16 +1348,26 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 								wait(cleanUpSingleShardDataMove(
 								    occ, rangeIntersectKeys, lock, startMoveKeysLock, dataMoveId, ddEnabledState));
 							} else {
-								Optional<Value> val = wait(tr.get(dataMoveKeyFor(destId)));
-								ASSERT(val.present());
-								DataMoveMetaData dmv = decodeDataMoveValue(val.get());
-								TraceEvent(
-								    SevWarnAlways, "StartMoveShardsFoundConflictingDataMove", relocationIntervalId)
-								    .detail("Range", rangeIntersectKeys)
-								    .detail("DataMoveID", dataMoveId)
-								    .detail("ExistingDataMoveID", destId)
-								    .detail("ExistingDataMove", dmv.toString());
-								throw movekeys_conflict();
+								if (cancelConflictingDataMoves) {
+									TraceEvent(
+									    SevWarnAlways, "StartMoveShardsCancelConflictingDataMove", relocationIntervalId)
+									    .detail("Range", rangeIntersectKeys)
+									    .detail("DataMoveID", dataMoveId)
+									    .detail("ExistingDataMoveID", destId);
+									wait(cleanUpDataMove(
+									    occ, dataMoveId, lock, startMoveKeysLock, keys, ddEnabledState));
+								} else {
+									Optional<Value> val = wait(tr.get(dataMoveKeyFor(destId)));
+									ASSERT(val.present());
+									DataMoveMetaData dmv = decodeDataMoveValue(val.get());
+									TraceEvent(
+									    SevWarnAlways, "StartMoveShardsFoundConflictingDataMove", relocationIntervalId)
+									    .detail("Range", rangeIntersectKeys)
+									    .detail("DataMoveID", dataMoveId)
+									    .detail("ExistingDataMoveID", destId)
+									    .detail("ExistingDataMove", dmv.toString());
+									throw movekeys_conflict();
+								}
 							}
 						}
 
@@ -2182,7 +2193,6 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
                                    MoveKeysLock lock,
                                    FlowLock* cleanUpDataMoveParallelismLock,
                                    KeyRange keys,
-                                   bool removeFromDest,
                                    const DDEnabledState* ddEnabledState) {
 	TraceEvent(SevDebug, "CleanUpDataMoveBegin", dataMoveId).detail("DataMoveID", dataMoveId);
 	state bool complete = false;
@@ -2337,7 +2347,8 @@ ACTOR Future<Void> moveKeys(Database cx,
                             FlowLock* finishMoveKeysParallelismLock,
                             bool hasRemote,
                             UID relocationIntervalId,
-                            const DDEnabledState* ddEnabledState) {
+                            const DDEnabledState* ddEnabledState,
+                            bool cancelConflictingDataMoves) {
 	ASSERT(destinationTeam.size());
 	std::sort(destinationTeam.begin(), destinationTeam.end());
 
@@ -2351,7 +2362,8 @@ ACTOR Future<Void> moveKeys(Database cx,
 		                     lock,
 		                     startMoveKeysParallelismLock,
 		                     relocationIntervalId,
-		                     ddEnabledState));
+		                     ddEnabledState,
+		                     cancelConflictingDataMoves));
 
 	} else {
 		wait(startMoveKeys(cx,
