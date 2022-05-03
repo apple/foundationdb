@@ -236,11 +236,14 @@ void DatabaseContext::getLatestCommitVersions(const Reference<LocationInfo>& loc
 	}
 
 	if (ssVersionVectorCache.getMaxVersion() != invalidVersion && readVersion > ssVersionVectorCache.getMaxVersion()) {
-		TraceEvent(SevDebug, "GetLatestCommitVersions")
-		    .detail("ReadVersion", readVersion)
-		    .detail("VersionVector", ssVersionVectorCache.toString());
-		ssVersionVectorCache.clear();
-		throw stale_version_vector(); // TODO: investigate why
+		if (!CLIENT_KNOBS->FORCE_GRV_CACHE_OFF && !info->options.skipGrvCache && info->options.useGrvCache) {
+			return;
+		} else {
+			TraceEvent(SevError, "GetLatestCommitVersions")
+			    .detail("ReadVersion", readVersion)
+			    .detail("VersionVector", ssVersionVectorCache.toString());
+			ASSERT(false);
+		}
 	}
 
 	std::map<Version, std::set<Tag>> versionMap; // order the versions to be returned
