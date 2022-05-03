@@ -655,7 +655,10 @@ TEST_CASE("/fdbclient/WriteMap/random") {
 			KeyRef key = RandomTestImpl::getRandomKey(arena);
 			ValueRef value = RandomTestImpl::getRandomValue(arena);
 			writes.mutate(key, MutationRef::SetVersionstampedValue, value, addConflict);
-			setMap[key].push(RYWMutation(value, MutationRef::SetVersionstampedValue));
+			if (unreadableMap[key])
+				setMap[key].push(RYWMutation(value, MutationRef::SetVersionstampedValue));
+			else
+				setMap[key] = OperationStack(RYWMutation(value, MutationRef::SetVersionstampedValue));
 			if (addConflict)
 				conflictMap.insert(key, true);
 			clearMap.insert(key, false);
