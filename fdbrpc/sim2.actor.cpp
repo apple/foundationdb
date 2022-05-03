@@ -24,6 +24,7 @@
 
 #include "contrib/fmt-8.1.1/include/fmt/format.h"
 #include "fdbrpc/simulator.h"
+#include "flow/Arena.h"
 #define BOOST_SYSTEM_NO_LIB
 #define BOOST_DATE_TIME_NO_LIB
 #define BOOST_REGEX_NO_LIB
@@ -171,7 +172,7 @@ private:
 	double halfLatency() const {
 		double a = deterministicRandom()->random01();
 		const double pFast = 0.999;
-		if (a <= pFast) {
+		if (a <= pFast || g_simulator.speedUpSimulation) {
 			a = a / pFast;
 			return 0.5 * (FLOW_KNOBS->MIN_NETWORK_LATENCY * (1 - a) +
 			              FLOW_KNOBS->FAST_NETWORK_LATENCY / pFast * a); // 0.5ms average
@@ -1147,7 +1148,7 @@ public:
 		// for the existence of a non-durably deleted file BEFORE a reboot will show that it apparently doesn't exist.
 		if (g_simulator.getCurrentProcess()->machine->openFiles.count(filename)) {
 			g_simulator.getCurrentProcess()->machine->openFiles.erase(filename);
-			g_simulator.getCurrentProcess()->machine->deletingFiles.insert(filename);
+			g_simulator.getCurrentProcess()->machine->deletingOrClosingFiles.insert(filename);
 		}
 		if (mustBeDurable || deterministicRandom()->random01() < 0.5) {
 			state ISimulator::ProcessInfo* currentProcess = g_simulator.getCurrentProcess();

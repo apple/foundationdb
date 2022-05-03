@@ -859,9 +859,9 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(
 	NetworkAddressList publicNetworkAddresses;
 	NetworkAddressList listenNetworkAddresses;
 
-	connectionRecord.resolveHostnamesBlocking();
-	auto& coordinators = connectionRecord.getConnectionString().coordinators();
-	ASSERT(coordinators.size() > 0);
+	std::vector<Hostname>& hostnames = connectionRecord.getConnectionString().hostnames;
+	const std::vector<NetworkAddress>& coords = connectionRecord.getConnectionString().coordinators();
+	ASSERT(hostnames.size() + coords.size() > 0);
 
 	for (int ii = 0; ii < publicAddressStrs.size(); ++ii) {
 		const std::string& publicAddressStr = publicAddressStrs[ii];
@@ -930,13 +930,26 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(
 			listenNetworkAddresses.secondaryAddress = currentListenAddress;
 		}
 
-		bool hasSameCoord = std::all_of(coordinators.begin(), coordinators.end(), [&](const NetworkAddress& address) {
+		bool matchCoordinatorsTls = std::all_of(coords.begin(), coords.end(), [&](const NetworkAddress& address) {
 			if (address.ip == currentPublicAddress.ip && address.port == currentPublicAddress.port) {
 				return address.isTLS() == currentPublicAddress.isTLS();
 			}
 			return true;
 		});
-		if (!hasSameCoord) {
+		// If true, further check hostnames.
+		if (matchCoordinatorsTls) {
+			matchCoordinatorsTls = std::all_of(hostnames.begin(), hostnames.end(), [&](Hostname& hostname) {
+				Optional<NetworkAddress> resolvedAddress = hostname.resolveBlocking();
+				if (resolvedAddress.present()) {
+					NetworkAddress address = resolvedAddress.get();
+					if (address.ip == currentPublicAddress.ip && address.port == currentPublicAddress.port) {
+						return address.isTLS() == currentPublicAddress.isTLS();
+					}
+				}
+				return true;
+			});
+		}
+		if (!matchCoordinatorsTls) {
 			fprintf(stderr,
 			        "ERROR: TLS state of public address %s does not match in coordinator list.\n",
 			        publicAddressStr.c_str());
