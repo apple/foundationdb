@@ -188,7 +188,7 @@ Reference<S3BlobStoreEndpoint> S3BlobStoreEndpoint::fromString(const std::string
 			StringRef proxyRef(proxy.get());
 			if (proxy.get().find("://") != std::string::npos) {
 				StringRef proxyPrefix = proxyRef.eat("://");
-				if (proxyPrefix != LiteralStringRef("http")) {
+				if (proxyPrefix != "http"_sr) {
 					throw format("Invalid proxy URL prefix '%s'. Either don't use a prefix, or use http://",
 					             proxyPrefix.toString().c_str());
 				}
