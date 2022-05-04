@@ -20,14 +20,6 @@
 
 #pragma once
 
-#if (!defined(TLS_DISABLED))
-#define ENCRYPTION_ENABLED 1
-#else
-#define ENCRYPTION_ENABLED 0
-#endif
-
-#if ENCRYPTION_ENABLED
-
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/flow.h"
@@ -117,5 +109,3 @@ public:
 };
 
 void applyHmacKeyDerivationFunc(StreamCipherKey* cipherKey, HmacSha256StreamCipher* hmacGenerator, Arena& arena);
-
-#endif // ENCRYPTION_ENABLED

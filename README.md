@@ -126,7 +126,6 @@ You should create a second build-directory which you will use for building and d
     mkdir .build && cd .build
     cmake -G Ninja \
         -DUSE_CCACHE=on \
-        -DDISABLE_TLS=off \
         -DUSE_DTRACE=off \
         ..
     ninja -j 10
