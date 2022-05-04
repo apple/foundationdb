@@ -3533,7 +3533,7 @@ Key constructMappedKey(KeyValueRef* keyValue, Tuple& mappedKeyFormatTuple, bool&
 			std::string s = mappedKeyFormatTuple.getString(i).toString();
 			auto sz = s.size();
 			bool escaped = unescapeLiterals(s, "{{", "{");
-			escaped = escaped || unescapeLiterals(s, "}}", "}");
+			escaped = unescapeLiterals(s, "}}", "}") || escaped;
 			if (escaped) {
 				mappedKeyTuple.append(s);
 			} else if (singleKeyOrValue(s, sz)) {
