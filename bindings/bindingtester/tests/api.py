@@ -601,8 +601,10 @@ class ApiTest(Test):
             elif op == 'TENANT_CLEAR_ACTIVE':
                 instructions.append(op)
             elif op == 'TENANT_LIST':
-                instructions.push_args(self.random.random_int())
                 self.ensure_string(instructions, 2)
+                instructions.push_args(self.random.random_int())
+                test_util.to_front(instructions, 2)
+                test_util.to_front(instructions, 2)
                 instructions.append(op)
                 self.add_strings(1)
             else:
