@@ -605,30 +605,20 @@ class Tester:
                     self.tenant = self.db.open_tenant(name)
                 elif inst.op == six.u("TENANT_CLEAR_ACTIVE"):
                     self.tenant = None
-                elif inst.op == six.u("TENANT_LIST_NAMES"):
+                elif inst.op == six.u("TENANT_LIST"):
                     begin, end, limit = inst.pop(3)
                     tenant_list = fdb.tenant_management.list_tenants(self.db, begin, end, limit)
                     result = bytearray()
                     for tenant in tenant_list:
                         result += tenant.key
-                    result_bytes = bytes(result)
-                    inst.push(result_bytes)
-                elif inst.op == six.u("TENANT_LIST_METADATA"):
-                    begin, end, limit = inst.pop(3)
-                    tenant_list = fdb.tenant_management.list_tenants(self.db, begin, end, limit)
-                    valid_data = True
-                    for tenant in tenant_list:
                         try:
                             metadata = json.loads(tenant.value)
                             id =  metadata["id"]
                             prefix = metadata["prefix"]
                         except (json.decoder.JSONDecodeError, KeyError) as e:
-                            valid_data = False
-                            break
-                    if valid_data:
-                        inst.push(b"VALID_TENANT_METADATA")
-                    else:
-                        inst.push(b"INVALID_TENANT_METADATA")
+                            assert False, "Invalid Tenant Metadata"
+                    result_bytes = bytes(result)
+                    inst.push(result_bytes)
                 elif inst.op == six.u("UNIT_TESTS"):
                     try:
                         test_db_options(db)

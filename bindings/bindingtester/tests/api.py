@@ -165,7 +165,7 @@ class ApiTest(Test):
         write_conflicts = ['WRITE_CONFLICT_RANGE', 'WRITE_CONFLICT_KEY', 'DISABLE_WRITE_CONFLICT']
         txn_sizes = ['GET_APPROXIMATE_SIZE']
         storage_metrics = ['GET_ESTIMATED_RANGE_SIZE', 'GET_RANGE_SPLIT_POINTS']
-        tenants = ['TENANT_CREATE', 'TENANT_DELETE', 'TENANT_SET_ACTIVE', 'TENANT_CLEAR_ACTIVE', 'TENANT_LIST_NAMES', 'TENANT_LIST_METADATA']
+        tenants = ['TENANT_CREATE', 'TENANT_DELETE', 'TENANT_SET_ACTIVE', 'TENANT_CLEAR_ACTIVE', 'TENANT_LIST']
 
         op_choices += reads
         op_choices += mutations
@@ -600,12 +600,9 @@ class ApiTest(Test):
                 instructions.append(op)
             elif op == 'TENANT_CLEAR_ACTIVE':
                 instructions.append(op)
-            elif op == 'TENANT_LIST_NAMES':
-                instructions.push_args(b'', b'\xff', 10000)
-                instructions.append(op)
-                self.add_strings(1)
-            elif op == 'TENANT_LIST_METADATA':
-                instructions.push_args(b'', b'\xff', 10000)
+            elif op == 'TENANT_LIST':
+                instructions.push_args(self.random.random_int())
+                self.ensure_string(instructions, 2)
                 instructions.append(op)
                 self.add_strings(1)
             else:

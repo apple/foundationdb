@@ -38,16 +38,10 @@ The tenant API introduces some new operations:
 
     Unsets the active tenant.
 
-#### TENANT_LIST_NAMES
+#### TENANT_LIST
 
     Pops the top 3 items off of the stack as BEGIN, END, & LIMIT. Returns list
     of tenant names contained in the range BEGIN to END, numbering LIMIT at most.
-    May optionally push a future onto the stack.
-
-#### TENANT_LIST_METADATA
-
-    Pops the top 3 items off of the stack as BEGIN, END, & LIMIT. Returns list
-    of tenant metadata contained in the range BEGIN to END, numbering LIMIT at most.
     May optionally push a future onto the stack.
 
 Updates to Existing Instructions

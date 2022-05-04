@@ -486,7 +486,7 @@ public class AsyncStackTester {
 				inst.push(TenantManagement.deleteTenant(inst.context.db, tenantName));
 			}, FDB.DEFAULT_EXECUTOR);
 		}
-		else if (op == StackOperation.TENANT_LIST_NAMES) {
+		else if (op == StackOperation.TENANT_LIST) {
 			return inst.popParams(3).thenAcceptAsync(params -> {
 				byte[] begin = (byte[])params.get(0);
 				byte[] end = (byte[])params.get(1);
@@ -497,6 +497,8 @@ public class AsyncStackTester {
 					while (tenantIter.hasNext()) {
 						try {
 							KeyValue next = tenantIter.next();
+							String metadata = new String(next.getValue());
+							assert StackUtils.validTenantMetadata(metadata) : "Invalid Tenant Metadata";
 							outputStream.write(next.getKey());
 						} catch (IOException e) {
 							continue;
@@ -507,37 +509,6 @@ public class AsyncStackTester {
 				}
 				byte[] output = outputStream.toByteArray();
 				inst.push(output);
-			}, FDB.DEFAULT_EXECUTOR);
-		}
-		else if (op == StackOperation.TENANT_LIST_METADATA) {
-			return inst.popParams(3).thenAcceptAsync(params -> {
-				byte[] begin = (byte[])params.get(0);
-				byte[] end = (byte[])params.get(1);
-				int limit = StackUtils.getInt(params.get(2));
-				CloseableAsyncIterator<KeyValue> tenantIter =
-				    TenantManagement.listTenants(inst.context.db, begin, end, limit);
-				ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
-				boolean validData = true;
-				try {
-					while (tenantIter.hasNext()) {
-						KeyValue next = tenantIter.next();
-						String metadata = new String(next.getValue());
-						// Without a JSON parsing library, we try to validate that the metadata consists
-						// of a select few properties using simple string comparison
-						if (metadata.charAt(0) != '{' || metadata.charAt(metadata.length() - 1) != '}' ||
-						    !metadata.contains("id") || !metadata.contains("prefix")) {
-							validData = false;
-							break;
-						}
-					}
-				} finally {
-					tenantIter.close();
-				}
-				if (validData) {
-					inst.push("VALID_TENANT_METADATA".getBytes());
-				} else {
-					inst.push("INVALID_TENANT_METADATA".getBytes());
-				}
 			}, FDB.DEFAULT_EXECUTOR);
 		}
 		else if (op == StackOperation.TENANT_SET_ACTIVE) {
