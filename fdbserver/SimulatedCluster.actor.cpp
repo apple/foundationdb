@@ -901,7 +901,7 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 				ASSERT(it.second.get().canGet());
 			}
 
-			for (auto it : g_simulator.getMachineById(localities.machineId())->deletingFiles) {
+			for (auto it : g_simulator.getMachineById(localities.machineId())->deletingOrClosingFiles) {
 				filenames.insert(it);
 				closingStr += it + ", ";
 			}

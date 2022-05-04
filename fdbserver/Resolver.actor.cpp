@@ -340,8 +340,8 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 			// The condition here must match CommitBatch::applyMetadataToCommittedTransactions()
 			if (reply.committed[t] == ConflictBatch::TransactionCommitted && !self->forceRecovery &&
 			    SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS && (!isLocked || req.transactions[t].lock_aware)) {
-				SpanID spanContext =
-				    req.transactions[t].spanContext.present() ? req.transactions[t].spanContext.get() : SpanID();
+				SpanContext spanContext =
+				    req.transactions[t].spanContext.present() ? req.transactions[t].spanContext.get() : SpanContext();
 
 				applyMetadataMutations(spanContext, resolverData, req.transactions[t].mutations);
 			}
@@ -565,7 +565,7 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 		ResolverData resolverData(
 		    pContext->pResolverData->dbgid, pContext->pTxnStateStore, &pContext->pResolverData->keyInfo, confChanges);
 
-		applyMetadataMutations(SpanID(), resolverData, mutations);
+		applyMetadataMutations(SpanContext(), resolverData, mutations);
 	} // loop
 
 	auto lockedKey = pContext->pTxnStateStore->readValue(databaseLockedKey).get();

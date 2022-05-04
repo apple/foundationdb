@@ -24,8 +24,10 @@
 #include <unordered_map>
 
 #include "contrib/fmt-8.1.1/include/fmt/format.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/LoadBalance.h"
+#include "fdbserver/OTELSpanContextMessage.h"
 #include "flow/ActorCollection.h"
 #include "flow/Arena.h"
 #include "flow/Error.h"
@@ -1395,8 +1397,8 @@ void updateProcessStats(StorageServer* self) {
 #pragma region Queries
 #endif
 
-ACTOR Future<Version> waitForVersionActor(StorageServer* data, Version version, SpanID spanContext) {
-	state Span span("SS.WaitForVersion"_loc, { spanContext });
+ACTOR Future<Version> waitForVersionActor(StorageServer* data, Version version, SpanContext spanContext) {
+	state Span span("SS.WaitForVersion"_loc, spanContext);
 	choose {
 		when(wait(data->version.whenAtLeast(version))) {
 			// FIXME: A bunch of these can block with or without the following delay 0.
@@ -1433,7 +1435,7 @@ Version getLatestCommitVersion(VersionVector& ssLatestCommitVersions, Tag& tag) 
 	return commitVersion;
 }
 
-Future<Version> waitForVersion(StorageServer* data, Version version, SpanID spanContext) {
+Future<Version> waitForVersion(StorageServer* data, Version version, SpanContext spanContext) {
 	if (version == latestVersion) {
 		version = std::max(Version(1), data->version.get());
 	}
@@ -1454,7 +1456,10 @@ Future<Version> waitForVersion(StorageServer* data, Version version, SpanID span
 	return waitForVersionActor(data, version, spanContext);
 }
 
-Future<Version> waitForVersion(StorageServer* data, Version commitVersion, Version readVersion, SpanID spanContext) {
+Future<Version> waitForVersion(StorageServer* data,
+                               Version commitVersion,
+                               Version readVersion,
+                               SpanContext spanContext) {
 	ASSERT(commitVersion == invalidVersion || commitVersion < readVersion);
 
 	if (commitVersion == invalidVersion) {
@@ -1528,11 +1533,11 @@ Optional<TenantMapEntry> StorageServer::getTenantEntry(Version version, TenantIn
 
 ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 	state int64_t resultSize = 0;
-	Span span("SS:getValue"_loc, { req.spanContext });
+	Span span("SS:getValue"_loc, req.spanContext);
 	if (req.tenantInfo.name.present()) {
-		span.addTag("tenant"_sr, req.tenantInfo.name.get());
+		span.addAttribute("tenant"_sr, req.tenantInfo.name.get());
 	}
-	span.addTag("key"_sr, req.key);
+	span.addAttribute("key"_sr, req.key);
 	// Temporarily disabled -- this path is hit a lot
 	// getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.first();
 
@@ -1665,9 +1670,9 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 // must be kept alive until the watch is finished.
 extern size_t WATCH_OVERHEAD_WATCHQ, WATCH_OVERHEAD_WATCHIMPL;
 
-ACTOR Future<Version> watchWaitForValueChange(StorageServer* data, SpanID parent, KeyRef key) {
+ACTOR Future<Version> watchWaitForValueChange(StorageServer* data, SpanContext parent, KeyRef key) {
 	state Location spanLocation = "SS:watchWaitForValueChange"_loc;
-	state Span span(spanLocation, { parent });
+	state Span span(spanLocation, parent);
 	state Reference<ServerWatchMetadata> metadata = data->getWatchMetadata(key);
 
 	if (metadata->debugID.present())
@@ -1774,8 +1779,8 @@ void checkCancelWatchImpl(StorageServer* data, WatchValueRequest req) {
 ACTOR Future<Void> watchValueSendReply(StorageServer* data,
                                        WatchValueRequest req,
                                        Future<Version> resp,
-                                       SpanID spanContext) {
-	state Span span("SS:watchValue"_loc, { spanContext });
+                                       SpanContext spanContext) {
+	state Span span("SS:watchValue"_loc, spanContext);
 	state double startTime = now();
 	++data->counters.watchQueries;
 	++data->numWatches;
@@ -1873,8 +1878,7 @@ ACTOR Future<Void> deleteCheckpointQ(StorageServer* self, Version version, Check
 
 	state Key persistCheckpointKey(persistCheckpointKeys.begin.toString() + checkpoint.checkpointID.toString());
 	state Key pendingCheckpointKey(persistPendingCheckpointKeys.begin.toString() + checkpoint.checkpointID.toString());
-	Version version = self->data().getLatestVersion();
-	auto& mLV = self->addVersionToMutationLog(version);
+	auto& mLV = self->addVersionToMutationLog(self->data().getLatestVersion());
 	self->addMutationToMutationLog(
 	    mLV, MutationRef(MutationRef::ClearRange, pendingCheckpointKey, keyAfter(pendingCheckpointKey)));
 	self->addMutationToMutationLog(
@@ -1885,6 +1889,7 @@ ACTOR Future<Void> deleteCheckpointQ(StorageServer* self, Version version, Check
 
 // Serves FetchCheckpointRequests.
 ACTOR Future<Void> fetchCheckpointQ(StorageServer* self, FetchCheckpointRequest req) {
+	state ICheckpointReader* reader = nullptr;
 	TraceEvent("ServeFetchCheckpointBegin", self->thisServerID)
 	    .detail("CheckpointID", req.checkpointID)
 	    .detail("Token", req.token);
@@ -1900,7 +1905,7 @@ ACTOR Future<Void> fetchCheckpointQ(StorageServer* self, FetchCheckpointRequest 
 	}
 
 	try {
-		state ICheckpointReader* reader = newCheckpointReader(it->second, deterministicRandom()->randomUniqueID());
+		reader = newCheckpointReader(it->second, deterministicRandom()->randomUniqueID());
 		wait(reader->init(req.token));
 
 		loop {
@@ -2503,7 +2508,7 @@ ACTOR Future<Void> stopChangeFeedOnMove(StorageServer* data, ChangeFeedStreamReq
 }
 
 ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamRequest req, UID streamUID) {
-	state Span span("SS:getChangeFeedStream"_loc, { req.spanContext });
+	state Span span("SS:getChangeFeedStream"_loc, req.spanContext);
 	state bool atLatest = false;
 	state bool removeUID = false;
 	state Optional<Version> blockedVersion;
@@ -2630,14 +2635,13 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 					// throw to delete from changeFeedClientVersions if present
 					throw unknown_change_feed();
 				}
-				state Version emptyBefore = feed->second->emptyVersion;
 				choose {
 					when(wait(feed->second->newMutations.onTrigger())) {}
 					when(wait(req.end == std::numeric_limits<Version>::max() ? Future<Void>(Never())
 					                                                         : data->version.whenAtLeast(req.end))) {}
 				}
-				auto feed = data->uidChangeFeed.find(req.rangeID);
-				if (feed == data->uidChangeFeed.end() || feed->second->removing) {
+				auto feedItr = data->uidChangeFeed.find(req.rangeID);
+				if (feedItr == data->uidChangeFeed.end() || feedItr->second->removing) {
 					req.reply.sendError(unknown_change_feed());
 					// throw to delete from changeFeedClientVersions if present
 					throw unknown_change_feed();
@@ -2860,7 +2864,7 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
                                           KeyRange range,
                                           int limit,
                                           int* pLimitBytes,
-                                          SpanID parentSpan,
+                                          SpanContext parentSpan,
                                           IKeyValueStore::ReadType type,
                                           Optional<Key> tenantPrefix) {
 	state GetKeyValuesReply result;
@@ -3099,7 +3103,7 @@ ACTOR Future<Key> findKey(StorageServer* data,
                           Version version,
                           KeyRange range,
                           int* pOffset,
-                          SpanID parentSpan,
+                          SpanContext parentSpan,
                           IKeyValueStore::ReadType type)
 // Attempts to find the key indicated by sel in the data at version, within range.
 // Precondition: selectorInRange(sel, range)
@@ -3120,7 +3124,7 @@ ACTOR Future<Key> findKey(StorageServer* data,
 	state int sign = forward ? +1 : -1;
 	state bool skipEqualKey = sel.orEqual == forward;
 	state int distance = forward ? sel.offset : 1 - sel.offset;
-	state Span span("SS.findKey"_loc, { parentSpan });
+	state Span span("SS.findKey"_loc, parentSpan);
 
 	// Don't limit the number of bytes if this is a trivial key selector (there will be at most two items returned from
 	// the read range in this case)
@@ -3218,16 +3222,16 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 // Throws a wrong_shard_server if the keys in the request or result depend on data outside this server OR if a large
 // selector offset prevents all data from being read in one range read
 {
-	state Span span("SS:getKeyValues"_loc, { req.spanContext });
+	state Span span("SS:getKeyValues"_loc, req.spanContext);
 	state int64_t resultSize = 0;
 	state IKeyValueStore::ReadType type =
 	    req.isFetchKeys ? IKeyValueStore::ReadType::FETCH : IKeyValueStore::ReadType::NORMAL;
 
 	if (req.tenantInfo.name.present()) {
-		span.addTag("tenant"_sr, req.tenantInfo.name.get());
+		span.addAttribute("tenant"_sr, req.tenantInfo.name.get());
 	}
 
-	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.first();
+	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID;
 
 	++data->counters.getRangeQueries;
 	++data->counters.allQueries;
@@ -3712,16 +3716,16 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 // Throws a wrong_shard_server if the keys in the request or result depend on data outside this server OR if a large
 // selector offset prevents all data from being read in one range read
 {
-	state Span span("SS:getMappedKeyValues"_loc, { req.spanContext });
+	state Span span("SS:getMappedKeyValues"_loc, req.spanContext);
 	state int64_t resultSize = 0;
 	state IKeyValueStore::ReadType type =
 	    req.isFetchKeys ? IKeyValueStore::ReadType::FETCH : IKeyValueStore::ReadType::NORMAL;
 
 	if (req.tenantInfo.name.present()) {
-		span.addTag("tenant"_sr, req.tenantInfo.name.get());
+		span.addAttribute("tenant"_sr, req.tenantInfo.name.get());
 	}
 
-	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.first();
+	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID;
 
 	++data->counters.getMappedRangeQueries;
 	++data->counters.allQueries;
@@ -3926,13 +3930,13 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 // Throws a wrong_shard_server if the keys in the request or result depend on data outside this server OR if a large
 // selector offset prevents all data from being read in one range read
 {
-	state Span span("SS:getKeyValuesStream"_loc, { req.spanContext });
+	state Span span("SS:getKeyValuesStream"_loc, req.spanContext);
 	state int64_t resultSize = 0;
 	state IKeyValueStore::ReadType type =
 	    req.isFetchKeys ? IKeyValueStore::ReadType::FETCH : IKeyValueStore::ReadType::NORMAL;
 
 	if (req.tenantInfo.name.present()) {
-		span.addTag("tenant"_sr, req.tenantInfo.name.get());
+		span.addAttribute("tenant"_sr, req.tenantInfo.name.get());
 	}
 
 	req.reply.setByteLimit(SERVER_KNOBS->RANGESTREAM_LIMIT_BYTES);
@@ -4130,12 +4134,12 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 }
 
 ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
-	state Span span("SS:getKey"_loc, { req.spanContext });
+	state Span span("SS:getKey"_loc, req.spanContext);
 	if (req.tenantInfo.name.present()) {
-		span.addTag("tenant"_sr, req.tenantInfo.name.get());
+		span.addAttribute("tenant"_sr, req.tenantInfo.name.get());
 	}
 	state int64_t resultSize = 0;
-	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.first();
+	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID;
 
 	++data->counters.getKeyQueries;
 	++data->counters.allQueries;
@@ -5183,7 +5187,11 @@ ACTOR Future<Version> fetchChangeFeed(StorageServer* data,
 			++data->counters.kvSystemClearRanges;
 
 			changeFeedInfo->destroy(cleanupVersion);
-			data->changeFeedCleanupDurable[changeFeedInfo->id] = cleanupVersion;
+
+			if (data->uidChangeFeed.count(changeFeedInfo->id)) {
+				// only register range for cleanup if it has not been already cleaned up
+				data->changeFeedCleanupDurable[changeFeedInfo->id] = cleanupVersion;
+			}
 
 			for (auto& it : data->changeFeedRemovals) {
 				it.second.send(changeFeedInfo->id);
@@ -5590,7 +5598,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		// Get the history
 		state int debug_getRangeRetries = 0;
 		state int debug_nextRetryToLog = 1;
-		state Error lastError();
+		state Error lastError;
 
 		// FIXME: The client cache does not notice when servers are added to a team. To read from a local storage server
 		// we must refresh the cache manually.
@@ -6794,7 +6802,9 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 		}
 		data->tlogCursorReadsLatencyHistogram->sampleSeconds(now() - beforeTLogCursorReads);
 		if (cursor->popped() > 0) {
-			TraceEvent("StorageServerWorkerRemoved", data->thisServerID).detail("Reason", "PeekPoppedTLogData");
+			TraceEvent("StorageServerWorkerRemoved", data->thisServerID)
+			    .detail("Reason", "PeekPoppedTLogData")
+			    .detail("Version", cursor->popped());
 			throw worker_removed();
 		}
 
@@ -6847,6 +6857,10 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				} else if (cloneReader.protocolVersion().hasSpanContext() &&
 				           SpanContextMessage::isNextIn(cloneReader)) {
 					SpanContextMessage scm;
+					cloneReader >> scm;
+				} else if (cloneReader.protocolVersion().hasOTELSpanContext() &&
+				           OTELSpanContextMessage::isNextIn(cloneReader)) {
+					OTELSpanContextMessage scm;
 					cloneReader >> scm;
 				} else {
 					MutationRef msg;
@@ -6930,7 +6944,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 
 		state Version ver = invalidVersion;
 		cloneCursor2->setProtocolVersion(data->logProtocol);
-		state SpanID spanContext = SpanID();
+		state SpanContext spanContext = SpanContext();
 		state double beforeTLogMsgsUpdates = now();
 		state std::set<Key> updatedChangeFeeds;
 		for (; cloneCursor2->hasMessage(); cloneCursor2->nextMessage()) {
@@ -6964,17 +6978,27 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				data->logProtocol = rd.protocolVersion();
 				data->storage.changeLogProtocol(ver, data->logProtocol);
 				cloneCursor2->setProtocolVersion(rd.protocolVersion());
-				spanContext = UID();
+				spanContext.traceID = UID();
 			} else if (rd.protocolVersion().hasSpanContext() && SpanContextMessage::isNextIn(rd)) {
 				SpanContextMessage scm;
+				rd >> scm;
+				TEST(true); // storageserveractor converting SpanContextMessage into OTEL SpanContext
+				spanContext =
+				    SpanContext(UID(scm.spanContext.first(), scm.spanContext.second()),
+				                0,
+				                scm.spanContext.first() != 0 && scm.spanContext.second() != 0 ? TraceFlags::sampled
+				                                                                              : TraceFlags::unsampled);
+			} else if (rd.protocolVersion().hasOTELSpanContext() && OTELSpanContextMessage::isNextIn(rd)) {
+				TEST(true); // storageserveractor reading OTELSpanContextMessage
+				OTELSpanContextMessage scm;
 				rd >> scm;
 				spanContext = scm.spanContext;
 			} else {
 				MutationRef msg;
 				rd >> msg;
 
-				Span span("SS:update"_loc, { spanContext });
-				span.addTag("key"_sr, msg.param1);
+				Span span("SS:update"_loc, spanContext);
+				span.addAttribute("key"_sr, msg.param1);
 
 				// Drop non-private mutations if TSS fault injection is enabled in simulation, or if this is a TSS in
 				// quarantine.
@@ -7748,6 +7772,7 @@ ACTOR Future<UID> getClusterId(StorageServer* self) {
 	state ReadYourWritesTransaction tr(self->cx);
 	loop {
 		try {
+			self->cx->invalidateCache(Key(), systemKeys);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			Optional<Value> clusterId = wait(tr.get(clusterIdKey));
@@ -8406,11 +8431,11 @@ ACTOR Future<Void> serveGetKeyRequests(StorageServer* self, FutureStream<GetKeyR
 ACTOR Future<Void> watchValueWaitForVersion(StorageServer* self,
                                             WatchValueRequest req,
                                             PromiseStream<WatchValueRequest> stream) {
-	state Span span("SS:watchValueWaitForVersion"_loc, { req.spanContext });
+	state Span span("SS:watchValueWaitForVersion"_loc, req.spanContext);
 	if (req.tenantInfo.name.present()) {
-		span.addTag("tenant"_sr, req.tenantInfo.name.get());
+		span.addAttribute("tenant"_sr, req.tenantInfo.name.get());
 	}
-	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.first();
+	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID;
 	try {
 		wait(success(waitForVersionNoTooOld(self, req.version)));
 		Optional<TenantMapEntry> entry = self->getTenantEntry(latestVersion, req.tenantInfo);
@@ -8428,11 +8453,11 @@ ACTOR Future<Void> watchValueWaitForVersion(StorageServer* self,
 
 ACTOR Future<Void> serveWatchValueRequestsImpl(StorageServer* self, FutureStream<WatchValueRequest> stream) {
 	loop {
-		getCurrentLineage()->modify(&TransactionLineage::txID) = 0;
+		getCurrentLineage()->modify(&TransactionLineage::txID) = UID();
 		state WatchValueRequest req = waitNext(stream);
 		state Reference<ServerWatchMetadata> metadata = self->getWatchMetadata(req.key.contents());
-		state Span span("SS:serveWatchValueRequestsImpl"_loc, { req.spanContext });
-		getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.first();
+		state Span span("SS:serveWatchValueRequestsImpl"_loc, req.spanContext);
+		getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID;
 
 		// case 1: no watch set for the current key
 		if (!metadata.isValid()) {
