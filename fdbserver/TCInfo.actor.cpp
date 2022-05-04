@@ -402,7 +402,7 @@ double TCTeamInfo::getLoadReadBandwidth(bool includeInFlight, double inflightPen
 	}
 	return (size == 0 ? 0 : sum / size) +
 	       // we don't need to divide the inflight bandwidth because when added it the bandwidth is from single server
-	       (includeInFlight ? inflightPenalty * getReadInFlightToTeam() : 0);
+	       (includeInFlight ? inflightPenalty * getReadInFlightToTeam() / servers.size() : 0);
 }
 
 int64_t TCTeamInfo::getMinAvailableSpace(bool includeInFlight) const {

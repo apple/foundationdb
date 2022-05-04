@@ -69,7 +69,7 @@ ACTOR Future<Void> setDDIgnoreRebalanceSwitch(Reference<IDatabase> db, uint8_t D
 		try {
 			state ThreadFuture<Optional<Value>> resultFuture = tr->get(rebalanceDDIgnoreKey);
 			Optional<Value> v = wait(safeThreadFutureToFuture(resultFuture));
-			uint8_t oldValue = 0; // nothing is disabled
+			uint8_t oldValue = DDIgnore::NONE; // nothing is disabled
 			if (v.present()) {
 				if (v.get().size() > 0) {
 					oldValue = BinaryReader::fromStringRef<uint8_t>(v.get(), Unversioned());

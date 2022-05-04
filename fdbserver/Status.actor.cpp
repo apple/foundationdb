@@ -1570,7 +1570,7 @@ struct LoadConfigurationResult {
 	double healthyZoneSeconds;
 	bool rebalanceDDIgnored;
 	// FIXME: possible convert it to int if upgrade value can be resolved?
-	std::string rebalanceDDIgnoreHex; // any or combination of 0, 1, 2, see enum DDIgnore;
+	std::string rebalanceDDIgnoreHex; // any or combination of 0, 1, 2, see DDIgnore;
 	bool dataDistributionDisabled;
 
 	LoadConfigurationResult()

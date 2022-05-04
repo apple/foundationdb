@@ -1,15 +1,24 @@
 [[test]]
 testTitle = 'RandomReadWriteTest'
-simCheckRelocationDuration = true
 connectionFailuresDisableDuration = 100000
+waitForQuiescenceBegin= false
+waitForQuiescenceEnd=false
+clearAfterTest = true
+runSetup = true # false
+timeout = 3600.0
 
-    [[test.workload]]
-    testName = 'ReadWrite'
-    testDuration = 30.0
-    skewRound = 1
-    transactionsPerSecond = 2000
-    nodeCount = 150000
-    valueBytes = 128
-    discardEdgeMeasurements = false
-    warmingDelay = 10.0
-    hotServerFraction = 0.1
+[[test.workload]]
+testName = 'ReadWrite'
+transactionsPerSecond = 100000
+testDuration = 400.0
+skewRound = 1
+nodeCount = 30000 # 30000000
+valueBytes = 100
+readsPerTransactionA = 8
+writesPerTransactionA = 0
+alpha = 0
+discardEdgeMeasurements = false
+hotServerFraction = 0.2
+hotServerReadFrac = 0.8
+# hotServerShardFraction = 0.3
+warmingDelay = 180.0

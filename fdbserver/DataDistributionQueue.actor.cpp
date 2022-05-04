@@ -1513,6 +1513,7 @@ inline double getWorstCpu(const HealthMetrics& metrics, const std::vector<UID>& 
 		} else {
 			// assume the server is too busy to report its stats
 			cpu = std::max(cpu, 100.0);
+			break;
 		}
 	}
 	return cpu;
