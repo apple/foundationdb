@@ -832,13 +832,12 @@ ACTOR Future<Void> trackInitialShards(DataDistributionTracker* self, Reference<I
 	return Void();
 }
 
-ACTOR Future<Void> fetchShardMetrics_impl(DataDistributionTracker* self, GetMetricsRequest req) {
+ACTOR Future<Void> fetchTopKShardMetrics_impl(DataDistributionTracker* self, GetTopKMetricsRequest req) {
+	ASSERT(req.comparator);
 	try {
 		loop {
 			Future<Void> onChange;
 			std::vector<StorageMetrics> returnMetrics;
-			if (!req.comparator.present())
-				returnMetrics.push_back(StorageMetrics());
 
 			// TODO: shall we do random shuffle to make the selection uniform distributed over the shard space?
 			for (int i = 0; i < SERVER_KNOBS->DD_SHARD_COMPARE_LIMIT && i < req.keys.size(); ++i) {
@@ -858,27 +857,59 @@ ACTOR Future<Void> fetchShardMetrics_impl(DataDistributionTracker* self, GetMetr
 					break;
 				}
 
-				if (req.comparator.present()) {
-					metrics.keys = range;
-					returnMetrics.push_back(metrics);
-				} else {
-					returnMetrics[0] += metrics;
-				}
+				metrics.keys = range;
+				returnMetrics.push_back(metrics);
 			}
 
 			if (!onChange.isValid()) {
-				if (!req.comparator.present() || req.topK >= returnMetrics.size())
+				if (req.topK >= returnMetrics.size())
 					req.reply.send(returnMetrics);
-				else if (req.comparator.present()) {
+				else {
 					std::nth_element(returnMetrics.begin(),
 					                 returnMetrics.begin() + req.topK - 1,
 					                 returnMetrics.end(),
-					                 req.comparator.get());
+					                 req.comparator);
 					req.reply.send(
 					    std::vector<StorageMetrics>(returnMetrics.begin(), returnMetrics.begin() + req.topK));
 				}
 				return Void();
 			}
+			wait(onChange);
+		}
+	} catch (Error& e) {
+		if (e.code() != error_code_actor_cancelled && !req.reply.isSet())
+			req.reply.sendError(e);
+		throw;
+	}
+}
+
+ACTOR Future<Void> fetchTopKShardMetrics(DataDistributionTracker* self, GetTopKMetricsRequest req) {
+	choose {
+		when(wait(fetchTopKShardMetrics_impl(self, req))) {}
+		when(wait(delay(SERVER_KNOBS->DD_SHARD_METRICS_TIMEOUT))) { req.reply.sendError(timed_out()); }
+	}
+	return Void();
+}
+
+ACTOR Future<Void> fetchShardMetrics_impl(DataDistributionTracker* self, GetMetricsRequest req) {
+	try {
+		loop {
+			Future<Void> onChange;
+			StorageMetrics returnMetrics;
+			for (auto t : self->shards.intersectingRanges(req.keys)) {
+				auto& stats = t.value().stats;
+				if (!stats->get().present()) {
+					onChange = stats->onChange();
+					break;
+				}
+				returnMetrics += t.value().stats->get().get().metrics;
+			}
+
+			if (!onChange.isValid()) {
+				req.reply.send(returnMetrics);
+				return Void();
+			}
+
 			wait(onChange);
 		}
 	} catch (Error& e) {
@@ -895,7 +926,7 @@ ACTOR Future<Void> fetchShardMetrics(DataDistributionTracker* self, GetMetricsRe
 			TEST(true); // DD_SHARD_METRICS_TIMEOUT
 			StorageMetrics largeMetrics;
 			largeMetrics.bytes = getMaxShardSize(self->dbSizeEstimate->get());
-			req.reply.send(std::vector<StorageMetrics>(1, largeMetrics));
+			req.reply.send(largeMetrics);
 		}
 	}
 	return Void();
@@ -952,6 +983,7 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
                                            PromiseStream<RelocateShard> output,
                                            Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
                                            PromiseStream<GetMetricsRequest> getShardMetrics,
+                                           PromiseStream<GetTopKMetricsRequest> getTopKMetrics,
                                            PromiseStream<GetMetricsListRequest> getShardMetricsList,
                                            FutureStream<Promise<int64_t>> getAverageShardBytes,
                                            Promise<Void> readyToStart,
@@ -989,6 +1021,9 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
 			}
 			when(GetMetricsRequest req = waitNext(getShardMetrics.getFuture())) {
 				self.sizeChanges.add(fetchShardMetrics(&self, req));
+			}
+			when(GetTopKMetricsRequest req = waitNext(getTopKMetrics.getFuture())) {
+				self.sizeChanges.add(fetchTopKShardMetrics(&self, req));
 			}
 			when(GetMetricsListRequest req = waitNext(getShardMetricsList.getFuture())) {
 				self.sizeChanges.add(fetchShardMetricsList(&self, req));

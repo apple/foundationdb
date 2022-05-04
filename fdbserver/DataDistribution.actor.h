@@ -152,17 +152,22 @@ struct GetTeamRequest {
 };
 
 struct GetMetricsRequest {
+	KeyRange keys;
+	Promise<StorageMetrics> reply;
+	GetMetricsRequest() {}
+	GetMetricsRequest(KeyRange const& keys) : keys(keys) {}
+};
+
+struct GetTopKMetricsRequest {
 	// whether a > b
 	typedef std::function<bool(const StorageMetrics& a, const StorageMetrics& b)> MetricsComparator;
-	std::vector<KeyRange> keys;
 	int topK = 1; // default only return the top 1 shard based on the comparator
+	MetricsComparator comparator; // Return true if a.score > b.score, return the largest topK in keys
+	std::vector<KeyRange> keys;
 	Promise<std::vector<StorageMetrics>> reply; // topK storage metrics
-	Optional<MetricsComparator> comparator; // Return true if a.score > b.score.if comparator is assigned, return the
-	                                        // largest topK in keys, otherwise return the sum of metrics
 
-	GetMetricsRequest() {}
-	GetMetricsRequest(KeyRange const& keys, int topK = 1) : keys({ keys }), topK(topK) {}
-	GetMetricsRequest(std::vector<KeyRange> const& keys, int topK = 1) : keys(keys), topK(topK) {}
+	GetTopKMetricsRequest() {}
+	GetTopKMetricsRequest(std::vector<KeyRange> const& keys, int topK = 1) : keys(keys), topK(topK) {}
 };
 
 struct GetMetricsListRequest {
@@ -296,6 +301,7 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
                                            PromiseStream<RelocateShard> output,
                                            Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
                                            PromiseStream<GetMetricsRequest> getShardMetrics,
+                                           PromiseStream<GetTopKMetricsRequest> getTopKMetrics,
                                            PromiseStream<GetMetricsListRequest> getShardMetricsList,
                                            FutureStream<Promise<int64_t>> getAverageShardBytes,
                                            Promise<Void> readyToStart,
