@@ -1354,8 +1354,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 									    .detail("Range", rangeIntersectKeys)
 									    .detail("DataMoveID", dataMoveId)
 									    .detail("ExistingDataMoveID", destId);
-									wait(cleanUpDataMove(
-									    occ, dataMoveId, lock, startMoveKeysLock, keys, ddEnabledState));
+									wait(cleanUpDataMove(occ, destId, lock, startMoveKeysLock, keys, ddEnabledState));
 								} else {
 									Optional<Value> val = wait(tr.get(dataMoveKeyFor(destId)));
 									ASSERT(val.present());
@@ -1476,10 +1475,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 	return Void();
 }
 
-ACTOR static Future<Void> checkDataMoveComplete(Database occ,
-                                                UID dataMoveId,
-                                                KeyRange keys,
-                                                UID relocationIntervalId) {
+ACTOR static Future<Void> checkDataMoveComplete(Database occ, UID dataMoveId, KeyRange keys, UID relocationIntervalId) {
 	try {
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(occ);
 		state Key begin = keys.begin;
