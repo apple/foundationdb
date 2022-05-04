@@ -808,12 +808,12 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext* cx) {
 				}
 			}
 			cx->clientStatusUpdater.outStatusQ.clear();
-			wait(GlobalConfig::globalConfig().onInitialized());
-			double sampleRate = GlobalConfig::globalConfig().get<double>(fdbClientInfoTxnSampleRate,
-			                                                             std::numeric_limits<double>::infinity());
+			wait(GlobalConfig::globalConfig(cx->dbId).onInitialized());
+			double sampleRate = GlobalConfig::globalConfig(cx->dbId).get<double>(
+			    fdbClientInfoTxnSampleRate, std::numeric_limits<double>::infinity());
 			double clientSamplingProbability =
 			    std::isinf(sampleRate) ? CLIENT_KNOBS->CSI_SAMPLING_PROBABILITY : sampleRate;
-			int64_t sizeLimit = GlobalConfig::globalConfig().get<int64_t>(fdbClientInfoTxnSizeLimit, -1);
+			int64_t sizeLimit = GlobalConfig::globalConfig(cx->dbId).get<int64_t>(fdbClientInfoTxnSizeLimit, -1);
 			int64_t clientTxnInfoSizeLimit = sizeLimit == -1 ? CLIENT_KNOBS->CSI_SIZE_LIMIT : sizeLimit;
 			if (!trChunksQ.empty() && deterministicRandom()->random01() < clientSamplingProbability)
 				wait(delExcessClntTxnEntriesActor(&tr, clientTxnInfoSizeLimit));
@@ -1546,7 +1546,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 		registerSpecialKeySpaceModule(
 		    SpecialKeySpace::MODULE::GLOBALCONFIG,
 		    SpecialKeySpace::IMPLTYPE::READWRITE,
-		    std::make_unique<GlobalConfigImpl>(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::GLOBALCONFIG)));
+		    std::make_unique<GlobalConfigImpl>(dbId, SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::GLOBALCONFIG)));
 		registerSpecialKeySpaceModule(
 		    SpecialKeySpace::MODULE::TRACING,
 		    SpecialKeySpace::IMPLTYPE::READWRITE,
@@ -1929,13 +1929,13 @@ Future<Void> DatabaseContext::onProxiesChanged() const {
 }
 
 bool DatabaseContext::sampleReadTags() const {
-	double sampleRate = GlobalConfig::globalConfig().get(transactionTagSampleRate, CLIENT_KNOBS->READ_TAG_SAMPLE_RATE);
+	double sampleRate = GlobalConfig::globalConfig(dbId).get(transactionTagSampleRate, CLIENT_KNOBS->READ_TAG_SAMPLE_RATE);
 	return sampleRate > 0 && deterministicRandom()->random01() <= sampleRate;
 }
 
 bool DatabaseContext::sampleOnCost(uint64_t cost) const {
 	double sampleCost =
-	    GlobalConfig::globalConfig().get<double>(transactionTagSampleCost, CLIENT_KNOBS->COMMIT_SAMPLE_COST);
+	    GlobalConfig::globalConfig(dbId).get<double>(transactionTagSampleCost, CLIENT_KNOBS->COMMIT_SAMPLE_COST);
 	if (sampleCost <= 0)
 		return false;
 	return deterministicRandom()->random01() <= (double)cost / sampleCost;
@@ -2213,8 +2213,8 @@ Database Database::createDatabase(Reference<IClusterConnectionRecord> connRecord
 	auto database = Database(db);
 	GlobalConfig::create(
 	    database, Reference<AsyncVar<ClientDBInfo> const>(clientInfo), std::addressof(clientInfo->get()));
-	GlobalConfig::globalConfig().trigger(samplingFrequency, samplingProfilerUpdateFrequency);
-	GlobalConfig::globalConfig().trigger(samplingWindow, samplingProfilerUpdateWindow);
+	GlobalConfig::globalConfig(database).trigger(samplingFrequency, samplingProfilerUpdateFrequency);
+	GlobalConfig::globalConfig(database).trigger(samplingWindow, samplingProfilerUpdateWindow);
 
 	TraceEvent("ConnectToDatabase", database->dbId)
 	    .detail("Version", FDB_VT_VERSION)
@@ -2236,6 +2236,8 @@ Database Database::createDatabase(std::string connFileName,
 	    new ClusterConnectionFile(ClusterConnectionFile::lookupClusterFileName(connFileName).first));
 	return Database::createDatabase(rccr, apiVersion, internal, clientLocality);
 }
+
+UID Database::dbId() const { return db->dbId; };
 
 Reference<WatchMetadata> DatabaseContext::getWatchMetadata(int64_t tenantId, KeyRef key) const {
 	const auto it = watchMap.find(std::make_pair(tenantId, key));
@@ -7223,10 +7225,10 @@ ACTOR Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> getReadHotRanges(Da
 			// condition. Should we abort and wait for the newly split shards to be hot again?
 			state int nLocs = locations.size();
 			// if (nLocs > 1) {
-			// 	TraceEvent("RHDDebug")
-			// 	    .detail("NumSSIs", nLocs)
-			// 	    .detail("KeysBegin", keys.begin.printable().c_str())
-			// 	    .detail("KeysEnd", keys.end.printable().c_str());
+			//	TraceEvent("RHDDebug")
+			//	    .detail("NumSSIs", nLocs)
+			//	    .detail("KeysBegin", keys.begin.printable().c_str())
+			//	    .detail("KeysEnd", keys.end.printable().c_str());
 			// }
 			state std::vector<Future<ReadHotSubRangeReply>> fReplies(nLocs);
 			KeyRef partBegin, partEnd;
@@ -7938,7 +7940,7 @@ void Transaction::checkDeferredError() const {
 
 Reference<TransactionLogInfo> Transaction::createTrLogInfoProbabilistically(const Database& cx) {
 	if (!cx->isError()) {
-		double clientSamplingProbability = GlobalConfig::globalConfig().get<double>(
+		double clientSamplingProbability = GlobalConfig::globalConfig(cx).get<double>(
 		    fdbClientInfoTxnSampleRate, CLIENT_KNOBS->CSI_SAMPLING_PROBABILITY);
 		if (((networkOptions.logClientInfo.present() && networkOptions.logClientInfo.get()) || BUGGIFY) &&
 		    deterministicRandom()->random01() < clientSamplingProbability &&
