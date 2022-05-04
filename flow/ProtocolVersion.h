@@ -31,17 +31,14 @@
 // used and should not be changed from 0.
 //                                                         xyzdev
 //                                                         vvvv
-constexpr uint64_t currentProtocolVersionValue = 0x0FDB00C071010000LL;
+constexpr uint64_t currentProtocolVersionValue = 0x0FDB00B0710A0000LL;
 
 // The first protocol version that cannot be downgraded from. Ordinarily, this will be two release versions larger
 // than the current version, meaning that we only support downgrades between consecutive release versions.
-constexpr uint64_t minInvalidProtocolVersionValue = 0x0FDB00C073000000LL;
-
-constexpr uint64_t minIncompatibleSFCWindow = 0x0FDB00B071010000LL;
-constexpr uint64_t maxIncompatibleSFCWindow = 0x0FDB00C071010000LL;
+constexpr uint64_t minInvalidProtocolVersionValue = 0x0FDB00B073000000LL;
 
 #define PROTOCOL_VERSION_FEATURE(v, x)                                                                                 \
-	static_assert((v & 0xF0FFFFLL) == 0 || v < 0x0FDB00C071000000LL, "Unexpected feature protocol version");           \
+	static_assert((v & 0xF0FFFFLL) == 0 || v < 0x0FDB00B071000000LL, "Unexpected feature protocol version");           \
 	static_assert(v <= currentProtocolVersionValue, "Feature protocol version too large");                             \
 	struct x {                                                                                                         \
 		static constexpr uint64_t protocolVersion = v;                                                                 \
@@ -75,10 +72,7 @@ public:
 	constexpr ProtocolVersion normalizedVersion() const {
 		return ProtocolVersion(_version & compatibleProtocolVersionMask);
 	}
-	constexpr bool isValid() const {
-		return version() >= minValidProtocolVersion &&
-		       (version() < minIncompatibleSFCWindow || version() >= maxIncompatibleSFCWindow);
-	}
+	constexpr bool isValid() const { return version() >= minValidProtocolVersion; }
 
 	constexpr uint64_t version() const { return _version & versionFlagMask; }
 	constexpr uint64_t versionWithFlags() const { return _version; }
@@ -162,13 +156,13 @@ public: // introduced features
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B070010001LL, TagThrottleValueReason);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B070010001LL, SpanContext);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B070010001LL, TSS);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00C071010000LL, ChangeFeed);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00C071010000LL, BlobGranule);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00C071010000LL, NetworkAddressHostnameFlag);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00C071010000LL, StorageMetadata);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00C071010000LL, PerpetualWiggleMetadata);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00C071010000LL, Tenants);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00C071010000LL, StorageInterfaceReadiness);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B0710A0000LL, ChangeFeed);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B0710A0000LL, BlobGranule);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B0710A0000LL, NetworkAddressHostnameFlag);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B0710A0000LL, StorageMetadata);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B0710A0000LL, PerpetualWiggleMetadata);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B0710A0000LL, Tenants);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B0710A0000LL, StorageInterfaceReadiness);
 };
 
 template <>
@@ -183,7 +177,7 @@ constexpr ProtocolVersion minInvalidProtocolVersion(minInvalidProtocolVersionVal
 
 // This assert is intended to help prevent incrementing the leftmost digits accidentally. It will probably need to
 // change when we reach version 10.
-static_assert(currentProtocolVersion.version() < 0x0FDB00C100000000LL, "Unexpected protocol version");
+static_assert(currentProtocolVersion.version() < 0x0FDB00B100000000LL, "Unexpected protocol version");
 
 // The last two bytes of the protocol version are currently masked out in compatibility checks. We do not use them,
 // so prevent them from being inadvertently changed.
