@@ -1714,7 +1714,8 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueueData* self, int teamCollectionIndex,
 	state bool skipCurrentLoop = false;
 	state Future<Void> delayF = Never();
 	state const bool readRebalance = !isDiskRebalancePriority(ddPriority);
-	state const char* eventName = isMountainChopperPriority(ddPriority) ? "BgDDMountainChopper_New" : "BgDDValleyFiller_New";
+	state const char* eventName =
+	    isMountainChopperPriority(ddPriority) ? "BgDDMountainChopper_New" : "BgDDValleyFiller_New";
 
 	loop {
 		state bool moved = false;
@@ -2190,9 +2191,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 						debug_setCheckRelocationDuration(false);
 					}
 				}
-				when(KeyRange done = waitNext(rangesComplete.getFuture())) {
-					keysToLaunchFrom = done;
-				}
+				when(KeyRange done = waitNext(rangesComplete.getFuture())) { keysToLaunchFrom = done; }
 				when(wait(recordMetrics)) {
 					Promise<int64_t> req;
 					getAverageShardBytes.send(req);
@@ -2239,9 +2238,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 				}
 				when(wait(self.error.getFuture())) {} // Propagate errors from dataDistributionRelocator
 				when(wait(waitForAll(balancingFutures))) {}
-				when(Promise<int> r = waitNext(getUnhealthyRelocationCount)) {
-					r.send(self.unhealthyRelocations);
-				}
+				when(Promise<int> r = waitNext(getUnhealthyRelocationCount)) { r.send(self.unhealthyRelocations); }
 			}
 		}
 	} catch (Error& e) {
