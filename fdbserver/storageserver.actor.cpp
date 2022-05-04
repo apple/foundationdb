@@ -3471,7 +3471,7 @@ ACTOR Future<GetRangeReqAndResultRef> quickGetKeyValues(
 	}
 };
 
-void unpackKeyTuple(Tuple** referenceTuple, Optional<Tuple> keyTuple, KeyValueRef* keyValue) {
+void unpackKeyTuple(Tuple** referenceTuple, Optional<Tuple>& keyTuple, KeyValueRef* keyValue) {
 	if (!keyTuple.present()) {
 		// May throw exception if the key is not parsable as a tuple.
 		try {
@@ -3484,7 +3484,7 @@ void unpackKeyTuple(Tuple** referenceTuple, Optional<Tuple> keyTuple, KeyValueRe
 	*referenceTuple = &keyTuple.get();
 }
 
-void unpackValueTuple(Tuple** referenceTuple, Optional<Tuple> valueTuple, KeyValueRef* keyValue) {
+void unpackValueTuple(Tuple** referenceTuple, Optional<Tuple>& valueTuple, KeyValueRef* keyValue) {
 	if (!valueTuple.present()) {
 		// May throw exception if the value is not parsable as a tuple.
 		try {
@@ -3506,18 +3506,18 @@ bool unescapeLiterals(std::string& s, std::string before, std::string after) {
 			break;
 		}
 		s.replace(found, before.length(), after);
-		p += 1;
+		p += after.length();
 		escaped = true;
 	}
 	return escaped;
 }
 
-bool singleKeyOrValue(std::string& s, size_t sz) {
+bool singleKeyOrValue(const std::string& s, size_t sz) {
 	// format would be {K[??]} or {V[??]}
 	return sz > 5 && s[0] == '{' && (s[1] == 'K' || s[1] == 'V') && s[2] == '[' && s[sz - 2] == ']' && s[sz - 1] == '}';
 }
 
-bool rangeQuery(std::string& s) {
+bool rangeQuery(const std::string& s) {
 	return s == "{...}";
 }
 
@@ -3555,7 +3555,7 @@ Key constructMappedKey(KeyValueRef* keyValue, Tuple& mappedKeyFormatTuple, bool&
 				if (idx < 0 || idx >= referenceTuple->size()) {
 					throw mapper_bad_index();
 				}
-				return referenceTuple->subTuple(idx, idx + 1).pack();
+				mappedKeyTuple.append(referenceTuple->subTuple(idx, idx + 1));
 			} else if (rangeQuery(s)) {
 				if (i != mappedKeyFormatTuple.size() - 1) {
 					// It must be the last element of the mapper tuple
@@ -3565,12 +3565,12 @@ Key constructMappedKey(KeyValueRef* keyValue, Tuple& mappedKeyFormatTuple, bool&
 				isRangeQuery = true;
 				// Do not add it to the mapped key.
 			} else {
-				// If the element is a string but neither escaped nor descriptors, no op needed.
-				return mappedKeyFormatTuple.subTuple(i, i + 1).pack();
+				// If the element is a string but neither escaped nor descriptors, add to result.
+				mappedKeyTuple.append(mappedKeyFormatTuple.subTuple(i, i + 1));
 			}
 		} else {
-			// If the element not a string, no op needed.
-			return mappedKeyFormatTuple.subTuple(i, i + 1).pack();
+			// If the element not a string, add to result.
+			mappedKeyTuple.append(mappedKeyFormatTuple.subTuple(i, i + 1));
 		}
 	}
 
