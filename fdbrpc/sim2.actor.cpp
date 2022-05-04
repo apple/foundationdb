@@ -2080,9 +2080,9 @@ public:
 		machines.erase(machineId);
 	}
 
-	Sim2(bool printSimTime)
+	Sim2(bool printSimTime, double crashAfter)
 	  : time(0.0), timerTime(0.0), currentTaskID(TaskPriority::Zero), taskCount(0), yielded(false), yield_limit(0),
-	    printSimTime(printSimTime) {
+	    printSimTime(printSimTime), crashAfter(crashAfter) {
 		// Not letting currentProcess be nullptr eliminates some annoying special cases
 		currentProcess =
 		    new ProcessInfo("NoMachine",
@@ -2146,6 +2146,9 @@ public:
 			mutex.enter();
 			if (printSimTime && (int)this->time < (int)t.time) {
 				printf("Time: %d\n", (int)t.time);
+			}
+			if (crashAfter > 0 && t.time > crashAfter) {
+				crashAndDie();
 			}
 			this->time = t.time;
 			this->timerTime = std::max(this->timerTime, this->time);
@@ -2220,6 +2223,7 @@ public:
 	bool yielded;
 	int yield_limit; // how many more times yield may return false before next returning true
 	bool printSimTime;
+	double crashAfter;
 
 private:
 	DNSCache mockDNS;
@@ -2428,9 +2432,9 @@ Future<Reference<IUDPSocket>> Sim2::createUDPSocket(bool isV6) {
 	return Reference<IUDPSocket>(new UDPSimSocket(localAddress, Optional<NetworkAddress>{}));
 }
 
-void startNewSimulator(bool printSimTime) {
+void startNewSimulator(bool printSimTime, double crashAfter) {
 	ASSERT(!g_network);
-	g_network = g_pSimulator = new Sim2(printSimTime);
+	g_network = g_pSimulator = new Sim2(printSimTime, crashAfter);
 	g_simulator.connectionFailuresDisableDuration = deterministicRandom()->random01() < 0.5 ? 0 : 1e6;
 }
 

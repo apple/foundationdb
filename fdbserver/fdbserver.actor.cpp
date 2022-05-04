@@ -111,7 +111,7 @@ enum {
 	OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_UNITTESTPARAM, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE,
 	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE,
 	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIAL_FILE, OPT_CONFIG_PATH, OPT_USE_TEST_CONFIG_DB, OPT_FAULT_INJECTION, OPT_PROFILER, OPT_PRINT_SIMTIME,
-	OPT_FLOW_PROCESS_NAME, OPT_FLOW_PROCESS_ENDPOINT, OPT_IP_TRUSTED_MASK
+	OPT_FLOW_PROCESS_NAME, OPT_FLOW_PROCESS_ENDPOINT, OPT_IP_TRUSTED_MASK, OPT_CRASH_AFTER,
 };
 
 CSimpleOpt::SOption g_rgOptions[] = {
@@ -200,7 +200,8 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_FAULT_INJECTION,       "-fi",                         SO_REQ_SEP },
 	{ OPT_FAULT_INJECTION,       "--fault-injection",           SO_REQ_SEP },
 	{ OPT_PROFILER,	             "--profiler-",                 SO_REQ_SEP },
-	{ OPT_PRINT_SIMTIME,         "--print-sim-time",             SO_NONE },
+	{ OPT_PRINT_SIMTIME,         "--print-sim-time",            SO_NONE },
+	{ OPT_CRASH_AFTER,           "--crash-after",               SO_REQ_SEP },
 	{ OPT_FLOW_PROCESS_NAME,     "--process-name",              SO_REQ_SEP },
 	{ OPT_FLOW_PROCESS_ENDPOINT, "--process-endpoint",          SO_REQ_SEP },
 	{ OPT_IP_TRUSTED_MASK,       "--trusted-subnet-",           SO_REQ_SEP },
@@ -1059,6 +1060,7 @@ struct CLIOptions {
 	std::string flowProcessName;
 	Endpoint flowProcessEndpoint;
 	bool printSimTime = false;
+	double crashAfter = -1.0;
 	IPAllowList allowList;
 
 	static CLIOptions parseArgs(int argc, char* argv[]) {
@@ -1621,6 +1623,18 @@ private:
 				printSimTime = true;
 				break;
 
+			case OPT_CRASH_AFTER:
+				try {
+					crashAfter = double(std::stoi(std::string(args.OptionArg())));
+				} catch (std::logic_error& e) {
+					std::cout << fmt::format(
+					    "ERROR: --crashAfter is expecting an integer, but {} was passed (error: {})\n",
+					    args.OptionArg(),
+					    e.what());
+					flushAndExit(FDB_EXIT_ERROR);
+				}
+				break;
+
 #ifndef TLS_DISABLED
 			case TLSConfig::OPT_TLS_PLUGIN:
 				args.OptionArg();
@@ -1874,7 +1888,7 @@ int main(int argc, char* argv[]) {
 		if (role == ServerRole::Simulation || role == ServerRole::CreateTemplateDatabase) {
 			// startOldSimulator();
 			opts.buildNetwork(argv[0]);
-			startNewSimulator(opts.printSimTime);
+			startNewSimulator(opts.printSimTime, opts.crashAfter);
 			openTraceFile(NetworkAddress(), opts.rollsize, opts.maxLogsSize, opts.logFolder, "trace", opts.logGroup);
 			openTracer(TracerType(deterministicRandom()->randomInt(static_cast<int>(TracerType::DISABLED),
 			                                                       static_cast<int>(TracerType::SIM_END))));
