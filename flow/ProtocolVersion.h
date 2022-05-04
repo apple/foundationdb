@@ -183,7 +183,7 @@ constexpr ProtocolVersion minInvalidProtocolVersion(minInvalidProtocolVersionVal
 
 // This assert is intended to help prevent incrementing the leftmost digits accidentally. It will probably need to
 // change when we reach version 10.
-static_assert(currentProtocolVersion.version() < 0x0FDB00B100000000LL, "Unexpected protocol version");
+static_assert(currentProtocolVersion.version() < 0x0FDB00C100000000LL, "Unexpected protocol version");
 
 // The last two bytes of the protocol version are currently masked out in compatibility checks. We do not use them,
 // so prevent them from being inadvertently changed.
