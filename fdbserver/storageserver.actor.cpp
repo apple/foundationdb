@@ -3471,6 +3471,56 @@ ACTOR Future<GetRangeReqAndResultRef> quickGetKeyValues(
 	}
 };
 
+void unpackKeyTuple(Tuple** referenceTuple, Optional<Tuple>& keyTuple, KeyValueRef* keyValue) {
+	if (!keyTuple.present()) {
+		// May throw exception if the key is not parsable as a tuple.
+		try {
+			keyTuple = Tuple::unpack(keyValue->key);
+		} catch (Error& e) {
+			TraceEvent("KeyNotTuple").error(e).detail("Key", keyValue->key.printable());
+			throw key_not_tuple();
+		}
+	}
+	*referenceTuple = &keyTuple.get();
+}
+
+void unpackValueTuple(Tuple** referenceTuple, Optional<Tuple>& valueTuple, KeyValueRef* keyValue) {
+	if (!valueTuple.present()) {
+		// May throw exception if the value is not parsable as a tuple.
+		try {
+			valueTuple = Tuple::unpack(keyValue->value);
+		} catch (Error& e) {
+			TraceEvent("ValueNotTuple").error(e).detail("Value", keyValue->value.printable());
+			throw value_not_tuple();
+		}
+	}
+	*referenceTuple = &valueTuple.get();
+}
+
+bool unescapeLiterals(std::string& s, std::string before, std::string after) {
+	bool escaped = false;
+	size_t p = 0;
+	while (true) {
+		size_t found = s.find(before, p);
+		if (found == std::string::npos) {
+			break;
+		}
+		s.replace(found, before.length(), after);
+		p = found + after.length();
+		escaped = true;
+	}
+	return escaped;
+}
+
+bool singleKeyOrValue(const std::string& s, size_t sz) {
+	// format would be {K[??]} or {V[??]}
+	return sz > 5 && s[0] == '{' && (s[1] == 'K' || s[1] == 'V') && s[2] == '[' && s[sz - 2] == ']' && s[sz - 1] == '}';
+}
+
+bool rangeQuery(const std::string& s) {
+	return s == "{...}";
+}
+
 Key constructMappedKey(KeyValueRef* keyValue, Tuple& mappedKeyFormatTuple, bool& isRangeQuery) {
 	// Lazily parse key and/or value to tuple because they may not need to be a tuple if not used.
 	Optional<Tuple> keyTuple;
@@ -3482,78 +3532,31 @@ Key constructMappedKey(KeyValueRef* keyValue, Tuple& mappedKeyFormatTuple, bool&
 		if (type == Tuple::BYTES || type == Tuple::UTF8) {
 			std::string s = mappedKeyFormatTuple.getString(i).toString();
 			auto sz = s.size();
-
-			// Handle escape.
-			bool escaped = false;
-			size_t p = 0;
-			while (true) {
-				size_t found = s.find("{{", p);
-				if (found == std::string::npos) {
-					break;
-				}
-				s.replace(found, 2, "{");
-				p += 1;
-				escaped = true;
-			}
-			p = 0;
-			while (true) {
-				size_t found = s.find("}}", p);
-				if (found == std::string::npos) {
-					break;
-				}
-				s.replace(found, 2, "}");
-				p += 1;
-				escaped = true;
-			}
+			bool escaped = unescapeLiterals(s, "{{", "{");
+			escaped = unescapeLiterals(s, "}}", "}") || escaped;
 			if (escaped) {
-				// If the element uses escape, cope the escaped version.
 				mappedKeyTuple.append(s);
-			}
-			// {K[??]} or {V[??]}
-			else if (sz > 5 && s[0] == '{' && (s[1] == 'K' || s[1] == 'V') && s[2] == '[' && s[sz - 2] == ']' &&
-			         s[sz - 1] == '}') {
+			} else if (singleKeyOrValue(s, sz)) {
 				int idx;
+				Tuple* referenceTuple;
 				try {
 					idx = std::stoi(s.substr(3, sz - 5));
 				} catch (std::exception& e) {
 					throw mapper_bad_index();
 				}
-				Tuple* referenceTuple;
 				if (s[1] == 'K') {
-					// Use keyTuple as reference.
-					if (!keyTuple.present()) {
-						// May throw exception if the key is not parsable as a tuple.
-						try {
-							keyTuple = Tuple::unpack(keyValue->key);
-						} catch (Error& e) {
-							TraceEvent("KeyNotTuple").error(e).detail("Key", keyValue->key.printable());
-							throw key_not_tuple();
-						}
-					}
-					referenceTuple = &keyTuple.get();
+					unpackKeyTuple(&referenceTuple, keyTuple, keyValue);
 				} else if (s[1] == 'V') {
-					// Use valueTuple as reference.
-					if (!valueTuple.present()) {
-						// May throw exception if the value is not parsable as a tuple.
-						try {
-							valueTuple = Tuple::unpack(keyValue->value);
-						} catch (Error& e) {
-							TraceEvent("ValueNotTuple").error(e).detail("Value", keyValue->value.printable());
-							throw value_not_tuple();
-						}
-					}
-					referenceTuple = &valueTuple.get();
+					unpackValueTuple(&referenceTuple, valueTuple, keyValue);
 				} else {
 					ASSERT(false);
 					throw internal_error();
 				}
-
 				if (idx < 0 || idx >= referenceTuple->size()) {
 					throw mapper_bad_index();
 				}
 				mappedKeyTuple.append(referenceTuple->subTuple(idx, idx + 1));
-			} else if (s == "{...}") {
-				// Range query.
+			} else if (rangeQuery(s)) {
 				if (i != mappedKeyFormatTuple.size() - 1) {
 					// It must be the last element of the mapper tuple
 					throw mapper_bad_range_decriptor();
@@ -3562,11 +3565,11 @@ Key constructMappedKey(KeyValueRef* keyValue, Tuple& mappedKeyFormatTuple, bool&
 				isRangeQuery = true;
 				// Do not add it to the mapped key.
 			} else {
-				// If the element is a string but neither escaped nor descriptors, just copy it.
+				// If the element is a string but neither escaped nor descriptors, add to result.
 				mappedKeyTuple.append(mappedKeyFormatTuple.subTuple(i, i + 1));
 			}
 		} else {
-			// If the element not a string, just copy it.
+			// If the element not a string, add to result.
 			mappedKeyTuple.append(mappedKeyFormatTuple.subTuple(i, i + 1));
 		}
 	}
