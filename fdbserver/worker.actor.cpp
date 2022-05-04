@@ -167,9 +167,9 @@ Database openDBOnServer(Reference<AsyncVar<ServerDBInfo> const> const& db,
 	                                  enableLocalityLoadBalance,
 	                                  taskID,
 	                                  lockAware);
-	GlobalConfig::create(cx, db, std::addressof(db->get().client));
-	GlobalConfig::globalConfig(cx).trigger(samplingFrequency, samplingProfilerUpdateFrequency);
-	GlobalConfig::globalConfig(cx).trigger(samplingWindow, samplingProfilerUpdateWindow);
+	cx->globalConfig->init(db, std::addressof(db->get().client));
+	cx->globalConfig->trigger(samplingFrequency, samplingProfilerUpdateFrequency);
+	cx->globalConfig->trigger(samplingWindow, samplingProfilerUpdateWindow);
 	return cx;
 }
 
@@ -1606,7 +1606,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				state Database db =
 				    Database::createDatabase(metricsConnFile, Database::API_VERSION_LATEST, IsInternal::True, locality);
 				metricsLogger = runMetrics(db, KeyRef(metricsPrefix));
-				GlobalConfig::globalConfig(db).trigger(samplingFrequency, samplingProfilerUpdateFrequency);
+				db->globalConfig->trigger(samplingFrequency, samplingProfilerUpdateFrequency);
 			} catch (Error& e) {
 				TraceEvent(SevWarnAlways, "TDMetricsBadClusterFile").error(e).detail("ConnFile", metricsConnFile);
 			}
@@ -1614,7 +1614,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 			auto lockAware = metricsPrefix.size() && metricsPrefix[0] == '\xff' ? LockAware::True : LockAware::False;
 			auto database = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, lockAware);
 			metricsLogger = runMetrics(database, KeyRef(metricsPrefix));
-			GlobalConfig::globalConfig(database).trigger(samplingFrequency, samplingProfilerUpdateFrequency);
+			database->globalConfig->trigger(samplingFrequency, samplingProfilerUpdateFrequency);
 		}
 	}
 

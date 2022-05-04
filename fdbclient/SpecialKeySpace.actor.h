@@ -425,9 +425,10 @@ public:
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
 };
 
+class GlobalConfig;
 class GlobalConfigImpl : public SpecialKeyRangeRWImpl {
 public:
-	explicit GlobalConfigImpl(UID dbId, KeyRangeRef kr);
+	explicit GlobalConfigImpl(GlobalConfig* config, KeyRangeRef kr);
 	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
@@ -437,7 +438,7 @@ public:
 	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key) override;
 
 private:
-	UID dbId;
+	GlobalConfig* globalConfig;
 };
 
 class TracingOptionsImpl : public SpecialKeyRangeRWImpl {
