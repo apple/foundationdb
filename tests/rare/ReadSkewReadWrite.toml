@@ -9,10 +9,10 @@ timeout = 3600.0
 
 [[test.workload]]
 testName = 'ReadWrite'
-transactionsPerSecond = 100000
-testDuration = 400.0
+transactionsPerSecond = 100
+testDuration = 40.0
 skewRound = 1
-nodeCount = 30000 # 30000000
+nodeCount = 3000 # 30000000
 valueBytes = 100
 readsPerTransactionA = 8
 writesPerTransactionA = 0
