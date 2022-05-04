@@ -1714,7 +1714,7 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueueData* self, int teamCollectionIndex,
 	state bool skipCurrentLoop = false;
 	state Future<Void> delayF = Never();
 	state const bool readRebalance = !isDiskRebalancePriority(ddPriority);
-	state const char* eventName = isMountainChopperPriority(ddPriority) ? "BgDDMountainChopper" : "BgDDValleyFiller";
+	state const char* eventName = isMountainChopperPriority(ddPriority) ? "BgDDMountainChopper_New" : "BgDDValleyFiller_New";
 
 	loop {
 		state bool moved = false;
@@ -1845,7 +1845,7 @@ ACTOR Future<Void> BgDDMountainChopper(DDQueueData* self, int teamCollectionInde
 	loop {
 		state std::pair<Optional<Reference<IDataDistributionTeam>>, bool> randomTeam;
 		state bool moved = false;
-		state TraceEvent traceEvent("BgDDMountainChopper", self->distributorId);
+		state TraceEvent traceEvent("BgDDMountainChopper_Old", self->distributorId);
 		traceEvent.suppressFor(5.0).detail("PollingInterval", rebalancePollingInterval).detail("Rebalance", "Disk");
 
 		if (*self->lastLimited > 0) {
@@ -1968,7 +1968,7 @@ ACTOR Future<Void> BgDDValleyFiller(DDQueueData* self, int teamCollectionIndex) 
 	loop {
 		state std::pair<Optional<Reference<IDataDistributionTeam>>, bool> randomTeam;
 		state bool moved = false;
-		state TraceEvent traceEvent("BgDDValleyFiller", self->distributorId);
+		state TraceEvent traceEvent("BgDDValleyFiller_Old", self->distributorId);
 		traceEvent.suppressFor(5.0).detail("PollingInterval", rebalancePollingInterval).detail("Rebalance", "Disk");
 
 		if (*self->lastLimited > 0) {
