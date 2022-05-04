@@ -29,6 +29,7 @@
 #include "flow/flow.h"
 #include "flow/Arena.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/GlobalConfig.actor.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -426,7 +427,7 @@ public:
 
 class GlobalConfigImpl : public SpecialKeyRangeRWImpl {
 public:
-	explicit GlobalConfigImpl(KeyRangeRef kr);
+	explicit GlobalConfigImpl(UID dbId, KeyRangeRef kr);
 	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
@@ -434,6 +435,9 @@ public:
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
 	void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) override;
 	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key) override;
+
+private:
+	UID dbId;
 };
 
 class TracingOptionsImpl : public SpecialKeyRangeRWImpl {
