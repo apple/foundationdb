@@ -88,6 +88,7 @@ set(FDBSERVER_SRCS
   OldTLogServer_4_6.actor.cpp
   OldTLogServer_6_0.actor.cpp
   OldTLogServer_6_2.actor.cpp
+  OTELSpanContextMessage.h
   OnDemandStore.actor.cpp
   OnDemandStore.h
   PaxosConfigConsumer.actor.cpp

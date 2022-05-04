@@ -464,7 +464,7 @@ ACTOR Future<Void> addBackupMutations(ProxyCommitData* self,
 	state int yieldBytes = 0;
 	state BinaryWriter valueWriter(Unversioned());
 
-	toCommit->addTransactionInfo(SpanID());
+	toCommit->addTransactionInfo(SpanContext());
 
 	// Serialize the log range mutations within the map
 	for (; logRangeMutation != logRangeMutations->cend(); ++logRangeMutation) {
@@ -731,7 +731,7 @@ void CommitBatchContext::setupTraceBatch() {
 
 			g_traceBatch.addAttach("CommitAttachID", tr.debugID.get().first(), debugID.get().first());
 		}
-		span.addParent(tr.spanContext);
+		span.addLink(tr.spanContext);
 	}
 
 	if (debugID.present()) {
@@ -960,7 +960,7 @@ void applyMetadataEffect(CommitBatchContext* self) {
 				committed =
 				    committed && self->resolution[resolver].stateMutations[versionIndex][transactionIndex].committed;
 			if (committed) {
-				applyMetadataMutations(SpanID(),
+				applyMetadataMutations(SpanContext(),
 				                       *self->pProxyCommitData,
 				                       self->arena,
 				                       self->pProxyCommitData->logSystem,
@@ -1380,8 +1380,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 			// simulation
 			TEST(true); // Semi-committed pipeline limited by MVCC window
 			//TraceEvent("ProxyWaitingForCommitted", pProxyCommitData->dbgid).detail("CommittedVersion", pProxyCommitData->committedVersion.get()).detail("NeedToCommit", commitVersion);
-			waitVersionSpan = Span(
-			    deterministicRandom()->randomUniqueID(), "MP:overMaxReadTransactionLifeVersions"_loc, { span.context });
+			waitVersionSpan = Span("MP:overMaxReadTransactionLifeVersions"_loc, span.context);
 			choose {
 				when(wait(pProxyCommitData->committedVersion.whenAtLeast(
 				    self->commitVersion - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS))) {
@@ -1777,7 +1776,7 @@ void addTagMapping(GetKeyServerLocationsReply& reply, ProxyCommitData* commitDat
 ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsRequest req, ProxyCommitData* commitData) {
 	// We can't respond to these requests until we have valid txnStateStore
 	getCurrentLineage()->modify(&TransactionLineage::operation) = TransactionLineage::Operation::GetKeyServersLocations;
-	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.first();
+	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID;
 	wait(commitData->validState.getFuture());
 	wait(delay(0, TaskPriority::DefaultEndpoint));
 
@@ -2297,7 +2296,7 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 
 		Arena arena;
 		bool confChanges;
-		applyMetadataMutations(SpanID(),
+		applyMetadataMutations(SpanContext(),
 		                       *pContext->pCommitData,
 		                       arena,
 		                       Reference<ILogSystem>(),

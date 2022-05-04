@@ -35,8 +35,6 @@
 #include <string>
 #include <utility>
 
-#if ENCRYPTION_ENABLED
-
 namespace {
 bool isEncryptHeaderAuthTokenModeValid(const EncryptAuthTokenMode mode) {
 	return mode >= ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE && mode < ENCRYPT_HEADER_AUTH_TOKEN_LAST;
@@ -1186,5 +1184,3 @@ TEST_CASE("flow/BlobCipher") {
 	TraceEvent("BlobCipherTest_Done").log();
 	return Void();
 }
-
-#endif // ENCRYPTION_ENABLED
