@@ -33,6 +33,7 @@
 #include <unordered_map>
 
 #include "fdbclient/CommitProxyInterface.h"
+#include "fdbclient/DatabaseContext.h"
 #include "fdbclient/GlobalConfig.h"
 #include "fdbclient/ReadYourWrites.h"
 
@@ -65,6 +66,8 @@ struct ConfigValue : ReferenceCounted<ConfigValue> {
 };
 
 class GlobalConfig : NonCopyable {
+	typedef std::unordered_map<UID, GlobalConfig*> ConfigMap;
+
 public:
 	// Creates a GlobalConfig singleton, accessed by calling
 	// GlobalConfig::globalConfig(). This function requires a database object
@@ -77,23 +80,34 @@ public:
 	// database.
 	template <class T>
 	static void create(Database& cx, Reference<AsyncVar<T> const> db, const ClientDBInfo* dbInfo) {
-		if (g_network->global(INetwork::enGlobalConfig) == nullptr) {
+		auto config_map =
+		    reinterpret_cast<ConfigMap*>(g_network->global(INetwork::enGlobalConfig));
+		if (config_map == nullptr) {
+			auto m = new ConfigMap();
+			g_network->setGlobal(INetwork::enGlobalConfig, m);
+			config_map = m;
+		}
+
+		auto it = config_map->find(cx.dbId());
+		if (it == config_map->end()) {
 			auto config = new GlobalConfig{ cx };
-			g_network->setGlobal(INetwork::enGlobalConfig, config);
+			config_map->emplace(cx.dbId(), config);
 			config->_updater = updater(config, dbInfo);
 			// Bind changes in `db` to the `dbInfoChanged` AsyncTrigger.
 			// TODO: Change AsyncTrigger to a Reference
 			forward(db, std::addressof(config->dbInfoChanged));
 		} else {
-			GlobalConfig* config = reinterpret_cast<GlobalConfig*>(g_network->global(INetwork::enGlobalConfig));
+			GlobalConfig* config = it->second;
 			config->cx = cx;
+			config->_updater = updater(config, dbInfo);
 		}
 	}
 
 	// Returns a reference to the global GlobalConfig object. Clients should
 	// call this function whenever they need to read a value out of the global
 	// configuration.
-	static GlobalConfig& globalConfig();
+	static GlobalConfig& globalConfig(const Database& cx);
+	static GlobalConfig& globalConfig(UID dbid);
 
 	// Use this function to turn a global configuration key defined above into
 	// the full path needed to set the value in the database.

@@ -856,7 +856,7 @@ void fdbcliCompCmd(std::string const& text, std::vector<std::string>& lc) {
 	int count = tokens.size();
 
 	// for(int i = 0; i < count; i++) {
-	// 	printf("Token (%d): `%s'\n", i, tokens[i].toString().c_str());
+	//	printf("Token (%d): `%s'\n", i, tokens[i].toString().c_str());
 	// }
 
 	std::string ntext = "";
@@ -1698,7 +1698,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 				if (tokencmp(tokens[0], "profile")) {
 					getTransaction(db, managementTenant, tr, options, intrans);
-					bool _result = wait(makeInterruptable(profileCommandActor(tr, tokens, intrans)));
+					bool _result = wait(makeInterruptable(profileCommandActor(localDb, tr, tokens, intrans)));
 					if (!_result)
 						is_error = true;
 					continue;
