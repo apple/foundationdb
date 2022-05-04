@@ -1472,7 +1472,7 @@ public:
 		wait(delay(SERVER_KNOBS->DD_TEAM_ZERO_SERVER_LEFT_LOG_DELAY));
 		state std::vector<KeyRange> shards = self->shardsAffectedByTeamFailure->getShardsFor(
 		    ShardsAffectedByTeamFailure::Team(team->getServerIDs(), self->primary));
-		state std::vector<Future<std::vector<StorageMetrics>>> sizes;
+		state std::vector<Future<StorageMetrics>> sizes;
 		sizes.reserve(shards.size());
 
 		for (auto const& shard : shards) {
@@ -1487,7 +1487,7 @@ public:
 
 		int64_t bytesLost = 0;
 		for (auto const& size : sizes) {
-			bytesLost += size.get()[0].bytes;
+			bytesLost += size.get().bytes;
 		}
 
 		TraceEvent(SevWarnAlways, "DDZeroServerLeftInTeam", self->distributorId)

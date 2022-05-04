@@ -167,7 +167,7 @@ struct GetTopKMetricsRequest {
 	Promise<std::vector<StorageMetrics>> reply; // topK storage metrics
 
 	GetTopKMetricsRequest() {}
-	GetTopKMetricsRequest(std::vector<KeyRange> const& keys, int topK = 1) : keys(keys), topK(topK) {}
+	GetTopKMetricsRequest(std::vector<KeyRange> const& keys, int topK = 1) : topK(topK), keys(keys) {}
 };
 
 struct GetMetricsListRequest {
@@ -314,6 +314,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
                                          PromiseStream<RelocateShard> output,
                                          FutureStream<RelocateShard> input,
                                          PromiseStream<GetMetricsRequest> getShardMetrics,
+                                         PromiseStream<GetTopKMetricsRequest> getTopKMetrics,
                                          Reference<AsyncVar<bool>> processingUnhealthy,
                                          Reference<AsyncVar<bool>> processingWiggle,
                                          std::vector<TeamCollectionInterface> teamCollection,

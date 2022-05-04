@@ -480,6 +480,7 @@ struct DDQueueData {
 	PromiseStream<RelocateShard> output;
 	FutureStream<RelocateShard> input;
 	PromiseStream<GetMetricsRequest> getShardMetrics;
+	PromiseStream<GetTopKMetricsRequest> getTopKMetrics;
 
 	double* lastLimited;
 	double lastInterval;
@@ -544,6 +545,7 @@ struct DDQueueData {
 	            PromiseStream<RelocateShard> output,
 	            FutureStream<RelocateShard> input,
 	            PromiseStream<GetMetricsRequest> getShardMetrics,
+	            PromiseStream<GetTopKMetricsRequest> getTopKMetrics,
 	            double* lastLimited)
 	  : distributorId(mid), lock(lock), cx(cx), teamCollections(teamCollections), shardsAffectedByTeamFailure(sABTF),
 	    getAverageShardBytes(getAverageShardBytes),
@@ -551,10 +553,10 @@ struct DDQueueData {
 	    finishMoveKeysParallelismLock(SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM),
 	    fetchSourceLock(new FlowLock(SERVER_KNOBS->DD_FETCH_SOURCE_PARALLELISM)), activeRelocations(0),
 	    queuedRelocations(0), bytesWritten(0), teamSize(teamSize), singleRegionTeamSize(singleRegionTeamSize),
-	    output(output), input(input), getShardMetrics(getShardMetrics), lastLimited(lastLimited), lastInterval(0),
-	    suppressIntervals(0), rawProcessingUnhealthy(new AsyncVar<bool>(false)),
-	    rawProcessingWiggle(new AsyncVar<bool>(false)), unhealthyRelocations(0),
-	    movedKeyServersEventHolder(makeReference<EventCacheHolder>("MovedKeyServers")) {}
+	    output(output), input(input), getShardMetrics(getShardMetrics), getTopKMetrics(getTopKMetrics),
+	    lastLimited(lastLimited), lastInterval(0), suppressIntervals(0),
+	    rawProcessingUnhealthy(new AsyncVar<bool>(false)), rawProcessingWiggle(new AsyncVar<bool>(false)),
+	    unhealthyRelocations(0), movedKeyServersEventHolder(makeReference<EventCacheHolder>("MovedKeyServers")) {}
 
 	void validate() {
 		if (EXPENSIVE_VALIDATION) {
@@ -1157,9 +1159,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 			self->suppressIntervals = 0;
 		}
 
-		std::vector<StorageMetrics> metricsList =
+		state StorageMetrics metrics =
 		    wait(brokenPromiseToNever(self->getShardMetrics.getReply(GetMetricsRequest(rd.keys))));
-		state StorageMetrics metrics = metricsList[0];
 
 		ASSERT(rd.src.size());
 		loop {
@@ -1553,12 +1554,12 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
 	// randomly choose topK shards
 	int topK = std::min(int(0.1 * shards.size()), 10);
 	state Future<HealthMetrics> healthMetrics = self->cx->getHealthMetrics(true);
-	state GetMetricsRequest req(shards, topK);
+	state GetTopKMetricsRequest req(shards, topK);
 	req.comparator = [](const StorageMetrics& a, const StorageMetrics& b) {
 		return a.bytesReadPerKSecond / std::max(a.bytes * 1.0, 1.0 * SERVER_KNOBS->MIN_SHARD_BYTES) >
 		       b.bytesReadPerKSecond / std::max(b.bytes * 1.0, 1.0 * SERVER_KNOBS->MIN_SHARD_BYTES);
 	};
-	state std::vector<StorageMetrics> metricsList = wait(brokenPromiseToNever(self->getShardMetrics.getReply(req)));
+	state std::vector<StorageMetrics> metricsList = wait(brokenPromiseToNever(self->getTopKMetrics.getReply(req)));
 	wait(ready(healthMetrics));
 	if (getWorstCpu(healthMetrics.get(), sourceTeam->getServerIDs()) < 25.0) { // 25%
 		traceEvent->detail("SkipReason", "LowReadLoad");
@@ -1634,11 +1635,11 @@ ACTOR static Future<bool> rebalanceTeams(DDQueueData* self,
 	state int retries = 0;
 	while (retries < SERVER_KNOBS->REBALANCE_MAX_RETRIES) {
 		state KeyRange testShard = deterministicRandom()->randomChoice(shards);
-		std::vector<StorageMetrics> testMetrics =
+		StorageMetrics testMetrics =
 		    wait(brokenPromiseToNever(self->getShardMetrics.getReply(GetMetricsRequest(testShard))));
-		if (testMetrics[0].bytes > metrics.bytes) {
+		if (testMetrics.bytes > metrics.bytes) {
 			moveShard = testShard;
-			metrics = testMetrics[0];
+			metrics = testMetrics;
 			if (metrics.bytes > averageShardBytes) {
 				break;
 			}
@@ -2084,6 +2085,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
                                          PromiseStream<RelocateShard> output,
                                          FutureStream<RelocateShard> input,
                                          PromiseStream<GetMetricsRequest> getShardMetrics,
+                                         PromiseStream<GetTopKMetricsRequest> getTopKMetrics,
                                          Reference<AsyncVar<bool>> processingUnhealthy,
                                          Reference<AsyncVar<bool>> processingWiggle,
                                          std::vector<TeamCollectionInterface> teamCollections,
@@ -2107,6 +2109,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 	                       output,
 	                       input,
 	                       getShardMetrics,
+	                       getTopKMetrics,
 	                       lastLimited);
 	state std::set<UID> serversToLaunchFrom;
 	state KeyRange keysToLaunchFrom;
