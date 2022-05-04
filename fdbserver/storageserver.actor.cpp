@@ -3506,7 +3506,7 @@ bool unescapeLiterals(std::string& s, std::string before, std::string after) {
 			break;
 		}
 		s.replace(found, before.length(), after);
-		p += after.length();
+		p = found + after.length();
 		escaped = true;
 	}
 	return escaped;
