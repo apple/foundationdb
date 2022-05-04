@@ -1092,7 +1092,6 @@ ACTOR Future<Void> ddSnapCreate(DistributorSnapRequest snapReq,
 		snapReq.reply.sendError(operation_failed());
 		return Void();
 	}
-	double delayTime = g_network->isSimulated() ? 70.0 : SERVER_KNOBS->SNAP_CREATE_MAX_TIMEOUT;
 	try {
 		choose {
 			when(wait(dbInfoChange)) {
@@ -1107,7 +1106,7 @@ ACTOR Future<Void> ddSnapCreate(DistributorSnapRequest snapReq,
 				    .detail("SnapUID", snapReq.snapUID);
 				snapReq.reply.send(Void());
 			}
-			when(wait(delay(delayTime))) {
+			when(wait(delay(SERVER_KNOBS->SNAP_CREATE_MAX_TIMEOUT))) {
 				TraceEvent("SnapDDCreateTimedOut")
 				    .detail("SnapPayload", snapReq.snapPayload)
 				    .detail("SnapUID", snapReq.snapUID);
