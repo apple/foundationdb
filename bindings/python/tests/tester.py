@@ -608,17 +608,16 @@ class Tester:
                 elif inst.op == six.u("TENANT_LIST"):
                     begin, end, limit = inst.pop(3)
                     tenant_list = fdb.tenant_management.list_tenants(self.db, begin, end, limit)
-                    result = bytearray()
+                    result = []
                     for tenant in tenant_list:
-                        result += tenant.key
+                        result += [tenant.key]
                         try:
                             metadata = json.loads(tenant.value)
                             id =  metadata["id"]
                             prefix = metadata["prefix"]
                         except (json.decoder.JSONDecodeError, KeyError) as e:
                             assert False, "Invalid Tenant Metadata"
-                    result_bytes = bytes(result)
-                    inst.push(result_bytes)
+                    inst.push(fdb.tuple.pack(tuple(result)))
                 elif inst.op == six.u("UNIT_TESTS"):
                     try:
                         test_db_options(db)
