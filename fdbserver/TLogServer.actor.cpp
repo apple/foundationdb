@@ -365,9 +365,9 @@ struct TLogData : NonCopyable {
 	                          // the set and for callers that unset will
 	                          // be able to match it up
 	std::string dataFolder; // folder where data is stored
-	Reference<AsyncVar<bool>> degraded;
 	// End of fields used by snapshot based backup and restore
 
+	Reference<AsyncVar<bool>> degraded;
 	std::vector<TagsAndMessage> tempTagMessages;
 
 	Reference<Histogram> commitLatencyDist;
