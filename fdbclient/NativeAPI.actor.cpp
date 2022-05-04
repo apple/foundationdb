@@ -23,6 +23,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <iterator>
+#include <memory>
 #include <regex>
 #include <unordered_set>
 #include <tuple>
@@ -809,12 +810,12 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext* cx) {
 				}
 			}
 			cx->clientStatusUpdater.outStatusQ.clear();
-			wait(GlobalConfig::globalConfig(cx->dbId).onInitialized());
-			double sampleRate = GlobalConfig::globalConfig(cx->dbId).get<double>(
+			wait(cx->globalConfig->onInitialized());
+			double sampleRate = cx->globalConfig->get<double>(
 			    fdbClientInfoTxnSampleRate, std::numeric_limits<double>::infinity());
 			double clientSamplingProbability =
 			    std::isinf(sampleRate) ? CLIENT_KNOBS->CSI_SAMPLING_PROBABILITY : sampleRate;
-			int64_t sizeLimit = GlobalConfig::globalConfig(cx->dbId).get<int64_t>(fdbClientInfoTxnSizeLimit, -1);
+			int64_t sizeLimit = cx->globalConfig->get<int64_t>(fdbClientInfoTxnSizeLimit, -1);
 			int64_t clientTxnInfoSizeLimit = sizeLimit == -1 ? CLIENT_KNOBS->CSI_SIZE_LIMIT : sizeLimit;
 			if (!trChunksQ.empty() && deterministicRandom()->random01() < clientSamplingProbability)
 				wait(delExcessClntTxnEntriesActor(&tr, clientTxnInfoSizeLimit));
@@ -1481,6 +1482,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 	cacheListMonitor = monitorCacheList(this);
 
 	smoothMidShardSize.reset(CLIENT_KNOBS->INIT_MID_SHARD_BYTES);
+	globalConfig = std::make_unique<GlobalConfig>(Database(this));
 
 	if (apiVersionAtLeast(710)) {
 		registerSpecialKeysImpl(
@@ -1554,7 +1556,8 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 		registerSpecialKeysImpl(
 		    SpecialKeySpace::MODULE::GLOBALCONFIG,
 		    SpecialKeySpace::IMPLTYPE::READWRITE,
-		    std::make_unique<GlobalConfigImpl>(dbId, SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::GLOBALCONFIG)));
+		    std::make_unique<GlobalConfigImpl>(globalConfig.get(),
+		                                       SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::GLOBALCONFIG)));
 		registerSpecialKeySpaceModule(
 		    SpecialKeySpace::MODULE::TRACING,
 		    SpecialKeySpace::IMPLTYPE::READWRITE,
@@ -1937,13 +1940,12 @@ Future<Void> DatabaseContext::onProxiesChanged() const {
 }
 
 bool DatabaseContext::sampleReadTags() const {
-	double sampleRate = GlobalConfig::globalConfig(dbId).get(transactionTagSampleRate, CLIENT_KNOBS->READ_TAG_SAMPLE_RATE);
+	double sampleRate = globalConfig->get(transactionTagSampleRate, CLIENT_KNOBS->READ_TAG_SAMPLE_RATE);
 	return sampleRate > 0 && deterministicRandom()->random01() <= sampleRate;
 }
 
 bool DatabaseContext::sampleOnCost(uint64_t cost) const {
-	double sampleCost =
-	    GlobalConfig::globalConfig(dbId).get<double>(transactionTagSampleCost, CLIENT_KNOBS->COMMIT_SAMPLE_COST);
+	double sampleCost = globalConfig->get<double>(transactionTagSampleCost, CLIENT_KNOBS->COMMIT_SAMPLE_COST);
 	if (sampleCost <= 0)
 		return false;
 	return deterministicRandom()->random01() <= (double)cost / sampleCost;
@@ -2219,10 +2221,9 @@ Database Database::createDatabase(Reference<IClusterConnectionRecord> connRecord
 	}
 
 	auto database = Database(db);
-	GlobalConfig::create(
-	    database, Reference<AsyncVar<ClientDBInfo> const>(clientInfo), std::addressof(clientInfo->get()));
-	GlobalConfig::globalConfig(database).trigger(samplingFrequency, samplingProfilerUpdateFrequency);
-	GlobalConfig::globalConfig(database).trigger(samplingWindow, samplingProfilerUpdateWindow);
+	database->globalConfig->init(Reference<AsyncVar<ClientDBInfo> const>(clientInfo), std::addressof(clientInfo->get()));
+	database->globalConfig->trigger(samplingFrequency, samplingProfilerUpdateFrequency);
+	database->globalConfig->trigger(samplingWindow, samplingProfilerUpdateWindow);
 
 	TraceEvent("ConnectToDatabase", database->dbId)
 	    .detail("Version", FDB_VT_VERSION)
@@ -7949,7 +7950,7 @@ void Transaction::checkDeferredError() const {
 
 Reference<TransactionLogInfo> Transaction::createTrLogInfoProbabilistically(const Database& cx) {
 	if (!cx->isError()) {
-		double clientSamplingProbability = GlobalConfig::globalConfig(cx).get<double>(
+		double clientSamplingProbability = cx->globalConfig->get<double>(
 		    fdbClientInfoTxnSampleRate, CLIENT_KNOBS->CSI_SAMPLING_PROBABILITY);
 		if (((networkOptions.logClientInfo.present() && networkOptions.logClientInfo.get()) || BUGGIFY) &&
 		    deterministicRandom()->random01() < clientSamplingProbability &&

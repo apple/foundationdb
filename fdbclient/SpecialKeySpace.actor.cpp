@@ -1454,7 +1454,8 @@ Future<Optional<std::string>> ConsistencyCheckImpl::commit(ReadYourWritesTransac
 	return Optional<std::string>();
 }
 
-GlobalConfigImpl::GlobalConfigImpl(UID dbId, KeyRangeRef kr) : dbId(dbId), SpecialKeyRangeRWImpl(kr) {}
+GlobalConfigImpl::GlobalConfigImpl(GlobalConfig* config, KeyRangeRef kr)
+  : globalConfig(config), SpecialKeyRangeRWImpl(kr) {}
 
 // Returns key-value pairs for each value stored in the global configuration
 // framework within the range specified. The special-key-space getrange
@@ -1464,11 +1465,9 @@ Future<RangeResult> GlobalConfigImpl::getRange(ReadYourWritesTransaction* ryw,
                                                KeyRangeRef kr,
                                                GetRangeLimits limitsHint) const {
 	RangeResult result;
-
-	auto& globalConfig = GlobalConfig::globalConfig(dbId);
 	KeyRangeRef modified =
 	    KeyRangeRef(kr.begin.removePrefix(getKeyRange().begin), kr.end.removePrefix(getKeyRange().begin));
-	std::map<KeyRef, Reference<ConfigValue>> values = globalConfig.get(modified);
+	std::map<KeyRef, Reference<ConfigValue>> values = globalConfig->get(modified);
 	for (const auto& [key, config] : values) {
 		Key prefixedKey = key.withPrefix(getKeyRange().begin);
 		if (config.isValid() && config->value.has_value()) {
