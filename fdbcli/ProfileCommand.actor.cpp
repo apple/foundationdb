@@ -48,7 +48,7 @@ ACTOR Future<bool> profileCommandActor(Database db,
 			fprintf(stderr, "ERROR: Usage: profile client <get|set>\n");
 			return false;
 		}
-		wait(GlobalConfig::globalConfig(db).onInitialized());
+		wait(db->globalConfig->onInitialized());
 		if (tokencmp(tokens[2], "get")) {
 			if (tokens.size() != 3) {
 				fprintf(stderr, "ERROR: Addtional arguments to `get` are not supported.\n");
@@ -56,12 +56,12 @@ ACTOR Future<bool> profileCommandActor(Database db,
 			}
 			std::string sampleRateStr = "default";
 			std::string sizeLimitStr = "default";
-			const double sampleRateDbl = GlobalConfig::globalConfig(db).get<double>(
+			const double sampleRateDbl = db->globalConfig->get<double>(
 			    fdbClientInfoTxnSampleRate, std::numeric_limits<double>::infinity());
 			if (!std::isinf(sampleRateDbl)) {
 				sampleRateStr = std::to_string(sampleRateDbl);
 			}
-			const int64_t sizeLimit = GlobalConfig::globalConfig(db).get<int64_t>(fdbClientInfoTxnSizeLimit, -1);
+			const int64_t sizeLimit = db->globalConfig->get<int64_t>(fdbClientInfoTxnSizeLimit, -1);
 			if (sizeLimit != -1) {
 				sizeLimitStr = boost::lexical_cast<std::string>(sizeLimit);
 			}
