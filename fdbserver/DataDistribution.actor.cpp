@@ -533,6 +533,7 @@ static std::set<int> const& normalDDQueueErrors() {
 		s.insert(error_code_movekeys_conflict);
 		s.insert(error_code_broken_promise);
 		s.insert(error_code_data_move_cancelled);
+		s.insert(error_code_data_move_dest_team_not_found);
 	}
 	return s;
 }
@@ -829,6 +830,12 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 						TraceEvent(SevInfo, "DDInitRestoredDataMove", self->ddId)
 						    .detail("DataMoveID", dataMoveMap[meta.range.begin]->meta.id)
 						    .detail("DataMove", dataMoveMap[meta.range.begin]->meta.toString());
+						std::vector<ShardsAffectedByTeamFailure::Team> teams;
+						teams.push_back(ShardsAffectedByTeamFailure::Team(rs.dataMove->primaryDest, true));
+						if (!rs.dataMove->remoteDest.empty()) {
+							teams.push_back(ShardsAffectedByTeamFailure::Team(rs.dataMove->remoteDest, false));
+						}
+						shardsAffectedByTeamFailure->moveShard(rs.keys, teams);
 						output.send(rs);
 					} else {
 						ASSERT(false);
@@ -1015,6 +1022,7 @@ static std::set<int> const& normalDataDistributorErrors() {
 		s.insert(error_code_please_reboot);
 		s.insert(error_code_movekeys_conflict);
 		s.insert(error_code_data_move_cancelled);
+		s.insert(error_code_data_move_dest_team_not_found);
 	}
 	return s;
 }
