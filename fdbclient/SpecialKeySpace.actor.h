@@ -543,11 +543,13 @@ public:
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
 };
 
-class TenantMapRangeImpl : public SpecialKeyRangeRWImpl {
+class TenantRangeImpl : public SpecialKeyRangeRWImpl {
 public:
 	const static KeyRangeRef submoduleRange;
+	const static KeyRangeRef mapSubRange;
+	const static KeyRangeRef configureSubRange;
 
-	explicit TenantMapRangeImpl(KeyRangeRef kr);
+	explicit TenantRangeImpl(KeyRangeRef kr);
 	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;

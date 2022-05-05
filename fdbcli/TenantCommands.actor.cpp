@@ -33,13 +33,15 @@
 
 namespace fdb_cli {
 
-const KeyRangeRef tenantSpecialKeyRange(LiteralStringRef("\xff\xff/management/tenant_map/"),
-                                        LiteralStringRef("\xff\xff/management/tenant_map0"));
+const KeyRangeRef tenantMapSpecialKeyRange(LiteralStringRef("\xff\xff/management/tenant/map/"),
+                                           LiteralStringRef("\xff\xff/management/tenant/map0"));
+const KeyRangeRef tenantConfigSpecialKeyRange(LiteralStringRef("\xff\xff/management/tenant/configure/"),
+                                              LiteralStringRef("\xff\xff/management/tenant/configure0"));
 
-std::pair<bool, Optional<TenantMapEntry>> parseTenantConfiguration(std::vector<StringRef> const& tokens,
-                                                                   TenantMapEntry const& defaults,
-                                                                   int startIndex) {
-	Optional<TenantMapEntry> entry;
+std::pair<bool, TenantMapEntry> parseTenantConfiguration(std::vector<StringRef> const& tokens,
+                                                         TenantMapEntry const& defaults,
+                                                         int startIndex) {
+	TenantMapEntry entry;
 
 	for (int tokenNum = startIndex; tokenNum < tokens.size(); ++tokenNum) {
 		StringRef token = tokens[tokenNum];
@@ -47,14 +49,26 @@ std::pair<bool, Optional<TenantMapEntry>> parseTenantConfiguration(std::vector<S
 		std::string value = token.toString();
 		if (tokencmp(param, "tenant_group")) {
 			entry = defaults;
-			// TODO: store tenant group
+			entry.tenantGroup = value;
 		} else {
 			fprintf(stderr, "ERROR: unrecognized configuration parameter %s\n", param.toString().c_str());
-			return std::make_pair(false, Optional<TenantMapEntry>());
+			return std::make_pair(false, defaults);
 		}
 	}
 
 	return std::make_pair(true, entry);
+}
+
+Key makeConfigKey(StringRef configName, TenantNameRef tenantName) {
+	Key configKey = makeString(tenantConfigSpecialKeyRange.begin.size() + configName.size() + 1 + tenantName.size());
+
+	uint8_t* mutableKey = mutateString(configKey);
+	mutableKey = tenantConfigSpecialKeyRange.begin.copyTo(mutableKey);
+	mutableKey = configName.copyTo(mutableKey);
+	*(mutableKey++) = '/';
+	tenantName.copyTo(mutableKey);
+
+	return configKey;
 }
 
 // createtenant command
@@ -64,16 +78,14 @@ ACTOR Future<bool> createTenantCommandActor(Reference<IDatabase> db, std::vector
 		return false;
 	}
 
-	state Key tenantNameKey = fdb_cli::tenantSpecialKeyRange.begin.withSuffix(tokens[1]);
+	state Key tenantNameKey = tenantMapSpecialKeyRange.begin.withSuffix(tokens[1]);
 	state Reference<ITransaction> tr = db->createTransaction();
 	state bool doneExistenceCheck = false;
 
-	auto configuration = parseTenantConfiguration(tokens, TenantMapEntry(), 2);
+	state std::pair<bool, TenantMapEntry> configuration = parseTenantConfiguration(tokens, TenantMapEntry(), 2);
 	if (!configuration.first) {
 		return false;
 	}
-
-	// TODO: use the tenant group
 
 	loop {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
@@ -89,12 +101,15 @@ ACTOR Future<bool> createTenantCommandActor(Reference<IDatabase> db, std::vector
 			}
 
 			tr->set(tenantNameKey, ValueRef());
+			if (configuration.second.tenantGroup.present()) {
+				tr->set(makeConfigKey("tenant_group"_sr, tokens[1]), configuration.second.tenantGroup.get());
+			}
 			wait(safeThreadFutureToFuture(tr->commit()));
 			break;
 		} catch (Error& e) {
 			state Error err(e);
 			if (e.code() == error_code_special_keys_api_failure) {
-				std::string errorMsgStr = wait(fdb_cli::getSpecialKeysFailureErrorMessage(tr));
+				std::string errorMsgStr = wait(getSpecialKeysFailureErrorMessage(tr));
 				fprintf(stderr, "ERROR: %s\n", errorMsgStr.c_str());
 				return false;
 			}
@@ -120,7 +135,7 @@ ACTOR Future<bool> deleteTenantCommandActor(Reference<IDatabase> db, std::vector
 		return false;
 	}
 
-	state Key tenantNameKey = fdb_cli::tenantSpecialKeyRange.begin.withSuffix(tokens[1]);
+	state Key tenantNameKey = tenantMapSpecialKeyRange.begin.withSuffix(tokens[1]);
 	state Reference<ITransaction> tr = db->createTransaction();
 	state bool doneExistenceCheck = false;
 
@@ -143,7 +158,7 @@ ACTOR Future<bool> deleteTenantCommandActor(Reference<IDatabase> db, std::vector
 		} catch (Error& e) {
 			state Error err(e);
 			if (e.code() == error_code_special_keys_api_failure) {
-				std::string errorMsgStr = wait(fdb_cli::getSpecialKeysFailureErrorMessage(tr));
+				std::string errorMsgStr = wait(getSpecialKeysFailureErrorMessage(tr));
 				fprintf(stderr, "ERROR: %s\n", errorMsgStr.c_str());
 				return false;
 			}
@@ -191,8 +206,8 @@ ACTOR Future<bool> listTenantsCommandActor(Reference<IDatabase> db, std::vector<
 		}
 	}
 
-	state Key beginTenantKey = fdb_cli::tenantSpecialKeyRange.begin.withSuffix(beginTenant);
-	state Key endTenantKey = fdb_cli::tenantSpecialKeyRange.begin.withSuffix(endTenant);
+	state Key beginTenantKey = tenantMapSpecialKeyRange.begin.withSuffix(beginTenant);
+	state Key endTenantKey = tenantMapSpecialKeyRange.begin.withSuffix(endTenant);
 	state Reference<ITransaction> tr = db->createTransaction();
 
 	loop {
@@ -212,16 +227,15 @@ ACTOR Future<bool> listTenantsCommandActor(Reference<IDatabase> db, std::vector<
 
 			int index = 0;
 			for (auto tenant : tenants) {
-				printf("  %d. %s\n",
-				       ++index,
-				       printable(tenant.key.removePrefix(fdb_cli::tenantSpecialKeyRange.begin)).c_str());
+				printf(
+				    "  %d. %s\n", ++index, printable(tenant.key.removePrefix(tenantMapSpecialKeyRange.begin)).c_str());
 			}
 
 			return true;
 		} catch (Error& e) {
 			state Error err(e);
 			if (e.code() == error_code_special_keys_api_failure) {
-				std::string errorMsgStr = wait(fdb_cli::getSpecialKeysFailureErrorMessage(tr));
+				std::string errorMsgStr = wait(getSpecialKeysFailureErrorMessage(tr));
 				fprintf(stderr, "ERROR: %s\n", errorMsgStr.c_str());
 				return false;
 			}
@@ -244,7 +258,7 @@ ACTOR Future<bool> getTenantCommandActor(Reference<IDatabase> db, std::vector<St
 		return false;
 	}
 
-	state Key tenantNameKey = fdb_cli::tenantSpecialKeyRange.begin.withSuffix(tokens[1]);
+	state Key tenantNameKey = tenantMapSpecialKeyRange.begin.withSuffix(tokens[1]);
 	state Reference<ITransaction> tr = db->createTransaction();
 
 	loop {
@@ -262,16 +276,21 @@ ACTOR Future<bool> getTenantCommandActor(Reference<IDatabase> db, std::vector<St
 
 			int64_t id;
 			std::string prefix;
+			std::string tenantGroup;
 			doc.get("id", id);
 			doc.get("prefix", prefix);
+			bool hasTenantGroup = doc.tryGet("tenant_group", tenantGroup);
 
 			printf("  id: %" PRId64 "\n", id);
 			printf("  prefix: %s\n", printable(prefix).c_str());
+			if (hasTenantGroup) {
+				printf("  tenant group: %s\n", printable(tenantGroup).c_str());
+			}
 			return true;
 		} catch (Error& e) {
 			state Error err(e);
 			if (e.code() == error_code_special_keys_api_failure) {
-				std::string errorMsgStr = wait(fdb_cli::getSpecialKeysFailureErrorMessage(tr));
+				std::string errorMsgStr = wait(getSpecialKeysFailureErrorMessage(tr));
 				fprintf(stderr, "ERROR: %s\n", errorMsgStr.c_str());
 				return false;
 			}

@@ -28,6 +28,8 @@
 
 typedef StringRef TenantNameRef;
 typedef Standalone<TenantNameRef> TenantName;
+typedef StringRef TenantGroupNameRef;
+typedef Standalone<TenantGroupNameRef> TenantGroupName;
 
 struct TenantMapEntry {
 	constexpr static FileIdentifier file_identifier = 12247338;
@@ -45,13 +47,14 @@ struct TenantMapEntry {
 		return id;
 	}
 
+	Arena arena;
 	int64_t id;
 	Key prefix;
+	Optional<TenantGroupName> tenantGroup;
 
 	constexpr static int ROOT_PREFIX_SIZE = sizeof(id);
 
-private:
-	void initPrefix(KeyRef subspace) {
+	void setSubspace(KeyRef subspace) {
 		ASSERT(id >= 0);
 		prefix = makeString(8 + subspace.size());
 		uint8_t* data = mutateString(prefix);
@@ -60,24 +63,27 @@ private:
 		memcpy(data + subspace.size(), &swapped, 8);
 	}
 
-public:
 	TenantMapEntry() : id(-1) {}
-	TenantMapEntry(int64_t id, KeyRef subspace) : id(id) { initPrefix(subspace); }
+	TenantMapEntry(int64_t id, KeyRef subspace) : id(id) { setSubspace(subspace); }
+	TenantMapEntry(int64_t id, KeyRef subspace, Optional<TenantGroupName> tenantGroup)
+	  : id(id), tenantGroup(tenantGroup) {
+		setSubspace(subspace);
+	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
 		KeyRef subspace;
 		if (ar.isDeserializing) {
-			serializer(ar, id, subspace);
+			serializer(ar, id, subspace, tenantGroup);
 			if (id >= 0) {
-				initPrefix(subspace);
+				setSubspace(subspace);
 			}
 		} else {
 			ASSERT(prefix.size() >= 8 || (prefix.empty() && id == -1));
 			if (!prefix.empty()) {
 				subspace = prefix.substr(0, prefix.size() - 8);
 			}
-			serializer(ar, id, subspace);
+			serializer(ar, id, subspace, tenantGroup);
 		}
 	}
 };

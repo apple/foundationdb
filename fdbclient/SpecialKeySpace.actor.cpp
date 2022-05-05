@@ -56,7 +56,7 @@ static bool isAlphaNumeric(const std::string& key) {
 }
 } // namespace
 
-const KeyRangeRef TenantMapRangeImpl::submoduleRange = KeyRangeRef("tenant_map/"_sr, "tenant_map0"_sr);
+const KeyRangeRef TenantRangeImpl::submoduleRange = KeyRangeRef("tenant/"_sr, "tenant0"_sr);
 const KeyRangeRef DataClusterMapRangeImpl::submoduleRange = KeyRangeRef("data_cluster/"_sr, "data_cluster0"_sr);
 
 std::unordered_map<SpecialKeySpace::MODULE, KeyRange> SpecialKeySpace::moduleToBoundary = {
@@ -121,7 +121,7 @@ std::unordered_map<std::string, KeyRange> SpecialKeySpace::managementApiCommandT
 	{ "datadistribution",
 	  KeyRangeRef(LiteralStringRef("data_distribution/"), LiteralStringRef("data_distribution0"))
 	      .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
-	{ "tenantmap", TenantMapRangeImpl::submoduleRange.withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) }
+	{ "tenant", TenantRangeImpl::submoduleRange.withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) }
 };
 
 std::unordered_map<std::string, KeyRange> SpecialKeySpace::actorLineageApiCommandToRange = {
@@ -2754,45 +2754,93 @@ Future<Optional<std::string>> FailedLocalitiesRangeImpl::commit(ReadYourWritesTr
 	return excludeLocalityCommitActor(ryw, true);
 }
 
-ACTOR Future<RangeResult> getTenantList(ReadYourWritesTransaction* ryw, KeyRangeRef kr, GetRangeLimits limitsHint) {
-	state KeyRef managementPrefix =
-	    kr.begin.substr(0,
-	                    SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin.size() +
-	                        TenantMapRangeImpl::submoduleRange.begin.size());
+TenantRangeImpl::TenantRangeImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
 
-	kr = kr.removePrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin);
-	TenantNameRef beginTenant = kr.begin.removePrefix(TenantMapRangeImpl::submoduleRange.begin);
+const KeyRangeRef TenantRangeImpl::mapSubRange = KeyRangeRef("map/"_sr, "map0"_sr);
+const KeyRangeRef TenantRangeImpl::configureSubRange = KeyRangeRef("configure/"_sr, "configure0"_sr);
 
-	TenantNameRef endTenant = kr.end;
-	if (endTenant.startsWith(TenantMapRangeImpl::submoduleRange.begin)) {
-		endTenant = endTenant.removePrefix(TenantMapRangeImpl::submoduleRange.begin);
+KeyRangeRef removePrefix(KeyRangeRef range, KeyRef prefix, KeyRef defaultEnd) {
+	KeyRef begin = range.begin.removePrefix(prefix);
+	KeyRef end;
+	if (range.end.startsWith(prefix)) {
+		end = range.end.removePrefix(TenantRangeImpl::mapSubRange.begin);
 	} else {
-		endTenant = "\xff"_sr;
+		end = defaultEnd;
 	}
 
-	std::map<TenantName, TenantMapEntry> tenants =
-	    wait(ManagementAPI::listTenantsTransaction(&ryw->getTransaction(), beginTenant, endTenant, limitsHint.rows));
+	return KeyRangeRef(begin, end);
+}
 
-	RangeResult results;
+KeyRef withTenantMapPrefix(Database db, KeyRef key, Arena& ar) {
+	int keySize = SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin.size() +
+	              TenantRangeImpl::submoduleRange.begin.size() + key.size();
+	if (db->apiVersionAtLeast(720)) {
+		keySize += TenantRangeImpl::mapSubRange.begin.size();
+	}
+
+	KeyRef prefixedKey = makeString(keySize, ar);
+	uint8_t* mutableKey = mutateString(prefixedKey);
+
+	mutableKey = SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin.copyTo(mutableKey);
+	mutableKey = TenantRangeImpl::submoduleRange.begin.copyTo(mutableKey);
+	if (db->apiVersionAtLeast(720)) {
+		mutableKey = TenantRangeImpl::mapSubRange.begin.copyTo(mutableKey);
+	}
+	key.copyTo(mutableKey);
+	return prefixedKey;
+}
+
+ACTOR Future<Void> getTenantList(ReadYourWritesTransaction* ryw,
+                                 KeyRangeRef kr,
+                                 RangeResult* results,
+                                 GetRangeLimits limitsHint) {
+	std::map<TenantName, TenantMapEntry> tenants =
+	    wait(ManagementAPI::listTenantsTransaction(&ryw->getTransaction(), kr.begin, kr.end, limitsHint.rows));
+
 	for (auto tenant : tenants) {
 		json_spirit::mObject tenantEntry;
 		tenantEntry["id"] = tenant.second.id;
 		tenantEntry["prefix"] = tenant.second.prefix.toString();
+		if (tenant.second.tenantGroup.present()) {
+			tenantEntry["tenant_group"] = tenant.second.tenantGroup.get().toString();
+		}
 		std::string tenantEntryString = json_spirit::write_string(json_spirit::mValue(tenantEntry));
-		ValueRef tenantEntryBytes(results.arena(), tenantEntryString);
-		results.push_back(results.arena(),
-		                  KeyValueRef(tenant.first.withPrefix(managementPrefix, results.arena()), tenantEntryBytes));
+		ValueRef tenantEntryBytes(results->arena(), tenantEntryString);
+		results->push_back(
+		    results->arena(),
+		    KeyValueRef(withTenantMapPrefix(ryw->getDatabase(), tenant.first, results->arena()), tenantEntryBytes));
+	}
+
+	return Void();
+}
+
+ACTOR Future<RangeResult> getTenantRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr, GetRangeLimits limitsHint) {
+
+	state RangeResult results;
+	kr = kr.removePrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin);
+	if (ryw->getDatabase()->apiVersionAtLeast(720)) {
+		kr = kr.removePrefix(TenantRangeImpl::submoduleRange.begin);
+		if (kr.intersects(TenantRangeImpl::mapSubRange)) {
+			GetRangeLimits limits = limitsHint;
+			limits.decrement(results);
+			wait(getTenantList(
+			    ryw,
+			    removePrefix(kr & TenantRangeImpl::mapSubRange, TenantRangeImpl::mapSubRange.begin, "\xff"_sr),
+			    &results,
+			    limits));
+		}
+	} else {
+		wait(getTenantList(
+		    ryw, removePrefix(kr, TenantRangeImpl::submoduleRange.begin, "\xff"_sr), &results, limitsHint));
 	}
 
 	return results;
 }
 
-TenantMapRangeImpl::TenantMapRangeImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
-
-Future<RangeResult> TenantMapRangeImpl::getRange(ReadYourWritesTransaction* ryw,
-                                                 KeyRangeRef kr,
-                                                 GetRangeLimits limitsHint) const {
-	return getTenantList(ryw, kr, limitsHint);
+Future<RangeResult> TenantRangeImpl::getRange(ReadYourWritesTransaction* ryw,
+                                              KeyRangeRef kr,
+                                              GetRangeLimits limitsHint) const {
+	return getTenantRange(ryw, kr, limitsHint);
 }
 
 ACTOR Future<Void> deleteTenantRange(ReadYourWritesTransaction* ryw, TenantName beginTenant, TenantName endTenant) {
@@ -2803,7 +2851,8 @@ ACTOR Future<Void> deleteTenantRange(ReadYourWritesTransaction* ryw, TenantName 
 		TraceEvent(SevWarn, "DeleteTenantRangeTooLange")
 		    .detail("BeginTenant", beginTenant)
 		    .detail("EndTenant", endTenant);
-		ryw->setSpecialKeySpaceErrorMsg("too many tenants to range delete");
+		ryw->setSpecialKeySpaceErrorMsg(
+		    ManagementAPIError::toJsonString(false, "delete tenants", "too many tenants to range delete"));
 		throw special_keys_api_failure();
 	}
 
@@ -2816,38 +2865,157 @@ ACTOR Future<Void> deleteTenantRange(ReadYourWritesTransaction* ryw, TenantName 
 	return Void();
 }
 
-Future<Optional<std::string>> TenantMapRangeImpl::commit(ReadYourWritesTransaction* ryw) {
+ACTOR Future<bool> checkTenantGroup(ReadYourWritesTransaction* ryw,
+                                    Optional<TenantGroupName> currentGroup,
+                                    Optional<TenantGroupName> desiredGroup) {
+	if (!desiredGroup.present() || currentGroup == desiredGroup) {
+		return true;
+	}
+
+	// TODO: check where desired group is assigned and allow if the cluster is the same
+	// SOMEDAY: It should also be possible to change the tenant group when we support tenant movement.
+	wait(delay(0));
+
+	return false;
+}
+
+ACTOR Future<Void> applyTenantConfig(ReadYourWritesTransaction* ryw,
+                                     TenantNameRef tenantName,
+                                     std::vector<std::pair<StringRef, Optional<Value>>> configEntries,
+                                     TenantMapEntry* tenantEntry,
+                                     bool creatingTenant) {
+
+	state std::vector<std::pair<StringRef, Optional<Value>>>::iterator configItr;
+	for (configItr = configEntries.begin(); configItr != configEntries.end(); ++configItr) {
+		if (configItr->first == "tenant_group"_sr) {
+			state bool isValidTenantGroup = true;
+			if (!creatingTenant) {
+				bool result = wait(checkTenantGroup(ryw, tenantEntry->tenantGroup, configItr->second));
+				isValidTenantGroup = result;
+			}
+			if (isValidTenantGroup) {
+				tenantEntry->tenantGroup = configItr->second;
+			} else {
+				TraceEvent(SevWarn, "CannotChangeTenantGroup")
+				    .detail("TenantName", tenantName)
+				    .detail("CurrentTenantGroup", tenantEntry->tenantGroup)
+				    .detail("DesiredTenantGroup", configItr->second);
+				ryw->setSpecialKeySpaceErrorMsg(ManagementAPIError::toJsonString(
+				    false,
+				    "set tenant configuration",
+				    format("cannot change tenant group for tenant `%s'", tenantName.toString().c_str())));
+				throw special_keys_api_failure();
+			}
+		} else {
+			TraceEvent(SevWarn, "InvalidTenantConfig")
+			    .detail("TenantName", tenantName)
+			    .detail("ConfigName", configItr->first);
+			ryw->setSpecialKeySpaceErrorMsg(
+			    ManagementAPIError::toJsonString(false,
+			                                     "set tenant configuration",
+			                                     format("invalid tenant configuration option `%s' for tenant `%s'",
+			                                            configItr->first.toString().c_str(),
+			                                            tenantName.toString().c_str())));
+			throw special_keys_api_failure();
+		}
+	}
+
+	return Void();
+}
+
+ACTOR Future<Void> createTenant(ReadYourWritesTransaction* ryw,
+                                TenantNameRef tenantName,
+                                Optional<std::vector<std::pair<StringRef, Optional<Value>>>> configMutations) {
+	state TenantMapEntry tenantEntry;
+
+	if (configMutations.present()) {
+		wait(applyTenantConfig(ryw, tenantName, configMutations.get(), &tenantEntry, true));
+	}
+
+	Optional<TenantMapEntry> entry =
+	    wait(ManagementAPI::createTenantTransaction(&ryw->getTransaction(), tenantName, tenantEntry));
+
+	return Void();
+}
+
+ACTOR Future<Void> changeTenantConfig(ReadYourWritesTransaction* ryw,
+                                      TenantNameRef tenantName,
+                                      std::vector<std::pair<StringRef, Optional<Value>>> configEntries) {
+	state Optional<TenantMapEntry> tenantEntry = wait(ManagementAPI::tryGetTenantTransaction(ryw, tenantName));
+	if (!tenantEntry.present()) {
+		TraceEvent(SevWarn, "ConfigureUnknownTenant").detail("TenantName", tenantName);
+		ryw->setSpecialKeySpaceErrorMsg(ManagementAPIError::toJsonString(
+		    false,
+		    "set tenant configuration",
+		    format("cannot configure tenant `%s': tenant not found", tenantName.toString().c_str())));
+		throw special_keys_api_failure();
+	}
+
+	TenantMapEntry& entry = tenantEntry.get();
+	wait(applyTenantConfig(ryw, tenantName, configEntries, &entry, false));
+	wait(ManagementAPI::configureTenantTransaction(ryw, tenantName, tenantEntry.get()));
+
+	return Void();
+}
+
+Future<Optional<std::string>> TenantRangeImpl::commit(ReadYourWritesTransaction* ryw) {
 	auto ranges = ryw->getSpecialKeySpaceWriteMap().containedRanges(range);
 	std::vector<Future<Void>> tenantManagementFutures;
+
+	std::vector<std::pair<KeyRangeRef, Optional<Value>>> mapMutations;
+	std::map<TenantNameRef, std::vector<std::pair<StringRef, Optional<Value>>>> configMutations;
+
 	for (auto range : ranges) {
 		if (!range.value().first) {
 			continue;
 		}
 
-		TenantNameRef tenantName =
-		    range.begin()
-		        .removePrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)
-		        .removePrefix(TenantMapRangeImpl::submoduleRange.begin);
 
-		if (range.value().second.present()) {
-			tenantManagementFutures.push_back(
-			    success(ManagementAPI::createTenantTransaction(&ryw->getTransaction(), tenantName)));
+		KeyRangeRef adjustedRange =
+		    range.range().removePrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin);
+
+		if (ryw->getDatabase()->apiVersionAtLeast(720)) {
+			adjustedRange = adjustedRange.removePrefix(TenantRangeImpl::submoduleRange.begin);
+		}
+
+		if (TenantRangeImpl::mapSubRange.intersects(adjustedRange) || !ryw->getDatabase()->apiVersionAtLeast(720)) {
+			if (ryw->getDatabase()->apiVersionAtLeast(720)) {
+				adjustedRange = TenantRangeImpl::mapSubRange & adjustedRange;
+				adjustedRange = removePrefix(adjustedRange, TenantRangeImpl::mapSubRange.begin, "\xff"_sr);
+			} else {
+				adjustedRange = removePrefix(adjustedRange, TenantRangeImpl::submoduleRange.begin, "\xff"_sr);
+			}
+			mapMutations.push_back(std::make_pair(adjustedRange, range.value().second));
+		} else if (TenantRangeImpl::configureSubRange.contains(adjustedRange) && adjustedRange.singleKeyRange()) {
+			StringRef tenantName = adjustedRange.begin.removePrefix(TenantRangeImpl::configureSubRange.begin);
+			StringRef configName = tenantName.eat("/");
+			configMutations[tenantName].push_back(std::make_pair(configName, range.value().second));
+		}
+	}
+
+	for (auto mapMutation : mapMutations) {
+		TenantNameRef tenantName = mapMutation.first.begin;
+		if (mapMutation.second.present()) {
+			Optional<std::vector<std::pair<StringRef, Optional<Value>>>> createMutations;
+			auto itr = configMutations.find(tenantName);
+			if (itr != configMutations.end()) {
+				createMutations = itr->second;
+				configMutations.erase(itr);
+			}
+			tenantManagementFutures.push_back(createTenant(ryw, tenantName, createMutations));
 		} else {
 			// For a single key clear, just issue the delete
-			if (KeyRangeRef(range.begin(), range.end()).singleKeyRange()) {
+			if (mapMutation.first.singleKeyRange()) {
 				tenantManagementFutures.push_back(
 				    ManagementAPI::deleteTenantTransaction(&ryw->getTransaction(), tenantName));
 			} else {
-				TenantNameRef endTenant = range.end().removePrefix(
-				    SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin);
-				if (endTenant.startsWith(submoduleRange.begin)) {
-					endTenant = endTenant.removePrefix(submoduleRange.begin);
-				} else {
-					endTenant = "\xff"_sr;
-				}
-				tenantManagementFutures.push_back(deleteTenantRange(ryw, tenantName, endTenant));
+				tenantManagementFutures.push_back(deleteTenantRange(ryw, tenantName, mapMutation.first.end));
 			}
 		}
+	}
+
+	for (auto configMutation : configMutations) {
+		tenantManagementFutures.push_back(changeTenantConfig(ryw, configMutation.first, configMutation.second));
 	}
 
 	return tag(waitForAll(tenantManagementFutures), Optional<std::string>());
@@ -2868,7 +3036,7 @@ ACTOR Future<RangeResult> getDataClusterList(ReadYourWritesTransaction* ryw,
 
 	ClusterNameRef endCluster = kr.end;
 	if (endCluster.startsWith(DataClusterMapRangeImpl::submoduleRange.begin)) {
-		endCluster = endCluster.removePrefix(TenantMapRangeImpl::submoduleRange.begin);
+		endCluster = endCluster.removePrefix(DataClusterMapRangeImpl::submoduleRange.begin);
 	} else {
 		endCluster = "\xff"_sr;
 	}
@@ -2908,7 +3076,8 @@ ACTOR Future<Void> removeClusterRange(ReadYourWritesTransaction* ryw,
 		TraceEvent(SevWarn, "RemoveClustersRangeTooLange")
 		    .detail("BeginCluster", beginCluster)
 		    .detail("EndCluster", endCluster);
-		ryw->setSpecialKeySpaceErrorMsg("too many cluster to range remove");
+		ryw->setSpecialKeySpaceErrorMsg(
+		    ManagementAPIError::toJsonString(false, "remove cluster", "too many cluster to range remove"));
 		throw special_keys_api_failure();
 	}
 

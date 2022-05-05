@@ -45,9 +45,6 @@ struct DataClusterMetadata {
 
 namespace MetaclusterAPI {
 
-const KeyRangeRef tenantSpecialKeyRange(LiteralStringRef("\xff\xff/management/tenant_map/"),
-                                        LiteralStringRef("\xff\xff/management/tenant_map0"));
-
 ACTOR template <class Transaction>
 Future<Optional<DataClusterMetadata>> tryGetClusterTransaction(Transaction tr, ClusterNameRef name) {
 	state Key dataClusterMetadataKey = name.withPrefix(dataClusterMetadataPrefix);

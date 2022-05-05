@@ -701,7 +701,9 @@ Future<TenantMapEntry> getTenant(Reference<DB> db, TenantName name) {
 
 // Creates a tenant with the given name. If the tenant already exists, an empty optional will be returned.
 ACTOR template <class Transaction>
-Future<Optional<TenantMapEntry>> createTenantTransaction(Transaction tr, TenantNameRef name) {
+Future<Optional<TenantMapEntry>> createTenantTransaction(Transaction tr,
+                                                         TenantNameRef name,
+                                                         TenantMapEntry tenantEntry = TenantMapEntry()) {
 	state Key tenantMapKey = name.withPrefix(tenantMapPrefix);
 
 	if (name.startsWith("\xff"_sr)) {
@@ -711,7 +713,7 @@ Future<Optional<TenantMapEntry>> createTenantTransaction(Transaction tr, TenantN
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-	state Future<Optional<TenantMapEntry>> tenantEntryFuture = tryGetTenantTransaction(tr, name);
+	state Future<Optional<TenantMapEntry>> existingEntryFuture = tryGetTenantTransaction(tr, name);
 	state typename transaction_future_type<Transaction, Optional<Value>>::type tenantDataPrefixFuture =
 	    tr->get(tenantDataPrefixKey);
 	state typename transaction_future_type<Transaction, Optional<Value>>::type lastIdFuture = tr->get(tenantLastIdKey);
@@ -724,8 +726,8 @@ Future<Optional<TenantMapEntry>> createTenantTransaction(Transaction tr, TenantN
 		throw tenants_disabled();
 	}
 
-	Optional<TenantMapEntry> tenantEntry = wait(tenantEntryFuture);
-	if (tenantEntry.present()) {
+	Optional<TenantMapEntry> existingEntry = wait(existingEntryFuture);
+	if (existingEntry.present()) {
 		return Optional<TenantMapEntry>();
 	}
 
@@ -743,24 +745,24 @@ Future<Optional<TenantMapEntry>> createTenantTransaction(Transaction tr, TenantN
 		throw client_invalid_operation();
 	}
 
-	state TenantMapEntry newTenant(lastIdVal.present() ? TenantMapEntry::prefixToId(lastIdVal.get()) + 1 : 0,
-	                               tenantDataPrefix.present() ? (KeyRef)tenantDataPrefix.get() : ""_sr);
+	tenantEntry.id = lastIdVal.present() ? TenantMapEntry::prefixToId(lastIdVal.get()) + 1 : 0;
+	tenantEntry.setSubspace(tenantDataPrefix.present() ? (KeyRef)tenantDataPrefix.get() : ""_sr);
 
 	state typename transaction_future_type<Transaction, RangeResult>::type prefixRangeFuture =
-	    tr->getRange(prefixRange(newTenant.prefix), 1);
+	    tr->getRange(prefixRange(tenantEntry.prefix), 1);
 	RangeResult contents = wait(safeThreadFutureToFuture(prefixRangeFuture));
 	if (!contents.empty()) {
 		throw tenant_prefix_allocator_conflict();
 	}
 
-	tr->set(tenantLastIdKey, TenantMapEntry::idToPrefix(newTenant.id));
-	tr->set(tenantMapKey, encodeTenantEntry(newTenant));
+	tr->set(tenantLastIdKey, TenantMapEntry::idToPrefix(tenantEntry.id));
+	tr->set(tenantMapKey, encodeTenantEntry(tenantEntry));
 
-	return newTenant;
+	return tenantEntry;
 }
 
 ACTOR template <class DB>
-Future<Void> createTenant(Reference<DB> db, TenantName name) {
+Future<Void> createTenant(Reference<DB> db, TenantName name, TenantMapEntry tenantEntry = TenantMapEntry()) {
 	state Reference<typename DB::TransactionT> tr = db->createTransaction();
 
 	state bool firstTry = true;
@@ -777,7 +779,7 @@ Future<Void> createTenant(Reference<DB> db, TenantName name) {
 				firstTry = false;
 			}
 
-			state Optional<TenantMapEntry> newTenant = wait(createTenantTransaction(tr, name));
+			state Optional<TenantMapEntry> newTenant = wait(createTenantTransaction(tr, name, tenantEntry));
 
 			if (BUGGIFY) {
 				throw commit_unknown_result();
@@ -793,6 +795,7 @@ Future<Void> createTenant(Reference<DB> db, TenantName name) {
 			    .detail("Tenant", name)
 			    .detail("TenantId", newTenant.present() ? newTenant.get().id : -1)
 			    .detail("Prefix", newTenant.present() ? (StringRef)newTenant.get().prefix : "Unknown"_sr)
+			    .detail("TenantGroup", tenantEntry.tenantGroup)
 			    .detail("Version", tr->getCommittedVersion());
 
 			return Void();
@@ -862,6 +865,16 @@ Future<Void> deleteTenant(Reference<DB> db, TenantName name) {
 			wait(safeThreadFutureToFuture(tr->onError(e)));
 		}
 	}
+}
+
+// This should only be called from a transaction that has already confirmed that the cluster entry
+// is present. The updatedEntry should use the existing entry and modify only those fields that need
+// to be changed.
+ACTOR template <class Transaction>
+Future<Void> configureTenantTransaction(Transaction tr, TenantNameRef tenantName, TenantMapEntry tenantEntry) {
+	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
+	tr->set(tenantName.withPrefix(tenantMapPrefix), encodeTenantEntry(tenantEntry));
+	return Void();
 }
 
 ACTOR template <class Transaction>

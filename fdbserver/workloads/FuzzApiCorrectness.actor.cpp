@@ -130,6 +130,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 	std::vector<Reference<ITenant>> tenants;
 	std::set<TenantName> createdTenants;
 	int numTenants;
+	int numTenantGroups;
 
 	// Map from tenant number to key prefix
 	std::map<int, std::string> keyPrefixes;
@@ -152,6 +153,9 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 		int maxTenants = getOption(options, "numTenants"_sr, 4);
 		numTenants = deterministicRandom()->randomInt(0, maxTenants + 1);
+
+		int maxTenantGroups = getOption(options, "numTenantGroups"_sr, numTenants);
+		numTenantGroups = deterministicRandom()->randomInt(0, maxTenantGroups + 1);
 
 		// See https://github.com/apple/foundationdb/issues/2424
 		if (BUGGIFY) {
@@ -205,6 +209,14 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 	std::string description() const override { return "FuzzApiCorrectness"; }
 
 	static TenantName getTenant(int num) { return TenantNameRef(format("tenant_%d", num)); }
+	Optional<TenantGroupName> getTenantGroup(int num) {
+		int groupNum = num % (numTenantGroups + 1);
+		if (groupNum == numTenantGroups - 1) {
+			return Optional<TenantGroupName>();
+		} else {
+			return TenantGroupNameRef(format("tenantgroup_%d", groupNum));
+		}
+	}
 	bool canUseTenant(Optional<TenantName> tenant) { return !tenant.present() || createdTenants.count(tenant.get()); }
 
 	Future<Void> setup(Database const& cx) override {
@@ -225,7 +237,9 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 			// The last tenant will not be created
 			if (i < self->numTenants) {
-				tenantFutures.push_back(ManagementAPI::createTenant(cx.getReference(), tenantName));
+				TenantMapEntry entry;
+				entry.tenantGroup = self->getTenantGroup(i);
+				tenantFutures.push_back(ManagementAPI::createTenant(cx.getReference(), tenantName, entry));
 				self->createdTenants.insert(tenantName);
 			}
 		}

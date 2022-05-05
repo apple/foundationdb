@@ -33,10 +33,12 @@
 struct TenantManagementWorkload : TestWorkload {
 	struct TenantState {
 		int64_t id;
+		Optional<TenantGroupName> tenantGroup;
 		bool empty;
 
 		TenantState() : id(-1), empty(true) {}
-		TenantState(int64_t id, bool empty) : id(id), empty(empty) {}
+		TenantState(int64_t id, Optional<TenantGroupName> tenantGroup, bool empty)
+		  : id(id), tenantGroup(tenantGroup), empty(empty) {}
 	};
 
 	std::map<TenantName, TenantState> createdTenants;
@@ -49,10 +51,15 @@ struct TenantManagementWorkload : TestWorkload {
 	const TenantName tenantNamePrefix = "tenant_management_workload_"_sr;
 	TenantName localTenantNamePrefix;
 
-	const Key specialKeysTenantMapPrefix = TenantMapRangeImpl::submoduleRange.begin.withPrefix(
-	    SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin);
+	const Key specialKeysTenantMapPrefix =
+	    TenantRangeImpl::mapSubRange.begin.withPrefix(TenantRangeImpl::submoduleRange.begin.withPrefix(
+	        SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin));
+	const Key specialKeysTenantConfigPrefix =
+	    TenantRangeImpl::configureSubRange.begin.withPrefix(TenantRangeImpl::submoduleRange.begin.withPrefix(
+	        SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin));
 
 	int maxTenants;
+	int maxTenantGroups;
 	double testDuration;
 
 	enum class OperationType { SPECIAL_KEYS, MANAGEMENT_DATABASE, MANAGEMENT_TRANSACTION };
@@ -70,6 +77,7 @@ struct TenantManagementWorkload : TestWorkload {
 
 	TenantManagementWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		maxTenants = std::min<int>(1e8 - 1, getOption(options, "maxTenants"_sr, 1000));
+		maxTenantGroups = std::min<int>(2 * maxTenants, getOption(options, "maxTenantGroups"_sr, 20));
 		testDuration = getOption(options, "testDuration"_sr, 60.0);
 
 		localTenantNamePrefix = format("%stenant_%d_", tenantNamePrefix.toString().c_str(), clientId);
@@ -130,8 +138,19 @@ struct TenantManagementWorkload : TestWorkload {
 		return tenant;
 	}
 
+	Optional<TenantGroupName> chooseTenantGroup() {
+		Optional<TenantGroupName> tenantGroup;
+		if (deterministicRandom()->coinflip()) {
+			tenantGroup =
+			    TenantGroupNameRef(format("tenantgroup%08d", deterministicRandom()->randomInt(0, maxTenantGroups)));
+		}
+
+		return tenantGroup;
+	}
+
 	ACTOR Future<Void> createTenant(Database cx, TenantManagementWorkload* self) {
 		state TenantName tenant = self->chooseTenantName(true);
+		state Optional<TenantGroupName> tenantGroup = self->chooseTenantGroup();
 		state bool alreadyExists = self->createdTenants.count(tenant);
 		state OperationType operationType = TenantManagementWorkload::randomOperationType();
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
@@ -140,14 +159,21 @@ struct TenantManagementWorkload : TestWorkload {
 			try {
 				if (operationType == OperationType::SPECIAL_KEYS) {
 					tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-					Key key = self->specialKeysTenantMapPrefix.withSuffix(tenant);
-					tr->set(key, ""_sr);
+					tr->set(self->specialKeysTenantMapPrefix.withSuffix(tenant), ""_sr);
+					if (tenantGroup.present()) {
+						tr->set(self->specialKeysTenantConfigPrefix.withSuffix("tenant_group/"_sr).withSuffix(tenant),
+						        tenantGroup.get());
+					}
 					wait(tr->commit());
 				} else if (operationType == OperationType::MANAGEMENT_DATABASE) {
-					wait(ManagementAPI::createTenant(cx.getReference(), tenant));
+					TenantMapEntry entry;
+					entry.tenantGroup = tenantGroup;
+					wait(ManagementAPI::createTenant(cx.getReference(), tenant, entry));
 				} else {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					Optional<TenantMapEntry> _ = wait(ManagementAPI::createTenantTransaction(tr, tenant));
+					TenantMapEntry entry;
+					entry.tenantGroup = tenantGroup;
+					Optional<TenantMapEntry> _ = wait(ManagementAPI::createTenantTransaction(tr, tenant, entry));
 					wait(tr->commit());
 				}
 
@@ -164,7 +190,7 @@ struct TenantManagementWorkload : TestWorkload {
 				ASSERT(entry.get().prefix.startsWith(self->tenantSubspace));
 
 				self->maxId = entry.get().id;
-				self->createdTenants[tenant] = TenantState(entry.get().id, true);
+				self->createdTenants[tenant] = TenantState(entry.get().id, tenantGroup, true);
 
 				state bool insertData = deterministicRandom()->random01() < 0.5;
 				if (insertData) {
@@ -382,11 +408,17 @@ struct TenantManagementWorkload : TestWorkload {
 
 		int64_t id;
 		std::string prefix;
+		std::string tenantGroupStr;
 		jsonDoc.get("id", id);
 		jsonDoc.get("prefix", prefix);
 
+		Optional<TenantGroupName> tenantGroup;
+		if (jsonDoc.tryGet("tenant_group", tenantGroupStr)) {
+			tenantGroup = TenantGroupNameRef(tenantGroupStr);
+		}
+
 		Key prefixKey = KeyRef(prefix);
-		TenantMapEntry entry(id, prefixKey.substr(0, prefixKey.size() - 8));
+		TenantMapEntry entry(id, prefixKey.substr(0, prefixKey.size() - 8), tenantGroup);
 
 		ASSERT(entry.prefix == prefixKey);
 		return entry;
@@ -396,9 +428,13 @@ struct TenantManagementWorkload : TestWorkload {
 		state TenantName tenant = self->chooseTenantName(true);
 		auto itr = self->createdTenants.find(tenant);
 		state bool alreadyExists = itr != self->createdTenants.end();
-		state TenantState tenantState = itr->second;
 		state OperationType operationType = TenantManagementWorkload::randomOperationType();
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+
+		state TenantState tenantState;
+		if (alreadyExists) {
+			tenantState = itr->second;
+		}
 
 		loop {
 			try {
@@ -420,6 +456,7 @@ struct TenantManagementWorkload : TestWorkload {
 				}
 				ASSERT(alreadyExists);
 				ASSERT(entry.id == tenantState.id);
+				ASSERT(entry.tenantGroup == tenantState.tenantGroup);
 				wait(self->checkTenant(cx, self, tenant, tenantState));
 				return Void();
 			} catch (Error& e) {

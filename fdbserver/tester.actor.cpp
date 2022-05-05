@@ -1611,8 +1611,13 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 	}
 
 	if (useDB && defaultTenant.present()) {
-		TraceEvent("CreatingDefaultTenant").detail("Tenant", defaultTenant.get());
-		wait(ManagementAPI::createTenant(cx.getReference(), defaultTenant.get()));
+		Optional<TenantGroupName> tenantGroup;
+		TenantMapEntry entry;
+		if (deterministicRandom()->coinflip()) {
+			entry.tenantGroup = "TestTenantGroup"_sr;
+		}
+		TraceEvent("CreatingDefaultTenant").detail("Tenant", defaultTenant.get()).detail("TenantGroup", tenantGroup);
+		wait(ManagementAPI::createTenant(cx.getReference(), defaultTenant.get(), entry));
 	}
 
 	if (useDB && waitForQuiescenceBegin) {
