@@ -121,6 +121,13 @@ Tuple& Tuple::append(StringRef const& str, bool utf8) {
 	return *this;
 }
 
+Tuple& Tuple::appendRaw(StringRef const& str) {
+	offsets.push_back(data.size());
+
+	data.append(data.arena(), str.begin(), str.size());
+	return *this;
+}
+
 Tuple& Tuple::append(int64_t value) {
 	uint64_t swap = value;
 	bool neg = false;
@@ -382,4 +389,13 @@ Tuple Tuple::subTuple(size_t start, size_t end) const {
 
 	size_t endPos = end < offsets.size() ? offsets[end] : data.size();
 	return Tuple(StringRef(data.begin() + offsets[start], endPos - offsets[start]));
+}
+
+StringRef Tuple::subTupleRawString(size_t index) const {
+	if (index >= offsets.size()) {
+		return StringRef();
+	}
+	size_t end = index + 1;
+	size_t endPos = end < offsets.size() ? offsets[end] : data.size();
+	return StringRef(data.begin() + offsets[index], endPos - offsets[index]);
 }
