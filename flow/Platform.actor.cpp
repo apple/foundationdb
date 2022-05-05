@@ -31,10 +31,8 @@
 #include "flow/Platform.actor.h"
 #include "flow/Arena.h"
 
-#if (!defined(TLS_DISABLED) && !defined(_WIN32))
 #include "flow/StreamCipher.h"
 #include "flow/BlobCipher.h"
-#endif
 #include "flow/Trace.h"
 #include "flow/Error.h"
 
@@ -3552,11 +3550,9 @@ void crashHandler(int sig) {
 
 	bool error = (sig != SIGUSR2);
 
-#if (!defined(TLS_DISABLED) && !defined(_WIN32))
 	StreamCipherKey::cleanup();
 	StreamCipher::cleanup();
 	BlobCipherKeyCache::cleanup();
-#endif
 
 	fflush(stdout);
 	{

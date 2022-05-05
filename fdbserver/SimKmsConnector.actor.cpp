@@ -23,6 +23,7 @@
 #include "fdbrpc/sim_validation.h"
 #include "fdbserver/Knobs.h"
 #include "flow/ActorCollection.h"
+#include "flow/BlobCipher.h"
 #include "flow/EncryptUtils.h"
 #include "flow/Error.h"
 #include "flow/FastRef.h"
@@ -42,7 +43,7 @@ struct SimEncryptKeyCtx {
 	EncryptCipherBaseKeyId id;
 	SimEncryptKey key;
 
-	explicit SimEncryptKeyCtx(EncryptCipherBaseKeyId kId, const char* data) : id(kId), key(data) {}
+	explicit SimEncryptKeyCtx(EncryptCipherBaseKeyId kId, const char* data) : id(kId), key(data, AES_256_KEY_LENGTH) {}
 };
 
 struct SimKmsConnectorContext {
@@ -50,13 +51,16 @@ struct SimKmsConnectorContext {
 	std::unordered_map<EncryptCipherBaseKeyId, std::unique_ptr<SimEncryptKeyCtx>> simEncryptKeyStore;
 
 	explicit SimKmsConnectorContext(uint32_t keyCount) : maxEncryptionKeys(keyCount) {
-		uint8_t buffer[AES_256_KEY_LENGTH];
+		const unsigned char SHA_KEY[] = "0c39e7906db6d51ac0573d328ce1b6be";
 
 		// Construct encryption keyStore.
-		for (int i = 0; i < maxEncryptionKeys; i++) {
-			generateRandomData(&buffer[0], AES_256_KEY_LENGTH);
-			SimEncryptKeyCtx ctx(i, reinterpret_cast<const char*>(buffer));
-			simEncryptKeyStore[i] = std::make_unique<SimEncryptKeyCtx>(i, reinterpret_cast<const char*>(buffer));
+		// Note the keys generated must be the same after restart.
+		for (int i = 1; i <= maxEncryptionKeys; i++) {
+			Arena arena;
+			StringRef digest = computeAuthToken(
+			    reinterpret_cast<const unsigned char*>(&i), sizeof(i), SHA_KEY, AES_256_KEY_LENGTH, arena);
+			simEncryptKeyStore[i] =
+			    std::make_unique<SimEncryptKeyCtx>(i, reinterpret_cast<const char*>(digest.begin()));
 		}
 	}
 };
@@ -103,7 +107,7 @@ ACTOR Future<Void> simKmsConnectorCore_impl(KmsConnectorInterface interf) {
 				// mean multiple domains gets mapped to the same encryption key which is fine, the EncryptKeyStore
 				// guarantees that keyId -> plaintext encryptKey mapping is idempotent.
 				for (EncryptCipherDomainId domainId : req.encryptDomainIds) {
-					EncryptCipherBaseKeyId keyId = domainId % SERVER_KNOBS->SIM_KMS_MAX_KEYS;
+					EncryptCipherBaseKeyId keyId = 1 + abs(domainId) % SERVER_KNOBS->SIM_KMS_MAX_KEYS;
 					const auto& itr = ctx->simEncryptKeyStore.find(keyId);
 					if (itr != ctx->simEncryptKeyStore.end()) {
 						keysByDomainIdRep.cipherKeyDetails.emplace_back(

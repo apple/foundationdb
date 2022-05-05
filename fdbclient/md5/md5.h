@@ -23,7 +23,7 @@
  * See md5.c for more information.
  */
 
-#if defined(HAVE_OPENSSL) && !defined(TLS_DISABLED)
+#if defined(HAVE_OPENSSL)
 #if defined(HAVE_WOLFSSL)
 #include <wolfssl/options.h>
 #endif

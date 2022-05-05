@@ -7,6 +7,7 @@ set(FDBRPC_SRCS
   AsyncFileReadAhead.actor.h
   AsyncFileWinASIO.actor.h
   AsyncFileCached.actor.cpp
+  AsyncFileEncrypted.actor.cpp
   AsyncFileNonDurable.actor.cpp
   AsyncFileWriteChecker.cpp
   FailureMonitor.actor.cpp
@@ -44,12 +45,6 @@ set(FDBRPC_SRCS
   TokenSign.cpp
   TraceFileIO.cpp
   TSSComparison.h)
-
-if(WITH_TLS)
-  set(FDBRPC_SRCS
-    ${FDBRPC_SRCS}
-    AsyncFileEncrypted.actor.cpp)
-endif()
 
 set(COMPILE_EIO OFF)
 

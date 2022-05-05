@@ -34,8 +34,6 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-#if ENCRYPTION_ENABLED
-
 #define MEGA_BYTES (1024 * 1024)
 #define NANO_SECOND (1000 * 1000 * 1000)
 
@@ -379,5 +377,3 @@ struct EncryptionOpsWorkload : TestWorkload {
 };
 
 WorkloadFactory<EncryptionOpsWorkload> EncryptionOpsWorkloadFactory("EncryptionOps");
-
-#endif // ENCRYPTION_ENABLED
