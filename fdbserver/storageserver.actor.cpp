@@ -3713,6 +3713,118 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 	return result;
 }
 
+bool rangeIntersectsAnyTenant(TenantPrefixIndex& prefixIndex, KeyRangeRef range, Version ver) {
+	auto view = prefixIndex.at(ver);
+	auto beginItr = view.lastLessOrEqual(range.begin);
+	auto endItr = view.lastLess(range.end);
+
+	// If the begin and end reference different spots in the tenant index, then the tenant pointed to
+	// by endItr intersects the range
+	if (beginItr != endItr) {
+		return true;
+	}
+
+	// If the iterators point to the same entry and that entry contains begin, then we are wholly in
+	// one tenant
+	if (beginItr != view.end() && range.begin.startsWith(beginItr.key())) {
+		return true;
+	}
+
+	return false;
+}
+
+TEST_CASE("/fdbserver/storageserver/rangeIntersectsAnyTenant") {
+	std::map<TenantName, TenantMapEntry> entries = { std::make_pair("tenant0"_sr, TenantMapEntry(0, ""_sr)),
+		                                             std::make_pair("tenant2"_sr, TenantMapEntry(2, ""_sr)),
+		                                             std::make_pair("tenant3"_sr, TenantMapEntry(3, ""_sr)),
+		                                             std::make_pair("tenant4"_sr, TenantMapEntry(4, ""_sr)),
+		                                             std::make_pair("tenant6"_sr, TenantMapEntry(6, ""_sr)) };
+	TenantPrefixIndex index;
+	index.createNewVersion(1);
+	for (auto entry : entries) {
+		index.insert(entry.second.prefix, entry.first);
+	}
+
+	// Before all tenants
+	ASSERT(!rangeIntersectsAnyTenant(index, KeyRangeRef(""_sr, "\x00"_sr), index.getLatestVersion()));
+
+	// After all tenants
+	ASSERT(!rangeIntersectsAnyTenant(index, KeyRangeRef("\xfe"_sr, "\xff"_sr), index.getLatestVersion()));
+
+	// In between tenants
+	ASSERT(!rangeIntersectsAnyTenant(
+	    index,
+	    KeyRangeRef(TenantMapEntry::idToPrefix(1), TenantMapEntry::idToPrefix(1).withSuffix("\xff"_sr)),
+	    index.getLatestVersion()));
+
+	// In between tenants with end intersecting tenant start
+	ASSERT(!rangeIntersectsAnyTenant(
+	    index, KeyRangeRef(TenantMapEntry::idToPrefix(5), entries["tenant6"_sr].prefix), index.getLatestVersion()));
+
+	// Entire tenants
+	ASSERT(rangeIntersectsAnyTenant(
+	    index, KeyRangeRef(entries["tenant0"_sr].prefix, TenantMapEntry::idToPrefix(1)), index.getLatestVersion()));
+	ASSERT(rangeIntersectsAnyTenant(
+	    index, KeyRangeRef(entries["tenant2"_sr].prefix, entries["tenant3"_sr].prefix), index.getLatestVersion()));
+
+	// Partial tenants
+	ASSERT(rangeIntersectsAnyTenant(
+	    index,
+	    KeyRangeRef(entries["tenant0"_sr].prefix, entries["tenant0"_sr].prefix.withSuffix("foo"_sr)),
+	    index.getLatestVersion()));
+	ASSERT(rangeIntersectsAnyTenant(
+	    index,
+	    KeyRangeRef(entries["tenant3"_sr].prefix.withSuffix("foo"_sr), entries["tenant4"_sr].prefix),
+	    index.getLatestVersion()));
+	ASSERT(rangeIntersectsAnyTenant(index,
+	                                KeyRangeRef(entries["tenant4"_sr].prefix.withSuffix("bar"_sr),
+	                                            entries["tenant4"_sr].prefix.withSuffix("foo"_sr)),
+	                                index.getLatestVersion()));
+
+	// Begin outside, end inside tenant
+	ASSERT(rangeIntersectsAnyTenant(
+	    index,
+	    KeyRangeRef(TenantMapEntry::idToPrefix(1), entries["tenant2"_sr].prefix.withSuffix("foo"_sr)),
+	    index.getLatestVersion()));
+	ASSERT(rangeIntersectsAnyTenant(
+	    index,
+	    KeyRangeRef(TenantMapEntry::idToPrefix(1), entries["tenant3"_sr].prefix.withSuffix("foo"_sr)),
+	    index.getLatestVersion()));
+
+	// Begin inside, end outside tenant
+	ASSERT(rangeIntersectsAnyTenant(
+	    index,
+	    KeyRangeRef(entries["tenant3"_sr].prefix.withSuffix("foo"_sr), TenantMapEntry::idToPrefix(5)),
+	    index.getLatestVersion()));
+	ASSERT(rangeIntersectsAnyTenant(
+	    index,
+	    KeyRangeRef(entries["tenant4"_sr].prefix.withSuffix("foo"_sr), TenantMapEntry::idToPrefix(5)),
+	    index.getLatestVersion()));
+
+	// Both inside different tenants
+	ASSERT(rangeIntersectsAnyTenant(index,
+	                                KeyRangeRef(entries["tenant0"_sr].prefix.withSuffix("foo"_sr),
+	                                            entries["tenant2"_sr].prefix.withSuffix("foo"_sr)),
+	                                index.getLatestVersion()));
+	ASSERT(rangeIntersectsAnyTenant(index,
+	                                KeyRangeRef(entries["tenant0"_sr].prefix.withSuffix("foo"_sr),
+	                                            entries["tenant3"_sr].prefix.withSuffix("foo"_sr)),
+	                                index.getLatestVersion()));
+	ASSERT(rangeIntersectsAnyTenant(index,
+	                                KeyRangeRef(entries["tenant2"_sr].prefix.withSuffix("foo"_sr),
+	                                            entries["tenant6"_sr].prefix.withSuffix("foo"_sr)),
+	                                index.getLatestVersion()));
+
+	// Both outside tenants with tenant in the middle
+	ASSERT(rangeIntersectsAnyTenant(
+	    index, KeyRangeRef(""_sr, TenantMapEntry::idToPrefix(1).withSuffix("foo"_sr)), index.getLatestVersion()));
+	ASSERT(rangeIntersectsAnyTenant(index, KeyRangeRef(""_sr, "\xff"_sr), index.getLatestVersion()));
+	ASSERT(rangeIntersectsAnyTenant(
+	    index, KeyRangeRef(TenantMapEntry::idToPrefix(5).withSuffix("foo"_sr), "\xff"_sr), index.getLatestVersion()));
+
+	return Void();
+}
+
 // Most of the actor is copied from getKeyValuesQ. I tried to use templates but things become nearly impossible after
 // combining actor shenanigans with template shenanigans.
 ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRequest req)
@@ -3799,13 +3911,7 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 				throw tenant_name_required();
 			}
 
-			auto view = data->tenantPrefixIndex.at(req.version);
-			auto beginItr = view.lastLessOrEqual(begin);
-			if (beginItr != view.end() && !begin.startsWith(beginItr.key())) {
-				++beginItr;
-			}
-			auto endItr = view.lastLessOrEqual(end);
-			if (beginItr != endItr) {
+			if (rangeIntersectsAnyTenant(data->tenantPrefixIndex, KeyRangeRef(begin, end), req.version)) {
 				throw tenant_name_required();
 			}
 		}
