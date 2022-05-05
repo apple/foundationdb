@@ -1454,7 +1454,15 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 				    .detail("DestTeamSize", totalIds);
 			}
 
-			self->shardsAffectedByTeamFailure->moveShard(rd.keys, destinationTeams);
+			TraceEvent("ShardsAffectedByTeamFailureMove")
+			    .detail("Range", rd.keys)
+			    .detail("IsRestore", rd.isRestore())
+			    .detail("NewTeamSize", destinationTeams.size())
+			    .detail("NewTeam", describe(destinationTeams));
+
+			if (!rd.isRestore()) {
+				self->shardsAffectedByTeamFailure->moveShard(rd.keys, destinationTeams);
+			}
 
 			// FIXME: do not add data in flight to servers that were already in the src.
 			healthyDestinations.addDataInFlightToTeam(+metrics.bytes);
@@ -1658,8 +1666,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 
 		relocationComplete.send(rd);
 
-		if (err.code() != error_code_actor_cancelled && err.code() != error_code_data_move_cancelled &&
-		    err.code() != error_code_data_move_dest_team_not_found) {
+		if (err.code() != error_code_actor_cancelled && err.code() != error_code_data_move_cancelled) {
 			if (errorOut.canBeSet()) {
 				errorOut.sendError(err);
 			}
@@ -2352,7 +2359,8 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 	} catch (Error& e) {
 		if (e.code() != error_code_broken_promise && // FIXME: Get rid of these broken_promise errors every time we
 		                                             // are killed by the master dying
-		    e.code() != error_code_movekeys_conflict && e.code() != error_code_data_move_cancelled)
+		    e.code() != error_code_movekeys_conflict && e.code() != error_code_data_move_cancelled &&
+		    e.code() != error_code_data_move_dest_team_not_found)
 			TraceEvent(SevError, "DataDistributionQueueError", distributorId).error(e);
 		throw e;
 	}

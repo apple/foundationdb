@@ -263,6 +263,8 @@ public:
 		bool operator>=(const Team& r) const { return !(*this < r); }
 		bool operator==(const Team& r) const { return servers == r.servers && primary == r.primary; }
 		bool operator!=(const Team& r) const { return !(*this == r); }
+
+		std::string toString() const { return describe(servers); };
 	};
 
 	// This tracks the data distribution on the data distribution server so that teamTrackers can
