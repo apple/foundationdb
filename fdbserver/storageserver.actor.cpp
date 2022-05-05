@@ -3552,10 +3552,14 @@ void preprocessMappedKey(Tuple& mappedKeyFormatTuple,
 				vt.push_back(Optional<Tuple>());
 				isRangeQuery = true;
 			} else {
-				vt.push_back(Optional<Tuple>(mappedKeyFormatTuple.subTuple(i, i + 1)));
+				Tuple t;
+				t.appendRaw(mappedKeyFormatTuple.subTupleRawString(i));
+				vt.push_back(Optional<Tuple>(t));
 			}
 		} else {
-			vt.push_back(Optional<Tuple>(mappedKeyFormatTuple.subTuple(i, i + 1)));
+			Tuple t;
+			t.appendRaw(mappedKeyFormatTuple.subTupleRawString(i));
+			vt.push_back(Optional<Tuple>(t));
 		}
 	}
 }
@@ -3599,7 +3603,7 @@ Key constructMappedKey(KeyValueRef* keyValue,
 			if (idx < 0 || idx >= referenceTuple->size()) {
 				throw mapper_bad_index();
 			}
-			mappedKeyTuple.append(referenceTuple->subTuple(idx, idx + 1));
+			mappedKeyTuple.appendRaw(referenceTuple->subTupleRawString(idx));
 		}
 	}
 

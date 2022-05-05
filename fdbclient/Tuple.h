@@ -36,6 +36,7 @@ struct Tuple {
 	static Tuple unpack(StringRef const& str, bool exclude_incomplete = false);
 
 	Tuple& append(Tuple const& tuple);
+	Tuple& appendRaw(StringRef const& str);
 	Tuple& append(StringRef const& str, bool utf8 = false);
 	Tuple& append(int64_t);
 	// There are some ambiguous append calls in fdbclient, so to make it easier
@@ -61,7 +62,7 @@ struct Tuple {
 		data.clear();
 		offsets.clear();
 	}
-
+	StringRef subTupleRawString(size_t index) const;
 	ElementType getType(size_t index) const;
 	Standalone<StringRef> getString(size_t index) const;
 	int64_t getInt(size_t index, bool allow_incomplete = false) const;
