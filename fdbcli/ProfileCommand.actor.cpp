@@ -56,8 +56,8 @@ ACTOR Future<bool> profileCommandActor(Database db,
 			}
 			std::string sampleRateStr = "default";
 			std::string sizeLimitStr = "default";
-			const double sampleRateDbl = db->globalConfig->get<double>(
-			    fdbClientInfoTxnSampleRate, std::numeric_limits<double>::infinity());
+			const double sampleRateDbl =
+			    db->globalConfig->get<double>(fdbClientInfoTxnSampleRate, std::numeric_limits<double>::infinity());
 			if (!std::isinf(sampleRateDbl)) {
 				sampleRateStr = std::to_string(sampleRateDbl);
 			}

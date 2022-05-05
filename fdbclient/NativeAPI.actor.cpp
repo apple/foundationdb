@@ -811,8 +811,8 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext* cx) {
 			}
 			cx->clientStatusUpdater.outStatusQ.clear();
 			wait(cx->globalConfig->onInitialized());
-			double sampleRate = cx->globalConfig->get<double>(
-			    fdbClientInfoTxnSampleRate, std::numeric_limits<double>::infinity());
+			double sampleRate =
+			    cx->globalConfig->get<double>(fdbClientInfoTxnSampleRate, std::numeric_limits<double>::infinity());
 			double clientSamplingProbability =
 			    std::isinf(sampleRate) ? CLIENT_KNOBS->CSI_SAMPLING_PROBABILITY : sampleRate;
 			int64_t sizeLimit = cx->globalConfig->get<int64_t>(fdbClientInfoTxnSizeLimit, -1);
@@ -2221,7 +2221,8 @@ Database Database::createDatabase(Reference<IClusterConnectionRecord> connRecord
 	}
 
 	auto database = Database(db);
-	database->globalConfig->init(Reference<AsyncVar<ClientDBInfo> const>(clientInfo), std::addressof(clientInfo->get()));
+	database->globalConfig->init(Reference<AsyncVar<ClientDBInfo> const>(clientInfo),
+	                             std::addressof(clientInfo->get()));
 	database->globalConfig->trigger(samplingFrequency, samplingProfilerUpdateFrequency);
 	database->globalConfig->trigger(samplingWindow, samplingProfilerUpdateWindow);
 
@@ -2246,7 +2247,9 @@ Database Database::createDatabase(std::string connFileName,
 	return Database::createDatabase(rccr, apiVersion, internal, clientLocality);
 }
 
-UID Database::dbId() const { return db->dbId; };
+UID Database::dbId() const {
+	return db->dbId;
+};
 
 Reference<WatchMetadata> DatabaseContext::getWatchMetadata(int64_t tenantId, KeyRef key) const {
 	const auto it = watchMap.find(std::make_pair(tenantId, key));
@@ -7950,8 +7953,8 @@ void Transaction::checkDeferredError() const {
 
 Reference<TransactionLogInfo> Transaction::createTrLogInfoProbabilistically(const Database& cx) {
 	if (!cx->isError()) {
-		double clientSamplingProbability = cx->globalConfig->get<double>(
-		    fdbClientInfoTxnSampleRate, CLIENT_KNOBS->CSI_SAMPLING_PROBABILITY);
+		double clientSamplingProbability =
+		    cx->globalConfig->get<double>(fdbClientInfoTxnSampleRate, CLIENT_KNOBS->CSI_SAMPLING_PROBABILITY);
 		if (((networkOptions.logClientInfo.present() && networkOptions.logClientInfo.get()) || BUGGIFY) &&
 		    deterministicRandom()->random01() < clientSamplingProbability &&
 		    (!g_network->isSimulated() || !g_simulator.speedUpSimulation)) {
