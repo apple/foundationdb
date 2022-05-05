@@ -56,6 +56,11 @@ struct Tuple {
 
 	// this is number of elements, not length of data
 	size_t size() const { return offsets.size(); }
+	void reserve(size_t cap) { offsets.reserve(cap); }
+	void clear() {
+		data.clear();
+		offsets.clear();
+	}
 
 	ElementType getType(size_t index) const;
 	Standalone<StringRef> getString(size_t index) const;
