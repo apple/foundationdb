@@ -1096,18 +1096,6 @@ struct DDQueueData {
 	}
 };
 
-// return -1 if a.readload > b.readload, usually for choose dest team with low read load
-int greaterReadLoad(Reference<IDataDistributionTeam> a, Reference<IDataDistributionTeam> b) {
-	auto r1 = a->getLoadReadBandwidth(true, 2), r2 = b->getLoadReadBandwidth(true, 2);
-	return r1 == r2 ? 0 : (r1 > r2 ? -1 : 1);
-}
-
-// return -1 if a.readload < b.readload, usually for choose source team with high read load
-int lessReadLoad(Reference<IDataDistributionTeam> a, Reference<IDataDistributionTeam> b) {
-	auto r1 = a->getLoadReadBandwidth(), r2 = b->getLoadReadBandwidth();
-	return r1 == r2 ? 0 : (r1 < r2 ? -1 : 1);
-}
-
 static std::string destServersString(std::vector<std::pair<Reference<IDataDistributionTeam>, bool>> const& bestTeams) {
 	std::stringstream ss;
 
@@ -1190,14 +1178,13 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 					                          WantTrueBest(isValleyFillerPriority(rd.priority)),
 					                          PreferLowerUtilization::True,
 					                          TeamMustHaveShards::False,
+					                          ForReadBalance(rd.reason == RelocateReason::REBALANCE_READ),
+					                          PreferLowerReadUtil::True,
 					                          inflightPenalty);
 
 					req.src = rd.src;
 					req.completeSources = rd.completeSources;
 
-					if (rd.reason == RelocateReason::REBALANCE_READ) {
-						req.teamSorter = greaterReadLoad;
-					}
 					// bestTeam.second = false if the bestTeam in the teamCollection (in the DC) does not have any
 					// server that hosts the relocateData. This is possible, for example, in a fearless configuration
 					// when the remote DC is just brought up.
@@ -1778,25 +1765,30 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueueData* self, int teamCollectionIndex,
 					srcReq = GetTeamRequest(WantNewServers::True,
 					                        WantTrueBest::True,
 					                        PreferLowerUtilization::False,
-					                        TeamMustHaveShards::True);
+					                        TeamMustHaveShards::True,
+					                        ForReadBalance(readRebalance),
+					                        PreferLowerReadUtil::False);
 					destReq = GetTeamRequest(WantNewServers::True,
 					                         WantTrueBest::False,
 					                         PreferLowerUtilization::True,
-					                         TeamMustHaveShards::False);
+					                         TeamMustHaveShards::False,
+					                         ForReadBalance(readRebalance),
+					                         PreferLowerReadUtil::True);
 				} else {
 					srcReq = GetTeamRequest(WantNewServers::True,
 					                        WantTrueBest::False,
 					                        PreferLowerUtilization::False,
-					                        TeamMustHaveShards::True);
+					                        TeamMustHaveShards::True,
+					                        ForReadBalance(readRebalance),
+					                        PreferLowerReadUtil::False);
 					destReq = GetTeamRequest(WantNewServers::True,
 					                         WantTrueBest::True,
 					                         PreferLowerUtilization::True,
-					                         TeamMustHaveShards::False);
+					                         TeamMustHaveShards::False,
+					                         ForReadBalance(readRebalance),
+					                         PreferLowerReadUtil::True);
 				}
-				if (readRebalance) {
-					srcReq.teamSorter = lessReadLoad;
-					destReq.teamSorter = greaterReadLoad;
-				}
+
 				// clang-format off
 				wait(getSrcDestTeams(self, teamCollectionIndex, srcReq, destReq, &sourceTeam, &destTeam,ddPriority,&traceEvent));
 				if (sourceTeam.isValid() && destTeam.isValid()) {

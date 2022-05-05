@@ -86,37 +86,40 @@ FDB_DECLARE_BOOLEAN_PARAM(WantNewServers);
 FDB_DECLARE_BOOLEAN_PARAM(WantTrueBest);
 FDB_DECLARE_BOOLEAN_PARAM(PreferLowerUtilization);
 FDB_DECLARE_BOOLEAN_PARAM(TeamMustHaveShards);
+FDB_DECLARE_BOOLEAN_PARAM(ForReadBalance);
+FDB_DECLARE_BOOLEAN_PARAM(PreferLowerReadUtil);
 
 struct GetTeamRequest {
 	bool wantsNewServers; // In additional to servers in completeSources, try to find teams with new server
 	bool wantsTrueBest;
 	bool preferLowerUtilization; // if true, lower utilized team has higher score
 	bool teamMustHaveShards;
+	bool forReadBalance;
+	bool preferLowerReadUtil; // only make sense when forReadBalance is true
 	double inflightPenalty;
 	std::vector<UID> completeSources;
 	std::vector<UID> src;
 	Promise<std::pair<Optional<Reference<IDataDistributionTeam>>, bool>> reply;
 
-	// optional
 	typedef Reference<IDataDistributionTeam> TeamRef;
-	std::function<bool(TeamRef)> hardConstraint;
-	std::function<int(TeamRef, TeamRef)>
-	    teamSorter; // => -1 if a.score < b.score, 0 if equal, 1 if larger, the reply will choose the largest one
 
 	GetTeamRequest() {}
 	GetTeamRequest(WantNewServers wantsNewServers,
 	               WantTrueBest wantsTrueBest,
 	               PreferLowerUtilization preferLowerUtilization,
 	               TeamMustHaveShards teamMustHaveShards,
+	               ForReadBalance forReadBalance = ForReadBalance::False,
+	               PreferLowerReadUtil preferLowerReadUtil = PreferLowerReadUtil::False,
 	               double inflightPenalty = 1.0)
 	  : wantsNewServers(wantsNewServers), wantsTrueBest(wantsTrueBest), preferLowerUtilization(preferLowerUtilization),
-	    teamMustHaveShards(teamMustHaveShards), inflightPenalty(inflightPenalty) {}
+	    teamMustHaveShards(teamMustHaveShards), forReadBalance(forReadBalance),
+	    preferLowerReadUtil(preferLowerReadUtil), inflightPenalty(inflightPenalty) {}
 
 	// return true if a.score < b.score
 	[[nodiscard]] bool lessCompare(TeamRef a, TeamRef b, int64_t aLoadBytes, int64_t bLoadBytes) const {
 		int res = 0;
-		if (teamSorter) {
-			res = teamSorter(a, b);
+		if (forReadBalance) {
+			res = preferLowerReadUtil ? greaterReadLoad(a, b) : lessReadLoad(a, b);
 		}
 		return res == 0 ? lessCompareByLoad(aLoadBytes, bLoadBytes) : res < 0;
 	}
@@ -128,11 +131,15 @@ struct GetTeamRequest {
 		return preferLowerUtilization ? !lessLoad : lessLoad;
 	}
 
-	bool eligible(TeamRef a) const {
-		if (hardConstraint) {
-			return hardConstraint(a);
-		}
-		return true;
+	// return -1 if a.readload > b.readload
+	static int greaterReadLoad(TeamRef a, TeamRef b) {
+		auto r1 = a->getLoadReadBandwidth(true, 2), r2 = b->getLoadReadBandwidth(true, 2);
+		return r1 == r2 ? 0 : (r1 > r2 ? -1 : 1);
+	}
+	// return -1 if a.readload < b.readload
+	static int lessReadLoad(TeamRef a, TeamRef b) {
+		auto r1 = a->getLoadReadBandwidth(), r2 = b->getLoadReadBandwidth();
+		return r1 == r2 ? 0 : (r1 < r2 ? -1 : 1);
 	}
 
 	std::string getDesc() const {
@@ -140,8 +147,7 @@ struct GetTeamRequest {
 
 		ss << "WantsNewServers:" << wantsNewServers << " WantsTrueBest:" << wantsTrueBest
 		   << " PreferLowerUtilization:" << preferLowerUtilization << " teamMustHaveShards:" << teamMustHaveShards
-		   << " inflightPenalty:" << inflightPenalty << " hardConstraint: " << (bool)hardConstraint
-		   << " teamSorter: " << (bool)teamSorter << ";";
+		   << "forReadBalance" << forReadBalance << " inflightPenalty:" << inflightPenalty << ";";
 		ss << "CompleteSources:";
 		for (const auto& cs : completeSources) {
 			ss << cs.toString() << ",";
@@ -489,9 +495,5 @@ struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 
 ACTOR Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses(
     Transaction* tr);
-// return -1 if a.readload > b.readload
-int greaterReadLoad(Reference<IDataDistributionTeam> a, Reference<IDataDistributionTeam> b);
-// return -1 if a.readload < b.readload
-int lessReadLoad(Reference<IDataDistributionTeam> a, Reference<IDataDistributionTeam> b);
 #include "flow/unactorcompiler.h"
 #endif

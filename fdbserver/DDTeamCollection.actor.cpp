@@ -44,6 +44,8 @@ FDB_DEFINE_BOOLEAN_PARAM(WantNewServers);
 FDB_DEFINE_BOOLEAN_PARAM(WantTrueBest);
 FDB_DEFINE_BOOLEAN_PARAM(PreferLowerUtilization);
 FDB_DEFINE_BOOLEAN_PARAM(TeamMustHaveShards);
+FDB_DEFINE_BOOLEAN_PARAM(ForReadBalance);
+FDB_DEFINE_BOOLEAN_PARAM(PreferLowerReadUtil);
 
 class DDTeamCollectionImpl {
 	ACTOR static Future<Void> checkAndRemoveInvalidLocalityAddr(DDTeamCollection* self) {
@@ -255,8 +257,7 @@ public:
 					    (!req.preferLowerUtilization ||
 					     self->teams[currentIndex]->hasHealthyAvailableSpace(self->medianAvailableSpace))) {
 						int64_t loadBytes = self->teams[currentIndex]->getLoadBytes(true, req.inflightPenalty);
-						if (req.eligible(self->teams[currentIndex]) && // hard constraints
-						    (!req.teamMustHaveShards ||
+						if ((!req.teamMustHaveShards ||
 						     self->shardsAffectedByTeamFailure->hasShards(ShardsAffectedByTeamFailure::Team(
 						         self->teams[currentIndex]->getServerIDs(), self->primary))) &&
 						    // sort conditions
@@ -5688,14 +5689,23 @@ public:
 		auto wantsTrueBest = WantTrueBest::True;
 		auto preferLowerUtilization = PreferLowerUtilization::True;
 		auto teamMustHaveShards = TeamMustHaveShards::False;
+		auto forReadBalance = ForReadBalance::True;
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
-		state GetTeamRequest req(wantsNewServers, wantsTrueBest, preferLowerUtilization, teamMustHaveShards);
+		state GetTeamRequest req(wantsNewServers,
+		                         wantsTrueBest,
+		                         preferLowerUtilization,
+		                         teamMustHaveShards,
+		                         forReadBalance,
+		                         PreferLowerReadUtil::True);
 		req.completeSources = completeSources;
-		req.teamSorter = greaterReadLoad;
 
-		state GetTeamRequest reqHigh(wantsNewServers, wantsTrueBest, PreferLowerUtilization::False, teamMustHaveShards);
-		reqHigh.teamSorter = lessReadLoad;
+		state GetTeamRequest reqHigh(wantsNewServers,
+		                             wantsTrueBest,
+		                             PreferLowerUtilization::False,
+		                             teamMustHaveShards,
+		                             forReadBalance,
+		                             PreferLowerReadUtil::False);
 
 		wait(collection->getTeam(req) && collection->getTeam(reqHigh));
 		std::pair<Optional<Reference<IDataDistributionTeam>>, bool> resTeam = req.reply.getFuture().get(),
