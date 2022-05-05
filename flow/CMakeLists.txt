@@ -46,6 +46,8 @@ set(FLOW_SRCS
   Knobs.cpp
   Knobs.h
   MetricSample.h
+  MkCert.h
+  MkCert.cpp
   Net2.actor.cpp
   Net2Packet.cpp
   Net2Packet.h
