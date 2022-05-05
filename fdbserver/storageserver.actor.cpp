@@ -3548,6 +3548,10 @@ void preprocessMappedKey(Tuple& mappedKeyFormatTuple,
 				// when it is SingleKeyOrValue, insert an empty Tuple to vector as placeholder
 				vt.push_back(Optional<Tuple>(Tuple()));
 			} else if (rangeQuery(s)) {
+				if (i != mappedKeyFormatTuple.size() - 1) {
+					// It must be the last element of the mapper tuple
+					throw mapper_bad_range_decriptor();
+				}
 				// when it is rangeQuery, insert Optional.empty as placeholder
 				vt.push_back(Optional<Tuple>());
 				isRangeQuery = true;
