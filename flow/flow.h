@@ -981,7 +981,10 @@ struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>
 		virtual ~Queue() {}
 		reference front() { return queue.front(); }
 		const_reference front() const { return queue.front(); }
-		virtual void pop() { queue.pop(); }
+		virtual void pop() {
+			removeElement();
+			queue.pop();
+		}
 		[[nodiscard]] bool empty() const { return queue.empty(); }
 		template <class... Args>
 		decltype(auto) emplace(Args&&... args) {

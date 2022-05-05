@@ -2085,9 +2085,10 @@ std::unordered_map<NetworkAddress, Reference<T>> FlowSingleton<T>::instanceMap;
 template <class T>
 class SimTimeoutQueue : public NotifiedQueue<T>::Queue {
 	using Parent = typename NotifiedQueue<T>::Queue;
-	Future<Void> timeoutFuture;
 	std::string backtrace;
-	AsyncTrigger add, remove;
+	AsyncTrigger add;
+	AsyncTrigger remove;
+	Future<Void> timeoutFuture;
 
 	void addElement() override { add.trigger(); }
 	void removeElement() override { remove.trigger(); }
@@ -2117,7 +2118,7 @@ class SimTimeoutQueue : public NotifiedQueue<T>::Queue {
 	}
 
 public:
-	SimTimeoutQueue() : timeoutFuture(observer(this)), backtrace(platform::get_backtrace()) {}
+	SimTimeoutQueue() : backtrace(platform::get_backtrace()), timeoutFuture(observer(this)) {}
 };
 
 template <class T>
