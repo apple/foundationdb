@@ -2086,33 +2086,34 @@ template <class T>
 class SimTimeoutQueue : public NotifiedQueue<T>::Queue {
 	using Parent = typename NotifiedQueue<T>::Queue;
 	std::string backtrace;
-	AsyncTrigger add;
-	AsyncTrigger remove;
+	AsyncTrigger change;
 	Future<Void> timeoutFuture;
 
-	void addElement() override { add.trigger(); }
-	void removeElement() override { remove.trigger(); }
+	void addElement() override { change.trigger(); }
+	void removeElement() override { change.trigger(); }
 
 	ACTOR static Future<Void> observer(SimTimeoutQueue<T>* self) {
 		state Future<Void> timeout = Never();
+		state int queueSize = 0;
 		loop {
-			if (self->empty()) {
+			int newSize = self->size();
+			if (newSize == 0) {
 				timeout = Never();
+			} else if (newSize < queueSize) {
+				timeout = delay(240);
 			}
+			queueSize = newSize;
 			choose {
 				when(wait(timeout)) {
+					ASSERT(!self->empty());
 					TraceEvent(SevError, "NotifiedQueueIsntConsumed")
 					    .detail("Timeout", 240)
+					    .detail("QueueSize", self->size())
 					    .detail("OriginalBacktrace", self->backtrace);
 					// we'll only report this once
 					return Void();
 				}
-				when(wait(self->add.onTrigger())) {
-					if (self->empty()) {
-						timeout = delay(240);
-					}
-				}
-				when(wait(self->remove.onTrigger())) { timeout = delay(240); }
+				when(wait(self->change.onTrigger())) {}
 			}
 		}
 	}

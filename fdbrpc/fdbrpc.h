@@ -506,7 +506,7 @@ public:
 
 	void setRequestStreamEndpoint(const Endpoint& endpoint) { queue->requestStreamEndpoint = endpoint; }
 
-	bool connected() { return queue->acknowledgements.getRawEndpoint().isValid() || queue->error.isValid(); }
+	bool connected() { return queue->acknowledgements.getRawEndpoint().isValid() || queue->hasError(); }
 
 	Future<Void> onConnected() {
 		if (connected()) {
@@ -550,8 +550,8 @@ public:
 
 	// throws, used to short circuit waiting on the queue if there has been an unexpected error
 	Future<Void> onError() {
-		if (queue->hasError() && queue->error.code() != error_code_end_of_stream) {
-			throw queue->error;
+		if (queue->hasError() && queue->getError().code() != error_code_end_of_stream) {
+			throw queue->getError();
 		}
 		if (!queue->onError.isValid()) {
 			queue->onError = Promise<Void>();

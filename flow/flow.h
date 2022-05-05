@@ -963,7 +963,6 @@ private:
 
 template <class T>
 struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>> {
-
 	class Queue : NonCopyable {
 	private:
 		std::queue<T, Deque<T>> queue;
@@ -982,26 +981,32 @@ struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>
 		reference front() { return queue.front(); }
 		const_reference front() const { return queue.front(); }
 		virtual void pop() {
-			removeElement();
 			queue.pop();
+			removeElement();
 		}
 		[[nodiscard]] bool empty() const { return queue.empty(); }
 		template <class... Args>
 		decltype(auto) emplace(Args&&... args) {
+			auto res = queue.emplace(std::forward<Args>(args)...);
 			addElement();
-			return queue.emplace(std::forward<Args>(args)...);
+			return res;
 		}
 		size_t size() const { return queue.size(); }
 	};
+
+private:
 	int promises; // one for each promise (and one for an active actor if this is an actor)
 	int futures; // one for each future and one more if there are any callbacks
 
 	// Invariant: SingleCallback<T>::next==this || (queue.empty() && !error.isValid())
 	std::unique_ptr<Queue> queue;
-	Promise<Void> onEmpty;
 	Error error;
+
+public:
+	Promise<Void> onEmpty;
 	Promise<Void> onError;
 
+public:
 	NotifiedQueue(int futures, int promises)
 	  : promises(promises), futures(futures), queue(Queue::create()), onEmpty(nullptr), onError(nullptr) {
 		SingleCallback<T>::next = this;
@@ -1012,6 +1017,7 @@ struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>
 	bool isReady() const { return !queue->empty() || error.isValid(); }
 	bool isError() const { return queue->empty() && error.isValid(); } // the *next* thing queued is an error
 	bool hasError() const { return error.isValid(); } // there is an error queued
+	Error const& getError() const { return error; }
 	uint32_t size() const { return queue->size(); }
 
 	virtual T pop() {
@@ -1157,7 +1163,7 @@ public:
 	T pop() { return queue->pop(); }
 	Error getError() {
 		ASSERT(queue->isError());
-		return queue->error;
+		return queue->getError();
 	}
 
 	explicit FutureStream(NotifiedQueue<T>* queue) : queue(queue) {}
