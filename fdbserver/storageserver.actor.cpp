@@ -3521,12 +3521,17 @@ bool rangeQuery(const std::string& s) {
 	return s == "{...}";
 }
 
-Key constructMappedKey(KeyValueRef* keyValue, Tuple& mappedKeyFormatTuple, bool& isRangeQuery) {
-	// Lazily parse key and/or value to tuple because they may not need to be a tuple if not used.
-	Optional<Tuple> keyTuple;
-	Optional<Tuple> valueTuple;
+// create a vector of Optional<Tuple>
+// in case of a singleKeyOrValue, insert an empty Tuple to vector as placeholder
+// in case of a rangeQuery, insert Optional.empty as placeholder
+// in other cases, insert the correct Tuple to be used.
+void preprocessMappedKey(Tuple& mappedKeyFormatTuple,
+                         std::vector<Optional<Tuple>>& vt,
+                         std::vector<std::string>& strings,
+                         bool& isRangeQuery) {
+	vt.reserve(mappedKeyFormatTuple.size());
+	strings.reserve(mappedKeyFormatTuple.size());
 
-	Tuple mappedKeyTuple;
 	for (int i = 0; i < mappedKeyFormatTuple.size(); i++) {
 		Tuple::ElementType type = mappedKeyFormatTuple.getType(i);
 		if (type == Tuple::BYTES || type == Tuple::UTF8) {
@@ -3534,43 +3539,67 @@ Key constructMappedKey(KeyValueRef* keyValue, Tuple& mappedKeyFormatTuple, bool&
 			auto sz = s.size();
 			bool escaped = unescapeLiterals(s, "{{", "{");
 			escaped = unescapeLiterals(s, "}}", "}") || escaped;
+			strings.push_back(s);
 			if (escaped) {
-				mappedKeyTuple.append(s);
+				Tuple escapedTuple;
+				escapedTuple.append(s);
+				vt.push_back(Optional<Tuple>(escapedTuple));
 			} else if (singleKeyOrValue(s, sz)) {
-				int idx;
-				Tuple* referenceTuple;
-				try {
-					idx = std::stoi(s.substr(3, sz - 5));
-				} catch (std::exception& e) {
-					throw mapper_bad_index();
-				}
-				if (s[1] == 'K') {
-					unpackKeyTuple(&referenceTuple, keyTuple, keyValue);
-				} else if (s[1] == 'V') {
-					unpackValueTuple(&referenceTuple, valueTuple, keyValue);
-				} else {
-					ASSERT(false);
-					throw internal_error();
-				}
-				if (idx < 0 || idx >= referenceTuple->size()) {
-					throw mapper_bad_index();
-				}
-				mappedKeyTuple.append(referenceTuple->subTuple(idx, idx + 1));
+				// when it is SingleKeyOrValue, insert an empty Tuple to vector as placeholder
+				vt.push_back(Optional<Tuple>(Tuple()));
 			} else if (rangeQuery(s)) {
-				if (i != mappedKeyFormatTuple.size() - 1) {
-					// It must be the last element of the mapper tuple
-					throw mapper_bad_range_decriptor();
-				}
-				// Every record will try to set it. It's ugly, but not wrong.
+				// when it is rangeQuery, insert Optional.empty as placeholder
+				vt.push_back(Optional<Tuple>());
 				isRangeQuery = true;
-				// Do not add it to the mapped key.
 			} else {
-				// If the element is a string but neither escaped nor descriptors, add to result.
-				mappedKeyTuple.append(mappedKeyFormatTuple.subTuple(i, i + 1));
+				vt.push_back(Optional<Tuple>(mappedKeyFormatTuple.subTuple(i, i + 1)));
 			}
 		} else {
-			// If the element not a string, add to result.
-			mappedKeyTuple.append(mappedKeyFormatTuple.subTuple(i, i + 1));
+			vt.push_back(Optional<Tuple>(mappedKeyFormatTuple.subTuple(i, i + 1)));
+		}
+	}
+}
+
+Key constructMappedKey(KeyValueRef* keyValue,
+                       std::vector<Optional<Tuple>>& vec,
+                       Tuple& mappedKeyTuple,
+                       std::vector<std::string>& strings) {
+	// Lazily parse key and/or value to tuple because they may not need to be a tuple if not used.
+	Optional<Tuple> keyTuple;
+	Optional<Tuple> valueTuple;
+	mappedKeyTuple.clear();
+	mappedKeyTuple.reserve(vec.size());
+
+	for (int i = 0; i < vec.size(); i++) {
+		if (!vec[i].present()) {
+			// rangeQuery
+			continue;
+		}
+		if (vec[i].get().size()) {
+			mappedKeyTuple.append(vec[i].get());
+		} else {
+			// singleKeyOrValue is true
+			std::string s = strings[i];
+			auto sz = s.size();
+			int idx;
+			Tuple* referenceTuple;
+			try {
+				idx = std::stoi(s.substr(3, sz - 5));
+			} catch (std::exception& e) {
+				throw mapper_bad_index();
+			}
+			if (s[1] == 'K') {
+				unpackKeyTuple(&referenceTuple, keyTuple, keyValue);
+			} else if (s[1] == 'V') {
+				unpackValueTuple(&referenceTuple, valueTuple, keyValue);
+			} else {
+				ASSERT(false);
+				throw internal_error();
+			}
+			if (idx < 0 || idx >= referenceTuple->size()) {
+				throw mapper_bad_index();
+			}
+			mappedKeyTuple.append(referenceTuple->subTuple(idx, idx + 1));
 		}
 	}
 
@@ -3582,15 +3611,20 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 	Value value = Tuple().append("value-0"_sr).append("value-1"_sr).append("value-2"_sr).getDataAsStandalone();
 	state KeyValueRef kvr(key, value);
 	{
-		Tuple mapperTuple = Tuple()
-		                        .append("normal"_sr)
-		                        .append("{{escaped}}"_sr)
-		                        .append("{K[2]}"_sr)
-		                        .append("{V[0]}"_sr)
-		                        .append("{...}"_sr);
+		Tuple mappedKeyFormatTuple = Tuple()
+		                                 .append("normal"_sr)
+		                                 .append("{{escaped}}"_sr)
+		                                 .append("{K[2]}"_sr)
+		                                 .append("{V[0]}"_sr)
+		                                 .append("{...}"_sr);
 
+		Tuple mappedKeyTuple;
+		std::vector<Optional<Tuple>> vt;
+		std::vector<std::string> strings;
 		bool isRangeQuery = false;
-		Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery);
+		preprocessMappedKey(mappedKeyFormatTuple, vt, strings, isRangeQuery);
+
+		Key mappedKey = constructMappedKey(&kvr, vt, mappedKeyTuple, strings);
 
 		Key expectedMappedKey = Tuple()
 		                            .append("normal"_sr)
@@ -3602,11 +3636,16 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 		ASSERT(mappedKey.compare(expectedMappedKey) == 0);
 		ASSERT(isRangeQuery == true);
 	}
-	{
-		Tuple mapperTuple = Tuple().append("{{{{}}"_sr).append("}}"_sr);
 
+	{
+		Tuple mappedKeyFormatTuple = Tuple().append("{{{{}}"_sr).append("}}"_sr);
+
+		Tuple mappedKeyTuple;
+		std::vector<Optional<Tuple>> vt;
+		std::vector<std::string> strings;
 		bool isRangeQuery = false;
-		Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery);
+		preprocessMappedKey(mappedKeyFormatTuple, vt, strings, isRangeQuery);
+		Key mappedKey = constructMappedKey(&kvr, vt, mappedKeyTuple, strings);
 
 		Key expectedMappedKey = Tuple().append("{{}"_sr).append("}"_sr).getDataAsStandalone();
 		//		std::cout << printable(mappedKey) << " == " << printable(expectedMappedKey) << std::endl;
@@ -3614,10 +3653,14 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 		ASSERT(isRangeQuery == false);
 	}
 	{
-		Tuple mapperTuple = Tuple().append("{{{{}}"_sr).append("}}"_sr);
+		Tuple mappedKeyFormatTuple = Tuple().append("{{{{}}"_sr).append("}}"_sr);
 
+		Tuple mappedKeyTuple;
+		std::vector<Optional<Tuple>> vt;
+		std::vector<std::string> strings;
 		bool isRangeQuery = false;
-		Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery);
+		preprocessMappedKey(mappedKeyFormatTuple, vt, strings, isRangeQuery);
+		Key mappedKey = constructMappedKey(&kvr, vt, mappedKeyTuple, strings);
 
 		Key expectedMappedKey = Tuple().append("{{}"_sr).append("}"_sr).getDataAsStandalone();
 		//		std::cout << printable(mappedKey) << " == " << printable(expectedMappedKey) << std::endl;
@@ -3625,11 +3668,16 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 		ASSERT(isRangeQuery == false);
 	}
 	{
-		Tuple mapperTuple = Tuple().append("{K[100]}"_sr);
-		bool isRangeQuery = false;
+		Tuple mappedKeyFormatTuple = Tuple().append("{K[100]}"_sr);
 		state bool throwException = false;
 		try {
-			Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery);
+			Tuple mappedKeyTuple;
+			std::vector<Optional<Tuple>> vt;
+			std::vector<std::string> strings;
+			bool isRangeQuery = false;
+			preprocessMappedKey(mappedKeyFormatTuple, vt, strings, isRangeQuery);
+
+			Key mappedKey = constructMappedKey(&kvr, vt, mappedKeyTuple, strings);
 		} catch (Error& e) {
 			ASSERT(e.code() == error_code_mapper_bad_index);
 			throwException = true;
@@ -3637,11 +3685,16 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 		ASSERT(throwException);
 	}
 	{
-		Tuple mapperTuple = Tuple().append("{...}"_sr).append("last-element"_sr);
-		bool isRangeQuery = false;
+		Tuple mappedKeyFormatTuple = Tuple().append("{...}"_sr).append("last-element"_sr);
 		state bool throwException2 = false;
 		try {
-			Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery);
+			Tuple mappedKeyTuple;
+			std::vector<Optional<Tuple>> vt;
+			std::vector<std::string> strings;
+			bool isRangeQuery = false;
+			preprocessMappedKey(mappedKeyFormatTuple, vt, strings, isRangeQuery);
+
+			Key mappedKey = constructMappedKey(&kvr, vt, mappedKeyTuple, strings);
 		} catch (Error& e) {
 			ASSERT(e.code() == error_code_mapper_bad_range_decriptor);
 			throwException2 = true;
@@ -3649,11 +3702,16 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 		ASSERT(throwException2);
 	}
 	{
-		Tuple mapperTuple = Tuple().append("{K[not-a-number]}"_sr);
-		bool isRangeQuery = false;
+		Tuple mappedKeyFormatTuple = Tuple().append("{K[not-a-number]}"_sr);
 		state bool throwException3 = false;
 		try {
-			Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery);
+			Tuple mappedKeyTuple;
+			std::vector<Optional<Tuple>> vt;
+			std::vector<std::string> strings;
+			bool isRangeQuery = false;
+			preprocessMappedKey(mappedKeyFormatTuple, vt, strings, isRangeQuery);
+
+			Key mappedKey = constructMappedKey(&kvr, vt, mappedKeyTuple, strings);
 		} catch (Error& e) {
 			ASSERT(e.code() == error_code_mapper_bad_index);
 			throwException3 = true;
@@ -3678,6 +3736,8 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 	result.data.reserve(result.arena, input.data.size());
 
 	state Tuple mappedKeyFormatTuple;
+	state Tuple mappedKeyTuple;
+
 	try {
 		mappedKeyFormatTuple = Tuple::unpack(mapper);
 	} catch (Error& e) {
@@ -3685,13 +3745,17 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 		throw mapper_not_tuple();
 	}
 	state KeyValueRef* it = input.data.begin();
+	state std::vector<Optional<Tuple>> vt;
+	state std::vector<std::string> strings;
+	state bool isRangeQuery = false;
+	preprocessMappedKey(mappedKeyFormatTuple, vt, strings, isRangeQuery);
+
 	for (; it != input.data.end(); it++) {
 		state MappedKeyValueRef kvm;
 		kvm.key = it->key;
 		kvm.value = it->value;
 
-		state bool isRangeQuery = false;
-		state Key mappedKey = constructMappedKey(it, mappedKeyFormatTuple, isRangeQuery);
+		state Key mappedKey = constructMappedKey(it, vt, mappedKeyTuple, strings);
 		// Make sure the mappedKey is always available, so that it's good even we want to get key asynchronously.
 		result.arena.dependsOn(mappedKey.arena());
 
