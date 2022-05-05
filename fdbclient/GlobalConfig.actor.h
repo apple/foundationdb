@@ -20,7 +20,6 @@
 
 #pragma once
 
-#include <memory>
 #if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_GLOBALCONFIG_ACTOR_G_H)
 #define FDBCLIENT_GLOBALCONFIG_ACTOR_G_H
 #include "fdbclient/GlobalConfig.actor.g.h"
