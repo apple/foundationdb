@@ -36,6 +36,8 @@ struct Tuple {
 	static Tuple unpack(StringRef const& str, bool exclude_incomplete = false);
 
 	Tuple& append(Tuple const& tuple);
+
+	// the str needs to be a Tuple encoded string.
 	Tuple& appendRaw(StringRef const& str);
 	Tuple& append(StringRef const& str, bool utf8 = false);
 	Tuple& append(int64_t);
@@ -62,6 +64,7 @@ struct Tuple {
 		data.clear();
 		offsets.clear();
 	}
+	// Return a Tuple encoded raw string.
 	StringRef subTupleRawString(size_t index) const;
 	ElementType getType(size_t index) const;
 	Standalone<StringRef> getString(size_t index) const;
