@@ -20,6 +20,8 @@
 
 #ifndef FDBCLIENT_MULTIVERSIONTRANSACTION_H
 #define FDBCLIENT_MULTIVERSIONTRANSACTION_H
+#include "fdbclient/ClusterConnectionFile.h"
+#include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "flow/ProtocolVersion.h"
 #pragma once
 
@@ -127,6 +129,7 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	fdb_error_t (*runNetwork)();
 	fdb_error_t (*stopNetwork)();
 	fdb_error_t (*createDatabase)(const char* clusterFilePath, FDBDatabase** db);
+	fdb_error_t (*createDatabaseFromConnectionString)(const char* connectionString, FDBDatabase** db);
 
 	// Database
 	fdb_error_t (*databaseOpenTenant)(FDBDatabase* database,
@@ -477,8 +480,15 @@ public:
 	void runNetwork() override;
 	void stopNetwork() override;
 
-	Reference<IDatabase> createDatabase(const char* clusterFilePath) override;
+	Reference<IDatabase> createDatabase(Reference<IClusterConnectionRecord> connectionRecord) override;
 	Reference<IDatabase> createDatabase609(const char* clusterFilePath); // legacy database creation
+
+	template <class T>
+	Reference<IDatabase> createDatabaseImpl(Reference<T> connectionRecord) {
+		throw unsupported_operation();
+	}
+	Reference<IDatabase> createDatabaseImpl(Reference<ClusterConnectionFile> connectionFile);
+	Reference<IDatabase> createDatabaseImpl(Reference<ClusterConnectionMemoryRecord> connectionRecord);
 
 	void addNetworkThreadCompletionHook(void (*hook)(void*), void* hookParameter) override;
 
@@ -499,8 +509,8 @@ class MultiVersionDatabase;
 class MultiVersionTenant;
 
 // An implementation of ITransaction that wraps a transaction created either locally or through a dynamically loaded
-// external client. When needed (e.g on cluster version change), the MultiVersionTransaction can automatically replace
-// its wrapped transaction with one from another client.
+// external client. When needed (e.g on cluster version change), the MultiVersionTransaction can automatically
+// replace its wrapped transaction with one from another client.
 class MultiVersionTransaction : public ITransaction, ThreadSafeReferenceCounted<MultiVersionTransaction> {
 public:
 	MultiVersionTransaction(Reference<MultiVersionDatabase> db,
@@ -601,8 +611,8 @@ private:
 	// A lock that needs to be held if using timeoutTsav or currentTimeout
 	ThreadSpinLock timeoutLock;
 
-	// A single assignment var (i.e. promise) that gets set with an error when the timeout elapses or the transaction
-	// is reset or destroyed.
+	// A single assignment var (i.e. promise) that gets set with an error when the timeout elapses or the
+	// transaction is reset or destroyed.
 	Reference<ThreadSingleAssignmentVar<Void>> timeoutTsav;
 
 	// A reference to the current actor waiting for the timeout. This actor will set the timeoutTsav promise.
@@ -704,7 +714,7 @@ class MultiVersionDatabase final : public IDatabase, ThreadSafeReferenceCounted<
 public:
 	MultiVersionDatabase(MultiVersionApi* api,
 	                     int threadIdx,
-	                     std::string clusterFilePath,
+	                     Reference<IClusterConnectionRecord> connectionRecord,
 	                     Reference<IDatabase> db,
 	                     Reference<IDatabase> versionMonitorDb,
 	                     bool openConnectors = true);
@@ -717,8 +727,8 @@ public:
 	double getMainThreadBusyness() override;
 
 	// Returns the protocol version reported by the coordinator this client is connected to
-	// If an expected version is given, the future won't return until the protocol version is different than expected
-	// Note: this will never return if the server is running a protocol from FDB 5.0 or older
+	// If an expected version is given, the future won't return until the protocol version is different than
+	// expected Note: this will never return if the server is running a protocol from FDB 5.0 or older
 	ThreadFuture<ProtocolVersion> getServerProtocol(
 	    Optional<ProtocolVersion> expectedVersion = Optional<ProtocolVersion>()) override;
 
@@ -746,7 +756,7 @@ public:
 	// A struct that manages the current connection state of the MultiVersionDatabase. This wraps the underlying
 	// IDatabase object that is currently interacting with the cluster.
 	struct DatabaseState : ThreadSafeReferenceCounted<DatabaseState> {
-		DatabaseState(std::string clusterFilePath, Reference<IDatabase> versionMonitorDb);
+		DatabaseState(Reference<IClusterConnectionRecord> connectionRecord, Reference<IDatabase> versionMonitorDb);
 
 		// Replaces the active database connection with a new one. Must be called from the main thread.
 		void updateDatabase(Reference<IDatabase> newDb, Reference<ClientInfo> client);
@@ -771,7 +781,7 @@ public:
 
 		Reference<IDatabase> db;
 		const Reference<ThreadSafeAsyncVar<Reference<IDatabase>>> dbVar;
-		std::string clusterFilePath;
+		Reference<IClusterConnectionRecord> connectionRecord;
 
 		// Used to monitor the cluster protocol version. Will be the same as db unless we have either not connected
 		// yet or if the client version associated with db does not support protocol monitoring. In those cases,
@@ -848,7 +858,8 @@ public:
 	void addNetworkThreadCompletionHook(void (*hook)(void*), void* hookParameter) override;
 
 	// Creates an IDatabase object that represents a connection to the cluster
-	Reference<IDatabase> createDatabase(const char* clusterFilePath) override;
+	Reference<IDatabase> createDatabase(Reference<IClusterConnectionRecord> connectionRecord) override;
+
 	static MultiVersionApi* api;
 
 	Reference<ClientInfo> getLocalClient();
@@ -861,8 +872,8 @@ public:
 
 	bool callbackOnMainThread;
 	bool localClientDisabled;
-	ThreadFuture<Void> updateClusterSharedStateMap(std::string clusterFilePath, Reference<IDatabase> db);
-	void clearClusterSharedStateMapEntry(std::string clusterFilePath);
+	ThreadFuture<Void> updateClusterSharedStateMap(std::string connectionRecord, Reference<IDatabase> db);
+	void clearClusterSharedStateMapEntry(std::string connectionRecord);
 
 	static bool apiVersionAtLeast(int minVersion);
 
@@ -886,7 +897,7 @@ private:
 	Reference<ClientInfo> localClient;
 	std::map<std::string, ClientDesc> externalClientDescriptions;
 	std::map<std::string, std::vector<Reference<ClientInfo>>> externalClients;
-	// Map of clusterFilePath -> DatabaseSharedState pointer Future
+	// Map of connection record -> DatabaseSharedState pointer Future
 	// Upon cluster version upgrade, clear the map entry for that cluster
 	std::map<std::string, ThreadFuture<DatabaseSharedState*>> clusterSharedStateMap;
 

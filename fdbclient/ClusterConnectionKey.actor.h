@@ -35,7 +35,9 @@
 
 // An implementation of IClusterConnectionRecord backed by a key in a FoundationDB database.
 template <class DB>
-class ClusterConnectionKey : public IClusterConnectionRecord, ReferenceCounted<ClusterConnectionKey<DB>>, NonCopyable {
+class ClusterConnectionKey : public IClusterConnectionRecord,
+                             ThreadSafeReferenceCounted<ClusterConnectionKey<DB>>,
+                             NonCopyable {
 public:
 	// Creates a cluster connection record with a given connection string and saves it to the specified key. Needs to be
 	// persisted should be set to true unless this ClusterConnectionKey is being created with the value read from the
@@ -102,8 +104,8 @@ public:
 	// the key where the record is stored.
 	std::string toString() const override { return "fdbkey://" + printable(connectionStringKey); }
 
-	void addref() override { ReferenceCounted<ClusterConnectionKey>::addref(); }
-	void delref() override { ReferenceCounted<ClusterConnectionKey>::delref(); }
+	void addref() override { ThreadSafeReferenceCounted<ClusterConnectionKey>::addref(); }
+	void delref() override { ThreadSafeReferenceCounted<ClusterConnectionKey>::delref(); }
 
 protected:
 	// Writes the connection string to the database

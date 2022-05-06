@@ -156,6 +156,11 @@ private:
 	bool connectionStringNeedsPersisted;
 };
 
+template <>
+struct Traceable<IClusterConnectionRecord> : std::true_type {
+	static std::string toString(IClusterConnectionRecord const& record) { return record.toString(); }
+};
+
 struct LeaderInfo {
 	constexpr static FileIdentifier file_identifier = 8338794;
 	// The first 7 bits of changeID represent cluster controller process class fitness, the lower the better

@@ -19,6 +19,7 @@
  */
 
 #pragma once
+#include "fdbclient/FDBOptions.g.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_METACLUSTER_MANAGEMENT_ACTOR_G_H)
 #define FDBCLIENT_METACLUSTER_MANAGEMENT_ACTOR_G_H
 #include "fdbclient/MetaclusterManagement.actor.g.h"
@@ -29,6 +30,7 @@
 #include "fdbclient/GenericTransactionHelper.h"
 #include "fdbclient/GenericManagementAPI.actor.h"
 #include "fdbclient/Metacluster.h"
+#include "fdbclient/MultiVersionTransaction.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/VersionedMap.h"
 #include "flow/flat_buffers.h"
@@ -42,6 +44,9 @@ struct DataClusterMetadata {
 	DataClusterMetadata(DataClusterEntry const& entry, ClusterConnectionString const& connectionString)
 	  : entry(entry), connectionString(connectionString) {}
 };
+
+FDB_DECLARE_BOOLEAN_PARAM(AddNewTenants);
+FDB_DECLARE_BOOLEAN_PARAM(RemoveMissingTenants);
 
 namespace MetaclusterAPI {
 
@@ -107,11 +112,11 @@ Future<DataClusterMetadata> getCluster(Reference<DB> db, ClusterName name) {
 // This should only be called from a transaction that has already confirmed that the cluster entry
 // is present. The updatedEntry should use the existing entry and modify only those fields that need
 // to be changed.
-ACTOR template <class Transaction>
-Future<Void> updateClusterMetadataTransaction(Transaction tr,
-                                              ClusterNameRef name,
-                                              Optional<std::string> updatedConnectionString,
-                                              Optional<DataClusterEntry> updatedEntry) {
+template <class Transaction>
+void updateClusterMetadataTransaction(Transaction tr,
+                                      ClusterNameRef name,
+                                      Optional<std::string> updatedConnectionString,
+                                      Optional<DataClusterEntry> updatedEntry) {
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 
 	if (updatedEntry.present()) {
@@ -120,24 +125,19 @@ Future<Void> updateClusterMetadataTransaction(Transaction tr,
 	if (updatedConnectionString.present()) {
 		tr->set(name.withPrefix(dataClusterConnectionRecordPrefix), updatedConnectionString.get());
 	}
-
-	return Void();
 }
 
 ACTOR template <class Transaction>
-Future<Optional<DataClusterEntry>> registerClusterTransaction(Transaction tr,
-                                                              ClusterNameRef name,
-                                                              std::string connectionString,
-                                                              DataClusterEntry entry) {
-
+Future<Void> managementClusterRegisterClusterTransaction(Transaction tr,
+                                                         ClusterNameRef name,
+                                                         std::string connectionString,
+                                                         DataClusterEntry entry) {
 	state Key dataClusterMetadataKey = name.withPrefix(dataClusterMetadataPrefix);
 	state Key dataClusterConnectionRecordKey = name.withPrefix(dataClusterConnectionRecordPrefix);
 
 	if (name.startsWith("\xff"_sr)) {
 		throw invalid_cluster_name();
 	}
-
-	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 
 	state Future<Optional<DataClusterMetadata>> dataClusterMetadataFuture = tryGetClusterTransaction(tr, name);
 	state typename transaction_future_type<Transaction, Optional<Value>>::type lastIdFuture =
@@ -153,7 +153,7 @@ Future<Optional<DataClusterEntry>> registerClusterTransaction(Transaction tr,
 
 	Optional<DataClusterMetadata> dataClusterMetadata = wait(dataClusterMetadataFuture);
 	if (dataClusterMetadata.present()) {
-		return Optional<DataClusterEntry>();
+		return Void();
 	}
 
 	state Optional<Value> lastIdVal = wait(safeThreadFutureToFuture(lastIdFuture));
@@ -165,7 +165,57 @@ Future<Optional<DataClusterEntry>> registerClusterTransaction(Transaction tr,
 	tr->set(dataClusterMetadataKey, encodeDataClusterEntry(entry));
 	tr->set(dataClusterConnectionRecordKey, connectionString);
 
-	return entry;
+	return Void();
+}
+
+ACTOR template <class Transaction>
+Future<Void> dataClusterRegisterClusterTransaction(Transaction tr, ClusterNameRef name) {
+	state Future<std::map<TenantName, TenantMapEntry>> existingTenantsFuture =
+	    ManagementAPI::listTenantsTransaction(tr, ""_sr, "\xff\xff"_sr, 1);
+	state ThreadFuture<RangeResult> existingDataFuture = tr->getRange(normalKeys, 1);
+
+	std::map<TenantName, TenantMapEntry> existingTenants = wait(safeThreadFutureToFuture(existingTenantsFuture));
+	if (!existingTenants.empty()) {
+		TraceEvent(SevWarn, "CannotRegisterClusterWithTenants").detail("ClusterName", name);
+		throw register_nonempty_cluster();
+	}
+
+	RangeResult existingData = wait(safeThreadFutureToFuture(existingDataFuture));
+	if (!existingData.empty()) {
+		TraceEvent(SevWarn, "CannotRegisterClusterWithData").detail("ClusterName", name);
+		throw register_nonempty_cluster();
+	}
+
+	// TODO: change config to subordinate cluster
+	return Void();
+}
+
+ACTOR template <class Transaction>
+Future<Void> registerClusterTransaction(Transaction tr,
+                                        ClusterNameRef name,
+                                        std::string connectionString,
+                                        DataClusterEntry entry) {
+	if (name.startsWith("\xff"_sr)) {
+		throw invalid_cluster_name();
+	}
+
+	state Reference<IDatabase> dbToRegister =
+	    MultiVersionApi::api->createDatabase(makeReference<ClusterConnectionMemoryRecord>(connectionString));
+
+	Reference<ITransaction> registerTr = dbToRegister->createTransaction();
+
+	registerTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	registerTr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+	// TODO: use the special key-space rather than running the logic ourselves
+
+	// registerTr->set("\xff\xff/metacluster/management/data_cluster/register"_sr, ""_sr);
+	wait(dataClusterRegisterClusterTransaction(registerTr, name));
+
+	// Once the data cluster is configured, we can add it to the metacluster
+	// tr->set(name.withPrefix("\xff\xff/metacluster/map/"_sr), connectionString);
+	// wait(safeThreadFutureToFuture(tr->commit()));
+	wait(managementClusterRegisterClusterTransaction(tr, name, connectionString, entry));
+	return Void();
 }
 
 ACTOR template <class DB>
@@ -186,8 +236,7 @@ Future<Void> registerCluster(Reference<DB> db, ClusterName name, std::string con
 				firstTry = false;
 			}
 
-			state Optional<DataClusterEntry> newCluster =
-			    wait(registerClusterTransaction(tr, name, connectionString, entry));
+			wait(registerClusterTransaction(tr, name, connectionString, entry));
 
 			if (BUGGIFY) {
 				throw commit_unknown_result();
@@ -201,7 +250,6 @@ Future<Void> registerCluster(Reference<DB> db, ClusterName name, std::string con
 
 			TraceEvent("RegisteredDataCluster")
 			    .detail("ClusterName", name)
-			    .detail("ClusterId", newCluster.present() ? newCluster.get().id : -1)
 			    .detail("Capacity", entry.capacity)
 			    .detail("Version", tr->getCommittedVersion())
 			    .detail("ConnectionString", connectionString);
@@ -217,8 +265,9 @@ ACTOR template <class Transaction>
 Future<Optional<DataClusterEntry>> restoreClusterTransaction(Transaction tr,
                                                              ClusterName name,
                                                              std::string connectionString,
-                                                             ClusterUsage capacity,
-                                                             ClusterUsage allocated) {
+                                                             DataClusterEntry entry,
+                                                             AddNewTenants addNewTenants,
+                                                             RemoveMissingTenants removeMissingTenants) {
 	wait(delay(0)); // TODO: remove when implementation is added
 	return Optional<DataClusterEntry>();
 }
@@ -227,8 +276,9 @@ ACTOR template <class DB>
 Future<Void> restoreCluster(Reference<DB> db,
                             ClusterName name,
                             std::string connectionString,
-                            ClusterUsage capacity,
-                            ClusterUsage allocated) {
+                            DataClusterEntry entry,
+                            AddNewTenants addNewTenants,
+                            RemoveMissingTenants removeMissingTenants) {
 	state Reference<typename DB::TransactionT> tr = db->createTransaction();
 
 	loop {
@@ -236,7 +286,7 @@ Future<Void> restoreCluster(Reference<DB> db,
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
 			state Optional<DataClusterEntry> newCluster =
-			    wait(restoreCluster(tr, name, connectionString, capacity, allocated));
+			    wait(restoreCluster(tr, name, connectionString, entry, addNewTenants, removeMissingTenants));
 
 			if (BUGGIFY) {
 				throw commit_unknown_result();

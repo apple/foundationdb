@@ -24,6 +24,7 @@
 #define FDB_API_VERSION 720
 #define FDB_INCLUDE_LEGACY_TYPES
 
+#include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/MultiVersionTransaction.h"
 #include "fdbclient/MultiVersionAssignmentVars.h"
 #include "foundationdb/fdb_c.h"
@@ -361,7 +362,8 @@ void fdb_cluster_destroy_v609(FDBCluster* c) {
 // the version of the function in the primary library if it was loaded into the global symbols.
 fdb_error_t fdb_create_database_impl(const char* cluster_file_path, FDBDatabase** out_database) {
 	CATCH_AND_RETURN(*out_database =
-	                     (FDBDatabase*)API->createDatabase(cluster_file_path ? cluster_file_path : "").extractPtr(););
+	                     (FDBDatabase*)API->createDatabase(ClusterConnectionFile::openOrDefault(cluster_file_path))
+	                         .extractPtr(););
 }
 
 FDBFuture* fdb_cluster_create_database_v609(FDBCluster* c, uint8_t const* db_name, int db_name_length) {
@@ -380,6 +382,14 @@ FDBFuture* fdb_cluster_create_database_v609(FDBCluster* c, uint8_t const* db_nam
 
 extern "C" DLLEXPORT fdb_error_t fdb_create_database(const char* cluster_file_path, FDBDatabase** out_database) {
 	return fdb_create_database_impl(cluster_file_path, out_database);
+}
+
+extern "C" DLLEXPORT fdb_error_t fdb_create_database_from_connection_string(const char* connection_string,
+                                                                            FDBDatabase** out_database) {
+	CATCH_AND_RETURN(*out_database = (FDBDatabase*)API
+	                                     ->createDatabase(makeReference<ClusterConnectionMemoryRecord>(
+	                                         ClusterConnectionString(connection_string)))
+	                                     .extractPtr(););
 }
 
 extern "C" DLLEXPORT fdb_error_t fdb_database_set_option(FDBDatabase* d,

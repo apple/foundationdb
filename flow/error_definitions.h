@@ -236,6 +236,7 @@ ERROR( invalid_cluster_name, 2150, "Data cluster name cannot begin with \\xff" )
 ERROR( invalid_metacluster_operation, 2151, "Metacluster operation performed on non-metacluster" )
 ERROR( cluster_already_exists, 2152, "A data cluster with the given name already exists" )
 ERROR( cluster_not_found, 2153, "Data cluster does not exist" )
+ERROR( register_nonempty_cluster, 2154, "Cannot register non-empty data cluster" )
 
 // 2200 - errors from bindings and official APIs
 ERROR( api_version_unset, 2200, "API version is not set" )

@@ -26,7 +26,7 @@
 
 // An implementation of IClusterConnectionRecord that is stored in memory only and not persisted.
 class ClusterConnectionMemoryRecord : public IClusterConnectionRecord,
-                                      ReferenceCounted<ClusterConnectionMemoryRecord>,
+                                      ThreadSafeReferenceCounted<ClusterConnectionMemoryRecord>,
                                       NonCopyable {
 public:
 	// Creates a cluster file with a given connection string.
@@ -56,8 +56,8 @@ public:
 	// record.
 	std::string toString() const override;
 
-	void addref() override { ReferenceCounted<ClusterConnectionMemoryRecord>::addref(); }
-	void delref() override { ReferenceCounted<ClusterConnectionMemoryRecord>::delref(); }
+	void addref() override { ThreadSafeReferenceCounted<ClusterConnectionMemoryRecord>::addref(); }
+	void delref() override { ThreadSafeReferenceCounted<ClusterConnectionMemoryRecord>::delref(); }
 
 protected:
 	// This is a no-op for memory records. Returns true to indicate success.

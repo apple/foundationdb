@@ -19,6 +19,10 @@
  */
 
 #include "fdbclient/Metacluster.h"
+#include "fdbclient/MetaclusterManagement.actor.h"
+
+FDB_DEFINE_BOOLEAN_PARAM(AddNewTenants);
+FDB_DEFINE_BOOLEAN_PARAM(RemoveMissingTenants);
 
 json_spirit::mObject ClusterUsage::toJson() {
 	json_spirit::mObject obj;

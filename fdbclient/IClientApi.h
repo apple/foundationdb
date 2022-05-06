@@ -23,6 +23,7 @@
 #include "flow/ProtocolVersion.h"
 #pragma once
 
+#include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/Tenant.h"
@@ -190,7 +191,7 @@ public:
 	virtual void runNetwork() = 0;
 	virtual void stopNetwork() = 0;
 
-	virtual Reference<IDatabase> createDatabase(const char* clusterFilePath) = 0;
+	virtual Reference<IDatabase> createDatabase(Reference<IClusterConnectionRecord> connectionRecord) = 0;
 
 	virtual void addNetworkThreadCompletionHook(void (*hook)(void*), void* hookParameter) = 0;
 };

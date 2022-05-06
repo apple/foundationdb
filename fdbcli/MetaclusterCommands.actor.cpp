@@ -190,8 +190,7 @@ ACTOR Future<bool> metaclusterConfigureCommand(Reference<IDatabase> db, std::vec
 				return false;
 			}
 
-			wait(MetaclusterAPI::updateClusterMetadataTransaction(
-			    tr, tokens[2], config.get().first, config.get().second));
+			MetaclusterAPI::updateClusterMetadataTransaction(tr, tokens[2], config.get().first, config.get().second);
 
 			wait(safeThreadFutureToFuture(tr->commit()));
 			break;

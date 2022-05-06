@@ -26,13 +26,19 @@
 #include "flow/actorcompiler.h" // has to be last include
 
 // An implementation of IClusterConnectionRecord backed by a file.
-class ClusterConnectionFile : public IClusterConnectionRecord, ReferenceCounted<ClusterConnectionFile>, NonCopyable {
+class ClusterConnectionFile : public IClusterConnectionRecord,
+                              ThreadSafeReferenceCounted<ClusterConnectionFile>,
+                              NonCopyable {
 public:
 	// Loads and parses the file at 'filename', throwing errors if the file cannot be read or the format is invalid.
 	explicit ClusterConnectionFile(std::string const& filename);
 
 	// Creates a cluster file with a given connection string and saves it to the specified file.
 	explicit ClusterConnectionFile(std::string const& filename, ClusterConnectionString const& contents);
+
+	// Creates a cluster file from the given filename. If the filename is empty, attempts to load the default
+	// cluster file instead.
+	static Reference<ClusterConnectionFile> openOrDefault(std::string const& filename);
 
 	// Sets the connections string held by this object and persists it.
 	Future<Void> setAndPersistConnectionString(ClusterConnectionString const&) override;
@@ -55,8 +61,8 @@ public:
 	// filename of the cluster file.
 	std::string toString() const override;
 
-	void addref() override { ReferenceCounted<ClusterConnectionFile>::addref(); }
-	void delref() override { ReferenceCounted<ClusterConnectionFile>::delref(); }
+	void addref() override { ThreadSafeReferenceCounted<ClusterConnectionFile>::addref(); }
+	void delref() override { ThreadSafeReferenceCounted<ClusterConnectionFile>::delref(); }
 
 	// returns <resolved name, was default file>
 	static std::pair<std::string, bool> lookupClusterFileName(std::string const& filename);

@@ -40,6 +40,12 @@ ClusterConnectionFile::ClusterConnectionFile(std::string const& filename, Cluste
 	cs = contents;
 }
 
+// Creates a cluster file from the given filename. If the filename is empty, attempts to load the default
+// cluster file instead.
+Reference<ClusterConnectionFile> ClusterConnectionFile::openOrDefault(std::string const& filename) {
+	return makeReference<ClusterConnectionFile>(lookupClusterFileName(filename).first);
+}
+
 // Sets the connections string held by this object and persists it.
 Future<Void> ClusterConnectionFile::setAndPersistConnectionString(ClusterConnectionString const& conn) {
 	ASSERT(filename.size());

@@ -141,19 +141,15 @@ ThreadFuture<Void> ThreadSafeDatabase::waitPurgeGranulesComplete(const KeyRef& p
 	return onMainThread([db, key]() -> Future<Void> { return db->waitPurgeGranulesComplete(key); });
 }
 
-ThreadSafeDatabase::ThreadSafeDatabase(std::string connFilename, int apiVersion) {
-	ClusterConnectionFile* connFile =
-	    new ClusterConnectionFile(ClusterConnectionFile::lookupClusterFileName(connFilename).first);
-
+ThreadSafeDatabase::ThreadSafeDatabase(Reference<IClusterConnectionRecord> connectionRecord, int apiVersion) {
 	// Allocate memory for the Database from this thread (so the pointer is known for subsequent method calls)
 	// but run its constructor on the main thread
 	DatabaseContext* db = this->db = DatabaseContext::allocateOnForeignThread();
 
 	onMainThreadVoid(
-	    [db, connFile, apiVersion]() {
+	    [db, connectionRecord, apiVersion]() {
 		    try {
-			    Database::createDatabase(
-			        Reference<ClusterConnectionFile>(connFile), apiVersion, IsInternal::False, LocalityData(), db)
+			    Database::createDatabase(connectionRecord, apiVersion, IsInternal::False, LocalityData(), db)
 			        .extractPtr();
 		    } catch (Error& e) {
 			    new (db) DatabaseContext(e);
@@ -596,8 +592,8 @@ void ThreadSafeApi::stopNetwork() {
 	::stopNetwork();
 }
 
-Reference<IDatabase> ThreadSafeApi::createDatabase(const char* clusterFilePath) {
-	return Reference<IDatabase>(new ThreadSafeDatabase(clusterFilePath, apiVersion));
+Reference<IDatabase> ThreadSafeApi::createDatabase(Reference<IClusterConnectionRecord> connectionRecord) {
+	return Reference<IDatabase>(new ThreadSafeDatabase(connectionRecord, apiVersion));
 }
 
 void ThreadSafeApi::addNetworkThreadCompletionHook(void (*hook)(void*), void* hookParameter) {
