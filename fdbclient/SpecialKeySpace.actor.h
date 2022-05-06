@@ -29,6 +29,7 @@
 #include "flow/flow.h"
 #include "flow/Arena.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/GlobalConfig.actor.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -424,6 +425,7 @@ public:
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
 };
 
+class GlobalConfig;
 class GlobalConfigImpl : public SpecialKeyRangeRWImpl {
 public:
 	explicit GlobalConfigImpl(KeyRangeRef kr);

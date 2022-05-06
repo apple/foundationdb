@@ -22,6 +22,7 @@
 
 #include <algorithm>
 #include <iterator>
+#include <memory>
 #include <regex>
 #include <unordered_set>
 #include <tuple>
@@ -808,12 +809,12 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext* cx) {
 				}
 			}
 			cx->clientStatusUpdater.outStatusQ.clear();
-			wait(GlobalConfig::globalConfig().onInitialized());
-			double sampleRate = GlobalConfig::globalConfig().get<double>(fdbClientInfoTxnSampleRate,
-			                                                             std::numeric_limits<double>::infinity());
+			wait(cx->globalConfig->onInitialized());
+			double sampleRate =
+			    cx->globalConfig->get<double>(fdbClientInfoTxnSampleRate, std::numeric_limits<double>::infinity());
 			double clientSamplingProbability =
 			    std::isinf(sampleRate) ? CLIENT_KNOBS->CSI_SAMPLING_PROBABILITY : sampleRate;
-			int64_t sizeLimit = GlobalConfig::globalConfig().get<int64_t>(fdbClientInfoTxnSizeLimit, -1);
+			int64_t sizeLimit = cx->globalConfig->get<int64_t>(fdbClientInfoTxnSizeLimit, -1);
 			int64_t clientTxnInfoSizeLimit = sizeLimit == -1 ? CLIENT_KNOBS->CSI_SIZE_LIMIT : sizeLimit;
 			if (!trChunksQ.empty() && deterministicRandom()->random01() < clientSamplingProbability)
 				wait(delExcessClntTxnEntriesActor(&tr, clientTxnInfoSizeLimit));
@@ -1473,6 +1474,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 	cacheListMonitor = monitorCacheList(this);
 
 	smoothMidShardSize.reset(CLIENT_KNOBS->INIT_MID_SHARD_BYTES);
+	globalConfig = std::make_unique<GlobalConfig>(Database(this));
 
 	if (apiVersionAtLeast(710)) {
 		registerSpecialKeySpaceModule(
@@ -1929,13 +1931,12 @@ Future<Void> DatabaseContext::onProxiesChanged() const {
 }
 
 bool DatabaseContext::sampleReadTags() const {
-	double sampleRate = GlobalConfig::globalConfig().get(transactionTagSampleRate, CLIENT_KNOBS->READ_TAG_SAMPLE_RATE);
+	double sampleRate = globalConfig->get(transactionTagSampleRate, CLIENT_KNOBS->READ_TAG_SAMPLE_RATE);
 	return sampleRate > 0 && deterministicRandom()->random01() <= sampleRate;
 }
 
 bool DatabaseContext::sampleOnCost(uint64_t cost) const {
-	double sampleCost =
-	    GlobalConfig::globalConfig().get<double>(transactionTagSampleCost, CLIENT_KNOBS->COMMIT_SAMPLE_COST);
+	double sampleCost = globalConfig->get<double>(transactionTagSampleCost, CLIENT_KNOBS->COMMIT_SAMPLE_COST);
 	if (sampleCost <= 0)
 		return false;
 	return deterministicRandom()->random01() <= (double)cost / sampleCost;
@@ -2211,10 +2212,10 @@ Database Database::createDatabase(Reference<IClusterConnectionRecord> connRecord
 	}
 
 	auto database = Database(db);
-	GlobalConfig::create(
-	    database, Reference<AsyncVar<ClientDBInfo> const>(clientInfo), std::addressof(clientInfo->get()));
-	GlobalConfig::globalConfig().trigger(samplingFrequency, samplingProfilerUpdateFrequency);
-	GlobalConfig::globalConfig().trigger(samplingWindow, samplingProfilerUpdateWindow);
+	database->globalConfig->init(Reference<AsyncVar<ClientDBInfo> const>(clientInfo),
+	                             std::addressof(clientInfo->get()));
+	database->globalConfig->trigger(samplingFrequency, samplingProfilerUpdateFrequency);
+	database->globalConfig->trigger(samplingWindow, samplingProfilerUpdateWindow);
 
 	TraceEvent("ConnectToDatabase", database->dbId)
 	    .detail("Version", FDB_VT_VERSION)
@@ -7223,10 +7224,10 @@ ACTOR Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> getReadHotRanges(Da
 			// condition. Should we abort and wait for the newly split shards to be hot again?
 			state int nLocs = locations.size();
 			// if (nLocs > 1) {
-			// 	TraceEvent("RHDDebug")
-			// 	    .detail("NumSSIs", nLocs)
-			// 	    .detail("KeysBegin", keys.begin.printable().c_str())
-			// 	    .detail("KeysEnd", keys.end.printable().c_str());
+			//	TraceEvent("RHDDebug")
+			//	    .detail("NumSSIs", nLocs)
+			//	    .detail("KeysBegin", keys.begin.printable().c_str())
+			//	    .detail("KeysEnd", keys.end.printable().c_str());
 			// }
 			state std::vector<Future<ReadHotSubRangeReply>> fReplies(nLocs);
 			KeyRef partBegin, partEnd;
@@ -7938,8 +7939,8 @@ void Transaction::checkDeferredError() const {
 
 Reference<TransactionLogInfo> Transaction::createTrLogInfoProbabilistically(const Database& cx) {
 	if (!cx->isError()) {
-		double clientSamplingProbability = GlobalConfig::globalConfig().get<double>(
-		    fdbClientInfoTxnSampleRate, CLIENT_KNOBS->CSI_SAMPLING_PROBABILITY);
+		double clientSamplingProbability =
+		    cx->globalConfig->get<double>(fdbClientInfoTxnSampleRate, CLIENT_KNOBS->CSI_SAMPLING_PROBABILITY);
 		if (((networkOptions.logClientInfo.present() && networkOptions.logClientInfo.get()) || BUGGIFY) &&
 		    deterministicRandom()->random01() < clientSamplingProbability &&
 		    (!g_network->isSimulated() || !g_simulator.speedUpSimulation)) {
