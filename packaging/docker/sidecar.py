@@ -523,7 +523,7 @@ class Server(BaseHTTPRequestHandler):
                     self.send_error(404, "Path not found")
                     self.end_headers()
             if self.path.startswith("/is_present/"):
-                if is_present(os.path.basename(self.path))):
+                if is_present(os.path.basename(self.path)):
                     self.send_text("OK")
                 else:
                     self.send_error(404, "Path not found")
