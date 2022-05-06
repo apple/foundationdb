@@ -2082,6 +2082,8 @@ private:
 template <class T>
 std::unordered_map<NetworkAddress, Reference<T>> FlowSingleton<T>::instanceMap;
 
+std::string demangle(const char* name);
+
 template <class T>
 class SimTimeoutQueue : public NotifiedQueue<T>::Queue {
 	using Parent = typename NotifiedQueue<T>::Queue;
@@ -2101,14 +2103,18 @@ class SimTimeoutQueue : public NotifiedQueue<T>::Queue {
 				timeout = Never();
 			} else if (newSize < queueSize) {
 				timeout = delay(240);
+			} else if (queueSize == 0 && newSize > 0) {
+				// first add
+				timeout = delay(240);
 			}
 			queueSize = newSize;
 			choose {
 				when(wait(timeout)) {
 					ASSERT(!self->empty());
-					TraceEvent(SevError, "NotifiedQueueIsntConsumed")
+					TraceEvent(SevWarnAlways, "NotifiedQueueIsntConsumed")
 					    .detail("Timeout", 240)
 					    .detail("QueueSize", self->size())
+					    .detail("QueueOfType", demangle(typeid(T).name()))
 					    .detail("OriginalBacktrace", self->backtrace);
 					// we'll only report this once
 					return Void();

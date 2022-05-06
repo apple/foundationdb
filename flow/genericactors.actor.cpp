@@ -18,8 +18,11 @@
  * limitations under the License.
  */
 
+#include <boost/core/demangle.hpp>
+
 #include "flow/flow.h"
 #include "flow/UnitTest.h"
+#include "flow/genericactors.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 ACTOR Future<bool> allTrue(std::vector<Future<bool>> all) {
@@ -169,6 +172,10 @@ ACTOR Future<Void> testSubscriber(Reference<IAsyncListener<int>> output, Optiona
 }
 
 } // namespace
+
+std::string demangle(const char* name) {
+	return boost::core::demangle(name);
+}
 
 TEST_CASE("/flow/genericactors/AsyncListener") {
 	auto input = makeReference<AsyncVar<DummyState>>();
