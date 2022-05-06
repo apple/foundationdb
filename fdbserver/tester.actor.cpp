@@ -99,6 +99,20 @@ Key KVWorkload::keyForIndex(uint64_t index) const {
 	}
 }
 
+int64_t KVWorkload::indexForKey(const KeyRef& key, bool absent) const {
+	int idx = 0;
+	if (nodePrefix > 0) {
+		ASSERT(keyBytes >= 32);
+		idx += 16;
+	}
+	ASSERT(keyBytes >= 16);
+	// extract int64_t index, the reverse process of emplaceIndex()
+	auto end = key.size() - idx - (absent ? 1 : 0);
+	std::string str((char*)key.begin() + idx, end);
+	int64_t res = std::stoll(str, nullptr, 16);
+	return res;
+}
+
 Key KVWorkload::keyForIndex(uint64_t index, bool absent) const {
 	int adjustedKeyBytes = (absent) ? (keyBytes + 1) : keyBytes;
 	Key result = makeString(adjustedKeyBytes);
@@ -112,8 +126,8 @@ Key KVWorkload::keyForIndex(uint64_t index, bool absent) const {
 		idx += 16;
 	}
 	ASSERT(keyBytes >= 16);
-	double d = double(index) / nodeCount;
-	emplaceIndex(data, idx, *(int64_t*)&d);
+	emplaceIndex(data, idx, (int64_t)index);
+	// ASSERT(indexForKey(result) == (int64_t)index); // debug assert
 
 	return result;
 }
@@ -1855,7 +1869,9 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
 	}
 
 	choose {
-		when(wait(tests)) { return Void(); }
+		when(wait(tests)) {
+			return Void();
+		}
 		when(wait(quorum(actors, 1))) {
 			ASSERT(false);
 			throw internal_error();

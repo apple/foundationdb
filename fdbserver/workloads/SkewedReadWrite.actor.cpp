@@ -30,35 +30,10 @@
 #include "fdbserver/workloads/BulkSetup.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "flow/TDMetric.actor.h"
+#include "fdbclient/RunTransaction.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 const int sampleSize = 10000;
-static Future<Version> nextRV;
-static Version lastRV = invalidVersion;
-
-ACTOR static Future<Version> getNextRV(Database db) {
-	state Transaction tr(db);
-	loop {
-		try {
-			Version v = wait(tr.getReadVersion());
-			return v;
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-	}
-}
-static Future<Version> getInconsistentReadVersion(Database const& db) {
-	if (!nextRV.isValid() || nextRV.isReady()) { // if no getNextRV() running
-		if (nextRV.isValid())
-			lastRV = nextRV.get();
-		nextRV = getNextRV(db);
-	}
-	if (lastRV == invalidVersion)
-		return nextRV;
-	else
-		return lastRV;
-}
-
 DESCR struct TransactionSuccessMetric {
 	int64_t totalLatency; // ns
 	int64_t startLatency; // ns
@@ -75,7 +50,7 @@ DESCR struct ReadMetric {
 	int64_t readLatency; // ns
 };
 
-struct ReadWriteWorkload : KVWorkload {
+struct SkewedReadWriteWorkload : KVWorkload {
 	// general test setting
 	Standalone<StringRef> descriptionString;
 	bool doSetup, cancelWorkersAtDuration;
@@ -87,28 +62,26 @@ struct ReadWriteWorkload : KVWorkload {
 	bool enableReadLatencyLogging;
 	double periodicLoggingInterval;
 
-	// use ReadWrite as a ramp up workload
-	bool rampUpLoad; // indicate this is a ramp up workload
-	int rampSweepCount; // how many times of ramp up
-	bool rampTransactionType; // choose transaction type based on client start time
-	bool rampUpConcurrency; // control client concurrency
-
 	// transaction setting
 	bool useRYW;
-	bool batchPriority;
-	bool rangeReads; // read operations are all single key range read
-	bool dependentReads; // read operations are issued sequentially
-	bool inconsistentReads; // read with previous read version
-	bool adjacentReads; // keys are adjacent within a transaction
-	bool adjacentWrites;
 	double alpha; // probability for run TransactionA type
 	// two type of transaction
 	int readsPerTransactionA, writesPerTransactionA;
 	int readsPerTransactionB, writesPerTransactionB;
-	int extraReadConflictRangesPerTransaction, extraWriteConflictRangesPerTransaction;
 	std::string valueString;
-	// hot traffic pattern
-	double hotKeyFraction, forceHotProbability = 0; // key based hot traffic setting
+
+	// server based hot traffic setting
+	int skewRound = 0; // skewDuration = ceil(testDuration / skewRound)
+	double hotServerFraction = 0, hotServerShardFraction = 1.0; // set > 0 to issue hot key based on shard map
+	double hotServerReadFrac, hotServerWriteFrac; // hot many traffic goes to hot servers
+	double hotReadWriteServerOverlap; // the portion of intersection of write and hot server
+
+	// hot server state
+	typedef std::vector<std::pair<int64_t, int64_t>> IndexRangeVec;
+	// keyForIndex generate key from index. So for a shard range, recording the start and end is enough
+	std::vector<std::pair<UID, IndexRangeVec>> serverShards; // storage server and the shards it owns
+	std::map<UID, StorageServerInterface> serverInterfaces;
+	int hotServerCount = 0, currentHotRound = -1;
 
 	// states of metric
 	Int64MetricHandle totalReadsMetric;
@@ -127,13 +100,13 @@ struct ReadWriteWorkload : KVWorkload {
 	std::vector<Future<Void>> clients;
 	double loadTime, clientBegin;
 
-	ReadWriteWorkload(WorkloadContext const& wcx)
-	  : KVWorkload(wcx), dependentReads(false), adjacentReads(false), adjacentWrites(false), totalReadsMetric(LiteralStringRef("RWWorkload.TotalReads")),
+	SkewedReadWriteWorkload(WorkloadContext const& wcx)
+	  : KVWorkload(wcx), totalReadsMetric(LiteralStringRef("RWWorkload.TotalReads")),
 	    totalRetriesMetric(LiteralStringRef("RWWorkload.TotalRetries")), aTransactions("A Transactions"),
-	    bTransactions("B Transactions"), retries("Retries"),
-	    latencies(sampleSize), readLatencies(sampleSize), commitLatencies(sampleSize), GRVLatencies(sampleSize),
-	    fullReadLatencies(sampleSize), readLatencyTotal(0), readLatencyCount(0), loadTime(0.0),
-	    clientBegin(0) {
+	    bTransactions("B Transactions"), retries("Retries"), latencies(sampleSize), readLatencies(sampleSize),
+	    commitLatencies(sampleSize), GRVLatencies(sampleSize), fullReadLatencies(sampleSize), readLatencyTotal(0),
+	    readLatencyCount(0), loadTime(0.0), clientBegin(0) {
+
 		transactionSuccessMetric.init(LiteralStringRef("RWWorkload.SuccessfulTransaction"));
 		transactionFailureMetric.init(LiteralStringRef("RWWorkload.FailedTransaction"));
 		readMetric.init(LiteralStringRef("RWWorkload.Read"));
@@ -150,11 +123,6 @@ struct ReadWriteWorkload : KVWorkload {
 		writesPerTransactionB = getOption(options, LiteralStringRef("writesPerTransactionB"), 9);
 		alpha = getOption(options, LiteralStringRef("alpha"), 0.1);
 
-		extraReadConflictRangesPerTransaction =
-		    getOption(options, LiteralStringRef("extraReadConflictRangesPerTransaction"), 0);
-		extraWriteConflictRangesPerTransaction =
-		    getOption(options, LiteralStringRef("extraWriteConflictRangesPerTransaction"), 0);
-
 		valueString = std::string(maxValueBytes, '.');
 		if (nodePrefix > 0) {
 			keyBytes += 16;
@@ -168,7 +136,6 @@ struct ReadWriteWorkload : KVWorkload {
 			metricsDuration *= 0.75;
 		}
 
-		dependentReads = getOption(options, LiteralStringRef("dependentReads"), false);
 		warmingDelay = getOption(options, LiteralStringRef("warmingDelay"), 0.0);
 		maxInsertRate = getOption(options, LiteralStringRef("maxInsertRate"), 1e12);
 		debugInterval = getOption(options, LiteralStringRef("debugInterval"), 0.0);
@@ -176,21 +143,9 @@ struct ReadWriteWorkload : KVWorkload {
 		enableReadLatencyLogging = getOption(options, LiteralStringRef("enableReadLatencyLogging"), false);
 		periodicLoggingInterval = getOption(options, LiteralStringRef("periodicLoggingInterval"), 5.0);
 		cancelWorkersAtDuration = getOption(options, LiteralStringRef("cancelWorkersAtDuration"), true);
-		inconsistentReads = getOption(options, LiteralStringRef("inconsistentReads"), false);
-		adjacentReads = getOption(options, LiteralStringRef("adjacentReads"), false);
-		adjacentWrites = getOption(options, LiteralStringRef("adjacentWrites"), false);
-		rampUpLoad = getOption(options, LiteralStringRef("rampUpLoad"), false);
 		useRYW = getOption(options, LiteralStringRef("useRYW"), false);
-		rampSweepCount = getOption(options, LiteralStringRef("rampSweepCount"), 1);
-		rangeReads = getOption(options, LiteralStringRef("rangeReads"), false);
-		rampTransactionType = getOption(options, LiteralStringRef("rampTransactionType"), false);
-		rampUpConcurrency = getOption(options, LiteralStringRef("rampUpConcurrency"), false);
 		doSetup = getOption(options, LiteralStringRef("setup"), true);
-		batchPriority = getOption(options, LiteralStringRef("batchPriority"), false);
-		descriptionString = getOption(options, LiteralStringRef("description"), LiteralStringRef("ReadWrite"));
-
-		if (rampUpConcurrency)
-			ASSERT(rampSweepCount == 2); // Implementation is hard coded to ramp up and down
+		descriptionString = getOption(options, LiteralStringRef("description"), LiteralStringRef("SkewedReadWrite"));
 
 		// Validate that keyForIndex() is monotonic
 		for (int i = 0; i < 30; i++) {
@@ -214,16 +169,14 @@ struct ReadWriteWorkload : KVWorkload {
 		}
 
 		{
-			// with P(hotTrafficFraction) an access is directed to one of a fraction
-			//   of hot keys, else it is directed to a disjoint set of cold keys
-			hotKeyFraction = getOption(options, LiteralStringRef("hotKeyFraction"), 0.0);
-			double hotTrafficFraction = getOption(options, LiteralStringRef("hotTrafficFraction"), 0.0);
-			ASSERT(hotKeyFraction >= 0 && hotTrafficFraction <= 1);
-			ASSERT(hotKeyFraction <= hotTrafficFraction); // hot keys should be actually hot!
-			// p(Cold key) = (1-FHP) * (1-hkf)
-			// p(Cold key) = (1-htf)
-			// solving for FHP gives:
-			forceHotProbability = (hotTrafficFraction - hotKeyFraction) / (1 - hotKeyFraction);
+			hotServerFraction = getOption(options, "hotServerFraction"_sr, 0.2);
+			hotServerShardFraction = getOption(options, "hotServerShardFraction"_sr, 1.0);
+			hotReadWriteServerOverlap = getOption(options, "hotReadWriteServerOverlap"_sr, 0.0);
+			skewRound = getOption(options, "skewRound"_sr, 1);
+			hotServerReadFrac = getOption(options, "hotServerReadFrac"_sr, 0.8);
+			hotServerWriteFrac = getOption(options, "hotServerWriteFrac"_sr, 0.0);
+			ASSERT((hotServerReadFrac >= hotServerFraction || hotServerWriteFrac >= hotServerFraction) &&
+			       skewRound > 0);
 		}
 	}
 
@@ -287,32 +240,6 @@ struct ReadWriteWorkload : KVWorkload {
 		m.emplace_back("Mean load time (seconds)", loadTime, Averaged::True);
 		m.emplace_back("Read rows", reads, Averaged::False);
 		m.emplace_back("Write rows", writes, Averaged::False);
-
-		if (!rampUpLoad) {
-			m.emplace_back("Mean Latency (ms)", 1000 * latencies.mean(), Averaged::True);
-			m.emplace_back("Median Latency (ms, averaged)", 1000 * latencies.median(), Averaged::True);
-			m.emplace_back("90% Latency (ms, averaged)", 1000 * latencies.percentile(0.90), Averaged::True);
-			m.emplace_back("98% Latency (ms, averaged)", 1000 * latencies.percentile(0.98), Averaged::True);
-			m.emplace_back("Max Latency (ms, averaged)", 1000 * latencies.max(), Averaged::True);
-
-			m.emplace_back("Mean Row Read Latency (ms)", 1000 * readLatencies.mean(), Averaged::True);
-			m.emplace_back("Median Row Read Latency (ms, averaged)", 1000 * readLatencies.median(), Averaged::True);
-			m.emplace_back("Max Row Read Latency (ms, averaged)", 1000 * readLatencies.max(), Averaged::True);
-
-			m.emplace_back("Mean Total Read Latency (ms)", 1000 * fullReadLatencies.mean(), Averaged::True);
-			m.emplace_back(
-			    "Median Total Read Latency (ms, averaged)", 1000 * fullReadLatencies.median(), Averaged::True);
-			m.emplace_back("Max Total Latency (ms, averaged)", 1000 * fullReadLatencies.max(), Averaged::True);
-
-			m.emplace_back("Mean GRV Latency (ms)", 1000 * GRVLatencies.mean(), Averaged::True);
-			m.emplace_back("Median GRV Latency (ms, averaged)", 1000 * GRVLatencies.median(), Averaged::True);
-			m.emplace_back("Max GRV Latency (ms, averaged)", 1000 * GRVLatencies.max(), Averaged::True);
-
-			m.emplace_back("Mean Commit Latency (ms)", 1000 * commitLatencies.mean(), Averaged::True);
-			m.emplace_back("Median Commit Latency (ms, averaged)", 1000 * commitLatencies.median(), Averaged::True);
-			m.emplace_back("Max Commit Latency (ms, averaged)", 1000 * commitLatencies.max(), Averaged::True);
-		}
-
 		m.emplace_back("Read rows/sec", reads / duration, Averaged::False);
 		m.emplace_back("Write rows/sec", writes / duration, Averaged::False);
 		m.emplace_back(
@@ -334,14 +261,121 @@ struct ReadWriteWorkload : KVWorkload {
 
 	Standalone<KeyValueRef> operator()(uint64_t n) { return KeyValueRef(keyForIndex(n, false), randomValue()); }
 
-	template <class Trans>
-	void setupTransaction(Trans* tr) {
-		if (batchPriority) {
-			tr->setOption(FDBTransactionOptions::PRIORITY_BATCH);
+	void debugPrintServerShards() const {
+		std::cout << std::hex;
+		for (auto it : this->serverShards) {
+			std::cout << serverInterfaces.at(it.first).address().toString() << ": [";
+			for (auto p : it.second) {
+				std::cout << "[" << p.first << "," << p.second << "], ";
+			}
+			std::cout << "] \n";
 		}
 	}
 
-	ACTOR static Future<Void> tracePeriodically(ReadWriteWorkload* self) {
+	// for each boundary except the last one in boundaries, found the first existed key generated from keyForIndex as
+	// beginIdx, found the last existed key generated from keyForIndex the endIdx.
+	ACTOR static Future<IndexRangeVec> convertKeyBoundaryToIndexShard(Database cx,
+	                                                                  SkewedReadWriteWorkload* self,
+	                                                                  Standalone<VectorRef<KeyRef>> boundaries) {
+		state IndexRangeVec res;
+		state int i = 0;
+		for (; i < boundaries.size() - 1; ++i) {
+			KeyRangeRef currentShard = KeyRangeRef(boundaries[i], boundaries[i + 1]);
+			// std::cout << currentShard.toString() << "\n";
+			std::vector<RangeResult> ranges = wait(runRYWTransaction(
+			    cx, [currentShard](Reference<ReadYourWritesTransaction> tr) -> Future<std::vector<RangeResult>> {
+				    std::vector<Future<RangeResult>> f;
+				    f.push_back(tr->getRange(currentShard, 1, Snapshot::False, Reverse::False));
+				    f.push_back(tr->getRange(currentShard, 1, Snapshot::False, Reverse::True));
+				    return getAll(f);
+			    }));
+			ASSERT(ranges[0].size() == 1 && ranges[1].size() == 1);
+			res.emplace_back(self->indexForKey(ranges[0][0].key), self->indexForKey(ranges[1][0].key));
+		}
+
+		ASSERT(res.size() == boundaries.size() - 1);
+		return res;
+	}
+
+	ACTOR static Future<Void> updateServerShards(Database cx, SkewedReadWriteWorkload* self) {
+		state Future<RangeResult> serverList =
+		    runRYWTransaction(cx, [](Reference<ReadYourWritesTransaction> tr) -> Future<RangeResult> {
+			    tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			    return tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
+		    });
+		state RangeResult range =
+		    wait(runRYWTransaction(cx, [](Reference<ReadYourWritesTransaction> tr) -> Future<RangeResult> {
+			    tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			    return tr->getRange(serverKeysRange, CLIENT_KNOBS->TOO_MANY);
+		    }));
+		wait(success(serverList));
+		// decode server interfaces
+		self->serverInterfaces.clear();
+		for (int i = 0; i < serverList.get().size(); i++) {
+			auto ssi = decodeServerListValue(serverList.get()[i].value);
+			self->serverInterfaces.emplace(ssi.id(), ssi);
+		}
+		// clear self->serverShards
+		self->serverShards.clear();
+
+		// leftEdge < workloadBegin < workloadEnd
+		Key workloadBegin = self->keyForIndex(0), workloadEnd = self->keyForIndex(self->nodeCount);
+		Key leftEdge(allKeys.begin);
+		std::vector<UID> leftServer; // left server owns the range [leftEdge, workloadBegin)
+		KeyRangeRef workloadRange(workloadBegin, workloadEnd);
+		state std::map<Key, std::vector<UID>> beginServers; // begin index to server ID
+
+		for (auto kv = range.begin(); kv != range.end(); kv++) {
+			if (serverHasKey(kv->value)) {
+				auto [id, key] = serverKeysDecodeServerBegin(kv->key);
+
+				if (workloadRange.contains(key)) {
+					beginServers[key].push_back(id);
+				} else if (workloadBegin > key && key > leftEdge) { // update left boundary
+					leftEdge = key;
+					leftServer.clear();
+				}
+
+				if (key == leftEdge) {
+					leftServer.push_back(id);
+				}
+			}
+		}
+		ASSERT(beginServers.size() == 0 || beginServers.begin()->first >= workloadBegin);
+		// handle the left boundary
+		if (beginServers.size() == 0 || beginServers.begin()->first > workloadBegin) {
+			beginServers[workloadBegin] = leftServer;
+		}
+		Standalone<VectorRef<KeyRef>> keyBegins;
+		for (auto p = beginServers.begin(); p != beginServers.end(); ++p) {
+			keyBegins.push_back(keyBegins.arena(), p->first);
+		}
+		// deep count because wait below will destruct workloadEnd
+		keyBegins.push_back_deep(keyBegins.arena(), workloadEnd);
+
+		IndexRangeVec indexShards = wait(convertKeyBoundaryToIndexShard(cx, self, keyBegins));
+		ASSERT(beginServers.size() == indexShards.size());
+		// sort shard begin idx
+		// build self->serverShards, starting from the left shard
+		std::map<UID, IndexRangeVec> serverShards;
+		int i = 0;
+		for (auto p = beginServers.begin(); p != beginServers.end(); ++p) {
+			for (int j = 0; j < p->second.size(); ++j) {
+				serverShards[p->second[j]].emplace_back(indexShards[i]);
+			}
+			++i;
+		}
+		// self->serverShards is ordered by UID
+		for (auto it : serverShards) {
+			self->serverShards.emplace_back(it);
+		}
+		//		if (self->clientId == 0) {
+		//			self->debugPrintServerShards();
+		//		}
+		return Void();
+	}
+
+	ACTOR static Future<Void> tracePeriodically(SkewedReadWriteWorkload* self) {
 		state double start = now();
 		state double elapsed = 0.0;
 		state int64_t last_ops = 0;
@@ -499,73 +533,27 @@ struct ReadWriteWorkload : KVWorkload {
 		return Void();
 	}
 
-	ACTOR static Future<Void> logLatency(Future<RangeResult> f,
-	                                     ContinuousSample<double>* latencies,
-	                                     double* totalLatency,
-	                                     int* latencyCount,
-	                                     EventMetricHandle<ReadMetric> readMetric,
-	                                     bool shouldRecord) {
-		state double readBegin = now();
-		RangeResult value = wait(f);
-
-		double latency = now() - readBegin;
-		readMetric->readLatency = latency * 1e9;
-		readMetric->log();
-
-		if (shouldRecord) {
-			*totalLatency += latency;
-			++*latencyCount;
-			latencies->addSample(latency);
-		}
-		return Void();
-	}
-
 	ACTOR template <class Trans>
-	Future<Void> readOp(Trans* tr, std::vector<int64_t> keys, ReadWriteWorkload* self, bool shouldRecord) {
+	Future<Void> readOp(Trans* tr, std::vector<int64_t> keys, SkewedReadWriteWorkload* self, bool shouldRecord) {
 		if (!keys.size())
 			return Void();
-		if (!self->dependentReads) {
-			std::vector<Future<Void>> readers;
-			if (self->rangeReads) {
-				for (int op = 0; op < keys.size(); op++) {
-					++self->totalReadsMetric;
-					readers.push_back(logLatency(
-					    tr->getRange(KeyRangeRef(self->keyForIndex(keys[op]), Key(strinc(self->keyForIndex(keys[op])))),
-					                 GetRangeLimits(-1, 80000)),
-					    &self->readLatencies,
-					    &self->readLatencyTotal,
-					    &self->readLatencyCount,
-					    self->readMetric,
-					    shouldRecord));
-				}
-			} else {
-				for (int op = 0; op < keys.size(); op++) {
-					++self->totalReadsMetric;
-					readers.push_back(logLatency(tr->get(self->keyForIndex(keys[op])),
-					                             &self->readLatencies,
-					                             &self->readLatencyTotal,
-					                             &self->readLatencyCount,
-					                             self->readMetric,
-					                             shouldRecord));
-				}
-			}
-			wait(waitForAll(readers));
-		} else {
-			state int op;
-			for (op = 0; op < keys.size(); op++) {
-				++self->totalReadsMetric;
-				wait(logLatency(tr->get(self->keyForIndex(keys[op])),
-				                &self->readLatencies,
-				                &self->readLatencyTotal,
-				                &self->readLatencyCount,
-				                self->readMetric,
-				                shouldRecord));
-			}
+
+		std::vector<Future<Void>> readers;
+		for (int op = 0; op < keys.size(); op++) {
+			++self->totalReadsMetric;
+			readers.push_back(logLatency(tr->get(self->keyForIndex(keys[op])),
+			                             &self->readLatencies,
+			                             &self->readLatencyTotal,
+			                             &self->readLatencyCount,
+			                             self->readMetric,
+			                             shouldRecord));
 		}
+
+		wait(waitForAll(readers));
 		return Void();
 	}
 
-	ACTOR Future<Void> _setup(Database cx, ReadWriteWorkload* self) {
+	ACTOR static Future<Void> _setup(Database cx, SkewedReadWriteWorkload* self) {
 		if (!self->doSetup)
 			return Void();
 
@@ -588,47 +576,33 @@ struct ReadWriteWorkload : KVWorkload {
 		return Void();
 	}
 
-	ACTOR Future<Void> _start(Database cx, ReadWriteWorkload* self) {
-		// Read one record from the database to warm the cache of keyServers
-		state std::vector<int64_t> keys;
-		keys.push_back(deterministicRandom()->randomInt64(0, self->nodeCount));
-		state double startTime = now();
-		loop {
-			state Transaction tr(cx);
-
-			try {
-				self->setupTransaction(&tr);
-				wait(self->readOp(&tr, keys, self, false));
-				wait(tr.warmRange(allKeys));
-				break;
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
+	void startReadWriteClients(Database cx, std::vector<Future<Void>>& clients) {
+		clientBegin = now();
+		for (int c = 0; c < actorCount; c++) {
+			Future<Void> worker;
+			if (useRYW)
+				worker =
+				    randomReadWriteClient<ReadYourWritesTransaction>(cx, this, actorCount / transactionsPerSecond, c);
+			else
+				worker = randomReadWriteClient<Transaction>(cx, this, actorCount / transactionsPerSecond, c);
+			clients.push_back(worker);
 		}
+	}
 
-		wait(delay(std::max(0.1, 1.0 - (now() - startTime))));
-
-		std::vector<Future<Void>> clients;
+	ACTOR static Future<Void> _start(Database cx, SkewedReadWriteWorkload* self) {
+		state std::vector<Future<Void>> clients;
 		if (self->enableReadLatencyLogging)
 			clients.push_back(tracePeriodically(self));
 
-		self->clientBegin = now();
-		for (int c = 0; c < self->actorCount; c++) {
-			Future<Void> worker;
-			if (self->useRYW)
-				worker = self->randomReadWriteClient<ReadYourWritesTransaction>(
-				    cx, self, self->actorCount / self->transactionsPerSecond, c);
-			else
-				worker = self->randomReadWriteClient<Transaction>(
-				    cx, self, self->actorCount / self->transactionsPerSecond, c);
-			clients.push_back(worker);
+		wait(updateServerShards(cx, self));
+		for (self->currentHotRound = 0; self->currentHotRound < self->skewRound; ++self->currentHotRound) {
+			self->setHotServers();
+			self->startReadWriteClients(cx, clients);
+			wait(timeout(waitForAll(clients), self->testDuration / self->skewRound, Void()));
+			clients.clear();
+			wait(delay(5.0) >> updateServerShards(cx, self));
 		}
 
-		if (!self->cancelWorkersAtDuration)
-			self->clients = clients; // Don't cancel them until check()
-
-		wait(self->cancelWorkersAtDuration ? timeout(waitForAll(clients), self->testDuration, Void())
-		                                   : delay(self->testDuration));
 		return Void();
 	}
 
@@ -639,230 +613,166 @@ struct ReadWriteWorkload : KVWorkload {
 		return timeSinceStart >= metricsStart && timeSinceStart < (metricsStart + metricsDuration);
 	}
 
-	int64_t getRandomKey(uint64_t nodeCount) {
-		if (forceHotProbability && deterministicRandom()->random01() < forceHotProbability)
-			return deterministicRandom()->randomInt64(0, nodeCount * hotKeyFraction) /
-			       hotKeyFraction; // spread hot keys over keyspace
-		else
-			return deterministicRandom()->randomInt64(0, nodeCount);
+	// calculate hot server count
+	void setHotServers() {
+		hotServerCount = ceil(hotServerFraction * serverShards.size());
+		std::cout << "Choose " << hotServerCount << "/" << serverShards.size() << "/" << serverInterfaces.size()
+		          << " hot servers: [";
+		int begin = currentHotRound * hotServerCount;
+		for (int i = 0; i < hotServerCount; ++i) {
+			int idx = (begin + i) % serverShards.size();
+			std::cout << serverInterfaces.at(serverShards[idx].first).address().toString() << ",";
+		}
+		std::cout << "]\n";
 	}
 
-	double sweepAlpha(double startTime) {
-		double sweepDuration = testDuration / rampSweepCount;
-		double numSweeps = (now() - startTime) / sweepDuration;
-		int currentSweep = (int)numSweeps;
-		double alpha = numSweeps - currentSweep;
-		if (currentSweep % 2)
-			alpha = 1 - alpha;
-		return alpha;
+	int64_t getRandomKeyFromHotServer(bool hotServerRead = true) {
+		ASSERT(hotServerCount > 0);
+		int begin = currentHotRound * hotServerCount;
+		if (!hotServerRead) {
+			begin += hotServerCount * (1.0 - hotReadWriteServerOverlap); // calculate non-overlap part offset
+		}
+		int idx = deterministicRandom()->randomInt(begin, begin + hotServerCount) % serverShards.size();
+		int shardMax = std::min(serverShards[idx].second.size(),
+		                        (size_t)ceil(serverShards[idx].second.size() * hotServerShardFraction));
+		int shardIdx = deterministicRandom()->randomInt(0, shardMax);
+		return deterministicRandom()->randomInt64(serverShards[idx].second[shardIdx].first,
+		                                          serverShards[idx].second[shardIdx].second + 1);
+	}
+
+	int64_t getRandomKey(uint64_t nodeCount, bool hotServerRead = true) {
+		auto random = deterministicRandom()->random01();
+		if (hotServerFraction > 0) {
+			if ((hotServerRead && random < hotServerReadFrac) || (!hotServerRead && random < hotServerWriteFrac)) {
+				return getRandomKeyFromHotServer(hotServerRead);
+			}
+		}
+		return deterministicRandom()->randomInt64(0, nodeCount);
 	}
 
 	ACTOR template <class Trans>
-	Future<Void> randomReadWriteClient(Database cx, ReadWriteWorkload* self, double delay, int clientIndex) {
+	Future<Void> randomReadWriteClient(Database cx, SkewedReadWriteWorkload* self, double delay, int clientIndex) {
 		state double startTime = now();
 		state double lastTime = now();
 		state double GRVStartTime;
 		state UID debugID;
 
-		if (self->rampUpConcurrency) {
-			wait(::delay(self->testDuration / 2 *
-			             (double(clientIndex) / self->actorCount +
-			              double(self->clientId) / self->clientCount / self->actorCount)));
-			TraceEvent("ClientStarting")
-			    .detail("ActorIndex", clientIndex)
-			    .detail("ClientIndex", self->clientId)
-			    .detail("NumActors", clientIndex * self->clientCount + self->clientId + 1);
-		}
-
 		loop {
 			wait(poisson(&lastTime, delay));
 
-			if (self->rampUpConcurrency) {
-				if (now() - startTime >= self->testDuration / 2 *
-				                             (2 - (double(clientIndex) / self->actorCount +
-				                                   double(self->clientId) / self->clientCount / self->actorCount))) {
-					TraceEvent("ClientStopping")
-					    .detail("ActorIndex", clientIndex)
-					    .detail("ClientIndex", self->clientId)
-					    .detail("NumActors", clientIndex * self->clientCount + self->clientId);
-					wait(Never());
+			state double tstart = now();
+			state bool aTransaction = deterministicRandom()->random01() > self->alpha;
+
+			state std::vector<int64_t> keys;
+			state std::vector<Value> values;
+			state std::vector<KeyRange> extra_ranges;
+			int reads = aTransaction ? self->readsPerTransactionA : self->readsPerTransactionB;
+			state int writes = aTransaction ? self->writesPerTransactionA : self->writesPerTransactionB;
+			for (int op = 0; op < reads; op++)
+				keys.push_back(self->getRandomKey(self->nodeCount));
+
+			values.reserve(writes);
+			for (int op = 0; op < writes; op++)
+				values.push_back(self->randomValue());
+
+			state Trans tr(cx);
+
+			if (tstart - self->clientBegin > self->debugTime &&
+			    tstart - self->clientBegin <= self->debugTime + self->debugInterval) {
+				debugID = deterministicRandom()->randomUniqueID();
+				tr.debugTransaction(debugID);
+				g_traceBatch.addEvent("TransactionDebug", debugID.first(), "ReadWrite.randomReadWriteClient.Before");
+			} else {
+				debugID = UID();
+			}
+
+			self->transactionSuccessMetric->retries = 0;
+			self->transactionSuccessMetric->commitLatency = -1;
+
+			loop {
+				try {
+					GRVStartTime = now();
+					self->transactionFailureMetric->startLatency = -1;
+
+					double grvLatency = now() - GRVStartTime;
+					self->transactionSuccessMetric->startLatency = grvLatency * 1e9;
+					self->transactionFailureMetric->startLatency = grvLatency * 1e9;
+					if (self->shouldRecord())
+						self->GRVLatencies.addSample(grvLatency);
+
+					state double readStart = now();
+					wait(self->readOp(&tr, keys, self, self->shouldRecord()));
+
+					double readLatency = now() - readStart;
+					if (self->shouldRecord())
+						self->fullReadLatencies.addSample(readLatency);
+
+					if (!writes)
+						break;
+
+					for (int op = 0; op < writes; op++)
+						tr.set(self->keyForIndex(self->getRandomKey(self->nodeCount, false), false), values[op]);
+
+					state double commitStart = now();
+					wait(tr.commit());
+
+					double commitLatency = now() - commitStart;
+					self->transactionSuccessMetric->commitLatency = commitLatency * 1e9;
+					if (self->shouldRecord())
+						self->commitLatencies.addSample(commitLatency);
+
+					break;
+				} catch (Error& e) {
+					self->transactionFailureMetric->errorCode = e.code();
+					self->transactionFailureMetric->log();
+
+					wait(tr.onError(e));
+
+					++self->transactionSuccessMetric->retries;
+					++self->totalRetriesMetric;
+
+					if (self->shouldRecord())
+						++self->retries;
 				}
 			}
 
-			if (!self->rampUpLoad || deterministicRandom()->random01() < self->sweepAlpha(startTime)) {
-				state double tstart = now();
-				state bool aTransaction = deterministicRandom()->random01() >
-				                          (self->rampTransactionType ? self->sweepAlpha(startTime) : self->alpha);
+			if (debugID != UID())
+				g_traceBatch.addEvent("TransactionDebug", debugID.first(), "ReadWrite.randomReadWriteClient.After");
 
-				state std::vector<int64_t> keys;
-				state std::vector<Value> values;
-				state std::vector<KeyRange> extra_ranges;
-				int reads = aTransaction ? self->readsPerTransactionA : self->readsPerTransactionB;
-				state int writes = aTransaction ? self->writesPerTransactionA : self->writesPerTransactionB;
-				state int extra_read_conflict_ranges = writes ? self->extraReadConflictRangesPerTransaction : 0;
-				state int extra_write_conflict_ranges = writes ? self->extraWriteConflictRangesPerTransaction : 0;
-				if (!self->adjacentReads) {
-					for (int op = 0; op < reads; op++)
-						keys.push_back(self->getRandomKey(self->nodeCount));
-				} else {
-					int startKey = self->getRandomKey(self->nodeCount - reads);
-					for (int op = 0; op < reads; op++)
-						keys.push_back(startKey + op);
-				}
+			tr = Trans();
 
-				values.reserve(writes);
-				for (int op = 0; op < writes; op++)
-					values.push_back(self->randomValue());
+			double transactionLatency = now() - tstart;
+			self->transactionSuccessMetric->totalLatency = transactionLatency * 1e9;
+			self->transactionSuccessMetric->log();
 
-				extra_ranges.reserve(extra_read_conflict_ranges + extra_write_conflict_ranges);
-				for (int op = 0; op < extra_read_conflict_ranges + extra_write_conflict_ranges; op++)
-					extra_ranges.push_back(singleKeyRange(deterministicRandom()->randomUniqueID().toString()));
+			if (self->shouldRecord()) {
+				if (aTransaction)
+					++self->aTransactions;
+				else
+					++self->bTransactions;
 
-				state Trans tr(cx);
-
-				if (tstart - self->clientBegin > self->debugTime &&
-				    tstart - self->clientBegin <= self->debugTime + self->debugInterval) {
-					debugID = deterministicRandom()->randomUniqueID();
-					tr.debugTransaction(debugID);
-					g_traceBatch.addEvent(
-					    "TransactionDebug", debugID.first(), "ReadWrite.randomReadWriteClient.Before");
-				} else {
-					debugID = UID();
-				}
-
-				self->transactionSuccessMetric->retries = 0;
-				self->transactionSuccessMetric->commitLatency = -1;
-
-				loop {
-					try {
-						self->setupTransaction(&tr);
-
-						GRVStartTime = now();
-						self->transactionFailureMetric->startLatency = -1;
-
-						Version v =
-						    wait(self->inconsistentReads ? getInconsistentReadVersion(cx) : tr.getReadVersion());
-						if (self->inconsistentReads)
-							tr.setVersion(v);
-
-						double grvLatency = now() - GRVStartTime;
-						self->transactionSuccessMetric->startLatency = grvLatency * 1e9;
-						self->transactionFailureMetric->startLatency = grvLatency * 1e9;
-						if (self->shouldRecord())
-							self->GRVLatencies.addSample(grvLatency);
-
-						state double readStart = now();
-						wait(self->readOp(&tr, keys, self, self->shouldRecord()));
-
-						double readLatency = now() - readStart;
-						if (self->shouldRecord())
-							self->fullReadLatencies.addSample(readLatency);
-
-						if (!writes)
-							break;
-
-						if (self->adjacentWrites) {
-							int64_t startKey = self->getRandomKey(self->nodeCount - writes);
-							for (int op = 0; op < writes; op++)
-								tr.set(self->keyForIndex(startKey + op, false), values[op]);
-						} else {
-							for (int op = 0; op < writes; op++)
-								tr.set(self->keyForIndex(self->getRandomKey(self->nodeCount), false), values[op]);
-						}
-						for (int op = 0; op < extra_read_conflict_ranges; op++)
-							tr.addReadConflictRange(extra_ranges[op]);
-						for (int op = 0; op < extra_write_conflict_ranges; op++)
-							tr.addWriteConflictRange(extra_ranges[op + extra_read_conflict_ranges]);
-
-						state double commitStart = now();
-						wait(tr.commit());
-
-						double commitLatency = now() - commitStart;
-						self->transactionSuccessMetric->commitLatency = commitLatency * 1e9;
-						if (self->shouldRecord())
-							self->commitLatencies.addSample(commitLatency);
-
-						break;
-					} catch (Error& e) {
-						self->transactionFailureMetric->errorCode = e.code();
-						self->transactionFailureMetric->log();
-
-						wait(tr.onError(e));
-
-						++self->transactionSuccessMetric->retries;
-						++self->totalRetriesMetric;
-
-						if (self->shouldRecord())
-							++self->retries;
-					}
-				}
-
-				if (debugID != UID())
-					g_traceBatch.addEvent("TransactionDebug", debugID.first(), "ReadWrite.randomReadWriteClient.After");
-
-				tr = Trans();
-
-				double transactionLatency = now() - tstart;
-				self->transactionSuccessMetric->totalLatency = transactionLatency * 1e9;
-				self->transactionSuccessMetric->log();
-
-				if (self->shouldRecord()) {
-					if (aTransaction)
-						++self->aTransactions;
-					else
-						++self->bTransactions;
-
-					self->latencies.addSample(transactionLatency);
-				}
+				self->latencies.addSample(transactionLatency);
 			}
 		}
 	}
 };
 
-ACTOR Future<std::vector<std::pair<uint64_t, double>>> trackInsertionCount(Database cx,
-                                                                           std::vector<uint64_t> countsOfInterest,
-                                                                           double checkInterval) {
-	state KeyRange keyPrefix = KeyRangeRef(std::string("keycount"), std::string("keycount") + char(255));
-	state KeyRange bytesPrefix = KeyRangeRef(std::string("bytesstored"), std::string("bytesstored") + char(255));
-	state Transaction tr(cx);
-	state uint64_t lastInsertionCount = 0;
-	state int currentCountIndex = 0;
+WorkloadFactory<SkewedReadWriteWorkload> SkewedReadWriteWorkloadFactory("SkewedReadWrite");
 
-	state std::vector<std::pair<uint64_t, double>> countInsertionRates;
-
-	state double startTime = now();
-
-	while (currentCountIndex < countsOfInterest.size()) {
-		try {
-			state Future<RangeResult> countFuture = tr.getRange(keyPrefix, 1000000000);
-			state Future<RangeResult> bytesFuture = tr.getRange(bytesPrefix, 1000000000);
-			wait(success(countFuture) && success(bytesFuture));
-
-			RangeResult counts = countFuture.get();
-			RangeResult bytes = bytesFuture.get();
-
-			uint64_t numInserted = 0;
-			for (int i = 0; i < counts.size(); i++)
-				numInserted += *(uint64_t*)counts[i].value.begin();
-
-			uint64_t bytesInserted = 0;
-			for (int i = 0; i < bytes.size(); i++)
-				bytesInserted += *(uint64_t*)bytes[i].value.begin();
-
-			while (currentCountIndex < countsOfInterest.size() &&
-			       countsOfInterest[currentCountIndex] > lastInsertionCount &&
-			       countsOfInterest[currentCountIndex] <= numInserted)
-				countInsertionRates.emplace_back(countsOfInterest[currentCountIndex++],
-				                                 bytesInserted / (now() - startTime));
-
-			lastInsertionCount = numInserted;
-			wait(delay(checkInterval));
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
+TEST_CASE("/KVWorkload/methods/ParseKeyForIndex") {
+	auto wk = SkewedReadWriteWorkload(WorkloadContext());
+	for (int i = 0; i < 1000; ++i) {
+		auto idx = deterministicRandom()->randomInt64(0, wk.nodeCount);
+		Key k = wk.keyForIndex(idx);
+		auto parse = wk.indexForKey(k);
+		// std::cout << parse << " " << idx << "\n";
+		ASSERT(parse == idx);
 	}
-
-	return countInsertionRates;
+	for (int i = 0; i < 1000; ++i) {
+		auto idx = deterministicRandom()->randomInt64(0, wk.nodeCount);
+		Key k = wk.keyForIndex(idx, true);
+		auto parse = wk.indexForKey(k, true);
+		ASSERT(parse == idx);
+	}
+	return Void();
 }
-
-WorkloadFactory<ReadWriteWorkload> ReadWriteWorkloadFactory("ReadWrite");
