@@ -45,16 +45,21 @@ struct KeyPairRef {
 };
 
 struct Asn1EntryRef {
-	// field must match one of ASN.1 object short/long names: e.g. "C", "countryName", "CN", "commonName", "subjectAltName", ...
+	// field must match one of ASN.1 object short/long names: e.g. "C", "countryName", "CN", "commonName",
+	// "subjectAltName", ...
 	StringRef field;
 	StringRef bytes;
 };
 
 struct ServerRootCA {};
-struct ServerIntermediateCA { unsigned level; };
+struct ServerIntermediateCA {
+	unsigned level;
+};
 struct Server {};
 struct ClientRootCA {};
-struct ClientIntermediateCA { unsigned level; };
+struct ClientIntermediateCA {
+	unsigned level;
+};
 struct Client {};
 
 struct CertKind {
@@ -62,48 +67,35 @@ struct CertKind {
 	CertKind() noexcept = default;
 
 	template <class Kind>
-	CertKind(Kind kind) noexcept :
-		value(std::in_place_type<Kind>, kind)
-	{}
+	CertKind(Kind kind) noexcept : value(std::in_place_type<Kind>, kind) {}
 
 	template <class Kind>
-	bool is() const noexcept { return std::holds_alternative<Kind>(value); }
+	bool is() const noexcept {
+		return std::holds_alternative<Kind>(value);
+	}
 
 	template <class Kind>
-	Kind const& get() const { return std::get<Kind>(value); }
-
-	bool isServerSide() const noexcept {
-		return is<ServerRootCA>() || is<ServerIntermediateCA>() || is<Server>();
+	Kind const& get() const {
+		return std::get<Kind>(value);
 	}
 
-	bool isClientSide() const noexcept {
-		return !isServerSide();
-	}
+	bool isServerSide() const noexcept { return is<ServerRootCA>() || is<ServerIntermediateCA>() || is<Server>(); }
 
-	bool isRootCA() const noexcept {
-		return is<ServerRootCA>() || is<ClientRootCA>();
-	}
+	bool isClientSide() const noexcept { return !isServerSide(); }
 
-	bool isIntermediateCA() const noexcept {
-		return is<ServerIntermediateCA>() || is<ClientIntermediateCA>();
-	}
+	bool isRootCA() const noexcept { return is<ServerRootCA>() || is<ClientRootCA>(); }
 
-	bool isLeaf() const noexcept {
-		return is<Server>() || is<Client>();
-	}
+	bool isIntermediateCA() const noexcept { return is<ServerIntermediateCA>() || is<ClientIntermediateCA>(); }
 
-	bool isCA() const noexcept {
-		return !isLeaf();
-	}
+	bool isLeaf() const noexcept { return is<Server>() || is<Client>(); }
+
+	bool isCA() const noexcept { return !isLeaf(); }
 
 	StringRef getCommonName(StringRef prefix, Arena& arena) const {
 		auto const side = std::string(isClientSide() ? " Client" : " Server");
 		if (isIntermediateCA()) {
-			auto const level = isClientSide() ? get<ClientIntermediateCA>().level
-											  : get<ServerIntermediateCA>().level;
-			return prefix.withSuffix(
-					fmt::format("{} Intermediate {}", side, level),
-					arena);
+			auto const level = isClientSide() ? get<ClientIntermediateCA>().level : get<ServerIntermediateCA>().level;
+			return prefix.withSuffix(fmt::format("{} Intermediate {}", side, level), arena);
 		} else if (isRootCA()) {
 			return prefix.withSuffix(fmt::format("{} Root", side), arena);
 		} else {
@@ -144,9 +136,7 @@ struct CertAndKeyRef {
 		}
 	}
 
-	bool empty() const noexcept {
-		return certPem.empty() && privateKeyPem.empty();
-	}
+	bool empty() const noexcept { return certPem.empty() && privateKeyPem.empty(); }
 
 	SelfType deepCopy(Arena& arena) {
 		auto ret = SelfType{};
@@ -166,10 +156,7 @@ using CertChainRef = VectorRef<CertAndKeyRef>;
 // Concatenate chain of PEMs to one StringRef
 StringRef concatCertChain(Arena& arena, CertChainRef chain);
 
-enum class ESide : int {
-	Server,
-	Client
-};
+enum class ESide : int { Server, Client };
 
 // For empty (default) rootAuthority, the last item in specs is used to generate rootAuthority
 // Otherwise, rootAuthority is deep-copied to first element of returned chain

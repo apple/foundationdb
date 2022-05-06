@@ -30,23 +30,23 @@
 
 std::FILE* outp = stderr;
 
-template <class ... Args>
-void log(Args&& ... args) {
+template <class... Args>
+void log(Args&&... args) {
 	auto buf = fmt::memory_buffer{};
 	fmt::format_to(std::back_inserter(buf), std::forward<Args>(args)...);
 	fmt::print(outp, "{}\n", std::string_view(buf.data(), buf.size()));
 }
 
-template <class ... Args>
-void logc(Args&& ... args) {
+template <class... Args>
+void logc(Args&&... args) {
 	auto buf = fmt::memory_buffer{};
 	fmt::format_to(std::back_inserter(buf), "[CLIENT] ");
 	fmt::format_to(std::back_inserter(buf), std::forward<Args>(args)...);
 	fmt::print(outp, "{}\n", std::string_view(buf.data(), buf.size()));
 }
 
-template <class ... Args>
-void logs(Args&& ... args) {
+template <class... Args>
+void logs(Args&&... args) {
 	auto buf = fmt::memory_buffer{};
 	fmt::format_to(std::back_inserter(buf), "[SERVER] ");
 	fmt::format_to(std::back_inserter(buf), std::forward<Args>(args)...);
@@ -82,7 +82,8 @@ void use_chain(ssl::context& ctx, mkcert::CertChainRef chain) {
 void init_certs(ssl::context& ctx, mkcert::CertChainRef my_chain, StringRef peerRootPem) {
 	if (!peerRootPem.empty())
 		trust_root_cacert(ctx, peerRootPem);
-	if (my_chain.size() > 1) my_chain.pop_back();
+	if (my_chain.size() > 1)
+		my_chain.pop_back();
 	if (my_chain.size() > 0)
 		use_chain(ctx, my_chain);
 }
@@ -92,9 +93,9 @@ void init_client_ssl_context() {
 	ctx.set_options(ssl::context::default_workarounds);
 	ctx.set_verify_mode(ssl::context::verify_peer | ssl::verify_fail_if_no_peer_cert);
 	ctx.set_verify_callback([](bool preverify, ssl::verify_context&) {
-			logc("context preverify: {}", preverify);
-			return preverify;
-		});
+		logc("context preverify: {}", preverify);
+		return preverify;
+	});
 	init_certs(ctx, client_chain, server_chain.empty() ? StringRef() : server_chain.back().certPem);
 }
 
@@ -103,16 +104,15 @@ void init_server_ssl_context() {
 	ctx.set_options(ssl::context::default_workarounds);
 	ctx.set_verify_mode(ssl::context::verify_peer | (client_chain.empty() ? 0 : ssl::verify_fail_if_no_peer_cert));
 	ctx.set_verify_callback([](bool preverify, ssl::verify_context&) {
-			logs("context preverify: {}", preverify);
-			return preverify;
-		});
+		logs("context preverify: {}", preverify);
+		return preverify;
+	});
 	init_certs(ctx, server_chain, client_chain.empty() ? StringRef() : client_chain.back().certPem);
 }
 
-template <> struct fmt::formatter<tcp::endpoint> {
-	constexpr auto parse(format_parse_context& ctx) -> decltype(ctx.begin()) {
-		return ctx.begin();
-	}
+template <>
+struct fmt::formatter<tcp::endpoint> {
+	constexpr auto parse(format_parse_context& ctx) -> decltype(ctx.begin()) { return ctx.begin(); }
 
 	template <class FormatContext>
 	auto format(const tcp::endpoint& ep, FormatContext& ctx) -> decltype(ctx.out()) {
@@ -147,12 +147,12 @@ int main(int argc, char** argv) {
 	print_chain(server_chain);
 	auto concat = concatCertChain(arena, server_chain);
 	if (!concat.empty())
-		log(concat.toString());
+	    log(concat.toString());
 	log("=========== CLIENT CHAIN");
 	print_chain(client_chain);
 	concat = concatCertChain(arena, client_chain);
 	if (!concat.empty())
-		log(concat.toString());
+	    log(concat.toString());
 	*/
 	init_client_ssl_context();
 	log("client SSL contexts initialized");
@@ -174,11 +174,13 @@ int main(int argc, char** argv) {
 		logs("client preverify: {}", preverify);
 		switch (server_sock_state) {
 		case ESockState::AssumedUntrusted:
-			if (!preverify) return false;
+			if (!preverify)
+				return false;
 			server_sock_state = ESockState::Trusted;
 			break;
 		case ESockState::Trusted:
-			if (!preverify) return false;
+			if (!preverify)
+				return false;
 			break;
 		default:
 			break;
@@ -192,9 +194,7 @@ int main(int argc, char** argv) {
 			wg_server.reset();
 		} else {
 			logs("accepted connection from {}", server_ssl_sock.next_layer().remote_endpoint());
-			server_ssl_sock.async_handshake(
-					ssl::stream_base::handshake_type::server,
-					[&wg_server](const ec_type& ec) {
+			server_ssl_sock.async_handshake(ssl::stream_base::handshake_type::server, [&wg_server](const ec_type& ec) {
 				if (ec) {
 					logs("server handshake returned {}", ec.message());
 				} else {
@@ -210,11 +210,13 @@ int main(int argc, char** argv) {
 		logc("server preverify: {}", preverify);
 		switch (client_sock_state) {
 		case ESockState::AssumedUntrusted:
-			if (!preverify) return false;
+			if (!preverify)
+				return false;
 			client_sock_state = ESockState::Trusted;
 			break;
 		case ESockState::Trusted:
-			if (!preverify) return false;
+			if (!preverify)
+				return false;
 			break;
 		default:
 			break;
@@ -228,16 +230,14 @@ int main(int argc, char** argv) {
 			wg_client.reset();
 		} else {
 			logc("connected to {}", client_sock.remote_endpoint());
-			client_ssl_sock.async_handshake(
-					ssl::stream_base::handshake_type::client,
-					[&wg_client](const ec_type& ec) {
-						if (ec) {
-							logc("client handshake returned {}", ec.message());
-						} else {
-							logc("handshake OK");
-						}
-						wg_client.reset();
-					});
+			client_ssl_sock.async_handshake(ssl::stream_base::handshake_type::client, [&wg_client](const ec_type& ec) {
+				if (ec) {
+					logc("client handshake returned {}", ec.message());
+				} else {
+					logc("handshake OK");
+				}
+				wg_client.reset();
+			});
 		}
 	});
 	io.run();

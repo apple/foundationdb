@@ -47,10 +47,7 @@ public:
 [[noreturn]] void traceAndThrow(const char* condition, const char* file, int line) {
 	fprintf(stderr, "Failed condition check %s at %s:%d\n", condition, file, line);
 	auto te = TraceEvent(SevWarnAlways, "ErrorTLSKeyOrCertGen");
-	te.suppressFor(60)
-	  .detail("File", file)
-	  .detail("Line", line)
-	  .detail("Condition", condition);
+	te.suppressFor(60).detail("File", file).detail("Line", line).detail("Condition", condition);
 	if (auto err = ::ERR_get_error()) {
 		char buf[256]{
 			0,
@@ -64,10 +61,10 @@ public:
 
 } // anonymous namespace
 
-#define OSSL_ASSERT(condition) \
-	do { \
-		if (!(condition)) \
-			traceAndThrow(#condition, __FILE__, __LINE__); \
+#define OSSL_ASSERT(condition)                                                                                         \
+	do {                                                                                                               \
+		if (!(condition))                                                                                              \
+			traceAndThrow(#condition, __FILE__, __LINE__);                                                             \
 	} while (false)
 
 namespace mkcert {
@@ -103,7 +100,8 @@ struct CertAndKeyNative {
 
 	PemType toPem(Arena& arena) {
 		auto ret = PemType{};
-		if (null()) return ret;
+		if (null())
+			return ret;
 		ASSERT(valid());
 		ret.certPem = writeX509CertPem(arena, cert);
 		ret.privateKeyPem = writePrivateKeyPem(arena, privateKey);
@@ -227,11 +225,14 @@ CertAndKeyNative makeCertNative(CertSpecRef spec, CertAndKeyNative issuer) {
 	auto nativeKeyPair = makeEllipticCurveKeyPairNative();
 	auto newX = ::X509_new();
 	OSSL_ASSERT(newX);
-	auto x509Guard = ExitGuard([&newX]() { if (newX) ::X509_free(newX); });
+	auto x509Guard = ExitGuard([&newX]() {
+		if (newX)
+			::X509_free(newX);
+	});
 	auto smartX = std::shared_ptr<X509>(newX, &::X509_free);
 	newX = nullptr;
 	auto x = smartX.get();
-	OSSL_ASSERT(0 < ::X509_set_version(x, 2/*X509_VERSION_3*/));
+	OSSL_ASSERT(0 < ::X509_set_version(x, 2 /*X509_VERSION_3*/));
 	auto serialPtr = ::X509_get_serialNumber(x);
 	OSSL_ASSERT(serialPtr);
 	OSSL_ASSERT(0 < ::ASN1_INTEGER_set(serialPtr, spec.serialNumber));
@@ -247,7 +248,9 @@ CertAndKeyNative makeCertNative(CertSpecRef spec, CertAndKeyNative issuer) {
 	for (const auto& entry : spec.subjectName) {
 		// field names are expected to null-terminate
 		auto fieldName = entry.field.toString();
-		OSSL_ASSERT(0 < ::X509_NAME_add_entry_by_txt(subjectName, fieldName.c_str(), MBSTRING_ASC, entry.bytes.begin(), entry.bytes.size(), -1, 0));
+		OSSL_ASSERT(0 <
+		            ::X509_NAME_add_entry_by_txt(
+		                subjectName, fieldName.c_str(), MBSTRING_ASC, entry.bytes.begin(), entry.bytes.size(), -1, 0));
 	}
 	auto issuerName = ::X509_get_issuer_name(x);
 	OSSL_ASSERT(issuerName);
@@ -283,22 +286,22 @@ CertSpecRef CertSpecRef::make(Arena& arena, CertKind kind) {
 	spec.offsetNotBefore = 0; // now
 	spec.offsetNotAfter = 60 * 60 * 24 * 365; // 1 year from now
 	auto& subject = spec.subjectName;
-	subject.push_back(arena, {"countryName"_sr, "DE"_sr});
-	subject.push_back(arena, {"localityName"_sr, "Berlin"_sr});
-	subject.push_back(arena, {"organizationName"_sr, "FoundationDB"_sr});
-	subject.push_back(arena, {"commonName"_sr, kind.getCommonName("FDB Testing Services"_sr, arena)});
+	subject.push_back(arena, { "countryName"_sr, "DE"_sr });
+	subject.push_back(arena, { "localityName"_sr, "Berlin"_sr });
+	subject.push_back(arena, { "organizationName"_sr, "FoundationDB"_sr });
+	subject.push_back(arena, { "commonName"_sr, kind.getCommonName("FDB Testing Services"_sr, arena) });
 	auto& ext = spec.extensions;
 	if (kind.isCA()) {
-		ext.push_back(arena, {"basicConstraints"_sr, "critical, CA:TRUE"_sr});
-		ext.push_back(arena, {"keyUsage"_sr, "critical, digitalSignature, keyCertSign, cRLSign"_sr});
+		ext.push_back(arena, { "basicConstraints"_sr, "critical, CA:TRUE"_sr });
+		ext.push_back(arena, { "keyUsage"_sr, "critical, digitalSignature, keyCertSign, cRLSign"_sr });
 	} else {
-		ext.push_back(arena, {"basicConstraints"_sr, "critical, CA:FALSE"_sr});
-		ext.push_back(arena, {"keyUsage"_sr, "critical, digitalSignature, keyEncipherment"_sr});
-		ext.push_back(arena, {"extendedKeyUsage"_sr, "serverAuth, clientAuth"_sr});
+		ext.push_back(arena, { "basicConstraints"_sr, "critical, CA:FALSE"_sr });
+		ext.push_back(arena, { "keyUsage"_sr, "critical, digitalSignature, keyEncipherment"_sr });
+		ext.push_back(arena, { "extendedKeyUsage"_sr, "serverAuth, clientAuth"_sr });
 	}
-	ext.push_back(arena, {"subjectKeyIdentifier"_sr, "hash"_sr});
+	ext.push_back(arena, { "subjectKeyIdentifier"_sr, "hash"_sr });
 	if (!kind.isRootCA())
-		ext.push_back(arena, {"authorityKeyIdentifier"_sr, "keyid, issuer"_sr});
+		ext.push_back(arena, { "authorityKeyIdentifier"_sr, "keyid, issuer"_sr });
 	return spec;
 }
 
@@ -307,7 +310,8 @@ StringRef concatCertChain(Arena& arena, CertChainRef chain) {
 	for (const auto& entry : chain) {
 		len += entry.certPem.size();
 	}
-	if (len == 0) return StringRef();
+	if (len == 0)
+		return StringRef();
 	auto buf = new (arena) uint8_t[len];
 	auto offset = 0;
 	for (auto const& entry : chain) {
@@ -325,8 +329,8 @@ CertChainRef makeCertChain(Arena& arena, VectorRef<CertSpecRef> specs, CertAndKe
 	if (needRootCA) {
 		int const chainLength = specs.size();
 		auto chain = new (arena) CertAndKeyRef[chainLength];
-		auto caNative = makeCertNative(specs.back(), CertAndKeyNative{}/* empty issuer == self-signed */);
-		chain[chainLength-1] = caNative.toPem(arena);
+		auto caNative = makeCertNative(specs.back(), CertAndKeyNative{} /* empty issuer == self-signed */);
+		chain[chainLength - 1] = caNative.toPem(arena);
 		for (auto i = chainLength - 2; i >= 0; i--) {
 			auto cnkNative = makeCertNative(specs[i], caNative);
 			chain[i] = cnkNative.toPem(arena);
@@ -335,9 +339,9 @@ CertChainRef makeCertChain(Arena& arena, VectorRef<CertSpecRef> specs, CertAndKe
 		return CertChainRef(chain, chainLength);
 	} else {
 		int const chainLength = specs.size() + 1; /* account for deep-copied rootAuthority */
-		auto chain = new (arena) CertAndKeyRef[chainLength]; 
+		auto chain = new (arena) CertAndKeyRef[chainLength];
 		auto caNative = CertAndKeyNative::fromPem(rootAuthority);
-		chain[chainLength-1] = rootAuthority.deepCopy(arena);
+		chain[chainLength - 1] = rootAuthority.deepCopy(arena);
 		for (auto i = chainLength - 2; i >= 0; i--) {
 			auto cnkNative = makeCertNative(specs[i], caNative);
 			chain[i] = cnkNative.toPem(arena);
@@ -348,7 +352,8 @@ CertChainRef makeCertChain(Arena& arena, VectorRef<CertSpecRef> specs, CertAndKe
 }
 
 CertChainRef makeCertChain(Arena& arena, unsigned length, ESide side) {
-	if (!length) return {};
+	if (!length)
+		return {};
 	// temporary arena for writing up specs
 	auto tmpArena = Arena();
 	auto specs = new (tmpArena) CertSpecRef[length];
@@ -360,10 +365,10 @@ CertChainRef makeCertChain(Arena& arena, unsigned length, ESide side) {
 		else if (i == length - 1)
 			kind = isServerSide ? CertKind(ServerRootCA{}) : CertKind(ClientRootCA{});
 		else
-			kind = isServerSide ? CertKind(ServerIntermediateCA{i}) : CertKind(ClientIntermediateCA{i});
+			kind = isServerSide ? CertKind(ServerIntermediateCA{ i }) : CertKind(ClientIntermediateCA{ i });
 		specs[i] = CertSpecRef::make(tmpArena, kind);
 	}
-	return makeCertChain(arena, VectorRef<CertSpecRef>(specs, length), {}/*root*/);
+	return makeCertChain(arena, VectorRef<CertSpecRef>(specs, length), {} /*root*/);
 }
 
 } // namespace mkcert
