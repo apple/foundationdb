@@ -111,7 +111,6 @@ public:
 	inline DatabaseContext* extractPtr() { return db.extractPtr(); }
 	DatabaseContext* operator->() const { return db.getPtr(); }
 	Reference<DatabaseContext> getReference() const { return db; }
-	UID dbId() const;
 
 	const UniqueOrderedOptionList<FDBTransactionOptions>& getTransactionDefaults() const;
 
