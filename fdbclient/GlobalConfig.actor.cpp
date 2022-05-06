@@ -168,11 +168,7 @@ ACTOR Future<Void> GlobalConfig::migrate(GlobalConfig* self) {
 			wait(tr->commit());
 			break;
 		} catch (Error& e) {
-			// If multiple fdbserver processes are started at once, they will all
-			// attempt this migration at the same time, sometimes resulting in
-			// aborts due to conflicts. Purposefully avoid retrying, making this
-			// migration best-effort.
-			TraceEvent(SevInfo, "GlobalConfig_MigrationError").detail("What", e.what());
+			TraceEvent(SevInfo, "GlobalConfig_MigrationError").error(e);
 			wait(tr->onError(e));
 		}
 	}
