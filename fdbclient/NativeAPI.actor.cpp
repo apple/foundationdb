@@ -4369,11 +4369,10 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 					TEST(true); // !GetKeyValuesFamilyReply.more and modifiedSelectors in getRange
 
 					if (!rep.data.size()) {
-						// VERSION_VECTOR change version to readVersion in getRangeFallback
 						RangeResultFamily result = wait(
 						    getRangeFallback<GetKeyValuesFamilyRequest, GetKeyValuesFamilyReply, RangeResultFamily>(
 						        trState,
-						        version,
+						        readVersion,
 						        originalBegin,
 						        originalEnd,
 						        mapper,
