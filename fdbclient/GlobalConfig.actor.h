@@ -66,8 +66,6 @@ struct ConfigValue : ReferenceCounted<ConfigValue> {
 };
 
 class GlobalConfig : NonCopyable {
-	typedef std::unordered_map<UID, GlobalConfig*> ConfigMap;
-
 public:
 	// Requires a database object to allow global configuration to run
 	// transactions on the database.
