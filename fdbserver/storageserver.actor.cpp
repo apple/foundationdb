@@ -3534,27 +3534,27 @@ void preprocessMappedKey(Tuple& mappedKeyFormatTuple, std::vector<Optional<Tuple
 			if (escaped) {
 				Tuple escapedTuple;
 				escapedTuple.append(s);
-				vt.push_back(Optional<Tuple>(escapedTuple));
+				vt.emplace_back(escapedTuple);
 			} else if (singleKeyOrValue(s, sz)) {
 				// when it is SingleKeyOrValue, insert an empty Tuple to vector as placeholder
-				vt.push_back(Optional<Tuple>(Tuple()));
+				vt.emplace_back(Tuple());
 			} else if (rangeQuery(s)) {
 				if (i != mappedKeyFormatTuple.size() - 1) {
 					// It must be the last element of the mapper tuple
 					throw mapper_bad_range_decriptor();
 				}
 				// when it is rangeQuery, insert Optional.empty as placeholder
-				vt.push_back(Optional<Tuple>());
+				vt.emplace_back(Optional<Tuple>());
 				isRangeQuery = true;
 			} else {
 				Tuple t;
 				t.appendRaw(mappedKeyFormatTuple.subTupleRawString(i));
-				vt.push_back(Optional<Tuple>(t));
+				vt.emplace_back(t);
 			}
 		} else {
 			Tuple t;
 			t.appendRaw(mappedKeyFormatTuple.subTupleRawString(i));
-			vt.push_back(Optional<Tuple>(t));
+			vt.emplace_back(t);
 		}
 	}
 }
