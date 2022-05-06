@@ -23,18 +23,18 @@
 import random
 import uuid
 import time
-import struct
 import fdb
 import fdb.tuple
 
 fdb.api_version(200)
 
+
 # TODO: Make this fdb.tuple.subspace() or similar?
 
 
 class Subspace(object):
-    def __init__(self, prefixTuple, rawPrefix=""):
-        self.rawPrefix = rawPrefix + fdb.tuple.pack(prefixTuple)
+    def __init__(self, prefix_tuple, raw_prefix=""):
+        self.rawPrefix = raw_prefix + fdb.tuple.pack(prefix_tuple)
 
     def __getitem__(self, name):
         return Subspace((name,), self.rawPrefix)
@@ -47,7 +47,7 @@ class Subspace(object):
 
     def unpack(self, key):
         assert key.startswith(self.rawPrefix)
-        return fdb.tuple.unpack(key[len(self.rawPrefix) :])
+        return fdb.tuple.unpack(key[len(self.rawPrefix):])
 
     def range(self, tuple=()):
         p = fdb.tuple.range(tuple)
@@ -92,19 +92,19 @@ class TaskBucket(object):
         del tr[self.prefix.range(())]
 
     @fdb.transactional
-    def add(self, tr, taskDict):
+    def add(self, tr, task_dict):
         """Adds the task specified by taskDict to the bucket for any participant to do."""
         if self.system_access:
             tr.options.set_access_system_keys()
-        assert taskDict
+        assert task_dict
         key = random_key()
-        for k, v in taskDict.items():
+        for k, v in task_dict.items():
             tr[self.available.pack((key, k))] = _pack_value(v)
-        taskDict["__task_key"] = key
+        task_dict["__task_key"] = key
         return key
 
     @fdb.transactional
-    def addIdle(self, tr):
+    def add_idle(self, tr):
         """Adds an idle task for any participant to remove."""
         if self.system_access:
             tr.options.set_access_system_keys()
@@ -115,7 +115,7 @@ class TaskBucket(object):
     @fdb.transactional
     def get_one(self, tr):
         """Gets a single task from the bucket, locks it so that only the
-        caller will work on it for a while, and returns its taskDict.
+        caller will work on it for a while, and returns its task_dict.
         If there are no tasks in the bucket, returns None."""
         if self.system_access:
             tr.options.set_access_system_keys()
@@ -138,19 +138,19 @@ class TaskBucket(object):
             self.timeout * (0.9 + 0.2 * random.random())
         )
 
-        taskDict = {}
+        task_dict = {}
         for k, v in tr[avail.range(())]:
             (tk,) = avail.unpack(k)
-            taskDict[tk] = v
+            task_dict[tk] = v
 
             if tk != "type" or v != "":
                 tr[self.timeouts.pack((timeout, key, tk))] = v
         del tr[avail.range(())]
         tr[self.active.key()] = random_key()
 
-        taskDict["__task_key"] = key
-        taskDict["__task_timeout"] = timeout
-        return taskDict
+        task_dict["__task_key"] = key
+        task_dict["__task_timeout"] = timeout
+        return task_dict
 
     @fdb.transactional
     def is_empty(self, tr):
@@ -173,23 +173,23 @@ class TaskBucket(object):
         return k and k >= self.available.pack(("",))
 
     @fdb.transactional
-    def finish(self, tr, taskDict):
+    def finish(self, tr, task_dict):
         """taskDict is a task previously locked by get_one.  Removes it permanently
         from the bucket.  If the task has already timed out, raises TaskTimedOutException."""
         if self.system_access:
             tr.options.set_access_system_keys()
-        rng = self.timeouts.range((taskDict["__task_timeout"], taskDict["__task_key"]))
+        rng = self.timeouts.range((task_dict["__task_timeout"], task_dict["__task_key"]))
         if next(iter(tr[rng]), False):
             del tr[rng]
         else:
             raise TaskTimedOutException()
 
     @fdb.transactional
-    def is_finished(self, tr, taskDict):
+    def is_finished(self, tr, task_dict):
         # print "checking if the task was finished at version: {0}".format(tr.get_read_version().wait())
         if self.system_access:
             tr.options.set_read_system_keys()
-        rng = self.timeouts.range((taskDict["__task_timeout"], taskDict["__task_key"]))
+        rng = self.timeouts.range((task_dict["__task_timeout"], task_dict["__task_key"]))
         return not bool(next(iter(tr[rng]), False))
 
     def check_active(self, db):
@@ -198,7 +198,7 @@ class TaskBucket(object):
             if self.system_access:
                 tr.options.set_read_system_keys()
             if not self.is_busy(tr):
-                self.addIdle(tr)
+                self.add_idle(tr)
             return tr[self.active.key()]
 
         starting_value = get_starting_value(db)
@@ -218,7 +218,7 @@ class TaskBucket(object):
         return False
 
     @fdb.transactional
-    def extend(self, tr, taskDict):
+    def extend(self, tr, task_dict):
         """Extends the lock on a task previously locked by get_one for another self.timeout seconds.
         If the task has already timed out, raises TaskTimedOutException."""
         pass
@@ -228,23 +228,23 @@ class TaskBucket(object):
         iff any tasks were affected."""
         end = tr.get_read_version().wait()
         rng = slice(self.timeouts.range((0,)).start, self.timeouts.range((end,)).stop)
-        anyTimeouts = False
+        any_timeouts = False
         for k, v in tr.get_range(
-            rng.start, rng.stop, streaming_mode=fdb.StreamingMode.want_all
+                rng.start, rng.stop, streaming_mode=fdb.StreamingMode.want_all
         ):
-            timeout, taskKey, param = self.timeouts.unpack(k)
-            anyTimeouts = True
-            tr.set(self.available.pack((taskKey, param)), v)
+            timeout, task_key, param = self.timeouts.unpack(k)
+            any_timeouts = True
+            tr.set(self.available.pack((task_key, param)), v)
         del tr[rng]
 
-        return anyTimeouts
+        return any_timeouts
 
 
 class TaskDispatcher(object):
     def __init__(self):
         self.taskTypes = {}
 
-    def taskType(self, f):
+    def task_type(self, f):
         """Given a function, defines a task type with the same name as the
         function that calls the function.  The function should accept the
         task dictionary as keyword parameters.
@@ -253,7 +253,7 @@ class TaskDispatcher(object):
         self.taskTypes[f.__name__] = f
         return f
 
-    def makeTask(self, f, **kw):
+    def make_task(self, f, **kw):
         """Return a taskDict suitable for TaskBucket.add() based on a function
         which has already been passed to self.taskType() and keyword parameters
         for it."""
@@ -263,17 +263,17 @@ class TaskDispatcher(object):
         d["type"] = f.__name__
         return d
 
-    def dispatch(self, taskDict):
+    def dispatch(self, task_dict):
         """Calls the function associated with the type of the taskDict passed
         in, passing the taskDict as keyword arguments.  Does not finish or
         extend the task or otherwise interact with a TaskBucket."""
-        if taskDict["type"] != "":
-            self.taskTypes[taskDict["type"]](**taskDict)
+        if task_dict["type"] != "":
+            self.taskTypes[task_dict["type"]](**task_dict)
 
-    def do_one(self, db, taskBucket):
+    def do_one(self, db, task_bucket):
         """Gets one task (if any) from the task bucket, executes it, and finishes it.
         Returns True if a task was executed, False if none was available."""
-        task = taskBucket.get_one(db)
+        task = task_bucket.get_one(db)
         if not task:
             return False
         self.dispatch(task)
@@ -286,8 +286,8 @@ class FutureBucket(object):
     def __init__(self, subspace, system_access=False):
         self.prefix = subspace
         self.dispatcher = TaskDispatcher()
-        self.dispatcher.taskType(self._add_task)
-        self.dispatcher.taskType(self._unblock_future)
+        self.dispatcher.task_type(self._add_task)
+        self.dispatcher.task_type(self._unblock_future)
         self.system_access = system_access
 
     @fdb.transactional
@@ -312,14 +312,14 @@ class FutureBucket(object):
         joined._join(tr, futures)
         return joined
 
-    def _add_task(self, tr, taskType, taskBucket, **task):
+    def _add_task(self, tr, task_type, task_bucket, **task):
         bucket = TaskBucket(
-            Subspace((), rawPrefix=taskBucket), system_access=self.system_access
+            Subspace((), raw_prefix=task_bucket), system_access=self.system_access
         )
-        task["type"] = taskType
+        task["type"] = task_type
         bucket.add(tr, task)
 
-    def _unblock_future(self, tr, future, blockid, **task):
+    def _unblock_future(self, tr, future, blockid):
         if self.system_access:
             tr.options.set_access_system_keys()
         future = self.unpack(future)
@@ -353,26 +353,26 @@ class Future(object):
         return not any(tr[self.prefix["bl"].range(())])
 
     @fdb.transactional
-    def on_set_add_task(self, tr, taskBucket, taskDict):
+    def on_set_add_task(self, tr, task_bucket, task_dict):
         """When the Future is set, the given task will be added to the given taskBucket."""
-        td = dict(taskDict)
-        td["taskBucket"] = taskBucket.prefix.key()
+        td = dict(task_dict)
+        td["taskBucket"] = task_bucket.prefix.key()
         td["taskType"] = td["type"]
         td["type"] = "_add_task"
         self.on_set(tr, td)
 
     @fdb.transactional
-    def on_set(self, tr, taskDict):
+    def on_set(self, tr, task_dict):
         """When the Future is set, the given task will be executed immediately
         as part of the same transaction.  Consider using onSetAddTask to defer
         the execution of the task instead."""
         if self.system_access:
             tr.options.set_access_system_keys()
         if self.is_set(tr):
-            self.perform_action(tr, taskDict)
+            self.perform_action(tr, task_dict)
         else:
             cb_key = random_key()
-            for k, v in taskDict.items():
+            for k, v in task_dict.items():
                 tr[self.prefix["cb"][cb_key][k].key()] = _pack_value(v)
 
     @fdb.transactional
@@ -408,13 +408,13 @@ class Future(object):
         return f
 
     def _join(self, tr, futures):
-        ids = [random_key() for f in futures]
+        ids = [random_key() for _ in futures]
         for blockid in ids:
             self._add_block(tr, blockid)
         for f, blockid in zip(futures, ids):
             f.on_set(
                 tr,
-                self.dispatcher.makeTask(
+                self.dispatcher.make_task(
                     self.bucket._unblock_future, future=self.pack(), blockid=blockid
                 ),
             )
@@ -427,18 +427,18 @@ class Future(object):
         callbacks = list(tr[cb.range()])
         del tr[cb.range()]  # Remove all callbacks
         # Now actually perform the callbacks
-        taskDict = {}
-        taskKey = None
+        task_dict = {}
+        task_key = None
         for k, v in callbacks:
             cb_key, k = cb.unpack(k)
-            if cb_key != taskKey:
-                self.perform_action(tr, taskDict)
-                taskDict = {}
-                taskKey = cb_key
-            taskDict[k] = v
-        self.perform_action(tr, taskDict)
+            if cb_key != task_key:
+                self.perform_action(tr, task_dict)
+                task_dict = {}
+                task_key = cb_key
+            task_dict[k] = v
+        self.perform_action(tr, task_dict)
 
-    def perform_action(self, tr, taskDict):
-        if taskDict:
-            taskDict["tr"] = tr
-            self.dispatcher.dispatch(taskDict)
+    def perform_action(self, tr, task_dict):
+        if task_dict:
+            task_dict["tr"] = tr
+            self.dispatcher.dispatch(task_dict)

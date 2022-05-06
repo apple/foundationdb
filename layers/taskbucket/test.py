@@ -43,7 +43,7 @@ taskBucket = taskbucket.TaskBucket(testSubspace["tasks"])
 futureBucket = taskbucket.FutureBucket(testSubspace["futures"])
 
 
-@taskDispatcher.taskType
+@taskDispatcher.task_type
 def say_hello(name, done, **task):
     done = futureBucket.unpack(done)
 
@@ -57,7 +57,7 @@ def say_hello(name, done, **task):
     say_hello_tx(db)
 
 
-@taskDispatcher.taskType
+@taskDispatcher.task_type
 def say_hello_to_everyone(done, **task):
     done = futureBucket.unpack(done)
 
@@ -68,7 +68,7 @@ def say_hello_to_everyone(done, **task):
             name_done = futureBucket.future(tr)
             futures.append(name_done)
             taskBucket.add(
-                tr, taskDispatcher.makeTask(say_hello, name=str(name), done=name_done)
+                tr, taskDispatcher.make_task(say_hello, name=str(name), done=name_done)
             )
             done.join(tr, *futures)
         taskBucket.finish(tr, task)
@@ -76,7 +76,7 @@ def say_hello_to_everyone(done, **task):
     say_hello_to_everyone_tx(db)
 
 
-@taskDispatcher.taskType
+@taskDispatcher.task_type
 def said_hello(**task):
     print("Said hello to everyone.")
     taskBucket.finish(db, task)
@@ -91,8 +91,8 @@ print("adding tasks")
 all_done = futureBucket.future(db)
 
 taskBucket.clear(db)
-taskBucket.add(db, taskDispatcher.makeTask(say_hello_to_everyone, done=all_done))
-all_done.on_set_add_task(db, taskBucket, taskDispatcher.makeTask(said_hello))
+taskBucket.add(db, taskDispatcher.make_task(say_hello_to_everyone, done=all_done))
+all_done.on_set_add_task(db, taskBucket, taskDispatcher.make_task(said_hello))
 
 while True:
     try:
@@ -103,7 +103,7 @@ while True:
                 else:
                     time.sleep(1)
         break
-    except TaskTimedOutException as e:
+    except TaskTimedOutException:
         print("task timed out")
 
 print("No tasks remain.")
