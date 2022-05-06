@@ -518,7 +518,9 @@ class Server(BaseHTTPRequestHandler):
                 return
             if self.path.startswith("/check_hash/"):
                 try:
-                    self.send_text(check_hash(os.path.basename(self.path)), add_newline=False)
+                    self.send_text(
+                        check_hash(os.path.basename(self.path)), add_newline=False
+                    )
                 except FileNotFoundError:
                     self.send_error(404, "Path not found")
                     self.end_headers()
