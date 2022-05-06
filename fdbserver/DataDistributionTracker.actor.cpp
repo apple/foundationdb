@@ -857,8 +857,10 @@ ACTOR Future<Void> fetchTopKShardMetrics_impl(DataDistributionTracker* self, Get
 					break;
 				}
 
-				metrics.keys = range;
-				returnMetrics.push_back(metrics);
+				if (metrics.bytesReadPerKSecond <= req.maxBytesReadPerKSecond) {
+					metrics.keys = range;
+					returnMetrics.push_back(metrics);
+				}
 			}
 
 			if (!onChange.isValid()) {

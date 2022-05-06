@@ -171,9 +171,13 @@ struct GetTopKMetricsRequest {
 	MetricsComparator comparator; // Return true if a.score > b.score, return the largest topK in keys
 	std::vector<KeyRange> keys;
 	Promise<std::vector<StorageMetrics>> reply; // topK storage metrics
+	double maxBytesReadPerKSecond = 0; // all returned shards won't exceed this read load
 
 	GetTopKMetricsRequest() {}
-	GetTopKMetricsRequest(std::vector<KeyRange> const& keys, int topK = 1) : topK(topK), keys(keys) {}
+	GetTopKMetricsRequest(std::vector<KeyRange> const& keys,
+	                      int topK = 1,
+	                      double maxBytesReadPerKSecond = std::numeric_limits<double>::max())
+	  : topK(topK), keys(keys), maxBytesReadPerKSecond(maxBytesReadPerKSecond) {}
 };
 
 struct GetMetricsListRequest {
