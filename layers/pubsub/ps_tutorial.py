@@ -35,8 +35,6 @@ actual delivery of messages.
 """
 
 # Prerequisites
-import os
-import sys
 import fdb
 from pubsub_bigdoc import PubSub
 

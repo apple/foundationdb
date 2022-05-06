@@ -119,7 +119,7 @@ def _get_feed_messages(feed, limit):
 
 # Read-only operation without side-effects.
 @simpledoc.transactional
-def _get_inbox_subscriptions(inbox, limit):
+def _get_inbox_subscriptions(inbox):
     subscriptions = []
     for message in inbox.subs.get_children():
         subscriptions.append(message.get_name())
@@ -211,8 +211,8 @@ class PubSub(object):
     def get_feed_messages(self, feed, limit=10):
         return _get_feed_messages(self.db, feed, limit)
 
-    def get_inbox_subscriptions(self, inbox, limit=10):
-        return _get_inbox_subscriptions(self.db, inbox, limit)
+    def get_inbox_subscriptions(self, limit=10):
+        return _get_inbox_subscriptions(self.db, limit)
 
     def get_inbox_messages(self, inbox, limit=10):
         return _get_inbox_messages(self.db, inbox, limit)
@@ -245,7 +245,7 @@ def setup_topology(feeds, inboxes):
     inbox_map = {}
     for i in range(inboxes):
         inbox_map[i] = ps.create_inbox("Bob " + str(i))
-        for f in random.sample(xrange(feeds), random.randint(1, feeds)):
+        for f in random.sample(range(feeds), random.randint(1, feeds)):
             ps.create_subscription(inbox_map[i], feed_map[f])
     return feed_map, inbox_map
 
@@ -270,7 +270,6 @@ def inbox_driver(inbox):
     wait_limit = 1.1
     wait_inc = 0.1
     waited = 0.0
-    changed = False
     latest = None
     while True:
         get_and_print_inbox_messages(inbox)

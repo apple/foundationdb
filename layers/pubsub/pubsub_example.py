@@ -75,7 +75,6 @@ def inbox_driver(inbox):
     wait_limit = 1.1
     wait_inc = 0.1
     waited = 0.0
-    changed = False
     latest = None
     while True:
         get_and_print_inbox_messages(inbox)

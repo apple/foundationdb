@@ -19,9 +19,6 @@
 #
 
 import os
-import sys
-
-import fdb
 import simpledoc
 
 feed_messages = simpledoc.OrderedIndex("messages.?", "fromfeed")
@@ -61,7 +58,7 @@ def _create_subscription_internal(feed, inbox):
 
 
 @simpledoc.transactional
-def _post_message_internal(feed, message_id, contents):
+def _post_message_internal(feed, contents):
     message = messages.prepend()
     message.set_value(contents)
     message.fromfeed = feed.get_name()
@@ -116,7 +113,7 @@ def _copy_dirty_feeds(inbox):
 
 
 @simpledoc.transactional
-def _get_inbox_subscriptions_internal(inbox, limit):
+def _get_inbox_subscriptions_internal(inbox):
     subscriptions = []
 
     for message in inbox.subs.get_children():
@@ -179,9 +176,9 @@ class PubSub(object):
     def create_subscription(self, feed, inbox):
         return _create_subscription_internal(self.db, feed, inbox)
 
-    def post_message(self, feed, contents):
+    def post_message(self, contents):
         message_id = os.urandom(8)
-        return _post_message_internal(self.db, feed, message_id, contents)
+        return _post_message_internal(self.db, message_id, contents)
 
     def list_inbox_messages(self, inbox):
         return _list_messages_internal(self.db, inbox)
@@ -189,8 +186,8 @@ class PubSub(object):
     def get_feed_messages(self, feed, limit=10):
         return _get_feed_messages_internal(self.db, feed, limit)
 
-    def get_inbox_subscriptions(self, inbox, limit=10):
-        return _get_inbox_subscriptions_internal(self.db, inbox, limit)
+    def get_inbox_subscriptions(self, limit=10):
+        return _get_inbox_subscriptions_internal(self.db, limit)
 
     def get_inbox_messages(self, inbox, limit=10):
         return _get_inbox_messages_internal(self.db, inbox, limit)

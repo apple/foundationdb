@@ -254,8 +254,8 @@ def _list_messages_internal(tr, inbox):
 
 @fdb.transactional
 def _print_internal(tr, feed):
-    countKey = key_for_feed_message_count(feed)
-    f_count = tr[countKey]
+    count_key = key_for_feed_message_count(feed)
+    f_count = tr[count_key]
     print("Messages in feed", feed, ":", struct.unpack(">Q", f_count + "")[0])
 
 
