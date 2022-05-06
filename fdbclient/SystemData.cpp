@@ -335,12 +335,10 @@ std::pair<UID, Key> serverKeysDecodeServerBegin(const KeyRef& key) {
 	BinaryReader rd(key.removePrefix(serverKeysPrefix), Unversioned());
 	rd >> server_id;
 	rd.readBytes(1); // skip "/"
-	std::string bytes;
-	while (!rd.empty()) {
-		bytes.push_back((char)*rd.arenaRead(1));
-	}
-	// std::cout << bytes.size() << " " <<bytes << std::endl;
-	return std::make_pair(server_id, Key(bytes));
+	const auto remainedBytes = rd.remainedBytes();
+	KeyRef ref = KeyRef(rd.arenaRead(remainedBytes), remainedBytes);
+	// std::cout << ref.size() << " " << ref.toString() << std::endl;
+	return std::make_pair(server_id, Key(ref));
 }
 
 bool serverHasKey(ValueRef storedValue) {
@@ -1469,12 +1467,11 @@ TEST_CASE("/SystemData/SerDes/SSI") {
 	ssi.uniqueID = UID(0x1234123412341234, 0x5678567856785678);
 	ssi.locality = localityData;
 	ssi.initEndpoints();
-	ssi.startAcceptingRequests();
 
 	testSSISerdes(ssi);
 
 	ssi.tssPairID = UID(0x2345234523452345, 0x1238123812381238);
-	ssi.stopAcceptingRequests();
+
 	testSSISerdes(ssi);
 	printf("ssi serdes test complete\n");
 

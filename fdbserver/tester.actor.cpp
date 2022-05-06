@@ -99,7 +99,6 @@ Key KVWorkload::keyForIndex(uint64_t index) const {
 	}
 }
 
-// the reverse process of keyForIndex() without division
 int64_t KVWorkload::indexForKey(const KeyRef& key, bool absent) const {
 	int idx = 0;
 	if (nodePrefix > 0) {
@@ -129,6 +128,7 @@ Key KVWorkload::keyForIndex(uint64_t index, bool absent) const {
 	ASSERT(keyBytes >= 16);
 	emplaceIndex(data, idx, (int64_t)index);
 	// ASSERT(indexForKey(result) == (int64_t)index); // debug assert
+
 	return result;
 }
 
