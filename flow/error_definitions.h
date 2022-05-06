@@ -95,7 +95,6 @@ ERROR( page_encoding_not_supported, 1071, "Page encoding type is not supported o
 ERROR( page_decoding_failed, 1072, "Page content decoding failed" )
 ERROR( unexpected_encoding_type, 1073, "Page content decoding failed" )
 ERROR( encryption_key_not_found, 1074, "Encryption key not found" )
-ERROR( stale_version_vector, 1075, "Client version vector is stale" )
 
 ERROR( broken_promise, 1100, "Broken promise" )
 ERROR( operation_cancelled, 1101, "Asynchronous operation cancelled" )
@@ -146,6 +145,10 @@ ERROR( file_corrupt, 1522, "A structurally corrupt data file was detected" )
 ERROR( http_request_failed, 1523, "HTTP response code not received or indicated failure" )
 ERROR( http_auth_failed, 1524, "HTTP request failed due to bad credentials" )
 ERROR( http_bad_request_id, 1525, "HTTP response contained an unexpected X-Request-ID header" )
+ERROR( rest_invalid_uri, 1526, "Invalid REST URI")
+ERROR( rest_invalid_rest_client_knob, 1527, "Invalid RESTClient knob")
+ERROR( rest_connectpool_key_not_found, 1528, "ConnectKey not found in connection pool")
+
 
 // 2xxx Attempt (presumably by a _client_) to do something illegal.  If an error is known to
 // be internally caused, it should be 41xx
@@ -226,6 +229,7 @@ ERROR( invalid_tenant_name, 2134, "Tenant name cannot begin with \\xff");
 ERROR( tenant_prefix_allocator_conflict, 2135, "The database already has keys stored at the prefix allocated for the tenant");
 ERROR( tenants_disabled, 2136, "Tenants have been disabled in the cluster");
 ERROR( unknown_tenant, 2137, "Tenant is not available from this server")
+ERROR( illegal_tenant_access, 2138, "Illegal tenant access")
 
 // 2200 - errors from bindings and official APIs
 ERROR( api_version_unset, 2200, "API version is not set" )

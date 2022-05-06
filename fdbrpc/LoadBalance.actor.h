@@ -638,7 +638,6 @@ Future<REPLY_TYPE(Request)> loadBalance(
 		} else if (firstRequestData.isValid()) {
 			// Issue a second request, the first one is taking a long time.
 			secondRequestData.startRequest(backoff, triedAllOptions, stream, request, model, alternatives, channel);
-			state bool firstFinished = false;
 
 			loop choose {
 				when(ErrorOr<REPLY_TYPE(Request)> result =
@@ -648,7 +647,6 @@ Future<REPLY_TYPE(Request)> loadBalance(
 					}
 
 					firstRequestEndpoint = Optional<uint64_t>();
-					firstFinished = true;
 				}
 				when(ErrorOr<REPLY_TYPE(Request)> result = wait(secondRequestData.response)) {
 					if (secondRequestData.checkAndProcessResult(atMostOnce)) {

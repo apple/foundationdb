@@ -21,6 +21,7 @@
 #include "boost/asio/buffer.hpp"
 #include "boost/asio/ip/address.hpp"
 #include "boost/system/system_error.hpp"
+#include "flow/Arena.h"
 #include "flow/Platform.h"
 #include "flow/Trace.h"
 #include <algorithm>
@@ -29,6 +30,10 @@
 #define BOOST_DATE_TIME_NO_LIB
 #define BOOST_REGEX_NO_LIB
 #include <boost/asio.hpp>
+#if defined(HAVE_WOLFSSL)
+#include <wolfssl/options.h>
+#endif
+#include "boost/asio/ssl.hpp"
 #include <boost/date_time/posix_time/posix_time_types.hpp>
 #include <boost/range.hpp>
 #include <boost/algorithm/string/join.hpp>
@@ -232,12 +237,10 @@ public:
 	// private:
 
 	ASIOReactor reactor;
-#ifndef TLS_DISABLED
 	AsyncVar<Reference<ReferencedObject<boost::asio::ssl::context>>> sslContextVar;
 	Reference<IThreadPool> sslHandshakerPool;
 	int sslHandshakerThreadsStarted;
 	int sslPoolHandshakesInProgress;
-#endif
 	TLSConfig tlsConfig;
 	Future<Void> backgroundCertRefresh;
 	ETLSInitState tlsInitializedState;
@@ -372,14 +375,12 @@ public:
 				{
 					TraceEvent evt(SevWarn, errContext, errID);
 					evt.suppressFor(1.0).detail("ErrorCode", error.value()).detail("Message", error.message());
-#ifndef TLS_DISABLED
 					// There is no function in OpenSSL to use to check if an error code is from OpenSSL,
 					// but all OpenSSL errors have a non-zero "library" code set in bits 24-32, and linux
 					// error codes should never go that high.
 					if (error.value() >= (1 << 24L)) {
 						evt.detail("WhichMeans", TLSPolicy::ErrorString(error));
 					}
-#endif
 				}
 
 				p.sendError(connection_failed());
@@ -786,7 +787,6 @@ private:
 	}
 };
 
-#ifndef TLS_DISABLED
 typedef boost::asio::ssl::stream<boost::asio::ip::tcp::socket&> ssl_socket;
 
 struct SSLHandshakerThread final : IThreadPoolReceiver {
@@ -1190,7 +1190,6 @@ private:
 		}
 	}
 };
-#endif
 
 struct PromiseTask final : public Task, public FastAllocated<PromiseTask> {
 	Promise<Void> promise;
@@ -1207,12 +1206,10 @@ struct PromiseTask final : public Task, public FastAllocated<PromiseTask> {
 
 Net2::Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics)
   : globals(enumGlobal::COUNT), useThreadPool(useThreadPool), reactor(this),
-#ifndef TLS_DISABLED
     sslContextVar({ ReferencedObject<boost::asio::ssl::context>::from(
         boost::asio::ssl::context(boost::asio::ssl::context::tls)) }),
-    sslHandshakerThreadsStarted(0), sslPoolHandshakesInProgress(0),
-#endif
-    tlsConfig(tlsConfig), tlsInitializedState(ETLSInitState::NONE), network(this), tscBegin(0), tscEnd(0), taskBegin(0),
+    sslHandshakerThreadsStarted(0), sslPoolHandshakesInProgress(0), tlsConfig(tlsConfig),
+    tlsInitializedState(ETLSInitState::NONE), network(this), tscBegin(0), tscEnd(0), taskBegin(0),
     currentTaskID(TaskPriority::DefaultYield), tasksIssued(0), stopped(false), started(false), numYields(0),
     lastPriorityStats(nullptr), ready(FLOW_KNOBS->READY_QUEUE_RESERVED_SIZE) {
 	// Until run() is called, yield() will always yield
@@ -1236,7 +1233,6 @@ Net2::Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics)
 	updateNow();
 }
 
-#ifndef TLS_DISABLED
 ACTOR static Future<Void> watchFileForChanges(std::string filename, AsyncTrigger* fileChanged) {
 	if (filename == "") {
 		return Never();
@@ -1313,13 +1309,11 @@ ACTOR static Future<Void> reloadCertificatesOnChange(
 		}
 	}
 }
-#endif
 
 void Net2::initTLS(ETLSInitState targetState) {
 	if (tlsInitializedState >= targetState) {
 		return;
 	}
-#ifndef TLS_DISABLED
 	// Any target state must be higher than NONE so if the current state is NONE
 	// then initialize the TLS config
 	if (tlsInitializedState == ETLSInitState::NONE) {
@@ -1373,7 +1367,6 @@ void Net2::initTLS(ETLSInitState targetState) {
 			}
 		}
 	}
-#endif
 
 	tlsInitializedState = targetState;
 }
@@ -1827,12 +1820,10 @@ THREAD_HANDLE Net2::startThread(THREAD_FUNC_RETURN (*func)(void*), void* arg, in
 }
 
 Future<Reference<IConnection>> Net2::connect(NetworkAddress toAddr, const std::string& host) {
-#ifndef TLS_DISABLED
 	if (toAddr.isTLS()) {
 		initTLS(ETLSInitState::CONNECT);
 		return SSLConnection::connect(&this->reactor.ios, this->sslContextVar.get(), toAddr);
 	}
-#endif
 
 	return Connection::connect(&this->reactor.ios, toAddr);
 }
@@ -1972,12 +1963,10 @@ bool Net2::isAddressOnThisHost(NetworkAddress const& addr) const {
 
 Reference<IListener> Net2::listen(NetworkAddress localAddr) {
 	try {
-#ifndef TLS_DISABLED
 		if (localAddr.isTLS()) {
 			initTLS(ETLSInitState::LISTEN);
 			return Reference<IListener>(new SSLListener(reactor.ios, &this->sslContextVar, localAddr));
 		}
-#endif
 		return Reference<IListener>(new Listener(reactor.ios, localAddr));
 	} catch (boost::system::system_error const& e) {
 		Error x;

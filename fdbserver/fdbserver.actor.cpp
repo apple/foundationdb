@@ -204,11 +204,7 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_FLOW_PROCESS_NAME,     "--process-name",              SO_REQ_SEP },
 	{ OPT_FLOW_PROCESS_ENDPOINT, "--process-endpoint",          SO_REQ_SEP },
 	{ OPT_IP_TRUSTED_MASK,       "--trusted-subnet-",           SO_REQ_SEP },
-
-#ifndef TLS_DISABLED
-	TLS_OPTION_FLAGS
-#endif
-
+	TLS_OPTION_FLAGS,
 	SO_END_OF_OPTIONS
 };
 
@@ -662,9 +658,7 @@ static void printUsage(const char* name, bool devhelp) {
 	                 "  collector -- None or FluentD (FluentD requires collector_endpoint to be set)\n"
 	                 "  collector_endpoint -- IP:PORT of the fluentd server\n"
 	                 "  collector_protocol -- UDP or TCP (default is UDP)");
-#ifndef TLS_DISABLED
 	printf("%s", TLS_HELP);
-#endif
 	printOptionUsage("-v, --version", "Print version information and exit.");
 	printOptionUsage("-h, -?, --help", "Display this help and exit.");
 	if (devhelp) {
@@ -859,9 +853,9 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(
 	NetworkAddressList publicNetworkAddresses;
 	NetworkAddressList listenNetworkAddresses;
 
-	connectionRecord.resolveHostnamesBlocking();
-	auto& coordinators = connectionRecord.getConnectionString().coordinators();
-	ASSERT(coordinators.size() > 0);
+	std::vector<Hostname>& hostnames = connectionRecord.getConnectionString().hostnames;
+	const std::vector<NetworkAddress>& coords = connectionRecord.getConnectionString().coordinators();
+	ASSERT(hostnames.size() + coords.size() > 0);
 
 	for (int ii = 0; ii < publicAddressStrs.size(); ++ii) {
 		const std::string& publicAddressStr = publicAddressStrs[ii];
@@ -930,13 +924,26 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(
 			listenNetworkAddresses.secondaryAddress = currentListenAddress;
 		}
 
-		bool hasSameCoord = std::all_of(coordinators.begin(), coordinators.end(), [&](const NetworkAddress& address) {
+		bool matchCoordinatorsTls = std::all_of(coords.begin(), coords.end(), [&](const NetworkAddress& address) {
 			if (address.ip == currentPublicAddress.ip && address.port == currentPublicAddress.port) {
 				return address.isTLS() == currentPublicAddress.isTLS();
 			}
 			return true;
 		});
-		if (!hasSameCoord) {
+		// If true, further check hostnames.
+		if (matchCoordinatorsTls) {
+			matchCoordinatorsTls = std::all_of(hostnames.begin(), hostnames.end(), [&](Hostname& hostname) {
+				Optional<NetworkAddress> resolvedAddress = hostname.resolveBlocking();
+				if (resolvedAddress.present()) {
+					NetworkAddress address = resolvedAddress.get();
+					if (address.ip == currentPublicAddress.ip && address.port == currentPublicAddress.port) {
+						return address.isTLS() == currentPublicAddress.isTLS();
+					}
+				}
+				return true;
+			});
+		}
+		if (!matchCoordinatorsTls) {
 			fprintf(stderr,
 			        "ERROR: TLS state of public address %s does not match in coordinator list.\n",
 			        publicAddressStr.c_str());
@@ -1608,7 +1615,6 @@ private:
 				printSimTime = true;
 				break;
 
-#ifndef TLS_DISABLED
 			case TLSConfig::OPT_TLS_PLUGIN:
 				args.OptionArg();
 				break;
@@ -1627,7 +1633,6 @@ private:
 			case TLSConfig::OPT_TLS_VERIFY_PEERS:
 				tlsConfig.addVerifyPeers(args.OptionArg());
 				break;
-#endif
 			}
 		}
 

@@ -429,6 +429,25 @@ public class StackTester {
 				byte[] tenantName = (byte[])inst.popParam().join();
 				inst.push(TenantManagement.deleteTenant(inst.context.db, tenantName));
 			}
+			else if (op == StackOperation.TENANT_LIST) {
+				List<Object> params = inst.popParams(3).join();
+				byte[] begin = (byte[])params.get(0);
+				byte[] end = (byte[])params.get(1);
+				int limit = StackUtils.getInt(params.get(2));
+				CloseableAsyncIterator<KeyValue> tenantIter = TenantManagement.listTenants(inst.context.db, begin, end, limit);
+				List<byte[]> result = new ArrayList();
+				try {
+					while (tenantIter.hasNext()) {
+						KeyValue next = tenantIter.next();
+						String metadata = new String(next.getValue());
+						assert StackUtils.validTenantMetadata(metadata) : "Invalid Tenant Metadata";
+						result.add(next.getKey());
+					}
+				} finally {
+					tenantIter.close();
+				}
+				inst.push(Tuple.fromItems(result).pack());
+			}
 			else if (op == StackOperation.TENANT_SET_ACTIVE) {
 				byte[] tenantName = (byte[])inst.popParam().join();
 				inst.context.setTenant(Optional.of(tenantName));
@@ -436,7 +455,7 @@ public class StackTester {
 			else if (op == StackOperation.TENANT_CLEAR_ACTIVE) {
 				inst.context.setTenant(Optional.empty());
 			}
-			else if(op == StackOperation.UNIT_TESTS) {
+			else if (op == StackOperation.UNIT_TESTS) {
 				try {
 					inst.context.db.options().setLocationCacheSize(100001);
 					inst.context.db.run(tr -> {
@@ -514,7 +533,7 @@ public class StackTester {
 					throw new RuntimeException("Unit tests failed: " + e.getMessage());
 				}
 			}
-			else if(op == StackOperation.LOG_STACK) {
+			else if (op == StackOperation.LOG_STACK) {
 				List<Object> params = inst.popParams(1).join();
 				byte[] prefix = (byte[]) params.get(0);
 

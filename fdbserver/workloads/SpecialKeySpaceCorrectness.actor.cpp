@@ -957,9 +957,9 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				boost::split(
 				    process_addresses, coordinator_processes_key.get().toString(), [](char c) { return c == ','; });
 				ASSERT(process_addresses.size() == cs.coordinators().size() + cs.hostnames.size());
-				wait(cs.resolveHostnames());
 				// compare the coordinator process network addresses one by one
-				for (const auto& network_address : cs.coordinators()) {
+				std::vector<NetworkAddress> coordinators = wait(cs.tryResolveHostnames());
+				for (const auto& network_address : coordinators) {
 					ASSERT(std::find(process_addresses.begin(), process_addresses.end(), network_address.toString()) !=
 					       process_addresses.end());
 				}
@@ -1077,19 +1077,20 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 					Optional<Value> res = wait(tx->get(coordinatorsKey));
 					ASSERT(res.present()); // Otherwise, database is in a bad state
-					state ClusterConnectionString csNew(res.get().toString());
-					wait(csNew.resolveHostnames());
-					ASSERT(csNew.coordinators().size() == old_coordinators_processes.size() + 1);
+					ClusterConnectionString csNew(res.get().toString());
+					// verify the cluster decription
+					ASSERT(new_cluster_description == csNew.clusterKeyName().toString());
+					ASSERT(csNew.hostnames.size() + csNew.coordinators().size() ==
+					       old_coordinators_processes.size() + 1);
+					std::vector<NetworkAddress> newCoordinators = wait(csNew.tryResolveHostnames());
 					// verify the coordinators' addresses
-					for (const auto& network_address : csNew.coordinators()) {
+					for (const auto& network_address : newCoordinators) {
 						std::string address_str = network_address.toString();
 						ASSERT(std::find(old_coordinators_processes.begin(),
 						                 old_coordinators_processes.end(),
 						                 address_str) != old_coordinators_processes.end() ||
 						       new_coordinator_process == address_str);
 					}
-					// verify the cluster decription
-					ASSERT(new_cluster_description == csNew.clusterKeyName().toString());
 					tx->reset();
 				} catch (Error& e) {
 					wait(tx->onError(e));
