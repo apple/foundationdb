@@ -138,6 +138,7 @@ struct Resolver : ReferenceCounted<Resolver> {
 	LogSystemDiskQueueAdapter* logAdapter = nullptr;
 	Reference<ILogSystem> logSystem;
 	IKeyValueStore* txnStateStore = nullptr;
+	int localTLogCount = -1;
 
 	std::map<UID, Reference<StorageInfo>> storageCache;
 	KeyRangeMap<ServerCacheInfo> keyInfo; // keyrange -> all storage servers in all DCs for the keyrange
@@ -318,7 +319,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 		if (SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS) {
 			auto lockedKey = self->txnStateStore->readValue(databaseLockedKey).get();
 			isLocked = lockedKey.present() && lockedKey.get().size();
-			toCommit.reset(new LogPushData(self->logSystem));
+			toCommit.reset(new LogPushData(self->logSystem, self->localTLogCount));
 			resolverData.reset(new ResolverData(self->dbgid,
 			                                    self->logSystem,
 			                                    self->txnStateStore,
@@ -647,6 +648,7 @@ ACTOR Future<Void> resolverCore(ResolverInterface resolver,
 
 	// Initialize txnStateStore
 	self->logSystem = ILogSystem::fromServerDBInfo(resolver.id(), db->get(), false, addActor);
+	self->localTLogCount = db->get().logSystemConfig.numLogs();
 	state PromiseStream<Future<Void>> addActor;
 	state Future<Void> onError =
 	    transformError(actorCollection(addActor.getFuture()), broken_promise(), resolver_failed());
