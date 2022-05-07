@@ -105,6 +105,8 @@ set(FDBSERVER_SRCS
   RecoveryState.h
   RemoteIKeyValueStore.actor.h
   RemoteIKeyValueStore.actor.cpp
+  RESTKmsConnector.actor.h
+  RESTKmsConnector.actor.cpp
   ResolutionBalancer.actor.cpp
   ResolutionBalancer.actor.h
   Resolver.actor.cpp

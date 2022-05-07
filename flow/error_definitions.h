@@ -311,6 +311,8 @@ ERROR( encrypt_key_ttl_expired, 2703, "Expected encryption key TTL has expired")
 ERROR( encrypt_header_authtoken_mismatch, 2704, "Encryption header authentication token mismatch")
 ERROR( encrypt_update_cipher, 2705, "Attempt to update encryption cipher key")
 ERROR( encrypt_invalid_id, 2706, "Invalid encryption cipher details")
+ERROR( encrypt_keys_fetch_failed, 2707, "Encryption keys fetch from external KMS failed")
+ERROR( encrypt_invalid_kms_config, 2708, "Invalid encryption/kms configuration: discovery-url, validation-token, endpoint etc.")
 
 // 4xxx Internal errors (those that should be generated only by bugs) are decimal 4xxx
 ERROR( unknown_error, 4000, "An unknown error occurred" )  // C++ exception not of type Error
