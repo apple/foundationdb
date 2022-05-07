@@ -61,6 +61,7 @@ class TestSidecar(unittest.TestCase):
     def test_get_check_hash_no_found(self):
         r = requests.get(f"{self.server_url }/check_hash/foobar")
         self.assertEqual(r.status_code, 404)
+        self.assertRegex(r.text, "foobar not found")
 
     def test_get_check_hash(self):
         with open(os.path.join(self.mock_config.output_dir, "foobar"), "w") as f:
@@ -85,6 +86,7 @@ class TestSidecar(unittest.TestCase):
     def test_get_is_present_no_found(self):
         r = requests.get(f"{self.server_url }/is_present/foobar")
         self.assertEqual(r.status_code, 404)
+        self.assertRegex(r.text, "foobar not found")
 
     def test_get_is_present(self):
         with open(os.path.join(self.mock_config.output_dir, "foobar"), "w") as f:
@@ -102,7 +104,10 @@ class TestSidecar(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.text, "OK\n")
 
-    # TODO (johscheuer): test case default case.
+    def test_get_not_found(self):
+        r = requests.get(f"{self.server_url }/foobar")
+        self.assertEqual(r.status_code, 404)
+        self.assertRegex(r.text, "Path not found")
 
 
 # TODO(johscheuer): Add test cases for post requests

@@ -501,15 +501,16 @@ class SidecarHandler(BaseHTTPRequestHandler):
                 else:
                     self.send_error(404, f"{file_path} not found")
             elif self.path == "/ready":
-                self.send_text(ready())
+                self.send_text("OK")
             elif self.path == "/substitutions":
                 self.send_text(self.get_substitutions())
             else:
                 self.send_error(404, "Path not found")
         except RequestException as e:
             self.send_error(400, e.message)
+        except (ConnectionResetError, BrokenPipeError) as ex:
+            log.error(f"connection was reset {ex}")
         except Exception as ex:
-            print(ex)
             log.error(f"Error processing request {ex}", exc_info=True)
             self.send_error(500)
 
@@ -668,10 +669,6 @@ def copy_monitor_conf(config):
 
         os.replace(tmp_file.name, target_file)
 
-    return "OK"
-
-
-def ready():
     return "OK"
 
 
