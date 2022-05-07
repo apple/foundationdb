@@ -144,12 +144,27 @@ Value ThrottleApi::TagQuotaValue::toValue() const {
 
 ThrottleApi::TagQuotaValue ThrottleApi::TagQuotaValue::fromValue(ValueRef value) {
 	auto tuple = Tuple::unpack(value);
-	ASSERT_EQ(tuple.size(), 4);
+	if (tuple.size() != 4) {
+		throw invalid_throttle_quota_value();
+	}
 	TagQuotaValue result;
-	result.reservedReadQuota = tuple.getDouble(0);
-	result.totalReadQuota = tuple.getDouble(1);
-	result.reservedWriteQuota = tuple.getDouble(2);
-	result.totalWriteQuota = tuple.getDouble(3);
+	try {
+		result.reservedReadQuota = tuple.getDouble(0);
+		result.totalReadQuota = tuple.getDouble(1);
+		result.reservedWriteQuota = tuple.getDouble(2);
+		result.totalWriteQuota = tuple.getDouble(3);
+	} catch (Error& e) {
+		TraceEvent(SevWarnAlways, "TagQuotaValueFailedToDeserialize").error(e);
+		throw invalid_throttle_quota_value();
+	}
+	if (result.reservedReadQuota > result.totalReadQuota || result.reservedWriteQuota > result.totalWriteQuota) {
+		TraceEvent(SevWarnAlways, "TagQuotaValueInvalidQuotas")
+		    .detail("ReservedReadQuota", result.reservedReadQuota)
+		    .detail("TotalReadQuota", result.totalReadQuota)
+		    .detail("ReservedWriteQuota", result.reservedWriteQuota)
+		    .detail("TotalWriteQuota", result.totalWriteQuota);
+		throw invalid_throttle_quota_value();
+	}
 	return result;
 }
 
