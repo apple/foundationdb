@@ -2082,6 +2082,61 @@ private:
 template <class T>
 std::unordered_map<NetworkAddress, Reference<T>> FlowSingleton<T>::instanceMap;
 
+std::string demangle(const char* name);
+
+template <class T>
+class SimTimeoutQueue : public NotifiedQueue<T>::Queue {
+	using Parent = typename NotifiedQueue<T>::Queue;
+	std::string backtrace;
+	AsyncTrigger change;
+	Future<Void> timeoutFuture;
+
+	void addElement() override { change.trigger(); }
+	void removeElement() override { change.trigger(); }
+
+	ACTOR static Future<Void> observer(SimTimeoutQueue<T>* self) {
+		state Future<Void> timeout = Never();
+		state int queueSize = 0;
+		loop {
+			int newSize = self->size();
+			if (newSize == 0) {
+				timeout = Never();
+			} else if (newSize < queueSize) {
+				timeout = delay(240);
+			} else if (queueSize == 0 && newSize > 0) {
+				// first add
+				timeout = delay(240);
+			}
+			queueSize = newSize;
+			choose {
+				when(wait(timeout)) {
+					ASSERT(!self->empty());
+					TraceEvent(SevWarnAlways, "NotifiedQueueIsntConsumed")
+					    .detail("Timeout", 240)
+					    .detail("QueueSize", self->size())
+					    .detail("QueueOfType", demangle(typeid(T).name()))
+					    .detail("OriginalBacktrace", self->backtrace);
+					// we'll only report this once
+					return Void();
+				}
+				when(wait(self->change.onTrigger())) {}
+			}
+		}
+	}
+
+public:
+	SimTimeoutQueue() : backtrace(platform::get_backtrace()), timeoutFuture(observer(this)) {}
+};
+
+template <class T>
+typename NotifiedQueue<T>::Queue* NotifiedQueue<T>::Queue::create() {
+	if (!g_network->isSimulated()) {
+		return new NotifiedQueue<T>::Queue();
+	} else {
+		return new SimTimeoutQueue<T>();
+	}
+}
+
 #include "flow/unactorcompiler.h"
 
 #endif
