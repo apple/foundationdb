@@ -91,8 +91,7 @@ ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterfa
 	state AfterReturn guard(kvStore, kvsId);
 	state Promise<Void> onClosed;
 	TraceEvent(SevDebug, "RemoteKVStoreInitializing").detail("UID", kvsId);
-	wait(kvStore->init());
-	openReq.reply.send(ikvsInterface);
+	wait(cancellableForwardPromise(openReq.reply, tag(kvStore->init(), ikvsInterface)));
 	TraceEvent(SevInfo, "RemoteKVStoreInitialized").detail("IKVSInterfaceUID", kvsId);
 
 	loop {

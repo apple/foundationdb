@@ -53,7 +53,7 @@ public:
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, error_code);
+		serializer(ar, error_code, flags);
 	}
 
 	Error() : error_code(invalid_error_code), flags(0) {}
@@ -73,7 +73,7 @@ public:
 	Error asInjectedFault() const; // Returns an error with the same code() as this but isInjectedFault() is true
 private:
 	uint16_t error_code;
-	uint16_t flags;
+	uint8_t flags;
 
 	enum Flags { FLAG_INJECTED_FAULT = 1 };
 };
