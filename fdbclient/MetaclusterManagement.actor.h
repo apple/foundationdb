@@ -128,10 +128,10 @@ void updateClusterMetadataTransaction(Transaction tr,
 }
 
 ACTOR template <class Transaction>
-Future<Void> managementClusterRegisterClusterTransaction(Transaction tr,
-                                                         ClusterNameRef name,
-                                                         std::string connectionString,
-                                                         DataClusterEntry entry) {
+Future<Void> managementClusterRegister(Transaction tr,
+                                       ClusterNameRef name,
+                                       std::string connectionString,
+                                       DataClusterEntry entry) {
 	state Key dataClusterMetadataKey = name.withPrefix(dataClusterMetadataPrefix);
 	state Key dataClusterConnectionRecordKey = name.withPrefix(dataClusterConnectionRecordPrefix);
 
@@ -169,7 +169,7 @@ Future<Void> managementClusterRegisterClusterTransaction(Transaction tr,
 }
 
 ACTOR template <class Transaction>
-Future<Void> dataClusterRegisterClusterTransaction(Transaction tr, ClusterNameRef name) {
+Future<Void> dataClusterRegister(Transaction tr, ClusterNameRef name) {
 	state Future<std::map<TenantName, TenantMapEntry>> existingTenantsFuture =
 	    ManagementAPI::listTenantsTransaction(tr, ""_sr, "\xff\xff"_sr, 1);
 	state ThreadFuture<RangeResult> existingDataFuture = tr->getRange(normalKeys, 1);
@@ -209,12 +209,14 @@ Future<Void> registerClusterTransaction(Transaction tr,
 	// TODO: use the special key-space rather than running the logic ourselves
 
 	// registerTr->set("\xff\xff/metacluster/management/data_cluster/register"_sr, ""_sr);
-	wait(dataClusterRegisterClusterTransaction(registerTr, name));
+	wait(dataClusterRegister(registerTr, name));
 
 	// Once the data cluster is configured, we can add it to the metacluster
-	// tr->set(name.withPrefix("\xff\xff/metacluster/map/"_sr), connectionString);
-	// wait(safeThreadFutureToFuture(tr->commit()));
-	wait(managementClusterRegisterClusterTransaction(tr, name, connectionString, entry));
+	tr->set(name.withPrefix("\xff\xff/metacluster_internal/management_cluster/data_cluster/map/"_sr), connectionString);
+	tr->set(
+	    name.withPrefix(
+	        "\xff\xff/metacluster_internal/management_cluster/data_cluster/configure/capacity.num_tenant_groups/"_sr),
+	    format("%d", entry.capacity.numTenantGroups));
 	return Void();
 }
 
@@ -226,6 +228,7 @@ Future<Void> registerCluster(Reference<DB> db, ClusterName name, std::string con
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 
 			if (firstTry) {
 				Optional<DataClusterMetadata> metadata = wait(tryGetClusterTransaction(tr, name));

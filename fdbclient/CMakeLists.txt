@@ -85,6 +85,8 @@ set(FDBCLIENT_SRCS
   Metacluster.cpp
   Metacluster.h
   MetaclusterManagement.actor.h
+  MetaclusterInternalDataClusterSpecialKeys.actor.cpp
+  MetaclusterInternalManagementClusterSpecialKeys.actor.cpp
   MonitorLeader.actor.cpp
   MonitorLeader.h
   MultiVersionAssignmentVars.h
@@ -143,6 +145,7 @@ set(FDBCLIENT_SRCS
   TaskBucket.h
   Tenant.cpp
   Tenant.h
+  TenantSpecialKeys.actor.cpp
   TestKnobCollection.cpp
   TestKnobCollection.h
   ThreadSafeTransaction.cpp
