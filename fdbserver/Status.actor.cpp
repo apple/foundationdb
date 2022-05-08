@@ -1947,12 +1947,7 @@ static Future<std::vector<StorageServerStatusInfo>> readStorageInterfaceAndMetad
 			state std::vector<Future<Void>> futures(servers.size());
 			for (int i = 0; i < servers.size(); ++i) {
 				auto& info = servers[i];
-				futures[i] = fmap(
-				    [&info](Optional<StorageMetadataType> meta) -> Void {
-					    info.metadata = meta;
-					    return Void();
-				    },
-				    metadataMap.get(tr, servers[i].id()));
+				futures[i] = store(servers[i].metadata, metadataMap.get(tr, servers[i].id()));
 				// TraceEvent(SevDebug, "MetadataAppear", servers[i].id()).detail("Present", metadata.present());
 			}
 			wait(waitForAll(futures));
