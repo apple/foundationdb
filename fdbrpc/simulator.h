@@ -87,6 +87,7 @@ public:
 		UID uid;
 
 		ProtocolVersion protocolVersion;
+		bool excludeFromRestarts = false;
 
 		std::vector<ProcessInfo*> childs;
 
@@ -202,7 +203,7 @@ public:
 		// A map from filename to file handle for all open files on a machine
 		std::map<std::string, UnsafeWeakFutureReference<IAsyncFile>> openFiles;
 
-		std::set<std::string> deletingFiles;
+		std::set<std::string> deletingOrClosingFiles;
 		std::set<std::string> closingFiles;
 		Optional<Standalone<StringRef>> machineId;
 

@@ -35,7 +35,7 @@
  * compile-time configuration.
  */
 
-#if !defined(HAVE_OPENSSL) || defined(TLS_DISABLED)
+#if !defined(HAVE_OPENSSL)
 
 #include <string.h>
 

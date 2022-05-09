@@ -65,7 +65,6 @@ set(FDBCLIENT_SRCS
   GlobalConfig.actor.cpp
   GrvProxyInterface.h
   HighContentionPrefixAllocator.actor.h
-  HTTP.actor.cpp
   IClientApi.h
   IConfigTransaction.cpp
   IConfigTransaction.h
@@ -151,6 +150,7 @@ set(FDBCLIENT_SRCS
   VersionedMap.h
   VersionedMap.cpp
   VersionVector.h
+  VersionVector.cpp
   WellKnownEndpoints.h
   WriteMap.h
   json_spirit/json_spirit_error_position.h

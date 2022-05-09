@@ -132,7 +132,7 @@ func (multi MultiMap) MultiIsElement(trtr fdb.Transactor, index, value interface
 
 func main() {
 
-	fdb.MustAPIVersion(710)
+	fdb.MustAPIVersion(720)
 
 	db := fdb.MustOpenDefault()
 

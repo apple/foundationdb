@@ -29,6 +29,9 @@
 #include "fdbclient/Tenant.h"
 #include "fdbrpc/Stats.h"
 #include "fdbserver/Knobs.h"
+#include "fdbserver/LogSystem.h"
+#include "fdbserver/MasterInterface.h"
+#include "fdbserver/ResolverInterface.h"
 #include "fdbserver/LogSystemDiskQueueAdapter.h"
 #include "flow/IRandom.h"
 
@@ -69,6 +72,8 @@ struct ProxyStats {
 	LatencySample commitBatchingEmptyMessageRatio;
 
 	LatencySample commitBatchingWindowSize;
+
+	LatencySample computeLatency;
 
 	Future<Void> logger;
 
@@ -123,6 +128,10 @@ struct ProxyStats {
 	                             id,
 	                             SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
 	                             SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+	    computeLatency("ComputeLatency",
+	                   id,
+	                   SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+	                   SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
 	    maxComputeNS(0), minComputeNS(1e12),
 	    commitBatchQueuingDist(Histogram::getHistogram(LiteralStringRef("CommitProxy"),
 	                                                   LiteralStringRef("CommitBatchQueuing"),
@@ -193,8 +202,8 @@ struct ProxyCommitData {
 	NotifiedVersion latestLocalCommitBatchResolving;
 	NotifiedVersion latestLocalCommitBatchLogging;
 
-	RequestStream<GetReadVersionRequest> getConsistentReadVersion;
-	RequestStream<CommitTransactionRequest> commit;
+	PublicRequestStream<GetReadVersionRequest> getConsistentReadVersion;
+	PublicRequestStream<CommitTransactionRequest> commit;
 	Database cx;
 	Reference<AsyncVar<ServerDBInfo> const> db;
 	EventMetricHandle<SingleKeyMutation> singleKeyMutationEvent;
@@ -219,6 +228,7 @@ struct ProxyCommitData {
 	double lastResolverReset;
 
 	std::map<TenantName, TenantMapEntry> tenantMap;
+	int localTLogCount = -1;
 
 	// The tag related to a storage server rarely change, so we keep a vector of tags for each key range to be slightly
 	// more CPU efficient. When a tag related to a storage server does change, we empty out all of these vectors to
@@ -273,9 +283,9 @@ struct ProxyCommitData {
 
 	ProxyCommitData(UID dbgid,
 	                MasterInterface master,
-	                RequestStream<GetReadVersionRequest> getConsistentReadVersion,
+	                PublicRequestStream<GetReadVersionRequest> getConsistentReadVersion,
 	                Version recoveryTransactionVersion,
-	                RequestStream<CommitTransactionRequest> commit,
+	                PublicRequestStream<CommitTransactionRequest> commit,
 	                Reference<AsyncVar<ServerDBInfo> const> db,
 	                bool firstProxy)
 	  : dbgid(dbgid), commitBatchesMemBytesCount(0),

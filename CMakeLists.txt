@@ -23,7 +23,7 @@ else()
 endif()
 
 project(foundationdb
-  VERSION 7.1.0
+  VERSION 7.2.0
   DESCRIPTION "FoundationDB is a scalable, fault-tolerant, ordered key-value store with full ACID transactions."
   HOMEPAGE_URL "http://www.foundationdb.org/"
   LANGUAGES C CXX ASM)
@@ -172,6 +172,7 @@ endif()
 
 include(CompileBoost)
 include(GetMsgpack)
+add_subdirectory(contrib)
 add_subdirectory(flow)
 add_subdirectory(fdbrpc)
 add_subdirectory(fdbclient)
@@ -183,7 +184,6 @@ else()
   add_subdirectory(fdbservice)
 endif()
 add_subdirectory(fdbbackup)
-add_subdirectory(contrib)
 add_subdirectory(tests)
 add_subdirectory(flowbench EXCLUDE_FROM_ALL)
 if(WITH_PYTHON AND WITH_C_BINDING)

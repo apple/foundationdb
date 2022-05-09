@@ -32,8 +32,8 @@
 #include "flow/Hostname.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-ACTOR template <class Req>
-Future<REPLY_TYPE(Req)> retryBrokenPromise(RequestStream<Req> to, Req request) {
+ACTOR template <class Req, bool P>
+Future<REPLY_TYPE(Req)> retryBrokenPromise(RequestStream<Req, P> to, Req request) {
 	// Like to.getReply(request), except that a broken_promise exception results in retrying request immediately.
 	// Suitable for use with well known endpoints, which are likely to return to existence after the other process
 	// restarts. Not normally useful for ordinary endpoints, which conventionally are permanently destroyed after
@@ -52,8 +52,8 @@ Future<REPLY_TYPE(Req)> retryBrokenPromise(RequestStream<Req> to, Req request) {
 	}
 }
 
-ACTOR template <class Req>
-Future<REPLY_TYPE(Req)> retryBrokenPromise(RequestStream<Req> to, Req request, TaskPriority taskID) {
+ACTOR template <class Req, bool P>
+Future<REPLY_TYPE(Req)> retryBrokenPromise(RequestStream<Req, P> to, Req request, TaskPriority taskID) {
 	// Like to.getReply(request), except that a broken_promise exception results in retrying request immediately.
 	// Suitable for use with well known endpoints, which are likely to return to existence after the other process
 	// restarts. Not normally useful for ordinary endpoints, which conventionally are permanently destroyed after
@@ -73,10 +73,21 @@ Future<REPLY_TYPE(Req)> retryBrokenPromise(RequestStream<Req> to, Req request, T
 }
 
 ACTOR template <class Req>
-Future<ErrorOr<REPLY_TYPE(Req)>> tryGetReplyFromHostname(RequestStream<Req>* to,
-                                                         Req request,
-                                                         Hostname hostname,
-                                                         WellKnownEndpoints token) {
+Future<Void> tryInitializeRequestStream(RequestStream<Req>* stream, Hostname hostname, WellKnownEndpoints token) {
+	Optional<NetworkAddress> address = wait(hostname.resolve());
+	if (!address.present()) {
+		return Void();
+	}
+	if (stream == nullptr) {
+		stream = new RequestStream<Req>(Endpoint::wellKnown({ address.get() }, token));
+	} else {
+		*stream = RequestStream<Req>(Endpoint::wellKnown({ address.get() }, token));
+	}
+	return Void();
+}
+
+ACTOR template <class Req>
+Future<ErrorOr<REPLY_TYPE(Req)>> tryGetReplyFromHostname(Req request, Hostname hostname, WellKnownEndpoints token) {
 	// A wrapper of tryGetReply(request), except that the request is sent to an address resolved from a hostname.
 	// If resolving fails, return lookup_failed().
 	// Otherwise, return tryGetReply(request).
@@ -84,8 +95,8 @@ Future<ErrorOr<REPLY_TYPE(Req)>> tryGetReplyFromHostname(RequestStream<Req>* to,
 	if (!address.present()) {
 		return ErrorOr<REPLY_TYPE(Req)>(lookup_failed());
 	}
-	*to = RequestStream<Req>(Endpoint::wellKnown({ address.get() }, token));
-	ErrorOr<REPLY_TYPE(Req)> reply = wait(to->tryGetReply(request));
+	RequestStream<Req> to(Endpoint::wellKnown({ address.get() }, token));
+	state ErrorOr<REPLY_TYPE(Req)> reply = wait(to.tryGetReply(request));
 	if (reply.isError()) {
 		resetReply(request);
 		if (reply.getError().code() == error_code_request_maybe_delivered) {
@@ -98,8 +109,7 @@ Future<ErrorOr<REPLY_TYPE(Req)>> tryGetReplyFromHostname(RequestStream<Req>* to,
 }
 
 ACTOR template <class Req>
-Future<ErrorOr<REPLY_TYPE(Req)>> tryGetReplyFromHostname(RequestStream<Req>* to,
-                                                         Req request,
+Future<ErrorOr<REPLY_TYPE(Req)>> tryGetReplyFromHostname(Req request,
                                                          Hostname hostname,
                                                          WellKnownEndpoints token,
                                                          TaskPriority taskID) {
@@ -110,8 +120,8 @@ Future<ErrorOr<REPLY_TYPE(Req)>> tryGetReplyFromHostname(RequestStream<Req>* to,
 	if (!address.present()) {
 		return ErrorOr<REPLY_TYPE(Req)>(lookup_failed());
 	}
-	*to = RequestStream<Req>(Endpoint::wellKnown({ address.get() }, token));
-	ErrorOr<REPLY_TYPE(Req)> reply = wait(to->tryGetReply(request, taskID));
+	RequestStream<Req> to(Endpoint::wellKnown({ address.get() }, token));
+	state ErrorOr<REPLY_TYPE(Req)> reply = wait(to.tryGetReply(request, taskID));
 	if (reply.isError()) {
 		resetReply(request);
 		if (reply.getError().code() == error_code_request_maybe_delivered) {
@@ -124,21 +134,21 @@ Future<ErrorOr<REPLY_TYPE(Req)>> tryGetReplyFromHostname(RequestStream<Req>* to,
 }
 
 ACTOR template <class Req>
-Future<REPLY_TYPE(Req)> retryGetReplyFromHostname(RequestStream<Req>* to,
-                                                  Req request,
-                                                  Hostname hostname,
-                                                  WellKnownEndpoints token) {
+Future<REPLY_TYPE(Req)> retryGetReplyFromHostname(Req request, Hostname hostname, WellKnownEndpoints token) {
 	// Like tryGetReplyFromHostname, except that request_maybe_delivered results in re-resolving the hostname.
 	// Suitable for use with hostname, where RequestStream is NOT initialized yet.
 	// Not normally useful for endpoints initialized with NetworkAddress.
+	state double reconnetInterval = FLOW_KNOBS->HOSTNAME_RECONNECT_INIT_INTERVAL;
 	loop {
 		NetworkAddress address = wait(hostname.resolveWithRetry());
-		*to = RequestStream<Req>(Endpoint::wellKnown({ address }, token));
-		ErrorOr<REPLY_TYPE(Req)> reply = wait(to->tryGetReply(request));
+		RequestStream<Req> to(Endpoint::wellKnown({ address }, token));
+		state ErrorOr<REPLY_TYPE(Req)> reply = wait(to.tryGetReply(request));
 		if (reply.isError()) {
 			resetReply(request);
 			if (reply.getError().code() == error_code_request_maybe_delivered) {
 				// Connection failure.
+				wait(delay(reconnetInterval));
+				reconnetInterval = std::min(2 * reconnetInterval, FLOW_KNOBS->HOSTNAME_RECONNECT_MAX_INTERVAL);
 				hostname.resetToUnresolved();
 				INetworkConnections::net()->removeCachedDNS(hostname.host, hostname.service);
 			} else {
@@ -151,22 +161,24 @@ Future<REPLY_TYPE(Req)> retryGetReplyFromHostname(RequestStream<Req>* to,
 }
 
 ACTOR template <class Req>
-Future<REPLY_TYPE(Req)> retryGetReplyFromHostname(RequestStream<Req>* to,
-                                                  Req request,
+Future<REPLY_TYPE(Req)> retryGetReplyFromHostname(Req request,
                                                   Hostname hostname,
                                                   WellKnownEndpoints token,
                                                   TaskPriority taskID) {
 	// Like tryGetReplyFromHostname, except that request_maybe_delivered results in re-resolving the hostname.
 	// Suitable for use with hostname, where RequestStream is NOT initialized yet.
 	// Not normally useful for endpoints initialized with NetworkAddress.
+	state double reconnetInterval = FLOW_KNOBS->HOSTNAME_RECONNECT_INIT_INTERVAL;
 	loop {
 		NetworkAddress address = wait(hostname.resolveWithRetry());
-		*to = RequestStream<Req>(Endpoint::wellKnown({ address }, token));
-		ErrorOr<REPLY_TYPE(Req)> reply = wait(to->tryGetReply(request, taskID));
+		RequestStream<Req> to(Endpoint::wellKnown({ address }, token));
+		state ErrorOr<REPLY_TYPE(Req)> reply = wait(to.tryGetReply(request, taskID));
 		if (reply.isError()) {
 			resetReply(request);
 			if (reply.getError().code() == error_code_request_maybe_delivered) {
 				// Connection failure.
+				wait(delay(reconnetInterval));
+				reconnetInterval = std::min(2 * reconnetInterval, FLOW_KNOBS->HOSTNAME_RECONNECT_MAX_INTERVAL);
 				hostname.resetToUnresolved();
 				INetworkConnections::net()->removeCachedDNS(hostname.host, hostname.service);
 			} else {
@@ -350,7 +362,11 @@ Future<ErrorOr<X>> waitValueOrSignal(Future<X> value,
 		try {
 			choose {
 				when(X x = wait(value)) { return x; }
-				when(wait(signal)) { return ErrorOr<X>(request_maybe_delivered()); }
+				when(wait(signal)) {
+					return ErrorOr<X>(IFailureMonitor::failureMonitor().knownUnauthorized(endpoint)
+					                      ? unauthorized_attempt()
+					                      : request_maybe_delivered());
+				}
 			}
 		} catch (Error& e) {
 			if (signal.isError()) {
@@ -373,12 +389,31 @@ Future<ErrorOr<X>> waitValueOrSignal(Future<X> value,
 
 ACTOR template <class T>
 Future<T> sendCanceler(ReplyPromise<T> reply, ReliablePacket* send, Endpoint endpoint) {
+	state bool didCancelReliable = false;
 	try {
-		T t = wait(reply.getFuture());
-		FlowTransport::transport().cancelReliable(send);
-		return t;
+		loop {
+			if (IFailureMonitor::failureMonitor().permanentlyFailed(endpoint)) {
+				FlowTransport::transport().cancelReliable(send);
+				didCancelReliable = true;
+				if (IFailureMonitor::failureMonitor().knownUnauthorized(endpoint)) {
+					throw unauthorized_attempt();
+				} else {
+					wait(Never());
+				}
+			}
+			choose {
+				when(T t = wait(reply.getFuture())) {
+					FlowTransport::transport().cancelReliable(send);
+					didCancelReliable = true;
+					return t;
+				}
+				when(wait(IFailureMonitor::failureMonitor().onStateChanged(endpoint))) {}
+			}
+		}
 	} catch (Error& e) {
-		FlowTransport::transport().cancelReliable(send);
+		if (!didCancelReliable) {
+			FlowTransport::transport().cancelReliable(send);
+		}
 		if (e.code() == error_code_broken_promise) {
 			IFailureMonitor::failureMonitor().endpointNotFound(endpoint);
 		}

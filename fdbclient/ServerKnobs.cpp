@@ -161,7 +161,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( DATA_DISTRIBUTION_FAILURE_REACTION_TIME,              60.0 ); if( randomize && BUGGIFY ) DATA_DISTRIBUTION_FAILURE_REACTION_TIME = 1.0;
 	bool buggifySmallShards = randomize && BUGGIFY;
 	bool simulationMediumShards = !buggifySmallShards && isSimulated && randomize && !BUGGIFY; // prefer smaller shards in simulation
-	init( MIN_SHARD_BYTES,                                  50000000 ); if( buggifySmallShards ) MIN_SHARD_BYTES = 40000; if (simulationMediumShards) MIN_SHARD_BYTES = 200000; //FIXME: data distribution tracker (specifically StorageMetrics) relies on this number being larger than the maximum size of a key value pair
+	// FIXME: increase this even more eventually
+	init( MIN_SHARD_BYTES,                                  10000000 ); if( buggifySmallShards ) MIN_SHARD_BYTES = 40000; if (simulationMediumShards) MIN_SHARD_BYTES = 200000; //FIXME: data distribution tracker (specifically StorageMetrics) relies on this number being larger than the maximum size of a key value pair
 	init( SHARD_BYTES_RATIO,                                       4 );
 	init( SHARD_BYTES_PER_SQRT_BYTES,                             45 ); if( buggifySmallShards ) SHARD_BYTES_PER_SQRT_BYTES = 0;//Approximately 10000 bytes per shard
 	init( MAX_SHARD_BYTES,                                 500000000 );
@@ -381,7 +382,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( DEFAULT_FDB_ROCKSDB_COLUMN_FAMILY,                    "fdb");
 
 	init( ROCKSDB_PERFCONTEXT_ENABLE,                          false ); if( randomize && BUGGIFY ) ROCKSDB_PERFCONTEXT_ENABLE = deterministicRandom()->coinflip() ? false : true;
-	init( ROCKSDB_PERFCONTEXT_SAMPLE_RATE, 					  0.0001 );
+	init( ROCKSDB_PERFCONTEXT_SAMPLE_RATE,                    0.0001 );
 	init( ROCKSDB_MAX_SUBCOMPACTIONS,                              2 );
 	init( ROCKSDB_SOFT_PENDING_COMPACT_BYTES_LIMIT,      64000000000 ); // 64GB, Rocksdb option, Writes will slow down.
 	init( ROCKSDB_HARD_PENDING_COMPACT_BYTES_LIMIT,     100000000000 ); // 100GB, Rocksdb option, Writes will stall.
@@ -393,6 +394,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_CAN_COMMIT_DELAY_TIMES_ON_OVERLOAD,              5 );
 	init( ROCKSDB_COMPACTION_READAHEAD_SIZE,                   32768 ); // 32 KB, performs bigger reads when doing compaction.
 	init( ROCKSDB_BLOCK_SIZE,                                  32768 ); // 32 KB, size of the block in rocksdb cache.
+ 	init( ENABLE_SHARDED_ROCKSDB,                              false );
 
 	// Leader election
 	bool longLeaderElection = randomize && BUGGIFY;
@@ -449,6 +451,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( MAX_COMMIT_UPDATES,                                    2000 ); if( randomize && BUGGIFY ) MAX_COMMIT_UPDATES = 1;
 	init( MAX_PROXY_COMPUTE,                                      2.0 );
 	init( MAX_COMPUTE_PER_OPERATION,                              0.1 );
+	init( MAX_COMPUTE_DURATION_LOG_CUTOFF,                       0.05 );
 	init( PROXY_COMPUTE_BUCKETS,                                20000 );
 	init( PROXY_COMPUTE_GROWTH_RATE,                             0.01 );
 	init( TXN_STATE_SEND_AMOUNT,                                    4 );
@@ -540,6 +543,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( CC_ENABLE_ENTIRE_SATELLITE_MONITORING,               false );
 	init( CC_SATELLITE_DEGRADATION_MIN_COMPLAINER,                 3 );
 	init( CC_SATELLITE_DEGRADATION_MIN_BAD_SERVER,                 3 );
+	init( CC_THROTTLE_SINGLETON_RERECRUIT_INTERVAL,              0.5 );
 
 	init( INCOMPATIBLE_PEERS_LOGGING_INTERVAL,                   600 ); if( randomize && BUGGIFY ) INCOMPATIBLE_PEERS_LOGGING_INTERVAL = 60.0;
 	init( EXPECTED_MASTER_FITNESS,            ProcessClass::UnsetFit );
@@ -852,6 +856,10 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
     // encrypt key proxy
     init( ENABLE_ENCRYPTION,                                   false );
     init( ENCRYPTION_MODE,                              "AES-256-CTR");
+    init( SIM_KMS_MAX_KEYS,                                      4096);
+
+    // KMS connector type
+    init( KMS_CONNECTOR_TYPE,                      "RESTKmsConnector");
 
 	// Blob granlues
 	init( BG_URL,               isSimulated ? "file://fdbblob/" : "" ); // TODO: store in system key space or something, eventually
@@ -877,6 +885,24 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 
 	init( BGCC_TIMEOUT,                   isSimulated ? 10.0 : 120.0 );
 	init( BGCC_MIN_INTERVAL,                isSimulated ? 1.0 : 10.0 );
+
+	// HTTP KMS Connector
+	init( REST_KMS_CONNECTOR_KMS_DISCOVERY_URL_MODE,           "file");
+	init( REST_KMS_CONNECTOR_VALIDATION_TOKEN_MODE,            "file");
+	init( REST_KMS_CONNECTOR_VALIDATION_TOKEN_MAX_SIZE,          1024);
+	init( REST_KMS_CONNECTOR_VALIDATION_TOKENS_MAX_PAYLOAD_SIZE, 10 * 1024);
+	init( REST_KMS_CONNECTOR_REFRESH_KMS_URLS,                   true);
+	init( REST_KMS_CONNECTOR_REFRESH_KMS_URLS_INTERVAL_SEC,       600);
+	// Below KMS configurations are responsible for:
+	// Discovering KMS URLs, fetch encryption keys endpoint and validation token details.
+	// Configurations are expected to be passed as command-line arguments.
+	// NOTE: Care must be taken when attempting to update below configurations for a up/running FDB cluster.
+	init( REST_KMS_CONNECTOR_DISCOVER_KMS_URL_FILE,                "");
+	init( REST_KMS_CONNECTOR_GET_ENCRYPTION_KEYS_ENDPOINT,         "");
+	// Details to fetch validation token from a localhost file
+	// acceptable format: "<token_name1>#<absolute_file_path1>,<token_name2>#<absolute_file_path2>,.."
+	// NOTE: 'token-name" can NOT contain '#' character
+	init( REST_KMS_CONNECTOR_VALIDATION_TOKEN_DETAILS,             "");
 
 	// clang-format on
 

@@ -507,7 +507,7 @@ Future<Version> TagPartitionedLogSystem::push(Version prevVersion,
                                               Version knownCommittedVersion,
                                               Version minKnownCommittedVersion,
                                               LogPushData& data,
-                                              SpanID const& spanContext,
+                                              SpanContext const& spanContext,
                                               Optional<UID> debugID,
                                               Optional<std::unordered_map<uint16_t, Version>> tpcvMap) {
 	// FIXME: Randomize request order as in LegacyLogSystem?
@@ -1908,7 +1908,7 @@ Optional<std::tuple<Version, Version, std::vector<TLogLockResult>>> TagPartition
 		int absent = logSet->logServers.size() - results.size();
 		int safe_range_begin = logSet->tLogWriteAntiQuorum;
 		int new_safe_range_begin = std::min(logSet->tLogWriteAntiQuorum, (int)(results.size() - 1));
-		int safe_range_end = logSet->tLogReplicationFactor - absent;
+		int safe_range_end = std::max(logSet->tLogReplicationFactor - absent, 1);
 
 		if (!lastEnd.present() || ((safe_range_end > 0) && (safe_range_end - 1 < results.size()) &&
 		                           results[safe_range_end - 1].end < lastEnd.get())) {
