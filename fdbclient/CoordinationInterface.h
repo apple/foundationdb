@@ -251,9 +251,9 @@ struct OpenDatabaseCoordRequest {
 		           traceLogGroup,
 		           knownClientInfoID,
 		           clusterKey,
-		           hostnames,
 		           coordinators,
-		           reply);
+		           reply,
+		           hostnames);
 	}
 };
 

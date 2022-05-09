@@ -37,8 +37,6 @@
 #include "flow/Knobs.h"
 #include "flow/flow.h"
 
-#ifndef TLS_DISABLED
-
 #if defined(HAVE_WOLFSSL)
 #include <wolfssl/options.h>
 #endif
@@ -72,7 +70,6 @@ struct Criteria {
 		return criteria == c.criteria && match_type == c.match_type && location == c.location;
 	}
 };
-#endif
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -204,7 +201,6 @@ private:
 	TLSEndpointType endpointType = TLSEndpointType::UNSET;
 };
 
-#ifndef TLS_DISABLED
 namespace boost {
 namespace asio {
 namespace ssl {
@@ -216,7 +212,6 @@ void ConfigureSSLContext(
     const LoadedTLSConfig& loaded,
     boost::asio::ssl::context* context,
     std::function<void()> onPolicyFailure = []() {});
-#endif
 
 class TLSPolicy : ReferenceCounted<TLSPolicy> {
 public:
@@ -226,7 +221,6 @@ public:
 	virtual void addref() { ReferenceCounted<TLSPolicy>::addref(); }
 	virtual void delref() { ReferenceCounted<TLSPolicy>::delref(); }
 
-#ifndef TLS_DISABLED
 	static std::string ErrorString(boost::system::error_code e);
 
 	void set_verify_peers(std::vector<std::string> verify_peers);
@@ -248,7 +242,6 @@ public:
 	};
 
 	std::vector<Rule> rules;
-#endif
 	bool is_client;
 };
 
@@ -264,8 +257,9 @@ public:
 	    { TLSConfig::OPT_TLS_CERTIFICATES, TLS_CERTIFICATE_FILE_FLAG, SO_REQ_SEP },                                    \
 	    { TLSConfig::OPT_TLS_KEY, TLS_KEY_FILE_FLAG, SO_REQ_SEP },                                                     \
 	    { TLSConfig::OPT_TLS_VERIFY_PEERS, TLS_VERIFY_PEERS_FLAG, SO_REQ_SEP },                                        \
-	    { TLSConfig::OPT_TLS_PASSWORD, TLS_PASSWORD_FLAG, SO_REQ_SEP },                                                \
-	    { TLSConfig::OPT_TLS_CA_FILE, TLS_CA_FILE_FLAG, SO_REQ_SEP },
+	    { TLSConfig::OPT_TLS_PASSWORD, TLS_PASSWORD_FLAG, SO_REQ_SEP }, {                                              \
+		TLSConfig::OPT_TLS_CA_FILE, TLS_CA_FILE_FLAG, SO_REQ_SEP                                                       \
+	}
 
 #define TLS_HELP                                                                                                       \
 	"  " TLS_CERTIFICATE_FILE_FLAG " CERTFILE\n"                                                                       \

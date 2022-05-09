@@ -514,8 +514,16 @@ class Server(BaseHTTPRequestHandler):
                 return
             if self.path.startswith("/check_hash/"):
                 try:
-                    self.send_text(check_hash(self.path[12:]), add_newline=False)
+                    self.send_text(
+                        check_hash(os.path.relpath(self.path, "/check_hash")), add_newline=False
+                    )
                 except FileNotFoundError:
+                    self.send_error(404, "Path not found")
+                    self.end_headers()
+            if self.path.startswith("/is_present/"):
+                if is_present(os.path.relpath(self.path, "/is_present")):
+                    self.send_text("OK")
+                else:
                     self.send_error(404, "Path not found")
                     self.end_headers()
             elif self.path == "/ready":
@@ -593,6 +601,10 @@ def check_hash(filename):
         m = hashlib.sha256()
         m.update(contents.read())
         return m.hexdigest()
+
+
+def is_present(filename):
+    return os.path.exists(os.path.join(Config.shared().output_dir, filename))
 
 
 def copy_files():
