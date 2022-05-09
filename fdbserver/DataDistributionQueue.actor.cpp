@@ -1549,7 +1549,7 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
 	// randomly choose topK shards
 	int topK = std::min(int(0.1 * shards.size()), 10);
 	state Future<HealthMetrics> healthMetrics = self->cx->getHealthMetrics(true);
-	state GetTopKMetricsRequest req(shards, topK, (srcLoad - destLoad) / 3.0);
+	state GetTopKMetricsRequest req(shards, topK, (srcLoad - destLoad) / 10.0); // 1/(5 * 2)
 	req.comparator = [](const StorageMetrics& a, const StorageMetrics& b) {
 		return a.bytesReadPerKSecond / std::max(a.bytes * 1.0, 1.0 * SERVER_KNOBS->MIN_SHARD_BYTES) >
 		       b.bytesReadPerKSecond / std::max(b.bytes * 1.0, 1.0 * SERVER_KNOBS->MIN_SHARD_BYTES);
