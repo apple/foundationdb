@@ -25,9 +25,12 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
 {
    "cluster":{
       "storage_wiggler": {
+         "error": "some error description",
          "wiggle_server_ids":["0ccb4e0feddb55"],
          "wiggle_server_addresses": ["127.0.0.1"],
          "primary": {
+            "state": {"$enum":["running", "paused", "unknown"]},
+            "last_state_change_timestamp": 1648857905.123,
             "last_round_start_datetime": "2022-04-02 00:05:05.123 +0000",
             "last_round_start_timestamp": 1648857905.123,
             "last_round_finish_datetime": "1970-01-01 00:00:00.000 +0000",
@@ -42,6 +45,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
             "finished_wiggle": 1
          },
          "remote": {
+            "state": {"$enum":["running", "paused", "unknown"]},
+            "last_state_change_timestamp": 1648857905.123,
             "last_round_start_datetime": "2022-04-02 00:05:05.123 +0000",
             "last_round_start_timestamp": 1648857905.123,
             "last_round_finish_datetime": "1970-01-01 00:00:00.000 +0000",
