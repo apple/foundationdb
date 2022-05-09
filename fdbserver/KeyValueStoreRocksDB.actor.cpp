@@ -1938,7 +1938,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				    .detail("Dir", dir);
 			}
 		} else if (checkpoint.format == RocksDB) {
-			std::cout << "3" << std::endl;
 			throw not_implemented();
 		} else {
 			throw internal_error();
@@ -1982,12 +1981,11 @@ void RocksDBKeyValueStore::Writer::action(CheckpointAction& a) {
 
 	// TODO: set the range as the actual shard range.
 	CheckpointMetaData res(version, a.request.range, a.request.format, a.request.checkpointID);
-	const std::string& checkpointDir = a.request.checkpointDir;
+	const std::string& checkpointDir = abspath(a.request.checkpointDir);
 
 	if (a.request.format == RocksDBColumnFamily) {
 		rocksdb::ExportImportFilesMetaData* pMetadata;
 		platform::eraseDirectoryRecursive(checkpointDir);
-		const std::string cwd = platform::getWorkingDirectory() + "/";
 		s = checkpoint->ExportColumnFamily(cf, checkpointDir, &pMetadata);
 		if (!s.ok()) {
 			logRocksDBError(s, "ExportColumnFamily");

@@ -44,15 +44,10 @@
 
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
 // Enforcing rocksdb version to be 6.22.1 or greater.
-static_assert(ROCKSDB_MAJOR >= 6, "Unsupported rocksdb version. Update the rocksdb to 6.22.1 version");
-static_assert(ROCKSDB_MAJOR == 6 ? ROCKSDB_MINOR >= 22 : true,
-              "Unsupported rocksdb version. Update the rocksdb to 6.22.1 version");
-static_assert((ROCKSDB_MAJOR == 6 && ROCKSDB_MINOR == 22) ? ROCKSDB_PATCH >= 1 : true,
-              "Unsupported rocksdb version. Update the rocksdb to 6.22.1 version");
-#endif // SSD_ROCKSDB_EXPERIMENTAL
+static_assert(ROCKSDB_MAJOR == 6 && ROCKSDB_MINOR >= 22 && ROCKSDB_PATCH >= 1,
+              "Unsupported rocksdb version. Update the rocksdb to at least 6.22.1 version");
 
 namespace {
-#ifdef SSD_ROCKSDB_EXPERIMENTAL
 
 using DB = rocksdb::DB*;
 using CF = rocksdb::ColumnFamilyHandle*;
@@ -221,6 +216,7 @@ RocksDBCheckpointReader::Reader::Reader(DB& db) : db(db), cf(nullptr) {
 		readRangeTimeout = SERVER_KNOBS->ROCKSDB_READ_RANGE_TIMEOUT;
 	}
 }
+
 void RocksDBCheckpointReader::Reader::action(RocksDBCheckpointReader::Reader::OpenAction& a) {
 	ASSERT(cf == nullptr);
 
@@ -324,7 +320,7 @@ void RocksDBCheckpointReader::Reader::action(RocksDBCheckpointReader::Reader::Re
 		    .detail("Error", "Read range request timedout")
 		    .detail("Method", "ReadRangeAction")
 		    .detail("Timeout value", readRangeTimeout);
-		a.result.sendError(transaction_too_old());
+		a.result.sendError(timed_out());
 		return;
 	}
 
@@ -334,6 +330,7 @@ void RocksDBCheckpointReader::Reader::action(RocksDBCheckpointReader::Reader::Re
 		return;
 	}
 
+	// For now, only forward scan is supported.
 	ASSERT(a.rowLimit > 0);
 
 	int accumulatedBytes = 0;
@@ -393,7 +390,6 @@ ACTOR Future<Void> RocksDBCheckpointReader::doClose(RocksDBCheckpointReader* sel
 
 	return Void();
 }
-#endif // SSD_ROCKSDB_EXPERIMENTAL
 
 // RocksDBCFCheckpointReader reads an exported RocksDB Column Family checkpoint, and returns the serialized
 // checkpoint via nextChunk.
@@ -582,7 +578,6 @@ ACTOR Future<Void> fetchCheckpointFile(Database cx,
 	}
 }
 
-#ifdef SSD_ROCKSDB_EXPERIMENTAL
 // TODO: Return when a file exceeds a limit.
 ACTOR Future<Void> fetchCheckpointRange(Database cx,
                                         std::shared_ptr<CheckpointMetaData> metaData,
@@ -732,11 +727,9 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
 
 	return Void();
 }
-#endif // SSD_ROCKSDB_EXPERIMENTAL
 
 } // namespace
 
-#ifdef SSD_ROCKSDB_EXPERIMENTAL
 ACTOR Future<CheckpointMetaData> fetchRocksDBCheckpoint(Database cx,
                                                         CheckpointMetaData initialState,
                                                         std::string dir,
@@ -768,17 +761,7 @@ ACTOR Future<CheckpointMetaData> fetchRocksDBCheckpoint(Database cx,
 
 	return *metaData;
 }
-#else
-ACTOR Future<CheckpointMetaData> fetchRocksDBCheckpoint(Database cx,
-                                                        CheckpointMetaData initialState,
-                                                        std::string dir,
-                                                        std::function<Future<Void>(const CheckpointMetaData&)> cFun) {
-	wait(delay(0));
-	return initialState;
-}
-#endif // SSD_ROCKSDB_EXPERIMENTAL
 
-#ifdef SSD_ROCKSDB_EXPERIMENTAL
 ACTOR Future<Void> deleteRocksCheckpoint(CheckpointMetaData checkpoint) {
 	state CheckpointFormat format = checkpoint.getFormat();
 	state std::unordered_set<std::string> dirs;
@@ -814,6 +797,14 @@ ACTOR Future<Void> deleteRocksCheckpoint(CheckpointMetaData checkpoint) {
 	return Void();
 }
 #else
+ACTOR Future<CheckpointMetaData> fetchRocksDBCheckpoint(Database cx,
+                                                        CheckpointMetaData initialState,
+                                                        std::string dir,
+                                                        std::function<Future<Void>(const CheckpointMetaData&)> cFun) {
+	wait(delay(0));
+	return initialState;
+}
+
 ACTOR Future<Void> deleteRocksCheckpoint(CheckpointMetaData checkpoint) {
 	wait(delay(0));
 	return Void();
@@ -825,6 +816,7 @@ int64_t getTotalFetchedBytes(const std::vector<CheckpointMetaData>& checkpoints)
 	for (const auto& checkpoint : checkpoints) {
 		const CheckpointFormat format = checkpoint.getFormat();
 		if (format == RocksDBColumnFamily) {
+			// TODO: Returns the checkpoint size of a RocksDB Column Family.
 		} else if (format == RocksDB) {
 			auto rcp = getRocksCheckpoint(checkpoint);
 			for (const auto& file : rcp.fetchedFiles) {

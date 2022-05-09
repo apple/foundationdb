@@ -71,18 +71,19 @@ struct SSCheckpointWorkload : TestWorkload {
 		state Key key = "TestKey"_sr;
 		state Key endKey = "TestKey0"_sr;
 		state Value oldValue = "TestValue"_sr;
+		state KeyRange testRange = KeyRangeRef(key, endKey);
 
 		int ignore = wait(setDDMode(cx, 0));
 		state Version version = wait(self->writeAndVerify(self, cx, key, oldValue));
 
 		// Create checkpoint.
 		state Transaction tr(cx);
-		state CheckpointFormat format = deterministicRandom()->random01() < 0.5 ? RocksDBColumnFamily : RocksDB;
+		state CheckpointFormat format = deterministicRandom()->coinflip() ? RocksDBColumnFamily : RocksDB;
 		loop {
 			try {
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				wait(createCheckpoint(&tr, KeyRangeRef(key, endKey), format));
+				wait(createCheckpoint(&tr, testRange, format));
 				wait(tr.commit());
 				version = tr.getCommittedVersion();
 				break;
@@ -91,20 +92,18 @@ struct SSCheckpointWorkload : TestWorkload {
 			}
 		}
 
-		TraceEvent("TestCheckpointCreated")
-		    .detail("Range", KeyRangeRef(key, endKey).toString())
-		    .detail("Version", version);
+		TraceEvent("TestCheckpointCreated").detail("Range", testRange).detail("Version", version);
 
 		// Fetch checkpoint meta data.
 		loop {
 			try {
 				state std::vector<CheckpointMetaData> records =
-				    wait(getCheckpointMetaData(cx, KeyRangeRef(key, endKey), version, format));
+				    wait(getCheckpointMetaData(cx, testRange, version, format));
 				break;
 			} catch (Error& e) {
 				TraceEvent("TestFetchCheckpointMetadataError")
 				    .errorUnsuppressed(e)
-				    .detail("Range", KeyRangeRef(key, endKey).toString())
+				    .detail("Range", testRange)
 				    .detail("Version", version);
 
 				// The checkpoint was just created, we don't expect this error.
@@ -113,7 +112,7 @@ struct SSCheckpointWorkload : TestWorkload {
 		}
 
 		TraceEvent("TestCheckpointFetched")
-		    .detail("Range", KeyRangeRef(key, endKey).toString())
+		    .detail("Range", testRange)
 		    .detail("Version", version)
 		    .detail("Checkpoints", describe(records));
 
@@ -170,10 +169,10 @@ struct SSCheckpointWorkload : TestWorkload {
 			}
 		}
 
-		for (i = 0; i < res.size(); ++i) {
-			Optional<Value> value = wait(kvStore->readValue(res[i].key));
-			ASSERT(value.present());
-			ASSERT(value.get() == res[i].value);
+		RangeResult kvRange = wait(kvStore->readRange(testRange));
+		ASSERT(res.size() == kvRange.size());
+		for (int i = 0; i < res.size(); ++i) {
+			ASSERT(res[i] == kvRange[i]);
 		}
 
 		int ignore = wait(setDDMode(cx, 1));
