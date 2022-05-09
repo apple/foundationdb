@@ -1960,7 +1960,7 @@ ACTOR Future<Void> fetchCheckpointKeyValuesQ(StorageServer* self, FetchCheckpoin
 
 	req.reply.setByteLimit(SERVER_KNOBS->CHECKPOINT_TRANSFER_BLOCK_BYTES);
 
-	// Returns error is the checkpoint cannot be found.
+	// Returns error if the checkpoint cannot be found.
 	const auto it = self->checkpoints.find(req.checkpointID);
 	if (it == self->checkpoints.end()) {
 		req.reply.sendError(checkpoint_not_found());
@@ -1978,11 +1978,11 @@ ACTOR Future<Void> fetchCheckpointKeyValuesQ(StorageServer* self, FetchCheckpoin
 			if (!res.empty()) {
 				TraceEvent(SevDebug, "FetchCheckpontKeyValuesReadRange", self->thisServerID)
 				    .detail("CheckpointID", req.checkpointID)
-				    .detail("Begin", res.front().key)
-				    .detail("End", res.back().key)
+				    .detail("FirstReturnedKey", res.front().key)
+				    .detail("LastReturnedKey", res.back().key)
 				    .detail("Size", res.size());
 			} else {
-				TraceEvent(SevWarn, "FetchCheckpontKeyValuesEmptyRange", self->thisServerID)
+				TraceEvent(SevInfo, "FetchCheckpontKeyValuesEmptyRange", self->thisServerID)
 				    .detail("CheckpointID", req.checkpointID);
 			}
 
@@ -7636,10 +7636,17 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		debug_advanceMinCommittedVersion(data->thisServerID, newOldestVersion);
 
 		if (requireCheckpoint) {
+			// `pendingCheckpoints` is a queue of checkpoint requests ordered by their versoins, and
+			// `newOldestVersion` is chosen such that it is no larger than the smallest pending checkpoing
+			// version. When the exact desired checkpoint version is committed, updateStorage() is blocked
+			// and a checkpoint will be created at that version from the underlying storage engine.
+			// Note a pending checkpoint is only dequeued after the corresponding checkpoint is created
+			// successfully.
 			TraceEvent(SevDebug, "CheckpointVersionDurable", data->thisServerID)
 			    .detail("NewDurableVersion", newOldestVersion)
 			    .detail("DesiredVersion", desiredVersion)
 			    .detail("SmallestCheckPointVersion", data->pendingCheckpoints.begin()->first);
+			// newOldestVersion could be smaller than the desired version due to byte limit.
 			ASSERT(newOldestVersion <= data->pendingCheckpoints.begin()->first);
 			if (newOldestVersion == data->pendingCheckpoints.begin()->first) {
 				std::vector<Future<Void>> createCheckpoints;
@@ -7648,6 +7655,8 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 					createCheckpoints.push_back(createCheckpoint(data, data->pendingCheckpoints.begin()->second[idx]));
 				}
 				wait(waitForAll(createCheckpoints));
+				// Erase the pending checkpoint after the checkpoint has been created successfully.
+				ASSERT(newOldestVersion == data->pendingCheckpoints.begin()->first);
 				data->pendingCheckpoints.erase(data->pendingCheckpoints.begin());
 			}
 			requireCheckpoint = false;
