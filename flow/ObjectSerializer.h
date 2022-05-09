@@ -247,11 +247,23 @@ public:
 		return Standalone<StringRef>(toStringRef(), arena);
 	}
 
+	StringRef toString(Arena& arena) const {
+		ASSERT(!customAllocator);
+		return StringRef(arena, toStringRef());
+	}
+
 	template <class Item, class VersionOptions>
 	static Standalone<StringRef> toValue(Item const& item, VersionOptions vo) {
 		ObjectWriter writer(vo);
 		writer.serialize(item);
 		return writer.toString();
+	}
+
+	template <class Item, class VersionOptions>
+	static StringRef toValue(Item const& item, VersionOptions vo, Arena& arena) {
+		ObjectWriter writer(vo);
+		writer.serialize(item);
+		return writer.toString(arena);
 	}
 
 	ProtocolVersion protocolVersion() const { return mProtocolVersion; }

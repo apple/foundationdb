@@ -33,10 +33,10 @@
 
 namespace fdb_cli {
 
-Optional<std::pair<Optional<std::string>, Optional<DataClusterEntry>>>
+Optional<std::pair<Optional<ClusterConnectionString>, Optional<DataClusterEntry>>>
 parseClusterConfiguration(std::vector<StringRef> const& tokens, DataClusterEntry const& defaults, int startIndex) {
 	Optional<DataClusterEntry> entry;
-	Optional<std::string> connectionString;
+	Optional<ClusterConnectionString> connectionString;
 
 	for (int tokenNum = startIndex; tokenNum < tokens.size(); ++tokenNum) {
 		StringRef token = tokens[tokenNum];
@@ -49,13 +49,13 @@ parseClusterConfiguration(std::vector<StringRef> const& tokens, DataClusterEntry
 			if (sscanf(value.c_str(), "%d%n", &entry.get().capacity.numTenantGroups, &n) != 1 || n != value.size() ||
 			    entry.get().capacity.numTenantGroups < 0) {
 				fprintf(stderr, "ERROR: invalid number of tenant groups %s\n", value.c_str());
-				return Optional<std::pair<Optional<std::string>, Optional<DataClusterEntry>>>();
+				return Optional<std::pair<Optional<ClusterConnectionString>, Optional<DataClusterEntry>>>();
 			}
 		} else if (tokencmp(param, "connection_string")) {
-			connectionString = value;
+			connectionString = ClusterConnectionString(value);
 		} else {
 			fprintf(stderr, "ERROR: unrecognized configuration parameter %s\n", param.toString().c_str());
-			return Optional<std::pair<Optional<std::string>, Optional<DataClusterEntry>>>();
+			return Optional<std::pair<Optional<ClusterConnectionString>, Optional<DataClusterEntry>>>();
 		}
 	}
 
@@ -180,6 +180,7 @@ ACTOR Future<bool> metaclusterConfigureCommand(Reference<IDatabase> db, std::vec
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 			Optional<DataClusterMetadata> metadata = wait(MetaclusterAPI::tryGetClusterTransaction(tr, tokens[2]));
 			if (!metadata.present()) {
 				throw cluster_not_found();
@@ -190,7 +191,7 @@ ACTOR Future<bool> metaclusterConfigureCommand(Reference<IDatabase> db, std::vec
 				return false;
 			}
 
-			MetaclusterAPI::updateClusterMetadataTransaction(tr, tokens[2], config.get().first, config.get().second);
+			MetaclusterAPI::updateClusterMetadata(tr, tokens[2], config.get().first, config.get().second);
 
 			wait(safeThreadFutureToFuture(tr->commit()));
 			break;

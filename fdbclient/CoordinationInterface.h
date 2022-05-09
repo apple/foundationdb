@@ -61,6 +61,8 @@ struct ClientLeaderRegInterface {
 //  - There is no address present more than once
 class ClusterConnectionString {
 public:
+	constexpr static FileIdentifier file_identifier = 13602011;
+
 	ClusterConnectionString() {}
 	ClusterConnectionString(const std::string& connectionString);
 	ClusterConnectionString(const std::vector<NetworkAddress>& coordinators, Key key);
@@ -86,6 +88,12 @@ public:
 private:
 	void parseConnString();
 	Key key, keyDesc;
+
+public:
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, coords, hostnames, key, keyDesc);
+	}
 };
 
 FDB_DECLARE_BOOLEAN_PARAM(ConnectionStringNeedsPersisted);

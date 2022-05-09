@@ -36,12 +36,6 @@ const KeyRangeRef MetaclusterInternalManagementClusterImpl::submoduleRange =
 MetaclusterInternalManagementClusterImpl::MetaclusterInternalManagementClusterImpl(KeyRangeRef kr)
   : SpecialKeyRangeRWImpl(kr) {}
 
-Future<RangeResult> MetaclusterInternalManagementClusterImpl::getRange(ReadYourWritesTransaction* ryw,
-                                                                       KeyRangeRef kr,
-                                                                       GetRangeLimits limitsHint) const {
-	return RangeResult();
-}
-
 KeyRef extractCommand(ReadYourWritesTransaction* ryw,
                       KeyRef& beginKey,
                       KeyRef& endKey,
@@ -69,6 +63,49 @@ KeyRef extractCommand(ReadYourWritesTransaction* ryw,
 	}
 
 	return command;
+}
+
+ACTOR Future<RangeResult> getDataClusterList(ReadYourWritesTransaction* ryw,
+                                             KeyRangeRef kr,
+                                             GetRangeLimits limitsHint) {
+	std::map<ClusterName, DataClusterMetadata> clusters =
+	    wait(MetaclusterAPI::managementClusterListClusters(&ryw->getTransaction(), kr.begin, kr.end, limitsHint.rows));
+
+	RangeResult results;
+	for (auto cluster : clusters) {
+		ValueRef value =
+		    ObjectWriter::toValue(cluster.second, IncludeVersion(ProtocolVersion::withMetacluster()), results.arena());
+		results.push_back(
+		    results.arena(),
+		    KeyValueRef(cluster.first.withPrefix(
+		                    "\xff\xff/metacluster_internal/management_cluster/data_cluster/map/"_sr, results.arena()),
+		                value));
+	}
+
+	return results;
+}
+
+Future<RangeResult> MetaclusterInternalManagementClusterImpl::getRange(ReadYourWritesTransaction* ryw,
+                                                                       KeyRangeRef kr,
+                                                                       GetRangeLimits limitsHint) const {
+
+	KeyRangeRef subRange =
+	    kr.removePrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::METACLUSTER_INTERNAL).begin)
+	        .removePrefix(MetaclusterInternalManagementClusterImpl::submoduleRange.begin);
+
+	KeyRef begin = subRange.begin;
+	KeyRef end = subRange.end;
+
+	KeyRef command = extractCommand(ryw, begin, end, kr);
+
+	if (command == "data_cluster"_sr) {
+		command = extractCommand(ryw, begin, end, kr, "\xff\xff"_sr);
+		if (command == "map"_sr) {
+			return getDataClusterList(ryw, KeyRangeRef(begin, end), limitsHint);
+		}
+	}
+
+	return RangeResult();
 }
 
 void applyDataClusterConfig(ReadYourWritesTransaction* ryw,
@@ -140,7 +177,7 @@ ACTOR Future<Void> changeDataClusterConfig(ReadYourWritesTransaction* ryw,
                                            ClusterNameRef clusterName,
                                            std::vector<std::pair<StringRef, Optional<Value>>> configEntries) {
 	state Optional<DataClusterMetadata> clusterMetadata =
-	    wait(MetaclusterAPI::tryGetClusterTransaction(&ryw->getTransaction(), clusterName));
+	    wait(MetaclusterAPI::managementClusterTryGetCluster(&ryw->getTransaction(), clusterName));
 	if (!clusterMetadata.present()) {
 		TraceEvent(SevWarn, "ConfigureUnknownDataCluster").detail("ClusterName", clusterName);
 		ryw->setSpecialKeySpaceErrorMsg(ManagementAPIError::toJsonString(
@@ -152,8 +189,7 @@ ACTOR Future<Void> changeDataClusterConfig(ReadYourWritesTransaction* ryw,
 
 	DataClusterMetadata& metadata = clusterMetadata.get();
 	applyDataClusterConfig(ryw, clusterName, configEntries, &metadata);
-	MetaclusterAPI::updateClusterMetadataTransaction(
-	    &ryw->getTransaction(), clusterName, metadata.connectionString.toString(), metadata.entry);
+	wait(MetaclusterAPI::managementClusterUpdateClusterMetadata(&ryw->getTransaction(), clusterName, metadata));
 
 	return Void();
 }
@@ -161,7 +197,7 @@ ACTOR Future<Void> changeDataClusterConfig(ReadYourWritesTransaction* ryw,
 ACTOR Future<Void> removeClusterRange(ReadYourWritesTransaction* ryw,
                                       ClusterName beginCluster,
                                       ClusterName endCluster) {
-	std::map<ClusterName, DataClusterMetadata> clusters = wait(MetaclusterAPI::listClustersTransaction(
+	std::map<ClusterName, DataClusterMetadata> clusters = wait(MetaclusterAPI::managementClusterListClusters(
 	    &ryw->getTransaction(), beginCluster, endCluster, CLIENT_KNOBS->TOO_MANY));
 
 	if (clusters.size() == CLIENT_KNOBS->TOO_MANY) {
@@ -175,7 +211,7 @@ ACTOR Future<Void> removeClusterRange(ReadYourWritesTransaction* ryw,
 
 	std::vector<Future<Void>> removeFutures;
 	for (auto cluster : clusters) {
-		removeFutures.push_back(MetaclusterAPI::removeClusterTransaction(&ryw->getTransaction(), cluster.first));
+		removeFutures.push_back(MetaclusterAPI::managementClusterRemove(&ryw->getTransaction(), cluster.first));
 	}
 
 	wait(waitForAll(removeFutures));
@@ -230,7 +266,7 @@ Future<Void> processDataClusterCommandCommit(ReadYourWritesTransaction* ryw) {
 			// For a single key clear, just issue the delete
 			if (mapMutation.first.singleKeyRange()) {
 				clusterManagementFutures.push_back(
-				    MetaclusterAPI::removeClusterTransaction(&ryw->getTransaction(), mapMutation.first.begin));
+				    MetaclusterAPI::managementClusterRemove(&ryw->getTransaction(), mapMutation.first.begin));
 			} else {
 				clusterManagementFutures.push_back(
 				    removeClusterRange(ryw, mapMutation.first.begin, mapMutation.first.end));
