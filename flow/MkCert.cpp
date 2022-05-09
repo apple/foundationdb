@@ -351,12 +351,10 @@ CertChainRef makeCertChain(Arena& arena, VectorRef<CertSpecRef> specs, CertAndKe
 	}
 }
 
-CertChainRef makeCertChain(Arena& arena, unsigned length, ESide side) {
+VectorRef<CertSpecRef> makeCertChainSpec(Arena& arena, unsigned length, ESide side) {
 	if (!length)
 		return {};
-	// temporary arena for writing up specs
-	auto tmpArena = Arena();
-	auto specs = new (tmpArena) CertSpecRef[length];
+	auto specs = new (arena) CertSpecRef[length];
 	auto const isServerSide = side == ESide::Server;
 	for (auto i = 0u; i < length; i++) {
 		auto kind = CertKind{};
@@ -366,9 +364,18 @@ CertChainRef makeCertChain(Arena& arena, unsigned length, ESide side) {
 			kind = isServerSide ? CertKind(ServerRootCA{}) : CertKind(ClientRootCA{});
 		else
 			kind = isServerSide ? CertKind(ServerIntermediateCA{ i }) : CertKind(ClientIntermediateCA{ i });
-		specs[i] = CertSpecRef::make(tmpArena, kind);
+		specs[i] = CertSpecRef::make(arena, kind);
 	}
-	return makeCertChain(arena, VectorRef<CertSpecRef>(specs, length), {} /*root*/);
+	return VectorRef<CertSpecRef>(specs, length);
+}
+
+CertChainRef makeCertChain(Arena& arena, unsigned length, ESide side) {
+	if (!length)
+		return {};
+	// temporary arena for writing up specs
+	auto tmpArena = Arena();
+	auto specs = makeCertChainSpec(tmpArena, length, side);
+	return makeCertChain(arena, specs, {} /*root*/);
 }
 
 } // namespace mkcert

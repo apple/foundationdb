@@ -22,6 +22,7 @@
 #include <boost/asio/ssl.hpp>
 #include <boost/bind.hpp>
 #include <fmt/format.h>
+#include <algorithm>
 #include <iostream>
 #include <cstdio>
 #include <cstdlib>
@@ -92,10 +93,11 @@ void init_client_ssl_context() {
 	auto& ctx = client_ssl;
 	ctx.set_options(ssl::context::default_workarounds);
 	ctx.set_verify_mode(ssl::context::verify_peer | ssl::verify_fail_if_no_peer_cert);
+	/*
 	ctx.set_verify_callback([](bool preverify, ssl::verify_context&) {
-		logc("context preverify: {}", preverify);
-		return preverify;
-	});
+	    logc("context preverify: {}", preverify);
+	    return preverify;
+	});*/
 	init_certs(ctx, client_chain, server_chain.empty() ? StringRef() : server_chain.back().certPem);
 }
 
@@ -103,10 +105,11 @@ void init_server_ssl_context() {
 	auto& ctx = server_ssl;
 	ctx.set_options(ssl::context::default_workarounds);
 	ctx.set_verify_mode(ssl::context::verify_peer | (client_chain.empty() ? 0 : ssl::verify_fail_if_no_peer_cert));
+	/*
 	ctx.set_verify_callback([](bool preverify, ssl::verify_context&) {
-		logs("context preverify: {}", preverify);
-		return preverify;
-	});
+	    logs("context preverify: {}", preverify);
+	    return preverify;
+	});*/
 	init_certs(ctx, server_chain, client_chain.empty() ? StringRef() : client_chain.back().certPem);
 }
 
@@ -121,8 +124,9 @@ struct fmt::formatter<tcp::endpoint> {
 };
 
 int main(int argc, char** argv) {
-	auto const server_chain_len = (argc > 1 ? std::strtoul(argv[1], nullptr, 10) : 3ul);
-	auto const client_chain_len = (argc > 2 ? std::strtoul(argv[2], nullptr, 10) : 3ul);
+	auto const server_chain_len = (argc > 1 ? std::strtol(argv[1], nullptr, 10) : 3l);
+	auto const client_chain_len = (argc > 2 ? std::strtol(argv[2], nullptr, 10) : 3l);
+	auto const expect_handshake_ok = client_chain_len >= 0 && server_chain_len > 0;
 	auto const expect_trusted = client_chain_len != 0;
 	log("cert chain length: server {}, client {}", server_chain_len, client_chain_len);
 	[[maybe_unused]] auto print_chain = [](mkcert::CertChainRef chain) -> void {
@@ -138,10 +142,24 @@ int main(int argc, char** argv) {
 		}
 	};
 	auto arena = Arena();
-	if (server_chain_len > 0)
-		server_chain = mkcert::makeCertChain(arena, server_chain_len, mkcert::ESide::Server);
-	if (client_chain_len > 0)
-		client_chain = mkcert::makeCertChain(arena, client_chain_len, mkcert::ESide::Client);
+	if (server_chain_len) {
+		auto tmpArena = Arena();
+		auto specs = mkcert::makeCertChainSpec(tmpArena, std::labs(server_chain_len), mkcert::ESide::Server);
+		if (server_chain_len < 0) {
+			specs[0].offsetNotBefore = -60l * 60 * 24 * 365;
+			specs[0].offsetNotAfter = -10l; // cert that expired 10 seconds ago
+		}
+		server_chain = mkcert::makeCertChain(arena, specs, {} /* create root CA cert from spec*/);
+	}
+	if (client_chain_len) {
+		auto tmpArena = Arena();
+		auto specs = mkcert::makeCertChainSpec(tmpArena, std::labs(client_chain_len), mkcert::ESide::Client);
+		if (client_chain_len < 0) {
+			specs[0].offsetNotBefore = -60l * 60 * 24 * 365;
+			specs[0].offsetNotAfter = -10l; // cert that expired 10 seconds ago
+		}
+		client_chain = mkcert::makeCertChain(arena, specs, {} /* create root CA cert from spec*/);
+	}
 	/*
 	log("=========== SERVER CHAIN");
 	print_chain(server_chain);
@@ -170,17 +188,18 @@ int main(int argc, char** argv) {
 	enum class ESockState { AssumedUntrusted, Trusted };
 	auto server_sock_state = ESockState::AssumedUntrusted;
 	auto client_sock_state = ESockState::AssumedUntrusted;
-	server_ssl_sock.set_verify_callback([&server_sock_state](bool preverify, ssl::verify_context&) {
+	auto handshake_ok = true;
+	server_ssl_sock.set_verify_callback([&server_sock_state, &handshake_ok](bool preverify, ssl::verify_context&) {
 		logs("client preverify: {}", preverify);
 		switch (server_sock_state) {
 		case ESockState::AssumedUntrusted:
 			if (!preverify)
-				return false;
+				return handshake_ok = false;
 			server_sock_state = ESockState::Trusted;
 			break;
 		case ESockState::Trusted:
 			if (!preverify)
-				return false;
+				return handshake_ok = false;
 			break;
 		default:
 			break;
@@ -206,17 +225,17 @@ int main(int argc, char** argv) {
 	});
 	auto client_sock = tcp::socket(io);
 	auto client_ssl_sock = socket_type(client_sock, client_ssl);
-	client_ssl_sock.set_verify_callback([&client_sock_state](bool preverify, ssl::verify_context&) {
+	client_ssl_sock.set_verify_callback([&client_sock_state, &handshake_ok](bool preverify, ssl::verify_context&) {
 		logc("server preverify: {}", preverify);
 		switch (client_sock_state) {
 		case ESockState::AssumedUntrusted:
 			if (!preverify)
-				return false;
+				return handshake_ok = false;
 			client_sock_state = ESockState::Trusted;
 			break;
 		case ESockState::Trusted:
 			if (!preverify)
-				return false;
+				return handshake_ok = false;
 			break;
 		default:
 			break;
@@ -241,7 +260,13 @@ int main(int argc, char** argv) {
 		}
 	});
 	io.run();
-	ASSERT_EQ(expect_trusted, (server_sock_state == ESockState::Trusted));
-	log("Test OK: Connection considered {}", server_sock_state == ESockState::Trusted ? "trusted" : "untrusted");
+	ASSERT_EQ(expect_handshake_ok, handshake_ok);
+	if (expect_handshake_ok) {
+		ASSERT_EQ(expect_trusted, (server_sock_state == ESockState::Trusted));
+		log("Test OK: Handshake passed and connection {} as expected",
+		    server_sock_state == ESockState::Trusted ? "trusted" : "untrusted");
+	} else {
+		log("Test OK: Handshake failed as expected");
+	}
 	return 0;
 }
