@@ -259,10 +259,14 @@ class UpgradeTest:
         dest_lib_file = self.download_dir.joinpath(version, "libfdb_c.so")
         if dest_lib_file.exists():
             return
+        # Avoid race conditions in case of parallel test execution by first copying to a temporary file
+        # and then renaming it atomically
+        dest_file_tmp = Path("{}.{}".format(str(dest_lib_file), random_secret_string(8)))
         src_lib_file = self.local_binary_repo.joinpath(version, "lib", "libfdb_c-{}.so".format(version))
         assert src_lib_file.exists(), "Missing file {} in the local old binaries repository".format(src_lib_file)
         self.download_dir.joinpath(version).mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(src_lib_file, dest_lib_file)
+        shutil.copyfile(src_lib_file, dest_file_tmp)
+        os.rename(dest_file_tmp, dest_lib_file)
         assert dest_lib_file.exists(), "{} does not exist".format(dest_lib_file)
 
     # Download all old binaries required for testing the specified upgrade path
