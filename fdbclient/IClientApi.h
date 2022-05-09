@@ -27,6 +27,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/Tenant.h"
 
+#include "flow/Tracing.h"
 #include "flow/ThreadHelper.actor.h"
 
 struct VersionVector;
@@ -96,11 +97,11 @@ public:
 
 	virtual ThreadFuture<Void> commit() = 0;
 	virtual Version getCommittedVersion() = 0;
-	// @todo This API and the "getSpanID()" API may help with debugging simulation
+	// @todo This API and the "getSpanContext()" API may help with debugging simulation
 	// test failures. (These APIs are not currently invoked anywhere.) Remove them
 	// later if they are not really needed.
 	virtual VersionVector getVersionVector() = 0;
-	virtual UID getSpanID() = 0;
+	virtual SpanContext getSpanContext() = 0;
 	virtual ThreadFuture<int64_t> getApproximateSize() = 0;
 
 	virtual void setOption(FDBTransactionOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) = 0;

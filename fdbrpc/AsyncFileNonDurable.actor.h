@@ -276,7 +276,7 @@ public:
 		if (delref_no_destroy()) {
 			if (filesBeingDeleted.count(filename) == 0) {
 				//TraceEvent("AsyncFileNonDurable_StartDelete", id).detail("Filename", filename);
-				Future<Void> deleteFuture = deleteFile(this);
+				Future<Void> deleteFuture = closeFile(this);
 				if (!deleteFuture.isReady())
 					filesBeingDeleted[filename] = deleteFuture;
 			}
@@ -824,10 +824,12 @@ private:
 	}
 
 	// Finishes all outstanding actors on an AsyncFileNonDurable and then deletes it
-	ACTOR Future<Void> deleteFile(AsyncFileNonDurable* self) {
+	ACTOR Future<Void> closeFile(AsyncFileNonDurable* self) {
 		state ISimulator::ProcessInfo* currentProcess = g_simulator.getCurrentProcess();
 		state TaskPriority currentTaskID = g_network->getCurrentTask();
 		state std::string filename = self->filename;
+
+		g_simulator.getMachineByNetworkAddress(self->openedAddress)->deletingOrClosingFiles.insert(self->getFilename());
 
 		wait(g_simulator.onMachine(currentProcess));
 		try {
@@ -853,7 +855,8 @@ private:
 
 			// Remove this file from the filesBeingDeleted map so that new files can be created with this filename
 			g_simulator.getMachineByNetworkAddress(self->openedAddress)->closingFiles.erase(self->getFilename());
-			g_simulator.getMachineByNetworkAddress(self->openedAddress)->deletingFiles.erase(self->getFilename());
+			g_simulator.getMachineByNetworkAddress(self->openedAddress)
+			    ->deletingOrClosingFiles.erase(self->getFilename());
 			AsyncFileNonDurable::filesBeingDeleted.erase(self->filename);
 			//TraceEvent("AsyncFileNonDurable_FinishDelete", self->id).detail("Filename", self->filename);
 

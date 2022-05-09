@@ -24,6 +24,7 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/Knobs.h"
+#include "flow/Tracing.h"
 
 // The versioned message has wire format : -1, version, messages
 static const int32_t VERSION_HEADER = -1;
@@ -77,6 +78,7 @@ struct MutationRef {
 		AndV2,
 		CompareAndClear,
 		Reserved_For_SpanContextMessage /* See fdbserver/SpanContextMessage.h */,
+		Reserved_For_OTELSpanContextMessage,
 		MAX_ATOMIC_OP
 	};
 	// This is stored this way for serialization purposes.
@@ -190,7 +192,7 @@ struct CommitTransactionRef {
 	Version read_snapshot = 0;
 	bool report_conflicting_keys = false;
 	bool lock_aware = false; // set when metadata mutations are present
-	Optional<SpanID> spanContext;
+	Optional<SpanContext> spanContext;
 
 	template <class Ar>
 	force_inline void serialize(Ar& ar) {

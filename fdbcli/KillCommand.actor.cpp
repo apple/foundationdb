@@ -95,6 +95,14 @@ ACTOR Future<bool> killCommandActor(Reference<IDatabase> db,
 	return result;
 }
 
+void killGenerator(const char* text,
+                   const char* line,
+                   std::vector<std::string>& lc,
+                   std::vector<StringRef> const& tokens) {
+	const char* opts[] = { "all", "list", nullptr };
+	arrayGenerator(text, line, opts, lc);
+}
+
 CommandFactory killFactory(
     "kill",
     CommandHelp(
@@ -103,5 +111,6 @@ CommandFactory killFactory(
         "If no addresses are specified, populates the list of processes which can be killed. Processes cannot be "
         "killed before this list has been populated.\n\nIf `all' is specified, attempts to kill all known "
         "processes.\n\nIf `list' is specified, displays all known processes. This is only useful when the database is "
-        "unresponsive.\n\nFor each IP:port pair in <ADDRESS ...>, attempt to kill the specified process."));
+        "unresponsive.\n\nFor each IP:port pair in <ADDRESS ...>, attempt to kill the specified process."),
+    &killGenerator);
 } // namespace fdb_cli

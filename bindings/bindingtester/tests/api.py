@@ -160,56 +160,25 @@ class ApiTest(Test):
     def generate(self, args, thread_number):
         instructions = InstructionSet()
 
-        op_choices = ["NEW_TRANSACTION", "COMMIT"]
+        op_choices = ['NEW_TRANSACTION', 'COMMIT']
 
-        reads = [
-            "GET",
-            "GET_KEY",
-            "GET_RANGE",
-            "GET_RANGE_STARTS_WITH",
-            "GET_RANGE_SELECTOR",
-        ]
-        mutations = [
-            "SET",
-            "CLEAR",
-            "CLEAR_RANGE",
-            "CLEAR_RANGE_STARTS_WITH",
-            "ATOMIC_OP",
-        ]
-        snapshot_reads = [x + "_SNAPSHOT" for x in reads]
-        database_reads = [x + "_DATABASE" for x in reads]
-        database_mutations = [x + "_DATABASE" for x in mutations]
-        mutations += ["VERSIONSTAMP"]
-        versions = ["GET_READ_VERSION", "SET_READ_VERSION", "GET_COMMITTED_VERSION"]
-        snapshot_versions = ["GET_READ_VERSION_SNAPSHOT"]
-        tuples = [
-            "TUPLE_PACK",
-            "TUPLE_UNPACK",
-            "TUPLE_RANGE",
-            "TUPLE_SORT",
-            "SUB",
-            "ENCODE_FLOAT",
-            "ENCODE_DOUBLE",
-            "DECODE_DOUBLE",
-            "DECODE_FLOAT",
-        ]
-        if "versionstamp" in args.types:
-            tuples.append("TUPLE_PACK_WITH_VERSIONSTAMP")
-        resets = ["ON_ERROR", "RESET", "CANCEL"]
-        read_conflicts = ["READ_CONFLICT_RANGE", "READ_CONFLICT_KEY"]
-        write_conflicts = [
-            "WRITE_CONFLICT_RANGE",
-            "WRITE_CONFLICT_KEY",
-            "DISABLE_WRITE_CONFLICT",
-        ]
-        txn_sizes = ["GET_APPROXIMATE_SIZE"]
-        storage_metrics = ["GET_ESTIMATED_RANGE_SIZE", "GET_RANGE_SPLIT_POINTS"]
-        tenants = [
-            "TENANT_CREATE",
-            "TENANT_DELETE",
-            "TENANT_SET_ACTIVE",
-            "TENANT_CLEAR_ACTIVE",
-        ]
+        reads = ['GET', 'GET_KEY', 'GET_RANGE', 'GET_RANGE_STARTS_WITH', 'GET_RANGE_SELECTOR']
+        mutations = ['SET', 'CLEAR', 'CLEAR_RANGE', 'CLEAR_RANGE_STARTS_WITH', 'ATOMIC_OP']
+        snapshot_reads = [x + '_SNAPSHOT' for x in reads]
+        database_reads = [x + '_DATABASE' for x in reads]
+        database_mutations = [x + '_DATABASE' for x in mutations]
+        mutations += ['VERSIONSTAMP']
+        versions = ['GET_READ_VERSION', 'SET_READ_VERSION', 'GET_COMMITTED_VERSION']
+        snapshot_versions = ['GET_READ_VERSION_SNAPSHOT']
+        tuples = ['TUPLE_PACK', 'TUPLE_UNPACK', 'TUPLE_RANGE', 'TUPLE_SORT', 'SUB', 'ENCODE_FLOAT', 'ENCODE_DOUBLE', 'DECODE_DOUBLE', 'DECODE_FLOAT']
+        if 'versionstamp' in args.types:
+            tuples.append('TUPLE_PACK_WITH_VERSIONSTAMP')
+        resets = ['ON_ERROR', 'RESET', 'CANCEL']
+        read_conflicts = ['READ_CONFLICT_RANGE', 'READ_CONFLICT_KEY']
+        write_conflicts = ['WRITE_CONFLICT_RANGE', 'WRITE_CONFLICT_KEY', 'DISABLE_WRITE_CONFLICT']
+        txn_sizes = ['GET_APPROXIMATE_SIZE']
+        storage_metrics = ['GET_ESTIMATED_RANGE_SIZE', 'GET_RANGE_SPLIT_POINTS']
+        tenants = ['TENANT_CREATE', 'TENANT_DELETE', 'TENANT_SET_ACTIVE', 'TENANT_CLEAR_ACTIVE', 'TENANT_LIST']
 
         op_choices += reads
         op_choices += mutations
@@ -710,6 +679,13 @@ class ApiTest(Test):
                 instructions.append(op)
             elif op == "TENANT_CLEAR_ACTIVE":
                 instructions.append(op)
+            elif op == 'TENANT_LIST':
+                self.ensure_string(instructions, 2)
+                instructions.push_args(self.random.random_int())
+                test_util.to_front(instructions, 2)
+                test_util.to_front(instructions, 2)
+                instructions.append(op)
+                self.add_strings(1)
             else:
                 assert False, "Unknown operation: " + op
 
