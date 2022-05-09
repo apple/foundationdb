@@ -1240,14 +1240,14 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 			self->suppressIntervals = 0;
 		}
 
-		wait(prevCleanup);
-
 		if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 			auto inFlightRange = self->inFlight.rangeContaining(rd.keys.begin);
 			ASSERT(inFlightRange.range() == rd.keys);
 			ASSERT(inFlightRange.value().randomId == rd.randomId);
 			ASSERT(inFlightRange.value().dataMoveId == rd.dataMoveId);
 			inFlightRange.value().cancellable = false;
+
+			wait(prevCleanup);
 
 			auto f = self->dataMoves.intersectingRanges(rd.keys);
 			for (auto it = f.begin(); it != f.end(); ++it) {

@@ -762,11 +762,13 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 	while (dbInfo->get().recoveryState != RecoveryState::FULLY_RECOVERED) {
 		wait(dbInfo->onChange());
 	}
+	TraceEvent("QuietDatabaseWaitingOnFullRecoveryDone").log();
 
 	// The quiet database check (which runs at the end of every test) will always time out due to active data movement.
 	// To get around this, quiet Database will disable the perpetual wiggle in the setup phase.
 
 	printf("Set perpetual_storage_wiggle=0 ...\n");
+	TraceEvent("QuietDatabaseWaitingOnWiggle").log();
 	wait(setPerpetualStorageWiggle(cx, false, LockAware::True));
 	printf("Set perpetual_storage_wiggle=0 Done.\n");
 
