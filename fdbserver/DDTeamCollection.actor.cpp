@@ -5076,11 +5076,11 @@ bool DDTeamCollection::exclusionSafetyCheck(std::vector<UID>& excludeServerIDs) 
 	return true;
 }
 
-StorageWiggler::State DDTeamCollection::getStorageWigglerState() const {
+std::pair<StorageWiggler::State, double> DDTeamCollection::getStorageWigglerState() const {
 	if (storageWiggler) {
-		return storageWiggler->getState();
+		return { storageWiggler->getState(), storageWiggler->lastStateChangeTs };
 	}
-	return StorageWiggler::INVALID;
+	return { StorageWiggler::INVALID, 0.0 };
 }
 
 Future<Void> DDTeamCollection::run(Reference<DDTeamCollection> teamCollection,

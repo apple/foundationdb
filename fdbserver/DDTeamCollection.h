@@ -664,7 +664,8 @@ public:
 
 	bool isPrimary() const { return primary; }
 
-	StorageWiggler::State getStorageWigglerState() const;
+	// state and last state change timestamp
+	std::pair<StorageWiggler::State, double> getStorageWigglerState() const;
 
 	UID getDistributorId() const { return distributorId; }
 

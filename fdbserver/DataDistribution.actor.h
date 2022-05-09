@@ -402,6 +402,8 @@ struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 	std::unordered_map<UID, decltype(wiggle_pq)::handle_type> pq_handles;
 
 	State _state = State::INVALID;
+	double lastStateChangeTs = 0.0; // timestamp describes when did the state change
+
 	explicit StorageWiggler(DDTeamCollection* collection) : nonEmpty(false), teamCollection(collection){};
 	// add server to wiggling queue
 	void addServer(const UID& serverId, const StorageMetadataType& metadata);
@@ -414,7 +416,12 @@ struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 	Optional<UID> getNextServerId();
 
 	State getState() const { return _state; }
-	void setState(State s) { _state = s; }
+	void setState(State s) {
+		if (_state != s) {
+			_state = s;
+			lastStateChangeTs = g_network->now();
+		}
+	}
 	static std::string getStateStr(State s) {
 		switch (s) {
 		case State::RUN:
