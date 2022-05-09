@@ -2806,8 +2806,9 @@ ACTOR Future<JsonBuilderObject> storageWigglerStatsFetcher(Optional<DataDistribu
 			wait(tr->onError(e));
 		}
 	}
-	wait(ready(stateFut));
-
+	if (ddWorker.present()) {
+		wait(ready(stateFut));
+	}
 	JsonBuilderObject res;
 	if (primaryV.present()) {
 		auto obj = ObjectReader::fromStringRef<StorageWiggleMetrics>(primaryV.get(), IncludeVersion()).toJSON();
@@ -2827,7 +2828,7 @@ ACTOR Future<JsonBuilderObject> storageWigglerStatsFetcher(Optional<DataDistribu
 		}
 		res["remote"] = obj;
 	}
-	if (stateFut.isError()) {
+	if (stateFut.canGet() && stateFut.isError()) {
 		res["error"] = std::string("Can't get storage wiggler state: ") + stateFut.getError().name();
 		TraceEvent(SevWarn, "StorageWigglerStatsFetcher").error(stateFut.getError());
 	} else if (stateFut.canGet() && stateFut.get().isError()) {
