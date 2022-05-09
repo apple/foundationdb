@@ -39,6 +39,44 @@ Future<RangeResult> MetaclusterInternalDataClusterImpl::getRange(ReadYourWritesT
 	return RangeResult();
 }
 
+Future<Void> MetaclusterInternalDataClusterImpl::processDataClusterCommand(ReadYourWritesTransaction* ryw) {
+	auto ranges = ryw->getSpecialKeySpaceWriteMap().containedRanges(
+	    KeyRangeRef("data_cluster/data_cluster/"_sr, "data_cluster/data_cluster0"_sr)
+	        .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::METACLUSTER_INTERNAL).begin));
+
+	std::vector<Future<Void>> clusterManagementFutures;
+
+	for (auto itr : ranges) {
+		if (!itr.value().first) {
+			continue;
+		}
+
+		KeyRangeRef range =
+		    itr.range()
+		        .removePrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::METACLUSTER_INTERNAL).begin)
+		        .removePrefix(MetaclusterInternalDataClusterImpl::submoduleRange.begin)
+		        .removePrefix("data_cluster/"_sr);
+
+		if (!itr.value().second.present()) {
+			continue;
+		}
+
+		if (range.begin == "register"_sr) {
+			clusterManagementFutures.push_back(
+			    MetaclusterAPI::dataClusterRegister(&ryw->getTransaction(), itr.value().second.get()));
+		} else if (range.begin == "remove"_sr) {
+			clusterManagementFutures.push_back(MetaclusterAPI::dataClusterRemove(&ryw->getTransaction()));
+		}
+	}
+
+	return waitForAll(clusterManagementFutures);
+}
+
+Future<Void> MetaclusterInternalDataClusterImpl::processTenantCommand(ReadYourWritesTransaction* ryw) {
+	// TODO
+	return Void();
+}
+
 Future<Optional<std::string>> MetaclusterInternalDataClusterImpl::commit(ReadYourWritesTransaction* ryw) {
-	return Optional<std::string>();
+	return tag(processDataClusterCommand(ryw) && processTenantCommand(ryw), Optional<std::string>());
 }

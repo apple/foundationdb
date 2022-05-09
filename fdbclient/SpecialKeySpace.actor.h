@@ -565,6 +565,9 @@ public:
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
+
+	Future<Void> processDataClusterCommand(ReadYourWritesTransaction* ryw);
+	Future<Void> processTenantCommand(ReadYourWritesTransaction* ryw);
 };
 
 class MetaclusterInternalDataClusterImpl : public SpecialKeyRangeRWImpl {
@@ -576,6 +579,9 @@ public:
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
+
+	Future<Void> processDataClusterCommand(ReadYourWritesTransaction* ryw);
+	Future<Void> processTenantCommand(ReadYourWritesTransaction* ryw);
 };
 
 #include "flow/unactorcompiler.h"

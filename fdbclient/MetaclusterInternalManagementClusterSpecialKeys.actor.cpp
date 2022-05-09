@@ -218,7 +218,7 @@ ACTOR Future<Void> removeClusterRange(ReadYourWritesTransaction* ryw,
 	return Void();
 }
 
-Future<Void> processDataClusterCommandCommit(ReadYourWritesTransaction* ryw) {
+Future<Void> MetaclusterInternalManagementClusterImpl::processDataClusterCommand(ReadYourWritesTransaction* ryw) {
 	auto ranges = ryw->getSpecialKeySpaceWriteMap().containedRanges(
 	    KeyRangeRef("management_cluster/data_cluster/"_sr, "management_cluster/data_cluster0"_sr)
 	        .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::METACLUSTER_INTERNAL).begin));
@@ -281,11 +281,11 @@ Future<Void> processDataClusterCommandCommit(ReadYourWritesTransaction* ryw) {
 	return waitForAll(clusterManagementFutures);
 }
 
-Future<Void> processTenantCommandCommit(ReadYourWritesTransaction* ryw) {
+Future<Void> MetaclusterInternalManagementClusterImpl::processTenantCommand(ReadYourWritesTransaction* ryw) {
 	// TODO
 	return Void();
 }
 
 Future<Optional<std::string>> MetaclusterInternalManagementClusterImpl::commit(ReadYourWritesTransaction* ryw) {
-	return tag(processDataClusterCommandCommit(ryw) && processTenantCommandCommit(ryw), Optional<std::string>());
+	return tag(processDataClusterCommand(ryw) && processTenantCommand(ryw), Optional<std::string>());
 }

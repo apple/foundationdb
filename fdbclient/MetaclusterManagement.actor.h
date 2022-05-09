@@ -217,7 +217,8 @@ ACTOR template <class Transaction>
 Future<Void> dataClusterRegister(Transaction tr, ClusterNameRef name) {
 	state Future<std::map<TenantName, TenantMapEntry>> existingTenantsFuture =
 	    ManagementAPI::listTenantsTransaction(tr, ""_sr, "\xff\xff"_sr, 1);
-	state ThreadFuture<RangeResult> existingDataFuture = tr->getRange(normalKeys, 1);
+	state typename transaction_future_type<Transaction, RangeResult>::type existingDataFuture =
+	    tr->getRange(normalKeys, 1);
 
 	std::map<TenantName, TenantMapEntry> existingTenants = wait(safeThreadFutureToFuture(existingTenantsFuture));
 	if (!existingTenants.empty()) {
@@ -232,6 +233,7 @@ Future<Void> dataClusterRegister(Transaction tr, ClusterNameRef name) {
 	}
 
 	// TODO: change config to subordinate cluster
+	// TODO: store the cluster name somewhere
 	return Void();
 }
 
@@ -254,10 +256,8 @@ Future<Void> registerCluster(Reference<DB> db,
 		try {
 			dataClusterTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			dataClusterTr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-			// TODO: use the special key-space rather than running the logic ourselves
 
-			// registerTr->set("\xff\xff/metacluster/management/data_cluster/register"_sr, ""_sr);
-			wait(dataClusterRegister(dataClusterTr, name));
+			dataClusterTr->set("\xff\xff/metacluster_internal/data_cluster/data_cluster/register"_sr, name);
 
 			if (BUGGIFY) {
 				throw commit_unknown_result();
@@ -390,7 +390,7 @@ Future<Void> managementClusterRemove(Transaction tr, ClusterNameRef name) {
 }
 
 ACTOR template <class Transaction>
-Future<Void> dataClusterRemove(Transaction tr, ClusterNameRef name) {
+Future<Void> dataClusterRemove(Transaction tr) {
 	// TODO
 	wait(delay(0.0));
 	return Void();
@@ -441,8 +441,7 @@ Future<Void> removeCluster(Reference<DB> db, ClusterName name) {
 			dataClusterTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 
-			// TODO: use special keys
-			wait(dataClusterRemove(dataClusterTr, name));
+			tr->set("\xff\xff/metacluster_internal/data_cluster/data_cluster/remove/"_sr.withSuffix(name), ""_sr);
 
 			if (BUGGIFY) {
 				throw commit_unknown_result();
