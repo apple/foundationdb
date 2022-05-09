@@ -3538,23 +3538,27 @@ void preprocessMappedKey(Tuple& mappedKeyFormatTuple, std::vector<Optional<Tuple
 			if (escaped) {
 				Tuple escapedTuple;
 				escapedTuple.append(s);
-				vt.push_back(Optional<Tuple>(escapedTuple));
+				vt.emplace_back(escapedTuple);
 			} else if (singleKeyOrValue(s, sz)) {
 				// when it is SingleKeyOrValue, insert an empty Tuple to vector as placeholder
-				vt.push_back(Optional<Tuple>(Tuple()));
+				vt.emplace_back(Tuple());
 			} else if (rangeQuery(s)) {
 				if (i != mappedKeyFormatTuple.size() - 1) {
 					// It must be the last element of the mapper tuple
 					throw mapper_bad_range_decriptor();
 				}
 				// when it is rangeQuery, insert Optional.empty as placeholder
-				vt.push_back(Optional<Tuple>());
+				vt.emplace_back(Optional<Tuple>());
 				isRangeQuery = true;
 			} else {
-				vt.push_back(Optional<Tuple>(mappedKeyFormatTuple.subTuple(i, i + 1)));
+				Tuple t;
+				t.appendRaw(mappedKeyFormatTuple.subTupleRawString(i));
+				vt.emplace_back(t);
 			}
 		} else {
-			vt.push_back(Optional<Tuple>(mappedKeyFormatTuple.subTuple(i, i + 1)));
+			Tuple t;
+			t.appendRaw(mappedKeyFormatTuple.subTupleRawString(i));
+			vt.emplace_back(t);
 		}
 	}
 }
@@ -3598,7 +3602,7 @@ Key constructMappedKey(KeyValueRef* keyValue,
 			if (idx < 0 || idx >= referenceTuple->size()) {
 				throw mapper_bad_index();
 			}
-			mappedKeyTuple.append(referenceTuple->subTuple(idx, idx + 1));
+			mappedKeyTuple.appendRaw(referenceTuple->subTupleRawString(idx));
 		}
 	}
 
