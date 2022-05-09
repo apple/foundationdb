@@ -1230,9 +1230,10 @@ static int64_t getMedianShardSize(VectorRef<DDMetricsRef> metricVec) {
 GetStorageWigglerStateReply getStorageWigglerStates(Reference<DataDistributorData> self) {
 	GetStorageWigglerStateReply reply;
 	if (self->teamCollection) {
-		reply.primary = self->teamCollection->getStorageWigglerState();
+		std::tie(reply.primary, reply.lastStateChangePrimary) = self->teamCollection->getStorageWigglerState();
 		if (self->teamCollection->teamCollections.size() > 1) {
-			reply.remote = self->teamCollection->teamCollections[1]->getStorageWigglerState();
+			std::tie(reply.remote, reply.lastStateChangeRemote) =
+			    self->teamCollection->teamCollections[1]->getStorageWigglerState();
 		}
 	}
 	return reply;

@@ -170,6 +170,7 @@ struct DistributorSplitRangeRequest {
 struct GetStorageWigglerStateReply {
 	constexpr static FileIdentifier file_identifier = 356721;
 	uint8_t primary = 0, remote = 0; // StorageWiggler::State enum
+	double lastStateChangePrimary = 0.0, lastStateChangeRemote = 0.0;
 
 	GetStorageWigglerStateReply() {}
 	template <class Ar>
