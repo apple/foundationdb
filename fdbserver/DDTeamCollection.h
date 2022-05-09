@@ -663,6 +663,8 @@ public:
 
 	bool isPrimary() const { return primary; }
 
+	StorageWiggler::State getStorageWigglerState() const;
+
 	UID getDistributorId() const { return distributorId; }
 
 	// Keep track of servers and teams -- serves requests for getRandomTeam
