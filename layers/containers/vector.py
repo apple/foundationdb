@@ -38,8 +38,8 @@ fdb.api_version(22)
 
 
 class Subspace(object):
-    def __init__(self, prefixTuple, rawPrefix=""):
-        self.rawPrefix = rawPrefix + fdb.tuple.pack(prefixTuple)
+    def __init__(self, prefix_tuple, raw_prefix=""):
+        self.rawPrefix = raw_prefix + fdb.tuple.pack(prefix_tuple)
 
     def __getitem__(self, name):
         return Subspace((name,), self.rawPrefix)
@@ -52,7 +52,7 @@ class Subspace(object):
 
     def unpack(self, key):
         assert key.startswith(self.rawPrefix)
-        return fdb.tuple.unpack(key[len(self.rawPrefix) :])
+        return fdb.tuple.unpack(key[len(self.rawPrefix):])
 
     def range(self, tuple=()):
         p = fdb.tuple.range(tuple)
@@ -111,9 +111,9 @@ class Vector:
 
     # Public functions
 
-    def __init__(self, subspace, defaultValue=""):
+    def __init__(self, subspace, default_value=""):
         self.subspace = subspace
-        self.defaultValue = defaultValue
+        self.defaultValue = default_value
         self.local = threading.local()
         self.local.tr = None
 
@@ -159,9 +159,9 @@ class Vector:
         """Get the item at the specified index."""
         return self._get(index, self._to_transaction(tr))
 
-    def get_range(self, startIndex=None, endIndex=None, step=None, tr=None):
+    def get_range(self, start_index=None, end_index=None, step=None, tr=None):
         """Get a range of items in the Vector, returned as a generator."""
-        return self._get_range(startIndex, endIndex, step, self._to_transaction(tr))
+        return self._get_range(start_index, end_index, step, self._to_transaction(tr))
 
     def set(self, index, val, tr=None):
         """Set the value at a particular index in the Vector."""
@@ -202,24 +202,24 @@ class Vector:
 
     @fdb.transactional
     def _back(self, tr):
-        keyRange = self.subspace.range()
-        last = tr.get_range(keyRange.start, keyRange.stop, 1, True)
+        key_range = self.subspace.range()
+        last = tr.get_range(key_range.start, key_range.stop, 1, True)
         for k, v in last:
             return fdb.tuple.unpack(v)[0]
         return None
 
     @fdb.transactional
     def _pop(self, tr):
-        keyRange = self.subspace.range()
+        key_range = self.subspace.range()
 
         # Read the last two entries so we can check if the second to last item
         # is being represented sparsely. If so, we will be required to set it
         # to the default value
-        lastTwo = list(tr.get_range(keyRange.start, keyRange.stop, 2, True))
-        indices = [self.subspace.unpack(kv.key)[0] for kv in lastTwo]
+        last_two = list(tr.get_range(key_range.start, key_range.stop, 2, True))
+        indices = [self.subspace.unpack(kv.key)[0] for kv in last_two]
 
         # Vector was empty
-        if len(lastTwo) == 0:
+        if len(last_two) == 0:
             return None
 
         # Vector has size one:
@@ -227,32 +227,32 @@ class Vector:
             pass
 
         # Second to last item is being represented sparsely
-        elif len(lastTwo) == 1 or indices[0] > indices[1] + 1:
+        elif len(last_two) == 1 or indices[0] > indices[1] + 1:
             tr[self._key_at(indices[0] - 1)] = fdb.tuple.pack((self.defaultValue,))
 
-        del tr[lastTwo[0].key]
-        return fdb.tuple.unpack(lastTwo[0].value)[0]
+        del tr[last_two[0].key]
+        return fdb.tuple.unpack(last_two[0].value)[0]
 
     @fdb.transactional
     def _swap(self, i1, i2, tr):
         k1 = self._key_at(i1)
         k2 = self._key_at(i2)
 
-        currentSize = self._size(tr)
+        current_size = self._size(tr)
         v1 = tr[k1]
         v2 = tr[k2]
 
-        if i1 > currentSize or i2 > currentSize or i1 < 0 or i2 < 0:
+        if i1 > current_size or i2 > current_size or i1 < 0 or i2 < 0:
             raise IndexError("vector.swap: indices (%d, %d) out of range" % (i1, i2))
 
         if v2.present():
             tr[k1] = v2
-        elif v1.present() and i1 < currentSize - 1:
+        elif v1.present() and i1 < current_size - 1:
             del tr[k1]
 
         if v1.present():
             tr[k2] = v1
-        elif v2.present() and i2 < currentSize - 1:
+        elif v2.present() and i2 < current_size - 1:
             del tr[k2]
 
     @fdb.transactional
@@ -275,33 +275,33 @@ class Vector:
         # We requested a value past the end of the vector
         raise IndexError("vector.get: index '%d' out of range" % index)
 
-    def _get_range(self, startIndex, endIndex, step, tr):
+    def _get_range(self, start_index, end_index, step, tr):
         size = self._size(tr)
-        if startIndex is not None and startIndex < 0:
-            startIndex = max(0, size + startIndex)
-        if endIndex is not None and endIndex < 0:
-            endIndex = max(0, size + endIndex)
+        if start_index is not None and start_index < 0:
+            start_index = max(0, size + start_index)
+        if end_index is not None and end_index < 0:
+            end_index = max(0, size + end_index)
 
         if step is None:
-            if startIndex is None or endIndex is None or startIndex <= endIndex:
+            if start_index is None or end_index is None or start_index <= end_index:
                 step = 1
             else:
                 step = -1
         elif step == 0:
             raise ValueError("vector.get_range: step cannot be zero")
 
-        if startIndex is None:
+        if start_index is None:
             if step > 0:
                 start = self.subspace.range().start
             else:
                 end = self.subspace.range().stop
         else:
             if step > 0:
-                start = self._key_at(startIndex)
+                start = self._key_at(start_index)
             else:
-                end = self._key_at(startIndex + 1)
+                end = self._key_at(start_index + 1)
 
-        if endIndex is None:
+        if end_index is None:
             if step > 0:
                 end = self.subspace.range().stop
             else:
@@ -309,41 +309,41 @@ class Vector:
 
         else:
             if step > 0:
-                end = self._key_at(endIndex)
+                end = self._key_at(end_index)
             else:
-                start = self._key_at(endIndex + 1)
+                start = self._key_at(end_index + 1)
 
         result = tr.get_range(start, end, 0, step < 0)
 
-        currentIndex = startIndex
-        if currentIndex is None:
+        current_index = start_index
+        if current_index is None:
             if step > 0:
-                currentIndex = 0
+                current_index = 0
             else:
-                currentIndex = size - 1
-        elif currentIndex >= size:
-            currentIndex = size - 1
+                current_index = size - 1
+        elif current_index >= size:
+            current_index = size - 1
 
         for k, v in result:
-            keyIndex = self.subspace.unpack(k)[0]
-            while (step > 0 and currentIndex < keyIndex) or (
-                step < 0 and currentIndex > keyIndex
+            key_index = self.subspace.unpack(k)[0]
+            while (step > 0 and current_index < key_index) or (
+                    step < 0 and current_index > key_index
             ):
-                currentIndex = currentIndex + step
+                current_index = current_index + step
                 yield self.defaultValue
 
-            if currentIndex == keyIndex:
-                currentIndex = currentIndex + step
+            if current_index == key_index:
+                current_index = current_index + step
                 yield fdb.tuple.unpack(v)[0]
 
     @fdb.transactional
     def _size(self, tr):
-        keyRange = self.subspace.range()
-        lastKey = tr.get_key(fdb.KeySelector.last_less_or_equal(keyRange.stop))
-        if lastKey < keyRange.start:
+        key_range = self.subspace.range()
+        last_key = tr.get_key(fdb.KeySelector.last_less_or_equal(key_range.stop))
+        if last_key < key_range.start:
             return 0
 
-        return self.subspace.unpack(lastKey)[0] + 1
+        return self.subspace.unpack(last_key)[0] + 1
 
     @fdb.transactional
     def _set(self, index, val, tr):
@@ -351,16 +351,16 @@ class Vector:
 
     @fdb.transactional
     def _resize(self, length, tr):
-        currentSize = self.size()
-        if length == currentSize:
+        current_size = self.size()
+        if length == current_size:
             return
-        if length < currentSize:
-            self._shrink(tr, length, currentSize)
+        if length < current_size:
+            self._shrink(tr, length)
         else:
-            self._expand(tr, length, currentSize)
+            self._expand(tr, length)
 
     @fdb.transactional
-    def _shrink(self, tr, length, currentSize):
+    def _shrink(self, tr, length):
         tr.clear_range(self._key_at(length), self.subspace.range().stop)
 
         # Check if the new end of the vector was being sparsely represented
@@ -368,7 +368,7 @@ class Vector:
             tr[self._key_at(length - 1)] = fdb.tuple.pack((self.defaultValue,))
 
     @fdb.transactional
-    def _expand(self, tr, length, currentSize):
+    def _expand(self, tr, length):
         tr[self._key_at(length - 1)] = fdb.tuple.pack((self.defaultValue,))
 
     @fdb.transactional

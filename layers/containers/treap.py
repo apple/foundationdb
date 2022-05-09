@@ -32,11 +32,11 @@ class FdbTreap(object):
         self._path = path + "\x00"
 
     @fdb.transactional
-    def updateNode(self, tr, node):
+    def update_node(self, tr, node):
         tr[fdb.tuple_to_key(self._path, node[0])] = fdb.tuple_to_key(node[1])
 
     @fdb.transactional
-    def updateRoot(self, tr, node):
+    def update_root(self, tr, node):
         tr[self._rootKey] = fdb.tuple_to_key(self._path, node[0])
 
     @fdb.transactional
@@ -47,9 +47,9 @@ class FdbTreap(object):
             fdb.first_greater_than(fdb.tuple_to_key(self._path, key)) + 1,
             2,
         ):
-            parentValue = fdb.key_to_tuple(v)
-            if parentValue[0] == key or parentValue[1] == key:
-                return tuple(fdb.key_to_tuple(k)[1], parentValue)
+            parent_value = fdb.key_to_tuple(v)
+            if parent_value[0] == key or parent_value[1] == key:
+                return tuple(fdb.key_to_tuple(k)[1], parent_value)
         return None
 
     @fdb.transactional
@@ -60,13 +60,13 @@ class FdbTreap(object):
         grandparent = self.parent(tr, parent[0])
 
         if grandparent == None:
-            self.updateRoot(tr, child)
+            self.update_root(tr, child)
         elif grandparent[1][0] == parent[0]:
             grandparent[1][0] = child[0]
-            self.updateNode(tr, grandparent)
+            self.update_node(tr, grandparent)
         else:
             grandparent[1][1] = child[0]
-            self.updateNode(tr, grandparent)
+            self.update_node(tr, grandparent)
 
         if parent[1][0] == child[0]:
             parent[1][0] = child[1][1]
@@ -75,15 +75,15 @@ class FdbTreap(object):
             parent[1][1] = child[1][0]
             child[1][0] = parent[0]
 
-        self.updateNode(tr, parent)
-        self.updateNode(tr, child)
+        self.update_node(tr, parent)
+        self.update_node(tr, child)
 
         self.balance(tr, grandparent, child)
 
     @fdb.transactional
-    def setKey(self, tr, key, value, metric):
-        isNew = True
-        isRoot = True
+    def set_key(self, tr, key, value, metric):
+        is_new = True
+        is_root = True
         child = tuple(key, tuple("", "", random.random(), metric, value))
         parent = tuple()
 
@@ -93,34 +93,34 @@ class FdbTreap(object):
             fdb.first_greater_than(fdb.tuple_to_key(self._path, key)) + 1,
             2,
         ):
-            isRoot = False
+            is_root = False
             node = tuple(fdb.key_to_tuple(k)[1], fdb.key_to_tuple(v))
             if node[0] == key:
-                isNew = False
+                is_new = False
                 child = node
                 node[1][4] = value
                 break
             elif node[0] < key and node[1][1] == "":
-                isRoot = False
+                is_root = False
                 parent = node
                 parent[1][1] = key
                 break
             elif node[0] > key and node[1][0] == "":
-                isRoot = False
+                is_root = False
                 parent = node
                 parent[1][0] = key
                 break
 
         # insert root
-        if isRoot:
-            self.updateRoot(tr, child)
+        if is_root:
+            self.update_root(tr, child)
 
         # update parent
-        if isNew:
-            self.updateNode(tr, parent)
+        if is_new:
+            self.update_node(tr, parent)
 
         # insert self
-        self.updateNode(tr, child)
+        self.update_node(tr, child)
 
         # balance
         self.balance(tr, parent, child)

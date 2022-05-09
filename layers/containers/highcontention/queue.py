@@ -48,8 +48,8 @@ fdb.api_version(22)
 
 
 class Subspace(object):
-    def __init__(self, prefixTuple, rawPrefix=""):
-        self.rawPrefix = rawPrefix + fdb.tuple.pack(prefixTuple)
+    def __init__(self, prefix_tuple, raw_prefix=""):
+        self.rawPrefix = raw_prefix + fdb.tuple.pack(prefix_tuple)
 
     def __getitem__(self, name):
         return Subspace((name,), self.rawPrefix)
@@ -62,7 +62,7 @@ class Subspace(object):
 
     def unpack(self, key):
         assert key.startswith(self.rawPrefix)
-        return fdb.tuple.unpack(key[len(self.rawPrefix) :])
+        return fdb.tuple.unpack(key[len(self.rawPrefix):])
 
     def range(self, tuple=()):
         p = fdb.tuple.range(tuple)
@@ -76,9 +76,9 @@ class Subspace(object):
 
 class Queue:
     # Public functions
-    def __init__(self, subspace, highContention=True):
+    def __init__(self, subspace, high_contention=True):
         self.subspace = subspace
-        self.highContention = highContention
+        self.highContention = high_contention
 
         self._conflictedPop = self.subspace["pop"]
         self._conflictedItem = self.subspace["conflict"]
@@ -92,69 +92,68 @@ class Queue:
     @fdb.transactional
     def push(self, tr, value):
         """Push a single item onto the queue."""
-        index = self._getNextIndex(tr.snapshot, self._queueItem)
-        self._pushAt(tr, self._encodeValue(value), index)
+        index = self._get_next_index(tr.snapshot, self._queueItem)
+        self._push_at(tr, self._encode_value(value), index)
 
     def pop(self, db):
         """Pop the next item from the queue. Cannot be composed with other functions in a single transaction."""
 
         if self.highContention:
-            result = self._popHighContention(db)
+            result = self._pop_high_contention(db)
         else:
-            result = self._popSimple(db)
+            result = self._pop_simple(db)
 
         if result is None:
             return result
 
-        return self._decodeValue(result)
+        return self._decode_value(result)
 
     @fdb.transactional
     def empty(self, tr):
         """Test whether the queue is empty."""
-        return self._getFirstItem(tr) is None
+        return self._get_first_item(tr) is None
 
     @fdb.transactional
     def peek(self, tr):
         """Get the value of the next item in the queue without popping it."""
-        firstItem = self._getFirstItem(tr)
-        if firstItem is None:
+        first_item = self._get_first_item(tr)
+        if first_item is None:
             return None
         else:
-            return self._decodeValue(firstItem.value)
+            return self._decode_value(first_item.value)
 
     # Private functions
 
-    def _conflictedItemKey(self, subKey):
-        return self._conflictedItem.pack((subKey,))
+    def _conflicted_item_key(self, sub_key):
+        return self._conflictedItem.pack((sub_key,))
 
-    def _randID(self):
+    def _rand_id(self):
         return os.urandom(
             20
         )  # this relies on good random data from the OS to avoid collisions
 
-    def _encodeValue(self, value):
+    def _encode_value(self, value):
         return fdb.tuple.pack((value,))
 
-    def _decodeValue(self, value):
+    def _decode_value(self, value):
         return fdb.tuple.unpack(value)[0]
 
     # Items are pushed on the queue at an (index, randomID) pair. Items pushed at the
     # same time will have the same index, and so their ordering will be random.
     # This makes pushes fast and usually conflict free (unless the queue becomes empty
     # during the push)
-    def _pushAt(self, tr, value, index):
-        key = self._queueItem.pack((index, self._randID()))
-        read = tr[key]
+    def _push_at(self, tr, value, index):
+        key = self._queueItem.pack((index, self._rand_id()))
         tr[key] = value
 
-    def _getNextIndex(self, tr, subspace):
-        lastKey = tr.get_key(fdb.KeySelector.last_less_than(subspace.range().stop))
-        if lastKey < subspace.range().start:
+    def _get_next_index(self, tr, subspace):
+        last_key = tr.get_key(fdb.KeySelector.last_less_than(subspace.range().stop))
+        if last_key < subspace.range().start:
             return 0
 
-        return subspace.unpack(lastKey)[0] + 1
+        return subspace.unpack(last_key)[0] + 1
 
-    def _getFirstItem(self, tr):
+    def _get_first_item(self, tr):
         r = self._queueItem.range()
         for kv in tr.get_range(r.start, r.stop, 1):
             return kv
@@ -164,9 +163,9 @@ class Queue:
     # This implementation of pop does not attempt to avoid conflicts. If many clients
     # are trying to pop simultaneously, only one will be able to succeed at a time.
     @fdb.transactional
-    def _popSimple(self, tr):
+    def _pop_simple(self, tr):
 
-        firstItem = self._getFirstItem(tr)
+        firstItem = self._get_first_item(tr)
         if firstItem is None:
             return None
 
@@ -174,56 +173,52 @@ class Queue:
         return firstItem.value
 
     @fdb.transactional
-    def _addConflictedPop(self, tr, forced=False):
-        index = self._getNextIndex(tr.snapshot, self._conflictedPop)
+    def _add_conflicted_pop(self, tr, forced=False):
+        index = self._get_next_index(tr.snapshot, self._conflictedPop)
 
         if index == 0 and not forced:
             return None
 
-        waitKey = self._conflictedPop.pack((index, self._randID()))
-        read = tr[waitKey]
-        tr[waitKey] = ""
-        return waitKey
+        wait_key = self._conflictedPop.pack((index, self._rand_id()))
+        tr[wait_key] = ""
+        return wait_key
 
-    def _getWaitingPops(self, tr, numPops):
+    def _get_waiting_pops(self, tr, num_pops):
         r = self._conflictedPop.range()
-        return tr.get_range(r.start, r.stop, numPops)
+        return tr.get_range(r.start, r.stop, num_pops)
 
-    def _getItems(self, tr, numItems):
+    def _get_items(self, tr, num_items):
         r = self._queueItem.range()
-        return tr.get_range(r.start, r.stop, numItems)
+        return tr.get_range(r.start, r.stop, num_items)
 
-    def _fulfillConflictedPops(self, db):
-        numPops = 100
+    def _fulfill_conflicted_pops(self, db):
+        num_pops = 100
 
         tr = db.create_transaction()
-        pops = self._getWaitingPops(tr.snapshot, numPops)
-        items = self._getItems(tr.snapshot, numPops)
+        pops = self._get_waiting_pops(tr.snapshot, num_pops)
+        items = self._get_items(tr.snapshot, num_pops)
 
         i = 0
         pops = list(pops)
         for pop, (k, v) in zip(pops, items):
             key = self._conflictedPop.unpack(pop.key)
-            storageKey = self._conflictedItemKey(key[1])
-            tr[storageKey] = v
-            read = tr[k]
-            read = tr[pop.key]
+            storage_key = self._conflicted_item_key(key[1])
+            tr[storage_key] = v
             del tr[pop.key]
             del tr[k]
             i = i + 1
 
         for pop in pops[i:]:
-            read = tr[pop.key]
             del tr[pop.key]
 
         tr.commit().wait()
-        return len(pops) < numPops
+        return len(pops) < num_pops
 
     # This implementation of pop attempts to avoid collisions by registering
     # itself in a semi-ordered set of poppers if it doesn't initially succeed.
     # It then enters a polling loop where it attempts to fulfill outstanding pops
     # and then checks to see if it has been fulfilled.
-    def _popHighContention(self, db):
+    def _pop_high_contention(self, db):
 
         backoff = 0.01
 
@@ -232,21 +227,21 @@ class Queue:
         try:
             # Check if there are other people waiting to be popped. If so, we
             # cannot pop before them.
-            waitKey = self._addConflictedPop(tr)
-            if waitKey is None:
+            wait_key = self._add_conflicted_pop(tr)
+            if wait_key is None:
                 # No one else was waiting to be popped
-                item = self._popSimple(tr)
+                item = self._pop_simple(tr)
                 tr.commit().wait()
                 return item
             else:
                 tr.commit().wait()
 
-        except fdb.FDBError as e:
+        except fdb.FDBError:
             # If we didn't succeed, then register our pop request
-            waitKey = self._addConflictedPop(db, True)
+            wait_key = self._add_conflicted_pop(db, True)
 
         # The result of the pop will be stored at this key once it has been fulfilled
-        resultKey = self._conflictedItemKey(self._conflictedPop.unpack(waitKey)[1])
+        result_key = self._conflicted_item_key(self._conflictedPop.unpack(wait_key)[1])
 
         tr.reset()
 
@@ -254,7 +249,7 @@ class Queue:
         # checking if we have been fulfilled
         while 1:
             try:
-                while not self._fulfillConflictedPops(db):
+                while not self._fulfill_conflicted_pops(db):
                     pass
             except fdb.FDBError as e:
                 # If the error is 1020 (not_committed), then there is a good chance
@@ -267,10 +262,10 @@ class Queue:
 
             try:
                 tr.reset()
-                value = tr[waitKey]
-                result = tr[resultKey]
+                value = tr[wait_key]
+                result = tr[result_key]
 
-                # If waitKey is present, then we have not been fulfilled
+                # If wait_key is present, then we have not been fulfilled
                 if value.present():
                     time.sleep(backoff)
                     backoff = min(1, backoff * 2)
@@ -279,7 +274,7 @@ class Queue:
                 if not result.present():
                     return None
 
-                del tr[resultKey]
+                del tr[result_key]
                 tr.commit().wait()
                 return result
 
