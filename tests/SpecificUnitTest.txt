@@ -3,5 +3,5 @@ startDelay=0
 useDB=false
 
     testName=UnitTests
-    maxTestCases=1
-    testsMatching=/TransactionTagCounter/
+    maxTestCases=0
+    testsMatching=/status/json/builder
