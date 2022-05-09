@@ -390,7 +390,7 @@ struct StorageWiggleMetrics {
 };
 
 struct StorageWiggler : ReferenceCounted<StorageWiggler> {
-	enum State { INVALID = 0, RUN, PAUSE };
+	enum State : uint8_t { INVALID = 0, RUN, PAUSE };
 	AsyncVar<bool> nonEmpty;
 	DDTeamCollection const* teamCollection;
 	StorageWiggleMetrics metrics;

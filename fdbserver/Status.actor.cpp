@@ -2781,12 +2781,18 @@ ACTOR Future<Optional<Value>> getActivePrimaryDC(Database cx, int* fullyReplicat
 }
 
 // read storageWigglerStats through Read-only tx, then convert it to JSON field
-ACTOR Future<JsonBuilderObject> storageWigglerStatsFetcher(DatabaseConfiguration conf,
+ACTOR Future<JsonBuilderObject> storageWigglerStatsFetcher(Optional<DataDistributorInterface> ddWorker,
+                                                           DatabaseConfiguration conf,
                                                            Database cx,
                                                            bool use_system_priority) {
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	state Optional<Value> primaryV;
 	state Optional<Value> remoteV;
+	state Future<ErrorOr<GetStorageWigglerStateReply>> stateFut;
+	if (ddWorker.present()) {
+		stateFut = ddWorker.get().storageWigglerState.tryGetReply(GetStorageWigglerStateRequest());
+	}
+
 	loop {
 		try {
 			if (use_system_priority) {
@@ -2800,13 +2806,33 @@ ACTOR Future<JsonBuilderObject> storageWigglerStatsFetcher(DatabaseConfiguration
 			wait(tr->onError(e));
 		}
 	}
+	wait(ready(stateFut));
 
 	JsonBuilderObject res;
 	if (primaryV.present()) {
-		res["primary"] = ObjectReader::fromStringRef<StorageWiggleMetrics>(primaryV.get(), IncludeVersion()).toJSON();
+		auto obj = ObjectReader::fromStringRef<StorageWiggleMetrics>(primaryV.get(), IncludeVersion()).toJSON();
+		if (stateFut.canGet() && stateFut.get().present()) {
+			auto& reply = stateFut.get().get();
+			obj["state"] = StorageWiggler::getStateStr(static_cast<StorageWiggler::State>(reply.primary));
+			obj["last_state_change_timestamp"] = reply.lastStateChangePrimary;
+		}
+		res["primary"] = obj;
 	}
 	if (conf.regions.size() > 1 && remoteV.present()) {
-		res["remote"] = ObjectReader::fromStringRef<StorageWiggleMetrics>(remoteV.get(), IncludeVersion()).toJSON();
+		auto obj = ObjectReader::fromStringRef<StorageWiggleMetrics>(remoteV.get(), IncludeVersion()).toJSON();
+		if (stateFut.canGet() && stateFut.get().present()) {
+			auto& reply = stateFut.get().get();
+			obj["state"] = StorageWiggler::getStateStr(static_cast<StorageWiggler::State>(reply.remote));
+			obj["last_state_change_timestamp"] = reply.lastStateChangeRemote;
+		}
+		res["remote"] = obj;
+	}
+	if (stateFut.isError()) {
+		res["error"] = std::string("Can't get storage wiggler state: ") + stateFut.getError().name();
+		TraceEvent(SevWarn, "StorageWigglerStatsFetcher").error(stateFut.getError());
+	} else if (stateFut.canGet() && stateFut.get().isError()) {
+		res["error"] = std::string("Can't get storage wiggler state: ") + stateFut.get().getError().name();
+		TraceEvent(SevWarn, "StorageWigglerStatsFetcher").error(stateFut.get().getError());
 	}
 	return res;
 }
@@ -3047,7 +3073,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 				primaryWiggleValues = readStorageWiggleValues(cx, true, true);
 				remoteWiggleValues = readStorageWiggleValues(cx, false, true);
-				wait(store(storageWiggler, storageWigglerStatsFetcher(configuration.get(), cx, true)) &&
+				wait(store(storageWiggler,
+				           storageWigglerStatsFetcher(db->get().distributor, configuration.get(), cx, true)) &&
 				     success(primaryWiggleValues) && success(remoteWiggleValues));
 
 				for (auto& p : primaryWiggleValues.get())
