@@ -1,5 +1,5 @@
 /*
- * RESTKmsConnector.actor.h
+ * EncryptUtils.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,20 +18,21 @@
  * limitations under the License.
  */
 
-#pragma once
+#include "flow/EncryptUtils.h"
+#include "flow/Trace.h"
 
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_RESTKMSCONNECTOR_ACTOR_G_H)
-#define FDBSERVER_RESTKMSCONNECTOR_ACTOR_G_H
-#include "fdbserver/RESTKmsConnector.actor.g.h"
-#elif !defined(FDBSERVER_RESTKMSCONNECTOR_ACTOR_H)
-#define FDBSERVER_RESTKMSCONNECTOR_ACTOR_H
+#include <boost/format.hpp>
 
-#include "fdbserver/KmsConnector.h"
-
-class RESTKmsConnector : public KmsConnector {
-public:
-	RESTKmsConnector() = default;
-	Future<Void> connectorCore(KmsConnectorInterface interf);
-};
-
-#endif
+std::string getEncryptDbgTraceKey(std::string_view prefix,
+                                  EncryptCipherDomainId domainId,
+                                  Optional<EncryptCipherBaseKeyId> baseCipherId) {
+	// Construct the TraceEvent field key ensuring its uniqueness and compliance to TraceEvent field validator and log
+	// parsing tools
+	if (baseCipherId.present()) {
+		boost::format fmter("%s.%lld.%llu");
+		return boost::str(boost::format(fmter % prefix % domainId % baseCipherId.get()));
+	} else {
+		boost::format fmter("%s.%lld");
+		return boost::str(boost::format(fmter % prefix % domainId));
+	}
+}

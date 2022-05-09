@@ -1175,7 +1175,7 @@ TEST_CASE("flow/BlobCipher") {
 		TraceEvent("MultiAuthMode_Done").log();
 	}
 
-	// Validate dropping encyrptDomainId cached keys
+	// Validate dropping encryptDomainId cached keys
 	const EncryptCipherDomainId candidate = deterministicRandom()->randomInt(minDomainId, maxDomainId);
 	cipherKeyCache->resetEncryptDomainId(candidate);
 	std::vector<Reference<BlobCipherKey>> cachedKeys = cipherKeyCache->getAllCiphers(candidate);

@@ -19,6 +19,8 @@ set(FLOW_SRCS
   Error.cpp
   Error.h
   EventTypes.actor.h
+  EncryptUtils.h
+  EncryptUtils.cpp
   FastAlloc.cpp
   FastAlloc.h
   FastRef.h

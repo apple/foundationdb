@@ -105,7 +105,7 @@ set(FDBSERVER_SRCS
   RecoveryState.h
   RemoteIKeyValueStore.actor.h
   RemoteIKeyValueStore.actor.cpp
-  RESTKmsConnector.actor.h
+  RESTKmsConnector.h
   RESTKmsConnector.actor.cpp
   ResolutionBalancer.actor.cpp
   ResolutionBalancer.actor.h
@@ -138,7 +138,7 @@ set(FDBSERVER_SRCS
   ServerDBInfo.actor.h
   ServerDBInfo.h
   SigStack.cpp
-  SimKmsConnector.actor.h
+  SimKmsConnector.h
   SimKmsConnector.actor.cpp
   SimpleConfigConsumer.actor.cpp
   SimpleConfigConsumer.h
