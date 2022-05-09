@@ -1665,9 +1665,9 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 				state std::vector<UID> newDestinations;
 				std::set<UID> completeSrcSet(completeSrc.begin(), completeSrc.end());
 				for (const UID& id : destServers) {
-					if (!completeSrcSet.count(id)) {
-						newDestinations.push_back(id);
-					}
+					// if (!completeSrcSet.count(id)) {
+					newDestinations.push_back(id);
+					// }
 				}
 
 				state std::vector<StorageServerInterface> storageServerInterfaces;
