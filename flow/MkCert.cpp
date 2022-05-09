@@ -45,7 +45,6 @@ public:
 };
 
 [[noreturn]] void traceAndThrow(const char* condition, const char* file, int line) {
-	fprintf(stderr, "Failed condition check %s at %s:%d\n", condition, file, line);
 	auto te = TraceEvent(SevWarnAlways, "ErrorTLSKeyOrCertGen");
 	te.suppressFor(60).detail("File", file).detail("Line", line).detail("Condition", condition);
 	if (auto err = ::ERR_get_error()) {
@@ -54,7 +53,6 @@ public:
 		};
 		::ERR_error_string_n(err, buf, sizeof(buf));
 		te.detail("OpenSSLError", buf);
-		fprintf(stderr, "OpenSSL error: %s\n", buf);
 	}
 	throw tls_error();
 }
