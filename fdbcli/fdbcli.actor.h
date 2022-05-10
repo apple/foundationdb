@@ -189,7 +189,10 @@ ACTOR Future<bool> clearHealthyZone(Reference<IDatabase> db,
                                     bool clearSSFailureZoneString = false);
 ACTOR Future<bool> maintenanceCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // profile command
-ACTOR Future<bool> profileCommandActor(Reference<ITransaction> tr, std::vector<StringRef> tokens, bool intrans);
+ACTOR Future<bool> profileCommandActor(Database db,
+                                       Reference<ITransaction> tr,
+                                       std::vector<StringRef> tokens,
+                                       bool intrans);
 // setclass command
 ACTOR Future<bool> setClassCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // snapshot command

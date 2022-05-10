@@ -37,13 +37,7 @@ const KeyRef transactionTagSampleCost = LiteralStringRef("config/transaction_tag
 const KeyRef samplingFrequency = LiteralStringRef("visibility/sampling/frequency");
 const KeyRef samplingWindow = LiteralStringRef("visibility/sampling/window");
 
-GlobalConfig::GlobalConfig(Database& cx) : cx(cx), lastUpdate(0) {}
-
-GlobalConfig& GlobalConfig::globalConfig() {
-	void* res = g_network->global(INetwork::enGlobalConfig);
-	ASSERT(res);
-	return *reinterpret_cast<GlobalConfig*>(res);
-}
+GlobalConfig::GlobalConfig(const Database& cx) : cx(cx), lastUpdate(0) {}
 
 Key GlobalConfig::prefixedKey(KeyRef key) {
 	return key.withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::GLOBALCONFIG).begin);
