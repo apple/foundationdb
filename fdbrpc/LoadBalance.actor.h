@@ -606,7 +606,6 @@ Future<REPLY_TYPE(Request)> loadBalance(
 
 		if (!stream && !firstRequestData.isValid()) {
 			// Everything is down!  Wait for someone to be up.
-
 			std::vector<Future<Void>> ok(alternatives->size());
 			for (int i = 0; i < ok.size(); i++) {
 				ok[i] = IFailureMonitor::failureMonitor().onStateEqual(alternatives->get(i, channel).getEndpoint(),
@@ -677,11 +676,9 @@ Future<REPLY_TYPE(Request)> loadBalance(
 							    std::min(model->secondBudget + FLOW_KNOBS->SECOND_REQUEST_BUDGET_GROWTH,
 							             FLOW_KNOBS->SECOND_REQUEST_MAX_BUDGET);
 						}
-
 						if (firstRequestData.checkAndProcessResult(atMostOnce)) {
 							return result.get();
 						}
-
 						firstRequestEndpoint = Optional<uint64_t>();
 						break;
 					}

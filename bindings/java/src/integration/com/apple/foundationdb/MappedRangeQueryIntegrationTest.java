@@ -194,8 +194,8 @@ class MappedRangeQueryIntegrationTest {
 		try {
 			List<MappedKeyValue> kvs =
 			    tr.getMappedRange(KeySelector.firstGreaterOrEqual(indexEntryKey(begin)),
-			                          KeySelector.firstGreaterOrEqual(indexEntryKey(end)), MAPPER,
-			                          ReadTransaction.ROW_LIMIT_UNLIMITED, false, StreamingMode.WANT_ALL)
+			                      KeySelector.firstGreaterOrEqual(indexEntryKey(end)), MAPPER,
+			                      ReadTransaction.ROW_LIMIT_UNLIMITED, 0, false, StreamingMode.WANT_ALL)
 			        .asList()
 			        .get();
 			Assertions.assertEquals(end - begin, kvs.size());
