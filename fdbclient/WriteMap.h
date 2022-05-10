@@ -231,7 +231,8 @@ public:
 				                                is_unreadable));
 			}
 		} else {
-			if (!it.is_unreadable() && operation == MutationRef::SetValue) {
+			if (!it.is_unreadable() &&
+			    (operation == MutationRef::SetValue || operation == MutationRef::SetVersionstampedValue)) {
 				it.tree.clear();
 				PTreeImpl::remove(writes, ver, key);
 				PTreeImpl::insert(writes,
@@ -523,9 +524,10 @@ public:
 	static RYWMutation coalesce(RYWMutation existingEntry, RYWMutation newEntry, Arena& arena) {
 		ASSERT(newEntry.value.present());
 
-		if (newEntry.type == MutationRef::SetValue)
+		if (newEntry.type == MutationRef::SetValue || newEntry.type == MutationRef::SetVersionstampedValue) {
+			// independent mutations
 			return newEntry;
-		else if (newEntry.type == MutationRef::AddValue) {
+		} else if (newEntry.type == MutationRef::AddValue) {
 			switch (existingEntry.type) {
 			case MutationRef::SetValue:
 				return RYWMutation(doLittleEndianAdd(existingEntry.value, newEntry.value.get(), arena),

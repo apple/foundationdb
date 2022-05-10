@@ -47,8 +47,28 @@ struct CommandHelp {
 	CommandHelp(const char* u, const char* s, const char* l) : usage(u), short_desc(s), long_desc(l) {}
 };
 
+void arrayGenerator(const char* text, const char* line, const char** options, std::vector<std::string>& lc);
+
 struct CommandFactory {
-	CommandFactory(const char* name, CommandHelp help) { commands()[name] = help; }
+	typedef void (*CompletionGeneratorFunc)(const char* text,
+	                                        const char* line,
+	                                        std::vector<std::string>& lc,
+	                                        std::vector<StringRef> const& tokens);
+
+	typedef std::vector<const char*> (*HintGeneratorFunc)(std::vector<StringRef> const& tokens, bool inArgument);
+
+	CommandFactory(const char* name,
+	               CommandHelp help,
+	               CompletionGeneratorFunc completionFunc = nullptr,
+	               HintGeneratorFunc hintFunc = nullptr) {
+		commands()[name] = help;
+		if (completionFunc) {
+			completionGenerators()[name] = completionFunc;
+		}
+		if (hintFunc) {
+			hintGenerators()[name] = hintFunc;
+		}
+	}
 	CommandFactory(const char* name) { hiddenCommands().insert(name); }
 	static std::map<std::string, CommandHelp>& commands() {
 		static std::map<std::string, CommandHelp> helpMap;
@@ -57,6 +77,14 @@ struct CommandFactory {
 	static std::set<std::string>& hiddenCommands() {
 		static std::set<std::string> commands;
 		return commands;
+	}
+	static std::map<std::string, CompletionGeneratorFunc>& completionGenerators() {
+		static std::map<std::string, CompletionGeneratorFunc> completionMap;
+		return completionMap;
+	}
+	static std::map<std::string, HintGeneratorFunc>& hintGenerators() {
+		static std::map<std::string, HintGeneratorFunc> hintMap;
+		return hintMap;
 	}
 };
 

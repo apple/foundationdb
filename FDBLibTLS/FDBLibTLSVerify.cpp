@@ -20,6 +20,9 @@
 
 #include "FDBLibTLS/FDBLibTLSVerify.h"
 
+#if defined(HAVE_WOLFSSL)
+#include <wolfssl/options.h>
+#endif
 #include <openssl/objects.h>
 
 #include <algorithm>

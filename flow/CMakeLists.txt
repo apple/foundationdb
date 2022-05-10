@@ -58,6 +58,7 @@ set(FLOW_SRCS
   SignalSafeUnwind.cpp
   SignalSafeUnwind.h
   SimpleOpt.h
+  StreamCipher.cpp
   StreamCipher.h
   SystemMonitor.cpp
   SystemMonitor.h
@@ -84,6 +85,10 @@ set(FLOW_SRCS
   actorcompiler.h
   crc32c.h
   crc32c.cpp
+  ppc-asm.h
+  crc32.S
+  crc32_wrapper.h
+  crc32_wrapper.c
   error_definitions.h
   ${CMAKE_CURRENT_BINARY_DIR}/SourceVersion.h
   flat_buffers.cpp
@@ -103,12 +108,6 @@ set(FLOW_SRCS
   version.cpp
   xxhash.c
   xxhash.h)
-
-if(WITH_TLS)
-  set(FLOW_SRCS
-    ${FLOW_SRCS}
-    StreamCipher.cpp)
-endif()
 
 add_library(stacktrace stacktrace.amalgamation.cpp stacktrace.h)
 if (USE_ASAN)
@@ -138,6 +137,7 @@ target_link_libraries(flow PUBLIC fmt::fmt)
 
 add_flow_target(STATIC_LIBRARY NAME flow_sampling SRCS ${FLOW_SRCS})
 target_link_libraries(flow_sampling PRIVATE stacktrace)
+target_link_libraries(flow_sampling PUBLIC fmt::fmt)
 target_compile_definitions(flow_sampling PRIVATE -DENABLE_SAMPLING)
 if(WIN32)
   add_dependencies(flow_sampling_actors flow_actors)
@@ -165,12 +165,11 @@ if(USE_VALGRIND)
   target_link_libraries(flow PUBLIC Valgrind)
   target_link_libraries(flow_sampling PUBLIC Valgrind)
 endif()
-if(NOT WITH_TLS)
-  target_compile_definitions(flow PUBLIC TLS_DISABLED)
-  target_compile_definitions(flow_sampling PUBLIC TLS_DISABLED)
-else()
-  target_link_libraries(flow PUBLIC OpenSSL::SSL)
-  target_link_libraries(flow_sampling PUBLIC OpenSSL::SSL)
+target_link_libraries(flow PUBLIC OpenSSL::SSL)
+target_link_libraries(flow_sampling PUBLIC OpenSSL::SSL)
+if(USE_WOLFSSL)
+  target_include_directories(flow SYSTEM BEFORE PUBLIC ${WOLFSSL_INCLUDE_DIR}/wolfssl)
+  target_include_directories(flow_sampling SYSTEM BEFORE PUBLIC ${WOLFSSL_INCLUDE_DIR}/wolfssl)
 endif()
 target_link_libraries(flow PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
 target_link_libraries(flow_sampling PUBLIC Threads::Threads ${CMAKE_DL_LIBS})

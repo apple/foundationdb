@@ -43,13 +43,13 @@ struct CommitProxyInterface {
 
 	Optional<Key> processId;
 	bool provisional;
-	RequestStream<struct CommitTransactionRequest> commit;
-	RequestStream<struct GetReadVersionRequest>
+	PublicRequestStream<struct CommitTransactionRequest> commit;
+	PublicRequestStream<struct GetReadVersionRequest>
 	    getConsistentReadVersion; // Returns a version which (1) is committed, and (2) is >= the latest version reported
 	                              // committed (by a commit response) when this request was sent
 	                              //   (at some point between when this request is sent and when its response is
 	                              //   received, the latest version reported committed)
-	RequestStream<struct GetKeyServerLocationsRequest> getKeyServersLocations;
+	PublicRequestStream<struct GetKeyServerLocationsRequest> getKeyServersLocations;
 	RequestStream<struct GetStorageServerRejoinInfoRequest> getStorageServerRejoinInfo;
 
 	RequestStream<ReplyPromise<Void>> waitFailure;
@@ -72,9 +72,9 @@ struct CommitProxyInterface {
 		serializer(ar, processId, provisional, commit);
 		if (Archive::isDeserializing) {
 			getConsistentReadVersion =
-			    RequestStream<struct GetReadVersionRequest>(commit.getEndpoint().getAdjustedEndpoint(1));
+			    PublicRequestStream<struct GetReadVersionRequest>(commit.getEndpoint().getAdjustedEndpoint(1));
 			getKeyServersLocations =
-			    RequestStream<struct GetKeyServerLocationsRequest>(commit.getEndpoint().getAdjustedEndpoint(2));
+			    PublicRequestStream<struct GetKeyServerLocationsRequest>(commit.getEndpoint().getAdjustedEndpoint(2));
 			getStorageServerRejoinInfo =
 			    RequestStream<struct GetStorageServerRejoinInfoRequest>(commit.getEndpoint().getAdjustedEndpoint(3));
 			waitFailure = RequestStream<ReplyPromise<Void>>(commit.getEndpoint().getAdjustedEndpoint(4));
@@ -162,7 +162,7 @@ struct CommitTransactionRequest : TimedRequest {
 	bool firstInBatch() const { return (flags & FLAG_FIRST_IN_BATCH) != 0; }
 
 	Arena arena;
-	SpanID spanContext;
+	SpanContext spanContext;
 	CommitTransactionRef transaction;
 	ReplyPromise<CommitID> reply;
 	uint32_t flags;
@@ -172,8 +172,8 @@ struct CommitTransactionRequest : TimedRequest {
 
 	TenantInfo tenantInfo;
 
-	CommitTransactionRequest() : CommitTransactionRequest(SpanID()) {}
-	CommitTransactionRequest(SpanID const& context) : spanContext(context), flags(0) {}
+	CommitTransactionRequest() : CommitTransactionRequest(SpanContext()) {}
+	CommitTransactionRequest(SpanContext const& context) : spanContext(context), flags(0) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -242,7 +242,7 @@ struct GetReadVersionRequest : TimedRequest {
 		FLAG_PRIORITY_MASK = PRIORITY_SYSTEM_IMMEDIATE,
 	};
 
-	SpanID spanContext;
+	SpanContext spanContext;
 	uint32_t transactionCount;
 	uint32_t flags;
 	TransactionPriority priority;
@@ -255,7 +255,7 @@ struct GetReadVersionRequest : TimedRequest {
 	Version maxVersion; // max version in the client's version vector cache
 
 	GetReadVersionRequest() : transactionCount(1), flags(0), maxVersion(invalidVersion) {}
-	GetReadVersionRequest(SpanID spanContext,
+	GetReadVersionRequest(SpanContext spanContext,
 	                      uint32_t transactionCount,
 	                      TransactionPriority priority,
 	                      Version maxVersion,
@@ -325,7 +325,7 @@ struct GetKeyServerLocationsReply {
 struct GetKeyServerLocationsRequest {
 	constexpr static FileIdentifier file_identifier = 9144680;
 	Arena arena;
-	SpanID spanContext;
+	SpanContext spanContext;
 	Optional<TenantNameRef> tenant;
 	KeyRef begin;
 	Optional<KeyRef> end;
@@ -340,7 +340,7 @@ struct GetKeyServerLocationsRequest {
 	Version minTenantVersion;
 
 	GetKeyServerLocationsRequest() : limit(0), reverse(false), minTenantVersion(latestVersion) {}
-	GetKeyServerLocationsRequest(SpanID spanContext,
+	GetKeyServerLocationsRequest(SpanContext spanContext,
 	                             Optional<TenantNameRef> const& tenant,
 	                             KeyRef const& begin,
 	                             Optional<KeyRef> const& end,
@@ -378,12 +378,12 @@ struct GetRawCommittedVersionReply {
 
 struct GetRawCommittedVersionRequest {
 	constexpr static FileIdentifier file_identifier = 12954034;
-	SpanID spanContext;
+	SpanContext spanContext;
 	Optional<UID> debugID;
 	ReplyPromise<GetRawCommittedVersionReply> reply;
 	Version maxVersion; // max version in the grv proxy's version vector cache
 
-	explicit GetRawCommittedVersionRequest(SpanID spanContext,
+	explicit GetRawCommittedVersionRequest(SpanContext spanContext,
 	                                       Optional<UID> const& debugID = Optional<UID>(),
 	                                       Version maxVersion = invalidVersion)
 	  : spanContext(spanContext), debugID(debugID), maxVersion(maxVersion) {}

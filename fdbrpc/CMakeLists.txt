@@ -7,6 +7,7 @@ set(FDBRPC_SRCS
   AsyncFileReadAhead.actor.h
   AsyncFileWinASIO.actor.h
   AsyncFileCached.actor.cpp
+  AsyncFileEncrypted.actor.cpp
   AsyncFileNonDurable.actor.cpp
   AsyncFileWriteChecker.cpp
   FailureMonitor.actor.cpp
@@ -15,7 +16,9 @@ set(FDBRPC_SRCS
   genericactors.actor.h
   genericactors.actor.cpp
   HealthMonitor.actor.cpp
+  HTTP.actor.cpp
   IAsyncFile.actor.cpp
+  IPAllowList.cpp
   LoadBalance.actor.cpp
   LoadBalance.actor.h
   Locality.cpp
@@ -27,6 +30,10 @@ set(FDBRPC_SRCS
   ReplicationPolicy.cpp
   ReplicationTypes.cpp
   ReplicationUtils.cpp
+  RESTClient.h
+  RESTClient.actor.cpp
+  RESTUtils.h
+  RESTUtils.actor.cpp
   SimExternalConnection.actor.cpp
   SimExternalConnection.h
   Stats.actor.cpp
@@ -34,14 +41,10 @@ set(FDBRPC_SRCS
   sim2.actor.cpp
   sim_validation.cpp
   TimedRequest.h
+  TokenSign.h
+  TokenSign.cpp
   TraceFileIO.cpp
   TSSComparison.h)
-
-if(WITH_TLS)
-  set(FDBRPC_SRCS
-    ${FDBRPC_SRCS}
-    AsyncFileEncrypted.actor.cpp)
-endif()
 
 set(COMPILE_EIO OFF)
 

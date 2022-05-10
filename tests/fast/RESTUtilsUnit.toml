@@ -1,0 +1,8 @@
+[[test]]
+testTitle = 'RESTUtilsTest'
+startDelay = 0
+useDB = false
+
+    [[test.workload]]
+    testName = 'UnitTests'
+    testsMatching = '/RESTUtils'

@@ -322,6 +322,7 @@ public:
 	int ROCKSDB_CAN_COMMIT_DELAY_TIMES_ON_OVERLOAD;
 	int64_t ROCKSDB_COMPACTION_READAHEAD_SIZE;
 	int64_t ROCKSDB_BLOCK_SIZE;
+	bool ENABLE_SHARDED_ROCKSDB;
 
 	// Leader election
 	int MAX_NOTIFICATIONS;
@@ -373,6 +374,7 @@ public:
 	int MAX_COMMIT_UPDATES;
 	double MAX_PROXY_COMPUTE;
 	double MAX_COMPUTE_PER_OPERATION;
+	double MAX_COMPUTE_DURATION_LOG_CUTOFF;
 	int PROXY_COMPUTE_BUCKETS;
 	double PROXY_COMPUTE_GROWTH_RATE;
 	int TXN_STATE_SEND_AMOUNT;
@@ -479,6 +481,8 @@ public:
 	                                             // be determined as degraded worker.
 	int CC_SATELLITE_DEGRADATION_MIN_BAD_SERVER; // The minimum amount of degraded server in satellite DC to be
 	                                             // determined as degraded satellite.
+	double CC_THROTTLE_SINGLETON_RERECRUIT_INTERVAL; // The interval to prevent re-recruiting the same singleton if a
+	                                                 // recruiting fight between two cluster controllers occurs.
 
 	// Knobs used to select the best policy (via monte carlo)
 	int POLICY_RATING_TESTS; // number of tests per policy (in order to compare)
@@ -819,6 +823,10 @@ public:
 	// Encryption
 	bool ENABLE_ENCRYPTION;
 	std::string ENCRYPTION_MODE;
+	int SIM_KMS_MAX_KEYS;
+
+	// Key Management Service (KMS) Connector
+	std::string KMS_CONNECTOR_TYPE;
 
 	// blob granule stuff
 	// FIXME: configure url with database configuration instead of knob eventually
@@ -843,6 +851,17 @@ public:
 	double BLOB_MANAGER_STATUS_EXP_BACKOFF_EXPONENT;
 	double BGCC_TIMEOUT;
 	double BGCC_MIN_INTERVAL;
+
+	// HTTP KMS Connector
+	std::string REST_KMS_CONNECTOR_KMS_DISCOVERY_URL_MODE;
+	std::string REST_KMS_CONNECTOR_DISCOVER_KMS_URL_FILE;
+	std::string REST_KMS_CONNECTOR_VALIDATION_TOKEN_MODE;
+	std::string REST_KMS_CONNECTOR_VALIDATION_TOKEN_DETAILS;
+	int REST_KMS_CONNECTOR_VALIDATION_TOKEN_MAX_SIZE;
+	int REST_KMS_CONNECTOR_VALIDATION_TOKENS_MAX_PAYLOAD_SIZE;
+	bool REST_KMS_CONNECTOR_REFRESH_KMS_URLS;
+	double REST_KMS_CONNECTOR_REFRESH_KMS_URLS_INTERVAL_SEC;
+	std::string REST_KMS_CONNECTOR_GET_ENCRYPTION_KEYS_ENDPOINT;
 
 	ServerKnobs(Randomize, ClientKnobs*, IsSimulated);
 	void initialize(Randomize, ClientKnobs*, IsSimulated);

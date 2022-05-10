@@ -40,6 +40,11 @@ auto get(MapContainer& m, K const& k) -> decltype(m.at(k)) {
 
 } // namespace
 
+FDB_DEFINE_BOOLEAN_PARAM(WantNewServers);
+FDB_DEFINE_BOOLEAN_PARAM(WantTrueBest);
+FDB_DEFINE_BOOLEAN_PARAM(PreferLowerUtilization);
+FDB_DEFINE_BOOLEAN_PARAM(TeamMustHaveShards);
+
 class DDTeamCollectionImpl {
 	ACTOR static Future<Void> checkAndRemoveInvalidLocalityAddr(DDTeamCollection* self) {
 		state double start = now();
@@ -713,18 +718,19 @@ public:
 				bool recheck = !healthy && (lastReady != self->initialFailureReactionDelay.isReady() ||
 				                            (lastZeroHealthy && !self->zeroHealthyTeams->get()) || containsFailed);
 
-				// TraceEvent("TeamHealthChangeDetected", self->distributorId)
-				//     .detail("Team", team->getDesc())
-				//     .detail("ServersLeft", serversLeft)
-				//     .detail("LastServersLeft", lastServersLeft)
-				//     .detail("AnyUndesired", anyUndesired)
-				//     .detail("LastAnyUndesired", lastAnyUndesired)
-				//     .detail("AnyWrongConfiguration", anyWrongConfiguration)
-				//     .detail("LastWrongConfiguration", lastWrongConfiguration)
-				//     .detail("Recheck", recheck)
-				//     .detail("BadTeam", badTeam)
-				//     .detail("LastZeroHealthy", lastZeroHealthy)
-				//     .detail("ZeroHealthyTeam", self->zeroHealthyTeams->get());
+				//TraceEvent("TeamHealthChangeDetected", self->distributorId)
+				//    .detail("Team", team->getDesc())
+				//    .detail("ServersLeft", serversLeft)
+				//    .detail("LastServersLeft", lastServersLeft)
+				//    .detail("AnyUndesired", anyUndesired)
+				//    .detail("LastAnyUndesired", lastAnyUndesired)
+				//    .detail("AnyWrongConfiguration", anyWrongConfiguration)
+				//    .detail("LastWrongConfiguration", lastWrongConfiguration)
+				//    .detail("ContainsWigglingServer", anyWigglingServer)
+				//    .detail("Recheck", recheck)
+				//    .detail("BadTeam", badTeam)
+				//    .detail("LastZeroHealthy", lastZeroHealthy)
+				//    .detail("ZeroHealthyTeam", self->zeroHealthyTeams->get());
 
 				lastReady = self->initialFailureReactionDelay.isReady();
 				lastZeroHealthy = self->zeroHealthyTeams->get();
@@ -990,14 +996,12 @@ public:
 		state Future<Void> metricsTracker = server->serverMetricsPolling();
 
 		state Future<std::pair<StorageServerInterface, ProcessClass>> interfaceChanged = server->onInterfaceChanged;
-
-		state Future<Void> storeTypeTracker = (isTss) ? Never() : keyValueStoreTypeTracker(self, server);
 		state bool hasWrongDC = !self->isCorrectDC(*server);
 		state bool hasInvalidLocality =
 		    !self->isValidLocality(self->configuration.storagePolicy, server->getLastKnownInterface().locality);
 		state int targetTeamNumPerServer =
 		    (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (self->configuration.storageTeamSize + 1)) / 2;
-		state Future<Void> storageMetadataTracker = (isTss) ? Never() : self->readOrCreateStorageMetadata(server);
+		state Future<Void> storageMetadataTracker = self->updateStorageMetadata(server, isTss);
 		try {
 			loop {
 				status.isUndesired = !self->disableFailingLaggingServers.get() && server->ssVersionTooFarBehind.get();
@@ -1098,9 +1102,8 @@ public:
 				if (worstStatus == DDTeamCollection::Status::WIGGLING && invalidWiggleServer(worstAddr, self, server)) {
 					TraceEvent(SevInfo, "InvalidWiggleServer", self->distributorId)
 					    .detail("Address", worstAddr.toString())
-					    .detail("ProcessId", server->getLastKnownInterface().locality.processId())
-					    .detail("WigglingId", self->wigglingId.present());
-					self->excludedServers.set(worstAddr, DDTeamCollection::Status::NONE);
+					    .detail("ServerId", server->getId())
+					    .detail("WigglingId", self->wigglingId.present() ? self->wigglingId.get().toString() : "");
 					worstStatus = DDTeamCollection::Status::NONE;
 				}
 				otherChanges.push_back(self->excludedServers.onChange(worstAddr));
@@ -1122,10 +1125,9 @@ public:
 					if (testStatus == DDTeamCollection::Status::WIGGLING &&
 					    invalidWiggleServer(testAddr, self, server)) {
 						TraceEvent(SevInfo, "InvalidWiggleServer", self->distributorId)
-						    .detail("Address", testAddr.toString())
-						    .detail("ProcessId", server->getLastKnownInterface().locality.processId())
-						    .detail("ValidWigglingId", self->wigglingId.present());
-						self->excludedServers.set(testAddr, DDTeamCollection::Status::NONE);
+						    .detail("Address", worstAddr.toString())
+						    .detail("ServerId", server->getId())
+						    .detail("WigglingId", self->wigglingId.present() ? self->wigglingId.get().toString() : "");
 						testStatus = DDTeamCollection::Status::NONE;
 					}
 
@@ -1320,8 +1322,8 @@ public:
 						recordTeamCollectionInfo = true;
 						// Restart the storeTracker for the new interface. This will cancel the previous
 						// keyValueStoreTypeTracker
-						storeTypeTracker = (isTss) ? Never() : keyValueStoreTypeTracker(self, server);
-						storageMetadataTracker = (isTss) ? Never() : readOrCreateStorageMetadata(self, server);
+						// storeTypeTracker = (isTss) ? Never() : keyValueStoreTypeTracker(self, server);
+						storageMetadataTracker = self->updateStorageMetadata(server, isTss);
 						hasWrongDC = !self->isCorrectDC(*server);
 						hasInvalidLocality = !self->isValidLocality(self->configuration.storagePolicy,
 						                                            server->getLastKnownInterface().locality);
@@ -1341,7 +1343,7 @@ public:
 						    .detail("WrongStoreTypeRemoved", server->wrongStoreTypeToRemove.get());
 					}
 					when(wait(server->wakeUpTracker.getFuture())) { server->wakeUpTracker = Promise<Void>(); }
-					when(wait(storageMetadataTracker || storeTypeTracker)) {}
+					when(wait(storageMetadataTracker)) {}
 					when(wait(server->ssVersionTooFarBehind.onChange())) {}
 					when(wait(self->disableFailingLaggingServers.onChange())) {}
 				}
@@ -1489,20 +1491,6 @@ public:
 		    .detail("TotalBytesLost", bytesLost);
 
 		return Void();
-	}
-
-	ACTOR static Future<Void> keyValueStoreTypeTracker(DDTeamCollection* self, TCServerInfo* server) {
-		// Update server's storeType, especially when it was created
-		wait(server->updateStoreType());
-
-		if (server->getStoreType() != self->configuration.storageServerStoreType) {
-			if (self->wrongStoreTypeRemover.isReady()) {
-				self->wrongStoreTypeRemover = removeWrongStoreType(self);
-				self->addActor.send(self->wrongStoreTypeRemover);
-			}
-		}
-
-		return Never();
 	}
 
 	ACTOR static Future<Void> storageServerFailureTracker(DDTeamCollection* self,
@@ -2034,6 +2022,8 @@ public:
 		}
 
 		loop {
+			state Future<Void> pauseChanged = self->pauseWiggle->onChange();
+			state Future<Void> stopChanged = stopSignal->onChange();
 			if (self->wigglingId.present()) {
 				state UID id = self->wigglingId.get();
 				if (self->pauseWiggle->get()) {
@@ -2045,7 +2035,7 @@ public:
 					           "PerpetualStorageWigglePause",
 					           self->distributorId)
 					    .detail("Primary", self->primary)
-					    .detail("ProcessId", id)
+					    .detail("ServerId", id)
 					    .detail("BestTeamKeepStuckCount", self->bestTeamKeepStuckCount)
 					    .detail("ExtraHealthyTeamCount", extraTeamCount)
 					    .detail("HealthyTeamCount", self->healthyTeamCount);
@@ -2058,11 +2048,11 @@ public:
 							moveFinishFuture = fv;
 							TraceEvent("PerpetualStorageWiggleStart", self->distributorId)
 							    .detail("Primary", self->primary)
-							    .detail("ProcessId", id)
+							    .detail("ServerId", id)
 							    .detail("ExtraHealthyTeamCount", extraTeamCount)
 							    .detail("HealthyTeamCount", self->healthyTeamCount);
 						}
-						when(wait(self->pauseWiggle->onChange())) { continue; }
+						when(wait(pauseChanged)) { continue; }
 					}
 				}
 			}
@@ -2084,7 +2074,7 @@ public:
 					self->includeStorageServersForWiggle();
 					TraceEvent("PerpetualStorageWiggleFinish", self->distributorId)
 					    .detail("Primary", self->primary)
-					    .detail("ProcessId", self->wigglingId.get());
+					    .detail("ServerId", self->wigglingId.get());
 
 					wait(self->eraseStorageWiggleMap(&metadataMap, self->wigglingId.get()) &&
 					     self->storageWiggler->finishWiggle());
@@ -2093,7 +2083,7 @@ public:
 					finishStorageWiggleSignal.send(Void());
 					extraTeamCount = std::max(0, extraTeamCount - 1);
 				}
-				when(wait(ddQueueCheck || self->pauseWiggle->onChange() || stopSignal->onChange())) {}
+				when(wait(ddQueueCheck || pauseChanged || stopChanged)) {}
 			}
 
 			if (stopSignal->get()) {
@@ -2105,7 +2095,7 @@ public:
 			self->includeStorageServersForWiggle();
 			TraceEvent("PerpetualStorageWiggleExitingPause", self->distributorId)
 			    .detail("Primary", self->primary)
-			    .detail("ProcessId", self->wigglingId.get());
+			    .detail("ServerId", self->wigglingId.get());
 			self->wigglingId.reset();
 		}
 
@@ -2626,7 +2616,11 @@ public:
 										    .detail("TSSID", tssId)
 										    .detail("Reason",
 										            self->zeroHealthyTeams->get() ? "ZeroHealthyTeams" : "TooMany");
+										Promise<Void> shutdown = self->shutdown;
 										killPromise.send(Void());
+										if (!shutdown.canBeSet()) {
+											return Void(); // "self" got destroyed, so return.
+										}
 									}
 								}
 							}
@@ -2867,12 +2861,17 @@ public:
 		return Void();
 	}
 
-	ACTOR static Future<Void> readOrCreateStorageMetadata(DDTeamCollection* self, TCServerInfo* server) {
+	ACTOR static Future<Void> updateStorageMetadata(DDTeamCollection* self, TCServerInfo* server) {
 		state KeyBackedObjectMap<UID, StorageMetadataType, decltype(IncludeVersion())> metadataMap(
 		    serverMetadataKeys.begin, IncludeVersion());
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
-		state StorageMetadataType data(StorageMetadataType::currentTime());
-		// printf("------ read metadata %s\n", server->getId().toString().c_str());
+
+		// Update server's storeType, especially when it was created
+		wait(server->updateStoreType());
+		state StorageMetadataType data(StorageMetadataType::currentTime(),
+		                               server->getStoreType(),
+		                               !server->isCorrectStoreType(self->configuration.storageServerStoreType));
+
 		// read storage metadata
 		loop {
 			try {
@@ -2881,17 +2880,23 @@ public:
 				Optional<StorageMetadataType> metadata = wait(property.get(tr));
 				// NOTE: in upgrade testing, there may not be any metadata
 				if (metadata.present()) {
-					data = metadata.get();
-				} else {
-					metadataMap.set(tr, server->getId(), data);
+					data.createdTime = metadata.get().createdTime;
 				}
+				metadataMap.set(tr, server->getId(), data);
 				wait(tr->commit());
 				break;
 			} catch (Error& e) {
 				wait(tr->onError(e));
 			}
 		}
+		// printf("------ updated metadata %s\n", server->getId().toString().c_str());
 
+		// wrong store type handler
+		if (!server->isCorrectStoreType(self->configuration.storageServerStoreType) &&
+		    self->wrongStoreTypeRemover.isReady()) {
+			self->wrongStoreTypeRemover = removeWrongStoreType(self);
+			self->addActor.send(self->wrongStoreTypeRemover);
+		}
 		// add server to wiggler
 		if (self->storageWiggler->contains(server->getId())) {
 			self->storageWiggler->updateMetadata(server->getId(), data);
@@ -3404,10 +3409,6 @@ Future<Void> DDTeamCollection::removeBadTeams() {
 	return DDTeamCollectionImpl::removeBadTeams(this);
 }
 
-Future<Void> DDTeamCollection::keyValueStoreTypeTracker(TCServerInfo* server) {
-	return DDTeamCollectionImpl::keyValueStoreTypeTracker(this, server);
-}
-
 Future<Void> DDTeamCollection::storageServerFailureTracker(TCServerInfo* server,
                                                            Database cx,
                                                            ServerStatus* status,
@@ -3503,8 +3504,8 @@ Future<Void> DDTeamCollection::readStorageWiggleMap() {
 	return DDTeamCollectionImpl::readStorageWiggleMap(this);
 }
 
-Future<Void> DDTeamCollection::readOrCreateStorageMetadata(TCServerInfo* server) {
-	return DDTeamCollectionImpl::readOrCreateStorageMetadata(this, server);
+Future<Void> DDTeamCollection::updateStorageMetadata(TCServerInfo* server, bool isTss) {
+	return isTss ? Never() : DDTeamCollectionImpl::updateStorageMetadata(this, server);
 }
 
 void DDTeamCollection::resetLocalitySet() {
@@ -3577,6 +3578,8 @@ DDTeamCollection::DDTeamCollection(Database const& cx,
 
 DDTeamCollection::~DDTeamCollection() {
 	TraceEvent("DDTeamCollectionDestructed", distributorId).detail("Primary", primary);
+	// Signal that the object is being destroyed.
+	shutdown.send(Void());
 
 	// Cancel the teamBuilder to avoid creating new teams after teams are cancelled.
 	teamBuilder.cancel();
@@ -4750,6 +4753,7 @@ bool DDTeamCollection::removeTeam(Reference<TCTeamInfo> team) {
 
 	ASSERT_WE_THINK(foundInMachineTeam);
 	team->tracker.cancel();
+	team->setHealthy(false);
 	if (g_network->isSimulated()) {
 		// Update server team information for consistency check in simulation
 		traceTeamCollectionInfo();
@@ -5362,14 +5366,10 @@ public:
 		 * don't strictly need new servers and all of these servers are healthy,
 		 * maintain status quo.
 		 */
-
-		bool wantsNewServers = false;
-		bool wantsTrueBest = true;
-		bool preferLowerUtilization = true;
-		bool teamMustHaveShards = false;
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
-		state GetTeamRequest req(wantsNewServers, wantsTrueBest, preferLowerUtilization, teamMustHaveShards);
+		state GetTeamRequest req(
+		    WantNewServers::False, WantTrueBest::True, PreferLowerUtilization::True, TeamMustHaveShards::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5419,14 +5419,10 @@ public:
 		 * strictly need new servers but '1' is not healthy, see that the other team of
 		 * complete sources is selected.
 		 */
-
-		bool wantsNewServers = false;
-		bool wantsTrueBest = true;
-		bool preferLowerUtilization = true;
-		bool teamMustHaveShards = false;
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0), UID(4, 0) };
 
-		state GetTeamRequest req(wantsNewServers, wantsTrueBest, preferLowerUtilization, teamMustHaveShards);
+		state GetTeamRequest req(
+		    WantNewServers::False, WantTrueBest::True, PreferLowerUtilization::True, TeamMustHaveShards::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5475,13 +5471,10 @@ public:
 		collection->server_info[UID(3, 0)]->setMetrics(high_avail);
 		collection->server_info[UID(4, 0)]->setMetrics(high_avail);
 
-		bool wantsNewServers = true;
-		bool wantsTrueBest = true;
-		bool preferLowerUtilization = true;
-		bool teamMustHaveShards = false;
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
-		state GetTeamRequest req(wantsNewServers, wantsTrueBest, preferLowerUtilization, teamMustHaveShards);
+		state GetTeamRequest req(
+		    WantNewServers::True, WantTrueBest::True, PreferLowerUtilization::True, TeamMustHaveShards::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5529,14 +5522,10 @@ public:
 		 * Among server teams that have healthy space available, pick the team that is
 		 * most utilized, if the caller says they don't preferLowerUtilization.
 		 */
-
-		bool wantsNewServers = true;
-		bool wantsTrueBest = true;
-		bool preferLowerUtilization = false;
-		bool teamMustHaveShards = false;
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
-		state GetTeamRequest req(wantsNewServers, wantsTrueBest, preferLowerUtilization, teamMustHaveShards);
+		state GetTeamRequest req(
+		    WantNewServers::True, WantTrueBest::True, PreferLowerUtilization::False, TeamMustHaveShards::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5585,14 +5574,10 @@ public:
 		 * space, decline to pick that team. Every server must have some minimum
 		 * free space defined by the MIN_AVAILABLE_SPACE server knob.
 		 */
-
-		bool wantsNewServers = true;
-		bool wantsTrueBest = true;
-		bool preferLowerUtilization = true;
-		bool teamMustHaveShards = false;
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
-		state GetTeamRequest req(wantsNewServers, wantsTrueBest, preferLowerUtilization, teamMustHaveShards);
+		state GetTeamRequest req(
+		    WantNewServers::True, WantTrueBest::True, PreferLowerUtilization::True, TeamMustHaveShards::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5646,14 +5631,10 @@ public:
 		 * test that each server has at least MIN_AVAILABLE_SPACE_RATIO (server knob)
 		 * percentage points of capacity free before picking that team.
 		 */
-
-		bool wantsNewServers = true;
-		bool wantsTrueBest = true;
-		bool preferLowerUtilization = true;
-		bool teamMustHaveShards = false;
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
-		state GetTeamRequest req(wantsNewServers, wantsTrueBest, preferLowerUtilization, teamMustHaveShards);
+		state GetTeamRequest req(
+		    WantNewServers::True, WantTrueBest::True, PreferLowerUtilization::True, TeamMustHaveShards::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5699,13 +5680,10 @@ public:
 		collection->wigglingId = UID(4, 0);
 		collection->pauseWiggle = makeReference<AsyncVar<bool>>(true);
 
-		bool wantsNewServers = true;
-		bool wantsTrueBest = true;
-		bool preferLowerUtilization = true;
-		bool teamMustHaveShards = false;
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
-		state GetTeamRequest req(wantsNewServers, wantsTrueBest, preferLowerUtilization, teamMustHaveShards);
+		state GetTeamRequest req(
+		    WantNewServers::True, WantTrueBest::True, PreferLowerUtilization::True, TeamMustHaveShards::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));

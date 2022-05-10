@@ -25,19 +25,14 @@
 // To force typeinfo to only be emitted once.
 TLSPolicy::~TLSPolicy() {}
 
-#ifdef TLS_DISABLED
-
-void LoadedTLSConfig::print(FILE* fp) {
-	fprintf(fp, "Cannot print LoadedTLSConfig.  TLS support is not enabled.\n");
-}
-
-#else // TLS is enabled
-
 #include <algorithm>
 #include <cstring>
 #include <exception>
 #include <map>
 #include <set>
+#if defined(HAVE_WOLFSSL)
+#include <wolfssl/options.h>
+#endif
 #include <openssl/objects.h>
 #include <openssl/bio.h>
 #include <openssl/err.h>
@@ -834,4 +829,3 @@ bool TLSPolicy::verify_peer(bool preverified, X509_STORE_CTX* store_ctx) {
 	}
 	return rc;
 }
-#endif
