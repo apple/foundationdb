@@ -1088,6 +1088,9 @@ struct DDQueueData {
 
 				launch(rrs, busymap, singleRegionTeamSize);
 				activeRelocations++;
+				TraceEvent(SevDebug, "InFlightRelocationChange")
+				    .detail("Launch", rrs.dataMoveId)
+				    .detail("Total", activeRelocations);
 				startRelocation(rrs.priority, rrs.healthPriority);
 				// Start the actor that relocates data in the rrs.keys
 				inFlightActors.insert(rrs.keys, dataDistributionRelocator(this, rrs, fCleanup, ddEnabledState));
@@ -1660,11 +1663,12 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 		if (!signalledTransferComplete)
 			dataTransferComplete.send(rd);
 
+
+		relocationComplete.send(rd);
+
 		if (err.code() == error_code_data_move_dest_team_not_found) {
 			wait(cancelDataMove(self, rd.keys, ddEnabledState));
 		}
-
-		relocationComplete.send(rd);
 
 		if (err.code() != error_code_actor_cancelled && err.code() != error_code_data_move_cancelled) {
 			if (errorOut.canBeSet()) {
@@ -2295,6 +2299,9 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 				}
 				when(RelocateData done = waitNext(self.relocationComplete.getFuture())) {
 					self.activeRelocations--;
+					TraceEvent(SevDebug, "InFlightRelocationChange")
+					    .detail("Complete", done.dataMoveId)
+					    .detail("Total", self.activeRelocations);
 					self.finishRelocation(done.priority, done.healthPriority);
 					self.fetchKeysComplete.erase(done);
 					// self.logRelocation( done, "ShardRelocatorDone" );
