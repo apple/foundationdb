@@ -52,7 +52,7 @@ public:
 			0,
 		};
 		::ERR_error_string_n(err, buf, sizeof(buf));
-		te.detail("OpenSSLError", buf);
+		te.detail("OpenSSLError", static_cast<const char*>(buf));
 	}
 	throw tls_error();
 }
