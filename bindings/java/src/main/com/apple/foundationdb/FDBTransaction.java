@@ -93,7 +93,8 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 
 		@Override
 		public AsyncIterable<MappedKeyValue> getMappedRange(KeySelector begin, KeySelector end, byte[] mapper,
-		                                                        int limit, boolean reverse, StreamingMode mode) {
+		                                                    int limit, int matchIndex, boolean reverse,
+		                                                    StreamingMode mode) {
 
 			throw new UnsupportedOperationException("getMappedRange is only supported in serializable");
 		}
@@ -346,8 +347,8 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	}
 
 	@Override
-	public AsyncIterable<MappedKeyValue> getMappedRange(KeySelector begin, KeySelector end, byte[] mapper,
-	                                                        int limit, boolean reverse, StreamingMode mode) {
+	public AsyncIterable<MappedKeyValue> getMappedRange(KeySelector begin, KeySelector end, byte[] mapper, int limit,
+	                                                    int matchIndex, boolean reverse, StreamingMode mode) {
 		if (mapper == null) {
 			throw new IllegalArgumentException("Mapper must be non-null");
 		}
@@ -466,11 +467,11 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 			        " -- range get: (%s, %s) limit: %d, bytes: %d, mode: %d, iteration: %d, snap: %s, reverse %s",
 			    begin.toString(), end.toString(), rowLimit, targetBytes, streamingMode,
 			    iteration, Boolean.toString(isSnapshot), Boolean.toString(reverse)));*/
-			return new FutureMappedResults(
-			    Transaction_getMappedRange(getPtr(), begin.getKey(), begin.orEqual(), begin.getOffset(),
-			                                   end.getKey(), end.orEqual(), end.getOffset(), mapper, rowLimit,
-			                                   targetBytes, streamingMode, iteration, isSnapshot, reverse),
-			    FDB.instance().isDirectBufferQueriesEnabled(), executor, eventKeeper);
+			return new FutureMappedResults(Transaction_getMappedRange(getPtr(), begin.getKey(), begin.orEqual(),
+			                                                          begin.getOffset(), end.getKey(), end.orEqual(),
+			                                                          end.getOffset(), mapper, rowLimit, targetBytes,
+			                                                          streamingMode, iteration, 0, isSnapshot, reverse),
+			                               FDB.instance().isDirectBufferQueriesEnabled(), executor, eventKeeper);
 		} finally {
 			pointerReadLock.unlock();
 		}
@@ -809,12 +810,11 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 			byte[] keyEnd, boolean orEqualEnd, int offsetEnd,
 			int rowLimit, int targetBytes, int streamingMode, int iteration,
 			boolean isSnapshot, boolean reverse);
-	private native long Transaction_getMappedRange(long cPtr, byte[] keyBegin, boolean orEqualBegin,
-	                                                   int offsetBegin, byte[] keyEnd, boolean orEqualEnd,
-	                                                   int offsetEnd,
-	                                                   byte[] mapper, // Nonnull
-	                                                   int rowLimit, int targetBytes, int streamingMode, int iteration,
-	                                                   boolean isSnapshot, boolean reverse);
+	private native long Transaction_getMappedRange(long cPtr, byte[] keyBegin, boolean orEqualBegin, int offsetBegin,
+	                                               byte[] keyEnd, boolean orEqualEnd, int offsetEnd,
+	                                               byte[] mapper, // Nonnull
+	                                               int rowLimit, int targetBytes, int streamingMode, int iteration,
+	                                               int matchIndex, boolean isSnapshot, boolean reverse);
 	private native void Transaction_addConflictRange(long cPtr,
 			byte[] keyBegin, byte[] keyEnd, int conflictRangeType);
 	private native void Transaction_set(long cPtr, byte[] key, byte[] value);
