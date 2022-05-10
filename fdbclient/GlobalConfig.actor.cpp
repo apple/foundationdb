@@ -20,6 +20,7 @@
 
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/GlobalConfig.actor.h"
+#include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SpecialKeySpace.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/Tuple.h"
@@ -37,7 +38,7 @@ const KeyRef transactionTagSampleCost = LiteralStringRef("config/transaction_tag
 const KeyRef samplingFrequency = LiteralStringRef("visibility/sampling/frequency");
 const KeyRef samplingWindow = LiteralStringRef("visibility/sampling/window");
 
-GlobalConfig::GlobalConfig(const Database& cx) : cx(cx), lastUpdate(0) {}
+GlobalConfig::GlobalConfig(DatabaseContext* cx) : cx(cx), lastUpdate(0) {}
 
 void GlobalConfig::applyChanges(Transaction& tr,
                                 const VectorRef<KeyValueRef>& insertions,
@@ -155,7 +156,8 @@ void GlobalConfig::erase(KeyRangeRef range) {
 // function performs a one-time migration of data in these keys to the new
 // global configuration key space.
 ACTOR Future<Void> GlobalConfig::migrate(GlobalConfig* self) {
-	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
+	state Database db = Database(self->cx);
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
 	state Key migratedKey("\xff\x02/fdbClientInfo/migrated/"_sr);
@@ -203,7 +205,8 @@ ACTOR Future<Void> GlobalConfig::refresh(GlobalConfig* self) {
 	// TraceEvent trace(SevInfo, "GlobalConfig_Refresh");
 	self->erase(KeyRangeRef(""_sr, "\xff"_sr));
 
-	Transaction tr(self->cx);
+	Database db(self->cx);
+	Transaction tr(db);
 	tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 	RangeResult result = wait(tr.getRange(globalConfigDataKeys, CLIENT_KNOBS->TOO_MANY));
 	for (const auto& kv : result) {
