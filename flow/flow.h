@@ -980,7 +980,7 @@ struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>
 		virtual ~Queue() {}
 		reference front() { return queue.front(); }
 		const_reference front() const { return queue.front(); }
-		virtual void pop() {
+		void pop() {
 			queue.pop();
 			removeElement();
 		}
