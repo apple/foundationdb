@@ -736,6 +736,9 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 				    .errorUnsuppressed(e)
 				    .suppressFor(1.0)
 				    .detail("PeerAddr", self->destination);
+
+				// Since the connection has closed, we need to check the protocol version the next time we connect
+				self->incompatibleProtocolVersionNewer = false;
 			}
 
 			if (self->destination.isPublic() &&
