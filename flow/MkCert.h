@@ -158,8 +158,9 @@ StringRef concatCertChain(Arena& arena, CertChainRef chain);
 
 enum class ESide : int { Server, Client };
 
-// Generate a chain of valid cert specs that are always the same given the same parameters
-// The side parameter makes a difference in the commonName ("CN") field of the produced specs
+// Generate a chain of valid cert specs that have consistent subject/issuer names and
+// is valid for typical server/client TLS scenario
+// The 'side' parameter makes a difference in the commonName ("CN") field of the produced specs
 VectorRef<CertSpecRef> makeCertChainSpec(Arena& arena, unsigned length, ESide side);
 
 // For empty (default) rootAuthority, the last item in specs is used to generate rootAuthority
