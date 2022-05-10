@@ -18,12 +18,6 @@
  * limitations under the License.
  */
 
-#include "fdbclient/FDBTypes.h"
-#include "fdbrpc/simulator.h"
-#include "flow/UnitTest.h"
-#include "fdbclient/StorageServerInterface.h"
-#include "fdbclient/KeyRangeMap.h"
-#include "fdbserver/Knobs.h"
 #include "fdbserver/StorageMetrics.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 

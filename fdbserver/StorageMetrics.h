@@ -20,24 +20,31 @@
 
 #pragma once
 
-const StringRef STORAGESERVER_HISTOGRAM_GROUP = LiteralStringRef("StorageServer");
-const StringRef FETCH_KEYS_LATENCY_HISTOGRAM = LiteralStringRef("FetchKeysLatency");
-const StringRef FETCH_KEYS_BYTES_HISTOGRAM = LiteralStringRef("FetchKeysSize");
-const StringRef FETCH_KEYS_BYTES_PER_SECOND_HISTOGRAM = LiteralStringRef("FetchKeysBandwidth");
-const StringRef TLOG_CURSOR_READS_LATENCY_HISTOGRAM = LiteralStringRef("TLogCursorReadsLatency");
-const StringRef SS_VERSION_LOCK_LATENCY_HISTOGRAM = LiteralStringRef("SSVersionLockLatency");
-const StringRef EAGER_READS_LATENCY_HISTOGRAM = LiteralStringRef("EagerReadsLatency");
-const StringRef FETCH_KEYS_PTREE_UPDATES_LATENCY_HISTOGRAM = LiteralStringRef("FetchKeysPTreeUpdatesLatency");
-const StringRef TLOG_MSGS_PTREE_UPDATES_LATENCY_HISTOGRAM = LiteralStringRef("TLogMsgsPTreeUpdatesLatency");
-const StringRef STORAGE_UPDATES_DURABLE_LATENCY_HISTOGRAM = LiteralStringRef("StorageUpdatesDurableLatency");
-const StringRef STORAGE_COMMIT_LATENCY_HISTOGRAM = LiteralStringRef("StorageCommitLatency");
-const StringRef SS_DURABLE_VERSION_UPDATE_LATENCY_HISTOGRAM = LiteralStringRef("SSDurableVersionUpdateLatency");
+#include "fdbclient/FDBTypes.h"
+#include "fdbrpc/simulator.h"
+#include "flow/UnitTest.h"
+#include "fdbclient/StorageServerInterface.h"
+#include "fdbclient/KeyRangeMap.h"
+#include "fdbserver/Knobs.h"
+
+const StringRef STORAGESERVER_HISTOGRAM_GROUP = "StorageServer"_sr;
+const StringRef FETCH_KEYS_LATENCY_HISTOGRAM = "FetchKeysLatency"_sr;
+const StringRef FETCH_KEYS_BYTES_HISTOGRAM = "FetchKeysSize"_sr;
+const StringRef FETCH_KEYS_BYTES_PER_SECOND_HISTOGRAM = "FetchKeysBandwidth"_sr;
+const StringRef TLOG_CURSOR_READS_LATENCY_HISTOGRAM = "TLogCursorReadsLatency"_sr;
+const StringRef SS_VERSION_LOCK_LATENCY_HISTOGRAM = "SSVersionLockLatency"_sr;
+const StringRef EAGER_READS_LATENCY_HISTOGRAM = "EagerReadsLatency"_sr;
+const StringRef FETCH_KEYS_PTREE_UPDATES_LATENCY_HISTOGRAM = "FetchKeysPTreeUpdatesLatency"_sr;
+const StringRef TLOG_MSGS_PTREE_UPDATES_LATENCY_HISTOGRAM = "TLogMsgsPTreeUpdatesLatency"_sr;
+const StringRef STORAGE_UPDATES_DURABLE_LATENCY_HISTOGRAM = "StorageUpdatesDurableLatency"_sr;
+const StringRef STORAGE_COMMIT_LATENCY_HISTOGRAM = "StorageCommitLatency"_sr;
+const StringRef SS_DURABLE_VERSION_UPDATE_LATENCY_HISTOGRAM = "SSDurableVersionUpdateLatency"_sr;
 
 struct StorageMetricSample {
 	IndexedSet<Key, int64_t> sample;
 	int64_t metricUnitsPerSample;
 
-	StorageMetricSample(int64_t metricUnitsPerSample) : metricUnitsPerSample(metricUnitsPerSample) {}
+	explicit StorageMetricSample(int64_t metricUnitsPerSample) : metricUnitsPerSample(metricUnitsPerSample) {}
 
 	int64_t getEstimate(KeyRangeRef keys) const { return sample.sumRange(keys.begin, keys.end); }
 	KeyRef splitEstimate(KeyRangeRef range, int64_t offset, bool front = true) const {
@@ -89,7 +96,7 @@ struct StorageMetricSample {
 struct TransientStorageMetricSample : StorageMetricSample {
 	Deque<std::pair<double, std::pair<Key, int64_t>>> queue;
 
-	TransientStorageMetricSample(int64_t metricUnitsPerSample) : StorageMetricSample(metricUnitsPerSample) {}
+	explicit TransientStorageMetricSample(int64_t metricUnitsPerSample) : StorageMetricSample(metricUnitsPerSample) {}
 
 	// Returns the sampled metric value (possibly 0, possibly increased by the sampling factor)
 	int64_t addAndExpire(KeyRef key, int64_t metric, double expiration) {
@@ -530,10 +537,10 @@ struct StorageServerMetrics {
 		req.reply.send(reply);
 	}
 
-	std::vector<KeyRef> getSplitPoints(KeyRangeRef range, int64_t chunkSize, Optional<Key> prefixToRemove) {
+	std::vector<KeyRef> getSplitPoints(KeyRangeRef range, int64_t chunkSize, Optional<Key> prefixToRemove) const {
 		std::vector<KeyRef> toReturn;
 		KeyRef beginKey = range.begin;
-		IndexedSet<Key, int64_t>::iterator endKey =
+		IndexedSet<Key, int64_t>::const_iterator endKey =
 		    byteSample.sample.index(byteSample.sample.sumTo(byteSample.sample.lower_bound(beginKey)) + chunkSize);
 		while (endKey != byteSample.sample.end()) {
 			if (*endKey > range.end) {
@@ -555,7 +562,7 @@ struct StorageServerMetrics {
 		return toReturn;
 	}
 
-	void getSplitPoints(SplitRangeRequest req, Optional<Key> prefix) {
+	void getSplitPoints(SplitRangeRequest req, Optional<Key> prefix) const {
 		SplitRangeReply reply;
 		KeyRangeRef range = req.keys;
 		if (prefix.present()) {
