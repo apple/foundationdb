@@ -332,7 +332,7 @@ struct ReadWriteWorkload : KVWorkload {
 	Standalone<KeyValueRef> operator()(uint64_t n) { return KeyValueRef(keyForIndex(n, false), randomValue()); }
 
 	template <class Trans>
-	void setupTransaction(Trans &tr) {
+	void setupTransaction(Trans& tr) {
 		if (batchPriority) {
 			tr.setOption(FDBTransactionOptions::PRIORITY_BATCH);
 		}

@@ -5729,7 +5729,7 @@ void Transaction::resetImpl(bool generateNewSpan) {
 	cancelWatches();
 }
 
-TagSet const &Transaction::getTags() const {
+TagSet const& Transaction::getTags() const {
 	return trState->options.tags;
 }
 
