@@ -27,9 +27,11 @@
 #include <memory>
 #include <string>
 #include <cstring>
+#include <openssl/bio.h>
 #include <openssl/ec.h>
 #include <openssl/err.h>
 #include <openssl/evp.h>
+#include <openssl/objects.h>
 #include <openssl/pem.h>
 #include <openssl/x509.h>
 #include <openssl/x509v3.h>
@@ -158,7 +160,7 @@ std::shared_ptr<EVP_PKEY> readPrivateKeyPem(StringRef privateKeyPem) {
 }
 
 StringRef writeX509CertPem(Arena& arena, const std::shared_ptr<X509>& nativeCert) {
-	auto mem = ::BIO_new(::BIO_s_secmem());
+	auto mem = ::BIO_new(::BIO_s_mem());
 	OSSL_ASSERT(mem);
 	auto memGuard = ScopeExit([mem]() { ::BIO_free(mem); });
 	OSSL_ASSERT(::PEM_write_bio_X509(mem, nativeCert.get()));
@@ -171,7 +173,7 @@ StringRef writeX509CertPem(Arena& arena, const std::shared_ptr<X509>& nativeCert
 }
 
 StringRef writePrivateKeyPem(Arena& arena, const std::shared_ptr<EVP_PKEY>& nativePrivateKey) {
-	auto mem = ::BIO_new(::BIO_s_secmem());
+	auto mem = ::BIO_new(::BIO_s_mem());
 	OSSL_ASSERT(mem);
 	auto memGuard = ScopeExit([mem]() { ::BIO_free(mem); });
 	OSSL_ASSERT(::PEM_write_bio_PrivateKey(mem, nativePrivateKey.get(), nullptr, nullptr, 0, 0, nullptr));
@@ -252,7 +254,12 @@ CertAndKeyNative makeCertNative(CertSpecRef spec, CertAndKeyNative issuer) {
 		// extension field names and values are expected to null-terminate
 		auto extName = entry.field.toString();
 		auto extValue = entry.bytes.toString();
-		auto ext = ::X509V3_EXT_conf(nullptr, &ctx, extName.c_str(), extValue.c_str());
+		auto extNid = ::OBJ_txt2nid(extName.c_str());
+		if (extNid == NID_undef) {
+			TraceEvent(SevWarnAlways, "MkCertInvalidExtName").suppressFor(10).detail("Name", extName);
+			throw tls_error();
+		}
+		auto ext = ::X509V3_EXT_conf_nid(nullptr, &ctx, extNid, extValue.c_str());
 		OSSL_ASSERT(ext);
 		auto extGuard = ScopeExit([ext]() { ::X509_EXTENSION_free(ext); });
 		OSSL_ASSERT(::X509_add_ext(x, ext, -1));
