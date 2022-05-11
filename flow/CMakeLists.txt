@@ -195,13 +195,5 @@ if(APPLE)
   target_link_libraries(flow_sampling PRIVATE ${IO_KIT} ${CORE_FOUNDATION})
 endif()
 
-add_executable(tls_poc TLSTest.cpp)
-
-if(USE_SANITIZER)
-  target_link_libraries(tls_poc PUBLIC fmt::fmt flow boost_asan)
-else()
-  target_link_libraries(tls_poc PUBLIC fmt::fmt flow boost_target)
-endif()
-
 add_executable(mkcert MkCertCli.cpp)
 target_link_libraries(mkcert PUBLIC fmt::fmt flow)
