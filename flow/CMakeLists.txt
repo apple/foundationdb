@@ -56,6 +56,7 @@ set(FLOW_SRCS
   Platform.h
   Profiler.actor.cpp
   Profiler.h
+  ScopeExit.h
   SendBufferIterator.h
   SignalSafeUnwind.cpp
   SignalSafeUnwind.h

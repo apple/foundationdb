@@ -26,9 +26,10 @@
 #include "flow/Arena.h"
 #include "flow/Error.h"
 #include "flow/MkCert.h"
-#include "flow/SimpleOpt.h"
-#include "flow/Platform.h"
 #include "flow/network.h"
+#include "flow/Platform.h"
+#include "flow/ScopeExit.h"
+#include "flow/SimpleOpt.h"
 #include "flow/TLSConfig.actor.h"
 #include "flow/Trace.h"
 
@@ -196,8 +197,16 @@ int main(int argc, char** argv) {
 		platformInit();
 		Error::init();
 		g_network = newNet2(TLSConfig());
-		TraceEvent::setNetworkThread();
 		openTraceFile(NetworkAddress(), 10 << 20, 10 << 20, ".", "mkcert");
+		auto thread = std::thread([]() {
+			TraceEvent::setNetworkThread();
+			g_network->run();
+		});
+		auto cleanUpGuard = ScopeExit([&thread]() {
+			flushTraceFileVoid();
+			g_network->stop();
+			thread.join();
+		});
 
 		serverCertFile = abspath(serverCertFile);
 		serverKeyFile = abspath(serverKeyFile);
@@ -223,12 +232,23 @@ int main(int argc, char** argv) {
 		           clientCaFile);
 
 		using FileStream = std::ofstream;
+		auto checkStream = [](FileStream& fs, std::string_view filename) {
+			if (!fs) {
+				throw std::runtime_error(fmt::format("Cannot open '{}' for writing", filename));
+			}
+		};
 		auto ofsServerCert = FileStream(serverCertFile, std::ofstream::out | std::ofstream::trunc);
+		checkStream(ofsServerCert, serverCertFile);
 		auto ofsServerKey = FileStream(serverKeyFile, std::ofstream::out | std::ofstream::trunc);
+		checkStream(ofsServerKey, serverKeyFile);
 		auto ofsServerCa = FileStream(serverCaFile, std::ofstream::out | std::ofstream::trunc);
+		checkStream(ofsServerCa, serverCaFile);
 		auto ofsClientCert = FileStream(clientCertFile, std::ofstream::out | std::ofstream::trunc);
+		checkStream(ofsClientCert, clientCertFile);
 		auto ofsClientKey = FileStream(clientKeyFile, std::ofstream::out | std::ofstream::trunc);
+		checkStream(ofsClientKey, clientKeyFile);
 		auto ofsClientCa = FileStream(clientCaFile, std::ofstream::out | std::ofstream::trunc);
+		checkStream(ofsClientCa, clientCaFile);
 		if (serverChainLen) {
 			auto arena = Arena();
 			auto specs = mkcert::makeCertChainSpec(arena, std::abs(serverChainLen), mkcert::ESide::Server);
@@ -269,10 +289,7 @@ int main(int argc, char** argv) {
 		ofsClientCert.close();
 		ofsClientKey.close();
 		ofsClientCa.close();
-		auto thread = std::thread([]() { g_network->run(); });
-		flushTraceFileVoid();
-		g_network->stop();
-		thread.join();
+		fmt::print("OK\n");
 		return FDB_EXIT_SUCCESS;
 	} catch (const Error& e) {
 		fmt::print(stderr, "ERROR: {}\n", e.name());
