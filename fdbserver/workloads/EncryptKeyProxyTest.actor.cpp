@@ -72,7 +72,11 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 
 		state int nAttempts = 0;
 		loop {
-			EKPGetLatestBaseCipherKeysRequest req(deterministicRandom()->randomUniqueID(), self->domainIds);
+			EKPGetLatestBaseCipherKeysRequest req;
+			req.encryptDomainIds = self->domainIds;
+			if (deterministicRandom()->randomInt(0, 100) < 50) {
+				req.debugId = deterministicRandom()->randomUniqueID();
+			}
 			ErrorOr<EKPGetLatestBaseCipherKeysReply> rep = wait(self->ekpInf.getLatestBaseCipherKeys.tryGetReply(req));
 			if (rep.present()) {
 
@@ -82,7 +86,7 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 				for (const uint64_t id : self->domainIds) {
 					bool found = false;
 					for (const auto& item : rep.get().baseCipherDetails) {
-						if (item.baseCipherId == id) {
+						if (item.encryptDomainId == id) {
 							found = true;
 							break;
 						}
@@ -131,7 +135,11 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 			// assertions. However, in simulation runs, RPCs can be force failed to inject retries, hence, code leverage
 			// tryGetReply to ensure at-most once delivery of message, further, assertions are relaxed to account of
 			// cache warm-up due to retries.
-			EKPGetLatestBaseCipherKeysRequest req(deterministicRandom()->randomUniqueID(), self->domainIds);
+			EKPGetLatestBaseCipherKeysRequest req;
+			req.encryptDomainIds = self->domainIds;
+			if (deterministicRandom()->randomInt(0, 100) < 50) {
+				req.debugId = deterministicRandom()->randomUniqueID();
+			}
 			ErrorOr<EKPGetLatestBaseCipherKeysReply> rep = wait(self->ekpInf.getLatestBaseCipherKeys.tryGetReply(req));
 			if (rep.present()) {
 				ASSERT(!rep.get().error.present());
@@ -140,7 +148,7 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 				for (const uint64_t id : self->domainIds) {
 					bool found = false;
 					for (const auto& item : rep.get().baseCipherDetails) {
-						if (item.baseCipherId == id) {
+						if (item.encryptDomainId == id) {
 							found = true;
 							break;
 						}
@@ -176,7 +184,11 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 			self->domainIds.emplace_back(self->minDomainId + i);
 		}
 
-		EKPGetLatestBaseCipherKeysRequest req(deterministicRandom()->randomUniqueID(), self->domainIds);
+		EKPGetLatestBaseCipherKeysRequest req;
+		req.encryptDomainIds = self->domainIds;
+		if (deterministicRandom()->randomInt(0, 100) < 50) {
+			req.debugId = deterministicRandom()->randomUniqueID();
+		}
 		EKPGetLatestBaseCipherKeysReply rep = wait(self->ekpInf.getLatestBaseCipherKeys.getReply(req));
 
 		ASSERT(!rep.error.present());
@@ -184,7 +196,7 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 		for (const uint64_t id : self->domainIds) {
 			bool found = false;
 			for (const auto& item : rep.baseCipherDetails) {
-				if (item.baseCipherId == id) {
+				if (item.encryptDomainId == id) {
 					found = true;
 					break;
 				}
@@ -200,14 +212,24 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 		}
 
 		state int numIterations = deterministicRandom()->randomInt(512, 786);
-		for (; numIterations > 0; numIterations--) {
+		for (; numIterations > 0;) {
 			int idx = deterministicRandom()->randomInt(1, self->cipherIds.size());
 			int nIds = deterministicRandom()->randomInt(1, self->cipherIds.size());
 
 			EKPGetBaseCipherKeysByIdsRequest req;
+			if (deterministicRandom()->randomInt(0, 100) < 50) {
+				req.debugId = deterministicRandom()->randomUniqueID();
+			}
 			for (int i = idx; i < nIds && i < self->cipherIds.size(); i++) {
 				req.baseCipherIds.emplace_back(std::make_pair(self->cipherIds[i], 1));
 			}
+			if (req.baseCipherIds.empty()) {
+				// No keys to query; continue
+				continue;
+			} else {
+				numIterations--;
+			}
+
 			expectedHits = req.baseCipherIds.size();
 			EKPGetBaseCipherKeysByIdsReply rep = wait(self->ekpInf.getBaseCipherKeysByIds.getReply(req));
 

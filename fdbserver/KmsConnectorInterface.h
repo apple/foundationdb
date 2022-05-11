@@ -101,16 +101,18 @@ struct KmsConnLookupEKsByKeyIdsRep {
 struct KmsConnLookupEKsByKeyIdsReq {
 	constexpr static FileIdentifier file_identifier = 6913396;
 	std::vector<std::pair<EncryptCipherBaseKeyId, EncryptCipherDomainId>> encryptKeyIds;
+	Optional<UID> debugId;
 	ReplyPromise<KmsConnLookupEKsByKeyIdsRep> reply;
 
 	KmsConnLookupEKsByKeyIdsReq() {}
 	explicit KmsConnLookupEKsByKeyIdsReq(
-	    const std::vector<std::pair<EncryptCipherBaseKeyId, EncryptCipherDomainId>>& keyIds)
-	  : encryptKeyIds(keyIds) {}
+	    const std::vector<std::pair<EncryptCipherBaseKeyId, EncryptCipherDomainId>>& keyIds,
+	    Optional<UID> dbgId)
+	  : encryptKeyIds(keyIds), debugId(dbgId) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, encryptKeyIds, reply);
+		serializer(ar, encryptKeyIds, debugId, reply);
 	}
 };
 
@@ -130,14 +132,16 @@ struct KmsConnLookupEKsByDomainIdsRep {
 struct KmsConnLookupEKsByDomainIdsReq {
 	constexpr static FileIdentifier file_identifier = 9918682;
 	std::vector<EncryptCipherDomainId> encryptDomainIds;
+	Optional<UID> debugId;
 	ReplyPromise<KmsConnLookupEKsByDomainIdsRep> reply;
 
 	KmsConnLookupEKsByDomainIdsReq() {}
-	explicit KmsConnLookupEKsByDomainIdsReq(const std::vector<EncryptCipherDomainId>& ids) : encryptDomainIds(ids) {}
+	explicit KmsConnLookupEKsByDomainIdsReq(const std::vector<EncryptCipherDomainId>& ids, Optional<UID> dbgId)
+	  : encryptDomainIds(ids), debugId(dbgId) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, encryptDomainIds, reply);
+		serializer(ar, encryptDomainIds, debugId, reply);
 	}
 };
 
