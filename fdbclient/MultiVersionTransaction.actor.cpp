@@ -300,17 +300,7 @@ ThreadResult<RangeResult> DLTransaction::readBlobGranules(const KeyRangeRef& key
 	                                                         beginVersion,
 	                                                         rv,
 	                                                         context);
-	const FdbCApi::FDBKeyValue* kvs;
-	int count;
-	FdbCApi::fdb_bool_t more;
-	FdbCApi::fdb_error_t error = api->resultGetKeyValueArray(r, &kvs, &count, &more);
-	if (error) {
-		return ThreadResult<RangeResult>(Error(error));
-	}
-
-	// The memory for this is stored in the FDBResult and is released when the result gets destroyed
-	return ThreadResult<RangeResult>(
-	    RangeResult(RangeResultRef(VectorRef<KeyValueRef>((KeyValueRef*)kvs, count), more), Arena()));
+	return ThreadResult<RangeResult>((ThreadSingleAssignmentVar<RangeResult>*)(r));
 }
 
 void DLTransaction::addReadConflictRange(const KeyRangeRef& keys) {
@@ -1115,13 +1105,13 @@ VersionVector MultiVersionTransaction::getVersionVector() {
 	return VersionVector();
 }
 
-UID MultiVersionTransaction::getSpanID() {
+SpanContext MultiVersionTransaction::getSpanContext() {
 	auto tr = getTransaction();
 	if (tr.transaction) {
-		return tr.transaction->getSpanID();
+		return tr.transaction->getSpanContext();
 	}
 
-	return UID();
+	return SpanContext();
 }
 
 ThreadFuture<int64_t> MultiVersionTransaction::getApproximateSize() {

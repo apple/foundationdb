@@ -21,6 +21,8 @@ from local_cluster import LocalCluster, random_secret_string
 SUPPORTED_PLATFORMS = ["x86_64"]
 SUPPORTED_VERSIONS = [
     "7.2.0",
+    "7.1.3",
+    "7.1.2",
     "7.1.1",
     "7.1.0",
     "7.0.0",
@@ -65,7 +67,9 @@ SUPPORTED_VERSIONS = [
     "5.1.7",
     "5.1.6",
 ]
+CLUSTER_ACTIONS = ["wiggle"]
 FDB_DOWNLOAD_ROOT = "https://github.com/apple/foundationdb/releases/download/"
+LOCAL_OLD_BINARY_REPO = "/opt/foundationdb/old/"
 CURRENT_VERSION = "7.2.0"
 HEALTH_CHECK_TIMEOUT_SEC = 5
 PROGRESS_CHECK_TIMEOUT_SEC = 30
@@ -127,19 +131,15 @@ def read_to_str(filename):
 class UpgradeTest:
     def __init__(
         self,
-        build_dir: str,
-        upgrade_path: list,
-        process_number: int = 1,
-        port: str = None,
+        args
     ):
-        self.build_dir = Path(build_dir).resolve()
-        assert self.build_dir.exists(), "{} does not exist".format(build_dir)
-        assert self.build_dir.is_dir(), "{} is not a directory".format(build_dir)
-        self.upgrade_path = upgrade_path
-        for version in upgrade_path:
-            assert version in SUPPORTED_VERSIONS, "Unsupported version {}".format(
-                version
-            )
+        self.build_dir = Path(args.build_dir).resolve()
+        assert self.build_dir.exists(), "{} does not exist".format(args.build_dir)
+        assert self.build_dir.is_dir(), "{} is not a directory".format(args.build_dir)
+        self.upgrade_path = args.upgrade_path
+        self.used_versions = set(self.upgrade_path).difference(set(CLUSTER_ACTIONS))
+        for version in self.used_versions:
+            assert version in SUPPORTED_VERSIONS, "Unsupported version or cluster action {}".format(version)
         self.platform = platform.machine()
         assert self.platform in SUPPORTED_PLATFORMS, "Unsupported platform {}".format(
             self.platform
@@ -147,17 +147,20 @@ class UpgradeTest:
         self.tmp_dir = self.build_dir.joinpath("tmp", random_secret_string(16))
         self.tmp_dir.mkdir(parents=True)
         self.download_dir = self.build_dir.joinpath("tmp", "old_binaries")
+        self.local_binary_repo = Path(LOCAL_OLD_BINARY_REPO)
+        if not self.local_binary_repo.exists():
+            self.local_binary_repo = None
         self.download_old_binaries()
         self.create_external_lib_dir()
-        init_version = upgrade_path[0]
+        init_version = self.upgrade_path[0]
         self.cluster = LocalCluster(
             self.tmp_dir,
             self.binary_path(init_version, "fdbserver"),
             self.binary_path(init_version, "fdbmonitor"),
             self.binary_path(init_version, "fdbcli"),
-            process_number,
-            port=port,
+            args.process_number,
             create_config=False,
+            redundancy=args.redundancy
         )
         self.cluster.create_cluster_file()
         self.configure_version(init_version)
@@ -178,10 +181,17 @@ class UpgradeTest:
         self.tester_proc = None
         self.output_pipe = None
         self.tester_bin = None
+        self.ctrl_pipe = None
+
+    # Check if the binaries for the given version are available in the local old binaries repository
+    def version_in_local_repo(self, version):
+        return (self.local_binary_repo is not None) and (self.local_binary_repo.joinpath(version).exists())
 
     def binary_path(self, version, bin_name):
         if version == CURRENT_VERSION:
             return self.build_dir.joinpath("bin", bin_name)
+        elif self.version_in_local_repo(version):
+            return self.local_binary_repo.joinpath(version, "bin", "{}-{}".format(bin_name, version))
         else:
             return self.download_dir.joinpath(version, bin_name)
 
@@ -195,7 +205,7 @@ class UpgradeTest:
     def download_old_binary(
         self, version, target_bin_name, remote_bin_name, make_executable
     ):
-        local_file = self.binary_path(version, target_bin_name)
+        local_file = self.download_dir.joinpath(version, target_bin_name)
         if local_file.exists():
             return
 
@@ -208,12 +218,21 @@ class UpgradeTest:
         remote_sha256 = "{}.sha256".format(remote_file)
         local_sha256 = Path("{}.sha256".format(local_file_tmp))
 
-        for attempt_cnt in range(MAX_DOWNLOAD_ATTEMPTS):
-            print("Downloading '{}' to '{}'...".format(remote_file, local_file_tmp))
-            request.urlretrieve(remote_file, local_file_tmp)
-            print("Downloading '{}' to '{}'...".format(remote_sha256, local_sha256))
-            request.urlretrieve(remote_sha256, local_sha256)
-            print("Download complete")
+        for attempt_cnt in range(MAX_DOWNLOAD_ATTEMPTS + 1):
+            if attempt_cnt == MAX_DOWNLOAD_ATTEMPTS:
+                assert False, "Failed to download {} after {} attempts".format(
+                    local_file_tmp, MAX_DOWNLOAD_ATTEMPTS
+                )
+            try:
+                print("Downloading '{}' to '{}'...".format(remote_file, local_file_tmp))
+                request.urlretrieve(remote_file, local_file_tmp)
+                print("Downloading '{}' to '{}'...".format(remote_sha256, local_sha256))
+                request.urlretrieve(remote_sha256, local_sha256)
+                print("Download complete")
+            except Exception as e:
+                print("Retrying on error:", e)
+                continue
+
             assert local_file_tmp.exists(), "{} does not exist".format(local_file_tmp)
             assert local_sha256.exists(), "{} does not exist".format(local_sha256)
             expected_checksum = read_to_str(local_sha256)
@@ -226,10 +245,6 @@ class UpgradeTest:
                     expected_checksum, actual_checkum
                 )
             )
-            if attempt_cnt == MAX_DOWNLOAD_ATTEMPTS - 1:
-                assert False, "Failed to download {} after {} attempts".format(
-                    local_file_tmp, MAX_DOWNLOAD_ATTEMPTS
-                )
 
         os.rename(local_file_tmp, local_file)
         os.remove(local_sha256)
@@ -237,11 +252,32 @@ class UpgradeTest:
         if make_executable:
             make_executable_path(local_file)
 
+    # Copy a client library file from the local old binaries repository
+    # The file needs to be renamed to libfdb_c.so, because it is loaded with this name by fdbcli
+    def copy_clientlib_from_local_repo(self, version):
+        dest_lib_file = self.download_dir.joinpath(version, "libfdb_c.so")
+        if dest_lib_file.exists():
+            return
+        # Avoid race conditions in case of parallel test execution by first copying to a temporary file
+        # and then renaming it atomically
+        dest_file_tmp = Path("{}.{}".format(str(dest_lib_file), random_secret_string(8)))
+        src_lib_file = self.local_binary_repo.joinpath(version, "lib", "libfdb_c-{}.so".format(version))
+        assert src_lib_file.exists(), "Missing file {} in the local old binaries repository".format(src_lib_file)
+        self.download_dir.joinpath(version).mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src_lib_file, dest_file_tmp)
+        os.rename(dest_file_tmp, dest_lib_file)
+        assert dest_lib_file.exists(), "{} does not exist".format(dest_lib_file)
+
     # Download all old binaries required for testing the specified upgrade path
     def download_old_binaries(self):
-        for version in self.upgrade_path:
+        for version in self.used_versions:
             if version == CURRENT_VERSION:
                 continue
+
+            if self.version_in_local_repo(version):
+                self.copy_clientlib_from_local_repo(version)
+                continue
+
             self.download_old_binary(
                 version, "fdbserver", "fdbserver.{}".format(self.platform), True
             )
@@ -260,7 +296,7 @@ class UpgradeTest:
     def create_external_lib_dir(self):
         self.external_lib_dir = self.tmp_dir.joinpath("client_libs")
         self.external_lib_dir.mkdir(parents=True)
-        for version in self.upgrade_path:
+        for version in self.used_versions:
             src_file_path = self.lib_dir(version).joinpath("libfdb_c.so")
             assert src_file_path.exists(), "{} does not exist".format(src_file_path)
             target_file_path = self.external_lib_dir.joinpath(
@@ -280,7 +316,7 @@ class UpgradeTest:
                 time.sleep(1)
                 continue
             num_proc = len(status["cluster"]["processes"])
-            if num_proc < self.cluster.process_number:
+            if num_proc != self.cluster.process_number:
                 print(
                     "Health check: {} of {} processes found. Retrying".format(
                         num_proc, self.cluster.process_number
@@ -288,11 +324,6 @@ class UpgradeTest:
                 )
                 time.sleep(1)
                 continue
-            assert (
-                num_proc == self.cluster.process_number
-            ), "Number of processes: expected: {}, actual: {}".format(
-                self.cluster.process_number, num_proc
-            )
             for (_, proc_stat) in status["cluster"]["processes"].items():
                 proc_ver = proc_stat["version"]
                 assert (
@@ -337,7 +368,7 @@ class UpgradeTest:
     # Determine FDB API version matching the upgrade path
     def determine_api_version(self):
         self.api_version = api_version_from_str(CURRENT_VERSION)
-        for version in self.upgrade_path:
+        for version in self.used_versions:
             self.api_version = min(api_version_from_str(version), self.api_version)
 
     # Start the tester to generate the workload specified by the test file
@@ -387,12 +418,17 @@ class UpgradeTest:
         except Exception:
             print("Execution of test workload failed")
             print(traceback.format_exc())
+        finally:
+            # If the tester failed to initialize, other threads of the test may stay
+            # blocked on trying to open the named pipes
+            if self.ctrl_pipe is None or self.output_pipe is None:
+                print("Tester failed before initializing named pipes. Aborting the test")
+                os._exit(1)
 
     # Perform a progress check: Trigger it and wait until it is completed
-
-    def progress_check(self, ctrl_pipe):
+    def progress_check(self):
         self.progress_event.clear()
-        os.write(ctrl_pipe, b"CHECK\n")
+        os.write(self.ctrl_pipe, b"CHECK\n")
         self.progress_event.wait(None if RUN_WITH_GDB else PROGRESS_CHECK_TIMEOUT_SEC)
         if self.progress_event.is_set():
             print("Progress check: OK")
@@ -421,18 +457,22 @@ class UpgradeTest:
     # upgrade path: perform the upgrade steps and check success after each step
     def exec_upgrade_test(self):
         print("Opening pipe {} for writing".format(self.input_pipe_path))
-        ctrl_pipe = os.open(self.input_pipe_path, os.O_WRONLY)
+        self.ctrl_pipe = os.open(self.input_pipe_path, os.O_WRONLY)
         try:
             self.health_check()
-            self.progress_check(ctrl_pipe)
-            for version in self.upgrade_path[1:]:
-                random_sleep(0.0, 2.0)
-                self.upgrade_to(version)
-                self.health_check()
-                self.progress_check(ctrl_pipe)
-            os.write(ctrl_pipe, b"STOP\n")
+            self.progress_check()
+            random_sleep(0.0, 2.0)
+            for entry in self.upgrade_path[1:]:
+                if entry == "wiggle":
+                    self.cluster.cluster_wiggle()
+                else:
+                    assert entry in self.used_versions, "Unexpected entry in the upgrade path: {}".format(entry)
+                    self.upgrade_to(entry)
+            self.health_check()
+            self.progress_check()
+            os.write(self.ctrl_pipe, b"STOP\n")
         finally:
-            os.close(ctrl_pipe)
+            os.close(self.ctrl_pipe)
 
     # Kill the tester process if it is still alive
     def kill_tester_if_alive(self, workload_thread):
@@ -572,7 +612,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--upgrade-path",
         nargs="+",
-        help="Cluster upgrade path: a space separated list of versions",
+        help="Cluster upgrade path: a space separated list of versions.\n" +
+        "The list may also contain cluster change actions: {}".format(CLUSTER_ACTIONS),
         default=[CURRENT_VERSION],
     )
     parser.add_argument(
@@ -588,6 +629,12 @@ if __name__ == "__main__":
         default=0,
     )
     parser.add_argument(
+        "--redundancy",
+        help="Database redundancy level (default: single)",
+        type=str,
+        default="single",
+    )
+    parser.add_argument(
         "--disable-log-dump",
         help="Do not dump cluster log on error",
         action="store_true",
@@ -600,11 +647,14 @@ if __name__ == "__main__":
         args.process_number = random.randint(1, 5)
         print("Testing with {} processes".format(args.process_number))
 
+    assert len(args.upgrade_path) > 0, "Upgrade path must be specified"
+    assert args.upgrade_path[0] in SUPPORTED_VERSIONS, "Upgrade path begin with a valid version number"
+
     if args.run_with_gdb:
         RUN_WITH_GDB = True
 
     errcode = 1
-    with UpgradeTest(args.build_dir, args.upgrade_path, args.process_number) as test:
+    with UpgradeTest(args) as test:
         print("log-dir: {}".format(test.log))
         print("etc-dir: {}".format(test.etc))
         print("data-dir: {}".format(test.data))

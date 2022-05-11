@@ -30,6 +30,9 @@
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
 #include <type_traits>
+#if defined(HAVE_WOLFSSL)
+#include <wolfssl/options.h>
+#endif
 #include <openssl/ec.h>
 #include <openssl/err.h>
 #include <openssl/evp.h>
