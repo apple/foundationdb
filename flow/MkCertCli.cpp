@@ -21,6 +21,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <fmt/format.h>
 #include "flow/Arena.h"
@@ -70,7 +71,7 @@ CSimpleOpt::SOption gOptions[] = { { OPT_HELP, "--help", SO_NONE },
 	                               SO_END_OF_OPTIONS };
 
 template <size_t Len>
-void printOptionUsage(std::string_view option, std::string_view(&&optionDescLines)[Len]) {
+void printOptionUsage(std::string_view option, const char*(&&optionDescLines)[Len]) {
 	constexpr std::string_view optionIndent{ "  " };
 	constexpr std::string_view descIndent{ "                " };
 	fmt::print(stdout, "{}{}\n", optionIndent, option);
