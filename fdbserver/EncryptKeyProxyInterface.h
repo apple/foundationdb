@@ -143,7 +143,6 @@ struct EKPGetLatestBaseCipherKeysReply {
 	Arena arena;
 	std::vector<EKPBaseCipherDetails> baseCipherDetails;
 	int numHits;
-	Optional<UID> debuId;
 	Optional<Error> error;
 
 	EKPGetLatestBaseCipherKeysReply() : numHits(0) {}
@@ -163,8 +162,7 @@ struct EKPGetLatestBaseCipherKeysRequest {
 	ReplyPromise<EKPGetLatestBaseCipherKeysReply> reply;
 
 	EKPGetLatestBaseCipherKeysRequest() {}
-	explicit EKPGetLatestBaseCipherKeysRequest(const std::vector<uint64_t>& ids, Optional<UID> dbgId)
-	  : encryptDomainIds(ids), debugId(dbgId) {}
+	explicit EKPGetLatestBaseCipherKeysRequest(const std::vector<uint64_t>& ids) : encryptDomainIds(ids) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {

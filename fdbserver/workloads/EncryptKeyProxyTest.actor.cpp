@@ -212,7 +212,7 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 		}
 
 		state int numIterations = deterministicRandom()->randomInt(512, 786);
-		for (; numIterations > 0; numIterations--) {
+		for (; numIterations > 0;) {
 			int idx = deterministicRandom()->randomInt(1, self->cipherIds.size());
 			int nIds = deterministicRandom()->randomInt(1, self->cipherIds.size());
 
@@ -223,6 +223,13 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 			for (int i = idx; i < nIds && i < self->cipherIds.size(); i++) {
 				req.baseCipherIds.emplace_back(std::make_pair(self->cipherIds[i], 1));
 			}
+			if (req.baseCipherIds.empty()) {
+				// No keys to query; continue
+				continue;
+			} else {
+				numIterations--;
+			}
+
 			expectedHits = req.baseCipherIds.size();
 			EKPGetBaseCipherKeysByIdsReply rep = wait(self->ekpInf.getBaseCipherKeysByIds.getReply(req));
 

@@ -182,8 +182,11 @@ ACTOR Future<Void> getCipherKeysByBaseCipherKeyIds(Reference<EncryptKeyProxyData
 	    dedupedCipherIds;
 	for (const auto& item : req.baseCipherIds) {
 		dedupedCipherIds.emplace(item);
+	}
 
-		if (dbgTrace.present()) {
+	if (dbgTrace.present()) {
+		dbgTrace.get().detail("NKeys", dedupedCipherIds.size());
+		for (const auto& item : dedupedCipherIds) {
 			// Record {encryptDomainId, baseCipherId} queried
 			dbgTrace.get().detail(getEncryptDbgTraceKey(ENCRYPT_DBG_TRACE_QUERY_PREFIX, item.second, item.first), "");
 		}
@@ -278,8 +281,11 @@ ACTOR Future<Void> getLatestCipherKeys(Reference<EncryptKeyProxyData> ekpProxyDa
 	std::unordered_set<EncryptCipherDomainId> dedupedDomainIds;
 	for (EncryptCipherDomainId id : req.encryptDomainIds) {
 		dedupedDomainIds.emplace(id);
+	}
 
-		if (dbgTrace.present()) {
+	if (dbgTrace.present()) {
+		dbgTrace.get().detail("NKeys", dedupedDomainIds.size());
+		for (EncryptCipherDomainId id : dedupedDomainIds) {
 			// log encryptDomainIds queried
 			dbgTrace.get().detail(getEncryptDbgTraceKey(ENCRYPT_DBG_TRACE_QUERY_PREFIX, id), "");
 		}
