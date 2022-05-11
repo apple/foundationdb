@@ -75,7 +75,7 @@ void printOptionUsage(std::string_view option, std::string_view(&&optionDescLine
 
 void printUsage(std::string_view binary) {
 	fmt::print(stdout,
-	           "mkcert: FDB test certificate chain generator\n"
+	           "mkcert: FDB test certificate chain generator\n\n"
 	           "Usage: {} [OPTIONS...]\n\n",
 	           binary);
 	printOptionUsage("--server-chain-length LENGTH, -S LENGTH (default: 3)",
@@ -93,7 +93,7 @@ void printUsage(std::string_view binary) {
 	printOptionUsage("--server-ca-file PATH (default: 'server_ca.pem')",
 	                 { "Output filename for server's root CA certificate.",
 	                   "Content same as '--server-cert-file' for '--server-chain-length' == 1.",
-	                   "Intended for CLIENTS to use as 'tls_ca_file': i.e. cert issuer to trust" });
+	                   "Intended for CLIENTS to use as 'tls_ca_file': i.e. cert issuer to trust." });
 	printOptionUsage("--client-cert-file PATH (default: 'client_cert.pem')",
 	                 { "Output filename for client certificate chain excluding root CA.",
 	                   "Intended for CLIENTS to use as 'tls_certificate_file'.",
@@ -104,7 +104,7 @@ void printUsage(std::string_view binary) {
 	printOptionUsage("--client-ca-file PATH (default: 'client_ca.pem')",
 	                 { "Output filename for client's root CA certificate.",
 	                   "Content same as '--client-cert-file' for '--client-chain-length' == 1.",
-	                   "Intended for SERVERS to use as 'tls_ca_file': i.e. cert issuer to trust" });
+	                   "Intended for SERVERS to use as 'tls_ca_file': i.e. cert issuer to trust." });
 	printOptionUsage("--expire-server-cert", { "Deliberately expire server's leaf certificate for testing." });
 	printOptionUsage("--expire-client-cert", { "Deliberately expire client's leaf certificate for testing." });
 }
@@ -234,7 +234,7 @@ int main(int argc, char** argv) {
 		using FileStream = std::ofstream;
 		auto checkStream = [](FileStream& fs, std::string_view filename) {
 			if (!fs) {
-				throw std::runtime_error(fmt::format("Cannot open '{}' for writing", filename));
+				throw std::runtime_error(fmt::format("cannot open '{}' for writing", filename));
 			}
 		};
 		auto ofsServerCert = FileStream(serverCertFile, std::ofstream::out | std::ofstream::trunc);
@@ -292,12 +292,10 @@ int main(int argc, char** argv) {
 		fmt::print("OK\n");
 		return FDB_EXIT_SUCCESS;
 	} catch (const Error& e) {
-		fmt::print(stderr, "ERROR: {}\n", e.name());
-		TraceEvent(SevError, "MainError").error(e);
+		fmt::print(stderr, "error: {}\n", e.name());
 		return FDB_EXIT_MAIN_ERROR;
 	} catch (const std::exception& e) {
-		fmt::print(stderr, "std::exception: {}\n", e.what());
-		TraceEvent(SevError, "MainError").error(unknown_error()).detail("RootException", e.what());
+		fmt::print(stderr, "exception: {}\n", e.what());
 		return FDB_EXIT_MAIN_EXCEPTION;
 	}
 }
