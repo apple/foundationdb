@@ -265,6 +265,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 
 	// trace
 	init( TRACE_LOG_FILE_IDENTIFIER_MAX_LENGTH,      50 );
+	init( TRACE_LOG_LEVEL_GLOBAL_THRESHOLD,           0 );
 
 	// transaction tags
 	init( MAX_TAGS_PER_TRANSACTION,                   5 );
