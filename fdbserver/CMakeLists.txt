@@ -149,7 +149,7 @@ set(FDBSERVER_SRCS
   Status.actor.cpp
   Status.h
   StorageCache.actor.cpp
-  StorageMetrics.actor.h
+  StorageMetrics.actor.cpp
   StorageMetrics.h
   storageserver.actor.cpp
   TagPartitionedLogSystem.actor.cpp
