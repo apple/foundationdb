@@ -45,6 +45,9 @@ enum EMkCertOpt : int {
 	OPT_CLIENT_CA_FILE,
 	OPT_EXPIRE_SERVER_CERT,
 	OPT_EXPIRE_CLIENT_CERT,
+	OPT_PRINT_SERVER_CERT,
+	OPT_PRINT_CLIENT_CERT,
+	OPT_PRINT_ARGUMENTS,
 };
 
 CSimpleOpt::SOption gOptions[] = { { OPT_HELP, "--help", SO_NONE },
@@ -61,6 +64,9 @@ CSimpleOpt::SOption gOptions[] = { { OPT_HELP, "--help", SO_NONE },
 	                               { OPT_CLIENT_CA_FILE, "--client-ca-file", SO_REQ_SEP },
 	                               { OPT_EXPIRE_SERVER_CERT, "--expire-server-cert", SO_NONE },
 	                               { OPT_EXPIRE_CLIENT_CERT, "--expire-client-cert", SO_NONE },
+	                               { OPT_PRINT_SERVER_CERT, "--print-server-cert", SO_NONE },
+	                               { OPT_PRINT_CLIENT_CERT, "--print-client-cert", SO_NONE },
+	                               { OPT_PRINT_ARGUMENTS, "--print-args", SO_NONE },
 	                               SO_END_OF_OPTIONS };
 
 template <size_t Len>
@@ -105,21 +111,88 @@ void printUsage(std::string_view binary) {
 	                 { "Output filename for client's root CA certificate.",
 	                   "Content same as '--client-cert-file' for '--client-chain-length' == 1.",
 	                   "Intended for SERVERS to use as 'tls_ca_file': i.e. cert issuer to trust." });
-	printOptionUsage("--expire-server-cert", { "Deliberately expire server's leaf certificate for testing." });
-	printOptionUsage("--expire-client-cert", { "Deliberately expire client's leaf certificate for testing." });
+	printOptionUsage("--expire-server-cert (default: no)",
+	                 { "Deliberately expire server's leaf certificate for testing." });
+	printOptionUsage("--expire-client-cert (default: no)",
+	                 { "Deliberately expire client's leaf certificate for testing." });
+	printOptionUsage("--print-server-cert (default: no)",
+	                 { "Print generated server certificate chain including root in human readable form.",
+	                   "Printed certificates are in leaf-to-CA order.",
+	                   "If --print-client-cert is also used, server chain precedes client's." });
+	printOptionUsage("--print-client-cert (default: no)",
+	                 { "Print generated client certificate chain including root in human readable form.",
+	                   "Printed certificates are in leaf-to-CA order.",
+	                   "If --print-server-cert is also used, server chain precedes client's." });
+	printOptionUsage("--print-args (default: no)", { "Print chain generation arguments." });
+}
+
+struct ChainSpec {
+	unsigned length;
+	std::string certFile;
+	std::string keyFile;
+	std::string caFile;
+	mkcert::ESide side;
+	bool expireLeaf;
+	void transformPathToAbs() {
+		certFile = abspath(certFile);
+		keyFile = abspath(keyFile);
+		caFile = abspath(caFile);
+	}
+	void print() {
+		fmt::print(stdout, "{}-side:\n", side == mkcert::ESide::Server ? "Server" : "Client");
+		fmt::print(stdout, "  Chain length: {}\n", length);
+		fmt::print(stdout, "  Certificate file: {}\n", certFile);
+		fmt::print(stdout, "  Key file: {}\n", keyFile);
+		fmt::print(stdout, "  CA file: {}\n", caFile);
+		fmt::print(stdout, "  Expire cert: {}\n", expireLeaf);
+	}
+	mkcert::CertChainRef makeChain(Arena& arena);
+};
+
+mkcert::CertChainRef ChainSpec::makeChain(Arena& arena) {
+	auto checkStream = [](std::ofstream& fs, std::string_view filename) {
+		if (!fs) {
+			throw std::runtime_error(fmt::format("cannot open '{}' for writing", filename));
+		}
+	};
+	auto ofsCert = std::ofstream(certFile, std::ofstream::out | std::ofstream::trunc);
+	checkStream(ofsCert, certFile);
+	auto ofsKey = std::ofstream(keyFile, std::ofstream::out | std::ofstream::trunc);
+	checkStream(ofsKey, keyFile);
+	auto ofsCa = std::ofstream(caFile, std::ofstream::out | std::ofstream::trunc);
+	checkStream(ofsCa, caFile);
+	if (!length)
+		return {};
+	auto specs = mkcert::makeCertChainSpec(arena, length, side);
+	if (expireLeaf) {
+		specs[0].offsetNotBefore = -60l * 60 * 24 * 365;
+		specs[0].offsetNotAfter = -10l;
+	}
+	auto chain = mkcert::makeCertChain(arena, specs, {} /*generate root CA*/);
+	auto ca = chain.back().certPem;
+	ofsCa.write(reinterpret_cast<char const*>(ca.begin()), ca.size());
+	auto chainMinusRoot = chain;
+	if (chainMinusRoot.size() > 1)
+		chainMinusRoot.pop_back();
+	auto cert = mkcert::concatCertChain(arena, chainMinusRoot);
+	ofsCert.write(reinterpret_cast<char const*>(cert.begin()), cert.size());
+	auto key = chain[0].privateKeyPem;
+	ofsKey.write(reinterpret_cast<char const*>(key.begin()), key.size());
+	ofsCert.close();
+	ofsKey.close();
+	ofsCa.close();
+	return chain;
 }
 
 int main(int argc, char** argv) {
-	auto serverChainLen = 3;
-	auto clientChainLen = 2;
-	auto serverCertFile = std::string("server_cert.pem");
-	auto serverKeyFile = std::string("server_key.pem");
-	auto serverCaFile = std::string("server_ca.pem");
-	auto clientCertFile = std::string("client_cert.pem");
-	auto clientKeyFile = std::string("client_key.pem");
-	auto clientCaFile = std::string("client_ca.pem");
-	auto expireServerCert = false;
-	auto expireClientCert = false;
+	// default chain specs
+	auto serverArgs = ChainSpec{ 3u /*length*/,   "server_cert.pem",     "server_key.pem",
+		                         "server_ca.pem", mkcert::ESide::Server, false /* expireLeaf */ };
+	auto clientArgs = ChainSpec{ 2u /*length*/,   "client_cert.pem",     "client_key.pem",
+		                         "client_ca.pem", mkcert::ESide::Client, false /* expireLeaf */ };
+	auto printServerCert = false;
+	auto printClientCert = false;
+	auto printArguments = false;
 	auto args = CSimpleOpt(argc, argv, gOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
 	while (args.Next()) {
 		if (auto err = args.LastError()) {
@@ -148,7 +221,7 @@ int main(int argc, char** argv) {
 				return FDB_EXIT_SUCCESS;
 			case OPT_SERVER_CHAIN_LEN:
 				try {
-					serverChainLen = std::stoi(args.OptionArg());
+					serverArgs.length = std::stoul(args.OptionArg());
 				} catch (std::exception const& ex) {
 					fmt::print(stderr, "ERROR: Invalid chain length ({})\n", ex.what());
 					return FDB_EXIT_ERROR;
@@ -156,35 +229,44 @@ int main(int argc, char** argv) {
 				break;
 			case OPT_CLIENT_CHAIN_LEN:
 				try {
-					clientChainLen = std::stoi(args.OptionArg());
+					clientArgs.length = std::stoul(args.OptionArg());
 				} catch (std::exception const& ex) {
 					fmt::print(stderr, "ERROR: Invalid chain length ({})\n", ex.what());
 					return FDB_EXIT_ERROR;
 				}
 				break;
 			case OPT_SERVER_CERT_FILE:
-				serverCertFile.assign(args.OptionArg());
+				serverArgs.certFile.assign(args.OptionArg());
 				break;
 			case OPT_SERVER_KEY_FILE:
-				serverKeyFile.assign(args.OptionArg());
+				serverArgs.keyFile.assign(args.OptionArg());
 				break;
 			case OPT_SERVER_CA_FILE:
-				serverCaFile.assign(args.OptionArg());
+				serverArgs.caFile.assign(args.OptionArg());
 				break;
 			case OPT_CLIENT_CERT_FILE:
-				clientCertFile.assign(args.OptionArg());
+				clientArgs.certFile.assign(args.OptionArg());
 				break;
 			case OPT_CLIENT_KEY_FILE:
-				clientKeyFile.assign(args.OptionArg());
+				clientArgs.keyFile.assign(args.OptionArg());
 				break;
 			case OPT_CLIENT_CA_FILE:
-				clientCaFile.assign(args.OptionArg());
+				clientArgs.caFile.assign(args.OptionArg());
 				break;
 			case OPT_EXPIRE_SERVER_CERT:
-				expireServerCert = true;
+				serverArgs.expireLeaf = true;
 				break;
 			case OPT_EXPIRE_CLIENT_CERT:
-				expireClientCert = true;
+				clientArgs.expireLeaf = true;
+				break;
+			case OPT_PRINT_SERVER_CERT:
+				printServerCert = true;
+				break;
+			case OPT_PRINT_CLIENT_CERT:
+				printClientCert = true;
+				break;
+			case OPT_PRINT_ARGUMENTS:
+				printArguments = true;
 				break;
 			default:
 				fmt::print(stderr, "ERROR: Unknown option {}\n", args.OptionText());
@@ -208,88 +290,30 @@ int main(int argc, char** argv) {
 			thread.join();
 		});
 
-		serverCertFile = abspath(serverCertFile);
-		serverKeyFile = abspath(serverKeyFile);
-		serverCaFile = abspath(serverCaFile);
-		clientCertFile = abspath(clientCertFile);
-		clientKeyFile = abspath(clientKeyFile);
-		clientCaFile = abspath(clientCaFile);
-		fmt::print("Server certificate chain length: {}\n"
-		           "Client certificate chain length: {}\n"
-		           "Server certificate file: {}\n"
-		           "Server private key file: {}\n"
-		           "Server CA file: {}\n"
-		           "Client certificate file: {}\n"
-		           "Client private key file: {}\n"
-		           "Client CA file: {}\n",
-		           serverChainLen,
-		           clientChainLen,
-		           serverCertFile,
-		           serverKeyFile,
-		           serverCaFile,
-		           clientCertFile,
-		           clientKeyFile,
-		           clientCaFile);
+		serverArgs.transformPathToAbs();
+		clientArgs.transformPathToAbs();
+		if (printArguments) {
+			serverArgs.print();
+			clientArgs.print();
+		}
+		auto arena = Arena();
+		auto serverChain = serverArgs.makeChain(arena);
+		auto clientChain = clientArgs.makeChain(arena);
 
-		using FileStream = std::ofstream;
-		auto checkStream = [](FileStream& fs, std::string_view filename) {
-			if (!fs) {
-				throw std::runtime_error(fmt::format("cannot open '{}' for writing", filename));
+		if (printServerCert || printClientCert) {
+			if (printServerCert) {
+				for (auto i = 0; i < serverChain.size(); i++) {
+					mkcert::printCert(stdout, serverChain[i].certPem);
+				}
 			}
-		};
-		auto ofsServerCert = FileStream(serverCertFile, std::ofstream::out | std::ofstream::trunc);
-		checkStream(ofsServerCert, serverCertFile);
-		auto ofsServerKey = FileStream(serverKeyFile, std::ofstream::out | std::ofstream::trunc);
-		checkStream(ofsServerKey, serverKeyFile);
-		auto ofsServerCa = FileStream(serverCaFile, std::ofstream::out | std::ofstream::trunc);
-		checkStream(ofsServerCa, serverCaFile);
-		auto ofsClientCert = FileStream(clientCertFile, std::ofstream::out | std::ofstream::trunc);
-		checkStream(ofsClientCert, clientCertFile);
-		auto ofsClientKey = FileStream(clientKeyFile, std::ofstream::out | std::ofstream::trunc);
-		checkStream(ofsClientKey, clientKeyFile);
-		auto ofsClientCa = FileStream(clientCaFile, std::ofstream::out | std::ofstream::trunc);
-		checkStream(ofsClientCa, clientCaFile);
-		if (serverChainLen) {
-			auto arena = Arena();
-			auto specs = mkcert::makeCertChainSpec(arena, std::abs(serverChainLen), mkcert::ESide::Server);
-			if (expireServerCert) {
-				specs[0].offsetNotBefore = -60l * 60 * 24 * 365;
-				specs[0].offsetNotAfter = -10l;
+			if (printClientCert) {
+				for (auto i = 0; i < clientChain.size(); i++) {
+					mkcert::printCert(stdout, clientChain[i].certPem);
+				}
 			}
-			auto serverChain = mkcert::makeCertChain(arena, specs, {} /*generate root CA*/);
-			auto serverCa = serverChain.back().certPem;
-			ofsServerCa.write(reinterpret_cast<char const*>(serverCa.begin()), serverCa.size());
-			if (serverChain.size() > 1)
-				serverChain.pop_back();
-			auto serverCert = mkcert::concatCertChain(arena, serverChain);
-			ofsServerCert.write(reinterpret_cast<char const*>(serverCert.begin()), serverCert.size());
-			auto serverKey = serverChain[0].privateKeyPem;
-			ofsServerKey.write(reinterpret_cast<char const*>(serverKey.begin()), serverKey.size());
+		} else {
+			fmt::print("OK\n");
 		}
-		ofsServerCert.close();
-		ofsServerKey.close();
-		ofsServerCa.close();
-		if (clientChainLen) {
-			auto arena = Arena();
-			auto specs = mkcert::makeCertChainSpec(arena, std::abs(serverChainLen), mkcert::ESide::Server);
-			if (expireClientCert) {
-				specs[0].offsetNotBefore = -60l * 60 * 24 * 365;
-				specs[0].offsetNotAfter = -10l;
-			}
-			auto serverChain = mkcert::makeCertChain(arena, specs, {} /*generate root CA*/);
-			auto serverCa = serverChain.back().certPem;
-			ofsServerCa.write(reinterpret_cast<char const*>(serverCa.begin()), serverCa.size());
-			if (serverChain.size() > 1)
-				serverChain.pop_back();
-			auto serverCert = mkcert::concatCertChain(arena, serverChain);
-			ofsServerCert.write(reinterpret_cast<char const*>(serverCert.begin()), serverCert.size());
-			auto serverKey = serverChain[0].privateKeyPem;
-			ofsServerKey.write(reinterpret_cast<char const*>(serverKey.begin()), serverKey.size());
-		}
-		ofsClientCert.close();
-		ofsClientKey.close();
-		ofsClientCa.close();
-		fmt::print("OK\n");
 		return FDB_EXIT_SUCCESS;
 	} catch (const Error& e) {
 		fmt::print(stderr, "error: {}\n", e.name());

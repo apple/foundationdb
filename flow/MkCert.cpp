@@ -26,6 +26,7 @@
 #include <limits>
 #include <memory>
 #include <string>
+#include <cstring>
 #include <openssl/ec.h>
 #include <openssl/err.h>
 #include <openssl/evp.h>
@@ -36,8 +37,10 @@
 namespace {
 
 [[noreturn]] void traceAndThrow(const char* condition, const char* file, int line) {
-	auto te = TraceEvent(SevWarnAlways, "ErrorTLSKeyOrCertGen");
-	te.suppressFor(60).detail("File", file).detail("Line", line).detail("Condition", condition);
+	auto te = TraceEvent(SevWarnAlways, "MkCertOrKeyError");
+	auto pfile= ::strrchr(file, '/');
+	pfile = pfile ? pfile + 1 : file;
+	te.suppressFor(5).detail("File", pfile).detail("Line", line).detail("Condition", condition);
 	if (auto err = ::ERR_get_error()) {
 		char buf[256]{
 			0,
