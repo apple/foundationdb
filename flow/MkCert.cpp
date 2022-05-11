@@ -36,11 +36,9 @@
 
 namespace {
 
-[[noreturn]] void traceAndThrow(const char* condition, const char* file, int line) {
+[[noreturn]] void traceAndThrow(const char* condition, int line) {
 	auto te = TraceEvent(SevWarnAlways, "MkCertOrKeyError");
-	auto pfile= ::strrchr(file, '/');
-	pfile = pfile ? pfile + 1 : file;
-	te.suppressFor(5).detail("File", pfile).detail("Line", line).detail("Condition", condition);
+	te.suppressFor(10).detail("Line", line).detail("Condition", condition);
 	if (auto err = ::ERR_get_error()) {
 		char buf[256]{
 			0,
