@@ -53,6 +53,8 @@
 // 2. To avoid a historically documented but unknown crash that occurs when logging allocations
 //    during an open trace event
 thread_local int g_allocation_tracing_disabled = 1;
+unsigned tracedLines = 0;
+thread_local int failedLineOverflow = 0;
 
 ITraceLogIssuesReporter::~ITraceLogIssuesReporter() {}
 
@@ -394,17 +396,22 @@ public:
 		eventBuffer.push_back(fields);
 		bufferLength += fields.sizeBytes();
 
-		// If we have queued up a large number of events in simulation, then throw an error. This makes it easier to
-		// diagnose cases where we get stuck in a loop logging trace events that eventually runs out of memory.
-		// Without this we would never see any trace events from that loop, and it would be more difficult to identify
-		// where the process is actually stuck.
-		if (g_network && g_network->isSimulated() && bufferLength > 1e8) {
-			fprintf(stderr, "Trace log buffer overflow\n");
-			fprintf(stderr, "Last event: %s\n", fields.toString().c_str());
-			// Setting this to 0 avoids a recurse from the assertion trace event and also prevents a situation where
-			// we roll the trace log only to log the single assertion event when using --crash.
-			bufferLength = 0;
-			ASSERT(false);
+		if (g_network && g_network->isSimulated()) {
+			// Throw an error if we have queued up a large number of events in simulation. This makes it easier to
+			// diagnose cases where we get stuck in a loop logging trace events that eventually runs out of memory.
+			// Without this we would never see any trace events from that loop, and it would be more difficult to
+			// identify where the process is actually stuck.
+			if (bufferLength > 1e8) {
+				fprintf(stderr, "Trace log buffer overflow\n");
+				fprintf(stderr, "Last event: %s\n", fields.toString().c_str());
+				// Setting this to 0 avoids a recurse from the assertion trace event and also prevents a situation where
+				// we roll the trace log only to log the single assertion event when using --crash.
+				bufferLength = 0;
+				ASSERT(false);
+			}
+			if (++tracedLines > FLOW_KNOBS->MAX_TRACE_LINES && failedLineOverflow == 0) {
+				failedLineOverflow = 1; // we only want to do this once
+			}
 		}
 
 		if (trackError) {
@@ -1265,6 +1272,11 @@ void BaseTraceEvent::log() {
 
 BaseTraceEvent::~BaseTraceEvent() {
 	log();
+	if (failedLineOverflow == 1) {
+		failedLineOverflow = 2;
+		TraceEvent(SevError, "TracedTooManyLines").log();
+		crashAndDie();
+	}
 }
 
 thread_local bool BaseTraceEvent::networkThread = false;
