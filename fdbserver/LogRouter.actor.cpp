@@ -603,7 +603,12 @@ Future<Void> logRouterPeekMessages(PromiseType replyPromise,
 	}
 
 	replyPromise.send(reply);
-	//TraceEvent("LogRouterPeek4", self->dbgid);
+	DisabledTraceEvent("LogRouterPeek4", self->dbgid)
+	    .detail("Tag", reqTag.toString())
+	    .detail("ReqBegin", reqBegin)
+	    .detail("End", reply.end)
+	    .detail("MessageSize", reply.messages.size())
+	    .detail("PoppedVersion", self->poppedVersion);
 	return Void();
 }
 
