@@ -255,6 +255,7 @@ public:
 
 	// trace
 	int TRACE_LOG_FILE_IDENTIFIER_MAX_LENGTH;
+	int TRACE_LOG_LEVEL_GLOBAL_THRESHOLD;
 
 	// transaction tags
 	int MAX_TRANSACTION_TAG_LENGTH;
