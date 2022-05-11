@@ -204,10 +204,11 @@ Future<Void> removeCachedRange(Reference<DB> db, KeyRangeRef range) {
 	return changeCachedRange(db, range, false);
 }
 
-ACTOR template <class Tr>
-Future<std::vector<ProcessData>> getWorkers(Reference<Tr> tr,
-                                            typename Tr::template FutureT<RangeResult> processClassesF,
-                                            typename Tr::template FutureT<RangeResult> processDataF) {
+ACTOR template <class Transaction>
+Future<std::vector<ProcessData>> getWorkers(
+    Transaction tr,
+    typename transaction_future_type<Transaction, RangeResult>::type processClassesF,
+    typename transaction_future_type<Transaction, RangeResult>::type processDataF) {
 	// processClassesF and processDataF are used to hold standalone memory
 	processClassesF = tr->getRange(processClassKeys, CLIENT_KNOBS->TOO_MANY);
 	processDataF = tr->getRange(workerListKeys, CLIENT_KNOBS->TOO_MANY);
@@ -245,18 +246,18 @@ Future<std::vector<ProcessData>> getWorkers(Reference<Tr> tr,
 // ConfigurationResult (or error).
 
 // Accepts a full configuration in key/value format (from buildConfiguration)
-ACTOR template <class DB>
-Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string, std::string> m, bool force) {
-	state StringRef initIdKey = LiteralStringRef("\xff/init_id");
-	state Reference<typename DB::TransactionT> tr = db->createTransaction();
+ACTOR template <class Transaction>
+Future<ConfigurationResult> changeConfigTransaction(Transaction tr,
+                                                    std::map<std::string, std::string> m,
+                                                    bool force,
+                                                    bool creating) {
+	state StringRef initIdKey = "\xff/init_id"_sr;
 
 	if (!m.size()) {
 		return ConfigurationResult::NO_OPTIONS_PROVIDED;
 	}
 
 	// make sure we have essential configuration options
-	std::string initKey = configKeysPrefix.toString() + "initialized";
-	state bool creating = m.count(initKey) != 0;
 	state Optional<UID> locked;
 	{
 		auto iter = m.find(databaseLockedKey.toString());
@@ -282,230 +283,251 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 	state bool warnChangeStorageNoMigrate = false;
 	state bool warnRocksDBIsExperimental = false;
 	state bool warnShardedRocksDBIsExperimental = false;
-	loop {
-		try {
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			tr->setOption(FDBTransactionOptions::USE_PROVISIONAL_PROXIES);
 
-			if (!creating && !force) {
-				state typename DB::TransactionT::template FutureT<RangeResult> fConfigF =
-				    tr->getRange(configKeys, CLIENT_KNOBS->TOO_MANY);
-				state Future<RangeResult> fConfig = safeThreadFutureToFuture(fConfigF);
-				state typename DB::TransactionT::template FutureT<RangeResult> processClassesF;
-				state typename DB::TransactionT::template FutureT<RangeResult> processDataF;
-				state Future<std::vector<ProcessData>> fWorkers = getWorkers(tr, processClassesF, processDataF);
-				wait(success(fConfig) || tooLong);
+	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+	tr->setOption(FDBTransactionOptions::USE_PROVISIONAL_PROXIES);
 
-				if (!fConfig.isReady()) {
-					return ConfigurationResult::DATABASE_UNAVAILABLE;
+	if (!creating && !force) {
+		state typename transaction_future_type<Transaction, RangeResult>::type fConfigF =
+		    tr->getRange(configKeys, CLIENT_KNOBS->TOO_MANY);
+		state Future<RangeResult> fConfig = safeThreadFutureToFuture(fConfigF);
+		state typename transaction_future_type<Transaction, RangeResult>::type processClassesF;
+		state typename transaction_future_type<Transaction, RangeResult>::type processDataF;
+		state Future<std::vector<ProcessData>> fWorkers = getWorkers(tr, processClassesF, processDataF);
+		wait(success(fConfig) || tooLong);
+
+		if (!fConfig.isReady()) {
+			return ConfigurationResult::DATABASE_UNAVAILABLE;
+		}
+
+		if (fConfig.isReady()) {
+			ASSERT(fConfig.get().size() < CLIENT_KNOBS->TOO_MANY);
+			state DatabaseConfiguration oldConfig;
+			oldConfig.fromKeyValues((VectorRef<KeyValueRef>)fConfig.get());
+			state DatabaseConfiguration newConfig = oldConfig;
+			for (auto kv : m) {
+				newConfig.set(kv.first, kv.second);
+			}
+			if (!newConfig.isValid()) {
+				return ConfigurationResult::INVALID_CONFIGURATION;
+			}
+
+			if (newConfig.tLogPolicy->attributeKeys().count("dcid") && newConfig.regions.size() > 0) {
+				return ConfigurationResult::REGION_REPLICATION_MISMATCH;
+			}
+
+			oldReplicationUsesDcId = oldReplicationUsesDcId || oldConfig.tLogPolicy->attributeKeys().count("dcid");
+
+			if (oldConfig.usableRegions != newConfig.usableRegions) {
+				// cannot change region configuration
+				std::map<Key, int32_t> dcId_priority;
+				for (auto& it : newConfig.regions) {
+					dcId_priority[it.dcId] = it.priority;
+				}
+				for (auto& it : oldConfig.regions) {
+					if (!dcId_priority.count(it.dcId) || dcId_priority[it.dcId] != it.priority) {
+						return ConfigurationResult::REGIONS_CHANGED;
+					}
 				}
 
-				if (fConfig.isReady()) {
-					ASSERT(fConfig.get().size() < CLIENT_KNOBS->TOO_MANY);
-					state DatabaseConfiguration oldConfig;
-					oldConfig.fromKeyValues((VectorRef<KeyValueRef>)fConfig.get());
-					state DatabaseConfiguration newConfig = oldConfig;
-					for (auto kv : m) {
-						newConfig.set(kv.first, kv.second);
+				// must only have one region with priority >= 0
+				int activeRegionCount = 0;
+				for (auto& it : newConfig.regions) {
+					if (it.priority >= 0) {
+						activeRegionCount++;
 					}
-					if (!newConfig.isValid()) {
-						return ConfigurationResult::INVALID_CONFIGURATION;
-					}
+				}
+				if (activeRegionCount > 1) {
+					return ConfigurationResult::MULTIPLE_ACTIVE_REGIONS;
+				}
+			}
 
-					if (newConfig.tLogPolicy->attributeKeys().count("dcid") && newConfig.regions.size() > 0) {
-						return ConfigurationResult::REGION_REPLICATION_MISMATCH;
-					}
+			state typename transaction_future_type<Transaction, RangeResult>::type fServerListF =
+			    tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
+			state Future<RangeResult> fServerList =
+			    (newConfig.regions.size()) ? safeThreadFutureToFuture(fServerListF) : Future<RangeResult>();
 
-					oldReplicationUsesDcId =
-					    oldReplicationUsesDcId || oldConfig.tLogPolicy->attributeKeys().count("dcid");
-
-					if (oldConfig.usableRegions != newConfig.usableRegions) {
-						// cannot change region configuration
-						std::map<Key, int32_t> dcId_priority;
-						for (auto& it : newConfig.regions) {
-							dcId_priority[it.dcId] = it.priority;
-						}
-						for (auto& it : oldConfig.regions) {
-							if (!dcId_priority.count(it.dcId) || dcId_priority[it.dcId] != it.priority) {
-								return ConfigurationResult::REGIONS_CHANGED;
-							}
-						}
-
-						// must only have one region with priority >= 0
-						int activeRegionCount = 0;
-						for (auto& it : newConfig.regions) {
-							if (it.priority >= 0) {
-								activeRegionCount++;
-							}
-						}
-						if (activeRegionCount > 1) {
-							return ConfigurationResult::MULTIPLE_ACTIVE_REGIONS;
-						}
-					}
-
-					state typename DB::TransactionT::template FutureT<RangeResult> fServerListF =
-					    tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
-					state Future<RangeResult> fServerList =
-					    (newConfig.regions.size()) ? safeThreadFutureToFuture(fServerListF) : Future<RangeResult>();
-
-					if (newConfig.usableRegions == 2) {
-						if (oldReplicationUsesDcId) {
-							state typename DB::TransactionT::template FutureT<RangeResult> fLocalityListF =
-							    tr->getRange(tagLocalityListKeys, CLIENT_KNOBS->TOO_MANY);
-							state Future<RangeResult> fLocalityList = safeThreadFutureToFuture(fLocalityListF);
-							wait(success(fLocalityList) || tooLong);
-							if (!fLocalityList.isReady()) {
-								return ConfigurationResult::DATABASE_UNAVAILABLE;
-							}
-							RangeResult localityList = fLocalityList.get();
-							ASSERT(!localityList.more && localityList.size() < CLIENT_KNOBS->TOO_MANY);
-
-							std::set<Key> localityDcIds;
-							for (auto& s : localityList) {
-								auto dc = decodeTagLocalityListKey(s.key);
-								if (dc.present()) {
-									localityDcIds.insert(dc.get());
-								}
-							}
-
-							for (auto& it : newConfig.regions) {
-								if (localityDcIds.count(it.dcId) == 0) {
-									return ConfigurationResult::DCID_MISSING;
-								}
-							}
-						} else {
-							// all regions with priority >= 0 must be fully replicated
-							state std::vector<typename DB::TransactionT::template FutureT<Optional<Value>>>
-							    replicasFuturesF;
-							state std::vector<Future<Optional<Value>>> replicasFutures;
-							for (auto& it : newConfig.regions) {
-								if (it.priority >= 0) {
-									replicasFuturesF.push_back(tr->get(datacenterReplicasKeyFor(it.dcId)));
-									replicasFutures.push_back(safeThreadFutureToFuture(replicasFuturesF.back()));
-								}
-							}
-							wait(waitForAll(replicasFutures) || tooLong);
-
-							for (auto& it : replicasFutures) {
-								if (!it.isReady()) {
-									return ConfigurationResult::DATABASE_UNAVAILABLE;
-								}
-								if (!it.get().present()) {
-									return ConfigurationResult::REGION_NOT_FULLY_REPLICATED;
-								}
-							}
-						}
-					}
-
-					if (newConfig.regions.size()) {
-						// all storage servers must be in one of the regions
-						wait(success(fServerList) || tooLong);
-						if (!fServerList.isReady()) {
-							return ConfigurationResult::DATABASE_UNAVAILABLE;
-						}
-						RangeResult serverList = fServerList.get();
-						ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
-
-						std::set<Key> newDcIds;
-						for (auto& it : newConfig.regions) {
-							newDcIds.insert(it.dcId);
-						}
-						std::set<Optional<Key>> missingDcIds;
-						for (auto& s : serverList) {
-							auto ssi = decodeServerListValue(s.value);
-							if (!ssi.locality.dcId().present() || !newDcIds.count(ssi.locality.dcId().get())) {
-								missingDcIds.insert(ssi.locality.dcId());
-							}
-						}
-						if (missingDcIds.size() > (oldReplicationUsesDcId ? 1 : 0)) {
-							return ConfigurationResult::STORAGE_IN_UNKNOWN_DCID;
-						}
-					}
-
-					wait(success(fWorkers) || tooLong);
-					if (!fWorkers.isReady()) {
+			if (newConfig.usableRegions == 2) {
+				if (oldReplicationUsesDcId) {
+					state typename transaction_future_type<Transaction, RangeResult>::type fLocalityListF =
+					    tr->getRange(tagLocalityListKeys, CLIENT_KNOBS->TOO_MANY);
+					state Future<RangeResult> fLocalityList = safeThreadFutureToFuture(fLocalityListF);
+					wait(success(fLocalityList) || tooLong);
+					if (!fLocalityList.isReady()) {
 						return ConfigurationResult::DATABASE_UNAVAILABLE;
 					}
+					RangeResult localityList = fLocalityList.get();
+					ASSERT(!localityList.more && localityList.size() < CLIENT_KNOBS->TOO_MANY);
 
-					if (newConfig.regions.size()) {
-						std::map<Optional<Key>, std::set<Optional<Key>>> dcId_zoneIds;
-						for (auto& it : fWorkers.get()) {
-							if (it.processClass.machineClassFitness(ProcessClass::Storage) <= ProcessClass::WorstFit) {
-								dcId_zoneIds[it.locality.dcId()].insert(it.locality.zoneId());
-							}
+					std::set<Key> localityDcIds;
+					for (auto& s : localityList) {
+						auto dc = decodeTagLocalityListKey(s.key);
+						if (dc.present()) {
+							localityDcIds.insert(dc.get());
 						}
-						for (auto& region : newConfig.regions) {
-							if (dcId_zoneIds[region.dcId].size() <
-							    std::max(newConfig.storageTeamSize, newConfig.tLogReplicationFactor)) {
-								return ConfigurationResult::NOT_ENOUGH_WORKERS;
-							}
-							if (region.satelliteTLogReplicationFactor > 0 && region.priority >= 0) {
-								int totalSatelliteProcesses = 0;
-								for (auto& sat : region.satellites) {
-									totalSatelliteProcesses += dcId_zoneIds[sat.dcId].size();
-								}
-								if (totalSatelliteProcesses < region.satelliteTLogReplicationFactor) {
-									return ConfigurationResult::NOT_ENOUGH_WORKERS;
-								}
-							}
+					}
+
+					for (auto& it : newConfig.regions) {
+						if (localityDcIds.count(it.dcId) == 0) {
+							return ConfigurationResult::DCID_MISSING;
 						}
-					} else {
-						std::set<Optional<Key>> zoneIds;
-						for (auto& it : fWorkers.get()) {
-							if (it.processClass.machineClassFitness(ProcessClass::Storage) <= ProcessClass::WorstFit) {
-								zoneIds.insert(it.locality.zoneId());
-							}
+					}
+				} else {
+					// all regions with priority >= 0 must be fully replicated
+					state std::vector<typename transaction_future_type<Transaction, Optional<Value>>::type>
+					    replicasFuturesF;
+					state std::vector<Future<Optional<Value>>> replicasFutures;
+					for (auto& it : newConfig.regions) {
+						if (it.priority >= 0) {
+							replicasFuturesF.push_back(tr->get(datacenterReplicasKeyFor(it.dcId)));
+							replicasFutures.push_back(safeThreadFutureToFuture(replicasFuturesF.back()));
 						}
-						if (zoneIds.size() < std::max(newConfig.storageTeamSize, newConfig.tLogReplicationFactor)) {
+					}
+					wait(waitForAll(replicasFutures) || tooLong);
+
+					for (auto& it : replicasFutures) {
+						if (!it.isReady()) {
+							return ConfigurationResult::DATABASE_UNAVAILABLE;
+						}
+						if (!it.get().present()) {
+							return ConfigurationResult::REGION_NOT_FULLY_REPLICATED;
+						}
+					}
+				}
+			}
+
+			if (newConfig.regions.size()) {
+				// all storage servers must be in one of the regions
+				wait(success(fServerList) || tooLong);
+				if (!fServerList.isReady()) {
+					return ConfigurationResult::DATABASE_UNAVAILABLE;
+				}
+				RangeResult serverList = fServerList.get();
+				ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
+
+				std::set<Key> newDcIds;
+				for (auto& it : newConfig.regions) {
+					newDcIds.insert(it.dcId);
+				}
+				std::set<Optional<Key>> missingDcIds;
+				for (auto& s : serverList) {
+					auto ssi = decodeServerListValue(s.value);
+					if (!ssi.locality.dcId().present() || !newDcIds.count(ssi.locality.dcId().get())) {
+						missingDcIds.insert(ssi.locality.dcId());
+					}
+				}
+				if (missingDcIds.size() > (oldReplicationUsesDcId ? 1 : 0)) {
+					return ConfigurationResult::STORAGE_IN_UNKNOWN_DCID;
+				}
+			}
+
+			wait(success(fWorkers) || tooLong);
+			if (!fWorkers.isReady()) {
+				return ConfigurationResult::DATABASE_UNAVAILABLE;
+			}
+
+			if (newConfig.regions.size()) {
+				std::map<Optional<Key>, std::set<Optional<Key>>> dcId_zoneIds;
+				for (auto& it : fWorkers.get()) {
+					if (it.processClass.machineClassFitness(ProcessClass::Storage) <= ProcessClass::WorstFit) {
+						dcId_zoneIds[it.locality.dcId()].insert(it.locality.zoneId());
+					}
+				}
+				for (auto& region : newConfig.regions) {
+					if (dcId_zoneIds[region.dcId].size() <
+					    std::max(newConfig.storageTeamSize, newConfig.tLogReplicationFactor)) {
+						return ConfigurationResult::NOT_ENOUGH_WORKERS;
+					}
+					if (region.satelliteTLogReplicationFactor > 0 && region.priority >= 0) {
+						int totalSatelliteProcesses = 0;
+						for (auto& sat : region.satellites) {
+							totalSatelliteProcesses += dcId_zoneIds[sat.dcId].size();
+						}
+						if (totalSatelliteProcesses < region.satelliteTLogReplicationFactor) {
 							return ConfigurationResult::NOT_ENOUGH_WORKERS;
 						}
 					}
-
-					if (newConfig.storageServerStoreType != oldConfig.storageServerStoreType &&
-					    newConfig.storageMigrationType == StorageMigrationType::DISABLED) {
-						return ConfigurationResult::STORAGE_MIGRATION_DISABLED;
-					} else if (newConfig.storageMigrationType == StorageMigrationType::GRADUAL &&
-					           newConfig.perpetualStorageWiggleSpeed == 0) {
-						warnPPWGradual = true;
-					} else if (newConfig.storageServerStoreType != oldConfig.storageServerStoreType &&
-					           newConfig.storageServerStoreType == KeyValueStoreType::SSD_ROCKSDB_V1) {
-						warnRocksDBIsExperimental = true;
-					} else if (newConfig.storageServerStoreType != oldConfig.storageServerStoreType &&
-					           newConfig.storageServerStoreType == KeyValueStoreType::SSD_SHARDED_ROCKSDB) {
-						warnShardedRocksDBIsExperimental = true;
+				}
+			} else {
+				std::set<Optional<Key>> zoneIds;
+				for (auto& it : fWorkers.get()) {
+					if (it.processClass.machineClassFitness(ProcessClass::Storage) <= ProcessClass::WorstFit) {
+						zoneIds.insert(it.locality.zoneId());
 					}
 				}
-			}
-			if (creating) {
-				tr->setOption(FDBTransactionOptions::INITIALIZE_NEW_DATABASE);
-				tr->addReadConflictRange(singleKeyRange(initIdKey));
-			} else if (m.size()) {
-				// might be used in an emergency transaction, so make sure it is retry-self-conflicting and
-				// CAUSAL_WRITE_RISKY
-				tr->setOption(FDBTransactionOptions::CAUSAL_WRITE_RISKY);
-				tr->addReadConflictRange(singleKeyRange(m.begin()->first));
+				if (zoneIds.size() < std::max(newConfig.storageTeamSize, newConfig.tLogReplicationFactor)) {
+					return ConfigurationResult::NOT_ENOUGH_WORKERS;
+				}
 			}
 
-			if (locked.present()) {
-				ASSERT(creating);
-				tr->atomicOp(databaseLockedKey,
-				             BinaryWriter::toValue(locked.get(), Unversioned())
-				                 .withPrefix(LiteralStringRef("0123456789"))
-				                 .withSuffix(LiteralStringRef("\x00\x00\x00\x00")),
-				             MutationRef::SetVersionstampedValue);
+			if (newConfig.storageServerStoreType != oldConfig.storageServerStoreType &&
+			    newConfig.storageMigrationType == StorageMigrationType::DISABLED) {
+				return ConfigurationResult::STORAGE_MIGRATION_DISABLED;
+			} else if (newConfig.storageMigrationType == StorageMigrationType::GRADUAL &&
+			           newConfig.perpetualStorageWiggleSpeed == 0) {
+				warnPPWGradual = true;
+			} else if (newConfig.storageServerStoreType != oldConfig.storageServerStoreType &&
+			           newConfig.storageServerStoreType == KeyValueStoreType::SSD_ROCKSDB_V1) {
+				warnRocksDBIsExperimental = true;
+			} else if (newConfig.storageServerStoreType != oldConfig.storageServerStoreType &&
+			           newConfig.storageServerStoreType == KeyValueStoreType::SSD_SHARDED_ROCKSDB) {
+				warnShardedRocksDBIsExperimental = true;
 			}
+		}
+	}
+	if (creating) {
+		tr->setOption(FDBTransactionOptions::INITIALIZE_NEW_DATABASE);
+		tr->addReadConflictRange(singleKeyRange(initIdKey));
+	} else if (m.size()) {
+		// might be used in an emergency transaction, so make sure it is retry-self-conflicting and
+		// CAUSAL_WRITE_RISKY
+		tr->setOption(FDBTransactionOptions::CAUSAL_WRITE_RISKY);
+		tr->addReadConflictRange(singleKeyRange(m.begin()->first));
+	}
 
-			for (auto i = m.begin(); i != m.end(); ++i) {
-				tr->set(StringRef(i->first), StringRef(i->second));
-			}
+	if (locked.present()) {
+		ASSERT(creating);
+		tr->atomicOp(databaseLockedKey,
+		             BinaryWriter::toValue(locked.get(), Unversioned())
+		                 .withPrefix(LiteralStringRef("0123456789"))
+		                 .withSuffix(LiteralStringRef("\x00\x00\x00\x00")),
+		             MutationRef::SetVersionstampedValue);
+	}
 
-			tr->addReadConflictRange(singleKeyRange(moveKeysLockOwnerKey));
-			tr->set(moveKeysLockOwnerKey, versionKey);
+	for (auto i = m.begin(); i != m.end(); ++i) {
+		tr->set(StringRef(i->first), StringRef(i->second));
+	}
 
+	tr->addReadConflictRange(singleKeyRange(moveKeysLockOwnerKey));
+	tr->set(moveKeysLockOwnerKey, versionKey);
+
+	if (warnPPWGradual) {
+		return ConfigurationResult::SUCCESS_WARN_PPW_GRADUAL;
+	} else if (warnRocksDBIsExperimental) {
+		return ConfigurationResult::SUCCESS_WARN_ROCKSDB_EXPERIMENTAL;
+	} else if (warnShardedRocksDBIsExperimental) {
+		return ConfigurationResult::SUCCESS_WARN_SHARDED_ROCKSDB_EXPERIMENTAL;
+	} else {
+		return ConfigurationResult::SUCCESS;
+	}
+}
+
+// Accepts a full configuration in key/value format (from buildConfiguration)
+ACTOR template <class DB>
+Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string, std::string> m, bool force) {
+	state StringRef initIdKey = "\xff/init_id"_sr;
+	state Reference<typename DB::TransactionT> tr = db->createTransaction();
+
+	std::string initKey = configKeysPrefix.toString() + "initialized";
+	state bool creating = m.count(initKey) != 0;
+
+	loop {
+		try {
+			state ConfigurationResult result = wait(changeConfigTransaction(tr, m, force, creating));
 			wait(safeThreadFutureToFuture(tr->commit()));
-			break;
+			return result;
 		} catch (Error& e) {
 			state Error e1(e);
 			if ((e.code() == error_code_not_committed || e.code() == error_code_transaction_too_old) && creating) {
@@ -539,81 +561,77 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 			wait(safeThreadFutureToFuture(tr->onError(e1)));
 		}
 	}
-
-	if (warnPPWGradual) {
-		return ConfigurationResult::SUCCESS_WARN_PPW_GRADUAL;
-	} else if (warnRocksDBIsExperimental) {
-		return ConfigurationResult::SUCCESS_WARN_ROCKSDB_EXPERIMENTAL;
-	} else if (warnShardedRocksDBIsExperimental) {
-		return ConfigurationResult::SUCCESS_WARN_SHARDED_ROCKSDB_EXPERIMENTAL;
-	} else {
-		return ConfigurationResult::SUCCESS;
-	}
 }
 
-ACTOR template <class DB>
-Future<ConfigurationResult> autoConfig(Reference<DB> db, ConfigureAutoResult conf) {
-	state Reference<typename DB::TransactionT> tr = db->createTransaction();
+ACTOR template <class Transaction>
+Future<ConfigurationResult> autoConfigTransaction(Transaction tr, ConfigureAutoResult conf) {
 	state Key versionKey = BinaryWriter::toValue(deterministicRandom()->randomUniqueID(), Unversioned());
 
 	if (!conf.address_class.size())
 		return ConfigurationResult::INCOMPLETE_CONFIGURATION; // FIXME: correct return type
 
+	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+	tr->setOption(FDBTransactionOptions::USE_PROVISIONAL_PROXIES);
+
+	state typename transaction_future_type<Transaction, RangeResult>::type processClassesF;
+	state typename transaction_future_type<Transaction, RangeResult>::type processDataF;
+	std::vector<ProcessData> workers = wait(getWorkers(tr, processClassesF, processDataF));
+	std::map<NetworkAddress, Optional<Standalone<StringRef>>> address_processId;
+	for (auto& w : workers) {
+		address_processId[w.address] = w.locality.processId();
+	}
+
+	for (auto& it : conf.address_class) {
+		if (it.second.classSource() == ProcessClass::CommandLineSource) {
+			tr->clear(processClassKeyFor(address_processId[it.first].get()));
+		} else {
+			tr->set(processClassKeyFor(address_processId[it.first].get()), processClassValue(it.second));
+		}
+	}
+
+	if (conf.address_class.size())
+		tr->set(processClassChangeKey, deterministicRandom()->randomUniqueID().toString());
+
+	if (conf.auto_logs != conf.old_logs)
+		tr->set(configKeysPrefix.toString() + "auto_logs", format("%d", conf.auto_logs));
+
+	if (conf.auto_commit_proxies != conf.old_commit_proxies)
+		tr->set(configKeysPrefix.toString() + "auto_commit_proxies", format("%d", conf.auto_commit_proxies));
+
+	if (conf.auto_grv_proxies != conf.old_grv_proxies)
+		tr->set(configKeysPrefix.toString() + "auto_grv_proxies", format("%d", conf.auto_grv_proxies));
+
+	if (conf.auto_resolvers != conf.old_resolvers)
+		tr->set(configKeysPrefix.toString() + "auto_resolvers", format("%d", conf.auto_resolvers));
+
+	if (conf.auto_replication != conf.old_replication) {
+		std::vector<StringRef> modes;
+		modes.push_back(conf.auto_replication);
+		std::map<std::string, std::string> m;
+		auto r = buildConfiguration(modes, m);
+		if (r != ConfigurationResult::SUCCESS)
+			return r;
+
+		for (auto& kv : m)
+			tr->set(kv.first, kv.second);
+	}
+
+	tr->addReadConflictRange(singleKeyRange(moveKeysLockOwnerKey));
+	tr->set(moveKeysLockOwnerKey, versionKey);
+
+	return ConfigurationResult::SUCCESS;
+}
+
+ACTOR template <class DB>
+Future<ConfigurationResult> autoConfig(Reference<DB> db, ConfigureAutoResult conf) {
+	state Reference<typename DB::TransactionT> tr = db->createTransaction();
 	loop {
 		try {
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			tr->setOption(FDBTransactionOptions::USE_PROVISIONAL_PROXIES);
-
-			state typename DB::TransactionT::template FutureT<RangeResult> processClassesF;
-			state typename DB::TransactionT::template FutureT<RangeResult> processDataF;
-			std::vector<ProcessData> workers = wait(getWorkers(tr, processClassesF, processDataF));
-			std::map<NetworkAddress, Optional<Standalone<StringRef>>> address_processId;
-			for (auto& w : workers) {
-				address_processId[w.address] = w.locality.processId();
-			}
-
-			for (auto& it : conf.address_class) {
-				if (it.second.classSource() == ProcessClass::CommandLineSource) {
-					tr->clear(processClassKeyFor(address_processId[it.first].get()));
-				} else {
-					tr->set(processClassKeyFor(address_processId[it.first].get()), processClassValue(it.second));
-				}
-			}
-
-			if (conf.address_class.size())
-				tr->set(processClassChangeKey, deterministicRandom()->randomUniqueID().toString());
-
-			if (conf.auto_logs != conf.old_logs)
-				tr->set(configKeysPrefix.toString() + "auto_logs", format("%d", conf.auto_logs));
-
-			if (conf.auto_commit_proxies != conf.old_commit_proxies)
-				tr->set(configKeysPrefix.toString() + "auto_commit_proxies", format("%d", conf.auto_commit_proxies));
-
-			if (conf.auto_grv_proxies != conf.old_grv_proxies)
-				tr->set(configKeysPrefix.toString() + "auto_grv_proxies", format("%d", conf.auto_grv_proxies));
-
-			if (conf.auto_resolvers != conf.old_resolvers)
-				tr->set(configKeysPrefix.toString() + "auto_resolvers", format("%d", conf.auto_resolvers));
-
-			if (conf.auto_replication != conf.old_replication) {
-				std::vector<StringRef> modes;
-				modes.push_back(conf.auto_replication);
-				std::map<std::string, std::string> m;
-				auto r = buildConfiguration(modes, m);
-				if (r != ConfigurationResult::SUCCESS)
-					return r;
-
-				for (auto& kv : m)
-					tr->set(kv.first, kv.second);
-			}
-
-			tr->addReadConflictRange(singleKeyRange(moveKeysLockOwnerKey));
-			tr->set(moveKeysLockOwnerKey, versionKey);
-
+			state ConfigurationResult result = wait(autoConfigTransaction(tr, conf));
 			wait(safeThreadFutureToFuture(tr->commit()));
-			return ConfigurationResult::SUCCESS;
+			return result;
 		} catch (Error& e) {
 			wait(safeThreadFutureToFuture(tr->onError(e)));
 		}
@@ -629,6 +647,23 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::string const& mo
 	if (r != ConfigurationResult::SUCCESS)
 		return r;
 	return changeConfig(db, m, force);
+}
+
+template <class Transaction>
+Future<ConfigurationResult> changeConfigTransaction(Transaction tr,
+                                                    std::vector<StringRef> const& modes,
+                                                    Optional<ConfigureAutoResult> const& conf,
+                                                    bool force,
+                                                    bool creating) {
+	if (modes.size() && modes[0] == LiteralStringRef("auto") && conf.present()) {
+		return autoConfigTransaction(tr, conf.get());
+	}
+
+	std::map<std::string, std::string> m;
+	auto r = buildConfiguration(modes, m);
+	if (r != ConfigurationResult::SUCCESS)
+		return r;
+	return changeConfigTransaction(tr, m, force, creating);
 }
 
 // Accepts a vector of configuration tokens
@@ -870,11 +905,10 @@ Future<Void> deleteTenant(Reference<DB> db, TenantName name) {
 // This should only be called from a transaction that has already confirmed that the cluster entry
 // is present. The updatedEntry should use the existing entry and modify only those fields that need
 // to be changed.
-ACTOR template <class Transaction>
-Future<Void> configureTenantTransaction(Transaction tr, TenantNameRef tenantName, TenantMapEntry tenantEntry) {
+template <class Transaction>
+void configureTenantTransaction(Transaction tr, TenantNameRef tenantName, TenantMapEntry tenantEntry) {
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 	tr->set(tenantName.withPrefix(tenantMapPrefix), encodeTenantEntry(tenantEntry));
-	return Void();
 }
 
 ACTOR template <class Transaction>

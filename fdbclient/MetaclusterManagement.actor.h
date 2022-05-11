@@ -232,8 +232,20 @@ Future<Void> dataClusterRegister(Transaction tr, ClusterNameRef name) {
 		throw cluster_not_empty();
 	}
 
-	// TODO: change config to subordinate cluster
+	std::vector<StringRef> tokens = { "tenant_mode=subordinate"_sr };
+	ConfigurationResult configResult =
+	    wait(ManagementAPI::changeConfigTransaction(tr, tokens, Optional<ConfigureAutoResult>(), false, false));
+
+	if (configResult != ConfigurationResult::SUCCESS) {
+		TraceEvent(SevWarn, "CouldNotConfigureDataCluster")
+		    .detail("Name", name)
+		    .detail("ConfigurationResult", configResult);
+
+		throw cluster_configuration_failure();
+	}
+
 	// TODO: store the cluster name somewhere
+
 	return Void();
 }
 
@@ -391,8 +403,18 @@ Future<Void> managementClusterRemove(Transaction tr, ClusterNameRef name) {
 
 ACTOR template <class Transaction>
 Future<Void> dataClusterRemove(Transaction tr) {
-	// TODO
-	wait(delay(0.0));
+	// TODO: is there any other state to remove?
+
+	std::vector<StringRef> tokens = { "tenant_mode=required"_sr };
+	ConfigurationResult configResult =
+	    wait(ManagementAPI::changeConfigTransaction(tr, tokens, Optional<ConfigureAutoResult>(), false, false));
+
+	if (configResult != ConfigurationResult::SUCCESS) {
+		TraceEvent(SevWarn, "CouldNotConfigureDataCluster").detail("ConfigurationResult", configResult);
+
+		throw cluster_configuration_failure();
+	}
+
 	return Void();
 }
 
@@ -439,9 +461,9 @@ Future<Void> removeCluster(Reference<DB> db, ClusterName name) {
 	loop {
 		try {
 			dataClusterTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+			dataClusterTr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 
-			tr->set("\xff\xff/metacluster_internal/data_cluster/data_cluster/remove/"_sr.withSuffix(name), ""_sr);
+			dataClusterTr->set("\xff\xff/metacluster_internal/data_cluster/data_cluster/remove"_sr, ""_sr);
 
 			if (BUGGIFY) {
 				throw commit_unknown_result();
@@ -453,7 +475,9 @@ Future<Void> removeCluster(Reference<DB> db, ClusterName name) {
 				throw commit_unknown_result();
 			}
 
-			TraceEvent("ReconfiguredDataCluster").detail("Name", name).detail("Version", tr->getCommittedVersion());
+			TraceEvent("ReconfiguredDataCluster")
+			    .detail("Name", name)
+			    .detail("Version", dataClusterTr->getCommittedVersion());
 			break;
 		} catch (Error& e) {
 			wait(safeThreadFutureToFuture(dataClusterTr->onError(e)));

@@ -229,7 +229,7 @@ ACTOR Future<Void> changeTenantConfig(ReadYourWritesTransaction* ryw,
 
 	TenantMapEntry& entry = tenantEntry.get();
 	wait(applyTenantConfig(ryw, tenantName, configEntries, &entry, false));
-	wait(ManagementAPI::configureTenantTransaction(ryw, tenantName, tenantEntry.get()));
+	ManagementAPI::configureTenantTransaction(ryw, tenantName, tenantEntry.get());
 
 	return Void();
 }
