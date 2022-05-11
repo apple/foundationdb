@@ -54,7 +54,7 @@ namespace {
 #define OSSL_ASSERT(condition)                                                                                         \
 	do {                                                                                                               \
 		if (!(condition))                                                                                              \
-			traceAndThrow(#condition, __FILE__, __LINE__);                                                             \
+			traceAndThrow(#condition, __LINE__);                                                                       \
 	} while (false)
 
 namespace mkcert {
