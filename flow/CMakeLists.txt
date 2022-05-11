@@ -211,3 +211,6 @@ if(USE_SANITIZER)
 else()
   target_link_libraries(tls_poc PUBLIC fmt::fmt flow boost_target)
 endif()
+
+add_executable(mkcert MkCertCli.cpp)
+target_link_libraries(mkcert PUBLIC fmt::fmt flow)
