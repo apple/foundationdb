@@ -4,4 +4,4 @@ useDB=false
 
     testName=UnitTests
     maxTestCases=0
-    testsMatching=/status/json/builder
+    testsMatching=/fdbclient/MonitorLeader/PartialResolve

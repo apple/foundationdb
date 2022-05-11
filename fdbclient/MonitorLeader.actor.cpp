@@ -300,7 +300,7 @@ TEST_CASE("/fdbclient/MonitorLeader/PartialResolve") {
 
 	INetworkConnections::net()->addMockTCPEndpoint(hn, port, { address });
 
-	state ClusterConnectionString cs(connectionString);
+	ClusterConnectionString cs(connectionString);
 	state std::vector<NetworkAddress> allCoordinators = wait(cs.tryResolveHostnames());
 	ASSERT(allCoordinators.size() == 1 &&
 	       std::find(allCoordinators.begin(), allCoordinators.end(), address) != allCoordinators.end());
