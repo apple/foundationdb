@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "flow/UnitTest.h"
 #include "fdbserver/StorageMetrics.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
