@@ -161,6 +161,10 @@ public:
 	int PRIORITY_SPLIT_SHARD;
 
 	// Data distribution
+	double READ_REBALANCE_CPU_THRESHOLD; // read rebalance only happens if the source servers' CPU > threshold
+	int READ_REBALANCE_SRC_PARALLELISM; // the max count a server become a source server within a certain interval
+	int READ_REBALANCE_SHARD_TOPK; // top k shards were return for random selection in read rebalance
+
 	double RETRY_RELOCATESHARD_DELAY;
 	double DATA_DISTRIBUTION_FAILURE_REACTION_TIME;
 	int MIN_SHARD_BYTES, SHARD_BYTES_RATIO, SHARD_BYTES_PER_SQRT_BYTES, MAX_SHARD_BYTES, KEY_SERVER_SHARD_BYTES;
