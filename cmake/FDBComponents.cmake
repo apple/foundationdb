@@ -168,7 +168,7 @@ endif()
 # RocksDB
 ################################################################################
 
-set(SSD_ROCKSDB_EXPERIMENTAL ON CACHE BOOL "Build with experimental RocksDB support")
+set(SSD_ROCKSDB_EXPERIMENTAL OFF CACHE BOOL "Build with experimental RocksDB support")
 # RocksDB is currently enabled by default for GCC but does not build with the latest
 # Clang.
 if (SSD_ROCKSDB_EXPERIMENTAL AND GCC)
