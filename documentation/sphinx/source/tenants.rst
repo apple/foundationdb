@@ -30,7 +30,6 @@ FoundationDB clusters support the following tenant modes:
 * ``optional`` - Tenants can be created. Each transaction can choose whether or not to use a tenant. This mode is primarily intended for migration and testing purposes, and care should be taken to avoid conflicts between tenant and non-tenant data.
 * ``required`` - Tenants can be created. Each normal transaction must use a tenant. To support special access needs, transactions will be permitted to access the raw key-space using the ``RAW_ACCESS`` transaction option.
 * ``management`` - The cluster is configured as the management cluster in a metacluster. Subordinate data clusters can be registered with this management cluster and created tenants will be assigned to them. This cluster is not allowed to store data.
-* ``subordinate`` - The cluster is configured as a data cluster in a metacluster. Like ``required`` mode, except tenants cannot be created and deleted directly on a ``subordinate`` cluster.
 
 Creating and deleting tenants
 =============================

@@ -145,6 +145,7 @@ set(FDBCLIENT_SRCS
   TaskBucket.h
   Tenant.cpp
   Tenant.h
+  TenantManagement.actor.h
   TenantSpecialKeys.actor.cpp
   TestKnobCollection.cpp
   TestKnobCollection.h

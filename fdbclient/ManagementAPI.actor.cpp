@@ -196,10 +196,8 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 				tenantMode = TenantMode::REQUIRED;
 			} else if (value == "management") {
 				tenantMode = TenantMode::MANAGEMENT;
-			} else if (value == "subordinate") {
-				tenantMode = TenantMode::SUBORDINATE;
 			} else {
-				printf("Error: Only disabled|optional|required|management|subordinate are valid for tenant_mode.\n");
+				printf("Error: Only disabled|optional|required|management are valid for tenant_mode.\n");
 				return out;
 			}
 			out[p + key] = format("%d", tenantMode);

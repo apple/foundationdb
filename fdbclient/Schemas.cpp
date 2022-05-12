@@ -820,8 +820,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
              "disabled",
              "optional",
              "required",
-             "management",
-             "subordinate"
+             "management"
          ]}
       },
       "data":{

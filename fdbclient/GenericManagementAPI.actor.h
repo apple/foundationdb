@@ -42,6 +42,7 @@ the contents of the system key space.
 #include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/Status.h"
 #include "fdbclient/SystemData.h"
+#include "fdbclient/TenantManagement.actor.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 // ConfigurationResult enumerates normal outcomes of changeConfig() and various error
@@ -70,6 +71,8 @@ enum class ConfigurationResult {
 	SUCCESS_WARN_SHARDED_ROCKSDB_EXPERIMENTAL,
 	DATABASE_CREATED_WARN_ROCKSDB_EXPERIMENTAL,
 	DATABASE_CREATED_WARN_SHARDED_ROCKSDB_EXPERIMENTAL,
+	DATABASE_NOT_EMPTY,
+	DATABASE_IS_REGISTERED
 };
 
 enum class CoordinatorsResult {
@@ -475,6 +478,43 @@ Future<ConfigurationResult> changeConfigTransaction(Transaction tr,
 			           newConfig.storageServerStoreType == KeyValueStoreType::SSD_SHARDED_ROCKSDB) {
 				warnShardedRocksDBIsExperimental = true;
 			}
+
+			if (newConfig.tenantMode != oldConfig.tenantMode) {
+				if (newConfig.tenantMode == TenantMode::MANAGEMENT || oldConfig.tenantMode == TenantMode::MANAGEMENT) {
+					state Future<std::map<TenantName, TenantMapEntry>> tenantsFuture =
+					    listTenantsTransaction(tr, ""_sr, "\xff\xff"_sr, 1);
+					state typename transaction_future_type<Transaction, RangeResult>::type dataClustersFuture =
+					    tr->getRange(dataClusterMetadataKeys, 1);
+
+					if (newConfig.tenantMode == TenantMode::MANAGEMENT) {
+						state typename transaction_future_type<Transaction, RangeResult>::type dbContentsFuture =
+						    tr->getRange(normalKeys, 1);
+
+						RangeResult dbContents = wait(safeThreadFutureToFuture(dbContentsFuture));
+						if (!dbContents.empty()) {
+							return ConfigurationResult::DATABASE_NOT_EMPTY;
+						}
+					}
+
+					RangeResult dataClusters = wait(safeThreadFutureToFuture(dataClustersFuture));
+					if (!dataClusters.empty()) {
+						return ConfigurationResult::DATABASE_NOT_EMPTY;
+					}
+
+					std::map<TenantName, TenantMapEntry> tenants = wait(tenantsFuture);
+					if (!tenants.empty()) {
+						return ConfigurationResult::DATABASE_NOT_EMPTY;
+					}
+				} else if (oldConfig.tenantMode == TenantMode::REQUIRED) {
+					state typename transaction_future_type<Transaction, Optional<Value>>::type dbRegistrationFuture =
+					    tr->get(dataClusterRegistrationKey);
+
+					Optional<Value> dbRegistration = wait(safeThreadFutureToFuture(dbRegistrationFuture));
+					if (dbRegistration.present()) {
+						return ConfigurationResult::DATABASE_IS_REGISTERED;
+					}
+				}
+			}
 		}
 	}
 	if (creating) {
@@ -687,269 +727,6 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db,
 // used by special keys and fdbcli
 std::string generateErrorMessage(const CoordinatorsResult& res);
 
-ACTOR template <class Transaction>
-Future<Optional<TenantMapEntry>> tryGetTenantTransaction(Transaction tr, TenantName name) {
-	state Key tenantMapKey = name.withPrefix(tenantMapPrefix);
-
-	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
-	tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-
-	state typename transaction_future_type<Transaction, Optional<Value>>::type tenantFuture = tr->get(tenantMapKey);
-	Optional<Value> val = wait(safeThreadFutureToFuture(tenantFuture));
-	return val.map<TenantMapEntry>([](Optional<Value> v) { return decodeTenantEntry(v.get()); });
-}
-
-ACTOR template <class DB>
-Future<Optional<TenantMapEntry>> tryGetTenant(Reference<DB> db, TenantName name) {
-	state Reference<typename DB::TransactionT> tr = db->createTransaction();
-
-	loop {
-		try {
-			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			Optional<TenantMapEntry> entry = wait(tryGetTenantTransaction(tr, name));
-			return entry;
-		} catch (Error& e) {
-			wait(safeThreadFutureToFuture(tr->onError(e)));
-		}
-	}
-}
-
-ACTOR template <class Transaction>
-Future<TenantMapEntry> getTenantTransaction(Transaction tr, TenantName name) {
-	Optional<TenantMapEntry> entry = wait(tryGetTenantTransaction(tr, name));
-	if (!entry.present()) {
-		throw tenant_not_found();
-	}
-
-	return entry.get();
-}
-
-ACTOR template <class DB>
-Future<TenantMapEntry> getTenant(Reference<DB> db, TenantName name) {
-	Optional<TenantMapEntry> entry = wait(tryGetTenant(db, name));
-	if (!entry.present()) {
-		throw tenant_not_found();
-	}
-
-	return entry.get();
-}
-
-// Creates a tenant with the given name. If the tenant already exists, an empty optional will be returned.
-ACTOR template <class Transaction>
-Future<Optional<TenantMapEntry>> createTenantTransaction(Transaction tr,
-                                                         TenantNameRef name,
-                                                         TenantMapEntry tenantEntry = TenantMapEntry()) {
-	state Key tenantMapKey = name.withPrefix(tenantMapPrefix);
-
-	if (name.startsWith("\xff"_sr)) {
-		throw invalid_tenant_name();
-	}
-
-	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
-	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-
-	state Future<Optional<TenantMapEntry>> existingEntryFuture = tryGetTenantTransaction(tr, name);
-	state typename transaction_future_type<Transaction, Optional<Value>>::type tenantDataPrefixFuture =
-	    tr->get(tenantDataPrefixKey);
-	state typename transaction_future_type<Transaction, Optional<Value>>::type lastIdFuture = tr->get(tenantLastIdKey);
-	state typename transaction_future_type<Transaction, Optional<Value>>::type tenantModeFuture =
-	    tr->get(configKeysPrefix.withSuffix("tenant_mode"_sr));
-
-	Optional<Value> tenantMode = wait(safeThreadFutureToFuture(tenantModeFuture));
-
-	if (!tenantMode.present() || tenantMode.get() == StringRef(format("%d", TenantMode::DISABLED))) {
-		throw tenants_disabled();
-	}
-
-	Optional<TenantMapEntry> existingEntry = wait(existingEntryFuture);
-	if (existingEntry.present()) {
-		return Optional<TenantMapEntry>();
-	}
-
-	state Optional<Value> lastIdVal = wait(safeThreadFutureToFuture(lastIdFuture));
-	Optional<Value> tenantDataPrefix = wait(safeThreadFutureToFuture(tenantDataPrefixFuture));
-
-	if (tenantDataPrefix.present() &&
-	    tenantDataPrefix.get().size() + TenantMapEntry::ROOT_PREFIX_SIZE > CLIENT_KNOBS->TENANT_PREFIX_SIZE_LIMIT) {
-		TraceEvent(SevWarnAlways, "TenantPrefixTooLarge")
-		    .detail("TenantSubspace", tenantDataPrefix.get())
-		    .detail("TenantSubspaceLength", tenantDataPrefix.get().size())
-		    .detail("RootPrefixLength", TenantMapEntry::ROOT_PREFIX_SIZE)
-		    .detail("MaxTenantPrefixSize", CLIENT_KNOBS->TENANT_PREFIX_SIZE_LIMIT);
-
-		throw client_invalid_operation();
-	}
-
-	tenantEntry.id = lastIdVal.present() ? TenantMapEntry::prefixToId(lastIdVal.get()) + 1 : 0;
-	tenantEntry.setSubspace(tenantDataPrefix.present() ? (KeyRef)tenantDataPrefix.get() : ""_sr);
-
-	state typename transaction_future_type<Transaction, RangeResult>::type prefixRangeFuture =
-	    tr->getRange(prefixRange(tenantEntry.prefix), 1);
-	RangeResult contents = wait(safeThreadFutureToFuture(prefixRangeFuture));
-	if (!contents.empty()) {
-		throw tenant_prefix_allocator_conflict();
-	}
-
-	tr->set(tenantLastIdKey, TenantMapEntry::idToPrefix(tenantEntry.id));
-	tr->set(tenantMapKey, encodeTenantEntry(tenantEntry));
-
-	return tenantEntry;
-}
-
-ACTOR template <class DB>
-Future<Void> createTenant(Reference<DB> db, TenantName name, TenantMapEntry tenantEntry = TenantMapEntry()) {
-	state Reference<typename DB::TransactionT> tr = db->createTransaction();
-
-	state bool firstTry = true;
-	loop {
-		try {
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-
-			if (firstTry) {
-				Optional<TenantMapEntry> entry = wait(tryGetTenantTransaction(tr, name));
-				if (entry.present()) {
-					throw tenant_already_exists();
-				}
-
-				firstTry = false;
-			}
-
-			state Optional<TenantMapEntry> newTenant = wait(createTenantTransaction(tr, name, tenantEntry));
-
-			if (BUGGIFY) {
-				throw commit_unknown_result();
-			}
-
-			wait(safeThreadFutureToFuture(tr->commit()));
-
-			if (BUGGIFY) {
-				throw commit_unknown_result();
-			}
-
-			TraceEvent("CreatedTenant")
-			    .detail("Tenant", name)
-			    .detail("TenantId", newTenant.present() ? newTenant.get().id : -1)
-			    .detail("Prefix", newTenant.present() ? (StringRef)newTenant.get().prefix : "Unknown"_sr)
-			    .detail("TenantGroup", tenantEntry.tenantGroup)
-			    .detail("Version", tr->getCommittedVersion());
-
-			return Void();
-		} catch (Error& e) {
-			wait(safeThreadFutureToFuture(tr->onError(e)));
-		}
-	}
-}
-
-ACTOR template <class Transaction>
-Future<Void> deleteTenantTransaction(Transaction tr, TenantNameRef name) {
-	state Key tenantMapKey = name.withPrefix(tenantMapPrefix);
-
-	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
-	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-
-	state Optional<TenantMapEntry> tenantEntry = wait(tryGetTenantTransaction(tr, name));
-	if (!tenantEntry.present()) {
-		return Void();
-	}
-
-	state typename transaction_future_type<Transaction, RangeResult>::type prefixRangeFuture =
-	    tr->getRange(prefixRange(tenantEntry.get().prefix), 1);
-	RangeResult contents = wait(safeThreadFutureToFuture(prefixRangeFuture));
-	if (!contents.empty()) {
-		throw tenant_not_empty();
-	}
-
-	tr->clear(tenantMapKey);
-
-	return Void();
-}
-
-ACTOR template <class DB>
-Future<Void> deleteTenant(Reference<DB> db, TenantName name) {
-	state Reference<typename DB::TransactionT> tr = db->createTransaction();
-
-	state bool firstTry = true;
-	loop {
-		try {
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-
-			if (firstTry) {
-				Optional<TenantMapEntry> entry = wait(tryGetTenantTransaction(tr, name));
-				if (!entry.present()) {
-					throw tenant_not_found();
-				}
-
-				firstTry = false;
-			}
-
-			wait(deleteTenantTransaction(tr, name));
-
-			if (BUGGIFY) {
-				throw commit_unknown_result();
-			}
-
-			wait(safeThreadFutureToFuture(tr->commit()));
-
-			if (BUGGIFY) {
-				throw commit_unknown_result();
-			}
-
-			TraceEvent("DeletedTenant").detail("Tenant", name).detail("Version", tr->getCommittedVersion());
-			return Void();
-		} catch (Error& e) {
-			wait(safeThreadFutureToFuture(tr->onError(e)));
-		}
-	}
-}
-
-// This should only be called from a transaction that has already confirmed that the cluster entry
-// is present. The updatedEntry should use the existing entry and modify only those fields that need
-// to be changed.
-template <class Transaction>
-void configureTenantTransaction(Transaction tr, TenantNameRef tenantName, TenantMapEntry tenantEntry) {
-	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
-	tr->set(tenantName.withPrefix(tenantMapPrefix), encodeTenantEntry(tenantEntry));
-}
-
-ACTOR template <class Transaction>
-Future<std::map<TenantName, TenantMapEntry>> listTenantsTransaction(Transaction tr,
-                                                                    TenantNameRef begin,
-                                                                    TenantNameRef end,
-                                                                    int limit) {
-	state KeyRange range = KeyRangeRef(begin, end).withPrefix(tenantMapPrefix);
-
-	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
-	tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-
-	state typename transaction_future_type<Transaction, RangeResult>::type listFuture =
-	    tr->getRange(firstGreaterOrEqual(range.begin), firstGreaterOrEqual(range.end), limit);
-	RangeResult results = wait(safeThreadFutureToFuture(listFuture));
-
-	std::map<TenantName, TenantMapEntry> tenants;
-	for (auto kv : results) {
-		tenants[kv.key.removePrefix(tenantMapPrefix)] = decodeTenantEntry(kv.value);
-	}
-
-	return tenants;
-}
-
-ACTOR template <class DB>
-Future<std::map<TenantName, TenantMapEntry>> listTenants(Reference<DB> db,
-                                                         TenantName begin,
-                                                         TenantName end,
-                                                         int limit) {
-	state Reference<typename DB::TransactionT> tr = db->createTransaction();
-
-	loop {
-		try {
-			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			std::map<TenantName, TenantMapEntry> tenants = wait(listTenantsTransaction(tr, begin, end, limit));
-			return tenants;
-		} catch (Error& e) {
-			wait(safeThreadFutureToFuture(tr->onError(e)));
-		}
-	}
-}
 } // namespace ManagementAPI
 
 #include "flow/unactorcompiler.h"

@@ -77,9 +77,39 @@ struct DataClusterEntry {
 	DataClusterEntry(int64_t id, ClusterUsage capacity, ClusterUsage allocated)
 	  : id(id), capacity(capacity), allocated(allocated) {}
 
+	Value encode() { return ObjectWriter::toValue(*this, IncludeVersion(ProtocolVersion::withMetacluster())); }
+	static DataClusterEntry decode(ValueRef const& value) {
+		DataClusterEntry entry;
+		ObjectReader reader(value.begin(), IncludeVersion());
+		reader.deserialize(entry);
+		return entry;
+	}
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, id, capacity, allocated);
+	}
+};
+
+struct DataClusterRegistrationEntry {
+	constexpr static FileIdentifier file_identifier = 13448589;
+
+	ClusterName name;
+
+	DataClusterRegistrationEntry() = default;
+	DataClusterRegistrationEntry(ClusterName name) : name(name) {}
+
+	Value encode() { return ObjectWriter::toValue(*this, IncludeVersion(ProtocolVersion::withMetacluster())); }
+	static DataClusterRegistrationEntry decode(ValueRef const& value) {
+		DataClusterRegistrationEntry entry;
+		ObjectReader reader(value.begin(), IncludeVersion());
+		reader.deserialize(entry);
+		return entry;
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, name);
 	}
 };
 

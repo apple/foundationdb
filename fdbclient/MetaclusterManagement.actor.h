@@ -46,6 +46,17 @@ struct DataClusterMetadata {
 	DataClusterMetadata(DataClusterEntry const& entry, ClusterConnectionString const& connectionString)
 	  : entry(entry), connectionString(connectionString) {}
 
+	Value encode() { return ObjectWriter::toValue(*this, IncludeVersion(ProtocolVersion::withMetacluster())); }
+	Value encode(Arena& arena) {
+		return ObjectWriter::toValue(*this, IncludeVersion(ProtocolVersion::withMetacluster()), arena);
+	}
+	static DataClusterMetadata decode(ValueRef const& value) {
+		DataClusterMetadata metadata;
+		ObjectReader reader(value.begin(), IncludeVersion());
+		reader.deserialize(metadata);
+		return metadata;
+	}
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, connectionString, entry);
@@ -75,7 +86,7 @@ Future<Optional<DataClusterMetadata>> managementClusterTryGetCluster(Transaction
 	if (metadata.present()) {
 		ASSERT(connectionString.present());
 		return Optional<DataClusterMetadata>(DataClusterMetadata(
-		    decodeDataClusterEntry(metadata.get()), ClusterConnectionString(connectionString.get().toString())));
+		    DataClusterEntry::decode(metadata.get()), ClusterConnectionString(connectionString.get().toString())));
 	} else {
 		return Optional<DataClusterMetadata>();
 	}
@@ -91,10 +102,7 @@ Future<Optional<DataClusterMetadata>> tryGetClusterTransaction(Transaction tr, C
 	state Optional<Value> clusterEntry = wait(safeThreadFutureToFuture(clusterEntryFuture));
 
 	if (clusterEntry.present()) {
-		DataClusterMetadata metadata;
-		ObjectReader reader(clusterEntry.get().begin(), IncludeVersion());
-		reader.deserialize(metadata);
-		return metadata;
+		return DataClusterMetadata::decode(clusterEntry.get());
 	} else {
 		return Optional<DataClusterMetadata>();
 	}
@@ -145,7 +153,7 @@ Future<Void> managementClusterUpdateClusterMetadata(Transaction tr, ClusterNameR
 		throw cluster_not_found();
 	}
 
-	tr->set(name.withPrefix(dataClusterMetadataPrefix), encodeDataClusterEntry(metadata.entry));
+	tr->set(name.withPrefix(dataClusterMetadataPrefix), metadata.entry.encode());
 	tr->set(name.withPrefix(dataClusterConnectionRecordPrefix), metadata.connectionString.toString());
 
 	return Void();
@@ -207,7 +215,7 @@ Future<Void> managementClusterRegister(Transaction tr,
 	entry.allocated = ClusterUsage();
 
 	tr->set(dataClusterLastIdKey, DataClusterEntry::idToValue(entry.id));
-	tr->set(dataClusterMetadataKey, encodeDataClusterEntry(entry));
+	tr->set(dataClusterMetadataKey, entry.encode());
 	tr->set(dataClusterConnectionRecordKey, connectionString);
 
 	return Void();
@@ -219,6 +227,8 @@ Future<Void> dataClusterRegister(Transaction tr, ClusterNameRef name) {
 	    ManagementAPI::listTenantsTransaction(tr, ""_sr, "\xff\xff"_sr, 1);
 	state typename transaction_future_type<Transaction, RangeResult>::type existingDataFuture =
 	    tr->getRange(normalKeys, 1);
+	state typename transaction_future_type<Transaction, Optional<Value>>::type clusterNameFuture =
+	    tr->get(dataClusterRegistrationKey);
 
 	std::map<TenantName, TenantMapEntry> existingTenants = wait(safeThreadFutureToFuture(existingTenantsFuture));
 	if (!existingTenants.empty()) {
@@ -232,7 +242,15 @@ Future<Void> dataClusterRegister(Transaction tr, ClusterNameRef name) {
 		throw cluster_not_empty();
 	}
 
-	std::vector<StringRef> tokens = { "tenant_mode=subordinate"_sr };
+	// TODO: this is not idempotent
+	Optional<Value> storedClusterName = wait(safeThreadFutureToFuture(clusterNameFuture));
+	if (storedClusterName.present()) {
+		throw cluster_already_registered();
+	}
+
+	tr->set(dataClusterRegistrationKey, DataClusterRegistrationEntry(name).encode());
+
+	std::vector<StringRef> tokens = { "tenant_mode=required"_sr };
 	ConfigurationResult configResult =
 	    wait(ManagementAPI::changeConfigTransaction(tr, tokens, Optional<ConfigureAutoResult>(), false, false));
 
@@ -243,8 +261,6 @@ Future<Void> dataClusterRegister(Transaction tr, ClusterNameRef name) {
 
 		throw cluster_configuration_failure();
 	}
-
-	// TODO: store the cluster name somewhere
 
 	return Void();
 }
@@ -401,20 +417,9 @@ Future<Void> managementClusterRemove(Transaction tr, ClusterNameRef name) {
 	return Void();
 }
 
-ACTOR template <class Transaction>
+template <class Transaction>
 Future<Void> dataClusterRemove(Transaction tr) {
-	// TODO: is there any other state to remove?
-
-	std::vector<StringRef> tokens = { "tenant_mode=required"_sr };
-	ConfigurationResult configResult =
-	    wait(ManagementAPI::changeConfigTransaction(tr, tokens, Optional<ConfigureAutoResult>(), false, false));
-
-	if (configResult != ConfigurationResult::SUCCESS) {
-		TraceEvent(SevWarn, "CouldNotConfigureDataCluster").detail("ConfigurationResult", configResult);
-
-		throw cluster_configuration_failure();
-	}
-
+	tr->clear(dataClusterRegistrationKey);
 	return Void();
 }
 
@@ -509,8 +514,9 @@ Future<std::map<ClusterName, DataClusterMetadata>> managementClusterListClusters
 
 	std::map<ClusterName, DataClusterMetadata> clusters;
 	for (int i = 0; i < metadata.size(); ++i) {
-		clusters[metadata[i].key.removePrefix(dataClusterMetadataPrefix)] = DataClusterMetadata(
-		    decodeDataClusterEntry(metadata[i].value), ClusterConnectionString(connectionStrings[i].value.toString()));
+		clusters[metadata[i].key.removePrefix(dataClusterMetadataPrefix)] =
+		    DataClusterMetadata(DataClusterEntry::decode(metadata[i].value),
+		                        ClusterConnectionString(connectionStrings[i].value.toString()));
 	}
 
 	return clusters;
@@ -538,8 +544,9 @@ Future<std::map<ClusterName, DataClusterMetadata>> listClustersTransaction(Trans
 
 	std::map<ClusterName, DataClusterMetadata> clusters;
 	for (int i = 0; i < metadata.size(); ++i) {
-		clusters[metadata[i].key.removePrefix(dataClusterMetadataPrefix)] = DataClusterMetadata(
-		    decodeDataClusterEntry(metadata[i].value), ClusterConnectionString(connectionStrings[i].value.toString()));
+		clusters[metadata[i].key.removePrefix(dataClusterMetadataPrefix)] =
+		    DataClusterMetadata(DataClusterEntry::decode(metadata[i].value),
+		                        ClusterConnectionString(connectionStrings[i].value.toString()));
 	}
 
 	return clusters;
@@ -563,10 +570,7 @@ Future<std::map<ClusterName, DataClusterMetadata>> listClusters(Reference<DB> db
 			std::map<ClusterName, DataClusterMetadata> clusters;
 
 			for (auto result : results) {
-				DataClusterMetadata metadata;
-				ObjectReader reader(result.value.begin(), IncludeVersion());
-				reader.deserialize(metadata);
-				clusters[result.key.removePrefix(prefix)] = metadata;
+				clusters[result.key.removePrefix(prefix)] = DataClusterMetadata::decode(result.value);
 			}
 
 			return clusters;

@@ -237,6 +237,8 @@ ERROR( invalid_metacluster_operation, 2151, "Metacluster operation performed on 
 ERROR( cluster_already_exists, 2152, "A data cluster with the given name already exists" )
 ERROR( cluster_not_found, 2153, "Data cluster does not exist" )
 ERROR( cluster_not_empty, 2154, "Data cluster must be empty" )
+ERROR( cluster_configuration_failure, 2155, "Could not configure cluster" )
+ERROR( cluster_already_registered, 2156, "Data cluster is already registered with a metacluster" )
 
 // 2200 - errors from bindings and official APIs
 ERROR( api_version_unset, 2200, "API version is not set" )

@@ -634,9 +634,7 @@ extern const KeyRef dataClusterMetadataPrefix;
 extern const KeyRangeRef dataClusterConnectionRecordKeys;
 extern const KeyRef dataClusterConnectionRecordPrefix;
 extern const KeyRef dataClusterLastIdKey;
-
-Value encodeDataClusterEntry(DataClusterEntry const& dataClusterEntry);
-DataClusterEntry decodeDataClusterEntry(ValueRef const& value);
+extern const KeyRef dataClusterRegistrationKey;
 
 #pragma clang diagnostic pop
 

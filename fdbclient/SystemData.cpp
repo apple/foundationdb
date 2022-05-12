@@ -1408,7 +1408,7 @@ const KeyRef tenantMapPrivatePrefix = "\xff\xff/tenantMap/"_sr;
 const KeyRef tenantLastIdKey = "\xff/tenantLastId/"_sr;
 const KeyRef tenantDataPrefixKey = "\xff/tenantDataPrefix"_sr;
 
-// Metacluster keys
+// Metacluster management cluster keys
 const KeyRangeRef dataClusterMetadataKeys("\xff/metacluster/dataCluster/metadata/"_sr,
                                           "\xff/metacluster/dataCluster/metadata0"_sr);
 const KeyRef dataClusterMetadataPrefix = dataClusterMetadataKeys.begin;
@@ -1417,16 +1417,8 @@ const KeyRangeRef dataClusterConnectionRecordKeys("\xff/metacluster/dataCluster/
 const KeyRef dataClusterConnectionRecordPrefix = dataClusterConnectionRecordKeys.begin;
 const KeyRef dataClusterLastIdKey = "\xff/metacluster/dataCluster/lastId/"_sr;
 
-Value encodeDataClusterEntry(DataClusterEntry const& dataClusterEntry) {
-	return ObjectWriter::toValue(dataClusterEntry, IncludeVersion());
-}
-
-DataClusterEntry decodeDataClusterEntry(ValueRef const& value) {
-	DataClusterEntry entry;
-	ObjectReader reader(value.begin(), IncludeVersion());
-	reader.deserialize(entry);
-	return entry;
-}
+// Metacluster data cluster keys
+const KeyRef dataClusterRegistrationKey = "\xff/metacluster/dataCluster/clusterName"_sr;
 
 // for tests
 void testSSISerdes(StorageServerInterface const& ssi) {

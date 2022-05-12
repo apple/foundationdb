@@ -784,8 +784,7 @@
              "disabled",
              "optional",
              "required",
-             "management",
-             "subordinate"
+             "management"
          ]}
       },
       "data":{

@@ -73,13 +73,11 @@ ACTOR Future<RangeResult> getDataClusterList(ReadYourWritesTransaction* ryw,
 
 	RangeResult results;
 	for (auto cluster : clusters) {
-		ValueRef value =
-		    ObjectWriter::toValue(cluster.second, IncludeVersion(ProtocolVersion::withMetacluster()), results.arena());
 		results.push_back(
 		    results.arena(),
 		    KeyValueRef(cluster.first.withPrefix(
 		                    "\xff\xff/metacluster_internal/management_cluster/data_cluster/map/"_sr, results.arena()),
-		                value));
+		                cluster.second.encode(results.arena())));
 	}
 
 	return results;
