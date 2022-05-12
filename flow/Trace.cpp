@@ -54,7 +54,6 @@
 //    during an open trace event
 thread_local int g_allocation_tracing_disabled = 1;
 unsigned tracedLines = 0;
-unsigned logLevel = 0;
 thread_local int failedLineOverflow = 0;
 
 ITraceLogIssuesReporter::~ITraceLogIssuesReporter() {}
@@ -424,9 +423,8 @@ public:
 	}
 
 	void log(int severity, const char* name, UID id, uint64_t event_ts) {
-		if (!logTraceEventMetrics || severity < logLevel) {
+		if (!logTraceEventMetrics)
 			return;
-		}
 
 		EventMetricHandle<TraceEventNameID>* m = nullptr;
 		switch (severity) {
