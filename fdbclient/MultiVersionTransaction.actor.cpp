@@ -1609,7 +1609,7 @@ void MultiVersionDatabase::DatabaseState::protocolVersionChanged(ProtocolVersion
 		// When the protocol version changes, clear the corresponding entry in the shared state map
 		// so it can be re-initialized. Only do so if there was a valid previous protocol version.
 		if (dbProtocolVersion.present() && MultiVersionApi::apiVersionAtLeast(710)) {
-			MultiVersionApi::api->clearClusterSharedStateMapEntry(clusterFilePath);
+			MultiVersionApi::api->clearClusterSharedStateMapEntry(clusterFilePath, dbProtocolVersion.get());
 		}
 
 		dbProtocolVersion = protocolVersion;
@@ -1722,8 +1722,10 @@ void MultiVersionDatabase::DatabaseState::updateDatabase(Reference<IDatabase> ne
 		}
 	}
 	if (db.isValid() && dbProtocolVersion.present() && MultiVersionApi::apiVersionAtLeast(710)) {
-		auto updateResult = MultiVersionApi::api->updateClusterSharedStateMap(clusterFilePath, db);
+		auto updateResult =
+		    MultiVersionApi::api->updateClusterSharedStateMap(clusterFilePath, dbProtocolVersion.get(), db);
 		auto handler = mapThreadFuture<Void, Void>(updateResult, [this](ErrorOr<Void> result) {
+			TraceEvent("ClusterSharedStateUpdated").detail("ClusterFilePath", clusterFilePath);
 			dbVar->set(db);
 			return ErrorOr<Void>(Void());
 		});
@@ -2389,12 +2391,30 @@ void MultiVersionApi::updateSupportedVersions() {
 	}
 }
 
-ThreadFuture<Void> MultiVersionApi::updateClusterSharedStateMap(std::string clusterFilePath, Reference<IDatabase> db) {
+ThreadFuture<Void> MultiVersionApi::updateClusterSharedStateMap(std::string clusterFilePath,
+                                                                ProtocolVersion dbProtocolVersion,
+                                                                Reference<IDatabase> db) {
 	MutexHolder holder(lock);
 	if (clusterSharedStateMap.find(clusterFilePath) == clusterSharedStateMap.end()) {
-		clusterSharedStateMap[clusterFilePath] = db->createSharedState();
+		TraceEvent("CreatingClusterSharedState")
+		    .detail("ClusterFilePath", clusterFilePath)
+		    .detail("ProtocolVersion", dbProtocolVersion);
+		clusterSharedStateMap[clusterFilePath] = { db->createSharedState(), dbProtocolVersion };
 	} else {
-		ThreadFuture<DatabaseSharedState*> entry = clusterSharedStateMap[clusterFilePath];
+		auto& sharedStateInfo = clusterSharedStateMap[clusterFilePath];
+		if (sharedStateInfo.protocolVersion != dbProtocolVersion) {
+			// This situation should never happen, because we are connecting to the same cluster,
+			// so the protocol version must be the same
+			TraceEvent(SevError, "ClusterStateProtocolVersionMismatch")
+			    .detail("ClusterFilePath", clusterFilePath)
+			    .detail("ProtocolVersionExpected", dbProtocolVersion)
+			    .detail("ProtocolVersionFound", sharedStateInfo.protocolVersion);
+			return Void();
+		}
+		TraceEvent("SettingClusterSharedState")
+		    .detail("ClusterFilePath", clusterFilePath)
+		    .detail("ProtocolVersion", dbProtocolVersion);
+		ThreadFuture<DatabaseSharedState*> entry = sharedStateInfo.sharedStateFuture;
 		return mapThreadFuture<DatabaseSharedState*, Void>(entry, [db](ErrorOr<DatabaseSharedState*> result) {
 			if (result.isError()) {
 				return ErrorOr<Void>(result.getError());
@@ -2407,16 +2427,29 @@ ThreadFuture<Void> MultiVersionApi::updateClusterSharedStateMap(std::string clus
 	return Void();
 }
 
-void MultiVersionApi::clearClusterSharedStateMapEntry(std::string clusterFilePath) {
+void MultiVersionApi::clearClusterSharedStateMapEntry(std::string clusterFilePath, ProtocolVersion dbProtocolVersion) {
 	MutexHolder holder(lock);
 	auto mapEntry = clusterSharedStateMap.find(clusterFilePath);
+	// It can be that other database instances on the same cluster path are already upgraded and thus
+	// have cleared or even created a new shared object entry
 	if (mapEntry == clusterSharedStateMap.end()) {
-		TraceEvent(SevError, "ClusterSharedStateMapEntryNotFound").detail("ClusterFilePath", clusterFilePath);
+		TraceEvent("ClusterSharedStateMapEntryNotFound").detail("ClusterFilePath", clusterFilePath);
 		return;
 	}
-	auto ssPtr = mapEntry->second.get();
+	auto sharedStateInfo = mapEntry->second;
+	if (sharedStateInfo.protocolVersion != dbProtocolVersion) {
+		TraceEvent("ClusterSharedStateClearSkipped")
+		    .detail("ClusterFilePath", clusterFilePath)
+		    .detail("ProtocolVersionExpected", dbProtocolVersion)
+		    .detail("ProtocolVersionFound", sharedStateInfo.protocolVersion);
+		return;
+	}
+	auto ssPtr = sharedStateInfo.sharedStateFuture.get();
 	ssPtr->delRef(ssPtr);
 	clusterSharedStateMap.erase(mapEntry);
+	TraceEvent("ClusterSharedStateCleared")
+	    .detail("ClusterFilePath", clusterFilePath)
+	    .detail("ProtocolVersion", dbProtocolVersion);
 }
 
 std::vector<std::string> parseOptionValues(std::string valueStr) {

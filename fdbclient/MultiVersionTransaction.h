@@ -861,8 +861,10 @@ public:
 
 	bool callbackOnMainThread;
 	bool localClientDisabled;
-	ThreadFuture<Void> updateClusterSharedStateMap(std::string clusterFilePath, Reference<IDatabase> db);
-	void clearClusterSharedStateMapEntry(std::string clusterFilePath);
+	ThreadFuture<Void> updateClusterSharedStateMap(std::string clusterFilePath,
+	                                               ProtocolVersion dbProtocolVersion,
+	                                               Reference<IDatabase> db);
+	void clearClusterSharedStateMapEntry(std::string clusterFilePath, ProtocolVersion dbProtocolVersion);
 
 	static bool apiVersionAtLeast(int minVersion);
 
@@ -888,7 +890,11 @@ private:
 	std::map<std::string, std::vector<Reference<ClientInfo>>> externalClients;
 	// Map of clusterFilePath -> DatabaseSharedState pointer Future
 	// Upon cluster version upgrade, clear the map entry for that cluster
-	std::map<std::string, ThreadFuture<DatabaseSharedState*>> clusterSharedStateMap;
+	struct SharedStateInfo {
+		ThreadFuture<DatabaseSharedState*> sharedStateFuture;
+		ProtocolVersion protocolVersion;
+	};
+	std::map<std::string, SharedStateInfo> clusterSharedStateMap;
 
 	bool networkStartSetup;
 	volatile bool networkSetup;
