@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 
-# entrypoint.py
+# sidecar.py
 #
 # This source file is part of the FoundationDB open source project
 #
-# Copyright 2018-2021 Apple Inc. and the FoundationDB project authors
+# Copyright 2018-2022 Apple Inc. and the FoundationDB project authors
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -22,25 +22,21 @@
 import argparse
 import hashlib
 import ipaddress
-import logging
 import json
+import logging
 import os
-import re
 import shutil
 import socket
 import ssl
-import stat
-import time
-import traceback
 import sys
 import tempfile
-from pathlib import Path
+import time
 from functools import partial
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
-from http.server import HTTPServer, ThreadingHTTPServer, BaseHTTPRequestHandler
-
-from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
+from watchdog.observers import Observer
 
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
@@ -242,7 +238,7 @@ class Config(object):
         if self.main_container_version == self.primary_version:
             self.substitutions["BINARY_DIR"] = "/usr/bin"
         else:
-            self.substitutions["BINARY_DIR"] = target_path = str(
+            self.substitutions["BINARY_DIR"] = str(
                 Path("%s/bin/%s" % (args.main_container_conf_dir, self.primary_version))
             )
 
@@ -346,22 +342,25 @@ class ThreadingHTTPServerV6(ThreadingHTTPServer):
 
 
 class SidecarHandler(BaseHTTPRequestHandler):
+    # We don't want to load the ssl context for each request so we hold it as a static variable.
+    ssl_context = None
+
     def __init__(self, config, *args, **kwargs):
         self.config = config
-        self.ssl_context = None
-        # BaseHTTPRequestHandler calls do_GET **inside** __init__ !!!
-        # So we have to call super().__init__ after setting attributes.
+        self.ssl_context = self.__class__.ssl_context
         super().__init__(*args, **kwargs)
 
-    def load_ssl_context(self):
-        if not self.ssl_context:
-            self.ssl_context = ssl.create_default_context(cafile=self.config.ca_file)
-            self.ssl_context.check_hostname = False
-            self.ssl_context.verify_mode = ssl.CERT_OPTIONAL
-        self.ssl_context.load_cert_chain(
-            self.config.certificate_file, self.config.key_file
-        )
-        return self.ssl_context
+    # This method allows to trigger a reload of the ssl context and updates the static variable.
+    @classmethod
+    def load_ssl_context(cls):
+        if not cls.ssl_context:
+            config = Config.shared()
+            cls.ssl_context = ssl.create_default_context(cafile=config.ca_file)
+            cls.ssl_context.check_hostname = False
+            cls.ssl_context.verify_mode = ssl.CERT_OPTIONAL
+        cls.ssl_context.load_cert_chain(config.certificate_file, config.key_file)
+
+        return cls.ssl_context
 
     def send_text(self, text, code=200, content_type="text/plain", add_newline=True):
         """
@@ -530,7 +529,7 @@ class SidecarHandler(BaseHTTPRequestHandler):
             elif self.path == "/copy_monitor_conf":
                 self.send_text(copy_monitor_conf(self.config))
             elif self.path == "/refresh_certs":
-                self.send_text(refresh_certs())
+                self.send_text(self.refresh_certs())
             elif self.path == "/restart":
                 self.send_text("OK")
                 exit(1)
@@ -541,10 +540,11 @@ class SidecarHandler(BaseHTTPRequestHandler):
             raise e
         except RequestException as e:
             self.send_error(400, e.message)
-        except e:
-            log.error("Error processing request", exc_info=True)
+        except (ConnectionResetError, BrokenPipeError) as ex:
+            log.error(f"connection was reset {ex}")
+        except Exception as ex:
+            log.error(f"Error processing request {ex}", exc_info=True)
             self.send_error(500)
-            self.end_headers()
 
     def log_message(self, format, *args):
         log.info(format % args)
@@ -552,7 +552,7 @@ class SidecarHandler(BaseHTTPRequestHandler):
     def refresh_certs(self):
         if not self.config.enable_tls:
             raise RequestException("Server is not using TLS")
-        self.load_ssl_context()
+        SidecarHandler.load_ssl_context()
         return "OK"
 
     def get_substitutions(self):
@@ -569,8 +569,7 @@ class SidecarHandler(BaseHTTPRequestHandler):
 
 
 class CertificateEventHandler(FileSystemEventHandler):
-    def __init__(self, handler):
-        self.handler = handler
+    def __init__(self):
         FileSystemEventHandler.__init__(self)
 
     def on_any_event(self, event):
@@ -589,7 +588,7 @@ class CertificateEventHandler(FileSystemEventHandler):
         )
         time.sleep(10)
         log.info("Reloading certificates")
-        self.handler.load_ssl_context()
+        SidecarHandler.load_ssl_context()
 
 
 def copy_files(config):
@@ -699,10 +698,10 @@ def start_sidecar_server(config):
         server = ThreadingHTTPServer((address, int(port)), handler)
 
     if config.enable_tls:
-        context = handler.load_ssl_context()
+        context = SidecarHandler.load_ssl_context()
         server.socket = context.wrap_socket(server.socket, server_side=True)
         observer = Observer()
-        event_handler = CertificateEventHandler(handler)
+        event_handler = CertificateEventHandler()
         for path in set(
             [
                 Path(config.certificate_file).parent.as_posix(),
