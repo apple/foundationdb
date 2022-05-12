@@ -48,6 +48,8 @@ set(FLOW_SRCS
   Knobs.cpp
   Knobs.h
   MetricSample.h
+  MkCert.h
+  MkCert.cpp
   Net2.actor.cpp
   Net2Packet.cpp
   Net2Packet.h
@@ -56,6 +58,7 @@ set(FLOW_SRCS
   Platform.h
   Profiler.actor.cpp
   Profiler.h
+  ScopeExit.h
   SendBufferIterator.h
   SignalSafeUnwind.cpp
   SignalSafeUnwind.h
@@ -193,3 +196,6 @@ if(APPLE)
   target_link_libraries(flow PRIVATE ${IO_KIT} ${CORE_FOUNDATION})
   target_link_libraries(flow_sampling PRIVATE ${IO_KIT} ${CORE_FOUNDATION})
 endif()
+
+add_executable(mkcert MkCertCli.cpp)
+target_link_libraries(mkcert PUBLIC fmt::fmt flow)
