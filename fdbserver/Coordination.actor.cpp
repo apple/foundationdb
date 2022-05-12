@@ -672,6 +672,11 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf,
 					    .detail("IncomingCoordinators", describeList(req.coordinators, req.coordinators.size()));
 					req.reply.sendError(wrong_connection_file());
 				} else {
+					TraceEvent("OpenDatabaseCoordRequest")
+					    .suppressFor(1.0)
+					    .detail("From", req.reply.getEndpoint().getPrimaryAddress())
+					    .detail("ClusterKey", req.clusterKey)
+					    .detail("Coordinators", req.coordinators);
 					regs.getInterface(req.clusterKey, id).openDatabase.send(req);
 				}
 			}
@@ -691,6 +696,11 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf,
 					    .detail("IncomingCoordinators", describeList(req.coordinators, req.coordinators.size()));
 					req.reply.sendError(wrong_connection_file());
 				} else {
+					TraceEvent("ElectionResultRequest")
+					    .suppressFor(1.0)
+					    .detail("From", req.reply.getEndpoint().getPrimaryAddress())
+					    .detail("Key", req.key)
+					    .detail("Coordinators", req.coordinators);
 					regs.getInterface(req.key, id).electionResult.send(req);
 				}
 			}
@@ -709,6 +719,10 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf,
 					    .detail("ClusterKey", ccr->getConnectionString().clusterKey());
 					req.reply.sendError(wrong_connection_file());
 				} else {
+					TraceEvent("GetLeaderRequest")
+					    .suppressFor(1.0)
+					    .detail("From", req.reply.getEndpoint().getPrimaryAddress())
+					    .detail("Key", req.key);
 					regs.getInterface(req.key, id).getLeader.send(req);
 				}
 			}
@@ -726,6 +740,10 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf,
 					    .detail("IncomingClusterKey", req.key);
 					req.reply.sendError(wrong_connection_file());
 				} else {
+					TraceEvent("CandidacyRequest")
+					    .suppressFor(1.0)
+					    .detail("From", req.reply.getEndpoint().getPrimaryAddress())
+					    .detail("Key", req.key);
 					regs.getInterface(req.key, id).candidacy.send(req);
 				}
 			}
@@ -743,6 +761,10 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf,
 					    .detail("IncomingClusterKey", req.key);
 					req.reply.sendError(wrong_connection_file());
 				} else {
+					TraceEvent("LeaderHeartbeatRequest")
+					    .suppressFor(1.0)
+					    .detail("From", req.reply.getEndpoint().getPrimaryAddress())
+					    .detail("Key", req.key);
 					regs.getInterface(req.key, id).leaderHeartbeat.send(req);
 				}
 			}
@@ -760,6 +782,11 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf,
 					    .detail("IncomingClusterKey", req.key);
 					req.reply.sendError(wrong_connection_file());
 				} else {
+					TraceEvent("ForwardRequest")
+					    .suppressFor(1.0)
+					    .detail("From", req.reply.getEndpoint().getPrimaryAddress())
+					    .detail("Key", req.key)
+					    .detail("ConnectionString", req.conn);
 					forwarders.add(LeaderRegisterCollection::setForward(
 					    &regs, req.key, ClusterConnectionString(req.conn.toString()), req, id));
 				}
