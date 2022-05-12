@@ -353,8 +353,8 @@ class SidecarHandler(BaseHTTPRequestHandler):
     # This method allows to trigger a reload of the ssl context and updates the static variable.
     @classmethod
     def load_ssl_context(cls):
+        config = Config.shared()
         if not cls.ssl_context:
-            config = Config.shared()
             cls.ssl_context = ssl.create_default_context(cafile=config.ca_file)
             cls.ssl_context.check_hostname = False
             cls.ssl_context.verify_mode = ssl.CERT_OPTIONAL
