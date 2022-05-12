@@ -1651,7 +1651,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 
 		if (perpetualWiggleEnabled) { // restore the enabled perpetual storage wiggle setting
 			printf("Set perpetual_storage_wiggle=1 ...\n");
-			wait(setPerpetualStorageWiggle(cx, true, LockAware::True));
+			Version cVer = wait(setPerpetualStorageWiggle(cx, true, LockAware::True));
 			printf("Set perpetual_storage_wiggle=1 Done.\n");
 		}
 	}

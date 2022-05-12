@@ -291,10 +291,7 @@ ACTOR Future<Void> cleanUpSingleShardDataMove(Database occ,
                                               UID dataMoveId,
                                               const DDEnabledState* ddEnabledState) {
 	ASSERT(CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
-	TraceEvent(SevDebug, "CleanUpSingleShardDataMoveBegin", dataMoveId).detail("Range", keys);
-
-	// wait(cleanUpDataMoveParallelismLock->take(TaskPriority::DataDistributionLaunch));
-	// state FlowLock::Releaser releaser = FlowLock::Releaser(*cleanUpDataMoveParallelismLock);
+	TraceEvent(SevInfo, "CleanUpSingleShardDataMoveBegin", dataMoveId).detail("Range", keys);
 
 	loop {
 		state Transaction tr(occ);
@@ -303,7 +300,6 @@ ACTOR Future<Void> cleanUpSingleShardDataMove(Database occ,
 			tr.trState->taskID = TaskPriority::MoveKeys;
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			// wait(checkMoveKeysLock(&tr, lock, ddEnabledState));
 
 			state RangeResult currentShards = wait(krmGetRanges(&tr,
 			                                                    keyServersPrefix,
@@ -328,7 +324,7 @@ ACTOR Future<Void> cleanUpSingleShardDataMove(Database occ,
 				return Void();
 			}
 
-			TraceEvent("CleanUpSingleShardDataMove", dataMoveId)
+			TraceEvent(SevInfo, "CleanUpSingleShardDataMove", dataMoveId)
 			    .detail("Range", keys)
 			    .detail("Src", describe(src))
 			    .detail("Dest", describe(dest))
@@ -362,7 +358,7 @@ ACTOR Future<Void> cleanUpSingleShardDataMove(Database occ,
 		}
 	}
 
-	TraceEvent(SevDebug, "CleanUpSingleShardDataMoveEnd", dataMoveId).detail("Range", keys);
+	TraceEvent(SevInfo, "CleanUpSingleShardDataMoveEnd", dataMoveId).detail("Range", keys);
 
 	return Void();
 }
