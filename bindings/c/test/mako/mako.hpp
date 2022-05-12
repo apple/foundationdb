@@ -44,6 +44,7 @@ constexpr const int MODE_INVALID = -1;
 constexpr const int MODE_CLEAN = 0;
 constexpr const int MODE_BUILD = 1;
 constexpr const int MODE_RUN = 2;
+constexpr const int MODE_REPORT = 3;
 
 /* for long arguments */
 enum ArgKind {
@@ -72,7 +73,9 @@ enum ArgKind {
 	ARG_DISABLE_RYW,
 	ARG_CLIENT_THREADS_PER_VERSION,
 	ARG_JSON_REPORT,
-	ARG_BG_FILE_PATH // if blob granule files are stored locally, mako will read and materialize them if this is set
+	ARG_BG_FILE_PATH, // if blob granule files are stored locally, mako will read and materialize them if this is set
+	ARG_EXPORT,
+	ARG_REPORT
 };
 
 constexpr const int OP_COUNT = 0;
@@ -161,6 +164,8 @@ struct Arguments {
 	char json_output_path[PATH_MAX];
 	bool bg_materialize_files;
 	char bg_file_path[PATH_MAX];
+	std::string stats_export_path;
+	std::vector<std::string> report_files;
 };
 
 } // namespace mako

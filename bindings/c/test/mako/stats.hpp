@@ -24,9 +24,15 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <fstream>
+#include <limits>
 #include <list>
 #include <new>
 #include <utility>
+#include "fdbclient/rapidjson/document.h"
+#include "fdbclient/rapidjson/rapidjson.h"
+#include "fdbclient/rapidjson/stringbuffer.h"
+#include "fdbclient/rapidjson/writer.h"
 #include "operations.hpp"
 #include "time.hpp"
 
@@ -59,42 +65,138 @@ public:
 	std::pair<uint64_t const*, size_t> data() const noexcept { return { samples, index }; }
 };
 
-/* collect sampled latencies until OOM is hit */
-class LatencySampleBin {
-	std::list<LatencySampleBlock> blocks;
-	bool noMoreAlloc{ false };
+/*
+    Collect sampled latencies according to DDSketch paper:
+    https://arxiv.org/pdf/1908.10693.pdf
+ */
+class DDSketch {
+private:
+	double errorGuarantee;
+	std::vector<uint64_t> buckets;
+	uint64_t minValue, maxValue, populationSize, zeroPopulationSize;
+	double gamma;
+	int offset;
+	constexpr static double EPSILON = 1e-18;
 
-	bool tryAlloc() {
-		try {
-			blocks.emplace_back();
-		} catch (const std::bad_alloc&) {
-			noMoreAlloc = true;
-			return false;
-		}
-		return true;
-	}
+	int getIdx(uint64_t sample) const noexcept { return ceil(log(sample) / log(gamma)); }
+
+	int64_t getVal(int idx) const noexcept { return (2.0 * pow(gamma, idx)) / (1 + gamma); }
 
 public:
-	void reserveOneBlock() {
-		if (blocks.empty())
-			tryAlloc();
+	DDSketch(double err = 0.05)
+	  : errorGuarantee(err), minValue(std::numeric_limits<uint64_t>::max()),
+	    maxValue(std::numeric_limits<uint64_t>::min()), populationSize(0), zeroPopulationSize(0),
+	    gamma((1.0 + errorGuarantee) / (1.0 - errorGuarantee)), offset(getIdx(1.0 / EPSILON)) {
+		buckets.resize(2 * offset, 0);
 	}
 
-	void put(timediff_t td) {
-		if (blocks.empty() || blocks.back().full()) {
-			if (blocks.size() >= MAX_LAT_BLOCKS || noMoreAlloc || !tryAlloc())
-				return;
+	uint64_t getPopulationSize() { return populationSize; }
+
+	void add(uint64_t sample) {
+		if (sample <= EPSILON) {
+			zeroPopulationSize++;
+		} else {
+			int idx = getIdx(sample);
+			assert(idx >= 0 && idx < int(buckets.size()));
+			buckets[idx]++;
 		}
-		blocks.back().put(td);
+		populationSize++;
+		maxValue = std::max(maxValue, sample);
+		minValue = std::min(minValue, sample);
+	}
+
+	uint64_t percentile(double percentile) {
+		assert(percentile >= 0 && percentile <= 1);
+		int current_bucket = 0;
+		uint64_t count = buckets.front();
+		uint64_t targetPercentilePopulation = percentile * (populationSize - 1);
+
+		while (count <= targetPercentilePopulation) {
+			current_bucket++;
+			count += buckets[current_bucket];
+		}
+		return getVal(current_bucket);
+	}
+
+	uint64_t min() const { return minValue; }
+	uint64_t max() const { return maxValue; }
+
+	void serialize(rapidjson::Writer<rapidjson::StringBuffer>& writer) const {
+		writer.StartObject();
+
+		writer.String("errorGuarantee");
+		writer.Double(errorGuarantee);
+		writer.String("minValue");
+		writer.Uint64(minValue);
+		writer.String("maxValue");
+		writer.Uint64(maxValue);
+		writer.String("populationSize");
+		writer.Uint64(populationSize);
+		writer.String("zeroPopulationSize");
+		writer.Uint64(zeroPopulationSize);
+		writer.String("gamma");
+		writer.Double(gamma);
+		writer.String("offset");
+		writer.Int(offset);
+		writer.String("buckets");
+		writer.StartArray();
+		for (auto b : buckets) {
+			writer.Uint64(b);
+		}
+		writer.EndArray();
+
+		writer.EndObject();
+	}
+
+	void deserialize(const rapidjson::Value& obj) {
+		errorGuarantee = obj["errorGuarantee"].GetDouble();
+		minValue = obj["minValue"].GetUint64();
+		maxValue = obj["maxValue"].GetUint64();
+		populationSize = obj["populationSize"].GetUint64();
+		zeroPopulationSize = obj["zeroPopulationSize"].GetUint64();
+		gamma = obj["gamma"].GetDouble();
+		offset = obj["offset"].GetInt();
+		auto jsonBuckets = obj["buckets"].GetArray().Begin();
+		uint64_t idx = 0;
+		for (auto it = jsonBuckets->Begin(); it != jsonBuckets->End(); it++) {
+			buckets[idx] = it->GetUint64();
+			idx++;
+		}
+	}
+
+	void merge(const DDSketch& other) {
+		// what to do if we have different errorGurantees?
+		// if (errorGuarantee != other.errorGuarantee)
+		// {
+		// 	// ayo?
+		// }
+		maxValue = std::max(maxValue, other.maxValue);
+		minValue = std::min(minValue, other.minValue);
+		populationSize += other.populationSize;
+		zeroPopulationSize += other.zeroPopulationSize;
+		for (uint32_t i = 0; i < buckets.size(); i++) {
+			buckets[i] += other.buckets[i];
+		}
+	}
+};
+
+/* collect sampled latencies until OOM is hit */
+class LatencySampleBin {
+	DDSketch sketch;
+
+public:
+	void put(timediff_t td) {
+		const auto latency_us = toIntegerMicroseconds(td);
+		sketch.add(latency_us);
 	}
 
 	// iterate & apply for each block user function void(uint64_t const*, size_t)
-	template <typename Func>
-	void forEachBlock(Func&& fn) const {
-		for (const auto& block : blocks) {
-			auto [ptr, cnt] = block.data();
-			fn(ptr, cnt);
-		}
+	void writeToFile(const std::string& filename) const {
+		rapidjson::StringBuffer ss;
+		rapidjson::Writer<rapidjson::StringBuffer> writer(ss);
+		sketch.serialize(writer);
+		std::ofstream f(filename);
+		f << ss.GetString();
 	}
 };
 

@@ -467,7 +467,8 @@ void dumpThreadSamples(Arguments const& args,
 				continue;
 			}
 			auto fclose_guard = ExitGuard([fp]() { fclose(fp); });
-			sample_bins[op].forEachBlock([fp](auto ptr, auto count) { fwrite(ptr, sizeof(*ptr) * count, 1, fp); });
+			// sample_bins[op].forEachBlock([fp](auto ptr, auto count) { fwrite(ptr, sizeof(*ptr) * count, 1, fp); });
+			sample_bins[op].writeToFile(filename);
 		}
 	}
 }
@@ -730,13 +731,6 @@ int workerProcessMain(Arguments const& args, int worker_id, shared_memory::Acces
 			this_args.args = &args;
 			this_args.shm = shm;
 			this_args.database = databases[i % args.num_databases];
-
-			/* for ops to run, pre-allocate one latency sample block */
-			for (auto op = 0; op < MAX_OP; op++) {
-				if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
-					this_args.sample_bins[op].reserveOneBlock();
-				}
-			}
 			worker_threads[i] = std::thread(workerThread, std::ref(this_args));
 		}
 		/* wait for everyone to finish */
@@ -1009,7 +1003,8 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 	int rc;
 	int c;
 	int idx;
-	while (1) {
+	bool report = false;
+	while (1 && !report) {
 		const char* short_options = "a:c:d:p:t:r:s:i:x:v:m:hz";
 		static struct option long_options[] = {
 			/* name, has_arg, flag, val */
@@ -1053,6 +1048,8 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			{ "disable_ryw", no_argument, NULL, ARG_DISABLE_RYW },
 			{ "json_report", optional_argument, NULL, ARG_JSON_REPORT },
 			{ "bg_file_path", required_argument, NULL, ARG_BG_FILE_PATH },
+			{ "export", optional_argument, NULL, ARG_EXPORT },
+			{ "report", required_argument, NULL, ARG_REPORT },
 			{ NULL, 0, NULL, 0 }
 		};
 		idx = 0;
@@ -1114,6 +1111,12 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 				args.mode = MODE_BUILD;
 			} else if (strcmp(optarg, "run") == 0) {
 				args.mode = MODE_RUN;
+			} else if (strcmp(optarg, "report") == 0) {
+				report = true;
+				args.mode = MODE_REPORT;
+				for (int i = optind; i < argc; i++) {
+					args.report_files.push_back(argv[i]);
+				}
 			}
 			break;
 		case ARG_ASYNC:
@@ -1240,6 +1243,14 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 		case ARG_BG_FILE_PATH:
 			args.bg_materialize_files = true;
 			strncpy(args.bg_file_path, optarg, std::min(sizeof(args.bg_file_path), strlen(optarg) + 1));
+		case ARG_EXPORT:
+			if (optarg == NULL && (argv[optind] == NULL || (argv[optind] != NULL && argv[optind][0] == '-'))) {
+				std::string default_file = "export.json";
+				args.stats_export_path = default_file;
+			} else {
+				args.stats_export_path = optarg;
+			}
+			break;
 		}
 	}
 
@@ -1305,6 +1316,20 @@ int validateArguments(Arguments const& args) {
 		if (args.txntagging < 0) {
 			logr.error("--txntagging must be a non-negative integer");
 			return -1;
+		}
+	}
+
+	// ensure that all of the files provided to mako are valid and exist
+	if (args.mode == MODE_REPORT) {
+		if (args.report_files.empty()) {
+			logr.error("No files to merge");
+		}
+		for (auto& filename : args.report_files) {
+			struct stat buffer;
+			if (stat(filename.c_str(), &buffer) != 0) {
+				logr.error("Couldn't open file {}", filename);
+				return -1;
+			}
 		}
 	}
 	return 0;
@@ -1635,7 +1660,7 @@ void printReport(Arguments const& args,
 	}
 	fmt::print("\n");
 
-	auto data_points = std::array<std::vector<uint64_t>, MAX_OP>{};
+	auto data_points = std::array<DDSketch, MAX_OP>{};
 
 	/* Median Latency */
 	if (fp) {
@@ -1647,30 +1672,23 @@ void printReport(Arguments const& args,
 		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
 			const auto lat_total = final_stats.getLatencyUsTotal(op);
 			const auto lat_samples = final_stats.getLatencySampleCount(op);
-			data_points[op].reserve(lat_samples);
+			// data_points[op].reserve(lat_samples);
 			if (lat_total && lat_samples) {
 				for (auto i = 0; i < args.num_processes; i++) {
 					auto load_sample = [pid_main, op, &data_points](int process_id, int thread_id) {
 						const auto dirname = fmt::format("{}{}", TEMP_DATA_STORE, pid_main);
 						const auto filename = getStatsFilename(dirname, process_id, thread_id, op);
-						auto fp = fopen(filename.c_str(), "r");
-						if (!fp) {
-							logr.error("fopen({}): {}", filename, strerror(errno));
-							return;
+						std::ifstream fp{ filename };
+						std::ostringstream sstr;
+						sstr << fp.rdbuf();
+						DDSketch sketch;
+						rapidjson::Document doc;
+						doc.Parse(sstr.str().c_str());
+						if (doc.HasParseError()) {
+							logr.error("Couldn't parse JSON from {}", filename);
 						}
-						auto fclose_guard = ExitGuard([fp]() { fclose(fp); });
-						fseek(fp, 0, SEEK_END);
-						const auto num_points = ftell(fp) / sizeof(uint64_t);
-						fseek(fp, 0, 0);
-						for (auto index = 0u; index < num_points; index++) {
-							auto value = uint64_t{};
-							auto nread = fread(&value, sizeof(uint64_t), 1, fp);
-							if (nread != 1) {
-								logr.error("Read sample returned {}", nread);
-								break;
-							}
-							data_points[op].push_back(value);
-						}
+						sketch.deserialize(doc);
+						data_points[op].merge(sketch);
 					};
 					if (args.async_xacts == 0) {
 						for (auto j = 0; j < args.num_threads; j++) {
@@ -1681,14 +1699,7 @@ void printReport(Arguments const& args,
 						load_sample(i, 0);
 					}
 				}
-				std::sort(data_points[op].begin(), data_points[op].end());
-				const auto num_points = data_points[op].size();
-				auto median = uint64_t{};
-				if (num_points & 1) {
-					median = data_points[op][num_points / 2];
-				} else {
-					median = (data_points[op][num_points / 2] + data_points[op][num_points / 2 - 1]) >> 1;
-				}
+				auto median = data_points[op].percentile(0.5);
 				putField(median);
 				if (fp) {
 					if (first_op) {
@@ -1713,20 +1724,19 @@ void printReport(Arguments const& args,
 	first_op = 1;
 	for (auto op = 0; op < MAX_OP; op++) {
 		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
-			if (data_points[op].empty() || !final_stats.getLatencyUsTotal(op)) {
+			if (!data_points[op].getPopulationSize() || !final_stats.getLatencyUsTotal(op)) {
 				putField("N/A");
 				continue;
 			}
-			const auto num_points = data_points[op].size();
-			const auto point_95pct = static_cast<size_t>(std::max(0., (num_points * 0.95) - 1));
-			putField(data_points[op][point_95pct]);
+			const auto point_95pct = data_points[op].percentile(0.95);
+			putField(point_95pct);
 			if (fp) {
 				if (first_op) {
 					first_op = 0;
 				} else {
 					fmt::fprintf(fp, ",");
 				}
-				fmt::fprintf(fp, "\"%s\": %lu", getOpName(op), data_points[op][point_95pct]);
+				fmt::fprintf(fp, "\"%s\": %lu", getOpName(op), point_95pct);
 			}
 		}
 	}
@@ -1740,20 +1750,19 @@ void printReport(Arguments const& args,
 	first_op = 1;
 	for (auto op = 0; op < MAX_OP; op++) {
 		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
-			if (data_points[op].empty() || !final_stats.getLatencyUsTotal(op)) {
+			if (!data_points[op].getPopulationSize() || !final_stats.getLatencyUsTotal(op)) {
 				putField("N/A");
 				continue;
 			}
-			const auto num_points = data_points[op].size();
-			const auto point_99pct = static_cast<size_t>(std::max(0., (num_points * 0.99) - 1));
-			putField(data_points[op][point_99pct]);
+			const auto point_99pct = data_points[op].percentile(0.99);
+			putField(point_99pct);
 			if (fp) {
 				if (first_op) {
 					first_op = 0;
 				} else {
 					fmt::fprintf(fp, ",");
 				}
-				fmt::fprintf(fp, "\"%s\": %lu", getOpName(op), data_points[op][point_99pct]);
+				fmt::fprintf(fp, "\"%s\": %lu", getOpName(op), point_99pct);
 			}
 		}
 	}
@@ -1767,26 +1776,38 @@ void printReport(Arguments const& args,
 	first_op = 1;
 	for (auto op = 0; op < MAX_OP; op++) {
 		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
-			if (data_points[op].empty() || !final_stats.getLatencyUsTotal(op)) {
+			if (!data_points[op].getPopulationSize() || !final_stats.getLatencyUsTotal(op)) {
 				putField("N/A");
 				continue;
 			}
-			const auto num_points = data_points[op].size();
-			const auto point_99_9pct = static_cast<size_t>(std::max(0., (num_points * 0.999) - 1));
-			putField(data_points[op][point_99_9pct]);
+			const auto point_99_9pct = data_points[op].percentile(0.999);
+			putField(point_99_9pct);
 			if (fp) {
 				if (first_op) {
 					first_op = 0;
 				} else {
 					fmt::fprintf(fp, ",");
 				}
-				fmt::fprintf(fp, "\"%s\": %lu", getOpName(op), data_points[op][point_99_9pct]);
+				fmt::fprintf(fp, "\"%s\": %lu", getOpName(op), point_99_9pct);
 			}
 		}
 	}
 	fmt::print("\n");
 	if (fp) {
 		fmt::fprintf(fp, "}}");
+	}
+
+	// export the ddsketch if the flag was set
+	if (!args.stats_export_path.empty()) {
+		rapidjson::StringBuffer ss;
+		rapidjson::Writer<rapidjson::StringBuffer> writer(ss);
+		writer.StartArray();
+		for (auto op = 0; op < MAX_OP; op++) {
+			data_points[op].serialize(writer);
+		}
+		writer.EndArray();
+		std::ofstream f(args.stats_export_path);
+		f << ss.GetString();
 	}
 
 	const auto command_remove = fmt::format("rm -rf {}{}", TEMP_DATA_STORE, pid_main);
@@ -1928,6 +1949,35 @@ int statsProcessMain(Arguments const& args,
 	return 0;
 }
 
+bool mergeSketchReport(Arguments& args) {
+
+	std::array<DDSketch, MAX_OP> sketches;
+	for (auto& filename : args.report_files) {
+		std::ifstream f{ filename };
+		std::stringstream buffer;
+		buffer << f.rdbuf();
+		rapidjson::Document doc;
+		doc.Parse(buffer.str().c_str());
+		if (doc.HasParseError()) {
+			logr.error("Couldn't parse JSON from {}", filename);
+			return false;
+		}
+		if (!doc.IsArray()) {
+			logr.error("JSON is invalid format from {}", filename);
+			return false;
+		}
+
+		int pos = 0;
+		for (auto it = doc.Begin(); it != doc.End(); it++) {
+			DDSketch d;
+			d.deserialize(*it);
+			sketches[pos].merge(d);
+			pos++;
+		}
+	}
+	return true;
+}
+
 int main(int argc, char* argv[]) {
 	setlinebuf(stdout);
 
@@ -1959,6 +2009,13 @@ int main(int argc, char* argv[]) {
 		if (args.txnspec.ops[OP_INSERT][OP_COUNT] == 0) {
 			parseTransaction(args, "i100");
 		}
+	}
+
+	if (args.mode == MODE_REPORT) {
+		if (mergeSketchReport(args)) {
+			return 0;
+		}
+		return -1;
 	}
 
 	const auto pid_main = getpid();
