@@ -536,7 +536,7 @@ inline uint64_t getWriteOperationCost(uint64_t bytes) {
 
 // Create a transaction to set the value of system key \xff/conf/perpetual_storage_wiggle. If enable == true, the value
 // will be 1. Otherwise, the value will be 0.
-ACTOR Future<Void> setPerpetualStorageWiggle(Database cx, bool enable, LockAware lockAware = LockAware::False);
+ACTOR Future<Version> setPerpetualStorageWiggle(Database cx, bool enable, LockAware lockAware = LockAware::False);
 
 ACTOR Future<std::vector<std::pair<UID, StorageWiggleValue>>> readStorageWiggleValues(Database cx,
                                                                                       bool primary,

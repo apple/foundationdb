@@ -974,6 +974,7 @@ public:
 		} catch (Error& e) {
 			if (logTeamEvents) {
 				TraceEvent("TeamTrackerStopping", self->distributorId)
+				    .errorUnsuppressed(e)
 				    .detail("ServerPrimary", self->primary)
 				    .detail("Team", team->getDesc())
 				    .detail("Priority", team->getPriority());

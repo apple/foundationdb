@@ -24,6 +24,7 @@
 
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/DatabaseContext.h" // for clone()
+#include "fdbclient/FDBTypes.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/actorcompiler.h"
@@ -31,7 +32,9 @@
 Future<int64_t> getDataInFlight(Database const& cx, Reference<AsyncVar<struct ServerDBInfo> const> const&);
 Future<std::pair<int64_t, int64_t>> getTLogQueueInfo(Database const& cx,
                                                      Reference<AsyncVar<struct ServerDBInfo> const> const&);
-Future<int64_t> getMaxStorageServerQueueSize(Database const& cx, Reference<AsyncVar<struct ServerDBInfo> const> const&);
+Future<int64_t> getMaxStorageServerQueueSize(Database const& cx,
+                                             Reference<AsyncVar<struct ServerDBInfo> const> const&,
+                                             Version const& version);
 Future<int64_t> getDataDistributionQueueSize(Database const& cx,
                                              Reference<AsyncVar<struct ServerDBInfo> const> const&,
                                              bool const& reportInFlight);
