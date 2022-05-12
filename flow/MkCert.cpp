@@ -259,7 +259,11 @@ CertAndKeyNative makeCertNative(CertSpecRef spec, CertAndKeyNative issuer) {
 			TraceEvent(SevWarnAlways, "MkCertInvalidExtName").suppressFor(10).detail("Name", extName);
 			throw tls_error();
 		}
+#ifdef OPENSSL_IS_BORINGSSL
+		auto ext = ::X509V3_EXT_conf_nid(nullptr, &ctx, extNid, const_cast<char*>(extValue.c_str()));
+#else
 		auto ext = ::X509V3_EXT_conf_nid(nullptr, &ctx, extNid, extValue.c_str());
+#endif
 		OSSL_ASSERT(ext);
 		auto extGuard = ScopeExit([ext]() { ::X509_EXTENSION_free(ext); });
 		OSSL_ASSERT(::X509_add_ext(x, ext, -1));
