@@ -754,20 +754,21 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			for (; shard < initData->shards.size() - 1; shard++) {
 				const DDShardInfo& iShard = initData->shards[shard];
 				KeyRangeRef keys = KeyRangeRef(iShard.key, initData->shards[shard + 1].key);
+
 				shardsAffectedByTeamFailure->defineShard(keys);
 				std::vector<ShardsAffectedByTeamFailure::Team> teams;
 				teams.push_back(ShardsAffectedByTeamFailure::Team(iShard.primarySrc, true));
 				if (configuration.usableRegions > 1) {
 					teams.push_back(ShardsAffectedByTeamFailure::Team(iShard.remoteSrc, false));
 				}
-				if (g_network->isSimulated()) {
+				// if (g_network->isSimulated()) {
 					TraceEvent("DDInitShard")
 					    .detail("Keys", keys)
 					    .detail("PrimarySrc", describe(iShard.primarySrc))
 					    .detail("RemoteSrc", describe(iShard.remoteSrc))
 					    .detail("PrimaryDest", describe(iShard.primaryDest))
 					    .detail("RemoteDest", describe(iShard.remoteDest));
-				}
+				// }
 
 				shardsAffectedByTeamFailure->moveShard(keys, teams);
 				if (iShard.hasDest &&
