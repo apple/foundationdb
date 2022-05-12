@@ -197,3 +197,13 @@ endif()
 
 add_executable(mkcert MkCertCli.cpp)
 target_link_libraries(mkcert PUBLIC fmt::fmt flow)
+
+add_executable(mtls_unittest TLSTest.cpp)
+target_link_libraries(mtls_unittest PUBLIC fmt::fmt flow)
+if(USE_SANITIZER)
+  target_link_libraries(mtls_unittest PUBLIC boost_asan)
+else()
+  target_link_libraries(mtls_unittest PUBLIC boost_target)
+endif()
+add_test(NAME mutual_tls_unittest
+         COMMAND $<TARGET_FILE:mtls_unittest>)
