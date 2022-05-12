@@ -379,4 +379,16 @@ CertChainRef makeCertChain(Arena& arena, unsigned length, ESide side) {
 	return makeCertChain(arena, specs, {} /*root*/);
 }
 
+StringRef CertKind::getCommonName(StringRef prefix, Arena& arena) const {
+	auto const side = std::string(isClientSide() ? " Client" : " Server");
+	if (isIntermediateCA()) {
+		auto const level = isClientSide() ? get<ClientIntermediateCA>().level : get<ServerIntermediateCA>().level;
+		return prefix.withSuffix(fmt::format("{} Intermediate {}", side, level), arena);
+	} else if (isRootCA()) {
+		return prefix.withSuffix(fmt::format("{} Root", side), arena);
+	} else {
+		return prefix.withSuffix(side, arena);
+	}
+}
+
 } // namespace mkcert

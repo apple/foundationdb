@@ -91,17 +91,7 @@ struct CertKind {
 
 	bool isCA() const noexcept { return !isLeaf(); }
 
-	StringRef getCommonName(StringRef prefix, Arena& arena) const {
-		auto const side = std::string(isClientSide() ? " Client" : " Server");
-		if (isIntermediateCA()) {
-			auto const level = isClientSide() ? get<ClientIntermediateCA>().level : get<ServerIntermediateCA>().level;
-			return prefix.withSuffix(fmt::format("{} Intermediate {}", side, level), arena);
-		} else if (isRootCA()) {
-			return prefix.withSuffix(fmt::format("{} Root", side), arena);
-		} else {
-			return prefix.withSuffix(side, arena);
-		}
-	}
+	StringRef getCommonName(StringRef prefix, Arena& arena) const;
 
 	std::variant<ServerRootCA, ServerIntermediateCA, Server, ClientRootCA, ClientIntermediateCA, Client> value;
 };
