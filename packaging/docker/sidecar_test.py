@@ -1,14 +1,38 @@
-import unittest
-from unittest.mock import MagicMock
-import socket
-from sidecar import SidecarHandler
-from http.server import HTTPServer, BaseHTTPRequestHandler
-import shutil, tempfile
-from functools import partial
+#!/usr/bin/env python3
+
+# sidecar_test.py
+#
+# This source file is part of the FoundationDB open source project
+#
+# Copyright 2018-2022 Apple Inc. and the FoundationDB project authors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
 import os
-import requests
+import shutil
+import socket
+import tempfile
+import unittest
+from functools import partial
+from http.server import HTTPServer
 from threading import Thread
-import time
+from unittest.mock import MagicMock
+
+import requests
+
+from sidecar import SidecarHandler
+
 
 # This test suite starts a real server with a mocked configuration and will do some requests against it.
 class TestSidecar(unittest.TestCase):
@@ -32,7 +56,6 @@ class TestSidecar(unittest.TestCase):
         self.mock_server_thread = Thread(target=self.mock_server.serve_forever)
         self.mock_server_thread.setDaemon(True)
         self.mock_server_thread.start()
-        # time.sleep(1)
 
     def tearDown(self):
         shutil.rmtree(self.mock_config.output_dir)
@@ -110,7 +133,7 @@ class TestSidecar(unittest.TestCase):
         self.assertRegex(r.text, "Path not found")
 
 
-# TODO(johscheuer): Add test cases for post requests
-
+# TODO(johscheuer): Add test cases for post requests.
+# TODO(johscheuer): Add test cases for TLS.
 if __name__ == "__main__":
     unittest.main()
