@@ -367,8 +367,10 @@ int main(int argc, char** argv) {
 			retCode = 1;
 		}
 
+		fprintf(stderr, "Stopping FDB network thread\n");
 		fdb_check(fdb_stop_network());
 		network_thread.join();
+		fprintf(stderr, "FDB network thread stopped\n");
 	} catch (const std::runtime_error& err) {
 		fmt::print(stderr, "ERROR: {}\n", err.what());
 		retCode = 1;

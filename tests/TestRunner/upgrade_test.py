@@ -128,6 +128,14 @@ def read_to_str(filename):
         return f.read()
 
 
+def dump_stack_traces(pid):
+    try:
+        cmd = "pstack {}".format(pid)
+        os.system(cmd)
+    except Exception as e:
+        print("Failed to dump stack traces using pstack: ", e)
+
+
 class UpgradeTest:
     def __init__(
         self,
@@ -480,6 +488,8 @@ class UpgradeTest:
             return
         if self.tester_proc is not None:
             try:
+                print("The tester process is possibly stuck. Dumping out its stack traces.")
+                dump_stack_traces(self.tester_proc.pid)
                 print("Killing the tester process")
                 self.tester_proc.kill()
                 workload_thread.join(5)
