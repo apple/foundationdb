@@ -365,7 +365,7 @@ ACTOR Future<TraceEventFields> getStorageMetricsTimeout(UID storage, WorkerInter
 		++retries;
 		state Future<TraceEventFields> result =
 		    wi.eventLogRequest.getReply(EventLogRequest(StringRef(storage.toString() + "/StorageMetrics")));
-		state Future<Void> timeout = delay(1.0);
+		state Future<Void> timeout = delay(30.0);
 		choose {
 			when(TraceEventFields res = wait(result)) {
 				if (version == invalidVersion || getDurableVersion(res) >= static_cast<int64_t>(version)) {
@@ -380,8 +380,13 @@ ACTOR Future<TraceEventFields> getStorageMetricsTimeout(UID storage, WorkerInter
 			}
 		}
 		if (retries > 30) {
+			TraceEvent("QuietDatabaseFailure")
+			    .detail("Reason", "Could not fetch StorageMetrics x30")
+			    .detail("Storage", format("%016" PRIx64, storage.first()))
+			    .detail("Version", version);
 			throw timed_out();
 		}
+		wait(delay(1.0));
 	}
 }
 

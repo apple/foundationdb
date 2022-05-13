@@ -7815,7 +7815,7 @@ ACTOR Future<Version> setPerpetualStorageWiggle(Database cx, bool enable, LockAw
 			tr.set(perpetualStorageWiggleKey, enable ? "1"_sr : "0"_sr);
 			wait(tr.commit());
 			version = tr.getCommittedVersion();
-			// TraceEvent("SetPerpetualWiggleKey").detail("Version", version);
+			TraceEvent("SetPerpetualWiggleKey").detail("Version", version);
 			break;
 		} catch (Error& e) {
 			wait(tr.onError(e));
