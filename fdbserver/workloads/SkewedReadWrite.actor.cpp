@@ -28,48 +28,13 @@
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
+#include "fdbserver/workloads/ReadWriteWorkload.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "flow/TDMetric.actor.h"
 #include "fdbclient/RunTransaction.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-const int sampleSize = 10000;
-DESCR struct TransactionSuccessMetric {
-	int64_t totalLatency; // ns
-	int64_t startLatency; // ns
-	int64_t commitLatency; // ns
-	int64_t retries; // count
-};
-
-DESCR struct TransactionFailureMetric {
-	int64_t startLatency; // ns
-	int64_t errorCode; // flow error code
-};
-
-DESCR struct ReadMetric {
-	int64_t readLatency; // ns
-};
-
-struct SkewedReadWriteWorkload : KVWorkload {
-	// general test setting
-	Standalone<StringRef> descriptionString;
-	bool doSetup, cancelWorkersAtDuration;
-	double testDuration, transactionsPerSecond, warmingDelay, maxInsertRate, debugInterval, debugTime;
-	double metricsStart, metricsDuration;
-	std::vector<uint64_t> insertionCountsToMeasure; // measure the speed of sequential insertion when bulkSetup
-
-	// test log setting
-	bool enableReadLatencyLogging;
-	double periodicLoggingInterval;
-
-	// transaction setting
-	bool useRYW;
-	double alpha; // probability for run TransactionA type
-	// two type of transaction
-	int readsPerTransactionA, writesPerTransactionA;
-	int readsPerTransactionB, writesPerTransactionB;
-	std::string valueString;
-
+struct SkewedReadWriteWorkload : ReadWriteCommon {
 	// server based hot traffic setting
 	int skewRound = 0; // skewDuration = ceil(testDuration / skewRound)
 	double hotServerFraction = 0, hotServerShardFraction = 1.0; // set > 0 to issue hot key based on shard map
@@ -83,183 +48,19 @@ struct SkewedReadWriteWorkload : KVWorkload {
 	std::map<UID, StorageServerInterface> serverInterfaces;
 	int hotServerCount = 0, currentHotRound = -1;
 
-	// states of metric
-	Int64MetricHandle totalReadsMetric;
-	Int64MetricHandle totalRetriesMetric;
-	EventMetricHandle<TransactionSuccessMetric> transactionSuccessMetric;
-	EventMetricHandle<TransactionFailureMetric> transactionFailureMetric;
-	EventMetricHandle<ReadMetric> readMetric;
-	PerfIntCounter aTransactions, bTransactions, retries;
-	ContinuousSample<double> latencies, readLatencies, commitLatencies, GRVLatencies, fullReadLatencies;
-	double readLatencyTotal;
-	int readLatencyCount;
-	std::vector<PerfMetric> periodicMetrics;
-	std::vector<std::pair<uint64_t, double>> ratesAtKeyCounts; // sequential insertion speed
-
-	// other internal states
-	std::vector<Future<Void>> clients;
-	double loadTime, clientBegin;
-
-	SkewedReadWriteWorkload(WorkloadContext const& wcx)
-	  : KVWorkload(wcx), totalReadsMetric(LiteralStringRef("RWWorkload.TotalReads")),
-	    totalRetriesMetric(LiteralStringRef("RWWorkload.TotalRetries")), aTransactions("A Transactions"),
-	    bTransactions("B Transactions"), retries("Retries"), latencies(sampleSize), readLatencies(sampleSize),
-	    commitLatencies(sampleSize), GRVLatencies(sampleSize), fullReadLatencies(sampleSize), readLatencyTotal(0),
-	    readLatencyCount(0), loadTime(0.0), clientBegin(0) {
-
-		transactionSuccessMetric.init(LiteralStringRef("RWWorkload.SuccessfulTransaction"));
-		transactionFailureMetric.init(LiteralStringRef("RWWorkload.FailedTransaction"));
-		readMetric.init(LiteralStringRef("RWWorkload.Read"));
-
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
-		transactionsPerSecond = getOption(options, LiteralStringRef("transactionsPerSecond"), 5000.0) / clientCount;
-		double allowedLatency = getOption(options, LiteralStringRef("allowedLatency"), 0.250);
-		actorCount = ceil(transactionsPerSecond * allowedLatency);
-		actorCount = getOption(options, LiteralStringRef("actorCountPerTester"), actorCount);
-
-		readsPerTransactionA = getOption(options, LiteralStringRef("readsPerTransactionA"), 10);
-		writesPerTransactionA = getOption(options, LiteralStringRef("writesPerTransactionA"), 0);
-		readsPerTransactionB = getOption(options, LiteralStringRef("readsPerTransactionB"), 1);
-		writesPerTransactionB = getOption(options, LiteralStringRef("writesPerTransactionB"), 9);
-		alpha = getOption(options, LiteralStringRef("alpha"), 0.1);
-
-		valueString = std::string(maxValueBytes, '.');
-		if (nodePrefix > 0) {
-			keyBytes += 16;
-		}
-
-		metricsStart = getOption(options, LiteralStringRef("metricsStart"), 0.0);
-		metricsDuration = getOption(options, LiteralStringRef("metricsDuration"), testDuration);
-		if (getOption(options, LiteralStringRef("discardEdgeMeasurements"), true)) {
-			// discardEdgeMeasurements keeps the metrics from the middle 3/4 of the test
-			metricsStart += testDuration * 0.125;
-			metricsDuration *= 0.75;
-		}
-
-		warmingDelay = getOption(options, LiteralStringRef("warmingDelay"), 0.0);
-		maxInsertRate = getOption(options, LiteralStringRef("maxInsertRate"), 1e12);
-		debugInterval = getOption(options, LiteralStringRef("debugInterval"), 0.0);
-		debugTime = getOption(options, LiteralStringRef("debugTime"), 0.0);
-		enableReadLatencyLogging = getOption(options, LiteralStringRef("enableReadLatencyLogging"), false);
-		periodicLoggingInterval = getOption(options, LiteralStringRef("periodicLoggingInterval"), 5.0);
-		cancelWorkersAtDuration = getOption(options, LiteralStringRef("cancelWorkersAtDuration"), true);
-		useRYW = getOption(options, LiteralStringRef("useRYW"), false);
-		doSetup = getOption(options, LiteralStringRef("setup"), true);
+	SkewedReadWriteWorkload(WorkloadContext const& wcx) : ReadWriteCommon(wcx) {
 		descriptionString = getOption(options, LiteralStringRef("description"), LiteralStringRef("SkewedReadWrite"));
-
-		// Validate that keyForIndex() is monotonic
-		for (int i = 0; i < 30; i++) {
-			int64_t a = deterministicRandom()->randomInt64(0, nodeCount);
-			int64_t b = deterministicRandom()->randomInt64(0, nodeCount);
-			if (a > b) {
-				std::swap(a, b);
-			}
-			ASSERT(a <= b);
-			ASSERT((keyForIndex(a, false) <= keyForIndex(b, false)));
-		}
-
-		std::vector<std::string> insertionCountsToMeasureString =
-		    getOption(options, LiteralStringRef("insertionCountsToMeasure"), std::vector<std::string>());
-		for (int i = 0; i < insertionCountsToMeasureString.size(); i++) {
-			try {
-				uint64_t count = boost::lexical_cast<uint64_t>(insertionCountsToMeasureString[i]);
-				insertionCountsToMeasure.push_back(count);
-			} catch (...) {
-			}
-		}
-
-		{
-			hotServerFraction = getOption(options, "hotServerFraction"_sr, 0.2);
-			hotServerShardFraction = getOption(options, "hotServerShardFraction"_sr, 1.0);
-			hotReadWriteServerOverlap = getOption(options, "hotReadWriteServerOverlap"_sr, 0.0);
-			skewRound = getOption(options, "skewRound"_sr, 1);
-			hotServerReadFrac = getOption(options, "hotServerReadFrac"_sr, 0.8);
-			hotServerWriteFrac = getOption(options, "hotServerWriteFrac"_sr, 0.0);
-			ASSERT((hotServerReadFrac >= hotServerFraction || hotServerWriteFrac >= hotServerFraction) &&
-			       skewRound > 0);
-		}
+		hotServerFraction = getOption(options, "hotServerFraction"_sr, 0.2);
+		hotServerShardFraction = getOption(options, "hotServerShardFraction"_sr, 1.0);
+		hotReadWriteServerOverlap = getOption(options, "hotReadWriteServerOverlap"_sr, 0.0);
+		skewRound = getOption(options, "skewRound"_sr, 1);
+		hotServerReadFrac = getOption(options, "hotServerReadFrac"_sr, 0.8);
+		hotServerWriteFrac = getOption(options, "hotServerWriteFrac"_sr, 0.0);
+		ASSERT((hotServerReadFrac >= hotServerFraction || hotServerWriteFrac >= hotServerFraction) && skewRound > 0);
 	}
 
 	std::string description() const override { return descriptionString.toString(); }
-	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
 	Future<Void> start(Database const& cx) override { return _start(cx, this); }
-
-	ACTOR static Future<bool> traceDumpWorkers(Reference<AsyncVar<ServerDBInfo> const> db) {
-		try {
-			loop {
-				choose {
-					when(wait(db->onChange())) {}
-
-					when(ErrorOr<std::vector<WorkerDetails>> workerList =
-					         wait(db->get().clusterInterface.getWorkers.tryGetReply(GetWorkersRequest()))) {
-						if (workerList.present()) {
-							std::vector<Future<ErrorOr<Void>>> dumpRequests;
-							dumpRequests.reserve(workerList.get().size());
-							for (int i = 0; i < workerList.get().size(); i++)
-								dumpRequests.push_back(workerList.get()[i].interf.traceBatchDumpRequest.tryGetReply(
-								    TraceBatchDumpRequest()));
-							wait(waitForAll(dumpRequests));
-							return true;
-						}
-						wait(delay(1.0));
-					}
-				}
-			}
-		} catch (Error& e) {
-			TraceEvent(SevError, "FailedToDumpWorkers").error(e);
-			throw;
-		}
-	}
-
-	Future<bool> check(Database const& cx) override {
-		clients.clear();
-
-		if (!cancelWorkersAtDuration && now() < metricsStart + metricsDuration)
-			metricsDuration = now() - metricsStart;
-
-		g_traceBatch.dump();
-		if (clientId == 0)
-			return traceDumpWorkers(dbInfo);
-		else
-			return true;
-	}
-
-	void getMetrics(std::vector<PerfMetric>& m) override {
-		double duration = metricsDuration;
-		int reads =
-		    (aTransactions.getValue() * readsPerTransactionA) + (bTransactions.getValue() * readsPerTransactionB);
-		int writes =
-		    (aTransactions.getValue() * writesPerTransactionA) + (bTransactions.getValue() * writesPerTransactionB);
-		m.emplace_back("Measured Duration", duration, Averaged::True);
-		m.emplace_back(
-		    "Transactions/sec", (aTransactions.getValue() + bTransactions.getValue()) / duration, Averaged::False);
-		m.emplace_back("Operations/sec", ((reads + writes) / duration), Averaged::False);
-		m.push_back(aTransactions.getMetric());
-		m.push_back(bTransactions.getMetric());
-		m.push_back(retries.getMetric());
-		m.emplace_back("Mean load time (seconds)", loadTime, Averaged::True);
-		m.emplace_back("Read rows", reads, Averaged::False);
-		m.emplace_back("Write rows", writes, Averaged::False);
-		m.emplace_back("Read rows/sec", reads / duration, Averaged::False);
-		m.emplace_back("Write rows/sec", writes / duration, Averaged::False);
-		m.emplace_back(
-		    "Bytes read/sec", (reads * (keyBytes + (minValueBytes + maxValueBytes) * 0.5)) / duration, Averaged::False);
-		m.emplace_back("Bytes written/sec",
-		               (writes * (keyBytes + (minValueBytes + maxValueBytes) * 0.5)) / duration,
-		               Averaged::False);
-		m.insert(m.end(), periodicMetrics.begin(), periodicMetrics.end());
-
-		std::vector<std::pair<uint64_t, double>>::iterator ratesItr = ratesAtKeyCounts.begin();
-		for (; ratesItr != ratesAtKeyCounts.end(); ratesItr++)
-			m.emplace_back(format("%lld keys imported bytes/sec", ratesItr->first), ratesItr->second, Averaged::False);
-	}
-
-	Value randomValue() {
-		return StringRef((uint8_t*)valueString.c_str(),
-		                 deterministicRandom()->randomInt(minValueBytes, maxValueBytes + 1));
-	}
-
-	Standalone<KeyValueRef> operator()(uint64_t n) { return KeyValueRef(keyForIndex(n, false), randomValue()); }
 
 	void debugPrintServerShards() const {
 		std::cout << std::hex;
@@ -375,164 +176,6 @@ struct SkewedReadWriteWorkload : KVWorkload {
 		return Void();
 	}
 
-	ACTOR static Future<Void> tracePeriodically(SkewedReadWriteWorkload* self) {
-		state double start = now();
-		state double elapsed = 0.0;
-		state int64_t last_ops = 0;
-
-		loop {
-			elapsed += self->periodicLoggingInterval;
-			wait(delayUntil(start + elapsed));
-
-			TraceEvent((self->description() + "_RowReadLatency").c_str())
-			    .detail("Mean", self->readLatencies.mean())
-			    .detail("Median", self->readLatencies.median())
-			    .detail("Percentile5", self->readLatencies.percentile(.05))
-			    .detail("Percentile95", self->readLatencies.percentile(.95))
-			    .detail("Percentile99", self->readLatencies.percentile(.99))
-			    .detail("Percentile99_9", self->readLatencies.percentile(.999))
-			    .detail("Max", self->readLatencies.max())
-			    .detail("Count", self->readLatencyCount)
-			    .detail("Elapsed", elapsed);
-
-			TraceEvent((self->description() + "_GRVLatency").c_str())
-			    .detail("Mean", self->GRVLatencies.mean())
-			    .detail("Median", self->GRVLatencies.median())
-			    .detail("Percentile5", self->GRVLatencies.percentile(.05))
-			    .detail("Percentile95", self->GRVLatencies.percentile(.95))
-			    .detail("Percentile99", self->GRVLatencies.percentile(.99))
-			    .detail("Percentile99_9", self->GRVLatencies.percentile(.999))
-			    .detail("Max", self->GRVLatencies.max());
-
-			TraceEvent((self->description() + "_CommitLatency").c_str())
-			    .detail("Mean", self->commitLatencies.mean())
-			    .detail("Median", self->commitLatencies.median())
-			    .detail("Percentile5", self->commitLatencies.percentile(.05))
-			    .detail("Percentile95", self->commitLatencies.percentile(.95))
-			    .detail("Percentile99", self->commitLatencies.percentile(.99))
-			    .detail("Percentile99_9", self->commitLatencies.percentile(.999))
-			    .detail("Max", self->commitLatencies.max());
-
-			TraceEvent((self->description() + "_TotalLatency").c_str())
-			    .detail("Mean", self->latencies.mean())
-			    .detail("Median", self->latencies.median())
-			    .detail("Percentile5", self->latencies.percentile(.05))
-			    .detail("Percentile95", self->latencies.percentile(.95))
-			    .detail("Percentile99", self->latencies.percentile(.99))
-			    .detail("Percentile99_9", self->latencies.percentile(.999))
-			    .detail("Max", self->latencies.max());
-
-			int64_t ops =
-			    (self->aTransactions.getValue() * (self->readsPerTransactionA + self->writesPerTransactionA)) +
-			    (self->bTransactions.getValue() * (self->readsPerTransactionB + self->writesPerTransactionB));
-			bool recordBegin = self->shouldRecord(std::max(now() - self->periodicLoggingInterval, self->clientBegin));
-			bool recordEnd = self->shouldRecord(now());
-			if (recordBegin && recordEnd) {
-				std::string ts = format("T=%04.0fs:", elapsed);
-				self->periodicMetrics.emplace_back(
-				    ts + "Operations/sec", (ops - last_ops) / self->periodicLoggingInterval, Averaged::False);
-
-				// if(self->rampUpLoad) {
-				self->periodicMetrics.emplace_back(
-				    ts + "Mean Latency (ms)", 1000 * self->latencies.mean(), Averaged::True);
-				self->periodicMetrics.emplace_back(
-				    ts + "Median Latency (ms, averaged)", 1000 * self->latencies.median(), Averaged::True);
-				self->periodicMetrics.emplace_back(
-				    ts + "5% Latency (ms, averaged)", 1000 * self->latencies.percentile(.05), Averaged::True);
-				self->periodicMetrics.emplace_back(
-				    ts + "95% Latency (ms, averaged)", 1000 * self->latencies.percentile(.95), Averaged::True);
-
-				self->periodicMetrics.emplace_back(
-				    ts + "Mean Row Read Latency (ms)", 1000 * self->readLatencies.mean(), Averaged::True);
-				self->periodicMetrics.emplace_back(
-				    ts + "Median Row Read Latency (ms, averaged)", 1000 * self->readLatencies.median(), Averaged::True);
-				self->periodicMetrics.emplace_back(ts + "5% Row Read Latency (ms, averaged)",
-				                                   1000 * self->readLatencies.percentile(.05),
-				                                   Averaged::True);
-				self->periodicMetrics.emplace_back(ts + "95% Row Read Latency (ms, averaged)",
-				                                   1000 * self->readLatencies.percentile(.95),
-				                                   Averaged::True);
-
-				self->periodicMetrics.emplace_back(
-				    ts + "Mean Total Read Latency (ms)", 1000 * self->fullReadLatencies.mean(), Averaged::True);
-				self->periodicMetrics.emplace_back(ts + "Median Total Read Latency (ms, averaged)",
-				                                   1000 * self->fullReadLatencies.median(),
-				                                   Averaged::True);
-				self->periodicMetrics.emplace_back(ts + "5% Total Read Latency (ms, averaged)",
-				                                   1000 * self->fullReadLatencies.percentile(.05),
-				                                   Averaged::True);
-				self->periodicMetrics.emplace_back(ts + "95% Total Read Latency (ms, averaged)",
-				                                   1000 * self->fullReadLatencies.percentile(.95),
-				                                   Averaged::True);
-
-				self->periodicMetrics.emplace_back(
-				    ts + "Mean GRV Latency (ms)", 1000 * self->GRVLatencies.mean(), Averaged::True);
-				self->periodicMetrics.emplace_back(
-				    ts + "Median GRV Latency (ms, averaged)", 1000 * self->GRVLatencies.median(), Averaged::True);
-				self->periodicMetrics.emplace_back(
-				    ts + "5% GRV Latency (ms, averaged)", 1000 * self->GRVLatencies.percentile(.05), Averaged::True);
-				self->periodicMetrics.emplace_back(
-				    ts + "95% GRV Latency (ms, averaged)", 1000 * self->GRVLatencies.percentile(.95), Averaged::True);
-
-				self->periodicMetrics.emplace_back(
-				    ts + "Mean Commit Latency (ms)", 1000 * self->commitLatencies.mean(), Averaged::True);
-				self->periodicMetrics.emplace_back(
-				    ts + "Median Commit Latency (ms, averaged)", 1000 * self->commitLatencies.median(), Averaged::True);
-				self->periodicMetrics.emplace_back(ts + "5% Commit Latency (ms, averaged)",
-				                                   1000 * self->commitLatencies.percentile(.05),
-				                                   Averaged::True);
-				self->periodicMetrics.emplace_back(ts + "95% Commit Latency (ms, averaged)",
-				                                   1000 * self->commitLatencies.percentile(.95),
-				                                   Averaged::True);
-				//}
-
-				self->periodicMetrics.emplace_back(
-				    ts + "Max Latency (ms, averaged)", 1000 * self->latencies.max(), Averaged::True);
-				self->periodicMetrics.emplace_back(
-				    ts + "Max Row Read Latency (ms, averaged)", 1000 * self->readLatencies.max(), Averaged::True);
-				self->periodicMetrics.emplace_back(
-				    ts + "Max Total Read Latency (ms, averaged)", 1000 * self->fullReadLatencies.max(), Averaged::True);
-				self->periodicMetrics.emplace_back(
-				    ts + "Max GRV Latency (ms, averaged)", 1000 * self->GRVLatencies.max(), Averaged::True);
-				self->periodicMetrics.emplace_back(
-				    ts + "Max Commit Latency (ms, averaged)", 1000 * self->commitLatencies.max(), Averaged::True);
-			}
-			last_ops = ops;
-
-			// if(self->rampUpLoad) {
-			self->latencies.clear();
-			self->readLatencies.clear();
-			self->fullReadLatencies.clear();
-			self->GRVLatencies.clear();
-			self->commitLatencies.clear();
-			//}
-
-			self->readLatencyTotal = 0.0;
-			self->readLatencyCount = 0;
-		}
-	}
-
-	ACTOR static Future<Void> logLatency(Future<Optional<Value>> f,
-	                                     ContinuousSample<double>* latencies,
-	                                     double* totalLatency,
-	                                     int* latencyCount,
-	                                     EventMetricHandle<ReadMetric> readMetric,
-	                                     bool shouldRecord) {
-		state double readBegin = now();
-		Optional<Value> value = wait(f);
-
-		double latency = now() - readBegin;
-		readMetric->readLatency = latency * 1e9;
-		readMetric->log();
-
-		if (shouldRecord) {
-			*totalLatency += latency;
-			++*latencyCount;
-			latencies->addSample(latency);
-		}
-		return Void();
-	}
-
 	ACTOR template <class Trans>
 	Future<Void> readOp(Trans* tr, std::vector<int64_t> keys, SkewedReadWriteWorkload* self, bool shouldRecord) {
 		if (!keys.size())
@@ -541,38 +184,10 @@ struct SkewedReadWriteWorkload : KVWorkload {
 		std::vector<Future<Void>> readers;
 		for (int op = 0; op < keys.size(); op++) {
 			++self->totalReadsMetric;
-			readers.push_back(logLatency(tr->get(self->keyForIndex(keys[op])),
-			                             &self->readLatencies,
-			                             &self->readLatencyTotal,
-			                             &self->readLatencyCount,
-			                             self->readMetric,
-			                             shouldRecord));
+			readers.push_back(self->logLatency(tr->get(self->keyForIndex(keys[op])), shouldRecord));
 		}
 
 		wait(waitForAll(readers));
-		return Void();
-	}
-
-	ACTOR static Future<Void> _setup(Database cx, SkewedReadWriteWorkload* self) {
-		if (!self->doSetup)
-			return Void();
-
-		state Promise<double> loadTime;
-		state Promise<std::vector<std::pair<uint64_t, double>>> ratesAtKeyCounts;
-
-		wait(bulkSetup(cx,
-		               self,
-		               self->nodeCount,
-		               loadTime,
-		               self->insertionCountsToMeasure.empty(),
-		               self->warmingDelay,
-		               self->maxInsertRate,
-		               self->insertionCountsToMeasure,
-		               ratesAtKeyCounts));
-
-		self->loadTime = loadTime.getFuture().get();
-		self->ratesAtKeyCounts = ratesAtKeyCounts.getFuture().get();
-
 		return Void();
 	}
 
@@ -592,7 +207,7 @@ struct SkewedReadWriteWorkload : KVWorkload {
 	ACTOR static Future<Void> _start(Database cx, SkewedReadWriteWorkload* self) {
 		state std::vector<Future<Void>> clients;
 		if (self->enableReadLatencyLogging)
-			clients.push_back(tracePeriodically(self));
+			clients.push_back(self->tracePeriodically());
 
 		wait(updateServerShards(cx, self));
 		for (self->currentHotRound = 0; self->currentHotRound < self->skewRound; ++self->currentHotRound) {
@@ -604,13 +219,6 @@ struct SkewedReadWriteWorkload : KVWorkload {
 		}
 
 		return Void();
-	}
-
-	bool shouldRecord() { return shouldRecord(now()); }
-
-	bool shouldRecord(double checkTime) {
-		double timeSinceStart = checkTime - clientBegin;
-		return timeSinceStart >= metricsStart && timeSinceStart < (metricsStart + metricsDuration);
 	}
 
 	// calculate hot server count

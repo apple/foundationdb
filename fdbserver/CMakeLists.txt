@@ -267,6 +267,7 @@ set(FDBSERVER_SRCS
   workloads/ReadAfterWrite.actor.cpp
   workloads/ReadHotDetection.actor.cpp
   workloads/ReadWrite.actor.cpp
+  workloads/ReadWriteWorkload.actor.h
   workloads/RemoveServersSafely.actor.cpp
   workloads/ReportConflictingKeys.actor.cpp
   workloads/RestoreBackup.actor.cpp
