@@ -468,8 +468,8 @@ class UpgradeTest:
                 else:
                     assert entry in self.used_versions, "Unexpected entry in the upgrade path: {}".format(entry)
                     self.upgrade_to(entry)
-            self.health_check()
-            self.progress_check()
+                self.health_check()
+                self.progress_check()
             os.write(self.ctrl_pipe, b"STOP\n")
         finally:
             os.close(self.ctrl_pipe)
