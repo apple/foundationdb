@@ -90,6 +90,7 @@ public:
 	uint64_t second() const { return part[1]; }
 
 	static UID fromString(std::string const&);
+	static UID fromStringThrowsOnFailure(std::string const&);
 
 	template <class Ar>
 	void serialize_unversioned(

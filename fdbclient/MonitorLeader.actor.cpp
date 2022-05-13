@@ -270,6 +270,9 @@ TEST_CASE("/fdbclient/MonitorLeader/ConnectionString/hostname") {
 
 ACTOR Future<std::vector<NetworkAddress>> tryResolveHostnamesImpl(ClusterConnectionString* self) {
 	state std::set<NetworkAddress> allCoordinatorsSet;
+	for (const auto& coord : self->coords) {
+		allCoordinatorsSet.insert(coord);
+	}
 	std::vector<Future<Void>> fs;
 	for (auto& hostname : self->hostnames) {
 		fs.push_back(map(hostname.resolve(), [&](Optional<NetworkAddress> const& addr) -> Void {
@@ -280,9 +283,6 @@ ACTOR Future<std::vector<NetworkAddress>> tryResolveHostnamesImpl(ClusterConnect
 		}));
 	}
 	wait(waitForAll(fs));
-	for (const auto& coord : self->coords) {
-		allCoordinatorsSet.insert(coord);
-	}
 	std::vector<NetworkAddress> allCoordinators(allCoordinatorsSet.begin(), allCoordinatorsSet.end());
 	std::sort(allCoordinators.begin(), allCoordinators.end());
 	return allCoordinators;
@@ -300,7 +300,7 @@ TEST_CASE("/fdbclient/MonitorLeader/PartialResolve") {
 
 	INetworkConnections::net()->addMockTCPEndpoint(hn, port, { address });
 
-	state ClusterConnectionString cs(connectionString);
+	ClusterConnectionString cs(connectionString);
 	state std::vector<NetworkAddress> allCoordinators = wait(cs.tryResolveHostnames());
 	ASSERT(allCoordinators.size() == 1 &&
 	       std::find(allCoordinators.begin(), allCoordinators.end(), address) != allCoordinators.end());
