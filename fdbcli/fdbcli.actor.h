@@ -93,10 +93,7 @@ extern const KeyRangeRef processClassTypeSpecialKeyRange;
 // Other special keys
 inline const KeyRef errorMsgSpecialKey = LiteralStringRef("\xff\xff/error_message");
 // help functions (Copied from fdbcli.actor.cpp)
-// decode worker interfaces
-ACTOR Future<Void> addInterface(std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface,
-                                Reference<FlowLock> connectLock,
-                                KeyValue kv);
+
 // get all workers' info
 ACTOR Future<bool> getWorkers(Reference<IDatabase> db, std::vector<ProcessData>* workers);
 
