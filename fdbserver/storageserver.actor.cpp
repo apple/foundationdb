@@ -714,7 +714,7 @@ public:
 			lastArena = Arena(4096);
 		u.arena() = lastArena;
 		counters.bytesInput += VERSION_OVERHEAD;
-		versionBytes[v] += VERSION_OVERHEAD;
+		// versionBytes[v] += VERSION_OVERHEAD;
 		// TraceEvent("MutationLogChange").detail("AddVersion", v).detail("Bytes", VERSION_OVERHEAD);
 		return u;
 	}
@@ -723,7 +723,7 @@ public:
 		byteSampleApplyMutation(m, mLV.version);
 		counters.bytesInput += mvccStorageBytes(m);
 		// TraceEvent("MutationLogChange").detail("AddVersion", mLV.version).detail("Bytes", mvccStorageBytes(m));
-		versionBytes[mLV.version] += mvccStorageBytes(m);
+		// versionBytes[mLV.version] += mvccStorageBytes(m);
 		return mLV.push_back_deep(mLV.arena(), m);
 	}
 
@@ -1016,7 +1016,7 @@ public:
 		}
 	} counters;
 
-	std::map<Version, int64_t> versionBytes;
+	// std::map<Version, int64_t> versionBytes;
 
 	// Bytes read from storage engine when a storage server starts.
 	int64_t bytesRestored = 0;
@@ -4610,16 +4610,16 @@ bool changeDurableVersion(StorageServer* data, Version desiredDurableVersion) {
 			}
 		}
 		data->counters.bytesDurable += bytesDurable;
-		data->versionBytes[nextDurableVersion] -= bytesDurable;
-		if (data->versionBytes[nextDurableVersion] == 0) {
-			data->versionBytes.erase(nextDurableVersion);
-		}
-		TraceEvent e("VersionBytesDebug", data->thisServerID);
-		e.detail("NewDurableVersion", nextDurableVersion);
-		for (auto& [version, bytes] : data->versionBytes) {
-			std::string name = "Version-" + std::to_string(version);
-			e.detail(std::move(name), bytes);
-		}
+		// data->versionBytes[nextDurableVersion] -= bytesDurable;
+		// if (data->versionBytes[nextDurableVersion] == 0) {
+		// 	data->versionBytes.erase(nextDurableVersion);
+		// }
+		// TraceEvent e("VersionBytesDebug", data->thisServerID);
+		// e.detail("NewDurableVersion", nextDurableVersion);
+		// for (auto& [version, bytes] : data->versionBytes) {
+		// 	std::string name = "Version-" + std::to_string(version);
+		// 	e.detail(std::move(name), bytes);
+		// }
 	}
 
 	if (EXPENSIVE_VALIDATION) {
