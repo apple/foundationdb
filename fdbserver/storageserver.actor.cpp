@@ -3749,7 +3749,7 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 	state int sz = input.data.size();
 	state int i = 0;
 	for (; i < sz; i++) {
-		state KeyValueRef* it = &input.data[i];
+		KeyValueRef* it = &input.data[i];
 		state MappedKeyValueRef kvm;
 		// need to keep the boundary, so that caller can use it as a continuation.
 		if ((i == 0 || i == sz - 1) || matchIndex == MATCH_INDEX_ALL) {

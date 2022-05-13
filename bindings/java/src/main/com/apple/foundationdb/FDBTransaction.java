@@ -32,6 +32,10 @@ import com.apple.foundationdb.async.AsyncUtil;
 import com.apple.foundationdb.tuple.ByteArrayUtil;
 
 class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionConsumer {
+
+	static public final int MATCH_INDEX_ALL = 0;
+	static public final int MATCH_INDEX_NONE = 1;
+
 	private final Database database;
 	private final Executor executor;
 	private final TransactionOptions options;
@@ -467,11 +471,11 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 			        " -- range get: (%s, %s) limit: %d, bytes: %d, mode: %d, iteration: %d, snap: %s, reverse %s",
 			    begin.toString(), end.toString(), rowLimit, targetBytes, streamingMode,
 			    iteration, Boolean.toString(isSnapshot), Boolean.toString(reverse)));*/
-			return new FutureMappedResults(Transaction_getMappedRange(getPtr(), begin.getKey(), begin.orEqual(),
-			                                                          begin.getOffset(), end.getKey(), end.orEqual(),
-			                                                          end.getOffset(), mapper, rowLimit, targetBytes,
-			                                                          streamingMode, iteration, 0, isSnapshot, reverse),
-			                               FDB.instance().isDirectBufferQueriesEnabled(), executor, eventKeeper);
+			return new FutureMappedResults(
+			    Transaction_getMappedRange(getPtr(), begin.getKey(), begin.orEqual(), begin.getOffset(), end.getKey(),
+			                               end.orEqual(), end.getOffset(), mapper, rowLimit, targetBytes, streamingMode,
+			                               iteration, MATCH_INDEX_ALL, isSnapshot, reverse),
+			    FDB.instance().isDirectBufferQueriesEnabled(), executor, eventKeeper);
 		} finally {
 			pointerReadLock.unlock();
 		}
