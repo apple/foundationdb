@@ -259,7 +259,11 @@ CertAndKeyNative makeCertNative(CertSpecRef spec, CertAndKeyNative issuer) {
 			TraceEvent(SevWarnAlways, "MkCertInvalidExtName").suppressFor(10).detail("Name", extName);
 			throw tls_error();
 		}
+#ifdef OPENSSL_IS_BORINGSSL
+		auto ext = ::X509V3_EXT_conf_nid(nullptr, &ctx, extNid, const_cast<char*>(extValue.c_str()));
+#else
 		auto ext = ::X509V3_EXT_conf_nid(nullptr, &ctx, extNid, extValue.c_str());
+#endif
 		OSSL_ASSERT(ext);
 		auto extGuard = ScopeExit([ext]() { ::X509_EXTENSION_free(ext); });
 		OSSL_ASSERT(::X509_add_ext(x, ext, -1));
@@ -373,6 +377,18 @@ CertChainRef makeCertChain(Arena& arena, unsigned length, ESide side) {
 	auto tmpArena = Arena();
 	auto specs = makeCertChainSpec(tmpArena, length, side);
 	return makeCertChain(arena, specs, {} /*root*/);
+}
+
+StringRef CertKind::getCommonName(StringRef prefix, Arena& arena) const {
+	auto const side = std::string(isClientSide() ? " Client" : " Server");
+	if (isIntermediateCA()) {
+		auto const level = isClientSide() ? get<ClientIntermediateCA>().level : get<ServerIntermediateCA>().level;
+		return prefix.withSuffix(fmt::format("{} Intermediate {}", side, level), arena);
+	} else if (isRootCA()) {
+		return prefix.withSuffix(fmt::format("{} Root", side), arena);
+	} else {
+		return prefix.withSuffix(side, arena);
+	}
 }
 
 } // namespace mkcert
