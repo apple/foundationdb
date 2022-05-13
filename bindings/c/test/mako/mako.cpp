@@ -467,7 +467,6 @@ void dumpThreadSamples(Arguments const& args,
 				continue;
 			}
 			auto fclose_guard = ExitGuard([fp]() { fclose(fp); });
-			// sample_bins[op].forEachBlock([fp](auto ptr, auto count) { fwrite(ptr, sizeof(*ptr) * count, 1, fp); });
 			sample_bins[op].writeToFile(filename);
 		}
 	}
@@ -1049,7 +1048,6 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			{ "json_report", optional_argument, NULL, ARG_JSON_REPORT },
 			{ "bg_file_path", required_argument, NULL, ARG_BG_FILE_PATH },
 			{ "export", optional_argument, NULL, ARG_EXPORT },
-			{ "report", required_argument, NULL, ARG_REPORT },
 			{ NULL, 0, NULL, 0 }
 		};
 		idx = 0;
@@ -1699,7 +1697,8 @@ void printReport(Arguments const& args,
 						load_sample(i, 0);
 					}
 				}
-				auto median = data_points[op].percentile(0.5);
+
+				auto median = std::ceil(data_points[op].percentile(0.5) * 100) / 100;
 				putField(median);
 				if (fp) {
 					if (first_op) {
@@ -1728,7 +1727,7 @@ void printReport(Arguments const& args,
 				putField("N/A");
 				continue;
 			}
-			const auto point_95pct = data_points[op].percentile(0.95);
+			const auto point_95pct = std::ceil(data_points[op].percentile(0.95) * 100) / 100;
 			putField(point_95pct);
 			if (fp) {
 				if (first_op) {
@@ -1754,7 +1753,7 @@ void printReport(Arguments const& args,
 				putField("N/A");
 				continue;
 			}
-			const auto point_99pct = data_points[op].percentile(0.99);
+			const auto point_99pct = std::ceil(data_points[op].percentile(0.99) * 100) / 100;
 			putField(point_99pct);
 			if (fp) {
 				if (first_op) {
@@ -1780,7 +1779,7 @@ void printReport(Arguments const& args,
 				putField("N/A");
 				continue;
 			}
-			const auto point_99_9pct = data_points[op].percentile(0.999);
+			const auto point_99_9pct = std::ceil(data_points[op].percentile(0.999) * 100) / 100;
 			putField(point_99_9pct);
 			if (fp) {
 				if (first_op) {

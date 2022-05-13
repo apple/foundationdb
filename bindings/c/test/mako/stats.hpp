@@ -80,7 +80,7 @@ private:
 
 	int getIdx(uint64_t sample) const noexcept { return ceil(log(sample) / log(gamma)); }
 
-	int64_t getVal(int idx) const noexcept { return (2.0 * pow(gamma, idx)) / (1 + gamma); }
+	double getVal(int idx) const noexcept { return (2.0 * pow(gamma, idx)) / (1 + gamma); }
 
 public:
 	DDSketch(double err = 0.05)
@@ -105,17 +105,52 @@ public:
 		minValue = std::min(minValue, sample);
 	}
 
-	uint64_t percentile(double percentile) {
+	double percentile(double percentile) {
 		assert(percentile >= 0 && percentile <= 1);
-		int current_bucket = 0;
-		uint64_t count = buckets.front();
-		uint64_t targetPercentilePopulation = percentile * (populationSize - 1);
 
-		while (count <= targetPercentilePopulation) {
-			current_bucket++;
-			count += buckets[current_bucket];
+		if (populationSize == 0) {
+			return 0;
 		}
-		return getVal(current_bucket);
+		uint64_t targetPercentilePopulation = percentile * (populationSize - 1);
+		// Now find the tPP-th (0-indexed) element
+		if (targetPercentilePopulation < zeroPopulationSize) {
+			return 0;
+		}
+
+		int index = -1;
+		bool found = false;
+		if (percentile <= 0.5) { // count up
+			uint64_t count = zeroPopulationSize;
+			for (size_t i = 0; i < buckets.size(); i++) {
+				if (targetPercentilePopulation < count + buckets[i]) {
+					// count + buckets[i] = # of numbers so far (from the rightmost to
+					// this bucket, inclusive), so if target is in this bucket, it should
+					// means tPP < cnt + bck[i]
+					found = true;
+					index = i;
+					break;
+				}
+				count += buckets[i];
+			}
+		} else { // and count down
+			uint64_t count = 0;
+			for (size_t i = buckets.size() - 1; i >= 0; i--) {
+				if (targetPercentilePopulation + count + buckets[i] >= populationSize) {
+					// cnt + bkt[i] is # of numbers to the right of this bucket (incl.),
+					// so if target is not in this bucket (i.e., to the left of this
+					// bucket), it would be as right as the left bucket's rightmost
+					// number, so we would have tPP + cnt + bkt[i] < total population (tPP
+					// is 0-indexed), that means target is in this bucket if this
+					// condition is not satisfied.
+					found = true;
+					index = i;
+					break;
+				}
+				count += buckets[i];
+			}
+		}
+		assert(found);
+		return getVal(index);
 	}
 
 	uint64_t min() const { return minValue; }
@@ -156,9 +191,9 @@ public:
 		zeroPopulationSize = obj["zeroPopulationSize"].GetUint64();
 		gamma = obj["gamma"].GetDouble();
 		offset = obj["offset"].GetInt();
-		auto jsonBuckets = obj["buckets"].GetArray().Begin();
+		auto jsonBuckets = obj["buckets"].GetArray();
 		uint64_t idx = 0;
-		for (auto it = jsonBuckets->Begin(); it != jsonBuckets->End(); it++) {
+		for (auto it = jsonBuckets.Begin(); it != jsonBuckets.End(); it++) {
 			buckets[idx] = it->GetUint64();
 			idx++;
 		}
@@ -197,6 +232,7 @@ public:
 		sketch.serialize(writer);
 		std::ofstream f(filename);
 		f << ss.GetString();
+		// std::cout << ss.GetString();
 	}
 };
 
