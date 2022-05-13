@@ -105,7 +105,7 @@ struct ProxyStats {
 	                    NotifiedVersion* pVersion,
 	                    NotifiedVersion* pCommittedVersion,
 	                    int64_t* commitBatchesMemBytesCountPtr,
-	                    std::map<TenantName, TenantMapEntry>* tenantMapPtr)
+	                    std::map<TenantName, TenantMapEntry>* pTenantMap)
 	  : cc("ProxyStats", id.toString()), txnCommitIn("TxnCommitIn", cc),
 	    txnCommitVersionAssigned("TxnCommitVersionAssigned", cc), txnCommitResolving("TxnCommitResolving", cc),
 	    txnCommitResolved("TxnCommitResolved", cc), txnCommitOut("TxnCommitOut", cc),
@@ -161,7 +161,7 @@ struct ProxyStats {
 		specialCounter(cc, "CommitBatchesMemBytesCount", [commitBatchesMemBytesCountPtr]() {
 			return *commitBatchesMemBytesCountPtr;
 		});
-		specialCounter(cc, "NumTenants", [tenantMapPtr]() { return tenantMapPtr->size(); });
+		specialCounter(cc, "NumTenants", [pTenantMap]() { return pTenantMap ? pTenantMap->size() : 0; });
 		specialCounter(cc, "MaxCompute", [this]() { return this->getAndResetMaxCompute(); });
 		specialCounter(cc, "MinCompute", [this]() { return this->getAndResetMinCompute(); });
 		logger = traceCounters("ProxyMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ProxyMetrics");
