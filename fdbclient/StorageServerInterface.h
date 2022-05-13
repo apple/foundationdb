@@ -418,6 +418,7 @@ struct GetMappedKeyValuesRequest : TimedRequest {
 	KeyRef mapper;
 	Version version; // or latestVersion
 	int limit, limitBytes;
+	int matchIndex;
 	bool isFetchKeys;
 	Optional<TagSet> tags;
 	Optional<UID> debugID;
@@ -443,7 +444,8 @@ struct GetMappedKeyValuesRequest : TimedRequest {
 		           spanContext,
 		           tenantInfo,
 		           arena,
-		           ssLatestCommitVersions);
+		           ssLatestCommitVersions,
+		           matchIndex);
 	}
 };
 

@@ -259,6 +259,7 @@ GetMappedRangeResult get_mapped_range(fdb::Transaction& tr,
                                       int target_bytes,
                                       FDBStreamingMode mode,
                                       int iteration,
+                                      int matchIndex,
                                       fdb_bool_t snapshot,
                                       fdb_bool_t reverse) {
 	fdb::MappedKeyValueArrayFuture f1 = tr.get_mapped_range(begin_key_name,
@@ -275,6 +276,7 @@ GetMappedRangeResult get_mapped_range(fdb::Transaction& tr,
 	                                                        target_bytes,
 	                                                        mode,
 	                                                        iteration,
+	                                                        matchIndex,
 	                                                        snapshot,
 	                                                        reverse);
 
@@ -949,7 +951,11 @@ std::map<std::string, std::string> fillInRecords(int n) {
 	return data;
 }
 
-GetMappedRangeResult getMappedIndexEntries(int beginId, int endId, fdb::Transaction& tr, std::string mapper) {
+GetMappedRangeResult getMappedIndexEntries(int beginId,
+                                           int endId,
+                                           fdb::Transaction& tr,
+                                           std::string mapper,
+                                           int matchIndex = MATCH_INDEX_ALL) {
 	std::string indexEntryKeyBegin = indexEntryKey(beginId);
 	std::string indexEntryKeyEnd = indexEntryKey(endId);
 
@@ -963,13 +969,17 @@ GetMappedRangeResult getMappedIndexEntries(int beginId, int endId, fdb::Transact
 	    /* target_bytes */ 0,
 	    /* FDBStreamingMode */ FDB_STREAMING_MODE_WANT_ALL,
 	    /* iteration */ 0,
+	    /* matchIndex */ matchIndex,
 	    /* snapshot */ false,
 	    /* reverse */ 0);
 }
 
-GetMappedRangeResult getMappedIndexEntries(int beginId, int endId, fdb::Transaction& tr) {
+GetMappedRangeResult getMappedIndexEntries(int beginId,
+                                           int endId,
+                                           fdb::Transaction& tr,
+                                           int matchIndex = MATCH_INDEX_ALL) {
 	std::string mapper = Tuple().append(prefix).append(RECORD).append("{K[3]}"_sr).append("{...}"_sr).pack().toString();
-	return getMappedIndexEntries(beginId, endId, tr, mapper);
+	return getMappedIndexEntries(beginId, endId, tr, mapper, matchIndex);
 }
 
 TEST_CASE("fdb_transaction_get_mapped_range") {
@@ -981,7 +991,8 @@ TEST_CASE("fdb_transaction_get_mapped_range") {
 	while (1) {
 		int beginId = 1;
 		int endId = 19;
-		auto result = getMappedIndexEntries(beginId, endId, tr);
+		const int matchIndex = deterministicRandom()->random01() > 0.5 ? MATCH_INDEX_NONE : MATCH_INDEX_ALL;
+		auto result = getMappedIndexEntries(beginId, endId, tr, matchIndex);
 
 		if (result.err) {
 			fdb::EmptyFuture f1 = tr.on_error(result.err);
@@ -996,7 +1007,11 @@ TEST_CASE("fdb_transaction_get_mapped_range") {
 		int id = beginId;
 		for (int i = 0; i < expectSize; i++, id++) {
 			const auto& [key, value, begin, end, range_results] = result.mkvs[i];
-			CHECK(indexEntryKey(id).compare(key) == 0);
+			if (matchIndex == MATCH_INDEX_ALL || i == 0 || i == expectSize - 1) {
+				CHECK(indexEntryKey(id).compare(key) == 0);
+			} else {
+				CHECK(EMPTY.compare(key) == 0);
+			}
 			CHECK(EMPTY.compare(value) == 0);
 			CHECK(range_results.size() == SPLIT_SIZE);
 			for (int split = 0; split < SPLIT_SIZE; split++) {
@@ -1022,6 +1037,7 @@ TEST_CASE("fdb_transaction_get_mapped_range_restricted_to_serializable") {
 	    /* target_bytes */ 0,
 	    /* FDBStreamingMode */ FDB_STREAMING_MODE_WANT_ALL,
 	    /* iteration */ 0,
+	    /* matchIndex */ MATCH_INDEX_ALL,
 	    /* snapshot */ true, // Set snapshot to true
 	    /* reverse */ 0);
 	ASSERT(result.err == error_code_unsupported_operation);
@@ -1041,6 +1057,7 @@ TEST_CASE("fdb_transaction_get_mapped_range_restricted_to_ryw_enable") {
 	    /* target_bytes */ 0,
 	    /* FDBStreamingMode */ FDB_STREAMING_MODE_WANT_ALL,
 	    /* iteration */ 0,
+	    /* matchIndex */ MATCH_INDEX_ALL,
 	    /* snapshot */ false,
 	    /* reverse */ 0);
 	ASSERT(result.err == error_code_unsupported_operation);
