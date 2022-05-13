@@ -40,6 +40,7 @@
 #include "fdbserver/Knobs.h"
 #include "flow/Knobs.h"
 #include "flow/Histogram.h"
+#include "fdbrpc/ContinuousSample.h"
 #include "flow/UnitTest.h"
 #include "flow/crc32c.h"
 #include "flow/genericactors.actor.h"
@@ -53,6 +54,11 @@ struct AsyncFileKAIOMetrics {
 	Reference<Histogram> readLatencyDist;
 	Reference<Histogram> writeLatencyDist;
 	Reference<Histogram> syncLatencyDist;
+	Reference<Histogram> ioSubmitLatencyDist;
+	ContinuousSample<double> writeLatencySamples;
+	ContinuousSample<double> ioSubmitLatencySamples;
+
+	AsyncFileKAIOMetrics() : writeLatencySamples(10000), ioSubmitLatencySamples(10000) {}
 } g_asyncFileKAIOMetrics;
 
 Future<Void> g_asyncFileKAIOHistogramLogger;
@@ -431,6 +437,9 @@ public:
 			int rc = io_submit(ctx.iocx, n, (linux_iocb**)toStart);
 			double end = timer_monotonic();
 
+			g_asyncFileKAIOMetrics.ioSubmitLatencyDist->sampleSeconds(end - truncateComplete);
+			g_asyncFileKAIOMetrics.ioSubmitLatencySamples.addSample((end - truncateComplete) * 1000000);
+
 			if (end - begin > FLOW_KNOBS->SLOW_LOOP_CUTOFF) {
 				ctx.slowAioSubmitMetric->submitDuration = end - truncateComplete;
 				ctx.slowAioSubmitMetric->truncateDuration = truncateComplete - begin;
@@ -478,6 +487,25 @@ public:
 	}
 
 	bool failed;
+
+	static void getIOSubmitMetrics() {
+
+		auto& metrics = g_asyncFileKAIOMetrics;
+
+		printf("\n=== Write Latencies (us) === \n");
+		printf("Mean Latency: %f\n", metrics.writeLatencySamples.mean());
+		printf("Median Latency: %f\n", metrics.writeLatencySamples.median());
+		printf("95%% Latency: %f\n", metrics.writeLatencySamples.percentile(0.95));
+		printf("99%% Latency: %f\n", metrics.writeLatencySamples.percentile(0.99));
+		printf("99.9%% Latency: %f\n", metrics.writeLatencySamples.percentile(0.999));
+
+		printf("\n === io_submit Latencies (us) === \n");
+		printf("Mean Latency: %f\n", metrics.ioSubmitLatencySamples.mean());
+		printf("Median Latency: %f\n", metrics.ioSubmitLatencySamples.median());
+		printf("95%% Latency: %f\n", metrics.ioSubmitLatencySamples.percentile(0.95));
+		printf("99%% Latency: %f\n", metrics.ioSubmitLatencySamples.percentile(0.99));
+		printf("99.9%% Latency: %f\n", metrics.ioSubmitLatencySamples.percentile(0.999));
+	}
 
 private:
 	int fd, flags;
@@ -649,6 +677,8 @@ private:
 				    Reference<HistogramRegistry>(), "AsyncFileKAIO", "WriteLatency", Histogram::Unit::microseconds));
 				metrics.syncLatencyDist = Reference<Histogram>(new Histogram(
 				    Reference<HistogramRegistry>(), "AsyncFileKAIO", "SyncLatency", Histogram::Unit::microseconds));
+				metrics.ioSubmitLatencyDist = Reference<Histogram>(new Histogram(
+				    Reference<HistogramRegistry>(), "AsyncFileKAIO", "IoSubmitLatency", Histogram::Unit::microseconds));
 				g_asyncFileKAIOHistogramLogger = histogramLogger(SERVER_KNOBS->DISK_METRIC_LOGGING_INTERVAL);
 			}
 		}
@@ -777,6 +807,7 @@ private:
 					break;
 				case IO_CMD_PWRITE:
 					metrics.writeLatencyDist->sampleSeconds(now() - iob->startTime);
+					metrics.writeLatencySamples.addSample((now() - iob->startTime) * 1000000);
 					break;
 				}
 
@@ -795,6 +826,7 @@ private:
 			metrics.readLatencyDist->writeToLog(elapsed);
 			metrics.writeLatencyDist->writeToLog(elapsed);
 			metrics.syncLatencyDist->writeToLog(elapsed);
+			metrics.ioSubmitLatencyDist->writeToLog(elapsed);
 		}
 	}
 };
