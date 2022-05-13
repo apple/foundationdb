@@ -335,8 +335,8 @@ std::pair<UID, Key> serverKeysDecodeServerBegin(const KeyRef& key) {
 	BinaryReader rd(key.removePrefix(serverKeysPrefix), Unversioned());
 	rd >> server_id;
 	rd.readBytes(1); // skip "/"
-	const auto remainedBytes = rd.remainedBytes();
-	KeyRef ref = KeyRef(rd.arenaRead(remainedBytes), remainedBytes);
+	const auto remainingBytes = rd.remainingBytes();
+	KeyRef ref = KeyRef(rd.arenaRead(remainingBytes), remainingBytes);
 	// std::cout << ref.size() << " " << ref.toString() << std::endl;
 	return std::make_pair(server_id, Key(ref));
 }

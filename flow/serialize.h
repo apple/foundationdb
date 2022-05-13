@@ -634,19 +634,16 @@ public:
 		check = nullptr;
 	}
 
-	size_t size() const { return len; }
 	size_t remainingBytes() const { return end - begin; };
 
 protected:
-	_Reader(const char* begin, const char* end) : begin(begin), end(end), len(end - begin) {}
-	_Reader(const char* begin, const char* end, const Arena& arena)
-	  : begin(begin), end(end), m_pool(arena), len(end - begin) {}
+	_Reader(const char* begin, const char* end) : begin(begin), end(end) {}
+	_Reader(const char* begin, const char* end, const Arena& arena) : begin(begin), end(end), m_pool(arena) {}
 
 	const char *begin, *end;
 	const char* check = nullptr;
 	Arena m_pool;
 	ProtocolVersion m_protocolVersion;
-	size_t len;
 };
 
 class ArenaReader : public _Reader<ArenaReader> {
