@@ -338,7 +338,7 @@ endif()
         COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
             --build-dir ${CMAKE_BINARY_DIR}
             --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
-            --upgrade-path "7.1.3" "7.2.0" "7.1.3"
+            --upgrade-path "7.1.3" "7.2.0"
             --process-number 3
           )
 
