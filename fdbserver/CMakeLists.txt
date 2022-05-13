@@ -281,6 +281,7 @@ set(FDBSERVER_SRCS
   workloads/Sideband.actor.cpp
   workloads/SidebandSingle.actor.cpp
   workloads/SimpleAtomicAdd.actor.cpp
+  workloads/SkewedReadWrite.actor.cpp
   workloads/SlowTaskWorkload.actor.cpp
   workloads/SnapTest.actor.cpp
   workloads/SpecialKeySpaceCorrectness.actor.cpp
