@@ -635,7 +635,7 @@ public:
 	}
 
 	size_t size() const { return len; }
-	size_t remainedBytes() const { return end - begin; };
+	size_t remainingBytes() const { return end - begin; };
 
 protected:
 	_Reader(const char* begin, const char* end) : begin(begin), end(end), len(end - begin) {}
