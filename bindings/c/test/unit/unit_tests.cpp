@@ -993,7 +993,15 @@ TEST_CASE("fdb_transaction_get_mapped_range") {
 	while (1) {
 		int beginId = 1;
 		int endId = 19;
-		const int matchIndex = deterministicRandom()->random01() > 0.5 ? MATCH_INDEX_NONE : MATCH_INDEX_ALL;
+		const double r = deterministicRandom()->random01();
+		int matchIndex = MATCH_INDEX_ALL;
+		if (r < 0.25) {
+			matchIndex = MATCH_INDEX_NONE;
+		} else if (r < 0.5) {
+			matchIndex = MATCH_INDEX_MATCHED_ONLY;
+		} else if (r < 0.75) {
+			matchIndex = MATCH_INDEX_UNMATCHED_ONLY;
+		}
 		auto result = getMappedIndexEntries(beginId, endId, tr, matchIndex);
 
 		if (result.err) {
@@ -1011,6 +1019,16 @@ TEST_CASE("fdb_transaction_get_mapped_range") {
 			const auto& [key, value, begin, end, range_results] = result.mkvs[i];
 			if (matchIndex == MATCH_INDEX_ALL || i == 0 || i == expectSize - 1) {
 				CHECK(indexEntryKey(id).compare(key) == 0);
+			} else if (matchIndex == MATCH_INDEX_MATCHED_ONLY) {
+				// now we cannot generate a workload that only has partial results matched
+				// thus expecting everything matched
+				// TODO: create tests to generate workloads with partial secondary results present
+				CHECK(indexEntryKey(id).compare(key) == 0);
+			} else if (matchIndex == MATCH_INDEX_UNMATCHED_ONLY) {
+				// now we cannot generate a workload that only has partial results matched
+				// thus expecting everything NOT matched(except for the boundary asserted above)
+				// TODO: create tests to generate workloads with partial secondary results present
+				CHECK(EMPTY.compare(key) == 0);
 			} else {
 				CHECK(EMPTY.compare(key) == 0);
 			}
