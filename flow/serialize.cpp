@@ -35,7 +35,7 @@ const void* BinaryReader::readBytes(int bytes) {
 	const char* e = b + bytes;
 	if (e > end) {
 		ASSERT(!g_network->isSimulated());
-		TraceEvent("SerializationFailed").backtrace();
+		TraceEvent("SerializationFailed").detail("Bytes", bytes).detail("Diff", e - end).backtrace();
 		throw serialization_failed();
 	}
 	begin = e;

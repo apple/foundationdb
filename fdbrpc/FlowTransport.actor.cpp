@@ -399,7 +399,7 @@ struct ConnectPacket {
 		serializer(ar, connectPacketLength);
 		if (connectPacketLength > sizeof(ConnectPacket) - sizeof(connectPacketLength)) {
 			ASSERT(!g_network->isSimulated());
-			TraceEvent("SerializationFailed").backtrace();
+			TraceEvent("SerializationFailed").detail("PacketLength", connectPacketLength).backtrace();
 			throw serialization_failed();
 		}
 
