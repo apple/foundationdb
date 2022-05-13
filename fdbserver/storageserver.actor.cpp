@@ -3723,7 +3723,8 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
                                                    StringRef mapper,
                                                    // To provide span context, tags, debug ID to underlying lookups.
                                                    GetMappedKeyValuesRequest* pOriginalReq,
-                                                   Optional<Key> tenantPrefix) {
+                                                   Optional<Key> tenantPrefix,
+                                                   int matchIndex) {
 	state GetMappedKeyValuesReply result;
 	result.version = input.version;
 	result.more = input.more;
@@ -3741,15 +3742,20 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 		TraceEvent("MapperNotTuple").error(e).detail("Mapper", mapper.printable());
 		throw mapper_not_tuple();
 	}
-	state KeyValueRef* it = input.data.begin();
 	state std::vector<Optional<Tuple>> vt;
 	state bool isRangeQuery = false;
 	preprocessMappedKey(mappedKeyFormatTuple, vt, isRangeQuery);
 
-	for (; it != input.data.end(); it++) {
+	state int sz = input.data.size();
+	state int i = 0;
+	for (; i < sz; i++) {
+		KeyValueRef* it = &input.data[i];
 		state MappedKeyValueRef kvm;
-		kvm.key = it->key;
-		kvm.value = it->value;
+		// need to keep the boundary, so that caller can use it as a continuation.
+		if ((i == 0 || i == sz - 1) || matchIndex == MATCH_INDEX_ALL) {
+			kvm.key = it->key;
+			kvm.value = it->value;
+		}
 
 		state Key mappedKey = constructMappedKey(it, vt, mappedKeyTuple, mappedKeyFormatTuple);
 		// Make sure the mappedKey is always available, so that it's good even we want to get key asynchronously.
@@ -4026,7 +4032,7 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 			try {
 				// Map the scanned range to another list of keys and look up.
 				GetMappedKeyValuesReply _r =
-				    wait(mapKeyValues(data, getKeyValuesReply, req.mapper, &req, tenantPrefix));
+				    wait(mapKeyValues(data, getKeyValuesReply, req.mapper, &req, tenantPrefix, req.matchIndex));
 				r = _r;
 			} catch (Error& e) {
 				TraceEvent("MapError").error(e);

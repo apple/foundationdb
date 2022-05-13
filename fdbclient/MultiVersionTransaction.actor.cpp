@@ -158,6 +158,7 @@ ThreadFuture<MappedRangeResult> DLTransaction::getMappedRange(const KeySelectorR
                                                               const KeySelectorRef& end,
                                                               const StringRef& mapper,
                                                               GetRangeLimits limits,
+                                                              int matchIndex,
                                                               bool snapshot,
                                                               bool reverse) {
 	FdbCApi::FDBFuture* f = api->transactionGetMappedRange(tr,
@@ -175,6 +176,7 @@ ThreadFuture<MappedRangeResult> DLTransaction::getMappedRange(const KeySelectorR
 	                                                       limits.bytes,
 	                                                       FDB_STREAMING_MODE_EXACT,
 	                                                       0,
+	                                                       matchIndex,
 	                                                       snapshot,
 	                                                       reverse);
 	return toThreadFuture<MappedRangeResult>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
@@ -971,10 +973,11 @@ ThreadFuture<MappedRangeResult> MultiVersionTransaction::getMappedRange(const Ke
                                                                         const KeySelectorRef& end,
                                                                         const StringRef& mapper,
                                                                         GetRangeLimits limits,
+                                                                        int matchIndex,
                                                                         bool snapshot,
                                                                         bool reverse) {
 	auto tr = getTransaction();
-	auto f = tr.transaction ? tr.transaction->getMappedRange(begin, end, mapper, limits, snapshot, reverse)
+	auto f = tr.transaction ? tr.transaction->getMappedRange(begin, end, mapper, limits, matchIndex, snapshot, reverse)
 	                        : makeTimeout<MappedRangeResult>();
 	return abortableFuture(f, tr.onChange);
 }
