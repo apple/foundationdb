@@ -1974,6 +1974,15 @@ bool mergeSketchReport(Arguments& args) {
 			pos++;
 		}
 	}
+	rapidjson::StringBuffer ss;
+	rapidjson::Writer<rapidjson::StringBuffer> writer(ss);
+	writer.StartArray();
+	for (auto op = 0; op < MAX_OP; op++) {
+		sketches[op].serialize(writer);
+	}
+	writer.EndArray();
+	std::ofstream f("merged_report.json");
+	f << ss.GetString();
 	return true;
 }
 
