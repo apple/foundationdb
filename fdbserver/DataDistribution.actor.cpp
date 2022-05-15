@@ -816,6 +816,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 							teams.push_back(ShardsAffectedByTeamFailure::Team(rs.dataMove->remoteDest, false));
 						}
 						shardsAffectedByTeamFailure->moveShard(rs.keys, teams);
+						shardsAffectedByTeamFailure->restartRequests.send(rs.keys);
 						output.send(rs);
 					} else {
 						ASSERT(false);
