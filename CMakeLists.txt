@@ -56,18 +56,28 @@ set(LIBRARY_OUTPUT_PATH ${PROJECT_BINARY_DIR}/lib)
 ################################################################################
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake/")
-if(EXISTS "${CMAKE_BINARY_DIR}/conan_paths.cmake")
-  include("${CMAKE_BINARY_DIR}/conan_paths.cmake")
-endif()
 
 ################################################################################
-# Compiler configuration
+# compiler configuration
 ################################################################################
 
 include(ConfigureCompiler)
 
 ################################################################################
-# Compiler configuration
+# Conan
+################################################################################
+
+if(EXISTS "${CMAKE_BINARY_DIR}/conan_paths.cmake")
+  include("${CMAKE_BINARY_DIR}/conan_paths.cmake")
+else()
+  message(STATUS "Run conan")
+  include("${CMAKE_SOURCE_DIR}/cmake/conan.cmake")
+  conan_cmake_run(CONANFILE conanfile.py BASIC_SETUP CMAKE_TARGETS BUILD missing)
+endif()
+
+
+################################################################################
+# Find Dependencies
 ################################################################################
 
 include(FDBComponents)
