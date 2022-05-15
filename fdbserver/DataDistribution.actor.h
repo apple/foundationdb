@@ -227,6 +227,8 @@ public:
 	void finishMove(KeyRangeRef keys);
 	void check() const;
 
+	PromiseStream<KeyRange> restartRequests;
+
 private:
 	struct OrderByTeamKey {
 		bool operator()(const std::pair<Team, KeyRange>& lhs, const std::pair<Team, KeyRange>& rhs) const {

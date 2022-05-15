@@ -1099,7 +1099,7 @@ struct DDQueueData {
 		DDQueueData::DDDataMove dataMove(dataMoveId);
 		dataMove.cancel = cleanUpDataMove(
 		    this->cx, dataMoveId, this->lock, &this->cleanUpDataMoveParallelismLock, range, ddEnabledState);
-		this->dataMoves.insert(range, DDQueueData::DDDataMove(dataMoveId));
+		this->dataMoves.insert(range, dataMove);
 		TraceEvent(SevDebug, "DDEnqueuedCancelledDataMove", this->distributorId)
 		    .detail("DataMoveID", dataMoveId)
 		    .detail("Range", range);
@@ -1998,7 +1998,11 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 					self.activeRelocations--;
 					TraceEvent(SevDebug, "InFlightRelocationChange")
 					    .detail("Complete", done.dataMoveId)
+					    .detail("IsRestore", done.isRestore())
 					    .detail("Total", self.activeRelocations);
+					// if (done.isRestore()) {
+					// 	self.shardsAffectedByTeamFailure->restartRequests.send(done.keys);
+					// }
 					self.finishRelocation(done.priority, done.healthPriority);
 					self.fetchKeysComplete.erase(done);
 					// self.logRelocation( done, "ShardRelocatorDone" );
