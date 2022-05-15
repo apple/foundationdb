@@ -213,20 +213,18 @@ if(WITH_AWS_BACKUP)
   set(FDBCLIENT_SRCS
     ${FDBCLIENT_SRCS}
     FDBAWSCredentialsProvider.h)
-
-  include(awssdk)
 endif()
 
 add_flow_target(STATIC_LIBRARY NAME fdbclient SRCS ${FDBCLIENT_SRCS} ADDL_SRCS ${options_srcs})
 add_dependencies(fdbclient fdboptions)
-target_link_libraries(fdbclient PUBLIC fdbrpc msgpack)
+target_link_libraries(fdbclient PUBLIC fdbrpc msgpack::msgpackc-cxx)
 
 # Create a separate fdbclient library with sampling enabled. This lets
 # fdbserver retain sampling functionality in client code while disabling
 # sampling for pure clients.
 add_flow_target(STATIC_LIBRARY NAME fdbclient_sampling SRCS ${FDBCLIENT_SRCS} ADDL_SRCS ${options_srcs})
 add_dependencies(fdbclient_sampling fdboptions)
-target_link_libraries(fdbclient_sampling PUBLIC fdbrpc_sampling msgpack)
+target_link_libraries(fdbclient_sampling PUBLIC fdbrpc_sampling msgpack::msgpackc-cxx)
 target_compile_definitions(fdbclient_sampling PRIVATE -DENABLE_SAMPLING)
 if(WIN32)
   add_dependencies(fdbclient_sampling_actors fdbclient_actors)
@@ -236,8 +234,7 @@ if(BUILD_AZURE_BACKUP)
   target_link_libraries(fdbclient PRIVATE curl uuid azure-storage-lite)
   target_link_libraries(fdbclient_sampling PRIVATE curl uuid azure-storage-lite)
 endif()
-
-if(BUILD_AWS_BACKUP)
-  target_link_libraries(fdbclient PUBLIC awssdk_target)
-  target_link_libraries(fdbclient_sampling PUBLIC awssdk_target)
+if(WITH_AWS_BACKUP)
+  target_link_libraries(fdbclient PRIVATE AWS::s3)
+  target_link_libraries(fdbclient_sampling PRIVATE AWS::s3)
 endif()

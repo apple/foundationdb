@@ -19,7 +19,7 @@
  */
 
 #include <cinttypes>
-#include "contrib/fmt-8.1.1/include/fmt/format.h"
+#include <fmt/format.h>
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbrpc/IAsyncFile.h"
 #include "fdbclient/FDBTypes.h"

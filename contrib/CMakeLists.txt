@@ -1,4 +1,3 @@
-add_subdirectory(fmt-8.1.1)
 if(NOT WIN32)
   add_subdirectory(debug_determinism)
   add_subdirectory(monitoring)

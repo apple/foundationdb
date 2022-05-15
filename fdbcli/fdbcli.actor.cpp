@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#include "boost/lexical_cast.hpp"
-#include "contrib/fmt-8.1.1/include/fmt/format.h"
+#include <boost/lexical_cast.hpp>
+#include <fmt/format.h>
 #include "fdbclient/ClusterConnectionFile.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/FDBTypes.h"

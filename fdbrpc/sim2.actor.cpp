@@ -22,7 +22,7 @@
 #include <memory>
 #include <string>
 
-#include "contrib/fmt-8.1.1/include/fmt/format.h"
+#include <fmt/format.h>
 #include "fdbrpc/simulator.h"
 #include "flow/Arena.h"
 #define BOOST_SYSTEM_NO_LIB

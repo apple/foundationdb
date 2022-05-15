@@ -56,6 +56,9 @@ set(LIBRARY_OUTPUT_PATH ${PROJECT_BINARY_DIR}/lib)
 ################################################################################
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake/")
+if(EXISTS "${CMAKE_BINARY_DIR}/conan_paths.cmake")
+  include("${CMAKE_BINARY_DIR}/conan_paths.cmake")
+endif()
 
 ################################################################################
 # Compiler configuration
@@ -170,8 +173,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
   include_directories(/usr/local/include)
 endif()
 
-include(CompileBoost)
-include(GetMsgpack)
 add_subdirectory(contrib)
 add_subdirectory(flow)
 add_subdirectory(fdbrpc)

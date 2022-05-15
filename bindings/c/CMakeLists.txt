@@ -190,18 +190,14 @@ if(NOT WIN32)
   target_link_libraries(disconnected_timeout_unit_tests PRIVATE fdb_c Threads::Threads)
 
 if(USE_SANITIZER)
-  target_link_libraries(fdb_c_api_tester PRIVATE fdb_c toml11_target Threads::Threads fmt::fmt boost_asan)
+  target_link_libraries(fdb_c_api_tester PRIVATE fdb_c toml11::toml11 Threads::Threads fmt::fmt Boost::boost)
 else()
-  target_link_libraries(fdb_c_api_tester PRIVATE fdb_c toml11_target Threads::Threads fmt::fmt boost_target)
+  target_link_libraries(fdb_c_api_tester PRIVATE fdb_c toml11::toml11 Threads::Threads fmt::fmt Boost::boost)
 endif()
 
   # do not set RPATH for mako
   set_property(TARGET mako PROPERTY SKIP_BUILD_RPATH TRUE)
-  if (USE_SANITIZER)
-	target_link_libraries(mako PRIVATE fdb_c fdbclient fmt::fmt Threads::Threads fdb_cpp boost_asan)
-  else()
-	target_link_libraries(mako PRIVATE fdb_c fdbclient fmt::fmt Threads::Threads fdb_cpp boost_target)
-  endif()
+	target_link_libraries(mako PRIVATE fdb_c fdbclient fmt::fmt Threads::Threads fdb_cpp Boost::boost)
 
   if(NOT OPEN_FOR_IDE)
     # Make sure that fdb_c.h is compatible with c90
