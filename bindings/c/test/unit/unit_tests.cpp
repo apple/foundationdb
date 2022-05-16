@@ -181,8 +181,8 @@ struct GetMappedRangeResult {
 	                       std::string, // value
 	                       std::string, // begin
 	                       std::string, // end
-	                       std::vector<std::pair<std::string, std::string>> // range results
-	                       >>
+	                       std::vector<std::pair<std::string, std::string>>, // range results
+	                       fdb_bool_t>>
 	    mkvs;
 	// True if values remain in the key range requested.
 	bool more;
@@ -306,6 +306,7 @@ GetMappedRangeResult get_mapped_range(fdb::Transaction& tr,
 		auto value = extractString(mkv.value);
 		auto begin = extractString(mkv.getRange.begin.key);
 		auto end = extractString(mkv.getRange.end.key);
+		bool boundaryAndExist = mkv.boundaryAndExist;
 		//		std::cout << "key:" << key << " value:" << value << " begin:" << begin << " end:" << end << std::endl;
 
 		std::vector<std::pair<std::string, std::string>> range_results;
@@ -316,7 +317,7 @@ GetMappedRangeResult get_mapped_range(fdb::Transaction& tr,
 			range_results.emplace_back(k, v);
 			// std::cout << "[" << i << "]" << k << " -> " << v << std::endl;
 		}
-		result.mkvs.emplace_back(key, value, begin, end, range_results);
+		result.mkvs.emplace_back(key, value, begin, end, range_results, boundaryAndExist);
 	}
 	return result;
 }
@@ -1015,8 +1016,10 @@ TEST_CASE("fdb_transaction_get_mapped_range") {
 		CHECK(!result.more);
 
 		int id = beginId;
+		bool boundary;
 		for (int i = 0; i < expectSize; i++, id++) {
-			const auto& [key, value, begin, end, range_results] = result.mkvs[i];
+			boundary = i == 0 || i == expectSize - 1;
+			const auto& [key, value, begin, end, range_results, boundaryAndExist] = result.mkvs[i];
 			if (matchIndex == MATCH_INDEX_ALL || i == 0 || i == expectSize - 1) {
 				CHECK(indexEntryKey(id).compare(key) == 0);
 			} else if (matchIndex == MATCH_INDEX_MATCHED_ONLY) {
@@ -1032,6 +1035,10 @@ TEST_CASE("fdb_transaction_get_mapped_range") {
 			} else {
 				CHECK(EMPTY.compare(key) == 0);
 			}
+
+			// TODO: create tests to generate workloads with partial secondary results present
+			CHECK(boundaryAndExist == boundary);
+
 			CHECK(EMPTY.compare(value) == 0);
 			CHECK(range_results.size() == SPLIT_SIZE);
 			for (int split = 0; split < SPLIT_SIZE; split++) {
