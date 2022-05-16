@@ -35,26 +35,6 @@
 
 namespace mako {
 
-/* collect sampled latencies until OOM is hit */
-class LatencySampleBin {
-	DDSketch sketch;
-
-public:
-	void put(timediff_t td) {
-		const auto latency_us = toIntegerMicroseconds(td);
-		sketch.add(latency_us);
-	}
-
-	// iterate & apply for each block user function void(uint64_t const*, size_t)
-	void writeToFile(const std::string& filename) const {
-		rapidjson::StringBuffer ss;
-		rapidjson::Writer<rapidjson::StringBuffer> writer(ss);
-		sketch.serialize(writer);
-		std::ofstream f(filename);
-		f << ss.GetString();
-	}
-};
-
 class alignas(64) ThreadStatistics {
 	uint64_t conflicts;
 	uint64_t total_errors;
@@ -64,6 +44,7 @@ class alignas(64) ThreadStatistics {
 	uint64_t latency_us_total[MAX_OP];
 	uint64_t latency_us_min[MAX_OP];
 	uint64_t latency_us_max[MAX_OP];
+	DDSketch sketch;
 
 public:
 	ThreadStatistics() noexcept {
@@ -104,6 +85,7 @@ public:
 			if (latency_us_max[op] < other.latency_us_max[op])
 				latency_us_max[op] = other.latency_us_max[op];
 		}
+		sketch.merge(other.sketch);
 	}
 
 	void incrConflictCount() noexcept { conflicts++; }
@@ -118,6 +100,7 @@ public:
 
 	void addLatency(int op, timediff_t diff) noexcept {
 		const auto latency_us = toIntegerMicroseconds(diff);
+		sketch.add(latency_us);
 		latency_samples[op]++;
 		latency_us_total[op] += latency_us;
 		if (latency_us_min[op] > latency_us)
@@ -125,9 +108,15 @@ public:
 		if (latency_us_max[op] < latency_us)
 			latency_us_max[op] = latency_us;
 	}
-};
 
-using LatencySampleBinArray = std::array<LatencySampleBin, MAX_OP>;
+	void writeToFile(const std::string& filename) const {
+		rapidjson::StringBuffer ss;
+		rapidjson::Writer<rapidjson::StringBuffer> writer(ss);
+		sketch.serialize(writer);
+		std::ofstream f(filename);
+		f << ss.GetString();
+	}
+};
 
 } // namespace mako
 

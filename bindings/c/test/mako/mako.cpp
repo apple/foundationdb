@@ -64,7 +64,7 @@ struct alignas(64) ThreadArgs {
 	int worker_id;
 	int thread_id;
 	pid_t parent_id;
-	LatencySampleBinArray sample_bins;
+	ThreadStatistics stats;
 	Arguments const* args;
 	shared_memory::Access shm;
 	fdb::Database database; // database to work with
@@ -122,8 +122,7 @@ int populate(Transaction tx,
              int worker_id,
              int thread_id,
              int thread_tps,
-             ThreadStatistics& stats,
-             LatencySampleBinArray& sample_bins) {
+             ThreadStatistics& stats) {
 	const auto key_begin = insertBegin(args.rows, worker_id, thread_id, args.num_processes, args.num_threads);
 	const auto key_end = insertEnd(args.rows, worker_id, thread_id, args.num_processes, args.num_threads);
 	auto xacts = 0;
@@ -198,8 +197,6 @@ int populate(Transaction tx,
 				const auto tx_duration = watch_tx.diff();
 				stats.addLatency(OP_COMMIT, commit_latency);
 				stats.addLatency(OP_TRANSACTION, tx_duration);
-				sample_bins[OP_COMMIT].put(commit_latency);
-				sample_bins[OP_TRANSACTION].put(tx_duration);
 			}
 			stats.incrOpCount(OP_COMMIT);
 			stats.incrOpCount(OP_TRANSACTION);
@@ -220,7 +217,6 @@ int populate(Transaction tx,
 int runOneTransaction(Transaction& tx,
                       Arguments const& args,
                       ThreadStatistics& stats,
-                      LatencySampleBinArray& sample_bins,
                       ByteString& key1,
                       ByteString& key2,
                       ByteString& val) {
@@ -272,7 +268,6 @@ transaction_begin:
 			if (do_sample) {
 				const auto step_latency = watch_step.diff();
 				stats.addLatency(OP_COMMIT, step_latency);
-				sample_bins[OP_COMMIT].put(step_latency);
 			}
 			tx.reset();
 			stats.incrOpCount(OP_COMMIT);
@@ -287,7 +282,6 @@ transaction_begin:
 			if (do_sample) {
 				const auto op_latency = watch_op.diff();
 				stats.addLatency(op, op_latency);
-				sample_bins[op].put(op_latency);
 			}
 			stats.incrOpCount(op);
 		}
@@ -305,7 +299,6 @@ transaction_begin:
 			if (do_sample) {
 				const auto commit_latency = watch_commit.diff();
 				stats.addLatency(OP_COMMIT, commit_latency);
-				sample_bins[OP_COMMIT].put(commit_latency);
 			}
 			stats.incrOpCount(OP_COMMIT);
 		} else {
@@ -324,7 +317,6 @@ transaction_begin:
 	// one transaction has completed successfully
 	if (do_sample) {
 		const auto tx_duration = watch_tx.stop().diff();
-		sample_bins[OP_TRANSACTION].put(tx_duration);
 		stats.addLatency(OP_TRANSACTION, tx_duration);
 	}
 	stats.incrOpCount(OP_TRANSACTION);
@@ -340,7 +332,6 @@ int runWorkload(Transaction tx,
                 int const thread_iters,
                 std::atomic<int> const& signal,
                 ThreadStatistics& stats,
-                LatencySampleBinArray& sample_bins,
                 int const dotrace,
                 int const dotagging) {
 	auto traceid = std::string{};
@@ -422,7 +413,7 @@ int runWorkload(Transaction tx,
 			}
 		}
 
-		rc = runOneTransaction(tx, args, stats, sample_bins, key1, key2, val);
+		rc = runOneTransaction(tx, args, stats, key1, key2, val);
 		if (rc) {
 			logr.warn("runOneTransaction failed ({})", rc);
 		}
@@ -451,7 +442,7 @@ void dumpThreadSamples(Arguments const& args,
                        pid_t parent_id,
                        int worker_id,
                        int thread_id,
-                       const LatencySampleBinArray& sample_bins,
+                       const ThreadStatistics& stats,
                        bool overwrite = true) {
 	const auto dirname = fmt::format("{}{}", TEMP_DATA_STORE, parent_id);
 	const auto rc = mkdir(dirname.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
@@ -468,7 +459,7 @@ void dumpThreadSamples(Arguments const& args,
 				continue;
 			}
 			auto fclose_guard = ExitGuard([fp]() { fclose(fp); });
-			sample_bins[op].writeToFile(filename);
+			stats.writeToFile(filename);
 		}
 	}
 }
@@ -482,7 +473,7 @@ void runAsyncWorkload(Arguments const& args,
 	auto dump_samples = [&args, pid_main, worker_id](auto&& states) {
 		auto overwrite = true; /* overwrite or append */
 		for (const auto& state : states) {
-			dumpThreadSamples(args, pid_main, worker_id, 0 /*thread_id*/, state->sample_bins, overwrite);
+			dumpThreadSamples(args, pid_main, worker_id, 0 /*thread_id*/, state->stats, overwrite);
 			overwrite = false;
 		}
 	};
@@ -586,7 +577,7 @@ void workerThread(ThreadArgs& thread_args) {
 		usleep(10000); /* 10ms */
 	}
 
-	auto& sample_bins = thread_args.sample_bins;
+	auto& sample_stats = thread_args.stats;
 
 	if (args.mode == MODE_CLEAN) {
 		auto rc = cleanup(tx, args);
@@ -594,20 +585,19 @@ void workerThread(ThreadArgs& thread_args) {
 			logr.error("cleanup failed");
 		}
 	} else if (args.mode == MODE_BUILD) {
-		auto rc = populate(tx, args, worker_id, thread_id, thread_tps, stats, sample_bins);
+		auto rc = populate(tx, args, worker_id, thread_id, thread_tps, stats);
 		if (rc < 0) {
 			logr.error("populate failed");
 		}
 	} else if (args.mode == MODE_RUN) {
-		auto rc = runWorkload(
-		    tx, args, thread_tps, throttle_factor, thread_iters, signal, stats, sample_bins, dotrace, dotagging);
+		auto rc = runWorkload(tx, args, thread_tps, throttle_factor, thread_iters, signal, stats, dotrace, dotagging);
 		if (rc < 0) {
 			logr.error("runWorkload failed");
 		}
 	}
 
 	if (args.mode == MODE_BUILD || args.mode == MODE_RUN) {
-		dumpThreadSamples(args, parent_id, worker_id, thread_id, sample_bins);
+		dumpThreadSamples(args, parent_id, worker_id, thread_id, sample_stats);
 	}
 }
 
