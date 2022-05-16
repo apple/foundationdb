@@ -159,7 +159,6 @@ struct Peer : public ReferenceCounted<Peer> {
 	double lastConnectTime;
 	double reconnectionDelay;
 	int peerReferences;
-	bool incompatibleProtocolVersionNewer;
 	int64_t bytesReceived;
 	int64_t bytesSent;
 	double lastDataPacketSentTime;
