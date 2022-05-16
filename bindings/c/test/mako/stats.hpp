@@ -201,10 +201,6 @@ public:
 
 	void merge(const DDSketch& other) {
 		// what to do if we have different errorGurantees?
-		// if (errorGuarantee != other.errorGuarantee)
-		// {
-		// 	// ayo?
-		// }
 		maxValue = std::max(maxValue, other.maxValue);
 		minValue = std::min(minValue, other.minValue);
 		populationSize += other.populationSize;
