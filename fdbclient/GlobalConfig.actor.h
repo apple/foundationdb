@@ -33,7 +33,6 @@
 #include <unordered_map>
 
 #include "fdbclient/CommitProxyInterface.h"
-#include "fdbclient/DatabaseContext.h"
 #include "fdbclient/GlobalConfig.h"
 #include "fdbclient/ReadYourWrites.h"
 
