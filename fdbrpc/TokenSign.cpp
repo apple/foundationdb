@@ -37,6 +37,7 @@
 #include <openssl/err.h>
 #include <openssl/evp.h>
 #include <openssl/x509.h>
+#include <openssl/hmac.h>
 #include <fmt/format.h>
 #include <boost/archive/iterators/binary_from_base64.hpp>
 #include <boost/archive/iterators/base64_from_binary.hpp>
@@ -63,13 +64,7 @@ namespace {
 
 } // namespace
 
-Standalone<SignedAuthTokenRef> signToken(AuthTokenRef token, StringRef keyName, StringRef privateKeyDer) {
-	auto ret = Standalone<SignedAuthTokenRef>{};
-	auto& arena = ret.arena();
-	auto writer = ObjectWriter([&arena](size_t len) { return new (arena) uint8_t[len]; }, IncludeVersion());
-	writer.serialize(token);
-	auto tokenStr = writer.toStringRef();
-
+StringRef es256Sign(Arena& arena, StringRef str, StringRef privateKeyDer) {
 	auto rawPrivKeyDer = privateKeyDer.begin();
 	auto key = ::d2i_AutoPrivateKey(nullptr, &rawPrivKeyDer, privateKeyDer.size());
 	if (!key) {
@@ -82,7 +77,7 @@ Standalone<SignedAuthTokenRef> signToken(AuthTokenRef token, StringRef keyName, 
 	auto mdctxGuard = ScopeExit([mdctx]() { ::EVP_MD_CTX_free(mdctx); });
 	if (1 != ::EVP_DigestSignInit(mdctx, nullptr, ::EVP_sha256() /*Parameterize?*/, nullptr, key))
 		traceAndThrow("SignTokenInitFail");
-	if (1 != ::EVP_DigestSignUpdate(mdctx, tokenStr.begin(), tokenStr.size()))
+	if (1 != ::EVP_DigestSignUpdate(mdctx, str.begin(), str.size()))
 		traceAndThrow("SignTokenUpdateFail");
 	auto sigLen = size_t{};
 	if (1 != ::EVP_DigestSignFinal(mdctx, nullptr, &sigLen)) // assess the length first
@@ -90,13 +85,10 @@ Standalone<SignedAuthTokenRef> signToken(AuthTokenRef token, StringRef keyName, 
 	auto sigBuf = new (arena) uint8_t[sigLen];
 	if (1 != ::EVP_DigestSignFinal(mdctx, sigBuf, &sigLen))
 		traceAndThrow("SignTokenFinalizeFail");
-	ret.token = tokenStr;
-	ret.signature = StringRef(sigBuf, sigLen);
-	ret.keyName = StringRef(arena, keyName);
-	return ret;
+	return StringRef(sigBuf, sigLen);
 }
 
-bool verifyToken(SignedAuthTokenRef signedToken, StringRef publicKeyDer) {
+bool es256Verify(StringRef str, StringRef signature, StringRef publicKeyDer) {
 	auto rawPubKeyDer = publicKeyDer.begin();
 	auto key = ::d2i_PUBKEY(nullptr, &rawPubKeyDer, publicKeyDer.size());
 	if (!key)
@@ -108,9 +100,9 @@ bool verifyToken(SignedAuthTokenRef signedToken, StringRef publicKeyDer) {
 	auto mdctxGuard = ScopeExit([mdctx]() { ::EVP_MD_CTX_free(mdctx); });
 	if (1 != ::EVP_DigestVerifyInit(mdctx, nullptr, ::EVP_sha256(), nullptr, key))
 		traceAndThrow("VerifyTokenInitFail");
-	if (1 != ::EVP_DigestVerifyUpdate(mdctx, signedToken.token.begin(), signedToken.token.size()))
+	if (1 != ::EVP_DigestVerifyUpdate(mdctx, str.begin(), str.size()))
 		traceAndThrow("VerifyTokenUpdateFail");
-	if (1 != ::EVP_DigestVerifyFinal(mdctx, signedToken.signature.begin(), signedToken.signature.size())) {
+	if (1 != ::EVP_DigestVerifyFinal(mdctx, signature.begin(), signature.size())) {
 		auto te = TraceEvent(SevInfo, "VerifyTokenFail");
 		te.suppressFor(30);
 		if (auto err = ::ERR_get_error()) {
@@ -123,6 +115,67 @@ bool verifyToken(SignedAuthTokenRef signedToken, StringRef publicKeyDer) {
 		return false;
 	}
 	return true;
+}
+
+StringRef hmacSHA256Sign(Arena& arena, StringRef str, StringRef key) {
+	unsigned int mdLength = 256 / 8;
+	auto md = new (arena) uint8_t[mdLength];
+	::HMAC(::EVP_sha256(), key.begin(), key.size(), str.begin(), str.size(), md, &mdLength);
+	return StringRef(md, mdLength);
+}
+
+bool hmacSHA256Verify(StringRef str, StringRef signature, StringRef key) {
+	Arena arena;
+	auto res = hmacSHA256Sign(arena, str, key);
+	return signature == res;
+}
+
+enum class CryptAlgo { ES256, HMACSHA256 };
+
+StringRef sign(CryptAlgo algo, Arena arena, StringRef str, StringRef key) {
+	switch (algo) {
+	case CryptAlgo::ES256:
+		return es256Sign(arena, str, key);
+	case CryptAlgo::HMACSHA256:
+		return hmacSHA256Sign(arena, str, key);
+	}
+}
+
+bool verify(CryptAlgo algo, StringRef str, StringRef signature, StringRef key) {
+	switch (algo) {
+	case CryptAlgo::ES256:
+		return es256Verify(str, signature, key);
+	case CryptAlgo::HMACSHA256:
+		return hmacSHA256Verify(str, signature, key);
+	}
+}
+
+Standalone<SignedAuthTokenRef> signToken(CryptAlgo algo,
+                                         AuthTokenRef token,
+                                         StringRef keyName,
+                                         StringRef privateKeyDer) {
+	auto ret = Standalone<SignedAuthTokenRef>{};
+	auto& arena = ret.arena();
+	auto writer = ObjectWriter([&arena](size_t len) { return new (arena) uint8_t[len]; }, IncludeVersion());
+	writer.serialize(token);
+	auto tokenStr = writer.toStringRef();
+
+	ret.token = tokenStr;
+	ret.signature = sign(algo, arena, tokenStr, privateKeyDer);
+	ret.keyName = StringRef(arena, keyName);
+	return ret;
+}
+
+bool verifyToken(CryptAlgo algo, SignedAuthTokenRef signedToken, StringRef publicKeyDer) {
+	return verify(algo, signedToken.token, signedToken.signature, publicKeyDer);
+}
+
+bool verifyToken(SignedAuthTokenRef signedToken, StringRef publicKeyDer) {
+	return verifyToken(CryptAlgo::ES256, signedToken, publicKeyDer);
+}
+
+Standalone<SignedAuthTokenRef> signToken(AuthTokenRef token, StringRef keyName, StringRef privateKeyDer) {
+	return signToken(CryptAlgo::ES256, token, keyName, privateKeyDer);
 }
 
 void forceLinkTokenSignTests() {}
@@ -190,14 +243,35 @@ std::string encode64(const std::string& val) {
 }
 
 template <class GenFun, class ValidateFun>
-void tokenVerifyBench(GenFun& gen, ValidateFun& validate) {
+void tokenVerifyBench(CryptAlgo algo, GenFun& gen, ValidateFun& validate) {
 	constexpr int numTokens = 10'000;
 	constexpr double testTime = 10;
-	std::vector<decltype(gen())> tokens;
+	Arena arena;
+	mkcert::KeyPairRef keyPair;
+	switch (algo) {
+	case CryptAlgo::ES256:
+		keyPair = mkcert::KeyPairRef::make(arena);
+		break;
+	case CryptAlgo::HMACSHA256: {
+		// the following is not secure, but good enough for testing
+		// we create a 64 byte key
+		auto k = new (arena) uint8_t[64];
+		static_assert(64 % sizeof(double) == 0);
+		for (int i = 0; i < 64; i += sizeof(double)) {
+			double d = nondeterministicRandom()->random01();
+			memcpy(k + i, &d, sizeof(double));
+		}
+		StringRef key(k, 64);
+		keyPair.privateKeyDer = key;
+		keyPair.publicKeyDer = key;
+		break;
+	}
+	}
+	std::vector<decltype(gen(algo, keyPair.privateKeyDer))> tokens;
 	tokens.reserve(numTokens);
 	fmt::print("Generating tokens");
 	for (int i = 0; i < numTokens; ++i) {
-		tokens.push_back(gen());
+		tokens.push_back(gen(algo, keyPair.privateKeyDer));
 		if (i % 100 == 0) {
 			fmt::print(".");
 		}
@@ -210,7 +284,7 @@ void tokenVerifyBench(GenFun& gen, ValidateFun& validate) {
 	uint64_t lastPrintedIterations = 0;
 	while (startTime + testTime > currentTime) {
 		auto t = tokens[deterministicRandom()->randomInt(0, tokens.size())];
-		validate(t);
+		validate(algo, t, keyPair.publicKeyDer);
 		if (currentTime - printTime > 1.0) {
 			fmt::print("{}s validate {} tokens\n", currentTime - startTime, iterations - lastPrintedIterations);
 			lastPrintedIterations = iterations;
@@ -220,13 +294,30 @@ void tokenVerifyBench(GenFun& gen, ValidateFun& validate) {
 		++iterations;
 	}
 	double endTime = timer();
-	fmt::print("Validated {} tokens in {} seconds ({}/s)",
+	fmt::print("Validated {} tokens in {} seconds ({}/s)\n",
 	           iterations,
 	           endTime - startTime,
 	           iterations / (endTime - startTime));
 }
 
-Standalone<StringRef> createJWT(VectorRef<StringRef> tenants, double exp, StringRef keyName, StringRef privateKeyDer) {
+template <class GenFun, class ValidateFun>
+void tokenVerifyBench(GenFun& gen, ValidateFun& validate) {
+	fmt::print("ES256:\n");
+	fmt::print("======\n");
+	tokenVerifyBench(CryptAlgo::ES256, gen, validate);
+	fmt::print("\n");
+
+	fmt::print("HMAC-SHA256:\n");
+	fmt::print("============\n");
+	tokenVerifyBench(CryptAlgo::HMACSHA256, gen, validate);
+	fmt::print("\n");
+}
+
+Standalone<StringRef> createJWT(CryptAlgo algo,
+                                VectorRef<StringRef> tenants,
+                                double exp,
+                                StringRef keyName,
+                                StringRef key) {
 	rapidjson::StringBuffer headerSS, payloadSS;
 	rapidjson::Writer<rapidjson::StringBuffer> headerW(headerSS), payloadW(payloadSS);
 	headerW.StartObject();
@@ -260,31 +351,12 @@ Standalone<StringRef> createJWT(VectorRef<StringRef> tenants, double exp, String
 
 	auto unsignedToken = fmt::format("{}.{}", encode64(header), encode64(payload));
 
-	auto rawPrivKeyDer = privateKeyDer.begin();
-	auto key = ::d2i_AutoPrivateKey(nullptr, &rawPrivKeyDer, privateKeyDer.size());
-	if (!key) {
-		traceAndThrow("SignTokenBadKey");
-	}
-	auto keyGuard = ScopeExit([key]() { ::EVP_PKEY_free(key); });
-	auto mdctx = ::EVP_MD_CTX_create();
-	if (!mdctx)
-		traceAndThrow("SignTokenInitFail");
-	auto mdctxGuard = ScopeExit([mdctx]() { ::EVP_MD_CTX_free(mdctx); });
-	if (1 != ::EVP_DigestSignInit(mdctx, nullptr, ::EVP_sha256() /*Parameterize?*/, nullptr, key))
-		traceAndThrow("SignTokenInitFail");
-	if (1 != ::EVP_DigestSignUpdate(mdctx, unsignedToken.data(), unsignedToken.size()))
-		traceAndThrow("SignTokenUpdateFail");
-	auto sigLen = size_t{};
-	if (1 != ::EVP_DigestSignFinal(mdctx, nullptr, &sigLen)) // assess the length first
-		traceAndThrow("SignTokenGetSigLenFail");
-	std::string signature;
-	signature.resize(sigLen);
-	if (1 != ::EVP_DigestSignFinal(mdctx, reinterpret_cast<unsigned char*>(signature.data()), &sigLen))
-		traceAndThrow("SignTokenFinalizeFail");
+	Arena arena;
+	auto signature = sign(algo, arena, StringRef(unsignedToken), key).toString();
 	return Standalone<StringRef>(fmt::format("{}.{}.{}", encode64(header), encode64(payload), encode64(signature)));
 }
 
-bool verifyToken(StringRef token, StringRef publicKeyDer) {
+bool verifyToken(CryptAlgo algo, StringRef token, StringRef key) {
 	StringRef fullToken = token, header = token.eat("."_sr), payload = token.eat("."_sr), signature = token,
 	          headerPayload = fullToken.substr(0, fullToken.size() - signature.size() - 1);
 	// Parse the json. We currently won't do anything with it, but we need to benchmark the whole thing
@@ -294,32 +366,7 @@ bool verifyToken(StringRef token, StringRef publicKeyDer) {
 	payloadJ.Parse(payloadStr.data(), payloadStr.size());
 
 	std::string sig = decode64(signature.toString());
-	auto rawPubKeyDer = publicKeyDer.begin();
-	auto key = ::d2i_PUBKEY(nullptr, &rawPubKeyDer, publicKeyDer.size());
-	if (!key)
-		traceAndThrow("VerifyTokenBadKey");
-	auto keyGuard = ScopeExit([key]() { ::EVP_PKEY_free(key); });
-	auto mdctx = ::EVP_MD_CTX_create();
-	if (!mdctx)
-		traceAndThrow("VerifyTokenInitFail");
-	auto mdctxGuard = ScopeExit([mdctx]() { ::EVP_MD_CTX_free(mdctx); });
-	if (1 != ::EVP_DigestVerifyInit(mdctx, nullptr, ::EVP_sha256(), nullptr, key))
-		traceAndThrow("VerifyTokenInitFail");
-	if (1 != ::EVP_DigestVerifyUpdate(mdctx, headerPayload.begin(), headerPayload.size()))
-		traceAndThrow("VerifyTokenUpdateFail");
-	if (1 != ::EVP_DigestVerifyFinal(mdctx, reinterpret_cast<const unsigned char*>(sig.data()), sig.size())) {
-		auto te = TraceEvent(SevInfo, "VerifyTokenFail");
-		te.suppressFor(30);
-		if (auto err = ::ERR_get_error()) {
-			char buf[256]{
-				0,
-			};
-			::ERR_error_string_n(err, buf, sizeof(buf));
-			te.detail("OpenSSLError", buf);
-		}
-		return false;
-	}
-	return true;
+	return verify(algo, headerPayload, StringRef(sig), key);
 }
 
 } // namespace
@@ -327,16 +374,15 @@ bool verifyToken(StringRef token, StringRef publicKeyDer) {
 TEST_CASE("performance/authz/tokenverify/jwt") {
 	constexpr int numTenants = 10;
 	Arena arena;
-	auto keyPair = mkcert::KeyPairRef::make(arena);
 	VectorRef<StringRef> tenants;
 	for (int i = 0; i < numTenants; ++i) {
 		auto t = deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(4, 32));
 		tenants.push_back(arena, StringRef(arena, t));
 	}
-	auto genToken = [&tenants, keyPair]() {
-		return createJWT(tenants, timer() + 100.0, "defaultKey"_sr, keyPair.privateKeyDer);
+	auto genToken = [&tenants](CryptAlgo algo, StringRef key) {
+		return createJWT(algo, tenants, timer() + 100.0, "defaultKey"_sr, key);
 	};
-	auto verifyFun = [keyPair](StringRef token) { return verifyToken(token, keyPair.publicKeyDer); };
+	auto verifyFun = [](CryptAlgo algo, StringRef token, StringRef key) { return verifyToken(algo, token, key); };
 	tokenVerifyBench(genToken, verifyFun);
 	return Void();
 }
@@ -344,13 +390,12 @@ TEST_CASE("performance/authz/tokenverify/jwt") {
 TEST_CASE("performance/authz/tokenverify/flatbuffers") {
 	constexpr int numTenants = 10;
 	Arena arena;
-	auto keyPair = mkcert::KeyPairRef::make(arena);
 	VectorRef<StringRef> tenants;
 	for (int i = 0; i < numTenants; ++i) {
 		auto t = deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(4, 32));
 		tenants.push_back(arena, StringRef(arena, t));
 	}
-	auto genToken = [&tenants, keyPair]() {
+	auto genToken = [&tenants](CryptAlgo algo, StringRef key) {
 		Arena a;
 		AuthTokenRef token;
 		token.expiresAt = timer() + 100.0;
@@ -358,13 +403,13 @@ TEST_CASE("performance/authz/tokenverify/flatbuffers") {
 		for (int i = 0; i < numTenants; ++i) {
 			token.tenants.push_back(a, tenants[deterministicRandom()->randomInt(0, tenants.size())]);
 		}
-		auto signedToken = signToken(token, "defaultKey"_sr, keyPair.privateKeyDer);
+		auto signedToken = signToken(algo, token, "defaultKey"_sr, key);
 		return ObjectWriter::toValue(signedToken, AssumeVersion(g_network->protocolVersion()));
 	};
-	auto verifyFun = [keyPair](StringRef token) {
+	auto verifyFun = [](CryptAlgo algo, StringRef token, StringRef key) {
 		auto signedToken = ObjectReader::fromStringRef<Standalone<SignedAuthTokenRef>>(
 		    token, AssumeVersion(g_network->protocolVersion()));
-		return verifyToken(signedToken, keyPair.publicKeyDer);
+		return verifyToken(algo, signedToken, key);
 	};
 	tokenVerifyBench(genToken, verifyFun);
 	return Void();
