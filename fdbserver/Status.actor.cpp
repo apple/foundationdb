@@ -2186,11 +2186,9 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(
 
 		statusObj["transactions"] = transactions;
 
-		uint64_t numTenants = 0;
 		if (commitProxyStats.size() > 0) {
-			numTenants = commitProxyStats[0].getUint64("NumTenants");
+			(*tenants)["num_tenants"] = commitProxyStats[0].getUint64("NumTenants");
 		}
-		(*tenants)["num_tenants"] = numTenants;
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
 			throw;
