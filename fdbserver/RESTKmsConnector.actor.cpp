@@ -18,13 +18,14 @@
  * limitations under the License.
  */
 
+#include <rapidjson/document.h>
+#include <rapidjson/rapidjson.h>
+#include <rapidjson/stringbuffer.h>
+#include <rapidjson/writer.h>
+
 #include "fdbserver/RESTKmsConnector.h"
 
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/rapidjson/document.h"
-#include "fdbclient/rapidjson/rapidjson.h"
-#include "fdbclient/rapidjson/stringbuffer.h"
-#include "fdbclient/rapidjson/writer.h"
 #include "fdbrpc/HTTP.h"
 #include "fdbrpc/IAsyncFile.h"
 #include "fdbserver/KmsConnectorInterface.h"

@@ -37,6 +37,14 @@
 #include <openssl/err.h>
 #include <openssl/evp.h>
 #include <openssl/x509.h>
+#include <fmt/format.h>
+#include <boost/archive/iterators/binary_from_base64.hpp>
+#include <boost/archive/iterators/base64_from_binary.hpp>
+#include <boost/archive/iterators/transform_width.hpp>
+#include <boost/algorithm/string.hpp>
+#include <rapidjson/document.h>
+#include <rapidjson/writer.h>
+#include <rapidjson/stringbuffer.h>
 
 namespace {
 
@@ -162,5 +170,202 @@ TEST_CASE("/fdbrpc/TokenSign") {
 		ASSERT(!verifyExpectFail);
 	}
 	printf("%d runs OK\n", numIters);
+	return Void();
+}
+
+namespace {
+
+std::string decode64(const std::string& val) {
+	using namespace boost::archive::iterators;
+	using It = transform_width<binary_from_base64<std::string::const_iterator>, 8, 6>;
+	return boost::algorithm::trim_right_copy_if(std::string(It(std::begin(val)), It(std::end(val))),
+	                                            [](char c) { return c == '\0'; });
+}
+
+std::string encode64(const std::string& val) {
+	using namespace boost::archive::iterators;
+	using It = base64_from_binary<transform_width<std::string::const_iterator, 6, 8>>;
+	auto tmp = std::string(It(std::begin(val)), It(std::end(val)));
+	return tmp.append((3 - val.size() % 3) % 3, '=');
+}
+
+template <class GenFun, class ValidateFun>
+void tokenVerifyBench(GenFun& gen, ValidateFun& validate) {
+	constexpr int numTokens = 10'000;
+	constexpr double testTime = 10;
+	std::vector<decltype(gen())> tokens;
+	tokens.reserve(numTokens);
+	fmt::print("Generating tokens");
+	for (int i = 0; i < numTokens; ++i) {
+		tokens.push_back(gen());
+		if (i % 100 == 0) {
+			fmt::print(".");
+		}
+	}
+	fmt::print("\n");
+	auto startTime = timer();
+	auto printTime = startTime;
+	double currentTime = startTime;
+	uint64_t iterations = 0;
+	uint64_t lastPrintedIterations = 0;
+	while (startTime + testTime > currentTime) {
+		auto t = tokens[deterministicRandom()->randomInt(0, tokens.size())];
+		validate(t);
+		if (currentTime - printTime > 1.0) {
+			fmt::print("{}s validate {} tokens\n", currentTime - startTime, iterations - lastPrintedIterations);
+			lastPrintedIterations = iterations;
+			printTime = currentTime;
+		}
+		currentTime = timer();
+		++iterations;
+	}
+	double endTime = timer();
+	fmt::print("Validated {} tokens in {} seconds ({}/s)",
+	           iterations,
+	           endTime - startTime,
+	           iterations / (endTime - startTime));
+}
+
+Standalone<StringRef> createJWT(VectorRef<StringRef> tenants, double exp, StringRef keyName, StringRef privateKeyDer) {
+	rapidjson::StringBuffer headerSS, payloadSS;
+	rapidjson::Writer<rapidjson::StringBuffer> headerW(headerSS), payloadW(payloadSS);
+	headerW.StartObject();
+
+	headerW.String("typ");
+	headerW.String("JWT");
+
+	headerW.String("alg");
+	headerW.String("ES256");
+
+	headerW.EndObject();
+
+	payloadW.StartObject();
+
+	payloadW.String("exp");
+	payloadW.Double(exp);
+
+	payloadW.String("keyName");
+	payloadW.String(reinterpret_cast<const char*>(keyName.begin()), keyName.size());
+
+	payloadW.String("tenants");
+	payloadW.StartArray();
+	for (auto tenant : tenants) {
+		payloadW.String(reinterpret_cast<const char*>(tenant.begin()), tenant.size());
+	}
+	payloadW.EndArray();
+
+	payloadW.EndObject();
+
+	std::string header = headerSS.GetString(), payload = payloadSS.GetString();
+
+	auto unsignedToken = fmt::format("{}.{}", encode64(header), encode64(payload));
+
+	auto rawPrivKeyDer = privateKeyDer.begin();
+	auto key = ::d2i_AutoPrivateKey(nullptr, &rawPrivKeyDer, privateKeyDer.size());
+	if (!key) {
+		traceAndThrow("SignTokenBadKey");
+	}
+	auto keyGuard = ScopeExit([key]() { ::EVP_PKEY_free(key); });
+	auto mdctx = ::EVP_MD_CTX_create();
+	if (!mdctx)
+		traceAndThrow("SignTokenInitFail");
+	auto mdctxGuard = ScopeExit([mdctx]() { ::EVP_MD_CTX_free(mdctx); });
+	if (1 != ::EVP_DigestSignInit(mdctx, nullptr, ::EVP_sha256() /*Parameterize?*/, nullptr, key))
+		traceAndThrow("SignTokenInitFail");
+	if (1 != ::EVP_DigestSignUpdate(mdctx, unsignedToken.data(), unsignedToken.size()))
+		traceAndThrow("SignTokenUpdateFail");
+	auto sigLen = size_t{};
+	if (1 != ::EVP_DigestSignFinal(mdctx, nullptr, &sigLen)) // assess the length first
+		traceAndThrow("SignTokenGetSigLenFail");
+	std::string signature;
+	signature.resize(sigLen);
+	if (1 != ::EVP_DigestSignFinal(mdctx, reinterpret_cast<unsigned char*>(signature.data()), &sigLen))
+		traceAndThrow("SignTokenFinalizeFail");
+	return Standalone<StringRef>(fmt::format("{}.{}.{}", encode64(header), encode64(payload), encode64(signature)));
+}
+
+bool verifyToken(StringRef token, StringRef publicKeyDer) {
+	StringRef fullToken = token, header = token.eat("."_sr), payload = token.eat("."_sr), signature = token,
+	          headerPayload = fullToken.substr(0, fullToken.size() - signature.size() - 1);
+	// Parse the json. We currently won't do anything with it, but we need to benchmark the whole thing
+	rapidjson::Document headerJ, payloadJ;
+	std::string headerStr = decode64(header.toString()), payloadStr = decode64(payload.toString());
+	headerJ.Parse(headerStr.data(), headerStr.size());
+	payloadJ.Parse(payloadStr.data(), payloadStr.size());
+
+	std::string sig = decode64(signature.toString());
+	auto rawPubKeyDer = publicKeyDer.begin();
+	auto key = ::d2i_PUBKEY(nullptr, &rawPubKeyDer, publicKeyDer.size());
+	if (!key)
+		traceAndThrow("VerifyTokenBadKey");
+	auto keyGuard = ScopeExit([key]() { ::EVP_PKEY_free(key); });
+	auto mdctx = ::EVP_MD_CTX_create();
+	if (!mdctx)
+		traceAndThrow("VerifyTokenInitFail");
+	auto mdctxGuard = ScopeExit([mdctx]() { ::EVP_MD_CTX_free(mdctx); });
+	if (1 != ::EVP_DigestVerifyInit(mdctx, nullptr, ::EVP_sha256(), nullptr, key))
+		traceAndThrow("VerifyTokenInitFail");
+	if (1 != ::EVP_DigestVerifyUpdate(mdctx, headerPayload.begin(), headerPayload.size()))
+		traceAndThrow("VerifyTokenUpdateFail");
+	if (1 != ::EVP_DigestVerifyFinal(mdctx, reinterpret_cast<const unsigned char*>(sig.data()), sig.size())) {
+		auto te = TraceEvent(SevInfo, "VerifyTokenFail");
+		te.suppressFor(30);
+		if (auto err = ::ERR_get_error()) {
+			char buf[256]{
+				0,
+			};
+			::ERR_error_string_n(err, buf, sizeof(buf));
+			te.detail("OpenSSLError", buf);
+		}
+		return false;
+	}
+	return true;
+}
+
+} // namespace
+
+TEST_CASE("performance/authz/tokenverify/jwt") {
+	constexpr int numTenants = 10;
+	Arena arena;
+	auto keyPair = mkcert::KeyPairRef::make(arena);
+	VectorRef<StringRef> tenants;
+	for (int i = 0; i < numTenants; ++i) {
+		auto t = deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(4, 32));
+		tenants.push_back(arena, StringRef(arena, t));
+	}
+	auto genToken = [&tenants, keyPair]() {
+		return createJWT(tenants, timer() + 100.0, "defaultKey"_sr, keyPair.privateKeyDer);
+	};
+	auto verifyFun = [keyPair](StringRef token) { return verifyToken(token, keyPair.publicKeyDer); };
+	tokenVerifyBench(genToken, verifyFun);
+	return Void();
+}
+
+TEST_CASE("performance/authz/tokenverify/flatbuffers") {
+	constexpr int numTenants = 10;
+	Arena arena;
+	auto keyPair = mkcert::KeyPairRef::make(arena);
+	VectorRef<StringRef> tenants;
+	for (int i = 0; i < numTenants; ++i) {
+		auto t = deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(4, 32));
+		tenants.push_back(arena, StringRef(arena, t));
+	}
+	auto genToken = [&tenants, keyPair]() {
+		Arena a;
+		AuthTokenRef token;
+		token.expiresAt = timer() + 100.0;
+		auto numTenants = deterministicRandom()->randomInt(1, 2);
+		for (int i = 0; i < numTenants; ++i) {
+			token.tenants.push_back(a, tenants[deterministicRandom()->randomInt(0, tenants.size())]);
+		}
+		auto signedToken = signToken(token, "defaultKey"_sr, keyPair.privateKeyDer);
+		return ObjectWriter::toValue(signedToken, AssumeVersion(g_network->protocolVersion()));
+	};
+	auto verifyFun = [keyPair](StringRef token) {
+		auto signedToken = ObjectReader::fromStringRef<Standalone<SignedAuthTokenRef>>(
+		    token, AssumeVersion(g_network->protocolVersion()));
+		return verifyToken(signedToken, keyPair.publicKeyDer);
+	};
+	tokenVerifyBench(genToken, verifyFun);
 	return Void();
 }

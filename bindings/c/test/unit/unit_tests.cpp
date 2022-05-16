@@ -40,7 +40,7 @@
 
 #define DOCTEST_CONFIG_IMPLEMENT
 #include "doctest.h"
-#include "fdbclient/rapidjson/document.h"
+#include <rapidjson/document.h>
 #include "fdbclient/Tuple.h"
 
 #include "flow/config.h"
