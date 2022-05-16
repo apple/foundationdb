@@ -43,6 +43,7 @@
 #include <fmt/format.h>
 #include <fmt/printf.h>
 #include <fdb_api.hpp>
+#include <unordered_map>
 #include "fdbclient/zipf.h"
 
 #include "async.hpp"
@@ -1658,7 +1659,7 @@ void printReport(Arguments const& args,
 	}
 	fmt::print("\n");
 
-	auto data_points = std::array<DDSketch, MAX_OP>{};
+	std::unordered_map<std::string, DDSketch> data_points;
 
 	/* Median Latency */
 	if (fp) {
@@ -1667,13 +1668,13 @@ void printReport(Arguments const& args,
 	putTitle("Median");
 	first_op = 1;
 	for (auto op = 0; op < MAX_OP; op++) {
+		std::string op_name = getOpName(op);
 		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
 			const auto lat_total = final_stats.getLatencyUsTotal(op);
 			const auto lat_samples = final_stats.getLatencySampleCount(op);
-			// data_points[op].reserve(lat_samples);
 			if (lat_total && lat_samples) {
 				for (auto i = 0; i < args.num_processes; i++) {
-					auto load_sample = [pid_main, op, &data_points](int process_id, int thread_id) {
+					auto load_sample = [pid_main, op, &data_points, &op_name](int process_id, int thread_id) {
 						const auto dirname = fmt::format("{}{}", TEMP_DATA_STORE, pid_main);
 						const auto filename = getStatsFilename(dirname, process_id, thread_id, op);
 						std::ifstream fp{ filename };
@@ -1686,7 +1687,11 @@ void printReport(Arguments const& args,
 							logr.error("Couldn't parse JSON from {}", filename);
 						}
 						sketch.deserialize(doc);
-						data_points[op].merge(sketch);
+						if (data_points.count(op_name)) {
+							data_points[op_name].merge(sketch);
+						} else {
+							data_points[op_name] = sketch;
+						}
 					};
 					if (args.async_xacts == 0) {
 						for (auto j = 0; j < args.num_threads; j++) {
@@ -1698,7 +1703,7 @@ void printReport(Arguments const& args,
 					}
 				}
 
-				auto median = std::ceil(data_points[op].percentile(0.5) * 100) / 100;
+				auto median = std::ceil(data_points[op_name].percentile(0.5) * 100) / 100;
 				putField(median);
 				if (fp) {
 					if (first_op) {
@@ -1722,12 +1727,13 @@ void printReport(Arguments const& args,
 	putTitle("95.0 pctile");
 	first_op = 1;
 	for (auto op = 0; op < MAX_OP; op++) {
+		std::string op_name = getOpName(op);
 		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
-			if (!data_points[op].getPopulationSize() || !final_stats.getLatencyUsTotal(op)) {
+			if (!data_points[op_name].getPopulationSize() || !final_stats.getLatencyUsTotal(op)) {
 				putField("N/A");
 				continue;
 			}
-			const auto point_95pct = std::ceil(data_points[op].percentile(0.95) * 100) / 100;
+			const auto point_95pct = std::ceil(data_points[op_name].percentile(0.95) * 100) / 100;
 			putField(point_95pct);
 			if (fp) {
 				if (first_op) {
@@ -1748,12 +1754,13 @@ void printReport(Arguments const& args,
 	putTitle("99.0 pctile");
 	first_op = 1;
 	for (auto op = 0; op < MAX_OP; op++) {
+		std::string op_name = getOpName(op);
 		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
-			if (!data_points[op].getPopulationSize() || !final_stats.getLatencyUsTotal(op)) {
+			if (!data_points[op_name].getPopulationSize() || !final_stats.getLatencyUsTotal(op)) {
 				putField("N/A");
 				continue;
 			}
-			const auto point_99pct = std::ceil(data_points[op].percentile(0.99) * 100) / 100;
+			const auto point_99pct = std::ceil(data_points[op_name].percentile(0.99) * 100) / 100;
 			putField(point_99pct);
 			if (fp) {
 				if (first_op) {
@@ -1774,12 +1781,13 @@ void printReport(Arguments const& args,
 	putTitle("99.9 pctile");
 	first_op = 1;
 	for (auto op = 0; op < MAX_OP; op++) {
+		std::string op_name = getOpName(op);
 		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
-			if (!data_points[op].getPopulationSize() || !final_stats.getLatencyUsTotal(op)) {
+			if (!data_points[op_name].getPopulationSize() || !final_stats.getLatencyUsTotal(op)) {
 				putField("N/A");
 				continue;
 			}
-			const auto point_99_9pct = std::ceil(data_points[op].percentile(0.999) * 100) / 100;
+			const auto point_99_9pct = std::ceil(data_points[op_name].percentile(0.999) * 100) / 100;
 			putField(point_99_9pct);
 			if (fp) {
 				if (first_op) {
@@ -1800,11 +1808,13 @@ void printReport(Arguments const& args,
 	if (!args.stats_export_path.empty()) {
 		rapidjson::StringBuffer ss;
 		rapidjson::Writer<rapidjson::StringBuffer> writer(ss);
-		writer.StartArray();
+		writer.StartObject();
 		for (auto op = 0; op < MAX_OP; op++) {
-			data_points[op].serialize(writer);
+			std::string op_name = getOpName(op);
+			writer.String(op_name.c_str());
+			data_points[op_name].serialize(writer);
 		}
-		writer.EndArray();
+		writer.EndObject();
 		std::ofstream f(args.stats_export_path);
 		f << ss.GetString();
 	}
@@ -1950,7 +1960,7 @@ int statsProcessMain(Arguments const& args,
 
 bool mergeSketchReport(Arguments& args) {
 
-	std::array<DDSketch, MAX_OP> sketches;
+	std::unordered_map<std::string, DDSketch> sketches;
 	for (auto& filename : args.report_files) {
 		std::ifstream f{ filename };
 		std::stringstream buffer;
@@ -1966,21 +1976,22 @@ bool mergeSketchReport(Arguments& args) {
 			return false;
 		}
 
-		int pos = 0;
-		for (auto it = doc.Begin(); it != doc.End(); it++) {
-			DDSketch d;
-			d.deserialize(*it);
-			sketches[pos].merge(d);
-			pos++;
-		}
+		// for (auto it = doc.Begin(); it != doc.End(); it++) {
+		// 	DDSketch d;
+		// 	d.deserialize(*it);
+		// 	if (sketches.coun)
+		// 		sketches[pos].merge(d);
+		// }
 	}
 	rapidjson::StringBuffer ss;
 	rapidjson::Writer<rapidjson::StringBuffer> writer(ss);
-	writer.StartArray();
+	writer.StartObject();
 	for (auto op = 0; op < MAX_OP; op++) {
-		sketches[op].serialize(writer);
+		std::string op_name = getOpName(op);
+		writer.String(op_name.c_str());
+		sketches[op_name].serialize(writer);
 	}
-	writer.EndArray();
+	writer.EndObject();
 	std::ofstream f("merged_report.json");
 	f << ss.GetString();
 	return true;
