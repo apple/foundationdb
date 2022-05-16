@@ -5345,9 +5345,8 @@ ACTOR Future<Version> fetchChangeFeed(StorageServer* data,
 			    .detail("Range", changeFeedInfo->range.toString())
 			    .detail("Version", cleanupVersion);
 
-			if (g_network->isSimulated()) {
-				ASSERT(allDestroyedChangeFeeds.count(changeFeedInfo->id));
-			}
+			// FIXME: do simulated validation that feed was destroyed, but needs to be added when client starts
+			// destroying a change feed instead of when server recieves private mutation for it
 
 			Key beginClearKey = changeFeedInfo->id.withPrefix(persistChangeFeedKeys.begin);
 
