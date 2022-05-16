@@ -1802,12 +1802,15 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueueData* self, int teamCollectionIndex,
 				moved ? resetCount = 0 : resetCount++;
 			}
 
-			if (now() - (*self->lastLimited) < SERVER_KNOBS->BG_DD_SATURATION_DELAY) {
-				rebalancePollingInterval = std::min(SERVER_KNOBS->BG_DD_MAX_WAIT,
-				                                    rebalancePollingInterval * SERVER_KNOBS->BG_DD_INCREASE_RATE);
-			} else {
-				rebalancePollingInterval = std::max(SERVER_KNOBS->BG_DD_MIN_WAIT,
-				                                    rebalancePollingInterval / SERVER_KNOBS->BG_DD_DECREASE_RATE);
+			// NOTE: We don’t want read rebalancing to be slowed down when Ratekeeper kicks in
+			if(isDiskRebalancePriority(ddPriority)) {
+				if (now() - (*self->lastLimited) < SERVER_KNOBS->BG_DD_SATURATION_DELAY) {
+					rebalancePollingInterval = std::min(SERVER_KNOBS->BG_DD_MAX_WAIT,
+					                                    rebalancePollingInterval * SERVER_KNOBS->BG_DD_INCREASE_RATE);
+				} else {
+					rebalancePollingInterval = std::max(SERVER_KNOBS->BG_DD_MIN_WAIT,
+					                                    rebalancePollingInterval / SERVER_KNOBS->BG_DD_DECREASE_RATE);
+				}
 			}
 
 			if (resetCount >= SERVER_KNOBS->DD_REBALANCE_RESET_AMOUNT &&
