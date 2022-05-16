@@ -205,7 +205,7 @@ set(DEFAULT_COROUTINE_IMPL boost)
 if(WIN32)
   # boost coroutine not available in windows build environment for now.
   set(DEFAULT_COROUTINE_IMPL libcoro)
-elseif(NOT APPLE AND NOT USE_SANITIZER AND CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^x86")
+elseif(NOT APPLE AND NOT USE_ASAN AND CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^x86")
   # revert to libcoro for x86 linux while we investigate a performance regression
   set(DEFAULT_COROUTINE_IMPL libcoro)
 endif()
