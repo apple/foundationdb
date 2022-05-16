@@ -645,6 +645,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		// All management api related tests
 		state Database cx = cx_->clone();
 		state Reference<ReadYourWritesTransaction> tx = makeReference<ReadYourWritesTransaction>(cx);
+		wait(cx->globalConfig->onInitialized());
 		// test ordered option keys
 		{
 			tx->setOption(FDBTransactionOptions::RAW_ACCESS);
@@ -1181,7 +1182,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				    wait(tx->get(LiteralStringRef("client_txn_sample_rate")
 				                     .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("profile"))));
 				ASSERT(txnSampleRate.present());
-				Optional<Value> txnSampleRateKey = wait(tx->get(fdbClientInfoTxnSampleRate));
+				Optional<Value> txnSampleRateKey = wait(tx->get(GlobalConfig::prefixedKey(fdbClientInfoTxnSampleRate)));
 				if (txnSampleRateKey.present()) {
 					const double sampleRateDbl =
 					    BinaryReader::fromStringRef<double>(txnSampleRateKey.get(), Unversioned());
@@ -1198,7 +1199,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				    wait(tx->get(LiteralStringRef("client_txn_size_limit")
 				                     .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("profile"))));
 				ASSERT(txnSizeLimit.present());
-				Optional<Value> txnSizeLimitKey = wait(tx->get(fdbClientInfoTxnSizeLimit));
+				Optional<Value> txnSizeLimitKey = wait(tx->get(GlobalConfig::prefixedKey(fdbClientInfoTxnSizeLimit)));
 				if (txnSizeLimitKey.present()) {
 					const int64_t sizeLimit =
 					    BinaryReader::fromStringRef<int64_t>(txnSizeLimitKey.get(), Unversioned());
@@ -1241,13 +1242,18 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			// commit successfully, verify the system key changed
 			loop {
 				try {
-					tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-					Optional<Value> sampleRate = wait(tx->get(fdbClientInfoTxnSampleRate));
+					state Optional<Value> sampleRate =
+					    wait(tx->get(GlobalConfig::prefixedKey(fdbClientInfoTxnSampleRate)));
+					if (!sampleRate.present()) {
+						// Wait for GlobalConfig synchronization
+						wait(delayJittered(1.0));
+						continue;
+					}
 					ASSERT(sampleRate.present());
-					ASSERT(r_sample_rate == BinaryReader::fromStringRef<double>(sampleRate.get(), Unversioned()));
-					Optional<Value> sizeLimit = wait(tx->get(fdbClientInfoTxnSizeLimit));
+					ASSERT_LT(r_sample_rate - boost::lexical_cast<double>(sampleRate.get().toString()), 0.001);
+					Optional<Value> sizeLimit = wait(tx->get(GlobalConfig::prefixedKey(fdbClientInfoTxnSizeLimit)));
 					ASSERT(sizeLimit.present());
-					ASSERT(r_size_limit == BinaryReader::fromStringRef<int64_t>(sizeLimit.get(), Unversioned()));
+					ASSERT(r_size_limit == boost::lexical_cast<int64_t>(sizeLimit.get().toString()));
 					tx->reset();
 					break;
 				} catch (Error& e) {
