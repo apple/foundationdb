@@ -155,45 +155,52 @@ void GlobalConfig::erase(KeyRangeRef range) {
 // function performs a one-time migration of data in these keys to the new
 // global configuration key space.
 ACTOR Future<Void> GlobalConfig::migrate(GlobalConfig* self) {
-	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
-	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-
-	state Key migratedKey("\xff\x02/fdbClientInfo/migrated/"_sr);
-	state Optional<Value> migrated = wait(tr->get(migratedKey));
-	if (migrated.present()) {
-		// Already performed migration.
-		return Void();
-	}
-
-	state Optional<Value> sampleRate = wait(tr->get(Key("\xff\x02/fdbClientInfo/client_txn_sample_rate/"_sr)));
-	state Optional<Value> sizeLimit = wait(tr->get(Key("\xff\x02/fdbClientInfo/client_txn_size_limit/"_sr)));
-
+	state Reference<ReadYourWritesTransaction> tr;
 	try {
-		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-		// The value doesn't matter too much, as long as the key is set.
-		tr->set(migratedKey.contents(), "1"_sr);
-		if (sampleRate.present()) {
-			const double sampleRateDbl =
-			    BinaryReader::fromStringRef<double>(sampleRate.get().contents(), Unversioned());
-			Tuple rate = Tuple().appendDouble(sampleRateDbl);
-			tr->set(GlobalConfig::prefixedKey(fdbClientInfoTxnSampleRate), rate.pack());
-		}
-		if (sizeLimit.present()) {
-			const int64_t sizeLimitInt =
-			    BinaryReader::fromStringRef<int64_t>(sizeLimit.get().contents(), Unversioned());
-			Tuple size = Tuple().append(sizeLimitInt);
-			tr->set(GlobalConfig::prefixedKey(fdbClientInfoTxnSizeLimit), size.pack());
-		}
+		loop {
+			tr = makeReference<ReadYourWritesTransaction>(Database(Reference<DatabaseContext>::addRef(self->cx)));
+			wait(delay(0));
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
-		wait(tr->commit());
+			try {
+				state Key migratedKey("\xff\x02/fdbClientInfo/migrated/"_sr);
+				state Optional<Value> migrated = wait(tr->get(migratedKey));
+				if (migrated.present()) {
+					// Already performed migration.
+					return Void();
+				}
+
+				state Optional<Value> sampleRate =
+				    wait(tr->get(Key("\xff\x02/fdbClientInfo/client_txn_sample_rate/"_sr)));
+				state Optional<Value> sizeLimit =
+				    wait(tr->get(Key("\xff\x02/fdbClientInfo/client_txn_size_limit/"_sr)));
+
+				tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+				// The value doesn't matter too much, as long as the key is set.
+				tr->set(migratedKey.contents(), "1"_sr);
+				if (sampleRate.present()) {
+					const double sampleRateDbl =
+					    BinaryReader::fromStringRef<double>(sampleRate.get().contents(), Unversioned());
+					Tuple rate = Tuple().appendDouble(sampleRateDbl);
+					tr->set(GlobalConfig::prefixedKey(fdbClientInfoTxnSampleRate), rate.pack());
+				}
+				if (sizeLimit.present()) {
+					const int64_t sizeLimitInt =
+					    BinaryReader::fromStringRef<int64_t>(sizeLimit.get().contents(), Unversioned());
+					Tuple size = Tuple().append(sizeLimitInt);
+					tr->set(GlobalConfig::prefixedKey(fdbClientInfoTxnSizeLimit), size.pack());
+				}
+
+				wait(tr->commit());
+				break;
+			} catch (Error& e) {
+				TraceEvent(SevInfo, "GlobalConfig_MigrationError").error(e);
+				wait(tr->onError(e));
+			}
+		}
 	} catch (Error& e) {
-		// If multiple fdbserver processes are started at once, they will all
-		// attempt this migration at the same time, sometimes resulting in
-		// aborts due to conflicts. Purposefully avoid retrying, making this
-		// migration best-effort.
-		TraceEvent(SevInfo, "GlobalConfig_MigrationError").detail("What", e.what());
+		// Catch non-retryable errors (and do nothing).
 	}
-
 	return Void();
 }
 
@@ -203,12 +210,20 @@ ACTOR Future<Void> GlobalConfig::refresh(GlobalConfig* self) {
 	// TraceEvent trace(SevInfo, "GlobalConfig_Refresh");
 	self->erase(KeyRangeRef(""_sr, "\xff"_sr));
 
-	Transaction tr(self->cx);
-	tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-	RangeResult result = wait(tr.getRange(globalConfigDataKeys, CLIENT_KNOBS->TOO_MANY));
-	for (const auto& kv : result) {
-		KeyRef systemKey = kv.key.removePrefix(globalConfigKeysPrefix);
-		self->insert(systemKey, kv.value);
+	state Transaction tr(self->cx);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			RangeResult result = wait(tr.getRange(globalConfigDataKeys, CLIENT_KNOBS->TOO_MANY));
+			for (const auto& kv : result) {
+				KeyRef systemKey = kv.key.removePrefix(globalConfigKeysPrefix);
+				self->insert(systemKey, kv.value);
+			}
+			break;
+		} catch (Error& e) {
+			TraceEvent("GlobalConfigRefreshError").errorUnsuppressed(e).suppressFor(1.0);
+			wait(tr.onError(e));
+		}
 	}
 	return Void();
 }
