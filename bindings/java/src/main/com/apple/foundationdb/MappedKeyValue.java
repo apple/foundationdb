@@ -22,6 +22,7 @@ package com.apple.foundationdb;
 
 import com.apple.foundationdb.tuple.ByteArrayUtil;
 
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -31,24 +32,35 @@ public class MappedKeyValue extends KeyValue {
 	private final byte[] rangeBegin;
 	private final byte[] rangeEnd;
 	private final List<KeyValue> rangeResult;
+	private final boolean boundaryAndExist;
 
-	public MappedKeyValue(byte[] key, byte[] value, byte[] rangeBegin, byte[] rangeEnd, List<KeyValue> rangeResult) {
+	// now it has 5 field, key, value, getRange.begin, getRange.end, boundaryAndExist
+	// this needs to change if FDBMappedKeyValue definition is changed.
+	private static final int TOTAL_SERIALIZED_FIELD_FDBMappedKeyValue = 5;
+
+	public MappedKeyValue(byte[] key, byte[] value, byte[] rangeBegin, byte[] rangeEnd, List<KeyValue> rangeResult,
+	               boolean boundaryAndExist) {
 		super(key, value);
 		this.rangeBegin = rangeBegin;
 		this.rangeEnd = rangeEnd;
 		this.rangeResult = rangeResult;
+		this.boundaryAndExist = boundaryAndExist;
 	}
 
 	public byte[] getRangeBegin() { return rangeBegin; }
 
 	public byte[] getRangeEnd() { return rangeEnd; }
 
+	public boolean getBoundaryAndExist() { return boundaryAndExist; }
+
 	public List<KeyValue> getRangeResult() { return rangeResult; }
 
 	public static MappedKeyValue fromBytes(byte[] bytes, int[] lengths) {
 		// Lengths include: key, value, rangeBegin, rangeEnd, count * (underlying key, underlying value)
-		if (lengths.length < 4) {
-			throw new IllegalArgumentException("There needs to be at least 4 lengths to cover the metadata");
+		if (lengths.length < TOTAL_SERIALIZED_FIELD_FDBMappedKeyValue) {
+			throw new IllegalArgumentException("There needs to be at least " +
+			                                   TOTAL_SERIALIZED_FIELD_FDBMappedKeyValue +
+			                                   " lengths to cover the metadata");
 		}
 
 		Offset offset = new Offset();
@@ -56,18 +68,19 @@ public class MappedKeyValue extends KeyValue {
 		byte[] value = takeBytes(offset, bytes, lengths);
 		byte[] rangeBegin = takeBytes(offset, bytes, lengths);
 		byte[] rangeEnd = takeBytes(offset, bytes, lengths);
-
-		if ((lengths.length - 4) % 2 != 0) {
+		byte[] boundaryAndExistBytes = takeBytes(offset, bytes, lengths);
+		boolean boundaryAndExist = ByteBuffer.wrap(boundaryAndExistBytes).getInt() == 1 ? true : false;
+		if ((lengths.length - TOTAL_SERIALIZED_FIELD_FDBMappedKeyValue) % 2 != 0) {
 			throw new IllegalArgumentException("There needs to be an even number of lengths!");
 		}
-		int count = (lengths.length - 4) / 2;
+		int count = (lengths.length - TOTAL_SERIALIZED_FIELD_FDBMappedKeyValue) / 2;
 		List<KeyValue> rangeResult = new ArrayList<>(count);
 		for (int i = 0; i < count; i++) {
 			byte[] k = takeBytes(offset, bytes, lengths);
 			byte[] v = takeBytes(offset, bytes, lengths);
 			rangeResult.add(new KeyValue(k, v));
 		}
-		return new MappedKeyValue(key, value, rangeBegin, rangeEnd, rangeResult);
+		return new MappedKeyValue(key, value, rangeBegin, rangeEnd, rangeResult, boundaryAndExist);
 	}
 
 	static class Offset {
@@ -96,13 +109,15 @@ public class MappedKeyValue extends KeyValue {
 		MappedKeyValue rhs = (MappedKeyValue) obj;
 		return Arrays.equals(rangeBegin, rhs.rangeBegin) 
 				&& Arrays.equals(rangeEnd, rhs.rangeEnd)
-				&& Objects.equals(rangeResult, rhs.rangeResult);
+				&& Objects.equals(rangeResult, rhs.rangeResult)
+				&& boundaryAndExist == rhs.boundaryAndExist;
 	}
 
 	@Override
 	public int hashCode() {
 		int hashForResult = rangeResult == null ? 0 : rangeResult.hashCode();
-		return 17 + (29 * hashForResult + 37 * Arrays.hashCode(rangeBegin) + Arrays.hashCode(rangeEnd));
+		return 17 + (29 * hashForResult + (boundaryAndExist ? 1 : 0) + 37 * Arrays.hashCode(rangeBegin) +
+		             Arrays.hashCode(rangeEnd));
 	}
 
 	@Override
@@ -111,6 +126,7 @@ public class MappedKeyValue extends KeyValue {
 		sb.append("rangeBegin=").append(ByteArrayUtil.printable(rangeBegin));
 		sb.append(", rangeEnd=").append(ByteArrayUtil.printable(rangeEnd));
 		sb.append(", rangeResult=").append(rangeResult);
+		sb.append(", boundaryAndExist=").append(boundaryAndExist);
 		sb.append('}');
 		return super.toString() + "->" + sb.toString();
 	}
