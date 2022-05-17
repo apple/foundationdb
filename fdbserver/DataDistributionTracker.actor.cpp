@@ -834,13 +834,19 @@ ACTOR Future<Void> trackInitialShards(DataDistributionTracker* self, Reference<I
 
 ACTOR Future<Void> fetchTopKShardMetrics_impl(DataDistributionTracker* self, GetTopKMetricsRequest req) {
 	ASSERT(req.comparator);
+	state Future<Void> onChange;
+	state std::vector<StorageMetrics> returnMetrics;
+	// random pick a portion of shard
+	if (req.keys.size() < SERVER_KNOBS->DD_SHARD_COMPARE_LIMIT) {
+		deterministicRandom()->randomShuffle(req.keys, SERVER_KNOBS->DD_SHARD_COMPARE_LIMIT);
+	}
 	try {
 		loop {
-			Future<Void> onChange;
-			std::vector<StorageMetrics> returnMetrics;
+			onChange = Future<Void>();
+			returnMetrics.clear();
 
-			// TODO: shall we do random shuffle to make the selection uniform distributed over the shard space?
-			for (int i = 0; i < SERVER_KNOBS->DD_SHARD_COMPARE_LIMIT && i < req.keys.size(); ++i) {
+			state int i;
+			for (i = 0; i < SERVER_KNOBS->DD_SHARD_COMPARE_LIMIT && i < req.keys.size(); ++i) {
 				auto range = req.keys[i];
 				StorageMetrics metrics;
 				for (auto t : self->shards.intersectingRanges(range)) {
@@ -857,12 +863,14 @@ ACTOR Future<Void> fetchTopKShardMetrics_impl(DataDistributionTracker* self, Get
 					break;
 				}
 
-				if (metrics.bytesReadPerKSecond <= req.maxBytesReadPerKSecond) {
+				if (metrics.bytesReadPerKSecond > 0 && metrics.bytesReadPerKSecond <= req.maxBytesReadPerKSecond) {
 					metrics.keys = range;
 					returnMetrics.push_back(metrics);
 				}
-			}
 
+				wait(yield());
+			}
+			// FIXME(xwang): Do we need to track slow task here?
 			if (!onChange.isValid()) {
 				if (req.topK >= returnMetrics.size())
 					req.reply.send(returnMetrics);

@@ -1556,16 +1556,20 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
 	};
 	state std::vector<StorageMetrics> metricsList = wait(brokenPromiseToNever(self->getTopKMetrics.getReply(req)));
 	wait(ready(healthMetrics));
-	if (getWorstCpu(healthMetrics.get(), sourceTeam->getServerIDs()) <
-	    SERVER_KNOBS->READ_REBALANCE_CPU_THRESHOLD) { // 15.0 +- (0.3 * 15) < 20.0
-		traceEvent->detail("SkipReason", "LowReadLoad");
+	auto cpu = getWorstCpu(healthMetrics.get(), sourceTeam->getServerIDs());
+	if (cpu < SERVER_KNOBS->READ_REBALANCE_CPU_THRESHOLD) { // 15.0 +- (0.3 * 15) < 20.0
+		traceEvent->detail("SkipReason", "LowReadLoad").detail("WorstSrcCpu", cpu);
 		return false;
 	}
 
-	deterministicRandom()->randomShuffle(metricsList);
+	if (!metricsList.empty()) {
+		traceEvent->detail("KthReadLoad1", metricsList[metricsList.size() - 1].bytesReadPerKSecond)
+		    .detail("KthReadLoad2", metricsList[0].bytesReadPerKSecond);
+	}
+
 	int chosenIdx = -1;
 	for (int i = 0; i < metricsList.size(); ++i) {
-		if (metricsList[i].keys.present() && metricsList[i].bytesReadPerKSecond > 0) {
+		if (metricsList[i].keys.present()) {
 			chosenIdx = i;
 			break;
 		}
@@ -1803,7 +1807,7 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueueData* self, int teamCollectionIndex,
 			}
 
 			// NOTE: We don’t want read rebalancing to be slowed down when Ratekeeper kicks in
-			if(isDiskRebalancePriority(ddPriority)) {
+			if (isDiskRebalancePriority(ddPriority)) {
 				if (now() - (*self->lastLimited) < SERVER_KNOBS->BG_DD_SATURATION_DELAY) {
 					rebalancePollingInterval = std::min(SERVER_KNOBS->BG_DD_MAX_WAIT,
 					                                    rebalancePollingInterval * SERVER_KNOBS->BG_DD_INCREASE_RATE);

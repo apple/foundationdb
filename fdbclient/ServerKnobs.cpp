@@ -161,7 +161,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// Data distribution
 	init( READ_REBALANCE_CPU_THRESHOLD,                         15.0 );
 	init( READ_REBALANCE_SRC_PARALLELISM,                          5 );
-	init( READ_REBALANCE_SHARD_TOPK,                              10 );
+	init( READ_REBALANCE_SHARD_TOPK,  READ_REBALANCE_SRC_PARALLELISM * 2 );
 	init( RETRY_RELOCATESHARD_DELAY,                             0.1 );
 	init( DATA_DISTRIBUTION_FAILURE_REACTION_TIME,              60.0 ); if( randomize && BUGGIFY ) DATA_DISTRIBUTION_FAILURE_REACTION_TIME = 1.0;
 	bool buggifySmallShards = randomize && BUGGIFY;
