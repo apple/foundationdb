@@ -25,7 +25,14 @@
 _AssumeVersion::_AssumeVersion(ProtocolVersion version) : v(version) {
 	if (!version.isValid()) {
 		ASSERT(!g_network->isSimulated());
-		TraceEvent("SerializationFailed").backtrace();
+		DbgLastDeliver lastDeliver = g_network->getDbgLastDeliver();
+		TraceEvent("SerializationFailed")
+		    .detail("AssumedVersion", version)
+		    .detail("LastDeliverPeerAddress", lastDeliver.peerAddr.address)
+		    .detail("LastDeliverPeerSecondaryAddress", lastDeliver.peerAddr.secondaryAddress)
+		    .detail("LastDeliverPeerToken", lastDeliver.peerToken)
+		    .detail("LastDeliverTime", format("%.6f", lastDeliver.time))
+		    .backtrace();
 		throw serialization_failed();
 	}
 }
@@ -35,7 +42,17 @@ const void* BinaryReader::readBytes(int bytes) {
 	const char* e = b + bytes;
 	if (e > end) {
 		ASSERT(!g_network->isSimulated());
-		TraceEvent("SerializationFailed").backtrace();
+		DbgLastDeliver lastDeliver = g_network->getDbgLastDeliver();
+		TraceEvent("SerializationFailed")
+		    .setMaxFieldLength(10000)
+		    .detail("MessageLength", end - begin)
+		    .detail("RequestedBytes", bytes)
+		    .detail("Message", StringRef((const uint8_t*)begin, std::min(e, end) - begin).toHexString())
+		    .detail("LastDeliverPeerAddress", lastDeliver.peerAddr.address)
+		    .detail("LastDeliverPeerSecondaryAddress", lastDeliver.peerAddr.secondaryAddress)
+		    .detail("LastDeliverPeerToken", lastDeliver.peerToken)
+		    .detail("LastDeliverTime", format("%.6f", lastDeliver.time))
+		    .backtrace();
 		throw serialization_failed();
 	}
 	begin = e;

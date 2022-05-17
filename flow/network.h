@@ -496,11 +496,24 @@ class INetwork;
 extern INetwork* g_network;
 extern INetwork* newNet2(const TLSConfig& tlsConfig, bool useThreadPool = false, bool useMetrics = false);
 
+struct DbgLastDeliver {
+	NetworkAddressList peerAddr;
+	UID peerToken;
+	double time;
+
+	DbgLastDeliver() : time(0.0) {}
+	DbgLastDeliver(NetworkAddressList peerAddr, UID peerToken, double time)
+	  : peerAddr(peerAddr), peerToken(peerToken), time(time) {}
+};
+
 class INetwork {
 public:
 	// This interface abstracts the physical or simulated network, event loop and hardware that FoundationDB is running
 	// on. Note that there are tools for disk access, scheduling, etc as well as networking, and that almost all access
 	//   to the network should be through FlowTransport, not directly through these low level interfaces!
+
+	void setDbgLastDeliver(DbgLastDeliver dbg) { lastDeliver = dbg; }
+	DbgLastDeliver getDbgLastDeliver() { return lastDeliver; }
 
 	enum enumGlobal {
 		enFailureMonitor = 0,
@@ -637,6 +650,8 @@ protected:
 	INetwork() {}
 
 	~INetwork() {} // Please don't try to delete through this interface!
+private:
+	DbgLastDeliver lastDeliver;
 };
 
 class IUDPSocket {

@@ -399,7 +399,19 @@ struct ConnectPacket {
 		serializer(ar, connectPacketLength);
 		if (connectPacketLength > sizeof(ConnectPacket) - sizeof(connectPacketLength)) {
 			ASSERT(!g_network->isSimulated());
-			TraceEvent("SerializationFailed").backtrace();
+			DbgLastDeliver lastDeliver = g_network->getDbgLastDeliver();
+			TraceEvent("SerializationFailed")
+			    .detail("ConnectPacketLength", connectPacketLength)
+			    .detail("MaxConnectPacketLength", sizeof(ConnectPacket) - sizeof(connectPacketLength))
+			    .detail("ProtocolVersion", protocolVersion)
+			    .detail("CanonicalRemotePort", canonicalRemotePort)
+			    .detail("ConnectionID", connectionId)
+			    .detail("CanonicalRemoteIp4", canonicalRemoteIp4)
+			    .detail("LastDeliverPeerAddress", lastDeliver.peerAddr.address)
+			    .detail("LastDeliverPeerSecondaryAddress", lastDeliver.peerAddr.secondaryAddress)
+			    .detail("LastDeliverPeerToken", lastDeliver.peerToken)
+			    .detail("LastDeliverTime", format("%.6f", lastDeliver.time))
+			    .backtrace();
 			throw serialization_failed();
 		}
 
@@ -952,6 +964,7 @@ ACTOR static void deliver(TransportData* self,
 		try {
 			g_currentDeliveryPeerAddress = destination.addresses;
 			g_currentDeliveryPeerDisconnect = disconnect;
+			g_network->setDbgLastDeliver(DbgLastDeliver(destination.addresses, destination.token, now()));
 			StringRef data = reader.arenaReadAll();
 			ASSERT(data.size() > 8);
 			ArenaObjectReader objReader(reader.arena(), reader.arenaReadAll(), AssumeVersion(reader.protocolVersion()));
