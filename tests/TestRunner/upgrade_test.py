@@ -21,6 +21,8 @@ from local_cluster import LocalCluster, random_secret_string
 SUPPORTED_PLATFORMS = ["x86_64"]
 SUPPORTED_VERSIONS = [
     "7.2.0",
+    "7.1.5",
+    "7.1.4",
     "7.1.3",
     "7.1.2",
     "7.1.1",
