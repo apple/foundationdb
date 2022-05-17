@@ -1147,7 +1147,7 @@ ACTOR Future<Void> ddExclusionSafetyCheck(DistributorExclusionSafetyCheckRequest
 		return Void();
 	}
 	// If there is only 1 team, unsafe to mark failed: team building can get stuck due to lack of servers left
-	if (self->teamCollection->teams.size() <= 1) {
+	if (self->teamCollection->teamCount() <= 1) {
 		TraceEvent("DDExclusionSafetyCheckNotEnoughTeams", self->ddId).log();
 		reply.safe = false;
 		req.reply.send(reply);
