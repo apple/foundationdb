@@ -1302,11 +1302,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 							foundTeams = false;
 							break;
 						}
-						if (!bestTeam.first.present()) {
+						if (!bestTeam.first.present() || !bestTeam.first.get()->isHealthy()) {
 							foundTeams = false;
-							if (stuckCount >= 50) {
-								throw data_move_dest_team_not_found();
-							}
 							break;
 						}
 						anyHealthy = true;
@@ -1398,6 +1395,9 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 					    .detail("TeamCollectionId", tciIndex)
 					    .detail("AnyDestOverloaded", anyDestOverloaded)
 					    .detail("NumOfTeamCollections", self->teamCollections.size());
+					if (rd.isRestore() && stuckCount > 50) {
+						throw data_move_dest_team_not_found();
+					}
 					wait(delay(SERVER_KNOBS->BEST_TEAM_STUCK_DELAY, TaskPriority::DataDistributionLaunch));
 				}
 
@@ -1662,7 +1662,6 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 		}
 		if (!signalledTransferComplete)
 			dataTransferComplete.send(rd);
-
 
 		relocationComplete.send(rd);
 
