@@ -170,9 +170,14 @@ public:
 		if (latency_us_max[op] < latency_us)
 			latency_us_max[op] = latency_us;
 	}
-};
 
-using LatencySampleBinArray = std::array<LatencySampleBin, MAX_OP>;
+	void writeToFile(const std::string& filename) const {
+		rapidjson::StringBuffer ss;
+		rapidjson::Writer<rapidjson::StringBuffer> writer(ss);
+		std::ofstream f(filename);
+		f << ss.GetString();
+	}
+};
 
 } // namespace mako
 
