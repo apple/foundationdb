@@ -620,22 +620,19 @@ int workerProcessMain(Arguments const& args, int worker_id, shared_memory::Acces
 	selectApiVersion(args.api_version);
 
 	/* enable distributed tracing */
-	if (args.distributed_tracer_client > 0) {
-		switch (args.distributed_tracer_client) {
-		case 1:
-			err = network::setOptionNothrow(FDB_NET_OPTION_DISTRIBUTED_CLIENT_TRACER,
-			                                BytesRef(toBytePtr("network_lossy")));
-			break;
-		case 2:
-			err = network::setOptionNothrow(FDB_NET_OPTION_DISTRIBUTED_CLIENT_TRACER, BytesRef(toBytePtr("sim_end")));
-			break;
-		case 3:
-			err = network::setOptionNothrow(FDB_NET_OPTION_DISTRIBUTED_CLIENT_TRACER, BytesRef(toBytePtr("log_file")));
-			break;
-		}
-		if (err) {
-			logr.error("network::setOption(FDB_NET_OPTION_DISTRIBUTED_CLIENT_TRACER): {}", err.what());
-		}
+	switch (args.distributed_tracer_client) {
+	case 1:
+		err = network::setOptionNothrow(FDB_NET_OPTION_DISTRIBUTED_CLIENT_TRACER, BytesRef(toBytePtr("network_lossy")));
+		break;
+	case 2:
+		err = network::setOptionNothrow(FDB_NET_OPTION_DISTRIBUTED_CLIENT_TRACER, BytesRef(toBytePtr("sim_end")));
+		break;
+	case 3:
+		err = network::setOptionNothrow(FDB_NET_OPTION_DISTRIBUTED_CLIENT_TRACER, BytesRef(toBytePtr("log_file")));
+		break;
+	}
+	if (err) {
+		logr.error("network::setOption(FDB_NET_OPTION_DISTRIBUTED_CLIENT_TRACER): {}", err.what());
 	}
 
 	/* enable flatbuffers if specified */
