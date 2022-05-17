@@ -1541,7 +1541,7 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
 	traceEvent->detail("SrcReadBandwidth", srcLoad).detail("DestReadBandwidth", destLoad);
 
 	// read bandwidth difference is less than 30% of src load
-	if (0.7 * srcLoad <= destLoad) {
+	if ((1.0 - SERVER_KNOBS->READ_REBALANCE_DIFF_FRAC) * srcLoad <= destLoad) {
 		traceEvent->detail("SkipReason", "TeamTooSimilar");
 		return false;
 	}
@@ -1549,10 +1549,10 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
 	int topK = std::min(int(0.1 * shards.size()), SERVER_KNOBS->READ_REBALANCE_SHARD_TOPK);
 	state Future<HealthMetrics> healthMetrics = self->cx->getHealthMetrics(true);
 	state GetTopKMetricsRequest req(
-	    shards, topK, (srcLoad - destLoad) / 2.0 / SERVER_KNOBS->READ_REBALANCE_SRC_PARALLELISM);
+	    shards, topK, (srcLoad - destLoad) * SERVER_KNOBS->READ_REBALANCE_MAX_SHARD_FRAC, srcLoad / shards.size());
 	req.comparator = [](const StorageMetrics& a, const StorageMetrics& b) {
-		return a.bytesReadPerKSecond / std::max(a.bytes * 1.0, 1.0 * SERVER_KNOBS->MIN_SHARD_BYTES) >
-		       b.bytesReadPerKSecond / std::max(b.bytes * 1.0, 1.0 * SERVER_KNOBS->MIN_SHARD_BYTES);
+		return a.bytesReadPerKSecond / std::max(a.bytes * 1.0, 1.0) >
+		       b.bytesReadPerKSecond / std::max(b.bytes * 1.0, 1.0);
 	};
 	state GetTopKMetricsReply reply = wait(brokenPromiseToNever(self->getTopKMetrics.getReply(req)));
 	wait(ready(healthMetrics));

@@ -837,7 +837,7 @@ ACTOR Future<Void> fetchTopKShardMetrics_impl(DataDistributionTracker* self, Get
 	state Future<Void> onChange;
 	state std::vector<StorageMetrics> returnMetrics;
 	// random pick a portion of shard
-	if (req.keys.size() < SERVER_KNOBS->DD_SHARD_COMPARE_LIMIT) {
+	if (req.keys.size() > SERVER_KNOBS->DD_SHARD_COMPARE_LIMIT) {
 		deterministicRandom()->randomShuffle(req.keys, SERVER_KNOBS->DD_SHARD_COMPARE_LIMIT);
 	}
 	try {
@@ -864,12 +864,14 @@ ACTOR Future<Void> fetchTopKShardMetrics_impl(DataDistributionTracker* self, Get
 					break;
 				}
 
-				minReadLoad = std::min(metrics.bytesReadPerKSecond, minReadLoad);
-				maxReadLoad = std::max(metrics.bytesReadPerKSecond, maxReadLoad);
-
-				if (metrics.bytesReadPerKSecond > 0 && metrics.bytesReadPerKSecond <= req.maxBytesReadPerKSecond) {
-					metrics.keys = range;
-					returnMetrics.push_back(metrics);
+				if (metrics.bytesReadPerKSecond > 0) {
+					minReadLoad = std::min(metrics.bytesReadPerKSecond, minReadLoad);
+					maxReadLoad = std::max(metrics.bytesReadPerKSecond, maxReadLoad);
+					if (req.minBytesReadPerKSecond <= metrics.bytesReadPerKSecond &&
+					    metrics.bytesReadPerKSecond <= req.maxBytesReadPerKSecond) {
+						metrics.keys = range;
+						returnMetrics.push_back(metrics);
+					}
 				}
 
 				wait(yield());
