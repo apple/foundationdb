@@ -1475,7 +1475,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 	cacheListMonitor = monitorCacheList(this);
 
 	smoothMidShardSize.reset(CLIENT_KNOBS->INIT_MID_SHARD_BYTES);
-	globalConfig = std::make_unique<GlobalConfig>(Database(this));
+	globalConfig = std::make_unique<GlobalConfig>(this);
 
 	if (apiVersionAtLeast(710)) {
 		registerSpecialKeySpaceModule(

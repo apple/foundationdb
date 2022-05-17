@@ -37,7 +37,7 @@ const KeyRef transactionTagSampleCost = LiteralStringRef("config/transaction_tag
 const KeyRef samplingFrequency = LiteralStringRef("visibility/sampling/frequency");
 const KeyRef samplingWindow = LiteralStringRef("visibility/sampling/window");
 
-GlobalConfig::GlobalConfig(const Database& cx) : cx(cx), lastUpdate(0) {}
+GlobalConfig::GlobalConfig(DatabaseContext* cx) : cx(cx), lastUpdate(0) {}
 
 void GlobalConfig::applyChanges(Transaction& tr,
                                 const VectorRef<KeyValueRef>& insertions,
@@ -210,11 +210,13 @@ ACTOR Future<Void> GlobalConfig::refresh(GlobalConfig* self) {
 	// TraceEvent trace(SevInfo, "GlobalConfig_Refresh");
 	self->erase(KeyRangeRef(""_sr, "\xff"_sr));
 
-	state Transaction tr(self->cx);
+	state Reference<ReadYourWritesTransaction> tr;
 	loop {
 		try {
-			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			RangeResult result = wait(tr.getRange(globalConfigDataKeys, CLIENT_KNOBS->TOO_MANY));
+			tr = makeReference<ReadYourWritesTransaction>(Database(Reference<DatabaseContext>::addRef(self->cx)));
+			wait(delay(0));
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			RangeResult result = wait(tr->getRange(globalConfigDataKeys, CLIENT_KNOBS->TOO_MANY));
 			for (const auto& kv : result) {
 				KeyRef systemKey = kv.key.removePrefix(globalConfigKeysPrefix);
 				self->insert(systemKey, kv.value);
@@ -222,7 +224,7 @@ ACTOR Future<Void> GlobalConfig::refresh(GlobalConfig* self) {
 			break;
 		} catch (Error& e) {
 			TraceEvent("GlobalConfigRefreshError").errorUnsuppressed(e).suppressFor(1.0);
-			wait(tr.onError(e));
+			wait(tr->onError(e));
 		}
 	}
 	return Void();
