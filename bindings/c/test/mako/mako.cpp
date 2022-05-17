@@ -1048,7 +1048,7 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			{ "disable_ryw", no_argument, NULL, ARG_DISABLE_RYW },
 			{ "json_report", optional_argument, NULL, ARG_JSON_REPORT },
 			{ "bg_file_path", required_argument, NULL, ARG_BG_FILE_PATH },
-			{ "export", optional_argument, NULL, ARG_EXPORT },
+			{ "export_sketch_path", optional_argument, NULL, ARG_EXPORT_SKETCH },
 			{ NULL, 0, NULL, 0 }
 		};
 		idx = 0;
@@ -1242,9 +1242,9 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 		case ARG_BG_FILE_PATH:
 			args.bg_materialize_files = true;
 			strncpy(args.bg_file_path, optarg, std::min(sizeof(args.bg_file_path), strlen(optarg) + 1));
-		case ARG_EXPORT:
+		case ARG_EXPORT_SKETCH:
 			if (optarg == NULL && (argv[optind] == NULL || (argv[optind] != NULL && argv[optind][0] == '-'))) {
-				std::string default_file = "export.json";
+				const std::string default_file = "sketch_data.json";
 				args.stats_export_path = default_file;
 			} else {
 				args.stats_export_path = optarg;
@@ -1557,14 +1557,15 @@ void printReport(Arguments const& args,
 
 	fmt::print("Latency (us)");
 	printStatsHeader(args, true, false, true);
-
+	std::unordered_map<std::string, DDSketchMako> data_points;
 	/* Total Samples */
 	putTitle("Samples");
 	first_op = 1;
 	for (auto op = 0; op < MAX_OP; op++) {
+		std::string op_name = getOpName(op);
 		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
-			if (final_stats.getLatencyUsTotal(op)) {
-				putField(final_stats.getLatencySampleCount(op));
+			if (data_points[op_name].getPopulationSize() > 0) {
+				putField(data_points[op_name].getPopulationSize());
 			} else {
 				putField("N/A");
 			}
@@ -1574,7 +1575,7 @@ void printReport(Arguments const& args,
 				} else {
 					fmt::fprintf(fp, ",");
 				}
-				fmt::fprintf(fp, "\"%s\": %lu", getOpName(op), final_stats.getLatencySampleCount(op));
+				fmt::fprintf(fp, "\"%s\": %lu", op_name, data_points[op_name].getPopulationSize());
 			}
 		}
 	}
@@ -1587,8 +1588,9 @@ void printReport(Arguments const& args,
 	putTitle("Min");
 	first_op = 1;
 	for (auto op = 0; op < MAX_OP; op++) {
+		std::string op_name = getOpName(op);
 		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
-			const auto lat_min = final_stats.getLatencyUsMin(op);
+			const auto lat_min = data_points[op_name].min();
 			if (lat_min == -1) {
 				putField("N/A");
 			} else {
@@ -1599,7 +1601,7 @@ void printReport(Arguments const& args,
 					} else {
 						fmt::fprintf(fp, ",");
 					}
-					fmt::fprintf(fp, "\"%s\": %lu", getOpName(op), lat_min);
+					fmt::fprintf(fp, "\"%s\": %lu", op_name, lat_min);
 				}
 			}
 		}
@@ -1613,18 +1615,18 @@ void printReport(Arguments const& args,
 	putTitle("Avg");
 	first_op = 1;
 	for (auto op = 0; op < MAX_OP; op++) {
+		std::string op_name = getOpName(op);
 		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
-			const auto lat_total = final_stats.getLatencyUsTotal(op);
-			const auto lat_samples = final_stats.getLatencySampleCount(op);
-			if (lat_total) {
-				putField(lat_total / lat_samples);
+			if (data_points[op_name].getPopulationSize() > 0) {
+				auto avg = std::ceil(data_points[op_name].mean() * 100) / 100;
+				putField(avg);
 				if (fp) {
 					if (first_op) {
 						first_op = 0;
 					} else {
 						fmt::fprintf(fp, ",");
 					}
-					fmt::fprintf(fp, "\"%s\": %lu", getOpName(op), lat_total / lat_samples);
+					fmt::fprintf(fp, "\"%s\": %lu", getOpName(op), avg);
 				}
 			} else {
 				putField("N/A");
@@ -1659,8 +1661,6 @@ void printReport(Arguments const& args,
 	}
 	fmt::print("\n");
 
-	std::unordered_map<std::string, DDSketch> data_points;
-
 	/* Median Latency */
 	if (fp) {
 		fmt::fprintf(fp, "}, \"medianLatency\": {");
@@ -1677,10 +1677,10 @@ void printReport(Arguments const& args,
 					auto load_sample = [pid_main, op, &data_points, &op_name](int process_id, int thread_id) {
 						const auto dirname = fmt::format("{}{}", TEMP_DATA_STORE, pid_main);
 						const auto filename = getStatsFilename(dirname, process_id, thread_id, op);
-						std::ifstream fp{ filename };
+						std::ifstream ifs{ filename };
 						std::ostringstream sstr;
-						sstr << fp.rdbuf();
-						DDSketch sketch;
+						sstr << ifs.rdbuf();
+						DDSketchMako sketch;
 						rapidjson::Document doc;
 						doc.Parse(sstr.str().c_str());
 						if (doc.HasParseError()) {
@@ -1688,7 +1688,7 @@ void printReport(Arguments const& args,
 						}
 						sketch.deserialize(doc);
 						if (data_points.count(op_name)) {
-							data_points[op_name].merge(sketch);
+							data_points[op_name].mergeWith(sketch);
 						} else {
 							data_points[op_name] = sketch;
 						}
@@ -1811,8 +1811,10 @@ void printReport(Arguments const& args,
 		writer.StartObject();
 		for (auto op = 0; op < MAX_OP; op++) {
 			std::string op_name = getOpName(op);
-			writer.String(op_name.c_str());
-			data_points[op_name].serialize(writer);
+			if (data_points[op_name].getPopulationSize() > 0) {
+				writer.String(op_name.c_str());
+				data_points[op_name].serialize(writer);
+			}
 		}
 		writer.EndObject();
 		std::ofstream f(args.stats_export_path);
@@ -1960,7 +1962,7 @@ int statsProcessMain(Arguments const& args,
 
 bool mergeSketchReport(Arguments& args) {
 
-	std::unordered_map<std::string, DDSketch> sketches;
+	std::unordered_map<std::string, DDSketchMako> sketches;
 	for (auto& filename : args.report_files) {
 		std::ifstream f{ filename };
 		std::stringstream buffer;
