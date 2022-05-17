@@ -73,6 +73,7 @@ LOCAL_OLD_BINARY_REPO = "/opt/foundationdb/old/"
 CURRENT_VERSION = "7.2.0"
 HEALTH_CHECK_TIMEOUT_SEC = 5
 PROGRESS_CHECK_TIMEOUT_SEC = 30
+TESTER_STATS_INTERVAL_SEC = 5
 TRANSACTION_RETRY_LIMIT = 100
 MAX_DOWNLOAD_ATTEMPTS = 5
 RUN_WITH_GDB = False
@@ -398,6 +399,8 @@ class UpgradeTest:
                 self.tmp_dir,
                 "--transaction-retry-limit",
                 str(TRANSACTION_RETRY_LIMIT),
+                "--stats-interval",
+                str(TESTER_STATS_INTERVAL_SEC*1000)
             ]
             if RUN_WITH_GDB:
                 cmd_args = ["gdb", "-ex", "run", "--args"] + cmd_args
