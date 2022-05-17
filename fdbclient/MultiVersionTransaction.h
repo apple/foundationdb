@@ -139,6 +139,7 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                 uint8_t const* value,
 	                                 int valueLength);
 	void (*databaseDestroy)(FDBDatabase* database);
+	FDBFuture* (*databaseFetchWorkerInterfaces)(FDBDatabase* database);
 	FDBFuture* (*databaseRebootWorker)(FDBDatabase* database,
 	                                   uint8_t const* address,
 	                                   int addressLength,
@@ -448,6 +449,7 @@ public:
 	void addref() override { ThreadSafeReferenceCounted<DLDatabase>::addref(); }
 	void delref() override { ThreadSafeReferenceCounted<DLDatabase>::delref(); }
 
+	ThreadFuture<Standalone<VectorRef<KeyRef>>> fetchWorkerInterfaces() override;
 	ThreadFuture<int64_t> rebootWorker(const StringRef& address, bool check, int duration) override;
 	ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) override;
 	ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) override;
@@ -732,6 +734,7 @@ public:
 	// For internal use in testing
 	static Reference<IDatabase> debugCreateFromExistingDatabase(Reference<IDatabase> db);
 
+	ThreadFuture<Standalone<VectorRef<KeyRef>>> fetchWorkerInterfaces() override;
 	ThreadFuture<int64_t> rebootWorker(const StringRef& address, bool check, int duration) override;
 	ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) override;
 	ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) override;

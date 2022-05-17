@@ -62,59 +62,6 @@ ACTOR Future<std::string> getSpecialKeysFailureErrorMessage(Reference<ITransacti
 	return valueObj["message"].get_str();
 }
 
-ACTOR Future<Void> verifyAndAddInterface(std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface,
-                                         Reference<FlowLock> connectLock,
-                                         KeyValue kv) {
-	wait(connectLock->take());
-	state FlowLock::Releaser releaser(*connectLock);
-	state ClientWorkerInterface workerInterf;
-	try {
-		// the interface is back-ward compatible, thus if parsing failed, it needs to upgrade cli version
-		workerInterf = BinaryReader::fromStringRef<ClientWorkerInterface>(kv.value, IncludeVersion());
-	} catch (Error& e) {
-		fprintf(stderr, "Error: %s; CLI version is too old, please update to use a newer version\n", e.what());
-		return Void();
-	}
-	state ClientLeaderRegInterface leaderInterf(workerInterf.address());
-	choose {
-		when(Optional<LeaderInfo> rep =
-		         wait(brokenPromiseToNever(leaderInterf.getLeader.getReply(GetLeaderRequest())))) {
-			StringRef ip_port =
-			    (kv.key.endsWith(LiteralStringRef(":tls")) ? kv.key.removeSuffix(LiteralStringRef(":tls")) : kv.key)
-			        .removePrefix(LiteralStringRef("\xff\xff/worker_interfaces/"));
-			(*address_interface)[ip_port] = std::make_pair(kv.value, leaderInterf);
-
-			if (workerInterf.reboot.getEndpoint().addresses.secondaryAddress.present()) {
-				Key full_ip_port2 =
-				    StringRef(workerInterf.reboot.getEndpoint().addresses.secondaryAddress.get().toString());
-				StringRef ip_port2 = full_ip_port2.endsWith(LiteralStringRef(":tls"))
-				                         ? full_ip_port2.removeSuffix(LiteralStringRef(":tls"))
-				                         : full_ip_port2;
-				(*address_interface)[ip_port2] = std::make_pair(kv.value, leaderInterf);
-			}
-		}
-		when(wait(delay(CLIENT_KNOBS->CLI_CONNECT_TIMEOUT))) {}
-	}
-	return Void();
-}
-
-ACTOR Future<Void> getWorkerInterfaces(Reference<ITransaction> tr,
-                                       std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface) {
-	// Hold the reference to the standalone's memory
-	state ThreadFuture<RangeResult> kvsFuture = tr->getRange(
-	    KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"), LiteralStringRef("\xff\xff/worker_interfaces0")),
-	    CLIENT_KNOBS->TOO_MANY);
-	RangeResult kvs = wait(safeThreadFutureToFuture(kvsFuture));
-	ASSERT(!kvs.more);
-	auto connectLock = makeReference<FlowLock>(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM);
-	std::vector<Future<Void>> addInterfs;
-	for (auto it : kvs) {
-		addInterfs.push_back(verifyAndAddInterface(address_interface, connectLock, it));
-	}
-	wait(waitForAll(addInterfs));
-	return Void();
-}
-
 ACTOR Future<bool> getWorkers(Reference<IDatabase> db, std::vector<ProcessData>* workers) {
 	state Reference<ITransaction> tr = db->createTransaction();
 	loop {
@@ -158,6 +105,17 @@ ACTOR Future<bool> getWorkers(Reference<IDatabase> db, std::vector<ProcessData>*
 			wait(safeThreadFutureToFuture(tr->onError(e)));
 		}
 	}
+}
+
+ACTOR Future<Void> fetchAndUpdateWorkerInterfaces(Reference<IDatabase> db, std::set<std::string>* workerAddresses) {
+	// initialize worker interfaces and hold the standalone memory
+	state ThreadFuture<Standalone<VectorRef<KeyRef>>> f = db->fetchWorkerInterfaces();
+	wait(success(safeThreadFutureToFuture(f)));
+	workerAddresses->clear();
+	for (const auto& address : f.get()) {
+		workerAddresses->emplace(address.toString());
+	}
+	return Void();
 }
 
 } // namespace fdb_cli

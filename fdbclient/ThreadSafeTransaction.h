@@ -55,6 +55,7 @@ public:
 	void addref() override { ThreadSafeReferenceCounted<ThreadSafeDatabase>::addref(); }
 	void delref() override { ThreadSafeReferenceCounted<ThreadSafeDatabase>::delref(); }
 
+	ThreadFuture<Standalone<VectorRef<KeyRef>>> fetchWorkerInterfaces() override;
 	ThreadFuture<int64_t> rebootWorker(const StringRef& address, bool check, int duration) override;
 	ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) override;
 	ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) override;

@@ -440,6 +440,22 @@ void DLDatabase::setOption(FDBDatabaseOptions::Option option, Optional<StringRef
 	                                    value.present() ? value.get().size() : 0));
 }
 
+ThreadFuture<Standalone<VectorRef<KeyRef>>> DLDatabase::fetchWorkerInterfaces() {
+	if (!api->databaseFetchWorkerInterfaces) {
+		return unsupported_operation();
+	}
+
+	FdbCApi::FDBFuture* f = api->databaseFetchWorkerInterfaces(db);
+	return toThreadFuture<Standalone<VectorRef<KeyRef>>>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+		const FdbCApi::FDBKey* addresses;
+		int keysArrayLength;
+		FdbCApi::fdb_error_t error = api->futureGetKeyArray(f, &addresses, &keysArrayLength);
+		ASSERT(!error);
+		// The memory for this is stored in the FDBFuture and is released when the future gets destroyed
+		return Standalone<VectorRef<KeyRef>>(VectorRef<KeyRef>((KeyRef*)addresses, keysArrayLength), Arena());
+	});
+}
+
 ThreadFuture<int64_t> DLDatabase::rebootWorker(const StringRef& address, bool check, int duration) {
 	if (!api->databaseRebootWorker) {
 		return unsupported_operation();
@@ -616,6 +632,11 @@ void DLApi::init() {
 	loadClientFunction(
 	    &api->databaseGetServerProtocol, lib, fdbCPath, "fdb_database_get_server_protocol", headerVersion >= 700);
 	loadClientFunction(&api->databaseDestroy, lib, fdbCPath, "fdb_database_destroy", headerVersion >= 0);
+	loadClientFunction(&api->databaseFetchWorkerInterfaces,
+	                   lib,
+	                   fdbCPath,
+	                   "fdb_database_fetch_worker_interfaces",
+	                   headerVersion >= 720);
 	loadClientFunction(&api->databaseRebootWorker, lib, fdbCPath, "fdb_database_reboot_worker", headerVersion >= 700);
 	loadClientFunction(&api->databaseForceRecoveryWithDataLoss,
 	                   lib,
@@ -1461,6 +1482,11 @@ void MultiVersionDatabase::setOption(FDBDatabaseOptions::Option option, Optional
 	if (dbState->db) {
 		dbState->db->setOption(option, value);
 	}
+}
+
+ThreadFuture<Standalone<VectorRef<KeyRef>>> MultiVersionDatabase::fetchWorkerInterfaces() {
+	auto f = dbState->db ? dbState->db->fetchWorkerInterfaces() : ThreadFuture<Standalone<VectorRef<KeyRef>>>(Never());
+	return abortableFuture(f, dbState->dbVar->get().onChange);
 }
 
 ThreadFuture<int64_t> MultiVersionDatabase::rebootWorker(const StringRef& address, bool check, int duration) {

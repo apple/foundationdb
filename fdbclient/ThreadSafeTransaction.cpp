@@ -81,6 +81,11 @@ void ThreadSafeDatabase::setOption(FDBDatabaseOptions::Option option, Optional<S
 	    &db->deferredError);
 }
 
+ThreadFuture<Standalone<VectorRef<KeyRef>>> ThreadSafeDatabase::fetchWorkerInterfaces() {
+	DatabaseContext* db = this->db;
+	return onMainThread([db]() -> Future<Standalone<VectorRef<KeyRef>>> { return db->fetchWorkerInterfaces(); });
+}
+
 ThreadFuture<int64_t> ThreadSafeDatabase::rebootWorker(const StringRef& address, bool check, int duration) {
 	DatabaseContext* db = this->db;
 	Key addressKey = address;

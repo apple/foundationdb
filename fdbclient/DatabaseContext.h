@@ -357,6 +357,8 @@ public:
 	Future<Void> connectionFileChanged();
 	IsSwitchable switchable{ false };
 
+	// Management API, fetch and save worker interfaces in the database object, return a list of workers' addresses
+	Future<Standalone<VectorRef<StringRef>>> fetchWorkerInterfaces();
 	// Management API, Attempt to kill or suspend a process, return 1 for request sent out, 0 for failure
 	Future<int64_t> rebootWorker(StringRef address, bool check = false, int duration = 0);
 	// Management API, force the database to recover into DCID, causing the database to lose the most recently committed
@@ -631,6 +633,7 @@ public:
 
 	std::unique_ptr<GlobalConfig> globalConfig;
 	EventCacheHolder connectToDatabaseEventCacheHolder;
+	Optional<std::map<Key, std::pair<Value, ClientLeaderRegInterface>>> addressInterfaces;
 
 private:
 	std::unordered_map<std::pair<int64_t, Key>, Reference<WatchMetadata>, boost::hash<std::pair<int64_t, Key>>>

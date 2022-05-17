@@ -279,6 +279,8 @@ DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_database_open_tenant(FDBDatabase* d
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_database_create_transaction(FDBDatabase* d,
                                                                          FDBTransaction** out_transaction);
 
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_fetch_worker_interfaces(FDBDatabase* db);
+
 DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_reboot_worker(FDBDatabase* db,
                                                                    uint8_t const* address,
                                                                    int address_length,

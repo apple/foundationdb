@@ -34,48 +34,55 @@ namespace fdb_cli {
 // The command is used to send a data check request to the specified process
 // The check request is accomplished by rebooting the process
 
-ACTOR Future<bool> expensiveDataCheckCommandActor(
-    Reference<IDatabase> db,
-    Reference<ITransaction> tr,
-    std::vector<StringRef> tokens,
-    std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface) {
+ACTOR Future<bool> expensiveDataCheckCommandActor(Reference<IDatabase> db,
+                                                  Reference<ITransaction> tr,
+                                                  std::vector<StringRef> tokens,
+                                                  std::set<std::string>* addresses) {
 	state bool result = true;
+	state std::vector<Future<int64_t>> futures;
+	state int i;
 	if (tokens.size() == 1) {
-		// initialize worker interfaces
-		wait(getWorkerInterfaces(tr, address_interface));
+		wait(fetchAndUpdateWorkerInterfaces(db, addresses));
 	}
 	if (tokens.size() == 1 || tokencmp(tokens[1], "list")) {
-		if (address_interface->size() == 0) {
+		if (addresses->size() == 0) {
 			printf("\nNo addresses can be checked.\n");
-		} else if (address_interface->size() == 1) {
+		} else if (addresses->size() == 1) {
 			printf("\nThe following address can be checked:\n");
 		} else {
-			printf("\nThe following %zu addresses can be checked:\n", address_interface->size());
+			printf("\nThe following %zu addresses can be checked:\n", addresses->size());
 		}
-		for (auto it : *address_interface) {
-			printf("%s\n", printable(it.first).c_str());
+		for (const auto& addr : *addresses) {
+			printf("%s\n", printable(addr).c_str());
 		}
 		printf("\n");
 	} else if (tokencmp(tokens[1], "all")) {
-		state std::map<Key, std::pair<Value, ClientLeaderRegInterface>>::const_iterator it;
-		for (it = address_interface->cbegin(); it != address_interface->cend(); it++) {
-			int64_t checkRequestSent = wait(safeThreadFutureToFuture(db->rebootWorker(it->first, true, 0)));
-			if (!checkRequestSent) {
-				result = false;
-				fprintf(stderr, "ERROR: failed to send request to check process `%s'.\n", it->first.toString().c_str());
-			}
+		state std::set<std::string>::iterator it;
+		for (it = addresses->begin(); it != addresses->end(); ++it) {
+			futures.push_back(safeThreadFutureToFuture(db->rebootWorker(*it, true, 0)));
 		}
-		if (address_interface->size() == 0) {
+		wait(waitForAll(futures));
+		i = 0;
+		it = addresses->begin();
+		while (i < futures.size()) {
+			if (!futures[i].get()) {
+				result = false;
+				fprintf(stderr, "ERROR: failed to send request to check process `%s'.\n", it->c_str());
+			}
+			i++;
+			++it;
+		}
+
+		if (addresses->size() == 0) {
 			fprintf(stderr,
 			        "ERROR: no processes to check. You must run the `expensive_data_check’ "
 			        "command before running `expensive_data_check all’.\n");
 		} else {
-			printf("Attempted to kill and check %zu processes\n", address_interface->size());
+			printf("Attempted to kill and check %zu processes\n", addresses->size());
 		}
 	} else {
-		state int i;
 		for (i = 1; i < tokens.size(); i++) {
-			if (!address_interface->count(tokens[i])) {
+			if (addresses->find(tokens[i].toString()) == addresses->end()) {
 				fprintf(stderr, "ERROR: process `%s' not recognized.\n", printable(tokens[i]).c_str());
 				result = false;
 				break;
@@ -84,11 +91,15 @@ ACTOR Future<bool> expensiveDataCheckCommandActor(
 
 		if (result) {
 			for (i = 1; i < tokens.size(); i++) {
-				int64_t checkRequestSent = wait(safeThreadFutureToFuture(db->rebootWorker(tokens[i], true, 0)));
-				if (!checkRequestSent) {
+				futures.push_back(safeThreadFutureToFuture(db->rebootWorker(tokens[i], true, 0)));
+			}
+			wait(waitForAll(futures));
+			for (i = 0; i < futures.size(); i++) {
+				if (!futures[i].get()) {
 					result = false;
-					fprintf(
-					    stderr, "ERROR: failed to send request to check process `%s'.\n", tokens[i].toString().c_str());
+					fprintf(stderr,
+					        "ERROR: failed to send request to check process `%s'.\n",
+					        tokens[i + 1].toString().c_str());
 				}
 			}
 			printf("Attempted to kill and check %zu processes\n", tokens.size() - 1);

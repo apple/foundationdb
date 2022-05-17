@@ -8288,33 +8288,42 @@ ACTOR Future<Void> addInterfaceActor(std::map<Key, std::pair<Value, ClientLeader
 	return Void();
 }
 
-ACTOR static Future<int64_t> rebootWorkerActor(DatabaseContext* cx, ValueRef addr, bool check, int duration) {
+Future<int64_t> DatabaseContext::rebootWorker(StringRef addr, bool check, int duration) {
 	// ignore negative value
 	if (duration < 0)
 		duration = 0;
-	// fetch the addresses of all workers
-	state std::map<Key, std::pair<Value, ClientLeaderRegInterface>> address_interface;
-	if (!cx->getConnectionRecord())
+	// need to call fetchWorkerInterfaces() first to call rebootWorker
+	if (!addressInterfaces.present() || !addressInterfaces.get().count(addr))
 		return 0;
+
+	BinaryReader::fromStringRef<ClientWorkerInterface>(addressInterfaces.get()[addr].first, IncludeVersion())
+	    .reboot.send(RebootRequest(false, check, duration));
+	return 1;
+}
+
+ACTOR static Future<Standalone<VectorRef<KeyRef>>> fetchWorkerInterfacesActor(DatabaseContext* cx) {
+	state Standalone<VectorRef<KeyRef>> result;
+	state std::map<Key, std::pair<Value, ClientLeaderRegInterface>> address_interfaces;
+	if (!cx->getConnectionRecord())
+		return result;
 	RangeResult kvs = wait(getWorkerInterfaces(cx->getConnectionRecord()));
 	ASSERT(!kvs.more);
 	// Note: reuse this knob from fdbcli, change it if necessary
 	Reference<FlowLock> connectLock(new FlowLock(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM));
 	std::vector<Future<Void>> addInterfs;
 	for (const auto& it : kvs) {
-		addInterfs.push_back(addInterfaceActor(&address_interface, connectLock, it));
+		addInterfs.push_back(addInterfaceActor(&address_interfaces, connectLock, it));
 	}
 	wait(waitForAll(addInterfs));
-	if (!address_interface.count(addr))
-		return 0;
-
-	BinaryReader::fromStringRef<ClientWorkerInterface>(address_interface[addr].first, IncludeVersion())
-	    .reboot.send(RebootRequest(false, check, duration));
-	return 1;
+	cx->addressInterfaces = address_interfaces;
+	for (const auto& interf : address_interfaces) {
+		result.push_back_deep(result.arena(), interf.first);
+	}
+	return result;
 }
 
-Future<int64_t> DatabaseContext::rebootWorker(StringRef addr, bool check, int duration) {
-	return rebootWorkerActor(this, addr, check, duration);
+Future<Standalone<VectorRef<KeyRef>>> DatabaseContext::fetchWorkerInterfaces() {
+	return fetchWorkerInterfacesActor(this);
 }
 
 Future<Void> DatabaseContext::forceRecoveryWithDataLoss(StringRef dcId) {

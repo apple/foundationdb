@@ -78,6 +78,12 @@ void Future::cancel() {
 	return fdb_future_get_string_array(future_, out_strings, out_count);
 }
 
+// KeyArrayFuture
+
+[[nodiscard]] fdb_error_t KeyArrayFuture::get(const FDBKey** out_keys, int* out_count) {
+	return fdb_future_get_key_array(future_, out_keys, out_count);
+}
+
 // KeyRangeArrayFuture
 
 [[nodiscard]] fdb_error_t KeyRangeArrayFuture::get(const FDBKeyRange** out_keyranges, int* out_count) {
@@ -110,6 +116,11 @@ Result::~Result() {
 }
 
 // Database
+
+KeyArrayFuture Database::fetch_worker_interfaces(FDBDatabase* db) {
+	return KeyArrayFuture(fdb_database_fetch_worker_interfaces(db));
+}
+
 Int64Future Database::reboot_worker(FDBDatabase* db,
                                     const uint8_t* address,
                                     int address_length,

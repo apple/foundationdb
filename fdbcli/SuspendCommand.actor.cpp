@@ -34,21 +34,20 @@ namespace fdb_cli {
 ACTOR Future<bool> suspendCommandActor(Reference<IDatabase> db,
                                        Reference<ITransaction> tr,
                                        std::vector<StringRef> tokens,
-                                       std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface) {
+                                       std::set<std::string>* addresses) {
 	ASSERT(tokens.size() >= 1);
 	state bool result = true;
 	if (tokens.size() == 1) {
-		// initialize worker interfaces
-		wait(getWorkerInterfaces(tr, address_interface));
-		if (address_interface->size() == 0) {
+		wait(fetchAndUpdateWorkerInterfaces(db, addresses));
+		if (addresses->size() == 0) {
 			printf("\nNo addresses can be suspended.\n");
-		} else if (address_interface->size() == 1) {
+		} else if (addresses->size() == 1) {
 			printf("\nThe following address can be suspended:\n");
 		} else {
-			printf("\nThe following %zu addresses can be suspended:\n", address_interface->size());
+			printf("\nThe following %zu addresses can be suspended:\n", addresses->size());
 		}
-		for (auto it : *address_interface) {
-			printf("%s\n", printable(it.first).c_str());
+		for (const auto& addr : *addresses) {
+			printf("%s\n", printable(addr).c_str());
 		}
 		printf("\n");
 	} else if (tokens.size() == 2) {
@@ -56,7 +55,7 @@ ACTOR Future<bool> suspendCommandActor(Reference<IDatabase> db,
 		result = false;
 	} else {
 		for (int i = 2; i < tokens.size(); i++) {
-			if (!address_interface->count(tokens[i])) {
+			if (addresses->find(tokens[i].toString()) == addresses->end()) {
 				fprintf(stderr, "ERROR: process `%s' not recognized.\n", printable(tokens[i]).c_str());
 				result = false;
 				break;
@@ -74,14 +73,18 @@ ACTOR Future<bool> suspendCommandActor(Reference<IDatabase> db,
 			} else {
 				int64_t timeout_ms = seconds * 1000;
 				tr->setOption(FDBTransactionOptions::TIMEOUT, StringRef((uint8_t*)&timeout_ms, sizeof(int64_t)));
+				state std::vector<Future<int64_t>> futures;
 				for (i = 2; i < tokens.size(); i++) {
-					int64_t suspendRequestSent =
-					    wait(safeThreadFutureToFuture(db->rebootWorker(tokens[i], false, static_cast<int>(seconds))));
-					if (!suspendRequestSent) {
+					futures.push_back(
+					    safeThreadFutureToFuture(db->rebootWorker(tokens[i], false, static_cast<int>(seconds))));
+				}
+				wait(waitForAll(futures));
+				for (i = 0; i < futures.size(); i++) {
+					if (!futures[i].get()) {
 						result = false;
 						fprintf(stderr,
 						        "ERROR: failed to send request to suspend process `%s'.\n",
-						        tokens[i].toString().c_str());
+						        tokens[i + 2].toString().c_str());
 					}
 				}
 				printf("Attempted to suspend %zu processes\n", tokens.size() - 2);

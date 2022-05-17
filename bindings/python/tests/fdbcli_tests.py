@@ -214,6 +214,23 @@ def kill(logger):
     logger.debug("Old: {}, New: {}".format(old_generation, new_generation))
     assert new_generation > old_generation
 
+@enable_logging()
+def killall(logger):
+    # test is designed to make sure 'kill all' sends all requests simultaneously
+    old_generation = get_value_from_status_json(False, 'cluster', 'generation')
+    # This is currently an issue with fdbcli,
+    # where you need to first run 'kill' to initialize processes' list
+    # and then specify the certain process to kill
+    process = subprocess.Popen(command_template[:-1], stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=fdbcli_env)
+    output, error = process.communicate(input='kill; kill all; sleep 1\n'.encode())
+    logger.debug(output)
+    # wait for a second for the cluster recovery
+    time.sleep(1)
+    new_generation = get_value_from_status_json(True, 'cluster', 'generation')
+    logger.debug("Old generation: {}, New generation: {}".format(old_generation, new_generation))
+    # Make sure the kill is not happening sequentially
+    # Pre: each recovery will increase the generated number by 2
+    assert new_generation < (old_generation + 2 * args.process_number)
 
 @enable_logging()
 def suspend(logger):
@@ -731,5 +748,6 @@ if __name__ == '__main__':
         assert args.process_number > 1, "Process number should be positive"
         coordinators()
         exclude()
+        killall()
         # TODO: fix the failure where one process is not available after setclass call
         #setclass()

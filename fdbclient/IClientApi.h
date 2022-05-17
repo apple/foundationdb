@@ -153,6 +153,8 @@ public:
 	virtual void addref() = 0;
 	virtual void delref() = 0;
 
+	// Management API, fetch and save worker interfaces in the database object, return a list of workers' addresses
+	virtual ThreadFuture<Standalone<VectorRef<KeyRef>>> fetchWorkerInterfaces() = 0;
 	// Management API, attempt to kill or suspend a process, return 1 for request sent out, 0 for failure
 	virtual ThreadFuture<int64_t> rebootWorker(const StringRef& address, bool check, int duration) = 0;
 	// Management API, force the database to recover into DCID, causing the database to lose the most recently committed

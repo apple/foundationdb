@@ -2216,6 +2216,19 @@ TEST_CASE("fdb_database_reboot_worker") {
 	auto processPtr = statusJson["cluster"]["processes"].MemberBegin();
 	CHECK(processPtr->value.HasMember("address"));
 	std::string network_address = processPtr->value["address"].GetString();
+	{
+		fdb::KeyArrayFuture keysF = fdb::Database::fetch_worker_interfaces(db);
+		fdb_check(wait_future(keysF));
+
+		FDBKey const* out_keys;
+		int out_count;
+		fdb_check(keysF.get(&out_keys, &out_count));
+
+		CHECK(out_count == 1);
+		std::string kill_address((const char*)out_keys[0].key, out_keys[0].key_length);
+		MESSAGE("Kill address: " + kill_address);
+		CHECK(std::string((char*)out_keys[0].key, out_keys[0].key_length) == network_address);
+	}
 	while (1) {
 		fdb::Int64Future f =
 		    fdb::Database::reboot_worker(db, (const uint8_t*)network_address.c_str(), network_address.size(), false, 0);

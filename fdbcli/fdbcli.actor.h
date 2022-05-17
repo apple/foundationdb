@@ -132,13 +132,8 @@ void printUsage(StringRef command);
 // Pre: tr failed with special_keys_api_failure error
 // Read the error message special key and return the message
 ACTOR Future<std::string> getSpecialKeysFailureErrorMessage(Reference<ITransaction> tr);
-// Using \xff\xff/worker_interfaces/ special key, get all worker interfaces
-ACTOR Future<Void> getWorkerInterfaces(Reference<ITransaction> tr,
-                                       std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface);
-// Deserialize \xff\xff/worker_interfaces/<address>:=<ClientInterface> k-v pair and verify by a RPC call
-ACTOR Future<Void> verifyAndAddInterface(std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface,
-                                         Reference<FlowLock> connectLock,
-                                         KeyValue kv);
+// fetch worker interfaces for db, and update worker addresses' set
+ACTOR Future<Void> fetchAndUpdateWorkerInterfaces(Reference<IDatabase> db, std::set<std::string>* workerAddresses);
 // print cluster status info
 void printStatus(StatusObjectReader statusObj,
                  StatusClient::StatusLevel level,
@@ -172,11 +167,10 @@ ACTOR Future<bool> deleteTenantCommandActor(Reference<IDatabase> db, std::vector
 // exclude command
 ACTOR Future<bool> excludeCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens, Future<Void> warn);
 // expensive_data_check command
-ACTOR Future<bool> expensiveDataCheckCommandActor(
-    Reference<IDatabase> db,
-    Reference<ITransaction> tr,
-    std::vector<StringRef> tokens,
-    std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface);
+ACTOR Future<bool> expensiveDataCheckCommandActor(Reference<IDatabase> db,
+                                                  Reference<ITransaction> tr,
+                                                  std::vector<StringRef> tokens,
+                                                  std::set<std::string>* addresses);
 // fileconfigure command
 ACTOR Future<bool> fileConfigureCommandActor(Reference<IDatabase> db,
                                              std::string filePath,
@@ -192,7 +186,7 @@ ACTOR Future<bool> includeCommandActor(Reference<IDatabase> db, std::vector<Stri
 ACTOR Future<bool> killCommandActor(Reference<IDatabase> db,
                                     Reference<ITransaction> tr,
                                     std::vector<StringRef> tokens,
-                                    std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface);
+                                    std::set<std::string>* addresses);
 // listtenants command
 ACTOR Future<bool> listTenantsCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // lock/unlock command
@@ -231,7 +225,7 @@ ACTOR Future<bool> statusCommandActor(Reference<IDatabase> db,
 ACTOR Future<bool> suspendCommandActor(Reference<IDatabase> db,
                                        Reference<ITransaction> tr,
                                        std::vector<StringRef> tokens,
-                                       std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface);
+                                       std::set<std::string>* addresses);
 // throttle command
 ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // triggerteaminfolog command

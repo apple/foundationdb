@@ -124,6 +124,19 @@ private:
 	StringArrayFuture(FDBFuture* f) : Future(f) {}
 };
 
+class KeyArrayFuture : public Future {
+public:
+	// Call this function instead of fdb_future_get_key_array when using
+	// the KeyArrayFuture type. It's behavior is identical to
+	// fdb_future_get_key_array.
+	fdb_error_t get(const FDBKey** out_keys, int* out_count);
+
+private:
+	friend class Transaction;
+	friend class Database;
+	KeyArrayFuture(FDBFuture* f) : Future(f) {}
+};
+
 class KeyValueArrayFuture : public Future {
 public:
 	// Call this function instead of fdb_future_get_keyvalue_array when using
@@ -191,6 +204,7 @@ private:
 // Wrapper around FDBDatabase, providing database-level API
 class Database final {
 public:
+	static KeyArrayFuture fetch_worker_interfaces(FDBDatabase* db);
 	static Int64Future reboot_worker(FDBDatabase* db,
 	                                 const uint8_t* address,
 	                                 int address_length,

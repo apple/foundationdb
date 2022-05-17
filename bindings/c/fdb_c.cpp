@@ -408,6 +408,10 @@ extern "C" DLLEXPORT fdb_error_t fdb_database_create_transaction(FDBDatabase* d,
 	                 *out_transaction = (FDBTransaction*)tr.extractPtr(););
 }
 
+extern "C" DLLEXPORT FDBFuture* fdb_database_fetch_worker_interfaces(FDBDatabase* db) {
+	return (FDBFuture*)(DB(db)->fetchWorkerInterfaces()).extractPtr();
+}
+
 extern "C" DLLEXPORT FDBFuture* fdb_database_reboot_worker(FDBDatabase* db,
                                                            uint8_t const* address,
                                                            int address_length,

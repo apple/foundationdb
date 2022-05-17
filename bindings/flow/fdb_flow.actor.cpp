@@ -105,6 +105,7 @@ public:
 
 	Reference<Transaction> createTransaction() override;
 	void setDatabaseOption(FDBDatabaseOption option, Optional<StringRef> value = Optional<StringRef>()) override;
+	Future<Standalone<VectorRef<KeyRef>>> fetchWorkerInterfaces() override;
 	Future<int64_t> rebootWorker(const StringRef& address, bool check = false, int duration = 0) override;
 	Future<Void> forceRecoveryWithDataLoss(const StringRef& dcid) override;
 	Future<Void> createSnapshot(const StringRef& uid, const StringRef& snap_command) override;
@@ -291,6 +292,16 @@ void DatabaseImpl::setDatabaseOption(FDBDatabaseOption option, Optional<StringRe
 		throw_on_error(fdb_database_set_option(db, option, value.get().begin(), value.get().size()));
 	else
 		throw_on_error(fdb_database_set_option(db, option, nullptr, 0));
+}
+
+Future<Standalone<VectorRef<KeyRef>>> DatabaseImpl::fetchWorkerInterfaces() {
+	return backToFuture<Standalone<VectorRef<KeyRef>>>(
+	    fdb_database_fetch_worker_interfaces(db), [](Reference<CFuture> f) {
+		    FDBKey const* ks;
+		    int count;
+		    throw_on_error(fdb_future_get_key_array(f->f, &ks, &count));
+		    return FDBStandalone<VectorRef<KeyRef>>(f, VectorRef<KeyRef>((KeyRef*)ks, count));
+	    });
 }
 
 Future<int64_t> DatabaseImpl::rebootWorker(const StringRef& address, bool check, int duration) {
