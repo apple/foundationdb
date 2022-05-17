@@ -44,12 +44,13 @@ class alignas(64) ThreadStatistics {
 	uint64_t latency_us_total[MAX_OP];
 	uint64_t latency_us_min[MAX_OP];
 	uint64_t latency_us_max[MAX_OP];
-	DDSketch sketch;
+	DDSketchFastUnsigned sketch;
 
 public:
 	ThreadStatistics() noexcept {
 		memset(this, 0, sizeof(ThreadStatistics));
 		memset(latency_us_min, 0xff, sizeof(latency_us_min));
+		sketch = DDSketchFastUnsigned{};
 	}
 
 	ThreadStatistics(const ThreadStatistics& other) noexcept = default;
@@ -85,7 +86,7 @@ public:
 			if (latency_us_max[op] < other.latency_us_max[op])
 				latency_us_max[op] = other.latency_us_max[op];
 		}
-		sketch.merge(other.sketch);
+		sketch.mergeWith(other.sketch);
 	}
 
 	void incrConflictCount() noexcept { conflicts++; }
@@ -100,7 +101,7 @@ public:
 
 	void addLatency(int op, timediff_t diff) noexcept {
 		const auto latency_us = toIntegerMicroseconds(diff);
-		sketch.add(latency_us);
+		sketch.addSample(latency_us);
 		latency_samples[op]++;
 		latency_us_total[op] += latency_us;
 		if (latency_us_min[op] > latency_us)

@@ -50,6 +50,7 @@
 #include "future.hpp"
 #include "logger.hpp"
 #include "mako.hpp"
+#include "mako/ddsketch.hpp"
 #include "operations.hpp"
 #include "process.hpp"
 #include "utils.hpp"
@@ -1649,7 +1650,7 @@ void printReport(Arguments const& args,
 	}
 	fmt::print("\n");
 
-	std::unordered_map<std::string, DDSketch> data_points;
+	std::unordered_map<std::string, DDSketchFastUnsigned> data_points;
 
 	/* Median Latency */
 	if (fp) {
@@ -1670,7 +1671,7 @@ void printReport(Arguments const& args,
 						std::ifstream fp{ filename };
 						std::ostringstream sstr;
 						sstr << fp.rdbuf();
-						DDSketch sketch;
+						DDSketchFastUnsigned sketch;
 						rapidjson::Document doc;
 						doc.Parse(sstr.str().c_str());
 						if (doc.HasParseError()) {
@@ -1678,7 +1679,7 @@ void printReport(Arguments const& args,
 						}
 						sketch.deserialize(doc);
 						if (data_points.count(op_name)) {
-							data_points[op_name].merge(sketch);
+							data_points[op_name].mergeWith(sketch);
 						} else {
 							data_points[op_name] = sketch;
 						}
@@ -1950,7 +1951,7 @@ int statsProcessMain(Arguments const& args,
 
 bool mergeSketchReport(Arguments& args) {
 
-	std::unordered_map<std::string, DDSketch> sketches;
+	std::unordered_map<std::string, DDSketchFastUnsigned> sketches;
 	for (auto& filename : args.report_files) {
 		std::ifstream f{ filename };
 		std::stringstream buffer;

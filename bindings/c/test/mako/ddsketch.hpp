@@ -1,71 +1,109 @@
-#ifndef MAKO_DDSKETCH_HPP
-#define MAKO_DDSKETCH_HPP
+/*
+ * DDSketch.h
+ *
+ * This source file is part of the FoundationDB open source project
+ *
+ * Copyright 2013-2020 Apple Inc. and the FoundationDB project authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 
-#include <array>
-#include <cstdint>
-#include <cstring>
-#include <fstream>
-#include <limits>
-#include <list>
-#include <new>
-#include <utility>
+#ifndef DDSKETCH_H
+#define DDSKETCH_H
+#pragma once
+
+#include <vector>
+#include <algorithm>
+#include <cmath>
 #include "fdbclient/rapidjson/document.h"
 #include "fdbclient/rapidjson/rapidjson.h"
 #include "fdbclient/rapidjson/stringbuffer.h"
 #include "fdbclient/rapidjson/writer.h"
-#include "operations.hpp"
-namespace mako {
-/*
-    Collect sampled latencies according to DDSketch paper:
-    https://arxiv.org/pdf/1908.10693.pdf
- */
-class DDSketch {
-private:
-	double errorGuarantee;
-	std::vector<uint64_t> buckets;
-	uint64_t minValue, maxValue, populationSize, zeroPopulationSize;
-	double gamma;
-	int offset;
-	constexpr static double EPSILON = 1e-18;
 
-	int getIdx(uint64_t sample) const noexcept { return ceil(log(sample) / log(gamma)); }
+// A namespace for fast log() computation.
+namespace fastLogger {
+// Basically, the goal is to compute log(x)/log(r).
+// For double, it is represented as 2^e*(1+s) (0<=s<1), so our goal becomes
+// e*log(2)/log(r)*log(1+s), and we approximate log(1+s) with a cubic function.
+// See more details on Datadog's paper, or CubicallyInterpolatedMapping.java in
+// https://github.com/DataDog/sketches-java/
+inline const double correctingFactor = 1.00988652862227438516; // = 7 / (10 * log(2));
+constexpr inline const double A = 6.0 / 35.0, B = -3.0 / 5.0, C = 10.0 / 7.0;
 
-	double getVal(int idx) const noexcept { return (2.0 * pow(gamma, idx)) / (1 + gamma); }
+inline double fastlog(double value) {
+	int e;
+	double s = frexp(value, &e);
+	s = s * 2 - 1;
+	return ((A * s + B) * s + C) * s + e - 1;
+}
 
+inline double reverseLog(double index) {
+	long exponent = floor(index);
+	// Derived from Cardano's formula
+	double d0 = B * B - 3 * A * C;
+	double d1 = 2 * B * B * B - 9 * A * B * C - 27 * A * A * (index - exponent);
+	double p = cbrt((d1 - sqrt(d1 * d1 - 4 * d0 * d0 * d0)) / 2);
+	double significandPlusOne = -(B + p + d0 / p) / (3 * A) + 1;
+	return ldexp(significandPlusOne / 2, exponent + 1);
+}
+}; // namespace fastLogger
+
+// DDSketch for non-negative numbers (those < EPS = 10^-18 are
+// treated as 0, and huge numbers (>1/EPS) fail ASSERT). This is the base
+// class without a concrete log() implementation.
+template <class Impl, class T>
+class DDSketchBase {
 public:
-	DDSketch(double err = 0.05)
-	  : errorGuarantee(err), minValue(std::numeric_limits<uint64_t>::max()),
-	    maxValue(std::numeric_limits<uint64_t>::min()), populationSize(0), zeroPopulationSize(0),
-	    gamma((1.0 + errorGuarantee) / (1.0 - errorGuarantee)), offset(getIdx(1.0 / EPSILON)) {
-		buckets.resize(2 * offset, 0);
-	}
+	explicit DDSketchBase(double errorGuarantee)
+	  : errorGuarantee(errorGuarantee), populationSize(0), zeroPopulationSize(0), minValue(T()), maxValue(T()),
+	    sum(T()) {}
 
-	uint64_t getPopulationSize() { return populationSize; }
+	DDSketchBase<Impl, T>& addSample(T sample) {
+		// Call it addSample for now, while it is not a sample anymore
+		if (!populationSize)
+			minValue = maxValue = sample;
 
-	void add(uint64_t sample) {
-		if (sample <= EPSILON) {
+		if (sample <= EPS) {
 			zeroPopulationSize++;
 		} else {
-			int idx = getIdx(sample);
-			assert(idx >= 0 && idx < int(buckets.size()));
-			buckets[idx]++;
+			int index = static_cast<Impl*>(this)->getIndex(sample);
+			ASSERT(index >= 0 && index < buckets.size());
+			buckets[index]++;
 		}
+
 		populationSize++;
+		sum += sample;
 		maxValue = std::max(maxValue, sample);
 		minValue = std::min(minValue, sample);
+		return *this;
 	}
 
-	double percentile(double percentile) {
-		assert(percentile >= 0 && percentile <= 1);
-
-		if (populationSize == 0) {
+	double mean() const {
+		if (populationSize == 0)
 			return 0;
-		}
+		return (double)sum / populationSize;
+	}
+
+	T median() { return percentile(0.5); }
+
+	T percentile(double percentile) {
+
+		if (populationSize == 0)
+			return T();
 		uint64_t targetPercentilePopulation = percentile * (populationSize - 1);
 		// Now find the tPP-th (0-indexed) element
-		if (targetPercentilePopulation < zeroPopulationSize) {
-			return 0;
-		}
+		if (targetPercentilePopulation < zeroPopulationSize)
+			return T(0);
 
 		int index = -1;
 		bool found = false;
@@ -99,16 +137,20 @@ public:
 				count += buckets[i];
 			}
 		}
-		assert(found);
-		return getVal(index);
+		return static_cast<Impl*>(this)->getValue(index);
 	}
 
-	uint64_t min() const { return minValue; }
-	uint64_t max() const { return maxValue; }
+	T min() const { return minValue; }
+	T max() const { return maxValue; }
+
+	void clear() {
+		std::fill(buckets.begin(), buckets.end(), 0);
+		populationSize = zeroPopulationSize = 0;
+		sum = minValue = maxValue = 0; // Doesn't work for all T
+	}
 
 	void serialize(rapidjson::Writer<rapidjson::StringBuffer>& writer) const {
 		writer.StartObject();
-
 		writer.String("errorGuarantee");
 		writer.Double(errorGuarantee);
 		writer.String("minValue");
@@ -119,10 +161,7 @@ public:
 		writer.Uint64(populationSize);
 		writer.String("zeroPopulationSize");
 		writer.Uint64(zeroPopulationSize);
-		writer.String("gamma");
-		writer.Double(gamma);
-		writer.String("offset");
-		writer.Int(offset);
+
 		writer.String("buckets");
 		writer.StartArray();
 		for (auto b : buckets) {
@@ -139,8 +178,7 @@ public:
 		maxValue = obj["maxValue"].GetUint64();
 		populationSize = obj["populationSize"].GetUint64();
 		zeroPopulationSize = obj["zeroPopulationSize"].GetUint64();
-		gamma = obj["gamma"].GetDouble();
-		offset = obj["offset"].GetInt();
+
 		auto jsonBuckets = obj["buckets"].GetArray();
 		uint64_t idx = 0;
 		for (auto it = jsonBuckets.Begin(); it != jsonBuckets.End(); it++) {
@@ -149,17 +187,116 @@ public:
 		}
 	}
 
-	void merge(const DDSketch& other) {
-		// what to do if we have different errorGurantees?
-		maxValue = std::max(maxValue, other.maxValue);
-		minValue = std::min(minValue, other.minValue);
-		populationSize += other.populationSize;
-		zeroPopulationSize += other.zeroPopulationSize;
-		for (uint32_t i = 0; i < buckets.size(); i++) {
-			buckets[i] += other.buckets[i];
+	uint64_t getPopulationSize() const { return populationSize; }
+
+	double getErrorGurantee() const { return errorGuarantee; }
+
+	DDSketchBase<Impl, T>& mergeWith(const DDSketchBase<Impl, T>& anotherSketch) {
+		// Must have the same guarantee
+		ASSERT(fabs(errorGuarantee - anotherSketch.errorGuarantee) < EPS &&
+		       anotherSketch.buckets.size() == buckets.size());
+		for (size_t i = 0; i < anotherSketch.buckets.size(); i++) {
+			buckets[i] += anotherSketch.buckets[i];
 		}
+		populationSize += anotherSketch.populationSize;
+		zeroPopulationSize += anotherSketch.zeroPopulationSize;
+		minValue = std::min(minValue, anotherSketch.minValue);
+		maxValue = std::max(maxValue, anotherSketch.maxValue);
+		sum += anotherSketch.sum;
+		return *this;
 	}
+
+	void setBucketSize(int capacity) { buckets.resize(capacity, 0); }
+
+	// Need to implement a ser/deser method before we can send this over network
+	// and merge
+
+	constexpr static double EPS = 1e-18; // smaller numbers are considered as 0
+private:
+	double errorGuarantee; // As defined in the paper
+
+	uint64_t populationSize, zeroPopulationSize; // we need to separately count 0s
+	std::vector<uint64_t> buckets;
+	T minValue, maxValue, sum;
 };
-} // namespace mako
+
+// DDSketch with fast log implementation for float numbers
+template <class T>
+class DDSketch : public DDSketchBase<DDSketch<T>, T> {
+public:
+	DDSketch(double errorGuarantee = 0.1)
+	  : DDSketchBase<DDSketch<T>, T>(errorGuarantee), gamma((1.0 + errorGuarantee) / (1.0 - errorGuarantee)),
+	    multiplier(fastLogger::correctingFactor * log(2) / log(gamma)) {
+		offset = getIndex(1.0 / DDSketchBase<DDSketch<T>, T>::EPS);
+		this->setBucketSize(2 * offset);
+	}
+
+	int getIndex(T sample) {
+		static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__, "Do not support non-little-endian systems");
+		return ceil(fastLogger::fastlog(sample) * multiplier) + offset;
+	}
+
+	T getValue(int index) { return fastLogger::reverseLog((index - offset) / multiplier) * 2.0 / (1 + gamma); }
+
+private:
+	double gamma, multiplier;
+	int offset = 0;
+};
+
+// DDSketch with <cmath> log. Slow and only use this when others doesn't work.
+template <class T>
+class DDSketchSlow : public DDSketchBase<DDSketchSlow<T>, T> {
+public:
+	DDSketchSlow(double errorGuarantee = 0.1)
+	  : DDSketchBase<DDSketchSlow<T>, T>(errorGuarantee), gamma((1.0 + errorGuarantee) / (1.0 - errorGuarantee)),
+	    logGamma(log(gamma)) {
+		offset = getIndex(1.0 / DDSketchBase<DDSketch<T>, T>::EPS) + 5;
+		this->setBucketSize(2 * offset);
+	}
+
+	int getIndex(T sample) { return ceil(log(sample) / logGamma) + offset; }
+
+	T getValue(int index) { return (T)(2.0 * pow(gamma, (index - offset)) / (1 + gamma)); }
+
+private:
+	double gamma, logGamma;
+	int offset = 0;
+};
+
+// DDSketch for unsigned int. Faster than the float version. Fixed accuracy.
+class DDSketchFastUnsigned : public DDSketchBase<DDSketchFastUnsigned, unsigned> {
+public:
+	DDSketchFastUnsigned() : DDSketchBase<DDSketchFastUnsigned, unsigned>(errorGuarantee) { this->setBucketSize(129); }
+
+	int getIndex(unsigned sample) {
+		__uint128_t v = sample;
+		v *= v;
+		v *= v; // sample^4
+		uint64_t low = (uint64_t)v, high = (uint64_t)(v >> 64);
+
+		return 128 - (high == 0 ? ((low == 0 ? 64 : __builtin_clzll(low)) + 64) : __builtin_clzll(high));
+	}
+
+	unsigned getValue(int index) {
+		double r = 1, g = gamma;
+		while (index) { // quick power method for power(gamma, index)
+			if (index & 1)
+				r *= g;
+			g *= g;
+			index >>= 1;
+		}
+		// 2.0 * pow(gamma, index) / (1 + gamma) is what we need
+		return (unsigned)(2.0 * r / (1 + gamma) + 0.5); // round to nearest int
+	}
+
+private:
+	constexpr static double errorGuarantee = 0.08642723372;
+	// getIndex basically calc floor(log_2(x^4)) + 1,
+	// which is almost ceil(log_2(x^4)) as it only matters when x is a power of 2,
+	// and it does not change the error bound. Original sketch asks for
+	// ceil(log_r(x)), so we know r = pow(2, 1/4) = 1.189207115. And r = (1 + eG)
+	// / (1 - eG) so eG = 0.08642723372.
+	constexpr static double gamma = 1.189207115;
+};
 
 #endif
