@@ -1548,7 +1548,8 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
                             std::vector<TestSpec> tests,
                             StringRef startingConfiguration,
                             LocalityData locality,
-                            Optional<TenantName> defaultTenant) {
+                            Optional<TenantName> defaultTenant,
+                            Standalone<VectorRef<TenantNameRef>> tenantsToCreate) {
 	state Database cx;
 	state Reference<AsyncVar<ServerDBInfo>> dbInfo(new AsyncVar<ServerDBInfo>);
 	state Future<Void> ccMonitor = monitorServerDBInfo(cc, LocalityData(), dbInfo); // FIXME: locality
@@ -1624,9 +1625,14 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 		}
 	}
 
-	if (useDB && defaultTenant.present()) {
-		TraceEvent("CreatingDefaultTenant").detail("Tenant", defaultTenant.get());
-		wait(ManagementAPI::createTenant(cx.getReference(), defaultTenant.get()));
+	if (useDB) {
+		std::vector<Future<Void>> tenantFutures;
+		for (auto tenant : tenantsToCreate) {
+			TraceEvent("CreatingTenant").detail("Tenant", tenant);
+			tenantFutures.push_back(ManagementAPI::createTenant(cx.getReference(), tenant));
+		}
+
+		wait(waitForAll(tenantFutures));
 	}
 
 	if (useDB && waitForQuiescenceBegin) {
@@ -1708,7 +1714,8 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
                             int minTestersExpected,
                             StringRef startingConfiguration,
                             LocalityData locality,
-                            Optional<TenantName> defaultTenant) {
+                            Optional<TenantName> defaultTenant,
+                            Standalone<VectorRef<TenantNameRef>> tenantsToCreate) {
 	state int flags = (at == TEST_ON_SERVERS ? 0 : GetWorkersRequest::TESTER_CLASS_ONLY) |
 	                  GetWorkersRequest::NON_EXCLUDED_PROCESSES_ONLY;
 	state Future<Void> testerTimeout = delay(600.0); // wait 600 sec for testers to show up
@@ -1739,7 +1746,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 	for (int i = 0; i < workers.size(); i++)
 		ts.push_back(workers[i].interf.testerInterface);
 
-	wait(runTests(cc, ci, ts, tests, startingConfiguration, locality, defaultTenant));
+	wait(runTests(cc, ci, ts, tests, startingConfiguration, locality, defaultTenant, tenantsToCreate));
 	return Void();
 }
 
@@ -1777,7 +1784,8 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
                             StringRef startingConfiguration,
                             LocalityData locality,
                             UnitTestParameters testOptions,
-                            Optional<TenantName> defaultTenant) {
+                            Optional<TenantName> defaultTenant,
+                            Standalone<VectorRef<TenantNameRef>> tenantsToCreate) {
 	state TestSet testSet;
 	state std::unique_ptr<KnobProtectiveGroup> knobProtectiveGroup(nullptr);
 	auto cc = makeReference<AsyncVar<Optional<ClusterControllerFullInterface>>>();
@@ -1861,11 +1869,19 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
 		actors.push_back(
 		    reportErrors(monitorServerDBInfo(cc, LocalityData(), db), "MonitorServerDBInfo")); // FIXME: Locality
 		actors.push_back(reportErrors(testerServerCore(iTesters[0], connRecord, db, locality), "TesterServerCore"));
-		tests = runTests(cc, ci, iTesters, testSet.testSpecs, startingConfiguration, locality, defaultTenant);
+		tests = runTests(
+		    cc, ci, iTesters, testSet.testSpecs, startingConfiguration, locality, defaultTenant, tenantsToCreate);
 	} else {
-		tests = reportErrors(
-		    runTests(cc, ci, testSet.testSpecs, at, minTestersExpected, startingConfiguration, locality, defaultTenant),
-		    "RunTests");
+		tests = reportErrors(runTests(cc,
+		                              ci,
+		                              testSet.testSpecs,
+		                              at,
+		                              minTestersExpected,
+		                              startingConfiguration,
+		                              locality,
+		                              defaultTenant,
+		                              tenantsToCreate),
+		                     "RunTests");
 	}
 
 	choose {

@@ -32,7 +32,7 @@ public class MappedKeyValue extends KeyValue {
 	private final byte[] rangeEnd;
 	private final List<KeyValue> rangeResult;
 
-	MappedKeyValue(byte[] key, byte[] value, byte[] rangeBegin, byte[] rangeEnd, List<KeyValue> rangeResult) {
+	public MappedKeyValue(byte[] key, byte[] value, byte[] rangeBegin, byte[] rangeEnd, List<KeyValue> rangeResult) {
 		super(key, value);
 		this.rangeBegin = rangeBegin;
 		this.rangeEnd = rangeEnd;

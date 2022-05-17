@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/RESTKmsConnector.actor.h"
+#include "fdbserver/RESTKmsConnector.h"
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/rapidjson/document.h"
@@ -61,6 +61,7 @@ const char* REFRESH_KMS_URLS_TAG = "refresh_kms_urls";
 const char* VALIDATION_TOKENS_TAG = "validation_tokens";
 const char* VALIDATION_TOKEN_NAME_TAG = "token_name";
 const char* VALIDATION_TOKEN_VALUE_TAG = "token_value";
+const char* DEBUG_UID_TAG = "debug_uid";
 
 const char* TOKEN_NAME_FILE_SEP = "#";
 const char* TOKEN_TUPLE_SEP = ",";
@@ -280,9 +281,9 @@ void parseKmsResponse(Reference<RESTKmsConnectorCtx> ctx,
 	//   "kms_urls" : [
 	//         "url1", "url2", ...
 	//   ],
-	//	 "error" : {
+	//	 "error" : {					// Optional, populated by the KMS, if present, rest of payload is ignored.
 	//		"details": <details>
-	// 	  }  					// Optional, populated by the KMS, if present, rest of payload is ignored.
+	// 	  }
 	// }
 
 	if (resp->code != HTTP::HTTP_STATUS_CODE_OK) {
@@ -397,6 +398,20 @@ void addRefreshKmsUrlsSectionToJsonDoc(Reference<RESTKmsConnectorCtx> ctx,
 	doc.AddMember(key, refreshUrls, doc.GetAllocator());
 }
 
+void addDebugUidSectionToJsonDoc(Reference<RESTKmsConnectorCtx> ctx, rapidjson::Document& doc, Optional<UID> dbgId) {
+	if (!dbgId.present()) {
+		// Debug id not present; do nothing
+		return;
+	}
+	rapidjson::Value key(DEBUG_UID_TAG, doc.GetAllocator());
+	rapidjson::Value debugIdVal;
+	const std::string dbgIdStr = dbgId.get().toString();
+	debugIdVal.SetString(dbgIdStr.c_str(), dbgIdStr.size(), doc.GetAllocator());
+
+	// Append 'debug_uid' object to the parent document
+	doc.AddMember(key, debugIdVal, doc.GetAllocator());
+}
+
 StringRef getEncryptKeysByKeyIdsRequestBody(Reference<RESTKmsConnectorCtx> ctx,
                                             const KmsConnLookupEKsByKeyIdsReq& req,
                                             const bool refreshKmsUrls,
@@ -424,6 +439,7 @@ StringRef getEncryptKeysByKeyIdsRequestBody(Reference<RESTKmsConnectorCtx> ctx,
 	//     }
 	//   ]
 	//   "refresh_kms_urls" = 1/0
+	//   "debug_uid" = <uid-string>   // Optional debug info to trace requests across FDB <--> KMS
 	// }
 
 	rapidjson::Document doc;
@@ -458,8 +474,11 @@ StringRef getEncryptKeysByKeyIdsRequestBody(Reference<RESTKmsConnectorCtx> ctx,
 	// Append 'validation_tokens' as json array
 	addValidationTokensSectionToJsonDoc(ctx, doc);
 
-	// Append "refresh_kms_urls'
+	// Append 'refresh_kms_urls'
 	addRefreshKmsUrlsSectionToJsonDoc(ctx, doc, refreshKmsUrls);
+
+	// Append 'debug_uid' section if needed
+	addDebugUidSectionToJsonDoc(ctx, doc, req.debugId);
 
 	// Serialize json to string
 	rapidjson::StringBuffer sb;
@@ -574,6 +593,7 @@ StringRef getEncryptKeysByDomainIdsRequestBody(Reference<RESTKmsConnectorCtx> ct
 	//     }
 	//   ]
 	//   "refresh_kms_urls" = 1/0
+	//   "debug_uid" = <uid-string>     // Optional debug info to trace requests across FDB <--> KMS
 	// }
 
 	rapidjson::Document doc;
@@ -603,6 +623,9 @@ StringRef getEncryptKeysByDomainIdsRequestBody(Reference<RESTKmsConnectorCtx> ct
 
 	// Append 'refresh_kms_urls'
 	addRefreshKmsUrlsSectionToJsonDoc(ctx, doc, refreshKmsUrls);
+
+	// Append 'debug_uid' section if needed
+	addDebugUidSectionToJsonDoc(ctx, doc, req.debugId);
 
 	// Serialize json to string
 	rapidjson::StringBuffer sb;
@@ -1007,13 +1030,16 @@ void testGetEncryptKeysByKeyIdsRequestBody(Reference<RESTKmsConnectorCtx> ctx, A
 	}
 
 	bool refreshKmsUrls = deterministicRandom()->randomInt(0, 100) < 50;
+	if (deterministicRandom()->randomInt(0, 100) < 40) {
+		req.debugId = deterministicRandom()->randomUniqueID();
+	}
 
 	StringRef requestBodyRef = getEncryptKeysByKeyIdsRequestBody(ctx, req, refreshKmsUrls, arena);
-	TraceEvent("FetchKeysByKeyIds", ctx->uid).setMaxFieldLength(10000).detail("JsonReqStr", requestBodyRef.toString());
+	TraceEvent("FetchKeysByKeyIds", ctx->uid).setMaxFieldLength(100000).detail("JsonReqStr", requestBodyRef.toString());
 	Reference<HTTP::Response> httpResp = makeReference<HTTP::Response>();
 	httpResp->code = HTTP::HTTP_STATUS_CODE_OK;
 	getFakeKmsResponse(requestBodyRef, true, httpResp);
-	TraceEvent("FetchKeysByKeyIds", ctx->uid).setMaxFieldLength(10000).detail("HttpRespStr", httpResp->content);
+	TraceEvent("FetchKeysByKeyIds", ctx->uid).setMaxFieldLength(100000).detail("HttpRespStr", httpResp->content);
 
 	std::vector<EncryptCipherKeyDetails> cipherDetails;
 	parseKmsResponse(ctx, httpResp, &arena, &cipherDetails);

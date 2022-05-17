@@ -928,6 +928,9 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                "logical_core_utilization":0.4
             }
          }
+      },
+      "tenants":{
+         "num_tenants":0
       }
    },
    "client":{

@@ -198,7 +198,6 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES rare/CheckRelocation.toml)
   add_fdb_test(TEST_FILES rare/ReadSkewReadWrite.toml)
   add_fdb_test(TEST_FILES rare/ClogUnclog.toml)
-  add_fdb_test(TEST_FILES rare/ReadSkewReadWrite.toml)
   add_fdb_test(TEST_FILES rare/CloggedCycleWithKills.toml)
   add_fdb_test(TEST_FILES rare/ConfigIncrement.toml)
   add_fdb_test(TEST_FILES rare/ConfigIncrementWithKills.toml)
@@ -213,6 +212,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES rare/LargeApiCorrectnessStatus.toml)
   add_fdb_test(TEST_FILES rare/RYWDisable.toml)
   add_fdb_test(TEST_FILES rare/RandomReadWriteTest.toml)
+  add_fdb_test(TEST_FILES rare/ReadSkewReadWrite.toml)
   add_fdb_test(TEST_FILES rare/SpecificUnitTests.toml)
   add_fdb_test(TEST_FILES rare/SwizzledLargeApiCorrectness.toml)
   add_fdb_test(TEST_FILES rare/RedwoodCorrectnessBTree.toml)
@@ -278,6 +278,12 @@ if(WITH_PYTHON)
   add_fdb_test(
     TEST_FILES restarting/from_7.1.0/ConfigureStorageMigrationTestRestart-1.toml
                restarting/from_7.1.0/ConfigureStorageMigrationTestRestart-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/from_7.1.0/VersionVectorDisableRestart-1.toml
+               restarting/from_7.1.0/VersionVectorDisableRestart-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/from_7.1.0/VersionVectorEnableRestart-1.toml
+               restarting/from_7.1.0/VersionVectorEnableRestart-2.toml)
 
 
   add_fdb_test(TEST_FILES slow/ApiCorrectness.toml)
