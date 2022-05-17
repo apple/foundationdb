@@ -139,6 +139,8 @@ StringRef sign(CryptAlgo algo, Arena arena, StringRef str, StringRef key) {
 	case CryptAlgo::HMACSHA256:
 		return hmacSHA256Sign(arena, str, key);
 	}
+	ASSERT(false);
+	return StringRef();
 }
 
 bool verify(CryptAlgo algo, StringRef str, StringRef signature, StringRef key) {
@@ -148,6 +150,8 @@ bool verify(CryptAlgo algo, StringRef str, StringRef signature, StringRef key) {
 	case CryptAlgo::HMACSHA256:
 		return hmacSHA256Verify(str, signature, key);
 	}
+	ASSERT(false);
+	return false;
 }
 
 Standalone<SignedAuthTokenRef> signToken(CryptAlgo algo,
