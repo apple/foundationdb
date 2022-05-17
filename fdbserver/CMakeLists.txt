@@ -267,6 +267,7 @@ set(FDBSERVER_SRCS
   workloads/ReadAfterWrite.actor.cpp
   workloads/ReadHotDetection.actor.cpp
   workloads/ReadWrite.actor.cpp
+  workloads/ReadWriteWorkload.actor.h
   workloads/RemoveServersSafely.actor.cpp
   workloads/ReportConflictingKeys.actor.cpp
   workloads/RestoreBackup.actor.cpp
@@ -281,6 +282,7 @@ set(FDBSERVER_SRCS
   workloads/Sideband.actor.cpp
   workloads/SidebandSingle.actor.cpp
   workloads/SimpleAtomicAdd.actor.cpp
+  workloads/SkewedReadWrite.actor.cpp
   workloads/SlowTaskWorkload.actor.cpp
   workloads/SnapTest.actor.cpp
   workloads/SpecialKeySpaceCorrectness.actor.cpp
