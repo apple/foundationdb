@@ -306,10 +306,12 @@ struct StorageServerDisk {
 		return storage->deleteCheckpoint(checkpoint);
 	}
 
-	Future<Void> addRange(KeyRange range, UID id) { return storage->addRange(range, id); };
+	Future<Void> addRange(KeyRange range, std::string id) { return storage->addRange(range, id); };
 	std::vector<std::string> removeRange(KeyRange range) { return storage->removeRange(range); }
 	void persistRangeMapping(KeyRangeRef range, bool isAdd) { return storage->persistRangeMapping(range, isAdd); }
-	Future<Void> cleanUpShardsIfNeeded(std::vector<UID>& shardIds) { return storage->cleanUpShardsIfNeeded(shardIds); };
+	Future<Void> cleanUpShardsIfNeeded(std::vector<std::string>& shardIds) {
+		return storage->cleanUpShardsIfNeeded(shardIds);
+	};
 
 	KeyValueStoreType getKeyValueStoreType() const { return storage->getType(); }
 	StorageBytes getStorageBytes() const { return storage->getStorageBytes(); }
@@ -6107,7 +6109,7 @@ void changeServerKeys(StorageServer* data,
 			    .detail("End", range.end);
 			newEmptyRanges.push_back(range);
 			data->addShard(ShardInfo::newReadWrite(range, data));
-			data->addedRanges.push_back(*r);
+			data->addedRanges.push_back(KeyRange(range));
 		} else if (!nowAssigned) {
 			if (dataAvailable) {
 				ASSERT(r->value() ==
@@ -6115,7 +6117,7 @@ void changeServerKeys(StorageServer* data,
 				ASSERT(data->mutableData().getLatestVersion() > version || context == CSK_RESTORE);
 				changeNewestAvailable.emplace_back(range, version);
 				removeRanges.push_back(range);
-				data->removedRanges.push_back(*r);
+				data->removedRanges.push_back(KeyRange(r.range()));
 			}
 			data->addShard(ShardInfo::newNotAssigned(range));
 			data->watches.triggerRange(range.begin, range.end);
@@ -6128,12 +6130,12 @@ void changeServerKeys(StorageServer* data,
 				    .detail("End", range.end);
 				changeNewestAvailable.emplace_back(range, latestVersion);
 				data->addShard(ShardInfo::newReadWrite(range, data));
-				data->addedRanges.push_back(*r);
+				data->addedRanges.push_back(KeyRange(r.range()));
 				setAvailableStatus(data, range, true);
 			} else {
 				auto& shard = data->shards[range.begin];
 				if (!shard->assigned() || shard->keys != range) {
-					data->addedRanges.push_back(*r);
+					data->addedRanges.push_back(KeyRange(r.range()));
 					data->addShard(ShardInfo::newAdding(data, range));
 				}
 			}
@@ -7347,10 +7349,10 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		data->storageUpdatesDurableLatencyHistogram->sampleSeconds(now() - beforeStorageUpdates);
 
 		std::vector<Future<Void>> addRangeFutures;
-		for (const auto& r : data->addedRanges) {
+		for (auto r : data->addedRanges) {
 			// TODO: replace id with shard id.
 			UID id = deterministicRandom()->randomUniqueID();
-			addRangeFutures.push_back(data->storage.addRange(r, id));
+			addRangeFutures.push_back(data->storage.addRange(r, id.toString()));
 			data->storage.persistRangeMapping(r, true);
 		}
 		data->addedRanges.clear();
@@ -7358,7 +7360,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		wait(waitForAll(addRangeFutures));
 
 		// Set metadata for unassigned ranges.
-		for (const auto& r : data->removedRanges) {
+		for (auto r : data->removedRanges) {
 			data->storage.persistRangeMapping(r, false);
 		}
 
@@ -7380,7 +7382,8 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 
 		// Remove unassigned ranges from KVS.
 		for (const auto& r : data->removedRanges) {
-			data->affectedShards.push_back(data->storage.removeRange(r));
+			auto shardIds = data->storage.removeRange(r);
+			data->affectedShards.insert(data->affectedShards.end(), shardIds.begin(), shardIds.end());
 		}
 		data->removedRanges.clear();
 
