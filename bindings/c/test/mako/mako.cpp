@@ -1016,9 +1016,8 @@ void usage() {
 	printf("%-24s %s\n",
 	       "    --bg_file_path=PATH",
 	       "Read blob granule files from the local filesystem at PATH and materialize the results.");
-	printf("%-24s %s\n",
-	       "    --distributed_tracer_client=CLIENT",
-	       "Specify client (disabled, network_lossy, log_file)");
+	printf(
+	    "%-24s %s\n", "    --distributed_tracer_client=CLIENT", "Specify client (disabled, network_lossy, log_file)");
 }
 
 /* parse benchmark paramters */
