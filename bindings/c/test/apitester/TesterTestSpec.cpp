@@ -112,6 +112,10 @@ std::unordered_map<std::string, std::function<void(const std::string& value, Tes
 	{ "maxTenants",
 	  [](const std::string& value, TestSpec* spec) { //
 	      processIntOption(value, "maxTenants", spec->maxTenants, 1, 1000);
+	  } },
+	{ "runLoopProfiler",
+	  [](const std::string& value, TestSpec* spec) { //
+	      spec->runLoopProfiler = (value == "true");
 	  } }
 };
 
@@ -129,6 +133,9 @@ std::string toml_to_string(const T& value) {
 }
 
 } // namespace
+
+// In the current TOML scope, look for "knobs" field. If exists, store all options as knob key-value pairs
+void getOverriddenKnobKeyValues(const toml::value& context, TestSpec::KnobKeyValues& result) {}
 
 TestSpec readTomlTestSpec(std::string fileName) {
 	TestSpec spec;
@@ -157,6 +164,19 @@ TestSpec readTomlTestSpec(std::string fileName) {
 			throw TesterError(fmt::format(
 			    "Invalid test file. Unrecognized test parameter. Name: {}, value {}", k, toml_to_string(v)));
 		}
+	}
+
+	// Look for "knobs" section. If exists, store all options as knob key-value pairs
+	try {
+		const toml::array& overrideKnobs = toml::find(conf, "knobs").as_array();
+		for (const toml::value& knob : overrideKnobs) {
+			for (const auto& [key, value_] : knob.as_table()) {
+				const std::string& value = toml_to_string(value_);
+				spec.knobs.emplace_back(key, value);
+			}
+		}
+	} catch (const std::out_of_range&) {
+		// Not an error because "knobs" section is optional
 	}
 
 	// And then copy the workload attributes to spec.options
