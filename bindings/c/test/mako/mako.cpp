@@ -625,9 +625,6 @@ int workerProcessMain(Arguments const& args, int worker_id, shared_memory::Acces
 		err = network::setOptionNothrow(FDB_NET_OPTION_DISTRIBUTED_CLIENT_TRACER, BytesRef(toBytePtr("network_lossy")));
 		break;
 	case 2:
-		err = network::setOptionNothrow(FDB_NET_OPTION_DISTRIBUTED_CLIENT_TRACER, BytesRef(toBytePtr("sim_end")));
-		break;
-	case 3:
 		err = network::setOptionNothrow(FDB_NET_OPTION_DISTRIBUTED_CLIENT_TRACER, BytesRef(toBytePtr("log_file")));
 		break;
 	}
@@ -1021,7 +1018,7 @@ void usage() {
 	       "Read blob granule files from the local filesystem at PATH and materialize the results.");
 	printf("%-24s %s\n",
 	       "    --distributed_tracer_client=CLIENT",
-	       "Specify client (disabled, log_file, network_lossy, sim_end)");
+	       "Specify client (disabled, network_lossy, log_file)");
 }
 
 /* parse benchmark paramters */
@@ -1266,10 +1263,8 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 				args.distributed_tracer_client = 0;
 			} else if (strcmp(optarg, "network_lossy") == 0) {
 				args.distributed_tracer_client = 1;
-			} else if (strcmp(optarg, "sim_end") == 0) {
-				args.distributed_tracer_client = 2;
 			} else if (strcmp(optarg, "log_file") == 0) {
-				args.distributed_tracer_client = 3;
+				args.distributed_tracer_client = 2;
 			} else {
 				args.distributed_tracer_client = -1;
 			}
@@ -1342,7 +1337,7 @@ int validateArguments(Arguments const& args) {
 		}
 	}
 	if (args.distributed_tracer_client < 0) {
-		logr.error("--disibuted_tracer_client must specify either (disabled, log_file, network_lossy, sim_end)");
+		logr.error("--disibuted_tracer_client must specify either (disabled, network_lossy, log_file)");
 		return -1;
 	}
 	return 0;
