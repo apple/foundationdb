@@ -272,7 +272,7 @@ void tokenVerifyBench(CryptAlgo algo, GenFun& gen, ValidateFun& validate) {
 	fmt::print("Generating tokens");
 	for (int i = 0; i < numTokens; ++i) {
 		tokens.push_back(gen(algo, keyPair.privateKeyDer));
-		if (i % 100 == 0) {
+		if (i % 1000 == 0) {
 			fmt::print(".");
 		}
 	}
@@ -286,7 +286,8 @@ void tokenVerifyBench(CryptAlgo algo, GenFun& gen, ValidateFun& validate) {
 		auto t = tokens[deterministicRandom()->randomInt(0, tokens.size())];
 		validate(algo, t, keyPair.publicKeyDer);
 		if (currentTime - printTime > 1.0) {
-			fmt::print("{}s validate {} tokens\n", currentTime - startTime, iterations - lastPrintedIterations);
+			fmt::print(
+			    "{}s validate {} tokens\n", unsigned(currentTime - startTime), iterations - lastPrintedIterations);
 			lastPrintedIterations = iterations;
 			printTime = currentTime;
 		}
@@ -294,10 +295,10 @@ void tokenVerifyBench(CryptAlgo algo, GenFun& gen, ValidateFun& validate) {
 		++iterations;
 	}
 	double endTime = timer();
-	fmt::print("Validated {} tokens in {} seconds ({}/s)\n",
+	fmt::print("Validated {} tokens in {} seconds ({} tokens per second)\n",
 	           iterations,
 	           endTime - startTime,
-	           iterations / (endTime - startTime));
+	           unsigned(iterations / (endTime - startTime)));
 }
 
 template <class GenFun, class ValidateFun>
