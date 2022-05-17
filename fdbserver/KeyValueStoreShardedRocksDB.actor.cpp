@@ -1599,7 +1599,6 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			if (a.getPerfContext) {
 				rocksDBMetrics->setPerfContext(threadIndex);
 			}
-
 		}
 	};
 
@@ -1824,14 +1823,15 @@ TEST_CASE("noSim/ShardedRocksDB/Initialization") {
 	state const std::string rocksDBTestDir = "sharded-rocksdb-test-db";
 	platform::eraseDirectoryRecursive(rocksDBTestDir);
 
-	state IKeyValueStore* kvStore = new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
-    state ShardedRocksDBKeyValueStore* rocksDB = dynamic_cast<ShardedRocksDBKeyValueStore*>(kvStore);
-    wait(kvStore->init());
+	state IKeyValueStore* kvStore =
+	    new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
+	state ShardedRocksDBKeyValueStore* rocksDB = dynamic_cast<ShardedRocksDBKeyValueStore*>(kvStore);
+	wait(kvStore->init());
 
-    Future<Void> closed = kvStore->onClosed();
-    kvStore->dispose();
-    wait(closed);
-    return Void();
+	Future<Void> closed = kvStore->onClosed();
+	kvStore->dispose();
+	wait(closed);
+	return Void();
 }
 
 } // namespace
