@@ -77,7 +77,7 @@ public:
 			zeroPopulationSize++;
 		} else {
 			int index = static_cast<Impl*>(this)->getIndex(sample);
-			ASSERT(index >= 0 && index < buckets.size());
+			assert(index >= 0 && index < buckets.size());
 			buckets[index]++;
 		}
 
@@ -193,8 +193,6 @@ public:
 
 	DDSketchBase<Impl, T>& mergeWith(const DDSketchBase<Impl, T>& anotherSketch) {
 		// Must have the same guarantee
-		ASSERT(fabs(errorGuarantee - anotherSketch.errorGuarantee) < EPS &&
-		       anotherSketch.buckets.size() == buckets.size());
 		for (size_t i = 0; i < anotherSketch.buckets.size(); i++) {
 			buckets[i] += anotherSketch.buckets[i];
 		}
