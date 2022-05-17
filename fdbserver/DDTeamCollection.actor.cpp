@@ -154,6 +154,8 @@ public:
 		return Void();
 	}
 
+	// Find the team with the exact storage servers as req.src.
+
 	static void getTeamByServers(DDTeamCollection* self, GetTeamRequest req) {
 		const std::string servers = TCTeamInfo::serversToString(req.src);
 		Optional<Reference<IDataDistributionTeam>> res;
@@ -879,10 +881,12 @@ public:
 						std::vector<KeyRange> shards = self->shardsAffectedByTeamFailure->getShardsFor(
 						    ShardsAffectedByTeamFailure::Team(team->getServerIDs(), self->primary));
 
-						TraceEvent(SevDebug, "ServerTeamRelocatingShards", self->distributorId)
-						    .detail("Info", team->getDesc())
-						    .detail("TeamID", team->getTeamID())
-						    .detail("Shards", shards.size());
+						if (SERVER_KNOBS->DD_ENABLE_VERBOSE_TRACING) {
+							TraceEvent(SevDebug, "ServerTeamRelocatingShards", self->distributorId)
+							    .detail("Info", team->getDesc())
+							    .detail("TeamID", team->getTeamID())
+							    .detail("Shards", shards.size());
+						}
 
 						for (int i = 0; i < shards.size(); i++) {
 							// Make it high priority to move keys off failed server or else RelocateShards may never be
@@ -952,7 +956,7 @@ public:
 
 							self->output.send(rs);
 							TraceEvent("SendRelocateToDDQueue", self->distributorId)
-							    // .suppressFor(1.0)
+							    .suppressFor(1.0)
 							    .detail("ServerPrimary", self->primary)
 							    .detail("ServerTeam", team->getDesc())
 							    .detail("KeyBegin", rs.keys.begin)
