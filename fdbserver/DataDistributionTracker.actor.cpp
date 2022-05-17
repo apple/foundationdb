@@ -844,7 +844,8 @@ ACTOR Future<Void> fetchTopKShardMetrics_impl(DataDistributionTracker* self, Get
 		loop {
 			onChange = Future<Void>();
 			returnMetrics.clear();
-
+			state int64_t minReadLoad = std::numeric_limits<int64_t>::max();
+			state int64_t maxReadLoad = std::numeric_limits<int64_t>::min();
 			state int i;
 			for (i = 0; i < SERVER_KNOBS->DD_SHARD_COMPARE_LIMIT && i < req.keys.size(); ++i) {
 				auto range = req.keys[i];
@@ -863,6 +864,9 @@ ACTOR Future<Void> fetchTopKShardMetrics_impl(DataDistributionTracker* self, Get
 					break;
 				}
 
+				minReadLoad = std::min(metrics.bytesReadPerKSecond, minReadLoad);
+				maxReadLoad = std::max(metrics.bytesReadPerKSecond, maxReadLoad);
+
 				if (metrics.bytesReadPerKSecond > 0 && metrics.bytesReadPerKSecond <= req.maxBytesReadPerKSecond) {
 					metrics.keys = range;
 					returnMetrics.push_back(metrics);
@@ -873,14 +877,16 @@ ACTOR Future<Void> fetchTopKShardMetrics_impl(DataDistributionTracker* self, Get
 			// FIXME(xwang): Do we need to track slow task here?
 			if (!onChange.isValid()) {
 				if (req.topK >= returnMetrics.size())
-					req.reply.send(returnMetrics);
+					req.reply.send(GetTopKMetricsReply(returnMetrics, minReadLoad, maxReadLoad));
 				else {
 					std::nth_element(returnMetrics.begin(),
 					                 returnMetrics.begin() + req.topK - 1,
 					                 returnMetrics.end(),
 					                 req.comparator);
-					req.reply.send(
-					    std::vector<StorageMetrics>(returnMetrics.begin(), returnMetrics.begin() + req.topK));
+					req.reply.send(GetTopKMetricsReply(
+					    std::vector<StorageMetrics>(returnMetrics.begin(), returnMetrics.begin() + req.topK),
+					    minReadLoad,
+					    maxReadLoad));
 				}
 				return Void();
 			}
@@ -898,7 +904,7 @@ ACTOR Future<Void> fetchTopKShardMetrics(DataDistributionTracker* self, GetTopKM
 		when(wait(fetchTopKShardMetrics_impl(self, req))) {}
 		when(wait(delay(SERVER_KNOBS->DD_SHARD_METRICS_TIMEOUT))) {
 			TEST(true); // TopK DD_SHARD_METRICS_TIMEOUT
-			req.reply.send(std::vector<StorageMetrics>(1));
+			req.reply.send(GetTopKMetricsReply());
 		}
 	}
 	return Void();

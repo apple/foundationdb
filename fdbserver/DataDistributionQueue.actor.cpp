@@ -1554,7 +1554,7 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
 		return a.bytesReadPerKSecond / std::max(a.bytes * 1.0, 1.0 * SERVER_KNOBS->MIN_SHARD_BYTES) >
 		       b.bytesReadPerKSecond / std::max(b.bytes * 1.0, 1.0 * SERVER_KNOBS->MIN_SHARD_BYTES);
 	};
-	state std::vector<StorageMetrics> metricsList = wait(brokenPromiseToNever(self->getTopKMetrics.getReply(req)));
+	state GetTopKMetricsReply reply = wait(brokenPromiseToNever(self->getTopKMetrics.getReply(req)));
 	wait(ready(healthMetrics));
 	auto cpu = getWorstCpu(healthMetrics.get(), sourceTeam->getServerIDs());
 	if (cpu < SERVER_KNOBS->READ_REBALANCE_CPU_THRESHOLD) { // 15.0 +- (0.3 * 15) < 20.0
@@ -1562,10 +1562,10 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
 		return false;
 	}
 
-	if (!metricsList.empty()) {
-		traceEvent->detail("KthReadLoad1", metricsList[metricsList.size() - 1].bytesReadPerKSecond)
-		    .detail("KthReadLoad2", metricsList[0].bytesReadPerKSecond);
-	}
+	auto& metricsList = reply.metrics;
+	// NOTE: randomize is important here since we don't want to always push the same shard into the queue
+	deterministicRandom()->randomShuffle(metricsList);
+	traceEvent->detail("MinReadLoad", reply.minReadLoad).detail("MaxReadLoad", reply.maxReadLoad);
 
 	int chosenIdx = -1;
 	for (int i = 0; i < metricsList.size(); ++i) {
