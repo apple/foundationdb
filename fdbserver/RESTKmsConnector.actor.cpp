@@ -54,7 +54,8 @@ const char* BASE_CIPHER_TAG = "baseCipher";
 const char* CIPHER_KEY_DETAILS_TAG = "cipher_key_details";
 const char* ENCRYPT_DOMAIN_ID_TAG = "encrypt_domain_id";
 const char* ERROR_TAG = "error";
-const char* ERROR_DETAIL_TAG = "details";
+const char* ERROR_MSG_TAG = "errMsg";
+const char* ERROR_CODE_TAG = "errCode";
 const char* KMS_URLS_TAG = "kms_urls";
 const char* QUERY_MODE_TAG = "query_mode";
 const char* REFRESH_KMS_URLS_TAG = "refresh_kms_urls";
@@ -282,7 +283,8 @@ void parseKmsResponse(Reference<RESTKmsConnectorCtx> ctx,
 	//         "url1", "url2", ...
 	//   ],
 	//	 "error" : {					// Optional, populated by the KMS, if present, rest of payload is ignored.
-	//		"details": <details>
+	//		"errMsg" : <message>
+	//		"errCode": <code>
 	// 	  }
 	// }
 
@@ -296,12 +298,26 @@ void parseKmsResponse(Reference<RESTKmsConnectorCtx> ctx,
 
 	// Check if response has error
 	if (doc.HasMember(ERROR_TAG)) {
-		if (doc[ERROR_TAG].HasMember(ERROR_DETAIL_TAG) && doc[ERROR_TAG][ERROR_DETAIL_TAG].IsString()) {
-			Standalone<StringRef> errRef = makeString(doc[ERROR_TAG][ERROR_DETAIL_TAG].GetStringLength());
-			memcpy(mutateString(errRef),
-			       doc[ERROR_TAG][ERROR_DETAIL_TAG].GetString(),
-			       doc[ERROR_TAG][ERROR_DETAIL_TAG].GetStringLength());
-			TraceEvent("KMSErrorResponse", ctx->uid).detail("ErrorDetails", errRef.toString());
+		Standalone<StringRef> errMsgRef;
+		Standalone<StringRef> errCodeRef;
+
+		if (doc[ERROR_TAG].HasMember(ERROR_MSG_TAG) && doc[ERROR_TAG][ERROR_MSG_TAG].IsString()) {
+			errMsgRef = makeString(doc[ERROR_TAG][ERROR_MSG_TAG].GetStringLength());
+			memcpy(mutateString(errMsgRef),
+			       doc[ERROR_TAG][ERROR_MSG_TAG].GetString(),
+			       doc[ERROR_TAG][ERROR_MSG_TAG].GetStringLength());
+		}
+		if (doc[ERROR_TAG].HasMember(ERROR_CODE_TAG) && doc[ERROR_TAG][ERROR_CODE_TAG].IsString()) {
+			errMsgRef = makeString(doc[ERROR_TAG][ERROR_CODE_TAG].GetStringLength());
+			memcpy(mutateString(errMsgRef),
+			       doc[ERROR_TAG][ERROR_CODE_TAG].GetString(),
+			       doc[ERROR_TAG][ERROR_CODE_TAG].GetStringLength());
+		}
+
+		if (!errCodeRef.empty() || !errMsgRef.empty()) {
+			TraceEvent("KMSErrorResponse", ctx->uid)
+			    .detail("ErrorMsg", errMsgRef.empty() ? "" : errMsgRef.toString())
+			    .detail("ErrorCode", errCodeRef.empty() ? "" : errCodeRef.toString());
 		} else {
 			TraceEvent("KMSErrorResponse_EmptyDetails", ctx->uid).log();
 		}
@@ -1194,7 +1210,7 @@ void testKMSErrorResponse(Reference<RESTKmsConnectorCtx> ctx) {
 	rapidjson::Value errorTag(rapidjson::kObjectType);
 
 	// Add 'error_detail'
-	rapidjson::Value eKey(ERROR_DETAIL_TAG, doc.GetAllocator());
+	rapidjson::Value eKey(ERROR_MSG_TAG, doc.GetAllocator());
 	rapidjson::Value detailInfo;
 	detailInfo.SetString("Foo is always bad", doc.GetAllocator());
 	errorTag.AddMember(eKey, detailInfo, doc.GetAllocator());
