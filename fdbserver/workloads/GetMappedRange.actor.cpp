@@ -154,9 +154,22 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		// indexEntryKey(expectedId) " << printable(indexEntryKey(expectedId)) << std::endl;
 		if (matchIndex == MATCH_INDEX_ALL || isBoundary) {
 			ASSERT(it->key == indexEntryKey(expectedId));
+		} else if (matchIndex == MATCH_INDEX_MATCHED_ONLY) {
+			// now we cannot generate a workload that only has partial results matched
+			// thus expecting everything matched
+			// TODO: create tests to generate workloads with partial secondary results present
+			ASSERT(it->key == indexEntryKey(expectedId));
+		} else if (matchIndex == MATCH_INDEX_UNMATCHED_ONLY) {
+			// now we cannot generate a workload that only has partial results matched
+			// thus expecting everything NOT matched(except for the boundary asserted above)
+			// TODO: create tests to generate workloads with partial secondary results present
+			ASSERT(it->key == EMPTY);
 		} else {
 			ASSERT(it->key == EMPTY);
 		}
+		// TODO: create tests to generate workloads with partial secondary results present
+		ASSERT(it->boundaryAndExist == isBoundary);
+
 		ASSERT(it->value == EMPTY);
 
 		if (self->SPLIT_RECORDS) {
@@ -417,7 +430,15 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		Key mapper = getMapper(self);
 		// The scanned range cannot be too large to hit get_mapped_key_values_has_more. We have a unit validating the
 		// error is thrown when the range is large.
-		int matchIndex = deterministicRandom()->random01() > 0.5 ? MATCH_INDEX_NONE : MATCH_INDEX_ALL;
+		const double r = deterministicRandom()->random01();
+		int matchIndex = MATCH_INDEX_ALL;
+		if (r < 0.25) {
+			matchIndex = MATCH_INDEX_NONE;
+		} else if (r < 0.5) {
+			matchIndex = MATCH_INDEX_MATCHED_ONLY;
+		} else if (r < 0.75) {
+			matchIndex = MATCH_INDEX_UNMATCHED_ONLY;
+		}
 		wait(self->scanMappedRange(cx, 10, 490, mapper, self, matchIndex));
 		return Void();
 	}

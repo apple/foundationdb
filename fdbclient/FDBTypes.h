@@ -169,6 +169,8 @@ static const Tag cacheTag{ tagLocalitySpecial, 2 };
 
 const int MATCH_INDEX_ALL = 0;
 const int MATCH_INDEX_NONE = 1;
+const int MATCH_INDEX_MATCHED_ONLY = 2;
+const int MATCH_INDEX_UNMATCHED_ONLY = 3;
 
 enum { txsTagOld = -1, invalidTagOld = -100 };
 
@@ -781,9 +783,18 @@ struct MappedKeyValueRef : KeyValueRef {
 
 	MappedReqAndResultRef reqAndResult;
 
+	// boundary KVs are always returned so that caller can use it as a continuation,
+	// for non-boundary KV, it is always false.
+	// for boundary KV, it is true only when the secondary query succeeds(return non-empty).
+	// Note: only MATCH_INDEX_MATCHED_ONLY and MATCH_INDEX_UNMATCHED_ONLY modes can make use of it,
+	// to decide whether the boudnary is a match/unmatch.
+	// In the case of MATCH_INDEX_ALL and MATCH_INDEX_NONE, caller should not care if boundary has a match or not.
+	bool boundaryAndExist;
+
 	MappedKeyValueRef() = default;
 	MappedKeyValueRef(Arena& a, const MappedKeyValueRef& copyFrom) : KeyValueRef(a, copyFrom) {
 		const auto& reqAndResultCopyFrom = copyFrom.reqAndResult;
+		boundaryAndExist = copyFrom.boundaryAndExist;
 		if (std::holds_alternative<GetValueReqAndResultRef>(reqAndResultCopyFrom)) {
 			auto getValue = std::get<GetValueReqAndResultRef>(reqAndResultCopyFrom);
 			reqAndResult = GetValueReqAndResultRef(a, getValue);
@@ -797,7 +808,7 @@ struct MappedKeyValueRef : KeyValueRef {
 
 	bool operator==(const MappedKeyValueRef& rhs) const {
 		return static_cast<const KeyValueRef&>(*this) == static_cast<const KeyValueRef&>(rhs) &&
-		       reqAndResult == rhs.reqAndResult;
+		       reqAndResult == rhs.reqAndResult && boundaryAndExist == rhs.boundaryAndExist;
 	}
 	bool operator!=(const MappedKeyValueRef& rhs) const { return !(rhs == *this); }
 
@@ -807,7 +818,7 @@ struct MappedKeyValueRef : KeyValueRef {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, ((KeyValueRef&)*this), reqAndResult);
+		serializer(ar, ((KeyValueRef&)*this), reqAndResult, boundaryAndExist);
 	}
 };
 

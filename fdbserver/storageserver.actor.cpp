@@ -3745,10 +3745,11 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 	state int sz = input.data.size();
 	state int i = 0;
 	for (; i < sz; i++) {
-		KeyValueRef* it = &input.data[i];
+		state KeyValueRef* it = &input.data[i];
 		state MappedKeyValueRef kvm;
+		state bool isBoundary = i == 0 || i == sz - 1;
 		// need to keep the boundary, so that caller can use it as a continuation.
-		if ((i == 0 || i == sz - 1) || matchIndex == MATCH_INDEX_ALL) {
+		if (isBoundary || matchIndex == MATCH_INDEX_ALL) {
 			kvm.key = it->key;
 			kvm.value = it->value;
 		}
@@ -3764,11 +3765,19 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 			// Use the mappedKey as the prefix of the range query.
 			GetRangeReqAndResultRef getRange =
 			    wait(quickGetKeyValues(data, mappedKey, input.version, &(result.arena), pOriginalReq));
+			if (!getRange.result.empty() && matchIndex == MATCH_INDEX_MATCHED_ONLY ||
+			    getRange.result.empty() && matchIndex == MATCH_INDEX_UNMATCHED_ONLY) {
+				kvm.key = it->key;
+				kvm.value = it->value;
+			}
+
+			kvm.boundaryAndExist = isBoundary && !getRange.result.empty();
 			kvm.reqAndResult = getRange;
 		} else {
 			GetValueReqAndResultRef getValue =
 			    wait(quickGetValue(data, mappedKey, input.version, &(result.arena), pOriginalReq));
 			kvm.reqAndResult = getValue;
+			kvm.boundaryAndExist = isBoundary && getValue.result.present();
 		}
 		result.data.push_back(result.arena, kvm);
 	}
