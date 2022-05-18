@@ -163,7 +163,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( READ_REBALANCE_SRC_PARALLELISM,                          5 );
 	init( READ_REBALANCE_SHARD_TOPK,  READ_REBALANCE_SRC_PARALLELISM * 2 );
     init( READ_REBALANCE_DIFF_FRAC,                               0.3);
-    init( READ_REBALANCE_MAX_SHARD_FRAC,                          0.3); // FIXME: add buggify here when we have DD test
+    init( READ_REBALANCE_MAX_SHARD_FRAC, 0.5 / READ_REBALANCE_SRC_PARALLELISM); // FIXME: add buggify here when we have DD test, seems DD is pretty sensitive to this parameter
 	init( RETRY_RELOCATESHARD_DELAY,                             0.1 );
 	init( DATA_DISTRIBUTION_FAILURE_REACTION_TIME,              60.0 ); if( randomize && BUGGIFY ) DATA_DISTRIBUTION_FAILURE_REACTION_TIME = 1.0;
 	bool buggifySmallShards = randomize && BUGGIFY;
