@@ -110,6 +110,9 @@ public:
 					TraceEvent(SevWarnAlways, "RatekeeperGetSSListLongLatency", self->id)
 					    .detail("Latency", now() - self->lastSSListFetchedTimestamp);
 				}
+				auto debugID = deterministicRandom()->randomUniqueID();
+				TraceEvent("RkFetchSSListDebug", debugID).log();
+				tr.debugTransaction(debugID);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				std::vector<std::pair<StorageServerInterface, ProcessClass>> results =
 				    wait(getServerListAndProcessClasses(&tr));
