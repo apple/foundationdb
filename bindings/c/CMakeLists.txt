@@ -112,7 +112,7 @@ if(NOT WIN32)
     test/unit/fdb_api.hpp)
 
   add_library(fdb_cpp INTERFACE)
-  target_sources(fdb_cpp INTERFACE test/fdb_api.hpp)
+  target_sources(fdb_cpp INTERFACE test/fdb_api.hpp test/fdb_api.cpp)
   target_include_directories(fdb_cpp INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/test)
   target_link_libraries(fdb_cpp INTERFACE fmt::fmt)
 

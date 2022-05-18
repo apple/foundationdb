@@ -611,9 +611,6 @@ private:
 	native::FDBTenant* tenant;
 };
 
-const std::string Tenant::tenantManagementMapPrefix = "\xff\xff/management/tenant_map/";
-const std::string Tenant::tenantMapPrefix = "\xff/tenantMap/";
-
 } // namespace fdb
 
 #endif /*FDB_API_HPP*/
