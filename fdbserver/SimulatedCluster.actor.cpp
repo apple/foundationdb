@@ -1264,8 +1264,8 @@ void SimulationConfig::setRandomConfig() {
 
 // Overwrite DB with simple options, used when simpleConfig is true in the TestConfig
 void SimulationConfig::setSimpleConfig() {
-	db.desiredTLogCount = 1;
-	db.commitProxyCount = 1;
+	db.desiredTLogCount = 2;
+	db.commitProxyCount = 2;
 	db.grvProxyCount = 1;
 	db.resolverCount = 1;
 }
