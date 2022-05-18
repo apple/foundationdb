@@ -46,6 +46,7 @@
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "flow/Histogram.h"
+#include "flow/DebugTrace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct TLogQueueEntryRef {
@@ -1675,6 +1676,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 	state int sequence = -1;
 	state UID peekId;
 	state double queueStart = now();
+	state Future<Void> recoveryTxnReceived = logData->recoveryTxnReceived.getFuture();
 
 	if (reqTag.locality == tagLocalityTxs && reqTag.id >= logData->txsTags && logData->txsTags > 0) {
 		reqTag.id = reqTag.id % logData->txsTags;
@@ -1746,7 +1748,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 		return Void();
 	}
 
-	DisabledTraceEvent("TLogPeekMessages0", self->dbgid)
+	DebugLogTraceEvent("TLogPeekMessages0", self->dbgid)
 	    .detail("LogId", logData->logId)
 	    .detail("Tag", reqTag.toString())
 	    .detail("ReqBegin", reqBegin)
@@ -1758,11 +1760,17 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 		wait(delay(SERVER_KNOBS->TLOG_PEEK_DELAY, g_network->getCurrentTask()));
 	}
 	if (!logData->stopped && reqTag.locality != tagLocalityTxs && reqTag != txsTag) {
+		DebugLogTraceEvent("TLogPeekMessages1", self->dbgid)
+		    .detail("LogId", logData->logId)
+		    .detail("Tag", reqTag.toString())
+		    .detail("ReqBegin", reqBegin)
+		    .detail("Version", logData->version.get())
+		    .detail("RecoveredAt", logData->recoveredAt);
 		// Make sure the peek reply has the recovery txn for the current TLog.
 		// Older generation TLog has been stopped and doesn't wait here.
 		// Similarly during recovery, reading transaction state store
 		// doesn't wait here.
-		wait(logData->recoveryTxnReceived.getFuture());
+		wait(recoveryTxnReceived);
 	}
 
 	if (logData->locality != tagLocalitySatellite && reqTag.locality == tagLocalityLogRouter) {
@@ -1803,7 +1811,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 		poppedVer = poppedVersion(logData, reqTag);
 	}
 
-	DisabledTraceEvent("TLogPeekMessages1", self->dbgid)
+	DebugLogTraceEvent("TLogPeekMessages2", self->dbgid)
 	    .detail("LogId", logData->logId)
 	    .detail("Tag", reqTag.toString())
 	    .detail("ReqBegin", reqBegin)
@@ -1852,7 +1860,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 		onlySpilled = false;
 
 		// grab messages from disk
-		DisabledTraceEvent("TLogPeekMessages2", self->dbgid)
+		DebugLogTraceEvent("TLogPeekMessages3", self->dbgid)
 		    .detail("ReqBegin", reqBegin)
 		    .detail("Tag", reqTag.toString());
 		if (reqBegin <= logData->persistentDataDurableVersion) {
@@ -2015,7 +2023,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 	reply.end = endVersion;
 	reply.onlySpilled = onlySpilled;
 
-	DisabledTraceEvent("TLogPeekMessages4", self->dbgid)
+	DebugLogTraceEvent("TLogPeekMessages4", self->dbgid)
 	    .detail("LogId", logData->logId)
 	    .detail("Tag", reqTag.toString())
 	    .detail("ReqBegin", reqBegin)
@@ -2101,6 +2109,7 @@ ACTOR Future<Void> tLogPeekStream(TLogData* self, TLogPeekStreamRequest req, Ref
 			self->activePeekStreams--;
 			TraceEvent(SevDebug, "TLogPeekStreamEnd", logData->logId)
 			    .errorUnsuppressed(e)
+			    .detail("Tag", req.tag)
 			    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress());
 
 			if (e.code() == error_code_end_of_stream || e.code() == error_code_operation_obsolete) {

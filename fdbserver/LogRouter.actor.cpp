@@ -35,7 +35,7 @@
 #include "flow/Histogram.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/network.h"
-
+#include "flow/DebugTrace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct LogRouterData {
@@ -499,9 +499,13 @@ Future<Void> logRouterPeekMessages(PromiseType replyPromise,
 		}
 	}
 
-	//TraceEvent("LogRouterPeek1", self->dbgid).detail("From", replyPromise.getEndpoint().getPrimaryAddress()).detail("Ver", self->version.get()).detail("Begin", reqBegin);
+	DebugLogTraceEvent("LogRouterPeek0", self->dbgid)
+	    .detail("ReturnIfBlocked", reqReturnIfBlocked)
+	    .detail("Tag", reqTag.toString())
+	    .detail("Ver", self->version.get())
+	    .detail("Begin", reqBegin);
+
 	if (reqReturnIfBlocked && self->version.get() < reqBegin) {
-		//TraceEvent("LogRouterPeek2", self->dbgid);
 		replyPromise.sendError(end_of_stream());
 		if (reqSequence.present()) {
 			auto& trackerData = self->peekTracker[peekId];
@@ -603,7 +607,7 @@ Future<Void> logRouterPeekMessages(PromiseType replyPromise,
 	}
 
 	replyPromise.send(reply);
-	DisabledTraceEvent("LogRouterPeek4", self->dbgid)
+	DebugLogTraceEvent("LogRouterPeek4", self->dbgid)
 	    .detail("Tag", reqTag.toString())
 	    .detail("ReqBegin", reqBegin)
 	    .detail("End", reply.end)
@@ -638,8 +642,9 @@ ACTOR Future<Void> logRouterPeekStream(LogRouterData* self, TLogPeekStreamReques
 			}
 		} catch (Error& e) {
 			self->activePeekStreams--;
-			TraceEvent(SevDebug, "TLogPeekStreamEnd", self->dbgid)
+			TraceEvent(SevDebug, "LogRouterPeekStreamEnd", self->dbgid)
 			    .errorUnsuppressed(e)
+			    .detail("Tag", req.tag)
 			    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress());
 
 			if (e.code() == error_code_end_of_stream || e.code() == error_code_operation_obsolete) {
