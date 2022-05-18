@@ -560,21 +560,21 @@ public:
 };
 
 class Tenant final {
-	std::string tenantManagementMapPrefix = "\xff\xff/management/tenant_map/";
-	std::string tenantMapPrefix = "\xff/tenantMap/";
+	static const std::string tenantManagementMapPrefix;
+	static const std::string tenantMapPrefix;
 
 public:
 	static TypedFuture<future_var::None> createTenant(Transaction tr, std::string name) {
-		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES);
-		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_LOCK_AWARE);
+		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, 1);
+		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_LOCK_AWARE, 1);
 		KeyRef tenantManagementKey = toBytesRef(tenantManagementMapPrefix + name);
-		tr.set(tenantManagementKey, toBytesRef(""));
+		tr.set(tenantManagementKey, toBytesRef(std::string("")));
 		return tr.commit();
 	}
 
 	static TypedFuture<future_var::None> deleteTenant(Transaction tr, std::string name) {
-		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_RAW_ACCESS);
-		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_LOCK_AWARE);
+		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_RAW_ACCESS, 1);
+		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_LOCK_AWARE, 1);
 		KeyRef tenantMapKey = toBytesRef(tenantMapPrefix + name);
 		tr.clear(tenantMapKey);
 		return tr.commit();
@@ -610,6 +610,9 @@ private:
 	friend class Transaction;
 	native::FDBTenant* tenant;
 };
+
+const std::string Tenant::tenantManagementMapPrefix = "\xff\xff/management/tenant_map/";
+const std::string Tenant::tenantMapPrefix = "\xff/tenantMap/";
 
 } // namespace fdb
 
