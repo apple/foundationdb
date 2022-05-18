@@ -32,17 +32,59 @@
 #include "operations.hpp"
 #include "time.hpp"
 #include "ddsketch.hpp"
+#include "fdbclient/rapidjson/document.h"
+#include "fdbclient/rapidjson/rapidjson.h"
+#include "fdbclient/rapidjson/stringbuffer.h"
+#include "fdbclient/rapidjson/writer.h"
 
 namespace mako {
 
-/* collect sampled latencies until OOM is hit */
+class DDSketchMako : public DDSketch<uint64_t> {
+public:
+	void serialize(rapidjson::Writer<rapidjson::StringBuffer>& writer) const {
+		writer.StartObject();
+		writer.String("errorGuarantee");
+		writer.Double(errorGuarantee);
+		writer.String("minValue");
+		writer.Uint64(minValue);
+		writer.String("maxValue");
+		writer.Uint64(maxValue);
+		writer.String("populationSize");
+		writer.Uint64(populationSize);
+		writer.String("zeroPopulationSize");
+		writer.Uint64(zeroPopulationSize);
+
+		writer.String("buckets");
+		writer.StartArray();
+		for (auto b : buckets) {
+			writer.Uint64(b);
+		}
+		writer.EndArray();
+
+		writer.EndObject();
+	}
+	void deserialize(const rapidjson::Value& obj) {
+		errorGuarantee = obj["errorGuarantee"].GetDouble();
+		minValue = obj["minValue"].GetUint64();
+		maxValue = obj["maxValue"].GetUint64();
+		populationSize = obj["populationSize"].GetUint64();
+		zeroPopulationSize = obj["zeroPopulationSize"].GetUint64();
+
+		auto jsonBuckets = obj["buckets"].GetArray();
+		uint64_t idx = 0;
+		for (auto it = jsonBuckets.Begin(); it != jsonBuckets.End(); it++) {
+			buckets[idx] = it->GetUint64();
+			idx++;
+		}
+	}
+};
 class LatencySampleBin {
-	DDSketch sketch;
+	DDSketchMako sketch;
 
 public:
 	void put(timediff_t td) {
 		const auto latency_us = toIntegerMicroseconds(td);
-		sketch.add(latency_us);
+		sketch.addSample(latency_us);
 	}
 
 	// iterate & apply for each block user function void(uint64_t const*, size_t)

@@ -1048,7 +1048,7 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			{ "disable_ryw", no_argument, NULL, ARG_DISABLE_RYW },
 			{ "json_report", optional_argument, NULL, ARG_JSON_REPORT },
 			{ "bg_file_path", required_argument, NULL, ARG_BG_FILE_PATH },
-			{ "export", optional_argument, NULL, ARG_EXPORT },
+			{ "export_sketch_path", optional_argument, NULL, ARG_EXPORT_PATH },
 			{ NULL, 0, NULL, 0 }
 		};
 		idx = 0;
@@ -1242,7 +1242,7 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 		case ARG_BG_FILE_PATH:
 			args.bg_materialize_files = true;
 			strncpy(args.bg_file_path, optarg, std::min(sizeof(args.bg_file_path), strlen(optarg) + 1));
-		case ARG_EXPORT:
+		case ARG_EXPORT_PATH:
 			if (optarg == NULL && (argv[optind] == NULL || (argv[optind] != NULL && argv[optind][0] == '-'))) {
 				std::string default_file = "export.json";
 				args.stats_export_path = default_file;
@@ -1659,7 +1659,7 @@ void printReport(Arguments const& args,
 	}
 	fmt::print("\n");
 
-	std::unordered_map<std::string, DDSketch> data_points;
+	std::unordered_map<std::string, DDSketchMako> data_points;
 
 	/* Median Latency */
 	if (fp) {
@@ -1680,7 +1680,7 @@ void printReport(Arguments const& args,
 						std::ifstream fp{ filename };
 						std::ostringstream sstr;
 						sstr << fp.rdbuf();
-						DDSketch sketch;
+						DDSketchMako sketch;
 						rapidjson::Document doc;
 						doc.Parse(sstr.str().c_str());
 						if (doc.HasParseError()) {
@@ -1688,7 +1688,7 @@ void printReport(Arguments const& args,
 						}
 						sketch.deserialize(doc);
 						if (data_points.count(op_name)) {
-							data_points[op_name].merge(sketch);
+							data_points[op_name].mergeWith(sketch);
 						} else {
 							data_points[op_name] = sketch;
 						}
@@ -1960,7 +1960,7 @@ int statsProcessMain(Arguments const& args,
 
 bool mergeSketchReport(Arguments& args) {
 
-	std::unordered_map<std::string, DDSketch> sketches;
+	std::unordered_map<std::string, DDSketchMako> sketches;
 	for (auto& filename : args.report_files) {
 		std::ifstream f{ filename };
 		std::stringstream buffer;
