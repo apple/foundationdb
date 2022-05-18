@@ -958,7 +958,7 @@ GetMappedRangeResult getMappedIndexEntries(int beginId,
                                            int endId,
                                            fdb::Transaction& tr,
                                            std::string mapper,
-                                           int matchIndex = MATCH_INDEX_ALL) {
+                                           int matchIndex) {
 	std::string indexEntryKeyBegin = indexEntryKey(beginId);
 	std::string indexEntryKeyEnd = indexEntryKey(endId);
 
@@ -980,8 +980,8 @@ GetMappedRangeResult getMappedIndexEntries(int beginId,
 GetMappedRangeResult getMappedIndexEntries(int beginId,
                                            int endId,
                                            fdb::Transaction& tr,
-                                           int matchIndex = MATCH_INDEX_ALL,
-                                           bool allMissing = false) {
+                                           int matchIndex,
+                                           bool allMissing) {
 	std::string mapper = Tuple()
 	                         .append(prefix)
 	                         .append(RECORD)
@@ -1010,7 +1010,7 @@ TEST_CASE("fdb_transaction_get_mapped_range") {
 		} else if (r < 0.75) {
 			matchIndex = MATCH_INDEX_UNMATCHED_ONLY;
 		}
-		auto result = getMappedIndexEntries(beginId, endId, tr, matchIndex);
+		auto result = getMappedIndexEntries(beginId, endId, tr, matchIndex, false);
 
 		if (result.err) {
 			fdb::EmptyFuture f1 = tr.on_error(result.err);
@@ -1162,7 +1162,7 @@ TEST_CASE("fdb_transaction_get_mapped_range_fail_on_mapper_not_tuple") {
 	};
 	assertNotTuple(mapper);
 	fdb::Transaction tr(db);
-	auto result = getMappedIndexEntries(1, 3, tr, mapper);
+	auto result = getMappedIndexEntries(1, 3, tr, mapper, MATCH_INDEX_ALL);
 	ASSERT(result.err == error_code_mapper_not_tuple);
 }
 

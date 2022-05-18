@@ -321,7 +321,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 	                                                   int endId,
 	                                                   Reference<TransactionWrapper>& tr,
 	                                                   GetMappedRangeWorkload* self) {
-		Key mapper = getMapper(self);
+		Key mapper = getMapper(self, false);
 		Key beginTuple = Tuple().append(prefix).append(INDEX).append(indexKey(beginId)).getDataAsStandalone();
 		KeySelector beginSelector = KeySelector(firstGreaterOrEqual(beginTuple));
 		Key endTuple = Tuple().append(prefix).append(INDEX).append(indexKey(endId)).getDataAsStandalone();
@@ -426,7 +426,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		std::cout << "Test configuration: transactionType:" << self->transactionType << " snapshot:" << self->snapshot
 		          << "bad_mapper:" << self->BAD_MAPPER << std::endl;
 
-		Key mapper = getMapper(self);
+		Key mapper = getMapper(self, false);
 		// The scanned range cannot be too large to hit get_mapped_key_values_has_more. We have a unit validating the
 		// error is thrown when the range is large.
 		const double r = deterministicRandom()->random01();
@@ -446,7 +446,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		return Void();
 	}
 
-	static Key getMapper(GetMappedRangeWorkload* self, bool mapperForAllMissing = false) {
+	static Key getMapper(GetMappedRangeWorkload* self, bool mapperForAllMissing) {
 		Tuple mapperTuple;
 		if (self->BAD_MAPPER) {
 			mapperTuple << prefix << RECORD << "{K[xxx]}"_sr;
