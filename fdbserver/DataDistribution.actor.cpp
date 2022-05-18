@@ -50,23 +50,31 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-ACTOR Future<Void> buildDDTenantCache(Database cx, UID distributorId) {
+typedef std::map<int64_t, Reference<TCTenantInfo>> DDTenantMap;
+
+ACTOR static Future<RangeResult> getTenantList(Transaction* tr) {
+	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+	tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+
+	state Future<RangeResult> tenantList = tr->getRange(tenantMapKeys, CLIENT_KNOBS->TOO_MANY);
+	wait(success(tenantList));
+	ASSERT(!tenantList.get().more && tenantList.get().size() < CLIENT_KNOBS->TOO_MANY);
+
+	return tenantList.get();
+}
+
+ACTOR static Future<Void> buildDDTenantCache(Database cx, UID distributorId) {
 	state Transaction tr(cx);
-	state std::map<int64_t, Reference<TCTenantInfo>> tenantCache;
+	state DDTenantMap tenantCache;
 
 	TraceEvent(SevInfo, "BuildingDDTenantCache", distributorId).log();
 
 	try {
-		tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-		tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+		state RangeResult tenantList = wait(getTenantList(&tr));
 
-		state Future<RangeResult> tenantList = tr.getRange(tenantMapKeys, CLIENT_KNOBS->TOO_MANY);
-		wait(success(tenantList));
-		ASSERT(!tenantList.get().more && tenantList.get().size() < CLIENT_KNOBS->TOO_MANY);
-
-		for (int i = 0; i < tenantList.get().size(); i++) {
-			TenantName tname = tenantList.get()[i].key.removePrefix(tenantMapPrefix);
-			TenantMapEntry t = decodeTenantEntry(tenantList.get()[i].value);
+		for (int i = 0; i < tenantList.size(); i++) {
+			TenantName tname = tenantList[i].key.removePrefix(tenantMapPrefix);
+			TenantMapEntry t = decodeTenantEntry(tenantList[i].value);
 
 			TenantInfo tinfo(tname, t.id);
 			tenantCache[t.id] = makeReference<TCTenantInfo>(tinfo);
@@ -80,6 +88,57 @@ ACTOR Future<Void> buildDDTenantCache(Database cx, UID distributorId) {
 	TraceEvent(SevInfo, "BuiltDDTenantCache", distributorId).log();
 
 	return Void();
+}
+
+ACTOR static Future<Void> monitorTenantList(Database cx, UID distributorID) {
+	state Transaction tr(cx);
+	state DDTenantMap tenantCache;
+
+	state double lastTenantListFetchTime = now();
+
+	loop {
+		try {
+			if (now() - lastTenantListFetchTime > (2 * SERVER_KNOBS->DD_TENANT_LIST_REFRESH_INTERVAL)) {
+				TraceEvent(SevWarn, "DDTenantListRefreshDelay", distributorID).log();
+			}
+
+			state RangeResult tenantList = wait(getTenantList(&tr));
+
+			DDTenantMap updatedTenantCache;
+			bool tenantListUpdated = false;
+
+			for (int i = 0; i < tenantList.size(); i++) {
+				TenantName tname = tenantList[i].key.removePrefix(tenantMapPrefix);
+				TenantMapEntry t = decodeTenantEntry(tenantList[i].value);
+
+				TenantInfo tinfo(tname, t.id);
+				updatedTenantCache[t.id] = makeReference<TCTenantInfo>(tinfo);
+
+				if (!tenantCache.count(t.id)) {
+					tenantListUpdated = true;
+				}
+			}
+
+			if (tenantCache.size() != updatedTenantCache.size() || tenantListUpdated) {
+				for (auto& [id, tenant] : tenantCache) {
+					TraceEvent(SevInfo, "DDTenantList", distributorID)
+					    .detail("TenantName", tenant->name())
+					    .detail("TenantID", id);
+				}
+			}
+
+			tenantCache.swap(updatedTenantCache);
+
+			tr = Transaction(cx);
+			lastTenantListFetchTime = now();
+			wait(delay(2.0));
+		} catch (Error& e) {
+			if (e.code() != error_code_actor_cancelled) {
+				TraceEvent("DDTenantCacheGetTenantListError", distributorID).errorUnsuppressed(e).suppressFor(1.0);
+			}
+			wait(tr.onError(e));
+		}
+	}
 }
 
 // Read keyservers, return unique set of teams
@@ -651,6 +710,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 					    .detail("Dest", "[no items]")
 					    .trackLatest(self->initialDDEventHolder->trackingKey);
 				}
+
+				self->addActor.send(monitorTenantList(cx, self->ddId));
 
 				if (initData->mode && ddEnabledState->isDDEnabled()) {
 					// mode may be set true by system operator using fdbcli and isDDEnabled() set to true

@@ -20,7 +20,9 @@
 
 #pragma once
 
+#include "fdbclient/Tenant.h"
 #include "fdbserver/DDTeamCollection.h"
+#include "flow/Arena.h"
 #include "flow/FastRef.h"
 
 class TCTeamInfo;
@@ -240,6 +242,8 @@ private:
 public:
 	TCTenantInfo(TenantInfo tinfo) : t_info(tinfo) {}
 	std::vector<Reference<TCTeamInfo>>& teams() { return t_teams; }
+
+	TenantName name() { return t_info.name.get(); }
 
 	void addTeam(TCTeamInfo team);
 	void removeTeam(TCTeamInfo team);
