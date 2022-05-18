@@ -45,7 +45,7 @@ def is_unknown_option(output):
 
 
 def is_unknown_knob(output):
-    return output.startswith("ERROR: Failed to set knob option")
+    return output.startswith("WARNING: Invalid knob option")
 
 
 def is_cli_usage(output):
