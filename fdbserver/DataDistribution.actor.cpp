@@ -49,66 +49,54 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-void DataMove::addShard(const DDShardInfo& shard, int priority) {
+void DataMove::validateShard(const DDShardInfo& shard, KeyRangeRef range, int priority) {
 	if (!valid) {
-		return;
-	}
-	if (!shard.hasDest) {
-		if (valid) {
-			TraceEvent("DataMoveAddInValidShard")
-			    .detail("DataMoveID", this->meta.id)
-			    .detail("DataMoveMetaData", this->meta.toString())
-			    .detail("DataMovePrimaryDest", describe(this->primaryDest))
-			    .detail("DataMoveRemoteDest", describe(this->remoteDest))
+		if (shard.hasDest && shard.destId != anonymousShardId) {
+			TraceEvent(SevError, "DataMoveValidationError")
+			    .detail("Range", range)
+			    .detail("Reason", "DataMoveMissing")
 			    .detail("ShardPrimaryDest", describe(shard.primaryDest))
 			    .detail("ShardRemoteDest", describe(shard.remoteDest));
 		}
+		return;
+	}
+
+	if (!shard.hasDest) {
+		TraceEvent(SevError, "DataMoveValidationError")
+		    .detail("Range", range)
+		    .detail("Reason", "ShardMissingDest")
+		    .detail("DataMoveMetaData", this->meta.toString())
+		    .detail("DataMovePrimaryDest", describe(this->primaryDest))
+		    .detail("DataMoveRemoteDest", describe(this->remoteDest));
 		valid = false;
 		return;
 	}
-	// Assume the dest servers are sorted.
-	if (this->primaryDest.empty() && this->remoteDest.empty()) {
-		this->primaryDest = shard.primaryDest;
-		this->remoteDest = shard.remoteDest;
-		std::sort(this->primaryDest.begin(), this->primaryDest.end());
-		std::sort(this->remoteDest.begin(), this->remoteDest.end());
-	} else {
-		std::vector<UID> ss = shard.primaryDest;
-		std::sort(ss.begin(), ss.end());
-		if (!std::equal(this->primaryDest.begin(), this->primaryDest.end(), ss.begin())) {
-			TraceEvent("DataMoveAddInValidShard")
-			    .detail("DataMoveID", this->meta.id)
-			    .detail("DataMoveMetaData", this->meta.toString())
-			    .detail("DataMovePrimaryDest", describe(this->primaryDest))
-			    .detail("DataMoveRemoteDest", describe(this->remoteDest))
-			    .detail("ShardPrimaryDest", describe(shard.primaryDest))
-			    .detail("ShardRemoteDest", describe(shard.remoteDest));
-			valid = false;
-			return;
-		}
-		ss = shard.remoteDest;
-		std::sort(ss.begin(), ss.end());
-		if (!std::equal(this->remoteDest.begin(), this->remoteDest.end(), ss.begin())) {
-			TraceEvent("DataMoveAddInValidShard")
-			    .detail("DataMoveID", this->meta.id)
-			    .detail("DataMoveMetaData", this->meta.toString())
-			    .detail("DataMovePrimaryDest", describe(this->primaryDest))
-			    .detail("DataMoveRemoteDest", describe(this->remoteDest))
-			    .detail("ShardPrimaryDest", describe(shard.primaryDest))
-			    .detail("ShardRemoteDest", describe(shard.remoteDest));
-			valid = false;
-			return;
-		}
+
+	if (shard.destId != this->meta.id) {
+		TraceEvent(SevError, "DataMoveValidationError")
+		    .detail("Range", range)
+		    .detail("Reason", "DataMoveIDMissMatch")
+		    .detail("DataMoveMetaData", this->meta.toString())
+		    .detail("ShardMoveID", shard.destId);
+		valid = false;
+		return;
 	}
 
-	// for (const UID& id : shard.primarySrc) {
-	// 	this->meta.src.insert(id);
-	// }
-	// for (const UID& id : shard.remoteSrc) {
-	// 	this->meta.src.insert(id);
-	// }
-	this->primarySrc.push_back(shard.primarySrc);
-	this->remoteSrc.push_back(shard.remoteSrc);
+	if (!std::includes(
+	        this->primaryDest.begin(), this->primaryDest.end(), shard.primaryDest.begin(), shard.primaryDest.end()) ||
+	    !std::includes(
+	        this->remoteDest.begin(), this->remoteDest.end(), shard.remoteDest.begin(), shard.remoteDest.end())) {
+		TraceEvent(SevError, "DataMoveValidationError")
+		    .detail("Range", range)
+		    .detail("Reason", "DataMoveDestMissMatch")
+		    .detail("DataMoveMetaData", this->meta.toString())
+		    .detail("DataMovePrimaryDest", describe(this->primaryDest))
+		    .detail("DataMoveRemoteDest", describe(this->remoteDest))
+		    .detail("ShardPrimaryDest", describe(shard.primaryDest))
+		    .detail("ShardRemoteDest", describe(shard.remoteDest));
+		valid = false;
+		return;
+	}
 }
 
 // Read keyservers, return unique set of teams
@@ -187,7 +175,29 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution(Data
 			RangeResult dataMoves = wait(tr.getRange(dataMoveKeys, CLIENT_KNOBS->TOO_MANY));
 			ASSERT(!dataMoves.more && dataMoves.size() < CLIENT_KNOBS->TOO_MANY);
 			for (int i = 0; i < dataMoves.size(); ++i) {
-				result->dataMoves.push_back(decodeDataMoveValue(dataMoves[i].value));
+				result->dataMoves.push_back(std::make_shared<DataMove>(decodeDataMoveValue(dataMoves[i].value), true));
+				DataMove* dataMove = result->dataMoves.back().get();
+				const DataMoveMetaData& meta = result->dataMoves.back()->meta;
+				for (const UID& id : meta.src) {
+					auto& dc = server_dc[id];
+					if (std::find(remoteDcIds.begin(), remoteDcIds.end(), dc) != remoteDcIds.end()) {
+						dataMove->remoteSrc.push_back(id);
+					} else {
+						dataMove->primarySrc.push_back(id);
+					}
+				}
+				for (const UID& id : meta.dest) {
+					auto& dc = server_dc[id];
+					if (std::find(remoteDcIds.begin(), remoteDcIds.end(), dc) != remoteDcIds.end()) {
+						dataMove->remoteDest.push_back(id);
+					} else {
+						dataMove->primaryDest.push_back(id);
+					}
+				}
+				std::sort(dataMove->primarySrc.begin(), dataMove->primarySrc.end());
+				std::sort(dataMove->remoteSrc.begin(), dataMove->remoteSrc.end());
+				std::sort(dataMove->primaryDest.begin(), dataMove->primaryDest.end());
+				std::sort(dataMove->remoteDest.begin(), dataMove->remoteDest.end());
 			}
 
 			succeeded = true;
@@ -732,7 +742,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 
 			state KeyRangeMap<std::shared_ptr<DataMove>> dataMoveMap(std::make_shared<DataMove>());
 			for (int i = 0; i < initData->dataMoves.size(); ++i) {
-				const auto& meta = initData->dataMoves[i];
+				const auto& meta = initData->dataMoves[i]->meta;
 				TraceEvent("DDInitFoundDataMove", self->ddId)
 				    .detail("DataMoveID", meta.id)
 				    .detail("DataMove", meta.toString());
@@ -741,12 +751,14 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 					rs.dataMoveId = meta.id;
 					rs.cancelled = true;
 					output.send(rs);
-				} else {
+				}
+
+				if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 					auto ranges = dataMoveMap.intersectingRanges(meta.range);
 					for (auto& r : ranges) {
 						ASSERT(!r.value()->valid);
 					}
-					dataMoveMap.insert(meta.range, std::make_shared<DataMove>(meta, true));
+					dataMoveMap.insert(meta.range, initData->dataMoves[i]);
 				}
 			}
 
@@ -786,8 +798,9 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 					                          RelocateReason::OTHER));
 				}
 
-				if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA && iShard.srcId != anonymousShardId) {
-					dataMoveMap[keys.begin]->addShard(iShard);
+				// if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA && iShard.srcId != anonymousShardId) {
+				if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+					dataMoveMap[keys.begin]->validateShard(iShard, keys);
 				}
 
 				wait(yield(TaskPriority::DataDistribution));
@@ -796,32 +809,27 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 				state int idx = 0;
 				for (; idx < initData->dataMoves.size(); ++idx) {
-					const DataMoveMetaData& meta = initData->dataMoves[idx];
+					const DataMoveMetaData& meta = initData->dataMoves[idx]->meta;
 					TraceEvent(SevDebug, "DDInitProcessingRestoredDataMove", self->ddId)
 					    .detail("DataMove", meta.toString());
 					if (meta.getPhase() == DataMoveMetaData::Deleting) {
 						continue;
 					}
-					if (dataMoveMap[meta.range.begin]->valid) {
-						RelocateShard rs(meta.range, SERVER_KNOBS->PRIORITY_RECOVER_MOVE);
-						rs.dataMoveId = meta.id;
-						rs.dataMove = dataMoveMap[meta.range.begin];
-						// TODO: Persist priority in DataMoveMetaData.
-						TraceEvent(SevInfo, "DDInitRestoredDataMove", self->ddId)
-						    .detail("DataMoveID", dataMoveMap[meta.range.begin]->meta.id)
-						    .detail("DataMove", dataMoveMap[meta.range.begin]->meta.toString());
-						std::vector<ShardsAffectedByTeamFailure::Team> teams;
-						teams.push_back(ShardsAffectedByTeamFailure::Team(rs.dataMove->primaryDest, true));
-						if (!rs.dataMove->remoteDest.empty()) {
-							teams.push_back(ShardsAffectedByTeamFailure::Team(rs.dataMove->remoteDest, false));
-						}
-						shardsAffectedByTeamFailure->restartRequests.send(rs.keys);
-						shardsAffectedByTeamFailure->defineShard(rs.keys);
-						shardsAffectedByTeamFailure->moveShard(rs.keys, teams);
-						output.send(rs);
-					} else {
-						ASSERT(false);
+					ASSERT(dataMoveMap[meta.range.begin]->valid);
+					RelocateShard rs(meta.range, SERVER_KNOBS->PRIORITY_RECOVER_MOVE);
+					rs.dataMoveId = meta.id;
+					rs.dataMove = initData->dataMoves[idx];
+					// TODO: Persist priority in DataMoveMetaData.
+					TraceEvent(SevInfo, "DDInitRestoredDataMove", self->ddId).detail("DataMove", meta.toString());
+					std::vector<ShardsAffectedByTeamFailure::Team> teams;
+					teams.push_back(ShardsAffectedByTeamFailure::Team(rs.dataMove->primaryDest, true));
+					if (!rs.dataMove->remoteDest.empty()) {
+						teams.push_back(ShardsAffectedByTeamFailure::Team(rs.dataMove->remoteDest, false));
 					}
+					shardsAffectedByTeamFailure->restartRequests.send(rs.keys);
+					shardsAffectedByTeamFailure->defineShard(rs.keys);
+					shardsAffectedByTeamFailure->moveShard(rs.keys, teams);
+					output.send(rs);
 					wait(yield(TaskPriority::DataDistribution));
 				}
 			}

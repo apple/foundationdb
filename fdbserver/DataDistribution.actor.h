@@ -50,16 +50,16 @@ struct DataMove {
 	// UID randomId;
 	// UID dataMoveId;
 	// int workFactor;
-	std::vector<std::vector<UID>> primarySrc;
-	std::vector<std::vector<UID>> remoteSrc;
+	std::vector<UID> primarySrc;
+	std::vector<UID> remoteSrc;
 	std::vector<UID> primaryDest;
 	std::vector<UID> remoteDest;
 
 	DataMove() : meta(DataMoveMetaData()), restore(false), startTime(-1), valid(false) {}
-	explicit DataMove(const DataMoveMetaData& meta, bool restore)
-	  : meta(meta), restore(restore), valid(true), startTime(now()) {}
+	explicit DataMove(DataMoveMetaData meta, bool restore)
+	  : meta(std::move(meta)), restore(restore), valid(true), startTime(now()) {}
 
-	void addShard(const DDShardInfo& shard, int priority = SERVER_KNOBS->PRIORITY_RECOVER_MOVE);
+	void validateShard(const DDShardInfo& shard, KeyRangeRef range, int priority = SERVER_KNOBS->PRIORITY_RECOVER_MOVE);
 };
 
 struct RelocateShard {
@@ -340,7 +340,7 @@ struct InitialDataDistribution : ReferenceCounted<InitialDataDistribution> {
 	std::set<std::vector<UID>> remoteTeams;
 	std::vector<DDShardInfo> shards;
 	Optional<Key> initHealthyZoneValue;
-	std::vector<DataMoveMetaData> dataMoves;
+	std::vector<std::shared_ptr<DataMove>> dataMoves;
 };
 
 struct ShardMetrics {
