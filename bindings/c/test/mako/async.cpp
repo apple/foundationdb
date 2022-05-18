@@ -70,6 +70,8 @@ void ResumableStateForPopulate::runOneTick() {
 						const auto tx_duration = watch_tx.diff();
 						stats.addLatency(OP_COMMIT, commit_latency);
 						stats.addLatency(OP_TRANSACTION, tx_duration);
+						sample_bins[OP_COMMIT].put(commit_latency);
+						sample_bins[OP_TRANSACTION].put(tx_duration);
 					}
 					stats.incrOpCount(OP_COMMIT);
 					stats.incrOpCount(OP_TRANSACTION);
@@ -188,6 +190,7 @@ void ResumableStateForRunWorkload::updateStepStats() {
 		const auto step_latency = watch_step.diff();
 		if (do_sample) {
 			stats.addLatency(OP_COMMIT, step_latency);
+			sample_bins[OP_COMMIT].put(step_latency);
 		}
 		tx.reset();
 		stats.incrOpCount(OP_COMMIT);
@@ -201,6 +204,7 @@ void ResumableStateForRunWorkload::updateStepStats() {
 		if (do_sample) {
 			const auto op_latency = watch_op.diff();
 			stats.addLatency(iter.op, op_latency);
+			sample_bins[iter.op].put(op_latency);
 		}
 		stats.incrOpCount(iter.op);
 	}
@@ -243,7 +247,9 @@ void ResumableStateForRunWorkload::onTransactionSuccess() {
 					const auto commit_latency = watch_commit.diff();
 					const auto tx_duration = watch_tx.diff();
 					stats.addLatency(OP_COMMIT, commit_latency);
-					stats.addLatency(OP_TRANSACTION, tx_duration);
+					stats.addLatency(OP_TRANSACTION, commit_latency);
+					sample_bins[OP_COMMIT].put(commit_latency);
+					sample_bins[OP_TRANSACTION].put(tx_duration);
 				}
 				stats.incrOpCount(OP_COMMIT);
 				stats.incrOpCount(OP_TRANSACTION);
@@ -264,6 +270,7 @@ void ResumableStateForRunWorkload::onTransactionSuccess() {
 		if (stats.getOpCount(OP_TRANSACTION) % args.sampling == 0) {
 			const auto tx_duration = watch_tx.diff();
 			stats.addLatency(OP_TRANSACTION, tx_duration);
+			sample_bins[OP_TRANSACTION].put(tx_duration);
 		}
 		stats.incrOpCount(OP_TRANSACTION);
 		watch_tx.startFromStop();

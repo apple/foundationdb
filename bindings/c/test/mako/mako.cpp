@@ -50,7 +50,6 @@
 #include "future.hpp"
 #include "logger.hpp"
 #include "mako.hpp"
-#include "mako/ddsketch.hpp"
 #include "operations.hpp"
 #include "process.hpp"
 #include "utils.hpp"
@@ -65,7 +64,7 @@ struct alignas(64) ThreadArgs {
 	int worker_id;
 	int thread_id;
 	pid_t parent_id;
-	ThreadStatistics stats;
+	LatencySampleBinArray sample_bins;
 	Arguments const* args;
 	shared_memory::Access shm;
 	fdb::Database database; // database to work with
@@ -123,7 +122,8 @@ int populate(Transaction tx,
              int worker_id,
              int thread_id,
              int thread_tps,
-             ThreadStatistics& stats) {
+             ThreadStatistics& stats,
+             LatencySampleBinArray& sample_bins) {
 	const auto key_begin = insertBegin(args.rows, worker_id, thread_id, args.num_processes, args.num_threads);
 	const auto key_end = insertEnd(args.rows, worker_id, thread_id, args.num_processes, args.num_threads);
 	auto xacts = 0;
@@ -198,6 +198,8 @@ int populate(Transaction tx,
 				const auto tx_duration = watch_tx.diff();
 				stats.addLatency(OP_COMMIT, commit_latency);
 				stats.addLatency(OP_TRANSACTION, tx_duration);
+				sample_bins[OP_COMMIT].put(commit_latency);
+				sample_bins[OP_TRANSACTION].put(tx_duration);
 			}
 			stats.incrOpCount(OP_COMMIT);
 			stats.incrOpCount(OP_TRANSACTION);
@@ -218,6 +220,7 @@ int populate(Transaction tx,
 int runOneTransaction(Transaction& tx,
                       Arguments const& args,
                       ThreadStatistics& stats,
+                      LatencySampleBinArray& sample_bins,
                       ByteString& key1,
                       ByteString& key2,
                       ByteString& val) {
@@ -269,6 +272,7 @@ transaction_begin:
 			if (do_sample) {
 				const auto step_latency = watch_step.diff();
 				stats.addLatency(OP_COMMIT, step_latency);
+				sample_bins[OP_COMMIT].put(step_latency);
 			}
 			tx.reset();
 			stats.incrOpCount(OP_COMMIT);
@@ -283,6 +287,7 @@ transaction_begin:
 			if (do_sample) {
 				const auto op_latency = watch_op.diff();
 				stats.addLatency(op, op_latency);
+				sample_bins[op].put(op_latency);
 			}
 			stats.incrOpCount(op);
 		}
@@ -300,6 +305,7 @@ transaction_begin:
 			if (do_sample) {
 				const auto commit_latency = watch_commit.diff();
 				stats.addLatency(OP_COMMIT, commit_latency);
+				sample_bins[OP_COMMIT].put(commit_latency);
 			}
 			stats.incrOpCount(OP_COMMIT);
 		} else {
@@ -318,6 +324,7 @@ transaction_begin:
 	// one transaction has completed successfully
 	if (do_sample) {
 		const auto tx_duration = watch_tx.stop().diff();
+		sample_bins[OP_TRANSACTION].put(tx_duration);
 		stats.addLatency(OP_TRANSACTION, tx_duration);
 	}
 	stats.incrOpCount(OP_TRANSACTION);
@@ -333,6 +340,7 @@ int runWorkload(Transaction tx,
                 int const thread_iters,
                 std::atomic<int> const& signal,
                 ThreadStatistics& stats,
+                LatencySampleBinArray& sample_bins,
                 int const dotrace,
                 int const dotagging) {
 	auto traceid = std::string{};
@@ -414,7 +422,7 @@ int runWorkload(Transaction tx,
 			}
 		}
 
-		rc = runOneTransaction(tx, args, stats, key1, key2, val);
+		rc = runOneTransaction(tx, args, stats, sample_bins, key1, key2, val);
 		if (rc) {
 			logr.warn("runOneTransaction failed ({})", rc);
 		}
@@ -443,7 +451,7 @@ void dumpThreadSamples(Arguments const& args,
                        pid_t parent_id,
                        int worker_id,
                        int thread_id,
-                       const ThreadStatistics& stats,
+                       const LatencySampleBinArray& sample_bins,
                        bool overwrite = true) {
 	const auto dirname = fmt::format("{}{}", TEMP_DATA_STORE, parent_id);
 	const auto rc = mkdir(dirname.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
@@ -460,7 +468,7 @@ void dumpThreadSamples(Arguments const& args,
 				continue;
 			}
 			auto fclose_guard = ExitGuard([fp]() { fclose(fp); });
-			stats.writeToFile(filename);
+			sample_bins[op].writeToFile(filename);
 		}
 	}
 }
@@ -474,7 +482,7 @@ void runAsyncWorkload(Arguments const& args,
 	auto dump_samples = [&args, pid_main, worker_id](auto&& states) {
 		auto overwrite = true; /* overwrite or append */
 		for (const auto& state : states) {
-			dumpThreadSamples(args, pid_main, worker_id, 0 /*thread_id*/, state->stats, overwrite);
+			dumpThreadSamples(args, pid_main, worker_id, 0 /*thread_id*/, state->sample_bins, overwrite);
 			overwrite = false;
 		}
 	};
@@ -578,7 +586,7 @@ void workerThread(ThreadArgs& thread_args) {
 		usleep(10000); /* 10ms */
 	}
 
-	auto& sample_stats = thread_args.stats;
+	auto& sample_bins = thread_args.sample_bins;
 
 	if (args.mode == MODE_CLEAN) {
 		auto rc = cleanup(tx, args);
@@ -586,19 +594,20 @@ void workerThread(ThreadArgs& thread_args) {
 			logr.error("cleanup failed");
 		}
 	} else if (args.mode == MODE_BUILD) {
-		auto rc = populate(tx, args, worker_id, thread_id, thread_tps, stats);
+		auto rc = populate(tx, args, worker_id, thread_id, thread_tps, stats, sample_bins);
 		if (rc < 0) {
 			logr.error("populate failed");
 		}
 	} else if (args.mode == MODE_RUN) {
-		auto rc = runWorkload(tx, args, thread_tps, throttle_factor, thread_iters, signal, stats, dotrace, dotagging);
+		auto rc = runWorkload(
+		    tx, args, thread_tps, throttle_factor, thread_iters, signal, stats, sample_bins, dotrace, dotagging);
 		if (rc < 0) {
 			logr.error("runWorkload failed");
 		}
 	}
 
 	if (args.mode == MODE_BUILD || args.mode == MODE_RUN) {
-		dumpThreadSamples(args, parent_id, worker_id, thread_id, sample_stats);
+		dumpThreadSamples(args, parent_id, worker_id, thread_id, sample_bins);
 	}
 }
 
@@ -1039,7 +1048,7 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			{ "disable_ryw", no_argument, NULL, ARG_DISABLE_RYW },
 			{ "json_report", optional_argument, NULL, ARG_JSON_REPORT },
 			{ "bg_file_path", required_argument, NULL, ARG_BG_FILE_PATH },
-			{ "export_sketch_path", optional_argument, NULL, ARG_EXPORT_SKETCH },
+			{ "export", optional_argument, NULL, ARG_EXPORT },
 			{ NULL, 0, NULL, 0 }
 		};
 		idx = 0;
@@ -1233,9 +1242,9 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 		case ARG_BG_FILE_PATH:
 			args.bg_materialize_files = true;
 			strncpy(args.bg_file_path, optarg, std::min(sizeof(args.bg_file_path), strlen(optarg) + 1));
-		case ARG_EXPORT_SKETCH:
+		case ARG_EXPORT:
 			if (optarg == NULL && (argv[optind] == NULL || (argv[optind] != NULL && argv[optind][0] == '-'))) {
-				const std::string default_file = "sketch_data.json";
+				std::string default_file = "export.json";
 				args.stats_export_path = default_file;
 			} else {
 				args.stats_export_path = optarg;
@@ -1548,15 +1557,14 @@ void printReport(Arguments const& args,
 
 	fmt::print("Latency (us)");
 	printStatsHeader(args, true, false, true);
-	std::unordered_map<std::string, DDSketchMako> data_points;
+
 	/* Total Samples */
 	putTitle("Samples");
 	first_op = 1;
 	for (auto op = 0; op < MAX_OP; op++) {
-		std::string op_name = getOpName(op);
 		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
-			if (data_points[op_name].getPopulationSize() > 0) {
-				putField(data_points[op_name].getPopulationSize());
+			if (final_stats.getLatencyUsTotal(op)) {
+				putField(final_stats.getLatencySampleCount(op));
 			} else {
 				putField("N/A");
 			}
@@ -1566,7 +1574,7 @@ void printReport(Arguments const& args,
 				} else {
 					fmt::fprintf(fp, ",");
 				}
-				fmt::fprintf(fp, "\"%s\": %lu", op_name, data_points[op_name].getPopulationSize());
+				fmt::fprintf(fp, "\"%s\": %lu", getOpName(op), final_stats.getLatencySampleCount(op));
 			}
 		}
 	}
@@ -1579,9 +1587,8 @@ void printReport(Arguments const& args,
 	putTitle("Min");
 	first_op = 1;
 	for (auto op = 0; op < MAX_OP; op++) {
-		std::string op_name = getOpName(op);
 		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
-			const auto lat_min = data_points[op_name].min();
+			const auto lat_min = final_stats.getLatencyUsMin(op);
 			if (lat_min == -1) {
 				putField("N/A");
 			} else {
@@ -1592,7 +1599,7 @@ void printReport(Arguments const& args,
 					} else {
 						fmt::fprintf(fp, ",");
 					}
-					fmt::fprintf(fp, "\"%s\": %lu", op_name, lat_min);
+					fmt::fprintf(fp, "\"%s\": %lu", getOpName(op), lat_min);
 				}
 			}
 		}
@@ -1606,18 +1613,18 @@ void printReport(Arguments const& args,
 	putTitle("Avg");
 	first_op = 1;
 	for (auto op = 0; op < MAX_OP; op++) {
-		std::string op_name = getOpName(op);
 		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
-			if (data_points[op_name].getPopulationSize() > 0) {
-				auto avg = std::ceil(data_points[op_name].mean() * 100) / 100;
-				putField(avg);
+			const auto lat_total = final_stats.getLatencyUsTotal(op);
+			const auto lat_samples = final_stats.getLatencySampleCount(op);
+			if (lat_total) {
+				putField(lat_total / lat_samples);
 				if (fp) {
 					if (first_op) {
 						first_op = 0;
 					} else {
 						fmt::fprintf(fp, ",");
 					}
-					fmt::fprintf(fp, "\"%s\": %lu", getOpName(op), avg);
+					fmt::fprintf(fp, "\"%s\": %lu", getOpName(op), lat_total / lat_samples);
 				}
 			} else {
 				putField("N/A");
@@ -1652,6 +1659,8 @@ void printReport(Arguments const& args,
 	}
 	fmt::print("\n");
 
+	std::unordered_map<std::string, DDSketch> data_points;
+
 	/* Median Latency */
 	if (fp) {
 		fmt::fprintf(fp, "}, \"medianLatency\": {");
@@ -1668,10 +1677,10 @@ void printReport(Arguments const& args,
 					auto load_sample = [pid_main, op, &data_points, &op_name](int process_id, int thread_id) {
 						const auto dirname = fmt::format("{}{}", TEMP_DATA_STORE, pid_main);
 						const auto filename = getStatsFilename(dirname, process_id, thread_id, op);
-						std::ifstream ifs{ filename };
+						std::ifstream fp{ filename };
 						std::ostringstream sstr;
-						sstr << ifs.rdbuf();
-						DDSketchMako sketch;
+						sstr << fp.rdbuf();
+						DDSketch sketch;
 						rapidjson::Document doc;
 						doc.Parse(sstr.str().c_str());
 						if (doc.HasParseError()) {
@@ -1679,7 +1688,7 @@ void printReport(Arguments const& args,
 						}
 						sketch.deserialize(doc);
 						if (data_points.count(op_name)) {
-							data_points[op_name].mergeWith(sketch);
+							data_points[op_name].merge(sketch);
 						} else {
 							data_points[op_name] = sketch;
 						}
@@ -1802,10 +1811,8 @@ void printReport(Arguments const& args,
 		writer.StartObject();
 		for (auto op = 0; op < MAX_OP; op++) {
 			std::string op_name = getOpName(op);
-			if (data_points[op_name].getPopulationSize() > 0) {
-				writer.String(op_name.c_str());
-				data_points[op_name].serialize(writer);
-			}
+			writer.String(op_name.c_str());
+			data_points[op_name].serialize(writer);
 		}
 		writer.EndObject();
 		std::ofstream f(args.stats_export_path);
@@ -1953,7 +1960,7 @@ int statsProcessMain(Arguments const& args,
 
 bool mergeSketchReport(Arguments& args) {
 
-	std::unordered_map<std::string, DDSketchMako> sketches;
+	std::unordered_map<std::string, DDSketch> sketches;
 	for (auto& filename : args.report_files) {
 		std::ifstream f{ filename };
 		std::stringstream buffer;
