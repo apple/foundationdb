@@ -86,7 +86,7 @@ struct CheckpointMetaData {
 	}
 };
 
-// a DataMoveMetaData object corresponds to a single data move.
+// A DataMoveMetaData object corresponds to a single data move.
 struct DataMoveMetaData {
  	enum Phase {
  		InvalidPhase = 0,

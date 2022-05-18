@@ -1510,7 +1510,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 			                                         self->teamCollections.size() > 1,
 			                                         relocateShardInterval.pairID,
 			                                         ddEnabledState,
-			                                         false);
+			                                         CancelConflictingDataMoves::False);
 			state Future<Void> pollHealth =
 			    signalledTransferComplete ? Never()
 			                              : delay(SERVER_KNOBS->HEALTH_POLL_TIME, TaskPriority::DataDistributionLaunch);
@@ -1535,7 +1535,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 								                      self->teamCollections.size() > 1,
 								                      relocateShardInterval.pairID,
 								                      ddEnabledState,
-								                      false);
+								                      CancelConflictingDataMoves::False);
 							} else {
 								self->fetchKeysComplete.insert(rd);
 								// if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
@@ -2303,7 +2303,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 					    .detail("IsRestore", done.isRestore())
 					    .detail("Total", self.activeRelocations);
 					// if (done.isRestore()) {
-					// 	self.shardsAffectedByTeamFailure->restartRequests.send(done.keys);
+					// 	self.shardsAffectedByTeamFailure->restartShardTracker.send(done.keys);
 					// }
 					self.finishRelocation(done.priority, done.healthPriority);
 					self.fetchKeysComplete.erase(done);

@@ -224,7 +224,7 @@ struct DataLossRecoveryWorkload : TestWorkload {
 				              false,
 				              UID(), // for logging only
 				              &ddEnabledState,
-				              true));
+				              CancelConflictingDataMoves::True));
 				break;
 			} catch (Error& e) {
 				TraceEvent("DataLossRecovery").error(e).detail("Phase", "MoveRangeError");

@@ -31,6 +31,8 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+FDB_DEFINE_BOOLEAN_PARAM(CancelConflictingDataMoves);
+
 namespace {
 struct Shard {
 	Shard() = default;
@@ -1211,7 +1213,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
                                           FlowLock* startMoveKeysLock,
                                           UID relocationIntervalId,
                                           const DDEnabledState* ddEnabledState,
-                                          bool cancelConflictingDataMoves) {
+                                          CancelConflictingDataMoves cancelConflictingDataMoves) {
 	ASSERT(CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
 	state Future<Void> warningLogger = logWarningAfter("StartMoveShardsTooLong", 600, servers);
 
@@ -2407,7 +2409,7 @@ ACTOR Future<Void> moveKeys(Database cx,
                             bool hasRemote,
                             UID relocationIntervalId,
                             const DDEnabledState* ddEnabledState,
-                            bool cancelConflictingDataMoves) {
+                            CancelConflictingDataMoves cancelConflictingDataMoves) {
 	ASSERT(destinationTeam.size());
 	std::sort(destinationTeam.begin(), destinationTeam.end());
 

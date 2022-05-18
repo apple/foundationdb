@@ -25,11 +25,14 @@
 #elif !defined(FDBSERVER_MOVEKEYS_ACTOR_H)
 #define FDBSERVER_MOVEKEYS_ACTOR_H
 
-#include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/KeyRangeMap.h"
+#include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/MasterInterface.h"
+#include "flow/BooleanParam.h"
 #include "flow/actorcompiler.h"
+
+FDB_DECLARE_BOOLEAN_PARAM(CancelConflictingDataMoves);
 
 struct MoveKeysLock {
 	UID prevOwner, myOwner, prevWrite;
@@ -82,7 +85,7 @@ ACTOR Future<Void> moveKeys(Database occ,
                             bool hasRemote,
                             UID relocationIntervalId, // for logging only
                             const DDEnabledState* ddEnabledState,
-                            bool cancelConflictingDataMoves);
+                            CancelConflictingDataMoves cancelConflictingDataMoves = CancelConflictingDataMoves::False);
 
 ACTOR Future<Void> cleanUpDataMove(Database occ,
                                    UID dataMoveId,

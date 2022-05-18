@@ -155,7 +155,6 @@ public:
 	}
 
 	// Find the team with the exact storage servers as req.src.
-
 	static void getTeamByServers(DDTeamCollection* self, GetTeamRequest req) {
 		const std::string servers = TCTeamInfo::serversToString(req.src);
 		Optional<Reference<IDataDistributionTeam>> res;

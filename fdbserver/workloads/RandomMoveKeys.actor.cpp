@@ -154,7 +154,7 @@ struct MoveKeysWorkload : TestWorkload {
 			              false,
 			              relocateShardInterval.pairID,
 			              &ddEnabledState,
-			              true));
+			              CancelConflictingDataMoves::True));
 			TraceEvent(relocateShardInterval.end()).detail("Result", "Success");
 			return Void();
 		} catch (Error& e) {

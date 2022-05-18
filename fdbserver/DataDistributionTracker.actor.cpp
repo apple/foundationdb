@@ -1050,7 +1050,7 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
 				self.sizeChanges.add(fetchShardMetricsList(&self, req));
 			}
 			when(wait(self.sizeChanges.getResult())) {}
-			when(KeyRange req = waitNext(self.shardsAffectedByTeamFailure->restartRequests.getFuture())) {
+			when(KeyRange req = waitNext(self.shardsAffectedByTeamFailure->restartShardTracker.getFuture())) {
 				restartShardTrackers(&self, req);
 			}
 		}

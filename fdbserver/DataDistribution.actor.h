@@ -39,17 +39,10 @@ struct DDShardInfo;
 
 struct DataMove {
 	const DataMoveMetaData meta;
-	// KeyRange keys;
-	// int priority;
-	// int boundaryPriority;
-	// int healthPriority;
 	bool restore;
 	bool valid;
 
 	double startTime;
-	// UID randomId;
-	// UID dataMoveId;
-	// int workFactor;
 	std::vector<UID> primarySrc;
 	std::vector<UID> remoteSrc;
 	std::vector<UID> primaryDest;
@@ -59,6 +52,7 @@ struct DataMove {
 	explicit DataMove(DataMoveMetaData meta, bool restore)
 	  : meta(std::move(meta)), restore(restore), valid(true), startTime(now()) {}
 
+	// Checks if the DataMove is consistent with the shard.
 	void validateShard(const DDShardInfo& shard, KeyRangeRef range, int priority = SERVER_KNOBS->PRIORITY_RECOVER_MOVE);
 };
 
@@ -295,7 +289,7 @@ public:
 	void finishMove(KeyRangeRef keys);
 	void check() const;
 
-	PromiseStream<KeyRange> restartRequests;
+	PromiseStream<KeyRange> restartShardTracker;
 
 private:
 	struct OrderByTeamKey {

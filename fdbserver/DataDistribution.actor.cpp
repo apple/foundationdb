@@ -234,13 +234,7 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution(Data
 
 				// for each range
 				for (int i = 0; i < keyServers.size() - 1; i++) {
-					if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
-						decodeKeyServersValue(UIDtoTagMap, keyServers[i].value, src, dest, srcId, destId);
-					} else {
-						decodeKeyServersValue(UIDtoTagMap, keyServers[i].value, src, dest);
-						srcId = anonymousShardId;
-						destId = dest.empty() ? UID() : anonymousShardId;
-					}
+					decodeKeyServersValue(UIDtoTagMap, keyServers[i].value, src, dest, srcId, destId);
 					DDShardInfo info(keyServers[i].key, srcId, destId);
 					if (remoteDcIds.size()) {
 						auto srcIter = team_cache.find(src);
@@ -743,14 +737,12 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			state KeyRangeMap<std::shared_ptr<DataMove>> dataMoveMap(std::make_shared<DataMove>());
 			for (int i = 0; i < initData->dataMoves.size(); ++i) {
 				const auto& meta = initData->dataMoves[i]->meta;
-				TraceEvent("DDInitFoundDataMove", self->ddId)
-				    .detail("DataMoveID", meta.id)
-				    .detail("DataMove", meta.toString());
 				if (meta.getPhase() == DataMoveMetaData::Deleting || !CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 					RelocateShard rs(meta.range, SERVER_KNOBS->PRIORITY_RECOVER_MOVE);
 					rs.dataMoveId = meta.id;
 					rs.cancelled = true;
 					output.send(rs);
+					TraceEvent("DDInitScheduledCancelDataMove", self->ddId).detail("DataMove", meta.toString());
 				}
 
 				if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
@@ -779,7 +771,9 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 					    .detail("PrimarySrc", describe(iShard.primarySrc))
 					    .detail("RemoteSrc", describe(iShard.remoteSrc))
 					    .detail("PrimaryDest", describe(iShard.primaryDest))
-					    .detail("RemoteDest", describe(iShard.remoteDest));
+					    .detail("RemoteDest", describe(iShard.remoteDest))
+					    .detail("SrcID", iShard.srcId)
+					    .detail("DestID", iShard.destId);
 				}
 
 				shardsAffectedByTeamFailure->moveShard(keys, teams);
@@ -798,8 +792,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 					                          RelocateReason::OTHER));
 				}
 
-				// if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA && iShard.srcId != anonymousShardId) {
-				if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+				if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA && EXPENSIVE_VALIDATION) {
 					dataMoveMap[keys.begin]->validateShard(iShard, keys);
 				}
 
@@ -810,24 +803,30 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 				state int idx = 0;
 				for (; idx < initData->dataMoves.size(); ++idx) {
 					const DataMoveMetaData& meta = initData->dataMoves[idx]->meta;
-					TraceEvent(SevDebug, "DDInitProcessingRestoredDataMove", self->ddId)
-					    .detail("DataMove", meta.toString());
+					TraceEvent(SevDebug, "DDInitFoundDataMove", self->ddId).detail("DataMove", meta.toString());
 					if (meta.getPhase() == DataMoveMetaData::Deleting) {
 						continue;
 					}
-					ASSERT(dataMoveMap[meta.range.begin]->valid);
+					if (EXPENSIVE_VALIDATION) {
+						ASSERT(dataMoveMap[meta.range.begin]->valid);
+					}
+					// TODO: Persist priority in DataMoveMetaData.
 					RelocateShard rs(meta.range, SERVER_KNOBS->PRIORITY_RECOVER_MOVE);
 					rs.dataMoveId = meta.id;
 					rs.dataMove = initData->dataMoves[idx];
-					// TODO: Persist priority in DataMoveMetaData.
 					TraceEvent(SevInfo, "DDInitRestoredDataMove", self->ddId).detail("DataMove", meta.toString());
 					std::vector<ShardsAffectedByTeamFailure::Team> teams;
 					teams.push_back(ShardsAffectedByTeamFailure::Team(rs.dataMove->primaryDest, true));
 					if (!rs.dataMove->remoteDest.empty()) {
 						teams.push_back(ShardsAffectedByTeamFailure::Team(rs.dataMove->remoteDest, false));
 					}
-					shardsAffectedByTeamFailure->restartRequests.send(rs.keys);
+
+					// Since a DataMove could cover more than one keyrange, e.g., during merge, we need to define
+					// the target shard and restart the shard tracker.
+					shardsAffectedByTeamFailure->restartShardTracker.send(rs.keys);
 					shardsAffectedByTeamFailure->defineShard(rs.keys);
+
+					// When restoring a DataMove, the destination team is determined, and hence
 					shardsAffectedByTeamFailure->moveShard(rs.keys, teams);
 					output.send(rs);
 					wait(yield(TaskPriority::DataDistribution));
