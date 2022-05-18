@@ -160,8 +160,6 @@ ACTOR Future<bool> metaclusterGetCommand(Reference<IDatabase> db, std::vector<St
 	}
 
 	DataClusterMetadata metadata = wait(MetaclusterAPI::getCluster(db, tokens[2]));
-	printf("  registration state: %s\n",
-	       DataClusterEntry::registrationStateToString(metadata.entry.registrationState).toString().c_str());
 	printf("  connection string: %s\n", metadata.connectionString.toString().c_str());
 	printf("  tenant group capacity: %d\n", metadata.entry.capacity.numTenantGroups);
 	printf("  allocated tenant groups: %d\n", metadata.entry.allocated.numTenantGroups);

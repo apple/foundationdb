@@ -633,7 +633,6 @@ extern const KeyRangeRef dataClusterMetadataKeys;
 extern const KeyRef dataClusterMetadataPrefix;
 extern const KeyRangeRef dataClusterConnectionRecordKeys;
 extern const KeyRef dataClusterConnectionRecordPrefix;
-extern const KeyRef dataClusterLastIdKey;
 extern const KeyRef dataClusterRegistrationKey;
 
 #pragma clang diagnostic pop

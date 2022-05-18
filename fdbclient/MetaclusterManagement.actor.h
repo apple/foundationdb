@@ -53,8 +53,12 @@ struct DataClusterMetadata {
 	DataClusterMetadata(DataClusterEntry const& entry, ClusterConnectionString const& connectionString)
 	  : entry(entry), connectionString(connectionString) {}
 
-	Value encode() { return ObjectWriter::toValue(*this, IncludeVersion(ProtocolVersion::withMetacluster())); }
-	Value encode(Arena& arena) {
+	bool matchesConfiguration(DataClusterMetadata const& other) const {
+		return entry.matchesConfiguration(other.entry) && connectionString == other.connectionString;
+	}
+
+	Value encode() const { return ObjectWriter::toValue(*this, IncludeVersion(ProtocolVersion::withMetacluster())); }
+	Value encode(Arena& arena) const {
 		return ObjectWriter::toValue(*this, IncludeVersion(ProtocolVersion::withMetacluster()), arena);
 	}
 	static DataClusterMetadata decode(ValueRef const& value) {
@@ -152,20 +156,14 @@ void updateClusterMetadata(Transaction tr,
 }
 
 ACTOR template <class Transaction>
-Future<Void> managementClusterRegister(Transaction tr,
-                                       ClusterNameRef name,
-                                       std::string connectionString,
-                                       DataClusterEntry entry) {
-	state Key dataClusterMetadataKey = name.withPrefix(dataClusterMetadataPrefix);
-	state Key dataClusterConnectionRecordKey = name.withPrefix(dataClusterConnectionRecordPrefix);
-
-	if (name.startsWith("\xff"_sr)) {
-		throw invalid_cluster_name();
-	}
-
+Future<std::pair<UID, bool>> managementClusterRegisterPrecheck(Transaction tr,
+                                                               ClusterNameRef name,
+                                                               Optional<DataClusterMetadata> metadata) {
 	state Future<Optional<DataClusterMetadata>> dataClusterMetadataFuture = tryGetClusterTransaction(tr, name);
 	state typename transaction_future_type<Transaction, Optional<Value>>::type tenantModeFuture =
 	    tr->get(configKeysPrefix.withSuffix("tenant_mode"_sr));
+	state typename transaction_future_type<Transaction, Optional<Value>>::type metaclusterIdFuture =
+	    tr->get(clusterIdKey);
 
 	Optional<Value> tenantMode = wait(safeThreadFutureToFuture(tenantModeFuture));
 
@@ -173,33 +171,61 @@ Future<Void> managementClusterRegister(Transaction tr,
 		throw invalid_metacluster_operation();
 	}
 
-	Optional<DataClusterMetadata> dataClusterMetadata = wait(dataClusterMetadataFuture);
-	if (dataClusterMetadata.present()) {
-		if (dataClusterMetadata.get().entry.registrationState == DataClusterEntry::RegistrationState::REGISTERING &&
-		    dataClusterMetadata.get().connectionString.toString() == connectionString &&
-		    dataClusterMetadata.get().entry.capacity == entry.capacity) {
-			return Void();
-		} else {
-			throw cluster_already_exists();
-		}
+	state Optional<DataClusterMetadata> dataClusterMetadata = wait(dataClusterMetadataFuture);
+	if (dataClusterMetadata.present() &&
+	    (!metadata.present() || !metadata.get().matchesConfiguration(dataClusterMetadata.get()))) {
+		throw cluster_already_exists();
 	}
 
-	entry.allocated = ClusterUsage();
+	Optional<Value> metaclusterIdValue = wait(safeThreadFutureToFuture(metaclusterIdFuture));
+	ASSERT(metaclusterIdValue.present());
 
-	tr->set(dataClusterMetadataKey, entry.encode());
-	tr->set(dataClusterConnectionRecordKey, connectionString);
+	return std::make_pair(BinaryReader::fromStringRef<UID>(metaclusterIdValue.get(), Unversioned()),
+	                      dataClusterMetadata.present());
+}
+
+ACTOR template <class Transaction>
+Future<Void> managementClusterRegister(Transaction tr,
+                                       ClusterNameRef name,
+                                       ClusterConnectionString connectionString,
+                                       DataClusterEntry entry) {
+	state Key dataClusterMetadataKey = name.withPrefix(dataClusterMetadataPrefix);
+	state Key dataClusterConnectionRecordKey = name.withPrefix(dataClusterConnectionRecordPrefix);
+
+	std::pair<UID, bool> result =
+	    wait(managementClusterRegisterPrecheck(tr, name, DataClusterMetadata(entry, connectionString)));
+
+	if (!result.second) {
+		entry.allocated = ClusterUsage();
+
+		tr->set(dataClusterMetadataKey, entry.encode());
+		tr->set(dataClusterConnectionRecordKey, connectionString.toString());
+	}
 
 	return Void();
 }
 
 ACTOR template <class Transaction>
-Future<Void> dataClusterRegister(Transaction tr, ClusterNameRef name, UID clusterId) {
+Future<UID> dataClusterRegister(Transaction tr, ClusterNameRef name, UID metaclusterId) {
 	state Future<std::map<TenantName, TenantMapEntry>> existingTenantsFuture =
 	    ManagementAPI::listTenantsTransaction(tr, ""_sr, "\xff\xff"_sr, 1);
 	state typename transaction_future_type<Transaction, RangeResult>::type existingDataFuture =
 	    tr->getRange(normalKeys, 1);
 	state typename transaction_future_type<Transaction, Optional<Value>>::type clusterRegistrationFuture =
 	    tr->get(dataClusterRegistrationKey);
+
+	Optional<Value> storedClusterRegistration = wait(safeThreadFutureToFuture(clusterRegistrationFuture));
+	if (storedClusterRegistration.present()) {
+		DataClusterRegistrationEntry existingRegistration =
+		    DataClusterRegistrationEntry::decode(storedClusterRegistration.get());
+
+		if (existingRegistration.name != name || existingRegistration.metaclusterId != metaclusterId) {
+			throw cluster_already_registered();
+		} else {
+			// We already successfully registered the cluster with these details, so there's nothing to do
+			return existingRegistration.id;
+		}
+	}
 
 	std::map<TenantName, TenantMapEntry> existingTenants = wait(safeThreadFutureToFuture(existingTenantsFuture));
 	if (!existingTenants.empty()) {
@@ -213,20 +239,8 @@ Future<Void> dataClusterRegister(Transaction tr, ClusterNameRef name, UID cluste
 		throw cluster_not_empty();
 	}
 
-	Optional<Value> storedClusterRegistration = wait(safeThreadFutureToFuture(clusterRegistrationFuture));
-	if (storedClusterRegistration.present()) {
-		DataClusterRegistrationEntry existingRegistration =
-		    DataClusterRegistrationEntry::decode(storedClusterRegistration.get());
-
-		if (existingRegistration.name != name || existingRegistration.id != clusterId) {
-			throw cluster_already_registered();
-		} else {
-			// We already successfully registered the cluster with these details, so there's nothing to do
-			return Void();
-		}
-	}
-
-	tr->set(dataClusterRegistrationKey, DataClusterRegistrationEntry(name, clusterId).encode());
+	state UID clusterId = deterministicRandom()->randomUniqueID();
+	tr->set(dataClusterRegistrationKey, DataClusterRegistrationEntry(name, metaclusterId, clusterId).encode());
 
 	std::vector<StringRef> tokens = { "tenant_mode=required"_sr };
 
@@ -242,19 +256,7 @@ Future<Void> dataClusterRegister(Transaction tr, ClusterNameRef name, UID cluste
 		throw cluster_configuration_failure();
 	}
 
-	return Void();
-}
-
-ACTOR template <class Transaction>
-Future<Void> finalizeRegistration(Transaction tr, ClusterNameRef name, UID clusterId) {
-	state Optional<DataClusterMetadata> dataClusterMetadata = wait(tryGetClusterTransaction(tr, name));
-	if (dataClusterMetadata.get().entry.id == clusterId &&
-	    dataClusterMetadata.get().entry.registrationState == DataClusterEntry::RegistrationState::REGISTERING) {
-		dataClusterMetadata.get().entry.registrationState = DataClusterEntry::RegistrationState::READY;
-		updateClusterMetadata(tr, name, Optional<ClusterConnectionString>(), dataClusterMetadata.get().entry);
-	}
-
-	return Void();
+	return clusterId;
 }
 
 ACTOR template <class DB>
@@ -266,14 +268,80 @@ Future<Void> registerCluster(Reference<DB> db,
 		throw invalid_cluster_name();
 	}
 
-	entry.id = deterministicRandom()->randomUniqueID();
+	state UID metaclusterId;
 
-	// Step 1: Record that we are registering the new cluster
+	// Step 1: Check for a conflicting cluster in the management cluster and get the metacluster ID
+	state Reference<typename DB::TransactionT> precheckTr = db->createTransaction();
+	loop {
+		try {
+			precheckTr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			std::pair<UID, bool> result =
+			    wait(managementClusterRegisterPrecheck(precheckTr, name, Optional<DataClusterMetadata>()));
+			metaclusterId = result.first;
+
+			if (BUGGIFY) {
+				throw commit_unknown_result();
+			}
+
+			wait(safeThreadFutureToFuture(precheckTr->commit()));
+
+			if (BUGGIFY) {
+				throw commit_unknown_result();
+			}
+
+			TraceEvent("RegisteredDataCluster")
+			    .detail("ClusterName", name)
+			    .detail("ClusterID", entry.id)
+			    .detail("Capacity", entry.capacity)
+			    .detail("Version", precheckTr->getCommittedVersion())
+			    .detail("ConnectionString", connectionString.toString());
+
+			break;
+		} catch (Error& e) {
+			wait(safeThreadFutureToFuture(precheckTr->onError(e)));
+		}
+	}
+
+	// Step 2: Configure the data cluster as a subordinate cluster
+	state Reference<IDatabase> dataClusterDb =
+	    MultiVersionApi::api->createDatabase(makeReference<ClusterConnectionMemoryRecord>(connectionString));
+
+	state Reference<ITransaction> dataClusterTr = dataClusterDb->createTransaction();
+	loop {
+		try {
+			dataClusterTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			UID clusterId = wait(dataClusterRegister(dataClusterTr, name, metaclusterId));
+			entry.id = clusterId;
+
+			if (BUGGIFY) {
+				throw commit_unknown_result();
+			}
+
+			wait(safeThreadFutureToFuture(dataClusterTr->commit()));
+
+			if (BUGGIFY) {
+				throw commit_unknown_result();
+			}
+
+			TraceEvent("ConfiguredDataCluster")
+			    .detail("ClusterName", name)
+			    .detail("ClusterID", entry.id)
+			    .detail("Capacity", entry.capacity)
+			    .detail("Version", dataClusterTr->getCommittedVersion())
+			    .detail("ConnectionString", connectionString.toString());
+
+			break;
+		} catch (Error& e) {
+			wait(safeThreadFutureToFuture(dataClusterTr->onError(e)));
+		}
+	}
+
+	// Step 3: Register the cluster in the management cluster
 	state Reference<typename DB::TransactionT> registerTr = db->createTransaction();
 	loop {
 		try {
 			registerTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			wait(managementClusterRegister(registerTr, name, connectionString.toString(), entry));
+			wait(managementClusterRegister(registerTr, name, connectionString, entry));
 
 			if (BUGGIFY) {
 				throw commit_unknown_result();
@@ -285,7 +353,7 @@ Future<Void> registerCluster(Reference<DB> db,
 				throw commit_unknown_result();
 			}
 
-			TraceEvent("RegisteredDataCluster")
+			TraceEvent("FinalizedDataCluster")
 			    .detail("ClusterName", name)
 			    .detail("ClusterID", entry.id)
 			    .detail("Capacity", entry.capacity)
@@ -295,74 +363,6 @@ Future<Void> registerCluster(Reference<DB> db,
 			break;
 		} catch (Error& e) {
 			wait(safeThreadFutureToFuture(registerTr->onError(e)));
-		}
-	}
-
-	// Step 2: Configure the data cluster as a subordinate cluster
-	state Reference<IDatabase> dataClusterDb =
-	    MultiVersionApi::api->createDatabase(makeReference<ClusterConnectionMemoryRecord>(connectionString));
-
-	state Reference<ITransaction> dataClusterTr = dataClusterDb->createTransaction();
-
-	try {
-		loop {
-			try {
-				dataClusterTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				wait(dataClusterRegister(dataClusterTr, name, entry.id));
-
-				if (BUGGIFY) {
-					throw commit_unknown_result();
-				}
-
-				wait(safeThreadFutureToFuture(dataClusterTr->commit()));
-
-				if (BUGGIFY) {
-					throw commit_unknown_result();
-				}
-
-				TraceEvent("ConfiguredDataCluster")
-				    .detail("ClusterName", name)
-				    .detail("ClusterID", entry.id)
-				    .detail("Capacity", entry.capacity)
-				    .detail("Version", dataClusterTr->getCommittedVersion())
-				    .detail("ConnectionString", connectionString.toString());
-
-				break;
-			} catch (Error& e) {
-				wait(safeThreadFutureToFuture(dataClusterTr->onError(e)));
-			}
-		}
-	} catch (Error& e) {
-		// TODO: Remove cluster if the parameters match and the cluster is in registering state
-	}
-
-	// Step 3: Record that the cluster is ready in the management cluster
-	state Reference<typename DB::TransactionT> finalizeTr = db->createTransaction();
-	loop {
-		try {
-			finalizeTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			wait(finalizeRegistration(finalizeTr, name, entry.id));
-
-			if (BUGGIFY) {
-				throw commit_unknown_result();
-			}
-
-			wait(safeThreadFutureToFuture(finalizeTr->commit()));
-
-			if (BUGGIFY) {
-				throw commit_unknown_result();
-			}
-
-			TraceEvent("FinalizedDataCluster")
-			    .detail("ClusterName", name)
-			    .detail("ClusterID", entry.id)
-			    .detail("Capacity", entry.capacity)
-			    .detail("Version", finalizeTr->getCommittedVersion())
-			    .detail("ConnectionString", connectionString.toString());
-
-			break;
-		} catch (Error& e) {
-			wait(safeThreadFutureToFuture(finalizeTr->onError(e)));
 		}
 	}
 

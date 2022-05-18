@@ -85,6 +85,11 @@ public:
 	std::vector<NetworkAddress> coords;
 	std::vector<Hostname> hostnames;
 
+	bool operator==(const ClusterConnectionString& other) const noexcept {
+		return key == other.key && keyDesc == other.keyDesc && coords == other.coords && hostnames == other.hostnames;
+	}
+	bool operator!=(const ClusterConnectionString& other) const noexcept { return !(*this == other); }
+
 private:
 	void parseConnString();
 	Key key, keyDesc;

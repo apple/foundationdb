@@ -1415,7 +1415,6 @@ const KeyRef dataClusterMetadataPrefix = dataClusterMetadataKeys.begin;
 const KeyRangeRef dataClusterConnectionRecordKeys("\xff/metacluster/dataCluster/connectionString/"_sr,
                                                   "\xff/metacluster/dataCluster/connectionString0"_sr);
 const KeyRef dataClusterConnectionRecordPrefix = dataClusterConnectionRecordKeys.begin;
-const KeyRef dataClusterLastIdKey = "\xff/metacluster/dataCluster/lastId/"_sr;
 
 // Metacluster data cluster keys
 const KeyRef dataClusterRegistrationKey = "\xff/metacluster/dataCluster/clusterRegistration"_sr;

@@ -58,37 +58,19 @@ struct Traceable<ClusterUsage> : std::true_type {
 struct DataClusterEntry {
 	constexpr static FileIdentifier file_identifier = 929511;
 
-	enum class RegistrationState { UNKNOWN = 0, REGISTERING = 1, READY = 2 };
-
-	static RegistrationState stringToRegistrationState(StringRef str) {
-		if (str == "REGISTERING"_sr) {
-			return RegistrationState::REGISTERING;
-		} else if (str == "READY"_sr) {
-			return RegistrationState::READY;
-		} else {
-			return RegistrationState::UNKNOWN;
-		}
-	}
-
-	static StringRef registrationStateToString(RegistrationState state) {
-		if (state == RegistrationState::REGISTERING) {
-			return "REGISTERING"_sr;
-		} else if (state == RegistrationState::READY) {
-			return "READY"_sr;
-		} else {
-			return "UNKNOWN"_sr;
-		}
-	}
-
 	UID id;
 	ClusterUsage capacity;
 	ClusterUsage allocated;
-	RegistrationState registrationState = RegistrationState::REGISTERING;
 
 	DataClusterEntry() = default;
 	DataClusterEntry(ClusterUsage capacity) : capacity(capacity) {}
 	DataClusterEntry(UID id, ClusterUsage capacity, ClusterUsage allocated)
 	  : id(id), capacity(capacity), allocated(allocated) {}
+
+	// Returns true if all configurable properties match
+	bool matchesConfiguration(DataClusterEntry const& other) const {
+		return id == other.id && capacity == other.capacity;
+	}
 
 	Value encode() { return ObjectWriter::toValue(*this, IncludeVersion(ProtocolVersion::withMetacluster())); }
 	static DataClusterEntry decode(ValueRef const& value) {
@@ -100,7 +82,7 @@ struct DataClusterEntry {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, id, capacity, allocated, registrationState);
+		serializer(ar, id, capacity, allocated);
 	}
 };
 
@@ -108,10 +90,12 @@ struct DataClusterRegistrationEntry {
 	constexpr static FileIdentifier file_identifier = 13448589;
 
 	ClusterName name;
+	UID metaclusterId;
 	UID id;
 
 	DataClusterRegistrationEntry() = default;
-	DataClusterRegistrationEntry(ClusterName name, UID id) : name(name), id(id) {}
+	DataClusterRegistrationEntry(ClusterName name, UID metaclusterId, UID id)
+	  : name(name), metaclusterId(metaclusterId), id(id) {}
 
 	Value encode() { return ObjectWriter::toValue(*this, IncludeVersion(ProtocolVersion::withMetacluster())); }
 	static DataClusterRegistrationEntry decode(ValueRef const& value) {
@@ -123,7 +107,7 @@ struct DataClusterRegistrationEntry {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, name, id);
+		serializer(ar, name, metaclusterId, id);
 	}
 };
 
