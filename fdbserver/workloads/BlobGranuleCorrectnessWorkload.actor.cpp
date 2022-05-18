@@ -20,6 +20,7 @@
 
 #include <cmath>
 #include <map>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -63,6 +64,8 @@ struct ThreadData : ReferenceCounted<ThreadData>, NonCopyable {
 	// directory info
 	int32_t directoryID;
 	KeyRange directoryRange;
+	TenantName tenantName;
+	TenantMapEntry tenant;
 
 	// key + value gen data
 	// in vector for efficient random selection
@@ -96,8 +99,7 @@ struct ThreadData : ReferenceCounted<ThreadData>, NonCopyable {
 
 	ThreadData(uint32_t directoryID, int64_t targetByteRate)
 	  : directoryID(directoryID), targetByteRate(targetByteRate) {
-		directoryRange =
-		    KeyRangeRef(StringRef(format("%08x", directoryID)), StringRef(format("%08x", directoryID + 1)));
+		tenantName = StringRef(std::to_string(directoryID));
 
 		targetByteRate *= (0.5 + deterministicRandom()->random01());
 
@@ -119,7 +121,10 @@ struct ThreadData : ReferenceCounted<ThreadData>, NonCopyable {
 	}
 
 	// TODO could make keys variable length?
-	Key getKey(uint32_t key, uint32_t id) { return StringRef(format("%08x/%08x/%08x", directoryID, key, id)); }
+	Key getKey(uint32_t key, uint32_t id) { return StringRef(format("%08x/%08x", key, id)); }
+
+	// TODO REMOVE once blob workers understand tenants
+	Key getKeyWithTenantPrefix(uint32_t key, uint32_t id) { return getKey(key, id).withPrefix(tenant.prefix); }
 };
 
 // For debugging mismatches on what data should be and why
@@ -199,25 +204,30 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR Future<Void> setUpBlobRange(Database cx, KeyRange range) {
+	ACTOR Future<TenantMapEntry> setUpTenant(Database cx, TenantName name) {
 		if (BGW_DEBUG) {
-			fmt::print(
-			    "Setting up blob granule range for [{0} - {1})\n", range.begin.printable(), range.end.printable());
+			fmt::print("Setting up blob granule range for tenant {0}\n", name.printable());
 		}
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				tr->set(blobRangeChangeKey, deterministicRandom()->randomUniqueID().toString());
-				wait(krmSetRange(tr, blobRangeKeys.begin, range, LiteralStringRef("1")));
+
+				state Optional<TenantMapEntry> entry = wait(ManagementAPI::createTenantTransaction(tr, name));
+				if (!entry.present()) {
+					// if tenant already exists because of retry, load it
+					wait(store(entry, ManagementAPI::tryGetTenantTransaction(tr, name)));
+					ASSERT(entry.present());
+				}
+
 				wait(tr->commit());
 				if (BGW_DEBUG) {
-					fmt::print("Successfully set up blob granule range for [{0} - {1})\n",
-					           range.begin.printable(),
-					           range.end.printable());
+					fmt::print("Set up blob granule range for tenant {0}: {1}\n",
+					           name.printable(),
+					           entry.get().prefix.printable());
 				}
-				return Void();
+				return entry.get();
 			} catch (Error& e) {
 				wait(tr->onError(e));
 			}
@@ -240,7 +250,11 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		state int directoryIdx = 0;
 		for (; directoryIdx < self->directories.size(); directoryIdx++) {
 			// Set up the blob range first
-			wait(self->setUpBlobRange(cx, self->directories[directoryIdx]->directoryRange));
+			TenantMapEntry tenantEntry = wait(self->setUpTenant(cx, self->directories[directoryIdx]->tenantName));
+
+			self->directories[directoryIdx]->tenant = tenantEntry;
+			self->directories[directoryIdx]->directoryRange =
+			    KeyRangeRef(tenantEntry.prefix, tenantEntry.prefix.withSuffix(normalKeys.end));
 		}
 
 		if (BGW_DEBUG) {
@@ -292,7 +306,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 	                                     bool doSetup) {
 		// read entire keyspace at the start until granules for the entire thing are available
 		loop {
-			state Transaction tr(cx);
+			state Transaction tr(cx, threadData->tenantName);
 			try {
 				Version rv = wait(self->doGrv(&tr));
 				state Version readVersion = rv;
@@ -476,7 +490,8 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 			}
 			for (; idIdx < checkIt->second.writes.size() && checkIt->second.writes[idIdx].writeVersion <= readVersion;
 			     idIdx++) {
-				Key nextKeyShouldBe = threadData->getKey(key, idIdx);
+				// FIXME: Blob Workers should strip tenant prefix like SS do
+				Key nextKeyShouldBe = threadData->getKeyWithTenantPrefix(key, idIdx);
 				Version keyBeginVersion = beginVersionByChunk.rangeContaining(nextKeyShouldBe).cvalue();
 				if (keyBeginVersion > checkIt->second.writes[idIdx].writeVersion) {
 					if (DEBUG_READ_OP(threadData->directoryID, readVersion)) {
@@ -624,7 +639,9 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 					endKey = endKeyIt->first;
 				}
 
-				state KeyRange range = KeyRangeRef(threadData->getKey(startKey, 0), threadData->getKey(endKey, 0));
+				// FIXME: make blob workers tenant aware
+				state KeyRange range = KeyRangeRef(threadData->getKeyWithTenantPrefix(startKey, 0),
+				                                   threadData->getKeyWithTenantPrefix(endKey, 0));
 
 				// pick read version
 				ASSERT(threadData->writeVersions.back() >= threadData->minSuccessfulReadVersion);
@@ -703,7 +720,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		TraceEvent("BlobGranuleCorrectnessWriterReady").log();
 
 		loop {
-			state Transaction tr(cx);
+			state Transaction tr(cx, threadData->tenantName);
 
 			// pick rows to write and clear, generate values for writes
 			state std::vector<std::tuple<uint32_t, uint32_t, uint32_t, uint16_t>> keyAndIdToWrite;
