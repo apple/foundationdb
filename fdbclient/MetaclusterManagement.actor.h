@@ -68,6 +68,12 @@ struct DataClusterMetadata {
 		return metadata;
 	}
 
+	json_spirit::mValue toJson() const {
+		json_spirit::mObject obj = entry.toJson();
+		obj["connection_string"] = connectionString.toString();
+		return obj;
+	}
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, connectionString, entry);

@@ -37,7 +37,7 @@ struct ClusterUsage {
 	ClusterUsage() = default;
 	ClusterUsage(int numTenantGroups) : numTenantGroups(numTenantGroups) {}
 
-	json_spirit::mObject toJson();
+	json_spirit::mObject toJson() const;
 
 	bool operator==(const ClusterUsage& other) const noexcept { return numTenantGroups == other.numTenantGroups; }
 	bool operator!=(const ClusterUsage& other) const noexcept { return !(*this == other); }
@@ -72,12 +72,19 @@ struct DataClusterEntry {
 		return id == other.id && capacity == other.capacity;
 	}
 
-	Value encode() { return ObjectWriter::toValue(*this, IncludeVersion(ProtocolVersion::withMetacluster())); }
+	Value encode() const { return ObjectWriter::toValue(*this, IncludeVersion(ProtocolVersion::withMetacluster())); }
 	static DataClusterEntry decode(ValueRef const& value) {
 		DataClusterEntry entry;
 		ObjectReader reader(value.begin(), IncludeVersion());
 		reader.deserialize(entry);
 		return entry;
+	}
+
+	json_spirit::mObject toJson() const {
+		json_spirit::mObject obj;
+		obj["capacity"] = capacity.toJson();
+		obj["allocated"] = allocated.toJson();
+		return obj;
 	}
 
 	template <class Ar>

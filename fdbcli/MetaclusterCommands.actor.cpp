@@ -153,16 +153,39 @@ ACTOR Future<bool> metaclusterListCommand(Reference<IDatabase> db, std::vector<S
 
 // metacluster get command
 ACTOR Future<bool> metaclusterGetCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
-	if (tokens.size() > 3) {
-		fmt::print("Usage: metacluster get <NAME>\n\n");
+	if (tokens.size() > 4 || (tokens.size() == 4 && tokens[3] != "JSON"_sr)) {
+		fmt::print("Usage: metacluster get <NAME> [JSON]\n\n");
 		fmt::print("Prints metadata associated with the given data cluster.\n");
+		fmt::print("If JSON is specified, then the output will be in JSON format.\n");
 		return false;
 	}
 
-	DataClusterMetadata metadata = wait(MetaclusterAPI::getCluster(db, tokens[2]));
-	printf("  connection string: %s\n", metadata.connectionString.toString().c_str());
-	printf("  tenant group capacity: %d\n", metadata.entry.capacity.numTenantGroups);
-	printf("  allocated tenant groups: %d\n", metadata.entry.allocated.numTenantGroups);
+	state bool useJson = tokens.size() == 4;
+
+	try {
+		DataClusterMetadata metadata = wait(MetaclusterAPI::getCluster(db, tokens[2]));
+
+		if (useJson) {
+			json_spirit::mObject obj;
+			obj["type"] = "success";
+			obj["cluster"] = metadata.toJson();
+			printf("%s\n", json_spirit::write_string(json_spirit::mValue(obj), json_spirit::pretty_print).c_str());
+		} else {
+			printf("  connection string: %s\n", metadata.connectionString.toString().c_str());
+			printf("  tenant group capacity: %d\n", metadata.entry.capacity.numTenantGroups);
+			printf("  allocated tenant groups: %d\n", metadata.entry.allocated.numTenantGroups);
+		}
+	} catch (Error& e) {
+		if (useJson) {
+			json_spirit::mObject obj;
+			obj["type"] = "error";
+			obj["error"] = e.what();
+			printf("%s\n", json_spirit::write_string(json_spirit::mValue(obj), json_spirit::pretty_print).c_str());
+			return false;
+		} else {
+			throw;
+		}
+	}
 
 	return true;
 }
@@ -253,8 +276,8 @@ std::vector<const char*> metaclusterHintGenerator(std::vector<StringRef> const& 
 	} else if (tokencmp(tokens[1], "list") && tokens.size() < 5) {
 		static std::vector<const char*> opts = { "[BEGIN]", "[END]", "[LIMIT]" };
 		return std::vector<const char*>(opts.begin() + tokens.size() - 2, opts.end());
-	} else if (tokencmp(tokens[1], "get") && tokens.size() < 3) {
-		static std::vector<const char*> opts = { "<NAME>" };
+	} else if (tokencmp(tokens[1], "get") && tokens.size() < 4) {
+		static std::vector<const char*> opts = { "<NAME>", "[JSON]" };
 		return std::vector<const char*>(opts.begin() + tokens.size() - 2, opts.end());
 	} else if (tokencmp(tokens[1], "configure")) {
 		static std::vector<const char*> opts = {

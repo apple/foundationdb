@@ -24,7 +24,7 @@
 FDB_DEFINE_BOOLEAN_PARAM(AddNewTenants);
 FDB_DEFINE_BOOLEAN_PARAM(RemoveMissingTenants);
 
-json_spirit::mObject ClusterUsage::toJson() {
+json_spirit::mObject ClusterUsage::toJson() const {
 	json_spirit::mObject obj;
 	obj["num_tenant_groups"] = numTenantGroups;
 	return obj;
