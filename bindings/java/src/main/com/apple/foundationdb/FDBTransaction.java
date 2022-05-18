@@ -35,6 +35,8 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 
 	static public final int MATCH_INDEX_ALL = 0;
 	static public final int MATCH_INDEX_NONE = 1;
+	static public final int MATCH_INDEX_MATCHED_ONLY = 2;
+	static public final int MATCH_INDEX_UNMATCHED_ONLY = 3;
 
 	private final Database database;
 	private final Executor executor;
