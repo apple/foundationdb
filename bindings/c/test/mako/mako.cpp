@@ -62,6 +62,8 @@ namespace mako {
 struct alignas(64) ThreadArgs {
 	int worker_id;
 	int thread_id;
+	bool tenant_main;
+	int tenants;
 	pid_t parent_id;
 	LatencySampleBinArray sample_bins;
 	Arguments const* args;
@@ -76,8 +78,20 @@ using namespace mako;
 
 thread_local Logger logr = Logger(MainProcess{}, VERBOSE_DEFAULT);
 
+Transaction createNewTransaction(Database* db, Arguments const& args, int id = -1) {
+	// No tenants specified
+	if (args.tenants <= 0) {
+		return db->createTransaction();
+	}
+	// Create Tenant Transaction
+	int tenant_id = (id == -1) ? urand(1, args.tenants) : id;
+	std::string tenant_name = "tenant" + std::to_string(tenant_id);
+	Tenant t(db, reinterpret_cast<const uint8_t*>(tenant_name.c_str()), tenant_name.length());
+	return t.createTransaction();
+}
+
 /* cleanup database */
-int cleanup(Transaction tx, Arguments const& args) {
+int cleanup(Database db, Arguments const& args) {
 	const auto prefix_len = args.prefixpadding ? args.key_length - args.row_digits : intSize(KEY_PREFIX);
 	auto genprefix = [&args](ByteString& s) {
 		const auto padding_len = args.key_length - intSize(KEY_PREFIX) - args.row_digits;
@@ -96,27 +110,52 @@ int cleanup(Transaction tx, Arguments const& args) {
 
 	auto watch = Stopwatch(StartAtCtor{});
 
-	while (true) {
-		tx.clearRange(beginstr, endstr);
-		auto future_commit = tx.commit();
-		const auto rc = waitAndHandleError(tx, future_commit, "COMMIT_CLEANUP");
-		if (rc == FutureRC::OK) {
-			break;
-		} else if (rc == FutureRC::RETRY || rc == FutureRC::CONFLICT) {
-			// tx already reset
-			continue;
-		} else {
-			return -1;
+	int num_iterations = (args.tenants > 1) ? args.tenants : 1;
+	for (int i = 1; i <= num_iterations; ++i) {
+		// If args.tenants is zero, this will use a non-tenant txn and perform a single range clear.
+		// If 1, it will use a tenant txn and do a single range clear instead.
+		// If > 1, it will perform a range clear with a different tenant txn per iteration.
+		Transaction tx = createNewTransaction(&db, args, i);
+		while (true) {
+			tx.clearRange(beginstr, endstr);
+			auto future_commit = tx.commit();
+			const auto rc = waitAndHandleError(tx, future_commit, "COMMIT_CLEANUP");
+			if (rc == FutureRC::OK) {
+				break;
+			} else if (rc == FutureRC::RETRY || rc == FutureRC::CONFLICT) {
+				// tx already reset
+				continue;
+			} else {
+				return -1;
+			}
+		}
+
+		// If tenants are specified, also delete the tenant after clearing out its keyspace
+		if (args.tenants > 0) {
+			std::string tenant_name = "tenant" + std::to_string(i);
+			while (true) {
+				Transaction systemTx = db.createTransaction();
+				auto future_commit = Tenant::deleteTenant(systemTx, tenant_name);
+				const auto rc = waitAndHandleError(systemTx, future_commit, "DELETE_TENANT");
+				if (rc == FutureRC::OK) {
+					break;
+				} else if (rc == FutureRC::RETRY || rc == FutureRC::CONFLICT) {
+					// tx already reset
+					continue;
+				} else {
+					// try with new transaction object
+					systemTx = db.createTransaction();
+				}
+			}
 		}
 	}
 
-	tx.reset();
 	logr.info("Clear range: {:6.3f} sec", toDoubleSeconds(watch.stop().diff()));
 	return 0;
 }
 
 /* populate database */
-int populate(Transaction tx,
+int populate(Database db,
              Arguments const& args,
              int worker_id,
              int thread_id,
@@ -139,6 +178,7 @@ int populate(Transaction tx,
 	auto watch_trace = Stopwatch(watch_total.getStart());
 	auto key_checkpoint = key_begin; // in case of commit failure, restart from this key
 
+	Transaction tx = createNewTransaction(&db, args);
 	for (auto i = key_begin; i <= key_end; i++) {
 		/* sequential keys */
 		genKey(keystr.data(), KEY_PREFIX, args, i);
@@ -184,7 +224,7 @@ int populate(Transaction tx,
 			auto tx_restarter = ExitGuard([&watch_tx]() { watch_tx.startFromStop(); });
 			if (rc == FutureRC::OK) {
 				key_checkpoint = i + 1; // restart on failures from next key
-				tx.reset();
+				tx = createNewTransaction(&db, args);
 			} else if (rc == FutureRC::ABORT) {
 				return -1;
 			} else {
@@ -257,7 +297,6 @@ transaction_begin:
 				stats.incrErrorCount(op);
 			} else {
 				// abort
-				tx.reset();
 				return -1;
 			}
 			// retry from first op
@@ -327,12 +366,10 @@ transaction_begin:
 		stats.addLatency(OP_TRANSACTION, tx_duration);
 	}
 	stats.incrOpCount(OP_TRANSACTION);
-	/* make sure to reset transaction */
-	tx.reset();
 	return 0;
 }
 
-int runWorkload(Transaction tx,
+int runWorkload(Database db,
                 Arguments const& args,
                 int const thread_tps,
                 std::atomic<double> const& throttle_factor,
@@ -373,6 +410,7 @@ int runWorkload(Transaction tx,
 
 	/* main transaction loop */
 	while (1) {
+		Transaction tx = createNewTransaction(&db, args);
 		while ((thread_tps > 0) && (xacts >= current_tps)) {
 			/* throttle on */
 			const auto time_now = steady_clock::now();
@@ -554,6 +592,8 @@ void workerThread(ThreadArgs& thread_args) {
 	const auto parent_id = thread_args.parent_id;
 	const auto worker_id = thread_args.worker_id;
 	const auto thread_id = thread_args.thread_id;
+	const auto tenant_main = thread_args.tenant_main;
+	const auto tenants = thread_args.tenants;
 	const auto dotrace = (worker_id == 0 && thread_id == 0 && args.txntrace) ? args.txntrace : 0;
 	auto database = thread_args.database;
 	const auto dotagging = args.txntagging;
@@ -576,7 +616,27 @@ void workerThread(ThreadArgs& thread_args) {
 	        : computeThreadIters(args.iteration, worker_id, thread_id, args.num_processes, args.num_threads);
 
 	/* create my own transaction object */
-	auto tx = database.createTransaction();
+	Transaction tx;
+	tx = database.createTransaction();
+
+	if (tenant_main && tenants > 0) {
+		for (int i = 1; i <= tenants; ++i) {
+			std::string tenant_name = "tenant" + std::to_string(i);
+			while (true) {
+				auto future_commit = Tenant::createTenant(tx, tenant_name);
+				const auto rc = waitAndHandleError(tx, future_commit, "CREATE_TENANT");
+				if (rc == FutureRC::OK) {
+					break;
+				} else if (rc == FutureRC::RETRY || rc == FutureRC::CONFLICT) {
+					// tx already reset
+					continue;
+				} else {
+					// try with new transaction object
+					tx = database.createTransaction();
+				}
+			}
+		}
+	}
 
 	/* i'm ready */
 	readycount.fetch_add(1);
@@ -588,18 +648,18 @@ void workerThread(ThreadArgs& thread_args) {
 	auto& sample_bins = thread_args.sample_bins;
 
 	if (args.mode == MODE_CLEAN) {
-		auto rc = cleanup(tx, args);
+		auto rc = cleanup(database, args);
 		if (rc < 0) {
 			logr.error("cleanup failed");
 		}
 	} else if (args.mode == MODE_BUILD) {
-		auto rc = populate(tx, args, worker_id, thread_id, thread_tps, stats, sample_bins);
+		auto rc = populate(database, args, worker_id, thread_id, thread_tps, stats, sample_bins);
 		if (rc < 0) {
 			logr.error("populate failed");
 		}
 	} else if (args.mode == MODE_RUN) {
 		auto rc = runWorkload(
-		    tx, args, thread_tps, throttle_factor, thread_iters, signal, stats, sample_bins, dotrace, dotagging);
+		    database, args, thread_tps, throttle_factor, thread_iters, signal, stats, sample_bins, dotrace, dotagging);
 		if (rc < 0) {
 			logr.error("runWorkload failed");
 		}
@@ -727,6 +787,9 @@ int workerProcessMain(Arguments const& args, int worker_id, shared_memory::Acces
 			this_args.worker_id = worker_id;
 			this_args.thread_id = i;
 			this_args.parent_id = pid_main;
+			// let a single worker thread create all the tenants before the green signal
+			this_args.tenant_main = i == 0 && worker_id == 0;
+			this_args.tenants = args.tenants;
 			this_args.args = &args;
 			this_args.shm = shm;
 			this_args.database = databases[i % args.num_databases];
@@ -974,6 +1037,7 @@ void usage() {
 	printf("%-24s %s\n", "", "This option cannot be specified with --seconds.");
 	printf("%-24s %s\n", "    --keylen=LENGTH", "Specify the key lengths");
 	printf("%-24s %s\n", "    --vallen=LENGTH", "Specify the value lengths");
+	printf("%-24s %s\n", "    --tenants=TENANTS", "Specify the number of tenants to use");
 	printf("%-24s %s\n", "-x, --transaction=SPEC", "Transaction specification");
 	printf("%-24s %s\n", "    --tps|--tpsmax=TPS", "Specify the target max TPS");
 	printf("%-24s %s\n", "    --tpsmin=TPS", "Specify the target min TPS");
@@ -1024,6 +1088,7 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			{ "iteration", required_argument, NULL, 'i' },
 			{ "keylen", required_argument, NULL, ARG_KEYLEN },
 			{ "vallen", required_argument, NULL, ARG_VALLEN },
+			{ "tenants", required_argument, NULL, ARG_TENANTS },
 			{ "transaction", required_argument, NULL, 'x' },
 			{ "tps", required_argument, NULL, ARG_TPS },
 			{ "tpsmax", required_argument, NULL, ARG_TPSMAX },
@@ -1124,6 +1189,9 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			break;
 		case ARG_VALLEN:
 			args.value_length = atoi(optarg);
+			break;
+		case ARG_TENANTS:
+			args.tenants = atoi(optarg);
 			break;
 		case ARG_TPS:
 		case ARG_TPSMAX:
@@ -1832,6 +1900,7 @@ int statsProcessMain(Arguments const& args,
 		fmt::fprintf(fp, "\"sampling\": %d,", args.sampling);
 		fmt::fprintf(fp, "\"key_length\": %d,", args.key_length);
 		fmt::fprintf(fp, "\"value_length\": %d,", args.value_length);
+		fmt::fprintf(fp, "\"tenants\": %d,", args.tenants);
 		fmt::fprintf(fp, "\"commit_get\": %d,", args.commit_get);
 		fmt::fprintf(fp, "\"verbose\": %d,", args.verbose);
 		fmt::fprintf(fp, "\"cluster_files\": \"%s\",", args.cluster_files[0]);

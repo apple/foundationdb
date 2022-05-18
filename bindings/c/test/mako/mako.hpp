@@ -22,7 +22,7 @@
 #define MAKO_HPP
 
 #ifndef FDB_API_VERSION
-#define FDB_API_VERSION 720
+#define FDB_API_VERSION 710
 #endif
 
 #include <array>
@@ -49,6 +49,7 @@ constexpr const int MODE_RUN = 2;
 enum ArgKind {
 	ARG_KEYLEN,
 	ARG_VALLEN,
+	ARG_TENANTS,
 	ARG_TPS,
 	ARG_ASYNC,
 	ARG_COMMITGET,
@@ -138,6 +139,7 @@ struct Arguments {
 	int sampling;
 	int key_length;
 	int value_length;
+	int tenants;
 	int zipf;
 	int commit_get;
 	int verbose;

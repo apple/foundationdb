@@ -23,11 +23,12 @@
 #pragma once
 
 #ifndef FDB_API_VERSION
-#define FDB_API_VERSION 720
+#define FDB_API_VERSION 710
 #endif
 
 #include <cassert>
 #include <cstdint>
+#include <iostream>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -388,6 +389,7 @@ inline KeySelector lastLessOrEqual(KeyRef key, int offset = 0) {
 
 class Transaction {
 	friend class Database;
+	friend class Tenant;
 	std::shared_ptr<native::FDBTransaction> tr;
 
 	explicit Transaction(native::FDBTransaction* tr_raw) {
@@ -506,6 +508,7 @@ public:
 };
 
 class Database {
+	friend class Tenant;
 	std::shared_ptr<native::FDBDatabase> db;
 
 public:
@@ -554,6 +557,58 @@ public:
 			throwError("Failed to create transaction: ", err);
 		return Transaction(tx_native);
 	}
+};
+
+class Tenant final {
+	std::string tenantManagementMapPrefix = "\xff\xff/management/tenant_map/";
+	std::string tenantMapPrefix = "\xff/tenantMap/";
+
+public:
+	static TypedFuture<future_var::None> createTenant(Transaction tr, std::string name) {
+		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES);
+		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_LOCK_AWARE);
+		KeyRef tenantManagementKey = toBytesRef(tenantManagementMapPrefix + name);
+		tr.set(tenantManagementKey, toBytesRef(""));
+		return tr.commit();
+	}
+
+	static TypedFuture<future_var::None> deleteTenant(Transaction tr, std::string name) {
+		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_RAW_ACCESS);
+		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_LOCK_AWARE);
+		KeyRef tenantMapKey = toBytesRef(tenantMapPrefix + name);
+		tr.clear(tenantMapKey);
+		return tr.commit();
+	}
+
+	Tenant(fdb::Database* db, const uint8_t* name, int name_length) {
+		if (native::fdb_error_t err = fdb_database_open_tenant(db->db.get(), name, name_length, &tenant)) {
+			std::cerr << native::fdb_get_error(err) << std::endl;
+			std::abort();
+		}
+	}
+
+	~Tenant() {
+		if (tenant != nullptr) {
+			fdb_tenant_destroy(tenant);
+		}
+	}
+
+	Transaction createTransaction() {
+		auto tx_native = static_cast<native::FDBTransaction*>(nullptr);
+		auto err = Error(native::fdb_tenant_create_transaction(tenant, &tx_native));
+		if (err)
+			throwError("Failed to create transaction: ", err);
+		return Transaction(tx_native);
+	}
+
+	Tenant(const Tenant&) = delete;
+	Tenant& operator=(const Tenant&) = delete;
+	Tenant(Tenant&&) = delete;
+	Tenant& operator=(Tenant&&) = delete;
+
+private:
+	friend class Transaction;
+	native::FDBTenant* tenant;
 };
 
 } // namespace fdb
