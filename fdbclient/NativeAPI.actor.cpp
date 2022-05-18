@@ -30,6 +30,7 @@
 #include <utility>
 #include <vector>
 
+#include "boost/algorithm/string.hpp"
 #include "contrib/fmt-8.1.1/include/fmt/format.h"
 
 #include "fdbclient/FDBOptions.g.h"
@@ -8259,57 +8260,74 @@ ACTOR Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion
 	return (ddCheck && coordinatorCheck);
 }
 
-ACTOR Future<Void> addInterfaceActor(std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface,
-                                     Reference<FlowLock> connectLock,
-                                     KeyValue kv) {
+// returns true if we can connect to the given worker interface
+ACTOR Future<bool> verifyInterfaceActor(Reference<FlowLock> connectLock, ClientWorkerInterface workerInterf) {
 	wait(connectLock->take());
 	state FlowLock::Releaser releaser(*connectLock);
-	state ClientWorkerInterface workerInterf =
-	    BinaryReader::fromStringRef<ClientWorkerInterface>(kv.value, IncludeVersion());
 	state ClientLeaderRegInterface leaderInterf(workerInterf.address());
 	choose {
 		when(Optional<LeaderInfo> rep =
 		         wait(brokenPromiseToNever(leaderInterf.getLeader.getReply(GetLeaderRequest())))) {
-			StringRef ip_port =
-			    kv.key.endsWith(LiteralStringRef(":tls")) ? kv.key.removeSuffix(LiteralStringRef(":tls")) : kv.key;
-			(*address_interface)[ip_port] = std::make_pair(kv.value, leaderInterf);
-
-			if (workerInterf.reboot.getEndpoint().addresses.secondaryAddress.present()) {
-				Key full_ip_port2 =
-				    StringRef(workerInterf.reboot.getEndpoint().addresses.secondaryAddress.get().toString());
-				StringRef ip_port2 = full_ip_port2.endsWith(LiteralStringRef(":tls"))
-				                         ? full_ip_port2.removeSuffix(LiteralStringRef(":tls"))
-				                         : full_ip_port2;
-				(*address_interface)[ip_port2] = std::make_pair(kv.value, leaderInterf);
-			}
+			return true;
 		}
-		when(wait(delay(CLIENT_KNOBS->CLI_CONNECT_TIMEOUT))) {} // NOTE : change timeout time here if necessary
+		when(wait(delay(CLIENT_KNOBS->CLI_CONNECT_TIMEOUT))) {
+			// NOTE : change timeout time here if necessary
+			return false;
+		}
 	}
-	return Void();
 }
 
 ACTOR static Future<int64_t> rebootWorkerActor(DatabaseContext* cx, ValueRef addr, bool check, int duration) {
 	// ignore negative value
 	if (duration < 0)
 		duration = 0;
-	// fetch the addresses of all workers
-	state std::map<Key, std::pair<Value, ClientLeaderRegInterface>> address_interface;
 	if (!cx->getConnectionRecord())
 		return 0;
+	// fetch all workers' addresses and interfaces from CC
 	RangeResult kvs = wait(getWorkerInterfaces(cx->getConnectionRecord()));
 	ASSERT(!kvs.more);
+	// map worker network address to its interface
+	state std::map<Key, ClientWorkerInterface> workerInterfaces;
+	for (const auto& it : kvs) {
+		ClientWorkerInterface workerInterf =
+		    BinaryReader::fromStringRef<ClientWorkerInterface>(it.value, IncludeVersion());
+		Key primaryAddress =
+		    it.key.endsWith(LiteralStringRef(":tls")) ? it.key.removeSuffix(LiteralStringRef(":tls")) : it.key;
+		workerInterfaces[primaryAddress] = workerInterf;
+		// Also add mapping from a worker's second address(if present) to its interface
+		if (workerInterf.reboot.getEndpoint().addresses.secondaryAddress.present()) {
+			Key secondAddress =
+			    StringRef(workerInterf.reboot.getEndpoint().addresses.secondaryAddress.get().toString());
+			secondAddress = secondAddress.endsWith(LiteralStringRef(":tls"))
+			                    ? secondAddress.removeSuffix(LiteralStringRef(":tls"))
+			                    : secondAddress;
+			workerInterfaces[secondAddress] = workerInterf;
+		}
+	}
+	// split and get all the requested addresses to send reboot requests
+	state std::vector<std::string> addressesVec;
+	boost::algorithm::split(addressesVec, addr.toString(), boost::is_any_of(","));
 	// Note: reuse this knob from fdbcli, change it if necessary
 	Reference<FlowLock> connectLock(new FlowLock(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM));
-	std::vector<Future<Void>> addInterfs;
-	for (const auto& it : kvs) {
-		addInterfs.push_back(addInterfaceActor(&address_interface, connectLock, it));
+	state std::vector<Future<bool>> verifyInterfs;
+	for (const auto& requestedAddress : addressesVec) {
+		// step 1: check that the requested address is in the worker list provided by CC
+		if (!workerInterfaces.count(Key(requestedAddress)))
+			return 0;
+		// step 2: try to establish connections to the requested worker
+		verifyInterfs.push_back(verifyInterfaceActor(connectLock, workerInterfaces[Key(requestedAddress)]));
 	}
-	wait(waitForAll(addInterfs));
-	if (!address_interface.count(addr))
-		return 0;
-
-	BinaryReader::fromStringRef<ClientWorkerInterface>(address_interface[addr].first, IncludeVersion())
-	    .reboot.send(RebootRequest(false, check, duration));
+	// step 3: check if we can establish connections to all requested workers, return if not
+	wait(waitForAll(verifyInterfs));
+	for (const auto& f : verifyInterfs) {
+		if (!f.get())
+			return 0;
+	}
+	// step 4: After verifying we can connect to all requested workers, send reboot requests together
+	for (const auto& address : addressesVec) {
+		// Note: We want to make sure these requests are sent in parallel
+		workerInterfaces[Key(address)].reboot.send(RebootRequest(false, check, duration));
+	}
 	return 1;
 }
 
