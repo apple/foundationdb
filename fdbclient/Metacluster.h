@@ -39,6 +39,9 @@ struct ClusterUsage {
 
 	json_spirit::mObject toJson();
 
+	bool operator==(const ClusterUsage& other) const noexcept { return numTenantGroups == other.numTenantGroups; }
+	bool operator!=(const ClusterUsage& other) const noexcept { return !(*this == other); }
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, numTenantGroups);
@@ -55,26 +58,36 @@ struct Traceable<ClusterUsage> : std::true_type {
 struct DataClusterEntry {
 	constexpr static FileIdentifier file_identifier = 929511;
 
-	static Value idToValue(int64_t id) {
-		int64_t swapped = bigEndian64(id);
-		return StringRef(reinterpret_cast<const uint8_t*>(&swapped), 8);
+	enum class RegistrationState { UNKNOWN = 0, REGISTERING = 1, READY = 2 };
+
+	static RegistrationState stringToRegistrationState(StringRef str) {
+		if (str == "REGISTERING"_sr) {
+			return RegistrationState::REGISTERING;
+		} else if (str == "READY"_sr) {
+			return RegistrationState::READY;
+		} else {
+			return RegistrationState::UNKNOWN;
+		}
 	}
 
-	static int64_t valueToId(ValueRef value) {
-		ASSERT(value.size() == 8);
-		int64_t id = *reinterpret_cast<const int64_t*>(value.begin());
-		id = bigEndian64(id);
-		ASSERT(id >= 0);
-		return id;
+	static StringRef registrationStateToString(RegistrationState state) {
+		if (state == RegistrationState::REGISTERING) {
+			return "REGISTERING"_sr;
+		} else if (state == RegistrationState::READY) {
+			return "READY"_sr;
+		} else {
+			return "UNKNOWN"_sr;
+		}
 	}
 
-	int64_t id = -1;
+	UID id;
 	ClusterUsage capacity;
 	ClusterUsage allocated;
+	RegistrationState registrationState = RegistrationState::REGISTERING;
 
 	DataClusterEntry() = default;
 	DataClusterEntry(ClusterUsage capacity) : capacity(capacity) {}
-	DataClusterEntry(int64_t id, ClusterUsage capacity, ClusterUsage allocated)
+	DataClusterEntry(UID id, ClusterUsage capacity, ClusterUsage allocated)
 	  : id(id), capacity(capacity), allocated(allocated) {}
 
 	Value encode() { return ObjectWriter::toValue(*this, IncludeVersion(ProtocolVersion::withMetacluster())); }
@@ -87,7 +100,7 @@ struct DataClusterEntry {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, id, capacity, allocated);
+		serializer(ar, id, capacity, allocated, registrationState);
 	}
 };
 
@@ -95,9 +108,10 @@ struct DataClusterRegistrationEntry {
 	constexpr static FileIdentifier file_identifier = 13448589;
 
 	ClusterName name;
+	UID id;
 
 	DataClusterRegistrationEntry() = default;
-	DataClusterRegistrationEntry(ClusterName name) : name(name) {}
+	DataClusterRegistrationEntry(ClusterName name, UID id) : name(name), id(id) {}
 
 	Value encode() { return ObjectWriter::toValue(*this, IncludeVersion(ProtocolVersion::withMetacluster())); }
 	static DataClusterRegistrationEntry decode(ValueRef const& value) {
@@ -109,7 +123,7 @@ struct DataClusterRegistrationEntry {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, name);
+		serializer(ar, name, id);
 	}
 };
 

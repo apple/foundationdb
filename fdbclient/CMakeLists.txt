@@ -85,8 +85,6 @@ set(FDBCLIENT_SRCS
   Metacluster.cpp
   Metacluster.h
   MetaclusterManagement.actor.h
-  MetaclusterInternalDataClusterSpecialKeys.actor.cpp
-  MetaclusterInternalManagementClusterSpecialKeys.actor.cpp
   MonitorLeader.actor.cpp
   MonitorLeader.h
   MultiVersionAssignmentVars.h

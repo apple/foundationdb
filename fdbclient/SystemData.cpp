@@ -1418,7 +1418,7 @@ const KeyRef dataClusterConnectionRecordPrefix = dataClusterConnectionRecordKeys
 const KeyRef dataClusterLastIdKey = "\xff/metacluster/dataCluster/lastId/"_sr;
 
 // Metacluster data cluster keys
-const KeyRef dataClusterRegistrationKey = "\xff/metacluster/dataCluster/clusterName"_sr;
+const KeyRef dataClusterRegistrationKey = "\xff/metacluster/dataCluster/clusterRegistration"_sr;
 
 // for tests
 void testSSISerdes(StorageServerInterface const& ssi) {

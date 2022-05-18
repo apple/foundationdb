@@ -80,9 +80,6 @@ std::unordered_map<SpecialKeySpace::MODULE, KeyRange> SpecialKeySpace::moduleToB
 	{ SpecialKeySpace::MODULE::ACTOR_PROFILER_CONF,
 	  KeyRangeRef(LiteralStringRef("\xff\xff/actor_profiler_conf/"),
 	              LiteralStringRef("\xff\xff/actor_profiler_conf0")) },
-	{ SpecialKeySpace::MODULE::METACLUSTER_INTERNAL,
-	  KeyRangeRef(LiteralStringRef("\xff\xff/metacluster_internal/"),
-	              LiteralStringRef("\xff\xff/metacluster_internal0")) }
 };
 
 std::unordered_map<std::string, KeyRange> SpecialKeySpace::managementApiCommandToRange = {
@@ -129,15 +126,6 @@ std::unordered_map<std::string, KeyRange> SpecialKeySpace::actorLineageApiComman
 	{ "time",
 	  KeyRangeRef(LiteralStringRef("time/"), LiteralStringRef("time0"))
 	      .withPrefix(moduleToBoundary[MODULE::ACTORLINEAGE].begin) }
-};
-
-std::unordered_map<std::string, KeyRange> SpecialKeySpace::metaclusterInternalApiCommandToRange = {
-	{ "management_cluster",
-	  MetaclusterInternalManagementClusterImpl::submoduleRange.withPrefix(
-	      moduleToBoundary[MODULE::METACLUSTER_INTERNAL].begin) },
-	{ "data_cluster",
-	  MetaclusterInternalDataClusterImpl::submoduleRange.withPrefix(
-	      moduleToBoundary[MODULE::METACLUSTER_INTERNAL].begin) }
 };
 
 std::set<std::string> SpecialKeySpace::options = { "excluded/force",

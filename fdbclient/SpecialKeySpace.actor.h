@@ -171,7 +171,6 @@ public:
 		ERRORMSG, // A single key space contains a json string which describes the last error in special-key-space
 		GLOBALCONFIG, // Global configuration options synchronized to all nodes
 		MANAGEMENT, // Management-API
-		METACLUSTER_INTERNAL, // Internal APIs for a metacluster
 		METRICS, // data-distribution metrics
 		TESTONLY, // only used by correctness tests
 		TRACING, // Distributed tracing options
@@ -554,34 +553,6 @@ public:
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
-};
-
-class MetaclusterInternalManagementClusterImpl : public SpecialKeyRangeRWImpl {
-public:
-	const static KeyRangeRef submoduleRange;
-
-	explicit MetaclusterInternalManagementClusterImpl(KeyRangeRef kr);
-	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
-	                             KeyRangeRef kr,
-	                             GetRangeLimits limitsHint) const override;
-	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
-
-	Future<Void> processDataClusterCommand(ReadYourWritesTransaction* ryw);
-	Future<Void> processTenantCommand(ReadYourWritesTransaction* ryw);
-};
-
-class MetaclusterInternalDataClusterImpl : public SpecialKeyRangeRWImpl {
-public:
-	const static KeyRangeRef submoduleRange;
-
-	explicit MetaclusterInternalDataClusterImpl(KeyRangeRef kr);
-	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
-	                             KeyRangeRef kr,
-	                             GetRangeLimits limitsHint) const override;
-	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
-
-	Future<Void> processDataClusterCommand(ReadYourWritesTransaction* ryw);
-	Future<Void> processTenantCommand(ReadYourWritesTransaction* ryw);
 };
 
 #include "flow/unactorcompiler.h"

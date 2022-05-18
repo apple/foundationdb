@@ -97,15 +97,18 @@ ACTOR Future<bool> metaclusterRegisterCommand(Reference<IDatabase> db, std::vect
 
 // metacluster remove command
 ACTOR Future<bool> metaclusterRemoveCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
-	if (tokens.size() != 3) {
-		fmt::print("Usage: metacluster remove <NAME> \n\n");
+	if (tokens.size() < 3 || tokens.size() > 4 || (tokens.size() == 4 && tokens[2] != "FORCE"_sr)) {
+		fmt::print("Usage: metacluster remove [FORCE] <NAME> \n\n");
 		fmt::print("Removes the specified data cluster from a metacluster.\n");
+		fmt::print("If FORCE is specified, then the cluster will be detached even if it has\n"
+		           "tenants assigned to it.\n");
 		return false;
 	}
 
-	wait(MetaclusterAPI::removeCluster(db, tokens[2]));
+	state ClusterNameRef clusterName = tokens[tokens.size() - 1];
+	wait(MetaclusterAPI::removeCluster(db, clusterName, tokens.size() == 4));
 
-	printf("The cluster `%s' has been removed\n", printable(tokens[2]).c_str());
+	printf("The cluster `%s' has been removed\n", printable(clusterName).c_str());
 	return true;
 }
 
@@ -157,7 +160,8 @@ ACTOR Future<bool> metaclusterGetCommand(Reference<IDatabase> db, std::vector<St
 	}
 
 	DataClusterMetadata metadata = wait(MetaclusterAPI::getCluster(db, tokens[2]));
-	printf("  id: %" PRId64 "\n", metadata.entry.id);
+	printf("  registration state: %s\n",
+	       DataClusterEntry::registrationStateToString(metadata.entry.registrationState).toString().c_str());
 	printf("  connection string: %s\n", metadata.connectionString.toString().c_str());
 	printf("  tenant group capacity: %d\n", metadata.entry.capacity.numTenantGroups);
 	printf("  allocated tenant groups: %d\n", metadata.entry.allocated.numTenantGroups);

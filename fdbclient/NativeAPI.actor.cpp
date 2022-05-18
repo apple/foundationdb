@@ -1480,14 +1480,6 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 	smoothMidShardSize.reset(CLIENT_KNOBS->INIT_MID_SHARD_BYTES);
 
 	if (apiVersionAtLeast(720)) {
-		registerSpecialKeysImpl(SpecialKeySpace::MODULE::METACLUSTER_INTERNAL,
-		                        SpecialKeySpace::IMPLTYPE::READWRITE,
-		                        std::make_unique<MetaclusterInternalManagementClusterImpl>(
-		                            SpecialKeySpace::getMetaclusterInternalApiCommandRange("management_cluster")));
-		registerSpecialKeysImpl(SpecialKeySpace::MODULE::METACLUSTER_INTERNAL,
-		                        SpecialKeySpace::IMPLTYPE::READWRITE,
-		                        std::make_unique<MetaclusterInternalDataClusterImpl>(
-		                            SpecialKeySpace::getMetaclusterInternalApiCommandRange("data_cluster")));
 		registerSpecialKeysImpl(
 		    SpecialKeySpace::MODULE::MANAGEMENT,
 		    SpecialKeySpace::IMPLTYPE::READWRITE,
