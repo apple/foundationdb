@@ -1703,7 +1703,7 @@ void printReport(Arguments const& args,
 					}
 				}
 
-				auto median = std::ceil(data_points[op_name].percentile(0.5) * 100) / 100;
+				auto median = data_points[op_name].percentile(0.5);
 				putField(median);
 				if (fp) {
 					if (first_op) {
@@ -1733,7 +1733,7 @@ void printReport(Arguments const& args,
 				putField("N/A");
 				continue;
 			}
-			const auto point_95pct = std::ceil(data_points[op_name].percentile(0.95) * 100) / 100;
+			const auto point_95pct = data_points[op_name].percentile(0.95);
 			putField(point_95pct);
 			if (fp) {
 				if (first_op) {
@@ -1760,7 +1760,7 @@ void printReport(Arguments const& args,
 				putField("N/A");
 				continue;
 			}
-			const auto point_99pct = std::ceil(data_points[op_name].percentile(0.99) * 100) / 100;
+			const auto point_99pct = data_points[op_name].percentile(0.99);
 			putField(point_99pct);
 			if (fp) {
 				if (first_op) {
@@ -1787,7 +1787,7 @@ void printReport(Arguments const& args,
 				putField("N/A");
 				continue;
 			}
-			const auto point_99_9pct = std::ceil(data_points[op_name].percentile(0.999) * 100) / 100;
+			const auto point_99_9pct = data_points[op_name].percentile(0.999);
 			putField(point_99_9pct);
 			if (fp) {
 				if (first_op) {
