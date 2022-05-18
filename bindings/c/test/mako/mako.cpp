@@ -865,6 +865,7 @@ int initArguments(Arguments& args) {
 	args.sampling = 1000;
 	args.key_length = 32;
 	args.value_length = 16;
+	args.tenants = 0;
 	args.zipf = 0;
 	args.commit_get = 0;
 	args.verbose = 1;

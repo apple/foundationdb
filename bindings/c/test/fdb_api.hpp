@@ -575,8 +575,8 @@ public:
 	static TypedFuture<future_var::None> deleteTenant(Transaction tr, std::string name) {
 		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_RAW_ACCESS, 1);
 		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_LOCK_AWARE, 1);
-		KeyRef tenantMapKey = toBytesRef(tenantMapPrefix + name);
-		tr.clear(tenantMapKey);
+		KeyRef tenantManagementKey = toBytesRef(tenantManagementMapPrefix + name);
+		tr.clear(tenantManagementKey);
 		return tr.commit();
 	}
 
