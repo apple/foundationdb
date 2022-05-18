@@ -44,7 +44,7 @@ class TCServerInfo : public ReferenceCounted<TCServerInfo> {
 	// To change storeType for an ip:port, we destroy the old one and create a new one.
 	KeyValueStoreType storeType; // Storage engine type
 
-	int64_t dataInFlightToServer, readInFlightToServer = 0;
+	int64_t dataInFlightToServer = 0, readInFlightToServer = 0;
 	std::vector<Reference<TCTeamInfo>> teams;
 	ErrorOr<GetStorageMetricsReply> metrics;
 

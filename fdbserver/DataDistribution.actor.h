@@ -124,6 +124,21 @@ struct GetTeamRequest {
 		return res == 0 ? lessCompareByLoad(aLoadBytes, bLoadBytes) : res < 0;
 	}
 
+	std::string getDesc() const {
+		std::stringstream ss;
+
+		ss << "WantsNewServers:" << wantsNewServers << " WantsTrueBest:" << wantsTrueBest
+		   << " PreferLowerUtilization:" << preferLowerUtilization << " teamMustHaveShards:" << teamMustHaveShards
+		   << "forReadBalance" << forReadBalance << " inflightPenalty:" << inflightPenalty << ";";
+		ss << "CompleteSources:";
+		for (const auto& cs : completeSources) {
+			ss << cs.toString() << ",";
+		}
+
+		return std::move(ss).str();
+	}
+
+private:
 	// return true if preferHigherUtil && aLoadBytes <= bLoadBytes (higher load bytes has larger score)
 	// or preferLowerUtil && aLoadBytes > bLoadBytes
 	bool lessCompareByLoad(int64_t aLoadBytes, int64_t bLoadBytes) const {
@@ -140,20 +155,6 @@ struct GetTeamRequest {
 	static int lessReadLoad(TeamRef a, TeamRef b) {
 		auto r1 = a->getLoadReadBandwidth(false), r2 = b->getLoadReadBandwidth(false);
 		return r1 == r2 ? 0 : (r1 < r2 ? -1 : 1);
-	}
-
-	std::string getDesc() const {
-		std::stringstream ss;
-
-		ss << "WantsNewServers:" << wantsNewServers << " WantsTrueBest:" << wantsTrueBest
-		   << " PreferLowerUtilization:" << preferLowerUtilization << " teamMustHaveShards:" << teamMustHaveShards
-		   << "forReadBalance" << forReadBalance << " inflightPenalty:" << inflightPenalty << ";";
-		ss << "CompleteSources:";
-		for (const auto& cs : completeSources) {
-			ss << cs.toString() << ",";
-		}
-
-		return std::move(ss).str();
 	}
 };
 
