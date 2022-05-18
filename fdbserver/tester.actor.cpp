@@ -494,7 +494,7 @@ void printSimulatedTopology() {
 		printf("%sAddress: %s\n", indent.c_str(), p->address.toString().c_str());
 		indent += "  ";
 		printf("%sClass: %s\n", indent.c_str(), p->startingClass.toString().c_str());
-		printf("%sName: %s\n", indent.c_str(), p->name);
+		printf("%sName: %s\n", indent.c_str(), p->name.c_str());
 	}
 }
 
