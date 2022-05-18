@@ -133,12 +133,12 @@ struct GetTeamRequest {
 
 	// return -1 if a.readload > b.readload
 	static int greaterReadLoad(TeamRef a, TeamRef b) {
-		auto r1 = a->getLoadReadBandwidth(true, 2), r2 = b->getLoadReadBandwidth(true, 2);
+		auto r1 = a->getLoadReadBandwidth(true), r2 = b->getLoadReadBandwidth(true);
 		return r1 == r2 ? 0 : (r1 > r2 ? -1 : 1);
 	}
 	// return -1 if a.readload < b.readload
 	static int lessReadLoad(TeamRef a, TeamRef b) {
-		auto r1 = a->getLoadReadBandwidth(), r2 = b->getLoadReadBandwidth();
+		auto r1 = a->getLoadReadBandwidth(false), r2 = b->getLoadReadBandwidth(false);
 		return r1 == r2 ? 0 : (r1 < r2 ? -1 : 1);
 	}
 
