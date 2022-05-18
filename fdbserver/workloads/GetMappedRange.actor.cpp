@@ -149,33 +149,26 @@ struct GetMappedRangeWorkload : ApiWorkload {
 	                           const MappedKeyValueRef* it,
 	                           GetMappedRangeWorkload* self,
 	                           int matchIndex,
-	                           bool isBoundary) {
+	                           bool isBoundary,
+	                           bool allMissing) {
 		//		std::cout << "validateRecord expectedId " << expectedId << " it->key " << printable(it->key) << "
 		// indexEntryKey(expectedId) " << printable(indexEntryKey(expectedId)) << std::endl;
 		if (matchIndex == MATCH_INDEX_ALL || isBoundary) {
 			ASSERT(it->key == indexEntryKey(expectedId));
 		} else if (matchIndex == MATCH_INDEX_MATCHED_ONLY) {
-			// now we cannot generate a workload that only has partial results matched
-			// thus expecting everything matched
-			// TODO: create tests to generate workloads with partial secondary results present
-			ASSERT(it->key == indexEntryKey(expectedId));
+			ASSERT(it->key == (allMissing ? EMPTY : indexEntryKey(expectedId)));
 		} else if (matchIndex == MATCH_INDEX_UNMATCHED_ONLY) {
-			// now we cannot generate a workload that only has partial results matched
-			// thus expecting everything NOT matched(except for the boundary asserted above)
-			// TODO: create tests to generate workloads with partial secondary results present
-			ASSERT(it->key == EMPTY);
+			ASSERT(it->key == (allMissing ? indexEntryKey(expectedId) : EMPTY));
 		} else {
 			ASSERT(it->key == EMPTY);
 		}
-		// TODO: create tests to generate workloads with partial secondary results present
-		ASSERT(it->boundaryAndExist == isBoundary);
-
 		ASSERT(it->value == EMPTY);
 
 		if (self->SPLIT_RECORDS) {
 			ASSERT(std::holds_alternative<GetRangeReqAndResultRef>(it->reqAndResult));
 			auto& getRange = std::get<GetRangeReqAndResultRef>(it->reqAndResult);
 			auto& rangeResult = getRange.result;
+			ASSERT(it->boundaryAndExist == (isBoundary && !rangeResult.empty()));
 			//					std::cout << "rangeResult.size()=" << rangeResult.size() << std::endl;
 			// In the future, we may be able to do the continuation more efficiently by combining partial results
 			// together and then validate.
@@ -183,17 +176,20 @@ struct GetMappedRangeWorkload : ApiWorkload {
 				// Retry if the underlying request is not fully completed.
 				return true;
 			}
-			ASSERT(rangeResult.size() == SPLIT_SIZE);
-			for (int split = 0; split < SPLIT_SIZE; split++) {
-				auto& kv = rangeResult[split];
-				//						std::cout << "kv.key=" << printable(kv.key)
-				//						          << ", recordKey(id, split)=" << printable(recordKey(id, split)) <<
-				// std::endl; std::cout << "kv.value=" << printable(kv.value)
-				//						          << ", recordValue(id, split)=" << printable(recordValue(id, split)) <<
-				// std::endl;
-				ASSERT(kv.key == recordKey(expectedId, split));
-				ASSERT(kv.value == recordValue(expectedId, split));
+			if (!allMissing) {
+				ASSERT(rangeResult.size() == SPLIT_SIZE);
+				for (int split = 0; split < SPLIT_SIZE; split++) {
+					auto& kv = rangeResult[split];
+					//				std::cout << "kv.key=" << printable(kv.key)
+					//						   << ", recordKey(id, split)=" << printable(recordKey(id, split)) <<
+					// std::endl; std::cout << "kv.value=" << printable(kv.value)
+					//						   << ", recordValue(id, split)=" << printable(recordValue(id,split)) <<
+					// std::endl;
+					ASSERT(kv.key == recordKey(expectedId, split));
+					ASSERT(kv.value == recordValue(expectedId, split));
+				}
 			}
+
 		} else {
 			ASSERT(std::holds_alternative<GetValueReqAndResultRef>(it->reqAndResult));
 			auto& getValue = std::get<GetValueReqAndResultRef>(it->reqAndResult);
@@ -211,7 +207,8 @@ struct GetMappedRangeWorkload : ApiWorkload {
 	                                                          int limit,
 	                                                          int expectedBeginId,
 	                                                          GetMappedRangeWorkload* self,
-	                                                          int matchIndex) {
+	                                                          int matchIndex,
+	                                                          bool allMissing) {
 
 		std::cout << "start scanMappedRangeWithLimits beginSelector:" << beginSelector.toString()
 		          << " endSelector:" << endSelector.toString() << " expectedBeginId:" << expectedBeginId
@@ -238,7 +235,8 @@ struct GetMappedRangeWorkload : ApiWorkload {
 				int cnt = 0;
 				const MappedKeyValueRef* it = result.begin();
 				for (; cnt < result.size(); cnt++, it++) {
-					if (validateRecord(expectedId, it, self, matchIndex, cnt == 0 || cnt == result.size() - 1)) {
+					if (validateRecord(
+					        expectedId, it, self, matchIndex, cnt == 0 || cnt == result.size() - 1, allMissing)) {
 						needRetry = true;
 						break;
 					}
@@ -270,7 +268,8 @@ struct GetMappedRangeWorkload : ApiWorkload {
 	                                   int endId,
 	                                   Key mapper,
 	                                   GetMappedRangeWorkload* self,
-	                                   int matchIndex) {
+	                                   int matchIndex,
+	                                   bool allMissing = false) {
 		Key beginTuple = Tuple().append(prefix).append(INDEX).append(indexKey(beginId)).getDataAsStandalone();
 		state KeySelector beginSelector = KeySelector(firstGreaterOrEqual(beginTuple));
 		Key endTuple = Tuple().append(prefix).append(INDEX).append(indexKey(endId)).getDataAsStandalone();
@@ -279,7 +278,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		state int expectedBeginId = beginId;
 		while (true) {
 			MappedRangeResult result = wait(self->scanMappedRangeWithLimits(
-			    cx, beginSelector, endSelector, mapper, limit, expectedBeginId, self, matchIndex));
+			    cx, beginSelector, endSelector, mapper, limit, expectedBeginId, self, matchIndex, allMissing));
 			expectedBeginId += result.size();
 			if (result.more) {
 				if (result.empty()) {
@@ -322,7 +321,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 	                                                   int endId,
 	                                                   Reference<TransactionWrapper>& tr,
 	                                                   GetMappedRangeWorkload* self) {
-		Key mapper = getMapper(self);
+		Key mapper = getMapper(self, false);
 		Key beginTuple = Tuple().append(prefix).append(INDEX).append(indexKey(beginId)).getDataAsStandalone();
 		KeySelector beginSelector = KeySelector(firstGreaterOrEqual(beginTuple));
 		Key endTuple = Tuple().append(prefix).append(INDEX).append(indexKey(endId)).getDataAsStandalone();
@@ -427,7 +426,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		std::cout << "Test configuration: transactionType:" << self->transactionType << " snapshot:" << self->snapshot
 		          << "bad_mapper:" << self->BAD_MAPPER << std::endl;
 
-		Key mapper = getMapper(self);
+		Key mapper = getMapper(self, false);
 		// The scanned range cannot be too large to hit get_mapped_key_values_has_more. We have a unit validating the
 		// error is thrown when the range is large.
 		const double r = deterministicRandom()->random01();
@@ -440,15 +439,19 @@ struct GetMappedRangeWorkload : ApiWorkload {
 			matchIndex = MATCH_INDEX_UNMATCHED_ONLY;
 		}
 		wait(self->scanMappedRange(cx, 10, 490, mapper, self, matchIndex));
+
+		Key mapper = getMapper(self, true);
+		wait(self->scanMappedRange(cx, 10, 490, mapper, self, MATCH_INDEX_UNMATCHED_ONLY, true));
+
 		return Void();
 	}
 
-	static Key getMapper(GetMappedRangeWorkload* self) {
+	static Key getMapper(GetMappedRangeWorkload* self, bool mapperForAllMissing) {
 		Tuple mapperTuple;
 		if (self->BAD_MAPPER) {
 			mapperTuple << prefix << RECORD << "{K[xxx]}"_sr;
 		} else {
-			mapperTuple << prefix << RECORD << "{K[3]}"_sr;
+			mapperTuple << prefix << RECORD << (mapperForAllMissing ? "{K[2]}"_sr : "{K[3]}"_sr);
 			if (self->SPLIT_RECORDS) {
 				mapperTuple << "{...}"_sr;
 			}
