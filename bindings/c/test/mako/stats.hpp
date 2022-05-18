@@ -53,6 +53,8 @@ public:
 		writer.Uint64(populationSize);
 		writer.String("zeroPopulationSize");
 		writer.Uint64(zeroPopulationSize);
+		writer.String("sum");
+		writer.Uint64(sum);
 
 		writer.String("buckets");
 		writer.StartArray();
@@ -69,6 +71,7 @@ public:
 		maxValue = obj["maxValue"].GetUint64();
 		populationSize = obj["populationSize"].GetUint64();
 		zeroPopulationSize = obj["zeroPopulationSize"].GetUint64();
+		sum = obj["sum"].GetUint64();
 
 		auto jsonBuckets = obj["buckets"].GetArray();
 		uint64_t idx = 0;
