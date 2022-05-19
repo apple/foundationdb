@@ -856,6 +856,10 @@ struct DDQueueData {
 				/*TraceEvent(rrs.interval.end(), mi.id()).detail("Result","Cancelled")
 				    .detail("WasFetching", foundActiveFetching).detail("Contained", rd.keys.contains( rrs.keys ));*/
 				queuedRelocations--;
+				TraceEvent("QueuedRelocationsChanged")
+				    .detail("DataMoveID", rrs.dataMoveId)
+				    .detail("RandomID", rrs.randomId)
+				    .detail("Total", queuedRelocations);
 				finishRelocation(rrs.priority, rrs.healthPriority);
 			}
 		}
@@ -884,6 +888,10 @@ struct DDQueueData {
 				  .detail("KeyBegin", rrs.keys.begin).detail("KeyEnd", rrs.keys.end)
 				    .detail("Priority", rrs.priority).detail("WantsNewServers", rrs.wantsNewServers);*/
 				queuedRelocations++;
+				TraceEvent("QueuedRelocationsChanged")
+				    .detail("DataMoveID", rrs.dataMoveId)
+				    .detail("RandomID", rrs.randomId)
+				    .detail("Total", queuedRelocations);
 				startRelocation(rrs.priority, rrs.healthPriority);
 
 				fetchingSourcesQueue.insert(rrs);
@@ -906,6 +914,10 @@ struct DDQueueData {
 							    .detail("Priority", newData.priority).detail("WantsNewServers",
 							  newData.wantsNewServers);*/
 							queuedRelocations++;
+							TraceEvent("QueuedRelocationsChanged")
+							    .detail("DataMoveID", newData.dataMoveId)
+							    .detail("RandomID", newData.randomId)
+							    .detail("Total", queuedRelocations);
 							startRelocation(newData.priority, newData.healthPriority);
 							foundActiveRelocation = true;
 						}
@@ -1049,6 +1061,10 @@ struct DDQueueData {
 			//TraceEvent(rd.interval.end(), distributorId).detail("Result","Success");
 			if (!rd.isRestore()) {
 				queuedRelocations--;
+				TraceEvent("QueuedRelocationsChanged")
+				    .detail("DataMoveID", rd.dataMoveId)
+				    .detail("RandomID", rd.randomId)
+				    .detail("Total", queuedRelocations);
 				finishRelocation(rd.priority, rd.healthPriority);
 
 				// now we are launching: remove this entry from the queue of all the src servers
@@ -2195,6 +2211,7 @@ ACTOR Future<Void> BgDDValleyFiller(DDQueueData* self, int teamCollectionIndex) 
 }
 
 ACTOR Future<Void> dataDistributionQueue(Database cx,
+                                         Future<Void> readyToStart,
                                          PromiseStream<RelocateShard> output,
                                          FutureStream<RelocateShard> input,
                                          PromiseStream<GetMetricsRequest> getShardMetrics,
@@ -2231,6 +2248,8 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 
 	state PromiseStream<KeyRange> rangesComplete;
 	state Future<Void> launchQueuedWorkTimeout = Never();
+
+	// wait(readyToStart);
 
 	for (int i = 0; i < teamCollections.size(); i++) {
 		// FIXME: Use BgDDLoadBalance for disk rebalance too after DD simulation test proof.

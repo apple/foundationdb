@@ -115,16 +115,16 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution(Data
 	state std::map<UID, Optional<Key>> server_dc;
 	state std::map<std::vector<UID>, std::pair<std::vector<UID>, std::vector<UID>>> team_cache;
 	state std::vector<std::pair<StorageServerInterface, ProcessClass>> tss_servers;
+	state std::vector<std::shared_ptr<DataMove>> dataMoves;
 
 	// Get the server list in its own try/catch block since it modifies result.  We don't want a subsequent failure
 	// causing entries to be duplicated
 	loop {
-		state std::vector<std::shared_ptr<DataMove>> dataMoves;
+		dataMoves.clear();
 		server_dc.clear();
 		result->allServers.clear();
 		succeeded = false;
 		try {
-
 			// Read healthyZone value which is later used to determine on/off of failure triggered DD
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
@@ -793,7 +793,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			}
 
 			if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
-				for (auto it : initData->dataMoveMap.ranges()) {
+				state KeyRangeMap<std::shared_ptr<DataMove>>::iterator it = initData->dataMoveMap.ranges().begin();
+				for (; it != initData->dataMoveMap.ranges().end(); ++it) {
 					const DataMoveMetaData& meta = it.value()->meta;
 					if (it.value()->isCancelled()) {
 						RelocateShard rs(meta.range, SERVER_KNOBS->PRIORITY_RECOVER_MOVE);
@@ -822,7 +823,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 						// When restoring a DataMove, the destination team is determined, and hence
 						shardsAffectedByTeamFailure->moveShard(rs.keys, teams);
 						output.send(rs);
-						// wait(yield(TaskPriority::DataDistribution));
+						wait(yield(TaskPriority::DataDistribution));
 					}
 				}
 			}
@@ -865,6 +866,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			                                    self->ddId,
 			                                    &normalDDQueueErrors()));
 			actors.push_back(reportErrorsExcept(dataDistributionQueue(cx,
+			                                                          readyToStart.getFuture(),
 			                                                          output,
 			                                                          input.getFuture(),
 			                                                          getShardMetrics,

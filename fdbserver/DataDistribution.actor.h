@@ -376,6 +376,7 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
                                            bool* trackerCancelled);
 
 ACTOR Future<Void> dataDistributionQueue(Database cx,
+                                         Future<Void> readyToStart,
                                          PromiseStream<RelocateShard> output,
                                          FutureStream<RelocateShard> input,
                                          PromiseStream<GetMetricsRequest> getShardMetrics,
