@@ -37,6 +37,7 @@
 
 #define WORK_FULL_UTILIZATION 10000 // This is not a knob; it is a fixed point scaling factor!
 
+// TODO: add guard to guarantee the priority is not equal for each purpose?
 inline bool isDiskRebalancePriority(int priority) {
 	return priority == SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM ||
 	       priority == SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM;
@@ -1807,6 +1808,7 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueueData* self, int teamCollectionIndex,
 			}
 
 			// NOTE: We don’t want read rebalancing to be slowed down when Ratekeeper kicks in
+			// TODO: consider dynamic polling interval for read rebalance ?
 			if (isDiskRebalancePriority(ddPriority)) {
 				if (now() - (*self->lastLimited) < SERVER_KNOBS->BG_DD_SATURATION_DELAY) {
 					rebalancePollingInterval = std::min(SERVER_KNOBS->BG_DD_MAX_WAIT,
