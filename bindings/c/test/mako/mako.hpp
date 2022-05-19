@@ -21,7 +21,6 @@
 #ifndef MAKO_HPP
 #define MAKO_HPP
 
-#include <sys/syslimits.h>
 #ifndef FDB_API_VERSION
 #define FDB_API_VERSION 720
 #endif
