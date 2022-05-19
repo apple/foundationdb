@@ -25,9 +25,11 @@
 #include <cstdint>
 #include <cstring>
 #include <fstream>
+#include <istream>
 #include <limits>
 #include <list>
 #include <new>
+#include <ostream>
 #include <utility>
 #include "operations.hpp"
 #include "time.hpp"
@@ -36,6 +38,8 @@
 #include "fdbclient/rapidjson/rapidjson.h"
 #include "fdbclient/rapidjson/stringbuffer.h"
 #include "fdbclient/rapidjson/writer.h"
+#include <iostream>
+#include <sstream>
 
 namespace mako {
 
@@ -85,10 +89,10 @@ public:
 class alignas(64) ThreadStatistics {
 	uint64_t conflicts;
 	uint64_t total_errors;
-	uint64_t ops[MAX_OP];
-	uint64_t errors[MAX_OP];
-	uint64_t latency_samples[MAX_OP];
-	uint64_t latency_us_total[MAX_OP];
+	std::array<uint64_t, MAX_OP> ops;
+	std::array<uint64_t, MAX_OP> errors;
+	std::array<uint64_t, MAX_OP> latency_samples;
+	std::array<uint64_t, MAX_OP> latency_us_total;
 	std::array<DDSketchMako, MAX_OP> sketches;
 
 public:
@@ -157,7 +161,92 @@ public:
 		std::ofstream f(filename);
 		f << ss.GetString();
 	}
+
+	friend std::ofstream& operator<<(std::ofstream& os, ThreadStatistics& stats);
+	friend std::ifstream& operator>>(std::ifstream& is, ThreadStatistics& stats);
 };
+
+inline std::ofstream& operator<<(std::ofstream& os, ThreadStatistics& stats) {
+	rapidjson::StringBuffer ss;
+	rapidjson::Writer<rapidjson::StringBuffer> writer(ss);
+	writer.StartObject();
+	writer.String("conflicts");
+	writer.Uint64(stats.conflicts);
+	writer.String("total_errors");
+	writer.Uint64(stats.total_errors);
+
+	writer.String("ops");
+	writer.StartArray();
+	for (auto op = 0; op < MAX_OP; op++) {
+		writer.Uint64(stats.ops[op]);
+	}
+	writer.EndArray();
+
+	writer.String("errors");
+	writer.StartArray();
+	for (auto op = 0; op < MAX_OP; op++) {
+		writer.Uint64(stats.errors[op]);
+	}
+	writer.EndArray();
+
+	writer.String("latency_samples");
+	writer.StartArray();
+	for (auto op = 0; op < MAX_OP; op++) {
+		writer.Uint64(stats.latency_samples[op]);
+	}
+	writer.EndArray();
+
+	writer.String("latency_us_total");
+	writer.StartArray();
+	for (auto op = 0; op < MAX_OP; op++) {
+		writer.Uint64(stats.latency_us_total[op]);
+	}
+	writer.EndArray();
+
+	for (auto op = 0; op < MAX_OP; op++) {
+		std::string op_name = getOpName(op);
+		writer.String(op_name.c_str());
+		stats.sketches[op].serialize(writer);
+	}
+	writer.EndObject();
+	os << ss.GetString();
+	return os;
+}
+
+inline void populateArray(std::array<uint64_t, MAX_OP>& arr,
+                          rapidjson::GenericArray<false, rapidjson::GenericValue<rapidjson::UTF8<>>>& json) {
+	uint64_t idx = 0;
+	for (auto it = json.Begin(); it != json.End(); it++) {
+		arr[idx] = it->GetUint64();
+		idx++;
+	}
+}
+
+inline std::ifstream& operator>>(std::ifstream& is, ThreadStatistics& stats) {
+	std::stringstream buffer;
+	buffer << is.rdbuf();
+	rapidjson::Document doc;
+	doc.Parse(buffer.str().c_str());
+	stats.conflicts = doc["conflicts"].GetUint64();
+	stats.total_errors = doc["total_errors"].GetUint64();
+
+	auto jsonOps = doc["ops"].GetArray();
+	auto jsonErrors = doc["errors"].GetArray();
+	auto jsonLatencySamples = doc["latency_samples"].GetArray();
+	auto jsonLatencyUsTotal = doc["latency_us_total"].GetArray();
+
+	populateArray(stats.ops, jsonOps);
+	populateArray(stats.errors, jsonErrors);
+	populateArray(stats.latency_samples, jsonLatencySamples);
+	populateArray(stats.latency_us_total, jsonLatencyUsTotal);
+	for (int op = 0; op < MAX_OP; op++) {
+		const std::string op_name = getOpName(op);
+		stats.sketches[op].deserialize(doc[op_name.c_str()]);
+	}
+
+	return is;
+}
+
 } // namespace mako
 
 #endif /* MAKO_STATS_HPP */

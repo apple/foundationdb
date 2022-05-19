@@ -18,12 +18,14 @@
  * limitations under the License.
  */
 
+#include <array>
 #include <cassert>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <map>
 #include <new>
 #include <string>
@@ -1554,7 +1556,7 @@ void printReport(Arguments const& args,
 	fmt::print("Latency (us)");
 	printStatsHeader(args, true, false, true);
 
-	std::unordered_map<std::string, DDSketchMako> data_points;
+	std::array<DDSketchMako, MAX_OP> data_points;
 	/* Total Samples */
 	putTitle("Samples");
 	first_op = 1;
@@ -1562,7 +1564,7 @@ void printReport(Arguments const& args,
 		const std::string op_name = getOpName(op);
 		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
 			for (auto i = 0; i < args.num_processes; i++) {
-				auto load_sample = [pid_main, op, &data_points, &op_name](int process_id, int thread_id) {
+				auto load_sample = [pid_main, op, &data_points](int process_id, int thread_id) {
 					const auto dirname = fmt::format("{}{}", TEMP_DATA_STORE, pid_main);
 					const auto filename = getStatsFilename(dirname, process_id, thread_id, op);
 					std::ifstream fp{ filename };
@@ -1575,10 +1577,10 @@ void printReport(Arguments const& args,
 						logr.error("Couldn't parse JSON from {}", filename);
 					}
 					sketch.deserialize(doc);
-					if (data_points.count(op_name)) {
-						data_points[op_name].mergeWith(sketch);
+					if (data_points[op].getPopulationSize() > 0) {
+						data_points[op].mergeWith(sketch);
 					} else {
-						data_points[op_name] = sketch;
+						data_points[op] = sketch;
 					}
 				};
 				if (args.async_xacts == 0) {
@@ -1590,7 +1592,7 @@ void printReport(Arguments const& args,
 					load_sample(i, 0);
 				}
 			}
-			auto sample_size = data_points[op_name].getPopulationSize();
+			auto sample_size = final_stats.getLatencySampleCount(op);
 			if (sample_size > 0) {
 				putField(sample_size);
 			} else {
@@ -1644,7 +1646,7 @@ void printReport(Arguments const& args,
 	for (auto op = 0; op < MAX_OP; op++) {
 		const std::string op_name = getOpName(op);
 		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
-			if (data_points[op_name].getPopulationSize() > 0) {
+			if (final_stats.getLatencySampleCount(op) > 0) {
 				putField(final_stats.mean(op));
 				if (fp) {
 					if (first_op) {
@@ -1701,7 +1703,8 @@ void printReport(Arguments const& args,
 			const auto lat_samples = final_stats.getLatencySampleCount(op);
 			if (lat_total && lat_samples) {
 
-				auto median = data_points[op_name].percentile(0.5);
+				auto median = data_points[op].percentile(0.5);
+				// auto median = final_stats.percentile(op, 0.5);
 				putField(median);
 				if (fp) {
 					if (first_op) {
@@ -1727,11 +1730,12 @@ void printReport(Arguments const& args,
 	for (auto op = 0; op < MAX_OP; op++) {
 		const std::string op_name = getOpName(op);
 		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
-			if (!data_points[op_name].getPopulationSize() || !final_stats.getLatencyUsTotal(op)) {
+			if (!final_stats.getLatencySampleCount(op) || !final_stats.getLatencyUsTotal(op)) {
 				putField("N/A");
 				continue;
 			}
-			const auto point_95pct = data_points[op_name].percentile(0.95);
+			const auto point_95pct = data_points[op].percentile(0.95);
+			// const auto point_95pct = final_stats.percentile(op, 0.95);
 			putField(point_95pct);
 			if (fp) {
 				if (first_op) {
@@ -1754,11 +1758,12 @@ void printReport(Arguments const& args,
 	for (auto op = 0; op < MAX_OP; op++) {
 		const std::string op_name = getOpName(op);
 		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
-			if (!data_points[op_name].getPopulationSize() || !final_stats.getLatencyUsTotal(op)) {
+			if (!final_stats.getLatencySampleCount(op) || !final_stats.getLatencyUsTotal(op)) {
 				putField("N/A");
 				continue;
 			}
-			const auto point_99pct = data_points[op_name].percentile(0.99);
+			const auto point_99pct = data_points[op].percentile(0.99);
+			// const auto point_99pct = final_stats.percentile(op, 0.99);
 			putField(point_99pct);
 			if (fp) {
 				if (first_op) {
@@ -1781,11 +1786,12 @@ void printReport(Arguments const& args,
 	for (auto op = 0; op < MAX_OP; op++) {
 		const std::string op_name = getOpName(op);
 		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
-			if (!data_points[op_name].getPopulationSize() || !final_stats.getLatencyUsTotal(op)) {
+			if (!final_stats.getLatencySampleCount(op) || !final_stats.getLatencyUsTotal(op)) {
 				putField("N/A");
 				continue;
 			}
-			const auto point_99_9pct = data_points[op_name].percentile(0.999);
+			const auto point_99_9pct = data_points[op].percentile(0.999);
+			// const auto point_99_9pct = final_stats.percentile(op, 0.999);
 			putField(point_99_9pct);
 			if (fp) {
 				if (first_op) {
@@ -1804,17 +1810,8 @@ void printReport(Arguments const& args,
 
 	// export the ddsketch if the flag was set
 	if (!args.stats_export_path.empty()) {
-		rapidjson::StringBuffer ss;
-		rapidjson::Writer<rapidjson::StringBuffer> writer(ss);
-		writer.StartObject();
-		for (auto op = 0; op < MAX_OP; op++) {
-			std::string op_name = getOpName(op);
-			writer.String(op_name.c_str());
-			data_points[op_name].serialize(writer);
-		}
-		writer.EndObject();
 		std::ofstream f(args.stats_export_path);
-		f << ss.GetString();
+		f << final_stats;
 	}
 
 	const auto command_remove = fmt::format("rm -rf {}{}", TEMP_DATA_STORE, pid_main);
