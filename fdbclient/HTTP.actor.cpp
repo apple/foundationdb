@@ -178,6 +178,8 @@ ACTOR Future<Void> read_http_response_headers(Reference<IConnection> conn,
 		int nameEnd = -1, valueStart = -1, valueEnd = -1;
 		int len = -1;
 
+		std::string name, value;
+
 		// Read header of the form "Name: Value\n"
 		// Note that multi line header values are not supported here.
 		// Format string breaks down as follows:
@@ -187,20 +189,28 @@ ACTOR Future<Void> read_http_response_headers(Reference<IConnection> conn,
 		//   %*1[\r]       Exactly one \r
 		//   %*1[\n]       Exactly one \n
 		//   %n            Save final end position
-		if (sscanf(buf->c_str() + *pos,
-		           "%*[^:]%n:%*[ \t]%n%*[^\r]%n%*1[\r]%*1[\n]%n",
-		           &nameEnd,
-		           &valueStart,
-		           &valueEnd,
-		           &len) >= 0 &&
-		    len > 0) {
-			const std::string name(buf->substr(*pos, nameEnd));
-			const std::string value(buf->substr(*pos + valueStart, valueEnd - valueStart));
-			(*headers)[name] = value;
-			*pos += len;
-			len = -1;
-		} else // Malformed header line (at least according to this simple parsing)
+		if (sscanf(buf->c_str() + *pos, "%*[^:]%n:%*[ \t]%n", &nameEnd, &valueStart) >= 0 && valueStart > 0) {
+			// found a header name
+			name = std::string(buf->substr(*pos, nameEnd));
+			*pos += valueStart;
+		} else {
+			// Malformed header line (at least according to this simple parsing)
 			throw http_bad_response();
+		}
+
+		if (sscanf(buf->c_str() + *pos, "%*[^\r]%n%*1[\r]%*1[\n]%n", &valueEnd, &len) >= 0 && len > 0) {
+			// found a header value
+			value = std::string(buf->substr(*pos, valueEnd));
+			*pos += len;
+		} else if (sscanf(buf->c_str() + *pos, "%*1[\r]%*1[\n]%n", &len) >= 0 && len > 0) {
+			// empty header value
+			*pos += len;
+		} else {
+			// Malformed header line (at least according to this simple parsing)
+			throw http_bad_response();
+		}
+
+		(*headers)[name] = value;
 	}
 }
 
@@ -313,9 +323,15 @@ ACTOR Future<Void> read_http_response(Reference<HTTP::Response> r, Reference<ICo
 	}
 
 	// If there is actual response content, check the MD5 sum against the Content-MD5 response header
-	if (r->content.size() > 0)
-		if (!r->verifyMD5(false)) // false arg means do not fail if the Content-MD5 header is missing.
+	if (r->content.size() > 0) {
+		if (r->code == 206 && CLIENT_KNOBS->HTTP_RESPONSE_SKIP_VERIFY_CHECKSUM_FOR_PARTIAL_CONTENT) {
+			return Void();
+		}
+
+		if (!r->verifyMD5(false)) { // false arg means do not fail if the Content-MD5 header is missing.
 			throw http_bad_response();
+		}
+	}
 
 	return Void();
 }

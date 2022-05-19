@@ -180,6 +180,7 @@ void ClientKnobs::initialize(bool randomize) {
 	init( HTTP_VERBOSE_LEVEL,                        0 );
 	init( HTTP_REQUEST_ID_HEADER,                   "" );
 	init( HTTP_REQUEST_AWS_V4_HEADER,            false );
+	init( HTTP_RESPONSE_SKIP_VERIFY_CHECKSUM_FOR_PARTIAL_CONTENT, false );
 	init( BLOBSTORE_ENCRYPTION_TYPE,                "" );
 	init( BLOBSTORE_CONNECT_TRIES,                  10 );
 	init( BLOBSTORE_CONNECT_TIMEOUT,                10 );
