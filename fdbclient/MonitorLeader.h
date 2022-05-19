@@ -85,7 +85,8 @@ Future<Void> monitorProxies(
     Reference<AsyncVar<ClientDBInfo>> const& clientInfo,
     Reference<AsyncVar<Optional<ClientLeaderRegInterface>>> const& coordinator,
     Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> const& supportedVersions,
-    Key const& traceLogGroup);
+    Key const& traceLogGroup,
+    bool const& monitorClusterFileChanges);
 
 void shrinkProxyList(ClientDBInfo& ni,
                      std::vector<UID>& lastCommitProxyUIDs,

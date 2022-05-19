@@ -1702,7 +1702,8 @@ void MultiVersionDatabase::DatabaseState::updateDatabase(Reference<IDatabase> ne
 		} else {
 			// For older clients that don't have an API to get the protocol version, we have to monitor it locally
 			try {
-				versionMonitorDb = MultiVersionApi::api->getLocalClient()->api->createDatabase(clusterFilePath.c_str());
+				versionMonitorDb = MultiVersionApi::api->getLocalClient()->api->createLocalVersionMonitorDatabase(
+				    clusterFilePath.c_str());
 			} catch (Error& e) {
 				// We can't create a new database to monitor the cluster version. This means we will continue using the
 				// previous one, which should hopefully continue to work.
@@ -1715,7 +1716,8 @@ void MultiVersionDatabase::DatabaseState::updateDatabase(Reference<IDatabase> ne
 		// We don't have a database connection, so use the local client to monitor the protocol version
 		db = Reference<IDatabase>();
 		try {
-			versionMonitorDb = MultiVersionApi::api->getLocalClient()->api->createDatabase(clusterFilePath.c_str());
+			versionMonitorDb =
+			    MultiVersionApi::api->getLocalClient()->api->createLocalVersionMonitorDatabase(clusterFilePath.c_str());
 		} catch (Error& e) {
 			// We can't create a new database to monitor the cluster version. This means we will continue using the
 			// previous one, which should hopefully continue to work.

@@ -72,7 +72,7 @@ private:
 	DatabaseContext* db;
 
 public: // Internal use only
-	ThreadSafeDatabase(std::string connFilename, int apiVersion);
+	ThreadSafeDatabase(std::string connFilename, int apiVersion, bool monitorClusterFileChanges);
 	ThreadSafeDatabase(DatabaseContext* db) : db(db) {}
 	DatabaseContext* unsafeGetPtr() const { return db; }
 };
@@ -208,6 +208,8 @@ public:
 	void stopNetwork() override;
 
 	Reference<IDatabase> createDatabase(const char* clusterFilePath) override;
+
+	Reference<IDatabase> createLocalVersionMonitorDatabase(const char* clusterFilePath) override;
 
 	void addNetworkThreadCompletionHook(void (*hook)(void*), void* hookParameter) override;
 

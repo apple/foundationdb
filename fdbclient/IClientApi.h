@@ -193,6 +193,11 @@ public:
 
 	virtual Reference<IDatabase> createDatabase(const char* clusterFilePath) = 0;
 
+	virtual Reference<IDatabase> createLocalVersionMonitorDatabase(const char* clusterFilePath) {
+		// The method is implemented only by the local client
+		throw internal_error();
+	}
+
 	virtual void addNetworkThreadCompletionHook(void (*hook)(void*), void* hookParameter) = 0;
 };
 

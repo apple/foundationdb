@@ -2130,7 +2130,8 @@ Database Database::createDatabase(Reference<IClusterConnectionRecord> connRecord
                                   int apiVersion,
                                   IsInternal internal,
                                   LocalityData const& clientLocality,
-                                  DatabaseContext* preallocatedDb) {
+                                  DatabaseContext* preallocatedDb,
+                                  bool monitorClusterFileChanges) {
 	if (!g_network)
 		throw network_not_setup();
 
@@ -2190,7 +2191,8 @@ Database Database::createDatabase(Reference<IClusterConnectionRecord> connRecord
 	                                                clientInfo,
 	                                                coordinator,
 	                                                networkOptions.supportedVersions,
-	                                                StringRef(networkOptions.traceLogGroup));
+	                                                StringRef(networkOptions.traceLogGroup),
+	                                                monitorClusterFileChanges);
 
 	DatabaseContext* db;
 	if (preallocatedDb) {
@@ -6957,10 +6959,14 @@ ACTOR Future<ProtocolVersion> getCoordinatorProtocol(
     Reference<AsyncVar<Optional<ClientLeaderRegInterface>> const> coordinator) {
 	state ProtocolInfoReply reply;
 	if (coordinator->get().get().hostname.present()) {
+		TraceEvent("GetCoordinatorProtocol")
+		    .detail("CoordinatorHostname", coordinator->get().get().hostname.get().toString());
 		wait(store(reply,
 		           retryGetReplyFromHostname(
 		               ProtocolInfoRequest{}, coordinator->get().get().hostname.get(), WLTOKEN_PROTOCOL_INFO)));
 	} else {
+		TraceEvent("GetCoordinatorProtocol")
+		    .detail("CoordinatorAddresses", coordinator->get().get().getLeader.getEndpoint().addresses.toString());
 		RequestStream<ProtocolInfoRequest> requestStream(
 		    Endpoint::wellKnown({ coordinator->get().get().getLeader.getEndpoint().addresses }, WLTOKEN_PROTOCOL_INFO));
 		wait(store(reply, retryBrokenPromise(requestStream, ProtocolInfoRequest{})));
@@ -7021,6 +7027,7 @@ ACTOR Future<ProtocolVersion> getClusterProtocolImpl(
 
 	loop {
 		if (!coordinator->get().present()) {
+			TraceEvent("GetClusterProtocolWaitForCoordinator").log();
 			wait(coordinator->onChange());
 		} else {
 			if (needToConnect) {
@@ -7033,6 +7040,9 @@ ACTOR Future<ProtocolVersion> getClusterProtocolImpl(
 				when(wait(coordinator->onChange())) { needToConnect = true; }
 
 				when(ProtocolVersion pv = wait(protocolVersion)) {
+					TraceEvent("CoordinatorProtocolVersionReceived")
+					    .detail("ReceivedVersion", pv)
+					    .detail("ExpectedVersion", expectedVersion);
 					if (!expectedVersion.present() || expectedVersion.get() != pv) {
 						return pv;
 					}
@@ -7044,6 +7054,9 @@ ACTOR Future<ProtocolVersion> getClusterProtocolImpl(
 				// the connect packet
 				when(Optional<ProtocolVersion> pv =
 				         wait(getCoordinatorProtocolFromConnectPacket(coordinator, expectedVersion))) {
+					TraceEvent("ProcotolVersionFromCoordinatorConnectPacketReceived")
+					    .detail("ReceivedVersion", pv)
+					    .detail("ExpectedVersion", expectedVersion);
 					if (pv.present()) {
 						return pv.get();
 					} else {

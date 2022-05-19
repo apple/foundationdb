@@ -91,7 +91,8 @@ public:
 	                               int apiVersion,
 	                               IsInternal internal = IsInternal::True,
 	                               LocalityData const& clientLocality = LocalityData(),
-	                               DatabaseContext* preallocatedDb = nullptr);
+	                               DatabaseContext* preallocatedDb = nullptr,
+	                               bool monitorClusterFileChanges = false);
 
 	static Database createDatabase(std::string connFileName,
 	                               int apiVersion,

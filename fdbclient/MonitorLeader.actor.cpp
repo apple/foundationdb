@@ -864,7 +864,8 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
     Reference<AsyncVar<Optional<ClientLeaderRegInterface>>> coordinator,
     MonitorLeaderInfo info,
     Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> supportedVersions,
-    Key traceLogGroup) {
+    Key traceLogGroup,
+    bool monitorClusterFileChanges) {
 	state ClusterConnectionString cs = info.intermediateConnRecord->getConnectionString();
 	state int coordinatorsSize = cs.hostnames.size() + cs.coordinators().size();
 	state int index = 0;
@@ -900,7 +901,18 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 		state ClusterConnectionString storedConnectionString;
 		if (connRecord) {
 			bool upToDate = wait(connRecord->upToDate(storedConnectionString));
-			if (!upToDate) {
+			if (upToDate) {
+				incorrectTime = Optional<double>();
+			} else if (monitorClusterFileChanges) {
+				TraceEvent("UpdatingConnectionStringFromFile")
+				    .detail("ClusterFile", connRecord->toString())
+				    .detail("StoredConnectionString", storedConnectionString.toString())
+				    .detail("CurrentConnectionString", connRecord->getConnectionString().toString());
+				connRecord->setAndPersistConnectionString(storedConnectionString);
+				info.intermediateConnRecord =
+				    connRecord->makeIntermediateRecord(ClusterConnectionString(storedConnectionString));
+				return info;
+			} else {
 				req.issues.push_back_deep(req.issues.arena(), LiteralStringRef("incorrect_cluster_file_contents"));
 				std::string connectionString = connRecord->getConnectionString().toString();
 				if (!incorrectTime.present()) {
@@ -913,11 +925,7 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 				    .detail("ClusterFile", connRecord->toString())
 				    .detail("StoredConnectionString", storedConnectionString.toString())
 				    .detail("CurrentConnectionString", connectionString);
-			} else {
-				incorrectTime = Optional<double>();
 			}
-		} else {
-			incorrectTime = Optional<double>();
 		}
 
 		state Future<ErrorOr<CachedSerialization<ClientDBInfo>>> repFuture;
@@ -984,12 +992,18 @@ ACTOR Future<Void> monitorProxies(
     Reference<AsyncVar<ClientDBInfo>> clientInfo,
     Reference<AsyncVar<Optional<ClientLeaderRegInterface>>> coordinator,
     Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> supportedVersions,
-    Key traceLogGroup) {
+    Key traceLogGroup,
+    bool monitorClusterFileChanges) {
 	state MonitorLeaderInfo info(connRecord->get());
 	loop {
 		choose {
-			when(MonitorLeaderInfo _info = wait(monitorProxiesOneGeneration(
-			         connRecord->get(), clientInfo, coordinator, info, supportedVersions, traceLogGroup))) {
+			when(MonitorLeaderInfo _info = wait(monitorProxiesOneGeneration(connRecord->get(),
+			                                                                clientInfo,
+			                                                                coordinator,
+			                                                                info,
+			                                                                supportedVersions,
+			                                                                traceLogGroup,
+			                                                                monitorClusterFileChanges))) {
 				info = _info;
 			}
 			when(wait(connRecord->onChange())) {

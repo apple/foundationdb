@@ -352,15 +352,25 @@ endif()
               --redundancy double
             )
 
-    add_test(NAME fdb_c_wiggle_and_upgrade
+    add_test(NAME fdb_c_wiggle_and_upgrade_latest
           COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
               --build-dir ${CMAKE_BINARY_DIR}
               --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
-              --upgrade-path "7.0.0" "wiggle" "7.2.0"
+              --upgrade-path "7.1.5" "wiggle" "7.2.0"
               --disable-log-dump
               --process-number 3
               --redundancy double
             )
+
+    add_test(NAME fdb_c_wiggle_and_upgrade_63
+      COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
+          --build-dir ${CMAKE_BINARY_DIR}
+          --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
+          --upgrade-path "6.3.24" "wiggle" "7.0.0"
+          --disable-log-dump
+          --process-number 3
+          --redundancy double
+        )
 
   endif()
 
