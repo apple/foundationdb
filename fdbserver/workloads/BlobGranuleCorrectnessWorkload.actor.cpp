@@ -122,9 +122,6 @@ struct ThreadData : ReferenceCounted<ThreadData>, NonCopyable {
 
 	// TODO could make keys variable length?
 	Key getKey(uint32_t key, uint32_t id) { return StringRef(format("%08x/%08x", key, id)); }
-
-	// TODO REMOVE once blob workers understand tenants
-	Key getKeyWithTenantPrefix(uint32_t key, uint32_t id) { return getKey(key, id).withPrefix(tenant.prefix); }
 };
 
 // For debugging mismatches on what data should be and why
@@ -310,8 +307,8 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 			try {
 				Version rv = wait(self->doGrv(&tr));
 				state Version readVersion = rv;
-				std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> blob =
-				    wait(readFromBlob(cx, self->bstore, threadData->directoryRange, 0, readVersion));
+				std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> blob = wait(
+				    readFromBlob(cx, self->bstore, threadData->directoryRange, 0, readVersion, threadData->tenantName));
 				fmt::print("Directory {0} got {1} RV {2}\n",
 				           threadData->directoryID,
 				           doSetup ? "initial" : "final",
@@ -490,8 +487,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 			}
 			for (; idIdx < checkIt->second.writes.size() && checkIt->second.writes[idIdx].writeVersion <= readVersion;
 			     idIdx++) {
-				// FIXME: Blob Workers should strip tenant prefix like SS do
-				Key nextKeyShouldBe = threadData->getKeyWithTenantPrefix(key, idIdx);
+				Key nextKeyShouldBe = threadData->getKey(key, idIdx);
 				Version keyBeginVersion = beginVersionByChunk.rangeContaining(nextKeyShouldBe).cvalue();
 				if (keyBeginVersion > checkIt->second.writes[idIdx].writeVersion) {
 					if (DEBUG_READ_OP(threadData->directoryID, readVersion)) {
@@ -639,9 +635,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 					endKey = endKeyIt->first;
 				}
 
-				// FIXME: make blob workers tenant aware
-				state KeyRange range = KeyRangeRef(threadData->getKeyWithTenantPrefix(startKey, 0),
-				                                   threadData->getKeyWithTenantPrefix(endKey, 0));
+				state KeyRange range = KeyRangeRef(threadData->getKey(startKey, 0), threadData->getKey(endKey, 0));
 
 				// pick read version
 				ASSERT(threadData->writeVersions.back() >= threadData->minSuccessfulReadVersion);
