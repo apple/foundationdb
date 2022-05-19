@@ -31,6 +31,7 @@
 #include <new>
 #include <ostream>
 #include <utility>
+#include "mako/mako.hpp"
 #include "operations.hpp"
 #include "time.hpp"
 #include "ddsketch.hpp"
@@ -161,6 +162,8 @@ public:
 		std::ofstream f(filename);
 		f << ss.GetString();
 	}
+
+	void updateLatencies(const std::array<DDSketchMako, MAX_OP>& other_sketches) { sketches = other_sketches; }
 
 	friend std::ofstream& operator<<(std::ofstream& os, ThreadStatistics& stats);
 	friend std::ifstream& operator>>(std::ifstream& is, ThreadStatistics& stats);
