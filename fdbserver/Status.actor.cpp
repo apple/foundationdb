@@ -103,6 +103,14 @@ extern const char* limitReasonDesc[];
 
 typedef std::map<std::string, TraceEventFields> EventMap;
 
+struct StorageServerStatusInfo : public StorageServerInterface {
+	Optional<StorageMetadataType> metadata;
+	EventMap eventMap;
+	StorageServerStatusInfo(const StorageServerInterface& interface,
+	                        Optional<StorageMetadataType> metadata = Optional<StorageMetadataType>())
+	  : StorageServerInterface(interface), metadata(metadata) {}
+};
+
 ACTOR static Future<Optional<TraceEventFields>> latestEventOnWorker(WorkerInterface worker, std::string eventName) {
 	try {
 		EventLogRequest req =
@@ -468,12 +476,13 @@ struct RolesInfo {
 		obj["role"] = role;
 		return roles.insert(std::make_pair(address, obj))->second;
 	}
+
 	JsonBuilderObject& addRole(std::string const& role,
-	                           StorageServerInterface& iface,
-	                           EventMap const& metrics,
+	                           StorageServerStatusInfo& iface,
 	                           Version maxTLogVersion,
 	                           double* pDataLagSeconds) {
 		JsonBuilderObject obj;
+		EventMap const& metrics = iface.eventMap;
 		double dataLagSeconds = -1.0;
 		obj["id"] = iface.id().shortString();
 		obj["role"] = role;
@@ -584,12 +593,9 @@ struct RolesInfo {
 				}
 			}
 
-			if (!iface.isTss()) { // only storage server has Metadata field
-				TraceEventFields const& metadata = metrics.at("Metadata");
-				JsonBuilderObject metadataObj;
-				metadataObj["created_time_datetime"] = metadata.getValue("CreatedTimeDatetime");
-				metadataObj["created_time_timestamp"] = metadata.getUint64("CreatedTimeTimestamp");
-				obj["storage_metadata"] = metadataObj;
+			if (iface.metadata.present()) {
+				obj["storage_metadata"] = iface.metadata.get().toJSON();
+				// printf("%s\n", metadataObj.getJson().c_str());
 			}
 
 		} catch (Error& e) {
@@ -729,7 +735,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
     WorkerEvents traceFileOpenErrors,
     WorkerEvents programStarts,
     std::map<std::string, std::vector<JsonBuilderObject>> processIssues,
-    std::vector<std::pair<StorageServerInterface, EventMap>> storageServers,
+    std::vector<StorageServerStatusInfo> storageServers,
     std::vector<std::pair<TLogInterface, EventMap>> tLogs,
     std::vector<std::pair<CommitProxyInterface, EventMap>> commitProxies,
     std::vector<std::pair<GrvProxyInterface, EventMap>> grvProxies,
@@ -859,13 +865,13 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 		wait(yield());
 	}
 
-	state std::vector<std::pair<StorageServerInterface, EventMap>>::iterator ss;
+	state std::vector<StorageServerStatusInfo>::iterator ss;
 	state std::map<NetworkAddress, double> ssLag;
 	state double lagSeconds;
 	for (ss = storageServers.begin(); ss != storageServers.end(); ++ss) {
-		roles.addRole("storage", ss->first, ss->second, maxTLogVersion, &lagSeconds);
+		roles.addRole("storage", *ss, maxTLogVersion, &lagSeconds);
 		if (lagSeconds != -1.0) {
-			ssLag[ss->first.address()] = lagSeconds;
+			ssLag[ss->address()] = lagSeconds;
 		}
 		wait(yield());
 	}
@@ -1917,72 +1923,69 @@ static Future<std::vector<TraceEventFields>> getServerBusiestWriteTags(
 }
 
 ACTOR
-static Future<std::vector<Optional<StorageMetadataType>>> getServerMetadata(std::vector<StorageServerInterface> servers,
-                                                                            Database cx,
-                                                                            bool use_system_priority) {
+static Future<std::vector<StorageServerStatusInfo>> readStorageInterfaceAndMetadata(Database cx,
+                                                                                    bool use_system_priority) {
 	state KeyBackedObjectMap<UID, StorageMetadataType, decltype(IncludeVersion())> metadataMap(serverMetadataKeys.begin,
 	                                                                                           IncludeVersion());
-	state std::vector<Optional<StorageMetadataType>> res(servers.size());
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
-
+	state std::vector<StorageServerStatusInfo> servers;
 	loop {
 		try {
+			servers.clear();
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			if (use_system_priority) {
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			}
-			state int i = 0;
-			for (i = 0; i < servers.size(); ++i) {
-				Optional<StorageMetadataType> metadata = wait(metadataMap.get(tr, servers[i].id(), Snapshot::True));
-				// TraceEvent(SevDebug, "MetadataAppear", servers[i].id()).detail("Present", metadata.present());
-				res[i] = metadata;
+			state RangeResult serverList = wait(tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
+			ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
+
+			servers.reserve(serverList.size());
+			for (int i = 0; i < serverList.size(); i++) {
+				servers.push_back(StorageServerStatusInfo(decodeServerListValue(serverList[i].value)));
 			}
+			state std::vector<Future<Void>> futures(servers.size());
+			for (int i = 0; i < servers.size(); ++i) {
+				auto& info = servers[i];
+				futures[i] = fmap(
+				    [&info](Optional<StorageMetadataType> meta) -> Void {
+					    info.metadata = meta;
+					    return Void();
+				    },
+				    metadataMap.get(tr, servers[i].id()));
+				// TraceEvent(SevDebug, "MetadataAppear", servers[i].id()).detail("Present", metadata.present());
+			}
+			wait(waitForAll(futures));
 			wait(tr->commit());
 			break;
 		} catch (Error& e) {
 			wait(tr->onError(e));
 		}
 	}
-	return res;
+	return servers;
 }
 
-ACTOR static Future<std::vector<std::pair<StorageServerInterface, EventMap>>> getStorageServersAndMetrics(
+ACTOR static Future<std::vector<StorageServerStatusInfo>> getStorageServerStatusInfos(
     Database cx,
     std::unordered_map<NetworkAddress, WorkerInterface> address_workers,
     WorkerDetails rkWorker) {
-	state std::vector<StorageServerInterface> servers = wait(timeoutError(getStorageServers(cx, true), 5.0));
-	state std::vector<std::pair<StorageServerInterface, EventMap>> results;
+	state std::vector<StorageServerStatusInfo> servers =
+	    wait(timeoutError(readStorageInterfaceAndMetadata(cx, true), 5.0));
+	state std::vector<std::pair<StorageServerStatusInfo, EventMap>> results;
 	state std::vector<TraceEventFields> busiestWriteTags;
-	state std::vector<Optional<StorageMetadataType>> metadata;
 	wait(store(results,
 	           getServerMetrics(servers,
 	                            address_workers,
 	                            std::vector<std::string>{
 	                                "StorageMetrics", "ReadLatencyMetrics", "ReadLatencyBands", "BusiestReadTag" })) &&
-	     store(busiestWriteTags, getServerBusiestWriteTags(servers, address_workers, rkWorker)) &&
-	     store(metadata, getServerMetadata(servers, cx, true)));
+	     store(busiestWriteTags, getServerBusiestWriteTags(servers, address_workers, rkWorker)));
 
-	ASSERT(busiestWriteTags.size() == results.size() && metadata.size() == results.size());
+	ASSERT(busiestWriteTags.size() == results.size());
 	for (int i = 0; i < results.size(); ++i) {
-		results[i].second.emplace("BusiestWriteTag", busiestWriteTags[i]);
-
-		// FIXME: it's possible that a SS is removed between `getStorageServers` and `getServerMetadata`. Maybe we can
-		// read StorageServer and Metadata in an atomic transaction?
-		if (metadata[i].present()) {
-			TraceEventFields metadataField;
-			metadataField.addField("CreatedTimeTimestamp", std::to_string(metadata[i].get().createdTime));
-			metadataField.addField("CreatedTimeDatetime", epochsToGMTString(metadata[i].get().createdTime));
-			results[i].second.emplace("Metadata", metadataField);
-		} else if (!servers[i].isTss()) {
-			TraceEventFields metadataField;
-			metadataField.addField("CreatedTimeTimestamp", "0");
-			metadataField.addField("CreatedTimeDatetime", "[removed]");
-			results[i].second.emplace("Metadata", metadataField);
-		}
+		servers[i].eventMap = std::move(results[i].second);
+		servers[i].eventMap.emplace("BusiestWriteTag", busiestWriteTags[i]);
 	}
-
-	return results;
+	return servers;
 }
 
 ACTOR static Future<std::vector<std::pair<TLogInterface, EventMap>>> getTLogsAndMetrics(
@@ -2098,8 +2101,9 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(
     WorkerDetails rkWorker,
     JsonBuilderObject* qos,
     JsonBuilderObject* data_overlay,
+    JsonBuilderObject* tenants,
     std::set<std::string>* incomplete_reasons,
-    Future<ErrorOr<std::vector<std::pair<StorageServerInterface, EventMap>>>> storageServerFuture) {
+    Future<ErrorOr<std::vector<StorageServerStatusInfo>>> storageServerFuture) {
 	state JsonBuilderObject statusObj;
 	state JsonBuilderObject operationsObj;
 	state JsonBuilderObject bytesObj;
@@ -2181,6 +2185,10 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(
 		transactions["committed"] = txnCommitOutSuccess.getStatus();
 
 		statusObj["transactions"] = transactions;
+
+		if (commitProxyStats.size() > 0) {
+			(*tenants)["num_tenants"] = commitProxyStats[0].getUint64("NumTenants");
+		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
 			throw;
@@ -2271,7 +2279,7 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(
 
 	// Reads
 	try {
-		ErrorOr<std::vector<std::pair<StorageServerInterface, EventMap>>> storageServers = wait(storageServerFuture);
+		ErrorOr<std::vector<StorageServerStatusInfo>> storageServers = wait(storageServerFuture);
 		if (!storageServers.present()) {
 			throw storageServers.getError();
 		}
@@ -2283,7 +2291,7 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(
 		StatusCounter lowPriorityReads;
 
 		for (auto& ss : storageServers.get()) {
-			TraceEventFields const& storageMetrics = ss.second.at("StorageMetrics");
+			TraceEventFields const& storageMetrics = ss.eventMap.at("StorageMetrics");
 
 			if (storageMetrics.size() > 0) {
 				readRequests.updateValues(StatusCounter(storageMetrics.getValue("QueryQueue")));
@@ -2314,14 +2322,14 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(
 
 ACTOR static Future<JsonBuilderObject> clusterSummaryStatisticsFetcher(
     WorkerEvents pMetrics,
-    Future<ErrorOr<std::vector<std::pair<StorageServerInterface, EventMap>>>> storageServerFuture,
+    Future<ErrorOr<std::vector<StorageServerStatusInfo>>> storageServerFuture,
     Future<ErrorOr<std::vector<std::pair<TLogInterface, EventMap>>>> tlogFuture,
     std::set<std::string>* incomplete_reasons) {
 	state JsonBuilderObject statusObj;
 	try {
 		state JsonBuilderObject cacheStatistics;
 
-		ErrorOr<std::vector<std::pair<StorageServerInterface, EventMap>>> storageServers = wait(storageServerFuture);
+		ErrorOr<std::vector<StorageServerStatusInfo>> storageServers = wait(storageServerFuture);
 
 		if (!storageServers.present()) {
 			throw storageServers.getError();
@@ -2331,7 +2339,7 @@ ACTOR static Future<JsonBuilderObject> clusterSummaryStatisticsFetcher(
 		double storageCacheMissesHz = 0;
 
 		for (auto& ss : storageServers.get()) {
-			auto processMetrics = pMetrics.find(ss.first.address());
+			auto processMetrics = pMetrics.find(ss.address());
 			if (processMetrics != pMetrics.end()) {
 				int64_t hits = processMetrics->second.getInt64("CacheHits");
 				int64_t misses = processMetrics->second.getInt64("CacheMisses");
@@ -2943,13 +2951,14 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 		state std::map<std::string, std::vector<JsonBuilderObject>> processIssues =
 		    getProcessIssuesAsMessages(workerIssues);
-		state std::vector<std::pair<StorageServerInterface, EventMap>> storageServers;
+		state std::vector<StorageServerStatusInfo> storageServers;
 		state std::vector<std::pair<TLogInterface, EventMap>> tLogs;
 		state std::vector<std::pair<CommitProxyInterface, EventMap>> commitProxies;
 		state std::vector<std::pair<GrvProxyInterface, EventMap>> grvProxies;
 		state std::vector<BlobWorkerInterface> blobWorkers;
 		state JsonBuilderObject qos;
 		state JsonBuilderObject dataOverlay;
+		state JsonBuilderObject tenants;
 		state JsonBuilderObject storageWiggler;
 		state std::unordered_set<UID> wiggleServers;
 
@@ -3017,8 +3026,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
 				address_workers[worker.interf.address()] = worker.interf;
 			}
 
-			state Future<ErrorOr<std::vector<std::pair<StorageServerInterface, EventMap>>>> storageServerFuture =
-			    errorOr(getStorageServersAndMetrics(cx, address_workers, rkWorker));
+			state Future<ErrorOr<std::vector<StorageServerStatusInfo>>> storageServerFuture =
+			    errorOr(getStorageServerStatusInfos(cx, address_workers, rkWorker));
 			state Future<ErrorOr<std::vector<std::pair<TLogInterface, EventMap>>>> tLogFuture =
 			    errorOr(getTLogsAndMetrics(db, address_workers));
 			state Future<ErrorOr<std::vector<std::pair<CommitProxyInterface, EventMap>>>> commitProxyFuture =
@@ -3037,8 +3046,15 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			state Future<Optional<Value>> primaryDCFO = getActivePrimaryDC(cx, &fullyReplicatedRegions, &messages);
 			state std::vector<Future<JsonBuilderObject>> futures2;
 			futures2.push_back(dataStatusFetcher(ddWorker, configuration.get(), &minStorageReplicasRemaining));
-			futures2.push_back(workloadStatusFetcher(
-			    db, workers, mWorker, rkWorker, &qos, &dataOverlay, &status_incomplete_reasons, storageServerFuture));
+			futures2.push_back(workloadStatusFetcher(db,
+			                                         workers,
+			                                         mWorker,
+			                                         rkWorker,
+			                                         &qos,
+			                                         &dataOverlay,
+			                                         &tenants,
+			                                         &status_incomplete_reasons,
+			                                         storageServerFuture));
 			futures2.push_back(layerStatusFetcher(cx, &messages, &status_incomplete_reasons));
 			futures2.push_back(lockedStatusFetcher(db, &messages, &status_incomplete_reasons));
 			futures2.push_back(
@@ -3110,6 +3126,9 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			if (!qos.empty())
 				statusObj["qos"] = qos;
 
+			if (!tenants.empty())
+				statusObj["tenants"] = tenants;
+
 			// Merge dataOverlay into data
 			JsonBuilderObject& clusterDataSection = workerStatuses[0];
 
@@ -3132,8 +3151,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			}
 
 			// Need storage servers now for processStatusFetcher() below.
-			ErrorOr<std::vector<std::pair<StorageServerInterface, EventMap>>> _storageServers =
-			    wait(storageServerFuture);
+			ErrorOr<std::vector<StorageServerStatusInfo>> _storageServers = wait(storageServerFuture);
 			if (_storageServers.present()) {
 				storageServers = _storageServers.get();
 			} else {
@@ -3221,11 +3239,11 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		int activeTSSCount = 0;
 		JsonBuilderArray wiggleServerAddress;
 		for (auto& it : storageServers) {
-			if (it.first.isTss()) {
+			if (it.isTss()) {
 				activeTSSCount++;
 			}
-			if (wiggleServers.count(it.first.id())) {
-				wiggleServerAddress.push_back(it.first.address().toString());
+			if (wiggleServers.count(it.id())) {
+				wiggleServerAddress.push_back(it.address().toString());
 			}
 		}
 		statusObj["active_tss_count"] = activeTSSCount;

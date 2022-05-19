@@ -23,6 +23,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <iterator>
+#include <memory>
 #include <regex>
 #include <unordered_set>
 #include <tuple>
@@ -236,11 +237,14 @@ void DatabaseContext::getLatestCommitVersions(const Reference<LocationInfo>& loc
 	}
 
 	if (ssVersionVectorCache.getMaxVersion() != invalidVersion && readVersion > ssVersionVectorCache.getMaxVersion()) {
-		TraceEvent(SevDebug, "GetLatestCommitVersions")
-		    .detail("ReadVersion", readVersion)
-		    .detail("VersionVector", ssVersionVectorCache.toString());
-		ssVersionVectorCache.clear();
-		throw stale_version_vector(); // TODO: investigate why
+		if (!CLIENT_KNOBS->FORCE_GRV_CACHE_OFF && !info->options.skipGrvCache && info->options.useGrvCache) {
+			return;
+		} else {
+			TraceEvent(SevError, "GetLatestCommitVersions")
+			    .detail("ReadVersion", readVersion)
+			    .detail("VersionVector", ssVersionVectorCache.toString());
+			ASSERT(false);
+		}
 	}
 
 	std::map<Version, std::set<Tag>> versionMap; // order the versions to be returned
@@ -806,12 +810,12 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext* cx) {
 				}
 			}
 			cx->clientStatusUpdater.outStatusQ.clear();
-			wait(GlobalConfig::globalConfig().onInitialized());
-			double sampleRate = GlobalConfig::globalConfig().get<double>(fdbClientInfoTxnSampleRate,
-			                                                             std::numeric_limits<double>::infinity());
+			wait(cx->globalConfig->onInitialized());
+			double sampleRate =
+			    cx->globalConfig->get<double>(fdbClientInfoTxnSampleRate, std::numeric_limits<double>::infinity());
 			double clientSamplingProbability =
 			    std::isinf(sampleRate) ? CLIENT_KNOBS->CSI_SAMPLING_PROBABILITY : sampleRate;
-			int64_t sizeLimit = GlobalConfig::globalConfig().get<int64_t>(fdbClientInfoTxnSizeLimit, -1);
+			int64_t sizeLimit = cx->globalConfig->get<int64_t>(fdbClientInfoTxnSizeLimit, -1);
 			int64_t clientTxnInfoSizeLimit = sizeLimit == -1 ? CLIENT_KNOBS->CSI_SIZE_LIMIT : sizeLimit;
 			if (!trChunksQ.empty() && deterministicRandom()->random01() < clientSamplingProbability)
 				wait(delExcessClntTxnEntriesActor(&tr, clientTxnInfoSizeLimit));
@@ -1444,13 +1448,13 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
     transactionsProcessBehind("ProcessBehind", cc), transactionsThrottled("Throttled", cc),
     transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
     transactionGrvFullBatches("NumGrvFullBatches", cc), transactionGrvTimedOutBatches("NumGrvTimedOutBatches", cc),
-    transactionsStaleVersionVectors("NumStaleVersionVectors", cc), latencies(1000), readLatencies(1000),
-    commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), bgLatencies(1000),
-    bgGranulesPerRequest(1000), outstandingWatches(0), sharedStatePtr(nullptr), lastGrvTime(0.0), cachedReadVersion(0),
-    lastRkBatchThrottleTime(0.0), lastRkDefaultThrottleTime(0.0), lastProxyRequestTime(0.0),
-    transactionTracingSample(false), taskID(taskID), clientInfo(clientInfo), clientInfoMonitor(clientInfoMonitor),
-    coordinator(coordinator), apiVersion(apiVersion), mvCacheInsertLocation(0), healthMetricsLastUpdated(0),
-    detailedHealthMetricsLastUpdated(0), smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
+    latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000),
+    bytesPerCommit(1000), bgLatencies(1000), bgGranulesPerRequest(1000), outstandingWatches(0), sharedStatePtr(nullptr),
+    lastGrvTime(0.0), cachedReadVersion(0), lastRkBatchThrottleTime(0.0), lastRkDefaultThrottleTime(0.0),
+    lastProxyRequestTime(0.0), transactionTracingSample(false), taskID(taskID), clientInfo(clientInfo),
+    clientInfoMonitor(clientInfoMonitor), coordinator(coordinator), apiVersion(apiVersion), mvCacheInsertLocation(0),
+    healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0),
+    smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
     specialKeySpace(std::make_unique<SpecialKeySpace>(specialKeys.begin, specialKeys.end, /* test */ false)),
     connectToDatabaseEventCacheHolder(format("ConnectToDatabase/%s", dbId.toString().c_str())) {
 	dbId = deterministicRandom()->randomUniqueID();
@@ -1478,6 +1482,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 	cacheListMonitor = monitorCacheList(this);
 
 	smoothMidShardSize.reset(CLIENT_KNOBS->INIT_MID_SHARD_BYTES);
+	globalConfig = std::make_unique<GlobalConfig>(Database(this));
 
 	if (apiVersionAtLeast(720)) {
 		registerSpecialKeysImpl(
@@ -1723,9 +1728,8 @@ DatabaseContext::DatabaseContext(const Error& err)
     transactionsProcessBehind("ProcessBehind", cc), transactionsThrottled("Throttled", cc),
     transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
     transactionGrvFullBatches("NumGrvFullBatches", cc), transactionGrvTimedOutBatches("NumGrvTimedOutBatches", cc),
-    transactionsStaleVersionVectors("NumStaleVersionVectors", cc), latencies(1000), readLatencies(1000),
-    commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), bgLatencies(1000),
-    bgGranulesPerRequest(1000), transactionTracingSample(false),
+    latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000),
+    bytesPerCommit(1000), bgLatencies(1000), bgGranulesPerRequest(1000), transactionTracingSample(false),
     smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
     connectToDatabaseEventCacheHolder(format("ConnectToDatabase/%s", dbId.toString().c_str())) {}
 
@@ -1941,13 +1945,12 @@ Future<Void> DatabaseContext::onProxiesChanged() const {
 }
 
 bool DatabaseContext::sampleReadTags() const {
-	double sampleRate = GlobalConfig::globalConfig().get(transactionTagSampleRate, CLIENT_KNOBS->READ_TAG_SAMPLE_RATE);
+	double sampleRate = globalConfig->get(transactionTagSampleRate, CLIENT_KNOBS->READ_TAG_SAMPLE_RATE);
 	return sampleRate > 0 && deterministicRandom()->random01() <= sampleRate;
 }
 
 bool DatabaseContext::sampleOnCost(uint64_t cost) const {
-	double sampleCost =
-	    GlobalConfig::globalConfig().get<double>(transactionTagSampleCost, CLIENT_KNOBS->COMMIT_SAMPLE_COST);
+	double sampleCost = globalConfig->get<double>(transactionTagSampleCost, CLIENT_KNOBS->COMMIT_SAMPLE_COST);
 	if (sampleCost <= 0)
 		return false;
 	return deterministicRandom()->random01() <= (double)cost / sampleCost;
@@ -2223,10 +2226,10 @@ Database Database::createDatabase(Reference<IClusterConnectionRecord> connRecord
 	}
 
 	auto database = Database(db);
-	GlobalConfig::create(
-	    database, Reference<AsyncVar<ClientDBInfo> const>(clientInfo), std::addressof(clientInfo->get()));
-	GlobalConfig::globalConfig().trigger(samplingFrequency, samplingProfilerUpdateFrequency);
-	GlobalConfig::globalConfig().trigger(samplingWindow, samplingProfilerUpdateWindow);
+	database->globalConfig->init(Reference<AsyncVar<ClientDBInfo> const>(clientInfo),
+	                             std::addressof(clientInfo->get()));
+	database->globalConfig->trigger(samplingFrequency, samplingProfilerUpdateFrequency);
+	database->globalConfig->trigger(samplingWindow, samplingProfilerUpdateWindow);
 
 	TraceEvent("ConnectToDatabase", database->dbId)
 	    .detail("Version", FDB_VT_VERSION)
@@ -3793,12 +3796,24 @@ PublicRequestStream<GetKeyValuesFamilyRequest> StorageServerInterface::*getRange
 	}
 }
 
+template <class GetKeyValuesFamilyRequest>
+void setMatchIndex(GetKeyValuesFamilyRequest& req, int matchIndex) {
+	if constexpr (std::is_same<GetKeyValuesFamilyRequest, GetKeyValuesRequest>::value) {
+		// do nothing;
+	} else if (std::is_same<GetKeyValuesFamilyRequest, GetMappedKeyValuesRequest>::value) {
+		req.matchIndex = matchIndex;
+	} else {
+		UNREACHABLE();
+	}
+}
+
 ACTOR template <class GetKeyValuesFamilyRequest, class GetKeyValuesFamilyReply, class RangeResultFamily>
 Future<RangeResultFamily> getExactRange(Reference<TransactionState> trState,
                                         Version version,
                                         KeyRange keys,
                                         Key mapper,
                                         GetRangeLimits limits,
+                                        int matchIndex,
                                         Reverse reverse,
                                         UseTenant useTenant) {
 	state RangeResultFamily output;
@@ -3832,6 +3847,7 @@ Future<RangeResultFamily> getExactRange(Reference<TransactionState> trState,
 			req.version = version;
 			req.begin = firstGreaterOrEqual(range.begin);
 			req.end = firstGreaterOrEqual(range.end);
+			setMatchIndex<GetKeyValuesFamilyRequest>(req, matchIndex);
 			req.spanContext = span.context;
 			trState->cx->getLatestCommitVersions(
 			    locations[shard].locations, req.version, trState, req.ssLatestCommitVersions);
@@ -4006,6 +4022,7 @@ Future<RangeResultFamily> getRangeFallback(Reference<TransactionState> trState,
                                            KeySelector end,
                                            Key mapper,
                                            GetRangeLimits limits,
+                                           int matchIndex,
                                            Reverse reverse,
                                            UseTenant useTenant) {
 	if (version == latestVersion) {
@@ -4031,7 +4048,7 @@ Future<RangeResultFamily> getRangeFallback(Reference<TransactionState> trState,
 	// or allKeys.begin exists in the database/tenant and will be part of the conflict range anyways
 
 	RangeResultFamily _r = wait(getExactRange<GetKeyValuesFamilyRequest, GetKeyValuesFamilyReply, RangeResultFamily>(
-	    trState, version, KeyRangeRef(b, e), mapper, limits, reverse, useTenant));
+	    trState, version, KeyRangeRef(b, e), mapper, limits, matchIndex, reverse, useTenant));
 	RangeResultFamily r = _r;
 
 	if (b == allKeys.begin && ((reverse && !r.more) || !reverse))
@@ -4070,7 +4087,7 @@ int64_t inline getRangeResultFamilyBytes(MappedRangeResultRef result) {
 	int64_t bytes = 0;
 	for (const MappedKeyValueRef& mappedKeyValue : result) {
 		bytes += mappedKeyValue.key.size() + mappedKeyValue.value.size();
-
+		bytes += sizeof(mappedKeyValue.boundaryAndExist);
 		auto& reqAndResult = mappedKeyValue.reqAndResult;
 		if (std::holds_alternative<GetValueReqAndResultRef>(reqAndResult)) {
 			auto getValue = std::get<GetValueReqAndResultRef>(reqAndResult);
@@ -4155,6 +4172,7 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
                                    Key mapper,
                                    GetRangeLimits limits,
                                    Promise<std::pair<Key, Key>> conflictRange,
+                                   int matchIndex,
                                    Snapshot snapshot,
                                    Reverse reverse,
                                    UseTenant useTenant = UseTenant::True) {
@@ -4207,7 +4225,7 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 			state GetKeyValuesFamilyRequest req;
 			req.mapper = mapper;
 			req.arena.dependsOn(mapper.arena());
-
+			setMatchIndex<GetKeyValuesFamilyRequest>(req, matchIndex);
 			req.tenantInfo = useTenant ? trState->getTenantInfo() : TenantInfo();
 			req.isFetchKeys = (trState->taskID == TaskPriority::FetchKeys);
 			req.version = readVersion;
@@ -4379,15 +4397,15 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 					TEST(true); // !GetKeyValuesFamilyReply.more and modifiedSelectors in getRange
 
 					if (!rep.data.size()) {
-						// VERSION_VECTOR change version to readVersion in getRangeFallback
 						RangeResultFamily result = wait(
 						    getRangeFallback<GetKeyValuesFamilyRequest, GetKeyValuesFamilyReply, RangeResultFamily>(
 						        trState,
-						        version,
+						        readVersion,
 						        originalBegin,
 						        originalEnd,
 						        mapper,
 						        originalLimits,
+						        matchIndex,
 						        reverse,
 						        useTenant));
 						getRangeFinished(
@@ -4428,6 +4446,7 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 						        originalEnd,
 						        mapper,
 						        originalLimits,
+						        matchIndex,
 						        reverse,
 						        useTenant));
 						getRangeFinished(
@@ -5013,6 +5032,7 @@ Future<RangeResult> getRange(Reference<TransactionState> const& trState,
 	                                                                     ""_sr,
 	                                                                     limits,
 	                                                                     Promise<std::pair<Key, Key>>(),
+	                                                                     MATCH_INDEX_ALL,
 	                                                                     Snapshot::True,
 	                                                                     reverse,
 	                                                                     useTenant);
@@ -5367,6 +5387,7 @@ Future<RangeResultFamily> Transaction::getRangeInternal(const KeySelector& begin
                                                         const KeySelector& end,
                                                         const Key& mapper,
                                                         GetRangeLimits limits,
+                                                        int matchIndex,
                                                         Snapshot snapshot,
                                                         Reverse reverse) {
 	++trState->cx->transactionLogicalReads;
@@ -5409,7 +5430,7 @@ Future<RangeResultFamily> Transaction::getRangeInternal(const KeySelector& begin
 	}
 
 	return ::getRange<GetKeyValuesFamilyRequest, GetKeyValuesFamilyReply, RangeResultFamily>(
-	    trState, getReadVersion(), b, e, mapper, limits, conflictRange, snapshot, reverse);
+	    trState, getReadVersion(), b, e, mapper, limits, conflictRange, matchIndex, snapshot, reverse);
 }
 
 Future<RangeResult> Transaction::getRange(const KeySelector& begin,
@@ -5418,17 +5439,18 @@ Future<RangeResult> Transaction::getRange(const KeySelector& begin,
                                           Snapshot snapshot,
                                           Reverse reverse) {
 	return getRangeInternal<GetKeyValuesRequest, GetKeyValuesReply, RangeResult>(
-	    begin, end, ""_sr, limits, snapshot, reverse);
+	    begin, end, ""_sr, limits, MATCH_INDEX_ALL, snapshot, reverse);
 }
 
 Future<MappedRangeResult> Transaction::getMappedRange(const KeySelector& begin,
                                                       const KeySelector& end,
                                                       const Key& mapper,
                                                       GetRangeLimits limits,
+                                                      int matchIndex,
                                                       Snapshot snapshot,
                                                       Reverse reverse) {
 	return getRangeInternal<GetMappedKeyValuesRequest, GetMappedKeyValuesReply, MappedRangeResult>(
-	    begin, end, mapper, limits, snapshot, reverse);
+	    begin, end, mapper, limits, matchIndex, snapshot, reverse);
 }
 
 Future<RangeResult> Transaction::getRange(const KeySelector& begin,
@@ -6966,24 +6988,30 @@ ACTOR Future<Optional<ProtocolVersion>> getCoordinatorProtocolFromConnectPacket(
 		coordinatorAddress = coordinator->get().get().getLeader.getEndpoint().getPrimaryAddress();
 	}
 
-	state Reference<AsyncVar<Optional<ProtocolVersion>> const> protocolVersion =
+	state Optional<Reference<AsyncVar<Optional<ProtocolVersion>> const>> protocolVersion =
 	    FlowTransport::transport().getPeerProtocolAsyncVar(coordinatorAddress);
 
+	if (!protocolVersion.present()) {
+		TraceEvent(SevWarnAlways, "GetCoordinatorProtocolPeerMissing").detail("Address", coordinatorAddress);
+		wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT));
+		return Optional<ProtocolVersion>();
+	}
+
 	loop {
-		if (protocolVersion->get().present() && protocolVersion->get() != expectedVersion) {
-			return protocolVersion->get();
+		if (protocolVersion.get()->get().present() && protocolVersion.get()->get() != expectedVersion) {
+			return protocolVersion.get()->get();
 		}
 
-		Future<Void> change = protocolVersion->onChange();
-		if (!protocolVersion->get().present()) {
+		Future<Void> change = protocolVersion.get()->onChange();
+		if (!protocolVersion.get()->get().present()) {
 			// If we still don't have any connection info after a timeout, retry sending the protocol version request
 			change = timeout(change, FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT, Void());
 		}
 
 		wait(change);
 
-		if (!protocolVersion->get().present()) {
-			return protocolVersion->get();
+		if (!protocolVersion.get()->get().present()) {
+			return protocolVersion.get()->get();
 		}
 	}
 }
@@ -7072,14 +7100,11 @@ Future<Void> Transaction::onError(Error const& e) {
 		reset();
 		return delay(backoff, trState->taskID);
 	}
-	if (e.code() == error_code_transaction_too_old || e.code() == error_code_future_version ||
-	    e.code() == error_code_stale_version_vector) {
+	if (e.code() == error_code_transaction_too_old || e.code() == error_code_future_version) {
 		if (e.code() == error_code_transaction_too_old)
 			++trState->cx->transactionsTooOld;
 		else if (e.code() == error_code_future_version)
 			++trState->cx->transactionsFutureVersions;
-		else if (e.code() == error_code_stale_version_vector)
-			++trState->cx->transactionsStaleVersionVectors;
 
 		double maxBackoff = trState->options.maxBackoff;
 		reset();
@@ -7238,10 +7263,10 @@ ACTOR Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> getReadHotRanges(Da
 			// condition. Should we abort and wait for the newly split shards to be hot again?
 			state int nLocs = locations.size();
 			// if (nLocs > 1) {
-			// 	TraceEvent("RHDDebug")
-			// 	    .detail("NumSSIs", nLocs)
-			// 	    .detail("KeysBegin", keys.begin.printable().c_str())
-			// 	    .detail("KeysEnd", keys.end.printable().c_str());
+			//	TraceEvent("RHDDebug")
+			//	    .detail("NumSSIs", nLocs)
+			//	    .detail("KeysBegin", keys.begin.printable().c_str())
+			//	    .detail("KeysEnd", keys.end.printable().c_str());
 			// }
 			state std::vector<Future<ReadHotSubRangeReply>> fReplies(nLocs);
 			KeyRef partBegin, partEnd;
@@ -7953,8 +7978,8 @@ void Transaction::checkDeferredError() const {
 
 Reference<TransactionLogInfo> Transaction::createTrLogInfoProbabilistically(const Database& cx) {
 	if (!cx->isError()) {
-		double clientSamplingProbability = GlobalConfig::globalConfig().get<double>(
-		    fdbClientInfoTxnSampleRate, CLIENT_KNOBS->CSI_SAMPLING_PROBABILITY);
+		double clientSamplingProbability =
+		    cx->globalConfig->get<double>(fdbClientInfoTxnSampleRate, CLIENT_KNOBS->CSI_SAMPLING_PROBABILITY);
 		if (((networkOptions.logClientInfo.present() && networkOptions.logClientInfo.get()) || BUGGIFY) &&
 		    deterministicRandom()->random01() < clientSamplingProbability &&
 		    (!g_network->isSimulated() || !g_simulator.speedUpSimulation)) {

@@ -18,16 +18,18 @@
  * limitations under the License.
  */
 
-#include "fdbserver/SimKmsConnector.actor.h"
+#include "fdbserver/SimKmsConnector.h"
 
 #include "fdbrpc/sim_validation.h"
 #include "fdbserver/Knobs.h"
 #include "flow/ActorCollection.h"
+#include "flow/BlobCipher.h"
 #include "flow/EncryptUtils.h"
 #include "flow/Error.h"
 #include "flow/FastRef.h"
 #include "flow/IRandom.h"
 #include "flow/ITrace.h"
+#include "flow/Trace.h"
 #include "flow/network.h"
 #include "flow/UnitTest.h"
 
@@ -42,7 +44,7 @@ struct SimEncryptKeyCtx {
 	EncryptCipherBaseKeyId id;
 	SimEncryptKey key;
 
-	explicit SimEncryptKeyCtx(EncryptCipherBaseKeyId kId, const char* data) : id(kId), key(data) {}
+	explicit SimEncryptKeyCtx(EncryptCipherBaseKeyId kId, const char* data) : id(kId), key(data, AES_256_KEY_LENGTH) {}
 };
 
 struct SimKmsConnectorContext {
@@ -50,13 +52,16 @@ struct SimKmsConnectorContext {
 	std::unordered_map<EncryptCipherBaseKeyId, std::unique_ptr<SimEncryptKeyCtx>> simEncryptKeyStore;
 
 	explicit SimKmsConnectorContext(uint32_t keyCount) : maxEncryptionKeys(keyCount) {
-		uint8_t buffer[AES_256_KEY_LENGTH];
+		const unsigned char SHA_KEY[] = "0c39e7906db6d51ac0573d328ce1b6be";
 
 		// Construct encryption keyStore.
-		for (int i = 0; i < maxEncryptionKeys; i++) {
-			generateRandomData(&buffer[0], AES_256_KEY_LENGTH);
-			SimEncryptKeyCtx ctx(i, reinterpret_cast<const char*>(buffer));
-			simEncryptKeyStore[i] = std::make_unique<SimEncryptKeyCtx>(i, reinterpret_cast<const char*>(buffer));
+		// Note the keys generated must be the same after restart.
+		for (int i = 1; i <= maxEncryptionKeys; i++) {
+			Arena arena;
+			StringRef digest = computeAuthToken(
+			    reinterpret_cast<const unsigned char*>(&i), sizeof(i), SHA_KEY, AES_256_KEY_LENGTH, arena);
+			simEncryptKeyStore[i] =
+			    std::make_unique<SimEncryptKeyCtx>(i, reinterpret_cast<const char*>(digest.begin()));
 		}
 	}
 };
@@ -75,6 +80,14 @@ ACTOR Future<Void> simKmsConnectorCore_impl(KmsConnectorInterface interf) {
 			when(KmsConnLookupEKsByKeyIdsReq req = waitNext(interf.ekLookupByIds.getFuture())) {
 				state KmsConnLookupEKsByKeyIdsReq keysByIdsReq = req;
 				state KmsConnLookupEKsByKeyIdsRep keysByIdsRep;
+				state Optional<TraceEvent> dbgKIdTrace = keysByIdsReq.debugId.present()
+				                                             ? TraceEvent("SimKmsGetByKeyIds", interf.id())
+				                                             : Optional<TraceEvent>();
+
+				if (dbgKIdTrace.present()) {
+					dbgKIdTrace.get().setMaxEventLength(100000);
+					dbgKIdTrace.get().detail("DbgId", keysByIdsReq.debugId.get());
+				}
 
 				// Lookup corresponding EncryptKeyCtx for input keyId
 				for (const auto& item : req.encryptKeyIds) {
@@ -85,6 +98,12 @@ ACTOR Future<Void> simKmsConnectorCore_impl(KmsConnectorInterface interf) {
 						    itr->first,
 						    StringRef(keysByIdsRep.arena, itr->second.get()->key),
 						    keysByIdsRep.arena);
+
+						if (dbgKIdTrace.present()) {
+							// {encryptDomainId, baseCipherId} forms a unique tuple across encryption domains
+							dbgKIdTrace.get().detail(
+							    getEncryptDbgTraceKey(ENCRYPT_DBG_TRACE_RESULT_PREFIX, item.second, itr->first), "");
+						}
 					} else {
 						success = false;
 						break;
@@ -98,16 +117,29 @@ ACTOR Future<Void> simKmsConnectorCore_impl(KmsConnectorInterface interf) {
 			when(KmsConnLookupEKsByDomainIdsReq req = waitNext(interf.ekLookupByDomainIds.getFuture())) {
 				state KmsConnLookupEKsByDomainIdsReq keysByDomainIdReq = req;
 				state KmsConnLookupEKsByDomainIdsRep keysByDomainIdRep;
+				state Optional<TraceEvent> dbgDIdTrace = keysByDomainIdReq.debugId.present()
+				                                             ? TraceEvent("SimKmsGetsByDomIds", interf.id())
+				                                             : Optional<TraceEvent>();
 
-				// Map encryptionDomainId to corresponding EncryptKeyCtx element using a modulo operation. This would
-				// mean multiple domains gets mapped to the same encryption key which is fine, the EncryptKeyStore
-				// guarantees that keyId -> plaintext encryptKey mapping is idempotent.
+				if (dbgDIdTrace.present()) {
+					dbgDIdTrace.get().detail("DbgId", keysByDomainIdReq.debugId.get());
+				}
+
+				// Map encryptionDomainId to corresponding EncryptKeyCtx element using a modulo operation. This
+				// would mean multiple domains gets mapped to the same encryption key which is fine, the
+				// EncryptKeyStore guarantees that keyId -> plaintext encryptKey mapping is idempotent.
 				for (EncryptCipherDomainId domainId : req.encryptDomainIds) {
-					EncryptCipherBaseKeyId keyId = domainId % SERVER_KNOBS->SIM_KMS_MAX_KEYS;
+					EncryptCipherBaseKeyId keyId = 1 + abs(domainId) % SERVER_KNOBS->SIM_KMS_MAX_KEYS;
 					const auto& itr = ctx->simEncryptKeyStore.find(keyId);
 					if (itr != ctx->simEncryptKeyStore.end()) {
 						keysByDomainIdRep.cipherKeyDetails.emplace_back(
 						    domainId, keyId, StringRef(itr->second.get()->key), keysByDomainIdRep.arena);
+
+						if (dbgDIdTrace.present()) {
+							// {encryptId, baseCipherId} forms a unique tuple across encryption domains
+							dbgDIdTrace.get().detail(
+							    getEncryptDbgTraceKey(ENCRYPT_DBG_TRACE_RESULT_PREFIX, domainId, keyId), "");
+						}
 					} else {
 						success = false;
 						break;

@@ -167,7 +167,7 @@ struct ElectionResultRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, key, hostnames, coordinators, knownLeader, reply);
+		serializer(ar, key, coordinators, knownLeader, reply, hostnames);
 	}
 };
 

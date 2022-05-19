@@ -31,10 +31,8 @@
 #include "flow/Platform.actor.h"
 #include "flow/Arena.h"
 
-#if (!defined(TLS_DISABLED) && !defined(_WIN32))
 #include "flow/StreamCipher.h"
 #include "flow/BlobCipher.h"
-#endif
 #include "flow/Trace.h"
 #include "flow/Error.h"
 
@@ -45,6 +43,9 @@
 #include <sstream>
 #include <cstring>
 #include <algorithm>
+#include <boost/format.hpp>
+#include <boost/filesystem.hpp>
+#include <boost/filesystem/operations.hpp>
 
 #include <sys/types.h>
 #include <time.h>
@@ -2949,54 +2950,54 @@ int64_t fileSize(std::string const& filename) {
 #endif
 }
 
-std::string readFileBytes(std::string const& filename, int maxSize) {
-	std::string s;
-	FILE* f = fopen(filename.c_str(), "rb" FOPEN_CLOEXEC_MODE);
-	if (!f) {
-		TraceEvent(SevWarn, "FileOpenError")
+size_t readFileBytes(std::string const& filename, uint8_t* buff, size_t len) {
+	std::fstream ifs(filename, std::fstream::in | std::fstream::binary);
+	if (!ifs.good()) {
+		TraceEvent("ileBytes_FileOpenError").detail("Filename", filename).GetLastError();
+		throw io_error();
+	}
+
+	size_t bytesRead = len;
+	ifs.seekg(0, std::fstream::beg);
+	ifs.read((char*)buff, len);
+	if (!ifs) {
+		bytesRead = ifs.gcount();
+		TraceEvent("ReadFileBytes_ShortRead")
 		    .detail("Filename", filename)
-		    .detail("Errno", errno)
-		    .detail("ErrorDescription", strerror(errno));
-		throw file_not_readable();
+		    .detail("Requested", len)
+		    .detail("Actual", bytesRead);
 	}
-	try {
-		fseek(f, 0, SEEK_END);
-		size_t size = ftell(f);
-		if (size > maxSize)
-			throw file_too_large();
-		s.resize(size);
-		fseek(f, 0, SEEK_SET);
-		if (!fread(&s[0], size, 1, f))
-			throw file_not_readable();
-	} catch (...) {
-		fclose(f);
-		throw;
+
+	return bytesRead;
+}
+
+std::string readFileBytes(std::string const& filename, int maxSize) {
+	if (!fileExists(filename)) {
+		TraceEvent("ReadFileBytes_FileNotFound").detail("Filename", filename);
+		throw file_not_found();
 	}
-	fclose(f);
-	return s;
+
+	size_t size = fileSize(filename);
+	if (size > maxSize) {
+		TraceEvent("ReadFileBytes_FileTooLarge").detail("Filename", filename);
+		throw file_too_large();
+	}
+
+	std::string ret;
+	ret.resize(size);
+	readFileBytes(filename, (uint8_t*)ret.data(), size);
+
+	return ret;
 }
 
 void writeFileBytes(std::string const& filename, const uint8_t* data, size_t count) {
-	FILE* f = fopen(filename.c_str(), "wb" FOPEN_CLOEXEC_MODE);
-	if (!f) {
-		TraceEvent(SevError, "WriteFileBytes").detail("Filename", filename).GetLastError();
-		throw file_not_writable();
+	std::ofstream ofs(filename, std::fstream::out | std::fstream::binary);
+	if (!ofs.good()) {
+		TraceEvent("WriteFileBytes_FileOpenError").detail("Filename", filename).GetLastError();
+		throw io_error();
 	}
 
-	try {
-		size_t length = fwrite(data, sizeof(uint8_t), count, f);
-		if (length != count) {
-			TraceEvent(SevError, "WriteFileBytes")
-			    .detail("Filename", filename)
-			    .detail("WrittenLength", length)
-			    .GetLastError();
-			throw file_not_writable();
-		}
-	} catch (...) {
-		fclose(f);
-		throw;
-	}
-	fclose(f);
+	ofs.write((const char*)data, count);
 }
 
 void writeFile(std::string const& filename, std::string const& content) {
@@ -3258,6 +3259,61 @@ bool isHwCrcSupported() {
 #else
 #error Port me!
 #endif
+}
+
+TmpFile::TmpFile() : filename("") {
+	createTmpFile(boost::filesystem::temp_directory_path().string(), TmpFile::defaultPrefix);
+}
+
+TmpFile::TmpFile(const std::string& tmpDir) : filename("") {
+	std::string dir = removeWhitespace(tmpDir);
+	createTmpFile(dir, TmpFile::defaultPrefix);
+}
+
+TmpFile::TmpFile(const std::string& tmpDir, const std::string& prefix) : filename("") {
+	std::string dir = removeWhitespace(tmpDir);
+	createTmpFile(dir, prefix);
+}
+
+TmpFile::~TmpFile() {
+	if (!filename.empty()) {
+		destroyFile();
+	}
+}
+
+void TmpFile::createTmpFile(const std::string_view dir, const std::string_view prefix) {
+	std::string modelPattern = "%%%%-%%%%-%%%%-%%%%";
+	boost::format fmter("%s/%s-%s");
+	std::string modelPath = boost::str(boost::format(fmter % dir % prefix % modelPattern));
+	boost::filesystem::path filePath = boost::filesystem::unique_path(modelPath);
+
+	filename = filePath.string();
+
+	// Create empty tmp file
+	std::fstream tmpFile(filename, std::fstream::out);
+	if (!tmpFile.good()) {
+		TraceEvent("TmpFile_CreateFileError").detail("Filename", filename);
+		throw io_error();
+	}
+	TraceEvent("TmpFile_CreateSuccess").detail("Filename", filename);
+}
+
+size_t TmpFile::read(uint8_t* buff, size_t len) {
+	return readFileBytes(filename, buff, len);
+}
+
+void TmpFile::write(const uint8_t* buff, size_t len) {
+	writeFileBytes(filename, buff, len);
+}
+
+bool TmpFile::destroyFile() {
+	bool deleted = deleteFile(filename);
+	if (deleted) {
+		TraceEvent("TmpFileDestory_Success").detail("Filename", filename);
+	} else {
+		TraceEvent("TmpFileDestory_Failed").detail("Filename", filename);
+	}
+	return deleted;
 }
 
 } // namespace platform
@@ -3552,11 +3608,9 @@ void crashHandler(int sig) {
 
 	bool error = (sig != SIGUSR2);
 
-#if (!defined(TLS_DISABLED) && !defined(_WIN32))
 	StreamCipherKey::cleanup();
 	StreamCipher::cleanup();
 	BlobCipherKeyCache::cleanup();
-#endif
 
 	fflush(stdout);
 	{

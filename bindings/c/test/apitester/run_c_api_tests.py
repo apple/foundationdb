@@ -30,6 +30,8 @@ import glob
 import random
 import string
 
+TESTER_STATS_INTERVAL_SEC = 5
+
 
 def random_string(len):
     return ''.join(random.choice(string.ascii_letters + string.digits) for i in range(len))
@@ -66,7 +68,8 @@ def dump_client_logs(log_dir):
 def run_tester(args, test_file):
     cmd = [args.tester_binary,
            "--cluster-file", args.cluster_file,
-           "--test-file", test_file]
+           "--test-file", test_file,
+           "--stats-interval", str(TESTER_STATS_INTERVAL_SEC*1000)]
     if args.external_client_library is not None:
         cmd += ["--external-client-library", args.external_client_library]
     if args.tmp_dir is not None:

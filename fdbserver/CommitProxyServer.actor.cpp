@@ -698,16 +698,11 @@ std::set<Tag> CommitBatchContext::getWrittenTagsPreResolution() {
 CommitBatchContext::CommitBatchContext(ProxyCommitData* const pProxyCommitData_,
                                        const std::vector<CommitTransactionRequest>* trs_,
                                        const int currentBatchMemBytesCount)
-  :
-
-    pProxyCommitData(pProxyCommitData_), trs(std::move(*const_cast<std::vector<CommitTransactionRequest>*>(trs_))),
-    currentBatchMemBytesCount(currentBatchMemBytesCount),
-
-    startTime(g_network->now()),
-
-    localBatchNumber(++pProxyCommitData->localCommitBatchesStarted), toCommit(pProxyCommitData->logSystem),
-
-    span("MP:commitBatch"_loc), committed(trs.size()) {
+  : pProxyCommitData(pProxyCommitData_), trs(std::move(*const_cast<std::vector<CommitTransactionRequest>*>(trs_))),
+    currentBatchMemBytesCount(currentBatchMemBytesCount), startTime(g_network->now()),
+    localBatchNumber(++pProxyCommitData->localCommitBatchesStarted),
+    toCommit(pProxyCommitData->logSystem, pProxyCommitData->localTLogCount), span("MP:commitBatch"_loc),
+    committed(trs.size()) {
 
 	evaluateBatchSize();
 
@@ -2408,6 +2403,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	//TraceEvent("ProxyInit3", proxy.id());
 
 	commitData.resolvers = commitData.db->get().resolvers;
+	commitData.localTLogCount = commitData.db->get().logSystemConfig.numLogs();
 	ASSERT(commitData.resolvers.size() != 0);
 	for (int i = 0; i < commitData.resolvers.size(); ++i) {
 		commitData.stats.resolverDist.push_back(

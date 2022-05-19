@@ -125,12 +125,8 @@ CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONNFILE, "-C", SO_REQ_SEP },
 	                                  { OPT_DEBUG_TLS, "--debug-tls", SO_NONE },
 	                                  { OPT_API_VERSION, "--api-version", SO_REQ_SEP },
 	                                  { OPT_MEMORY, "--memory", SO_REQ_SEP },
-
-#ifndef TLS_DISABLED
-	                                  TLS_OPTION_FLAGS
-#endif
-
-	                                      SO_END_OF_OPTIONS };
+	                                  TLS_OPTION_FLAGS,
+	                                  SO_END_OF_OPTIONS };
 
 void printAtCol(const char* text, int col, FILE* stream = stdout) {
 	const char* iter = text;
@@ -448,10 +444,7 @@ static void printProgramUsage(const char* name) {
 	       "  --no-status    Disables the initial status check done when starting\n"
 	       "                 the CLI.\n"
 	       "  --api-version  APIVERSION\n"
-	       "                 Specifies the version of the API for the CLI to use.\n"
-#ifndef TLS_DISABLED
-	       TLS_HELP
-#endif
+	       "                 Specifies the version of the API for the CLI to use.\n" TLS_HELP
 	       "  --knob-KNOBNAME KNOBVALUE\n"
 	       "                 Changes a knob option. KNOBNAME should be lowercase.\n"
 	       "  --debug-tls    Prints the TLS configuration and certificate chain, then exits.\n"
@@ -789,7 +782,7 @@ void fdbcliCompCmd(std::string const& text, std::vector<std::string>& lc) {
 	int count = tokens.size();
 
 	// for(int i = 0; i < count; i++) {
-	// 	printf("Token (%d): `%s'\n", i, tokens[i].toString().c_str());
+	//	printf("Token (%d): `%s'\n", i, tokens[i].toString().c_str());
 	// }
 
 	std::string ntext = "";
@@ -953,7 +946,6 @@ struct CLIOptions {
 		case OPT_NO_HINTS:
 			cliHints = false;
 
-#ifndef TLS_DISABLED
 		// TLS Options
 		case TLSConfig::OPT_TLS_PLUGIN:
 			args.OptionArg();
@@ -973,7 +965,7 @@ struct CLIOptions {
 		case TLSConfig::OPT_TLS_VERIFY_PEERS:
 			tlsVerifyPeers = args.OptionArg();
 			break;
-#endif
+
 		case OPT_HELP:
 			printProgramUsage(program_name.c_str());
 			return 0;
@@ -1018,6 +1010,36 @@ Future<T> stopNetworkAfter(Future<T> what) {
 		API->stopNetwork();
 		throw;
 	}
+}
+
+ACTOR Future<Void> addInterface(std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface,
+                                Reference<FlowLock> connectLock,
+                                KeyValue kv) {
+	wait(connectLock->take());
+	state FlowLock::Releaser releaser(*connectLock);
+	state ClientWorkerInterface workerInterf =
+	    BinaryReader::fromStringRef<ClientWorkerInterface>(kv.value, IncludeVersion());
+	state ClientLeaderRegInterface leaderInterf(workerInterf.address());
+	choose {
+		when(Optional<LeaderInfo> rep =
+		         wait(brokenPromiseToNever(leaderInterf.getLeader.getReply(GetLeaderRequest())))) {
+			StringRef ip_port =
+			    (kv.key.endsWith(LiteralStringRef(":tls")) ? kv.key.removeSuffix(LiteralStringRef(":tls")) : kv.key)
+			        .removePrefix(LiteralStringRef("\xff\xff/worker_interfaces/"));
+			(*address_interface)[ip_port] = std::make_pair(kv.value, leaderInterf);
+
+			if (workerInterf.reboot.getEndpoint().addresses.secondaryAddress.present()) {
+				Key full_ip_port2 =
+				    StringRef(workerInterf.reboot.getEndpoint().addresses.secondaryAddress.get().toString());
+				StringRef ip_port2 = full_ip_port2.endsWith(LiteralStringRef(":tls"))
+				                         ? full_ip_port2.removeSuffix(LiteralStringRef(":tls"))
+				                         : full_ip_port2;
+				(*address_interface)[ip_port2] = std::make_pair(kv.value, leaderInterf);
+			}
+		}
+		when(wait(delay(CLIENT_KNOBS->CLI_CONNECT_TIMEOUT))) {}
+	}
+	return Void();
 }
 
 ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
@@ -1522,9 +1544,62 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 				if (tokencmp(tokens[0], "kill")) {
 					getTransaction(db, managementTenant, tr, options, intrans);
-					bool _result = wait(makeInterruptable(killCommandActor(db, tr, tokens, &address_interface)));
-					if (!_result)
-						is_error = true;
+					if (tokens.size() == 1) {
+						state ThreadFuture<RangeResult> wInterfF =
+						    tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
+						                             LiteralStringRef("\xff\xff/worker_interfaces0")),
+						                 CLIENT_KNOBS->TOO_MANY);
+						RangeResult kvs = wait(makeInterruptable(safeThreadFutureToFuture(wInterfF)));
+						ASSERT(!kvs.more);
+						auto connectLock = makeReference<FlowLock>(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM);
+						std::vector<Future<Void>> addInterfs;
+						for (auto it : kvs) {
+							addInterfs.push_back(addInterface(&address_interface, connectLock, it));
+						}
+						wait(waitForAll(addInterfs));
+					}
+					if (tokens.size() == 1 || tokencmp(tokens[1], "list")) {
+						if (address_interface.size() == 0) {
+							printf("\nNo addresses can be killed.\n");
+						} else if (address_interface.size() == 1) {
+							printf("\nThe following address can be killed:\n");
+						} else {
+							printf("\nThe following %zu addresses can be killed:\n", address_interface.size());
+						}
+						for (auto it : address_interface) {
+							printf("%s\n", printable(it.first).c_str());
+						}
+						printf("\n");
+					} else if (tokencmp(tokens[1], "all")) {
+						for (auto it : address_interface) {
+							BinaryReader::fromStringRef<ClientWorkerInterface>(it.second.first, IncludeVersion())
+							    .reboot.send(RebootRequest());
+						}
+						if (address_interface.size() == 0) {
+							fprintf(stderr,
+							        "ERROR: no processes to kill. You must run the `kill’ command before "
+							        "running `kill all’.\n");
+						} else {
+							printf("Attempted to kill %zu processes\n", address_interface.size());
+						}
+					} else {
+						for (int i = 1; i < tokens.size(); i++) {
+							if (!address_interface.count(tokens[i])) {
+								fprintf(stderr, "ERROR: process `%s' not recognized.\n", printable(tokens[i]).c_str());
+								is_error = true;
+								break;
+							}
+						}
+
+						if (!is_error) {
+							for (int i = 1; i < tokens.size(); i++) {
+								BinaryReader::fromStringRef<ClientWorkerInterface>(address_interface[tokens[i]].first,
+								                                                   IncludeVersion())
+								    .reboot.send(RebootRequest());
+							}
+							printf("Attempted to kill %zu processes\n", tokens.size() - 1);
+						}
+					}
 					continue;
 				}
 
@@ -1560,7 +1635,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 				if (tokencmp(tokens[0], "profile")) {
 					getTransaction(db, managementTenant, tr, options, intrans);
-					bool _result = wait(makeInterruptable(profileCommandActor(tr, tokens, intrans)));
+					bool _result = wait(makeInterruptable(profileCommandActor(localDb, tr, tokens, intrans)));
 					if (!_result)
 						is_error = true;
 					continue;
@@ -2094,7 +2169,6 @@ int main(int argc, char** argv) {
 	}
 
 	if (opt.debugTLS) {
-#ifndef TLS_DISABLED
 		// Backdoor into NativeAPI's tlsConfig, which is where the above network option settings ended up.
 		extern TLSConfig tlsConfig;
 		printf("TLS Configuration:\n");
@@ -2111,9 +2185,6 @@ int main(int argc, char** argv) {
 			printf("Use --log and look at the trace logs for more detailed information on the failure.\n");
 			return 1;
 		}
-#else
-		printf("This fdbcli was built with TLS disabled.\n");
-#endif
 		return 0;
 	}
 

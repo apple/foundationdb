@@ -3471,103 +3471,138 @@ ACTOR Future<GetRangeReqAndResultRef> quickGetKeyValues(
 	}
 };
 
-Key constructMappedKey(KeyValueRef* keyValue, Tuple& mappedKeyFormatTuple, bool& isRangeQuery) {
-	// Lazily parse key and/or value to tuple because they may not need to be a tuple if not used.
-	Optional<Tuple> keyTuple;
-	Optional<Tuple> valueTuple;
+void unpackKeyTuple(Tuple** referenceTuple, Optional<Tuple>& keyTuple, KeyValueRef* keyValue) {
+	if (!keyTuple.present()) {
+		// May throw exception if the key is not parsable as a tuple.
+		try {
+			keyTuple = Tuple::unpack(keyValue->key);
+		} catch (Error& e) {
+			TraceEvent("KeyNotTuple").error(e).detail("Key", keyValue->key.printable());
+			throw key_not_tuple();
+		}
+	}
+	*referenceTuple = &keyTuple.get();
+}
 
-	Tuple mappedKeyTuple;
+void unpackValueTuple(Tuple** referenceTuple, Optional<Tuple>& valueTuple, KeyValueRef* keyValue) {
+	if (!valueTuple.present()) {
+		// May throw exception if the value is not parsable as a tuple.
+		try {
+			valueTuple = Tuple::unpack(keyValue->value);
+		} catch (Error& e) {
+			TraceEvent("ValueNotTuple").error(e).detail("Value", keyValue->value.printable());
+			throw value_not_tuple();
+		}
+	}
+	*referenceTuple = &valueTuple.get();
+}
+
+bool unescapeLiterals(std::string& s, std::string before, std::string after) {
+	bool escaped = false;
+	size_t p = 0;
+	while (true) {
+		size_t found = s.find(before, p);
+		if (found == std::string::npos) {
+			break;
+		}
+		s.replace(found, before.length(), after);
+		p = found + after.length();
+		escaped = true;
+	}
+	return escaped;
+}
+
+bool singleKeyOrValue(const std::string& s, size_t sz) {
+	// format would be {K[??]} or {V[??]}
+	return sz > 5 && s[0] == '{' && (s[1] == 'K' || s[1] == 'V') && s[2] == '[' && s[sz - 2] == ']' && s[sz - 1] == '}';
+}
+
+bool rangeQuery(const std::string& s) {
+	return s == "{...}";
+}
+
+// create a vector of Optional<Tuple>
+// in case of a singleKeyOrValue, insert an empty Tuple to vector as placeholder
+// in case of a rangeQuery, insert Optional.empty as placeholder
+// in other cases, insert the correct Tuple to be used.
+void preprocessMappedKey(Tuple& mappedKeyFormatTuple, std::vector<Optional<Tuple>>& vt, bool& isRangeQuery) {
+	vt.reserve(mappedKeyFormatTuple.size());
+
 	for (int i = 0; i < mappedKeyFormatTuple.size(); i++) {
 		Tuple::ElementType type = mappedKeyFormatTuple.getType(i);
 		if (type == Tuple::BYTES || type == Tuple::UTF8) {
 			std::string s = mappedKeyFormatTuple.getString(i).toString();
 			auto sz = s.size();
-
-			// Handle escape.
-			bool escaped = false;
-			size_t p = 0;
-			while (true) {
-				size_t found = s.find("{{", p);
-				if (found == std::string::npos) {
-					break;
-				}
-				s.replace(found, 2, "{");
-				p += 1;
-				escaped = true;
-			}
-			p = 0;
-			while (true) {
-				size_t found = s.find("}}", p);
-				if (found == std::string::npos) {
-					break;
-				}
-				s.replace(found, 2, "}");
-				p += 1;
-				escaped = true;
-			}
+			bool escaped = unescapeLiterals(s, "{{", "{");
+			escaped = unescapeLiterals(s, "}}", "}") || escaped;
 			if (escaped) {
-				// If the element uses escape, cope the escaped version.
-				mappedKeyTuple.append(s);
-			}
-			// {K[??]} or {V[??]}
-			else if (sz > 5 && s[0] == '{' && (s[1] == 'K' || s[1] == 'V') && s[2] == '[' && s[sz - 2] == ']' &&
-			         s[sz - 1] == '}') {
-				int idx;
-				try {
-					idx = std::stoi(s.substr(3, sz - 5));
-				} catch (std::exception& e) {
-					throw mapper_bad_index();
-				}
-				Tuple* referenceTuple;
-				if (s[1] == 'K') {
-					// Use keyTuple as reference.
-					if (!keyTuple.present()) {
-						// May throw exception if the key is not parsable as a tuple.
-						try {
-							keyTuple = Tuple::unpack(keyValue->key);
-						} catch (Error& e) {
-							TraceEvent("KeyNotTuple").error(e).detail("Key", keyValue->key.printable());
-							throw key_not_tuple();
-						}
-					}
-					referenceTuple = &keyTuple.get();
-				} else if (s[1] == 'V') {
-					// Use valueTuple as reference.
-					if (!valueTuple.present()) {
-						// May throw exception if the value is not parsable as a tuple.
-						try {
-							valueTuple = Tuple::unpack(keyValue->value);
-						} catch (Error& e) {
-							TraceEvent("ValueNotTuple").error(e).detail("Value", keyValue->value.printable());
-							throw value_not_tuple();
-						}
-					}
-					referenceTuple = &valueTuple.get();
-				} else {
-					ASSERT(false);
-					throw internal_error();
-				}
-
-				if (idx < 0 || idx >= referenceTuple->size()) {
-					throw mapper_bad_index();
-				}
-				mappedKeyTuple.append(referenceTuple->subTuple(idx, idx + 1));
-			} else if (s == "{...}") {
-				// Range query.
+				Tuple escapedTuple;
+				escapedTuple.append(s);
+				vt.emplace_back(escapedTuple);
+			} else if (singleKeyOrValue(s, sz)) {
+				// when it is SingleKeyOrValue, insert an empty Tuple to vector as placeholder
+				vt.emplace_back(Tuple());
+			} else if (rangeQuery(s)) {
 				if (i != mappedKeyFormatTuple.size() - 1) {
 					// It must be the last element of the mapper tuple
 					throw mapper_bad_range_decriptor();
 				}
-				// Every record will try to set it. It's ugly, but not wrong.
+				// when it is rangeQuery, insert Optional.empty as placeholder
+				vt.emplace_back(Optional<Tuple>());
 				isRangeQuery = true;
-				// Do not add it to the mapped key.
 			} else {
-				// If the element is a string but neither escaped nor descriptors, just copy it.
-				mappedKeyTuple.append(mappedKeyFormatTuple.subTuple(i, i + 1));
+				Tuple t;
+				t.appendRaw(mappedKeyFormatTuple.subTupleRawString(i));
+				vt.emplace_back(t);
 			}
 		} else {
-			// If the element not a string, just copy it.
-			mappedKeyTuple.append(mappedKeyFormatTuple.subTuple(i, i + 1));
+			Tuple t;
+			t.appendRaw(mappedKeyFormatTuple.subTupleRawString(i));
+			vt.emplace_back(t);
+		}
+	}
+}
+
+Key constructMappedKey(KeyValueRef* keyValue,
+                       std::vector<Optional<Tuple>>& vec,
+                       Tuple& mappedKeyTuple,
+                       Tuple& mappedKeyFormatTuple) {
+	// Lazily parse key and/or value to tuple because they may not need to be a tuple if not used.
+	Optional<Tuple> keyTuple;
+	Optional<Tuple> valueTuple;
+	mappedKeyTuple.clear();
+	mappedKeyTuple.reserve(vec.size());
+
+	for (int i = 0; i < vec.size(); i++) {
+		if (!vec[i].present()) {
+			// rangeQuery
+			continue;
+		}
+		if (vec[i].get().size()) {
+			mappedKeyTuple.append(vec[i].get());
+		} else {
+			// singleKeyOrValue is true
+			std::string s = mappedKeyFormatTuple.getString(i).toString();
+			auto sz = s.size();
+			int idx;
+			Tuple* referenceTuple;
+			try {
+				idx = std::stoi(s.substr(3, sz - 5));
+			} catch (std::exception& e) {
+				throw mapper_bad_index();
+			}
+			if (s[1] == 'K') {
+				unpackKeyTuple(&referenceTuple, keyTuple, keyValue);
+			} else if (s[1] == 'V') {
+				unpackValueTuple(&referenceTuple, valueTuple, keyValue);
+			} else {
+				ASSERT(false);
+				throw internal_error();
+			}
+			if (idx < 0 || idx >= referenceTuple->size()) {
+				throw mapper_bad_index();
+			}
+			mappedKeyTuple.appendRaw(referenceTuple->subTupleRawString(idx));
 		}
 	}
 
@@ -3579,15 +3614,19 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 	Value value = Tuple().append("value-0"_sr).append("value-1"_sr).append("value-2"_sr).getDataAsStandalone();
 	state KeyValueRef kvr(key, value);
 	{
-		Tuple mapperTuple = Tuple()
-		                        .append("normal"_sr)
-		                        .append("{{escaped}}"_sr)
-		                        .append("{K[2]}"_sr)
-		                        .append("{V[0]}"_sr)
-		                        .append("{...}"_sr);
+		Tuple mappedKeyFormatTuple = Tuple()
+		                                 .append("normal"_sr)
+		                                 .append("{{escaped}}"_sr)
+		                                 .append("{K[2]}"_sr)
+		                                 .append("{V[0]}"_sr)
+		                                 .append("{...}"_sr);
 
+		Tuple mappedKeyTuple;
+		std::vector<Optional<Tuple>> vt;
 		bool isRangeQuery = false;
-		Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery);
+		preprocessMappedKey(mappedKeyFormatTuple, vt, isRangeQuery);
+
+		Key mappedKey = constructMappedKey(&kvr, vt, mappedKeyTuple, mappedKeyFormatTuple);
 
 		Key expectedMappedKey = Tuple()
 		                            .append("normal"_sr)
@@ -3599,11 +3638,15 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 		ASSERT(mappedKey.compare(expectedMappedKey) == 0);
 		ASSERT(isRangeQuery == true);
 	}
-	{
-		Tuple mapperTuple = Tuple().append("{{{{}}"_sr).append("}}"_sr);
 
+	{
+		Tuple mappedKeyFormatTuple = Tuple().append("{{{{}}"_sr).append("}}"_sr);
+
+		Tuple mappedKeyTuple;
+		std::vector<Optional<Tuple>> vt;
 		bool isRangeQuery = false;
-		Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery);
+		preprocessMappedKey(mappedKeyFormatTuple, vt, isRangeQuery);
+		Key mappedKey = constructMappedKey(&kvr, vt, mappedKeyTuple, mappedKeyFormatTuple);
 
 		Key expectedMappedKey = Tuple().append("{{}"_sr).append("}"_sr).getDataAsStandalone();
 		//		std::cout << printable(mappedKey) << " == " << printable(expectedMappedKey) << std::endl;
@@ -3611,10 +3654,13 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 		ASSERT(isRangeQuery == false);
 	}
 	{
-		Tuple mapperTuple = Tuple().append("{{{{}}"_sr).append("}}"_sr);
+		Tuple mappedKeyFormatTuple = Tuple().append("{{{{}}"_sr).append("}}"_sr);
 
+		Tuple mappedKeyTuple;
+		std::vector<Optional<Tuple>> vt;
 		bool isRangeQuery = false;
-		Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery);
+		preprocessMappedKey(mappedKeyFormatTuple, vt, isRangeQuery);
+		Key mappedKey = constructMappedKey(&kvr, vt, mappedKeyTuple, mappedKeyFormatTuple);
 
 		Key expectedMappedKey = Tuple().append("{{}"_sr).append("}"_sr).getDataAsStandalone();
 		//		std::cout << printable(mappedKey) << " == " << printable(expectedMappedKey) << std::endl;
@@ -3622,11 +3668,15 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 		ASSERT(isRangeQuery == false);
 	}
 	{
-		Tuple mapperTuple = Tuple().append("{K[100]}"_sr);
-		bool isRangeQuery = false;
+		Tuple mappedKeyFormatTuple = Tuple().append("{K[100]}"_sr);
 		state bool throwException = false;
 		try {
-			Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery);
+			Tuple mappedKeyTuple;
+			std::vector<Optional<Tuple>> vt;
+			bool isRangeQuery = false;
+			preprocessMappedKey(mappedKeyFormatTuple, vt, isRangeQuery);
+
+			Key mappedKey = constructMappedKey(&kvr, vt, mappedKeyTuple, mappedKeyFormatTuple);
 		} catch (Error& e) {
 			ASSERT(e.code() == error_code_mapper_bad_index);
 			throwException = true;
@@ -3634,11 +3684,15 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 		ASSERT(throwException);
 	}
 	{
-		Tuple mapperTuple = Tuple().append("{...}"_sr).append("last-element"_sr);
-		bool isRangeQuery = false;
+		Tuple mappedKeyFormatTuple = Tuple().append("{...}"_sr).append("last-element"_sr);
 		state bool throwException2 = false;
 		try {
-			Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery);
+			Tuple mappedKeyTuple;
+			std::vector<Optional<Tuple>> vt;
+			bool isRangeQuery = false;
+			preprocessMappedKey(mappedKeyFormatTuple, vt, isRangeQuery);
+
+			Key mappedKey = constructMappedKey(&kvr, vt, mappedKeyTuple, mappedKeyFormatTuple);
 		} catch (Error& e) {
 			ASSERT(e.code() == error_code_mapper_bad_range_decriptor);
 			throwException2 = true;
@@ -3646,11 +3700,15 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 		ASSERT(throwException2);
 	}
 	{
-		Tuple mapperTuple = Tuple().append("{K[not-a-number]}"_sr);
-		bool isRangeQuery = false;
+		Tuple mappedKeyFormatTuple = Tuple().append("{K[not-a-number]}"_sr);
 		state bool throwException3 = false;
 		try {
-			Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery);
+			Tuple mappedKeyTuple;
+			std::vector<Optional<Tuple>> vt;
+			bool isRangeQuery = false;
+			preprocessMappedKey(mappedKeyFormatTuple, vt, isRangeQuery);
+
+			Key mappedKey = constructMappedKey(&kvr, vt, mappedKeyTuple, mappedKeyFormatTuple);
 		} catch (Error& e) {
 			ASSERT(e.code() == error_code_mapper_bad_index);
 			throwException3 = true;
@@ -3665,7 +3723,8 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
                                                    StringRef mapper,
                                                    // To provide span context, tags, debug ID to underlying lookups.
                                                    GetMappedKeyValuesRequest* pOriginalReq,
-                                                   Optional<Key> tenantPrefix) {
+                                                   Optional<Key> tenantPrefix,
+                                                   int matchIndex) {
 	state GetMappedKeyValuesReply result;
 	result.version = input.version;
 	result.more = input.more;
@@ -3675,20 +3734,31 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 	result.data.reserve(result.arena, input.data.size());
 
 	state Tuple mappedKeyFormatTuple;
+	state Tuple mappedKeyTuple;
+
 	try {
 		mappedKeyFormatTuple = Tuple::unpack(mapper);
 	} catch (Error& e) {
 		TraceEvent("MapperNotTuple").error(e).detail("Mapper", mapper.printable());
 		throw mapper_not_tuple();
 	}
-	state KeyValueRef* it = input.data.begin();
-	for (; it != input.data.end(); it++) {
-		state MappedKeyValueRef kvm;
-		kvm.key = it->key;
-		kvm.value = it->value;
+	state std::vector<Optional<Tuple>> vt;
+	state bool isRangeQuery = false;
+	preprocessMappedKey(mappedKeyFormatTuple, vt, isRangeQuery);
 
-		state bool isRangeQuery = false;
-		state Key mappedKey = constructMappedKey(it, mappedKeyFormatTuple, isRangeQuery);
+	state int sz = input.data.size();
+	state int i = 0;
+	for (; i < sz; i++) {
+		state KeyValueRef* it = &input.data[i];
+		state MappedKeyValueRef kvm;
+		state bool isBoundary = i == 0 || i == sz - 1;
+		// need to keep the boundary, so that caller can use it as a continuation.
+		if (isBoundary || matchIndex == MATCH_INDEX_ALL) {
+			kvm.key = it->key;
+			kvm.value = it->value;
+		}
+
+		state Key mappedKey = constructMappedKey(it, vt, mappedKeyTuple, mappedKeyFormatTuple);
 		// Make sure the mappedKey is always available, so that it's good even we want to get key asynchronously.
 		result.arena.dependsOn(mappedKey.arena());
 
@@ -3699,15 +3769,135 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 			// Use the mappedKey as the prefix of the range query.
 			GetRangeReqAndResultRef getRange =
 			    wait(quickGetKeyValues(data, mappedKey, input.version, &(result.arena), pOriginalReq));
+			if ((!getRange.result.empty() && matchIndex == MATCH_INDEX_MATCHED_ONLY) ||
+			    (getRange.result.empty() && matchIndex == MATCH_INDEX_UNMATCHED_ONLY)) {
+				kvm.key = it->key;
+				kvm.value = it->value;
+			}
+
+			kvm.boundaryAndExist = isBoundary && !getRange.result.empty();
 			kvm.reqAndResult = getRange;
 		} else {
 			GetValueReqAndResultRef getValue =
 			    wait(quickGetValue(data, mappedKey, input.version, &(result.arena), pOriginalReq));
 			kvm.reqAndResult = getValue;
+			kvm.boundaryAndExist = isBoundary && getValue.result.present();
 		}
 		result.data.push_back(result.arena, kvm);
 	}
 	return result;
+}
+
+bool rangeIntersectsAnyTenant(TenantPrefixIndex& prefixIndex, KeyRangeRef range, Version ver) {
+	auto view = prefixIndex.at(ver);
+	auto beginItr = view.lastLessOrEqual(range.begin);
+	auto endItr = view.lastLess(range.end);
+
+	// If the begin and end reference different spots in the tenant index, then the tenant pointed to
+	// by endItr intersects the range
+	if (beginItr != endItr) {
+		return true;
+	}
+
+	// If the iterators point to the same entry and that entry contains begin, then we are wholly in
+	// one tenant
+	if (beginItr != view.end() && range.begin.startsWith(beginItr.key())) {
+		return true;
+	}
+
+	return false;
+}
+
+TEST_CASE("/fdbserver/storageserver/rangeIntersectsAnyTenant") {
+	std::map<TenantName, TenantMapEntry> entries = { std::make_pair("tenant0"_sr, TenantMapEntry(0, ""_sr)),
+		                                             std::make_pair("tenant2"_sr, TenantMapEntry(2, ""_sr)),
+		                                             std::make_pair("tenant3"_sr, TenantMapEntry(3, ""_sr)),
+		                                             std::make_pair("tenant4"_sr, TenantMapEntry(4, ""_sr)),
+		                                             std::make_pair("tenant6"_sr, TenantMapEntry(6, ""_sr)) };
+	TenantPrefixIndex index;
+	index.createNewVersion(1);
+	for (auto entry : entries) {
+		index.insert(entry.second.prefix, entry.first);
+	}
+
+	// Before all tenants
+	ASSERT(!rangeIntersectsAnyTenant(index, KeyRangeRef(""_sr, "\x00"_sr), index.getLatestVersion()));
+
+	// After all tenants
+	ASSERT(!rangeIntersectsAnyTenant(index, KeyRangeRef("\xfe"_sr, "\xff"_sr), index.getLatestVersion()));
+
+	// In between tenants
+	ASSERT(!rangeIntersectsAnyTenant(
+	    index,
+	    KeyRangeRef(TenantMapEntry::idToPrefix(1), TenantMapEntry::idToPrefix(1).withSuffix("\xff"_sr)),
+	    index.getLatestVersion()));
+
+	// In between tenants with end intersecting tenant start
+	ASSERT(!rangeIntersectsAnyTenant(
+	    index, KeyRangeRef(TenantMapEntry::idToPrefix(5), entries["tenant6"_sr].prefix), index.getLatestVersion()));
+
+	// Entire tenants
+	ASSERT(rangeIntersectsAnyTenant(
+	    index, KeyRangeRef(entries["tenant0"_sr].prefix, TenantMapEntry::idToPrefix(1)), index.getLatestVersion()));
+	ASSERT(rangeIntersectsAnyTenant(
+	    index, KeyRangeRef(entries["tenant2"_sr].prefix, entries["tenant3"_sr].prefix), index.getLatestVersion()));
+
+	// Partial tenants
+	ASSERT(rangeIntersectsAnyTenant(
+	    index,
+	    KeyRangeRef(entries["tenant0"_sr].prefix, entries["tenant0"_sr].prefix.withSuffix("foo"_sr)),
+	    index.getLatestVersion()));
+	ASSERT(rangeIntersectsAnyTenant(
+	    index,
+	    KeyRangeRef(entries["tenant3"_sr].prefix.withSuffix("foo"_sr), entries["tenant4"_sr].prefix),
+	    index.getLatestVersion()));
+	ASSERT(rangeIntersectsAnyTenant(index,
+	                                KeyRangeRef(entries["tenant4"_sr].prefix.withSuffix("bar"_sr),
+	                                            entries["tenant4"_sr].prefix.withSuffix("foo"_sr)),
+	                                index.getLatestVersion()));
+
+	// Begin outside, end inside tenant
+	ASSERT(rangeIntersectsAnyTenant(
+	    index,
+	    KeyRangeRef(TenantMapEntry::idToPrefix(1), entries["tenant2"_sr].prefix.withSuffix("foo"_sr)),
+	    index.getLatestVersion()));
+	ASSERT(rangeIntersectsAnyTenant(
+	    index,
+	    KeyRangeRef(TenantMapEntry::idToPrefix(1), entries["tenant3"_sr].prefix.withSuffix("foo"_sr)),
+	    index.getLatestVersion()));
+
+	// Begin inside, end outside tenant
+	ASSERT(rangeIntersectsAnyTenant(
+	    index,
+	    KeyRangeRef(entries["tenant3"_sr].prefix.withSuffix("foo"_sr), TenantMapEntry::idToPrefix(5)),
+	    index.getLatestVersion()));
+	ASSERT(rangeIntersectsAnyTenant(
+	    index,
+	    KeyRangeRef(entries["tenant4"_sr].prefix.withSuffix("foo"_sr), TenantMapEntry::idToPrefix(5)),
+	    index.getLatestVersion()));
+
+	// Both inside different tenants
+	ASSERT(rangeIntersectsAnyTenant(index,
+	                                KeyRangeRef(entries["tenant0"_sr].prefix.withSuffix("foo"_sr),
+	                                            entries["tenant2"_sr].prefix.withSuffix("foo"_sr)),
+	                                index.getLatestVersion()));
+	ASSERT(rangeIntersectsAnyTenant(index,
+	                                KeyRangeRef(entries["tenant0"_sr].prefix.withSuffix("foo"_sr),
+	                                            entries["tenant3"_sr].prefix.withSuffix("foo"_sr)),
+	                                index.getLatestVersion()));
+	ASSERT(rangeIntersectsAnyTenant(index,
+	                                KeyRangeRef(entries["tenant2"_sr].prefix.withSuffix("foo"_sr),
+	                                            entries["tenant6"_sr].prefix.withSuffix("foo"_sr)),
+	                                index.getLatestVersion()));
+
+	// Both outside tenants with tenant in the middle
+	ASSERT(rangeIntersectsAnyTenant(
+	    index, KeyRangeRef(""_sr, TenantMapEntry::idToPrefix(1).withSuffix("foo"_sr)), index.getLatestVersion()));
+	ASSERT(rangeIntersectsAnyTenant(index, KeyRangeRef(""_sr, "\xff"_sr), index.getLatestVersion()));
+	ASSERT(rangeIntersectsAnyTenant(
+	    index, KeyRangeRef(TenantMapEntry::idToPrefix(5).withSuffix("foo"_sr), "\xff"_sr), index.getLatestVersion()));
+
+	return Void();
 }
 
 // Most of the actor is copied from getKeyValuesQ. I tried to use templates but things become nearly impossible after
@@ -3796,13 +3986,7 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 				throw tenant_name_required();
 			}
 
-			auto view = data->tenantPrefixIndex.at(req.version);
-			auto beginItr = view.lastLessOrEqual(begin);
-			if (beginItr != view.end() && !begin.startsWith(beginItr.key())) {
-				++beginItr;
-			}
-			auto endItr = view.lastLessOrEqual(end);
-			if (beginItr != endItr) {
+			if (rangeIntersectsAnyTenant(data->tenantPrefixIndex, KeyRangeRef(begin, end), req.version)) {
 				throw tenant_name_required();
 			}
 		}
@@ -3857,7 +4041,7 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 			try {
 				// Map the scanned range to another list of keys and look up.
 				GetMappedKeyValuesReply _r =
-				    wait(mapKeyValues(data, getKeyValuesReply, req.mapper, &req, tenantPrefix));
+				    wait(mapKeyValues(data, getKeyValuesReply, req.mapper, &req, tenantPrefix, req.matchIndex));
 				r = _r;
 			} catch (Error& e) {
 				TraceEvent("MapError").error(e);

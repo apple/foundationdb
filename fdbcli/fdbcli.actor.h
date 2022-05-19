@@ -121,10 +121,7 @@ extern const KeyRangeRef processClassTypeSpecialKeyRange;
 // Other special keys
 inline const KeyRef errorMsgSpecialKey = LiteralStringRef("\xff\xff/error_message");
 // help functions (Copied from fdbcli.actor.cpp)
-// decode worker interfaces
-ACTOR Future<Void> addInterface(std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface,
-                                Reference<FlowLock> connectLock,
-                                KeyValue kv);
+
 // get all workers' info
 ACTOR Future<bool> getWorkers(Reference<IDatabase> db, std::vector<ProcessData>* workers);
 
@@ -221,7 +218,10 @@ ACTOR Future<bool> clearHealthyZone(Reference<IDatabase> db,
                                     bool clearSSFailureZoneString = false);
 ACTOR Future<bool> maintenanceCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // profile command
-ACTOR Future<bool> profileCommandActor(Reference<ITransaction> tr, std::vector<StringRef> tokens, bool intrans);
+ACTOR Future<bool> profileCommandActor(Database db,
+                                       Reference<ITransaction> tr,
+                                       std::vector<StringRef> tokens,
+                                       bool intrans);
 // setclass command
 ACTOR Future<bool> setClassCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // snapshot command

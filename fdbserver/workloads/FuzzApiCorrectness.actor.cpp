@@ -915,6 +915,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			Key autoCoordinatorSpecialKey =
 			    LiteralStringRef("auto_coordinators")
 			        .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin);
+			KeyRangeRef actorLineageRange = SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ACTORLINEAGE);
 			// Read this particular special key may throw timed_out
 			Key statusJsonSpecialKey = LiteralStringRef("\xff\xff/status/json");
 
@@ -934,8 +935,9 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 				    error_code_timed_out,
 				    ExceptionContract::possibleIf(key1 <= statusJsonSpecialKey && statusJsonSpecialKey < key2)),
 				std::make_pair(error_code_special_keys_api_failure,
-				               ExceptionContract::possibleIf(key1 <= autoCoordinatorSpecialKey &&
-				                                             autoCoordinatorSpecialKey < key2)),
+				               ExceptionContract::possibleIf(
+				                   (key1 <= autoCoordinatorSpecialKey && autoCoordinatorSpecialKey < key2) ||
+				                   actorLineageRange.intersects(KeyRangeRef(key1, key2)))),
 				std::make_pair(error_code_accessed_unreadable, ExceptionContract::Possible),
 				std::make_pair(error_code_tenant_not_found,
 				               ExceptionContract::possibleIf(!workload->canUseTenant(tr->getTenant()))),
@@ -970,6 +972,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			Key autoCoordinatorSpecialKey =
 			    LiteralStringRef("auto_coordinators")
 			        .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin);
+			KeyRangeRef actorLineageRange = SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ACTORLINEAGE);
 			Key statusJsonSpecialKey = LiteralStringRef("\xff\xff/status/json");
 
 			contract = {
@@ -989,8 +992,9 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 				    error_code_timed_out,
 				    ExceptionContract::possibleIf(key1 <= statusJsonSpecialKey && statusJsonSpecialKey < key2)),
 				std::make_pair(error_code_special_keys_api_failure,
-				               ExceptionContract::possibleIf((key1 <= autoCoordinatorSpecialKey) &&
-				                                             (autoCoordinatorSpecialKey < key2))),
+				               ExceptionContract::possibleIf(
+				                   (key1 <= autoCoordinatorSpecialKey && autoCoordinatorSpecialKey < key2) ||
+				                   actorLineageRange.intersects(KeyRangeRef(key1, key2)))),
 				std::make_pair(error_code_accessed_unreadable, ExceptionContract::Possible),
 				std::make_pair(error_code_tenant_not_found,
 				               ExceptionContract::possibleIf(!workload->canUseTenant(tr->getTenant()))),

@@ -25,14 +25,6 @@
 #include <unordered_map>
 #include <vector>
 
-#if (!defined(TLS_DISABLED))
-#define ENCRYPTION_ENABLED 1
-#else
-#define ENCRYPTION_ENABLED 0
-#endif
-
-#if ENCRYPTION_ENABLED
-
 #include "flow/Arena.h"
 #include "flow/EncryptUtils.h"
 #include "flow/FastRef.h"
@@ -252,12 +244,12 @@ public:
 	                                    const EncryptCipherRandomSalt& salt);
 
 	// API returns the last inserted cipherKey.
-	// If none exists, 'encrypt_key_not_found' is thrown.
+	// If none exists, null reference is returned.
 
 	Reference<BlobCipherKey> getLatestCipherKey();
 
 	// API returns cipherKey corresponding to input 'baseCipherKeyId'.
-	// If none exists, 'encrypt_key_not_found' is thrown.
+	// If none exists, null reference is returned.
 
 	Reference<BlobCipherKey> getCipherByBaseCipherId(const EncryptCipherBaseKeyId& baseCipherKeyId,
 	                                                 const EncryptCipherRandomSalt& salt);
@@ -265,17 +257,19 @@ public:
 	// API enables inserting base encryption cipher details to the BlobCipherKeyIdCache.
 	// Given cipherKeys are immutable, attempting to re-insert same 'identical' cipherKey
 	// is treated as a NOP (success), however, an attempt to update cipherKey would throw
-	// 'encrypt_update_cipher' exception.
+	// 'encrypt_update_cipher' exception. Returns the inserted cipher key if success.
 	//
 	// API NOTE: Recommended usecase is to update encryption cipher-key is updated the external
 	// keyManagementSolution to limit an encryption key lifetime
 
-	void insertBaseCipherKey(const EncryptCipherBaseKeyId& baseCipherId, const uint8_t* baseCipher, int baseCipherLen);
+	Reference<BlobCipherKey> insertBaseCipherKey(const EncryptCipherBaseKeyId& baseCipherId,
+	                                             const uint8_t* baseCipher,
+	                                             int baseCipherLen);
 
 	// API enables inserting base encryption cipher details to the BlobCipherKeyIdCache
 	// Given cipherKeys are immutable, attempting to re-insert same 'identical' cipherKey
 	// is treated as a NOP (success), however, an attempt to update cipherKey would throw
-	// 'encrypt_update_cipher' exception.
+	// 'encrypt_update_cipher' exception. Returns the inserted cipher key if sucess.
 	//
 	// API NOTE: Recommended usecase is to update encryption cipher-key regeneration while performing
 	// decryption. The encryptionheader would contain relevant details including: 'encryptDomainId',
@@ -296,8 +290,8 @@ public:
 private:
 	EncryptCipherDomainId domainId;
 	BlobCipherKeyIdCacheMap keyIdCache;
-	EncryptCipherBaseKeyId latestBaseCipherKeyId;
-	EncryptCipherRandomSalt latestRandomSalt;
+	Optional<EncryptCipherBaseKeyId> latestBaseCipherKeyId;
+	Optional<EncryptCipherRandomSalt> latestRandomSalt;
 };
 
 using BlobCipherDomainCacheMap = std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKeyIdCache>>;
@@ -313,19 +307,21 @@ public:
 	// The cipherKeys are indexed using 'baseCipherId', given cipherKeys are immutable,
 	// attempting to re-insert same 'identical' cipherKey is treated as a NOP (success),
 	// however, an attempt to update cipherKey would throw 'encrypt_update_cipher' exception.
+	// Returns the inserted cipher key if success.
 	//
-	// API NOTE: Recommended usecase is to update encryption cipher-key is updated the external
+	// API NOTE: Recommended use case is to update encryption cipher-key is updated the external
 	// keyManagementSolution to limit an encryption key lifetime
 
-	void insertCipherKey(const EncryptCipherDomainId& domainId,
-	                     const EncryptCipherBaseKeyId& baseCipherId,
-	                     const uint8_t* baseCipher,
-	                     int baseCipherLen);
+	Reference<BlobCipherKey> insertCipherKey(const EncryptCipherDomainId& domainId,
+	                                         const EncryptCipherBaseKeyId& baseCipherId,
+	                                         const uint8_t* baseCipher,
+	                                         int baseCipherLen);
 
 	// Enable clients to insert base encryption cipher details to the BlobCipherKeyCache.
 	// The cipherKeys are indexed using 'baseCipherId', given cipherKeys are immutable,
 	// attempting to re-insert same 'identical' cipherKey is treated as a NOP (success),
 	// however, an attempt to update cipherKey would throw 'encrypt_update_cipher' exception.
+	// Returns the inserted cipher key if success.
 	//
 	// API NOTE: Recommended usecase is to update encryption cipher-key regeneration while performing
 	// decryption. The encryptionheader would contain relevant details including: 'encryptDomainId',
@@ -339,12 +335,13 @@ public:
 	                     const EncryptCipherRandomSalt& salt);
 
 	// API returns the last insert cipherKey for a given encryption domain Id.
-	// If none exists, it would throw 'encrypt_key_not_found' exception.
+	// If domain Id is invalid, it would throw 'encrypt_invalid_id' exception,
+	// otherwise, and if none exists, it would return null reference.
 
 	Reference<BlobCipherKey> getLatestCipherKey(const EncryptCipherDomainId& domainId);
 
 	// API returns cipherKey corresponding to {encryptionDomainId, baseCipherId} tuple.
-	// If none exists, it would throw 'encrypt_key_not_found' exception.
+	// If none exists, it would return null reference.
 
 	Reference<BlobCipherKey> getCipherKey(const EncryptCipherDomainId& domainId,
 	                                      const EncryptCipherBaseKeyId& baseCipherId,
@@ -468,5 +465,3 @@ StringRef computeAuthToken(const uint8_t* payload,
                            const uint8_t* key,
                            const int keyLen,
                            Arena& arena);
-
-#endif // ENCRYPTION_ENABLED
