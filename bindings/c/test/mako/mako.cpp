@@ -1951,28 +1951,12 @@ int statsProcessMain(Arguments const& args,
 
 bool mergeSketchReport(Arguments& args) {
 
-	std::unordered_map<std::string, DDSketchMako> sketches;
+	ThreadStatistics stats;
 	for (auto& filename : args.report_files) {
 		std::ifstream f{ filename };
-		std::stringstream buffer;
-		buffer << f.rdbuf();
-		rapidjson::Document doc;
-		doc.Parse(buffer.str().c_str());
-		if (doc.HasParseError()) {
-			logr.error("Couldn't parse JSON from {}", filename);
-			return false;
-		}
-		if (!doc.IsArray()) {
-			logr.error("JSON is invalid format from {}", filename);
-			return false;
-		}
-
-		// for (auto it = doc.Begin(); it != doc.End(); it++) {
-		// 	DDSketch d;
-		// 	d.deserialize(*it);
-		// 	if (sketches.coun)
-		// 		sketches[pos].merge(d);
-		// }
+		ThreadStatistics tmp;
+		f >> tmp;
+		stats.combine(tmp);
 	}
 	rapidjson::StringBuffer ss;
 	rapidjson::Writer<rapidjson::StringBuffer> writer(ss);
