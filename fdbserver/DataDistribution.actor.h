@@ -38,6 +38,15 @@ enum class RelocateReason { INVALID = -1, OTHER, REBALANCE_DISK, REBALANCE_READ 
 struct DDShardInfo;
 
 struct DataMove {
+	DataMove() : meta(DataMoveMetaData()), restore(false), startTime(-1), valid(false) {}
+	explicit DataMove(DataMoveMetaData meta, bool restore)
+	  : meta(std::move(meta)), restore(restore), valid(true), startTime(now()) {}
+
+	// Checks if the DataMove is consistent with the shard.
+	void validateShard(const DDShardInfo& shard, KeyRangeRef range, int priority = SERVER_KNOBS->PRIORITY_RECOVER_MOVE);
+
+	bool isCancelled() const { return this->meta.getPhase() == DataMoveMetaData::Deleting; }
+
 	const DataMoveMetaData meta;
 	bool restore;
 	bool valid;
@@ -47,13 +56,6 @@ struct DataMove {
 	std::vector<UID> remoteSrc;
 	std::vector<UID> primaryDest;
 	std::vector<UID> remoteDest;
-
-	DataMove() : meta(DataMoveMetaData()), restore(false), startTime(-1), valid(false) {}
-	explicit DataMove(DataMoveMetaData meta, bool restore)
-	  : meta(std::move(meta)), restore(restore), valid(true), startTime(now()) {}
-
-	// Checks if the DataMove is consistent with the shard.
-	void validateShard(const DDShardInfo& shard, KeyRangeRef range, int priority = SERVER_KNOBS->PRIORITY_RECOVER_MOVE);
 };
 
 struct RelocateShard {
@@ -328,13 +330,15 @@ struct DDShardInfo {
 };
 
 struct InitialDataDistribution : ReferenceCounted<InitialDataDistribution> {
+	InitialDataDistribution() : dataMoveMap(std::make_shared<DataMove>()) {}
+
 	int mode;
 	std::vector<std::pair<StorageServerInterface, ProcessClass>> allServers;
 	std::set<std::vector<UID>> primaryTeams;
 	std::set<std::vector<UID>> remoteTeams;
 	std::vector<DDShardInfo> shards;
 	Optional<Key> initHealthyZoneValue;
-	std::vector<std::shared_ptr<DataMove>> dataMoves;
+	KeyRangeMap<std::shared_ptr<DataMove>> dataMoveMap;
 };
 
 struct ShardMetrics {
