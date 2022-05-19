@@ -207,9 +207,11 @@ inline std::ofstream& operator<<(std::ofstream& os, ThreadStatistics& stats) {
 	writer.EndArray();
 
 	for (auto op = 0; op < MAX_OP; op++) {
-		std::string op_name = getOpName(op);
-		writer.String(op_name.c_str());
-		stats.sketches[op].serialize(writer);
+		if (stats.sketches[op].getPopulationSize() > 0) {
+			std::string op_name = getOpName(op);
+			writer.String(op_name.c_str());
+			stats.sketches[op].serialize(writer);
+		}
 	}
 	writer.EndObject();
 	os << ss.GetString();
