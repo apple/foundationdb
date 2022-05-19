@@ -6570,7 +6570,7 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 		validateOptionValueNotPresent(value);
 		if (trState->hasTenant()) {
 			Error e = invalid_option();
-			TraceEvent(SevWarn, "TenantTransactionRawAccess").error(e).detail("Tenant", trState->tenant());
+			TraceEvent(SevError, "TenantTransactionRawAccess").error(e).detail("Tenant", trState->tenant());
 			throw e;
 		}
 		trState->options.rawAccess = true;
@@ -7493,6 +7493,7 @@ ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRangesActor(Trans
 		fmt::print("Getting Blob Granules for [{0} - {1})\n", keyRange.begin.printable(), keyRange.end.printable());
 	}
 	self->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	// FIXME: limit to tenant range if set
 	loop {
 		state RangeResult blobGranuleMapping = wait(
 		    krmGetRanges(self, blobGranuleMappingKeys.begin, currentRange, 1000, GetRangeLimits::BYTE_LIMIT_UNLIMITED));
@@ -7642,6 +7643,7 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 		req.keyRange = KeyRangeRef(StringRef(req.arena, granuleStartKey), StringRef(req.arena, granuleEndKey));
 		req.beginVersion = begin;
 		req.readVersion = rv;
+		req.tenantInfo = self->trState->getTenantInfo();
 		req.canCollapseBegin = true; // TODO make this a parameter once we support it
 
 		std::vector<Reference<ReferencedInterface<BlobWorkerInterface>>> v;
@@ -9341,6 +9343,7 @@ Reference<DatabaseContext::TransactionT> DatabaseContext::createTransaction() {
 	return makeReference<ReadYourWritesTransaction>(Database(Reference<DatabaseContext>::addRef(this)));
 }
 
+// FIXME: handle tenants?
 ACTOR Future<Key> purgeBlobGranulesActor(Reference<DatabaseContext> db,
                                          KeyRange range,
                                          Version purgeVersion,

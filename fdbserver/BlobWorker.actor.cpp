@@ -35,6 +35,7 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/Notified.h"
+#include "fdbclient/Tenant.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/BlobGranuleServerCommon.actor.h"
 #include "fdbserver/MutationTracking.h"
@@ -155,6 +156,16 @@ struct GranuleHistoryEntry : NonCopyable, ReferenceCounted<GranuleHistoryEntry> 
 	  : range(range), granuleID(granuleID), startVersion(startVersion), endVersion(endVersion) {}
 };
 
+// TODO: does this need to be versioned like SS has?
+struct GranuleTenantData : NonCopyable, ReferenceCounted<GranuleTenantData> {
+	TenantName name;
+	TenantMapEntry entry;
+	// TODO add other useful stuff like per-tenant blob connection, if necessary
+
+	GranuleTenantData() {}
+	GranuleTenantData(TenantName name, TenantMapEntry entry) : name(name), entry(entry) {}
+};
+
 struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 	UID id;
 	Database db;
@@ -173,6 +184,8 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 	// logic
 	Reference<BackupContainerFileSystem> bstore;
 	KeyRangeMap<GranuleRangeMetadata> granuleMetadata;
+	KeyRangeMap<Reference<GranuleTenantData>> tenantData;
+	std::unordered_map<int64_t, TenantMapEntry> tenantInfoById;
 
 	// contains the history of completed granules before the existing ones. Maps to the latest one, and has
 	// back-pointers to earlier granules
@@ -2194,6 +2207,25 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 		}
 	}
 
+	state Optional<Key> tenantPrefix;
+	if (req.tenantInfo.name.present()) {
+		ASSERT(req.tenantInfo.tenantId != TenantInfo::INVALID_TENANT);
+		auto tenantEntry = bwData->tenantInfoById.find(req.tenantInfo.tenantId);
+		if (tenantEntry != bwData->tenantInfoById.end()) {
+			tenantPrefix = tenantEntry->second.prefix;
+		} else {
+			// FIXME - better way. Wait on retry here, or just have better model for tenant metadata?
+			// Just throw wrong_shard_server and make the client retry and assume we load it later
+			TraceEvent(SevDebug, "BlobWorkerRequestUnknownTenant", bwData->id)
+			    .suppressFor(5.0)
+			    .detail("TenantName", req.tenantInfo.name.get())
+			    .detail("TenantId", req.tenantInfo.tenantId);
+			throw wrong_shard_server();
+		}
+		req.keyRange = KeyRangeRef(req.keyRange.begin.withPrefix(tenantPrefix.get(), req.arena),
+		                           req.keyRange.end.withPrefix(tenantPrefix.get(), req.arena));
+	}
+
 	state bool didCollapse = false;
 	try {
 		// TODO remove requirement for canCollapseBegin once we implement early replying
@@ -2203,6 +2235,10 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 		}
 		state BlobGranuleFileReply rep;
 		state std::vector<Reference<GranuleMetadata>> granules;
+
+		if (tenantPrefix.present()) {
+			rep.arena.dependsOn(tenantPrefix.get().arena());
+		}
 
 		auto checkRanges = bwData->granuleMetadata.intersectingRanges(req.keyRange);
 		// check for gaps as errors and copy references to granule metadata before yielding or doing any
@@ -2403,7 +2439,16 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 			BlobGranuleChunkRef chunk;
 			// TODO change with early reply
 			chunk.includedVersion = req.readVersion;
-			chunk.keyRange = KeyRangeRef(StringRef(rep.arena, chunkRange.begin), StringRef(rep.arena, chunkRange.end));
+			// compiler doesn't like this
+			// chunk.tenantPrefix = tenantPrefix;
+			if (tenantPrefix.present()) {
+				chunk.keyRange = KeyRangeRef(StringRef(rep.arena, chunkRange.begin.removePrefix(tenantPrefix.get())),
+				                             StringRef(rep.arena, chunkRange.end).removePrefix(tenantPrefix.get()));
+				chunk.tenantPrefix = Optional<StringRef>(tenantPrefix.get());
+			} else {
+				chunk.keyRange =
+				    KeyRangeRef(StringRef(rep.arena, chunkRange.begin), StringRef(rep.arena, chunkRange.end));
+			}
 
 			int64_t deltaBytes = 0;
 			chunkFiles.getFiles(
@@ -3079,6 +3124,56 @@ ACTOR Future<Void> runGRVChecks(Reference<BlobWorkerData> bwData) {
 			++bwData->stats.commitVersionChecks;
 		} catch (Error& e) {
 			wait(tr.onError(e));
+		}
+	}
+}
+
+// FIXME: better way to do this?
+// monitor system keyspace for new tenants
+ACTOR Future<Void> monitorTenants(Reference<BlobWorkerData> bwData) {
+	loop {
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bwData->db);
+		loop {
+			try {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				state RangeResult tenantResults;
+				wait(store(tenantResults, tr->getRange(tenantMapKeys, CLIENT_KNOBS->TOO_MANY)));
+				ASSERT_WE_THINK(!tenantResults.more && tenantResults.size() < CLIENT_KNOBS->TOO_MANY);
+				if (tenantResults.more || tenantResults.size() >= CLIENT_KNOBS->TOO_MANY) {
+					TraceEvent(SevError, "BlobWorkerTooManyTenants", bwData->id)
+					    .detail("TenantCount", tenantResults.size());
+					wait(delay(600));
+					if (bwData->fatalError.canBeSet()) {
+						bwData->fatalError.sendError(internal_error());
+					}
+					throw internal_error();
+				}
+
+				for (auto& it : tenantResults) {
+					// FIXME: handle removing/moving tenants!
+					StringRef tenantName = it.key.removePrefix(tenantMapPrefix);
+					TenantMapEntry entry = decodeTenantEntry(it.value);
+
+					if (bwData->tenantInfoById.insert({ entry.id, entry }).second) {
+						if (BW_DEBUG) {
+							fmt::print("BW {0} found new tenant {1}: {2} {3}\n",
+							           bwData->id.shortString().substr(0, 5),
+							           tenantName.printable(),
+							           entry.id,
+							           entry.prefix.printable());
+						}
+						bwData->tenantData.insert(KeyRangeRef(entry.prefix, entry.prefix.withSuffix(normalKeys.end)),
+						                          makeReference<GranuleTenantData>(tenantName, entry));
+					}
+				}
+
+				state Future<Void> watchChange = tr->watch(tenantLastIdKey);
+				wait(tr->commit());
+				wait(watchChange);
+			} catch (Error& e) {
+				wait(tr->onError(e));
+			}
 		}
 	}
 }

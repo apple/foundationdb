@@ -222,7 +222,10 @@ RangeResult materializeBlobGranule(const BlobGranuleChunkRef& chunk,
 
 	RangeResult ret;
 	for (auto& it : dataMap) {
-		ret.push_back_deep(ret.arena(), KeyValueRef(it.first, it.second));
+		ret.push_back_deep(
+		    ret.arena(),
+		    KeyValueRef(chunk.tenantPrefix.present() ? it.first.removePrefix(chunk.tenantPrefix.get()) : it.first,
+		                it.second));
 	}
 
 	return ret;
