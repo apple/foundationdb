@@ -520,7 +520,7 @@ public:
 	                               // (fdbclient/Knobs.h) to ensure that at least two entries will be returned from an
 	                               // attempt to read a key range map
 	int MOVE_SHARD_KRM_ROW_LIMIT;
- 	int MOVE_SHARD_KRM_BYTE_LIMIT;
+	int MOVE_SHARD_KRM_BYTE_LIMIT;
 	int MAX_SKIP_TAGS;
 	double MAX_ADDED_SOURCES_MULTIPLIER;
 

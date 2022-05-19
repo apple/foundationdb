@@ -320,19 +320,19 @@ TCTeamInfo::TCTeamInfo(std::vector<Reference<TCServerInfo>> const& servers)
 }
 
 // static
- std::string TCTeamInfo::serversToString(std::vector<UID> servers) {
- 	if (servers.empty()) {
- 		return "[unset]";
- 	}
+std::string TCTeamInfo::serversToString(std::vector<UID> servers) {
+	if (servers.empty()) {
+		return "[unset]";
+	}
 
- 	std::sort(servers.begin(), servers.end());
- 	std::stringstream ss;
- 	for (const auto& id : servers) {
- 		ss << id.toString() << " ";
- 	}
+	std::sort(servers.begin(), servers.end());
+	std::stringstream ss;
+	for (const auto& id : servers) {
+		ss << id.toString() << " ";
+	}
 
- 	return ss.str();
- }
+	return ss.str();
+}
 
 std::vector<StorageServerInterface> TCTeamInfo::getLastKnownServerInterfaces() const {
 	std::vector<StorageServerInterface> v;

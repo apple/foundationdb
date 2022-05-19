@@ -70,9 +70,9 @@ const Value keyServersValue(const std::vector<UID>& src,
                             const UID& srcID,
                             const UID& destID);
 const Value keyServersValue(const std::vector<Tag>& srcTag,
-                             const std::vector<Tag>& destTag,
-                             const UID& srcId,
-                             const UID& destId);
+                            const std::vector<Tag>& destTag,
+                            const UID& srcId,
+                            const UID& destId);
 // `result` must be the full result of getting serverTagKeys
 void decodeKeyServersValue(RangeResult result,
                            const ValueRef& value,
@@ -84,12 +84,12 @@ void decodeKeyServersValue(std::map<Tag, UID> const& tag_uid,
                            std::vector<UID>& src,
                            std::vector<UID>& dest);
 void decodeKeyServersValue(RangeResult result,
-                            const ValueRef& value,
-                            std::vector<UID>& src,
-                            std::vector<UID>& dest,
-                            UID& srcID,
-                            UID& destID,
-                            bool missingIsError = true);
+                           const ValueRef& value,
+                           std::vector<UID>& src,
+                           std::vector<UID>& dest,
+                           UID& srcID,
+                           UID& destID,
+                           bool missingIsError = true);
 
 extern const KeyRef clusterIdKey;
 
@@ -101,11 +101,11 @@ UID decodeCheckpointKey(const KeyRef& key);
 CheckpointMetaData decodeCheckpointValue(const ValueRef& value);
 
 // "\xff/dataMoves/[[UID]] := [[DataMoveMetaData]]"
- extern const KeyRangeRef dataMoveKeys;
- const Key dataMoveKeyFor(UID checkpontId);
- const Value dataMoveValue(const DataMoveMetaData& checkpoint);
- UID decodeDataMoveKey(const KeyRef& key);
- DataMoveMetaData decodeDataMoveValue(const ValueRef& value);
+extern const KeyRangeRef dataMoveKeys;
+const Key dataMoveKeyFor(UID checkpontId);
+const Value dataMoveValue(const DataMoveMetaData& checkpoint);
+UID decodeDataMoveKey(const KeyRef& key);
+DataMoveMetaData decodeDataMoveValue(const ValueRef& value);
 
 // "\xff/storageCacheServer/[[UID]] := StorageServerInterface"
 // This will be added by the cache server on initialization and removed by DD
