@@ -21,6 +21,7 @@
 #ifndef MAKO_HPP
 #define MAKO_HPP
 
+#include <sys/syslimits.h>
 #ifndef FDB_API_VERSION
 #define FDB_API_VERSION 720
 #endif
@@ -120,6 +121,7 @@ constexpr const int NUM_CLUSTERS_MAX = 3;
 constexpr const int NUM_DATABASES_MAX = 10;
 constexpr const std::string_view KEY_PREFIX{ "mako" };
 constexpr const std::string_view TEMP_DATA_STORE{ "/tmp/makoTemp" };
+constexpr const int MAX_NUM_PATHS = 200;
 
 /* benchmark parameters */
 struct Arguments {
@@ -163,8 +165,9 @@ struct Arguments {
 	char json_output_path[PATH_MAX];
 	bool bg_materialize_files;
 	char bg_file_path[PATH_MAX];
-	std::string stats_export_path;
-	std::vector<std::string> report_files;
+	char stats_export_path[PATH_MAX];
+	char report_files[MAX_NUM_PATHS][PATH_MAX];
+	int num_report_files;
 };
 
 } // namespace mako

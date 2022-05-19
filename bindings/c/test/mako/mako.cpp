@@ -1108,12 +1108,13 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 				int i = optind;
 				for (; i < argc; i++) {
 					if (argv[i][0] != '-') {
-						args.report_files.push_back(argv[i]);
+						strcpy(args.report_files[i], report_file.c_str());
 					} else {
 						optind = i - 1;
 						break;
 					}
 				}
+				args.num_report_files = i;
 			}
 			break;
 		case ARG_ASYNC:
@@ -1242,10 +1243,10 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			strncpy(args.bg_file_path, optarg, std::min(sizeof(args.bg_file_path), strlen(optarg) + 1));
 		case ARG_EXPORT_PATH:
 			if (optarg == NULL && (argv[optind] == NULL || (argv[optind] != NULL && argv[optind][0] == '-'))) {
-				std::string default_file = "export.json";
-				args.stats_export_path = default_file;
+				char default_file[] = "sketch_data.json";
+				strncpy(args.stats_export_path, default_file, sizeof(default_file));
 			} else {
-				args.stats_export_path = optarg;
+				strncpy(args.stats_export_path, optarg, std::min(sizeof(args.json_output_path), strlen(optarg) + 1));
 			}
 			break;
 		}
@@ -1318,13 +1319,13 @@ int validateArguments(Arguments const& args) {
 
 	// ensure that all of the files provided to mako are valid and exist
 	if (args.mode == MODE_REPORT) {
-		if (args.report_files.empty()) {
+		if (!args.num_report_files) {
 			logr.error("No files to merge");
 		}
-		for (auto& filename : args.report_files) {
+		for (int i = 0; i < args.num_report_files; i++) {
 			struct stat buffer;
-			if (stat(filename.c_str(), &buffer) != 0) {
-				logr.error("Couldn't open file {}", filename);
+			if (stat(args.report_files[i], &buffer) != 0) {
+				logr.error("Couldn't open file {}", args.report_files[i]);
 				return -1;
 			}
 		}
@@ -1805,7 +1806,7 @@ void printReport(Arguments const& args,
 	}
 
 	// export the ddsketch if the flag was set
-	if (!args.stats_export_path.empty()) {
+	if (args.stats_export_path[0] != 0) {
 		std::ofstream f(args.stats_export_path);
 		f << final_stats;
 	}
@@ -1958,17 +1959,7 @@ bool mergeSketchReport(Arguments& args) {
 		f >> tmp;
 		stats.combine(tmp);
 	}
-	rapidjson::StringBuffer ss;
-	rapidjson::Writer<rapidjson::StringBuffer> writer(ss);
-	writer.StartObject();
-	for (auto op = 0; op < MAX_OP; op++) {
-		std::string op_name = getOpName(op);
-		writer.String(op_name.c_str());
-		sketches[op_name].serialize(writer);
-	}
-	writer.EndObject();
-	std::ofstream f("merged_report.json");
-	f << ss.GetString();
+
 	return true;
 }
 
