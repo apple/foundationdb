@@ -52,7 +52,7 @@ class MappedRangeResultDirectBufferIterator extends DirectBufferIterator impleme
 		final byte[] rangeBegin = getString();
 		final byte[] rangeEnd = getString();
 		final byte[] boundaryAndExistBytes = getString();
-		final boolean boundaryAndExist = ByteBuffer.wrap(boundaryAndExistBytes).getInt() == 1 ? true : false;
+		final int boundaryAndExist = ByteBuffer.wrap(boundaryAndExistBytes).getInt();
 		final int rangeResultSize = byteBuffer.getInt();
 		List<KeyValue> rangeResult = new ArrayList();
 		for (int i = 0; i < rangeResultSize; i++) {

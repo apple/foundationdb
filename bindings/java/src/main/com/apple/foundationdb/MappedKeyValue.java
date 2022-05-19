@@ -23,6 +23,7 @@ package com.apple.foundationdb;
 import com.apple.foundationdb.tuple.ByteArrayUtil;
 
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -32,14 +33,14 @@ public class MappedKeyValue extends KeyValue {
 	private final byte[] rangeBegin;
 	private final byte[] rangeEnd;
 	private final List<KeyValue> rangeResult;
-	private final boolean boundaryAndExist;
+	private final int boundaryAndExist;
 
 	// now it has 5 field, key, value, getRange.begin, getRange.end, boundaryAndExist
 	// this needs to change if FDBMappedKeyValue definition is changed.
 	private static final int TOTAL_SERIALIZED_FIELD_FDBMappedKeyValue = 5;
 
 	public MappedKeyValue(byte[] key, byte[] value, byte[] rangeBegin, byte[] rangeEnd, List<KeyValue> rangeResult,
-	               boolean boundaryAndExist) {
+	               int boundaryAndExist) {
 		super(key, value);
 		this.rangeBegin = rangeBegin;
 		this.rangeEnd = rangeEnd;
@@ -51,7 +52,7 @@ public class MappedKeyValue extends KeyValue {
 
 	public byte[] getRangeEnd() { return rangeEnd; }
 
-	public boolean getBoundaryAndExist() { return boundaryAndExist; }
+	public boolean getBoundaryAndExist() { return boundaryAndExist == 0 ? false : true; }
 
 	public List<KeyValue> getRangeResult() { return rangeResult; }
 
@@ -69,7 +70,8 @@ public class MappedKeyValue extends KeyValue {
 		byte[] rangeBegin = takeBytes(offset, bytes, lengths);
 		byte[] rangeEnd = takeBytes(offset, bytes, lengths);
 		byte[] boundaryAndExistBytes = takeBytes(offset, bytes, lengths);
-		boolean boundaryAndExist = ByteBuffer.wrap(boundaryAndExistBytes).getInt() == 1 ? true : false;
+		int boundaryAndExist = ByteBuffer.wrap(boundaryAndExistBytes).order(ByteOrder.LITTLE_ENDIAN).getInt();
+
 		if ((lengths.length - TOTAL_SERIALIZED_FIELD_FDBMappedKeyValue) % 2 != 0) {
 			throw new IllegalArgumentException("There needs to be an even number of lengths!");
 		}
@@ -116,8 +118,8 @@ public class MappedKeyValue extends KeyValue {
 	@Override
 	public int hashCode() {
 		int hashForResult = rangeResult == null ? 0 : rangeResult.hashCode();
-		return 17 + (29 * hashForResult + (boundaryAndExist ? 1 : 0) + 37 * Arrays.hashCode(rangeBegin) +
-		             Arrays.hashCode(rangeEnd));
+		return 17 +
+		    (29 * hashForResult + boundaryAndExist + 37 * Arrays.hashCode(rangeBegin) + Arrays.hashCode(rangeEnd));
 	}
 
 	@Override
