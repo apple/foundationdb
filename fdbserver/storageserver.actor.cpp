@@ -3769,8 +3769,8 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 			// Use the mappedKey as the prefix of the range query.
 			GetRangeReqAndResultRef getRange =
 			    wait(quickGetKeyValues(data, mappedKey, input.version, &(result.arena), pOriginalReq));
-			if (!getRange.result.empty() && matchIndex == MATCH_INDEX_MATCHED_ONLY ||
-			    getRange.result.empty() && matchIndex == MATCH_INDEX_UNMATCHED_ONLY) {
+			if ((!getRange.result.empty() && matchIndex == MATCH_INDEX_MATCHED_ONLY) ||
+			    (getRange.result.empty() && matchIndex == MATCH_INDEX_UNMATCHED_ONLY)) {
 				kvm.key = it->key;
 				kvm.value = it->value;
 			}
