@@ -1080,8 +1080,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					ClusterConnectionString csNew(res.get().toString());
 					// verify the cluster decription
 					ASSERT(new_cluster_description == csNew.clusterKeyName().toString());
-					ASSERT(csNew.hostnames.size() + csNew.coords.size() ==
-					       old_coordinators_processes.size() + 1);
+					ASSERT(csNew.hostnames.size() + csNew.coords.size() == old_coordinators_processes.size() + 1);
 					std::vector<NetworkAddress> newCoordinators = wait(csNew.tryResolveHostnames());
 					// verify the coordinators' addresses
 					for (const auto& network_address : newCoordinators) {
