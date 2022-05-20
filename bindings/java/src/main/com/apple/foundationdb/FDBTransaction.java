@@ -358,7 +358,8 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 		if (mapper == null) {
 			throw new IllegalArgumentException("Mapper must be non-null");
 		}
-		return new MappedRangeQuery(FDBTransaction.this, false, begin, end, mapper, limit, reverse, mode, eventKeeper);
+		return new MappedRangeQuery(FDBTransaction.this, false, begin, end, mapper, limit, matchIndex, reverse, mode,
+		                            eventKeeper);
 	}
 
 	///////////////////
@@ -463,7 +464,8 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	protected FutureMappedResults getMappedRange_internal(KeySelector begin, KeySelector end,
 	                                                      byte[] mapper, // Nullable
 	                                                      int rowLimit, int targetBytes, int streamingMode,
-	                                                      int iteration, boolean isSnapshot, boolean reverse) {
+	                                                      int iteration, boolean isSnapshot, boolean reverse,
+	                                                      int matchIndex) {
 		if (eventKeeper != null) {
 			eventKeeper.increment(Events.JNI_CALL);
 		}
@@ -476,7 +478,7 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 			return new FutureMappedResults(
 			    Transaction_getMappedRange(getPtr(), begin.getKey(), begin.orEqual(), begin.getOffset(), end.getKey(),
 			                               end.orEqual(), end.getOffset(), mapper, rowLimit, targetBytes, streamingMode,
-			                               iteration, MATCH_INDEX_ALL, isSnapshot, reverse),
+			                               iteration, matchIndex, isSnapshot, reverse),
 			    FDB.instance().isDirectBufferQueriesEnabled(), executor, eventKeeper);
 		} finally {
 			pointerReadLock.unlock();
