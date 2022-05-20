@@ -1387,7 +1387,7 @@ void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
 		while (std::find(testConfig.storageEngineExcludeTypes.begin(),
 		                 testConfig.storageEngineExcludeTypes.end(),
 		                 storage_engine_type) != testConfig.storageEngineExcludeTypes.end()) {
-			storage_engine_type = deterministicRandom()->randomInt(0, 4);
+			storage_engine_type = deterministicRandom()->randomInt(0, 5);
 		}
 	}
 
@@ -1771,6 +1771,7 @@ void SimulationConfig::setProcessesPerMachine(const TestConfig& testConfig) {
 // Also configures the cluster behaviour through setting some flags on the simulator.
 void SimulationConfig::setTss(const TestConfig& testConfig) {
 	int tssCount = 0;
+	// TODO: Support TSS in SHARD_ENCODE_LOCATION_METADATA mode.
 	if (!testConfig.simpleConfig && !testConfig.disableTss && !CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA &&
 	    deterministicRandom()->random01() < 0.25) {
 		// 1 or 2 tss

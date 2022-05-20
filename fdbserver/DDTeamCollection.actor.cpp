@@ -734,19 +734,19 @@ public:
 				bool recheck = !healthy && (lastReady != self->initialFailureReactionDelay.isReady() ||
 				                            (lastZeroHealthy && !self->zeroHealthyTeams->get()) || containsFailed);
 
-				TraceEvent("TeamHealthChangeDetected", self->distributorId)
-				    .detail("Team", team->getDesc())
-				    .detail("ServersLeft", serversLeft)
-				    .detail("LastServersLeft", lastServersLeft)
-				    .detail("AnyUndesired", anyUndesired)
-				    .detail("LastAnyUndesired", lastAnyUndesired)
-				    .detail("AnyWrongConfiguration", anyWrongConfiguration)
-				    .detail("LastWrongConfiguration", lastWrongConfiguration)
-				    .detail("ContainsWigglingServer", anyWigglingServer)
-				    .detail("Recheck", recheck)
-				    .detail("BadTeam", badTeam)
-				    .detail("LastZeroHealthy", lastZeroHealthy)
-				    .detail("ZeroHealthyTeam", self->zeroHealthyTeams->get());
+				// TraceEvent("TeamHealthChangeDetected", self->distributorId)
+				//     .detail("Team", team->getDesc())
+				//     .detail("ServersLeft", serversLeft)
+				//     .detail("LastServersLeft", lastServersLeft)
+				//     .detail("AnyUndesired", anyUndesired)
+				//     .detail("LastAnyUndesired", lastAnyUndesired)
+				//     .detail("AnyWrongConfiguration", anyWrongConfiguration)
+				//     .detail("LastWrongConfiguration", lastWrongConfiguration)
+				//     .detail("ContainsWigglingServer", anyWigglingServer)
+				//     .detail("Recheck", recheck)
+				//     .detail("BadTeam", badTeam)
+				//     .detail("LastZeroHealthy", lastZeroHealthy)
+				//     .detail("ZeroHealthyTeam", self->zeroHealthyTeams->get());
 
 				lastReady = self->initialFailureReactionDelay.isReady();
 				lastZeroHealthy = self->zeroHealthyTeams->get();
@@ -1618,10 +1618,8 @@ public:
 	                                                Database cx,
 	                                                UID serverID,
 	                                                Version addedVersion) {
-		TraceEvent("WaitForAllDataRemovedBegin").detail("Server", serverID);
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 		loop {
-			TraceEvent("WaitForAllDataRemovedLoop").detail("Server", serverID).detail("AddedVersion", addedVersion);
 			try {
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -1631,10 +1629,10 @@ public:
 				// could cause us to not store the mutations sent to the short lived storage server.
 				if (ver > addedVersion + SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) {
 					bool canRemove = wait(canRemoveStorageServer(tr, serverID));
-					TraceEvent("WaitForAllDataRemoved")
-					    .detail("Server", serverID)
-					    .detail("CanRemove", canRemove)
-					    .detail("Shards", teams->shardsAffectedByTeamFailure->getNumberOfShards(serverID));
+					// TraceEvent("WaitForAllDataRemoved")
+					//     .detail("Server", serverID)
+					//     .detail("CanRemove", canRemove)
+					//     .detail("Shards", teams->shardsAffectedByTeamFailure->getNumberOfShards(serverID));
 					ASSERT_GE(teams->shardsAffectedByTeamFailure->getNumberOfShards(serverID), 0);
 					if (canRemove && teams->shardsAffectedByTeamFailure->getNumberOfShards(serverID) == 0) {
 						return Void();
@@ -1874,14 +1872,12 @@ public:
 				for (const auto& r : excludedResults) {
 					AddressExclusion addr = decodeExcludedServersKey(r.key);
 					if (addr.isValid()) {
-						TraceEvent("DDServerExcluded", self->distributorId).detail("Address", addr.toString());
 						excluded.insert(addr);
 					}
 				}
 				for (const auto& r : failedResults) {
 					AddressExclusion addr = decodeFailedServersKey(r.key);
 					if (addr.isValid()) {
-						TraceEvent("DDServerFailed", self->distributorId).detail("Address", addr.toString());
 						failed.insert(addr);
 					}
 				}
@@ -1908,19 +1904,16 @@ public:
 					    !(self->excludedServers.count(o) &&
 					      self->excludedServers.get(o) == DDTeamCollection::Status::WIGGLING)) {
 						self->excludedServers.set(o, DDTeamCollection::Status::NONE);
-						TraceEvent("DDServerUnExcluded", self->distributorId).detail("Address", o.toString());
 					}
 				}
 				for (const auto& n : excluded) {
 					if (!failed.count(n)) {
 						self->excludedServers.set(n, DDTeamCollection::Status::EXCLUDED);
-						TraceEvent("DDAddNewExcludedServer", self->distributorId).detail("Address", n.toString());
 					}
 				}
 
 				for (const auto& f : failed) {
 					self->excludedServers.set(f, DDTeamCollection::Status::FAILED);
-					TraceEvent("DDAddNewFailedServer", self->distributorId).detail("Address", f.toString());
 				}
 
 				TraceEvent("DDExcludedServersChanged", self->distributorId)

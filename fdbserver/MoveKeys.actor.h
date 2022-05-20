@@ -73,6 +73,7 @@ void seedShardServers(Arena& trArena, CommitTransactionRef& tr, std::vector<Stor
 // Caller is responsible for cancelling it before issuing an overlapping move,
 // for restarting the remainder, and for not otherwise cancelling it before
 // it returns (since it needs to execute the finishMoveKeys transaction).
+// When dataMoveId.isValid(), the keyrange will be moved to a shard designated as dataMoveId.
 ACTOR Future<Void> moveKeys(Database occ,
                             UID dataMoveId,
                             KeyRange keys,
@@ -87,6 +88,7 @@ ACTOR Future<Void> moveKeys(Database occ,
                             const DDEnabledState* ddEnabledState,
                             CancelConflictingDataMoves cancelConflictingDataMoves = CancelConflictingDataMoves::False);
 
+// Cancels a data move designated by dataMoveId.
 ACTOR Future<Void> cleanUpDataMove(Database occ,
                                    UID dataMoveId,
                                    MoveKeysLock lock,

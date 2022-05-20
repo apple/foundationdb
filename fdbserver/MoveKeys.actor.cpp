@@ -127,7 +127,7 @@ ACTOR Future<Void> unassignServerKeys(Transaction* tr, UID ssId, KeyRange range,
 	kvs.push_back(KeyValueRef(endKey, endValue));
 
 	for (int i = 0; i < kvs.size(); ++i) {
-		TraceEvent(SevDebug, "unassignServerKeys", logId)
+		TraceEvent(SevDebug, "UnassignServerKeys", logId)
 		    .detail("SSID", ssId)
 		    .detail("Range", range)
 		    .detail("Point", kvs[i]);
@@ -1208,6 +1208,12 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 	return Void();
 }
 
+// keyServer: map from keys to destination servers.
+// serverKeys: two-dimension map: [servers][keys], value is the servers' state of having the keys: active(not-have),
+// complete(already has), ""().
+// Set keyServers[keys].dest = servers Set serverKeys[servers][keys] = dataMoveId for each
+// subrange of keys.
+// Set dataMoves[dataMoveId] = DataMoveMetaData.
 ACTOR static Future<Void> startMoveShards(Database occ,
                                           UID dataMoveId,
                                           KeyRange keys,
@@ -1267,7 +1273,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 					if (dataMove.getPhase() == DataMoveMetaData::Running) {
 						TraceEvent(SevVerbose, "StartMoveShardsDataMove", relocationIntervalId)
 						    .detail("DataMoveAlreadyCommitted", dataMoveId);
-							ASSERT(keys == dataMove.range);
+						ASSERT(keys == dataMove.range);
 						return Void();
 					}
 					begin = dataMove.range.end;
@@ -1438,7 +1444,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 
 				wait(tr.commit());
 
-				TraceEvent(SevVerbose,"DataMoveMetaDataCommit", dataMove.id)
+				TraceEvent(SevVerbose, "DataMoveMetaDataCommit", dataMove.id)
 				    .detail("DataMoveID", dataMoveId)
 				    .detail("DataMoveKey", dataMoveKeyFor(dataMoveId))
 				    .detail("CommitVersion", tr.getCommittedVersion())
@@ -1538,6 +1544,10 @@ ACTOR static Future<Void> checkDataMoveComplete(Database occ, UID dataMoveId, Ke
 	return Void();
 }
 
+// Set keyServers[keys].src = keyServers[keys].dest and keyServers[keys].dest=[], return when successful
+// keyServers[k].dest must be the same for all k in keys.
+// Set serverKeys[dest][keys] = dataMoveId; serverKeys[src][keys] = false for all src not in dest.
+// Clear dataMoves[dataMoveId].
 ACTOR static Future<Void> finishMoveShards(Database occ,
                                            UID dataMoveId,
                                            KeyRange targetKeys,
@@ -1632,7 +1642,7 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 					allServers.insert(src.begin(), src.end());
 					allServers.insert(dest.begin(), dest.end());
 					if (!destId.isValid()) {
-						TraceEvent(SevWarnError, "FinishMoveShardsInvalidDestID", relocationIntervalId)
+						TraceEvent(SevError, "FinishMoveShardsInvalidDestID", relocationIntervalId)
 						    .detail("DataMoveID", dataMoveId);
 						continue;
 					} else {
@@ -2248,7 +2258,6 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 	return Void();
 }
 
-// Cancels an on-going data move, reset the keyServers/ and serverKeys/.
 ACTOR Future<Void> cleanUpDataMove(Database occ,
                                    UID dataMoveId,
                                    MoveKeysLock lock,
@@ -2305,7 +2314,6 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 				state int i = 0;
 				for (; i < currentShards.size() - 1; ++i) {
 					KeyRangeRef rangeIntersectKeys(currentShards[i].key, currentShards[i + 1].key);
-					// range = rangeIntersectKeys;
 					std::vector<UID> src;
 					std::vector<UID> dest;
 					UID srcId, destId;
@@ -2350,7 +2358,8 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 				if (range.end == dataMove.range.end) {
 					tr.clear(dataMoveKeyFor(dataMoveId));
 					complete = true;
-					TraceEvent(SevVerbose, "CleanUpDataMoveDeleteMetaData", dataMoveId).detail("DataMoveID", dataMove.toString());
+					TraceEvent(SevVerbose, "CleanUpDataMoveDeleteMetaData", dataMoveId)
+					    .detail("DataMoveID", dataMove.toString());
 
 				} else {
 					dataMove.range = KeyRangeRef(range.end, dataMove.range.end);

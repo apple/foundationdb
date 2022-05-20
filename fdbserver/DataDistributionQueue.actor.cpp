@@ -443,6 +443,7 @@ void complete(RelocateData const& relocation, std::map<UID, Busyness>& busymap, 
 	completeDest(relocation, destBusymap);
 }
 
+// Cancells in-flight data moves intersecting with range.
 ACTOR Future<Void> cancelDataMove(struct DDQueueData* self, KeyRange range, const DDEnabledState* ddEnabledState);
 
 ACTOR Future<Void> dataDistributionRelocator(struct DDQueueData* self,
@@ -856,7 +857,7 @@ struct DDQueueData {
 				/*TraceEvent(rrs.interval.end(), mi.id()).detail("Result","Cancelled")
 				    .detail("WasFetching", foundActiveFetching).detail("Contained", rd.keys.contains( rrs.keys ));*/
 				queuedRelocations--;
-				TraceEvent("QueuedRelocationsChanged")
+				TraceEvent(SevVerbose, "QueuedRelocationsChanged")
 				    .detail("DataMoveID", rrs.dataMoveId)
 				    .detail("RandomID", rrs.randomId)
 				    .detail("Total", queuedRelocations);
@@ -888,7 +889,7 @@ struct DDQueueData {
 				  .detail("KeyBegin", rrs.keys.begin).detail("KeyEnd", rrs.keys.end)
 				    .detail("Priority", rrs.priority).detail("WantsNewServers", rrs.wantsNewServers);*/
 				queuedRelocations++;
-				TraceEvent("QueuedRelocationsChanged")
+				TraceEvent(SevVerbose, "QueuedRelocationsChanged")
 				    .detail("DataMoveID", rrs.dataMoveId)
 				    .detail("RandomID", rrs.randomId)
 				    .detail("Total", queuedRelocations);
@@ -914,7 +915,7 @@ struct DDQueueData {
 							    .detail("Priority", newData.priority).detail("WantsNewServers",
 							  newData.wantsNewServers);*/
 							queuedRelocations++;
-							TraceEvent("QueuedRelocationsChanged")
+							TraceEvent(SevVerbose, "QueuedRelocationsChanged")
 							    .detail("DataMoveID", newData.dataMoveId)
 							    .detail("RandomID", newData.randomId)
 							    .detail("Total", queuedRelocations);
@@ -1061,7 +1062,7 @@ struct DDQueueData {
 			//TraceEvent(rd.interval.end(), distributorId).detail("Result","Success");
 			if (!rd.isRestore()) {
 				queuedRelocations--;
-				TraceEvent("QueuedRelocationsChanged")
+				TraceEvent(SevVerbose, "QueuedRelocationsChanged")
 				    .detail("DataMoveID", rd.dataMoveId)
 				    .detail("RandomID", rd.randomId)
 				    .detail("Total", queuedRelocations);
@@ -1178,7 +1179,6 @@ struct DDQueueData {
 	}
 };
 
-// Cancells in-flight data moves intersecting with range.
 ACTOR Future<Void> cancelDataMove(struct DDQueueData* self, KeyRange range, const DDEnabledState* ddEnabledState) {
 	std::vector<Future<Void>> cleanup;
 	auto f = self->dataMoves.intersectingRanges(range);
@@ -2308,13 +2308,10 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 				}
 				when(RelocateData done = waitNext(self.relocationComplete.getFuture())) {
 					self.activeRelocations--;
-					TraceEvent(SevDebug, "InFlightRelocationChange")
+					TraceEvent(SevVerbose, "InFlightRelocationChange")
 					    .detail("Complete", done.dataMoveId)
 					    .detail("IsRestore", done.isRestore())
 					    .detail("Total", self.activeRelocations);
-					// if (done.isRestore()) {
-					// 	self.shardsAffectedByTeamFailure->restartShardTracker.send(done.keys);
-					// }
 					self.finishRelocation(done.priority, done.healthPriority);
 					self.fetchKeysComplete.erase(done);
 					// self.logRelocation( done, "ShardRelocatorDone" );
