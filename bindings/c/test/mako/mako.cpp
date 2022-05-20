@@ -1110,7 +1110,7 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 				for (; i < argc; i++) {
 					args.num_report_files = 0;
 					if (argv[i][0] != '-') {
-						strcpy(args.report_files[i], report_file.c_str());
+						strcpy(args.report_files[args.num_report_files], report_file.c_str());
 						args.num_report_files++;
 					} else {
 						optind = i - 1;
