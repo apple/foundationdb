@@ -819,35 +819,10 @@ ACTOR Future<Void> trackInitialShards(DataDistributionTracker* self, Reference<I
 	wait(delay(0.0, TaskPriority::DataDistribution));
 
 	state int s;
-	// state std::set<const DataMove*> dms;
 	for (s = 0; s < initData->shards.size() - 1; s++) {
-		// KeyRangeRef range(initData->shards[s].key, initData->shards[s + 1].key);
-		// const DataMove* dm = initData->dataMoveMap[range.begin].get();
-		// if (dm->isCancelled() || !dm->valid) {
 		restartShardTrackers(self, KeyRangeRef(initData->shards[s].key, initData->shards[s + 1].key));
-		// } else {
-		// 	dms.insert(dm);
-		// }
 		wait(yield(TaskPriority::DataDistribution));
 	}
-
-	// state std::set<const DataMove*>::iterator it = dms.begin();
-	// for (; it != dms.end(); ++it) {
-	// 	wait(yield(TaskPriority::DataDistribution));
-	// }
-
-	// state KeyRangeMap<std::shared_ptr<DataMove>>::iterator it = initData->dataMoveMap.ranges().begin();
-	// for (; it != initData->dataMoveMap.ranges().end(); ++it) {
-	// 	const DataMoveMetaData& meta = it.value()->meta;
-	// 	if (it.value()->valid && !it.value()->isCancelled()) {
-	// 		TraceEvent(SevDebug, "DDInitFoundDataMoveRestartTracker", self->distributorId)
-	// 		    .detail("DataMove", meta.toString());
-	// 		ASSERT(meta.range == it.range());
-	// 		// TODO: Persist priority in DataMoveMetaData.
-	// 		restartShardTrackers(self, it.value()->meta.range);
-	// 		wait(yield(TaskPriority::DataDistribution));
-	// 	}
-	// }
 
 	Future<Void> initialSize = changeSizes(self, KeyRangeRef(allKeys.begin, allKeys.end), 0);
 	self->readyToStart.send(Void());

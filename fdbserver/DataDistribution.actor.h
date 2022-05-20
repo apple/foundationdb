@@ -38,20 +38,20 @@ enum class RelocateReason { INVALID = -1, OTHER, REBALANCE_DISK, REBALANCE_READ 
 struct DDShardInfo;
 
 struct DataMove {
-	DataMove() : meta(DataMoveMetaData()), restore(false), startTime(-1), valid(false) {}
+	DataMove() : meta(DataMoveMetaData()), restore(false), valid(false), cancelled(false) {}
 	explicit DataMove(DataMoveMetaData meta, bool restore)
-	  : meta(std::move(meta)), restore(restore), valid(true), startTime(now()) {}
+	  : meta(std::move(meta)), restore(restore), valid(true), cancelled(meta.getPhase() == DataMoveMetaData::Deleting) {
+	}
 
 	// Checks if the DataMove is consistent with the shard.
 	void validateShard(const DDShardInfo& shard, KeyRangeRef range, int priority = SERVER_KNOBS->PRIORITY_RECOVER_MOVE);
 
-	bool isCancelled() const { return this->meta.getPhase() == DataMoveMetaData::Deleting; }
+	bool isCancelled() const { return this->cancelled; }
 
 	const DataMoveMetaData meta;
 	bool restore;
 	bool valid;
-
-	double startTime;
+	bool cancelled;
 	std::vector<UID> primarySrc;
 	std::vector<UID> remoteSrc;
 	std::vector<UID> primaryDest;

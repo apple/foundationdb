@@ -1153,12 +1153,13 @@ struct DDQueueData {
 			lastAsSource[id] = t;
 	}
 
+	// Schedules cancellation of a data move.
 	void enqueueCancelledDataMove(UID dataMoveId, KeyRange range, const DDEnabledState* ddEnabledState) {
 		std::vector<Future<Void>> cleanup;
 		auto f = this->dataMoves.intersectingRanges(range);
 		for (auto it = f.begin(); it != f.end(); ++it) {
 			if (it->value().isValid()) {
-				TraceEvent(SevDebug, "DDEnqueueCancelledDataMoveConflict", this->distributorId)
+				TraceEvent(SevError, "DDEnqueueCancelledDataMoveConflict", this->distributorId)
 				    .detail("DataMoveID", dataMoveId)
 				    .detail("CancelledRange", range)
 				    .detail("ConflictingDataMoveID", it->value().id)
@@ -1177,6 +1178,7 @@ struct DDQueueData {
 	}
 };
 
+// Cancells in-flight data moves intersecting with range.
 ACTOR Future<Void> cancelDataMove(struct DDQueueData* self, KeyRange range, const DDEnabledState* ddEnabledState) {
 	std::vector<Future<Void>> cleanup;
 	auto f = self->dataMoves.intersectingRanges(range);
@@ -1189,8 +1191,6 @@ ACTOR Future<Void> cancelDataMove(struct DDQueueData* self, KeyRange range, cons
 		    .detail("DataMoveID", it->value().id)
 		    .detail("DataMoveRange", keys)
 		    .detail("Range", range);
-		// auto [iter, inserted] = dms.insert(it->value());
-		// ASSERT(inserted);
 		if (!it->value().cancel.isValid()) {
 			it->value().cancel = cleanUpDataMove(
 			    self->cx, it->value().id, self->lock, &self->cleanUpDataMoveParallelismLock, keys, ddEnabledState);
@@ -1554,25 +1554,16 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 								                      CancelConflictingDataMoves::False);
 							} else {
 								self->fetchKeysComplete.insert(rd);
-								// if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
-								// 	auto f = self->dataMoves.intersectingRanges(rd.keys);
-								// 	for (auto it = f.begin(); it != f.end(); ++it) {
-								// 		KeyRangeRef kr(it->range().begin, it->range().end);
-								// 		if (it->value().id == rd.dataMoveId && rd.keys.contains(kr)) {
-								// 			self->dataMoves.insert(kr, DDQueueData::DDDataMove());
-								// 			TraceEvent(SevInfo, "DequeueDataMoveOnSuccess", self->distributorId)
-								// 			    .detail("DataMoveID", rd.dataMoveId)
-								// 			    .detail("DataMoveRange", rd.keys)
-								// 			    .detail("Range", kr);
-								// 		} else {
-								// 			TraceEvent(SevWarnAlways, "DataMoveConflictOnSuccess", self->distributorId)
-								// 			    .detail("DataMoveID", rd.dataMoveId)
-								// 			    .detail("DataMoveRange", rd.keys)
-								// 			    .detail("CurrentID", it->value().id)
-								// 			    .detail("CurrentRange", kr);
-								// 		}
-								// 	}
-								// }
+								if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+									auto ranges = self->dataMoves.getAffectedRangesAfterInsertion(rd.keys);
+									if (ranges.size() == 1 && static_cast<KeyRange>(ranges[0]) == rd.keys &&
+									    ranges[0].value.id == rd.dataMoveId && !ranges[0].value.cancel.isValid()) {
+										self->dataMoves.insert(rd.keys, DDQueueData::DDDataMove());
+										TraceEvent(SevInfo, "DequeueDataMoveOnSuccess", self->distributorId)
+										    .detail("DataMoveID", rd.dataMoveId)
+										    .detail("DataMoveRange", rd.keys);
+									}
+								}
 								break;
 							}
 						}
