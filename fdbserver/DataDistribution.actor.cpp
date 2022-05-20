@@ -784,6 +784,21 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 				if (configuration.usableRegions > 1) {
 					teams.push_back(ShardsAffectedByTeamFailure::Team(iShard.remoteSrc, false));
 				}
+
+				if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+					std::vector<ShardsAffectedByTeamFailure::Team> destTeams;
+					destTeams.push_back(ShardsAffectedByTeamFailure::Team(iShard.primaryDest, true));
+					if (configuration.usableRegions > 1) {
+						destTeams.push_back(ShardsAffectedByTeamFailure::Team(iShard.remoteDest, false));
+					}
+					shardsAffectedByTeamFailure->updatePhysicalShardToTeams(
+						ShardsAffectedByTeamFailure::PhysicalShard(iShard.srcId.first()), teams, configuration.storageTeamSize, false);
+					shardsAffectedByTeamFailure->printTeamPhysicalShardsMapping("InitBySrc");
+					shardsAffectedByTeamFailure->updatePhysicalShardToTeams(
+						ShardsAffectedByTeamFailure::PhysicalShard(iShard.destId.first()), destTeams, configuration.storageTeamSize, false);
+					shardsAffectedByTeamFailure->printTeamPhysicalShardsMapping("InitByDest");
+				}
+
 				// if (g_network->isSimulated()) {
 					TraceEvent("DDInitShard")
 					    .detail("Keys", keys)
@@ -964,6 +979,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			wait(waitForAll(actors));
 			return Void();
 		} catch (Error& e) {
+			std::cout << "\033[1;31m" << "DD ERROR: " << e.name() << " " << e.what() << "\033[0m\n";
 			trackerCancelled = true;
 			state Error err = e;
 			TraceEvent("DataDistributorDestroyTeamCollections").error(e);

@@ -229,6 +229,29 @@ public:
 
 	PromiseStream<KeyRange> restartRequests;
 
+	struct PhysicalShard {
+		uint64_t id;
+		// On disk
+		uint64_t bytesOnDisk;
+		// In memory
+		uint64_t bytesInMemory;
+		// I/O
+		int64_t bytesPerKSecond = 0;
+		int64_t bytesWritePerKSecond = 0;
+		int64_t bytesReadPerKSecond = 0; 
+
+		PhysicalShard(uint64_t id) : id(id) { bytesOnDisk = deterministicRandom()->randomUInt64(); }
+		// operator< used for selecting the physicalShard with the minimal bytesOnDisk
+		bool operator<(const struct PhysicalShard& right) const { return id < right.id ? true : false; }
+	};
+	void updatePhysicalShardToTeams(PhysicalShard physicalShard, 
+		std::vector<Team> inputTeams, int expectedNumServersPerTeam, bool ignoreRemoteTeam);
+	uint64_t getPhysicalShardFor(Team team); // return UID().first() if no physicalShard is available
+	Team getRemoteTeamIfHas(uint64_t physicalShardID);
+	void removePysicalShardFromRemoteTeam(uint64_t inputPhysicalShardID);
+	bool allTeamsOfKeyRangesHavePhysicalShard();
+	void printTeamPhysicalShardsMapping(std::string);
+
 private:
 	struct OrderByTeamKey {
 		bool operator()(const std::pair<Team, KeyRange>& lhs, const std::pair<Team, KeyRange>& rhs) const {
@@ -245,7 +268,7 @@ private:
 	                 // usable_regions > 1
 	std::set<std::pair<Team, KeyRange>, OrderByTeamKey> team_shards;
 	std::map<UID, int> storageServerShards;
-
+	std::map<Team, std::set<PhysicalShard>> teamPhysicalShards; // the mapping from team to physicalShards
 	void erase(Team team, KeyRange const& range);
 	void insert(Team team, KeyRange const& range);
 };

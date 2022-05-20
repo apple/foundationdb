@@ -54,6 +54,7 @@ struct RelocateData {
 	bool cancellable;
 	TraceInterval interval;
 	std::shared_ptr<DataMove> dataMove;
+	bool dataMoveIdSetDelayed;
 
 	RelocateData()
 	  : priority(-1), boundaryPriority(-1), healthPriority(-1), startTime(-1), dataMoveId(UID()), workFactor(0),
@@ -1042,9 +1043,12 @@ struct DDQueueData {
 				if (rd.keys == ranges[r] && rd.isRestore()) {
 					ASSERT(rd.dataMove != nullptr);
 					rrs.dataMoveId = rd.dataMove->meta.id;
+					rrs.dataMoveIdSetDelayed = false;
 				} else {
 					// TODO(psm): The shard id is determined by DD.
-					rrs.dataMoveId = deterministicRandom()->randomUniqueID();
+					// rrs.dataMoveId = deterministicRandom()->randomUniqueID();
+					rrs.dataMoveId = UID();
+					rrs.dataMoveIdSetDelayed = true;
 				}
 
 				launch(rrs, busymap, singleRegionTeamSize);
@@ -1214,8 +1218,11 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 		state StorageMetrics metrics =
 		    wait(brokenPromiseToNever(self->getShardMetrics.getReply(GetMetricsRequest(rd.keys))));
 
+		state uint64_t physicalShardIDCandidate = UID().first();
+		std::cout << "\033[1;33m" << "START DataDistributionRelocator" << "\033[0m\n";
 		ASSERT(rd.src.size());
 		loop {
+			std::cout << "\033[1;33m" << "START DataDistributionRelocator TRIAL" << "\033[0m\n";
 			destOverloadedCount = 0;
 			stuckCount = 0;
 			// state int bestTeamStuckThreshold = 50;
@@ -1229,9 +1236,32 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 				anyDestOverloaded = false;
 				bestTeams.clear();
 				// Get team from teamCollections in different DCs and find the best one
+				std::cout << "\033[1;33m" << "START DataDistributionRelocator TRIAL inner" << "\033[0m\n";
 				while (tciIndex < self->teamCollections.size()) {
 					if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA && rd.isRestore()) {
 						auto req = GetTeamRequest(tciIndex == 0 ? rd.dataMove->primaryDest : rd.dataMove->remoteDest);
+
+						if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA && tciIndex == 1 && rd.dataMoveIdSetDelayed) {
+							ASSERT( physicalShardIDCandidate != UID().first() );
+							ShardsAffectedByTeamFailure::Team remoteTeamWithPhysicalShard =
+							    self->shardsAffectedByTeamFailure->getRemoteTeamIfHas(physicalShardIDCandidate);
+							bool x = false;
+							if (remoteTeamWithPhysicalShard.servers.size() > 0) {
+								// Case: exists a remoteTeam in the mapping that has the physicalShardIDCandidate
+								// Use the remoteTeam with the physicalShard as the bestTeam
+								req = GetTeamRequest(remoteTeamWithPhysicalShard.servers);
+								x = true;
+
+							}
+							std::cout << "\033[1;34m" << "Handle remote team: " << 
+								physicalShardIDCandidate << (x? " remoteTeamWithPhysicalShard" : " NOT remoteTeamWithPhysicalShard") << 
+								(remoteTeamWithPhysicalShard.primary ? " primary": " remote");
+							for (auto server : remoteTeamWithPhysicalShard.servers) {
+								std::cout << " " << server.first() << "-" << server.second();
+							}
+							std::cout << "\033[0m\n";
+						}
+
 						Future<std::pair<Optional<Reference<IDataDistributionTeam>>, bool>> fbestTeam =
 						    brokenPromiseToNever(self->teamCollections[tciIndex].getTeam.getReply(req));
 						bestTeamReady = fbestTeam.isReady();
@@ -1277,6 +1307,29 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 						// bestTeam.second = false if the bestTeam in the teamCollection (in the DC) does not have any
 						// server that hosts the relocateData. This is possible, for example, in a fearless
 						// configuration when the remote DC is just brought up.
+						ASSERT( rd.dataMoveIdSetDelayed );
+
+						if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA && tciIndex == 1 && rd.dataMoveIdSetDelayed) { 
+							ASSERT( physicalShardIDCandidate != UID().first() );
+							ShardsAffectedByTeamFailure::Team remoteTeamWithPhysicalShard =
+							    self->shardsAffectedByTeamFailure->getRemoteTeamIfHas(physicalShardIDCandidate);
+							bool x = false;
+							if (remoteTeamWithPhysicalShard.servers.size() > 0) {
+								// Case: exists a remoteTeam in the mapping that has the physicalShardIDCandidate
+								// use the remoteTeam with the physicalShard as the bestTeam
+								req = GetTeamRequest(remoteTeamWithPhysicalShard.servers);
+								x = true;
+
+							}
+							std::cout << "\033[1;34m" << "Handle remote team: " << 
+								physicalShardIDCandidate << (x? " remoteTeamWithPhysicalShard" : " NOT remoteTeamWithPhysicalShard") << 
+								(remoteTeamWithPhysicalShard.primary ? " primary": " remote");
+							for (auto server : remoteTeamWithPhysicalShard.servers) {
+								std::cout << " " << server.first() << "-" << server.second();
+							}
+							std::cout << "\033[0m\n";
+						}
+
 						Future<std::pair<Optional<Reference<IDataDistributionTeam>>, bool>> fbestTeam =
 						    brokenPromiseToNever(self->teamCollections[tciIndex].getTeam.getReply(req));
 						bestTeamReady = fbestTeam.isReady();
@@ -1287,12 +1340,19 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 							// servers in the destination team
 							TraceEvent("BestTeamNotReady");
 							foundTeams = false;
+							if (tciIndex!=0) {
+								//self->shardsAffectedByTeamFailure->removePysicalShardFromRemoteTeam(physicalShardIDCandidate);
+							}
 							break;
 						}
 						// If a DC has no healthy team, we stop checking the other DCs until
 						// the unhealthy DC is healthy again or is excluded.
 						if (!bestTeam.first.present()) {
 							foundTeams = false;
+							std::cout << "\033[1;31m" << "!bestTeam.first.present() " << tciIndex << "\033[0m\n";
+							if (tciIndex!=0) {
+								//self->shardsAffectedByTeamFailure->removePysicalShardFromRemoteTeam(physicalShardIDCandidate);
+							}
 							break;
 						}
 						if (!bestTeam.first.get()->isHealthy()) {
@@ -1307,6 +1367,25 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 
 						bestTeams.emplace_back(bestTeam.first.get(), bestTeam.second);
 					}
+
+					// update physicalShardIDCandidate
+					if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA && tciIndex==0 && rd.dataMoveIdSetDelayed) { // && rd.dataMoveIdSetDelayed && foundTeams
+						ASSERT(foundTeams);
+						ShardsAffectedByTeamFailure::Team primaryTeam = 
+							ShardsAffectedByTeamFailure::Team(bestTeams[tciIndex].first->getServerIDs(), true);
+						physicalShardIDCandidate = self->shardsAffectedByTeamFailure->getPhysicalShardFor(primaryTeam);
+						if (physicalShardIDCandidate==UID().first()) { // if failed to find an available physicalShard
+							physicalShardIDCandidate = deterministicRandom()->randomUInt64();
+						}
+						std::cout << "\033[1;34m" << "Handle primary team: " << 
+								physicalShardIDCandidate << 
+								(primaryTeam.primary ? " primary": " remote");
+						for (auto server : primaryTeam.servers) {
+							std::cout << " " << server.first() << "-" << server.second();
+						}
+						std::cout << "\033[0m\n";
+					}
+
 					tciIndex++;
 				}
 				// once we've found healthy candidate teams, make sure they're not overloaded with outstanding moves
@@ -1315,6 +1394,31 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 
 				if (foundTeams && anyHealthy && !anyDestOverloaded) {
 					ASSERT(rd.completeDests.empty());
+					if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA && rd.dataMoveIdSetDelayed) {
+						ASSERT(physicalShardIDCandidate!=UID().first());
+						rd.dataMoveId = UID(physicalShardIDCandidate, deterministicRandom()->randomUInt64());
+						auto inFlightRange = self->inFlight.rangeContaining(rd.keys.begin);
+						inFlightRange.value().dataMoveId = rd.dataMoveId;
+						ASSERT(inFlightRange.range() == rd.keys);
+						ASSERT(inFlightRange.value().randomId == rd.randomId);
+						ASSERT(inFlightRange.value().dataMoveId == rd.dataMoveId);
+						self->dataMoves.insert(rd.keys, DDQueueData::DDDataMove(rd.dataMoveId));
+					}
+					// update teamPhysicalShard mapping
+					if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+						std::vector<ShardsAffectedByTeamFailure::Team> selectedTeams;
+						for (int i = 0; i < bestTeams.size(); i++) {
+							auto& serverIds = bestTeams[i].first->getServerIDs();
+							selectedTeams.push_back(ShardsAffectedByTeamFailure::Team(serverIds, i == 0));
+						}
+						self->shardsAffectedByTeamFailure->updatePhysicalShardToTeams(
+										ShardsAffectedByTeamFailure::PhysicalShard(rd.dataMoveId.first()), 
+										selectedTeams, self->singleRegionTeamSize, false);
+						self->shardsAffectedByTeamFailure->printTeamPhysicalShardsMapping("Update teams");
+						std::cout << "\033[1;34m" << "Done with team size " << bestTeams.size() 
+										<< " and stuckCount=" << stuckCount << " randomID=" << rd.randomId.first() 
+										<< "-" << rd.randomId.second() << "\033[0m\n";
+					}
 					break;
 				}
 
@@ -1499,6 +1603,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 								// }
 								break;
 							}
+							std::cout << "doMoveKeys \n";
 						}
 						when(wait(pollHealth)) {
 							if (!healthyDestinations.isHealthy()) {
@@ -1510,6 +1615,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 							pollHealth = signalledTransferComplete ? Never()
 							                                       : delay(SERVER_KNOBS->HEALTH_POLL_TIME,
 							                                               TaskPriority::DataDistributionLaunch);
+							std::cout << "pollHealth \n";
 						}
 						when(wait(signalledTransferComplete ? Never() : dataMovementComplete.getFuture())) {
 							self->fetchKeysComplete.insert(rd);
@@ -1517,6 +1623,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 								signalledTransferComplete = true;
 								self->dataTransferComplete.send(rd);
 							}
+							std::cout << "signalledTransferComplete \n";
 						}
 					}
 				}
@@ -1525,7 +1632,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 			}
 
 			//TraceEvent("RelocateShardFinished", distributorId).detail("RelocateId", relocateShardInterval.pairID);
-
+			std::cout << "\033[1;33m" << "FINISH DataDistributionRelocator" << "\033[0m\n";
 			if (error.code() != error_code_move_to_removed_server) {
 				if (!error.code()) {
 					try {
@@ -1566,6 +1673,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 					relocationComplete.send(rd);
 					return Void();
 				} else {
+					std::cout << "\033[1;31m" << "ERROR DataDistributionRelocator: " << error.name() << " " << error.what() <<  "\033[0m\n";
 					throw error;
 				}
 			} else {
@@ -1578,6 +1686,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 			}
 		}
 	} catch (Error& e) {
+		std::cout << "\033[1;31m" << "ERROR2 DataDistributionRelocator: " << e.name() << " " << e.what() <<  "\033[0m\n";
 		state Error err = e;
 		TraceEvent(relocateShardInterval.end(), distributorId)
 		    .errorUnsuppressed(err)
