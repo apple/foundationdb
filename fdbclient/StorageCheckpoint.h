@@ -90,7 +90,7 @@ struct CheckpointMetaData {
 struct DataMoveMetaData {
 	enum Phase {
 		InvalidPhase = 0,
-		Prepare = 1, // System keyspace has been modified, data move in action.
+		Prepare = 1, // System keyspace is being modified.
 		Running = 2, // System keyspace has been modified, data move in action.
 		Completing = 3, // Data transfer has finished, finalizing system keyspace.
 		Deleting = 4, // Data move is cancelled.
