@@ -78,7 +78,7 @@ cluster-file = {etcdir}/fdb.cluster
 ## Default parameters for individual fdbserver processes
 [fdbserver]
 command = {fdbserver_bin}
-public-address = {ip_address}:$ID
+public-address = {ip_address}:$ID{optional_tls}
 listen-address = public
 datadir = {datadir}/$ID
 logdir = {logdir}
@@ -192,7 +192,8 @@ logdir = {logdir}
                     logdir=self.log,
                     ip_address=self.ip_address,
                     bg_knob_line=bg_knob_line,
-                    tls_config=self.tls_conf_string()
+                    tls_config=self.tls_conf_string(),
+                    optional_tls=":tls" if self.tls_config is not None else "",
                 )
             )
             # By default, the cluster only has one process
@@ -217,11 +218,12 @@ logdir = {logdir}
     def create_cluster_file(self):
         with open(self.cluster_file, "x") as f:
             f.write(
-                "{desc}:{secret}@{ip_addr}:{server_port}".format(
+                "{desc}:{secret}@{ip_addr}:{server_port}{optional_tls}".format(
                     desc=self.cluster_desc,
                     secret=self.cluster_secret,
                     ip_addr=self.ip_address,
                     server_port=self.server_ports[0],
+                    optional_tls=":tls" if self.tls_config is not None else "",
                 )
             )
         self.coordinators = {0}
@@ -275,6 +277,10 @@ logdir = {logdir}
 
     def __fdbcli_exec(self, cmd, stdout, stderr, timeout):
         args = [self.fdbcli_binary, "-C", self.cluster_file, "--exec", cmd]
+        if self.tls_config:
+            args += ["--tls-certificate-file", self.client_cert_file,
+                     "--tls-key-file", self.client_key_file,
+                     "--tls-ca-file", self.server_ca_file]
         res = subprocess.run(args, env=self.process_env(), stderr=stderr, stdout=stdout, timeout=timeout)
         assert res.returncode == 0, "fdbcli command {} failed with {}".format(cmd, res.returncode)
         return res.stdout
@@ -311,12 +317,12 @@ logdir = {logdir}
             str(self.mkcert_binary),
             "--server-chain-length", str(server_chain_len),
             "--client-chain-length", str(client_chain_len),
-            "--server-cert-file", self.server_cert_file,
-            "--client-cert-file", self.client_cert_file,
-            "--server-key-file", self.server_key_file,
-            "--client-key-file", self.client_key_file,
-            "--server-ca-file", self.server_ca_file,
-            "--client-ca-file", self.client_ca_file,
+            "--server-cert-file", str(self.server_cert_file),
+            "--client-cert-file", str(self.client_cert_file),
+            "--server-key-file", str(self.server_key_file),
+            "--client-key-file", str(self.client_key_file),
+            "--server-ca-file", str(self.server_ca_file),
+            "--client-ca-file", str(self.client_ca_file),
             "--print-args",
         ]
         if expire_server_cert:
