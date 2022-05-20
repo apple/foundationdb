@@ -1442,7 +1442,19 @@ void printStatsHeader(Arguments const& args, bool show_commit, bool is_first_hea
 	fmt::print("\n");
 }
 
-void printThreadStats(ThreadStatistics& final_stats, const Arguments& args, FILE* fp) {
+void printThreadStats(ThreadStatistics& final_stats, Arguments& args, FILE* fp, bool is_report = false) {
+
+	if (is_report) {
+		for (auto op = 0; op < MAX_OP; op++) {
+			if (final_stats.getLatencySampleCount(op) > 0 && op != OP_COMMIT && op != OP_TRANSACTION) {
+				args.txnspec.ops[op][OP_COUNT] = 1;
+			}
+		}
+	}
+
+	fmt::print("Latency (us)");
+	printStatsHeader(args, true, false, true);
+
 	/* Total Samples */
 	putTitle("Samples");
 	auto first_op = 1;
@@ -1476,7 +1488,7 @@ void printThreadStats(ThreadStatistics& final_stats, const Arguments& args, FILE
 	for (auto op = 0; op < MAX_OP; op++) {
 		const std::string op_name = getOpName(op);
 		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
-			const auto lat_min = final_stats.getLatencySampleCount(op);
+			const auto lat_min = final_stats.getLatencyUsMin(op);
 			if (lat_min == -1) {
 				putField("N/A");
 			} else {
@@ -1661,11 +1673,7 @@ void printThreadStats(ThreadStatistics& final_stats, const Arguments& args, FILE
 	}
 }
 
-void printReport(Arguments const& args,
-                 ThreadStatistics const* stats,
-                 double const duration_sec,
-                 pid_t pid_main,
-                 FILE* fp) {
+void printReport(Arguments& args, ThreadStatistics const* stats, double const duration_sec, pid_t pid_main, FILE* fp) {
 
 	auto final_stats = ThreadStatistics{};
 	const auto num_effective_threads = args.async_xacts > 0 ? args.async_xacts : args.num_threads;
@@ -1777,12 +1785,8 @@ void printReport(Arguments const& args,
 	}
 	fmt::print("\n\n");
 
-	fmt::print("Latency (us)");
-	printStatsHeader(args, true, false, true);
-
-	std::array<DDSketchMako, MAX_OP> data_points;
-
 	// Get the sketches stored in file and merge them together
+	std::array<DDSketchMako, MAX_OP> data_points;
 	for (auto op = 0; op < MAX_OP; op++) {
 		auto load_sample = [pid_main, op, &data_points](int process_id, int thread_id) {
 			const auto dirname = fmt::format("{}{}", TEMP_DATA_STORE, pid_main);
@@ -1831,7 +1835,7 @@ void printReport(Arguments const& args,
 	}
 }
 
-int statsProcessMain(Arguments const& args,
+int statsProcessMain(Arguments& args,
                      ThreadStatistics const* stats,
                      std::atomic<double>& throttle_factor,
                      std::atomic<int> const& signal,
@@ -1972,7 +1976,7 @@ bool mergeSketchReport(Arguments& args) {
 		f >> tmp;
 		stats.combine(tmp);
 	}
-	printThreadStats(stats, args, NULL);
+	printThreadStats(stats, args, NULL, true);
 	return true;
 }
 
