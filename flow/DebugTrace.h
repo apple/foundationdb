@@ -7,7 +7,7 @@
 
 #define DebugTraceEvent(enable, ...) enable&& TraceEvent(__VA_ARGS__)
 
-constexpr bool debugLogTraces = true;
+constexpr bool debugLogTraces = false;
 #define DebugLogTraceEvent(...) DebugTraceEvent(debugLogTraces, __VA_ARGS__)
 
 #endif // FOUNDATIONDB_DEBUGTRACE_H

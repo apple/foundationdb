@@ -19,21 +19,15 @@
  */
 
 #include "fdbclient/Atomic.h"
-#include "fdbclient/NativeAPI.actor.h"
-#include "fdbclient/SystemData.h"
 #include "fdbrpc/Stats.h"
-#include "fdbserver/ApplyMetadataMutation.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LogSystem.h"
-#include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/RecoveryState.h"
-#include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/TLogInterface.h"
 #include "flow/ActorCollection.h"
 #include "flow/Arena.h"
 #include "flow/Histogram.h"
-#include "flow/TDMetric.actor.h"
 #include "flow/network.h"
 #include "flow/DebugTrace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -739,6 +733,7 @@ ACTOR Future<Void> logRouterCore(TLogInterface interf,
 		}
 		when(TLogPeekStreamRequest req = waitNext(interf.peekStreamMessages.getFuture())) {
 			TraceEvent(SevDebug, "LogRouterPeekStream", logRouterData.dbgid)
+			    .detail("Tag", req.tag)
 			    .detail("Token", interf.peekStreamMessages.getEndpoint().token);
 			addActor.send(logRouterPeekStream(&logRouterData, req));
 		}
