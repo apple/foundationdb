@@ -24,6 +24,7 @@
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/MetaclusterManagement.actor.h"
 #include "fdbclient/Schemas.h"
 
 #include "flow/Arena.h"
@@ -89,7 +90,12 @@ ACTOR Future<bool> createTenantCommandActor(Reference<IDatabase> db, std::vector
 
 	loop {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+
 		try {
+			state ThreadFuture<Optional<Value>> tenantModeFuture =
+			    tr->get(configKeysPrefix.withSuffix("tenant_mode"_sr));
+
 			if (!doneExistenceCheck) {
 				// Hold the reference to the standalone's memory
 				state ThreadFuture<Optional<Value>> existingTenantFuture = tr->get(tenantNameKey);
@@ -100,11 +106,17 @@ ACTOR Future<bool> createTenantCommandActor(Reference<IDatabase> db, std::vector
 				doneExistenceCheck = true;
 			}
 
-			tr->set(tenantNameKey, ValueRef());
-			if (configuration.second.tenantGroup.present()) {
-				tr->set(makeConfigKey("tenant_group"_sr, tokens[1]), configuration.second.tenantGroup.get());
+			Optional<Value> tenantMode = wait(safeThreadFutureToFuture(tenantModeFuture));
+			if (TenantMode::fromValue(tenantMode.castTo<ValueRef>()) == TenantMode::MANAGEMENT) {
+				wait(MetaclusterAPI::createTenant(db, tokens[1], configuration.second));
+			} else {
+				tr->set(tenantNameKey, ValueRef());
+				if (configuration.second.tenantGroup.present()) {
+					tr->set(makeConfigKey("tenant_group"_sr, tokens[1]), configuration.second.tenantGroup.get());
+				}
+				wait(safeThreadFutureToFuture(tr->commit()));
 			}
-			wait(safeThreadFutureToFuture(tr->commit()));
+
 			break;
 		} catch (Error& e) {
 			state Error err(e);
@@ -141,7 +153,11 @@ ACTOR Future<bool> deleteTenantCommandActor(Reference<IDatabase> db, std::vector
 
 	loop {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		try {
+			state ThreadFuture<Optional<Value>> tenantModeFuture =
+			    tr->get(configKeysPrefix.withSuffix("tenant_mode"_sr));
+
 			if (!doneExistenceCheck) {
 				// Hold the reference to the standalone's memory
 				state ThreadFuture<Optional<Value>> existingTenantFuture = tr->get(tenantNameKey);
@@ -152,8 +168,13 @@ ACTOR Future<bool> deleteTenantCommandActor(Reference<IDatabase> db, std::vector
 				doneExistenceCheck = true;
 			}
 
-			tr->clear(tenantNameKey);
-			wait(safeThreadFutureToFuture(tr->commit()));
+			Optional<Value> tenantMode = wait(safeThreadFutureToFuture(tenantModeFuture));
+			if (TenantMode::fromValue(tenantMode.castTo<ValueRef>()) == TenantMode::MANAGEMENT) {
+				wait(MetaclusterAPI::deleteTenant(db, tokens[1]));
+			} else {
+				tr->clear(tenantNameKey);
+				wait(safeThreadFutureToFuture(tr->commit()));
+			}
 			break;
 		} catch (Error& e) {
 			state Error err(e);
@@ -286,13 +307,22 @@ ACTOR Future<bool> getTenantCommandActor(Reference<IDatabase> db, std::vector<St
 
 				int64_t id;
 				std::string prefix;
+				std::string tenantState;
+				std::string assignedCluster;
 				std::string tenantGroup;
+
 				doc.get("id", id);
 				doc.get("prefix", prefix);
+				doc.get("tenant_state", tenantState);
+				bool hasAssignedCluster = doc.tryGet("assigned_cluster", assignedCluster);
 				bool hasTenantGroup = doc.tryGet("tenant_group", tenantGroup);
 
 				printf("  id: %" PRId64 "\n", id);
 				printf("  prefix: %s\n", printable(prefix).c_str());
+				printf("  tenant state: %s\n", printable(tenantState).c_str());
+				if (hasAssignedCluster) {
+					printf("  assigned cluster: %s\n", printable(assignedCluster).c_str());
+				}
 				if (hasTenantGroup) {
 					printf("  tenant group: %s\n", printable(tenantGroup).c_str());
 				}

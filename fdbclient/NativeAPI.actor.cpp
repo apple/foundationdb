@@ -3190,6 +3190,8 @@ TenantInfo TransactionState::getTenantInfo() {
 
 	if (options.rawAccess) {
 		return TenantInfo();
+	} else if (!cx->internal && cx->clientInfo->get().tenantMode == TenantMode::MANAGEMENT) {
+		throw management_cluster_invalid_access();
 	} else if (!cx->internal && cx->clientInfo->get().tenantMode == TenantMode::REQUIRED && !t.present()) {
 		throw tenant_name_required();
 	} else if (!t.present()) {

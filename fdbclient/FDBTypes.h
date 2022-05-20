@@ -1375,6 +1375,22 @@ struct TenantMode {
 		return "";
 	}
 
+	Value toValue() const { return ValueRef(format("%d", (int)mode)); }
+
+	static TenantMode fromValue(Optional<ValueRef> val) {
+		if (!val.present()) {
+			return DISABLED;
+		}
+
+		// A failed parsing returns 0 (DISABLED)
+		int num = atoi(val.get().toString().c_str());
+		if (num < 0 || num >= END) {
+			return DISABLED;
+		}
+
+		return static_cast<Mode>(num);
+	}
+
 	uint32_t mode;
 };
 struct GRVCacheSpace {

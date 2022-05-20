@@ -23,12 +23,12 @@
 #include "flow/UnitTest.h"
 
 TEST_CASE("/fdbclient/TenantMapEntry/Serialization") {
-	TenantMapEntry entry1(1, ""_sr);
+	TenantMapEntry entry1(1, ""_sr, TenantState::READY);
 	ASSERT(entry1.prefix == "\x00\x00\x00\x00\x00\x00\x00\x01"_sr);
 	TenantMapEntry entry2 = decodeTenantEntry(encodeTenantEntry(entry1));
 	ASSERT(entry1.id == entry2.id && entry1.prefix == entry2.prefix);
 
-	TenantMapEntry entry3(std::numeric_limits<int64_t>::max(), "foo"_sr);
+	TenantMapEntry entry3(std::numeric_limits<int64_t>::max(), "foo"_sr, TenantState::READY);
 	ASSERT(entry3.prefix == "foo\xfe\xff\xff\xff\xff\xff\xff\xff"_sr);
 	TenantMapEntry entry4 = decodeTenantEntry(encodeTenantEntry(entry3));
 	ASSERT(entry3.id == entry4.id && entry3.prefix == entry4.prefix);
@@ -43,7 +43,7 @@ TEST_CASE("/fdbclient/TenantMapEntry/Serialization") {
 		Standalone<StringRef> subspace = makeString(subspaceLength);
 		generateRandomData(mutateString(subspace), subspaceLength);
 
-		TenantMapEntry entry(id, subspace);
+		TenantMapEntry entry(id, subspace, TenantState::READY);
 		int64_t bigEndianId = bigEndian64(id);
 		ASSERT(entry.id == id && entry.prefix.startsWith(subspace) &&
 		       entry.prefix.endsWith(StringRef(reinterpret_cast<uint8_t*>(&bigEndianId), 8)) &&

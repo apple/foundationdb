@@ -1,5 +1,5 @@
 /*
- * TenantManagement.actor.cpp
+ * TenantManagementWorkload.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -168,12 +168,12 @@ struct TenantManagementWorkload : TestWorkload {
 				} else if (operationType == OperationType::MANAGEMENT_DATABASE) {
 					TenantMapEntry entry;
 					entry.tenantGroup = tenantGroup;
-					wait(ManagementAPI::createTenant(cx.getReference(), tenant, entry));
+					TenantMapEntry result = wait(ManagementAPI::createTenant(cx.getReference(), tenant, entry));
 				} else {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					TenantMapEntry entry;
 					entry.tenantGroup = tenantGroup;
-					Optional<TenantMapEntry> _ = wait(ManagementAPI::createTenantTransaction(tr, tenant, entry));
+					std::pair<TenantMapEntry, bool> _ = wait(ManagementAPI::createTenantTransaction(tr, tenant, entry));
 					wait(tr->commit());
 				}
 
@@ -408,9 +408,17 @@ struct TenantManagementWorkload : TestWorkload {
 
 		int64_t id;
 		std::string prefix;
+		std::string tenantStateStr;
+		std::string assignedClusterStr;
 		std::string tenantGroupStr;
 		jsonDoc.get("id", id);
 		jsonDoc.get("prefix", prefix);
+		jsonDoc.get("tenant_state", tenantStateStr);
+
+		Optional<ClusterName> assignedCluster;
+		if (jsonDoc.tryGet("assigned_cluster", assignedClusterStr)) {
+			assignedCluster = ClusterNameRef(assignedClusterStr);
+		}
 
 		Optional<TenantGroupName> tenantGroup;
 		if (jsonDoc.tryGet("tenant_group", tenantGroupStr)) {
@@ -418,7 +426,10 @@ struct TenantManagementWorkload : TestWorkload {
 		}
 
 		Key prefixKey = KeyRef(prefix);
-		TenantMapEntry entry(id, prefixKey.substr(0, prefixKey.size() - 8), tenantGroup);
+		TenantMapEntry entry(id,
+		                     prefixKey.substr(0, prefixKey.size() - 8),
+		                     tenantGroup,
+		                     TenantMapEntry::stringToTenantState(tenantStateStr));
 
 		ASSERT(entry.prefix == prefixKey);
 		return entry;

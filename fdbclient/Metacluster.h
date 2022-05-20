@@ -41,6 +41,7 @@ struct ClusterUsage {
 
 	bool operator==(const ClusterUsage& other) const noexcept { return numTenantGroups == other.numTenantGroups; }
 	bool operator!=(const ClusterUsage& other) const noexcept { return !(*this == other); }
+	bool operator<(const ClusterUsage& other) const noexcept { return numTenantGroups < other.numTenantGroups; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -71,6 +72,8 @@ struct DataClusterEntry {
 	bool matchesConfiguration(DataClusterEntry const& other) const {
 		return id == other.id && capacity == other.capacity;
 	}
+
+	bool hasCapacity() const { return allocated < capacity; }
 
 	Value encode() const { return ObjectWriter::toValue(*this, IncludeVersion(ProtocolVersion::withMetacluster())); }
 	static DataClusterEntry decode(ValueRef const& value) {

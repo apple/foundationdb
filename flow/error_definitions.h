@@ -225,11 +225,12 @@ ERROR( tenant_name_required, 2130, "Tenant name must be specified to access data
 ERROR( tenant_not_found, 2131, "Tenant does not exist" )
 ERROR( tenant_already_exists, 2132, "A tenant with the given name already exists" )
 ERROR( tenant_not_empty, 2133, "Cannot delete a non-empty tenant" )
-ERROR( invalid_tenant_name, 2134, "Tenant name cannot begin with \\xff");
-ERROR( tenant_prefix_allocator_conflict, 2135, "The database already has keys stored at the prefix allocated for the tenant");
-ERROR( tenants_disabled, 2136, "Tenants have been disabled in the cluster");
-ERROR( unknown_tenant, 2137, "Tenant is not available from this server")
-ERROR( illegal_tenant_access, 2138, "Illegal tenant access")
+ERROR( invalid_tenant_name, 2134, "Tenant name cannot begin with \\xff" )
+ERROR( tenant_prefix_allocator_conflict, 2135, "The database already has keys stored at the prefix allocated for the tenant" )
+ERROR( tenants_disabled, 2136, "Tenants have been disabled in the cluster" )
+ERROR( unknown_tenant, 2137, "Tenant is not available from this server" )
+ERROR( illegal_tenant_access, 2138, "Illegal tenant access" )
+ERROR( tenant_removed, 2139, "The tenant was removed" )
 
 ERROR( invalid_cluster_name, 2150, "Data cluster name cannot begin with \\xff" )
 ERROR( invalid_metacluster_operation, 2151, "Metacluster operation performed on non-metacluster" )
@@ -238,6 +239,8 @@ ERROR( cluster_not_found, 2153, "Data cluster does not exist" )
 ERROR( cluster_not_empty, 2154, "Data cluster must be empty" )
 ERROR( cluster_configuration_failure, 2155, "Could not configure cluster" )
 ERROR( cluster_already_registered, 2156, "Data cluster is already registered with a metacluster" )
+ERROR( metacluster_no_capacity, 2157, "Metacluster does not have capacity to create new tenants" )
+ERROR( management_cluster_invalid_access, 2158, "Standard transactions cannot be run against the management cluster" )
 
 // 2200 - errors from bindings and official APIs
 ERROR( api_version_unset, 2200, "API version is not set" )

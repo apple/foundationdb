@@ -295,7 +295,7 @@ set(FDBSERVER_SRCS
   workloads/TagThrottleApi.actor.cpp
   workloads/TargetedKill.actor.cpp
   workloads/TaskBucketCorrectness.actor.cpp
-  workloads/TenantManagement.actor.cpp
+  workloads/TenantManagementWorkload.actor.cpp
   workloads/ThreadSafety.actor.cpp
   workloads/Throttling.actor.cpp
   workloads/Throughput.actor.cpp

@@ -1626,7 +1626,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 	}
 
 	if (useDB) {
-		std::vector<Future<Void>> tenantFutures;
+		std::vector<Future<TenantMapEntry>> tenantFutures;
 		for (auto tenant : tenantsToCreate) {
 			TenantMapEntry entry;
 			if (deterministicRandom()->coinflip()) {

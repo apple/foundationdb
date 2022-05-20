@@ -32,12 +32,15 @@
 #include "flow/actorcompiler.h" // has to be last include
 
 namespace ManagementAPI {
+
+enum class TenantOperationType { STANDALONE_CLUSTER, MANAGEMENT_CLUSTER, DATA_CLUSTER };
+
 ACTOR template <class Transaction>
 Future<Optional<TenantMapEntry>> tryGetTenantTransaction(Transaction tr, TenantName name) {
 	state Key tenantMapKey = name.withPrefix(tenantMapPrefix);
 
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
-	tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 	state typename transaction_future_type<Transaction, Optional<Value>>::type tenantFuture = tr->get(tenantMapKey);
 	Optional<Value> val = wait(safeThreadFutureToFuture(tenantFuture));
@@ -79,12 +82,21 @@ Future<TenantMapEntry> getTenant(Reference<DB> db, TenantName name) {
 	return entry.get();
 }
 
+bool checkTenantMode(Optional<Value> tenantModeValue, bool isDataCluster, TenantOperationType operationType);
+
 // Creates a tenant with the given name. If the tenant already exists, an empty optional will be returned.
 ACTOR template <class Transaction>
-Future<Optional<TenantMapEntry>> createTenantTransaction(Transaction tr,
-                                                         TenantNameRef name,
-                                                         TenantMapEntry tenantEntry = TenantMapEntry()) {
+Future<std::pair<TenantMapEntry, bool>> createTenantTransaction(
+    Transaction tr,
+    TenantNameRef name,
+    TenantMapEntry tenantEntry = TenantMapEntry(),
+    TenantOperationType operationType = TenantOperationType::STANDALONE_CLUSTER) {
 	state Key tenantMapKey = name.withPrefix(tenantMapPrefix);
+
+	state bool generateId = operationType != TenantOperationType::DATA_CLUSTER;
+	state bool allowSubspace = operationType == TenantOperationType::STANDALONE_CLUSTER;
+
+	ASSERT(operationType != TenantOperationType::MANAGEMENT_CLUSTER || tenantEntry.assignedCluster.present());
 
 	if (name.startsWith("\xff"_sr)) {
 		throw invalid_tenant_name();
@@ -94,57 +106,78 @@ Future<Optional<TenantMapEntry>> createTenantTransaction(Transaction tr,
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 	state Future<Optional<TenantMapEntry>> existingEntryFuture = tryGetTenantTransaction(tr, name);
-	state typename transaction_future_type<Transaction, Optional<Value>>::type tenantDataPrefixFuture =
-	    tr->get(tenantDataPrefixKey);
-	state typename transaction_future_type<Transaction, Optional<Value>>::type lastIdFuture = tr->get(tenantLastIdKey);
+	state typename transaction_future_type<Transaction, Optional<Value>>::type tenantDataPrefixFuture;
+	if (allowSubspace) {
+		tenantDataPrefixFuture = tr->get(tenantDataPrefixKey);
+	}
+	state typename transaction_future_type<Transaction, Optional<Value>>::type lastIdFuture;
+	if (generateId) {
+		lastIdFuture = tr->get(tenantLastIdKey);
+	}
 	state typename transaction_future_type<Transaction, Optional<Value>>::type tenantModeFuture =
 	    tr->get(configKeysPrefix.withSuffix("tenant_mode"_sr));
+	state typename transaction_future_type<Transaction, Optional<Value>>::type metaclusterRegistrationFuture =
+	    tr->get(dataClusterRegistrationKey);
 
-	Optional<Value> tenantMode = wait(safeThreadFutureToFuture(tenantModeFuture));
+	state Optional<Value> tenantMode = wait(safeThreadFutureToFuture(tenantModeFuture));
+	Optional<Value> metaclusterRegistration = wait(safeThreadFutureToFuture(metaclusterRegistrationFuture));
 
-	// TODO: disallow tenant creation directly on clusters in a metacluster
-
-	if (!tenantMode.present() || tenantMode.get() == StringRef(format("%d", TenantMode::DISABLED))) {
+	if (!checkTenantMode(tenantMode, metaclusterRegistration.present(), operationType)) {
 		throw tenants_disabled();
 	}
 
 	Optional<TenantMapEntry> existingEntry = wait(existingEntryFuture);
 	if (existingEntry.present()) {
-		return Optional<TenantMapEntry>();
+		return std::make_pair(existingEntry.get(), false);
 	}
 
-	state Optional<Value> lastIdVal = wait(safeThreadFutureToFuture(lastIdFuture));
-	Optional<Value> tenantDataPrefix = wait(safeThreadFutureToFuture(tenantDataPrefixFuture));
-
-	if (tenantDataPrefix.present() &&
-	    tenantDataPrefix.get().size() + TenantMapEntry::ROOT_PREFIX_SIZE > CLIENT_KNOBS->TENANT_PREFIX_SIZE_LIMIT) {
-		TraceEvent(SevWarnAlways, "TenantPrefixTooLarge")
-		    .detail("TenantSubspace", tenantDataPrefix.get())
-		    .detail("TenantSubspaceLength", tenantDataPrefix.get().size())
-		    .detail("RootPrefixLength", TenantMapEntry::ROOT_PREFIX_SIZE)
-		    .detail("MaxTenantPrefixSize", CLIENT_KNOBS->TENANT_PREFIX_SIZE_LIMIT);
-
-		throw client_invalid_operation();
+	if (generateId) {
+		state Optional<Value> lastIdVal = wait(safeThreadFutureToFuture(lastIdFuture));
+		tenantEntry.id = lastIdVal.present() ? TenantMapEntry::prefixToId(lastIdVal.get()) + 1 : 0;
+		tr->set(tenantLastIdKey, TenantMapEntry::idToPrefix(tenantEntry.id));
 	}
 
-	tenantEntry.id = lastIdVal.present() ? TenantMapEntry::prefixToId(lastIdVal.get()) + 1 : 0;
-	tenantEntry.setSubspace(tenantDataPrefix.present() ? (KeyRef)tenantDataPrefix.get() : ""_sr);
+	if (allowSubspace) {
+		Optional<Value> tenantDataPrefix = wait(safeThreadFutureToFuture(tenantDataPrefixFuture));
+		if (tenantDataPrefix.present() &&
+		    tenantDataPrefix.get().size() + TenantMapEntry::ROOT_PREFIX_SIZE > CLIENT_KNOBS->TENANT_PREFIX_SIZE_LIMIT) {
+			TraceEvent(SevWarnAlways, "TenantPrefixTooLarge")
+			    .detail("TenantSubspace", tenantDataPrefix.get())
+			    .detail("TenantSubspaceLength", tenantDataPrefix.get().size())
+			    .detail("RootPrefixLength", TenantMapEntry::ROOT_PREFIX_SIZE)
+			    .detail("MaxTenantPrefixSize", CLIENT_KNOBS->TENANT_PREFIX_SIZE_LIMIT);
 
-	state typename transaction_future_type<Transaction, RangeResult>::type prefixRangeFuture =
-	    tr->getRange(prefixRange(tenantEntry.prefix), 1);
-	RangeResult contents = wait(safeThreadFutureToFuture(prefixRangeFuture));
-	if (!contents.empty()) {
-		throw tenant_prefix_allocator_conflict();
+			throw client_invalid_operation();
+		}
+		tenantEntry.setSubspace(tenantDataPrefix.present() ? (KeyRef)tenantDataPrefix.get() : ""_sr);
+	} else {
+		tenantEntry.setSubspace(""_sr);
 	}
 
-	tr->set(tenantLastIdKey, TenantMapEntry::idToPrefix(tenantEntry.id));
+	if (operationType != TenantOperationType::MANAGEMENT_CLUSTER) {
+		state typename transaction_future_type<Transaction, RangeResult>::type prefixRangeFuture =
+		    tr->getRange(prefixRange(tenantEntry.prefix), 1);
+
+		RangeResult contents = wait(safeThreadFutureToFuture(prefixRangeFuture));
+		if (!contents.empty()) {
+			throw tenant_prefix_allocator_conflict();
+		}
+	}
+
+	// We don't store some metadata in the tenant entries on data clusters
+	if (operationType == TenantOperationType::DATA_CLUSTER) {
+		tenantEntry.assignedCluster = Optional<ClusterName>();
+	}
+
 	tr->set(tenantMapKey, encodeTenantEntry(tenantEntry));
-
-	return tenantEntry;
+	return std::make_pair(tenantEntry, true);
 }
 
 ACTOR template <class DB>
-Future<Void> createTenant(Reference<DB> db, TenantName name, TenantMapEntry tenantEntry = TenantMapEntry()) {
+Future<TenantMapEntry> createTenant(Reference<DB> db,
+                                    TenantName name,
+                                    TenantMapEntry tenantEntry = TenantMapEntry(),
+                                    TenantOperationType operationType = TenantOperationType::STANDALONE_CLUSTER) {
 	state Reference<typename DB::TransactionT> tr = db->createTransaction();
 
 	state bool firstTry = true;
@@ -161,26 +194,29 @@ Future<Void> createTenant(Reference<DB> db, TenantName name, TenantMapEntry tena
 				firstTry = false;
 			}
 
-			state Optional<TenantMapEntry> newTenant = wait(createTenantTransaction(tr, name, tenantEntry));
+			state std::pair<TenantMapEntry, bool> newTenant =
+			    wait(createTenantTransaction(tr, name, tenantEntry, operationType));
 
-			if (BUGGIFY) {
-				throw commit_unknown_result();
+			if (newTenant.second) {
+				if (BUGGIFY) {
+					throw commit_unknown_result();
+				}
+
+				wait(safeThreadFutureToFuture(tr->commit()));
+
+				if (BUGGIFY) {
+					throw commit_unknown_result();
+				}
+
+				TraceEvent("CreatedTenant")
+				    .detail("Tenant", name)
+				    .detail("TenantId", newTenant.first.id)
+				    .detail("Prefix", newTenant.first.prefix)
+				    .detail("TenantGroup", tenantEntry.tenantGroup)
+				    .detail("Version", tr->getCommittedVersion());
 			}
 
-			wait(safeThreadFutureToFuture(tr->commit()));
-
-			if (BUGGIFY) {
-				throw commit_unknown_result();
-			}
-
-			TraceEvent("CreatedTenant")
-			    .detail("Tenant", name)
-			    .detail("TenantId", newTenant.present() ? newTenant.get().id : -1)
-			    .detail("Prefix", newTenant.present() ? (StringRef)newTenant.get().prefix : "Unknown"_sr)
-			    .detail("TenantGroup", tenantEntry.tenantGroup)
-			    .detail("Version", tr->getCommittedVersion());
-
-			return Void();
+			return newTenant.first;
 		} catch (Error& e) {
 			wait(safeThreadFutureToFuture(tr->onError(e)));
 		}
@@ -188,11 +224,18 @@ Future<Void> createTenant(Reference<DB> db, TenantName name, TenantMapEntry tena
 }
 
 ACTOR template <class Transaction>
-Future<Void> deleteTenantTransaction(Transaction tr, TenantNameRef name) {
+Future<Void> deleteTenantTransaction(Transaction tr,
+                                     TenantNameRef name,
+                                     TenantOperationType operationType = TenantOperationType::STANDALONE_CLUSTER) {
 	state Key tenantMapKey = name.withPrefix(tenantMapPrefix);
 
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+	state typename transaction_future_type<Transaction, Optional<Value>>::type tenantModeFuture =
+	    tr->get(configKeysPrefix.withSuffix("tenant_mode"_sr));
+	state typename transaction_future_type<Transaction, Optional<Value>>::type metaclusterRegistrationFuture =
+	    tr->get(dataClusterRegistrationKey);
 
 	state Optional<TenantMapEntry> tenantEntry = wait(tryGetTenantTransaction(tr, name));
 	if (!tenantEntry.present()) {
@@ -201,6 +244,20 @@ Future<Void> deleteTenantTransaction(Transaction tr, TenantNameRef name) {
 
 	state typename transaction_future_type<Transaction, RangeResult>::type prefixRangeFuture =
 	    tr->getRange(prefixRange(tenantEntry.get().prefix), 1);
+
+	state Optional<Value> tenantMode = wait(safeThreadFutureToFuture(tenantModeFuture));
+	Optional<Value> metaclusterRegistration = wait(safeThreadFutureToFuture(metaclusterRegistrationFuture));
+
+	if (!checkTenantMode(tenantMode, metaclusterRegistration.present(), operationType)) {
+		throw tenants_disabled();
+	}
+
+	if (operationType == TenantOperationType::MANAGEMENT_CLUSTER &&
+	    tenantEntry.get().tenantState != TenantState::REMOVING) {
+		// TODO: better error
+		throw operation_failed();
+	}
+
 	RangeResult contents = wait(safeThreadFutureToFuture(prefixRangeFuture));
 	if (!contents.empty()) {
 		throw tenant_not_empty();
@@ -212,24 +269,26 @@ Future<Void> deleteTenantTransaction(Transaction tr, TenantNameRef name) {
 }
 
 ACTOR template <class DB>
-Future<Void> deleteTenant(Reference<DB> db, TenantName name) {
+Future<Void> deleteTenant(Reference<DB> db,
+                          TenantName name,
+                          TenantOperationType operationType = TenantOperationType::STANDALONE_CLUSTER) {
 	state Reference<typename DB::TransactionT> tr = db->createTransaction();
 
-	state bool firstTry = true;
+	state bool checkExistence = operationType == TenantOperationType::STANDALONE_CLUSTER;
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
-			if (firstTry) {
+			if (checkExistence) {
 				Optional<TenantMapEntry> entry = wait(tryGetTenantTransaction(tr, name));
 				if (!entry.present()) {
 					throw tenant_not_found();
 				}
 
-				firstTry = false;
+				checkExistence = false;
 			}
 
-			wait(deleteTenantTransaction(tr, name));
+			wait(deleteTenantTransaction(tr, name, operationType));
 
 			if (BUGGIFY) {
 				throw commit_unknown_result();
@@ -266,7 +325,7 @@ Future<std::map<TenantName, TenantMapEntry>> listTenantsTransaction(Transaction 
 	state KeyRange range = KeyRangeRef(begin, end).withPrefix(tenantMapPrefix);
 
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
-	tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 	state typename transaction_future_type<Transaction, RangeResult>::type listFuture =
 	    tr->getRange(firstGreaterOrEqual(range.begin), firstGreaterOrEqual(range.end), limit);

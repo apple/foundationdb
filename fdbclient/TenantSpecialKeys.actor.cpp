@@ -77,6 +77,10 @@ ACTOR Future<Void> getTenantList(ReadYourWritesTransaction* ryw,
 		json_spirit::mObject tenantEntry;
 		tenantEntry["id"] = tenant.second.id;
 		tenantEntry["prefix"] = tenant.second.prefix.toString();
+		tenantEntry["tenant_state"] = TenantMapEntry::tenantStateToString(tenant.second.tenantState);
+		if (tenant.second.assignedCluster.present()) {
+			tenantEntry["assigned_cluster"] = tenant.second.assignedCluster.get().toString();
+		}
 		if (tenant.second.tenantGroup.present()) {
 			tenantEntry["tenant_group"] = tenant.second.tenantGroup.get().toString();
 		}
@@ -208,7 +212,7 @@ ACTOR Future<Void> createTenant(ReadYourWritesTransaction* ryw,
 		wait(applyTenantConfig(ryw, tenantName, configMutations.get(), &tenantEntry, true));
 	}
 
-	Optional<TenantMapEntry> entry =
+	std::pair<TenantMapEntry, bool> entry =
 	    wait(ManagementAPI::createTenantTransaction(&ryw->getTransaction(), tenantName, tenantEntry));
 
 	return Void();

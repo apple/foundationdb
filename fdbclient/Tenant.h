@@ -31,6 +31,8 @@ typedef Standalone<TenantNameRef> TenantName;
 typedef StringRef TenantGroupNameRef;
 typedef Standalone<TenantGroupNameRef> TenantGroupName;
 
+enum class TenantState { REGISTERING, READY, REMOVING, ERROR };
+
 struct TenantMapEntry {
 	constexpr static FileIdentifier file_identifier = 12247338;
 
@@ -47,10 +49,43 @@ struct TenantMapEntry {
 		return id;
 	}
 
+	static std::string tenantStateToString(TenantState tenantState) {
+		switch (tenantState) {
+		case TenantState::REGISTERING:
+			return "registering";
+		case TenantState::READY:
+			return "ready";
+		case TenantState::REMOVING:
+			return "removing";
+		case TenantState::ERROR:
+			return "error";
+		default:
+			ASSERT(false);
+		}
+	}
+
+	static TenantState stringToTenantState(std::string stateStr) {
+		if (stateStr == "registering") {
+			return TenantState::REGISTERING;
+		} else if (stateStr == "ready") {
+			return TenantState::READY;
+		} else if (stateStr == "removing") {
+			return TenantState::REMOVING;
+		} else if (stateStr == "error") {
+			return TenantState::ERROR;
+		}
+
+		ASSERT(false);
+		throw internal_error();
+	}
+
 	Arena arena;
 	int64_t id;
 	Key prefix;
 	Optional<TenantGroupName> tenantGroup;
+	TenantState tenantState;
+	// TODO: fix this
+	Optional<Standalone<StringRef>> assignedCluster;
 
 	constexpr static int ROOT_PREFIX_SIZE = sizeof(id);
 
@@ -66,17 +101,21 @@ struct TenantMapEntry {
 	}
 
 	TenantMapEntry() : id(-1) {}
-	TenantMapEntry(int64_t id, KeyRef subspace) : id(id) { setSubspace(subspace); }
-	TenantMapEntry(int64_t id, KeyRef subspace, Optional<TenantGroupName> tenantGroup)
-	  : id(id), tenantGroup(tenantGroup) {
+	TenantMapEntry(int64_t id, KeyRef subspace, TenantState tenantState) : id(id), tenantState(tenantState) {
 		setSubspace(subspace);
 	}
+	TenantMapEntry(int64_t id, KeyRef subspace, Optional<TenantGroupName> tenantGroup, TenantState tenantState)
+	  : id(id), tenantGroup(tenantGroup), tenantState(tenantState) {
+		setSubspace(subspace);
+	}
+
+	bool matchesConfiguration(TenantMapEntry const& other) const { return tenantGroup == other.tenantGroup; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
 		KeyRef subspace;
 		if (ar.isDeserializing) {
-			serializer(ar, id, subspace, tenantGroup);
+			serializer(ar, id, subspace, tenantGroup, tenantState, assignedCluster);
 			if (id >= 0) {
 				setSubspace(subspace);
 			}
@@ -85,7 +124,7 @@ struct TenantMapEntry {
 			if (!prefix.empty()) {
 				subspace = prefix.substr(0, prefix.size() - 8);
 			}
-			serializer(ar, id, subspace, tenantGroup);
+			serializer(ar, id, subspace, tenantGroup, tenantState, assignedCluster);
 		}
 	}
 };
