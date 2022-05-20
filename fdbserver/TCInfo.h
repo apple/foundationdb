@@ -247,7 +247,4 @@ public:
 
 	void addTeam(TCTeamInfo team);
 	void removeTeam(TCTeamInfo team);
-
-	void addref() const /*override*/ { ReferenceCounted<TCTenantInfo>::addref(); }
-	void delref() const /*override*/ { ReferenceCounted<TCTenantInfo>::delref(); }
 };
