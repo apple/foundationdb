@@ -832,7 +832,7 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 	std::sort(conn->coords.begin(), conn->coords.end());
 	std::sort(old.hostnames.begin(), old.hostnames.end());
 	std::sort(old.coords.begin(), old.coords.end());
-	if (conn->hostnames == old.hostnames && conn->hostnames == old.hostnames && old.clusterKeyName() == newName) {
+	if (conn->hostnames == old.hostnames && conn->coords == old.coords && old.clusterKeyName() == newName) {
 		return CoordinatorsResult::SAME_NETWORK_ADDRESSES;
 	}
 
