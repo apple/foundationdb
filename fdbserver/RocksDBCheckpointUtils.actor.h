@@ -31,6 +31,26 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
+struct CheckpointFile {
+	constexpr static FileIdentifier file_identifier = 13804348;
+	std::string path;
+	KeyRange range;
+	int64_t size; // Logical bytes of the checkpoint.
+
+	CheckpointFile() = default;
+	CheckpointFile(std::string path, KeyRange range, int64_t size) : path(path), range(range), size(size) {}
+
+	std::string toString() const {
+		return "CheckpointFile:\nFile Name: " + this->path + "\nRange: " + range.toString() +
+		       "\nSize: " + std::to_string(size) + "\n";
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, path, range, size);
+	}
+};
+
 // Copied from rocksdb/metadata.h, so that we can add serializer.
 struct SstFileMetaData {
 	constexpr static FileIdentifier file_identifier = 3804347;
@@ -193,6 +213,34 @@ struct RocksDBColumnFamilyCheckpoint {
 	}
 };
 
+// Checkpoint metadata associated with RocksDB format.
+// The checkpoint is created via rocksdb::CreateCheckpoint().
+struct RocksDBCheckpoint {
+	constexpr static FileIdentifier file_identifier = 13804347;
+	std::string checkpointDir; // Checkpoint directory on the storage server.
+	std::vector<std::string> sstFiles; // All checkpoint files.
+	std::vector<CheckpointFile> fetchedFiles; // Used for fetchCheckpoint, to record the progress.
+
+	CheckpointFormat format() const { return RocksDB; }
+
+	std::string toString() const {
+		std::string res = "RocksDBCheckpoint:\nCheckpoint dir: " + checkpointDir + "\nFiles: ";
+		for (const std::string& file : sstFiles) {
+			res += (file + " ");
+		}
+		res += "\nFetched files:\n";
+		for (const auto& file : fetchedFiles) {
+			res += file.toString();
+		}
+		return res;
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, checkpointDir, sstFiles, fetchedFiles);
+	}
+};
+
 // Fetch the checkpoint file(s) to local dir, the checkpoint is specified by initialState.
 // If cFun is provided, the fetch progress can be checkpointed, so that next time, the fetch process
 // can be continued, in case of crash.
@@ -201,9 +249,15 @@ ACTOR Future<CheckpointMetaData> fetchRocksDBCheckpoint(Database cx,
                                                         std::string dir,
                                                         std::function<Future<Void>(const CheckpointMetaData&)> cFun);
 
-ACTOR Future<Void> deleteRocksCFCheckpoint(CheckpointMetaData checkpoint);
+// Returns the total logical bytes of all *fetched* checkpoints.
+int64_t getTotalFetchedBytes(const std::vector<CheckpointMetaData>& checkpoints);
+
+// Clean up on-disk files associated with checkpoint.
+ACTOR Future<Void> deleteRocksCheckpoint(CheckpointMetaData checkpoint);
 
 ICheckpointReader* newRocksDBCheckpointReader(const CheckpointMetaData& checkpoint, UID logID);
 
 RocksDBColumnFamilyCheckpoint getRocksCF(const CheckpointMetaData& checkpoint);
+
+RocksDBCheckpoint getRocksCheckpoint(const CheckpointMetaData& checkpoint);
 #endif

@@ -4,6 +4,52 @@
 Release Notes
 #############
 
+7.1.5
+=====
+* Fixed a fdbcli kill bug that was not killing in parallel. `(PR #7150) <https://github.com/apple/foundationdb/pull/7150>`_
+* Fixed a bug that prevents a peer from sending messages on a previously incompatible connection. `(PR #7124) <https://github.com/apple/foundationdb/pull/7124>`_
+* Added rocksdb throttling counters to trace event. `(PR #7096) <https://github.com/apple/foundationdb/pull/7096>`_
+* Added a backtrace before throwing serialization_failed. `(PR #7155) <https://github.com/apple/foundationdb/pull/7155>`_
+
+7.1.4
+=====
+* Fixed a bug that prevents client from connecting to a cluster. `(PR #7060) <https://github.com/apple/foundationdb/pull/7060>`_
+* Fixed a performance bug that overloads Resolver CPU. `(PR #7068) <https://github.com/apple/foundationdb/pull/7068>`_
+* Optimized storage server performance for "get range and flat map" feature. `(PR #7078) <https://github.com/apple/foundationdb/pull/7078>`_
+* Optimized both Proxy performance and Resolver (when version vector is enabled) performance. `(PR #7076) <https://github.com/apple/foundationdb/pull/7076>`_
+* Fixed a key size limit bug when using tenants. `(PR #6986) <https://github.com/apple/foundationdb/pull/6986>`_
+* Fixed operation_failed thrown incorrectly from transactions. `(PR #6993) <https://github.com/apple/foundationdb/pull/6993>`_
+* Fixed a version vector bug when GRV cache is used. `(PR #7057) <https://github.com/apple/foundationdb/pull/7057>`_
+* Fixed orphaned storage server due to force recovery. `(PR #7028) <https://github.com/apple/foundationdb/pull/7028>`_
+* Fixed a bug that a storage server reads stale cluster ID. `(PR #7026) <https://github.com/apple/foundationdb/pull/7026>`_
+* Fixed a storage server exclusion status bug that affects wiggling. `(PR #6984) <https://github.com/apple/foundationdb/pull/6984>`_
+* Fixed a bug that relocate shard tasks move data to a removed team. `(PR #7023) <https://github.com/apple/foundationdb/pull/7023>`_
+* Fixed recruitment thrashing when there are temporarily multiple cluster controllers. `(PR #7001) <https://github.com/apple/foundationdb/pull/7001>`_
+* Fixed change feed deletion due to multiple sources race. `(PR #6987) <https://github.com/apple/foundationdb/pull/6987>`_
+* Fixed TLog crash if more TLogs are absent than the replication factor. `(PR #6991) <https://github.com/apple/foundationdb/pull/6991>`_
+* Added hostname DNS resolution logic for cluster connection string. `(PR #6998) <https://github.com/apple/foundationdb/pull/6998>`_
+* Fixed a limit bug in indexPrefetch. `(PR #7005) <https://github.com/apple/foundationdb/pull/7005>`_
+
+7.1.3
+=====
+* Added logging measuring commit compute duration. `(PR #6906) <https://github.com/apple/foundationdb/pull/6906>`_
+* RocksDb used aggregated property metrics for pending compaction bytes. `(PR #6867) <https://github.com/apple/foundationdb/pull/6867>`_
+* Fixed a perpetual wiggle bug that would not react to a pause. `(PR #6933) <https://github.com/apple/foundationdb/pull/6933>`_
+* Fixed a crash of data distributor. `(PR #6938) <https://github.com/apple/foundationdb/pull/6938>`_
+* Added new c libs to client package. `(PR #6921) <https://github.com/apple/foundationdb/pull/6921>`_
+* Fixed a bug that prevents a cluster from fully recovered state after taking a snapshot. `(PR #6892) <https://github.com/apple/foundationdb/pull/6892>`_
+
+7.1.2
+=====
+* Fixed failing upgrades due to non-persisted initial cluster version. `(PR #6864) <https://github.com/apple/foundationdb/pull/6864>`_
+* Fixed a client load balancing bug because ClientDBInfo may be unintentionally not set. `(PR #6878) <https://github.com/apple/foundationdb/pull/6878>`_
+* Fixed stuck LogRouter due to races of multiple PeekStream requests. `(PR #6870) <https://github.com/apple/foundationdb/pull/6870>`_
+* Fixed a client-side infinite loop due to provisional GRV Proxy ID not set in GetReadVersionReply. `(PR #6849) <https://github.com/apple/foundationdb/pull/6849>`_
+
+7.1.1
+=====
+* Added new c libs to client package. `(PR #6828) <https://github.com/apple/foundationdb/pull/6828>`_
+
 7.1.0
 =====
 

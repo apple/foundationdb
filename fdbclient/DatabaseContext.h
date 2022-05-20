@@ -222,6 +222,8 @@ struct KeyRangeLocationInfo {
 	  : tenantEntry(tenantEntry), range(range), locations(locations) {}
 };
 
+class GlobalConfig;
+
 class DatabaseContext : public ReferenceCounted<DatabaseContext>, public FastAllocated<DatabaseContext>, NonCopyable {
 public:
 	static DatabaseContext* allocateOnForeignThread() {
@@ -627,6 +629,7 @@ public:
 	using TransactionT = ReadYourWritesTransaction;
 	Reference<TransactionT> createTransaction();
 
+	std::unique_ptr<GlobalConfig> globalConfig;
 	EventCacheHolder connectToDatabaseEventCacheHolder;
 
 private:
