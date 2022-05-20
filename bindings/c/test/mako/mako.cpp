@@ -1439,161 +1439,13 @@ void printStatsHeader(Arguments const& args, bool show_commit, bool is_first_hea
 	fmt::print("\n");
 }
 
-void printReport(Arguments const& args,
-                 ThreadStatistics const* stats,
-                 double const duration_sec,
-                 pid_t pid_main,
-                 FILE* fp) {
-
-	auto final_stats = ThreadStatistics{};
-	const auto num_effective_threads = args.async_xacts > 0 ? args.async_xacts : args.num_threads;
-	for (auto i = 0; i < args.num_processes; i++) {
-		for (auto j = 0; j < num_effective_threads; j++) {
-			const auto idx = i * num_effective_threads + j;
-			final_stats.combine(stats[idx]);
-		}
-	}
-
-	/* overall stats */
-	fmt::printf("\n====== Total Duration %6.3f sec ======\n\n", duration_sec);
-	fmt::printf("Total Processes:   %8d\n", args.num_processes);
-	fmt::printf("Total Threads:     %8d\n", args.num_threads);
-	fmt::printf("Total Async Xacts: %8d\n", args.async_xacts);
-	if (args.tpsmax == args.tpsmin)
-		fmt::printf("Target TPS:        %8d\n", args.tpsmax);
-	else {
-		fmt::printf("Target TPS (MAX):  %8d\n", args.tpsmax);
-		fmt::printf("Target TPS (MIN):  %8d\n", args.tpsmin);
-		fmt::printf("TPS Interval:      %8d\n", args.tpsinterval);
-		fmt::printf("TPS Change:        ");
-		switch (args.tpschange) {
-		case TPS_SIN:
-			fmt::printf("%8s\n", "SIN");
-			break;
-		case TPS_SQUARE:
-			fmt::printf("%8s\n", "SQUARE");
-			break;
-		case TPS_PULSE:
-			fmt::printf("%8s\n", "PULSE");
-			break;
-		}
-	}
-	const auto tps_f = final_stats.getOpCount(OP_TRANSACTION) / duration_sec;
-	const auto tps_i = static_cast<uint64_t>(tps_f);
-	fmt::printf("Total Xacts:       %8lu\n", final_stats.getOpCount(OP_TRANSACTION));
-	fmt::printf("Total Conflicts:   %8lu\n", final_stats.getConflictCount());
-	fmt::printf("Total Errors:      %8lu\n", final_stats.getTotalErrorCount());
-	fmt::printf("Overall TPS:       %8lu\n\n", tps_i);
-
-	if (fp) {
-		fmt::fprintf(fp, "\"results\": {");
-		fmt::fprintf(fp, "\"totalDuration\": %6.3f,", duration_sec);
-		fmt::fprintf(fp, "\"totalProcesses\": %d,", args.num_processes);
-		fmt::fprintf(fp, "\"totalThreads\": %d,", args.num_threads);
-		fmt::fprintf(fp, "\"totalAsyncXacts\": %d,", args.async_xacts);
-		fmt::fprintf(fp, "\"targetTPS\": %d,", args.tpsmax);
-		fmt::fprintf(fp, "\"totalXacts\": %lu,", final_stats.getOpCount(OP_TRANSACTION));
-		fmt::fprintf(fp, "\"totalConflicts\": %lu,", final_stats.getConflictCount());
-		fmt::fprintf(fp, "\"totalErrors\": %lu,", final_stats.getTotalErrorCount());
-		fmt::fprintf(fp, "\"overallTPS\": %lu,", tps_i);
-	}
-
-	/* per-op stats */
-	printStatsHeader(args, true, true, false);
-
-	/* OPS */
-	putTitle("Total OPS");
-	if (fp) {
-		fmt::fprintf(fp, "\"totalOps\": {");
-	}
-	auto first_op = true;
-	for (auto op = 0; op < MAX_OP; op++) {
-		if ((args.txnspec.ops[op][OP_COUNT] > 0 && op != OP_TRANSACTION) || op == OP_COMMIT) {
-			putField(final_stats.getOpCount(op));
-			if (fp) {
-				if (first_op) {
-					first_op = 0;
-				} else {
-					fmt::fprintf(fp, ",");
-				}
-				fmt::fprintf(fp, "\"%s\": %lu", getOpName(op), final_stats.getOpCount(op));
-			}
-		}
-	}
-
-	/* TPS */
-	const auto tps = final_stats.getOpCount(OP_TRANSACTION) / duration_sec;
-	putFieldFloat(tps, 2);
-
-	/* Conflicts */
-	const auto conflicts_rate = final_stats.getConflictCount() / duration_sec;
-	putFieldFloat(conflicts_rate, 2);
-	fmt::print("\n");
-
-	if (fp) {
-		fmt::fprintf(fp, "}, \"tps\": %.2f, \"conflictsPerSec\": %.2f, \"errors\": {", tps, conflicts_rate);
-	}
-
-	/* Errors */
-	putTitle("Errors");
-	first_op = 1;
-	for (auto op = 0; op < MAX_OP; op++) {
-		if (args.txnspec.ops[op][OP_COUNT] > 0 && op != OP_TRANSACTION) {
-			putField(final_stats.getErrorCount(op));
-			if (fp) {
-				if (first_op) {
-					first_op = 0;
-				} else {
-					fmt::fprintf(fp, ",");
-				}
-				fmt::fprintf(fp, "\"%s\": %lu", getOpName(op), final_stats.getErrorCount(op));
-			}
-		}
-	}
-	if (fp) {
-		fmt::fprintf(fp, "}, \"numSamples\": {");
-	}
-	fmt::print("\n\n");
-
-	fmt::print("Latency (us)");
-	printStatsHeader(args, true, false, true);
-
-	std::array<DDSketchMako, MAX_OP> data_points;
+void printThreadStats(ThreadStatistics& final_stats, const Arguments& args, FILE* fp) {
 	/* Total Samples */
 	putTitle("Samples");
-	first_op = 1;
+	auto first_op = 1;
 	for (auto op = 0; op < MAX_OP; op++) {
 		const std::string op_name = getOpName(op);
 		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
-			for (auto i = 0; i < args.num_processes; i++) {
-				auto load_sample = [pid_main, op, &data_points](int process_id, int thread_id) {
-					const auto dirname = fmt::format("{}{}", TEMP_DATA_STORE, pid_main);
-					const auto filename = getStatsFilename(dirname, process_id, thread_id, op);
-					std::ifstream fp{ filename };
-					std::ostringstream sstr;
-					sstr << fp.rdbuf();
-					DDSketchMako sketch;
-					rapidjson::Document doc;
-					doc.Parse(sstr.str().c_str());
-					if (doc.HasParseError()) {
-						logr.error("Couldn't parse JSON from {}", filename);
-					}
-					sketch.deserialize(doc);
-					if (data_points[op].getPopulationSize() > 0) {
-						data_points[op].mergeWith(sketch);
-					} else {
-						data_points[op] = sketch;
-					}
-				};
-				if (args.async_xacts == 0) {
-					for (auto j = 0; j < args.num_threads; j++) {
-						load_sample(i, j);
-					}
-				} else {
-					// async mode uses only one file per process
-					load_sample(i, 0);
-				}
-			}
 			auto sample_size = final_stats.getLatencySampleCount(op);
 			if (sample_size > 0) {
 				putField(sample_size);
@@ -1612,7 +1464,6 @@ void printReport(Arguments const& args,
 	}
 	fmt::print("\n");
 
-	final_stats.updateLatencies(data_points);
 	/* Min Latency */
 	if (fp) {
 		fmt::fprintf(fp, "}, \"minLatency\": {");
@@ -1805,6 +1656,164 @@ void printReport(Arguments const& args,
 	if (fp) {
 		fmt::fprintf(fp, "}}");
 	}
+}
+
+void printReport(Arguments const& args,
+                 ThreadStatistics const* stats,
+                 double const duration_sec,
+                 pid_t pid_main,
+                 FILE* fp) {
+
+	auto final_stats = ThreadStatistics{};
+	const auto num_effective_threads = args.async_xacts > 0 ? args.async_xacts : args.num_threads;
+	for (auto i = 0; i < args.num_processes; i++) {
+		for (auto j = 0; j < num_effective_threads; j++) {
+			const auto idx = i * num_effective_threads + j;
+			final_stats.combine(stats[idx]);
+		}
+	}
+
+	/* overall stats */
+	fmt::printf("\n====== Total Duration %6.3f sec ======\n\n", duration_sec);
+	fmt::printf("Total Processes:   %8d\n", args.num_processes);
+	fmt::printf("Total Threads:     %8d\n", args.num_threads);
+	fmt::printf("Total Async Xacts: %8d\n", args.async_xacts);
+	if (args.tpsmax == args.tpsmin)
+		fmt::printf("Target TPS:        %8d\n", args.tpsmax);
+	else {
+		fmt::printf("Target TPS (MAX):  %8d\n", args.tpsmax);
+		fmt::printf("Target TPS (MIN):  %8d\n", args.tpsmin);
+		fmt::printf("TPS Interval:      %8d\n", args.tpsinterval);
+		fmt::printf("TPS Change:        ");
+		switch (args.tpschange) {
+		case TPS_SIN:
+			fmt::printf("%8s\n", "SIN");
+			break;
+		case TPS_SQUARE:
+			fmt::printf("%8s\n", "SQUARE");
+			break;
+		case TPS_PULSE:
+			fmt::printf("%8s\n", "PULSE");
+			break;
+		}
+	}
+	const auto tps_f = final_stats.getOpCount(OP_TRANSACTION) / duration_sec;
+	const auto tps_i = static_cast<uint64_t>(tps_f);
+	fmt::printf("Total Xacts:       %8lu\n", final_stats.getOpCount(OP_TRANSACTION));
+	fmt::printf("Total Conflicts:   %8lu\n", final_stats.getConflictCount());
+	fmt::printf("Total Errors:      %8lu\n", final_stats.getTotalErrorCount());
+	fmt::printf("Overall TPS:       %8lu\n\n", tps_i);
+
+	if (fp) {
+		fmt::fprintf(fp, "\"results\": {");
+		fmt::fprintf(fp, "\"totalDuration\": %6.3f,", duration_sec);
+		fmt::fprintf(fp, "\"totalProcesses\": %d,", args.num_processes);
+		fmt::fprintf(fp, "\"totalThreads\": %d,", args.num_threads);
+		fmt::fprintf(fp, "\"totalAsyncXacts\": %d,", args.async_xacts);
+		fmt::fprintf(fp, "\"targetTPS\": %d,", args.tpsmax);
+		fmt::fprintf(fp, "\"totalXacts\": %lu,", final_stats.getOpCount(OP_TRANSACTION));
+		fmt::fprintf(fp, "\"totalConflicts\": %lu,", final_stats.getConflictCount());
+		fmt::fprintf(fp, "\"totalErrors\": %lu,", final_stats.getTotalErrorCount());
+		fmt::fprintf(fp, "\"overallTPS\": %lu,", tps_i);
+	}
+
+	/* per-op stats */
+	printStatsHeader(args, true, true, false);
+
+	/* OPS */
+	putTitle("Total OPS");
+	if (fp) {
+		fmt::fprintf(fp, "\"totalOps\": {");
+	}
+	auto first_op = true;
+	for (auto op = 0; op < MAX_OP; op++) {
+		if ((args.txnspec.ops[op][OP_COUNT] > 0 && op != OP_TRANSACTION) || op == OP_COMMIT) {
+			putField(final_stats.getOpCount(op));
+			if (fp) {
+				if (first_op) {
+					first_op = 0;
+				} else {
+					fmt::fprintf(fp, ",");
+				}
+				fmt::fprintf(fp, "\"%s\": %lu", getOpName(op), final_stats.getOpCount(op));
+			}
+		}
+	}
+
+	/* TPS */
+	const auto tps = final_stats.getOpCount(OP_TRANSACTION) / duration_sec;
+	putFieldFloat(tps, 2);
+
+	/* Conflicts */
+	const auto conflicts_rate = final_stats.getConflictCount() / duration_sec;
+	putFieldFloat(conflicts_rate, 2);
+	fmt::print("\n");
+
+	if (fp) {
+		fmt::fprintf(fp, "}, \"tps\": %.2f, \"conflictsPerSec\": %.2f, \"errors\": {", tps, conflicts_rate);
+	}
+
+	/* Errors */
+	putTitle("Errors");
+	first_op = 1;
+	for (auto op = 0; op < MAX_OP; op++) {
+		if (args.txnspec.ops[op][OP_COUNT] > 0 && op != OP_TRANSACTION) {
+			putField(final_stats.getErrorCount(op));
+			if (fp) {
+				if (first_op) {
+					first_op = 0;
+				} else {
+					fmt::fprintf(fp, ",");
+				}
+				fmt::fprintf(fp, "\"%s\": %lu", getOpName(op), final_stats.getErrorCount(op));
+			}
+		}
+	}
+	if (fp) {
+		fmt::fprintf(fp, "}, \"numSamples\": {");
+	}
+	fmt::print("\n\n");
+
+	fmt::print("Latency (us)");
+	printStatsHeader(args, true, false, true);
+
+	std::array<DDSketchMako, MAX_OP> data_points;
+
+	// Get the sketches stored in file and merge them together
+	for (auto op = 0; op < MAX_OP; op++) {
+		auto load_sample = [pid_main, op, &data_points](int process_id, int thread_id) {
+			const auto dirname = fmt::format("{}{}", TEMP_DATA_STORE, pid_main);
+			const auto filename = getStatsFilename(dirname, process_id, thread_id, op);
+			std::ifstream fp{ filename };
+			std::ostringstream sstr;
+			sstr << fp.rdbuf();
+			DDSketchMako sketch;
+			rapidjson::Document doc;
+			doc.Parse(sstr.str().c_str());
+			if (!doc.HasParseError()) {
+				sketch.deserialize(doc);
+				if (data_points[op].getPopulationSize() > 0) {
+					data_points[op].mergeWith(sketch);
+				} else {
+					data_points[op] = sketch;
+				}
+			}
+		};
+		for (auto i = 0; i < args.num_processes; i++) {
+
+			if (args.async_xacts == 0) {
+				for (auto j = 0; j < args.num_threads; j++) {
+					load_sample(i, j);
+				}
+			} else {
+				// async mode uses only one file per process
+				load_sample(i, 0);
+			}
+		}
+	}
+	final_stats.updateLatencies(data_points);
+
+	printThreadStats(final_stats, args, fp);
 
 	// export the ddsketch if the flag was set
 	if (args.stats_export_path[0] != 0) {
@@ -1960,7 +1969,7 @@ bool mergeSketchReport(Arguments& args) {
 		f >> tmp;
 		stats.combine(tmp);
 	}
-
+	printThreadStats(stats, args, NULL);
 	return true;
 }
 
