@@ -23,7 +23,7 @@
 #pragma once
 
 #ifndef FDB_API_VERSION
-#define FDB_API_VERSION 710
+#define FDB_API_VERSION 720
 #endif
 
 #include <cassert>
@@ -560,55 +560,42 @@ public:
 };
 
 class Tenant final {
-	static const std::string tenantManagementMapPrefix;
-	static const std::string tenantMapPrefix;
+	std::shared_ptr<native::FDBTenant> tenant;
+	static constexpr CharsRef tenantManagementMapPrefix = "\xff\xff/management/tenant_map/";
 
 public:
-	static TypedFuture<future_var::None> createTenant(Transaction tr, std::string name) {
+	Tenant(const Tenant&) noexcept = default;
+	Tenant& operator=(const Tenant&) noexcept = default;
+	Tenant(fdb::Database* db, BytesRef name, int name_length) : tenant(nullptr) {
+		auto tenant_raw = static_cast<native::FDBTenant*>(nullptr);
+		if (auto err = Error(native::fdb_database_open_tenant(db->db.get(), name.data(), name_length, &tenant_raw))) {
+			throwError(fmt::format("Failed to create tenant with name '{}': ", name), err);
+		}
+		tenant = std::shared_ptr<native::FDBTenant>(tenant_raw, &native::fdb_tenant_destroy);
+	}
+	Tenant() noexcept : tenant(nullptr) {}
+
+	static void createTenant(Transaction tr, BytesRef name) {
 		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, 1);
 		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_LOCK_AWARE, 1);
-		KeyRef tenantManagementKey = toBytesRef(tenantManagementMapPrefix + name);
-		tr.set(tenantManagementKey, toBytesRef(std::string("")));
-		return tr.commit();
+		tr.set(toBytesRef(fmt::format("{}{}", tenantManagementMapPrefix, toCharsRef(name))),
+		       toBytesRef(std::string("")));
 	}
 
-	static TypedFuture<future_var::None> deleteTenant(Transaction tr, std::string name) {
+	static void deleteTenant(Transaction tr, BytesRef name) {
 		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_RAW_ACCESS, 1);
 		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_LOCK_AWARE, 1);
-		KeyRef tenantManagementKey = toBytesRef(tenantManagementMapPrefix + name);
-		tr.clear(tenantManagementKey);
-		return tr.commit();
-	}
-
-	Tenant(fdb::Database* db, const uint8_t* name, int name_length) {
-		if (native::fdb_error_t err = fdb_database_open_tenant(db->db.get(), name, name_length, &tenant)) {
-			std::cerr << native::fdb_get_error(err) << std::endl;
-			std::abort();
-		}
-	}
-
-	~Tenant() {
-		if (tenant != nullptr) {
-			fdb_tenant_destroy(tenant);
-		}
+		tr.clear(toBytesRef(fmt::format("{}{}", tenantManagementMapPrefix, toCharsRef(name))));
 	}
 
 	Transaction createTransaction() {
 		auto tx_native = static_cast<native::FDBTransaction*>(nullptr);
-		auto err = Error(native::fdb_tenant_create_transaction(tenant, &tx_native));
+		auto err = Error(native::fdb_tenant_create_transaction(tenant.get(), &tx_native));
 		if (err)
 			throwError("Failed to create transaction: ", err);
 		return Transaction(tx_native);
 	}
 
-	Tenant(const Tenant&) = delete;
-	Tenant& operator=(const Tenant&) = delete;
-	Tenant(Tenant&&) = delete;
-	Tenant& operator=(Tenant&&) = delete;
-
-private:
-	friend class Transaction;
-	native::FDBTenant* tenant;
 };
 
 } // namespace fdb

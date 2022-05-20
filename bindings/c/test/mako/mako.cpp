@@ -78,15 +78,15 @@ using namespace mako;
 
 thread_local Logger logr = Logger(MainProcess{}, VERBOSE_DEFAULT);
 
-Transaction createNewTransaction(Database* db, Arguments const& args, int id = -1) {
+Transaction createNewTransaction(Database db, Arguments const& args, int id = -1) {
 	// No tenants specified
 	if (args.tenants <= 0) {
-		return db->createTransaction();
+		return db.createTransaction();
 	}
 	// Create Tenant Transaction
 	int tenant_id = (id == -1) ? urand(1, args.tenants) : id;
-	std::string tenant_name = "tenant" + std::to_string(tenant_id);
-	Tenant t(db, reinterpret_cast<const uint8_t*>(tenant_name.c_str()), tenant_name.length());
+	BytesRef tenant_name = toBytesRef("tenant" + std::to_string(tenant_id));
+	Tenant t(&db, tenant_name, tenant_name.length());
 	return t.createTransaction();
 }
 
@@ -115,7 +115,7 @@ int cleanup(Database db, Arguments const& args) {
 		// If args.tenants is zero, this will use a non-tenant txn and perform a single range clear.
 		// If 1, it will use a tenant txn and do a single range clear instead.
 		// If > 1, it will perform a range clear with a different tenant txn per iteration.
-		Transaction tx = createNewTransaction(&db, args, i);
+		Transaction tx = createNewTransaction(db, args, i);
 		while (true) {
 			tx.clearRange(beginstr, endstr);
 			auto future_commit = tx.commit();
@@ -132,19 +132,16 @@ int cleanup(Database db, Arguments const& args) {
 
 		// If tenants are specified, also delete the tenant after clearing out its keyspace
 		if (args.tenants > 0) {
-			std::string tenant_name = "tenant" + std::to_string(i);
 			while (true) {
 				Transaction systemTx = db.createTransaction();
-				auto future_commit = Tenant::deleteTenant(systemTx, tenant_name);
+				Tenant::deleteTenant(systemTx, toBytesRef("tenant" + std::to_string(i)));
+				auto future_commit = systemTx.commit();
 				const auto rc = waitAndHandleError(systemTx, future_commit, "DELETE_TENANT");
 				if (rc == FutureRC::OK) {
 					break;
 				} else if (rc == FutureRC::RETRY || rc == FutureRC::CONFLICT) {
 					// tx already reset
 					continue;
-				} else {
-					// try with new transaction object
-					systemTx = db.createTransaction();
 				}
 			}
 		}
@@ -178,7 +175,23 @@ int populate(Database db,
 	auto watch_trace = Stopwatch(watch_total.getStart());
 	auto key_checkpoint = key_begin; // in case of commit failure, restart from this key
 
-	Transaction tx = createNewTransaction(&db, args);
+	Transaction systemTx = db.createTransaction();
+	for (int i = 1; i <= args.tenants; ++i) {
+		std::string tenant_name = "tenant" + std::to_string(i);
+		Tenant::createTenant(systemTx, toBytesRef(tenant_name));
+		while (i % 10 == 0 || i == args.tenants) {
+			// create {batchSize} # of tenants
+			// commit every batch
+			auto future_commit = systemTx.commit();
+			const auto rc = waitAndHandleError(systemTx, future_commit, "CREATE_TENANT");
+			if (rc == FutureRC::OK) {
+				systemTx.reset();
+				break;
+			}
+			// look up tenant range limit 1. If found, break, else retry
+		}
+	}
+	Transaction tx = createNewTransaction(db, args);
 	for (auto i = key_begin; i <= key_end; i++) {
 		/* sequential keys */
 		genKey(keystr.data(), KEY_PREFIX, args, i);
@@ -224,7 +237,7 @@ int populate(Database db,
 			auto tx_restarter = ExitGuard([&watch_tx]() { watch_tx.startFromStop(); });
 			if (rc == FutureRC::OK) {
 				key_checkpoint = i + 1; // restart on failures from next key
-				tx = createNewTransaction(&db, args);
+				tx = createNewTransaction(db, args);
 			} else if (rc == FutureRC::ABORT) {
 				return -1;
 			} else {
@@ -410,7 +423,7 @@ int runWorkload(Database db,
 
 	/* main transaction loop */
 	while (1) {
-		Transaction tx = createNewTransaction(&db, args);
+		Transaction tx = createNewTransaction(db, args);
 		while ((thread_tps > 0) && (xacts >= current_tps)) {
 			/* throttle on */
 			const auto time_now = steady_clock::now();
@@ -614,29 +627,6 @@ void workerThread(ThreadArgs& thread_args) {
 	    args.iteration == 0
 	        ? -1
 	        : computeThreadIters(args.iteration, worker_id, thread_id, args.num_processes, args.num_threads);
-
-	/* create my own transaction object */
-	Transaction tx;
-	tx = database.createTransaction();
-
-	if (tenant_main && tenants > 0) {
-		for (int i = 1; i <= tenants; ++i) {
-			std::string tenant_name = "tenant" + std::to_string(i);
-			while (true) {
-				auto future_commit = Tenant::createTenant(tx, tenant_name);
-				const auto rc = waitAndHandleError(tx, future_commit, "CREATE_TENANT");
-				if (rc == FutureRC::OK) {
-					break;
-				} else if (rc == FutureRC::RETRY || rc == FutureRC::CONFLICT) {
-					// tx already reset
-					continue;
-				} else {
-					// try with new transaction object
-					tx = database.createTransaction();
-				}
-			}
-		}
-	}
 
 	/* i'm ready */
 	readycount.fetch_add(1);
