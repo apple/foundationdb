@@ -813,12 +813,12 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 	        tr->getDatabase()->getConnectionRecord()->getConnectionString().clusterKeyName())
 		return CoordinatorsResult::BAD_DATABASE_STATE; // Someone changed the "name" of the database??
 
-	if (conn->hostnames.size() + conn->coordinators().size() == 0) {
+	if (conn->hostnames.size() + conn->coords.size() == 0) {
 		conn->hostnames = old.hostnames;
 		conn->coords = old.coords;
 	}
 	std::vector<NetworkAddress> desiredCoordinators = wait(conn->tryResolveHostnames());
-	if (desiredCoordinators.size() != conn->hostnames.size() + conn->coordinators().size()) {
+	if (desiredCoordinators.size() != conn->hostnames.size() + conn->coords.size()) {
 		return CoordinatorsResult::COORDINATOR_UNREACHABLE;
 	}
 
