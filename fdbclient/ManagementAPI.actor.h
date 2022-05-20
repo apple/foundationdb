@@ -55,8 +55,8 @@ struct IQuorumChange : ReferenceCounted<IQuorumChange> {
 
 // Change to use the given set of coordination servers
 ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
-                                                               Reference<IQuorumChange> change,
-                                                               std::vector<NetworkAddress> desiredCoordinators);
+                                                               ClusterConnectionString* conn,
+                                                               std::string newName);
 ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChange> change);
 Reference<IQuorumChange> autoQuorumChange(int desired = -1);
 Reference<IQuorumChange> noQuorumChange();
