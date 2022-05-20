@@ -595,7 +595,6 @@ public:
 			throwError("Failed to create transaction: ", err);
 		return Transaction(tx_native);
 	}
-
 };
 
 } // namespace fdb
