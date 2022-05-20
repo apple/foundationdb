@@ -1658,7 +1658,6 @@ Future<RangeResult> CoordinatorsImpl::getRange(ReadYourWritesTransaction* ryw,
 }
 
 ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
-	state Reference<IQuorumChange> change;
 	state ClusterConnectionString conn; // We don't care about the Key here.
 	state std::vector<std::string> process_address_or_hostname_strs;
 	state Optional<std::string> msg;
