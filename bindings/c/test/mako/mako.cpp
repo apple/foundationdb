@@ -809,6 +809,7 @@ int initArguments(Arguments& args) {
 	args.client_threads_per_version = 0;
 	args.disable_ryw = 0;
 	args.json_output_path[0] = '\0';
+	args.stats_export_path[0] = '\0';
 	args.bg_materialize_files = false;
 	args.bg_file_path[0] = '\0';
 	return 0;
@@ -1247,7 +1248,9 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 				char default_file[] = "sketch_data.json";
 				strncpy(args.stats_export_path, default_file, sizeof(default_file));
 			} else {
-				strncpy(args.stats_export_path, optarg, std::min(sizeof(args.json_output_path), strlen(optarg) + 1));
+				strncpy(args.stats_export_path,
+				        argv[optind],
+				        std::min(sizeof(args.stats_export_path), strlen(argv[optind]) + 1));
 			}
 			break;
 		}
