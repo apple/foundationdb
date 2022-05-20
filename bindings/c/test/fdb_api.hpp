@@ -569,7 +569,7 @@ public:
 	Tenant(fdb::Database* db, BytesRef name, int name_length) : tenant(nullptr) {
 		auto tenant_raw = static_cast<native::FDBTenant*>(nullptr);
 		if (auto err = Error(native::fdb_database_open_tenant(db->db.get(), name.data(), name_length, &tenant_raw))) {
-			throwError(fmt::format("Failed to create tenant with name '{}': ", name), err);
+			throwError(fmt::format("Failed to create tenant with name '{}': ", toCharsRef(name)), err);
 		}
 		tenant = std::shared_ptr<native::FDBTenant>(tenant_raw, &native::fdb_tenant_destroy);
 	}

@@ -62,7 +62,6 @@ namespace mako {
 struct alignas(64) ThreadArgs {
 	int worker_id;
 	int thread_id;
-	bool tenant_main;
 	int tenants;
 	pid_t parent_id;
 	LatencySampleBinArray sample_bins;
@@ -142,6 +141,8 @@ int cleanup(Database db, Arguments const& args) {
 				} else if (rc == FutureRC::RETRY || rc == FutureRC::CONFLICT) {
 					// tx already reset
 					continue;
+				} else {
+					return -1;
 				}
 			}
 		}
@@ -605,8 +606,6 @@ void workerThread(ThreadArgs& thread_args) {
 	const auto parent_id = thread_args.parent_id;
 	const auto worker_id = thread_args.worker_id;
 	const auto thread_id = thread_args.thread_id;
-	const auto tenant_main = thread_args.tenant_main;
-	const auto tenants = thread_args.tenants;
 	const auto dotrace = (worker_id == 0 && thread_id == 0 && args.txntrace) ? args.txntrace : 0;
 	auto database = thread_args.database;
 	const auto dotagging = args.txntagging;
@@ -777,8 +776,6 @@ int workerProcessMain(Arguments const& args, int worker_id, shared_memory::Acces
 			this_args.worker_id = worker_id;
 			this_args.thread_id = i;
 			this_args.parent_id = pid_main;
-			// let a single worker thread create all the tenants before the green signal
-			this_args.tenant_main = i == 0 && worker_id == 0;
 			this_args.tenants = args.tenants;
 			this_args.args = &args;
 			this_args.shm = shm;
