@@ -59,8 +59,6 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
                                                                std::string newName);
 ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChange> change);
 Reference<IQuorumChange> autoQuorumChange(int desired = -1);
-Reference<IQuorumChange> noQuorumChange();
-Reference<IQuorumChange> specifiedQuorumChange(std::vector<NetworkAddress> const&);
 Reference<IQuorumChange> nameQuorumChange(std::string const& name, Reference<IQuorumChange> const& other);
 
 // Exclude the given set of servers from use as state servers.  Returns as soon as the change is durable, without

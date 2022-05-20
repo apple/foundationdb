@@ -819,6 +819,9 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 	}
 	std::vector<NetworkAddress> desiredCoordinators = wait(conn->tryResolveHostnames());
 	if (desiredCoordinators.size() != conn->hostnames.size() + conn->coords.size()) {
+		TraceEvent("ChangeQuorumCheckerEarlyTermination")
+		    .detail("Reason", "One or more hostnames are unresolvable")
+		    .backtrace();
 		return CoordinatorsResult::COORDINATOR_UNREACHABLE;
 	}
 
@@ -986,32 +989,6 @@ ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChan
 			++retries;
 		}
 	}
-}
-
-struct SpecifiedQuorumChange final : IQuorumChange {
-	std::vector<NetworkAddress> desired;
-	explicit SpecifiedQuorumChange(std::vector<NetworkAddress> const& desired) : desired(desired) {}
-	Future<std::vector<NetworkAddress>> getDesiredCoordinators(Transaction* tr,
-	                                                           std::vector<NetworkAddress> oldCoordinators,
-	                                                           Reference<IClusterConnectionRecord>,
-	                                                           CoordinatorsResult&) override {
-		return desired;
-	}
-};
-Reference<IQuorumChange> specifiedQuorumChange(std::vector<NetworkAddress> const& addresses) {
-	return Reference<IQuorumChange>(new SpecifiedQuorumChange(addresses));
-}
-
-struct NoQuorumChange final : IQuorumChange {
-	Future<std::vector<NetworkAddress>> getDesiredCoordinators(Transaction* tr,
-	                                                           std::vector<NetworkAddress> oldCoordinators,
-	                                                           Reference<IClusterConnectionRecord>,
-	                                                           CoordinatorsResult&) override {
-		return oldCoordinators;
-	}
-};
-Reference<IQuorumChange> noQuorumChange() {
-	return Reference<IQuorumChange>(new NoQuorumChange);
 }
 
 struct NameQuorumChange final : IQuorumChange {
