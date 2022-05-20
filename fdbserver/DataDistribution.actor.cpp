@@ -596,8 +596,6 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 					}
 				}
 
-				state Reference<DDTenantCache> ddtc = makeReference<DDTenantCache>(cx, self->ddId);
-
 				TraceEvent("DDInitUpdatedReplicaKeys", self->ddId).log();
 				Reference<InitialDataDistribution> initData_ = wait(getInitialDataDistribution(
 				    cx,
@@ -622,15 +620,12 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 					    .trackLatest(self->initialDDEventHolder->trackingKey);
 				}
 
-				wait(ddtc->build(cx));
-
-				self->addActor.send(ddtc->monitorTenantMap());
+				TraceEvent("DataDistributionDisabled", self->ddId).log();
 
 				if (initData->mode && ddEnabledState->isDDEnabled()) {
 					// mode may be set true by system operator using fdbcli and isDDEnabled() set to true
 					break;
 				}
-				TraceEvent("DataDistributionDisabled", self->ddId).log();
 
 				TraceEvent("MovingData", self->ddId)
 				    .detail("InFlight", 0)
@@ -669,6 +664,9 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 				wait(waitForDataDistributionEnabled(cx, ddEnabledState));
 				TraceEvent("DataDistributionEnabled").log();
 			}
+
+			state Reference<DDTenantCache> ddtc = makeReference<DDTenantCache>(cx, self->ddId);
+			wait(ddtc->build(cx));
 
 			// When/If this assertion fails, Evan owes Ben a pat on the back for his foresight
 			ASSERT(configuration.storageTeamSize > 0);
@@ -735,6 +733,9 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			} else {
 				anyZeroHealthyTeams = zeroHealthyTeams[0];
 			}
+
+			actors.push_back(reportErrorsExcept(
+			    ddtc->monitorTenantMap(), "DDTenantCacheMonitor", self->ddId, &normalDDQueueErrors()));
 
 			actors.push_back(pollMoveKeysLock(cx, lock, ddEnabledState));
 			actors.push_back(reportErrorsExcept(dataDistributionTracker(initData,
@@ -832,8 +833,6 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			actors.push_back(yieldPromiseStream(output.getFuture(), input));
 
 			wait(waitForAll(actors));
-
-			TraceEvent(SevInfo, "ExitingdataDistribution").log();
 			return Void();
 		} catch (Error& e) {
 			trackerCancelled = true;

@@ -52,7 +52,6 @@ public:
 				TraceEvent(SevInfo, "DDTenantFound", self->id()).detail("TenantName", tname).detail("TenantID", t.id);
 			}
 		} catch (Error& e) {
-			TraceEvent(SevWarn, "ErrGettingTenantList").error(e);
 			wait(tr.onError(e));
 		}
 
@@ -62,7 +61,7 @@ public:
 	}
 
 	ACTOR static Future<Void> monitorTenantMap(DDTenantCache* self) {
-		TraceEvent(SevInfo, "StartingTenantCacheMonitor").backtrace();
+		TraceEvent(SevInfo, "StartingTenantCacheMonitor", self->id()).log();
 
 		state Transaction tr(self->dbcx());
 
@@ -95,12 +94,12 @@ public:
 					tenantListUpdated = true;
 				}
 
-				self->tenantCache.swap(updatedTenantCache);
-
 				if (tenantListUpdated) {
+					self->tenantCache.swap(updatedTenantCache);
 					TraceEvent(SevInfo, "DDTenantCache", self->id()).detail("List", self->desc());
 				}
 
+				updatedTenantCache.clear();
 				tr.reset();
 				lastTenantListFetchTime = now();
 				wait(delay(2.0));
