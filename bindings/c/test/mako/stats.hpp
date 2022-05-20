@@ -102,8 +102,8 @@ public:
 		sketches = std::array<DDSketchMako, MAX_OP>();
 	}
 
-	ThreadStatistics(const ThreadStatistics& other) noexcept = default;
-	ThreadStatistics& operator=(const ThreadStatistics& other) noexcept = default;
+	ThreadStatistics(const ThreadStatistics& other) = default;
+	ThreadStatistics& operator=(const ThreadStatistics& other) = default;
 
 	uint64_t getConflictCount() const noexcept { return conflicts; }
 
