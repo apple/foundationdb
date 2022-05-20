@@ -1107,14 +1107,15 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 				const std::string report_file = argv[optind];
 				int i = optind;
 				for (; i < argc; i++) {
+					args.num_report_files = 0;
 					if (argv[i][0] != '-') {
 						strcpy(args.report_files[i], report_file.c_str());
+						args.num_report_files++;
 					} else {
 						optind = i - 1;
 						break;
 					}
 				}
-				args.num_report_files = i;
 			}
 			break;
 		case ARG_ASYNC:
