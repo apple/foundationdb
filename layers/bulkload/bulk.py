@@ -56,14 +56,15 @@ fdb.api_version(22)
 
 db = fdb.open(event_model="gevent")
 
+
 #####################################
 ## This defines a Subspace of keys ##
 #####################################
 
 
 class Subspace(object):
-    def __init__(self, prefixTuple, rawPrefix=""):
-        self.rawPrefix = rawPrefix + fdb.tuple.pack(prefixTuple)
+    def __init__(self, prefix_tuple, raw_prefix=""):
+        self.rawPrefix = raw_prefix + fdb.tuple.pack(prefix_tuple)
 
     def __getitem__(self, name):
         return Subspace((name,), self.rawPrefix)
@@ -76,7 +77,7 @@ class Subspace(object):
 
     def unpack(self, key):
         assert key.startswith(self.rawPrefix)
-        return fdb.tuple.unpack(key[len(self.rawPrefix) :])
+        return fdb.tuple.unpack(key[len(self.rawPrefix):])
 
     def range(self, tuple=()):
         p = fdb.tuple.range(tuple)
