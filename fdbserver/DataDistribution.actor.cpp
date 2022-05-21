@@ -793,10 +793,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 					}
 					shardsAffectedByTeamFailure->updatePhysicalShardToTeams(
 						ShardsAffectedByTeamFailure::PhysicalShard(iShard.srcId.first()), teams, configuration.storageTeamSize, false);
-					//shardsAffectedByTeamFailure->printTeamPhysicalShardsMapping("InitBySrc");
 					shardsAffectedByTeamFailure->updatePhysicalShardToTeams(
 						ShardsAffectedByTeamFailure::PhysicalShard(iShard.destId.first()), destTeams, configuration.storageTeamSize, false);
-					//shardsAffectedByTeamFailure->printTeamPhysicalShardsMapping("InitByDest");
 				}
 
 				// if (g_network->isSimulated()) {
@@ -979,7 +977,6 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			wait(waitForAll(actors));
 			return Void();
 		} catch (Error& e) {
-			//std::cout << "\033[1;31m" << "DD ERROR: " << e.name() << " " << e.what() << "\033[0m\n";
 			trackerCancelled = true;
 			state Error err = e;
 			TraceEvent("DataDistributorDestroyTeamCollections").error(e);

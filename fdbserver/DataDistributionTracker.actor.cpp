@@ -1199,21 +1199,6 @@ ShardsAffectedByTeamFailure::Team ShardsAffectedByTeamFailure::getRemoteTeamIfHa
 	return returnTeam;
 }
 
-void ShardsAffectedByTeamFailure::removePysicalShardFromRemoteTeam(uint64_t inputPhysicalShardID) {
-	ASSERT(CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
-	for (auto [team, physicalShards] : teamPhysicalShards) {
-		if (team.primary == false) {
-			for (auto it = teamPhysicalShards[team].begin(); it != teamPhysicalShards[team].end();) {
-		        if(it->id == inputPhysicalShardID) {
-		            it = teamPhysicalShards[team].erase(it);
-		        } else {
-		        	++it;
-		        }
-		    }
-		}
-	}
-}
-
 // At beginning of the transition from the initial state without physical shard notion
 // to the physical shard aware state, the physicalShard set only contains one element which is anonymousShardId[0]
 // After a period in the transition, the physicalShard set of the team contains some meaningful physicalShardIDs
