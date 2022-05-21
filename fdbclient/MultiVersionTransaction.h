@@ -80,7 +80,6 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 		 * and take the shortcut. */
 		FDBGetRangeReqAndResult getRange;
 		unsigned char buffer[32];
-		bool boundaryAndExist;
 	} FDBMappedKeyValue;
 
 #pragma pack(push, 4)
