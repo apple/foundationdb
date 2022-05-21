@@ -53,7 +53,8 @@ enum TesterOptionId {
 	OPT_OUTPUT_PIPE,
 	OPT_FDB_API_VERSION,
 	OPT_TRANSACTION_RETRY_LIMIT,
-	OPT_BLOB_GRANULE_LOCAL_FILE_PATH
+	OPT_BLOB_GRANULE_LOCAL_FILE_PATH,
+	OPT_STATS_INTERVAL
 };
 
 CSimpleOpt::SOption TesterOptionDefs[] = //
@@ -77,6 +78,7 @@ CSimpleOpt::SOption TesterOptionDefs[] = //
 	  { OPT_FDB_API_VERSION, "--api-version", SO_REQ_SEP },
 	  { OPT_TRANSACTION_RETRY_LIMIT, "--transaction-retry-limit", SO_REQ_SEP },
 	  { OPT_BLOB_GRANULE_LOCAL_FILE_PATH, "--blob-granule-local-file-path", SO_REQ_SEP },
+	  { OPT_STATS_INTERVAL, "--stats-interval", SO_REQ_SEP },
 	  SO_END_OF_OPTIONS };
 
 void printProgramUsage(const char* execName) {
@@ -118,6 +120,8 @@ void printProgramUsage(const char* execName) {
 	       "				 Path to blob granule files on local filesystem\n"
 	       "  -f, --test-file FILE\n"
 	       "                 Test file to run.\n"
+	       "  --stats-interval MILLISECONDS\n"
+	       "                 Time interval in milliseconds for printing workload statistics (default: 0 - disabled).\n"
 	       "  -h, --help     Display this help and exit.\n",
 	       FDB_API_VERSION);
 }
@@ -213,6 +217,9 @@ bool processArg(TesterOptions& options, const CSimpleOpt& args) {
 		break;
 	case OPT_BLOB_GRANULE_LOCAL_FILE_PATH:
 		options.bgBasePath = args.OptionArg();
+		break;
+	case OPT_STATS_INTERVAL:
+		processIntOption(args.OptionText(), args.OptionArg(), 0, 60000, options.statsIntervalMs);
 		break;
 	}
 	return true;
@@ -335,6 +342,9 @@ bool runWorkloads(TesterOptions& options) {
 		}
 
 		scheduler->start();
+		if (options.statsIntervalMs) {
+			workloadMgr.schedulePrintStatistics(options.statsIntervalMs);
+		}
 		workloadMgr.run();
 		return !workloadMgr.failed();
 	} catch (const std::runtime_error& err) {

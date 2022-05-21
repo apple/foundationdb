@@ -355,8 +355,8 @@ bool canLaunchDest(const std::vector<std::pair<Reference<IDataDistributionTeam>,
 		return true;
 	}
 	int workFactor = getDestWorkFactor();
-	for (auto& team : candidateTeams) {
-		for (UID id : team.first->getServerIDs()) {
+	for (auto& [team, _] : candidateTeams) {
+		for (UID id : team->getServerIDs()) {
 			if (!busymapDest[id].canLaunch(priority, workFactor)) {
 				return false;
 			}
@@ -378,8 +378,8 @@ void launchDest(RelocateData& relocation,
                 std::map<UID, Busyness>& destBusymap) {
 	ASSERT(relocation.completeDests.empty());
 	int destWorkFactor = getDestWorkFactor();
-	for (auto& team : candidateTeams) {
-		for (UID id : team.first->getServerIDs()) {
+	for (auto& [team, _] : candidateTeams) {
+		for (UID id : team->getServerIDs()) {
 			relocation.completeDests.push_back(id);
 			destBusymap[id].addWork(relocation.priority, destWorkFactor);
 		}
