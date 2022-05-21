@@ -160,7 +160,6 @@ typedef struct mappedkeyvalue {
 	 * take the shortcut. */
 	FDBGetRangeReqAndResult getRange;
 	unsigned char buffer[32];
-	fdb_bool_t boundaryAndExist;
 } FDBMappedKeyValue;
 
 #pragma pack(push, 4)
@@ -385,7 +384,6 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_mapped_range(FDBTran
                                                                          int target_bytes,
                                                                          FDBStreamingMode mode,
                                                                          int iteration,
-                                                                         int matchIndex,
                                                                          fdb_bool_t snapshot,
                                                                          fdb_bool_t reverse);
 
