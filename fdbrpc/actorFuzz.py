@@ -30,7 +30,7 @@ class Context:
     def __init__(self):
         self.random = random.Random()
 
-    def uniqueID(self):
+    def unique_id(self):
         return self.random.randint(100000, 999999)
 
 
@@ -42,8 +42,8 @@ class ExecContext:
     iterationsLeft = 1000
     ifstate = 0
 
-    def __init__(self, inputSeq):
-        self.input = iter(inputSeq)
+    def __init__(self, input_seq):
+        self.input = iter(input_seq)
         self.output = []
 
     def inp(self):
@@ -52,7 +52,7 @@ class ExecContext:
     def out(self, x):
         self.output.append(x)
 
-    def infinityCheck(self):
+    def infinity_check(self):
         self.iterationsLeft -= 1
         if self.iterationsLeft <= 0:
             raise InfiniteLoop()
@@ -77,21 +77,21 @@ class F(object):
         return False
 
 
-class hashF(F):
+class HashF(F):
     def __init__(self, cx):
         self.cx = cx
-        self.uniqueID = cx.uniqueID()
+        self.uniqueID = cx.unique_id()
 
     def __str__(self):
         return indent(self.cx) + "outputStream.send( %d );\n" % self.uniqueID
 
     def eval(self, ecx):
-        ecx.infinityCheck()
+        ecx.infinity_check()
         ecx.out(self.uniqueID)
         return OK
 
 
-class compoundF(F):
+class CompoundF(F):
     def __init__(self, cx, children):
         self.cx = cx
         self.children = []
@@ -106,7 +106,7 @@ class compoundF(F):
 
     def eval(self, ecx):
         for c in self.children:
-            ecx.infinityCheck()
+            ecx.infinity_check()
             result = c.eval(ecx)
             if result != OK:
                 break
@@ -116,14 +116,14 @@ class compoundF(F):
         return any(c.containsbreak() for c in self.children)
 
 
-class loopF(F):
+class LoopF(F):
     def __init__(self, cx):
         self.cx = cx
         ccx = copy.copy(cx)
         ccx.indent += 1
         ccx.inLoop = True
-        self.body = compoundF(ccx, [hashF(ccx)] + [fuzzCode(ccx)(ccx)] + [hashF(ccx)])
-        self.uniqueID = cx.uniqueID()
+        self.body = CompoundF(ccx, [HashF(ccx)] + [fuzz_code(ccx)(ccx)] + [HashF(ccx)])
+        self.uniqueID = cx.unique_id()
         self.forever = cx.random.random() < 0.1
 
     def __str__(self):
@@ -144,7 +144,7 @@ class loopF(F):
     def eval(self, ecx):
         if self.forever:
             while True:
-                ecx.infinityCheck()
+                ecx.infinity_check()
                 result = self.body.eval(ecx)
                 if result == BREAK:
                     break
@@ -152,7 +152,7 @@ class loopF(F):
                     return result
         else:
             for i in range(5):
-                ecx.infinityCheck()
+                ecx.infinity_check()
                 result = self.body.eval(ecx)
                 if result == BREAK:
                     break
@@ -164,14 +164,14 @@ class loopF(F):
         return self.forever and not self.body.containsbreak()
 
 
-class rangeForF(F):
+class RangeForF(F):
     def __init__(self, cx):
         self.cx = cx
         ccx = copy.copy(cx)
         ccx.indent += 1
         ccx.inLoop = True
-        self.body = compoundF(ccx, [hashF(ccx)] + [fuzzCode(ccx)(ccx)] + [hashF(ccx)])
-        self.uniqueID = cx.uniqueID()
+        self.body = CompoundF(ccx, [HashF(ccx)] + [fuzz_code(ccx)(ccx)] + [HashF(ccx)])
+        self.uniqueID = cx.unique_id()
 
     def __str__(self):
         return (
@@ -196,7 +196,7 @@ class rangeForF(F):
 
     def eval(self, ecx):
         for i in range(1, 4):
-            ecx.infinityCheck()
+            ecx.infinity_check()
             result = self.body.eval(ecx)
             if result == BREAK:
                 break
@@ -208,18 +208,18 @@ class rangeForF(F):
         return False
 
 
-class ifF(F):
+class IfF(F):
     def __init__(self, cx):
         self.cx = cx
         ccx = copy.copy(cx)
         ccx.indent += 1
         self.toggle = cx.random.randint(0, 1)
-        self.ifbody = compoundF(ccx, [hashF(ccx)] + [fuzzCode(ccx)(ccx)] + [hashF(ccx)])
+        self.ifbody = CompoundF(ccx, [HashF(ccx)] + [fuzz_code(ccx)(ccx)] + [HashF(ccx)])
         if cx.random.random() < 0.5:
             ccx = copy.copy(cx)
             ccx.indent += 1
-            self.elsebody = compoundF(
-                ccx, [hashF(ccx)] + [fuzzCode(ccx)(ccx)] + [hashF(ccx)]
+            self.elsebody = CompoundF(
+                ccx, [HashF(ccx)] + [fuzz_code(ccx)(ccx)] + [HashF(ccx)]
             )
         else:
             self.elsebody = None
@@ -236,8 +236,8 @@ class ifF(F):
         return s
 
     def eval(self, ecx):
-        ecx.infinityCheck()
-        ecx.ifstate = ecx.ifstate + 1
+        ecx.infinity_check()
+        ecx.ifstate += 1
         if (ecx.ifstate & 1) == self.toggle:
             return self.ifbody.eval(ecx)
         elif self.elsebody:
@@ -256,15 +256,15 @@ class ifF(F):
         )
 
 
-class tryF(F):
+class TryF(F):
     def __init__(self, cx):
         self.cx = cx
         ccx = copy.copy(cx)
         ccx.indent += 1
-        self.body = compoundF(ccx, [hashF(ccx)] + [fuzzCode(ccx)(ccx)] + [hashF(ccx)])
+        self.body = CompoundF(ccx, [HashF(ccx)] + [fuzz_code(ccx)(ccx)] + [HashF(ccx)])
         ccx = copy.copy(cx)
         ccx.indent += 1
-        self.catch = compoundF(ccx, [hashF(ccx)] + [fuzzCode(ccx)(ccx)] + [hashF(ccx)])
+        self.catch = CompoundF(ccx, [HashF(ccx)] + [fuzz_code(ccx)(ccx)] + [HashF(ccx)])
 
     def __str__(self):
         return (
@@ -279,7 +279,7 @@ class tryF(F):
         )
 
     def eval(self, ecx):
-        ecx.infinityCheck()
+        ecx.infinity_check()
         result = self.body.eval(ecx)
         if result != THROW:
             return result
@@ -292,11 +292,11 @@ class tryF(F):
         return self.body.containsbreak() or self.catch.containsbreak()
 
 
-def doubleF(cx):
-    return compoundF(cx, [fuzzCode(cx)(cx)] + [hashF(cx)] + [fuzzCode(cx)(cx)])
+def double_f(cx):
+    return CompoundF(cx, [fuzz_code(cx)(cx)] + [HashF(cx)] + [fuzz_code(cx)(cx)])
 
 
-class breakF(F):
+class BreakF(F):
     def __init__(self, cx):
         self.cx = cx
 
@@ -307,14 +307,14 @@ class breakF(F):
         return True
 
     def eval(self, ecx):
-        ecx.infinityCheck()
+        ecx.infinity_check()
         return BREAK
 
     def containsbreak(self):
         return True
 
 
-class continueF(F):
+class ContinueF(F):
     def __init__(self, cx):
         self.cx = cx
 
@@ -325,14 +325,14 @@ class continueF(F):
         return True
 
     def eval(self, ecx):
-        ecx.infinityCheck()
+        ecx.infinity_check()
         return CONTINUE
 
 
-class waitF(F):
+class WaitF(F):
     def __init__(self, cx):
         self.cx = cx
-        self.uniqueID = cx.uniqueID()
+        self.uniqueID = cx.unique_id()
 
     def __str__(self):
         return (
@@ -343,13 +343,13 @@ class waitF(F):
         )
 
     def eval(self, ecx):
-        ecx.infinityCheck()
+        ecx.infinity_check()
         input = ecx.inp()
         ecx.out((input + self.uniqueID) & 0xFFFFFFFF)
         return OK
 
 
-class throwF(F):
+class ThrowF(F):
     def __init__(self, cx):
         self.cx = cx
 
@@ -360,11 +360,11 @@ class throwF(F):
         return True
 
     def eval(self, ecx):
-        ecx.infinityCheck()
+        ecx.infinity_check()
         return THROW
 
 
-class throwF2(throwF):
+class ThrowF2(ThrowF):
     def __str__(self):
         return indent(self.cx) + "throw_operation_failed();\n"
 
@@ -372,7 +372,7 @@ class throwF2(throwF):
         return False  # The actor compiler doesn't know the function never returns
 
 
-class throwF3(throwF):
+class ThrowF3(ThrowF):
     def __str__(self):
         return indent(self.cx) + "wait( error ); // throw operation_failed()\n"
 
@@ -380,10 +380,10 @@ class throwF3(throwF):
         return False  # The actor compiler doesn't know that 'error' always contains an error
 
 
-class returnF(F):
+class ReturnF(F):
     def __init__(self, cx):
         self.cx = cx
-        self.uniqueID = cx.uniqueID()
+        self.uniqueID = cx.unique_id()
 
     def __str__(self):
         return indent(self.cx) + "return %d;\n" % self.uniqueID
@@ -392,29 +392,29 @@ class returnF(F):
         return True
 
     def eval(self, ecx):
-        ecx.infinityCheck()
+        ecx.infinity_check()
         ecx.returnValue = self.uniqueID
         return RETURN
 
 
-def fuzzCode(cx):
-    choices = [loopF, rangeForF, tryF, doubleF, ifF]
+def fuzz_code(cx):
+    choices = [LoopF, RangeForF, TryF, double_f, IfF]
     if cx.indent < 2:
-        choices = choices * 2
-    choices += [waitF, returnF]
+        choices *= 2
+    choices += [WaitF, ReturnF]
     if cx.inLoop:
-        choices += [breakF, continueF]
-    choices = choices * 3 + [throwF, throwF2, throwF3]
+        choices += [BreakF, ContinueF]
+    choices = choices * 3 + [ThrowF, ThrowF2, ThrowF3]
     return cx.random.choice(choices)
 
 
-def randomActor(index):
+def random_actor(index):
     while 1:
         cx = Context()
         cx.indent += 1
-        actor = fuzzCode(cx)(cx)
-        actor = compoundF(
-            cx, [actor, returnF(cx)]
+        actor = fuzz_code(cx)(cx)
+        actor = CompoundF(
+            cx, [actor, ReturnF(cx)]
         )  # Add a return at the end if the end is reachable
         name = "actorFuzz%d" % index
         text = (
@@ -477,7 +477,7 @@ print(
 print('#include "ActorFuzz.h"\n', file=outputFile)
 print("#ifndef WIN32\n", file=outputFile)
 
-actors = [randomActor(i) for i in range(testCaseCount)]
+actors = [random_actor(i) for i in range(testCaseCount)]
 
 for actor in actors:
     print(actor.text + "\n", file=outputFile)
