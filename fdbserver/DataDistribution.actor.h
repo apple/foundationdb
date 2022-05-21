@@ -247,7 +247,7 @@ public:
 	void updatePhysicalShardToTeams(PhysicalShard physicalShard, 
 		std::vector<Team> inputTeams, int expectedNumServersPerTeam, bool ignoreRemoteTeam);
 	uint64_t getPhysicalShardFor(Team team); // return UID().first() if no physicalShard is available
-	Team getRemoteTeamIfHas(uint64_t physicalShardID);
+	Team getRemoteTeamIfHas(uint64_t physicalShardID, int expectedTeamSize);
 	void removePysicalShardFromRemoteTeam(uint64_t inputPhysicalShardID);
 	bool allTeamsOfKeyRangesHavePhysicalShard();
 	void printTeamPhysicalShardsMapping(std::string);

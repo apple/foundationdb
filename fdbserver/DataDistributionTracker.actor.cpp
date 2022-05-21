@@ -1176,17 +1176,27 @@ void ShardsAffectedByTeamFailure::updatePhysicalShardToTeams(PhysicalShard input
 	}
 }
 
-ShardsAffectedByTeamFailure::Team ShardsAffectedByTeamFailure::getRemoteTeamIfHas(uint64_t inputPhysicalShardID) {
+ShardsAffectedByTeamFailure::Team ShardsAffectedByTeamFailure::getRemoteTeamIfHas(uint64_t inputPhysicalShardID, int expectedTeamSize) {
 	ASSERT(CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
+	Team returnTeam;
 	for (auto [team, physicalShards] : teamPhysicalShards) {
 		if (team.primary == false) {
-			for (auto physicalShard : physicalShards) {
-				if (physicalShard.id == inputPhysicalShardID)
-					return team;
+			for (auto it = teamPhysicalShards[team].begin(); it != teamPhysicalShards[team].end();) {
+				if (it->id == inputPhysicalShardID) {
+					if (team.servers.size() == expectedTeamSize) {
+						ASSERT(returnTeam==Team());
+						returnTeam = team;
+						break;
+					} else {
+						it = teamPhysicalShards[team].erase(it);
+					}
+				} else {
+					++it;
+				}
 			}
 		}
 	}
-	return Team();
+	return returnTeam;
 }
 
 void ShardsAffectedByTeamFailure::removePysicalShardFromRemoteTeam(uint64_t inputPhysicalShardID) {
