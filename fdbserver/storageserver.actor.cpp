@@ -9472,6 +9472,10 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 
 		throw internal_error();
 	} catch (Error& e) {
+		if (self.byteSampleRecovery.isValid()) {
+			self.byteSampleRecovery.cancel();
+		}
+
 		if (recovered.canBeSet())
 			recovered.send(Void());
 
