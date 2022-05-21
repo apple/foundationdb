@@ -130,6 +130,19 @@ UID UID::fromString(std::string const& s) {
 	return UID(a, b);
 }
 
+UID UID::fromStringThrowsOnFailure(std::string const& s) {
+	if (s.size() != 32) {
+		// invalid string size
+		throw operation_failed();
+	}
+	uint64_t a = 0, b = 0;
+	int r = sscanf(s.c_str(), "%16" SCNx64 "%16" SCNx64, &a, &b);
+	if (r != 2) {
+		throw operation_failed();
+	}
+	return UID(a, b);
+}
+
 std::string UID::shortString() const {
 	return format("%016llx", part[0]);
 }

@@ -55,7 +55,9 @@ private:
 		ASSERT(id >= 0);
 		prefix = makeString(8 + subspace.size());
 		uint8_t* data = mutateString(prefix);
-		memcpy(data, subspace.begin(), subspace.size());
+		if (subspace.size() > 0) {
+			memcpy(data, subspace.begin(), subspace.size());
+		}
 		int64_t swapped = bigEndian64(id);
 		memcpy(data + subspace.size(), &swapped, 8);
 	}

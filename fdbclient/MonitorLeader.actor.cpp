@@ -270,6 +270,9 @@ TEST_CASE("/fdbclient/MonitorLeader/ConnectionString/hostname") {
 
 ACTOR Future<std::vector<NetworkAddress>> tryResolveHostnamesImpl(ClusterConnectionString* self) {
 	state std::set<NetworkAddress> allCoordinatorsSet;
+	for (const auto& coord : self->coords) {
+		allCoordinatorsSet.insert(coord);
+	}
 	std::vector<Future<Void>> fs;
 	for (auto& hostname : self->hostnames) {
 		fs.push_back(map(hostname.resolve(), [&](Optional<NetworkAddress> const& addr) -> Void {
@@ -280,9 +283,6 @@ ACTOR Future<std::vector<NetworkAddress>> tryResolveHostnamesImpl(ClusterConnect
 		}));
 	}
 	wait(waitForAll(fs));
-	for (const auto& coord : self->coords) {
-		allCoordinatorsSet.insert(coord);
-	}
 	std::vector<NetworkAddress> allCoordinators(allCoordinatorsSet.begin(), allCoordinatorsSet.end());
 	std::sort(allCoordinators.begin(), allCoordinators.end());
 	return allCoordinators;
@@ -300,7 +300,7 @@ TEST_CASE("/fdbclient/MonitorLeader/PartialResolve") {
 
 	INetworkConnections::net()->addMockTCPEndpoint(hn, port, { address });
 
-	state ClusterConnectionString cs(connectionString);
+	ClusterConnectionString cs(connectionString);
 	state std::vector<NetworkAddress> allCoordinators = wait(cs.tryResolveHostnames());
 	ASSERT(allCoordinators.size() == 1 &&
 	       std::find(allCoordinators.begin(), allCoordinators.end(), address) != allCoordinators.end());
@@ -890,8 +890,6 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 		state ClientLeaderRegInterface clientLeaderServer = clientLeaderServers[index];
 		state OpenDatabaseCoordRequest req;
 
-		coordinator->set(clientLeaderServer);
-
 		req.clusterKey = cs.clusterKey();
 		req.hostnames = cs.hostnames;
 		req.coordinators = cs.coordinators();
@@ -922,16 +920,26 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 			incorrectTime = Optional<double>();
 		}
 
-		state ErrorOr<CachedSerialization<ClientDBInfo>> rep;
+		state Future<ErrorOr<CachedSerialization<ClientDBInfo>>> repFuture;
 		if (clientLeaderServer.hostname.present()) {
-			wait(store(rep,
-			           tryGetReplyFromHostname(req,
-			                                   clientLeaderServer.hostname.get(),
-			                                   WLTOKEN_CLIENTLEADERREG_OPENDATABASE,
-			                                   TaskPriority::CoordinationReply)));
+			repFuture = tryGetReplyFromHostname(req,
+			                                    clientLeaderServer.hostname.get(),
+			                                    WLTOKEN_CLIENTLEADERREG_OPENDATABASE,
+			                                    TaskPriority::CoordinationReply);
 		} else {
-			wait(store(rep, clientLeaderServer.openDatabase.tryGetReply(req, TaskPriority::CoordinationReply)));
+			repFuture = clientLeaderServer.openDatabase.tryGetReply(req, TaskPriority::CoordinationReply);
 		}
+
+		// We need to update the coordinator even if it hasn't changed in case we are establishing a new connection in
+		// FlowTransport. If so, setting the coordinator here forces protocol version monitoring to restart with the new
+		// peer object.
+		//
+		// Both the tryGetReply call and the creation of the ClientLeaderRegInterface above should result in the Peer
+		// object being created in FlowTransport. Having this peer is a prerequisite to us signaling the AsyncVar.
+		coordinator->setUnconditional(clientLeaderServer);
+
+		state ErrorOr<CachedSerialization<ClientDBInfo>> rep = wait(repFuture);
+
 		if (rep.present()) {
 			if (rep.get().read().forward.present()) {
 				TraceEvent("MonitorProxiesForwarding")

@@ -48,6 +48,7 @@ public:
 	int numClientThreads;
 	int numDatabases;
 	int numClients;
+	int statsIntervalMs = 0;
 	std::vector<std::pair<std::string, std::string>> knobs;
 	TestSpec testSpec;
 	std::string bgBasePath;

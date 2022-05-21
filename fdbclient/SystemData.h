@@ -99,11 +99,13 @@ void decodeStorageCacheValue(const ValueRef& value, std::vector<uint16_t>& serve
 //	Using the serverID as a prefix, then followed by the beginning of the shard range
 //	as the key, the value indicates whether the shard does or does not exist on the server.
 //	These values can be changed as data movement occurs.
+extern const KeyRangeRef serverKeysRange;
 extern const KeyRef serverKeysPrefix;
 extern const ValueRef serverKeysTrue, serverKeysTrueEmptyRange, serverKeysFalse;
 const Key serverKeysKey(UID serverID, const KeyRef& keys);
 const Key serverKeysPrefixFor(UID serverID);
 UID serverKeysDecodeServer(const KeyRef& key);
+std::pair<UID, Key> serverKeysDecodeServerBegin(const KeyRef& key);
 bool serverHasKey(ValueRef storedValue);
 
 extern const KeyRangeRef conflictingKeysRange;
