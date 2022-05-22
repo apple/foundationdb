@@ -102,8 +102,8 @@ CheckpointMetaData decodeCheckpointValue(const ValueRef& value);
 
 // "\xff/dataMoves/[[UID]] := [[DataMoveMetaData]]"
 extern const KeyRangeRef dataMoveKeys;
-const Key dataMoveKeyFor(UID checkpontId);
-const Value dataMoveValue(const DataMoveMetaData& checkpoint);
+const Key dataMoveKeyFor(UID dataMoveId);
+const Value dataMoveValue(const DataMoveMetaData& dataMove);
 UID decodeDataMoveKey(const KeyRef& key);
 DataMoveMetaData decodeDataMoveValue(const ValueRef& value);
 
