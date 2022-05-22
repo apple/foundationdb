@@ -48,7 +48,6 @@ from sphinx.directives import ObjectDescription
 from sphinx.util.nodes import make_refnode
 from sphinx.util.docfields import Field, GroupedField, TypedField
 
-
 # REs for Ruby signatures
 rb_sig_re = re.compile(
     r"""^ ([\w.]*\.)?            # class name(s)
@@ -166,7 +165,7 @@ class RubyObject(ObjectDescription):
             if name_prefix and name_prefix.startswith(classname):
                 fullname = name_prefix + name
                 # class name is given again in the signature
-                name_prefix = name_prefix[len(classname) :].lstrip(".")
+                name_prefix = name_prefix[len(classname):].lstrip(".")
             else:
                 separator = separators[self.objtype]
                 fullname = classname + separator + name_prefix + name
@@ -544,7 +543,7 @@ class RubyModuleIndex(Index):
 
             for ignore in ignores:
                 if modname.startswith(ignore):
-                    modname = modname[len(ignore) :]
+                    modname = modname[len(ignore):]
                     stripped = ignore
                     break
             else:
@@ -656,7 +655,7 @@ class RubyDomain(Domain):
             if fn == docname:
                 del self.data["modules"][modname]
 
-    def find_obj(self, env, modname, classname, name, type, searchorder=0):
+    def find_obj(self, modname, classname, name, type, searchorder=0):
         """
         Find a Ruby object for "name", perhaps using the given module and/or
         classname.
@@ -673,15 +672,15 @@ class RubyDomain(Domain):
         newname = None
         if searchorder == 1:
             if (
-                modname
-                and classname
-                and modname + "::" + classname + "#" + name in objects
+                    modname
+                    and classname
+                    and modname + "::" + classname + "#" + name in objects
             ):
                 newname = modname + "::" + classname + "#" + name
             elif (
-                modname
-                and classname
-                and modname + "::" + classname + "." + name in objects
+                    modname
+                    and classname
+                    and modname + "::" + classname + "." + name in objects
             ):
                 newname = modname + "::" + classname + "." + name
             elif modname and modname + "::" + name in objects:
@@ -710,22 +709,22 @@ class RubyDomain(Domain):
             elif modname and modname + "." + name in objects:
                 newname = modname + "." + name
             elif (
-                modname
-                and classname
-                and modname + "::" + classname + "#" + name in objects
+                    modname
+                    and classname
+                    and modname + "::" + classname + "#" + name in objects
             ):
                 newname = modname + "::" + classname + "#" + name
             elif (
-                modname
-                and classname
-                and modname + "::" + classname + "." + name in objects
+                    modname
+                    and classname
+                    and modname + "::" + classname + "." + name in objects
             ):
                 newname = modname + "::" + classname + "." + name
             # special case: object methods
             elif (
-                type in ("func", "meth")
-                and "." not in name
-                and "object." + name in objects
+                    type in ("func", "meth")
+                    and "." not in name
+                    and "object." + name in objects
             ):
                 newname = "object." + name
         if newname is None:
@@ -752,7 +751,7 @@ class RubyDomain(Domain):
             modname = node.get("rb:module")
             clsname = node.get("rb:class")
             searchorder = node.hasattr("refspecific") and 1 or 0
-            name, obj = self.find_obj(env, modname, clsname, target, typ, searchorder)
+            name, obj = self.find_obj(modname, clsname, target, typ, searchorder)
             if not obj:
                 return None
             else:
@@ -760,9 +759,9 @@ class RubyDomain(Domain):
 
     def get_objects(self):
         for modname, info in self.data["modules"].items():
-            yield (modname, modname, "module", info[0], "module-" + modname, 0)
+            yield modname, modname, "module", info[0], "module-" + modname, 0
         for refname, (docname, type) in self.data["objects"].items():
-            yield (refname, refname, type, docname, refname, 1)
+            yield refname, refname, type, docname, refname, 1
 
 
 def setup(app):
