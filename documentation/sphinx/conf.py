@@ -13,6 +13,7 @@
 import sphinx_bootstrap_theme
 import sys
 import os
+import xml.etree.ElementTree as ET
 
 # If extensions (or modules to document with autodoc) are in another directory,
 # add these directories to sys.path here. If the directory is relative to the
@@ -52,7 +53,6 @@ project = u"FoundationDB"
 copyright = u"2013-2021 Apple, Inc and the FoundationDB project authors"
 
 # Load the version information from 'versions.target'
-import xml.etree.ElementTree as ET
 
 version_path = os.path.join(
     os.path.dirname(sys.executable), "..", "..", "..", "versions.target"
@@ -194,16 +194,15 @@ htmlhelp_basename = "FoundationDB"
 # Disable permalinks
 html_add_permalinks = ""
 
-
 # -- Options for LaTeX output --------------------------------------------------
 
 latex_elements = {
     # The paper size ('letterpaper' or 'a4paper').
-    #'papersize': 'letterpaper',
+    # 'papersize': 'letterpaper',
     # The font size ('10pt', '11pt' or '12pt').
-    #'pointsize': '10pt',
+    # 'pointsize': '10pt',
     # Additional stuff for the LaTeX preamble.
-    #'preamble': '',
+    # 'preamble': '',
 }
 
 # Grouping the document tree into LaTeX files. List of tuples
@@ -278,6 +277,6 @@ texinfo_documents = [
 # texinfo_show_urls = 'footnote'
 
 
-########### Check for inappropriate use of the default role ##########
+# Check for inappropriate use of the default role ##########
 
 default_role = "broken"
