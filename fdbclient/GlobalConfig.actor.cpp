@@ -155,15 +155,14 @@ void GlobalConfig::erase(KeyRangeRef range) {
 // function performs a one-time migration of data in these keys to the new
 // global configuration key space.
 ACTOR Future<Void> GlobalConfig::migrate(GlobalConfig* self) {
+	state Key migratedKey("\xff\x02/fdbClientInfo/migrated/"_sr);
 	state Reference<ReadYourWritesTransaction> tr;
 	try {
 		loop {
 			tr = makeReference<ReadYourWritesTransaction>(Database(Reference<DatabaseContext>::addRef(self->cx)));
-			wait(delay(0));
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
 			try {
-				state Key migratedKey("\xff\x02/fdbClientInfo/migrated/"_sr);
 				state Optional<Value> migrated = wait(tr->get(migratedKey));
 				if (migrated.present()) {
 					// Already performed migration.
@@ -198,12 +197,15 @@ ACTOR Future<Void> GlobalConfig::migrate(GlobalConfig* self) {
 				// attempt this migration at the same time, sometimes resulting in
 				// aborts due to conflicts. Purposefully avoid retrying, making this
 				// migration best-effort.
-				TraceEvent(SevInfo, "GlobalConfig_MigrationError").detail("What", e.what());
+				TraceEvent(SevInfo, "GlobalConfig_RetryableMigrationError").error(e);
 				wait(tr->onError(e));
+				tr.clear();
+				wait(delay(0));
 			}
 		}
 	} catch (Error& e) {
 		// Catch non-retryable errors (and do nothing).
+		TraceEvent(SevWarnAlways, "GlobalConfig_MigrationError").error(e);
 	}
 	return Void();
 }
@@ -218,7 +220,6 @@ ACTOR Future<Void> GlobalConfig::refresh(GlobalConfig* self) {
 	loop {
 		try {
 			tr = makeReference<ReadYourWritesTransaction>(Database(Reference<DatabaseContext>::addRef(self->cx)));
-			wait(delay(0));
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			RangeResult result = wait(tr->getRange(globalConfigDataKeys, CLIENT_KNOBS->TOO_MANY));
 			for (const auto& kv : result) {
@@ -229,6 +230,8 @@ ACTOR Future<Void> GlobalConfig::refresh(GlobalConfig* self) {
 		} catch (Error& e) {
 			TraceEvent("GlobalConfigRefreshError").errorUnsuppressed(e).suppressFor(1.0);
 			wait(tr->onError(e));
+			tr.clear();
+			wait(delay(0));
 		}
 	}
 	return Void();
@@ -237,56 +240,67 @@ ACTOR Future<Void> GlobalConfig::refresh(GlobalConfig* self) {
 // Applies updates to the local copy of the global configuration when this
 // process receives an updated history.
 ACTOR Future<Void> GlobalConfig::updater(GlobalConfig* self, const ClientDBInfo* dbInfo) {
-	wait(self->cx->onConnected());
-	wait(self->migrate(self));
-
-	wait(self->refresh(self));
-	self->initialized.send(Void());
-
 	loop {
 		try {
-			wait(self->dbInfoChanged.onTrigger());
+			if (self->initialized.canBeSet()) {
+				wait(self->cx->onConnected());
+				wait(self->migrate(self));
 
-			auto& history = dbInfo->history;
-			if (history.size() == 0) {
-				continue;
+				wait(self->refresh(self));
+				self->initialized.send(Void());
 			}
 
-			if (self->lastUpdate < history[0].version) {
-				// This process missed too many global configuration
-				// history updates or the protocol version changed, so it
-				// must re-read the entire configuration range.
-				wait(self->refresh(self));
-				if (dbInfo->history.size() > 0) {
-					self->lastUpdate = dbInfo->history.back().version;
-				}
-			} else {
-				// Apply history in order, from lowest version to highest
-				// version. Mutation history should already be stored in
-				// ascending version order.
-				for (const auto& vh : history) {
-					if (vh.version <= self->lastUpdate) {
-						continue; // already applied this mutation
+			loop {
+				try {
+					wait(self->dbInfoChanged.onTrigger());
+
+					auto& history = dbInfo->history;
+					if (history.size() == 0) {
+						continue;
 					}
 
-					for (const auto& mutation : vh.mutations.contents()) {
-						if (mutation.type == MutationRef::SetValue) {
-							self->insert(mutation.param1, mutation.param2);
-						} else if (mutation.type == MutationRef::ClearRange) {
-							self->erase(KeyRangeRef(mutation.param1, mutation.param2));
-						} else {
-							ASSERT(false);
+					if (self->lastUpdate < history[0].version) {
+						// This process missed too many global configuration
+						// history updates or the protocol version changed, so it
+						// must re-read the entire configuration range.
+						wait(self->refresh(self));
+						if (dbInfo->history.size() > 0) {
+							self->lastUpdate = dbInfo->history.back().version;
+						}
+					} else {
+						// Apply history in order, from lowest version to highest
+						// version. Mutation history should already be stored in
+						// ascending version order.
+						for (const auto& vh : history) {
+							if (vh.version <= self->lastUpdate) {
+								continue; // already applied this mutation
+							}
+
+							for (const auto& mutation : vh.mutations.contents()) {
+								if (mutation.type == MutationRef::SetValue) {
+									self->insert(mutation.param1, mutation.param2);
+								} else if (mutation.type == MutationRef::ClearRange) {
+									self->erase(KeyRangeRef(mutation.param1, mutation.param2));
+								} else {
+									ASSERT(false);
+								}
+							}
+
+							ASSERT(vh.version > self->lastUpdate);
+							self->lastUpdate = vh.version;
 						}
 					}
 
-					ASSERT(vh.version > self->lastUpdate);
-					self->lastUpdate = vh.version;
+					self->configChanged.trigger();
+				} catch (Error& e) {
+					throw;
 				}
 			}
-
-			self->configChanged.trigger();
 		} catch (Error& e) {
-			throw;
+			// There shouldn't be any uncaught errors that fall to this point,
+			// but in case there are, catch them and restart the updater.
+			TraceEvent("GlobalConfigUpdaterError").error(e);
+			wait(delay(1.0));
 		}
 	}
 }
