@@ -968,7 +968,7 @@ void usage() {
 	printf("%-24s %s\n", "    --tpsinterval=SEC", "Specify the TPS change interval (Default: 10 seconds)");
 	printf("%-24s %s\n", "    --tpschange=<sin|square|pulse>", "Specify the TPS change type (Default: sin)");
 	printf("%-24s %s\n", "    --sampling=RATE", "Specify the sampling rate for latency stats");
-	printf("%-24s %s\n", "-m, --mode=MODE", "Specify the mode (build, run, clean)");
+	printf("%-24s %s\n", "-m, --mode=MODE", "Specify the mode (build, run, clean, report)");
 	printf("%-24s %s\n", "-z, --zipf", "Use zipfian distribution instead of uniform distribution");
 	printf("%-24s %s\n", "    --commitget", "Commit GETs");
 	printf("%-24s %s\n", "    --loggroup=LOGGROUP", "Set client logr group");
@@ -990,6 +990,9 @@ void usage() {
 	printf("%-24s %s\n",
 	       "    --bg_file_path=PATH",
 	       "Read blob granule files from the local filesystem at PATH and materialize the results.");
+	printf("%-24s %s\n",
+	       "    --export_sketch_path=PATH",
+	       "Write the serialized DDSketch data to file at PATH. Can be used in either run or build mode.");
 }
 
 /* parse benchmark paramters */
