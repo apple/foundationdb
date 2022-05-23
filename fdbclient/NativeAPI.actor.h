@@ -269,7 +269,7 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 	                 Reference<TransactionLogInfo> trLogInfo);
 
 	Reference<TransactionState> cloneAndReset(Reference<TransactionLogInfo> newTrLogInfo, bool generateNewSpan) const;
-	TenantInfo getTenantInfo();
+	TenantInfo getTenantInfo(bool allowInvalidId = false);
 
 	Optional<TenantName> const& tenant();
 	bool hasTenant() const;

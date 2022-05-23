@@ -2917,7 +2917,7 @@ Future<KeyRangeLocationInfo> getKeyLocation(Reference<TransactionState> trState,
                                             UseTenant useTenant,
                                             Version version) {
 	auto f = getKeyLocation(trState->cx,
-	                        useTenant ? trState->getTenantInfo() : TenantInfo(),
+	                        useTenant ? trState->getTenantInfo(true) : TenantInfo(),
 	                        key,
 	                        member,
 	                        trState->spanID,
@@ -3056,7 +3056,7 @@ Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations(Reference<Transac
                                                                UseTenant useTenant,
                                                                Version version) {
 	auto f = getKeyRangeLocations(trState->cx,
-	                              useTenant ? trState->getTenantInfo() : TenantInfo(),
+	                              useTenant ? trState->getTenantInfo(true) : TenantInfo(),
 	                              keys,
 	                              limit,
 	                              reverse,
@@ -3167,7 +3167,7 @@ Reference<TransactionState> TransactionState::cloneAndReset(Reference<Transactio
 	return newState;
 }
 
-TenantInfo TransactionState::getTenantInfo() {
+TenantInfo TransactionState::getTenantInfo(bool allowInvalidId /* = false */) {
 	Optional<TenantName> const& t = tenant();
 
 	if (options.rawAccess) {
@@ -3180,7 +3180,7 @@ TenantInfo TransactionState::getTenantInfo() {
 		throw tenants_disabled();
 	}
 
-	ASSERT(tenantId != TenantInfo::INVALID_TENANT);
+	ASSERT(allowInvalidId || tenantId != TenantInfo::INVALID_TENANT);
 	return TenantInfo(t.get(), tenantId);
 }
 
