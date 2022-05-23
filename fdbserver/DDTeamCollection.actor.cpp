@@ -190,8 +190,8 @@ public:
 			}
 
 			bool foundSrc = false;
-			for (int i = 0; i < req.src.size(); i++) {
-				if (self->server_info.count(req.src[i])) {
+			for (const auto& id : req.src) {
+				if (self->server_info.count(id)) {
 					foundSrc = true;
 					break;
 				}
@@ -516,7 +516,7 @@ public:
 			}
 		}
 
-		for (auto& [serverID, server] : self->server_info) {
+		for (const auto& [serverID, server] : self->server_info) {
 			if (!self->server_status.get(serverID).isUnhealthy()) {
 				++serverCount;
 				LocalityData const& serverLocation = server->getLastKnownInterface().locality;
@@ -5281,8 +5281,8 @@ public:
 
 		ASSERT(result >= 8);
 
-		for (auto process = collection->server_info.begin(); process != collection->server_info.end(); process++) {
-			auto teamCount = process->second->getTeams().size();
+		for (const auto& [serverID, server] : collection->server_info) {
+			auto teamCount = server->getTeams().size();
 			ASSERT(teamCount >= 1);
 			// ASSERT(teamCount <= targetTeamsPerServer);
 		}
@@ -5319,8 +5319,8 @@ public:
 
 		// We need to guarantee a server always have at least a team so that the server can participate in data
 		// distribution
-		for (auto process = collection->server_info.begin(); process != collection->server_info.end(); process++) {
-			auto teamCount = process->second->getTeams().size();
+		for (const auto& [serverID, server] : collection->server_info) {
+			auto teamCount = server->getTeams().size();
 			ASSERT(teamCount >= 1);
 		}
 
@@ -5370,7 +5370,7 @@ public:
 
 		wait(collection->getTeam(req));
 
-		auto& [resTeam, srcTeamFound] = req.reply.getFuture().get();
+		const auto [resTeam, srcFound] = req.reply.getFuture().get();
 
 		std::set<UID> expectedServers{ UID(1, 0), UID(2, 0), UID(3, 0) };
 		ASSERT(resTeam.present());
@@ -5422,7 +5422,7 @@ public:
 
 		wait(collection->getTeam(req));
 
-		auto& [resTeam, srcTeamFound] = req.reply.getFuture().get();
+		const auto [resTeam, srcFound] = req.reply.getFuture().get();
 
 		std::set<UID> expectedServers{ UID(2, 0), UID(3, 0), UID(4, 0) };
 		ASSERT(resTeam.present());
@@ -5472,7 +5472,7 @@ public:
 
 		wait(collection->getTeam(req));
 
-		auto& [resTeam, srcTeamFound] = req.reply.getFuture().get();
+		const auto [resTeam, srcFound] = req.reply.getFuture().get();
 
 		std::set<UID> expectedServers{ UID(2, 0), UID(3, 0), UID(4, 0) };
 		ASSERT(resTeam.present());
@@ -5521,7 +5521,7 @@ public:
 
 		wait(collection->getTeam(req));
 
-		auto& [resTeam, srcTeamFound] = req.reply.getFuture().get();
+		const auto [resTeam, srcFound] = req.reply.getFuture().get();
 
 		std::set<UID> expectedServers{ UID(1, 0), UID(2, 0), UID(3, 0) };
 		ASSERT(resTeam.present());
@@ -5572,7 +5572,7 @@ public:
 
 		wait(collection->getTeam(req));
 
-		auto& [resTeam, srcTeamFound] = req.reply.getFuture().get();
+		const auto [resTeam, srcFound] = req.reply.getFuture().get();
 
 		ASSERT(!resTeam.present());
 
@@ -5628,7 +5628,7 @@ public:
 
 		wait(collection->getTeam(req));
 
-		auto& [resTeam, srcTeamFound] = req.reply.getFuture().get();
+		const auto& [resTeam, srcTeamFound] = req.reply.getFuture().get();
 
 		ASSERT(!resTeam.present());
 
@@ -5746,7 +5746,7 @@ public:
 
 		wait(collection->getTeam(req));
 
-		auto& [resTeam, srcTeamFound] = req.reply.getFuture().get();
+		const auto [resTeam, srcFound] = req.reply.getFuture().get();
 
 		std::set<UID> expectedServers{ UID(1, 0), UID(2, 0), UID(3, 0) };
 		ASSERT(resTeam.present());
