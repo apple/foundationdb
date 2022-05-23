@@ -890,8 +890,6 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 		state ClientLeaderRegInterface clientLeaderServer = clientLeaderServers[index];
 		state OpenDatabaseCoordRequest req;
 
-		coordinator->set(clientLeaderServer);
-
 		req.clusterKey = cs.clusterKey();
 		req.hostnames = cs.hostnames;
 		req.coordinators = cs.coordinators();
@@ -922,16 +920,26 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 			incorrectTime = Optional<double>();
 		}
 
-		state ErrorOr<CachedSerialization<ClientDBInfo>> rep;
+		state Future<ErrorOr<CachedSerialization<ClientDBInfo>>> repFuture;
 		if (clientLeaderServer.hostname.present()) {
-			wait(store(rep,
-			           tryGetReplyFromHostname(req,
-			                                   clientLeaderServer.hostname.get(),
-			                                   WLTOKEN_CLIENTLEADERREG_OPENDATABASE,
-			                                   TaskPriority::CoordinationReply)));
+			repFuture = tryGetReplyFromHostname(req,
+			                                    clientLeaderServer.hostname.get(),
+			                                    WLTOKEN_CLIENTLEADERREG_OPENDATABASE,
+			                                    TaskPriority::CoordinationReply);
 		} else {
-			wait(store(rep, clientLeaderServer.openDatabase.tryGetReply(req, TaskPriority::CoordinationReply)));
+			repFuture = clientLeaderServer.openDatabase.tryGetReply(req, TaskPriority::CoordinationReply);
 		}
+
+		// We need to update the coordinator even if it hasn't changed in case we are establishing a new connection in
+		// FlowTransport. If so, setting the coordinator here forces protocol version monitoring to restart with the new
+		// peer object.
+		//
+		// Both the tryGetReply call and the creation of the ClientLeaderRegInterface above should result in the Peer
+		// object being created in FlowTransport. Having this peer is a prerequisite to us signaling the AsyncVar.
+		coordinator->setUnconditional(clientLeaderServer);
+
+		state ErrorOr<CachedSerialization<ClientDBInfo>> rep = wait(repFuture);
+
 		if (rep.present()) {
 			if (rep.get().read().forward.present()) {
 				TraceEvent("MonitorProxiesForwarding")
