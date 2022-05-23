@@ -1177,7 +1177,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 
 					auto req = GetTeamRequest(WantNewServers(rd.wantsNewServers),
 					                          WantTrueBest(isValleyFillerPriority(rd.priority)),
-					                          PreferLowerUtilization::True,
+					                          PreferLowerDiskUtil::True,
 					                          TeamMustHaveShards::False,
 					                          ForReadBalance(rd.reason == RelocateReason::REBALANCE_READ),
 					                          PreferLowerReadUtil::True,
@@ -1757,26 +1757,26 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueueData* self, int teamCollectionIndex,
 				if (isMountainChopperPriority(ddPriority)) {
 					srcReq = GetTeamRequest(WantNewServers::True,
 					                        WantTrueBest::True,
-					                        PreferLowerUtilization::False,
+					                        PreferLowerDiskUtil::False,
 					                        TeamMustHaveShards::True,
 					                        ForReadBalance(readRebalance),
 					                        PreferLowerReadUtil::False);
 					destReq = GetTeamRequest(WantNewServers::True,
 					                         WantTrueBest::False,
-					                         PreferLowerUtilization::True,
+					                         PreferLowerDiskUtil::True,
 					                         TeamMustHaveShards::False,
 					                         ForReadBalance(readRebalance),
 					                         PreferLowerReadUtil::True);
 				} else {
 					srcReq = GetTeamRequest(WantNewServers::True,
 					                        WantTrueBest::False,
-					                        PreferLowerUtilization::False,
+					                        PreferLowerDiskUtil::False,
 					                        TeamMustHaveShards::True,
 					                        ForReadBalance(readRebalance),
 					                        PreferLowerReadUtil::False);
 					destReq = GetTeamRequest(WantNewServers::True,
 					                         WantTrueBest::True,
-					                         PreferLowerUtilization::True,
+					                         PreferLowerDiskUtil::True,
 					                         TeamMustHaveShards::False,
 					                         ForReadBalance(readRebalance),
 					                         PreferLowerReadUtil::True);
@@ -1866,7 +1866,7 @@ ACTOR Future<Void> BgDDMountainChopper(DDQueueData* self, int teamCollectionInde
 				    wait(brokenPromiseToNever(self->teamCollections[teamCollectionIndex].getTeam.getReply(
 				        GetTeamRequest(WantNewServers::True,
 				                       WantTrueBest::False,
-				                       PreferLowerUtilization::True,
+				                       PreferLowerDiskUtil::True,
 				                       TeamMustHaveShards::False))));
 				randomTeam = _randomTeam;
 				traceEvent.detail("DestTeam",
@@ -1878,7 +1878,7 @@ ACTOR Future<Void> BgDDMountainChopper(DDQueueData* self, int teamCollectionInde
 					    wait(brokenPromiseToNever(self->teamCollections[teamCollectionIndex].getTeam.getReply(
 					        GetTeamRequest(WantNewServers::True,
 					                       WantTrueBest::True,
-					                       PreferLowerUtilization::False,
+					                       PreferLowerDiskUtil::False,
 					                       TeamMustHaveShards::True))));
 
 					traceEvent.detail(
@@ -1989,7 +1989,7 @@ ACTOR Future<Void> BgDDValleyFiller(DDQueueData* self, int teamCollectionIndex) 
 				    wait(brokenPromiseToNever(self->teamCollections[teamCollectionIndex].getTeam.getReply(
 				        GetTeamRequest(WantNewServers::True,
 				                       WantTrueBest::False,
-				                       PreferLowerUtilization::False,
+				                       PreferLowerDiskUtil::False,
 				                       TeamMustHaveShards::True))));
 				randomTeam = _randomTeam;
 				traceEvent.detail("SourceTeam",
@@ -2001,7 +2001,7 @@ ACTOR Future<Void> BgDDValleyFiller(DDQueueData* self, int teamCollectionIndex) 
 					    wait(brokenPromiseToNever(self->teamCollections[teamCollectionIndex].getTeam.getReply(
 					        GetTeamRequest(WantNewServers::True,
 					                       WantTrueBest::True,
-					                       PreferLowerUtilization::True,
+					                       PreferLowerDiskUtil::True,
 					                       TeamMustHaveShards::False))));
 
 					traceEvent.detail(
