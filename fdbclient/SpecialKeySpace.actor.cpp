@@ -1932,12 +1932,13 @@ Future<Optional<std::string>> VersionEpochImpl::commit(ReadYourWritesTransaction
 
 ClientProfilingImpl::ClientProfilingImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
 
-ACTOR static Future<RangeResult> ClientProfilingGetRangeActor(ReadYourWritesTransaction* ryw,
-                                                              KeyRef prefix,
-                                                              KeyRangeRef kr) {
-	state RangeResult result;
+Future<RangeResult> ClientProfilingImpl::getRange(ReadYourWritesTransaction* ryw,
+                                                  KeyRangeRef kr,
+                                                  GetRangeLimits limitsHint) const {
+	KeyRef prefix = getKeyRange().begin;
+	RangeResult result = RangeResult();
 	// client_txn_sample_rate
-	state Key sampleRateKey = LiteralStringRef("client_txn_sample_rate").withPrefix(prefix);
+	Key sampleRateKey = LiteralStringRef("client_txn_sample_rate").withPrefix(prefix);
 
 	ryw->getTransaction().setOption(FDBTransactionOptions::RAW_ACCESS);
 
@@ -1958,7 +1959,7 @@ ACTOR static Future<RangeResult> ClientProfilingGetRangeActor(ReadYourWritesTran
 		}
 	}
 	// client_txn_size_limit
-	state Key txnSizeLimitKey = LiteralStringRef("client_txn_size_limit").withPrefix(prefix);
+	Key txnSizeLimitKey = LiteralStringRef("client_txn_size_limit").withPrefix(prefix);
 	if (kr.contains(txnSizeLimitKey)) {
 		auto entry = ryw->getSpecialKeySpaceWriteMap()[txnSizeLimitKey];
 		if (!ryw->readYourWritesDisabled() && entry.first) {
@@ -1975,13 +1976,6 @@ ACTOR static Future<RangeResult> ClientProfilingGetRangeActor(ReadYourWritesTran
 		}
 	}
 	return result;
-}
-
-// TODO : add limitation on set operation
-Future<RangeResult> ClientProfilingImpl::getRange(ReadYourWritesTransaction* ryw,
-                                                  KeyRangeRef kr,
-                                                  GetRangeLimits limitsHint) const {
-	return ClientProfilingGetRangeActor(ryw, getKeyRange().begin, kr);
 }
 
 Future<Optional<std::string>> ClientProfilingImpl::commit(ReadYourWritesTransaction* ryw) {
