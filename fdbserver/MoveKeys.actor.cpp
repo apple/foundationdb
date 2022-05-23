@@ -2180,7 +2180,7 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 								dest.erase(std::remove(dest.begin(), dest.end(), id), dest.end());
 							}
 							src.push_back(id);
-							srcId = destId;
+							srcId = anonymousShardId;
 						}
 						// TODO(psm): We may need to cancel the data move since all sources servers are gone.
 					}
@@ -2193,13 +2193,6 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 							    .detail("Begin", it.key)
 							    .detail("End", keyServers[i + 1].key);
 							throw internal_error();
-						}
-
-						// Assign the shard to teamForDroppedRange in keyServer space.
-						if (srcId != anonymousShardId) {
-							tr.set(keyServersKey(it.key), keyServersValue(src, dest, srcId, UID()));
-						} else {
-							tr.set(keyServersKey(it.key), keyServersValue(UIDtoTagMap, src));
 						}
 
 						if (destId.isValid() && destId != anonymousShardId) {
@@ -2221,6 +2214,15 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 							}
 						}
 
+						const UID shardId = newShardId(deterministicRandom()->randomUInt64(), EmptyRange::True);
+
+						// Assign the shard to teamForDroppedRange in keyServer space.
+						if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+							tr.set(keyServersKey(it.key), keyServersValue(teamForDroppedRange, {}, shardId, UID()));
+						} else {
+							tr.set(keyServersKey(it.key), keyServersValue(UIDtoTagMap, teamForDroppedRange));
+						}
+
 						std::vector<Future<Void>> actors;
 
 						// Unassign the shard from the dest servers.
@@ -2232,8 +2234,13 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 						// Assign the shard to the new team as an empty range.
 						// Note, there could be data loss.
 						for (const UID& id : teamForDroppedRange) {
-							actors.push_back(krmSetRangeCoalescing(
-							    &tr, serverKeysPrefixFor(id), range, allKeys, serverKeysTrueEmptyRange));
+						if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+								actors.push_back(krmSetRangeCoalescing(
+								    &tr, serverKeysPrefixFor(id), range, allKeys, serverKeysValue(shardId)));
+							} else {
+								actors.push_back(krmSetRangeCoalescing(
+								    &tr, serverKeysPrefixFor(id), range, allKeys, serverKeysTrueEmptyRange));
+							}
 						}
 
 						wait(waitForAll(actors));
@@ -2250,7 +2257,8 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 						    .detail("Key", it.key)
 						    .detail("ValueSrc", describe(src))
 						    .detail("ValueDest", describe(dest));
-						if (srcId != anonymousShardId || destId != anonymousShardId) {
+						if (srcId != anonymousShardId) {
+							if (dest.empty()) destId = UID();
 							tr.set(keyServersKey(it.key), keyServersValue(src, dest, srcId, destId));
 						} else {
 							tr.set(keyServersKey(it.key), keyServersValue(UIDtoTagMap, src, dest));

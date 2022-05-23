@@ -27,6 +27,8 @@
 #include "flow/serialize.h"
 #include "flow/UnitTest.h"
 
+FDB_DEFINE_BOOLEAN_PARAM(EmptyRange);
+
 const KeyRef systemKeysPrefix = LiteralStringRef("\xff");
 const KeyRangeRef normalKeys(KeyRef(), systemKeysPrefix);
 const KeyRangeRef systemKeys(systemKeysPrefix, LiteralStringRef("\xff\xff"));
@@ -407,6 +409,16 @@ const ValueRef serverKeysTrue = "1"_sr, // compatible with what was serverKeysTr
     serverKeysTrueEmptyRange = "3"_sr, // the server treats the range as empty.
     serverKeysFalse;
 
+const UID newShardId(const uint64_t physicalShardId, EmptyRange emptyRange) {
+	uint64_t split = 0;
+	if (!emptyRange) {
+		do {
+			split = deterministicRandom()->randomUInt64();
+		} while (split == anonymousShardId.second() || split == static_cast<uint64_t>(0));
+	}
+	return UID(physicalShardId, split);
+}
+
 const Key serverKeysKey(UID serverID, const KeyRef& key) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(serverKeysPrefix);
@@ -474,7 +486,7 @@ void decodeServerKeysValue(const ValueRef& value, bool& assigned, bool& emptyRan
 		ASSERT(rd.protocolVersion().hasShardEncodLocationMetaData());
 		rd >> id;
 		assigned = id.isValid();
-		emptyRange = false; // TODO: support assigning empty range.
+		emptyRange = id.second() == 0; // TODO: support assigning empty range.
 	}
 }
 

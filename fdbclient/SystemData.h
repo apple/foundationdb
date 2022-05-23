@@ -33,6 +33,8 @@
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wunused-variable"
 
+FDB_DECLARE_BOOLEAN_PARAM(EmptyRange);
+
 struct RestoreLoaderInterface;
 struct RestoreApplierInterface;
 struct RestoreMasterInterface;
@@ -132,6 +134,7 @@ void decodeStorageCacheValue(const ValueRef& value, std::vector<uint16_t>& serve
 extern const KeyRangeRef serverKeysRange;
 extern const KeyRef serverKeysPrefix;
 extern const ValueRef serverKeysTrue, serverKeysTrueEmptyRange, serverKeysFalse;
+const UID newShardId(const uint64_t physicalShardId, EmptyRange emptyRange);
 const Key serverKeysKey(UID serverID, const KeyRef& keys);
 const Key serverKeysPrefixFor(UID serverID);
 UID serverKeysDecodeServer(const KeyRef& key);
