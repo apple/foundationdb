@@ -74,7 +74,6 @@ public:
 	                                                 KeySelector end,
 	                                                 Key mapper,
 	                                                 GetRangeLimits limits,
-	                                                 int matchIndex = MATCH_INDEX_ALL,
 	                                                 Snapshot = Snapshot::False,
 	                                                 Reverse = Reverse::False) = 0;
 	virtual Future<Standalone<VectorRef<const char*>>> getAddressesForKey(Key const& key) = 0;

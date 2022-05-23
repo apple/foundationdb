@@ -3719,8 +3719,7 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
                                                    StringRef mapper,
                                                    // To provide span context, tags, debug ID to underlying lookups.
                                                    GetMappedKeyValuesRequest* pOriginalReq,
-                                                   Optional<Key> tenantPrefix,
-                                                   int matchIndex) {
+                                                   Optional<Key> tenantPrefix) {
 	state GetMappedKeyValuesReply result;
 	result.version = input.version;
 	result.more = input.more;
@@ -3738,21 +3737,15 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 		TraceEvent("MapperNotTuple").error(e).detail("Mapper", mapper.printable());
 		throw mapper_not_tuple();
 	}
+	state KeyValueRef* it = input.data.begin();
 	state std::vector<Optional<Tuple>> vt;
 	state bool isRangeQuery = false;
 	preprocessMappedKey(mappedKeyFormatTuple, vt, isRangeQuery);
 
-	state int sz = input.data.size();
-	state int i = 0;
-	for (; i < sz; i++) {
-		state KeyValueRef* it = &input.data[i];
+	for (; it != input.data.end(); it++) {
 		state MappedKeyValueRef kvm;
-		state bool isBoundary = i == 0 || i == sz - 1;
-		// need to keep the boundary, so that caller can use it as a continuation.
-		if (isBoundary || matchIndex == MATCH_INDEX_ALL) {
-			kvm.key = it->key;
-			kvm.value = it->value;
-		}
+		kvm.key = it->key;
+		kvm.value = it->value;
 
 		state Key mappedKey = constructMappedKey(it, vt, mappedKeyTuple, mappedKeyFormatTuple);
 		// Make sure the mappedKey is always available, so that it's good even we want to get key asynchronously.
@@ -3765,19 +3758,11 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 			// Use the mappedKey as the prefix of the range query.
 			GetRangeReqAndResultRef getRange =
 			    wait(quickGetKeyValues(data, mappedKey, input.version, &(result.arena), pOriginalReq));
-			if (!getRange.result.empty() && matchIndex == MATCH_INDEX_MATCHED_ONLY ||
-			    getRange.result.empty() && matchIndex == MATCH_INDEX_UNMATCHED_ONLY) {
-				kvm.key = it->key;
-				kvm.value = it->value;
-			}
-
-			kvm.boundaryAndExist = isBoundary && !getRange.result.empty();
 			kvm.reqAndResult = getRange;
 		} else {
 			GetValueReqAndResultRef getValue =
 			    wait(quickGetValue(data, mappedKey, input.version, &(result.arena), pOriginalReq));
 			kvm.reqAndResult = getValue;
-			kvm.boundaryAndExist = isBoundary && getValue.result.present();
 		}
 		result.data.push_back(result.arena, kvm);
 	}
@@ -3931,7 +3916,7 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 			try {
 				// Map the scanned range to another list of keys and look up.
 				GetMappedKeyValuesReply _r =
-				    wait(mapKeyValues(data, getKeyValuesReply, req.mapper, &req, tenantPrefix, req.matchIndex));
+				    wait(mapKeyValues(data, getKeyValuesReply, req.mapper, &req, tenantPrefix));
 				r = _r;
 			} catch (Error& e) {
 				TraceEvent("MapError").error(e);
@@ -9246,6 +9231,10 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 
 		throw internal_error();
 	} catch (Error& e) {
+		if (self.byteSampleRecovery.isValid()) {
+			self.byteSampleRecovery.cancel();
+		}
+
 		if (recovered.canBeSet())
 			recovered.send(Void());
 

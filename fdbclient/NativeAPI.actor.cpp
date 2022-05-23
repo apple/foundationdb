@@ -29,6 +29,7 @@
 #include <utility>
 #include <vector>
 
+#include "boost/algorithm/string.hpp"
 #include "contrib/fmt-8.1.1/include/fmt/format.h"
 
 #include "fdbclient/FDBOptions.g.h"
@@ -3784,24 +3785,12 @@ RequestStream<GetKeyValuesFamilyRequest> StorageServerInterface::*getRangeReques
 	}
 }
 
-template <class GetKeyValuesFamilyRequest>
-void setMatchIndex(GetKeyValuesFamilyRequest& req, int matchIndex) {
-	if constexpr (std::is_same<GetKeyValuesFamilyRequest, GetKeyValuesRequest>::value) {
-		// do nothing;
-	} else if (std::is_same<GetKeyValuesFamilyRequest, GetMappedKeyValuesRequest>::value) {
-		req.matchIndex = matchIndex;
-	} else {
-		UNREACHABLE();
-	}
-}
-
 ACTOR template <class GetKeyValuesFamilyRequest, class GetKeyValuesFamilyReply, class RangeResultFamily>
 Future<RangeResultFamily> getExactRange(Reference<TransactionState> trState,
                                         Version version,
                                         KeyRange keys,
                                         Key mapper,
                                         GetRangeLimits limits,
-                                        int matchIndex,
                                         Reverse reverse,
                                         UseTenant useTenant) {
 	state RangeResultFamily output;
@@ -3834,7 +3823,6 @@ Future<RangeResultFamily> getExactRange(Reference<TransactionState> trState,
 			req.version = version;
 			req.begin = firstGreaterOrEqual(range.begin);
 			req.end = firstGreaterOrEqual(range.end);
-			setMatchIndex<GetKeyValuesFamilyRequest>(req, matchIndex);
 			req.spanContext = span.context;
 			trState->cx->getLatestCommitVersions(
 			    locations[shard].locations, req.version, trState, req.ssLatestCommitVersions);
@@ -4009,7 +3997,6 @@ Future<RangeResultFamily> getRangeFallback(Reference<TransactionState> trState,
                                            KeySelector end,
                                            Key mapper,
                                            GetRangeLimits limits,
-                                           int matchIndex,
                                            Reverse reverse,
                                            UseTenant useTenant) {
 	if (version == latestVersion) {
@@ -4035,7 +4022,7 @@ Future<RangeResultFamily> getRangeFallback(Reference<TransactionState> trState,
 	// or allKeys.begin exists in the database/tenant and will be part of the conflict range anyways
 
 	RangeResultFamily _r = wait(getExactRange<GetKeyValuesFamilyRequest, GetKeyValuesFamilyReply, RangeResultFamily>(
-	    trState, version, KeyRangeRef(b, e), mapper, limits, matchIndex, reverse, useTenant));
+	    trState, version, KeyRangeRef(b, e), mapper, limits, reverse, useTenant));
 	RangeResultFamily r = _r;
 
 	if (b == allKeys.begin && ((reverse && !r.more) || !reverse))
@@ -4074,7 +4061,7 @@ int64_t inline getRangeResultFamilyBytes(MappedRangeResultRef result) {
 	int64_t bytes = 0;
 	for (const MappedKeyValueRef& mappedKeyValue : result) {
 		bytes += mappedKeyValue.key.size() + mappedKeyValue.value.size();
-		bytes += sizeof(mappedKeyValue.boundaryAndExist);
+
 		auto& reqAndResult = mappedKeyValue.reqAndResult;
 		if (std::holds_alternative<GetValueReqAndResultRef>(reqAndResult)) {
 			auto getValue = std::get<GetValueReqAndResultRef>(reqAndResult);
@@ -4159,7 +4146,6 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
                                    Key mapper,
                                    GetRangeLimits limits,
                                    Promise<std::pair<Key, Key>> conflictRange,
-                                   int matchIndex,
                                    Snapshot snapshot,
                                    Reverse reverse,
                                    UseTenant useTenant = UseTenant::True) {
@@ -4212,7 +4198,7 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 			state GetKeyValuesFamilyRequest req;
 			req.mapper = mapper;
 			req.arena.dependsOn(mapper.arena());
-			setMatchIndex<GetKeyValuesFamilyRequest>(req, matchIndex);
+
 			req.tenantInfo = useTenant ? trState->getTenantInfo() : TenantInfo();
 			req.isFetchKeys = (trState->taskID == TaskPriority::FetchKeys);
 			req.version = readVersion;
@@ -4392,7 +4378,6 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 						        originalEnd,
 						        mapper,
 						        originalLimits,
-						        matchIndex,
 						        reverse,
 						        useTenant));
 						getRangeFinished(
@@ -4433,7 +4418,6 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 						        originalEnd,
 						        mapper,
 						        originalLimits,
-						        matchIndex,
 						        reverse,
 						        useTenant));
 						getRangeFinished(
@@ -5019,7 +5003,6 @@ Future<RangeResult> getRange(Reference<TransactionState> const& trState,
 	                                                                     ""_sr,
 	                                                                     limits,
 	                                                                     Promise<std::pair<Key, Key>>(),
-	                                                                     MATCH_INDEX_ALL,
 	                                                                     Snapshot::True,
 	                                                                     reverse,
 	                                                                     useTenant);
@@ -5374,7 +5357,6 @@ Future<RangeResultFamily> Transaction::getRangeInternal(const KeySelector& begin
                                                         const KeySelector& end,
                                                         const Key& mapper,
                                                         GetRangeLimits limits,
-                                                        int matchIndex,
                                                         Snapshot snapshot,
                                                         Reverse reverse) {
 	++trState->cx->transactionLogicalReads;
@@ -5417,7 +5399,7 @@ Future<RangeResultFamily> Transaction::getRangeInternal(const KeySelector& begin
 	}
 
 	return ::getRange<GetKeyValuesFamilyRequest, GetKeyValuesFamilyReply, RangeResultFamily>(
-	    trState, getReadVersion(), b, e, mapper, limits, conflictRange, matchIndex, snapshot, reverse);
+	    trState, getReadVersion(), b, e, mapper, limits, conflictRange, snapshot, reverse);
 }
 
 Future<RangeResult> Transaction::getRange(const KeySelector& begin,
@@ -5426,18 +5408,17 @@ Future<RangeResult> Transaction::getRange(const KeySelector& begin,
                                           Snapshot snapshot,
                                           Reverse reverse) {
 	return getRangeInternal<GetKeyValuesRequest, GetKeyValuesReply, RangeResult>(
-	    begin, end, ""_sr, limits, MATCH_INDEX_ALL, snapshot, reverse);
+	    begin, end, ""_sr, limits, snapshot, reverse);
 }
 
 Future<MappedRangeResult> Transaction::getMappedRange(const KeySelector& begin,
                                                       const KeySelector& end,
                                                       const Key& mapper,
                                                       GetRangeLimits limits,
-                                                      int matchIndex,
                                                       Snapshot snapshot,
                                                       Reverse reverse) {
 	return getRangeInternal<GetMappedKeyValuesRequest, GetMappedKeyValuesReply, MappedRangeResult>(
-	    begin, end, mapper, limits, matchIndex, snapshot, reverse);
+	    begin, end, mapper, limits, snapshot, reverse);
 }
 
 Future<RangeResult> Transaction::getRange(const KeySelector& begin,
@@ -8250,57 +8231,74 @@ ACTOR Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion
 	return (ddCheck && coordinatorCheck);
 }
 
-ACTOR Future<Void> addInterfaceActor(std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface,
-                                     Reference<FlowLock> connectLock,
-                                     KeyValue kv) {
+// returns true if we can connect to the given worker interface
+ACTOR Future<bool> verifyInterfaceActor(Reference<FlowLock> connectLock, ClientWorkerInterface workerInterf) {
 	wait(connectLock->take());
 	state FlowLock::Releaser releaser(*connectLock);
-	state ClientWorkerInterface workerInterf =
-	    BinaryReader::fromStringRef<ClientWorkerInterface>(kv.value, IncludeVersion());
 	state ClientLeaderRegInterface leaderInterf(workerInterf.address());
 	choose {
 		when(Optional<LeaderInfo> rep =
 		         wait(brokenPromiseToNever(leaderInterf.getLeader.getReply(GetLeaderRequest())))) {
-			StringRef ip_port =
-			    kv.key.endsWith(LiteralStringRef(":tls")) ? kv.key.removeSuffix(LiteralStringRef(":tls")) : kv.key;
-			(*address_interface)[ip_port] = std::make_pair(kv.value, leaderInterf);
-
-			if (workerInterf.reboot.getEndpoint().addresses.secondaryAddress.present()) {
-				Key full_ip_port2 =
-				    StringRef(workerInterf.reboot.getEndpoint().addresses.secondaryAddress.get().toString());
-				StringRef ip_port2 = full_ip_port2.endsWith(LiteralStringRef(":tls"))
-				                         ? full_ip_port2.removeSuffix(LiteralStringRef(":tls"))
-				                         : full_ip_port2;
-				(*address_interface)[ip_port2] = std::make_pair(kv.value, leaderInterf);
-			}
+			return true;
 		}
-		when(wait(delay(CLIENT_KNOBS->CLI_CONNECT_TIMEOUT))) {} // NOTE : change timeout time here if necessary
+		when(wait(delay(CLIENT_KNOBS->CLI_CONNECT_TIMEOUT))) {
+			// NOTE : change timeout time here if necessary
+			return false;
+		}
 	}
-	return Void();
 }
 
 ACTOR static Future<int64_t> rebootWorkerActor(DatabaseContext* cx, ValueRef addr, bool check, int duration) {
 	// ignore negative value
 	if (duration < 0)
 		duration = 0;
-	// fetch the addresses of all workers
-	state std::map<Key, std::pair<Value, ClientLeaderRegInterface>> address_interface;
 	if (!cx->getConnectionRecord())
 		return 0;
+	// fetch all workers' addresses and interfaces from CC
 	RangeResult kvs = wait(getWorkerInterfaces(cx->getConnectionRecord()));
 	ASSERT(!kvs.more);
+	// map worker network address to its interface
+	state std::map<Key, ClientWorkerInterface> workerInterfaces;
+	for (const auto& it : kvs) {
+		ClientWorkerInterface workerInterf =
+		    BinaryReader::fromStringRef<ClientWorkerInterface>(it.value, IncludeVersion());
+		Key primaryAddress =
+		    it.key.endsWith(LiteralStringRef(":tls")) ? it.key.removeSuffix(LiteralStringRef(":tls")) : it.key;
+		workerInterfaces[primaryAddress] = workerInterf;
+		// Also add mapping from a worker's second address(if present) to its interface
+		if (workerInterf.reboot.getEndpoint().addresses.secondaryAddress.present()) {
+			Key secondAddress =
+			    StringRef(workerInterf.reboot.getEndpoint().addresses.secondaryAddress.get().toString());
+			secondAddress = secondAddress.endsWith(LiteralStringRef(":tls"))
+			                    ? secondAddress.removeSuffix(LiteralStringRef(":tls"))
+			                    : secondAddress;
+			workerInterfaces[secondAddress] = workerInterf;
+		}
+	}
+	// split and get all the requested addresses to send reboot requests
+	state std::vector<std::string> addressesVec;
+	boost::algorithm::split(addressesVec, addr.toString(), boost::is_any_of(","));
 	// Note: reuse this knob from fdbcli, change it if necessary
 	Reference<FlowLock> connectLock(new FlowLock(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM));
-	std::vector<Future<Void>> addInterfs;
-	for (const auto& it : kvs) {
-		addInterfs.push_back(addInterfaceActor(&address_interface, connectLock, it));
+	state std::vector<Future<bool>> verifyInterfs;
+	for (const auto& requestedAddress : addressesVec) {
+		// step 1: check that the requested address is in the worker list provided by CC
+		if (!workerInterfaces.count(Key(requestedAddress)))
+			return 0;
+		// step 2: try to establish connections to the requested worker
+		verifyInterfs.push_back(verifyInterfaceActor(connectLock, workerInterfaces[Key(requestedAddress)]));
 	}
-	wait(waitForAll(addInterfs));
-	if (!address_interface.count(addr))
-		return 0;
-
-	BinaryReader::fromStringRef<ClientWorkerInterface>(address_interface[addr].first, IncludeVersion())
-	    .reboot.send(RebootRequest(false, check, duration));
+	// step 3: check if we can establish connections to all requested workers, return if not
+	wait(waitForAll(verifyInterfs));
+	for (const auto& f : verifyInterfs) {
+		if (!f.get())
+			return 0;
+	}
+	// step 4: After verifying we can connect to all requested workers, send reboot requests together
+	for (const auto& address : addressesVec) {
+		// Note: We want to make sure these requests are sent in parallel
+		workerInterfaces[Key(address)].reboot.send(RebootRequest(false, check, duration));
+	}
 	return 1;
 }
 

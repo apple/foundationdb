@@ -80,7 +80,6 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 		 * and take the shortcut. */
 		FDBGetRangeReqAndResult getRange;
 		unsigned char buffer[32];
-		bool boundaryAndExist;
 	} FDBMappedKeyValue;
 
 #pragma pack(push, 4)
@@ -219,7 +218,6 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                        int targetBytes,
 	                                        FDBStreamingMode mode,
 	                                        int iteration,
-	                                        int matchIndex,
 	                                        fdb_bool_t snapshot,
 	                                        fdb_bool_t reverse);
 	FDBFuture* (*transactionGetVersionstamp)(FDBTransaction* tr);
@@ -351,7 +349,6 @@ public:
 	                                               const KeySelectorRef& end,
 	                                               const StringRef& mapper,
 	                                               GetRangeLimits limits,
-	                                               int matchIndex,
 	                                               bool snapshot,
 	                                               bool reverse) override;
 	ThreadFuture<Standalone<VectorRef<const char*>>> getAddressesForKey(const KeyRef& key) override;
@@ -540,7 +537,6 @@ public:
 	                                               const KeySelectorRef& end,
 	                                               const StringRef& mapper,
 	                                               GetRangeLimits limits,
-	                                               int matchIndex,
 	                                               bool snapshot,
 	                                               bool reverse) override;
 	ThreadFuture<Standalone<VectorRef<const char*>>> getAddressesForKey(const KeyRef& key) override;
