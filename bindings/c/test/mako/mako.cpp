@@ -1970,8 +1970,8 @@ int statsProcessMain(Arguments& args,
 bool mergeSketchReport(Arguments& args) {
 
 	ThreadStatistics stats;
-	for (auto& filename : args.report_files) {
-		std::ifstream f{ filename };
+	for (int i = 0; i < args.num_report_files; i++) {
+		std::ifstream f{ args.report_files[i] };
 		ThreadStatistics tmp;
 		f >> tmp;
 		stats.combine(tmp);
