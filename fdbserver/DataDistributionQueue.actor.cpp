@@ -37,6 +37,9 @@
 
 #define WORK_FULL_UTILIZATION 10000 // This is not a knob; it is a fixed point scaling factor!
 
+typedef Reference<IDataDistributionTeam> ITeamRef;
+typedef std::pair<ITeamRef, ITeamRef> SrcDestTeamPair;
+
 // TODO: add guard to guarantee the priority is not equal for each purpose?
 inline bool isDiskRebalancePriority(int priority) {
 	return priority == SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM ||
@@ -1668,34 +1671,31 @@ ACTOR static Future<bool> rebalanceTeams(DDQueueData* self,
 	return false;
 }
 
-ACTOR Future<Void> getSrcDestTeams(DDQueueData* self,
-                                   int teamCollectionIndex,
-                                   GetTeamRequest srcReq,
-                                   GetTeamRequest destReq,
-                                   Reference<IDataDistributionTeam>* sourceTeam,
-                                   Reference<IDataDistributionTeam>* destTeam,
-                                   int priority,
-                                   TraceEvent* traceEvent) {
+ACTOR Future<SrcDestTeamPair> getSrcDestTeams(DDQueueData* self,
+                                              int teamCollectionIndex,
+                                              GetTeamRequest srcReq,
+                                              GetTeamRequest destReq,
+                                              int priority,
+                                              TraceEvent* traceEvent) {
 
-	std::pair<Optional<Reference<IDataDistributionTeam>>, bool> randomTeam =
+	state std::pair<Optional<ITeamRef>, bool> randomTeam =
 	    wait(brokenPromiseToNever(self->teamCollections[teamCollectionIndex].getTeam.getReply(destReq)));
-	traceEvent->detail("DestTeam",
-	                   printable(randomTeam.first.map<std::string>(
-	                       [](const Reference<IDataDistributionTeam>& team) { return team->getDesc(); })));
+	traceEvent->detail(
+	    "DestTeam", printable(randomTeam.first.map<std::string>([](const ITeamRef& team) { return team->getDesc(); })));
 
 	if (randomTeam.first.present()) {
-		*destTeam = randomTeam.first.get();
-		std::pair<Optional<Reference<IDataDistributionTeam>>, bool> loadedTeam =
+		state std::pair<Optional<ITeamRef>, bool> loadedTeam =
 		    wait(brokenPromiseToNever(self->teamCollections[teamCollectionIndex].getTeam.getReply(srcReq)));
 
-		traceEvent->detail("SourceTeam",
-		                   printable(loadedTeam.first.map<std::string>(
-		                       [](const Reference<IDataDistributionTeam>& team) { return team->getDesc(); })));
+		traceEvent->detail("SourceTeam", printable(loadedTeam.first.map<std::string>([](const ITeamRef& team) {
+			                   return team->getDesc();
+		                   })));
 
-		if (loadedTeam.first.present())
-			*sourceTeam = loadedTeam.first.get();
+		if (loadedTeam.first.present()) {
+			return std::make_pair(loadedTeam.first.get(), randomTeam.first.get());
+		}
 	}
-	return Void();
+	return {};
 }
 
 ACTOR Future<Void> BgDDLoadRebalance(DDQueueData* self, int teamCollectionIndex, int ddPriority) {
@@ -1781,9 +1781,13 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueueData* self, int teamCollectionIndex,
 					                         ForReadBalance(readRebalance),
 					                         PreferLowerReadUtil::True);
 				}
+				state Future<SrcDestTeamPair> getTeamFuture =
+				    getSrcDestTeams(self, teamCollectionIndex, srcReq, destReq, ddPriority, &traceEvent);
+				wait(ready(getTeamFuture));
+				sourceTeam = getTeamFuture.get().first;
+				destTeam = getTeamFuture.get().second;
 
 				// clang-format off
-				wait(getSrcDestTeams(self, teamCollectionIndex, srcReq, destReq, &sourceTeam, &destTeam,ddPriority,&traceEvent));
 				if (sourceTeam.isValid() && destTeam.isValid()) {
 					if (readRebalance) {
 						wait(store(moved,rebalanceReadLoad(self, ddPriority, sourceTeam, destTeam, teamCollectionIndex == 0, &traceEvent)));
