@@ -5237,8 +5237,7 @@ public:
 	}
 
 	static void AddAllTeams_isExhaustive() {
-		Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+		Reference<IReplicationPolicy> policy = makeReference<PolicyAcross>(3, "zoneid", makeReference<PolicyOne>());
 		int processSize = 10;
 		int desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * processSize;
 		int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
@@ -5253,8 +5252,7 @@ public:
 	}
 
 	static void AddAllTeams_withLimit() {
-		Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+		Reference<IReplicationPolicy> policy = makeReference<PolicyAcross>(3, "zoneid", makeReference<PolicyOne>());
 		int processSize = 10;
 		int desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * processSize;
 		int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
@@ -5268,8 +5266,7 @@ public:
 
 	ACTOR static Future<Void> AddTeamsBestOf_SkippingBusyServers() {
 		wait(Future<Void>(Void()));
-		Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+		Reference<IReplicationPolicy> policy = makeReference<PolicyAcross>(3, "zoneid", makeReference<PolicyOne>());
 		state int processSize = 10;
 		state int desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * processSize;
 		state int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
@@ -5298,9 +5295,7 @@ public:
 	// It is hard to conclude what is the minimum number of  teams the addTeamsBestOf() should create in this situation.
 	ACTOR static Future<Void> AddTeamsBestOf_NotEnoughServers() {
 		wait(Future<Void>(Void()));
-
-		Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+		Reference<IReplicationPolicy> policy = makeReference<PolicyAcross>(3, "zoneid", makeReference<PolicyOne>());
 		state int processSize = 5;
 		state int desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * processSize;
 		state int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
@@ -5336,9 +5331,7 @@ public:
 	}
 
 	ACTOR static Future<Void> GetTeam_NewServersNotNeeded() {
-
-		Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+		Reference<IReplicationPolicy> policy = makeReference<PolicyAcross>(3, "zoneid", makeReference<PolicyOne>());
 		state int processSize = 5;
 		state int teamSize = 3;
 		state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
@@ -5389,8 +5382,7 @@ public:
 	}
 
 	ACTOR static Future<Void> GetTeam_HealthyCompleteSource() {
-		Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+		Reference<IReplicationPolicy> policy = makeReference<PolicyAcross>(3, "zoneid", makeReference<PolicyOne>());
 		state int processSize = 5;
 		state int teamSize = 3;
 		state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
@@ -5442,9 +5434,7 @@ public:
 	}
 
 	ACTOR static Future<Void> GetTeam_TrueBestLeastUtilized() {
-
-		Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+		Reference<IReplicationPolicy> policy = makeReference<PolicyAcross>(3, "zoneid", makeReference<PolicyOne>());
 		state int processSize = 5;
 		state int teamSize = 3;
 		state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
@@ -5494,9 +5484,7 @@ public:
 	}
 
 	ACTOR static Future<Void> GetTeam_TrueBestMostUtilized() {
-
-		Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+		Reference<IReplicationPolicy> policy = makeReference<PolicyAcross>(3, "zoneid", makeReference<PolicyOne>());
 		state int processSize = 5;
 		state int teamSize = 3;
 		state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
@@ -5545,8 +5533,7 @@ public:
 	}
 
 	ACTOR static Future<Void> GetTeam_ServerUtilizationBelowCutoff() {
-		Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+		Reference<IReplicationPolicy> policy = makeReference<PolicyAcross>(3, "zoneid", makeReference<PolicyOne>());
 		state int processSize = 5;
 		state int teamSize = 3;
 		state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
@@ -5593,8 +5580,7 @@ public:
 	}
 
 	ACTOR static Future<Void> GetTeam_ServerUtilizationNearCutoff() {
-		Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+		Reference<IReplicationPolicy> policy = makeReference<PolicyAcross>(3, "zoneid", makeReference<PolicyOne>());
 		state int processSize = 5;
 		state int teamSize = 3;
 		state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
@@ -5650,8 +5636,7 @@ public:
 	}
 
 	ACTOR static Future<Void> GetTeam_TrueBestLeastReadBandwidth() {
-		Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(1, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+		Reference<IReplicationPolicy> policy = makeReference<PolicyAcross>(1, "zoneid", makeReference<PolicyOne>());
 		state int processSize = 5;
 		state int teamSize = 1;
 		state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
@@ -5726,8 +5711,7 @@ public:
 	}
 
 	ACTOR static Future<Void> GetTeam_DeprioritizeWigglePausedTeam() {
-		Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+		Reference<IReplicationPolicy> policy = makeReference<PolicyAcross>(3, "zoneid", makeReference<PolicyOne>());
 		state int processSize = 5;
 		state int teamSize = 3;
 		state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
