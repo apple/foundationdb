@@ -1544,62 +1544,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 				if (tokencmp(tokens[0], "kill")) {
 					getTransaction(db, managementTenant, tr, options, intrans);
-					if (tokens.size() == 1) {
-						state ThreadFuture<RangeResult> wInterfF =
-						    tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
-						                             LiteralStringRef("\xff\xff/worker_interfaces0")),
-						                 CLIENT_KNOBS->TOO_MANY);
-						RangeResult kvs = wait(makeInterruptable(safeThreadFutureToFuture(wInterfF)));
-						ASSERT(!kvs.more);
-						auto connectLock = makeReference<FlowLock>(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM);
-						std::vector<Future<Void>> addInterfs;
-						for (auto it : kvs) {
-							addInterfs.push_back(addInterface(&address_interface, connectLock, it));
-						}
-						wait(waitForAll(addInterfs));
-					}
-					if (tokens.size() == 1 || tokencmp(tokens[1], "list")) {
-						if (address_interface.size() == 0) {
-							printf("\nNo addresses can be killed.\n");
-						} else if (address_interface.size() == 1) {
-							printf("\nThe following address can be killed:\n");
-						} else {
-							printf("\nThe following %zu addresses can be killed:\n", address_interface.size());
-						}
-						for (auto it : address_interface) {
-							printf("%s\n", printable(it.first).c_str());
-						}
-						printf("\n");
-					} else if (tokencmp(tokens[1], "all")) {
-						for (auto it : address_interface) {
-							BinaryReader::fromStringRef<ClientWorkerInterface>(it.second.first, IncludeVersion())
-							    .reboot.send(RebootRequest());
-						}
-						if (address_interface.size() == 0) {
-							fprintf(stderr,
-							        "ERROR: no processes to kill. You must run the `kill’ command before "
-							        "running `kill all’.\n");
-						} else {
-							printf("Attempted to kill %zu processes\n", address_interface.size());
-						}
-					} else {
-						for (int i = 1; i < tokens.size(); i++) {
-							if (!address_interface.count(tokens[i])) {
-								fprintf(stderr, "ERROR: process `%s' not recognized.\n", printable(tokens[i]).c_str());
-								is_error = true;
-								break;
-							}
-						}
-
-						if (!is_error) {
-							for (int i = 1; i < tokens.size(); i++) {
-								BinaryReader::fromStringRef<ClientWorkerInterface>(address_interface[tokens[i]].first,
-								                                                   IncludeVersion())
-								    .reboot.send(RebootRequest());
-							}
-							printf("Attempted to kill %zu processes\n", tokens.size() - 1);
-						}
-					}
+					bool _result = wait(makeInterruptable(killCommandActor(db, tr, tokens, &address_interface)));
+					if (!_result)
+						is_error = true;
 					continue;
 				}
 
