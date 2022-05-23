@@ -42,7 +42,7 @@ auto get(MapContainer& m, K const& k) -> decltype(m.at(k)) {
 
 FDB_DEFINE_BOOLEAN_PARAM(WantNewServers);
 FDB_DEFINE_BOOLEAN_PARAM(WantTrueBest);
-FDB_DEFINE_BOOLEAN_PARAM(PreferLowerUtilization);
+FDB_DEFINE_BOOLEAN_PARAM(PreferLowerDiskUtil);
 FDB_DEFINE_BOOLEAN_PARAM(TeamMustHaveShards);
 FDB_DEFINE_BOOLEAN_PARAM(ForReadBalance);
 FDB_DEFINE_BOOLEAN_PARAM(PreferLowerReadUtil);
@@ -245,7 +245,7 @@ public:
 			if (req.wantsTrueBest) {
 				ASSERT(!bestOption.present());
 				auto& startIndex =
-				    req.preferLowerUtilization ? self->lowestUtilizationTeam : self->highestUtilizationTeam;
+				    req.preferLowerDiskUtil ? self->lowestUtilizationTeam : self->highestUtilizationTeam;
 				if (startIndex >= self->teams.size()) {
 					startIndex = 0;
 				}
@@ -254,7 +254,7 @@ public:
 				for (int i = 0; i < self->teams.size(); i++) {
 					int currentIndex = (startIndex + i) % self->teams.size();
 					if (self->teams[currentIndex]->isHealthy() &&
-					    (!req.preferLowerUtilization ||
+					    (!req.preferLowerDiskUtil ||
 					     self->teams[currentIndex]->hasHealthyAvailableSpace(self->medianAvailableSpace))) {
 						int64_t loadBytes = self->teams[currentIndex]->getLoadBytes(true, req.inflightPenalty);
 						if ((!req.teamMustHaveShards ||
@@ -286,7 +286,7 @@ public:
 					// If unhealthy team is majority, we may not find an ok dest in this while loop
 					Reference<TCTeamInfo> dest = deterministicRandom()->randomChoice(self->teams);
 
-					bool ok = dest->isHealthy() && (!req.preferLowerUtilization ||
+					bool ok = dest->isHealthy() && (!req.preferLowerDiskUtil ||
 					                                dest->hasHealthyAvailableSpace(self->medianAvailableSpace));
 
 					for (int i = 0; ok && i < randomTeams.size(); i++) {
@@ -5372,7 +5372,7 @@ public:
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
 		state GetTeamRequest req(
-		    WantNewServers::False, WantTrueBest::True, PreferLowerUtilization::True, TeamMustHaveShards::False);
+		    WantNewServers::False, WantTrueBest::True, PreferLowerDiskUtil::True, TeamMustHaveShards::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5425,7 +5425,7 @@ public:
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0), UID(4, 0) };
 
 		state GetTeamRequest req(
-		    WantNewServers::False, WantTrueBest::True, PreferLowerUtilization::True, TeamMustHaveShards::False);
+		    WantNewServers::False, WantTrueBest::True, PreferLowerDiskUtil::True, TeamMustHaveShards::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5466,7 +5466,7 @@ public:
 
 		/*
 		 * Among server teams that have healthy space available, pick the team that is
-		 * least utilized, if the caller says they preferLowerUtilization.
+		 * least utilized, if the caller says they preferLowerDiskUtil.
 		 */
 
 		collection->server_info[UID(1, 0)]->setMetrics(mid_avail);
@@ -5477,7 +5477,7 @@ public:
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
 		state GetTeamRequest req(
-		    WantNewServers::True, WantTrueBest::True, PreferLowerUtilization::True, TeamMustHaveShards::False);
+		    WantNewServers::True, WantTrueBest::True, PreferLowerDiskUtil::True, TeamMustHaveShards::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5523,12 +5523,12 @@ public:
 
 		/*
 		 * Among server teams that have healthy space available, pick the team that is
-		 * most utilized, if the caller says they don't preferLowerUtilization.
+		 * most utilized, if the caller says they don't preferLowerDiskUtil.
 		 */
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
 		state GetTeamRequest req(
-		    WantNewServers::True, WantTrueBest::True, PreferLowerUtilization::False, TeamMustHaveShards::False);
+		    WantNewServers::True, WantTrueBest::True, PreferLowerDiskUtil::False, TeamMustHaveShards::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5580,7 +5580,7 @@ public:
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
 		state GetTeamRequest req(
-		    WantNewServers::True, WantTrueBest::True, PreferLowerUtilization::True, TeamMustHaveShards::False);
+		    WantNewServers::True, WantTrueBest::True, PreferLowerDiskUtil::True, TeamMustHaveShards::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5637,7 +5637,7 @@ public:
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
 		state GetTeamRequest req(
-		    WantNewServers::True, WantTrueBest::True, PreferLowerUtilization::True, TeamMustHaveShards::False);
+		    WantNewServers::True, WantTrueBest::True, PreferLowerDiskUtil::True, TeamMustHaveShards::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5678,14 +5678,14 @@ public:
 
 		auto wantsNewServers = WantNewServers::True;
 		auto wantsTrueBest = WantTrueBest::True;
-		auto preferLowerUtilization = PreferLowerUtilization::True;
+		auto preferLowerDiskUtil = PreferLowerDiskUtil::True;
 		auto teamMustHaveShards = TeamMustHaveShards::False;
 		auto forReadBalance = ForReadBalance::True;
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
 		state GetTeamRequest req(wantsNewServers,
 		                         wantsTrueBest,
-		                         preferLowerUtilization,
+		                         preferLowerDiskUtil,
 		                         teamMustHaveShards,
 		                         forReadBalance,
 		                         PreferLowerReadUtil::True);
@@ -5693,7 +5693,7 @@ public:
 
 		state GetTeamRequest reqHigh(wantsNewServers,
 		                             wantsTrueBest,
-		                             PreferLowerUtilization::False,
+		                             PreferLowerDiskUtil::False,
 		                             teamMustHaveShards,
 		                             forReadBalance,
 		                             PreferLowerReadUtil::False);
@@ -5757,7 +5757,7 @@ public:
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
 		state GetTeamRequest req(
-		    WantNewServers::True, WantTrueBest::True, PreferLowerUtilization::True, TeamMustHaveShards::False);
+		    WantNewServers::True, WantTrueBest::True, PreferLowerDiskUtil::True, TeamMustHaveShards::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));

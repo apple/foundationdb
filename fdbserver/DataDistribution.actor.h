@@ -84,7 +84,7 @@ struct IDataDistributionTeam {
 
 FDB_DECLARE_BOOLEAN_PARAM(WantNewServers);
 FDB_DECLARE_BOOLEAN_PARAM(WantTrueBest);
-FDB_DECLARE_BOOLEAN_PARAM(PreferLowerUtilization);
+FDB_DECLARE_BOOLEAN_PARAM(PreferLowerDiskUtil);
 FDB_DECLARE_BOOLEAN_PARAM(TeamMustHaveShards);
 FDB_DECLARE_BOOLEAN_PARAM(ForReadBalance);
 FDB_DECLARE_BOOLEAN_PARAM(PreferLowerReadUtil);
@@ -92,7 +92,7 @@ FDB_DECLARE_BOOLEAN_PARAM(PreferLowerReadUtil);
 struct GetTeamRequest {
 	bool wantsNewServers; // In additional to servers in completeSources, try to find teams with new server
 	bool wantsTrueBest;
-	bool preferLowerUtilization; // if true, lower utilized team has higher score
+	bool preferLowerDiskUtil; // if true, lower utilized team has higher score
 	bool teamMustHaveShards;
 	bool forReadBalance;
 	bool preferLowerReadUtil; // only make sense when forReadBalance is true
@@ -106,12 +106,12 @@ struct GetTeamRequest {
 	GetTeamRequest() {}
 	GetTeamRequest(WantNewServers wantsNewServers,
 	               WantTrueBest wantsTrueBest,
-	               PreferLowerUtilization preferLowerUtilization,
+	               PreferLowerDiskUtil preferLowerDiskUtil,
 	               TeamMustHaveShards teamMustHaveShards,
 	               ForReadBalance forReadBalance = ForReadBalance::False,
 	               PreferLowerReadUtil preferLowerReadUtil = PreferLowerReadUtil::False,
 	               double inflightPenalty = 1.0)
-	  : wantsNewServers(wantsNewServers), wantsTrueBest(wantsTrueBest), preferLowerUtilization(preferLowerUtilization),
+	  : wantsNewServers(wantsNewServers), wantsTrueBest(wantsTrueBest), preferLowerDiskUtil(preferLowerDiskUtil),
 	    teamMustHaveShards(teamMustHaveShards), forReadBalance(forReadBalance),
 	    preferLowerReadUtil(preferLowerReadUtil), inflightPenalty(inflightPenalty) {}
 
@@ -128,7 +128,7 @@ struct GetTeamRequest {
 		std::stringstream ss;
 
 		ss << "WantsNewServers:" << wantsNewServers << " WantsTrueBest:" << wantsTrueBest
-		   << " PreferLowerUtilization:" << preferLowerUtilization << " teamMustHaveShards:" << teamMustHaveShards
+		   << " PreferLowerDiskUtil:" << preferLowerDiskUtil << " teamMustHaveShards:" << teamMustHaveShards
 		   << "forReadBalance" << forReadBalance << " inflightPenalty:" << inflightPenalty << ";";
 		ss << "CompleteSources:";
 		for (const auto& cs : completeSources) {
@@ -143,7 +143,7 @@ private:
 	// or preferLowerUtil && aLoadBytes > bLoadBytes
 	bool lessCompareByLoad(int64_t aLoadBytes, int64_t bLoadBytes) const {
 		bool lessLoad = aLoadBytes <= bLoadBytes;
-		return preferLowerUtilization ? !lessLoad : lessLoad;
+		return preferLowerDiskUtil ? !lessLoad : lessLoad;
 	}
 
 	// return -1 if a.readload > b.readload
