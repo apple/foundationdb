@@ -2234,7 +2234,7 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 						// Assign the shard to the new team as an empty range.
 						// Note, there could be data loss.
 						for (const UID& id : teamForDroppedRange) {
-						if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+							if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 								actors.push_back(krmSetRangeCoalescing(
 								    &tr, serverKeysPrefixFor(id), range, allKeys, serverKeysValue(shardId)));
 							} else {
@@ -2258,7 +2258,8 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 						    .detail("ValueSrc", describe(src))
 						    .detail("ValueDest", describe(dest));
 						if (srcId != anonymousShardId) {
-							if (dest.empty()) destId = UID();
+							if (dest.empty())
+								destId = UID();
 							tr.set(keyServersKey(it.key), keyServersValue(src, dest, srcId, destId));
 						} else {
 							tr.set(keyServersKey(it.key), keyServersValue(UIDtoTagMap, src, dest));

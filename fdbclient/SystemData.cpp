@@ -453,7 +453,11 @@ std::pair<UID, Key> serverKeysDecodeServerBegin(const KeyRef& key) {
 }
 
 bool serverHasKey(ValueRef storedValue) {
-	return storedValue == serverKeysTrue || storedValue == serverKeysTrueEmptyRange;
+	UID teamId;
+	bool assigned, emptyRange;
+	decodeServerKeysValue(storedValue, assigned, emptyRange, teamId);
+	// return storedValue == serverKeysTrue || storedValue == serverKeysTrueEmptyRange;
+	return assigned;
 }
 
 const Value serverKeysValue(const UID& id) {

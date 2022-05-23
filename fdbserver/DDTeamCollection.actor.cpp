@@ -734,19 +734,19 @@ public:
 				bool recheck = !healthy && (lastReady != self->initialFailureReactionDelay.isReady() ||
 				                            (lastZeroHealthy && !self->zeroHealthyTeams->get()) || containsFailed);
 
-				// TraceEvent("TeamHealthChangeDetected", self->distributorId)
-				//     .detail("Team", team->getDesc())
-				//     .detail("ServersLeft", serversLeft)
-				//     .detail("LastServersLeft", lastServersLeft)
-				//     .detail("AnyUndesired", anyUndesired)
-				//     .detail("LastAnyUndesired", lastAnyUndesired)
-				//     .detail("AnyWrongConfiguration", anyWrongConfiguration)
-				//     .detail("LastWrongConfiguration", lastWrongConfiguration)
-				//     .detail("ContainsWigglingServer", anyWigglingServer)
-				//     .detail("Recheck", recheck)
-				//     .detail("BadTeam", badTeam)
-				//     .detail("LastZeroHealthy", lastZeroHealthy)
-				//     .detail("ZeroHealthyTeam", self->zeroHealthyTeams->get());
+				TraceEvent(SevVerbose, "TeamHealthChangeDetected", self->distributorId)
+				    .detail("Team", team->getDesc())
+				    .detail("ServersLeft", serversLeft)
+				    .detail("LastServersLeft", lastServersLeft)
+				    .detail("AnyUndesired", anyUndesired)
+				    .detail("LastAnyUndesired", lastAnyUndesired)
+				    .detail("AnyWrongConfiguration", anyWrongConfiguration)
+				    .detail("LastWrongConfiguration", lastWrongConfiguration)
+				    .detail("ContainsWigglingServer", anyWigglingServer)
+				    .detail("Recheck", recheck)
+				    .detail("BadTeam", badTeam)
+				    .detail("LastZeroHealthy", lastZeroHealthy)
+				    .detail("ZeroHealthyTeam", self->zeroHealthyTeams->get());
 
 				lastReady = self->initialFailureReactionDelay.isReady();
 				lastZeroHealthy = self->zeroHealthyTeams->get();
@@ -1629,10 +1629,10 @@ public:
 				// could cause us to not store the mutations sent to the short lived storage server.
 				if (ver > addedVersion + SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) {
 					bool canRemove = wait(canRemoveStorageServer(tr, serverID));
-					// TraceEvent("WaitForAllDataRemoved")
-					//     .detail("Server", serverID)
-					//     .detail("CanRemove", canRemove)
-					//     .detail("Shards", teams->shardsAffectedByTeamFailure->getNumberOfShards(serverID));
+					TraceEvent(SevVerbose, "WaitForAllDataRemoved")
+					    .detail("Server", serverID)
+					    .detail("CanRemove", canRemove)
+					    .detail("Shards", teams->shardsAffectedByTeamFailure->getNumberOfShards(serverID));
 					ASSERT_GE(teams->shardsAffectedByTeamFailure->getNumberOfShards(serverID), 0);
 					if (canRemove && teams->shardsAffectedByTeamFailure->getNumberOfShards(serverID) == 0) {
 						return Void();
