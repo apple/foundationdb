@@ -791,10 +791,14 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 					if (configuration.usableRegions > 1) {
 						destTeams.push_back(ShardsAffectedByTeamFailure::Team(iShard.remoteDest, false));
 					}
-					shardsAffectedByTeamFailure->updatePhysicalShardToTeams(
-						ShardsAffectedByTeamFailure::PhysicalShard(iShard.srcId.first()), teams, configuration.storageTeamSize, false);
-					shardsAffectedByTeamFailure->updatePhysicalShardToTeams(
-						ShardsAffectedByTeamFailure::PhysicalShard(iShard.destId.first()), destTeams, configuration.storageTeamSize, false);
+					if (iShard.srcId != anonymousShardId) {
+						shardsAffectedByTeamFailure->updatePhysicalShardToTeams(
+							ShardsAffectedByTeamFailure::PhysicalShard(iShard.srcId.first()), teams, configuration.storageTeamSize);
+					}
+					if (iShard.hasDest) {
+						shardsAffectedByTeamFailure->updatePhysicalShardToTeams(
+							ShardsAffectedByTeamFailure::PhysicalShard(iShard.destId.first()), destTeams, configuration.storageTeamSize);
+					}
 				}
 
 				// if (g_network->isSimulated()) {

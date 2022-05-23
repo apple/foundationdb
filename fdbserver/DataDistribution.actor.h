@@ -240,14 +240,14 @@ public:
 		int64_t bytesWritePerKSecond = 0;
 		int64_t bytesReadPerKSecond = 0; 
 
-		PhysicalShard(uint64_t id) : id(id) { bytesOnDisk = deterministicRandom()->randomUInt64(); }
+		explicit PhysicalShard(uint64_t id) : id(id) { bytesOnDisk = deterministicRandom()->randomUInt64(); }
 		// operator< used for selecting the physicalShard with the minimal bytesOnDisk
 		bool operator<(const struct PhysicalShard& right) const { return id < right.id ? true : false; }
 	};
 	void updatePhysicalShardToTeams(PhysicalShard physicalShard, 
-		std::vector<Team> inputTeams, int expectedNumServersPerTeam, bool ignoreRemoteTeam);
-	uint64_t getPhysicalShardFor(Team team); // return UID().first() if no physicalShard is available
-	Team getRemoteTeamIfHas(uint64_t physicalShardID, int expectedTeamSize);
+		std::vector<Team> inputTeams, int expectedNumServersPerTeam);
+	Optional<uint64_t> tryGetPhysicalShardFor(Team team); // return UID().first() if no physicalShard is available
+	Optional<Team> tryGetRemoteTeamWith(uint64_t physicalShardID, int expectedTeamSize);
 	bool allTeamsOfKeyRangesHavePhysicalShard();
 	void printTeamPhysicalShardsMapping(std::string);
 

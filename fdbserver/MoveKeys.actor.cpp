@@ -1982,7 +1982,8 @@ ACTOR Future<bool> canRemoveStorageServer(Reference<ReadYourWritesTransaction> t
 	    .detail("Key1", keys[0].key)
 	    .detail("Value1", keys[0].value)
 	    .detail("Key2", keys[1].key)
-	    .detail("Value2", keys[1].value);
+	    .detail("Value2", keys[1].value)
+	    .detail("TeamID", teamId);
 	return !assigned && keys[1].key == allKeys.end;
 }
 

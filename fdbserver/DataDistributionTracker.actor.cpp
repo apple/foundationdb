@@ -1142,7 +1142,7 @@ void ShardsAffectedByTeamFailure::check() const {
 
 //ignoreRemoteTeam is for debugging purpose
 void ShardsAffectedByTeamFailure::updatePhysicalShardToTeams(PhysicalShard inputPhysicalShard, 
-		std::vector<Team> inputTeams, int expectedNumServersPerTeam, bool ignoreRemoteTeam) {
+		std::vector<Team> inputTeams, int expectedNumServersPerTeam) {
 	ASSERT(CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
 	ASSERT(expectedNumServersPerTeam>0);
 	ASSERT(inputTeams.size()<=2);
@@ -1170,13 +1170,10 @@ void ShardsAffectedByTeamFailure::updatePhysicalShardToTeams(PhysicalShard input
 		} else {
 			teamPhysicalShards[inputTeam].insert(inputPhysicalShard);
 		}
-		if (ignoreRemoteTeam) {
-			break;
-		}
 	}
 }
 
-ShardsAffectedByTeamFailure::Team ShardsAffectedByTeamFailure::getRemoteTeamIfHas(uint64_t inputPhysicalShardID, int expectedTeamSize) {
+Optional<ShardsAffectedByTeamFailure::Team> ShardsAffectedByTeamFailure::tryGetRemoteTeamWith(uint64_t inputPhysicalShardID, int expectedTeamSize) {
 	ASSERT(CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
 	Team returnTeam;
 	for (auto [team, physicalShards] : teamPhysicalShards) {
@@ -1196,7 +1193,11 @@ ShardsAffectedByTeamFailure::Team ShardsAffectedByTeamFailure::getRemoteTeamIfHa
 			}
 		}
 	}
-	return returnTeam;
+	if (returnTeam!=Team()) {
+		return returnTeam;
+	} else {
+		return Optional<ShardsAffectedByTeamFailure::Team>();
+	}
 }
 
 // At beginning of the transition from the initial state without physical shard notion
@@ -1204,23 +1205,23 @@ ShardsAffectedByTeamFailure::Team ShardsAffectedByTeamFailure::getRemoteTeamIfHa
 // After a period in the transition, the physicalShard set of the team contains some meaningful physicalShardIDs
 // This function increases #physicalShard of the team when #physicalShard less than 10
 // When stable, each team has 10 physicalShards
-uint64_t ShardsAffectedByTeamFailure::getPhysicalShardFor(Team team) {
+Optional<uint64_t> ShardsAffectedByTeamFailure::tryGetPhysicalShardFor(Team team) {
 	ASSERT(CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
 	ASSERT(team.servers.size()!=0);
 	if (teamPhysicalShards.count(team)==0) {
 		// Case: The team is not tracked in the mapping (teamPhysicalShards)
-		return UID().first();
+		return Optional<uint64_t>();
 	} else if (teamPhysicalShards[team].size() == 1 &&
 	           teamPhysicalShards[team].begin()->id == anonymousShardId.first()) {
 		// Case: The team is tracked in the mapping but
 		// 		in the transition from the initial state without physical shard notion
 		// 		to the physical shard aware state
 		teamPhysicalShards[team].clear();
-		return UID().first();
+		return Optional<uint64_t>();
 	} else if (teamPhysicalShards[team].size() < 4) {
 		// Case: The team is tracked in the mapping and the system already has physical shard notion
 		// 		but the number of physicalShard is small
-		return UID().first();
+		return Optional<uint64_t>();
 	} else {
 		// Case: The team is tracked in the mapping and the system already has physical shard notion
 		// 		and the number of physicalShard is large
