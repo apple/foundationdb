@@ -8879,6 +8879,12 @@ ACTOR Future<KeyRange> getChangeFeedRange(Reference<DatabaseContext> db, Databas
 			} else {
 				Optional<Value> val = wait(tr.get(rangeIDKey));
 				if (!val.present()) {
+					ASSERT(tr.getReadVersion().isReady());
+					TraceEvent(SevDebug, "ChangeFeedNotRegisteredGet")
+					    .detail("FeedID", rangeID)
+					    .detail("FullFeedKey", rangeIDKey)
+					    .detail("BeginVersion", begin)
+					    .detail("ReadVersion", tr.getReadVersion().get());
 					throw change_feed_not_registered();
 				}
 				if (db->changeFeedCache.size() > CLIENT_KNOBS->CHANGE_FEED_CACHE_SIZE) {
@@ -9281,6 +9287,12 @@ ACTOR static Future<Void> popChangeFeedBackup(Database cx, Key rangeID, Version 
 					tr.set(rangeIDKey, changeFeedValue(range, version, status));
 				}
 			} else {
+				ASSERT(tr.getReadVersion().isReady());
+				TraceEvent(SevDebug, "ChangeFeedNotRegisteredPop")
+				    .detail("FeedID", rangeID)
+				    .detail("FullFeedKey", rangeIDKey)
+				    .detail("PopVersion", version)
+				    .detail("ReadVersion", tr.getReadVersion().get());
 				throw change_feed_not_registered();
 			}
 			wait(tr.commit());

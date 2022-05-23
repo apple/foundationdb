@@ -186,6 +186,7 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 	Promise<Void> fatalError;
 
 	FlowLock initialSnapshotLock;
+	bool shuttingDown = false;
 
 	int changeFeedStreamReplyBufferSize = SERVER_KNOBS->BG_DELTA_FILE_TARGET_BYTES / 2;
 
@@ -703,7 +704,8 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(Reference<BlobWorkerData> bwData,
                                                        Reference<GranuleMetadata> metadata,
                                                        UID granuleID,
-                                                       Key cfKey) {
+                                                       Key cfKey,
+                                                       std::deque<Future<Void>>* inFlightPops) {
 	if (BW_DEBUG) {
 		fmt::print("Dumping snapshot from FDB for [{0} - {1})\n",
 		           metadata->keyRange.begin.printable(),
@@ -742,7 +744,7 @@ ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(Reference<BlobWorkerData>
 			DEBUG_KEY_RANGE("BlobWorkerFDBSnapshot", readVersion, metadata->keyRange, bwData->id);
 
 			// initial snapshot is committed in fdb, we can pop the change feed up to this version
-			bwData->addActor.send(bwData->db->popChangeFeedMutations(cfKey, readVersion));
+			inFlightPops->push_back(bwData->db->popChangeFeedMutations(cfKey, readVersion));
 			return snapshotWriter.get();
 		} catch (Error& e) {
 			if (e.code() == error_code_operation_cancelled) {
@@ -1000,7 +1002,8 @@ static void handleCompletedDeltaFile(Reference<BlobWorkerData> bwData,
                                      BlobFileIndex completedDeltaFile,
                                      Key cfKey,
                                      Version cfStartVersion,
-                                     std::deque<std::pair<Version, Version>>* rollbacksCompleted) {
+                                     std::deque<std::pair<Version, Version>>* rollbacksCompleted,
+                                     std::deque<Future<Void>>& inFlightPops) {
 	metadata->files.deltaFiles.push_back(completedDeltaFile);
 	ASSERT(metadata->durableDeltaVersion.get() < completedDeltaFile.version);
 	metadata->durableDeltaVersion.set(completedDeltaFile.version);
@@ -1018,7 +1021,7 @@ static void handleCompletedDeltaFile(Reference<BlobWorkerData> bwData,
 		// an async pop at its previousDurableVersion after opening the granule to guarantee it is eventually popped?
 		Future<Void> popFuture = bwData->db->popChangeFeedMutations(cfKey, completedDeltaFile.version);
 		// Do pop asynchronously
-		bwData->addActor.send(popFuture);
+		inFlightPops.push_back(popFuture);
 	}
 	while (!rollbacksCompleted->empty() && completedDeltaFile.version >= rollbacksCompleted->front().second) {
 		if (BW_DEBUG) {
@@ -1285,6 +1288,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
                                           Reference<GranuleMetadata> metadata,
                                           Future<GranuleStartState> assignFuture) {
 	state std::deque<InFlightFile> inFlightFiles;
+	state std::deque<Future<Void>> inFlightPops;
 	state Future<Void> oldChangeFeedFuture;
 	state Future<Void> changeFeedFuture;
 	state GranuleStartState startState;
@@ -1369,7 +1373,8 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				metadata->durableSnapshotVersion.set(startState.blobFilesToSnapshot.get().snapshotFiles.back().version);
 			} else {
 				ASSERT(startState.previousDurableVersion == invalidVersion);
-				BlobFileIndex fromFDB = wait(dumpInitialSnapshotFromFDB(bwData, metadata, startState.granuleID, cfKey));
+				BlobFileIndex fromFDB =
+				    wait(dumpInitialSnapshotFromFDB(bwData, metadata, startState.granuleID, cfKey, &inFlightPops));
 				newSnapshotFile = fromFDB;
 				ASSERT(startState.changeFeedStartVersion <= fromFDB.version);
 				startVersion = newSnapshotFile.version;
@@ -1446,7 +1451,8 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 						                         completedFile,
 						                         cfKey,
 						                         startState.changeFeedStartVersion,
-						                         &rollbacksCompleted);
+						                         &rollbacksCompleted,
+						                         inFlightPops);
 					}
 
 					inFlightFiles.pop_front();
@@ -1454,6 +1460,12 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				} else {
 					break;
 				}
+			}
+
+			// also check outstanding pops for errors
+			while (!inFlightPops.empty() && inFlightPops.front().isReady()) {
+				wait(inFlightPops.front());
+				inFlightPops.pop_front();
 			}
 
 			// inject delay into reading change feed stream
@@ -1849,7 +1861,8 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 								                         completedFile,
 								                         cfKey,
 								                         startState.changeFeedStartVersion,
-								                         &rollbacksCompleted);
+								                         &rollbacksCompleted,
+								                         inFlightPops);
 							}
 
 							inFlightFiles.pop_front();
@@ -2928,6 +2941,10 @@ ACTOR Future<Void> handleRangeAssign(Reference<BlobWorkerData> bwData,
 		return Void();
 	} catch (Error& e) {
 		if (e.code() == error_code_operation_cancelled) {
+			if (!bwData->shuttingDown) {
+				// the cancelled was because the granule open was cancelled, not because the whole blob worker was.
+				req.reply.sendError(granule_assignment_conflict());
+			}
 			throw e;
 		}
 		if (BW_DEBUG) {
@@ -3256,6 +3273,7 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 				}
 			}
 			when(wait(collection)) {
+				self->shuttingDown = true;
 				TraceEvent("BlobWorkerActorCollectionError", self->id);
 				ASSERT(false);
 				throw internal_error();
@@ -3273,6 +3291,7 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 			}
 		}
 	} catch (Error& e) {
+		self->shuttingDown = true;
 		if (e.code() == error_code_operation_cancelled) {
 			self->granuleMetadata.clear();
 			throw;
@@ -3282,6 +3301,8 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 		}
 		TraceEvent("BlobWorkerDied", self->id).errorUnsuppressed(e);
 	}
+
+	self->shuttingDown = true;
 
 	wait(self->granuleMetadata.clearAsync());
 	return Void();
