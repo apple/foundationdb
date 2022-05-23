@@ -244,8 +244,7 @@ public:
 
 			if (req.wantsTrueBest) {
 				ASSERT(!bestOption.present());
-				auto& startIndex =
-				    req.preferLowerDiskUtil ? self->lowestUtilizationTeam : self->highestUtilizationTeam;
+				auto& startIndex = req.preferLowerDiskUtil ? self->lowestUtilizationTeam : self->highestUtilizationTeam;
 				if (startIndex >= self->teams.size()) {
 					startIndex = 0;
 				}
@@ -286,8 +285,8 @@ public:
 					// If unhealthy team is majority, we may not find an ok dest in this while loop
 					Reference<TCTeamInfo> dest = deterministicRandom()->randomChoice(self->teams);
 
-					bool ok = dest->isHealthy() && (!req.preferLowerDiskUtil ||
-					                                dest->hasHealthyAvailableSpace(self->medianAvailableSpace));
+					bool ok = dest->isHealthy() &&
+					          (!req.preferLowerDiskUtil || dest->hasHealthyAvailableSpace(self->medianAvailableSpace));
 
 					for (int i = 0; ok && i < randomTeams.size(); i++) {
 						if (randomTeams[i]->getServerIDs() == dest->getServerIDs()) {
@@ -5700,7 +5699,7 @@ public:
 
 		wait(collection->getTeam(req) && collection->getTeam(reqHigh));
 		auto [resTeam, resTeamSrcFound] = req.reply.getFuture().get();
-		auto [resTeamHigh, resTeamHighSrcFound] = req.reply.getFuture().get();
+		auto [resTeamHigh, resTeamHighSrcFound] = reqHigh.reply.getFuture().get();
 
 		std::set<UID> expectedServers{ UID(4, 0) };
 		std::set<UID> expectedServersHigh{ UID(5, 0) };

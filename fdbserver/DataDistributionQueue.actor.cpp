@@ -1535,7 +1535,10 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
 		return false;
 	}
 
-	// check lastAsSource, at most 10% of shards can be moved within a sample period
+	// Check lastAsSource, at most SERVER_KNOBS->READ_REBALANCE_SRC_PARALLELISM shards can be moved within a sample
+	// period. It takes time for the sampled metrics being updated after a shard is moved, so we should control the
+	// cadence of movement here to avoid moving churn caused by making many decision based on out-of-date sampled
+	// metrics.
 	if (self->timeThrottle(sourceTeam->getServerIDs())) {
 		traceEvent->detail("SkipReason", "SourceTeamThrottle");
 		return false;
