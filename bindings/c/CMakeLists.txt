@@ -301,12 +301,37 @@ endif()
             @LOG_DIR@
             )
 
+  add_fdbclient_test(
+    NAME fdb_c_api_tests_with_tls
+    DISABLE_LOG_DUMP
+    TLS_ENABLED
+    COMMAND ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/run_c_api_tests.py
+            --cluster-file
+            @CLUSTER_FILE@
+            --tester-binary
+            $<TARGET_FILE:fdb_c_api_tester>
+            --external-client-library
+            ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c_external.so
+            --test-dir
+            ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests
+            --tmp-dir
+            @TMP_DIR@
+            --log-dir
+            @LOG_DIR@
+            --tls-cert-file
+            @CLIENT_CERT_FILE@
+            --tls-key-file
+            @CLIENT_KEY_FILE@
+            --tls-ca-file
+            @SERVER_CA_FILE@
+            )
+
   if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" AND NOT USE_SANITIZER)
     add_test(NAME fdb_c_upgrade_single_threaded_630api
       COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
             --build-dir ${CMAKE_BINARY_DIR}
             --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadSingleThr.toml
-            --upgrade-path "6.3.23" "7.0.0" "7.1.3" "7.2.0"
+            --upgrade-path "6.3.23" "7.0.0" "7.1.5" "7.2.0"
             --process-number 1
             )
 
@@ -314,7 +339,7 @@ endif()
       COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
             --build-dir ${CMAKE_BINARY_DIR}
             --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadSingleThr.toml
-            --upgrade-path "7.0.0" "7.1.3" "7.2.0"
+            --upgrade-path "7.0.0" "7.1.5" "7.2.0"
             --process-number 1
             )
 
@@ -322,7 +347,7 @@ endif()
         COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
             --build-dir ${CMAKE_BINARY_DIR}
             --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
-            --upgrade-path "6.3.23" "7.0.0" "7.1.3" "7.2.0"
+            --upgrade-path "6.3.23" "7.0.0" "7.1.5" "7.2.0" "7.1.5"
             --process-number 3
           )
 
@@ -330,7 +355,7 @@ endif()
         COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
             --build-dir ${CMAKE_BINARY_DIR}
             --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
-            --upgrade-path "7.0.0" "7.1.3" "7.2.0"
+            --upgrade-path "7.0.0" "7.1.5" "7.2.0" "7.1.5"
             --process-number 3
           )
 
@@ -338,7 +363,7 @@ endif()
         COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
             --build-dir ${CMAKE_BINARY_DIR}
             --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
-            --upgrade-path "7.1.3" "7.2.0"
+            --upgrade-path "7.1.5" "7.2.0" "7.1.5"
             --process-number 3
           )
 

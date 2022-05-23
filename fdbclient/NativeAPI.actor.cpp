@@ -30,6 +30,7 @@
 #include <utility>
 #include <vector>
 
+#include "boost/algorithm/string.hpp"
 #include "contrib/fmt-8.1.1/include/fmt/format.h"
 
 #include "fdbclient/FDBOptions.g.h"
@@ -4082,7 +4083,7 @@ int64_t inline getRangeResultFamilyBytes(MappedRangeResultRef result) {
 	int64_t bytes = 0;
 	for (const MappedKeyValueRef& mappedKeyValue : result) {
 		bytes += mappedKeyValue.key.size() + mappedKeyValue.value.size();
-
+		bytes += sizeof(mappedKeyValue.boundaryAndExist);
 		auto& reqAndResult = mappedKeyValue.reqAndResult;
 		if (std::holds_alternative<GetValueReqAndResultRef>(reqAndResult)) {
 			auto getValue = std::get<GetValueReqAndResultRef>(reqAndResult);
@@ -6983,24 +6984,30 @@ ACTOR Future<Optional<ProtocolVersion>> getCoordinatorProtocolFromConnectPacket(
 		coordinatorAddress = coordinator->get().get().getLeader.getEndpoint().getPrimaryAddress();
 	}
 
-	state Reference<AsyncVar<Optional<ProtocolVersion>> const> protocolVersion =
+	state Optional<Reference<AsyncVar<Optional<ProtocolVersion>> const>> protocolVersion =
 	    FlowTransport::transport().getPeerProtocolAsyncVar(coordinatorAddress);
 
+	if (!protocolVersion.present()) {
+		TraceEvent(SevWarnAlways, "GetCoordinatorProtocolPeerMissing").detail("Address", coordinatorAddress);
+		wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT));
+		return Optional<ProtocolVersion>();
+	}
+
 	loop {
-		if (protocolVersion->get().present() && protocolVersion->get() != expectedVersion) {
-			return protocolVersion->get();
+		if (protocolVersion.get()->get().present() && protocolVersion.get()->get() != expectedVersion) {
+			return protocolVersion.get()->get();
 		}
 
-		Future<Void> change = protocolVersion->onChange();
-		if (!protocolVersion->get().present()) {
+		Future<Void> change = protocolVersion.get()->onChange();
+		if (!protocolVersion.get()->get().present()) {
 			// If we still don't have any connection info after a timeout, retry sending the protocol version request
 			change = timeout(change, FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT, Void());
 		}
 
 		wait(change);
 
-		if (!protocolVersion->get().present()) {
-			return protocolVersion->get();
+		if (!protocolVersion.get()->get().present()) {
+			return protocolVersion.get()->get();
 		}
 	}
 }
@@ -8143,8 +8150,10 @@ ACTOR Future<std::vector<CheckpointMetaData>> getCheckpointMetaData(Database cx,
 
 			futures.clear();
 			for (index = 0; index < locations.size(); ++index) {
-				futures.push_back(getCheckpointMetaDataInternal(
-				    GetCheckpointRequest(version, keys, format), locations[index].locations, timeout));
+				futures.push_back(
+				    getCheckpointMetaDataInternal(GetCheckpointRequest(version, locations[index].range, format),
+				                                  locations[index].locations,
+				                                  timeout));
 				TraceEvent("GetCheckpointShardBegin")
 				    .detail("Range", locations[index].range)
 				    .detail("Version", version)
@@ -8259,57 +8268,74 @@ ACTOR Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion
 	return (ddCheck && coordinatorCheck);
 }
 
-ACTOR Future<Void> addInterfaceActor(std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface,
-                                     Reference<FlowLock> connectLock,
-                                     KeyValue kv) {
+// returns true if we can connect to the given worker interface
+ACTOR Future<bool> verifyInterfaceActor(Reference<FlowLock> connectLock, ClientWorkerInterface workerInterf) {
 	wait(connectLock->take());
 	state FlowLock::Releaser releaser(*connectLock);
-	state ClientWorkerInterface workerInterf =
-	    BinaryReader::fromStringRef<ClientWorkerInterface>(kv.value, IncludeVersion());
 	state ClientLeaderRegInterface leaderInterf(workerInterf.address());
 	choose {
 		when(Optional<LeaderInfo> rep =
 		         wait(brokenPromiseToNever(leaderInterf.getLeader.getReply(GetLeaderRequest())))) {
-			StringRef ip_port =
-			    kv.key.endsWith(LiteralStringRef(":tls")) ? kv.key.removeSuffix(LiteralStringRef(":tls")) : kv.key;
-			(*address_interface)[ip_port] = std::make_pair(kv.value, leaderInterf);
-
-			if (workerInterf.reboot.getEndpoint().addresses.secondaryAddress.present()) {
-				Key full_ip_port2 =
-				    StringRef(workerInterf.reboot.getEndpoint().addresses.secondaryAddress.get().toString());
-				StringRef ip_port2 = full_ip_port2.endsWith(LiteralStringRef(":tls"))
-				                         ? full_ip_port2.removeSuffix(LiteralStringRef(":tls"))
-				                         : full_ip_port2;
-				(*address_interface)[ip_port2] = std::make_pair(kv.value, leaderInterf);
-			}
+			return true;
 		}
-		when(wait(delay(CLIENT_KNOBS->CLI_CONNECT_TIMEOUT))) {} // NOTE : change timeout time here if necessary
+		when(wait(delay(CLIENT_KNOBS->CLI_CONNECT_TIMEOUT))) {
+			// NOTE : change timeout time here if necessary
+			return false;
+		}
 	}
-	return Void();
 }
 
 ACTOR static Future<int64_t> rebootWorkerActor(DatabaseContext* cx, ValueRef addr, bool check, int duration) {
 	// ignore negative value
 	if (duration < 0)
 		duration = 0;
-	// fetch the addresses of all workers
-	state std::map<Key, std::pair<Value, ClientLeaderRegInterface>> address_interface;
 	if (!cx->getConnectionRecord())
 		return 0;
+	// fetch all workers' addresses and interfaces from CC
 	RangeResult kvs = wait(getWorkerInterfaces(cx->getConnectionRecord()));
 	ASSERT(!kvs.more);
+	// map worker network address to its interface
+	state std::map<Key, ClientWorkerInterface> workerInterfaces;
+	for (const auto& it : kvs) {
+		ClientWorkerInterface workerInterf =
+		    BinaryReader::fromStringRef<ClientWorkerInterface>(it.value, IncludeVersion());
+		Key primaryAddress =
+		    it.key.endsWith(LiteralStringRef(":tls")) ? it.key.removeSuffix(LiteralStringRef(":tls")) : it.key;
+		workerInterfaces[primaryAddress] = workerInterf;
+		// Also add mapping from a worker's second address(if present) to its interface
+		if (workerInterf.reboot.getEndpoint().addresses.secondaryAddress.present()) {
+			Key secondAddress =
+			    StringRef(workerInterf.reboot.getEndpoint().addresses.secondaryAddress.get().toString());
+			secondAddress = secondAddress.endsWith(LiteralStringRef(":tls"))
+			                    ? secondAddress.removeSuffix(LiteralStringRef(":tls"))
+			                    : secondAddress;
+			workerInterfaces[secondAddress] = workerInterf;
+		}
+	}
+	// split and get all the requested addresses to send reboot requests
+	state std::vector<std::string> addressesVec;
+	boost::algorithm::split(addressesVec, addr.toString(), boost::is_any_of(","));
 	// Note: reuse this knob from fdbcli, change it if necessary
 	Reference<FlowLock> connectLock(new FlowLock(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM));
-	std::vector<Future<Void>> addInterfs;
-	for (const auto& it : kvs) {
-		addInterfs.push_back(addInterfaceActor(&address_interface, connectLock, it));
+	state std::vector<Future<bool>> verifyInterfs;
+	for (const auto& requestedAddress : addressesVec) {
+		// step 1: check that the requested address is in the worker list provided by CC
+		if (!workerInterfaces.count(Key(requestedAddress)))
+			return 0;
+		// step 2: try to establish connections to the requested worker
+		verifyInterfs.push_back(verifyInterfaceActor(connectLock, workerInterfaces[Key(requestedAddress)]));
 	}
-	wait(waitForAll(addInterfs));
-	if (!address_interface.count(addr))
-		return 0;
-
-	BinaryReader::fromStringRef<ClientWorkerInterface>(address_interface[addr].first, IncludeVersion())
-	    .reboot.send(RebootRequest(false, check, duration));
+	// step 3: check if we can establish connections to all requested workers, return if not
+	wait(waitForAll(verifyInterfs));
+	for (const auto& f : verifyInterfs) {
+		if (!f.get())
+			return 0;
+	}
+	// step 4: After verifying we can connect to all requested workers, send reboot requests together
+	for (const auto& address : addressesVec) {
+		// Note: We want to make sure these requests are sent in parallel
+		workerInterfaces[Key(address)].reboot.send(RebootRequest(false, check, duration));
+	}
 	return 1;
 }
 
@@ -8853,6 +8879,12 @@ ACTOR Future<KeyRange> getChangeFeedRange(Reference<DatabaseContext> db, Databas
 			} else {
 				Optional<Value> val = wait(tr.get(rangeIDKey));
 				if (!val.present()) {
+					ASSERT(tr.getReadVersion().isReady());
+					TraceEvent(SevDebug, "ChangeFeedNotRegisteredGet")
+					    .detail("FeedID", rangeID)
+					    .detail("FullFeedKey", rangeIDKey)
+					    .detail("BeginVersion", begin)
+					    .detail("ReadVersion", tr.getReadVersion().get());
 					throw change_feed_not_registered();
 				}
 				if (db->changeFeedCache.size() > CLIENT_KNOBS->CHANGE_FEED_CACHE_SIZE) {
@@ -9255,6 +9287,12 @@ ACTOR static Future<Void> popChangeFeedBackup(Database cx, Key rangeID, Version 
 					tr.set(rangeIDKey, changeFeedValue(range, version, status));
 				}
 			} else {
+				ASSERT(tr.getReadVersion().isReady());
+				TraceEvent(SevDebug, "ChangeFeedNotRegisteredPop")
+				    .detail("FeedID", rangeID)
+				    .detail("FullFeedKey", rangeIDKey)
+				    .detail("PopVersion", version)
+				    .detail("ReadVersion", tr.getReadVersion().get());
 				throw change_feed_not_registered();
 			}
 			wait(tr.commit());

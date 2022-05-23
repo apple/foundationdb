@@ -35,6 +35,8 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 
 	static public final int MATCH_INDEX_ALL = 0;
 	static public final int MATCH_INDEX_NONE = 1;
+	static public final int MATCH_INDEX_MATCHED_ONLY = 2;
+	static public final int MATCH_INDEX_UNMATCHED_ONLY = 3;
 
 	private final Database database;
 	private final Executor executor;
@@ -356,7 +358,8 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 		if (mapper == null) {
 			throw new IllegalArgumentException("Mapper must be non-null");
 		}
-		return new MappedRangeQuery(FDBTransaction.this, false, begin, end, mapper, limit, reverse, mode, eventKeeper);
+		return new MappedRangeQuery(FDBTransaction.this, false, begin, end, mapper, limit, matchIndex, reverse, mode,
+		                            eventKeeper);
 	}
 
 	///////////////////
@@ -461,7 +464,8 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	protected FutureMappedResults getMappedRange_internal(KeySelector begin, KeySelector end,
 	                                                      byte[] mapper, // Nullable
 	                                                      int rowLimit, int targetBytes, int streamingMode,
-	                                                      int iteration, boolean isSnapshot, boolean reverse) {
+	                                                      int iteration, boolean isSnapshot, boolean reverse,
+	                                                      int matchIndex) {
 		if (eventKeeper != null) {
 			eventKeeper.increment(Events.JNI_CALL);
 		}
@@ -474,7 +478,7 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 			return new FutureMappedResults(
 			    Transaction_getMappedRange(getPtr(), begin.getKey(), begin.orEqual(), begin.getOffset(), end.getKey(),
 			                               end.orEqual(), end.getOffset(), mapper, rowLimit, targetBytes, streamingMode,
-			                               iteration, MATCH_INDEX_ALL, isSnapshot, reverse),
+			                               iteration, matchIndex, isSnapshot, reverse),
 			    FDB.instance().isDirectBufferQueriesEnabled(), executor, eventKeeper);
 		} finally {
 			pointerReadLock.unlock();
