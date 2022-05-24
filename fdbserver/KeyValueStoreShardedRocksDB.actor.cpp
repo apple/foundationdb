@@ -525,11 +525,6 @@ public:
 		return std::move(existingWriteBatch);
 	}
 
-=======
-		return status;
-	}
-
->>>>>>> 6bf1e3921f3645d816a9a8378a97d5442ff1efa9
 	void closeAllShards() {
 		// Close DB.
 		auto s = db->Close();
