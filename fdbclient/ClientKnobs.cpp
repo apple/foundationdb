@@ -287,6 +287,9 @@ void ClientKnobs::initialize(Randomize randomize) {
 	// Blob granules
 	init( BG_MAX_GRANULE_PARALLELISM,                10 );
 
+	init( CHANGE_QUORUM_BAD_STATE_RETRY_TIMES,        3 );
+	init( CHANGE_QUORUM_BAD_STATE_RETRY_DELAY,      2.0 );
+
 	// clang-format on
 }
 
