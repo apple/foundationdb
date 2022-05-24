@@ -20,6 +20,7 @@
 
 #include <cinttypes>
 #include <vector>
+#include <type_traits>
 
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/SystemData.h"
@@ -669,6 +670,60 @@ ACTOR Future<Void> reconfigureAfter(Database cx,
 	return Void();
 }
 
+struct QuietDatabaseChecker {
+	double start = now();
+	constexpr static double maxDDRunTime = 1000.0;
+
+	struct Impl {
+		double start;
+		std::string const& phase;
+		std::vector<std::string> failReasons;
+
+		Impl(double start, const std::string& phase) : start(start), phase(phase) {}
+
+		template <class T, class Comparison = std::less_equal<>>
+		Impl& add(BaseTraceEvent& evt,
+		          const char* name,
+		          T value,
+		          T expected,
+		          Comparison const& cmp = std::less_equal<>()) {
+			std::string k = fmt::format("{}Gate", name);
+			evt.detail(name, value).detail(k.c_str(), expected);
+			if (!cmp(value, expected)) {
+				failReasons.push_back(name);
+			}
+			return *this;
+		}
+
+		bool success() {
+			bool timedOut = now() - start > maxDDRunTime;
+			if (!failReasons.empty()) {
+				std::string traceMessage = fmt::format("QuietDatabase{}Fail", phase);
+				std::string reasons = fmt::format("{}", fmt::join(failReasons, ", "));
+				TraceEvent(timedOut ? SevError : SevWarnAlways, traceMessage.c_str())
+				    .detail("Reasons", reasons)
+				    .detail("FailedAfter", now() - start)
+				    .detail("Timeout", maxDDRunTime);
+				if (timedOut) {
+					// this bool is just created to make the assertion more readable
+					bool ddGotStuck = true;
+					// This assertion is here to make the test fail more quickly. If quietDatabase takes this
+					// long without completing, we can assume that the test will eventually time out. However,
+					// time outs are more annoying to debug. This will hopefully be easier to track down.
+					ASSERT(!ddGotStuck || !g_network->isSimulated());
+				}
+				return false;
+			}
+			return true;
+		}
+	};
+
+	Impl startIteration(std::string const& phase) const {
+		Impl res(start, phase);
+		return res;
+	}
+};
+
 // Waits until a database quiets down (no data in flight, small tlog queue, low SQ, no active data distribution). This
 // requires the database to be available and healthy in order to succeed.
 ACTOR Future<Void> waitForQuietDatabase(Database cx,
@@ -680,6 +735,7 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
                                         int64_t maxDataDistributionQueueSize = 0,
                                         int64_t maxPoppedVersionLag = 30e6,
                                         int64_t maxVersionOffset = 1e6) {
+	state QuietDatabaseChecker checker;
 	state Future<Void> reconfig =
 	    reconfigureAfter(cx, 100 + (deterministicRandom()->random01() * 100), dbInfo, "QuietDatabase");
 	state Future<int64_t> dataInFlight;
@@ -732,35 +788,26 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 			     success(teamCollectionValid) && success(storageQueueSize) && success(dataDistributionActive) &&
 			     success(storageServersRecruiting) && success(versionOffset));
 
-			TraceEvent(("QuietDatabase" + phase).c_str())
-			    .detail("DataInFlight", dataInFlight.get())
-			    .detail("DataInFlightGate", dataInFlightGate)
-			    .detail("MaxTLogQueueSize", tLogQueueInfo.get().first)
-			    .detail("MaxTLogQueueGate", maxTLogQueueGate)
-			    .detail("MaxTLogPoppedVersionLag", tLogQueueInfo.get().second)
-			    .detail("MaxTLogPoppedVersionLagGate", maxPoppedVersionLag)
-			    .detail("DataDistributionQueueSize", dataDistributionQueueSize.get())
-			    .detail("DataDistributionQueueSizeGate", maxDataDistributionQueueSize)
-			    .detail("TeamCollectionValid", teamCollectionValid.get())
-			    .detail("MaxStorageQueueSize", storageQueueSize.get())
-			    .detail("MaxStorageServerQueueGate", maxStorageServerQueueGate)
-			    .detail("DataDistributionActive", dataDistributionActive.get())
-			    .detail("StorageServersRecruiting", storageServersRecruiting.get())
-			    .detail("RecoveryCount", dbInfo->get().recoveryCount)
-			    .detail("VersionOffset", versionOffset.get())
-			    .detail("NumSuccesses", numSuccesses);
-
 			maxVersionOffset += dbInfo->get().recoveryCount * SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT;
-			if (dataInFlight.get() > dataInFlightGate || tLogQueueInfo.get().first > maxTLogQueueGate ||
-			    tLogQueueInfo.get().second > maxPoppedVersionLag ||
-			    dataDistributionQueueSize.get() > maxDataDistributionQueueSize ||
-			    storageQueueSize.get() > maxStorageServerQueueGate || !dataDistributionActive.get() ||
-			    storageServersRecruiting.get() || versionOffset.get() > maxVersionOffset ||
-			    !teamCollectionValid.get()) {
 
-				wait(delay(1.0));
-				numSuccesses = 0;
-			} else {
+			auto check = checker.startIteration(phase);
+
+			std::string evtType = "QuietDatabase" + phase;
+			TraceEvent evt(evtType.c_str());
+			check.add(evt, "DataInFlight", dataInFlight.get(), dataInFlightGate)
+			    .add(evt, "MaxTLogQueueSize", tLogQueueInfo.get().first, maxTLogQueueGate)
+			    .add(evt, "MaxTLogPoppedVersionLag", tLogQueueInfo.get().second, maxPoppedVersionLag)
+			    .add(evt, "DataDistributionQueueSize", dataDistributionQueueSize.get(), maxDataDistributionQueueSize)
+			    .add(evt, "TeamCollectionValid", teamCollectionValid.get(), true, std::equal_to<>())
+			    .add(evt, "MaxStorageQueueSize", storageQueueSize.get(), maxStorageServerQueueGate)
+			    .add(evt, "DataDistributionActive", dataDistributionActive.get(), true, std::equal_to<>())
+			    .add(evt, "StorageServersRecruiting", storageServersRecruiting.get(), false, std::equal_to<>())
+			    .add(evt, "VersionOffset", versionOffset.get(), maxVersionOffset);
+
+			evt.detail("RecoveryCount", dbInfo->get().recoveryCount).detail("NumSuccesses", numSuccesses);
+			evt.log();
+
+			if (check.success()) {
 				if (++numSuccesses == 3) {
 					auto msg = "QuietDatabase" + phase + "Done";
 					TraceEvent(msg.c_str()).log();
@@ -768,6 +815,9 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 				} else {
 					wait(delay(g_network->isSimulated() ? 2.0 : 30.0));
 				}
+			} else {
+				wait(delay(1.0));
+				numSuccesses = 0;
 			}
 		} catch (Error& e) {
 			TraceEvent(("QuietDatabase" + phase + "Error").c_str()).errorUnsuppressed(e);

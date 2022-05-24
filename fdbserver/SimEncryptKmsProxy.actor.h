@@ -29,14 +29,13 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/fdbrpc.h"
+#include "flow/EncryptUtils.h"
 #include "flow/FileIdentifier.h"
 #include "flow/Trace.h"
 #include "flow/flow.h"
 #include "flow/network.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-using SimEncryptKeyId = uint64_t;
-using SimEncryptDomainId = uint64_t;
 using SimEncryptKey = std::string;
 
 struct SimKmsProxyInterface {
@@ -73,12 +72,15 @@ struct SimKmsProxyInterface {
 
 struct SimEncryptKeyDetails {
 	constexpr static FileIdentifier file_identifier = 1227025;
-	SimEncryptDomainId encryptDomainId;
-	SimEncryptKeyId encryptKeyId;
+	EncryptCipherDomainId encryptDomainId;
+	EncryptCipherBaseKeyId encryptKeyId;
 	StringRef encryptKey;
 
 	SimEncryptKeyDetails() {}
-	explicit SimEncryptKeyDetails(SimEncryptDomainId domainId, SimEncryptKeyId keyId, StringRef key, Arena& arena)
+	explicit SimEncryptKeyDetails(EncryptCipherDomainId domainId,
+	                              EncryptCipherBaseKeyId keyId,
+	                              StringRef key,
+	                              Arena& arena)
 	  : encryptDomainId(domainId), encryptKeyId(keyId), encryptKey(StringRef(arena, key)) {}
 
 	template <class Ar>
@@ -102,11 +104,12 @@ struct SimGetEncryptKeysByKeyIdsReply {
 
 struct SimGetEncryptKeysByKeyIdsRequest {
 	constexpr static FileIdentifier file_identifier = 6913396;
-	std::vector<std::pair<SimEncryptKeyId, SimEncryptDomainId>> encryptKeyIds;
+	std::vector<std::pair<EncryptCipherBaseKeyId, EncryptCipherDomainId>> encryptKeyIds;
 	ReplyPromise<SimGetEncryptKeysByKeyIdsReply> reply;
 
 	SimGetEncryptKeysByKeyIdsRequest() {}
-	explicit SimGetEncryptKeysByKeyIdsRequest(const std::vector<std::pair<SimEncryptKeyId, SimEncryptDomainId>>& keyIds)
+	explicit SimGetEncryptKeysByKeyIdsRequest(
+	    const std::vector<std::pair<EncryptCipherBaseKeyId, EncryptCipherDomainId>>& keyIds)
 	  : encryptKeyIds(keyIds) {}
 
 	template <class Ar>
@@ -130,11 +133,12 @@ struct SimGetEncryptKeyByDomainIdReply {
 
 struct SimGetEncryptKeysByDomainIdsRequest {
 	constexpr static FileIdentifier file_identifier = 9918682;
-	std::vector<SimEncryptDomainId> encryptDomainIds;
+	std::vector<EncryptCipherDomainId> encryptDomainIds;
 	ReplyPromise<SimGetEncryptKeyByDomainIdReply> reply;
 
 	SimGetEncryptKeysByDomainIdsRequest() {}
-	explicit SimGetEncryptKeysByDomainIdsRequest(const std::vector<SimEncryptDomainId>& ids) : encryptDomainIds(ids) {}
+	explicit SimGetEncryptKeysByDomainIdsRequest(const std::vector<EncryptCipherDomainId>& ids)
+	  : encryptDomainIds(ids) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {

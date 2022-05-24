@@ -53,18 +53,21 @@ class MappedRangeQuery implements AsyncIterable<MappedKeyValue> {
 	private final byte[] mapper; // Nonnull
 	private final boolean snapshot;
 	private final int rowLimit;
+	private final int matchIndex;
 	private final boolean reverse;
 	private final StreamingMode streamingMode;
 	private final EventKeeper eventKeeper;
 
 	MappedRangeQuery(FDBTransaction transaction, boolean isSnapshot, KeySelector begin, KeySelector end, byte[] mapper,
-	                 int rowLimit, boolean reverse, StreamingMode streamingMode, EventKeeper eventKeeper) {
+	                 int rowLimit, int matchIndex, boolean reverse, StreamingMode streamingMode,
+	                 EventKeeper eventKeeper) {
 		this.tr = transaction;
 		this.begin = begin;
 		this.end = end;
 		this.mapper = mapper;
 		this.snapshot = isSnapshot;
 		this.rowLimit = rowLimit;
+		this.matchIndex = matchIndex;
 		this.reverse = reverse;
 		this.streamingMode = streamingMode;
 		this.eventKeeper = eventKeeper;
@@ -88,14 +91,14 @@ class MappedRangeQuery implements AsyncIterable<MappedKeyValue> {
 
 			FutureMappedResults range =
 			    tr.getMappedRange_internal(this.begin, this.end, this.mapper, this.rowLimit, 0,
-			                               StreamingMode.EXACT.code(), 1, this.snapshot, this.reverse);
+			                               StreamingMode.EXACT.code(), 1, this.snapshot, this.reverse, this.matchIndex);
 			return range.thenApply(result -> result.get().values).whenComplete((result, e) -> range.close());
 		}
 
 		// If the streaming mode is not EXACT, simply collect the results of an
 		// iteration into a list
 		return AsyncUtil.collect(
-		    new MappedRangeQuery(tr, snapshot, begin, end, mapper, rowLimit, reverse, mode, eventKeeper),
+		    new MappedRangeQuery(tr, snapshot, begin, end, mapper, rowLimit, matchIndex, reverse, mode, eventKeeper),
 		    tr.getExecutor());
 	}
 
@@ -106,7 +109,7 @@ class MappedRangeQuery implements AsyncIterable<MappedKeyValue> {
 	 */
 	@Override
 	public AsyncRangeIterator iterator() {
-		return new AsyncRangeIterator(this.rowLimit, this.reverse, this.streamingMode);
+		return new AsyncRangeIterator(this.rowLimit, this.matchIndex, this.reverse, this.streamingMode);
 	}
 
 	private class AsyncRangeIterator implements AsyncIterator<MappedKeyValue> {
@@ -114,6 +117,7 @@ class MappedRangeQuery implements AsyncIterable<MappedKeyValue> {
 		private final boolean rowsLimited;
 		private final boolean reverse;
 		private final StreamingMode streamingMode;
+		private final int matchIndex;
 
 		// There is the chance for parallelism in the two "chunks" for fetched data
 		private MappedRangeResult chunk = null;
@@ -131,12 +135,13 @@ class MappedRangeQuery implements AsyncIterable<MappedKeyValue> {
 		private CompletableFuture<Boolean> nextFuture;
 		private boolean isCancelled = false;
 
-		private AsyncRangeIterator(int rowLimit, boolean reverse, StreamingMode streamingMode) {
+		private AsyncRangeIterator(int rowLimit, int matchIndex, boolean reverse, StreamingMode streamingMode) {
 			this.begin = MappedRangeQuery.this.begin;
 			this.end = MappedRangeQuery.this.end;
 			this.rowsLimited = rowLimit != 0;
 			this.rowsRemaining = rowLimit;
 			this.reverse = reverse;
+			this.matchIndex = matchIndex;
 			this.streamingMode = streamingMode;
 
 			startNextFetch();
@@ -217,8 +222,9 @@ class MappedRangeQuery implements AsyncIterable<MappedKeyValue> {
 
 			nextFuture = new CompletableFuture<>();
 			final long sTime = System.nanoTime();
-			fetchingChunk = tr.getMappedRange_internal(begin, end, mapper, rowsLimited ? rowsRemaining : 0, 0,
-			                                           streamingMode.code(), ++iteration, snapshot, reverse);
+			fetchingChunk =
+			    tr.getMappedRange_internal(begin, end, mapper, rowsLimited ? rowsRemaining : 0, 0, streamingMode.code(),
+			                               ++iteration, snapshot, reverse, matchIndex);
 
 			BiConsumer<MappedRangeResultInfo, Throwable> cons = new FetchComplete(fetchingChunk, nextFuture);
 			if (eventKeeper != null) {

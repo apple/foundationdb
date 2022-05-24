@@ -272,6 +272,15 @@ void LogSet::getPushLocations(VectorRef<Tag> tags, std::vector<int>& locations, 
 	//	.detail("Included", alsoServers.size()).detail("Duration", timer() - t);
 }
 
+LogPushData::LogPushData(Reference<ILogSystem> logSystem, int tlogCount) : logSystem(logSystem), subsequence(1) {
+	ASSERT(tlogCount > 0);
+	messagesWriter.reserve(tlogCount);
+	for (int i = 0; i < tlogCount; i++) {
+		messagesWriter.emplace_back(AssumeVersion(g_network->protocolVersion()));
+	}
+	messagesWritten = std::vector<bool>(tlogCount, false);
+}
+
 void LogPushData::addTxsTag() {
 	if (logSystem->getTLogVersion() >= TLogVersion::V4) {
 		next_message_tags.push_back(logSystem->getRandomTxsTag());
