@@ -307,8 +307,8 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 			try {
 				Version rv = wait(self->doGrv(&tr));
 				state Version readVersion = rv;
-				std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> blob = wait(
-				    readFromBlob(cx, self->bstore, threadData->directoryRange, 0, readVersion, threadData->tenantName));
+				std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> blob = wait(readFromBlob(
+				    cx, self->bstore, normalKeys /* tenant handles range */, 0, readVersion, threadData->tenantName));
 				fmt::print("Directory {0} got {1} RV {2}\n",
 				           threadData->directoryID,
 				           doSetup ? "initial" : "final",
@@ -373,7 +373,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 			fmt::print("      Actual Key: {0}\n", blobKey.present() ? blobKey.get().printable() : "<missing>");
 		}
 
-		fmt::print("Chunks:\n");
+		fmt::print("Chunks: {0}\n", blob.second.size());
 		for (auto& chunk : blob.second) {
 			fmt::print("[{0} - {1})\n", chunk.keyRange.begin.printable(), chunk.keyRange.end.printable());
 
@@ -440,10 +440,11 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		int resultIdx = 0;
 		Optional<Key> lastMatching;
 		if (DEBUG_READ_OP(threadData->directoryID, readVersion)) {
-			fmt::print("DBG READ: [{0} - {1}) @ {2}\n",
+			fmt::print("DBG READ: [{0} - {1}) @ {2} ({3} rows)\n",
 			           format("%08x", startKeyInclusive),
 			           format("%08x", endKeyExclusive),
-			           readVersion);
+			           readVersion,
+			           blob.first.size());
 		}
 
 		// because each chunk could be separately collapsed or not if we set beginVersion, we have to track it by chunk
@@ -456,7 +457,15 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 				ASSERT(beginVersion > 0);
 				ASSERT(chunk.snapshotVersion == invalidVersion);
 				beginCollapsed++;
-				beginVersionByChunk.insert(chunk.keyRange, beginVersion);
+				KeyRange beginVersionRange;
+				if (chunk.tenantPrefix.present()) {
+					beginVersionRange = KeyRangeRef(chunk.keyRange.begin.removePrefix(chunk.tenantPrefix.get()),
+					                                chunk.keyRange.end.removePrefix(chunk.tenantPrefix.get()));
+				} else {
+					beginVersionRange = chunk.keyRange;
+				}
+
+				beginVersionByChunk.insert(beginVersionRange, beginVersion);
 			} else {
 				ASSERT(chunk.snapshotVersion != invalidVersion);
 				if (beginVersion > 0) {
@@ -594,6 +603,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 
 		state Version beginVersion;
 		state Version readVersion;
+		state KeyRange range;
 
 		TraceEvent("BlobGranuleCorrectnessReaderStart").log();
 		if (BGW_DEBUG) {
@@ -635,7 +645,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 					endKey = endKeyIt->first;
 				}
 
-				state KeyRange range = KeyRangeRef(threadData->getKey(startKey, 0), threadData->getKey(endKey, 0));
+				range = KeyRangeRef(threadData->getKey(startKey, 0), threadData->getKey(endKey, 0));
 
 				// pick read version
 				ASSERT(threadData->writeVersions.back() >= threadData->minSuccessfulReadVersion);
@@ -672,7 +682,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 				}
 
 				std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> blob =
-				    wait(readFromBlob(cx, self->bstore, range, beginVersion, readVersion));
+				    wait(readFromBlob(cx, self->bstore, range, beginVersion, readVersion, threadData->tenantName));
 				self->validateResult(threadData, blob, startKey, endKey, beginVersion, readVersion);
 
 				int resultBytes = blob.first.expectedSize();
@@ -685,6 +695,13 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 					throw;
 				}
 				if (e.code() == error_code_blob_granule_transaction_too_old) {
+					if (BGW_DEBUG) {
+						fmt::print("ERROR: TTO for [{0} - {1}) @ {2} for tenant {3}\n",
+						           range.begin.printable(),
+						           range.end.printable(),
+						           readVersion,
+						           threadData->tenantName.printable());
+					}
 					threadData->timeTravelTooOld++;
 				} else {
 					threadData->errors++;
@@ -865,8 +882,8 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 			if (BGW_DEBUG) {
 				fmt::print("Directory {0} doing final data check @ {1}\n", threadData->directoryID, readVersion);
 			}
-			std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> blob =
-			    wait(readFromBlob(cx, self->bstore, threadData->directoryRange, 0, readVersion));
+			std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> blob = wait(readFromBlob(
+			    cx, self->bstore, normalKeys /*tenant handles range*/, 0, readVersion, threadData->tenantName));
 			result = self->validateResult(threadData, blob, 0, std::numeric_limits<uint32_t>::max(), 0, readVersion);
 			finalRowsValidated = blob.first.size();
 

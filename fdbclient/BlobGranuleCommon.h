@@ -86,7 +86,7 @@ struct BlobGranuleChunkRef {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keyRange, includedVersion, snapshotVersion, snapshotFile, deltaFiles, newDeltas);
+		serializer(ar, keyRange, includedVersion, snapshotVersion, snapshotFile, deltaFiles, newDeltas, tenantPrefix);
 	}
 };
 
