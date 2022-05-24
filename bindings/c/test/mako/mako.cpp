@@ -457,8 +457,7 @@ void dumpThreadSamples(Arguments const& args,
 	}
 	for (auto op = 0; op < MAX_OP; op++) {
 		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
-			const auto filename = getStatsFilename(dirname, worker_id, thread_id, op);
-			stats.writeToFile(filename, op);
+			stats.writeToFile(getStatsFilename(dirname, worker_id, thread_id, op), op);
 		}
 	}
 }
@@ -1661,6 +1660,25 @@ void printThreadStats(ThreadStatistics& final_stats, Arguments& args, FILE* fp, 
 	}
 }
 
+void load_sample(int pid_main, int op, std::vector<DDSketchMako>& data_points, int process_id, int thread_id) {
+	const auto dirname = fmt::format("{}{}", TEMP_DATA_STORE, pid_main);
+	const auto filename = getStatsFilename(dirname, process_id, thread_id, op);
+	std::ifstream fp{ filename };
+	std::ostringstream sstr;
+	sstr << fp.rdbuf();
+	DDSketchMako sketch;
+	rapidjson::Document doc;
+	doc.Parse(sstr.str().c_str());
+	if (!doc.HasParseError()) {
+		sketch.deserialize(doc);
+		if (data_points[op].getPopulationSize() > 0) {
+			data_points[op].mergeWith(sketch);
+		} else {
+			data_points[op] = sketch;
+		}
+	}
+}
+
 void printReport(Arguments& args, ThreadStatistics const* stats, double const duration_sec, pid_t pid_main, FILE* fp) {
 
 	auto final_stats = ThreadStatistics{};
@@ -1776,33 +1794,15 @@ void printReport(Arguments& args, ThreadStatistics const* stats, double const du
 	// Get the sketches stored in file and merge them together
 	std::vector<DDSketchMako> data_points(MAX_OP);
 	for (auto op = 0; op < MAX_OP; op++) {
-		auto load_sample = [pid_main, op, &data_points](int process_id, int thread_id) {
-			const auto dirname = fmt::format("{}{}", TEMP_DATA_STORE, pid_main);
-			const auto filename = getStatsFilename(dirname, process_id, thread_id, op);
-			std::ifstream fp{ filename };
-			std::ostringstream sstr;
-			sstr << fp.rdbuf();
-			DDSketchMako sketch;
-			rapidjson::Document doc;
-			doc.Parse(sstr.str().c_str());
-			if (!doc.HasParseError()) {
-				sketch.deserialize(doc);
-				if (data_points[op].getPopulationSize() > 0) {
-					data_points[op].mergeWith(sketch);
-				} else {
-					data_points[op] = sketch;
-				}
-			}
-		};
 		for (auto i = 0; i < args.num_processes; i++) {
 
 			if (args.async_xacts == 0) {
 				for (auto j = 0; j < args.num_threads; j++) {
-					load_sample(i, j);
+					load_sample(pid_main, op, data_points, i, j);
 				}
 			} else {
 				// async mode uses only one file per process
-				load_sample(i, 0);
+				load_sample(pid_main, op, data_points, i, 0);
 			}
 		}
 	}
