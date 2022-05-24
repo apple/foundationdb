@@ -27,7 +27,8 @@
 #include "flow/serialize.h"
 #include "flow/UnitTest.h"
 
-FDB_DEFINE_BOOLEAN_PARAM(EmptyRange);
+FDB_DEFINE_BOOLEAN_PARAM(AssignEmptyRange);
+FDB_DEFINE_BOOLEAN_PARAM(UnassignShard);
 
 const KeyRef systemKeysPrefix = LiteralStringRef("\xff");
 const KeyRangeRef normalKeys(KeyRef(), systemKeysPrefix);
@@ -46,6 +47,8 @@ const KeyRangeRef keyServersKeyServersKeys(LiteralStringRef("\xff/keyServers/\xf
 const KeyRef keyServersKeyServersKey = keyServersKeyServersKeys.begin;
 
 const UID anonymousShardId = UID(666666, 88888888);
+
+const uint64_t emptyShardId = 77707777;
 
 const Key keyServersKey(const KeyRef& k) {
 	return k.withPrefix(keyServersPrefix);
@@ -97,7 +100,12 @@ const Value keyServersValue(const std::vector<UID>& src,
                             const UID& srcID,
                             const UID& destID) {
 	BinaryWriter wr(IncludeVersion(ProtocolVersion::withShardEncodLocationMetaData()));
-	wr << src << dest << srcID << destID;
+	if (dest.empty()) {
+		ASSERT(!destID.isValid());
+		wr << src << dest << srcID;
+	} else {
+		wr << src << dest << srcID << destID;
+	}
 	return wr.toValue();
 }
 
@@ -201,8 +209,9 @@ void decodeKeyServersValue(RangeResult result,
 		}
 	} else {
 		decodeKeyServersValue(result, value, src, dest, missingIsError);
-		ASSERT(!src.empty());
-		srcID = anonymousShardId;
+		if (!src.empty()) {
+			srcID = anonymousShardId;
+		}
 		if (!dest.empty()) {
 			destID = anonymousShardId;
 		}
@@ -236,7 +245,7 @@ void decodeKeyServersValue(std::map<Tag, UID> const& tag_uid,
 			rd >> srcId;
 			if (rd.empty()) {
 				ASSERT(dest.empty());
-				destId = anonymousShardId;
+				destId = UID();
 			} else {
 				rd >> destId;
 			}
@@ -409,12 +418,16 @@ const ValueRef serverKeysTrue = "1"_sr, // compatible with what was serverKeysTr
     serverKeysTrueEmptyRange = "3"_sr, // the server treats the range as empty.
     serverKeysFalse;
 
-const UID newShardId(const uint64_t physicalShardId, EmptyRange emptyRange) {
+const UID newShardId(const uint64_t physicalShardId, AssignEmptyRange assignEmptyRange, UnassignShard unassignShard) {
 	uint64_t split = 0;
-	if (!emptyRange) {
+	if (assignEmptyRange) {
+		split = emptyShardId;
+	} else if (unassignShard) {
+		split = 0;
+	} else {
 		do {
 			split = deterministicRandom()->randomUInt64();
-		} while (split == anonymousShardId.second() || split == static_cast<uint64_t>(0));
+		} while (split == anonymousShardId.second() || split == 0 || split == emptyShardId);
 	}
 	return UID(physicalShardId, split);
 }
@@ -456,7 +469,6 @@ bool serverHasKey(ValueRef storedValue) {
 	UID teamId;
 	bool assigned, emptyRange;
 	decodeServerKeysValue(storedValue, assigned, emptyRange, teamId);
-	// return storedValue == serverKeysTrue || storedValue == serverKeysTrueEmptyRange;
 	return assigned;
 }
 
@@ -489,8 +501,8 @@ void decodeServerKeysValue(const ValueRef& value, bool& assigned, bool& emptyRan
 		BinaryReader rd(value, IncludeVersion());
 		ASSERT(rd.protocolVersion().hasShardEncodLocationMetaData());
 		rd >> id;
-		assigned = id.isValid();
-		emptyRange = id.second() == 0; // TODO: support assigning empty range.
+		assigned = id.second() != 0;
+		emptyRange = id.second() == emptyShardId;
 	}
 }
 
@@ -1627,8 +1639,8 @@ TEST_CASE("/SystemData/SerDes/SSI") {
 	return Void();
 }
 
-// unit test for serialization since tss stuff had bugs
-TEST_CASE("/SystemData/compat/KeyServers") {
+// Tests compatibility of different keyServersValue() and decodeKeyServersValue().
+TEST_CASE("noSim/SystemData/compat/KeyServers") {
 	printf("testing keyServers serdes\n");
 	std::vector<UID> src, dest;
 	std::map<Tag, UID> tag_uid;
@@ -1637,7 +1649,7 @@ TEST_CASE("/SystemData/compat/KeyServers") {
 	const int n = 3;
 	int8_t locality = 1;
 	uint16_t id = 1;
-	const UID srcId = deterministicRandom()->randomUniqueID(), destId = deterministicRandom()->randomUniqueID();
+	UID srcId = deterministicRandom()->randomUniqueID(), destId = deterministicRandom()->randomUniqueID();
 	for (int i = 0; i < n; ++i) {
 		src.push_back(deterministicRandom()->randomUniqueID());
 		tag_uid.emplace(Tag(locality, id), src.back());
@@ -1697,6 +1709,20 @@ TEST_CASE("/SystemData/compat/KeyServers") {
 	v = keyServersValue(idTag, src, dest);
 	decodeAndVerify(v, anonymousShardId, anonymousShardId);
 
+	printf("ssi serdes test part.2 complete\n");
+
+	dest.clear();
+	destId = UID();
+
+	v = keyServersValue(src, dest, srcId, destId);
+	decodeAndVerify(v, srcId, destId);
+
+	printf("ssi serdes test part.3 complete\n");
+
+	v = keyServersValue(idTag, src, dest);
+	decodeAndVerify(v, anonymousShardId, UID());
+
 	printf("ssi serdes test complete\n");
+
 	return Void();
 }

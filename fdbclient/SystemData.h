@@ -33,7 +33,8 @@
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wunused-variable"
 
-FDB_DECLARE_BOOLEAN_PARAM(EmptyRange);
+FDB_DECLARE_BOOLEAN_PARAM(AssignEmptyRange);
+FDB_DECLARE_BOOLEAN_PARAM(UnassignShard);
 
 struct RestoreLoaderInterface;
 struct RestoreApplierInterface;
@@ -61,6 +62,7 @@ extern const KeyRef keyServersPrefix, keyServersEnd, keyServersKeyServersKey;
 // If `SHARD_ENCODE_LOCATION_METADATA` is enabled, any shard that doesn't have a shard ID will be assigned this
 // temporary ID, until a permanent ID is assigned to it.
 extern const UID anonymousShardId;
+extern const uint64_t assignedEmptyShardId;
 const Key keyServersKey(const KeyRef& k);
 const KeyRef keyServersKey(const KeyRef& k, Arena& arena);
 const Value keyServersValue(RangeResult result,
@@ -134,7 +136,9 @@ void decodeStorageCacheValue(const ValueRef& value, std::vector<uint16_t>& serve
 extern const KeyRangeRef serverKeysRange;
 extern const KeyRef serverKeysPrefix;
 extern const ValueRef serverKeysTrue, serverKeysTrueEmptyRange, serverKeysFalse;
-const UID newShardId(const uint64_t physicalShardId, EmptyRange emptyRange);
+const UID newShardId(const uint64_t physicalShardId,
+                     AssignEmptyRange assignEmptyRange,
+                     UnassignShard unassignShard = UnassignShard::False);
 const Key serverKeysKey(UID serverID, const KeyRef& keys);
 const Key serverKeysPrefixFor(UID serverID);
 UID serverKeysDecodeServer(const KeyRef& key);
