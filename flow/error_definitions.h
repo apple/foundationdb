@@ -124,6 +124,8 @@ ERROR( restart_cluster_controller, 1218, "Restart cluster controller process" )
 ERROR( please_reboot_remote_kv_store, 1219, "Need to reboot the storage engine process as it died abnormally")
 ERROR( incompatible_software_version, 1220, "Current software does not support database format" )
 
+ERROR( toml_parse_error, 1221, "TOML parsing failed")
+
 // 15xx Platform errors
 ERROR( platform_error, 1500, "Platform error" )
 ERROR( large_alloc_failed, 1501, "Large block allocation failed" )
