@@ -1955,7 +1955,7 @@ int statsProcessMain(Arguments& args,
 	return 0;
 }
 
-bool mergeSketchReport(Arguments& args) {
+ThreadStatistics mergeSketchReport(Arguments& args) {
 
 	ThreadStatistics stats;
 	for (int i = 0; i < args.num_report_files; i++) {
@@ -1964,8 +1964,7 @@ bool mergeSketchReport(Arguments& args) {
 		f >> tmp;
 		stats.combine(tmp);
 	}
-	printThreadStats(stats, args, NULL, true);
-	return true;
+	return stats;
 }
 
 int main(int argc, char* argv[]) {
@@ -2002,10 +2001,8 @@ int main(int argc, char* argv[]) {
 	}
 
 	if (args.mode == MODE_REPORT) {
-		if (mergeSketchReport(args)) {
-			return 0;
-		}
-		return -1;
+		ThreadStatistics stats = mergeSketchReport(args);
+		printThreadStats(stats, args, NULL, true);
 	}
 
 	const auto pid_main = getpid();
