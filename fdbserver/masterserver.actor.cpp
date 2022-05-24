@@ -119,6 +119,28 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	~MasterData() = default;
 };
 
+Version figureVersion(Version current,
+                      double now,
+                      Version reference,
+                      int64_t toAdd,
+                      double maxVersionRateModifier,
+                      int64_t maxVersionRateOffset) {
+	// Versions should roughly follow wall-clock time, based on the
+	// system clock of the current machine and an FDB-specific epoch.
+	// Calculate the expected version and determine whether we need to
+	// hand out versions faster or slower to stay in sync with the
+	// clock.
+	Version expected = now * SERVER_KNOBS->VERSIONS_PER_SECOND - reference;
+
+	// Attempt to jump directly to the expected version. But make
+	// sure that versions are still being handed out at a rate
+	// around VERSIONS_PER_SECOND. This rate is scaled depending on
+	// how far off the calculated version is from the expected
+	// version.
+	int64_t maxOffset = std::min(static_cast<int64_t>(toAdd * maxVersionRateModifier), maxVersionRateOffset);
+	return std::clamp(expected, current + toAdd - maxOffset, current + toAdd + maxOffset);
+}
+
 ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionRequest req) {
 	state Span span("M:getVersion"_loc, req.spanContext);
 	state std::map<UID, CommitProxyVersionReplies>::iterator proxyItr =
@@ -158,11 +180,6 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 				t1 = self->lastVersionTime;
 			}
 
-			// Versions should roughly follow wall-clock time, based on the
-			// system clock of the current machine and an FDB-specific epoch.
-			// Calculate the expected version and determine whether we need to
-			// hand out versions faster or slower to stay in sync with the
-			// clock.
 			Version toAdd =
 			    std::max<Version>(1,
 			                      std::min<Version>(SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS,
@@ -170,18 +187,12 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 
 			rep.prevVersion = self->version;
 			if (self->referenceVersion.present()) {
-				Version expected =
-				    g_network->timer() * SERVER_KNOBS->VERSIONS_PER_SECOND - self->referenceVersion.get();
-
-				// Attempt to jump directly to the expected version. But make
-				// sure that versions are still being handed out at a rate
-				// around VERSIONS_PER_SECOND. This rate is scaled depending on
-				// how far off the calculated version is from the expected
-				// version.
-				int64_t maxOffset = std::min(static_cast<int64_t>(toAdd * SERVER_KNOBS->MAX_VERSION_RATE_MODIFIER),
-				                             SERVER_KNOBS->MAX_VERSION_RATE_OFFSET);
-				self->version =
-				    std::clamp(expected, self->version + toAdd - maxOffset, self->version + toAdd + maxOffset);
+				self->version = figureVersion(self->version,
+				                              g_network->timer(),
+				                              self->referenceVersion.get(),
+				                              toAdd,
+				                              SERVER_KNOBS->MAX_VERSION_RATE_MODIFIER,
+				                              SERVER_KNOBS->MAX_VERSION_RATE_OFFSET);
 				ASSERT_GT(self->version, rep.prevVersion);
 			} else {
 				self->version = self->version + toAdd;
@@ -432,4 +443,45 @@ ACTOR Future<Void> masterServer(MasterInterface mi,
 		}
 		throw err;
 	}
+}
+
+TEST_CASE("/fdbserver/MasterServer/FigureVersion/Simple") {
+	ASSERT_EQ(
+	    figureVersion(0, 1.0, 0, 1e6, SERVER_KNOBS->MAX_VERSION_RATE_MODIFIER, SERVER_KNOBS->MAX_VERSION_RATE_OFFSET),
+	    1e6);
+	ASSERT_EQ(figureVersion(1e6, 1.5, 0, 100, 0.1, 1e6), 1000110);
+	ASSERT_EQ(figureVersion(1e6, 1.5, 0, 550000, 0.1, 1e6), 1500000);
+	return Void();
+}
+
+TEST_CASE("/fdbserver/MasterServer/FigureVersion/Small") {
+	// Should always advance by at least 1 version.
+	ASSERT_EQ(figureVersion(1e6, 2.0, 0, 1, 0.0001, 1e6), 1000001);
+	ASSERT_EQ(figureVersion(1e6, 0.0, 0, 1, 0.1, 1e6), 1000001);
+	return Void();
+}
+
+TEST_CASE("/fdbserver/MasterServer/FigureVersion/MaxOffset") {
+	ASSERT_EQ(figureVersion(1e6, 10.0, 0, 5e6, 0.1, 1e6), 6500000);
+	ASSERT_EQ(figureVersion(1e6, 20.0, 0, 15e6, 0.1, 1e6), 17e6);
+	return Void();
+}
+
+TEST_CASE("/fdbserver/MasterServer/FigureVersion/PositiveReferenceVersion") {
+	ASSERT_EQ(figureVersion(1e6, 3.0, 1e6, 1e6, 0.1, 1e6), 2e6);
+	ASSERT_EQ(figureVersion(1e6, 3.0, 1e6, 100, 0.1, 1e6), 1000110);
+	return Void();
+}
+
+TEST_CASE("/fdbserver/MasterServer/FigureVersion/NegativeReferenceVersion") {
+	ASSERT_EQ(figureVersion(0, 2.0, -1e6, 3e6, 0.1, 1e6), 3e6);
+	ASSERT_EQ(figureVersion(0, 2.0, -1e6, 5e5, 0.1, 1e6), 550000);
+	return Void();
+}
+
+TEST_CASE("/fdbserver/MasterServer/FigureVersion/Overflow") {
+	// The upper range used in std::clamp should overflow.
+	ASSERT_EQ(figureVersion(std::numeric_limits<Version>::max() - static_cast<Version>(1e6), 1.0, 0, 1e6, 0.1, 1e6),
+	          std::numeric_limits<Version>::max() - static_cast<Version>(1e6 * 0.1));
+	return Void();
 }

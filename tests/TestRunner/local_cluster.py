@@ -39,6 +39,17 @@ def is_port_in_use(port):
 
 valid_letters_for_secret = string.ascii_letters + string.digits
 
+class TLSConfig:
+    # Passing a negative chain length generates expired leaf certificate
+    def __init__(
+        self,
+        server_chain_len: int = 3,
+        client_chain_len: int = 2,
+        verify_peers = "Check.Valid=1",
+    ):
+        self.server_chain_len = server_chain_len
+        self.client_chain_len = client_chain_len
+        self.verify_peers = verify_peers
 
 def random_secret_string(length):
     return "".join(random.choice(valid_letters_for_secret) for _ in range(length))
@@ -67,11 +78,12 @@ cluster-file = {etcdir}/fdb.cluster
 ## Default parameters for individual fdbserver processes
 [fdbserver]
 command = {fdbserver_bin}
-public-address = {ip_address}:$ID
+public-address = {ip_address}:$ID{optional_tls}
 listen-address = public
 datadir = {datadir}/$ID
 logdir = {logdir}
 {bg_knob_line}
+{tls_config}
 # logsize = 10MiB
 # maxlogssize = 100MiB
 # machine-id =
@@ -98,12 +110,15 @@ logdir = {logdir}
         port=None,
         ip_address=None,
         blob_granules_enabled: bool = False,
-        redundancy: str = "single"
+        redundancy: str = "single",
+        tls_config: TLSConfig = None,
+        mkcert_binary: str = "",
     ):
         self.basedir = Path(basedir)
         self.etc = self.basedir.joinpath("etc")
         self.log = self.basedir.joinpath("log")
         self.data = self.basedir.joinpath("data")
+        self.cert = self.basedir.joinpath("cert")
         self.conf_file = self.etc.joinpath("foundationdb.conf")
         self.cluster_file = self.etc.joinpath("fdb.cluster")
         self.fdbserver_binary = Path(fdbserver_binary)
@@ -137,10 +152,21 @@ logdir = {logdir}
         self.use_legacy_conf_syntax = False
         self.coordinators = set()
         self.active_servers = set(self.server_ports.keys())
+        self.tls_config = tls_config
+        self.mkcert_binary = Path(mkcert_binary)
+        self.server_cert_file = self.cert.joinpath("server_cert.pem")
+        self.client_cert_file = self.cert.joinpath("client_cert.pem")
+        self.server_key_file = self.cert.joinpath("server_key.pem")
+        self.client_key_file = self.cert.joinpath("client_key.pem")
+        self.server_ca_file = self.cert.joinpath("server_ca.pem")
+        self.client_ca_file = self.cert.joinpath("client_ca.pem")
 
         if create_config:
             self.create_cluster_file()
             self.save_config()
+
+        if self.tls_config is not None:
+            self.create_tls_cert()
 
     def __next_port(self):
         if self.first_port is None:
@@ -166,6 +192,8 @@ logdir = {logdir}
                     logdir=self.log,
                     ip_address=self.ip_address,
                     bg_knob_line=bg_knob_line,
+                    tls_config=self.tls_conf_string(),
+                    optional_tls=":tls" if self.tls_config is not None else "",
                 )
             )
             # By default, the cluster only has one process
@@ -190,11 +218,12 @@ logdir = {logdir}
     def create_cluster_file(self):
         with open(self.cluster_file, "x") as f:
             f.write(
-                "{desc}:{secret}@{ip_addr}:{server_port}".format(
+                "{desc}:{secret}@{ip_addr}:{server_port}{optional_tls}".format(
                     desc=self.cluster_desc,
                     secret=self.cluster_secret,
                     ip_addr=self.ip_address,
                     server_port=self.server_ports[0],
+                    optional_tls=":tls" if self.tls_config is not None else "",
                 )
             )
         self.coordinators = {0}
@@ -248,6 +277,10 @@ logdir = {logdir}
 
     def __fdbcli_exec(self, cmd, stdout, stderr, timeout):
         args = [self.fdbcli_binary, "-C", self.cluster_file, "--exec", cmd]
+        if self.tls_config:
+            args += ["--tls-certificate-file", self.client_cert_file,
+                     "--tls-key-file", self.client_key_file,
+                     "--tls-ca-file", self.server_ca_file]
         res = subprocess.run(args, env=self.process_env(), stderr=stderr, stdout=stdout, timeout=timeout)
         assert res.returncode == 0, "fdbcli command {} failed with {}".format(cmd, res.returncode)
         return res.stdout
@@ -270,6 +303,46 @@ logdir = {logdir}
 
         if self.blob_granules_enabled:
             self.fdbcli_exec("blobrange start \\x00 \\xff")
+
+    # Generate and install test certificate chains and keys
+    def create_tls_cert(self):
+        assert self.tls_config is not None, "TLS not enabled"
+        assert self.mkcert_binary.exists() and self.mkcert_binary.is_file(), "{} does not exist".format(self.mkcert_binary)
+        self.cert.mkdir(exist_ok=True)
+        server_chain_len = abs(self.tls_config.server_chain_len)
+        client_chain_len = abs(self.tls_config.client_chain_len)
+        expire_server_cert = (self.tls_config.server_chain_len < 0)
+        expire_client_cert = (self.tls_config.client_chain_len < 0)
+        args = [
+            str(self.mkcert_binary),
+            "--server-chain-length", str(server_chain_len),
+            "--client-chain-length", str(client_chain_len),
+            "--server-cert-file", str(self.server_cert_file),
+            "--client-cert-file", str(self.client_cert_file),
+            "--server-key-file", str(self.server_key_file),
+            "--client-key-file", str(self.client_key_file),
+            "--server-ca-file", str(self.server_ca_file),
+            "--client-ca-file", str(self.client_ca_file),
+            "--print-args",
+        ]
+        if expire_server_cert:
+            args.append("--expire-server-cert")
+        if expire_client_cert:
+            args.append("--expire-client-cert")
+        subprocess.run(args, check=True)
+
+    # Materialize server's TLS configuration section
+    def tls_conf_string(self):
+        if self.tls_config is None:
+            return ""
+        else:
+            conf_map = {
+                "tls-certificate-file": self.server_cert_file,
+                "tls-key-file": self.server_key_file,
+                "tls-ca-file": self.client_ca_file,
+                "tls-verify-peers": self.tls_config.verify_peers,
+            }
+            return "\n".join("{} = {}".format(k, v) for k, v in conf_map.items())
 
     # Get cluster status using fdbcli
     def get_status(self):

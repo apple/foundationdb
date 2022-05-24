@@ -141,7 +141,6 @@ private:
 	ThreadReturnPromise<Void> errorPromise;
 	std::mutex mutex;
 };
-using DB = rocksdb::DB*;
 
 std::shared_ptr<rocksdb::Cache> rocksdb_block_cache = nullptr;
 
@@ -161,12 +160,11 @@ std::vector<std::pair<KeyRangeRef, std::string>> decodeShardMapping(const RangeR
 		auto keyWithoutPrefix = kv.key.removePrefix(prefix);
 		if (name.size() > 0) {
 			shards.push_back({ KeyRangeRef(endKey, keyWithoutPrefix), name });
-			std::cout << "Discover shard " << name << "\n";
 		}
 		endKey = keyWithoutPrefix;
 		name = kv.value.toString();
 	}
-	return std::move(shards);
+	return shards;
 }
 
 void logRocksDBError(const rocksdb::Status& status, const std::string& method) {
@@ -178,6 +176,7 @@ void logRocksDBError(const rocksdb::Status& status, const std::string& method) {
 	}
 }
 
+// TODO: define shard ops.
 enum class ShardOp {
 	CREATE,
 	OPEN,
@@ -205,7 +204,7 @@ const char* ShardOpToString(ShardOp op) {
 void logShardEvent(StringRef name, ShardOp op, Severity severity = SevInfo, const std::string& message = "") {
 	TraceEvent e(severity, "KVSShardEvent");
 	e.detail("Name", name).detail("Action", ShardOpToString(op));
-	if (message != "") {
+	if (!message.empty()) {
 		e.detail("Message", message);
 	}
 }
@@ -305,7 +304,7 @@ struct ReadIterator {
 	bool inUse;
 	std::shared_ptr<rocksdb::Iterator> iter;
 	double creationTime;
-	ReadIterator(rocksdb::ColumnFamilyHandle* cf, uint64_t index, DB& db, rocksdb::ReadOptions& options)
+	ReadIterator(rocksdb::ColumnFamilyHandle* cf, uint64_t index, rocksdb::DB* db, rocksdb::ReadOptions& options)
 	  : cf(cf), index(index), inUse(true), creationTime(now()), iter(db->NewIterator(options)) {}
 };
 
@@ -324,7 +323,7 @@ gets deleted as the ref count becomes 0.
 */
 class ReadIteratorPool {
 public:
-	ReadIteratorPool(DB& db, rocksdb::ColumnFamilyHandle* cf, const std::string& path)
+	ReadIteratorPool(rocksdb::DB* db, rocksdb::ColumnFamilyHandle* cf, const std::string& path)
 	  : db(db), cf(cf), index(0), iteratorsReuseCount(0), readRangeOptions(getReadOptions()) {
 		readRangeOptions.background_purge_on_iterator_cleanup = true;
 		readRangeOptions.auto_prefix_mode = (SERVER_KNOBS->ROCKSDB_PREFIX_LEN > 0);
@@ -398,7 +397,7 @@ public:
 private:
 	std::unordered_map<int, ReadIterator> iteratorsMap;
 	std::unordered_map<int, ReadIterator>::iterator it;
-	DB& db;
+	rocksdb::DB* db;
 	rocksdb::ColumnFamilyHandle* cf;
 	rocksdb::ReadOptions readRangeOptions;
 	std::mutex mutex;
@@ -422,6 +421,7 @@ ACTOR Future<Void> flowLockLogger(const FlowLock* readLock, const FlowLock* fetc
 
 struct PhysicalShard;
 
+// DataShard represents a key range (logical shard) in FDB. A DataShard is assigned to a specific physical shard.
 struct DataShard {
 	DataShard(KeyRange range, PhysicalShard* physicalShard) : range(range), physicalShard(physicalShard) {}
 
@@ -429,6 +429,8 @@ struct DataShard {
 	PhysicalShard* physicalShard;
 };
 
+// PhysicalShard represent a collection of logical shards. A PhysicalShard could have one or more DataShards. A
+// PhysicalShard is stored as a column family in rocksdb. Each PhysicalShard has its own iterator pool.
 struct PhysicalShard {
 	PhysicalShard(rocksdb::DB* db, std::string id) : db(db), id(id) {}
 
@@ -470,12 +472,13 @@ struct PhysicalShard {
 	bool deletePending = false;
 };
 
+// Manages physical shards and maintains logical shard mapping.
 class ShardManager {
 public:
 	ShardManager(std::string path) : path(path) {}
 	rocksdb::Status init() {
-		// TODO: Open default instance and get shard mapping.
-		// Open Instances
+		// TODO: Open default cf and get shard mapping.
+		// Open instance.
 		auto options = getOptions();
 		rocksdb::Status status = rocksdb::DB::Open(options, path, &db);
 		if (!status.ok()) {
@@ -525,6 +528,11 @@ public:
 		return std::move(existingWriteBatch);
 	}
 
+=======
+		return status;
+	}
+
+>>>>>>> 6bf1e3921f3645d816a9a8378a97d5442ff1efa9
 	void closeAllShards() {
 		// Close DB.
 		auto s = db->Close();
@@ -1182,7 +1190,6 @@ ACTOR Future<Void> rocksDBAggregatedMetricsLogger(std::shared_ptr<RocksDBMetrics
 
 struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	using CF = rocksdb::ColumnFamilyHandle*;
-	using CommitBatchMap = std::unordered_map<std::shared_ptr<DataShard>, std::unique_ptr<rocksdb::WriteBatch>>;
 
 	struct Writer : IThreadPoolReceiver {
 		int threadIndex;
