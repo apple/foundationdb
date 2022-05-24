@@ -560,7 +560,6 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	Promise<Void> recoveryComplete, committingQueue;
 	Version unrecoveredBefore, recoveredAt;
 	Version recoveryTxnVersion;
-	Promise<Void> recoveryTxnReceived;
 
 	struct PeekTrackerData {
 		std::map<int, Promise<std::pair<Version, bool>>>
@@ -1709,12 +1708,19 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 		wait(logData->version.whenAtLeast(reqBegin));
 		wait(delay(SERVER_KNOBS->TLOG_PEEK_DELAY, g_network->getCurrentTask()));
 	}
-	if (!logData->stopped && reqTag.locality != tagLocalityTxs && reqTag != txsTag) {
+	if (!logData->stopped && reqTag.locality != tagLocalityTxs && reqTag != txsTag &&
+	    logData->version.get() < logData->recoveryTxnVersion) {
+		DisabledTraceEvent("TLogPeekMessages1", self->dbgid)
+		    .detail("LogId", logData->logId)
+		    .detail("Tag", reqTag.toString())
+		    .detail("ReqBegin", reqBegin)
+		    .detail("Version", logData->version.get())
+		    .detail("RecoveredAt", logData->recoveredAt);
 		// Make sure the peek reply has the recovery txn for the current TLog.
 		// Older generation TLog has been stopped and doesn't wait here.
 		// Similarly during recovery, reading transaction state store
 		// doesn't wait here.
-		wait(logData->recoveryTxnReceived.getFuture());
+		wait(logData->version.whenAtLeast(logData->recoveryTxnVersion));
 	}
 
 	if (logData->locality != tagLocalitySatellite && reqTag.locality == tagLocalityLogRouter) {
@@ -2175,9 +2181,6 @@ ACTOR Future<Void> tLogCommit(TLogData* self,
 		g_traceBatch.addEvent("CommitDebug", tlogDebugID.get().first(), "TLog.tLogCommit.BeforeWaitForVersion");
 	}
 
-	if (req.prevVersion == logData->recoveredAt) {
-		logData->recoveryTxnVersion = req.version;
-	}
 	logData->minKnownCommittedVersion = std::max(logData->minKnownCommittedVersion, req.minKnownCommittedVersion);
 
 	wait(logData->version.whenAtLeast(req.prevVersion));
@@ -2232,15 +2235,6 @@ ACTOR Future<Void> tLogCommit(TLogData* self,
 
 		// Notifies the commitQueue actor to commit persistentQueue, and also unblocks tLogPeekMessages actors
 		logData->version.set(req.version);
-		if (logData->recoveryTxnReceived.canBeSet() &&
-		    (req.prevVersion == 0 || req.prevVersion == logData->recoveredAt)) {
-			TraceEvent("TLogInfo", self->dbgid)
-			    .detail("Log", logData->logId)
-			    .detail("Prev", req.prevVersion)
-			    .detail("RecoveredAt", logData->recoveredAt)
-			    .detail("RecoveryTxnVersion", req.version);
-			logData->recoveryTxnReceived.send(Void());
-		}
 
 		if (req.debugID.present())
 			g_traceBatch.addEvent("CommitDebug", tlogDebugID.get().first(), "TLog.tLogCommit.AfterTLogCommit");
@@ -2779,13 +2773,6 @@ ACTOR Future<Void> pullAsyncData(TLogData* self,
 					// Notifies the commitQueue actor to commit persistentQueue, and also unblocks tLogPeekMessages
 					// actors
 					logData->version.set(ver);
-					if (logData->recoveryTxnReceived.canBeSet() && !pullingRecoveryData && ver > logData->recoveredAt) {
-						TraceEvent("TLogInfo", self->dbgid)
-						    .detail("Log", logData->logId)
-						    .detail("RecoveredAt", logData->recoveredAt)
-						    .detail("RecoveryTxnVersion", ver);
-						logData->recoveryTxnReceived.send(Void());
-					}
 					wait(yield(TaskPriority::TLogCommit));
 				}
 				lastVer = ver;
@@ -3349,11 +3336,14 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 	self->id_data[recruited.id()] = logData;
 	logData->locality = req.locality;
 	logData->recoveryCount = req.epoch;
+	logData->recoveryTxnVersion = req.recoveryTransactionVersion;
 	logData->removed = rejoinClusterController(self, recruited, req.epoch, Future<Void>(Void()), req.isPrimary);
 	self->popOrder.push_back(recruited.id());
 	self->spillOrder.push_back(recruited.id());
 
-	TraceEvent("TLogStart", logData->logId).detail("RecoveryCount", logData->recoveryCount);
+	TraceEvent("TLogStart", logData->logId)
+	    .detail("RecoveryCount", logData->recoveryCount)
+	    .detail("RecoveryTxnVersion", logData->recoveryTxnVersion);
 
 	state Future<Void> updater;
 	state bool pulledRecoveryVersions = false;

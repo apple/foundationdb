@@ -266,6 +266,7 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	                                       UID clusterId,
 	                                       DatabaseConfiguration const& config,
 	                                       LogEpoch recoveryCount,
+	                                       Version recoveryTransactionVersion,
 	                                       int8_t primaryLocality,
 	                                       int8_t remoteLocality,
 	                                       std::vector<Tag> const& allTags,
@@ -346,6 +347,7 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	                                         UID clusterId,
 	                                         DatabaseConfiguration configuration,
 	                                         LogEpoch recoveryCount,
+	                                         Version recoveryTransactionVersion,
 	                                         int8_t remoteLocality,
 	                                         std::vector<Tag> allTags);
 
@@ -355,6 +357,7 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	                                                    UID clusterId,
 	                                                    DatabaseConfiguration configuration,
 	                                                    LogEpoch recoveryCount,
+	                                                    Version recoveryTransactionVersion,
 	                                                    int8_t primaryLocality,
 	                                                    int8_t remoteLocality,
 	                                                    std::vector<Tag> allTags,

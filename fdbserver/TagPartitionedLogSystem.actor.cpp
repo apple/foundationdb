@@ -1577,6 +1577,7 @@ Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
     UID clusterId,
     DatabaseConfiguration const& config,
     LogEpoch recoveryCount,
+    Version recoveryTransactionVersion,
     int8_t primaryLocality,
     int8_t remoteLocality,
     std::vector<Tag> const& allTags,
@@ -1587,6 +1588,7 @@ Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 	                clusterId,
 	                config,
 	                recoveryCount,
+	                recoveryTransactionVersion,
 	                primaryLocality,
 	                remoteLocality,
 	                allTags,
@@ -2442,6 +2444,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::newRemoteEpoch(TagPartitionedLogSyst
                                                            UID clusterId,
                                                            DatabaseConfiguration configuration,
                                                            LogEpoch recoveryCount,
+                                                           Version recoveryTransactionVersion,
                                                            int8_t remoteLocality,
                                                            std::vector<Tag> allTags) {
 	TraceEvent("RemoteLogRecruitment_WaitingForWorkers").log();
@@ -2580,6 +2583,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::newRemoteEpoch(TagPartitionedLogSyst
 		req.logRouterTags = 0;
 		req.txsTags = self->txsTags;
 		req.clusterId = clusterId;
+		req.recoveryTransactionVersion = recoveryTransactionVersion;
 	}
 
 	remoteTLogInitializationReplies.reserve(remoteWorkers.remoteTLogs.size());
@@ -2631,6 +2635,7 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
     UID clusterId,
     DatabaseConfiguration configuration,
     LogEpoch recoveryCount,
+    Version recoveryTransactionVersion,
     int8_t primaryLocality,
     int8_t remoteLocality,
     std::vector<Tag> allTags,
@@ -2850,6 +2855,7 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 		req.logRouterTags = logSystem->logRouterTags;
 		req.txsTags = logSystem->txsTags;
 		req.clusterId = clusterId;
+		req.recoveryTransactionVersion = recoveryTransactionVersion;
 	}
 
 	initializationReplies.reserve(recr.tLogs.size());
@@ -2917,6 +2923,7 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 			req.logRouterTags = logSystem->logRouterTags;
 			req.txsTags = logSystem->txsTags;
 			req.clusterId = clusterId;
+			req.recoveryTransactionVersion = recoveryTransactionVersion;
 		}
 
 		satelliteInitializationReplies.reserve(recr.satelliteTLogs.size());
@@ -2974,6 +2981,7 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 		                                                                    clusterId,
 		                                                                    configuration,
 		                                                                    recoveryCount,
+		                                                                    recoveryTransactionVersion,
 		                                                                    remoteLocality,
 		                                                                    allTags);
 		if (oldLogSystem->tLogs.size() > 0 && oldLogSystem->tLogs[0]->locality == tagLocalitySpecial) {

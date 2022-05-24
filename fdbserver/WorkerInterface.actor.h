@@ -570,6 +570,7 @@ struct InitializeTLogRequest {
 	int logRouterTags;
 	int txsTags;
 	UID clusterId;
+	Version recoveryTransactionVersion;
 
 	ReplyPromise<struct TLogInterface> reply;
 
@@ -595,7 +596,8 @@ struct InitializeTLogRequest {
 		           logVersion,
 		           spillType,
 		           txsTags,
-		           clusterId);
+		           clusterId,
+		           recoveryTransactionVersion);
 	}
 };
 
