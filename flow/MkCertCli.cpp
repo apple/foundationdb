@@ -281,11 +281,12 @@ int main(int argc, char** argv) {
 		auto thread = std::thread([]() {
 			TraceEvent::setNetworkThread();
 			g_network->run();
+			flushTraceFileVoid();
 		});
 		auto cleanUpGuard = ScopeExit([&thread]() {
-			flushTraceFileVoid();
 			g_network->stop();
 			thread.join();
+			closeTraceFile();
 		});
 
 		serverArgs.transformPathToAbs();
