@@ -2706,8 +2706,8 @@ ACTOR Future<Void> updateNewestSoftwareVersion(std::string folder,
 		    0600));
 
 		SWVersion swVersion(latestVersion, currentVersion, minCompatibleVersion);
-		auto s = swVersionValue(swVersion);
-		ErrorOr<Void> e = wait(errorOr(newVersionFile->write(s.toString().c_str(), s.size(), 0)));
+		state Standalone<StringRef> s = swVersionValue(swVersion);
+		ErrorOr<Void> e = wait(errorOr(newVersionFile->write(s.begin(), s.size(), 0)));
 		if (e.isError()) {
 			throw e.getError();
 		}
