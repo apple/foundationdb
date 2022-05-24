@@ -21,6 +21,8 @@ from local_cluster import LocalCluster, random_secret_string
 SUPPORTED_PLATFORMS = ["x86_64"]
 SUPPORTED_VERSIONS = [
     "7.2.0",
+    "7.1.5",
+    "7.1.4",
     "7.1.3",
     "7.1.2",
     "7.1.1",
@@ -73,6 +75,7 @@ LOCAL_OLD_BINARY_REPO = "/opt/foundationdb/old/"
 CURRENT_VERSION = "7.2.0"
 HEALTH_CHECK_TIMEOUT_SEC = 5
 PROGRESS_CHECK_TIMEOUT_SEC = 30
+TESTER_STATS_INTERVAL_SEC = 5
 TRANSACTION_RETRY_LIMIT = 100
 MAX_DOWNLOAD_ATTEMPTS = 5
 RUN_WITH_GDB = False
@@ -398,6 +401,8 @@ class UpgradeTest:
                 self.tmp_dir,
                 "--transaction-retry-limit",
                 str(TRANSACTION_RETRY_LIMIT),
+                "--stats-interval",
+                str(TESTER_STATS_INTERVAL_SEC*1000)
             ]
             if RUN_WITH_GDB:
                 cmd_args = ["gdb", "-ex", "run", "--args"] + cmd_args
@@ -468,8 +473,8 @@ class UpgradeTest:
                 else:
                     assert entry in self.used_versions, "Unexpected entry in the upgrade path: {}".format(entry)
                     self.upgrade_to(entry)
-            self.health_check()
-            self.progress_check()
+                self.health_check()
+                self.progress_check()
             os.write(self.ctrl_pipe, b"STOP\n")
         finally:
             os.close(self.ctrl_pipe)

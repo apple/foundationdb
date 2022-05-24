@@ -799,8 +799,8 @@ ACTOR Future<Optional<ClusterConnectionString>> getConnectionString(Database cx)
 }
 
 ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
-                                                               Reference<IQuorumChange> change,
-                                                               std::vector<NetworkAddress> desiredCoordinators) {
+                                                               ClusterConnectionString* conn,
+                                                               std::string newName) {
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::USE_PROVISIONAL_PROXIES);
@@ -816,34 +816,30 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 	        tr->getDatabase()->getConnectionRecord()->getConnectionString().clusterKeyName())
 		return CoordinatorsResult::BAD_DATABASE_STATE; // Someone changed the "name" of the database??
 
-	state std::vector<NetworkAddress> oldCoordinators = wait(old.tryResolveHostnames());
-	state CoordinatorsResult result = CoordinatorsResult::SUCCESS;
-	if (!desiredCoordinators.size()) {
-		std::vector<NetworkAddress> _desiredCoordinators = wait(change->getDesiredCoordinators(
-		    tr,
-		    oldCoordinators,
-		    Reference<ClusterConnectionMemoryRecord>(new ClusterConnectionMemoryRecord(old)),
-		    result));
-		desiredCoordinators = _desiredCoordinators;
+	if (conn->hostnames.size() + conn->coords.size() == 0) {
+		conn->hostnames = old.hostnames;
+		conn->coords = old.coords;
+	}
+	std::vector<NetworkAddress> desiredCoordinators = wait(conn->tryResolveHostnames());
+	if (desiredCoordinators.size() != conn->hostnames.size() + conn->coords.size()) {
+		TraceEvent("ChangeQuorumCheckerEarlyTermination")
+		    .detail("Reason", "One or more hostnames are unresolvable")
+		    .backtrace();
+		return CoordinatorsResult::COORDINATOR_UNREACHABLE;
 	}
 
-	if (result != CoordinatorsResult::SUCCESS)
-		return result;
-
-	if (!desiredCoordinators.size())
-		return CoordinatorsResult::INVALID_NETWORK_ADDRESSES;
-
-	std::sort(desiredCoordinators.begin(), desiredCoordinators.end());
-
-	std::string newName = change->getDesiredClusterKeyName();
-	if (newName.empty())
+	if (newName.empty()) {
 		newName = old.clusterKeyName().toString();
-
-	if (oldCoordinators == desiredCoordinators && old.clusterKeyName() == newName)
+	}
+	std::sort(conn->hostnames.begin(), conn->hostnames.end());
+	std::sort(conn->coords.begin(), conn->coords.end());
+	std::sort(old.hostnames.begin(), old.hostnames.end());
+	std::sort(old.coords.begin(), old.coords.end());
+	if (conn->hostnames == old.hostnames && conn->coords == old.coords && old.clusterKeyName() == newName) {
 		return CoordinatorsResult::SAME_NETWORK_ADDRESSES;
+	}
 
-	state ClusterConnectionString conn(desiredCoordinators,
-	                                   StringRef(newName + ':' + deterministicRandom()->randomAlphaNumeric(32)));
+	conn->parseKey(newName + ':' + deterministicRandom()->randomAlphaNumeric(32));
 
 	if (g_network->isSimulated()) {
 		int i = 0;
@@ -868,19 +864,27 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 	}
 
 	std::vector<Future<Optional<LeaderInfo>>> leaderServers;
-	ClientCoordinators coord(Reference<ClusterConnectionMemoryRecord>(new ClusterConnectionMemoryRecord(conn)));
+	ClientCoordinators coord(Reference<ClusterConnectionMemoryRecord>(new ClusterConnectionMemoryRecord(*conn)));
 
 	leaderServers.reserve(coord.clientLeaderServers.size());
-	for (int i = 0; i < coord.clientLeaderServers.size(); i++)
-		leaderServers.push_back(retryBrokenPromise(coord.clientLeaderServers[i].getLeader,
-		                                           GetLeaderRequest(coord.clusterKey, UID()),
-		                                           TaskPriority::CoordinationReply));
+	for (int i = 0; i < coord.clientLeaderServers.size(); i++) {
+		if (coord.clientLeaderServers[i].hostname.present()) {
+			leaderServers.push_back(retryGetReplyFromHostname(GetLeaderRequest(coord.clusterKey, UID()),
+			                                                  coord.clientLeaderServers[i].hostname.get(),
+			                                                  WLTOKEN_CLIENTLEADERREG_GETLEADER,
+			                                                  TaskPriority::CoordinationReply));
+		} else {
+			leaderServers.push_back(retryBrokenPromise(coord.clientLeaderServers[i].getLeader,
+			                                           GetLeaderRequest(coord.clusterKey, UID()),
+			                                           TaskPriority::CoordinationReply));
+		}
+	}
 
 	choose {
 		when(wait(waitForAll(leaderServers))) {}
 		when(wait(delay(5.0))) { return CoordinatorsResult::COORDINATOR_UNREACHABLE; }
 	}
-	tr->set(coordinatorsKey, conn.toString());
+	tr->set(coordinatorsKey, conn->toString());
 	return Optional<CoordinatorsResult>();
 }
 
@@ -990,32 +994,6 @@ ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChan
 	}
 }
 
-struct SpecifiedQuorumChange final : IQuorumChange {
-	std::vector<NetworkAddress> desired;
-	explicit SpecifiedQuorumChange(std::vector<NetworkAddress> const& desired) : desired(desired) {}
-	Future<std::vector<NetworkAddress>> getDesiredCoordinators(Transaction* tr,
-	                                                           std::vector<NetworkAddress> oldCoordinators,
-	                                                           Reference<IClusterConnectionRecord>,
-	                                                           CoordinatorsResult&) override {
-		return desired;
-	}
-};
-Reference<IQuorumChange> specifiedQuorumChange(std::vector<NetworkAddress> const& addresses) {
-	return Reference<IQuorumChange>(new SpecifiedQuorumChange(addresses));
-}
-
-struct NoQuorumChange final : IQuorumChange {
-	Future<std::vector<NetworkAddress>> getDesiredCoordinators(Transaction* tr,
-	                                                           std::vector<NetworkAddress> oldCoordinators,
-	                                                           Reference<IClusterConnectionRecord>,
-	                                                           CoordinatorsResult&) override {
-		return oldCoordinators;
-	}
-};
-Reference<IQuorumChange> noQuorumChange() {
-	return Reference<IQuorumChange>(new NoQuorumChange);
-}
-
 struct NameQuorumChange final : IQuorumChange {
 	std::string newName;
 	Reference<IQuorumChange> otherChange;
@@ -1062,11 +1040,29 @@ struct AutoQuorumChange final : IQuorumChange {
 	                                       Reference<IClusterConnectionRecord> ccr,
 	                                       int desiredCount,
 	                                       std::set<AddressExclusion>* excluded) {
+		ClusterConnectionString cs = ccr->getConnectionString();
+		if (oldCoordinators.size() != cs.hostnames.size() + cs.coords.size()) {
+			return false;
+		}
+
 		// Are there enough coordinators for the redundancy level?
 		if (oldCoordinators.size() < desiredCount)
 			return false;
 		if (oldCoordinators.size() % 2 != 1)
 			return false;
+
+		// Check exclusions
+		for (auto& c : oldCoordinators) {
+			if (addressExcluded(*excluded, c))
+				return false;
+		}
+
+		// Check locality
+		// FIXME: Actual locality!
+		std::sort(oldCoordinators.begin(), oldCoordinators.end());
+		for (int i = 1; i < oldCoordinators.size(); i++)
+			if (oldCoordinators[i - 1].ip == oldCoordinators[i].ip)
+				return false; // Multiple coordinators share an IP
 
 		// Check availability
 		ClientCoordinators coord(ccr);
@@ -1094,19 +1090,6 @@ struct AutoQuorumChange final : IQuorumChange {
 				return false; // Coordinator doesn't know about this database?
 			}
 		}
-
-		// Check exclusions
-		for (auto& c : oldCoordinators) {
-			if (addressExcluded(*excluded, c))
-				return false;
-		}
-
-		// Check locality
-		// FIXME: Actual locality!
-		std::sort(oldCoordinators.begin(), oldCoordinators.end());
-		for (int i = 1; i < oldCoordinators.size(); i++)
-			if (oldCoordinators[i - 1].ip == oldCoordinators[i].ip)
-				return false; // Multiple coordinators share an IP
 
 		return true; // The status quo seems fine
 	}
@@ -1149,8 +1132,10 @@ struct AutoQuorumChange final : IQuorumChange {
 
 		if (checkAcceptable) {
 			bool ok = wait(isAcceptable(self.getPtr(), tr, oldCoordinators, ccr, desiredCount, &excluded));
-			if (ok)
+			if (ok) {
+				*err = CoordinatorsResult::SAME_NETWORK_ADDRESSES;
 				return oldCoordinators;
+			}
 		}
 
 		std::vector<NetworkAddress> chosen;

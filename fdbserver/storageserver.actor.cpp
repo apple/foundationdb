@@ -62,6 +62,7 @@
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/MutationTracking.h"
 #include "fdbserver/RecoveryState.h"
+#include "fdbserver/RocksDBCheckpointUtils.actor.h"
 #include "fdbserver/StorageMetrics.h"
 #include "fdbserver/ServerCheckpoint.actor.h"
 #include "fdbserver/ServerDBInfo.h"
@@ -846,6 +847,8 @@ public:
 	AsyncVar<bool> fetchKeysBudgetUsed;
 	std::vector<Promise<FetchInjectionInfo*>> readyFetchKeys;
 
+	FlowLock serveFetchCheckpointParallelismLock;
+
 	int64_t instanceID;
 
 	Promise<Void> otherError;
@@ -991,6 +994,12 @@ public:
 			});
 			specialCounter(
 			    cc, "FetchChangeFeedWaiting", [self]() { return self->fetchChangeFeedParallelismLock.waiters(); });
+			specialCounter(cc, "ServeFetchCheckpointActive", [self]() {
+				return self->serveFetchCheckpointParallelismLock.activePermits();
+			});
+			specialCounter(cc, "ServeFetchCheckpointWaiting", [self]() {
+				return self->serveFetchCheckpointParallelismLock.waiters();
+			});
 			specialCounter(cc, "QueryQueueMax", [self]() { return self->getAndResetMaxQueryQueueSize(); });
 			specialCounter(cc, "BytesStored", [self]() { return self->metrics.byteSample.getEstimate(allKeys); });
 			specialCounter(cc, "ActiveWatches", [self]() { return self->numWatches; });
@@ -1046,6 +1055,7 @@ public:
 	    fetchKeysParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM),
 	    fetchChangeFeedParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM),
 	    fetchKeysBytesBudget(SERVER_KNOBS->STORAGE_FETCH_BYTES), fetchKeysBudgetUsed(false),
+	    serveFetchCheckpointParallelismLock(SERVER_KNOBS->SERVE_FETCH_CHECKPOINT_PARALLELISM),
 	    instanceID(deterministicRandom()->randomUniqueID().first()), shuttingDown(false), behind(false),
 	    versionBehind(false), debug_inApplyUpdate(false), debug_lastValidateTime(0), lastBytesInputEBrake(0),
 	    lastDurableVersionEBrake(0), maxQueryQueue(0), transactionTagCounter(ssi.id()), counters(this),
@@ -1398,7 +1408,7 @@ void updateProcessStats(StorageServer* self) {
 #endif
 
 ACTOR Future<Version> waitForVersionActor(StorageServer* data, Version version, SpanContext spanContext) {
-	state Span span("SS.WaitForVersion"_loc, spanContext);
+	state Span span("SS:WaitForVersion"_loc, spanContext);
 	choose {
 		when(wait(data->version.whenAtLeast(version))) {
 			// FIXME: A bunch of these can block with or without the following delay 0.
@@ -1863,6 +1873,8 @@ ACTOR Future<Void> getCheckpointQ(StorageServer* self, GetCheckpointRequest req)
 
 // Delete the checkpoint from disk, as well as all related presisted meta data.
 ACTOR Future<Void> deleteCheckpointQ(StorageServer* self, Version version, CheckpointMetaData checkpoint) {
+	wait(delay(0, TaskPriority::Low));
+
 	wait(self->durableVersion.whenAtLeast(version));
 
 	TraceEvent("DeleteCheckpointBegin", self->thisServerID).detail("Checkpoint", checkpoint.toString());
@@ -1926,6 +1938,74 @@ ACTOR Future<Void> fetchCheckpointQ(StorageServer* self, FetchCheckpointRequest 
 			    .errorUnsuppressed(e)
 			    .detail("CheckpointID", req.checkpointID)
 			    .detail("Token", req.token);
+			if (!canReplyWith(e)) {
+				throw e;
+			}
+			req.reply.sendError(e);
+		}
+	}
+
+	wait(reader->close());
+	return Void();
+}
+
+// Serves FetchCheckpointKeyValuesRequest, reads local checkpoint and sends it to the client over wire.
+ACTOR Future<Void> fetchCheckpointKeyValuesQ(StorageServer* self, FetchCheckpointKeyValuesRequest req) {
+	wait(self->serveFetchCheckpointParallelismLock.take(TaskPriority::DefaultYield));
+	state FlowLock::Releaser holder(self->serveFetchCheckpointParallelismLock);
+
+	TraceEvent("ServeFetchCheckpointKeyValuesBegin", self->thisServerID)
+	    .detail("CheckpointID", req.checkpointID)
+	    .detail("Range", req.range);
+
+	req.reply.setByteLimit(SERVER_KNOBS->CHECKPOINT_TRANSFER_BLOCK_BYTES);
+
+	// Returns error if the checkpoint cannot be found.
+	const auto it = self->checkpoints.find(req.checkpointID);
+	if (it == self->checkpoints.end()) {
+		req.reply.sendError(checkpoint_not_found());
+		TraceEvent("ServeFetchCheckpointNotFound", self->thisServerID).detail("CheckpointID", req.checkpointID);
+		return Void();
+	}
+
+	try {
+		state ICheckpointReader* reader = newCheckpointReader(it->second, self->thisServerID);
+		wait(reader->init(BinaryWriter::toValue(req.range, IncludeVersion())));
+
+		loop {
+			state RangeResult res =
+			    wait(reader->nextKeyValues(CLIENT_KNOBS->REPLY_BYTE_LIMIT, CLIENT_KNOBS->REPLY_BYTE_LIMIT));
+			if (!res.empty()) {
+				TraceEvent(SevDebug, "FetchCheckpontKeyValuesReadRange", self->thisServerID)
+				    .detail("CheckpointID", req.checkpointID)
+				    .detail("FirstReturnedKey", res.front().key)
+				    .detail("LastReturnedKey", res.back().key)
+				    .detail("Size", res.size());
+			} else {
+				TraceEvent(SevInfo, "FetchCheckpontKeyValuesEmptyRange", self->thisServerID)
+				    .detail("CheckpointID", req.checkpointID);
+			}
+
+			wait(req.reply.onReady());
+			FetchCheckpointKeyValuesStreamReply reply;
+			reply.arena.dependsOn(res.arena());
+			for (int i = 0; i < res.size(); ++i) {
+				reply.data.push_back(reply.arena, res[i]);
+			}
+
+			req.reply.send(reply);
+		}
+	} catch (Error& e) {
+		if (e.code() == error_code_end_of_stream) {
+			req.reply.sendError(end_of_stream());
+			TraceEvent("ServeFetchCheckpointKeyValuesEnd", self->thisServerID)
+			    .detail("CheckpointID", req.checkpointID)
+			    .detail("Range", req.range);
+		} else {
+			TraceEvent(SevWarnAlways, "ServerFetchCheckpointKeyValuesFailure")
+			    .errorUnsuppressed(e)
+			    .detail("CheckpointID", req.checkpointID)
+			    .detail("Range", req.range);
 			if (!canReplyWith(e)) {
 				throw e;
 			}
@@ -3723,7 +3803,8 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
                                                    StringRef mapper,
                                                    // To provide span context, tags, debug ID to underlying lookups.
                                                    GetMappedKeyValuesRequest* pOriginalReq,
-                                                   Optional<Key> tenantPrefix) {
+                                                   Optional<Key> tenantPrefix,
+                                                   int matchIndex) {
 	state GetMappedKeyValuesReply result;
 	result.version = input.version;
 	result.more = input.more;
@@ -3741,15 +3822,21 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 		TraceEvent("MapperNotTuple").error(e).detail("Mapper", mapper.printable());
 		throw mapper_not_tuple();
 	}
-	state KeyValueRef* it = input.data.begin();
 	state std::vector<Optional<Tuple>> vt;
 	state bool isRangeQuery = false;
 	preprocessMappedKey(mappedKeyFormatTuple, vt, isRangeQuery);
 
-	for (; it != input.data.end(); it++) {
+	state int sz = input.data.size();
+	state int i = 0;
+	for (; i < sz; i++) {
+		state KeyValueRef* it = &input.data[i];
 		state MappedKeyValueRef kvm;
-		kvm.key = it->key;
-		kvm.value = it->value;
+		state bool isBoundary = i == 0 || i == sz - 1;
+		// need to keep the boundary, so that caller can use it as a continuation.
+		if (isBoundary || matchIndex == MATCH_INDEX_ALL) {
+			kvm.key = it->key;
+			kvm.value = it->value;
+		}
 
 		state Key mappedKey = constructMappedKey(it, vt, mappedKeyTuple, mappedKeyFormatTuple);
 		// Make sure the mappedKey is always available, so that it's good even we want to get key asynchronously.
@@ -3762,11 +3849,19 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 			// Use the mappedKey as the prefix of the range query.
 			GetRangeReqAndResultRef getRange =
 			    wait(quickGetKeyValues(data, mappedKey, input.version, &(result.arena), pOriginalReq));
+			if ((!getRange.result.empty() && matchIndex == MATCH_INDEX_MATCHED_ONLY) ||
+			    (getRange.result.empty() && matchIndex == MATCH_INDEX_UNMATCHED_ONLY)) {
+				kvm.key = it->key;
+				kvm.value = it->value;
+			}
+
+			kvm.boundaryAndExist = isBoundary && !getRange.result.empty();
 			kvm.reqAndResult = getRange;
 		} else {
 			GetValueReqAndResultRef getValue =
 			    wait(quickGetValue(data, mappedKey, input.version, &(result.arena), pOriginalReq));
 			kvm.reqAndResult = getValue;
+			kvm.boundaryAndExist = isBoundary && getValue.result.present();
 		}
 		result.data.push_back(result.arena, kvm);
 	}
@@ -4026,7 +4121,7 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 			try {
 				// Map the scanned range to another list of keys and look up.
 				GetMappedKeyValuesReply _r =
-				    wait(mapKeyValues(data, getKeyValuesReply, req.mapper, &req, tenantPrefix));
+				    wait(mapKeyValues(data, getKeyValuesReply, req.mapper, &req, tenantPrefix, req.matchIndex));
 				r = _r;
 			} catch (Error& e) {
 				TraceEvent("MapError").error(e);
@@ -5316,13 +5411,12 @@ ACTOR Future<Version> fetchChangeFeed(StorageServer* data,
 			}
 		}
 
-		// TODO REMOVE
-		fmt::print("DBG: SS {} Feed {} possibly destroyed {}, {} metadata create, {} desired committed\n",
+		/*fmt::print("DBG: SS {} Feed {} possibly destroyed {}, {} metadata create, {} desired committed\n",
 		           data->thisServerID.toString().substr(0, 4),
 		           changeFeedInfo->id.printable(),
 		           changeFeedInfo->possiblyDestroyed,
 		           changeFeedInfo->metadataCreateVersion,
-		           data->desiredOldestVersion.get());
+		           data->desiredOldestVersion.get());*/
 
 		// There are two reasons for change_feed_not_registered:
 		//   1. The feed was just created, but the ss mutation stream is ahead of the GRV that fetchChangeFeedApplier
@@ -5339,9 +5433,8 @@ ACTOR Future<Version> fetchChangeFeed(StorageServer* data,
 			    .detail("Range", changeFeedInfo->range.toString())
 			    .detail("Version", cleanupVersion);
 
-			if (g_network->isSimulated()) {
-				ASSERT(allDestroyedChangeFeeds.count(changeFeedInfo->id));
-			}
+			// FIXME: do simulated validation that feed was destroyed, but needs to be added when client starts
+			// destroying a change feed instead of when server recieves private mutation for it
 
 			Key beginClearKey = changeFeedInfo->id.withPrefix(persistChangeFeedKeys.begin);
 
@@ -5562,11 +5655,9 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 			continue;
 		}
 
-		// TODO REMOVE print
-		fmt::print("DBG: SS {} fetching feed {} was refreshed but not present!! assuming destroyed\n",
+		/*fmt::print("DBG: SS {} fetching feed {} was refreshed but not present!! assuming destroyed\n",
 		           data->thisServerID.toString().substr(0, 4),
-		           feedId.printable());
-
+		           feedId.printable());*/
 		Version cleanupVersion = data->data().getLatestVersion();
 
 		TraceEvent(SevDebug, "DestroyingChangeFeedFromFetchMetadata", data->thisServerID)
@@ -7384,12 +7475,14 @@ ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData meta
 		data->storage.clearRange(singleKeyRange(pendingCheckpointKey));
 		data->storage.writeKeyValue(KeyValueRef(persistCheckpointKey, checkpointValue(checkpointResult)));
 		wait(data->storage.commit());
+		TraceEvent("StorageCreateCheckpointPersisted", data->thisServerID)
+		    .detail("Checkpoint", checkpointResult.toString());
 	} catch (Error& e) {
 		// If the checkpoint meta data is not persisted successfully, remove the checkpoint.
-		TraceEvent("StorageCreateCheckpointPersistFailure", data->thisServerID)
+		TraceEvent(SevWarn, "StorageCreateCheckpointPersistFailure", data->thisServerID)
 		    .errorUnsuppressed(e)
 		    .detail("Checkpoint", checkpointResult.toString());
-		data->checkpoints.erase(checkpointResult.checkpointID);
+		data->checkpoints[checkpointResult.checkpointID].setState(CheckpointMetaData::Deleting);
 		data->actors.add(deleteCheckpointQ(data, metaData.version, checkpointResult));
 	}
 
@@ -7438,6 +7531,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 			if (cVer <= desiredVersion) {
 				TraceEvent("CheckpointVersionSatisfied", data->thisServerID)
 				    .detail("DesiredVersion", desiredVersion)
+				    .detail("DurableVersion", data->durableVersion.get())
 				    .detail("CheckPointVersion", cVer);
 				desiredVersion = cVer;
 				requireCheckpoint = true;
@@ -7538,13 +7632,29 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		debug_advanceMinCommittedVersion(data->thisServerID, newOldestVersion);
 
 		if (requireCheckpoint) {
-			ASSERT(newOldestVersion == data->pendingCheckpoints.begin()->first);
-			std::vector<Future<Void>> createCheckpoints;
-			for (int idx = 0; idx < data->pendingCheckpoints.begin()->second.size(); ++idx) {
-				createCheckpoints.push_back(createCheckpoint(data, data->pendingCheckpoints.begin()->second[idx]));
+			// `pendingCheckpoints` is a queue of checkpoint requests ordered by their versoins, and
+			// `newOldestVersion` is chosen such that it is no larger than the smallest pending checkpoing
+			// version. When the exact desired checkpoint version is committed, updateStorage() is blocked
+			// and a checkpoint will be created at that version from the underlying storage engine.
+			// Note a pending checkpoint is only dequeued after the corresponding checkpoint is created
+			// successfully.
+			TraceEvent(SevDebug, "CheckpointVersionDurable", data->thisServerID)
+			    .detail("NewDurableVersion", newOldestVersion)
+			    .detail("DesiredVersion", desiredVersion)
+			    .detail("SmallestCheckPointVersion", data->pendingCheckpoints.begin()->first);
+			// newOldestVersion could be smaller than the desired version due to byte limit.
+			ASSERT(newOldestVersion <= data->pendingCheckpoints.begin()->first);
+			if (newOldestVersion == data->pendingCheckpoints.begin()->first) {
+				std::vector<Future<Void>> createCheckpoints;
+				// TODO: Combine these checkpoints if necessary.
+				for (int idx = 0; idx < data->pendingCheckpoints.begin()->second.size(); ++idx) {
+					createCheckpoints.push_back(createCheckpoint(data, data->pendingCheckpoints.begin()->second[idx]));
+				}
+				wait(waitForAll(createCheckpoints));
+				// Erase the pending checkpoint after the checkpoint has been created successfully.
+				ASSERT(newOldestVersion == data->pendingCheckpoints.begin()->first);
+				data->pendingCheckpoints.erase(data->pendingCheckpoints.begin());
 			}
-			wait(waitForAll(createCheckpoints));
-			data->pendingCheckpoints.erase(data->pendingCheckpoints.begin());
 			requireCheckpoint = false;
 		}
 
@@ -8911,6 +9021,9 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 			when(FetchCheckpointRequest req = waitNext(ssi.fetchCheckpoint.getFuture())) {
 				self->actors.add(fetchCheckpointQ(self, req));
 			}
+			when(FetchCheckpointKeyValuesRequest req = waitNext(ssi.fetchCheckpointKeyValues.getFuture())) {
+				self->actors.add(fetchCheckpointKeyValuesQ(self, req));
+			}
 			when(wait(updateProcessStatsTimer)) {
 				updateProcessStats(self);
 				updateProcessStatsTimer = delay(SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL);
@@ -9355,6 +9468,10 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 
 		throw internal_error();
 	} catch (Error& e) {
+		if (self.byteSampleRecovery.isValid()) {
+			self.byteSampleRecovery.cancel();
+		}
+
 		if (recovered.canBeSet())
 			recovered.send(Void());
 
