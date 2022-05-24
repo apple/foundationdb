@@ -33,11 +33,12 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( VERSIONS_PER_SECOND,                                   1e6 );
 	init( MAX_VERSIONS_IN_FLIGHT,                100 * VERSIONS_PER_SECOND );
 	init( MAX_VERSIONS_IN_FLIGHT_FORCED,         6e5 * VERSIONS_PER_SECOND ); //one week of versions
-	init( MAX_READ_TRANSACTION_LIFE_VERSIONS,      5 * VERSIONS_PER_SECOND ); if (randomize && BUGGIFY) MAX_READ_TRANSACTION_LIFE_VERSIONS = VERSIONS_PER_SECOND; else if (randomize && BUGGIFY) MAX_READ_TRANSACTION_LIFE_VERSIONS = std::max<int>(1, 0.1 * VERSIONS_PER_SECOND); else if( randomize && BUGGIFY ) MAX_READ_TRANSACTION_LIFE_VERSIONS = 10 * VERSIONS_PER_SECOND;
+	init( ENABLE_VERSION_VECTOR,                               false );
+        bool buggifyShortReadWindow = randomize && BUGGIFY && !ENABLE_VERSION_VECTOR;
+	init( MAX_READ_TRANSACTION_LIFE_VERSIONS,      5 * VERSIONS_PER_SECOND ); if (randomize && BUGGIFY) MAX_READ_TRANSACTION_LIFE_VERSIONS = VERSIONS_PER_SECOND; else if (buggifyShortReadWindow) MAX_READ_TRANSACTION_LIFE_VERSIONS = std::max<int>(1, 0.1 * VERSIONS_PER_SECOND); else if( randomize && BUGGIFY ) MAX_READ_TRANSACTION_LIFE_VERSIONS = 10 * VERSIONS_PER_SECOND;
 	init( MAX_WRITE_TRANSACTION_LIFE_VERSIONS,     5 * VERSIONS_PER_SECOND ); if (randomize && BUGGIFY) MAX_WRITE_TRANSACTION_LIFE_VERSIONS=std::max<int>(1, 1 * VERSIONS_PER_SECOND);
 	init( MAX_COMMIT_BATCH_INTERVAL,                             2.0 ); if( randomize && BUGGIFY ) MAX_COMMIT_BATCH_INTERVAL = 0.5; // Each commit proxy generates a CommitTransactionBatchRequest at least this often, so that versions always advance smoothly
 	MAX_COMMIT_BATCH_INTERVAL = std::min(MAX_COMMIT_BATCH_INTERVAL, MAX_READ_TRANSACTION_LIFE_VERSIONS/double(2*VERSIONS_PER_SECOND)); // Ensure that the proxy commits 2 times every MAX_READ_TRANSACTION_LIFE_VERSIONS, otherwise the master will not give out versions fast enough
-	init( ENABLE_VERSION_VECTOR,                               false );
 	init( ENABLE_VERSION_VECTOR_TLOG_UNICAST,                  false );
 	init( MAX_VERSION_RATE_MODIFIER,                             0.1 );
 	init( MAX_VERSION_RATE_OFFSET,               VERSIONS_PER_SECOND ); // If the calculated version is more than this amount away from the expected version, it will be clamped to this value. This prevents huge version jumps.
@@ -457,7 +458,9 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( TXN_STATE_SEND_AMOUNT,                                    4 );
 	init( REPORT_TRANSACTION_COST_ESTIMATION_DELAY,               0.1 );
 	init( PROXY_REJECT_BATCH_QUEUED_TOO_LONG,                    true );
-	init( PROXY_USE_RESOLVER_PRIVATE_MUTATIONS,                 false ); if( !ENABLE_VERSION_VECTOR_TLOG_UNICAST && randomize && BUGGIFY ) PROXY_USE_RESOLVER_PRIVATE_MUTATIONS = deterministicRandom()->coinflip();
+
+        bool buggfyUseResolverPrivateMutations = randomize && BUGGIFY && !ENABLE_VERSION_VECTOR_TLOG_UNICAST;
+	init( PROXY_USE_RESOLVER_PRIVATE_MUTATIONS,                 false ); if( buggfyUseResolverPrivateMutations ) PROXY_USE_RESOLVER_PRIVATE_MUTATIONS = deterministicRandom()->coinflip();
 
 	init( RESET_MASTER_BATCHES,                                   200 );
 	init( RESET_RESOLVER_BATCHES,                                 200 );
@@ -673,6 +676,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( FETCH_KEYS_PARALLELISM,                                  2 );
 	init( FETCH_KEYS_LOWER_PRIORITY,                               0 );
 	init( FETCH_CHANGEFEED_PARALLELISM,                            2 );
+	init( SERVE_FETCH_CHECKPOINT_PARALLELISM,                      4 );
 	init( BUGGIFY_BLOCK_BYTES,                                 10000 );
 	init( STORAGE_RECOVERY_VERSION_LAG_LIMIT,				2 * MAX_READ_TRANSACTION_LIFE_VERSIONS );
 	init( STORAGE_COMMIT_BYTES,                             10000000 ); if( randomize && BUGGIFY ) STORAGE_COMMIT_BYTES = 2000000;
@@ -857,10 +861,10 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
     init( ENABLE_ENCRYPTION,                                   false );
     init( ENCRYPTION_MODE,                              "AES-256-CTR");
     init( SIM_KMS_MAX_KEYS,                                      4096);
+    init( ENCRYPT_PROXY_MAX_DBG_TRACE_LENGTH,                  100000);
 
-    // Support KmsConnector types are:
-    // KMS_CONNECTOR_TYPE_HTTP -> 1
-    init( KMS_CONNECTOR_TYPE,                      "HttpKmsConnector");
+    // KMS connector type
+    init( KMS_CONNECTOR_TYPE,                      "RESTKmsConnector");
 
 	// Blob granlues
 	init( BG_URL,               isSimulated ? "file://fdbblob/" : "" ); // TODO: store in system key space or something, eventually
@@ -886,6 +890,24 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 
 	init( BGCC_TIMEOUT,                   isSimulated ? 10.0 : 120.0 );
 	init( BGCC_MIN_INTERVAL,                isSimulated ? 1.0 : 10.0 );
+
+	// HTTP KMS Connector
+	init( REST_KMS_CONNECTOR_KMS_DISCOVERY_URL_MODE,           "file");
+	init( REST_KMS_CONNECTOR_VALIDATION_TOKEN_MODE,            "file");
+	init( REST_KMS_CONNECTOR_VALIDATION_TOKEN_MAX_SIZE,          1024);
+	init( REST_KMS_CONNECTOR_VALIDATION_TOKENS_MAX_PAYLOAD_SIZE, 10 * 1024);
+	init( REST_KMS_CONNECTOR_REFRESH_KMS_URLS,                   true);
+	init( REST_KMS_CONNECTOR_REFRESH_KMS_URLS_INTERVAL_SEC,       600);
+	// Below KMS configurations are responsible for:
+	// Discovering KMS URLs, fetch encryption keys endpoint and validation token details.
+	// Configurations are expected to be passed as command-line arguments.
+	// NOTE: Care must be taken when attempting to update below configurations for a up/running FDB cluster.
+	init( REST_KMS_CONNECTOR_DISCOVER_KMS_URL_FILE,                "");
+	init( REST_KMS_CONNECTOR_GET_ENCRYPTION_KEYS_ENDPOINT,         "");
+	// Details to fetch validation token from a localhost file
+	// acceptable format: "<token_name1>#<absolute_file_path1>,<token_name2>#<absolute_file_path2>,.."
+	// NOTE: 'token-name" can NOT contain '#' character
+	init( REST_KMS_CONNECTOR_VALIDATION_TOKEN_DETAILS,             "");
 
 	// clang-format on
 

@@ -314,6 +314,10 @@ void atomicReplace(std::string const& path, std::string const& content, bool tex
 // Read a file into memory
 std::string readFileBytes(std::string const& filename, int maxSize);
 
+// Read a file into memory supplied by the caller
+// If 'len' is greater than file size, then read the filesize bytes.
+void readFileBytes(std::string const& filename, uint8_t* buff, int64_t len);
+
 // Write data buffer into file
 void writeFileBytes(std::string const& filename, const char* data, size_t count);
 
@@ -417,6 +421,27 @@ std::string format_backtrace(void** addresses, int numAddresses);
 int eraseDirectoryRecursive(std::string const& directory);
 
 bool isHwCrcSupported();
+
+// Creates a temporary file; file gets destroyed/deleted along with object destruction.
+// If 'tmpDir' is empty, code defaults to 'boost::filesystem::temp_directory_path()'
+// If 'pattern' is empty, code defaults to 'fdbtmp'
+struct TmpFile {
+public:
+	TmpFile();
+	TmpFile(const std::string& tempDir);
+	TmpFile(const std::string& tempDir, std::string const& prefix);
+	~TmpFile();
+	size_t read(uint8_t* buff, size_t len);
+	void write(const uint8_t* buff, size_t len);
+	bool destroyFile();
+	std::string getFileName() const { return filename; }
+
+private:
+	std::string filename;
+	constexpr static std::string_view defaultPrefix = "fdbtmp";
+
+	void createTmpFile(const std::string_view dir, const std::string_view prefix);
+};
 
 } // namespace platform
 

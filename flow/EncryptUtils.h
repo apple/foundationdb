@@ -22,8 +22,12 @@
 #define ENCRYPT_UTILS_H
 #pragma once
 
+#include "flow/Arena.h"
+
 #include <cstdint>
 #include <limits>
+#include <string>
+#include <string_view>
 
 #define ENCRYPT_INVALID_DOMAIN_ID 0
 #define ENCRYPT_INVALID_CIPHER_KEY_ID 0
@@ -50,7 +54,7 @@ static_assert(EncryptCipherMode::ENCRYPT_CIPHER_MODE_LAST <= std::numeric_limits
 // EncryptionHeader authentication modes
 // 1. NONE - No 'authentication token' generation needed for EncryptionHeader i.e. no protection against header OR
 // cipherText 'tampering' and/or bit rot/flip corruptions.
-// 2. Single/Multi - Encyrption header would generate one or more 'authentication tokens' to protect the header against
+// 2. Single/Multi - Encryption header would generate one or more 'authentication tokens' to protect the header against
 // 'tempering' and/or bit rot/flip corruptions. Refer to BlobCipher.h for detailed usage recommendations.
 // 3. LAST - Invalid mode, used for static asserts.
 
@@ -64,4 +68,13 @@ typedef enum {
 static_assert(EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_LAST <= std::numeric_limits<uint8_t>::max(),
               "EncryptHeaderAuthToken value overflow");
 
+constexpr std::string_view ENCRYPT_DBG_TRACE_CACHED_PREFIX = "Chd";
+constexpr std::string_view ENCRYPT_DBG_TRACE_QUERY_PREFIX = "Qry";
+constexpr std::string_view ENCRYPT_DBG_TRACE_INSERT_PREFIX = "Ins";
+constexpr std::string_view ENCRYPT_DBG_TRACE_RESULT_PREFIX = "Res";
+
+// Utility interface to construct TraceEvent key for debugging
+std::string getEncryptDbgTraceKey(std::string_view prefix,
+                                  EncryptCipherDomainId domainId,
+                                  Optional<EncryptCipherBaseKeyId> baseCipherId = Optional<EncryptCipherBaseKeyId>());
 #endif

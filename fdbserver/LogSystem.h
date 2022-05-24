@@ -652,14 +652,14 @@ struct ILogSystem {
 	// Returns an ILogSystem representing a new epoch immediately following this one.  The new epoch is only provisional
 	// until the caller updates the coordinated DBCoreState
 
-	virtual LogSystemConfig getLogSystemConfig() const = 0;
 	// Returns the physical configuration of this LogSystem, that could be used to construct an equivalent LogSystem
 	// using fromLogSystemConfig()
+	virtual LogSystemConfig getLogSystemConfig() const = 0;
 
 	virtual Standalone<StringRef> getLogsValue() const = 0;
 
-	virtual Future<Void> onLogSystemConfigChange() = 0;
 	// Returns when the log system configuration has changed due to a tlog rejoin.
+	virtual Future<Void> onLogSystemConfigChange() = 0;
 
 	virtual void getPushLocations(VectorRef<Tag> tags,
 	                              std::vector<int>& locations,
@@ -741,16 +741,7 @@ struct LogPushData : NonCopyable {
 	// Log subsequences have to start at 1 (the MergedPeekCursor relies on this to make sure we never have !hasMessage()
 	// in the middle of data for a version
 
-	explicit LogPushData(Reference<ILogSystem> logSystem) : logSystem(logSystem), subsequence(1) {
-		for (auto& log : logSystem->getLogSystemConfig().tLogs) {
-			if (log.isLocal) {
-				for (int i = 0; i < log.tLogs.size(); i++) {
-					messagesWriter.push_back(BinaryWriter(AssumeVersion(g_network->protocolVersion())));
-				}
-			}
-		}
-		messagesWritten = std::vector<bool>(messagesWriter.size(), false);
-	}
+	explicit LogPushData(Reference<ILogSystem> logSystem, int tlogCount);
 
 	void addTxsTag();
 

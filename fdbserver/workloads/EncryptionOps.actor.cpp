@@ -34,8 +34,6 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-#if ENCRYPTION_ENABLED
-
 #define MEGA_BYTES (1024 * 1024)
 #define NANO_SECOND (1000 * 1000 * 1000)
 
@@ -228,7 +226,7 @@ struct EncryptionOpsWorkload : TestWorkload {
 		Reference<BlobCipherKey> cipherKey = cipherKeyCache->getCipherKey(domainId, baseCipherId, salt);
 
 		if (simCacheMiss) {
-			TraceEvent("SimKeyCacheMiss").detail("EncyrptDomainId", domainId).detail("BaseCipherId", baseCipherId);
+			TraceEvent("SimKeyCacheMiss").detail("EncryptDomainId", domainId).detail("BaseCipherId", baseCipherId);
 			// simulate KeyCache miss that may happen during decryption; insert a CipherKey with known 'salt'
 			cipherKeyCache->insertCipherKey(domainId,
 			                                baseCipherId,
@@ -379,5 +377,3 @@ struct EncryptionOpsWorkload : TestWorkload {
 };
 
 WorkloadFactory<EncryptionOpsWorkload> EncryptionOpsWorkloadFactory("EncryptionOps");
-
-#endif // ENCRYPTION_ENABLED
