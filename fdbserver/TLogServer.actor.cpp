@@ -2896,6 +2896,14 @@ ACTOR Future<Void> pullAsyncData(TLogData* self,
 						// Notifies the commitQueue actor to commit persistentQueue, and also unblocks tLogPeekMessages
 						// actors
 						logData->version.set(ver);
+						if (logData->recoveryTxnReceived.canBeSet() && !pullingRecoveryData &&
+						    ver > logData->recoveredAt) {
+							TraceEvent("TLogInfo", self->dbgid)
+							    .detail("Log", logData->logId)
+							    .detail("RecoveredAt", logData->recoveredAt)
+							    .detail("RecoveryTxnVersion", ver);
+							logData->recoveryTxnReceived.send(Void());
+						}
 						wait(yield(TaskPriority::TLogCommit));
 					}
 					break;
