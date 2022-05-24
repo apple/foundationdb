@@ -1459,7 +1459,7 @@ void printThreadStats(ThreadStatistics& final_stats, Arguments& args, FILE* fp, 
 
 	/* Total Samples */
 	putTitle("Samples");
-	auto first_op = 1;
+	bool first_op = true;
 	for (auto op = 0; op < MAX_OP; op++) {
 		const std::string op_name = getOpName(op);
 		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
@@ -1471,7 +1471,7 @@ void printThreadStats(ThreadStatistics& final_stats, Arguments& args, FILE* fp, 
 			}
 			if (fp) {
 				if (first_op) {
-					first_op = 0;
+					first_op = false;
 				} else {
 					fmt::fprintf(fp, ",");
 				}
@@ -1486,7 +1486,7 @@ void printThreadStats(ThreadStatistics& final_stats, Arguments& args, FILE* fp, 
 		fmt::fprintf(fp, "}, \"minLatency\": {");
 	}
 	putTitle("Min");
-	first_op = 1;
+	first_op = true;
 	for (auto op = 0; op < MAX_OP; op++) {
 		const std::string op_name = getOpName(op);
 		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
@@ -1497,7 +1497,7 @@ void printThreadStats(ThreadStatistics& final_stats, Arguments& args, FILE* fp, 
 				putField(lat_min);
 				if (fp) {
 					if (first_op) {
-						first_op = 0;
+						first_op = false;
 					} else {
 						fmt::fprintf(fp, ",");
 					}
@@ -1513,7 +1513,7 @@ void printThreadStats(ThreadStatistics& final_stats, Arguments& args, FILE* fp, 
 		fmt::fprintf(fp, "}, \"avgLatency\": {");
 	}
 	putTitle("Avg");
-	first_op = 1;
+	first_op = true;
 	for (auto op = 0; op < MAX_OP; op++) {
 		const std::string op_name = getOpName(op);
 		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
@@ -1521,7 +1521,7 @@ void printThreadStats(ThreadStatistics& final_stats, Arguments& args, FILE* fp, 
 				putField(final_stats.mean(op));
 				if (fp) {
 					if (first_op) {
-						first_op = 0;
+						first_op = false;
 					} else {
 						fmt::fprintf(fp, ",");
 					}
@@ -1539,7 +1539,7 @@ void printThreadStats(ThreadStatistics& final_stats, Arguments& args, FILE* fp, 
 		fmt::fprintf(fp, "}, \"maxLatency\": {");
 	}
 	putTitle("Max");
-	first_op = 1;
+	first_op = true;
 	for (auto op = 0; op < MAX_OP; op++) {
 		const std::string op_name = getOpName(op);
 		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
@@ -1550,7 +1550,7 @@ void printThreadStats(ThreadStatistics& final_stats, Arguments& args, FILE* fp, 
 				putField(lat_max);
 				if (fp) {
 					if (first_op) {
-						first_op = 0;
+						first_op = false;
 					} else {
 						fmt::fprintf(fp, ",");
 					}
@@ -1566,7 +1566,7 @@ void printThreadStats(ThreadStatistics& final_stats, Arguments& args, FILE* fp, 
 		fmt::fprintf(fp, "}, \"medianLatency\": {");
 	}
 	putTitle("Median");
-	first_op = 1;
+	first_op = true;
 	for (auto op = 0; op < MAX_OP; op++) {
 		const std::string op_name = getOpName(op);
 		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
@@ -1577,7 +1577,7 @@ void printThreadStats(ThreadStatistics& final_stats, Arguments& args, FILE* fp, 
 				putField(median);
 				if (fp) {
 					if (first_op) {
-						first_op = 0;
+						first_op = false;
 					} else {
 						fmt::fprintf(fp, ",");
 					}
@@ -1595,7 +1595,7 @@ void printThreadStats(ThreadStatistics& final_stats, Arguments& args, FILE* fp, 
 		fmt::fprintf(fp, "}, \"p95Latency\": {");
 	}
 	putTitle("95.0 pctile");
-	first_op = 1;
+	first_op = true;
 	for (auto op = 0; op < MAX_OP; op++) {
 		const std::string op_name = getOpName(op);
 		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
@@ -1607,7 +1607,7 @@ void printThreadStats(ThreadStatistics& final_stats, Arguments& args, FILE* fp, 
 			putField(point_95pct);
 			if (fp) {
 				if (first_op) {
-					first_op = 0;
+					first_op = false;
 				} else {
 					fmt::fprintf(fp, ",");
 				}
@@ -1622,7 +1622,7 @@ void printThreadStats(ThreadStatistics& final_stats, Arguments& args, FILE* fp, 
 		fmt::fprintf(fp, "}, \"p99Latency\": {");
 	}
 	putTitle("99.0 pctile");
-	first_op = 1;
+	first_op = true;
 	for (auto op = 0; op < MAX_OP; op++) {
 		const std::string op_name = getOpName(op);
 		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
@@ -1634,7 +1634,7 @@ void printThreadStats(ThreadStatistics& final_stats, Arguments& args, FILE* fp, 
 			putField(point_99pct);
 			if (fp) {
 				if (first_op) {
-					first_op = 0;
+					first_op = false;
 				} else {
 					fmt::fprintf(fp, ",");
 				}
@@ -1649,7 +1649,7 @@ void printThreadStats(ThreadStatistics& final_stats, Arguments& args, FILE* fp, 
 		fmt::fprintf(fp, "}, \"p99.9Latency\": {");
 	}
 	putTitle("99.9 pctile");
-	first_op = 1;
+	first_op = true;
 	for (auto op = 0; op < MAX_OP; op++) {
 		const std::string op_name = getOpName(op);
 		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
@@ -1661,7 +1661,7 @@ void printThreadStats(ThreadStatistics& final_stats, Arguments& args, FILE* fp, 
 			putField(point_99_9pct);
 			if (fp) {
 				if (first_op) {
-					first_op = 0;
+					first_op = false;
 				} else {
 					fmt::fprintf(fp, ",");
 				}
@@ -1744,7 +1744,7 @@ void printReport(Arguments& args, ThreadStatistics const* stats, double const du
 			putField(final_stats.getOpCount(op));
 			if (fp) {
 				if (first_op) {
-					first_op = 0;
+					first_op = false;
 				} else {
 					fmt::fprintf(fp, ",");
 				}
@@ -1768,13 +1768,13 @@ void printReport(Arguments& args, ThreadStatistics const* stats, double const du
 
 	/* Errors */
 	putTitle("Errors");
-	first_op = 1;
+	first_op = true;
 	for (auto op = 0; op < MAX_OP; op++) {
 		if (args.txnspec.ops[op][OP_COUNT] > 0 && op != OP_TRANSACTION) {
 			putField(final_stats.getErrorCount(op));
 			if (fp) {
 				if (first_op) {
-					first_op = 0;
+					first_op = false;
 				} else {
 					fmt::fprintf(fp, ",");
 				}
