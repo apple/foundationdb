@@ -252,7 +252,7 @@ ACTOR Future<Void> handleIOErrors(Future<Void> actor, IClosable* store, UID id, 
 	}
 }
 
-ACTOR Future<Void> workerHandleErrors(FutureStream<ErrorInfo> errors) {
+ACTOR Future<Void> workerHandleErrors(FutureStream<ErrorInfo> errors, int* sharedTLogCount) {
 	loop choose {
 		when(ErrorInfo _err = waitNext(errors)) {
 			ErrorInfo err = _err;
@@ -264,6 +264,10 @@ ACTOR Future<Void> workerHandleErrors(FutureStream<ErrorInfo> errors) {
 
 			if (!ok) {
 				err.error = checkIOTimeout(err.error); // Possibly convert error to io_timeout
+			}
+
+			if (err.role == Role::SHARED_TRANSACTION_LOG) {
+				--(*sharedTLogCount);
 			}
 
 			endRole(err.role, err.id, "Error", ok, err.error);
@@ -1556,6 +1560,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
                                 ConfigBroadcastInterface configBroadcastInterface,
                                 Reference<ConfigNode> configNode,
                                 Reference<LocalConfiguration> localConfig) {
+	state int sharedTLogCount = 0;
 	state PromiseStream<ErrorInfo> errors;
 	state Reference<AsyncVar<Optional<DataDistributorInterface>>> ddInterf(
 	    new AsyncVar<Optional<DataDistributorInterface>>());
@@ -1564,7 +1569,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	    new AsyncVar<Optional<std::pair<int64_t, BlobManagerInterface>>>());
 	state Reference<AsyncVar<Optional<EncryptKeyProxyInterface>>> ekpInterf(
 	    new AsyncVar<Optional<EncryptKeyProxyInterface>>());
-	state Future<Void> handleErrors = workerHandleErrors(errors.getFuture()); // Needs to be stopped last
+	state Future<Void> handleErrors = workerHandleErrors(errors.getFuture(), &sharedTLogCount); // Needs to be stopped last
 	state ActorCollection errorForwarders(false);
 	state Future<Void> loggingTrigger = Void();
 	state double loggingDelay = SERVER_KNOBS->WORKER_LOGGING_INTERVAL;
@@ -1766,6 +1771,10 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 
 				std::map<std::string, std::string> details;
 				details["StorageEngine"] = s.storeType.toString();
+
+				++sharedTLogCount;
+				ASSERT(sharedTLogCount == 1);
+
 				startRole(Role::SHARED_TRANSACTION_LOG, s.storeID, interf.id(), details, "Restored");
 
 				Promise<Void> oldLog;
@@ -2150,6 +2159,10 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 
 					// FIXME: start role for every tlog instance, rather that just for the shared actor, also use a
 					// different role type for the shared actor
+
+					++sharedTLogCount;
+					ASSERT(sharedTLogCount == 1);
+
 					startRole(Role::SHARED_TRANSACTION_LOG, logId, interf.id(), details);
 
 					const StringRef prefix =
