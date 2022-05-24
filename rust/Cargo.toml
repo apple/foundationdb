@@ -1,0 +1,16 @@
+[package]
+name = "foundationdb"
+license = "Apache-2.0"
+version = "0.1.0"  # Version of rust demo; not of FDB (for now)
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+bytes = {version = "1.1"}
+tokio = { version = "1.10", features = ["full"] }
+xxhash-rust = { version = "0.8.5", features = ["xxh3"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["test-util"] }
+criterion = { version = "0.3.5", features = ["html_reports"] }

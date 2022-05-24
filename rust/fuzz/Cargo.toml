@@ -1,0 +1,25 @@
+[package]
+name = "foundationdb-fuzz"
+version = "0.0.0"
+authors = ["Automatically generated"]
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.foundationdb]
+path = ".."
+
+# Prevent this from interfering with workspaces
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "grv_master"
+path = "fuzz_targets/fuzz_grv_master.rs"
+test = false
+doc = false

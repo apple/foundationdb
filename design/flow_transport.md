@@ -1,13 +1,19 @@
 # Flow Transport
 ​
-This section describes the design and implementation of the flow transport wire protocol (as of release 6.3).
+This section describes the design and implementation of the flow transport wire protocol (as of release 7.1).
 ​
 ## ConnectPacket
-​
+
 The first bytes sent over a tcp connection in flow are the `ConnectPacket`.
 This is a variable length message (though fixed length at a given protocol
 version) designed with forward and backward compatibility in mind. The expected length of the `ConnectPacket` is encoded as the first 4 bytes (unsigned, little-endian). Upon receiving an incoming connection, a peer reads the `ProtocolVersion` (the next 8 bytes unsigned, little-endian. The most significant 4 bits encode flags and should be zeroed before interpreting numerically.) from the `ConnectPacket`.
 ​
+Note:  The above is incomplete.  The following was reverse-engineered from git main during the 7.2 development cycle.  Integers are implemented as a mixture of machine order (little endian on supported targets) and little endian:
+    1. packet_length (u32)
+    2. flags (u4)
+    3. version (u60)
+    4. ???
+
 ## Protocol compatibility
 ​
 Based on the incoming connection's `ProtocolVersion`, this connection is either
@@ -20,17 +26,21 @@ If this connection is compatible, then we know that our peer is using the same w
 ​
 ## Framing and checksumming protocol
 ​
-As of release 6.3, the structure of subsequent messages is as follows:
+This is implemented in FlowTransport.actor.cpp.  The read logic is simpler than the write logic.
+
+Note: UID is deserialized using flatbuffers, which happen to encode it as exactly 16 bytes, in native x86 packed struct memory layout (two unsigned 64-bit integers; little endian).
+
+As of release 7.1, the structure of subsequent messages is as follows.  All integers are little endian (often implemented as machine order, then compiled for x86 or little-endian arm variants):
 ​
 * For TLS connections:
-    1. packet length (4 bytes unsigned little-endian)
-    2. token (16 opaque bytes that identify the recipient of this message)
-    3. message contents (packet length - 16 bytes to be interpreted by the recipient)
+    1. packet_length (u32: 4 bytes unsigned; byte count includes token and message; excludes packet_length)
+    2. token (u128: 16 opaque bytes that identify the recipient of this message)
+    3. message (u8[packet length - 16]: to be interpreted by the recipient)
 * For non-TLS connections, there's additionally a crc32 checksum for message integrity:
-    1. packet length (4 bytes unsigned little-endian)
-    2. 4 byte crc32 checksum of token + message
-    3. token
-    4. message
+    1. packet_length (u32: 4 bytes unsigned; exclusive of packet_length and xxhash3_64bit bytes)
+    2. xxhash3_64bit (u64: checksum of token + message)
+    3. token (u128)
+    4. message (u8[packet_length - 16])
 ​
 ## Well-known endpoints
 ​
@@ -80,7 +90,7 @@ One of the main features motivating "Stable Endpoints" is the ability to downloa
 ### Changes to flow transport for Stable Endpoints
 ​
 1. Well known endpoints must never change (this just makes it official)
-2. The (initial) framing protocol must remain fixed. If we want to change the checksum, we can add a stable, well known endpoint that advertises what checksums are supported and use this to change the checksum after the connection has already been established.
+2. The (initial) framing protocol must remain fixed. If we want to change the checksum, we can add a stable, well known endpoint that advertises what checksums are supported and use this to change the checksum after the connection has already been established.  (Though we changed the checksum at least once since this was written, and did not do this.)
 3. Each endpoint can have a different compatibility policy: e.g. an endpoint can be marked as requiring at least `ProtocolVersion::withStableInterfaces()` like this:
 ​
 ```
