@@ -1,10 +1,10 @@
 // Implementation of the flow network protocol.  See flow_transport.md for more information.
-use tokio::net::{TcpListener, TcpStream};
-use tokio::io::{AsyncReadExt, AsyncWriteExt, BufWriter};
-use std::sync::Arc;
-use tokio::sync::Semaphore;
 use bytes::{Buf, BytesMut};
 use std::io::Cursor;
+use std::sync::Arc;
+use tokio::io::{AsyncReadExt, AsyncWriteExt, BufWriter};
+use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::Semaphore;
 
 // TODO
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
@@ -21,8 +21,6 @@ struct Listener {
 }
 
 const MAX_CONNECTIONS: usize = 250;
-
-
 
 pub async fn hello() -> Result<()> {
     let listener = TcpListener::bind(&format!("127.0.0.1:{}", 6789)).await?;
@@ -50,7 +48,6 @@ pub async fn hello() -> Result<()> {
     println!("werewwer");
     Ok(())
 }
-
 
 #[test]
 fn test_uid() -> Result<()> {

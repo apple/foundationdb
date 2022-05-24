@@ -1,7 +1,7 @@
-use std::io::Cursor;
-use super::Result;
 use super::uid::UID;
+use super::Result;
 use bytes::{Buf, BytesMut};
+use std::io::Cursor;
 use xxhash_rust::xxh3::xxh3_64;
 
 pub struct Frame {
@@ -24,24 +24,23 @@ pub struct Frame {
 // uint16_t flags = 0;å
 // uint8_t canonicalRemoteIp6[16] = { 0 };
 
-
 #[derive(Debug)]
 pub struct ConnectPacket {
     len: u32,
-    flags: u8, // Really just 4 bits
+    flags: u8,    // Really just 4 bits
     version: u64, // protocol version bytes.  Human readable in hex.
 }
 
 pub fn get_connect_packet(bytes: &mut BytesMut) -> Result<Option<ConnectPacket>> {
     let cur = Cursor::new(&bytes[..]);
-    let start : usize = cur.position().try_into()?;
+    let start: usize = cur.position().try_into()?;
     let src = &cur.get_ref()[start..];
 
-    let len_sz : usize = 4;
+    let len_sz: usize = 4;
     let version_sz = 8; // note that the 4 msb of the version are flags.
 
     if src.len() < len_sz + version_sz {
-        return Ok(None)
+        return Ok(None);
     }
 
     let len = u32::from_le_bytes(src[0..len_sz].try_into()?);
@@ -51,7 +50,7 @@ pub fn get_connect_packet(bytes: &mut BytesMut) -> Result<Option<ConnectPacket>>
     let version = u64::from_le_bytes(src[0..version_sz].try_into()?);
     let src = &src[version_sz..];
 
-    let flags : u8 = (version >> (60)).try_into()?;
+    let flags: u8 = (version >> (60)).try_into()?;
     let version = version & !(0b1111 << 60);
     let cp = ConnectPacket {
         len,
@@ -66,17 +65,16 @@ pub fn get_connect_packet(bytes: &mut BytesMut) -> Result<Option<ConnectPacket>>
     Ok(Some(cp))
 }
 
-
-pub fn get_frame (bytes: &mut BytesMut) -> Result<Option<Frame>> {
+pub fn get_frame(bytes: &mut BytesMut) -> Result<Option<Frame>> {
     let cur = Cursor::new(&bytes[..]);
-    let start : usize = cur.position().try_into()?;
+    let start: usize = cur.position().try_into()?;
     let src = &cur.get_ref()[start..];
     let len_sz = 4;
     let checksum_sz = 8;
     let uid_sz = 16;
 
     if src.len() < (len_sz + checksum_sz + uid_sz) {
-        return Ok(None)
+        return Ok(None);
     }
 
     let len = u32::from_le_bytes(src[0..len_sz].try_into()?) as usize;
@@ -88,10 +86,10 @@ pub fn get_frame (bytes: &mut BytesMut) -> Result<Option<Frame>> {
 
     let xxhash = xxh3_64(&src[..len]);
 
-    let uid = u128::from_le_bytes(src[0..uid_sz].try_into()?);
+    let uid = UID::new(src[0..uid_sz].try_into()?)?;
     let src = &src[uid_sz..];
 
-    // println!("Got {} {:x} ?= {:x} {:x} bytes_left={}", len, checksum, xxhash, uid, src.len());
+    // println!("Got {} {:x} ?= {:x} {:?} ({:?}) bytes_left={}", len, checksum, xxhash, uid, uid.get_well_known_endpoint(), src.len());
     if src.len() < len {
         return Ok(None);
     }
@@ -104,8 +102,8 @@ pub fn get_frame (bytes: &mut BytesMut) -> Result<Option<Frame>> {
     } else {
         bytes.advance(frame_length);
 
-        Ok(Some(Frame{
-            token: UID{ uid },
+        Ok(Some(Frame {
+            token: uid,
             payload,
         }))
     }

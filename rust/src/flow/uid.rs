@@ -1,45 +1,62 @@
 use super::Result;
 
+use num_derive::FromPrimitive;
+use num_traits::FromPrimitive;
+
 #[derive(PartialEq, PartialOrd)]
 pub struct UID {
-    pub uid: u128,
+    pub uid: [u64; 2],
 }
 // This needs to be kept in sync with FlowTransport.h, but these almost never change.
 // Enum members are spelled like this in C++: WLTOKEN_ENDPOINT_NOT_FOUND
-enum WLTOKEN {
-	EndpointNotFound = 0, 
-	PingPacket,
-	AuthTenant,
-	UnauthorizedEndpoint,
-	FirstAvailable,
+#[derive(FromPrimitive, Debug)]
+pub enum WLTOKEN {
+    EndpointNotFound = 0,
+    PingPacket = 1,
+    AuthTenant = 2,
+    UnauthorizedEndpoint = 3,
+    NetworkTest = 4, // XXX the C++ code isn't particularly typesafe...
 }
 
 impl std::fmt::Debug for UID {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "[UID: {:0>16x}]", self.uid)
+        write!(f, "[UID: {:0>8x}, {:0>8x}]", self.uid[0], self.uid[1])
     }
 }
 
-
 impl UID {
-    pub fn new(uid : [u8; 16]) -> Result<Self> {
+    pub fn new(uid: [u8; 16]) -> Result<Self> {
         Ok(UID {
-            uid: u128::from_le_bytes(uid),
+            uid: [
+                u64::from_le_bytes(uid[0..8].try_into()?),
+                u64::from_le_bytes(uid[8..].try_into()?),
+            ],
         })
     }
-    pub fn to_u128 (&self) -> u128 {
-        self.uid
+    pub fn well_known_token(id: u64) -> UID {
+        UID {
+            uid: [u64::MAX, id],
+        }
     }
-    pub fn is_valid(&self) -> bool {
-        self.uid != 0
+    pub fn get_adjusted_token(&self, index: u32) -> UID {
+        let mut new_index = self.uid[1];
+        new_index += index as u64;
+        let mut first: u64 = self.uid[0];
+        let mut second: u64 = self.uid[1];
+        first = first + ((index as u64) << 32);
+        second = (second & 0xffff_ffff_0000_0000) | new_index;
+        UID {
+            uid: [first, second],
+        }
     }
 
-    pub fn from_string(s : &str) -> Result<Self> {
-        Ok(UID {
-            uid: u128::from_str_radix(s, 16)?,
-        })
+    pub fn is_valid(&self) -> bool {
+        self.uid[0] != 0 || self.uid[1] != 0
     }
-    pub fn to_string(&self) -> String {
-        format!("{:0>32x}", self.uid)
+
+    pub fn get_well_known_endpoint(&self) -> Option<WLTOKEN> {
+        // TODO: Might need to strip out more bits.  get_adjusted_token stores the index
+        // in the upper 32 bits of second (uid[1]), so maybe this is OK?
+        WLTOKEN::from_u32(self.uid[1] as u32)
     }
 }

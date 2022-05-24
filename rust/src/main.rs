@@ -1,5 +1,5 @@
-mod flow;
 mod fdbserver;
+mod flow;
 
 #[tokio::main]
 async fn main() -> flow::Result<()> {

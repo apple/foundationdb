@@ -13,7 +13,7 @@ pub struct Connection {
 }
 
 // TODO:  Figure out what this is set to on the C++ side.
-const MAX_FDB_FRAME_LENGTH : usize = 1024 * 1024;
+const MAX_FDB_FRAME_LENGTH: usize = 1024 * 1024;
 
 impl Connection {
     pub fn new(stream: TcpStream) -> Connection {
