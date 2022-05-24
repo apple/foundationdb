@@ -43,8 +43,9 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 	Arena arena;
 	uint64_t minDomainId;
 	uint64_t maxDomainId;
-	std::unordered_map<uint64_t, StringRef> cipherIdMap;
-	std::vector<uint64_t> cipherIds;
+	using CacheKey = std::pair<int64_t, uint64_t>;
+	std::unordered_map<CacheKey, StringRef, boost::hash<CacheKey>> cipherIdMap;
+	std::vector<CacheKey> cipherIds;
 	int numDomains;
 	std::vector<uint64_t> domainIds;
 	static std::atomic<int> seed;
@@ -207,8 +208,9 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 		self->cipherIdMap.clear();
 		self->cipherIds.clear();
 		for (auto& item : rep.baseCipherDetails) {
-			self->cipherIdMap.emplace(item.baseCipherId, StringRef(self->arena, item.baseCipherKey));
-			self->cipherIds.emplace_back(item.baseCipherId);
+			CacheKey cacheKey = std::make_pair(item.encryptDomainId, item.baseCipherId);
+			self->cipherIdMap.emplace(cacheKey, StringRef(self->arena, item.baseCipherKey));
+			self->cipherIds.emplace_back(cacheKey);
 		}
 
 		state int numIterations = deterministicRandom()->randomInt(512, 786);
@@ -221,7 +223,7 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 				req.debugId = deterministicRandom()->randomUniqueID();
 			}
 			for (int i = idx; i < nIds && i < self->cipherIds.size(); i++) {
-				req.baseCipherIds.emplace_back(std::make_pair(self->cipherIds[i], 1));
+				req.baseCipherIds.emplace_back(std::make_pair(self->cipherIds[i].second, self->cipherIds[i].first));
 			}
 			if (req.baseCipherIds.empty()) {
 				// No keys to query; continue
@@ -238,9 +240,10 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 			ASSERT_EQ(rep.numHits, expectedHits);
 			// Valdiate the 'cipherKey' content against the one read while querying by domainIds
 			for (auto& item : rep.baseCipherDetails) {
-				const auto itr = self->cipherIdMap.find(item.baseCipherId);
+				CacheKey cacheKey = std::make_pair(item.encryptDomainId, item.baseCipherId);
+				const auto itr = self->cipherIdMap.find(cacheKey);
 				ASSERT(itr != self->cipherIdMap.end());
-				Standalone<StringRef> toCompare = self->cipherIdMap[item.baseCipherId];
+				Standalone<StringRef> toCompare = self->cipherIdMap[cacheKey];
 				if (toCompare.compare(item.baseCipherKey) != 0) {
 					TraceEvent("Mismatch")
 					    .detail("Id", item.baseCipherId)
@@ -264,8 +267,8 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 
 		// Prepare a lookup with valid and invalid keyIds - SimEncryptKmsProxy should throw encrypt_key_not_found()
 		std::vector<std::pair<uint64_t, int64_t>> baseCipherIds;
-		for (auto id : self->cipherIds) {
-			baseCipherIds.emplace_back(std::make_pair(id, 1));
+		for (auto item : self->cipherIds) {
+			baseCipherIds.emplace_back(std::make_pair(item.second, item.first));
 		}
 		baseCipherIds.emplace_back(std::make_pair(SERVER_KNOBS->SIM_KMS_MAX_KEYS + 10, 1));
 		EKPGetBaseCipherKeysByIdsRequest req(deterministicRandom()->randomUniqueID(), baseCipherIds);

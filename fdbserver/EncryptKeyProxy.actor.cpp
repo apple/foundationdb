@@ -80,7 +80,12 @@ struct EncryptBaseCipherKey {
 };
 
 using EncryptBaseDomainIdCache = std::unordered_map<EncryptCipherDomainId, EncryptBaseCipherKey>;
-using EncryptBaseCipherKeyIdCache = std::unordered_map<EncryptCipherBaseKeyId, EncryptBaseCipherKey>;
+
+using EncryptBaseCipherDomainIdKeyIdCacheKey = std::pair<EncryptCipherDomainId, EncryptCipherBaseKeyId>;
+using EncryptBaseCipherDomainIdKeyIdCacheKeyHash = boost::hash<EncryptBaseCipherDomainIdKeyIdCacheKey>;
+using EncryptBaseCipherDomainIdKeyIdCache = std::unordered_map<EncryptBaseCipherDomainIdKeyIdCacheKey,
+                                                               EncryptBaseCipherKey,
+                                                               EncryptBaseCipherDomainIdKeyIdCacheKeyHash>;
 
 struct EncryptKeyProxyData : NonCopyable, ReferenceCounted<EncryptKeyProxyData> {
 public:
@@ -89,7 +94,7 @@ public:
 	Future<Void> encryptionKeyRefresher;
 
 	EncryptBaseDomainIdCache baseCipherDomainIdCache;
-	EncryptBaseCipherKeyIdCache baseCipherKeyIdCache;
+	EncryptBaseCipherDomainIdKeyIdCache baseCipherDomainIdKeyIdCache;
 
 	std::unique_ptr<KmsConnector> kmsConnector;
 
@@ -113,6 +118,12 @@ public:
 	    numResponseWithErrors("EKPNumResponseWithErrors", ekpCacheMetrics),
 	    numEncryptionKeyRefreshErrors("EKPNumEncryptionKeyRefreshErrors", ekpCacheMetrics) {}
 
+	EncryptBaseCipherDomainIdKeyIdCacheKey getBaseCipherDomainIdKeyIdCacheKey(
+	    const EncryptCipherDomainId domainId,
+	    const EncryptCipherBaseKeyId baseCipherId) {
+		return std::make_pair(domainId, baseCipherId);
+	}
+
 	void insertIntoBaseDomainIdCache(const EncryptCipherDomainId domainId,
 	                                 const EncryptCipherBaseKeyId baseCipherId,
 	                                 const StringRef baseCipherKey) {
@@ -131,7 +142,8 @@ public:
 		// Given an cipherKey is immutable, it is OK to NOT expire cached information.
 		// TODO: Update cache to support LRU eviction policy to limit the total cache size.
 
-		baseCipherKeyIdCache[baseCipherId] = EncryptBaseCipherKey(domainId, baseCipherId, baseCipherKey, true);
+		EncryptBaseCipherDomainIdKeyIdCacheKey cacheKey = getBaseCipherDomainIdKeyIdCacheKey(domainId, baseCipherId);
+		baseCipherDomainIdKeyIdCache[cacheKey] = EncryptBaseCipherKey(domainId, baseCipherId, baseCipherKey, true);
 	}
 
 	template <class Reply>
@@ -193,8 +205,10 @@ ACTOR Future<Void> getCipherKeysByBaseCipherKeyIds(Reference<EncryptKeyProxyData
 	}
 
 	for (const auto& item : dedupedCipherIds) {
-		const auto itr = ekpProxyData->baseCipherKeyIdCache.find(item.first);
-		if (itr != ekpProxyData->baseCipherKeyIdCache.end()) {
+		const EncryptBaseCipherDomainIdKeyIdCacheKey cacheKey =
+		    ekpProxyData->getBaseCipherDomainIdKeyIdCacheKey(item.second, item.first);
+		const auto itr = ekpProxyData->baseCipherDomainIdKeyIdCache.find(cacheKey);
+		if (itr != ekpProxyData->baseCipherDomainIdKeyIdCache.end()) {
 			ASSERT(itr->second.isValid());
 			cachedCipherDetails.emplace_back(
 			    itr->second.domainId, itr->second.baseCipherId, itr->second.baseCipherKey, keyIdsReply.arena);
