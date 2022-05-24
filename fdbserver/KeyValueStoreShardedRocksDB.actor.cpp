@@ -469,7 +469,7 @@ struct PhysicalShard {
 
 	rocksdb::DB* db;
 	std::string id;
-	rocksdb::ColumnFamilyHandle* cf;
+	rocksdb::ColumnFamilyHandle* cf = nullptr;
 	std::unordered_map<std::string, std::unique_ptr<DataShard>> dataShards;
 	std::shared_ptr<ReadIteratorPool> readIterPool;
 	bool deletePending = false;
