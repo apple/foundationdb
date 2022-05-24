@@ -2225,6 +2225,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 		ASSERT(req.tenantInfo.tenantId != TenantInfo::INVALID_TENANT);
 		auto tenantEntry = bwData->tenantInfoById.find(req.tenantInfo.tenantId);
 		if (tenantEntry != bwData->tenantInfoById.end()) {
+			ASSERT(tenantEntry->second.id == req.tenantInfo.tenantId);
 			tenantPrefix = tenantEntry->second.prefix;
 		} else {
 			// FIXME - better way. Wait on retry here, or just have better model for tenant metadata?
@@ -2452,15 +2453,9 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 			BlobGranuleChunkRef chunk;
 			// TODO change with early reply
 			chunk.includedVersion = req.readVersion;
-			// compiler doesn't like this
-			// chunk.tenantPrefix = tenantPrefix;
+			chunk.keyRange = KeyRangeRef(StringRef(rep.arena, chunkRange.begin), StringRef(rep.arena, chunkRange.end));
 			if (tenantPrefix.present()) {
-				chunk.keyRange = KeyRangeRef(StringRef(rep.arena, chunkRange.begin.removePrefix(tenantPrefix.get())),
-				                             StringRef(rep.arena, chunkRange.end).removePrefix(tenantPrefix.get()));
 				chunk.tenantPrefix = Optional<StringRef>(tenantPrefix.get());
-			} else {
-				chunk.keyRange =
-				    KeyRangeRef(StringRef(rep.arena, chunkRange.begin), StringRef(rep.arena, chunkRange.end));
 			}
 
 			int64_t deltaBytes = 0;
@@ -3188,6 +3183,7 @@ ACTOR Future<Void> monitorTenants(Reference<BlobWorkerData> bwData) {
 				state Future<Void> watchChange = tr->watch(tenantLastIdKey);
 				wait(tr->commit());
 				wait(watchChange);
+				tr->reset();
 			} catch (Error& e) {
 				wait(tr->onError(e));
 			}
@@ -3264,6 +3260,9 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 
 	self->addActor.send(waitFailureServer(bwInterf.waitFailure.getFuture()));
 	self->addActor.send(runGRVChecks(self));
+	if (SERVER_KNOBS->BG_RANGE_SOURCE == "tenant") {
+		self->addActor.send(monitorTenants(self));
+	}
 	state Future<Void> selfRemoved = monitorRemoval(self);
 
 	TraceEvent("BlobWorkerInit", self->id).log();

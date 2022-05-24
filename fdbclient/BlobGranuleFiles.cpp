@@ -201,9 +201,16 @@ RangeResult materializeBlobGranule(const BlobGranuleChunkRef& chunk,
 	Arena arena;
 	std::map<KeyRef, ValueRef> dataMap;
 	Version lastFileEndVersion = invalidVersion;
+	KeyRange requestRange;
+	if (chunk.tenantPrefix.present()) {
+		requestRange = KeyRangeRef(keyRange.begin.withPrefix(chunk.tenantPrefix.get()),
+		                           keyRange.end.withPrefix(chunk.tenantPrefix.get()));
+	} else {
+		requestRange = keyRange;
+	}
 
 	if (snapshotData.present()) {
-		Arena snapshotArena = loadSnapshotFile(snapshotData.get(), keyRange, dataMap);
+		Arena snapshotArena = loadSnapshotFile(snapshotData.get(), requestRange, dataMap);
 		arena.dependsOn(snapshotArena);
 	}
 
@@ -211,14 +218,14 @@ RangeResult materializeBlobGranule(const BlobGranuleChunkRef& chunk,
 		fmt::print("Applying {} delta files\n", chunk.deltaFiles.size());
 	}
 	for (int deltaIdx = 0; deltaIdx < chunk.deltaFiles.size(); deltaIdx++) {
-		Arena deltaArena =
-		    loadDeltaFile(deltaFileData[deltaIdx], keyRange, beginVersion, readVersion, lastFileEndVersion, dataMap);
+		Arena deltaArena = loadDeltaFile(
+		    deltaFileData[deltaIdx], requestRange, beginVersion, readVersion, lastFileEndVersion, dataMap);
 		arena.dependsOn(deltaArena);
 	}
 	if (BG_READ_DEBUG) {
 		fmt::print("Applying {} memory deltas\n", chunk.newDeltas.size());
 	}
-	applyDeltas(chunk.newDeltas, keyRange, beginVersion, readVersion, lastFileEndVersion, dataMap);
+	applyDeltas(chunk.newDeltas, requestRange, beginVersion, readVersion, lastFileEndVersion, dataMap);
 
 	RangeResult ret;
 	for (auto& it : dataMap) {
