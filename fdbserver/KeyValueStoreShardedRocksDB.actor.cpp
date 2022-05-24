@@ -492,10 +492,7 @@ public:
 		return status;
 	}
 
-	DataShard* getDataShard(KeyRef key) {
-		auto it = dataShardMap.rangeContaining(key);
-		return it.value();
-	}
+	DataShard* getDataShard(KeyRef key) { return dataShardMap.rangeContaining(key).value(); }
 
 	PhysicalShard* addRange(KeyRange range, std::string id) {
 		// Newly added range should not overlap with any existing range.
@@ -1779,7 +1776,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	Future<Optional<Value>> readValue(KeyRef key, IKeyValueStore::ReadType type, Optional<UID> debugID) override {
 		auto shard = shardManager.getDataShard(key);
 		if (shard == nullptr) {
-			TraceEvent(SevWarn, "ShardedRocksDB").detail("Detail", "Read non-exist key range");
+			// TODO: read non-exist system key range should not cause an error.
+			TraceEvent(SevError, "ShardedRocksDB").detail("Detail", "Read non-exist key range").detail("ReadKey", key);
 			return Optional<Value>();
 		}
 
