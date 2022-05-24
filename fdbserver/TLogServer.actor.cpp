@@ -3648,17 +3648,22 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 			if (!self.durableClusterId.isValid()) {
 				throw;
 			}
-			// When a tlog joins a new cluster and has data for an old cluster,
-			// it should automatically exclude itself to avoid being used in
-			// the new cluster.
 			auto recoveryState = self.dbInfo->get().recoveryState;
 			if (recoveryState == RecoveryState::FULLY_RECOVERED && self.ccClusterId.isValid() &&
-			    self.durableClusterId.isValid() && self.ccClusterId != self.durableClusterId) {
-				state NetworkAddress address = g_network->getLocalAddress();
-				wait(excludeServers(self.cx, { AddressExclusion{ address.ip, address.port } }));
-				TraceEvent(SevWarnAlways, "TLogBelongsToExistingCluster")
-				    .detail("ClusterId", self.durableClusterId)
-				    .detail("NewClusterId", self.ccClusterId);
+			    self.durableClusterId.isValid()) {
+				if (self.ccClusterId == self.durableClusterId) {
+					// Cluster ids match, so we do want worker_removed after all.
+					throw worker_removed();
+				} else {
+					// When a tlog joins a new cluster and has data for an old cluster,
+					// it should automatically exclude itself to avoid being used in
+					// the new cluster.
+					state NetworkAddress address = g_network->getLocalAddress();
+					wait(excludeServers(self.cx, { AddressExclusion{ address.ip, address.port } }));
+					TraceEvent(SevWarnAlways, "TLogBelongsToExistingCluster")
+					    .detail("ClusterId", self.durableClusterId)
+					    .detail("NewClusterId", self.ccClusterId);
+				}
 			}
 			// If the tlog has a valid durable cluster ID, we don't want it to
 			// wipe its data! Throw this error to signal to `tlogTerminated` to
