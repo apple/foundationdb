@@ -41,6 +41,7 @@
 #include "fdbclient/rapidjson/writer.h"
 #include <iostream>
 #include <sstream>
+#include <vector>
 
 namespace mako {
 
@@ -94,12 +95,12 @@ class alignas(64) ThreadStatistics {
 	std::array<uint64_t, MAX_OP> errors;
 	std::array<uint64_t, MAX_OP> latency_samples;
 	std::array<uint64_t, MAX_OP> latency_us_total;
-	std::array<DDSketchMako, MAX_OP> sketches;
+	std::vector<DDSketchMako> sketches;
 
 public:
 	ThreadStatistics() noexcept {
 		memset(this, 0, sizeof(ThreadStatistics));
-		sketches = std::array<DDSketchMako, MAX_OP>();
+		sketches.resize(MAX_OP);
 	}
 
 	ThreadStatistics(const ThreadStatistics& other) = default;
@@ -163,7 +164,7 @@ public:
 		f << ss.GetString();
 	}
 
-	void updateLatencies(const std::array<DDSketchMako, MAX_OP>& other_sketches) { sketches = other_sketches; }
+	void updateLatencies(const std::vector<DDSketchMako> other_sketches) { sketches = other_sketches; }
 
 	friend std::ofstream& operator<<(std::ofstream& os, ThreadStatistics& stats);
 	friend std::ifstream& operator>>(std::ifstream& is, ThreadStatistics& stats);

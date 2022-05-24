@@ -1788,7 +1788,7 @@ void printReport(Arguments& args, ThreadStatistics const* stats, double const du
 	fmt::print("\n\n");
 
 	// Get the sketches stored in file and merge them together
-	std::array<DDSketchMako, MAX_OP> data_points;
+	std::vector<DDSketchMako> data_points(MAX_OP);
 	for (auto op = 0; op < MAX_OP; op++) {
 		auto load_sample = [pid_main, op, &data_points](int process_id, int thread_id) {
 			const auto dirname = fmt::format("{}{}", TEMP_DATA_STORE, pid_main);
