@@ -10,6 +10,7 @@ use std::io::Cursor;
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
 pub type Result<T> = std::result::Result<T, Error>;
 
+mod connection;
 mod frame;
 mod uid;
 
@@ -25,7 +26,7 @@ const MAX_CONNECTIONS: usize = 250;
 
 pub async fn hello() -> Result<()> {
     let listener = TcpListener::bind(&format!("127.0.0.1:{}", 6789)).await?;
-    let mut server = Listener {
+    let server = Listener {
         listener,
         limit_connections: Arc::new(Semaphore::new(MAX_CONNECTIONS)),
     };
@@ -35,25 +36,14 @@ pub async fn hello() -> Result<()> {
     loop {
         server.limit_connections.acquire().await.unwrap().forget();
         let socket = server.listener.accept().await?;
-        let mut stream = BufWriter::new(socket.0);
-        let mut buf = BytesMut::with_capacity(4 * 1024);
         println!("got socket from {}", socket.1);
+        let mut conn = connection::Connection::new(socket.0);
         loop {
-            let count = stream.read_buf(&mut buf).await?;
-            // println!("count: {} buf: {:?}", count, &buf[0..count]);
-            if count == 0 {
-                break
+            let frame = conn.read_frame().await?;
+            if frame.is_none() {
+                println!("clean shutdown!");
+                break; // XXX loses stream sync after first OS read!
             }
-            let mut cur : Cursor<&[u8]> = Cursor::new(&buf);
-
-            frame::get_connect_packet(&mut cur)?;
-            loop {
-                let frame = frame::get_frame(&mut cur)?;
-                if frame.is_none() {
-                    break; // XXX loses stream sync after first OS read!
-                }
-            }
-            
         }
     }
 

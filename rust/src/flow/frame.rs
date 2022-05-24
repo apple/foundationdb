@@ -1,11 +1,12 @@
 use std::io::Cursor;
-use super::{Error,Result};
+use super::Result;
 use super::uid::UID;
+use bytes::{Buf, BytesMut};
 use xxhash_rust::xxh3::xxh3_64;
 
-pub struct Frame<'a> {
+pub struct Frame {
     token: UID,
-    payload: &'a[u8],
+    payload: std::vec::Vec<u8>, // TODO - elide copy.  See read_frame: &'a[u8],
 }
 // // The value does not include the size of `connectPacketLength` itself,
 // // but only the other fields of this structure.
@@ -20,7 +21,7 @@ pub struct Frame<'a> {
 // uint32_t canonicalRemoteIp4 = 0;
 
 // enum ConnectPacketFlags { FLAG_IPV6 = 1 };
-// uint16_t flags = 0;
+// uint16_t flags = 0;å
 // uint8_t canonicalRemoteIp6[16] = { 0 };
 
 
@@ -31,7 +32,8 @@ pub struct ConnectPacket {
     version: u64, // protocol version bytes.  Human readable in hex.
 }
 
-pub fn get_connect_packet(cur: &mut Cursor<&[u8]>) -> Result<Option<ConnectPacket>> {
+pub fn get_connect_packet(bytes: &mut BytesMut) -> Result<Option<ConnectPacket>> {
+    let cur = Cursor::new(&bytes[..]);
     let start : usize = cur.position().try_into()?;
     let src = &cur.get_ref()[start..];
 
@@ -43,7 +45,7 @@ pub fn get_connect_packet(cur: &mut Cursor<&[u8]>) -> Result<Option<ConnectPacke
     }
 
     let len = u32::from_le_bytes(src[0..len_sz].try_into()?);
-    let frame_len : u64 = (len_sz + len as usize).try_into()?;
+    let frame_length = len_sz + len as usize;
     let src = &src[len_sz..(len_sz + (len as usize))];
 
     let version = u64::from_le_bytes(src[0..version_sz].try_into()?);
@@ -60,12 +62,13 @@ pub fn get_connect_packet(cur: &mut Cursor<&[u8]>) -> Result<Option<ConnectPacke
     if src.len() > 0 {
         println!("ConnectPacket: {:x?} (trailing garbage(?): {:?}", cp, src);
     }
-    cur.set_position(cur.position() + frame_len);
+    bytes.advance(frame_length);
     Ok(Some(cp))
 }
 
 
-pub fn get_frame<'a> (cur: &mut Cursor<&'a [u8]>) -> Result<Option<Frame<'a>>> {
+pub fn get_frame (bytes: &mut BytesMut) -> Result<Option<Frame>> {
+    let cur = Cursor::new(&bytes[..]);
     let start : usize = cur.position().try_into()?;
     let src = &cur.get_ref()[start..];
     let len_sz = 4;
@@ -78,7 +81,7 @@ pub fn get_frame<'a> (cur: &mut Cursor<&'a [u8]>) -> Result<Option<Frame<'a>>> {
 
     let len = u32::from_le_bytes(src[0..len_sz].try_into()?) as usize;
     let src = &src[len_sz..];
-    let frame_length : u64 = (len_sz + checksum_sz + len).try_into()?;
+    let frame_length = len_sz + checksum_sz + len;
 
     let checksum = u64::from_le_bytes(src[0..checksum_sz].try_into()?);
     let src = &src[checksum_sz..];
@@ -93,13 +96,13 @@ pub fn get_frame<'a> (cur: &mut Cursor<&'a [u8]>) -> Result<Option<Frame<'a>>> {
         return Ok(None);
     }
 
-    let payload = &src[0..len];
+    let payload = src[0..len].to_vec();
     // println!("Payload: {:?}", &src[0..len]);
 
     if checksum != xxhash {
         Err("checksum mismatch".into())
     } else {
-        cur.set_position(cur.position() + frame_length);
+        bytes.advance(frame_length);
 
         Ok(Some(Frame{
             token: UID{ uid },
