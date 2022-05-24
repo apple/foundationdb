@@ -458,12 +458,6 @@ void dumpThreadSamples(Arguments const& args,
 	for (auto op = 0; op < MAX_OP; op++) {
 		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
 			const auto filename = getStatsFilename(dirname, worker_id, thread_id, op);
-			auto fp = fopen(filename.c_str(), overwrite ? "w" : "a");
-			if (!fp) {
-				logr.error("fopen({}): {}", filename, strerror(errno));
-				continue;
-			}
-			auto fclose_guard = ExitGuard([fp]() { fclose(fp); });
 			stats.writeToFile(filename, op);
 		}
 	}
