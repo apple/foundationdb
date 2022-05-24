@@ -20,8 +20,9 @@
 
 #include <string>
 #include <map>
-#include "fdbclient/TenantManagement.actor.h"
 #include "fdbclient/SystemData.h"
+#include "fdbclient/TenantManagement.actor.h"
+#include "fdbclient/Tuple.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 namespace ManagementAPI {
@@ -42,6 +43,15 @@ bool checkTenantMode(Optional<Value> tenantModeValue, bool isDataCluster, Tenant
 	}
 
 	return true;
+}
+
+Key getTenantGroupIndexKey(TenantGroupNameRef tenantGroup, Optional<TenantNameRef> tenant) {
+	Tuple tuple;
+	tuple.append(tenantGroup);
+	if (tenant.present()) {
+		tuple.append(tenant.get());
+	}
+	return tenantGroupTenantIndexKeys.begin.withSuffix(tuple.pack());
 }
 
 } // namespace ManagementAPI

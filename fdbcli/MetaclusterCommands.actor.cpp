@@ -270,9 +270,16 @@ std::vector<const char*> metaclusterHintGenerator(std::vector<StringRef> const& 
 			"<NAME>", "<max_tenant_groups=<NUM_GROUPS>|connection_string=<CONNECTION_STRING>>"
 		};
 		return std::vector<const char*>(opts.begin() + std::min<int>(1, tokens.size() - 2), opts.end());
-	} else if (tokencmp(tokens[1], "remove") && tokens.size() < 3) {
-		static std::vector<const char*> opts = { "<NAME>" };
-		return std::vector<const char*>(opts.begin() + tokens.size() - 2, opts.end());
+	} else if (tokencmp(tokens[1], "remove") && tokens.size() < 4) {
+		static std::vector<const char*> opts = { "[FORCE]", "<NAME>" };
+		if (tokens.size() == 2) {
+			return opts;
+		} else if (tokens.size() == 3 && (inArgument || tokens[2].size() == "FORCE"_sr.size()) &&
+		           "FORCE"_sr.startsWith(tokens[2])) {
+			return std::vector<const char*>(opts.begin() + tokens.size() - 2, opts.end());
+		} else {
+			return std::vector<const char*>();
+		}
 	} else if (tokencmp(tokens[1], "list") && tokens.size() < 5) {
 		static std::vector<const char*> opts = { "[BEGIN]", "[END]", "[LIMIT]" };
 		return std::vector<const char*>(opts.begin() + tokens.size() - 2, opts.end());

@@ -1420,6 +1420,8 @@ const KeyRef tenantMapPrefix = tenantMapKeys.begin;
 const KeyRef tenantMapPrivatePrefix = "\xff\xff/tenantMap/"_sr;
 const KeyRef tenantLastIdKey = "\xff/tenantLastId/"_sr;
 const KeyRef tenantDataPrefixKey = "\xff/tenantDataPrefix"_sr;
+const KeyRangeRef tenantGroupTenantIndexKeys("\xff/tenant/tenantGroup/tenantMap/"_sr,
+                                             "\xff/tenant/tenantGroup/tenantMap0"_sr);
 
 // Metacluster management cluster keys
 const KeyRangeRef dataClusterMetadataKeys("\xff/metacluster/dataCluster/metadata/"_sr,
@@ -1428,6 +1430,9 @@ const KeyRef dataClusterMetadataPrefix = dataClusterMetadataKeys.begin;
 const KeyRangeRef dataClusterConnectionRecordKeys("\xff/metacluster/dataCluster/connectionString/"_sr,
                                                   "\xff/metacluster/dataCluster/connectionString0"_sr);
 const KeyRef dataClusterConnectionRecordPrefix = dataClusterConnectionRecordKeys.begin;
+
+const KeyRangeRef tenantGroupMetadataKeys("\xff/metacluster/tenantGroup/metadata/"_sr,
+                                          "\xff/metacluster/tenantGroup/metadata0"_sr);
 
 // Metacluster data cluster keys
 const KeyRef dataClusterRegistrationKey = "\xff/metacluster/dataCluster/clusterRegistration"_sr;

@@ -84,6 +84,8 @@ Future<TenantMapEntry> getTenant(Reference<DB> db, TenantName name) {
 
 bool checkTenantMode(Optional<Value> tenantModeValue, bool isDataCluster, TenantOperationType operationType);
 
+Key getTenantGroupIndexKey(TenantGroupNameRef tenantGroup, Optional<TenantNameRef> tenant);
+
 // Creates a tenant with the given name. If the tenant already exists, an empty optional will be returned.
 ACTOR template <class Transaction>
 Future<std::pair<TenantMapEntry, bool>> createTenantTransaction(
@@ -162,6 +164,10 @@ Future<std::pair<TenantMapEntry, bool>> createTenantTransaction(
 		if (!contents.empty()) {
 			throw tenant_prefix_allocator_conflict();
 		}
+
+		tenantEntry.tenantState = TenantState::READY;
+	} else {
+		tenantEntry.tenantState = TenantState::REGISTERING;
 	}
 
 	// We don't store some metadata in the tenant entries on data clusters
@@ -170,6 +176,9 @@ Future<std::pair<TenantMapEntry, bool>> createTenantTransaction(
 	}
 
 	tr->set(tenantMapKey, encodeTenantEntry(tenantEntry));
+	if (tenantEntry.tenantGroup.present()) {
+		tr->set(getTenantGroupIndexKey(tenantEntry.tenantGroup.get(), name), ""_sr);
+	}
 	return std::make_pair(tenantEntry, true);
 }
 
@@ -264,6 +273,9 @@ Future<Void> deleteTenantTransaction(Transaction tr,
 	}
 
 	tr->clear(tenantMapKey);
+	if (tenantEntry.get().tenantGroup.present()) {
+		tr->clear(getTenantGroupIndexKey(tenantEntry.get().tenantGroup.get(), name));
+	}
 
 	return Void();
 }

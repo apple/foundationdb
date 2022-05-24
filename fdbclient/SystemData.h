@@ -626,6 +626,7 @@ extern const KeyRef tenantMapPrefix;
 extern const KeyRef tenantMapPrivatePrefix;
 extern const KeyRef tenantLastIdKey;
 extern const KeyRef tenantDataPrefixKey;
+extern const KeyRangeRef tenantGroupTenantIndexKeys;
 
 Value encodeTenantEntry(TenantMapEntry const& tenantEntry);
 TenantMapEntry decodeTenantEntry(ValueRef const& value);
@@ -636,6 +637,7 @@ extern const KeyRef dataClusterMetadataPrefix;
 extern const KeyRangeRef dataClusterConnectionRecordKeys;
 extern const KeyRef dataClusterConnectionRecordPrefix;
 extern const KeyRef dataClusterRegistrationKey;
+extern const KeyRangeRef tenantGroupMetadataKeys;
 
 #pragma clang diagnostic pop
 

@@ -121,4 +121,26 @@ struct DataClusterRegistrationEntry {
 	}
 };
 
+struct TenantGroupEntry {
+	constexpr static FileIdentifier file_identifier = 10764222;
+
+	ClusterName assignedCluster;
+
+	TenantGroupEntry() = default;
+	TenantGroupEntry(ClusterName assignedCluster) : assignedCluster(assignedCluster) {}
+
+	Value encode() { return ObjectWriter::toValue(*this, IncludeVersion(ProtocolVersion::withMetacluster())); }
+	static TenantGroupEntry decode(ValueRef const& value) {
+		TenantGroupEntry entry;
+		ObjectReader reader(value.begin(), IncludeVersion());
+		reader.deserialize(entry);
+		return entry;
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, assignedCluster);
+	}
+};
+
 #endif

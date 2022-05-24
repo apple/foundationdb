@@ -80,11 +80,11 @@ struct TenantMapEntry {
 	}
 
 	Arena arena;
-	int64_t id;
+	int64_t id = -1;
 	Key prefix;
 	Optional<TenantGroupName> tenantGroup;
-	TenantState tenantState;
-	// TODO: fix this
+	TenantState tenantState = TenantState::READY;
+	// TODO: fix this type
 	Optional<Standalone<StringRef>> assignedCluster;
 
 	constexpr static int ROOT_PREFIX_SIZE = sizeof(id);
@@ -100,7 +100,7 @@ struct TenantMapEntry {
 		memcpy(data + subspace.size(), &swapped, 8);
 	}
 
-	TenantMapEntry() : id(-1) {}
+	TenantMapEntry() {}
 	TenantMapEntry(int64_t id, KeyRef subspace, TenantState tenantState) : id(id), tenantState(tenantState) {
 		setSubspace(subspace);
 	}
@@ -116,6 +116,7 @@ struct TenantMapEntry {
 		KeyRef subspace;
 		if (ar.isDeserializing) {
 			serializer(ar, id, subspace, tenantGroup, tenantState, assignedCluster);
+			ASSERT(tenantState >= TenantState::REGISTERING && tenantState <= TenantState::ERROR);
 			if (id >= 0) {
 				setSubspace(subspace);
 			}
@@ -124,6 +125,7 @@ struct TenantMapEntry {
 			if (!prefix.empty()) {
 				subspace = prefix.substr(0, prefix.size() - 8);
 			}
+			ASSERT(tenantState >= TenantState::REGISTERING && tenantState <= TenantState::ERROR);
 			serializer(ar, id, subspace, tenantGroup, tenantState, assignedCluster);
 		}
 	}
