@@ -1569,7 +1569,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	    new AsyncVar<Optional<std::pair<int64_t, BlobManagerInterface>>>());
 	state Reference<AsyncVar<Optional<EncryptKeyProxyInterface>>> ekpInterf(
 	    new AsyncVar<Optional<EncryptKeyProxyInterface>>());
-	state Future<Void> handleErrors = workerHandleErrors(errors.getFuture(), &sharedTLogCount); // Needs to be stopped last
+	state Future<Void> handleErrors =
+	    workerHandleErrors(errors.getFuture(), &sharedTLogCount); // Needs to be stopped last
 	state ActorCollection errorForwarders(false);
 	state Future<Void> loggingTrigger = Void();
 	state double loggingDelay = SERVER_KNOBS->WORKER_LOGGING_INTERVAL;
