@@ -4,9 +4,10 @@ use bytes::{Buf, BytesMut};
 use std::io::Cursor;
 use xxhash_rust::xxh3::xxh3_64;
 
+#[derive(Debug)]
 pub struct Frame {
-    token: UID,
-    payload: std::vec::Vec<u8>, // TODO - elide copy.  See read_frame: &'a[u8],
+    pub token: UID,
+    pub payload: std::vec::Vec<u8>, // TODO - elide copy.  See read_frame: &'a[u8],
 }
 // // The value does not include the size of `connectPacketLength` itself,
 // // but only the other fields of this structure.
@@ -84,17 +85,18 @@ pub fn get_frame(bytes: &mut BytesMut) -> Result<Option<Frame>> {
     let checksum = u64::from_le_bytes(src[0..checksum_sz].try_into()?);
     let src = &src[checksum_sz..];
 
+    if src.len() < len {
+        return Ok(None);
+    }
+
     let xxhash = xxh3_64(&src[..len]);
 
     let uid = UID::new(src[0..uid_sz].try_into()?)?;
     let src = &src[uid_sz..];
 
-    // println!("Got {} {:x} ?= {:x} {:?} ({:?}) bytes_left={}", len, checksum, xxhash, uid, uid.get_well_known_endpoint(), src.len());
-    if src.len() < len {
-        return Ok(None);
-    }
+    // println!("Got {} {:x} {:?} ({:?}) bytes_left={}", len, checksum, uid, uid.get_well_known_endpoint(), src.len());
 
-    let payload = src[0..len].to_vec();
+    let payload = src[0..(len - uid_sz)].to_vec();
     // println!("Payload: {:?}", &src[0..len]);
 
     if checksum != xxhash {

@@ -38,9 +38,21 @@ pub async fn hello() -> Result<()> {
         let mut conn = connection::Connection::new(socket.0);
         loop {
             let frame = conn.read_frame().await?;
-            if frame.is_none() {
-                println!("clean shutdown!");
-                break; // XXX loses stream sync after first OS read!
+            // println!("{:?}", frame);
+            match (frame) {
+                None => {
+                    println!("clean shutdown!");
+                    break; // XXX loses stream sync after first OS read!
+                }
+                Some(frame) => match (frame.token.get_well_known_endpoint()) {
+                    Some(uid::WLTOKEN::PingPacket) => {
+                        println!("Ping        payload: {:x?}", frame);
+                    }
+                    Some(uid::WLTOKEN::NetworkTest) => {
+                        println!("NetworkTest payload: {:x?}", frame);
+                    }
+                    _ => (),
+                },
             }
         }
     }
@@ -49,14 +61,14 @@ pub async fn hello() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn test_uid() -> Result<()> {
-    let s = "0123456789abcdeffedcba9876543210";
-    let uid = uid::UID::from_string(s)?;
-    let uid_s = uid.to_string();
-    assert_eq!(uid_s, s);
-    let uid2 = uid::UID::from_string(&uid_s)?;
-    assert_eq!(uid, uid2);
-    assert_eq!(uid.to_u128(), 0x0123456789abcdeffedcba9876543210);
-    Ok(())
-}
+// #[test]
+// fn test_uid() -> Result<()> {
+//     let s = "0123456789abcdeffedcba9876543210";
+//     let uid = uid::UID::from_string(s)?;
+//     let uid_s = uid.to_string();
+//     assert_eq!(uid_s, s);
+//     let uid2 = uid::UID::from_string(&uid_s)?;
+//     assert_eq!(uid, uid2);
+//     assert_eq!(uid.to_u128(), 0x0123456789abcdeffedcba9876543210);
+//     Ok(())
+// }

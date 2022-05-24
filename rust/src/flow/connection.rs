@@ -42,7 +42,12 @@ impl Connection {
                 if self.buffer.is_empty() {
                     return Ok(None);
                 } else {
-                    return Err("connection closed mid-frame".into());
+                    return Err(format!(
+                        "connection closed mid-frame {} bytes left: {:x?}",
+                        self.buffer[..].len(),
+                        &self.buffer[..]
+                    )
+                    .into());
                 }
             }
         }

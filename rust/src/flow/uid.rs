@@ -20,7 +20,7 @@ pub enum WLTOKEN {
 
 impl std::fmt::Debug for UID {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "[UID: {:0>8x}, {:0>8x}]", self.uid[0], self.uid[1])
+        write!(f, "[UID: {:0>16x}, {:0>16x}]", self.uid[0], self.uid[1])
     }
 }
 
@@ -39,14 +39,12 @@ impl UID {
         }
     }
     pub fn get_adjusted_token(&self, index: u32) -> UID {
-        let mut new_index = self.uid[1];
-        new_index += index as u64;
-        let mut first: u64 = self.uid[0];
-        let mut second: u64 = self.uid[1];
-        first = first + ((index as u64) << 32);
-        second = (second & 0xffff_ffff_0000_0000) | new_index;
+        let new_index = self.uid[1] + (index as u64);
         UID {
-            uid: [first, second],
+            uid: [
+                self.uid[0] + ((index as u64) << 32),
+                (self.uid[1] & 0xffff_ffff_0000_0000) | new_index,
+            ],
         }
     }
 
