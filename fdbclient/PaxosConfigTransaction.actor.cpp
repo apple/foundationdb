@@ -117,7 +117,7 @@ public:
 		}
 		return result.getFuture();
 	}
-	bool committed() const { return result.isSet(); }
+	bool committed() const { return result.isSet() && !result.isError(); }
 };
 
 class GetGenerationQuorum {
