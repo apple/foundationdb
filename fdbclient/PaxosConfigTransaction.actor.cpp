@@ -155,7 +155,9 @@ class GetGenerationQuorum {
 				} else if (self->maxAgreement + (self->ctis.size() - self->totalRepliesReceived) <
 				           (self->ctis.size() / 2 + 1)) {
 					if (!self->result.isError()) {
-						self->result.sendError(failed_to_reach_quorum());
+						// Calling sendError could delete self
+						auto local = self->result;
+						local.sendError(failed_to_reach_quorum());
 					}
 				}
 				break;
@@ -166,7 +168,9 @@ class GetGenerationQuorum {
 					++self->totalRepliesReceived;
 					if (self->totalRepliesReceived == self->ctis.size() && self->result.canBeSet() &&
 					    !self->result.isError()) {
-						self->result.sendError(failed_to_reach_quorum());
+						// Calling sendError could delete self
+						auto local = self->result;
+						local.sendError(failed_to_reach_quorum());
 					}
 					break;
 				} else {
