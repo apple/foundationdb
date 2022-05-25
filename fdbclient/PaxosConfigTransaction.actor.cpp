@@ -44,13 +44,18 @@ class CommitQuorum {
 		} else if (failed >= ctis.size() / 2 + 1 && result.canBeSet()) {
 			// Rollforwards could cause a version that didn't have quorum to
 			// commit, so send commit_unknown_result instead of commit_failed.
-			result.sendError(commit_unknown_result());
+
+			// Calling sendError could delete this
+			auto local = this->result;
+			local.sendError(commit_unknown_result());
 		} else {
 			// Check if it is possible to ever receive quorum agreement
 			auto totalRequestsOutstanding = ctis.size() - (failed + successful + maybeCommitted);
 			if ((failed + totalRequestsOutstanding < ctis.size() / 2 + 1) &&
 			    (successful + totalRequestsOutstanding < ctis.size() / 2 + 1) && result.canBeSet()) {
-				result.sendError(commit_unknown_result());
+				// Calling sendError could delete this
+				auto local = this->result;
+				local.sendError(commit_unknown_result());
 			}
 		}
 	}
