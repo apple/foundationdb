@@ -163,7 +163,7 @@ public:
 	// Data distribution
 	double READ_REBALANCE_CPU_THRESHOLD; // read rebalance only happens if the source servers' CPU > threshold
 	int READ_REBALANCE_SRC_PARALLELISM; // the max count a server become a source server within a certain interval
-	int READ_REBALANCE_SHARD_TOPK; // top k shards were return for random selection in read rebalance
+	int READ_REBALANCE_SHARD_TOPK; // top k shards from which to select randomly for read-rebalance
 	double
 	    READ_REBALANCE_DIFF_FRAC; // only when (srcLoad - destLoad)/srcLoad > DIFF_FRAC the read rebalance will happen
 	double READ_REBALANCE_MAX_SHARD_FRAC; // only move shard whose readLoad < (srcLoad - destLoad) * MAX_SHARD_FRAC
