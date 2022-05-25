@@ -1140,21 +1140,44 @@ void ShardsAffectedByTeamFailure::check() const {
 	}
 }
 
-//ignoreRemoteTeam is for debugging purpose
 void ShardsAffectedByTeamFailure::updatePhysicalShardToTeams(PhysicalShard inputPhysicalShard, 
-		std::vector<Team> inputTeams, int expectedNumServersPerTeam) {
+		std::vector<Team> inputTeams, int expectedNumServersPerTeam, std::string caller, uint64_t debugID) {
 	ASSERT(CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
 	ASSERT(expectedNumServersPerTeam>0);
 	ASSERT(inputTeams.size()<=2);
+	ASSERT(inputPhysicalShard.id!=anonymousShardId.first());
 	for (auto inputTeam : inputTeams) {
 		if (inputTeam.servers.size()!=expectedNumServersPerTeam) {
 			return;
 		}
 	}
+	/*TraceEvent("UpdatePhysicalShardMapping")
+		.detail("PhysicalShardID", inputPhysicalShard.id)
+		.detail("NewTeam", describe(inputTeams))
+		.detail("SingleRegionTeamSize", expectedNumServersPerTeam)
+		.detail("Caller", caller)
+		.detail("DebugID", debugID);*/
+
 	// remove old ones
 	for (auto [team, physicalShards] : teamPhysicalShards) {
 		for (auto it = teamPhysicalShards[team].begin(); it != teamPhysicalShards[team].end();) {
 	        if(it->id == inputPhysicalShard.id) {
+	        	bool flag = false;
+	        	for (auto inputTeam : inputTeams) { //exist one of inputTeams should match team
+	        		if (team == inputTeam) {
+	        			flag = true;
+	        		}
+	        	}
+	        	if (!flag) {
+	        		TraceEvent(SevWarn, "UpdatePhysicalShardDuplicate")
+					    .detail("Caller", caller)
+					    .detail("PhysicalShardID", inputPhysicalShard.id)
+					    .detail("OldTeam", team.toString())
+					    .detail("NewTeam", describe(inputTeams))
+					    .detail("SingleRegionTeamSize", expectedNumServersPerTeam)
+					    .detail("DebugID", debugID);
+				}
+	        	ASSERT(flag);
 	            it = teamPhysicalShards[team].erase(it);
 	        } else {
 	        	++it;
@@ -1173,19 +1196,21 @@ void ShardsAffectedByTeamFailure::updatePhysicalShardToTeams(PhysicalShard input
 	}
 }
 
-Optional<ShardsAffectedByTeamFailure::Team> ShardsAffectedByTeamFailure::tryGetRemoteTeamWith(uint64_t inputPhysicalShardID, int expectedTeamSize) {
+Optional<ShardsAffectedByTeamFailure::Team> ShardsAffectedByTeamFailure::tryGetRemoteTeamWith(uint64_t inputPhysicalShardID, int expectedTeamSize, uint64_t debugID) {
 	ASSERT(CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
-	Team returnTeam;
 	for (auto [team, physicalShards] : teamPhysicalShards) {
 		if (team.primary == false) {
 			for (auto it = teamPhysicalShards[team].begin(); it != teamPhysicalShards[team].end();) {
 				if (it->id == inputPhysicalShardID) {
 					if (team.servers.size() == expectedTeamSize) {
-						ASSERT(returnTeam==Team());
-						returnTeam = team;
-						break;
-					} else {
-						it = teamPhysicalShards[team].erase(it);
+						/*TraceEvent("TryGetRemoteTeamWith")
+							.detail("PhysicalShardID", inputPhysicalShardID)
+							.detail("ExpectedTeamSize", expectedTeamSize)
+							.detail("Team", team.toString())
+							.detail("TeamSize", team.servers.size())
+							.detail("PhysicalShards", teamPhysicalShards[team])
+							.detail("DebugID", debugID);*/
+						return team;
 					}
 				} else {
 					++it;
@@ -1193,32 +1218,25 @@ Optional<ShardsAffectedByTeamFailure::Team> ShardsAffectedByTeamFailure::tryGetR
 			}
 		}
 	}
-	if (returnTeam!=Team()) {
-		return returnTeam;
-	} else {
-		return Optional<ShardsAffectedByTeamFailure::Team>();
-	}
+	return Optional<ShardsAffectedByTeamFailure::Team>();
 }
 
 // At beginning of the transition from the initial state without physical shard notion
 // to the physical shard aware state, the physicalShard set only contains one element which is anonymousShardId[0]
 // After a period in the transition, the physicalShard set of the team contains some meaningful physicalShardIDs
-// This function increases #physicalShard of the team when #physicalShard less than 10
-// When stable, each team has 10 physicalShards
-Optional<uint64_t> ShardsAffectedByTeamFailure::tryGetPhysicalShardFor(Team team) {
+Optional<uint64_t> ShardsAffectedByTeamFailure::tryGetPhysicalShardIDFor(Team team, uint64_t debugID) {
 	ASSERT(CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
 	ASSERT(team.servers.size()!=0);
 	if (teamPhysicalShards.count(team)==0) {
 		// Case: The team is not tracked in the mapping (teamPhysicalShards)
 		return Optional<uint64_t>();
-	} else if (teamPhysicalShards[team].size() == 1 &&
-	           teamPhysicalShards[team].begin()->id == anonymousShardId.first()) {
-		// Case: The team is tracked in the mapping but
-		// 		in the transition from the initial state without physical shard notion
-		// 		to the physical shard aware state
-		teamPhysicalShards[team].clear();
-		return Optional<uint64_t>();
-	} else if (teamPhysicalShards[team].size() < 4) {
+	} 
+	for (auto physicalShard : teamPhysicalShards[team]) {
+		if (physicalShard.id==anonymousShardId.first()) {
+			ASSERT(false);
+		}
+	}
+	if (teamPhysicalShards[team].size() < 4) {
 		// Case: The team is tracked in the mapping and the system already has physical shard notion
 		// 		but the number of physicalShard is small
 		return Optional<uint64_t>();
@@ -1238,17 +1256,24 @@ Optional<uint64_t> ShardsAffectedByTeamFailure::tryGetPhysicalShardFor(Team team
 	}
 }
 
-bool ShardsAffectedByTeamFailure::allTeamsOfKeyRangesHavePhysicalShard() {
+Optional<uint64_t> ShardsAffectedByTeamFailure::tryGetPhysicalShardIDFor(Team primaryTeam, Team remoteTeam, uint64_t debugID) {
 	ASSERT(CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
-	for(auto it : team_shards) {
-		Team team = it.first;
-		if (teamPhysicalShards.count(team)!=0 &&
-			teamPhysicalShards[team].begin()->id == anonymousShardId.first()) {
-			ASSERT(teamPhysicalShards[team].size() == 1);
-			return false;
+	if (teamPhysicalShards.count(primaryTeam)==0) {
+		return Optional<uint64_t>();
+	}
+	if (teamPhysicalShards.count(remoteTeam)==0) {
+		return Optional<uint64_t>();
+	}
+	ASSERT(teamPhysicalShards.count(primaryTeam)==1);
+	ASSERT(teamPhysicalShards.count(remoteTeam)==1);
+	for (auto primaryPhysicalShard : teamPhysicalShards[primaryTeam]) {
+		for (auto remotePhysicalShard : teamPhysicalShards[remoteTeam]) {
+			if (primaryPhysicalShard.id==remotePhysicalShard.id) {
+				return primaryPhysicalShard.id;
+			}
 		}
 	}
-	return true;
+	UNREACHABLE();
 }
 
 void ShardsAffectedByTeamFailure::printTeamPhysicalShardsMapping(std::string action) {
@@ -1266,3 +1291,7 @@ void ShardsAffectedByTeamFailure::printTeamPhysicalShardsMapping(std::string act
 		std::cout << "\n";
 	}
 }
+
+uint64_t ShardsAffectedByTeamFailure::generateNewPhysicalShardID(uint64_t debugID) {
+	return deterministicRandom()->randomUInt64();
+ }

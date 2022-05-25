@@ -793,11 +793,11 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 					}
 					if (iShard.srcId != anonymousShardId) {
 						shardsAffectedByTeamFailure->updatePhysicalShardToTeams(
-							ShardsAffectedByTeamFailure::PhysicalShard(iShard.srcId.first()), teams, configuration.storageTeamSize);
+							ShardsAffectedByTeamFailure::PhysicalShard(iShard.srcId.first()), teams, configuration.storageTeamSize, "InitBySrc", 0);
 					}
-					if (iShard.hasDest) {
+					if (iShard.hasDest && iShard.destId != anonymousShardId) {
 						shardsAffectedByTeamFailure->updatePhysicalShardToTeams(
-							ShardsAffectedByTeamFailure::PhysicalShard(iShard.destId.first()), destTeams, configuration.storageTeamSize);
+							ShardsAffectedByTeamFailure::PhysicalShard(iShard.destId.first()), destTeams, configuration.storageTeamSize, "InitByDest", 0);
 					}
 				}
 
@@ -807,7 +807,9 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 					    .detail("PrimarySrc", describe(iShard.primarySrc))
 					    .detail("RemoteSrc", describe(iShard.remoteSrc))
 					    .detail("PrimaryDest", describe(iShard.primaryDest))
-					    .detail("RemoteDest", describe(iShard.remoteDest));
+					    .detail("RemoteDest", describe(iShard.remoteDest))
+					    .detail("SrcID", iShard.srcId)
+					    .detail("DestID", iShard.destId);
 				// }
 
 				shardsAffectedByTeamFailure->moveShard(keys, teams);

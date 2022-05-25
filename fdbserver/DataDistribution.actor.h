@@ -232,9 +232,9 @@ public:
 	struct PhysicalShard {
 		uint64_t id;
 		// On disk
-		uint64_t bytesOnDisk;
+		uint64_t bytesOnDisk = 0;
 		// In memory
-		uint64_t bytesInMemory;
+		uint64_t bytesInMemory = 0;
 		// I/O
 		int64_t bytesPerKSecond = 0;
 		int64_t bytesWritePerKSecond = 0;
@@ -243,13 +243,15 @@ public:
 		explicit PhysicalShard(uint64_t id) : id(id) { bytesOnDisk = deterministicRandom()->randomUInt64(); }
 		// operator< used for selecting the physicalShard with the minimal bytesOnDisk
 		bool operator<(const struct PhysicalShard& right) const { return id < right.id ? true : false; }
+		std::string toString() const { return std::to_string(id); }
 	};
 	void updatePhysicalShardToTeams(PhysicalShard physicalShard, 
-		std::vector<Team> inputTeams, int expectedNumServersPerTeam);
-	Optional<uint64_t> tryGetPhysicalShardFor(Team team); // return UID().first() if no physicalShard is available
-	Optional<Team> tryGetRemoteTeamWith(uint64_t physicalShardID, int expectedTeamSize);
-	bool allTeamsOfKeyRangesHavePhysicalShard();
+		std::vector<Team> inputTeams, int expectedNumServersPerTeam, std::string caller, uint64_t debugID);
+	Optional<uint64_t> tryGetPhysicalShardIDFor(Team team, uint64_t debugID);
+	Optional<uint64_t> tryGetPhysicalShardIDFor(Team primaryTeam, Team remoteTeam, uint64_t debugID);
+	Optional<Team> tryGetRemoteTeamWith(uint64_t physicalShardID, int expectedTeamSize, uint64_t debugID);
 	void printTeamPhysicalShardsMapping(std::string);
+	uint64_t generateNewPhysicalShardID(uint64_t debugID);
 
 private:
 	struct OrderByTeamKey {
