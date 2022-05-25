@@ -409,11 +409,11 @@ public:
 
 	PaxosConfigTransactionImpl(Database const& cx) : cx(cx) {
 		const ClusterConnectionString& cs = cx->getConnectionRecord()->getConnectionString();
-		ctis.reserve(cs.hostnames.size() + cs.coordinators().size());
+		ctis.reserve(cs.hostnames.size() + cs.coords.size());
 		for (const auto& h : cs.hostnames) {
 			ctis.emplace_back(h);
 		}
-		for (const auto& c : cs.coordinators()) {
+		for (const auto& c : cs.coords) {
 			ctis.emplace_back(c);
 		}
 		getGenerationQuorum = GetGenerationQuorum{ ctis };

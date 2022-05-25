@@ -66,7 +66,6 @@ public:
 	ClusterConnectionString(const std::vector<NetworkAddress>& coordinators, Key key);
 	ClusterConnectionString(const std::vector<Hostname>& hosts, Key key);
 
-	std::vector<NetworkAddress> const& coordinators() const { return coords; }
 	Key clusterKey() const { return key; }
 	Key clusterKeyName() const {
 		return keyDesc;
