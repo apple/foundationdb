@@ -513,7 +513,7 @@ public:
 	void put(KeyRef key, ValueRef value) {
 		auto it = dataShardMap.rangeContaining(key);
 		if (!it.value()) {
-			TraceEvent(SevError, "ShardedRocksDB").detail("Error", "write to non-exist shard");
+			TraceEvent(SevError, "ShardedRocksDB").detail("Error", "write to non-exist shard").detail("WriteKey", key);
 			return;
 		}
 		writeBatch->Put(it->value()->physicalShard->cf, toSlice(key), toSlice(value));
@@ -522,7 +522,7 @@ public:
 	std::unique_ptr<rocksdb::WriteBatch> getWriteBatch() {
 		std::unique_ptr<rocksdb::WriteBatch> existingWriteBatch = std::move(writeBatch);
 		writeBatch = std::make_unique<rocksdb::WriteBatch>();
-		return std::move(existingWriteBatch);
+		return existingWriteBatch;
 	}
 
 	void closeAllShards() {
@@ -1908,14 +1908,14 @@ TEST_CASE("noSim/ShardedRocksDB/SingleShardRead") {
 	KeyRangeRef range("a"_sr, "b"_sr);
 	wait(kvStore->addRange(range, "shard-1"));
 
-	kvStore->set({ LiteralStringRef("a"), LiteralStringRef("foo") });
-	kvStore->set({ LiteralStringRef("ac"), LiteralStringRef("bar") });
+	kvStore->set({ "a"_sr, "foo"_sr });
+	kvStore->set({ "ac"_sr, "bar"_sr });
 	wait(kvStore->commit(false));
 
-	Optional<Value> val = wait(kvStore->readValue(LiteralStringRef("a")));
-	ASSERT(Optional<Value>(LiteralStringRef("foo")) == val);
-	Optional<Value> val = wait(kvStore->readValue(LiteralStringRef("ac")));
-	ASSERT(Optional<Value>(LiteralStringRef("bar")) == val);
+	Optional<Value> val = wait(kvStore->readValue("a"_sr));
+	ASSERT(Optional<Value>("foo"_sr) == val);
+	Optional<Value> val = wait(kvStore->readValue("ac"_sr));
+	ASSERT(Optional<Value>("bar"_sr) == val);
 
 	Future<Void> closed = kvStore->onClosed();
 	kvStore->dispose();
