@@ -1674,7 +1674,6 @@ Future<RangeResult> CoordinatorsImpl::getRange(ReadYourWritesTransaction* ryw,
 }
 
 ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
-	state Reference<IQuorumChange> change;
 	state ClusterConnectionString conn; // We don't care about the Key here.
 	state std::vector<std::string> process_address_or_hostname_strs;
 	state Optional<std::string> msg;
@@ -1720,15 +1719,7 @@ ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWrite
 		}
 	}
 
-	std::vector<NetworkAddress> addressesVec = wait(conn.tryResolveHostnames());
-	if (addressesVec.size() != conn.hostnames.size() + conn.coordinators().size()) {
-		return ManagementAPIError::toJsonString(false, "coordinators", "One or more hostnames are not resolvable.");
-	} else if (addressesVec.size()) {
-		change = specifiedQuorumChange(addressesVec);
-	} else {
-		change = noQuorumChange();
-	}
-
+	std::string newName;
 	// check update for cluster_description
 	Key cluster_decription_key = LiteralStringRef("cluster_description").withPrefix(kr.begin);
 	auto entry = ryw->getSpecialKeySpaceWriteMap()[cluster_decription_key];
@@ -1736,7 +1727,7 @@ ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWrite
 		// check valid description [a-zA-Z0-9_]+
 		if (entry.second.present() && isAlphaNumeric(entry.second.get().toString())) {
 			// do the name change
-			change = nameQuorumChange(entry.second.get().toString(), change);
+			newName = entry.second.get().toString();
 		} else {
 			// throw the error
 			return ManagementAPIError::toJsonString(
@@ -1744,13 +1735,11 @@ ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWrite
 		}
 	}
 
-	ASSERT(change.isValid());
-
 	TraceEvent(SevDebug, "SKSChangeCoordinatorsStart")
-	    .detail("NewAddresses", describe(addressesVec))
+	    .detail("NewConnectionString", conn.toString())
 	    .detail("Description", entry.first ? entry.second.get().toString() : "");
 
-	Optional<CoordinatorsResult> r = wait(changeQuorumChecker(&ryw->getTransaction(), change, addressesVec));
+	Optional<CoordinatorsResult> r = wait(changeQuorumChecker(&ryw->getTransaction(), &conn, newName));
 
 	TraceEvent(SevDebug, "SKSChangeCoordinatorsFinish")
 	    .detail("Result", r.present() ? static_cast<int>(r.get()) : -1); // -1 means success
@@ -1819,9 +1808,20 @@ ACTOR static Future<RangeResult> CoordinatorsAutoImplActor(ReadYourWritesTransac
 		throw special_keys_api_failure();
 	}
 
-	for (const auto& address : _desiredCoordinators) {
-		autoCoordinatorsKey += autoCoordinatorsKey.size() ? "," : "";
-		autoCoordinatorsKey += address.toString();
+	if (result == CoordinatorsResult::SAME_NETWORK_ADDRESSES) {
+		for (const auto& host : old.hostnames) {
+			autoCoordinatorsKey += autoCoordinatorsKey.size() ? "," : "";
+			autoCoordinatorsKey += host.toString();
+		}
+		for (const auto& coord : old.coords) {
+			autoCoordinatorsKey += autoCoordinatorsKey.size() ? "," : "";
+			autoCoordinatorsKey += coord.toString();
+		}
+	} else {
+		for (const auto& address : _desiredCoordinators) {
+			autoCoordinatorsKey += autoCoordinatorsKey.size() ? "," : "";
+			autoCoordinatorsKey += address.toString();
+		}
 	}
 	res.push_back_deep(res.arena(), KeyValueRef(kr.begin, Value(autoCoordinatorsKey)));
 	return res;
