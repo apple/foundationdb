@@ -1357,41 +1357,66 @@ Future<Void> TagPartitionedLogSystem::onKnownCommittedVersionChange() {
 	return waitForAny(result);
 }
 
-void TagPartitionedLogSystem::popLogRouter(
-    Version upTo,
-    Tag tag,
-    Version durableKnownCommittedVersion,
-    int8_t popLocality) { // FIXME: do not need to pop all generations of old logs
+void TagPartitionedLogSystem::popLogRouter(Version upTo,
+                                           Tag tag,
+                                           Version durableKnownCommittedVersion,
+                                           int8_t popLocality) {
 	if (!upTo)
 		return;
-	for (auto& t : tLogs) {
-		if (t->locality == popLocality) {
-			for (auto& log : t->logRouters) {
-				Version prev = outstandingPops[std::make_pair(log->get().id(), tag)].first;
-				if (prev < upTo)
-					outstandingPops[std::make_pair(log->get().id(), tag)] =
-					    std::make_pair(upTo, durableKnownCommittedVersion);
-				if (prev == 0) {
-					popActors.add(popFromLog(
-					    this, log, tag, 0.0)); // Fast pop time because log routers can only hold 5 seconds of data.
+
+	Version lastGenerationStartVersion = TagPartitionedLogSystem::getMaxLocalStartVersion(tLogs);
+	if (upTo >= lastGenerationStartVersion) {
+		for (auto& t : tLogs) {
+			if (t->locality == popLocality) {
+				for (auto& log : t->logRouters) {
+					Version prev = outstandingPops[std::make_pair(log->get().id(), tag)].first;
+					if (prev < upTo) {
+						outstandingPops[std::make_pair(log->get().id(), tag)] =
+						    std::make_pair(upTo, durableKnownCommittedVersion);
+					}
+					if (prev == 0) {
+						popActors.add(popFromLog(this,
+						                         log,
+						                         tag,
+						                         /*delayBeforePop=*/0.0,
+						                         /*popLogRouter=*/true)); // Fast pop time because log routers can only
+						                                                  // hold 5 seconds of data.
+					}
 				}
 			}
 		}
 	}
 
-	for (auto& old : oldLogData) {
-		for (auto& t : old.tLogs) {
-			if (t->locality == popLocality) {
-				for (auto& log : t->logRouters) {
-					Version prev = outstandingPops[std::make_pair(log->get().id(), tag)].first;
-					if (prev < upTo)
-						outstandingPops[std::make_pair(log->get().id(), tag)] =
-						    std::make_pair(upTo, durableKnownCommittedVersion);
-					if (prev == 0)
-						popActors.add(popFromLog(this, log, tag, 0.0));
+	Version nextGenerationStartVersion = lastGenerationStartVersion;
+	for (const auto& old : oldLogData) {
+		Version generationStartVersion = TagPartitionedLogSystem::getMaxLocalStartVersion(old.tLogs);
+		if (generationStartVersion <= upTo) {
+			for (auto& t : old.tLogs) {
+				if (t->locality == popLocality) {
+					for (auto& log : t->logRouters) {
+						auto logRouterIdTagPair = std::make_pair(log->get().id(), tag);
+
+						// We pop the log router only if the popped version is within this generation's version range.
+						// That is between the current generation's start version and the next generation's start
+						// version.
+						if (logRouterLastPops.find(logRouterIdTagPair) == logRouterLastPops.end() ||
+						    logRouterLastPops[logRouterIdTagPair] < nextGenerationStartVersion) {
+							Version prev = outstandingPops[logRouterIdTagPair].first;
+							if (prev < upTo) {
+								outstandingPops[logRouterIdTagPair] =
+								    std::make_pair(upTo, durableKnownCommittedVersion);
+							}
+							if (prev == 0) {
+								popActors.add(
+								    popFromLog(this, log, tag, /*delayBeforePop=*/0.0, /*popLogRouter=*/true));
+							}
+						}
+					}
 				}
 			}
 		}
+
+		nextGenerationStartVersion = generationStartVersion;
 	}
 }
 
@@ -1424,7 +1449,8 @@ void TagPartitionedLogSystem::pop(Version upTo, Tag tag, Version durableKnownCom
 				}
 				if (prev == 0) {
 					// pop tag from log upto version defined in outstandingPops[].first
-					popActors.add(popFromLog(this, log, tag, 1.0)); //< FIXME: knob
+					popActors.add(
+					    popFromLog(this, log, tag, /*delayBeforePop*/ 1.0, /*popLogRouter=*/false)); //< FIXME: knob
 				}
 			}
 		}
@@ -1434,10 +1460,11 @@ void TagPartitionedLogSystem::pop(Version upTo, Tag tag, Version durableKnownCom
 ACTOR Future<Void> TagPartitionedLogSystem::popFromLog(TagPartitionedLogSystem* self,
                                                        Reference<AsyncVar<OptionalInterface<TLogInterface>>> log,
                                                        Tag tag,
-                                                       double time) {
+                                                       double delayBeforePop,
+                                                       bool popLogRouter) {
 	state Version last = 0;
 	loop {
-		wait(delay(time, TaskPriority::TLogPop));
+		wait(delay(delayBeforePop, TaskPriority::TLogPop));
 
 		// to: first is upto version, second is durableKnownComittedVersion
 		state std::pair<Version, Version> to = self->outstandingPops[std::make_pair(log->get().id(), tag)];
@@ -1452,6 +1479,10 @@ ACTOR Future<Void> TagPartitionedLogSystem::popFromLog(TagPartitionedLogSystem* 
 				return Void();
 			wait(log->get().interf().popMessages.getReply(TLogPopRequest(to.first, to.second, tag),
 			                                              TaskPriority::TLogPop));
+
+			if (popLogRouter) {
+				self->logRouterLastPops[std::make_pair(log->get().id(), tag)] = to.first;
+			}
 
 			last = to.first;
 		} catch (Error& e) {
@@ -2843,6 +2874,7 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 	    .detail("OldLogRouterTags", oldLogSystem->logRouterTags);
 	if (oldLogSystem->logRouterTags > 0 ||
 	    logSystem->tLogs[0]->startVersion < oldLogSystem->knownCommittedVersion + 1) {
+		// Use log routers to recover [knownCommittedVersion, recoveryVersion] from the old generation.
 		oldRouterRecruitment = TagPartitionedLogSystem::recruitOldLogRouters(oldLogSystem.getPtr(),
 		                                                                     recr.oldLogRouters,
 		                                                                     recoveryCount,
