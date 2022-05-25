@@ -185,7 +185,7 @@ int populate(Database db,
 	for (int i = 0; i < args.tenants; ++i) {
 		std::string tenant_name = "tenant" + std::to_string(i);
 		Tenant::createTenant(systemTx, toBytesRef(tenant_name));
-		while (i % 10 == 9 || i == args.tenants) {
+		while (i % 10 == 9 || i == args.tenants - 1) {
 			// create {batchSize} # of tenants
 			// commit every batch
 			auto future_commit = systemTx.commit();
