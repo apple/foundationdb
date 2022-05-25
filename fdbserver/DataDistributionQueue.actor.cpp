@@ -1733,7 +1733,8 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueueData* self, int teamCollectionIndex,
 				if (!val.present()) {
 					skipCurrentLoop = false;
 				} else {
-					if (val.get().size() > 0) {
+					// NOTE: check special value "" and "on" might written in old version < 7.2
+					if (val.get().size() > 0 && val.get() != "on"_sr) {
 						int ddIgnore = BinaryReader::fromStringRef<uint8_t>(val.get(), Unversioned());
 						if (readRebalance) {
 							skipCurrentLoop = (ddIgnore & DDIgnore::REBALANCE_READ) > 0;
@@ -1845,7 +1846,8 @@ ACTOR Future<Void> BgDDMountainChopper(DDQueueData* self, int teamCollectionInde
 					}
 					skipCurrentLoop = false;
 				} else {
-					if (val.get().size() > 0) {
+					// NOTE: check special value "" and "on" might written in old version < 7.2
+					if (val.get().size() > 0 && val.get() != "on"_sr) {
 						int ddIgnore = BinaryReader::fromStringRef<uint8_t>(val.get(), Unversioned());
 						skipCurrentLoop = (ddIgnore & DDIgnore::REBALANCE_DISK) > 0;
 					} else {
@@ -1968,7 +1970,8 @@ ACTOR Future<Void> BgDDValleyFiller(DDQueueData* self, int teamCollectionIndex) 
 					}
 					skipCurrentLoop = false;
 				} else {
-					if (val.get().size() > 0) {
+					// NOTE: check special value "" and "on" might written in old version < 7.2
+					if (val.get().size() > 0 && val.get() != "on"_sr) {
 						int ddIgnore = BinaryReader::fromStringRef<uint8_t>(val.get(), Unversioned());
 						skipCurrentLoop = (ddIgnore & DDIgnore::REBALANCE_DISK) > 0;
 					} else {

@@ -143,8 +143,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 
 	init( PRIORITY_RECOVER_MOVE,                                 110 );
 	init( PRIORITY_REBALANCE_UNDERUTILIZED_TEAM,                 120 );
-	init( PRIORITY_REBALANCE_OVERUTILIZED_TEAM,                  121 );
-	init( PRIORITY_REBALANCE_READ_UNDERUTIL_TEAM,                122 );
+    init( PRIORITY_REBALANCE_READ_UNDERUTIL_TEAM,                121 );
+	init( PRIORITY_REBALANCE_OVERUTILIZED_TEAM,                  122 );
 	init( PRIORITY_REBALANCE_READ_OVERUTIL_TEAM,                 123 );
 	init( PRIORITY_PERPETUAL_STORAGE_WIGGLE,                     139 );
 	init( PRIORITY_TEAM_HEALTHY,                                 140 );

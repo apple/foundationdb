@@ -2995,6 +2995,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 				}
 			}
 			if (loadResult.get().rebalanceDDIgnored) {
+				// TODO: change the hex string to human-friendly fields like "rebalance_read", "rebalance_disk"
 				statusObj["data_distribution_disabled_for_rebalance"] = true;
 				statusObj["data_distribution_disabled_hex"] = loadResult.get().rebalanceDDIgnoreHex;
 			}
