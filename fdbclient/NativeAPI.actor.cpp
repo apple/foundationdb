@@ -7657,14 +7657,10 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 
 		if (!self->trState->cx->blobWorker_interf.count(workerId)) {
 			state Optional<Value> workerInterface;
-			if (self->getTenant().present()) {
-				// again, have to bypass system keys and tenant requirements
-				wait(store(
-				    workerInterface,
-				    getValue(self->trState, blobWorkerListKeyFor(workerId), self->getReadVersion(), UseTenant::False)));
-			} else {
-				wait(store(workerInterface, self->get(blobWorkerListKeyFor(workerId))));
-			}
+			// again, have to bypass system keys and tenant requirements if tenant is present
+			wait(store(
+			    workerInterface,
+			    getValue(self->trState, blobWorkerListKeyFor(workerId), self->getReadVersion(), UseTenant::False)));
 			// from the time the mapping was read from the db, the associated blob worker
 			// could have died and so its interface wouldn't be present as part of the blobWorkerList
 			// we persist in the db. So throw wrong_shard_server to get the new mapping
@@ -7782,7 +7778,8 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 				fmt::print("BGReq got error {}\n", e.name());
 			}
 			// worker is up but didn't actually have granule, or connection failed
-			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_connection_failed) {
+			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_connection_failed ||
+			    e.code() == error_code_unknown_tenant) {
 				// need to re-read mapping, throw transaction_too_old so client retries. TODO better error?
 				throw transaction_too_old();
 			}
