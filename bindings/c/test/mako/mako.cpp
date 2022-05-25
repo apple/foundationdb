@@ -20,6 +20,7 @@
 
 #include <cassert>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -77,13 +78,17 @@ using namespace mako;
 
 thread_local Logger logr = Logger(MainProcess{}, VERBOSE_DEFAULT);
 
-Transaction createNewTransaction(Database db, Arguments const& args, int id = -1) {
+Transaction createNewTransaction(Database db, Arguments const& args, int id = -1, Tenant** tenants = nullptr) {
 	// No tenants specified
 	if (args.tenants <= 0) {
 		return db.createTransaction();
 	}
 	// Create Tenant Transaction
-	int tenant_id = (id == -1) ? urand(1, args.tenants) : id;
+	int tenant_id = (id == -1) ? urand(0, args.tenants - 1) : id;
+	// If provided tenants array (only necessary in runWorkload), use it
+	if (tenants) {
+		return tenants[tenant_id]->createTransaction();
+	}
 	BytesRef tenant_name = toBytesRef("tenant" + std::to_string(tenant_id));
 	Tenant t(&db, tenant_name, tenant_name.length());
 	return t.createTransaction();
@@ -110,7 +115,7 @@ int cleanup(Database db, Arguments const& args) {
 	auto watch = Stopwatch(StartAtCtor{});
 
 	int num_iterations = (args.tenants > 1) ? args.tenants : 1;
-	for (int i = 1; i <= num_iterations; ++i) {
+	for (int i = 0; i < num_iterations; ++i) {
 		// If args.tenants is zero, this will use a non-tenant txn and perform a single range clear.
 		// If 1, it will use a tenant txn and do a single range clear instead.
 		// If > 1, it will perform a range clear with a different tenant txn per iteration.
@@ -177,19 +182,23 @@ int populate(Database db,
 	auto key_checkpoint = key_begin; // in case of commit failure, restart from this key
 
 	Transaction systemTx = db.createTransaction();
-	for (int i = 1; i <= args.tenants; ++i) {
+	for (int i = 0; i < args.tenants; ++i) {
 		std::string tenant_name = "tenant" + std::to_string(i);
 		Tenant::createTenant(systemTx, toBytesRef(tenant_name));
-		while (i % 10 == 0 || i == args.tenants) {
+		while (i % 10 == 9 || i == args.tenants) {
 			// create {batchSize} # of tenants
 			// commit every batch
 			auto future_commit = systemTx.commit();
 			const auto rc = waitAndHandleError(systemTx, future_commit, "CREATE_TENANT");
-			if (rc == FutureRC::OK) {
+			if (rc == FutureRC::RETRY) {
+				continue;
+			} else {
+				// Keep going if commit was successful (FutureRC::OK)
+				// If not a retryable error, expected to be the error
+				// tenant_already_exists, meaning another thread finished creating it
 				systemTx.reset();
 				break;
 			}
-			// look up tenant range limit 1. If found, break, else retry
 		}
 	}
 	Transaction tx = createNewTransaction(db, args);
@@ -422,9 +431,17 @@ int runWorkload(Database db,
 	auto val = ByteString{};
 	val.resize(args.value_length);
 
+	// mimic typical tenant usage: keep tenants in memory
+	// and create transactions as needed
+	Tenant* tenants[args.tenants];
+	for (int i = 0; i < args.tenants; ++i) {
+		BytesRef tenant_name = toBytesRef("tenant" + std::to_string(i));
+		tenants[i] = new Tenant(&db, tenant_name, tenant_name.length());
+	}
+
 	/* main transaction loop */
 	while (1) {
-		Transaction tx = createNewTransaction(db, args);
+		Transaction tx = createNewTransaction(db, args, 0, args.tenants > 0 ? tenants : nullptr);
 		while ((thread_tps > 0) && (xacts >= current_tps)) {
 			/* throttle on */
 			const auto time_now = steady_clock::now();
@@ -547,7 +564,7 @@ void runAsyncWorkload(Arguments const& args,
 			auto state =
 			    std::make_shared<ResumableStateForPopulate>(Logger(WorkerProcess{}, args.verbose, worker_id, i),
 			                                                db,
-			                                                db.createTransaction(),
+			                                                createNewTransaction(db, args),
 			                                                io_context,
 			                                                args,
 			                                                shm.statsSlot(worker_id, i),
@@ -577,7 +594,7 @@ void runAsyncWorkload(Arguments const& args,
 			auto state =
 			    std::make_shared<ResumableStateForRunWorkload>(Logger(WorkerProcess{}, args.verbose, worker_id, i),
 			                                                   db,
-			                                                   db.createTransaction(),
+			                                                   createNewTransaction(db, args),
 			                                                   io_context,
 			                                                   args,
 			                                                   shm.statsSlot(worker_id, i),
