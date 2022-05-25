@@ -840,7 +840,6 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
                                                                Reference<IQuorumChange> change,
                                                                std::vector<NetworkAddress> desiredCoordinators) {
 
-
 	state Optional<ClusterConnectionString> clusterConnectionStringOptional =
 	    wait(getClusterConnectionStringFromStorageServer(tr));
 
@@ -927,7 +926,6 @@ ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChan
 	state int retries = 0;
 	state std::vector<NetworkAddress> desiredCoordinators;
 	state int notEnoughMachineResults = 0;
-
 
 	loop {
 		try {
