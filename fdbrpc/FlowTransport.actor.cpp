@@ -299,7 +299,7 @@ public:
 		setAddressList(addressList); // force the recaching of the string.
 	}
 	Standalone<StringRef> getLocalAddressAsString() const { return cachedStr; }
-	operator NetworkAddressList const &() { return addressList; }
+	operator NetworkAddressList const& () { return addressList; }
 
 private:
 	NetworkAddressList addressList;
