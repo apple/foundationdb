@@ -1781,8 +1781,14 @@ Reference<AsyncVar<bool>> FlowTransport::getDegraded() {
 //
 // Note that this function does not establish a connection to the peer. In order to obtain a peer's protocol
 // version, some other mechanism should be used to connect to that peer.
-Reference<AsyncVar<Optional<ProtocolVersion>> const> FlowTransport::getPeerProtocolAsyncVar(NetworkAddress addr) {
-	return self->peers.at(addr)->protocolVersion;
+Optional<Reference<AsyncVar<Optional<ProtocolVersion>> const>> FlowTransport::getPeerProtocolAsyncVar(
+    NetworkAddress addr) {
+	auto itr = self->peers.find(addr);
+	if (itr != self->peers.end()) {
+		return itr->second->protocolVersion;
+	} else {
+		return Optional<Reference<AsyncVar<Optional<ProtocolVersion>> const>>();
+	}
 }
 
 void FlowTransport::resetConnection(NetworkAddress address) {
