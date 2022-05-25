@@ -6571,7 +6571,7 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 		validateOptionValueNotPresent(value);
 		if (trState->hasTenant()) {
 			Error e = invalid_option();
-			TraceEvent(SevError, "TenantTransactionRawAccess").error(e).detail("Tenant", trState->tenant());
+			TraceEvent(SevWarn, "TenantTransactionRawAccess").error(e).detail("Tenant", trState->tenant());
 			throw e;
 		}
 		trState->options.rawAccess = true;
