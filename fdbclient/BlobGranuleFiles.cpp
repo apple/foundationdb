@@ -203,8 +203,7 @@ RangeResult materializeBlobGranule(const BlobGranuleChunkRef& chunk,
 	Version lastFileEndVersion = invalidVersion;
 	KeyRange requestRange;
 	if (chunk.tenantPrefix.present()) {
-		requestRange = KeyRangeRef(keyRange.begin.withPrefix(chunk.tenantPrefix.get()),
-		                           keyRange.end.withPrefix(chunk.tenantPrefix.get()));
+		requestRange = keyRange.withPrefix(chunk.tenantPrefix.get());
 	} else {
 		requestRange = keyRange;
 	}
