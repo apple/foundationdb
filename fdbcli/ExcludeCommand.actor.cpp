@@ -163,7 +163,7 @@ ACTOR Future<std::set<NetworkAddress>> checkForExcludingServers(Reference<IDatab
 
 			// Check if all of the specified exclusions are done.
 			bool allExcluded = true;
-			for (const auto& inProgressAddr : exclusionInProgress) {
+			for (const auto& inProgressAddr : inProgressExclusion) {
 				if (!allExcluded) {
 					break;
 				}
