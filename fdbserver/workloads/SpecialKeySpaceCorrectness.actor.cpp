@@ -956,7 +956,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				state std::vector<std::string> process_addresses;
 				boost::split(
 				    process_addresses, coordinator_processes_key.get().toString(), [](char c) { return c == ','; });
-				ASSERT(process_addresses.size() == cs.coordinators().size() + cs.hostnames.size());
+				ASSERT(process_addresses.size() == cs.coords.size() + cs.hostnames.size());
 				// compare the coordinator process network addresses one by one
 				std::vector<NetworkAddress> coordinators = wait(cs.tryResolveHostnames());
 				for (const auto& network_address : coordinators) {
@@ -1080,8 +1080,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					ClusterConnectionString csNew(res.get().toString());
 					// verify the cluster decription
 					ASSERT(new_cluster_description == csNew.clusterKeyName().toString());
-					ASSERT(csNew.hostnames.size() + csNew.coordinators().size() ==
-					       old_coordinators_processes.size() + 1);
+					ASSERT(csNew.hostnames.size() + csNew.coords.size() == old_coordinators_processes.size() + 1);
 					std::vector<NetworkAddress> newCoordinators = wait(csNew.tryResolveHostnames());
 					// verify the coordinators' addresses
 					for (const auto& network_address : newCoordinators) {
