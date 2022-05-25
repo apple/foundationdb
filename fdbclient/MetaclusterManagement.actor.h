@@ -733,94 +733,154 @@ Future<Void> createTenant(Reference<DB> db, TenantName name, TenantMapEntry tena
 
 ACTOR template <class DB>
 Future<Void> deleteTenant(Reference<DB> db, TenantName name) {
-	state Optional<DataClusterMetadata> clusterMetadata;
+	state int64_t tenantId;
+	state DataClusterMetadata clusterMetadata;
+	state Reference<IDatabase> dataClusterDb;
+	state bool alreadyRemoving = false;
 
-	// Step 1: record that we are removing the tenant in the management cluster
-	state Reference<typename DB::TransactionT> startTr = db->createTransaction();
+	// Step 1: get the assigned location of the tenant
+	state Reference<typename DB::TransactionT> managementTr = db->createTransaction();
 	loop {
 		try {
-			startTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			state Optional<TenantMapEntry> managementEntry =
-			    wait(ManagementAPI::tryGetTenantTransaction(startTr, name));
-			if (!managementEntry.present()) {
+			managementTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			state Optional<TenantMapEntry> tenantEntry1 =
+			    wait(ManagementAPI::tryGetTenantTransaction(managementTr, name));
+			if (!tenantEntry1.present()) {
 				throw tenant_not_found();
 			}
 
-			if (managementEntry.get().assignedCluster.present()) {
+			tenantId = tenantEntry1.get().id;
+
+			if (tenantEntry1.get().assignedCluster.present()) {
 				Optional<DataClusterMetadata> _clusterMetadata =
-				    wait(tryGetClusterTransaction(startTr, managementEntry.get().assignedCluster.get()));
+				    wait(tryGetClusterTransaction(managementTr, tenantEntry1.get().assignedCluster.get()));
 
-				clusterMetadata = _clusterMetadata;
-
-				if (managementEntry.get().tenantState != TenantState::REMOVING) {
-					TenantMapEntry updatedEntry = managementEntry.get();
-					updatedEntry.tenantState = TenantState::REMOVING;
-					ManagementAPI::configureTenantTransaction(startTr, name, updatedEntry);
-					wait(safeThreadFutureToFuture(startTr->commit()));
+				if (!_clusterMetadata.present()) {
+					// TODO: better error
+					throw operation_failed();
 				}
+				clusterMetadata = _clusterMetadata.get();
+				alreadyRemoving = tenantEntry1.get().tenantState == TenantState::REMOVING;
+			} else {
+				// The record only exists on the management cluster, so we can just delete it.
+				TenantMapEntry updatedEntry = tenantEntry1.get();
+				updatedEntry.tenantState = TenantState::REMOVING;
+				ManagementAPI::configureTenantTransaction(managementTr, name, updatedEntry);
+				wait(ManagementAPI::deleteTenantTransaction(
+				    managementTr, name, ManagementAPI::TenantOperationType::MANAGEMENT_CLUSTER));
+				wait(safeThreadFutureToFuture(managementTr->commit()));
+				return Void();
 			}
 
 			break;
 		} catch (Error& e) {
-			wait(safeThreadFutureToFuture(startTr->onError(e)));
+			wait(safeThreadFutureToFuture(managementTr->onError(e)));
 		}
 	}
 
-	// Step 2: remove the tenant from the data cluster
-	if (clusterMetadata.present()) {
-		state Reference<IDatabase> dataClusterDb = MultiVersionApi::api->createDatabase(
-		    makeReference<ClusterConnectionMemoryRecord>(clusterMetadata.get().connectionString));
+	dataClusterDb = MultiVersionApi::api->createDatabase(
+	    makeReference<ClusterConnectionMemoryRecord>(clusterMetadata.connectionString));
 
-		wait(ManagementAPI::deleteTenant(dataClusterDb, name, ManagementAPI::TenantOperationType::DATA_CLUSTER));
+	if (!alreadyRemoving) {
+		// Step 2: check that the tenant is empty
+		state Reference<ITenant> dataTenant = dataClusterDb->openTenant(name);
+		state Reference<ITransaction> dataTr = dataTenant->createTransaction();
+		loop {
+			try {
+				ThreadFuture<RangeResult> rangeFuture = dataTr->getRange(normalKeys, 1);
+				RangeResult result = wait(safeThreadFutureToFuture(rangeFuture));
+				if (!result.empty()) {
+					throw tenant_not_empty();
+				}
+				break;
+			} catch (Error& e) {
+				wait(safeThreadFutureToFuture(dataTr->onError(e)));
+			}
+		}
+
+		// Step 3: record that we are removing the tenant in the management cluster
+		managementTr = db->createTransaction();
+		loop {
+			try {
+				managementTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				state Optional<TenantMapEntry> tenantEntry2 =
+				    wait(ManagementAPI::tryGetTenantTransaction(managementTr, name));
+				if (!tenantEntry2.present() || tenantEntry2.get().id != tenantId) {
+					// The tenant must have been removed simultaneously
+					return Void();
+				}
+
+				if (tenantEntry2.get().tenantState != TenantState::REMOVING) {
+					TenantMapEntry updatedEntry = tenantEntry2.get();
+					updatedEntry.tenantState = TenantState::REMOVING;
+					ManagementAPI::configureTenantTransaction(managementTr, name, updatedEntry);
+					wait(safeThreadFutureToFuture(managementTr->commit()));
+				}
+
+				break;
+			} catch (Error& e) {
+				wait(safeThreadFutureToFuture(managementTr->onError(e)));
+			}
+		}
 	}
 
-	// Step 3: mark the tenant as ready in the management cluster
-	state Reference<typename DB::TransactionT> removeTr = db->createTransaction();
+	// Step 4: remove the tenant from the data cluster
+	// TODO: pass in ID to verify we are deleting the correct tenant
+	wait(ManagementAPI::deleteTenant(dataClusterDb, name, ManagementAPI::TenantOperationType::DATA_CLUSTER));
+
+	// Step 5: delete the tenant from the management cluster
+	managementTr = db->createTransaction();
 	loop {
 		try {
-			removeTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			state Optional<TenantMapEntry> finalEntry = wait(ManagementAPI::tryGetTenantTransaction(removeTr, name));
+			managementTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			state Optional<TenantMapEntry> tenantEntry3 =
+			    wait(ManagementAPI::tryGetTenantTransaction(managementTr, name));
+
+			if (!tenantEntry3.present() || tenantEntry3.get().id != tenantId) {
+				return Void();
+			}
 
 			wait(ManagementAPI::deleteTenantTransaction(
-			    removeTr, name, ManagementAPI::TenantOperationType::MANAGEMENT_CLUSTER));
+			    managementTr, name, ManagementAPI::TenantOperationType::MANAGEMENT_CLUSTER));
 
-			if (finalEntry.present() && finalEntry.get().assignedCluster.present()) {
+			if (tenantEntry3.get().assignedCluster.present()) {
 				state typename DB::TransactionT::template FutureT<RangeResult> tenantGroupIndexFuture;
-				if (finalEntry.get().tenantGroup.present()) {
+				if (tenantEntry3.get().tenantGroup.present()) {
 					tenantGroupIndexFuture =
-					    removeTr->getRange(prefixRange(ManagementAPI::getTenantGroupIndexKey(
-					                           finalEntry.get().tenantGroup.get(), Optional<TenantNameRef>())),
-					                       1);
+					    managementTr->getRange(prefixRange(ManagementAPI::getTenantGroupIndexKey(
+					                               tenantEntry3.get().tenantGroup.get(), Optional<TenantNameRef>())),
+					                           1);
 				}
 
 				state Optional<DataClusterMetadata> finalClusterMetadata =
-				    wait(tryGetClusterTransaction(removeTr, finalEntry.get().assignedCluster.get()));
+				    wait(tryGetClusterTransaction(managementTr, tenantEntry3.get().assignedCluster.get()));
 
 				state DataClusterEntry updatedEntry = finalClusterMetadata.get().entry;
 				state bool decrementTenantGroupCount =
-				    finalClusterMetadata.present() && !finalEntry.get().tenantGroup.present();
+				    finalClusterMetadata.present() && !tenantEntry3.get().tenantGroup.present();
 
-				if (finalClusterMetadata.present() && finalEntry.get().tenantGroup.present()) {
+				if (finalClusterMetadata.present() && tenantEntry3.get().tenantGroup.present()) {
 					RangeResult result = wait(safeThreadFutureToFuture(tenantGroupIndexFuture));
 					if (result.size() == 0) {
-						removeTr->clear(tenantGroupMetadataKeys.begin.withSuffix(finalEntry.get().tenantGroup.get()));
+						managementTr->clear(
+						    tenantGroupMetadataKeys.begin.withSuffix(tenantEntry3.get().tenantGroup.get()));
 						decrementTenantGroupCount = true;
 					}
 				}
 				if (decrementTenantGroupCount) {
 					--updatedEntry.allocated.numTenantGroups;
-					updateClusterMetadata(removeTr,
-					                      finalEntry.get().assignedCluster.get(),
+					updateClusterMetadata(managementTr,
+					                      tenantEntry3.get().assignedCluster.get(),
 					                      Optional<ClusterConnectionString>(),
 					                      updatedEntry);
 				}
 			}
 
-			wait(safeThreadFutureToFuture(removeTr->commit()));
+			wait(safeThreadFutureToFuture(managementTr->commit()));
 
 			break;
 		} catch (Error& e) {
-			wait(safeThreadFutureToFuture(removeTr->onError(e)));
+			wait(safeThreadFutureToFuture(managementTr->onError(e)));
 		}
 	}
 
