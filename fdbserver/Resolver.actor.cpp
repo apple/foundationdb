@@ -655,7 +655,8 @@ ACTOR Future<Void> resolverCore(ResolverInterface resolver,
 	state TransactionStateResolveContext transactionStateResolveContext;
 	if (SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS) {
 		self->logAdapter = new LogSystemDiskQueueAdapter(self->logSystem, Reference<AsyncVar<PeekTxsInfo>>(), 1, false);
-		self->txnStateStore = keyValueStoreLogSystem(self->logAdapter, resolver.id(), 2e9, true, true, true);
+		self->txnStateStore = keyValueStoreLogSystem(
+		    self->logAdapter, db, resolver.id(), 2e9, true, true, true, SERVER_KNOBS->ENABLE_TLOG_ENCRYPTION);
 
 		// wait for txnStateStore recovery
 		wait(success(self->txnStateStore->readValue(StringRef())));

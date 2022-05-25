@@ -57,7 +57,7 @@ ACTOR Future<EKPGetLatestBaseCipherKeysReply> getUncachedLatestEncryptCipherKeys
 	try {
 		EKPGetLatestBaseCipherKeysReply reply = wait(proxy.get().getLatestBaseCipherKeys.getReply(request));
 		if (reply.error.present()) {
-			TraceEvent("GetLatestCipherKeys_RequestFailed").error(reply.error.get());
+			TraceEvent(SevWarn, "GetLatestCipherKeys_RequestFailed").error(reply.error.get());
 			throw encrypt_keys_fetch_failed();
 		}
 		return reply;
