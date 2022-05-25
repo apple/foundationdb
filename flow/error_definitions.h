@@ -324,6 +324,7 @@ ERROR( not_implemented, 4200, "Not implemented yet" )
 ERROR( permission_denied, 6000, "Client tried to access unauthorized data" )
 ERROR( unauthorized_attempt, 6001, "A untrusted client tried to send a message to a private endpoint" )
 ERROR( digital_signature_ops_error, 6002, "Digital signature operation error" )
+ERROR( authorization_token_verify_failed, 6003, "Failed to verify authorization token" )
 // clang-format on
 
 #undef ERROR

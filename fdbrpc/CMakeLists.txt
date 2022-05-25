@@ -10,6 +10,10 @@ set(FDBRPC_SRCS
   AsyncFileEncrypted.actor.cpp
   AsyncFileNonDurable.actor.cpp
   AsyncFileWriteChecker.cpp
+  Base64UrlDecode.h
+  Base64UrlDecode.cpp
+  Base64UrlEncode.h
+  Base64UrlEncode.cpp
   FailureMonitor.actor.cpp
   FlowProcess.actor.h
   FlowTransport.actor.cpp
