@@ -1,0 +1,18 @@
+struct UID {
+    first : ulong;
+    second : ulong;
+}
+
+table ReplyPromise {
+    uid : UID;
+}
+
+table PingRequest {
+    reply_promise : ReplyPromise;
+}
+
+table FakeRoot {
+    ping_request : PingRequest;
+}
+
+root_type FakeRoot;

@@ -14,6 +14,10 @@ mod connection;
 mod frame;
 mod uid;
 
+// #[allow(non_snake_case)]
+#[path = "../../target/flatbuffers/PingRequest_generated.rs"]
+mod ping_request;
+
 struct Listener {
     listener: TcpListener,
     limit_connections: Arc<Semaphore>,
@@ -47,6 +51,8 @@ pub async fn hello() -> Result<()> {
                 Some(frame) => match (frame.token.get_well_known_endpoint()) {
                     Some(uid::WLTOKEN::PingPacket) => {
                         println!("Ping        payload: {:x?}", frame);
+                        let fake_root = ping_request::root_as_fake_root(&frame.payload[..])?;
+                        println!("FakeRoot: {:x?}", fake_root);
                     }
                     Some(uid::WLTOKEN::NetworkTest) => {
                         println!("NetworkTest payload: {:x?}", frame);

@@ -113,6 +113,7 @@ struct scalar_traits<UID> : std::true_type {
 	constexpr static size_t size = sizeof(uint64_t[2]);
 	template <class Context>
 	static void save(uint8_t* out, const UID& uid, Context&) {
+		printf("Save UID %01llx %016llx\n", uid.first(), uid.second());
 		uint64_t* outI = reinterpret_cast<uint64_t*>(out);
 		outI[0] = uid.first();
 		outI[1] = uid.second();

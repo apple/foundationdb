@@ -8,6 +8,7 @@ edition = "2021"
 
 [dependencies]
 bytes = {version = "1.1"}
+flatbuffers = { version = "2.1" }
 num-traits = "0.2"
 num-derive = "0.3"
 tokio = { version = "1.10", features = ["full"] }
@@ -16,3 +17,6 @@ xxhash-rust = { version = "0.8.5", features = ["xxh3"] }
 [dev-dependencies]
 tokio = { version = "1", features = ["test-util"] }
 criterion = { version = "0.3.5", features = ["html_reports"] }
+
+[build-dependencies]
+flatc-rust = { version = "0.2" }

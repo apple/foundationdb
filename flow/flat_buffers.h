@@ -690,6 +690,7 @@ struct TraverseMessageTypes : Context {
 
 	template <class Member>
 	std::enable_if_t<expect_serialize_member<Member>> operator()(const Member& member) {
+		printf("SERIALIZED %s\n", typeid(Member).name());
 		if constexpr (serializable_traits<Member>::value) {
 			serializable_traits<Member>::serialize(f, const_cast<Member&>(member));
 		} else {
@@ -698,7 +699,9 @@ struct TraverseMessageTypes : Context {
 	};
 
 	template <class T>
-	std::enable_if_t<!expect_serialize_member<T> && !is_vector_like<T> && !is_union_like<T>> operator()(const T&) {}
+	std::enable_if_t<!expect_serialize_member<T> && !is_vector_like<T> && !is_union_like<T>> operator()(const T&) {
+		printf("PRIMITIVE %s\n", typeid(T).name());
+	}
 
 	template <class VectorLike>
 	std::enable_if_t<is_vector_like<VectorLike>> operator()(const VectorLike& members) {
@@ -708,6 +711,7 @@ struct TraverseMessageTypes : Context {
 		// to operator() will do that and we don't generate a vtable for the
 		// vector-like type itself
 		T t{};
+		printf("VECTOR %s\n", typeid(T).name());
 		(*this)(t);
 	}
 
@@ -716,6 +720,7 @@ struct TraverseMessageTypes : Context {
 		using UnionTraits = union_like_traits<UnionLike>;
 		static_assert(pack_size(typename UnionTraits::alternatives{}) <= 254,
 		              "Up to 254 alternatives are supported for unions");
+		printf("UNION %s\n", typeid(UnionTraits).name());
 		union_helper(typename UnionTraits::alternatives{});
 	}
 
@@ -1317,6 +1322,7 @@ uint8_t* save_members(Context& context,
                       FileIdentifier file_identifier,
                       const FirstMember& first,
                       const Members&... members) {
+	printf("SAVE_MEMBER %s\n", typeid(FirstMember).name());
 	if constexpr (serialize_raw<FirstMember>::value) {
 		return serialize_raw<FirstMember>::save_raw(context, first);
 	} else {
@@ -1398,6 +1404,7 @@ struct LoadSaveHelper<EnsureTable<T>, Context> : Context {
 		if constexpr (expect_serialize_member<T>) {
 			return alreadyATable.save(member.asUnderlyingType(), writer, vtables);
 		} else {
+			printf("FAKEROOT %s\n", typeid(T).name());
 			FakeRoot<T> t{ const_cast<T&>(member.asUnderlyingType()) };
 			return wrapInTable.save(t, writer, vtables);
 		}
