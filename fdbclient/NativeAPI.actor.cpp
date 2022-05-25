@@ -6954,18 +6954,10 @@ Future<Standalone<StringRef>> Transaction::getVersionstamp() {
 }
 
 // Gets the protocol version reported by a coordinator via the protocol info interface
-ACTOR Future<ProtocolVersion> getCoordinatorProtocol(
-    Reference<AsyncVar<Optional<ClientLeaderRegInterface>> const> coordinator) {
-	state ProtocolInfoReply reply;
-	if (coordinator->get().get().hostname.present()) {
-		wait(store(reply,
-		           retryGetReplyFromHostname(
-		               ProtocolInfoRequest{}, coordinator->get().get().hostname.get(), WLTOKEN_PROTOCOL_INFO)));
-	} else {
-		RequestStream<ProtocolInfoRequest> requestStream(
-		    Endpoint::wellKnown({ coordinator->get().get().getLeader.getEndpoint().addresses }, WLTOKEN_PROTOCOL_INFO));
-		wait(store(reply, retryBrokenPromise(requestStream, ProtocolInfoRequest{})));
-	}
+ACTOR Future<ProtocolVersion> getCoordinatorProtocol(NetworkAddress coordinatorAddress) {
+	RequestStream<ProtocolInfoRequest> requestStream(
+	    Endpoint::wellKnown({ coordinatorAddress }, WLTOKEN_PROTOCOL_INFO));
+	ProtocolInfoReply reply = wait(retryBrokenPromise(requestStream, ProtocolInfoRequest{}));
 	return reply.version;
 }
 
@@ -6974,16 +6966,8 @@ ACTOR Future<ProtocolVersion> getCoordinatorProtocol(
 // function will return with an unset result.
 // If an expected version is given, this future won't return if the actual protocol version matches the expected version
 ACTOR Future<Optional<ProtocolVersion>> getCoordinatorProtocolFromConnectPacket(
-    Reference<AsyncVar<Optional<ClientLeaderRegInterface>> const> coordinator,
+    NetworkAddress coordinatorAddress,
     Optional<ProtocolVersion> expectedVersion) {
-	state NetworkAddress coordinatorAddress;
-	if (coordinator->get().get().hostname.present()) {
-		Hostname h = coordinator->get().get().hostname.get();
-		wait(store(coordinatorAddress, h.resolveWithRetry()));
-	} else {
-		coordinatorAddress = coordinator->get().get().getLeader.getEndpoint().getPrimaryAddress();
-	}
-
 	state Optional<Reference<AsyncVar<Optional<ProtocolVersion>> const>> protocolVersion =
 	    FlowTransport::transport().getPeerProtocolAsyncVar(coordinatorAddress);
 
@@ -7024,10 +7008,18 @@ ACTOR Future<ProtocolVersion> getClusterProtocolImpl(
 		if (!coordinator->get().present()) {
 			wait(coordinator->onChange());
 		} else {
+			state NetworkAddress coordinatorAddress;
+			if (coordinator->get().get().hostname.present()) {
+				Hostname h = coordinator->get().get().hostname.get();
+				wait(store(coordinatorAddress, h.resolveWithRetry()));
+			} else {
+				coordinatorAddress = coordinator->get().get().getLeader.getEndpoint().getPrimaryAddress();
+			}
+
 			if (needToConnect) {
 				// Even though we typically rely on the connect packet to get the protocol version, we need to send some
 				// request in order to start a connection. This protocol version request serves that purpose.
-				protocolVersion = getCoordinatorProtocol(coordinator);
+				protocolVersion = getCoordinatorProtocol(coordinatorAddress);
 				needToConnect = false;
 			}
 			choose {
@@ -7044,7 +7036,7 @@ ACTOR Future<ProtocolVersion> getClusterProtocolImpl(
 				// Older versions of FDB don't have an endpoint to return the protocol version, so we get this info from
 				// the connect packet
 				when(Optional<ProtocolVersion> pv =
-				         wait(getCoordinatorProtocolFromConnectPacket(coordinator, expectedVersion))) {
+				         wait(getCoordinatorProtocolFromConnectPacket(coordinatorAddress, expectedVersion))) {
 					if (pv.present()) {
 						return pv.get();
 					} else {
