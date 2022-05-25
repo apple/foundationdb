@@ -46,9 +46,9 @@ const KeyRangeRef keyServersKeyServersKeys(LiteralStringRef("\xff/keyServers/\xf
                                            LiteralStringRef("\xff/keyServers/\xff/keyServers0"));
 const KeyRef keyServersKeyServersKey = keyServersKeyServersKeys.begin;
 
-const UID anonymousShardId = UID(666666, 88888888);
-
-const uint64_t emptyShardId = 77707777;
+// These constants are selected to be easily recognized during debugging.
+const UID anonymousShardId = UID(0x666666, 0x88888888);
+const uint64_t emptyShardId = 0x7777777;
 
 const Key keyServersKey(const KeyRef& k) {
 	return k.withPrefix(keyServersPrefix);

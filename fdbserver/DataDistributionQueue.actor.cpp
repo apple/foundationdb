@@ -1101,6 +1101,7 @@ struct DDQueueData {
 				} else {
 					ASSERT_WE_THINK(!rd.isRestore()); // Restored data move should not overlap.
 					// TODO(psm): The shard id is determined by DD.
+					rrs.dataMove.reset();
 					rrs.dataMoveId = deterministicRandom()->randomUniqueID();
 				}
 
