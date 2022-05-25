@@ -44,6 +44,8 @@ set(FDBSERVER_SRCS
   FDBExecHelper.actor.cpp
   FDBExecHelper.actor.h
   fdbserver.actor.cpp
+  GetCipherKeys.actor.cpp
+  GetCipherKeys.h
   GrvProxyServer.actor.cpp
   IConfigConsumer.cpp
   IConfigConsumer.h
