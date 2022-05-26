@@ -834,6 +834,8 @@ public:
 	// FIXME: configure url with database configuration instead of knob eventually
 	std::string BG_URL;
 
+	// whether to use blobRangeKeys or tenants for blob granule range sources
+	std::string BG_RANGE_SOURCE;
 	int BG_SNAPSHOT_FILE_TARGET_BYTES;
 	int BG_DELTA_FILE_TARGET_BYTES;
 	int BG_DELTA_BYTES_BEFORE_COMPACT;

@@ -9435,26 +9435,30 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		if (e.isError()) {
 			Error e = f.getError();
 
-			if (e.code() != error_code_worker_removed) {
-				throw e;
-			}
-			state UID clusterId = wait(getClusterId(&self));
-			ASSERT(self.clusterId.isValid());
-			UID durableClusterId = wait(self.clusterId.getFuture());
-			ASSERT(durableClusterId.isValid());
-			if (clusterId == durableClusterId) {
-				throw worker_removed();
-			}
-			// When a storage server connects to a new cluster, it deletes its
-			// old data and creates a new, empty data file for the new cluster.
-			// We want to avoid this and force a manual removal of the storage
-			// servers' old data when being assigned to a new cluster to avoid
-			// accidental data loss.
-			TraceEvent(SevWarn, "StorageServerBelongsToExistingCluster")
-			    .detail("ServerID", ssi.id())
-			    .detail("ClusterID", durableClusterId)
-			    .detail("NewClusterID", clusterId);
-			wait(Future<Void>(Never()));
+			throw e;
+			// TODO: #5375
+			/*
+			            if (e.code() != error_code_worker_removed) {
+			                throw e;
+			            }
+			            state UID clusterId = wait(getClusterId(&self));
+			            ASSERT(self.clusterId.isValid());
+			            UID durableClusterId = wait(self.clusterId.getFuture());
+			            ASSERT(durableClusterId.isValid());
+			            if (clusterId == durableClusterId) {
+			                throw worker_removed();
+			            }
+			            // When a storage server connects to a new cluster, it deletes its
+			            // old data and creates a new, empty data file for the new cluster.
+			            // We want to avoid this and force a manual removal of the storage
+			            // servers' old data when being assigned to a new cluster to avoid
+			            // accidental data loss.
+			            TraceEvent(SevWarn, "StorageServerBelongsToExistingCluster")
+			                .detail("ServerID", ssi.id())
+			                .detail("ClusterID", durableClusterId)
+			                .detail("NewClusterID", clusterId);
+			            wait(Future<Void>(Never()));
+			*/
 		}
 
 		self.interfaceRegistered =

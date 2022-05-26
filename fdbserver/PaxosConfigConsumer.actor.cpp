@@ -215,11 +215,15 @@ class GetCommittedVersionQuorum {
 			++self->totalRepliesReceived;
 			if (e.code() == error_code_version_already_compacted) {
 				if (self->quorumVersion.canBeSet()) {
-					self->quorumVersion.sendError(e);
+					// Calling sendError could delete self
+					auto local = self->quorumVersion;
+					local.sendError(e);
 				}
 			} else if (e.code() != error_code_timed_out && e.code() != error_code_broken_promise) {
 				if (self->quorumVersion.canBeSet()) {
-					self->quorumVersion.sendError(e);
+					// Calling sendError could delete self
+					auto local = self->quorumVersion;
+					local.sendError(e);
 				}
 			} else if (self->totalRepliesReceived == self->cfis.size() && self->quorumVersion.canBeSet() &&
 			           !self->quorumVersion.isError()) {
@@ -238,7 +242,10 @@ class GetCommittedVersionQuorum {
 				} else if (!self->quorumVersion.isSet()) {
 					// Otherwise, if a quorum agree on the committed version,
 					// some other occurred. Notify the caller of it.
-					self->quorumVersion.sendError(e);
+
+					// Calling sendError could delete self
+					auto local = self->quorumVersion;
+					local.sendError(e);
 				}
 			}
 		}
