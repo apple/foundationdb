@@ -2003,6 +2003,7 @@ int main(int argc, char* argv[]) {
 	if (args.mode == MODE_REPORT) {
 		ThreadStatistics stats = mergeSketchReport(args);
 		printThreadStats(stats, args, NULL, true);
+		return 0;
 	}
 
 	const auto pid_main = getpid();
