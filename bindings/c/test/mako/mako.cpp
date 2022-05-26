@@ -193,10 +193,8 @@ int populate(Database db,
 			auto future_commit = systemTx.commit();
 			const auto rc = waitAndHandleError(systemTx, future_commit, "CREATE_TENANT");
 			if (rc == FutureRC::RETRY) {
-				printf("retry\n");
 				continue;
 			} else {
-				printf("success\n");
 				// Keep going if commit was successful (FutureRC::OK)
 				// If not a retryable error, expected to be the error
 				// tenant_already_exists, meaning another thread finished creating it
