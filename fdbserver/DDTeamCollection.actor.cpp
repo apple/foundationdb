@@ -1298,7 +1298,7 @@ public:
 
 							bool addedNewBadTeam = false;
 							for (auto it : newBadTeams) {
-								if (self->removeTeam(self->m_teamSets[0], it)) {
+								if (self->removeTeam(it)) {
 									self->addTeam(it->getServers(), IsInitialTeam::True);
 									addedNewBadTeam = true;
 								}
@@ -1702,7 +1702,7 @@ public:
 					}
 
 					// The team will be marked as a bad team
-					bool foundTeam = self->removeTeam(self->m_teamSets[0], team);
+					bool foundTeam = self->removeTeam(team);
 					ASSERT(foundTeam);
 					// removeTeam() has side effect of swapping the last element to the current pos
 					// in the serverTeams vector in the machine team.
@@ -1790,7 +1790,7 @@ public:
 				ASSERT(st.isValid());
 				// The team will be marked as a bad team
 
-				bool foundTeam = self->removeTeam(self->m_teamSets[0], st);
+				bool foundTeam = self->removeTeam(st);
 				ASSERT(foundTeam);
 				self->addTeam(st->getServers(), IsInitialTeam::True, IsRedundantTeam::True);
 				TEST(true); // Marked team as a bad team
@@ -4775,9 +4775,11 @@ void DDTeamCollection::addServer(StorageServerInterface newServer,
 	}
 }
 
-bool DDTeamCollection::removeTeam(Reference<TCTeamSet>& teamSet, Reference<TCTeamInfo> team) {
+bool DDTeamCollection::removeTeam(Reference<TCTeamInfo> team) {
 	TraceEvent("RemovingServerTeamFromTeamSet", distributorId).detail("Team", team->getDesc());
 	bool found = true;
+	Reference<TCTeamSet> teamSet = team->teamSet();
+	ASSERT(teamSet.isValid());
 
 	if (!teamSet->removeTeam(team)) {
 		TraceEvent te(SevError, "TeamNotInTeamSet", distributorId);
@@ -4962,7 +4964,7 @@ void DDTeamCollection::removeServer(UID removedServer) {
 				    .detail("TeamServerIDs", teams[t]->getServerIDsStr())
 				    .detail("TeamID", teams[t]->getTeamID());
 				// removeTeam also needs to remove the team from the machine team info.
-				removeTeam(teamSet, teams[t]);
+				removeTeam(teams[t]);
 				removedCount++;
 			}
 		}

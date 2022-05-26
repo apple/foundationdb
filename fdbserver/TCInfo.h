@@ -223,6 +223,7 @@ public:
 
 	void addToTeamSet(const Reference<TCTeamSet>& teamSet);
 	void removeFromTeamSet();
+	Reference<TCTeamSet> teamSet() { return m_teamSet; }
 
 private:
 	// Calculate an "average" of the metrics replies that we received.  Penalize teams from which we did not receive

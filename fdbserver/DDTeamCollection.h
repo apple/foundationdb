@@ -665,7 +665,7 @@ public:
 	               Version addedVersion,
 	               DDEnabledState const& ddEnabledState);
 
-	bool removeTeam(Reference<TCTeamSet>& teamSet, Reference<TCTeamInfo> team);
+	bool removeTeam(Reference<TCTeamInfo> team);
 
 	void removeTSS(UID removedServer);
 
