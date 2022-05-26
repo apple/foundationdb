@@ -56,6 +56,9 @@ public:
 	// record.
 	std::string toString() const override;
 
+	// Returns true because memory connection records are supported through the C API
+	bool supportedExternally() const override;
+
 	void addref() override { ThreadSafeReferenceCounted<ClusterConnectionMemoryRecord>::addref(); }
 	void delref() override { ThreadSafeReferenceCounted<ClusterConnectionMemoryRecord>::delref(); }
 

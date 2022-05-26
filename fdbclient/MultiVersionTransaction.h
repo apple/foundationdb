@@ -486,12 +486,8 @@ public:
 	Reference<IDatabase> createDatabase(Reference<IClusterConnectionRecord> connectionRecord) override;
 	Reference<IDatabase> createDatabase609(const char* clusterFilePath); // legacy database creation
 
-	template <class T>
-	Reference<IDatabase> createDatabaseImpl(Reference<T> connectionRecord) {
-		throw unsupported_operation();
-	}
-	Reference<IDatabase> createDatabaseImpl(Reference<ClusterConnectionFile> connectionFile);
-	Reference<IDatabase> createDatabaseImpl(Reference<ClusterConnectionMemoryRecord> connectionRecord);
+	Reference<IDatabase> createDatabaseFromFile(std::string filename);
+	Reference<IDatabase> createDatabaseFromConnectionString(std::string connectionString);
 
 	void addNetworkThreadCompletionHook(void (*hook)(void*), void* hookParameter) override;
 

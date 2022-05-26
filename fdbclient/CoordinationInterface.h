@@ -148,6 +148,13 @@ public:
 	// Signals to the connection record that it was successfully used to connect to a cluster.
 	void notifyConnected();
 
+	// If the connection string is backed by a file, returns the filename. Otherwise, returns an empty optional.
+	// The interface provides a default implementation that assumes no file-backing.
+	virtual Optional<std::string> getFilename() const { return Optional<std::string>(); }
+
+	// Returns true if this type of cluster connection record is exposed through the C API
+	virtual bool supportedExternally() const = 0;
+
 	virtual void addref() = 0;
 	virtual void delref() = 0;
 

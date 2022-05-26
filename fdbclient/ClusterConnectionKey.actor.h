@@ -104,6 +104,9 @@ public:
 	// the key where the record is stored.
 	std::string toString() const override { return "fdbkey://" + printable(connectionStringKey); }
 
+	// Returns false because cluster connection keys are not supported through the C API
+	bool supportedExternally() const { return false; }
+
 	void addref() override { ThreadSafeReferenceCounted<ClusterConnectionKey>::addref(); }
 	void delref() override { ThreadSafeReferenceCounted<ClusterConnectionKey>::delref(); }
 

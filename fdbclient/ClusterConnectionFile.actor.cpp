@@ -46,6 +46,10 @@ Reference<ClusterConnectionFile> ClusterConnectionFile::openOrDefault(std::strin
 	return makeReference<ClusterConnectionFile>(lookupClusterFileName(filename).first);
 }
 
+Reference<ClusterConnectionFile> ClusterConnectionFile::openOrDefault(const char* filename) {
+	return openOrDefault(std::string(filename == nullptr ? "" : filename));
+}
+
 // Sets the connections string held by this object and persists it.
 Future<Void> ClusterConnectionFile::setAndPersistConnectionString(ClusterConnectionString const& conn) {
 	ASSERT(filename.size());
@@ -97,6 +101,16 @@ std::string ClusterConnectionFile::toString() const {
 	// may use backslashes in windows paths, etc.
 	// SOMEDAY: we should encode this string as a proper URI.
 	return "file://" + filename;
+}
+
+// Return the specified path of the cluster file
+Optional<std::string> ClusterConnectionFile::getFilename() const {
+	return filename;
+}
+
+// Returns true because cluster files are supported through the C API
+bool ClusterConnectionFile::supportedExternally() const {
+	return true;
 }
 
 // returns <resolved name, was default file>

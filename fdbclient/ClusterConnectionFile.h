@@ -39,6 +39,7 @@ public:
 	// Creates a cluster file from the given filename. If the filename is empty, attempts to load the default
 	// cluster file instead.
 	static Reference<ClusterConnectionFile> openOrDefault(std::string const& filename);
+	static Reference<ClusterConnectionFile> openOrDefault(const char* filename);
 
 	// Sets the connections string held by this object and persists it.
 	Future<Void> setAndPersistConnectionString(ClusterConnectionString const&) override;
@@ -60,6 +61,12 @@ public:
 	// Returns a string representation of this cluster connection record. This will include the type of record and the
 	// filename of the cluster file.
 	std::string toString() const override;
+
+	// Return the specified path of the cluster file
+	virtual Optional<std::string> getFilename() const override;
+
+	// Returns true because cluster files are supported through the C API
+	bool supportedExternally() const override;
 
 	void addref() override { ThreadSafeReferenceCounted<ClusterConnectionFile>::addref(); }
 	void delref() override { ThreadSafeReferenceCounted<ClusterConnectionFile>::delref(); }
