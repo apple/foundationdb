@@ -115,12 +115,18 @@ int cleanup(Database db, Arguments const& args) {
 	auto watch = Stopwatch(StartAtCtor{});
 
 	int num_iterations = (args.tenants > 1) ? args.tenants : 1;
+	Tenant* tenants[args.tenants];
+	for (int i = 0; i < args.tenants; ++i) {
+		BytesRef tenant_name = toBytesRef("tenant" + std::to_string(i));
+		tenants[i] = new Tenant(&db, tenant_name, tenant_name.length());
+	}
 	for (int i = 0; i < num_iterations; ++i) {
 		// If args.tenants is zero, this will use a non-tenant txn and perform a single range clear.
 		// If 1, it will use a tenant txn and do a single range clear instead.
 		// If > 1, it will perform a range clear with a different tenant txn per iteration.
-		Transaction tx = createNewTransaction(db, args, i);
+		Transaction tx = createNewTransaction(db, args, i, args.tenants > 0 ? tenants : nullptr);
 		while (true) {
+			printf("clearrange: %d\n", i);
 			tx.clearRange(beginstr, endstr);
 			auto future_commit = tx.commit();
 			const auto rc = waitAndHandleError(tx, future_commit, "COMMIT_CLEANUP");
@@ -136,15 +142,18 @@ int cleanup(Database db, Arguments const& args) {
 
 		// If tenants are specified, also delete the tenant after clearing out its keyspace
 		if (args.tenants > 0) {
+			Transaction systemTx = db.createTransaction();
 			while (true) {
-				Transaction systemTx = db.createTransaction();
+				printf("deletetenant: %d\n", i);
 				Tenant::deleteTenant(systemTx, toBytesRef("tenant" + std::to_string(i)));
 				auto future_commit = systemTx.commit();
 				const auto rc = waitAndHandleError(systemTx, future_commit, "DELETE_TENANT");
 				if (rc == FutureRC::OK) {
+					printf("branch1");
 					break;
 				} else if (rc == FutureRC::RETRY || rc == FutureRC::CONFLICT) {
 					// tx already reset
+					printf("branch2");
 					continue;
 				} else {
 					return -1;
@@ -191,8 +200,10 @@ int populate(Database db,
 			auto future_commit = systemTx.commit();
 			const auto rc = waitAndHandleError(systemTx, future_commit, "CREATE_TENANT");
 			if (rc == FutureRC::RETRY) {
+				printf("retry\n");
 				continue;
 			} else {
+				printf("success\n");
 				// Keep going if commit was successful (FutureRC::OK)
 				// If not a retryable error, expected to be the error
 				// tenant_already_exists, meaning another thread finished creating it
@@ -201,7 +212,11 @@ int populate(Database db,
 			}
 		}
 	}
-	Transaction tx = createNewTransaction(db, args);
+	Tenant* tenants[args.tenants];
+	for (int i = 0; i < args.tenants; ++i) {
+		BytesRef tenant_name = toBytesRef("tenant" + std::to_string(i));
+		tenants[i] = new Tenant(&db, tenant_name, tenant_name.length());
+	}
 	for (auto i = key_begin; i <= key_end; i++) {
 		/* sequential keys */
 		genKey(keystr.data(), KEY_PREFIX, args, i);
@@ -216,6 +231,7 @@ int populate(Database db,
 				usleep(1000);
 			}
 		}
+		Transaction tx = createNewTransaction(db, args, -1, args.tenants > 0 ? tenants : nullptr);
 		if (num_seconds_trace_every) {
 			if (toIntegerSeconds(watch_trace.stop().diff()) >= num_seconds_trace_every) {
 				watch_trace.startFromStop();
@@ -247,7 +263,7 @@ int populate(Database db,
 			auto tx_restarter = ExitGuard([&watch_tx]() { watch_tx.startFromStop(); });
 			if (rc == FutureRC::OK) {
 				key_checkpoint = i + 1; // restart on failures from next key
-				tx = createNewTransaction(db, args);
+				tx = createNewTransaction(db, args, -1, args.tenants > 0 ? tenants : nullptr);
 			} else if (rc == FutureRC::ABORT) {
 				return -1;
 			} else {
@@ -441,7 +457,7 @@ int runWorkload(Database db,
 
 	/* main transaction loop */
 	while (1) {
-		Transaction tx = createNewTransaction(db, args, 0, args.tenants > 0 ? tenants : nullptr);
+		Transaction tx = createNewTransaction(db, args, -1, args.tenants > 0 ? tenants : nullptr);
 		while ((thread_tps > 0) && (xacts >= current_tps)) {
 			/* throttle on */
 			const auto time_now = steady_clock::now();

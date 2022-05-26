@@ -576,15 +576,16 @@ public:
 	Tenant() noexcept : tenant(nullptr) {}
 
 	static void createTenant(Transaction tr, BytesRef name) {
-		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, 1);
-		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_LOCK_AWARE, 1);
+		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, BytesRef());
+		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_LOCK_AWARE, BytesRef());
 		tr.set(toBytesRef(fmt::format("{}{}", tenantManagementMapPrefix, toCharsRef(name))),
 		       toBytesRef(std::string("")));
 	}
 
 	static void deleteTenant(Transaction tr, BytesRef name) {
-		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_RAW_ACCESS, 1);
-		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_LOCK_AWARE, 1);
+		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, BytesRef());
+		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_RAW_ACCESS, BytesRef());
+		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_LOCK_AWARE, BytesRef());
 		tr.clear(toBytesRef(fmt::format("{}{}", tenantManagementMapPrefix, toCharsRef(name))));
 	}
 
