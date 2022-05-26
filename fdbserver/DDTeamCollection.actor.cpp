@@ -3543,6 +3543,8 @@ bool DDTeamCollection::satisfiesPolicy(const std::vector<Reference<TCServerInfo>
 	return result && resultEntries.size() == 0;
 }
 
+constexpr int numTeamSets = 4;
+
 DDTeamCollection::DDTeamCollection(Database const& cx,
                                    UID distributorId,
                                    MoveKeysLock const& lock,
@@ -3584,7 +3586,9 @@ DDTeamCollection::DDTeamCollection(Database const& cx,
 		    .detail("State", "Inactive")
 		    .trackLatest(ddTrackerStartingEventHolder->trackingKey);
 	}
-	m_teamSets.push_back(makeReference<TCTeamSet>());
+	for (int i = 0; i < numTeamSets; i++) {
+		m_teamSets.push_back(makeReference<TCTeamSet>());
+	}
 }
 
 DDTeamCollection::~DDTeamCollection() {
@@ -3837,6 +3841,10 @@ int DDTeamCollection::overlappingMachineMembers(std::vector<Standalone<StringRef
 	return maxMatchingServers;
 }
 
+Reference<TCTeamSet> DDTeamCollection::pickTeamSetForNewTeam() {
+	return m_teamSets[0];
+}
+
 void DDTeamCollection::addTeam(const std::vector<Reference<TCServerInfo>>& newTeamServers,
                                IsInitialTeam isInitialTeam,
                                IsRedundantTeam redundantTeam) {
@@ -3854,8 +3862,9 @@ void DDTeamCollection::addTeam(const std::vector<Reference<TCServerInfo>>& newTe
 	}
 
 	// For a good team, we add it to teams and create machine team for it when necessary
-	teamInfo->addToTeamSet(m_teamSets[0]);
-	m_teamSets[0]->addTeam(teamInfo);
+	Reference<TCTeamSet> teamSet = pickTeamSetForNewTeam();
+	teamInfo->addToTeamSet(teamSet);
+	teamSet->addTeam(teamInfo);
 	for (auto& server : newTeamServers) {
 		server->addTeam(teamInfo);
 	}
@@ -4713,8 +4722,6 @@ bool DDTeamCollection::shouldHandleServer(const StorageServerInterface& newServe
 	        std::find(otherTrackedDCs.get().begin(), otherTrackedDCs.get().end(), newServer.locality.dcId()) ==
 	            otherTrackedDCs.get().end());
 }
-
-void DDTeamCollection::balanceTeamSets() {}
 
 void DDTeamCollection::addServer(StorageServerInterface newServer,
                                  ProcessClass processClass,

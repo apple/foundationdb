@@ -643,7 +643,7 @@ public:
 		return count;
 	}
 
-	void balanceTeamSets();
+	Reference<TCTeamSet> pickTeamSetForNewTeam();
 
 	void addLaggingStorageServer(Key zoneId);
 
