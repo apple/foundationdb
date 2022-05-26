@@ -89,6 +89,7 @@ struct GetTeamRequest {
 	double inflightPenalty;
 	std::vector<UID> completeSources;
 	std::vector<UID> src;
+	int teamSetIndex;
 	Promise<std::pair<Optional<Reference<IDataDistributionTeam>>, bool>> reply;
 
 	GetTeamRequest() {}
@@ -96,9 +97,10 @@ struct GetTeamRequest {
 	               WantTrueBest wantsTrueBest,
 	               PreferLowerUtilization preferLowerUtilization,
 	               TeamMustHaveShards teamMustHaveShards,
+	               int teamSetIndex,
 	               double inflightPenalty = 1.0)
 	  : wantsNewServers(wantsNewServers), wantsTrueBest(wantsTrueBest), preferLowerUtilization(preferLowerUtilization),
-	    teamMustHaveShards(teamMustHaveShards), inflightPenalty(inflightPenalty) {}
+	    teamMustHaveShards(teamMustHaveShards), inflightPenalty(inflightPenalty), teamSetIndex(teamSetIndex) {}
 
 	std::string getDesc() const {
 		std::stringstream ss;

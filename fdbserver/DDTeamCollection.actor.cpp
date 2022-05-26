@@ -3368,7 +3368,8 @@ Future<Void> DDTeamCollection::checkBuildTeams() {
 }
 
 Future<Void> DDTeamCollection::getTeam(GetTeamRequest req) {
-	return DDTeamCollectionImpl::getTeam(this, this->m_teamSets[0]->teams(), req);
+	ASSERT(req.teamSetIndex == 0);
+	return DDTeamCollectionImpl::getTeam(this, this->m_teamSets[req.teamSetIndex]->teams(), req);
 }
 
 Future<Void> DDTeamCollection::addSubsetOfEmergencyTeams() {
@@ -5389,6 +5390,7 @@ public:
 		    new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
 		state int processSize = 5;
 		state int teamSize = 3;
+		state int teamSetIndex = 0;
 		state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
 
 		GetStorageMetricsReply mid_avail;
@@ -5419,8 +5421,11 @@ public:
 		 */
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
-		state GetTeamRequest req(
-		    WantNewServers::False, WantTrueBest::True, PreferLowerUtilization::True, TeamMustHaveShards::False);
+		state GetTeamRequest req(WantNewServers::False,
+		                         WantTrueBest::True,
+		                         PreferLowerUtilization::True,
+		                         TeamMustHaveShards::False,
+		                         teamSetIndex);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5441,6 +5446,7 @@ public:
 		    new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
 		state int processSize = 5;
 		state int teamSize = 3;
+		state int teamSetIndex = 0;
 		state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
 
 		GetStorageMetricsReply mid_avail;
@@ -5472,8 +5478,11 @@ public:
 		 */
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0), UID(4, 0) };
 
-		state GetTeamRequest req(
-		    WantNewServers::False, WantTrueBest::True, PreferLowerUtilization::True, TeamMustHaveShards::False);
+		state GetTeamRequest req(WantNewServers::False,
+		                         WantTrueBest::True,
+		                         PreferLowerUtilization::True,
+		                         TeamMustHaveShards::False,
+		                         teamSetIndex);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5495,6 +5504,7 @@ public:
 		    new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
 		state int processSize = 5;
 		state int teamSize = 3;
+		state int teamSetIndex = 0;
 		state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
 
 		GetStorageMetricsReply mid_avail;
@@ -5524,8 +5534,11 @@ public:
 
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
-		state GetTeamRequest req(
-		    WantNewServers::True, WantTrueBest::True, PreferLowerUtilization::True, TeamMustHaveShards::False);
+		state GetTeamRequest req(WantNewServers::True,
+		                         WantTrueBest::True,
+		                         PreferLowerUtilization::True,
+		                         TeamMustHaveShards::False,
+		                         teamSetIndex);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5547,6 +5560,7 @@ public:
 		    new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
 		state int processSize = 5;
 		state int teamSize = 3;
+		state int teamSetIndex = 0;
 		state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
 
 		GetStorageMetricsReply mid_avail;
@@ -5575,8 +5589,11 @@ public:
 		 */
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
-		state GetTeamRequest req(
-		    WantNewServers::True, WantTrueBest::True, PreferLowerUtilization::False, TeamMustHaveShards::False);
+		state GetTeamRequest req(WantNewServers::True,
+		                         WantTrueBest::True,
+		                         PreferLowerUtilization::False,
+		                         TeamMustHaveShards::False,
+		                         teamSetIndex);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5597,6 +5614,7 @@ public:
 		    new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
 		state int processSize = 5;
 		state int teamSize = 3;
+		state int teamSetIndex = 0;
 		state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
 
 		GetStorageMetricsReply low_avail;
@@ -5627,8 +5645,11 @@ public:
 		 */
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
-		state GetTeamRequest req(
-		    WantNewServers::True, WantTrueBest::True, PreferLowerUtilization::True, TeamMustHaveShards::False);
+		state GetTeamRequest req(WantNewServers::True,
+		                         WantTrueBest::True,
+		                         PreferLowerUtilization::True,
+		                         TeamMustHaveShards::False,
+		                         teamSetIndex);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5645,6 +5666,7 @@ public:
 		    new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
 		state int processSize = 5;
 		state int teamSize = 3;
+		state int teamSetIndex = 0;
 		state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
 
 		GetStorageMetricsReply low_avail;
@@ -5684,8 +5706,11 @@ public:
 		 */
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
-		state GetTeamRequest req(
-		    WantNewServers::True, WantTrueBest::True, PreferLowerUtilization::True, TeamMustHaveShards::False);
+		state GetTeamRequest req(WantNewServers::True,
+		                         WantTrueBest::True,
+		                         PreferLowerUtilization::True,
+		                         TeamMustHaveShards::False,
+		                         teamSetIndex);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5702,6 +5727,7 @@ public:
 		    new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
 		state int processSize = 5;
 		state int teamSize = 3;
+		state int teamSetIndex = 0;
 		state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
 		GetStorageMetricsReply mid_avail;
 		mid_avail.capacity.bytes = 1000 * 1024 * 1024;
@@ -5733,8 +5759,11 @@ public:
 
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
-		state GetTeamRequest req(
-		    WantNewServers::True, WantTrueBest::True, PreferLowerUtilization::True, TeamMustHaveShards::False);
+		state GetTeamRequest req(WantNewServers::True,
+		                         WantTrueBest::True,
+		                         PreferLowerUtilization::True,
+		                         TeamMustHaveShards::False,
+		                         teamSetIndex);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
