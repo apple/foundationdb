@@ -19,6 +19,7 @@
  */
 
 #include "fdbrpc/FlowTransport.h"
+#include "flow/Arena.h"
 #include "flow/network.h"
 
 #include <cstdint>
@@ -278,6 +279,33 @@ struct UnauthorizedEndpointReceiver final : NetworkMessageReceiver {
 	bool isPublic() const override { return true; }
 };
 
+// NetworkAddressCachedString retains a cached Standalone<StringRef> of
+// a NetworkAddressList.address.toString() value. This cached value is useful
+// for features in the hot path (i.e. Tracing), which need the String formatted value
+// frequently and do not wish to pay the formatting cost. If the underlying NetworkAddressList
+// needs to change, do not attempt to update it directly, use the setNetworkAddress API as it
+// will ensure the new toString() cached value is updated.
+class NetworkAddressCachedString {
+public:
+	NetworkAddressCachedString() { setAddressList(NetworkAddressList()); }
+	NetworkAddressCachedString(NetworkAddressList const& list) { setAddressList(list); }
+	NetworkAddressList const& getAddressList() const { return addressList; }
+	void setAddressList(NetworkAddressList const& list) {
+		cachedStr = Standalone<StringRef>(StringRef(list.address.toString()));
+		addressList = list;
+	}
+	void setNetworkAddress(NetworkAddress const& addr) {
+		addressList.address = addr;
+		setAddressList(addressList); // force the recaching of the string.
+	}
+	Standalone<StringRef> getLocalAddressAsString() const { return cachedStr; }
+	operator NetworkAddressList const&() { return addressList; }
+
+private:
+	NetworkAddressList addressList;
+	Standalone<StringRef> cachedStr;
+};
+
 class TransportData {
 public:
 	TransportData(uint64_t transportId, int maxWellKnownEndpoints, IPAllowList const* allowList);
@@ -299,7 +327,7 @@ public:
 	// Returns true if given network address 'address' is one of the address we are listening on.
 	bool isLocalAddress(const NetworkAddress& address) const;
 
-	NetworkAddressList localAddresses;
+	NetworkAddressCachedString localAddresses;
 	std::vector<Future<Void>> listeners;
 	std::unordered_map<NetworkAddress, Reference<struct Peer>> peers;
 	std::unordered_map<NetworkAddress, std::pair<double, double>> closedPeers;
@@ -451,6 +479,7 @@ struct ConnectPacket {
 		serializer(ar, connectPacketLength);
 		if (connectPacketLength > sizeof(ConnectPacket) - sizeof(connectPacketLength)) {
 			ASSERT(!g_network->isSimulated());
+			TraceEvent("SerializationFailed").backtrace();
 			throw serialization_failed();
 		}
 
@@ -788,6 +817,9 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 				    .errorUnsuppressed(e)
 				    .suppressFor(1.0)
 				    .detail("PeerAddr", self->destination);
+
+				// Since the connection has closed, we need to check the protocol version the next time we connect
+				self->compatible = true;
 			}
 
 			if (self->destination.isPublic() &&
@@ -857,9 +889,9 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 Peer::Peer(TransportData* transport, NetworkAddress const& destination)
   : transport(transport), destination(destination), compatible(true), outgoingConnectionIdle(true),
     lastConnectTime(0.0), reconnectionDelay(FLOW_KNOBS->INITIAL_RECONNECTION_TIME), peerReferences(-1),
-    incompatibleProtocolVersionNewer(false), bytesReceived(0), bytesSent(0), lastDataPacketSentTime(now()),
-    outstandingReplies(0), pingLatencies(destination.isPublic() ? FLOW_KNOBS->PING_SAMPLE_AMOUNT : 1),
-    lastLoggedTime(0.0), lastLoggedBytesReceived(0), lastLoggedBytesSent(0), timeoutCount(0),
+    bytesReceived(0), bytesSent(0), lastDataPacketSentTime(now()), outstandingReplies(0),
+    pingLatencies(destination.isPublic() ? FLOW_KNOBS->PING_SAMPLE_AMOUNT : 1), lastLoggedTime(0.0),
+    lastLoggedBytesReceived(0), lastLoggedBytesSent(0), timeoutCount(0),
     protocolVersion(Reference<AsyncVar<Optional<ProtocolVersion>>>(new AsyncVar<Optional<ProtocolVersion>>())),
     connectOutgoingCount(0), connectIncomingCount(0), connectFailedCount(0),
     connectLatencies(destination.isPublic() ? FLOW_KNOBS->NETWORK_CONNECT_SAMPLE_AMOUNT : 1) {
@@ -877,12 +909,12 @@ void Peer::send(PacketBuffer* pb, ReliablePacket* rp, bool firstUnsent) {
 void Peer::prependConnectPacket() {
 	// Send the ConnectPacket expected at the beginning of a new connection
 	ConnectPacket pkt;
-	if (transport->localAddresses.address.isTLS() == destination.isTLS()) {
-		pkt.canonicalRemotePort = transport->localAddresses.address.port;
-		pkt.setCanonicalRemoteIp(transport->localAddresses.address.ip);
-	} else if (transport->localAddresses.secondaryAddress.present()) {
-		pkt.canonicalRemotePort = transport->localAddresses.secondaryAddress.get().port;
-		pkt.setCanonicalRemoteIp(transport->localAddresses.secondaryAddress.get().ip);
+	if (transport->localAddresses.getAddressList().address.isTLS() == destination.isTLS()) {
+		pkt.canonicalRemotePort = transport->localAddresses.getAddressList().address.port;
+		pkt.setCanonicalRemoteIp(transport->localAddresses.getAddressList().address.ip);
+	} else if (transport->localAddresses.getAddressList().secondaryAddress.present()) {
+		pkt.canonicalRemotePort = transport->localAddresses.getAddressList().secondaryAddress.get().port;
+		pkt.setCanonicalRemoteIp(transport->localAddresses.getAddressList().secondaryAddress.get().ip);
 	} else {
 		// a "mixed" TLS/non-TLS connection is like a client/server connection - there's no way to reverse it
 		pkt.canonicalRemotePort = 0;
@@ -919,10 +951,10 @@ void Peer::onIncomingConnection(Reference<Peer> self, Reference<IConnection> con
 	++self->connectIncomingCount;
 	if (!destination.isPublic() && !outgoingConnectionIdle)
 		throw address_in_use();
-	NetworkAddress compatibleAddr = transport->localAddresses.address;
-	if (transport->localAddresses.secondaryAddress.present() &&
-	    transport->localAddresses.secondaryAddress.get().isTLS() == destination.isTLS()) {
-		compatibleAddr = transport->localAddresses.secondaryAddress.get();
+	NetworkAddress compatibleAddr = transport->localAddresses.getAddressList().address;
+	if (transport->localAddresses.getAddressList().secondaryAddress.present() &&
+	    transport->localAddresses.getAddressList().secondaryAddress.get().isTLS() == destination.isTLS()) {
+		compatibleAddr = transport->localAddresses.getAddressList().secondaryAddress.get();
 	}
 
 	if (!destination.isPublic() || outgoingConnectionIdle || destination > compatibleAddr ||
@@ -1229,7 +1261,6 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 	state bool expectConnectPacket = true;
 	state bool compatible = false;
 	state bool incompatiblePeerCounted = false;
-	state bool incompatibleProtocolVersionNewer = false;
 	state NetworkAddress peerAddress;
 	state ProtocolVersion peerProtocolVersion;
 	state Reference<AuthorizedTenants> authorizedTenants = makeReference<AuthorizedTenants>();
@@ -1295,7 +1326,6 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 						uint64_t connectionId = pkt.connectionId;
 						if (!pkt.protocolVersion.hasObjectSerializerFlag() ||
 						    !pkt.protocolVersion.isCompatible(g_network->protocolVersion())) {
-							incompatibleProtocolVersionNewer = pkt.protocolVersion > g_network->protocolVersion();
 							NetworkAddress addr = pkt.canonicalRemotePort
 							                          ? NetworkAddress(pkt.canonicalRemoteIp(), pkt.canonicalRemotePort)
 							                          : conn->getPeerAddress();
@@ -1355,7 +1385,6 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 							    .suppressFor(1.0)
 							    .detail("PeerAddr", NetworkAddress(pkt.canonicalRemoteIp(), pkt.canonicalRemotePort));
 							peer->compatible = compatible;
-							peer->incompatibleProtocolVersionNewer = incompatibleProtocolVersionNewer;
 							if (!compatible) {
 								peer->transport->numIncompatibleConnections++;
 								incompatiblePeerCounted = true;
@@ -1373,7 +1402,6 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 							}
 							peer = transport->getOrOpenPeer(peerAddress, false);
 							peer->compatible = compatible;
-							peer->incompatibleProtocolVersionNewer = incompatibleProtocolVersionNewer;
 							if (!compatible) {
 								peer->transport->numIncompatibleConnections++;
 								incompatiblePeerCounted = true;
@@ -1455,10 +1483,10 @@ ACTOR static Future<Void> listen(TransportData* self, NetworkAddress listenAddr)
 	state ActorCollectionNoErrors
 	    incoming; // Actors monitoring incoming connections that haven't yet been associated with a peer
 	state Reference<IListener> listener = INetworkConnections::net()->listen(listenAddr);
-	if (!g_network->isSimulated() && self->localAddresses.address.port == 0) {
+	if (!g_network->isSimulated() && self->localAddresses.getAddressList().address.port == 0) {
 		TraceEvent(SevInfo, "UpdatingListenAddress")
 		    .detail("AssignedListenAddress", listener->getListenAddress().toString());
-		self->localAddresses.address = listener->getListenAddress();
+		self->localAddresses.setNetworkAddress(listener->getListenAddress());
 	}
 	state uint64_t connectionCount = 0;
 	try {
@@ -1507,8 +1535,9 @@ Reference<Peer> TransportData::getOrOpenPeer(NetworkAddress const& address, bool
 }
 
 bool TransportData::isLocalAddress(const NetworkAddress& address) const {
-	return address == localAddresses.address ||
-	       (localAddresses.secondaryAddress.present() && address == localAddresses.secondaryAddress.get());
+	return address == localAddresses.getAddressList().address ||
+	       (localAddresses.getAddressList().secondaryAddress.present() &&
+	        address == localAddresses.getAddressList().secondaryAddress.get());
 }
 
 ACTOR static Future<Void> multiVersionCleanupWorker(TransportData* self) {
@@ -1554,15 +1583,21 @@ void FlowTransport::initMetrics() {
 }
 
 NetworkAddressList FlowTransport::getLocalAddresses() const {
-	return self->localAddresses;
+	return self->localAddresses.getAddressList();
 }
 
 NetworkAddress FlowTransport::getLocalAddress() const {
-	return self->localAddresses.address;
+	return self->localAddresses.getAddressList().address;
+}
+
+Standalone<StringRef> FlowTransport::getLocalAddressAsString() const {
+	return self->localAddresses.getLocalAddressAsString();
 }
 
 void FlowTransport::setLocalAddress(NetworkAddress const& address) {
-	self->localAddresses.address = address;
+	auto newAddress = self->localAddresses.getAddressList();
+	newAddress.address = address;
+	self->localAddresses.setAddressList(newAddress);
 }
 
 const std::unordered_map<NetworkAddress, Reference<Peer>>& FlowTransport::getAllPeers() const {
@@ -1586,11 +1621,14 @@ Future<Void> FlowTransport::onIncompatibleChanged() {
 
 Future<Void> FlowTransport::bind(NetworkAddress publicAddress, NetworkAddress listenAddress) {
 	ASSERT(publicAddress.isPublic());
-	if (self->localAddresses.address == NetworkAddress()) {
-		self->localAddresses.address = publicAddress;
+	if (self->localAddresses.getAddressList().address == NetworkAddress()) {
+		self->localAddresses.setNetworkAddress(publicAddress);
 	} else {
-		self->localAddresses.secondaryAddress = publicAddress;
+		auto addrList = self->localAddresses.getAddressList();
+		addrList.secondaryAddress = publicAddress;
+		self->localAddresses.setAddressList(addrList);
 	}
+	// reformatLocalAddress()
 	TraceEvent("Binding").detail("PublicAddress", publicAddress).detail("ListenAddress", listenAddress);
 
 	Future<Void> listenF = listen(self, listenAddress);
@@ -1641,7 +1679,7 @@ void FlowTransport::removePeerReference(const Endpoint& endpoint, bool isStream)
 void FlowTransport::addEndpoint(Endpoint& endpoint, NetworkMessageReceiver* receiver, TaskPriority taskID) {
 	endpoint.token = deterministicRandom()->randomUniqueID();
 	if (receiver->isStream()) {
-		endpoint.addresses = self->localAddresses;
+		endpoint.addresses = self->localAddresses.getAddressList();
 		endpoint.token = UID(endpoint.token.first() | TOKEN_STREAM_FLAG, endpoint.token.second());
 	} else {
 		endpoint.addresses = NetworkAddressList();
@@ -1651,7 +1689,7 @@ void FlowTransport::addEndpoint(Endpoint& endpoint, NetworkMessageReceiver* rece
 }
 
 void FlowTransport::addEndpoints(std::vector<std::pair<FlowReceiver*, TaskPriority>> const& streams) {
-	self->endpoints.insert(self->localAddresses, streams);
+	self->endpoints.insert(self->localAddresses.getAddressList(), streams);
 }
 
 void FlowTransport::removeEndpoint(const Endpoint& endpoint, NetworkMessageReceiver* receiver) {
@@ -1659,7 +1697,7 @@ void FlowTransport::removeEndpoint(const Endpoint& endpoint, NetworkMessageRecei
 }
 
 void FlowTransport::addWellKnownEndpoint(Endpoint& endpoint, NetworkMessageReceiver* receiver, TaskPriority taskID) {
-	endpoint.addresses = self->localAddresses;
+	endpoint.addresses = self->localAddresses.getAddressList();
 	ASSERT(receiver->isStream());
 	self->endpoints.insertWellKnown(receiver, endpoint.token, taskID);
 }
@@ -1703,8 +1741,7 @@ static ReliablePacket* sendPacket(TransportData* self,
 
 	// If there isn't an open connection, a public address, or the peer isn't compatible, we can't send
 	if (!peer || (peer->outgoingConnectionIdle && !destination.getPrimaryAddress().isPublic()) ||
-	    (peer->incompatibleProtocolVersionNewer &&
-	     destination.token != Endpoint::wellKnownToken(WLTOKEN_PING_PACKET))) {
+	    (!peer->compatible && destination.token != Endpoint::wellKnownToken(WLTOKEN_PING_PACKET))) {
 		TEST(true); // Can't send to private address without a compatible open connection
 		return nullptr;
 	}
@@ -1874,8 +1911,14 @@ Reference<AsyncVar<bool>> FlowTransport::getDegraded() {
 //
 // Note that this function does not establish a connection to the peer. In order to obtain a peer's protocol
 // version, some other mechanism should be used to connect to that peer.
-Reference<AsyncVar<Optional<ProtocolVersion>> const> FlowTransport::getPeerProtocolAsyncVar(NetworkAddress addr) {
-	return self->peers.at(addr)->protocolVersion;
+Optional<Reference<AsyncVar<Optional<ProtocolVersion>> const>> FlowTransport::getPeerProtocolAsyncVar(
+    NetworkAddress addr) {
+	auto itr = self->peers.find(addr);
+	if (itr != self->peers.end()) {
+		return itr->second->protocolVersion;
+	} else {
+		return Optional<Reference<AsyncVar<Optional<ProtocolVersion>> const>>();
+	}
 }
 
 void FlowTransport::resetConnection(NetworkAddress address) {

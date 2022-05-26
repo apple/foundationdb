@@ -1467,7 +1467,6 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 
 	DBCoreState newState = self->cstate.myDBState;
 	newState.recoveryCount++;
-	newState.recoveryCount++;
 	if (self->cstate.prevDBState.newestProtocolVersion.isInvalid() ||
 	    self->cstate.prevDBState.newestProtocolVersion < currentProtocolVersion) {
 		ASSERT(self->cstate.myDBState.lowestCompatibleProtocolVersion.isInvalid() ||
@@ -1629,7 +1628,7 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 		tr.set(recoveryCommitRequest.arena, clusterIdKey, BinaryWriter::toValue(self->clusterId, Unversioned()));
 	}
 
-	applyMetadataMutations(SpanID(),
+	applyMetadataMutations(SpanContext(),
 	                       self->dbgid,
 	                       recoveryCommitRequest.arena,
 	                       tr.mutations.slice(mmApplied, tr.mutations.size()),

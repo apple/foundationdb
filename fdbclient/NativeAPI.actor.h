@@ -243,7 +243,7 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 
 	Optional<UID> debugID;
 	TaskPriority taskID;
-	SpanID spanID;
+	SpanContext spanContext;
 	UseProvisionalProxies useProvisionalProxies = UseProvisionalProxies::False;
 	bool readVersionObtainedFromGrvProxy;
 
@@ -259,13 +259,14 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 	std::shared_ptr<CoalescedKeyRangeMap<Value>> conflictingKeys;
 
 	// Only available so that Transaction can have a default constructor, for use in state variables
-	TransactionState(TaskPriority taskID, SpanID spanID) : taskID(taskID), spanID(spanID), tenantSet(false) {}
+	TransactionState(TaskPriority taskID, SpanContext spanContext)
+	  : taskID(taskID), spanContext(spanContext), tenantSet(false) {}
 
 	// VERSION_VECTOR changed default values of readVersionObtainedFromGrvProxy
 	TransactionState(Database cx,
 	                 Optional<TenantName> tenant,
 	                 TaskPriority taskID,
-	                 SpanID spanID,
+	                 SpanContext spanContext,
 	                 Reference<TransactionLogInfo> trLogInfo);
 
 	Reference<TransactionState> cloneAndReset(Reference<TransactionLogInfo> newTrLogInfo, bool generateNewSpan) const;
@@ -328,6 +329,7 @@ public:
 	                                                       const KeySelector& end,
 	                                                       const Key& mapper,
 	                                                       GetRangeLimits limits,
+	                                                       int matchIndex = MATCH_INDEX_ALL,
 	                                                       Snapshot = Snapshot::False,
 	                                                       Reverse = Reverse::False);
 
@@ -337,6 +339,7 @@ private:
 	                                           const KeySelector& end,
 	                                           const Key& mapper,
 	                                           GetRangeLimits limits,
+	                                           int matchIndex,
 	                                           Snapshot snapshot,
 	                                           Reverse reverse);
 
@@ -435,7 +438,7 @@ public:
 
 	void debugTransaction(UID dID) { trState->debugID = dID; }
 	VersionVector getVersionVector() const;
-	UID getSpanID() const { return trState->spanID; }
+	SpanContext getSpanContext() const { return trState->spanContext; }
 
 	Future<Void> commitMutations();
 	void setupWatches();
@@ -447,7 +450,7 @@ public:
 	Database getDatabase() const { return trState->cx; }
 	static Reference<TransactionLogInfo> createTrLogInfoProbabilistically(const Database& cx);
 
-	void setTransactionID(uint64_t id);
+	void setTransactionID(UID id);
 	void setToken(uint64_t token);
 
 	const std::vector<Future<std::pair<Key, Key>>>& getExtraReadConflictRanges() const { return extraConflictRanges; }
@@ -490,7 +493,7 @@ private:
 	Future<Void> committing;
 };
 
-ACTOR Future<Version> waitForCommittedVersion(Database cx, Version version, SpanID spanContext);
+ACTOR Future<Version> waitForCommittedVersion(Database cx, Version version, SpanContext spanContext);
 ACTOR Future<Standalone<VectorRef<DDMetricsRef>>> waitDataDistributionMetricsList(Database cx,
                                                                                   KeyRange keys,
                                                                                   int shardLimit);

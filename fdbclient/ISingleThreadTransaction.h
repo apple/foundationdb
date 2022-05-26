@@ -74,6 +74,7 @@ public:
 	                                                 KeySelector end,
 	                                                 Key mapper,
 	                                                 GetRangeLimits limits,
+	                                                 int matchIndex = MATCH_INDEX_ALL,
 	                                                 Snapshot = Snapshot::False,
 	                                                 Reverse = Reverse::False) = 0;
 	virtual Future<Standalone<VectorRef<const char*>>> getAddressesForKey(Key const& key) = 0;
@@ -95,7 +96,7 @@ public:
 	virtual Future<Void> commit() = 0;
 	virtual Version getCommittedVersion() const = 0;
 	virtual VersionVector getVersionVector() const = 0;
-	virtual UID getSpanID() const = 0;
+	virtual SpanContext getSpanContext() const = 0;
 	virtual int64_t getApproximateSize() const = 0;
 	virtual Future<Standalone<StringRef>> getVersionstamp() = 0;
 	virtual void setOption(FDBTransactionOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) = 0;

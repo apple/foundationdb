@@ -20,6 +20,7 @@
 
 #ifndef FLOW_TRANSPORT_H
 #define FLOW_TRANSPORT_H
+#include "flow/Arena.h"
 #pragma once
 
 #include <algorithm>
@@ -158,7 +159,6 @@ struct Peer : public ReferenceCounted<Peer> {
 	double lastConnectTime;
 	double reconnectionDelay;
 	int peerReferences;
-	bool incompatibleProtocolVersionNewer;
 	int64_t bytesReceived;
 	int64_t bytesSent;
 	double lastDataPacketSentTime;
@@ -214,6 +214,10 @@ public:
 
 	// Returns first local NetworkAddress.
 	NetworkAddress getLocalAddress() const;
+
+	// Returns first local NetworkAddress as std::string. Caches value
+	// to avoid unnecessary calls to toString() and fmt overhead.
+	Standalone<StringRef> getLocalAddressAsString() const;
 
 	// Returns first local NetworkAddress.
 	void setLocalAddress(NetworkAddress const&);
@@ -276,7 +280,7 @@ public:
 	//
 	// Note that this function does not establish a connection to the peer. In order to obtain a peer's protocol
 	// version, some other mechanism should be used to connect to that peer.
-	Reference<AsyncVar<Optional<ProtocolVersion>> const> getPeerProtocolAsyncVar(NetworkAddress addr);
+	Optional<Reference<AsyncVar<Optional<ProtocolVersion>> const>> getPeerProtocolAsyncVar(NetworkAddress addr);
 
 	static FlowTransport& transport() {
 		return *static_cast<FlowTransport*>((void*)g_network->global(INetwork::enFlowTransport));

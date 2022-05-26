@@ -26,6 +26,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
+#include "fdbclient/StorageServerInterface.h" // for TenantInfo - should we refactor that elsewhere?
 
 struct BlobWorkerInterface {
 	constexpr static FileIdentifier file_identifier = 8358753;
@@ -104,13 +105,14 @@ struct BlobGranuleFileRequest {
 	Version beginVersion = 0;
 	Version readVersion;
 	bool canCollapseBegin = true;
+	TenantInfo tenantInfo;
 	ReplyPromise<BlobGranuleFileReply> reply;
 
 	BlobGranuleFileRequest() {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keyRange, beginVersion, readVersion, canCollapseBegin, reply, arena);
+		serializer(ar, keyRange, beginVersion, readVersion, canCollapseBegin, tenantInfo, reply, arena);
 	}
 };
 

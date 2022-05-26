@@ -53,9 +53,8 @@ private:
 		    [this, begin, end, results, tooOld](auto ctx) {
 			    ctx->tx()->setOption(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE);
 			    KeyValuesResult res = ctx->tx()->readBlobGranules(begin, end, ctx->getBGBasePath());
-			    bool more;
+			    bool more = false;
 			    (*results) = res.getKeyValues(&more);
-			    ASSERT(!more);
 			    if (res.getError() == error_code_blob_granule_transaction_too_old) {
 				    info("BlobGranuleCorrectness::randomReadOp bg too old\n");
 				    ASSERT(!seenReadSuccess);
@@ -64,6 +63,7 @@ private:
 			    } else if (res.getError() != error_code_success) {
 				    ctx->onError(res.getError());
 			    } else {
+				    ASSERT(!more);
 				    if (!seenReadSuccess) {
 					    info("BlobGranuleCorrectness::randomReadOp first success\n");
 				    }

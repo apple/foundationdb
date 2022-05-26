@@ -432,9 +432,6 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 
 	bool isCorrectDC(TCServerInfo const& server) const;
 
-	// Set the server's storeType; Error is caught by the caller
-	Future<Void> keyValueStoreTypeTracker(TCServerInfo* server);
-
 	Future<Void> storageServerFailureTracker(TCServerInfo* server,
 	                                         Database cx,
 	                                         ServerStatus* status,
@@ -486,8 +483,9 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 		});
 	}
 
-	// Read storage metadata from database, and do necessary updates
-	Future<Void> readOrCreateStorageMetadata(TCServerInfo* server);
+	// Read storage metadata from database, get the server's storeType, and do necessary updates. Error is caught by the
+	// caller
+	Future<Void> updateStorageMetadata(TCServerInfo* server, bool isTss);
 
 	Future<Void> serverGetTeamRequests(TeamCollectionInterface tci);
 

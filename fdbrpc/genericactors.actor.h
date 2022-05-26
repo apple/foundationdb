@@ -101,7 +101,6 @@ Future<ErrorOr<REPLY_TYPE(Req)>> tryGetReplyFromHostname(Req request, Hostname h
 		resetReply(request);
 		if (reply.getError().code() == error_code_request_maybe_delivered) {
 			// Connection failure.
-			hostname.resetToUnresolved();
 			INetworkConnections::net()->removeCachedDNS(hostname.host, hostname.service);
 		}
 	}
@@ -126,7 +125,6 @@ Future<ErrorOr<REPLY_TYPE(Req)>> tryGetReplyFromHostname(Req request,
 		resetReply(request);
 		if (reply.getError().code() == error_code_request_maybe_delivered) {
 			// Connection failure.
-			hostname.resetToUnresolved();
 			INetworkConnections::net()->removeCachedDNS(hostname.host, hostname.service);
 		}
 	}
@@ -149,7 +147,6 @@ Future<REPLY_TYPE(Req)> retryGetReplyFromHostname(Req request, Hostname hostname
 				// Connection failure.
 				wait(delay(reconnetInterval));
 				reconnetInterval = std::min(2 * reconnetInterval, FLOW_KNOBS->HOSTNAME_RECONNECT_MAX_INTERVAL);
-				hostname.resetToUnresolved();
 				INetworkConnections::net()->removeCachedDNS(hostname.host, hostname.service);
 			} else {
 				throw reply.getError();
@@ -179,7 +176,6 @@ Future<REPLY_TYPE(Req)> retryGetReplyFromHostname(Req request,
 				// Connection failure.
 				wait(delay(reconnetInterval));
 				reconnetInterval = std::min(2 * reconnetInterval, FLOW_KNOBS->HOSTNAME_RECONNECT_MAX_INTERVAL);
-				hostname.resetToUnresolved();
 				INetworkConnections::net()->removeCachedDNS(hostname.host, hostname.service);
 			} else {
 				throw reply.getError();

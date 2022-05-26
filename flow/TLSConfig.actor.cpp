@@ -25,14 +25,6 @@
 // To force typeinfo to only be emitted once.
 TLSPolicy::~TLSPolicy() {}
 
-#ifdef TLS_DISABLED
-
-void LoadedTLSConfig::print(FILE* fp) {
-	fprintf(fp, "Cannot print LoadedTLSConfig.  TLS support is not enabled.\n");
-}
-
-#else // TLS is enabled
-
 #include <algorithm>
 #include <cstring>
 #include <exception>
@@ -837,4 +829,3 @@ bool TLSPolicy::verify_peer(bool preverified, X509_STORE_CTX* store_ctx) {
 	}
 	return rc;
 }
-#endif

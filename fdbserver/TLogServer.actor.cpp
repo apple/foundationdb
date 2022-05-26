@@ -46,6 +46,7 @@
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "flow/Histogram.h"
+#include "flow/DebugTrace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct TLogQueueEntryRef {
@@ -567,6 +568,8 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	TLogData* tLogData;
 	Promise<Void> recoveryComplete, committingQueue;
 	Version unrecoveredBefore, recoveredAt;
+	Version recoveryTxnVersion;
+	Promise<Void> recoveryTxnReceived;
 
 	struct PeekTrackerData {
 		std::map<int, Promise<std::pair<Version, bool>>>
@@ -646,10 +649,11 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	    blockingPeekTimeouts("BlockingPeekTimeouts", cc), emptyPeeks("EmptyPeeks", cc),
 	    nonEmptyPeeks("NonEmptyPeeks", cc), logId(interf.id()), protocolVersion(protocolVersion),
 	    newPersistentDataVersion(invalidVersion), tLogData(tLogData), unrecoveredBefore(1), recoveredAt(1),
-	    logSystem(new AsyncVar<Reference<ILogSystem>>()), remoteTag(remoteTag), isPrimary(isPrimary),
-	    logRouterTags(logRouterTags), logRouterPoppedVersion(0), logRouterPopToVersion(0), locality(tagLocalityInvalid),
-	    recruitmentID(recruitmentID), logSpillType(logSpillType), allTags(tags.begin(), tags.end()),
-	    terminated(tLogData->terminated.getFuture()), execOpCommitInProgress(false), txsTags(txsTags) {
+	    recoveryTxnVersion(1), logSystem(new AsyncVar<Reference<ILogSystem>>()), remoteTag(remoteTag),
+	    isPrimary(isPrimary), logRouterTags(logRouterTags), logRouterPoppedVersion(0), logRouterPopToVersion(0),
+	    locality(tagLocalityInvalid), recruitmentID(recruitmentID), logSpillType(logSpillType),
+	    allTags(tags.begin(), tags.end()), terminated(tLogData->terminated.getFuture()), execOpCommitInProgress(false),
+	    txsTags(txsTags) {
 		startRole(Role::TRANSACTION_LOG,
 		          interf.id(),
 		          tLogData->workerID,
@@ -1565,7 +1569,7 @@ Version poppedVersion(Reference<LogData> self, Tag tag) {
 		if (tag == txsTag || tag.locality == tagLocalityTxs) {
 			return 0;
 		}
-		return self->recoveredAt + 1;
+		return std::max(self->recoveredAt + 1, self->recoveryTxnVersion);
 	}
 	return tagData->popped;
 }
@@ -1672,6 +1676,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 	state int sequence = -1;
 	state UID peekId;
 	state double queueStart = now();
+	state Future<Void> recoveryTxnReceived = logData->recoveryTxnReceived.getFuture();
 
 	if (reqTag.locality == tagLocalityTxs && reqTag.id >= logData->txsTags && logData->txsTags > 0) {
 		reqTag.id = reqTag.id % logData->txsTags;
@@ -1743,11 +1748,29 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 		return Void();
 	}
 
-	//TraceEvent("TLogPeekMessages0", self->dbgid).detail("ReqBeginEpoch", reqBegin.epoch).detail("ReqBeginSeq", reqBegin.sequence).detail("Epoch", self->epoch()).detail("PersistentDataSeq", self->persistentDataSequence).detail("Tag1", reqTag1).detail("Tag2", reqTag2);
+	DebugLogTraceEvent("TLogPeekMessages0", self->dbgid)
+	    .detail("LogId", logData->logId)
+	    .detail("Tag", reqTag.toString())
+	    .detail("ReqBegin", reqBegin)
+	    .detail("Version", logData->version.get())
+	    .detail("RecoveredAt", logData->recoveredAt);
 	// Wait until we have something to return that the caller doesn't already have
 	if (logData->version.get() < reqBegin) {
 		wait(logData->version.whenAtLeast(reqBegin));
 		wait(delay(SERVER_KNOBS->TLOG_PEEK_DELAY, g_network->getCurrentTask()));
+	}
+	if (!logData->stopped && reqTag.locality != tagLocalityTxs && reqTag != txsTag) {
+		DebugLogTraceEvent("TLogPeekMessages1", self->dbgid)
+		    .detail("LogId", logData->logId)
+		    .detail("Tag", reqTag.toString())
+		    .detail("ReqBegin", reqBegin)
+		    .detail("Version", logData->version.get())
+		    .detail("RecoveredAt", logData->recoveredAt);
+		// Make sure the peek reply has the recovery txn for the current TLog.
+		// Older generation TLog has been stopped and doesn't wait here.
+		// Similarly during recovery, reading transaction state store
+		// doesn't wait here.
+		wait(recoveryTxnReceived);
 	}
 
 	if (logData->locality != tagLocalitySatellite && reqTag.locality == tagLocalityLogRouter) {
@@ -1769,9 +1792,11 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 
 	state Version poppedVer = poppedVersion(logData, reqTag);
 
+	auto tagData = logData->getTagData(reqTag);
+	bool tagRecovered = tagData && !tagData->unpoppedRecovered;
 	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR && poppedVer <= reqBegin &&
 	    reqBegin > logData->persistentDataDurableVersion && !reqOnlySpilled && reqTag.locality >= 0 &&
-	    !reqReturnIfBlocked) {
+	    !reqReturnIfBlocked && tagRecovered) {
 		state double startTime = now();
 		// TODO (version vector) check if this should be included in "status details" json
 		// TODO (version vector) all tags may be too many, instead,  standard deviation?
@@ -1788,6 +1813,11 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 		poppedVer = poppedVersion(logData, reqTag);
 	}
 
+	DebugLogTraceEvent("TLogPeekMessages2", self->dbgid)
+	    .detail("LogId", logData->logId)
+	    .detail("Tag", reqTag.toString())
+	    .detail("ReqBegin", reqBegin)
+	    .detail("PoppedVer", poppedVer);
 	if (poppedVer > reqBegin) {
 		TLogPeekReply rep;
 		rep.maxKnownVersion = logData->version.get();
@@ -1832,7 +1862,9 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 		onlySpilled = false;
 
 		// grab messages from disk
-		//TraceEvent("TLogPeekMessages", self->dbgid).detail("ReqBeginEpoch", reqBegin.epoch).detail("ReqBeginSeq", reqBegin.sequence).detail("Epoch", self->epoch()).detail("PersistentDataSeq", self->persistentDataSequence).detail("Tag1", reqTag1).detail("Tag2", reqTag2);
+		DebugLogTraceEvent("TLogPeekMessages3", self->dbgid)
+		    .detail("ReqBegin", reqBegin)
+		    .detail("Tag", reqTag.toString());
 		if (reqBegin <= logData->persistentDataDurableVersion) {
 			// Just in case the durable version changes while we are waiting for the read, we grab this data from
 			// memory. We may or may not actually send it depending on whether we get enough data from disk. SOMEDAY:
@@ -1993,13 +2025,12 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 	reply.end = endVersion;
 	reply.onlySpilled = onlySpilled;
 
-	// TraceEvent("TlogPeek", self->dbgid)
-	//    .detail("LogId", logData->logId)
-	//    .detail("Tag", req.tag.toString())
-	//    .detail("BeginVer", req.begin)
-	//    .detail("EndVer", reply.end)
-	//    .detail("MsgBytes", reply.messages.expectedSize())
-	//    .detail("ForAddress", req.reply.getEndpoint().getPrimaryAddress());
+	DebugLogTraceEvent("TLogPeekMessages4", self->dbgid)
+	    .detail("LogId", logData->logId)
+	    .detail("Tag", reqTag.toString())
+	    .detail("ReqBegin", reqBegin)
+	    .detail("EndVer", reply.end)
+	    .detail("MsgBytes", reply.messages.expectedSize());
 
 	if (reqSequence.present()) {
 		auto& trackerData = logData->peekTracker[peekId];
@@ -2080,6 +2111,7 @@ ACTOR Future<Void> tLogPeekStream(TLogData* self, TLogPeekStreamRequest req, Ref
 			self->activePeekStreams--;
 			TraceEvent(SevDebug, "TLogPeekStreamEnd", logData->logId)
 			    .errorUnsuppressed(e)
+			    .detail("Tag", req.tag)
 			    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress());
 
 			if (e.code() == error_code_end_of_stream || e.code() == error_code_operation_obsolete) {
@@ -2221,6 +2253,9 @@ ACTOR Future<Void> tLogCommit(TLogData* self,
 		g_traceBatch.addEvent("CommitDebug", tlogDebugID.get().first(), "TLog.tLogCommit.BeforeWaitForVersion");
 	}
 
+	if (req.prevVersion == logData->recoveredAt) {
+		logData->recoveryTxnVersion = req.version;
+	}
 	logData->minKnownCommittedVersion = std::max(logData->minKnownCommittedVersion, req.minKnownCommittedVersion);
 
 	wait(logData->version.whenAtLeast(req.prevVersion));
@@ -2274,6 +2309,15 @@ ACTOR Future<Void> tLogCommit(TLogData* self,
 		}
 		// Notifies the commitQueue actor to commit persistentQueue, and also unblocks tLogPeekMessages actors
 		logData->version.set(req.version);
+		if (logData->recoveryTxnReceived.canBeSet() &&
+		    (req.prevVersion == 0 || req.prevVersion == logData->recoveredAt)) {
+			TraceEvent("TLogInfo", self->dbgid)
+			    .detail("Log", logData->logId)
+			    .detail("Prev", req.prevVersion)
+			    .detail("RecoveredAt", logData->recoveredAt)
+			    .detail("RecoveryTxnVersion", req.version);
+			logData->recoveryTxnReceived.send(Void());
+		}
 		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
 			self->unknownCommittedVersions.push_front(std::make_tuple(req.version, req.tLogCount));
 			while (!self->unknownCommittedVersions.empty() &&
@@ -2398,10 +2442,15 @@ ACTOR Future<Void> rejoinClusterController(TLogData* self,
 			// Read and cache cluster ID before displacing this tlog. We want
 			// to avoid removing the tlogs data if it has joined a new cluster
 			// with a different cluster ID.
-			state UID clusterId = wait(getClusterId(self));
-			ASSERT(clusterId.isValid());
-			self->ccClusterId = clusterId;
-			ev.detail("ClusterId", clusterId).detail("SelfClusterId", self->durableClusterId);
+
+			// TODO: #5375
+			/*
+			            state UID clusterId = wait(getClusterId(self));
+			            ASSERT(clusterId.isValid());
+			            self->ccClusterId = clusterId;
+			            ev.detail("ClusterId", clusterId).detail("SelfClusterId", self->durableClusterId);
+			*/
+
 			if (BUGGIFY)
 				wait(delay(SERVER_KNOBS->BUGGIFY_WORKER_REMOVED_MAX_LAG * deterministicRandom()->random01()));
 			throw worker_removed();
@@ -2777,6 +2826,7 @@ ACTOR Future<Void> pullAsyncData(TLogData* self,
 
 		state Version ver = 0;
 		state std::vector<TagsAndMessage> messages;
+		state bool pullingRecoveryData = endVersion.present() && endVersion.get() == logData->recoveredAt;
 		loop {
 			state bool foundMessage = r->hasMessage();
 			if (!foundMessage || r->version().version != ver) {
@@ -2814,6 +2864,13 @@ ACTOR Future<Void> pullAsyncData(TLogData* self,
 					// Notifies the commitQueue actor to commit persistentQueue, and also unblocks tLogPeekMessages
 					// actors
 					logData->version.set(ver);
+					if (logData->recoveryTxnReceived.canBeSet() && !pullingRecoveryData && ver > logData->recoveredAt) {
+						TraceEvent("TLogInfo", self->dbgid)
+						    .detail("Log", logData->logId)
+						    .detail("RecoveredAt", logData->recoveredAt)
+						    .detail("RecoveryTxnVersion", ver);
+						logData->recoveryTxnReceived.send(Void());
+					}
 					wait(yield(TaskPriority::TLogCommit));
 				}
 				lastVer = ver;
@@ -3597,30 +3654,35 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 				}
 			}
 		} catch (Error& e) {
-			if (e.code() != error_code_worker_removed) {
-				throw;
-			}
-			// Don't need to worry about deleting data if there is no durable
-			// cluster ID.
-			if (!self.durableClusterId.isValid()) {
-				throw;
-			}
-			// When a tlog joins a new cluster and has data for an old cluster,
-			// it should automatically exclude itself to avoid being used in
-			// the new cluster.
-			auto recoveryState = self.dbInfo->get().recoveryState;
-			if (recoveryState == RecoveryState::FULLY_RECOVERED && self.ccClusterId.isValid() &&
-			    self.durableClusterId.isValid() && self.ccClusterId != self.durableClusterId) {
-				state NetworkAddress address = g_network->getLocalAddress();
-				wait(excludeServers(self.cx, { AddressExclusion{ address.ip, address.port } }));
-				TraceEvent(SevWarnAlways, "TLogBelongsToExistingCluster")
-				    .detail("ClusterId", self.durableClusterId)
-				    .detail("NewClusterId", self.ccClusterId);
-			}
-			// If the tlog has a valid durable cluster ID, we don't want it to
-			// wipe its data! Throw this error to signal to `tlogTerminated` to
-			// close the persistent data store instead of deleting it.
-			throw invalid_cluster_id();
+			throw;
+
+			// TODO: #5375
+			/*
+			            if (e.code() != error_code_worker_removed) {
+			                throw;
+			            }
+			            // Don't need to worry about deleting data if there is no durable
+			            // cluster ID.
+			            if (!self.durableClusterId.isValid()) {
+			                throw;
+			            }
+			            // When a tlog joins a new cluster and has data for an old cluster,
+			            // it should automatically exclude itself to avoid being used in
+			            // the new cluster.
+			            auto recoveryState = self.dbInfo->get().recoveryState;
+			            if (recoveryState == RecoveryState::FULLY_RECOVERED && self.ccClusterId.isValid() &&
+			                self.durableClusterId.isValid() && self.ccClusterId != self.durableClusterId) {
+			                state NetworkAddress address = g_network->getLocalAddress();
+			                wait(excludeServers(self.cx, { AddressExclusion{ address.ip, address.port } }));
+			                TraceEvent(SevWarnAlways, "TLogBelongsToExistingCluster")
+			                    .detail("ClusterId", self.durableClusterId)
+			                    .detail("NewClusterId", self.ccClusterId);
+			            }
+			            // If the tlog has a valid durable cluster ID, we don't want it to
+			            // wipe its data! Throw this error to signal to `tlogTerminated` to
+			            // close the persistent data store instead of deleting it.
+			            throw invalid_cluster_id();
+			*/
 		}
 	} catch (Error& e) {
 		self.terminated.send(Void());

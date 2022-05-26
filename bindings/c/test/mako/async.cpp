@@ -247,7 +247,7 @@ void ResumableStateForRunWorkload::onTransactionSuccess() {
 					const auto commit_latency = watch_commit.diff();
 					const auto tx_duration = watch_tx.diff();
 					stats.addLatency(OP_COMMIT, commit_latency);
-					stats.addLatency(OP_TRANSACTION, commit_latency);
+					stats.addLatency(OP_TRANSACTION, tx_duration);
 					sample_bins[OP_COMMIT].put(commit_latency);
 					sample_bins[OP_TRANSACTION].put(tx_duration);
 				}

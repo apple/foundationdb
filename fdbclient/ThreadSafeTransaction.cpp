@@ -306,6 +306,7 @@ ThreadFuture<MappedRangeResult> ThreadSafeTransaction::getMappedRange(const KeyS
                                                                       const KeySelectorRef& end,
                                                                       const StringRef& mapper,
                                                                       GetRangeLimits limits,
+                                                                      int matchIndex,
                                                                       bool snapshot,
                                                                       bool reverse) {
 	KeySelector b = begin;
@@ -313,9 +314,9 @@ ThreadFuture<MappedRangeResult> ThreadSafeTransaction::getMappedRange(const KeyS
 	Key h = mapper;
 
 	ISingleThreadTransaction* tr = this->tr;
-	return onMainThread([tr, b, e, h, limits, snapshot, reverse]() -> Future<MappedRangeResult> {
+	return onMainThread([tr, b, e, h, limits, matchIndex, snapshot, reverse]() -> Future<MappedRangeResult> {
 		tr->checkDeferredError();
-		return tr->getMappedRange(b, e, h, limits, Snapshot{ snapshot }, Reverse{ reverse });
+		return tr->getMappedRange(b, e, h, limits, matchIndex, Snapshot{ snapshot }, Reverse{ reverse });
 	});
 }
 
@@ -465,8 +466,8 @@ VersionVector ThreadSafeTransaction::getVersionVector() {
 	return tr->getVersionVector();
 }
 
-UID ThreadSafeTransaction::getSpanID() {
-	return tr->getSpanID();
+SpanContext ThreadSafeTransaction::getSpanContext() {
+	return tr->getSpanContext();
 }
 
 ThreadFuture<int64_t> ThreadSafeTransaction::getApproximateSize() {
