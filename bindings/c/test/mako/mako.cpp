@@ -89,7 +89,8 @@ Transaction createNewTransaction(Database db, Arguments const& args, int id = -1
 	if (tenants) {
 		return tenants[tenant_id]->createTransaction();
 	}
-	BytesRef tenant_name = toBytesRef("tenant" + std::to_string(tenant_id));
+	std::string tenantStr = "tenant" + std::to_string(tenant_id);
+	BytesRef tenant_name = toBytesRef(tenantStr);
 	Tenant t(&db, tenant_name, tenant_name.length());
 	return t.createTransaction();
 }
@@ -115,18 +116,12 @@ int cleanup(Database db, Arguments const& args) {
 	auto watch = Stopwatch(StartAtCtor{});
 
 	int num_iterations = (args.tenants > 1) ? args.tenants : 1;
-	Tenant* tenants[args.tenants];
-	for (int i = 0; i < args.tenants; ++i) {
-		BytesRef tenant_name = toBytesRef("tenant" + std::to_string(i));
-		tenants[i] = new Tenant(&db, tenant_name, tenant_name.length());
-	}
 	for (int i = 0; i < num_iterations; ++i) {
 		// If args.tenants is zero, this will use a non-tenant txn and perform a single range clear.
 		// If 1, it will use a tenant txn and do a single range clear instead.
 		// If > 1, it will perform a range clear with a different tenant txn per iteration.
-		Transaction tx = createNewTransaction(db, args, i, args.tenants > 0 ? tenants : nullptr);
+		Transaction tx = createNewTransaction(db, args, i);
 		while (true) {
-			printf("clearrange: %d\n", i);
 			tx.clearRange(beginstr, endstr);
 			auto future_commit = tx.commit();
 			const auto rc = waitAndHandleError(tx, future_commit, "COMMIT_CLEANUP");
@@ -144,16 +139,13 @@ int cleanup(Database db, Arguments const& args) {
 		if (args.tenants > 0) {
 			Transaction systemTx = db.createTransaction();
 			while (true) {
-				printf("deletetenant: %d\n", i);
 				Tenant::deleteTenant(systemTx, toBytesRef("tenant" + std::to_string(i)));
 				auto future_commit = systemTx.commit();
 				const auto rc = waitAndHandleError(systemTx, future_commit, "DELETE_TENANT");
 				if (rc == FutureRC::OK) {
-					printf("branch1");
 					break;
 				} else if (rc == FutureRC::RETRY || rc == FutureRC::CONFLICT) {
 					// tx already reset
-					printf("branch2");
 					continue;
 				} else {
 					return -1;
@@ -194,9 +186,10 @@ int populate(Database db,
 	for (int i = 0; i < args.tenants; ++i) {
 		std::string tenant_name = "tenant" + std::to_string(i);
 		Tenant::createTenant(systemTx, toBytesRef(tenant_name));
-		while (i % 10 == 9 || i == args.tenants - 1) {
-			// create {batchSize} # of tenants
-			// commit every batch
+		// Until this issue https://github.com/apple/foundationdb/issues/7260 is resolved
+		// we have to commit each tenant creation transaction one-by-one
+		// while (i % 10 == 9 || i == args.tenants - 1) {
+		while (true) {
 			auto future_commit = systemTx.commit();
 			const auto rc = waitAndHandleError(systemTx, future_commit, "CREATE_TENANT");
 			if (rc == FutureRC::RETRY) {
@@ -212,11 +205,6 @@ int populate(Database db,
 			}
 		}
 	}
-	Tenant* tenants[args.tenants];
-	for (int i = 0; i < args.tenants; ++i) {
-		BytesRef tenant_name = toBytesRef("tenant" + std::to_string(i));
-		tenants[i] = new Tenant(&db, tenant_name, tenant_name.length());
-	}
 	for (auto i = key_begin; i <= key_end; i++) {
 		/* sequential keys */
 		genKey(keystr.data(), KEY_PREFIX, args, i);
@@ -231,7 +219,7 @@ int populate(Database db,
 				usleep(1000);
 			}
 		}
-		Transaction tx = createNewTransaction(db, args, -1, args.tenants > 0 ? tenants : nullptr);
+		Transaction tx = createNewTransaction(db, args);
 		if (num_seconds_trace_every) {
 			if (toIntegerSeconds(watch_trace.stop().diff()) >= num_seconds_trace_every) {
 				watch_trace.startFromStop();
@@ -263,7 +251,7 @@ int populate(Database db,
 			auto tx_restarter = ExitGuard([&watch_tx]() { watch_tx.startFromStop(); });
 			if (rc == FutureRC::OK) {
 				key_checkpoint = i + 1; // restart on failures from next key
-				tx = createNewTransaction(db, args, -1, args.tenants > 0 ? tenants : nullptr);
+				tx = createNewTransaction(db, args);
 			} else if (rc == FutureRC::ABORT) {
 				return -1;
 			} else {
