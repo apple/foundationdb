@@ -22,6 +22,71 @@
 #include "fdbclient/Tenant.h"
 #include "flow/UnitTest.h"
 
+Key TenantMapEntry::idToPrefix(int64_t id) {
+	int64_t swapped = bigEndian64(id);
+	return StringRef(reinterpret_cast<const uint8_t*>(&swapped), 8);
+}
+
+int64_t TenantMapEntry::prefixToId(KeyRef prefix) {
+	ASSERT(prefix.size() == 8);
+	int64_t id = *reinterpret_cast<const int64_t*>(prefix.begin());
+	id = bigEndian64(id);
+	ASSERT(id >= 0);
+	return id;
+}
+
+std::string TenantMapEntry::tenantStateToString(TenantState tenantState) {
+	switch (tenantState) {
+	case TenantState::REGISTERING:
+		return "registering";
+	case TenantState::READY:
+		return "ready";
+	case TenantState::REMOVING:
+		return "removing";
+	case TenantState::ERROR:
+		return "error";
+	default:
+		ASSERT(false);
+	}
+}
+
+TenantState TenantMapEntry::stringToTenantState(std::string stateStr) {
+	if (stateStr == "registering") {
+		return TenantState::REGISTERING;
+	} else if (stateStr == "ready") {
+		return TenantState::READY;
+	} else if (stateStr == "removing") {
+		return TenantState::REMOVING;
+	} else if (stateStr == "error") {
+		return TenantState::ERROR;
+	}
+
+	ASSERT(false);
+	throw internal_error();
+}
+
+void TenantMapEntry::setSubspace(KeyRef subspace) {
+	ASSERT(id >= 0);
+	prefix = makeString(8 + subspace.size());
+	uint8_t* data = mutateString(prefix);
+	if (subspace.size() > 0) {
+		memcpy(data, subspace.begin(), subspace.size());
+	}
+	int64_t swapped = bigEndian64(id);
+	memcpy(data + subspace.size(), &swapped, 8);
+}
+
+TenantMapEntry::TenantMapEntry() {}
+TenantMapEntry::TenantMapEntry(int64_t id, KeyRef subspace, TenantState tenantState) : id(id), tenantState(tenantState) {
+	setSubspace(subspace);
+}
+TenantMapEntry::TenantMapEntry(int64_t id, KeyRef subspace, Optional<TenantGroupName> tenantGroup, TenantState tenantState)
+	: id(id), tenantGroup(tenantGroup), tenantState(tenantState) {
+	setSubspace(subspace);
+}
+
+bool TenantMapEntry::matchesConfiguration(TenantMapEntry const& other) const { return tenantGroup == other.tenantGroup; }
+
 TEST_CASE("/fdbclient/TenantMapEntry/Serialization") {
 	TenantMapEntry entry1(1, ""_sr, TenantState::READY);
 	ASSERT(entry1.prefix == "\x00\x00\x00\x00\x00\x00\x00\x01"_sr);
