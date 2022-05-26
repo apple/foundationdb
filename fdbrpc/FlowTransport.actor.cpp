@@ -354,6 +354,7 @@ public:
 	uint32_t numIncompatibleConnections;
 	std::map<uint64_t, double> multiVersionConnections;
 	double lastIncompatibleMessage;
+	Optional<double> firstConnFailedTime;
 	uint64_t transportId;
 	IPAllowList allowList;
 	std::shared_ptr<ContextVariableMap> localCVM = std::make_shared<ContextVariableMap>(); // for local delivery
@@ -658,7 +659,6 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 	ASSERT_WE_THINK(FlowTransport::transport().getLocalAddress() != self->destination);
 
 	state Future<Void> delayedHealthUpdateF;
-	state Optional<double> firstConnFailedTime = Optional<double>();
 	state int retryConnect = false;
 	state bool tooManyConnectionsClosed = false;
 
@@ -747,7 +747,7 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 				self->lastConnectTime = now();
 			}
 
-			firstConnFailedTime.reset();
+			self->transport->firstConnFailedTime.reset();
 			try {
 				self->transport->countConnEstablished++;
 				if (!delayedHealthUpdateF.isValid())
@@ -777,15 +777,17 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 				                                   self->reconnectionDelay * FLOW_KNOBS->RECONNECTION_TIME_GROWTH_RATE);
 			}
 
-			if (firstConnFailedTime.present()) {
-				if (now() - firstConnFailedTime.get() > FLOW_KNOBS->PEER_UNAVAILABLE_FOR_LONG_TIME_TIMEOUT) {
+			if (self->transport->firstConnFailedTime.present()) {
+				if (now() - self->transport->firstConnFailedTime.get() >
+				    FLOW_KNOBS->PEER_UNAVAILABLE_FOR_LONG_TIME_TIMEOUT) {
 					TraceEvent(SevWarnAlways, "PeerUnavailableForLongTime", conn ? conn->getDebugID() : UID())
 					    .suppressFor(1.0)
 					    .detail("PeerAddr", self->destination);
-					firstConnFailedTime = now() - FLOW_KNOBS->PEER_UNAVAILABLE_FOR_LONG_TIME_TIMEOUT / 2.0;
+					self->transport->firstConnFailedTime =
+					    now() - FLOW_KNOBS->PEER_UNAVAILABLE_FOR_LONG_TIME_TIMEOUT / 2.0;
 				}
 			} else {
-				firstConnFailedTime = now();
+				self->transport->firstConnFailedTime = now();
 			}
 
 			// Don't immediately mark connection as failed. To stay closed to earlier behaviour of centralized
@@ -795,7 +797,7 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 				if (!self->destination.isPublic()) {
 					// Can't connect back to non-public addresses.
 					IFailureMonitor::failureMonitor().setStatus(self->destination, FailureStatus(true));
-				} else if (now() - firstConnFailedTime.get() > FLOW_KNOBS->FAILURE_DETECTION_DELAY) {
+				} else if (now() - self->transport->firstConnFailedTime.get() > FLOW_KNOBS->FAILURE_DETECTION_DELAY) {
 					IFailureMonitor::failureMonitor().setStatus(self->destination, FailureStatus(true));
 				}
 			}
