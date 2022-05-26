@@ -248,7 +248,6 @@ public:
 	void updatePhysicalShardToTeams(PhysicalShard physicalShard, 
 		std::vector<Team> inputTeams, int expectedNumServersPerTeam, std::string caller, uint64_t debugID);
 	Optional<uint64_t> tryGetPhysicalShardIDFor(Team team, uint64_t debugID);
-	Optional<uint64_t> tryGetPhysicalShardIDFor(Team primaryTeam, Team remoteTeam, uint64_t debugID);
 	Optional<Team> tryGetRemoteTeamWith(uint64_t physicalShardID, int expectedTeamSize, uint64_t debugID);
 	void printTeamPhysicalShardsMapping(std::string);
 	uint64_t generateNewPhysicalShardID(uint64_t debugID);
