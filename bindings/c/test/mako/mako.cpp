@@ -509,6 +509,9 @@ int runWorkload(Database db,
 		xacts++;
 		total_xacts++;
 	}
+	for (int i = 0; i < args.tenants; ++i) {
+		delete tenants[i];
+	}
 	return rc;
 }
 
