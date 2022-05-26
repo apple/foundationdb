@@ -1781,25 +1781,6 @@ ACTOR Future<bool> setHealthyZone(Database cx, StringRef zoneId, double seconds,
 	}
 }
 
-ACTOR Future<Void> setDDIgnoreRebalanceSwitch(Database cx, bool ignoreRebalance) {
-	state Transaction tr(cx);
-	loop {
-		try {
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			if (ignoreRebalance) {
-				tr.set(rebalanceDDIgnoreKey, LiteralStringRef("on"));
-			} else {
-				tr.clear(rebalanceDDIgnoreKey);
-			}
-			wait(tr.commit());
-			return Void();
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-	}
-}
-
 ACTOR Future<int> setDDMode(Database cx, int mode) {
 	state Transaction tr(cx);
 	state int oldMode = -1;

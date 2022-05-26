@@ -2542,14 +2542,18 @@ Future<Optional<std::string>> DataDistributionImpl::commit(ReadYourWritesTransac
 					                                           iter->value().second.get().toString());
 				}
 			} else if (iter->range() == singleKeyRange(rebalanceIgnoredKey)) {
-				if (iter->value().second.get().size())
-					msg =
-					    ManagementAPIError::toJsonString(false,
-					                                     "datadistribution",
-					                                     "Value is unused for the data_distribution/rebalance_ignored "
-					                                     "key, please set it to an empty value");
-				else
-					ryw->getTransaction().set(rebalanceDDIgnoreKey, LiteralStringRef("on"));
+				ValueRef val = iter->value().second.get();
+				try {
+					boost::lexical_cast<int>(iter->value().second.get().toString());
+				} catch (boost::bad_lexical_cast& e) {
+					ManagementAPIError::toJsonString(
+					    false,
+					    "datadistribution",
+					    "Invalid datadistribution rebalance ignore option (int or empty): " +
+					        iter->value().second.get().toString());
+					val = ""_sr;
+				}
+				ryw->getTransaction().set(rebalanceDDIgnoreKey, iter->value().second.get());
 			} else {
 				msg = ManagementAPIError::toJsonString(
 				    false,
