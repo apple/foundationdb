@@ -173,42 +173,13 @@ FDB_DECLARE_BOOLEAN_PARAM(IsRedundantTeam);
 FDB_DECLARE_BOOLEAN_PARAM(IsBadTeam);
 FDB_DECLARE_BOOLEAN_PARAM(WaitWiggle);
 
-class TeamSet {
-private:
-	std::vector<Reference<TCTeamInfo>> m_teams;
-
-public:
-	TeamSet() {}
-
-	size_t teamCount() const { return m_teams.size(); }
-
-	bool removeTeam(Reference<TCTeamInfo> team) {
-		bool found = false;
-
-		for (int t = 0; t < m_teams.size(); t++) {
-			if (m_teams[t] == team) {
-				m_teams[t] = m_teams.back();
-				m_teams.pop_back();
-				found = true;
-				break;
-			}
-		}
-
-		return found;
-	}
-
-	void addTeam(Reference<TCTeamInfo> team) { m_teams.push_back(team); }
-
-	std::vector<Reference<TCTeamInfo>> teams() const { return m_teams; }
-};
-
 class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	friend class DDTeamCollectionImpl;
 	friend class DDTeamCollectionUnitTest;
 
 	enum class Status { NONE = 0, WIGGLING = 1, EXCLUDED = 2, FAILED = 3 };
 
-	std::vector<TeamSet> m_teamSets;
+	std::vector<Reference<TCTeamSet>> m_teamSets;
 
 	// addActor: add to actorCollection so that when an actor has error, the ActorCollection can catch the error.
 	// addActor is used to create the actorCollection when the dataDistributionTeamCollection is created
@@ -347,7 +318,7 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 
 	void traceServerInfo() const;
 
-	void traceTeamSetInfo(const TeamSet& teamSet) const;
+	void traceTeamSetInfo(const Reference<TCTeamSet>& teamSet) const;
 
 	void traceServerTeamInfo() const;
 
@@ -588,7 +559,7 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 
 	// Sanity check the property of teams in unit test
 	// Return true if all server teams belong to machine teams
-	bool teamSetIsSane(const TeamSet& teamSet) const;
+	bool teamSetIsSane(const Reference<TCTeamSet>& teamSet) const;
 	bool teamsAreSane() const;
 
 	void disableBuildingTeams() { doBuildTeams = false; }
@@ -667,7 +638,7 @@ public:
 	size_t teamCount() const {
 		size_t count = 0;
 		for (auto& teamSet : m_teamSets) {
-			count += teamSet.teamCount();
+			count += teamSet->teamCount();
 		}
 		return count;
 	}
@@ -694,7 +665,7 @@ public:
 	               Version addedVersion,
 	               DDEnabledState const& ddEnabledState);
 
-	bool removeTeam(TeamSet& teamSet, Reference<TCTeamInfo> team);
+	bool removeTeam(Reference<TCTeamSet>& teamSet, Reference<TCTeamInfo> team);
 
 	void removeTSS(UID removedServer);
 

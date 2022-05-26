@@ -450,6 +450,16 @@ void TCTeamInfo::addServers(const std::vector<UID>& servers) {
 	}
 }
 
+void TCTeamInfo::addToTeamSet(const Reference<TCTeamSet>& teamSet) {
+	ASSERT(!m_teamSet.isValid() && teamSet.isValid());
+	m_teamSet = teamSet;
+}
+
+void TCTeamInfo::removeFromTeamSet() {
+	ASSERT(m_teamSet.isValid());
+	m_teamSet.clear();
+}
+
 int64_t TCTeamInfo::getLoadAverage() const {
 	int64_t bytesSum = 0;
 	int added = 0;

@@ -19,6 +19,7 @@
  */
 
 #include "fdbserver/DDTeamCollection.h"
+#include "flow/FastRef.h"
 #include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -542,7 +543,7 @@ public:
 			int totalTeamCount = 0;
 			int wigglingTeams = 0;
 			for (auto& teamSet : self->m_teamSets) {
-				const std::vector<Reference<TCTeamInfo>>& teams = teamSet.teams();
+				const std::vector<Reference<TCTeamInfo>>& teams = teamSet->teams();
 				for (auto& team : teams) {
 					if (!team->isWrongConfiguration()) {
 						if (team->isHealthy()) {
@@ -3056,7 +3057,7 @@ public:
 
 				configuration = self->configuration;
 				server_info = self->server_info;
-				teams = self->m_teamSets[0].teams();
+				teams = self->m_teamSets[0]->teams();
 				state size_t teamCount = self->teamCount();
 				// Perform deep copy so we have a consistent snapshot, even if yields are performed
 				for (const auto& [machineId, info] : self->machine_info) {
@@ -3367,7 +3368,7 @@ Future<Void> DDTeamCollection::checkBuildTeams() {
 }
 
 Future<Void> DDTeamCollection::getTeam(GetTeamRequest req) {
-	return DDTeamCollectionImpl::getTeam(this, this->m_teamSets[0].teams(), req);
+	return DDTeamCollectionImpl::getTeam(this, this->m_teamSets[0]->teams(), req);
 }
 
 Future<Void> DDTeamCollection::addSubsetOfEmergencyTeams() {
@@ -3582,8 +3583,7 @@ DDTeamCollection::DDTeamCollection(Database const& cx,
 		    .detail("State", "Inactive")
 		    .trackLatest(ddTrackerStartingEventHolder->trackingKey);
 	}
-	TeamSet ts;
-	m_teamSets.push_back(ts);
+	m_teamSets.push_back(makeReference<TCTeamSet>());
 }
 
 DDTeamCollection::~DDTeamCollection() {
@@ -3613,7 +3613,7 @@ DDTeamCollection::~DDTeamCollection() {
 	// held by the actor It also ensures that the trackers are done fiddling with healthyTeamCount before we free
 	// this
 	for (auto& teamSet : m_teamSets) {
-		std::vector<Reference<TCTeamInfo>> teams = teamSet.teams();
+		std::vector<Reference<TCTeamInfo>> teams = teamSet->teams();
 		for (auto& team : teams) {
 			team->tracker.cancel();
 		}
@@ -3665,8 +3665,8 @@ bool DDTeamCollection::isWigglePausedServer(const UID& server) const {
 std::vector<UID> DDTeamCollection::getRandomHealthyTeam(const UID& excludeServer) {
 	std::vector<Reference<TCTeamInfo>> candidates, backup;
 	for (auto& teamSet : m_teamSets) {
-		const std::vector<Reference<TCTeamInfo>>& teams = teamSet.teams();
-		for (int i = 0; i < teamSet.teamCount(); ++i) {
+		const std::vector<Reference<TCTeamInfo>>& teams = teamSet->teams();
+		for (int i = 0; i < teamSet->teamCount(); ++i) {
 			if (teams[i]->isHealthy() && !teams[i]->hasServer(excludeServer)) {
 				candidates.push_back(teams[i]);
 			} else if (teams[i]->size() - (teams[i]->hasServer(excludeServer) ? 1 : 0) > 0) {
@@ -3853,7 +3853,8 @@ void DDTeamCollection::addTeam(const std::vector<Reference<TCServerInfo>>& newTe
 	}
 
 	// For a good team, we add it to teams and create machine team for it when necessary
-	m_teamSets[0].addTeam(teamInfo);
+	teamInfo->addToTeamSet(m_teamSets[0]);
+	m_teamSets[0]->addTeam(teamInfo);
 	for (auto& server : newTeamServers) {
 		server->addTeam(teamInfo);
 	}
@@ -3941,10 +3942,10 @@ void DDTeamCollection::traceConfigInfo() const {
 	    .detail("StoreType", configuration.storageServerStoreType);
 }
 
-void DDTeamCollection::traceTeamSetInfo(const TeamSet& teamSet) const {
+void DDTeamCollection::traceTeamSetInfo(const Reference<TCTeamSet>& teamSet) const {
 	int i = 0;
 
-	for (auto& team : teamSet.teams()) {
+	for (auto& team : teamSet->teams()) {
 		TraceEvent("ServerTeamInfo", distributorId)
 		    .detail("TeamIndex", i++)
 		    .detail("Healthy", team->isHealthy())
@@ -3957,7 +3958,7 @@ void DDTeamCollection::traceTeamSetInfo(const TeamSet& teamSet) const {
 void DDTeamCollection::traceServerTeamInfo() const {
 	int i = 0;
 	for (auto& teamSet : m_teamSets) {
-		TraceEvent("ServerTeamInfo", distributorId).detail("TeamSetIndex", i).detail("Size", teamSet.teamCount());
+		TraceEvent("ServerTeamInfo", distributorId).detail("TeamSetIndex", i).detail("Size", teamSet->teamCount());
 		traceTeamSetInfo(teamSet);
 		i++;
 	}
@@ -4286,8 +4287,8 @@ bool DDTeamCollection::isOnSameMachineTeam(TCTeamInfo const& team) const {
 	return (numExistence == team.size());
 }
 
-bool DDTeamCollection::teamSetIsSane(const TeamSet& teamSet) const {
-	for (auto& team : teamSet.teams()) {
+bool DDTeamCollection::teamSetIsSane(const Reference<TCTeamSet>& teamSet) const {
+	for (auto& team : teamSet->teams()) {
 		if (isOnSameMachineTeam(*team) == false) {
 			return false;
 		}
@@ -4358,7 +4359,7 @@ bool DDTeamCollection::isServerTeamCountCorrect(Reference<TCMachineTeamInfo> con
 	bool ret = true;
 
 	for (auto& teamSet : m_teamSets) {
-		for (auto& team : teamSet.teams()) {
+		for (auto& team : teamSet->teams()) {
 			if (team->machineTeam->getMachineIDs() == mt->getMachineIDs()) {
 				++num;
 			}
@@ -4421,7 +4422,7 @@ std::pair<Reference<TCTeamInfo>, int> DDTeamCollection::getServerTeamWithMostPro
 	int targetTeamNumPerServer = (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (configuration.storageTeamSize + 1)) / 2;
 
 	for (auto& teamSet : m_teamSets) {
-		for (auto& t : teamSet.teams()) {
+		for (auto& t : teamSet->teams()) {
 			// The minimum number of teams of a server in a team is the representative team number for the team t
 			int representNumProcessTeams = std::numeric_limits<int>::max();
 			for (auto& server : t->getServers()) {
@@ -4773,21 +4774,22 @@ void DDTeamCollection::addServer(StorageServerInterface newServer,
 	}
 }
 
-bool DDTeamCollection::removeTeam(TeamSet& teamSet, Reference<TCTeamInfo> team) {
+bool DDTeamCollection::removeTeam(Reference<TCTeamSet>& teamSet, Reference<TCTeamInfo> team) {
 	TraceEvent("RemovingServerTeamFromTeamSet", distributorId).detail("Team", team->getDesc());
 	bool found = true;
 
-	if (!teamSet.removeTeam(team)) {
+	if (!teamSet->removeTeam(team)) {
 		TraceEvent te(SevError, "TeamNotInTeamSet", distributorId);
 
-		te.detail("Team", team->getDesc()).detail("TenantTeamCount", teamSet.teamCount());
+		te.detail("Team", team->getDesc()).detail("TenantTeamCount", teamSet->teamCount());
 
-		for (auto& tteam : teamSet.teams()) {
+		for (auto& tteam : teamSet->teams()) {
 			te.detail("Team", tteam->getDesc());
 		}
 		found = false;
 	}
 
+	team->removeFromTeamSet();
 	for (auto& server : team->getServers()) {
 		server->removeTeam(team);
 	}
@@ -4951,7 +4953,7 @@ void DDTeamCollection::removeServer(UID removedServer) {
 	// participated
 	int removedCount = 0;
 	for (auto& teamSet : m_teamSets) {
-		const std::vector<Reference<TCTeamInfo>> teams = teamSet.teams();
+		const std::vector<Reference<TCTeamInfo>> teams = teamSet->teams();
 		for (int t = 0; t < teams.size(); t++) {
 			if (std::count(teams[t]->getServerIDs().begin(), teams[t]->getServerIDs().end(), removedServer)) {
 				TraceEvent("ServerTeamRemovedFromTeamSet")
@@ -5099,7 +5101,7 @@ bool DDTeamCollection::exclusionSafetyCheck(std::vector<UID>& excludeServerIDs) 
 	std::sort(excludeServerIDs.begin(), excludeServerIDs.end());
 
 	for (const auto& teamSet : m_teamSets) {
-		for (const auto& team : teamSet.teams()) {
+		for (const auto& team : teamSet->teams()) {
 			std::vector<UID> teamServerIDs = team->getServerIDs();
 			std::sort(teamServerIDs.begin(), teamServerIDs.end());
 			TraceEvent(SevDebug, "DDExclusionSafetyCheck", distributorId)
