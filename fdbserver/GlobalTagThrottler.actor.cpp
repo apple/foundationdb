@@ -34,6 +34,22 @@ class GlobalTagThrottlerImpl {
 		Smoother writeCostCounter;
 		Smoother transactionCounter;
 
+		Optional<double> getReadLimit() const {
+			if (readCostCounter.smoothRate() > 0) {
+				return quota.get().totalReadQuota * transactionCounter.smoothRate() / readCostCounter.smoothRate();
+			} else {
+				return {};
+			}
+		}
+
+		Optional<double> getWriteLimit() const {
+			if (writeCostCounter.smoothRate() > 0) {
+				return quota.get().totalWriteQuota * transactionCounter.smoothRate() / writeCostCounter.smoothRate();
+			} else {
+				return {};
+			}
+		}
+
 	public:
 		QuotaAndCounters()
 		  : readCostCounter(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_FOLDING_TIME),
@@ -51,14 +67,8 @@ class GlobalTagThrottlerImpl {
 		Optional<ClientTagThrottleLimits> getTotalLimit() const {
 			if (!quota.present())
 				return {};
-			Optional<double> readLimit, writeLimit;
-			if (readCostCounter.smoothRate() > 0) {
-				readLimit = quota.get().totalReadQuota * transactionCounter.smoothRate() / readCostCounter.smoothRate();
-			}
-			if (writeCostCounter.smoothRate() > 0) {
-				writeLimit =
-				    quota.get().totalWriteQuota * transactionCounter.smoothRate() / writeCostCounter.smoothRate();
-			}
+			auto readLimit = getReadLimit();
+			auto writeLimit = getWriteLimit();
 
 			// TODO: Implement expiration logic
 			if (!readLimit.present() && !writeLimit.present()) {
@@ -75,12 +85,37 @@ class GlobalTagThrottlerImpl {
 				return ClientTagThrottleLimits(totalLimit, std::numeric_limits<double>::max());
 			}
 		}
+
+		void processTraceEvent(TraceEvent& te) const {
+			ASSERT(quota.present());
+			te.detail("ProvidedReadLimit", getReadLimit())
+			    .detail("ProvidedWriteLimit", getWriteLimit())
+			    .detail("ReadCostRate", readCostCounter.smoothRate())
+			    .detail("WriteCostRate", writeCostCounter.smoothRate())
+			    .detail("TotalReadQuota", quota.get().totalReadQuota)
+			    .detail("ReservedReadQuota", quota.get().reservedReadQuota)
+			    .detail("TotalWriteQuota", quota.get().totalWriteQuota)
+			    .detail("ReservedWriteQuota", quota.get().reservedWriteQuota);
+		}
 	};
 
 	Database db;
 	UID id;
 	std::map<TransactionTag, QuotaAndCounters> trackedTags;
 	uint64_t throttledTagChangeId{ 0 };
+	Future<Void> traceActor;
+
+	ACTOR static Future<Void> tracer(GlobalTagThrottlerImpl const* self) {
+		loop {
+			for (const auto& [tag, quotaAndCounters] : self->trackedTags) {
+				TraceEvent te("GlobalTagThrottling");
+				te.detail("Tag", tag);
+				quotaAndCounters.processTraceEvent(te);
+			}
+			// TODO: Make delay time a knob?
+			wait(delay(5.0));
+		}
+	}
 
 	ACTOR static Future<Void> monitorThrottlingChanges(GlobalTagThrottlerImpl* self) {
 		loop {
@@ -95,8 +130,8 @@ class GlobalTagThrottlerImpl {
 					state RangeResult currentQuotas = wait(tr.getRange(tagQuotaKeys, CLIENT_KNOBS->TOO_MANY));
 					TraceEvent("GlobalTagThrottler_ReadCurrentQuotas").detail("Size", currentQuotas.size());
 					for (auto const kv : currentQuotas) {
-						auto tag = kv.key.removePrefix(tagQuotaPrefix);
-						auto quota = ThrottleApi::TagQuotaValue::fromValue(kv.value);
+						auto const tag = kv.key.removePrefix(tagQuotaPrefix);
+						auto const quota = ThrottleApi::TagQuotaValue::fromValue(kv.value);
 						self->trackedTags[tag].setQuota(quota);
 					}
 
@@ -116,7 +151,7 @@ class GlobalTagThrottlerImpl {
 	}
 
 public:
-	GlobalTagThrottlerImpl(Database db, UID id) : db(db), id(id) {}
+	GlobalTagThrottlerImpl(Database db, UID id) : db(db), id(id) { traceActor = tracer(this); }
 	Future<Void> monitorThrottlingChanges() { return monitorThrottlingChanges(this); }
 	void addRequests(TransactionTag tag, int count) { trackedTags[tag].addTransactions(count); }
 	uint64_t getThrottledTagChangeId() const { return throttledTagChangeId; }
