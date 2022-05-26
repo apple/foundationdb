@@ -46,6 +46,7 @@
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "flow/Histogram.h"
+#include "flow/DebugTrace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct TLogQueueEntryRef {
@@ -1675,6 +1676,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 	state int sequence = -1;
 	state UID peekId;
 	state double queueStart = now();
+	state Future<Void> recoveryTxnReceived = logData->recoveryTxnReceived.getFuture();
 
 	if (reqTag.locality == tagLocalityTxs && reqTag.id >= logData->txsTags && logData->txsTags > 0) {
 		reqTag.id = reqTag.id % logData->txsTags;
@@ -1746,7 +1748,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 		return Void();
 	}
 
-	DisabledTraceEvent("TLogPeekMessages0", self->dbgid)
+	DebugLogTraceEvent("TLogPeekMessages0", self->dbgid)
 	    .detail("LogId", logData->logId)
 	    .detail("Tag", reqTag.toString())
 	    .detail("ReqBegin", reqBegin)
@@ -1758,11 +1760,17 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 		wait(delay(SERVER_KNOBS->TLOG_PEEK_DELAY, g_network->getCurrentTask()));
 	}
 	if (!logData->stopped && reqTag.locality != tagLocalityTxs && reqTag != txsTag) {
+		DebugLogTraceEvent("TLogPeekMessages1", self->dbgid)
+		    .detail("LogId", logData->logId)
+		    .detail("Tag", reqTag.toString())
+		    .detail("ReqBegin", reqBegin)
+		    .detail("Version", logData->version.get())
+		    .detail("RecoveredAt", logData->recoveredAt);
 		// Make sure the peek reply has the recovery txn for the current TLog.
 		// Older generation TLog has been stopped and doesn't wait here.
 		// Similarly during recovery, reading transaction state store
 		// doesn't wait here.
-		wait(logData->recoveryTxnReceived.getFuture());
+		wait(recoveryTxnReceived);
 	}
 
 	if (logData->locality != tagLocalitySatellite && reqTag.locality == tagLocalityLogRouter) {
@@ -1805,7 +1813,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 		poppedVer = poppedVersion(logData, reqTag);
 	}
 
-	DisabledTraceEvent("TLogPeekMessages1", self->dbgid)
+	DebugLogTraceEvent("TLogPeekMessages2", self->dbgid)
 	    .detail("LogId", logData->logId)
 	    .detail("Tag", reqTag.toString())
 	    .detail("ReqBegin", reqBegin)
@@ -1854,7 +1862,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 		onlySpilled = false;
 
 		// grab messages from disk
-		DisabledTraceEvent("TLogPeekMessages2", self->dbgid)
+		DebugLogTraceEvent("TLogPeekMessages3", self->dbgid)
 		    .detail("ReqBegin", reqBegin)
 		    .detail("Tag", reqTag.toString());
 		if (reqBegin <= logData->persistentDataDurableVersion) {
@@ -2017,7 +2025,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 	reply.end = endVersion;
 	reply.onlySpilled = onlySpilled;
 
-	DisabledTraceEvent("TLogPeekMessages4", self->dbgid)
+	DebugLogTraceEvent("TLogPeekMessages4", self->dbgid)
 	    .detail("LogId", logData->logId)
 	    .detail("Tag", reqTag.toString())
 	    .detail("ReqBegin", reqBegin)
@@ -2103,6 +2111,7 @@ ACTOR Future<Void> tLogPeekStream(TLogData* self, TLogPeekStreamRequest req, Ref
 			self->activePeekStreams--;
 			TraceEvent(SevDebug, "TLogPeekStreamEnd", logData->logId)
 			    .errorUnsuppressed(e)
+			    .detail("Tag", req.tag)
 			    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress());
 
 			if (e.code() == error_code_end_of_stream || e.code() == error_code_operation_obsolete) {
@@ -2433,10 +2442,15 @@ ACTOR Future<Void> rejoinClusterController(TLogData* self,
 			// Read and cache cluster ID before displacing this tlog. We want
 			// to avoid removing the tlogs data if it has joined a new cluster
 			// with a different cluster ID.
-			state UID clusterId = wait(getClusterId(self));
-			ASSERT(clusterId.isValid());
-			self->ccClusterId = clusterId;
-			ev.detail("ClusterId", clusterId).detail("SelfClusterId", self->durableClusterId);
+
+			// TODO: #5375
+			/*
+			            state UID clusterId = wait(getClusterId(self));
+			            ASSERT(clusterId.isValid());
+			            self->ccClusterId = clusterId;
+			            ev.detail("ClusterId", clusterId).detail("SelfClusterId", self->durableClusterId);
+			*/
+
 			if (BUGGIFY)
 				wait(delay(SERVER_KNOBS->BUGGIFY_WORKER_REMOVED_MAX_LAG * deterministicRandom()->random01()));
 			throw worker_removed();
@@ -3640,30 +3654,35 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 				}
 			}
 		} catch (Error& e) {
-			if (e.code() != error_code_worker_removed) {
-				throw;
-			}
-			// Don't need to worry about deleting data if there is no durable
-			// cluster ID.
-			if (!self.durableClusterId.isValid()) {
-				throw;
-			}
-			// When a tlog joins a new cluster and has data for an old cluster,
-			// it should automatically exclude itself to avoid being used in
-			// the new cluster.
-			auto recoveryState = self.dbInfo->get().recoveryState;
-			if (recoveryState == RecoveryState::FULLY_RECOVERED && self.ccClusterId.isValid() &&
-			    self.durableClusterId.isValid() && self.ccClusterId != self.durableClusterId) {
-				state NetworkAddress address = g_network->getLocalAddress();
-				wait(excludeServers(self.cx, { AddressExclusion{ address.ip, address.port } }));
-				TraceEvent(SevWarnAlways, "TLogBelongsToExistingCluster")
-				    .detail("ClusterId", self.durableClusterId)
-				    .detail("NewClusterId", self.ccClusterId);
-			}
-			// If the tlog has a valid durable cluster ID, we don't want it to
-			// wipe its data! Throw this error to signal to `tlogTerminated` to
-			// close the persistent data store instead of deleting it.
-			throw invalid_cluster_id();
+			throw;
+
+			// TODO: #5375
+			/*
+			            if (e.code() != error_code_worker_removed) {
+			                throw;
+			            }
+			            // Don't need to worry about deleting data if there is no durable
+			            // cluster ID.
+			            if (!self.durableClusterId.isValid()) {
+			                throw;
+			            }
+			            // When a tlog joins a new cluster and has data for an old cluster,
+			            // it should automatically exclude itself to avoid being used in
+			            // the new cluster.
+			            auto recoveryState = self.dbInfo->get().recoveryState;
+			            if (recoveryState == RecoveryState::FULLY_RECOVERED && self.ccClusterId.isValid() &&
+			                self.durableClusterId.isValid() && self.ccClusterId != self.durableClusterId) {
+			                state NetworkAddress address = g_network->getLocalAddress();
+			                wait(excludeServers(self.cx, { AddressExclusion{ address.ip, address.port } }));
+			                TraceEvent(SevWarnAlways, "TLogBelongsToExistingCluster")
+			                    .detail("ClusterId", self.durableClusterId)
+			                    .detail("NewClusterId", self.ccClusterId);
+			            }
+			            // If the tlog has a valid durable cluster ID, we don't want it to
+			            // wipe its data! Throw this error to signal to `tlogTerminated` to
+			            // close the persistent data store instead of deleting it.
+			            throw invalid_cluster_id();
+			*/
 		}
 	} catch (Error& e) {
 		self.terminated.send(Void());

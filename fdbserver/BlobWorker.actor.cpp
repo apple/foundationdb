@@ -35,6 +35,7 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/Notified.h"
+#include "fdbclient/Tenant.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/BlobGranuleServerCommon.actor.h"
 #include "fdbserver/MutationTracking.h"
@@ -155,6 +156,16 @@ struct GranuleHistoryEntry : NonCopyable, ReferenceCounted<GranuleHistoryEntry> 
 	  : range(range), granuleID(granuleID), startVersion(startVersion), endVersion(endVersion) {}
 };
 
+// TODO: does this need to be versioned like SS has?
+struct GranuleTenantData : NonCopyable, ReferenceCounted<GranuleTenantData> {
+	TenantName name;
+	TenantMapEntry entry;
+	// TODO add other useful stuff like per-tenant blob connection, if necessary
+
+	GranuleTenantData() {}
+	GranuleTenantData(TenantName name, TenantMapEntry entry) : name(name), entry(entry) {}
+};
+
 struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 	UID id;
 	Database db;
@@ -173,6 +184,8 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 	// logic
 	Reference<BackupContainerFileSystem> bstore;
 	KeyRangeMap<GranuleRangeMetadata> granuleMetadata;
+	KeyRangeMap<Reference<GranuleTenantData>> tenantData;
+	std::unordered_map<int64_t, TenantMapEntry> tenantInfoById;
 
 	// contains the history of completed granules before the existing ones. Maps to the latest one, and has
 	// back-pointers to earlier granules
@@ -186,6 +199,7 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 	Promise<Void> fatalError;
 
 	FlowLock initialSnapshotLock;
+	bool shuttingDown = false;
 
 	int changeFeedStreamReplyBufferSize = SERVER_KNOBS->BG_DELTA_FILE_TARGET_BYTES / 2;
 
@@ -703,7 +717,8 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(Reference<BlobWorkerData> bwData,
                                                        Reference<GranuleMetadata> metadata,
                                                        UID granuleID,
-                                                       Key cfKey) {
+                                                       Key cfKey,
+                                                       std::deque<Future<Void>>* inFlightPops) {
 	if (BW_DEBUG) {
 		fmt::print("Dumping snapshot from FDB for [{0} - {1})\n",
 		           metadata->keyRange.begin.printable(),
@@ -720,6 +735,8 @@ ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(Reference<BlobWorkerData>
 
 	loop {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		// FIXME: proper tenant support in Blob Worker
+		tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 		try {
 			Version rv = wait(tr->getReadVersion());
 			readVersion = rv;
@@ -742,7 +759,7 @@ ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(Reference<BlobWorkerData>
 			DEBUG_KEY_RANGE("BlobWorkerFDBSnapshot", readVersion, metadata->keyRange, bwData->id);
 
 			// initial snapshot is committed in fdb, we can pop the change feed up to this version
-			bwData->addActor.send(bwData->db->popChangeFeedMutations(cfKey, readVersion));
+			inFlightPops->push_back(bwData->db->popChangeFeedMutations(cfKey, readVersion));
 			return snapshotWriter.get();
 		} catch (Error& e) {
 			if (e.code() == error_code_operation_cancelled) {
@@ -1000,7 +1017,8 @@ static void handleCompletedDeltaFile(Reference<BlobWorkerData> bwData,
                                      BlobFileIndex completedDeltaFile,
                                      Key cfKey,
                                      Version cfStartVersion,
-                                     std::deque<std::pair<Version, Version>>* rollbacksCompleted) {
+                                     std::deque<std::pair<Version, Version>>* rollbacksCompleted,
+                                     std::deque<Future<Void>>& inFlightPops) {
 	metadata->files.deltaFiles.push_back(completedDeltaFile);
 	ASSERT(metadata->durableDeltaVersion.get() < completedDeltaFile.version);
 	metadata->durableDeltaVersion.set(completedDeltaFile.version);
@@ -1018,7 +1036,7 @@ static void handleCompletedDeltaFile(Reference<BlobWorkerData> bwData,
 		// an async pop at its previousDurableVersion after opening the granule to guarantee it is eventually popped?
 		Future<Void> popFuture = bwData->db->popChangeFeedMutations(cfKey, completedDeltaFile.version);
 		// Do pop asynchronously
-		bwData->addActor.send(popFuture);
+		inFlightPops.push_back(popFuture);
 	}
 	while (!rollbacksCompleted->empty() && completedDeltaFile.version >= rollbacksCompleted->front().second) {
 		if (BW_DEBUG) {
@@ -1285,6 +1303,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
                                           Reference<GranuleMetadata> metadata,
                                           Future<GranuleStartState> assignFuture) {
 	state std::deque<InFlightFile> inFlightFiles;
+	state std::deque<Future<Void>> inFlightPops;
 	state Future<Void> oldChangeFeedFuture;
 	state Future<Void> changeFeedFuture;
 	state GranuleStartState startState;
@@ -1369,7 +1388,8 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				metadata->durableSnapshotVersion.set(startState.blobFilesToSnapshot.get().snapshotFiles.back().version);
 			} else {
 				ASSERT(startState.previousDurableVersion == invalidVersion);
-				BlobFileIndex fromFDB = wait(dumpInitialSnapshotFromFDB(bwData, metadata, startState.granuleID, cfKey));
+				BlobFileIndex fromFDB =
+				    wait(dumpInitialSnapshotFromFDB(bwData, metadata, startState.granuleID, cfKey, &inFlightPops));
 				newSnapshotFile = fromFDB;
 				ASSERT(startState.changeFeedStartVersion <= fromFDB.version);
 				startVersion = newSnapshotFile.version;
@@ -1446,7 +1466,8 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 						                         completedFile,
 						                         cfKey,
 						                         startState.changeFeedStartVersion,
-						                         &rollbacksCompleted);
+						                         &rollbacksCompleted,
+						                         inFlightPops);
 					}
 
 					inFlightFiles.pop_front();
@@ -1454,6 +1475,12 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				} else {
 					break;
 				}
+			}
+
+			// also check outstanding pops for errors
+			while (!inFlightPops.empty() && inFlightPops.front().isReady()) {
+				wait(inFlightPops.front());
+				inFlightPops.pop_front();
 			}
 
 			// inject delay into reading change feed stream
@@ -1849,7 +1876,8 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 								                         completedFile,
 								                         cfKey,
 								                         startState.changeFeedStartVersion,
-								                         &rollbacksCompleted);
+								                         &rollbacksCompleted,
+								                         inFlightPops);
 							}
 
 							inFlightFiles.pop_front();
@@ -2192,6 +2220,27 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 		}
 	}
 
+	state Optional<Key> tenantPrefix;
+	if (req.tenantInfo.name.present()) {
+		ASSERT(req.tenantInfo.tenantId != TenantInfo::INVALID_TENANT);
+		auto tenantEntry = bwData->tenantInfoById.find(req.tenantInfo.tenantId);
+		if (tenantEntry != bwData->tenantInfoById.end()) {
+			ASSERT(tenantEntry->second.id == req.tenantInfo.tenantId);
+			tenantPrefix = tenantEntry->second.prefix;
+		} else {
+			TEST(true); // Blob worker unknown tenant
+			// FIXME - better way. Wait on retry here, or just have better model for tenant metadata?
+			// Just throw wrong_shard_server and make the client retry and assume we load it later
+			TraceEvent(SevDebug, "BlobWorkerRequestUnknownTenant", bwData->id)
+			    .suppressFor(5.0)
+			    .detail("TenantName", req.tenantInfo.name.get())
+			    .detail("TenantId", req.tenantInfo.tenantId);
+			throw unknown_tenant();
+		}
+		req.keyRange = KeyRangeRef(req.keyRange.begin.withPrefix(tenantPrefix.get(), req.arena),
+		                           req.keyRange.end.withPrefix(tenantPrefix.get(), req.arena));
+	}
+
 	state bool didCollapse = false;
 	try {
 		// TODO remove requirement for canCollapseBegin once we implement early replying
@@ -2201,6 +2250,10 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 		}
 		state BlobGranuleFileReply rep;
 		state std::vector<Reference<GranuleMetadata>> granules;
+
+		if (tenantPrefix.present()) {
+			rep.arena.dependsOn(tenantPrefix.get().arena());
+		}
 
 		auto checkRanges = bwData->granuleMetadata.intersectingRanges(req.keyRange);
 		// check for gaps as errors and copy references to granule metadata before yielding or doing any
@@ -2402,6 +2455,9 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 			// TODO change with early reply
 			chunk.includedVersion = req.readVersion;
 			chunk.keyRange = KeyRangeRef(StringRef(rep.arena, chunkRange.begin), StringRef(rep.arena, chunkRange.end));
+			if (tenantPrefix.present()) {
+				chunk.tenantPrefix = Optional<StringRef>(tenantPrefix.get());
+			}
 
 			int64_t deltaBytes = 0;
 			chunkFiles.getFiles(
@@ -2928,6 +2984,10 @@ ACTOR Future<Void> handleRangeAssign(Reference<BlobWorkerData> bwData,
 		return Void();
 	} catch (Error& e) {
 		if (e.code() == error_code_operation_cancelled) {
+			if (!bwData->shuttingDown) {
+				// the cancelled was because the granule open was cancelled, not because the whole blob worker was.
+				req.reply.sendError(granule_assignment_conflict());
+			}
 			throw e;
 		}
 		if (BW_DEBUG) {
@@ -3081,6 +3141,57 @@ ACTOR Future<Void> runGRVChecks(Reference<BlobWorkerData> bwData) {
 	}
 }
 
+// FIXME: better way to do this?
+// monitor system keyspace for new tenants
+ACTOR Future<Void> monitorTenants(Reference<BlobWorkerData> bwData) {
+	loop {
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bwData->db);
+		loop {
+			try {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				state RangeResult tenantResults;
+				wait(store(tenantResults, tr->getRange(tenantMapKeys, CLIENT_KNOBS->TOO_MANY)));
+				ASSERT_WE_THINK(!tenantResults.more && tenantResults.size() < CLIENT_KNOBS->TOO_MANY);
+				if (tenantResults.more || tenantResults.size() >= CLIENT_KNOBS->TOO_MANY) {
+					TraceEvent(SevError, "BlobWorkerTooManyTenants", bwData->id)
+					    .detail("TenantCount", tenantResults.size());
+					wait(delay(600));
+					if (bwData->fatalError.canBeSet()) {
+						bwData->fatalError.sendError(internal_error());
+					}
+					throw internal_error();
+				}
+
+				for (auto& it : tenantResults) {
+					// FIXME: handle removing/moving tenants!
+					StringRef tenantName = it.key.removePrefix(tenantMapPrefix);
+					TenantMapEntry entry = decodeTenantEntry(it.value);
+
+					if (bwData->tenantInfoById.insert({ entry.id, entry }).second) {
+						if (BW_DEBUG) {
+							fmt::print("BW {0} found new tenant {1}: {2} {3}\n",
+							           bwData->id.shortString().substr(0, 5),
+							           tenantName.printable(),
+							           entry.id,
+							           entry.prefix.printable());
+						}
+						bwData->tenantData.insert(KeyRangeRef(entry.prefix, entry.prefix.withSuffix(normalKeys.end)),
+						                          makeReference<GranuleTenantData>(tenantName, entry));
+					}
+				}
+
+				state Future<Void> watchChange = tr->watch(tenantLastIdKey);
+				wait(tr->commit());
+				wait(watchChange);
+				tr->reset();
+			} catch (Error& e) {
+				wait(tr->onError(e));
+			}
+		}
+	}
+}
+
 static void handleGetGranuleAssignmentsRequest(Reference<BlobWorkerData> self,
                                                const GetGranuleAssignmentsRequest& req) {
 	GetGranuleAssignmentsReply reply;
@@ -3150,6 +3261,9 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 
 	self->addActor.send(waitFailureServer(bwInterf.waitFailure.getFuture()));
 	self->addActor.send(runGRVChecks(self));
+	if (SERVER_KNOBS->BG_RANGE_SOURCE == "tenant") {
+		self->addActor.send(monitorTenants(self));
+	}
 	state Future<Void> selfRemoved = monitorRemoval(self);
 
 	TraceEvent("BlobWorkerInit", self->id).log();
@@ -3256,6 +3370,7 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 				}
 			}
 			when(wait(collection)) {
+				self->shuttingDown = true;
 				TraceEvent("BlobWorkerActorCollectionError", self->id);
 				ASSERT(false);
 				throw internal_error();
@@ -3273,6 +3388,7 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 			}
 		}
 	} catch (Error& e) {
+		self->shuttingDown = true;
 		if (e.code() == error_code_operation_cancelled) {
 			self->granuleMetadata.clear();
 			throw;
@@ -3282,6 +3398,8 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 		}
 		TraceEvent("BlobWorkerDied", self->id).errorUnsuppressed(e);
 	}
+
+	self->shuttingDown = true;
 
 	wait(self->granuleMetadata.clearAsync());
 	return Void();

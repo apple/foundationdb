@@ -153,7 +153,11 @@ public:
 	virtual void addref() = 0;
 	virtual void delref() = 0;
 
-	// Management API, attempt to kill or suspend a process, return 1 for request sent out, 0 for failure
+	// Management API, attempt to kill or suspend a process, return 1 for request being sent out, 0 for failure
+	// The address string can be extended to a comma-delimited string like <addr1>,<addr2>...,<addrN> to send reboot
+	// requests to multiple processes simultaneously
+	// If multiple addresses are provided, it returns 1 for requests being sent out to all provided addresses.
+	// On the contrary, if the client cannot connect to any of the given address, no requests will be sent out
 	virtual ThreadFuture<int64_t> rebootWorker(const StringRef& address, bool check, int duration) = 0;
 	// Management API, force the database to recover into DCID, causing the database to lose the most recently committed
 	// mutations
