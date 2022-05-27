@@ -184,12 +184,12 @@ int populate(Database db,
 
 	Transaction systemTx = db.createTransaction();
 	for (int i = 0; i < args.tenants; ++i) {
-		std::string tenant_name = "tenant" + std::to_string(i);
-		Tenant::createTenant(systemTx, toBytesRef(tenant_name));
-		// Until this issue https://github.com/apple/foundationdb/issues/7260 is resolved
-		// we have to commit each tenant creation transaction one-by-one
-		// while (i % 10 == 9 || i == args.tenants - 1) {
 		while (true) {
+			// Until this issue https://github.com/apple/foundationdb/issues/7260 is resolved
+			// we have to commit each tenant creation transaction one-by-one
+			// while (i % 10 == 9 || i == args.tenants - 1) {
+			std::string tenant_name = "tenant" + std::to_string(i);
+			Tenant::createTenant(systemTx, toBytesRef(tenant_name));
 			auto future_commit = systemTx.commit();
 			const auto rc = waitAndHandleError(systemTx, future_commit, "CREATE_TENANT");
 			if (rc == FutureRC::RETRY) {
@@ -203,6 +203,7 @@ int populate(Database db,
 			}
 		}
 	}
+	Transaction tx = createNewTransaction(db, args);
 	for (auto i = key_begin; i <= key_end; i++) {
 		/* sequential keys */
 		genKey(keystr.data(), KEY_PREFIX, args, i);
@@ -217,7 +218,6 @@ int populate(Database db,
 				usleep(1000);
 			}
 		}
-		Transaction tx = createNewTransaction(db, args);
 		if (num_seconds_trace_every) {
 			if (toIntegerSeconds(watch_trace.stop().diff()) >= num_seconds_trace_every) {
 				watch_trace.startFromStop();
