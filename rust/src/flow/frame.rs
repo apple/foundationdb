@@ -1,6 +1,8 @@
 use super::uid::UID;
 use super::Result;
 use bytes::{Buf, BytesMut};
+use num_derive::{FromPrimitive, ToPrimitive};
+use num_traits::{FromPrimitive, ToPrimitive};
 use std::io::Cursor;
 use xxhash_rust::xxh3::xxh3_64;
 
@@ -14,22 +16,71 @@ pub struct Frame {
 // uint32_t connectPacketLength = 0;
 // ProtocolVersion protocolVersion; // Expect currentProtocolVersion
 
-// uint16_t canonicalRemotePort = 0; // Port number to reconnect to the originating process
-// uint64_t connectionId = 0; // Multi-version clients will use the same Id for both connections, other connections
+// uint16_t canonical_remote_port = 0; // Port number to reconnect to the originating process
+// uint64_t connection_id = 0; // Multi-version clients will use the same Id for both connections, other connections
 //                            // will set this to zero. Added at protocol Version 0x0FDB00A444020001.
 
 // // IP Address to reconnect to the originating process. Only one of these must be populated.
-// uint32_t canonicalRemoteIp4 = 0;
+// uint32_t canonical_remote_ip4 = 0;
 
-// enum ConnectPacketFlags { FLAG_IPV6 = 1 };
+// enum connect_packet_flags { FLAG_IPV6 = 1 };
 // uint16_t flags = 0;å
-// uint8_t canonicalRemoteIp6[16] = { 0 };
+// uint8_t canonical_remote_ip6[16] = { 0 };
+
+#[derive(Debug, FromPrimitive, ToPrimitive, PartialEq)]
+pub enum ConnectPacketFlags {
+    IPV4 = 0,
+    IPV6 = 1,
+}
 
 #[derive(Debug)]
 pub struct ConnectPacket {
     len: u32,
-    flags: u8,    // Really just 4 bits
-    version: u64, // protocol version bytes.  Human readable in hex.
+    version_flags: u8, // Really just 4 bits
+    version: u64,      // protocol version bytes.  Human readable in hex.
+    canonical_remote_port: u16,
+    connection_id: u64,
+    canonical_remote_ip4: u32,
+    connect_packet_flags: ConnectPacketFlags, // 16 bits on wire
+    canonical_remote_ip6: [u8; 16],
+}
+
+impl ConnectPacket {
+    pub fn new() -> Self {
+        ConnectPacket {
+            len: 28,
+            version_flags: 1, // TODO: set these to real values!
+            version: 0xfdb00b072000000,
+            canonical_remote_port: 6789,
+            connection_id: 1,
+            canonical_remote_ip4: 0x7f00_0001,
+            connect_packet_flags: ConnectPacketFlags::IPV4,
+            canonical_remote_ip6: [0; 16],
+        }
+    }
+    pub fn is_ipv6(&self) -> bool {
+        self.connect_packet_flags == ConnectPacketFlags::IPV6
+    }
+    pub fn as_bytes(&self) -> Vec<u8> {
+        let mut vec = Vec::new();
+        let len_sz: usize = 4;
+        vec.extend_from_slice(&u32::to_le_bytes(0)); // len
+        vec.extend_from_slice(&u64::to_le_bytes(
+            (self.version_flags as u64) << 60 | self.version,
+        ));
+        vec.extend_from_slice(&u16::to_le_bytes(self.canonical_remote_port));
+        vec.extend_from_slice(&u64::to_le_bytes(self.connection_id));
+        vec.extend_from_slice(&u32::to_le_bytes(self.canonical_remote_ip4));
+        vec.extend_from_slice(&u16::to_le_bytes(
+            self.connect_packet_flags.to_u16().unwrap(),
+        ));
+        vec.extend_from_slice(&self.canonical_remote_ip6);
+        // XXX below is whatever FDB is sending.  Don't know what it is, or what it means!
+        // vec.extend_from_slice(&[0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        let frame_sz = vec.len();
+        vec[0..len_sz].copy_from_slice(&u32::to_le_bytes((frame_sz - len_sz).try_into().unwrap()));
+        vec
+    }
 }
 
 pub fn get_connect_packet(bytes: &mut BytesMut) -> Result<Option<ConnectPacket>> {
@@ -51,12 +102,45 @@ pub fn get_connect_packet(bytes: &mut BytesMut) -> Result<Option<ConnectPacket>>
     let version = u64::from_le_bytes(src[0..version_sz].try_into()?);
     let src = &src[version_sz..];
 
-    let flags: u8 = (version >> (60)).try_into()?;
+    let version_flags: u8 = (version >> (60)).try_into()?;
     let version = version & !(0b1111 << 60);
+
+    let canonical_remote_port_sz = 2;
+    let canonical_remote_port = u16::from_le_bytes(src[0..canonical_remote_port_sz].try_into()?);
+    let src = &src[canonical_remote_port_sz..];
+
+    let connection_id_sz = 8;
+    let connection_id = u64::from_le_bytes(src[0..connection_id_sz].try_into()?);
+    let src = &src[connection_id_sz..];
+
+    let canonical_remote_ip4_sz = 4;
+    let canonical_remote_ip4 = u32::from_le_bytes(src[0..canonical_remote_ip4_sz].try_into()?);
+    let src = &src[canonical_remote_ip4_sz..];
+
+    let connect_packet_flags_sz = 2;
+    let connect_packet_flags_u16 = u16::from_le_bytes(src[0..connect_packet_flags_sz].try_into()?);
+    let connect_packet_flags = ConnectPacketFlags::from_u16(connect_packet_flags_u16)
+        .ok_or::<super::Error>("Bad connect_packet_flags".into())?;
+    let mut src = &src[connect_packet_flags_sz..];
+
+    let canonical_remote_ip6_sz = 16;
+    let canonical_remote_ip6 = if src.len() >= 16 {
+        let slice = &src[0..canonical_remote_ip6_sz];
+        src = &src[canonical_remote_ip6_sz..];
+        slice
+    } else {
+        &[0; 16]
+    };
+
     let cp = ConnectPacket {
         len,
-        flags,
+        version_flags,
+        canonical_remote_port: canonical_remote_port,
         version,
+        connection_id: connection_id,
+        canonical_remote_ip4: canonical_remote_ip4,
+        connect_packet_flags: connect_packet_flags,
+        canonical_remote_ip6: canonical_remote_ip6.try_into()?,
     };
 
     if src.len() > 0 {
@@ -108,5 +192,25 @@ pub fn get_frame(bytes: &mut BytesMut) -> Result<Option<Frame>> {
             token: uid,
             payload,
         }))
+    }
+}
+
+impl Frame {
+    pub fn as_bytes(&self) -> Vec<u8> {
+        let mut vec = Vec::<u8>::new();
+        let len_sz = 4;
+        let checksum_sz = 8;
+        let uid_sz = 16;
+        let len = len_sz + checksum_sz + uid_sz + self.payload.len();
+        //vec.resize(len, 0);
+        vec.extend_from_slice(&u32::to_le_bytes((uid_sz + len).try_into().unwrap()));
+        vec.extend_from_slice(&u64::to_le_bytes(0)); // we compute checksum below.
+        vec.extend_from_slice(&u64::to_le_bytes(self.token.uid[0]));
+        vec.extend_from_slice(&u64::to_le_bytes(self.token.uid[1]));
+        vec.extend_from_slice(&self.payload[..]);
+
+        let xxh3_64 = xxh3_64(&vec[len_sz + checksum_sz..]);
+        vec[len_sz..len_sz + checksum_sz].copy_from_slice(&u64::to_le_bytes(xxh3_64));
+        vec
     }
 }

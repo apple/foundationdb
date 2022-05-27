@@ -40,31 +40,61 @@ pub async fn hello() -> Result<()> {
         let socket = server.listener.accept().await?;
         println!("got socket from {}", socket.1);
         let mut conn = connection::Connection::new(socket.0);
+        conn.send_connect_packet().await?;
+        println!("sent ConnectPacket");
         loop {
             let frame = conn.read_frame().await?;
             // println!("{:?}", frame);
-            match (frame) {
+            match frame {
                 None => {
                     println!("clean shutdown!");
-                    break; // XXX loses stream sync after first OS read!
+                    break;
                 }
-                Some(frame) => match (frame.token.get_well_known_endpoint()) {
+                Some(frame) => match frame.token.get_well_known_endpoint() {
                     Some(uid::WLTOKEN::PingPacket) => {
                         println!("Ping        payload: {:x?}", frame);
                         let fake_root = ping_request::root_as_fake_root(&frame.payload[..])?;
                         println!("FakeRoot: {:x?}", fake_root);
+                        let reply = fake_root.ping_request().unwrap().reply_promise().unwrap();
+                        let mut builder = flatbuffers::FlatBufferBuilder::with_capacity(1024);
+                        let reply_buf = ping_request::ReplyPromise::create(
+                            &mut builder,
+                            &ping_request::ReplyPromiseArgs {
+                                uid: Some(reply.uid().unwrap()),
+                            },
+                        );
+                        builder.finish(reply_buf, None);
+                        println!("reply: {:x?}", builder.finished_data());
+                        let uid = reply.uid().unwrap();
+                        let token = uid::UID {
+                            uid: [uid.first(), uid.second()],
+                        };
+                        let frame = frame::Frame {
+                            token,
+                            payload: Vec::new(),
+                        };
+                        conn.write_frame(frame).await?;
                     }
+
                     Some(uid::WLTOKEN::NetworkTest) => {
                         println!("NetworkTest payload: {:x?}", frame);
                     }
-                    _ => (),
+                    Some(uid::WLTOKEN::EndpointNotFound) => {
+                        println!("EndpointNotFound payload: {:x?}", frame);
+                    }
+                    Some(uid::WLTOKEN::AuthTenant) => {
+                        println!("AuthTenant payload: {:x?}", frame);
+                    }
+                    Some(uid::WLTOKEN::UnauthorizedEndpoint) => {
+                        println!("UnauthorizedEndpoint payload: {:x?}", frame);
+                    }
+                    None => {
+                        println!("Message not destined for well-known endpoint: {:x?}", frame);
+                    }
                 },
             }
         }
     }
-
-    println!("werewwer");
-    Ok(())
 }
 
 // #[test]

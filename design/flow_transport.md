@@ -28,7 +28,7 @@ If this connection is compatible, then we know that our peer is using the same w
 ​
 This is implemented in FlowTransport.actor.cpp.  The read logic is simpler than the write logic.
 
-Note: UID is deserialized using flatbuffers, which happen to encode it as exactly 16 bytes, in native x86 packed struct memory layout (two unsigned 64-bit integers; little endian).
+The UID here is serialized as two raw 64 bit values.  Later, UIDs are serialized using flatbuffer, which is a more complex (and verbose) format.
 
 As of release 7.1, the structure of subsequent messages is as follows.  All integers are little endian (often implemented as machine order, then compiled for x86 or little-endian arm variants):
 ​
@@ -36,7 +36,7 @@ As of release 7.1, the structure of subsequent messages is as follows.  All inte
     1. packet_length (u32: 4 bytes unsigned; byte count includes token and message; excludes packet_length)
     2. token (u64[2]: 16 opaque bytes that identify the recipient of this message)
     3. message (u8[packet length - 16]: to be interpreted by the recipient)
-* For non-TLS connections, there's additionally a crc32 checksum for message integrity:
+* For non-TLS connections, there's additionally a checksum for message integrity:
     1. packet_length (u32: 4 bytes unsigned; exclusive of packet_length and xxhash3_64bit bytes)
     2. xxhash3_64bit (u64: checksum of token + message)
     3. token (u64[2])
@@ -56,8 +56,7 @@ EndpointMap to determine if the endpoint is local (the bit is set to 1) or remot
 
 TODO: What uses the top 32 bits of `second`?
 
-TODO: What ensures the bottom 32 bits of `second` are set to a unique value by `getAdjustedEndpoint`?  (If nothing does, then how does `EndpointMap` dispatch the result?)  It seems to just add offsets to an index.  If the indexes are close, then the sums will overlap.  (Could it just be hoping there are no collisions?!?)
-
+TODO: What ensures the bottom 32 bits of `second` are set to a unique value by `getAdjustedEndpoint`?  If nothing does, then how does `EndpointMap` dispatch the result?  It seems to just add offsets to an index.  If the indexes are close, then the sums will overlap, right?
 
 ## Well-known endpoints
 ​

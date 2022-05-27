@@ -2,7 +2,7 @@ use super::frame::Frame;
 use super::Result;
 
 use bytes::BytesMut;
-use tokio::io::{AsyncReadExt, BufWriter};
+use tokio::io::{AsyncReadExt, AsyncWriteExt, BufWriter};
 use tokio::net::TcpStream;
 
 #[derive(Debug)]
@@ -22,6 +22,13 @@ impl Connection {
             buffer: BytesMut::with_capacity(MAX_FDB_FRAME_LENGTH),
             reading_connect_packet: true,
         }
+    }
+
+    pub async fn send_connect_packet(&mut self) -> Result<()> {
+        let connect_packet = super::frame::ConnectPacket::new();
+        self.stream.write_all(&connect_packet.as_bytes()).await?;
+        self.stream.flush().await?;
+        Ok(())
     }
 
     // TODO: Pass this a lambda, and change the payload in frame from a vec<u8> to a &'a[u8].
@@ -51,5 +58,10 @@ impl Connection {
                 }
             }
         }
+    }
+    pub async fn write_frame(&mut self, frame: Frame) -> Result<()> {
+        let buf = frame.as_bytes();
+        self.stream.write_all(&buf).await?;
+        Ok(())
     }
 }

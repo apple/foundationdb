@@ -1277,6 +1277,7 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 	try {
 		loop {
 			loop {
+				printf("A\n");
 				state int readAllBytes = buffer_end - unprocessed_end;
 				if (readAllBytes < FLOW_KNOBS->MIN_PACKET_BUFFER_FREE_BYTES) {
 					Arena newArena;
@@ -1296,6 +1297,7 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 
 				state int totalReadBytes = 0;
 				while (true) {
+					printf("B\n");
 					const int len = std::min<int>(buffer_end - unprocessed_end, FLOW_KNOBS->MAX_PACKET_SEND_BYTES);
 					if (len == 0)
 						break;
@@ -1309,14 +1311,19 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 				if (peer) {
 					peer->bytesReceived += totalReadBytes;
 				}
+				printf("peer->bytesReceived: %lld totalReadBytes: %d\n", peer->bytesReceived, totalReadBytes);
 				if (totalReadBytes == 0)
 					break;
 				state bool readWillBlock = totalReadBytes != readAllBytes;
 
+				printf("C\n");
 				if (expectConnectPacket && unprocessed_end - unprocessed_begin >= CONNECT_PACKET_V0_SIZE) {
+					printf("D\n");
+
 					// At the beginning of a connection, we expect to receive a packet containing the protocol version
 					// and the listening port of the remote process
 					int32_t connectPacketSize = ((ConnectPacket*)unprocessed_begin)->totalPacketSize();
+					printf("ConnectPacketSize %d (got %d)\n", connectPacketSize, unprocessed_end - unprocessed_begin);
 					if (unprocessed_end - unprocessed_begin >= connectPacketSize) {
 						auto protocolVersion = ((ConnectPacket*)unprocessed_begin)->protocolVersion;
 						BinaryReader pktReader(unprocessed_begin, connectPacketSize, AssumeVersion(protocolVersion));
@@ -1414,6 +1421,8 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 				}
 
 				if (!expectConnectPacket) {
+					printf("E\n");
+
 					if (compatible || peerProtocolVersion.hasStableInterfaces()) {
 						scanPackets(transport,
 						            unprocessed_begin,
