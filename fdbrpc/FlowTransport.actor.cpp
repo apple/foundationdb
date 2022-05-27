@@ -1104,6 +1104,7 @@ static void scanPackets(TransportData* transport,
 
 	const bool checksumEnabled = !peerAddress.isTLS();
 	loop {
+		printf("F %ld bytes\n", e - p);
 		uint32_t packetLen;
 		XXH64_hash_t packetChecksum;
 
@@ -1122,6 +1123,8 @@ static void scanPackets(TransportData* transport,
 			p += sizeof(packetChecksum);
 		}
 
+		printf("FF packetlen %d (remaing: %d)\n", packetLen, (uint32_t)(e-p));
+
 		if (packetLen > FLOW_KNOBS->PACKET_LIMIT) {
 			TraceEvent(SevError, "PacketLimitExceeded")
 			    .detail("FromPeer", peerAddress.toString())
@@ -1134,6 +1137,7 @@ static void scanPackets(TransportData* transport,
 		ASSERT(packetLen >= sizeof(UID));
 
 		if (checksumEnabled) {
+			printf("CHECKSUM\n");
 			bool isBuggifyEnabled = false;
 			if (g_network->isSimulated() && !isStableConnection &&
 			    g_network->now() - g_simulator.lastConnectionFailure > g_simulator.connectionFailuresDisableDuration &&
@@ -1177,11 +1181,15 @@ static void scanPackets(TransportData* transport,
 					    .detail("CalculatedChecksum", calculatedChecksum);
 				}
 			}
+		} else {
+			printf("NO CHECKSUM\n");
 		}
 
 #if VALGRIND
 		VALGRIND_CHECK_MEM_IS_DEFINED(p, packetLen);
 #endif
+		printf("G\n");
+
 		// remove object serializer flag to account for flat buffer
 		peerProtocolVersion.removeObjectSerializerFlag();
 		ArenaReader reader(arena, StringRef(p, packetLen), AssumeVersion(peerProtocolVersion));
@@ -1203,6 +1211,7 @@ static void scanPackets(TransportData* transport,
 
 		ASSERT(!reader.empty());
 		TaskPriority priority = transport->endpoints.getPriority(token);
+		printf("TaskPriority = %d", (uint32_t)priority);
 		// we ignore packets to unknown endpoints if they're not going to a stream anyways, so we can just
 		// return here. The main place where this seems to happen is if a ReplyPromise is not waited on
 		// long enough.
@@ -1210,6 +1219,7 @@ static void scanPackets(TransportData* transport,
 		// we have many messages to UnknownEndpoint we want to optimize earlier. As deliver is an actor it
 		// will allocate some state on the heap and this prevents it from doing that.
 		if (priority != TaskPriority::UnknownEndpoint || (token.first() & TOKEN_STREAM_FLAG) != 0) {
+			printf("H\n");
 			deliver(transport,
 			        Endpoint({ peerAddress }, token),
 			        priority,
@@ -1421,7 +1431,7 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 				}
 
 				if (!expectConnectPacket) {
-					printf("E\n");
+					printf("E compatible = %d  hasStableInterfaces = %d\n", compatible, peerProtocolVersion.hasStableInterfaces());
 
 					if (compatible || peerProtocolVersion.hasStableInterfaces()) {
 						scanPackets(transport,

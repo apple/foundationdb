@@ -62,6 +62,7 @@ impl Connection {
     pub async fn write_frame(&mut self, frame: Frame) -> Result<()> {
         let buf = frame.as_bytes();
         self.stream.write_all(&buf).await?;
+        self.stream.flush().await?;
         Ok(())
     }
 }

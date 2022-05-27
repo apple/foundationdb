@@ -201,9 +201,9 @@ impl Frame {
         let len_sz = 4;
         let checksum_sz = 8;
         let uid_sz = 16;
-        let len = len_sz + checksum_sz + uid_sz + self.payload.len();
+        let len = uid_sz + self.payload.len();
         //vec.resize(len, 0);
-        vec.extend_from_slice(&u32::to_le_bytes((uid_sz + len).try_into().unwrap()));
+        vec.extend_from_slice(&u32::to_le_bytes((len).try_into().unwrap()));
         vec.extend_from_slice(&u64::to_le_bytes(0)); // we compute checksum below.
         vec.extend_from_slice(&u64::to_le_bytes(self.token.uid[0]));
         vec.extend_from_slice(&u64::to_le_bytes(self.token.uid[1]));
@@ -211,6 +211,7 @@ impl Frame {
 
         let xxh3_64 = xxh3_64(&vec[len_sz + checksum_sz..]);
         vec[len_sz..len_sz + checksum_sz].copy_from_slice(&u64::to_le_bytes(xxh3_64));
+        println!("sent len: {}, actual len: {}, payload: {:?}", len, vec.len(), &vec);
         vec
     }
 }
