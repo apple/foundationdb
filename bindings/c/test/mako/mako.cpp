@@ -437,7 +437,8 @@ int runWorkload(Database db,
 	// and create transactions as needed
 	Tenant* tenants[args.tenants];
 	for (int i = 0; i < args.tenants; ++i) {
-		BytesRef tenant_name = toBytesRef("tenant" + std::to_string(i));
+		std::string tenantStr = "tenant" + std::to_string(i);
+		BytesRef tenant_name = toBytesRef(tenantStr);
 		tenants[i] = new Tenant(&db, tenant_name, tenant_name.length());
 	}
 
