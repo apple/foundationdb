@@ -69,8 +69,10 @@ int encode(const uint8_t* __restrict plaintextIn, int lengthIn, uint8_t* __restr
 
 int encodedLength(int dataLength) noexcept {
 	auto r = dataLength % 3;
-	if (r == 0) return (dataLength / 3) * 4;
-	else return (dataLength / 3) * 4 + r + 1;
+	if (r == 0)
+		return (dataLength / 3) * 4;
+	else
+		return (dataLength / 3) * 4 + r + 1;
 }
 
 StringRef encode(Arena& arena, StringRef plainText) {

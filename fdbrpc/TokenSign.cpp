@@ -94,33 +94,29 @@ Algorithm algorithmFromString(StringRef s) noexcept {
 		return Algorithm::Unknown;
 }
 
-StringRef signString(Arena& arena,
-					 StringRef string,
-					 PrivateKey privateKey,
-					 int keyAlgNid,
-					 MessageDigestMethod digest);
+StringRef signString(Arena& arena, StringRef string, PrivateKey privateKey, int keyAlgNid, MessageDigestMethod digest);
 
 bool verifyStringSignature(StringRef string,
-						   StringRef signature,
-						   PublicKey publicKey,
-						   int keyAlgNid,
-						   MessageDigestMethod digest);
+                           StringRef signature,
+                           PublicKey publicKey,
+                           int keyAlgNid,
+                           MessageDigestMethod digest);
 
-std::pair<int/*key algorithm nid*/, MessageDigestMethod> getMethod(Algorithm alg) {
+std::pair<int /*key algorithm nid*/, MessageDigestMethod> getMethod(Algorithm alg) {
 	if (alg == Algorithm::RS256) {
-		return {EVP_PKEY_RSA, ::EVP_sha256()};
+		return { EVP_PKEY_RSA, ::EVP_sha256() };
 	} else if (alg == Algorithm::ES256) {
-		return {EVP_PKEY_EC, ::EVP_sha256()};
+		return { EVP_PKEY_EC, ::EVP_sha256() };
 	} else {
-		return {NID_undef, nullptr};
+		return { NID_undef, nullptr };
 	}
 }
 
 std::string_view getAlgorithmName(Algorithm alg) {
 	if (alg == Algorithm::RS256)
-		return {"RS256"};
+		return { "RS256" };
 	else if (alg == Algorithm::ES256)
-		return {"ES256"};
+		return { "ES256" };
 	else
 		UNREACHABLE();
 }
@@ -131,9 +127,9 @@ StringRef signString(Arena& arena, StringRef string, PrivateKey privateKey, int 
 	auto const privateKeyAlgNid = ::EVP_PKEY_base_id(key);
 	if (privateKeyAlgNid != keyAlgNid) {
 		TraceEvent(SevWarnAlways, "TokenSignAlgoMismatch")
-			.suppressFor(10)
-			.detail("ExpectedAlg", OBJ_nid2sn(keyAlgNid))
-			.detail("PublicKeyAlg", OBJ_nid2sn(privateKeyAlgNid));
+		    .suppressFor(10)
+		    .detail("ExpectedAlg", OBJ_nid2sn(keyAlgNid))
+		    .detail("PublicKeyAlg", OBJ_nid2sn(privateKeyAlgNid));
 		throw digital_signature_ops_error();
 	}
 	auto mdctx = ::EVP_MD_CTX_create();
@@ -154,18 +150,18 @@ StringRef signString(Arena& arena, StringRef string, PrivateKey privateKey, int 
 }
 
 bool verifyStringSignature(StringRef string,
-						   StringRef signature,
-						   PublicKey publicKey,
-						   int keyAlgNid,
-						   MessageDigestMethod digest) {
+                           StringRef signature,
+                           PublicKey publicKey,
+                           int keyAlgNid,
+                           MessageDigestMethod digest) {
 	ASSERT_NE(keyAlgNid, NID_undef);
 	auto key = publicKey.nativeHandle();
 	auto const publicKeyAlgNid = ::EVP_PKEY_base_id(key);
 	if (keyAlgNid != publicKeyAlgNid) {
 		TraceEvent(SevWarnAlways, "TokenVerifyAlgoMismatch")
-			.suppressFor(10)
-			.detail("ExpectedAlg", OBJ_nid2sn(keyAlgNid))
-			.detail("PublicKeyAlg", OBJ_nid2sn(publicKeyAlgNid));
+		    .suppressFor(10)
+		    .detail("ExpectedAlg", OBJ_nid2sn(keyAlgNid))
+		    .detail("PublicKeyAlg", OBJ_nid2sn(publicKeyAlgNid));
 		return false; // public key's algorithm doesn't match string's
 	}
 	auto mdctx = ::EVP_MD_CTX_create();
@@ -194,10 +190,7 @@ bool verifyStringSignature(StringRef string,
 
 namespace authz::flatbuffers {
 
-SignedTokenRef signToken(Arena& arena,
-						 TokenRef token,
-						 StringRef keyName,
-						 PrivateKey privateKey) {
+SignedTokenRef signToken(Arena& arena, TokenRef token, StringRef keyName, PrivateKey privateKey) {
 	auto ret = SignedTokenRef{};
 	auto writer = ObjectWriter([&arena](size_t len) { return new (arena) uint8_t[len]; }, IncludeVersion());
 	writer.serialize(token);
@@ -220,8 +213,7 @@ TokenRef makeRandomTokenSpec(Arena& arena, IRandom& rng) {
 	token.expiresAt = timer_monotonic() * (0.5 + rng.random01());
 	const auto numTenants = rng.randomInt(1, 3);
 	for (auto i = 0; i < numTenants; i++) {
-		token.tenants.push_back(arena,
-								genRandomAlphanumStringRef(arena, rng, MaxTenantNameLenPlus1));
+		token.tenants.push_back(arena, genRandomAlphanumStringRef(arena, rng, MaxTenantNameLenPlus1));
 	}
 	return token;
 }
@@ -233,9 +225,7 @@ namespace authz::jwt {
 StringRef makeTokenPart(Arena& arena, TokenRef tokenSpec) {
 	using Buffer = rapidjson::StringBuffer;
 	using Writer = rapidjson::Writer<Buffer>;
-	auto setStringRef = [](Writer& wr, StringRef s) {
-		wr.String(reinterpret_cast<const char*>(s.begin()), s.size());
-	};
+	auto setStringRef = [](Writer& wr, StringRef s) { wr.String(reinterpret_cast<const char*>(s.begin()), s.size()); };
 	auto headerBuffer = Buffer();
 	auto payloadBuffer = Buffer();
 	auto header = Writer(headerBuffer);
@@ -310,10 +300,10 @@ bool parseHeaderPart(TokenRef& token, StringRef b64urlHeader) {
 	d.Parse(reinterpret_cast<const char*>(header.begin()), header.size());
 	if (d.HasParseError()) {
 		TraceEvent(SevWarnAlways, "TokenHeaderJsonParseError")
-			.suppressFor(10)
-			.detail("Header", header.toString())
-			.detail("Message", GetParseError_En(d.GetParseError()))
-			.detail("Offset", d.GetErrorOffset());
+		    .suppressFor(10)
+		    .detail("Header", header.toString())
+		    .detail("Message", GetParseError_En(d.GetParseError()))
+		    .detail("Offset", d.GetErrorOffset());
 		return false;
 	}
 	if (d.IsObject() && d.HasMember("alg") && d.HasMember("typ")) {
@@ -341,19 +331,21 @@ bool parsePayloadPart(Arena& arena, TokenRef& token, StringRef b64urlPayload) {
 	d.Parse(reinterpret_cast<const char*>(payload.begin()), payload.size());
 	if (d.HasParseError()) {
 		TraceEvent(SevWarnAlways, "TokenPayloadJsonParseError")
-			.suppressFor(10)
-			.detail("Payload", payload.toString())
-			.detail("Message", GetParseError_En(d.GetParseError()))
-			.detail("Offset", d.GetErrorOffset());
+		    .suppressFor(10)
+		    .detail("Payload", payload.toString())
+		    .detail("Message", GetParseError_En(d.GetParseError()))
+		    .detail("Offset", d.GetErrorOffset());
 		return false;
 	}
-	if (d.IsObject() && d.HasMember("iss") && d.HasMember("iat") && d.HasMember("exp") && d.HasMember("kid") && d.HasMember("tenants")) {
+	if (d.IsObject() && d.HasMember("iss") && d.HasMember("iat") && d.HasMember("exp") && d.HasMember("kid") &&
+	    d.HasMember("tenants")) {
 		auto const& iss = d["iss"];
 		auto const& iat = d["iat"];
 		auto const& exp = d["exp"];
 		auto const& kid = d["kid"];
 		auto const& tenants = d["tenants"];
-		if (iss.IsString() && iat.IsUint64() && exp.IsUint64() && kid.IsString() && tenants.IsArray() && tenants.Size() > 0) {
+		if (iss.IsString() && iat.IsUint64() && exp.IsUint64() && kid.IsString() && tenants.IsArray() &&
+		    tenants.Size() > 0) {
 			token.issuer = StringRef(arena, reinterpret_cast<const uint8_t*>(iss.GetString()), iss.GetStringLength());
 			token.keyId = StringRef(arena, reinterpret_cast<const uint8_t*>(kid.GetString()), kid.GetStringLength());
 			token.issuedAtUnixTime = iat.GetUint64();

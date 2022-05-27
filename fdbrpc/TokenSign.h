@@ -64,10 +64,7 @@ struct SignedTokenRef {
 	}
 };
 
-SignedTokenRef signToken(Arena& arena,
-						 TokenRef token,
-						 StringRef keyName,
-						 StringRef privateKeyDer);
+SignedTokenRef signToken(Arena& arena, TokenRef token, StringRef keyName, StringRef privateKeyDer);
 
 bool verifyToken(SignedTokenRef signedToken, StringRef publicKeyDer);
 
@@ -83,12 +80,12 @@ namespace authz::jwt {
 // This is a parsed, flattened view of T and signature
 struct TokenRef {
 	// header part ("typ": "JWT" implicitly enforced)
-	Algorithm algorithm;			// alg
+	Algorithm algorithm; // alg
 	// payload part
-	StringRef issuer;				// iss
-	uint64_t issuedAtUnixTime;		// iat
-	uint64_t expiresAtUnixTime;		// exp
-	StringRef keyId;				// kid
+	StringRef issuer; // iss
+	uint64_t issuedAtUnixTime; // iat
+	uint64_t expiresAtUnixTime; // exp
+	StringRef keyId; // kid
 	VectorRef<StringRef> tenants;
 	// signature part
 	StringRef signature;

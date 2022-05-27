@@ -218,7 +218,8 @@ CertAndKeyNative makeCertNative(CertSpecRef spec, CertAndKeyNative issuer) {
 		auto extGuard = ScopeExit([ext]() { ::X509_EXTENSION_free(ext); });
 		OSSL_ASSERT(::X509_add_ext(x, ext, -1));
 	}
-	OSSL_ASSERT(::X509_sign(x, (isSelfSigned ? keypair.nativeHandle() : issuer.privateKey.nativeHandle()), ::EVP_sha256()));
+	OSSL_ASSERT(
+	    ::X509_sign(x, (isSelfSigned ? keypair.nativeHandle() : issuer.privateKey.nativeHandle()), ::EVP_sha256()));
 	auto ret = CertAndKeyNative{};
 	ret.cert = smartX;
 	ret.privateKey = keypair;

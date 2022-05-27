@@ -33,6 +33,7 @@ class PrivateKey;
 // Consumes public key in ASN.1 subjectPublicKeyInfo encoding
 class PublicKey {
 	std::shared_ptr<EVP_PKEY> ptr;
+
 public:
 	PublicKey() noexcept = default;
 
@@ -52,17 +53,14 @@ public:
 	// i2d_PUBKEY
 	StringRef writeDer(Arena& arena) const;
 
-	EVP_PKEY* nativeHandle() const noexcept {
-		return ptr.get();
-	}
+	EVP_PKEY* nativeHandle() const noexcept { return ptr.get(); }
 
-	explicit operator bool() const noexcept {
-		return static_cast<bool>(ptr);
-	}
+	explicit operator bool() const noexcept { return static_cast<bool>(ptr); }
 };
 
 class PrivateKey {
 	std::shared_ptr<EVP_PKEY> ptr;
+
 public:
 	PrivateKey() noexcept = default;
 
@@ -91,13 +89,9 @@ public:
 	// i2d_PUBKEY
 	StringRef writePublicKeyDer(Arena& arena) const;
 
-	EVP_PKEY* nativeHandle() const noexcept {
-		return ptr.get();
-	}
+	EVP_PKEY* nativeHandle() const noexcept { return ptr.get(); }
 
-	explicit operator bool() const noexcept {
-		return static_cast<bool>(ptr);
-	}
+	explicit operator bool() const noexcept { return static_cast<bool>(ptr); }
 
 	// Create a PublicKey independent of this key
 	PublicKey toPublicKey() const;

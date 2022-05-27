@@ -132,8 +132,7 @@ PrivateKey::PrivateKey(DerEncoded, StringRef der) {
 	ptr = std::shared_ptr<EVP_PKEY>(key, &::EVP_PKEY_free);
 }
 
-PrivateKey::PrivateKey(std::shared_ptr<EVP_PKEY> key) : ptr(std::move(key))
-{}
+PrivateKey::PrivateKey(std::shared_ptr<EVP_PKEY> key) : ptr(std::move(key)) {}
 
 StringRef PrivateKey::writePem(Arena& arena) const {
 	ASSERT(ptr);

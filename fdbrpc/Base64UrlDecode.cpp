@@ -94,20 +94,23 @@ int decode(const uint8_t* __restrict codeIn, const int lengthIn, uint8_t* __rest
 
 int decodedLength(int codeLength) noexcept {
 	const auto r = (codeLength & 3);
-	if (r == 1) return -1;
-	else if (r == 0) return (codeLength / 4) * 3;
-	else return (codeLength / 4) * 3 + (r - 1);
+	if (r == 1)
+		return -1;
+	else if (r == 0)
+		return (codeLength / 4) * 3;
+	else
+		return (codeLength / 4) * 3 + (r - 1);
 }
 
 std::pair<StringRef, bool> decode(Arena& arena, StringRef base64UrlStr) {
 	auto decodedLen = decodedLength(base64UrlStr.size());
 	if (decodedLen <= 0) {
-		return {StringRef(), decodedLen == 0};
+		return { StringRef(), decodedLen == 0 };
 	}
 	auto out = new (arena) uint8_t[decodedLen];
 	auto actualLen = decode(base64UrlStr.begin(), base64UrlStr.size(), out);
 	ASSERT_EQ(decodedLen, actualLen);
-	return {StringRef(out, decodedLen), true};
+	return { StringRef(out, decodedLen), true };
 }
 
 } // namespace base64url
