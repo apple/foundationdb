@@ -137,13 +137,11 @@ Future<REPLY_TYPE(Req)> retryGetReplyFromHostname(Req request, Hostname hostname
 	// Suitable for use with hostname, where RequestStream is NOT initialized yet.
 	// Not normally useful for endpoints initialized with NetworkAddress.
 	state double reconnetInterval = FLOW_KNOBS->HOSTNAME_RECONNECT_INIT_INTERVAL;
-	state RequestStream<Req>* to;
+	state std::unique_ptr<RequestStream<Req>> to;
 	loop {
 		NetworkAddress address = wait(hostname.resolveWithRetry());
-		if (to == nullptr) {
-			to = new RequestStream<Req>(Endpoint::wellKnown({ address }, token));
-		} else if (to->getEndpoint().getPrimaryAddress() != address) {
-			*to = RequestStream<Req>(Endpoint::wellKnown({ address }, token));
+		if (to == nullptr || to->getEndpoint().getPrimaryAddress() != address) {
+			to = std::make_unique<RequestStream<Req>>(Endpoint::wellKnown({ address }, token));
 		}
 		state ErrorOr<REPLY_TYPE(Req)> reply = wait(to->tryGetReply(request));
 		if (reply.isError()) {
@@ -171,13 +169,11 @@ Future<REPLY_TYPE(Req)> retryGetReplyFromHostname(Req request,
 	// Suitable for use with hostname, where RequestStream is NOT initialized yet.
 	// Not normally useful for endpoints initialized with NetworkAddress.
 	state double reconnetInterval = FLOW_KNOBS->HOSTNAME_RECONNECT_INIT_INTERVAL;
-	state RequestStream<Req>* to;
+	state std::unique_ptr<RequestStream<Req>> to;
 	loop {
 		NetworkAddress address = wait(hostname.resolveWithRetry());
-		if (to == nullptr) {
-			to = new RequestStream<Req>(Endpoint::wellKnown({ address }, token));
-		} else if (to->getEndpoint().getPrimaryAddress() != address) {
-			*to = RequestStream<Req>(Endpoint::wellKnown({ address }, token));
+		if (to == nullptr || to->getEndpoint().getPrimaryAddress() != address) {
+			to = std::make_unique<RequestStream<Req>>(Endpoint::wellKnown({ address }, token));
 		}
 		state ErrorOr<REPLY_TYPE(Req)> reply = wait(to->tryGetReply(request, taskID));
 		if (reply.isError()) {
