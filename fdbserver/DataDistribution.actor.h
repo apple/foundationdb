@@ -240,17 +240,20 @@ public:
 		int64_t bytesWritePerKSecond = 0;
 		int64_t bytesReadPerKSecond = 0; 
 
-		explicit PhysicalShard(uint64_t id) : id(id) { bytesOnDisk = deterministicRandom()->randomUInt64(); }
+		PhysicalShard() : id(0) {}
+		explicit PhysicalShard(uint64_t id) : id(id) { bytesOnDisk = 0; }
+		explicit PhysicalShard(uint64_t id, uint64_t bytesOnDisk) : id(id), bytesOnDisk(bytesOnDisk) {}
 		// operator< used for selecting the physicalShard with the minimal bytesOnDisk
 		bool operator<(const struct PhysicalShard& right) const { return id < right.id ? true : false; }
 		std::string toString() const { return std::to_string(id); }
 	};
-	void updatePhysicalShardToTeams(PhysicalShard physicalShard, 
-		std::vector<Team> inputTeams, int expectedNumServersPerTeam, std::string caller, uint64_t debugID);
+	void updatePhysicalShardToTeams(uint64_t physicalShardID, 
+		std::vector<Team> inputTeams, KeyRange keys, StorageMetrics const& metrics, int expectedNumServersPerTeam, std::string caller, uint64_t debugID);
 	Optional<uint64_t> tryGetPhysicalShardIDFor(Team team, uint64_t debugID);
 	Optional<Team> tryGetRemoteTeamWith(uint64_t physicalShardID, int expectedTeamSize, uint64_t debugID);
 	void printTeamPhysicalShardsMapping(std::string);
 	uint64_t generateNewPhysicalShardID(uint64_t debugID);
+	void updatePhysicalShardMetrics(KeyRange keyRange, StorageMetrics const& metrics);
 
 private:
 	struct OrderByTeamKey {
@@ -268,7 +271,8 @@ private:
 	                 // usable_regions > 1
 	std::set<std::pair<Team, KeyRange>, OrderByTeamKey> team_shards;
 	std::map<UID, int> storageServerShards;
-	std::map<Team, std::set<PhysicalShard>> teamPhysicalShards; // the mapping from team to physicalShards
+	std::map<Team, std::set<uint64_t>> teamPhysicalShardIDs; // the mapping from team to physicalShards
+	KeyRangeMap<PhysicalShard> keyRangePhysicalShardMap;
 	void erase(Team team, KeyRange const& range);
 	void insert(Team team, KeyRange const& range);
 };

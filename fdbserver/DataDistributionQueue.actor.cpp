@@ -1411,8 +1411,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 							selectedTeams.push_back(ShardsAffectedByTeamFailure::Team(serverIds, i == 0));
 						}
 						self->shardsAffectedByTeamFailure->updatePhysicalShardToTeams(
-										ShardsAffectedByTeamFailure::PhysicalShard(rd.dataMoveId.first()), 
-										selectedTeams, self->singleRegionTeamSize, "Update", debugID);
+										rd.dataMoveId.first(), 
+										selectedTeams, rd.keys, metrics, self->singleRegionTeamSize, "Update", debugID);
 					}
 					break;
 				}
