@@ -42,8 +42,10 @@ auto get(MapContainer& m, K const& k) -> decltype(m.at(k)) {
 
 FDB_DEFINE_BOOLEAN_PARAM(WantNewServers);
 FDB_DEFINE_BOOLEAN_PARAM(WantTrueBest);
-FDB_DEFINE_BOOLEAN_PARAM(PreferLowerUtilization);
+FDB_DEFINE_BOOLEAN_PARAM(PreferLowerDiskUtil);
 FDB_DEFINE_BOOLEAN_PARAM(TeamMustHaveShards);
+FDB_DEFINE_BOOLEAN_PARAM(ForReadBalance);
+FDB_DEFINE_BOOLEAN_PARAM(PreferLowerReadUtil);
 
 class DDTeamCollectionImpl {
 	ACTOR static Future<Void> checkAndRemoveInvalidLocalityAddr(DDTeamCollection* self) {
@@ -157,6 +159,7 @@ public:
 	ACTOR static Future<Void> getTeam(DDTeamCollection* self, GetTeamRequest req) {
 		try {
 			wait(self->checkBuildTeams());
+			// report the median available space
 			if (now() - self->lastMedianAvailableSpaceUpdate > SERVER_KNOBS->AVAILABLE_SPACE_UPDATE_DELAY) {
 				self->lastMedianAvailableSpaceUpdate = now();
 				std::vector<double> teamAvailableSpace;
@@ -241,8 +244,7 @@ public:
 
 			if (req.wantsTrueBest) {
 				ASSERT(!bestOption.present());
-				auto& startIndex =
-				    req.preferLowerUtilization ? self->lowestUtilizationTeam : self->highestUtilizationTeam;
+				auto& startIndex = req.preferLowerDiskUtil ? self->lowestUtilizationTeam : self->highestUtilizationTeam;
 				if (startIndex >= self->teams.size()) {
 					startIndex = 0;
 				}
@@ -251,14 +253,15 @@ public:
 				for (int i = 0; i < self->teams.size(); i++) {
 					int currentIndex = (startIndex + i) % self->teams.size();
 					if (self->teams[currentIndex]->isHealthy() &&
-					    (!req.preferLowerUtilization ||
+					    (!req.preferLowerDiskUtil ||
 					     self->teams[currentIndex]->hasHealthyAvailableSpace(self->medianAvailableSpace))) {
 						int64_t loadBytes = self->teams[currentIndex]->getLoadBytes(true, req.inflightPenalty);
-						if ((!bestOption.present() || (req.preferLowerUtilization && loadBytes < bestLoadBytes) ||
-						     (!req.preferLowerUtilization && loadBytes > bestLoadBytes)) &&
-						    (!req.teamMustHaveShards ||
+						if ((!req.teamMustHaveShards ||
 						     self->shardsAffectedByTeamFailure->hasShards(ShardsAffectedByTeamFailure::Team(
-						         self->teams[currentIndex]->getServerIDs(), self->primary)))) {
+						         self->teams[currentIndex]->getServerIDs(), self->primary))) &&
+						    // sort conditions
+						    (!bestOption.present() ||
+						     req.lessCompare(bestOption.get(), self->teams[currentIndex], bestLoadBytes, loadBytes))) {
 
 							// bestOption doesn't contain wiggling SS while current team does. Don't replace bestOption
 							// in this case
@@ -266,7 +269,6 @@ public:
 							    self->teams[currentIndex]->hasWigglePausedServer()) {
 								continue;
 							}
-
 							bestLoadBytes = loadBytes;
 							bestOption = self->teams[currentIndex];
 							bestIndex = currentIndex;
@@ -283,8 +285,8 @@ public:
 					// If unhealthy team is majority, we may not find an ok dest in this while loop
 					Reference<TCTeamInfo> dest = deterministicRandom()->randomChoice(self->teams);
 
-					bool ok = dest->isHealthy() && (!req.preferLowerUtilization ||
-					                                dest->hasHealthyAvailableSpace(self->medianAvailableSpace));
+					bool ok = dest->isHealthy() &&
+					          (!req.preferLowerDiskUtil || dest->hasHealthyAvailableSpace(self->medianAvailableSpace));
 
 					for (int i = 0; ok && i < randomTeams.size(); i++) {
 						if (randomTeams[i]->getServerIDs() == dest->getServerIDs()) {
@@ -315,8 +317,8 @@ public:
 
 				for (int i = 0; i < randomTeams.size(); i++) {
 					int64_t loadBytes = randomTeams[i]->getLoadBytes(true, req.inflightPenalty);
-					if (!bestOption.present() || (req.preferLowerUtilization && loadBytes < bestLoadBytes) ||
-					    (!req.preferLowerUtilization && loadBytes > bestLoadBytes)) {
+					if (!bestOption.present() ||
+					    req.lessCompare(bestOption.get(), randomTeams[i], bestLoadBytes, loadBytes)) {
 
 						// bestOption doesn't contain wiggling SS while current team does. Don't replace bestOption
 						// in this case
@@ -5235,8 +5237,7 @@ public:
 	}
 
 	static void AddAllTeams_isExhaustive() {
-		Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+		Reference<IReplicationPolicy> policy = makeReference<PolicyAcross>(3, "zoneid", makeReference<PolicyOne>());
 		int processSize = 10;
 		int desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * processSize;
 		int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
@@ -5251,8 +5252,7 @@ public:
 	}
 
 	static void AddAllTeams_withLimit() {
-		Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+		Reference<IReplicationPolicy> policy = makeReference<PolicyAcross>(3, "zoneid", makeReference<PolicyOne>());
 		int processSize = 10;
 		int desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * processSize;
 		int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
@@ -5266,8 +5266,7 @@ public:
 
 	ACTOR static Future<Void> AddTeamsBestOf_SkippingBusyServers() {
 		wait(Future<Void>(Void()));
-		Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+		Reference<IReplicationPolicy> policy = makeReference<PolicyAcross>(3, "zoneid", makeReference<PolicyOne>());
 		state int processSize = 10;
 		state int desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * processSize;
 		state int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
@@ -5296,9 +5295,7 @@ public:
 	// It is hard to conclude what is the minimum number of  teams the addTeamsBestOf() should create in this situation.
 	ACTOR static Future<Void> AddTeamsBestOf_NotEnoughServers() {
 		wait(Future<Void>(Void()));
-
-		Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+		Reference<IReplicationPolicy> policy = makeReference<PolicyAcross>(3, "zoneid", makeReference<PolicyOne>());
 		state int processSize = 5;
 		state int desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * processSize;
 		state int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
@@ -5334,9 +5331,7 @@ public:
 	}
 
 	ACTOR static Future<Void> GetTeam_NewServersNotNeeded() {
-
-		Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+		Reference<IReplicationPolicy> policy = makeReference<PolicyAcross>(3, "zoneid", makeReference<PolicyOne>());
 		state int processSize = 5;
 		state int teamSize = 3;
 		state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
@@ -5370,7 +5365,7 @@ public:
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
 		state GetTeamRequest req(
-		    WantNewServers::False, WantTrueBest::True, PreferLowerUtilization::True, TeamMustHaveShards::False);
+		    WantNewServers::False, WantTrueBest::True, PreferLowerDiskUtil::True, TeamMustHaveShards::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5387,8 +5382,7 @@ public:
 	}
 
 	ACTOR static Future<Void> GetTeam_HealthyCompleteSource() {
-		Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+		Reference<IReplicationPolicy> policy = makeReference<PolicyAcross>(3, "zoneid", makeReference<PolicyOne>());
 		state int processSize = 5;
 		state int teamSize = 3;
 		state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
@@ -5423,7 +5417,7 @@ public:
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0), UID(4, 0) };
 
 		state GetTeamRequest req(
-		    WantNewServers::False, WantTrueBest::True, PreferLowerUtilization::True, TeamMustHaveShards::False);
+		    WantNewServers::False, WantTrueBest::True, PreferLowerDiskUtil::True, TeamMustHaveShards::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5440,9 +5434,7 @@ public:
 	}
 
 	ACTOR static Future<Void> GetTeam_TrueBestLeastUtilized() {
-
-		Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+		Reference<IReplicationPolicy> policy = makeReference<PolicyAcross>(3, "zoneid", makeReference<PolicyOne>());
 		state int processSize = 5;
 		state int teamSize = 3;
 		state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
@@ -5464,7 +5456,7 @@ public:
 
 		/*
 		 * Among server teams that have healthy space available, pick the team that is
-		 * least utilized, if the caller says they preferLowerUtilization.
+		 * least utilized, if the caller says they preferLowerDiskUtil.
 		 */
 
 		collection->server_info[UID(1, 0)]->setMetrics(mid_avail);
@@ -5475,7 +5467,7 @@ public:
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
 		state GetTeamRequest req(
-		    WantNewServers::True, WantTrueBest::True, PreferLowerUtilization::True, TeamMustHaveShards::False);
+		    WantNewServers::True, WantTrueBest::True, PreferLowerDiskUtil::True, TeamMustHaveShards::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5492,9 +5484,7 @@ public:
 	}
 
 	ACTOR static Future<Void> GetTeam_TrueBestMostUtilized() {
-
-		Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+		Reference<IReplicationPolicy> policy = makeReference<PolicyAcross>(3, "zoneid", makeReference<PolicyOne>());
 		state int processSize = 5;
 		state int teamSize = 3;
 		state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
@@ -5521,12 +5511,12 @@ public:
 
 		/*
 		 * Among server teams that have healthy space available, pick the team that is
-		 * most utilized, if the caller says they don't preferLowerUtilization.
+		 * most utilized, if the caller says they don't preferLowerDiskUtil.
 		 */
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
 		state GetTeamRequest req(
-		    WantNewServers::True, WantTrueBest::True, PreferLowerUtilization::False, TeamMustHaveShards::False);
+		    WantNewServers::True, WantTrueBest::True, PreferLowerDiskUtil::False, TeamMustHaveShards::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5543,8 +5533,7 @@ public:
 	}
 
 	ACTOR static Future<Void> GetTeam_ServerUtilizationBelowCutoff() {
-		Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+		Reference<IReplicationPolicy> policy = makeReference<PolicyAcross>(3, "zoneid", makeReference<PolicyOne>());
 		state int processSize = 5;
 		state int teamSize = 3;
 		state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
@@ -5578,7 +5567,7 @@ public:
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
 		state GetTeamRequest req(
-		    WantNewServers::True, WantTrueBest::True, PreferLowerUtilization::True, TeamMustHaveShards::False);
+		    WantNewServers::True, WantTrueBest::True, PreferLowerDiskUtil::True, TeamMustHaveShards::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5591,8 +5580,7 @@ public:
 	}
 
 	ACTOR static Future<Void> GetTeam_ServerUtilizationNearCutoff() {
-		Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+		Reference<IReplicationPolicy> policy = makeReference<PolicyAcross>(3, "zoneid", makeReference<PolicyOne>());
 		state int processSize = 5;
 		state int teamSize = 3;
 		state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
@@ -5635,7 +5623,7 @@ public:
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
 		state GetTeamRequest req(
-		    WantNewServers::True, WantTrueBest::True, PreferLowerUtilization::True, TeamMustHaveShards::False);
+		    WantNewServers::True, WantTrueBest::True, PreferLowerDiskUtil::True, TeamMustHaveShards::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5647,9 +5635,83 @@ public:
 		return Void();
 	}
 
+	ACTOR static Future<Void> GetTeam_TrueBestLeastReadBandwidth() {
+		Reference<IReplicationPolicy> policy = makeReference<PolicyAcross>(1, "zoneid", makeReference<PolicyOne>());
+		state int processSize = 5;
+		state int teamSize = 1;
+		state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
+
+		int64_t capacity = 1000 * 1024 * 1024, available = 800 * 1024 * 1024;
+		std::vector<int64_t> read_bandwidths{
+			300 * 1024 * 1024, 100 * 1024 * 1024, 500 * 1024 * 1024, 100 * 1024 * 1024, 900 * 1024 * 1024
+		};
+		std::vector<int64_t> load_bytes{
+			50 * 1024 * 1024, 600 * 1024 * 1024, 800 * 1024 * 1024, 200 * 1024 * 1024, 100 * 1024 * 1024
+		};
+		GetStorageMetricsReply metrics[5];
+		for (int i = 0; i < 5; ++i) {
+			metrics[i].capacity.bytes = capacity;
+			metrics[i].available.bytes = available;
+			metrics[i].load.bytesReadPerKSecond = read_bandwidths[i];
+			metrics[i].load.bytes = load_bytes[i];
+			collection->addTeam(std::set<UID>({ UID(i + 1, 0) }), IsInitialTeam::True);
+			collection->server_info[UID(i + 1, 0)]->setMetrics(metrics[i]);
+		}
+
+		collection->disableBuildingTeams();
+		collection->setCheckTeamDelay();
+
+		auto wantsNewServers = WantNewServers::True;
+		auto wantsTrueBest = WantTrueBest::True;
+		auto preferLowerDiskUtil = PreferLowerDiskUtil::True;
+		auto teamMustHaveShards = TeamMustHaveShards::False;
+		auto forReadBalance = ForReadBalance::True;
+		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
+
+		state GetTeamRequest req(wantsNewServers,
+		                         wantsTrueBest,
+		                         preferLowerDiskUtil,
+		                         teamMustHaveShards,
+		                         forReadBalance,
+		                         PreferLowerReadUtil::True);
+		req.completeSources = completeSources;
+
+		state GetTeamRequest reqHigh(wantsNewServers,
+		                             wantsTrueBest,
+		                             PreferLowerDiskUtil::False,
+		                             teamMustHaveShards,
+		                             forReadBalance,
+		                             PreferLowerReadUtil::False);
+
+		wait(collection->getTeam(req) && collection->getTeam(reqHigh));
+		auto [resTeam, resTeamSrcFound] = req.reply.getFuture().get();
+		auto [resTeamHigh, resTeamHighSrcFound] = reqHigh.reply.getFuture().get();
+
+		std::set<UID> expectedServers{ UID(4, 0) };
+		std::set<UID> expectedServersHigh{ UID(5, 0) };
+
+		ASSERT(resTeam.present() && resTeamHigh.present());
+		auto servers = resTeam.get()->getServerIDs(), serversHigh = resTeamHigh.get()->getServerIDs();
+		const std::set<UID> selectedServers(servers.begin(), servers.end()),
+		    selectedServersHigh(serversHigh.begin(), serversHigh.end());
+		// for (auto id : selectedServers)
+		// 	std::cout << id.toString() << std::endl;
+		ASSERT(expectedServers == selectedServers && expectedServersHigh == selectedServersHigh);
+
+		resTeam.get()->addReadInFlightToTeam(50);
+		req.reply.reset();
+		wait(collection->getTeam(req));
+		auto [resTeam1, resTeam1Found] = req.reply.getFuture().get();
+		std::set<UID> expectedServers1{ UID(2, 0) };
+		auto servers1 = resTeam1.get()->getServerIDs();
+		const std::set<UID> selectedServers1(servers1.begin(), servers1.end());
+		ASSERT(expectedServers1 == selectedServers1);
+
+		return Void();
+	}
+
 	ACTOR static Future<Void> GetTeam_DeprioritizeWigglePausedTeam() {
-		Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+		Reference<IReplicationPolicy> policy = makeReference<PolicyAcross>(3, "zoneid", makeReference<PolicyOne>());
 		state int processSize = 5;
 		state int teamSize = 3;
 		state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
@@ -5668,11 +5730,6 @@ public:
 		collection->disableBuildingTeams();
 		collection->setCheckTeamDelay();
 
-		/*
-		 * Among server teams that have healthy space available, pick the team that is
-		 * least utilized, if the caller says they preferLowerUtilization.
-		 */
-
 		collection->server_info[UID(1, 0)]->setMetrics(mid_avail);
 		collection->server_info[UID(2, 0)]->setMetrics(high_avail);
 		collection->server_info[UID(3, 0)]->setMetrics(high_avail);
@@ -5684,7 +5741,7 @@ public:
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
 		state GetTeamRequest req(
-		    WantNewServers::True, WantTrueBest::True, PreferLowerUtilization::True, TeamMustHaveShards::False);
+		    WantNewServers::True, WantTrueBest::True, PreferLowerDiskUtil::True, TeamMustHaveShards::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5758,6 +5815,10 @@ TEST_CASE("/DataDistribution/GetTeam/ServerUtilizationBelowCutoff") {
 
 TEST_CASE("/DataDistribution/GetTeam/ServerUtilizationNearCutoff") {
 	wait(DDTeamCollectionUnitTest::GetTeam_ServerUtilizationNearCutoff());
+	return Void();
+}
+TEST_CASE("/DataDistribution/GetTeam/TrueBestLeastReadBandwidth") {
+	wait(DDTeamCollectionUnitTest::GetTeam_TrueBestLeastReadBandwidth());
 	return Void();
 }
 

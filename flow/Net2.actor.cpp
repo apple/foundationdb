@@ -1890,9 +1890,11 @@ Future<std::vector<NetworkAddress>> Net2::resolveTCPEndpoint(const std::string& 
 
 Future<std::vector<NetworkAddress>> Net2::resolveTCPEndpointWithDNSCache(const std::string& host,
                                                                          const std::string& service) {
-	Optional<std::vector<NetworkAddress>> cache = dnsCache.find(host, service);
-	if (cache.present()) {
-		return cache.get();
+	if (FLOW_KNOBS->ENABLE_COORDINATOR_DNS_CACHE) {
+		Optional<std::vector<NetworkAddress>> cache = dnsCache.find(host, service);
+		if (cache.present()) {
+			return cache.get();
+		}
 	}
 	return resolveTCPEndpoint_impl(this, host, service);
 }
@@ -1925,9 +1927,11 @@ std::vector<NetworkAddress> Net2::resolveTCPEndpointBlocking(const std::string& 
 
 std::vector<NetworkAddress> Net2::resolveTCPEndpointBlockingWithDNSCache(const std::string& host,
                                                                          const std::string& service) {
-	Optional<std::vector<NetworkAddress>> cache = dnsCache.find(host, service);
-	if (cache.present()) {
-		return cache.get();
+	if (FLOW_KNOBS->ENABLE_COORDINATOR_DNS_CACHE) {
+		Optional<std::vector<NetworkAddress>> cache = dnsCache.find(host, service);
+		if (cache.present()) {
+			return cache.get();
+		}
 	}
 	return resolveTCPEndpointBlocking(host, service);
 }
