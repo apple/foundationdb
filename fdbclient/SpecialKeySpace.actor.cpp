@@ -171,7 +171,7 @@ ACTOR Future<Void> moveKeySelectorOverRangeActor(const SpecialKeyRangeReadImpl* 
 	// Note : startKey never equals endKey here
 	ASSERT(startKey < endKey);
 
-	TraceEvent(SevDebug, "NormalizeKeySelector")
+	DisabledTraceEvent(SevDebug, "NormalizeKeySelector")
 	    .detail("OriginalKey", ks->getKey())
 	    .detail("OriginalOffset", ks->offset)
 	    .detail("SpecialKeyRangeStart", skrImpl->getKeyRange().begin)
@@ -211,7 +211,7 @@ ACTOR Future<Void> moveKeySelectorOverRangeActor(const SpecialKeyRangeReadImpl* 
 			ks->offset -= result.size();
 		}
 	}
-	TraceEvent(SevDebug, "NormalizeKeySelector")
+	DisabledTraceEvent(SevDebug, "NormalizeKeySelector")
 	    .detail("NormalizedKey", ks->getKey())
 	    .detail("NormalizedOffset", ks->offset)
 	    .detail("SpecialKeyRangeStart", skrImpl->getKeyRange().begin)
