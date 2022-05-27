@@ -118,7 +118,7 @@ bool parseSignaturePart(Arena& arena, TokenRef& tokenOut, StringRef b64urlSignat
 // Parse passed token string and materialize its contents into tokenOut,
 // using memory allocated from arena
 // Return whether the signed token string is well-formed
-bool parseSignedToken(Arena& arena, TokenRef& tokenOut, StringRef signedTokenIn);
+bool parseToken(Arena& arena, TokenRef& tokenOut, StringRef signedTokenIn);
 
 // Verify only the signature part of signed token string against its token part, not its content
 bool verifyToken(StringRef signedToken, StringRef publicKeyDer);

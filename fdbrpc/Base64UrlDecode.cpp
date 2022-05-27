@@ -26,6 +26,7 @@ namespace base64url {
 constexpr uint8_t _X = 0xff;
 
 inline uint8_t decodeValue(uint8_t valueIn) noexcept {
+	// clang-format off
 	constexpr const uint8_t decoding[] = { // 20x13
 		_X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X,
 		_X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X,
@@ -40,6 +41,7 @@ inline uint8_t decodeValue(uint8_t valueIn) noexcept {
 		_X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X,
 		_X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X,
 		_X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X, _X };
+	// clang-format on
 	static_assert(sizeof(decoding) / sizeof(decoding[0]) == 256);
 	return decoding[valueIn];
 }
