@@ -305,7 +305,7 @@ struct ReadIterator {
 	std::shared_ptr<rocksdb::Iterator> iter;
 	double creationTime;
 	ReadIterator(rocksdb::ColumnFamilyHandle* cf, uint64_t index, rocksdb::DB* db, rocksdb::ReadOptions& options)
-	  : cf(cf), index(index), inUse(true), creationTime(now()), iter(db->NewIterator(options)) {}
+	  : cf(cf), index(index), inUse(true), creationTime(now()), iter(db->NewIterator(options, cf)) {}
 };
 
 // TODO: Add actor to refresh iterator pool.
@@ -450,7 +450,6 @@ struct PhysicalShard {
 	bool initialized() { return cf != nullptr; }
 
 	~PhysicalShard() {
-		readIterPool.reset();
 		if (!deletePending)
 			return;
 
@@ -494,6 +493,18 @@ public:
 
 	DataShard* getDataShard(KeyRef key) { return dataShardMap.rangeContaining(key).value(); }
 
+	std::vector<DataShard*> getDataShardsByRange(KeyRangeRef range) {
+		std::vector<DataShard*> result;
+		auto rangeIterator = dataShardMap.intersectingRanges(range);
+
+		for (auto it = rangeIterator.begin(); it != rangeIterator.end(); ++it) {
+			if (it.value() == nullptr)
+				continue;
+			result.push_back(it.value());
+		}
+		return result;
+	}
+
 	PhysicalShard* addRange(KeyRange range, std::string id) {
 		// Newly added range should not overlap with any existing range.
 		std::shared_ptr<PhysicalShard> shard;
@@ -507,6 +518,10 @@ public:
 		auto dataShard = std::make_unique<DataShard>(range, shard.get());
 		dataShardMap.insert(range, dataShard.get());
 		shard->dataShards[range.begin.toString()] = std::move(dataShard);
+		TraceEvent(SevDebug, "ShardedRocksDB")
+		    .detail("Action", "AddRange")
+		    .detail("BeginKey", range.begin)
+		    .detail("EndKey", range.end);
 		return shard.get();
 	}
 
@@ -526,6 +541,9 @@ public:
 	}
 
 	void closeAllShards() {
+		for (auto& [_, shard] : physicalShards) {
+			shard->readIterPool.reset();
+		}
 		// Close DB.
 		auto s = db->Close();
 		if (!s.ok()) {
@@ -578,6 +596,7 @@ int readRangeInDb(DataShard* shard, const KeyRangeRef& range, int rowLimit, int 
 	options.auto_prefix_mode = (SERVER_KNOBS->ROCKSDB_PREFIX_LEN > 0);
 	if (rowLimit >= 0) {
 		ReadIterator readIter = shard->physicalShard->readIterPool->getIterator();
+		// ReadIterator readIter(shard->physicalShard->db, shard->physicalShard->cf, options);
 		auto cursor = readIter.iter;
 		cursor->Seek(toSlice(range.begin));
 		while (cursor->Valid() && toStringRef(cursor->key()) < range.end) {
@@ -589,22 +608,13 @@ int readRangeInDb(DataShard* shard, const KeyRangeRef& range, int rowLimit, int 
 			if (result->size() >= rowLimit || accumulatedBytes >= byteLimit) {
 				break;
 			}
-
-			/*
-			if (timer_monotonic() - a.startTime > readRangeTimeout) {
-			    TraceEvent(SevWarn, "RocksDBError")
-			        .detail("Error", "Read range request timedout")
-			        .detail("Method", "ReadRangeAction")
-			        .detail("Timeout value", readRangeTimeout);
-			    a.result.sendError(transaction_too_old());
-			    return;
-			}*/
 			cursor->Next();
 		}
 		s = cursor->status();
-		shard->physicalShard->readIterPool->returnIterator(readIter);
+		// shard->physicalShard->readIterPool->returnIterator(readIter);
 	} else {
 		ReadIterator readIter = shard->physicalShard->readIterPool->getIterator();
+		// ReadIterator readIter(shard->physicalShard->db, shard->physicalShard->cf, options);
 		auto cursor = readIter.iter;
 		cursor->SeekForPrev(toSlice(range.end));
 		if (cursor->Valid() && toStringRef(cursor->key()) == range.end) {
@@ -619,19 +629,10 @@ int readRangeInDb(DataShard* shard, const KeyRangeRef& range, int rowLimit, int 
 			if (result->size() >= -rowLimit || accumulatedBytes >= byteLimit) {
 				break;
 			}
-			/*
-			if (timer_monotonic() - a.startTime > readRangeTimeout) {
-			    TraceEvent(SevWarn, "RocksDBError")
-			        .detail("Error", "Read range request timedout")
-			        .detail("Method", "ReadRangeAction")
-			        .detail("Timeout value", readRangeTimeout);
-			    a.result.sendError(transaction_too_old());
-			    return;
-			}*/
 			cursor->Prev();
 		}
 		s = cursor->status();
-		shard->physicalShard->readIterPool->returnIterator(readIter);
+		// shard->physicalShard->readIterPool->returnIterator(readIter);
 	}
 
 	if (!s.ok()) {
@@ -1333,7 +1334,6 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		};
 
 		void action(CloseAction& a) {
-
 			if (a.deleteOnClose) {
 				a.shardManager->destroyAllShards();
 			} else {
@@ -1568,7 +1568,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				rocksDBMetrics->getReadRangeQueueWaitHistogram(threadIndex)->sampleSeconds(readBeginTime - a.startTime);
 			}
 			if (readBeginTime - a.startTime > readRangeTimeout) {
-				TraceEvent(SevWarn, "RocksDBError")
+				TraceEvent(SevWarn, "KVSReadTimeout")
 				    .detail("Error", "Read range request timedout")
 				    .detail("Method", "ReadRangeAction")
 				    .detail("Timeout value", readRangeTimeout);
@@ -1584,18 +1584,16 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				a.result.send(result);
 			}
 			if (rowLimit < 0) {
-				// Reverses the instances so we could read range in reverse direction.
+				// Reverses the shard order so we could read range in reverse direction.
 				std::reverse(a.shards.begin(), a.shards.end());
 			}
 
-			// TODO: Do multi-thread read to improve performance
-			// All the shards should have the same version. Does the version matter?? probably not.
-			// Consider the following case
-			// Shard [a, b) => s1, [b, d) => s2
-			// Enqueue ClearRange(a, c)
-			// Enqueue Read(a, d), one shard could have applied ClearRange, Another may not.
-
+			// TODO: consider multi-thread reads. It's possible to read multiple shards in parallel. However, the number
+			// of rows to read needs to be calculated based on the previous read result. We may read more than we
+			// expected when parallel read is used when the previous result is not available. It's unlikely to get to
+			// performance improvement when the actual number of rows to read is very small.
 			int accumulatedBytes = 0;
+			int numShards = 0;
 			for (auto shard : a.shards) {
 				auto range = shard->range;
 				KeyRange readRange = KeyRange(KeyRangeRef(a.keys.begin > range.begin ? a.keys.begin : range.begin,
@@ -1610,10 +1608,18 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				}
 				byteLimit -= bytesRead;
 				accumulatedBytes += bytesRead;
+				++numShards;
 				if (result.size() >= abs(a.rowLimit) || accumulatedBytes >= a.byteLimit) {
 					break;
 				}
 			}
+
+			TraceEvent(SevDebug, "NumShards").detail("Size", a.shards.size());
+
+			Histogram::getHistogram(
+			    ROCKSDBSTORAGE_HISTOGRAM_GROUP, "ShardedRocksDBNumShardsInRangeRead"_sr, Histogram::Unit::countLinear)
+			    ->sample(numShards);
+
 			result.more =
 			    (result.size() == a.rowLimit) || (result.size() == -a.rowLimit) || (accumulatedBytes >= a.byteLimit);
 			if (result.more) {
@@ -1823,7 +1829,21 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	                              int rowLimit,
 	                              int byteLimit,
 	                              IKeyValueStore::ReadType type) override {
-		return RangeResult();
+		auto shards = shardManager.getDataShardsByRange(keys);
+
+		if (!shouldThrottle(type, keys.begin)) {
+			auto a = new Reader::ReadRangeAction(keys, shards, rowLimit, byteLimit);
+			auto res = a->result.getFuture();
+			readThreads->post(a);
+			return res;
+		}
+
+		auto& semaphore = (type == IKeyValueStore::ReadType::FETCH) ? fetchSemaphore : readSemaphore;
+		int maxWaiters = (type == IKeyValueStore::ReadType::FETCH) ? numFetchWaiters : numReadWaiters;
+		checkWaiters(semaphore, maxWaiters);
+
+		auto a = std::make_unique<Reader::ReadRangeAction>(keys, shards, rowLimit, byteLimit);
+		return read(a.release(), &semaphore, readThreads.getPtr(), &counters.failedToAcquire);
 	}
 
 	StorageBytes getStorageBytes() const override {
@@ -1920,6 +1940,107 @@ TEST_CASE("noSim/ShardedRocksDB/SingleShardRead") {
 	Future<Void> closed = kvStore->onClosed();
 	kvStore->dispose();
 	wait(closed);
+	return Void();
+}
+
+TEST_CASE("noSim/ShardedRocksDB/ReadRange") {
+	state std::string rocksDBTestDir = "sharded-rocksdb-kvs-test-db";
+	platform::eraseDirectoryRecursive(rocksDBTestDir);
+
+	state IKeyValueStore* kvStore =
+	    new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
+	wait(kvStore->init());
+
+	std::vector<Future<Void>> addRangeFutures;
+	addRangeFutures.push_back(kvStore->addRange(KeyRangeRef("0"_sr, "3"_sr), "shard-1"));
+	addRangeFutures.push_back(kvStore->addRange(KeyRangeRef("4"_sr, "7"_sr), "shard-2"));
+
+	wait(waitForAll(addRangeFutures));
+
+	// write to shard 1
+	state RangeResult expectedRows;
+	for (int i = 0; i < 30; ++i) {
+		std::string key = format("%02d", i);
+		std::string value = std::to_string(i);
+		kvStore->set({ key, value });
+		expectedRows.push_back_deep(expectedRows.arena(), { key, value });
+	}
+
+	// write to shard 2
+	for (int i = 40; i < 70; ++i) {
+		std::string key = format("%02d", i);
+		std::string value = std::to_string(i);
+		kvStore->set({ key, value });
+		expectedRows.push_back_deep(expectedRows.arena(), { key, value });
+	}
+
+	wait(kvStore->commit(false));
+
+	// Point read
+	state int i = 0;
+	for (i = 0; i < expectedRows.size(); ++i) {
+		Optional<Value> val = wait(kvStore->readValue(expectedRows[i].key));
+		std::cout << "Read: " << expectedRows[i].key.toString() << ", got: " << val.get().toString();
+		ASSERT(val == Optional<Value>(expectedRows[i].value));
+	}
+
+	// Range read
+	// Read forward full range.
+	RangeResult result =
+	    wait(kvStore->readRange(KeyRangeRef("0"_sr, ":"_sr), 1000, 10000, IKeyValueStore::ReadType::NORMAL));
+	ASSERT_EQ(result.size(), expectedRows.size());
+	for (int i = 0; i < expectedRows.size(); ++i) {
+		ASSERT(result[i] == expectedRows[i]);
+	}
+
+	// Read backward full range.
+	RangeResult result =
+	    wait(kvStore->readRange(KeyRangeRef("0"_sr, ":"_sr), -1000, 10000, IKeyValueStore::ReadType::NORMAL));
+	ASSERT_EQ(result.size(), expectedRows.size());
+	for (int i = 0; i < expectedRows.size(); ++i) {
+		ASSERT(result[i] == expectedRows[59 - i]);
+	}
+
+	// Forward with row limit.
+	RangeResult result =
+	    wait(kvStore->readRange(KeyRangeRef("2"_sr, "6"_sr), 10, 10000, IKeyValueStore::ReadType::NORMAL));
+	ASSERT_EQ(result.size(), 10);
+	for (int i = 0; i < 10; ++i) {
+		ASSERT(result[i] == expectedRows[20 + i]);
+	}
+
+	// Add another range on shard-1.
+	wait(kvStore->addRange(KeyRangeRef("7"_sr, "9"_sr), "shard-1"));
+
+	for (i = 70; i < 90; ++i) {
+		std::string key = format("%02d", i);
+		std::string value = std::to_string(i);
+		kvStore->set({ key, value });
+		expectedRows.push_back_deep(expectedRows.arena(), { key, value });
+	}
+
+	wait(kvStore->commit(false));
+
+	// Read all values.
+	RangeResult result =
+	    wait(kvStore->readRange(KeyRangeRef("0"_sr, ":"_sr), 1000, 10000, IKeyValueStore::ReadType::NORMAL));
+	ASSERT_EQ(result.size(), expectedRows.size());
+	for (int i = 0; i < expectedRows.size(); ++i) {
+		ASSERT(result[i] == expectedRows[i]);
+	}
+
+	// Read partial range with row limit
+	RangeResult result =
+	    wait(kvStore->readRange(KeyRangeRef("5"_sr, ":"_sr), 35, 10000, IKeyValueStore::ReadType::NORMAL));
+	ASSERT_EQ(result.size(), 35);
+	for (int i = 0; i < result.size(); ++i) {
+		ASSERT(result[i] == expectedRows[40 + i]);
+	}
+
+	Future<Void> closed = kvStore->onClosed();
+	kvStore->dispose();
+	wait(closed);
+
 	return Void();
 }
 
