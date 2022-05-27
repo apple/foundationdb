@@ -26,6 +26,7 @@
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/FileIdentifier.h"
+#include "flow/PKey.h"
 
 namespace authz {
 
@@ -64,9 +65,9 @@ struct SignedTokenRef {
 	}
 };
 
-SignedTokenRef signToken(Arena& arena, TokenRef token, StringRef keyName, StringRef privateKeyDer);
+SignedTokenRef signToken(Arena& arena, TokenRef token, StringRef keyName, PrivateKey privateKey);
 
-bool verifyToken(SignedTokenRef signedToken, StringRef publicKeyDer);
+bool verifyToken(SignedTokenRef signedToken, PublicKey publicKey);
 
 } // namespace authz::flatbuffers
 

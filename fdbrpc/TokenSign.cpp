@@ -488,3 +488,52 @@ TEST_CASE("/fdbrpc/TokenSign/JWT") {
 	printf("%d runs OK\n", numIters);
 	return Void();
 }
+
+TEST_CASE("/fdbrpc/TokenSign/bench") {
+	constexpr auto repeat = 10;
+	constexpr auto numSamples = 10000;
+	auto keys = std::vector<PrivateKey>(numSamples);
+	auto pubKeys = std::vector<PublicKey>(numSamples);
+	for (auto i = 0; i < numSamples; i++) {
+		keys[i] = mkcert::makeEcP256();
+		pubKeys[i] = keys[i].toPublicKey();
+	}
+	fmt::print("{} keys generated\n", numSamples);
+	auto& rng = *deterministicRandom();
+	auto arena = Arena();
+	auto jwts = new (arena) StringRef[numSamples];
+	auto fbs = new (arena) StringRef[numSamples];
+	{
+		auto tmpArena = Arena();
+		for (auto i = 0; i < numSamples; i++) {
+			auto jwtSpec = authz::jwt::makeRandomTokenSpec(tmpArena, rng, authz::Algorithm::ES256);
+			jwts[i] = authz::jwt::signToken(arena, jwtSpec, keys[i]);
+			auto fbSpec = authz::flatbuffers::makeRandomTokenSpec(tmpArena, rng);
+			auto fbToken = authz::flatbuffers::signToken(tmpArena, fbSpec, "defaultKey"_sr, keys[i]);
+			auto wr = ObjectWriter([&arena](size_t len) { return new (arena) uint8_t[len]; }, Unversioned());
+			wr.serialize(fbToken);
+			fbs[i] = wr.toStringRef();
+		}
+	}
+	fmt::print("{} FB/JWT tokens generated\n", numSamples);
+	auto jwtBegin = timer_monotonic();
+	for (auto rep = 0; rep < repeat; rep++) {
+		for (auto i = 0; i < numSamples; i++) {
+			auto verifyOk = authz::jwt::verifyToken(jwts[i], pubKeys[i]);
+			ASSERT(verifyOk);
+		}
+	}
+	auto jwtEnd = timer_monotonic();
+	fmt::print("JWT:         {:.2f} OPS\n", repeat * numSamples / (jwtEnd - jwtBegin));
+	auto fbBegin = timer_monotonic();
+	for (auto rep = 0; rep < repeat; rep++) {
+		for (auto i = 0; i < numSamples; i++) {
+			auto signedToken = ObjectReader::fromStringRef<authz::flatbuffers::SignedTokenRef>(fbs[i], Unversioned());
+			auto verifyOk = authz::flatbuffers::verifyToken(signedToken, pubKeys[i]);
+			ASSERT(verifyOk);
+		}
+	}
+	auto fbEnd = timer_monotonic();
+	fmt::print("FlatBuffers: {:.2f} OPS\n", repeat * numSamples / (fbEnd - fbBegin));
+	return Void();
+}
