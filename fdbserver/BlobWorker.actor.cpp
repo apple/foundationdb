@@ -36,8 +36,10 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/Tenant.h"
+#include "fdbserver/BlobMetadataUtils.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/BlobGranuleServerCommon.actor.h"
+#include "fdbserver/BlobConnectionProvider.h"
 #include "fdbserver/MutationTracking.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/ServerDBInfo.h"
@@ -161,6 +163,8 @@ struct GranuleTenantData : NonCopyable, ReferenceCounted<GranuleTenantData> {
 	TenantName name;
 	TenantMapEntry entry;
 	// TODO add other useful stuff like per-tenant blob connection, if necessary
+	Reference<BlobConnectionProvider> conn;
+	Promise<Void> connLoaded;
 
 	GranuleTenantData() {}
 	GranuleTenantData(TenantName name, TenantMapEntry entry) : name(name), entry(entry) {}
@@ -3111,6 +3115,72 @@ ACTOR Future<Void> monitorRemoval(Reference<BlobWorkerData> bwData) {
 	}
 }
 
+// FIXME: if credentials can expire, refresh periodically
+ACTOR Future<Void> loadBlobMetadataForTenants(Reference<BlobWorkerData> bwData,
+                                              Reference<AsyncVar<ServerDBInfo> const> dbInfo,
+                                              std::vector<TenantMapEntry> tenantMapEntries) {
+	ASSERT(SERVER_KNOBS->BG_METADATA_SOURCE == "tenant");
+	ASSERT(!tenantMapEntries.empty());
+	state std::vector<BlobMetadataDomainId> domainIds;
+	for (auto& entry : tenantMapEntries) {
+		if (BW_DEBUG) {
+			fmt::print(
+			    "BW {0} loading blob metadata for tenant {1}\n", bwData->id.shortString().substr(0, 5), entry.id);
+		}
+		domainIds.push_back(entry.id);
+	}
+
+	// FIXME: if one tenant gets an error, don't kill whole blob worker
+	// TODO: add latency metrics
+	loop {
+		Future<EKPGetLatestBlobMetadataReply> requestFuture;
+		if (dbInfo.isValid() && dbInfo->get().encryptKeyProxy.present()) {
+			EKPGetLatestBlobMetadataRequest req;
+			req.domainIds = domainIds;
+			requestFuture =
+			    brokenPromiseToNever(dbInfo->get().encryptKeyProxy.get().getLatestBlobMetadata.getReply(req));
+		} else {
+			requestFuture = Never();
+		}
+		choose {
+			when(EKPGetLatestBlobMetadataReply rep = wait(requestFuture)) {
+				ASSERT(rep.blobMetadataDetails.size() == domainIds.size());
+				// not guaranteed to be in same order in the request as the response
+				for (auto& metadata : rep.blobMetadataDetails) {
+					auto info = bwData->tenantInfoById.find(metadata.domainId);
+					if (info == bwData->tenantInfoById.end()) {
+						TraceEvent(SevWarn, "BlobWorkerTenantDeletedWhileLoadMetadata", bwData->id)
+						    .detail("TenantId", metadata.domainId);
+						continue;
+					}
+					auto dataEntry = bwData->tenantData.rangeContaining(info->second.prefix);
+					ASSERT(dataEntry.begin() == info->second.prefix);
+					dataEntry.cvalue()->conn = BlobConnectionProvider::newBlobConnectionProvider(metadata);
+					dataEntry.cvalue()->connLoaded.send(Void());
+					TraceEvent(SevDebug, "BlobWorkerTenantMetadataLoaded", bwData->id)
+					    .detail("TenantId", metadata.domainId);
+					if (BW_DEBUG) {
+						fmt::print("BW {0} loaded blob metadata for {1}: {2}",
+						           bwData->id.shortString().substr(0, 5),
+						           metadata.domainId,
+						           metadata.base.present() ? metadata.base.get().toString() : "");
+						if (metadata.partitions.empty()) {
+							fmt::print("\n");
+						} else {
+							fmt::print(" ({0})\n", metadata.partitions.size());
+							for (auto& it : metadata.partitions) {
+								fmt::print("    {0}\n", it.toString());
+							}
+						}
+					}
+				}
+				return Void();
+			}
+			when(wait(dbInfo->onChange())) {}
+		}
+	}
+}
+
 // Because change feeds send uncommitted data and explicit rollback messages, we speculatively buffer/write
 // uncommitted data. This means we must ensure the data is actually committed before "committing" those writes in
 // the blob granule. The simplest way to do this is to have the blob worker do a periodic GRV, which is guaranteed
@@ -3143,7 +3213,7 @@ ACTOR Future<Void> runGRVChecks(Reference<BlobWorkerData> bwData) {
 
 // FIXME: better way to do this?
 // monitor system keyspace for new tenants
-ACTOR Future<Void> monitorTenants(Reference<BlobWorkerData> bwData) {
+ACTOR Future<Void> monitorTenants(Reference<BlobWorkerData> bwData, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	loop {
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bwData->db);
 		loop {
@@ -3163,6 +3233,7 @@ ACTOR Future<Void> monitorTenants(Reference<BlobWorkerData> bwData) {
 					throw internal_error();
 				}
 
+				std::vector<TenantMapEntry> tenantsToLoad;
 				for (auto& it : tenantResults) {
 					// FIXME: handle removing/moving tenants!
 					StringRef tenantName = it.key.removePrefix(tenantMapPrefix);
@@ -3176,9 +3247,18 @@ ACTOR Future<Void> monitorTenants(Reference<BlobWorkerData> bwData) {
 							           entry.id,
 							           entry.prefix.printable());
 						}
+						auto r = makeReference<GranuleTenantData>(tenantName, entry);
 						bwData->tenantData.insert(KeyRangeRef(entry.prefix, entry.prefix.withSuffix(normalKeys.end)),
-						                          makeReference<GranuleTenantData>(tenantName, entry));
+						                          r);
+						if (SERVER_KNOBS->BG_METADATA_SOURCE != "tenant") {
+							r->connLoaded.send(Void());
+						} else {
+							tenantsToLoad.push_back(entry);
+						}
 					}
+				}
+				if (!tenantsToLoad.empty()) {
+					bwData->addActor.send(loadBlobMetadataForTenants(bwData, dbInfo, tenantsToLoad));
 				}
 
 				state Future<Void> watchChange = tr->watch(tenantLastIdKey);
@@ -3262,7 +3342,7 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 	self->addActor.send(waitFailureServer(bwInterf.waitFailure.getFuture()));
 	self->addActor.send(runGRVChecks(self));
 	if (SERVER_KNOBS->BG_RANGE_SOURCE == "tenant") {
-		self->addActor.send(monitorTenants(self));
+		self->addActor.send(monitorTenants(self, dbInfo));
 	}
 	state Future<Void> selfRemoved = monitorRemoval(self);
 

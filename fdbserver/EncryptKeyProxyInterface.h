@@ -29,6 +29,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
+#include "fdbserver/BlobMetadataUtils.h"
 
 struct EncryptKeyProxyInterface {
 	constexpr static FileIdentifier file_identifier = 1303419;
@@ -38,6 +39,7 @@ struct EncryptKeyProxyInterface {
 	RequestStream<struct HaltEncryptKeyProxyRequest> haltEncryptKeyProxy;
 	RequestStream<struct EKPGetBaseCipherKeysByIdsRequest> getBaseCipherKeysByIds;
 	RequestStream<struct EKPGetLatestBaseCipherKeysRequest> getLatestBaseCipherKeys;
+	RequestStream<struct EKPGetLatestBlobMetadataRequest> getLatestBlobMetadata;
 
 	EncryptKeyProxyInterface() {}
 	explicit EncryptKeyProxyInterface(const struct LocalityData& loc, UID id) : locality(loc), myId(id) {}
@@ -63,6 +65,8 @@ struct EncryptKeyProxyInterface {
 			    waitFailure.getEndpoint().getAdjustedEndpoint(2));
 			getLatestBaseCipherKeys = RequestStream<struct EKPGetLatestBaseCipherKeysRequest>(
 			    waitFailure.getEndpoint().getAdjustedEndpoint(3));
+			getLatestBlobMetadata =
+			    RequestStream<struct EKPGetLatestBlobMetadataRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(4));
 		}
 	}
 
@@ -72,6 +76,7 @@ struct EncryptKeyProxyInterface {
 		streams.push_back(haltEncryptKeyProxy.getReceiver(TaskPriority::DefaultPromiseEndpoint));
 		streams.push_back(getBaseCipherKeysByIds.getReceiver(TaskPriority::Worker));
 		streams.push_back(getLatestBaseCipherKeys.getReceiver(TaskPriority::Worker));
+		streams.push_back(getLatestBlobMetadata.getReceiver(TaskPriority::Worker));
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
@@ -167,6 +172,37 @@ struct EKPGetLatestBaseCipherKeysRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, encryptDomainIds, debugId, reply);
+	}
+};
+
+// partition and credentials information for a given blob domain
+
+struct EKPGetLatestBlobMetadataReply {
+	constexpr static FileIdentifier file_identifier = 5761581;
+	Standalone<VectorRef<BlobMetadataDetailsRef>> blobMetadataDetails;
+
+	EKPGetLatestBlobMetadataReply() {}
+	explicit EKPGetLatestBlobMetadataReply(const Standalone<VectorRef<BlobMetadataDetailsRef>>& blobMetadataDetails)
+	  : blobMetadataDetails(blobMetadataDetails) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, blobMetadataDetails);
+	}
+};
+
+struct EKPGetLatestBlobMetadataRequest {
+	constexpr static FileIdentifier file_identifier = 3821549;
+	std::vector<BlobMetadataDomainId> domainIds;
+	Optional<UID> debugId;
+	ReplyPromise<EKPGetLatestBlobMetadataReply> reply;
+
+	EKPGetLatestBlobMetadataRequest() {}
+	explicit EKPGetLatestBlobMetadataRequest(const std::vector<BlobMetadataDomainId>& ids) : domainIds(ids) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, domainIds, debugId, reply);
 	}
 };
 
