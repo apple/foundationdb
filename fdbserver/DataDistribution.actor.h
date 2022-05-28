@@ -166,17 +166,18 @@ struct GetMetricsRequest {
 };
 
 struct GetTopKMetricsReply {
-	std::vector<StorageMetrics> metrics;
+	struct KeyRangeStorageMetrics {
+		KeyRange range;
+		StorageMetrics metrics;
+	};
+	std::vector<KeyRangeStorageMetrics> shardMetrics;
 	double minReadLoad = -1, maxReadLoad = -1;
 	GetTopKMetricsReply() {}
-	GetTopKMetricsReply(std::vector<StorageMetrics> const& m, double minReadLoad, double maxReadLoad)
-	  : metrics(m), minReadLoad(minReadLoad), maxReadLoad(maxReadLoad) {}
+	GetTopKMetricsReply(std::vector<KeyRangeStorageMetrics> const& m, double minReadLoad, double maxReadLoad)
+	  : shardMetrics(m), minReadLoad(minReadLoad), maxReadLoad(maxReadLoad) {}
 };
 struct GetTopKMetricsRequest {
-	// whether a > b
-	typedef std::function<bool(const StorageMetrics& a, const StorageMetrics& b)> MetricsComparator;
 	int topK = 1; // default only return the top 1 shard based on the comparator
-	MetricsComparator comparator; // Return true if a.score > b.score, return the largest topK in keys
 	std::vector<KeyRange> keys;
 	Promise<GetTopKMetricsReply> reply; // topK storage metrics
 	double maxBytesReadPerKSecond = 0, minBytesReadPerKSecond = 0; // all returned shards won't exceed this read load
@@ -188,6 +189,20 @@ struct GetTopKMetricsRequest {
 	                      double minBytesReadPerKSecond = 0)
 	  : topK(topK), keys(keys), maxBytesReadPerKSecond(maxBytesReadPerKSecond),
 	    minBytesReadPerKSecond(minBytesReadPerKSecond) {}
+
+	// Return true if a.score > b.score, return the largest topK in keys
+	static bool compare(const GetTopKMetricsReply::KeyRangeStorageMetrics& a,
+	                    const GetTopKMetricsReply::KeyRangeStorageMetrics& b) {
+		return compareByReadDensity(a, b);
+	}
+
+private:
+	// larger read density means higher score
+	static bool compareByReadDensity(const GetTopKMetricsReply::KeyRangeStorageMetrics& a,
+	                                 const GetTopKMetricsReply::KeyRangeStorageMetrics& b) {
+		return a.metrics.bytesReadPerKSecond / std::max(a.metrics.bytes * 1.0, 1.0) >
+		       b.metrics.bytesReadPerKSecond / std::max(b.metrics.bytes * 1.0, 1.0);
+	}
 };
 
 struct GetMetricsListRequest {
