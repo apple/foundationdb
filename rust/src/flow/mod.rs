@@ -18,6 +18,9 @@ mod uid;
 #[path = "../../target/flatbuffers/PingRequest_generated.rs"]
 mod ping_request;
 
+#[path = "../../target/flatbuffers/Void_generated.rs"]
+mod void;
+
 struct Listener {
     listener: TcpListener,
     limit_connections: Arc<Semaphore>,
@@ -57,11 +60,15 @@ pub async fn hello() -> Result<()> {
                         println!("FakeRoot: {:x?}", fake_root);
                         let reply = fake_root.ping_request().unwrap().reply_promise().unwrap();
                         let mut builder = flatbuffers::FlatBufferBuilder::with_capacity(1024);
-                        let reply_buf = ping_request::ReplyPromise::create(
+                        // let reply_buf = ping_request::ReplyPromise::create(
+                        //     &mut builder,
+                        //     &ping_request::ReplyPromiseArgs {
+                        //         uid: Some(reply.uid().unwrap()),
+                        //     },
+                        // );
+                        let reply_buf = void::FakeRoot::create(
                             &mut builder,
-                            &ping_request::ReplyPromiseArgs {
-                                uid: Some(reply.uid().unwrap()),
-                            },
+                            &void::FakeRootArgs { },
                         );
                         builder.finish(reply_buf, None);
                         println!("reply: {:x?}", builder.finished_data());
@@ -71,7 +78,7 @@ pub async fn hello() -> Result<()> {
                         };
                         let frame = frame::Frame {
                             token,
-                            payload: Vec::new(),
+                            payload: builder.finished_data().to_vec(),
                         };
                         conn.write_frame(frame).await?;
                     }

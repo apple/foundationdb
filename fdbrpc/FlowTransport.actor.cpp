@@ -273,6 +273,7 @@ struct UnauthorizedEndpointReceiver final : NetworkMessageReceiver {
 	void receive(ArenaObjectReader& reader) override {
 		UID token;
 		reader.deserialize(token);
+		printf("UnauthorizedEndpointReceiver Got token: %lx %lx\n", token.first(), token.second());
 		Endpoint e = FlowTransport::transport().loadedEndpoint(token);
 		IFailureMonitor::failureMonitor().unauthorizedEndpoint(e);
 	}

@@ -201,17 +201,42 @@ impl Frame {
         let len_sz = 4;
         let checksum_sz = 8;
         let uid_sz = 16;
-        let len = uid_sz + self.payload.len();
+        // let len = uid_sz + self.payload.len();
         //vec.resize(len, 0);
-        vec.extend_from_slice(&u32::to_le_bytes((len).try_into().unwrap()));
+        vec.extend_from_slice(&u32::to_le_bytes(0)); // we compute len below
         vec.extend_from_slice(&u64::to_le_bytes(0)); // we compute checksum below.
         vec.extend_from_slice(&u64::to_le_bytes(self.token.uid[0]));
         vec.extend_from_slice(&u64::to_le_bytes(self.token.uid[1]));
         vec.extend_from_slice(&self.payload[..]);
-
+        // vec.extend_from_slice(&[0xD, 0xE, 0xA, 0xD, 0xB, 0xE, 0xE, 0xF]);
+        // vec.extend_from_slice(&[0xD, 0xE, 0xA, 0xD, 0xB, 0xE, 0xE, 0xF]);
+        // vec.extend_from_slice(&[0xD, 0xE, 0xA, 0xD, 0xB, 0xE, 0xE, 0xF]);
+        let len : u32 = (vec.len() - len_sz - checksum_sz).try_into().unwrap(); 
+        vec[0..len_sz].copy_from_slice(&u32::to_le_bytes(len));
         let xxh3_64 = xxh3_64(&vec[len_sz + checksum_sz..]);
         vec[len_sz..len_sz + checksum_sz].copy_from_slice(&u64::to_le_bytes(xxh3_64));
-        println!("sent len: {}, actual len: {}, payload: {:?}", len, vec.len(), &vec);
+
+        // XXX need to figure out how to jam the FileIdentifier in somehow.
+        // See flat_buffer.h::save_with_vtables, which does so by writing a 32 bit
+        // value, 32 bits after the start of the root(?)
+        // Also, note that FDB modifies bytes at position B << 24, or B << 28 of
+        // file_identifiers, making them extremely difficult to grep for.
+        // The file identifier for Void is this in the source code;
+        // p/x 2010442
+        // $1 = 0x1ead4a
+        // 
+        // but this on the wire:
+        //  p/x    35564874
+        // $2 = 0x21ead4a
+
+        // I think (in that example) the other side wants an ErrorOr<Void> because:
+        // template <class T>
+        // class ErrorOr : public ComposedIdentifier<T, 2> {
+            // std::variant<Error, T> value;
+
+
+
+        println!("sent len: {}, vec len: {}, checksum: {}, payload: {:x?} send: {:x?}", len, vec.len(), xxh3_64, self.payload, &vec);
         vec
     }
 }
