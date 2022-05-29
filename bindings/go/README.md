@@ -25,7 +25,6 @@ You can also build this package, in the top level of this repository run:
 
 This will create binary packages for the appropriate platform within the "build" subdirectory of this folder.
 
-
 Documentation
 -------------
 
