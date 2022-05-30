@@ -238,28 +238,38 @@ StringRef makeTokenPart(Arena& arena, TokenRef tokenSpec) {
 	header.String(algo.data(), algo.size());
 	header.EndObject();
 	payload.StartObject();
-	if (!tokenSpec.issuer.empty()) {
+	if (tokenSpec.issuer.present()) {
 		payload.Key("iss");
-		setStringRef(payload, tokenSpec.issuer);
+		setStringRef(payload, tokenSpec.issuer.get());
 	}
-	payload.Key("iat");
-	payload.Uint64(tokenSpec.issuedAtUnixTime);
-	payload.Key("exp");
-	payload.Uint64(tokenSpec.expiresAtUnixTime);
-	if (!tokenSpec.keyId.empty()) {
+	if (tokenSpec.issuedAtUnixTime.present()) {
+		payload.Key("iat");
+		payload.Uint64(tokenSpec.issuedAtUnixTime.get());
+	}
+	if (tokenSpec.expiresAtUnixTime.present()) {
+		payload.Key("exp");
+		payload.Uint64(tokenSpec.expiresAtUnixTime.get());
+	}
+	if (tokenSpec.notBeforeUnixTime.present()) {
+		payload.Key("nbf");
+		payload.Uint64(tokenSpec.notBeforeUnixTime.get());
+	}
+	if (tokenSpec.keyId.present()) {
 		payload.Key("kid");
-		setStringRef(payload, tokenSpec.keyId);
+		setStringRef(payload, tokenSpec.keyId.get());
 	}
-	payload.Key("tenants");
-	payload.StartArray();
-	for (const auto tenant : tokenSpec.tenants) {
-		setStringRef(payload, tenant);
+	if (tokenSpec.tenants.present()) {
+		payload.Key("tenants");
+		payload.StartArray();
+		for (const auto tenant : tokenSpec.tenants.get()) {
+			setStringRef(payload, tenant);
+		}
+		payload.EndArray();
 	}
-	payload.EndArray();
 	payload.EndObject();
-	const auto headerPartLen = base64url::encodedLength(headerBuffer.GetSize());
-	const auto payloadPartLen = base64url::encodedLength(payloadBuffer.GetSize());
-	const auto totalLen = headerPartLen + 1 + payloadPartLen;
+	auto const headerPartLen = base64url::encodedLength(headerBuffer.GetSize());
+	auto const payloadPartLen = base64url::encodedLength(payloadBuffer.GetSize());
+	auto const totalLen = headerPartLen + 1 + payloadPartLen;
 	auto out = new (arena) uint8_t[totalLen];
 	auto cur = out;
 	cur += base64url::encode(reinterpret_cast<const uint8_t*>(headerBuffer.GetString()), headerBuffer.GetSize(), cur);
@@ -337,19 +347,48 @@ bool parsePayloadPart(Arena& arena, TokenRef& token, StringRef b64urlPayload) {
 		    .detail("Offset", d.GetErrorOffset());
 		return false;
 	}
-	if (d.IsObject() && d.HasMember("iss") && d.HasMember("iat") && d.HasMember("exp") && d.HasMember("kid") &&
-	    d.HasMember("tenants")) {
+	if (!d.IsObject())
+		return false;
+	if (d.HasMember("iss")) {
 		auto const& iss = d["iss"];
-		auto const& iat = d["iat"];
-		auto const& exp = d["exp"];
-		auto const& kid = d["kid"];
-		auto const& tenants = d["tenants"];
-		if (iss.IsString() && iat.IsUint64() && exp.IsUint64() && kid.IsString() && tenants.IsArray() &&
-		    tenants.Size() > 0) {
+		if (!iss.IsString())
+			return false;
+		else
 			token.issuer = StringRef(arena, reinterpret_cast<const uint8_t*>(iss.GetString()), iss.GetStringLength());
-			token.keyId = StringRef(arena, reinterpret_cast<const uint8_t*>(kid.GetString()), kid.GetStringLength());
+	}
+	if (d.HasMember("iat")) {
+		auto const& iat = d["iat"];
+		if (!iat.IsUint64())
+			return false;
+		else
 			token.issuedAtUnixTime = iat.GetUint64();
+	}
+	if (d.HasMember("exp")) {
+		auto const& exp = d["exp"];
+		if (!exp.IsUint64())
+			return false;
+		else
 			token.expiresAtUnixTime = exp.GetUint64();
+	}
+	if (d.HasMember("nbf")) {
+		auto const& nbf = d["nbf"];
+		if (!nbf.IsUint64())
+			return false;
+		else
+			token.notBeforeUnixTime = nbf.GetUint64();
+	}
+	if (d.HasMember("kid")) {
+		auto const& kid = d["kid"];
+		if (!kid.IsString())
+			return false;
+		else
+			token.keyId = StringRef(arena, reinterpret_cast<const uint8_t*>(kid.GetString()), kid.GetStringLength());
+	}
+	if (d.HasMember("tenants")) {
+		auto const& tenants = d["tenants"];
+		if (!tenants.IsArray())
+			return false;
+		if (tenants.Size() > 0) {
 			auto t = new (arena) StringRef[tenants.Size()];
 			for (auto i = 0u; i < tenants.Size(); i++) {
 				auto const& tenant = tenants[i];
@@ -358,10 +397,11 @@ bool parsePayloadPart(Arena& arena, TokenRef& token, StringRef b64urlPayload) {
 				t[i] = StringRef(arena, reinterpret_cast<const uint8_t*>(tenant.GetString()), tenant.GetStringLength());
 			}
 			token.tenants = VectorRef<StringRef>(t, tenants.Size());
-			return true;
+		} else {
+			token.tenants = VectorRef<StringRef>();
 		}
 	}
-	return false;
+	return true;
 }
 
 bool parseSignaturePart(Arena& arena, TokenRef& token, StringRef b64urlSignature) {
@@ -413,7 +453,8 @@ TokenRef makeRandomTokenSpec(Arena& arena, IRandom& rng, Algorithm alg) {
 	ret.algorithm = alg;
 	ret.issuer = genRandomAlphanumStringRef(arena, rng, MaxIssuerNameLenPlus1);
 	ret.issuedAtUnixTime = timer_int() / 1'000'000'000ul;
-	ret.expiresAtUnixTime = ret.issuedAtUnixTime + rng.randomInt(360, 1080 + 1);
+	ret.notBeforeUnixTime = timer_int() / 1'000'000'000ul;
+	ret.expiresAtUnixTime = ret.issuedAtUnixTime.get() + rng.randomInt(360, 1080 + 1);
 	ret.keyId = genRandomAlphanumStringRef(arena, rng, MaxKeyNameLenPlus1);
 	auto numTenants = rng.randomInt(1, 3);
 	auto tenants = new (arena) StringRef[numTenants];
@@ -470,8 +511,9 @@ TEST_CASE("/fdbrpc/TokenSign/JWT") {
 			ASSERT(parseOk);
 			ASSERT_EQ(tokenSpec.algorithm, parsedToken.algorithm);
 			ASSERT(tokenSpec.issuer == parsedToken.issuer);
-			ASSERT_EQ(tokenSpec.issuedAtUnixTime, parsedToken.issuedAtUnixTime);
-			ASSERT_EQ(tokenSpec.expiresAtUnixTime, parsedToken.expiresAtUnixTime);
+			ASSERT_EQ(tokenSpec.issuedAtUnixTime.get(), parsedToken.issuedAtUnixTime.get());
+			ASSERT_EQ(tokenSpec.expiresAtUnixTime.get(), parsedToken.expiresAtUnixTime.get());
+			ASSERT_EQ(tokenSpec.notBeforeUnixTime.get(), parsedToken.notBeforeUnixTime.get());
 			ASSERT(tokenSpec.keyId == parsedToken.keyId);
 			ASSERT(tokenSpec.tenants == parsedToken.tenants);
 			auto [sig, sigValid] = base64url::decode(tmpArena, signaturePart);
@@ -479,7 +521,7 @@ TEST_CASE("/fdbrpc/TokenSign/JWT") {
 			ASSERT(sig == parsedToken.signature);
 		}
 		// try tampering with signed token by adding one more tenant
-		tokenSpec.tenants.push_back(arena, genRandomAlphanumStringRef(arena, rng, MaxTenantNameLenPlus1));
+		tokenSpec.tenants.get().push_back(arena, genRandomAlphanumStringRef(arena, rng, MaxTenantNameLenPlus1));
 		auto tamperedTokenPart = makeTokenPart(arena, tokenSpec);
 		auto tamperedTokenString = fmt::format("{}.{}", tamperedTokenPart.toString(), signaturePart.toString());
 		const auto verifyExpectFail = authz::jwt::verifyToken(StringRef(tamperedTokenString), privateKey.toPublicKey());
