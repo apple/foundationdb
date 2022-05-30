@@ -222,10 +222,30 @@ TokenRef makeRandomTokenSpec(Arena& arena, IRandom& rng) {
 
 namespace authz::jwt {
 
+template <class FieldType, class Writer>
+void putField(Optional<FieldType> const& field, Writer& wr, const char* fieldName) {
+	if (!field.present())
+		return;
+	wr.Key(fieldName);
+	auto const& value = field.get();
+	static_assert(std::is_same_v<StringRef, FieldType> || std::is_same_v<FieldType, uint64_t> ||
+	              std::is_same_v<FieldType, VectorRef<StringRef>>);
+	if constexpr (std::is_same_v<StringRef, FieldType>) {
+		wr.String(reinterpret_cast<const char*>(value.begin()), value.size());
+	} else if constexpr (std::is_same_v<FieldType, uint64_t>) {
+		wr.Uint64(value);
+	} else {
+		wr.StartArray();
+		for (auto elem : value) {
+			wr.String(reinterpret_cast<const char*>(elem.begin()), elem.size());
+		}
+		wr.EndArray();
+	}
+}
+
 StringRef makeTokenPart(Arena& arena, TokenRef tokenSpec) {
 	using Buffer = rapidjson::StringBuffer;
 	using Writer = rapidjson::Writer<Buffer>;
-	auto setStringRef = [](Writer& wr, StringRef s) { wr.String(reinterpret_cast<const char*>(s.begin()), s.size()); };
 	auto headerBuffer = Buffer();
 	auto payloadBuffer = Buffer();
 	auto header = Writer(headerBuffer);
@@ -238,28 +258,19 @@ StringRef makeTokenPart(Arena& arena, TokenRef tokenSpec) {
 	header.String(algo.data(), algo.size());
 	header.EndObject();
 	payload.StartObject();
-	if (!tokenSpec.issuer.empty()) {
-		payload.Key("iss");
-		setStringRef(payload, tokenSpec.issuer);
-	}
-	payload.Key("iat");
-	payload.Uint64(tokenSpec.issuedAtUnixTime);
-	payload.Key("exp");
-	payload.Uint64(tokenSpec.expiresAtUnixTime);
-	if (!tokenSpec.keyId.empty()) {
-		payload.Key("kid");
-		setStringRef(payload, tokenSpec.keyId);
-	}
-	payload.Key("tenants");
-	payload.StartArray();
-	for (const auto tenant : tokenSpec.tenants) {
-		setStringRef(payload, tenant);
-	}
-	payload.EndArray();
+	putField(tokenSpec.issuer, payload, "iss");
+	putField(tokenSpec.subject, payload, "sub");
+	putField(tokenSpec.audience, payload, "aud");
+	putField(tokenSpec.issuedAtUnixTime, payload, "iat");
+	putField(tokenSpec.expiresAtUnixTime, payload, "exp");
+	putField(tokenSpec.notBeforeUnixTime, payload, "nbf");
+	putField(tokenSpec.keyId, payload, "kid");
+	putField(tokenSpec.tokenId, payload, "jti");
+	putField(tokenSpec.tenants, payload, "tenants");
 	payload.EndObject();
-	const auto headerPartLen = base64url::encodedLength(headerBuffer.GetSize());
-	const auto payloadPartLen = base64url::encodedLength(payloadBuffer.GetSize());
-	const auto totalLen = headerPartLen + 1 + payloadPartLen;
+	auto const headerPartLen = base64url::encodedLength(headerBuffer.GetSize());
+	auto const payloadPartLen = base64url::encodedLength(payloadBuffer.GetSize());
+	auto const totalLen = headerPartLen + 1 + payloadPartLen;
 	auto out = new (arena) uint8_t[totalLen];
 	auto cur = out;
 	cur += base64url::encode(reinterpret_cast<const uint8_t*>(headerBuffer.GetString()), headerBuffer.GetSize(), cur);
@@ -324,6 +335,40 @@ bool parseHeaderPart(TokenRef& token, StringRef b64urlHeader) {
 	return false;
 }
 
+template <class FieldType>
+bool parseField(Arena& arena, Optional<FieldType>& out, const rapidjson::Document& d, const char* fieldName) {
+	if (!d.HasMember(fieldName))
+		return true;
+	auto const& field = d[fieldName];
+	static_assert(std::is_same_v<StringRef, FieldType> || std::is_same_v<FieldType, uint64_t> ||
+	              std::is_same_v<FieldType, VectorRef<StringRef>>);
+	if constexpr (std::is_same_v<FieldType, StringRef>) {
+		if (!field.IsString())
+			return false;
+		out = StringRef(arena, reinterpret_cast<const uint8_t*>(field.GetString()), field.GetStringLength());
+	} else if constexpr (std::is_same_v<FieldType, uint64_t>) {
+		if (!field.IsUint64())
+			return false;
+		out = field.GetUint64();
+	} else {
+		if (!field.IsArray())
+			return false;
+		if (field.Size() > 0) {
+			auto vector = new (arena) StringRef[field.Size()];
+			for (auto i = 0; i < field.Size(); i++) {
+				if (!field[i].IsString())
+					return false;
+				vector[i] = StringRef(
+				    arena, reinterpret_cast<const uint8_t*>(field[i].GetString()), field[i].GetStringLength());
+			}
+			out = VectorRef<StringRef>(vector, field.Size());
+		} else {
+			out = VectorRef<StringRef>();
+		}
+	}
+	return true;
+}
+
 bool parsePayloadPart(Arena& arena, TokenRef& token, StringRef b64urlPayload) {
 	auto tmpArena = Arena();
 	auto [payload, valid] = base64url::decode(tmpArena, b64urlPayload);
@@ -337,31 +382,27 @@ bool parsePayloadPart(Arena& arena, TokenRef& token, StringRef b64urlPayload) {
 		    .detail("Offset", d.GetErrorOffset());
 		return false;
 	}
-	if (d.IsObject() && d.HasMember("iss") && d.HasMember("iat") && d.HasMember("exp") && d.HasMember("kid") &&
-	    d.HasMember("tenants")) {
-		auto const& iss = d["iss"];
-		auto const& iat = d["iat"];
-		auto const& exp = d["exp"];
-		auto const& kid = d["kid"];
-		auto const& tenants = d["tenants"];
-		if (iss.IsString() && iat.IsUint64() && exp.IsUint64() && kid.IsString() && tenants.IsArray() &&
-		    tenants.Size() > 0) {
-			token.issuer = StringRef(arena, reinterpret_cast<const uint8_t*>(iss.GetString()), iss.GetStringLength());
-			token.keyId = StringRef(arena, reinterpret_cast<const uint8_t*>(kid.GetString()), kid.GetStringLength());
-			token.issuedAtUnixTime = iat.GetUint64();
-			token.expiresAtUnixTime = exp.GetUint64();
-			auto t = new (arena) StringRef[tenants.Size()];
-			for (auto i = 0u; i < tenants.Size(); i++) {
-				auto const& tenant = tenants[i];
-				if (!tenant.IsString())
-					return false;
-				t[i] = StringRef(arena, reinterpret_cast<const uint8_t*>(tenant.GetString()), tenant.GetStringLength());
-			}
-			token.tenants = VectorRef<StringRef>(t, tenants.Size());
-			return true;
-		}
-	}
-	return false;
+	if (!d.IsObject())
+		return false;
+	if (!parseField(arena, token.issuer, d, "iss"))
+		return false;
+	if (!parseField(arena, token.subject, d, "sub"))
+		return false;
+	if (!parseField(arena, token.audience, d, "aud"))
+		return false;
+	if (!parseField(arena, token.tokenId, d, "jti"))
+		return false;
+	if (!parseField(arena, token.issuedAtUnixTime, d, "iat"))
+		return false;
+	if (!parseField(arena, token.expiresAtUnixTime, d, "exp"))
+		return false;
+	if (!parseField(arena, token.notBeforeUnixTime, d, "nbf"))
+		return false;
+	if (!parseField(arena, token.keyId, d, "kid"))
+		return false;
+	if (!parseField(arena, token.tenants, d, "tenants"))
+		return false;
+	return true;
 }
 
 bool parseSignaturePart(Arena& arena, TokenRef& token, StringRef b64urlSignature) {
@@ -412,8 +453,16 @@ TokenRef makeRandomTokenSpec(Arena& arena, IRandom& rng, Algorithm alg) {
 	auto ret = TokenRef{};
 	ret.algorithm = alg;
 	ret.issuer = genRandomAlphanumStringRef(arena, rng, MaxIssuerNameLenPlus1);
+	ret.subject = genRandomAlphanumStringRef(arena, rng, MaxIssuerNameLenPlus1);
+	ret.tokenId = genRandomAlphanumStringRef(arena, rng, 31);
+	auto numAudience = rng.randomInt(1, 5);
+	auto aud = new (arena) StringRef[numAudience];
+	for (auto i = 0; i < numAudience; i++)
+		aud[i] = genRandomAlphanumStringRef(arena, rng, MaxTenantNameLenPlus1);
+	ret.audience = VectorRef<StringRef>(aud, numAudience);
 	ret.issuedAtUnixTime = timer_int() / 1'000'000'000ul;
-	ret.expiresAtUnixTime = ret.issuedAtUnixTime + rng.randomInt(360, 1080 + 1);
+	ret.notBeforeUnixTime = timer_int() / 1'000'000'000ul;
+	ret.expiresAtUnixTime = ret.issuedAtUnixTime.get() + rng.randomInt(360, 1080 + 1);
 	ret.keyId = genRandomAlphanumStringRef(arena, rng, MaxKeyNameLenPlus1);
 	auto numTenants = rng.randomInt(1, 3);
 	auto tenants = new (arena) StringRef[numTenants];
@@ -470,16 +519,20 @@ TEST_CASE("/fdbrpc/TokenSign/JWT") {
 			ASSERT(parseOk);
 			ASSERT_EQ(tokenSpec.algorithm, parsedToken.algorithm);
 			ASSERT(tokenSpec.issuer == parsedToken.issuer);
-			ASSERT_EQ(tokenSpec.issuedAtUnixTime, parsedToken.issuedAtUnixTime);
-			ASSERT_EQ(tokenSpec.expiresAtUnixTime, parsedToken.expiresAtUnixTime);
+			ASSERT(tokenSpec.subject == parsedToken.subject);
+			ASSERT(tokenSpec.tokenId == parsedToken.tokenId);
+			ASSERT(tokenSpec.audience == parsedToken.audience);
 			ASSERT(tokenSpec.keyId == parsedToken.keyId);
+			ASSERT_EQ(tokenSpec.issuedAtUnixTime.get(), parsedToken.issuedAtUnixTime.get());
+			ASSERT_EQ(tokenSpec.expiresAtUnixTime.get(), parsedToken.expiresAtUnixTime.get());
+			ASSERT_EQ(tokenSpec.notBeforeUnixTime.get(), parsedToken.notBeforeUnixTime.get());
 			ASSERT(tokenSpec.tenants == parsedToken.tenants);
 			auto [sig, sigValid] = base64url::decode(tmpArena, signaturePart);
 			ASSERT(sigValid);
 			ASSERT(sig == parsedToken.signature);
 		}
 		// try tampering with signed token by adding one more tenant
-		tokenSpec.tenants.push_back(arena, genRandomAlphanumStringRef(arena, rng, MaxTenantNameLenPlus1));
+		tokenSpec.tenants.get().push_back(arena, genRandomAlphanumStringRef(arena, rng, MaxTenantNameLenPlus1));
 		auto tamperedTokenPart = makeTokenPart(arena, tokenSpec);
 		auto tamperedTokenString = fmt::format("{}.{}", tamperedTokenPart.toString(), signaturePart.toString());
 		const auto verifyExpectFail = authz::jwt::verifyToken(StringRef(tamperedTokenString), privateKey.toPublicKey());

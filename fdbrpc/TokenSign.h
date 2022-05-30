@@ -83,11 +83,15 @@ struct TokenRef {
 	// header part ("typ": "JWT" implicitly enforced)
 	Algorithm algorithm; // alg
 	// payload part
-	StringRef issuer; // iss
-	uint64_t issuedAtUnixTime; // iat
-	uint64_t expiresAtUnixTime; // exp
-	StringRef keyId; // kid
-	VectorRef<StringRef> tenants;
+	Optional<StringRef> issuer; // iss
+	Optional<StringRef> subject; // sub
+	Optional<VectorRef<StringRef>> audience; // aud
+	Optional<uint64_t> issuedAtUnixTime; // iat
+	Optional<uint64_t> expiresAtUnixTime; // exp
+	Optional<uint64_t> notBeforeUnixTime; // nbf
+	Optional<StringRef> keyId; // kid
+	Optional<StringRef> tokenId; // jti
+	Optional<VectorRef<StringRef>> tenants; // tenants
 	// signature part
 	StringRef signature;
 };
