@@ -63,9 +63,9 @@ inline double reverseLog(double index) {
 template <class Impl, class T>
 class DDSketchBase {
 
-	constexpr T defaultMin() { return std::numeric_limits<T>::max(); }
+	static constexpr T defaultMin() { return std::numeric_limits<T>::max(); }
 
-	constexpr T defaultMax() {
+	static constexpr T defaultMax() {
 		if constexpr (std::is_floating_point_v<T>) {
 			return -std::numeric_limits<T>::max();
 		} else {
@@ -158,7 +158,9 @@ public:
 	void clear() {
 		std::fill(buckets.begin(), buckets.end(), 0);
 		populationSize = zeroPopulationSize = 0;
-		sum = minValue = maxValue = 0; // Doesn't work for all T
+		sum = 0;
+		minValue = defaultMin();
+		maxValue = defaultMax();
 	}
 
 	uint64_t getPopulationSize() const { return populationSize; }
@@ -180,8 +182,6 @@ public:
 		return *this;
 	}
 
-	void setBucketSize(int capacity) { buckets.resize(capacity, 0); }
-
 	constexpr static double EPS = 1e-18; // smaller numbers are considered as 0
 protected:
 	double errorGuarantee; // As defined in the paper
@@ -189,6 +189,7 @@ protected:
 	uint64_t populationSize, zeroPopulationSize; // we need to separately count 0s
 	std::vector<uint64_t> buckets;
 	T minValue, maxValue, sum;
+	void setBucketSize(int capacity) { buckets.resize(capacity, 0); }
 };
 
 // DDSketch with fast log implementation for float numbers
