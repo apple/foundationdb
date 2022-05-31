@@ -1483,7 +1483,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 	cacheListMonitor = monitorCacheList(this);
 
 	smoothMidShardSize.reset(CLIENT_KNOBS->INIT_MID_SHARD_BYTES);
-	globalConfig = std::make_unique<GlobalConfig>(Database(this));
+	globalConfig = std::make_unique<GlobalConfig>(this);
 
 	if (apiVersionAtLeast(710)) {
 		registerSpecialKeysImpl(
@@ -6954,18 +6954,10 @@ Future<Standalone<StringRef>> Transaction::getVersionstamp() {
 }
 
 // Gets the protocol version reported by a coordinator via the protocol info interface
-ACTOR Future<ProtocolVersion> getCoordinatorProtocol(
-    Reference<AsyncVar<Optional<ClientLeaderRegInterface>> const> coordinator) {
-	state ProtocolInfoReply reply;
-	if (coordinator->get().get().hostname.present()) {
-		wait(store(reply,
-		           retryGetReplyFromHostname(
-		               ProtocolInfoRequest{}, coordinator->get().get().hostname.get(), WLTOKEN_PROTOCOL_INFO)));
-	} else {
-		RequestStream<ProtocolInfoRequest> requestStream(
-		    Endpoint::wellKnown({ coordinator->get().get().getLeader.getEndpoint().addresses }, WLTOKEN_PROTOCOL_INFO));
-		wait(store(reply, retryBrokenPromise(requestStream, ProtocolInfoRequest{})));
-	}
+ACTOR Future<ProtocolVersion> getCoordinatorProtocol(NetworkAddress coordinatorAddress) {
+	RequestStream<ProtocolInfoRequest> requestStream(
+	    Endpoint::wellKnown({ coordinatorAddress }, WLTOKEN_PROTOCOL_INFO));
+	ProtocolInfoReply reply = wait(retryBrokenPromise(requestStream, ProtocolInfoRequest{}));
 	return reply.version;
 }
 
@@ -6974,16 +6966,8 @@ ACTOR Future<ProtocolVersion> getCoordinatorProtocol(
 // function will return with an unset result.
 // If an expected version is given, this future won't return if the actual protocol version matches the expected version
 ACTOR Future<Optional<ProtocolVersion>> getCoordinatorProtocolFromConnectPacket(
-    Reference<AsyncVar<Optional<ClientLeaderRegInterface>> const> coordinator,
+    NetworkAddress coordinatorAddress,
     Optional<ProtocolVersion> expectedVersion) {
-	state NetworkAddress coordinatorAddress;
-	if (coordinator->get().get().hostname.present()) {
-		Hostname h = coordinator->get().get().hostname.get();
-		wait(store(coordinatorAddress, h.resolveWithRetry()));
-	} else {
-		coordinatorAddress = coordinator->get().get().getLeader.getEndpoint().getPrimaryAddress();
-	}
-
 	state Optional<Reference<AsyncVar<Optional<ProtocolVersion>> const>> protocolVersion =
 	    FlowTransport::transport().getPeerProtocolAsyncVar(coordinatorAddress);
 
@@ -7024,10 +7008,18 @@ ACTOR Future<ProtocolVersion> getClusterProtocolImpl(
 		if (!coordinator->get().present()) {
 			wait(coordinator->onChange());
 		} else {
+			state NetworkAddress coordinatorAddress;
+			if (coordinator->get().get().hostname.present()) {
+				Hostname h = coordinator->get().get().hostname.get();
+				wait(store(coordinatorAddress, h.resolveWithRetry()));
+			} else {
+				coordinatorAddress = coordinator->get().get().getLeader.getEndpoint().getPrimaryAddress();
+			}
+
 			if (needToConnect) {
 				// Even though we typically rely on the connect packet to get the protocol version, we need to send some
 				// request in order to start a connection. This protocol version request serves that purpose.
-				protocolVersion = getCoordinatorProtocol(coordinator);
+				protocolVersion = getCoordinatorProtocol(coordinatorAddress);
 				needToConnect = false;
 			}
 			choose {
@@ -7044,7 +7036,7 @@ ACTOR Future<ProtocolVersion> getClusterProtocolImpl(
 				// Older versions of FDB don't have an endpoint to return the protocol version, so we get this info from
 				// the connect packet
 				when(Optional<ProtocolVersion> pv =
-				         wait(getCoordinatorProtocolFromConnectPacket(coordinator, expectedVersion))) {
+				         wait(getCoordinatorProtocolFromConnectPacket(coordinatorAddress, expectedVersion))) {
 					if (pv.present()) {
 						return pv.get();
 					} else {
@@ -7483,6 +7475,27 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(Reference<Transa
 	}
 }
 
+// kind of a hack, but necessary to work around needing to access system keys in a tenant-enabled transaction
+ACTOR Future<TenantMapEntry> blobGranuleGetTenantEntry(Transaction* self, Key rangeStartKey) {
+	Optional<KeyRangeLocationInfo> cachedLocationInfo =
+	    self->trState->cx->getCachedLocation(self->getTenant().get(), rangeStartKey, Reverse::False);
+	if (!cachedLocationInfo.present()) {
+		KeyRangeLocationInfo l = wait(getKeyLocation_internal(self->trState->cx,
+		                                                      self->getTenant().get(),
+		                                                      rangeStartKey,
+		                                                      self->trState->spanContext,
+		                                                      self->trState->debugID,
+		                                                      self->trState->useProvisionalProxies,
+		                                                      Reverse::False,
+		                                                      latestVersion));
+		self->trState->tenantId = l.tenantEntry.id;
+		return l.tenantEntry;
+	} else {
+		self->trState->tenantId = cachedLocationInfo.get().tenantEntry.id;
+		return cachedLocationInfo.get().tenantEntry;
+	}
+}
+
 Future<Standalone<VectorRef<KeyRef>>> Transaction::getRangeSplitPoints(KeyRange const& keys, int64_t chunkSize) {
 	return ::getRangeSplitPoints(
 	    trState, keys, chunkSize, readVersion.isValid() && readVersion.isReady() ? readVersion.get() : latestVersion);
@@ -7500,6 +7513,7 @@ ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRangesActor(Trans
 		fmt::print("Getting Blob Granules for [{0} - {1})\n", keyRange.begin.printable(), keyRange.end.printable());
 	}
 	self->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	// FIXME: limit to tenant range if set
 	loop {
 		state RangeResult blobGranuleMapping = wait(
 		    krmGetRanges(self, blobGranuleMappingKeys.begin, currentRange, 1000, GetRangeLimits::BYTE_LIMIT_UNLIMITED));
@@ -7543,6 +7557,7 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 	state UID workerId;
 	state int i;
 	state Version rv;
+	state Optional<Key> tenantPrefix;
 
 	state Standalone<VectorRef<BlobGranuleChunkRef>> results;
 	state double startTime = now();
@@ -7553,14 +7568,46 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 		Version _end = wait(self->getReadVersion());
 		rv = _end;
 	}
-	self->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+
 	// Right now just read whole blob range assignments from DB
 	// FIXME: eventually we probably want to cache this and invalidate similarly to storage servers.
 	// Cache misses could still read from the DB, or we could add it to the Transaction State Store and
 	// have proxies serve it from memory.
-	RangeResult _bgMapping =
-	    wait(krmGetRanges(self, blobGranuleMappingKeys.begin, keyRange, 1000, GetRangeLimits::BYTE_LIMIT_UNLIMITED));
-	blobGranuleMapping = _bgMapping;
+	if (BG_REQUEST_DEBUG) {
+		fmt::print("Doing blob granule request [{0} - {1}) @ {2}{3}\n",
+		           range.begin.printable(),
+		           range.end.printable(),
+		           rv,
+		           self->getTenant().present() ? " for tenant " + self->getTenant().get().printable() : "");
+	}
+
+	if (self->getTenant().present()) {
+		// have to bypass tenant to read system key space, and add tenant prefix to part of mapping
+		TenantMapEntry tenantEntry = wait(blobGranuleGetTenantEntry(self, range.begin));
+		tenantPrefix = tenantEntry.prefix;
+		Standalone<StringRef> mappingPrefix = tenantEntry.prefix.withPrefix(blobGranuleMappingKeys.begin);
+
+		// basically krmGetRange, but enable it to not use tenant without RAW_ACCESS by doing manual getRange with
+		// UseTenant::False
+		GetRangeLimits limits(1000);
+		limits.minRows = 2;
+		RangeResult rawMapping = wait(getRange(self->trState,
+		                                       self->getReadVersion(),
+		                                       lastLessOrEqual(keyRange.begin.withPrefix(mappingPrefix)),
+		                                       firstGreaterThan(keyRange.end.withPrefix(mappingPrefix)),
+		                                       limits,
+		                                       Reverse::False,
+		                                       UseTenant::False));
+		// strip off mapping prefix
+		Standalone<StringRef> prefix =
+		    StringRef(blobGranuleMappingKeys.begin.toString() + tenantPrefix.get().toString());
+		blobGranuleMapping = krmDecodeRanges(prefix, range, rawMapping);
+	} else {
+		self->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		wait(store(
+		    blobGranuleMapping,
+		    krmGetRanges(self, blobGranuleMappingKeys.begin, keyRange, 1000, GetRangeLimits::BYTE_LIMIT_UNLIMITED)));
+	}
 	if (blobGranuleMapping.more) {
 		if (BG_REQUEST_DEBUG) {
 			fmt::print(
@@ -7571,10 +7618,7 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 	}
 	ASSERT(!blobGranuleMapping.more && blobGranuleMapping.size() < CLIENT_KNOBS->TOO_MANY);
 
-	if (blobGranuleMapping.size() == 0) {
-		if (BG_REQUEST_DEBUG) {
-			printf("no blob worker assignments yet\n");
-		}
+	if (blobGranuleMapping.size() < 2) {
 		throw blob_granule_transaction_too_old();
 	}
 
@@ -7611,7 +7655,11 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 		}
 
 		if (!self->trState->cx->blobWorker_interf.count(workerId)) {
-			Optional<Value> workerInterface = wait(self->get(blobWorkerListKeyFor(workerId)));
+			state Optional<Value> workerInterface;
+			// again, have to bypass system keys and tenant requirements if tenant is present
+			wait(store(
+			    workerInterface,
+			    getValue(self->trState, blobWorkerListKeyFor(workerId), self->getReadVersion(), UseTenant::False)));
 			// from the time the mapping was read from the db, the associated blob worker
 			// could have died and so its interface wouldn't be present as part of the blobWorkerList
 			// we persist in the db. So throw wrong_shard_server to get the new mapping
@@ -7649,6 +7697,7 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 		req.keyRange = KeyRangeRef(StringRef(req.arena, granuleStartKey), StringRef(req.arena, granuleEndKey));
 		req.beginVersion = begin;
 		req.readVersion = rv;
+		req.tenantInfo = self->getTenant().present() ? self->trState->getTenantInfo() : TenantInfo();
 		req.canCollapseBegin = true; // TODO make this a parameter once we support it
 
 		std::vector<Reference<ReferencedInterface<BlobWorkerInterface>>> v;
@@ -7673,6 +7722,7 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 						           rv,
 						           workerId.toString());
 					}
+					ASSERT(!rep.chunks.empty());
 					results.arena().dependsOn(rep.arena);
 					for (auto& chunk : rep.chunks) {
 						if (BG_REQUEST_DEBUG) {
@@ -7692,10 +7742,22 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 								           chunk.newDeltas[chunk.newDeltas.size() - 1].version);
 							}
 							fmt::print("  IncludedVersion: {0}\n\n\n", chunk.includedVersion);
+							if (chunk.tenantPrefix.present()) {
+								fmt::print("  TenantPrefix: {0}\n", chunk.tenantPrefix.get().printable());
+							}
+						}
+
+						ASSERT(chunk.tenantPrefix.present() == tenantPrefix.present());
+						if (chunk.tenantPrefix.present()) {
+							ASSERT(chunk.tenantPrefix.get() == tenantPrefix.get());
 						}
 
 						results.push_back(results.arena(), chunk);
-						keyRange = KeyRangeRef(std::min(chunk.keyRange.end, keyRange.end), keyRange.end);
+						StringRef chunkEndKey = chunk.keyRange.end;
+						if (tenantPrefix.present()) {
+							chunkEndKey = chunkEndKey.removePrefix(tenantPrefix.get());
+						}
+						keyRange = KeyRangeRef(std::min(chunkEndKey, keyRange.end), keyRange.end);
 					}
 				}
 				// if we detect that this blob worker fails, cancel the request, as otherwise load balance will
@@ -7715,7 +7777,8 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 				fmt::print("BGReq got error {}\n", e.name());
 			}
 			// worker is up but didn't actually have granule, or connection failed
-			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_connection_failed) {
+			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_connection_failed ||
+			    e.code() == error_code_unknown_tenant) {
 				// need to re-read mapping, throw transaction_too_old so client retries. TODO better error?
 				throw transaction_too_old();
 			}
@@ -8879,6 +8942,12 @@ ACTOR Future<KeyRange> getChangeFeedRange(Reference<DatabaseContext> db, Databas
 			} else {
 				Optional<Value> val = wait(tr.get(rangeIDKey));
 				if (!val.present()) {
+					ASSERT(tr.getReadVersion().isReady());
+					TraceEvent(SevDebug, "ChangeFeedNotRegisteredGet")
+					    .detail("FeedID", rangeID)
+					    .detail("FullFeedKey", rangeIDKey)
+					    .detail("BeginVersion", begin)
+					    .detail("ReadVersion", tr.getReadVersion().get());
 					throw change_feed_not_registered();
 				}
 				if (db->changeFeedCache.size() > CLIENT_KNOBS->CHANGE_FEED_CACHE_SIZE) {
@@ -9281,6 +9350,12 @@ ACTOR static Future<Void> popChangeFeedBackup(Database cx, Key rangeID, Version 
 					tr.set(rangeIDKey, changeFeedValue(range, version, status));
 				}
 			} else {
+				ASSERT(tr.getReadVersion().isReady());
+				TraceEvent(SevDebug, "ChangeFeedNotRegisteredPop")
+				    .detail("FeedID", rangeID)
+				    .detail("FullFeedKey", rangeIDKey)
+				    .detail("PopVersion", version)
+				    .detail("ReadVersion", tr.getReadVersion().get());
 				throw change_feed_not_registered();
 			}
 			wait(tr.commit());
@@ -9367,6 +9442,7 @@ Reference<DatabaseContext::TransactionT> DatabaseContext::createTransaction() {
 	return makeReference<ReadYourWritesTransaction>(Database(Reference<DatabaseContext>::addRef(this)));
 }
 
+// FIXME: handle tenants?
 ACTOR Future<Key> purgeBlobGranulesActor(Reference<DatabaseContext> db,
                                          KeyRange range,
                                          Version purgeVersion,

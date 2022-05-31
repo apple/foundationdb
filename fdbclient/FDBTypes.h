@@ -1179,10 +1179,10 @@ class Database;
 
 struct HealthMetrics {
 	struct StorageStats {
-		int64_t storageQueue;
-		int64_t storageDurabilityLag;
-		double diskUsage;
-		double cpuUsage;
+		int64_t storageQueue = 0;
+		int64_t storageDurabilityLag = 0;
+		double diskUsage = 0.0;
+		double cpuUsage = 0.0;
 
 		bool operator==(StorageStats const& r) const {
 			return ((storageQueue == r.storageQueue) && (storageDurabilityLag == r.storageDurabilityLag) &&
