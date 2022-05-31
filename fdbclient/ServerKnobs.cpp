@@ -28,7 +28,7 @@ ServerKnobs::ServerKnobs(Randomize randomize, ClientKnobs* clientKnobs, IsSimula
 
 void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSimulated isSimulated) {
 	// clang-format off
-	init( ALLOW_DANGEROUS_KNOBS,                               false ); if (isSimulated) ALLOW_DANGEROUS_KNOBS = true;
+	init( ALLOW_DANGEROUS_KNOBS,                               isSimulated );
 	// Versions
 	init( VERSIONS_PER_SECOND,                                   1e6 );
 	init( MAX_VERSIONS_IN_FLIGHT,                100 * VERSIONS_PER_SECOND );
