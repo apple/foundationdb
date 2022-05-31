@@ -91,7 +91,7 @@ Transaction createNewTransaction(Database db, Arguments const& args, int id = -1
 	}
 	std::string tenantStr = "tenant" + std::to_string(tenant_id);
 	BytesRef tenant_name = toBytesRef(tenantStr);
-	Tenant t = db.openTenant(tenant_name);	
+	Tenant t = db.openTenant(tenant_name);
 	return t.createTransaction();
 }
 
