@@ -41,4 +41,8 @@ public class KeyArrayResult {
 			keys.add(key);
 		}
 	}
+	
+	public List<byte[]> getKeys() {
+		return keys;	
+	}
 }

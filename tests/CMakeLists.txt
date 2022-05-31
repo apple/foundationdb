@@ -190,9 +190,11 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES noSim/RandomUnitTests.toml UNIT)
   if (WITH_ROCKSDB_EXPERIMENTAL)
     add_fdb_test(TEST_FILES noSim/KeyValueStoreRocksDBTest.toml)
+    add_fdb_test(TEST_FILES noSim/ShardedRocksDBTest.toml)
     add_fdb_test(TEST_FILES fast/PhysicalShardMove.toml)
   else()
     add_fdb_test(TEST_FILES noSim/KeyValueStoreRocksDBTest.toml IGNORE)
+    add_fdb_test(TEST_FILES noSim/ShardedRocksDBTest.toml IGNORE)
     add_fdb_test(TEST_FILES fast/PhysicalShardMove.toml IGNORE)
   endif()
   add_fdb_test(TEST_FILES rare/CheckRelocation.toml)
@@ -211,6 +213,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES rare/LargeApiCorrectnessStatus.toml)
   add_fdb_test(TEST_FILES rare/RYWDisable.toml)
   add_fdb_test(TEST_FILES rare/RandomReadWriteTest.toml)
+  add_fdb_test(TEST_FILES rare/ReadSkewReadWrite.toml)
   add_fdb_test(TEST_FILES rare/SpecificUnitTests.toml)
   add_fdb_test(TEST_FILES rare/SwizzledLargeApiCorrectness.toml)
   add_fdb_test(TEST_FILES rare/RedwoodCorrectnessBTree.toml)
@@ -276,6 +279,12 @@ if(WITH_PYTHON)
   add_fdb_test(
     TEST_FILES restarting/from_7.1.0/ConfigureStorageMigrationTestRestart-1.toml
                restarting/from_7.1.0/ConfigureStorageMigrationTestRestart-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/from_7.1.0/VersionVectorDisableRestart-1.toml
+               restarting/from_7.1.0/VersionVectorDisableRestart-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/from_7.1.0/VersionVectorEnableRestart-1.toml
+               restarting/from_7.1.0/VersionVectorEnableRestart-2.toml)
 
 
   add_fdb_test(TEST_FILES slow/ApiCorrectness.toml)

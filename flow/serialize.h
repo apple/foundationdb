@@ -634,6 +634,8 @@ public:
 		check = nullptr;
 	}
 
+	size_t remainingBytes() const { return end - begin; };
+
 protected:
 	_Reader(const char* begin, const char* end) : begin(begin), end(end) {}
 	_Reader(const char* begin, const char* end, const Arena& arena) : begin(begin), end(end), m_pool(arena) {}

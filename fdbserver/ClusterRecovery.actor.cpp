@@ -1467,7 +1467,6 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 
 	DBCoreState newState = self->cstate.myDBState;
 	newState.recoveryCount++;
-	newState.recoveryCount++;
 	if (self->cstate.prevDBState.newestProtocolVersion.isInvalid() ||
 	    self->cstate.prevDBState.newestProtocolVersion < currentProtocolVersion) {
 		ASSERT(self->cstate.myDBState.lowestCompatibleProtocolVersion.isInvalid() ||

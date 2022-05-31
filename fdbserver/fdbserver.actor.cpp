@@ -857,7 +857,7 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(
 	NetworkAddressList listenNetworkAddresses;
 
 	std::vector<Hostname>& hostnames = connectionRecord.getConnectionString().hostnames;
-	const std::vector<NetworkAddress>& coords = connectionRecord.getConnectionString().coordinators();
+	const std::vector<NetworkAddress>& coords = connectionRecord.getConnectionString().coords;
 	ASSERT(hostnames.size() + coords.size() > 0);
 
 	for (int ii = 0; ii < publicAddressStrs.size(); ++ii) {

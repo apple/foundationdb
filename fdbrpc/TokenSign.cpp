@@ -24,26 +24,21 @@
 #include "flow/Arena.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
+#include "flow/MkCert.h"
 #include "flow/Platform.h"
+#include "flow/ScopeExit.h"
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
 #include <type_traits>
+#if defined(HAVE_WOLFSSL)
+#include <wolfssl/options.h>
+#endif
 #include <openssl/ec.h>
 #include <openssl/err.h>
 #include <openssl/evp.h>
 #include <openssl/x509.h>
 
 namespace {
-
-template <typename Func>
-class ExitGuard {
-	std::decay_t<Func> fn;
-
-public:
-	ExitGuard(Func&& fn) : fn(std::forward<Func>(fn)) {}
-
-	~ExitGuard() { fn(); }
-};
 
 [[noreturn]] void traceAndThrow(const char* type) {
 	auto te = TraceEvent(SevWarnAlways, type);
@@ -53,61 +48,9 @@ public:
 			0,
 		};
 		::ERR_error_string_n(err, buf, sizeof(buf));
-		te.detail("OpenSSLError", buf);
+		te.detail("OpenSSLError", static_cast<const char*>(buf));
 	}
 	throw digital_signature_ops_error();
-}
-
-struct KeyPairRef {
-	StringRef privateKey;
-	StringRef publicKey;
-};
-
-Standalone<KeyPairRef> generateEcdsaKeyPair() {
-	auto params = std::add_pointer_t<EVP_PKEY>();
-	{
-		auto pctx = ::EVP_PKEY_CTX_new_id(EVP_PKEY_EC, nullptr);
-		ASSERT(pctx);
-		auto ctxGuard = ExitGuard([pctx]() { ::EVP_PKEY_CTX_free(pctx); });
-		ASSERT_LT(0, ::EVP_PKEY_paramgen_init(pctx));
-		ASSERT_LT(0, ::EVP_PKEY_CTX_set_ec_paramgen_curve_nid(pctx, NID_X9_62_prime256v1));
-		ASSERT_LT(0, ::EVP_PKEY_paramgen(pctx, &params));
-		ASSERT(params);
-	}
-	auto paramsGuard = ExitGuard([params]() { ::EVP_PKEY_free(params); });
-	// keygen
-	auto kctx = ::EVP_PKEY_CTX_new(params, nullptr);
-	ASSERT(kctx);
-	auto kctxGuard = ExitGuard([kctx]() { ::EVP_PKEY_CTX_free(kctx); });
-	auto key = std::add_pointer_t<EVP_PKEY>();
-	{
-		ASSERT_LT(0, ::EVP_PKEY_keygen_init(kctx));
-		ASSERT_LT(0, ::EVP_PKEY_keygen(kctx, &key));
-	}
-	ASSERT(key);
-	auto keyGuard = ExitGuard([key]() { ::EVP_PKEY_free(key); });
-
-	auto ret = Standalone<KeyPairRef>{};
-	auto& arena = ret.arena();
-	{
-		auto len = 0;
-		len = ::i2d_PrivateKey(key, nullptr);
-		ASSERT_LT(0, len);
-		auto buf = new (arena) uint8_t[len];
-		auto out = std::add_pointer_t<uint8_t>(buf);
-		len = ::i2d_PrivateKey(key, &out);
-		ret.privateKey = StringRef(buf, len);
-	}
-	{
-		auto len = 0;
-		len = ::i2d_PUBKEY(key, nullptr);
-		ASSERT_LT(0, len);
-		auto buf = new (arena) uint8_t[len];
-		auto out = std::add_pointer_t<uint8_t>(buf);
-		len = ::i2d_PUBKEY(key, &out);
-		ret.publicKey = StringRef(buf, len);
-	}
-	return ret;
 }
 
 } // namespace
@@ -124,11 +67,11 @@ Standalone<SignedAuthTokenRef> signToken(AuthTokenRef token, StringRef keyName, 
 	if (!key) {
 		traceAndThrow("SignTokenBadKey");
 	}
-	auto keyGuard = ExitGuard([key]() { ::EVP_PKEY_free(key); });
+	auto keyGuard = ScopeExit([key]() { ::EVP_PKEY_free(key); });
 	auto mdctx = ::EVP_MD_CTX_create();
 	if (!mdctx)
 		traceAndThrow("SignTokenInitFail");
-	auto mdctxGuard = ExitGuard([mdctx]() { ::EVP_MD_CTX_free(mdctx); });
+	auto mdctxGuard = ScopeExit([mdctx]() { ::EVP_MD_CTX_free(mdctx); });
 	if (1 != ::EVP_DigestSignInit(mdctx, nullptr, ::EVP_sha256() /*Parameterize?*/, nullptr, key))
 		traceAndThrow("SignTokenInitFail");
 	if (1 != ::EVP_DigestSignUpdate(mdctx, tokenStr.begin(), tokenStr.size()))
@@ -150,11 +93,11 @@ bool verifyToken(SignedAuthTokenRef signedToken, StringRef publicKeyDer) {
 	auto key = ::d2i_PUBKEY(nullptr, &rawPubKeyDer, publicKeyDer.size());
 	if (!key)
 		traceAndThrow("VerifyTokenBadKey");
-	auto keyGuard = ExitGuard([key]() { ::EVP_PKEY_free(key); });
+	auto keyGuard = ScopeExit([key]() { ::EVP_PKEY_free(key); });
 	auto mdctx = ::EVP_MD_CTX_create();
 	if (!mdctx)
 		traceAndThrow("VerifyTokenInitFail");
-	auto mdctxGuard = ExitGuard([mdctx]() { ::EVP_MD_CTX_free(mdctx); });
+	auto mdctxGuard = ScopeExit([mdctx]() { ::EVP_MD_CTX_free(mdctx); });
 	if (1 != ::EVP_DigestVerifyInit(mdctx, nullptr, ::EVP_sha256(), nullptr, key))
 		traceAndThrow("VerifyTokenInitFail");
 	if (1 != ::EVP_DigestVerifyUpdate(mdctx, signedToken.token.begin(), signedToken.token.size()))
@@ -179,7 +122,8 @@ void forceLinkTokenSignTests() {}
 TEST_CASE("/fdbrpc/TokenSign") {
 	const auto numIters = 100;
 	for (auto i = 0; i < numIters; i++) {
-		auto keyPair = generateEcdsaKeyPair();
+		auto kpArena = Arena();
+		auto keyPair = mkcert::KeyPairRef::make(kpArena);
 		auto token = Standalone<AuthTokenRef>{};
 		auto& arena = token.arena();
 		auto& rng = *deterministicRandom();
@@ -206,15 +150,15 @@ TEST_CASE("/fdbrpc/TokenSign") {
 			token.tenants.push_back(arena, genRandomStringRef());
 		}
 		auto keyName = genRandomStringRef();
-		auto signedToken = signToken(token, keyName, keyPair.privateKey);
-		const auto verifyExpectOk = verifyToken(signedToken, keyPair.publicKey);
+		auto signedToken = signToken(token, keyName, keyPair.privateKeyDer);
+		const auto verifyExpectOk = verifyToken(signedToken, keyPair.publicKeyDer);
 		ASSERT(verifyExpectOk);
 		// try tampering with signed token by adding one more tenant
 		token.tenants.push_back(arena, genRandomStringRef());
 		auto writer = ObjectWriter([&arena](size_t len) { return new (arena) uint8_t[len]; }, IncludeVersion());
 		writer.serialize(token);
 		signedToken.token = writer.toStringRef();
-		const auto verifyExpectFail = verifyToken(signedToken, keyPair.publicKey);
+		const auto verifyExpectFail = verifyToken(signedToken, keyPair.publicKeyDer);
 		ASSERT(!verifyExpectFail);
 	}
 	printf("%d runs OK\n", numIters);

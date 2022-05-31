@@ -181,8 +181,8 @@ struct GetMappedRangeResult {
 	                       std::string, // value
 	                       std::string, // begin
 	                       std::string, // end
-	                       std::vector<std::pair<std::string, std::string>> // range results
-	                       >>
+	                       std::vector<std::pair<std::string, std::string>>, // range results
+	                       fdb_bool_t>>
 	    mkvs;
 	// True if values remain in the key range requested.
 	bool more;
@@ -261,6 +261,7 @@ GetMappedRangeResult get_mapped_range(fdb::Transaction& tr,
                                       int target_bytes,
                                       FDBStreamingMode mode,
                                       int iteration,
+                                      int matchIndex,
                                       fdb_bool_t snapshot,
                                       fdb_bool_t reverse) {
 	fdb::MappedKeyValueArrayFuture f1 = tr.get_mapped_range(begin_key_name,
@@ -277,6 +278,7 @@ GetMappedRangeResult get_mapped_range(fdb::Transaction& tr,
 	                                                        target_bytes,
 	                                                        mode,
 	                                                        iteration,
+	                                                        matchIndex,
 	                                                        snapshot,
 	                                                        reverse);
 
@@ -304,6 +306,7 @@ GetMappedRangeResult get_mapped_range(fdb::Transaction& tr,
 		auto value = extractString(mkv.value);
 		auto begin = extractString(mkv.getRange.begin.key);
 		auto end = extractString(mkv.getRange.end.key);
+		bool boundaryAndExist = mkv.boundaryAndExist;
 		//		std::cout << "key:" << key << " value:" << value << " begin:" << begin << " end:" << end << std::endl;
 
 		std::vector<std::pair<std::string, std::string>> range_results;
@@ -314,7 +317,7 @@ GetMappedRangeResult get_mapped_range(fdb::Transaction& tr,
 			range_results.emplace_back(k, v);
 			// std::cout << "[" << i << "]" << k << " -> " << v << std::endl;
 		}
-		result.mkvs.emplace_back(key, value, begin, end, range_results);
+		result.mkvs.emplace_back(key, value, begin, end, range_results, boundaryAndExist);
 	}
 	return result;
 }
@@ -951,7 +954,11 @@ std::map<std::string, std::string> fillInRecords(int n) {
 	return data;
 }
 
-GetMappedRangeResult getMappedIndexEntries(int beginId, int endId, fdb::Transaction& tr, std::string mapper) {
+GetMappedRangeResult getMappedIndexEntries(int beginId,
+                                           int endId,
+                                           fdb::Transaction& tr,
+                                           std::string mapper,
+                                           int matchIndex) {
 	std::string indexEntryKeyBegin = indexEntryKey(beginId);
 	std::string indexEntryKeyEnd = indexEntryKey(endId);
 
@@ -965,13 +972,24 @@ GetMappedRangeResult getMappedIndexEntries(int beginId, int endId, fdb::Transact
 	    /* target_bytes */ 0,
 	    /* FDBStreamingMode */ FDB_STREAMING_MODE_WANT_ALL,
 	    /* iteration */ 0,
+	    /* matchIndex */ matchIndex,
 	    /* snapshot */ false,
 	    /* reverse */ 0);
 }
 
-GetMappedRangeResult getMappedIndexEntries(int beginId, int endId, fdb::Transaction& tr) {
-	std::string mapper = Tuple().append(prefix).append(RECORD).append("{K[3]}"_sr).append("{...}"_sr).pack().toString();
-	return getMappedIndexEntries(beginId, endId, tr, mapper);
+GetMappedRangeResult getMappedIndexEntries(int beginId,
+                                           int endId,
+                                           fdb::Transaction& tr,
+                                           int matchIndex,
+                                           bool allMissing) {
+	std::string mapper = Tuple()
+	                         .append(prefix)
+	                         .append(RECORD)
+	                         .append(allMissing ? "{K[2]}"_sr : "{K[3]}"_sr)
+	                         .append("{...}"_sr)
+	                         .pack()
+	                         .toString();
+	return getMappedIndexEntries(beginId, endId, tr, mapper, matchIndex);
 }
 
 TEST_CASE("fdb_transaction_get_mapped_range") {
@@ -983,7 +1001,16 @@ TEST_CASE("fdb_transaction_get_mapped_range") {
 	while (1) {
 		int beginId = 1;
 		int endId = 19;
-		auto result = getMappedIndexEntries(beginId, endId, tr);
+		const double r = deterministicRandom()->random01();
+		int matchIndex = MATCH_INDEX_ALL;
+		if (r < 0.25) {
+			matchIndex = MATCH_INDEX_NONE;
+		} else if (r < 0.5) {
+			matchIndex = MATCH_INDEX_MATCHED_ONLY;
+		} else if (r < 0.75) {
+			matchIndex = MATCH_INDEX_UNMATCHED_ONLY;
+		}
+		auto result = getMappedIndexEntries(beginId, endId, tr, matchIndex, false);
 
 		if (result.err) {
 			fdb::EmptyFuture f1 = tr.on_error(result.err);
@@ -996,9 +1023,21 @@ TEST_CASE("fdb_transaction_get_mapped_range") {
 		CHECK(!result.more);
 
 		int id = beginId;
+		bool boundary;
 		for (int i = 0; i < expectSize; i++, id++) {
-			const auto& [key, value, begin, end, range_results] = result.mkvs[i];
-			CHECK(indexEntryKey(id).compare(key) == 0);
+			boundary = i == 0 || i == expectSize - 1;
+			const auto& [key, value, begin, end, range_results, boundaryAndExist] = result.mkvs[i];
+			if (matchIndex == MATCH_INDEX_ALL || i == 0 || i == expectSize - 1) {
+				CHECK(indexEntryKey(id).compare(key) == 0);
+			} else if (matchIndex == MATCH_INDEX_MATCHED_ONLY) {
+				CHECK(indexEntryKey(id).compare(key) == 0);
+			} else if (matchIndex == MATCH_INDEX_UNMATCHED_ONLY) {
+				CHECK(EMPTY.compare(key) == 0);
+			} else {
+				CHECK(EMPTY.compare(key) == 0);
+			}
+			bool empty = range_results.empty();
+			CHECK(boundaryAndExist == (boundary && !empty));
 			CHECK(EMPTY.compare(value) == 0);
 			CHECK(range_results.size() == SPLIT_SIZE);
 			for (int split = 0; split < SPLIT_SIZE; split++) {
@@ -1006,6 +1045,58 @@ TEST_CASE("fdb_transaction_get_mapped_range") {
 				CHECK(recordKey(id, split).compare(k) == 0);
 				CHECK(recordValue(id, split).compare(v) == 0);
 			}
+		}
+		break;
+	}
+}
+
+TEST_CASE("fdb_transaction_get_mapped_range_missing_all_secondary") {
+	const int TOTAL_RECORDS = 20;
+	fillInRecords(TOTAL_RECORDS);
+
+	fdb::Transaction tr(db);
+	// RYW should be enabled.
+	while (1) {
+		int beginId = 1;
+		int endId = 19;
+		const double r = deterministicRandom()->random01();
+		int matchIndex = MATCH_INDEX_ALL;
+		if (r < 0.25) {
+			matchIndex = MATCH_INDEX_NONE;
+		} else if (r < 0.5) {
+			matchIndex = MATCH_INDEX_MATCHED_ONLY;
+		} else if (r < 0.75) {
+			matchIndex = MATCH_INDEX_UNMATCHED_ONLY;
+		}
+		auto result = getMappedIndexEntries(beginId, endId, tr, matchIndex, true);
+
+		if (result.err) {
+			fdb::EmptyFuture f1 = tr.on_error(result.err);
+			fdb_check(wait_future(f1));
+			continue;
+		}
+
+		int expectSize = endId - beginId;
+		CHECK(result.mkvs.size() == expectSize);
+		CHECK(!result.more);
+
+		int id = beginId;
+		bool boundary;
+		for (int i = 0; i < expectSize; i++, id++) {
+			boundary = i == 0 || i == expectSize - 1;
+			const auto& [key, value, begin, end, range_results, boundaryAndExist] = result.mkvs[i];
+			if (matchIndex == MATCH_INDEX_ALL || i == 0 || i == expectSize - 1) {
+				CHECK(indexEntryKey(id).compare(key) == 0);
+			} else if (matchIndex == MATCH_INDEX_MATCHED_ONLY) {
+				CHECK(EMPTY.compare(key) == 0);
+			} else if (matchIndex == MATCH_INDEX_UNMATCHED_ONLY) {
+				CHECK(indexEntryKey(id).compare(key) == 0);
+			} else {
+				CHECK(EMPTY.compare(key) == 0);
+			}
+			bool empty = range_results.empty();
+			CHECK(boundaryAndExist == (boundary && !empty));
+			CHECK(EMPTY.compare(value) == 0);
 		}
 		break;
 	}
@@ -1024,6 +1115,7 @@ TEST_CASE("fdb_transaction_get_mapped_range_restricted_to_serializable") {
 	    /* target_bytes */ 0,
 	    /* FDBStreamingMode */ FDB_STREAMING_MODE_WANT_ALL,
 	    /* iteration */ 0,
+	    /* matchIndex */ MATCH_INDEX_ALL,
 	    /* snapshot */ true, // Set snapshot to true
 	    /* reverse */ 0);
 	ASSERT(result.err == error_code_unsupported_operation);
@@ -1043,6 +1135,7 @@ TEST_CASE("fdb_transaction_get_mapped_range_restricted_to_ryw_enable") {
 	    /* target_bytes */ 0,
 	    /* FDBStreamingMode */ FDB_STREAMING_MODE_WANT_ALL,
 	    /* iteration */ 0,
+	    /* matchIndex */ MATCH_INDEX_ALL,
 	    /* snapshot */ false,
 	    /* reverse */ 0);
 	ASSERT(result.err == error_code_unsupported_operation);
@@ -1069,7 +1162,7 @@ TEST_CASE("fdb_transaction_get_mapped_range_fail_on_mapper_not_tuple") {
 	};
 	assertNotTuple(mapper);
 	fdb::Transaction tr(db);
-	auto result = getMappedIndexEntries(1, 3, tr, mapper);
+	auto result = getMappedIndexEntries(1, 3, tr, mapper, MATCH_INDEX_ALL);
 	ASSERT(result.err == error_code_mapper_not_tuple);
 }
 

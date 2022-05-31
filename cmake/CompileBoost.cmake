@@ -123,7 +123,7 @@ set(FORCE_BOOST_BUILD OFF CACHE BOOL "Forces cmake to build boost and ignores an
 
 if(Boost_FOUND AND Boost_filesystem_FOUND AND Boost_context_FOUND AND NOT FORCE_BOOST_BUILD)
   add_library(boost_target INTERFACE)
-  target_link_libraries(boost_target INTERFACE Boost::boost Boost::context_FOUND Boost::filesystem)
+  target_link_libraries(boost_target INTERFACE Boost::boost Boost::context Boost::filesystem)
 elseif(WIN32)
   message(FATAL_ERROR "Could not find Boost")
 else()
