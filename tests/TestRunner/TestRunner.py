@@ -118,7 +118,7 @@ class LogParser:
         with open(self.infile) as f:
             line = f.readline()
             while line != "":
-                obj = self.processLine(line, linenr)
+                obj = self.process_line(line, linenr)
                 line = f.readline()
                 linenr += 1
                 if obj is None:
@@ -137,7 +137,7 @@ class LogParser:
                     and self.sanitize_backtrace(obj) is not None
                 ):
                     obj = self.apply_address_to_line(obj)
-                self.writeObject(obj)
+                self.write_object(obj)
 
     def log_trace_parse_error(self, linenr, e):
         obj = {}
@@ -164,7 +164,7 @@ class LogParser:
             return_code_trace["Command"] = command
             return_code_trace["ReturnCode"] = return_code
             return_code_trace["testname"] = self.name
-            self.writeObject(return_code_trace)
+            self.write_object(return_code_trace)
 
 
 class JSONParser(LogParser):
@@ -208,7 +208,7 @@ class XMLParser(LogParser):
             self.errors.append(exception)
 
         def fatalError(self, exception):
-            self.fatalError.append(exception)
+            self.fatalErrors.append(exception)
 
         def warning(self, exception):
             self.warnings.append(exception)
