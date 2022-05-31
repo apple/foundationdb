@@ -40,10 +40,10 @@
 #include <openssl/err.h>
 #include <openssl/evp.h>
 #include <openssl/x509.h>
-#include "fdbclient/rapidjson/document.h"
-#include "fdbclient/rapidjson/writer.h"
-#include "fdbclient/rapidjson/stringbuffer.h"
-#include "fdbclient/rapidjson/error/en.h"
+#include <rapidjson/document.h>
+#include <rapidjson/writer.h>
+#include <rapidjson/stringbuffer.h>
+#include <rapidjson/error/en.h>
 #include "fdbrpc/Base64UrlEncode.h"
 #include "fdbrpc/Base64UrlDecode.h"
 
