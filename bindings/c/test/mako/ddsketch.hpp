@@ -20,6 +20,7 @@
 
 #ifndef DDSKETCH_H
 #define DDSKETCH_H
+#include <iterator>
 #include <limits>
 #include <type_traits>
 #pragma once
@@ -133,8 +134,8 @@ public:
 			}
 		} else { // and count down
 			uint64_t count = 0;
-			for (size_t i = buckets.size() - 1; i >= 0; i--) {
-				if (targetPercentilePopulation + count + buckets[i] >= populationSize) {
+			for (auto rit = buckets.rbegin(); rit != buckets.rend(); rit++) {
+				if (targetPercentilePopulation + count + *rit >= populationSize) {
 					// cnt + bkt[i] is # of numbers to the right of this bucket (incl.),
 					// so if target is not in this bucket (i.e., to the left of this
 					// bucket), it would be as right as the left bucket's rightmost
@@ -142,10 +143,10 @@ public:
 					// is 0-indexed), that means target is in this bucket if this
 					// condition is not satisfied.
 					found = true;
-					index = i;
+					index = std::distance(rit, buckets.rend()) - 1;
 					break;
 				}
-				count += buckets[i];
+				count += *rit;
 			}
 		}
 		assert(found);
