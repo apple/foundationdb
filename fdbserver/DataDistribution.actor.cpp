@@ -492,34 +492,10 @@ struct DataDistributorData : NonCopyable, ReferenceCounted<DataDistributorData> 
 	    totalDataInFlightRemoteEventHolder(makeReference<EventCacheHolder>("TotalDataInFlightRemote")) {}
 };
 
-ACTOR Future<Void> monitorBatchLimitedTime(Reference<AsyncVar<ServerDBInfo> const> db, double* lastLimited) {
-	loop {
-		wait(delay(SERVER_KNOBS->METRIC_UPDATE_RATE));
-
-		state Reference<GrvProxyInfo> grvProxies(new GrvProxyInfo(db->get().client.grvProxies));
-
-		choose {
-			when(wait(db->onChange())) {}
-			when(GetHealthMetricsReply reply =
-			         wait(grvProxies->size() ? basicLoadBalance(grvProxies,
-			                                                    &GrvProxyInterface::getHealthMetrics,
-			                                                    GetHealthMetricsRequest(false))
-			                                 : Never())) {
-				if (reply.healthMetrics.batchLimited) {
-					*lastLimited = now();
-				}
-			}
-		}
-	}
-}
-
 // Runs the data distribution algorithm for FDB, including the DD Queue, DD tracker, and DD team collection
 ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
                                     PromiseStream<GetMetricsListRequest> getShardMetricsList,
                                     const DDEnabledState* ddEnabledState) {
-	state double lastLimited = 0;
-	self->addActor.send(monitorBatchLimitedTime(self->dbInfo, &lastLimited));
-
 	state Database cx = openDBOnServer(self->dbInfo, TaskPriority::DataDistributionLaunch, LockAware::True);
 	cx->locationCacheSize = SERVER_KNOBS->DD_LOCATION_CACHE_SIZE;
 
@@ -762,7 +738,6 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			                                                          self->ddId,
 			                                                          storageTeamSize,
 			                                                          configuration.storageTeamSize,
-			                                                          &lastLimited,
 			                                                          ddEnabledState),
 			                                    "DDQueue",
 			                                    self->ddId,
