@@ -280,7 +280,7 @@ endif()
       COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
             --build-dir ${CMAKE_BINARY_DIR}
             --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadSingleThr.toml
-            --upgrade-path "6.3.23" "7.0.0" "7.1.1"
+            --upgrade-path "6.3.23" "7.0.0" "7.1.2"
             --process-number 1
             )
 
@@ -288,7 +288,7 @@ endif()
       COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
             --build-dir ${CMAKE_BINARY_DIR}
             --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadSingleThr.toml
-            --upgrade-path "7.0.0" "7.1.1"
+            --upgrade-path "7.0.0" "7.1.2"
             --process-number 1
             )
 
@@ -296,7 +296,7 @@ endif()
         COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
             --build-dir ${CMAKE_BINARY_DIR}
             --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
-            --upgrade-path "6.3.23" "7.0.0" "7.1.1"
+            --upgrade-path "6.3.23" "7.0.0" "7.1.2"
             --process-number 3
           )
 
@@ -304,7 +304,7 @@ endif()
         COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
             --build-dir ${CMAKE_BINARY_DIR}
             --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
-            --upgrade-path "7.0.0" "7.1.1"
+            --upgrade-path "7.0.0" "7.1.2"
             --process-number 3
           )
 
@@ -312,7 +312,7 @@ endif()
           COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
               --build-dir ${CMAKE_BINARY_DIR}
               --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
-              --upgrade-path "7.1.1" "wiggle"
+              --upgrade-path "7.1.2" "wiggle"
               --disable-log-dump
               --process-number 3
               --redundancy double
@@ -322,7 +322,7 @@ endif()
           COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
               --build-dir ${CMAKE_BINARY_DIR}
               --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
-              --upgrade-path "7.0.0" "wiggle" "7.1.1"
+              --upgrade-path "7.0.0" "wiggle" "7.1.2"
               --disable-log-dump
               --process-number 3
               --redundancy double
