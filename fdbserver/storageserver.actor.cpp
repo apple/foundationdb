@@ -5411,13 +5411,12 @@ ACTOR Future<Version> fetchChangeFeed(StorageServer* data,
 			}
 		}
 
-		// TODO REMOVE
-		fmt::print("DBG: SS {} Feed {} possibly destroyed {}, {} metadata create, {} desired committed\n",
+		/*fmt::print("DBG: SS {} Feed {} possibly destroyed {}, {} metadata create, {} desired committed\n",
 		           data->thisServerID.toString().substr(0, 4),
 		           changeFeedInfo->id.printable(),
 		           changeFeedInfo->possiblyDestroyed,
 		           changeFeedInfo->metadataCreateVersion,
-		           data->desiredOldestVersion.get());
+		           data->desiredOldestVersion.get());*/
 
 		// There are two reasons for change_feed_not_registered:
 		//   1. The feed was just created, but the ss mutation stream is ahead of the GRV that fetchChangeFeedApplier
@@ -5434,9 +5433,8 @@ ACTOR Future<Version> fetchChangeFeed(StorageServer* data,
 			    .detail("Range", changeFeedInfo->range.toString())
 			    .detail("Version", cleanupVersion);
 
-			if (g_network->isSimulated()) {
-				ASSERT(allDestroyedChangeFeeds.count(changeFeedInfo->id));
-			}
+			// FIXME: do simulated validation that feed was destroyed, but needs to be added when client starts
+			// destroying a change feed instead of when server recieves private mutation for it
 
 			Key beginClearKey = changeFeedInfo->id.withPrefix(persistChangeFeedKeys.begin);
 
@@ -5657,11 +5655,9 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 			continue;
 		}
 
-		// TODO REMOVE print
-		fmt::print("DBG: SS {} fetching feed {} was refreshed but not present!! assuming destroyed\n",
+		/*fmt::print("DBG: SS {} fetching feed {} was refreshed but not present!! assuming destroyed\n",
 		           data->thisServerID.toString().substr(0, 4),
-		           feedId.printable());
-
+		           feedId.printable());*/
 		Version cleanupVersion = data->data().getLatestVersion();
 
 		TraceEvent(SevDebug, "DestroyingChangeFeedFromFetchMetadata", data->thisServerID)

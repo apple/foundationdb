@@ -162,8 +162,8 @@ class SimpleConfigTransactionImpl {
 public:
 	SimpleConfigTransactionImpl(Database const& cx) : cx(cx) {
 		const ClusterConnectionString& cs = cx->getConnectionRecord()->getConnectionString();
-		if (cs.coordinators().size()) {
-			std::vector<NetworkAddress> coordinators = cs.coordinators();
+		if (cs.coords.size()) {
+			std::vector<NetworkAddress> coordinators = cs.coords;
 			std::sort(coordinators.begin(), coordinators.end());
 			cti = ConfigTransactionInterface(coordinators[0]);
 		} else {
