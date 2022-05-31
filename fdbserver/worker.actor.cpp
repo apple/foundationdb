@@ -21,6 +21,7 @@
 #include <cstdlib>
 #include <tuple>
 #include <boost/lexical_cast.hpp>
+#include "boost/algorithm/string.hpp"
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/IAsyncFile.h"
@@ -1415,10 +1416,24 @@ ACTOR Future<Void> traceRole(Role role, UID roleId) {
 	}
 }
 
-ACTOR Future<Void> workerSnapCreate(WorkerSnapRequest snapReq, Standalone<StringRef> snapFolder) {
+ACTOR Future<Void> workerSnapCreate(WorkerSnapRequest snapReq,
+                                    std::string snapDataFolder,
+                                    std::string snapCoordFolder) {
 	state ExecCmdValueString snapArg(snapReq.snapPayload);
 	try {
-		int err = wait(execHelper(&snapArg, snapReq.snapUID, snapFolder.toString(), snapReq.role.toString()));
+		TraceEvent(SevDebug, "DebugSnapBeforeSplit").detail("RoleStr", snapReq.role.toString());
+		std::vector<std::string> roles;
+		boost::algorithm::split(roles, snapReq.role.toString(), boost::is_any_of(","));
+		ASSERT(roles.size() >= 1 && roles.size() <= 3);
+		std::vector<std::string> folders;
+		for (const auto& role : roles) {
+			folders.push_back(role == "coord" ? snapCoordFolder : snapDataFolder);
+		}
+		state std::string snapFolder = boost::algorithm::join(folders, ",");
+		TraceEvent(SevDebug, "DebugSnapSplitResult")
+		    .detail("Folders", describe(folders))
+		    .detail("Roles", describe(roles));
+		int err = wait(execHelper(&snapArg, snapReq.snapUID, snapFolder, snapReq.role.toString()));
 		std::string uidStr = snapReq.snapUID.toString();
 		TraceEvent("ExecTraceWorker")
 		    .detail("Uid", uidStr)
@@ -1429,7 +1444,7 @@ ACTOR Future<Void> workerSnapCreate(WorkerSnapRequest snapReq, Standalone<String
 		if (err != 0) {
 			throw operation_failed();
 		}
-		if (snapReq.role.toString() == "storage") {
+		if (snapReq.role.toString().find("storage") != std::string::npos) {
 			printStorageVersionInfo();
 		}
 		snapReq.reply.send(Void());
@@ -1584,6 +1599,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	state WorkerCache<InitializeBackupReply> backupWorkerCache;
 	state WorkerCache<InitializeBlobWorkerReply> blobWorkerCache;
 
+	state WorkerSnapRequest lastSnapReq;
+	state double lastSnapTime = now();
 	state std::string coordFolder = abspath(_coordFolder);
 
 	state WorkerInterface interf(locality);
@@ -2497,11 +2514,25 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				loggingTrigger = delay(loggingDelay, TaskPriority::FlushTrace);
 			}
 			when(state WorkerSnapRequest snapReq = waitNext(interf.workerSnapReq.getFuture())) {
-				Standalone<StringRef> snapFolder = StringRef(folder);
-				if (snapReq.role.toString() == "coord") {
-					snapFolder = coordFolder;
+				if (g_network->isSimulated() && lastSnapReq.snapUID == snapReq.snapUID &&
+				    (now() - lastSnapTime) < SERVER_KNOBS->SNAP_CREATE_MAX_TIMEOUT) {
+					TraceEvent(SevDebug, "DuplicateSnapRequest")
+					    .detail("PrevUID", lastSnapReq.snapUID)
+					    .detail("CurrUID", snapReq.snapUID)
+					    .detail("PrevRole", lastSnapReq.role)
+					    .detail("CurrRole", snapReq.role)
+					    .detail("GapTime", now() - lastSnapTime);
+					// ASSERT(false);
 				}
-				errorForwarders.add(workerSnapCreate(snapReq, snapFolder));
+				// Standalone<StringRef> snapFolder = StringRef(folder);
+				// if (snapReq.role.toString() == "coord") {
+				// 	snapFolder = coordFolder;
+				// }
+				errorForwarders.add(workerSnapCreate(snapReq, folder, coordFolder));
+				if (g_network->isSimulated()) {
+					lastSnapTime = now();
+					lastSnapReq = snapReq;
+				}
 			}
 			when(wait(errorForwarders.getResult())) {}
 			when(wait(handleErrors)) {}

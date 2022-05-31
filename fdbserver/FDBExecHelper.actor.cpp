@@ -399,7 +399,17 @@ ACTOR Future<int> execHelper(ExecCmdValueString* execArg, UID snapUID, std::stri
 	state int err = 0;
 	state Future<int> cmdErr;
 	state double maxWaitTime = SERVER_KNOBS->SNAP_CREATE_MAX_TIMEOUT;
+	// split roles and folders if one process running as multiple roles
+	state std::vector<std::string> roles;
+	boost::algorithm::split(roles, role, boost::is_any_of(","));
+	state std::vector<std::string> folders;
+	boost::algorithm::split(folders, folder, boost::is_any_of(","));
+	ASSERT(roles.size() == folders.size());
+	ASSERT(roles.size() >= 1 && roles.size() <= 3);
 	if (!g_network->isSimulated()) {
+		// if not simulated, only use the first one
+		role = roles[0];
+		folder = folders[0];
 		// get bin path
 		auto snapBin = execArg->getBinaryPath();
 		std::vector<std::string> paramList;
@@ -423,28 +433,33 @@ ACTOR Future<int> execHelper(ExecCmdValueString* execArg, UID snapUID, std::stri
 		wait(success(cmdErr));
 		err = cmdErr.get();
 	} else {
-		// copy the files
-		state std::string folderFrom = folder + "/.";
-		state std::string folderTo = folder + "-snap-" + uidStr.toString();
-		double maxSimDelayTime = 10.0;
-		folderTo = folder + "-snap-" + uidStr.toString() + "-" + role;
-		std::vector<std::string> paramList;
-		std::string mkdirBin = "/bin/mkdir";
-		paramList.push_back(mkdirBin);
-		paramList.push_back(folderTo);
-		cmdErr = spawnProcess(mkdirBin, paramList, maxWaitTime, false /*isSync*/, maxSimDelayTime);
-		wait(success(cmdErr));
-		err = cmdErr.get();
-		if (err == 0) {
+		state int index;
+		for (index = 0; index < folders.size(); index++) {
+			folder = folders[index];
+			role = roles[index];
+			// copy the files
+			state std::string folderFrom = folder + "/.";
+			state std::string folderTo = folder + "-snap-" + uidStr.toString();
+			double maxSimDelayTime = 10.0;
+			folderTo = folder + "-snap-" + uidStr.toString() + "-" + role;
 			std::vector<std::string> paramList;
-			std::string cpBin = "/bin/cp";
-			paramList.push_back(cpBin);
-			paramList.push_back("-a");
-			paramList.push_back(folderFrom);
+			std::string mkdirBin = "/bin/mkdir";
+			paramList.push_back(mkdirBin);
 			paramList.push_back(folderTo);
-			cmdErr = spawnProcess(cpBin, paramList, maxWaitTime, true /*isSync*/, 1.0);
+			cmdErr = spawnProcess(mkdirBin, paramList, maxWaitTime, false /*isSync*/, maxSimDelayTime);
 			wait(success(cmdErr));
 			err = cmdErr.get();
+			if (err == 0) {
+				std::vector<std::string> paramList;
+				std::string cpBin = "/bin/cp";
+				paramList.push_back(cpBin);
+				paramList.push_back("-a");
+				paramList.push_back(folderFrom);
+				paramList.push_back(folderTo);
+				cmdErr = spawnProcess(cpBin, paramList, maxWaitTime, true /*isSync*/, 1.0);
+				wait(success(cmdErr));
+				err = cmdErr.get();
+			}
 		}
 	}
 	return err;
