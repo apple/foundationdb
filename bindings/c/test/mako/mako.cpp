@@ -78,7 +78,7 @@ using namespace mako;
 
 thread_local Logger logr = Logger(MainProcess{}, VERBOSE_DEFAULT);
 
-Transaction createNewTransaction(Database db, Arguments const& args, int id = -1, Tenant** tenants = nullptr) {
+Transaction createNewTransaction(Database db, Arguments const& args, int id = -1, Tenant* tenants = nullptr) {
 	// No tenants specified
 	if (args.tenants <= 0) {
 		return db.createTransaction();
@@ -87,11 +87,11 @@ Transaction createNewTransaction(Database db, Arguments const& args, int id = -1
 	int tenant_id = (id == -1) ? urand(0, args.tenants - 1) : id;
 	// If provided tenants array (only necessary in runWorkload), use it
 	if (tenants) {
-		return tenants[tenant_id]->createTransaction();
+		return tenants[tenant_id].createTransaction();
 	}
 	std::string tenantStr = "tenant" + std::to_string(tenant_id);
 	BytesRef tenant_name = toBytesRef(tenantStr);
-	Tenant t(&db, tenant_name, tenant_name.length());
+	Tenant t = db.openTenant(tenant_name);	
 	return t.createTransaction();
 }
 
@@ -435,11 +435,11 @@ int runWorkload(Database db,
 
 	// mimic typical tenant usage: keep tenants in memory
 	// and create transactions as needed
-	Tenant* tenants[args.tenants];
+	Tenant tenants[args.tenants];
 	for (int i = 0; i < args.tenants; ++i) {
 		std::string tenantStr = "tenant" + std::to_string(i);
 		BytesRef tenant_name = toBytesRef(tenantStr);
-		tenants[i] = new Tenant(&db, tenant_name, tenant_name.length());
+		tenants[i] = db.openTenant(tenant_name);
 	}
 
 	/* main transaction loop */
@@ -509,9 +509,6 @@ int runWorkload(Database db,
 		}
 		xacts++;
 		total_xacts++;
-	}
-	for (int i = 0; i < args.tenants; ++i) {
-		delete tenants[i];
 	}
 	return rc;
 }
