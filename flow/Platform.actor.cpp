@@ -2238,7 +2238,9 @@ void renamedFile() {
 void renameFile(std::string const& fromPath, std::string const& toPath) {
 	INJECT_FAULT(io_error, "renameFile"); // rename file failed
 #ifdef _WIN32
-	if (MoveFileExA(fromPath.c_str(), toPath.c_str(), MOVEFILE_COPY_ALLOWED | MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+	if (MoveFileExA(fromPath.c_str(),
+	                toPath.c_str(),
+	                MOVEFILE_COPY_ALLOWED | MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
 		// renamedFile();
 		return;
 	}
@@ -2331,7 +2333,9 @@ void atomicReplace(std::string const& path, std::string const& content, bool tex
 		}
 		f = 0;
 
-		if (!MoveFileExA(tempfilename.c_str(), path.c_str(), MOVEFILE_COPY_ALLOWED | MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+		if (!MoveFileExA(tempfilename.c_str(),
+		                 path.c_str(),
+		                 MOVEFILE_COPY_ALLOWED | MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
 			throw io_error();
 		}
 #elif defined(__unixish__)
