@@ -47,6 +47,22 @@ struct StorageServerShard {
 		return StorageServerShard(range, version, 0, 0, NotAssigned);
 	}
 
+	static StorageServerShard anonymousShard(KeyRange range, Version version, ShardState shardState) {
+		return StorageServerShard(range, version, anonymousShardId.first(), anonymousShardId.first(), shardState);
+	}
+
+	static StorageServerShard anonymousMoveIn(KeyRange range, Version version) {
+		return StorageServerShard(range, version, anonymousShardId.first(), anonymousShardId.first(), MovingIn);
+	}
+
+	static StorageServerShard anonymousReadWrite(KeyRange range, Version version) {
+		return StorageServerShard(range, version, anonymousShardId.first(), anonymousShardId.first(), MovingIn);
+	}
+
+	bool isAnonymous() const {
+		return this->id == anonymousShardId.first() && this->desiredId == anonymousShardId.first();
+	}
+
 	ShardState getShardState() const { return static_cast<ShardState>(this->shardState); };
 	void setShardState(const ShardState shardState) { this->shardState = static_cast<int8_t>(shardState); }
 	std::string getShardStateString() const {

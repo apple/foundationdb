@@ -6335,86 +6335,133 @@ void ShardInfo::addMutation(Version version, bool fromFetch, MutationRef const& 
 enum ChangeServerKeysContext { CSK_UPDATE, CSK_RESTORE, CSK_ASSIGN_EMPTY };
 const char* changeServerKeysContextName[] = { "Update", "Restore" };
 
-// void restoreShards(StorageServer* data,
-//                     const RangeResult& available,
-//                     const RangeResult& moveInShards,
-//                     const RangeResult& assigned,
-//                     const Version version) {
-//  	TraceEvent(SevDebug, "StorageServerRestoreShardsBegin", data->thisServerID).detail("Version", version);
+ACTOR Future<Void> restoreShards(StorageServer* data,
+                                 RangeResult assigned,
+                                 RangeResult available,
+                                 RangeResult storageShards,
+                                 Version version) {
+	TraceEvent(SevDebug, "StorageServerRestoreShardsBegin", data->thisServerID)
+	    .detail("Assigned", assigned.size())
+	    .detail("ReadWrite", available.size())
+	    .detail("StorageShard", storageShards.size())
+	    .detail("Version", version);
 
-//  	for (int availableLoc = 0; availableLoc < available.size(); ++availableLoc) {
-//  		KeyRangeRef keys(available[availableLoc].key.removePrefix(persistShardAvailableKeys.begin),
-//  		                 availableLoc + 1 == available.size()
-//  		                     ? allKeys.end
-//  		                     : available[availableLoc + 1].key.removePrefix(persistShardAvailableKeys.begin));
-//  		ASSERT(!keys.empty());
-//  		bool nowAvailable = available[availableLoc].value != LiteralStringRef("0");
-//  		if (nowAvailable) {
-//  			TraceEvent("RestoreShardAvailableShard", data->thisServerID).detail("Range", keys);
-//  			data->addShard(ShardInfo::newReadWrite(keys, data));
-//  		}
-//  		// wait(yield());
-//  	}
+	state KeyRangeMap<StorageServerShard> shards;
 
-//  	for (int mLoc = 0; mLoc < moveInShards.size(); ++mLoc) {
-//  		MoveInShardMetaData metaData = MoveInShard::decodeMoveInShardValue(moveInShards[mLoc].value);
-//  		TraceEvent("RestoreShardMoveInShard", data->thisServerID).detail("MoveInShard", metaData.toString());
-//  		if (metaData.getPhase() == MoveInShardMetaData::Complete) {
-//  			data->actors.add(deleteMoveInShardQ(data, version, metaData));
-//  			continue;
-//  		}
-//  		data->addShard(ShardInfo::newMoveInShard(data, metaData));
-//  		// newMoveInShards.push_back(data->shards[range.begin]);
-//  		// wait(yield());
-//  	}
+	state int assignedLoc;
+	for (assignedLoc = 0; assignedLoc < assigned.size(); assignedLoc++) {
+		KeyRangeRef keys(assigned[assignedLoc].key.removePrefix(persistShardAssignedKeys.begin),
+		                 assignedLoc + 1 == assigned.size()
+		                     ? allKeys.end
+		                     : assigned[assignedLoc + 1].key.removePrefix(persistShardAssignedKeys.begin));
+		ASSERT(!keys.empty());
+		const bool nowAssigned = assigned[assignedLoc].value != "0"_sr;
+		TraceEvent(SevVerbose, "RestoreShardsAssignStatus", data->thisServerID)
+		    .detail("Range", keys)
+		    .detail("Assigned", nowAssigned);
+		if (nowAssigned) {
+			auto ranges = shards.getAffectedRangesAfterInsertion(keys, StorageServerShard());
+			for (int i = 0; i < ranges.size(); i++) {
+				KeyRangeRef& range = (KeyRangeRef&)ranges[i];
+				if (range == keys) {
+					shards.insert(keys, StorageServerShard::anonymousMoveIn(keys, version));
+				} else {
+					ASSERT(ranges[i].value.getShardState() == StorageServerShard::NotAssigned);
+					TraceEvent(SevVerbose, "RestoreShardsNotAssigned", data->thisServerID)
+					    .detail("Range", range)
+					    .detail("AdjacentShard", keys);
+					shards.insert(keys, StorageServerShard::notAssigned(range, version));
+				}
+			}
+		} else {
+			ASSERT(data->newestAvailableVersion.allEqual(keys, invalidVersion));
+		}
+		wait(yield());
+	}
 
-//  	for (int assignedLoc = 0; assignedLoc < assigned.size(); assignedLoc++) {
-//  		KeyRangeRef keys(assigned[assignedLoc].key.removePrefix(persistShardAssignedKeys.begin),
-//  		                 assignedLoc + 1 == assigned.size()
-//  		                     ? allKeys.end
-//  		                     : assigned[assignedLoc + 1].key.removePrefix(persistShardAssignedKeys.begin));
-//  		ASSERT(!keys.empty());
-//  		const bool nowAssigned = assigned[assignedLoc].value != LiteralStringRef("0");
-//  		/*if(nowAssigned)
-//  		  TraceEvent("AssignedShard", data->thisServerID).detail("RangeBegin", keys.begin).detail("RangeEnd",
-//  keys.end);*/ 		auto existingShards = data->shards.intersectingRanges(keys); 		if (nowAssigned) {
-//  for (auto it = existingShards.begin(); it != existingShards.end(); ++it) { 				TraceEvent(SevDebug,
-//  "RestoreShardCompareAssigned",
-//  data->thisServerID) 				    .detail("AssginedRange", keys) 				    .detail("Shard",
-//  it->value()->debugDescribeState()) 				    .detail("ShardRange", it->value()->keys);
-//  				// ASSERT(keys.contains(it->value()->keys)); // TODO(bug)
-//  				ASSERT(it->value()->assigned());
-//  			}
-//  		} else {
-//  			ASSERT(data->newestAvailableVersion.allEqual(keys, invalidVersion));
-//  			for (auto it = existingShards.begin(); it != existingShards.end(); ++it) {
-//  				TraceEvent(SevDebug, "RestoreShardCompareNotAssigned", data->thisServerID)
-//  				    .detail("NotAssginedRange", keys)
-//  				    .detail("Shard", it->value()->debugDescribeState());
-//  				if (it->value()->moveInShard != nullptr) {
-//  					TraceEvent(SevDebug, "RestoreShardNotAssignedConflict", data->thisServerID)
-//  					    .detail("NotAssginedRange", keys)
-//  					    .detail("MoveInShard", it->value()->moveInShard->toString());
-//  				}
-//  				ASSERT(it->value()->notAssigned());
-//  			}
-//  			data->addShard(ShardInfo::newNotAssigned(keys));
-//  		}
-//  		// ASSERT(data->shards[keys.begin]->notAssigned());
-//  		// ASSERT(data->shards[keys.begin]->keys.contains(keys));
+	state int availableLoc;
+	for (availableLoc = 0; availableLoc < available.size(); ++availableLoc) {
+		KeyRangeRef shardRange(available[availableLoc].key.removePrefix(persistShardAvailableKeys.begin),
+		                       availableLoc + 1 == available.size()
+		                           ? allKeys.end
+		                           : available[availableLoc + 1].key.removePrefix(persistShardAvailableKeys.begin));
+		ASSERT(!shardRange.empty());
+		bool nowAvailable = available[availableLoc].value != "0"_sr;
+		auto existingShards = shards.intersectingRanges(shardRange);
+		for (auto it = existingShards.begin(); it != existingShards.end(); ++it) {
+			if (nowAvailable && it->value().getShardState() == StorageServerShard::NotAssigned) {
+				TraceEvent(SevError, "RestoreShardsError", data->thisServerID)
+				    .detail("Error", "ReadWriteShardNotAssigned")
+				    .detail("Range", shardRange)
+				    .detail("ConflictingShard", it->value().toString());
+				ASSERT(false);
+			}
+		}
+		auto ranges = shards.getAffectedRangesAfterInsertion(shardRange, StorageServerShard());
+		for (int i = 0; i < ranges.size(); i++) {
+			KeyRangeRef& range = (KeyRangeRef&)ranges[i];
+			if (range == shardRange) {
+				shards.insert(range, StorageServerShard::anonymousReadWrite(range, version));
+			} else {
+				ASSERT(ranges[i].value.getShardState() == StorageServerShard::MovingIn);
+			}
+		}
+		wait(yield());
+	}
 
-//  		// wait(yield());
-//  	}
-//  	// if (!nowAssigned) {
-//  	// 	data->metrics.notifyNotReadable(keys);
-//  	// }
+	state int mLoc;
+	for (mLoc = 0; mLoc < storageShards.size(); ++mLoc) {
+		KeyRangeRef shardRange(storageShards[mLoc].key.removePrefix(persistStorageServerShardKeys.begin),
+		                       mLoc + 1 == storageShards.size()
+		                           ? allKeys.end
+		                           : storageShards[mLoc + 1].key.removePrefix(persistStorageServerShardKeys.begin));
+		const StorageServerShard shard =
+		    ObjectReader::fromStringRef<StorageServerShard>(storageShards[mLoc].value, IncludeVersion());
+		TraceEvent(SevVerbose, "RestoreShardsStorageShard", data->thisServerID)
+		    .detail("Range", shardRange)
+		    .detail("StorageShard", shard.toString());
+		ASSERT(shardRange == shard.range);
+		if (shard.getShardState() == StorageServerShard::NotAssigned) {
+			continue;
+		}
+		// TODO(psm): Schedule deletion of finished moveInShard.
+		// if (metaData.getPhase() == MoveInShardMetaData::Complete) {
+		// 	data->actors.add(deleteMoveInShardQ(data, version, metaData));
+		// 	continue;
+		// }
+		auto existingShards = shards.intersectingRanges(shardRange);
+		for (auto it = existingShards.begin(); it != existingShards.end(); ++it) {
+			TraceEvent(SevVerbose, "RestoreShardsStorageShard", data->thisServerID)
+			    .detail("StorageShard", shard.toString())
+			    .detail("IntersectingShard", it->value().toString());
+			ASSERT(shard.getShardState() == it->value().getShardState());
+		}
+		auto ranges = shards.getAffectedRangesAfterInsertion(shard.range, shard);
+		for (int i = 0; i < ranges.size(); i++) {
+			KeyRangeRef& range = (KeyRangeRef&)ranges[i];
+			if (range == shard.range) {
+				shards.insert(shard.range, shard);
+			} else {
+				TraceEvent(SevVerbose, "RestoreShardsNewAnonymousShard", data->thisServerID)
+				    .detail("StorageShard", shard.toString())
+				    .detail("CurrentRange", range)
+				    .detail("ExistingShard", ranges[i].value.toString());
+				ASSERT(ranges[i].value.isAnonymous());
+				shards.insert(range,
+				              StorageServerShard::anonymousShard(range, version, ranges[i].value.getShardState()));
+			}
+		}
+		wait(yield());
+	}
 
-//  	TraceEvent(SevDebug, "StorageServerRestoreShardsCoalesce", data->thisServerID).detail("Version", version);
-//  	coalesceShards(data, allKeys);
-//  	TraceEvent(SevDebug, "StorageServerRestoreShardsValidate", data->thisServerID).detail("Version", version);
-//  	validate(data, /*force=*/true);
-//  	TraceEvent(SevDebug, "StorageServerRestoreShardsEnd", data->thisServerID).detail("Version", version);
-//  }
+	TraceEvent(SevDebug, "StorageServerRestoreShardsCoalesce", data->thisServerID).detail("Version", version);
+	coalesceShards(data, allKeys);
+	TraceEvent(SevDebug, "StorageServerRestoreShardsValidate", data->thisServerID).detail("Version", version);
+	validate(data, /*force=*/true);
+	TraceEvent(SevDebug, "StorageServerRestoreShardsEnd", data->thisServerID).detail("Version", version);
+
+	return Void();
+}
 
 void changeServerKeys(StorageServer* data,
                       const KeyRangeRef& keys,
