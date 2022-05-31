@@ -120,7 +120,7 @@ constexpr const int NUM_CLUSTERS_MAX = 3;
 constexpr const int NUM_DATABASES_MAX = 10;
 constexpr const std::string_view KEY_PREFIX{ "mako" };
 constexpr const std::string_view TEMP_DATA_STORE{ "/tmp/makoTemp" };
-constexpr const int MAX_NUM_PATHS = 200;
+constexpr const int MAX_REPORT_FILES = 200;
 
 /* benchmark parameters */
 struct Arguments {
@@ -165,7 +165,7 @@ struct Arguments {
 	bool bg_materialize_files;
 	char bg_file_path[PATH_MAX];
 	char stats_export_path[PATH_MAX];
-	char report_files[MAX_NUM_PATHS][PATH_MAX];
+	char report_files[MAX_REPORT_FILES][PATH_MAX];
 	int num_report_files;
 };
 

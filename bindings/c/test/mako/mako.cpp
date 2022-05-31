@@ -984,7 +984,7 @@ void usage() {
 	       "    --bg_file_path=PATH",
 	       "Read blob granule files from the local filesystem at PATH and materialize the results.");
 	printf("%-24s %s\n",
-	       "    --export_sketch_path=PATH",
+	       "    --stats_export_path=PATH",
 	       "Write the serialized DDSketch data to file at PATH. Can be used in either run or build mode.");
 }
 
@@ -1037,7 +1037,7 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			{ "disable_ryw", no_argument, NULL, ARG_DISABLE_RYW },
 			{ "json_report", optional_argument, NULL, ARG_JSON_REPORT },
 			{ "bg_file_path", required_argument, NULL, ARG_BG_FILE_PATH },
-			{ "export_sketch_path", optional_argument, NULL, ARG_EXPORT_PATH },
+			{ "stats_export_path", optional_argument, NULL, ARG_EXPORT_PATH },
 			{ NULL, 0, NULL, 0 }
 		};
 		idx = 0;
@@ -1105,7 +1105,7 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 				for (; i < argc; i++) {
 					if (argv[i][0] != '-') {
 						const std::string report_file = argv[i];
-						strcpy(args.report_files[args.num_report_files], report_file.c_str());
+						strncpy(args.report_files[args.num_report_files], report_file.c_str(), report_file.size());
 						args.num_report_files++;
 					} else {
 						optind = i - 1;
@@ -1437,7 +1437,7 @@ void printStatsHeader(Arguments const& args, bool show_commit, bool is_first_hea
 	fmt::print("\n");
 }
 
-void printThreadStats(ThreadStatistics& final_stats, Arguments& args, FILE* fp, bool is_report = false) {
+void printThreadStats(ThreadStatistics& final_stats, Arguments args, FILE* fp, bool is_report = false) {
 
 	if (is_report) {
 		for (auto op = 0; op < MAX_OP; op++) {
@@ -1660,7 +1660,7 @@ void printThreadStats(ThreadStatistics& final_stats, Arguments& args, FILE* fp, 
 	}
 }
 
-void load_sample(int pid_main, int op, std::vector<DDSketchMako>& data_points, int process_id, int thread_id) {
+void loadSample(int pid_main, int op, std::vector<DDSketchMako>& data_points, int process_id, int thread_id) {
 	const auto dirname = fmt::format("{}{}", TEMP_DATA_STORE, pid_main);
 	const auto filename = getStatsFilename(dirname, process_id, thread_id, op);
 	std::ifstream fp{ filename };
@@ -1679,7 +1679,11 @@ void load_sample(int pid_main, int op, std::vector<DDSketchMako>& data_points, i
 	}
 }
 
-void printReport(Arguments& args, ThreadStatistics const* stats, double const duration_sec, pid_t pid_main, FILE* fp) {
+void printReport(Arguments const& args,
+                 ThreadStatistics const* stats,
+                 double const duration_sec,
+                 pid_t pid_main,
+                 FILE* fp) {
 
 	auto final_stats = ThreadStatistics{};
 	const auto num_effective_threads = args.async_xacts > 0 ? args.async_xacts : args.num_threads;
@@ -1798,11 +1802,11 @@ void printReport(Arguments& args, ThreadStatistics const* stats, double const du
 
 			if (args.async_xacts == 0) {
 				for (auto j = 0; j < args.num_threads; j++) {
-					load_sample(pid_main, op, data_points, i, j);
+					loadSample(pid_main, op, data_points, i, j);
 				}
 			} else {
 				// async mode uses only one file per process
-				load_sample(pid_main, op, data_points, i, 0);
+				loadSample(pid_main, op, data_points, i, 0);
 			}
 		}
 	}
@@ -1823,7 +1827,7 @@ void printReport(Arguments& args, ThreadStatistics const* stats, double const du
 	}
 }
 
-int statsProcessMain(Arguments& args,
+int statsProcessMain(Arguments const& args,
                      ThreadStatistics const* stats,
                      std::atomic<double>& throttle_factor,
                      std::atomic<int> const& signal,
