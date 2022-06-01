@@ -956,7 +956,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				state std::vector<std::string> process_addresses;
 				boost::split(
 				    process_addresses, coordinator_processes_key.get().toString(), [](char c) { return c == ','; });
-				ASSERT(process_addresses.size() == cs.coordinators().size() + cs.hostnames.size());
+				ASSERT(process_addresses.size() == cs.coords.size() + cs.hostnames.size());
 				// compare the coordinator process network addresses one by one
 				std::vector<NetworkAddress> coordinators = wait(cs.tryResolveHostnames());
 				for (const auto& network_address : coordinators) {
@@ -1080,8 +1080,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					ClusterConnectionString csNew(res.get().toString());
 					// verify the cluster decription
 					ASSERT(new_cluster_description == csNew.clusterKeyName().toString());
-					ASSERT(csNew.hostnames.size() + csNew.coordinators().size() ==
-					       old_coordinators_processes.size() + 1);
+					ASSERT(csNew.hostnames.size() + csNew.coords.size() == old_coordinators_processes.size() + 1);
 					std::vector<NetworkAddress> newCoordinators = wait(csNew.tryResolveHostnames());
 					// verify the coordinators' addresses
 					for (const auto& network_address : newCoordinators) {
@@ -1275,13 +1274,21 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				}
 			}
 			// set dd mode to 0 and disable DD for rebalance
+			state uint8_t ddIgnoreValue = DDIgnore::NONE;
+			if (deterministicRandom()->coinflip()) {
+				ddIgnoreValue |= DDIgnore::REBALANCE_READ;
+			}
+			if (deterministicRandom()->coinflip()) {
+				ddIgnoreValue |= DDIgnore::REBALANCE_DISK;
+			}
 			loop {
 				try {
 					tx->setOption(FDBTransactionOptions::RAW_ACCESS);
 					tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 					KeyRef ddPrefix = SpecialKeySpace::getManagementApiCommandPrefix("datadistribution");
 					tx->set(LiteralStringRef("mode").withPrefix(ddPrefix), LiteralStringRef("0"));
-					tx->set(LiteralStringRef("rebalance_ignored").withPrefix(ddPrefix), Value());
+					tx->set(LiteralStringRef("rebalance_ignored").withPrefix(ddPrefix),
+					        BinaryWriter::toValue(ddIgnoreValue, Unversioned()));
 					wait(tx->commit());
 					tx->reset();
 					break;
@@ -1306,8 +1313,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					ASSERT(BinaryReader::fromStringRef<int>(val2.get(), Unversioned()) == 0);
 					// check DD disabled for rebalance
 					Optional<Value> val3 = wait(tx->get(rebalanceDDIgnoreKey));
-					// default value "on"
-					ASSERT(val3.present() && val3.get() == LiteralStringRef("on"));
+					ASSERT(val3.present() &&
+					       BinaryReader::fromStringRef<uint8_t>(val3.get(), Unversioned()) == ddIgnoreValue);
 					tx->reset();
 					break;
 				} catch (Error& e) {

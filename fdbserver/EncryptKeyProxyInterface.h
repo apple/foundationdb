@@ -125,6 +125,7 @@ struct EKPGetBaseCipherKeysByIdsRequest {
 	constexpr static FileIdentifier file_identifier = 4930263;
 	UID requesterID;
 	std::vector<std::pair<uint64_t, int64_t>> baseCipherIds;
+	Optional<UID> debugId;
 	ReplyPromise<EKPGetBaseCipherKeysByIdsReply> reply;
 
 	EKPGetBaseCipherKeysByIdsRequest() : requesterID(deterministicRandom()->randomUniqueID()) {}
@@ -133,7 +134,7 @@ struct EKPGetBaseCipherKeysByIdsRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, requesterID, baseCipherIds, reply);
+		serializer(ar, requesterID, baseCipherIds, debugId, reply);
 	}
 };
 
@@ -156,17 +157,16 @@ struct EKPGetLatestBaseCipherKeysReply {
 
 struct EKPGetLatestBaseCipherKeysRequest {
 	constexpr static FileIdentifier file_identifier = 1910123;
-	UID requesterID;
 	std::vector<uint64_t> encryptDomainIds;
+	Optional<UID> debugId;
 	ReplyPromise<EKPGetLatestBaseCipherKeysReply> reply;
 
-	EKPGetLatestBaseCipherKeysRequest() : requesterID(deterministicRandom()->randomUniqueID()) {}
-	explicit EKPGetLatestBaseCipherKeysRequest(UID uid, const std::vector<uint64_t>& ids)
-	  : requesterID(uid), encryptDomainIds(ids) {}
+	EKPGetLatestBaseCipherKeysRequest() {}
+	explicit EKPGetLatestBaseCipherKeysRequest(const std::vector<uint64_t>& ids) : encryptDomainIds(ids) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, requesterID, encryptDomainIds, reply);
+		serializer(ar, encryptDomainIds, debugId, reply);
 	}
 };
 

@@ -21,6 +21,7 @@
 #include "TesterScheduler.h"
 #include "TesterUtil.h"
 
+#include <boost/asio/detail/chrono.hpp>
 #include <memory>
 #include <thread>
 #include <boost/asio.hpp>
@@ -30,6 +31,15 @@ using namespace boost::asio;
 namespace FdbApiTester {
 
 const TTaskFct NO_OP_TASK = []() {};
+
+class AsioTimer : public ITimer {
+public:
+	AsioTimer(io_context& io_ctx, chrono::steady_clock::duration time) : impl(io_ctx, time) {}
+
+	void cancel() override { impl.cancel(); }
+
+	boost::asio::steady_timer impl;
+};
 
 class AsioScheduler : public IScheduler {
 public:
@@ -43,6 +53,16 @@ public:
 	}
 
 	void schedule(TTaskFct task) override { post(io_ctx, task); }
+
+	std::unique_ptr<ITimer> scheduleWithDelay(int delayMs, TTaskFct task) override {
+		auto timer = std::make_unique<AsioTimer>(io_ctx, boost::asio::chrono::milliseconds(delayMs));
+		timer->impl.async_wait([task](const boost::system::error_code& e) {
+			if (!e) {
+				task();
+			}
+		});
+		return timer;
+	}
 
 	void stop() override { work = any_io_executor(); }
 

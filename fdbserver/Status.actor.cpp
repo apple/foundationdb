@@ -1575,6 +1575,8 @@ struct LoadConfigurationResult {
 	Optional<Key> healthyZone;
 	double healthyZoneSeconds;
 	bool rebalanceDDIgnored;
+	// FIXME: possible convert it to int if upgrade value can be resolved?
+	std::string rebalanceDDIgnoreHex; // any or combination of 0, 1, 2, see DDIgnore;
 	bool dataDistributionDisabled;
 
 	LoadConfigurationResult()
@@ -1649,6 +1651,9 @@ loadConfiguration(Database cx, JsonBuilderArray* messages, std::set<std::string>
 						}
 					}
 					res.rebalanceDDIgnored = rebalanceDDIgnored.get().present();
+					if (res.rebalanceDDIgnored) {
+						res.rebalanceDDIgnoreHex = rebalanceDDIgnored.get().get().toHexString();
+					}
 					if (ddModeKey.get().present()) {
 						BinaryReader rd(ddModeKey.get().get(), Unversioned());
 						int currentMode;
@@ -2101,6 +2106,7 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(
     WorkerDetails rkWorker,
     JsonBuilderObject* qos,
     JsonBuilderObject* data_overlay,
+    JsonBuilderObject* tenants,
     std::set<std::string>* incomplete_reasons,
     Future<ErrorOr<std::vector<StorageServerStatusInfo>>> storageServerFuture) {
 	state JsonBuilderObject statusObj;
@@ -2184,6 +2190,10 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(
 		transactions["committed"] = txnCommitOutSuccess.getStatus();
 
 		statusObj["transactions"] = transactions;
+
+		if (commitProxyStats.size() > 0) {
+			(*tenants)["num_tenants"] = commitProxyStats[0].getUint64("NumTenants");
+		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
 			throw;
@@ -2953,6 +2963,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		state std::vector<BlobWorkerInterface> blobWorkers;
 		state JsonBuilderObject qos;
 		state JsonBuilderObject dataOverlay;
+		state JsonBuilderObject tenants;
 		state JsonBuilderObject storageWiggler;
 		state std::unordered_set<UID> wiggleServers;
 
@@ -2984,7 +2995,9 @@ ACTOR Future<StatusReply> clusterGetStatus(
 				}
 			}
 			if (loadResult.get().rebalanceDDIgnored) {
+				// TODO: change the hex string to human-friendly fields like "rebalance_read", "rebalance_disk"
 				statusObj["data_distribution_disabled_for_rebalance"] = true;
+				statusObj["data_distribution_disabled_hex"] = loadResult.get().rebalanceDDIgnoreHex;
 			}
 			if (loadResult.get().dataDistributionDisabled) {
 				statusObj["data_distribution_disabled"] = true;
@@ -3040,8 +3053,15 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			state Future<Optional<Value>> primaryDCFO = getActivePrimaryDC(cx, &fullyReplicatedRegions, &messages);
 			state std::vector<Future<JsonBuilderObject>> futures2;
 			futures2.push_back(dataStatusFetcher(ddWorker, configuration.get(), &minStorageReplicasRemaining));
-			futures2.push_back(workloadStatusFetcher(
-			    db, workers, mWorker, rkWorker, &qos, &dataOverlay, &status_incomplete_reasons, storageServerFuture));
+			futures2.push_back(workloadStatusFetcher(db,
+			                                         workers,
+			                                         mWorker,
+			                                         rkWorker,
+			                                         &qos,
+			                                         &dataOverlay,
+			                                         &tenants,
+			                                         &status_incomplete_reasons,
+			                                         storageServerFuture));
 			futures2.push_back(layerStatusFetcher(cx, &messages, &status_incomplete_reasons));
 			futures2.push_back(lockedStatusFetcher(db, &messages, &status_incomplete_reasons));
 			futures2.push_back(
@@ -3112,6 +3132,9 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			// Add qos section if it was populated
 			if (!qos.empty())
 				statusObj["qos"] = qos;
+
+			if (!tenants.empty())
+				statusObj["tenants"] = tenants;
 
 			// Merge dataOverlay into data
 			JsonBuilderObject& clusterDataSection = workerStatuses[0];

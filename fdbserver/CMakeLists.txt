@@ -54,6 +54,7 @@ set(FDBSERVER_SRCS
   KeyValueStoreCompressTestData.actor.cpp
   KeyValueStoreMemory.actor.cpp
   KeyValueStoreRocksDB.actor.cpp
+  KeyValueStoreShardedRocksDB.actor.cpp
   KeyValueStoreSQLite.actor.cpp
   KmsConnector.h
   KmsConnectorInterface.h
@@ -105,7 +106,7 @@ set(FDBSERVER_SRCS
   RecoveryState.h
   RemoteIKeyValueStore.actor.h
   RemoteIKeyValueStore.actor.cpp
-  RESTKmsConnector.actor.h
+  RESTKmsConnector.h
   RESTKmsConnector.actor.cpp
   ResolutionBalancer.actor.cpp
   ResolutionBalancer.actor.h
@@ -138,7 +139,7 @@ set(FDBSERVER_SRCS
   ServerDBInfo.actor.h
   ServerDBInfo.h
   SigStack.cpp
-  SimKmsConnector.actor.h
+  SimKmsConnector.h
   SimKmsConnector.actor.cpp
   SimpleConfigConsumer.actor.cpp
   SimpleConfigConsumer.h
@@ -149,7 +150,7 @@ set(FDBSERVER_SRCS
   Status.actor.cpp
   Status.h
   StorageCache.actor.cpp
-  StorageMetrics.actor.h
+  StorageMetrics.actor.cpp
   StorageMetrics.h
   storageserver.actor.cpp
   TagPartitionedLogSystem.actor.cpp
@@ -267,6 +268,7 @@ set(FDBSERVER_SRCS
   workloads/ReadAfterWrite.actor.cpp
   workloads/ReadHotDetection.actor.cpp
   workloads/ReadWrite.actor.cpp
+  workloads/ReadWriteWorkload.actor.h
   workloads/RemoveServersSafely.actor.cpp
   workloads/ReportConflictingKeys.actor.cpp
   workloads/RestoreBackup.actor.cpp
@@ -281,6 +283,7 @@ set(FDBSERVER_SRCS
   workloads/Sideband.actor.cpp
   workloads/SidebandSingle.actor.cpp
   workloads/SimpleAtomicAdd.actor.cpp
+  workloads/SkewedReadWrite.actor.cpp
   workloads/SlowTaskWorkload.actor.cpp
   workloads/SnapTest.actor.cpp
   workloads/SpecialKeySpaceCorrectness.actor.cpp

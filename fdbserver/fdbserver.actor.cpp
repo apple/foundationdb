@@ -857,7 +857,7 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(
 	NetworkAddressList listenNetworkAddresses;
 
 	std::vector<Hostname>& hostnames = connectionRecord.getConnectionString().hostnames;
-	const std::vector<NetworkAddress>& coords = connectionRecord.getConnectionString().coordinators();
+	const std::vector<NetworkAddress>& coords = connectionRecord.getConnectionString().coords;
 	ASSERT(hostnames.size() + coords.size() > 0);
 
 	for (int ii = 0; ii < publicAddressStrs.size(); ++ii) {
@@ -1841,6 +1841,21 @@ int main(int argc, char* argv[]) {
 		g_knobs.setKnob("server_mem_limit", KnobValue::create(static_cast<int64_t>(opts.memLimit)));
 		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
 		g_knobs.initialize(Randomize::True, role == ServerRole::Simulation ? IsSimulated::True : IsSimulated::False);
+
+		if (!SERVER_KNOBS->ALLOW_DANGEROUS_KNOBS) {
+			if (SERVER_KNOBS->FETCH_USING_STREAMING) {
+				fprintf(stderr,
+				        "ERROR : explicitly setting FETCH_USING_STREAMING is dangerous! set ALLOW_DANGEROUS_KNOBS to "
+				        "proceed anyways\n");
+				flushAndExit(FDB_EXIT_ERROR);
+			}
+			if (SERVER_KNOBS->PEEK_USING_STREAMING) {
+				fprintf(stderr,
+				        "ERROR : explicitly setting PEEK_USING_STREAMING is dangerous! set ALLOW_DANGEROUS_KNOBS to "
+				        "proceed anyways\n");
+				flushAndExit(FDB_EXIT_ERROR);
+			}
+		}
 
 		// evictionPolicyStringToEnum will throw an exception if the string is not recognized as a valid
 		EvictablePageCache::evictionPolicyStringToEnum(FLOW_KNOBS->CACHE_EVICTION_POLICY);
