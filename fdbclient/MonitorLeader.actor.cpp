@@ -485,6 +485,14 @@ ClientLeaderRegInterface::ClientLeaderRegInterface(INetwork* local) {
 	                                             TaskPriority::Coordination);
 }
 
+std::string ClientLeaderRegInterface::getAddressString() const {
+	if (hostname.present()) {
+		return hostname.get().toString();
+	} else {
+		return getLeader.getEndpoint().getPrimaryAddress().toString();
+	}
+}
+
 // Nominee is the worker among all workers that are considered as leader by one coordinator
 // This function contacts a coordinator coord to ask who is its nominee.
 ACTOR Future<Void> monitorNominee(Key key,
@@ -510,9 +518,7 @@ ACTOR Future<Void> monitorNominee(Key key,
 
 		TraceEvent("GetLeaderReply")
 		    .suppressFor(1.0)
-		    .detail("Coordinator",
-		            coord.hostname.present() ? coord.hostname.get().toString()
-		                                     : coord.getLeader.getEndpoint().getPrimaryAddress().toString())
+		    .detail("Coordinator", coord.getAddressString())
 		    .detail("Nominee", li.present() ? li.get().changeID : UID())
 		    .detail("ClusterKey", key.printable());
 
@@ -971,6 +977,9 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 		} else {
 			TEST(rep.getError().code() == error_code_failed_to_progress); // Coordinator cant talk to cluster controller
 			TEST(rep.getError().code() == error_code_lookup_failed); // Coordinator hostname resolving failure
+			TraceEvent("MonitorProxiesConnectFailed")
+			    .detail("Error", rep.getError().name())
+			    .detail("Coordinator", clientLeaderServer.getAddressString());
 			index = (index + 1) % coordinatorsSize;
 			if (index == successIndex) {
 				wait(delay(CLIENT_KNOBS->COORDINATOR_RECONNECTION_DELAY));
