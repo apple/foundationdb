@@ -2555,7 +2555,6 @@ void stopNetwork() {
 
 	TraceEvent("ClientStopNetwork").log();
 	g_network->stop();
-	closeTraceFile();
 }
 
 void DatabaseContext::updateProxies() {
