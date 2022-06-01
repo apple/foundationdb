@@ -26,6 +26,8 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
+double const ClientTagThrottleLimits::NO_EXPIRATION = std::numeric_limits<double>::max();
+
 void TagSet::addTag(TransactionTagRef tag) {
 	ASSERT(CLIENT_KNOBS->MAX_TRANSACTION_TAG_LENGTH < 256); // Tag length is encoded with a single byte
 	ASSERT(CLIENT_KNOBS->MAX_TAGS_PER_TRANSACTION < 256); // Number of tags is encoded with a single byte

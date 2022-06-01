@@ -82,7 +82,7 @@ class GlobalTagThrottlerImpl {
 				} else {
 					totalLimit = std::max(totalLimit, std::min(readLimit.get(), writeLimit.get()));
 				}
-				return ClientTagThrottleLimits(totalLimit, std::numeric_limits<double>::max());
+				return ClientTagThrottleLimits(totalLimit, ClientTagThrottleLimits::NO_EXPIRATION);
 			}
 		}
 
