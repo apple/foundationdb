@@ -33,7 +33,7 @@ namespace authz {
 enum class Algorithm : int {
 	RS256,
 	ES256,
-	Unknown,
+	UNKNOWN,
 };
 
 Algorithm algorithmFromString(StringRef s) noexcept;

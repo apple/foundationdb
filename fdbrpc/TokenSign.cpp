@@ -91,7 +91,7 @@ Algorithm algorithmFromString(StringRef s) noexcept {
 	else if (s == "ES256"_sr)
 		return Algorithm::ES256;
 	else
-		return Algorithm::Unknown;
+		return Algorithm::UNKNOWN;
 }
 
 StringRef signString(Arena& arena, StringRef string, PrivateKey privateKey, int keyAlgNid, MessageDigestMethod digest);
@@ -323,7 +323,7 @@ bool parseHeaderPart(TokenRef& token, StringRef b64urlHeader) {
 		if (alg.IsString() && typ.IsString()) {
 			auto algValue = StringRef(reinterpret_cast<const uint8_t*>(alg.GetString()), alg.GetStringLength());
 			auto algType = algorithmFromString(algValue);
-			if (algType == Algorithm::Unknown)
+			if (algType == Algorithm::UNKNOWN)
 				return false;
 			token.algorithm = algType;
 			auto typValue = StringRef(reinterpret_cast<const uint8_t*>(typ.GetString()), typ.GetStringLength());
