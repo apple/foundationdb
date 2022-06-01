@@ -856,7 +856,7 @@ Future<Void> attemptGRVFromOldProxies(std::vector<GrvProxyInterface> oldProxies,
                                       std::vector<GrvProxyInterface> newProxies) {
 	auto debugID = nondeterministicRandom()->randomUniqueID();
 	g_traceBatch.addEvent("AttemptGRVFromOldProxyDebug", debugID.first(), "NativeAPI.attemptGRVFromOldProxies.Start");
-	Span span("VerifyCausalReadRisky"_loc);
+	Span span("NAPI:VerifyCausalReadRisky"_loc);
 	std::vector<Future<Void>> replies;
 	replies.reserve(oldProxies.size());
 	GetReadVersionRequest req(
@@ -2555,7 +2555,6 @@ void stopNetwork() {
 
 	TraceEvent("ClientStopNetwork").log();
 	g_network->stop();
-	closeTraceFile();
 }
 
 void DatabaseContext::updateProxies() {
