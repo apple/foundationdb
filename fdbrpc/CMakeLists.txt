@@ -68,13 +68,13 @@ add_flow_target(STATIC_LIBRARY NAME fdbrpc
   SRCS ${FDBRPC_SRCS}
   DISABLE_ACTOR_DIAGNOSTICS ${FDBRPC_SRCS_DISABLE_ACTOR_DIAGNOSTICS})
 target_include_directories(fdbrpc PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/libeio)
-target_link_libraries(fdbrpc PUBLIC flow)
+target_link_libraries(fdbrpc PUBLIC flow rapidjson)
 
 add_flow_target(STATIC_LIBRARY NAME fdbrpc_sampling
   SRCS ${FDBRPC_SRCS}
   DISABLE_ACTOR_DIAGNOSTICS ${FDBRPC_SRCS_DISABLE_ACTOR_DIAGNOSTICS})
 target_include_directories(fdbrpc_sampling PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/libeio)
-target_link_libraries(fdbrpc_sampling PUBLIC flow_sampling)
+target_link_libraries(fdbrpc_sampling PUBLIC flow_sampling rapidjson)
 target_compile_definitions(fdbrpc_sampling PRIVATE -DENABLE_SAMPLING)
 if(WIN32)
   add_dependencies(fdbrpc_sampling_actors fdbrpc_actors)
