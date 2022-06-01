@@ -84,6 +84,7 @@ set(FDBCLIENT_SRCS
   ManagementAPI.actor.h
   Metacluster.cpp
   Metacluster.h
+  MetaclusterManagement.actor.cpp
   MetaclusterManagement.actor.h
   MonitorLeader.actor.cpp
   MonitorLeader.h

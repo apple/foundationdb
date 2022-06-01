@@ -85,6 +85,8 @@ FDB_DECLARE_BOOLEAN_PARAM(RemoveMissingTenants);
 
 namespace MetaclusterAPI {
 
+ACTOR Future<Reference<IDatabase>> openDatabase(ClusterConnectionString connectionString);
+
 ACTOR template <class Transaction>
 Future<Optional<DataClusterMetadata>> tryGetClusterTransaction(Transaction tr, ClusterNameRef name) {
 	state Key dataClusterMetadataKey = name.withPrefix(dataClusterMetadataPrefix);
@@ -293,16 +295,7 @@ Future<Void> registerCluster(Reference<DB> db,
 			    wait(managementClusterRegisterPrecheck(precheckTr, name, Optional<DataClusterMetadata>()));
 			metaclusterId = result.first;
 
-			if (BUGGIFY) {
-				throw commit_unknown_result();
-			}
-
-			wait(safeThreadFutureToFuture(precheckTr->commit()));
-
-			if (BUGGIFY) {
-				throw commit_unknown_result();
-			}
-
+			wait(buggifiedCommit(precheckTr, BUGGIFY));
 			break;
 		} catch (Error& e) {
 			wait(safeThreadFutureToFuture(precheckTr->onError(e)));
@@ -310,9 +303,7 @@ Future<Void> registerCluster(Reference<DB> db,
 	}
 
 	// Step 2: Configure the data cluster as a subordinate cluster
-	state Reference<IDatabase> dataClusterDb =
-	    MultiVersionApi::api->createDatabase(makeReference<ClusterConnectionMemoryRecord>(connectionString));
-
+	state Reference<IDatabase> dataClusterDb = wait(openDatabase(connectionString));
 	state Reference<ITransaction> dataClusterTr = dataClusterDb->createTransaction();
 	loop {
 		try {
@@ -320,15 +311,7 @@ Future<Void> registerCluster(Reference<DB> db,
 			UID clusterId = wait(dataClusterRegister(dataClusterTr, name, metaclusterId));
 			entry.id = clusterId;
 
-			if (BUGGIFY) {
-				throw commit_unknown_result();
-			}
-
-			wait(safeThreadFutureToFuture(dataClusterTr->commit()));
-
-			if (BUGGIFY) {
-				throw commit_unknown_result();
-			}
+			wait(buggifiedCommit(dataClusterTr, BUGGIFY));
 
 			TraceEvent("ConfiguredDataCluster")
 			    .detail("ClusterName", name)
@@ -349,16 +332,7 @@ Future<Void> registerCluster(Reference<DB> db,
 		try {
 			registerTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			wait(managementClusterRegister(registerTr, name, connectionString, entry));
-
-			if (BUGGIFY) {
-				throw commit_unknown_result();
-			}
-
-			wait(safeThreadFutureToFuture(registerTr->commit()));
-
-			if (BUGGIFY) {
-				throw commit_unknown_result();
-			}
+			wait(buggifiedCommit(registerTr, BUGGIFY));
 
 			TraceEvent("RegisteredDataCluster")
 			    .detail("ClusterName", name)
@@ -403,15 +377,7 @@ Future<Void> restoreCluster(Reference<DB> db,
 			state Optional<DataClusterEntry> newCluster =
 			    wait(restoreCluster(tr, name, connectionString, entry, addNewTenants, removeMissingTenants));
 
-			if (BUGGIFY) {
-				throw commit_unknown_result();
-			}
-
-			wait(safeThreadFutureToFuture(tr->commit()));
-
-			if (BUGGIFY) {
-				throw commit_unknown_result();
-			}
+			wait(buggifiedCommit(tr, BUGGIFY));
 
 			TraceEvent("RestoredDataCluster")
 			    .detail("ClusterName", name)
@@ -469,16 +435,7 @@ Future<Void> removeCluster(Reference<DB> db, ClusterName name, bool forceRemove)
 			}
 
 			metadata = _metadata.get();
-
-			if (BUGGIFY) {
-				throw commit_unknown_result();
-			}
-
-			wait(safeThreadFutureToFuture(tr->commit()));
-
-			if (BUGGIFY) {
-				throw commit_unknown_result();
-			}
+			wait(buggifiedCommit(tr, BUGGIFY));
 
 			TraceEvent("RemovedDataCluster").detail("Name", name).detail("Version", tr->getCommittedVersion());
 			break;
@@ -489,25 +446,14 @@ Future<Void> removeCluster(Reference<DB> db, ClusterName name, bool forceRemove)
 
 	// Step 2: Reconfigure data cluster and remove metadata.
 	//         Note that this is best effort; if it fails the cluster will still have been removed.
-	state Reference<IDatabase> dataClusterDb =
-	    MultiVersionApi::api->createDatabase(makeReference<ClusterConnectionMemoryRecord>(metadata.connectionString));
-
+	state Reference<IDatabase> dataClusterDb = wait(openDatabase(metadata.connectionString));
 	state Reference<ITransaction> dataClusterTr = dataClusterDb->createTransaction();
 	loop {
 		try {
 			dataClusterTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
 			wait(dataClusterRemove(dataClusterTr));
-
-			if (BUGGIFY) {
-				throw commit_unknown_result();
-			}
-
-			wait(safeThreadFutureToFuture(dataClusterTr->commit()));
-
-			if (BUGGIFY) {
-				throw commit_unknown_result();
-			}
+			wait(buggifiedCommit(dataClusterTr, BUGGIFY));
 
 			TraceEvent("ReconfiguredDataCluster")
 			    .detail("Name", name)
@@ -671,7 +617,8 @@ Future<Void> createTenant(Reference<DB> db, TenantName name, TenantMapEntry tena
 			createdTenant = result.first;
 
 			if (!result.second) {
-				if (!result.first.matchesConfiguration(tenantEntry)) {
+				if (!result.first.matchesConfiguration(tenantEntry) ||
+				    result.first.tenantState != TenantState::REGISTERING) {
 					throw tenant_already_exists();
 				} else if (tenantEntry.assignedCluster != createdTenant.assignedCluster) {
 					if (!result.first.assignedCluster.present()) {
@@ -687,7 +634,7 @@ Future<Void> createTenant(Reference<DB> db, TenantName name, TenantMapEntry tena
 					clusterMetadata = actualMetadata.get();
 				}
 			} else {
-				wait(safeThreadFutureToFuture(assignTr->commit()));
+				wait(buggifiedCommit(assignTr, BUGGIFY));
 			}
 
 			break;
@@ -697,9 +644,7 @@ Future<Void> createTenant(Reference<DB> db, TenantName name, TenantMapEntry tena
 	}
 
 	// Step 2: store the tenant info in the data cluster
-	state Reference<IDatabase> dataClusterDb = MultiVersionApi::api->createDatabase(
-	    makeReference<ClusterConnectionMemoryRecord>(clusterMetadata.connectionString));
-
+	state Reference<IDatabase> dataClusterDb = wait(openDatabase(clusterMetadata.connectionString));
 	TenantMapEntry _ = wait(ManagementAPI::createTenant(
 	    dataClusterDb, name, createdTenant, ManagementAPI::TenantOperationType::DATA_CLUSTER));
 
@@ -719,7 +664,7 @@ Future<Void> createTenant(Reference<DB> db, TenantName name, TenantMapEntry tena
 				TenantMapEntry updatedEntry = managementEntry.get();
 				updatedEntry.tenantState = TenantState::READY;
 				ManagementAPI::configureTenantTransaction(finalizeTr, name, updatedEntry);
-				wait(safeThreadFutureToFuture(finalizeTr->commit()));
+				wait(buggifiedCommit(finalizeTr, BUGGIFY));
 			}
 
 			break;
@@ -735,7 +680,6 @@ ACTOR template <class DB>
 Future<Void> deleteTenant(Reference<DB> db, TenantName name) {
 	state int64_t tenantId;
 	state DataClusterMetadata clusterMetadata;
-	state Reference<IDatabase> dataClusterDb;
 	state bool alreadyRemoving = false;
 
 	// Step 1: get the assigned location of the tenant
@@ -768,7 +712,7 @@ Future<Void> deleteTenant(Reference<DB> db, TenantName name) {
 				ManagementAPI::configureTenantTransaction(managementTr, name, updatedEntry);
 				wait(ManagementAPI::deleteTenantTransaction(
 				    managementTr, name, ManagementAPI::TenantOperationType::MANAGEMENT_CLUSTER));
-				wait(safeThreadFutureToFuture(managementTr->commit()));
+				wait(buggifiedCommit(managementTr, BUGGIFY));
 				return Void();
 			}
 
@@ -778,8 +722,7 @@ Future<Void> deleteTenant(Reference<DB> db, TenantName name) {
 		}
 	}
 
-	dataClusterDb = MultiVersionApi::api->createDatabase(
-	    makeReference<ClusterConnectionMemoryRecord>(clusterMetadata.connectionString));
+	state Reference<IDatabase> dataClusterDb = wait(openDatabase(clusterMetadata.connectionString));
 
 	if (!alreadyRemoving) {
 		// Step 2: check that the tenant is empty
@@ -814,7 +757,7 @@ Future<Void> deleteTenant(Reference<DB> db, TenantName name) {
 					TenantMapEntry updatedEntry = tenantEntry2.get();
 					updatedEntry.tenantState = TenantState::REMOVING;
 					ManagementAPI::configureTenantTransaction(managementTr, name, updatedEntry);
-					wait(safeThreadFutureToFuture(managementTr->commit()));
+					wait(buggifiedCommit(managementTr, BUGGIFY));
 				}
 
 				break;
@@ -876,7 +819,7 @@ Future<Void> deleteTenant(Reference<DB> db, TenantName name) {
 				}
 			}
 
-			wait(safeThreadFutureToFuture(managementTr->commit()));
+			wait(buggifiedCommit(managementTr, BUGGIFY));
 
 			break;
 		} catch (Error& e) {

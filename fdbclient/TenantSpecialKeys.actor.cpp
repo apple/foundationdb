@@ -124,8 +124,20 @@ Future<RangeResult> TenantRangeImpl::getRange(ReadYourWritesTransaction* ryw,
 }
 
 ACTOR Future<Void> deleteTenantRange(ReadYourWritesTransaction* ryw, TenantName beginTenant, TenantName endTenant) {
-	std::map<TenantName, TenantMapEntry> tenants = wait(
+	state Future<Optional<Value>> tenantModeFuture =
+	    ryw->getTransaction().get(configKeysPrefix.withSuffix("tenant_mode"_sr));
+	state Future<Optional<Value>> metaclusterRegistrationFuture = ryw->getTransaction().get(dataClusterRegistrationKey);
+
+	state std::map<TenantName, TenantMapEntry> tenants = wait(
 	    ManagementAPI::listTenantsTransaction(&ryw->getTransaction(), beginTenant, endTenant, CLIENT_KNOBS->TOO_MANY));
+
+	state Optional<Value> tenantMode = wait(safeThreadFutureToFuture(tenantModeFuture));
+	Optional<Value> metaclusterRegistration = wait(safeThreadFutureToFuture(metaclusterRegistrationFuture));
+
+	if (!checkTenantMode(
+	        tenantMode, metaclusterRegistration.present(), ManagementAPI::TenantOperationType::STANDALONE_CLUSTER)) {
+		throw tenants_disabled();
+	}
 
 	if (tenants.size() == CLIENT_KNOBS->TOO_MANY) {
 		TraceEvent(SevWarn, "DeleteTenantRangeTooLange")

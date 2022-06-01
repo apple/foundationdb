@@ -189,33 +189,25 @@ Future<TenantMapEntry> createTenant(Reference<DB> db,
                                     TenantOperationType operationType = TenantOperationType::STANDALONE_CLUSTER) {
 	state Reference<typename DB::TransactionT> tr = db->createTransaction();
 
-	state bool firstTry = true;
+	state bool checkExistence = operationType != TenantOperationType::DATA_CLUSTER;
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
-			if (firstTry) {
+			if (checkExistence) {
 				Optional<TenantMapEntry> entry = wait(tryGetTenantTransaction(tr, name));
 				if (entry.present()) {
 					throw tenant_already_exists();
 				}
 
-				firstTry = false;
+				checkExistence = false;
 			}
 
 			state std::pair<TenantMapEntry, bool> newTenant =
 			    wait(createTenantTransaction(tr, name, tenantEntry, operationType));
 
 			if (newTenant.second) {
-				if (BUGGIFY) {
-					throw commit_unknown_result();
-				}
-
-				wait(safeThreadFutureToFuture(tr->commit()));
-
-				if (BUGGIFY) {
-					throw commit_unknown_result();
-				}
+				wait(buggifiedCommit(tr, BUGGIFY));
 
 				TraceEvent("CreatedTenant")
 				    .detail("Tenant", name)
@@ -245,14 +237,7 @@ Future<Void> deleteTenantTransaction(Transaction tr,
 	    tr->get(configKeysPrefix.withSuffix("tenant_mode"_sr));
 	state typename transaction_future_type<Transaction, Optional<Value>>::type metaclusterRegistrationFuture =
 	    tr->get(dataClusterRegistrationKey);
-
-	state Optional<TenantMapEntry> tenantEntry = wait(tryGetTenantTransaction(tr, name));
-	if (!tenantEntry.present()) {
-		return Void();
-	}
-
-	state typename transaction_future_type<Transaction, RangeResult>::type prefixRangeFuture =
-	    tr->getRange(prefixRange(tenantEntry.get().prefix), 1);
+	state Future<Optional<TenantMapEntry>> tenantEntryFuture = tryGetTenantTransaction(tr, name);
 
 	state Optional<Value> tenantMode = wait(safeThreadFutureToFuture(tenantModeFuture));
 	Optional<Value> metaclusterRegistration = wait(safeThreadFutureToFuture(metaclusterRegistrationFuture));
@@ -261,11 +246,19 @@ Future<Void> deleteTenantTransaction(Transaction tr,
 		throw tenants_disabled();
 	}
 
+	state Optional<TenantMapEntry> tenantEntry = wait(tenantEntryFuture);
+	if (!tenantEntry.present()) {
+		return Void();
+	}
+
 	if (operationType == TenantOperationType::MANAGEMENT_CLUSTER &&
 	    tenantEntry.get().tenantState != TenantState::REMOVING) {
 		// TODO: better error
 		throw operation_failed();
 	}
+
+	state typename transaction_future_type<Transaction, RangeResult>::type prefixRangeFuture =
+	    tr->getRange(prefixRange(tenantEntry.get().prefix), 1);
 
 	RangeResult contents = wait(safeThreadFutureToFuture(prefixRangeFuture));
 	if (!contents.empty()) {
@@ -301,16 +294,7 @@ Future<Void> deleteTenant(Reference<DB> db,
 			}
 
 			wait(deleteTenantTransaction(tr, name, operationType));
-
-			if (BUGGIFY) {
-				throw commit_unknown_result();
-			}
-
-			wait(safeThreadFutureToFuture(tr->commit()));
-
-			if (BUGGIFY) {
-				throw commit_unknown_result();
-			}
+			wait(buggifiedCommit(tr, BUGGIFY));
 
 			TraceEvent("DeletedTenant").detail("Tenant", name).detail("Version", tr->getCommittedVersion());
 			return Void();
