@@ -58,8 +58,9 @@ if(APPLE)
   add_custom_command(OUTPUT ${symbols}
     COMMAND $<TARGET_FILE:Python::Interpreter> ${CMAKE_CURRENT_SOURCE_DIR}/symbolify.py
         ${CMAKE_CURRENT_SOURCE_DIR}/foundationdb/fdb_c.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/foundationdb/fdb_c_internal.h
         ${symbols}
-    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/symbolify.py ${CMAKE_CURRENT_SOURCE_DIR}/foundationdb/fdb_c.h
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/symbolify.py ${CMAKE_CURRENT_SOURCE_DIR}/foundationdb/fdb_c.h ${CMAKE_CURRENT_SOURCE_DIR}/foundationdb/fdb_c_internal.h
     COMMENT "Generate exported_symbols_list")
   add_custom_target(exported_symbols_list DEPENDS ${symbols})
   add_dependencies(fdb_c exported_symbols_list)
