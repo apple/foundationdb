@@ -112,6 +112,8 @@ std::string tupleToString(Tuple const& tuple) {
 			str += format("%016llx%016llx", *(uint64_t*)u.getData().begin(), *(uint64_t*)(u.getData().begin() + 8));
 		} else if (type == Tuple::NESTED) {
 			str += tupleToString(tuple.getNested(i));
+		} else if (type == Tuple::VERSIONSTAMP) {
+			str += "\'" + tuple.getString(i).printable() + "\'";
 		} else {
 			ASSERT(false);
 		}
@@ -1147,6 +1149,8 @@ struct TuplePackFunc : InstructionFunc {
 					tuple << itemTuple.getUuid(0);
 				} else if (type == Tuple::NESTED) {
 					tuple.appendNested(itemTuple.getNested(0));
+				} else if (type == Tuple::VERSIONSTAMP) {
+					tuple.appendVersionstamp(itemTuple.getString(0));
 				} else {
 					ASSERT(false);
 				}
@@ -1226,6 +1230,8 @@ struct TupleRangeFunc : InstructionFunc {
 					tuple << itemTuple.getUuid(0);
 				} else if (type == Tuple::NESTED) {
 					tuple.appendNested(itemTuple.getNested(0));
+				} else if (type == Tuple::VERSIONSTAMP) {
+					tuple.appendVersionstamp(itemTuple.getString(0));
 				} else {
 					ASSERT(false);
 				}

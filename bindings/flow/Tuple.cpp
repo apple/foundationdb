@@ -39,6 +39,7 @@ const uint8_t Tuple::DOUBLE_CODE = 0x21;
 const uint8_t Tuple::FALSE_CODE = 0x26;
 const uint8_t Tuple::TRUE_CODE = 0x27;
 const uint8_t Tuple::UUID_CODE = 0x30;
+const uint8_t Tuple::VERSIONSTAMP_96_CODE = 0x33;
 
 static float bigEndianFloat(float orig) {
 	int32_t big = *(int32_t*)&orig;
@@ -117,6 +118,8 @@ Tuple::Tuple(StringRef const& str) {
 		} else if (data[i] == NESTED_CODE) {
 			i += 1;
 			depth += 1;
+		} else if (data[i] == VERSIONSTAMP_96_CODE) {
+			i += 1 + 12;
 		} else {
 			throw invalid_tuple_data_type();
 		}
@@ -166,6 +169,15 @@ Tuple& Tuple::append(StringRef const& str, bool utf8) {
 
 	data.append(data.arena(), str.begin() + lastPos, str.size() - lastPos);
 	data.push_back(data.arena(), (uint8_t)'\x00');
+
+	return *this;
+}
+
+Tuple& Tuple::appendVersionstamp(StringRef const& str) {
+	offsets.push_back(data.size());
+
+	data.push_back(data.arena(), VERSIONSTAMP_96_CODE);
+	data.append(data.arena(), str.begin(), 12);
 
 	return *this;
 }
@@ -293,6 +305,8 @@ Tuple::ElementType Tuple::getType(size_t index) const {
 		return ElementType::BOOL;
 	} else if (code == UUID_CODE) {
 		return ElementType::UUID;
+	} else if (code == VERSIONSTAMP_96_CODE) {
+		return ElementType::VERSIONSTAMP;
 	} else {
 		throw invalid_tuple_data_type();
 	}
@@ -425,6 +439,19 @@ double Tuple::getDouble(size_t index) const {
 	return bigEndianDouble(swap);
 }
 
+Standalone<StringRef> Tuple::getVersionstamp(size_t index) const {
+	if (index >= offsets.size()) {
+		throw invalid_tuple_index();
+	}
+	ASSERT_LT(offsets[index], data.size());
+	uint8_t code = data[offsets[index]];
+	if (code != VERSIONSTAMP_96_CODE) {
+		throw invalid_tuple_data_type();
+	}
+	size_t versionstampLength = 12;
+	return StringRef(data.begin() + offsets[index] + 1, versionstampLength);
+}
+
 Uuid Tuple::getUuid(size_t index) const {
 	if (index >= offsets.size()) {
 		throw invalid_tuple_index();
@@ -507,6 +534,10 @@ Tuple Tuple::getNested(size_t index) const {
 			ASSERT_LE(i + 1 + sizeof(double), next_offset - 1);
 			dest.append(dest.arena(), data.begin() + i + 1, sizeof(double));
 			i += sizeof(double) + 1;
+		} else if (code == VERSIONSTAMP_96_CODE) {
+			ASSERT_LE(i + 1 + 12, next_offset - 1);
+			dest.append(dest.arena(), data.begin() + i + 1, 12);
+			i += 12 + 1;
 		} else if (code == NESTED_CODE) {
 			i += 1;
 			depth += 1;

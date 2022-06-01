@@ -75,6 +75,8 @@ Tuple::Tuple(StringRef const& str, bool exclude_incomplete) {
 			i += 1;
 		} else if (data[i] == '\x00') {
 			i += 1;
+		} else if (data[i] == 0x33) {
+			i += 12 + 1;
 		} else {
 			throw invalid_tuple_data_type();
 		}
@@ -95,6 +97,15 @@ Tuple& Tuple::append(Tuple const& tuple) {
 	}
 
 	data.append(data.arena(), tuple.data.begin(), tuple.data.size());
+
+	return *this;
+}
+
+Tuple& Tuple::appendVersionstamp(StringRef const& str) {
+	offsets.push_back(data.size());
+
+	data.push_back(data.arena(), 0x33);
+	data.append(data.arena(), str.begin(), 12);
 
 	return *this;
 }
@@ -213,6 +224,8 @@ Tuple::ElementType Tuple::getType(size_t index) const {
 		return ElementType::DOUBLE;
 	} else if (code == 0x26 || code == 0x27) {
 		return ElementType::BOOL;
+	} else if (code == 0x33) {
+		return ElementType::VERSIONSTAMP;
 	} else {
 		throw invalid_tuple_data_type();
 	}
@@ -359,6 +372,19 @@ double Tuple::getDouble(size_t index) const {
 	adjustFloatingPoint(bytes, sizeof(double), false);
 
 	return bigEndianDouble(swap);
+}
+
+Standalone<StringRef> Tuple::getVersionstamp(size_t index) const {
+	if (index >= offsets.size()) {
+		throw invalid_tuple_index();
+	}
+	ASSERT_LT(offsets[index], data.size());
+	uint8_t code = data[offsets[index]];
+	if (code != 0x33) {
+		throw invalid_tuple_data_type();
+	}
+	size_t versionstampLength = 12;
+	return StringRef(data.begin() + offsets[index] + 1, versionstampLength);
 }
 
 KeyRange Tuple::range(Tuple const& tuple) const {

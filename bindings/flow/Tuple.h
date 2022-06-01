@@ -60,6 +60,7 @@ struct Tuple {
 	Tuple& append(Uuid);
 	Tuple& appendNested(Tuple const&);
 	Tuple& appendNull();
+	Tuple& appendVersionstamp(StringRef const& str);
 
 	StringRef pack() const { return StringRef(data.begin(), data.size()); }
 
@@ -68,13 +69,14 @@ struct Tuple {
 		return append(t);
 	}
 
-	enum ElementType { NULL_TYPE, INT, BYTES, UTF8, BOOL, FLOAT, DOUBLE, UUID, NESTED };
+	enum ElementType { NULL_TYPE, INT, BYTES, UTF8, BOOL, FLOAT, DOUBLE, UUID, NESTED, VERSIONSTAMP };
 
 	// this is number of elements, not length of data
 	size_t size() const { return offsets.size(); }
 
 	ElementType getType(size_t index) const;
 	Standalone<StringRef> getString(size_t index) const;
+	Standalone<StringRef> getVersionstamp(size_t index) const;
 	int64_t getInt(size_t index) const;
 	bool getBool(size_t index) const;
 	float getFloat(size_t index) const;
@@ -107,6 +109,7 @@ private:
 	static const uint8_t FALSE_CODE;
 	static const uint8_t TRUE_CODE;
 	static const uint8_t UUID_CODE;
+	static const uint8_t VERSIONSTAMP_96_CODE;
 
 	Tuple(const StringRef& data);
 	Tuple(Standalone<VectorRef<uint8_t>> data, std::vector<size_t> offsets);
