@@ -22,7 +22,7 @@
 #define BLOB_CONNECTION_PROVIDER_H
 
 #include "fdbclient/BackupContainerFileSystem.h"
-#include "fdbserver/BlobMetadataUtils.h"
+#include "fdbclient/BlobMetadataUtils.h"
 
 struct BlobConnectionProvider : NonCopyable, ReferenceCounted<BlobConnectionProvider> {
 	// chooses a partition and prepends the necessary prefix to the filename (if necessary) for writing a file, and
@@ -38,6 +38,8 @@ struct BlobConnectionProvider : NonCopyable, ReferenceCounted<BlobConnectionProv
 	static Reference<BlobConnectionProvider> newBlobConnectionProvider(std::string blobUrl);
 
 	static Reference<BlobConnectionProvider> newBlobConnectionProvider(Standalone<BlobMetadataDetailsRef> blobMetadata);
+
+	// TODO add update impl
 };
 
 #endif

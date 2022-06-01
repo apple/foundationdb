@@ -26,10 +26,10 @@
 #include "flow/network.h"
 #pragma once
 
+#include "fdbclient/BlobMetadataUtils.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
-#include "fdbserver/BlobMetadataUtils.h"
 
 struct EncryptKeyProxyInterface {
 	constexpr static FileIdentifier file_identifier = 1303419;

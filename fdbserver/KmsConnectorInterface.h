@@ -28,7 +28,7 @@
 #include "flow/Trace.h"
 #include "flow/flow.h"
 #include "flow/network.h"
-#include "fdbserver/BlobMetadataUtils.h"
+#include "fdbclient/BlobMetadataUtils.h"
 
 struct KmsConnectorInterface {
 	constexpr static FileIdentifier file_identifier = 2416711;

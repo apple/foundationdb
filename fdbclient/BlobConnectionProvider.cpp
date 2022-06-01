@@ -21,7 +21,7 @@
 #include <string>
 
 #include "flow/IRandom.h"
-#include "fdbserver/BlobConnectionProvider.h"
+#include "fdbclient/BlobConnectionProvider.h"
 
 struct SingleBlobConnectionProvider : BlobConnectionProvider {
 public:

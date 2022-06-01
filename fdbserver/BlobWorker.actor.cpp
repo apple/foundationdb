@@ -27,19 +27,20 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/BackupContainerFileSystem.h"
+#include "fdbclient/BlobConnectionProvider.h"
 #include "fdbclient/BlobGranuleCommon.h"
 #include "fdbclient/BlobGranuleReader.actor.h"
+#include "fdbclient/BlobMetadataUtils.h"
 #include "fdbclient/BlobWorkerCommon.h"
 #include "fdbclient/BlobWorkerInterface.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/Notified.h"
-#include "fdbclient/Tenant.h"
-#include "fdbserver/BlobMetadataUtils.h"
+
 #include "fdbserver/Knobs.h"
 #include "fdbserver/BlobGranuleServerCommon.actor.h"
-#include "fdbserver/BlobConnectionProvider.h"
+
 #include "fdbserver/MutationTracking.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/ServerDBInfo.h"
@@ -51,7 +52,7 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
-#define BW_DEBUG false
+#define BW_DEBUG true
 #define BW_REQUEST_DEBUG false
 
 /*
@@ -158,18 +159,6 @@ struct GranuleHistoryEntry : NonCopyable, ReferenceCounted<GranuleHistoryEntry> 
 	  : range(range), granuleID(granuleID), startVersion(startVersion), endVersion(endVersion) {}
 };
 
-// TODO: does this need to be versioned like SS has?
-struct GranuleTenantData : NonCopyable, ReferenceCounted<GranuleTenantData> {
-	TenantName name;
-	TenantMapEntry entry;
-	// TODO add other useful stuff like per-tenant blob connection, if necessary
-	Reference<BlobConnectionProvider> conn;
-	Promise<Void> connLoaded;
-
-	GranuleTenantData() {}
-	GranuleTenantData(TenantName name, TenantMapEntry entry) : name(name), entry(entry) {}
-};
-
 struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 	UID id;
 	Database db;
@@ -186,10 +175,9 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 
 	// FIXME: refactor out the parts of this that are just for interacting with blob stores from the backup business
 	// logic
-	Reference<BackupContainerFileSystem> bstore;
+	Reference<BlobConnectionProvider> bstore;
 	KeyRangeMap<GranuleRangeMetadata> granuleMetadata;
-	KeyRangeMap<Reference<GranuleTenantData>> tenantData;
-	std::unordered_map<int64_t, TenantMapEntry> tenantInfoById;
+	BGTenantMap tenantData;
 
 	// contains the history of completed granules before the existing ones. Maps to the latest one, and has
 	// back-pointers to earlier granules
@@ -207,8 +195,8 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 
 	int changeFeedStreamReplyBufferSize = SERVER_KNOBS->BG_DELTA_FILE_TARGET_BYTES / 2;
 
-	BlobWorkerData(UID id, Database db)
-	  : id(id), db(db), stats(id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL),
+	BlobWorkerData(UID id, Reference<AsyncVar<ServerDBInfo> const> dbInfo, Database db)
+	  : id(id), db(db), stats(id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL), tenantData(BGTenantMap(dbInfo)),
 	    initialSnapshotLock(SERVER_KNOBS->BLOB_WORKER_INITIAL_SNAPSHOT_PARALLELISM) {}
 
 	bool managerEpochOk(int64_t epoch) {
@@ -479,6 +467,7 @@ ACTOR Future<std::pair<BlobGranuleSplitState, Version>> getGranuleSplitState(Tra
 // in flight. The synchronization happens after the s3 file is written, but before we update the FDB index of what files
 // exist. Before updating FDB, we ensure the version is committed and all previous delta files have updated FDB.
 ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
+                                           Reference<BlobConnectionProvider> bstore,
                                            KeyRange keyRange,
                                            UID granuleID,
                                            int64_t epoch,
@@ -492,9 +481,9 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 
 	// Prefix filename with random chars both to avoid hotspotting on granuleID, and to have unique file names if
 	// multiple blob workers try to create the exact same file at the same millisecond (which observably happens)
-	state std::string fname = deterministicRandom()->randomUniqueID().shortString() + "_" + granuleID.toString() +
-	                          "_T" + std::to_string((uint64_t)(1000.0 * now())) + "_V" +
-	                          std::to_string(currentDeltaVersion) + ".delta";
+	std::string fileName = deterministicRandom()->randomUniqueID().shortString() + "_" + granuleID.toString() + "_T" +
+	                       std::to_string((uint64_t)(1000.0 * now())) + "_V" + std::to_string(currentDeltaVersion) +
+	                       ".delta";
 
 	state Value serialized = ObjectWriter::toValue(deltasToWrite, Unversioned());
 	state size_t serializedSize = serialized.size();
@@ -502,7 +491,10 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 	// Free up deltasToWrite here to reduce memory
 	deltasToWrite = Standalone<GranuleDeltas>();
 
-	state Reference<IBackupFile> objectFile = wait(bwData->bstore->writeFile(fname));
+	state Reference<BackupContainerFileSystem> writeBStore;
+	state std::string fname;
+	std::tie(writeBStore, fname) = bstore->createForWrite(fileName);
+	state Reference<IBackupFile> objectFile = wait(writeBStore->writeFile(fname));
 
 	++bwData->stats.s3PutReqs;
 	++bwData->stats.deltaFilesWritten;
@@ -577,12 +569,13 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 		}
 		TEST(true); // Granule cleaning up delta file after error
 		++bwData->stats.s3DeleteReqs;
-		bwData->addActor.send(bwData->bstore->deleteFile(fname));
+		bwData->addActor.send(writeBStore->deleteFile(fname));
 		throw e;
 	}
 }
 
 ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
+                                          Reference<BlobConnectionProvider> bstore,
                                           KeyRange keyRange,
                                           UID granuleID,
                                           int64_t epoch,
@@ -592,9 +585,9 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
                                           bool createGranuleHistory) {
 	// Prefix filename with random chars both to avoid hotspotting on granuleID, and to have unique file names if
 	// multiple blob workers try to create the exact same file at the same millisecond (which observably happens)
-	state std::string fname = deterministicRandom()->randomUniqueID().shortString() + "_" + granuleID.toString() +
-	                          "_T" + std::to_string((uint64_t)(1000.0 * now())) + "_V" + std::to_string(version) +
-	                          ".snapshot";
+	state std::string fileName = deterministicRandom()->randomUniqueID().shortString() + "_" + granuleID.toString() +
+	                             "_T" + std::to_string((uint64_t)(1000.0 * now())) + "_V" + std::to_string(version) +
+	                             ".snapshot";
 	state Standalone<GranuleSnapshot> snapshot;
 
 	wait(delay(0, TaskPriority::BlobWorkerUpdateStorage));
@@ -644,7 +637,10 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 	snapshot = Standalone<GranuleSnapshot>();
 
 	// write to blob using multi part upload
-	state Reference<IBackupFile> objectFile = wait(bwData->bstore->writeFile(fname));
+	state Reference<BackupContainerFileSystem> writeBStore;
+	state std::string fname;
+	std::tie(writeBStore, fname) = bstore->createForWrite(fileName);
+	state Reference<IBackupFile> objectFile = wait(writeBStore->writeFile(fname));
 
 	++bwData->stats.s3PutReqs;
 	++bwData->stats.snapshotFilesWritten;
@@ -698,7 +694,7 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 		}
 		TEST(true); // Granule deleting snapshot file after error
 		++bwData->stats.s3DeleteReqs;
-		bwData->addActor.send(bwData->bstore->deleteFile(fname));
+		bwData->addActor.send(writeBStore->deleteFile(fname));
 		throw e;
 	}
 
@@ -719,6 +715,7 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 }
 
 ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(Reference<BlobWorkerData> bwData,
+                                                       Reference<BlobConnectionProvider> bstore,
                                                        Reference<GranuleMetadata> metadata,
                                                        UID granuleID,
                                                        Key cfKey,
@@ -747,6 +744,7 @@ ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(Reference<BlobWorkerData>
 			ASSERT(lastReadVersion <= readVersion);
 			state PromiseStream<RangeResult> rowsStream;
 			state Future<BlobFileIndex> snapshotWriter = writeSnapshot(bwData,
+			                                                           bstore,
 			                                                           metadata->keyRange,
 			                                                           granuleID,
 			                                                           metadata->originalEpoch,
@@ -805,6 +803,7 @@ ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(Reference<BlobWorkerData>
 // files might not be the current set of files in metadata, in the case of doing the initial snapshot of a granule that
 // was split.
 ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
+                                            Reference<BlobConnectionProvider> bstore,
                                             Reference<GranuleMetadata> metadata,
                                             UID granuleID,
                                             GranuleFiles files,
@@ -859,6 +858,7 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 		try {
 			state PromiseStream<RangeResult> rowsStream;
 			state Future<BlobFileIndex> snapshotWriter = writeSnapshot(bwData,
+			                                                           bstore,
 			                                                           metadata->keyRange,
 			                                                           granuleID,
 			                                                           metadata->originalEpoch,
@@ -867,7 +867,7 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 			                                                           rowsStream,
 			                                                           false);
 			RangeResult newGranule =
-			    wait(readBlobGranule(chunk, metadata->keyRange, 0, version, bwData->bstore, &bwData->stats));
+			    wait(readBlobGranule(chunk, metadata->keyRange, 0, version, bstore, &bwData->stats));
 
 			bwData->stats.bytesReadFromS3ForCompaction += compactBytesRead;
 			rowsStream.send(std::move(newGranule));
@@ -906,6 +906,7 @@ struct CounterHolder {
 };
 
 ACTOR Future<BlobFileIndex> checkSplitAndReSnapshot(Reference<BlobWorkerData> bwData,
+                                                    Reference<BlobConnectionProvider> bstore,
                                                     Reference<GranuleMetadata> metadata,
                                                     UID granuleID,
                                                     int64_t bytesInNewDeltaFiles,
@@ -1012,7 +1013,7 @@ ACTOR Future<BlobFileIndex> checkSplitAndReSnapshot(Reference<BlobWorkerData> bw
 		wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
 	}
 	BlobFileIndex reSnapshotIdx =
-	    wait(compactFromBlob(bwData, metadata, granuleID, metadata->files, reSnapshotVersion));
+	    wait(compactFromBlob(bwData, bstore, metadata, granuleID, metadata->files, reSnapshotVersion));
 	return reSnapshotIdx;
 }
 
@@ -1305,7 +1306,9 @@ ACTOR Future<Void> waitVersionCommitted(Reference<BlobWorkerData> bwData,
 // TODO: this is getting kind of large. Should try to split out this actor if it continues to grow?
 ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
                                           Reference<GranuleMetadata> metadata,
-                                          Future<GranuleStartState> assignFuture) {
+                                          Future<GranuleStartState> assignFuture,
+                                          Future<Reference<BlobConnectionProvider>> bstoreFuture) {
+	state Reference<BlobConnectionProvider> bstore;
 	state std::deque<InFlightFile> inFlightFiles;
 	state std::deque<Future<Void>> inFlightPops;
 	state Future<Void> oldChangeFeedFuture;
@@ -1327,9 +1330,9 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 		// set resume snapshot so it's not valid until we pause to ask the blob manager for a re-snapshot
 		metadata->resumeSnapshot.send(Void());
 
-		// before starting, make sure worker persists range assignment and acquires the granule lock
-		GranuleStartState _info = wait(assignFuture);
-		startState = _info;
+		// before starting, make sure worker persists range assignment, acquires the granule lock, and has a blob store
+		wait(store(startState, assignFuture));
+		wait(store(bstore, bstoreFuture));
 
 		wait(delay(0, TaskPriority::BlobWorkerUpdateStorage));
 
@@ -1385,15 +1388,15 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 			if (startState.blobFilesToSnapshot.present()) {
 				startVersion = startState.previousDurableVersion;
 				Future<BlobFileIndex> inFlightBlobSnapshot = compactFromBlob(
-				    bwData, metadata, startState.granuleID, startState.blobFilesToSnapshot.get(), startVersion);
+				    bwData, bstore, metadata, startState.granuleID, startState.blobFilesToSnapshot.get(), startVersion);
 				inFlightFiles.push_back(InFlightFile(inFlightBlobSnapshot, startVersion, 0, true));
 				pendingSnapshots++;
 
 				metadata->durableSnapshotVersion.set(startState.blobFilesToSnapshot.get().snapshotFiles.back().version);
 			} else {
 				ASSERT(startState.previousDurableVersion == invalidVersion);
-				BlobFileIndex fromFDB =
-				    wait(dumpInitialSnapshotFromFDB(bwData, metadata, startState.granuleID, cfKey, &inFlightPops));
+				BlobFileIndex fromFDB = wait(
+				    dumpInitialSnapshotFromFDB(bwData, bstore, metadata, startState.granuleID, cfKey, &inFlightPops));
 				newSnapshotFile = fromFDB;
 				ASSERT(startState.changeFeedStartVersion <= fromFDB.version);
 				startVersion = newSnapshotFile.version;
@@ -1764,6 +1767,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 					}
 					Future<BlobFileIndex> dfFuture =
 					    writeDeltaFile(bwData,
+					                   bstore,
 					                   metadata->keyRange,
 					                   startState.granuleID,
 					                   metadata->originalEpoch,
@@ -1825,6 +1829,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 					int64_t versionsSinceLastSnapshot =
 					    metadata->pendingDeltaVersion - metadata->pendingSnapshotVersion;
 					Future<BlobFileIndex> inFlightBlobSnapshot = checkSplitAndReSnapshot(bwData,
+					                                                                     bstore,
 					                                                                     metadata,
 					                                                                     startState.granuleID,
 					                                                                     metadata->bytesInNewDeltaFiles,
@@ -2227,10 +2232,10 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 	state Optional<Key> tenantPrefix;
 	if (req.tenantInfo.name.present()) {
 		ASSERT(req.tenantInfo.tenantId != TenantInfo::INVALID_TENANT);
-		auto tenantEntry = bwData->tenantInfoById.find(req.tenantInfo.tenantId);
-		if (tenantEntry != bwData->tenantInfoById.end()) {
-			ASSERT(tenantEntry->second.id == req.tenantInfo.tenantId);
-			tenantPrefix = tenantEntry->second.prefix;
+		Optional<TenantMapEntry> tenantEntry = bwData->tenantData.getTenantById(req.tenantInfo.tenantId);
+		if (tenantEntry.present()) {
+			ASSERT(tenantEntry.get().id == req.tenantInfo.tenantId);
+			tenantPrefix = tenantEntry.get().prefix;
 		} else {
 			TEST(true); // Blob worker unknown tenant
 			// FIXME - better way. Wait on retry here, or just have better model for tenant metadata?
@@ -2744,11 +2749,39 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 	}
 }
 
+ACTOR Future<Reference<BlobConnectionProvider>> loadBStoreForTenant(Reference<BlobWorkerData> bwData,
+                                                                    KeyRange keyRange) {
+	state int retryCount = 0;
+	loop {
+		state Reference<GranuleTenantData> data = bwData->tenantData.getDataForGranule(keyRange);
+		if (data.isValid()) {
+			wait(data->bstoreLoaded.getFuture());
+			return data->bstore;
+		} else {
+			TEST(true); // bstore for unknown tenant
+			// Assume not loaded yet, just wait a bit. Could do sophisticated mechanism but will redo tenant loading to
+			// be versioned anyway
+			retryCount++;
+			TraceEvent(retryCount < 10 ? SevDebug : SevWarn, "BlobWorkerUnknownTenantForGranule", bwData->id)
+			    .detail("KeyRange", keyRange);
+			wait(delay(0.1));
+		}
+	}
+}
+
 ACTOR Future<Void> start(Reference<BlobWorkerData> bwData, GranuleRangeMetadata* meta, AssignBlobRangeRequest req) {
 	ASSERT(meta->activeMetadata.isValid());
+
+	Future<Reference<BlobConnectionProvider>> loadBStore;
+	if (SERVER_KNOBS->BG_METADATA_SOURCE != "tenant") {
+		loadBStore = Future<Reference<BlobConnectionProvider>>(bwData->bstore); // done
+	} else {
+		loadBStore = loadBStoreForTenant(bwData, req.keyRange);
+	}
+
 	meta->activeMetadata->originalReq = req;
 	meta->assignFuture = openGranule(bwData, req);
-	meta->fileUpdaterFuture = blobGranuleUpdateFiles(bwData, meta->activeMetadata, meta->assignFuture);
+	meta->fileUpdaterFuture = blobGranuleUpdateFiles(bwData, meta->activeMetadata, meta->assignFuture, loadBStore);
 	meta->historyLoaderFuture = blobGranuleLoadHistory(bwData, meta->activeMetadata, meta->assignFuture);
 	wait(success(meta->assignFuture));
 	return Void();
@@ -3115,72 +3148,6 @@ ACTOR Future<Void> monitorRemoval(Reference<BlobWorkerData> bwData) {
 	}
 }
 
-// FIXME: if credentials can expire, refresh periodically
-ACTOR Future<Void> loadBlobMetadataForTenants(Reference<BlobWorkerData> bwData,
-                                              Reference<AsyncVar<ServerDBInfo> const> dbInfo,
-                                              std::vector<TenantMapEntry> tenantMapEntries) {
-	ASSERT(SERVER_KNOBS->BG_METADATA_SOURCE == "tenant");
-	ASSERT(!tenantMapEntries.empty());
-	state std::vector<BlobMetadataDomainId> domainIds;
-	for (auto& entry : tenantMapEntries) {
-		if (BW_DEBUG) {
-			fmt::print(
-			    "BW {0} loading blob metadata for tenant {1}\n", bwData->id.shortString().substr(0, 5), entry.id);
-		}
-		domainIds.push_back(entry.id);
-	}
-
-	// FIXME: if one tenant gets an error, don't kill whole blob worker
-	// TODO: add latency metrics
-	loop {
-		Future<EKPGetLatestBlobMetadataReply> requestFuture;
-		if (dbInfo.isValid() && dbInfo->get().encryptKeyProxy.present()) {
-			EKPGetLatestBlobMetadataRequest req;
-			req.domainIds = domainIds;
-			requestFuture =
-			    brokenPromiseToNever(dbInfo->get().encryptKeyProxy.get().getLatestBlobMetadata.getReply(req));
-		} else {
-			requestFuture = Never();
-		}
-		choose {
-			when(EKPGetLatestBlobMetadataReply rep = wait(requestFuture)) {
-				ASSERT(rep.blobMetadataDetails.size() == domainIds.size());
-				// not guaranteed to be in same order in the request as the response
-				for (auto& metadata : rep.blobMetadataDetails) {
-					auto info = bwData->tenantInfoById.find(metadata.domainId);
-					if (info == bwData->tenantInfoById.end()) {
-						TraceEvent(SevWarn, "BlobWorkerTenantDeletedWhileLoadMetadata", bwData->id)
-						    .detail("TenantId", metadata.domainId);
-						continue;
-					}
-					auto dataEntry = bwData->tenantData.rangeContaining(info->second.prefix);
-					ASSERT(dataEntry.begin() == info->second.prefix);
-					dataEntry.cvalue()->conn = BlobConnectionProvider::newBlobConnectionProvider(metadata);
-					dataEntry.cvalue()->connLoaded.send(Void());
-					TraceEvent(SevDebug, "BlobWorkerTenantMetadataLoaded", bwData->id)
-					    .detail("TenantId", metadata.domainId);
-					if (BW_DEBUG) {
-						fmt::print("BW {0} loaded blob metadata for {1}: {2}",
-						           bwData->id.shortString().substr(0, 5),
-						           metadata.domainId,
-						           metadata.base.present() ? metadata.base.get().toString() : "");
-						if (metadata.partitions.empty()) {
-							fmt::print("\n");
-						} else {
-							fmt::print(" ({0})\n", metadata.partitions.size());
-							for (auto& it : metadata.partitions) {
-								fmt::print("    {0}\n", it.toString());
-							}
-						}
-					}
-				}
-				return Void();
-			}
-			when(wait(dbInfo->onChange())) {}
-		}
-	}
-}
-
 // Because change feeds send uncommitted data and explicit rollback messages, we speculatively buffer/write
 // uncommitted data. This means we must ensure the data is actually committed before "committing" those writes in
 // the blob granule. The simplest way to do this is to have the blob worker do a periodic GRV, which is guaranteed
@@ -3213,7 +3180,7 @@ ACTOR Future<Void> runGRVChecks(Reference<BlobWorkerData> bwData) {
 
 // FIXME: better way to do this?
 // monitor system keyspace for new tenants
-ACTOR Future<Void> monitorTenants(Reference<BlobWorkerData> bwData, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+ACTOR Future<Void> monitorTenants(Reference<BlobWorkerData> bwData) {
 	loop {
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bwData->db);
 		loop {
@@ -3233,33 +3200,14 @@ ACTOR Future<Void> monitorTenants(Reference<BlobWorkerData> bwData, Reference<As
 					throw internal_error();
 				}
 
-				std::vector<TenantMapEntry> tenantsToLoad;
+				std::vector<std::pair<TenantName, TenantMapEntry>> tenants;
 				for (auto& it : tenantResults) {
 					// FIXME: handle removing/moving tenants!
 					StringRef tenantName = it.key.removePrefix(tenantMapPrefix);
 					TenantMapEntry entry = decodeTenantEntry(it.value);
-
-					if (bwData->tenantInfoById.insert({ entry.id, entry }).second) {
-						if (BW_DEBUG) {
-							fmt::print("BW {0} found new tenant {1}: {2} {3}\n",
-							           bwData->id.shortString().substr(0, 5),
-							           tenantName.printable(),
-							           entry.id,
-							           entry.prefix.printable());
-						}
-						auto r = makeReference<GranuleTenantData>(tenantName, entry);
-						bwData->tenantData.insert(KeyRangeRef(entry.prefix, entry.prefix.withSuffix(normalKeys.end)),
-						                          r);
-						if (SERVER_KNOBS->BG_METADATA_SOURCE != "tenant") {
-							r->connLoaded.send(Void());
-						} else {
-							tenantsToLoad.push_back(entry);
-						}
-					}
+					tenants.push_back(std::pair(tenantName, entry));
 				}
-				if (!tenantsToLoad.empty()) {
-					bwData->addActor.send(loadBlobMetadataForTenants(bwData, dbInfo, tenantsToLoad));
-				}
+				bwData->tenantData.addTenants(tenants);
 
 				state Future<Void> watchChange = tr->watch(tenantLastIdKey);
 				wait(tr->commit());
@@ -3298,8 +3246,8 @@ static void handleGetGranuleAssignmentsRequest(Reference<BlobWorkerData> self,
 ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
                               ReplyPromise<InitializeBlobWorkerReply> recruitReply,
                               Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
-	state Reference<BlobWorkerData> self(
-	    new BlobWorkerData(bwInterf.id(), openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True)));
+	state Reference<BlobWorkerData> self(new BlobWorkerData(
+	    bwInterf.id(), dbInfo, openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True)));
 	self->id = bwInterf.id();
 	self->locality = bwInterf.locality;
 
@@ -3310,19 +3258,21 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 	}
 
 	try {
-		if (BW_DEBUG) {
-			fmt::print("BW constructing backup container from {0}\n", SERVER_KNOBS->BG_URL);
-		}
-		self->bstore = BackupContainerFileSystem::openContainerFS(SERVER_KNOBS->BG_URL, {}, {});
-		if (BW_DEBUG) {
-			printf("BW constructed backup container\n");
+		if (SERVER_KNOBS->BG_RANGE_SOURCE != "tenant") {
+			if (BW_DEBUG) {
+				fmt::print("BW constructing backup container from {0}\n", SERVER_KNOBS->BG_URL);
+			}
+			self->bstore = BlobConnectionProvider::newBlobConnectionProvider(SERVER_KNOBS->BG_URL);
+			if (BW_DEBUG) {
+				printf("BW constructed backup container\n");
+			}
 		}
 
 		// register the blob worker to the system keyspace
 		wait(registerBlobWorker(self, bwInterf));
 	} catch (Error& e) {
 		if (BW_DEBUG) {
-			fmt::print("BW got backup container init error {0}\n", e.name());
+			fmt::print("BW got init error {0}\n", e.name());
 		}
 		// if any errors came up while initializing the blob worker, let the blob manager know
 		// that recruitment failed
@@ -3342,7 +3292,7 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 	self->addActor.send(waitFailureServer(bwInterf.waitFailure.getFuture()));
 	self->addActor.send(runGRVChecks(self));
 	if (SERVER_KNOBS->BG_RANGE_SOURCE == "tenant") {
-		self->addActor.send(monitorTenants(self, dbInfo));
+		self->addActor.send(monitorTenants(self));
 	}
 	state Future<Void> selfRemoved = monitorRemoval(self);
 

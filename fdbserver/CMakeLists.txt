@@ -5,15 +5,12 @@ set(FDBSERVER_SRCS
   BackupProgress.actor.cpp
   BackupProgress.actor.h
   BackupWorker.actor.cpp
-  BlobConnectionProvider.h
-  BlobConnectionProvider.cpp
   BlobGranuleServerCommon.actor.cpp
   BlobGranuleServerCommon.actor.h
   BlobGranuleValidation.actor.cpp
   BlobGranuleValidation.actor.h
   BlobManager.actor.cpp
   BlobManagerInterface.h
-  BlobMetadataUtils.h
   BlobWorker.actor.cpp
   ClusterController.actor.cpp
   ClusterController.actor.h
