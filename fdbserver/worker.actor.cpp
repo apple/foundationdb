@@ -2522,12 +2522,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					    .detail("PrevRole", lastSnapReq.role)
 					    .detail("CurrRole", snapReq.role)
 					    .detail("GapTime", now() - lastSnapTime);
-					// ASSERT(false);
+					ASSERT(false);
 				}
-				// Standalone<StringRef> snapFolder = StringRef(folder);
-				// if (snapReq.role.toString() == "coord") {
-				// 	snapFolder = coordFolder;
-				// }
 				errorForwarders.add(workerSnapCreate(snapReq, folder, coordFolder));
 				if (g_network->isSimulated()) {
 					lastSnapTime = now();
