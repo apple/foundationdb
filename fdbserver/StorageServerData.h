@@ -43,8 +43,12 @@ struct StorageServerShard {
 	                   ShardState shardState)
 	  : range(range), version(version), id(id), desiredId(desiredId), shardState(shardState) {}
 
-	static StorageServerShard notAssigned(KeyRange range, Version version) {
+	static StorageServerShard notAssigned(KeyRange range, Version version = 0) {
 		return StorageServerShard(range, version, 0, 0, NotAssigned);
+	}
+
+	static StorageServerShard anonymousNotAssigned(KeyRange range) {
+		return StorageServerShard(range, 0, anonymousShardId.first(), anonymousShardId.first(), NotAssigned);
 	}
 
 	static StorageServerShard anonymousShard(KeyRange range, Version version, ShardState shardState) {
