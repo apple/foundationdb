@@ -46,12 +46,18 @@ enum TesterOptionId {
 	OPT_KNOB,
 	OPT_EXTERNAL_CLIENT_LIBRARY,
 	OPT_EXTERNAL_CLIENT_DIRECTORY,
+	OPT_TMP_DIR,
 	OPT_DISABLE_LOCAL_CLIENT,
 	OPT_TEST_FILE,
 	OPT_INPUT_PIPE,
 	OPT_OUTPUT_PIPE,
 	OPT_FDB_API_VERSION,
-	OPT_TRANSACTION_RETRY_LIMIT
+	OPT_TRANSACTION_RETRY_LIMIT,
+	OPT_BLOB_GRANULE_LOCAL_FILE_PATH,
+	OPT_STATS_INTERVAL,
+	OPT_TLS_CERT_FILE,
+	OPT_TLS_KEY_FILE,
+	OPT_TLS_CA_FILE,
 };
 
 CSimpleOpt::SOption TesterOptionDefs[] = //
@@ -66,6 +72,7 @@ CSimpleOpt::SOption TesterOptionDefs[] = //
 	  { OPT_KNOB, "--knob-", SO_REQ_SEP },
 	  { OPT_EXTERNAL_CLIENT_LIBRARY, "--external-client-library", SO_REQ_SEP },
 	  { OPT_EXTERNAL_CLIENT_DIRECTORY, "--external-client-dir", SO_REQ_SEP },
+	  { OPT_TMP_DIR, "--tmp-dir", SO_REQ_SEP },
 	  { OPT_DISABLE_LOCAL_CLIENT, "--disable-local-client", SO_NONE },
 	  { OPT_TEST_FILE, "-f", SO_REQ_SEP },
 	  { OPT_TEST_FILE, "--test-file", SO_REQ_SEP },
@@ -73,6 +80,11 @@ CSimpleOpt::SOption TesterOptionDefs[] = //
 	  { OPT_OUTPUT_PIPE, "--output-pipe", SO_REQ_SEP },
 	  { OPT_FDB_API_VERSION, "--api-version", SO_REQ_SEP },
 	  { OPT_TRANSACTION_RETRY_LIMIT, "--transaction-retry-limit", SO_REQ_SEP },
+	  { OPT_BLOB_GRANULE_LOCAL_FILE_PATH, "--blob-granule-local-file-path", SO_REQ_SEP },
+	  { OPT_STATS_INTERVAL, "--stats-interval", SO_REQ_SEP },
+	  { OPT_TLS_CERT_FILE, "--tls-cert-file", SO_REQ_SEP },
+	  { OPT_TLS_KEY_FILE, "--tls-key-file", SO_REQ_SEP },
+	  { OPT_TLS_CA_FILE, "--tls-ca-file", SO_REQ_SEP },
 	  SO_END_OF_OPTIONS };
 
 void printProgramUsage(const char* execName) {
@@ -98,6 +110,8 @@ void printProgramUsage(const char* execName) {
 	       "                 Path to the external client library.\n"
 	       "  --external-client-dir DIR\n"
 	       "                 Directory containing external client libraries.\n"
+	       "  --tmp-dir DIR\n"
+	       "                 Directory for temporary files of the client.\n"
 	       "  --disable-local-client DIR\n"
 	       "                 Disable the local client, i.e. use only external client libraries.\n"
 	       "  --input-pipe NAME\n"
@@ -108,8 +122,18 @@ void printProgramUsage(const char* execName) {
 	       "                 Required FDB API version (default %d).\n"
 	       "  --transaction-retry-limit NUMBER\n"
 	       "				 Maximum number of retries per tranaction (default: 0 - unlimited)\n"
+	       "  --blob-granule-local-file-path PATH\n"
+	       "				 Path to blob granule files on local filesystem\n"
 	       "  -f, --test-file FILE\n"
 	       "                 Test file to run.\n"
+	       "  --stats-interval MILLISECONDS\n"
+	       "                 Time interval in milliseconds for printing workload statistics (default: 0 - disabled).\n"
+	       "  --tls-cert-file FILE\n"
+	       "                 Path to file containing client's TLS certificate chain\n"
+	       "  --tls-key-file FILE\n"
+	       "                 Path to file containing client's TLS private key\n"
+	       "  --tls-ca-file FILE\n"
+	       "                 Path to file containing TLS CA certificate\n"
 	       "  -h, --help     Display this help and exit.\n",
 	       FDB_API_VERSION);
 }
@@ -180,6 +204,9 @@ bool processArg(TesterOptions& options, const CSimpleOpt& args) {
 	case OPT_EXTERNAL_CLIENT_DIRECTORY:
 		options.externalClientDir = args.OptionArg();
 		break;
+	case OPT_TMP_DIR:
+		options.tmpDir = args.OptionArg();
+		break;
 	case OPT_DISABLE_LOCAL_CLIENT:
 		options.disableLocalClient = true;
 		break;
@@ -199,6 +226,21 @@ bool processArg(TesterOptions& options, const CSimpleOpt& args) {
 		break;
 	case OPT_TRANSACTION_RETRY_LIMIT:
 		processIntOption(args.OptionText(), args.OptionArg(), 0, 1000, options.transactionRetryLimit);
+		break;
+	case OPT_BLOB_GRANULE_LOCAL_FILE_PATH:
+		options.bgBasePath = args.OptionArg();
+		break;
+	case OPT_STATS_INTERVAL:
+		processIntOption(args.OptionText(), args.OptionArg(), 0, 60000, options.statsIntervalMs);
+		break;
+	case OPT_TLS_CERT_FILE:
+		options.tlsCertFile.assign(args.OptionArg());
+		break;
+	case OPT_TLS_KEY_FILE:
+		options.tlsKeyFile.assign(args.OptionArg());
+		break;
+	case OPT_TLS_CA_FILE:
+		options.tlsCaFile.assign(args.OptionArg());
 		break;
 	}
 	return true;
@@ -236,6 +278,9 @@ void fdb_check(fdb_error_t e) {
 }
 
 void applyNetworkOptions(TesterOptions& options) {
+	if (!options.tmpDir.empty()) {
+		fdb_check(FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_CLIENT_TMP_DIR, options.tmpDir));
+	}
 	if (!options.externalClientLibrary.empty()) {
 		fdb_check(FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_DISABLE_LOCAL_CLIENT));
 		fdb_check(
@@ -275,6 +320,18 @@ void applyNetworkOptions(TesterOptions& options) {
 		fdb_check(FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_KNOB,
 		                            fmt::format("{}={}", knob.first.c_str(), knob.second.c_str())));
 	}
+
+	if (!options.tlsCertFile.empty()) {
+		fdb_check(FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_TLS_CERT_PATH, options.tlsCertFile));
+	}
+
+	if (!options.tlsKeyFile.empty()) {
+		fdb_check(FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_TLS_KEY_PATH, options.tlsKeyFile));
+	}
+
+	if (!options.tlsCaFile.empty()) {
+		fdb_check(FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_TLS_CA_PATH, options.tlsCaFile));
+	}
 }
 
 void randomizeOptions(TesterOptions& options) {
@@ -295,7 +352,7 @@ bool runWorkloads(TesterOptions& options) {
 
 		std::unique_ptr<IScheduler> scheduler = createScheduler(options.numClientThreads);
 		std::unique_ptr<ITransactionExecutor> txExecutor = createTransactionExecutor(txExecOptions);
-		txExecutor->init(scheduler.get(), options.clusterFile.c_str());
+		txExecutor->init(scheduler.get(), options.clusterFile.c_str(), options.bgBasePath);
 
 		WorkloadManager workloadMgr(txExecutor.get(), scheduler.get());
 		for (const auto& workloadSpec : options.testSpec.workloads) {
@@ -318,6 +375,9 @@ bool runWorkloads(TesterOptions& options) {
 		}
 
 		scheduler->start();
+		if (options.statsIntervalMs) {
+			workloadMgr.schedulePrintStatistics(options.statsIntervalMs);
+		}
 		workloadMgr.run();
 		return !workloadMgr.failed();
 	} catch (const std::runtime_error& err) {

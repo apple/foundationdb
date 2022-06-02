@@ -23,6 +23,7 @@
 #include "fdbclient/Notified.h"
 #include "flow/FastAlloc.h"
 #include "flow/FastRef.h"
+#include "fdbclient/GlobalConfig.actor.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "flow/genericactors.actor.h"
 #include <vector>
@@ -141,7 +142,7 @@ struct WatchParameters : public ReferenceCounted<WatchParameters> {
 
 	const Version version;
 	const TagSet tags;
-	const SpanID spanID;
+	const SpanContext spanContext;
 	const TaskPriority taskID;
 	const Optional<UID> debugID;
 	const UseProvisionalProxies useProvisionalProxies;
@@ -151,11 +152,11 @@ struct WatchParameters : public ReferenceCounted<WatchParameters> {
 	                Optional<Value> value,
 	                Version version,
 	                TagSet tags,
-	                SpanID spanID,
+	                SpanContext spanContext,
 	                TaskPriority taskID,
 	                Optional<UID> debugID,
 	                UseProvisionalProxies useProvisionalProxies)
-	  : tenant(tenant), key(key), value(value), version(version), tags(tags), spanID(spanID), taskID(taskID),
+	  : tenant(tenant), key(key), value(value), version(version), tags(tags), spanContext(spanContext), taskID(taskID),
 	    debugID(debugID), useProvisionalProxies(useProvisionalProxies) {}
 };
 
@@ -243,18 +244,21 @@ public:
 
 	// Constructs a new copy of this DatabaseContext from the parameters of this DatabaseContext
 	Database clone() const {
-		return Database(new DatabaseContext(connectionRecord,
-		                                    clientInfo,
-		                                    coordinator,
-		                                    clientInfoMonitor,
-		                                    taskID,
-		                                    clientLocality,
-		                                    enableLocalityLoadBalance,
-		                                    lockAware,
-		                                    internal,
-		                                    apiVersion,
-		                                    switchable,
-		                                    defaultTenant));
+		Database cx = Database(new DatabaseContext(connectionRecord,
+		                                           clientInfo,
+		                                           coordinator,
+		                                           clientInfoMonitor,
+		                                           taskID,
+		                                           clientLocality,
+		                                           enableLocalityLoadBalance,
+		                                           lockAware,
+		                                           internal,
+		                                           apiVersion,
+		                                           switchable,
+		                                           defaultTenant));
+		cx->globalConfig->init(Reference<AsyncVar<ClientDBInfo> const>(cx->clientInfo),
+		                       std::addressof(cx->clientInfo->get()));
+		return cx;
 	}
 
 	Optional<KeyRangeLocationInfo> getCachedLocation(const Optional<TenantName>& tenant,
@@ -416,12 +420,12 @@ public:
 	Optional<TenantName> defaultTenant;
 
 	struct VersionRequest {
-		SpanID spanContext;
+		SpanContext spanContext;
 		Promise<GetReadVersionReply> reply;
 		TagSet tags;
 		Optional<UID> debugID;
 
-		VersionRequest(SpanID spanContext, TagSet tags = TagSet(), Optional<UID> debugID = Optional<UID>())
+		VersionRequest(SpanContext spanContext, TagSet tags = TagSet(), Optional<UID> debugID = Optional<UID>())
 		  : spanContext(spanContext), tags(tags), debugID(debugID) {}
 	};
 
@@ -524,7 +528,6 @@ public:
 	Counter transactionsExpensiveClearCostEstCount;
 	Counter transactionGrvFullBatches;
 	Counter transactionGrvTimedOutBatches;
-	Counter transactionsStaleVersionVectors;
 
 	ContinuousSample<double> latencies, readLatencies, commitLatencies, GRVLatencies, mutationsPerCommit,
 	    bytesPerCommit, bgLatencies, bgGranulesPerRequest;
@@ -594,9 +597,10 @@ public:
 	AsyncTrigger updateCache;
 	std::vector<std::unique_ptr<SpecialKeyRangeReadImpl>> specialKeySpaceModules;
 	std::unique_ptr<SpecialKeySpace> specialKeySpace;
-	void registerSpecialKeySpaceModule(SpecialKeySpace::MODULE module,
-	                                   SpecialKeySpace::IMPLTYPE type,
-	                                   std::unique_ptr<SpecialKeyRangeReadImpl>&& impl);
+	void registerSpecialKeysImpl(SpecialKeySpace::MODULE module,
+	                             SpecialKeySpace::IMPLTYPE type,
+	                             std::unique_ptr<SpecialKeyRangeReadImpl>&& impl,
+	                             int deprecatedVersion = -1);
 
 	static bool debugUseTags;
 	static const std::vector<std::string> debugTransactionTagChoices;
@@ -627,6 +631,7 @@ public:
 	using TransactionT = ReadYourWritesTransaction;
 	Reference<TransactionT> createTransaction();
 
+	std::unique_ptr<GlobalConfig> globalConfig;
 	EventCacheHolder connectToDatabaseEventCacheHolder;
 
 private:

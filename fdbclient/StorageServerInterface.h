@@ -35,6 +35,7 @@
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/TagThrottle.actor.h"
 #include "fdbclient/Tenant.h"
+#include "flow/Tracing.h"
 #include "flow/UnitTest.h"
 #include "fdbclient/VersionVector.h"
 
@@ -271,7 +272,7 @@ struct GetValueReply : public LoadBalancedReply {
 
 struct GetValueRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 8454530;
-	SpanID spanContext;
+	SpanContext spanContext;
 	TenantInfo tenantInfo;
 	Key key;
 	Version version;
@@ -283,7 +284,7 @@ struct GetValueRequest : TimedRequest {
 	                                      // serve the given key
 
 	GetValueRequest() {}
-	GetValueRequest(SpanID spanContext,
+	GetValueRequest(SpanContext spanContext,
 	                const TenantInfo& tenantInfo,
 	                const Key& key,
 	                Version ver,
@@ -315,7 +316,7 @@ struct WatchValueReply {
 
 struct WatchValueRequest {
 	constexpr static FileIdentifier file_identifier = 14747733;
-	SpanID spanContext;
+	SpanContext spanContext;
 	TenantInfo tenantInfo;
 	Key key;
 	Optional<Value> value;
@@ -326,7 +327,7 @@ struct WatchValueRequest {
 
 	WatchValueRequest() {}
 
-	WatchValueRequest(SpanID spanContext,
+	WatchValueRequest(SpanContext spanContext,
 	                  TenantInfo tenantInfo,
 	                  const Key& key,
 	                  Optional<Value> value,
@@ -360,7 +361,7 @@ struct GetKeyValuesReply : public LoadBalancedReply {
 
 struct GetKeyValuesRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 6795746;
-	SpanID spanContext;
+	SpanContext spanContext;
 	Arena arena;
 	TenantInfo tenantInfo;
 	KeySelectorRef begin, end;
@@ -418,13 +419,14 @@ struct GetMappedKeyValuesReply : public LoadBalancedReply {
 
 struct GetMappedKeyValuesRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 6795747;
-	SpanID spanContext;
+	SpanContext spanContext;
 	Arena arena;
 	TenantInfo tenantInfo;
 	KeySelectorRef begin, end;
 	KeyRef mapper;
 	Version version; // or latestVersion
 	int limit, limitBytes;
+	int matchIndex;
 	bool isFetchKeys;
 	Optional<TagSet> tags;
 	Optional<UID> debugID;
@@ -450,7 +452,8 @@ struct GetMappedKeyValuesRequest : TimedRequest {
 		           spanContext,
 		           tenantInfo,
 		           arena,
-		           ssLatestCommitVersions);
+		           ssLatestCommitVersions,
+		           matchIndex);
 	}
 };
 
@@ -483,7 +486,7 @@ struct GetKeyValuesStreamReply : public ReplyPromiseStreamReply {
 
 struct GetKeyValuesStreamRequest {
 	constexpr static FileIdentifier file_identifier = 6795746;
-	SpanID spanContext;
+	SpanContext spanContext;
 	Arena arena;
 	TenantInfo tenantInfo;
 	KeySelectorRef begin, end;
@@ -534,7 +537,7 @@ struct GetKeyReply : public LoadBalancedReply {
 
 struct GetKeyRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 10457870;
-	SpanID spanContext;
+	SpanContext spanContext;
 	Arena arena;
 	TenantInfo tenantInfo;
 	KeySelectorRef sel;
@@ -548,7 +551,7 @@ struct GetKeyRequest : TimedRequest {
 
 	GetKeyRequest() {}
 
-	GetKeyRequest(SpanID spanContext,
+	GetKeyRequest(SpanContext spanContext,
 	              TenantInfo tenantInfo,
 	              KeySelectorRef const& sel,
 	              Version version,
@@ -602,6 +605,7 @@ struct StorageMetrics {
 	int64_t bytesPerKSecond = 0; // network bandwidth (average over 10s)
 	int64_t iosPerKSecond = 0;
 	int64_t bytesReadPerKSecond = 0;
+	Optional<KeyRange> keys; // this metric belongs to which range
 
 	static const int64_t infinity = 1LL << 60;
 
@@ -835,7 +839,7 @@ struct ChangeFeedStreamReply : public ReplyPromiseStreamReply {
 
 struct ChangeFeedStreamRequest {
 	constexpr static FileIdentifier file_identifier = 6795746;
-	SpanID spanContext;
+	SpanContext spanContext;
 	Arena arena;
 	Key rangeID;
 	Version begin = 0;
@@ -1039,9 +1043,9 @@ struct ChangeFeedVersionUpdateRequest {
 
 struct GetStorageMetricsReply {
 	constexpr static FileIdentifier file_identifier = 15491478;
-	StorageMetrics load;
-	StorageMetrics available;
-	StorageMetrics capacity;
+	StorageMetrics load; // sum of key-value metrics (logical bytes)
+	StorageMetrics available; // physical bytes
+	StorageMetrics capacity; // physical bytes
 	double bytesInputRate;
 	int64_t versionLag;
 	double lastUpdate;

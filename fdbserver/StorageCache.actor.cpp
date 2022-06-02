@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbserver/OTELSpanContextMessage.h"
 #include "flow/Arena.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/NativeAPI.actor.h"
@@ -1839,16 +1840,18 @@ ACTOR Future<Void> pullAsyncData(StorageCacheData* data) {
 	++data->counters.updateBatches;
 
 	loop {
-		loop {
-			choose {
-				when(wait(cursor ? cursor->getMore(TaskPriority::TLogCommit) : Never())) { break; }
-				when(wait(dbInfoChange)) {
+		loop choose {
+			when(wait(cursor ? cursor->getMore(TaskPriority::TLogCommit) : Never())) { break; }
+			when(wait(dbInfoChange)) {
+				dbInfoChange = data->db->onChange();
+				if (data->db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
+					data->logSystem = ILogSystem::fromServerDBInfo(data->thisServerID, data->db->get());
 					if (data->logSystem) {
 						cursor = data->logSystem->peekSingle(
 						    data->thisServerID, data->peekVersion, cacheTag, std::vector<std::pair<Version, Tag>>());
-					} else
+					} else {
 						cursor = Reference<ILogSystem::IPeekCursor>();
-					dbInfoChange = data->db->onChange();
+					}
 				}
 			}
 		}
@@ -1896,6 +1899,10 @@ ACTOR Future<Void> pullAsyncData(StorageCacheData* data) {
 					} else if (cloneReader.protocolVersion().hasSpanContext() &&
 					           SpanContextMessage::isNextIn(cloneReader)) {
 						SpanContextMessage scm;
+						cloneReader >> scm;
+					} else if (cloneReader.protocolVersion().hasOTELSpanContext() &&
+					           OTELSpanContextMessage::isNextIn(cloneReader)) {
+						OTELSpanContextMessage scm;
 						cloneReader >> scm;
 					} else {
 						MutationRef msg;
@@ -1975,6 +1982,10 @@ ACTOR Future<Void> pullAsyncData(StorageCacheData* data) {
 				} else if (reader.protocolVersion().hasSpanContext() && SpanContextMessage::isNextIn(reader)) {
 					SpanContextMessage scm;
 					reader >> scm;
+				} else if (reader.protocolVersion().hasOTELSpanContext() && OTELSpanContextMessage::isNextIn(reader)) {
+					TEST(true); // StorageCache reading OTELSpanContextMessage
+					OTELSpanContextMessage oscm;
+					reader >> oscm;
 				} else {
 					MutationRef msg;
 					reader >> msg;
@@ -2169,7 +2180,6 @@ ACTOR Future<Void> storageCacheServer(StorageServerInterface ssi,
                                       Reference<AsyncVar<ServerDBInfo> const> db) {
 	state StorageCacheData self(ssi.id(), id, db);
 	state ActorCollection actors(false);
-	state Future<Void> dbInfoChange = Void();
 	state StorageCacheUpdater updater(self.lastVersionWithData);
 	self.updater = &updater;
 
@@ -2201,10 +2211,6 @@ ACTOR Future<Void> storageCacheServer(StorageServerInterface ssi,
 	loop {
 		++self.counters.loops;
 		choose {
-			when(wait(dbInfoChange)) {
-				dbInfoChange = db->onChange();
-				self.logSystem = ILogSystem::fromServerDBInfo(self.thisServerID, self.db->get());
-			}
 			when(GetValueRequest req = waitNext(ssi.getValue.getFuture())) {
 				// TODO do we need to add throttling for cache servers? Probably not
 				// actors.add(self->readGuard(req , getValueQ));

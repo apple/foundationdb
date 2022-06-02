@@ -171,6 +171,13 @@ futures must apply the following rules to the result:
     the language binding. Make sure the API returns without error. Finally 
     push the string "GOT_ESTIMATED_RANGE_SIZE" onto the stack.
 
+#### GET_RANGE_SPLIT_POINTS
+
+    Pops the top three items off of the stack as BEGIN_KEY, END_KEY and
+    CHUNK_SIZE. Then call the `getRangeSplitPoints` API of the language
+    binding. Make sure the API returns without error. Finally push the string
+    "GOT_RANGE_SPLIT_POINTS" onto the stack.
+
 #### GET_KEY (_SNAPSHOT, _DATABASE)
 
     Pops the top four items off of the stack as KEY, OR_EQUAL, OFFSET, PREFIX

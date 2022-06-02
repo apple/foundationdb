@@ -48,6 +48,7 @@ import com.apple.foundationdb.Transaction;
 import com.apple.foundationdb.async.AsyncUtil;
 import com.apple.foundationdb.tuple.ByteArrayUtil;
 import com.apple.foundationdb.tuple.Tuple;
+import com.apple.foundationdb.async.CloseableAsyncIterator;
 
 public class AsyncStackTester {
 	static final String DIRECTORY_PREFIX = "DIRECTORY_";
@@ -483,6 +484,26 @@ public class AsyncStackTester {
 				inst.push(TenantManagement.deleteTenant(inst.context.db, tenantName));
 			}, FDB.DEFAULT_EXECUTOR);
 		}
+		else if (op == StackOperation.TENANT_LIST) {
+			return inst.popParams(3).thenAcceptAsync(params -> {
+				byte[] begin = (byte[])params.get(0);
+				byte[] end = (byte[])params.get(1);
+				int limit = StackUtils.getInt(params.get(2));
+				CloseableAsyncIterator<KeyValue> tenantIter = TenantManagement.listTenants(inst.context.db, begin, end, limit);
+				List<byte[]> result = new ArrayList();
+				try {
+					while (tenantIter.hasNext()) {
+						KeyValue next = tenantIter.next();
+						String metadata = new String(next.getValue());
+						assert StackUtils.validTenantMetadata(metadata) : "Invalid Tenant Metadata";
+						result.add(next.getKey());
+					}
+				} finally {
+					tenantIter.close();
+				}
+				inst.push(Tuple.fromItems(result).pack());
+			}, FDB.DEFAULT_EXECUTOR);
+		}
 		else if (op == StackOperation.TENANT_SET_ACTIVE) {
 			return inst.popParam().thenAcceptAsync(param -> {
 				byte[] tenantName = (byte[])param;
@@ -493,7 +514,7 @@ public class AsyncStackTester {
 			inst.context.setTenant(Optional.empty());
 			return AsyncUtil.DONE;
 		}
-		else if(op == StackOperation.UNIT_TESTS) {
+		else if (op == StackOperation.UNIT_TESTS) {
 			inst.context.db.options().setLocationCacheSize(100001);
 			return inst.context.db.runAsync(tr -> {
 				FDB fdb = FDB.instance();
@@ -568,7 +589,7 @@ public class AsyncStackTester {
 				throw new RuntimeException("Unit tests failed: " + t.getMessage());
 			});
 		}
-		else if(op == StackOperation.LOG_STACK) {
+		else if (op == StackOperation.LOG_STACK) {
 			return inst.popParam().thenComposeAsync(prefix -> doLogStack(inst, (byte[])prefix), FDB.DEFAULT_EXECUTOR);
 		}
 

@@ -152,6 +152,8 @@ Here is a complete list of valid parameters:
  *max_recv_bytes_per_second* (or *rbps*) - Max receive bytes per second for all requests combined.
 
  *header* - Add an additional HTTP header to each blob store REST API request.  Can be specified multiple times.  Format is *header=<FieldName>:<FieldValue>* where both strings are non-empty.
+
+ *sdk_auth* (or *sa*) - Use the AWS SDK to do credentials and authentication. This supports all aws authentication types, including credential-less iam role-based authentication in aws. Experimental, and only works if FDB was compiled with BUILD_AWS_BACKUP=ON. When this parameter is set, all other credential parts of the backup url can be ignored.
  
   **Example**: The URL parameter *header=x-amz-storage-class:REDUCED_REDUNDANCY* would send the HTTP header required to use the reduced redundancy storage option in the S3 API.
 

@@ -28,6 +28,7 @@ ACTOR Future<std::pair<RangeResult, Version>> readFromFDB(Database cx, KeyRange 
 	state Transaction tr(cx);
 	state KeyRange currentRange = range;
 	loop {
+		tr.setOption(FDBTransactionOptions::RAW_ACCESS);
 		try {
 			state RangeResult r = wait(tr.getRange(currentRange, CLIENT_KNOBS->TOO_MANY));
 			Version grv = wait(tr.getReadVersion());
@@ -63,10 +64,11 @@ ACTOR Future<std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>>>
     Reference<BackupContainerFileSystem> bstore,
     KeyRange range,
     Version beginVersion,
-    Version readVersion) {
+    Version readVersion,
+    Optional<TenantName> tenantName) {
 	state RangeResult out;
 	state Standalone<VectorRef<BlobGranuleChunkRef>> chunks;
-	state Transaction tr(cx);
+	state Transaction tr(cx, tenantName);
 
 	loop {
 		try {
@@ -80,6 +82,7 @@ ACTOR Future<std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>>>
 	}
 
 	for (const BlobGranuleChunkRef& chunk : chunks) {
+		ASSERT(chunk.tenantPrefix.present() == tenantName.present());
 		RangeResult chunkRows = wait(readBlobGranule(chunk, range, beginVersion, readVersion, bstore));
 		out.arena().dependsOn(chunkRows.arena());
 		out.append(out.arena(), chunkRows.begin(), chunkRows.size());

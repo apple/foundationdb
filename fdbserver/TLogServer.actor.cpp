@@ -46,6 +46,7 @@
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "flow/Histogram.h"
+#include "flow/DebugTrace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct TLogQueueEntryRef {
@@ -358,7 +359,6 @@ struct TLogData : NonCopyable {
 	FlowLock persistentDataCommitLock;
 
 	// Beginning of fields used by snapshot based backup and restore
-	bool ignorePopRequest; // ignore pop request from storage servers
 	double ignorePopDeadline; // time until which the ignorePopRequest will be
 	                          // honored
 	std::string ignorePopUid; // callers that set ignorePopRequest will set this
@@ -366,8 +366,6 @@ struct TLogData : NonCopyable {
 	                          // the set and for callers that unset will
 	                          // be able to match it up
 	std::string dataFolder; // folder where data is stored
-	std::map<Tag, Version> toBePopped; // map of Tag->Version for all the pops
-	                                   // that came when ignorePopRequest was set
 	Reference<AsyncVar<bool>> degraded;
 	// End of fields used by snapshot based backup and restore
 
@@ -388,11 +386,10 @@ struct TLogData : NonCopyable {
 	    instanceID(deterministicRandom()->randomUniqueID().first()), bytesInput(0), bytesDurable(0),
 	    targetVolatileBytes(SERVER_KNOBS->TLOG_SPILL_THRESHOLD), overheadBytesInput(0), overheadBytesDurable(0),
 	    peekMemoryLimiter(SERVER_KNOBS->TLOG_SPILL_REFERENCE_MAX_PEEK_MEMORY_BYTES),
-	    concurrentLogRouterReads(SERVER_KNOBS->CONCURRENT_LOG_ROUTER_READS), ignorePopRequest(false),
-	    dataFolder(folder), degraded(degraded),
-	    commitLatencyDist(Histogram::getHistogram(LiteralStringRef("tLog"),
-	                                              LiteralStringRef("commit"),
-	                                              Histogram::Unit::microseconds)) {
+	    concurrentLogRouterReads(SERVER_KNOBS->CONCURRENT_LOG_ROUTER_READS), ignorePopDeadline(0), dataFolder(folder),
+	    degraded(degraded), commitLatencyDist(Histogram::getHistogram(LiteralStringRef("tLog"),
+	                                                                  LiteralStringRef("commit"),
+	                                                                  Histogram::Unit::microseconds)) {
 		cx = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
 	}
 };
@@ -571,6 +568,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	TLogData* tLogData;
 	Promise<Void> recoveryComplete, committingQueue;
 	Version unrecoveredBefore, recoveredAt;
+	Version recoveryTxnVersion;
 
 	struct PeekTrackerData {
 		std::map<int, Promise<std::pair<Version, bool>>>
@@ -629,6 +627,9 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	bool execOpCommitInProgress;
 	int txsTags;
 
+	std::map<Tag, Version> toBePopped; // map of Tag->Version for all the pops
+	                                   // that came when ignorePopRequest was set
+
 	explicit LogData(TLogData* tLogData,
 	                 TLogInterface interf,
 	                 Tag remoteTag,
@@ -647,10 +648,11 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	    blockingPeekTimeouts("BlockingPeekTimeouts", cc), emptyPeeks("EmptyPeeks", cc),
 	    nonEmptyPeeks("NonEmptyPeeks", cc), logId(interf.id()), protocolVersion(protocolVersion),
 	    newPersistentDataVersion(invalidVersion), tLogData(tLogData), unrecoveredBefore(1), recoveredAt(1),
-	    logSystem(new AsyncVar<Reference<ILogSystem>>()), remoteTag(remoteTag), isPrimary(isPrimary),
-	    logRouterTags(logRouterTags), logRouterPoppedVersion(0), logRouterPopToVersion(0), locality(tagLocalityInvalid),
-	    recruitmentID(recruitmentID), logSpillType(logSpillType), allTags(tags.begin(), tags.end()),
-	    terminated(tLogData->terminated.getFuture()), execOpCommitInProgress(false), txsTags(txsTags) {
+	    recoveryTxnVersion(1), logSystem(new AsyncVar<Reference<ILogSystem>>()), remoteTag(remoteTag),
+	    isPrimary(isPrimary), logRouterTags(logRouterTags), logRouterPoppedVersion(0), logRouterPopToVersion(0),
+	    locality(tagLocalityInvalid), recruitmentID(recruitmentID), logSpillType(logSpillType),
+	    allTags(tags.begin(), tags.end()), terminated(tLogData->terminated.getFuture()), execOpCommitInProgress(false),
+	    txsTags(txsTags) {
 		startRole(Role::TRANSACTION_LOG,
 		          interf.id(),
 		          tLogData->workerID,
@@ -1234,14 +1236,17 @@ ACTOR Future<Void> processPopRequests(TLogData* self, Reference<LogData> logData
 	state std::map<Tag, Version>::const_iterator it;
 	state int ignoredPopsPlayed = 0;
 	state std::map<Tag, Version> toBePopped;
-	toBePopped = std::move(self->toBePopped);
-	self->toBePopped.clear();
-	self->ignorePopRequest = false;
-	self->ignorePopDeadline = 0.0;
+
+	while (now() < self->ignorePopDeadline) {
+		wait(delayUntil(self->ignorePopDeadline + 0.0001));
+	}
+
+	toBePopped = std::move(logData->toBePopped);
+	logData->toBePopped.clear();
 	self->ignorePopUid = "";
 	for (it = toBePopped.cbegin(); it != toBePopped.cend(); ++it) {
 		const auto& [tag, version] = *it;
-		TraceEvent("PlayIgnoredPop").detail("Tag", tag.toString()).detail("Version", version);
+		TraceEvent("PlayIgnoredPop", logData->logId).detail("Tag", tag.toString()).detail("Version", version);
 		ignoredPops.push_back(tLogPopCore(self, tag, version, logData));
 		if (++ignoredPopsPlayed % SERVER_KNOBS->TLOG_POP_BATCH_SIZE == 0) {
 			TEST(true); // Yielding while processing pop requests
@@ -1249,20 +1254,22 @@ ACTOR Future<Void> processPopRequests(TLogData* self, Reference<LogData> logData
 		}
 	}
 	wait(waitForAll(ignoredPops));
-	TraceEvent("ResetIgnorePopRequest")
-	    .detail("IgnorePopRequest", self->ignorePopRequest)
-	    .detail("IgnorePopDeadline", self->ignorePopDeadline);
+	TraceEvent("ResetIgnorePopRequest", logData->logId).detail("IgnorePopDeadline", self->ignorePopDeadline);
 	return Void();
 }
 
 ACTOR Future<Void> tLogPop(TLogData* self, TLogPopRequest req, Reference<LogData> logData) {
-	if (self->ignorePopRequest) {
-		TraceEvent(SevDebug, "IgnoringPopRequest").detail("IgnorePopDeadline", self->ignorePopDeadline);
+	if (now() < self->ignorePopDeadline) {
+		TraceEvent(SevDebug, "IgnoringPopRequest", logData->logId).detail("IgnorePopDeadline", self->ignorePopDeadline);
 
-		auto& v = self->toBePopped[req.tag];
+		if (logData->toBePopped.empty()) {
+			logData->addActor.send(processPopRequests(self, logData));
+		}
+
+		auto& v = logData->toBePopped[req.tag];
 		v = std::max(v, req.to);
 
-		TraceEvent(SevDebug, "IgnoringPopRequest")
+		TraceEvent(SevDebug, "IgnoringPopRequest", logData->logId)
 		    .detail("IgnorePopDeadline", self->ignorePopDeadline)
 		    .detail("Tag", req.tag.toString())
 		    .detail("Version", req.to);
@@ -1561,7 +1568,7 @@ Version poppedVersion(Reference<LogData> self, Tag tag) {
 		if (tag == txsTag || tag.locality == tagLocalityTxs) {
 			return 0;
 		}
-		return self->recoveredAt + 1;
+		return std::max(self->recoveredAt + 1, self->recoveryTxnVersion);
 	}
 	return tagData->popped;
 }
@@ -1739,11 +1746,30 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 		return Void();
 	}
 
-	//TraceEvent("TLogPeekMessages0", self->dbgid).detail("ReqBeginEpoch", reqBegin.epoch).detail("ReqBeginSeq", reqBegin.sequence).detail("Epoch", self->epoch()).detail("PersistentDataSeq", self->persistentDataSequence).detail("Tag1", reqTag1).detail("Tag2", reqTag2);
+	DebugLogTraceEvent("TLogPeekMessages0", self->dbgid)
+	    .detail("LogId", logData->logId)
+	    .detail("Tag", reqTag.toString())
+	    .detail("ReqBegin", reqBegin)
+	    .detail("Version", logData->version.get())
+	    .detail("RecoveredAt", logData->recoveredAt);
 	// Wait until we have something to return that the caller doesn't already have
 	if (logData->version.get() < reqBegin) {
 		wait(logData->version.whenAtLeast(reqBegin));
 		wait(delay(SERVER_KNOBS->TLOG_PEEK_DELAY, g_network->getCurrentTask()));
+	}
+	if (!logData->stopped && reqTag.locality != tagLocalityTxs && reqTag != txsTag &&
+	    logData->version.get() < logData->recoveryTxnVersion) {
+		DebugLogTraceEvent("TLogPeekMessages1", self->dbgid)
+		    .detail("LogId", logData->logId)
+		    .detail("Tag", reqTag.toString())
+		    .detail("ReqBegin", reqBegin)
+		    .detail("Version", logData->version.get())
+		    .detail("RecoveredAt", logData->recoveredAt);
+		// Make sure the peek reply has the recovery txn for the current TLog.
+		// Older generation TLog has been stopped and doesn't wait here.
+		// Similarly during recovery, reading transaction state store
+		// doesn't wait here.
+		wait(logData->version.whenAtLeast(logData->recoveryTxnVersion));
 	}
 
 	if (logData->locality != tagLocalitySatellite && reqTag.locality == tagLocalityLogRouter) {
@@ -1765,9 +1791,11 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 
 	state Version poppedVer = poppedVersion(logData, reqTag);
 
+	auto tagData = logData->getTagData(reqTag);
+	bool tagRecovered = tagData && !tagData->unpoppedRecovered;
 	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR && poppedVer <= reqBegin &&
 	    reqBegin > logData->persistentDataDurableVersion && !reqOnlySpilled && reqTag.locality >= 0 &&
-	    !reqReturnIfBlocked) {
+	    !reqReturnIfBlocked && tagRecovered) {
 		state double startTime = now();
 		// TODO (version vector) check if this should be included in "status details" json
 		// TODO (version vector) all tags may be too many, instead,  standard deviation?
@@ -1784,6 +1812,11 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 		poppedVer = poppedVersion(logData, reqTag);
 	}
 
+	DebugLogTraceEvent("TLogPeekMessages2", self->dbgid)
+	    .detail("LogId", logData->logId)
+	    .detail("Tag", reqTag.toString())
+	    .detail("ReqBegin", reqBegin)
+	    .detail("PoppedVer", poppedVer);
 	if (poppedVer > reqBegin) {
 		TLogPeekReply rep;
 		rep.maxKnownVersion = logData->version.get();
@@ -1828,7 +1861,9 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 		onlySpilled = false;
 
 		// grab messages from disk
-		//TraceEvent("TLogPeekMessages", self->dbgid).detail("ReqBeginEpoch", reqBegin.epoch).detail("ReqBeginSeq", reqBegin.sequence).detail("Epoch", self->epoch()).detail("PersistentDataSeq", self->persistentDataSequence).detail("Tag1", reqTag1).detail("Tag2", reqTag2);
+		DebugLogTraceEvent("TLogPeekMessages3", self->dbgid)
+		    .detail("ReqBegin", reqBegin)
+		    .detail("Tag", reqTag.toString());
 		if (reqBegin <= logData->persistentDataDurableVersion) {
 			// Just in case the durable version changes while we are waiting for the read, we grab this data from
 			// memory. We may or may not actually send it depending on whether we get enough data from disk. SOMEDAY:
@@ -1989,13 +2024,12 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 	reply.end = endVersion;
 	reply.onlySpilled = onlySpilled;
 
-	// TraceEvent("TlogPeek", self->dbgid)
-	//    .detail("LogId", logData->logId)
-	//    .detail("Tag", req.tag.toString())
-	//    .detail("BeginVer", req.begin)
-	//    .detail("EndVer", reply.end)
-	//    .detail("MsgBytes", reply.messages.expectedSize())
-	//    .detail("ForAddress", req.reply.getEndpoint().getPrimaryAddress());
+	DebugLogTraceEvent("TLogPeekMessages4", self->dbgid)
+	    .detail("LogId", logData->logId)
+	    .detail("Tag", reqTag.toString())
+	    .detail("ReqBegin", reqBegin)
+	    .detail("EndVer", reply.end)
+	    .detail("MsgBytes", reply.messages.expectedSize());
 
 	if (reqSequence.present()) {
 		auto& trackerData = logData->peekTracker[peekId];
@@ -2076,6 +2110,7 @@ ACTOR Future<Void> tLogPeekStream(TLogData* self, TLogPeekStreamRequest req, Ref
 			self->activePeekStreams--;
 			TraceEvent(SevDebug, "TLogPeekStreamEnd", logData->logId)
 			    .errorUnsuppressed(e)
+			    .detail("Tag", req.tag)
 			    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress());
 
 			if (e.code() == error_code_end_of_stream || e.code() == error_code_operation_obsolete) {
@@ -2394,10 +2429,15 @@ ACTOR Future<Void> rejoinClusterController(TLogData* self,
 			// Read and cache cluster ID before displacing this tlog. We want
 			// to avoid removing the tlogs data if it has joined a new cluster
 			// with a different cluster ID.
-			state UID clusterId = wait(getClusterId(self));
-			ASSERT(clusterId.isValid());
-			self->ccClusterId = clusterId;
-			ev.detail("ClusterId", clusterId).detail("SelfClusterId", self->durableClusterId);
+
+			// TODO: #5375
+			/*
+			            state UID clusterId = wait(getClusterId(self));
+			            ASSERT(clusterId.isValid());
+			            self->ccClusterId = clusterId;
+			            ev.detail("ClusterId", clusterId).detail("SelfClusterId", self->durableClusterId);
+			*/
+
 			if (BUGGIFY)
 				wait(delay(SERVER_KNOBS->BUGGIFY_WORKER_REMOVED_MAX_LAG * deterministicRandom()->random01()));
 			throw worker_removed();
@@ -2571,15 +2611,15 @@ ACTOR Future<Void> tLogEnablePopReq(TLogEnablePopRequest enablePopReq, TLogData*
 		enablePopReq.reply.sendError(operation_failed());
 		return Void();
 	}
-	TraceEvent("EnableTLogPlayAllIgnoredPops2")
+	TraceEvent("EnableTLogPlayAllIgnoredPops2", logData->logId)
 	    .detail("UidStr", enablePopReq.snapUID.toString())
 	    .detail("IgnorePopUid", self->ignorePopUid)
-	    .detail("IgnorePopRequest", self->ignorePopRequest)
 	    .detail("IgnorePopDeadline", self->ignorePopDeadline)
 	    .detail("PersistentDataVersion", logData->persistentDataVersion)
 	    .detail("PersistentDataDurableVersion", logData->persistentDataDurableVersion)
 	    .detail("QueueCommittedVersion", logData->queueCommittedVersion.get())
 	    .detail("Version", logData->version.get());
+	self->ignorePopDeadline = 0;
 	wait(processPopRequests(self, logData));
 	enablePopReq.reply.send(Void());
 	return Void();
@@ -2681,9 +2721,8 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 				req.reply.sendError(operation_failed());
 			} else {
 				// FIXME: As part of reverting snapshot V1, make ignorePopUid a UID instead of string
-				self->ignorePopRequest = true;
 				self->ignorePopUid = req.snapUID.toString();
-				self->ignorePopDeadline = g_network->now() + SERVER_KNOBS->TLOG_IGNORE_POP_AUTO_ENABLE_DELAY;
+				self->ignorePopDeadline = now() + SERVER_KNOBS->TLOG_IGNORE_POP_AUTO_ENABLE_DELAY;
 				req.reply.send(Void());
 			}
 		}
@@ -2692,11 +2731,6 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 		}
 		when(TLogSnapRequest snapReq = waitNext(tli.snapRequest.getFuture())) {
 			logData->addActor.send(tLogSnapCreate(snapReq, self, logData));
-		}
-		when(wait(self->ignorePopRequest ? delayUntil(self->ignorePopDeadline) : Never())) {
-			TEST(true); // Hit ignorePopDeadline
-			TraceEvent("EnableTLogPlayAllIgnoredPops").detail("IgnoredPopDeadline", self->ignorePopDeadline);
-			logData->addActor.send(processPopRequests(self, logData));
 		}
 	}
 }
@@ -2779,6 +2813,7 @@ ACTOR Future<Void> pullAsyncData(TLogData* self,
 
 		state Version ver = 0;
 		state std::vector<TagsAndMessage> messages;
+		state bool pullingRecoveryData = endVersion.present() && endVersion.get() == logData->recoveredAt;
 		loop {
 			state bool foundMessage = r->hasMessage();
 			if (!foundMessage || r->version().version != ver) {
@@ -3381,11 +3416,14 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 	self->id_data[recruited.id()] = logData;
 	logData->locality = req.locality;
 	logData->recoveryCount = req.epoch;
+	logData->recoveryTxnVersion = req.recoveryTransactionVersion;
 	logData->removed = rejoinClusterController(self, recruited, req.epoch, Future<Void>(Void()), req.isPrimary);
 	self->popOrder.push_back(recruited.id());
 	self->spillOrder.push_back(recruited.id());
 
-	TraceEvent("TLogStart", logData->logId).detail("RecoveryCount", logData->recoveryCount);
+	TraceEvent("TLogStart", logData->logId)
+	    .detail("RecoveryCount", logData->recoveryCount)
+	    .detail("RecoveryTxnVersion", logData->recoveryTxnVersion);
 
 	state Future<Void> updater;
 	state bool pulledRecoveryVersions = false;
@@ -3599,30 +3637,35 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 				}
 			}
 		} catch (Error& e) {
-			if (e.code() != error_code_worker_removed) {
-				throw;
-			}
-			// Don't need to worry about deleting data if there is no durable
-			// cluster ID.
-			if (!self.durableClusterId.isValid()) {
-				throw;
-			}
-			// When a tlog joins a new cluster and has data for an old cluster,
-			// it should automatically exclude itself to avoid being used in
-			// the new cluster.
-			auto recoveryState = self.dbInfo->get().recoveryState;
-			if (recoveryState == RecoveryState::FULLY_RECOVERED && self.ccClusterId.isValid() &&
-			    self.durableClusterId.isValid() && self.ccClusterId != self.durableClusterId) {
-				state NetworkAddress address = g_network->getLocalAddress();
-				wait(excludeServers(self.cx, { AddressExclusion{ address.ip, address.port } }));
-				TraceEvent(SevWarnAlways, "TLogBelongsToExistingCluster")
-				    .detail("ClusterId", self.durableClusterId)
-				    .detail("NewClusterId", self.ccClusterId);
-			}
-			// If the tlog has a valid durable cluster ID, we don't want it to
-			// wipe its data! Throw this error to signal to `tlogTerminated` to
-			// close the persistent data store instead of deleting it.
-			throw invalid_cluster_id();
+			throw;
+
+			// TODO: #5375
+			/*
+			            if (e.code() != error_code_worker_removed) {
+			                throw;
+			            }
+			            // Don't need to worry about deleting data if there is no durable
+			            // cluster ID.
+			            if (!self.durableClusterId.isValid()) {
+			                throw;
+			            }
+			            // When a tlog joins a new cluster and has data for an old cluster,
+			            // it should automatically exclude itself to avoid being used in
+			            // the new cluster.
+			            auto recoveryState = self.dbInfo->get().recoveryState;
+			            if (recoveryState == RecoveryState::FULLY_RECOVERED && self.ccClusterId.isValid() &&
+			                self.durableClusterId.isValid() && self.ccClusterId != self.durableClusterId) {
+			                state NetworkAddress address = g_network->getLocalAddress();
+			                wait(excludeServers(self.cx, { AddressExclusion{ address.ip, address.port } }));
+			                TraceEvent(SevWarnAlways, "TLogBelongsToExistingCluster")
+			                    .detail("ClusterId", self.durableClusterId)
+			                    .detail("NewClusterId", self.ccClusterId);
+			            }
+			            // If the tlog has a valid durable cluster ID, we don't want it to
+			            // wipe its data! Throw this error to signal to `tlogTerminated` to
+			            // close the persistent data store instead of deleting it.
+			            throw invalid_cluster_id();
+			*/
 		}
 	} catch (Error& e) {
 		self.terminated.send(Void());

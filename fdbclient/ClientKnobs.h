@@ -81,6 +81,7 @@ public:
 	int64_t CHANGE_FEED_CACHE_SIZE;
 	double CHANGE_FEED_POP_TIMEOUT;
 	int64_t CHANGE_FEED_STREAM_MIN_BYTES;
+	int64_t TENANT_PREFIX_SIZE_LIMIT;
 
 	int MAX_BATCH_SIZE;
 	double GRV_BATCH_TIMEOUT;
@@ -220,6 +221,7 @@ public:
 	int HTTP_VERBOSE_LEVEL;
 	std::string HTTP_REQUEST_ID_HEADER;
 	bool HTTP_REQUEST_AWS_V4_HEADER; // setting this knob to true will enable AWS V4 style header.
+	bool HTTP_RESPONSE_SKIP_VERIFY_CHECKSUM_FOR_PARTIAL_CONTENT; // skip verify md5 checksum for 206 response
 	std::string BLOBSTORE_ENCRYPTION_TYPE;
 	int BLOBSTORE_CONNECT_TRIES;
 	int BLOBSTORE_CONNECT_TIMEOUT;

@@ -115,6 +115,10 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	// sending a pop for anything less than durableKnownCommittedVersion for the TLog will be absurd.
 	std::map<std::pair<UID, Tag>, std::pair<Version, Version>> outstandingPops;
 
+	// Stores each <log router, tag> pair's last popped version. This is used to determine whether we need to pop an old
+	// generation log router.
+	std::map<std::pair<UID, Tag>, Version> logRouterLastPops;
+
 	Optional<PromiseStream<Future<Void>>> addActor;
 	ActorCollection popActors;
 	std::vector<OldLogData> oldLogData; // each element has the log info. in one old epoch.
@@ -191,7 +195,7 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	                     Version knownCommittedVersion,
 	                     Version minKnownCommittedVersion,
 	                     LogPushData& data,
-	                     SpanID const& spanContext,
+	                     SpanContext const& spanContext,
 	                     Optional<UID> debugID,
 	                     Optional<std::unordered_map<uint16_t, Version>> tpcvMap) final;
 
@@ -246,7 +250,8 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	ACTOR static Future<Void> popFromLog(TagPartitionedLogSystem* self,
 	                                     Reference<AsyncVar<OptionalInterface<TLogInterface>>> log,
 	                                     Tag tag,
-	                                     double time);
+	                                     double delayBeforePop,
+	                                     bool popLogRouter);
 
 	ACTOR static Future<Version> getPoppedFromTLog(Reference<AsyncVar<OptionalInterface<TLogInterface>>> log, Tag tag);
 
@@ -268,6 +273,7 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	                                       UID clusterId,
 	                                       DatabaseConfiguration const& config,
 	                                       LogEpoch recoveryCount,
+	                                       Version recoveryTransactionVersion,
 	                                       int8_t primaryLocality,
 	                                       int8_t remoteLocality,
 	                                       std::vector<Tag> const& allTags,
@@ -348,6 +354,7 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	                                         UID clusterId,
 	                                         DatabaseConfiguration configuration,
 	                                         LogEpoch recoveryCount,
+	                                         Version recoveryTransactionVersion,
 	                                         int8_t remoteLocality,
 	                                         std::vector<Tag> allTags);
 
@@ -357,6 +364,7 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	                                                    UID clusterId,
 	                                                    DatabaseConfiguration configuration,
 	                                                    LogEpoch recoveryCount,
+	                                                    Version recoveryTransactionVersion,
 	                                                    int8_t primaryLocality,
 	                                                    int8_t remoteLocality,
 	                                                    std::vector<Tag> allTags,

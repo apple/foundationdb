@@ -29,14 +29,13 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/fdbrpc.h"
+#include "flow/EncryptUtils.h"
 #include "flow/FileIdentifier.h"
 #include "flow/Trace.h"
 #include "flow/flow.h"
 #include "flow/network.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-using SimEncryptKeyId = uint64_t;
-using SimEncryptDomainId = uint64_t;
 using SimEncryptKey = std::string;
 
 struct SimKmsProxyInterface {
@@ -71,26 +70,47 @@ struct SimKmsProxyInterface {
 	}
 };
 
+struct SimEncryptKeyDetails {
+	constexpr static FileIdentifier file_identifier = 1227025;
+	EncryptCipherDomainId encryptDomainId;
+	EncryptCipherBaseKeyId encryptKeyId;
+	StringRef encryptKey;
+
+	SimEncryptKeyDetails() {}
+	explicit SimEncryptKeyDetails(EncryptCipherDomainId domainId,
+	                              EncryptCipherBaseKeyId keyId,
+	                              StringRef key,
+	                              Arena& arena)
+	  : encryptDomainId(domainId), encryptKeyId(keyId), encryptKey(StringRef(arena, key)) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, encryptDomainId, encryptKeyId, encryptKey);
+	}
+};
+
 struct SimGetEncryptKeysByKeyIdsReply {
 	constexpr static FileIdentifier file_identifier = 2313778;
 	Arena arena;
-	std::unordered_map<SimEncryptKeyId, StringRef> encryptKeyMap;
+	std::vector<SimEncryptKeyDetails> encryptKeyDetails;
 
 	SimGetEncryptKeysByKeyIdsReply() {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, arena, encryptKeyMap);
+		serializer(ar, arena, encryptKeyDetails);
 	}
 };
 
 struct SimGetEncryptKeysByKeyIdsRequest {
 	constexpr static FileIdentifier file_identifier = 6913396;
-	std::vector<SimEncryptKeyId> encryptKeyIds;
+	std::vector<std::pair<EncryptCipherBaseKeyId, EncryptCipherDomainId>> encryptKeyIds;
 	ReplyPromise<SimGetEncryptKeysByKeyIdsReply> reply;
 
 	SimGetEncryptKeysByKeyIdsRequest() {}
-	explicit SimGetEncryptKeysByKeyIdsRequest(const std::vector<SimEncryptKeyId>& keyIds) : encryptKeyIds(keyIds) {}
+	explicit SimGetEncryptKeysByKeyIdsRequest(
+	    const std::vector<std::pair<EncryptCipherBaseKeyId, EncryptCipherDomainId>>& keyIds)
+	  : encryptKeyIds(keyIds) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -98,41 +118,27 @@ struct SimGetEncryptKeysByKeyIdsRequest {
 	}
 };
 
-struct SimEncryptKeyDetails {
-	constexpr static FileIdentifier file_identifier = 1227025;
-	SimEncryptKeyId encryptKeyId;
-	StringRef encryptKey;
-
-	SimEncryptKeyDetails() {}
-	explicit SimEncryptKeyDetails(SimEncryptKeyId keyId, StringRef key, Arena& arena)
-	  : encryptKeyId(keyId), encryptKey(StringRef(arena, key)) {}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, encryptKeyId, encryptKey);
-	}
-};
-
 struct SimGetEncryptKeyByDomainIdReply {
 	constexpr static FileIdentifier file_identifier = 3009025;
 	Arena arena;
-	std::unordered_map<SimEncryptDomainId, SimEncryptKeyDetails> encryptKeyMap;
+	std::vector<SimEncryptKeyDetails> encryptKeyDetails;
 
 	SimGetEncryptKeyByDomainIdReply() {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, arena, encryptKeyMap);
+		serializer(ar, arena, encryptKeyDetails);
 	}
 };
 
 struct SimGetEncryptKeysByDomainIdsRequest {
 	constexpr static FileIdentifier file_identifier = 9918682;
-	std::vector<SimEncryptDomainId> encryptDomainIds;
+	std::vector<EncryptCipherDomainId> encryptDomainIds;
 	ReplyPromise<SimGetEncryptKeyByDomainIdReply> reply;
 
 	SimGetEncryptKeysByDomainIdsRequest() {}
-	explicit SimGetEncryptKeysByDomainIdsRequest(const std::vector<SimEncryptDomainId>& ids) : encryptDomainIds(ids) {}
+	explicit SimGetEncryptKeysByDomainIdsRequest(const std::vector<EncryptCipherDomainId>& ids)
+	  : encryptDomainIds(ids) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {

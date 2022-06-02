@@ -29,29 +29,10 @@
 #include <unordered_set>
 #include <boost/functional/hash.hpp>
 
-#include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/flow.h"
-
-enum class TraceFlags : uint8_t { unsampled = 0b00000000, sampled = 0b00000001 };
-
-inline TraceFlags operator&(TraceFlags lhs, TraceFlags rhs) {
-	return static_cast<TraceFlags>(static_cast<std::underlying_type_t<TraceFlags>>(lhs) &
-	                               static_cast<std::underlying_type_t<TraceFlags>>(rhs));
-}
-
-struct SpanContext {
-	UID traceID;
-	uint64_t spanID;
-	TraceFlags m_Flags;
-	SpanContext() : traceID(UID()), spanID(0), m_Flags(TraceFlags::unsampled) {}
-	SpanContext(UID traceID, uint64_t spanID, TraceFlags flags) : traceID(traceID), spanID(spanID), m_Flags(flags) {}
-	SpanContext(UID traceID, uint64_t spanID) : traceID(traceID), spanID(spanID), m_Flags(TraceFlags::unsampled) {}
-	SpanContext(Arena arena, const SpanContext& span)
-	  : traceID(span.traceID), spanID(span.spanID), m_Flags(span.m_Flags) {}
-	bool isSampled() const { return (m_Flags & TraceFlags::sampled) == TraceFlags::sampled; }
-};
+#include "fdbclient/Status.h"
 
 typedef int64_t Version;
 typedef uint64_t LogEpoch;
@@ -166,6 +147,11 @@ struct hash<Tag> {
 static const Tag invalidTag{ tagLocalitySpecial, 0 };
 static const Tag txsTag{ tagLocalitySpecial, 1 };
 static const Tag cacheTag{ tagLocalitySpecial, 2 };
+
+const int MATCH_INDEX_ALL = 0;
+const int MATCH_INDEX_NONE = 1;
+const int MATCH_INDEX_MATCHED_ONLY = 2;
+const int MATCH_INDEX_UNMATCHED_ONLY = 3;
 
 enum { txsTagOld = -1, invalidTagOld = -100 };
 
@@ -778,9 +764,18 @@ struct MappedKeyValueRef : KeyValueRef {
 
 	MappedReqAndResultRef reqAndResult;
 
+	// boundary KVs are always returned so that caller can use it as a continuation,
+	// for non-boundary KV, it is always false.
+	// for boundary KV, it is true only when the secondary query succeeds(return non-empty).
+	// Note: only MATCH_INDEX_MATCHED_ONLY and MATCH_INDEX_UNMATCHED_ONLY modes can make use of it,
+	// to decide whether the boudnary is a match/unmatch.
+	// In the case of MATCH_INDEX_ALL and MATCH_INDEX_NONE, caller should not care if boundary has a match or not.
+	bool boundaryAndExist;
+
 	MappedKeyValueRef() = default;
 	MappedKeyValueRef(Arena& a, const MappedKeyValueRef& copyFrom) : KeyValueRef(a, copyFrom) {
 		const auto& reqAndResultCopyFrom = copyFrom.reqAndResult;
+		boundaryAndExist = copyFrom.boundaryAndExist;
 		if (std::holds_alternative<GetValueReqAndResultRef>(reqAndResultCopyFrom)) {
 			auto getValue = std::get<GetValueReqAndResultRef>(reqAndResultCopyFrom);
 			reqAndResult = GetValueReqAndResultRef(a, getValue);
@@ -794,7 +789,7 @@ struct MappedKeyValueRef : KeyValueRef {
 
 	bool operator==(const MappedKeyValueRef& rhs) const {
 		return static_cast<const KeyValueRef&>(*this) == static_cast<const KeyValueRef&>(rhs) &&
-		       reqAndResult == rhs.reqAndResult;
+		       reqAndResult == rhs.reqAndResult && boundaryAndExist == rhs.boundaryAndExist;
 	}
 	bool operator!=(const MappedKeyValueRef& rhs) const { return !(rhs == *this); }
 
@@ -804,7 +799,7 @@ struct MappedKeyValueRef : KeyValueRef {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, ((KeyValueRef&)*this), reqAndResult);
+		serializer(ar, ((KeyValueRef&)*this), reqAndResult, boundaryAndExist);
 	}
 };
 
@@ -845,7 +840,16 @@ struct KeyValueStoreType {
 	// These enumerated values are stored in the database configuration, so should NEVER be changed.
 	// Only add new ones just before END.
 	// SS storeType is END before the storageServerInterface is initialized.
-	enum StoreType { SSD_BTREE_V1, MEMORY, SSD_BTREE_V2, SSD_REDWOOD_V1, MEMORY_RADIXTREE, SSD_ROCKSDB_V1, END };
+	enum StoreType {
+		SSD_BTREE_V1,
+		MEMORY,
+		SSD_BTREE_V2,
+		SSD_REDWOOD_V1,
+		MEMORY_RADIXTREE,
+		SSD_ROCKSDB_V1,
+		SSD_SHARDED_ROCKSDB,
+		END
+	};
 
 	KeyValueStoreType() : type(END) {}
 	KeyValueStoreType(StoreType type) : type(type) {
@@ -860,8 +864,8 @@ struct KeyValueStoreType {
 		serializer(ar, type);
 	}
 
-	std::string toString() const {
-		switch (type) {
+	static std::string getStoreTypeStr(const StoreType& storeType) {
+		switch (storeType) {
 		case SSD_BTREE_V1:
 			return "ssd-1";
 		case SSD_BTREE_V2:
@@ -870,6 +874,8 @@ struct KeyValueStoreType {
 			return "ssd-redwood-1-experimental";
 		case SSD_ROCKSDB_V1:
 			return "ssd-rocksdb-v1";
+		case SSD_SHARDED_ROCKSDB:
+			return "ssd-sharded-rocksdb";
 		case MEMORY:
 			return "memory";
 		case MEMORY_RADIXTREE:
@@ -878,6 +884,7 @@ struct KeyValueStoreType {
 			return "unknown";
 		}
 	}
+	std::string toString() const { return getStoreTypeStr((StoreType)type); }
 
 private:
 	uint32_t type;
@@ -1172,10 +1179,10 @@ class Database;
 
 struct HealthMetrics {
 	struct StorageStats {
-		int64_t storageQueue;
-		int64_t storageDurabilityLag;
-		double diskUsage;
-		double cpuUsage;
+		int64_t storageQueue = 0;
+		int64_t storageDurabilityLag = 0;
+		double diskUsage = 0.0;
+		double cpuUsage = 0.0;
 
 		bool operator==(StorageStats const& r) const {
 			return ((storageQueue == r.storageQueue) && (storageDurabilityLag == r.storageDurabilityLag) &&
@@ -1430,16 +1437,44 @@ struct StorageMetadataType {
 	constexpr static FileIdentifier file_identifier = 732123;
 	// when the SS is initialized, in epoch seconds, comes from currentTime()
 	double createdTime;
+	KeyValueStoreType storeType;
+
+	// no need to serialize part (should be assigned after initialization)
+	bool wrongConfigured = false;
+
 	StorageMetadataType() : createdTime(0) {}
-	StorageMetadataType(uint64_t t) : createdTime(t) {}
+	StorageMetadataType(uint64_t t, KeyValueStoreType storeType = KeyValueStoreType::END, bool wrongConfigured = false)
+	  : createdTime(t), storeType(storeType), wrongConfigured(wrongConfigured) {}
 
 	static double currentTime() { return g_network->timer(); }
+
+	bool operator==(const StorageMetadataType& b) const {
+		return createdTime == b.createdTime && storeType == b.storeType && wrongConfigured == b.wrongConfigured;
+	}
+
+	bool operator<(const StorageMetadataType& b) const {
+		if (wrongConfigured == b.wrongConfigured) {
+			// the older SS has smaller createdTime
+			return createdTime < b.createdTime;
+		}
+		return wrongConfigured > b.wrongConfigured;
+	}
+
+	bool operator>(const StorageMetadataType& b) const { return b < *this; }
 
 	// To change this serialization, ProtocolVersion::StorageMetadata must be updated, and downgrades need
 	// to be considered
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, createdTime);
+		serializer(ar, createdTime, storeType);
+	}
+
+	StatusObject toJSON() const {
+		StatusObject result;
+		result["created_time_timestamp"] = createdTime;
+		result["created_time_datetime"] = epochsToGMTString(createdTime);
+		result["storage_engine"] = storeType.toString();
+		return result;
 	}
 };
 

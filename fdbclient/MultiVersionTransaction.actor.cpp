@@ -18,6 +18,10 @@
  * limitations under the License.
  */
 
+#ifdef ADDRESS_SANITIZER
+#include <sanitizer/lsan_interface.h>
+#endif
+
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/GenericManagementAPI.actor.h"
@@ -154,6 +158,7 @@ ThreadFuture<MappedRangeResult> DLTransaction::getMappedRange(const KeySelectorR
                                                               const KeySelectorRef& end,
                                                               const StringRef& mapper,
                                                               GetRangeLimits limits,
+                                                              int matchIndex,
                                                               bool snapshot,
                                                               bool reverse) {
 	FdbCApi::FDBFuture* f = api->transactionGetMappedRange(tr,
@@ -171,6 +176,7 @@ ThreadFuture<MappedRangeResult> DLTransaction::getMappedRange(const KeySelectorR
 	                                                       limits.bytes,
 	                                                       FDB_STREAMING_MODE_EXACT,
 	                                                       0,
+	                                                       matchIndex,
 	                                                       snapshot,
 	                                                       reverse);
 	return toThreadFuture<MappedRangeResult>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
@@ -296,15 +302,7 @@ ThreadResult<RangeResult> DLTransaction::readBlobGranules(const KeyRangeRef& key
 	                                                         beginVersion,
 	                                                         rv,
 	                                                         context);
-	const FdbCApi::FDBKeyValue* kvs;
-	int count;
-	FdbCApi::fdb_bool_t more;
-	FdbCApi::fdb_error_t error = api->resultGetKeyValueArray(r, &kvs, &count, &more);
-	ASSERT(!error);
-
-	// The memory for this is stored in the FDBResult and is released when the result gets destroyed
-	return ThreadResult<RangeResult>(
-	    RangeResult(RangeResultRef(VectorRef<KeyValueRef>((KeyValueRef*)kvs, count), more), Arena()));
+	return ThreadResult<RangeResult>((ThreadSingleAssignmentVar<RangeResult>*)(r));
 }
 
 void DLTransaction::addReadConflictRange(const KeyRangeRef& keys) {
@@ -975,10 +973,11 @@ ThreadFuture<MappedRangeResult> MultiVersionTransaction::getMappedRange(const Ke
                                                                         const KeySelectorRef& end,
                                                                         const StringRef& mapper,
                                                                         GetRangeLimits limits,
+                                                                        int matchIndex,
                                                                         bool snapshot,
                                                                         bool reverse) {
 	auto tr = getTransaction();
-	auto f = tr.transaction ? tr.transaction->getMappedRange(begin, end, mapper, limits, snapshot, reverse)
+	auto f = tr.transaction ? tr.transaction->getMappedRange(begin, end, mapper, limits, matchIndex, snapshot, reverse)
 	                        : makeTimeout<MappedRangeResult>();
 	return abortableFuture(f, tr.onChange);
 }
@@ -1109,13 +1108,13 @@ VersionVector MultiVersionTransaction::getVersionVector() {
 	return VersionVector();
 }
 
-UID MultiVersionTransaction::getSpanID() {
+SpanContext MultiVersionTransaction::getSpanContext() {
 	auto tr = getTransaction();
 	if (tr.transaction) {
-		return tr.transaction->getSpanID();
+		return tr.transaction->getSpanContext();
 	}
 
-	return UID();
+	return SpanContext();
 }
 
 ThreadFuture<int64_t> MultiVersionTransaction::getApproximateSize() {
@@ -1613,7 +1612,7 @@ void MultiVersionDatabase::DatabaseState::protocolVersionChanged(ProtocolVersion
 		// When the protocol version changes, clear the corresponding entry in the shared state map
 		// so it can be re-initialized. Only do so if there was a valid previous protocol version.
 		if (dbProtocolVersion.present() && MultiVersionApi::apiVersionAtLeast(710)) {
-			MultiVersionApi::api->clearClusterSharedStateMapEntry(clusterFilePath);
+			MultiVersionApi::api->clearClusterSharedStateMapEntry(clusterFilePath, dbProtocolVersion.get());
 		}
 
 		dbProtocolVersion = protocolVersion;
@@ -1726,8 +1725,10 @@ void MultiVersionDatabase::DatabaseState::updateDatabase(Reference<IDatabase> ne
 		}
 	}
 	if (db.isValid() && dbProtocolVersion.present() && MultiVersionApi::apiVersionAtLeast(710)) {
-		auto updateResult = MultiVersionApi::api->updateClusterSharedStateMap(clusterFilePath, db);
+		auto updateResult =
+		    MultiVersionApi::api->updateClusterSharedStateMap(clusterFilePath, dbProtocolVersion.get(), db);
 		auto handler = mapThreadFuture<Void, Void>(updateResult, [this](ErrorOr<Void> result) {
+			TraceEvent("ClusterSharedStateUpdated").detail("ClusterFilePath", clusterFilePath);
 			dbVar->set(db);
 			return ErrorOr<Void>(Void());
 		});
@@ -1996,8 +1997,9 @@ std::vector<std::pair<std::string, bool>> MultiVersionApi::copyExternalLibraryPe
 		for (int ii = 0; ii < threadCount; ++ii) {
 			std::string filename = basename(path);
 
-			char tempName[PATH_MAX + 12];
-			sprintf(tempName, "/tmp/%s-XXXXXX", filename.c_str());
+			constexpr int MAX_TMP_NAME_LENGTH = PATH_MAX + 12;
+			char tempName[MAX_TMP_NAME_LENGTH];
+			snprintf(tempName, MAX_TMP_NAME_LENGTH, "%s/%s-XXXXXX", tmpDir.c_str(), filename.c_str());
 			int tempFd = mkstemp(tempName);
 			int fd;
 
@@ -2143,6 +2145,9 @@ void MultiVersionApi::setNetworkOptionInternal(FDBNetworkOptions::Option option,
 		// multiple client threads are not supported on windows.
 		threadCount = extractIntOption(value, 1, 1);
 #endif
+	} else if (option == FDBNetworkOptions::CLIENT_TMP_DIR) {
+		validateOption(value, true, false, false);
+		tmpDir = abspath(value.get().toString());
 	} else {
 		forwardOption = true;
 	}
@@ -2389,12 +2394,30 @@ void MultiVersionApi::updateSupportedVersions() {
 	}
 }
 
-ThreadFuture<Void> MultiVersionApi::updateClusterSharedStateMap(std::string clusterFilePath, Reference<IDatabase> db) {
+ThreadFuture<Void> MultiVersionApi::updateClusterSharedStateMap(std::string clusterFilePath,
+                                                                ProtocolVersion dbProtocolVersion,
+                                                                Reference<IDatabase> db) {
 	MutexHolder holder(lock);
 	if (clusterSharedStateMap.find(clusterFilePath) == clusterSharedStateMap.end()) {
-		clusterSharedStateMap[clusterFilePath] = db->createSharedState();
+		TraceEvent("CreatingClusterSharedState")
+		    .detail("ClusterFilePath", clusterFilePath)
+		    .detail("ProtocolVersion", dbProtocolVersion);
+		clusterSharedStateMap[clusterFilePath] = { db->createSharedState(), dbProtocolVersion };
 	} else {
-		ThreadFuture<DatabaseSharedState*> entry = clusterSharedStateMap[clusterFilePath];
+		auto& sharedStateInfo = clusterSharedStateMap[clusterFilePath];
+		if (sharedStateInfo.protocolVersion != dbProtocolVersion) {
+			// This situation should never happen, because we are connecting to the same cluster,
+			// so the protocol version must be the same
+			TraceEvent(SevError, "ClusterStateProtocolVersionMismatch")
+			    .detail("ClusterFilePath", clusterFilePath)
+			    .detail("ProtocolVersionExpected", dbProtocolVersion)
+			    .detail("ProtocolVersionFound", sharedStateInfo.protocolVersion);
+			return Void();
+		}
+		TraceEvent("SettingClusterSharedState")
+		    .detail("ClusterFilePath", clusterFilePath)
+		    .detail("ProtocolVersion", dbProtocolVersion);
+		ThreadFuture<DatabaseSharedState*> entry = sharedStateInfo.sharedStateFuture;
 		return mapThreadFuture<DatabaseSharedState*, Void>(entry, [db](ErrorOr<DatabaseSharedState*> result) {
 			if (result.isError()) {
 				return ErrorOr<Void>(result.getError());
@@ -2407,16 +2430,29 @@ ThreadFuture<Void> MultiVersionApi::updateClusterSharedStateMap(std::string clus
 	return Void();
 }
 
-void MultiVersionApi::clearClusterSharedStateMapEntry(std::string clusterFilePath) {
+void MultiVersionApi::clearClusterSharedStateMapEntry(std::string clusterFilePath, ProtocolVersion dbProtocolVersion) {
 	MutexHolder holder(lock);
 	auto mapEntry = clusterSharedStateMap.find(clusterFilePath);
+	// It can be that other database instances on the same cluster path are already upgraded and thus
+	// have cleared or even created a new shared object entry
 	if (mapEntry == clusterSharedStateMap.end()) {
-		TraceEvent(SevError, "ClusterSharedStateMapEntryNotFound").detail("ClusterFilePath", clusterFilePath);
+		TraceEvent("ClusterSharedStateMapEntryNotFound").detail("ClusterFilePath", clusterFilePath);
 		return;
 	}
-	auto ssPtr = mapEntry->second.get();
+	auto sharedStateInfo = mapEntry->second;
+	if (sharedStateInfo.protocolVersion != dbProtocolVersion) {
+		TraceEvent("ClusterSharedStateClearSkipped")
+		    .detail("ClusterFilePath", clusterFilePath)
+		    .detail("ProtocolVersionExpected", dbProtocolVersion)
+		    .detail("ProtocolVersionFound", sharedStateInfo.protocolVersion);
+		return;
+	}
+	auto ssPtr = sharedStateInfo.sharedStateFuture.get();
 	ssPtr->delRef(ssPtr);
 	clusterSharedStateMap.erase(mapEntry);
+	TraceEvent("ClusterSharedStateCleared")
+	    .detail("ClusterFilePath", clusterFilePath)
+	    .detail("ProtocolVersion", dbProtocolVersion);
 }
 
 std::vector<std::string> parseOptionValues(std::string valueStr) {
@@ -2518,7 +2554,8 @@ void MultiVersionApi::loadEnvironmentVariableNetworkOptions() {
 
 MultiVersionApi::MultiVersionApi()
   : callbackOnMainThread(true), localClientDisabled(false), networkStartSetup(false), networkSetup(false),
-    bypassMultiClientApi(false), externalClient(false), apiVersion(0), threadCount(0), envOptionsLoaded(false) {}
+    bypassMultiClientApi(false), externalClient(false), apiVersion(0), threadCount(0), tmpDir("/tmp"),
+    envOptionsLoaded(false) {}
 
 MultiVersionApi* MultiVersionApi::api = new MultiVersionApi();
 
@@ -2755,6 +2792,11 @@ ACTOR Future<Void> checkUndestroyedFutures(std::vector<ThreadSingleAssignmentVar
 template <class T>
 THREAD_FUNC runSingleAssignmentVarTest(void* arg) {
 	noUnseed = true;
+
+// This test intentionally leaks memory
+#ifdef ADDRESS_SANITIZER
+	__lsan::ScopedDisabler disableLeakChecks;
+#endif
 
 	volatile bool* done = (volatile bool*)arg;
 	try {

@@ -91,6 +91,15 @@ public:
 	                                      int byteLimit = 1 << 30,
 	                                      ReadType type = ReadType::NORMAL) = 0;
 
+	// Shard management APIs.
+	virtual Future<Void> addRange(KeyRangeRef range, std::string id) { return Void(); }
+
+	virtual std::vector<std::string> removeRange(KeyRangeRef range) { return std::vector<std::string>(); }
+
+	virtual void persistRangeMapping(KeyRangeRef range, bool isAdd) {}
+
+	virtual Future<Void> cleanUpShardsIfNeeded(const std::vector<std::string>& shardIds) { return Void(); };
+
 	// To debug MEMORY_RADIXTREE type ONLY
 	// Returns (1) how many key & value pairs have been inserted (2) how many nodes have been created (3) how many
 	// key size is less than 12 bytes
@@ -187,6 +196,8 @@ inline IKeyValueStore* openKVStore(KeyValueStoreType storeType,
 		return keyValueStoreRedwoodV1(filename, logID);
 	case KeyValueStoreType::SSD_ROCKSDB_V1:
 		return keyValueStoreRocksDB(filename, logID, storeType);
+	case KeyValueStoreType::SSD_SHARDED_ROCKSDB:
+		return keyValueStoreRocksDB(filename, logID, storeType); // TODO: to replace the KVS in the future
 	case KeyValueStoreType::MEMORY_RADIXTREE:
 		return keyValueStoreMemory(filename,
 		                           logID,

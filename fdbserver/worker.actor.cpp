@@ -22,12 +22,18 @@
 #include <tuple>
 #include <boost/lexical_cast.hpp>
 
+#include "fdbclient/FDBTypes.h"
+#include "fdbrpc/IAsyncFile.h"
 #include "fdbrpc/Locality.h"
 #include "fdbclient/GlobalConfig.actor.h"
 #include "fdbclient/ProcessInterface.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbserver/Knobs.h"
 #include "flow/ActorCollection.h"
+#include "flow/Error.h"
+#include "flow/FileIdentifier.h"
+#include "flow/ObjectSerializer.h"
+#include "flow/Platform.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/SystemMonitor.h"
 #include "flow/TDMetric.actor.h"
@@ -57,7 +63,9 @@
 #include "flow/ThreadHelper.actor.h"
 #include "flow/Trace.h"
 #include "flow/flow.h"
+#include "flow/genericactors.actor.h"
 #include "flow/network.h"
+#include "flow/serialize.h"
 
 #ifdef __linux__
 #include <fcntl.h>
@@ -159,9 +167,9 @@ Database openDBOnServer(Reference<AsyncVar<ServerDBInfo> const> const& db,
 	                                  enableLocalityLoadBalance,
 	                                  taskID,
 	                                  lockAware);
-	GlobalConfig::create(cx, db, std::addressof(db->get().client));
-	GlobalConfig::globalConfig().trigger(samplingFrequency, samplingProfilerUpdateFrequency);
-	GlobalConfig::globalConfig().trigger(samplingWindow, samplingProfilerUpdateWindow);
+	cx->globalConfig->init(db, std::addressof(db->get().client));
+	cx->globalConfig->trigger(samplingFrequency, samplingProfilerUpdateFrequency);
+	cx->globalConfig->trigger(samplingWindow, samplingProfilerUpdateWindow);
 	return cx;
 }
 
@@ -323,6 +331,9 @@ KeyValueStoreSuffix redwoodSuffix = { KeyValueStoreType::SSD_REDWOOD_V1, ".redwo
 KeyValueStoreSuffix rocksdbSuffix = { KeyValueStoreType::SSD_ROCKSDB_V1,
 	                                  ".rocksdb",
 	                                  FilesystemCheck::DIRECTORIES_ONLY };
+KeyValueStoreSuffix shardedRocksdbSuffix = { KeyValueStoreType::SSD_SHARDED_ROCKSDB,
+	                                         ".shardedrocksdb",
+	                                         FilesystemCheck::DIRECTORIES_ONLY };
 
 std::string validationFilename = "_validate";
 
@@ -336,6 +347,8 @@ std::string filenameFromSample(KeyValueStoreType storeType, std::string folder, 
 	else if (storeType == KeyValueStoreType::SSD_REDWOOD_V1)
 		return joinPath(folder, sample_filename);
 	else if (storeType == KeyValueStoreType::SSD_ROCKSDB_V1)
+		return joinPath(folder, sample_filename);
+	else if (storeType == KeyValueStoreType::SSD_SHARDED_ROCKSDB)
 		return joinPath(folder, sample_filename);
 	UNREACHABLE();
 }
@@ -352,6 +365,8 @@ std::string filenameFromId(KeyValueStoreType storeType, std::string folder, std:
 		return joinPath(folder, prefix + id.toString() + ".redwood-v1");
 	else if (storeType == KeyValueStoreType::SSD_ROCKSDB_V1)
 		return joinPath(folder, prefix + id.toString() + ".rocksdb");
+	else if (storeType == KeyValueStoreType::SSD_SHARDED_ROCKSDB)
+		return joinPath(folder, prefix + id.toString() + ".shardedrocksdb");
 
 	TraceEvent(SevError, "UnknownStoreType").detail("StoreType", storeType.toString());
 	UNREACHABLE();
@@ -528,6 +543,9 @@ std::vector<DiskStore> getDiskStores(std::string folder) {
 	result.insert(result.end(), result4.begin(), result4.end());
 	auto result5 = getDiskStores(folder, rocksdbSuffix.suffix, rocksdbSuffix.type, rocksdbSuffix.check);
 	result.insert(result.end(), result5.begin(), result5.end());
+	auto result6 =
+	    getDiskStores(folder, shardedRocksdbSuffix.suffix, shardedRocksdbSuffix.type, shardedRocksdbSuffix.check);
+	result.insert(result.end(), result6.begin(), result6.end());
 	return result;
 }
 
@@ -1588,16 +1606,16 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				state Database db =
 				    Database::createDatabase(metricsConnFile, Database::API_VERSION_LATEST, IsInternal::True, locality);
 				metricsLogger = runMetrics(db, KeyRef(metricsPrefix));
+				db->globalConfig->trigger(samplingFrequency, samplingProfilerUpdateFrequency);
 			} catch (Error& e) {
 				TraceEvent(SevWarnAlways, "TDMetricsBadClusterFile").error(e).detail("ConnFile", metricsConnFile);
 			}
 		} else {
 			auto lockAware = metricsPrefix.size() && metricsPrefix[0] == '\xff' ? LockAware::True : LockAware::False;
-			metricsLogger =
-			    runMetrics(openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, lockAware), KeyRef(metricsPrefix));
+			auto database = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, lockAware);
+			metricsLogger = runMetrics(database, KeyRef(metricsPrefix));
+			database->globalConfig->trigger(samplingFrequency, samplingProfilerUpdateFrequency);
 		}
-
-		GlobalConfig::globalConfig().trigger(samplingFrequency, samplingProfilerUpdateFrequency);
 	}
 
 	errorForwarders.add(resetAfter(degraded,
@@ -1657,6 +1675,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				    SERVER_KNOBS->REMOTE_KV_STORE && /* testing mixed mode in simulation if remote kvs enabled */
 				        (g_network->isSimulated()
 				             ? (/* Disable for RocksDB */ s.storeType != KeyValueStoreType::SSD_ROCKSDB_V1 &&
+				                s.storeType != KeyValueStoreType::SSD_SHARDED_ROCKSDB &&
 				                deterministicRandom()->coinflip())
 				             : true));
 				Future<Void> kvClosed = kv->onClosed();
@@ -2234,6 +2253,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					    SERVER_KNOBS->REMOTE_KV_STORE && /* testing mixed mode in simulation if remote kvs enabled */
 					        (g_network->isSimulated()
 					             ? (/* Disable for RocksDB */ req.storeType != KeyValueStoreType::SSD_ROCKSDB_V1 &&
+					                req.storeType != KeyValueStoreType::SSD_SHARDED_ROCKSDB &&
 					                deterministicRandom()->coinflip())
 					             : true));
 
@@ -2432,6 +2452,9 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 						} else if (d.storeType == KeyValueStoreType::SSD_ROCKSDB_V1) {
 							included = fileExists(joinPath(d.filename, "CURRENT")) &&
 							           fileExists(joinPath(d.filename, "IDENTITY"));
+						} else if (d.storeType == KeyValueStoreType::SSD_SHARDED_ROCKSDB) {
+							included = fileExists(joinPath(d.filename, "CURRENT")) &&
+							           fileExists(joinPath(d.filename, "IDENTITY"));
 						} else if (d.storeType == KeyValueStoreType::MEMORY) {
 							included = fileExists(d.filename + "1.fdq");
 						} else {
@@ -2609,6 +2632,291 @@ ACTOR Future<Void> monitorAndWriteCCPriorityInfo(std::string filePath,
 	}
 }
 
+static const std::string versionFileName = "sw-version";
+
+ACTOR Future<SWVersion> testSoftwareVersionCompatibility(std::string folder, ProtocolVersion currentVersion) {
+	try {
+		state std::string versionFilePath = joinPath(folder, versionFileName);
+		state ErrorOr<Reference<IAsyncFile>> versionFile = wait(
+		    errorOr(IAsyncFileSystem::filesystem(g_network)->open(versionFilePath, IAsyncFile::OPEN_READONLY, 0600)));
+
+		if (versionFile.isError()) {
+			if (versionFile.getError().code() == error_code_file_not_found && !fileExists(versionFilePath)) {
+				// If a version file does not exist, we assume this is either a fresh
+				// installation or an upgrade from a version that does not support version files.
+				// Either way, we can safely continue running this version of software.
+				TraceEvent(SevInfo, "NoPreviousSWVersion").log();
+				return SWVersion();
+			} else {
+				// Dangerous to continue if we cannot do a software compatibility test
+				throw versionFile.getError();
+			}
+		} else {
+			// Test whether the most newest software version that has been run on this cluster is
+			// compatible with the current software version
+			state int64_t filesize = wait(versionFile.get()->size());
+			state Standalone<StringRef> buf = makeString(filesize);
+			int readLen = wait(versionFile.get()->read(mutateString(buf), filesize, 0));
+			if (filesize == 0 || readLen != filesize) {
+				throw file_corrupt();
+			}
+
+			try {
+				SWVersion swversion = ObjectReader::fromStringRef<SWVersion>(buf, IncludeVersion());
+				ProtocolVersion lowestCompatibleVersion(swversion.lowestCompatibleProtocolVersion());
+				if (currentVersion >= lowestCompatibleVersion) {
+					return swversion;
+				} else {
+					throw incompatible_software_version();
+				}
+			} catch (Error& e) {
+				throw e;
+			}
+		}
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
+		// TODO(bvr): Inject faults
+		TraceEvent(SevWarnAlways, "OpenReadSWVersionFileError").error(e);
+		throw;
+	}
+}
+
+ACTOR Future<Void> updateNewestSoftwareVersion(std::string folder,
+                                               ProtocolVersion currentVersion,
+                                               ProtocolVersion latestVersion,
+                                               ProtocolVersion minCompatibleVersion) {
+
+	ASSERT(currentVersion >= minCompatibleVersion);
+
+	try {
+		state std::string versionFilePath = joinPath(folder, versionFileName);
+		ErrorOr<Reference<IAsyncFile>> versionFile = wait(
+		    errorOr(IAsyncFileSystem::filesystem(g_network)->open(versionFilePath, IAsyncFile::OPEN_READONLY, 0600)));
+
+		if (versionFile.isError() &&
+		    (versionFile.getError().code() != error_code_file_not_found || fileExists(versionFilePath))) {
+			throw versionFile.getError();
+		}
+
+		state Reference<IAsyncFile> newVersionFile = wait(IAsyncFileSystem::filesystem()->open(
+		    versionFilePath,
+		    IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE,
+		    0600));
+
+		SWVersion swVersion(latestVersion, currentVersion, minCompatibleVersion);
+		auto s = swVersionValue(swVersion);
+		ErrorOr<Void> e = wait(errorOr(newVersionFile->write(s.toString().c_str(), s.size(), 0)));
+		if (e.isError()) {
+			throw e.getError();
+		}
+		wait(newVersionFile->sync());
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
+		TraceEvent(SevWarnAlways, "OpenWriteSWVersionFileError").error(e);
+		throw;
+	}
+
+	return Void();
+}
+
+ACTOR Future<Void> testAndUpdateSoftwareVersionCompatibility(std::string dataFolder, UID processIDUid) {
+	ErrorOr<SWVersion> swVersion = wait(errorOr(testSoftwareVersionCompatibility(dataFolder, currentProtocolVersion)));
+	if (swVersion.isError()) {
+		TraceEvent(SevWarnAlways, "SWVersionCompatibilityCheckError", processIDUid).error(swVersion.getError());
+		throw swVersion.getError();
+	}
+
+	TraceEvent(SevInfo, "SWVersionCompatible", processIDUid).detail("SWVersion", swVersion.get());
+
+	if (!swVersion.get().isValid() ||
+	    currentProtocolVersion > ProtocolVersion(swVersion.get().newestProtocolVersion())) {
+		ErrorOr<Void> updatedSWVersion = wait(errorOr(updateNewestSoftwareVersion(
+		    dataFolder, currentProtocolVersion, currentProtocolVersion, minCompatibleProtocolVersion)));
+		if (updatedSWVersion.isError()) {
+			throw updatedSWVersion.getError();
+		}
+	} else if (currentProtocolVersion < ProtocolVersion(swVersion.get().newestProtocolVersion())) {
+		ErrorOr<Void> updatedSWVersion = wait(
+		    errorOr(updateNewestSoftwareVersion(dataFolder,
+		                                        currentProtocolVersion,
+		                                        ProtocolVersion(swVersion.get().newestProtocolVersion()),
+		                                        ProtocolVersion(swVersion.get().lowestCompatibleProtocolVersion()))));
+		if (updatedSWVersion.isError()) {
+			throw updatedSWVersion.getError();
+		}
+	}
+
+	ErrorOr<SWVersion> newSWVersion =
+	    wait(errorOr(testSoftwareVersionCompatibility(dataFolder, currentProtocolVersion)));
+	if (newSWVersion.isError()) {
+		TraceEvent(SevWarnAlways, "SWVersionCompatibilityCheckError", processIDUid).error(newSWVersion.getError());
+		throw newSWVersion.getError();
+	}
+
+	TraceEvent(SevInfo, "VerifiedNewSoftwareVersion", processIDUid).detail("SWVersion", newSWVersion.get());
+
+	return Void();
+}
+
+static const std::string swversionTestDirName = "sw-version-test";
+
+TEST_CASE("/fdbserver/worker/swversion/noversionhistory") {
+	if (!platform::createDirectory("sw-version-test")) {
+		TraceEvent(SevWarnAlways, "FailedToCreateDirectory").detail("Directory", "sw-version-test");
+		return Void();
+	}
+
+	ErrorOr<SWVersion> swversion = wait(errorOr(
+	    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
+
+	if (!swversion.isError()) {
+		ASSERT(!swversion.get().isValid());
+	}
+
+	wait(IAsyncFileSystem::filesystem()->deleteFile(joinPath(swversionTestDirName, versionFileName), true));
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/worker/swversion/writeVerifyVersion") {
+	if (!platform::createDirectory("sw-version-test")) {
+		TraceEvent(SevWarnAlways, "FailedToCreateDirectory").detail("Directory", "sw-version-test");
+		return Void();
+	}
+
+	ErrorOr<Void> f = wait(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
+	                                                           ProtocolVersion::withStorageInterfaceReadiness(),
+	                                                           ProtocolVersion::withStorageInterfaceReadiness(),
+	                                                           ProtocolVersion::withTSS())));
+
+	ErrorOr<SWVersion> swversion = wait(errorOr(
+	    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
+
+	if (!swversion.isError()) {
+		ASSERT(swversion.get().newestProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
+		ASSERT(swversion.get().lastRunProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
+		ASSERT(swversion.get().lowestCompatibleProtocolVersion() == ProtocolVersion::withTSS().version());
+	}
+
+	wait(IAsyncFileSystem::filesystem()->deleteFile(joinPath(swversionTestDirName, versionFileName), true));
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/worker/swversion/runCompatibleOlder") {
+	if (!platform::createDirectory("sw-version-test")) {
+		TraceEvent(SevWarnAlways, "FailedToCreateDirectory").detail("Directory", "sw-version-test");
+		return Void();
+	}
+
+	ErrorOr<Void> f = wait(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
+	                                                           ProtocolVersion::withStorageInterfaceReadiness(),
+	                                                           ProtocolVersion::withStorageInterfaceReadiness(),
+	                                                           ProtocolVersion::withTSS())));
+
+	ErrorOr<SWVersion> swversion = wait(errorOr(
+	    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
+
+	if (!swversion.isError()) {
+		ASSERT(swversion.get().newestProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
+		ASSERT(swversion.get().lastRunProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
+		ASSERT(swversion.get().lowestCompatibleProtocolVersion() == ProtocolVersion::withTSS().version());
+
+		TraceEvent(SevInfo, "UT/swversion/runCompatibleOlder").detail("SWVersion", swversion.get());
+	}
+
+	ErrorOr<Void> f = wait(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
+	                                                           ProtocolVersion::withTSS(),
+	                                                           ProtocolVersion::withStorageInterfaceReadiness(),
+	                                                           ProtocolVersion::withTSS())));
+
+	ErrorOr<SWVersion> swversion = wait(errorOr(
+	    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
+
+	if (!swversion.isError()) {
+		ASSERT(swversion.get().newestProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
+		ASSERT(swversion.get().lastRunProtocolVersion() == ProtocolVersion::withTSS().version());
+		ASSERT(swversion.get().lowestCompatibleProtocolVersion() == ProtocolVersion::withTSS().version());
+	}
+
+	wait(IAsyncFileSystem::filesystem()->deleteFile(joinPath(swversionTestDirName, versionFileName), true));
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/worker/swversion/runIncompatibleOlder") {
+	if (!platform::createDirectory("sw-version-test")) {
+		TraceEvent(SevWarnAlways, "FailedToCreateDirectory").detail("Directory", "sw-version-test");
+		return Void();
+	}
+
+	ErrorOr<Void> f = wait(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
+	                                                           ProtocolVersion::withStorageInterfaceReadiness(),
+	                                                           ProtocolVersion::withStorageInterfaceReadiness(),
+	                                                           ProtocolVersion::withTSS())));
+
+	ErrorOr<SWVersion> swversion = wait(errorOr(
+	    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
+
+	if (!swversion.isError()) {
+		ASSERT(swversion.get().newestProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
+		ASSERT(swversion.get().lastRunProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
+		ASSERT(swversion.get().lowestCompatibleProtocolVersion() == ProtocolVersion::withTSS().version());
+	}
+
+	ErrorOr<SWVersion> swversion =
+	    wait(errorOr(testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withCacheRole())));
+
+	ASSERT(swversion.isError() && swversion.getError().code() == error_code_incompatible_software_version);
+
+	wait(IAsyncFileSystem::filesystem()->deleteFile(joinPath(swversionTestDirName, versionFileName), true));
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/worker/swversion/runNewer") {
+	if (!platform::createDirectory("sw-version-test")) {
+		TraceEvent(SevWarnAlways, "FailedToCreateDirectory").detail("Directory", "sw-version-test");
+		return Void();
+	}
+
+	ErrorOr<Void> f = wait(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
+	                                                           ProtocolVersion::withTSS(),
+	                                                           ProtocolVersion::withTSS(),
+	                                                           ProtocolVersion::withCacheRole())));
+
+	ErrorOr<SWVersion> swversion = wait(errorOr(
+	    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
+
+	if (!swversion.isError()) {
+		ASSERT(swversion.get().newestProtocolVersion() == ProtocolVersion::withTSS().version());
+		ASSERT(swversion.get().lastRunProtocolVersion() == ProtocolVersion::withTSS().version());
+		ASSERT(swversion.get().lowestCompatibleProtocolVersion() == ProtocolVersion::withCacheRole().version());
+	}
+
+	ErrorOr<Void> f = wait(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
+	                                                           ProtocolVersion::withStorageInterfaceReadiness(),
+	                                                           ProtocolVersion::withStorageInterfaceReadiness(),
+	                                                           ProtocolVersion::withTSS())));
+
+	ErrorOr<SWVersion> swversion = wait(errorOr(
+	    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
+
+	if (!swversion.isError()) {
+		ASSERT(swversion.get().newestProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
+		ASSERT(swversion.get().lastRunProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
+		ASSERT(swversion.get().lowestCompatibleProtocolVersion() == ProtocolVersion::withTSS().version());
+	}
+
+	wait(IAsyncFileSystem::filesystem()->deleteFile(joinPath(swversionTestDirName, versionFileName), true));
+
+	return Void();
+}
+
 ACTOR Future<UID> createAndLockProcessIdFile(std::string folder) {
 	state UID processIDUid;
 	platform::createDirectory(folder);
@@ -2669,21 +2977,40 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderWithDelayedCandidacyImplOneGenerati
     Reference<IClusterConnectionRecord> connRecord,
     Reference<AsyncVar<Value>> result,
     MonitorLeaderInfo info) {
-	state ClusterConnectionString ccf = info.intermediateConnRecord->getConnectionString();
-	state std::vector<NetworkAddress> addrs = ccf.coordinators();
+	ClusterConnectionString cs = info.intermediateConnRecord->getConnectionString();
+	state int coordinatorsSize = cs.hostnames.size() + cs.coords.size();
 	state ElectionResultRequest request;
 	state int index = 0;
 	state int successIndex = 0;
-	request.key = ccf.clusterKey();
-	request.coordinators = ccf.coordinators();
+	state std::vector<LeaderElectionRegInterface> leaderElectionServers;
 
-	deterministicRandom()->randomShuffle(addrs);
+	leaderElectionServers.reserve(coordinatorsSize);
+	for (const auto& h : cs.hostnames) {
+		leaderElectionServers.push_back(LeaderElectionRegInterface(h));
+	}
+	for (const auto& c : cs.coords) {
+		leaderElectionServers.push_back(LeaderElectionRegInterface(c));
+	}
+	deterministicRandom()->randomShuffle(leaderElectionServers);
+
+	request.key = cs.clusterKey();
+	request.hostnames = cs.hostnames;
+	request.coordinators = cs.coords;
 
 	loop {
-		LeaderElectionRegInterface interf(addrs[index]);
+		LeaderElectionRegInterface interf = leaderElectionServers[index];
+		bool usingHostname = interf.hostname.present();
 		request.reply = ReplyPromise<Optional<LeaderInfo>>();
 
-		ErrorOr<Optional<LeaderInfo>> leader = wait(interf.electionResult.tryGetReply(request));
+		state ErrorOr<Optional<LeaderInfo>> leader;
+		if (usingHostname) {
+			wait(store(
+			    leader,
+			    tryGetReplyFromHostname(request, interf.hostname.get(), WLTOKEN_LEADERELECTIONREG_ELECTIONRESULT)));
+		} else {
+			wait(store(leader, interf.electionResult.tryGetReply(request)));
+		}
+
 		if (leader.present()) {
 			if (leader.get().present()) {
 				if (leader.get().get().forward) {
@@ -2719,14 +3046,9 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderWithDelayedCandidacyImplOneGenerati
 			}
 			successIndex = index;
 		} else {
-			if (leader.isError() && leader.getError().code() == error_code_coordinators_changed) {
-				info.intermediateConnRecord->getConnectionString().resetToUnresolved();
-				throw coordinators_changed();
-			}
-			index = (index + 1) % addrs.size();
+			index = (index + 1) % coordinatorsSize;
 			if (index == successIndex) {
 				wait(delay(CLIENT_KNOBS->COORDINATOR_RECONNECTION_DELAY));
-				throw coordinators_changed();
 			}
 		}
 	}
@@ -2734,22 +3056,11 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderWithDelayedCandidacyImplOneGenerati
 
 ACTOR Future<Void> monitorLeaderWithDelayedCandidacyImplInternal(Reference<IClusterConnectionRecord> connRecord,
                                                                  Reference<AsyncVar<Value>> outSerializedLeaderInfo) {
-	wait(connRecord->resolveHostnames());
 	state MonitorLeaderInfo info(connRecord);
 	loop {
-		try {
-			wait(info.intermediateConnRecord->resolveHostnames());
-			MonitorLeaderInfo _info =
-			    wait(monitorLeaderWithDelayedCandidacyImplOneGeneration(connRecord, outSerializedLeaderInfo, info));
-			info = _info;
-		} catch (Error& e) {
-			if (e.code() == error_code_coordinators_changed) {
-				TraceEvent("MonitorLeaderWithDelayedCandidacyCoordinatorsChanged").suppressFor(1.0);
-				info.intermediateConnRecord->getConnectionString().resetToUnresolved();
-			} else {
-				throw e;
-			}
-		}
+		MonitorLeaderInfo _info =
+		    wait(monitorLeaderWithDelayedCandidacyImplOneGeneration(connRecord, outSerializedLeaderInfo, info));
+		info = _info;
 	}
 }
 
@@ -2883,6 +3194,7 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 	actors.push_back(serveProcess());
 
 	try {
+		ServerCoordinators coordinators(connRecord);
 		if (g_network->isSimulated()) {
 			whitelistBinPaths = ",, random_path,  /bin/snap_create.sh,,";
 		}
@@ -2907,6 +3219,8 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 		state UID processIDUid = wait(createAndLockProcessIdFile(dataFolder));
 		localities.set(LocalityData::keyProcessId, processIDUid.toString());
 		// Only one process can execute on a dataFolder from this point onwards
+
+		wait(testAndUpdateSoftwareVersionCompatibility(dataFolder, processIDUid));
 
 		std::string fitnessFilePath = joinPath(dataFolder, "fitness");
 		auto cc = makeReference<AsyncVar<Optional<ClusterControllerFullInterface>>>();

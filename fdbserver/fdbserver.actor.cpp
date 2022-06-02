@@ -111,7 +111,7 @@ enum {
 	OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_UNITTESTPARAM, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE,
 	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE,
 	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIAL_FILE, OPT_CONFIG_PATH, OPT_USE_TEST_CONFIG_DB, OPT_FAULT_INJECTION, OPT_PROFILER, OPT_PRINT_SIMTIME,
-	OPT_FLOW_PROCESS_NAME, OPT_FLOW_PROCESS_ENDPOINT, OPT_IP_TRUSTED_MASK
+	OPT_FLOW_PROCESS_NAME, OPT_FLOW_PROCESS_ENDPOINT, OPT_IP_TRUSTED_MASK, OPT_KMS_CONN_DISCOVERY_URL_FILE, OPT_KMS_CONN_VALIDATION_TOKEN_DETAILS, OPT_KMS_CONN_GET_ENCRYPTION_KEYS_ENDPOINT
 };
 
 CSimpleOpt::SOption g_rgOptions[] = {
@@ -204,11 +204,10 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_FLOW_PROCESS_NAME,     "--process-name",              SO_REQ_SEP },
 	{ OPT_FLOW_PROCESS_ENDPOINT, "--process-endpoint",          SO_REQ_SEP },
 	{ OPT_IP_TRUSTED_MASK,       "--trusted-subnet-",           SO_REQ_SEP },
-
-#ifndef TLS_DISABLED
-	TLS_OPTION_FLAGS
-#endif
-
+	{ OPT_KMS_CONN_DISCOVERY_URL_FILE,           "--discover-kms-conn-url-file",            SO_REQ_SEP},
+	{ OPT_KMS_CONN_VALIDATION_TOKEN_DETAILS,     "--kms-conn-validation-token-details",     SO_REQ_SEP},
+	{ OPT_KMS_CONN_GET_ENCRYPTION_KEYS_ENDPOINT, "--kms-conn-get-encryption-keys-endpoint", SO_REQ_SEP},
+	TLS_OPTION_FLAGS,
 	SO_END_OF_OPTIONS
 };
 
@@ -662,9 +661,7 @@ static void printUsage(const char* name, bool devhelp) {
 	                 "  collector -- None or FluentD (FluentD requires collector_endpoint to be set)\n"
 	                 "  collector_endpoint -- IP:PORT of the fluentd server\n"
 	                 "  collector_protocol -- UDP or TCP (default is UDP)");
-#ifndef TLS_DISABLED
-	printf(TLS_HELP);
-#endif
+	printf("%s", TLS_HELP);
 	printOptionUsage("-v, --version", "Print version information and exit.");
 	printOptionUsage("-h, -?, --help", "Display this help and exit.");
 	if (devhelp) {
@@ -859,9 +856,9 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(
 	NetworkAddressList publicNetworkAddresses;
 	NetworkAddressList listenNetworkAddresses;
 
-	connectionRecord.resolveHostnamesBlocking();
-	auto& coordinators = connectionRecord.getConnectionString().coordinators();
-	ASSERT(coordinators.size() > 0);
+	std::vector<Hostname>& hostnames = connectionRecord.getConnectionString().hostnames;
+	const std::vector<NetworkAddress>& coords = connectionRecord.getConnectionString().coords;
+	ASSERT(hostnames.size() + coords.size() > 0);
 
 	for (int ii = 0; ii < publicAddressStrs.size(); ++ii) {
 		const std::string& publicAddressStr = publicAddressStrs[ii];
@@ -930,13 +927,26 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(
 			listenNetworkAddresses.secondaryAddress = currentListenAddress;
 		}
 
-		bool hasSameCoord = std::all_of(coordinators.begin(), coordinators.end(), [&](const NetworkAddress& address) {
+		bool matchCoordinatorsTls = std::all_of(coords.begin(), coords.end(), [&](const NetworkAddress& address) {
 			if (address.ip == currentPublicAddress.ip && address.port == currentPublicAddress.port) {
 				return address.isTLS() == currentPublicAddress.isTLS();
 			}
 			return true;
 		});
-		if (!hasSameCoord) {
+		// If true, further check hostnames.
+		if (matchCoordinatorsTls) {
+			matchCoordinatorsTls = std::all_of(hostnames.begin(), hostnames.end(), [&](Hostname& hostname) {
+				Optional<NetworkAddress> resolvedAddress = hostname.resolveBlocking();
+				if (resolvedAddress.present()) {
+					NetworkAddress address = resolvedAddress.get();
+					if (address.ip == currentPublicAddress.ip && address.port == currentPublicAddress.port) {
+						return address.isTLS() == currentPublicAddress.isTLS();
+					}
+				}
+				return true;
+			});
+		}
+		if (!matchCoordinatorsTls) {
 			fprintf(stderr,
 			        "ERROR: TLS state of public address %s does not match in coordinator list.\n",
 			        publicAddressStr.c_str());
@@ -1608,7 +1618,6 @@ private:
 				printSimTime = true;
 				break;
 
-#ifndef TLS_DISABLED
 			case TLSConfig::OPT_TLS_PLUGIN:
 				args.OptionArg();
 				break;
@@ -1627,7 +1636,18 @@ private:
 			case TLSConfig::OPT_TLS_VERIFY_PEERS:
 				tlsConfig.addVerifyPeers(args.OptionArg());
 				break;
-#endif
+			case OPT_KMS_CONN_DISCOVERY_URL_FILE: {
+				knobs.emplace_back("rest_kms_connector_kms_discovery_url_file", args.OptionArg());
+				break;
+			}
+			case OPT_KMS_CONN_VALIDATION_TOKEN_DETAILS: {
+				knobs.emplace_back("rest_kms_connector_validation_token_details", args.OptionArg());
+				break;
+			}
+			case OPT_KMS_CONN_GET_ENCRYPTION_KEYS_ENDPOINT: {
+				knobs.emplace_back("rest_kms_connector_get_encryption_keys_endpoint", args.OptionArg());
+				break;
+			}
 			}
 		}
 
@@ -1821,6 +1841,21 @@ int main(int argc, char* argv[]) {
 		g_knobs.setKnob("server_mem_limit", KnobValue::create(static_cast<int64_t>(opts.memLimit)));
 		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
 		g_knobs.initialize(Randomize::True, role == ServerRole::Simulation ? IsSimulated::True : IsSimulated::False);
+
+		if (!SERVER_KNOBS->ALLOW_DANGEROUS_KNOBS) {
+			if (SERVER_KNOBS->FETCH_USING_STREAMING) {
+				fprintf(stderr,
+				        "ERROR : explicitly setting FETCH_USING_STREAMING is dangerous! set ALLOW_DANGEROUS_KNOBS to "
+				        "proceed anyways\n");
+				flushAndExit(FDB_EXIT_ERROR);
+			}
+			if (SERVER_KNOBS->PEEK_USING_STREAMING) {
+				fprintf(stderr,
+				        "ERROR : explicitly setting PEEK_USING_STREAMING is dangerous! set ALLOW_DANGEROUS_KNOBS to "
+				        "proceed anyways\n");
+				flushAndExit(FDB_EXIT_ERROR);
+			}
+		}
 
 		// evictionPolicyStringToEnum will throw an exception if the string is not recognized as a valid
 		EvictablePageCache::evictionPolicyStringToEnum(FLOW_KNOBS->CACHE_EVICTION_POLICY);

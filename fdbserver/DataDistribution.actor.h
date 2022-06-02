@@ -32,12 +32,15 @@
 #include "fdbclient/RunTransaction.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+enum class RelocateReason { INVALID = -1, OTHER, REBALANCE_DISK, REBALANCE_READ };
+
 struct RelocateShard {
 	KeyRange keys;
 	int priority;
-
-	RelocateShard() : priority(0) {}
-	RelocateShard(KeyRange const& keys, int priority) : keys(keys), priority(priority) {}
+	RelocateReason reason;
+	RelocateShard() : priority(0), reason(RelocateReason::INVALID) {}
+	RelocateShard(KeyRange const& keys, int priority, RelocateReason reason)
+	  : keys(keys), priority(priority), reason(reason) {}
 };
 
 struct IDataDistributionTeam {
@@ -45,8 +48,11 @@ struct IDataDistributionTeam {
 	virtual int size() const = 0;
 	virtual std::vector<UID> const& getServerIDs() const = 0;
 	virtual void addDataInFlightToTeam(int64_t delta) = 0;
+	virtual void addReadInFlightToTeam(int64_t delta) = 0;
 	virtual int64_t getDataInFlightToTeam() const = 0;
 	virtual int64_t getLoadBytes(bool includeInFlight = true, double inflightPenalty = 1.0) const = 0;
+	virtual int64_t getReadInFlightToTeam() const = 0;
+	virtual double getLoadReadBandwidth(bool includeInFlight = true, double inflightPenalty = 1.0) const = 0;
 	virtual int64_t getMinAvailableSpace(bool includeInFlight = true) const = 0;
 	virtual double getMinAvailableSpaceRatio(bool includeInFlight = true) const = 0;
 	virtual bool hasHealthyAvailableSpace(double minRatio) const = 0;
@@ -65,7 +71,7 @@ struct IDataDistributionTeam {
 
 	std::string getDesc() const {
 		const auto& servers = getLastKnownServerInterfaces();
-		std::string s = format("TeamID:%s", getTeamID().c_str());
+		std::string s = format("TeamID %s; ", getTeamID().c_str());
 		s += format("Size %d; ", servers.size());
 		for (int i = 0; i < servers.size(); i++) {
 			if (i)
@@ -78,34 +84,52 @@ struct IDataDistributionTeam {
 
 FDB_DECLARE_BOOLEAN_PARAM(WantNewServers);
 FDB_DECLARE_BOOLEAN_PARAM(WantTrueBest);
-FDB_DECLARE_BOOLEAN_PARAM(PreferLowerUtilization);
+FDB_DECLARE_BOOLEAN_PARAM(PreferLowerDiskUtil);
 FDB_DECLARE_BOOLEAN_PARAM(TeamMustHaveShards);
+FDB_DECLARE_BOOLEAN_PARAM(ForReadBalance);
+FDB_DECLARE_BOOLEAN_PARAM(PreferLowerReadUtil);
 
 struct GetTeamRequest {
-	bool wantsNewServers;
+	bool wantsNewServers; // In additional to servers in completeSources, try to find teams with new server
 	bool wantsTrueBest;
-	bool preferLowerUtilization;
+	bool preferLowerDiskUtil; // if true, lower utilized team has higher score
 	bool teamMustHaveShards;
+	bool forReadBalance;
+	bool preferLowerReadUtil; // only make sense when forReadBalance is true
 	double inflightPenalty;
 	std::vector<UID> completeSources;
 	std::vector<UID> src;
 	Promise<std::pair<Optional<Reference<IDataDistributionTeam>>, bool>> reply;
 
+	typedef Reference<IDataDistributionTeam> TeamRef;
+
 	GetTeamRequest() {}
 	GetTeamRequest(WantNewServers wantsNewServers,
 	               WantTrueBest wantsTrueBest,
-	               PreferLowerUtilization preferLowerUtilization,
+	               PreferLowerDiskUtil preferLowerDiskUtil,
 	               TeamMustHaveShards teamMustHaveShards,
+	               ForReadBalance forReadBalance = ForReadBalance::False,
+	               PreferLowerReadUtil preferLowerReadUtil = PreferLowerReadUtil::False,
 	               double inflightPenalty = 1.0)
-	  : wantsNewServers(wantsNewServers), wantsTrueBest(wantsTrueBest), preferLowerUtilization(preferLowerUtilization),
-	    teamMustHaveShards(teamMustHaveShards), inflightPenalty(inflightPenalty) {}
+	  : wantsNewServers(wantsNewServers), wantsTrueBest(wantsTrueBest), preferLowerDiskUtil(preferLowerDiskUtil),
+	    teamMustHaveShards(teamMustHaveShards), forReadBalance(forReadBalance),
+	    preferLowerReadUtil(preferLowerReadUtil), inflightPenalty(inflightPenalty) {}
+
+	// return true if a.score < b.score
+	[[nodiscard]] bool lessCompare(TeamRef a, TeamRef b, int64_t aLoadBytes, int64_t bLoadBytes) const {
+		int res = 0;
+		if (forReadBalance) {
+			res = preferLowerReadUtil ? greaterReadLoad(a, b) : lessReadLoad(a, b);
+		}
+		return res == 0 ? lessCompareByLoad(aLoadBytes, bLoadBytes) : res < 0;
+	}
 
 	std::string getDesc() const {
 		std::stringstream ss;
 
 		ss << "WantsNewServers:" << wantsNewServers << " WantsTrueBest:" << wantsTrueBest
-		   << " PreferLowerUtilization:" << preferLowerUtilization << " teamMustHaveShards:" << teamMustHaveShards
-		   << " inflightPenalty:" << inflightPenalty << ";";
+		   << " PreferLowerDiskUtil:" << preferLowerDiskUtil << " teamMustHaveShards:" << teamMustHaveShards
+		   << "forReadBalance" << forReadBalance << " inflightPenalty:" << inflightPenalty << ";";
 		ss << "CompleteSources:";
 		for (const auto& cs : completeSources) {
 			ss << cs.toString() << ",";
@@ -113,14 +137,57 @@ struct GetTeamRequest {
 
 		return std::move(ss).str();
 	}
+
+private:
+	// return true if preferHigherUtil && aLoadBytes <= bLoadBytes (higher load bytes has larger score)
+	// or preferLowerUtil && aLoadBytes > bLoadBytes
+	bool lessCompareByLoad(int64_t aLoadBytes, int64_t bLoadBytes) const {
+		bool lessLoad = aLoadBytes <= bLoadBytes;
+		return preferLowerDiskUtil ? !lessLoad : lessLoad;
+	}
+
+	// return -1 if a.readload > b.readload
+	static int greaterReadLoad(TeamRef a, TeamRef b) {
+		auto r1 = a->getLoadReadBandwidth(true), r2 = b->getLoadReadBandwidth(true);
+		return r1 == r2 ? 0 : (r1 > r2 ? -1 : 1);
+	}
+	// return -1 if a.readload < b.readload
+	static int lessReadLoad(TeamRef a, TeamRef b) {
+		auto r1 = a->getLoadReadBandwidth(false), r2 = b->getLoadReadBandwidth(false);
+		return r1 == r2 ? 0 : (r1 < r2 ? -1 : 1);
+	}
 };
 
 struct GetMetricsRequest {
 	KeyRange keys;
 	Promise<StorageMetrics> reply;
-
 	GetMetricsRequest() {}
 	GetMetricsRequest(KeyRange const& keys) : keys(keys) {}
+};
+
+struct GetTopKMetricsReply {
+	std::vector<StorageMetrics> metrics;
+	double minReadLoad = -1, maxReadLoad = -1;
+	GetTopKMetricsReply() {}
+	GetTopKMetricsReply(std::vector<StorageMetrics> const& m, double minReadLoad, double maxReadLoad)
+	  : metrics(m), minReadLoad(minReadLoad), maxReadLoad(maxReadLoad) {}
+};
+struct GetTopKMetricsRequest {
+	// whether a > b
+	typedef std::function<bool(const StorageMetrics& a, const StorageMetrics& b)> MetricsComparator;
+	int topK = 1; // default only return the top 1 shard based on the comparator
+	MetricsComparator comparator; // Return true if a.score > b.score, return the largest topK in keys
+	std::vector<KeyRange> keys;
+	Promise<GetTopKMetricsReply> reply; // topK storage metrics
+	double maxBytesReadPerKSecond = 0, minBytesReadPerKSecond = 0; // all returned shards won't exceed this read load
+
+	GetTopKMetricsRequest() {}
+	GetTopKMetricsRequest(std::vector<KeyRange> const& keys,
+	                      int topK = 1,
+	                      double maxBytesReadPerKSecond = std::numeric_limits<double>::max(),
+	                      double minBytesReadPerKSecond = 0)
+	  : topK(topK), keys(keys), maxBytesReadPerKSecond(maxBytesReadPerKSecond),
+	    minBytesReadPerKSecond(minBytesReadPerKSecond) {}
 };
 
 struct GetMetricsListRequest {
@@ -254,6 +321,7 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
                                            PromiseStream<RelocateShard> output,
                                            Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
                                            PromiseStream<GetMetricsRequest> getShardMetrics,
+                                           FutureStream<GetTopKMetricsRequest> getTopKMetrics,
                                            PromiseStream<GetMetricsListRequest> getShardMetricsList,
                                            FutureStream<Promise<int64_t>> getAverageShardBytes,
                                            Promise<Void> readyToStart,
@@ -266,6 +334,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
                                          PromiseStream<RelocateShard> output,
                                          FutureStream<RelocateShard> input,
                                          PromiseStream<GetMetricsRequest> getShardMetrics,
+                                         PromiseStream<GetTopKMetricsRequest> getTopKMetrics,
                                          Reference<AsyncVar<bool>> processingUnhealthy,
                                          Reference<AsyncVar<bool>> processingWiggle,
                                          std::vector<TeamCollectionInterface> teamCollection,
@@ -395,17 +464,9 @@ struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 
 	// data structures
 	typedef std::pair<StorageMetadataType, UID> MetadataUIDP;
-	// sorted by (createdTime, UID), the least comes first
-	struct CompPair {
-		bool operator()(MetadataUIDP const& a, MetadataUIDP const& b) const {
-			if (a.first.createdTime == b.first.createdTime) {
-				return a.second > b.second;
-			}
-			// larger createdTime means the age is younger
-			return a.first.createdTime > b.first.createdTime;
-		}
-	};
-	boost::heap::skew_heap<MetadataUIDP, boost::heap::mutable_<true>, boost::heap::compare<CompPair>> wiggle_pq;
+	// min-heap
+	boost::heap::skew_heap<MetadataUIDP, boost::heap::mutable_<true>, boost::heap::compare<std::greater<MetadataUIDP>>>
+	    wiggle_pq;
 	std::unordered_map<UID, decltype(wiggle_pq)::handle_type> pq_handles;
 
 	AsyncVar<bool> nonEmpty;
@@ -440,6 +501,5 @@ struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 
 ACTOR Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses(
     Transaction* tr);
-
 #include "flow/unactorcompiler.h"
 #endif

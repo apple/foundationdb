@@ -19,6 +19,8 @@ set(FLOW_SRCS
   Error.cpp
   Error.h
   EventTypes.actor.h
+  EncryptUtils.h
+  EncryptUtils.cpp
   FastAlloc.cpp
   FastAlloc.h
   FastRef.h
@@ -46,18 +48,24 @@ set(FLOW_SRCS
   Knobs.cpp
   Knobs.h
   MetricSample.h
+  MkCert.h
+  MkCert.cpp
   Net2.actor.cpp
   Net2Packet.cpp
   Net2Packet.h
+  PKey.h
+  PKey.cpp
   Platform.actor.cpp
   Platform.actor.h
   Platform.h
   Profiler.actor.cpp
   Profiler.h
+  ScopeExit.h
   SendBufferIterator.h
   SignalSafeUnwind.cpp
   SignalSafeUnwind.h
   SimpleOpt.h
+  StreamCipher.cpp
   StreamCipher.h
   SystemMonitor.cpp
   SystemMonitor.h
@@ -84,6 +92,10 @@ set(FLOW_SRCS
   actorcompiler.h
   crc32c.h
   crc32c.cpp
+  ppc-asm.h
+  crc32.S
+  crc32_wrapper.h
+  crc32_wrapper.c
   error_definitions.h
   ${CMAKE_CURRENT_BINARY_DIR}/SourceVersion.h
   flat_buffers.cpp
@@ -103,12 +115,6 @@ set(FLOW_SRCS
   version.cpp
   xxhash.c
   xxhash.h)
-
-if(WITH_TLS)
-  set(FLOW_SRCS
-    ${FLOW_SRCS}
-    StreamCipher.cpp)
-endif()
 
 add_library(stacktrace stacktrace.amalgamation.cpp stacktrace.h)
 if (USE_ASAN)
@@ -166,12 +172,11 @@ if(USE_VALGRIND)
   target_link_libraries(flow PUBLIC Valgrind)
   target_link_libraries(flow_sampling PUBLIC Valgrind)
 endif()
-if(NOT WITH_TLS)
-  target_compile_definitions(flow PUBLIC TLS_DISABLED)
-  target_compile_definitions(flow_sampling PUBLIC TLS_DISABLED)
-else()
-  target_link_libraries(flow PUBLIC OpenSSL::SSL)
-  target_link_libraries(flow_sampling PUBLIC OpenSSL::SSL)
+target_link_libraries(flow PUBLIC OpenSSL::SSL)
+target_link_libraries(flow_sampling PUBLIC OpenSSL::SSL)
+if(USE_WOLFSSL)
+  target_include_directories(flow SYSTEM BEFORE PUBLIC ${WOLFSSL_INCLUDE_DIR}/wolfssl)
+  target_include_directories(flow_sampling SYSTEM BEFORE PUBLIC ${WOLFSSL_INCLUDE_DIR}/wolfssl)
 endif()
 target_link_libraries(flow PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
 target_link_libraries(flow_sampling PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
@@ -193,3 +198,16 @@ if(APPLE)
   target_link_libraries(flow PRIVATE ${IO_KIT} ${CORE_FOUNDATION})
   target_link_libraries(flow_sampling PRIVATE ${IO_KIT} ${CORE_FOUNDATION})
 endif()
+
+add_executable(mkcert MkCertCli.cpp)
+target_link_libraries(mkcert PUBLIC fmt::fmt flow)
+
+add_executable(mtls_unittest TLSTest.cpp)
+target_link_libraries(mtls_unittest PUBLIC fmt::fmt flow)
+if(USE_SANITIZER)
+  target_link_libraries(mtls_unittest PUBLIC boost_asan)
+else()
+  target_link_libraries(mtls_unittest PUBLIC boost_target)
+endif()
+add_test(NAME mutual_tls_unittest
+         COMMAND $<TARGET_FILE:mtls_unittest>)

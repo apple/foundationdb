@@ -29,15 +29,17 @@ ServerKnobs::ServerKnobs(Randomize randomize, ClientKnobs* clientKnobs, IsSimula
 
 void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSimulated isSimulated) {
 	// clang-format off
+	init( ALLOW_DANGEROUS_KNOBS,                               isSimulated );
 	// Versions
 	init( VERSIONS_PER_SECOND,                                   1e6 );
 	init( MAX_VERSIONS_IN_FLIGHT,                100 * VERSIONS_PER_SECOND );
 	init( MAX_VERSIONS_IN_FLIGHT_FORCED,         6e5 * VERSIONS_PER_SECOND ); //one week of versions
-	init( MAX_READ_TRANSACTION_LIFE_VERSIONS,      5 * VERSIONS_PER_SECOND ); if (randomize && BUGGIFY) MAX_READ_TRANSACTION_LIFE_VERSIONS = VERSIONS_PER_SECOND; else if (randomize && BUGGIFY) MAX_READ_TRANSACTION_LIFE_VERSIONS = std::max<int>(1, 0.1 * VERSIONS_PER_SECOND); else if( randomize && BUGGIFY ) MAX_READ_TRANSACTION_LIFE_VERSIONS = 10 * VERSIONS_PER_SECOND;
+	init( ENABLE_VERSION_VECTOR,                               false );
+        bool buggifyShortReadWindow = randomize && BUGGIFY && !ENABLE_VERSION_VECTOR;
+	init( MAX_READ_TRANSACTION_LIFE_VERSIONS,      5 * VERSIONS_PER_SECOND ); if (randomize && BUGGIFY) MAX_READ_TRANSACTION_LIFE_VERSIONS = VERSIONS_PER_SECOND; else if (buggifyShortReadWindow) MAX_READ_TRANSACTION_LIFE_VERSIONS = std::max<int>(1, 0.1 * VERSIONS_PER_SECOND); else if( randomize && BUGGIFY ) MAX_READ_TRANSACTION_LIFE_VERSIONS = 10 * VERSIONS_PER_SECOND;
 	init( MAX_WRITE_TRANSACTION_LIFE_VERSIONS,     5 * VERSIONS_PER_SECOND ); if (randomize && BUGGIFY) MAX_WRITE_TRANSACTION_LIFE_VERSIONS=std::max<int>(1, 1 * VERSIONS_PER_SECOND);
 	init( MAX_COMMIT_BATCH_INTERVAL,                             2.0 ); if( randomize && BUGGIFY ) MAX_COMMIT_BATCH_INTERVAL = 0.5; // Each commit proxy generates a CommitTransactionBatchRequest at least this often, so that versions always advance smoothly
 	MAX_COMMIT_BATCH_INTERVAL = std::min(MAX_COMMIT_BATCH_INTERVAL, MAX_READ_TRANSACTION_LIFE_VERSIONS/double(2*VERSIONS_PER_SECOND)); // Ensure that the proxy commits 2 times every MAX_READ_TRANSACTION_LIFE_VERSIONS, otherwise the master will not give out versions fast enough
-	init( ENABLE_VERSION_VECTOR,                               false );
 	init( ENABLE_VERSION_VECTOR_TLOG_UNICAST,                  false );
 	init( MAX_VERSION_RATE_MODIFIER,                             0.1 );
 	init( MAX_VERSION_RATE_OFFSET,               VERSIONS_PER_SECOND ); // If the calculated version is more than this amount away from the expected version, it will be clamped to this value. This prevents huge version jumps.
@@ -69,7 +71,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( TLOG_MESSAGE_BLOCK_BYTES,                             10e6 );
 	init( TLOG_MESSAGE_BLOCK_OVERHEAD_FACTOR,      double(TLOG_MESSAGE_BLOCK_BYTES) / (TLOG_MESSAGE_BLOCK_BYTES - MAX_MESSAGE_SIZE) ); //1.0121466709838096006362758832473
 	init( PEEK_TRACKER_EXPIRATION_TIME,                          600 ); if( randomize && BUGGIFY ) PEEK_TRACKER_EXPIRATION_TIME = 120; // Cannot be buggified lower without changing the following assert in LogSystemPeekCursor.actor.cpp: ASSERT_WE_THINK(e.code() == error_code_operation_obsolete || SERVER_KNOBS->PEEK_TRACKER_EXPIRATION_TIME < 10);
-	init( PEEK_USING_STREAMING,                                 true ); if( randomize && BUGGIFY ) PEEK_USING_STREAMING = false;
+	init( PEEK_USING_STREAMING,                                false ); if( randomize && isSimulated && BUGGIFY ) PEEK_USING_STREAMING = true;
 	init( PARALLEL_GET_MORE_REQUESTS,                             32 ); if( randomize && BUGGIFY ) PARALLEL_GET_MORE_REQUESTS = 2;
 	init( MULTI_CURSOR_PRE_FETCH_LIMIT,                           10 );
 	init( MAX_QUEUE_COMMIT_BYTES,                               15e6 ); if( randomize && BUGGIFY ) MAX_QUEUE_COMMIT_BYTES = 5000;
@@ -142,7 +144,9 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 
 	init( PRIORITY_RECOVER_MOVE,                                 110 );
 	init( PRIORITY_REBALANCE_UNDERUTILIZED_TEAM,                 120 );
-	init( PRIORITY_REBALANCE_OVERUTILIZED_TEAM,                  121 );
+	init( PRIORITY_REBALANCE_READ_UNDERUTIL_TEAM,                121 );
+	init( PRIORITY_REBALANCE_OVERUTILIZED_TEAM,                  122 );
+	init( PRIORITY_REBALANCE_READ_OVERUTIL_TEAM,                 123 );
 	init( PRIORITY_PERPETUAL_STORAGE_WIGGLE,                     139 );
 	init( PRIORITY_TEAM_HEALTHY,                                 140 );
 	init( PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER,               150 );
@@ -157,11 +161,17 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( PRIORITY_SPLIT_SHARD,                                  950 ); if( randomize && BUGGIFY ) PRIORITY_SPLIT_SHARD = 350;
 
 	// Data distribution
+	init( READ_REBALANCE_CPU_THRESHOLD,                         15.0 );
+	init( READ_REBALANCE_SRC_PARALLELISM,                         20 );
+	init( READ_REBALANCE_SHARD_TOPK,  READ_REBALANCE_SRC_PARALLELISM * 2 );
+	init( READ_REBALANCE_DIFF_FRAC,                               0.3);
+	init( READ_REBALANCE_MAX_SHARD_FRAC,                          0.2); // FIXME: add buggify here when we have DD test, seems DD is pretty sensitive to this parameter
 	init( RETRY_RELOCATESHARD_DELAY,                             0.1 );
 	init( DATA_DISTRIBUTION_FAILURE_REACTION_TIME,              60.0 ); if( randomize && BUGGIFY ) DATA_DISTRIBUTION_FAILURE_REACTION_TIME = 1.0;
 	bool buggifySmallShards = randomize && BUGGIFY;
 	bool simulationMediumShards = !buggifySmallShards && isSimulated && randomize && !BUGGIFY; // prefer smaller shards in simulation
-	init( MIN_SHARD_BYTES,                                  50000000 ); if( buggifySmallShards ) MIN_SHARD_BYTES = 40000; if (simulationMediumShards) MIN_SHARD_BYTES = 200000; //FIXME: data distribution tracker (specifically StorageMetrics) relies on this number being larger than the maximum size of a key value pair
+	// FIXME: increase this even more eventually
+	init( MIN_SHARD_BYTES,                                  10000000 ); if( buggifySmallShards ) MIN_SHARD_BYTES = 40000; if (simulationMediumShards) MIN_SHARD_BYTES = 200000; //FIXME: data distribution tracker (specifically StorageMetrics) relies on this number being larger than the maximum size of a key value pair
 	init( SHARD_BYTES_RATIO,                                       4 );
 	init( SHARD_BYTES_PER_SQRT_BYTES,                             45 ); if( buggifySmallShards ) SHARD_BYTES_PER_SQRT_BYTES = 0;//Approximately 10000 bytes per shard
 	init( MAX_SHARD_BYTES,                                 500000000 );
@@ -382,7 +392,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( DEFAULT_FDB_ROCKSDB_COLUMN_FAMILY,                    "fdb");
 
 	init( ROCKSDB_PERFCONTEXT_ENABLE,                          false ); if( randomize && BUGGIFY ) ROCKSDB_PERFCONTEXT_ENABLE = deterministicRandom()->coinflip() ? false : true;
-	init( ROCKSDB_PERFCONTEXT_SAMPLE_RATE, 					  0.0001 );
+	init( ROCKSDB_PERFCONTEXT_SAMPLE_RATE,                    0.0001 );
 	init( ROCKSDB_MAX_SUBCOMPACTIONS,                              2 );
 	init( ROCKSDB_SOFT_PENDING_COMPACT_BYTES_LIMIT,      64000000000 ); // 64GB, Rocksdb option, Writes will slow down.
 	init( ROCKSDB_HARD_PENDING_COMPACT_BYTES_LIMIT,     100000000000 ); // 100GB, Rocksdb option, Writes will stall.
@@ -394,6 +404,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_CAN_COMMIT_DELAY_TIMES_ON_OVERLOAD,              5 );
 	init( ROCKSDB_COMPACTION_READAHEAD_SIZE,                   32768 ); // 32 KB, performs bigger reads when doing compaction.
 	init( ROCKSDB_BLOCK_SIZE,                                  32768 ); // 32 KB, size of the block in rocksdb cache.
+ 	init( ENABLE_SHARDED_ROCKSDB,                              false );
 
 	// Leader election
 	bool longLeaderElection = randomize && BUGGIFY;
@@ -450,12 +461,15 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( MAX_COMMIT_UPDATES,                                    2000 ); if( randomize && BUGGIFY ) MAX_COMMIT_UPDATES = 1;
 	init( MAX_PROXY_COMPUTE,                                      2.0 );
 	init( MAX_COMPUTE_PER_OPERATION,                              0.1 );
+	init( MAX_COMPUTE_DURATION_LOG_CUTOFF,                       0.05 );
 	init( PROXY_COMPUTE_BUCKETS,                                20000 );
 	init( PROXY_COMPUTE_GROWTH_RATE,                             0.01 );
 	init( TXN_STATE_SEND_AMOUNT,                                    4 );
 	init( REPORT_TRANSACTION_COST_ESTIMATION_DELAY,               0.1 );
 	init( PROXY_REJECT_BATCH_QUEUED_TOO_LONG,                    true );
-	init( PROXY_USE_RESOLVER_PRIVATE_MUTATIONS,                 false ); if( !ENABLE_VERSION_VECTOR_TLOG_UNICAST && randomize && BUGGIFY ) PROXY_USE_RESOLVER_PRIVATE_MUTATIONS = deterministicRandom()->coinflip();
+
+        bool buggfyUseResolverPrivateMutations = randomize && BUGGIFY && !ENABLE_VERSION_VECTOR_TLOG_UNICAST;
+	init( PROXY_USE_RESOLVER_PRIVATE_MUTATIONS,                 false ); if( buggfyUseResolverPrivateMutations ) PROXY_USE_RESOLVER_PRIVATE_MUTATIONS = deterministicRandom()->coinflip();
 
 	init( RESET_MASTER_BATCHES,                                   200 );
 	init( RESET_RESOLVER_BATCHES,                                 200 );
@@ -541,6 +555,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( CC_ENABLE_ENTIRE_SATELLITE_MONITORING,               false );
 	init( CC_SATELLITE_DEGRADATION_MIN_COMPLAINER,                 3 );
 	init( CC_SATELLITE_DEGRADATION_MIN_BAD_SERVER,                 3 );
+	init( CC_THROTTLE_SINGLETON_RERECRUIT_INTERVAL,              0.5 );
 
 	init( INCOMPATIBLE_PEERS_LOGGING_INTERVAL,                   600 ); if( randomize && BUGGIFY ) INCOMPATIBLE_PEERS_LOGGING_INTERVAL = 60.0;
 	init( EXPECTED_MASTER_FITNESS,            ProcessClass::UnsetFit );
@@ -656,6 +671,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( BYTES_READ_UNITS_PER_SAMPLE,                          100000 ); // 100K bytes
 	init( READ_HOT_SUB_RANGE_CHUNK_SIZE,                        10000000); // 10MB
 	init( EMPTY_READ_PENALTY,                                   20 ); // 20 bytes
+	init( DD_SHARD_COMPARE_LIMIT,                               1000 );
 	init( READ_SAMPLING_ENABLED,                                false ); if ( randomize && BUGGIFY ) READ_SAMPLING_ENABLED = true;// enable/disable read sampling
 
 	//Storage Server
@@ -664,12 +680,13 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( FUTURE_VERSION_DELAY,                                  1.0 );
 	init( STORAGE_LIMIT_BYTES,                                500000 );
 	init( BUGGIFY_LIMIT_BYTES,                                  1000 );
-	init( FETCH_USING_STREAMING,                                true ); if( randomize && BUGGIFY ) FETCH_USING_STREAMING = false; //Determines if fetch keys uses streaming reads
+	init( FETCH_USING_STREAMING,                               false ); if( randomize && isSimulated && BUGGIFY ) FETCH_USING_STREAMING = true; //Determines if fetch keys uses streaming reads
 	init( FETCH_BLOCK_BYTES,                                     2e6 );
 	init( FETCH_KEYS_PARALLELISM_BYTES,                          4e6 ); if( randomize && BUGGIFY ) FETCH_KEYS_PARALLELISM_BYTES = 3e6;
 	init( FETCH_KEYS_PARALLELISM,                                  2 );
 	init( FETCH_KEYS_LOWER_PRIORITY,                               0 );
 	init( FETCH_CHANGEFEED_PARALLELISM,                            2 );
+	init( SERVE_FETCH_CHECKPOINT_PARALLELISM,                      4 );
 	init( BUGGIFY_BLOCK_BYTES,                                 10000 );
 	init( STORAGE_RECOVERY_VERSION_LAG_LIMIT,				2 * MAX_READ_TRANSACTION_LIFE_VERSIONS );
 	init( STORAGE_COMMIT_BYTES,                             10000000 ); if( randomize && BUGGIFY ) STORAGE_COMMIT_BYTES = 2000000;
@@ -854,9 +871,15 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
     init( ENABLE_ENCRYPTION,                                   false );
     init( ENCRYPTION_MODE,                              "AES-256-CTR");
     init( SIM_KMS_MAX_KEYS,                                      4096);
+    init( ENCRYPT_PROXY_MAX_DBG_TRACE_LENGTH,                  100000);
+
+    // KMS connector type
+    init( KMS_CONNECTOR_TYPE,                      "RESTKmsConnector");
 
 	// Blob granlues
 	init( BG_URL,               isSimulated ? "file://fdbblob/" : "" ); // TODO: store in system key space or something, eventually
+	// BlobGranuleVerify* simulation tests use blobRangeKeys, BlobGranuleCorrectness* use tenant, default in real clusters is tenant
+	init( BG_RANGE_SOURCE,                                  "tenant" );
 	init( BG_SNAPSHOT_FILE_TARGET_BYTES,                    10000000 ); if( buggifySmallShards ) BG_SNAPSHOT_FILE_TARGET_BYTES = 100000; else if (simulationMediumShards || (randomize && BUGGIFY) ) BG_SNAPSHOT_FILE_TARGET_BYTES = 1000000; 
 	init( BG_DELTA_BYTES_BEFORE_COMPACT, BG_SNAPSHOT_FILE_TARGET_BYTES/2 );
 	init( BG_DELTA_FILE_TARGET_BYTES,   BG_DELTA_BYTES_BEFORE_COMPACT/10 );
@@ -879,6 +902,24 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 
 	init( BGCC_TIMEOUT,                   isSimulated ? 10.0 : 120.0 );
 	init( BGCC_MIN_INTERVAL,                isSimulated ? 1.0 : 10.0 );
+
+	// HTTP KMS Connector
+	init( REST_KMS_CONNECTOR_KMS_DISCOVERY_URL_MODE,           "file");
+	init( REST_KMS_CONNECTOR_VALIDATION_TOKEN_MODE,            "file");
+	init( REST_KMS_CONNECTOR_VALIDATION_TOKEN_MAX_SIZE,          1024);
+	init( REST_KMS_CONNECTOR_VALIDATION_TOKENS_MAX_PAYLOAD_SIZE, 10 * 1024);
+	init( REST_KMS_CONNECTOR_REFRESH_KMS_URLS,                   true);
+	init( REST_KMS_CONNECTOR_REFRESH_KMS_URLS_INTERVAL_SEC,       600);
+	// Below KMS configurations are responsible for:
+	// Discovering KMS URLs, fetch encryption keys endpoint and validation token details.
+	// Configurations are expected to be passed as command-line arguments.
+	// NOTE: Care must be taken when attempting to update below configurations for a up/running FDB cluster.
+	init( REST_KMS_CONNECTOR_DISCOVER_KMS_URL_FILE,                "");
+	init( REST_KMS_CONNECTOR_GET_ENCRYPTION_KEYS_ENDPOINT,         "");
+	// Details to fetch validation token from a localhost file
+	// acceptable format: "<token_name1>#<absolute_file_path1>,<token_name2>#<absolute_file_path2>,.."
+	// NOTE: 'token-name" can NOT contain '#' character
+	init( REST_KMS_CONNECTOR_VALIDATION_TOKEN_DETAILS,             "");
 
 	// clang-format on
 
