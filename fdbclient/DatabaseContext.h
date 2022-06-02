@@ -23,6 +23,7 @@
 #include "fdbclient/Notified.h"
 #include "flow/FastAlloc.h"
 #include "flow/FastRef.h"
+#include "fdbclient/GlobalConfig.actor.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "flow/genericactors.actor.h"
 #include <vector>
@@ -222,8 +223,6 @@ struct KeyRangeLocationInfo {
 	  : tenantEntry(tenantEntry), range(range), locations(locations) {}
 };
 
-class GlobalConfig;
-
 class DatabaseContext : public ReferenceCounted<DatabaseContext>, public FastAllocated<DatabaseContext>, NonCopyable {
 public:
 	static DatabaseContext* allocateOnForeignThread() {
@@ -245,18 +244,21 @@ public:
 
 	// Constructs a new copy of this DatabaseContext from the parameters of this DatabaseContext
 	Database clone() const {
-		return Database(new DatabaseContext(connectionRecord,
-		                                    clientInfo,
-		                                    coordinator,
-		                                    clientInfoMonitor,
-		                                    taskID,
-		                                    clientLocality,
-		                                    enableLocalityLoadBalance,
-		                                    lockAware,
-		                                    internal,
-		                                    apiVersion,
-		                                    switchable,
-		                                    defaultTenant));
+		Database cx = Database(new DatabaseContext(connectionRecord,
+		                                           clientInfo,
+		                                           coordinator,
+		                                           clientInfoMonitor,
+		                                           taskID,
+		                                           clientLocality,
+		                                           enableLocalityLoadBalance,
+		                                           lockAware,
+		                                           internal,
+		                                           apiVersion,
+		                                           switchable,
+		                                           defaultTenant));
+		cx->globalConfig->init(Reference<AsyncVar<ClientDBInfo> const>(cx->clientInfo),
+		                       std::addressof(cx->clientInfo->get()));
+		return cx;
 	}
 
 	Optional<KeyRangeLocationInfo> getCachedLocation(const Optional<TenantName>& tenant,

@@ -170,7 +170,7 @@ ACTOR Future<Void> moveKeySelectorOverRangeActor(const SpecialKeyRangeReadImpl* 
 	// Note : startKey never equals endKey here
 	ASSERT(startKey < endKey);
 
-	TraceEvent(SevDebug, "NormalizeKeySelector")
+	DisabledTraceEvent(SevDebug, "NormalizeKeySelector")
 	    .detail("OriginalKey", ks->getKey())
 	    .detail("OriginalOffset", ks->offset)
 	    .detail("SpecialKeyRangeStart", skrImpl->getKeyRange().begin)
@@ -210,7 +210,7 @@ ACTOR Future<Void> moveKeySelectorOverRangeActor(const SpecialKeyRangeReadImpl* 
 			ks->offset -= result.size();
 		}
 	}
-	TraceEvent(SevDebug, "NormalizeKeySelector")
+	DisabledTraceEvent(SevDebug, "NormalizeKeySelector")
 	    .detail("NormalizedKey", ks->getKey())
 	    .detail("NormalizedOffset", ks->offset)
 	    .detail("SpecialKeyRangeStart", skrImpl->getKeyRange().begin)
@@ -1657,7 +1657,6 @@ Future<RangeResult> CoordinatorsImpl::getRange(ReadYourWritesTransaction* ryw,
 }
 
 ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
-	state Reference<IQuorumChange> change;
 	state ClusterConnectionString conn; // We don't care about the Key here.
 	state std::vector<std::string> process_address_or_hostname_strs;
 	state Optional<std::string> msg;
@@ -1703,15 +1702,7 @@ ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWrite
 		}
 	}
 
-	std::vector<NetworkAddress> addressesVec = wait(conn.tryResolveHostnames());
-	if (addressesVec.size() != conn.hostnames.size() + conn.coordinators().size()) {
-		return ManagementAPIError::toJsonString(false, "coordinators", "One or more hostnames are not resolvable.");
-	} else if (addressesVec.size()) {
-		change = specifiedQuorumChange(addressesVec);
-	} else {
-		change = noQuorumChange();
-	}
-
+	std::string newName;
 	// check update for cluster_description
 	Key cluster_decription_key = LiteralStringRef("cluster_description").withPrefix(kr.begin);
 	auto entry = ryw->getSpecialKeySpaceWriteMap()[cluster_decription_key];
@@ -1719,7 +1710,7 @@ ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWrite
 		// check valid description [a-zA-Z0-9_]+
 		if (entry.second.present() && isAlphaNumeric(entry.second.get().toString())) {
 			// do the name change
-			change = nameQuorumChange(entry.second.get().toString(), change);
+			newName = entry.second.get().toString();
 		} else {
 			// throw the error
 			return ManagementAPIError::toJsonString(
@@ -1727,13 +1718,11 @@ ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWrite
 		}
 	}
 
-	ASSERT(change.isValid());
-
 	TraceEvent(SevDebug, "SKSChangeCoordinatorsStart")
-	    .detail("NewAddresses", describe(addressesVec))
+	    .detail("NewConnectionString", conn.toString())
 	    .detail("Description", entry.first ? entry.second.get().toString() : "");
 
-	Optional<CoordinatorsResult> r = wait(changeQuorumChecker(&ryw->getTransaction(), change, addressesVec));
+	Optional<CoordinatorsResult> r = wait(changeQuorumChecker(&ryw->getTransaction(), &conn, newName));
 
 	TraceEvent(SevDebug, "SKSChangeCoordinatorsFinish")
 	    .detail("Result", r.present() ? static_cast<int>(r.get()) : -1); // -1 means success
@@ -1802,9 +1791,20 @@ ACTOR static Future<RangeResult> CoordinatorsAutoImplActor(ReadYourWritesTransac
 		throw special_keys_api_failure();
 	}
 
-	for (const auto& address : _desiredCoordinators) {
-		autoCoordinatorsKey += autoCoordinatorsKey.size() ? "," : "";
-		autoCoordinatorsKey += address.toString();
+	if (result == CoordinatorsResult::SAME_NETWORK_ADDRESSES) {
+		for (const auto& host : old.hostnames) {
+			autoCoordinatorsKey += autoCoordinatorsKey.size() ? "," : "";
+			autoCoordinatorsKey += host.toString();
+		}
+		for (const auto& coord : old.coords) {
+			autoCoordinatorsKey += autoCoordinatorsKey.size() ? "," : "";
+			autoCoordinatorsKey += coord.toString();
+		}
+	} else {
+		for (const auto& address : _desiredCoordinators) {
+			autoCoordinatorsKey += autoCoordinatorsKey.size() ? "," : "";
+			autoCoordinatorsKey += address.toString();
+		}
 	}
 	res.push_back_deep(res.arena(), KeyValueRef(kr.begin, Value(autoCoordinatorsKey)));
 	return res;
@@ -1852,6 +1852,12 @@ Future<RangeResult> AdvanceVersionImpl::getRange(ReadYourWritesTransaction* ryw,
 }
 
 ACTOR static Future<Optional<std::string>> advanceVersionCommitActor(ReadYourWritesTransaction* ryw, Version v) {
+	Optional<Standalone<StringRef>> versionEpochValue = wait(ryw->getTransaction().get(versionEpochKey));
+	if (versionEpochValue.present()) {
+		return ManagementAPIError::toJsonString(
+		    false, "advanceversion", "Illegal to modify the version while the version epoch is enabled");
+	}
+
 	// Max version we can set for minRequiredCommitVersionKey,
 	// making sure the cluster can still be alive for 1000 years after the recovery
 	static const Version maxAllowedVerion =
@@ -1933,12 +1939,13 @@ Future<Optional<std::string>> VersionEpochImpl::commit(ReadYourWritesTransaction
 
 ClientProfilingImpl::ClientProfilingImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
 
-ACTOR static Future<RangeResult> ClientProfilingGetRangeActor(ReadYourWritesTransaction* ryw,
-                                                              KeyRef prefix,
-                                                              KeyRangeRef kr) {
-	state RangeResult result;
+Future<RangeResult> ClientProfilingImpl::getRange(ReadYourWritesTransaction* ryw,
+                                                  KeyRangeRef kr,
+                                                  GetRangeLimits limitsHint) const {
+	KeyRef prefix = getKeyRange().begin;
+	RangeResult result = RangeResult();
 	// client_txn_sample_rate
-	state Key sampleRateKey = LiteralStringRef("client_txn_sample_rate").withPrefix(prefix);
+	Key sampleRateKey = LiteralStringRef("client_txn_sample_rate").withPrefix(prefix);
 
 	ryw->getTransaction().setOption(FDBTransactionOptions::RAW_ACCESS);
 
@@ -1959,7 +1966,7 @@ ACTOR static Future<RangeResult> ClientProfilingGetRangeActor(ReadYourWritesTran
 		}
 	}
 	// client_txn_size_limit
-	state Key txnSizeLimitKey = LiteralStringRef("client_txn_size_limit").withPrefix(prefix);
+	Key txnSizeLimitKey = LiteralStringRef("client_txn_size_limit").withPrefix(prefix);
 	if (kr.contains(txnSizeLimitKey)) {
 		auto entry = ryw->getSpecialKeySpaceWriteMap()[txnSizeLimitKey];
 		if (!ryw->readYourWritesDisabled() && entry.first) {
@@ -1976,12 +1983,6 @@ ACTOR static Future<RangeResult> ClientProfilingGetRangeActor(ReadYourWritesTran
 		}
 	}
 	return result;
-}
-
-Future<RangeResult> ClientProfilingImpl::getRange(ReadYourWritesTransaction* ryw,
-                                                  KeyRangeRef kr,
-                                                  GetRangeLimits limitsHint) const {
-	return ClientProfilingGetRangeActor(ryw, getKeyRange().begin, kr);
 }
 
 Future<Optional<std::string>> ClientProfilingImpl::commit(ReadYourWritesTransaction* ryw) {
@@ -2535,14 +2536,18 @@ Future<Optional<std::string>> DataDistributionImpl::commit(ReadYourWritesTransac
 					                                           iter->value().second.get().toString());
 				}
 			} else if (iter->range() == singleKeyRange(rebalanceIgnoredKey)) {
-				if (iter->value().second.get().size())
-					msg =
-					    ManagementAPIError::toJsonString(false,
-					                                     "datadistribution",
-					                                     "Value is unused for the data_distribution/rebalance_ignored "
-					                                     "key, please set it to an empty value");
-				else
-					ryw->getTransaction().set(rebalanceDDIgnoreKey, LiteralStringRef("on"));
+				ValueRef val = iter->value().second.get();
+				try {
+					boost::lexical_cast<int>(iter->value().second.get().toString());
+				} catch (boost::bad_lexical_cast& e) {
+					ManagementAPIError::toJsonString(
+					    false,
+					    "datadistribution",
+					    "Invalid datadistribution rebalance ignore option (int or empty): " +
+					        iter->value().second.get().toString());
+					val = ""_sr;
+				}
+				ryw->getTransaction().set(rebalanceDDIgnoreKey, iter->value().second.get());
 			} else {
 				msg = ManagementAPIError::toJsonString(
 				    false,

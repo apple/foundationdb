@@ -13,8 +13,6 @@ Overview
 
 A tenant in a FoundationDB cluster maps a byte-string name to a key-space that can be used to store data associated with that tenant. This key-space is stored in the clusters global key-space under a prefix assigned to that tenant, with each tenant being assigned a separate non-intersecting prefix.
 
-In addition to being each assigned a separate tenant prefix, tenants can be configured to have a common shared prefix. By default, the shared prefix is empty and tenants are allocated prefixes throughout the normal key-space. To configure an alternate shared prefix, set the ``\xff/tenantDataPrefix`` key to have the desired prefix as the value.
-
 Tenant operations are implicitly confined to the key-space associated with the tenant. It is not necessary for client applications to use or be aware of the prefix assigned to the tenant.
 
 Enabling tenants

@@ -587,6 +587,7 @@ void ThreadSafeApi::runNetwork() {
 	}
 
 	TraceEvent("RunNetworkTerminating");
+	closeTraceFile();
 }
 
 void ThreadSafeApi::stopNetwork() {

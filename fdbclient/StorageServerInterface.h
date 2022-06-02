@@ -605,6 +605,7 @@ struct StorageMetrics {
 	int64_t bytesPerKSecond = 0; // network bandwidth (average over 10s)
 	int64_t iosPerKSecond = 0;
 	int64_t bytesReadPerKSecond = 0;
+	Optional<KeyRange> keys; // this metric belongs to which range
 
 	static const int64_t infinity = 1LL << 60;
 
@@ -1042,9 +1043,9 @@ struct ChangeFeedVersionUpdateRequest {
 
 struct GetStorageMetricsReply {
 	constexpr static FileIdentifier file_identifier = 15491478;
-	StorageMetrics load;
-	StorageMetrics available;
-	StorageMetrics capacity;
+	StorageMetrics load; // sum of key-value metrics (logical bytes)
+	StorageMetrics available; // physical bytes
+	StorageMetrics capacity; // physical bytes
 	double bytesInputRate;
 	int64_t versionLag;
 	double lastUpdate;

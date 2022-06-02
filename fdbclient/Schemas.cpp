@@ -717,6 +717,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
       "maintenance_seconds_remaining":1.0,
       "data_distribution_disabled_for_ss_failures":true,
       "data_distribution_disabled_for_rebalance":true,
+      "data_distribution_disabled_hex": "1",
       "data_distribution_disabled":true,
       "active_primary_dc":"pv",
       "bounce_impact":{

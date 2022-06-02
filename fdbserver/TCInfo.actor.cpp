@@ -346,12 +346,25 @@ void TCTeamInfo::addDataInFlightToTeam(int64_t delta) {
 		servers[i]->incrementDataInFlightToServer(delta);
 }
 
+void TCTeamInfo::addReadInFlightToTeam(int64_t delta) {
+	for (int i = 0; i < servers.size(); i++)
+		servers[i]->incrementReadInFlightToServer(delta);
+}
+
 int64_t TCTeamInfo::getDataInFlightToTeam() const {
 	int64_t dataInFlight = 0.0;
 	for (auto const& server : servers) {
 		dataInFlight += server->getDataInFlightToServer();
 	}
 	return dataInFlight;
+}
+
+int64_t TCTeamInfo::getReadInFlightToTeam() const {
+	int64_t inFlight = 0.0;
+	for (auto const& server : servers) {
+		inFlight += server->getReadInFlightToServer();
+	}
+	return inFlight;
 }
 
 int64_t TCTeamInfo::getLoadBytes(bool includeInFlight, double inflightPenalty) const {
@@ -374,6 +387,23 @@ int64_t TCTeamInfo::getLoadBytes(bool includeInFlight, double inflightPenalty) c
 	return (physicalBytes + (inflightPenalty * inFlightBytes)) * availableSpaceMultiplier;
 }
 
+// average read bandwidth within a team
+double TCTeamInfo::getLoadReadBandwidth(bool includeInFlight, double inflightPenalty) const {
+	// FIXME: consider team load variance
+	double sum = 0;
+	int size = 0;
+	for (const auto& server : servers) {
+		if (server->metricsPresent()) {
+			auto& replyValue = server->getMetrics();
+			ASSERT(replyValue.load.bytesReadPerKSecond >= 0);
+			sum += replyValue.load.bytesReadPerKSecond;
+			size += 1;
+		}
+	}
+	return (size == 0 ? 0 : sum / size) +
+	       (includeInFlight ? inflightPenalty * getReadInFlightToTeam() / servers.size() : 0);
+}
+
 int64_t TCTeamInfo::getMinAvailableSpace(bool includeInFlight) const {
 	int64_t minAvailableSpace = std::numeric_limits<int64_t>::max();
 	for (const auto& server : servers) {
@@ -386,6 +416,7 @@ int64_t TCTeamInfo::getMinAvailableSpace(bool includeInFlight) const {
 	return minAvailableSpace; // Could be negative
 }
 
+// return the min ratio of servers in this team
 double TCTeamInfo::getMinAvailableSpaceRatio(bool includeInFlight) const {
 	double minRatio = 1.0;
 	for (const auto& server : servers) {

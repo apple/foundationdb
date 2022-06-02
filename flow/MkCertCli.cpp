@@ -179,9 +179,6 @@ mkcert::CertChainRef ChainSpec::makeChain(Arena& arena) {
 	ofsCert.write(reinterpret_cast<char const*>(cert.begin()), cert.size());
 	auto key = chain[0].privateKeyPem;
 	ofsKey.write(reinterpret_cast<char const*>(key.begin()), key.size());
-	ofsCert.close();
-	ofsKey.close();
-	ofsCa.close();
 	return chain;
 }
 

@@ -250,7 +250,7 @@ TEST_CASE("/fdbclient/MonitorLeader/ConnectionString/hostname") {
 
 		ClusterConnectionString cs(hostnames, LiteralStringRef("TestCluster:0"));
 		ASSERT(cs.hostnames.size() == 2);
-		ASSERT(cs.coordinators().size() == 0);
+		ASSERT(cs.coords.size() == 0);
 		ASSERT(cs.toString() == connectionString);
 	}
 
@@ -301,7 +301,7 @@ TEST_CASE("/fdbclient/MonitorLeader/PartialResolve") {
 	INetworkConnections::net()->addMockTCPEndpoint(hn, port, { address });
 
 	ClusterConnectionString cs(connectionString);
-	state std::vector<NetworkAddress> allCoordinators = wait(cs.tryResolveHostnames());
+	std::vector<NetworkAddress> allCoordinators = wait(cs.tryResolveHostnames());
 	ASSERT(allCoordinators.size() == 1 &&
 	       std::find(allCoordinators.begin(), allCoordinators.end(), address) != allCoordinators.end());
 
@@ -460,7 +460,7 @@ ClientCoordinators::ClientCoordinators(Reference<IClusterConnectionRecord> ccr) 
 	for (auto h : cs.hostnames) {
 		clientLeaderServers.push_back(ClientLeaderRegInterface(h));
 	}
-	for (auto s : cs.coordinators()) {
+	for (auto s : cs.coords) {
 		clientLeaderServers.push_back(ClientLeaderRegInterface(s));
 	}
 }
@@ -866,7 +866,7 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
     Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> supportedVersions,
     Key traceLogGroup) {
 	state ClusterConnectionString cs = info.intermediateConnRecord->getConnectionString();
-	state int coordinatorsSize = cs.hostnames.size() + cs.coordinators().size();
+	state int coordinatorsSize = cs.hostnames.size() + cs.coords.size();
 	state int index = 0;
 	state int successIndex = 0;
 	state Optional<double> incorrectTime;
@@ -880,7 +880,7 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 	for (const auto& h : cs.hostnames) {
 		clientLeaderServers.push_back(ClientLeaderRegInterface(h));
 	}
-	for (const auto& c : cs.coordinators()) {
+	for (const auto& c : cs.coords) {
 		clientLeaderServers.push_back(ClientLeaderRegInterface(c));
 	}
 
@@ -892,7 +892,7 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 
 		req.clusterKey = cs.clusterKey();
 		req.hostnames = cs.hostnames;
-		req.coordinators = cs.coordinators();
+		req.coordinators = cs.coords;
 		req.knownClientInfoID = clientInfo->get().id;
 		req.supportedVersions = supportedVersions->get();
 		req.traceLogGroup = traceLogGroup;
