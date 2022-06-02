@@ -211,7 +211,7 @@ impl Frame {
         // vec.extend_from_slice(&[0xD, 0xE, 0xA, 0xD, 0xB, 0xE, 0xE, 0xF]);
         // vec.extend_from_slice(&[0xD, 0xE, 0xA, 0xD, 0xB, 0xE, 0xE, 0xF]);
         // vec.extend_from_slice(&[0xD, 0xE, 0xA, 0xD, 0xB, 0xE, 0xE, 0xF]);
-        let len : u32 = (vec.len() - len_sz - checksum_sz).try_into().unwrap(); 
+        let len: u32 = (vec.len() - len_sz - checksum_sz).try_into().unwrap();
         vec[0..len_sz].copy_from_slice(&u32::to_le_bytes(len));
         let xxh3_64 = xxh3_64(&vec[len_sz + checksum_sz..]);
         vec[len_sz..len_sz + checksum_sz].copy_from_slice(&u64::to_le_bytes(xxh3_64));
@@ -224,7 +224,7 @@ impl Frame {
         // The file identifier for Void is this in the source code;
         // p/x 2010442
         // $1 = 0x1ead4a
-        // 
+        //
         // but this on the wire:
         //  p/x    35564874
         // $2 = 0x21ead4a
@@ -232,11 +232,16 @@ impl Frame {
         // I think (in that example) the other side wants an ErrorOr<Void> because:
         // template <class T>
         // class ErrorOr : public ComposedIdentifier<T, 2> {
-            // std::variant<Error, T> value;
+        // std::variant<Error, T> value;
 
-
-
-        println!("sent len: {}, vec len: {}, checksum: {}, payload: {:x?} send: {:x?}", len, vec.len(), xxh3_64, self.payload, &vec);
+        println!(
+            "sent len: {}, vec len: {}, checksum: {}, payload: {:x?} send: {:x?}",
+            len,
+            vec.len(),
+            xxh3_64,
+            self.payload,
+            &vec
+        );
         vec
     }
 }

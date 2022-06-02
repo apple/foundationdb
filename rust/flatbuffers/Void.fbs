@@ -1,0 +1,17 @@
+table Void {
+
+}
+table EnsureTable {
+    void: Void;
+}
+
+table Error {
+    error: uint;
+}
+union ErrorOr { Error, EnsureTable }
+
+table FakeRoot {
+    error_or: ErrorOr;
+}
+
+root_type FakeRoot;

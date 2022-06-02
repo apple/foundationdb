@@ -11,13 +11,16 @@ pub type Error = Box<dyn std::error::Error + Send + Sync>;
 pub type Result<T> = std::result::Result<T, Error>;
 
 mod connection;
+mod file_identifier;
 mod frame;
 mod uid;
 
 // #[allow(non_snake_case)]
+#[allow(dead_code, unused_imports)]
 #[path = "../../target/flatbuffers/PingRequest_generated.rs"]
 mod ping_request;
 
+#[allow(dead_code, unused_imports)]
 #[path = "../../target/flatbuffers/Void_generated.rs"]
 mod void;
 
@@ -60,26 +63,30 @@ pub async fn hello() -> Result<()> {
                         println!("FakeRoot: {:x?}", fake_root);
                         let reply = fake_root.ping_request().unwrap().reply_promise().unwrap();
                         let mut builder = flatbuffers::FlatBufferBuilder::with_capacity(1024);
-                        // let reply_buf = ping_request::ReplyPromise::create(
-                        //     &mut builder,
-                        //     &ping_request::ReplyPromiseArgs {
-                        //         uid: Some(reply.uid().unwrap()),
-                        //     },
-                        // );
-                        let reply_buf = void::FakeRoot::create(
+                        let void = void::Void::create(&mut builder, &void::VoidArgs {});
+                        let ensure_table = void::EnsureTable::create(
                             &mut builder,
-                            &void::FakeRootArgs { },
+                            &void::EnsureTableArgs { void: Some(void) },
                         );
-                        builder.finish(reply_buf, None);
+                        let fake_root = void::FakeRoot::create(
+                            &mut builder,
+                            &void::FakeRootArgs {
+                                error_or_type: void::ErrorOr::EnsureTable,
+                                error_or: Some(ensure_table.as_union_value()),
+                            },
+                        );
+                        builder.finish(fake_root, Some("myfi"));
+                        let mut payload = builder.finished_data().to_vec();
+                        // See also: flow/README.md ### Flatbuffers/ObjectSerializer
+                        file_identifier::FileIdentifier::new(0x1ead4a)?
+                            .to_error_or()?
+                            .rewrite_flatbuf(&mut payload)?;
                         println!("reply: {:x?}", builder.finished_data());
                         let uid = reply.uid().unwrap();
                         let token = uid::UID {
                             uid: [uid.first(), uid.second()],
                         };
-                        let frame = frame::Frame {
-                            token,
-                            payload: builder.finished_data().to_vec(),
-                        };
+                        let frame = frame::Frame { token, payload };
                         conn.write_frame(frame).await?;
                     }
 

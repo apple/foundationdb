@@ -209,6 +209,8 @@ template <class Archive, class T>
 void load(Archive& ar, ErrorOr<T>& value) {
 	Error error;
 	ar >> error;
+	printf("load<%s, ErrorOr<%s>>) code = %d\n", typeid(Archive).name(), typeid(T).name(), error.code());
+
 	if (error.code() != invalid_error_code) {
 		T t;
 		ar >> t;

@@ -105,10 +105,12 @@ struct NetSAV final : SAV<T>, FlowReceiver, FastAllocated<NetSAV<T>> {
 		ErrorOr<EnsureTable<T>> message;
 		printf("In NetSAV<%s>::receive()\n", typeid(T).name());
 		reader.deserialize(message);
-		printf("Deserialized!");
+		printf("Deserialized!\n");
 		if (message.isError()) {
+			printf("Message is error!\n");
 			SAV<T>::sendErrorAndDelPromiseRef(message.getError());
 		} else {
+			printf("Message is not error!\n");
 			SAV<T>::sendAndDelPromiseRef(message.get().asUnderlyingType());
 		}
 	}

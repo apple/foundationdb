@@ -392,6 +392,22 @@ you are holding the corresponding future.
     `flow/FileIdentifier.h` for examples. You don't need to change the file
     identifier for a type when evolving its schema.
 
+    Compatibility note:  FlatBuffer file identifiers must be a 4 byte array that is
+    also valid UTF-8.  FDB does not currently enforce this, and uses file identifiers
+    that violate this rule.  As a workaround, third party tools need to serialize
+    with a fake file identifier, then overwrite bytes [4..8) of the serialized buffer
+    before sending it over the wire to FDB.  When deserializing, they need to
+    perform the reverse translation.  Note that flatbuffer file identiers are
+    optional, and that including one changes the layout of the serialized flatbuffer
+    data.  Therefore, telling the serialization logic to omit the file_identifier,
+    or telling the deserializer to simply ignore it is *NOT* adequate.  You must
+    manually rewrite the serialized data before passing it to/from standard
+    flatbuffer implementations.
+
+    This may be fixed in the future, but doing so will force us to rewrite FDB's
+    file identifiers to be valid UTF-8, and audit the usage of (or replace)
+    ComposedIdentifier.  The above was written during the 7.2 release cycle.
+
 1. Schema evolution
 
     Two schemas are forward/backward compatible if they meet the following

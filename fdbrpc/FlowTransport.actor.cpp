@@ -113,6 +113,7 @@ void EndpointMap::insert(NetworkMessageReceiver* r, Endpoint::Token& token, Task
 		realloc();
 	int index = firstFree;
 	firstFree = data[index].nextFree;
+	// TODO: Delete the bitmask stuff from this line?
 	token = Endpoint::Token(token.first(), (token.second() & 0xffffffff00000000LL) | index);
 	data[index].token() =
 	    Endpoint::Token(token.first(), (token.second() & 0xffffffff00000000LL) | static_cast<uint32_t>(priority));
@@ -740,7 +741,6 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 					TraceEvent("ConnectionTimedOut", conn ? conn->getDebugID() : UID())
 					    .suppressFor(1.0)
 					    .detail("PeerAddr", self->destination);
-
 					throw;
 				}
 			} else {
@@ -766,7 +766,6 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 					self->transport->countConnClosedWithoutError++;
 				else
 					self->transport->countConnClosedWithError++;
-
 				throw e;
 			}
 		} catch (Error& e) {
@@ -1105,7 +1104,6 @@ static void scanPackets(TransportData* transport,
 
 	const bool checksumEnabled = !peerAddress.isTLS();
 	loop {
-		printf("F %ld bytes\n", e - p);
 		uint32_t packetLen;
 		XXH64_hash_t packetChecksum;
 
@@ -1124,7 +1122,11 @@ static void scanPackets(TransportData* transport,
 			p += sizeof(packetChecksum);
 		}
 
-		printf("FF packetlen %d (remaing: %d)\n", packetLen, (uint32_t)(e-p));
+		printf("FF packetlen %d (remaing: %d)\nPayload:  ", packetLen, (uint32_t)(e-p));
+		for (uint32_t i = 0; i < (uint32_t)(e-p); i++) {
+			printf(" %02x", (int) (p[i]));
+		}
+		printf("\n");
 
 		if (packetLen > FLOW_KNOBS->PACKET_LIMIT) {
 			TraceEvent(SevError, "PacketLimitExceeded")
@@ -1189,7 +1191,6 @@ static void scanPackets(TransportData* transport,
 #if VALGRIND
 		VALGRIND_CHECK_MEM_IS_DEFINED(p, packetLen);
 #endif
-		printf("G\n");
 
 		// remove object serializer flag to account for flat buffer
 		peerProtocolVersion.removeObjectSerializerFlag();
@@ -1212,7 +1213,7 @@ static void scanPackets(TransportData* transport,
 
 		ASSERT(!reader.empty());
 		TaskPriority priority = transport->endpoints.getPriority(token);
-		printf("TaskPriority = %d", (uint32_t)priority);
+		printf("TaskPriority = %d\n", (uint32_t)priority);
 		// we ignore packets to unknown endpoints if they're not going to a stream anyways, so we can just
 		// return here. The main place where this seems to happen is if a ReplyPromise is not waited on
 		// long enough.
@@ -1220,7 +1221,7 @@ static void scanPackets(TransportData* transport,
 		// we have many messages to UnknownEndpoint we want to optimize earlier. As deliver is an actor it
 		// will allocate some state on the heap and this prevents it from doing that.
 		if (priority != TaskPriority::UnknownEndpoint || (token.first() & TOKEN_STREAM_FLAG) != 0) {
-			printf("H\n");
+			printf("deliver\n");
 			deliver(transport,
 			        Endpoint({ peerAddress }, token),
 			        priority,
@@ -1288,7 +1289,6 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 	try {
 		loop {
 			loop {
-				printf("A\n");
 				state int readAllBytes = buffer_end - unprocessed_end;
 				if (readAllBytes < FLOW_KNOBS->MIN_PACKET_BUFFER_FREE_BYTES) {
 					Arena newArena;
@@ -1308,7 +1308,6 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 
 				state int totalReadBytes = 0;
 				while (true) {
-					printf("B\n");
 					const int len = std::min<int>(buffer_end - unprocessed_end, FLOW_KNOBS->MAX_PACKET_SEND_BYTES);
 					if (len == 0)
 						break;
@@ -1321,16 +1320,12 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 				}
 				if (peer) {
 					peer->bytesReceived += totalReadBytes;
+					printf("peer->bytesReceived: %lld totalReadBytes: %d\n", peer->bytesReceived, totalReadBytes);
 				}
-				printf("peer->bytesReceived: %lld totalReadBytes: %d\n", peer->bytesReceived, totalReadBytes);
 				if (totalReadBytes == 0)
 					break;
 				state bool readWillBlock = totalReadBytes != readAllBytes;
-
-				printf("C\n");
 				if (expectConnectPacket && unprocessed_end - unprocessed_begin >= CONNECT_PACKET_V0_SIZE) {
-					printf("D\n");
-
 					// At the beginning of a connection, we expect to receive a packet containing the protocol version
 					// and the listening port of the remote process
 					int32_t connectPacketSize = ((ConnectPacket*)unprocessed_begin)->totalPacketSize();
@@ -1404,6 +1399,7 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 							    .detail("PeerAddr", NetworkAddress(pkt.canonicalRemoteIp(), pkt.canonicalRemotePort));
 							peer->compatible = compatible;
 							if (!compatible) {
+								printf("incompatible!\n");
 								peer->transport->numIncompatibleConnections++;
 								incompatiblePeerCounted = true;
 							}
@@ -1427,13 +1423,12 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 							onConnected.send(peer);
 							wait(delay(0)); // Check for cancellation
 						}
+					  	printf("Set peer protocol version\n");
 						peer->protocolVersion->set(peerProtocolVersion);
 					}
 				}
 
 				if (!expectConnectPacket) {
-					printf("E compatible = %d  hasStableInterfaces = %d\n", compatible, peerProtocolVersion.hasStableInterfaces());
-
 					if (compatible || peerProtocolVersion.hasStableInterfaces()) {
 						scanPackets(transport,
 						            unprocessed_begin,

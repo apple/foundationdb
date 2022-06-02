@@ -978,6 +978,7 @@ struct LoadMember {
 	Context& context;
 	template <class Member>
 	void operator()(Member& member) {
+		printf("LoadMember<%s, %s>", typeid(Context).name(), typeid(Member).name());
 		if constexpr (is_vector_of_union_like<Member>) {
 			if (!field_present()) {
 				i += 2;
@@ -999,6 +1000,7 @@ struct LoadMember {
 			for (int i = 0; i < numEntries; ++i) {
 				T value;
 				if (types_current[i] > 0) {
+					printf("LK\n");
 					uint8_t type_tag = types_current[i] - 1; // Flatbuffers indexes from 1.
 					(LoadAlternative<Context, union_like_traits<T>>{ context, current }).load(type_tag, value);
 				} else {
@@ -1061,6 +1063,7 @@ struct LoadSaveHelper : Context {
 	LoadSaveHelper(const Context& context) : Context(context) {}
 	template <class U>
 	std::enable_if_t<is_scalar<U>> load(U& member, const uint8_t* current) {
+		printf("scalar_traits<%s>::load\n", typeid(U).name());
 		scalar_traits<U>::load(current, member, this->context());
 	}
 
@@ -1068,6 +1071,7 @@ struct LoadSaveHelper : Context {
 	std::enable_if_t<is_struct_like<U>> load(U& member, const uint8_t* current) {
 		using StructTraits = struct_like_traits<U>;
 		using types = typename StructTraits::types;
+		printf("is_struct_like<%s>::load\n", typeid(U).name());
 		for_each_i<pack_size(types{})>([&](auto i_type) {
 			constexpr int i = decltype(i_type)::value;
 			using type = index_t<i, types>;
@@ -1080,6 +1084,8 @@ struct LoadSaveHelper : Context {
 	template <class U>
 	std::enable_if_t<is_dynamic_size<U>> load(U& member, const uint8_t* current) {
 		uint32_t current_offset = interpret_as<uint32_t>(current);
+		printf("is_dynamic_size<%s>::load\n", typeid(U).name());
+
 		current += current_offset;
 		uint32_t size = interpret_as<uint32_t>(current);
 		current += sizeof(size);
@@ -1115,6 +1121,8 @@ struct LoadSaveHelper : Context {
 	template <class Member>
 	std::enable_if_t<expect_serialize_member<Member>> load(Member& member, const uint8_t* current) {
 		SerializeFun fun(current, this->context());
+		printf("expect_serialize_member<%s>::load\n", typeid(Member).name());
+
 		if constexpr (serializable_traits<Member>::value) {
 			serializable_traits<Member>::serialize(fun, member);
 		} else {
@@ -1126,6 +1134,7 @@ struct LoadSaveHelper : Context {
 	std::enable_if_t<is_vector_like<VectorLike>> load(VectorLike& member, const uint8_t* current) {
 		using VectorTraits = vector_like_traits<VectorLike>;
 		using T = typename VectorTraits::value_type;
+		printf("is_vector_like<%s>::load\n", typeid(T).name());
 		uint32_t current_offset = interpret_as<uint32_t>(current);
 		current += current_offset;
 		uint32_t numEntries = interpret_as<uint32_t>(current);
@@ -1392,8 +1401,10 @@ struct LoadSaveHelper<EnsureTable<T>, Context> : Context {
 
 	void load(EnsureTable<T>& member, const uint8_t* current) {
 		if constexpr (expect_serialize_member<T>) {
+			printf("EnsureTable<%s>::load expect_serialize_member\n", typeid(T).name());
 			alreadyATable.load(member.asUnderlyingType(), current);
 		} else {
+			printf("EnsureTable<%s>::load not expect_serialize_member\n", typeid(T).name());
 			FakeRoot<T> t{ member.asUnderlyingType() };
 			wrapInTable.load(t, current);
 		}
