@@ -329,6 +329,7 @@ public:
 	                                                       const KeySelector& end,
 	                                                       const Key& mapper,
 	                                                       GetRangeLimits limits,
+	                                                       int matchIndex = MATCH_INDEX_ALL,
 	                                                       Snapshot = Snapshot::False,
 	                                                       Reverse = Reverse::False);
 
@@ -338,6 +339,7 @@ private:
 	                                           const KeySelector& end,
 	                                           const Key& mapper,
 	                                           GetRangeLimits limits,
+	                                           int matchIndex,
 	                                           Snapshot snapshot,
 	                                           Reverse reverse);
 
@@ -539,6 +541,20 @@ ACTOR Future<Void> setPerpetualStorageWiggle(Database cx, bool enable, LockAware
 ACTOR Future<std::vector<std::pair<UID, StorageWiggleValue>>> readStorageWiggleValues(Database cx,
                                                                                       bool primary,
                                                                                       bool use_system_priority);
+
+// Returns the maximum legal size of a key. This size will be determined by the prefix of the passed in key
+// (system keys have a larger maximum size). This should be used for generic max key size requests.
+int64_t getMaxKeySize(KeyRef const& key);
+
+// Returns the maximum legal size of a key that can be read. Keys larger than this will be assumed not to exist.
+int64_t getMaxReadKeySize(KeyRef const& key);
+
+// Returns the maximum legal size of a key that can be written. If using raw access, writes to normal keys will
+// be allowed to be slighly larger to accommodate the prefix.
+int64_t getMaxWriteKeySize(KeyRef const& key, bool hasRawAccess);
+
+// Returns the maximum legal size of a key that can be cleared. Keys larger than this will be assumed not to exist.
+int64_t getMaxClearKeySize(KeyRef const& key);
 
 #include "flow/unactorcompiler.h"
 #endif

@@ -95,7 +95,6 @@ ERROR( page_encoding_not_supported, 1071, "Page encoding type is not supported o
 ERROR( page_decoding_failed, 1072, "Page content decoding failed" )
 ERROR( unexpected_encoding_type, 1073, "Page content decoding failed" )
 ERROR( encryption_key_not_found, 1074, "Encryption key not found" )
-ERROR( stale_version_vector, 1075, "Client version vector is stale" )
 
 ERROR( broken_promise, 1100, "Broken promise" )
 ERROR( operation_cancelled, 1101, "Asynchronous operation cancelled" )
@@ -123,6 +122,7 @@ ERROR( failed_to_progress, 1216, "Process has failed to make sufficient progress
 ERROR( invalid_cluster_id, 1217, "Attempted to join cluster with a different cluster ID" )
 ERROR( restart_cluster_controller, 1218, "Restart cluster controller process" )
 ERROR( please_reboot_remote_kv_store, 1219, "Need to reboot the storage engine process as it died abnormally")
+ERROR( incompatible_software_version, 1220, "Current software does not support database format" )
 
 // 15xx Platform errors
 ERROR( platform_error, 1500, "Platform error" )
@@ -145,6 +145,10 @@ ERROR( file_corrupt, 1522, "A structurally corrupt data file was detected" )
 ERROR( http_request_failed, 1523, "HTTP response code not received or indicated failure" )
 ERROR( http_auth_failed, 1524, "HTTP request failed due to bad credentials" )
 ERROR( http_bad_request_id, 1525, "HTTP response contained an unexpected X-Request-ID header" )
+ERROR( rest_invalid_uri, 1526, "Invalid REST URI")
+ERROR( rest_invalid_rest_client_knob, 1527, "Invalid RESTClient knob")
+ERROR( rest_connectpool_key_not_found, 1528, "ConnectKey not found in connection pool")
+
 
 // 2xxx Attempt (presumably by a _client_) to do something illegal.  If an error is known to
 // be internally caused, it should be 41xx
@@ -191,6 +195,7 @@ ERROR( checkpoint_not_found, 2040, "Checkpoint not found" )
 ERROR( key_not_tuple, 2041, "The key cannot be parsed as a tuple" );
 ERROR( value_not_tuple, 2042, "The value cannot be parsed as a tuple" );
 ERROR( mapper_not_tuple, 2043, "The mapper cannot be parsed as a tuple" );
+ERROR( invalid_checkpoint_format, 2044, "Invalid checkpoint format" )
 
 
 ERROR( incompatible_protocol_version, 2100, "Incompatible protocol version" )
@@ -225,6 +230,7 @@ ERROR( invalid_tenant_name, 2134, "Tenant name cannot begin with \\xff");
 ERROR( tenant_prefix_allocator_conflict, 2135, "The database already has keys stored at the prefix allocated for the tenant");
 ERROR( tenants_disabled, 2136, "Tenants have been disabled in the cluster");
 ERROR( unknown_tenant, 2137, "Tenant is not available from this server")
+ERROR( illegal_tenant_access, 2138, "Illegal tenant access")
 
 // 2200 - errors from bindings and official APIs
 ERROR( api_version_unset, 2200, "API version is not set" )
@@ -306,6 +312,8 @@ ERROR( encrypt_key_ttl_expired, 2703, "Expected encryption key TTL has expired")
 ERROR( encrypt_header_authtoken_mismatch, 2704, "Encryption header authentication token mismatch")
 ERROR( encrypt_update_cipher, 2705, "Attempt to update encryption cipher key")
 ERROR( encrypt_invalid_id, 2706, "Invalid encryption cipher details")
+ERROR( encrypt_keys_fetch_failed, 2707, "Encryption keys fetch from external KMS failed")
+ERROR( encrypt_invalid_kms_config, 2708, "Invalid encryption/kms configuration: discovery-url, validation-token, endpoint etc.")
 
 // 4xxx Internal errors (those that should be generated only by bugs) are decimal 4xxx
 ERROR( unknown_error, 4000, "An unknown error occurred" )  // C++ exception not of type Error
@@ -316,6 +324,9 @@ ERROR( not_implemented, 4200, "Not implemented yet" )
 ERROR( permission_denied, 6000, "Client tried to access unauthorized data" )
 ERROR( unauthorized_attempt, 6001, "A untrusted client tried to send a message to a private endpoint" )
 ERROR( digital_signature_ops_error, 6002, "Digital signature operation error" )
+ERROR( authorization_token_verify_failed, 6003, "Failed to verify authorization token" )
+ERROR( pkey_decode_error, 6004, "Failed to decode public/private key" )
+ERROR( pkey_encode_error, 6005, "Failed to encode public/private key" )
 // clang-format on
 
 #undef ERROR

@@ -73,6 +73,20 @@ Future<REPLY_TYPE(Req)> retryBrokenPromise(RequestStream<Req, P> to, Req request
 }
 
 ACTOR template <class Req>
+Future<Void> tryInitializeRequestStream(RequestStream<Req>* stream, Hostname hostname, WellKnownEndpoints token) {
+	Optional<NetworkAddress> address = wait(hostname.resolve());
+	if (!address.present()) {
+		return Void();
+	}
+	if (stream == nullptr) {
+		stream = new RequestStream<Req>(Endpoint::wellKnown({ address.get() }, token));
+	} else {
+		*stream = RequestStream<Req>(Endpoint::wellKnown({ address.get() }, token));
+	}
+	return Void();
+}
+
+ACTOR template <class Req>
 Future<ErrorOr<REPLY_TYPE(Req)>> tryGetReplyFromHostname(Req request, Hostname hostname, WellKnownEndpoints token) {
 	// A wrapper of tryGetReply(request), except that the request is sent to an address resolved from a hostname.
 	// If resolving fails, return lookup_failed().
@@ -87,7 +101,6 @@ Future<ErrorOr<REPLY_TYPE(Req)>> tryGetReplyFromHostname(Req request, Hostname h
 		resetReply(request);
 		if (reply.getError().code() == error_code_request_maybe_delivered) {
 			// Connection failure.
-			hostname.resetToUnresolved();
 			INetworkConnections::net()->removeCachedDNS(hostname.host, hostname.service);
 		}
 	}
@@ -112,7 +125,6 @@ Future<ErrorOr<REPLY_TYPE(Req)>> tryGetReplyFromHostname(Req request,
 		resetReply(request);
 		if (reply.getError().code() == error_code_request_maybe_delivered) {
 			// Connection failure.
-			hostname.resetToUnresolved();
 			INetworkConnections::net()->removeCachedDNS(hostname.host, hostname.service);
 		}
 	}
@@ -125,17 +137,19 @@ Future<REPLY_TYPE(Req)> retryGetReplyFromHostname(Req request, Hostname hostname
 	// Suitable for use with hostname, where RequestStream is NOT initialized yet.
 	// Not normally useful for endpoints initialized with NetworkAddress.
 	state double reconnetInterval = FLOW_KNOBS->HOSTNAME_RECONNECT_INIT_INTERVAL;
+	state std::unique_ptr<RequestStream<Req>> to;
 	loop {
 		NetworkAddress address = wait(hostname.resolveWithRetry());
-		RequestStream<Req> to(Endpoint::wellKnown({ address }, token));
-		state ErrorOr<REPLY_TYPE(Req)> reply = wait(to.tryGetReply(request));
+		if (to == nullptr || to->getEndpoint().getPrimaryAddress() != address) {
+			to = std::make_unique<RequestStream<Req>>(Endpoint::wellKnown({ address }, token));
+		}
+		state ErrorOr<REPLY_TYPE(Req)> reply = wait(to->tryGetReply(request));
 		if (reply.isError()) {
 			resetReply(request);
 			if (reply.getError().code() == error_code_request_maybe_delivered) {
 				// Connection failure.
 				wait(delay(reconnetInterval));
 				reconnetInterval = std::min(2 * reconnetInterval, FLOW_KNOBS->HOSTNAME_RECONNECT_MAX_INTERVAL);
-				hostname.resetToUnresolved();
 				INetworkConnections::net()->removeCachedDNS(hostname.host, hostname.service);
 			} else {
 				throw reply.getError();
@@ -155,17 +169,19 @@ Future<REPLY_TYPE(Req)> retryGetReplyFromHostname(Req request,
 	// Suitable for use with hostname, where RequestStream is NOT initialized yet.
 	// Not normally useful for endpoints initialized with NetworkAddress.
 	state double reconnetInterval = FLOW_KNOBS->HOSTNAME_RECONNECT_INIT_INTERVAL;
+	state std::unique_ptr<RequestStream<Req>> to;
 	loop {
 		NetworkAddress address = wait(hostname.resolveWithRetry());
-		RequestStream<Req> to(Endpoint::wellKnown({ address }, token));
-		state ErrorOr<REPLY_TYPE(Req)> reply = wait(to.tryGetReply(request, taskID));
+		if (to == nullptr || to->getEndpoint().getPrimaryAddress() != address) {
+			to = std::make_unique<RequestStream<Req>>(Endpoint::wellKnown({ address }, token));
+		}
+		state ErrorOr<REPLY_TYPE(Req)> reply = wait(to->tryGetReply(request, taskID));
 		if (reply.isError()) {
 			resetReply(request);
 			if (reply.getError().code() == error_code_request_maybe_delivered) {
 				// Connection failure.
 				wait(delay(reconnetInterval));
 				reconnetInterval = std::min(2 * reconnetInterval, FLOW_KNOBS->HOSTNAME_RECONNECT_MAX_INTERVAL);
-				hostname.resetToUnresolved();
 				INetworkConnections::net()->removeCachedDNS(hostname.host, hostname.service);
 			} else {
 				throw reply.getError();

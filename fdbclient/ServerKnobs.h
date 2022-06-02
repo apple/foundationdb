@@ -31,6 +31,7 @@ static constexpr int _PAGE_SIZE = 4096;
 
 class ServerKnobs : public KnobsImpl<ServerKnobs> {
 public:
+	bool ALLOW_DANGEROUS_KNOBS;
 	// Versions
 	int64_t VERSIONS_PER_SECOND;
 	int64_t MAX_VERSIONS_IN_FLIGHT;
@@ -145,6 +146,8 @@ public:
 	int PRIORITY_RECOVER_MOVE;
 	int PRIORITY_REBALANCE_UNDERUTILIZED_TEAM;
 	int PRIORITY_REBALANCE_OVERUTILIZED_TEAM;
+	int PRIORITY_REBALANCE_READ_OVERUTIL_TEAM;
+	int PRIORITY_REBALANCE_READ_UNDERUTIL_TEAM;
 	int PRIORITY_PERPETUAL_STORAGE_WIGGLE;
 	int PRIORITY_TEAM_HEALTHY;
 	int PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER;
@@ -159,6 +162,13 @@ public:
 	int PRIORITY_SPLIT_SHARD;
 
 	// Data distribution
+	double READ_REBALANCE_CPU_THRESHOLD; // read rebalance only happens if the source servers' CPU > threshold
+	int READ_REBALANCE_SRC_PARALLELISM; // the max count a server become a source server within a certain interval
+	int READ_REBALANCE_SHARD_TOPK; // top k shards from which to select randomly for read-rebalance
+	double
+	    READ_REBALANCE_DIFF_FRAC; // only when (srcLoad - destLoad)/srcLoad > DIFF_FRAC the read rebalance will happen
+	double READ_REBALANCE_MAX_SHARD_FRAC; // only move shard whose readLoad < (srcLoad - destLoad) * MAX_SHARD_FRAC
+
 	double RETRY_RELOCATESHARD_DELAY;
 	double DATA_DISTRIBUTION_FAILURE_REACTION_TIME;
 	int MIN_SHARD_BYTES, SHARD_BYTES_RATIO, SHARD_BYTES_PER_SQRT_BYTES, MAX_SHARD_BYTES, KEY_SERVER_SHARD_BYTES;
@@ -374,6 +384,7 @@ public:
 	int MAX_COMMIT_UPDATES;
 	double MAX_PROXY_COMPUTE;
 	double MAX_COMPUTE_PER_OPERATION;
+	double MAX_COMPUTE_DURATION_LOG_CUTOFF;
 	int PROXY_COMPUTE_BUCKETS;
 	double PROXY_COMPUTE_GROWTH_RATE;
 	int TXN_STATE_SEND_AMOUNT;
@@ -480,6 +491,8 @@ public:
 	                                             // be determined as degraded worker.
 	int CC_SATELLITE_DEGRADATION_MIN_BAD_SERVER; // The minimum amount of degraded server in satellite DC to be
 	                                             // determined as degraded satellite.
+	double CC_THROTTLE_SINGLETON_RERECRUIT_INTERVAL; // The interval to prevent re-recruiting the same singleton if a
+	                                                 // recruiting fight between two cluster controllers occurs.
 
 	// Knobs used to select the best policy (via monte carlo)
 	int POLICY_RATING_TESTS; // number of tests per policy (in order to compare)
@@ -605,6 +618,7 @@ public:
 	int64_t BYTES_READ_UNITS_PER_SAMPLE;
 	int64_t READ_HOT_SUB_RANGE_CHUNK_SIZE;
 	int64_t EMPTY_READ_PENALTY;
+	int DD_SHARD_COMPARE_LIMIT; // when read-aware DD is enabled, at most how many shards are compared together
 	bool READ_SAMPLING_ENABLED;
 
 	// Storage Server
@@ -619,6 +633,7 @@ public:
 	int FETCH_KEYS_PARALLELISM;
 	int FETCH_KEYS_LOWER_PRIORITY;
 	int FETCH_CHANGEFEED_PARALLELISM;
+	int SERVE_FETCH_CHECKPOINT_PARALLELISM;
 	int BUGGIFY_BLOCK_BYTES;
 	int64_t STORAGE_RECOVERY_VERSION_LAG_LIMIT;
 	double STORAGE_DURABILITY_LAG_REJECT_THRESHOLD;
@@ -821,11 +836,17 @@ public:
 	bool ENABLE_ENCRYPTION;
 	std::string ENCRYPTION_MODE;
 	int SIM_KMS_MAX_KEYS;
+	int ENCRYPT_PROXY_MAX_DBG_TRACE_LENGTH;
+
+	// Key Management Service (KMS) Connector
+	std::string KMS_CONNECTOR_TYPE;
 
 	// blob granule stuff
 	// FIXME: configure url with database configuration instead of knob eventually
 	std::string BG_URL;
 
+	// whether to use blobRangeKeys or tenants for blob granule range sources
+	std::string BG_RANGE_SOURCE;
 	int BG_SNAPSHOT_FILE_TARGET_BYTES;
 	int BG_DELTA_FILE_TARGET_BYTES;
 	int BG_DELTA_BYTES_BEFORE_COMPACT;
@@ -845,6 +866,17 @@ public:
 	double BLOB_MANAGER_STATUS_EXP_BACKOFF_EXPONENT;
 	double BGCC_TIMEOUT;
 	double BGCC_MIN_INTERVAL;
+
+	// HTTP KMS Connector
+	std::string REST_KMS_CONNECTOR_KMS_DISCOVERY_URL_MODE;
+	std::string REST_KMS_CONNECTOR_DISCOVER_KMS_URL_FILE;
+	std::string REST_KMS_CONNECTOR_VALIDATION_TOKEN_MODE;
+	std::string REST_KMS_CONNECTOR_VALIDATION_TOKEN_DETAILS;
+	int REST_KMS_CONNECTOR_VALIDATION_TOKEN_MAX_SIZE;
+	int REST_KMS_CONNECTOR_VALIDATION_TOKENS_MAX_PAYLOAD_SIZE;
+	bool REST_KMS_CONNECTOR_REFRESH_KMS_URLS;
+	double REST_KMS_CONNECTOR_REFRESH_KMS_URLS_INTERVAL_SEC;
+	std::string REST_KMS_CONNECTOR_GET_ENCRYPTION_KEYS_ENDPOINT;
 
 	ServerKnobs(Randomize, ClientKnobs*, IsSimulated);
 	void initialize(Randomize, ClientKnobs*, IsSimulated);

@@ -23,6 +23,7 @@
 #include "fdbclient/Notified.h"
 #include "flow/FastAlloc.h"
 #include "flow/FastRef.h"
+#include "fdbclient/GlobalConfig.actor.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "flow/genericactors.actor.h"
 #include <vector>
@@ -243,18 +244,21 @@ public:
 
 	// Constructs a new copy of this DatabaseContext from the parameters of this DatabaseContext
 	Database clone() const {
-		return Database(new DatabaseContext(connectionRecord,
-		                                    clientInfo,
-		                                    coordinator,
-		                                    clientInfoMonitor,
-		                                    taskID,
-		                                    clientLocality,
-		                                    enableLocalityLoadBalance,
-		                                    lockAware,
-		                                    internal,
-		                                    apiVersion,
-		                                    switchable,
-		                                    defaultTenant));
+		Database cx = Database(new DatabaseContext(connectionRecord,
+		                                           clientInfo,
+		                                           coordinator,
+		                                           clientInfoMonitor,
+		                                           taskID,
+		                                           clientLocality,
+		                                           enableLocalityLoadBalance,
+		                                           lockAware,
+		                                           internal,
+		                                           apiVersion,
+		                                           switchable,
+		                                           defaultTenant));
+		cx->globalConfig->init(Reference<AsyncVar<ClientDBInfo> const>(cx->clientInfo),
+		                       std::addressof(cx->clientInfo->get()));
+		return cx;
 	}
 
 	Optional<KeyRangeLocationInfo> getCachedLocation(const Optional<TenantName>& tenant,
@@ -524,7 +528,6 @@ public:
 	Counter transactionsExpensiveClearCostEstCount;
 	Counter transactionGrvFullBatches;
 	Counter transactionGrvTimedOutBatches;
-	Counter transactionsStaleVersionVectors;
 
 	ContinuousSample<double> latencies, readLatencies, commitLatencies, GRVLatencies, mutationsPerCommit,
 	    bytesPerCommit, bgLatencies, bgGranulesPerRequest;
@@ -628,6 +631,7 @@ public:
 	using TransactionT = ReadYourWritesTransaction;
 	Reference<TransactionT> createTransaction();
 
+	std::unique_ptr<GlobalConfig> globalConfig;
 	EventCacheHolder connectToDatabaseEventCacheHolder;
 
 private:

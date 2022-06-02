@@ -1128,8 +1128,12 @@ void printStatus(StatusObjectReader statusObj,
 					                "storage server failures.";
 				}
 				if (statusObjCluster.has("data_distribution_disabled_for_rebalance")) {
-					outputString += "\n\nWARNING: Data distribution is currently turned on but shard size balancing is "
-					                "currently disabled.";
+					outputString += "\n\nWARNING: Data distribution is currently turned on but one or both of shard "
+					                "size and read-load based balancing are disabled.";
+					// data_distribution_disabled_hex
+					if (statusObjCluster.has("data_distribution_disabled_hex")) {
+						outputString += " Ignore code: " + statusObjCluster["data_distribution_disabled_hex"].get_str();
+					}
 				}
 			}
 
@@ -1246,6 +1250,16 @@ ACTOR Future<bool> statusCommandActor(Reference<IDatabase> db,
 	return true;
 }
 
+void statusGenerator(const char* text,
+                     const char* line,
+                     std::vector<std::string>& lc,
+                     std::vector<StringRef> const& tokens) {
+	if (tokens.size() == 1) {
+		const char* opts[] = { "minimal", "details", "json", nullptr };
+		arrayGenerator(text, line, opts, lc);
+	}
+}
+
 CommandFactory statusFactory(
     "status",
     CommandHelp("status [minimal|details|json]",
@@ -1254,5 +1268,6 @@ CommandFactory statusFactory(
                 "what is wrong. If the cluster is running, this command will print cluster "
                 "statistics.\n\nSpecifying `minimal' will provide a minimal description of the status of your "
                 "database.\n\nSpecifying `details' will provide load information for individual "
-                "workers.\n\nSpecifying `json' will provide status information in a machine readable JSON format."));
+                "workers.\n\nSpecifying `json' will provide status information in a machine readable JSON format."),
+    &statusGenerator);
 } // namespace fdb_cli

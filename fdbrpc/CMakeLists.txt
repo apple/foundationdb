@@ -7,14 +7,20 @@ set(FDBRPC_SRCS
   AsyncFileReadAhead.actor.h
   AsyncFileWinASIO.actor.h
   AsyncFileCached.actor.cpp
+  AsyncFileEncrypted.actor.cpp
   AsyncFileNonDurable.actor.cpp
   AsyncFileWriteChecker.cpp
+  Base64UrlDecode.h
+  Base64UrlDecode.cpp
+  Base64UrlEncode.h
+  Base64UrlEncode.cpp
   FailureMonitor.actor.cpp
   FlowProcess.actor.h
   FlowTransport.actor.cpp
   genericactors.actor.h
   genericactors.actor.cpp
   HealthMonitor.actor.cpp
+  HTTP.actor.cpp
   IAsyncFile.actor.cpp
   IPAllowList.cpp
   LoadBalance.actor.cpp
@@ -28,6 +34,10 @@ set(FDBRPC_SRCS
   ReplicationPolicy.cpp
   ReplicationTypes.cpp
   ReplicationUtils.cpp
+  RESTClient.h
+  RESTClient.actor.cpp
+  RESTUtils.h
+  RESTUtils.actor.cpp
   SimExternalConnection.actor.cpp
   SimExternalConnection.h
   Stats.actor.cpp
@@ -39,12 +49,6 @@ set(FDBRPC_SRCS
   TokenSign.cpp
   TraceFileIO.cpp
   TSSComparison.h)
-
-if(WITH_TLS)
-  set(FDBRPC_SRCS
-    ${FDBRPC_SRCS}
-    AsyncFileEncrypted.actor.cpp)
-endif()
 
 set(COMPILE_EIO OFF)
 
@@ -68,13 +72,13 @@ add_flow_target(STATIC_LIBRARY NAME fdbrpc
   SRCS ${FDBRPC_SRCS}
   DISABLE_ACTOR_DIAGNOSTICS ${FDBRPC_SRCS_DISABLE_ACTOR_DIAGNOSTICS})
 target_include_directories(fdbrpc PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/libeio)
-target_link_libraries(fdbrpc PUBLIC flow)
+target_link_libraries(fdbrpc PUBLIC flow PRIVATE rapidjson)
 
 add_flow_target(STATIC_LIBRARY NAME fdbrpc_sampling
   SRCS ${FDBRPC_SRCS}
   DISABLE_ACTOR_DIAGNOSTICS ${FDBRPC_SRCS_DISABLE_ACTOR_DIAGNOSTICS})
 target_include_directories(fdbrpc_sampling PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/libeio)
-target_link_libraries(fdbrpc_sampling PUBLIC flow_sampling)
+target_link_libraries(fdbrpc_sampling PUBLIC flow_sampling PRIVATE rapidjson)
 target_compile_definitions(fdbrpc_sampling PRIVATE -DENABLE_SAMPLING)
 if(WIN32)
   add_dependencies(fdbrpc_sampling_actors fdbrpc_actors)

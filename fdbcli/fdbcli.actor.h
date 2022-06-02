@@ -47,8 +47,28 @@ struct CommandHelp {
 	CommandHelp(const char* u, const char* s, const char* l) : usage(u), short_desc(s), long_desc(l) {}
 };
 
+void arrayGenerator(const char* text, const char* line, const char** options, std::vector<std::string>& lc);
+
 struct CommandFactory {
-	CommandFactory(const char* name, CommandHelp help) { commands()[name] = help; }
+	typedef void (*CompletionGeneratorFunc)(const char* text,
+	                                        const char* line,
+	                                        std::vector<std::string>& lc,
+	                                        std::vector<StringRef> const& tokens);
+
+	typedef std::vector<const char*> (*HintGeneratorFunc)(std::vector<StringRef> const& tokens, bool inArgument);
+
+	CommandFactory(const char* name,
+	               CommandHelp help,
+	               CompletionGeneratorFunc completionFunc = nullptr,
+	               HintGeneratorFunc hintFunc = nullptr) {
+		commands()[name] = help;
+		if (completionFunc) {
+			completionGenerators()[name] = completionFunc;
+		}
+		if (hintFunc) {
+			hintGenerators()[name] = hintFunc;
+		}
+	}
 	CommandFactory(const char* name) { hiddenCommands().insert(name); }
 	static std::map<std::string, CommandHelp>& commands() {
 		static std::map<std::string, CommandHelp> helpMap;
@@ -57,6 +77,14 @@ struct CommandFactory {
 	static std::set<std::string>& hiddenCommands() {
 		static std::set<std::string> commands;
 		return commands;
+	}
+	static std::map<std::string, CompletionGeneratorFunc>& completionGenerators() {
+		static std::map<std::string, CompletionGeneratorFunc> completionMap;
+		return completionMap;
+	}
+	static std::map<std::string, HintGeneratorFunc>& hintGenerators() {
+		static std::map<std::string, HintGeneratorFunc> hintMap;
+		return hintMap;
 	}
 };
 
@@ -93,10 +121,7 @@ extern const KeyRangeRef processClassTypeSpecialKeyRange;
 // Other special keys
 inline const KeyRef errorMsgSpecialKey = LiteralStringRef("\xff\xff/error_message");
 // help functions (Copied from fdbcli.actor.cpp)
-// decode worker interfaces
-ACTOR Future<Void> addInterface(std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface,
-                                Reference<FlowLock> connectLock,
-                                KeyValue kv);
+
 // get all workers' info
 ACTOR Future<bool> getWorkers(Reference<IDatabase> db, std::vector<ProcessData>* workers);
 
@@ -189,7 +214,10 @@ ACTOR Future<bool> clearHealthyZone(Reference<IDatabase> db,
                                     bool clearSSFailureZoneString = false);
 ACTOR Future<bool> maintenanceCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // profile command
-ACTOR Future<bool> profileCommandActor(Reference<ITransaction> tr, std::vector<StringRef> tokens, bool intrans);
+ACTOR Future<bool> profileCommandActor(Database db,
+                                       Reference<ITransaction> tr,
+                                       std::vector<StringRef> tokens,
+                                       bool intrans);
 // setclass command
 ACTOR Future<bool> setClassCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // snapshot command

@@ -25,6 +25,7 @@
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/WaitFailure.h"
 
+#include "flow/ProtocolVersion.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 static std::set<int> const& normalClusterRecoveryErrors() {
@@ -188,7 +189,7 @@ ACTOR Future<Void> newCommitProxies(Reference<ClusterRecoveryData> self, Recruit
 		req.firstProxy = i == 0;
 		TraceEvent("CommitProxyReplies", self->dbgid)
 		    .detail("WorkerID", recr.commitProxies[i].id())
-		    .detail("ReocoveryTxnVersion", self->recoveryTransactionVersion)
+		    .detail("RecoveryTxnVersion", self->recoveryTransactionVersion)
 		    .detail("FirstProxy", req.firstProxy ? "True" : "False");
 		initializationReplies.push_back(
 		    transformErrors(throwErrorOr(recr.commitProxies[i].commitProxy.getReplyUnlessFailedFor(
@@ -297,6 +298,7 @@ ACTOR Future<Void> newTLogServers(Reference<ClusterRecoveryData> self,
 		                                                                 self->clusterId,
 		                                                                 self->configuration,
 		                                                                 self->cstate.myDBState.recoveryCount + 1,
+		                                                                 self->recoveryTransactionVersion,
 		                                                                 self->primaryLocality,
 		                                                                 self->dcId_locality[remoteDcId],
 		                                                                 self->allTags,
@@ -310,6 +312,7 @@ ACTOR Future<Void> newTLogServers(Reference<ClusterRecoveryData> self,
 		                                                                 self->clusterId,
 		                                                                 self->configuration,
 		                                                                 self->cstate.myDBState.recoveryCount + 1,
+		                                                                 self->recoveryTransactionVersion,
 		                                                                 self->primaryLocality,
 		                                                                 tagLocalitySpecial,
 		                                                                 self->allTags,
@@ -536,8 +539,7 @@ ACTOR Future<Void> changeCoordinators(Reference<ClusterRecoveryData> self) {
 		}
 
 		try {
-			state ClusterConnectionString conn(changeCoordinatorsRequest.newConnectionString.toString());
-			wait(conn.resolveHostnames());
+			ClusterConnectionString conn(changeCoordinatorsRequest.newConnectionString.toString());
 			wait(self->cstate.move(conn));
 		} catch (Error& e) {
 			if (e.code() != error_code_actor_cancelled)
@@ -1407,6 +1409,11 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 
 	wait(self->cstate.read());
 
+	if (self->cstate.prevDBState.lowestCompatibleProtocolVersion > currentProtocolVersion) {
+		TraceEvent(SevWarnAlways, "IncompatibleProtocolVersion", self->dbgid).log();
+		throw internal_error();
+	}
+
 	self->recoveryState = RecoveryState::LOCKING_CSTATE;
 	TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_STATE_EVENT_NAME).c_str(), self->dbgid)
 	    .detail("StatusCode", RecoveryStatus::locking_coordinated_state)
@@ -1462,7 +1469,19 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 
 	DBCoreState newState = self->cstate.myDBState;
 	newState.recoveryCount++;
+	if (self->cstate.prevDBState.newestProtocolVersion.isInvalid() ||
+	    self->cstate.prevDBState.newestProtocolVersion < currentProtocolVersion) {
+		ASSERT(self->cstate.myDBState.lowestCompatibleProtocolVersion.isInvalid() ||
+		       !self->cstate.myDBState.newestProtocolVersion.isInvalid());
+		newState.newestProtocolVersion = currentProtocolVersion;
+		newState.lowestCompatibleProtocolVersion = minCompatibleProtocolVersion;
+	}
 	wait(self->cstate.write(newState) || recoverAndEndEpoch);
+
+	TraceEvent("ProtocolVersionCompatibilityChecked", self->dbgid)
+	    .detail("NewestProtocolVersion", self->cstate.myDBState.newestProtocolVersion)
+	    .detail("LowestCompatibleProtocolVersion", self->cstate.myDBState.lowestCompatibleProtocolVersion)
+	    .trackLatest(self->swVersionCheckedEventHolder->trackingKey);
 
 	self->recoveryState = RecoveryState::RECRUITING;
 

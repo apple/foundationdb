@@ -137,7 +137,21 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   },
                   "storage_metadata":{
                      "created_time_datetime":"1970-01-01 00:00:00.000 +0000",
-                     "created_time_timestamp": 0
+                     "created_time_timestamp": 0,
+                     "storage_engine":{
+                     "$enum":[
+                     "ssd",
+                     "ssd-1",
+                     "ssd-2",
+                     "ssd-redwood-1-experimental",
+                     "ssd-rocksdb-v1",
+                     "ssd-sharded-rocksdb",
+                     "memory",
+                     "memory-1",
+                     "memory-2",
+                     "memory-radixtree-beta",
+                     "unknown"
+                     ]}
                   },
                   "data_version":12341234,
                   "durable_version":12341234,
@@ -695,12 +709,15 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
       },
       "cluster_controller_timestamp":1415650089,
       "protocol_version":"fdb00a400050001",
+      "newest_protocol_version":"fdb00a500040001",
+      "lowest_compatible_protocol_version":"fdb00a500040001",
       "connection_string":"a:a@127.0.0.1:4000",
       "full_replication":true,
       "maintenance_zone":"0ccb4e0fdbdb5583010f6b77d9d10ece",
       "maintenance_seconds_remaining":1.0,
       "data_distribution_disabled_for_ss_failures":true,
       "data_distribution_disabled_for_rebalance":true,
+      "data_distribution_disabled_hex": "1",
       "data_distribution_disabled":true,
       "active_primary_dc":"pv",
       "bounce_impact":{
@@ -911,6 +928,9 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                "logical_core_utilization":0.4
             }
          }
+      },
+      "tenants":{
+         "num_tenants":0
       }
    },
    "client":{

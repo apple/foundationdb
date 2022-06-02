@@ -188,9 +188,11 @@ struct StatusWorkload : TestWorkload {
 				            now() - issued); //.detail("Reply", json_spirit::write_string(json_spirit::mValue(result)));
 				std::string errorStr;
 				if (self->parsedSchema.present() &&
-				    !schemaMatch(self->parsedSchema.get(), result, errorStr, SevError, true))
+				    !schemaMatch(self->parsedSchema.get(), result, errorStr, SevError, true)) {
+					std::cout << errorStr << std::endl;
 					TraceEvent(SevError, "StatusWorkloadValidationFailed")
 					    .detail("JSON", json_spirit::write_string(json_spirit::mValue(result)));
+				}
 			} catch (Error& e) {
 				if (e.code() != error_code_actor_cancelled) {
 					TraceEvent(SevError, "StatusWorkloadError").error(e);

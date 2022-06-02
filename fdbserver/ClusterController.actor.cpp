@@ -1110,10 +1110,10 @@ ACTOR Future<Void> registerWorker(RegisterWorkerRequest req,
 	newPriorityInfo.processClassFitness = newProcessClass.machineClassFitness(ProcessClass::ClusterController);
 
 	bool isCoordinator =
-	    (std::find(coordinatorAddresses.begin(), coordinatorAddresses.end(), req.wi.address()) !=
+	    (std::find(coordinatorAddresses.begin(), coordinatorAddresses.end(), w.address()) !=
 	     coordinatorAddresses.end()) ||
-	    (req.wi.secondaryAddress().present() &&
-	     std::find(coordinatorAddresses.begin(), coordinatorAddresses.end(), req.wi.secondaryAddress().get()) !=
+	    (w.secondaryAddress().present() &&
+	     std::find(coordinatorAddresses.begin(), coordinatorAddresses.end(), w.secondaryAddress().get()) !=
 	         coordinatorAddresses.end());
 
 	for (auto it : req.incompatiblePeers) {
@@ -1933,8 +1933,24 @@ ACTOR Future<Void> handleForcedRecoveries(ClusterControllerData* self, ClusterCo
 	}
 }
 
-ACTOR Future<Void> startDataDistributor(ClusterControllerData* self) {
-	wait(delay(0.0)); // If master fails at the same time, give it a chance to clear master PID.
+struct SingletonRecruitThrottler {
+	double lastRecruitStart;
+
+	SingletonRecruitThrottler() : lastRecruitStart(-1) {}
+
+	double newRecruitment() {
+		double n = now();
+		double waitTime =
+		    std::max(0.0, (lastRecruitStart + SERVER_KNOBS->CC_THROTTLE_SINGLETON_RERECRUIT_INTERVAL - n));
+		lastRecruitStart = n;
+		return waitTime;
+	}
+};
+
+ACTOR Future<Void> startDataDistributor(ClusterControllerData* self, double waitTime) {
+	// If master fails at the same time, give it a chance to clear master PID.
+	// Also wait to avoid too many consecutive recruits in a small time window.
+	wait(delay(waitTime));
 
 	TraceEvent("CCStartDataDistributor", self->id).log();
 	loop {
@@ -2003,6 +2019,7 @@ ACTOR Future<Void> startDataDistributor(ClusterControllerData* self) {
 }
 
 ACTOR Future<Void> monitorDataDistributor(ClusterControllerData* self) {
+	state SingletonRecruitThrottler recruitThrottler;
 	while (self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
 		wait(self->db.serverInfo->onChange());
 	}
@@ -2019,13 +2036,15 @@ ACTOR Future<Void> monitorDataDistributor(ClusterControllerData* self) {
 				when(wait(self->recruitDistributor.onChange())) {}
 			}
 		} else {
-			wait(startDataDistributor(self));
+			wait(startDataDistributor(self, recruitThrottler.newRecruitment()));
 		}
 	}
 }
 
-ACTOR Future<Void> startRatekeeper(ClusterControllerData* self) {
-	wait(delay(0.0)); // If master fails at the same time, give it a chance to clear master PID.
+ACTOR Future<Void> startRatekeeper(ClusterControllerData* self, double waitTime) {
+	// If master fails at the same time, give it a chance to clear master PID.
+	// Also wait to avoid too many consecutive recruits in a small time window.
+	wait(delay(waitTime));
 
 	TraceEvent("CCStartRatekeeper", self->id).log();
 	loop {
@@ -2091,6 +2110,7 @@ ACTOR Future<Void> startRatekeeper(ClusterControllerData* self) {
 }
 
 ACTOR Future<Void> monitorRatekeeper(ClusterControllerData* self) {
+	state SingletonRecruitThrottler recruitThrottler;
 	while (self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
 		wait(self->db.serverInfo->onChange());
 	}
@@ -2107,34 +2127,15 @@ ACTOR Future<Void> monitorRatekeeper(ClusterControllerData* self) {
 				when(wait(self->recruitRatekeeper.onChange())) {}
 			}
 		} else {
-			wait(startRatekeeper(self));
+			wait(startRatekeeper(self, recruitThrottler.newRecruitment()));
 		}
 	}
 }
 
-// Acquires the BM lock by getting the next epoch no.
-ACTOR Future<int64_t> getNextBMEpoch(ClusterControllerData* self) {
-	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
-
-	loop {
-		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-		try {
-			Optional<Value> oldEpoch = wait(tr->get(blobManagerEpochKey));
-			state int64_t newEpoch = oldEpoch.present() ? decodeBlobManagerEpochValue(oldEpoch.get()) + 1 : 1;
-			tr->set(blobManagerEpochKey, blobManagerEpochValueFor(newEpoch));
-
-			wait(tr->commit());
-			TraceEvent(SevDebug, "CCNextBlobManagerEpoch", self->id).detail("Epoch", newEpoch);
-			return newEpoch;
-		} catch (Error& e) {
-			wait(tr->onError(e));
-		}
-	}
-}
-
-ACTOR Future<Void> startEncryptKeyProxy(ClusterControllerData* self) {
-	wait(delay(0.0)); // If master fails at the same time, give it a chance to clear master PID.
+ACTOR Future<Void> startEncryptKeyProxy(ClusterControllerData* self, double waitTime) {
+	// If master fails at the same time, give it a chance to clear master PID.
+	// Also wait to avoid too many consecutive recruits in a small time window.
+	wait(delay(waitTime));
 
 	TraceEvent("CCEKP_Start", self->id).log();
 	loop {
@@ -2208,6 +2209,7 @@ ACTOR Future<Void> startEncryptKeyProxy(ClusterControllerData* self) {
 }
 
 ACTOR Future<Void> monitorEncryptKeyProxy(ClusterControllerData* self) {
+	state SingletonRecruitThrottler recruitThrottler;
 	loop {
 		if (self->db.serverInfo->get().encryptKeyProxy.present() && !self->recruitEncryptKeyProxy.get()) {
 			choose {
@@ -2219,13 +2221,36 @@ ACTOR Future<Void> monitorEncryptKeyProxy(ClusterControllerData* self) {
 				when(wait(self->recruitEncryptKeyProxy.onChange())) {}
 			}
 		} else {
-			wait(startEncryptKeyProxy(self));
+			wait(startEncryptKeyProxy(self, recruitThrottler.newRecruitment()));
 		}
 	}
 }
 
-ACTOR Future<Void> startBlobManager(ClusterControllerData* self) {
-	wait(delay(0.0)); // If master fails at the same time, give it a chance to clear master PID.
+// Acquires the BM lock by getting the next epoch no.
+ACTOR Future<int64_t> getNextBMEpoch(ClusterControllerData* self) {
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
+
+	loop {
+		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		try {
+			Optional<Value> oldEpoch = wait(tr->get(blobManagerEpochKey));
+			state int64_t newEpoch = oldEpoch.present() ? decodeBlobManagerEpochValue(oldEpoch.get()) + 1 : 1;
+			tr->set(blobManagerEpochKey, blobManagerEpochValueFor(newEpoch));
+
+			wait(tr->commit());
+			TraceEvent(SevDebug, "CCNextBlobManagerEpoch", self->id).detail("Epoch", newEpoch);
+			return newEpoch;
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+}
+
+ACTOR Future<Void> startBlobManager(ClusterControllerData* self, double waitTime) {
+	// If master fails at the same time, give it a chance to clear master PID.
+	// Also wait to avoid too many consecutive recruits in a small time window.
+	wait(delay(waitTime));
 
 	TraceEvent("CCStartBlobManager", self->id).log();
 	loop {
@@ -2322,6 +2347,7 @@ ACTOR Future<Void> watchBlobGranulesConfigKey(ClusterControllerData* self) {
 }
 
 ACTOR Future<Void> monitorBlobManager(ClusterControllerData* self) {
+	state SingletonRecruitThrottler recruitThrottler;
 	while (self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
 		wait(self->db.serverInfo->onChange());
 	}
@@ -2352,7 +2378,7 @@ ACTOR Future<Void> monitorBlobManager(ClusterControllerData* self) {
 			}
 		} else if (self->db.blobGranulesEnabled.get()) {
 			// if there is no blob manager present but blob granules are now enabled, recruit a BM
-			wait(startBlobManager(self));
+			wait(startBlobManager(self, recruitThrottler.newRecruitment()));
 		} else {
 			// if there is no blob manager present and blob granules are disabled, wait for a config change
 			wait(self->db.blobGranulesEnabled.onChange());
@@ -2481,12 +2507,11 @@ ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 	}
 }
 
-ACTOR Future<Void> clusterControllerCore(Reference<IClusterConnectionRecord> connRecord,
-                                         ClusterControllerFullInterface interf,
+ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
                                          Future<Void> leaderFail,
+                                         ServerCoordinators coordinators,
                                          LocalityData locality,
                                          ConfigDBType configDBType) {
-	state ServerCoordinators coordinators(connRecord);
 	state ClusterControllerData self(interf, locality, coordinators);
 	state ConfigBroadcaster configBroadcaster(coordinators, configDBType);
 	state Future<Void> coordinationPingDelay = delay(SERVER_KNOBS->WORKER_COORDINATION_PING_DELAY);
@@ -2621,7 +2646,7 @@ ACTOR Future<Void> replaceInterface(ClusterControllerFullInterface interf) {
 	}
 }
 
-ACTOR Future<Void> clusterController(Reference<IClusterConnectionRecord> connRecord,
+ACTOR Future<Void> clusterController(ServerCoordinators coordinators,
                                      Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC,
                                      bool hasConnected,
                                      Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
@@ -2632,10 +2657,9 @@ ACTOR Future<Void> clusterController(Reference<IClusterConnectionRecord> connRec
 		state bool inRole = false;
 		cci.initEndpoints();
 		try {
-			wait(connRecord->resolveHostnames());
 			// Register as a possible leader; wait to be elected
 			state Future<Void> leaderFail =
-			    tryBecomeLeader(connRecord, cci, currentCC, hasConnected, asyncPriorityInfo);
+			    tryBecomeLeader(coordinators, cci, currentCC, hasConnected, asyncPriorityInfo);
 			state Future<Void> shouldReplace = replaceInterface(cci);
 
 			while (!currentCC->get().present() || currentCC->get().get() != cci) {
@@ -2654,7 +2678,7 @@ ACTOR Future<Void> clusterController(Reference<IClusterConnectionRecord> connRec
 				startRole(Role::CLUSTER_CONTROLLER, cci.id(), UID());
 				inRole = true;
 
-				wait(clusterControllerCore(connRecord, cci, leaderFail, locality, configDBType));
+				wait(clusterControllerCore(cci, leaderFail, coordinators, locality, configDBType));
 			}
 		} catch (Error& e) {
 			if (inRole)
@@ -2683,7 +2707,8 @@ ACTOR Future<Void> clusterController(Reference<IClusterConnectionRecord> connRec
 	state bool hasConnected = false;
 	loop {
 		try {
-			wait(clusterController(connRecord, currentCC, hasConnected, asyncPriorityInfo, locality, configDBType));
+			ServerCoordinators coordinators(connRecord);
+			wait(clusterController(coordinators, currentCC, hasConnected, asyncPriorityInfo, locality, configDBType));
 			hasConnected = true;
 		} catch (Error& e) {
 			if (e.code() != error_code_coordinators_changed)

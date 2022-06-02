@@ -20,6 +20,7 @@
 
 // Unit tests for the flow language and libraries
 
+#include "flow/Arena.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/UnitTest.h"
 #include "flow/DeterministicRandom.h"

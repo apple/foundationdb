@@ -21,6 +21,7 @@
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
+#include "fdbrpc/FlowTransport.h"
 #include "flow/IRandom.h"
 #include <unordered_set>
 #include <atomic>
@@ -131,7 +132,9 @@ public:
 		this->kind = SpanKind::SERVER;
 		this->status = SpanStatus::OK;
 		this->attributes.push_back(
-		    this->arena, KeyValueRef("address"_sr, StringRef(this->arena, g_network->getLocalAddress().toString())));
+		    // this->arena, KeyValueRef("address"_sr, StringRef(this->arena, "localhost:4000")));
+		    this->arena,
+		    KeyValueRef("address"_sr, StringRef(this->arena, FlowTransport::transport().getLocalAddressAsString())));
 	}
 
 	// Construct Span with a location, parent, and optional links.
@@ -232,15 +235,6 @@ public:
 		context.traceID = parent.traceID;
 		context.spanID = deterministicRandom()->randomUInt64();
 		context.m_Flags = parent.m_Flags;
-		return *this;
-	}
-
-	Span& addParentOrLink(const SpanContext& other) {
-		if (!parentContext.isValid()) {
-			parentContext = other;
-		} else {
-			links.push_back(arena, other);
-		}
 		return *this;
 	}
 
