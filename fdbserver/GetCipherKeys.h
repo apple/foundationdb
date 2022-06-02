@@ -30,7 +30,7 @@
 
 extern Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>> getLatestCipherKeys(
     const Reference<AsyncVar<ServerDBInfo> const>& db,
-    const std::unordered_set<EncryptCipherDomainId>& domainIds);
+    const std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName>& domains);
 
 extern Future<std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>> getCipherKeys(
     const Reference<AsyncVar<ServerDBInfo> const>& db,

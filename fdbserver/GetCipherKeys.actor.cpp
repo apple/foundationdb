@@ -44,19 +44,17 @@ ACTOR Future<Void> onEncryptKeyProxyChange(Reference<AsyncVar<ServerDBInfo> cons
 	return Void();
 }
 
-ACTOR Future<std::vector<EKPBaseCipherDetails>> getUncachedLatestCipherKeys(
-    Reference<AsyncVar<ServerDBInfo> const> db,
-    std::vector<EncryptCipherDomainId> uncachedIds) {
+ACTOR Future<std::vector<EKPBaseCipherDetails>> getUncachedLatestCipherKeys(Reference<AsyncVar<ServerDBInfo> const> db,
+                                                                            EKPGetLatestBaseCipherKeysRequest request) {
 	Optional<EncryptKeyProxyInterface> proxy = db->get().encryptKeyProxy;
 	if (!proxy.present()) {
 		// Wait for onEncryptKeyProxyChange.
 		TraceEvent("GetLatestCipherKeys_EncryptKeyProxyNotPresent");
 		return Never();
 	}
-	EKPGetLatestBaseCipherKeysRequest req;
-	req.encryptDomainIds = uncachedIds;
+	request.reply.reset();
 	try {
-		EKPGetLatestBaseCipherKeysReply reply = wait(proxy.get().getLatestBaseCipherKeys.getReply(req));
+		EKPGetLatestBaseCipherKeysReply reply = wait(proxy.get().getLatestBaseCipherKeys.getReply(request));
 		if (reply.error.present()) {
 			TraceEvent("GetLatestCipherKeys_RequestFailed").error(reply.error.get());
 			throw reply.error.get();
@@ -74,10 +72,10 @@ ACTOR Future<std::vector<EKPBaseCipherDetails>> getUncachedLatestCipherKeys(
 
 ACTOR Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>> getLatestCipherKeys(
     Reference<AsyncVar<ServerDBInfo> const> db,
-    std::unordered_set<EncryptCipherDomainId> domainIds) {
+    std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> domains) {
 	state Reference<BlobCipherKeyCache> cipherKeyCache = BlobCipherKeyCache::getInstance();
 	state std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cipherKeys;
-	state std::vector<EncryptCipherDomainId> uncachedIds;
+	state EKPGetLatestBaseCipherKeysRequest request;
 
 	if (!db.isValid()) {
 		TraceEvent(SevError, "GetLatestCipherKeys_ServerDBInfoNotAvailable");
@@ -85,24 +83,25 @@ ACTOR Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>
 	}
 
 	// Collect cached cipher keys.
-	for (EncryptCipherDomainId domainId : domainIds) {
-		Reference<BlobCipherKey> cachedCipherKey = cipherKeyCache->getLatestCipherKey(domainId);
+	for (auto& domain : domains) {
+		Reference<BlobCipherKey> cachedCipherKey = cipherKeyCache->getLatestCipherKey(domain.first /*domainId*/);
 		if (cachedCipherKey.isValid()) {
-			cipherKeys[domainId] = cachedCipherKey;
+			cipherKeys[domain.first] = cachedCipherKey;
 		} else {
-			uncachedIds.push_back(domainId);
+			request.encryptDomainInfos.emplace_back(
+			    domain.first /*domainId*/, domain.second /*domainName*/, request.arena);
 		}
 	}
-	if (uncachedIds.empty()) {
+	if (request.encryptDomainInfos.empty()) {
 		return cipherKeys;
 	}
 	// Fetch any uncached cipher keys.
 	loop choose {
-		when(std::vector<EKPBaseCipherDetails> baseCipherDetails = wait(getUncachedLatestCipherKeys(db, uncachedIds))) {
+		when(std::vector<EKPBaseCipherDetails> baseCipherDetails = wait(getUncachedLatestCipherKeys(db, request))) {
 			// Insert base cipher keys into cache and construct result.
 			for (const EKPBaseCipherDetails& details : baseCipherDetails) {
 				EncryptCipherDomainId domainId = details.encryptDomainId;
-				if (domainIds.count(domainId) > 0 && cipherKeys.count(domainId) == 0) {
+				if (domains.count(domainId) > 0 && cipherKeys.count(domainId) == 0) {
 					Reference<BlobCipherKey> cipherKey = cipherKeyCache->insertCipherKey(
 					    domainId, details.baseCipherId, details.baseCipherKey.begin(), details.baseCipherKey.size());
 					ASSERT(cipherKey.isValid());
@@ -110,9 +109,9 @@ ACTOR Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>
 				}
 			}
 			// Check for any missing cipher keys.
-			for (EncryptCipherDomainId domainId : uncachedIds) {
-				if (cipherKeys.count(domainId) == 0) {
-					TraceEvent(SevWarn, "GetLatestCipherKeys_KeyMissing").detail("DomainId", domainId);
+			for (auto& domain : request.encryptDomainInfos) {
+				if (cipherKeys.count(domain.domainId) == 0) {
+					TraceEvent(SevWarn, "GetLatestCipherKeys_KeyMissing").detail("DomainId", domain.domainId);
 					throw encrypt_key_not_found();
 				}
 			}
@@ -124,21 +123,17 @@ ACTOR Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>
 	return cipherKeys;
 }
 
-using BaseCipherIndex = std::pair<EncryptCipherBaseKeyId, EncryptCipherDomainId>;
-
-ACTOR Future<std::vector<EKPBaseCipherDetails>> getUncachedCipherKeys(
-    Reference<AsyncVar<ServerDBInfo> const> db,
-    std::unordered_set<BaseCipherIndex, boost::hash<BaseCipherIndex>> uncachedIds) {
+ACTOR Future<std::vector<EKPBaseCipherDetails>> getUncachedCipherKeys(Reference<AsyncVar<ServerDBInfo> const> db,
+                                                                      EKPGetBaseCipherKeysByIdsRequest request) {
 	Optional<EncryptKeyProxyInterface> proxy = db->get().encryptKeyProxy;
 	if (!proxy.present()) {
 		// Wait for onEncryptKeyProxyChange.
 		TraceEvent("GetCipherKeys_EncryptKeyProxyNotPresent");
 		return Never();
 	}
-	EKPGetBaseCipherKeysByIdsRequest req;
-	req.baseCipherIds.assign(uncachedIds.begin(), uncachedIds.end());
+	request.reply.reset();
 	try {
-		EKPGetBaseCipherKeysByIdsReply reply = wait(proxy.get().getBaseCipherKeysByIds.getReply(req));
+		EKPGetBaseCipherKeysByIdsReply reply = wait(proxy.get().getBaseCipherKeysByIds.getReply(request));
 		if (reply.error.present()) {
 			TraceEvent("GetCipherKeys_RequestFailed").error(reply.error.get());
 			throw reply.error.get();
@@ -154,12 +149,15 @@ ACTOR Future<std::vector<EKPBaseCipherDetails>> getUncachedCipherKeys(
 	}
 }
 
+using BaseCipherIndex = std::pair<EncryptCipherDomainId, EncryptCipherBaseKeyId>;
+
 ACTOR Future<std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>> getCipherKeys(
     Reference<AsyncVar<ServerDBInfo> const> db,
     std::unordered_set<BlobCipherDetails> cipherDetails) {
 	state Reference<BlobCipherKeyCache> cipherKeyCache = BlobCipherKeyCache::getInstance();
 	state std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> cipherKeys;
-	state std::unordered_set<BaseCipherIndex, boost::hash<BaseCipherIndex>> uncachedIds;
+	state std::unordered_set<BaseCipherIndex, boost::hash<BaseCipherIndex>> uncachedBaseCipherIds;
+	state EKPGetBaseCipherKeysByIdsRequest request;
 
 	if (!db.isValid()) {
 		TraceEvent(SevError, "GetCipherKeys_ServerDBInfoNotAvailable");
@@ -173,18 +171,22 @@ ACTOR Future<std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>> ge
 		if (cachedCipherKey.isValid()) {
 			cipherKeys.emplace(details, cachedCipherKey);
 		} else {
-			uncachedIds.insert(std::make_pair(details.baseCipherId, details.encryptDomainId));
+			uncachedBaseCipherIds.insert(std::make_pair(details.encryptDomainId, details.baseCipherId));
 		}
 	}
-	if (uncachedIds.empty()) {
+	if (uncachedBaseCipherIds.empty()) {
 		return cipherKeys;
+	}
+	for (const BaseCipherIndex& id : uncachedBaseCipherIds) {
+		request.baseCipherInfos.emplace_back(
+		    id.first /*domainId*/, id.second /*baseCipherId*/, StringRef() /*domainName*/, request.arena);
 	}
 	// Fetch any uncached cipher keys.
 	loop choose {
-		when(std::vector<EKPBaseCipherDetails> baseCipherDetails = wait(getUncachedCipherKeys(db, uncachedIds))) {
+		when(std::vector<EKPBaseCipherDetails> baseCipherDetails = wait(getUncachedCipherKeys(db, request))) {
 			std::unordered_map<BaseCipherIndex, StringRef, boost::hash<BaseCipherIndex>> baseCipherKeys;
 			for (const EKPBaseCipherDetails& baseDetails : baseCipherDetails) {
-				BaseCipherIndex baseIdx = std::make_pair(baseDetails.baseCipherId, baseDetails.encryptDomainId);
+				BaseCipherIndex baseIdx = std::make_pair(baseDetails.encryptDomainId, baseDetails.baseCipherId);
 				baseCipherKeys[baseIdx] = baseDetails.baseCipherKey;
 			}
 			// Insert base cipher keys into cache and construct result.
@@ -192,7 +194,7 @@ ACTOR Future<std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>> ge
 				if (cipherKeys.count(details) > 0) {
 					continue;
 				}
-				BaseCipherIndex baseIdx = std::make_pair(details.baseCipherId, details.encryptDomainId);
+				BaseCipherIndex baseIdx = std::make_pair(details.encryptDomainId, details.baseCipherId);
 				const auto& itr = baseCipherKeys.find(baseIdx);
 				if (itr == baseCipherKeys.end()) {
 					TraceEvent(SevError, "GetCipherKeys_KeyMissing")
@@ -217,10 +219,12 @@ ACTOR Future<std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>> ge
 }
 
 ACTOR Future<TextAndHeaderCipherKeys> getLatestSystemCipherKeys(Reference<AsyncVar<ServerDBInfo> const> db) {
-	std::unordered_set<EncryptCipherDomainId> domainIds = { SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID,
-		                                                    ENCRYPT_HEADER_DOMAIN_ID };
+	std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> domains = {
+		{ SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME },
+		{ ENCRYPT_HEADER_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME }
+	};
 	std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cipherKeys =
-	    wait(getLatestCipherKeys(db, domainIds));
+	    wait(getLatestCipherKeys(db, domains));
 	ASSERT(cipherKeys.count(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID) > 0);
 	ASSERT(cipherKeys.count(ENCRYPT_HEADER_DOMAIN_ID) > 0);
 	TextAndHeaderCipherKeys result{ cipherKeys.at(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID),
