@@ -31,6 +31,7 @@ static constexpr int _PAGE_SIZE = 4096;
 
 class ServerKnobs : public KnobsImpl<ServerKnobs> {
 public:
+	bool ALLOW_DANGEROUS_KNOBS;
 	// Versions
 	int64_t VERSIONS_PER_SECOND;
 	int64_t MAX_VERSIONS_IN_FLIGHT;
@@ -145,6 +146,8 @@ public:
 	int PRIORITY_RECOVER_MOVE;
 	int PRIORITY_REBALANCE_UNDERUTILIZED_TEAM;
 	int PRIORITY_REBALANCE_OVERUTILIZED_TEAM;
+	int PRIORITY_REBALANCE_READ_OVERUTIL_TEAM;
+	int PRIORITY_REBALANCE_READ_UNDERUTIL_TEAM;
 	int PRIORITY_PERPETUAL_STORAGE_WIGGLE;
 	int PRIORITY_TEAM_HEALTHY;
 	int PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER;
@@ -159,6 +162,13 @@ public:
 	int PRIORITY_SPLIT_SHARD;
 
 	// Data distribution
+	double READ_REBALANCE_CPU_THRESHOLD; // read rebalance only happens if the source servers' CPU > threshold
+	int READ_REBALANCE_SRC_PARALLELISM; // the max count a server become a source server within a certain interval
+	int READ_REBALANCE_SHARD_TOPK; // top k shards from which to select randomly for read-rebalance
+	double
+	    READ_REBALANCE_DIFF_FRAC; // only when (srcLoad - destLoad)/srcLoad > DIFF_FRAC the read rebalance will happen
+	double READ_REBALANCE_MAX_SHARD_FRAC; // only move shard whose readLoad < (srcLoad - destLoad) * MAX_SHARD_FRAC
+
 	double RETRY_RELOCATESHARD_DELAY;
 	double DATA_DISTRIBUTION_FAILURE_REACTION_TIME;
 	int MIN_SHARD_BYTES, SHARD_BYTES_RATIO, SHARD_BYTES_PER_SQRT_BYTES, MAX_SHARD_BYTES, KEY_SERVER_SHARD_BYTES;
@@ -608,6 +618,7 @@ public:
 	int64_t BYTES_READ_UNITS_PER_SAMPLE;
 	int64_t READ_HOT_SUB_RANGE_CHUNK_SIZE;
 	int64_t EMPTY_READ_PENALTY;
+	int DD_SHARD_COMPARE_LIMIT; // when read-aware DD is enabled, at most how many shards are compared together
 	bool READ_SAMPLING_ENABLED;
 
 	// Storage Server
@@ -834,6 +845,8 @@ public:
 	// FIXME: configure url with database configuration instead of knob eventually
 	std::string BG_URL;
 
+	// whether to use blobRangeKeys or tenants for blob granule range sources
+	std::string BG_RANGE_SOURCE;
 	int BG_SNAPSHOT_FILE_TARGET_BYTES;
 	int BG_DELTA_FILE_TARGET_BYTES;
 	int BG_DELTA_BYTES_BEFORE_COMPACT;
