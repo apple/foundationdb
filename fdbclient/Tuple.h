@@ -25,6 +25,7 @@
 
 #include "flow/flow.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/Versionstamp.h"
 
 struct Tuple {
 	Tuple() {}
@@ -47,7 +48,7 @@ struct Tuple {
 	Tuple& appendFloat(float);
 	Tuple& appendDouble(double);
 	Tuple& appendNull();
-	Tuple& appendVersionstamp(StringRef const& str);
+	Tuple& appendVersionstamp(Versionstamp const&);
 
 	StringRef pack() const { return StringRef(data.begin(), data.size()); }
 
@@ -69,7 +70,7 @@ struct Tuple {
 	StringRef subTupleRawString(size_t index) const;
 	ElementType getType(size_t index) const;
 	Standalone<StringRef> getString(size_t index) const;
-	Standalone<StringRef> getVersionstamp(size_t index) const;
+	Versionstamp getVersionstamp(size_t index) const;
 	int64_t getInt(size_t index, bool allow_incomplete = false) const;
 	bool getBool(size_t index) const;
 	float getFloat(size_t index) const;

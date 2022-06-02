@@ -113,7 +113,11 @@ std::string tupleToString(Tuple const& tuple) {
 		} else if (type == Tuple::NESTED) {
 			str += tupleToString(tuple.getNested(i));
 		} else if (type == Tuple::VERSIONSTAMP) {
-			str += "\'" + tuple.getString(i).printable() + "\'";
+			Versionstamp versionstamp = tuple.getVersionstamp(i);
+			str += format("Transaction Version: '%ld', BatchNumber: '%hd', ClientWrittenNumber : '%hd'",
+			              versionstamp.getVersion(),
+			              versionstamp.getBatchNumber(),
+			              versionstamp.getClientWrittenNumber());
 		} else {
 			ASSERT(false);
 		}
@@ -1150,7 +1154,7 @@ struct TuplePackFunc : InstructionFunc {
 				} else if (type == Tuple::NESTED) {
 					tuple.appendNested(itemTuple.getNested(0));
 				} else if (type == Tuple::VERSIONSTAMP) {
-					tuple.appendVersionstamp(itemTuple.getString(0));
+					tuple.appendVersionstamp(Versionstamp(itemTuple.getString(0)));
 				} else {
 					ASSERT(false);
 				}
@@ -1231,7 +1235,7 @@ struct TupleRangeFunc : InstructionFunc {
 				} else if (type == Tuple::NESTED) {
 					tuple.appendNested(itemTuple.getNested(0));
 				} else if (type == Tuple::VERSIONSTAMP) {
-					tuple.appendVersionstamp(itemTuple.getString(0));
+					tuple.appendVersionstamp(Versionstamp(itemTuple.getString(0)));
 				} else {
 					ASSERT(false);
 				}

@@ -24,6 +24,7 @@
 #pragma once
 
 #include "bindings/flow/fdb_flow.h"
+#include "fdbclient/Versionstamp.h"
 
 namespace FDB {
 struct Uuid {
@@ -60,7 +61,7 @@ struct Tuple {
 	Tuple& append(Uuid);
 	Tuple& appendNested(Tuple const&);
 	Tuple& appendNull();
-	Tuple& appendVersionstamp(StringRef const& str);
+	Tuple& appendVersionstamp(Versionstamp const&);
 
 	StringRef pack() const { return StringRef(data.begin(), data.size()); }
 
@@ -76,7 +77,7 @@ struct Tuple {
 
 	ElementType getType(size_t index) const;
 	Standalone<StringRef> getString(size_t index) const;
-	Standalone<StringRef> getVersionstamp(size_t index) const;
+	Versionstamp getVersionstamp(size_t index) const;
 	int64_t getInt(size_t index) const;
 	bool getBool(size_t index) const;
 	float getFloat(size_t index) const;

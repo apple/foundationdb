@@ -21,7 +21,6 @@
 #include "fdbclient/Tuple.h"
 
 const uint8_t VERSIONSTAMP_96_CODE = 0x33;
-const size_t VERSIONSTAMP_TUPLE_SIZE = 12;
 
 // TODO: Many functions copied from bindings/flow/Tuple.cpp. Merge at some point.
 static float bigEndianFloat(float orig) {
@@ -104,12 +103,11 @@ Tuple& Tuple::append(Tuple const& tuple) {
 	return *this;
 }
 
-Tuple& Tuple::appendVersionstamp(StringRef const& str) {
-	ASSERT_EQ(str.size(), VERSIONSTAMP_TUPLE_SIZE);
+Tuple& Tuple::appendVersionstamp(Versionstamp const& vs) {
 	offsets.push_back(data.size());
 
 	data.push_back(data.arena(), VERSIONSTAMP_96_CODE);
-	data.append(data.arena(), str.begin(), VERSIONSTAMP_TUPLE_SIZE);
+	data.append(data.arena(), vs.begin(), vs.size());
 
 	return *this;
 }
@@ -378,7 +376,7 @@ double Tuple::getDouble(size_t index) const {
 	return bigEndianDouble(swap);
 }
 
-Standalone<StringRef> Tuple::getVersionstamp(size_t index) const {
+Versionstamp Tuple::getVersionstamp(size_t index) const {
 	if (index >= offsets.size()) {
 		throw invalid_tuple_index();
 	}
@@ -387,7 +385,7 @@ Standalone<StringRef> Tuple::getVersionstamp(size_t index) const {
 	if (code != VERSIONSTAMP_96_CODE) {
 		throw invalid_tuple_data_type();
 	}
-	return StringRef(data.begin() + offsets[index] + 1, VERSIONSTAMP_TUPLE_SIZE);
+	return Versionstamp(StringRef(data.begin() + offsets[index] + 1, VERSIONSTAMP_TUPLE_SIZE));
 }
 
 KeyRange Tuple::range(Tuple const& tuple) const {

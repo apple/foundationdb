@@ -174,12 +174,11 @@ Tuple& Tuple::append(StringRef const& str, bool utf8) {
 	return *this;
 }
 
-Tuple& Tuple::appendVersionstamp(StringRef const& str) {
-	ASSERT_EQ(str.size(), VERSIONSTAMP_TUPLE_SIZE);
+Tuple& Tuple::appendVersionstamp(Versionstamp const& vs) {
 	offsets.push_back(data.size());
 
 	data.push_back(data.arena(), VERSIONSTAMP_96_CODE);
-	data.append(data.arena(), str.begin(), VERSIONSTAMP_TUPLE_SIZE);
+	data.append(data.arena(), vs.begin(), vs.size());
 
 	return *this;
 }
@@ -441,7 +440,7 @@ double Tuple::getDouble(size_t index) const {
 	return bigEndianDouble(swap);
 }
 
-Standalone<StringRef> Tuple::getVersionstamp(size_t index) const {
+Versionstamp Tuple::getVersionstamp(size_t index) const {
 	if (index >= offsets.size()) {
 		throw invalid_tuple_index();
 	}
@@ -451,7 +450,7 @@ Standalone<StringRef> Tuple::getVersionstamp(size_t index) const {
 		throw invalid_tuple_data_type();
 	}
 	size_t versionstampLength = VERSIONSTAMP_TUPLE_SIZE;
-	return StringRef(data.begin() + offsets[index] + 1, versionstampLength);
+	return Versionstamp(StringRef(data.begin() + offsets[index] + 1, versionstampLength));
 }
 
 Uuid Tuple::getUuid(size_t index) const {
