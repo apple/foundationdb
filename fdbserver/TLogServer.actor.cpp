@@ -2745,6 +2745,9 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 		when(TLogSnapRequest snapReq = waitNext(tli.snapRequest.getFuture())) {
 			logData->addActor.send(tLogSnapCreate(snapReq, self, logData));
 		}
+		when(TLogUnblockPeekRequest unblockPeekRequest = waitNext(tli.unblockPeekRequest.getFuture())) {
+			logData->unblockWaitingPeeks();
+		}
 	}
 }
 

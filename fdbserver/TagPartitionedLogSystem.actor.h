@@ -152,6 +152,8 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	// Return the min version of all pseudoLocalities, i.e., logRouter and backupTag
 	Version popPseudoLocalityTag(Tag tag, Version upTo) final;
 
+	Optional<TLogInterface> getBestInterface(Tag tag);
+
 	static Future<Void> recoverAndEndEpoch(Reference<AsyncVar<Reference<ILogSystem>>> const& outLogSystem,
 	                                       UID const& dbgid,
 	                                       DBCoreState const& oldState,

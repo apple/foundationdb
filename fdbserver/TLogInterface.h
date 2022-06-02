@@ -51,6 +51,7 @@ struct TLogInterface {
 	RequestStream<struct TLogDisablePopRequest> disablePopRequest;
 	RequestStream<struct TLogEnablePopRequest> enablePopRequest;
 	RequestStream<struct TLogSnapRequest> snapRequest;
+	RequestStream<struct TLogUnblockPeekRequest> unblockPeekRequest;
 
 	TLogInterface() {}
 	explicit TLogInterface(const LocalityData& locality)
@@ -84,6 +85,7 @@ struct TLogInterface {
 		streams.push_back(enablePopRequest.getReceiver());
 		streams.push_back(snapRequest.getReceiver());
 		streams.push_back(peekStreamMessages.getReceiver(TaskPriority::TLogPeek));
+		streams.push_back(unblockPeekRequest.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 
@@ -112,6 +114,8 @@ struct TLogInterface {
 			snapRequest = RequestStream<struct TLogSnapRequest>(peekMessages.getEndpoint().getAdjustedEndpoint(10));
 			peekStreamMessages =
 			    RequestStream<struct TLogPeekStreamRequest>(peekMessages.getEndpoint().getAdjustedEndpoint(11));
+			unblockPeekRequest =
+			    RequestStream<struct TLogUnblockPeekRequest>(peekMessages.getEndpoint().getAdjustedEndpoint(12));
 		}
 	}
 };
@@ -404,6 +408,18 @@ struct TLogSnapRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, reply, snapPayload, snapUID, role, arena);
+	}
+};
+
+struct TLogUnblockPeekRequest {
+	constexpr static FileIdentifier file_identifier = 4022810;
+	ReplyPromise<Void> reply;
+
+	TLogUnblockPeekRequest() = default;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply);
 	}
 };
 

@@ -588,6 +588,8 @@ struct ILogSystem {
 	virtual Future<Void> endEpoch() = 0;
 	// Ends the current epoch without starting a new one
 
+	virtual Optional<TLogInterface> getBestInterface(Tag tag) = 0;
+
 	static Reference<ILogSystem> fromServerDBInfo(
 	    UID const& dbgid,
 	    ServerDBInfo const& db,

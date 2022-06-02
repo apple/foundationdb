@@ -1335,6 +1335,22 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekLogRouter(UID db
 	    Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, getPeekEnd(), false, false);
 }
 
+Optional<TLogInterface> TagPartitionedLogSystem::getBestInterface(Tag tag) {
+	Optional<TLogInterface> rv;
+	int bestSet = -1;
+	for (int t = 0; t < tLogs.size(); t++) {
+		if (tLogs[t]->logServers.size()) {
+			bestSet = t;
+			break;
+		}
+	}
+	if (bestSet != -1) {
+		auto tii = tLogs[bestSet]->logServers[tLogs[bestSet]->bestLocationFor(tag)];
+		rv = tii->get().interf();
+	}
+	return rv;
+}
+
 Version TagPartitionedLogSystem::getKnownCommittedVersion() {
 	Version result = invalidVersion;
 	for (auto& it : lockResults) {

@@ -6058,8 +6058,11 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 
 		// After we add to the promise readyFetchKeys, update() would provide a pointer to FetchInjectionInfo that we
 		// can put mutation in.
+		state double startWaitUpdate = now();
 		FetchInjectionInfo* batch = wait(p.getFuture());
-		TraceEvent(SevDebug, "FKUpdateBatch", data->thisServerID).detail("FKID", interval.pairID);
+		TraceEvent(SevDebug, "FKUpdateBatch", data->thisServerID)
+		    .detail("FKID", interval.pairID)
+		    .detail("Time", now() - startWaitUpdate);
 
 		shard->phase = AddingShard::FetchingCF;
 		ASSERT(data->version.get() >= fetchVersion);
@@ -8928,6 +8931,19 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 	self->transactionTagCounter.startNewInterval();
 	self->actors.add(
 	    recurring([&]() { self->transactionTagCounter.startNewInterval(); }, SERVER_KNOBS->TAG_MEASUREMENT_INTERVAL));
+
+	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
+		self->actors.add(recurring(
+		    [&]() {
+			    if (self->logSystem && !self->readyFetchKeys.empty()) {
+				    auto tli = self->logSystem->getBestInterface(self->tag);
+				    if (tli.present()) {
+					    tli.get().unblockPeekRequest.getReply(TLogUnblockPeekRequest());
+				    }
+			    }
+		    },
+		    .1));
+	}
 
 	self->coreStarted.send(Void());
 
