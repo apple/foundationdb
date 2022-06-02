@@ -32,7 +32,7 @@ struct Versionstamp {
 
 	int64_t getVersion() const;
 	int16_t getBatchNumber() const;
-	int16_t getClientWrittenNumber() const;
+	int16_t getUserVersion() const;
 	size_t size() const;
 	const uint8_t* begin() const;
 	bool operator==(const Versionstamp&) const;

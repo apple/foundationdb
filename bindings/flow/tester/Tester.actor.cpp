@@ -114,10 +114,10 @@ std::string tupleToString(Tuple const& tuple) {
 			str += tupleToString(tuple.getNested(i));
 		} else if (type == Tuple::VERSIONSTAMP) {
 			Versionstamp versionstamp = tuple.getVersionstamp(i);
-			str += format("Transaction Version: '%ld', BatchNumber: '%hd', ClientWrittenNumber : '%hd'",
+			str += format("Transaction Version: '%ld', BatchNumber: '%hd', UserVersion : '%hd'",
 			              versionstamp.getVersion(),
 			              versionstamp.getBatchNumber(),
-			              versionstamp.getClientWrittenNumber());
+			              versionstamp.getUserVersion());
 		} else {
 			ASSERT(false);
 		}

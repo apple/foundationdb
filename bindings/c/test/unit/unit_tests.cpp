@@ -1012,8 +1012,8 @@ TEST_CASE("versionstamp_unit_test") {
 	ASSERT(batch == batchExpected);
 	ASSERT(batch2 == batchExpected);
 
-	int16_t client = vs.getClientWrittenNumber();
-	int16_t client2 = vs2.getClientWrittenNumber();
+	int16_t client = vs.getUserVersion();
+	int16_t client2 = vs2.getUserVersion();
 	int16_t clientExpected = (0x11 << 8) + 0x12;
 	ASSERT(client == clientExpected);
 	ASSERT(client2 == clientExpected);

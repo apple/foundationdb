@@ -15,12 +15,12 @@ int16_t Versionstamp::getBatchNumber() const {
 	return batchNumber;
 }
 
-int16_t Versionstamp::getClientWrittenNumber() const {
+int16_t Versionstamp::getUserVersion() const {
 	const uint8_t* begin = data.begin();
 	begin += 10;
-	int16_t clientWrittenNumber = *(int16_t*)(begin);
-	clientWrittenNumber = bigEndian16(clientWrittenNumber);
-	return clientWrittenNumber;
+	int16_t userVersion = *(int16_t*)(begin);
+	userVersion = bigEndian16(userVersion);
+	return userVersion;
 }
 
 const uint8_t* Versionstamp::begin() const {
@@ -40,5 +40,5 @@ size_t Versionstamp::size() const {
 
 bool Versionstamp::operator==(const Versionstamp& other) const {
 	return getVersion() == other.getVersion() && getBatchNumber() == other.getBatchNumber() &&
-	       getClientWrittenNumber() == other.getClientWrittenNumber();
+	       getUserVersion() == other.getUserVersion();
 }
