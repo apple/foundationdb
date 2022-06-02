@@ -1012,11 +1012,11 @@ TEST_CASE("versionstamp_unit_test") {
 	ASSERT(batch == batchExpected);
 	ASSERT(batch2 == batchExpected);
 
-	int16_t client = vs.getUserVersion();
-	int16_t client2 = vs2.getUserVersion();
-	int16_t clientExpected = (0x11 << 8) + 0x12;
-	ASSERT(client == clientExpected);
-	ASSERT(client2 == clientExpected);
+	int16_t user = vs.getUserVersion();
+	int16_t user2 = vs2.getUserVersion();
+	int16_t userExpected = (0x11 << 8) + 0x12;
+	ASSERT(user == userExpected);
+	ASSERT(user2 == userExpected);
 
 	ASSERT(vs.size() == VERSIONSTAMP_TUPLE_SIZE);
 	ASSERT(vs2.size() == VERSIONSTAMP_TUPLE_SIZE);
