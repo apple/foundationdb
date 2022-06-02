@@ -103,6 +103,8 @@ enum OpKind {
 
 enum TPSChangeTypes { TPS_SIN, TPS_SQUARE, TPS_PULSE };
 
+enum DistributedTracerClient { DISABLED, NETWORK_LOSSY, LOG_FILE };
+
 /* we set WorkloadSpec and Arguments only once in the master process,
  * and won't be touched by child processes.
  */

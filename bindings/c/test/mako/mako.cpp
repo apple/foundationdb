@@ -621,10 +621,10 @@ int workerProcessMain(Arguments const& args, int worker_id, shared_memory::Acces
 
 	/* enable distributed tracing */
 	switch (args.distributed_tracer_client) {
-	case 1:
+	case DistributedTracerClient::NETWORK_LOSSY:
 		err = network::setOptionNothrow(FDB_NET_OPTION_DISTRIBUTED_CLIENT_TRACER, BytesRef(toBytePtr("network_lossy")));
 		break;
-	case 2:
+	case DistributedTracerClient::LOG_FILE:
 		err = network::setOptionNothrow(FDB_NET_OPTION_DISTRIBUTED_CLIENT_TRACER, BytesRef(toBytePtr("log_file")));
 		break;
 	}
@@ -1259,11 +1259,11 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			strncpy(args.bg_file_path, optarg, std::min(sizeof(args.bg_file_path), strlen(optarg) + 1));
 		case ARG_DISTRIBUTED_TRACER_CLIENT:
 			if (strcmp(optarg, "disabled") == 0) {
-				args.distributed_tracer_client = 0;
+				args.distributed_tracer_client = DistributedTracerClient::DISABLED;
 			} else if (strcmp(optarg, "network_lossy") == 0) {
-				args.distributed_tracer_client = 1;
+				args.distributed_tracer_client = DistributedTracerClient::NETWORK_LOSSY;
 			} else if (strcmp(optarg, "log_file") == 0) {
-				args.distributed_tracer_client = 2;
+				args.distributed_tracer_client = DistributedTracerClient::LOG_FILE;
 			} else {
 				args.distributed_tracer_client = -1;
 			}
