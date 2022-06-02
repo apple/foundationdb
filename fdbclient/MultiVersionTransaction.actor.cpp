@@ -594,6 +594,8 @@ void DLApi::init() {
 		}
 	}
 
+	TraceEvent("RenxuanHeaderVersion").detail("Version", headerVersion).detail("LibPath", fdbCPath).log();
+
 	loadClientFunction(&api->selectApiVersion, lib, fdbCPath, "fdb_select_api_version_impl", headerVersion >= 0);
 	loadClientFunction(&api->getClientVersion, lib, fdbCPath, "fdb_get_client_version", headerVersion >= 410);
 	loadClientFunction(&api->setNetworkOption, lib, fdbCPath, "fdb_network_set_option", headerVersion >= 0);
