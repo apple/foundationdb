@@ -20,6 +20,9 @@
 
 #include "fdbclient/Tuple.h"
 
+const uint8_t VERSIONSTAMP_96_CODE = 0x33;
+const size_t VERSIONSTAMP_TUPLE_SIZE = 12;
+
 // TODO: Many functions copied from bindings/flow/Tuple.cpp. Merge at some point.
 static float bigEndianFloat(float orig) {
 	int32_t big = *(int32_t*)&orig;
@@ -75,8 +78,8 @@ Tuple::Tuple(StringRef const& str, bool exclude_incomplete) {
 			i += 1;
 		} else if (data[i] == '\x00') {
 			i += 1;
-		} else if (data[i] == 0x33) {
-			i += 12 + 1;
+		} else if (data[i] == VERSIONSTAMP_96_CODE) {
+			i += VERSIONSTAMP_TUPLE_SIZE + 1;
 		} else {
 			throw invalid_tuple_data_type();
 		}
@@ -102,10 +105,11 @@ Tuple& Tuple::append(Tuple const& tuple) {
 }
 
 Tuple& Tuple::appendVersionstamp(StringRef const& str) {
+	ASSERT_EQ(str.size(), VERSIONSTAMP_TUPLE_SIZE);
 	offsets.push_back(data.size());
 
-	data.push_back(data.arena(), 0x33);
-	data.append(data.arena(), str.begin(), 12);
+	data.push_back(data.arena(), VERSIONSTAMP_96_CODE);
+	data.append(data.arena(), str.begin(), VERSIONSTAMP_TUPLE_SIZE);
 
 	return *this;
 }
@@ -224,7 +228,7 @@ Tuple::ElementType Tuple::getType(size_t index) const {
 		return ElementType::DOUBLE;
 	} else if (code == 0x26 || code == 0x27) {
 		return ElementType::BOOL;
-	} else if (code == 0x33) {
+	} else if (code == VERSIONSTAMP_96_CODE) {
 		return ElementType::VERSIONSTAMP;
 	} else {
 		throw invalid_tuple_data_type();
@@ -380,11 +384,10 @@ Standalone<StringRef> Tuple::getVersionstamp(size_t index) const {
 	}
 	ASSERT_LT(offsets[index], data.size());
 	uint8_t code = data[offsets[index]];
-	if (code != 0x33) {
+	if (code != VERSIONSTAMP_96_CODE) {
 		throw invalid_tuple_data_type();
 	}
-	size_t versionstampLength = 12;
-	return StringRef(data.begin() + offsets[index] + 1, versionstampLength);
+	return StringRef(data.begin() + offsets[index] + 1, VERSIONSTAMP_TUPLE_SIZE);
 }
 
 KeyRange Tuple::range(Tuple const& tuple) const {

@@ -992,11 +992,40 @@ GetMappedRangeResult getMappedIndexEntries(int beginId,
 	return getMappedIndexEntries(beginId, endId, tr, mapper, matchIndex);
 }
 
-TEST_CASE("tuble_support_versionstamp") {
+TEST_CASE("tuple_support_versionstamp") {
 	// a random 12 bytes long StringRef as a versionstamp
 	StringRef vs = "\x01\x02\x03\x04\x05\x06\x07\x08\x09\x10\x11\x12"_sr;
+
 	const Tuple t = Tuple().append(prefix).append(RECORD).appendVersionstamp(vs).append("{K[3]}"_sr).append("{...}"_sr);
 	ASSERT(t.getVersionstamp(2).toString() == vs.toString());
+
+	// verify the round-way pack-unpack path for a Tuple containing a versionstamp
+	StringRef result1 = t.pack();
+	Tuple t2 = Tuple::unpack(result1);
+	StringRef result2 = t2.pack();
+	ASSERT(result1.toString() == result2.toString());
+}
+
+TEST_CASE("tuple_fail_to_append_truncated_versionstamp") {
+	// a truncated 11 bytes long StringRef as a versionstamp
+	StringRef truncatedVersionstamp = "\x01\x02\x03\x04\x05\x06\x07\x08\x09\x10\x11"_sr;
+	try {
+		Tuple().appendVersionstamp(truncatedVersionstamp).pack();
+	} catch (Error& e) {
+		return;
+	}
+	UNREACHABLE();
+}
+
+TEST_CASE("tuple_fail_to_append_longer_versionstamp") {
+	// a longer than expected 13 bytes long StringRef as a versionstamp
+	StringRef longerVersionstamp = "\x01\x02\x03\x04\x05\x06\x07\x08\x09\x10\x11\x12\x35"_sr;
+	try {
+		Tuple().appendVersionstamp(longerVersionstamp).pack();
+	} catch (Error& e) {
+		return;
+	}
+	UNREACHABLE();
 }
 
 TEST_CASE("fdb_transaction_get_mapped_range") {

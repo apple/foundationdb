@@ -26,6 +26,7 @@ static_assert(std::numeric_limits<float>::is_iec559);
 static_assert(std::numeric_limits<double>::is_iec559);
 
 const size_t Uuid::SIZE = 16;
+const size_t VERSIONSTAMP_TUPLE_SIZE = 12;
 
 const uint8_t Tuple::NULL_CODE = 0x00;
 const uint8_t Tuple::BYTES_CODE = 0x01;
@@ -119,7 +120,7 @@ Tuple::Tuple(StringRef const& str) {
 			i += 1;
 			depth += 1;
 		} else if (data[i] == VERSIONSTAMP_96_CODE) {
-			i += 1 + 12;
+			i += 1 + VERSIONSTAMP_TUPLE_SIZE;
 		} else {
 			throw invalid_tuple_data_type();
 		}
@@ -174,10 +175,11 @@ Tuple& Tuple::append(StringRef const& str, bool utf8) {
 }
 
 Tuple& Tuple::appendVersionstamp(StringRef const& str) {
+	ASSERT_EQ(str.size(), VERSIONSTAMP_TUPLE_SIZE);
 	offsets.push_back(data.size());
 
 	data.push_back(data.arena(), VERSIONSTAMP_96_CODE);
-	data.append(data.arena(), str.begin(), 12);
+	data.append(data.arena(), str.begin(), VERSIONSTAMP_TUPLE_SIZE);
 
 	return *this;
 }
@@ -448,7 +450,7 @@ Standalone<StringRef> Tuple::getVersionstamp(size_t index) const {
 	if (code != VERSIONSTAMP_96_CODE) {
 		throw invalid_tuple_data_type();
 	}
-	size_t versionstampLength = 12;
+	size_t versionstampLength = VERSIONSTAMP_TUPLE_SIZE;
 	return StringRef(data.begin() + offsets[index] + 1, versionstampLength);
 }
 
@@ -535,9 +537,9 @@ Tuple Tuple::getNested(size_t index) const {
 			dest.append(dest.arena(), data.begin() + i + 1, sizeof(double));
 			i += sizeof(double) + 1;
 		} else if (code == VERSIONSTAMP_96_CODE) {
-			ASSERT_LE(i + 1 + 12, next_offset - 1);
-			dest.append(dest.arena(), data.begin() + i + 1, 12);
-			i += 12 + 1;
+			ASSERT_LE(i + 1 + VERSIONSTAMP_TUPLE_SIZE, next_offset - 1);
+			dest.append(dest.arena(), data.begin() + i + 1, VERSIONSTAMP_TUPLE_SIZE);
+			i += VERSIONSTAMP_TUPLE_SIZE + 1;
 		} else if (code == NESTED_CODE) {
 			i += 1;
 			depth += 1;
