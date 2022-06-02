@@ -511,8 +511,13 @@ public:
 		auto rangeIterator = dataShardMap.intersectingRanges(range);
 
 		for (auto it = rangeIterator.begin(); it != rangeIterator.end(); ++it) {
-			if (it.value() == nullptr)
+			if (it.value() == nullptr) {
+				TraceEvent(SevDebug, "ShardedRocksDB")
+				    .detal("Info", "ShardNotFound")
+				    .detail("BeginKey", range.begin)
+				    .detail("EndKey", range.end);
 				continue;
+			}
 			result.push_back(it.value());
 		}
 		return result;
@@ -1632,8 +1637,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			int numShards = 0;
 			for (auto shard : a.shards) {
 				auto range = shard->range;
-				KeyRange readRange = KeyRange(KeyRangeRef(a.keys.begin > range.begin ? a.keys.begin : range.begin,
-				                                          a.keys.end < range.end ? a.keys.end : range.end));
+				KeyRange readRange = KeyRange(a.keys & range);
 
 				auto bytesRead = readRangeInDb(shard, readRange, rowLimit, byteLimit, &result);
 				if (bytesRead < 0) {
