@@ -409,12 +409,18 @@ private:
 
 ACTOR Future<Void> refreshReadIteratorPool(
     std::unordered_map<std::string, std::shared_ptr<PhysicalShard>>* physicalShards) {
+	state Reference<Histogram> histogram = Histogram::getHistogram(
+	    ROCKSDBSTORAGE_HISTOGRAM_GROUP, "TimeSpentRefreshIterators"_sr, Histogram::Unit::microseconds);
+
 	if (SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_ITERATORS) {
 		loop {
 			wait(delay(SERVER_KNOBS->ROCKSDB_READ_RANGE_ITERATOR_REFRESH_TIME));
+
+			double startTime = timer_monotonic();
 			for (auto& [_, shard] : *physicalShards) {
 				shard->readIterPool->refreshIterators();
 			}
+			histogram->sample(timer_monotonic() - startTime);
 		}
 	}
 	return Void();
@@ -513,7 +519,7 @@ public:
 		for (auto it = rangeIterator.begin(); it != rangeIterator.end(); ++it) {
 			if (it.value() == nullptr) {
 				TraceEvent(SevDebug, "ShardedRocksDB")
-				    .detal("Info", "ShardNotFound")
+				    .detail("Info", "ShardNotFound")
 				    .detail("BeginKey", range.begin)
 				    .detail("EndKey", range.end);
 				continue;
