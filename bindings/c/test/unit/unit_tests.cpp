@@ -1006,15 +1006,15 @@ TEST_CASE("versionstamp_unit_test") {
 	ASSERT(version == versionExpected);
 	ASSERT(version2 == versionExpected);
 
-	int64_t batch = vs.getBatchNumber();
-	int64_t batch2 = vs2.getBatchNumber();
-	int64_t batchExpected = (0x09 << 8) + 0x10;
+	int16_t batch = vs.getBatchNumber();
+	int16_t batch2 = vs2.getBatchNumber();
+	int16_t batchExpected = (0x09 << 8) + 0x10;
 	ASSERT(batch == batchExpected);
 	ASSERT(batch2 == batchExpected);
 
-	int64_t client = vs.getClientWrittenNumber();
-	int64_t client2 = vs2.getClientWrittenNumber();
-	int64_t clientExpected = (0x11 << 8) + 0x12;
+	int16_t client = vs.getClientWrittenNumber();
+	int16_t client2 = vs2.getClientWrittenNumber();
+	int16_t clientExpected = (0x11 << 8) + 0x12;
 	ASSERT(client == clientExpected);
 	ASSERT(client2 == clientExpected);
 
