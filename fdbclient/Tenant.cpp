@@ -29,14 +29,14 @@ TEST_CASE("/fdbclient/TenantMapEntry/Serialization") {
 	ASSERT(entry1.id == entry2.id && entry1.prefix == entry2.prefix);
 
 	TenantMapEntry entry3(std::numeric_limits<int64_t>::max(), "foo"_sr);
-	ASSERT(entry3.prefix == "foo\xfe\xff\xff\xff\xff\xff\xff\xff"_sr);
+	ASSERT(entry3.prefix == "foo\x7f\xff\xff\xff\xff\xff\xff\xff"_sr);
 	TenantMapEntry entry4 = decodeTenantEntry(encodeTenantEntry(entry3));
 	ASSERT(entry3.id == entry4.id && entry3.prefix == entry4.prefix);
 
 	for (int i = 0; i < 100; ++i) {
 		int bits = deterministicRandom()->randomInt(1, 64);
-		int64_t min = bits == 1 ? 0 : (1 << (bits - 1));
-		int64_t maxPlusOne = std::min<uint64_t>(1 << bits, std::numeric_limits<int64_t>::max());
+		int64_t min = bits == 1 ? 0 : (UINT64_C(1) << (bits - 1));
+		int64_t maxPlusOne = std::min<uint64_t>(UINT64_C(1) << bits, std::numeric_limits<int64_t>::max());
 		int64_t id = deterministicRandom()->randomInt64(min, maxPlusOne);
 
 		int subspaceLength = deterministicRandom()->randomInt(0, 20);
@@ -50,7 +50,7 @@ TEST_CASE("/fdbclient/TenantMapEntry/Serialization") {
 		       entry.prefix.size() == subspaceLength + 8);
 
 		TenantMapEntry decodedEntry = decodeTenantEntry(encodeTenantEntry(entry));
-		ASSERT(decodedEntry.id = entry.id && decodedEntry.prefix == entry.prefix);
+		ASSERT(decodedEntry.id == entry.id && decodedEntry.prefix == entry.prefix);
 	}
 
 	return Void();

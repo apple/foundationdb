@@ -4,6 +4,16 @@
 Release Notes
 #############
 
+7.1.7
+=====
+* Same as 7.1.6 release with AVX enabled.
+
+7.1.6
+=====
+* Released with AVX disabled.
+* Fixed a fdbserver crash when given invalid knob name. `(PR #7189) <https://github.com/apple/foundationdb/pull/7189>`_
+* Fixed a storage server bug that read data after its failure. `(PR #7217) <https://github.com/apple/foundationdb/pull/7217>`_
+
 7.1.5
 =====
 * Fixed a fdbcli kill bug that was not killing in parallel. `(PR #7150) <https://github.com/apple/foundationdb/pull/7150>`_

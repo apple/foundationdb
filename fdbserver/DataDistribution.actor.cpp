@@ -669,6 +669,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			state PromiseStream<Promise<int64_t>> getAverageShardBytes;
 			state PromiseStream<Promise<int>> getUnhealthyRelocationCount;
 			state PromiseStream<GetMetricsRequest> getShardMetrics;
+			state PromiseStream<GetTopKMetricsRequest> getTopKShardMetrics;
 			state Reference<AsyncVar<bool>> processingUnhealthy(new AsyncVar<bool>(false));
 			state Reference<AsyncVar<bool>> processingWiggle(new AsyncVar<bool>(false));
 			state Promise<Void> readyToStart;
@@ -701,8 +702,10 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 					if (!unhealthy && configuration.usableRegions > 1) {
 						unhealthy = initData->shards[shard].remoteSrc.size() != configuration.storageTeamSize;
 					}
-					output.send(RelocateShard(
-					    keys, unhealthy ? SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY : SERVER_KNOBS->PRIORITY_RECOVER_MOVE));
+					output.send(RelocateShard(keys,
+					                          unhealthy ? SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY
+					                                    : SERVER_KNOBS->PRIORITY_RECOVER_MOVE,
+					                          RelocateReason::OTHER));
 				}
 				wait(yield(TaskPriority::DataDistribution));
 			}
@@ -733,6 +736,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			                                                            output,
 			                                                            shardsAffectedByTeamFailure,
 			                                                            getShardMetrics,
+			                                                            getTopKShardMetrics.getFuture(),
 			                                                            getShardMetricsList,
 			                                                            getAverageShardBytes.getFuture(),
 			                                                            readyToStart,
@@ -747,6 +751,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			                                                          output,
 			                                                          input.getFuture(),
 			                                                          getShardMetrics,
+			                                                          getTopKShardMetrics,
 			                                                          processingUnhealthy,
 			                                                          processingWiggle,
 			                                                          tcis,

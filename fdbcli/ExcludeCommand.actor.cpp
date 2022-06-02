@@ -160,6 +160,28 @@ ACTOR Future<std::set<NetworkAddress>> checkForExcludingServers(Reference<IDatab
 			for (const auto& addr : exclusionInProgress)
 				inProgressExclusion.insert(NetworkAddress::parse(
 				    addr.key.removePrefix(fdb_cli::exclusionInProgressSpecialKeyRange.begin).toString()));
+
+			// Check if all of the specified exclusions are done.
+			bool allExcluded = true;
+			for (const auto& inProgressAddr : inProgressExclusion) {
+				if (!allExcluded) {
+					break;
+				}
+
+				for (const auto& exclusion : exclusions) {
+					// We found an exclusion that is still in progress
+					if (exclusion.excludes(inProgressAddr)) {
+						allExcluded = false;
+						break;
+					}
+				}
+			}
+
+			if (allExcluded) {
+				inProgressExclusion.clear();
+				return inProgressExclusion;
+			}
+
 			if (!waitForAllExcluded)
 				break;
 
