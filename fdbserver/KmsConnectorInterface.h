@@ -98,21 +98,44 @@ struct KmsConnLookupEKsByKeyIdsRep {
 	}
 };
 
+struct KmsConnLookupKeyIdsReqInfo {
+	constexpr static FileIdentifier file_identifier = 3092256;
+	EncryptCipherDomainId domainId;
+	EncryptCipherBaseKeyId baseCipherId;
+	EncryptCipherDomainName domainName;
+
+	KmsConnLookupKeyIdsReqInfo() : domainId(ENCRYPT_INVALID_DOMAIN_ID), baseCipherId(ENCRYPT_INVALID_CIPHER_KEY_ID) {}
+	explicit KmsConnLookupKeyIdsReqInfo(const EncryptCipherDomainId dId,
+	                                    const EncryptCipherBaseKeyId bCId,
+	                                    StringRef name,
+	                                    Arena& arena)
+	  : domainId(dId), baseCipherId(bCId), domainName(StringRef(arena, name)) {}
+
+	bool operator==(const KmsConnLookupKeyIdsReqInfo& info) const {
+		return domainId == info.domainId && baseCipherId == info.baseCipherId &&
+		       (domainName.compare(info.domainName) == 0);
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, domainId, baseCipherId, domainName);
+	}
+};
+
 struct KmsConnLookupEKsByKeyIdsReq {
 	constexpr static FileIdentifier file_identifier = 6913396;
-	std::vector<std::pair<EncryptCipherBaseKeyId, EncryptCipherDomainId>> encryptKeyIds;
+	Arena arena;
+	std::vector<KmsConnLookupKeyIdsReqInfo> encryptKeyInfos;
 	Optional<UID> debugId;
 	ReplyPromise<KmsConnLookupEKsByKeyIdsRep> reply;
 
 	KmsConnLookupEKsByKeyIdsReq() {}
-	explicit KmsConnLookupEKsByKeyIdsReq(
-	    const std::vector<std::pair<EncryptCipherBaseKeyId, EncryptCipherDomainId>>& keyIds,
-	    Optional<UID> dbgId)
-	  : encryptKeyIds(keyIds), debugId(dbgId) {}
+	explicit KmsConnLookupEKsByKeyIdsReq(const std::vector<KmsConnLookupKeyIdsReqInfo>& keyInfos, Optional<UID> dbgId)
+	  : encryptKeyInfos(keyInfos), debugId(dbgId) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, encryptKeyIds, debugId, reply);
+		serializer(ar, arena, encryptKeyInfos, debugId, reply);
 	}
 };
 
@@ -129,19 +152,40 @@ struct KmsConnLookupEKsByDomainIdsRep {
 	}
 };
 
+struct KmsConnLookupDomainIdsReqInfo {
+	constexpr static FileIdentifier file_identifier = 8980149;
+	EncryptCipherDomainId domainId;
+	EncryptCipherDomainName domainName;
+
+	KmsConnLookupDomainIdsReqInfo() : domainId(ENCRYPT_INVALID_DOMAIN_ID) {}
+	explicit KmsConnLookupDomainIdsReqInfo(const EncryptCipherDomainId dId, StringRef name, Arena& arena)
+	  : domainId(dId), domainName(StringRef(arena, name)) {}
+
+	bool operator==(const KmsConnLookupDomainIdsReqInfo& info) const {
+		return domainId == info.domainId && (domainName.compare(info.domainName) == 0);
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, domainId, domainName);
+	}
+};
+
 struct KmsConnLookupEKsByDomainIdsReq {
 	constexpr static FileIdentifier file_identifier = 9918682;
-	std::vector<EncryptCipherDomainId> encryptDomainIds;
+	Arena arena;
+	std::vector<KmsConnLookupDomainIdsReqInfo> encryptDomainInfos;
 	Optional<UID> debugId;
 	ReplyPromise<KmsConnLookupEKsByDomainIdsRep> reply;
 
 	KmsConnLookupEKsByDomainIdsReq() {}
-	explicit KmsConnLookupEKsByDomainIdsReq(const std::vector<EncryptCipherDomainId>& ids, Optional<UID> dbgId)
-	  : encryptDomainIds(ids), debugId(dbgId) {}
+	explicit KmsConnLookupEKsByDomainIdsReq(const std::vector<KmsConnLookupDomainIdsReqInfo>& infos,
+	                                        Optional<UID> dbgId)
+	  : encryptDomainInfos(infos), debugId(dbgId) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, encryptDomainIds, debugId, reply);
+		serializer(ar, arena, encryptDomainInfos, debugId, reply);
 	}
 };
 
