@@ -274,14 +274,21 @@ struct TenantManagementWorkload : TestWorkload {
 		loop {
 			try {
 				// First, attempt to create the tenants
+				state bool retried = false;
 				loop {
 					try {
 						Optional<Void> result =
 						    wait(timeout(self->createImpl(cx, tr, tenantsToCreate, operationType, self), 30));
 
 						if (result.present()) {
+							// Database operations shouldn't get here if the tenant already exists
+							ASSERT(operationType == OperationType::SPECIAL_KEYS ||
+							       operationType == OperationType::MANAGEMENT_TRANSACTION || !alreadyExists);
 							break;
 						}
+
+						retried = true;
+						tr->reset();
 					} catch (Error& e) {
 						// If we retried the creation after our initial attempt succeeded, then we proceed with the rest
 						// of the creation steps normally. Otherwise, the creation happened elsewhere and we failed
@@ -289,7 +296,7 @@ struct TenantManagementWorkload : TestWorkload {
 						if (e.code() == error_code_tenant_already_exists && !existedAtStart) {
 							ASSERT(operationType == OperationType::METACLUSTER ||
 							       operationType == OperationType::MANAGEMENT_DATABASE);
-							ASSERT(alreadyExists);
+							ASSERT(retried);
 							break;
 						} else {
 							throw;
@@ -552,14 +559,21 @@ struct TenantManagementWorkload : TestWorkload {
 		loop {
 			try {
 				// Attempt to delete the tenant(s)
+				state bool retried = false;
 				loop {
 					try {
 						Optional<Void> result = wait(timeout(
 						    self->deleteImpl(cx, tr, beginTenant, endTenant, tenants, operationType, self), 30));
 
 						if (result.present()) {
+							// Database operations shouldn't get here if the tenant didn't exist
+							ASSERT(operationType == OperationType::SPECIAL_KEYS ||
+							       operationType == OperationType::MANAGEMENT_TRANSACTION || alreadyExists);
 							break;
 						}
+
+						retried = true;
+						tr->reset();
 					} catch (Error& e) {
 						// If we retried the deletion after our initial attempt succeeded, then we proceed with the rest
 						// of the deletion steps normally. Otherwise, the deletion happened elsewhere and we failed
@@ -567,7 +581,7 @@ struct TenantManagementWorkload : TestWorkload {
 						if (e.code() == error_code_tenant_not_found && existedAtStart) {
 							ASSERT(operationType == OperationType::METACLUSTER ||
 							       operationType == OperationType::MANAGEMENT_DATABASE);
-							ASSERT(!alreadyExists);
+							ASSERT(retried);
 							break;
 					} else {
 							throw;
@@ -902,6 +916,8 @@ struct TenantManagementWorkload : TestWorkload {
 	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 	ACTOR Future<Void> _start(Database cx, TenantManagementWorkload* self) {
 		state double start = now();
+
+		// Run a random sequence of tenant management operations for the duration of the test
 		while (now() < start + self->testDuration) {
 			state int operation = deterministicRandom()->randomInt(0, 4);
 			if (operation == 0) {
