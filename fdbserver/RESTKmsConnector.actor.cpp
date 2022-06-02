@@ -18,13 +18,9 @@
  * limitations under the License.
  */
 
-#include "fdbserver/RESTKmsConnector.actor.h"
+#include "fdbserver/RESTKmsConnector.h"
 
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/rapidjson/document.h"
-#include "fdbclient/rapidjson/rapidjson.h"
-#include "fdbclient/rapidjson/stringbuffer.h"
-#include "fdbclient/rapidjson/writer.h"
 #include "fdbrpc/HTTP.h"
 #include "fdbrpc/IAsyncFile.h"
 #include "fdbserver/KmsConnectorInterface.h"
@@ -39,7 +35,12 @@
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
 
+#include <rapidjson/document.h>
+#include <rapidjson/rapidjson.h>
+#include <rapidjson/stringbuffer.h>
+#include <rapidjson/writer.h>
 #include <boost/algorithm/string.hpp>
+#include <cstring>
 #include <memory>
 #include <queue>
 #include <sstream>
@@ -53,14 +54,17 @@ const char* BASE_CIPHER_ID_TAG = "base_cipher_id";
 const char* BASE_CIPHER_TAG = "baseCipher";
 const char* CIPHER_KEY_DETAILS_TAG = "cipher_key_details";
 const char* ENCRYPT_DOMAIN_ID_TAG = "encrypt_domain_id";
+const char* ENCRYPT_DOMAIN_NAME_TAG = "encrypt_domain_name";
 const char* ERROR_TAG = "error";
-const char* ERROR_DETAIL_TAG = "details";
+const char* ERROR_MSG_TAG = "errMsg";
+const char* ERROR_CODE_TAG = "errCode";
 const char* KMS_URLS_TAG = "kms_urls";
 const char* QUERY_MODE_TAG = "query_mode";
 const char* REFRESH_KMS_URLS_TAG = "refresh_kms_urls";
 const char* VALIDATION_TOKENS_TAG = "validation_tokens";
 const char* VALIDATION_TOKEN_NAME_TAG = "token_name";
 const char* VALIDATION_TOKEN_VALUE_TAG = "token_value";
+const char* DEBUG_UID_TAG = "debug_uid";
 
 const char* TOKEN_NAME_FILE_SEP = "#";
 const char* TOKEN_TUPLE_SEP = ",";
@@ -269,9 +273,9 @@ void parseKmsResponse(Reference<RESTKmsConnectorCtx> ctx,
 	// response_json_payload {
 	//   "cipher_key_details" : [
 	//     {
-	//        "base_cipher_id" : <cipherKeyId>,
+	//        "base_cipher_id"    : <cipherKeyId>,
 	//        "encrypt_domain_id" : <domainId>,
-	//        "base_cipher" : <baseCipher>
+	//        "base_cipher"       : <baseCipher>
 	//     },
 	//     {
 	//         ....
@@ -280,9 +284,10 @@ void parseKmsResponse(Reference<RESTKmsConnectorCtx> ctx,
 	//   "kms_urls" : [
 	//         "url1", "url2", ...
 	//   ],
-	//	 "error" : {
-	//		"details": <details>
-	// 	  }  					// Optional, populated by the KMS, if present, rest of payload is ignored.
+	//	 "error" : {					// Optional, populated by the KMS, if present, rest of payload is ignored.
+	//		"errMsg" : <message>
+	//		"errCode": <code>
+	// 	  }
 	// }
 
 	if (resp->code != HTTP::HTTP_STATUS_CODE_OK) {
@@ -295,12 +300,26 @@ void parseKmsResponse(Reference<RESTKmsConnectorCtx> ctx,
 
 	// Check if response has error
 	if (doc.HasMember(ERROR_TAG)) {
-		if (doc[ERROR_TAG].HasMember(ERROR_DETAIL_TAG) && doc[ERROR_TAG][ERROR_DETAIL_TAG].IsString()) {
-			Standalone<StringRef> errRef = makeString(doc[ERROR_TAG][ERROR_DETAIL_TAG].GetStringLength());
-			memcpy(mutateString(errRef),
-			       doc[ERROR_TAG][ERROR_DETAIL_TAG].GetString(),
-			       doc[ERROR_TAG][ERROR_DETAIL_TAG].GetStringLength());
-			TraceEvent("KMSErrorResponse", ctx->uid).detail("ErrorDetails", errRef.toString());
+		Standalone<StringRef> errMsgRef;
+		Standalone<StringRef> errCodeRef;
+
+		if (doc[ERROR_TAG].HasMember(ERROR_MSG_TAG) && doc[ERROR_TAG][ERROR_MSG_TAG].IsString()) {
+			errMsgRef = makeString(doc[ERROR_TAG][ERROR_MSG_TAG].GetStringLength());
+			memcpy(mutateString(errMsgRef),
+			       doc[ERROR_TAG][ERROR_MSG_TAG].GetString(),
+			       doc[ERROR_TAG][ERROR_MSG_TAG].GetStringLength());
+		}
+		if (doc[ERROR_TAG].HasMember(ERROR_CODE_TAG) && doc[ERROR_TAG][ERROR_CODE_TAG].IsString()) {
+			errMsgRef = makeString(doc[ERROR_TAG][ERROR_CODE_TAG].GetStringLength());
+			memcpy(mutateString(errMsgRef),
+			       doc[ERROR_TAG][ERROR_CODE_TAG].GetString(),
+			       doc[ERROR_TAG][ERROR_CODE_TAG].GetStringLength());
+		}
+
+		if (!errCodeRef.empty() || !errMsgRef.empty()) {
+			TraceEvent("KMSErrorResponse", ctx->uid)
+			    .detail("ErrorMsg", errMsgRef.empty() ? "" : errMsgRef.toString())
+			    .detail("ErrorCode", errCodeRef.empty() ? "" : errCodeRef.toString());
 		} else {
 			TraceEvent("KMSErrorResponse_EmptyDetails", ctx->uid).log();
 		}
@@ -397,6 +416,20 @@ void addRefreshKmsUrlsSectionToJsonDoc(Reference<RESTKmsConnectorCtx> ctx,
 	doc.AddMember(key, refreshUrls, doc.GetAllocator());
 }
 
+void addDebugUidSectionToJsonDoc(Reference<RESTKmsConnectorCtx> ctx, rapidjson::Document& doc, Optional<UID> dbgId) {
+	if (!dbgId.present()) {
+		// Debug id not present; do nothing
+		return;
+	}
+	rapidjson::Value key(DEBUG_UID_TAG, doc.GetAllocator());
+	rapidjson::Value debugIdVal;
+	const std::string dbgIdStr = dbgId.get().toString();
+	debugIdVal.SetString(dbgIdStr.c_str(), dbgIdStr.size(), doc.GetAllocator());
+
+	// Append 'debug_uid' object to the parent document
+	doc.AddMember(key, debugIdVal, doc.GetAllocator());
+}
+
 StringRef getEncryptKeysByKeyIdsRequestBody(Reference<RESTKmsConnectorCtx> ctx,
                                             const KmsConnLookupEKsByKeyIdsReq& req,
                                             const bool refreshKmsUrls,
@@ -407,8 +440,9 @@ StringRef getEncryptKeysByKeyIdsRequestBody(Reference<RESTKmsConnectorCtx> ctx,
 	//   "query_mode": "lookupByKeyId" / "lookupByDomainId"
 	//   "cipher_key_details" = [
 	//     {
-	//        "base_cipher_id" : <cipherKeyId>
-	//        "encrypt_domain_id" : <domainId>
+	//        "base_cipher_id"      : <cipherKeyId>
+	//        "encrypt_domain_id"   : <domainId>
+	//        "encrypt_domain_name" : <domainName>
 	//     },
 	//     {
 	//         ....
@@ -424,6 +458,7 @@ StringRef getEncryptKeysByKeyIdsRequestBody(Reference<RESTKmsConnectorCtx> ctx,
 	//     }
 	//   ]
 	//   "refresh_kms_urls" = 1/0
+	//   "debug_uid" = <uid-string>   // Optional debug info to trace requests across FDB <--> KMS
 	// }
 
 	rapidjson::Document doc;
@@ -434,20 +469,26 @@ StringRef getEncryptKeysByKeyIdsRequestBody(Reference<RESTKmsConnectorCtx> ctx,
 
 	// Append 'cipher_key_details' as json array
 	rapidjson::Value keyIdDetails(rapidjson::kArrayType);
-	for (const auto& detail : req.encryptKeyIds) {
+	for (const auto& detail : req.encryptKeyInfos) {
 		rapidjson::Value keyIdDetail(rapidjson::kObjectType);
 
 		// Add 'base_cipher_id'
 		rapidjson::Value key(BASE_CIPHER_ID_TAG, doc.GetAllocator());
 		rapidjson::Value baseKeyId;
-		baseKeyId.SetUint64(detail.first);
+		baseKeyId.SetUint64(detail.baseCipherId);
 		keyIdDetail.AddMember(key, baseKeyId, doc.GetAllocator());
 
-		// Add 'encrypt_domainId'
+		// Add 'encrypt_domain_id'
 		key.SetString(ENCRYPT_DOMAIN_ID_TAG, doc.GetAllocator());
 		rapidjson::Value domainId;
-		domainId.SetInt64(detail.second);
+		domainId.SetInt64(detail.domainId);
 		keyIdDetail.AddMember(key, domainId, doc.GetAllocator());
+
+		// Add 'encrypt_domain_name'
+		key.SetString(ENCRYPT_DOMAIN_NAME_TAG, doc.GetAllocator());
+		rapidjson::Value domainName;
+		domainName.SetString(detail.domainName.toString().c_str(), detail.domainName.size(), doc.GetAllocator());
+		keyIdDetail.AddMember(key, domainName, doc.GetAllocator());
 
 		// push above object to the array
 		keyIdDetails.PushBack(keyIdDetail, doc.GetAllocator());
@@ -458,8 +499,11 @@ StringRef getEncryptKeysByKeyIdsRequestBody(Reference<RESTKmsConnectorCtx> ctx,
 	// Append 'validation_tokens' as json array
 	addValidationTokensSectionToJsonDoc(ctx, doc);
 
-	// Append "refresh_kms_urls'
+	// Append 'refresh_kms_urls'
 	addRefreshKmsUrlsSectionToJsonDoc(ctx, doc, refreshKmsUrls);
+
+	// Append 'debug_uid' section if needed
+	addDebugUidSectionToJsonDoc(ctx, doc, req.debugId);
 
 	// Serialize json to string
 	rapidjson::StringBuffer sb;
@@ -558,7 +602,8 @@ StringRef getEncryptKeysByDomainIdsRequestBody(Reference<RESTKmsConnectorCtx> ct
 	//   "query_mode": "lookupByKeyId" / "lookupByDomainId"
 	//   "cipher_key_details" = [
 	//     {
-	//        "encrypt_domainId" : <domainId>
+	//        "encrypt_domain_id"   : <domainId>
+	//        "encrypt_domain_name" : <domainName>
 	//     },
 	//     {
 	//         ....
@@ -574,6 +619,7 @@ StringRef getEncryptKeysByDomainIdsRequestBody(Reference<RESTKmsConnectorCtx> ct
 	//     }
 	//   ]
 	//   "refresh_kms_urls" = 1/0
+	//   "debug_uid" = <uid-string>     // Optional debug info to trace requests across FDB <--> KMS
 	// }
 
 	rapidjson::Document doc;
@@ -584,13 +630,19 @@ StringRef getEncryptKeysByDomainIdsRequestBody(Reference<RESTKmsConnectorCtx> ct
 
 	// Append 'cipher_key_details' as json array
 	rapidjson::Value keyIdDetails(rapidjson::kArrayType);
-	for (const auto& detail : req.encryptDomainIds) {
+	for (const auto& detail : req.encryptDomainInfos) {
 		rapidjson::Value keyIdDetail(rapidjson::kObjectType);
 
 		rapidjson::Value key(ENCRYPT_DOMAIN_ID_TAG, doc.GetAllocator());
 		rapidjson::Value domainId;
-		domainId.SetInt64(detail);
+		domainId.SetInt64(detail.domainId);
 		keyIdDetail.AddMember(key, domainId, doc.GetAllocator());
+
+		// Add 'encrypt_domain_name'
+		key.SetString(ENCRYPT_DOMAIN_NAME_TAG, doc.GetAllocator());
+		rapidjson::Value domainName;
+		domainName.SetString(detail.domainName.toString().c_str(), detail.domainName.size(), doc.GetAllocator());
+		keyIdDetail.AddMember(key, domainName, doc.GetAllocator());
 
 		// push above object to the array
 		keyIdDetails.PushBack(keyIdDetail, doc.GetAllocator());
@@ -603,6 +655,9 @@ StringRef getEncryptKeysByDomainIdsRequestBody(Reference<RESTKmsConnectorCtx> ct
 
 	// Append 'refresh_kms_urls'
 	addRefreshKmsUrlsSectionToJsonDoc(ctx, doc, refreshKmsUrls);
+
+	// Append 'debug_uid' section if needed
+	addDebugUidSectionToJsonDoc(ctx, doc, req.debugId);
 
 	// Serialize json to string
 	rapidjson::StringBuffer sb;
@@ -1002,18 +1057,24 @@ void testGetEncryptKeysByKeyIdsRequestBody(Reference<RESTKmsConnectorCtx> ctx, A
 	const int nKeys = deterministicRandom()->randomInt(7, 8);
 	for (int i = 1; i < nKeys; i++) {
 		EncryptCipherDomainId domainId = getRandomDomainId();
-		req.encryptKeyIds.push_back(std::make_pair(i, domainId));
+		EncryptCipherDomainName domainName = domainId < 0
+		                                         ? StringRef(arena, std::string(FDB_DEFAULT_ENCRYPT_DOMAIN_NAME))
+		                                         : StringRef(arena, std::to_string(domainId));
+		req.encryptKeyInfos.emplace_back(KmsConnLookupKeyIdsReqInfo(domainId, i, domainName, req.arena));
 		keyMap[i] = domainId;
 	}
 
 	bool refreshKmsUrls = deterministicRandom()->randomInt(0, 100) < 50;
+	if (deterministicRandom()->randomInt(0, 100) < 40) {
+		req.debugId = deterministicRandom()->randomUniqueID();
+	}
 
 	StringRef requestBodyRef = getEncryptKeysByKeyIdsRequestBody(ctx, req, refreshKmsUrls, arena);
-	TraceEvent("FetchKeysByKeyIds", ctx->uid).setMaxFieldLength(10000).detail("JsonReqStr", requestBodyRef.toString());
+	TraceEvent("FetchKeysByKeyIds", ctx->uid).setMaxFieldLength(100000).detail("JsonReqStr", requestBodyRef.toString());
 	Reference<HTTP::Response> httpResp = makeReference<HTTP::Response>();
 	httpResp->code = HTTP::HTTP_STATUS_CODE_OK;
 	getFakeKmsResponse(requestBodyRef, true, httpResp);
-	TraceEvent("FetchKeysByKeyIds", ctx->uid).setMaxFieldLength(10000).detail("HttpRespStr", httpResp->content);
+	TraceEvent("FetchKeysByKeyIds", ctx->uid).setMaxFieldLength(100000).detail("HttpRespStr", httpResp->content);
 
 	std::vector<EncryptCipherKeyDetails> cipherDetails;
 	parseKmsResponse(ctx, httpResp, &arena, &cipherDetails);
@@ -1031,12 +1092,18 @@ void testGetEncryptKeysByKeyIdsRequestBody(Reference<RESTKmsConnectorCtx> ctx, A
 
 void testGetEncryptKeysByDomainIdsRequestBody(Reference<RESTKmsConnectorCtx> ctx, Arena arena) {
 	KmsConnLookupEKsByDomainIdsReq req;
-	std::unordered_set<EncryptCipherDomainId> domainIdsSet;
+	std::unordered_map<EncryptCipherDomainId, KmsConnLookupDomainIdsReqInfo> domainInfoMap;
 	const int nKeys = deterministicRandom()->randomInt(7, 25);
 	for (int i = 1; i < nKeys; i++) {
-		domainIdsSet.emplace(getRandomDomainId());
+		EncryptCipherDomainId domainId = getRandomDomainId();
+		EncryptCipherDomainName domainName = domainId < 0
+		                                         ? StringRef(arena, std::string(FDB_DEFAULT_ENCRYPT_DOMAIN_NAME))
+		                                         : StringRef(arena, std::to_string(domainId));
+		KmsConnLookupDomainIdsReqInfo reqInfo(domainId, domainName, req.arena);
+		if (domainInfoMap.insert({ domainId, reqInfo }).second) {
+			req.encryptDomainInfos.emplace_back(reqInfo);
+		}
 	}
-	req.encryptDomainIds.insert(req.encryptDomainIds.begin(), domainIdsSet.begin(), domainIdsSet.end());
 
 	bool refreshKmsUrls = deterministicRandom()->randomInt(0, 100) < 50;
 
@@ -1049,9 +1116,9 @@ void testGetEncryptKeysByDomainIdsRequestBody(Reference<RESTKmsConnectorCtx> ctx
 
 	std::vector<EncryptCipherKeyDetails> cipherDetails;
 	parseKmsResponse(ctx, httpResp, &arena, &cipherDetails);
-	ASSERT_EQ(domainIdsSet.size(), cipherDetails.size());
+	ASSERT_EQ(domainInfoMap.size(), cipherDetails.size());
 	for (const auto& detail : cipherDetails) {
-		ASSERT(domainIdsSet.find(detail.encryptDomainId) != domainIdsSet.end());
+		ASSERT(domainInfoMap.find(detail.encryptDomainId) != domainInfoMap.end());
 		ASSERT_EQ(detail.encryptKey.size(), sizeof(BASE_CIPHER_KEY_TEST));
 		ASSERT_EQ(memcmp(detail.encryptKey.begin(), &BASE_CIPHER_KEY_TEST[0], sizeof(BASE_CIPHER_KEY_TEST)), 0);
 	}
@@ -1168,7 +1235,7 @@ void testKMSErrorResponse(Reference<RESTKmsConnectorCtx> ctx) {
 	rapidjson::Value errorTag(rapidjson::kObjectType);
 
 	// Add 'error_detail'
-	rapidjson::Value eKey(ERROR_DETAIL_TAG, doc.GetAllocator());
+	rapidjson::Value eKey(ERROR_MSG_TAG, doc.GetAllocator());
 	rapidjson::Value detailInfo;
 	detailInfo.SetString("Foo is always bad", doc.GetAllocator());
 	errorTag.AddMember(eKey, detailInfo, doc.GetAllocator());

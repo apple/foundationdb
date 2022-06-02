@@ -56,6 +56,7 @@ struct TransactionWrapper : public ReferenceCounted<TransactionWrapper> {
 	                                                 KeySelector& end,
 	                                                 Key& mapper,
 	                                                 GetRangeLimits limits,
+	                                                 int matchIndex,
 	                                                 Snapshot snapshot,
 	                                                 Reverse reverse) = 0;
 
@@ -128,9 +129,10 @@ struct FlowTransactionWrapper : public TransactionWrapper {
 	                                         KeySelector& end,
 	                                         Key& mapper,
 	                                         GetRangeLimits limits,
+	                                         int matchIndex,
 	                                         Snapshot snapshot,
 	                                         Reverse reverse) override {
-		return transaction.getMappedRange(begin, end, mapper, limits, snapshot, reverse);
+		return transaction.getMappedRange(begin, end, mapper, limits, matchIndex, snapshot, reverse);
 	}
 
 	// Gets the key from the database specified by a given key selector
@@ -203,9 +205,11 @@ struct ThreadTransactionWrapper : public TransactionWrapper {
 	                                         KeySelector& end,
 	                                         Key& mapper,
 	                                         GetRangeLimits limits,
+	                                         int matchIndex,
 	                                         Snapshot snapshot,
 	                                         Reverse reverse) override {
-		return unsafeThreadFutureToFuture(transaction->getMappedRange(begin, end, mapper, limits, snapshot, reverse));
+		return unsafeThreadFutureToFuture(
+		    transaction->getMappedRange(begin, end, mapper, limits, matchIndex, snapshot, reverse));
 	}
 
 	// Gets the key from the database specified by a given key selector

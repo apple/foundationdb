@@ -1,5 +1,5 @@
 /*
- * RESTKmsConnector.actor.h
+ * SimKmsConnector.actor.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,19 +18,16 @@
  * limitations under the License.
  */
 
+#ifndef SIM_KMS_CONNECTOR_H
+#define SIM_KMS_CONNECTOR_H
 #pragma once
 
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_RESTKMSCONNECTOR_ACTOR_G_H)
-#define FDBSERVER_RESTKMSCONNECTOR_ACTOR_G_H
-#include "fdbserver/RESTKmsConnector.actor.g.h"
-#elif !defined(FDBSERVER_RESTKMSCONNECTOR_ACTOR_H)
-#define FDBSERVER_RESTKMSCONNECTOR_ACTOR_H
-
 #include "fdbserver/KmsConnector.h"
+#include "flow/BlobCipher.h"
 
-class RESTKmsConnector : public KmsConnector {
+class SimKmsConnector : public KmsConnector {
 public:
-	RESTKmsConnector() = default;
+	SimKmsConnector() = default;
 	Future<Void> connectorCore(KmsConnectorInterface interf);
 };
 
