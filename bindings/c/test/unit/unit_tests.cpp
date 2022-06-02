@@ -39,8 +39,8 @@
 #include <chrono>
 
 #define DOCTEST_CONFIG_IMPLEMENT
+#include <rapidjson/document.h>
 #include "doctest.h"
-#include "fdbclient/rapidjson/document.h"
 #include "fdbclient/Tuple.h"
 
 #include "flow/config.h"
