@@ -1154,7 +1154,7 @@ struct TuplePackFunc : InstructionFunc {
 				} else if (type == Tuple::NESTED) {
 					tuple.appendNested(itemTuple.getNested(0));
 				} else if (type == Tuple::VERSIONSTAMP) {
-					tuple.appendVersionstamp(Versionstamp(itemTuple.getString(0)));
+					tuple.appendVersionstamp(itemTuple.getVersionstamp(0));
 				} else {
 					ASSERT(false);
 				}
@@ -1235,7 +1235,7 @@ struct TupleRangeFunc : InstructionFunc {
 				} else if (type == Tuple::NESTED) {
 					tuple.appendNested(itemTuple.getNested(0));
 				} else if (type == Tuple::VERSIONSTAMP) {
-					tuple.appendVersionstamp(Versionstamp(itemTuple.getString(0)));
+					tuple.appendVersionstamp(itemTuple.getVersionstamp(0));
 				} else {
 					ASSERT(false);
 				}
