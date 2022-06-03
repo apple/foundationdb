@@ -3975,14 +3975,14 @@ void DDTeamCollection::traceMachineInfo() const {
 	int i = 0;
 
 	TraceEvent("MachineInfo").detail("Size", machine_info.size());
-	for (auto& machine : machine_info) {
+	for (auto& [machineName, machineInfo] : machine_info) {
 		TraceEvent("MachineInfo", distributorId)
 		    .detail("MachineInfoIndex", i++)
-		    .detail("Healthy", isMachineHealthy(machine.second))
-		    .detail("MachineID", machine.first.contents().toString())
-		    .detail("MachineTeamOwned", machine.second->machineTeams.size())
-		    .detail("ServerNumOnMachine", machine.second->serversOnMachine.size())
-		    .detail("ServersID", machine.second->getServersIDStr());
+		    .detail("Healthy", isMachineHealthy(machineInfo))
+		    .detail("MachineID", machineName.contents().toString())
+		    .detail("MachineTeamOwned", machineInfo->machineTeams.size())
+		    .detail("ServerNumOnMachine", machineInfo->serversOnMachine.size())
+		    .detail("ServersID", machineInfo->getServersIDStr());
 	}
 }
 
@@ -4225,20 +4225,20 @@ int DDTeamCollection::addBestMachineTeams(int machineTeamsToBuild) {
 Reference<TCServerInfo> DDTeamCollection::findOneLeastUsedServer() const {
 	std::vector<Reference<TCServerInfo>> leastUsedServers;
 	int minTeams = std::numeric_limits<int>::max();
-	for (auto& server : server_info) {
+	for (auto& [serverID, server] : server_info) {
 		// Only pick healthy server, which is not failed or excluded.
-		if (server_status.get(server.first).isUnhealthy())
+		if (server_status.get(serverID).isUnhealthy())
 			continue;
-		if (!isValidLocality(configuration.storagePolicy, server.second->getLastKnownInterface().locality))
+		if (!isValidLocality(configuration.storagePolicy, server->getLastKnownInterface().locality))
 			continue;
 
-		int numTeams = server.second->getTeams().size();
+		int numTeams = server->getTeams().size();
 		if (numTeams < minTeams) {
 			minTeams = numTeams;
 			leastUsedServers.clear();
 		}
 		if (minTeams == numTeams) {
-			leastUsedServers.push_back(server.second);
+			leastUsedServers.push_back(server);
 		}
 	}
 
@@ -4338,12 +4338,12 @@ int DDTeamCollection::calculateHealthyMachineCount() const {
 std::pair<int64_t, int64_t> DDTeamCollection::calculateMinMaxServerTeamsOnServer() const {
 	int64_t minTeams = std::numeric_limits<int64_t>::max();
 	int64_t maxTeams = 0;
-	for (auto& server : server_info) {
-		if (server_status.get(server.first).isUnhealthy()) {
+	for (auto& [serverID, server] : server_info) {
+		if (server_status.get(serverID).isUnhealthy()) {
 			continue;
 		}
-		minTeams = std::min((int64_t)server.second->getTeams().size(), minTeams);
-		maxTeams = std::max((int64_t)server.second->getTeams().size(), maxTeams);
+		minTeams = std::min((int64_t)server->getTeams().size(), minTeams);
+		maxTeams = std::max((int64_t)server->getTeams().size(), maxTeams);
 	}
 	return std::make_pair(minTeams, maxTeams);
 }
@@ -4351,12 +4351,12 @@ std::pair<int64_t, int64_t> DDTeamCollection::calculateMinMaxServerTeamsOnServer
 std::pair<int64_t, int64_t> DDTeamCollection::calculateMinMaxMachineTeamsOnMachine() const {
 	int64_t minTeams = std::numeric_limits<int64_t>::max();
 	int64_t maxTeams = 0;
-	for (auto& machine : machine_info) {
-		if (!isMachineHealthy(machine.second)) {
+	for (auto& [_, machine] : machine_info) {
+		if (!isMachineHealthy(machine)) {
 			continue;
 		}
-		minTeams = std::min<int64_t>((int64_t)machine.second->machineTeams.size(), minTeams);
-		maxTeams = std::max<int64_t>((int64_t)machine.second->machineTeams.size(), maxTeams);
+		minTeams = std::min<int64_t>((int64_t)machine->machineTeams.size(), minTeams);
+		maxTeams = std::max<int64_t>((int64_t)machine->machineTeams.size(), maxTeams);
 	}
 	return std::make_pair(minTeams, maxTeams);
 }
@@ -4645,8 +4645,8 @@ int DDTeamCollection::addTeamsBestOf(int teamsToBuild, int desiredTeams, int max
 
 	healthyMachineTeamCount = getHealthyMachineTeamCount();
 
-	std::pair<uint64_t, uint64_t> minMaxTeamsOnServer = calculateMinMaxServerTeamsOnServer();
-	std::pair<uint64_t, uint64_t> minMaxMachineTeamsOnMachine = calculateMinMaxMachineTeamsOnMachine();
+	auto [minTeamsOnServer, maxTeamsOnServer] = calculateMinMaxServerTeamsOnServer();
+	auto [minMachineTeamsOnMachine, maxMachineTeamsOnMachine] = calculateMinMaxMachineTeamsOnMachine();
 
 	TraceEvent("TeamCollectionInfo", distributorId)
 	    .detail("Primary", primary)
@@ -4661,10 +4661,10 @@ int DDTeamCollection::addTeamsBestOf(int teamsToBuild, int desiredTeams, int max
 	    .detail("DesiredMachineTeams", desiredMachineTeams)
 	    .detail("MaxMachineTeams", maxMachineTeams)
 	    .detail("TotalHealthyMachines", totalHealthyMachineCount)
-	    .detail("MinTeamsOnServer", minMaxTeamsOnServer.first)
-	    .detail("MaxTeamsOnServer", minMaxTeamsOnServer.second)
-	    .detail("MinMachineTeamsOnMachine", minMaxMachineTeamsOnMachine.first)
-	    .detail("MaxMachineTeamsOnMachine", minMaxMachineTeamsOnMachine.second)
+	    .detail("MinTeamsOnServer", minTeamsOnServer)
+	    .detail("MaxTeamsOnServer", maxTeamsOnServer)
+	    .detail("MinMachineTeamsOnMachine", minMachineTeamsOnMachine)
+	    .detail("MaxMachineTeamsOnMachine", maxMachineTeamsOnMachine)
 	    .detail("DoBuildTeams", doBuildTeams)
 	    .trackLatest(teamCollectionInfoEventHolder->trackingKey);
 
@@ -4681,8 +4681,8 @@ void DDTeamCollection::traceTeamCollectionInfo() const {
 	int maxMachineTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * totalHealthyMachineCount;
 	int healthyMachineTeamCount = getHealthyMachineTeamCount();
 
-	std::pair<uint64_t, uint64_t> minMaxTeamsOnServer = calculateMinMaxServerTeamsOnServer();
-	std::pair<uint64_t, uint64_t> minMaxMachineTeamsOnMachine = calculateMinMaxMachineTeamsOnMachine();
+	auto [minTeamsOnServer, maxTeamsOnServer] = calculateMinMaxServerTeamsOnServer();
+	auto [minMachineTeamsOnMachine, maxMachineTeamsOnMachine] = calculateMinMaxMachineTeamsOnMachine();
 
 	TraceEvent("TeamCollectionInfo", distributorId)
 	    .detail("Primary", primary)
@@ -4697,10 +4697,10 @@ void DDTeamCollection::traceTeamCollectionInfo() const {
 	    .detail("DesiredMachineTeams", desiredMachineTeams)
 	    .detail("MaxMachineTeams", maxMachineTeams)
 	    .detail("TotalHealthyMachines", totalHealthyMachineCount)
-	    .detail("MinTeamsOnServer", minMaxTeamsOnServer.first)
-	    .detail("MaxTeamsOnServer", minMaxTeamsOnServer.second)
-	    .detail("MinMachineTeamsOnMachine", minMaxMachineTeamsOnMachine.first)
-	    .detail("MaxMachineTeamsOnMachine", minMaxMachineTeamsOnMachine.second)
+	    .detail("MinTeamsOnServer", minTeamsOnServer)
+	    .detail("MaxTeamsOnServer", maxTeamsOnServer)
+	    .detail("MinMachineTeamsOnMachine", minMachineTeamsOnMachine)
+	    .detail("MaxMachineTeamsOnMachine", maxMachineTeamsOnMachine)
 	    .detail("DoBuildTeams", doBuildTeams)
 	    .trackLatest(teamCollectionInfoEventHolder->trackingKey);
 
@@ -5476,11 +5476,11 @@ public:
 
 		wait(collection->getTeam(req));
 
-		std::pair<Optional<Reference<IDataDistributionTeam>>, bool> resTeam = req.reply.getFuture().get();
+		auto& [resTeam, srcTeamFound] = req.reply.getFuture().get();
 
 		std::set<UID> expectedServers{ UID(1, 0), UID(2, 0), UID(3, 0) };
-		ASSERT(resTeam.first.present());
-		auto servers = resTeam.first.get()->getServerIDs();
+		ASSERT(resTeam.present());
+		auto servers = resTeam.get()->getServerIDs();
 		const std::set<UID> selectedServers(servers.begin(), servers.end());
 		ASSERT(expectedServers == selectedServers);
 
@@ -5532,11 +5532,11 @@ public:
 
 		wait(collection->getTeam(req));
 
-		std::pair<Optional<Reference<IDataDistributionTeam>>, bool> resTeam = req.reply.getFuture().get();
+		auto& [resTeam, srcTeamFound] = req.reply.getFuture().get();
 
 		std::set<UID> expectedServers{ UID(2, 0), UID(3, 0), UID(4, 0) };
-		ASSERT(resTeam.first.present());
-		auto servers = resTeam.first.get()->getServerIDs();
+		ASSERT(resTeam.present());
+		auto servers = resTeam.get()->getServerIDs();
 		const std::set<UID> selectedServers(servers.begin(), servers.end());
 
 		ASSERT(expectedServers == selectedServers);
@@ -5586,11 +5586,11 @@ public:
 
 		wait(collection->getTeam(req));
 
-		std::pair<Optional<Reference<IDataDistributionTeam>>, bool> resTeam = req.reply.getFuture().get();
+		auto& [resTeam, srcTeamFound] = req.reply.getFuture().get();
 
 		std::set<UID> expectedServers{ UID(2, 0), UID(3, 0), UID(4, 0) };
-		ASSERT(resTeam.first.present());
-		auto servers = resTeam.first.get()->getServerIDs();
+		ASSERT(resTeam.present());
+		auto servers = resTeam.get()->getServerIDs();
 		const std::set<UID> selectedServers(servers.begin(), servers.end());
 		ASSERT(expectedServers == selectedServers);
 
@@ -5639,11 +5639,11 @@ public:
 
 		wait(collection->getTeam(req));
 
-		std::pair<Optional<Reference<IDataDistributionTeam>>, bool> resTeam = req.reply.getFuture().get();
+		auto& [resTeam, srcTeamFound] = req.reply.getFuture().get();
 
 		std::set<UID> expectedServers{ UID(1, 0), UID(2, 0), UID(3, 0) };
-		ASSERT(resTeam.first.present());
-		auto servers = resTeam.first.get()->getServerIDs();
+		ASSERT(resTeam.present());
+		auto servers = resTeam.get()->getServerIDs();
 		const std::set<UID> selectedServers(servers.begin(), servers.end());
 		ASSERT(expectedServers == selectedServers);
 
@@ -5694,9 +5694,9 @@ public:
 
 		wait(collection->getTeam(req));
 
-		std::pair<Optional<Reference<IDataDistributionTeam>>, bool> resTeam = req.reply.getFuture().get();
+		auto& [resTeam, srcTeamFound] = req.reply.getFuture().get();
 
-		ASSERT(!resTeam.first.present());
+		ASSERT(!resTeam.present());
 
 		return Void();
 	}
@@ -5754,9 +5754,9 @@ public:
 
 		wait(collection->getTeam(req));
 
-		std::pair<Optional<Reference<IDataDistributionTeam>>, bool> resTeam = req.reply.getFuture().get();
+		auto& [resTeam, srcTeamFound] = req.reply.getFuture().get();
 
-		ASSERT(!resTeam.first.present());
+		ASSERT(!resTeam.present());
 
 		return Void();
 	}
@@ -5879,11 +5879,11 @@ public:
 
 		wait(collection->getTeam(req));
 
-		std::pair<Optional<Reference<IDataDistributionTeam>>, bool> resTeam = req.reply.getFuture().get();
+		auto& [resTeam, srcTeamFound] = req.reply.getFuture().get();
 
 		std::set<UID> expectedServers{ UID(1, 0), UID(2, 0), UID(3, 0) };
-		ASSERT(resTeam.first.present());
-		auto servers = resTeam.first.get()->getServerIDs();
+		ASSERT(resTeam.present());
+		auto servers = resTeam.get()->getServerIDs();
 		const std::set<UID> selectedServers(servers.begin(), servers.end());
 		ASSERT(expectedServers == selectedServers);
 
