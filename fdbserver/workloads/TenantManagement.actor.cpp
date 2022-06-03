@@ -58,7 +58,7 @@ struct TenantManagementWorkload : TestWorkload {
 	enum class OperationType { SPECIAL_KEYS, MANAGEMENT_DATABASE, MANAGEMENT_TRANSACTION };
 
 	static OperationType randomOperationType() {
-		int randomNum = deterministicRandom()->randomInt(1, 3);
+		int randomNum = deterministicRandom()->randomInt(0, 3);
 		if (randomNum == 0) {
 			return OperationType::SPECIAL_KEYS;
 		} else if (randomNum == 1) {
@@ -163,12 +163,20 @@ struct TenantManagementWorkload : TestWorkload {
 					wait(tr->commit());
 				} else if (operationType == OperationType::MANAGEMENT_DATABASE) {
 					ASSERT(tenantsToCreate.size() == 1);
-					wait(ManagementAPI::createTenant(cx.getReference(), *tenantsToCreate.begin()));
+					wait(success(ManagementAPI::createTenant(cx.getReference(), *tenantsToCreate.begin())));
 				} else {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+
+					Optional<Value> lastIdVal = wait(tr->get(tenantLastIdKey));
+					int64_t previousId = lastIdVal.present() ? TenantMapEntry::prefixToId(lastIdVal.get()) : -1;
+
+					std::vector<Future<Void>> createFutures;
 					for (auto tenant : tenantsToCreate) {
-						Optional<TenantMapEntry> _ = wait(ManagementAPI::createTenantTransaction(tr, tenant));
+						createFutures.push_back(
+						    success(ManagementAPI::createTenantTransaction(tr, tenant, ++previousId)));
 					}
+					tr->set(tenantLastIdKey, TenantMapEntry::idToPrefix(previousId));
+					wait(waitForAll(createFutures));
 					wait(tr->commit());
 				}
 
