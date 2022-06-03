@@ -149,6 +149,8 @@ set(FDBCLIENT_SRCS
   VersionedMap.actor.h
   VersionedMap.h
   VersionedMap.cpp
+  Versionstamp.cpp
+  Versionstamp.h
   VersionVector.h
   VersionVector.cpp
   WellKnownEndpoints.h
