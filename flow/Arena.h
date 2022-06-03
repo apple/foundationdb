@@ -433,8 +433,7 @@ private:
 extern std::string format(const char* form, ...);
 
 #pragma pack(push, 4)
-class StringRef {
-public:
+struct StringRef {
 	constexpr static FileIdentifier file_identifier = 13300811;
 	StringRef() : data(0), length(0) {}
 	StringRef(Arena& p, const StringRef& toCopy) : data(new (p) uint8_t[toCopy.size()]), length(toCopy.size()) {

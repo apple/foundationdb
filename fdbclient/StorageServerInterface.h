@@ -677,9 +677,10 @@ struct StorageMetrics {
 };
 
 struct WaitMetricsRequest {
+	constexpr static FileIdentifier file_identifier = 1795961;
+
 	// Waits for any of the given minimum or maximum metrics to be exceeded, and then returns the current values
 	// Send a reversed range for min, max to receive an immediate report
-	constexpr static FileIdentifier file_identifier = 1795961;
 	Arena arena;
 	KeyRangeRef keys;
 	StorageMetrics min, max;
@@ -1068,6 +1069,8 @@ struct GetStorageMetricsRequest {
 };
 
 struct StorageQueuingMetricsReply {
+	constexpr static FileIdentifier file_identifier = 7633366;
+
 	struct TagInfo {
 		constexpr static FileIdentifier file_identifier = 4528694;
 		TransactionTag tag;
@@ -1084,7 +1087,6 @@ struct StorageQueuingMetricsReply {
 		}
 	};
 
-	constexpr static FileIdentifier file_identifier = 7633366;
 	double localTime;
 	int64_t instanceID; // changes if bytesDurable and bytesInput reset
 	int64_t bytesDurable, bytesInput;
@@ -1114,8 +1116,8 @@ struct StorageQueuingMetricsReply {
 };
 
 struct StorageQueuingMetricsRequest {
-	// SOMEDAY: Send threshold value to avoid polling faster than the information changes?
 	constexpr static FileIdentifier file_identifier = 3978640;
+	// SOMEDAY: Send threshold value to avoid polling faster than the information changes?
 	ReplyPromise<struct StorageQueuingMetricsReply> reply;
 
 	template <class Ar>

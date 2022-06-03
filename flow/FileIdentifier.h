@@ -74,7 +74,6 @@ struct ComposedIdentifier<T, B, true> {
 	static_assert(B > 0 && B < 16, "Up to 15 types of composed identifiers allowed");
 	static_assert(FileIdentifierFor<T>::value < (1 << composed_identifier_offset));
 
-public:
 	static constexpr int composition_depth = CompositionDepthFor<T>::value + 1;
 	static constexpr FileIdentifier file_identifier = (B << composed_identifier_offset) | FileIdentifierFor<T>::value;
 };

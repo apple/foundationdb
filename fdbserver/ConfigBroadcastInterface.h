@@ -22,11 +22,12 @@
 
 #include "fdbserver/ConfigFollowerInterface.h"
 
-class ConfigClassSet {
+struct ConfigClassSet {
+	static constexpr FileIdentifier file_identifier = 9854021;
+private:
 	std::set<Key> classes;
 
 public:
-	static constexpr FileIdentifier file_identifier = 9854021;
 
 	bool operator==(ConfigClassSet const& rhs) const { return classes == rhs.classes; }
 	bool operator!=(ConfigClassSet const& rhs) const { return !(*this == rhs); }
@@ -165,11 +166,12 @@ struct ConfigBroadcastReadyRequest {
  * The ConfigBroadcaster uses a ConfigBroadcastInterface from each worker to
  * push updates made to the configuration database to the worker.
  */
-class ConfigBroadcastInterface {
+struct ConfigBroadcastInterface {
+	static constexpr FileIdentifier file_identifier = 1676543;
+private:
 	UID _id;
 
 public:
-	static constexpr FileIdentifier file_identifier = 1676543;
 	RequestStream<ConfigBroadcastSnapshotRequest> snapshot;
 	RequestStream<ConfigBroadcastChangesRequest> changes;
 	RequestStream<ConfigBroadcastRegisteredRequest> registered;

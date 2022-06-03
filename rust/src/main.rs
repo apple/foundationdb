@@ -1,4 +1,5 @@
 mod fdbserver;
+mod handlers;
 mod flow;
 
 #[tokio::main]

@@ -29,7 +29,6 @@
 
 // file format of actual blob files
 struct GranuleSnapshot : VectorRef<KeyValueRef> {
-
 	constexpr static FileIdentifier file_identifier = 1300395;
 
 	template <class Ar>

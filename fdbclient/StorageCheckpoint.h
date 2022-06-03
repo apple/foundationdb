@@ -35,6 +35,8 @@ enum CheckpointFormat {
 
 // Metadata of a FDB checkpoint.
 struct CheckpointMetaData {
+	constexpr static FileIdentifier file_identifier = 13804342;
+
 	enum CheckpointState {
 		InvalidState = 0,
 		Pending = 1, // Checkpoint creation pending.
@@ -43,7 +45,6 @@ struct CheckpointMetaData {
 		Fail = 4,
 	};
 
-	constexpr static FileIdentifier file_identifier = 13804342;
 	Version version;
 	KeyRange range;
 	int16_t format; // CheckpointFormat.

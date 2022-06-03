@@ -56,7 +56,6 @@ struct IKVSCommitReply {
 };
 
 struct RemoteKVSProcessInterface {
-
 	constexpr static FileIdentifier file_identifier = 3491838;
 	RequestStream<struct GetRemoteKVSProcessInterfaceRequest> getProcessInterface;
 	RequestStream<struct OpenKVStoreRequest> openKVStore;

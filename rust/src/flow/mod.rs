@@ -10,19 +10,12 @@ use tokio::sync::Semaphore;
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
 pub type Result<T> = std::result::Result<T, Error>;
 
-mod connection;
-mod file_identifier;
-mod frame;
-mod uid;
+pub mod connection;
+pub mod file_identifier;
+mod file_identifier_table;
+pub mod frame;
+pub mod uid;
 
-// #[allow(non_snake_case)]
-#[allow(dead_code, unused_imports)]
-#[path = "../../target/flatbuffers/PingRequest_generated.rs"]
-mod ping_request;
-
-#[allow(dead_code, unused_imports)]
-#[path = "../../target/flatbuffers/Void_generated.rs"]
-mod void;
 
 struct Listener {
     listener: TcpListener,
@@ -39,6 +32,8 @@ pub async fn hello() -> Result<()> {
         limit_connections: Arc::new(Semaphore::new(MAX_CONNECTIONS)),
     };
 
+    let file_identifier_table = file_identifier::FileIdentifierNames::new()?;
+
     println!("listening");
 
     loop {
@@ -49,61 +44,43 @@ pub async fn hello() -> Result<()> {
         conn.send_connect_packet().await?;
         println!("sent ConnectPacket");
         loop {
-            let frame = conn.read_frame().await?;
-            // println!("{:?}", frame);
-            match frame {
+            match conn.read_frame().await? {
                 None => {
                     println!("clean shutdown!");
                     break;
                 }
-                Some(frame) => match frame.token.get_well_known_endpoint() {
-                    Some(uid::WLTOKEN::PingPacket) => {
-                        println!("Ping        payload: {:x?}", frame);
-                        let fake_root = ping_request::root_as_fake_root(&frame.payload[..])?;
-                        println!("FakeRoot: {:x?}", fake_root);
-                        let reply = fake_root.ping_request().unwrap().reply_promise().unwrap();
-                        let mut builder = flatbuffers::FlatBufferBuilder::with_capacity(1024);
-                        let void = void::Void::create(&mut builder, &void::VoidArgs {});
-                        let ensure_table = void::EnsureTable::create(
-                            &mut builder,
-                            &void::EnsureTableArgs { void: Some(void) },
-                        );
-                        let fake_root = void::FakeRoot::create(
-                            &mut builder,
-                            &void::FakeRootArgs {
-                                error_or_type: void::ErrorOr::EnsureTable,
-                                error_or: Some(ensure_table.as_union_value()),
-                            },
-                        );
-                        builder.finish(fake_root, Some("myfi"));
-                        let mut payload = builder.finished_data().to_vec();
-                        // See also: flow/README.md ### Flatbuffers/ObjectSerializer
-                        file_identifier::FileIdentifier::new(0x1ead4a)?
-                            .to_error_or()?
-                            .rewrite_flatbuf(&mut payload)?;
-                        println!("reply: {:x?}", builder.finished_data());
-                        let uid = reply.uid().unwrap();
-                        let token = uid::UID {
-                            uid: [uid.first(), uid.second()],
-                        };
-                        let frame = frame::Frame { token, payload };
-                        conn.write_frame(frame).await?;
+                Some(frame) => {
+                    if frame.payload.len() < 8 {
+                            println!("Frame is too short! {:x?}", frame);
+                        continue;
                     }
 
-                    Some(uid::WLTOKEN::NetworkTest) => {
-                        println!("NetworkTest payload: {:x?}", frame);
-                    }
-                    Some(uid::WLTOKEN::EndpointNotFound) => {
-                        println!("EndpointNotFound payload: {:x?}", frame);
-                    }
-                    Some(uid::WLTOKEN::AuthTenant) => {
-                        println!("AuthTenant payload: {:x?}", frame);
-                    }
-                    Some(uid::WLTOKEN::UnauthorizedEndpoint) => {
-                        println!("UnauthorizedEndpoint payload: {:x?}", frame);
-                    }
-                    None => {
-                        println!("Message not destined for well-known endpoint: {:x?}", frame);
+                    let file_identifier = frame.peek_file_identifier()?;
+                    let parsed_file_identifier = file_identifier_table.from_id(file_identifier)?;
+    
+                    match frame.token.get_well_known_endpoint() {
+                        Some(uid::WLTOKEN::PingPacket) => {
+                            super::handlers::ping_request::handle(&mut conn, parsed_file_identifier, frame).await?;
+                        }
+                        Some(uid::WLTOKEN::NetworkTest) => {
+                            super::handlers::network_test::handle(&mut conn, parsed_file_identifier, frame).await?;
+                        }
+                        Some(uid::WLTOKEN::EndpointNotFound) => {
+                            println!("EndpointNotFound payload: {:x?}", frame);
+                            println!("{:x?} {:04x?}", frame.token, parsed_file_identifier);
+                        }
+                        Some(uid::WLTOKEN::AuthTenant) => {
+                            println!("AuthTenant payload: {:x?}", frame);
+                            println!("{:x?} {:04x?}", frame.token, parsed_file_identifier);
+                        }
+                        Some(uid::WLTOKEN::UnauthorizedEndpoint) => {
+                            println!("UnauthorizedEndpoint payload: {:x?}", frame);
+                            println!("{:x?} {:04x?}", frame.token, parsed_file_identifier);
+                        }
+                        None => {
+                            println!("Message not destined for well-known endpoint: {:x?}", frame);
+                            println!("{:x?} {:04x?}", frame.token, parsed_file_identifier);
+                        }
                     }
                 },
             }

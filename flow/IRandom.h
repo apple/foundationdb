@@ -61,11 +61,12 @@ int compare(std::pair<K, V> const& l, std::pair<K, V> const& r) {
 	return compare(l.second, r.second);
 }
 
-class UID {
+struct UID {
+	constexpr static FileIdentifier file_identifier = 15597147;
+private:
 	uint64_t part[2];
 
 public:
-	constexpr static FileIdentifier file_identifier = 15597147;
 	UID() { part[0] = part[1] = 0; }
 	constexpr UID(uint64_t a, uint64_t b) : part{ a, b } {}
 	std::string toString() const;

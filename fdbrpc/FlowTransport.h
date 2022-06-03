@@ -41,11 +41,11 @@ enum {
 };
 
 #pragma pack(push, 4)
-class Endpoint {
-public:
+struct Endpoint {
+	constexpr static FileIdentifier file_identifier = 10618805;
+
 	// Endpoint represents a particular service (e.g. a serialized Promise<T> or PromiseStream<T>)
 	// An endpoint is either "local" (used for receiving data) or "remote" (used for sending data)
-	constexpr static FileIdentifier file_identifier = 10618805;
 	using Token = UID;
 	NetworkAddressList addresses;
 	Token token{};

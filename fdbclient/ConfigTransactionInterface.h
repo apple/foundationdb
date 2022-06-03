@@ -190,10 +190,9 @@ struct ConfigTransactionGetKnobsRequest {
  * used by clients to transactionally update the configuration database
  */
 struct ConfigTransactionInterface {
+	static constexpr FileIdentifier file_identifier = 982485;
 	UID _id;
 
-public:
-	static constexpr FileIdentifier file_identifier = 982485;
 	class RequestStream<ConfigTransactionGetGenerationRequest> getGeneration;
 	class RequestStream<ConfigTransactionGetRequest> get;
 	class RequestStream<ConfigTransactionGetConfigClassesRequest> getClasses;

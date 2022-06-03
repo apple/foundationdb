@@ -61,7 +61,6 @@ struct RestoreUpdateRateRequest;
 // TODO: If it turns out this struct only has appliers in the final version, we will rename it to a more specific name,
 // e.g., AppliersMap
 struct RestoreSysInfo {
-	constexpr static FileIdentifier file_identifier = 68098739;
 	std::map<UID, RestoreApplierInterface> appliers;
 
 	RestoreSysInfo() = default;

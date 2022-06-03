@@ -96,8 +96,7 @@ enum class ErrorKind : uint8_t {
 
 const int NUM_MAJOR_LEVELS_OF_EVENTS = SevMaxUsed / 10 + 1;
 
-class TraceEventFields {
-public:
+struct TraceEventFields {
 	constexpr static FileIdentifier file_identifier = 11262274;
 	typedef std::pair<std::string, std::string> Field;
 	typedef std::vector<Field> FieldContainer;

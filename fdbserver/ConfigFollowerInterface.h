@@ -206,11 +206,12 @@ struct ConfigFollowerGetCommittedVersionRequest {
  * Configuration database nodes serve a ConfigFollowerInterface which contains well known endpoints,
  * used by workers to receive configuration database updates
  */
-class ConfigFollowerInterface {
+struct ConfigFollowerInterface {
+	static constexpr FileIdentifier file_identifier = 7721102;
+private:
 	UID _id;
 
 public:
-	static constexpr FileIdentifier file_identifier = 7721102;
 	RequestStream<ConfigFollowerGetSnapshotAndChangesRequest> getSnapshotAndChanges;
 	RequestStream<ConfigFollowerGetChangesRequest> getChanges;
 	RequestStream<ConfigFollowerCompactRequest> compact;

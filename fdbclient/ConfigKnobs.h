@@ -29,7 +29,9 @@
  * KnobValueRefs are stored in the configuration database, and in local configuration files. They are created from
  * ParsedKnobValue objects, so it is assumed that the value type is correct for the corresponding knob name
  */
-class KnobValueRef {
+struct KnobValueRef {
+	static constexpr FileIdentifier file_identifier = 9297109;
+private:
 	std::variant<int, double, int64_t, bool, ValueRef> value;
 	template <class T>
 	explicit KnobValueRef(T const& v) : value(std::in_place_type<T>, v) {}
@@ -54,7 +56,6 @@ class KnobValueRef {
 	};
 
 public:
-	static constexpr FileIdentifier file_identifier = 9297109;
 
 	template <class T>
 	static Value toValue(T const& v) {
@@ -134,14 +135,15 @@ inline bool operator<(ConfigKeyRef const& lhs, ConfigKeyRef const& rhs) {
 /*
  * Only set and point clear configuration database mutations are currently permitted.
  */
-class ConfigMutationRef {
+struct ConfigMutationRef {
+	static constexpr FileIdentifier file_identifier = 7219528;
+
+private:
 	ConfigKeyRef key;
 	// Empty value means this is a clear mutation
 	Optional<KnobValueRef> value;
 
 public:
-	static constexpr FileIdentifier file_identifier = 7219528;
-
 	ConfigMutationRef() = default;
 
 	explicit ConfigMutationRef(Arena& arena, ConfigKeyRef key, Optional<KnobValueRef> value)

@@ -39,8 +39,7 @@ public:
 	void addCode(int code, const char* name, const char* description);
 };
 
-class Error {
-public:
+struct Error {
 	constexpr static FileIdentifier file_identifier = 14065384;
 	int code() const { return error_code; }
 	const char* name() const;

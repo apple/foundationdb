@@ -130,8 +130,7 @@ Standalone<StringRef> concatenate(Iter b, Iter const& e) {
 	return r;
 }
 
-class Void {
-public:
+struct Void {
 	constexpr static FileIdentifier file_identifier = 2010442;
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -265,8 +264,7 @@ struct union_like_traits<ErrorOr<T>> : std::true_type {
 };
 
 template <class T>
-class CachedSerialization {
-public:
+struct CachedSerialization {
 	constexpr static FileIdentifier file_identifier = FileIdentifierFor<T>::value;
 
 	// FIXME: this code will not work for caching a direct serialization from ObjectWriter, because it adds an ErrorOr,

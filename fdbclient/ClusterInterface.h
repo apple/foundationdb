@@ -175,6 +175,8 @@ struct FailureMonitoringReply {
 };
 
 struct FailureMonitoringRequest {
+	constexpr static FileIdentifier file_identifier = 5867851;
+
 	// Sent by all participants to the cluster controller reply.clientRequestIntervalMS
 	//   ms after receiving the previous reply.
 	// Provides the controller the self-diagnosed status of the sender, and also
@@ -185,7 +187,6 @@ struct FailureMonitoringRequest {
 	// The failureInformationVersion returned in reply should be passed back to the
 	//   next request to facilitate delta compression of the failure information.
 
-	constexpr static FileIdentifier file_identifier = 5867851;
 	Optional<FailureStatus> senderStatus;
 	Version failureInformationVersion;
 	NetworkAddressList addresses;
