@@ -6368,10 +6368,10 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				if (data->sharded) {
 					updateStorageShard(data, StorageServerShard::notAssigned(keys, data->data().getLatestVersion()));
 				} else {
-					removeDataRange(
-					    data, data->addVersionToMutationLog(data->data().getLatestVersion()), data->shards, keys);
 					setAvailableStatus(data, keys, false);
 				}
+				removeDataRange(
+				    data, data->addVersionToMutationLog(data->data().getLatestVersion()), data->shards, keys);
 				// Prevent another, overlapping fetchKeys from entering the Fetching phase until
 				// data->data().getLatestVersion() is durable
 				data->newestDirtyVersion.insert(keys, data->data().getLatestVersion());
@@ -6459,12 +6459,13 @@ ACTOR Future<Void> restoreShards(StorageServer* data, RangeResult storageShards,
 		                             mLoc + 1 == storageShards.size() ? allKeys.end
 		                                                              : storageShards[mLoc + 1].key.removePrefix(
 		                                                                    persistStorageServerShardKeys.begin));
-		const StorageServerShard shard =
+		StorageServerShard shard =
 		    ObjectReader::fromStringRef<StorageServerShard>(storageShards[mLoc].value, IncludeVersion());
 		TraceEvent(SevVerbose, "RestoreShardsStorageShard", data->thisServerID)
 		    .detail("Range", shardRange)
 		    .detail("StorageShard", shard.toString());
-		ASSERT(shardRange == shard.range);
+		// ASSERT(shardRange == shard.range);
+		shard.range = shardRange;
 		// if (shard.getShardState() == StorageServerShard::NotAssigned) {
 		// 	continue;
 		// }
@@ -6501,7 +6502,7 @@ ACTOR Future<Void> restoreShards(StorageServer* data, RangeResult storageShards,
 	}
 
 	TraceEvent(SevDebug, "StorageServerRestoreShardsCoalesce", data->thisServerID).detail("Version", version);
-	coalesceShards(data, allKeys);
+	coalescePhysicalShards(data, allKeys);
 	TraceEvent(SevDebug, "StorageServerRestoreShardsValidate", data->thisServerID).detail("Version", version);
 	validate(data, /*force=*/true);
 	TraceEvent(SevDebug, "StorageServerRestoreShardsEnd", data->thisServerID).detail("Version", version);
@@ -6882,17 +6883,20 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 			newShard.range = currentRange;
 			data->addShard(ShardInfo::newShard(data, newShard));
 		} else if (currentShard->isReadable()) {
-			ASSERT(!nowAssigned); // Removing a range from the server.
+			// ASSERT(!nowAssigned); // Removing a range from the server.
 			StorageServerShard newShard = currentShard->toStorageServerShard();
 			newShard.range = currentRange;
 			data->addShard(ShardInfo::newShard(data, newShard));
 		} else if (ranges[i].value->adding) {
 			const AddingShard* oldMoveInShard = ranges[i].value->adding.get();
-			TraceEvent(SevError, "NonAllignedMoveInShards", data->thisServerID)
+			TraceEvent(SevDebug, "NonAllignedMoveInShards", data->thisServerID)
 			    .detail("NewRange", moveRange)
 			    .detail("ExistingMoveInShardRange", oldMoveInShard->keys)
 			    .detail("NowAssigned", nowAssigned);
-			ASSERT(false);
+			ASSERT(!nowAssigned);
+			StorageServerShard newShard = currentShard->toStorageServerShard();
+			newShard.range = currentRange;
+			data->addShard(ShardInfo::newShard(data, newShard));
 		} else {
 			ASSERT(false);
 		}
@@ -6907,7 +6911,7 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 	// std::unordered_map<UID, MoveInShard> cancelMoveIns;
 	const uint64_t desiredId = dataMoveId.first();
 	for (auto r = overlappingShards.begin(); r != overlappingShards.end(); ++r) {
-		ASSERT(moveRange.contains(r->range()));
+		// ASSERT(moveRange.contains(r->range()));
 		const KeyRangeRef range = r->range();
 		const bool dataAvailable = r->value()->isReadable();
 		TraceEvent(SevDebug, "CSKPhysicalShardRange", data->thisServerID)
@@ -6932,11 +6936,11 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 				changeNewestAvailable.emplace_back(range, version);
 			} else if (r->value()->adding) {
 				TraceEvent(SevDebug, "ChangeServerKeysCancelMoveInShard", data->thisServerID)
-				    .detail("range", range)
+				    .detail("Range", range)
 				    .detail("Version", version + 1)
 				    .detail("MoveInShardRange", r->value()->adding->keys);
 				// TODO(psm): call moveInShard->cancel() to avoid split of brain.
-				removeRanges.push_back(range); // This could be pushed down to kv with physical shards.
+				// removeRanges.push_back(range); // This could be pushed down to kv with physical shards.
 				updatedShards.push_back(StorageServerShard::notAssigned(range, cVer));
 			}
 		} else if (!dataAvailable) {
@@ -6962,7 +6966,7 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 						// TODO(heliu): Replace this with moveInShard->cancel().
 						// oldMoveInShard->updates->shardRemoved = true;
 						// cancelMoveIns.emplace(oldMoveInShard->meta->id, *oldMoveInShard);
-						removeRanges.push_back(range); // This clearRange is unnecessary with physical shards.
+						// removeRanges.push_back(range); // This clearRange is unnecessary with physical shards.
 						updatedShards.push_back(
 						    StorageServerShard(range, cVer, desiredId, desiredId, StorageServerShard::MovingIn));
 						// newMoveInShards.emplace_back(dataMoveId, range, version + 1);
@@ -7004,7 +7008,7 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 		data->metrics.notifyNotReadable(moveRange);
 	}
 
-	coalesceShards(data, KeyRangeRef(ranges[0].begin, ranges[ranges.size() - 1].end));
+	coalescePhysicalShards(data, KeyRangeRef(ranges[0].begin, ranges[ranges.size() - 1].end));
 
 	// Now it is OK to do removeDataRanges, directly and through fetchKeys cancellation (and we have to do so before
 	// validate())
@@ -7047,6 +7051,65 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 		++data->counters.kvSystemClearRanges;
 	}
 	validate(data);
+
+	// find any change feeds that no longer have shards on this server, and clean them up
+	if (!nowAssigned) {
+		std::map<Key, KeyRange> candidateFeeds;
+		auto ranges = data->keyChangeFeed.intersectingRanges(moveRange);
+		for (auto r : ranges) {
+			for (auto feed : r.value()) {
+				candidateFeeds[feed->id] = feed->range;
+			}
+		}
+		for (auto f : candidateFeeds) {
+			bool foundAssigned = false;
+			auto shards = data->shards.intersectingRanges(f.second);
+			for (auto shard : shards) {
+				if (shard->value()->assigned()) {
+					foundAssigned = true;
+					break;
+				}
+			}
+
+			if (!foundAssigned) {
+				Version durableVersion = data->data().getLatestVersion();
+				TraceEvent(SevDebug, "ChangeFeedCleanup", data->thisServerID)
+				    .detail("FeedID", f.first)
+				    .detail("Version", version)
+				    .detail("DurableVersion", durableVersion);
+
+				data->changeFeedCleanupDurable[f.first] = durableVersion;
+
+				Key beginClearKey = f.first.withPrefix(persistChangeFeedKeys.begin);
+				auto& mLV = data->addVersionToMutationLog(durableVersion);
+				data->addMutationToMutationLog(
+				    mLV, MutationRef(MutationRef::ClearRange, beginClearKey, keyAfter(beginClearKey)));
+				++data->counters.kvSystemClearRanges;
+				data->addMutationToMutationLog(mLV,
+				                               MutationRef(MutationRef::ClearRange,
+				                                           changeFeedDurableKey(f.first, 0),
+				                                           changeFeedDurableKey(f.first, version)));
+
+				// We can't actually remove this change feed fully until the mutations clearing its data become durable.
+				// If the SS restarted at version R before the clearing mutations became durable at version D (R < D),
+				// then the restarted SS would restore the change feed clients would be able to read data and would miss
+				// mutations from versions [R, D), up until we got the private mutation triggering the cleanup again.
+
+				auto feed = data->uidChangeFeed.find(f.first);
+				if (feed != data->uidChangeFeed.end()) {
+					feed->second->removing = true;
+					feed->second->moved(feed->second->range);
+					feed->second->newMutations.trigger();
+				}
+			} else {
+				// if just part of feed's range is moved away
+				auto feed = data->uidChangeFeed.find(f.first);
+				if (feed != data->uidChangeFeed.end()) {
+					feed->second->moved(moveRange);
+				}
+			}
+		}
+	}
 }
 
 void rollback(StorageServer* data, Version rollbackVersion, Version nextVersion) {
