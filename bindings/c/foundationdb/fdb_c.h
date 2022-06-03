@@ -489,6 +489,45 @@ DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_version(FDBFuture* f, in
 #define fdb_future_get_version(f, ov) FDB_REMOVED_FUNCTION
 #endif
 
+#if FDB_API_VERSION < 710
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_range_and_flat_map(FDBTransaction* tr,
+                                                                               uint8_t const* begin_key_name,
+                                                                               int begin_key_name_length,
+                                                                               fdb_bool_t begin_or_equal,
+                                                                               int begin_offset,
+                                                                               uint8_t const* end_key_name,
+                                                                               int end_key_name_length,
+                                                                               fdb_bool_t end_or_equal,
+                                                                               int end_offset,
+                                                                               uint8_t const* mapper_name,
+                                                                               int mapper_name_length,
+                                                                               int limit,
+                                                                               int target_bytes,
+                                                                               FDBStreamingMode mode,
+                                                                               int iteration,
+                                                                               fdb_bool_t snapshot,
+                                                                               fdb_bool_t reverse);
+#else
+#define fdb_transaction_get_range_and_flat_map(tr,                                                                     \
+                                               begin_key_name,                                                         \
+                                               begin_key_name_length,                                                  \
+                                               begin_or_equal,                                                         \
+                                               begin_offset,                                                           \
+                                               end_key_name,                                                           \
+                                               end_key_name_length,                                                    \
+                                               end_or_equal,                                                           \
+                                               end_offset,                                                             \
+                                               mapper_name,                                                            \
+                                               mapper_name_length,                                                     \
+                                               limit,                                                                  \
+                                               target_bytes,                                                           \
+                                               mode,                                                                   \
+                                               iteration,                                                              \
+                                               snapshot,                                                               \
+                                               reverse)                                                                \
+	FDB_REMOVED_FUNCTION
+#endif
+
 #if FDB_API_VERSION < 610 || defined FDB_INCLUDE_LEGACY_TYPES
 typedef struct FDB_cluster FDBCluster;
 
