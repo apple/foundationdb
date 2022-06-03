@@ -561,7 +561,7 @@ public:
 
 	void clear(KeyRef key) {
 		auto it = dataShardMap.rangeContaining(key);
-		if(!it.value()) {
+		if (!it.value()) {
 			return;
 		}
 		writeBatch->Delete(it->value()->physicalShard->cf, toSlice(key));
@@ -572,7 +572,7 @@ public:
 		auto rangeIterator = dataShardMap.intersectingRanges(range);
 
 		for (auto it = rangeIterator.begin(); it != rangeIterator.end(); ++it) {
-			if(it.value() == nullptr) {
+			if (it.value() == nullptr) {
 				continue;
 			}
 			writeBatch->DeleteRange(it->value()->physicalShard->cf, toSlice(range.begin), toSlice(range.end));
@@ -1864,7 +1864,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	void set(KeyValueRef kv, const Arena*) override { shardManager.put(kv.key, kv.value); }
 
 	void clear(KeyRangeRef range, const Arena*) override {
-		if(range.singleKeyRange()) {
+		if (range.singleKeyRange()) {
 			shardManager.clear(range.begin);
 		} else {
 			shardManager.clearRange(range);
