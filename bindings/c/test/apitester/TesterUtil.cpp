@@ -26,8 +26,8 @@
 
 namespace FdbApiTester {
 
-std::string lowerCase(const std::string& str) {
-	std::string res = str;
+fdb::ByteString lowerCase(fdb::BytesRef str) {
+	fdb::ByteString res(str);
 	std::transform(res.begin(), res.end(), res.begin(), ::tolower);
 	return res;
 }
@@ -46,9 +46,9 @@ Random& Random::get() {
 	return random;
 }
 
-std::string Random::randomStringLowerCase(int minLength, int maxLength) {
+fdb::ByteString Random::randomStringLowerCase(int minLength, int maxLength) {
 	int length = randomInt(minLength, maxLength);
-	std::string str;
+	fdb::ByteString str;
 	str.reserve(length);
 	for (int i = 0; i < length; i++) {
 		str += (char)randomInt('a', 'z');

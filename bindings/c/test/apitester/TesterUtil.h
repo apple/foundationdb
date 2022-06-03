@@ -29,6 +29,8 @@
 #include <fmt/format.h>
 #include <chrono>
 
+#include "test/fdb_api.hpp"
+
 namespace fmt {
 
 // fmt::format formatting for std::optional<T>
@@ -49,12 +51,7 @@ struct formatter<std::optional<T>> : fmt::formatter<T> {
 
 namespace FdbApiTester {
 
-struct KeyValue {
-	std::string key;
-	std::string value;
-};
-
-std::string lowerCase(const std::string& str);
+fdb::ByteString lowerCase(fdb::BytesRef str);
 
 class Random {
 public:
@@ -64,7 +61,7 @@ public:
 
 	int randomInt(int min, int max);
 
-	std::string randomStringLowerCase(int minLength, int maxLength);
+	fdb::ByteString randomStringLowerCase(int minLength, int maxLength);
 
 	bool randomBool(double trueRatio);
 

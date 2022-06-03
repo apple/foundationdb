@@ -94,7 +94,7 @@ protected:
 	std::atomic<int> numRandomOpLeft;
 
 	// Key prefix
-	std::string keyPrefix;
+	fdb::Key keyPrefix;
 
 	// In-memory store maintaining expected database state
 	KeyValueStore store;
@@ -102,11 +102,11 @@ protected:
 	ApiWorkload(const WorkloadConfig& config);
 
 	// Methods for generating random keys and values
-	std::string randomKeyName();
-	std::string randomValue();
-	std::string randomNotExistingKey();
-	std::string randomExistingKey();
-	std::string randomKey(double existingKeyRatio);
+	fdb::Key randomKeyName();
+	fdb::Value randomValue();
+	fdb::Key randomNotExistingKey();
+	fdb::Key randomExistingKey();
+	fdb::Key randomKey(double existingKeyRatio);
 
 	// Generate initial random data for the workload
 	void populateData(TTaskFct cont);

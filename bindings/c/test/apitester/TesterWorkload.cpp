@@ -66,7 +66,7 @@ bool WorkloadConfig::getBoolOption(const std::string& name, bool defaultVal) con
 	if (iter == options.end()) {
 		return defaultVal;
 	} else {
-		std::string val = lowerCase(iter->second);
+		std::string val(fdb::toCharsRef(lowerCase(fdb::toBytesRef(iter->second))));
 		if (val == "true") {
 			return true;
 		} else if (val == "false") {
@@ -111,11 +111,11 @@ void WorkloadBase::execTransaction(std::shared_ptr<ITransactionActor> tx, TTaskF
 	tasksScheduled++;
 	manager->txExecutor->execute(tx, [this, tx, cont, failOnError]() {
 		numTxCompleted++;
-		fdb_error_t err = tx->getErrorCode();
-		if (tx->getErrorCode() == error_code_success) {
+		fdb::Error err = tx->getError();
+		if (err.code() == error_code_success) {
 			cont();
 		} else {
-			std::string msg = fmt::format("Transaction failed with error: {} ({})", err, fdb_get_error(err));
+			std::string msg = fmt::format("Transaction failed with error: {} ({})", err.code(), err.what());
 			if (failOnError) {
 				error(msg);
 				failed = true;
