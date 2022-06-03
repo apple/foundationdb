@@ -1842,6 +1842,21 @@ int main(int argc, char* argv[]) {
 		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
 		g_knobs.initialize(Randomize::True, role == ServerRole::Simulation ? IsSimulated::True : IsSimulated::False);
 
+		if (!SERVER_KNOBS->ALLOW_DANGEROUS_KNOBS) {
+			if (SERVER_KNOBS->FETCH_USING_STREAMING) {
+				fprintf(stderr,
+				        "ERROR : explicitly setting FETCH_USING_STREAMING is dangerous! set ALLOW_DANGEROUS_KNOBS to "
+				        "proceed anyways\n");
+				flushAndExit(FDB_EXIT_ERROR);
+			}
+			if (SERVER_KNOBS->PEEK_USING_STREAMING) {
+				fprintf(stderr,
+				        "ERROR : explicitly setting PEEK_USING_STREAMING is dangerous! set ALLOW_DANGEROUS_KNOBS to "
+				        "proceed anyways\n");
+				flushAndExit(FDB_EXIT_ERROR);
+			}
+		}
+
 		// evictionPolicyStringToEnum will throw an exception if the string is not recognized as a valid
 		EvictablePageCache::evictionPolicyStringToEnum(FLOW_KNOBS->CACHE_EVICTION_POLICY);
 

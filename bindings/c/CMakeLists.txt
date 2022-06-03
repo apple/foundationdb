@@ -58,8 +58,9 @@ if(APPLE)
   add_custom_command(OUTPUT ${symbols}
     COMMAND $<TARGET_FILE:Python::Interpreter> ${CMAKE_CURRENT_SOURCE_DIR}/symbolify.py
         ${CMAKE_CURRENT_SOURCE_DIR}/foundationdb/fdb_c.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/foundationdb/fdb_c_internal.h
         ${symbols}
-    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/symbolify.py ${CMAKE_CURRENT_SOURCE_DIR}/foundationdb/fdb_c.h
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/symbolify.py ${CMAKE_CURRENT_SOURCE_DIR}/foundationdb/fdb_c.h ${CMAKE_CURRENT_SOURCE_DIR}/foundationdb/fdb_c_internal.h
     COMMENT "Generate exported_symbols_list")
   add_custom_target(exported_symbols_list DEPENDS ${symbols})
   add_dependencies(fdb_c exported_symbols_list)
@@ -184,7 +185,7 @@ if(NOT WIN32)
   target_include_directories(fdb_c_unit_tests_version_510 PUBLIC ${DOCTEST_INCLUDE_DIR})
   target_include_directories(disconnected_timeout_unit_tests PUBLIC ${DOCTEST_INCLUDE_DIR})
   target_link_libraries(fdb_c_setup_tests PRIVATE fdb_c Threads::Threads)
-  target_link_libraries(fdb_c_unit_tests PRIVATE fdb_c Threads::Threads fdbclient)
+  target_link_libraries(fdb_c_unit_tests PRIVATE fdb_c Threads::Threads fdbclient rapidjson)
   target_link_libraries(fdb_c_unit_tests_version_510 PRIVATE fdb_c Threads::Threads)
   target_link_libraries(trace_partial_file_suffix_test PRIVATE fdb_c Threads::Threads flow)
   target_link_libraries(disconnected_timeout_unit_tests PRIVATE fdb_c Threads::Threads)

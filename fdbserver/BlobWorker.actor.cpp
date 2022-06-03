@@ -579,7 +579,7 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
                                           Version version,
                                           PromiseStream<RangeResult> rows,
                                           bool createGranuleHistory) {
-	std::string fileName = randomBGFilename(bwData->id, granuleID, version, ".snapshot");
+	state std::string fileName = randomBGFilename(bwData->id, granuleID, version, ".snapshot");
 	state Standalone<GranuleSnapshot> snapshot;
 
 	wait(delay(0, TaskPriority::BlobWorkerUpdateStorage));

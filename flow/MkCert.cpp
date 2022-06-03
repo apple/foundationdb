@@ -21,6 +21,7 @@
 #include "flow/Arena.h"
 #include "flow/IRandom.h"
 #include "flow/MkCert.h"
+#include "flow/PKey.h"
 #include "flow/ScopeExit.h"
 
 #include <limits>
@@ -63,15 +64,11 @@ namespace mkcert {
 
 // Helper functions working with OpenSSL native types
 std::shared_ptr<X509> readX509CertPem(StringRef x509CertPem);
-std::shared_ptr<EVP_PKEY> readPrivateKeyPem(StringRef privateKeyPem);
-std::shared_ptr<EVP_PKEY> readPrivateKeyPem(StringRef privateKeyPem);
-std::shared_ptr<EVP_PKEY> makeEllipticCurveKeyPairNative();
 StringRef writeX509CertPem(Arena& arena, const std::shared_ptr<X509>& nativeCert);
-StringRef writePrivateKeyPem(Arena& arena, const std::shared_ptr<EVP_PKEY>& nativePrivateKey);
 
 struct CertAndKeyNative {
 	std::shared_ptr<X509> cert;
-	std::shared_ptr<EVP_PKEY> privateKey;
+	PrivateKey privateKey;
 	bool valid() const noexcept { return cert && privateKey; }
 	// self-signed cert case
 	bool null() const noexcept { return !cert && !privateKey; }
@@ -86,7 +83,7 @@ struct CertAndKeyNative {
 		// either both set or both unset
 		ASSERT(!certPem.empty() && !keyPem.empty());
 		ret.cert = readX509CertPem(certPem);
-		ret.privateKey = readPrivateKeyPem(keyPem);
+		ret.privateKey = PrivateKey(PemEncoded{}, keyPem);
 		return ret;
 	}
 
@@ -96,7 +93,7 @@ struct CertAndKeyNative {
 			return ret;
 		ASSERT(valid());
 		ret.certPem = writeX509CertPem(arena, cert);
-		ret.privateKeyPem = writePrivateKeyPem(arena, privateKey);
+		ret.privateKeyPem = privateKey.writePem(arena);
 		return ret;
 	}
 };
@@ -109,14 +106,37 @@ void printCert(FILE* out, StringRef certPem) {
 }
 
 void printPrivateKey(FILE* out, StringRef privateKeyPem) {
-	auto key = readPrivateKeyPem(privateKeyPem);
+	auto key = PrivateKey(PemEncoded{}, privateKeyPem);
 	auto bio = ::BIO_new_fp(out, BIO_NOCLOSE);
 	OSSL_ASSERT(bio);
 	auto bioGuard = ScopeExit([bio]() { ::BIO_free(bio); });
-	OSSL_ASSERT(0 < ::EVP_PKEY_print_private(bio, key.get(), 0, nullptr));
+	OSSL_ASSERT(0 < ::EVP_PKEY_print_private(bio, key.nativeHandle(), 0, nullptr));
 }
 
-std::shared_ptr<EVP_PKEY> makeEllipticCurveKeyPairNative() {
+std::shared_ptr<X509> readX509CertPem(StringRef x509CertPem) {
+	ASSERT(!x509CertPem.empty());
+	auto bio_mem = ::BIO_new_mem_buf(x509CertPem.begin(), x509CertPem.size());
+	OSSL_ASSERT(bio_mem);
+	auto bioGuard = ScopeExit([bio_mem]() { ::BIO_free(bio_mem); });
+	auto ret = ::PEM_read_bio_X509(bio_mem, nullptr, nullptr, nullptr);
+	OSSL_ASSERT(ret);
+	return std::shared_ptr<X509>(ret, &::X509_free);
+}
+
+StringRef writeX509CertPem(Arena& arena, const std::shared_ptr<X509>& nativeCert) {
+	auto mem = ::BIO_new(::BIO_s_mem());
+	OSSL_ASSERT(mem);
+	auto memGuard = ScopeExit([mem]() { ::BIO_free(mem); });
+	OSSL_ASSERT(::PEM_write_bio_X509(mem, nativeCert.get()));
+	auto bioBuf = std::add_pointer_t<char>{};
+	auto const len = ::BIO_get_mem_data(mem, &bioBuf);
+	ASSERT_GT(len, 0);
+	auto buf = new (arena) uint8_t[len];
+	::memcpy(buf, bioBuf, len);
+	return StringRef(buf, static_cast<int>(len));
+}
+
+PrivateKey makeEcP256() {
 	auto params = std::add_pointer_t<EVP_PKEY>();
 	{
 		auto pctx = ::EVP_PKEY_CTX_new_id(EVP_PKEY_EC, nullptr);
@@ -139,82 +159,12 @@ std::shared_ptr<EVP_PKEY> makeEllipticCurveKeyPairNative() {
 	return std::shared_ptr<EVP_PKEY>(key, &::EVP_PKEY_free);
 }
 
-std::shared_ptr<X509> readX509CertPem(StringRef x509CertPem) {
-	ASSERT(!x509CertPem.empty());
-	auto bio_mem = ::BIO_new_mem_buf(x509CertPem.begin(), x509CertPem.size());
-	OSSL_ASSERT(bio_mem);
-	auto bioGuard = ScopeExit([bio_mem]() { ::BIO_free(bio_mem); });
-	auto ret = ::PEM_read_bio_X509(bio_mem, nullptr, nullptr, nullptr);
-	OSSL_ASSERT(ret);
-	return std::shared_ptr<X509>(ret, &::X509_free);
-}
-
-std::shared_ptr<EVP_PKEY> readPrivateKeyPem(StringRef privateKeyPem) {
-	ASSERT(!privateKeyPem.empty());
-	auto bio_mem = ::BIO_new_mem_buf(privateKeyPem.begin(), privateKeyPem.size());
-	OSSL_ASSERT(bio_mem);
-	auto bioGuard = ScopeExit([bio_mem]() { ::BIO_free(bio_mem); });
-	auto ret = ::PEM_read_bio_PrivateKey(bio_mem, nullptr, nullptr, nullptr);
-	OSSL_ASSERT(ret);
-	return std::shared_ptr<EVP_PKEY>(ret, &::EVP_PKEY_free);
-}
-
-StringRef writeX509CertPem(Arena& arena, const std::shared_ptr<X509>& nativeCert) {
-	auto mem = ::BIO_new(::BIO_s_mem());
-	OSSL_ASSERT(mem);
-	auto memGuard = ScopeExit([mem]() { ::BIO_free(mem); });
-	OSSL_ASSERT(::PEM_write_bio_X509(mem, nativeCert.get()));
-	auto bioBuf = std::add_pointer_t<char>{};
-	auto const len = ::BIO_get_mem_data(mem, &bioBuf);
-	ASSERT_GT(len, 0);
-	auto buf = new (arena) uint8_t[len];
-	::memcpy(buf, bioBuf, len);
-	return StringRef(buf, static_cast<int>(len));
-}
-
-StringRef writePrivateKeyPem(Arena& arena, const std::shared_ptr<EVP_PKEY>& nativePrivateKey) {
-	auto mem = ::BIO_new(::BIO_s_mem());
-	OSSL_ASSERT(mem);
-	auto memGuard = ScopeExit([mem]() { ::BIO_free(mem); });
-	OSSL_ASSERT(::PEM_write_bio_PrivateKey(mem, nativePrivateKey.get(), nullptr, nullptr, 0, 0, nullptr));
-	auto bioBuf = std::add_pointer_t<char>{};
-	auto const len = ::BIO_get_mem_data(mem, &bioBuf);
-	ASSERT_GT(len, 0);
-	auto buf = new (arena) uint8_t[len];
-	::memcpy(buf, bioBuf, len);
-	return StringRef(buf, static_cast<int>(len));
-}
-
-KeyPairRef KeyPairRef::make(Arena& arena) {
-	auto keypair = makeEllipticCurveKeyPairNative();
-	auto ret = KeyPairRef{};
-	{
-		auto len = 0;
-		len = ::i2d_PrivateKey(keypair.get(), nullptr);
-		ASSERT_LT(0, len);
-		auto buf = new (arena) uint8_t[len];
-		auto out = std::add_pointer_t<uint8_t>(buf);
-		len = ::i2d_PrivateKey(keypair.get(), &out);
-		ret.privateKeyDer = StringRef(buf, len);
-	}
-	{
-		auto len = 0;
-		len = ::i2d_PUBKEY(keypair.get(), nullptr);
-		ASSERT_LT(0, len);
-		auto buf = new (arena) uint8_t[len];
-		auto out = std::add_pointer_t<uint8_t>(buf);
-		len = ::i2d_PUBKEY(keypair.get(), &out);
-		ret.publicKeyDer = StringRef(buf, len);
-	}
-	return ret;
-}
-
 CertAndKeyNative makeCertNative(CertSpecRef spec, CertAndKeyNative issuer) {
 	// issuer key/cert must be both set or both null (self-signed case)
 	ASSERT(issuer.valid() || issuer.null());
 
 	auto const isSelfSigned = issuer.null();
-	auto nativeKeyPair = makeEllipticCurveKeyPairNative();
+	auto keypair = makeEcP256();
 	auto newX = ::X509_new();
 	OSSL_ASSERT(newX);
 	auto x509Guard = ScopeExit([&newX]() {
@@ -234,7 +184,7 @@ CertAndKeyNative makeCertNative(CertSpecRef spec, CertAndKeyNative issuer) {
 	auto notAfter = ::X509_getm_notAfter(x);
 	OSSL_ASSERT(notAfter);
 	OSSL_ASSERT(::X509_gmtime_adj(notAfter, spec.offsetNotAfter));
-	OSSL_ASSERT(0 < ::X509_set_pubkey(x, nativeKeyPair.get()));
+	OSSL_ASSERT(0 < ::X509_set_pubkey(x, keypair.nativeHandle()));
 	auto subjectName = ::X509_get_subject_name(x);
 	OSSL_ASSERT(subjectName);
 	for (const auto& entry : spec.subjectName) {
@@ -268,10 +218,11 @@ CertAndKeyNative makeCertNative(CertSpecRef spec, CertAndKeyNative issuer) {
 		auto extGuard = ScopeExit([ext]() { ::X509_EXTENSION_free(ext); });
 		OSSL_ASSERT(::X509_add_ext(x, ext, -1));
 	}
-	OSSL_ASSERT(::X509_sign(x, (isSelfSigned ? nativeKeyPair.get() : issuer.privateKey.get()), ::EVP_sha256()));
+	OSSL_ASSERT(
+	    ::X509_sign(x, (isSelfSigned ? keypair.nativeHandle() : issuer.privateKey.nativeHandle()), ::EVP_sha256()));
 	auto ret = CertAndKeyNative{};
 	ret.cert = smartX;
-	ret.privateKey = nativeKeyPair;
+	ret.privateKey = keypair;
 	return ret;
 }
 

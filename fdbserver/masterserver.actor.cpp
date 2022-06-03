@@ -312,18 +312,16 @@ ACTOR Future<Void> updateRecoveryData(Reference<MasterData> self) {
 	loop {
 		UpdateRecoveryDataRequest req = waitNext(self->myInterface.updateRecoveryData.getFuture());
 		TraceEvent("UpdateRecoveryData", self->dbgid)
-		    .detail("RecoveryTxnVersion", req.recoveryTransactionVersion)
-		    .detail("LastEpochEnd", req.lastEpochEnd)
+		    .detail("ReceivedRecoveryTxnVersion", req.recoveryTransactionVersion)
+		    .detail("ReceivedLastEpochEnd", req.lastEpochEnd)
+		    .detail("CurrentRecoveryTxnVersion", self->recoveryTransactionVersion)
+		    .detail("CurrentLastEpochEnd", self->lastEpochEnd)
 		    .detail("NumCommitProxies", req.commitProxies.size())
 		    .detail("VersionEpoch", req.versionEpoch);
 
-		if (self->recoveryTransactionVersion == invalidVersion ||
-		    req.recoveryTransactionVersion > self->recoveryTransactionVersion) {
-			self->recoveryTransactionVersion = req.recoveryTransactionVersion;
-		}
-		if (self->lastEpochEnd == invalidVersion || req.lastEpochEnd > self->lastEpochEnd) {
-			self->lastEpochEnd = req.lastEpochEnd;
-		}
+		self->recoveryTransactionVersion = req.recoveryTransactionVersion;
+		self->lastEpochEnd = req.lastEpochEnd;
+
 		if (req.commitProxies.size() > 0) {
 			self->lastCommitProxyVersionReplies.clear();
 
