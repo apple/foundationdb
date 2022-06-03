@@ -109,9 +109,9 @@ struct GetTeamRequest {
 	               WantTrueBest wantsTrueBest,
 	               PreferLowerDiskUtil preferLowerDiskUtil,
 	               TeamMustHaveShards teamMustHaveShards,
+	               int teamSetIndex,
 	               ForReadBalance forReadBalance = ForReadBalance::False,
 	               PreferLowerReadUtil preferLowerReadUtil = PreferLowerReadUtil::False,
-		       int teamSetIndex,
 	               double inflightPenalty = 1.0)
 	  : wantsNewServers(wantsNewServers), wantsTrueBest(wantsTrueBest), preferLowerDiskUtil(preferLowerDiskUtil),
 	    teamMustHaveShards(teamMustHaveShards), forReadBalance(forReadBalance),

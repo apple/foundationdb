@@ -1185,9 +1185,9 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 					                          WantTrueBest(isValleyFillerPriority(rd.priority)),
 					                          PreferLowerDiskUtil::True,
 					                          TeamMustHaveShards::False,
+					                          teamSetIndex,
 					                          ForReadBalance(rd.reason == RelocateReason::REBALANCE_READ),
 					                          PreferLowerReadUtil::True,
-								  teamSetIndex,
 					                          inflightPenalty);
 
 					req.src = rd.src;
@@ -1711,6 +1711,7 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueueData* self, int teamCollectionIndex,
 	state double lastRead = 0;
 	state bool skipCurrentLoop = false;
 	state Future<Void> delayF = Never();
+	state int teamSetIndex = 0;
 	state const bool readRebalance = !isDiskRebalancePriority(ddPriority);
 	state const char* eventName =
 	    isMountainChopperPriority(ddPriority) ? "BgDDMountainChopper_New" : "BgDDValleyFiller_New";
@@ -1767,12 +1768,14 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueueData* self, int teamCollectionIndex,
 					                        WantTrueBest::True,
 					                        PreferLowerDiskUtil::False,
 					                        TeamMustHaveShards::True,
+					                        teamSetIndex,
 					                        ForReadBalance(readRebalance),
 					                        PreferLowerReadUtil::False);
 					destReq = GetTeamRequest(WantNewServers::True,
 					                         WantTrueBest::False,
 					                         PreferLowerDiskUtil::True,
 					                         TeamMustHaveShards::False,
+					                         teamSetIndex,
 					                         ForReadBalance(readRebalance),
 					                         PreferLowerReadUtil::True);
 				} else {
@@ -1780,12 +1783,14 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueueData* self, int teamCollectionIndex,
 					                        WantTrueBest::False,
 					                        PreferLowerDiskUtil::False,
 					                        TeamMustHaveShards::True,
+					                        teamSetIndex,
 					                        ForReadBalance(readRebalance),
 					                        PreferLowerReadUtil::False);
 					destReq = GetTeamRequest(WantNewServers::True,
 					                         WantTrueBest::True,
 					                         PreferLowerDiskUtil::True,
 					                         TeamMustHaveShards::False,
+					                         teamSetIndex,
 					                         ForReadBalance(readRebalance),
 					                         PreferLowerReadUtil::True);
 				}
@@ -1882,7 +1887,7 @@ ACTOR Future<Void> BgDDMountainChopper(DDQueueData* self, int teamCollectionInde
 				                       WantTrueBest::False,
 				                       PreferLowerDiskUtil::True,
 				                       TeamMustHaveShards::False,
-						       teamSetIndex))));
+				                       teamSetIndex))));
 				randomTeam = _randomTeam;
 				traceEvent.detail("DestTeam",
 				                  printable(randomTeam.first.map<std::string>(
@@ -1895,7 +1900,7 @@ ACTOR Future<Void> BgDDMountainChopper(DDQueueData* self, int teamCollectionInde
 					                       WantTrueBest::True,
 					                       PreferLowerDiskUtil::False,
 					                       TeamMustHaveShards::True,
-							       teamSetIndex))));
+					                       teamSetIndex))));
 
 					traceEvent.detail(
 					    "SourceTeam",
@@ -2021,7 +2026,7 @@ ACTOR Future<Void> BgDDValleyFiller(DDQueueData* self, int teamCollectionIndex) 
 					        GetTeamRequest(WantNewServers::True,
 					                       WantTrueBest::True,
 					                       PreferLowerDiskUtil::True,
-					                       TeamMustHaveShards::False))));
+					                       TeamMustHaveShards::False,
 					                       teamSetIndex))));
 
 					traceEvent.detail(

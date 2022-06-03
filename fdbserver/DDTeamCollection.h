@@ -575,7 +575,7 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	// isIntialTeam : False when the team is added by addTeamsBestOf(); True otherwise, e.g.,
 	// when the team added at init() when we recreate teams by looking up DB
 	template <class InputIt>
-	void addTeam(InputIt begin, InputIt end, IsInitialTeam isInitialTeam) {
+	void addTeam(Reference<TCTeamSet> teamSet, InputIt begin, InputIt end, IsInitialTeam isInitialTeam) {
 		std::vector<Reference<TCServerInfo>> newTeamServers;
 		for (auto i = begin; i != end; ++i) {
 			if (server_info.find(*i) != server_info.end()) {
@@ -583,16 +583,34 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 			}
 		}
 
-		addTeam(newTeamServers, isInitialTeam);
+		addTeam(teamSet, newTeamServers, isInitialTeam);
+	}
+
+	template <class InputIt>
+	void addTeam(InputIt begin, InputIt end, IsInitialTeam isInitialTeam) {
+		addTeam(m_teamSets[0], begin, end, isInitialTeam);
 	}
 
 	void addTeam(const std::vector<Reference<TCServerInfo>>& newTeamServers,
+	             IsInitialTeam isInitialTeam,
+	             IsRedundantTeam isRedundantTeam = IsRedundantTeam::False) {
+		addTeam(m_teamSets[0], newTeamServers, isInitialTeam, isRedundantTeam);
+	}
+
+	void addTeam(Reference<TCTeamSet> teamSet, std::set<UID> const& team, IsInitialTeam isInitialTeam) {
+		addTeam(teamSet, team.begin(), team.end(), isInitialTeam);
+	}
+
+	void addTeam(std::set<UID> const& team, IsInitialTeam isInitialTeam) {
+		addTeam(m_teamSets[0], team, isInitialTeam);
+	}
+
+	void addTeam(Reference<TCTeamSet> teamset,
+	             const std::vector<Reference<TCServerInfo>>& newTeamServers,
 	             IsInitialTeam,
 	             IsRedundantTeam = IsRedundantTeam::False);
 
-	void addTeam(std::set<UID> const& team, IsInitialTeam isInitialTeam) {
-		addTeam(team.begin(), team.end(), isInitialTeam);
-	}
+	Reference<TCTeamSet> selectTeamSetToAddNewTeamTo();
 
 	// Create server teams based on machine teams
 	// Before the number of machine teams reaches the threshold, build a machine team for each server team
@@ -624,6 +642,7 @@ public:
 	                 DatabaseConfiguration configuration,
 	                 std::vector<Optional<Key>> includedDCs,
 	                 Optional<std::vector<Optional<Key>>> otherTrackedDCs,
+	                 int teamSetCount,
 	                 Future<Void> readyToStart,
 	                 Reference<AsyncVar<bool>> zeroHealthyTeams,
 	                 IsPrimary primary,

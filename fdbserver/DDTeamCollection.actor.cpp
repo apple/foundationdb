@@ -20,6 +20,7 @@
 
 #include "fdbserver/DDTeamCollection.h"
 #include "flow/FastRef.h"
+#include "flow/IRandom.h"
 #include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -3545,8 +3546,6 @@ bool DDTeamCollection::satisfiesPolicy(const std::vector<Reference<TCServerInfo>
 	return result && resultEntries.size() == 0;
 }
 
-constexpr int numTeamSets = 4;
-
 DDTeamCollection::DDTeamCollection(Database const& cx,
                                    UID distributorId,
                                    MoveKeysLock const& lock,
@@ -3555,6 +3554,7 @@ DDTeamCollection::DDTeamCollection(Database const& cx,
                                    DatabaseConfiguration configuration,
                                    std::vector<Optional<Key>> includedDCs,
                                    Optional<std::vector<Optional<Key>>> otherTrackedDCs,
+                                   int teamSetCount,
                                    Future<Void> readyToStart,
                                    Reference<AsyncVar<bool>> zeroHealthyTeams,
                                    IsPrimary primary,
@@ -3588,7 +3588,7 @@ DDTeamCollection::DDTeamCollection(Database const& cx,
 		    .detail("State", "Inactive")
 		    .trackLatest(ddTrackerStartingEventHolder->trackingKey);
 	}
-	for (int i = 0; i < numTeamSets; i++) {
+	for (int i = 0; i < teamSetCount; i++) {
 		m_teamSets.push_back(makeReference<TCTeamSet>());
 	}
 }
@@ -3843,11 +3843,8 @@ int DDTeamCollection::overlappingMachineMembers(std::vector<Standalone<StringRef
 	return maxMatchingServers;
 }
 
-Reference<TCTeamSet> DDTeamCollection::pickTeamSetForNewTeam() {
-	return m_teamSets[0];
-}
-
-void DDTeamCollection::addTeam(const std::vector<Reference<TCServerInfo>>& newTeamServers,
+void DDTeamCollection::addTeam(Reference<TCTeamSet> teamSet,
+                               const std::vector<Reference<TCServerInfo>>& newTeamServers,
                                IsInitialTeam isInitialTeam,
                                IsRedundantTeam redundantTeam) {
 	auto teamInfo = makeReference<TCTeamInfo>(newTeamServers);
@@ -3863,8 +3860,6 @@ void DDTeamCollection::addTeam(const std::vector<Reference<TCServerInfo>>& newTe
 		return;
 	}
 
-	// For a good team, we add it to teams and create machine team for it when necessary
-	Reference<TCTeamSet> teamSet = pickTeamSetForNewTeam();
 	teamInfo->addToTeamSet(teamSet);
 	teamSet->addTeam(teamInfo);
 	for (auto& server : newTeamServers) {
@@ -4504,6 +4499,25 @@ bool DDTeamCollection::notEnoughTeamsForAServer() const {
 	return false;
 }
 
+Reference<TCTeamSet> DDTeamCollection::selectTeamSetToAddNewTeamTo() {
+	int minTeamSetSize = std::numeric_limits<int>::max();
+	std::vector<Reference<TCTeamSet>> teamSetsWithFewestTeams;
+
+	for (auto& teamset : m_teamSets) {
+		if (teamset->teamCount() < minTeamSetSize) {
+			teamSetsWithFewestTeams.clear();
+			minTeamSetSize = teamset->teamCount();
+			teamSetsWithFewestTeams.push_back(teamset);
+		} else if (teamset->teamCount() == minTeamSetSize) {
+			teamSetsWithFewestTeams.push_back(teamset);
+		}
+	}
+
+	ASSERT(teamSetsWithFewestTeams.size() > 0);
+	deterministicRandom()->randomShuffle(teamSetsWithFewestTeams);
+	return teamSetsWithFewestTeams[0];
+}
+
 int DDTeamCollection::addTeamsBestOf(int teamsToBuild, int desiredTeams, int maxTeams) {
 	ASSERT_GE(teamsToBuild, 0);
 	ASSERT_WE_THINK(machine_info.size() > 0 || server_info.size() == 0);
@@ -4543,6 +4557,7 @@ int DDTeamCollection::addTeamsBestOf(int teamsToBuild, int desiredTeams, int max
 		int bestScore = std::numeric_limits<int>::max();
 		int maxAttempts = SERVER_KNOBS->BEST_OF_AMT; // BEST_OF_AMT = 4
 		bool earlyQuitBuild = false;
+		Reference<TCTeamSet> teamset = selectTeamSetToAddNewTeamTo();
 		for (int i = 0; i < maxAttempts && i < 100; ++i) {
 			// Step 2: Choose 1 least used server and then choose 1 least used machine team from the server
 			Reference<TCServerInfo> chosenServer = findOneLeastUsedServer();
@@ -4624,7 +4639,7 @@ int DDTeamCollection::addTeamsBestOf(int teamsToBuild, int desiredTeams, int max
 		}
 
 		// Step 4: Add the server team
-		addTeam(bestServerTeam.begin(), bestServerTeam.end(), IsInitialTeam::False);
+		addTeam(teamset, bestServerTeam.begin(), bestServerTeam.end(), IsInitialTeam::False);
 		addedTeams++;
 	}
 
@@ -5150,7 +5165,8 @@ Future<Void> DDTeamCollection::printSnapshotTeamsInfo(Reference<DDTeamCollection
 class DDTeamCollectionUnitTest {
 	static std::unique_ptr<DDTeamCollection> testTeamCollection(int teamSize,
 	                                                            Reference<IReplicationPolicy> policy,
-	                                                            int processCount) {
+	                                                            int processCount,
+	                                                            int teamSetCount = 1) {
 		Database database = DatabaseContext::create(
 		    makeReference<AsyncVar<ClientDBInfo>>(), Never(), LocalityData(), EnableLocalityLoadBalance::False);
 
@@ -5167,6 +5183,7 @@ class DDTeamCollectionUnitTest {
 		                                                           conf,
 		                                                           {},
 		                                                           {},
+		                                                           teamSetCount,
 		                                                           Future<Void>(Void()),
 		                                                           makeReference<AsyncVar<bool>>(true),
 		                                                           IsPrimary::True,
@@ -5194,7 +5211,8 @@ class DDTeamCollectionUnitTest {
 
 	static std::unique_ptr<DDTeamCollection> testMachineTeamCollection(int teamSize,
 	                                                                   Reference<IReplicationPolicy> policy,
-	                                                                   int processCount) {
+	                                                                   int processCount,
+	                                                                   int teamSetCount = 1) {
 		Database database = DatabaseContext::create(
 		    makeReference<AsyncVar<ClientDBInfo>>(), Never(), LocalityData(), EnableLocalityLoadBalance::False);
 
@@ -5211,6 +5229,7 @@ class DDTeamCollectionUnitTest {
 		                                                           conf,
 		                                                           {},
 		                                                           {},
+		                                                           teamSetCount,
 		                                                           Future<Void>(Void()),
 		                                                           makeReference<AsyncVar<bool>>(true),
 		                                                           IsPrimary::True,
@@ -5390,6 +5409,29 @@ public:
 		return Void();
 	}
 
+	ACTOR static Future<Void> AddTeamsBestOf_MultipleTeamSets() {
+		wait(Future<Void>(Void()));
+
+		Reference<IReplicationPolicy> policy = makeReference<PolicyAcross>(3, "zoneid", makeReference<PolicyOne>());
+		state int processSize = 6;
+		state int teamSize = 3;
+		state int teamSetCount = 3;
+		state std::unique_ptr<DDTeamCollection> collection =
+		    testTeamCollection(teamSize, policy, processSize, teamSetCount);
+
+		int desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * processSize;
+		int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
+
+		int result = collection->addTeamsBestOf(desiredTeams, desiredTeams, maxTeams);
+
+		ASSERT(collection->m_teamSets.size() == teamSetCount);
+		for (auto& teamset : collection->m_teamSets) {
+			ASSERT(teamset->teamCount() >= result / teamSetCount);
+		}
+
+		return Void();
+	}
+
 	ACTOR static Future<Void> GetTeam_NewServersNotNeeded() {
 		Reference<IReplicationPolicy> policy = makeReference<PolicyAcross>(3, "zoneid", makeReference<PolicyOne>());
 		state int processSize = 5;
@@ -5425,8 +5467,11 @@ public:
 		 */
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
-		state GetTeamRequest req(
-		    WantNewServers::False, WantTrueBest::True, PreferLowerDiskUtil::True, TeamMustHaveShards::False, teamSetIndex);
+		state GetTeamRequest req(WantNewServers::False,
+		                         WantTrueBest::True,
+		                         PreferLowerDiskUtil::True,
+		                         TeamMustHaveShards::False,
+		                         teamSetIndex);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5478,8 +5523,11 @@ public:
 		 */
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0), UID(4, 0) };
 
-		state GetTeamRequest req(
-		    WantNewServers::False, WantTrueBest::True, PreferLowerDiskUtil::True, TeamMustHaveShards::False, teamSetIndex);
+		state GetTeamRequest req(WantNewServers::False,
+		                         WantTrueBest::True,
+		                         PreferLowerDiskUtil::True,
+		                         TeamMustHaveShards::False,
+		                         teamSetIndex);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5529,8 +5577,11 @@ public:
 
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
-		state GetTeamRequest req(
-		    WantNewServers::True, WantTrueBest::True, PreferLowerDiskUtil::True, TeamMustHaveShards::False, teamSetIndex);
+		state GetTeamRequest req(WantNewServers::True,
+		                         WantTrueBest::True,
+		                         PreferLowerDiskUtil::True,
+		                         TeamMustHaveShards::False,
+		                         teamSetIndex);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5579,8 +5630,11 @@ public:
 		 */
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
-		state GetTeamRequest req(
-		    WantNewServers::True, WantTrueBest::True, PreferLowerDiskUtil::False, TeamMustHaveShards::False, teamSetIndex);
+		state GetTeamRequest req(WantNewServers::True,
+		                         WantTrueBest::True,
+		                         PreferLowerDiskUtil::False,
+		                         TeamMustHaveShards::False,
+		                         teamSetIndex);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5631,8 +5685,11 @@ public:
 		 */
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
-		state GetTeamRequest req(
-		    WantNewServers::True, WantTrueBest::True, PreferLowerDiskUtil::True, TeamMustHaveShards::False, teamSetIndex);
+		state GetTeamRequest req(WantNewServers::True,
+		                         WantTrueBest::True,
+		                         PreferLowerDiskUtil::True,
+		                         TeamMustHaveShards::False,
+		                         teamSetIndex);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5688,8 +5745,11 @@ public:
 		 */
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
-		state GetTeamRequest req(
-		    WantNewServers::True, WantTrueBest::True, PreferLowerDiskUtil::True, TeamMustHaveShards::False, teamSetIndex);
+		state GetTeamRequest req(WantNewServers::True,
+		                         WantTrueBest::True,
+		                         PreferLowerDiskUtil::True,
+		                         TeamMustHaveShards::False,
+		                         teamSetIndex);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5705,6 +5765,7 @@ public:
 		Reference<IReplicationPolicy> policy = makeReference<PolicyAcross>(1, "zoneid", makeReference<PolicyOne>());
 		state int processSize = 5;
 		state int teamSize = 1;
+		state int teamSetIndex = 0;
 		state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
 
 		int64_t capacity = 1000 * 1024 * 1024, available = 800 * 1024 * 1024;
@@ -5738,6 +5799,7 @@ public:
 		                         wantsTrueBest,
 		                         preferLowerDiskUtil,
 		                         teamMustHaveShards,
+		                         teamSetIndex,
 		                         forReadBalance,
 		                         PreferLowerReadUtil::True);
 		req.completeSources = completeSources;
@@ -5746,6 +5808,7 @@ public:
 		                             wantsTrueBest,
 		                             PreferLowerDiskUtil::False,
 		                             teamMustHaveShards,
+		                             teamSetIndex,
 		                             forReadBalance,
 		                             PreferLowerReadUtil::False);
 
@@ -5807,8 +5870,11 @@ public:
 
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
-		state GetTeamRequest req(
-		    WantNewServers::True, WantTrueBest::True, PreferLowerDiskUtil::True, TeamMustHaveShards::False, teamSetIndex);
+		state GetTeamRequest req(WantNewServers::True,
+		                         WantTrueBest::True,
+		                         PreferLowerDiskUtil::True,
+		                         TeamMustHaveShards::False,
+		                         teamSetIndex);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5852,6 +5918,11 @@ TEST_CASE("/DataDistribution/AddTeamsBestOf/SkippingBusyServers") {
 
 TEST_CASE("/DataDistribution/AddTeamsBestOf/NotEnoughServers") {
 	wait(DDTeamCollectionUnitTest::AddTeamsBestOf_NotEnoughServers());
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/AddTeamsBestOf/MultipleTeamSets") {
+	wait(DDTeamCollectionUnitTest::AddTeamsBestOf_MultipleTeamSets());
 	return Void();
 }
 

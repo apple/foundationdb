@@ -537,6 +537,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 	state Reference<DDTeamCollection> primaryTeamCollection;
 	state Reference<DDTeamCollection> remoteTeamCollection;
 	state bool trackerCancelled;
+	state int teamSetCount = 1;
+
 	loop {
 		trackerCancelled = false;
 
@@ -778,6 +780,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			    configuration,
 			    primaryDcId,
 			    configuration.usableRegions > 1 ? remoteDcIds : std::vector<Optional<Key>>(),
+			    teamSetCount,
 			    readyToStart.getFuture(),
 			    zeroHealthyTeams[0],
 			    IsPrimary::True,
@@ -799,6 +802,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 				                                    configuration,
 				                                    remoteDcIds,
 				                                    Optional<std::vector<Optional<Key>>>(),
+				                                    teamSetCount,
 				                                    readyToStart.getFuture() && remoteRecovered(self->dbInfo),
 				                                    zeroHealthyTeams[1],
 				                                    IsPrimary::False,
