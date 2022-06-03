@@ -479,7 +479,7 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
                                            Optional<std::pair<KeyRange, UID>> oldGranuleComplete) {
 	wait(delay(0, TaskPriority::BlobWorkerUpdateStorage));
 
-	std::string fileName = randomBGFilename(bwData->id, granuleID, currentDeltaVersion, ".delta");
+	state std::string fileName = randomBGFilename(bwData->id, granuleID, currentDeltaVersion, ".delta");
 
 	state Value serialized = ObjectWriter::toValue(deltasToWrite, Unversioned());
 	state size_t serializedSize = serialized.size();
