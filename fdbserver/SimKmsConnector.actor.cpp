@@ -153,20 +153,25 @@ static Standalone<BlobMetadataDetailsRef> createBlobMetadata(BlobMetadataDomainI
 	int type = deterministicRandom()->randomInt(0, 3);
 	int partitionCount = (type == 0) ? 0 : deterministicRandom()->randomInt(2, 12);
 	fmt::print("SimBlobMetadata ({})\n", domainId);
+	TraceEvent ev(SevDebug, "SimBlobMetadata");
+	ev.detail("DomainId", domainId).detail("Type", type).detail("PartitionCount", partitionCount);
 	if (type == 0) {
 		// single storage location
 		metadata.base = StringRef(metadata.arena(), "file://fdbblob/" + std::to_string(domainId) + "/");
 		fmt::print("  {}\n", metadata.base.get().printable());
+		ev.detail("Base", metadata.base);
 	}
 	if (type == 1) {
 		// simulate hash prefixing in s3
 		metadata.base = StringRef(metadata.arena(), "file://fdbblob/"_sr);
+		ev.detail("Base", metadata.base);
 		fmt::print("    {} ({})\n", metadata.base.get().printable(), partitionCount);
 		for (int i = 0; i < partitionCount; i++) {
 			metadata.partitions.push_back_deep(metadata.arena(),
 			                                   deterministicRandom()->randomUniqueID().shortString() + "-" +
 			                                       std::to_string(domainId) + "/");
 			fmt::print("      {}\n", metadata.partitions.back().printable());
+			ev.detail("P" + std::to_string(i), metadata.partitions.back());
 		}
 	}
 	if (type == 2) {
@@ -175,6 +180,7 @@ static Standalone<BlobMetadataDetailsRef> createBlobMetadata(BlobMetadataDomainI
 			metadata.partitions.push_back_deep(
 			    metadata.arena(), "file://fdbblob" + std::to_string(domainId) + "_" + std::to_string(i) + "/");
 			fmt::print("      {}\n", metadata.partitions.back().printable());
+			ev.detail("P" + std::to_string(i), metadata.partitions.back());
 		}
 	}
 	return metadata;

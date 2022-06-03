@@ -52,7 +52,7 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
-#define BW_DEBUG true
+#define BW_DEBUG false
 #define BW_REQUEST_DEBUG false
 
 /*
@@ -479,11 +479,7 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
                                            Optional<std::pair<KeyRange, UID>> oldGranuleComplete) {
 	wait(delay(0, TaskPriority::BlobWorkerUpdateStorage));
 
-	// Prefix filename with random chars both to avoid hotspotting on granuleID, and to have unique file names if
-	// multiple blob workers try to create the exact same file at the same millisecond (which observably happens)
-	std::string fileName = deterministicRandom()->randomUniqueID().shortString() + "_" + granuleID.toString() + "_T" +
-	                       std::to_string((uint64_t)(1000.0 * now())) + "_V" + std::to_string(currentDeltaVersion) +
-	                       ".delta";
+	std::string fileName = randomBGFilename(bwData->id, granuleID, currentDeltaVersion, ".delta");
 
 	state Value serialized = ObjectWriter::toValue(deltasToWrite, Unversioned());
 	state size_t serializedSize = serialized.size();
@@ -583,11 +579,7 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
                                           Version version,
                                           PromiseStream<RangeResult> rows,
                                           bool createGranuleHistory) {
-	// Prefix filename with random chars both to avoid hotspotting on granuleID, and to have unique file names if
-	// multiple blob workers try to create the exact same file at the same millisecond (which observably happens)
-	state std::string fileName = deterministicRandom()->randomUniqueID().shortString() + "_" + granuleID.toString() +
-	                             "_T" + std::to_string((uint64_t)(1000.0 * now())) + "_V" + std::to_string(version) +
-	                             ".snapshot";
+	std::string fileName = randomBGFilename(bwData->id, granuleID, version, ".snapshot");
 	state Standalone<GranuleSnapshot> snapshot;
 
 	wait(delay(0, TaskPriority::BlobWorkerUpdateStorage));
@@ -2760,9 +2752,10 @@ ACTOR Future<Reference<BlobConnectionProvider>> loadBStoreForTenant(Reference<Bl
 		} else {
 			TEST(true); // bstore for unknown tenant
 			// Assume not loaded yet, just wait a bit. Could do sophisticated mechanism but will redo tenant loading to
-			// be versioned anyway
+			// be versioned anyway. 10 retries means it's likely not a transient race with loading tenants, and instead
+			// a persistent issue.
 			retryCount++;
-			TraceEvent(retryCount < 10 ? SevDebug : SevWarn, "BlobWorkerUnknownTenantForGranule", bwData->id)
+			TraceEvent(retryCount <= 10 ? SevDebug : SevWarn, "BlobWorkerUnknownTenantForGranule", bwData->id)
 			    .detail("KeyRange", keyRange);
 			wait(delay(0.1));
 		}

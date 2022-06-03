@@ -49,7 +49,7 @@
  * The Blob Manager is responsible for managing range granules, and recruiting and monitoring Blob Workers.
  */
 
-#define BM_DEBUG true
+#define BM_DEBUG false
 
 void handleClientBlobRange(KeyRangeMap<bool>* knownBlobRanges,
                            Arena& ar,
@@ -2289,8 +2289,6 @@ static Future<Void> deleteFile(Reference<BlobConnectionProvider> bstoreProvider,
 	return bstore->deleteFile(filePath);
 }
 
-// since all BM operations for a tenant are driven by discovering the tenant from the tenant map, it will always know
-// about this tenant
 ACTOR Future<Reference<BlobConnectionProvider>> getBStoreForGranule(Reference<BlobManagerData> self,
                                                                     KeyRange granuleRange) {
 	if (self->bstore.isValid()) {

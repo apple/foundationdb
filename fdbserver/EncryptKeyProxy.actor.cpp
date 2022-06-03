@@ -444,8 +444,7 @@ void refreshEncryptionKeys(Reference<EncryptKeyProxyData> ekpProxyData, KmsConne
 ACTOR Future<Void> getLatestBlobMetadata(Reference<EncryptKeyProxyData> ekpProxyData,
                                          KmsConnectorInterface kmsConnectorInf,
                                          EKPGetLatestBlobMetadataRequest req) {
-	// Scan the cached cipher-keys and filter our baseCipherIds locally cached
-	// for the rest, reachout to KMS to fetch the required details
+	// Use cached metadata if it exists, otherwise reach out to KMS
 	state Standalone<VectorRef<BlobMetadataDetailsRef>> metadataDetails;
 	state Optional<TraceEvent> dbgTrace =
 	    req.debugId.present() ? TraceEvent("GetBlobMetadata", ekpProxyData->myId) : Optional<TraceEvent>();
@@ -464,7 +463,7 @@ ACTOR Future<Void> getLatestBlobMetadata(Reference<EncryptKeyProxyData> ekpProxy
 	if (dbgTrace.present()) {
 		dbgTrace.get().detail("NKeys", dedupedDomainIds.size());
 		for (BlobMetadataDomainId id : dedupedDomainIds) {
-			// log encryptDomainIds queried
+			// log domainids queried
 			dbgTrace.get().detail("BMQ" + std::to_string(id), "");
 		}
 	}
@@ -500,11 +499,10 @@ ACTOR Future<Void> getLatestBlobMetadata(Reference<EncryptKeyProxyData> ekpProxy
 			for (auto& item : kmsRep.metadataDetails) {
 				metadataDetails.push_back(metadataDetails.arena(), item);
 
-				// Record the fetched cipher details to the local cache for the future references
+				// Record the fetched metadata to the local cache for the future references
 				ekpProxyData->insertIntoBlobMetadataCache(item.domainId, item);
 
 				if (dbgTrace.present()) {
-					// {encryptDomainId, baseCipherId} forms a unique tuple across encryption domains
 					dbgTrace.get().detail("BMI" + std::to_string(item.domainId), "");
 				}
 			}
