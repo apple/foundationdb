@@ -241,7 +241,11 @@ void updateLiveCommittedVersion(Reference<MasterData> self, ReportRawCommittedVe
 	if (req.version > self->liveCommittedVersion.get()) {
 		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR && req.writtenTags.present()) {
 			// TraceEvent("Received ReportRawCommittedVersionRequest").detail("Version",req.version);
-			self->ssVersionVector.setVersion(req.writtenTags.get(), req.version);
+			int8_t primaryLocality = tagLocalityInvalid;
+			if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_HA_OPTIMIZATION && self->myInterface.locality.dcId().present()) {
+				primaryLocality = std::stoi(self->myInterface.locality.dcId().get().toString());
+			}
+			self->ssVersionVector.setVersion(req.writtenTags.get(), req.version, primaryLocality);
 			self->versionVectorTagUpdates += req.writtenTags.get().size();
 		}
 		auto curTime = now();
