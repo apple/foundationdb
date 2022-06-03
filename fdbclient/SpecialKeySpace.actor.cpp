@@ -2772,7 +2772,24 @@ Future<RangeResult> TenantMapRangeImpl::getRange(ReadYourWritesTransaction* ryw,
 	return getTenantList(ryw, kr, limitsHint);
 }
 
-ACTOR Future<Void> deleteTenantRange(ReadYourWritesTransaction* ryw, TenantName beginTenant, TenantName endTenant) {
+ACTOR Future<Void> createTenants(ReadYourWritesTransaction* ryw, std::vector<TenantNameRef> tenants) {
+	Optional<Value> lastIdVal = wait(ryw->getTransaction().get(tenantLastIdKey));
+	int64_t previousId = lastIdVal.present() ? TenantMapEntry::prefixToId(lastIdVal.get()) : -1;
+
+	std::vector<Future<Void>> createFutures;
+	for (auto tenant : tenants) {
+		createFutures.push_back(
+		    success(ManagementAPI::createTenantTransaction(&ryw->getTransaction(), tenant, ++previousId)));
+	}
+
+	ryw->getTransaction().set(tenantLastIdKey, TenantMapEntry::idToPrefix(previousId));
+	wait(waitForAll(createFutures));
+	return Void();
+}
+
+ACTOR Future<Void> deleteTenantRange(ReadYourWritesTransaction* ryw,
+                                     TenantNameRef beginTenant,
+                                     TenantNameRef endTenant) {
 	std::map<TenantName, TenantMapEntry> tenants = wait(
 	    ManagementAPI::listTenantsTransaction(&ryw->getTransaction(), beginTenant, endTenant, CLIENT_KNOBS->TOO_MANY));
 
@@ -2795,6 +2812,7 @@ ACTOR Future<Void> deleteTenantRange(ReadYourWritesTransaction* ryw, TenantName 
 
 Future<Optional<std::string>> TenantMapRangeImpl::commit(ReadYourWritesTransaction* ryw) {
 	auto ranges = ryw->getSpecialKeySpaceWriteMap().containedRanges(range);
+	std::vector<TenantNameRef> tenantsToCreate;
 	std::vector<Future<Void>> tenantManagementFutures;
 	for (auto range : ranges) {
 		if (!range.value().first) {
@@ -2807,8 +2825,7 @@ Future<Optional<std::string>> TenantMapRangeImpl::commit(ReadYourWritesTransacti
 		        .removePrefix(TenantMapRangeImpl::submoduleRange.begin);
 
 		if (range.value().second.present()) {
-			tenantManagementFutures.push_back(
-			    success(ManagementAPI::createTenantTransaction(&ryw->getTransaction(), tenantName)));
+			tenantsToCreate.push_back(tenantName);
 		} else {
 			// For a single key clear, just issue the delete
 			if (KeyRangeRef(range.begin(), range.end()).singleKeyRange()) {
@@ -2825,6 +2842,10 @@ Future<Optional<std::string>> TenantMapRangeImpl::commit(ReadYourWritesTransacti
 				tenantManagementFutures.push_back(deleteTenantRange(ryw, tenantName, endTenant));
 			}
 		}
+	}
+
+	if (tenantsToCreate.size()) {
+		tenantManagementFutures.push_back(createTenants(ryw, tenantsToCreate));
 	}
 
 	return tag(waitForAll(tenantManagementFutures), Optional<std::string>());
