@@ -7,13 +7,13 @@ mod ping_request;
 #[path = "../../target/flatbuffers/Void_generated.rs"]
 mod void;
 
-use crate::flow::Result;
 use crate::flow::connection::Connection;
+use crate::flow::file_identifier::{FileIdentifier, IdentifierType, ParsedFileIdentifier};
 use crate::flow::frame::Frame;
 use crate::flow::uid::UID;
-use crate::flow::file_identifier::{ParsedFileIdentifier, FileIdentifier, IdentifierType};
+use crate::flow::Result;
 
-const PING_FILE_IDENTIFIER : ParsedFileIdentifier = ParsedFileIdentifier {
+const PING_FILE_IDENTIFIER: ParsedFileIdentifier = ParsedFileIdentifier {
     file_identifier: 0x47d2c7,
     inner_wrapper: IdentifierType::None,
     outer_wrapper: IdentifierType::None,
@@ -23,10 +23,8 @@ const PING_FILE_IDENTIFIER : ParsedFileIdentifier = ParsedFileIdentifier {
 fn serialize_response(token: UID) -> Result<Frame> {
     let mut builder = flatbuffers::FlatBufferBuilder::with_capacity(1024);
     let void = void::Void::create(&mut builder, &void::VoidArgs {});
-    let ensure_table = void::EnsureTable::create(
-        &mut builder,
-        &void::EnsureTableArgs { void: Some(void) },
-    );
+    let ensure_table =
+        void::EnsureTable::create(&mut builder, &void::EnsureTableArgs { void: Some(void) });
     let fake_root = void::FakeRoot::create(
         &mut builder,
         &void::FakeRootArgs {
@@ -42,11 +40,15 @@ fn serialize_response(token: UID) -> Result<Frame> {
         .rewrite_flatbuf(&mut payload)?;
     // println!("reply: {:x?}", builder.finished_data());
     Ok(Frame { token, payload })
- }
+}
 
-pub async fn handle(conn: &mut Connection, parsed_file_identifier: ParsedFileIdentifier, frame: Frame) -> Result<()> {
+pub async fn handle(
+    conn: &mut Connection,
+    parsed_file_identifier: ParsedFileIdentifier,
+    frame: Frame,
+) -> Result<()> {
     if parsed_file_identifier != PING_FILE_IDENTIFIER {
-        return Err(format!("Expected PingRequest.  Got {:?}", parsed_file_identifier).into())
+        return Err(format!("Expected PingRequest.  Got {:?}", parsed_file_identifier).into());
     }
     let fake_root = ping_request::root_as_fake_root(&frame.payload[..])?;
     let reply_promise = fake_root.ping_request().unwrap().reply_promise().unwrap();

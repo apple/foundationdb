@@ -220,7 +220,11 @@ impl Frame {
     }
     pub fn peek_file_identifier(&self) -> Result<FileIdentifier> {
         if self.payload.len() < 8 {
-            Err(format!("Payload too short to contain file identifier: {:x?}", self.payload).into())
+            Err(format!(
+                "Payload too short to contain file identifier: {:x?}",
+                self.payload
+            )
+            .into())
         } else {
             let file_identifier = u32::from_le_bytes(self.payload[4..8].try_into()?);
             FileIdentifier::new_from_wire(file_identifier)

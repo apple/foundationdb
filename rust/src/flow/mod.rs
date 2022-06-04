@@ -13,7 +13,6 @@ mod file_identifier_table;
 pub mod frame;
 pub mod uid;
 
-
 struct Listener {
     listener: TcpListener,
     limit_connections: Arc<Semaphore>,
@@ -48,19 +47,29 @@ pub async fn hello() -> Result<()> {
                 }
                 Some(frame) => {
                     if frame.payload.len() < 8 {
-                            println!("Frame is too short! {:x?}", frame);
+                        println!("Frame is too short! {:x?}", frame);
                         continue;
                     }
 
                     let file_identifier = frame.peek_file_identifier()?;
                     let parsed_file_identifier = file_identifier_table.from_id(file_identifier)?;
-    
+
                     match frame.token.get_well_known_endpoint() {
                         Some(uid::WLTOKEN::PingPacket) => {
-                            super::handlers::ping_request::handle(&mut conn, parsed_file_identifier, frame).await?;
+                            super::handlers::ping_request::handle(
+                                &mut conn,
+                                parsed_file_identifier,
+                                frame,
+                            )
+                            .await?;
                         }
                         Some(uid::WLTOKEN::NetworkTest) => {
-                            super::handlers::network_test::handle(&mut conn, parsed_file_identifier, frame).await?;
+                            super::handlers::network_test::handle(
+                                &mut conn,
+                                parsed_file_identifier,
+                                frame,
+                            )
+                            .await?;
                         }
                         Some(uid::WLTOKEN::EndpointNotFound) => {
                             println!("EndpointNotFound payload: {:x?}", frame);
@@ -79,7 +88,7 @@ pub async fn hello() -> Result<()> {
                             println!("{:x?} {:04x?}", frame.token, parsed_file_identifier);
                         }
                     }
-                },
+                }
             }
         }
     }

@@ -13,7 +13,7 @@ my @lines = `git grep -B1 FileIdentifier\\\ file_identifier\\\ =\\\ `;
 
 print "// generated with ./scrape-file-identifiers.pl > src/flow/file_identifier_table.rs\n";
 print "// you may need to edit the FDB C++ code to remove any ?s in the output.\n";
-print "pub fn file_identifier_table() -> std::collections::HashMap<&'static str, u32> {\n   vec![\n";
+print "pub fn file_identifier_table() -> std::collections::HashMap<&'static str, u32> {\n    vec![\n";
 
 my $struct;
 for my $line (@lines) {
@@ -23,11 +23,13 @@ for my $line (@lines) {
     } elsif ($line =~ /struct\s+(\S+)/) {
         $struct = $1;
     } elsif ($line =~ /file_identifier = (\d+)/) {
-        print "      (\"$struct\", $1),\n";
+        print "        (\"$struct\", $1),\n";
     } elsif ($line =~ /file_identifier = /) {
         # skip
     } else {
         warn "??? $line\n";
     }
 }
-print "   ].into_iter().collect()\n}\n";
+print "    ]\n";
+print "    .into_iter()\n";
+print "    .collect()\n}\n";

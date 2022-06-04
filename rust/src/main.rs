@@ -1,6 +1,6 @@
 mod fdbserver;
-mod handlers;
 mod flow;
+mod handlers;
 
 #[tokio::main]
 async fn main() -> flow::Result<()> {
