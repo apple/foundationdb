@@ -42,7 +42,7 @@ const char* XmlTraceLogFormatter::getFooter() const {
 }
 
 void XmlTraceLogFormatter::escape(std::ostringstream& oss, std::string source) const {
-	for(;;) {
+	for (;;) {
 		int index = source.find_first_of(std::string({ '&', '"', '<', '>', '\r', '\n', '\0' }));
 		if (index == source.npos) {
 			break;
