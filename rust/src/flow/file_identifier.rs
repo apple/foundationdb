@@ -49,17 +49,20 @@ impl FileIdentifier {
     fn is_nested_composed(&self) -> bool {
         (self.file_identifier & 0xF << 28) != 0
     }
+    #[allow(dead_code)]
     pub fn to_reply_promise(&self) -> Result<FileIdentifier> {
-        self.compose(1)
+        self.compose(IdentifierType::ReplyPromise.to_u8().unwrap())
     }
     pub fn to_error_or(&self) -> Result<FileIdentifier> {
-        self.compose(2)
+        self.compose(IdentifierType::ErrorOr.to_u8().unwrap())
     }
+    #[allow(dead_code)]
     pub fn to_vector_ref(&self) -> Result<FileIdentifier> {
-        self.compose(3)
+        self.compose(IdentifierType::VectorRef.to_u8().unwrap())
     }
+    #[allow(dead_code)]
     pub fn to_optional(&self) -> Result<FileIdentifier> {
-        self.compose(4)
+        self.compose(IdentifierType::Optional.to_u8().unwrap())
     }
 
     // need to tell flatbuffers to put a file identifier in, but FDB flatbuffers
@@ -123,6 +126,7 @@ impl FileIdentifierNames {
         };
         Ok(ParsedFileIdentifier { file_identifier, inner_wrapper, outer_wrapper, file_identifier_name })
     }
+    #[allow(dead_code)]
     pub fn name_to_raw(&self, name : &'static str) -> Result<FileIdentifier> {
         match self.name_to_id.get(name) {
             None => Err("Name not found!".into()),

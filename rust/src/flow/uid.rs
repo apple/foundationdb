@@ -33,11 +33,13 @@ impl UID {
             ],
         })
     }
+    #[allow(dead_code)]
     pub fn well_known_token(id: u64) -> UID {
         UID {
             uid: [u64::MAX, id],
         }
     }
+    #[allow(dead_code)]
     pub fn get_adjusted_token(&self, index: u32) -> UID {
         let new_index = self.uid[1] + (index as u64);
         UID {
@@ -48,6 +50,7 @@ impl UID {
         }
     }
 
+    #[allow(dead_code)]
     pub fn is_valid(&self) -> bool {
         self.uid[0] != 0 || self.uid[1] != 0
     }

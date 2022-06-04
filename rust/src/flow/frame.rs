@@ -36,7 +36,6 @@ pub enum ConnectPacketFlags {
 
 #[derive(Debug)]
 pub struct ConnectPacket {
-    len: u32,
     version_flags: u8, // Really just 4 bits
     version: u64,      // protocol version bytes.  Human readable in hex.
     canonical_remote_port: u16,
@@ -49,7 +48,6 @@ pub struct ConnectPacket {
 impl ConnectPacket {
     pub fn new() -> Self {
         ConnectPacket {
-            len: 28,
             version_flags: 1, // TODO: set these to real values!
             version: 0xfdb00b072000000,
             canonical_remote_port: 6789,
@@ -58,9 +56,6 @@ impl ConnectPacket {
             connect_packet_flags: ConnectPacketFlags::IPV4,
             canonical_remote_ip6: [0; 16],
         }
-    }
-    pub fn is_ipv6(&self) -> bool {
-        self.connect_packet_flags == ConnectPacketFlags::IPV6
     }
     pub fn as_bytes(&self) -> Vec<u8> {
         let mut vec = Vec::new();
@@ -134,7 +129,6 @@ pub fn get_connect_packet(bytes: &mut BytesMut) -> Result<Option<ConnectPacket>>
     };
 
     let cp = ConnectPacket {
-        len,
         version_flags,
         canonical_remote_port: canonical_remote_port,
         version,
