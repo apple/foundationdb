@@ -67,9 +67,11 @@ struct RelocateShard {
 	bool cancelled;
 	std::shared_ptr<DataMove> dataMove;
 	UID dataMoveId;
+	// std::vector<std::tuple<uint64_t, KeyRange, StorageMetrics>> toReduceMetrics;
 
 	RelocateShard() : priority(0), cancelled(false) {}
 	RelocateShard(KeyRange const& keys, int priority) : keys(keys), priority(priority), cancelled(false) {}
+	// RelocateShard(KeyRange const& keys, int priority, std::vector<std::tuple<uint64_t, KeyRange, StorageMetrics>> toReduceMetrics) : keys(keys), priority(priority), toReduceMetrics(toReduceMetrics), cancelled(false) {}
 
 	bool isRestore() const { return this->dataMove != nullptr; }
 };
@@ -156,9 +158,11 @@ struct GetTeamRequest {
 struct GetMetricsRequest {
 	KeyRange keys;
 	Promise<StorageMetrics> reply;
+	// uint64_t debugID = 0;
 
 	GetMetricsRequest() {}
 	GetMetricsRequest(KeyRange const& keys) : keys(keys) {}
+	// GetMetricsRequest(KeyRange const& keys, uint64_t debugID) : keys(keys), debugID(debugID) {}
 };
 
 struct GetMetricsListRequest {
@@ -199,6 +203,25 @@ public:
 		std::string toString() const { return describe(servers); };
 	};
 
+	struct PhysicalShard {
+		uint64_t id;
+		// On disk
+		int64_t bytesOnDisk = 0;
+		// In memory
+		int64_t bytesInMemory = 0;
+		// I/O
+		int64_t bytesPerKSecond = 0;
+		int64_t bytesWritePerKSecond = 0;
+		int64_t bytesReadPerKSecond = 0; 
+
+		PhysicalShard() : id(0) {}
+		explicit PhysicalShard(uint64_t id) : id(id), bytesOnDisk(0) {}
+		explicit PhysicalShard(uint64_t id,  StorageMetrics const& metrics) : id(id), bytesOnDisk(metrics.bytes) {}
+		// operator< used for selecting the physicalShard with the minimal bytesOnDisk
+		bool operator<(const struct PhysicalShard& right) const { return id < right.id ? true : false; }
+		std::string toString() const { return std::to_string(id); }
+	};
+
 	// This tracks the data distribution on the data distribution server so that teamTrackers can
 	//   relocate the right shards when a team is degraded.
 
@@ -229,31 +252,18 @@ public:
 
 	PromiseStream<KeyRange> restartRequests;
 
-	struct PhysicalShard {
-		uint64_t id;
-		// On disk
-		uint64_t bytesOnDisk = 0;
-		// In memory
-		uint64_t bytesInMemory = 0;
-		// I/O
-		int64_t bytesPerKSecond = 0;
-		int64_t bytesWritePerKSecond = 0;
-		int64_t bytesReadPerKSecond = 0; 
-
-		PhysicalShard() : id(0) {}
-		explicit PhysicalShard(uint64_t id) : id(id) { bytesOnDisk = 0; }
-		explicit PhysicalShard(uint64_t id, uint64_t bytesOnDisk) : id(id), bytesOnDisk(bytesOnDisk) {}
-		// operator< used for selecting the physicalShard with the minimal bytesOnDisk
-		bool operator<(const struct PhysicalShard& right) const { return id < right.id ? true : false; }
-		std::string toString() const { return std::to_string(id); }
-	};
+	// For PhysicalShard
+	KeyRangeMap<uint64_t> keyRangePhysicalShardIDMap;
+	std::map<uint64_t, PhysicalShard> physicalShardCollection;
 	void updatePhysicalShardToTeams(uint64_t physicalShardID, 
-		std::vector<Team> inputTeams, KeyRange keys, StorageMetrics const& metrics, int expectedNumServersPerTeam, std::string caller, uint64_t debugID);
-	Optional<uint64_t> tryGetPhysicalShardIDFor(Team team, uint64_t debugID);
+			std::vector<Team> inputTeams, int expectedNumServersPerTeam, uint64_t debugID);
+	Optional<uint64_t> tryGetPhysicalShardIDFor(Team team, StorageMetrics const& metrics, uint64_t debugID);
 	Optional<Team> tryGetRemoteTeamWith(uint64_t physicalShardID, int expectedTeamSize, uint64_t debugID);
 	void printTeamPhysicalShardsMapping(std::string);
 	uint64_t generateNewPhysicalShardID(uint64_t debugID);
-	void updatePhysicalShardMetrics(KeyRange keyRange, StorageMetrics const& metrics);
+	void updatePhysicalShardMetrics(KeyRange keys, StorageMetrics const& newMetrics, StorageMetrics const& oldMetrics, bool forDDRestore);
+	void reduceMetricsForMoveOut(uint64_t physicalShardID, StorageMetrics const& metrics);
+	void increaseMetricsForMoveIn(uint64_t physicalShardID, StorageMetrics const& metrics);
 
 private:
 	struct OrderByTeamKey {
@@ -272,7 +282,6 @@ private:
 	std::set<std::pair<Team, KeyRange>, OrderByTeamKey> team_shards;
 	std::map<UID, int> storageServerShards;
 	std::map<Team, std::set<uint64_t>> teamPhysicalShardIDs; // the mapping from team to physicalShards
-	KeyRangeMap<PhysicalShard> keyRangePhysicalShardMap;
 	void erase(Team team, KeyRange const& range);
 	void insert(Team team, KeyRange const& range);
 };

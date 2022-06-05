@@ -792,11 +792,22 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 						destTeams.push_back(ShardsAffectedByTeamFailure::Team(iShard.remoteDest, false));
 					}
 					if (iShard.srcId != anonymousShardId) {
-						shardsAffectedByTeamFailure->updatePhysicalShardToTeams(iShard.srcId.first(), teams, Standalone(keys), StorageMetrics(), configuration.storageTeamSize, "InitBySrc", 0);
+						shardsAffectedByTeamFailure->updatePhysicalShardToTeams(iShard.srcId.first(), teams, configuration.storageTeamSize, 0);
+						if (shardsAffectedByTeamFailure->physicalShardCollection.count(iShard.srcId.first())==0) {
+							shardsAffectedByTeamFailure->physicalShardCollection.insert(
+								std::make_pair(iShard.srcId.first(), ShardsAffectedByTeamFailure::PhysicalShard(iShard.srcId.first())));
+						}
 					}
 					if (iShard.hasDest && iShard.destId != anonymousShardId) {
-						shardsAffectedByTeamFailure->updatePhysicalShardToTeams(iShard.destId.first(), destTeams, Standalone(keys), StorageMetrics(), configuration.storageTeamSize, "InitByDest", 0);
+						shardsAffectedByTeamFailure->updatePhysicalShardToTeams(iShard.destId.first(), destTeams, configuration.storageTeamSize, 1);
+						if (shardsAffectedByTeamFailure->physicalShardCollection.count(iShard.destId.first())==0) {
+							shardsAffectedByTeamFailure->physicalShardCollection.insert(
+								std::make_pair(iShard.destId.first(), ShardsAffectedByTeamFailure::PhysicalShard(iShard.destId.first())));
+						}
 					}
+					// Assigning keyRange to destId is delayed to restoring key move in relocation
+					shardsAffectedByTeamFailure->keyRangePhysicalShardIDMap.insert(Standalone(keys), iShard.srcId.first());
+					// Metrics of physicalShardCollection is inited by trackShardMetrics (see: forDDRestore in updatePhysicalShardMetrics())
 				}
 
 				// if (g_network->isSimulated()) {

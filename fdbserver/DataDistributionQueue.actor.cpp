@@ -1129,6 +1129,8 @@ ACTOR Future<Void> cancelDataMove(struct DDQueueData* self, KeyRange range, cons
 		KeyRange keys = KeyRangeRef(it->range().begin, it->range().end);
 		TraceEvent(SevDebug, "DDQueueCancelDataMove", self->distributorId)
 		    .detail("DataMoveID", it->value().id)
+		    .detail("DataMoveIDFirst", it->value().id.first())
+		    .detail("DataMoveIDSecond", it->value().id.second())
 		    .detail("DataMoveRange", keys)
 		    .detail("Range", range);
 		// auto [iter, inserted] = dms.insert(it->value());
@@ -1261,6 +1263,9 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 							    .detail("TeamCollectionIndex", tciIndex)
 							    .detail("RestoreDataMoveForDest",
 							            describe(tciIndex == 0 ? rd.dataMove->primaryDest : rd.dataMove->remoteDest))
+							    .detail("RdMoveIDFirst", rd.dataMoveId.first())
+							    .detail("RdMoveIDSecond", rd.dataMoveId.second())
+							    .detail("RdMoveID", rd.dataMoveId)
 							    .detail("DebugID", debugID);
 							foundTeams = false;
 							break;
@@ -1271,8 +1276,11 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 							    .detail("TeamCollectionIndex", tciIndex)
 							    .detail("RestoreDataMoveForDest",
 							            describe(tciIndex == 0 ? rd.dataMove->primaryDest : rd.dataMove->remoteDest))
+							    .detail("RdMoveIDFirst", rd.dataMoveId.first())
+							    .detail("RdMoveIDSecond", rd.dataMoveId.second())
+							    .detail("RdMoveID", rd.dataMoveId)
 							    .detail("DebugID", debugID);
-							if (stuckCount >= 50) {
+							if (stuckCount >= 50) { //50
 								throw data_move_dest_team_not_found();
 							}
 							break;
@@ -1364,7 +1372,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 							if (forceToUseNewPhysicalShard) {
 								physicalShardIDCandidate = self->shardsAffectedByTeamFailure->generateNewPhysicalShardID(debugID);
 							} else {
-								Optional<uint64_t> physicalShardIDFetch = self->shardsAffectedByTeamFailure->tryGetPhysicalShardIDFor(primaryTeam, debugID);
+								Optional<uint64_t> physicalShardIDFetch = self->shardsAffectedByTeamFailure->tryGetPhysicalShardIDFor(primaryTeam, metrics, debugID);
 								if (physicalShardIDFetch.present()) {
 									physicalShardIDCandidate = physicalShardIDFetch.get();
 								} else { // if failed to find an available physicalShard
@@ -1394,25 +1402,63 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 
 				if (foundTeams && anyHealthy && !anyDestOverloaded) {
 					ASSERT(rd.completeDests.empty());
-					if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA && !rd.isRestore()) {
-						ASSERT(physicalShardIDCandidate!=UID().first());
-						rd.dataMoveId = UID(physicalShardIDCandidate, deterministicRandom()->randomUInt64());
-						auto inFlightRange = self->inFlight.rangeContaining(rd.keys.begin);
-						inFlightRange.value().dataMoveId = rd.dataMoveId;
-						ASSERT(inFlightRange.range() == rd.keys);
-						ASSERT(inFlightRange.value().randomId == rd.randomId);
-						ASSERT(inFlightRange.value().dataMoveId == rd.dataMoveId);
-						self->dataMoves.insert(rd.keys, DDQueueData::DDDataMove(rd.dataMoveId));
-
-						// Update teamPhysicalShard mapping
-						std::vector<ShardsAffectedByTeamFailure::Team> selectedTeams;
-						for (int i = 0; i < bestTeams.size(); i++) {
-							auto& serverIds = bestTeams[i].first->getServerIDs();
-							selectedTeams.push_back(ShardsAffectedByTeamFailure::Team(serverIds, i == 0));
+					if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+						if (!rd.isRestore()) {
+							// Update dataMoveId and dataMoves
+							ASSERT(physicalShardIDCandidate!=UID().first());
+							rd.dataMoveId = UID(physicalShardIDCandidate, deterministicRandom()->randomUInt64());
+							auto inFlightRange = self->inFlight.rangeContaining(rd.keys.begin);
+							inFlightRange.value().dataMoveId = rd.dataMoveId;
+							ASSERT(inFlightRange.range() == rd.keys);
+							ASSERT(inFlightRange.value().randomId == rd.randomId);
+							ASSERT(inFlightRange.value().dataMoveId == rd.dataMoveId);
+							self->dataMoves.insert(rd.keys, DDQueueData::DDDataMove(rd.dataMoveId));
+							// Update teamPhysicalShard mapping
+							std::vector<ShardsAffectedByTeamFailure::Team> selectedTeams;
+							for (int i = 0; i < bestTeams.size(); i++) {
+								auto& serverIds = bestTeams[i].first->getServerIDs();
+								selectedTeams.push_back(ShardsAffectedByTeamFailure::Team(serverIds, i == 0));
+							}
+							self->shardsAffectedByTeamFailure->updatePhysicalShardToTeams(
+								rd.dataMoveId.first(), selectedTeams, self->singleRegionTeamSize, debugID);
 						}
-						self->shardsAffectedByTeamFailure->updatePhysicalShardToTeams(
-										rd.dataMoveId.first(), 
-										selectedTeams, rd.keys, metrics, self->singleRegionTeamSize, "Update", debugID);
+						// Update physicalShardCollection
+						// Add the metrics to in-physicalShard
+						/*TraceEvent e("UpdatePhysicalShardCollection");
+						e.detail("DebugID", debugID);
+						e.detail("KeyRange", rd.dataMoveId.first());
+						e.detail("IsRestore", rd.isRestore());
+						e.detail("PhysicalShardIDIn", rd.dataMoveId.first());*/
+						if (self->shardsAffectedByTeamFailure->physicalShardCollection.count(rd.dataMoveId.first())==0) {
+							//e.detail("Op", "Insert");
+							ASSERT(!rd.isRestore());
+							self->shardsAffectedByTeamFailure->physicalShardCollection.insert(
+								std::make_pair(rd.dataMoveId.first(), ShardsAffectedByTeamFailure::PhysicalShard(rd.dataMoveId.first(), metrics)));
+						} else {
+							//e.detail("Op", "Update");
+							self->shardsAffectedByTeamFailure->increaseMetricsForMoveIn(rd.dataMoveId.first(), metrics);
+						}
+						// Minus the metrics from the existing (multiple) out-physicalShard(s)
+						auto ranges = self->shardsAffectedByTeamFailure->keyRangePhysicalShardIDMap.intersectingRanges(rd.keys);
+						std::set<uint64_t> physicalShardIDSet;
+						for (auto it = ranges.begin(); it != ranges.end(); ++it) {
+							physicalShardIDSet.insert(it->value());
+						}
+						/*std::string physicalShardIDOut = "";
+						for (auto id : physicalShardIDSet) {
+							physicalShardIDOut = physicalShardIDOut + std::to_string(id) + " ";
+						}*/
+						//e.detail("PhysicalShardIDOut", physicalShardIDOut);
+						for (auto physicalShardID : physicalShardIDSet) { // imprecise: evenly move out bytes
+							StorageMetrics newMetrics = metrics*(1.0/physicalShardIDSet.size());
+							self->shardsAffectedByTeamFailure->reduceMetricsForMoveOut(physicalShardID, newMetrics);
+							/*if (physicalShardIDSet.size()>1) {
+								std::cout << newMetrics.bytes << " = " << metrics.bytes << " * " << 1.0/physicalShardIDSet.size() << "\n";
+							}*/
+						}
+						// std::cout << "Priority: " << rd.priority << "; " << "Move bytes: " << metrics.bytes << " from " << physicalShardIDSet.size() << " different physicalShard" << "\n";
+						// Update keyRangePhysicalShardIDMap must be right after adapting metrics for data move
+						self->shardsAffectedByTeamFailure->keyRangePhysicalShardIDMap.insert(rd.keys, rd.dataMoveId.first());
 					}
 					break;
 				}
@@ -1430,6 +1476,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 					    .detail("SelectedServers", destServersString(bestTeams))
 					    .detail("PhysicalShardIDCandidate", physicalShardIDCandidate)
 					    .detail("RdMoveId", rd.dataMoveId)
+					    .detail("RdMoveIdFirst", rd.dataMoveId.first())
 					    .detail("ForceToUseNewPhysicalShard", forceToUseNewPhysicalShard)
 					    .detail("IsRestore", rd.isRestore())
 					    .detail("FoundTeams", foundTeams)
@@ -1449,6 +1496,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 					    .detail("SelectedServers", destServersString(bestTeams))
 					    .detail("PhysicalShardIDCandidate", physicalShardIDCandidate)
 					    .detail("RdMoveId", rd.dataMoveId)
+					    .detail("RdMoveIdFirst", rd.dataMoveId.first())
 					    .detail("ForceToUseNewPhysicalShard", forceToUseNewPhysicalShard)
 					    .detail("IsRestore", rd.isRestore())
 					    .detail("FoundTeams", foundTeams)
@@ -1539,7 +1587,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 				    .detail("SourceServers", describe(rd.src))
 				    .detail("DestinationTeam", describe(destIds))
 				    .detail("ExtraIds", describe(extraIds))
-				    .detail("SingeZoneTeamSize", self->singleRegionTeamSize);
+				    .detail("SingeZoneTeamSize", self->singleRegionTeamSize)
+				    .detail("PhysicalShardID", rd.dataMoveId.first());
 			} else {
 				TraceEvent(relocateShardInterval.severity, "RelocateShardHasDestination", distributorId)
 				    .detail("PairId", relocateShardInterval.pairID)
@@ -1548,7 +1597,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 				    .detail("SourceServers", describe(rd.src))
 				    .detail("DestinationTeam", describe(destIds))
 				    .detail("ExtraIds", describe(extraIds))
-				    .detail("SingeZoneTeamSize", self->singleRegionTeamSize);
+				    .detail("SingeZoneTeamSize", self->singleRegionTeamSize)
+				    .detail("PhysicalShardID", rd.dataMoveId.first());
 			}
 
 			state Error error = success();
