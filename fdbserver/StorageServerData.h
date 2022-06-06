@@ -32,7 +32,8 @@ struct StorageServerShard {
 	enum ShardState {
 		NotAssigned = 0,
 		MovingIn = 1,
-		ReadWrite = 2,
+		ReadWritePending = 2,
+		ReadWrite = 3,
 	};
 
 	StorageServerShard() = default;
