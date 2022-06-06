@@ -573,7 +573,9 @@ Future<Void> logRouterPeekMessages(PromiseType replyPromise,
 	TLogPeekReply reply;
 	reply.maxKnownVersion = self->version.get();
 	reply.minKnownCommittedVersion = self->poppedVersion;
-	reply.messages = StringRef(reply.arena, messages.toValue());
+	auto messagesValue = messages.toValue();
+	reply.arena.dependsOn(messagesValue.arena());
+	reply.messages = messagesValue;
 	reply.popped = self->minPopped.get() >= self->startVersion ? self->minPopped.get() : 0;
 	reply.end = endVersion;
 	reply.onlySpilled = false;

@@ -2020,7 +2020,9 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 	TLogPeekReply reply;
 	reply.maxKnownVersion = logData->version.get();
 	reply.minKnownCommittedVersion = logData->minKnownCommittedVersion;
-	reply.messages = StringRef(reply.arena, messages.toValue());
+	auto messagesValue = messages.toValue();
+	reply.arena.dependsOn(messagesValue.arena());
+	reply.messages = messagesValue;
 	reply.end = endVersion;
 	reply.onlySpilled = onlySpilled;
 
