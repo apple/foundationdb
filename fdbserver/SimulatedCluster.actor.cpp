@@ -183,7 +183,7 @@ class TestConfig {
 			auto iter = confMap.find(key);
 			if (iter == confMap.end()) {
 				std::cerr << "Unknown configuration attribute " << key << std::endl;
-				TraceEvent("UnknownConfigurationAttribute").detail("Name", std::string(key));
+				TraceEvent(SevError, "UnknownConfigurationAttribute").detail("Name", std::string(key));
 				throw unknown_error();
 			}
 			std::visit(visitor(value), iter->second);
@@ -406,7 +406,7 @@ public:
 			}
 		} catch (std::exception& e) {
 			std::cerr << e.what() << std::endl;
-			TraceEvent("TOMLParseError").detail("Error", printable(e.what()));
+			TraceEvent(SevError, "TOMLParseError").detail("Error", printable(e.what()));
 			throw unknown_error();
 		}
 		// Verify that we can use the passed config

@@ -388,6 +388,7 @@ public:
 		} catch (Error& e) {
 			p.sendError(e);
 		} catch (...) {
+			TraceEvent(SevError, "UnknownError7").backtrace();
 			p.sendError(unknown_error());
 		}
 	}
@@ -587,6 +588,7 @@ public:
 		} catch (Error& e) {
 			p.sendError(e);
 		} catch (...) {
+			TraceEvent(SevError, "UnknownError8").backtrace();
 			p.sendError(unknown_error());
 		}
 	}
@@ -1994,14 +1996,14 @@ Reference<IListener> Net2::listen(NetworkAddress localAddr) {
 		throw x;
 	} catch (std::exception const& e) {
 		Error x = unknown_error();
-		TraceEvent("Net2ListenError").error(x).detail("Message", e.what());
+		TraceEvent(SevError, "Net2ListenError").error(x).detail("Message", e.what());
 		throw x;
 	} catch (Error& e) {
 		TraceEvent("Net2ListenError").error(e);
 		throw e;
 	} catch (...) {
 		Error x = unknown_error();
-		TraceEvent("Net2ListenError").error(x);
+		TraceEvent(SevError, "Net2ListenError").error(x);
 		throw x;
 	}
 }

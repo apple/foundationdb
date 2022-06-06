@@ -1403,7 +1403,7 @@ TestSet readTOMLTests(std::string fileName) {
 		return readTOMLTests_(fileName);
 	} catch (std::exception& e) {
 		std::cerr << e.what() << std::endl;
-		TraceEvent("TOMLParseError").detail("Error", printable(e.what()));
+		TraceEvent(SevError, "TOMLParseError").detail("Error", printable(e.what()));
 		// TODO: replace with toml_parse_error();
 		throw unknown_error();
 	}

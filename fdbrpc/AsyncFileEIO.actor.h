@@ -498,6 +498,7 @@ private:
 				    data->result = e;
 				    req->result = -1;
 			    } catch (...) {
+					TraceEvent(SevError, "UnknownError3").backtrace();
 				    data->result = unknown_error();
 				    req->result = -1;
 			    }

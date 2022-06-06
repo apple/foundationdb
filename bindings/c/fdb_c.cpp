@@ -95,6 +95,7 @@ extern "C" DLLEXPORT fdb_bool_t fdb_error_predicate(int predicate_test, fdb_erro
 		else                                                                                                           \
 			return ((FDBFuture*)(ThreadFuture<return_type>(e)).extractPtr());                                          \
 	} catch (...) {                                                                                                    \
+		fprintf(stderr, "Unexpected FDB unknown error 1\n");                                                           \
 		return ((FDBFuture*)(ThreadFuture<return_type>(unknown_error())).extractPtr());                                \
 	}
 
@@ -107,6 +108,7 @@ extern "C" DLLEXPORT fdb_bool_t fdb_error_predicate(int predicate_test, fdb_erro
 		else                                                                                                           \
 			return ((FDBResult*)(ThreadResult<return_type>(e)).extractPtr());                                          \
 	} catch (...) {                                                                                                    \
+		fprintf(stderr, "Unexpected FDB unknown error 2\n");                                                           \
 		return ((FDBResult*)(ThreadResult<return_type>(unknown_error())).extractPtr());                                \
 	}
 
@@ -119,6 +121,7 @@ extern "C" DLLEXPORT fdb_bool_t fdb_error_predicate(int predicate_test, fdb_erro
 		else                                                                                                           \
 			return e.code();                                                                                           \
 	} catch (...) {                                                                                                    \
+		fprintf(stderr, "Unexpected FDB unknown error 3\n");                                                           \
 		return error_code_unknown_error;                                                                               \
 	}
 

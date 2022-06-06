@@ -160,6 +160,7 @@ public:
 		} catch (Error& e) {
 			errors.sendError(e);
 		} catch (...) {
+			TraceEvent(SevError, "UnknownError6").backtrace();
 			errors.sendError(unknown_error());
 		}
 	}

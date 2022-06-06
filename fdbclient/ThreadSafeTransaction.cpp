@@ -158,6 +158,7 @@ ThreadSafeDatabase::ThreadSafeDatabase(std::string connFilename, int apiVersion)
 		    } catch (Error& e) {
 			    new (db) DatabaseContext(e);
 		    } catch (...) {
+				TraceEvent(SevError, "UnknownError2").backtrace();
 			    new (db) DatabaseContext(unknown_error());
 		    }
 	    },

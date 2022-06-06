@@ -53,6 +53,7 @@ struct LineNoiseReader final : IThreadPoolReceiver {
 		} catch (Error& e) {
 			r.result.sendError(e);
 		} catch (...) {
+			TraceEvent(SevError, "UnknownError1").backtrace();
 			r.result.sendError(unknown_error());
 		}
 	}

@@ -181,7 +181,7 @@ class WorkPool final : public IThreadPool, public ReferenceCounted<WorkPool<Thre
 				TraceEvent("WorkPoolError").errorUnsuppressed(e);
 				error.sendError(e);
 			} catch (...) {
-				TraceEvent("WorkPoolError").log();
+				TraceEvent(SevError, "WorkPoolError").log();
 				error.sendError(unknown_error());
 			}
 

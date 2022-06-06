@@ -127,6 +127,7 @@ public:
 		} else if (bg_error->IsCorruption()) {
 			errorPromise.sendError(file_corrupt());
 		} else {
+			TraceEvent(SevError, "UnknownError4").backtrace();
 			errorPromise.sendError(unknown_error());
 		}
 	}
@@ -860,6 +861,7 @@ Error statusToError(const rocksdb::Status& s) {
 	} else if (s.IsTimedOut()) {
 		return transaction_too_old();
 	} else {
+		TraceEvent(SevError, "UnknownError5").backtrace();
 		return unknown_error();
 	}
 }
