@@ -28,11 +28,11 @@
 #include "fdbserver/ServerDBInfo.h"
 #include "flow/BlobCipher.h"
 
-extern Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>> getLatestCipherKeys(
+extern Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>> getLatestEncryptCipherKeys(
     const Reference<AsyncVar<ServerDBInfo> const>& db,
     const std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName>& domains);
 
-extern Future<std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>> getCipherKeys(
+extern Future<std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>> getEncryptCipherKeys(
     const Reference<AsyncVar<ServerDBInfo> const>& db,
     const std::unordered_set<BlobCipherDetails>& cipherDetails);
 
@@ -42,9 +42,10 @@ struct TextAndHeaderCipherKeys {
 };
 
 // Get latest cipher text key and cipher header key for system data.
-extern Future<TextAndHeaderCipherKeys> getLatestSystemCipherKeys(const Reference<AsyncVar<ServerDBInfo> const>& db);
+extern Future<TextAndHeaderCipherKeys> getLatestSystemEncryptCipherKeys(
+    const Reference<AsyncVar<ServerDBInfo> const>& db);
 
 // Get text cipher key and header cipher key for the given encryption header.
-extern Future<TextAndHeaderCipherKeys> getCipherKeys(const Reference<AsyncVar<ServerDBInfo> const>& db,
-                                                     const BlobCipherEncryptHeader& header);
+extern Future<TextAndHeaderCipherKeys> getEncryptCipherKeys(const Reference<AsyncVar<ServerDBInfo> const>& db,
+                                                            const BlobCipherEncryptHeader& header);
 #endif
