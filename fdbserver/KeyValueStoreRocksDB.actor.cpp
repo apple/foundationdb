@@ -1255,7 +1255,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				TraceEvent(SevWarn, "KVSTimeout")
 				    .detail("Error", "Read value request timedout")
 				    .detail("Method", "ReadValueAction")
-				    .detail("Timeout value", readValueTimeout);
+				    .detail("TimeoutValue", readValueTimeout);
 				a.result.sendError(transaction_too_old());
 				return;
 			}
@@ -1342,7 +1342,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				TraceEvent(SevWarn, "KVSTimeout")
 				    .detail("Error", "Read value prefix request timedout")
 				    .detail("Method", "ReadValuePrefixAction")
-				    .detail("Timeout value", readValuePrefixTimeout);
+				    .detail("TimeoutValue", readValuePrefixTimeout);
 				a.result.sendError(transaction_too_old());
 				return;
 			}
@@ -1417,7 +1417,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				TraceEvent(SevWarn, "KVSTimeout")
 				    .detail("Error", "Read range request timedout")
 				    .detail("Method", "ReadRangeAction")
-				    .detail("Timeout value", readRangeTimeout);
+				    .detail("TimeoutValue", readRangeTimeout);
 				a.result.sendError(transaction_too_old());
 				return;
 			}
@@ -1449,7 +1449,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 						TraceEvent(SevWarn, "KVSTimeout")
 						    .detail("Error", "Read range request timedout")
 						    .detail("Method", "ReadRangeAction")
-						    .detail("Timeout value", readRangeTimeout);
+						    .detail("TimeoutValue", readRangeTimeout);
 						a.result.sendError(transaction_too_old());
 						return;
 					}
@@ -1481,7 +1481,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 						TraceEvent(SevWarn, "KVSTimeout")
 						    .detail("Error", "Read range request timedout")
 						    .detail("Method", "ReadRangeAction")
-						    .detail("Timeout value", readRangeTimeout);
+						    .detail("TimeoutValue", readRangeTimeout);
 						a.result.sendError(transaction_too_old());
 						return;
 					}
