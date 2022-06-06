@@ -58,8 +58,9 @@ if(APPLE)
   add_custom_command(OUTPUT ${symbols}
     COMMAND $<TARGET_FILE:Python::Interpreter> ${CMAKE_CURRENT_SOURCE_DIR}/symbolify.py
         ${CMAKE_CURRENT_SOURCE_DIR}/foundationdb/fdb_c.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/foundationdb/fdb_c_internal.h
         ${symbols}
-    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/symbolify.py ${CMAKE_CURRENT_SOURCE_DIR}/foundationdb/fdb_c.h
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/symbolify.py ${CMAKE_CURRENT_SOURCE_DIR}/foundationdb/fdb_c.h ${CMAKE_CURRENT_SOURCE_DIR}/foundationdb/fdb_c_internal.h
     COMMENT "Generate exported_symbols_list")
   add_custom_target(exported_symbols_list DEPENDS ${symbols})
   add_dependencies(fdb_c exported_symbols_list)
@@ -184,7 +185,7 @@ if(NOT WIN32)
   target_include_directories(fdb_c_unit_tests_version_510 PUBLIC ${DOCTEST_INCLUDE_DIR})
   target_include_directories(disconnected_timeout_unit_tests PUBLIC ${DOCTEST_INCLUDE_DIR})
   target_link_libraries(fdb_c_setup_tests PRIVATE fdb_c Threads::Threads)
-  target_link_libraries(fdb_c_unit_tests PRIVATE fdb_c Threads::Threads fdbclient)
+  target_link_libraries(fdb_c_unit_tests PRIVATE fdb_c Threads::Threads fdbclient rapidjson)
   target_link_libraries(fdb_c_unit_tests_version_510 PRIVATE fdb_c Threads::Threads)
   target_link_libraries(trace_partial_file_suffix_test PRIVATE fdb_c Threads::Threads flow)
   target_link_libraries(disconnected_timeout_unit_tests PRIVATE fdb_c Threads::Threads)
@@ -301,12 +302,37 @@ endif()
             @LOG_DIR@
             )
 
+  add_fdbclient_test(
+    NAME fdb_c_api_tests_with_tls
+    DISABLE_LOG_DUMP
+    TLS_ENABLED
+    COMMAND ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/run_c_api_tests.py
+            --cluster-file
+            @CLUSTER_FILE@
+            --tester-binary
+            $<TARGET_FILE:fdb_c_api_tester>
+            --external-client-library
+            ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c_external.so
+            --test-dir
+            ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests
+            --tmp-dir
+            @TMP_DIR@
+            --log-dir
+            @LOG_DIR@
+            --tls-cert-file
+            @CLIENT_CERT_FILE@
+            --tls-key-file
+            @CLIENT_KEY_FILE@
+            --tls-ca-file
+            @SERVER_CA_FILE@
+            )
+
   if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" AND NOT USE_SANITIZER)
     add_test(NAME fdb_c_upgrade_single_threaded_630api
       COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
             --build-dir ${CMAKE_BINARY_DIR}
             --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadSingleThr.toml
-            --upgrade-path "6.3.23" "7.0.0" "7.2.0"
+            --upgrade-path "6.3.23" "7.0.0" "7.1.5" "7.2.0"
             --process-number 1
             )
 
@@ -314,7 +340,7 @@ endif()
       COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
             --build-dir ${CMAKE_BINARY_DIR}
             --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadSingleThr.toml
-            --upgrade-path "7.0.0" "7.2.0"
+            --upgrade-path "7.0.0" "7.1.5" "7.2.0"
             --process-number 1
             )
 
@@ -322,7 +348,7 @@ endif()
         COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
             --build-dir ${CMAKE_BINARY_DIR}
             --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
-            --upgrade-path "6.3.23" "7.0.0" "7.2.0"
+            --upgrade-path "6.3.23" "7.0.0" "7.1.5" "7.2.0" "7.1.5"
             --process-number 3
           )
 
@@ -330,9 +356,38 @@ endif()
         COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
             --build-dir ${CMAKE_BINARY_DIR}
             --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
-            --upgrade-path "7.0.0" "7.2.0"
+            --upgrade-path "7.0.0" "7.1.5" "7.2.0" "7.1.5"
             --process-number 3
           )
+
+    add_test(NAME fdb_c_upgrade_multi_threaded_710api
+        COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
+            --build-dir ${CMAKE_BINARY_DIR}
+            --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
+            --upgrade-path "7.1.5" "7.2.0" "7.1.5"
+            --process-number 3
+          )
+
+    add_test(NAME fdb_c_cluster_wiggle
+          COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
+              --build-dir ${CMAKE_BINARY_DIR}
+              --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
+              --upgrade-path "7.2.0" "wiggle"
+              --disable-log-dump
+              --process-number 3
+              --redundancy double
+            )
+
+    add_test(NAME fdb_c_wiggle_and_upgrade
+          COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
+              --build-dir ${CMAKE_BINARY_DIR}
+              --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
+              --upgrade-path "7.0.0" "wiggle" "7.2.0"
+              --disable-log-dump
+              --process-number 3
+              --redundancy double
+            )
+
   endif()
 
 endif()

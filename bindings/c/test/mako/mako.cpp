@@ -606,6 +606,19 @@ int workerProcessMain(Arguments const& args, int worker_id, shared_memory::Acces
 
 	selectApiVersion(args.api_version);
 
+	/* enable distributed tracing */
+	switch (args.distributed_tracer_client) {
+	case 1:
+		err = network::setOptionNothrow(FDB_NET_OPTION_DISTRIBUTED_CLIENT_TRACER, BytesRef(toBytePtr("network_lossy")));
+		break;
+	case 2:
+		err = network::setOptionNothrow(FDB_NET_OPTION_DISTRIBUTED_CLIENT_TRACER, BytesRef(toBytePtr("log_file")));
+		break;
+	}
+	if (err) {
+		logr.error("network::setOption(FDB_NET_OPTION_DISTRIBUTED_CLIENT_TRACER): {}", err.what());
+	}
+
 	/* enable flatbuffers if specified */
 	if (args.flatbuffers) {
 #ifdef FDB_NET_OPTION_USE_FLATBUFFERS
@@ -805,6 +818,7 @@ int initArguments(Arguments& args) {
 	args.stats_export_path[0] = '\0';
 	args.bg_materialize_files = false;
 	args.bg_file_path[0] = '\0';
+	args.distributed_tracer_client = 0;
 	return 0;
 }
 
@@ -986,6 +1000,8 @@ void usage() {
 	printf("%-24s %s\n",
 	       "    --stats_export_path=PATH",
 	       "Write the serialized DDSketch data to file at PATH. Can be used in either run or build mode.");
+	printf(
+	    "%-24s %s\n", "    --distributed_tracer_client=CLIENT", "Specify client (disabled, network_lossy, log_file)");
 }
 
 /* parse benchmark paramters */
@@ -1038,6 +1054,7 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			{ "json_report", optional_argument, NULL, ARG_JSON_REPORT },
 			{ "bg_file_path", required_argument, NULL, ARG_BG_FILE_PATH },
 			{ "stats_export_path", optional_argument, NULL, ARG_EXPORT_PATH },
+			{ "distributed_tracer_client", required_argument, NULL, ARG_DISTRIBUTED_TRACER_CLIENT },
 			{ NULL, 0, NULL, 0 }
 		};
 		idx = 0;
@@ -1248,6 +1265,17 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 				        std::min(sizeof(args.stats_export_path), strlen(argv[optind]) + 1));
 			}
 			break;
+		case ARG_DISTRIBUTED_TRACER_CLIENT:
+			if (strcmp(optarg, "disabled") == 0) {
+				args.distributed_tracer_client = 0;
+			} else if (strcmp(optarg, "network_lossy") == 0) {
+				args.distributed_tracer_client = 1;
+			} else if (strcmp(optarg, "log_file") == 0) {
+				args.distributed_tracer_client = 2;
+			} else {
+				args.distributed_tracer_client = -1;
+			}
+			break;
 		}
 	}
 
@@ -1328,6 +1356,10 @@ int validateArguments(Arguments const& args) {
 				return -1;
 			}
 		}
+	}
+	if (args.distributed_tracer_client < 0) {
+		logr.error("--disibuted_tracer_client must specify either (disabled, network_lossy, log_file)");
+		return -1;
 	}
 	return 0;
 }

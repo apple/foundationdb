@@ -185,11 +185,20 @@ Reference<S3BlobStoreEndpoint> S3BlobStoreEndpoint::fromString(const std::string
 
 		Optional<std::string> proxyHost, proxyPort;
 		if (proxy.present()) {
-			if (!Hostname::isHostname(proxy.get()) && !NetworkAddress::parseOptional(proxy.get()).present()) {
-				throw format("'%s' is not a valid value for proxy. Format should be either IP:port or host:port.",
-				             proxy.get().c_str());
+			StringRef proxyRef(proxy.get());
+			if (proxy.get().find("://") != std::string::npos) {
+				StringRef proxyPrefix = proxyRef.eat("://");
+				if (proxyPrefix != "http"_sr) {
+					throw format("Invalid proxy URL prefix '%s'. Either don't use a prefix, or use http://",
+					             proxyPrefix.toString().c_str());
+				}
 			}
-			StringRef p(proxy.get());
+			std::string proxyBody = proxyRef.eat().toString();
+			if (!Hostname::isHostname(proxyBody) && !NetworkAddress::parseOptional(proxyBody).present()) {
+				throw format("'%s' is not a valid value for proxy. Format should be either IP:port or host:port.",
+				             proxyBody.c_str());
+			}
+			StringRef p(proxyBody);
 			proxyHost = p.eat(":").toString();
 			proxyPort = p.eat().toString();
 		}
@@ -336,9 +345,9 @@ std::string S3BlobStoreEndpoint::getResourceURL(std::string resource, std::strin
 			params.append("&");
 		}
 		params.append("header=");
-		params.append(HTTP::urlEncode(k));
+		params.append(k);
 		params.append(":");
-		params.append(HTTP::urlEncode(v));
+		params.append(v);
 	}
 
 	if (!params.empty())
@@ -645,10 +654,24 @@ ACTOR Future<S3BlobStoreEndpoint::ReusableConnection> connect_impl(Reference<S3B
 		}
 	}
 	std::string host = b->host, service = b->service;
-	if (service.empty())
+	if (service.empty()) {
+		if (b->useProxy) {
+			fprintf(stderr, "ERROR: Port can't be empty when using HTTP proxy.\n");
+			throw connection_failed();
+		}
 		service = b->knobs.secure_connection ? "https" : "http";
-	state Reference<IConnection> conn =
-	    wait(INetworkConnections::net()->connect(host, service, b->knobs.secure_connection ? true : false));
+	}
+	bool isTLS = b->knobs.secure_connection == 1;
+	if (b->useProxy) {
+		// TODO(renxuan): Support http proxy + TLS
+		if (isTLS || b->service == "443") {
+			fprintf(stderr, "ERROR: TLS is not supported yet when using HTTP proxy.\n");
+			throw connection_failed();
+		}
+		host = b->proxyHost.get();
+		service = b->proxyPort.get();
+	}
+	state Reference<IConnection> conn = wait(INetworkConnections::net()->connect(host, service, isTLS));
 	wait(conn->connectHandshake());
 
 	TraceEvent("S3BlobStoreEndpointNewConnection")
@@ -671,6 +694,42 @@ void S3BlobStoreEndpoint::returnConnection(ReusableConnection& rconn) {
 	if (rconn.expirationTime > now())
 		connectionPool.push(rconn);
 	rconn.conn = Reference<IConnection>();
+}
+
+std::string awsCanonicalURI(const std::string& resource, std::vector<std::string>& queryParameters, bool isV4) {
+	StringRef resourceRef(resource);
+	resourceRef.eat("/");
+	std::string canonicalURI("/" + resourceRef.toString());
+	size_t q = canonicalURI.find_last_of('?');
+	if (q != canonicalURI.npos)
+		canonicalURI.resize(q);
+	if (isV4) {
+		canonicalURI = HTTP::awsV4URIEncode(canonicalURI, false);
+	} else {
+		canonicalURI = HTTP::urlEncode(canonicalURI);
+	}
+
+	// Create the canonical query string
+	std::string queryString;
+	q = resource.find_last_of('?');
+	if (q != queryString.npos)
+		queryString = resource.substr(q + 1);
+
+	StringRef qStr(queryString);
+	StringRef queryParameter;
+	while ((queryParameter = qStr.eat("&")) != StringRef()) {
+		StringRef param = queryParameter.eat("=");
+		StringRef value = queryParameter.eat();
+
+		if (isV4) {
+			queryParameters.push_back(HTTP::awsV4URIEncode(param.toString(), true) + "=" +
+			                          HTTP::awsV4URIEncode(value.toString(), true));
+		} else {
+			queryParameters.push_back(HTTP::urlEncode(param.toString()) + "=" + HTTP::urlEncode(value.toString()));
+		}
+	}
+
+	return canonicalURI;
 }
 
 // Do a request, get a Response.
@@ -716,6 +775,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<S3BlobStoreEndp
 		state Optional<NetworkAddress> remoteAddress;
 		state bool connectionEstablished = false;
 		state Reference<HTTP::Response> r;
+		state std::string canonicalURI = resource;
 
 		try {
 			// Start connecting
@@ -752,11 +812,23 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<S3BlobStoreEndp
 				bstore->setAuthHeaders(verb, resource, headers);
 			}
 
+			std::vector<std::string> queryParameters;
+			canonicalURI = awsCanonicalURI(resource, queryParameters, CLIENT_KNOBS->HTTP_REQUEST_AWS_V4_HEADER);
+			if (!queryParameters.empty()) {
+				canonicalURI += "?";
+				canonicalURI += boost::algorithm::join(queryParameters, "&");
+			}
+
+			if (bstore->useProxy) {
+				// Has to be in absolute-form.
+				canonicalURI = "http://" + bstore->host + ":" + bstore->service + canonicalURI;
+			}
+
 			remoteAddress = rconn.conn->getPeerAddress();
 			wait(bstore->requestRate->getAllowance(1));
 			Reference<HTTP::Response> _r = wait(timeoutError(HTTP::doRequest(rconn.conn,
 			                                                                 verb,
-			                                                                 resource,
+			                                                                 canonicalURI,
 			                                                                 headers,
 			                                                                 &contentCopy,
 			                                                                 contentLen,
@@ -898,9 +970,9 @@ ACTOR Future<Void> listObjectsStream_impl(Reference<S3BlobStoreEndpoint> bstore,
 	resource.append(bucket);
 	resource.append("/?max-keys=1000");
 	if (prefix.present())
-		resource.append("&prefix=").append(HTTP::urlEncode(prefix.get()));
+		resource.append("&prefix=").append(prefix.get());
 	if (delimiter.present())
-		resource.append("&delimiter=").append(HTTP::urlEncode(std::string(1, delimiter.get())));
+		resource.append("&delimiter=").append(std::string(1, delimiter.get()));
 	resource.append("&marker=");
 	state std::string lastFile;
 	state bool more = true;
@@ -912,7 +984,7 @@ ACTOR Future<Void> listObjectsStream_impl(Reference<S3BlobStoreEndpoint> bstore,
 		state FlowLock::Releaser listReleaser(bstore->concurrentLists, 1);
 
 		HTTP::Headers headers;
-		state std::string fullResource = resource + HTTP::urlEncode(lastFile);
+		state std::string fullResource = resource + lastFile;
 		lastFile.clear();
 		Reference<HTTP::Response> r = wait(bstore->doRequest("GET", fullResource, headers, nullptr, 0, { 200 }));
 		listReleaser.release();
@@ -1090,7 +1162,7 @@ ACTOR Future<std::vector<std::string>> listBuckets_impl(Reference<S3BlobStoreEnd
 		state FlowLock::Releaser listReleaser(bstore->concurrentLists, 1);
 
 		HTTP::Headers headers;
-		state std::string fullResource = resource + HTTP::urlEncode(lastName);
+		state std::string fullResource = resource + lastName;
 		Reference<HTTP::Response> r = wait(bstore->doRequest("GET", fullResource, headers, nullptr, 0, { 200 }));
 		listReleaser.release();
 
@@ -1259,29 +1331,15 @@ void S3BlobStoreEndpoint::setV4AuthHeaders(std::string const& verb,
 
 	// ************* TASK 1: CREATE A CANONICAL REQUEST *************
 	// Create Create canonical URI--the part of the URI from domain to query string (use '/' if no path)
-	StringRef resourceRef(resource);
-	resourceRef.eat("/");
-	std::string canonicalURI("/" + resourceRef.toString());
-	size_t q = canonicalURI.find_last_of('?');
-	if (q != canonicalURI.npos)
-		canonicalURI.resize(q);
-	canonicalURI = HTTP::awsV4URIEncode(canonicalURI, false);
-	// Create the canonical query string
-	std::string queryString;
-	q = resource.find_last_of('?');
-	if (q != queryString.npos)
-		queryString = resource.substr(q + 1);
 	std::vector<std::string> queryParameters;
-	StringRef qStr(queryString);
-	StringRef queryParameter;
-	while ((queryParameter = qStr.eat("&")) != StringRef()) {
-		StringRef param = queryParameter.eat("=");
-		StringRef value = queryParameter.eat();
-		queryParameters.push_back(HTTP::awsV4URIEncode(param.toString(), true) + "=" +
-		                          HTTP::awsV4URIEncode(value.toString(), true));
+	std::string canonicalURI = awsCanonicalURI(resource, queryParameters, true);
+
+	std::string canonicalQueryString;
+	if (!queryParameters.empty()) {
+		std::sort(queryParameters.begin(), queryParameters.end());
+		canonicalQueryString = boost::algorithm::join(queryParameters, "&");
 	}
-	std::sort(queryParameters.begin(), queryParameters.end());
-	std::string canonicalQueryString = boost::algorithm::join(queryParameters, "&");
+
 	using namespace boost::algorithm;
 	// Create the canonical headers and signed headers
 	ASSERT(!headers["Host"].empty());
@@ -1336,11 +1394,10 @@ void S3BlobStoreEndpoint::setAuthHeaders(std::string const& verb, std::string co
 
 	std::string& date = headers["Date"];
 
-	char dateBuf[20];
+	char dateBuf[64];
 	time_t ts;
 	time(&ts);
-	// ISO 8601 format YYYYMMDD'T'HHMMSS'Z'
-	strftime(dateBuf, 20, "%Y%m%dT%H%M%SZ", gmtime(&ts));
+	strftime(dateBuf, 64, "%a, %d %b %Y %H:%M:%S GMT", gmtime(&ts));
 	date = dateBuf;
 
 	std::string msg;

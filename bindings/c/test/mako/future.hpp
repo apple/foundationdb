@@ -81,7 +81,7 @@ force_inline FutureRC waitAndHandleError(fdb::Transaction& tx, FutureType& f, st
 	}
 	// implicit backoff
 	auto follow_up = tx.onError(err);
-	return waitAndHandleForOnError(tx, f, step);
+	return waitAndHandleForOnError(tx, follow_up, step);
 }
 
 } // namespace mako
