@@ -356,6 +356,7 @@ you are holding the corresponding future.
     // IDL equivalent
     [T]
     ```
+Note that fields inherited from superclasses appear last in the IDL definition.
 
 1. Flatbuffers Traits
 

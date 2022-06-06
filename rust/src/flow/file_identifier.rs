@@ -185,5 +185,21 @@ fn test_file_identifier_names() -> Result<()> {
     assert_eq!(parsed.inner_wrapper, IdentifierType::ErrorOr);
     assert_eq!(parsed.outer_wrapper, IdentifierType::ReplyPromise);
     assert_eq!(parsed.file_identifier_name, Some("Void"));
+    if false {
+        // handy for translating FDB traces about mismatched file identifiers
+        // into human-readable form.
+        assert_eq!(
+            names
+                .from_id(FileIdentifier {
+                    file_identifier: 35564874
+                })
+                .unwrap(),
+            names
+                .from_id(FileIdentifier {
+                    file_identifier: 48019806
+                })
+                .unwrap()
+        );
+    }
     Ok(())
 }

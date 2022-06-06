@@ -1122,11 +1122,11 @@ static void scanPackets(TransportData* transport,
 			p += sizeof(packetChecksum);
 		}
 
-		printf("FF packetlen %d (remaing: %d)\nPayload:  ", packetLen, (uint32_t)(e-p));
-		for (uint32_t i = 0; i < (uint32_t)(e-p); i++) {
-			printf(" %02x", (int) (p[i]));
-		}
-		printf("\n");
+		// printf("FF packetlen %d (remaing: %d)\nPayload:  ", packetLen, (uint32_t)(e-p));
+		// for (uint32_t i = 0; i < (uint32_t)(e-p); i++) {
+		// 	printf(" %02x", (int) (p[i]));
+		// }
+		// printf("\n");
 
 		if (packetLen > FLOW_KNOBS->PACKET_LIMIT) {
 			TraceEvent(SevError, "PacketLimitExceeded")
@@ -1140,7 +1140,7 @@ static void scanPackets(TransportData* transport,
 		ASSERT(packetLen >= sizeof(UID));
 
 		if (checksumEnabled) {
-			printf("CHECKSUM\n");
+			// printf("CHECKSUM\n");
 			bool isBuggifyEnabled = false;
 			if (g_network->isSimulated() && !isStableConnection &&
 			    g_network->now() - g_simulator.lastConnectionFailure > g_simulator.connectionFailuresDisableDuration &&
@@ -1185,7 +1185,7 @@ static void scanPackets(TransportData* transport,
 				}
 			}
 		} else {
-			printf("NO CHECKSUM\n");
+			// printf("NO CHECKSUM\n");
 		}
 
 #if VALGRIND
@@ -1329,7 +1329,7 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 					// At the beginning of a connection, we expect to receive a packet containing the protocol version
 					// and the listening port of the remote process
 					int32_t connectPacketSize = ((ConnectPacket*)unprocessed_begin)->totalPacketSize();
-					printf("ConnectPacketSize %d (got %d)\n", connectPacketSize, unprocessed_end - unprocessed_begin);
+					// printf("ConnectPacketSize %d (got %d)\n", connectPacketSize, unprocessed_end - unprocessed_begin);
 					if (unprocessed_end - unprocessed_begin >= connectPacketSize) {
 						auto protocolVersion = ((ConnectPacket*)unprocessed_begin)->protocolVersion;
 						BinaryReader pktReader(unprocessed_begin, connectPacketSize, AssumeVersion(protocolVersion));

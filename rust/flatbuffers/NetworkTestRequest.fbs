@@ -1,2 +1,18 @@
-table Foo{ }
-root_type Foo;
+struct UID {
+    first : ulong;
+    second : ulong;
+}
+
+table ReplyPromise {
+    uid : UID;
+}
+
+table NetworkTestRequest {
+    payload: [ubyte];
+    reply_size: uint;
+    reply_promise: ReplyPromise;
+}
+table FakeRoot {
+    network_test_request: NetworkTestRequest;
+}
+root_type FakeRoot;

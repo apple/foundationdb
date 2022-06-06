@@ -1,2 +1,16 @@
-table Foo{ }
-root_type Foo;
+table NetworkTestResponse {
+    payload: [ubyte];
+}
+table EnsureTable {
+    network_test_response: NetworkTestResponse;
+}
+table Error {
+    error: uint;
+}
+union ErrorOr { Error, EnsureTable }
+
+table FakeRoot {
+    error_or: ErrorOr;
+}
+
+root_type FakeRoot;
