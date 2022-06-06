@@ -47,9 +47,16 @@ struct TextAndHeaderCipherKeys {
 	Reference<BlobCipherKey> cipherHeaderKey;
 };
 
+// Helper method to get latest cipher text key and cipher header key for given domain.
+extern Future<TextAndHeaderCipherKeys> getLatestEncryptCipherKeysForDomain(
+    const Reference<AsyncVar<ServerDBInfo> const>& db,
+    const EncryptCipherDomainId& domainId,
+    const EncryptCipherDomainName& domainName);
+
 // Helper method to get latest cipher text key and cipher header key for system domain,
 // used for encrypting system data.
-Future<TextAndHeaderCipherKeys> getLatestSystemEncryptCipherKeys(const Reference<AsyncVar<ServerDBInfo> const>& db);
+extern Future<TextAndHeaderCipherKeys> getLatestSystemEncryptCipherKeys(
+    const Reference<AsyncVar<ServerDBInfo> const>& db);
 
 // Helper method to get both text cipher key and header cipher key for the given encryption header,
 // used for decrypting given encrypted data with encryption header.

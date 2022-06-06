@@ -1700,7 +1700,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				             ? (/* Disable for RocksDB */ s.storeType != KeyValueStoreType::SSD_ROCKSDB_V1 &&
 				                s.storeType != KeyValueStoreType::SSD_SHARDED_ROCKSDB &&
 				                deterministicRandom()->coinflip())
-				             : true));
+				             : true),
+				    dbInfo);
 				Future<Void> kvClosed = kv->onClosed();
 				filesClosed.add(kvClosed);
 
@@ -2288,7 +2289,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                   folder,
 					                   isTss ? testingStoragePrefix.toString() : fileStoragePrefix.toString(),
 					                   recruited.id());
-
 					IKeyValueStore* data = openKVStore(
 					    req.storeType,
 					    filename,
@@ -2301,7 +2301,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					             ? (/* Disable for RocksDB */ req.storeType != KeyValueStoreType::SSD_ROCKSDB_V1 &&
 					                req.storeType != KeyValueStoreType::SSD_SHARDED_ROCKSDB &&
 					                deterministicRandom()->coinflip())
-					             : true));
+					             : true),
+					    dbInfo);
 
 					Future<Void> kvClosed = data->onClosed();
 					filesClosed.add(kvClosed);

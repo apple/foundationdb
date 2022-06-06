@@ -35,6 +35,8 @@ typedef Standalone<TenantGroupNameRef> TenantGroupName;
 
 enum class TenantState { REGISTERING, READY, REMOVING, UPDATING_CONFIGURATION, ERROR };
 
+constexpr int TENANT_PREFIX_SIZE = sizeof(int64_t);
+
 struct TenantMapEntry {
 	constexpr static FileIdentifier file_identifier = 12247338;
 
@@ -127,6 +129,6 @@ public:
 };
 
 typedef VersionedMap<TenantName, TenantMapEntry> TenantMap;
-typedef VersionedMap<Key, TenantName> TenantPrefixIndex;
+class TenantPrefixIndex : public VersionedMap<Key, TenantName>, public ReferenceCounted<TenantPrefixIndex> {};
 
 #endif

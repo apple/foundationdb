@@ -225,20 +225,24 @@ ACTOR Future<std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>> ge
 	return cipherKeys;
 }
 
-ACTOR Future<TextAndHeaderCipherKeys> getLatestSystemEncryptCipherKeys(Reference<AsyncVar<ServerDBInfo> const> db) {
-	static std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> domains = {
-		{ SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME },
-		{ ENCRYPT_HEADER_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME }
-	};
+ACTOR Future<TextAndHeaderCipherKeys> getLatestEncryptCipherKeysForDomain(Reference<AsyncVar<ServerDBInfo> const> db,
+                                                                          EncryptCipherDomainId domainId,
+                                                                          EncryptCipherDomainName domainName) {
+	std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> domains;
+	domains[domainId] = domainName;
+	domains[ENCRYPT_HEADER_DOMAIN_ID] = FDB_DEFAULT_ENCRYPT_DOMAIN_NAME;
 	std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cipherKeys =
 	    wait(getLatestEncryptCipherKeys(db, domains));
-	ASSERT(cipherKeys.count(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID) > 0);
+	ASSERT(cipherKeys.count(domainId) > 0);
 	ASSERT(cipherKeys.count(ENCRYPT_HEADER_DOMAIN_ID) > 0);
-	TextAndHeaderCipherKeys result{ cipherKeys.at(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID),
-		                            cipherKeys.at(ENCRYPT_HEADER_DOMAIN_ID) };
+	TextAndHeaderCipherKeys result{ cipherKeys.at(domainId), cipherKeys.at(ENCRYPT_HEADER_DOMAIN_ID) };
 	ASSERT(result.cipherTextKey.isValid());
 	ASSERT(result.cipherHeaderKey.isValid());
 	return result;
+}
+
+Future<TextAndHeaderCipherKeys> getLatestSystemEncryptCipherKeys(const Reference<AsyncVar<ServerDBInfo> const>& db) {
+	return getLatestEncryptCipherKeysForDomain(db, SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME);
 }
 
 ACTOR Future<TextAndHeaderCipherKeys> getEncryptCipherKeys(Reference<AsyncVar<ServerDBInfo> const> db,

@@ -26,11 +26,11 @@
 
 Key TenantMapEntry::idToPrefix(int64_t id) {
 	int64_t swapped = bigEndian64(id);
-	return StringRef(reinterpret_cast<const uint8_t*>(&swapped), 8);
+	return StringRef(reinterpret_cast<const uint8_t*>(&swapped), TENANT_PREFIX_SIZE);
 }
 
 int64_t TenantMapEntry::prefixToId(KeyRef prefix) {
-	ASSERT(prefix.size() == 8);
+	ASSERT(prefix.size() == TENANT_PREFIX_SIZE);
 	int64_t id = *reinterpret_cast<const int64_t*>(prefix.begin());
 	id = bigEndian64(id);
 	ASSERT(id >= 0);

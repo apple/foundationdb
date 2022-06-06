@@ -893,12 +893,12 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( SIM_KMS_MAX_KEYS,                                     4096 );
 	init( ENCRYPT_PROXY_MAX_DBG_TRACE_LENGTH,                 100000 );
 	init( ENABLE_TLOG_ENCRYPTION,                  ENABLE_ENCRYPTION ); if ( randomize && BUGGIFY ) { ENABLE_TLOG_ENCRYPTION = (ENABLE_ENCRYPTION && !PROXY_USE_RESOLVER_PRIVATE_MUTATIONS && deterministicRandom()->coinflip()); }
+	init( ENABLE_STORAGE_SERVER_ENCRYPTION,        ENABLE_ENCRYPTION ); if ( randomize && BUGGIFY) { ENABLE_TLOG_ENCRYPTION = (ENABLE_ENCRYPTION && !REMOTE_KV_STORE && deterministicRandom()->coinflip()); }
 	init( ENABLE_BLOB_GRANULE_ENCRYPTION,          ENABLE_ENCRYPTION ); if ( randomize && BUGGIFY ) { ENABLE_BLOB_GRANULE_ENCRYPTION = (ENABLE_ENCRYPTION && deterministicRandom()->coinflip()); }
 
 	// encrypt key proxy
 	init( ENABLE_BLOB_GRANULE_COMPRESSION,                     false ); if ( randomize && BUGGIFY ) { ENABLE_BLOB_GRANULE_COMPRESSION = deterministicRandom()->coinflip(); }
 	init( BLOB_GRANULE_COMPRESSION_FILTER,                    "GZIP" ); if ( randomize && BUGGIFY ) { BLOB_GRANULE_COMPRESSION_FILTER = "NONE"; }
-
 
     // KMS connector type
 	init( KMS_CONNECTOR_TYPE,                     "RESTKmsConnector" );

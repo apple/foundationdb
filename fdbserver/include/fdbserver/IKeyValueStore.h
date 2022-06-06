@@ -23,9 +23,10 @@
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/StorageCheckpoint.h"
+#include "fdbclient/Tenant.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/ServerDBInfo.h"
-#include "fdbclient/StorageCheckpoint.h"
 
 struct CheckpointRequest {
 	const Version version; // The FDB version at which the checkpoint is created.
@@ -149,6 +150,9 @@ public:
 	// of a rollback.
 	virtual Future<Void> init() { return Void(); }
 
+	// Provide a tenant id to tenant name map to support per-tenant data encryption. Currently only used by Redwood.
+	virtual void setTenantPrefixIndex(Reference<TenantPrefixIndex> tenantPrefixIndex) {}
+
 protected:
 	virtual ~IKeyValueStore() {}
 };
@@ -158,7 +162,9 @@ extern IKeyValueStore* keyValueStoreSQLite(std::string const& filename,
                                            KeyValueStoreType storeType,
                                            bool checkChecksums = false,
                                            bool checkIntegrity = false);
-extern IKeyValueStore* keyValueStoreRedwoodV1(std::string const& filename, UID logID);
+extern IKeyValueStore* keyValueStoreRedwoodV1(std::string const& filename,
+                                              UID logID,
+                                              Reference<AsyncVar<ServerDBInfo> const> dbInfo = {});
 extern IKeyValueStore* keyValueStoreRocksDB(std::string const& path,
                                             UID logID,
                                             KeyValueStoreType storeType,
@@ -196,7 +202,8 @@ inline IKeyValueStore* openKVStore(KeyValueStoreType storeType,
                                    int64_t memoryLimit,
                                    bool checkChecksums = false,
                                    bool checkIntegrity = false,
-                                   bool openRemotely = false) {
+                                   bool openRemotely = false,
+                                   Reference<AsyncVar<ServerDBInfo> const> dbInfo = {}) {
 	if (openRemotely) {
 		return openRemoteKVStore(storeType, filename, logID, memoryLimit, checkChecksums, checkIntegrity);
 	}
@@ -208,7 +215,7 @@ inline IKeyValueStore* openKVStore(KeyValueStoreType storeType,
 	case KeyValueStoreType::MEMORY:
 		return keyValueStoreMemory(filename, logID, memoryLimit);
 	case KeyValueStoreType::SSD_REDWOOD_V1:
-		return keyValueStoreRedwoodV1(filename, logID);
+		return keyValueStoreRedwoodV1(filename, logID, dbInfo);
 	case KeyValueStoreType::SSD_ROCKSDB_V1:
 		return keyValueStoreRocksDB(filename, logID, storeType);
 	case KeyValueStoreType::SSD_SHARDED_ROCKSDB:

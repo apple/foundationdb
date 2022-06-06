@@ -436,6 +436,10 @@ struct StorageServerDisk {
 	StorageBytes getStorageBytes() const { return storage->getStorageBytes(); }
 	std::tuple<size_t, size_t, size_t> getSize() const { return storage->getSize(); }
 
+	void setTenantPrefixIndex(Reference<TenantPrefixIndex> tenantPrefixIndex) {
+		storage->setTenantPrefixIndex(tenantPrefixIndex);
+	}
+
 	// The following are pointers to the Counters in StorageServer::counters of the same names.
 	Counter* kvCommitLogicalBytes;
 	Counter* kvClearRanges;
@@ -699,7 +703,7 @@ public:
 	std::map<Version, std::vector<CheckpointMetaData>> pendingCheckpoints; // Pending checkpoint requests
 	std::unordered_map<UID, CheckpointMetaData> checkpoints; // Existing and deleting checkpoints
 	TenantMap tenantMap;
-	TenantPrefixIndex tenantPrefixIndex;
+	Reference<TenantPrefixIndex> tenantPrefixIndex;
 	std::map<Version, std::vector<PendingNewShard>>
 	    pendingAddRanges; // Pending requests to add ranges to physical shards
 	std::map<Version, std::vector<KeyRange>>
@@ -1216,9 +1220,10 @@ public:
 	StorageServer(IKeyValueStore* storage,
 	              Reference<AsyncVar<ServerDBInfo> const> const& db,
 	              StorageServerInterface const& ssi)
-	  : shardAware(false), tlogCursorReadsLatencyHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
-	                                                                               TLOG_CURSOR_READS_LATENCY_HISTOGRAM,
-	                                                                               Histogram::Unit::microseconds)),
+	  : tenantPrefixIndex(makeReference<TenantPrefixIndex>()), shardAware(false),
+	    tlogCursorReadsLatencyHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
+	                                                            TLOG_CURSOR_READS_LATENCY_HISTOGRAM,
+	                                                            Histogram::Unit::microseconds)),
 	    ssVersionLockLatencyHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
 	                                                          SS_VERSION_LOCK_LATENCY_HISTOGRAM,
 	                                                          Histogram::Unit::microseconds)),
@@ -1258,6 +1263,7 @@ public:
 	    busiestWriteTagContext(ssi.id()), counters(this),
 	    storageServerSourceTLogIDEventHolder(
 	        makeReference<EventCacheHolder>(ssi.id().toString() + "/StorageServerSourceTLogID")) {
+
 		version.initMetric(LiteralStringRef("StorageServer.Version"), counters.cc.id);
 		oldestVersion.initMetric(LiteralStringRef("StorageServer.OldestVersion"), counters.cc.id);
 		durableVersion.initMetric(LiteralStringRef("StorageServer.DurableVersion"), counters.cc.id);
@@ -4472,7 +4478,7 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 				throw tenant_name_required();
 			}
 
-			if (rangeIntersectsAnyTenant(data->tenantPrefixIndex, KeyRangeRef(begin, end), req.version)) {
+			if (rangeIntersectsAnyTenant(*(data->tenantPrefixIndex), KeyRangeRef(begin, end), req.version)) {
 				throw tenant_name_required();
 			}
 		}
@@ -7802,10 +7808,10 @@ private:
 bool StorageServer::insertTenant(TenantNameRef tenantName, TenantMapEntry tenantEntry, Version version) {
 	if (version >= tenantMap.getLatestVersion()) {
 		tenantMap.createNewVersion(version);
-		tenantPrefixIndex.createNewVersion(version);
+		tenantPrefixIndex->createNewVersion(version);
 
 		tenantMap.insert(tenantName, tenantEntry);
-		tenantPrefixIndex.insert(tenantEntry.prefix, tenantName);
+		tenantPrefixIndex->insert(tenantEntry.prefix, tenantName);
 
 		TraceEvent("InsertTenant", thisServerID).detail("Tenant", tenantName).detail("Version", version);
 		return true;
@@ -7825,13 +7831,13 @@ void StorageServer::insertTenant(TenantNameRef tenantName, ValueRef value, Versi
 void StorageServer::clearTenants(TenantNameRef startTenant, TenantNameRef endTenant, Version version) {
 	if (version >= tenantMap.getLatestVersion()) {
 		tenantMap.createNewVersion(version);
-		tenantPrefixIndex.createNewVersion(version);
+		tenantPrefixIndex->createNewVersion(version);
 
 		auto view = tenantMap.at(version);
 		for (auto itr = view.lower_bound(startTenant); itr != view.lower_bound(endTenant); ++itr) {
 			// Trigger any watches on the prefix associated with the tenant.
 			watches.triggerRange(itr->prefix, strinc(itr->prefix));
-			tenantPrefixIndex.erase(itr->prefix);
+			tenantPrefixIndex->erase(itr->prefix);
 			TraceEvent("EraseTenant", thisServerID).detail("Tenant", itr.key()).detail("Version", version);
 		}
 
@@ -8499,7 +8505,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 			    newOldestVersion, desiredVersion, bytesLeft, unlimitedCommitBytes);
 			if (data->tenantMap.getLatestVersion() < newOldestVersion) {
 				data->tenantMap.createNewVersion(newOldestVersion);
-				data->tenantPrefixIndex.createNewVersion(newOldestVersion);
+				data->tenantPrefixIndex->createNewVersion(newOldestVersion);
 			}
 			// We want to forget things from these data structures atomically with changing oldestVersion (and "before",
 			// since oldestVersion.set() may trigger waiting actors) forgetVersionsBeforeAsync visibly forgets
@@ -8507,7 +8513,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 			Future<Void> finishedForgetting =
 			    data->mutableData().forgetVersionsBeforeAsync(newOldestVersion, TaskPriority::UpdateStorage) &&
 			    data->tenantMap.forgetVersionsBeforeAsync(newOldestVersion, TaskPriority::UpdateStorage) &&
-			    data->tenantPrefixIndex.forgetVersionsBeforeAsync(newOldestVersion, TaskPriority::UpdateStorage);
+			    data->tenantPrefixIndex->forgetVersionsBeforeAsync(newOldestVersion, TaskPriority::UpdateStorage);
 			data->oldestVersion.set(newOldestVersion);
 			wait(finishedForgetting);
 			wait(yield(TaskPriority::UpdateStorage));
@@ -9355,7 +9361,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 		TenantMapEntry tenantEntry = TenantMapEntry::decode(result.value);
 
 		data->tenantMap.insert(tenantName, tenantEntry);
-		data->tenantPrefixIndex.insert(tenantEntry.prefix, tenantName);
+		data->tenantPrefixIndex->insert(tenantEntry.prefix, tenantName);
 
 		TraceEvent("RestoringTenant", data->thisServerID)
 		    .detail("Key", tenantMap[tenantMapLoc].key)
@@ -10448,6 +10454,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 			self.tag = seedTag;
 		}
 
+		self.storage.setTenantPrefixIndex(self.tenantPrefixIndex);
 		self.storage.makeNewStorageServerDurable(self.shardAware);
 		wait(self.storage.commit());
 		++self.counters.kvCommits;
@@ -10526,6 +10533,11 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 				recovered.send(Void());
 			return Void();
 		}
+		// Pass a reference of tenantPrefixIndex to the storage engine to support per-tenant data encryption,
+		// after the tenant map is recovered in restoreDurableState. In case of a storage server reboot,
+		// it is possible that the storage engine is still holding a pre-reboot tenantPrefixIndex, and use that
+		// for its own recovery, before we set the tenantPrefixIndex here.
+		self.storage.setTenantPrefixIndex(self.tenantPrefixIndex);
 		TraceEvent("SSTimeRestoreDurableState", self.thisServerID).detail("TimeTaken", now() - start);
 
 		// if this is a tss storage file, use that as source of truth for this server being a tss instead of the
