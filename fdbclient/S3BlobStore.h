@@ -100,12 +100,13 @@ public:
 
 	S3BlobStoreEndpoint(std::string const& host,
 	                    std::string const& service,
+	                    std::string region,
 	                    Optional<std::string> const& proxyHost,
 	                    Optional<std::string> const& proxyPort,
 	                    Optional<Credentials> const& creds,
 	                    BlobKnobs const& knobs = BlobKnobs(),
 	                    HTTP::Headers extraHeaders = HTTP::Headers())
-	  : host(host), service(service), proxyHost(proxyHost), proxyPort(proxyPort),
+	  : host(host), service(service), region(region), proxyHost(proxyHost), proxyPort(proxyPort),
 	    useProxy(proxyHost.present() && proxyPort.present()), credentials(creds),
 	    lookupKey(creds.present() && creds.get().key.empty()),
 	    lookupSecret(creds.present() && creds.get().secret.empty()), knobs(knobs), extraHeaders(extraHeaders),
@@ -156,6 +157,7 @@ public:
 
 	std::string host;
 	std::string service;
+	std::string region;
 	Optional<std::string> proxyHost;
 	Optional<std::string> proxyPort;
 	bool useProxy;
@@ -192,6 +194,10 @@ public:
 	                      HTTP::Headers& headers,
 	                      std::string date = "",
 	                      std::string datestamp = "");
+
+	std::string getHost() const { return host; }
+
+	std::string getRegion() const { return region; }
 
 	// Prepend the HTTP request header to the given PacketBuffer, returning the new head of the buffer chain
 	static PacketBuffer* writeRequestHeader(std::string const& request,
