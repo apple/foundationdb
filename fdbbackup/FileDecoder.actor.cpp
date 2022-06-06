@@ -433,7 +433,7 @@ public:
 					platform::createDirectory(path);
 				}
 			}
-			self->lfd = open(self->file.fileName.c_str(), O_WRONLY | O_CREAT | O_TRUNC);
+			self->lfd = open(self->file.fileName.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
 			if (self->lfd == -1) {
 				TraceEvent(SevError, "OpenLocalFileFailed").detail("File", self->file.fileName);
 				throw platform_error();
