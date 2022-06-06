@@ -119,6 +119,8 @@ void GlobalConfig::insert(KeyRef key, ValueRef value) {
 			any = t.getFloat(0);
 		} else if (t.getType(0) == Tuple::ElementType::DOUBLE) {
 			any = t.getDouble(0);
+		} else if (t.getType(0) == Tuple::ElementType::VERSIONSTAMP) {
+			any = t.getVersionstamp(0);
 		} else {
 			ASSERT(false);
 		}
@@ -151,6 +153,18 @@ void GlobalConfig::erase(KeyRangeRef range) {
 	}
 }
 
+// Similar to tr.onError(), but doesn't require a DatabaseContext.
+struct Backoff {
+	Future<Void> onError() {
+		double currentBackoff = backoff;
+		backoff = std::min(backoff * CLIENT_KNOBS->BACKOFF_GROWTH_RATE, CLIENT_KNOBS->DEFAULT_MAX_BACKOFF);
+		return delay(currentBackoff * deterministicRandom()->random01());
+	}
+
+private:
+	double backoff = CLIENT_KNOBS->DEFAULT_BACKOFF;
+};
+
 // Older FDB versions used different keys for client profiling data. This
 // function performs a one-time migration of data in these keys to the new
 // global configuration key space.
@@ -158,6 +172,7 @@ ACTOR Future<Void> GlobalConfig::migrate(GlobalConfig* self) {
 	state Key migratedKey("\xff\x02/fdbClientInfo/migrated/"_sr);
 	state Reference<ReadYourWritesTransaction> tr;
 	try {
+		state Backoff backoff;
 		loop {
 			tr = makeReference<ReadYourWritesTransaction>(Database(Reference<DatabaseContext>::addRef(self->cx)));
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -197,10 +212,11 @@ ACTOR Future<Void> GlobalConfig::migrate(GlobalConfig* self) {
 				// attempt this migration at the same time, sometimes resulting in
 				// aborts due to conflicts. Purposefully avoid retrying, making this
 				// migration best-effort.
-				TraceEvent(SevInfo, "GlobalConfig_RetryableMigrationError").error(e);
+				TraceEvent(SevInfo, "GlobalConfig_RetryableMigrationError").errorUnsuppressed(e).suppressFor(1.0);
 				wait(tr->onError(e));
 				tr.clear();
-				wait(delay(0));
+				// tr is cleared, so it won't backoff properly. Use custom backoff logic here.
+				wait(backoff.onError());
 			}
 		}
 	} catch (Error& e) {
@@ -215,6 +231,8 @@ ACTOR Future<Void> GlobalConfig::migrate(GlobalConfig* self) {
 ACTOR Future<Void> GlobalConfig::refresh(GlobalConfig* self) {
 	// TraceEvent trace(SevInfo, "GlobalConfig_Refresh");
 	self->erase(KeyRangeRef(""_sr, "\xff"_sr));
+
+	state Backoff backoff;
 
 	state Reference<ReadYourWritesTransaction> tr;
 	loop {
@@ -231,7 +249,8 @@ ACTOR Future<Void> GlobalConfig::refresh(GlobalConfig* self) {
 			TraceEvent("GlobalConfigRefreshError").errorUnsuppressed(e).suppressFor(1.0);
 			wait(tr->onError(e));
 			tr.clear();
-			wait(delay(0));
+			// tr is cleared, so it won't backoff properly. Use custom backoff logic here.
+			wait(backoff.onError());
 		}
 	}
 	return Void();
