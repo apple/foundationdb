@@ -134,13 +134,13 @@ struct TenantManagementWorkload : TestWorkload {
 			if (self->useMetacluster) {
 				self->tenantSubspace = ""_sr;
 			} else {
-			self->tenantSubspace = makeString(deterministicRandom()->randomInt(0, 10));
-			loop {
-				generateRandomData(mutateString(self->tenantSubspace), self->tenantSubspace.size());
-				if (!self->tenantSubspace.startsWith(systemKeys.begin)) {
-					break;
+				self->tenantSubspace = makeString(deterministicRandom()->randomInt(0, 10));
+				loop {
+					generateRandomData(mutateString(self->tenantSubspace), self->tenantSubspace.size());
+					if (!self->tenantSubspace.startsWith(systemKeys.begin)) {
+						break;
+					}
 				}
-			}
 			}
 
 			// Set a key outside of all tenants to make sure that our tenants aren't writing to the regular key-space
@@ -205,47 +205,50 @@ struct TenantManagementWorkload : TestWorkload {
 	                              std::map<TenantName, TenantMapEntry> tenantsToCreate,
 	                              OperationType operationType,
 	                              TenantManagementWorkload* self) {
-				if (operationType == OperationType::SPECIAL_KEYS) {
-					tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+		if (operationType == OperationType::SPECIAL_KEYS) {
+			tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 			for (auto [tenant, entry] : tenantsToCreate) {
-					tr->set(self->specialKeysTenantMapPrefix.withSuffix(tenant), ""_sr);
+				tr->set(self->specialKeysTenantMapPrefix.withSuffix(tenant), ""_sr);
 				if (entry.tenantGroup.present()) {
-						tr->set(self->specialKeysTenantConfigPrefix.withSuffix("tenant_group/"_sr).withSuffix(tenant),
+					tr->set(self->specialKeysTenantConfigPrefix.withSuffix("tenant_group/"_sr).withSuffix(tenant),
 					        entry.tenantGroup.get());
 				}
-					}
-					wait(tr->commit());
-				} else if (operationType == OperationType::MANAGEMENT_DATABASE) {
+			}
+			wait(tr->commit());
+		} else if (operationType == OperationType::MANAGEMENT_DATABASE) {
 			ASSERT(tenantsToCreate.size() == 1);
 			TenantMapEntry result = wait(ManagementAPI::createTenant(
 			    self->dataDb.getReference(), tenantsToCreate.begin()->first, tenantsToCreate.begin()->second));
 		} else if (operationType == OperationType::MANAGEMENT_TRANSACTION) {
-					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			Optional<Value> lastIdVal = wait(tr->get(tenantLastIdKey));
+			int64_t previousId = lastIdVal.present() ? TenantMapEntry::prefixToId(lastIdVal.get()) : -1;
+
 			std::vector<Future<Void>> createFutures;
 			for (auto [tenant, entry] : tenantsToCreate) {
+				entry.id = ++previousId;
 				createFutures.push_back(success(ManagementAPI::createTenantTransaction(tr, tenant, entry)));
 			}
+			tr->set(tenantLastIdKey, TenantMapEntry::idToPrefix(previousId));
 			wait(waitForAll(createFutures));
-					wait(tr->commit());
+			wait(tr->commit());
 		} else {
 			ASSERT(tenantsToCreate.size() == 1);
 			wait(MetaclusterAPI::createTenant(
 			    self->mvDb, tenantsToCreate.begin()->first, tenantsToCreate.begin()->second));
-			TraceEvent("MetaclusterCreatedTenant");
 		}
-				}
 
-					return Void();
-				}
+		return Void();
+	}
 
 	ACTOR Future<Void> createTenant(Database cx, TenantManagementWorkload* self) {
 		state OperationType operationType = self->randomOperationType();
 		int numTenants = 1;
 
 		// For transaction-based operations, test creating multiple tenants in the same transaction
-		/*if (operationType == OperationType::SPECIAL_KEYS || operationType == OperationType::MANAGEMENT_TRANSACTION) {
-		    numTenants = deterministicRandom()->randomInt(1, 5);
-		}*/
+		if (operationType == OperationType::SPECIAL_KEYS || operationType == OperationType::MANAGEMENT_TRANSACTION) {
+			numTenants = deterministicRandom()->randomInt(1, 5);
+		}
 
 		// Tracks whether any tenant exists in the database or not. This variable is updated if we have to retry
 		// the creation.
@@ -262,7 +265,7 @@ struct TenantManagementWorkload : TestWorkload {
 			tenantsToCreate[tenant] = entry;
 
 			alreadyExists = alreadyExists || self->createdTenants.count(tenant);
-			hasSystemTenant = tenant.startsWith("\xff"_sr);
+			hasSystemTenant = hasSystemTenant || tenant.startsWith("\xff"_sr);
 		}
 
 		// If any tenant existed at the start of this function, then we expect the creation to fail or be a no-op,
@@ -300,7 +303,7 @@ struct TenantManagementWorkload : TestWorkload {
 							break;
 						} else {
 							throw;
-		}
+						}
 					}
 
 					// Check the state of the first created tenant
@@ -323,28 +326,29 @@ struct TenantManagementWorkload : TestWorkload {
 				// Check that using the wrong creation type fails depending on whether we are using a metacluster
 				ASSERT(self->useMetacluster == (operationType == OperationType::METACLUSTER));
 
-				// Transaction-based creation modes will not fail if the tenant already existed, so we can just return
-				// instead.
-				if ((operationType == OperationType::MANAGEMENT_TRANSACTION ||
-				     operationType == OperationType::SPECIAL_KEYS) &&
-				    existedAtStart) {
-					return Void();
+				// Database-based creation modes will fail if the tenant already existed
+				if (operationType == OperationType::MANAGEMENT_DATABASE ||
+				    operationType == OperationType::METACLUSTER) {
+					ASSERT(!existedAtStart);
 				}
-
-				ASSERT(!existedAtStart);
 
 				// It is not legal to create a tenant starting with \xff
 				ASSERT(!hasSystemTenant);
 
 				state std::map<TenantName, TenantMapEntry>::iterator tenantItr;
 				for (tenantItr = tenantsToCreate.begin(); tenantItr != tenantsToCreate.end(); ++tenantItr) {
+					// Ignore any tenants that already existed
+					if (self->createdTenants.count(tenantItr->first)) {
+						continue;
+					}
+
 					// Read the created tenant object and verify that its state is correct
 					state Optional<TenantMapEntry> entry =
 					    wait(ManagementAPI::tryGetTenant(cx.getReference(), tenantItr->first));
 
-				ASSERT(entry.present());
-				ASSERT(entry.get().id > self->maxId);
-				ASSERT(entry.get().prefix.startsWith(self->tenantSubspace));
+					ASSERT(entry.present());
+					ASSERT(entry.get().id > self->maxId);
+					ASSERT(entry.get().prefix.startsWith(self->tenantSubspace));
 					ASSERT(entry.get().tenantGroup == tenantItr->second.tenantGroup);
 					ASSERT(entry.get().tenantState == TenantState::READY);
 
@@ -360,45 +364,47 @@ struct TenantManagementWorkload : TestWorkload {
 					}
 
 					// Update our local tenant state to include the newly created one
-				self->maxId = entry.get().id;
+					self->maxId = entry.get().id;
 					self->createdTenants[tenantItr->first] =
 					    TenantData(entry.get().id, tenantItr->second.tenantGroup, true);
 
 					// Randomly decide to insert a key into the tenant
-				state bool insertData = deterministicRandom()->random01() < 0.5;
-				if (insertData) {
+					state bool insertData = deterministicRandom()->random01() < 0.5;
+					if (insertData) {
 						state Transaction insertTr(self->dataDb, tenantItr->first);
-					loop {
-						try {
+						loop {
+							try {
 								// The value stored in the key will be the name of the tenant
 								insertTr.set(self->keyName, tenantItr->first);
-							wait(insertTr.commit());
-							break;
-						} catch (Error& e) {
-							wait(insertTr.onError(e));
+								wait(insertTr.commit());
+								break;
+							} catch (Error& e) {
+								wait(insertTr.onError(e));
+							}
 						}
-					}
 
 						self->createdTenants[tenantItr->first].empty = false;
 
-						// Make sure that the key inserted correctly concatenates the tenant prefix with the relative
-						// key
+						// Make sure that the key inserted correctly concatenates the tenant prefix with the
+						// relative key
 						state Transaction checkTr(self->dataDb);
-					loop {
-						try {
-							checkTr.setOption(FDBTransactionOptions::RAW_ACCESS);
-							Optional<Value> val = wait(checkTr.get(self->keyName.withPrefix(entry.get().prefix)));
-							ASSERT(val.present());
+						loop {
+							try {
+								checkTr.setOption(FDBTransactionOptions::RAW_ACCESS);
+								Optional<Value> val = wait(checkTr.get(self->keyName.withPrefix(entry.get().prefix)));
+								ASSERT(val.present());
 								ASSERT(val.get() == tenantItr->first);
-							break;
-						} catch (Error& e) {
-							wait(checkTr.onError(e));
+								break;
+							} catch (Error& e) {
+								wait(checkTr.onError(e));
+							}
 						}
 					}
-				}
 
 					// Perform some final tenant validation
 					wait(self->checkTenantContents(self, tenantItr->first, self->createdTenants[tenantItr->first]));
+				}
+
 				return Void();
 			} catch (Error& e) {
 				if (e.code() == error_code_invalid_tenant_name) {
@@ -418,6 +424,7 @@ struct TenantManagementWorkload : TestWorkload {
 					if (e.code() == error_code_tenant_already_exists) {
 						ASSERT(existedAtStart);
 					} else {
+						ASSERT(tenantsToCreate.size() == 1);
 						TraceEvent(SevError, "CreateTenantFailure")
 						    .error(e)
 						    .detail("TenantName", tenantsToCreate.begin()->first);
@@ -431,7 +438,7 @@ struct TenantManagementWorkload : TestWorkload {
 						wait(tr->onError(e));
 					} catch (Error& e) {
 						for (auto [tenant, _] : tenantsToCreate) {
-						TraceEvent(SevError, "CreateTenantFailure").error(e).detail("TenantName", tenant);
+							TraceEvent(SevError, "CreateTenantFailure").error(e).detail("TenantName", tenant);
 						}
 						return Void();
 					}
@@ -487,8 +494,8 @@ struct TenantManagementWorkload : TestWorkload {
 		state Optional<TenantName> endTenant =
 		    operationType != OperationType::MANAGEMENT_DATABASE && operationType != OperationType::METACLUSTER &&
 		            !beginTenant.startsWith("\xff"_sr) && deterministicRandom()->random01() < 0.2
-		                                           ? Optional<TenantName>(self->chooseTenantName(false))
-		                                           : Optional<TenantName>();
+		        ? Optional<TenantName>(self->chooseTenantName(false))
+		        : Optional<TenantName>();
 
 		if (endTenant.present() && endTenant < beginTenant) {
 			TenantName temp = beginTenant;
@@ -498,7 +505,8 @@ struct TenantManagementWorkload : TestWorkload {
 
 		auto itr = self->createdTenants.find(beginTenant);
 
-		// True if the beginTenant should exist and be deletable. This is updated if a deletion fails and gets retried.
+		// True if the beginTenant should exist and be deletable. This is updated if a deletion fails and gets
+		// retried.
 		state bool alreadyExists = itr != self->createdTenants.end();
 
 		// True if the beginTenant existed at the start of this function
@@ -575,38 +583,45 @@ struct TenantManagementWorkload : TestWorkload {
 						retried = true;
 						tr->reset();
 					} catch (Error& e) {
-						// If we retried the deletion after our initial attempt succeeded, then we proceed with the rest
-						// of the deletion steps normally. Otherwise, the deletion happened elsewhere and we failed
-						// here, so we can rethrow the error.
+						// If we retried the deletion after our initial attempt succeeded, then we proceed with the
+						// rest of the deletion steps normally. Otherwise, the deletion happened elsewhere and we
+						// failed here, so we can rethrow the error.
 						if (e.code() == error_code_tenant_not_found && existedAtStart) {
 							ASSERT(operationType == OperationType::METACLUSTER ||
 							       operationType == OperationType::MANAGEMENT_DATABASE);
 							ASSERT(retried);
 							break;
-					} else {
+						} else {
 							throw;
-					}
-					}
-
-					// Check the state of the first deleted tenant
-					Optional<TenantMapEntry> resultEntry =
-					    wait(ManagementAPI::tryGetTenant(cx.getReference(), *tenants.begin()));
-
-					if (!resultEntry.present()) {
-						alreadyExists = false;
-					} else if (resultEntry.get().tenantState == TenantState::REMOVING) {
-						ASSERT(operationType == OperationType::METACLUSTER);
-				} else {
-						ASSERT(resultEntry.get().tenantState == TenantState::READY);
-					}
+						}
 					}
 
-				// The management transaction operation is a no-op if there are no tenants to delete in a range delete
+					if (!tenants.empty()) {
+						// Check the state of the first deleted tenant
+						Optional<TenantMapEntry> resultEntry =
+						    wait(ManagementAPI::tryGetTenant(cx.getReference(), *tenants.begin()));
+
+						if (!resultEntry.present()) {
+							alreadyExists = false;
+						} else if (resultEntry.get().tenantState == TenantState::REMOVING) {
+							ASSERT(operationType == OperationType::METACLUSTER);
+						} else {
+							ASSERT(resultEntry.get().tenantState == TenantState::READY);
+						}
+					} else if (deterministicRandom()->coinflip()) {
+						// Nothing to delete, so randomly retry
+						break;
+					}
+				}
+
+				// The management transaction operation is a no-op if there are no tenants to delete in a range
+				// delete
 				if (tenants.size() == 0 && operationType == OperationType::MANAGEMENT_TRANSACTION) {
 					return Void();
 				}
 
-				// The special keys operation is a no-op if the begin and end tenant are equal (i.e. the range is empty)
+				// The special keys operation is a no-op if the begin and end tenant are equal (i.e. the range is
+				// empty)
 				if (endTenant.present() && beginTenant == endTenant.get() &&
 				    operationType == OperationType::SPECIAL_KEYS) {
 					return Void();
@@ -746,28 +761,28 @@ struct TenantManagementWorkload : TestWorkload {
 	                                     TenantName tenant,
 	                                     OperationType operationType,
 	                                     TenantManagementWorkload* self) {
-				state TenantMapEntry entry;
-				if (operationType == OperationType::SPECIAL_KEYS) {
-					Key key = self->specialKeysTenantMapPrefix.withSuffix(tenant);
-					Optional<Value> value = wait(tr->get(key));
-					if (!value.present()) {
-						throw tenant_not_found();
-					}
-					entry = TenantManagementWorkload::jsonToTenantMapEntry(value.get());
-				} else if (operationType == OperationType::MANAGEMENT_DATABASE) {
+		state TenantMapEntry entry;
+		if (operationType == OperationType::SPECIAL_KEYS) {
+			Key key = self->specialKeysTenantMapPrefix.withSuffix(tenant);
+			Optional<Value> value = wait(tr->get(key));
+			if (!value.present()) {
+				throw tenant_not_found();
+			}
+			entry = TenantManagementWorkload::jsonToTenantMapEntry(value.get());
+		} else if (operationType == OperationType::MANAGEMENT_DATABASE) {
 			TenantMapEntry _entry = wait(ManagementAPI::getTenant(self->dataDb.getReference(), tenant));
-					entry = _entry;
+			entry = _entry;
 		} else if (operationType == OperationType::MANAGEMENT_TRANSACTION) {
-					tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-					TenantMapEntry _entry = wait(ManagementAPI::getTenantTransaction(tr, tenant));
-					entry = _entry;
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			TenantMapEntry _entry = wait(ManagementAPI::getTenantTransaction(tr, tenant));
+			entry = _entry;
 		} else {
 			TenantMapEntry _entry = wait(ManagementAPI::getTenant(self->mvDb, tenant));
 			entry = _entry;
 		}
 
 		return entry;
-				}
+	}
 
 	ACTOR Future<Void> getTenant(Database cx, TenantManagementWorkload* self) {
 		state TenantName tenant = self->chooseTenantName(true);
@@ -828,29 +843,29 @@ struct TenantManagementWorkload : TestWorkload {
 	                                                            int limit,
 	                                                            OperationType operationType,
 	                                                            TenantManagementWorkload* self) {
-				state std::map<TenantName, TenantMapEntry> tenants;
+		state std::map<TenantName, TenantMapEntry> tenants;
 
-				if (operationType == OperationType::SPECIAL_KEYS) {
-					KeyRange range = KeyRangeRef(beginTenant, endTenant).withPrefix(self->specialKeysTenantMapPrefix);
-					RangeResult results = wait(tr->getRange(range, limit));
-					for (auto result : results) {
-						tenants[result.key.removePrefix(self->specialKeysTenantMapPrefix)] =
-						    TenantManagementWorkload::jsonToTenantMapEntry(result.value);
-					}
-				} else if (operationType == OperationType::MANAGEMENT_DATABASE) {
-					std::map<TenantName, TenantMapEntry> _tenants =
+		if (operationType == OperationType::SPECIAL_KEYS) {
+			KeyRange range = KeyRangeRef(beginTenant, endTenant).withPrefix(self->specialKeysTenantMapPrefix);
+			RangeResult results = wait(tr->getRange(range, limit));
+			for (auto result : results) {
+				tenants[result.key.removePrefix(self->specialKeysTenantMapPrefix)] =
+				    TenantManagementWorkload::jsonToTenantMapEntry(result.value);
+			}
+		} else if (operationType == OperationType::MANAGEMENT_DATABASE) {
+			std::map<TenantName, TenantMapEntry> _tenants =
 			    wait(ManagementAPI::listTenants(self->dataDb.getReference(), beginTenant, endTenant, limit));
-					tenants = _tenants;
+			tenants = _tenants;
 		} else if (operationType == OperationType::MANAGEMENT_TRANSACTION) {
-					tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-					std::map<TenantName, TenantMapEntry> _tenants =
-					    wait(ManagementAPI::listTenantsTransaction(tr, beginTenant, endTenant, limit));
-					tenants = _tenants;
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			std::map<TenantName, TenantMapEntry> _tenants =
+			    wait(ManagementAPI::listTenantsTransaction(tr, beginTenant, endTenant, limit));
+			tenants = _tenants;
 		} else {
 			std::map<TenantName, TenantMapEntry> _tenants =
 			    wait(ManagementAPI::listTenants(self->mvDb, beginTenant, endTenant, limit));
 			tenants = _tenants;
-				}
+		}
 
 		return tenants;
 	}

@@ -20,6 +20,7 @@
 
 #include "fdbserver/SimKmsConnector.h"
 
+#include "contrib/fmt-8.1.1/include/fmt/format.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbserver/KmsConnectorInterface.h"
 #include "fdbserver/Knobs.h"
@@ -49,7 +50,11 @@ struct SimEncryptKeyCtx {
 	explicit SimEncryptKeyCtx(EncryptCipherBaseKeyId kId, const char* data) : id(kId), key(data, AES_256_KEY_LENGTH) {}
 };
 
-struct SimKmsConnectorContext {
+// The credentials may be allowed to change, but the storage locations and partitioning cannot change, even across
+// restarts. Keep it as global static state in simulation.
+static std::unordered_map<BlobMetadataDomainId, Standalone<BlobMetadataDetailsRef>> simBlobMetadataStore;
+
+struct SimKmsConnectorContext : NonCopyable, ReferenceCounted<SimKmsConnectorContext> {
 	uint32_t maxEncryptionKeys;
 	std::unordered_map<EncryptCipherBaseKeyId, std::unique_ptr<SimEncryptKeyCtx>> simEncryptKeyStore;
 
@@ -68,94 +73,168 @@ struct SimKmsConnectorContext {
 	}
 };
 
+ACTOR Future<Void> ekLookupByIds(Reference<SimKmsConnectorContext> ctx,
+                                 KmsConnectorInterface interf,
+                                 KmsConnLookupEKsByKeyIdsReq req) {
+	state KmsConnLookupEKsByKeyIdsRep rep;
+	state bool success = true;
+	state Optional<TraceEvent> dbgKIdTrace =
+	    req.debugId.present() ? TraceEvent("SimKmsGetByKeyIds", interf.id()) : Optional<TraceEvent>();
+
+	if (dbgKIdTrace.present()) {
+		dbgKIdTrace.get().setMaxEventLength(100000);
+		dbgKIdTrace.get().detail("DbgId", req.debugId.get());
+	}
+
+	// Lookup corresponding EncryptKeyCtx for input keyId
+	for (const auto& item : req.encryptKeyInfos) {
+		const auto& itr = ctx->simEncryptKeyStore.find(item.baseCipherId);
+		if (itr != ctx->simEncryptKeyStore.end()) {
+			rep.cipherKeyDetails.emplace_back(
+			    item.domainId, itr->first, StringRef(rep.arena, itr->second.get()->key), rep.arena);
+
+			if (dbgKIdTrace.present()) {
+				// {encryptDomainId, baseCipherId} forms a unique tuple across encryption domains
+				dbgKIdTrace.get().detail(
+				    getEncryptDbgTraceKey(ENCRYPT_DBG_TRACE_RESULT_PREFIX, item.domainId, item.domainName, itr->first),
+				    "");
+			}
+		} else {
+			success = false;
+			break;
+		}
+	}
+
+	wait(delayJittered(1.0)); // simulate network delay
+
+	success ? req.reply.send(rep) : req.reply.sendError(encrypt_key_not_found());
+
+	return Void();
+}
+
+ACTOR Future<Void> ekLookupByDomainIds(Reference<SimKmsConnectorContext> ctx,
+                                       KmsConnectorInterface interf,
+                                       KmsConnLookupEKsByDomainIdsReq req) {
+	state KmsConnLookupEKsByDomainIdsRep rep;
+	state bool success = true;
+	state Optional<TraceEvent> dbgDIdTrace =
+	    req.debugId.present() ? TraceEvent("SimKmsGetsByDomIds", interf.id()) : Optional<TraceEvent>();
+
+	if (dbgDIdTrace.present()) {
+		dbgDIdTrace.get().detail("DbgId", req.debugId.get());
+	}
+
+	// Map encryptionDomainId to corresponding EncryptKeyCtx element using a modulo operation. This
+	// would mean multiple domains gets mapped to the same encryption key which is fine, the
+	// EncryptKeyStore guarantees that keyId -> plaintext encryptKey mapping is idempotent.
+	for (const auto& info : req.encryptDomainInfos) {
+		EncryptCipherBaseKeyId keyId = 1 + abs(info.domainId) % SERVER_KNOBS->SIM_KMS_MAX_KEYS;
+		const auto& itr = ctx->simEncryptKeyStore.find(keyId);
+		if (itr != ctx->simEncryptKeyStore.end()) {
+			rep.cipherKeyDetails.emplace_back(info.domainId, keyId, StringRef(itr->second.get()->key), rep.arena);
+			if (dbgDIdTrace.present()) {
+				// {encryptId, baseCipherId} forms a unique tuple across encryption domains
+				dbgDIdTrace.get().detail(
+				    getEncryptDbgTraceKey(ENCRYPT_DBG_TRACE_RESULT_PREFIX, info.domainId, info.domainName, keyId), "");
+			}
+		} else {
+			success = false;
+			break;
+		}
+	}
+
+	wait(delayJittered(1.0)); // simulate network delay
+
+	success ? req.reply.send(rep) : req.reply.sendError(encrypt_key_not_found());
+
+	return Void();
+}
+
+static Standalone<BlobMetadataDetailsRef> createBlobMetadata(BlobMetadataDomainId domainId) {
+	Standalone<BlobMetadataDetailsRef> metadata;
+	metadata.domainId = domainId;
+	// 0 == no partition, 1 == suffix partitioned, 2 == storage location partitioned
+	int type = deterministicRandom()->randomInt(0, 3);
+	int partitionCount = (type == 0) ? 0 : deterministicRandom()->randomInt(2, 12);
+	fmt::print("SimBlobMetadata ({})\n", domainId);
+	TraceEvent ev(SevDebug, "SimBlobMetadata");
+	ev.detail("DomainId", domainId).detail("TypeNum", type).detail("PartitionCount", partitionCount);
+	if (type == 0) {
+		// single storage location
+		metadata.base = StringRef(metadata.arena(), "file://fdbblob/" + std::to_string(domainId) + "/");
+		fmt::print("  {}\n", metadata.base.get().printable());
+		ev.detail("Base", metadata.base);
+	}
+	if (type == 1) {
+		// simulate hash prefixing in s3
+		metadata.base = StringRef(metadata.arena(), "file://fdbblob/"_sr);
+		ev.detail("Base", metadata.base);
+		fmt::print("    {} ({})\n", metadata.base.get().printable(), partitionCount);
+		for (int i = 0; i < partitionCount; i++) {
+			metadata.partitions.push_back_deep(metadata.arena(),
+			                                   deterministicRandom()->randomUniqueID().shortString() + "-" +
+			                                       std::to_string(domainId) + "/");
+			fmt::print("      {}\n", metadata.partitions.back().printable());
+			ev.detail("P" + std::to_string(i), metadata.partitions.back());
+		}
+	}
+	if (type == 2) {
+		// simulate separate storage location per partition
+		for (int i = 0; i < partitionCount; i++) {
+			metadata.partitions.push_back_deep(
+			    metadata.arena(), "file://fdbblob" + std::to_string(domainId) + "_" + std::to_string(i) + "/");
+			fmt::print("      {}\n", metadata.partitions.back().printable());
+			ev.detail("P" + std::to_string(i), metadata.partitions.back());
+		}
+	}
+	return metadata;
+}
+
+ACTOR Future<Void> blobMetadataLookup(KmsConnectorInterface interf, KmsConnBlobMetadataReq req) {
+	state KmsConnBlobMetadataRep rep;
+	state Optional<TraceEvent> dbgDIdTrace =
+	    req.debugId.present() ? TraceEvent("SimKmsBlobMetadataLookup", interf.id()) : Optional<TraceEvent>();
+	if (dbgDIdTrace.present()) {
+		dbgDIdTrace.get().detail("DbgId", req.debugId.get());
+	}
+
+	for (BlobMetadataDomainId domainId : req.domainIds) {
+		auto it = simBlobMetadataStore.find(domainId);
+		if (it == simBlobMetadataStore.end()) {
+			// construct new blob metadata
+			it = simBlobMetadataStore.insert({ domainId, createBlobMetadata(domainId) }).first;
+		}
+		rep.metadataDetails.arena().dependsOn(it->second.arena());
+		rep.metadataDetails.push_back(rep.metadataDetails.arena(), it->second);
+	}
+
+	wait(delayJittered(1.0)); // simulate network delay
+
+	req.reply.send(rep);
+
+	return Void();
+}
+
 ACTOR Future<Void> simKmsConnectorCore_impl(KmsConnectorInterface interf) {
 	TraceEvent("SimEncryptKmsProxy_Init", interf.id()).detail("MaxEncryptKeys", SERVER_KNOBS->SIM_KMS_MAX_KEYS);
 
-	state bool success = true;
-	state std::unique_ptr<SimKmsConnectorContext> ctx =
-	    std::make_unique<SimKmsConnectorContext>(SERVER_KNOBS->SIM_KMS_MAX_KEYS);
+	state Reference<SimKmsConnectorContext> ctx = makeReference<SimKmsConnectorContext>(SERVER_KNOBS->SIM_KMS_MAX_KEYS);
 
 	ASSERT_EQ(ctx->simEncryptKeyStore.size(), SERVER_KNOBS->SIM_KMS_MAX_KEYS);
+
+	state PromiseStream<Future<Void>> addActor;
+	state Future<Void> collection = actorCollection(addActor.getFuture());
 
 	loop {
 		choose {
 			when(KmsConnLookupEKsByKeyIdsReq req = waitNext(interf.ekLookupByIds.getFuture())) {
-				state KmsConnLookupEKsByKeyIdsReq keysByIdsReq = req;
-				state KmsConnLookupEKsByKeyIdsRep keysByIdsRep;
-				state Optional<TraceEvent> dbgKIdTrace = keysByIdsReq.debugId.present()
-				                                             ? TraceEvent("SimKmsGetByKeyIds", interf.id())
-				                                             : Optional<TraceEvent>();
-
-				if (dbgKIdTrace.present()) {
-					dbgKIdTrace.get().setMaxEventLength(100000);
-					dbgKIdTrace.get().detail("DbgId", keysByIdsReq.debugId.get());
-				}
-
-				// Lookup corresponding EncryptKeyCtx for input keyId
-				for (const auto& item : req.encryptKeyInfos) {
-					const auto& itr = ctx->simEncryptKeyStore.find(item.baseCipherId);
-					if (itr != ctx->simEncryptKeyStore.end()) {
-						keysByIdsRep.cipherKeyDetails.emplace_back(
-						    item.domainId,
-						    itr->first,
-						    StringRef(keysByIdsRep.arena, itr->second.get()->key),
-						    keysByIdsRep.arena);
-
-						if (dbgKIdTrace.present()) {
-							// {encryptDomainId, baseCipherId} forms a unique tuple across encryption domains
-							dbgKIdTrace.get().detail(
-							    getEncryptDbgTraceKey(
-							        ENCRYPT_DBG_TRACE_RESULT_PREFIX, item.domainId, item.domainName, itr->first),
-							    "");
-						}
-					} else {
-						success = false;
-						break;
-					}
-				}
-
-				wait(delayJittered(1.0)); // simulate network delay
-
-				success ? keysByIdsReq.reply.send(keysByIdsRep) : keysByIdsReq.reply.sendError(encrypt_key_not_found());
+				addActor.send(ekLookupByIds(ctx, interf, req));
 			}
 			when(KmsConnLookupEKsByDomainIdsReq req = waitNext(interf.ekLookupByDomainIds.getFuture())) {
-				state KmsConnLookupEKsByDomainIdsReq keysByDomainIdReq = req;
-				state KmsConnLookupEKsByDomainIdsRep keysByDomainIdRep;
-				state Optional<TraceEvent> dbgDIdTrace = keysByDomainIdReq.debugId.present()
-				                                             ? TraceEvent("SimKmsGetsByDomIds", interf.id())
-				                                             : Optional<TraceEvent>();
-
-				if (dbgDIdTrace.present()) {
-					dbgDIdTrace.get().detail("DbgId", keysByDomainIdReq.debugId.get());
-				}
-
-				// Map encryptionDomainId to corresponding EncryptKeyCtx element using a modulo operation. This
-				// would mean multiple domains gets mapped to the same encryption key which is fine, the
-				// EncryptKeyStore guarantees that keyId -> plaintext encryptKey mapping is idempotent.
-				for (const auto& info : req.encryptDomainInfos) {
-					EncryptCipherBaseKeyId keyId = 1 + abs(info.domainId) % SERVER_KNOBS->SIM_KMS_MAX_KEYS;
-					const auto& itr = ctx->simEncryptKeyStore.find(keyId);
-					if (itr != ctx->simEncryptKeyStore.end()) {
-						keysByDomainIdRep.cipherKeyDetails.emplace_back(
-						    info.domainId, keyId, StringRef(itr->second.get()->key), keysByDomainIdRep.arena);
-
-						if (dbgDIdTrace.present()) {
-							// {encryptId, baseCipherId} forms a unique tuple across encryption domains
-							dbgDIdTrace.get().detail(
-							    getEncryptDbgTraceKey(
-							        ENCRYPT_DBG_TRACE_RESULT_PREFIX, info.domainId, info.domainName, keyId),
-							    "");
-						}
-					} else {
-						success = false;
-						break;
-					}
-				}
-
-				wait(delayJittered(1.0)); // simulate network delay
-
-				success ? keysByDomainIdReq.reply.send(keysByDomainIdRep)
-				        : keysByDomainIdReq.reply.sendError(encrypt_key_not_found());
+				addActor.send(ekLookupByDomainIds(ctx, interf, req));
+			}
+			when(KmsConnBlobMetadataReq req = waitNext(interf.blobMetadataReq.getFuture())) {
+				addActor.send(blobMetadataLookup(interf, req));
 			}
 		}
 	}

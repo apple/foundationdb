@@ -217,8 +217,10 @@ ACTOR Future<Void> applyTenantConfig(ReadYourWritesTransaction* ryw,
 
 ACTOR Future<Void> createTenant(ReadYourWritesTransaction* ryw,
                                 TenantNameRef tenantName,
-                                Optional<std::vector<std::pair<StringRef, Optional<Value>>>> configMutations) {
+                                Optional<std::vector<std::pair<StringRef, Optional<Value>>>> configMutations,
+                                int64_t tenantId) {
 	state TenantMapEntry tenantEntry;
+	tenantEntry.id = tenantId;
 
 	if (configMutations.present()) {
 		wait(applyTenantConfig(ryw, tenantName, configMutations.get(), &tenantEntry, true));
@@ -227,6 +229,22 @@ ACTOR Future<Void> createTenant(ReadYourWritesTransaction* ryw,
 	std::pair<TenantMapEntry, bool> entry =
 	    wait(ManagementAPI::createTenantTransaction(&ryw->getTransaction(), tenantName, tenantEntry));
 
+	return Void();
+}
+
+ACTOR Future<Void> createTenants(
+    ReadYourWritesTransaction* ryw,
+    std::map<TenantNameRef, Optional<std::vector<std::pair<StringRef, Optional<Value>>>>> tenants) {
+	Optional<Value> lastIdVal = wait(ryw->getTransaction().get(tenantLastIdKey));
+	int64_t previousId = lastIdVal.present() ? TenantMapEntry::prefixToId(lastIdVal.get()) : -1;
+
+	std::vector<Future<Void>> createFutures;
+	for (auto const& [tenant, config] : tenants) {
+		createFutures.push_back(createTenant(ryw, tenant, config, ++previousId));
+	}
+
+	ryw->getTransaction().set(tenantLastIdKey, TenantMapEntry::idToPrefix(previousId));
+	wait(waitForAll(createFutures));
 	return Void();
 }
 
@@ -284,6 +302,7 @@ Future<Optional<std::string>> TenantRangeImpl::commit(ReadYourWritesTransaction*
 		}
 	}
 
+	std::map<TenantNameRef, Optional<std::vector<std::pair<StringRef, Optional<Value>>>>> tenantsToCreate;
 	for (auto mapMutation : mapMutations) {
 		TenantNameRef tenantName = mapMutation.first.begin;
 		if (mapMutation.second.present()) {
@@ -293,7 +312,7 @@ Future<Optional<std::string>> TenantRangeImpl::commit(ReadYourWritesTransaction*
 				createMutations = itr->second;
 				configMutations.erase(itr);
 			}
-			tenantManagementFutures.push_back(createTenant(ryw, tenantName, createMutations));
+			tenantsToCreate[tenantName] = createMutations;
 		} else {
 			// For a single key clear, just issue the delete
 			if (mapMutation.first.singleKeyRange()) {
@@ -305,6 +324,9 @@ Future<Optional<std::string>> TenantRangeImpl::commit(ReadYourWritesTransaction*
 		}
 	}
 
+	if (!tenantsToCreate.empty()) {
+		tenantManagementFutures.push_back(createTenants(ryw, tenantsToCreate));
+	}
 	for (auto configMutation : configMutations) {
 		tenantManagementFutures.push_back(changeTenantConfig(ryw, configMutation.first, configMutation.second));
 	}
