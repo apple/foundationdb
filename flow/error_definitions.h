@@ -258,6 +258,7 @@ ERROR( directory_prefix_in_use, 2265, "Directory layer already has a conflicting
 ERROR( invalid_destination_directory, 2266, "Target directory is invalid" )
 ERROR( cannot_modify_root_directory, 2267, "Root directory cannot be modified" )
 ERROR( invalid_uuid_size, 2268, "UUID is not sixteen bytes");
+ERROR( invalid_versionstamp_size, 2269, "Versionstamp is not exactly twelve bytes");
 
 // 2300 - backup and restore errors
 ERROR( backup_error, 2300, "Backup error")
@@ -324,6 +325,9 @@ ERROR( not_implemented, 4200, "Not implemented yet" )
 ERROR( permission_denied, 6000, "Client tried to access unauthorized data" )
 ERROR( unauthorized_attempt, 6001, "A untrusted client tried to send a message to a private endpoint" )
 ERROR( digital_signature_ops_error, 6002, "Digital signature operation error" )
+ERROR( authorization_token_verify_failed, 6003, "Failed to verify authorization token" )
+ERROR( pkey_decode_error, 6004, "Failed to decode public/private key" )
+ERROR( pkey_encode_error, 6005, "Failed to encode public/private key" )
 // clang-format on
 
 #undef ERROR
