@@ -28,12 +28,14 @@
 #include "flow/Trace.h"
 #include "flow/flow.h"
 #include "flow/network.h"
+#include "fdbclient/BlobMetadataUtils.h"
 
 struct KmsConnectorInterface {
 	constexpr static FileIdentifier file_identifier = 2416711;
 	RequestStream<ReplyPromise<Void>> waitFailure;
 	RequestStream<struct KmsConnLookupEKsByKeyIdsReq> ekLookupByIds;
 	RequestStream<struct KmsConnLookupEKsByDomainIdsReq> ekLookupByDomainIds;
+	RequestStream<struct KmsConnBlobMetadataReq> blobMetadataReq;
 
 	KmsConnectorInterface() {}
 
@@ -49,6 +51,8 @@ struct KmsConnectorInterface {
 			    RequestStream<struct KmsConnLookupEKsByKeyIdsReq>(waitFailure.getEndpoint().getAdjustedEndpoint(1));
 			ekLookupByDomainIds =
 			    RequestStream<struct KmsConnLookupEKsByDomainIdsReq>(waitFailure.getEndpoint().getAdjustedEndpoint(2));
+			blobMetadataReq =
+			    RequestStream<struct KmsConnBlobMetadataReq>(waitFailure.getEndpoint().getAdjustedEndpoint(3));
 		}
 	}
 
@@ -57,6 +61,7 @@ struct KmsConnectorInterface {
 		streams.push_back(waitFailure.getReceiver());
 		streams.push_back(ekLookupByIds.getReceiver(TaskPriority::Worker));
 		streams.push_back(ekLookupByDomainIds.getReceiver(TaskPriority::Worker));
+		streams.push_back(blobMetadataReq.getReceiver(TaskPriority::Worker));
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
@@ -186,6 +191,34 @@ struct KmsConnLookupEKsByDomainIdsReq {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, arena, encryptDomainInfos, debugId, reply);
+	}
+};
+
+struct KmsConnBlobMetadataRep {
+	constexpr static FileIdentifier file_identifier = 2919714;
+	Standalone<VectorRef<BlobMetadataDetailsRef>> metadataDetails;
+
+	KmsConnBlobMetadataRep() {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, metadataDetails);
+	}
+};
+
+struct KmsConnBlobMetadataReq {
+	constexpr static FileIdentifier file_identifier = 3913147;
+	std::vector<BlobMetadataDomainId> domainIds;
+	Optional<UID> debugId;
+	ReplyPromise<KmsConnBlobMetadataRep> reply;
+
+	KmsConnBlobMetadataReq() {}
+	explicit KmsConnBlobMetadataReq(const std::vector<BlobMetadataDomainId>& ids, Optional<UID> dbgId)
+	  : domainIds(ids), debugId(dbgId) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, domainIds, debugId, reply);
 	}
 };
 
