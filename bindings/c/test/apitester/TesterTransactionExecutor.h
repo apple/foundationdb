@@ -39,7 +39,7 @@ public:
 	virtual ~ITransactionContext() {}
 
 	// Current FDB transaction
-	virtual fdb::Transaction* tx() = 0;
+	virtual fdb::Transaction tx() = 0;
 
 	// Schedule a continuation to be executed when the future gets ready
 	// retryOnError controls whether transaction is retried in case of an error instead

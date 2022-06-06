@@ -85,7 +85,7 @@ public:
 	// IN_PROGRESS -> (ON_ERROR -> IN_PROGRESS)* [-> ON_ERROR] -> DONE
 	enum class TxState { IN_PROGRESS, ON_ERROR, DONE };
 
-	fdb::Transaction* tx() override { return &fdbTx; }
+	fdb::Transaction tx() override { return fdbTx; }
 
 	// Set a continuation to be executed when a future gets ready
 	void continueAfter(fdb::Future f, TTaskFct cont, bool retryOnError) override {
@@ -417,7 +417,7 @@ protected:
 
 		ASSERT(!onErrorFuture);
 		onErrorArg = err;
-		onErrorFuture = tx()->onError(err);
+		onErrorFuture = tx().onError(err);
 		onErrorCallTimePoint = timeNow();
 		onErrorThisRef = std::static_pointer_cast<AsyncTransactionContext>(shared_from_this());
 		try {

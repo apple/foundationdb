@@ -114,7 +114,7 @@ public:
 
 	bool retryable() const noexcept { return native::fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, err) != 0; }
 
-	static Error success() { return Error(error_code_success); }
+	static Error success() { return Error(); }
 
 private:
 	CodeType err;
@@ -283,11 +283,7 @@ inline void setOption(FDBNetworkOption option, BytesRef str) {
 }
 
 inline void setOption(FDBNetworkOption option, CharsRef str) {
-	if (auto err = setOptionNothrow(option, str)) {
-		throwError(fmt::format("ERROR: fdb_network_set_option({}): ",
-		                       static_cast<std::underlying_type_t<FDBNetworkOption>>(option)),
-		           err);
-	}
+	setOption(option, toBytesRef(str));
 }
 
 inline void setOption(FDBNetworkOption option, int64_t value) {
@@ -300,11 +296,7 @@ inline void setOption(FDBNetworkOption option, int64_t value) {
 }
 
 inline void setOption(FDBNetworkOption option) {
-	if (auto err = setOptionNothrow(option)) {
-		throwError(fmt::format("ERROR: fdb_network_set_option({}): ",
-		                       static_cast<std::underlying_type_t<FDBNetworkOption>>(option)),
-		           err);
-	}
+	setOption(option, "");
 }
 
 inline Error setupNothrow() noexcept {
@@ -556,21 +548,9 @@ public:
 		}
 	}
 
-	void setOption(FDBTransactionOption option, CharsRef str) {
-		if (auto err = setOptionNothrow(option, str)) {
-			throwError(fmt::format("transaction_set_option({}) returned error: ",
-			                       static_cast<std::underlying_type_t<FDBTransactionOption>>(option)),
-			           err);
-		}
-	}
+	void setOption(FDBTransactionOption option, CharsRef str) { setOption(option, toBytesRef(str)); }
 
-	void setOption(FDBTransactionOption option) {
-		if (auto err = setOptionNothrow(option)) {
-			throwError(fmt::format("transaction_set_option({}) returned error: ",
-			                       static_cast<std::underlying_type_t<FDBTransactionOption>>(option)),
-			           err);
-		}
-	}
+	void setOption(FDBTransactionOption option) { setOption(option, ""); }
 
 	TypedFuture<future_var::Int64> getReadVersion() { return native::fdb_transaction_get_read_version(tr.get()); }
 

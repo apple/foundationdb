@@ -41,7 +41,7 @@ private:
 		execTransaction(
 		    [kvPairs](auto ctx) {
 			    for (const fdb::KeyValue& kv : *kvPairs) {
-				    ctx->tx()->set(kv.key, kv.value);
+				    ctx->tx().set(kv.key, kv.value);
 			    }
 			    ctx->commit();
 		    },
@@ -54,11 +54,11 @@ private:
 			        [kvPairs, results, this](auto ctx) {
 				        if (apiVersion >= 710) {
 					        // Test GRV caching in 7.1 and later
-					        ctx->tx()->setOption(FDB_TR_OPTION_USE_GRV_CACHE);
+					        ctx->tx().setOption(FDB_TR_OPTION_USE_GRV_CACHE);
 				        }
 				        auto futures = std::make_shared<std::vector<fdb::Future>>();
 				        for (const auto& kv : *kvPairs) {
-					        futures->push_back(ctx->tx()->get(kv.key, false));
+					        futures->push_back(ctx->tx().get(kv.key, false));
 				        }
 				        ctx->continueAfterAll(*futures, [ctx, futures, results]() {
 					        results->clear();
@@ -99,7 +99,7 @@ private:
 		    [keys, results](auto ctx) {
 			    auto futures = std::make_shared<std::vector<fdb::Future>>();
 			    for (const auto& key : *keys) {
-				    futures->push_back(ctx->tx()->get(key, false));
+				    futures->push_back(ctx->tx().get(key, false));
 			    }
 			    ctx->continueAfterAll(*futures, [ctx, futures, results]() {
 				    results->clear();

@@ -41,7 +41,7 @@ private:
 		    [keys](auto ctx) {
 			    std::vector<fdb::Future> futures;
 			    for (const auto& key : *keys) {
-				    futures.push_back(ctx->tx()->get(key, false).eraseType());
+				    futures.push_back(ctx->tx().get(key, false).eraseType());
 			    }
 			    ctx->done();
 		    },
@@ -59,7 +59,7 @@ private:
 		    [this, keys](auto ctx) {
 			    std::vector<fdb::Future> futures;
 			    for (const auto& key : *keys) {
-				    futures.push_back(ctx->tx()->get(key, false).eraseType());
+				    futures.push_back(ctx->tx().get(key, false).eraseType());
 			    }
 			    for (int i = 0; i < keys->size(); i++) {
 				    fdb::Future f = futures[i];

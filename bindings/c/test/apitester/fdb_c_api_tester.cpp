@@ -270,9 +270,9 @@ bool parseArgs(TesterOptions& options, int argc, char** argv) {
 	return true;
 }
 
-void fdb_check(fdb::native::fdb_error_t e) {
+void fdb_check(fdb::Error e) {
 	if (e) {
-		fmt::print(stderr, "Unexpected FDB error: {}({})\n", e, fdb::native::fdb_get_error(e));
+		fmt::print(stderr, "Unexpected FDB error: {}({})\n", e.code(), e.what());
 		std::abort();
 	}
 }
@@ -398,17 +398,17 @@ int main(int argc, char** argv) {
 		}
 		randomizeOptions(options);
 
-		fdb_check(fdb::native::fdb_select_api_version(options.apiVersion));
+		fdb::selectApiVersion(options.apiVersion);
 		applyNetworkOptions(options);
-		fdb_check(fdb::native::fdb_setup_network());
+		fdb::network::setup();
 
-		std::thread network_thread{ &fdb::native::fdb_run_network };
+		std::thread network_thread{ &fdb::network::run };
 
 		if (!runWorkloads(options)) {
 			retCode = 1;
 		}
 
-		fdb_check(fdb::native::fdb_stop_network());
+		fdb_check(fdb::network::stop());
 		network_thread.join();
 	} catch (const std::runtime_error& err) {
 		fmt::print(stderr, "ERROR: {}\n", err.what());

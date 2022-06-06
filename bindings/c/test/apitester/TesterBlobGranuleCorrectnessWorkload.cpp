@@ -100,7 +100,7 @@ private:
 		}
 		execTransaction(
 		    [this, begin, end, results, tooOld](auto ctx) {
-			    ctx->tx()->setOption(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE);
+			    ctx->tx().setOption(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE);
 			    TesterGranuleContext testerContext;
 			    testerContext.basePath = ctx->getBGBasePath();
 
@@ -112,7 +112,7 @@ private:
 			    granuleContext.get_load_f = &granule_get_load;
 			    granuleContext.free_load_f = &granule_free_load;
 
-			    fdb::Result res = ctx->tx()->readBlobGranules(
+			    fdb::Result res = ctx->tx().readBlobGranules(
 			        begin, end, 0 /* beginVersion */, -2 /* latest read version */, granuleContext);
 			    auto out = fdb::Result::NativeKeyValueArray{};
 			    fdb::Error err = res.getKeyValueArrayNothrow(out);
@@ -178,7 +178,7 @@ private:
 		}
 		execTransaction(
 		    [begin, end, results](auto ctx) {
-			    fdb::Future f = ctx->tx()->getBlobGranuleRanges(begin, end).eraseType();
+			    fdb::Future f = ctx->tx().getBlobGranuleRanges(begin, end).eraseType();
 			    ctx->continueAfter(
 			        f,
 			        [ctx, f, results]() {
