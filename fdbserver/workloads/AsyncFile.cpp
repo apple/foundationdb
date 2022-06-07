@@ -21,7 +21,6 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/ActorCollection.h"
 #include "fdbserver/workloads/AsyncFile.actor.h"
-#include "flow/actorcompiler.h"
 
 // class RandomByteGenerator
 

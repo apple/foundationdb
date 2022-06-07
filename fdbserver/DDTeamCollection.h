@@ -47,7 +47,6 @@
 #include "flow/BooleanParam.h"
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 class TCTeamInfo;
 class TCMachineInfo;

@@ -23,7 +23,6 @@
 #define FDBCLIENT_CLUSTERCONNECTIONFILE_H
 
 #include "fdbclient/CoordinationInterface.h"
-#include "flow/actorcompiler.h" // has to be last include
 
 // An implementation of IClusterConnectionRecord backed by a file.
 class ClusterConnectionFile : public IClusterConnectionRecord, ReferenceCounted<ClusterConnectionFile>, NonCopyable {
@@ -72,5 +71,4 @@ private:
 	std::string filename;
 };
 
-#include "flow/unactorcompiler.h"
 #endif
