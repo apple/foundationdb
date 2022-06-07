@@ -38,6 +38,7 @@ set(FDBSERVER_SRCS
   DBCoreState.h
   DDTeamCollection.actor.cpp
   DDTeamCollection.h
+  DDTxnProcessor.actor.cpp
   DiskQueue.actor.cpp
   EncryptKeyProxy.actor.cpp
   EncryptKeyProxyInterface.h
