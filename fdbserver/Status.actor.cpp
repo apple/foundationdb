@@ -979,6 +979,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 				statusObj["network"] = networkObj;
 
 				memoryObj.setKeyRawNumber("used_bytes", processMetrics.getValue("Memory"));
+				memoryObj.setKeyRawNumber("rss_bytes", processMetrics.getValue("ResidentMemory"));
 				memoryObj.setKeyRawNumber("unused_allocated_memory", processMetrics.getValue("UnusedAllocatedMemory"));
 			}
 
@@ -1010,8 +1011,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 				auto machineMemInfo = machineMemoryUsage[workerItr->interf.locality.machineId()];
 				if (machineMemInfo.valid() && memoryLimit > 0) {
 					ASSERT(machineMemInfo.aggregateLimit > 0);
-					int64_t memory =
-					    (availableMemory + machineMemInfo.memoryUsage) * memoryLimit / machineMemInfo.aggregateLimit;
+					int64_t memory = availableMemory * memoryLimit / machineMemInfo.aggregateLimit;
 					memoryObj["available_bytes"] = std::min<int64_t>(std::max<int64_t>(memory, 0), memoryLimit);
 				}
 			}
