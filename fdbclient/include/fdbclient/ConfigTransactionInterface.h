@@ -65,16 +65,18 @@ struct ConfigTransactionGetGenerationReply {
 
 struct ConfigTransactionGetGenerationRequest {
 	static constexpr FileIdentifier file_identifier = 138941;
+	size_t coordinatorsHash;
 	// A hint to catch up lagging nodes:
 	Optional<Version> lastSeenLiveVersion;
 	ReplyPromise<ConfigTransactionGetGenerationReply> reply;
 	ConfigTransactionGetGenerationRequest() = default;
-	explicit ConfigTransactionGetGenerationRequest(Optional<Version> const& lastSeenLiveVersion)
-	  : lastSeenLiveVersion(lastSeenLiveVersion) {}
+	explicit ConfigTransactionGetGenerationRequest(size_t coordinatorsHash,
+	                                               Optional<Version> const& lastSeenLiveVersion)
+	  : coordinatorsHash(coordinatorsHash), lastSeenLiveVersion(lastSeenLiveVersion) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, lastSeenLiveVersion, reply);
+		serializer(ar, coordinatorsHash, lastSeenLiveVersion, reply);
 	}
 };
 
@@ -92,39 +94,43 @@ struct ConfigTransactionGetReply {
 
 struct ConfigTransactionGetRequest {
 	static constexpr FileIdentifier file_identifier = 923040;
+	size_t coordinatorsHash;
 	ConfigGeneration generation;
 	ConfigKey key;
 	ReplyPromise<ConfigTransactionGetReply> reply;
 
 	ConfigTransactionGetRequest() = default;
-	explicit ConfigTransactionGetRequest(ConfigGeneration generation, ConfigKey key)
-	  : generation(generation), key(key) {}
+	explicit ConfigTransactionGetRequest(size_t coordinatorsHash, ConfigGeneration generation, ConfigKey key)
+	  : coordinatorsHash(coordinatorsHash), generation(generation), key(key) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, generation, key, reply);
+		serializer(ar, coordinatorsHash, generation, key, reply);
 	}
 };
 
 struct ConfigTransactionCommitRequest {
 	static constexpr FileIdentifier file_identifier = 103841;
 	Arena arena;
+	size_t coordinatorsHash;
 	ConfigGeneration generation{ ::invalidVersion, ::invalidVersion };
 	VectorRef<ConfigMutationRef> mutations;
 	ConfigCommitAnnotationRef annotation;
 	ReplyPromise<Void> reply;
 
 	ConfigTransactionCommitRequest() = default;
-	explicit ConfigTransactionCommitRequest(ConfigGeneration generation,
+	explicit ConfigTransactionCommitRequest(size_t coordinatorsHash,
+	                                        ConfigGeneration generation,
 	                                        VectorRef<ConfigMutationRef> mutations,
 	                                        ConfigCommitAnnotationRef annotation)
-	  : generation(generation), mutations(arena, mutations), annotation(arena, annotation) {}
+	  : coordinatorsHash(coordinatorsHash), generation(generation), mutations(arena, mutations),
+	    annotation(arena, annotation) {}
 
 	size_t expectedSize() const { return mutations.expectedSize() + annotation.expectedSize(); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, generation, mutations, annotation, reply, arena);
+		serializer(ar, coordinatorsHash, generation, mutations, annotation, reply, arena);
 	}
 };
 

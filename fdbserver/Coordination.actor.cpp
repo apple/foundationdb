@@ -725,9 +725,9 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf,
 		}
 		when(ForwardRequest req = waitNext(interf.forward.getFuture())) {
 			Optional<LeaderInfo> forward = regs.getForward(req.key);
-			if (forward.present())
+			if (forward.present()) {
 				req.reply.send(Void());
-			else {
+			} else {
 				StringRef clusterName = ccr->getConnectionString().clusterKeyName();
 				if (!SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT && getClusterDescriptor(req.key).compare(clusterName)) {
 					TraceEvent(SevWarn, "CCRMismatch")
@@ -761,12 +761,14 @@ ACTOR Future<Void> coordinationServer(std::string dataFolder,
 	state Future<Void> configDatabaseServer = Never();
 	TraceEvent("CoordinationServer", myID)
 	    .detail("MyInterfaceAddr", myInterface.read.getEndpoint().getPrimaryAddress())
-	    .detail("Folder", dataFolder);
+	    .detail("Folder", dataFolder)
+	    .detail("ConfigNodeValid", configNode.isValid());
 
 	if (configNode.isValid()) {
 		configTransactionInterface.setupWellKnownEndpoints();
 		configFollowerInterface.setupWellKnownEndpoints();
-		configDatabaseServer = configNode->serve(cbi, configTransactionInterface, configFollowerInterface);
+		configDatabaseServer =
+		    brokenPromiseToNever(configNode->serve(cbi, configTransactionInterface, configFollowerInterface));
 	}
 
 	try {

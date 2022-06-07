@@ -32,9 +32,11 @@
 
 namespace {
 
+const KeyRef coordinatorsHashKey = "id"_sr;
 const KeyRef lastCompactedVersionKey = "lastCompactedVersion"_sr;
 const KeyRef currentGenerationKey = "currentGeneration"_sr;
 const KeyRef registeredKey = "registered"_sr;
+const KeyRef lockedKey = "locked"_sr;
 const KeyRangeRef kvKeys = KeyRangeRef("kv/"_sr, "kv0"_sr);
 const KeyRangeRef mutationKeys = KeyRangeRef("mutation/"_sr, "mutation0"_sr);
 const KeyRangeRef annotationKeys = KeyRangeRef("annotation/"_sr, "annotation0"_sr);
@@ -122,6 +124,7 @@ class ConfigNodeImpl {
 	Counter failedChangeRequests;
 	Counter snapshotRequests;
 	Counter getCommittedVersionRequests;
+	Counter lockRequests;
 
 	// Transaction counters
 	Counter successfulCommits;
@@ -131,6 +134,22 @@ class ConfigNodeImpl {
 	Counter getValueRequests;
 	Counter getGenerationRequests;
 	Future<Void> logger;
+
+	ACTOR static Future<Optional<size_t>> getCoordinatorsHash(ConfigNodeImpl* self) {
+		Optional<Value> value = wait(self->kvStore->readValue(coordinatorsHashKey));
+		if (!value.present()) {
+			return Optional<size_t>();
+		}
+		return BinaryReader::fromStringRef<size_t>(value.get(), IncludeVersion());
+	}
+
+	ACTOR static Future<Optional<size_t>> getLocked(ConfigNodeImpl* self) {
+		Optional<Value> value = wait(self->kvStore->readValue(lockedKey));
+		if (!value.present()) {
+			return false;
+		}
+		return BinaryReader::fromStringRef<Optional<size_t>>(value.get(), IncludeVersion());
+	}
 
 	ACTOR static Future<ConfigGeneration> getGeneration(ConfigNodeImpl* self) {
 		state ConfigGeneration generation;
@@ -216,6 +235,7 @@ class ConfigNodeImpl {
 		    wait(getAnnotations(self, req.lastSeenVersion + 1, committedVersion));
 		TraceEvent(SevDebug, "ConfigNodeSendingChanges", self->id)
 		    .detail("ReqLastSeenVersion", req.lastSeenVersion)
+		    .detail("ReqMostRecentVersion", req.mostRecentVersion)
 		    .detail("CommittedVersion", committedVersion)
 		    .detail("NumMutations", versionedMutations.size())
 		    .detail("NumCommits", versionedAnnotations.size());
@@ -227,6 +247,12 @@ class ConfigNodeImpl {
 	// New transactions increment the database's current live version. This effectively serves as a lock, providing
 	// serializability
 	ACTOR static Future<Void> getNewGeneration(ConfigNodeImpl* self, ConfigTransactionGetGenerationRequest req) {
+		state Optional<size_t> coordinatorsHash = wait(getCoordinatorsHash(self));
+		ASSERT(coordinatorsHash.present());
+		if (req.coordinatorsHash != coordinatorsHash.get()) {
+			req.reply.sendError(coordinators_changed());
+			return Void();
+		}
 		state ConfigGeneration generation = wait(getGeneration(self));
 		++generation.liveVersion;
 		if (req.lastSeenLiveVersion.present()) {
@@ -241,6 +267,18 @@ class ConfigNodeImpl {
 	}
 
 	ACTOR static Future<Void> get(ConfigNodeImpl* self, ConfigTransactionGetRequest req) {
+		state Optional<size_t> locked = wait(getLocked(self));
+		if (locked.present()) {
+			CODE_PROBE(true, "attempting to read from a locked ConfigNode");
+			req.reply.sendError(coordinators_changed());
+			return Void();
+		}
+		state Optional<size_t> coordinatorsHash = wait(getCoordinatorsHash(self));
+		ASSERT(coordinatorsHash.present());
+		if (req.coordinatorsHash != coordinatorsHash.get()) {
+			req.reply.sendError(coordinators_changed());
+			return Void();
+		}
 		ConfigGeneration currentGeneration = wait(getGeneration(self));
 		if (req.generation != currentGeneration) {
 			// TODO: Also send information about highest seen version
@@ -273,6 +311,13 @@ class ConfigNodeImpl {
 	// TODO: Currently it is possible that extra configuration classes may be returned, we
 	// may want to fix this to clean up the contract
 	ACTOR static Future<Void> getConfigClasses(ConfigNodeImpl* self, ConfigTransactionGetConfigClassesRequest req) {
+		state Optional<size_t> locked = wait(getLocked(self));
+		if (locked.present()) {
+			CODE_PROBE(true, "attempting to read config classes from locked ConfigNode");
+			req.reply.sendError(coordinators_changed());
+			return Void();
+		}
+
 		ConfigGeneration currentGeneration = wait(getGeneration(self));
 		if (req.generation != currentGeneration) {
 			req.reply.sendError(transaction_too_old());
@@ -306,6 +351,13 @@ class ConfigNodeImpl {
 
 	// Retrieve all knobs explicitly defined for the specified configuration class
 	ACTOR static Future<Void> getKnobs(ConfigNodeImpl* self, ConfigTransactionGetKnobsRequest req) {
+		state Optional<size_t> locked = wait(getLocked(self));
+		if (locked.present()) {
+			CODE_PROBE(true, "attempting to read knobs from locked ConfigNode");
+			req.reply.sendError(coordinators_changed());
+			return Void();
+		}
+
 		ConfigGeneration currentGeneration = wait(getGeneration(self));
 		if (req.generation != currentGeneration) {
 			req.reply.sendError(transaction_too_old());
@@ -383,6 +435,19 @@ class ConfigNodeImpl {
 	}
 
 	ACTOR static Future<Void> commit(ConfigNodeImpl* self, ConfigTransactionCommitRequest req) {
+		state Optional<size_t> locked = wait(getLocked(self));
+		if (locked.present()) {
+			CODE_PROBE(true, "attempting to write to locked ConfigNode");
+			req.reply.sendError(coordinators_changed());
+			return Void();
+		}
+		state Optional<size_t> coordinatorsHash = wait(getCoordinatorsHash(self));
+		ASSERT(coordinatorsHash.present());
+		if (req.coordinatorsHash != coordinatorsHash.get()) {
+			req.reply.sendError(coordinators_changed());
+			return Void();
+		}
+
 		ConfigGeneration currentGeneration = wait(getGeneration(self));
 		if (req.generation.committedVersion != currentGeneration.committedVersion) {
 			++self->failedCommits;
@@ -454,7 +519,7 @@ class ConfigNodeImpl {
 	// However, commit annotations for compacted mutations are lost
 	ACTOR static Future<Void> compact(ConfigNodeImpl* self, ConfigFollowerCompactRequest req) {
 		state Version lastCompactedVersion = wait(getLastCompactedVersion(self));
-		TraceEvent(SevDebug, "ConfigNodeCompacting", self->id)
+		TraceEvent(SevInfo, "ConfigNodeCompacting", self->id)
 		    .detail("Version", req.version)
 		    .detail("LastCompacted", lastCompactedVersion);
 		if (req.version <= lastCompactedVersion) {
@@ -506,11 +571,13 @@ class ConfigNodeImpl {
 			req.reply.sendError(transaction_too_old());
 			return Void();
 		}
-		TraceEvent("ConfigNodeRollforward")
+		TraceEvent("ConfigNodeRollforward", self->id)
 		    .detail("RollbackTo", req.rollback)
 		    .detail("Target", req.target)
 		    .detail("LastKnownCommitted", req.lastKnownCommitted)
-		    .detail("Committed", currentGeneration.committedVersion);
+		    .detail("Committed", currentGeneration.committedVersion)
+		    .detail("CurrentGeneration", currentGeneration.toString())
+		    .detail("LastCompactedVersion", lastCompactedVersion);
 		// Rollback to prior known committed version to erase any commits not
 		// made on a quorum.
 		if (req.rollback.present() && req.rollback.get() < currentGeneration.committedVersion) {
@@ -539,8 +606,11 @@ class ConfigNodeImpl {
 		}
 		// Now rollforward by applying all mutations between last known
 		// committed version and rollforward version.
-		ASSERT_GT(req.mutations[0].version, currentGeneration.committedVersion);
-		wait(commitMutations(self, req.mutations, req.annotations, req.target));
+		if (req.mutations.size() > 0) {
+			ASSERT_GT(req.mutations.size(), 0);
+			ASSERT_GT(req.mutations[0].version, currentGeneration.committedVersion);
+			wait(commitMutations(self, req.mutations, req.annotations, req.target));
+		}
 
 		req.reply.send(Void());
 		return Void();
@@ -548,39 +618,20 @@ class ConfigNodeImpl {
 
 	ACTOR static Future<Void> getCommittedVersion(ConfigNodeImpl* self, ConfigFollowerGetCommittedVersionRequest req) {
 		state Version lastCompacted = wait(getLastCompactedVersion(self));
-		ConfigGeneration generation = wait(getGeneration(self));
-		req.reply.send(ConfigFollowerGetCommittedVersionReply{ lastCompacted, generation.committedVersion });
+		state ConfigGeneration generation = wait(getGeneration(self));
+		bool isRegistered = wait(registered(self));
+		req.reply.send(ConfigFollowerGetCommittedVersionReply{
+		    isRegistered, lastCompacted, generation.liveVersion, generation.committedVersion });
 		return Void();
 	}
 
-	ACTOR static Future<Void> serve(ConfigNodeImpl* self, ConfigFollowerInterface const* cfi) {
-		loop {
-			choose {
-				when(ConfigFollowerGetSnapshotAndChangesRequest req =
-				         waitNext(cfi->getSnapshotAndChanges.getFuture())) {
-					++self->snapshotRequests;
-					wait(getSnapshotAndChanges(self, req));
-				}
-				when(ConfigFollowerGetChangesRequest req = waitNext(cfi->getChanges.getFuture())) {
-					wait(getChanges(self, req));
-				}
-				when(ConfigFollowerCompactRequest req = waitNext(cfi->compact.getFuture())) {
-					++self->compactRequests;
-					wait(compact(self, req));
-				}
-				when(ConfigFollowerRollforwardRequest req = waitNext(cfi->rollforward.getFuture())) {
-					++self->rollforwardRequests;
-					wait(rollforward(self, req));
-				}
-				when(ConfigFollowerGetCommittedVersionRequest req = waitNext(cfi->getCommittedVersion.getFuture())) {
-					++self->getCommittedVersionRequests;
-					wait(getCommittedVersion(self, req));
-				}
-				when(wait(self->kvStore->getError())) { ASSERT(false); }
-			}
-		}
-	}
-
+	// Requires ConfigNodes to register with the ConfigBroadcaster before being
+	// allowed to respond to most requests. The ConfigBroadcaster will first
+	// ask the ConfigNode whether it is registered (kickstarted by the worker
+	// registering with the cluster controller). Then, the ConfigBroadcaster
+	// will send the ConfigNode a ready message, containing a snapshot if the
+	// ConfigNode is a new coordinator and needs updated state, or empty
+	// otherwise.
 	ACTOR static Future<Void> serve(ConfigNodeImpl* self, ConfigBroadcastInterface const* cbi, bool infinite) {
 		loop {
 			// Normally, the ConfigBroadcaster will first send a
@@ -593,10 +644,61 @@ class ConfigNodeImpl {
 			// ConfigNode.
 			choose {
 				when(state ConfigBroadcastRegisteredRequest req = waitNext(cbi->registered.getFuture())) {
-					bool isRegistered = wait(registered(self));
-					req.reply.send(ConfigBroadcastRegisteredReply{ isRegistered });
+					state bool isRegistered = wait(registered(self));
+					ConfigGeneration generation = wait(getGeneration(self));
+					TraceEvent("ConfigNodeSendingRegisteredReply", self->id)
+					    .detail("Generation", generation.toString());
+					req.reply.send(ConfigBroadcastRegisteredReply{ isRegistered, generation.committedVersion });
 				}
-				when(ConfigBroadcastReadyRequest readyReq = waitNext(cbi->ready.getFuture())) {
+				when(state ConfigBroadcastReadyRequest readyReq = waitNext(cbi->ready.getFuture())) {
+					state Optional<size_t> locked = wait(getLocked(self));
+
+					// New ConfigNodes with no previous state should always
+					// apply snapshots from the ConfigBroadcaster. Otherwise,
+					// the ConfigNode must be part of a new generation to
+					// accept a snapshot. An existing ConfigNode that restarts
+					// shouldn't apply a snapshot and overwrite its state if
+					// the set of coordinators hasn't changed.
+					if ((!infinite && !locked.present()) ||
+					    (locked.present() && locked.get() != readyReq.coordinatorsHash)) {
+						// Apply snapshot if necessary.
+						if (readyReq.snapshot.size() > 0) {
+							for (const auto& [configKey, knobValue] : readyReq.snapshot) {
+								TraceEvent("ConfigNodeSettingFromSnapshot", self->id)
+								    .detail("ConfigClass", configKey.configClass)
+								    .detail("KnobName", configKey.knobName)
+								    .detail("Value", knobValue.toString())
+								    .detail("Version", readyReq.snapshotVersion);
+								self->kvStore->set(KeyValueRef(
+								    BinaryWriter::toValue(configKey, IncludeVersion()).withPrefix(kvKeys.begin),
+								    ObjectWriter::toValue(knobValue, IncludeVersion())));
+							}
+							ConfigGeneration newGeneration = { readyReq.snapshotVersion, readyReq.liveVersion };
+							self->kvStore->set(KeyValueRef(currentGenerationKey,
+							                               BinaryWriter::toValue(newGeneration, IncludeVersion())));
+							// Clear out any mutations to the keys. If these
+							// aren't cleared, they will overwrite the
+							// snapshotted values when the knobs are read.
+							self->kvStore->clear(KeyRangeRef(versionedMutationKey(0, 0),
+							                                 versionedMutationKey(readyReq.snapshotVersion + 1, 0)));
+							self->kvStore->clear(KeyRangeRef(versionedAnnotationKey(0),
+							                                 versionedAnnotationKey(readyReq.snapshotVersion + 1)));
+
+							self->kvStore->set(
+							    KeyValueRef(lastCompactedVersionKey,
+							                BinaryWriter::toValue(readyReq.snapshotVersion, IncludeVersion())));
+						}
+						// Make sure freshly up to date ConfigNode isn't
+						// locked! This is possible if it was a coordinator in
+						// a previous generation.
+						self->kvStore->set(
+						    KeyValueRef(lockedKey, BinaryWriter::toValue(Optional<size_t>(), IncludeVersion())));
+					}
+					self->kvStore->set(KeyValueRef(coordinatorsHashKey,
+					                               BinaryWriter::toValue(readyReq.coordinatorsHash, IncludeVersion())));
+					wait(self->kvStore->commit());
+
+					TraceEvent("ConfigNodeReady", self->id).detail("WasLocked", locked.present());
 					readyReq.reply.send(ConfigBroadcastReadyReply{});
 					if (!infinite) {
 						return Void();
@@ -606,17 +708,73 @@ class ConfigNodeImpl {
 		}
 	}
 
+	ACTOR static Future<Void> serveRegistered(ConfigNodeImpl* self, ConfigFollowerInterface const* cfi) {
+		loop {
+			choose {
+				when(ConfigFollowerCompactRequest req = waitNext(cfi->compact.getFuture())) {
+					++self->compactRequests;
+					wait(compact(self, req));
+				}
+			}
+		}
+	}
+
+	// Many of the ConfigNode interfaces need to be served before the
+	// ConfigNode is officially registered with the ConfigBroadcaster. This is
+	// necessary due to edge cases around coordinator changes. For example, a
+	// ConfigNode that loses its coordinator status but then restarts before
+	// serving its snapshot to the new coordinators needs to be able to
+	// continue serving its snapshot interface when it restarts, even though it
+	// is no longer a coordinator.
+	ACTOR static Future<Void> serveUnregistered(ConfigNodeImpl* self, ConfigFollowerInterface const* cfi) {
+		loop {
+			choose {
+				when(ConfigFollowerGetSnapshotAndChangesRequest req =
+				         waitNext(cfi->getSnapshotAndChanges.getFuture())) {
+					++self->snapshotRequests;
+					wait(getSnapshotAndChanges(self, req));
+				}
+				when(ConfigFollowerGetChangesRequest req = waitNext(cfi->getChanges.getFuture())) {
+					wait(getChanges(self, req));
+				}
+				when(ConfigFollowerRollforwardRequest req = waitNext(cfi->rollforward.getFuture())) {
+					++self->rollforwardRequests;
+					wait(rollforward(self, req));
+				}
+				when(ConfigFollowerGetCommittedVersionRequest req = waitNext(cfi->getCommittedVersion.getFuture())) {
+					++self->getCommittedVersionRequests;
+					wait(getCommittedVersion(self, req));
+				}
+				when(state ConfigFollowerLockRequest req = waitNext(cfi->lock.getFuture())) {
+					++self->lockRequests;
+					Optional<size_t> coordinatorsHash = wait(getCoordinatorsHash(self));
+					if (!coordinatorsHash.present() || coordinatorsHash.get() == req.coordinatorsHash) {
+						TraceEvent("ConfigNodeLocking", self->id).log();
+						self->kvStore->set(KeyValueRef(registeredKey, BinaryWriter::toValue(false, IncludeVersion())));
+						self->kvStore->set(KeyValueRef(
+						    lockedKey,
+						    BinaryWriter::toValue(Optional<size_t>(req.coordinatorsHash), IncludeVersion())));
+						wait(self->kvStore->commit());
+					}
+					req.reply.send(Void());
+				}
+				when(wait(self->kvStore->getError())) { ASSERT(false); }
+			}
+		}
+	}
+
 	ACTOR static Future<Void> serve(ConfigNodeImpl* self,
 	                                ConfigBroadcastInterface const* cbi,
 	                                ConfigTransactionInterface const* cti,
 	                                ConfigFollowerInterface const* cfi) {
+		state Future<Void> serveUnregisteredFuture = serveUnregistered(self, cfi);
 		wait(serve(self, cbi, false));
 
 		self->kvStore->set(KeyValueRef(registeredKey, BinaryWriter::toValue(true, IncludeVersion())));
 		wait(self->kvStore->commit());
 
 		// Shouldn't return (coordinationServer will throw an error if it does).
-		wait(serve(self, cbi, true) || serve(self, cti) || serve(self, cfi));
+		wait(serve(self, cbi, true) || serve(self, cti) || serveRegistered(self, cfi) || serveUnregisteredFuture);
 		return Void();
 	}
 
@@ -631,11 +789,12 @@ public:
 	    compactRequests("CompactRequests", cc), rollbackRequests("RollbackRequests", cc),
 	    rollforwardRequests("RollforwardRequests", cc), successfulChangeRequests("SuccessfulChangeRequests", cc),
 	    failedChangeRequests("FailedChangeRequests", cc), snapshotRequests("SnapshotRequests", cc),
-	    getCommittedVersionRequests("GetCommittedVersionRequests", cc), successfulCommits("SuccessfulCommits", cc),
-	    failedCommits("FailedCommits", cc), setMutations("SetMutations", cc), clearMutations("ClearMutations", cc),
+	    getCommittedVersionRequests("GetCommittedVersionRequests", cc), lockRequests("LockRequests", cc),
+	    successfulCommits("SuccessfulCommits", cc), failedCommits("FailedCommits", cc),
+	    setMutations("SetMutations", cc), clearMutations("ClearMutations", cc),
 	    getValueRequests("GetValueRequests", cc), getGenerationRequests("GetGenerationRequests", cc) {
 		logger = traceCounters("ConfigNodeMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ConfigNode");
-		TraceEvent(SevDebug, "StartingConfigNode", id).detail("KVStoreAlreadyExists", kvStore.exists());
+		TraceEvent(SevInfo, "StartingConfigNode", id).detail("KVStoreAlreadyExists", kvStore.exists());
 	}
 
 	Future<Void> serve(ConfigBroadcastInterface const& cbi,
@@ -646,7 +805,9 @@ public:
 
 	Future<Void> serve(ConfigTransactionInterface const& cti) { return serve(this, &cti); }
 
-	Future<Void> serve(ConfigFollowerInterface const& cfi) { return serve(this, &cfi); }
+	Future<Void> serve(ConfigFollowerInterface const& cfi) {
+		return serveUnregistered(this, &cfi) && serveRegistered(this, &cfi);
+	}
 
 	void close() { kvStore.close(); }
 

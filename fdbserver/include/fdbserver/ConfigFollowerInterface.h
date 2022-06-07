@@ -177,16 +177,21 @@ struct ConfigFollowerRollforwardRequest {
 
 struct ConfigFollowerGetCommittedVersionReply {
 	static constexpr FileIdentifier file_identifier = 9214735;
+	bool registered;
 	Version lastCompacted;
+	Version lastLive;
 	Version lastCommitted;
 
 	ConfigFollowerGetCommittedVersionReply() = default;
-	explicit ConfigFollowerGetCommittedVersionReply(Version lastCompacted, Version lastCommitted)
-	  : lastCompacted(lastCompacted), lastCommitted(lastCommitted) {}
+	explicit ConfigFollowerGetCommittedVersionReply(bool registered,
+	                                                Version lastCompacted,
+	                                                Version lastLive,
+	                                                Version lastCommitted)
+	  : registered(registered), lastCompacted(lastCompacted), lastLive(lastLive), lastCommitted(lastCommitted) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, lastCompacted, lastCommitted);
+		serializer(ar, registered, lastCompacted, lastLive, lastCommitted);
 	}
 };
 
@@ -199,6 +204,20 @@ struct ConfigFollowerGetCommittedVersionRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, reply);
+	}
+};
+
+struct ConfigFollowerLockRequest {
+	static constexpr FileIdentifier file_identifier = 1867800;
+	size_t coordinatorsHash;
+	ReplyPromise<Void> reply;
+
+	ConfigFollowerLockRequest() = default;
+	explicit ConfigFollowerLockRequest(size_t coordinatorsHash) : coordinatorsHash(coordinatorsHash) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, coordinatorsHash, reply);
 	}
 };
 
@@ -217,6 +236,7 @@ public:
 	RequestStream<ConfigFollowerRollforwardRequest> rollforward;
 	RequestStream<ConfigFollowerGetCommittedVersionRequest> getCommittedVersion;
 	Optional<Hostname> hostname;
+	RequestStream<ConfigFollowerLockRequest> lock;
 
 	ConfigFollowerInterface();
 	void setupWellKnownEndpoints();
@@ -229,6 +249,7 @@ public:
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, _id, getSnapshotAndChanges, getChanges, compact, rollforward, getCommittedVersion, hostname);
+		serializer(
+		    ar, _id, getSnapshotAndChanges, getChanges, compact, rollforward, getCommittedVersion, hostname, lock);
 	}
 };

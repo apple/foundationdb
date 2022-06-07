@@ -1948,7 +1948,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 		                                       recoveredDiskFiles));
 
 		if (configNode.isValid()) {
-			errorForwarders.add(localConfig->consume(interf.configBroadcastInterface));
+			errorForwarders.add(brokenPromiseToNever(localConfig->consume(interf.configBroadcastInterface)));
 		}
 
 		if (SERVER_KNOBS->ENABLE_WORKER_HEALTH_MONITOR) {
@@ -3319,8 +3319,8 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 	state std::vector<Future<Void>> actors;
 	state Promise<Void> recoveredDiskFiles;
 	state Reference<ConfigNode> configNode;
-	state Reference<LocalConfiguration> localConfig =
-	    makeReference<LocalConfiguration>(dataFolder, configPath, manualKnobOverrides);
+	state Reference<LocalConfiguration> localConfig = makeReference<LocalConfiguration>(
+	    dataFolder, configPath, manualKnobOverrides, g_network->isSimulated() ? IsTest::True : IsTest::False);
 	// setupStackSignal();
 	getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::Worker;
 
@@ -3329,11 +3329,9 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 	}
 
 	// FIXME: Initializing here causes simulation issues, these must be fixed
-	/*
-	if (configDBType != ConfigDBType::DISABLED) {
-	    wait(localConfig->initialize());
-	}
-	*/
+	// if (configDBType != ConfigDBType::DISABLED) {
+	//     wait(localConfig->initialize());
+	// }
 
 	actors.push_back(serveProtocolInfo());
 	actors.push_back(serveProcess());

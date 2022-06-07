@@ -270,7 +270,7 @@ class BroadcasterToLocalConfigEnvironment {
 		self->cbi = makeReference<AsyncVar<ConfigBroadcastInterface>>();
 		self->readFrom.connectToBroadcaster(self->cbi);
 		self->broadcastServer = self->broadcaster.registerNode(
-		    WorkerInterface(), 0, configClassSet, self->workerFailure.getFuture(), self->cbi->get());
+		    WorkerInterface(), 0, configClassSet, self->workerFailure.getFuture(), self->cbi->get(), true);
 		return Void();
 	}
 
@@ -309,7 +309,8 @@ public:
 		                                           readFrom.lastSeenVersion(),
 		                                           readFrom.configClassSet(),
 		                                           workerFailure.getFuture(),
-		                                           cbi->get());
+		                                           cbi->get(),
+		                                           true);
 	}
 
 	Future<Void> restartLocalConfig(std::string const& newConfigPath) {
@@ -442,7 +443,7 @@ class TransactionToLocalConfigEnvironment {
 		self->cbi = makeReference<AsyncVar<ConfigBroadcastInterface>>();
 		self->readFrom.connectToBroadcaster(self->cbi);
 		self->broadcastServer = self->broadcaster.registerNode(
-		    WorkerInterface(), 0, configClassSet, self->workerFailure.getFuture(), self->cbi->get());
+		    WorkerInterface(), 0, configClassSet, self->workerFailure.getFuture(), self->cbi->get(), true);
 		return Void();
 	}
 
@@ -465,7 +466,8 @@ public:
 		                                           readFrom.lastSeenVersion(),
 		                                           readFrom.configClassSet(),
 		                                           workerFailure.getFuture(),
-		                                           cbi->get());
+		                                           cbi->get(),
+		                                           true);
 	}
 
 	Future<Void> restartLocalConfig(std::string const& newConfigPath) {

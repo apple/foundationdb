@@ -1069,7 +1069,7 @@ struct CLIOptions {
 	const char* blobCredsFromENV = nullptr;
 
 	std::string configPath;
-	ConfigDBType configDBType{ ConfigDBType::DISABLED };
+	ConfigDBType configDBType{ ConfigDBType::PAXOS };
 
 	Reference<IClusterConnectionRecord> connectionFile;
 	Standalone<StringRef> machineId;
@@ -1627,6 +1627,7 @@ private:
 			case OPT_USE_TEST_CONFIG_DB:
 				configDBType = ConfigDBType::SIMPLE;
 				break;
+			// TODO: Add no_config_db option which disables the configuration database
 			case OPT_FLOW_PROCESS_NAME:
 				flowProcessName = args.OptionArg();
 				std::cout << flowProcessName << std::endl;

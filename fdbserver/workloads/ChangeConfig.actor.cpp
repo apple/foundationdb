@@ -33,6 +33,7 @@ struct ChangeConfigWorkload : TestWorkload {
 	double minDelayBeforeChange, maxDelayBeforeChange;
 	std::string configMode; //<\"single\"|\"double\"|\"triple\">
 	std::string networkAddresses; // comma separated list e.g. "127.0.0.1:4000,127.0.0.1:4001"
+	int coordinatorChanges; // number of times to change coordinators. Only applied if `coordinators` is set to `auto`
 
 	ChangeConfigWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		minDelayBeforeChange = getOption(options, LiteralStringRef("minDelayBeforeChange"), 0);
@@ -40,6 +41,7 @@ struct ChangeConfigWorkload : TestWorkload {
 		ASSERT(maxDelayBeforeChange >= minDelayBeforeChange);
 		configMode = getOption(options, LiteralStringRef("configMode"), StringRef()).toString();
 		networkAddresses = getOption(options, LiteralStringRef("coordinators"), StringRef()).toString();
+		coordinatorChanges = getOption(options, LiteralStringRef("coordinatorChanges"), 1);
 	}
 
 	std::string description() const override { return "ChangeConfig"; }
@@ -122,6 +124,15 @@ struct ChangeConfigWorkload : TestWorkload {
 				wait(CoordinatorsChangeActor(cx, self, true));
 			else
 				wait(CoordinatorsChangeActor(cx, self));
+		}
+
+		// Run additional coordinator changes if specified.
+		if (self->networkAddresses.size() && self->networkAddresses == "auto") {
+			state int i;
+			for (i = 1; i < self->coordinatorChanges; ++i) {
+				wait(delay(20));
+				wait(CoordinatorsChangeActor(cx, self, true));
+			}
 		}
 
 		if (!extraConfigureBefore) {

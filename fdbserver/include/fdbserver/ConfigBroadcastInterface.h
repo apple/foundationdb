@@ -116,13 +116,15 @@ struct ConfigBroadcastChangesRequest {
 struct ConfigBroadcastRegisteredReply {
 	static constexpr FileIdentifier file_identifier = 12041047;
 	bool registered;
+	Version lastSeenVersion;
 
 	ConfigBroadcastRegisteredReply() = default;
-	explicit ConfigBroadcastRegisteredReply(bool registered) : registered(registered) {}
+	explicit ConfigBroadcastRegisteredReply(bool registered, Version lastSeenVersion)
+	  : registered(registered), lastSeenVersion(lastSeenVersion) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, registered);
+		serializer(ar, registered, lastSeenVersion);
 	}
 };
 
@@ -151,13 +153,23 @@ struct ConfigBroadcastReadyReply {
 
 struct ConfigBroadcastReadyRequest {
 	static constexpr FileIdentifier file_identifier = 7402862;
+	size_t coordinatorsHash;
+	std::map<ConfigKey, KnobValue> snapshot;
+	Version snapshotVersion;
+	Version liveVersion;
 	ReplyPromise<ConfigBroadcastReadyReply> reply;
 
 	ConfigBroadcastReadyRequest() = default;
+	ConfigBroadcastReadyRequest(size_t coordinatorsHash,
+	                            std::map<ConfigKey, KnobValue> const& snapshot,
+	                            Version snapshotVersion,
+	                            Version liveVersion)
+	  : coordinatorsHash(coordinatorsHash), snapshot(snapshot), snapshotVersion(snapshotVersion),
+	    liveVersion(liveVersion) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, reply);
+		serializer(ar, coordinatorsHash, snapshot, snapshotVersion, liveVersion, reply);
 	}
 };
 

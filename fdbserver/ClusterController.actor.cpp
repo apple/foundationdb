@@ -43,7 +43,6 @@
 #include "fdbserver/ClusterRecovery.actor.h"
 #include "fdbserver/DataDistributorInterface.h"
 #include "fdbserver/DBCoreState.h"
-#include "fdbserver/ConfigBroadcaster.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/LeaderElection.h"
 #include "fdbserver/LogSystem.h"
@@ -195,6 +194,21 @@ struct EncryptKeyProxySingleton : Singleton<EncryptKeyProxyInterface> {
 		cc->recruitEncryptKeyProxy.set(true);
 	}
 };
+
+ACTOR Future<Optional<Value>> getPreviousCoordinators(ClusterControllerData* self) {
+	state ReadYourWritesTransaction tr(self->db.db);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			Optional<Value> previousCoordinators = wait(tr.get(previousCoordinatorsKey));
+			return previousCoordinators;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
 
 ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
                                         ClusterControllerData::DBInfo* db,
@@ -1209,13 +1223,14 @@ ACTOR Future<Void> registerWorker(RegisterWorkerRequest req,
 		    w.locality.processId() == self->db.serverInfo->get().master.locality.processId()) {
 			self->masterProcessId = w.locality.processId();
 		}
-		if (configBroadcaster != nullptr && isCoordinator) {
+		if (configBroadcaster != nullptr) {
 			self->addActor.send(configBroadcaster->registerNode(
 			    w,
 			    req.lastSeenKnobVersion,
 			    req.knobConfigClassSet,
 			    self->id_worker[w.locality.processId()].watcher,
-			    self->id_worker[w.locality.processId()].details.interf.configBroadcastInterface));
+			    self->id_worker[w.locality.processId()].details.interf.configBroadcastInterface,
+			    isCoordinator));
 		}
 		self->updateDBInfoEndpoints.insert(w.updateServerDBInfo.getEndpoint());
 		self->updateDBInfo.trigger();
@@ -1246,12 +1261,13 @@ ACTOR Future<Void> registerWorker(RegisterWorkerRequest req,
 			self->updateDBInfoEndpoints.insert(w.updateServerDBInfo.getEndpoint());
 			self->updateDBInfo.trigger();
 		}
-		if (configBroadcaster != nullptr && isCoordinator) {
+		if (configBroadcaster != nullptr) {
 			self->addActor.send(configBroadcaster->registerNode(w,
 			                                                    req.lastSeenKnobVersion,
 			                                                    req.knobConfigClassSet,
 			                                                    info->second.watcher,
-			                                                    info->second.details.interf.configBroadcastInterface));
+			                                                    info->second.details.interf.configBroadcastInterface,
+			                                                    isCoordinator));
 		}
 		checkOutstandingRequests(self);
 	} else {
@@ -2536,10 +2552,10 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
                                          ConfigDBType configDBType,
                                          Future<Void> recoveredDiskFiles) {
 	state ClusterControllerData self(interf, locality, coordinators);
-	state ConfigBroadcaster configBroadcaster(coordinators, configDBType);
 	state Future<Void> coordinationPingDelay = delay(SERVER_KNOBS->WORKER_COORDINATION_PING_DELAY);
 	state uint64_t step = 0;
 	state Future<ErrorOr<Void>> error = errorOr(actorCollection(self.addActor.getFuture()));
+	state ConfigBroadcaster configBroadcaster(coordinators, configDBType, getPreviousCoordinators(&self));
 
 	// EncryptKeyProxy is necessary for TLog recovery, recruit it as the first process
 	if (SERVER_KNOBS->ENABLE_ENCRYPTION) {
