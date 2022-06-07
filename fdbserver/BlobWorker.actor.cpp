@@ -2748,6 +2748,7 @@ ACTOR Future<Reference<BlobConnectionProvider>> loadBStoreForTenant(Reference<Bl
 		state Reference<GranuleTenantData> data = bwData->tenantData.getDataForGranule(keyRange);
 		if (data.isValid()) {
 			wait(data->bstoreLoaded.getFuture());
+			wait(delay(0));
 			return data->bstore;
 		} else {
 			TEST(true); // bstore for unknown tenant
