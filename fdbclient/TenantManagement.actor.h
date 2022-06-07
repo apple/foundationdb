@@ -88,7 +88,7 @@ Key getTenantGroupIndexKey(TenantGroupNameRef tenantGroup, Optional<TenantNameRe
 
 // Creates a tenant with the given name. If the tenant already exists, an empty optional will be returned.
 ACTOR template <class Transaction>
-Future<std::pair<TenantMapEntry, bool>> createTenantTransaction(
+Future<std::pair<Optional<TenantMapEntry>, bool>> createTenantTransaction(
     Transaction tr,
     TenantNameRef name,
     TenantMapEntry tenantEntry,
@@ -111,11 +111,12 @@ Future<std::pair<TenantMapEntry, bool>> createTenantTransaction(
 	if (allowSubspace) {
 		tenantDataPrefixFuture = tr->get(tenantDataPrefixKey);
 	}
-	state typename transaction_future_type<Transaction, Optional<Value>>::type lastIdFuture;
 	state typename transaction_future_type<Transaction, Optional<Value>>::type tenantModeFuture =
 	    tr->get(configKeysPrefix.withSuffix("tenant_mode"_sr));
 	state typename transaction_future_type<Transaction, Optional<Value>>::type metaclusterRegistrationFuture =
 	    tr->get(dataClusterRegistrationKey);
+	state typename transaction_future_type<Transaction, Optional<Value>>::type tombstoneFuture =
+	    tr->get(tenantTombstoneKeys.begin.withSuffix(TenantMapEntry::idToPrefix(tenantEntry.id)));
 
 	state Optional<Value> tenantMode = wait(safeThreadFutureToFuture(tenantModeFuture));
 	Optional<Value> metaclusterRegistration = wait(safeThreadFutureToFuture(metaclusterRegistrationFuture));
@@ -127,6 +128,11 @@ Future<std::pair<TenantMapEntry, bool>> createTenantTransaction(
 	Optional<TenantMapEntry> existingEntry = wait(existingEntryFuture);
 	if (existingEntry.present()) {
 		return std::make_pair(existingEntry.get(), false);
+	}
+
+	Optional<Value> tombstone = wait(safeThreadFutureToFuture(tombstoneFuture));
+	if (tombstone.present()) {
+		return std::make_pair(Optional<TenantMapEntry>(), false);
 	}
 
 	if (allowSubspace) {
@@ -173,7 +179,8 @@ Future<std::pair<TenantMapEntry, bool>> createTenantTransaction(
 }
 
 ACTOR template <class DB>
-Future<TenantMapEntry> createTenant(Reference<DB> db,
+Future<Optional<TenantMapEntry>> createTenant(
+    Reference<DB> db,
                                     TenantName name,
                                     TenantMapEntry tenantEntry = TenantMapEntry(),
                                     TenantOperationType operationType = TenantOperationType::STANDALONE_CLUSTER) {
@@ -184,7 +191,11 @@ Future<TenantMapEntry> createTenant(Reference<DB> db,
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			state typename DB::TransactionT::template FutureT<Optional<Value>> lastIdFuture = tr->get(tenantLastIdKey);
+
+			state typename DB::TransactionT::template FutureT<Optional<Value>> lastIdFuture;
+			if (tenantEntry.id < 0) {
+				lastIdFuture = tr->get(tenantLastIdKey);
+			}
 
 			if (checkExistence) {
 				Optional<TenantMapEntry> entry = wait(tryGetTenantTransaction(tr, name));
@@ -195,20 +206,23 @@ Future<TenantMapEntry> createTenant(Reference<DB> db,
 				checkExistence = false;
 			}
 
+			if (tenantEntry.id < 0) {
 			Optional<Value> lastIdVal = wait(safeThreadFutureToFuture(lastIdFuture));
 			tenantEntry.id = lastIdVal.present() ? TenantMapEntry::prefixToId(lastIdVal.get()) + 1 : 0;
 			tr->set(tenantLastIdKey, TenantMapEntry::idToPrefix(tenantEntry.id));
+			}
 
-			state std::pair<TenantMapEntry, bool> newTenant =
+			state std::pair<Optional<TenantMapEntry>, bool> newTenant =
 			    wait(createTenantTransaction(tr, name, tenantEntry, operationType));
 
 			if (newTenant.second) {
+				ASSERT(newTenant.first.present());
 				wait(buggifiedCommit(tr, BUGGIFY));
 
 				TraceEvent("CreatedTenant")
 				    .detail("Tenant", name)
-				    .detail("TenantId", newTenant.first.id)
-				    .detail("Prefix", newTenant.first.prefix)
+				    .detail("TenantId", newTenant.first.get().id)
+				    .detail("Prefix", newTenant.first.get().prefix)
 				    .detail("TenantGroup", tenantEntry.tenantGroup)
 				    .detail("Version", tr->getCommittedVersion());
 			}
@@ -223,8 +237,10 @@ Future<TenantMapEntry> createTenant(Reference<DB> db,
 ACTOR template <class Transaction>
 Future<Void> deleteTenantTransaction(Transaction tr,
                                      TenantNameRef name,
-                                     TenantOperationType operationType = TenantOperationType::STANDALONE_CLUSTER) {
+                                     TenantOperationType operationType = TenantOperationType::STANDALONE_CLUSTER,
+                                     Optional<int64_t> tenantId = Optional<int64_t>()) {
 	state Key tenantMapKey = name.withPrefix(tenantMapPrefix);
+	ASSERT(operationType == TenantOperationType::STANDALONE_CLUSTER || tenantId.present());
 
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 
@@ -242,10 +258,7 @@ Future<Void> deleteTenantTransaction(Transaction tr,
 	}
 
 	state Optional<TenantMapEntry> tenantEntry = wait(tenantEntryFuture);
-	if (!tenantEntry.present()) {
-		return Void();
-	}
-
+	if (tenantEntry.present() && (!tenantId.present() || tenantEntry.get().id == tenantId.get())) {
 	if (operationType == TenantOperationType::MANAGEMENT_CLUSTER &&
 	    tenantEntry.get().tenantState != TenantState::REMOVING) {
 		// TODO: better error
@@ -264,14 +277,25 @@ Future<Void> deleteTenantTransaction(Transaction tr,
 	if (tenantEntry.get().tenantGroup.present()) {
 		tr->clear(getTenantGroupIndexKey(tenantEntry.get().tenantGroup.get(), name));
 	}
+	}
 
+	if (operationType == TenantOperationType::DATA_CLUSTER) {
+		// In data clusters, we store a tombstone
+		// TODO: periodically clean up tombstones
+		tr->set(tenantTombstoneKeys.begin.withSuffix(TenantMapEntry::idToPrefix(tenantId.get())), ""_sr);
+	}
+
+	/*if (name == "tenant_management_concurrency_workload_00000006"_sr) {
+		fprintf(stderr, "Delete tenant transaction done\n");
+	}*/
 	return Void();
 }
 
 ACTOR template <class DB>
 Future<Void> deleteTenant(Reference<DB> db,
                           TenantName name,
-                          TenantOperationType operationType = TenantOperationType::STANDALONE_CLUSTER) {
+                          TenantOperationType operationType = TenantOperationType::STANDALONE_CLUSTER,
+                          Optional<int64_t> tenantId = Optional<int64_t>()) {
 	state Reference<typename DB::TransactionT> tr = db->createTransaction();
 
 	state bool checkExistence = operationType == TenantOperationType::STANDALONE_CLUSTER;
@@ -289,7 +313,7 @@ Future<Void> deleteTenant(Reference<DB> db,
 				checkExistence = false;
 			}
 
-			wait(deleteTenantTransaction(tr, name, operationType));
+			wait(deleteTenantTransaction(tr, name, operationType, tenantId));
 			wait(buggifiedCommit(tr, BUGGIFY));
 
 			TraceEvent("DeletedTenant").detail("Tenant", name).detail("Version", tr->getCommittedVersion());

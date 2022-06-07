@@ -230,7 +230,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		Reference<IDatabase> db = wait(unsafeThreadFutureToFuture(ThreadSafeDatabase::createFromExistingDatabase(cx)));
 		self->db = db;
 
-		std::vector<Future<TenantMapEntry>> tenantFutures;
+		std::vector<Future<Optional<TenantMapEntry>>> tenantFutures;
 		for (int i = 0; i < self->numTenants + 1; ++i) {
 			TenantName tenantName = getTenant(i);
 			self->tenants.push_back(self->db->openTenant(tenantName));

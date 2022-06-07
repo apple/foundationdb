@@ -226,7 +226,7 @@ ACTOR Future<Void> createTenant(ReadYourWritesTransaction* ryw,
 		wait(applyTenantConfig(ryw, tenantName, configMutations.get(), &tenantEntry, true));
 	}
 
-	std::pair<TenantMapEntry, bool> entry =
+	std::pair<Optional<TenantMapEntry>, bool> entry =
 	    wait(ManagementAPI::createTenantTransaction(&ryw->getTransaction(), tenantName, tenantEntry));
 
 	return Void();

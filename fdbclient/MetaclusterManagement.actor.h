@@ -612,16 +612,24 @@ Future<Void> createTenant(Reference<DB> db, TenantName name, TenantMapEntry tena
 			tenantEntry.assignedCluster = assignment.first;
 			clusterMetadata = assignment.second;
 
-			std::pair<TenantMapEntry, bool> result = wait(ManagementAPI::createTenantTransaction(
+			state typename DB::TransactionT::template FutureT<Optional<Value>> lastIdFuture =
+			    assignTr->get(tenantLastIdKey);
+			Optional<Value> lastIdVal = wait(safeThreadFutureToFuture(lastIdFuture));
+			tenantEntry.id = lastIdVal.present() ? TenantMapEntry::prefixToId(lastIdVal.get()) + 1 : 0;
+
+			std::pair<Optional<TenantMapEntry>, bool> result = wait(ManagementAPI::createTenantTransaction(
 			    assignTr, name, tenantEntry, ManagementAPI::TenantOperationType::MANAGEMENT_CLUSTER));
-			createdTenant = result.first;
+
+			// The management cluster doesn't use tombstones, so we should always get back an entry
+			ASSERT(result.first.present());
+			createdTenant = result.first.get();
 
 			if (!result.second) {
-				if (!result.first.matchesConfiguration(tenantEntry) ||
-				    result.first.tenantState != TenantState::REGISTERING) {
+				if (!result.first.get().matchesConfiguration(tenantEntry) ||
+				    result.first.get().tenantState != TenantState::REGISTERING) {
 					throw tenant_already_exists();
 				} else if (tenantEntry.assignedCluster != createdTenant.assignedCluster) {
-					if (!result.first.assignedCluster.present()) {
+					if (!result.first.get().assignedCluster.present()) {
 						// This is an unexpected state in a metacluster, but if it happens then it wasn't created here
 						throw tenant_already_exists();
 					}
@@ -634,6 +642,7 @@ Future<Void> createTenant(Reference<DB> db, TenantName name, TenantMapEntry tena
 					clusterMetadata = actualMetadata.get();
 				}
 			} else {
+				assignTr->set(tenantLastIdKey, TenantMapEntry::idToPrefix(tenantEntry.id));
 				wait(buggifiedCommit(assignTr, BUGGIFY));
 			}
 
@@ -645,8 +654,13 @@ Future<Void> createTenant(Reference<DB> db, TenantName name, TenantMapEntry tena
 
 	// Step 2: store the tenant info in the data cluster
 	state Reference<IDatabase> dataClusterDb = wait(openDatabase(clusterMetadata.connectionString));
-	TenantMapEntry _ = wait(ManagementAPI::createTenant(
+	Optional<TenantMapEntry> dataClusterTenant = wait(ManagementAPI::createTenant(
 	    dataClusterDb, name, createdTenant, ManagementAPI::TenantOperationType::DATA_CLUSTER));
+
+	if (!dataClusterTenant.present()) {
+		// We were deleted simultaneously
+		return Void();
+	}
 
 	// Step 3: mark the tenant as ready in the management cluster
 	state Reference<typename DB::TransactionT> finalizeTr = db->createTransaction();
@@ -711,7 +725,7 @@ Future<Void> deleteTenant(Reference<DB> db, TenantName name) {
 				updatedEntry.tenantState = TenantState::REMOVING;
 				ManagementAPI::configureTenantTransaction(managementTr, name, updatedEntry);
 				wait(ManagementAPI::deleteTenantTransaction(
-				    managementTr, name, ManagementAPI::TenantOperationType::MANAGEMENT_CLUSTER));
+				    managementTr, name, ManagementAPI::TenantOperationType::MANAGEMENT_CLUSTER, tenantId));
 				wait(buggifiedCommit(managementTr, BUGGIFY));
 				return Void();
 			}
@@ -768,8 +782,7 @@ Future<Void> deleteTenant(Reference<DB> db, TenantName name) {
 	}
 
 	// Step 4: remove the tenant from the data cluster
-	// TODO: pass in ID to verify we are deleting the correct tenant
-	wait(ManagementAPI::deleteTenant(dataClusterDb, name, ManagementAPI::TenantOperationType::DATA_CLUSTER));
+	wait(ManagementAPI::deleteTenant(dataClusterDb, name, ManagementAPI::TenantOperationType::DATA_CLUSTER, tenantId));
 
 	// Step 5: delete the tenant from the management cluster
 	managementTr = db->createTransaction();
@@ -784,7 +797,7 @@ Future<Void> deleteTenant(Reference<DB> db, TenantName name) {
 			}
 
 			wait(ManagementAPI::deleteTenantTransaction(
-			    managementTr, name, ManagementAPI::TenantOperationType::MANAGEMENT_CLUSTER));
+			    managementTr, name, ManagementAPI::TenantOperationType::MANAGEMENT_CLUSTER, tenantId));
 
 			if (tenantEntry3.get().assignedCluster.present()) {
 				state typename DB::TransactionT::template FutureT<RangeResult> tenantGroupIndexFuture;

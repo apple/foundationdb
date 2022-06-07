@@ -77,15 +77,21 @@ void TenantMapEntry::setSubspace(KeyRef subspace) {
 }
 
 TenantMapEntry::TenantMapEntry() {}
-TenantMapEntry::TenantMapEntry(int64_t id, KeyRef subspace, TenantState tenantState) : id(id), tenantState(tenantState) {
+TenantMapEntry::TenantMapEntry(int64_t id, KeyRef subspace, TenantState tenantState)
+  : id(id), tenantState(tenantState) {
 	setSubspace(subspace);
 }
-TenantMapEntry::TenantMapEntry(int64_t id, KeyRef subspace, Optional<TenantGroupName> tenantGroup, TenantState tenantState)
-	: id(id), tenantGroup(tenantGroup), tenantState(tenantState) {
+TenantMapEntry::TenantMapEntry(int64_t id,
+                               KeyRef subspace,
+                               Optional<TenantGroupName> tenantGroup,
+                               TenantState tenantState)
+  : id(id), tenantGroup(tenantGroup), tenantState(tenantState) {
 	setSubspace(subspace);
 }
 
-bool TenantMapEntry::matchesConfiguration(TenantMapEntry const& other) const { return tenantGroup == other.tenantGroup; }
+bool TenantMapEntry::matchesConfiguration(TenantMapEntry const& other) const {
+	return tenantGroup == other.tenantGroup;
+}
 
 TEST_CASE("/fdbclient/TenantMapEntry/Serialization") {
 	TenantMapEntry entry1(1, ""_sr, TenantState::READY);

@@ -630,6 +630,7 @@ extern const KeyRef tenantMapPrivatePrefix;
 extern const KeyRef tenantLastIdKey;
 extern const KeyRef tenantDataPrefixKey;
 extern const KeyRangeRef tenantGroupTenantIndexKeys;
+extern const KeyRangeRef tenantTombstoneKeys;
 
 Value encodeTenantEntry(TenantMapEntry const& tenantEntry);
 TenantMapEntry decodeTenantEntry(ValueRef const& value);

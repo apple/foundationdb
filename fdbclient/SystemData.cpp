@@ -1422,6 +1422,7 @@ const KeyRef tenantLastIdKey = "\xff/tenantLastId/"_sr;
 const KeyRef tenantDataPrefixKey = "\xff/tenantDataPrefix"_sr;
 const KeyRangeRef tenantGroupTenantIndexKeys("\xff/tenant/tenantGroup/tenantMap/"_sr,
                                              "\xff/tenant/tenantGroup/tenantMap0"_sr);
+const KeyRangeRef tenantTombstoneKeys("\xff/tenant/tombstones/"_sr, "\xff/tenant/tombstones0"_sr);
 
 // Metacluster management cluster keys
 const KeyRangeRef dataClusterMetadataKeys("\xff/metacluster/dataCluster/metadata/"_sr,

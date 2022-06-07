@@ -1,0 +1,15 @@
+[configuration]
+allowDefaultTenant = false
+allowDisablingTenants = false
+extraDB = 2
+
+[[test]]
+testTitle = 'TenantManagementConcurrencyTest'
+clearAfterTest = true
+timeout = 2100
+runSetup = true
+
+    [[test.workload]]
+    testName = 'TenantManagementConcurrency'
+	maxTenants = 100
+	testDuration = 60

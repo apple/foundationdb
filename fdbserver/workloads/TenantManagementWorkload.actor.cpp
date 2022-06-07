@@ -217,7 +217,7 @@ struct TenantManagementWorkload : TestWorkload {
 			wait(tr->commit());
 		} else if (operationType == OperationType::MANAGEMENT_DATABASE) {
 			ASSERT(tenantsToCreate.size() == 1);
-			TenantMapEntry result = wait(ManagementAPI::createTenant(
+			Optional<TenantMapEntry> result = wait(ManagementAPI::createTenant(
 			    self->dataDb.getReference(), tenantsToCreate.begin()->first, tenantsToCreate.begin()->second));
 		} else if (operationType == OperationType::MANAGEMENT_TRANSACTION) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
