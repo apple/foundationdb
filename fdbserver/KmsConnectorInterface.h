@@ -23,6 +23,7 @@
 #pragma once
 
 #include "fdbrpc/fdbrpc.h"
+#include "flow/Arena.h"
 #include "flow/EncryptUtils.h"
 #include "flow/FileIdentifier.h"
 #include "flow/Trace.h"
@@ -71,13 +72,24 @@ struct EncryptCipherKeyDetails {
 	EncryptCipherDomainId encryptDomainId;
 	EncryptCipherBaseKeyId encryptKeyId;
 	StringRef encryptKey;
+	Optional<int64_t> refreshAfterSec;
+	Optional<int64_t> expireAfterSec;
 
 	EncryptCipherKeyDetails() {}
-	explicit EncryptCipherKeyDetails(EncryptCipherDomainId dId,
+	explicit EncryptCipherKeyDetails(Arena& arena,
+	                                 EncryptCipherDomainId dId,
+	                                 EncryptCipherBaseKeyId keyId,
+	                                 StringRef key)
+	  : encryptDomainId(dId), encryptKeyId(keyId), encryptKey(StringRef(arena, key)),
+	    refreshAfterSec(Optional<int64_t>()), expireAfterSec(Optional<int64_t>()) {}
+	explicit EncryptCipherKeyDetails(Arena& arena,
+	                                 EncryptCipherDomainId dId,
 	                                 EncryptCipherBaseKeyId keyId,
 	                                 StringRef key,
-	                                 Arena& arena)
-	  : encryptDomainId(dId), encryptKeyId(keyId), encryptKey(StringRef(arena, key)) {}
+	                                 Optional<int64_t> refAfterSec,
+	                                 Optional<int64_t> expAfterSec)
+	  : encryptDomainId(dId), encryptKeyId(keyId), encryptKey(StringRef(arena, key)), refreshAfterSec(refAfterSec),
+	    expireAfterSec(expAfterSec) {}
 
 	bool operator==(const EncryptCipherKeyDetails& toCompare) {
 		return encryptDomainId == toCompare.encryptDomainId && encryptKeyId == toCompare.encryptKeyId &&
@@ -86,20 +98,19 @@ struct EncryptCipherKeyDetails {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, encryptDomainId, encryptKeyId, encryptKey);
+		serializer(ar, encryptDomainId, encryptKeyId, encryptKey, refreshAfterSec, expireAfterSec);
 	}
 };
 
 struct KmsConnLookupEKsByKeyIdsRep {
 	constexpr static FileIdentifier file_identifier = 2313778;
-	Arena arena;
-	std::vector<EncryptCipherKeyDetails> cipherKeyDetails;
+	VectorRef<EncryptCipherKeyDetails> cipherKeyDetails;
 
 	KmsConnLookupEKsByKeyIdsRep() {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, arena, cipherKeyDetails);
+		serializer(ar, cipherKeyDetails);
 	}
 };
 
@@ -110,10 +121,10 @@ struct KmsConnLookupKeyIdsReqInfo {
 	EncryptCipherDomainName domainName;
 
 	KmsConnLookupKeyIdsReqInfo() : domainId(ENCRYPT_INVALID_DOMAIN_ID), baseCipherId(ENCRYPT_INVALID_CIPHER_KEY_ID) {}
-	explicit KmsConnLookupKeyIdsReqInfo(const EncryptCipherDomainId dId,
+	explicit KmsConnLookupKeyIdsReqInfo(Arena& arena,
+	                                    const EncryptCipherDomainId dId,
 	                                    const EncryptCipherBaseKeyId bCId,
-	                                    StringRef name,
-	                                    Arena& arena)
+	                                    StringRef name)
 	  : domainId(dId), baseCipherId(bCId), domainName(StringRef(arena, name)) {}
 
 	bool operator==(const KmsConnLookupKeyIdsReqInfo& info) const {
@@ -130,12 +141,12 @@ struct KmsConnLookupKeyIdsReqInfo {
 struct KmsConnLookupEKsByKeyIdsReq {
 	constexpr static FileIdentifier file_identifier = 6913396;
 	Arena arena;
-	std::vector<KmsConnLookupKeyIdsReqInfo> encryptKeyInfos;
+	VectorRef<KmsConnLookupKeyIdsReqInfo> encryptKeyInfos;
 	Optional<UID> debugId;
 	ReplyPromise<KmsConnLookupEKsByKeyIdsRep> reply;
 
 	KmsConnLookupEKsByKeyIdsReq() {}
-	explicit KmsConnLookupEKsByKeyIdsReq(const std::vector<KmsConnLookupKeyIdsReqInfo>& keyInfos, Optional<UID> dbgId)
+	explicit KmsConnLookupEKsByKeyIdsReq(VectorRef<KmsConnLookupKeyIdsReqInfo> keyInfos, Optional<UID> dbgId)
 	  : encryptKeyInfos(keyInfos), debugId(dbgId) {}
 
 	template <class Ar>
@@ -146,14 +157,13 @@ struct KmsConnLookupEKsByKeyIdsReq {
 
 struct KmsConnLookupEKsByDomainIdsRep {
 	constexpr static FileIdentifier file_identifier = 3009025;
-	Arena arena;
-	std::vector<EncryptCipherKeyDetails> cipherKeyDetails;
+	VectorRef<EncryptCipherKeyDetails> cipherKeyDetails;
 
 	KmsConnLookupEKsByDomainIdsRep() {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, arena, cipherKeyDetails);
+		serializer(ar, cipherKeyDetails);
 	}
 };
 
@@ -163,7 +173,7 @@ struct KmsConnLookupDomainIdsReqInfo {
 	EncryptCipherDomainName domainName;
 
 	KmsConnLookupDomainIdsReqInfo() : domainId(ENCRYPT_INVALID_DOMAIN_ID) {}
-	explicit KmsConnLookupDomainIdsReqInfo(const EncryptCipherDomainId dId, StringRef name, Arena& arena)
+	explicit KmsConnLookupDomainIdsReqInfo(Arena& arena, const EncryptCipherDomainId dId, StringRef name)
 	  : domainId(dId), domainName(StringRef(arena, name)) {}
 
 	bool operator==(const KmsConnLookupDomainIdsReqInfo& info) const {
@@ -179,13 +189,12 @@ struct KmsConnLookupDomainIdsReqInfo {
 struct KmsConnLookupEKsByDomainIdsReq {
 	constexpr static FileIdentifier file_identifier = 9918682;
 	Arena arena;
-	std::vector<KmsConnLookupDomainIdsReqInfo> encryptDomainInfos;
+	VectorRef<KmsConnLookupDomainIdsReqInfo> encryptDomainInfos;
 	Optional<UID> debugId;
 	ReplyPromise<KmsConnLookupEKsByDomainIdsRep> reply;
 
 	KmsConnLookupEKsByDomainIdsReq() {}
-	explicit KmsConnLookupEKsByDomainIdsReq(const std::vector<KmsConnLookupDomainIdsReqInfo>& infos,
-	                                        Optional<UID> dbgId)
+	explicit KmsConnLookupEKsByDomainIdsReq(VectorRef<KmsConnLookupDomainIdsReqInfo>& infos, Optional<UID> dbgId)
 	  : encryptDomainInfos(infos), debugId(dbgId) {}
 
 	template <class Ar>
