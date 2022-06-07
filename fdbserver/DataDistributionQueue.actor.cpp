@@ -440,6 +440,8 @@ ACTOR Future<Void> dataDistributionRelocator(struct DDQueueData* self,
                                              const DDEnabledState* ddEnabledState);
 
 struct DDQueueData {
+	ActorCollectionNoErrors noErrorActors; // has to be the last one to be destroyed because other Actors may use it.
+
 	UID distributorId;
 	MoveKeysLock lock;
 	Database cx;
@@ -479,7 +481,6 @@ struct DDQueueData {
 	PromiseStream<RelocateData> dataTransferComplete;
 	PromiseStream<RelocateData> relocationComplete;
 	PromiseStream<RelocateData> fetchSourceServersComplete; // find source SSs for a relocate range
-	ActorCollectionNoErrors noErrorActors;
 
 	PromiseStream<RelocateShard> output;
 	FutureStream<RelocateShard> input;

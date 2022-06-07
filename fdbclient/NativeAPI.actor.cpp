@@ -856,7 +856,7 @@ Future<Void> attemptGRVFromOldProxies(std::vector<GrvProxyInterface> oldProxies,
                                       std::vector<GrvProxyInterface> newProxies) {
 	auto debugID = nondeterministicRandom()->randomUniqueID();
 	g_traceBatch.addEvent("AttemptGRVFromOldProxyDebug", debugID.first(), "NativeAPI.attemptGRVFromOldProxies.Start");
-	Span span("VerifyCausalReadRisky"_loc);
+	Span span("NAPI:VerifyCausalReadRisky"_loc);
 	std::vector<Future<Void>> replies;
 	replies.reserve(oldProxies.size());
 	GetReadVersionRequest req(
@@ -1483,7 +1483,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 	cacheListMonitor = monitorCacheList(this);
 
 	smoothMidShardSize.reset(CLIENT_KNOBS->INIT_MID_SHARD_BYTES);
-	globalConfig = std::make_unique<GlobalConfig>(Database(this));
+	globalConfig = std::make_unique<GlobalConfig>(this);
 
 	if (apiVersionAtLeast(710)) {
 		registerSpecialKeysImpl(
@@ -2555,7 +2555,6 @@ void stopNetwork() {
 
 	TraceEvent("ClientStopNetwork").log();
 	g_network->stop();
-	closeTraceFile();
 }
 
 void DatabaseContext::updateProxies() {

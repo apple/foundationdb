@@ -39,8 +39,8 @@
 #include <chrono>
 
 #define DOCTEST_CONFIG_IMPLEMENT
+#include <rapidjson/document.h>
 #include "doctest.h"
-#include "fdbclient/rapidjson/document.h"
 #include "fdbclient/Tuple.h"
 
 #include "flow/config.h"
@@ -992,6 +992,73 @@ GetMappedRangeResult getMappedIndexEntries(int beginId,
 	return getMappedIndexEntries(beginId, endId, tr, mapper, matchIndex);
 }
 
+TEST_CASE("versionstamp_unit_test") {
+	// a random 12 bytes long StringRef as a versionstamp
+	StringRef str = "\x01\x02\x03\x04\x05\x06\x07\x08\x09\x10\x11\x12"_sr;
+	Versionstamp vs(str), vs2(str);
+	ASSERT(vs == vs2);
+	ASSERT(vs.begin() != vs2.begin());
+
+	int64_t version = vs.getVersion();
+	int64_t version2 = vs2.getVersion();
+	int64_t versionExpected = ((int64_t)0x01 << 56) + ((int64_t)0x02 << 48) + ((int64_t)0x03 << 40) +
+	                          ((int64_t)0x04 << 32) + (0x05 << 24) + (0x06 << 16) + (0x07 << 8) + 0x08;
+	ASSERT(version == versionExpected);
+	ASSERT(version2 == versionExpected);
+
+	int16_t batch = vs.getBatchNumber();
+	int16_t batch2 = vs2.getBatchNumber();
+	int16_t batchExpected = (0x09 << 8) + 0x10;
+	ASSERT(batch == batchExpected);
+	ASSERT(batch2 == batchExpected);
+
+	int16_t user = vs.getUserVersion();
+	int16_t user2 = vs2.getUserVersion();
+	int16_t userExpected = (0x11 << 8) + 0x12;
+	ASSERT(user == userExpected);
+	ASSERT(user2 == userExpected);
+
+	ASSERT(vs.size() == VERSIONSTAMP_TUPLE_SIZE);
+	ASSERT(vs2.size() == VERSIONSTAMP_TUPLE_SIZE);
+}
+
+TEST_CASE("tuple_support_versionstamp") {
+	// a random 12 bytes long StringRef as a versionstamp
+	StringRef str = "\x01\x02\x03\x04\x05\x06\x07\x08\x09\x10\x11\x12"_sr;
+	Versionstamp vs(str);
+	const Tuple t = Tuple().append(prefix).append(RECORD).appendVersionstamp(vs).append("{K[3]}"_sr).append("{...}"_sr);
+	ASSERT(t.getVersionstamp(2) == vs);
+
+	// verify the round-way pack-unpack path for a Tuple containing a versionstamp
+	StringRef result1 = t.pack();
+	Tuple t2 = Tuple::unpack(result1);
+	StringRef result2 = t2.pack();
+	ASSERT(t2.getVersionstamp(2) == vs);
+	ASSERT(result1.toString() == result2.toString());
+}
+
+TEST_CASE("tuple_fail_to_append_truncated_versionstamp") {
+	// a truncated 11 bytes long StringRef as a versionstamp
+	StringRef str = "\x01\x02\x03\x04\x05\x06\x07\x08\x09\x10\x11"_sr;
+	try {
+		Versionstamp truncatedVersionstamp(str);
+	} catch (Error& e) {
+		return;
+	}
+	UNREACHABLE();
+}
+
+TEST_CASE("tuple_fail_to_append_longer_versionstamp") {
+	// a longer than expected 13 bytes long StringRef as a versionstamp
+	StringRef str = "\x01\x02\x03\x04\x05\x06\x07\x08\x09\x10\x11"_sr;
+	try {
+		Versionstamp longerVersionstamp(str);
+	} catch (Error& e) {
+		return;
+	}
+	UNREACHABLE();
+}
+
 TEST_CASE("fdb_transaction_get_mapped_range") {
 	const int TOTAL_RECORDS = 20;
 	fillInRecords(TOTAL_RECORDS);
@@ -1153,11 +1220,13 @@ void assertNotTuple(std::string str) {
 TEST_CASE("fdb_transaction_get_mapped_range_fail_on_mapper_not_tuple") {
 	// A string that cannot be parsed as tuple.
 	// "\x15:\x152\x15E\x15\x09\x15\x02\x02MySimpleRecord$repeater-version\x00\x15\x013\x00\x00\x00\x00\x1aU\x90\xba\x00\x00\x00\x02\x15\x04"
+	// should fail at \x35
+
 	std::string mapper = {
 		'\x15', ':',    '\x15', '2', '\x15', 'E',    '\x15', '\t',   '\x15', '\x02', '\x02', 'M',
 		'y',    'S',    'i',    'm', 'p',    'l',    'e',    'R',    'e',    'c',    'o',    'r',
 		'd',    '$',    'r',    'e', 'p',    'e',    'a',    't',    'e',    'r',    '-',    'v',
-		'e',    'r',    's',    'i', 'o',    'n',    '\x00', '\x15', '\x01', '3',    '\x00', '\x00',
+		'e',    'r',    's',    'i', 'o',    'n',    '\x00', '\x15', '\x01', '\x35', '\x00', '\x00',
 		'\x00', '\x00', '\x1a', 'U', '\x90', '\xba', '\x00', '\x00', '\x00', '\x02', '\x15', '\x04'
 	};
 	assertNotTuple(mapper);
