@@ -20,6 +20,7 @@
 
 #ifndef DDSKETCH_H
 #define DDSKETCH_H
+#include <iostream>
 #include <iterator>
 #include <limits>
 #include <type_traits>
@@ -89,6 +90,11 @@ public:
 		} else {
 			int index = static_cast<Impl*>(this)->getIndex(sample);
 			assert(index >= 0 && index < int(buckets.size()));
+			if (buckets[index] == std::numeric_limits<uint32_t>::max()) {
+				std::cerr << "Terminating. "
+				          << "Bucket " << index << " has hit maximum threshold in DDSketch.";
+				std::exit(-1);
+			}
 			buckets[index]++;
 		}
 
