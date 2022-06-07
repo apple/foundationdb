@@ -1,5 +1,5 @@
 /*
- * AsyncFileChaos.actor.h
+ * AsyncFileChaos.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,13 +18,13 @@
  * limitations under the License.
  */
 
+#pragma once
+
 #include "flow/flow.h"
 #include "flow/serialize.h"
-#include "flow/genericactors.actor.h"
 #include "fdbrpc/IAsyncFile.h"
 #include "flow/network.h"
 #include "flow/ActorCollection.h"
-#include "flow/actorcompiler.h"
 
 // template <class AsyncFileType>
 class AsyncFileChaos final : public IAsyncFile, public ReferenceCounted<AsyncFileChaos> {

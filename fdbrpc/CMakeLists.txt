@@ -1,5 +1,6 @@
 set(FDBRPC_SRCS
   AsyncFileCached.actor.h
+  AsyncFileChaos.h
   AsyncFileEIO.actor.h
   AsyncFileEncrypted.h
   AsyncFileKAIO.actor.h
