@@ -81,13 +81,15 @@ if __name__ == "__main__":
         error("Unsupported platform: %s" % platform.system())
 
     parser = argparse.ArgumentParser(
-        description="Prints version information for an FDB client library (e.g. %s). Must be run on a library built for the current platform (%s)."
+        description="Prints version information for an FDB client library (e.g. %s). Must be run on a library built " +
+                    "for the current platform (%s). "
         % (default_lib, platform_name)
     )
     parser.add_argument(
         "library_path",
         type=str,
-        help="Path to the client library. If not specified, the library will be searched for according to the procedures for %s on the current platform (%s)."
+        help="Path to the client library. If not specified, the library will be searched for according to the " +
+             "procedures for %s on the current platform (%s). "
         % (dlopen, platform_name),
         default=None,
         nargs="?",

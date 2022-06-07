@@ -24,21 +24,21 @@ import logging
 import os
 import re
 import sys
-import traceback
-
 
 LOG_FORMAT = '%(created)f [%(levelname)s] %(message)s'
 
 EXCLUDED_FILES = list(map(re.compile, [
     # Output directories
-    r'\.git/.*', r'bin/.*', r'packages/.*', r'\.objs/.*', r'\.deps/.*', r'bindings/go/build/.*', r'documentation/sphinx/\.out/.*',
+    r'\.git/.*', r'bin/.*', r'packages/.*', r'\.objs/.*', r'\.deps/.*', r'bindings/go/build/.*',
+    r'documentation/sphinx/\.out/.*',
 
     # Generated files
     r'.*\.g\.cpp$', r'.*\.g\.h$', r'(^|.*/)generated.mk$', r'.*\.g\.S$',
     r'.*/MutationType\.java', r'.*/generated\.go',
 
     # Binary files
-    r'.*\.class$', r'.*\.o$', r'.*\.a$', r'.*[\.-]debug', r'.*\.so$', r'.*\.dylib$', r'.*\.dll$', r'.*\.tar[^/]*$', r'.*\.jar$', r'.*pyc$', r'bindings/flow/bin/.*',
+    r'.*\.class$', r'.*\.o$', r'.*\.a$', r'.*[\.-]debug', r'.*\.so$', r'.*\.dylib$', r'.*\.dll$', r'.*\.tar[^/]*$',
+    r'.*\.jar$', r'.*pyc$', r'bindings/flow/bin/.*',
     r'.*\.pdf$', r'.*\.jp[e]*g', r'.*\.png', r'.*\.ico',
     r'packaging/msi/art/.*',
 
@@ -55,7 +55,8 @@ EXCLUDED_FILES = list(map(re.compile, [
     r'fdbrpc/generated-constants.cpp$',
 
     # Miscellaneous
-    r'bindings/nodejs/node_modules/.*', r'bindings/go/godoc/.*', r'.*trace.*xml$', r'.*log$', r'.*\.DS_Store$', r'simfdb/\.*', r'.*~$', r'.*.swp$'
+    r'bindings/nodejs/node_modules/.*', r'bindings/go/godoc/.*', r'.*trace.*xml$', r'.*log$', r'.*\.DS_Store$',
+    r'simfdb/\.*', r'.*~$', r'.*.swp$'
 ]))
 
 SUSPECT_PHRASES = map(re.compile, [
@@ -82,13 +83,13 @@ def positive_response(val):
 
 # Returns: new line list + a dirty flag
 def rewrite_lines(
-    lines,
-    version_re,
-    new_version,
-    suspect_only=True,
-    print_diffs=False,
-    ask_confirm=False,
-    grayscale=False,
+        lines,
+        version_re,
+        new_version,
+        suspect_only=True,
+        print_diffs=False,
+        ask_confirm=False,
+        grayscale=False,
 ):
     new_lines = []
     dirty = False
@@ -105,7 +106,7 @@ def rewrite_lines(
                 start = m.start(group_index)
                 end = m.end(group_index)
                 new_line = (
-                    new_line[: start + offset] + new_str + new_line[end + offset :]
+                        new_line[: start + offset] + new_str + new_line[end + offset:]
                 )
                 offset += len(new_str) - (end - start)
 
@@ -117,7 +118,7 @@ def rewrite_lines(
                         lambda pair: " {:4d}: {}".format(
                             line_no - 1 + pair[0], pair[1]
                         ),
-                        enumerate(lines[line_no - 2 : line_no]),
+                        enumerate(lines[line_no - 2: line_no]),
                     )
                 )
             )
@@ -137,7 +138,7 @@ def rewrite_lines(
                         lambda pair: " {:4d}: {}".format(
                             line_no + 2 + pair[0], pair[1]
                         ),
-                        enumerate(lines[line_no + 1 : line_no + 3]),
+                        enumerate(lines[line_no + 1: line_no + 3]),
                     )
                 )
             )
@@ -155,16 +156,16 @@ def rewrite_lines(
 
 
 def address_file(
-    base_path,
-    file_path,
-    version,
-    new_version=None,
-    suspect_only=False,
-    show_diffs=False,
-    rewrite=False,
-    ask_confirm=True,
-    grayscale=False,
-    paths_only=False,
+        base_path,
+        file_path,
+        version,
+        new_version=None,
+        suspect_only=False,
+        show_diffs=False,
+        rewrite=False,
+        ask_confirm=True,
+        grayscale=False,
+        paths_only=False,
 ):
     if any(map(lambda x: x.match(file_path), EXCLUDED_FILES)):
         logging.debug("skipping file %s as matches excluded list", file_path)
@@ -186,7 +187,7 @@ def address_file(
                     for match in suspect_phrase.finditer(line):
                         curr_version = int(match.groups()[0])
                         if (new_version is None and curr_version < version) or (
-                            new_version is not None and curr_version < new_version
+                                new_version is not None and curr_version < new_version
                         ):
                             found = True
                             logging.info(
@@ -235,7 +236,7 @@ def address_file(
                 fout.write("\n".join(new_lines))
 
         return True
-    except (OSError, UnicodeDecodeError) as e:
+    except (OSError, UnicodeDecodeError):
         logging.exception(
             "Unable to read file %s due to OSError", os.path.join(base_path, file_path)
         )
@@ -243,15 +244,15 @@ def address_file(
 
 
 def address_path(
-    path,
-    version,
-    new_version=None,
-    suspect_only=False,
-    show_diffs=False,
-    rewrite=False,
-    ask_confirm=True,
-    grayscale=False,
-    paths_only=False,
+        path,
+        version,
+        new_version=None,
+        suspect_only=False,
+        show_diffs=False,
+        rewrite=False,
+        ask_confirm=True,
+        grayscale=False,
+        paths_only=False,
 ):
     try:
         if os.path.exists(path):
@@ -263,19 +264,19 @@ def address_path(
                             os.path.join(dir_path, file_name), path
                         )
                         status = (
-                            address_file(
-                                path,
-                                file_path,
-                                version,
-                                new_version,
-                                suspect_only,
-                                show_diffs,
-                                rewrite,
-                                ask_confirm,
-                                grayscale,
-                                paths_only,
-                            )
-                            and status
+                                address_file(
+                                    path,
+                                    file_path,
+                                    version,
+                                    new_version,
+                                    suspect_only,
+                                    show_diffs,
+                                    rewrite,
+                                    ask_confirm,
+                                    grayscale,
+                                    paths_only,
+                                )
+                                and status
                         )
                 return status
             else:
@@ -294,7 +295,7 @@ def address_path(
         else:
             logging.error("Path %s does not exist", path)
             return False
-    except OSError as e:
+    except OSError:
         logging.exception("Unable to find all API versions due to OSError")
         return False
 

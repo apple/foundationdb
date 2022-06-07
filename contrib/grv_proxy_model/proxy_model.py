@@ -143,7 +143,9 @@ class TimeLimiter(PositiveBudgetLimiter):
         )
 
     def update_budget(self, params):
-        # print('Start update budget: time=%f, limit=%f, locked_until=%f, num_started=%d, priority=%s, min_priority=%s, last_batch=%d' % (params.time, self.limit, self.locked_until, params.num_started, self.priority, params.min_priority, params.last_batch))
+        # print('Start update budget: time=%f, limit=%f, locked_until=%f, num_started=%d, priority=%s,
+        # min_priority=%s, last_batch=%d' % (params.time, self.limit, self.locked_until, params.num_started,
+        # self.priority, params.min_priority, params.last_batch))
 
         if params.min_priority >= self.priority or params.num_started < self.limit:
             self.limit -= params.num_started
@@ -157,7 +159,8 @@ class TimeLimiter(PositiveBudgetLimiter):
                 + (params.num_started - self.limit) / self.rate,
             )
 
-        # print('End update budget: time=%f, limit=%f, locked_until=%f, num_started=%d, priority=%s, min_priority=%s' % (params.time, self.limit, self.locked_until, params.num_started, self.priority, params.min_priority))
+        # print('End update budget: time=%f, limit=%f, locked_until=%f, num_started=%d, priority=%s, min_priority=%s'
+        # % (params.time, self.limit, self.locked_until, params.num_started, self.priority, params.min_priority))
 
 
 class TimePositiveBudgetLimiter(PositiveBudgetLimiter):
@@ -174,7 +177,9 @@ class TimePositiveBudgetLimiter(PositiveBudgetLimiter):
 
     def update_budget(self, params):
         # if params.num_started > 0:
-        # print('Start update budget: time=%f, limit=%f, locked_until=%f, num_started=%d, priority=%s, min_priority=%s, last_batch=%d' % (params.time, self.limit, self.locked_until, params.num_started, self.priority, params.min_priority, params.last_batch))
+        # print('Start update budget: time=%f, limit=%f, locked_until=%f, num_started=%d,
+        # priority=%s, min_priority=%s, last_batch=%d' % (params.time, self.limit, self.locked_until,
+        # params.num_started, self.priority, params.min_priority, params.last_batch))
 
         if params.num_started > self.limit:
             self.locked_until = min(
@@ -186,7 +191,9 @@ class TimePositiveBudgetLimiter(PositiveBudgetLimiter):
             self.limit -= params.num_started
 
         # if params.num_started > 0:
-        # print('End update budget: time=%f, limit=%f, locked_until=%f, num_started=%d, priority=%s, min_priority=%s' % (params.time, self.limit, self.locked_until, params.num_started, self.priority, params.min_priority))
+        # print('End update budget: time=%f, limit=%f, locked_until=%f, num_started=%d,
+        # priority=%s, min_priority=%s' % (params.time, self.limit, self.locked_until, params.num_started,
+        # self.priority, params.min_priority))
 
 
 class SmoothingLimiter(OriginalLimiter):
@@ -247,7 +254,9 @@ class SmoothingBudgetLimiter(SmoothingLimiter):
         # if self.smooth_filled.smooth_total(params.time) >= 0.1:
         # self.budget += params.elapsed * self.smooth_rate_limit.smooth_total(params.time)
 
-        # print('Update limit: time=%f, priority=%s, limit=%f, rate=%f, released=%f, budget=%f' % (params.time, self.priority, self.limit, self.smooth_rate_limit.smooth_total(params.time), self.smooth_released.smooth_rate(params.time), self.budget))
+        # print('Update limit: time=%f, priority=%s, limit=%f, rate=%f, released=%f, budget=%f' % (params.time,
+        # self.priority, self.limit, self.smooth_rate_limit.smooth_total(params.time),
+        # self.smooth_released.smooth_rate(params.time), self.budget))
 
     def can_start(self, params):
         return (
@@ -287,12 +296,12 @@ class ProxyModel:
                 for p in priorities
             }
 
-    def __init__(self, duration, ratekeeper_model, workload_model, Limiter):
+    def __init__(self, duration, ratekeeper_model, workload_model, limiter):
         self.time = 0
         self.log_time = 0
         self.duration = duration
         self.priority_limiters = {
-            priority: Limiter(priority, ratekeeper_model, self)
+            priority: limiter(priority, ratekeeper_model, self)
             for priority in workload_model.priorities()
         }
         self.workload_model = workload_model

@@ -24,11 +24,9 @@ import argparse
 import inspect
 import sys
 
-import rate_model
-import workload_model
 import proxy_model
 import ratekeeper_model
-from priority import Priority
+import workload_model
 from plot import Plotter
 
 parser = argparse.ArgumentParser()
@@ -94,7 +92,7 @@ def print_choices_list(context=None):
             if issubclass(p, proxy_model.Limiter) and p != proxy_model.Limiter:
                 name = p.__name__
                 if name.endswith("Limiter"):
-                    name = name[0 : -len("Limiter")]
+                    name = name[0: -len("Limiter")]
                 print("  %s" % name)
 
 
@@ -115,12 +113,12 @@ def validate_class_type(var, name, superclass):
     return cls is not None and inspect.isclass(cls) and issubclass(cls, superclass)
 
 
-if not args.ratekeeper in ratekeeper_model.predefined_ratekeeper:
+if args.ratekeeper not in ratekeeper_model.predefined_ratekeeper:
     print("Invalid ratekeeper model `%s'" % args.ratekeeper)
     print_choices_list("ratekeeper")
     sys.exit(1)
 
-if not args.workload in workload_model.predefined_workloads:
+if args.workload not in workload_model.predefined_workloads:
     print("Invalid workload model `%s'" % args.workload)
     print_choices_list("workload")
     sys.exit(1)

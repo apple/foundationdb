@@ -80,12 +80,14 @@ def non_negative_int(value_str):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Parses the output from enabling ALLOC_INSTRUMENTATION in FoundationDB and reports information about the top memory users."
+        description="Parses the output from enabling ALLOC_INSTRUMENTATION in FoundationDB and reports information " +
+                    "about the top memory users. "
     )
     parser.add_argument(
         "input_file",
         type=str,
-        help="Path to file(s) containing the output from a run of FoundationDB with ALLOC_INSTRUMENTATION enabled. If not specified, stdin will be used.",
+        help="Path to file(s) containing the output from a run of FoundationDB with ALLOC_INSTRUMENTATION enabled. " +
+             "If not specified, stdin will be used.",
         default="-",
         nargs="*",
     )
@@ -93,21 +95,24 @@ if __name__ == "__main__":
         "-f",
         "--logging-frequency",
         type=non_negative_int,
-        help="How frequently the top stacks will be logged, measured in lines of output processed. A value of 0 disables periodic logging. Defaults to 1,000,000.",
+        help="How frequently the top stacks will be logged, measured in lines of output processed. A value of 0 " +
+             "disables periodic logging. Defaults to 1,000,000.",
         default=1000000,
     )
     parser.add_argument(
         "-p",
         "--periodic-stack-count",
         type=non_negative_int,
-        help="How many stack traces to log when periodically logging output. A value of 0 results in all stacks being logged. Defaults to 15.",
+        help="How many stack traces to log when periodically logging output. A value of 0 results in all stacks " +
+             "being logged. Defaults to 15.",
         default=15,
     )
     parser.add_argument(
         "-s",
         "--final-stack-count",
         type=non_negative_int,
-        help="How many stack traces to log when finished processing output. A value of 0 results in all stacks being logged. Defaults to 0.",
+        help="How many stack traces to log when finished processing output. A value of 0 results in all stacks being " +
+             "logged. Defaults to 0.",
         default=0,
     )
     parser.add_argument(

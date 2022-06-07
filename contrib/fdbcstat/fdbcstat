@@ -29,13 +29,13 @@ in a slash-separated format:
 # 5: clear_range
 # 6: commit
 fdbfuncs = [
-    { "name":"get",              "waitfuture":True,  "enabled":True },
-    { "name":"get_range",        "waitfuture":True,  "enabled":True },
-    { "name":"get_read_version", "waitfuture":True,  "enabled":True },
-    { "name":"set",              "waitfuture":False, "enabled":True },
-    { "name":"clear",            "waitfuture":False, "enabled":True },
-    { "name":"clear_range",      "waitfuture":False, "enabled":True },
-    { "name":"commit",           "waitfuture":True,  "enabled":True }
+    {"name": "get", "waitfuture": True, "enabled": True},
+    {"name": "get_range", "waitfuture": True, "enabled": True},
+    {"name": "get_read_version", "waitfuture": True, "enabled": True},
+    {"name": "set", "waitfuture": False, "enabled": True},
+    {"name": "clear", "waitfuture": False, "enabled": True},
+    {"name": "clear_range", "waitfuture": False, "enabled": True},
+    {"name": "commit", "waitfuture": True, "enabled": True}
 ]
 
 # arguments
@@ -44,17 +44,17 @@ parser = argparse.ArgumentParser(
     formatter_class=argparse.RawTextHelpFormatter,
     epilog=description)
 parser.add_argument("-p", "--pid", type=int,
-    help="Capture for this PID only")
+                    help="Capture for this PID only")
 parser.add_argument("-i", "--interval", type=int,
-    help="Print interval in seconds (Default: 1 second)")
+                    help="Print interval in seconds (Default: 1 second)")
 parser.add_argument("-d", "--duration", type=int,
-    help="Duration in seconds (Default: unset)")
+                    help="Duration in seconds (Default: unset)")
 parser.add_argument("-f", "--functions", type=str,
-    help='''Capture for specific functions (comma-separated) (Default: unset)
+                    help='''Capture for specific functions (comma-separated) (Default: unset)
 Supported functions: get, get_range, get_read_version,
                      set, clear, clear_range, commit''')
 parser.add_argument("libpath",
-    help="Full path to libfdb_c.so")
+                    help="Full path to libfdb_c.so")
 args = parser.parse_args()
 
 if not args.interval:
@@ -62,14 +62,14 @@ if not args.interval:
 
 if args.functions:
     # reset all
-    idx=0
+    idx = 0
     while idx < len(fdbfuncs):
         fdbfuncs[idx]['enabled'] = False
         idx += 1
 
     # enable specified functions
     for f in args.functions.split(','):
-        idx=0
+        idx = 0
         while idx < len(fdbfuncs):
             if fdbfuncs[idx]['name'] == f:
                 fdbfuncs[idx]['enabled'] = True
@@ -82,8 +82,8 @@ if libpath is None:
     exit(1)
 
 # main BPF program
-# we do not rely on PT_REGS_IP() and BPF.sym() to retrive the symbol name
-# because some "backword-compatible" symbols do not get resovled through BPF.sym().
+# we do not rely on PT_REGS_IP() and BPF.sym() to retrieve the symbol name
+# because some "backward-compatible" symbols do not get resolved through BPF.sym().
 bpf_text = """
 #include <uapi/linux/ptrace.h>
 
@@ -209,19 +209,21 @@ int trace_func_return(struct pt_regs *ctx)
 # If PID is specified, insert the PID filter
 if args.pid:
     bpf_text = bpf_text.replace('FILTERPID',
-        'if (tgid != %d) { return 0; }' % args.pid)
+                                'if (tgid != %d) { return 0; }' % args.pid)
 else:
     bpf_text = bpf_text.replace('FILTERPID', '')
+
 
 # signal handler
 def signal_ignore(signal, frame):
     pass
 
+
 # load BPF program
 b = BPF(text=bpf_text)
 
 # attach probes
-waitfuture = False;
+waitfuture = False
 for f in fdbfuncs:
 
     # skip disabled functions
@@ -229,17 +231,17 @@ for f in fdbfuncs:
         continue
 
     # attach the entry point
-    b.attach_uprobe(name=libpath, sym='fdb_transaction_'+f['name'],
+    b.attach_uprobe(name=libpath, sym='fdb_transaction_' + f['name'],
                     fn_name='trace_' + f['name'] + '_entry', pid=args.pid or -1)
     if f['waitfuture']:
         waitfuture = True
     else:
-        b.attach_uretprobe(name=libpath, sym='fdb_transaction_'+f['name'],
+        b.attach_uretprobe(name=libpath, sym='fdb_transaction_' + f['name'],
                            fn_name="trace_func_return", pid=args.pid or -1)
 if waitfuture:
     b.attach_uretprobe(name=libpath, sym='fdb_future_block_until_ready',
                        fn_name="trace_func_return", pid=args.pid or -1)
-    
+
 # open uprobes
 matched = b.num_open_uprobes()
 
@@ -258,7 +260,7 @@ prev = 0.0
 now = 0.0
 
 # main loop
-while (1):
+while 1:
     try:
         sleep(args.interval)
         seconds += args.interval
@@ -275,28 +277,28 @@ while (1):
         exiting = 1
 
     # walk through the stats and aggregate by the functions
-    for k,v in stats.items():
+    for k, v in stats.items():
         f = fdbfuncs[k.func]['name']
         if f in agg:
             # update an exiting entry
             agg[f]['cnt'] = agg[f]['cnt'] + v.cnt
-            agg[f]['total'] = agg[f]['total'] + v.total;
+            agg[f]['total'] = agg[f]['total'] + v.total
             if v.cnt > agg[f]['max']:
                 agg[f]['max'] = v.cnt
         else:
             # insert a new entry
-            agg[f] = {'cnt':v.cnt, 'total':v.total, 'max':v.max}
+            agg[f] = {'cnt': v.cnt, 'total': v.total, 'max': v.max}
 
     # print out aggregated stats
     print("%-8s " % (strftime("%H:%M:%S")), end="", flush=True)
     for f in sorted(agg):
         print("%s/%d/%d/%d " % (f,
                                 agg[f]['cnt'] / (now - prev),
-                                agg[f]['total']/agg[f]['cnt'] / 1000, # us
-                                agg[f]['max'] / 1000), # us
+                                agg[f]['total'] / agg[f]['cnt'] / 1000,  # us
+                                agg[f]['max'] / 1000),  # us
               end="")
     print()
-        
+
     stats.clear()
     agg.clear()
 

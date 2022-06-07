@@ -59,7 +59,7 @@ class CommitDebugHandler(xml.sax.ContentHandler, object):
     def _emit(self, d):
         self._f.write(json.dumps(d) + ", ")
 
-    def startElement(self, name, attrs):
+    def start_element(self, name, attrs):
         # I've flipped from using Async spans to Duration spans, because
         # I kept on running into issues with trace viewer believeing there
         # is no start or end of an emitted span even when there actually is.
@@ -68,7 +68,6 @@ class CommitDebugHandler(xml.sax.ContentHandler, object):
             if self._starttime is None:
                 self._starttime = float(attrs["Time"])
 
-            attr_id = attrs["ID"]
             # Trace viewer doesn't seem to care about types, so use host as pid and port as tid
             (pid, tid) = attrs["Machine"].split(":")
             traces = locationToPhase[attrs["Location"]]
@@ -92,7 +91,7 @@ class CommitDebugHandler(xml.sax.ContentHandler, object):
                     self._emit(trace)
 
 
-def do_file(args, handler, filename):
+def do_file(handler, filename):
     openfn = gzip.open if filename.endswith(".gz") else open
     try:
         with openfn(filename) as f:
@@ -112,7 +111,7 @@ def main():
                 start = line.find("Time=") + 6
                 end = line.find('"', start)
                 tx = float(line[start:end])
-                yield (tx, line)
+                yield tx, line
 
     if os.path.isdir(args.path):
         combined_xml = os.path.join(args.path, "combined.xml.gz")
@@ -127,9 +126,9 @@ def main():
                 for line in merged:
                     f.write(line[1])
                 f.write("</Trace>")
-        do_file(args, handler, combined_xml)
+        do_file(handler, combined_xml)
     else:
-        do_file(args, handler, args.path)
+        do_file(handler, args.path)
 
     return 0
 

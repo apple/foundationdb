@@ -5,7 +5,7 @@ import json
 import re
 
 
-def actorFile(actor: str, build: str, src: str):
+def actor_file(actor: str, build: str, src: str):
     res = actor.replace(build, src, 1)
     res = res.replace("actor.g.cpp", "actor.cpp")
     return res.replace("actor.g.h", "actor.h")
@@ -16,7 +16,7 @@ def rreplace(s, old, new, occurrence=1):
     return new.join(li)
 
 
-def actorCommand(cmd: str, build: str, src: str):
+def actor_command(cmd: str, build: str, src: str):
     r1 = re.compile("-c (.+)(actor\.g\.cpp)")
     m1 = r1.search(cmd)
     if m1 is None:
@@ -52,8 +52,8 @@ for cmd in cmds:
     )
     if cmd["file"].endswith("actor.g.cpp"):
         # here we need to rewrite the rule
-        cmd["command"] = actorCommand(cmd["command"], args.builddir, args.srcdir)
-        cmd["file"] = actorFile(cmd["file"], args.builddir, args.srcdir)
+        cmd["command"] = actor_command(cmd["command"], args.builddir, args.srcdir)
+        cmd["file"] = actor_file(cmd["file"], args.builddir, args.srcdir)
         result.append(cmd)
     else:
         result.append(cmd)

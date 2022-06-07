@@ -139,7 +139,7 @@ class RangeCounterTest(unittest.TestCase):
                 for letter in letters[start_index:end_index]:
                     if letter not in count_dict:
                         count_dict[letter] = 0
-                    count_dict[letter] = count_dict[letter] + 1
+                    count_dict[letter] += 1
 
                 test_correct()
 

@@ -20,10 +20,12 @@
 #
 
 
-"""
-Example trace:
-{  "Severity": "10", "Time": "194.878474", "DateTime": "2022-02-01T16:28:27Z", "Type": "MemSample", "Machine": "2.1.1.0:2", "ID": "0000000000000000", "Count": "943", "TotalSize": "540000000", "SampleCount": "54", "Hash": "980074757", "Bt": "addr2line -e fdbserver.debug -p -C -f -i 0x1919b72 0x3751d43 0x37518cc 0x19930f8 0x199dac3 0x1999e7c 0x21a1061 0x31e8fc5 0x31e784a 0x10ab3a8 0x36bf4c6 0x36bf304 0x36beea4 0x36bf352 0x36bfa1c 0x10ab3a8 0x37b22fe 0x37a16ee 0x368c754 0x19202d5 0x7fb3fe2d6555 0x1077029", "ThreadID": "10074331651862410074", "LogGroup": "default" }
-"""
+"""Example trace: {  "Severity": "10", "Time": "194.878474", "DateTime": "2022-02-01T16:28:27Z", "Type": "MemSample",
+"Machine": "2.1.1.0:2", "ID": "0000000000000000", "Count": "943", "TotalSize": "540000000", "SampleCount": "54",
+"Hash": "980074757", "Bt": "addr2line -e fdbserver.debug -p -C -f -i 0x1919b72 0x3751d43 0x37518cc 0x19930f8
+0x199dac3 0x1999e7c 0x21a1061 0x31e8fc5 0x31e784a 0x10ab3a8 0x36bf4c6 0x36bf304 0x36beea4 0x36bf352 0x36bfa1c
+0x10ab3a8 0x37b22fe 0x37a16ee 0x368c754 0x19202d5 0x7fb3fe2d6555 0x1077029", "ThreadID": "10074331651862410074",
+"LogGroup": "default" } """
 
 
 # This program analyzes MemSample trace events produced by setting ALLOC_INSTRUMENTATION in FastAlloc.h
