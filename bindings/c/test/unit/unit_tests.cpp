@@ -178,6 +178,15 @@ struct GetRangeResult {
 
 struct GetMappedRangeResult {
 	struct MappedKV {
+		MappedKV(const std::string& key,
+		         const std::string& value,
+		         const std::string& begin,
+		         const std::string& end,
+		         const std::vector<std::pair<std::string, std::string>>& range_results,
+		         fdb_bool_t boundaryAndExist)
+		  : key(key), value(value), begin(begin), end(end), range_results(range_results),
+		    boundaryAndExist(boundaryAndExist) {}
+
 		std::string key;
 		std::string value;
 		std::string begin;
