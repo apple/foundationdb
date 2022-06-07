@@ -40,6 +40,8 @@
 #include "fdbserver/RestoreApplier.actor.h"
 #include "fdbserver/RestoreWorkerInterface.actor.h"
 
+#include "flow/actorcompiler.h" // must be last include
+
 // Each restore worker (a process) is assigned for a role.
 // MAYBE Later: We will support multiple restore roles on a worker
 struct RestoreWorkerData : NonCopyable, public ReferenceCounted<RestoreWorkerData> {
