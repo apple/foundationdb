@@ -155,7 +155,6 @@ set(FDBSERVER_SRCS
   StorageMetrics.actor.cpp
   StorageMetrics.h
   storageserver.actor.cpp
-  StorageServerData.h
   TagPartitionedLogSystem.actor.cpp
   TagPartitionedLogSystem.actor.h
   TagThrottler.actor.cpp
