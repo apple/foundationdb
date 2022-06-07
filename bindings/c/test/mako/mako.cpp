@@ -18,12 +18,15 @@
  * limitations under the License.
  */
 
+#include <array>
 #include <cassert>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <map>
 #include <new>
 #include <string>
@@ -43,6 +46,7 @@
 #include <fmt/format.h>
 #include <fmt/printf.h>
 #include <fdb_api.hpp>
+#include <unordered_map>
 #include "fdbclient/zipf.h"
 
 #include "async.hpp"
@@ -62,8 +66,8 @@ namespace mako {
 struct alignas(64) ThreadArgs {
 	int worker_id;
 	int thread_id;
+	int tenants;
 	pid_t parent_id;
-	LatencySampleBinArray sample_bins;
 	Arguments const* args;
 	shared_memory::Access shm;
 	fdb::Database database; // database to work with
@@ -76,8 +80,25 @@ using namespace mako;
 
 thread_local Logger logr = Logger(MainProcess{}, VERBOSE_DEFAULT);
 
+Transaction createNewTransaction(Database db, Arguments const& args, int id = -1, Tenant* tenants = nullptr) {
+	// No tenants specified
+	if (args.tenants <= 0) {
+		return db.createTransaction();
+	}
+	// Create Tenant Transaction
+	int tenant_id = (id == -1) ? urand(0, args.tenants - 1) : id;
+	// If provided tenants array (only necessary in runWorkload), use it
+	if (tenants) {
+		return tenants[tenant_id].createTransaction();
+	}
+	std::string tenantStr = "tenant" + std::to_string(tenant_id);
+	BytesRef tenant_name = toBytesRef(tenantStr);
+	Tenant t = db.openTenant(tenant_name);
+	return t.createTransaction();
+}
+
 /* cleanup database */
-int cleanup(Transaction tx, Arguments const& args) {
+int cleanup(Database db, Arguments const& args) {
 	const auto prefix_len = args.prefixpadding ? args.key_length - args.row_digits : intSize(KEY_PREFIX);
 	auto genprefix = [&args](ByteString& s) {
 		const auto padding_len = args.key_length - intSize(KEY_PREFIX) - args.row_digits;
@@ -96,33 +117,56 @@ int cleanup(Transaction tx, Arguments const& args) {
 
 	auto watch = Stopwatch(StartAtCtor{});
 
-	while (true) {
-		tx.clearRange(beginstr, endstr);
-		auto future_commit = tx.commit();
-		const auto rc = waitAndHandleError(tx, future_commit, "COMMIT_CLEANUP");
-		if (rc == FutureRC::OK) {
-			break;
-		} else if (rc == FutureRC::RETRY || rc == FutureRC::CONFLICT) {
-			// tx already reset
-			continue;
-		} else {
-			return -1;
+	int num_iterations = (args.tenants > 1) ? args.tenants : 1;
+	for (int i = 0; i < num_iterations; ++i) {
+		// If args.tenants is zero, this will use a non-tenant txn and perform a single range clear.
+		// If 1, it will use a tenant txn and do a single range clear instead.
+		// If > 1, it will perform a range clear with a different tenant txn per iteration.
+		Transaction tx = createNewTransaction(db, args, i);
+		while (true) {
+			tx.clearRange(beginstr, endstr);
+			auto future_commit = tx.commit();
+			const auto rc = waitAndHandleError(tx, future_commit, "COMMIT_CLEANUP");
+			if (rc == FutureRC::OK) {
+				break;
+			} else if (rc == FutureRC::RETRY || rc == FutureRC::CONFLICT) {
+				// tx already reset
+				continue;
+			} else {
+				return -1;
+			}
+		}
+
+		// If tenants are specified, also delete the tenant after clearing out its keyspace
+		if (args.tenants > 0) {
+			Transaction systemTx = db.createTransaction();
+			while (true) {
+				Tenant::deleteTenant(systemTx, toBytesRef("tenant" + std::to_string(i)));
+				auto future_commit = systemTx.commit();
+				const auto rc = waitAndHandleError(systemTx, future_commit, "DELETE_TENANT");
+				if (rc == FutureRC::OK) {
+					break;
+				} else if (rc == FutureRC::RETRY || rc == FutureRC::CONFLICT) {
+					// tx already reset
+					continue;
+				} else {
+					return -1;
+				}
+			}
 		}
 	}
 
-	tx.reset();
 	logr.info("Clear range: {:6.3f} sec", toDoubleSeconds(watch.stop().diff()));
 	return 0;
 }
 
 /* populate database */
-int populate(Transaction tx,
+int populate(Database db,
              Arguments const& args,
              int worker_id,
              int thread_id,
              int thread_tps,
-             ThreadStatistics& stats,
-             LatencySampleBinArray& sample_bins) {
+             ThreadStatistics& stats) {
 	const auto key_begin = insertBegin(args.rows, worker_id, thread_id, args.num_processes, args.num_threads);
 	const auto key_end = insertEnd(args.rows, worker_id, thread_id, args.num_processes, args.num_threads);
 	auto xacts = 0;
@@ -139,6 +183,28 @@ int populate(Transaction tx,
 	auto watch_trace = Stopwatch(watch_total.getStart());
 	auto key_checkpoint = key_begin; // in case of commit failure, restart from this key
 
+	Transaction systemTx = db.createTransaction();
+	for (int i = 0; i < args.tenants; ++i) {
+		while (true) {
+			// Until this issue https://github.com/apple/foundationdb/issues/7260 is resolved
+			// we have to commit each tenant creation transaction one-by-one
+			// while (i % 10 == 9 || i == args.tenants - 1) {
+			std::string tenant_name = "tenant" + std::to_string(i);
+			Tenant::createTenant(systemTx, toBytesRef(tenant_name));
+			auto future_commit = systemTx.commit();
+			const auto rc = waitAndHandleError(systemTx, future_commit, "CREATE_TENANT");
+			if (rc == FutureRC::RETRY) {
+				continue;
+			} else {
+				// Keep going if commit was successful (FutureRC::OK)
+				// If not a retryable error, expected to be the error
+				// tenant_already_exists, meaning another thread finished creating it
+				systemTx.reset();
+				break;
+			}
+		}
+	}
+	Transaction tx = createNewTransaction(db, args);
 	for (auto i = key_begin; i <= key_end; i++) {
 		/* sequential keys */
 		genKey(keystr.data(), KEY_PREFIX, args, i);
@@ -184,7 +250,7 @@ int populate(Transaction tx,
 			auto tx_restarter = ExitGuard([&watch_tx]() { watch_tx.startFromStop(); });
 			if (rc == FutureRC::OK) {
 				key_checkpoint = i + 1; // restart on failures from next key
-				tx.reset();
+				tx = createNewTransaction(db, args);
 			} else if (rc == FutureRC::ABORT) {
 				return -1;
 			} else {
@@ -197,8 +263,6 @@ int populate(Transaction tx,
 				const auto tx_duration = watch_tx.diff();
 				stats.addLatency(OP_COMMIT, commit_latency);
 				stats.addLatency(OP_TRANSACTION, tx_duration);
-				sample_bins[OP_COMMIT].put(commit_latency);
-				sample_bins[OP_TRANSACTION].put(tx_duration);
 			}
 			stats.incrOpCount(OP_COMMIT);
 			stats.incrOpCount(OP_TRANSACTION);
@@ -219,7 +283,6 @@ int populate(Transaction tx,
 int runOneTransaction(Transaction& tx,
                       Arguments const& args,
                       ThreadStatistics& stats,
-                      LatencySampleBinArray& sample_bins,
                       ByteString& key1,
                       ByteString& key2,
                       ByteString& val) {
@@ -257,7 +320,6 @@ transaction_begin:
 				stats.incrErrorCount(op);
 			} else {
 				// abort
-				tx.reset();
 				return -1;
 			}
 			// retry from first op
@@ -271,7 +333,6 @@ transaction_begin:
 			if (do_sample) {
 				const auto step_latency = watch_step.diff();
 				stats.addLatency(OP_COMMIT, step_latency);
-				sample_bins[OP_COMMIT].put(step_latency);
 			}
 			tx.reset();
 			stats.incrOpCount(OP_COMMIT);
@@ -286,7 +347,6 @@ transaction_begin:
 			if (do_sample) {
 				const auto op_latency = watch_op.diff();
 				stats.addLatency(op, op_latency);
-				sample_bins[op].put(op_latency);
 			}
 			stats.incrOpCount(op);
 		}
@@ -304,7 +364,6 @@ transaction_begin:
 			if (do_sample) {
 				const auto commit_latency = watch_commit.diff();
 				stats.addLatency(OP_COMMIT, commit_latency);
-				sample_bins[OP_COMMIT].put(commit_latency);
 			}
 			stats.incrOpCount(OP_COMMIT);
 		} else {
@@ -323,23 +382,19 @@ transaction_begin:
 	// one transaction has completed successfully
 	if (do_sample) {
 		const auto tx_duration = watch_tx.stop().diff();
-		sample_bins[OP_TRANSACTION].put(tx_duration);
 		stats.addLatency(OP_TRANSACTION, tx_duration);
 	}
 	stats.incrOpCount(OP_TRANSACTION);
-	/* make sure to reset transaction */
-	tx.reset();
 	return 0;
 }
 
-int runWorkload(Transaction tx,
+int runWorkload(Database db,
                 Arguments const& args,
                 int const thread_tps,
                 std::atomic<double> const& throttle_factor,
                 int const thread_iters,
                 std::atomic<int> const& signal,
                 ThreadStatistics& stats,
-                LatencySampleBinArray& sample_bins,
                 int const dotrace,
                 int const dotagging) {
 	auto traceid = std::string{};
@@ -371,8 +426,18 @@ int runWorkload(Transaction tx,
 	auto val = ByteString{};
 	val.resize(args.value_length);
 
+	// mimic typical tenant usage: keep tenants in memory
+	// and create transactions as needed
+	Tenant tenants[args.tenants];
+	for (int i = 0; i < args.tenants; ++i) {
+		std::string tenantStr = "tenant" + std::to_string(i);
+		BytesRef tenant_name = toBytesRef(tenantStr);
+		tenants[i] = db.openTenant(tenant_name);
+	}
+
 	/* main transaction loop */
 	while (1) {
+		Transaction tx = createNewTransaction(db, args, -1, args.tenants > 0 ? tenants : nullptr);
 		while ((thread_tps > 0) && (xacts >= current_tps)) {
 			/* throttle on */
 			const auto time_now = steady_clock::now();
@@ -421,7 +486,7 @@ int runWorkload(Transaction tx,
 			}
 		}
 
-		rc = runOneTransaction(tx, args, stats, sample_bins, key1, key2, val);
+		rc = runOneTransaction(tx, args, stats, key1, key2, val);
 		if (rc) {
 			logr.warn("runOneTransaction failed ({})", rc);
 		}
@@ -446,11 +511,15 @@ std::string getStatsFilename(std::string_view dirname, int worker_id, int thread
 	return fmt::format("{}/{}_{}_{}", dirname, worker_id + 1, thread_id + 1, opTable[op].name());
 }
 
+std::string getStatsFilename(std::string_view dirname, int worker_id, int thread_id) {
+	return fmt::format("{}/{}_{}", dirname, worker_id + 1, thread_id + 1);
+}
+
 void dumpThreadSamples(Arguments const& args,
                        pid_t parent_id,
                        int worker_id,
                        int thread_id,
-                       const LatencySampleBinArray& sample_bins,
+                       const ThreadStatistics& stats,
                        bool overwrite = true) {
 	const auto dirname = fmt::format("{}{}", TEMP_DATA_STORE, parent_id);
 	const auto rc = mkdir(dirname.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
@@ -460,14 +529,7 @@ void dumpThreadSamples(Arguments const& args,
 	}
 	for (auto op = 0; op < MAX_OP; op++) {
 		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
-			const auto filename = getStatsFilename(dirname, worker_id, thread_id, op);
-			auto fp = fopen(filename.c_str(), overwrite ? "w" : "a");
-			if (!fp) {
-				logr.error("fopen({}): {}", filename, strerror(errno));
-				continue;
-			}
-			auto fclose_guard = ExitGuard([fp]() { fclose(fp); });
-			sample_bins[op].forEachBlock([fp](auto ptr, auto count) { fwrite(ptr, sizeof(*ptr) * count, 1, fp); });
+			stats.writeToFile(getStatsFilename(dirname, worker_id, thread_id, op), op);
 		}
 	}
 }
@@ -481,7 +543,7 @@ void runAsyncWorkload(Arguments const& args,
 	auto dump_samples = [&args, pid_main, worker_id](auto&& states) {
 		auto overwrite = true; /* overwrite or append */
 		for (const auto& state : states) {
-			dumpThreadSamples(args, pid_main, worker_id, 0 /*thread_id*/, state->sample_bins, overwrite);
+			dumpThreadSamples(args, pid_main, worker_id, 0 /*thread_id*/, state->stats, overwrite);
 			overwrite = false;
 		}
 	};
@@ -495,7 +557,7 @@ void runAsyncWorkload(Arguments const& args,
 			auto state =
 			    std::make_shared<ResumableStateForPopulate>(Logger(WorkerProcess{}, args.verbose, worker_id, i),
 			                                                db,
-			                                                db.createTransaction(),
+			                                                createNewTransaction(db, args),
 			                                                io_context,
 			                                                args,
 			                                                shm.statsSlot(worker_id, i),
@@ -525,7 +587,7 @@ void runAsyncWorkload(Arguments const& args,
 			auto state =
 			    std::make_shared<ResumableStateForRunWorkload>(Logger(WorkerProcess{}, args.verbose, worker_id, i),
 			                                                   db,
-			                                                   db.createTransaction(),
+			                                                   createNewTransaction(db, args),
 			                                                   io_context,
 			                                                   args,
 			                                                   shm.statsSlot(worker_id, i),
@@ -575,9 +637,6 @@ void workerThread(ThreadArgs& thread_args) {
 	        ? -1
 	        : computeThreadIters(args.iteration, worker_id, thread_id, args.num_processes, args.num_threads);
 
-	/* create my own transaction object */
-	auto tx = database.createTransaction();
-
 	/* i'm ready */
 	readycount.fetch_add(1);
 	auto stopcount_guard = ExitGuard([&stopcount]() { stopcount.fetch_add(1); });
@@ -585,28 +644,26 @@ void workerThread(ThreadArgs& thread_args) {
 		usleep(10000); /* 10ms */
 	}
 
-	auto& sample_bins = thread_args.sample_bins;
-
 	if (args.mode == MODE_CLEAN) {
-		auto rc = cleanup(tx, args);
+		auto rc = cleanup(database, args);
 		if (rc < 0) {
 			logr.error("cleanup failed");
 		}
 	} else if (args.mode == MODE_BUILD) {
-		auto rc = populate(tx, args, worker_id, thread_id, thread_tps, stats, sample_bins);
+		auto rc = populate(database, args, worker_id, thread_id, thread_tps, stats);
 		if (rc < 0) {
 			logr.error("populate failed");
 		}
 	} else if (args.mode == MODE_RUN) {
-		auto rc = runWorkload(
-		    tx, args, thread_tps, throttle_factor, thread_iters, signal, stats, sample_bins, dotrace, dotagging);
+		auto rc =
+		    runWorkload(database, args, thread_tps, throttle_factor, thread_iters, signal, stats, dotrace, dotagging);
 		if (rc < 0) {
 			logr.error("runWorkload failed");
 		}
 	}
 
 	if (args.mode == MODE_BUILD || args.mode == MODE_RUN) {
-		dumpThreadSamples(args, parent_id, worker_id, thread_id, sample_bins);
+		dumpThreadSamples(args, parent_id, worker_id, thread_id, stats);
 	}
 }
 
@@ -621,10 +678,10 @@ int workerProcessMain(Arguments const& args, int worker_id, shared_memory::Acces
 
 	/* enable distributed tracing */
 	switch (args.distributed_tracer_client) {
-	case 1:
+	case DistributedTracerClient::NETWORK_LOSSY:
 		err = network::setOptionNothrow(FDB_NET_OPTION_DISTRIBUTED_CLIENT_TRACER, BytesRef(toBytePtr("network_lossy")));
 		break;
-	case 2:
+	case DistributedTracerClient::LOG_FILE:
 		err = network::setOptionNothrow(FDB_NET_OPTION_DISTRIBUTED_CLIENT_TRACER, BytesRef(toBytePtr("log_file")));
 		break;
 	}
@@ -740,16 +797,10 @@ int workerProcessMain(Arguments const& args, int worker_id, shared_memory::Acces
 			this_args.worker_id = worker_id;
 			this_args.thread_id = i;
 			this_args.parent_id = pid_main;
+			this_args.tenants = args.tenants;
 			this_args.args = &args;
 			this_args.shm = shm;
 			this_args.database = databases[i % args.num_databases];
-
-			/* for ops to run, pre-allocate one latency sample block */
-			for (auto op = 0; op < MAX_OP; op++) {
-				if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
-					this_args.sample_bins[op].reserveOneBlock();
-				}
-			}
 			worker_threads[i] = std::thread(workerThread, std::ref(this_args));
 		}
 		/* wait for everyone to finish */
@@ -815,6 +866,7 @@ int initArguments(Arguments& args) {
 	args.sampling = 1000;
 	args.key_length = 32;
 	args.value_length = 16;
+	args.tenants = 0;
 	args.zipf = 0;
 	args.commit_get = 0;
 	args.verbose = 1;
@@ -835,6 +887,7 @@ int initArguments(Arguments& args) {
 	args.client_threads_per_version = 0;
 	args.disable_ryw = 0;
 	args.json_output_path[0] = '\0';
+	args.stats_export_path[0] = '\0';
 	args.bg_materialize_files = false;
 	args.bg_file_path[0] = '\0';
 	args.distributed_tracer_client = 0;
@@ -988,13 +1041,14 @@ void usage() {
 	printf("%-24s %s\n", "", "This option cannot be specified with --seconds.");
 	printf("%-24s %s\n", "    --keylen=LENGTH", "Specify the key lengths");
 	printf("%-24s %s\n", "    --vallen=LENGTH", "Specify the value lengths");
+	printf("%-24s %s\n", "    --tenants=TENANTS", "Specify the number of tenants to use");
 	printf("%-24s %s\n", "-x, --transaction=SPEC", "Transaction specification");
 	printf("%-24s %s\n", "    --tps|--tpsmax=TPS", "Specify the target max TPS");
 	printf("%-24s %s\n", "    --tpsmin=TPS", "Specify the target min TPS");
 	printf("%-24s %s\n", "    --tpsinterval=SEC", "Specify the TPS change interval (Default: 10 seconds)");
 	printf("%-24s %s\n", "    --tpschange=<sin|square|pulse>", "Specify the TPS change type (Default: sin)");
 	printf("%-24s %s\n", "    --sampling=RATE", "Specify the sampling rate for latency stats");
-	printf("%-24s %s\n", "-m, --mode=MODE", "Specify the mode (build, run, clean)");
+	printf("%-24s %s\n", "-m, --mode=MODE", "Specify the mode (build, run, clean, report)");
 	printf("%-24s %s\n", "-z, --zipf", "Use zipfian distribution instead of uniform distribution");
 	printf("%-24s %s\n", "    --commitget", "Commit GETs");
 	printf("%-24s %s\n", "    --loggroup=LOGGROUP", "Set client logr group");
@@ -1016,6 +1070,9 @@ void usage() {
 	printf("%-24s %s\n",
 	       "    --bg_file_path=PATH",
 	       "Read blob granule files from the local filesystem at PATH and materialize the results.");
+	printf("%-24s %s\n",
+	       "    --stats_export_path=PATH",
+	       "Write the serialized DDSketch data to file at PATH. Can be used in either run or build mode.");
 	printf(
 	    "%-24s %s\n", "    --distributed_tracer_client=CLIENT", "Specify client (disabled, network_lossy, log_file)");
 }
@@ -1040,6 +1097,7 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			{ "iteration", required_argument, NULL, 'i' },
 			{ "keylen", required_argument, NULL, ARG_KEYLEN },
 			{ "vallen", required_argument, NULL, ARG_VALLEN },
+			{ "tenants", required_argument, NULL, ARG_TENANTS },
 			{ "transaction", required_argument, NULL, 'x' },
 			{ "tps", required_argument, NULL, ARG_TPS },
 			{ "tpsmax", required_argument, NULL, ARG_TPSMAX },
@@ -1069,6 +1127,7 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			{ "disable_ryw", no_argument, NULL, ARG_DISABLE_RYW },
 			{ "json_report", optional_argument, NULL, ARG_JSON_REPORT },
 			{ "bg_file_path", required_argument, NULL, ARG_BG_FILE_PATH },
+			{ "stats_export_path", optional_argument, NULL, ARG_EXPORT_PATH },
 			{ "distributed_tracer_client", required_argument, NULL, ARG_DISTRIBUTED_TRACER_CLIENT },
 			{ NULL, 0, NULL, 0 }
 		};
@@ -1131,6 +1190,19 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 				args.mode = MODE_BUILD;
 			} else if (strcmp(optarg, "run") == 0) {
 				args.mode = MODE_RUN;
+			} else if (strcmp(optarg, "report") == 0) {
+				args.mode = MODE_REPORT;
+				int i = optind;
+				for (; i < argc; i++) {
+					if (argv[i][0] != '-') {
+						const std::string report_file = argv[i];
+						strncpy(args.report_files[args.num_report_files], report_file.c_str(), report_file.size());
+						args.num_report_files++;
+					} else {
+						optind = i - 1;
+						break;
+					}
+				}
 			}
 			break;
 		case ARG_ASYNC:
@@ -1141,6 +1213,9 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			break;
 		case ARG_VALLEN:
 			args.value_length = atoi(optarg);
+			break;
+		case ARG_TENANTS:
+			args.tenants = atoi(optarg);
 			break;
 		case ARG_TPS:
 		case ARG_TPSMAX:
@@ -1257,13 +1332,23 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 		case ARG_BG_FILE_PATH:
 			args.bg_materialize_files = true;
 			strncpy(args.bg_file_path, optarg, std::min(sizeof(args.bg_file_path), strlen(optarg) + 1));
+		case ARG_EXPORT_PATH:
+			if (optarg == NULL && (argv[optind] == NULL || (argv[optind] != NULL && argv[optind][0] == '-'))) {
+				char default_file[] = "sketch_data.json";
+				strncpy(args.stats_export_path, default_file, sizeof(default_file));
+			} else {
+				strncpy(args.stats_export_path,
+				        argv[optind],
+				        std::min(sizeof(args.stats_export_path), strlen(argv[optind]) + 1));
+			}
+			break;
 		case ARG_DISTRIBUTED_TRACER_CLIENT:
 			if (strcmp(optarg, "disabled") == 0) {
-				args.distributed_tracer_client = 0;
+				args.distributed_tracer_client = DistributedTracerClient::DISABLED;
 			} else if (strcmp(optarg, "network_lossy") == 0) {
-				args.distributed_tracer_client = 1;
+				args.distributed_tracer_client = DistributedTracerClient::NETWORK_LOSSY;
 			} else if (strcmp(optarg, "log_file") == 0) {
-				args.distributed_tracer_client = 2;
+				args.distributed_tracer_client = DistributedTracerClient::LOG_FILE;
 			} else {
 				args.distributed_tracer_client = -1;
 			}
@@ -1333,6 +1418,20 @@ int validateArguments(Arguments const& args) {
 		if (args.txntagging < 0) {
 			logr.error("--txntagging must be a non-negative integer");
 			return -1;
+		}
+	}
+
+	// ensure that all of the files provided to mako are valid and exist
+	if (args.mode == MODE_REPORT) {
+		if (!args.num_report_files) {
+			logr.error("No files to merge");
+		}
+		for (int i = 0; i < args.num_report_files; i++) {
+			struct stat buffer;
+			if (stat(args.report_files[i], &buffer) != 0) {
+				logr.error("Couldn't open file {}", args.report_files[i]);
+				return -1;
+			}
 		}
 	}
 	if (args.distributed_tracer_client < 0) {
@@ -1447,6 +1546,248 @@ void printStatsHeader(Arguments const& args, bool show_commit, bool is_first_hea
 	fmt::print("\n");
 }
 
+void printThreadStats(ThreadStatistics& final_stats, Arguments args, FILE* fp, bool is_report = false) {
+
+	if (is_report) {
+		for (auto op = 0; op < MAX_OP; op++) {
+			if (final_stats.getLatencySampleCount(op) > 0 && op != OP_COMMIT && op != OP_TRANSACTION) {
+				args.txnspec.ops[op][OP_COUNT] = 1;
+			}
+		}
+	}
+
+	fmt::print("Latency (us)");
+	printStatsHeader(args, true, false, true);
+
+	/* Total Samples */
+	putTitle("Samples");
+	bool first_op = true;
+	for (auto op = 0; op < MAX_OP; op++) {
+		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
+			auto sample_size = final_stats.getLatencySampleCount(op);
+			if (sample_size > 0) {
+				putField(sample_size);
+			} else {
+				putField("N/A");
+			}
+			if (fp) {
+				if (first_op) {
+					first_op = false;
+				} else {
+					fmt::fprintf(fp, ",");
+				}
+				fmt::fprintf(fp, "\"%s\": %lu", getOpName(op), sample_size);
+			}
+		}
+	}
+	fmt::print("\n");
+
+	/* Min Latency */
+	if (fp) {
+		fmt::fprintf(fp, "}, \"minLatency\": {");
+	}
+	putTitle("Min");
+	first_op = true;
+	for (auto op = 0; op < MAX_OP; op++) {
+		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
+			const auto lat_min = final_stats.getLatencyUsMin(op);
+			if (lat_min == -1) {
+				putField("N/A");
+			} else {
+				putField(lat_min);
+				if (fp) {
+					if (first_op) {
+						first_op = false;
+					} else {
+						fmt::fprintf(fp, ",");
+					}
+					fmt::fprintf(fp, "\"%s\": %lu", getOpName(op), lat_min);
+				}
+			}
+		}
+	}
+	fmt::print("\n");
+
+	/* Avg Latency */
+	if (fp) {
+		fmt::fprintf(fp, "}, \"avgLatency\": {");
+	}
+	putTitle("Avg");
+	first_op = true;
+	for (auto op = 0; op < MAX_OP; op++) {
+		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
+			if (final_stats.getLatencySampleCount(op) > 0) {
+				putField(final_stats.mean(op));
+				if (fp) {
+					if (first_op) {
+						first_op = false;
+					} else {
+						fmt::fprintf(fp, ",");
+					}
+					fmt::fprintf(fp, "\"%s\": %lu", getOpName(op), final_stats.mean(op));
+				}
+			} else {
+				putField("N/A");
+			}
+		}
+	}
+	fmt::printf("\n");
+
+	/* Max Latency */
+	if (fp) {
+		fmt::fprintf(fp, "}, \"maxLatency\": {");
+	}
+	putTitle("Max");
+	first_op = true;
+	for (auto op = 0; op < MAX_OP; op++) {
+		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
+			const auto lat_max = final_stats.getLatencyUsMax(op);
+			if (lat_max == 0) {
+				putField("N/A");
+			} else {
+				putField(lat_max);
+				if (fp) {
+					if (first_op) {
+						first_op = false;
+					} else {
+						fmt::fprintf(fp, ",");
+					}
+					fmt::fprintf(fp, "\"%s\": %lu", getOpName(op), final_stats.getLatencyUsMax(op));
+				}
+			}
+		}
+	}
+	fmt::print("\n");
+
+	/* Median Latency */
+	if (fp) {
+		fmt::fprintf(fp, "}, \"medianLatency\": {");
+	}
+	putTitle("Median");
+	first_op = true;
+	for (auto op = 0; op < MAX_OP; op++) {
+		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
+			const auto lat_total = final_stats.getLatencyUsTotal(op);
+			const auto lat_samples = final_stats.getLatencySampleCount(op);
+			if (lat_total && lat_samples) {
+				auto median = final_stats.percentile(op, 0.5);
+				putField(median);
+				if (fp) {
+					if (first_op) {
+						first_op = false;
+					} else {
+						fmt::fprintf(fp, ",");
+					}
+					fmt::fprintf(fp, "\"%s\": %lu", getOpName(op), median);
+				}
+			} else {
+				putField("N/A");
+			}
+		}
+	}
+	fmt::print("\n");
+
+	/* 95%ile Latency */
+	if (fp) {
+		fmt::fprintf(fp, "}, \"p95Latency\": {");
+	}
+	putTitle("95.0 pctile");
+	first_op = true;
+	for (auto op = 0; op < MAX_OP; op++) {
+		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
+			if (!final_stats.getLatencySampleCount(op) || !final_stats.getLatencyUsTotal(op)) {
+				putField("N/A");
+				continue;
+			}
+			const auto point_95pct = final_stats.percentile(op, 0.95);
+			putField(point_95pct);
+			if (fp) {
+				if (first_op) {
+					first_op = false;
+				} else {
+					fmt::fprintf(fp, ",");
+				}
+				fmt::fprintf(fp, "\"%s\": %lu", getOpName(op), point_95pct);
+			}
+		}
+	}
+	fmt::printf("\n");
+
+	/* 99%ile Latency */
+	if (fp) {
+		fmt::fprintf(fp, "}, \"p99Latency\": {");
+	}
+	putTitle("99.0 pctile");
+	first_op = true;
+	for (auto op = 0; op < MAX_OP; op++) {
+		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
+			if (!final_stats.getLatencySampleCount(op) || !final_stats.getLatencyUsTotal(op)) {
+				putField("N/A");
+				continue;
+			}
+			const auto point_99pct = final_stats.percentile(op, 0.99);
+			putField(point_99pct);
+			if (fp) {
+				if (first_op) {
+					first_op = false;
+				} else {
+					fmt::fprintf(fp, ",");
+				}
+				fmt::fprintf(fp, "\"%s\": %lu", getOpName(op), point_99pct);
+			}
+		}
+	}
+	fmt::print("\n");
+
+	/* 99.9%ile Latency */
+	if (fp) {
+		fmt::fprintf(fp, "}, \"p99.9Latency\": {");
+	}
+	putTitle("99.9 pctile");
+	first_op = true;
+	for (auto op = 0; op < MAX_OP; op++) {
+		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
+			if (!final_stats.getLatencySampleCount(op) || !final_stats.getLatencyUsTotal(op)) {
+				putField("N/A");
+				continue;
+			}
+			const auto point_99_9pct = final_stats.percentile(op, 0.999);
+			putField(point_99_9pct);
+			if (fp) {
+				if (first_op) {
+					first_op = false;
+				} else {
+					fmt::fprintf(fp, ",");
+				}
+				fmt::fprintf(fp, "\"%s\": %lu", getOpName(op), point_99_9pct);
+			}
+		}
+	}
+	fmt::print("\n");
+	if (fp) {
+		fmt::fprintf(fp, "}}");
+	}
+}
+
+void loadSample(int pid_main, int op, std::vector<DDSketchMako>& data_points, int process_id, int thread_id) {
+	const auto dirname = fmt::format("{}{}", TEMP_DATA_STORE, pid_main);
+	const auto filename = getStatsFilename(dirname, process_id, thread_id, op);
+	std::ifstream fp{ filename };
+	std::ostringstream sstr;
+	sstr << fp.rdbuf();
+	DDSketchMako sketch;
+	rapidjson::Document doc;
+	doc.Parse(sstr.str().c_str());
+	if (!doc.HasParseError()) {
+		sketch.deserialize(doc);
+		if (data_points[op].getPopulationSize() > 0) {
+			data_points[op].mergeWith(sketch);
+		} else {
+			data_points[op] = sketch;
+		}
+	}
+}
+
 void printReport(Arguments const& args,
                  ThreadStatistics const* stats,
                  double const duration_sec,
@@ -1520,7 +1861,7 @@ void printReport(Arguments const& args,
 			putField(final_stats.getOpCount(op));
 			if (fp) {
 				if (first_op) {
-					first_op = 0;
+					first_op = false;
 				} else {
 					fmt::fprintf(fp, ",");
 				}
@@ -1544,13 +1885,13 @@ void printReport(Arguments const& args,
 
 	/* Errors */
 	putTitle("Errors");
-	first_op = 1;
+	first_op = true;
 	for (auto op = 0; op < MAX_OP; op++) {
 		if (args.txnspec.ops[op][OP_COUNT] > 0 && op != OP_TRANSACTION) {
 			putField(final_stats.getErrorCount(op));
 			if (fp) {
 				if (first_op) {
-					first_op = 0;
+					first_op = false;
 				} else {
 					fmt::fprintf(fp, ",");
 				}
@@ -1563,262 +1904,29 @@ void printReport(Arguments const& args,
 	}
 	fmt::print("\n\n");
 
-	fmt::print("Latency (us)");
-	printStatsHeader(args, true, false, true);
-
-	/* Total Samples */
-	putTitle("Samples");
-	first_op = 1;
+	// Get the sketches stored in file and merge them together
+	std::vector<DDSketchMako> data_points(MAX_OP);
 	for (auto op = 0; op < MAX_OP; op++) {
-		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
-			if (final_stats.getLatencyUsTotal(op)) {
-				putField(final_stats.getLatencySampleCount(op));
-			} else {
-				putField("N/A");
-			}
-			if (fp) {
-				if (first_op) {
-					first_op = 0;
-				} else {
-					fmt::fprintf(fp, ",");
-				}
-				fmt::fprintf(fp, "\"%s\": %lu", getOpName(op), final_stats.getLatencySampleCount(op));
-			}
-		}
-	}
-	fmt::print("\n");
+		for (auto i = 0; i < args.num_processes; i++) {
 
-	/* Min Latency */
-	if (fp) {
-		fmt::fprintf(fp, "}, \"minLatency\": {");
-	}
-	putTitle("Min");
-	first_op = 1;
-	for (auto op = 0; op < MAX_OP; op++) {
-		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
-			const auto lat_min = final_stats.getLatencyUsMin(op);
-			if (lat_min == -1) {
-				putField("N/A");
-			} else {
-				putField(lat_min);
-				if (fp) {
-					if (first_op) {
-						first_op = 0;
-					} else {
-						fmt::fprintf(fp, ",");
-					}
-					fmt::fprintf(fp, "\"%s\": %lu", getOpName(op), lat_min);
-				}
-			}
-		}
-	}
-	fmt::print("\n");
-
-	/* Avg Latency */
-	if (fp) {
-		fmt::fprintf(fp, "}, \"avgLatency\": {");
-	}
-	putTitle("Avg");
-	first_op = 1;
-	for (auto op = 0; op < MAX_OP; op++) {
-		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
-			const auto lat_total = final_stats.getLatencyUsTotal(op);
-			const auto lat_samples = final_stats.getLatencySampleCount(op);
-			if (lat_total) {
-				putField(lat_total / lat_samples);
-				if (fp) {
-					if (first_op) {
-						first_op = 0;
-					} else {
-						fmt::fprintf(fp, ",");
-					}
-					fmt::fprintf(fp, "\"%s\": %lu", getOpName(op), lat_total / lat_samples);
+			if (args.async_xacts == 0) {
+				for (auto j = 0; j < args.num_threads; j++) {
+					loadSample(pid_main, op, data_points, i, j);
 				}
 			} else {
-				putField("N/A");
+				// async mode uses only one file per process
+				loadSample(pid_main, op, data_points, i, 0);
 			}
 		}
 	}
-	fmt::printf("\n");
+	final_stats.updateLatencies(data_points);
 
-	/* Max Latency */
-	if (fp) {
-		fmt::fprintf(fp, "}, \"maxLatency\": {");
-	}
-	putTitle("Max");
-	first_op = 1;
-	for (auto op = 0; op < MAX_OP; op++) {
-		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
-			const auto lat_max = final_stats.getLatencyUsMax(op);
-			if (lat_max == 0) {
-				putField("N/A");
-			} else {
-				putField(lat_max);
-				if (fp) {
-					if (first_op) {
-						first_op = 0;
-					} else {
-						fmt::fprintf(fp, ",");
-					}
-					fmt::fprintf(fp, "\"%s\": %lu", getOpName(op), final_stats.getLatencyUsMax(op));
-				}
-			}
-		}
-	}
-	fmt::print("\n");
+	printThreadStats(final_stats, args, fp);
 
-	auto data_points = std::array<std::vector<uint64_t>, MAX_OP>{};
-
-	/* Median Latency */
-	if (fp) {
-		fmt::fprintf(fp, "}, \"medianLatency\": {");
-	}
-	putTitle("Median");
-	first_op = 1;
-	for (auto op = 0; op < MAX_OP; op++) {
-		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
-			const auto lat_total = final_stats.getLatencyUsTotal(op);
-			const auto lat_samples = final_stats.getLatencySampleCount(op);
-			data_points[op].reserve(lat_samples);
-			if (lat_total && lat_samples) {
-				for (auto i = 0; i < args.num_processes; i++) {
-					auto load_sample = [pid_main, op, &data_points](int process_id, int thread_id) {
-						const auto dirname = fmt::format("{}{}", TEMP_DATA_STORE, pid_main);
-						const auto filename = getStatsFilename(dirname, process_id, thread_id, op);
-						auto fp = fopen(filename.c_str(), "r");
-						if (!fp) {
-							logr.error("fopen({}): {}", filename, strerror(errno));
-							return;
-						}
-						auto fclose_guard = ExitGuard([fp]() { fclose(fp); });
-						fseek(fp, 0, SEEK_END);
-						const auto num_points = ftell(fp) / sizeof(uint64_t);
-						fseek(fp, 0, 0);
-						for (auto index = 0u; index < num_points; index++) {
-							auto value = uint64_t{};
-							auto nread = fread(&value, sizeof(uint64_t), 1, fp);
-							if (nread != 1) {
-								logr.error("Read sample returned {}", nread);
-								break;
-							}
-							data_points[op].push_back(value);
-						}
-					};
-					if (args.async_xacts == 0) {
-						for (auto j = 0; j < args.num_threads; j++) {
-							load_sample(i, j);
-						}
-					} else {
-						// async mode uses only one file per process
-						load_sample(i, 0);
-					}
-				}
-				std::sort(data_points[op].begin(), data_points[op].end());
-				const auto num_points = data_points[op].size();
-				auto median = uint64_t{};
-				if (num_points & 1) {
-					median = data_points[op][num_points / 2];
-				} else {
-					median = (data_points[op][num_points / 2] + data_points[op][num_points / 2 - 1]) >> 1;
-				}
-				putField(median);
-				if (fp) {
-					if (first_op) {
-						first_op = 0;
-					} else {
-						fmt::fprintf(fp, ",");
-					}
-					fmt::fprintf(fp, "\"%s\": %lu", getOpName(op), median);
-				}
-			} else {
-				putField("N/A");
-			}
-		}
-	}
-	fmt::print("\n");
-
-	/* 95%ile Latency */
-	if (fp) {
-		fmt::fprintf(fp, "}, \"p95Latency\": {");
-	}
-	putTitle("95.0 pctile");
-	first_op = 1;
-	for (auto op = 0; op < MAX_OP; op++) {
-		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
-			if (data_points[op].empty() || !final_stats.getLatencyUsTotal(op)) {
-				putField("N/A");
-				continue;
-			}
-			const auto num_points = data_points[op].size();
-			const auto point_95pct = static_cast<size_t>(std::max(0., (num_points * 0.95) - 1));
-			putField(data_points[op][point_95pct]);
-			if (fp) {
-				if (first_op) {
-					first_op = 0;
-				} else {
-					fmt::fprintf(fp, ",");
-				}
-				fmt::fprintf(fp, "\"%s\": %lu", getOpName(op), data_points[op][point_95pct]);
-			}
-		}
-	}
-	fmt::printf("\n");
-
-	/* 99%ile Latency */
-	if (fp) {
-		fmt::fprintf(fp, "}, \"p99Latency\": {");
-	}
-	putTitle("99.0 pctile");
-	first_op = 1;
-	for (auto op = 0; op < MAX_OP; op++) {
-		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
-			if (data_points[op].empty() || !final_stats.getLatencyUsTotal(op)) {
-				putField("N/A");
-				continue;
-			}
-			const auto num_points = data_points[op].size();
-			const auto point_99pct = static_cast<size_t>(std::max(0., (num_points * 0.99) - 1));
-			putField(data_points[op][point_99pct]);
-			if (fp) {
-				if (first_op) {
-					first_op = 0;
-				} else {
-					fmt::fprintf(fp, ",");
-				}
-				fmt::fprintf(fp, "\"%s\": %lu", getOpName(op), data_points[op][point_99pct]);
-			}
-		}
-	}
-	fmt::print("\n");
-
-	/* 99.9%ile Latency */
-	if (fp) {
-		fmt::fprintf(fp, "}, \"p99.9Latency\": {");
-	}
-	putTitle("99.9 pctile");
-	first_op = 1;
-	for (auto op = 0; op < MAX_OP; op++) {
-		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
-			if (data_points[op].empty() || !final_stats.getLatencyUsTotal(op)) {
-				putField("N/A");
-				continue;
-			}
-			const auto num_points = data_points[op].size();
-			const auto point_99_9pct = static_cast<size_t>(std::max(0., (num_points * 0.999) - 1));
-			putField(data_points[op][point_99_9pct]);
-			if (fp) {
-				if (first_op) {
-					first_op = 0;
-				} else {
-					fmt::fprintf(fp, ",");
-				}
-				fmt::fprintf(fp, "\"%s\": %lu", getOpName(op), data_points[op][point_99_9pct]);
-			}
-		}
-	}
-	fmt::print("\n");
-	if (fp) {
-		fmt::fprintf(fp, "}}");
+	// export the ddsketch if the flag was set
+	if (args.stats_export_path[0] != 0) {
+		std::ofstream f(args.stats_export_path);
+		f << final_stats;
 	}
 
 	const auto command_remove = fmt::format("rm -rf {}{}", TEMP_DATA_STORE, pid_main);
@@ -1864,6 +1972,7 @@ int statsProcessMain(Arguments const& args,
 		fmt::fprintf(fp, "\"sampling\": %d,", args.sampling);
 		fmt::fprintf(fp, "\"key_length\": %d,", args.key_length);
 		fmt::fprintf(fp, "\"value_length\": %d,", args.value_length);
+		fmt::fprintf(fp, "\"tenants\": %d,", args.tenants);
 		fmt::fprintf(fp, "\"commit_get\": %d,", args.commit_get);
 		fmt::fprintf(fp, "\"verbose\": %d,", args.verbose);
 		fmt::fprintf(fp, "\"cluster_files\": \"%s\",", args.cluster_files[0]);
@@ -1960,6 +2069,18 @@ int statsProcessMain(Arguments const& args,
 	return 0;
 }
 
+ThreadStatistics mergeSketchReport(Arguments& args) {
+
+	ThreadStatistics stats;
+	for (int i = 0; i < args.num_report_files; i++) {
+		std::ifstream f{ args.report_files[i] };
+		ThreadStatistics tmp;
+		f >> tmp;
+		stats.combine(tmp);
+	}
+	return stats;
+}
+
 int main(int argc, char* argv[]) {
 	setlinebuf(stdout);
 
@@ -1991,6 +2112,12 @@ int main(int argc, char* argv[]) {
 		if (args.txnspec.ops[OP_INSERT][OP_COUNT] == 0) {
 			parseTransaction(args, "i100");
 		}
+	}
+
+	if (args.mode == MODE_REPORT) {
+		ThreadStatistics stats = mergeSketchReport(args);
+		printThreadStats(stats, args, NULL, true);
+		return 0;
 	}
 
 	const auto pid_main = getpid();

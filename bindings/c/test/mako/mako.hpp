@@ -44,11 +44,13 @@ constexpr const int MODE_INVALID = -1;
 constexpr const int MODE_CLEAN = 0;
 constexpr const int MODE_BUILD = 1;
 constexpr const int MODE_RUN = 2;
+constexpr const int MODE_REPORT = 3;
 
 /* for long arguments */
 enum ArgKind {
 	ARG_KEYLEN,
 	ARG_VALLEN,
+	ARG_TENANTS,
 	ARG_TPS,
 	ARG_ASYNC,
 	ARG_COMMITGET,
@@ -73,6 +75,7 @@ enum ArgKind {
 	ARG_CLIENT_THREADS_PER_VERSION,
 	ARG_JSON_REPORT,
 	ARG_BG_FILE_PATH, // if blob granule files are stored locally, mako will read and materialize them if this is set
+	ARG_EXPORT_PATH,
 	ARG_DISTRIBUTED_TRACER_CLIENT
 };
 
@@ -103,6 +106,8 @@ enum OpKind {
 
 enum TPSChangeTypes { TPS_SIN, TPS_SQUARE, TPS_PULSE };
 
+enum DistributedTracerClient { DISABLED, NETWORK_LOSSY, LOG_FILE };
+
 /* we set WorkloadSpec and Arguments only once in the master process,
  * and won't be touched by child processes.
  */
@@ -119,6 +124,7 @@ constexpr const int NUM_CLUSTERS_MAX = 3;
 constexpr const int NUM_DATABASES_MAX = 10;
 constexpr const std::string_view KEY_PREFIX{ "mako" };
 constexpr const std::string_view TEMP_DATA_STORE{ "/tmp/makoTemp" };
+constexpr const int MAX_REPORT_FILES = 200;
 
 /* benchmark parameters */
 struct Arguments {
@@ -139,6 +145,7 @@ struct Arguments {
 	int sampling;
 	int key_length;
 	int value_length;
+	int tenants;
 	int zipf;
 	int commit_get;
 	int verbose;
@@ -162,6 +169,9 @@ struct Arguments {
 	char json_output_path[PATH_MAX];
 	bool bg_materialize_files;
 	char bg_file_path[PATH_MAX];
+	char stats_export_path[PATH_MAX];
+	char report_files[MAX_REPORT_FILES][PATH_MAX];
+	int num_report_files;
 	int distributed_tracer_client;
 };
 

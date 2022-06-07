@@ -39,6 +39,7 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include <boost/lexical_cast.hpp>
 #include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/flow.h"
 
 ACTOR Future<std::vector<WorkerDetails>> getWorkers(Reference<AsyncVar<ServerDBInfo> const> dbInfo, int flags = 0) {
 	loop {
@@ -672,14 +673,18 @@ ACTOR Future<Void> reconfigureAfter(Database cx,
 
 struct QuietDatabaseChecker {
 	double start = now();
-	constexpr static double maxDDRunTime = 1000.0;
+	double maxDDRunTime;
+
+	QuietDatabaseChecker(double maxDDRunTime) : maxDDRunTime(maxDDRunTime) {}
 
 	struct Impl {
 		double start;
 		std::string const& phase;
+		double maxDDRunTime;
 		std::vector<std::string> failReasons;
 
-		Impl(double start, const std::string& phase) : start(start), phase(phase) {}
+		Impl(double start, const std::string& phase, const double maxDDRunTime)
+		  : start(start), phase(phase), maxDDRunTime(maxDDRunTime) {}
 
 		template <class T, class Comparison = std::less_equal<>>
 		Impl& add(BaseTraceEvent& evt,
@@ -719,7 +724,7 @@ struct QuietDatabaseChecker {
 	};
 
 	Impl startIteration(std::string const& phase) const {
-		Impl res(start, phase);
+		Impl res(start, phase, maxDDRunTime);
 		return res;
 	}
 };
@@ -735,7 +740,7 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
                                         int64_t maxDataDistributionQueueSize = 0,
                                         int64_t maxPoppedVersionLag = 30e6,
                                         int64_t maxVersionOffset = 1e6) {
-	state QuietDatabaseChecker checker;
+	state QuietDatabaseChecker checker(isBuggifyEnabled(BuggifyType::General) ? 1500.0 : 1000.0);
 	state Future<Void> reconfig =
 	    reconfigureAfter(cx, 100 + (deterministicRandom()->random01() * 100), dbInfo, "QuietDatabase");
 	state Future<int64_t> dataInFlight;
