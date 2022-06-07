@@ -6517,7 +6517,8 @@ ACTOR Future<Void> restoreShards(StorageServer* data, RangeResult storageShards,
 		for (auto it = existingShards.begin(); it != existingShards.end(); ++it) {
 			TraceEvent(SevVerbose, "RestoreShardsIntersectingRange", data->thisServerID)
 			    .detail("StorageShard", shard.toString())
-			    .detail("IntersectingShard", it->value()->debugDescribeState())
+			    .detail("IntersectingShardRange", it->value()->keys)
+			    .detail("IntersectingShardState", it->value()->debugDescribeState())
 			    .log();
 			switch (shardState) {
 			case StorageServerShard::NotAssigned:
@@ -6526,7 +6527,8 @@ ACTOR Future<Void> restoreShards(StorageServer* data, RangeResult storageShards,
 			case StorageServerShard::MovingIn:
 				ASSERT(it->value()->assigned());
 				ASSERT(!it->value()->isReadable());
-				ASSERT(it->value()->keys == shard.range);
+				// ASSERT(it->value()->keys == shard.range);
+				ASSERT(it->value()->keys.contains(shard.range));
 				break;
 			case StorageServerShard::ReadWrite:
 				ASSERT(it->value()->isReadable());
@@ -6544,22 +6546,24 @@ ACTOR Future<Void> restoreShards(StorageServer* data, RangeResult storageShards,
 		auto ranges = data->shards.getAffectedRangesAfterInsertion(shard.range, Reference<ShardInfo>());
 		for (int i = 0; i < ranges.size(); i++) {
 			KeyRangeRef& range = static_cast<KeyRangeRef&>(ranges[i]);
-			TraceEvent(SevVerbose, "RestoreShardsLoadPhysicalShard", data->thisServerID)
+			TraceEvent(SevVerbose, "RestoreShardsInstallPhysicalShard", data->thisServerID)
 			    .detail("Shard", shard.toString())
 			    .detail("Range", range);
 			if (range == shard.range) {
-				auto currentShard = data->shards[range.begin];
-				if (shardState == StorageServerShard::MovingIn) {
-					ASSERT(currentShard->keys == shard.range);
-					currentShard->populateShard(shard);
-				} else if (currentShard->keys == shard.range) {
-					currentShard->populateShard(shard);
-				} else {
-					data->addShard(ShardInfo::newShard(data, shard));
-				}
+				// auto currentShard = data->shards[range.begin];
+				// if (shardState == StorageServerShard::MovingIn) {
+				// ASSERT(currentShard->keys == shard.range);
+				// 	currentShard->populateShard(shard);
+				// } else if (currentShard->keys == shard.range) {
+				// 	currentShard->populateShard(shard);
+				// } else {
+				data->addShard(ShardInfo::newShard(data, shard));
+				// }
 			} else {
 				ASSERT(range.begin == shard.range.end);
-				data->addShard(ShardInfo::newReadWrite(range, data));
+				StorageServerShard rightShard = ranges[i].value->toStorageServerShard();
+				rightShard.range = range;
+				data->addShard(ShardInfo::newShard(data, rightShard));
 			}
 		}
 

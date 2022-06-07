@@ -1,5 +1,5 @@
 /*
- *PhysicalShardMove.actor.cpp
+ * PhysicalShardMove.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -43,11 +43,14 @@ std::string printValue(const ErrorOr<Optional<Value>>& value) {
 }
 } // namespace
 
-struct SSCheckpointWorkload : TestWorkload {
+struct PhysicalShardMoveWorkLoad : TestWorkload {
+	FlowLock startMoveKeysParallelismLock;
+	FlowLock finishMoveKeysParallelismLock;
+	FlowLock cleanUpDataMoveParallelismLock;
 	const bool enabled;
 	bool pass;
 
-	SSCheckpointWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), enabled(!clientId), pass(true) {}
+	PhysicalShardMoveWorkLoad(WorkloadContext const& wcx) : TestWorkload(wcx), enabled(!clientId), pass(true) {}
 
 	void validationFailed(ErrorOr<Optional<Value>> expectedValue, ErrorOr<Optional<Value>> actualValue) {
 		TraceEvent(SevError, "TestFailed")
@@ -67,126 +70,44 @@ struct SSCheckpointWorkload : TestWorkload {
 		return _start(this, cx);
 	}
 
-	ACTOR Future<Void> _start(SSCheckpointWorkload* self, Database cx) {
-		state Key key = "TestKey"_sr;
-		state Key endKey = "TestKey0"_sr;
-		state Value oldValue = "TestValue"_sr;
-		state KeyRange testRange = KeyRangeRef(key, endKey);
-
+	ACTOR Future<Void> _start(PhysicalShardMoveWorkLoad* self, Database cx) {
 		int ignore = wait(setDDMode(cx, 0));
-		state Version version = wait(self->writeAndVerify(self, cx, key, oldValue));
+		state Key keyA = "TestKeyA"_sr;
+		state Key keyB = "TestKeyB"_sr;
+		state Key keyC = "TestKeyC"_sr;
+		state Value testValue = "TestValue"_sr;
 
-		// Create checkpoint.
-		state Transaction tr(cx);
-		state CheckpointFormat format = deterministicRandom()->coinflip() ? RocksDBColumnFamily : RocksDB;
-		loop {
-			try {
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				wait(createCheckpoint(&tr, testRange, format));
-				wait(tr.commit());
-				version = tr.getCommittedVersion();
-				break;
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
+		Version ignore1 = wait(self->writeAndVerify(self, cx, keyA, testValue));
+		Version ignore2 = wait(self->writeAndVerify(self, cx, keyB, testValue));
+		Version ignore3 = wait(self->writeAndVerify(self, cx, keyC, testValue));
 
-		TraceEvent("TestCheckpointCreated").detail("Range", testRange).detail("Version", version);
+		TraceEvent("TestValueWritten").log();
 
-		// Fetch checkpoint meta data.
-		loop {
-			try {
-				state std::vector<CheckpointMetaData> records =
-				    wait(getCheckpointMetaData(cx, testRange, version, format));
-				break;
-			} catch (Error& e) {
-				TraceEvent("TestFetchCheckpointMetadataError")
-				    .errorUnsuppressed(e)
-				    .detail("Range", testRange)
-				    .detail("Version", version);
+		state std::unordered_set<UID> excludes;
+		state int teamSize = 3;
+		state std::vector<UID> teamA = wait(self->moveShard(self, cx, KeyRangeRef(keyA, keyB), teamSize, &excludes));
+		// state std::vector<UID> teamB = wait(self->moveShard(self, cx, KeyRangeRef(keyB, keyC), teamSize,
+		// &excludes));
 
-				// The checkpoint was just created, we don't expect this error.
-				ASSERT(e.code() != error_code_checkpoint_not_found);
-			}
-		}
-
-		TraceEvent("TestCheckpointFetched")
-		    .detail("Range", testRange)
-		    .detail("Version", version)
-		    .detail("Checkpoints", describe(records));
-
-		state std::string pwd = platform::getWorkingDirectory();
-		state std::string folder = pwd + "/checkpoints";
-		platform::eraseDirectoryRecursive(folder);
-		ASSERT(platform::createDirectory(folder));
-
-		// Fetch checkpoint.
-		state std::vector<CheckpointMetaData> fetchedCheckpoints;
-		state int i = 0;
-		for (; i < records.size(); ++i) {
-			loop {
-				TraceEvent("TestFetchingCheckpoint").detail("Checkpoint", records[i].toString());
-				try {
-					state CheckpointMetaData record = wait(fetchCheckpoint(cx, records[0], folder));
-					fetchedCheckpoints.push_back(record);
-					TraceEvent("TestCheckpointFetched").detail("Checkpoint", record.toString());
-					break;
-				} catch (Error& e) {
-					TraceEvent("TestFetchCheckpointError")
-					    .errorUnsuppressed(e)
-					    .detail("Checkpoint", records[i].toString());
-					wait(delay(1));
-				}
-			}
-		}
-
-		state std::string rocksDBTestDir = "rocksdb-kvstore-test-db";
-		platform::eraseDirectoryRecursive(rocksDBTestDir);
-
-		// Restore KVS.
-		state IKeyValueStore* kvStore = keyValueStoreRocksDB(
-		    rocksDBTestDir, deterministicRandom()->randomUniqueID(), KeyValueStoreType::SSD_ROCKSDB_V1);
-		wait(kvStore->init());
-		try {
-			wait(kvStore->restore(fetchedCheckpoints));
-		} catch (Error& e) {
-			TraceEvent(SevError, "TestRestoreCheckpointError")
-			    .errorUnsuppressed(e)
-			    .detail("Checkpoint", describe(records));
-		}
-
-		// Compare the keyrange between the original database and the one restored from checkpoint.
-		// For now, it should have been a single key.
-		tr.reset();
-		loop {
-			try {
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				state RangeResult res = wait(tr.getRange(KeyRangeRef(key, endKey), CLIENT_KNOBS->TOO_MANY));
-				break;
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
-
-		RangeResult kvRange = wait(kvStore->readRange(testRange));
-		ASSERT(res.size() == kvRange.size());
-		for (int i = 0; i < res.size(); ++i) {
-			ASSERT(res[i] == kvRange[i]);
-		}
+		wait(self->readAndVerify(self, cx, keyA, testValue));
+		wait(self->readAndVerify(self, cx, keyB, testValue));
+		wait(self->readAndVerify(self, cx, keyC, testValue));
+		TraceEvent("TestValueVerified").log();
 
 		int ignore = wait(setDDMode(cx, 1));
 		return Void();
 	}
 
-	ACTOR Future<Void> readAndVerify(SSCheckpointWorkload* self,
+	ACTOR Future<Void> readAndVerify(PhysicalShardMoveWorkLoad* self,
 	                                 Database cx,
 	                                 Key key,
 	                                 ErrorOr<Optional<Value>> expectedValue) {
 		state Transaction tr(cx);
+		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
 		loop {
 			try {
+				state Version readVersion = wait(tr.getReadVersion());
 				state Optional<Value> res = wait(timeoutError(tr.get(key), 30.0));
 				const bool equal = !expectedValue.isError() && res == expectedValue.get();
 				if (!equal) {
@@ -194,6 +115,7 @@ struct SSCheckpointWorkload : TestWorkload {
 				}
 				break;
 			} catch (Error& e) {
+				TraceEvent("TestReadError").errorUnsuppressed(e);
 				if (expectedValue.isError() && expectedValue.getError().code() == e.code()) {
 					break;
 				}
@@ -201,30 +123,130 @@ struct SSCheckpointWorkload : TestWorkload {
 			}
 		}
 
+		TraceEvent("TestReadSuccess").detail("Version", readVersion);
+
 		return Void();
 	}
 
-	ACTOR Future<Version> writeAndVerify(SSCheckpointWorkload* self, Database cx, Key key, Optional<Value> value) {
-		state Transaction tr(cx);
+	ACTOR Future<Version> writeAndVerify(PhysicalShardMoveWorkLoad* self, Database cx, Key key, Optional<Value> value) {
+		// state Transaction tr(cx);
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 		state Version version;
 		loop {
+			state UID debugID = deterministicRandom()->randomUniqueID();
 			try {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->debugTransaction(debugID);
 				if (value.present()) {
-					tr.set(key, value.get());
+					tr->set(key, value.get());
+					tr->set("Test?"_sr, value.get());
+					tr->set(key, value.get());
 				} else {
-					tr.clear(key);
+					tr->clear(key);
 				}
-				wait(timeoutError(tr.commit(), 30.0));
-				version = tr.getCommittedVersion();
+				wait(timeoutError(tr->commit(), 30.0));
+				version = tr->getCommittedVersion();
 				break;
 			} catch (Error& e) {
-				wait(tr.onError(e));
+				TraceEvent("TestCommitError").errorUnsuppressed(e);
+				wait(tr->onError(e));
 			}
 		}
+
+		TraceEvent("TestCommitSuccess").detail("CommitVersion", tr->getCommittedVersion()).detail("DebugID", debugID);
 
 		wait(self->readAndVerify(self, cx, key, value));
 
 		return version;
+	}
+
+	// Move keys to a random selected team consisting of a single SS, after disabling DD, so that keys won't be
+	// kept in the new team until DD is enabled.
+	// Returns the address of the single SS of the new team.
+	ACTOR Future<std::vector<UID>> moveShard(PhysicalShardMoveWorkLoad* self,
+	                                         Database cx,
+	                                         KeyRange keys,
+	                                         int teamSize,
+	                                         std::unordered_set<UID>* excludes) {
+		// Disable DD to avoid DD undoing of our move.
+		int ignore = wait(setDDMode(cx, 0));
+		state std::vector<UID> dests;
+
+		// Pick a random SS as the dest, keys will reside on a single server after the move.
+		std::vector<StorageServerInterface> interfs = wait(getStorageServers(cx));
+		ASSERT(interfs.size() > teamSize);
+		while (dests.size() < teamSize) {
+			const auto& interf = interfs[deterministicRandom()->randomInt(0, interfs.size())];
+			if (excludes->count(interf.uniqueID) == 0) {
+				dests.push_back(interf.uniqueID);
+				excludes->insert(interf.uniqueID);
+			}
+		}
+
+		state UID owner = deterministicRandom()->randomUniqueID();
+		// state Key ownerKey = "\xff/moveKeysLock/Owner"_sr;
+		state DDEnabledState ddEnabledState;
+
+		state Transaction tr(cx);
+
+		loop {
+			try {
+				// BinaryWriter wrMyOwner(Unversioned());
+				// wrMyOwner << owner;
+				// tr.set(ownerKey, wrMyOwner.toValue());
+				TraceEvent("TestMoveShard").detail("Range", keys.toString());
+				// DEBUG_MUTATION("TestMoveShard", self->commitVersion, m, pProxyCommitData->dbgid).detail("To", tags);
+
+				state MoveKeysLock moveKeysLock = wait(takeMoveKeysLock(cx, owner));
+
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				state RangeResult dataMoves = wait(tr.getRange(dataMoveKeys, CLIENT_KNOBS->TOO_MANY));
+				Version readVersion = wait(tr.getReadVersion());
+				TraceEvent("TestMoveShardReadDataMoves")
+				    .detail("DataMoves", dataMoves.size())
+				    .detail("ReadVersion", readVersion);
+				// wait(tr.commit());
+				state int i = 0;
+				for (; i < dataMoves.size(); ++i) {
+					UID dataMoveId = decodeDataMoveKey(dataMoves[i].key);
+					state DataMoveMetaData dataMove = decodeDataMoveValue(dataMoves[i].value);
+					ASSERT(dataMoveId == dataMove.id);
+					TraceEvent("TestCancelDataMoveBegin").detail("DataMove", dataMove.toString());
+					wait(cleanUpDataMove(cx,
+					                     dataMoveId,
+					                     moveKeysLock,
+					                     &self->cleanUpDataMoveParallelismLock,
+					                     dataMove.range,
+					                     &ddEnabledState));
+					TraceEvent("TestCancelDataMoveEnd").detail("DataMove", dataMove.toString());
+				}
+
+				wait(moveKeys(cx,
+				              deterministicRandom()->randomUniqueID(),
+				              keys,
+				              dests,
+				              dests,
+				              moveKeysLock,
+				              Promise<Void>(),
+				              &self->startMoveKeysParallelismLock,
+				              &self->finishMoveKeysParallelismLock,
+				              false,
+				              deterministicRandom()->randomUniqueID(), // for logging only
+				              &ddEnabledState));
+				break;
+			} catch (Error& e) {
+				if (e.code() == error_code_movekeys_conflict) {
+					// Conflict on moveKeysLocks with the current running DD is expected, just retry.
+					tr.reset();
+				} else {
+					wait(tr.onError(e));
+				}
+			}
+		}
+
+		TraceEvent("TestMoveShardComplete").detail("Range", keys.toString()).detail("NewTeam", describe(dests));
+
+		return dests;
 	}
 
 	Future<bool> check(Database const& cx) override { return pass; }
@@ -232,4 +254,4 @@ struct SSCheckpointWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<SSCheckpointWorkload> SSCheckpointWorkloadFactory("SSCheckpointWorkload");
+WorkloadFactory<PhysicalShardMoveWorkLoad> PhysicalShardMoveWorkLoadFactory("PhysicalShardMoveWorkLoad");
