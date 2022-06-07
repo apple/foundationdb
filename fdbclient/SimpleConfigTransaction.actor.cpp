@@ -70,11 +70,12 @@ class SimpleConfigTransactionImpl {
 		state ConfigTransactionGetReply reply;
 		if (self->cti.hostname.present()) {
 			wait(store(reply,
-			           retryGetReplyFromHostname(ConfigTransactionGetRequest{ generation, configKey },
+			           retryGetReplyFromHostname(ConfigTransactionGetRequest{ 0, generation, configKey },
 			                                     self->cti.hostname.get(),
 			                                     WLTOKEN_CONFIGTXN_GET)));
 		} else {
-			wait(store(reply, retryBrokenPromise(self->cti.get, ConfigTransactionGetRequest{ generation, configKey })));
+			wait(store(reply,
+			           retryBrokenPromise(self->cti.get, ConfigTransactionGetRequest{ 0, generation, configKey })));
 		}
 		if (self->dID.present()) {
 			TraceEvent("SimpleConfigTransactionGotValue", self->dID.get())

@@ -224,6 +224,7 @@ class ConfigNode;
 
 class ServerCoordinators : public ClientCoordinators {
 public:
+	ServerCoordinators() {}
 	explicit ServerCoordinators(Reference<IClusterConnectionRecord> ccr);
 
 	std::vector<LeaderElectionRegInterface> leaderElectionServers;

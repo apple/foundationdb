@@ -521,6 +521,7 @@ ACTOR Future<Void> changeCoordinators(Reference<ClusterRecoveryData> self) {
 	loop {
 		ChangeCoordinatorsRequest req = waitNext(self->clusterController.changeCoordinators.getFuture());
 		TraceEvent("ChangeCoordinators", self->dbgid).log();
+
 		++self->changeCoordinatorsRequests;
 		state ChangeCoordinatorsRequest changeCoordinatorsRequest = req;
 		if (self->masterInterface.id() != changeCoordinatorsRequest.masterId) {
@@ -1637,6 +1638,11 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	tr.set(
 	    recoveryCommitRequest.arena, primaryLocalityKey, BinaryWriter::toValue(self->primaryLocality, Unversioned()));
 	tr.set(recoveryCommitRequest.arena, backupVersionKey, backupVersionValue);
+	Optional<Value> txnStateStoreCoords = self->txnStateStore->readValue(coordinatorsKey).get();
+	if (txnStateStoreCoords.present() &&
+	    txnStateStoreCoords.get() != self->coordinators.ccr->getConnectionString().toString()) {
+		tr.set(recoveryCommitRequest.arena, previousCoordinatorsKey, txnStateStoreCoords.get());
+	}
 	tr.set(recoveryCommitRequest.arena, coordinatorsKey, self->coordinators.ccr->getConnectionString().toString());
 	tr.set(recoveryCommitRequest.arena, logsKey, self->logSystem->getLogsValue());
 	tr.set(recoveryCommitRequest.arena,

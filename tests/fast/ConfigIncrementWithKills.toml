@@ -14,3 +14,9 @@ testTitle = 'ConfigIncrement'
   [[test.workload]]
   testName = 'Attrition'
   reboot = false
+
+  [[test.workload]]
+  testName = 'ChangeConfig'
+  maxDelayBeforeChange = 120.0
+  coordinators = 'auto'
+  coordinatorChanges = 2

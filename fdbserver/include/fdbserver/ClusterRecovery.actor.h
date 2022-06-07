@@ -93,6 +93,8 @@ public:
 		return previousWrite;
 	}
 
+	ServerCoordinators getCoordinators() { return coordinators; }
+
 	Future<Void> move(ClusterConnectionString const& nc) { return cstate.move(nc); }
 
 private:

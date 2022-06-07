@@ -37,7 +37,9 @@ public:
 	                     double pollingInterval,
 	                     Optional<double> compactionInterval);
 	~SimpleConfigConsumer();
+	Future<Void> readSnapshot(ConfigBroadcaster& broadcaster) override;
 	Future<Void> consume(ConfigBroadcaster& broadcaster) override;
+	void allowSpecialCaseRollforward() override;
 	UID getID() const override;
 
 public: // Testing

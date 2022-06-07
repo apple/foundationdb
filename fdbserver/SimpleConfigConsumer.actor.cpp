@@ -145,7 +145,8 @@ class SimpleConfigConsumerImpl {
 		                                     reply.changes,
 		                                     committedVersion,
 		                                     reply.annotations,
-		                                     { self->cfi });
+		                                     { self->cfi },
+		                                     committedVersion);
 		return Void();
 	}
 
@@ -186,8 +187,17 @@ SimpleConfigConsumer::SimpleConfigConsumer(ServerCoordinators const& coordinator
                                            Optional<double> compactionInterval)
   : impl(PImpl<SimpleConfigConsumerImpl>::create(coordinators, pollingInterval, compactionInterval)) {}
 
+Future<Void> SimpleConfigConsumer::readSnapshot(ConfigBroadcaster& broadcaster) {
+	ASSERT(false);
+	return Void();
+}
+
 Future<Void> SimpleConfigConsumer::consume(ConfigBroadcaster& broadcaster) {
 	return impl->consume(broadcaster);
+}
+
+void SimpleConfigConsumer::allowSpecialCaseRollforward() {
+	ASSERT(false);
 }
 
 SimpleConfigConsumer::~SimpleConfigConsumer() = default;
