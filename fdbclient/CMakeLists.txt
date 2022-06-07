@@ -18,15 +18,18 @@ set(FDBCLIENT_SRCS
   BackupContainerLocalDirectory.h
   BackupContainerS3BlobStore.actor.cpp
   BackupContainerS3BlobStore.h
-  ClientBooleanParams.cpp
-  ClientBooleanParams.h
+  BlobConnectionProvider.h
+  BlobConnectionProvider.cpp
   BlobWorkerInterface.h
   BlobGranuleReader.actor.cpp
   BlobGranuleReader.actor.h
   BlobGranuleCommon.h
   BlobGranuleFiles.cpp
   BlobGranuleFiles.h
+  BlobMetadataUtils.h
   BlobWorkerCommon.h
+  ClientBooleanParams.cpp
+  ClientBooleanParams.h
   ClientKnobCollection.cpp
   ClientKnobCollection.h
   ClientKnobs.cpp
@@ -149,10 +152,13 @@ set(FDBCLIENT_SRCS
   VersionedMap.actor.h
   VersionedMap.h
   VersionedMap.cpp
+  Versionstamp.cpp
+  Versionstamp.h
   VersionVector.h
   VersionVector.cpp
   WellKnownEndpoints.h
   WriteMap.h
+  WriteMap.cpp
   json_spirit/json_spirit_error_position.h
   json_spirit/json_spirit_reader_template.h
   json_spirit/json_spirit_value.h

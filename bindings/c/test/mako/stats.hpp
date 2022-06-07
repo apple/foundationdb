@@ -24,76 +24,66 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <fstream>
+#include <istream>
+#include <limits>
 #include <list>
 #include <new>
+#include <ostream>
 #include <utility>
+#include "mako/mako.hpp"
 #include "operations.hpp"
 #include "time.hpp"
+#include "ddsketch.hpp"
+#include "contrib/rapidjson/rapidjson/document.h"
+#include "contrib/rapidjson/rapidjson/rapidjson.h"
+#include "contrib/rapidjson/rapidjson/stringbuffer.h"
+#include "contrib/rapidjson/rapidjson/writer.h"
+#include <iostream>
+#include <sstream>
+#include <vector>
 
 namespace mako {
 
-/* rough cap on the number of samples to avoid OOM hindering benchmark */
-constexpr const size_t SAMPLE_CAP = 2000000;
-
-/* size of each block to get detailed latency for each operation */
-constexpr const size_t LAT_BLOCK_SIZE = 4093;
-
-/* hard cap on the number of sample blocks = 488 */
-constexpr const size_t MAX_LAT_BLOCKS = SAMPLE_CAP / LAT_BLOCK_SIZE;
-
-/* memory block allocated to each operation when collecting detailed latency */
-class LatencySampleBlock {
-	uint64_t samples[LAT_BLOCK_SIZE]{
-		0,
-	};
-	uint64_t index{ 0 };
-
+class DDSketchMako : public DDSketch<uint64_t> {
 public:
-	LatencySampleBlock() noexcept = default;
-	bool full() const noexcept { return index >= LAT_BLOCK_SIZE; }
-	void put(timediff_t td) {
-		assert(!full());
-		samples[index++] = toIntegerMicroseconds(td);
-	}
-	// return {data block, number of samples}
-	std::pair<uint64_t const*, size_t> data() const noexcept { return { samples, index }; }
-};
+	void serialize(rapidjson::Writer<rapidjson::StringBuffer>& writer) const {
+		writer.StartObject();
+		writer.String("errorGuarantee");
+		writer.Double(errorGuarantee);
+		writer.String("minValue");
+		writer.Uint64(minValue);
+		writer.String("maxValue");
+		writer.Uint64(maxValue);
+		writer.String("populationSize");
+		writer.Uint64(populationSize);
+		writer.String("zeroPopulationSize");
+		writer.Uint64(zeroPopulationSize);
+		writer.String("sum");
+		writer.Uint64(sum);
 
-/* collect sampled latencies until OOM is hit */
-class LatencySampleBin {
-	std::list<LatencySampleBlock> blocks;
-	bool noMoreAlloc{ false };
-
-	bool tryAlloc() {
-		try {
-			blocks.emplace_back();
-		} catch (const std::bad_alloc&) {
-			noMoreAlloc = true;
-			return false;
+		writer.String("buckets");
+		writer.StartArray();
+		for (auto b : buckets) {
+			writer.Uint64(b);
 		}
-		return true;
-	}
+		writer.EndArray();
 
-public:
-	void reserveOneBlock() {
-		if (blocks.empty())
-			tryAlloc();
+		writer.EndObject();
 	}
+	void deserialize(const rapidjson::Value& obj) {
+		errorGuarantee = obj["errorGuarantee"].GetDouble();
+		minValue = obj["minValue"].GetUint64();
+		maxValue = obj["maxValue"].GetUint64();
+		populationSize = obj["populationSize"].GetUint64();
+		zeroPopulationSize = obj["zeroPopulationSize"].GetUint64();
+		sum = obj["sum"].GetUint64();
 
-	void put(timediff_t td) {
-		if (blocks.empty() || blocks.back().full()) {
-			if (blocks.size() >= MAX_LAT_BLOCKS || noMoreAlloc || !tryAlloc())
-				return;
-		}
-		blocks.back().put(td);
-	}
-
-	// iterate & apply for each block user function void(uint64_t const*, size_t)
-	template <typename Func>
-	void forEachBlock(Func&& fn) const {
-		for (const auto& block : blocks) {
-			auto [ptr, cnt] = block.data();
-			fn(ptr, cnt);
+		auto jsonBuckets = obj["buckets"].GetArray();
+		uint64_t idx = 0;
+		for (auto it = jsonBuckets.Begin(); it != jsonBuckets.End(); it++) {
+			buckets[idx] = it->GetUint64();
+			idx++;
 		}
 	}
 };
@@ -101,21 +91,20 @@ public:
 class alignas(64) ThreadStatistics {
 	uint64_t conflicts;
 	uint64_t total_errors;
-	uint64_t ops[MAX_OP];
-	uint64_t errors[MAX_OP];
-	uint64_t latency_samples[MAX_OP];
-	uint64_t latency_us_total[MAX_OP];
-	uint64_t latency_us_min[MAX_OP];
-	uint64_t latency_us_max[MAX_OP];
+	std::array<uint64_t, MAX_OP> ops;
+	std::array<uint64_t, MAX_OP> errors;
+	std::array<uint64_t, MAX_OP> latency_samples;
+	std::array<uint64_t, MAX_OP> latency_us_total;
+	std::vector<DDSketchMako> sketches;
 
 public:
 	ThreadStatistics() noexcept {
 		memset(this, 0, sizeof(ThreadStatistics));
-		memset(latency_us_min, 0xff, sizeof(latency_us_min));
+		sketches.resize(MAX_OP);
 	}
 
-	ThreadStatistics(const ThreadStatistics& other) noexcept = default;
-	ThreadStatistics& operator=(const ThreadStatistics& other) noexcept = default;
+	ThreadStatistics(const ThreadStatistics& other) = default;
+	ThreadStatistics& operator=(const ThreadStatistics& other) = default;
 
 	uint64_t getConflictCount() const noexcept { return conflicts; }
 
@@ -129,23 +118,24 @@ public:
 
 	uint64_t getLatencyUsTotal(int op) const noexcept { return latency_us_total[op]; }
 
-	uint64_t getLatencyUsMin(int op) const noexcept { return latency_us_min[op]; }
+	uint64_t getLatencyUsMin(int op) const noexcept { return sketches[op].min(); }
 
-	uint64_t getLatencyUsMax(int op) const noexcept { return latency_us_max[op]; }
+	uint64_t getLatencyUsMax(int op) const noexcept { return sketches[op].max(); }
+
+	uint64_t percentile(int op, double quantile) { return sketches[op].percentile(quantile); }
+
+	uint64_t mean(int op) const noexcept { return sketches[op].mean(); }
 
 	// with 'this' as final aggregation, factor in 'other'
 	void combine(const ThreadStatistics& other) {
 		conflicts += other.conflicts;
 		for (auto op = 0; op < MAX_OP; op++) {
+			sketches[op].mergeWith(other.sketches[op]);
 			ops[op] += other.ops[op];
 			errors[op] += other.errors[op];
 			total_errors += other.errors[op];
 			latency_samples[op] += other.latency_samples[op];
 			latency_us_total[op] += other.latency_us_total[op];
-			if (latency_us_min[op] > other.latency_us_min[op])
-				latency_us_min[op] = other.latency_us_min[op];
-			if (latency_us_max[op] < other.latency_us_max[op])
-				latency_us_max[op] = other.latency_us_max[op];
 		}
 	}
 
@@ -162,15 +152,106 @@ public:
 	void addLatency(int op, timediff_t diff) noexcept {
 		const auto latency_us = toIntegerMicroseconds(diff);
 		latency_samples[op]++;
+		sketches[op].addSample(latency_us);
 		latency_us_total[op] += latency_us;
-		if (latency_us_min[op] > latency_us)
-			latency_us_min[op] = latency_us;
-		if (latency_us_max[op] < latency_us)
-			latency_us_max[op] = latency_us;
 	}
+
+	void writeToFile(const std::string& filename, int op) const {
+		rapidjson::StringBuffer ss;
+		rapidjson::Writer<rapidjson::StringBuffer> writer(ss);
+		sketches[op].serialize(writer);
+		std::ofstream f(filename);
+		f << ss.GetString();
+	}
+
+	void updateLatencies(const std::vector<DDSketchMako> other_sketches) { sketches = other_sketches; }
+
+	friend std::ofstream& operator<<(std::ofstream& os, ThreadStatistics& stats);
+	friend std::ifstream& operator>>(std::ifstream& is, ThreadStatistics& stats);
 };
 
-using LatencySampleBinArray = std::array<LatencySampleBin, MAX_OP>;
+inline std::ofstream& operator<<(std::ofstream& os, ThreadStatistics& stats) {
+	rapidjson::StringBuffer ss;
+	rapidjson::Writer<rapidjson::StringBuffer> writer(ss);
+	writer.StartObject();
+	writer.String("conflicts");
+	writer.Uint64(stats.conflicts);
+	writer.String("total_errors");
+	writer.Uint64(stats.total_errors);
+
+	writer.String("ops");
+	writer.StartArray();
+	for (auto op = 0; op < MAX_OP; op++) {
+		writer.Uint64(stats.ops[op]);
+	}
+	writer.EndArray();
+
+	writer.String("errors");
+	writer.StartArray();
+	for (auto op = 0; op < MAX_OP; op++) {
+		writer.Uint64(stats.errors[op]);
+	}
+	writer.EndArray();
+
+	writer.String("latency_samples");
+	writer.StartArray();
+	for (auto op = 0; op < MAX_OP; op++) {
+		writer.Uint64(stats.latency_samples[op]);
+	}
+	writer.EndArray();
+
+	writer.String("latency_us_total");
+	writer.StartArray();
+	for (auto op = 0; op < MAX_OP; op++) {
+		writer.Uint64(stats.latency_us_total[op]);
+	}
+	writer.EndArray();
+
+	for (auto op = 0; op < MAX_OP; op++) {
+		if (stats.sketches[op].getPopulationSize() > 0) {
+			std::string op_name = getOpName(op);
+			writer.String(op_name.c_str());
+			stats.sketches[op].serialize(writer);
+		}
+	}
+	writer.EndObject();
+	os << ss.GetString();
+	return os;
+}
+
+inline void populateArray(std::array<uint64_t, MAX_OP>& arr,
+                          rapidjson::GenericArray<false, rapidjson::GenericValue<rapidjson::UTF8<>>>& json) {
+	uint64_t idx = 0;
+	for (auto it = json.Begin(); it != json.End(); it++) {
+		arr[idx] = it->GetUint64();
+		idx++;
+	}
+}
+
+inline std::ifstream& operator>>(std::ifstream& is, ThreadStatistics& stats) {
+	std::stringstream buffer;
+	buffer << is.rdbuf();
+	rapidjson::Document doc;
+	doc.Parse(buffer.str().c_str());
+	stats.conflicts = doc["conflicts"].GetUint64();
+	stats.total_errors = doc["total_errors"].GetUint64();
+
+	auto jsonOps = doc["ops"].GetArray();
+	auto jsonErrors = doc["errors"].GetArray();
+	auto jsonLatencySamples = doc["latency_samples"].GetArray();
+	auto jsonLatencyUsTotal = doc["latency_us_total"].GetArray();
+
+	populateArray(stats.ops, jsonOps);
+	populateArray(stats.errors, jsonErrors);
+	populateArray(stats.latency_samples, jsonLatencySamples);
+	populateArray(stats.latency_us_total, jsonLatencyUsTotal);
+	for (int op = 0; op < MAX_OP; op++) {
+		const std::string op_name = getOpName(op);
+		stats.sketches[op].deserialize(doc[op_name.c_str()]);
+	}
+
+	return is;
+}
 
 } // namespace mako
 

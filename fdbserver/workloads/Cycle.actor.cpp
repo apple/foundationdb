@@ -49,7 +49,7 @@ struct CycleWorkload : TestWorkload {
 		actorCount = getOption(options, "actorsPerClient"_sr, transactionsPerSecond / 5);
 		nodeCount = getOption(options, "nodeCount"_sr, transactionsPerSecond * clientCount);
 		keyPrefix = unprintable(getOption(options, "keyPrefix"_sr, LiteralStringRef("")).toString());
-		traceParentProbability = getOption(options, "traceParentProbability "_sr, 0.01);
+		traceParentProbability = getOption(options, "traceParentProbability"_sr, 0.01);
 		minExpectedTransactionsPerSecond = transactionsPerSecond * getOption(options, "expectedRate"_sr, 0.7);
 	}
 
@@ -104,7 +104,7 @@ struct CycleWorkload : TestWorkload {
 				state double tstart = now();
 				state int r = deterministicRandom()->randomInt(0, self->nodeCount);
 				state Transaction tr(cx);
-				if (deterministicRandom()->random01() >= self->traceParentProbability) {
+				if (deterministicRandom()->random01() <= self->traceParentProbability) {
 					state Span span("CycleClient"_loc);
 					TraceEvent("CycleTracingTransaction", span.context.traceID).log();
 					tr.setOption(FDBTransactionOptions::SPAN_PARENT,

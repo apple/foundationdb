@@ -86,7 +86,17 @@ def run_tester(args, test_file):
     if args.blob_granule_local_file_path is not None:
         cmd += ["--blob-granule-local-file-path", args.blob_granule_local_file_path]
 
-    get_logger().info("\nRunning tester '%s'..." % " ".join(cmd))
+    if args.tls_ca_file is not None:
+        cmd += ["--tls-ca-file", args.tls_ca_file]
+
+    if args.tls_key_file is not None:
+        cmd += ["--tls-key-file", args.tls_key_file]
+
+    if args.tls_cert_file is not None:
+        cmd += ["--tls-cert-file", args.tls_cert_file]
+
+    get_logger().info('\nRunning tester \'%s\'...' % ' '.join(cmd))
+    
     proc = Popen(cmd, stdout=sys.stdout, stderr=sys.stderr)
     timed_out = False
     ret_code = 1
@@ -135,63 +145,32 @@ def run_tests(args):
 
 
 def parse_args(argv):
-    parser = argparse.ArgumentParser(description="FoundationDB C API Tester")
+    parser = argparse.ArgumentParser(description='FoundationDB C API Tester')
 
-    parser.add_argument(
-        "--cluster-file",
-        type=str,
-        default="fdb.cluster",
-        help="The cluster file for the cluster being connected to. (default: fdb.cluster)",
-    )
-    parser.add_argument(
-        "--tester-binary",
-        type=str,
-        default="fdb_c_api_tester",
-        help="Path to the fdb_c_api_tester executable. (default: fdb_c_api_tester)",
-    )
-    parser.add_argument(
-        "--external-client-library",
-        type=str,
-        default=None,
-        help="Path to the external client library. (default: None)",
-    )
-    parser.add_argument(
-        "--test-dir",
-        type=str,
-        default="./",
-        help="Path to a directory with test definitions. (default: ./)",
-    )
-    parser.add_argument(
-        "--timeout",
-        type=int,
-        default=300,
-        help="The timeout in seconds for running each individual test. (default 300)",
-    )
-    parser.add_argument(
-        "--log-dir",
-        type=str,
-        default=None,
-        help="The directory for storing logs (default: None)",
-    )
-    parser.add_argument(
-        "--logging-level",
-        type=str,
-        default="INFO",
-        choices=["ERROR", "WARNING", "INFO", "DEBUG"],
-        help="Specifies the level of detail in the tester output (default='INFO').",
-    )
-    parser.add_argument(
-        "--tmp-dir",
-        type=str,
-        default=None,
-        help="The directory for storing temporary files (default: None)",
-    )
-    parser.add_argument(
-        "--blob-granule-local-file-path",
-        type=str,
-        default=None,
-        help="Enable blob granule tests if set, value is path to local blob granule files",
-    )
+    parser.add_argument('--cluster-file', type=str, default="fdb.cluster",
+                        help='The cluster file for the cluster being connected to. (default: fdb.cluster)')
+    parser.add_argument('--tester-binary', type=str, default="fdb_c_api_tester",
+                        help='Path to the fdb_c_api_tester executable. (default: fdb_c_api_tester)')
+    parser.add_argument('--external-client-library', type=str, default=None,
+                        help='Path to the external client library. (default: None)')
+    parser.add_argument('--test-dir', type=str, default="./",
+                        help='Path to a directory with test definitions. (default: ./)')
+    parser.add_argument('--timeout', type=int, default=300,
+                        help='The timeout in seconds for running each individual test. (default 300)')
+    parser.add_argument('--log-dir', type=str, default=None,
+                        help='The directory for storing logs (default: None)')
+    parser.add_argument('--logging-level', type=str, default='INFO',
+                        choices=['ERROR', 'WARNING', 'INFO', 'DEBUG'], help='Specifies the level of detail in the tester output (default=\'INFO\').')
+    parser.add_argument('--tmp-dir', type=str, default=None,
+                        help='The directory for storing temporary files (default: None)')
+    parser.add_argument('--blob-granule-local-file-path', type=str, default=None,
+                        help='Enable blob granule tests if set, value is path to local blob granule files')
+    parser.add_argument('--tls-ca-file', type=str, default=None,
+                        help='Path to client\'s TLS CA file: i.e. certificate of CA that signed the server certificate')
+    parser.add_argument('--tls-cert-file', type=str, default=None,
+                        help='Path to client\'s TLS certificate file')
+    parser.add_argument('--tls-key-file', type=str, default=None,
+                        help='Path to client\'s TLS private key file')
 
     return parser.parse_args(argv)
 

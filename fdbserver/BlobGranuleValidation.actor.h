@@ -37,10 +37,11 @@
 
 ACTOR Future<std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>>> readFromBlob(
     Database cx,
-    Reference<BackupContainerFileSystem> bstore,
+    Reference<BlobConnectionProvider> bstore,
     KeyRange range,
     Version beginVersion,
-    Version readVersion);
+    Version readVersion,
+    Optional<TenantName> tenantName = Optional<TenantName>());
 
 ACTOR Future<std::pair<RangeResult, Version>> readFromFDB(Database cx, KeyRange range);
 

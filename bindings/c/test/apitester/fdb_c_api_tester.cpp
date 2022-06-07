@@ -54,7 +54,10 @@ enum TesterOptionId {
 	OPT_FDB_API_VERSION,
 	OPT_TRANSACTION_RETRY_LIMIT,
 	OPT_BLOB_GRANULE_LOCAL_FILE_PATH,
-	OPT_STATS_INTERVAL
+	OPT_STATS_INTERVAL,
+	OPT_TLS_CERT_FILE,
+	OPT_TLS_KEY_FILE,
+	OPT_TLS_CA_FILE,
 };
 
 CSimpleOpt::SOption TesterOptionDefs[] = //
@@ -79,6 +82,9 @@ CSimpleOpt::SOption TesterOptionDefs[] = //
 	  { OPT_TRANSACTION_RETRY_LIMIT, "--transaction-retry-limit", SO_REQ_SEP },
 	  { OPT_BLOB_GRANULE_LOCAL_FILE_PATH, "--blob-granule-local-file-path", SO_REQ_SEP },
 	  { OPT_STATS_INTERVAL, "--stats-interval", SO_REQ_SEP },
+	  { OPT_TLS_CERT_FILE, "--tls-cert-file", SO_REQ_SEP },
+	  { OPT_TLS_KEY_FILE, "--tls-key-file", SO_REQ_SEP },
+	  { OPT_TLS_CA_FILE, "--tls-ca-file", SO_REQ_SEP },
 	  SO_END_OF_OPTIONS };
 
 void printProgramUsage(const char* execName) {
@@ -122,6 +128,12 @@ void printProgramUsage(const char* execName) {
 	       "                 Test file to run.\n"
 	       "  --stats-interval MILLISECONDS\n"
 	       "                 Time interval in milliseconds for printing workload statistics (default: 0 - disabled).\n"
+	       "  --tls-cert-file FILE\n"
+	       "                 Path to file containing client's TLS certificate chain\n"
+	       "  --tls-key-file FILE\n"
+	       "                 Path to file containing client's TLS private key\n"
+	       "  --tls-ca-file FILE\n"
+	       "                 Path to file containing TLS CA certificate\n"
 	       "  -h, --help     Display this help and exit.\n",
 	       FDB_API_VERSION);
 }
@@ -221,6 +233,15 @@ bool processArg(TesterOptions& options, const CSimpleOpt& args) {
 	case OPT_STATS_INTERVAL:
 		processIntOption(args.OptionText(), args.OptionArg(), 0, 60000, options.statsIntervalMs);
 		break;
+	case OPT_TLS_CERT_FILE:
+		options.tlsCertFile.assign(args.OptionArg());
+		break;
+	case OPT_TLS_KEY_FILE:
+		options.tlsKeyFile.assign(args.OptionArg());
+		break;
+	case OPT_TLS_CA_FILE:
+		options.tlsCaFile.assign(args.OptionArg());
+		break;
 	}
 	return true;
 }
@@ -298,6 +319,18 @@ void applyNetworkOptions(TesterOptions& options) {
 	for (auto knob : options.knobs) {
 		fdb_check(FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_KNOB,
 		                            fmt::format("{}={}", knob.first.c_str(), knob.second.c_str())));
+	}
+
+	if (!options.tlsCertFile.empty()) {
+		fdb_check(FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_TLS_CERT_PATH, options.tlsCertFile));
+	}
+
+	if (!options.tlsKeyFile.empty()) {
+		fdb_check(FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_TLS_KEY_PATH, options.tlsKeyFile));
+	}
+
+	if (!options.tlsCaFile.empty()) {
+		fdb_check(FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_TLS_CA_PATH, options.tlsCaFile));
 	}
 }
 

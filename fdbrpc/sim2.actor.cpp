@@ -992,9 +992,11 @@ public:
 		if (mock.present()) {
 			return mock.get();
 		}
-		Optional<std::vector<NetworkAddress>> cache = dnsCache.find(host, service);
-		if (cache.present()) {
-			return cache.get();
+		if (FLOW_KNOBS->ENABLE_COORDINATOR_DNS_CACHE) {
+			Optional<std::vector<NetworkAddress>> cache = dnsCache.find(host, service);
+			if (cache.present()) {
+				return cache.get();
+			}
 		}
 		return SimExternalConnection::resolveTCPEndpoint(host, service, &dnsCache);
 	}
@@ -1014,9 +1016,11 @@ public:
 		if (mock.present()) {
 			return mock.get();
 		}
-		Optional<std::vector<NetworkAddress>> cache = dnsCache.find(host, service);
-		if (cache.present()) {
-			return cache.get();
+		if (FLOW_KNOBS->ENABLE_COORDINATOR_DNS_CACHE) {
+			Optional<std::vector<NetworkAddress>> cache = dnsCache.find(host, service);
+			if (cache.present()) {
+				return cache.get();
+			}
 		}
 		return SimExternalConnection::resolveTCPEndpointBlocking(host, service, &dnsCache);
 	}
@@ -1671,6 +1675,25 @@ public:
 		}
 		bool result = false;
 		for (auto& machineId : zoneMachines) {
+			if (killMachine(machineId, kt, forceKill, ktFinal)) {
+				result = true;
+			}
+		}
+		return result;
+	}
+	bool killDataHall(Optional<Standalone<StringRef>> dataHallId,
+	                  KillType kt,
+	                  bool forceKill,
+	                  KillType* ktFinal) override {
+		auto processes = getAllProcesses();
+		std::set<Optional<Standalone<StringRef>>> dataHallMachines;
+		for (auto& process : processes) {
+			if (process->locality.dataHallId() == dataHallId) {
+				dataHallMachines.insert(process->locality.machineId());
+			}
+		}
+		bool result = false;
+		for (auto& machineId : dataHallMachines) {
 			if (killMachine(machineId, kt, forceKill, ktFinal)) {
 				result = true;
 			}

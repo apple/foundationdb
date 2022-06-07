@@ -27,95 +27,53 @@ import sys
 import traceback
 
 
-LOG_FORMAT = "%(created)f [%(levelname)s] %(message)s"
+LOG_FORMAT = '%(created)f [%(levelname)s] %(message)s'
 
-EXCLUDED_FILES = list(
-    map(
-        re.compile,
-        [
-            # Output directories
-            r"\.git/.*",
-            r"bin/.*",
-            r"packages/.*",
-            r"\.objs/.*",
-            r"\.deps/.*",
-            r"bindings/go/build/.*",
-            r"documentation/sphinx/\.out/.*",
-            # Generated files
-            r".*\.g\.cpp$",
-            r".*\.g\.h$",
-            r"(^|.*/)generated.mk$",
-            r".*\.g\.S$",
-            r".*/MutationType\.java",
-            r".*/generated\.go",
-            # Binary files
-            r".*\.class$",
-            r".*\.o$",
-            r".*\.a$",
-            r".*[\.-]debug",
-            r".*\.so$",
-            r".*\.dylib$",
-            r".*\.dll$",
-            r".*\.tar[^/]*$",
-            r".*\.jar$",
-            r".*pyc$",
-            r"bindings/flow/bin/.*",
-            r".*\.pdf$",
-            r".*\.jp[e]*g",
-            r".*\.png",
-            r".*\.ico",
-            r"packaging/msi/art/.*",
-            # Project configuration files
-            r".*foundationdb\.VC\.db$",
-            r".*foundationdb\.VC\.VC\.opendb$",
-            r".*iml$",
-            # Source files from someone else
-            r"(^|.*/)Hash3\..*",
-            r"(^|.*/)sqlite.*",
-            r"bindings/go/godoc-resources/.*",
-            r"bindings/go/src/fdb/tuple/testdata/tuples.golden",
-            r"fdbcli/linenoise/.*",
-            r"fdbrpc/rapidjson/.*",
-            r"fdbrpc/rapidxml/.*",
-            r"fdbrpc/zlib/.*",
-            r"fdbrpc/sha1/.*",
-            r"fdbrpc/xml2json.hpp$",
-            r"fdbrpc/libcoroutine/.*",
-            r"fdbrpc/libeio/.*",
-            r"fdbrpc/lib64/.*",
-            r"fdbrpc/generated-constants.cpp$",
-            # Miscellaneous
-            r"bindings/nodejs/node_modules/.*",
-            r"bindings/go/godoc/.*",
-            r".*trace.*xml$",
-            r".*log$",
-            r".*\.DS_Store$",
-            r"simfdb/\.*",
-            r".*~$",
-            r".*.swp$",
-        ],
-    )
-)
+EXCLUDED_FILES = list(map(re.compile, [
+    # Output directories
+    r'\.git/.*', r'bin/.*', r'packages/.*', r'\.objs/.*', r'\.deps/.*', r'bindings/go/build/.*', r'documentation/sphinx/\.out/.*',
 
-SUSPECT_PHRASES = map(
-    re.compile,
-    [
-        r"#define\s+FDB_API_VERSION\s+(\d+)",
-        r"\.\s*selectApiVersion\s*\(\s*(\d+)\s*\)",
-        r"\.\s*APIVersion\s*\(\s*(\d+)\s*\)",
-        r"\.\s*MustAPIVersion\s*\(\s*(\d+)\s*\)",
-        r"header_version\s+=\s+(\d+)",
-        r"\.\s*apiVersion\s*\(\s*(\d+)\s*\)",
-        r"API_VERSION\s*=\s*(\d+)",
-        r"fdb_select_api_version\s*\((\d+)\)",
-    ],
-)
+    # Generated files
+    r'.*\.g\.cpp$', r'.*\.g\.h$', r'(^|.*/)generated.mk$', r'.*\.g\.S$',
+    r'.*/MutationType\.java', r'.*/generated\.go',
 
-DIM_CODE = "\033[2m"
-BOLD_CODE = "\033[1m"
-RED_COLOR = "\033[91m"
-GREEN_COLOR = "\033[92m"
-END_COLOR = "\033[0m"
+    # Binary files
+    r'.*\.class$', r'.*\.o$', r'.*\.a$', r'.*[\.-]debug', r'.*\.so$', r'.*\.dylib$', r'.*\.dll$', r'.*\.tar[^/]*$', r'.*\.jar$', r'.*pyc$', r'bindings/flow/bin/.*',
+    r'.*\.pdf$', r'.*\.jp[e]*g', r'.*\.png', r'.*\.ico',
+    r'packaging/msi/art/.*',
+
+    # Project configuration files
+    r'.*foundationdb\.VC\.db$', r'.*foundationdb\.VC\.VC\.opendb$', r'.*iml$',
+
+    # Source files from someone else
+    r'(^|.*/)Hash3\..*', r'(^|.*/)sqlite.*',
+    r'bindings/go/godoc-resources/.*',
+    r'bindings/go/src/fdb/tuple/testdata/tuples.golden',
+    r'fdbcli/linenoise/.*',
+    r'contrib/rapidjson/.*', r'fdbrpc/rapidxml/.*', r'fdbrpc/zlib/.*', r'fdbrpc/sha1/.*',
+    r'fdbrpc/xml2json.hpp$', r'fdbrpc/libcoroutine/.*', r'fdbrpc/libeio/.*', r'fdbrpc/lib64/.*',
+    r'fdbrpc/generated-constants.cpp$',
+
+    # Miscellaneous
+    r'bindings/nodejs/node_modules/.*', r'bindings/go/godoc/.*', r'.*trace.*xml$', r'.*log$', r'.*\.DS_Store$', r'simfdb/\.*', r'.*~$', r'.*.swp$'
+]))
+
+SUSPECT_PHRASES = map(re.compile, [
+    r'#define\s+FDB_API_VERSION\s+(\d+)',
+    r'\.\s*selectApiVersion\s*\(\s*(\d+)\s*\)',
+    r'\.\s*APIVersion\s*\(\s*(\d+)\s*\)',
+    r'\.\s*MustAPIVersion\s*\(\s*(\d+)\s*\)',
+    r'header_version\s+=\s+(\d+)',
+    r'\.\s*apiVersion\s*\(\s*(\d+)\s*\)',
+    r'API_VERSION\s*=\s*(\d+)',
+    r'fdb_select_api_version\s*\((\d+)\)'
+])
+
+DIM_CODE = '\033[2m'
+BOLD_CODE = '\033[1m'
+RED_COLOR = '\033[91m'
+GREEN_COLOR = '\033[92m'
+END_COLOR = '\033[0m'
 
 
 def positive_response(val):

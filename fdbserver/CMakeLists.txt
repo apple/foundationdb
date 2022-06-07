@@ -54,6 +54,7 @@ set(FDBSERVER_SRCS
   KeyValueStoreCompressTestData.actor.cpp
   KeyValueStoreMemory.actor.cpp
   KeyValueStoreRocksDB.actor.cpp
+  KeyValueStoreShardedRocksDB.actor.cpp
   KeyValueStoreSQLite.actor.cpp
   KmsConnector.h
   KmsConnectorInterface.h
@@ -376,7 +377,7 @@ else()
   target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite)
 endif()
 
-target_link_libraries(fdbserver PRIVATE toml11_target jemalloc)
+target_link_libraries(fdbserver PRIVATE toml11_target jemalloc rapidjson)
 # target_compile_definitions(fdbserver PRIVATE -DENABLE_SAMPLING)
 
 if (GPERFTOOLS_FOUND)
