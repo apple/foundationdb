@@ -64,4 +64,6 @@ Future<decltype(std::declval<Fun>()())> runInRole(Fun fun, ProcessClass::Cluster
 	return res;
 }
 
+#include "flow/unactorcompiler.h"
+
 #endif

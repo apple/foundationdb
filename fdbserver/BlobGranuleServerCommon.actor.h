@@ -123,4 +123,6 @@ private:
 	Future<Void> collection;
 };
 
+#include "flow/unactorcompiler.h"
+
 #endif
