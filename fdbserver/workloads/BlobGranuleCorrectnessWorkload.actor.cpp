@@ -265,6 +265,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 			state Reference<GranuleTenantData> data =
 			    tenantData.getDataForGranule(self->directories[directoryIdx]->directoryRange);
 			wait(data->bstoreLoaded.getFuture());
+			wait(delay(0));
 			self->directories[directoryIdx]->bstore = data->bstore;
 		}
 
