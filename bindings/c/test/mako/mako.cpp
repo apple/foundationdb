@@ -655,8 +655,8 @@ void workerThread(ThreadArgs& thread_args) {
 			logr.error("populate failed");
 		}
 	} else if (args.mode == MODE_RUN) {
-		auto rc = runWorkload(
-		    database, args, thread_tps, throttle_factor, thread_iters, signal, stats, dotrace, dotagging);
+		auto rc =
+		    runWorkload(database, args, thread_tps, throttle_factor, thread_iters, signal, stats, dotrace, dotagging);
 		if (rc < 0) {
 			logr.error("runWorkload failed");
 		}
