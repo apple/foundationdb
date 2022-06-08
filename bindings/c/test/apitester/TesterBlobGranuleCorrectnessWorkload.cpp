@@ -114,7 +114,7 @@ private:
 
 			    fdb::Result res = ctx->tx().readBlobGranules(
 			        begin, end, 0 /* beginVersion */, -2 /* latest read version */, granuleContext);
-			    auto out = fdb::Result::NativeKeyValueArray{};
+			    auto out = fdb::Result::KeyValueRefArray{};
 			    fdb::Error err = res.getKeyValueArrayNothrow(out);
 			    if (err.code() == error_code_blob_granule_transaction_too_old) {
 				    info("BlobGranuleCorrectness::randomReadOp bg too old\n");
@@ -182,7 +182,7 @@ private:
 			    ctx->continueAfter(
 			        f,
 			        [ctx, f, results]() {
-				        *results = f.get<fdb::future_var::KeyRangeArray>();
+				        *results = copyKeyRangeArray(f.get<fdb::future_var::KeyRangeRefArray>());
 				        ctx->done();
 			        },
 			        true);

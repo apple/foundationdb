@@ -65,7 +65,7 @@ private:
 				    fdb::Future f = futures[i];
 				    auto expectedVal = store.get((*keys)[i]);
 				    ctx->continueAfter(f, [expectedVal, f, this, ctx]() {
-					    auto val = f.get<fdb::future_var::OptionalValue>();
+					    auto val = f.get<fdb::future_var::ValueRef>();
 					    if (expectedVal != val) {
 						    error(fmt::format("cancelAfterFirstResTx mismatch. expected: {:.80} actual: {:.80}",
 						                      fdb::toCharsRef(expectedVal.value()),

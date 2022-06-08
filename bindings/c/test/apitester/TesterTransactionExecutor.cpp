@@ -490,7 +490,7 @@ protected:
 	};
 
 	// Map for keeping track of future waits and holding necessary object references
-	std::unordered_map<fdb::Future, CallbackInfo, fdb::FutureHash, fdb::FutureEquals> callbackMap;
+	std::unordered_map<fdb::Future, CallbackInfo> callbackMap;
 
 	// Holding reference to this for onError future C callback
 	std::shared_ptr<AsyncTransactionContext> onErrorThisRef;

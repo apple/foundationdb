@@ -31,6 +31,11 @@
 
 #include "test/fdb_api.hpp"
 
+#undef ERROR
+#define ERROR(name, number, description) enum { error_code_##name = number };
+
+#include "flow/error_definitions.h"
+
 namespace fmt {
 
 // fmt::format formatting for std::optional<T>
@@ -106,6 +111,14 @@ static inline TimeDuration timeElapsedInUs(const TimePoint& start) {
 static inline double microsecToSec(TimeDuration timeUs) {
 	return timeUs / 1000000.0;
 }
+
+std::optional<fdb::Value> copyValueRef(fdb::future_var::ValueRef::Type value);
+
+using KeyValueArray = std::pair<std::vector<fdb::KeyValue>, bool>;
+KeyValueArray copyKeyValueArray(fdb::future_var::KeyValueRefArray::Type array);
+
+using KeyRangeArray = std::vector<fdb::KeyRange>;
+KeyRangeArray copyKeyRangeArray(fdb::future_var::KeyRangeRefArray::Type array);
 
 } // namespace FdbApiTester
 

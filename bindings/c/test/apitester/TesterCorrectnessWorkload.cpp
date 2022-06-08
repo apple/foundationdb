@@ -63,7 +63,7 @@ private:
 				        ctx->continueAfterAll(*futures, [ctx, futures, results]() {
 					        results->clear();
 					        for (auto& f : *futures) {
-						        results->push_back(f.get<fdb::future_var::OptionalValue>());
+						        results->push_back(copyValueRef(f.get<fdb::future_var::ValueRef>()));
 					        }
 					        ASSERT(results->size() == futures->size());
 					        ctx->done();
@@ -104,7 +104,7 @@ private:
 			    ctx->continueAfterAll(*futures, [ctx, futures, results]() {
 				    results->clear();
 				    for (auto& f : *futures) {
-					    results->push_back(f.get<fdb::future_var::OptionalValue>());
+					    results->push_back(copyValueRef(f.get<fdb::future_var::ValueRef>()));
 				    }
 				    ASSERT(results->size() == futures->size());
 				    ctx->done();
