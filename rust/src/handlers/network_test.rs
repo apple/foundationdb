@@ -15,7 +15,6 @@ mod network_test_request;
 #[path = "../../target/flatbuffers/NetworkTestResponse_generated.rs"]
 mod network_test_response;
 
-use crate::flow::connection::Connection;
 use crate::flow::file_identifier::{FileIdentifier, IdentifierType, ParsedFileIdentifier};
 use crate::flow::frame::Frame;
 use crate::flow::uid::UID;
@@ -29,10 +28,13 @@ const NETWORK_TEST_REQUEST_IDENTIFIER: ParsedFileIdentifier = ParsedFileIdentifi
 };
 
 fn serialize_error_or_network_test_response(token: UID, response_len: u32) -> Result<Frame> {
-    let mut builder = flatbuffers::FlatBufferBuilder::with_capacity(1024);
+    let mut builder = flatbuffers::FlatBufferBuilder::with_capacity(usize::min(
+        1024 + (response_len as usize),
+        flatbuffers::FLATBUFFERS_MAX_BUFFER_SIZE,
+    ));
     let payload = vec!['.' as u8; response_len.try_into()?];
     let payload = builder.create_vector(&payload[..]);
-    let network_test_resposne = network_test_response::NetworkTestResponse::create(
+    let network_test_response = network_test_response::NetworkTestResponse::create(
         &mut builder,
         &network_test_response::NetworkTestResponseArgs {
             payload: Some(payload),
@@ -41,7 +43,7 @@ fn serialize_error_or_network_test_response(token: UID, response_len: u32) -> Re
     let ensure_table = network_test_response::EnsureTable::create(
         &mut builder,
         &network_test_response::EnsureTableArgs {
-            network_test_response: Some(network_test_resposne),
+            network_test_response: Some(network_test_response),
         },
     );
     let fake_root = network_test_response::FakeRoot::create(
@@ -57,14 +59,13 @@ fn serialize_error_or_network_test_response(token: UID, response_len: u32) -> Re
         .to_error_or()?
         .rewrite_flatbuf(&mut payload)?;
     // println!("reply: {:x?}", builder.finished_data());
-    Ok(Frame { token, payload })
+    Ok(Frame::new_reply(token, payload))
 }
 
 pub async fn handle(
-    conn: &mut Connection,
     parsed_file_identifier: ParsedFileIdentifier,
     frame: Frame,
-) -> Result<()> {
+) -> Result<Option<Frame>> {
     if parsed_file_identifier != NETWORK_TEST_REQUEST_IDENTIFIER {
         return Err(format!(
             "Expected NetworkTestRequest.  Got {:?}",
@@ -72,11 +73,13 @@ pub async fn handle(
         )
         .into());
     }
-    println!("frame: {:?}", frame.payload);
+    // println!("frame: {:?}", frame.payload);
     let fake_root = network_test_request::root_as_fake_root(&frame.payload[..])?;
     let network_test_request = fake_root.network_test_request().unwrap();
-    println!("Got: {:?}", network_test_request);
+    // println!("Got: {:?}", network_test_request);
     let reply_promise = network_test_request.reply_promise().unwrap();
+
+    //   tokio::time::sleep(core::time::Duration::from_millis(1)).await;
 
     let uid = reply_promise.uid().unwrap();
     let uid = UID {
@@ -87,5 +90,5 @@ pub async fn handle(
         uid,
         network_test_request.reply_size().try_into()?,
     )?;
-    conn.write_frame(frame).await
+    Ok(Some(frame))
 }

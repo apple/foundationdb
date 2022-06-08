@@ -4,13 +4,14 @@ use bytes::{Buf, BytesMut};
 use num_derive::{FromPrimitive, ToPrimitive};
 use num_traits::{FromPrimitive, ToPrimitive};
 use std::io::Cursor;
-use xxhash_rust::xxh3::xxh3_64;
+use xxhash_rust::xxh3;
 
 use crate::flow::file_identifier::FileIdentifier;
 #[derive(Debug)]
 pub struct Frame {
     pub token: UID,
-    pub payload: std::vec::Vec<u8>, // TODO - elide copy.  See read_frame: &'a[u8],
+    pub checksum: Option<u64>,
+    pub payload: std::vec::Vec<u8>,
 }
 // // The value does not include the size of `connectPacketLength` itself,
 // // but only the other fields of this structure.
@@ -71,8 +72,7 @@ impl ConnectPacket {
             self.connect_packet_flags.to_u16().unwrap(),
         ));
         vec.extend_from_slice(&self.canonical_remote_ip6);
-        // XXX below is whatever FDB is sending.  Don't know what it is, or what it means!
-        // vec.extend_from_slice(&[0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+
         let frame_sz = vec.len();
         vec[0..len_sz].copy_from_slice(&u32::to_le_bytes((frame_sz - len_sz).try_into().unwrap()));
         vec
@@ -161,14 +161,12 @@ pub fn get_frame(bytes: &mut BytesMut) -> Result<Option<Frame>> {
     let src = &src[len_sz..];
     let frame_length = len_sz + checksum_sz + len;
 
-    let checksum = u64::from_le_bytes(src[0..checksum_sz].try_into()?);
+    let checksum = Some(u64::from_le_bytes(src[0..checksum_sz].try_into()?));
     let src = &src[checksum_sz..];
 
     if src.len() < len {
         return Ok(None);
     }
-
-    let xxhash = xxh3_64(&src[..len]);
 
     let uid = UID::new(src[0..uid_sz].try_into()?)?;
     let src = &src[uid_sz..];
@@ -178,35 +176,33 @@ pub fn get_frame(bytes: &mut BytesMut) -> Result<Option<Frame>> {
     let payload = src[0..(len - uid_sz)].to_vec();
     // println!("Payload: {:?}", &src[0..len]);
 
-    if checksum != xxhash {
-        Err("checksum mismatch".into())
-    } else {
-        bytes.advance(frame_length);
+    bytes.advance(frame_length);
 
-        Ok(Some(Frame {
-            token: uid,
-            payload,
-        }))
-    }
+    Ok(Some(Frame {
+        token: uid,
+        checksum,
+        payload,
+    }))
 }
 
 impl Frame {
     pub fn as_bytes(&self) -> Vec<u8> {
-        let mut vec = Vec::<u8>::new();
         let len_sz = 4;
         let checksum_sz = 8;
-        let _uid_sz = 16;
-        // let len = uid_sz + self.payload.len();
-        //vec.resize(len, 0);
-        vec.extend_from_slice(&u32::to_le_bytes(0)); // we compute len below
-        vec.extend_from_slice(&u64::to_le_bytes(0)); // we compute checksum below.
+        let uid_sz = 16;
+
+        let mut vec = Vec::<u8>::with_capacity(len_sz + checksum_sz + uid_sz + self.payload.len());
+
+        vec.extend_from_slice(&u32::to_le_bytes(
+            (self.payload.len() + 2 * 8).try_into().unwrap(),
+        )); // we compute len below
+        match self.checksum {
+            Some(checksum) => vec.extend_from_slice(&u64::to_le_bytes(checksum)),
+            None => (),
+        };
         vec.extend_from_slice(&u64::to_le_bytes(self.token.uid[0]));
         vec.extend_from_slice(&u64::to_le_bytes(self.token.uid[1]));
         vec.extend_from_slice(&self.payload[..]);
-        let len: u32 = (vec.len() - len_sz - checksum_sz).try_into().unwrap();
-        vec[0..len_sz].copy_from_slice(&u32::to_le_bytes(len));
-        let xxh3_64 = xxh3_64(&vec[len_sz + checksum_sz..]);
-        vec[len_sz..len_sz + checksum_sz].copy_from_slice(&u64::to_le_bytes(xxh3_64));
 
         // println!(
         //     "sent len: {}, vec len: {}, checksum: {}, payload: {:x?} send: {:x?}",
@@ -229,5 +225,38 @@ impl Frame {
             let file_identifier = u32::from_le_bytes(self.payload[4..8].try_into()?);
             FileIdentifier::new_from_wire(file_identifier)
         }
+    }
+
+    fn compute_checksum(&self) -> u64 {
+        let mut digest = xxh3::Xxh3::new();
+        digest.update(&u64::to_le_bytes(self.token.uid[0]));
+        digest.update(&u64::to_le_bytes(self.token.uid[1]));
+        digest.update(&self.payload);
+        digest.digest()
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        match self.checksum {
+            Some(checksum) => {
+                if self.compute_checksum() == checksum {
+                    Ok(())
+                } else {
+                    Err("checksum mismatch".into())
+                }
+            }
+            None => Ok(()),
+        }
+    }
+
+    // Called new_reply because this populates the checksum field instead of
+    // letting some downstream thing validate it.
+    pub fn new_reply(token: UID, payload: Vec<u8>) -> Self {
+        let mut frame = Self {
+            token,
+            checksum: None,
+            payload,
+        };
+        frame.checksum = Some(frame.compute_checksum());
+        frame
     }
 }

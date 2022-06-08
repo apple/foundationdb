@@ -7,7 +7,6 @@ mod ping_request;
 #[path = "../../target/flatbuffers/Void_generated.rs"]
 mod void;
 
-use crate::flow::connection::Connection;
 use crate::flow::file_identifier::{FileIdentifier, IdentifierType, ParsedFileIdentifier};
 use crate::flow::frame::Frame;
 use crate::flow::uid::UID;
@@ -39,14 +38,13 @@ fn serialize_response(token: UID) -> Result<Frame> {
         .to_error_or()?
         .rewrite_flatbuf(&mut payload)?;
     // println!("reply: {:x?}", builder.finished_data());
-    Ok(Frame { token, payload })
+    Ok(Frame::new_reply(token, payload))
 }
 
 pub async fn handle(
-    conn: &mut Connection,
     parsed_file_identifier: ParsedFileIdentifier,
     frame: Frame,
-) -> Result<()> {
+) -> Result<Option<Frame>> {
     if parsed_file_identifier != PING_FILE_IDENTIFIER {
         return Err(format!("Expected PingRequest.  Got {:?}", parsed_file_identifier).into());
     }
@@ -59,5 +57,5 @@ pub async fn handle(
     };
 
     let frame = serialize_response(uid)?;
-    conn.write_frame(frame).await
+    Ok(Some(frame))
 }
