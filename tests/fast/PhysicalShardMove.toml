@@ -11,4 +11,4 @@ testTitle = 'PhysicalShardMove'
 useDB = true
 
     [[test.workload]]
-    testName = 'PhysicalShardMoveWorkLoad'
+    testName = 'PhysicalShardMove'

@@ -59,7 +59,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		pass = false;
 	}
 
-	std::string description() const override { return "SSCheckpoint"; }
+	std::string description() const override { return "PhysicalShardMove"; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -72,30 +72,63 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 
 	ACTOR Future<Void> _start(PhysicalShardMoveWorkLoad* self, Database cx) {
 		int ignore = wait(setDDMode(cx, 0));
-		state Key keyA = "TestKeyA"_sr;
-		state Key keyB = "TestKeyB"_sr;
-		state Key keyC = "TestKeyC"_sr;
-		state Value testValue = "TestValue"_sr;
+		state std::map<Key, Value> kvs({ { "TestKeyA"_sr, "TestValueA"_sr },
+		                                 { "TestKeyB"_sr, "TestValueB"_sr },
+		                                 { "TestKeyC"_sr, "TestValueC"_sr },
+		                                 { "TestKeyD"_sr, "TestValueD"_sr },
+		                                 { "TestKeyE"_sr, "TestValueE"_sr },
+		                                 { "TestKeyF"_sr, "TestValueF"_sr } });
 
-		Version ignore1 = wait(self->writeAndVerify(self, cx, keyA, testValue));
-		Version ignore2 = wait(self->writeAndVerify(self, cx, keyB, testValue));
-		Version ignore3 = wait(self->writeAndVerify(self, cx, keyC, testValue));
+		Version _ = wait(self->populateData(self, cx, &kvs));
 
 		TraceEvent("TestValueWritten").log();
 
 		state std::unordered_set<UID> excludes;
-		state int teamSize = 3;
-		state std::vector<UID> teamA = wait(self->moveShard(self, cx, KeyRangeRef(keyA, keyB), teamSize, &excludes));
+		state std::unordered_set<UID> includes;
+		state int teamSize = 1;
+		state std::vector<UID> teamA = wait(self->moveShard(self,
+		                                                    cx,
+		                                                    deterministicRandom()->randomUniqueID(),
+		                                                    KeyRangeRef("TestKeyA"_sr, "TestKeyB"_sr),
+		                                                    teamSize,
+		                                                    includes,
+		                                                    excludes));
 		// state std::vector<UID> teamB = wait(self->moveShard(self, cx, KeyRangeRef(keyB, keyC), teamSize,
 		// &excludes));
 
-		wait(self->readAndVerify(self, cx, keyA, testValue));
-		wait(self->readAndVerify(self, cx, keyB, testValue));
-		wait(self->readAndVerify(self, cx, keyC, testValue));
+		for (const auto& [key, value] : kvs) {
+			wait(self->readAndVerify(self, cx, key, value));
+		}
 		TraceEvent("TestValueVerified").log();
 
 		int ignore = wait(setDDMode(cx, 1));
 		return Void();
+	}
+
+	ACTOR Future<Version> populateData(PhysicalShardMoveWorkLoad* self, Database cx, std::map<Key, Value>* kvs) {
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+		state Version version;
+		loop {
+			state UID debugID = deterministicRandom()->randomUniqueID();
+			try {
+				tr->debugTransaction(debugID);
+				for (const auto& [key, value] : *kvs) {
+					tr->set(key, value);
+				}
+				wait(tr->commit());
+				version = tr->getCommittedVersion();
+				break;
+			} catch (Error& e) {
+				TraceEvent("TestCommitError").errorUnsuppressed(e);
+				wait(tr->onError(e));
+			}
+		}
+
+		TraceEvent("PopulateTestDataDone")
+		    .detail("CommitVersion", tr->getCommittedVersion())
+		    .detail("DebugID", debugID);
+
+		return version;
 	}
 
 	ACTOR Future<Void> readAndVerify(PhysicalShardMoveWorkLoad* self,
@@ -165,24 +198,25 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 	// Returns the address of the single SS of the new team.
 	ACTOR Future<std::vector<UID>> moveShard(PhysicalShardMoveWorkLoad* self,
 	                                         Database cx,
+	                                         UID dataMoveId,
 	                                         KeyRange keys,
 	                                         int teamSize,
-	                                         std::unordered_set<UID>* excludes) {
+	                                         std::unordered_set<UID> includes,
+	                                         std::unordered_set<UID> excludes) {
 		// Disable DD to avoid DD undoing of our move.
 		int ignore = wait(setDDMode(cx, 0));
-		state std::vector<UID> dests;
 
 		// Pick a random SS as the dest, keys will reside on a single server after the move.
 		std::vector<StorageServerInterface> interfs = wait(getStorageServers(cx));
-		ASSERT(interfs.size() > teamSize);
+		ASSERT(interfs.size() > teamSize - includes.size());
 		while (dests.size() < teamSize) {
 			const auto& interf = interfs[deterministicRandom()->randomInt(0, interfs.size())];
-			if (excludes->count(interf.uniqueID) == 0) {
-				dests.push_back(interf.uniqueID);
-				excludes->insert(interf.uniqueID);
+			if (excludes.count(interf.uniqueID) == 0 && includes.count(interf.uniqueID) == 0) {
+				includes.insert(interf.uniqueID);
 			}
 		}
 
+		state std::vector<UID> dests(includes.begin(), includes.end());
 		state UID owner = deterministicRandom()->randomUniqueID();
 		// state Key ownerKey = "\xff/moveKeysLock/Owner"_sr;
 		state DDEnabledState ddEnabledState;
@@ -191,12 +225,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 
 		loop {
 			try {
-				// BinaryWriter wrMyOwner(Unversioned());
-				// wrMyOwner << owner;
-				// tr.set(ownerKey, wrMyOwner.toValue());
 				TraceEvent("TestMoveShard").detail("Range", keys.toString());
-				// DEBUG_MUTATION("TestMoveShard", self->commitVersion, m, pProxyCommitData->dbgid).detail("To", tags);
-
 				state MoveKeysLock moveKeysLock = wait(takeMoveKeysLock(cx, owner));
 
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -205,7 +234,6 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 				TraceEvent("TestMoveShardReadDataMoves")
 				    .detail("DataMoves", dataMoves.size())
 				    .detail("ReadVersion", readVersion);
-				// wait(tr.commit());
 				state int i = 0;
 				for (; i < dataMoves.size(); ++i) {
 					UID dataMoveId = decodeDataMoveKey(dataMoves[i].key);
@@ -222,7 +250,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 				}
 
 				wait(moveKeys(cx,
-				              deterministicRandom()->randomUniqueID(),
+				              dataMoveId,
 				              keys,
 				              dests,
 				              dests,
@@ -254,4 +282,4 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<PhysicalShardMoveWorkLoad> PhysicalShardMoveWorkLoadFactory("PhysicalShardMoveWorkLoad");
+WorkloadFactory<PhysicalShardMoveWorkLoad> PhysicalShardMoveWorkLoadFactory("PhysicalShardMove");

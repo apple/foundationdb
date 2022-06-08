@@ -25,6 +25,7 @@
 #include <ostream>
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/StorageCheckpoint.h"
+#include "fdbclient/StorageServerShard.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/QueueModel.h"
 #include "fdbrpc/fdbrpc.h"

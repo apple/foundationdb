@@ -695,6 +695,8 @@ public:
 	Optional<TenantMapEntry> getTenantEntry(Version version, TenantInfo tenant);
 	KeyRangeRef clampRangeToTenant(KeyRangeRef range, Optional<TenantMapEntry> tenantEntry, Arena& arena);
 
+	std::vector<StorageServerShard> getStorageServerShards(KeyRangeRef range);
+
 	class CurrentRunningFetchKeys {
 		std::unordered_map<UID, double> startTimeMap;
 		std::unordered_map<UID, KeyRange> keyRangeMap;
@@ -1674,6 +1676,14 @@ Optional<TenantMapEntry> StorageServer::getTenantEntry(Version version, TenantIn
 	}
 
 	return Optional<TenantMapEntry>();
+}
+
+std::vector<StorageServerShard> StorageServer::getStorageServerShards(KeyRangeRef range) {
+	std::vector<StorageServerShard> res;
+	for (auto t : this->shards.intersectingRanges(range)) {
+		res.push_back(t.value()->toStorageServerShard());
+	}
+	return res;
 }
 
 ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
@@ -2924,7 +2934,11 @@ ACTOR Future<Void> getShardState_impl(StorageServer* data, GetShardStateRequest 
 		}
 
 		if (!onChange.size()) {
-			req.reply.send(GetShardStateReply{ data->version.get(), data->durableVersion.get() });
+			GetShardStateReply rep(data->version.get(), data->durableVersion.get());
+			if (req.includePhysicalShard) {
+				rep.shards = std::move(data->getStorageServerShards(req.keys));
+			}
+			req.reply.send(rep);
 			return Void();
 		}
 
