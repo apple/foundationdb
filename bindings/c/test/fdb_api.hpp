@@ -388,6 +388,7 @@ inline KeySelector lastLessOrEqual(KeyRef key, int offset = 0) {
 
 class Transaction {
 	friend class Database;
+	friend class Tenant;
 	std::shared_ptr<native::FDBTransaction> tr;
 
 	explicit Transaction(native::FDBTransaction* tr_raw) {
@@ -505,7 +506,46 @@ public:
 	}
 };
 
+class Tenant final {
+	friend class Database;
+	std::shared_ptr<native::FDBTenant> tenant;
+
+	static constexpr CharsRef tenantManagementMapPrefix = "\xff\xff/management/tenant_map/";
+
+	explicit Tenant(native::FDBTenant* tenant_raw) {
+		if (tenant_raw)
+			tenant = std::shared_ptr<native::FDBTenant>(tenant_raw, &native::fdb_tenant_destroy);
+	}
+
+public:
+	Tenant(const Tenant&) noexcept = default;
+	Tenant& operator=(const Tenant&) noexcept = default;
+	Tenant() noexcept : tenant(nullptr) {}
+
+	static void createTenant(Transaction tr, BytesRef name) {
+		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, BytesRef());
+		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_LOCK_AWARE, BytesRef());
+		tr.set(toBytesRef(fmt::format("{}{}", tenantManagementMapPrefix, toCharsRef(name))), BytesRef());
+	}
+
+	static void deleteTenant(Transaction tr, BytesRef name) {
+		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, BytesRef());
+		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_RAW_ACCESS, BytesRef());
+		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_LOCK_AWARE, BytesRef());
+		tr.clear(toBytesRef(fmt::format("{}{}", tenantManagementMapPrefix, toCharsRef(name))));
+	}
+
+	Transaction createTransaction() {
+		auto tx_native = static_cast<native::FDBTransaction*>(nullptr);
+		auto err = Error(native::fdb_tenant_create_transaction(tenant.get(), &tx_native));
+		if (err)
+			throwError("Failed to create transaction: ", err);
+		return Transaction(tx_native);
+	}
+};
+
 class Database {
+	friend class Tenant;
 	std::shared_ptr<native::FDBDatabase> db;
 
 public:
@@ -543,6 +583,16 @@ public:
 			                       static_cast<std::underlying_type_t<FDBDatabaseOption>>(option)),
 			           err);
 		}
+	}
+
+	Tenant openTenant(BytesRef name) {
+		if (!db)
+			throw std::runtime_error("openTenant from null database");
+		auto tenant_native = static_cast<native::FDBTenant*>(nullptr);
+		if (auto err = Error(native::fdb_database_open_tenant(db.get(), name.data(), name.size(), &tenant_native))) {
+			throwError(fmt::format("Failed to open tenant with name '{}': ", toCharsRef(name)), err);
+		}
+		return Tenant(tenant_native);
 	}
 
 	Transaction createTransaction() {

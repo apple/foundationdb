@@ -837,6 +837,7 @@ public:
 	std::string ENCRYPTION_MODE;
 	int SIM_KMS_MAX_KEYS;
 	int ENCRYPT_PROXY_MAX_DBG_TRACE_LENGTH;
+	bool ENABLE_TLOG_ENCRYPTION;
 
 	// Key Management Service (KMS) Connector
 	std::string KMS_CONNECTOR_TYPE;
@@ -847,6 +848,9 @@ public:
 
 	// whether to use blobRangeKeys or tenants for blob granule range sources
 	std::string BG_RANGE_SOURCE;
+	// Whether to use knobs or EKP for blob metadata and credentials
+	std::string BG_METADATA_SOURCE;
+
 	int BG_SNAPSHOT_FILE_TARGET_BYTES;
 	int BG_DELTA_FILE_TARGET_BYTES;
 	int BG_DELTA_BYTES_BEFORE_COMPACT;
@@ -866,6 +870,10 @@ public:
 	double BLOB_MANAGER_STATUS_EXP_BACKOFF_EXPONENT;
 	double BGCC_TIMEOUT;
 	double BGCC_MIN_INTERVAL;
+
+	// Blob metadata
+	int64_t BLOB_METADATA_CACHE_TTL;
+	int64_t BLOB_METADATA_REFRESH_INTERVAL;
 
 	// HTTP KMS Connector
 	std::string REST_KMS_CONNECTOR_KMS_DISCOVERY_URL_MODE;
