@@ -116,19 +116,17 @@ void LoadedTLSConfig::print(FILE* fp) {
 	X509_STORE_CTX_free(store_ctx);
 }
 
-void ConfigureSSLContext(const LoadedTLSConfig& loaded,
-                         boost::asio::ssl::context& context) {
+void ConfigureSSLContext(const LoadedTLSConfig& loaded, boost::asio::ssl::context& context) {
 	try {
 		context.set_options(boost::asio::ssl::context::default_workarounds);
 		auto verifyFailIfNoPeerCert = boost::asio::ssl::verify_fail_if_no_peer_cert;
 		// Servers get to accept connections without peer certs as "untrusted" clients
 		if (loaded.getEndpointType() == TLSEndpointType::SERVER)
 			verifyFailIfNoPeerCert = 0;
-		context.set_verify_mode(boost::asio::ssl::context::verify_peer |
-		                        verifyFailIfNoPeerCert);
+		context.set_verify_mode(boost::asio::ssl::context::verify_peer | verifyFailIfNoPeerCert);
 
 		context.set_password_callback([password = loaded.getPassword()](
-		                                   size_t, boost::asio::ssl::context::password_purpose) { return password; });
+		                                  size_t, boost::asio::ssl::context::password_purpose) { return password; });
 
 		const std::string& CABytes = loaded.getCABytes();
 		if (CABytes.size()) {
@@ -138,7 +136,7 @@ void ConfigureSSLContext(const LoadedTLSConfig& loaded,
 		const std::string& keyBytes = loaded.getKeyBytes();
 		if (keyBytes.size()) {
 			context.use_private_key(boost::asio::buffer(keyBytes.data(), keyBytes.size()),
-			                         boost::asio::ssl::context::pem);
+			                        boost::asio::ssl::context::pem);
 		}
 
 		const std::string& certBytes = loaded.getCertificateBytes();
@@ -155,20 +153,19 @@ void ConfigureSSLContext(const LoadedTLSConfig& loaded,
 }
 
 void ConfigureSSLStream(Reference<TLSPolicy> policy,
-						boost::asio::ssl::stream<boost::asio::ip::tcp::socket&>& stream,
-						std::function<void(bool)> callback) {
+                        boost::asio::ssl::stream<boost::asio::ip::tcp::socket&>& stream,
+                        std::function<void(bool)> callback) {
 	try {
-		stream.set_verify_callback(
-			[policy, callback](bool preverified, boost::asio::ssl::verify_context& ctx) {
-				bool success = policy->verify_peer(preverified, ctx.native_handle());
-				if (!success) {
-					if (policy->on_failure)
-						policy->on_failure();
-				}
-				if (callback)
-					callback(success);
-				return success;
-			});
+		stream.set_verify_callback([policy, callback](bool preverified, boost::asio::ssl::verify_context& ctx) {
+			bool success = policy->verify_peer(preverified, ctx.native_handle());
+			if (!success) {
+				if (policy->on_failure)
+					policy->on_failure();
+			}
+			if (callback)
+				callback(success);
+			return success;
+		});
 	} catch (boost::system::system_error& e) {
 		TraceEvent("TLSStreamConfigureError")
 		    .detail("What", e.what())
@@ -347,10 +344,8 @@ ACTOR Future<LoadedTLSConfig> TLSConfig::loadAsync(const TLSConfig* self) {
 	return loaded;
 }
 
-TLSPolicy::TLSPolicy(const LoadedTLSConfig& loaded, std::function<void()> on_failure) :
-	rules(),
-	on_failure(std::move(on_failure)),
-	is_client(loaded.getEndpointType() == TLSEndpointType::CLIENT) {
+TLSPolicy::TLSPolicy(const LoadedTLSConfig& loaded, std::function<void()> on_failure)
+  : rules(), on_failure(std::move(on_failure)), is_client(loaded.getEndpointType() == TLSEndpointType::CLIENT) {
 	set_verify_peers(loaded.getVerifyPeers());
 }
 

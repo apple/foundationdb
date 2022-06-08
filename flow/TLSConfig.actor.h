@@ -205,22 +205,19 @@ private:
 
 class TLSPolicy;
 
-void ConfigureSSLContext(
-    const LoadedTLSConfig& loaded,
-    boost::asio::ssl::context& context);
+void ConfigureSSLContext(const LoadedTLSConfig& loaded, boost::asio::ssl::context& context);
 
 // Set up SSL for stream object based on policy.
 // Optionally arm a callback that gets called with verify-outcome of each cert in peer certificate chain:
 // e.g. for peer with a valid, trusted length-3 certificate chain (root CA, intermediate CA, and server certs),
 // callback(true) will be called 3 times.
-void ConfigureSSLStream(
-    Reference<TLSPolicy> policy,
-    boost::asio::ssl::stream<boost::asio::ip::tcp::socket&>& stream,
-	std::function<void(bool)> callback
-);
+void ConfigureSSLStream(Reference<TLSPolicy> policy,
+                        boost::asio::ssl::stream<boost::asio::ip::tcp::socket&>& stream,
+                        std::function<void(bool)> callback);
 
 class TLSPolicy : ReferenceCounted<TLSPolicy> {
 	void set_verify_peers(std::vector<std::string> verify_peers);
+
 public:
 	TLSPolicy(const LoadedTLSConfig& loaded, std::function<void()> on_failure);
 	virtual ~TLSPolicy();

@@ -896,12 +896,9 @@ public:
 
 		try {
 			Future<Void> onHandshook;
-			ConfigureSSLStream(
-					N2::g_net2->activeTlsPolicy,
-					self->ssl_sock,
-					[this](bool verifyOk) {
-						self->has_trusted_peer = verifyOk;
-					});
+			ConfigureSSLStream(N2::g_net2->activeTlsPolicy, self->ssl_sock, [this](bool verifyOk) {
+				self->has_trusted_peer = verifyOk;
+			});
 
 			// If the background handshakers are not all busy, use one
 			if (N2::g_net2->sslPoolHandshakesInProgress < N2::g_net2->sslHandshakerThreadsStarted) {
@@ -977,12 +974,9 @@ public:
 
 		try {
 			Future<Void> onHandshook;
-			ConfigureSSLStream(
-					N2::g_net2->activeTlsPolicy,
-					self->ssl_sock,
-					[this](bool verifyOk) {
-						self->has_trusted_peer = verifyOk;
-					});
+			ConfigureSSLStream(N2::g_net2->activeTlsPolicy, self->ssl_sock, [this](bool verifyOk) {
+				self->has_trusted_peer = verifyOk;
+			});
 			// If the background handshakers are not all busy, use one
 			if (N2::g_net2->sslPoolHandshakesInProgress < N2::g_net2->sslHandshakerThreadsStarted) {
 				holder = Hold(&N2::g_net2->sslPoolHandshakesInProgress);
@@ -1114,9 +1108,7 @@ public:
 		return sent;
 	}
 
-	bool hasTrustedPeer() const override {
-		return has_trusted_peer;
-	}
+	bool hasTrustedPeer() const override { return has_trusted_peer; }
 
 	NetworkAddress getPeerAddress() const override { return peer_address; }
 
@@ -1292,7 +1284,7 @@ ACTOR static Future<Void> reloadCertificatesOnChange(
     TLSConfig config,
     std::function<void()> onPolicyFailure,
     AsyncVar<Reference<ReferencedObject<boost::asio::ssl::context>>>* contextVar,
-	Reference<TLSPolicy>* policy) {
+    Reference<TLSPolicy>* policy) {
 	if (FLOW_KNOBS->TLS_CERT_REFRESH_DELAY_SECONDS <= 0) {
 		return Void();
 	}
@@ -1356,7 +1348,8 @@ void Net2::initTLS(ETLSInitState targetState) {
 		} catch (Error& e) {
 			TraceEvent("Net2TLSInitError").error(e);
 		}
-		backgroundCertRefresh = reloadCertificatesOnChange(tlsConfig, onPolicyFailure, &sslContextVar, &activeTlsPolicy);
+		backgroundCertRefresh =
+		    reloadCertificatesOnChange(tlsConfig, onPolicyFailure, &sslContextVar, &activeTlsPolicy);
 	}
 
 	// If a TLS connection is actually going to be used then start background threads if configured

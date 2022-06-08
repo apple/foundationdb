@@ -470,8 +470,8 @@ public:
 	virtual UID getDebugID() const = 0;
 
 	// Returns whether the peer is trusted.
-	// For TLS-enabled connections, this is true if the peer has presented a valid chain of certificates trusted by the local endpoint.
-	// For non-TLS connections this is always true for any valid open connection.
+	// For TLS-enabled connections, this is true if the peer has presented a valid chain of certificates trusted by the
+	// local endpoint. For non-TLS connections this is always true for any valid open connection.
 	virtual bool hasTrustedPeer() const = 0;
 
 	// At present, implemented by Sim2Conn where we want to disable bits flip for connections between parent process and
