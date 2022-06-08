@@ -44,6 +44,7 @@ public:
 	                                  // often, so that versions always advance smoothly
 	double MAX_VERSION_RATE_MODIFIER;
 	int64_t MAX_VERSION_RATE_OFFSET;
+	bool ENABLE_VERSION_VECTOR_HA_OPTIMIZATION;
 
 	// TLogs
 	bool PEEK_USING_STREAMING;
