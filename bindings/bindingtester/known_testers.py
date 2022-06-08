@@ -60,7 +60,7 @@ class Tester:
 
     def supports_api_version(self, api_version):
         return (
-            api_version >= self.min_api_version and api_version <= self.max_api_version
+                self.min_api_version <= api_version <= self.max_api_version
         )
 
     @classmethod

@@ -21,12 +21,11 @@
 import math
 import sys
 import os
+import util
 
 sys.path[:0] = [
     os.path.join(os.path.dirname(__file__), "..", "..", "bindings", "python")
 ]
-
-import util
 
 FDB_API_VERSION = 720
 
@@ -55,7 +54,7 @@ class Result:
         self.values = values
 
     def key(self, specification):
-        return self.key_tuple[specification.key_start_index :]
+        return self.key_tuple[specification.key_start_index:]
 
     @staticmethod
     def elements_equal(el1, el2):
