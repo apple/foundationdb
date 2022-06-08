@@ -120,12 +120,14 @@ class DirectoryStateTreeNode:
     def _add_child_impl(self, subpath, child):
         # print('%d, %d. Adding child %r (recursive): %r' % (self.state.dir_id, child.state.dir_id, child, subpath))
         if len(subpath) == 0:
-            # print('%d, %d. Setting child: %d, %d' % (self.state.dir_id, child.state.dir_id, self.state.has_known_prefix, child.state.has_known_prefix))
+            # print('%d, %d. Setting child: %d, %d' % (self.state.dir_id, child.state.dir_id,
+            # self.state.has_known_prefix, child.state.has_known_prefix))
             self._merge(child)
             return self
         else:
             if not subpath[0] in self.state.children:
-                # print('%d, %d. Path %r was absent from %r (%r)' % (self.state.dir_id, child.state.dir_id, subpath[0:1], self, self.state.children))
+                # print('%d, %d. Path %r was absent from %r (%r)' % (self.state.dir_id, child.state.dir_id,
+                # subpath[0:1], self, self.state.children))
                 subdir = DirectoryStateTreeNode(True, True, root=self.state.root)
                 self.state.children[subpath[0]] = subdir
             else:

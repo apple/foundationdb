@@ -18,15 +18,10 @@
 # limitations under the License.
 #
 
-import random
-import struct
-
-import fdb
 import fdb.tuple
 
 from bindingtester import FDB_API_VERSION
-from bindingtester import util
-from bindingtester.tests import Test, Instruction, InstructionSet, ResultSpecification
+from bindingtester.tests import Test, InstructionSet, ResultSpecification
 from bindingtester.tests import test_util
 
 fdb.api_version(FDB_API_VERSION)
@@ -59,7 +54,7 @@ class TupleTest(Test):
                 sign_str = "" if sign == 1 else "-"
                 for offset in range(-10, 11):
                     val = (2 ** i) * sign + offset
-                    if val >= min_value and val <= max_value:
+                    if min_value <= val <= max_value:
                         if offset == 0:
                             add_str = ""
                         elif offset > 0:

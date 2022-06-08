@@ -101,7 +101,7 @@ class ApiTest(Test):
         if random.random() < float(len(self.generated_keys)) / self.max_keys:
             tup = random.choice(self.generated_keys)
             if random.random() < 0.3:
-                return self.workspace.pack(tup[0 : random.randint(0, len(tup))])
+                return self.workspace.pack(tup[0: random.randint(0, len(tup))])
 
             return self.workspace.pack(tup)
 
@@ -143,8 +143,8 @@ class ApiTest(Test):
 
     def wait_for_reads(self, instructions):
         while (
-            len(self.outstanding_ops) > 0
-            and self.outstanding_ops[-1][0] <= self.stack_size
+                len(self.outstanding_ops) > 0
+                and self.outstanding_ops[-1][0] <= self.stack_size
         ):
             read = self.outstanding_ops.pop()
             # print '%d. waiting for read at instruction %r' % (len(instructions), read)
@@ -170,7 +170,8 @@ class ApiTest(Test):
         mutations += ['VERSIONSTAMP']
         versions = ['GET_READ_VERSION', 'SET_READ_VERSION', 'GET_COMMITTED_VERSION']
         snapshot_versions = ['GET_READ_VERSION_SNAPSHOT']
-        tuples = ['TUPLE_PACK', 'TUPLE_UNPACK', 'TUPLE_RANGE', 'TUPLE_SORT', 'SUB', 'ENCODE_FLOAT', 'ENCODE_DOUBLE', 'DECODE_DOUBLE', 'DECODE_FLOAT']
+        tuples = ['TUPLE_PACK', 'TUPLE_UNPACK', 'TUPLE_RANGE', 'TUPLE_SORT', 'SUB', 'ENCODE_FLOAT', 'ENCODE_DOUBLE',
+                  'DECODE_DOUBLE', 'DECODE_FLOAT']
         if 'versionstamp' in args.types:
             tuples.append('TUPLE_PACK_WITH_VERSIONSTAMP')
         resets = ['ON_ERROR', 'RESET', 'CANCEL']
@@ -221,13 +222,12 @@ class ApiTest(Test):
 
         for i in range(args.num_ops):
             op = random.choice(op_choices)
-            index = len(instructions)
             read_performed = False
 
             # print 'Adding instruction %s at %d' % (op, index)
 
             if args.concurrency == 1 and (
-                op in database_mutations or op in ["TENANT_CREATE", "TENANT_DELETE"]
+                    op in database_mutations or op in ["TENANT_CREATE", "TENANT_DELETE"]
             ):
                 self.wait_for_reads(instructions)
                 test_util.blocking_commit(instructions)
@@ -268,7 +268,7 @@ class ApiTest(Test):
                 read_performed = True
 
             elif (
-                op == "GET_KEY" or op == "GET_KEY_SNAPSHOT" or op == "GET_KEY_DATABASE"
+                    op == "GET_KEY" or op == "GET_KEY_SNAPSHOT" or op == "GET_KEY_DATABASE"
             ):
                 if op.endswith("_DATABASE") or self.can_use_key_selectors:
                     self.ensure_key(instructions, 1)
@@ -283,9 +283,9 @@ class ApiTest(Test):
                     read_performed = True
 
             elif (
-                op == "GET_RANGE"
-                or op == "GET_RANGE_SNAPSHOT"
-                or op == "GET_RANGE_DATABASE"
+                    op == "GET_RANGE"
+                    or op == "GET_RANGE_SNAPSHOT"
+                    or op == "GET_RANGE_DATABASE"
             ):
                 self.ensure_key(instructions, 2)
                 range_params = self.random.random_range_params()
@@ -295,7 +295,7 @@ class ApiTest(Test):
                 instructions.append(op)
 
                 if (
-                    range_params[0] >= 1 and range_params[0] <= 1000
+                        1 <= range_params[0] <= 1000
                 ):  # avoid adding a string if the limit is large
                     self.add_strings(1)
                 else:
@@ -305,9 +305,9 @@ class ApiTest(Test):
                 read_performed = True
 
             elif (
-                op == "GET_RANGE_STARTS_WITH"
-                or op == "GET_RANGE_STARTS_WITH_SNAPSHOT"
-                or op == "GET_RANGE_STARTS_WITH_DATABASE"
+                    op == "GET_RANGE_STARTS_WITH"
+                    or op == "GET_RANGE_STARTS_WITH_SNAPSHOT"
+                    or op == "GET_RANGE_STARTS_WITH_DATABASE"
             ):
                 # TODO: not tested well
                 self.ensure_key(instructions, 1)
@@ -317,7 +317,7 @@ class ApiTest(Test):
                 instructions.append(op)
 
                 if (
-                    range_params[0] >= 1 and range_params[0] <= 1000
+                        1 <= range_params[0] <= 1000
                 ):  # avoid adding a string if the limit is large
                     self.add_strings(1)
                 else:
@@ -327,9 +327,9 @@ class ApiTest(Test):
                 read_performed = True
 
             elif (
-                op == "GET_RANGE_SELECTOR"
-                or op == "GET_RANGE_SELECTOR_SNAPSHOT"
-                or op == "GET_RANGE_SELECTOR_DATABASE"
+                    op == "GET_RANGE_SELECTOR"
+                    or op == "GET_RANGE_SELECTOR_SNAPSHOT"
+                    or op == "GET_RANGE_SELECTOR_DATABASE"
             ):
                 if op.endswith("_DATABASE") or self.can_use_key_selectors:
                     self.ensure_key(instructions, 2)
@@ -343,7 +343,7 @@ class ApiTest(Test):
                     instructions.append(op)
 
                     if (
-                        range_params[0] >= 1 and range_params[0] <= 1000
+                            1 <= range_params[0] <= 1000
                     ):  # avoid adding a string if the limit is large
                         self.add_strings(1)
                     else:
@@ -389,8 +389,8 @@ class ApiTest(Test):
                     self.add_stack_items(1)
 
             elif (
-                op == "CLEAR_RANGE_STARTS_WITH"
-                or op == "CLEAR_RANGE_STARTS_WITH_DATABASE"
+                    op == "CLEAR_RANGE_STARTS_WITH"
+                    or op == "CLEAR_RANGE_STARTS_WITH_DATABASE"
             ):
                 self.ensure_key(instructions, 1)
                 instructions.append(op)
@@ -655,9 +655,9 @@ class ApiTest(Test):
                 if key1 > key2:
                     key1, key2 = key2, key1
 
-                # TODO: randomize chunkSize but should not exceed 100M(shard limit)
-                chunkSize = 10000000  # 10M
-                instructions.push_args(key1, key2, chunkSize)
+                # TODO: randomize chunk_size but should not exceed 100M(shard limit)
+                chunk_size = 10000000  # 10M
+                instructions.push_args(key1, key2, chunk_size)
                 instructions.append(op)
                 self.add_strings(1)
             elif op == "TENANT_CREATE":
@@ -693,9 +693,9 @@ class ApiTest(Test):
                 self.outstanding_ops.append((self.stack_size, len(instructions) - 1))
 
             if args.concurrency == 1 and (
-                op in database_reads
-                or op in database_mutations
-                or op in ["TENANT_CREATE", "TENANT_DELETE"]
+                    op in database_reads
+                    or op in database_mutations
+                    or op in ["TENANT_CREATE", "TENANT_DELETE"]
             ):
                 instructions.append("WAIT_FUTURE")
 
@@ -722,7 +722,7 @@ class ApiTest(Test):
         next_begin = None
         incorrect_versionstamps = 0
         for k, v in tr.get_range(
-            begin_key, self.versionstamped_values.range().stop, limit=limit
+                begin_key, self.versionstamped_values.range().stop, limit=limit
         ):
             next_begin = k + b"\x00"
             random_id = self.versionstamped_values.unpack(k)[0]
@@ -747,7 +747,7 @@ class ApiTest(Test):
                     )
                     incorrect_versionstamps += 1
 
-        return (next_begin, incorrect_versionstamps)
+        return next_begin, incorrect_versionstamps
 
     def validate(self, db, args):
         errors = []

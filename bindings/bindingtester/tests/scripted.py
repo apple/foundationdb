@@ -47,7 +47,8 @@ class ScriptedTest(Test):
         )
         self.workspace = self.subspace["workspace"]
         self.results_subspace = self.subspace["results"]
-        # self.thread_subspace = self.subspace['threads'] # TODO: update START_THREAD so that we can create threads in subspaces
+        # self.thread_subspace = self.subspace['threads'] # TODO: update START_THREAD so that we can create threads
+        #  in subspaces
 
     def setup(self, args):
         if args.concurrency > 1:
@@ -58,8 +59,8 @@ class ScriptedTest(Test):
         # SOMEDAY: this is only a limitation because we don't know how many operations the bisection should start with
         # it should be fixable.
         #
-        # We also need to enable the commented out support for num_ops in this file and make it so the default value runs
-        # the entire test
+        # We also need to enable the commented out support for num_ops in this file and make it so the default value
+        # runs the entire test
         if args.bisect:
             raise Exception("Scripted tests cannot be bisected")
 
@@ -336,11 +337,11 @@ class ScriptedTest(Test):
         self.add_result(main_thread, args, rng.stop)
         self.add_result(main_thread, args, rng.start)
 
-        stampKey = b"stampedXXXXXXXXXXsuffix"
-        stampKeyIndex = stampKey.find(b"XXXXXXXXXX")
+        stamp_key = b"stampedXXXXXXXXXXsuffix"
+        stamp_key_index = stamp_key.find(b"XXXXXXXXXX")
         main_thread.push_args(
             "SET_VERSIONSTAMPED_KEY",
-            self.versionstamp_key(stampKey, stampKeyIndex),
+            self.versionstamp_key(stamp_key, stamp_key_index),
             b"stampedBar",
         )
         main_thread.append("ATOMIC_OP")
@@ -352,12 +353,12 @@ class ScriptedTest(Test):
         main_thread.append("ATOMIC_OP")
 
         if self.api_version >= 520:
-            stampValue = b"stampedXXXXXXXXXXsuffix"
-            stampValueIndex = stampValue.find(b"XXXXXXXXXX")
+            stamp_value = b"stampedXXXXXXXXXXsuffix"
+            stamp_value_index = stamp_value.find(b"XXXXXXXXXX")
             main_thread.push_args(
                 "SET_VERSIONSTAMPED_VALUE",
                 b"stampedValue2",
-                self.versionstamp_value(stampValue, stampValueIndex),
+                self.versionstamp_value(stamp_value, stamp_value_index),
             )
             main_thread.append("ATOMIC_OP")
 
@@ -461,7 +462,7 @@ class ScriptedTest(Test):
                 self.workspace.pack(
                     (
                         b"foo",
-                        bytes([random.randint(0, 254) for i in range(0, kv_length)]),
+                        bytes([random.randint(0, 254) for _ in range(0, kv_length)]),
                     )
                 )
             )

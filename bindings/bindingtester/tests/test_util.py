@@ -18,30 +18,27 @@
 # limitations under the License.
 #
 
-import random
-import uuid
-import unicodedata
-import ctypes
 import math
+import random
+import unicodedata
+import uuid
 
 import fdb
 import fdb.tuple
-
-from bindingtester import util
 from bindingtester import FDB_API_VERSION
 from bindingtester.known_testers import COMMON_TYPES
 
 
 class RandomGenerator(object):
     def __init__(
-        self, max_int_bits=64, api_version=FDB_API_VERSION, types=COMMON_TYPES
+            self, max_int_bits=64, api_version=FDB_API_VERSION, types=COMMON_TYPES
     ):
         self.max_int_bits = max_int_bits
         self.api_version = api_version
         self.types = list(types)
 
     def random_unicode_str(self, length):
-        return "".join(self.random_unicode_char() for i in range(0, length))
+        return "".join(self.random_unicode_char() for _ in range(0, length))
 
     def random_int(self):
         num_bits = random.randint(
@@ -115,7 +112,7 @@ class RandomGenerator(object):
                 user_version = random.randint(0, 0xFFFF)
                 tup.append(fdb.tuple.Versionstamp(tr_version, user_version))
             else:
-                assert false
+                assert False
 
         return tuple(tup)
 
@@ -134,15 +131,14 @@ class RandomGenerator(object):
                 non_empty = [
                     x
                     for x in enumerate(to_add)
-                    if (isinstance(x[1], list) or isinstance(x[1], tuple))
-                    and len(x[1]) > 0
+                    if (isinstance(x[1], list) or isinstance(x[1], tuple)) and len(x[1]) > 0
                 ]
                 if len(non_empty) > 0 and random.random() < 0.25:
                     # Add a smaller list to test prefixes of nested structures.
                     idx, choice = random.choice(non_empty)
                     smaller_size = random.randint(0, len(to_add[idx]))
                     tuples.append(
-                        to_add[:idx] + (choice[:smaller_size],) + to_add[idx + 1 :]
+                        to_add[:idx] + (choice[:smaller_size],) + to_add[idx + 1:]
                     )
 
         random.shuffle(tuples)
@@ -156,7 +152,7 @@ class RandomGenerator(object):
         else:
             limit = random.randint(1e8, (1 << 31) - 1)
 
-        return (limit, random.randint(0, 1), random.randint(-2, 4))
+        return limit, random.randint(0, 1), random.randint(-2, 4)
 
     def random_selector_params(self):
         if random.random() < 0.9:
@@ -164,7 +160,7 @@ class RandomGenerator(object):
         else:
             offset = random.randint(-1000, 1000)
 
-        return (random.randint(0, 1), offset)
+        return random.randint(0, 1), offset
 
     def random_string(self, length):
         if length == 0:
@@ -172,7 +168,7 @@ class RandomGenerator(object):
 
         return bytes(
             [random.randint(0, 254)]
-            + [random.randint(0, 255) for i in range(0, length - 1)]
+            + [random.randint(0, 255) for _ in range(0, length - 1)]
         )
 
     def random_unicode_char(self):

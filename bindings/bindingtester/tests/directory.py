@@ -128,7 +128,7 @@ class DirectoryTest(Test):
         # Generate some directories that we are going to create in advance. This tests that other bindings
         # are compatible with the Python implementation
         self.prepopulated_dirs = [
-            (generate_path(min_length=1), self.generate_layer()) for i in range(5)
+            (generate_path(min_length=1), self.generate_layer()) for _ in range(5)
         ]
 
         for path, layer in self.prepopulated_dirs:
@@ -146,8 +146,8 @@ class DirectoryTest(Test):
                     ),
                 )
             )
-            # print('%d. Selected %s, dir=%s, dir_id=%s, has_known_prefix=%s, dir_list_len=%d' \
-            #       % (len(instructions), 'DIRECTORY_OPEN', repr(self.dir_index), self.dir_list[-1].dir_id, False, len(self.dir_list)-1))
+            # print('%d. Selected %s, dir=%s, dir_id=%s, has_known_prefix=%s, dir_list_len=%d' \% (len(instructions),
+            # 'DIRECTORY_OPEN', repr(self.dir_index), self.dir_list[-1].dir_id, False, len(self.dir_list)-1))
 
         instructions.setup_complete()
 
@@ -156,8 +156,8 @@ class DirectoryTest(Test):
                 while True:
                     self.dir_index = random.randrange(0, len(self.dir_list))
                     if (
-                        not self.dir_list[self.dir_index].state.is_partition
-                        or not self.dir_list[self.dir_index].state.deleted
+                            not self.dir_list[self.dir_index].state.is_partition
+                            or not self.dir_list[self.dir_index].state.deleted
                     ):
                         break
 
@@ -174,8 +174,8 @@ class DirectoryTest(Test):
 
             op = random.choice(choices)
 
-            # print('%d. Selected %s, dir=%d, dir_id=%d, has_known_prefix=%d, dir_list_len=%d' \
-            #       % (len(instructions), op, self.dir_index, dir_entry.dir_id, dir_entry.state.has_known_prefix, len(self.dir_list)))
+            # print('%d. Selected %s, dir=%d, dir_id=%d, has_known_prefix=%d, dir_list_len=%d' \% (len(instructions),
+            # op, self.dir_index, dir_entry.dir_id, dir_entry.state.has_known_prefix, len(self.dir_list)))
 
             if op.endswith("_DATABASE") or op.endswith("_SNAPSHOT"):
                 root_op = op[0:-9]
@@ -206,10 +206,10 @@ class DirectoryTest(Test):
                     generate_prefix(
                         require_unique=args.concurrency == 1, is_partition=True
                     )
-                    for i in range(2)
+                    for _ in range(2)
                 ]
-                for i in range(2):
-                    instructions.push_args(prefixes[i])
+                for j in range(2):
+                    instructions.push_args(prefixes[j])
                     instructions.push_args(*test_util.with_length(generate_path()))
                     instructions.append("DIRECTORY_CREATE_SUBSPACE")
                     indices.append(len(self.dir_list))
@@ -229,7 +229,7 @@ class DirectoryTest(Test):
                     test_util.blocking_commit(instructions)
 
                 path = generate_path()
-                # Partitions that use the high-contention allocator can result in non-determinism if they fail to commit,
+                # Partitions that use the high-contention allocator can result in non-determinism if they fail to commit
                 # so we disallow them in comparison tests
                 op_args = test_util.with_length(path) + (
                     self.generate_layer(allow_partition=args.concurrency > 1),
@@ -267,7 +267,7 @@ class DirectoryTest(Test):
                 # Because allocated prefixes are non-deterministic, we cannot have overlapping
                 # transactions that allocate/remove these prefixes in a comparison test
                 if (
-                    op.endswith("_DATABASE") and args.concurrency == 1
+                        op.endswith("_DATABASE") and args.concurrency == 1
                 ):  # and allow_empty_prefix:
                     test_util.blocking_commit(instructions)
 
@@ -288,7 +288,7 @@ class DirectoryTest(Test):
                     instructions.append(op)
 
                 if (
-                    not op.endswith("_DATABASE") and args.concurrency == 1
+                        not op.endswith("_DATABASE") and args.concurrency == 1
                 ):  # and allow_empty_prefix:
                     test_util.blocking_commit(instructions)
 
@@ -337,9 +337,9 @@ class DirectoryTest(Test):
 
                 # Make sure that the default directory subspace still exists after moving the specified directory
                 if (
-                    dir_entry.state.is_directory
-                    and not dir_entry.state.is_subspace
-                    and old_path == ("",)
+                        dir_entry.state.is_directory
+                        and not dir_entry.state.is_subspace
+                        and old_path == ("",)
                 ):
                     self.ensure_default_directory_subspace(instructions, default_path)
 
@@ -360,7 +360,7 @@ class DirectoryTest(Test):
                 self.ensure_default_directory_subspace(instructions, default_path)
 
             elif (
-                root_op == "DIRECTORY_REMOVE" or root_op == "DIRECTORY_REMOVE_IF_EXISTS"
+                    root_op == "DIRECTORY_REMOVE" or root_op == "DIRECTORY_REMOVE_IF_EXISTS"
             ):
                 # Because allocated prefixes are non-deterministic, we cannot have overlapping
                 # transactions that allocate/remove these prefixes in a comparison test
@@ -380,14 +380,13 @@ class DirectoryTest(Test):
 
                 # Make sure that the default directory subspace still exists after removing the specified directory
                 if path == () or (
-                    dir_entry.state.is_directory
-                    and not dir_entry.state.is_subspace
-                    and path == ("",)
+                        dir_entry.state.is_directory
+                        and not dir_entry.state.is_subspace
+                        and path == ("",)
                 ):
                     self.ensure_default_directory_subspace(instructions, default_path)
 
             elif root_op == "DIRECTORY_LIST" or root_op == "DIRECTORY_EXISTS":
-                path = ()
                 count = random.randint(0, 1)
                 if count == 1:
                     path = generate_path()
@@ -403,9 +402,9 @@ class DirectoryTest(Test):
 
             elif root_op == "DIRECTORY_UNPACK_KEY" or root_op == "DIRECTORY_CONTAINS":
                 if (
-                    not dir_entry.state.has_known_prefix
-                    or random.random() < 0.2
-                    or root_op == "DIRECTORY_UNPACK_KEY"
+                        not dir_entry.state.has_known_prefix
+                        or random.random() < 0.2
+                        or root_op == "DIRECTORY_UNPACK_KEY"
                 ):
                     t = self.random.random_tuple(5)
                     instructions.push_args(*test_util.with_length(t))
@@ -499,9 +498,9 @@ def generate_path(min_length=0):
     path = ()
     for i in range(length):
         if random.random() < 0.05:
-            path = path + ("",)
+            path += "",
         else:
-            path = path + (random.choice(["1", "2", "3"]),)
+            path += random.choice(["1", "2", "3"]),
 
     return path
 
@@ -511,10 +510,10 @@ def generate_prefix(require_unique=False, is_partition=False, min_length=1):
     if not require_unique and min_length == 0 and random.random() < 0.8:
         return None
     elif (
-        require_unique
-        or is_partition
-        or min_length > len(fixed_prefix)
-        or random.random() < 0.5
+            require_unique
+            or is_partition
+            or min_length > len(fixed_prefix)
+            or random.random() < 0.5
     ):
         if require_unique:
             min_length = max(min_length, 16)
@@ -526,13 +525,13 @@ def generate_prefix(require_unique=False, is_partition=False, min_length=1):
         if not is_partition:
             first = random.randint(ord("\x1d"), 255) % 255
             return bytes(
-                [first] + [random.randrange(0, 256) for i in range(0, length - 1)]
+                [first] + [random.randrange(0, 256) for _ in range(0, length - 1)]
             )
         else:
             return bytes(
-                [random.randrange(ord("\x02"), ord("\x14")) for i in range(0, length)]
+                [random.randrange(ord("\x02"), ord("\x14")) for _ in range(0, length)]
             )
     else:
         prefix = fixed_prefix
-        generated = prefix[0 : random.randrange(min_length, len(prefix))]
+        generated = prefix[0: random.randrange(min_length, len(prefix))]
         return generated
