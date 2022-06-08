@@ -639,4 +639,16 @@ private:
 	    watchMap;
 };
 
+// Similar to tr.onError(), but doesn't require a DatabaseContext.
+struct Backoff {
+	Future<Void> onError() {
+		double currentBackoff = backoff;
+		backoff = std::min(backoff * CLIENT_KNOBS->BACKOFF_GROWTH_RATE, CLIENT_KNOBS->DEFAULT_MAX_BACKOFF);
+		return delay(currentBackoff * deterministicRandom()->random01());
+	}
+
+private:
+	double backoff = CLIENT_KNOBS->DEFAULT_BACKOFF;
+};
+
 #endif
