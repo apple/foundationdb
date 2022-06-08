@@ -3144,6 +3144,9 @@ public:
 					if (it != server_status.end()) {
 						e.detail("Healthy", !it->second.isUnhealthy());
 					}
+					if (it->second.isUnhealthy()) {
+						std::cout << "ServerStatus: " << server->first.first() << " " << !it->second.isUnhealthy() << "\n";
+					}
 
 					server++;
 					if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
@@ -3195,9 +3198,12 @@ public:
 						if (it != server_status.end() && !it->second.isUnhealthy()) {
 							isMachineHealthy = true;
 						}
+						if (it->second.isUnhealthy()) {
+							std::cout << "MachineInfo: " << server->getId().first() << " " << !it->second.isUnhealthy() << "\n";
+						}
 					}
 
-					isMachineHealthy = false;
+					isMachineHealthy = false; //Why??
 					TraceEvent("MachineInfo", self->getDistributorId())
 					    .detail("MachineInfoIndex", i)
 					    .detail("Healthy", isMachineHealthy)

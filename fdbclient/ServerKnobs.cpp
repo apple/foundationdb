@@ -396,8 +396,9 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_BLOCK_SIZE,                                  32768 ); // 32 KB, size of the block in rocksdb cache.
 	init( ENABLE_SHARDED_ROCKSDB,                              false );
 
-	init( PHYSICAL_SHARD_SIZE_MAX_BYTES,     		50 * 1024 * 1024 );
-	init( PHYSICAL_SHARD_COUNT_PER_TEAM_MIN,                       4 );
+	// init( PHYSICAL_SHARD_SIZE_MAX_BYTES,     			   500000000 );
+	init( PHYSICAL_SHARD_SIZE_MIN_BYTES,     			   200000000 );
+	// init( PHYSICAL_SHARD_COUNT_PER_TEAM_MIN,                       4 );
 
 	// Leader election
 	bool longLeaderElection = randomize && BUGGIFY;

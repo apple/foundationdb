@@ -1159,44 +1159,45 @@ void ShardsAffectedByTeamFailure::updatePhysicalShardToTeams(uint64_t inputPhysi
 		}
 	}
 	std::string caller;
-	if (debugID==0) {
-		caller = "InitBySrc";
-	} else if (debugID==1) {
-		caller = "InitByDest";
-	} else {
-		caller = "Update";
+	if (debugID%20==0) {
+		if (debugID==0) {
+			caller = "InitBySrc";
+		} else if (debugID==1) {
+			caller = "InitByDest";
+		} else {
+			caller = "Update";
+		}
+		TraceEvent("UpdatePhysicalShardMapping")
+			.detail("PhysicalShardID", inputPhysicalShardID)
+			.detail("NewTeam", describe(inputTeams))
+			.detail("SingleRegionTeamSize", expectedNumServersPerTeam)
+			.detail("Caller", caller)
+			.detail("DebugID", debugID);
 	}
-	TraceEvent("UpdatePhysicalShardMapping")
-		.detail("PhysicalShardID", inputPhysicalShardID)
-		.detail("NewTeam", describe(inputTeams))
-		.detail("SingleRegionTeamSize", expectedNumServersPerTeam)
-		.detail("Caller", caller)
-		.detail("DebugID", debugID);
-
 	// remove old ones
 	for (auto [team, physicalShardIDs] : teamPhysicalShardIDs) {
 		for (auto it = teamPhysicalShardIDs[team].begin(); it != teamPhysicalShardIDs[team].end();) {
-	        if(*it == inputPhysicalShardID) {
-	        	bool flag = false;
-	        	for (auto inputTeam : inputTeams) { //exist one of inputTeams should match team
-	        		if (team == inputTeam) {
-	        			flag = true;
-	        		}
-	        	}
-	        	/*if (!flag) {
-	        		TraceEvent(SevWarn, "UpdatePhysicalShardDuplicate")
-					    .detail("Caller", caller)
-					    .detail("PhysicalShardID", inputPhysicalShardID)
-					    .detail("OldTeam", team.toString())
-					    .detail("NewTeam", describe(inputTeams))
-					    .detail("SingleRegionTeamSize", expectedNumServersPerTeam)
-					    .detail("DebugID", debugID);
-				}*/
-	        	ASSERT(flag);
-	            it = teamPhysicalShardIDs[team].erase(it);
-	        } else {
-	        	++it;
+	        if (*it != inputPhysicalShardID) {
+	        	it++;
+	        	continue;
 	        }
+	        bool flag = false;
+	        for (auto inputTeam : inputTeams) { //exist one of inputTeams should match team
+	        	if (team == inputTeam) {
+	        		flag = true;
+	        	}
+	        }
+	        if (!flag) {
+	        	TraceEvent(SevWarn, "UpdatePhysicalShardDuplicate")
+					.detail("Caller", caller)
+					.detail("PhysicalShardID", inputPhysicalShardID)
+					.detail("OldTeam", team.toString())
+					.detail("NewTeam", describe(inputTeams))
+					.detail("SingleRegionTeamSize", expectedNumServersPerTeam)
+					.detail("DebugID", debugID);
+			}
+	        ASSERT(flag);
+	        it = teamPhysicalShardIDs[team].erase(it);
 	    }
 	}
 	// insert new one
@@ -1222,23 +1223,26 @@ std::string convertSetOfIDToString(std::set<uint64_t> ids) {
 Optional<ShardsAffectedByTeamFailure::Team> ShardsAffectedByTeamFailure::tryGetRemoteTeamWith(uint64_t inputPhysicalShardID, int expectedTeamSize, uint64_t debugID) {
 	ASSERT(CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
 	for (auto [team, physicalShardIDs] : teamPhysicalShardIDs) {
-		if (team.primary == false) {
-			for (auto it = teamPhysicalShardIDs[team].begin(); it != teamPhysicalShardIDs[team].end();) {
-				if (*it == inputPhysicalShardID) {
-					if (team.servers.size() == expectedTeamSize) {
-						TraceEvent("TryGetRemoteTeamWith")
-							.detail("PhysicalShardID", inputPhysicalShardID)
-							.detail("ExpectedTeamSize", expectedTeamSize)
-							.detail("Team", team.toString())
-							.detail("TeamSize", team.servers.size())
-							.detail("PhysicalShardsOfTeam", convertSetOfIDToString(teamPhysicalShardIDs[team]))
-							.detail("DebugID", debugID);
-						return team;
-					}
-				} else {
-					++it;
-				}
+		if (team.primary == true) {
+			continue;
+		}
+		for (auto it = teamPhysicalShardIDs[team].begin(); it != teamPhysicalShardIDs[team].end(); it++) {
+			if (*it != inputPhysicalShardID) {
+				continue;
 			}
+			if (team.servers.size() != expectedTeamSize) {
+				continue;
+			}
+			// if (debugID%20==0) {
+				TraceEvent("TryGetRemoteTeamWith")
+					.detail("PhysicalShardID", inputPhysicalShardID)
+					.detail("ExpectedTeamSize", expectedTeamSize)
+					.detail("Team", team.toString())
+					.detail("TeamSize", team.servers.size())
+					.detail("PhysicalShardsOfTeam", convertSetOfIDToString(teamPhysicalShardIDs[team]))
+					.detail("DebugID", debugID);
+			// }
+			return team;
 		}
 	}
 	return Optional<ShardsAffectedByTeamFailure::Team>();
@@ -1250,8 +1254,8 @@ Optional<ShardsAffectedByTeamFailure::Team> ShardsAffectedByTeamFailure::tryGetR
 Optional<uint64_t> ShardsAffectedByTeamFailure::tryGetPhysicalShardIDFor(Team team, StorageMetrics const& metrics, uint64_t debugID) {
 	ASSERT(CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
 	ASSERT(team.servers.size()!=0);
+	// Case: The team is not tracked in the mapping (teamPhysicalShardIDs)
 	if (teamPhysicalShardIDs.count(team)==0) {
-		// Case: The team is not tracked in the mapping (teamPhysicalShardIDs)
 		return Optional<uint64_t>();
 	} 
 	for (auto physicalShardID : teamPhysicalShardIDs[team]) {
@@ -1259,55 +1263,64 @@ Optional<uint64_t> ShardsAffectedByTeamFailure::tryGetPhysicalShardIDFor(Team te
 			ASSERT(false);
 		}
 	}
-	if (teamPhysicalShardIDs[team].size() < SERVER_KNOBS->PHYSICAL_SHARD_COUNT_PER_TEAM_MIN) {
-		// Case: The team is tracked in the mapping and the system already has physical shard notion
-		// 		but the number of physicalShard is small
+	// Case: The team is tracked in the mapping and the system already has physical shard notion
+	// 		but the number of physicalShard is small
+	/*if (teamPhysicalShardIDs[team].size() < SERVER_KNOBS->PHYSICAL_SHARD_COUNT_PER_TEAM_MIN) {
 		return Optional<uint64_t>();
-	} else {
-		// Case: The team is tracked in the mapping and the system already has physical shard notion
-		// 		and the number of physicalShard is large
-		int64_t minTotalBytes = StorageMetrics::infinity;
-		uint64_t minPhysicalShardID = 0;
-		for (auto physicalShardID : teamPhysicalShardIDs[team]) {
-			int64_t totalBytes = physicalShardCollection[physicalShardID].bytesOnDisk;
+	}*/
+		
+	// Case: The team is tracked in the mapping and the system already has physical shard notion
+	// 		and the number of physicalShard is large
+	int64_t minTotalBytes = StorageMetrics::infinity;
+	uint64_t minPhysicalShardID = 0;
+	for (auto physicalShardID : teamPhysicalShardIDs[team]) {
+		int64_t totalBytes = physicalShardCollection[physicalShardID].bytesOnDisk;
+		// if (debugID%20==0) {
 			TraceEvent("TryGetPhysicalShardID")
 				.detail("PhysicalShardID", physicalShardID)
 				.detail("TotalBytes", totalBytes)
 				.detail("BelongTeam", team.toString())
 				.detail("DebugID", debugID);
-			if (totalBytes < minTotalBytes) {
-				minTotalBytes = totalBytes;
-				minPhysicalShardID = physicalShardID;
-			}
+		// }
+		if (totalBytes < minTotalBytes) {
+			minTotalBytes = totalBytes;
+			minPhysicalShardID = physicalShardID;
 		}
-		ASSERT(minPhysicalShardID!=0);
-		if (minTotalBytes + metrics.bytes > SERVER_KNOBS->PHYSICAL_SHARD_SIZE_MAX_BYTES) {
-			// Case: The physicalShard with the minimal bytes is insufficient to store the new input bytes
+	}
+	ASSERT(minPhysicalShardID!=0);
+	if (minTotalBytes + metrics.bytes > SERVER_KNOBS->PHYSICAL_SHARD_SIZE_MIN_BYTES) {
+		// Case: The physicalShard with the minimal bytes is insufficient to store the new input bytes
+		// if (debugID%20==0) {
 			TraceEvent("TryGetPhysicalShardIDResult")
-				.detail("Result", "MORE-THAN-MAX")
+				.detail("Result", 0)
+				.detail("FailedReason", "more than the upper bound of physicalShard")
 				.detail("MinTotalBytes", minTotalBytes)
 				.detail("MoveInBytes", metrics.bytes)
-				.detail("BoundBytes", SERVER_KNOBS->PHYSICAL_SHARD_SIZE_MAX_BYTES)
+				.detail("BoundBytes", SERVER_KNOBS->PHYSICAL_SHARD_SIZE_MIN_BYTES)
 				.detail("DebugID", debugID);
-			return Optional<uint64_t>();
-		} else {
-			// std::cout << "PhysicalShardID: " << minPhysicalShardID << " Bytes: " << minTotalBytes << "\n";
+		// }
+		return Optional<uint64_t>();
+	} else {
+		// std::cout << "PhysicalShardID: " << minPhysicalShardID << " Bytes: " << minTotalBytes << "\n";
+		// if (debugID%20==0) {
 			TraceEvent("TryGetPhysicalShardIDResult")
 				.detail("Result", minPhysicalShardID)
 				.detail("MinTotalBytes", minTotalBytes)
 				.detail("MoveInBytes", metrics.bytes)
-				.detail("BoundBytes", SERVER_KNOBS->PHYSICAL_SHARD_SIZE_MAX_BYTES)
+				.detail("BoundBytes", SERVER_KNOBS->PHYSICAL_SHARD_SIZE_MIN_BYTES)
 				.detail("DebugID", debugID);
-			return minPhysicalShardID;
-		}
+		// }
+		return minPhysicalShardID;
 	}
 }
 
 uint64_t ShardsAffectedByTeamFailure::generateNewPhysicalShardID(uint64_t debugID) {
 	uint64_t physicalShardID = deterministicRandom()->randomUInt64();
-	TraceEvent("GenerateNewPhysicalShardID")
-		.detail("PhysicalShardID", physicalShardID)
-		.detail("DebugID", debugID);
+	// if (debugID%20==0) {
+		TraceEvent("GenerateNewPhysicalShardID")
+			.detail("PhysicalShardID", physicalShardID)
+			.detail("DebugID", debugID);
+	// }
 	return physicalShardID;
 }
 

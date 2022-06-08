@@ -592,6 +592,96 @@ ACTOR Future<Void> monitorBatchLimitedTime(Reference<AsyncVar<ServerDBInfo> cons
 	}
 }
 
+ACTOR Future<Void> monitorPhysicalShardStatus(Reference<ShardsAffectedByTeamFailure> self) {
+	loop {
+		wait(delay(SERVER_KNOBS->ROCKSDB_METRICS_DELAY));
+		for (auto [team, physicalShardIDs] : self->teamPhysicalShardIDs) {
+			TraceEvent e("PhysicalShardStatus");
+			e.detail("Team", team.toString());
+			std::string metricsStr = "";
+			int64_t counter = 0;
+			int64_t totalBytes = 0;
+			int64_t maxPhysicalShardBytes = -1;
+			int64_t minPhysicalShardBytes = StorageMetrics::infinity;
+			uint64_t maxPhysicalShardID = 0;
+			uint64_t minPhysicalShardID = 0;
+			for (auto physicalShardID : physicalShardIDs) {
+				uint64_t id = self->physicalShardCollection[physicalShardID].id;
+				int64_t bytes = self->physicalShardCollection[physicalShardID].bytesOnDisk;
+				if (bytes > maxPhysicalShardBytes) {
+					maxPhysicalShardBytes = bytes;
+					maxPhysicalShardID = id;
+				}
+				if (bytes < minPhysicalShardBytes) {
+					minPhysicalShardBytes = bytes;
+					minPhysicalShardID = id;
+				}
+				totalBytes = totalBytes + bytes;
+				metricsStr = metricsStr + std::to_string(id) + ":" + std::to_string(bytes);
+				if (counter<physicalShardIDs.size()-1) {
+					metricsStr = metricsStr + ",";
+				}
+				counter = counter + 1;
+			}
+			e.detail("Metrics", metricsStr);
+			e.detail("TotalBytes", totalBytes);
+			e.detail("NumPhysicalShards", counter);
+			e.detail("MaxPhysicalShard", std::to_string(maxPhysicalShardID)+":"+std::to_string(maxPhysicalShardBytes));
+			e.detail("MinPhysicalShard", std::to_string(minPhysicalShardID)+":"+std::to_string(minPhysicalShardBytes));
+		}
+		std::map<UID, std::map<uint64_t, int64_t>> storageServerPhysicalShardStatus;
+		for (auto [team, physicalShardIDs] : self->teamPhysicalShardIDs) {
+			for (auto ssid : team.servers) {
+				for (auto physicalShardID : physicalShardIDs) {
+					if (storageServerPhysicalShardStatus.count(ssid)!=0) {
+						if (storageServerPhysicalShardStatus[ssid].count(physicalShardID)==0) {
+							storageServerPhysicalShardStatus[ssid].insert(
+								std::make_pair(physicalShardID, self->physicalShardCollection[physicalShardID].bytesOnDisk));
+						} else {
+							ASSERT(false);
+						}
+					} else {
+						std::map<uint64_t, int64_t> tmp;
+						tmp.insert(std::make_pair(physicalShardID, self->physicalShardCollection[physicalShardID].bytesOnDisk));
+						storageServerPhysicalShardStatus.insert(std::make_pair(ssid, tmp));
+					}
+				}
+			}
+		}
+		for (auto [serverID, physicalShardMetrics] : storageServerPhysicalShardStatus) {
+			TraceEvent e("ServerPhysicalShardStatus");
+			e.detail("Server", serverID);
+			e.detail("NumPhysicalShards", physicalShardMetrics.size());
+			int64_t totalBytes = 0;
+			int64_t maxPhysicalShardBytes = -1;
+			int64_t minPhysicalShardBytes = StorageMetrics::infinity;
+			uint64_t maxPhysicalShardID = 0;
+			uint64_t minPhysicalShardID = 0;
+			std::string metricsStr = "";
+			int64_t counter = 0;
+			for (auto [physicalShardID, bytes] : physicalShardMetrics) {
+				totalBytes = totalBytes + bytes;
+				if (bytes > maxPhysicalShardBytes) {
+					maxPhysicalShardBytes = bytes;
+					maxPhysicalShardID = physicalShardID;
+				}
+				if (bytes < minPhysicalShardBytes) {
+					minPhysicalShardBytes = bytes;
+					minPhysicalShardID = physicalShardID;
+				}
+				metricsStr = metricsStr + std::to_string(physicalShardID) + ":" + std::to_string(bytes);
+				if (counter<physicalShardMetrics.size()-1) {
+					metricsStr = metricsStr + ",";
+				}
+				counter = counter + 1;
+			}
+			e.detail("TotalBytes", totalBytes);
+			e.detail("MaxPhysicalShard", std::to_string(maxPhysicalShardID)+":"+std::to_string(maxPhysicalShardBytes));
+			e.detail("MinPhysicalShard", std::to_string(minPhysicalShardID)+":"+std::to_string(minPhysicalShardBytes));
+		}
+	}
+}
+
 // Runs the data distribution algorithm for FDB, including the DD Queue, DD tracker, and DD team collection
 ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
                                     PromiseStream<GetMetricsListRequest> getShardMetricsList,
@@ -988,6 +1078,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 
 			actors.push_back(DDTeamCollection::printSnapshotTeamsInfo(primaryTeamCollection));
 			actors.push_back(yieldPromiseStream(output.getFuture(), input));
+			actors.push_back(monitorPhysicalShardStatus(shardsAffectedByTeamFailure));
 
 			wait(waitForAll(actors));
 			return Void();

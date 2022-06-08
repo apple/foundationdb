@@ -1424,18 +1424,18 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 						}
 						// Update physicalShardCollection
 						// Add the metrics to in-physicalShard
-						/*TraceEvent e("UpdatePhysicalShardCollection");
+						TraceEvent e("UpdatePhysicalShardCollection");
 						e.detail("DebugID", debugID);
 						e.detail("KeyRange", rd.dataMoveId.first());
 						e.detail("IsRestore", rd.isRestore());
-						e.detail("PhysicalShardIDIn", rd.dataMoveId.first());*/
+						e.detail("PhysicalShardIDIn", rd.dataMoveId.first());
 						if (self->shardsAffectedByTeamFailure->physicalShardCollection.count(rd.dataMoveId.first())==0) {
-							//e.detail("Op", "Insert");
+							e.detail("Op", "Insert");
 							ASSERT(!rd.isRestore());
 							self->shardsAffectedByTeamFailure->physicalShardCollection.insert(
 								std::make_pair(rd.dataMoveId.first(), ShardsAffectedByTeamFailure::PhysicalShard(rd.dataMoveId.first(), metrics)));
 						} else {
-							//e.detail("Op", "Update");
+							e.detail("Op", "Update");
 							self->shardsAffectedByTeamFailure->increaseMetricsForMoveIn(rd.dataMoveId.first(), metrics);
 						}
 						// Minus the metrics from the existing (multiple) out-physicalShard(s)
@@ -1444,17 +1444,17 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 						for (auto it = ranges.begin(); it != ranges.end(); ++it) {
 							physicalShardIDSet.insert(it->value());
 						}
-						/*std::string physicalShardIDOut = "";
+						std::string physicalShardIDOut = "";
 						for (auto id : physicalShardIDSet) {
 							physicalShardIDOut = physicalShardIDOut + std::to_string(id) + " ";
-						}*/
-						//e.detail("PhysicalShardIDOut", physicalShardIDOut);
+						}
+						e.detail("PhysicalShardIDOut", physicalShardIDOut);
 						for (auto physicalShardID : physicalShardIDSet) { // imprecise: evenly move out bytes
 							StorageMetrics newMetrics = metrics*(1.0/physicalShardIDSet.size());
 							self->shardsAffectedByTeamFailure->reduceMetricsForMoveOut(physicalShardID, newMetrics);
-							/*if (physicalShardIDSet.size()>1) {
+							if (physicalShardIDSet.size()>1) {
 								std::cout << newMetrics.bytes << " = " << metrics.bytes << " * " << 1.0/physicalShardIDSet.size() << "\n";
-							}*/
+							}
 						}
 						// std::cout << "Priority: " << rd.priority << "; " << "Move bytes: " << metrics.bytes << " from " << physicalShardIDSet.size() << " different physicalShard" << "\n";
 						// Update keyRangePhysicalShardIDMap must be right after adapting metrics for data move

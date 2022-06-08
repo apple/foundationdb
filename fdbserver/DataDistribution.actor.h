@@ -253,6 +253,7 @@ public:
 	PromiseStream<KeyRange> restartRequests;
 
 	// For PhysicalShard
+	std::map<Team, std::set<uint64_t>> teamPhysicalShardIDs; // the mapping from team to physicalShards
 	KeyRangeMap<uint64_t> keyRangePhysicalShardIDMap;
 	std::map<uint64_t, PhysicalShard> physicalShardCollection;
 	void updatePhysicalShardToTeams(uint64_t physicalShardID, 
@@ -281,7 +282,6 @@ private:
 	                 // usable_regions > 1
 	std::set<std::pair<Team, KeyRange>, OrderByTeamKey> team_shards;
 	std::map<UID, int> storageServerShards;
-	std::map<Team, std::set<uint64_t>> teamPhysicalShardIDs; // the mapping from team to physicalShards
 	void erase(Team team, KeyRange const& range);
 	void insert(Team team, KeyRange const& range);
 };
