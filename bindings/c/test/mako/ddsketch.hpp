@@ -92,7 +92,9 @@ public:
 			assert(index >= 0 && index < int(buckets.size()));
 			if (buckets[index] == std::numeric_limits<uint32_t>::max()) {
 				std::cerr << "Terminating. "
-				          << "Bucket " << index << " has hit maximum threshold in DDSketch.";
+				          << "Maximum threshold for statistics collection hit "
+				          << "has hit maximum size." << std::endl;
+				std::cerr << "Consider increasing --sampling to a smaller value.";
 				std::exit(-1);
 			}
 			buckets[index]++;
@@ -179,6 +181,11 @@ public:
 		assert(fabs(errorGuarantee - anotherSketch.errorGuarantee) < EPS &&
 		       anotherSketch.buckets.size() == buckets.size());
 		for (size_t i = 0; i < anotherSketch.buckets.size(); i++) {
+			// Check for overflow
+			if ((buckets[i] > 0) && (anotherSketch.buckets[i] > std::numeric_limits<uint32_t>::max() - buckets[i])) {
+				std::cerr << "Overflow detected when merging sketches! Exiting..." << std::endl;
+				std::exit(-1);
+			}
 			buckets[i] += anotherSketch.buckets[i];
 		}
 		populationSize += anotherSketch.populationSize;
