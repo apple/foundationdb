@@ -86,19 +86,68 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		state std::unordered_set<UID> excludes;
 		state std::unordered_set<UID> includes;
 		state int teamSize = 1;
+		std::vector<UID> teamA = wait(self->moveShard(self,
+		                                              cx,
+		                                              deterministicRandom()->randomUniqueID(),
+		                                              KeyRangeRef("TestKeyA"_sr, "TestKeyF"_sr),
+		                                              teamSize,
+		                                              includes,
+		                                              excludes));
+		excludes.insert(teamA.begin(), teamA.end());
+
+		state uint64_t sh0 = deterministicRandom()->randomUInt64();
+		state uint64_t sh1 = deterministicRandom()->randomUInt64();
+		state uint64_t sh2 = deterministicRandom()->randomUInt64();
+
+		// Move range [TestKeyA, TestKeyB) to sh0.
 		state std::vector<UID> teamA = wait(self->moveShard(self,
 		                                                    cx,
-		                                                    deterministicRandom()->randomUniqueID(),
+		                                                    UID(sh0, deterministicRandom()->randomUInt64()),
 		                                                    KeyRangeRef("TestKeyA"_sr, "TestKeyB"_sr),
 		                                                    teamSize,
 		                                                    includes,
 		                                                    excludes));
-		// state std::vector<UID> teamB = wait(self->moveShard(self, cx, KeyRangeRef(keyB, keyC), teamSize,
-		// &excludes));
+		includes.insert(teamA.begin(), teamA.end());
+		// Move range [TestKeyB, TestKeyC) to sh1, on the same server.
+		state std::vector<UID> teamB = wait(self->moveShard(self,
+		                                                    cx,
+		                                                    UID(sh1, deterministicRandom()->randomUInt64()),
+		                                                    KeyRangeRef("TestKeyB"_sr, "TestKeyC"_sr),
+		                                                    teamSize,
+		                                                    includes,
+		                                                    excludes));
+		ASSERT(std::equal(teamA.begin(), teamA.end(), teamB.begin()));
 
-		for (const auto& [key, value] : kvs) {
-			wait(self->readAndVerify(self, cx, key, value));
+		state int teamIdx = 0;
+		for (teamIdx = 0; teamIdx < teamA.size(); ++teamIdx) {
+			std::vector<StorageServerShard> shards =
+			    wait(self->getStorageServerShards(cx, teamA[teamIdx], KeyRangeRef("TestKeyA"_sr, "TestKeyC"_sr)));
+			ASSERT(shards.size() == 2);
+			ASSERT(shards[0].desiredId == sh0);
+			ASSERT(shards[1].desiredId == sh1);
+			TraceEvent("TestStorageServerShards", teamA[teamIdx]).detail("Shards", describe(shards));
 		}
+
+		state std::vector<UID> teamC = wait(self->moveShard(self,
+		                                                    cx,
+		                                                    UID(sh2, deterministicRandom()->randomUInt64()),
+		                                                    KeyRangeRef("TestKeyB"_sr, "TestKeyC"_sr),
+		                                                    teamSize,
+		                                                    includes,
+		                                                    excludes));
+		ASSERT(std::equal(teamA.begin(), teamA.end(), teamC.begin()));
+
+		for (teamIdx = 0; teamIdx < teamA.size(); ++teamIdx) {
+			std::vector<StorageServerShard> shards =
+			    wait(self->getStorageServerShards(cx, teamA[teamIdx], KeyRangeRef("TestKeyA"_sr, "TestKeyC"_sr)));
+			ASSERT(shards.size() == 2);
+			ASSERT(shards[0].desiredId == sh0);
+			ASSERT(shards[1].id == sh1);
+			ASSERT(shards[1].desiredId == sh2);
+			TraceEvent("TestStorageServerShards", teamA[teamIdx]).detail("Shards", describe(shards));
+		}
+
+		wait(self->validateData(self, cx, KeyRangeRef("TestKeyA"_sr, "TestKeyF"_sr), &kvs));
 		TraceEvent("TestValueVerified").log();
 
 		int ignore = wait(setDDMode(cx, 1));
@@ -129,6 +178,33 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		    .detail("DebugID", debugID);
 
 		return version;
+	}
+
+	ACTOR Future<Void> validateData(PhysicalShardMoveWorkLoad* self,
+	                                Database cx,
+	                                KeyRange range,
+	                                std::map<Key, Value>* kvs) {
+		state Transaction tr(cx);
+		loop {
+			state UID debugID = deterministicRandom()->randomUniqueID();
+			try {
+				tr.debugTransaction(debugID);
+				RangeResult res = wait(tr.getRange(range, CLIENT_KNOBS->TOO_MANY));
+				ASSERT(!res.more && res.size() < CLIENT_KNOBS->TOO_MANY);
+
+				for (const auto& kv : res) {
+					ASSERT((*kvs)[kv.key] == kv.value);
+				}
+				break;
+			} catch (Error& e) {
+				TraceEvent("TestCommitError").errorUnsuppressed(e);
+				wait(tr.onError(e));
+			}
+		}
+
+		TraceEvent("ValidateTestDataDone").detail("DebugID", debugID);
+
+		return Void();
 	}
 
 	ACTOR Future<Void> readAndVerify(PhysicalShardMoveWorkLoad* self,
@@ -209,7 +285,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		// Pick a random SS as the dest, keys will reside on a single server after the move.
 		std::vector<StorageServerInterface> interfs = wait(getStorageServers(cx));
 		ASSERT(interfs.size() > teamSize - includes.size());
-		while (dests.size() < teamSize) {
+		while (includes.size() < teamSize) {
 			const auto& interf = interfs[deterministicRandom()->randomInt(0, interfs.size())];
 			if (excludes.count(interf.uniqueID) == 0 && includes.count(interf.uniqueID) == 0) {
 				includes.insert(interf.uniqueID);
@@ -275,6 +351,22 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		TraceEvent("TestMoveShardComplete").detail("Range", keys.toString()).detail("NewTeam", describe(dests));
 
 		return dests;
+	}
+
+	ACTOR Future<std::vector<StorageServerShard>> getStorageServerShards(Database cx, UID ssId, KeyRange range) {
+		state Transaction tr(cx);
+		loop {
+			try {
+				Optional<Value> serverListValue = wait(tr.get(serverListKeyFor(ssId)));
+				ASSERT(serverListValue.present());
+				state StorageServerInterface ssi = decodeServerListValue(serverListValue.get());
+				GetShardStateRequest req(range, GetShardStateRequest::READABLE, true);
+				GetShardStateReply rep = wait(ssi.getShardState.getReply(req, TaskPriority::DefaultEndpoint));
+				return rep.shards;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
 	}
 
 	Future<bool> check(Database const& cx) override { return pass; }
