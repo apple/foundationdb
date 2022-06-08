@@ -323,7 +323,7 @@ moves = _MovedItems(__name__ + ".moves")
 _importer._add_module(moves, "moves")
 
 
-class Module_six_moves_urllib_parse(_LazyModule):
+class ModuleSixMovesUrllibParse(_LazyModule):
 
     """Lazy loading of moved objects in six.moves.urllib_parse"""
 
@@ -358,19 +358,19 @@ _urllib_parse_moved_attributes = [
     MovedAttribute("uses_relative", "urlparse", "urllib.parse"),
 ]
 for attr in _urllib_parse_moved_attributes:
-    setattr(Module_six_moves_urllib_parse, attr.name, attr)
+    setattr(ModuleSixMovesUrllibParse, attr.name, attr)
 del attr
 
-Module_six_moves_urllib_parse._moved_attributes = _urllib_parse_moved_attributes
+ModuleSixMovesUrllibParse._moved_attributes = _urllib_parse_moved_attributes
 
 _importer._add_module(
-    Module_six_moves_urllib_parse(__name__ + ".moves.urllib_parse"),
+    ModuleSixMovesUrllibParse(__name__ + ".moves.urllib_parse"),
     "moves.urllib_parse",
     "moves.urllib.parse",
 )
 
 
-class Module_six_moves_urllib_error(_LazyModule):
+class ModuleSixMovesUrllibError(_LazyModule):
 
     """Lazy loading of moved objects in six.moves.urllib_error"""
 
@@ -381,19 +381,19 @@ _urllib_error_moved_attributes = [
     MovedAttribute("ContentTooShortError", "urllib", "urllib.error"),
 ]
 for attr in _urllib_error_moved_attributes:
-    setattr(Module_six_moves_urllib_error, attr.name, attr)
+    setattr(ModuleSixMovesUrllibError, attr.name, attr)
 del attr
 
-Module_six_moves_urllib_error._moved_attributes = _urllib_error_moved_attributes
+ModuleSixMovesUrllibError._moved_attributes = _urllib_error_moved_attributes
 
 _importer._add_module(
-    Module_six_moves_urllib_error(__name__ + ".moves.urllib.error"),
+    ModuleSixMovesUrllibError(__name__ + ".moves.urllib.error"),
     "moves.urllib_error",
     "moves.urllib.error",
 )
 
 
-class Module_six_moves_urllib_request(_LazyModule):
+class ModuleSixMovesUrllibRequest(_LazyModule):
 
     """Lazy loading of moved objects in six.moves.urllib_request"""
 
@@ -436,19 +436,19 @@ _urllib_request_moved_attributes = [
     MovedAttribute("parse_keqv_list", "urllib2", "urllib.request"),
 ]
 for attr in _urllib_request_moved_attributes:
-    setattr(Module_six_moves_urllib_request, attr.name, attr)
+    setattr(ModuleSixMovesUrllibRequest, attr.name, attr)
 del attr
 
-Module_six_moves_urllib_request._moved_attributes = _urllib_request_moved_attributes
+ModuleSixMovesUrllibRequest._moved_attributes = _urllib_request_moved_attributes
 
 _importer._add_module(
-    Module_six_moves_urllib_request(__name__ + ".moves.urllib.request"),
+    ModuleSixMovesUrllibRequest(__name__ + ".moves.urllib.request"),
     "moves.urllib_request",
     "moves.urllib.request",
 )
 
 
-class Module_six_moves_urllib_response(_LazyModule):
+class ModuleSixMovesUrllibResponse(_LazyModule):
 
     """Lazy loading of moved objects in six.moves.urllib_response"""
 
@@ -460,19 +460,19 @@ _urllib_response_moved_attributes = [
     MovedAttribute("addinfourl", "urllib", "urllib.response"),
 ]
 for attr in _urllib_response_moved_attributes:
-    setattr(Module_six_moves_urllib_response, attr.name, attr)
+    setattr(ModuleSixMovesUrllibResponse, attr.name, attr)
 del attr
 
-Module_six_moves_urllib_response._moved_attributes = _urllib_response_moved_attributes
+ModuleSixMovesUrllibResponse._moved_attributes = _urllib_response_moved_attributes
 
 _importer._add_module(
-    Module_six_moves_urllib_response(__name__ + ".moves.urllib.response"),
+    ModuleSixMovesUrllibResponse(__name__ + ".moves.urllib.response"),
     "moves.urllib_response",
     "moves.urllib.response",
 )
 
 
-class Module_six_moves_urllib_robotparser(_LazyModule):
+class ModuleSixMovesUrllibRobotparser(_LazyModule):
 
     """Lazy loading of moved objects in six.moves.urllib_robotparser"""
 
@@ -481,21 +481,21 @@ _urllib_robotparser_moved_attributes = [
     MovedAttribute("RobotFileParser", "robotparser", "urllib.robotparser"),
 ]
 for attr in _urllib_robotparser_moved_attributes:
-    setattr(Module_six_moves_urllib_robotparser, attr.name, attr)
+    setattr(ModuleSixMovesUrllibRobotparser, attr.name, attr)
 del attr
 
-Module_six_moves_urllib_robotparser._moved_attributes = (
+ModuleSixMovesUrllibRobotparser._moved_attributes = (
     _urllib_robotparser_moved_attributes
 )
 
 _importer._add_module(
-    Module_six_moves_urllib_robotparser(__name__ + ".moves.urllib.robotparser"),
+    ModuleSixMovesUrllibRobotparser(__name__ + ".moves.urllib.robotparser"),
     "moves.urllib_robotparser",
     "moves.urllib.robotparser",
 )
 
 
-class Module_six_moves_urllib(types.ModuleType):
+class ModuleSixMovesUrllib(types.ModuleType):
 
     """Create a six.moves.urllib namespace that resembles the Python 3 namespace"""
 
@@ -511,7 +511,7 @@ class Module_six_moves_urllib(types.ModuleType):
 
 
 _importer._add_module(
-    Module_six_moves_urllib(__name__ + ".moves.urllib"), "moves.urllib"
+    ModuleSixMovesUrllib(__name__ + ".moves.urllib"), "moves.urllib"
 )
 
 
@@ -698,8 +698,8 @@ else:
     def byte2int(bs):
         return ord(bs[0])
 
-    def indexbytes(buf, i):
-        return ord(buf[i])
+    def indexbytes(buf, j):
+        return ord(buf[j])
 
     iterbytes = functools.partial(itertools.imap, ord)
     import StringIO
@@ -712,15 +712,15 @@ _add_doc(b, """Byte literal""")
 _add_doc(u, """Text literal""")
 
 
-def assertCountEqual(self, *args, **kwargs):
+def assert_count_equal(self, *args, **kwargs):
     return getattr(self, _assertCountEqual)(*args, **kwargs)
 
 
-def assertRaisesRegex(self, *args, **kwargs):
+def assert_raises_regex(self, *args, **kwargs):
     return getattr(self, _assertRaisesRegex)(*args, **kwargs)
 
 
-def assertRegex(self, *args, **kwargs):
+def assert_regex(self, *args, **kwargs):
     return getattr(self, _assertRegex)(*args, **kwargs)
 
 

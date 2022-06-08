@@ -48,6 +48,7 @@ TRUE_CODE = 0x27
 UUID_CODE = 0x30
 VERSIONSTAMP_CODE = 0x33
 
+
 # Reserved: Codes 0x03, 0x04, 0x23, and 0x24 are reserved for historical reasons.
 
 
@@ -57,7 +58,7 @@ def _find_terminator(v, pos):
         pos = v.find(b"\x00", pos)
         if pos < 0:
             return len(v)
-        if pos + 1 == len(v) or v[pos + 1 : pos + 2] != b"\xff":
+        if pos + 1 == len(v) or v[pos + 1: pos + 2] != b"\xff":
             return pos
         pos += 2
 
@@ -179,11 +180,11 @@ class Versionstamp(object):
                 + " bytes to read from"
             )
         else:
-            tr_version = v[start : start + cls._TR_VERSION_LEN]
+            tr_version = v[start: start + cls._TR_VERSION_LEN]
             if tr_version == cls._UNSET_TR_VERSION:
                 tr_version = None
             user_version = six.indexbytes(v, start + cls._TR_VERSION_LEN) * (
-                1 << 8
+                    1 << 8
             ) + six.indexbytes(v, start + cls._TR_VERSION_LEN + 1)
             return Versionstamp(tr_version, user_version)
 
@@ -192,20 +193,20 @@ class Versionstamp(object):
 
     def __repr__(self):
         return (
-            "fdb.tuple.Versionstamp("
-            + repr(self.tr_version)
-            + ", "
-            + repr(self.user_version)
-            + ")"
+                "fdb.tuple.Versionstamp("
+                + repr(self.tr_version)
+                + ", "
+                + repr(self.user_version)
+                + ")"
         )
 
     def __str__(self):
         return (
-            "Versionstamp("
-            + repr(self.tr_version)
-            + ", "
-            + str(self.user_version)
-            + ")"
+                "Versionstamp("
+                + repr(self.tr_version)
+                + ", "
+                + str(self.user_version)
+                + ")"
         )
 
     def to_bytes(self):
@@ -228,8 +229,8 @@ class Versionstamp(object):
     def __eq__(self, other):
         if isinstance(other, Versionstamp):
             return (
-                self.tr_version == other.tr_version
-                and self.user_version == other.user_version
+                    self.tr_version == other.tr_version
+                    and self.user_version == other.user_version
             )
         else:
             return False
@@ -267,19 +268,19 @@ def _decode(v, pos):
         return None, pos + 1
     elif code == BYTES_CODE:
         end = _find_terminator(v, pos + 1)
-        return v[pos + 1 : end].replace(b"\x00\xFF", b"\x00"), end + 1
+        return v[pos + 1: end].replace(b"\x00\xFF", b"\x00"), end + 1
     elif code == STRING_CODE:
         end = _find_terminator(v, pos + 1)
-        return v[pos + 1 : end].replace(b"\x00\xFF", b"\x00").decode("utf-8"), end + 1
-    elif code >= INT_ZERO_CODE and code < POS_INT_END:
+        return v[pos + 1: end].replace(b"\x00\xFF", b"\x00").decode("utf-8"), end + 1
+    elif INT_ZERO_CODE <= code < POS_INT_END:
         n = code - 20
         end = pos + 1 + n
-        return struct.unpack(">Q", b"\x00" * (8 - n) + v[pos + 1 : end])[0], end
-    elif code > NEG_INT_START and code < INT_ZERO_CODE:
+        return struct.unpack(">Q", b"\x00" * (8 - n) + v[pos + 1: end])[0], end
+    elif NEG_INT_START < code < INT_ZERO_CODE:
         n = 20 - code
         end = pos + 1 + n
         return (
-            struct.unpack(">Q", b"\x00" * (8 - n) + v[pos + 1 : end])[0]
+            struct.unpack(">Q", b"\x00" * (8 - n) + v[pos + 1: end])[0]
             - _size_limits[n],
             end,
         )
@@ -287,30 +288,30 @@ def _decode(v, pos):
         length = six.indexbytes(v, pos + 1)
         val = 0
         for i in _range(length):
-            val = val << 8
+            val <<= 8
             val += six.indexbytes(v, pos + 2 + i)
         return val, pos + 2 + length
     elif code == NEG_INT_START:  # 0x0b; Negative 9-255 byte integer
         length = six.indexbytes(v, pos + 1) ^ 0xFF
         val = 0
         for i in _range(length):
-            val = val << 8
+            val <<= 8
             val += six.indexbytes(v, pos + 2 + i)
         return val - (1 << (length * 8)) + 1, pos + 2 + length
     elif code == FLOAT_CODE:
         return (
             SingleFloat(
-                struct.unpack(">f", _float_adjust(v[pos + 1 : pos + 5], False))[0]
+                struct.unpack(">f", _float_adjust(v[pos + 1: pos + 5], False))[0]
             ),
             pos + 5,
         )
     elif code == DOUBLE_CODE:
         return (
-            struct.unpack(">d", _float_adjust(v[pos + 1 : pos + 9], False))[0],
+            struct.unpack(">d", _float_adjust(v[pos + 1: pos + 9], False))[0],
             pos + 9,
         )
     elif code == UUID_CODE:
-        return uuid.UUID(bytes=v[pos + 1 : pos + 17]), pos + 17
+        return uuid.UUID(bytes=v[pos + 1: pos + 17]), pos + 17
     elif code == FALSE_CODE:
         if fdb.is_api_version_selected() and fdb.get_api_version() < 500:
             raise ValueError(
@@ -393,7 +394,7 @@ def _encode(value, nested=False):
             -1,
         )
     elif isinstance(value, six.integer_types) and (
-        not isinstance(value, bool) or (hasattr(fdb, "_version") and fdb._version < 500)
+            not isinstance(value, bool) or (hasattr(fdb, "_version") and fdb._version < 500)
     ):
         if value == 0:
             return b"".join([six.int2byte(INT_ZERO_CODE)]), -1
@@ -556,7 +557,7 @@ def _code_for(value):
     elif isinstance(value, six.text_type):
         return STRING_CODE
     elif (not hasattr(fdb, "_version") or fdb._version >= 500) and isinstance(
-        value, bool
+            value, bool
     ):
         return FALSE_CODE
     elif isinstance(value, six.integer_types):

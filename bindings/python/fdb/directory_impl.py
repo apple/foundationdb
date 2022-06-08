@@ -72,9 +72,9 @@ class HighContentionAllocator(object):
             while True:
                 with tr_state.lock:
                     if window_advanced:
-                        del tr[self.counters : self.counters[start]]
+                        del tr[self.counters: self.counters[start]]
                         tr.options.set_next_write_no_write_conflict_range()
-                        del tr[self.recent : self.recent[start]]
+                        del tr[self.recent: self.recent[start]]
 
                     # Increment the allocation count for the current window
                     tr.add(self.counters[start], struct.pack("<q", 1))
@@ -219,7 +219,7 @@ class Directory(object):
 
     def _partition_subpath(self, path, directory_layer=None):
         directory_layer = directory_layer or self._directory_layer
-        return self._path[len(directory_layer._path) :] + path
+        return self._path[len(directory_layer._path):] + path
 
     # Called by all functions that could operate on this subspace directly (move_to, remove, remove_if_exists, exists)
     # Subclasses can choose to return a different directory layer to use for the operation if path is in fact ()
@@ -229,10 +229,10 @@ class Directory(object):
 
 class DirectoryLayer(Directory):
     def __init__(
-        self,
-        node_subspace=Subspace(rawPrefix=b"\xfe"),
-        content_subspace=Subspace(),
-        allow_manual_prefixes=False,
+            self,
+            node_subspace=Subspace(raw_prefix=b"\xfe"),
+            content_subspace=Subspace(),
+            allow_manual_prefixes=False,
     ):
         Directory.__init__(self, self)
 
@@ -259,7 +259,7 @@ class DirectoryLayer(Directory):
         return self._create_or_open_internal(tr, path, layer)
 
     def _create_or_open_internal(
-        self, tr, path, layer=None, prefix=None, allow_create=True, allow_open=True
+            self, tr, path, layer=None, prefix=None, allow_create=True, allow_open=True
     ):
         self._check_version(tr, write_access=False)
 
@@ -313,7 +313,8 @@ class DirectoryLayer(Directory):
 
             if not self._is_prefix_free(tr.snapshot, prefix):
                 raise Exception(
-                    "The directory layer has manually allocated prefixes that conflict with the automatic prefix allocator."
+                    "The directory layer has manually allocated prefixes that conflict with the automatic prefix " +
+                    "allocator. "
                 )
 
         elif not self._is_prefix_free(tr, prefix):
@@ -396,9 +397,9 @@ class DirectoryLayer(Directory):
 
         if old_node.is_in_partition() or new_node.is_in_partition():
             if (
-                not old_node.is_in_partition()
-                or not new_node.is_in_partition()
-                or old_node.path != new_node.path
+                    not old_node.is_in_partition()
+                    or not new_node.is_in_partition()
+                    or old_node.path != new_node.path
             ):
                 raise ValueError("Cannot move between partitions.")
 
@@ -539,10 +540,10 @@ class DirectoryLayer(Directory):
         if key.startswith(self._node_subspace.key()):
             return self._root_node
         for k, v in tr.get_range(
-            self._node_subspace.range(()).start,
-            self._node_subspace.pack((key,)) + b"\x00",
-            reverse=True,
-            limit=1,
+                self._node_subspace.range(()).start,
+                self._node_subspace.pack((key,)) + b"\x00",
+                reverse=True,
+                limit=1,
         ):
             prev_prefix = self._node_subspace.unpack(k)[0]
             if key.startswith(prev_prefix):
@@ -616,7 +617,7 @@ def _to_unicode_path(path):
         path = six.text_type(path)
 
     if isinstance(path, six.text_type):
-        return (path,)
+        return path,
 
     if isinstance(path, tuple):
         path = list(path)
@@ -644,23 +645,23 @@ class DirectorySubspace(Subspace, Directory):
     # to operate on the directory at that path.
 
     def __init__(self, path, prefix, directory_layer=directory, layer=None):
-        Subspace.__init__(self, rawPrefix=prefix)
+        Subspace.__init__(self, raw_prefix=prefix)
         Directory.__init__(self, directory_layer, path, layer)
 
     def __repr__(self):
         return (
-            "DirectorySubspace(path="
-            + repr(self._path)
-            + ", prefix="
-            + repr(self.rawPrefix)
-            + ")"
+                "DirectorySubspace(path="
+                + repr(self._path)
+                + ", prefix="
+                + repr(self.rawPrefix)
+                + ")"
         )
 
 
 class DirectoryPartition(DirectorySubspace):
     def __init__(self, path, prefix, parent_directory_layer):
         directory_layer = DirectoryLayer(
-            Subspace(rawPrefix=prefix + b"\xfe"), Subspace(rawPrefix=prefix)
+            Subspace(raw_prefix=prefix + b"\xfe"), Subspace(raw_prefix=prefix)
         )
         directory_layer._path = path
         DirectorySubspace.__init__(self, path, prefix, directory_layer, b"partition")
@@ -669,11 +670,11 @@ class DirectoryPartition(DirectorySubspace):
 
     def __repr__(self):
         return (
-            "DirectoryPartition(path="
-            + repr(self._path)
-            + ", prefix="
-            + repr(self.rawPrefix)
-            + ")"
+                "DirectoryPartition(path="
+                + repr(self._path)
+                + ", prefix="
+                + repr(self.rawPrefix)
+                + ")"
         )
 
     def __getitem__(self, name):
@@ -735,13 +736,13 @@ class _Node(object):
 
     def is_in_partition(self, tr=None, include_empty_subpath=False):
         return (
-            self.exists()
-            and self.layer(tr) == b"partition"
-            and (include_empty_subpath or len(self.target_path) > len(self.path))
+                self.exists()
+                and self.layer(tr) == b"partition"
+                and (include_empty_subpath or len(self.target_path) > len(self.path))
         )
 
     def get_partition_subpath(self):
-        return self.target_path[len(self.path) :]
+        return self.target_path[len(self.path):]
 
     def get_contents(self, directory_layer, tr=None):
         return directory_layer._contents_of_node(

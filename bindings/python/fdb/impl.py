@@ -22,7 +22,6 @@
 
 import ctypes
 import ctypes.util
-import datetime
 import functools
 import inspect
 import multiprocessing
@@ -31,10 +30,14 @@ import platform
 import sys
 import threading
 import traceback
+import weakref
+import struct
+import atexit
 
 import fdb
 from fdb import six
-from fdb.tuple import pack, unpack
+from fdb import fdboptions as _opts
+from fdb.tuple import pack
 
 _network_thread = None
 _network_thread_reentrant_lock = threading.RLock()
@@ -42,8 +45,6 @@ _network_thread_reentrant_lock = threading.RLock()
 _open_file = open
 
 _thread_local_storage = threading.local()
-
-import weakref
 
 
 class _NetworkOptions(object):
@@ -66,15 +67,11 @@ class _TransactionOptions(object):
         self._parent = weakref.proxy(tr)
 
 
-from fdb import fdboptions as _opts
-import types
-import struct
-
-
 def remove_prefix(text, prefix):
     if text.startswith(prefix):
         return text[len(prefix):]
     return text
+
 
 def option_wrap(code):
     def setfunc(self):
@@ -85,7 +82,7 @@ def option_wrap(code):
 
 def option_wrap_string(code):
     def setfunc(self, param=None):
-        param, length = optionalParamToBytes(param)
+        param, length = optional_param_to_bytes(param)
         self._parent._set_option(code, param, length)
 
     return setfunc
@@ -129,40 +126,40 @@ def fill_options(scope, predicates=False):
 
     for k, v in _dict.items():
         fname = (predicates and "is_" or "set_") + k.lower()
-        code, desc, paramType, paramDesc = v
+        code, desc, param_type, param_desc = v
         if predicates:
             f = pred_wrap(code)
         else:
-            if paramType == type(None):
+            if param_type == type(None):
                 f = option_wrap(code)
-            elif paramType == type(""):
+            elif param_type == type(""):
                 f = option_wrap_string(code)
-            elif paramType == type(
-                b""
+            elif param_type == type(
+                    b""
             ):  # This won't happen in Python 2 because type('') == type(b''), but it will happen in Python 3
                 f = option_wrap_bytes(code)
-            elif paramType == type(0):
+            elif param_type == type(0):
                 f = option_wrap_int(code)
             else:
                 raise TypeError(
-                    "Don't know how to set options of type %s" % paramType.__name__
+                    "Don't know how to set options of type %s" % param_type.__name__
                 )
         f.__name__ = fname
         f.__doc__ = desc
-        if paramDesc is not None:
-            f.__doc__ += "\n\nArgument is " + paramDesc
+        if param_desc is not None:
+            f.__doc__ += "\n\nArgument is " + param_desc
         klass = globals()["_" + scope + "s"]
         setattr(klass, fname, f)
 
 
 def add_operation(fname, v):
-    code, desc, paramType, paramDesc = v
+    code, desc, param_type, param_desc = v
     f = operation_wrap(code)
     f.__name__ = fname
     f.__doc__ = (
-        desc
-        + "\n\nArguments are the key to which the operation is applied and the "
-        + paramDesc
+            desc
+            + "\n\nArguments are the key to which the operation is applied and the "
+            + param_desc
     )
     setattr(globals()["Database"], fname, f)
     setattr(globals()["Transaction"], fname, f)
@@ -245,7 +242,7 @@ def transactional(*tr_args, **tr_kwargs):
     def decorate(func):
         try:
             parameter = tr_kwargs["parameter"]
-        except:
+        except Exception:
             parameter = "tr"
 
         wfunc = func
@@ -315,7 +312,8 @@ def transactional(*tr_args, **tr_kwargs):
                     # elapsed = (td.microseconds + (td.seconds + td.days * 24 * 3600) * 10**6) / float(10**6)
                     # if elapsed >= 1:
                     #     td = now - start
-                    #     print ('fdb WARNING: long transaction (%gs elapsed in transactional function \'%s\' (%d retries, %s))'
+                    #     print ('fdb WARNING: long transaction (%gs elapsed in transactional function \'%s\'
+                    #            (%d retries, %s))'
                     #            % (elapsed, func.__name__, retries, committed and 'committed' or 'not yet committed'))
                     #     last = now
 
@@ -454,13 +452,13 @@ class TransactionRead(_FDBBase):
         return FutureInt64(self.capi.fdb_transaction_get_read_version(self.tpointer))
 
     def get(self, key):
-        key = keyToBytes(key)
+        key = key_to_bytes(key)
         return Value(
             self.capi.fdb_transaction_get(self.tpointer, key, len(key), self._snapshot)
         )
 
     def get_key(self, key_selector):
-        key = keyToBytes(key_selector.key)
+        key = key_to_bytes(key_selector.key)
 
         return Key(
             self.capi.fdb_transaction_get_key(
@@ -474,18 +472,18 @@ class TransactionRead(_FDBBase):
         )
 
     def _get_range(self, begin, end, limit, streaming_mode, iteration, reverse):
-        beginKey = keyToBytes(begin.key)
-        endKey = keyToBytes(end.key)
+        begin_key = key_to_bytes(begin.key)
+        end_key = key_to_bytes(end.key)
 
         return FutureKeyValueArray(
             self.capi.fdb_transaction_get_range(
                 self.tpointer,
-                beginKey,
-                len(beginKey),
+                begin_key,
+                len(begin_key),
                 begin.or_equal,
                 begin.offset,
-                endKey,
-                len(endKey),
+                end_key,
+                len(end_key),
                 end.or_equal,
                 end.offset,
                 limit,
@@ -503,7 +501,7 @@ class TransactionRead(_FDBBase):
         return key_or_selector
 
     def get_range(
-        self, begin, end, limit=0, reverse=False, streaming_mode=StreamingMode.iterator
+            self, begin, end, limit=0, reverse=False, streaming_mode=StreamingMode.iterator
     ):
         if begin is None:
             begin = b""
@@ -514,7 +512,7 @@ class TransactionRead(_FDBBase):
         return FDBRange(self, begin, end, limit, reverse, streaming_mode)
 
     def get_range_startswith(self, prefix, *args, **kwargs):
-        prefix = keyToBytes(prefix)
+        prefix = key_to_bytes(prefix)
         return self.get_range(prefix, strinc(prefix), *args, **kwargs)
 
     def __getitem__(self, key):
@@ -571,24 +569,24 @@ class Transaction(TransactionRead):
         self.capi.fdb_transaction_set_option(self.tpointer, option, param, length)
 
     def _atomic_operation(self, opcode, key, param):
-        paramBytes = valueToBytes(param)
-        paramLength = len(paramBytes)
-        keyBytes = keyToBytes(key)
-        keyLength = len(keyBytes)
+        param_bytes = value_to_bytes(param)
+        param_length = len(param_bytes)
+        key_bytes = key_to_bytes(key)
+        key_length = len(key_bytes)
         self.capi.fdb_transaction_atomic_op(
-            self.tpointer, keyBytes, keyLength, paramBytes, paramLength, opcode
+            self.tpointer, key_bytes, key_length, param_bytes, param_length, opcode
         )
 
     def set(self, key, value):
-        key = keyToBytes(key)
-        value = valueToBytes(value)
+        key = key_to_bytes(key)
+        value = value_to_bytes(value)
         self.capi.fdb_transaction_set(self.tpointer, key, len(key), value, len(value))
 
     def clear(self, key):
         if isinstance(key, KeySelector):
             key = self.get_key(key)
 
-        key = keyToBytes(key)
+        key = key_to_bytes(key)
 
         self.capi.fdb_transaction_clear(self.tpointer, key, len(key))
 
@@ -602,41 +600,41 @@ class Transaction(TransactionRead):
         if isinstance(end, KeySelector):
             end = self.get_key(end)
 
-        begin = keyToBytes(begin)
-        end = keyToBytes(end)
+        begin = key_to_bytes(begin)
+        end = key_to_bytes(end)
 
         self.capi.fdb_transaction_clear_range(
             self.tpointer, begin, len(begin), end, len(end)
         )
 
     def clear_range_startswith(self, prefix):
-        prefix = keyToBytes(prefix)
+        prefix = key_to_bytes(prefix)
         return self.clear_range(prefix, strinc(prefix))
 
     def watch(self, key):
-        key = keyToBytes(key)
+        key = key_to_bytes(key)
         return FutureVoid(self.capi.fdb_transaction_watch(self.tpointer, key, len(key)))
 
     def add_read_conflict_range(self, begin, end):
-        begin = keyToBytes(begin)
-        end = keyToBytes(end)
+        begin = key_to_bytes(begin)
+        end = key_to_bytes(end)
         self.capi.fdb_transaction_add_conflict_range(
             self.tpointer, begin, len(begin), end, len(end), ConflictRangeType.read
         )
 
     def add_read_conflict_key(self, key):
-        key = keyToBytes(key)
+        key = key_to_bytes(key)
         self.add_read_conflict_range(key, key + b"\x00")
 
     def add_write_conflict_range(self, begin, end):
-        begin = keyToBytes(begin)
-        end = keyToBytes(end)
+        begin = key_to_bytes(begin)
+        end = key_to_bytes(end)
         self.capi.fdb_transaction_add_conflict_range(
             self.tpointer, begin, len(begin), end, len(end), ConflictRangeType.write
         )
 
     def add_write_conflict_key(self, key):
-        key = keyToBytes(key)
+        key = key_to_bytes(key)
         self.add_write_conflict_range(key, key + b"\x00")
 
     def commit(self):
@@ -726,7 +724,7 @@ class Future(_FDBBase):
 
             try:
                 semaphore.acquire()
-            except:
+            except Exception:
                 # If this semaphore didn't actually get released, then we need to replace our thread-local
                 # copy so that later callers still function correctly
                 _thread_local_storage.future_block_semaphore = (
@@ -740,13 +738,13 @@ class Future(_FDBBase):
             del cbfunc[:]
             try:
                 callback(self)
-            except:
+            except Exception:
                 try:
                     sys.stderr.write(
                         "Discarding uncaught exception from user FDB callback:\n"
                     )
                     traceback.print_exception(*sys.exc_info(), file=sys.stderr)
-                except:
+                except Exception:
                     pass
 
         cbfunc = [_CBFUNC(cb_and_delref)]
@@ -840,7 +838,7 @@ class FutureKeyValueArray(Future):
                     ctypes.string_at(x.key, x.key_length),
                     ctypes.string_at(x.value, x.value_length),
                 )
-                for x in kvs[0 : count.value]
+                for x in kvs[0: count.value]
             ],
             count.value,
             more.value,
@@ -860,7 +858,7 @@ class FutureKeyArray(Future):
         self.capi.fdb_future_get_key_array(
             self.fpointer, ctypes.byref(ks), ctypes.byref(count)
         )
-        return [ctypes.string_at(x.key, x.key_length) for x in ks[0 : count.value]]
+        return [ctypes.string_at(x.key, x.key_length) for x in ks[0: count.value]]
 
 
 class FutureStringArray(Future):
@@ -871,10 +869,10 @@ class FutureStringArray(Future):
         self.capi.fdb_future_get_string_array(
             self.fpointer, ctypes.byref(strings), ctypes.byref(count)
         )
-        return list(strings[0 : count.value])
+        return list(strings[0: count.value])
 
 
-class replaceable_property(object):
+class ReplaceableProperty(object):
     def __get__(self, obj, cls=None):
         return self.method(obj)
 
@@ -893,7 +891,7 @@ class LazyFuture(Future):
     def _getter(self):
         raise NotImplementedError
 
-    @replaceable_property
+    @ReplaceableProperty
     def value(self):
         self.block_until_ready()
 
@@ -901,10 +899,10 @@ class LazyFuture(Future):
             self._getter()
             self._release_memory()
 
-        except:
+        except Exception:
             e = sys.exc_info()
             if not (
-                isinstance(e[1], FDBError) and e[1].code == 1102
+                    isinstance(e[1], FDBError) and e[1].code == 1102
             ):  # future_released
                 raise
 
@@ -1001,10 +999,10 @@ def makewrapper(func):
 
 for i in dir(bytes):
     if not i.startswith("_") or i in (
-        "__getitem__",
-        "__getslice__",
-        "__hash__",
-        "__len__",
+            "__getitem__",
+            "__getslice__",
+            "__hash__",
+            "__len__",
     ):
         setattr(FutureString, i, makewrapper(getattr(bytes, i)))
 
@@ -1052,13 +1050,13 @@ class FormerFuture(_FDBBase):
     def on_ready(self, callback):
         try:
             callback(self)
-        except:
+        except Exception:
             try:
                 sys.stderr.write(
                     "Discarding uncaught exception from user FDB callback:\n"
                 )
                 traceback.print_exception(*sys.exc_info(), file=sys.stderr)
-            except:
+            except Exception:
                 pass
 
 
@@ -1075,7 +1073,7 @@ class _TransactionCreator(_FDBBase):
         return _TransactionCreator.__creator_get_key(self, key_selector)
 
     def get_range(
-        self, begin, end, limit=0, reverse=False, streaming_mode=StreamingMode.want_all
+            self, begin, end, limit=0, reverse=False, streaming_mode=StreamingMode.want_all
     ):
         return _TransactionCreator.__creator_get_range(
             self, begin, end, limit, reverse, streaming_mode
@@ -1119,7 +1117,7 @@ class _TransactionCreator(_FDBBase):
     def _atomic_operation(self, opcode, key, param):
         _TransactionCreator.__creator_atomic_operation(self, opcode, key, param)
 
-    #### Transaction implementations ####
+    # Transaction implementations #
     @staticmethod
     @transactional
     def __creator_getitem(tr, key):
@@ -1181,8 +1179,8 @@ class _TransactionCreator(_FDBBase):
     # Asynchronous transactions
     @staticmethod
     def declare_asynchronous_transactions():
-        Return = asyncio.Return
-        From = asyncio.From
+        asyncio_return = asyncio.Return
+        asyncio_from = asyncio.From
         coroutine = asyncio.coroutine
 
         class TransactionCreator:
@@ -1190,24 +1188,22 @@ class _TransactionCreator(_FDBBase):
             @transactional
             @coroutine
             def __creator_getitem(tr, key):
-                # raise Return(( yield From( tr[key] ) ))
-                raise Return(tr[key])
-                yield None
+                # raise asyncio_return(( yield asyncio_from( tr[key] ) ))
+                raise asyncio_return(tr[key])
 
             @staticmethod
             @transactional
             @coroutine
             def __creator_get_key(tr, key_selector):
-                raise Return(tr.get_key(key_selector))
-                yield None
+                raise asyncio_return(tr.get_key(key_selector))
 
             @staticmethod
             @transactional
             @coroutine
             def __creator_get_range(tr, begin, end, limit, reverse, streaming_mode):
-                raise Return(
+                raise asyncio_return(
                     (
-                        yield From(
+                        yield asyncio_from(
                             tr.get_range(
                                 begin, end, limit, reverse, streaming_mode
                             ).to_list()
@@ -1219,9 +1215,9 @@ class _TransactionCreator(_FDBBase):
             @transactional
             @coroutine
             def __creator_get_range_startswith(tr, prefix, *args, **kwargs):
-                raise Return(
+                raise asyncio_return(
                     (
-                        yield From(
+                        yield asyncio_from(
                             tr.get_range_startswith(prefix, *args, **kwargs).to_list()
                         )
                     )
@@ -1232,56 +1228,49 @@ class _TransactionCreator(_FDBBase):
             @coroutine
             def __creator_setitem(tr, key, value):
                 tr[key] = value
-                raise Return()
-                yield None
+                raise asyncio_return()
 
             @staticmethod
             @transactional
             @coroutine
             def __creator_clear_range_startswith(tr, prefix):
                 tr.clear_range_startswith(prefix)
-                raise Return()
-                yield None
+                raise asyncio_return()
 
             @staticmethod
             @transactional
             @coroutine
             def __creator_get_and_watch(tr, key):
                 v = tr.get(key)
-                raise Return(v, tr.watch(key))
-                yield None
+                raise asyncio_return(v, tr.watch(key))
 
             @staticmethod
             @transactional
             @coroutine
             def __creator_set_and_watch(tr, key, value):
                 tr.set(key, value)
-                raise Return(tr.watch(key))
-                yield None
+                raise asyncio_return(tr.watch(key))
 
             @staticmethod
             @transactional
             @coroutine
             def __creator_clear_and_watch(tr, key):
                 del tr[key]
-                raise Return(tr.watch(key))
-                yield None
+                raise asyncio_return(tr.watch(key))
 
             @staticmethod
             @transactional
             @coroutine
             def __creator_delitem(tr, key_or_slice):
                 del tr[key_or_slice]
-                raise Return()
-                yield None
+                raise asyncio_return()
 
             @staticmethod
             @transactional
             @coroutine
             def __creator_atomic_operation(tr, opcode, key, param):
                 tr._atomic_operation(opcode, key, param)
-                raise Return()
-                yield None
+                raise asyncio_return()
 
         return TransactionCreator
 
@@ -1357,7 +1346,7 @@ class Cluster(_FDBBase):
 def create_database(cluster_file=None):
     pointer = ctypes.c_void_p()
     _FDBBase.capi.fdb_create_database(
-        optionalParamToBytes(cluster_file)[0], ctypes.byref(pointer)
+        optional_param_to_bytes(cluster_file)[0], ctypes.byref(pointer)
     )
     return Database(pointer)
 
@@ -1446,7 +1435,7 @@ class KeyValue(object):
         return KVIter(self)
 
 
-def check_error_code(code, func, arguments):
+def check_error_code(code):
     if code:
         raise FDBError(code)
     return None
@@ -1496,7 +1485,8 @@ def read_pth_file():
 
 for pth in [
     lambda: os.path.join(this_dir, capi_name),
-    # lambda: os.path.join(this_dir, '../../lib', capi_name),  # For compatibility with existing unix installation process... should be removed
+    # lambda: os.path.join(this_dir, '../../lib', capi_name),  # For compatibility with existing unix installation
+    # process... should be removed
     read_pth_file,
 ]:
     p = pth()
@@ -1506,20 +1496,20 @@ for pth in [
 else:
     try:
         _capi = ctypes.CDLL(capi_name)
-    except:
+    except Exception:
         # The system python on OS X can't find the library installed to /usr/local/lib if SIP is enabled
         # find_library does find the location in /usr/local/lib, so if the above fails fallback to using it
         lib_path = ctypes.util.find_library(capi_name)
         if lib_path is not None:
             try:
                 _capi = ctypes.CDLL(lib_path)
-            except:
+            except Exception:
                 raise Exception("Unable to locate the FoundationDB API shared library!")
         else:
             raise Exception("Unable to locate the FoundationDB API shared library!")
 
 
-def keyToBytes(k):
+def key_to_bytes(k):
     if hasattr(k, "as_foundationdb_key"):
         k = k.as_foundationdb_key()
     if not isinstance(k, bytes):
@@ -1527,7 +1517,7 @@ def keyToBytes(k):
     return k
 
 
-def valueToBytes(v):
+def value_to_bytes(v):
     if hasattr(v, "as_foundationdb_value"):
         v = v.as_foundationdb_value()
     if not isinstance(v, bytes):
@@ -1535,7 +1525,7 @@ def valueToBytes(v):
     return v
 
 
-def paramToBytes(v):
+def param_to_bytes(v):
     if isinstance(v, FutureString):
         v = v.value
     if not isinstance(v, bytes) and hasattr(v, "encode"):
@@ -1545,12 +1535,12 @@ def paramToBytes(v):
     return v
 
 
-def optionalParamToBytes(v):
+def optional_param_to_bytes(v):
     if v is None:
-        return (None, 0)
+        return None, 0
     else:
-        v = paramToBytes(v)
-        return (v, len(v))
+        v = param_to_bytes(v)
+        return v, len(v)
 
 
 _FDBBase.capi = _capi
@@ -1881,6 +1871,7 @@ if hasattr(ctypes.pythonapi, "Py_IncRef"):
     def _pin_callback(cb):
         ctypes.pythonapi.Py_IncRef(ctypes.py_object(cb))
 
+
     def _unpin_callback(cb):
         ctypes.pythonapi.Py_DecRef(ctypes.py_object(cb))
 
@@ -1981,7 +1972,7 @@ def init(event_model=None):
                     def _gevent_block_until_ready(self):
                         e = self.Event()
 
-                        def is_ready_cb(future):
+                        def is_ready_cb():
                             e.set()
 
                         self.on_ready(is_ready_cb)
@@ -2046,10 +2037,10 @@ def init(event_model=None):
                         return it()
 
                     FDBRange.iterate = iterate
-                    AT = _TransactionCreator.declare_asynchronous_transactions()
-                    for name in dir(AT):
+                    at = _TransactionCreator.declare_asynchronous_transactions()
+                    for name in dir(at):
                         if name.startswith("__TransactionCreator__creator_"):
-                            setattr(_TransactionCreator, name, getattr(AT, name))
+                            setattr(_TransactionCreator, name, getattr(at, name))
 
                     def to_list(self):
                         if self._mode == StreamingMode.iterator:
@@ -2078,7 +2069,7 @@ def init(event_model=None):
             # been setup, so if we get here without exception we know
             # it has been.
             _network_thread.start()
-        except:
+        except Exception:
             # We assigned _network_thread but didn't succeed in init,
             # so clear it out so the next caller has a chance
             _network_thread = None
@@ -2107,7 +2098,7 @@ def open(cluster_file=None, event_model=None):
         if cluster_file not in open_databases:
             open_databases[cluster_file] = create_database(cluster_file)
 
-        return open_databases[(cluster_file)]
+        return open_databases[cluster_file]
 
 
 def open_v609(cluster_file=None, database_name=b"DB", event_model=None):
@@ -2119,9 +2110,6 @@ def open_v609(cluster_file=None, database_name=b"DB", event_model=None):
 
 def open_v13(cluster_id_path, database_name, local_address=None, event_model=None):
     return open_v609(cluster_id_path, database_name, event_model)
-
-
-import atexit
 
 
 @atexit.register

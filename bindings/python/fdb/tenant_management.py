@@ -27,16 +27,17 @@ from fdb import impl as _impl
 
 _tenant_map_prefix = b"\xff\xff/management/tenant_map/"
 
+
 # If the existence_check_marker is an empty list, then check whether the tenant exists.
 # After the check, append an item to the existence_check_marker list so that subsequent
 # calls to this function will not perform the existence check.
 #
 # If the existence_check_marker is a non-empty list, return None.
-def _check_tenant_existence(tr, key, existence_check_marker, force_maybe_commited):
+def _check_tenant_existence(tr, key, existence_check_marker, force_maybe_committed):
     if not existence_check_marker:
         existing_tenant = tr[key].wait()
         existence_check_marker.append(None)
-        if force_maybe_commited:
+        if force_maybe_committed:
             raise _impl.FDBError(1021)  # maybe_committed
         return existing_tenant != None
 
@@ -53,16 +54,16 @@ def _check_tenant_existence(tr, key, existence_check_marker, force_maybe_commite
 # If the existence_check_marker is a non-empty list, then the existence check is skipped.
 @_impl.transactional
 def _create_tenant_impl(
-    tr, tenant_name, existence_check_marker, force_existence_check_maybe_committed=False
+        tr, tenant_name, existence_check_marker, force_existence_check_maybe_committed=False
 ):
     tr.options.set_special_key_space_enable_writes()
     key = b"%s%s" % (_tenant_map_prefix, tenant_name)
 
     if (
-        _check_tenant_existence(
-            tr, key, existence_check_marker, force_existence_check_maybe_committed
-        )
-        is True
+            _check_tenant_existence(
+                tr, key, existence_check_marker, force_existence_check_maybe_committed
+            )
+            is True
     ):
         raise _impl.FDBError(2132)  # tenant_already_exists
 
@@ -79,16 +80,16 @@ def _create_tenant_impl(
 # If the existence_check_marker is a non-empty list, then the existence check is skipped.
 @_impl.transactional
 def _delete_tenant_impl(
-    tr, tenant_name, existence_check_marker, force_existence_check_maybe_committed=False
+        tr, tenant_name, existence_check_marker, force_existence_check_maybe_committed=False
 ):
     tr.options.set_special_key_space_enable_writes()
     key = b"%s%s" % (_tenant_map_prefix, tenant_name)
 
     if (
-        _check_tenant_existence(
-            tr, key, existence_check_marker, force_existence_check_maybe_committed
-        )
-        is False
+            _check_tenant_existence(
+                tr, key, existence_check_marker, force_existence_check_maybe_committed
+            )
+            is False
     ):
         raise _impl.FDBError(2131)  # tenant_not_found
 
@@ -113,6 +114,7 @@ class FDBTenantList(object):
             tenant_name = _impl.remove_prefix(next_item.key, _tenant_map_prefix)
             yield _impl.KeyValue(tenant_name, next_item.value)
 
+
 # Lists the tenants created in the cluster, specified by the begin and end range.
 # Also limited in number of results by the limit parameter.
 # Returns an iterable object that yields KeyValue objects
@@ -127,6 +129,7 @@ def _list_tenants_impl(tr, begin, end, limit):
     rangeresult = tr.get_range(begin_key, end_key, limit)
 
     return FDBTenantList(rangeresult)
+
 
 def create_tenant(db_or_tr, tenant_name):
     tenant_name = _impl.process_tenant_name(tenant_name)
@@ -148,6 +151,7 @@ def delete_tenant(db_or_tr, tenant_name):
         [] if not isinstance(db_or_tr, _impl.TransactionRead) else [None]
     )
     _delete_tenant_impl(db_or_tr, tenant_name, existence_check_marker)
+
 
 def list_tenants(db_or_tr, begin, end, limit):
     begin = _impl.process_tenant_name(begin)

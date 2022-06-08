@@ -24,8 +24,8 @@ import fdb.tuple
 
 
 class Subspace(object):
-    def __init__(self, prefixTuple=tuple(), rawPrefix=b""):
-        self.rawPrefix = fdb.tuple.pack(prefixTuple, prefix=rawPrefix)
+    def __init__(self, prefix_tuple=tuple(), raw_prefix=b""):
+        self.rawPrefix = fdb.tuple.pack(prefix_tuple, prefix=raw_prefix)
 
     def __repr__(self):
         return "Subspace(rawPrefix=" + repr(self.rawPrefix) + ")"

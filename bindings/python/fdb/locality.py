@@ -45,7 +45,9 @@ def _get_boundary_keys(db_or_tr, begin, end):
             )
             if first_time:
                 first_time = False
-                yield None  # trick to get the above get_range to be asynchronously dispatched before get_boundary_keys() returns.
+                yield None
+                # trick to get the above get_range to be asynchronously dispatched before
+                # get_boundary_keys() returns.
             for kv in kvs:
                 yield kv.key[13:]
                 begin = kv.key[13:] + b"\x00"
@@ -59,8 +61,8 @@ def _get_boundary_keys(db_or_tr, begin, end):
 
 
 def get_boundary_keys(db_or_tr, begin, end):
-    begin = _impl.keyToBytes(begin)
-    end = _impl.keyToBytes(end)
+    begin = _impl.key_to_bytes(begin)
+    end = _impl.key_to_bytes(end)
 
     gen = _get_boundary_keys(db_or_tr, begin, end)
     try:
@@ -72,9 +74,9 @@ def get_boundary_keys(db_or_tr, begin, end):
 
 @_impl.transactional
 def get_addresses_for_key(tr, key):
-    keyBytes = _impl.keyToBytes(key)
+    key_bytes = _impl.key_to_bytes(key)
     return _impl.FutureStringArray(
         tr.capi.fdb_transaction_get_addresses_for_key(
-            tr.tpointer, keyBytes, len(keyBytes)
+            tr.tpointer, key_bytes, len(key_bytes)
         )
     )
