@@ -552,7 +552,7 @@ Optional<std::pair<LeaderInfo, bool>> getLeader(const std::vector<Optional<Leade
 	          maskedNominees.end(),
 	          [](const std::pair<UID, int>& l, const std::pair<UID, int>& r) { return l.first < r.first; });
 
-	int bestCount = 0;
+	int bestCount = 1;
 	int bestIdx = 0;
 	int currentIdx = 0;
 	int curCount = 1;
@@ -560,17 +560,13 @@ Optional<std::pair<LeaderInfo, bool>> getLeader(const std::vector<Optional<Leade
 		if (maskedNominees[currentIdx].first == maskedNominees[i].first) {
 			curCount++;
 		} else {
-			if (curCount > bestCount) {
-				bestIdx = currentIdx;
-				bestCount = curCount;
-			}
 			currentIdx = i;
 			curCount = 1;
 		}
-	}
-	if (curCount > bestCount) {
-		bestIdx = currentIdx;
-		bestCount = curCount;
+		if (curCount > bestCount) {
+			bestIdx = currentIdx;
+			bestCount = curCount;
+		}
 	}
 
 	bool majority = bestCount >= nominees.size() / 2 + 1;
@@ -628,7 +624,14 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderOneGeneration(Reference<IClusterCon
 
 			outSerializedLeaderInfo->set(leader.get().first.serializedInfo);
 		}
-		wait(nomineeChange.onTrigger() || allActors);
+		choose {
+			when(wait(nomineeChange.onTrigger())) {
+				TraceEvent("MonitorLeaderChangeLoop1").log();
+			}
+			when(wait(allActors)) { 
+				TraceEvent("MonitorLeaderChangeLoop2").log();
+			}
+		}
 	}
 }
 

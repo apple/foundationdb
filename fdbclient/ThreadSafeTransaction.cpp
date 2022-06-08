@@ -586,11 +586,12 @@ void ThreadSafeApi::runNetwork() {
 		}
 	}
 
+	TraceEvent("RunNetworkTerminating");
+	closeTraceFile();
+
 	if (runErr.present()) {
 		throw runErr.get();
 	}
-
-	TraceEvent("RunNetworkTerminating");
 }
 
 void ThreadSafeApi::stopNetwork() {
