@@ -301,7 +301,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                "available_bytes":0,
                "limit_bytes":0,
                "unused_allocated_memory":0,
-               "used_bytes":0
+               "used_bytes":0,
+               "rss_bytes":0
             },
             "messages":[
                {

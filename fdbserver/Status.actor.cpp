@@ -422,10 +422,11 @@ static JsonBuilderObject getBounceImpactInfo(int recoveryStatusCode) {
 }
 
 struct MachineMemoryInfo {
-	double memoryUsage;
+	double memoryUsage; // virtual memory usage
+	double rssUsage; // RSS memory usage
 	double aggregateLimit;
 
-	MachineMemoryInfo() : memoryUsage(0), aggregateLimit(0) {}
+	MachineMemoryInfo() : memoryUsage(0), rssUsage(0), aggregateLimit(0) {}
 
 	bool valid() { return memoryUsage >= 0; }
 	void invalidate() { memoryUsage = -1; }
@@ -789,6 +790,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 			if (memInfo->second.valid()) {
 				if (processMetrics.size() > 0 && programStart.size() > 0) {
 					memInfo->second.memoryUsage += processMetrics.getDouble("Memory");
+					memInfo->second.rssUsage += processMetrics.getDouble("ResidentMemory");
 					memInfo->second.aggregateLimit += programStart.getDouble("MemoryLimit");
 				} else
 					memInfo->second.invalidate();
@@ -979,6 +981,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 				statusObj["network"] = networkObj;
 
 				memoryObj.setKeyRawNumber("used_bytes", processMetrics.getValue("Memory"));
+				memoryObj.setKeyRawNumber("rss_bytes", processMetrics.getValue("ResidentMemory"));
 				memoryObj.setKeyRawNumber("unused_allocated_memory", processMetrics.getValue("UnusedAllocatedMemory"));
 			}
 
@@ -1011,7 +1014,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 				if (machineMemInfo.valid() && memoryLimit > 0) {
 					ASSERT(machineMemInfo.aggregateLimit > 0);
 					int64_t memory =
-					    (availableMemory + machineMemInfo.memoryUsage) * memoryLimit / machineMemInfo.aggregateLimit;
+					    (availableMemory + machineMemInfo.rssUsage) * memoryLimit / machineMemInfo.aggregateLimit;
 					memoryObj["available_bytes"] = std::min<int64_t>(std::max<int64_t>(memory, 0), memoryLimit);
 				}
 			}
