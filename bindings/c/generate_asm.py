@@ -30,8 +30,8 @@ functions = {}
 func_re = re.compile("^\s*FDB_API_(?:CHANGED|REMOVED)\s*\(\s*([^,]*),\s*([^)]*)\).*")
 
 with open(source, "r") as srcfile:
-    for l in srcfile:
-        m = func_re.match(l)
+    for line in srcfile:
+        m = func_re.match(line)
         if m:
             func, ver = m.groups()
             if func not in functions:
@@ -71,10 +71,10 @@ def write_unix_asm(asmfile, functions, prefix):
             asmfile.write("\n.text\n")
             for f in functions:
                 if cpu == "ppc64le":
-                    asmfile.write("\n.LC%d:\n" % (i))
-                    asmfile.write("\t.quad \tfdb_api_ptr_%s\n" % (f))
+                    asmfile.write("\n.LC%d:\n" % i)
+                    asmfile.write("\t.quad \tfdb_api_ptr_%s\n" % f)
                     asmfile.write("\t.align 2\n")
-                    i = i + 1
+                    i += 1
                 asmfile.write("\t.global %s\n\t.type %s, @function\n" % (f, f))
     i = 0
     for f in functions:
@@ -114,26 +114,26 @@ def write_unix_asm(asmfile, functions, prefix):
 
         if cpu == "aarch64":
             if os == "osx":
-                asmfile.write("\tadrp x8, _fdb_api_ptr_%s@GOTPAGE\n" % (f))
-                asmfile.write("\tldr x8, [x8, _fdb_api_ptr_%s@GOTPAGEOFF]\n" % (f))
+                asmfile.write("\tadrp x8, _fdb_api_ptr_%s@GOTPAGE\n" % f)
+                asmfile.write("\tldr x8, [x8, _fdb_api_ptr_%s@GOTPAGEOFF]\n" % f)
             elif os == "linux":
-                asmfile.write("\tadrp x8, :got:fdb_api_ptr_%s\n" % (f))
-                asmfile.write("\tldr x8, [x8, #:got_lo12:fdb_api_ptr_%s]\n" % (f))
+                asmfile.write("\tadrp x8, :got:fdb_api_ptr_%s\n" % f)
+                asmfile.write("\tldr x8, [x8, #:got_lo12:fdb_api_ptr_%s]\n" % f)
             else:
                 assert False, "{} not supported for Arm yet".format(os)
             asmfile.write("\tldr x8, [x8]\n")
             asmfile.write("\tbr x8\n")
         elif cpu == "ppc64le":
-            asmfile.write("\n.LCF%d:\n" % (i))
-            asmfile.write("\taddis 2,12,.TOC.-.LCF%d@ha\n" % (i))
-            asmfile.write("\taddi 2,2,.TOC.-.LCF%d@l\n" % (i))
+            asmfile.write("\n.LCF%d:\n" % i)
+            asmfile.write("\taddis 2,12,.TOC.-.LCF%d@ha\n" % i)
+            asmfile.write("\taddi 2,2,.TOC.-.LCF%d@l\n" % i)
             asmfile.write("\tmflr 0\n")
             asmfile.write("\tstd 31, -8(1)\n")
             asmfile.write("\tstd     0,16(1)\n")
             asmfile.write("\tstdu    1,-192(1)\n")
             # asmfile.write("\tstd 2,24(1)\n")
-            asmfile.write("\taddis 11,2,.LC%d@toc@ha\n" % (i))
-            asmfile.write("\tld 11,.LC%d@toc@l(11)\n" % (i))
+            asmfile.write("\taddis 11,2,.LC%d@toc@ha\n" % i)
+            asmfile.write("\tld 11,.LC%d@toc@l(11)\n" % i)
             asmfile.write("\tld 12,0(11)\n")
             asmfile.write("\tstd 2,24(1)\n")
             asmfile.write("\tlwa 11,344(1)\n")
@@ -162,7 +162,7 @@ def write_unix_asm(asmfile, functions, prefix):
             asmfile.write("\tld 31, -8(1)\n")
             asmfile.write("\tmtlr 0\n")
             asmfile.write("\tblr\n")
-            i = i + 1
+            i += 1
         else:
             asmfile.write(
                 "\tmov r11, qword ptr [%sfdb_api_ptr_%s@GOTPCREL+rip]\n" % (prefix, f)
