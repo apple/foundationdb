@@ -48,6 +48,7 @@ public:
 	int write(SendBuffer const* buffer, int limit) override;
 	NetworkAddress getPeerAddress() const override;
 	UID getDebugID() const override;
+	bool hasTrustedPeer() const override;
 	static Future<std::vector<NetworkAddress>> resolveTCPEndpoint(const std::string& host,
 	                                                              const std::string& service,
 	                                                              DNSCache* dnsCache);

@@ -130,6 +130,10 @@ UID SimExternalConnection::getDebugID() const {
 	return dbgid;
 }
 
+bool SimExternalConnection::hasTrustedPeer() const {
+	return true;
+}
+
 std::vector<NetworkAddress> SimExternalConnection::resolveTCPEndpointBlocking(const std::string& host,
                                                                               const std::string& service,
                                                                               DNSCache* dnsCache) {
