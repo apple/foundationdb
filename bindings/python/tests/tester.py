@@ -665,8 +665,8 @@ class Tester:
                         result += [tenant.key]
                         try:
                             metadata = json.loads(tenant.value)
-                            metadata["id"]
-                            metadata["prefix"]
+                            _ = metadata["id"]
+                            _ = metadata["prefix"]
                         except (json.decoder.JSONDecodeError, KeyError):
                             assert False, "Invalid Tenant Metadata"
                     inst.push(fdb.tuple.pack(tuple(result)))
