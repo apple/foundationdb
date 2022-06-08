@@ -32,22 +32,11 @@ async fn handle_frame(
         Some(uid::WLTOKEN::PingPacket) => {
             super::handlers::ping_request::handle(parsed_file_identifier, frame).await?
         }
-        Some(uid::WLTOKEN::NetworkTest) => {
+        Some(uid::WLTOKEN::ReservedForTesting) => {
             super::handlers::network_test::handle(parsed_file_identifier, frame).await?
         }
-        Some(uid::WLTOKEN::EndpointNotFound) => {
-            println!("EndpointNotFound payload: {:x?}", frame);
-            println!("{:x?} {:04x?}", frame.token, parsed_file_identifier);
-            None
-        }
-        Some(uid::WLTOKEN::AuthTenant) => {
-            println!("AuthTenant payload: {:x?}", frame);
-            println!("{:x?} {:04x?}", frame.token, parsed_file_identifier);
-            None
-        }
-        Some(uid::WLTOKEN::UnauthorizedEndpoint) => {
-            println!("UnauthorizedEndpoint payload: {:x?}", frame);
-            println!("{:x?} {:04x?}", frame.token, parsed_file_identifier);
+        Some(wltoken) => {
+            println!("Got unhandled request for well-known enpoint {:?}: {:x?} {:04x?}", wltoken, frame.token, parsed_file_identifier);
             None
         }
         None => {

@@ -115,3 +115,33 @@ One of the main features motivating "Stable Endpoints" is the ability to downloa
 ```
 ​
 4. Well known endpoints no longer need to be added in a particular order. Instead you reserve the number of well known endpoints ahead of time and then you can add them in any order.
+
+### Bootstrapping connections to the cluster
+
+At startup, worker.actor.cpp is responsible for contacting the cluster controller, and
+performs various handshakes.
+
+registrationClient() tells the cluster controller that the worker interface exists, and
+re-registers when roles change.  It is invoked by workerServer(), which is invoked by fdbd().  fdbd() invokes the following at startup:
+
+ - monitorAndWriteCCPriorityInfo() - this updates a file called fittnessFilePath when asyncPriorityInfo is updated.
+ - clusterController (if configured so that this is a decent fit for the current process)
+ - extractClusterInterface - this waits for changes to its first argument and writes them to its second argument.  The second argument is used by 'printOnFirstConnected' (only?)
+ - workerServer: most interesting things happen here.
+   - registrationClient
+ - printOnFirstConnected (indirectly prints some thing stdout if cc is updated)
+
+These eventually invoke getEndpoint() to register various network listeners.  getEndpoint() abstracts away local
+and remote endpoints (NetSAV and NetNotifiedQueue).  When
+working remotely, it invokes `FlowTransport::transport().addPeerReference()` in its constructor.
+
+addPeerReference is a no-op
+unless the enpoint has a valid, public primary address and the endpoint
+is a stream.  ("public" is determined by a flag passed into the NetworkAddress when it is instantiated; "valid" mostly means non-zero.  See flow/network.h)
+
+addPeerReference calls getOrOpenPeer, and maintains a refcount of Peers.
+
+getOrOpenPeer maintains a hashmap of NetworkAddress -> peer, and (on this path)
+starts a ConnectionKeeper for the peer.
+
+ConnectionKeeper retries connections, handles connection timeouts, performs failure monitoring, and sends the connect packet at connection startup.
