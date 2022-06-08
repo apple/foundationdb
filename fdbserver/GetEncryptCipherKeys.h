@@ -17,22 +17,28 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#pragma once
 
 #ifndef FDBSERVER_GETCIPHERKEYS_H
 #define FDBSERVER_GETCIPHERKEYS_H
-#pragma once
-
-#include <unordered_map>
-#include <unordered_set>
 
 #include "fdbserver/ServerDBInfo.h"
 #include "flow/BlobCipher.h"
 
-extern Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>> getLatestEncryptCipherKeys(
+#include <unordered_map>
+#include <unordered_set>
+
+// Get latest cipher keys for given encryption domains. It tries to get the cipher keys from local cache.
+// In case of cache miss, it fetches the cipher keys from EncryptKeyProxy and put the result in the local cache
+// before return.
+Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>> getLatestEncryptCipherKeys(
     const Reference<AsyncVar<ServerDBInfo> const>& db,
     const std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName>& domains);
 
-extern Future<std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>> getEncryptCipherKeys(
+// Get cipher keys specified by the list of cipher details. It tries to get the cipher keys from local cache.
+// In case of cache miss, it fetches the cipher keys from EncryptKeyProxy and put the result in the local cache
+// before return.
+Future<std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>> getEncryptCipherKeys(
     const Reference<AsyncVar<ServerDBInfo> const>& db,
     const std::unordered_set<BlobCipherDetails>& cipherDetails);
 
@@ -41,11 +47,12 @@ struct TextAndHeaderCipherKeys {
 	Reference<BlobCipherKey> cipherHeaderKey;
 };
 
-// Get latest cipher text key and cipher header key for system data.
-extern Future<TextAndHeaderCipherKeys> getLatestSystemEncryptCipherKeys(
-    const Reference<AsyncVar<ServerDBInfo> const>& db);
+// Helper method to get latest cipher text key and cipher header key for system domain,
+// used for encrypting system data.
+Future<TextAndHeaderCipherKeys> getLatestSystemEncryptCipherKeys(const Reference<AsyncVar<ServerDBInfo> const>& db);
 
-// Get text cipher key and header cipher key for the given encryption header.
-extern Future<TextAndHeaderCipherKeys> getEncryptCipherKeys(const Reference<AsyncVar<ServerDBInfo> const>& db,
-                                                            const BlobCipherEncryptHeader& header);
+// Helper method to get both text cipher key and header cipher key for the given encryption header,
+// used for decrypting given encrypted data with encryption header.
+Future<TextAndHeaderCipherKeys> getEncryptCipherKeys(const Reference<AsyncVar<ServerDBInfo> const>& db,
+                                                     const BlobCipherEncryptHeader& header);
 #endif

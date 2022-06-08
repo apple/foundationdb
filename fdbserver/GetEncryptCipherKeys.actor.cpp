@@ -58,7 +58,7 @@ ACTOR Future<EKPGetLatestBaseCipherKeysReply> getUncachedLatestEncryptCipherKeys
 		EKPGetLatestBaseCipherKeysReply reply = wait(proxy.get().getLatestBaseCipherKeys.getReply(request));
 		if (reply.error.present()) {
 			TraceEvent("GetLatestCipherKeys_RequestFailed").error(reply.error.get());
-			throw reply.error.get();
+			throw encrypt_keys_fetch_failed();
 		}
 		return reply;
 	} catch (Error& e) {
@@ -140,8 +140,8 @@ ACTOR Future<EKPGetBaseCipherKeysByIdsReply> getUncachedEncryptCipherKeys(Refere
 	try {
 		EKPGetBaseCipherKeysByIdsReply reply = wait(proxy.get().getBaseCipherKeysByIds.getReply(request));
 		if (reply.error.present()) {
-			TraceEvent("GetCipherKeys_RequestFailed").error(reply.error.get());
-			throw reply.error.get();
+			TraceEvent(SevWarn, "GetCipherKeys_RequestFailed").error(reply.error.get());
+			throw encrypt_keys_fetch_failed();
 		}
 		return reply;
 	} catch (Error& e) {
@@ -226,7 +226,7 @@ ACTOR Future<std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>> ge
 }
 
 ACTOR Future<TextAndHeaderCipherKeys> getLatestSystemEncryptCipherKeys(Reference<AsyncVar<ServerDBInfo> const> db) {
-	std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> domains = {
+	static std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> domains = {
 		{ SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME },
 		{ ENCRYPT_HEADER_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME }
 	};
