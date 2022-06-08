@@ -35,7 +35,7 @@ TESTER_STATS_INTERVAL_SEC = 5
 
 def random_string(len):
     return "".join(
-        random.choice(string.ascii_letters + string.digits) for i in range(len)
+        random.choice(string.ascii_letters + string.digits) for _ in range(len)
     )
 
 
@@ -160,7 +160,8 @@ def parse_args(argv):
     parser.add_argument('--log-dir', type=str, default=None,
                         help='The directory for storing logs (default: None)')
     parser.add_argument('--logging-level', type=str, default='INFO',
-                        choices=['ERROR', 'WARNING', 'INFO', 'DEBUG'], help='Specifies the level of detail in the tester output (default=\'INFO\').')
+                        choices=['ERROR', 'WARNING', 'INFO', 'DEBUG'], help='Specifies the level of detail in the ' +
+                                                                            'tester output (default=\'INFO\').')
     parser.add_argument('--tmp-dir', type=str, default=None,
                         help='The directory for storing temporary files (default: None)')
     parser.add_argument('--blob-granule-local-file-path', type=str, default=None,
