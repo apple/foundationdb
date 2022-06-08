@@ -2238,7 +2238,9 @@ void renamedFile() {
 void renameFile(std::string const& fromPath, std::string const& toPath) {
 	INJECT_FAULT(io_error, "renameFile"); // rename file failed
 #ifdef _WIN32
-	if (MoveFile(fromPath.c_str(), toPath.c_str())) {
+	if (MoveFileExA(fromPath.c_str(),
+	                toPath.c_str(),
+	                MOVEFILE_COPY_ALLOWED | MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
 		// renamedFile();
 		return;
 	}
@@ -2331,8 +2333,11 @@ void atomicReplace(std::string const& path, std::string const& content, bool tex
 		}
 		f = 0;
 
-		if (!ReplaceFile(path.c_str(), tempfilename.c_str(), nullptr, NULL, nullptr, nullptr))
+		if (!MoveFileExA(tempfilename.c_str(),
+		                 path.c_str(),
+		                 MOVEFILE_COPY_ALLOWED | MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
 			throw io_error();
+		}
 #elif defined(__unixish__)
 		if (!g_network->isSimulated()) {
 			if (fsync(fileno(f)) != 0)
@@ -2523,14 +2528,14 @@ std::string popPath(const std::string& path) {
 	return path.substr(0, i + 1);
 }
 
-std::string abspath(std::string const& path, bool resolveLinks, bool mustExist) {
-	if (path.empty()) {
+std::string abspath(std::string const& path_, bool resolveLinks, bool mustExist) {
+	if (path_.empty()) {
 		Error e = platform_error();
 		Severity sev = e.code() == error_code_io_error ? SevError : SevWarnAlways;
-		TraceEvent(sev, "AbsolutePathError").error(e).detail("Path", path);
+		TraceEvent(sev, "AbsolutePathError").error(e).detail("Path", path_);
 		throw e;
 	}
-
+	std::string path = path_.back() == '\\' ? path_.substr(0, path_.size() - 1) : path_;
 	// Returns an absolute path canonicalized to use only CANONICAL_PATH_SEPARATOR
 	INJECT_FAULT(platform_error, "abspath"); // abspath failed
 
