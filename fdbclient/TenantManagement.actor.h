@@ -187,13 +187,14 @@ Future<Optional<TenantMapEntry>> createTenant(
 	state Reference<typename DB::TransactionT> tr = db->createTransaction();
 
 	state bool checkExistence = operationType != TenantOperationType::DATA_CLUSTER;
+	state bool generateTenantId = tenantEntry.id < 0;
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 			state typename DB::TransactionT::template FutureT<Optional<Value>> lastIdFuture;
-			if (tenantEntry.id < 0) {
+			if (generateTenantId) {
 				lastIdFuture = tr->get(tenantLastIdKey);
 			}
 
@@ -206,7 +207,7 @@ Future<Optional<TenantMapEntry>> createTenant(
 				checkExistence = false;
 			}
 
-			if (tenantEntry.id < 0) {
+			if (generateTenantId) {
 			Optional<Value> lastIdVal = wait(safeThreadFutureToFuture(lastIdFuture));
 			tenantEntry.id = lastIdVal.present() ? TenantMapEntry::prefixToId(lastIdVal.get()) + 1 : 0;
 			tr->set(tenantLastIdKey, TenantMapEntry::idToPrefix(tenantEntry.id));
