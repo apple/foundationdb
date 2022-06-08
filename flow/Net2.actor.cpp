@@ -242,6 +242,7 @@ public:
 	int sslHandshakerThreadsStarted;
 	int sslPoolHandshakesInProgress;
 	TLSConfig tlsConfig;
+	Reference<TLSPolicy> activeTlsPolicy;
 	Future<Void> backgroundCertRefresh;
 	ETLSInitState tlsInitializedState;
 
@@ -508,6 +509,8 @@ public:
 		              // limit was not > 0.
 		return sent;
 	}
+
+	bool hasTrustedPeer() const override { return true; }
 
 	NetworkAddress getPeerAddress() const override { return peer_address; }
 
@@ -843,7 +846,7 @@ public:
 	explicit SSLConnection(boost::asio::io_service& io_service,
 	                       Reference<ReferencedObject<boost::asio::ssl::context>> context)
 	  : id(nondeterministicRandom()->randomUniqueID()), socket(io_service), ssl_sock(socket, context->mutate()),
-	    sslContext(context) {}
+	    sslContext(context), has_trusted_peer(false) {}
 
 	// This is not part of the IConnection interface, because it is wrapped by INetwork::connect()
 	ACTOR static Future<Reference<IConnection>> connect(boost::asio::io_service* ios,
@@ -893,6 +896,12 @@ public:
 
 		try {
 			Future<Void> onHandshook;
+			ConfigureSSLStream(
+					N2::g_net2->activeTlsPolicy,
+					self->ssl_sock,
+					[this](bool verifyOk) {
+						self->has_trusted_peer = verifyOk;
+					});
 
 			// If the background handshakers are not all busy, use one
 			if (N2::g_net2->sslPoolHandshakesInProgress < N2::g_net2->sslHandshakerThreadsStarted) {
@@ -968,6 +977,12 @@ public:
 
 		try {
 			Future<Void> onHandshook;
+			ConfigureSSLStream(
+					N2::g_net2->activeTlsPolicy,
+					self->ssl_sock,
+					[this](bool verifyOk) {
+						self->has_trusted_peer = verifyOk;
+					});
 			// If the background handshakers are not all busy, use one
 			if (N2::g_net2->sslPoolHandshakesInProgress < N2::g_net2->sslHandshakerThreadsStarted) {
 				holder = Hold(&N2::g_net2->sslPoolHandshakesInProgress);
@@ -1099,6 +1114,10 @@ public:
 		return sent;
 	}
 
+	bool hasTrustedPeer() const override {
+		return has_trusted_peer;
+	}
+
 	NetworkAddress getPeerAddress() const override { return peer_address; }
 
 	UID getDebugID() const override { return id; }
@@ -1113,6 +1132,7 @@ private:
 	ssl_socket ssl_sock;
 	NetworkAddress peer_address;
 	Reference<ReferencedObject<boost::asio::ssl::context>> sslContext;
+	bool has_trusted_peer;
 
 	void init() {
 		// Socket settings that have to be set after connect or accept succeeds
@@ -1271,7 +1291,8 @@ ACTOR static Future<Void> watchFileForChanges(std::string filename, AsyncTrigger
 ACTOR static Future<Void> reloadCertificatesOnChange(
     TLSConfig config,
     std::function<void()> onPolicyFailure,
-    AsyncVar<Reference<ReferencedObject<boost::asio::ssl::context>>>* contextVar) {
+    AsyncVar<Reference<ReferencedObject<boost::asio::ssl::context>>>* contextVar,
+	Reference<TLSPolicy>* policy) {
 	if (FLOW_KNOBS->TLS_CERT_REFRESH_DELAY_SECONDS <= 0) {
 		return Void();
 	}
@@ -1295,7 +1316,8 @@ ACTOR static Future<Void> reloadCertificatesOnChange(
 		try {
 			LoadedTLSConfig loaded = wait(config.loadAsync());
 			boost::asio::ssl::context context(boost::asio::ssl::context::tls);
-			ConfigureSSLContext(loaded, &context, onPolicyFailure);
+			ConfigureSSLContext(loaded, context);
+			*policy = makeReference<TLSPolicy>(loaded, onPolicyFailure);
 			TraceEvent(SevInfo, "TLSCertificateRefreshSucceeded").log();
 			mismatches = 0;
 			contextVar->set(ReferencedObject<boost::asio::ssl::context>::from(std::move(context)));
@@ -1327,12 +1349,14 @@ void Net2::initTLS(ETLSInitState targetState) {
 			    .detail("KeyPath", tlsConfig.getKeyPathSync())
 			    .detail("HasPassword", !loaded.getPassword().empty())
 			    .detail("VerifyPeers", boost::algorithm::join(loaded.getVerifyPeers(), "|"));
-			ConfigureSSLContext(tlsConfig.loadSync(), &newContext, onPolicyFailure);
+			auto loadedTlsConfig = tlsConfig.loadSync();
+			ConfigureSSLContext(loadedTlsConfig, newContext);
+			activeTlsPolicy = makeReference<TLSPolicy>(loadedTlsConfig, onPolicyFailure);
 			sslContextVar.set(ReferencedObject<boost::asio::ssl::context>::from(std::move(newContext)));
 		} catch (Error& e) {
 			TraceEvent("Net2TLSInitError").error(e);
 		}
-		backgroundCertRefresh = reloadCertificatesOnChange(tlsConfig, onPolicyFailure, &sslContextVar);
+		backgroundCertRefresh = reloadCertificatesOnChange(tlsConfig, onPolicyFailure, &sslContextVar, &activeTlsPolicy);
 	}
 
 	// If a TLS connection is actually going to be used then start background threads if configured
