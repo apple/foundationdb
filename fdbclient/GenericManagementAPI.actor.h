@@ -251,30 +251,30 @@ Future<std::vector<ProcessData>> getWorkers(
 // Accepts a full configuration in key/value format (from buildConfiguration)
 ACTOR template <class Transaction>
 Future<ConfigurationResult> changeConfigTransaction(Transaction tr,
-                                                    std::map<std::string, std::string>* m,
+                                                    std::map<std::string, std::string> m,
                                                     bool force,
                                                     Optional<UID> createId) {
 	state StringRef initIdKey = "\xff/init_id"_sr;
 
-	if (!m->size()) {
+	if (!m.size()) {
 		return ConfigurationResult::NO_OPTIONS_PROVIDED;
 	}
 
 	// make sure we have essential configuration options
 	state Optional<UID> locked;
 	{
-		auto iter = m->find(databaseLockedKey.toString());
-		if (iter != m->end()) {
+		auto iter = m.find(databaseLockedKey.toString());
+		if (iter != m.end()) {
 			if (!createId.present()) {
 				return ConfigurationResult::LOCKED_NOT_NEW;
 			}
 			locked = UID::fromString(iter->second);
-			m->erase(iter);
+			m.erase(iter);
 		}
 	}
 	if (createId.present()) {
-		(*m)[initIdKey.toString()] = createId.get().toString();
-		if (!isCompleteConfiguration(*m)) {
+		m[initIdKey.toString()] = createId.get().toString();
+		if (!isCompleteConfiguration(m)) {
 			return ConfigurationResult::INCOMPLETE_CONFIGURATION;
 		}
 	}
@@ -310,7 +310,7 @@ Future<ConfigurationResult> changeConfigTransaction(Transaction tr,
 			state DatabaseConfiguration oldConfig;
 			oldConfig.fromKeyValues((VectorRef<KeyValueRef>)fConfig.get());
 			state DatabaseConfiguration newConfig = oldConfig;
-			for (auto kv : *m) {
+			for (auto kv : m) {
 				newConfig.set(kv.first, kv.second);
 			}
 			if (!newConfig.isValid()) {
@@ -520,11 +520,11 @@ Future<ConfigurationResult> changeConfigTransaction(Transaction tr,
 	if (createId.present()) {
 		tr->setOption(FDBTransactionOptions::INITIALIZE_NEW_DATABASE);
 		tr->addReadConflictRange(singleKeyRange(initIdKey));
-	} else if (m->size()) {
+	} else if (m.size()) {
 		// might be used in an emergency transaction, so make sure it is retry-self-conflicting and
 		// CAUSAL_WRITE_RISKY
 		tr->setOption(FDBTransactionOptions::CAUSAL_WRITE_RISKY);
-		tr->addReadConflictRange(singleKeyRange(m->begin()->first));
+		tr->addReadConflictRange(singleKeyRange(m.begin()->first));
 	}
 
 	if (locked.present()) {
@@ -536,7 +536,7 @@ Future<ConfigurationResult> changeConfigTransaction(Transaction tr,
 		             MutationRef::SetVersionstampedValue);
 	}
 
-	for (auto i = m->begin(); i != m->end(); ++i) {
+	for (auto i = m.begin(); i != m.end(); ++i) {
 		tr->set(StringRef(i->first), StringRef(i->second));
 	}
 
@@ -567,7 +567,7 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 
 	loop {
 		try {
-			state ConfigurationResult result = wait(changeConfigTransaction(tr, &m, force, createId));
+			state ConfigurationResult result = wait(changeConfigTransaction(tr, m, force, createId));
 			wait(safeThreadFutureToFuture(tr->commit()));
 			return result;
 		} catch (Error& e) {
@@ -707,7 +707,7 @@ Future<ConfigurationResult> changeConfigTransaction(Transaction tr,
 	auto r = buildConfiguration(modes, m);
 	if (r != ConfigurationResult::SUCCESS)
 		return r;
-	return changeConfigTransaction(tr, &m, force, createId);
+	return changeConfigTransaction(tr, m, force, createId);
 }
 
 // Accepts a vector of configuration tokens
