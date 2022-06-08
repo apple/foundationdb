@@ -815,7 +815,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 		roles.addRole("blob_manager", db->get().blobManager.get());
 	}
 
-	if (SERVER_KNOBS->ENABLE_ENCRYPTION && db->get().encryptKeyProxy.present()) {
+	if ((SERVER_KNOBS->ENABLE_ENCRYPTION || g_network->isSimulated()) && db->get().encryptKeyProxy.present()) {
 		roles.addRole("encrypt_key_proxy", db->get().encryptKeyProxy.get());
 	}
 

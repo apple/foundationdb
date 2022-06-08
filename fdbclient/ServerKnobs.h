@@ -837,6 +837,7 @@ public:
 	std::string ENCRYPTION_MODE;
 	int SIM_KMS_MAX_KEYS;
 	int ENCRYPT_PROXY_MAX_DBG_TRACE_LENGTH;
+	bool ENABLE_TLOG_ENCRYPTION;
 
 	// Key Management Service (KMS) Connector
 	std::string KMS_CONNECTOR_TYPE;
