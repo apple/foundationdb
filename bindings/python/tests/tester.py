@@ -18,24 +18,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-
-
-import ctypes
+import functools
+import json
 import math
-import sys
 import os
+import random
 import struct
+import sys
 import threading
 import time
-import random
-import time
 import traceback
-import json
-
-sys.path[:0] = [os.path.join(os.path.dirname(__file__), "..")]
 import fdb
-
-fdb.api_version(int(sys.argv[2]))
 
 from fdb import six
 from fdb.impl import strinc
@@ -52,6 +45,10 @@ from cancellation_timeout_tests import test_combinations
 
 from size_limit_tests import test_size_limit_option, test_get_approximate_size
 from tenant_tests import test_tenants
+
+sys.path[:0] = [os.path.join(os.path.dirname(__file__), "..")]
+
+fdb.api_version(int(sys.argv[2]))
 
 random.seed(0)
 
@@ -119,15 +116,15 @@ class Stack:
 
 class Instruction:
     def __init__(
-        self, tr, stack, op, index, isDatabase=False, isTenant=False, isSnapshot=False
+        self, tr, stack, op, index, is_database=False, is_tenant=False, is_snapshot=False
     ):
         self.tr = tr
         self.stack = stack
         self.op = op
         self.index = index
-        self.isDatabase = isDatabase
-        self.isTenant = isTenant
-        self.isSnapshot = isSnapshot
+        self.isDatabase = is_database
+        self.isTenant = is_tenant
+        self.isSnapshot = is_snapshot
 
     def pop(self, count=None, with_idx=False):
         return self.stack.pop(count, with_idx)
@@ -146,7 +143,7 @@ def test_fdb_transactional_generator(db):
         assert (
             fdb.get_api_version() < 630
         ), "Pre-6.3, a decorator may wrap a function that yields"
-    except ValueError as e:
+    except ValueError:
         assert (
             fdb.get_api_version() >= 630
         ), "Post-6.3, a decorator should throw if wrapped function yields"
@@ -164,7 +161,7 @@ def test_fdb_transactional_returns_generator(db):
 
         function_that_returns()
         assert fdb.get_api_version() < 630, "Pre-6.3, returning a generator is allowed"
-    except ValueError as e:
+    except ValueError:
         assert (
             fdb.get_api_version() >= 630
         ), "Post-6.3, returning a generator should throw"
@@ -273,7 +270,8 @@ def test_watches(db):
 @fdb.transactional
 def test_locality(tr):
     tr.options.set_timeout(60 * 1000)
-    tr.options.set_read_system_keys()  # We do this because the last shard (for now, someday the last N shards) is in the /FF/ keyspace
+    tr.options.set_read_system_keys()
+    # We do this because the last shard (for now, someday the last N shards) is in the /FF/ keyspace
 
     # This isn't strictly transactional, thought we expect it to be given the size of our database
     boundary_keys = list(fdb.locality.get_boundary_keys(tr, b"", b"\xff\xff")) + [
@@ -364,24 +362,24 @@ class Tester:
             # if op != "PUSH" and op != "SWAP":
             #     print("%d. Instruction is %s" % (idx, op))
 
-            isDatabase = op.endswith(six.u("_DATABASE"))
-            isTenant = op.endswith(six.u("_TENANT"))
-            isSnapshot = op.endswith(six.u("_SNAPSHOT"))
+            is_database = op.endswith(six.u("_DATABASE"))
+            is_tenant = op.endswith(six.u("_TENANT"))
+            is_snapshot = op.endswith(six.u("_SNAPSHOT"))
 
-            if isDatabase:
+            if is_database:
                 op = op[:-9]
                 obj = self.db
-            elif isTenant:
+            elif is_tenant:
                 op = op[:-7]
                 obj = self.tenant if self.tenant else self.db
-            elif isSnapshot:
+            elif is_snapshot:
                 op = op[:-9]
                 obj = self.current_transaction().snapshot
             else:
                 obj = self.current_transaction()
 
             inst = Instruction(
-                obj, self.stack, op, idx, isDatabase, isTenant, isSnapshot
+                obj, self.stack, op, idx, is_database, is_tenant, is_snapshot
             )
 
             try:
@@ -427,14 +425,14 @@ class Tester:
                         inst.push(f)
                 elif inst.op == six.u("GET_ESTIMATED_RANGE_SIZE"):
                     begin, end = inst.pop(2)
-                    estimatedSize = obj.get_estimated_range_size_bytes(
+                    obj.get_estimated_range_size_bytes(
                         begin, end
                     ).wait()
                     inst.push(b"GOT_ESTIMATED_RANGE_SIZE")
                 elif inst.op == six.u("GET_RANGE_SPLIT_POINTS"):
-                    begin, end, chunkSize = inst.pop(3)
-                    estimatedSize = obj.get_range_split_points(
-                        begin, end, chunkSize
+                    begin, end, chunk_size = inst.pop(3)
+                    obj.get_range_split_points(
+                        begin, end, chunk_size
                     ).wait()
                     inst.push(b"GOT_RANGE_SPLIT_POINTS")
                 elif inst.op == six.u("GET_KEY"):
@@ -476,15 +474,15 @@ class Tester:
                         mode,
                         prefix,
                     ) = inst.pop(10)
-                    beginSel = fdb.KeySelector(begin_key, begin_or_equal, begin_offset)
-                    endSel = fdb.KeySelector(end_key, end_or_equal, end_offset)
+                    begin_sel = fdb.KeySelector(begin_key, begin_or_equal, begin_offset)
+                    end_sel = fdb.KeySelector(end_key, end_or_equal, end_offset)
                     if limit == 0 and mode == -1 and random.random() < 0.5:
                         if reverse:
-                            r = obj[beginSel:endSel:-1]
+                            r = obj[begin_sel:end_sel:-1]
                         else:
-                            r = obj[beginSel:endSel]
+                            r = obj[begin_sel:end_sel]
                     else:
-                        r = obj.get_range(beginSel, endSel, limit, reverse, mode)
+                        r = obj.get_range(begin_sel, end_sel, limit, reverse, mode)
 
                     self.push_range(inst, r, prefix_filter=prefix)
                 elif inst.op == six.u("GET_READ_VERSION"):
@@ -511,8 +509,8 @@ class Tester:
 
                     self.log_stack(self.db, prefix, entries)
                 elif inst.op == six.u("ATOMIC_OP"):
-                    opType, key, value = inst.pop(3)
-                    getattr(obj, opType.lower())(key, value)
+                    op_type, key, value = inst.pop(3)
+                    getattr(obj, op_type.lower())(key, value)
 
                     if obj == self.db:
                         inst.push(b"RESULT_NOT_PRESENT")
@@ -566,7 +564,7 @@ class Tester:
                     self.last_version = inst.tr.get_committed_version()
                     inst.push(b"GOT_COMMITTED_VERSION")
                 elif inst.op == six.u("GET_APPROXIMATE_SIZE"):
-                    approximate_size = inst.tr.get_approximate_size().wait()
+                    inst.tr.get_approximate_size().wait()
                     inst.push(b"GOT_APPROXIMATE_SIZE")
                 elif inst.op == six.u("GET_VERSIONSTAMP"):
                     inst.push(inst.tr.get_versionstamp())
@@ -605,7 +603,7 @@ class Tester:
                     if six.PY3:
                         sorted_items = sorted(unpacked, key=fdb.tuple.pack)
                     else:
-                        sorted_items = sorted(unpacked, cmp=fdb.tuple.compare)
+                        sorted_items = sorted(unpacked, key=functools.cmp_to_key(fdb.tuple.compare))
                     for item in sorted_items:
                         inst.push(fdb.tuple.pack(item))
                 elif inst.op == six.u("TUPLE_RANGE"):
@@ -667,9 +665,9 @@ class Tester:
                         result += [tenant.key]
                         try:
                             metadata = json.loads(tenant.value)
-                            id =  metadata["id"]
-                            prefix = metadata["prefix"]
-                        except (json.decoder.JSONDecodeError, KeyError) as e:
+                            metadata["id"]
+                            metadata["prefix"]
+                        except (json.decoder.JSONDecodeError, KeyError):
                             assert False, "Invalid Tenant Metadata"
                     inst.push(fdb.tuple.pack(tuple(result)))
                 elif inst.op == six.u("UNIT_TESTS"):

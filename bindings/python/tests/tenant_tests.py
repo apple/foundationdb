@@ -21,7 +21,6 @@
 import fdb
 import sys
 import json
-from fdb.tuple import pack
 
 if __name__ == "__main__":
     fdb.api_version(720)
@@ -103,7 +102,7 @@ def test_tenant_operations(db):
         del tr1[:]
         tr1.commit().wait()
     except fdb.FDBError as e:
-        tr.on_error(e).wait()
+        tr1.on_error(e).wait()
 
     assert tenant1[b"tenant_test_key"] == None
     assert db[prefix1 + b"tenant_test_key"] == None

@@ -21,35 +21,34 @@
 
 
 import ctypes
-import sys
+import functools
 import random
 import struct
 import unicodedata
-import math
 import uuid
-
-_range = range
 
 from fdb.tuple import pack, unpack, range, compare, SingleFloat
 from fdb import six
 
 from fdb.six import u
 
+_range = range
 
-def randomUnicode():
+
+def random_unicode():
     while True:
         c = random.randint(0, 0xFFFF)
         if unicodedata.category(unichr(c))[0] in "LMNPSZ":
             return unichr(c)
 
 
-def randomElement():
+def random_element():
     r = random.randint(0, 9)
     if r == 0:
         if random.random() < 0.5:
             chars = [b"\x00", b"\x01", b"a", b"7", b"\xfe", b"\ff"]
             return b"".join(
-                [random.choice(chars) for c in _range(random.randint(0, 5))]
+                [random.choice(chars) for _ in _range(random.randint(0, 5))]
             )
         else:
             return b"".join(
@@ -74,10 +73,10 @@ def randomElement():
                 u("\U0001f4a9"),
             ]
             return u("").join(
-                [random.choice(chars) for c in _range(random.randint(0, 10))]
+                [random.choice(chars) for _ in _range(random.randint(0, 10))]
             )
         else:
-            return u("").join([randomUnicode() for _ in _range(random.randint(0, 10))])
+            return u("").join([random_unicode() for _ in _range(random.randint(0, 10))])
     elif r == 2:
         return random.choice([-1, 1]) * min(
             2 ** random.randint(0, 2040) + random.randint(-10, 10), 2 ** 2040 - 1
@@ -113,14 +112,14 @@ def randomElement():
     elif r == 8:
         return uuid.uuid4()
     elif r == 9:
-        return [randomElement() for _ in _range(random.randint(0, 5))]
+        return [random_element() for _ in _range(random.randint(0, 5))]
 
 
-def randomTuple():
-    return tuple(randomElement() for x in _range(random.randint(0, 4)))
+def random_tuple():
+    return tuple(random_element() for _ in _range(random.randint(0, 4)))
 
 
-def isprefix(a, b):
+def is_prefix(a, b):
     return compare(a, b[: len(a)]) == 0
 
 
@@ -128,11 +127,11 @@ def find_bad_sort(a, b):
     for x1 in a:
         for x2 in b:
             if compare(x1, x2) < 0 and pack(x1) >= pack(x2):
-                return (x1, x2)
+                return x1, x2
     return None
 
 
-def equalEnough(t1, t2):
+def equal_enough(t1, t2):
     if len(t1) != len(t2):
         return False
 
@@ -147,7 +146,7 @@ def equalEnough(t1, t2):
         elif isinstance(e1, list) or isinstance(e2, tuple):
             if not (isinstance(e2, list) or isinstance(e2, tuple)):
                 return False
-            if not equalEnough(e1, e2):
+            if not equal_enough(e1, e2):
                 return False
         else:
             if e1 != e2:
@@ -156,10 +155,10 @@ def equalEnough(t1, t2):
     return True
 
 
-def tupleTest(N=10000):
-    someTuples = [randomTuple() for i in _range(N)]
-    a = sorted(someTuples, cmp=compare)
-    b = sorted(someTuples, key=pack)
+def tuple_test(n=10000):
+    some_tuples = [random_tuple() for _ in _range(n)]
+    a = sorted(some_tuples, key=functools.cmp_to_key(compare))
+    b = sorted(some_tuples, key=pack)
 
     if not a == b:
         problem = find_bad_sort(a, b)
@@ -175,12 +174,12 @@ def tupleTest(N=10000):
             print("Sorts unequal but every pair correct")
             return False
 
-    print("Sort %d OK" % N)
+    print("Sort %d OK" % n)
 
-    for i in _range(N):
-        t = randomTuple()
-        t2 = t + (randomElement(),)
-        t3 = randomTuple()
+    for _ in _range(n):
+        t = random_tuple()
+        t2 = t + (random_element(),)
+        t3 = random_tuple()
 
         if not compare(unpack(pack(t)), t) == 0:
             print(
@@ -202,7 +201,7 @@ def tupleTest(N=10000):
             )
             return False
 
-        if not isprefix(t, t3):
+        if not is_prefix(t, t3):
             if r.start <= pack(t3) <= r.stop:
                 print(
                     "non-prefixed element in range:\n    Tuple: %s\n    Bytes: %s\n    Other: %s\n    Bytes: %s"
@@ -223,7 +222,7 @@ def tupleTest(N=10000):
             )
             return False
 
-    print("Tuple check %d OK" % N)
+    print("Tuple check %d OK" % n)
     return True
 
 
@@ -233,4 +232,4 @@ def tupleTest(N=10000):
 
 
 if __name__ == "__main__":
-    assert tupleTest(10000)
+    assert tuple_test(10000)

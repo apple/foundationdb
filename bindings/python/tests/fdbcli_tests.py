@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 
-import sys
 import shutil
 import os
 import subprocess
@@ -185,7 +184,6 @@ def setclass(logger):
     # except the first line, each line is one process
     process_types = output4.split("\n")[1:]
     assert len(process_types) == args.process_number
-    addresses = []
     for line in process_types:
         assert "127.0.0.1" in line
         # check class type
@@ -195,7 +193,7 @@ def setclass(logger):
 
 
 @enable_logging()
-def lockAndUnlock(logger):
+def lock_and_unlock(logger):
     # lock an unlocked database, should be successful
     output1 = run_fdbcli_command("lock")
     # UID is 32 bytes
@@ -214,8 +212,7 @@ def lockAndUnlock(logger):
         stdout=subprocess.PIPE,
         env=fdbcli_env,
     )
-    line1 = process.stdout.readline()
-    # The randome passphrease we need to confirm to proceed the unlocking
+    # The random passphrase we need to confirm to proceed the unlocking
     line2 = process.stdout.readline()
     logger.debug("Random passphrase: {}".format(line2))
     output3, err = process.communicate(input=line2)
@@ -314,7 +311,7 @@ def suspend(logger):
         env=fdbcli_env,
     )
     # suspend the process for enough long time
-    output2, err = process.communicate(
+    process.communicate(
         input="suspend; suspend 3600 {}; sleep 1\n".format(address).encode()
     )
     # the cluster should be unavailable after the only process being suspended
@@ -331,8 +328,8 @@ def suspend(logger):
     # The process should come back after a few time
     duration = 0  # seconds we already wait
     while (
-        not get_value_from_status_json(False, "client", "database_status", "available")
-        and duration < 60
+            not get_value_from_status_json(False, "client", "database_status", "available")
+            and duration < 60
     ):
         logger.debug("Sleep for 1 second to wait cluster recovery")
         time.sleep(1)
@@ -415,8 +412,9 @@ def datadistribution(logger):
         "maintenance", "on", "fake_zone_id", "1"
     )
     assert (
-        error_msg
-        == "ERROR: Maintenance mode cannot be used while data distribution is disabled for storage server failures. Use 'datadistribution on' to reenable data distribution."
+            error_msg
+            == "ERROR: Maintenance mode cannot be used while data distribution is disabled for storage server " +
+               "failures. Use 'datadistribution on' to reenable data distribution. "
     )
     output4 = run_fdbcli_command("datadistribution", "enable", "ssfailure")
     assert output4 == "Data distribution is enabled for storage server failures."
@@ -436,7 +434,7 @@ def transaction(logger):
     """
     err1 = run_fdbcli_command_and_get_error("set", "key", "value")
     assert (
-        err1 == "ERROR: writemode must be enabled to set or clear keys in the database."
+            err1 == "ERROR: writemode must be enabled to set or clear keys in the database."
     )
     process = subprocess.Popen(
         command_template[:-1],
@@ -462,7 +460,7 @@ def transaction(logger):
     assert lines[2] == "`key' is `value'"
     assert lines[3].startswith("Committed (") and lines[3].endswith(")")
     # validate commit version is larger than the read version
-    commit_verion = int(lines[3][len("Committed (") : -1])
+    commit_verion = int(lines[3][len("Committed ("): -1])
     logger.debug("Commit version: {}".format(commit_verion))
     assert commit_verion >= read_version
     # check the transaction is committed
@@ -561,8 +559,8 @@ def coordinators(logger):
     # auto change should go back to 1 coordinator
     run_fdbcli_command("coordinators", "auto")
     assert (
-        len(get_value_from_status_json(True, "client", "coordinators", "coordinators"))
-        == 1
+            len(get_value_from_status_json(True, "client", "coordinators", "coordinators"))
+            == 1
     )
     wait_for_database_available(logger)
 
@@ -603,8 +601,8 @@ def exclude(logger):
             assert coordinator_list[0]["address"] == excluded_address
             break
         elif (
-            "ERROR: This exclude may cause the total free space in the cluster to drop below 10%."
-            in error_message
+                "ERROR: This exclude may cause the total free space in the cluster to drop below 10%."
+                in error_message
         ):
             # exclude the process may cause the free space not enough
             # use FORCE option to ignore it and proceed
@@ -619,8 +617,8 @@ def exclude(logger):
         time.sleep(1)
     output2 = run_fdbcli_command("exclude")
     assert (
-        "There are currently 1 servers or localities being excluded from the database"
-        in output2
+            "There are currently 1 servers or localities being excluded from the database"
+            in output2
     )
     assert excluded_address in output2
     run_fdbcli_command("include", excluded_address)
@@ -666,7 +664,7 @@ def wait_for_database_available(logger):
     # sometimes the change takes some time to have effect and the database can be unavailable at that time
     # this is to wait until the database is available again
     while not get_value_from_status_json(
-        True, "client", "database_status", "available"
+            True, "client", "database_status", "available"
     ):
         logger.debug("Database unavailable for now, wait for one second")
         time.sleep(1)
@@ -695,8 +693,8 @@ def profile(logger):
     # change back to default value and check
     run_fdbcli_command("profile", "client", "set", "default", "default")
     assert (
-        run_fdbcli_command("profile", "client", "get")
-        == default_profile_client_get_output
+            run_fdbcli_command("profile", "client", "get")
+            == default_profile_client_get_output
     )
 
 
@@ -704,8 +702,8 @@ def profile(logger):
 def test_available(logger):
     duration = 0  # seconds we already wait
     while (
-        not get_value_from_status_json(False, "client", "database_status", "available")
-        and duration < 10
+            not get_value_from_status_json(False, "client", "database_status", "available")
+            and duration < 10
     ):
         logger.debug("Sleep for 1 second to wait cluster recovery")
         time.sleep(1)
@@ -720,7 +718,6 @@ def triggerddteaminfolog(logger):
     # this command is straightforward and only has one code path
     output = run_fdbcli_command("triggerddteaminfolog")
     assert output == "Triggered team info logging in data distribution."
-
 
 
 @enable_logging()
@@ -775,7 +772,8 @@ def tenants(logger):
     assert lines[2].startswith('Committed')
 
     process = subprocess.Popen(command_template[:-1], stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=fdbcli_env)
-    cmd_sequence = ['writemode on', 'usetenant tenant2', 'get tenant_test', 'set tenant_test tenant2', 'get tenant_test']
+    cmd_sequence = ['writemode on', 'usetenant tenant2', 'get tenant_test', 'set tenant_test tenant2',
+                    'get tenant_test']
     output, _ = process.communicate(input='\n'.join(cmd_sequence).encode())
 
     lines = output.decode().strip().split('\n')[-4:]
@@ -794,7 +792,8 @@ def tenants(logger):
     assert lines[2] == 'Using the default tenant'
     assert lines[3] == '`tenant_test\' is `default_tenant\''
 
-    process = subprocess.Popen(command_template[:-1], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=fdbcli_env)
+    process = subprocess.Popen(command_template[:-1], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE, env=fdbcli_env)
     cmd_sequence = ['writemode on', 'usetenant tenant', 'clear tenant_test',
                     'deletetenant tenant', 'get tenant_test', 'defaulttenant', 'usetenant tenant']
     output, error_output = process.communicate(input='\n'.join(cmd_sequence).encode())
@@ -810,8 +809,10 @@ def tenants(logger):
     assert lines[6] == 'Using the default tenant'
     assert error_lines[1] == 'ERROR: Tenant `tenant\' does not exist'
 
-    process = subprocess.Popen(command_template[:-1], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=fdbcli_env)
-    cmd_sequence = ['writemode on', 'deletetenant tenant2', 'usetenant tenant2', 'clear tenant_test', 'defaulttenant', 'deletetenant tenant2']
+    process = subprocess.Popen(command_template[:-1], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE, env=fdbcli_env)
+    cmd_sequence = ['writemode on', 'deletetenant tenant2', 'usetenant tenant2', 'clear tenant_test', 'defaulttenant',
+                    'deletetenant tenant2']
     output, error_output = process.communicate(input='\n'.join(cmd_sequence).encode())
 
     lines = output.decode().strip().split('\n')[-4:]
@@ -835,7 +836,7 @@ if __name__ == '__main__':
     For complex commands like exclude, they will run against a cluster with multiple(current set to 5) processes.
     If external_client_library is given, we will disable the local client and use the external client to run fdbcli.
     """,
-    )
+                            )
     parser.add_argument(
         "build_dir", metavar="BUILD_DIRECTORY", help="FDB build directory"
     )
@@ -883,7 +884,7 @@ if __name__ == '__main__':
         consistencycheck()
         datadistribution()
         kill()
-        lockAndUnlock()
+        lock_and_unlock()
         maintenance()
         profile()
         suspend()

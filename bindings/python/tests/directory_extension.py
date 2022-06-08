@@ -18,9 +18,6 @@
 # limitations under the License.
 #
 
-import traceback
-import sys
-
 import fdb
 import fdb.directory_impl
 
@@ -61,7 +58,7 @@ class DirectoryExtension:
         if actual_num is None:
             actual_num = 1
 
-        tuples = tuple([tuple(stack.pop(stack.pop())) for i in range(actual_num)])
+        tuples = tuple([tuple(stack.pop(stack.pop())) for _ in range(actual_num)])
 
         if num is None:
             return tuples[0]
@@ -95,7 +92,8 @@ class DirectoryExtension:
                     self.append_dir(inst, None)
                 else:
                     log_op(
-                        "create directory layer: node_subspace (%d) = %r, content_subspace (%d) = %r, allow_manual_prefixes = %d"
+                        "create directory layer: node_subspace (%d) = %r, content_subspace (%d) = %r, "
+                        "allow_manual_prefixes = %d "
                         % (
                             index1,
                             self.dir_list[index1].rawPrefix,
@@ -242,15 +240,15 @@ class DirectoryExtension:
                     children = tuple(directory.list(inst.tr))
                 else:
                     children = ()
-                logSubspace = fdb.Subspace((self.dir_index,), prefix)
-                inst.tr[logSubspace[six.u("path")]] = fdb.tuple.pack(
+                log_subspace = fdb.Subspace((self.dir_index,), prefix)
+                inst.tr[log_subspace[six.u("path")]] = fdb.tuple.pack(
                     directory.get_path()
                 )
-                inst.tr[logSubspace[six.u("layer")]] = fdb.tuple.pack(
+                inst.tr[log_subspace[six.u("layer")]] = fdb.tuple.pack(
                     (directory.get_layer(),)
                 )
-                inst.tr[logSubspace[six.u("exists")]] = fdb.tuple.pack((int(exists),))
-                inst.tr[logSubspace[six.u("children")]] = fdb.tuple.pack(children)
+                inst.tr[log_subspace[six.u("exists")]] = fdb.tuple.pack((int(exists),))
+                inst.tr[log_subspace[six.u("children")]] = fdb.tuple.pack(children)
             elif inst.op == six.u("DIRECTORY_STRIP_PREFIX"):
                 s = inst.pop()
                 if not s.startswith(directory.key()):
@@ -259,7 +257,7 @@ class DirectoryExtension:
                         % (s, directory.key())
                     )
 
-                inst.push(s[len(directory.key()) :])
+                inst.push(s[len(directory.key()):])
             else:
                 raise Exception("Unknown op: %s" % inst.op)
         except Exception as e:

@@ -98,7 +98,6 @@ def test_cancellation(db):
     # (4) Cancellation works with weird operations
     @retry_with_timeout(default_timeout)
     def txn4(tr):
-        tr[b"foo"]
         tr.cancel()
         try:
             tr.get_read_version().wait()  # should throw
@@ -519,7 +518,6 @@ def test_timeouts(db):
         for i in range(2):
             tr.options.set_timeout(1500)
             tr.set_read_version(0x7FFFFFFFFFFFFFF0)
-            x = tr[b"foo"]
             try:
                 tr.commit().wait()
                 tr.reset()
@@ -560,7 +558,6 @@ def test_db_timeouts(db):
         tr[b"foo"] = b"bar"
         tr.on_error(err).wait()  # should not throw
         time.sleep(1)
-        tr[b"foo"]
         try:
             tr.commit().wait()  # should throw
             raise TestError("(2) Timeout didn't fire.")
@@ -577,7 +574,6 @@ def test_db_timeouts(db):
         time.sleep(0.75)
         tr[b"foo"] = b"bar"
         tr.on_error(err).wait()  # should not throw
-        tr[b"foo"]
         time.sleep(0.75)
         try:
             tr.commit().wait()  # should throw
