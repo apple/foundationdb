@@ -616,9 +616,10 @@ def tenants(logger):
 
     output = run_fdbcli_command('gettenant tenant')
     lines = output.split('\n')
-    assert len(lines) == 2
+    assert len(lines) == 3
     assert lines[0].strip().startswith('id: ')
     assert lines[1].strip().startswith('prefix: ')
+    assert lines[2].strip().startswith('tenant state: ready')
 
     output = run_fdbcli_command('usetenant')
     assert output == 'Using the default tenant'
