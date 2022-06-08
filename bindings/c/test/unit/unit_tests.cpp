@@ -2212,7 +2212,7 @@ TEST_CASE("special-key-space custom transaction ID") {
 		fdb_check(f1.get(&out_present, (const uint8_t**)&val, &vallen));
 
 		REQUIRE(out_present);
-		UID transaction_id = UID::fromString(std::string_view(val, vallen));
+		UID transaction_id = UID::fromString(std::string(val, vallen));
 		CHECK(transaction_id == randomTransactionID);
 		break;
 	}
