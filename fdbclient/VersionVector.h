@@ -55,11 +55,14 @@ public:
 		maxVersion = version;
 	}
 
-	void setVersion(const std::set<Tag>& tags, Version version) {
+	void setVersion(const std::set<Tag>& tags, Version version, int8_t localityFilter = tagLocalityInvalid) {
 		ASSERT(version > maxVersion);
 		for (auto& tag : tags) {
 			ASSERT(tag != invalidTag);
-			versions[tag] = version;
+			ASSERT(tag.locality > tagLocalityInvalid);
+			if (localityFilter == tagLocalityInvalid || tag.locality == localityFilter) {
+				versions[tag] = version;
+			}
 		}
 		maxVersion = version;
 	}
