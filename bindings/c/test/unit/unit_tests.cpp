@@ -2615,7 +2615,7 @@ TEST_CASE("Tenant create, access, and delete") {
 	fdb::Transaction tr(db);
 	while (1) {
 		fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, nullptr, 0));
-		tr.set("\xff\xff/management/tenant_map/" + tenantName, "");
+		tr.set("\xff\xff/management/tenant/map/" + tenantName, "");
 		fdb::EmptyFuture commitFuture = tr.commit();
 		fdb_error_t err = wait_future(commitFuture);
 		if (err) {
@@ -2628,8 +2628,8 @@ TEST_CASE("Tenant create, access, and delete") {
 	}
 
 	while (1) {
-		StringRef begin = "\xff\xff/management/tenant_map/"_sr;
-		StringRef end = "\xff\xff/management/tenant_map0"_sr;
+		StringRef begin = "\xff\xff/management/tenant/map/"_sr;
+		StringRef end = "\xff\xff/management/tenant/map0"_sr;
 
 		fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, nullptr, 0));
 		fdb::KeyValueArrayFuture f = tr.get_range(FDB_KEYSEL_FIRST_GREATER_OR_EQUAL(begin.begin(), begin.size()),
@@ -2707,7 +2707,7 @@ TEST_CASE("Tenant create, access, and delete") {
 
 	while (1) {
 		fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, nullptr, 0));
-		tr.clear("\xff\xff/management/tenant_map/" + tenantName);
+		tr.clear("\xff\xff/management/tenant/map/" + tenantName);
 		fdb::EmptyFuture commitFuture = tr.commit();
 		fdb_error_t err = wait_future(commitFuture);
 		if (err) {

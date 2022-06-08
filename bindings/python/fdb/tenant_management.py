@@ -25,7 +25,7 @@ https://apple.github.io/foundationdb/api-python.html"""
 
 from fdb import impl as _impl
 
-_tenant_map_prefix = b'\xff\xff/management/tenant_map/'
+_tenant_map_prefix = b'\xff\xff/management/tenant/map/'
 
 # If the existence_check_marker is an empty list, then check whether the tenant exists. 
 # After the check, append an item to the existence_check_marker list so that subsequent

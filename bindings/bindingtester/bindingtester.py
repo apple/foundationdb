@@ -288,7 +288,7 @@ class TestRunner(object):
             tr = self.db.create_transaction()
             try:
                 tr.options.set_special_key_space_enable_writes()
-                del tr[b'\xff\xff/management/tenant_map/' : b'\xff\xff/management/tenant_map0']
+                del tr[b'\xff\xff/management/tenant/map/' : b'\xff\xff/management/tenant/map0']
                 tr.commit().wait()
                 break
             except fdb.FDBError as e:

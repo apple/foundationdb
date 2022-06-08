@@ -78,12 +78,12 @@ def test_tenant_operations(db):
     tenant1[b'tenant_test_key'] = b'tenant1'
     tenant2[b'tenant_test_key'] = b'tenant2'
 
-    tenant1_entry = db[b'\xff\xff/management/tenant_map/tenant1']
+    tenant1_entry = db[b'\xff\xff/management/tenant/map/tenant1']
     tenant1_json = json.loads(tenant1_entry)
     prefix1 = tenant1_json['prefix'].encode('utf8')
     assert prefix1 == p1
 
-    tenant2_entry = db[b'\xff\xff/management/tenant_map/tenant2']
+    tenant2_entry = db[b'\xff\xff/management/tenant/map/tenant2']
     tenant2_json = json.loads(tenant2_entry)
     prefix2 = tenant2_json['prefix'].encode('utf8')
     assert prefix2 == p2
