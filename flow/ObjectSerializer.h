@@ -103,12 +103,12 @@ public:
 			}
 		}
 		load_members(data, context, items...);
-		printf("Deserialize returns\n");
+		// printf("Deserialize returns\n");
 	}
 
 	template <class Item>
 	void deserialize(Item& item) {
-		printf("_ObjectReader<%s>::deserialize<%s> (file_identifier %x)\n", typeid(ReaderImpl).name(), typeid(Item).name(), FileIdentifierFor<Item>::value);
+		// printf("_ObjectReader<%s>::deserialize<%s> (file_identifier %x)\n", typeid(ReaderImpl).name(), typeid(Item).name(), FileIdentifierFor<Item>::value);
 		deserialize(FileIdentifierFor<Item>::value, item);
 	}
 

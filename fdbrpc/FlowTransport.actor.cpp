@@ -274,7 +274,7 @@ struct UnauthorizedEndpointReceiver final : NetworkMessageReceiver {
 	void receive(ArenaObjectReader& reader) override {
 		UID token;
 		reader.deserialize(token);
-		printf("UnauthorizedEndpointReceiver Got token: %lx %lx\n", token.first(), token.second());
+		// printf("UnauthorizedEndpointReceiver Got token: %lx %lx\n", token.first(), token.second());
 		Endpoint e = FlowTransport::transport().loadedEndpoint(token);
 		IFailureMonitor::failureMonitor().unauthorizedEndpoint(e);
 	}
@@ -1213,7 +1213,7 @@ static void scanPackets(TransportData* transport,
 
 		ASSERT(!reader.empty());
 		TaskPriority priority = transport->endpoints.getPriority(token);
-		printf("TaskPriority = %d\n", (uint32_t)priority);
+		// printf("TaskPriority = %d\n", (uint32_t)priority);
 		// we ignore packets to unknown endpoints if they're not going to a stream anyways, so we can just
 		// return here. The main place where this seems to happen is if a ReplyPromise is not waited on
 		// long enough.
@@ -1221,7 +1221,7 @@ static void scanPackets(TransportData* transport,
 		// we have many messages to UnknownEndpoint we want to optimize earlier. As deliver is an actor it
 		// will allocate some state on the heap and this prevents it from doing that.
 		if (priority != TaskPriority::UnknownEndpoint || (token.first() & TOKEN_STREAM_FLAG) != 0) {
-			printf("deliver\n");
+			// printf("deliver\n");
 			deliver(transport,
 			        Endpoint({ peerAddress }, token),
 			        priority,
@@ -1320,7 +1320,7 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 				}
 				if (peer) {
 					peer->bytesReceived += totalReadBytes;
-					printf("peer->bytesReceived: %lld totalReadBytes: %d\n", peer->bytesReceived, totalReadBytes);
+					// printf("peer->bytesReceived: %lld totalReadBytes: %d\n", peer->bytesReceived, totalReadBytes);
 				}
 				if (totalReadBytes == 0)
 					break;
@@ -1423,7 +1423,7 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 							onConnected.send(peer);
 							wait(delay(0)); // Check for cancellation
 						}
-					  	printf("Set peer protocol version\n");
+					  	// printf("Set peer protocol version\n");
 						peer->protocolVersion->set(peerProtocolVersion);
 					}
 				}
