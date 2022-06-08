@@ -261,8 +261,8 @@ Future<UID> dataClusterRegister(Transaction tr, ClusterNameRef name, UID metaclu
 	std::vector<StringRef> tokens = { "tenant_mode=required"_sr };
 
 	// TODO: special keys?
-	ConfigurationResult configResult =
-	    wait(ManagementAPI::changeConfigTransaction(tr, tokens, Optional<ConfigureAutoResult>(), false, false));
+	ConfigurationResult configResult = wait(
+	    ManagementAPI::changeConfigTransaction(tr, tokens, Optional<ConfigureAutoResult>(), false, Optional<UID>()));
 
 	if (configResult != ConfigurationResult::SUCCESS) {
 		TraceEvent(SevWarn, "CouldNotConfigureDataCluster")
