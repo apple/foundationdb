@@ -26,18 +26,18 @@ import time
 import random
 import traceback
 
-sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 from python_tests import PythonTest
 
 import fdb
 import fdb.tuple
+
+sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
 fdb.api_version(400)
 
 
 # A class that mimics some of the operations of the FoundationDB key-value store
 class KeyValueStore:
-
     # Uses a simple dictionary to store key-value pairs
     # Any operations that depend on the order of keys first sort the data
     store = dict()
@@ -57,7 +57,7 @@ class KeyValueStore:
             if key >= key_selector.key:
                 index += key_selector.offset
                 if (
-                    key == key_selector.key and not key_selector.or_equal
+                        key == key_selector.key and not key_selector.or_equal
                 ) or key != key_selector.key:
                     index -= 1
 
@@ -157,20 +157,19 @@ class PythonCorrectness(PythonTest):
 
     # Generates a random set of keys and values
     def generate_data(
-        self,
-        num_keys,
-        min_key_length,
-        max_key_length,
-        min_value_length,
-        max_value_length,
-        prefix="",
-        allow_duplicates=True,
+            self,
+            num_keys,
+            min_key_length,
+            max_key_length,
+            max_value_length,
+            prefix="",
+            allow_duplicates=True,
     ):
         data = list()
         keys = set()
         while len(data) < num_keys:
             # key = prefix + ''.join(random.choice(string.ascii_lowercase)
-            #                        for i in range(0, random.randint(minKeyLength - len(prefix), maxKeyLength - len(prefix))))
+            #      for i in range(0, random.randint(minKeyLength - len(prefix), maxKeyLength - len(prefix))))
             key = prefix + "".join(
                 chr(random.randint(0, 254))
                 for _ in range(
@@ -514,8 +513,8 @@ class PythonCorrectness(PythonTest):
             #    print 'mismatched key: ' + dbResults[i].key
             #    return False
             if (
-                db_results[i].key != store_results[i][0]
-                or db_results[i].value != store_results[i][1]
+                    db_results[i].key != store_results[i][0]
+                    or db_results[i].value != store_results[i][1]
             ):
                 # print 'mismatched key: ' + dbResults[i].key + ' - ' + storeResults[i][0]
                 return False
@@ -530,7 +529,6 @@ class PythonCorrectness(PythonTest):
         max_short_key_length = 3
         min_long_key_length = 1
         max_long_key_length = 128
-        min_value_length = 1
         max_value_length = 10000
         max_transaction_bytes = 5000000
 
@@ -555,7 +553,6 @@ class PythonCorrectness(PythonTest):
                 num_keys * ratio_short_keys,
                 min_short_key_length,
                 max_short_key_length,
-                min_value_length,
                 max_value_length,
             )
             data.extend(
@@ -563,7 +560,6 @@ class PythonCorrectness(PythonTest):
                     num_keys * (1 - ratio_short_keys),
                     min_long_key_length,
                     max_long_key_length,
-                    min_value_length,
                     max_value_length,
                 )
             )
@@ -575,7 +571,7 @@ class PythonCorrectness(PythonTest):
 
             # Compare the results of single key reads
             if not self.correctness_get(
-                db, store, data, num_reads, max_keys_per_transaction
+                    db, store, data, num_reads, max_keys_per_transaction
             ):
                 self.result.add_error("transaction.get returned incorrect result")
 
@@ -589,7 +585,7 @@ class PythonCorrectness(PythonTest):
 
             # Compare the results of prefix reads
             for i in range(0, num_prefix_reads):
-                if not self.correctness_get_prefix(db, store, data):
+                if not self.correctness_get_prefix(db, store):
                     self.result.add_error(
                         "transaction.get_range_startswith returned incorrect results"
                     )
@@ -597,7 +593,7 @@ class PythonCorrectness(PythonTest):
 
             # Compare the results of get key
             if not self.correctness_get_key(
-                db, store, data, num_get_keys, max_keys_per_transaction
+                    db, store, data, num_get_keys, max_keys_per_transaction
             ):
                 self.result.add_error("transaction.get_key returned incorrect results")
 
@@ -640,7 +636,7 @@ class PythonCorrectness(PythonTest):
                     break
 
             # Compare the results of clear_range_startswith
-            self.correctness_clear_prefix(db, store, data, num_prefix_clears)
+            self.correctness_clear_prefix(db, store, num_prefix_clears)
             if not self.compare_database_to_memory(db, store):
                 self.result.add_error(
                     "transaction.clear_range_startswith resulted in incorrect database"
@@ -659,7 +655,7 @@ class PythonCorrectness(PythonTest):
         keys_committed = 0
         while keys_committed < len(data):
             self.correctness_set_transactional(
-                db, data[keys_committed : keys_committed + max_keys_per_transaction]
+                db, data[keys_committed: keys_committed + max_keys_per_transaction]
             )
             keys_committed += max_keys_per_transaction
 
@@ -678,7 +674,7 @@ class PythonCorrectness(PythonTest):
 
         keys_retrieved = 0
         while keys_retrieved < len(keys):
-            sub_keys = keys[keys_retrieved : keys_retrieved + max_keys_per_transaction]
+            sub_keys = keys[keys_retrieved: keys_retrieved + max_keys_per_transaction]
 
             values = self.correctness_get_transactional(db, sub_keys)
             for i in range(0, num_reads):
@@ -724,7 +720,7 @@ class PythonCorrectness(PythonTest):
             return list(tr.get_range(key1, key2))
 
     # Compares the results of the get_range_startswith operation from the database and a memory key-value store
-    def correctness_get_prefix(self, db, store, data):
+    def correctness_get_prefix(self, db, store):
         prefix = "".join(
             chr(random.randint(0, 254)) for _ in range(0, random.randint(1, 3))
         )
@@ -740,7 +736,7 @@ class PythonCorrectness(PythonTest):
 
     # Compares the results of the get_key operation from the database and a memory key-value store
     def correctness_get_key(
-        self, db, store, data, num_get_keys, max_keys_per_transaction
+            self, db, store, data, num_get_keys, max_keys_per_transaction
     ):
         selectors = []
         for i in range(0, num_get_keys):
@@ -758,8 +754,8 @@ class PythonCorrectness(PythonTest):
         keys_retrieved = 0
         while keys_retrieved < len(selectors):
             sub_selectors = selectors[
-                keys_retrieved : keys_retrieved + max_keys_per_transaction
-            ]
+                            keys_retrieved: keys_retrieved + max_keys_per_transaction
+                            ]
             db_keys = self.correctness_get_key_transactional(db, sub_selectors)
             for i in range(0, num_get_keys):
                 if db_keys[i] != store.get_key(sub_selectors[i]):
@@ -796,7 +792,7 @@ class PythonCorrectness(PythonTest):
         keys_cleared = 0
         while keys_cleared < len(cleared_keys):
             self.correctness_clear_transactional(
-                db, cleared_keys[keys_cleared : keys_cleared + max_keys_per_transaction]
+                db, cleared_keys[keys_cleared: keys_cleared + max_keys_per_transaction]
             )
             keys_cleared += max_keys_per_transaction
 
@@ -825,7 +821,7 @@ class PythonCorrectness(PythonTest):
         tr.clear_range(key1, key2)
 
     # Clears data with random prefixes from a database and a memory key-value store
-    def correctness_clear_prefix(self, db, store, data, num_prefix_clears):
+    def correctness_clear_prefix(self, db, store, num_prefix_clears):
         prefixes = []
         for i in range(0, num_prefix_clears):
             prefix = "".join(

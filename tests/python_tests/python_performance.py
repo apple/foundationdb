@@ -28,13 +28,14 @@ import random
 import math
 import traceback
 
-from collections import OrderedDict
-
-sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 from python_tests import PythonTest
 
 import fdb
 import fdb.tuple
+
+from collections import OrderedDict
+
+sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
 fdb.api_version(400)
 
@@ -101,8 +102,8 @@ class PythonPerformance(PythonTest):
             futures = {}
 
             for i in range(self.key_count):
-                if not success[i / num_keys]:
-                    trs[i / num_keys][self.key(i)] = self.value(self.key(i))
+                if not success[int(i / num_keys)]:
+                    trs[int(i / num_keys)][self.key(i)] = self.value(self.key(i))
 
             for i, tr in enumerate(trs):
                 if not success[i]:
@@ -139,7 +140,7 @@ class PythonPerformance(PythonTest):
 
             fxn_name = "run_%s" % test
             assert hasattr(self, fxn_name), (
-                "Test function %s not implemented" % fxn_name
+                    "Test function %s not implemented" % fxn_name
             )
 
             # Perform each test several times
@@ -157,7 +158,7 @@ class PythonPerformance(PythonTest):
                     break
 
             if len(results) == num_runs:
-                median = sorted(results)[num_runs / 2]
+                median = sorted(results)[int(num_runs / 2)]
                 self.result.add_kpi(
                     "%s (%s)"
                     % (PythonPerformance.tests[test], self.multi_version_description()),
@@ -194,7 +195,7 @@ class PythonPerformance(PythonTest):
 
         for i in range(count):
             key = self.random_key()
-            del tr[key : self.key(int(key) + 1)]
+            del tr[key: self.key(int(key) + 1)]
 
         return count / (time.time() - s)
 
@@ -269,7 +270,7 @@ class PythonPerformance(PythonTest):
         b = random.randint(0, self.key_count - count)
         s = time.time()
 
-        list(tr[self.key(b) : self.key(b + count)])
+        list(tr[self.key(b): self.key(b + count)])
 
         return count / (time.time() - s)
 
@@ -343,6 +344,6 @@ if __name__ == "__main__":
         "--tests-to-run",
         nargs="*",
         help="Names of tests to run. Can be any of %s. By default, all tests are run."
-        % test_string,
+             % test_string,
     )
     PythonPerformance().run(parser=parser)
