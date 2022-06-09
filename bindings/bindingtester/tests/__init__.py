@@ -32,7 +32,7 @@ fdb.api_version(FDB_API_VERSION)
 
 class ResultSpecification(object):
     def __init__(
-            self, subspace, key_start_index=0, ordering_index=None, global_error_filter=None
+        self, subspace, key_start_index=0, ordering_index=None, global_error_filter=None
     ):
         self.subspace = subspace
         self.key_start_index = key_start_index
@@ -179,11 +179,11 @@ class InstructionSet(TestInstructions, list):
         self.core_test_end = len(self)
 
     def core_instructions(self):
-        return self[self.core_test_begin: self.core_test_end]
+        return self[self.core_test_begin : self.core_test_end]
 
     @fdb.transactional
     def _insert_operations_transactional(self, tr, subspace, start, count):
-        for i, instruction in enumerate(self[start: start + count]):
+        for i, instruction in enumerate(self[start : start + count]):
             tr[subspace.pack((start + i,))] = instruction.to_value()
 
     def insert_operations(self, db, subspace):

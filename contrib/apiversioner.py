@@ -25,56 +25,95 @@ import os
 import re
 import sys
 
-LOG_FORMAT = '%(created)f [%(levelname)s] %(message)s'
+LOG_FORMAT = "%(created)f [%(levelname)s] %(message)s"
 
-EXCLUDED_FILES = list(map(re.compile, [
-    # Output directories
-    r'\.git/.*', r'bin/.*', r'packages/.*', r'\.objs/.*', r'\.deps/.*', r'bindings/go/build/.*',
-    r'documentation/sphinx/\.out/.*',
+EXCLUDED_FILES = list(
+    map(
+        re.compile,
+        [
+            # Output directories
+            r"\.git/.*",
+            r"bin/.*",
+            r"packages/.*",
+            r"\.objs/.*",
+            r"\.deps/.*",
+            r"bindings/go/build/.*",
+            r"documentation/sphinx/\.out/.*",
+            # Generated files
+            r".*\.g\.cpp$",
+            r".*\.g\.h$",
+            r"(^|.*/)generated.mk$",
+            r".*\.g\.S$",
+            r".*/MutationType\.java",
+            r".*/generated\.go",
+            # Binary files
+            r".*\.class$",
+            r".*\.o$",
+            r".*\.a$",
+            r".*[\.-]debug",
+            r".*\.so$",
+            r".*\.dylib$",
+            r".*\.dll$",
+            r".*\.tar[^/]*$",
+            r".*\.jar$",
+            r".*pyc$",
+            r"bindings/flow/bin/.*",
+            r".*\.pdf$",
+            r".*\.jp[e]*g",
+            r".*\.png",
+            r".*\.ico",
+            r"packaging/msi/art/.*",
+            # Project configuration files
+            r".*foundationdb\.VC\.db$",
+            r".*foundationdb\.VC\.VC\.opendb$",
+            r".*iml$",
+            # Source files from someone else
+            r"(^|.*/)Hash3\..*",
+            r"(^|.*/)sqlite.*",
+            r"bindings/go/godoc-resources/.*",
+            r"bindings/go/src/fdb/tuple/testdata/tuples.golden",
+            r"fdbcli/linenoise/.*",
+            r"contrib/rapidjson/.*",
+            r"fdbrpc/rapidxml/.*",
+            r"fdbrpc/zlib/.*",
+            r"fdbrpc/sha1/.*",
+            r"fdbrpc/xml2json.hpp$",
+            r"fdbrpc/libcoroutine/.*",
+            r"fdbrpc/libeio/.*",
+            r"fdbrpc/lib64/.*",
+            r"fdbrpc/generated-constants.cpp$",
+            # Miscellaneous
+            r"bindings/nodejs/node_modules/.*",
+            r"bindings/go/godoc/.*",
+            r".*trace.*xml$",
+            r".*log$",
+            r".*\.DS_Store$",
+            r"simfdb/\.*",
+            r".*~$",
+            r".*.swp$",
+        ],
+    )
+)
 
-    # Generated files
-    r'.*\.g\.cpp$', r'.*\.g\.h$', r'(^|.*/)generated.mk$', r'.*\.g\.S$',
-    r'.*/MutationType\.java', r'.*/generated\.go',
+SUSPECT_PHRASES = map(
+    re.compile,
+    [
+        r"#define\s+FDB_API_VERSION\s+(\d+)",
+        r"\.\s*selectApiVersion\s*\(\s*(\d+)\s*\)",
+        r"\.\s*APIVersion\s*\(\s*(\d+)\s*\)",
+        r"\.\s*MustAPIVersion\s*\(\s*(\d+)\s*\)",
+        r"header_version\s+=\s+(\d+)",
+        r"\.\s*apiVersion\s*\(\s*(\d+)\s*\)",
+        r"API_VERSION\s*=\s*(\d+)",
+        r"fdb_select_api_version\s*\((\d+)\)",
+    ],
+)
 
-    # Binary files
-    r'.*\.class$', r'.*\.o$', r'.*\.a$', r'.*[\.-]debug', r'.*\.so$', r'.*\.dylib$', r'.*\.dll$', r'.*\.tar[^/]*$',
-    r'.*\.jar$', r'.*pyc$', r'bindings/flow/bin/.*',
-    r'.*\.pdf$', r'.*\.jp[e]*g', r'.*\.png', r'.*\.ico',
-    r'packaging/msi/art/.*',
-
-    # Project configuration files
-    r'.*foundationdb\.VC\.db$', r'.*foundationdb\.VC\.VC\.opendb$', r'.*iml$',
-
-    # Source files from someone else
-    r'(^|.*/)Hash3\..*', r'(^|.*/)sqlite.*',
-    r'bindings/go/godoc-resources/.*',
-    r'bindings/go/src/fdb/tuple/testdata/tuples.golden',
-    r'fdbcli/linenoise/.*',
-    r'contrib/rapidjson/.*', r'fdbrpc/rapidxml/.*', r'fdbrpc/zlib/.*', r'fdbrpc/sha1/.*',
-    r'fdbrpc/xml2json.hpp$', r'fdbrpc/libcoroutine/.*', r'fdbrpc/libeio/.*', r'fdbrpc/lib64/.*',
-    r'fdbrpc/generated-constants.cpp$',
-
-    # Miscellaneous
-    r'bindings/nodejs/node_modules/.*', r'bindings/go/godoc/.*', r'.*trace.*xml$', r'.*log$', r'.*\.DS_Store$',
-    r'simfdb/\.*', r'.*~$', r'.*.swp$'
-]))
-
-SUSPECT_PHRASES = map(re.compile, [
-    r'#define\s+FDB_API_VERSION\s+(\d+)',
-    r'\.\s*selectApiVersion\s*\(\s*(\d+)\s*\)',
-    r'\.\s*APIVersion\s*\(\s*(\d+)\s*\)',
-    r'\.\s*MustAPIVersion\s*\(\s*(\d+)\s*\)',
-    r'header_version\s+=\s+(\d+)',
-    r'\.\s*apiVersion\s*\(\s*(\d+)\s*\)',
-    r'API_VERSION\s*=\s*(\d+)',
-    r'fdb_select_api_version\s*\((\d+)\)'
-])
-
-DIM_CODE = '\033[2m'
-BOLD_CODE = '\033[1m'
-RED_COLOR = '\033[91m'
-GREEN_COLOR = '\033[92m'
-END_COLOR = '\033[0m'
+DIM_CODE = "\033[2m"
+BOLD_CODE = "\033[1m"
+RED_COLOR = "\033[91m"
+GREEN_COLOR = "\033[92m"
+END_COLOR = "\033[0m"
 
 
 def positive_response(val):
@@ -83,13 +122,13 @@ def positive_response(val):
 
 # Returns: new line list + a dirty flag
 def rewrite_lines(
-        lines,
-        version_re,
-        new_version,
-        suspect_only=True,
-        print_diffs=False,
-        ask_confirm=False,
-        grayscale=False,
+    lines,
+    version_re,
+    new_version,
+    suspect_only=True,
+    print_diffs=False,
+    ask_confirm=False,
+    grayscale=False,
 ):
     new_lines = []
     dirty = False
@@ -106,7 +145,7 @@ def rewrite_lines(
                 start = m.start(group_index)
                 end = m.end(group_index)
                 new_line = (
-                        new_line[: start + offset] + new_str + new_line[end + offset:]
+                    new_line[: start + offset] + new_str + new_line[end + offset :]
                 )
                 offset += len(new_str) - (end - start)
 
@@ -118,7 +157,7 @@ def rewrite_lines(
                         lambda pair: " {:4d}: {}".format(
                             line_no - 1 + pair[0], pair[1]
                         ),
-                        enumerate(lines[line_no - 2: line_no]),
+                        enumerate(lines[line_no - 2 : line_no]),
                     )
                 )
             )
@@ -138,7 +177,7 @@ def rewrite_lines(
                         lambda pair: " {:4d}: {}".format(
                             line_no + 2 + pair[0], pair[1]
                         ),
-                        enumerate(lines[line_no + 1: line_no + 3]),
+                        enumerate(lines[line_no + 1 : line_no + 3]),
                     )
                 )
             )
@@ -156,16 +195,16 @@ def rewrite_lines(
 
 
 def address_file(
-        base_path,
-        file_path,
-        version,
-        new_version=None,
-        suspect_only=False,
-        show_diffs=False,
-        rewrite=False,
-        ask_confirm=True,
-        grayscale=False,
-        paths_only=False,
+    base_path,
+    file_path,
+    version,
+    new_version=None,
+    suspect_only=False,
+    show_diffs=False,
+    rewrite=False,
+    ask_confirm=True,
+    grayscale=False,
+    paths_only=False,
 ):
     if any(map(lambda x: x.match(file_path), EXCLUDED_FILES)):
         logging.debug("skipping file %s as matches excluded list", file_path)
@@ -187,7 +226,7 @@ def address_file(
                     for match in suspect_phrase.finditer(line):
                         curr_version = int(match.groups()[0])
                         if (new_version is None and curr_version < version) or (
-                                new_version is not None and curr_version < new_version
+                            new_version is not None and curr_version < new_version
                         ):
                             found = True
                             logging.info(
@@ -244,15 +283,15 @@ def address_file(
 
 
 def address_path(
-        path,
-        version,
-        new_version=None,
-        suspect_only=False,
-        show_diffs=False,
-        rewrite=False,
-        ask_confirm=True,
-        grayscale=False,
-        paths_only=False,
+    path,
+    version,
+    new_version=None,
+    suspect_only=False,
+    show_diffs=False,
+    rewrite=False,
+    ask_confirm=True,
+    grayscale=False,
+    paths_only=False,
 ):
     try:
         if os.path.exists(path):
@@ -264,19 +303,19 @@ def address_path(
                             os.path.join(dir_path, file_name), path
                         )
                         status = (
-                                address_file(
-                                    path,
-                                    file_path,
-                                    version,
-                                    new_version,
-                                    suspect_only,
-                                    show_diffs,
-                                    rewrite,
-                                    ask_confirm,
-                                    grayscale,
-                                    paths_only,
-                                )
-                                and status
+                            address_file(
+                                path,
+                                file_path,
+                                version,
+                                new_version,
+                                suspect_only,
+                                show_diffs,
+                                rewrite,
+                                ask_confirm,
+                                grayscale,
+                                paths_only,
+                            )
+                            and status
                         )
                 return status
             else:

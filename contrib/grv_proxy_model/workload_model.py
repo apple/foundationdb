@@ -39,7 +39,7 @@ class Request:
 
 class PriorityWorkloadModel:
     def __init__(
-            self, priority, rate_model, batch_model, generator, max_outstanding=1e9
+        self, priority, rate_model, batch_model, generator, max_outstanding=1e9
     ):
         self.priority = priority
         self.rate_model = rate_model
@@ -79,9 +79,14 @@ class WorkloadModel:
 
 
 class Distribution:
-    def exponential(self, x): return numpy.random.exponential(x)
-    def uniform(self, x): return numpy.random.uniform(0, 2.0 * x)
-    def fixed(self, x): return x
+    def exponential(self, x):
+        return numpy.random.exponential(x)
+
+    def uniform(self, x):
+        return numpy.random.uniform(0, 2.0 * x)
+
+    def fixed(self, x):
+        return x
 
 
 class BatchGenerator:

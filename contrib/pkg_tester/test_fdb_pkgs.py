@@ -119,8 +119,8 @@ def ubuntu_image_with_fdb_helper(versioned: bool) -> Iterator[Optional[Image]]:
             [
                 "bash",
                 "-c",
-                "DEBIAN_FRONTEND=noninteractive DEBCONF_NONINTERACTIVE_SEEN=true apt-get install --yes gcc " +
-                "pkg-config cmake",
+                "DEBIAN_FRONTEND=noninteractive DEBCONF_NONINTERACTIVE_SEEN=true apt-get install --yes gcc "
+                + "pkg-config cmake",
             ]
         )  # this is for testing building client apps
         container.run(["bash", "-c", "dpkg -i /opt/*.deb"])
@@ -205,11 +205,11 @@ def pytest_generate_tests(metafunc):
 
 @pytest.fixture()
 def linux_container(
-        request,
-        ubuntu_image_with_fdb,
-        centos_image_with_fdb,
-        ubuntu_image_with_fdb_versioned,
-        centos_image_with_fdb_versioned,
+    request,
+    ubuntu_image_with_fdb,
+    centos_image_with_fdb,
+    ubuntu_image_with_fdb_versioned,
+    centos_image_with_fdb_versioned,
 ) -> Iterator[Container]:
     """
     Tests which accept this fixture will be run once for each supported platform, for each type of package (versioned

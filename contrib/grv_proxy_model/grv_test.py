@@ -92,7 +92,7 @@ def print_choices_list(context=None):
             if issubclass(p, proxy_model.Limiter) and p != proxy_model.Limiter:
                 name = p.__name__
                 if name.endswith("Limiter"):
-                    name = name[0: -len("Limiter")]
+                    name = name[0 : -len("Limiter")]
                 print("  %s" % name)
 
 

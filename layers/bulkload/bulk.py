@@ -77,7 +77,7 @@ class Subspace(object):
 
     def unpack(self, key):
         assert key.startswith(self.rawPrefix)
-        return fdb.tuple.unpack(key[len(self.rawPrefix):])
+        return fdb.tuple.unpack(key[len(self.rawPrefix) :])
 
     def range(self, tuple=()):
         p = fdb.tuple.range(tuple)

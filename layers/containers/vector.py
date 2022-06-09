@@ -52,7 +52,7 @@ class Subspace(object):
 
     def unpack(self, key):
         assert key.startswith(self.rawPrefix)
-        return fdb.tuple.unpack(key[len(self.rawPrefix):])
+        return fdb.tuple.unpack(key[len(self.rawPrefix) :])
 
     def range(self, tuple=()):
         p = fdb.tuple.range(tuple)
@@ -327,7 +327,7 @@ class Vector:
         for k, v in result:
             key_index = self.subspace.unpack(k)[0]
             while (step > 0 and current_index < key_index) or (
-                    step < 0 and current_index > key_index
+                step < 0 and current_index > key_index
             ):
                 current_index = current_index + step
                 yield self.defaultValue

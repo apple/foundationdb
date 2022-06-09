@@ -116,7 +116,14 @@ class Stack:
 
 class Instruction:
     def __init__(
-        self, tr, stack, op, index, is_database=False, is_tenant=False, is_snapshot=False
+        self,
+        tr,
+        stack,
+        op,
+        index,
+        is_database=False,
+        is_tenant=False,
+        is_snapshot=False,
     ):
         self.tr = tr
         self.stack = stack
@@ -425,15 +432,11 @@ class Tester:
                         inst.push(f)
                 elif inst.op == six.u("GET_ESTIMATED_RANGE_SIZE"):
                     begin, end = inst.pop(2)
-                    obj.get_estimated_range_size_bytes(
-                        begin, end
-                    ).wait()
+                    obj.get_estimated_range_size_bytes(begin, end).wait()
                     inst.push(b"GOT_ESTIMATED_RANGE_SIZE")
                 elif inst.op == six.u("GET_RANGE_SPLIT_POINTS"):
                     begin, end, chunk_size = inst.pop(3)
-                    obj.get_range_split_points(
-                        begin, end, chunk_size
-                    ).wait()
+                    obj.get_range_split_points(begin, end, chunk_size).wait()
                     inst.push(b"GOT_RANGE_SPLIT_POINTS")
                 elif inst.op == six.u("GET_KEY"):
                     key, or_equal, offset, prefix = inst.pop(4)
@@ -603,7 +606,9 @@ class Tester:
                     if six.PY3:
                         sorted_items = sorted(unpacked, key=fdb.tuple.pack)
                     else:
-                        sorted_items = sorted(unpacked, key=functools.cmp_to_key(fdb.tuple.compare))
+                        sorted_items = sorted(
+                            unpacked, key=functools.cmp_to_key(fdb.tuple.compare)
+                        )
                     for item in sorted_items:
                         inst.push(fdb.tuple.pack(item))
                 elif inst.op == six.u("TUPLE_RANGE"):
@@ -659,7 +664,9 @@ class Tester:
                     self.tenant = None
                 elif inst.op == six.u("TENANT_LIST"):
                     begin, end, limit = inst.pop(3)
-                    tenant_list = fdb.tenant_management.list_tenants(self.db, begin, end, limit)
+                    tenant_list = fdb.tenant_management.list_tenants(
+                        self.db, begin, end, limit
+                    )
                     result = []
                     for tenant in tenant_list:
                         result += [tenant.key]

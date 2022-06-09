@@ -79,7 +79,7 @@ def create_default_directory_subspace(instructions, path, random):
 
 
 def push_instruction_and_record_prefix(
-        instructions, op, op_args, path, dir_index, random, subspace
+    instructions, op, op_args, path, dir_index, random, subspace
 ):
     if not op.endswith("_DATABASE"):
         instructions.push_args(1, *test_util.with_length(path))
@@ -130,7 +130,7 @@ def check_for_duplicate_prefixes(db, subspace):
             p
             for p in prefixes
             if not (
-                    p.startswith(DEFAULT_DIRECTORY_PREFIX) or p == DIRECTORY_ERROR_STRING
+                p.startswith(DEFAULT_DIRECTORY_PREFIX) or p == DIRECTORY_ERROR_STRING
             )
         ]
         count += len(prefixes)
@@ -154,11 +154,11 @@ def validate_hca_state(db):
         counters.range().start, counters.range().stop, limit=1, reverse=True
     )
     [(start, reported_count)] = [
-                                    (counters.unpack(kv.key)[0], struct.unpack("<q", kv.value)[0])
-                                    for kv in last_counter
-                                ] or [(0, 0)]
+        (counters.unpack(kv.key)[0], struct.unpack("<q", kv.value)[0])
+        for kv in last_counter
+    ] or [(0, 0)]
 
-    actual_count = len(db[recent[start]: recent.range().stop])
+    actual_count = len(db[recent[start] : recent.range().stop])
     if actual_count > reported_count:
         return [
             "The HCA reports %d prefixes allocated in current window, but it actually allocated %d"

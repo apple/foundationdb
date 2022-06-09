@@ -54,16 +54,16 @@ def _check_tenant_existence(tr, key, existence_check_marker, force_maybe_committ
 # If the existence_check_marker is a non-empty list, then the existence check is skipped.
 @_impl.transactional
 def _create_tenant_impl(
-        tr, tenant_name, existence_check_marker, force_existence_check_maybe_committed=False
+    tr, tenant_name, existence_check_marker, force_existence_check_maybe_committed=False
 ):
     tr.options.set_special_key_space_enable_writes()
     key = b"%s%s" % (_tenant_map_prefix, tenant_name)
 
     if (
-            _check_tenant_existence(
-                tr, key, existence_check_marker, force_existence_check_maybe_committed
-            )
-            is True
+        _check_tenant_existence(
+            tr, key, existence_check_marker, force_existence_check_maybe_committed
+        )
+        is True
     ):
         raise _impl.FDBError(2132)  # tenant_already_exists
 
@@ -80,16 +80,16 @@ def _create_tenant_impl(
 # If the existence_check_marker is a non-empty list, then the existence check is skipped.
 @_impl.transactional
 def _delete_tenant_impl(
-        tr, tenant_name, existence_check_marker, force_existence_check_maybe_committed=False
+    tr, tenant_name, existence_check_marker, force_existence_check_maybe_committed=False
 ):
     tr.options.set_special_key_space_enable_writes()
     key = b"%s%s" % (_tenant_map_prefix, tenant_name)
 
     if (
-            _check_tenant_existence(
-                tr, key, existence_check_marker, force_existence_check_maybe_committed
-            )
-            is False
+        _check_tenant_existence(
+            tr, key, existence_check_marker, force_existence_check_maybe_committed
+        )
+        is False
     ):
         raise _impl.FDBError(2131)  # tenant_not_found
 
@@ -123,8 +123,8 @@ class FDBTenantList(object):
 @_impl.transactional
 def _list_tenants_impl(tr, begin, end, limit):
     tr.options.set_read_system_keys()
-    begin_key = b'%s%s' % (_tenant_map_prefix, begin)
-    end_key = b'%s%s' % (_tenant_map_prefix, end)
+    begin_key = b"%s%s" % (_tenant_map_prefix, begin)
+    end_key = b"%s%s" % (_tenant_map_prefix, end)
 
     rangeresult = tr.get_range(begin_key, end_key, limit)
 

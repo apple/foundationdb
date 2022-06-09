@@ -156,8 +156,8 @@ class DirectoryTest(Test):
                 while True:
                     self.dir_index = random.randrange(0, len(self.dir_list))
                     if (
-                            not self.dir_list[self.dir_index].state.is_partition
-                            or not self.dir_list[self.dir_index].state.deleted
+                        not self.dir_list[self.dir_index].state.is_partition
+                        or not self.dir_list[self.dir_index].state.deleted
                     ):
                         break
 
@@ -267,7 +267,7 @@ class DirectoryTest(Test):
                 # Because allocated prefixes are non-deterministic, we cannot have overlapping
                 # transactions that allocate/remove these prefixes in a comparison test
                 if (
-                        op.endswith("_DATABASE") and args.concurrency == 1
+                    op.endswith("_DATABASE") and args.concurrency == 1
                 ):  # and allow_empty_prefix:
                     test_util.blocking_commit(instructions)
 
@@ -288,7 +288,7 @@ class DirectoryTest(Test):
                     instructions.append(op)
 
                 if (
-                        not op.endswith("_DATABASE") and args.concurrency == 1
+                    not op.endswith("_DATABASE") and args.concurrency == 1
                 ):  # and allow_empty_prefix:
                     test_util.blocking_commit(instructions)
 
@@ -337,9 +337,9 @@ class DirectoryTest(Test):
 
                 # Make sure that the default directory subspace still exists after moving the specified directory
                 if (
-                        dir_entry.state.is_directory
-                        and not dir_entry.state.is_subspace
-                        and old_path == ("",)
+                    dir_entry.state.is_directory
+                    and not dir_entry.state.is_subspace
+                    and old_path == ("",)
                 ):
                     self.ensure_default_directory_subspace(instructions, default_path)
 
@@ -360,7 +360,7 @@ class DirectoryTest(Test):
                 self.ensure_default_directory_subspace(instructions, default_path)
 
             elif (
-                    root_op == "DIRECTORY_REMOVE" or root_op == "DIRECTORY_REMOVE_IF_EXISTS"
+                root_op == "DIRECTORY_REMOVE" or root_op == "DIRECTORY_REMOVE_IF_EXISTS"
             ):
                 # Because allocated prefixes are non-deterministic, we cannot have overlapping
                 # transactions that allocate/remove these prefixes in a comparison test
@@ -380,9 +380,9 @@ class DirectoryTest(Test):
 
                 # Make sure that the default directory subspace still exists after removing the specified directory
                 if path == () or (
-                        dir_entry.state.is_directory
-                        and not dir_entry.state.is_subspace
-                        and path == ("",)
+                    dir_entry.state.is_directory
+                    and not dir_entry.state.is_subspace
+                    and path == ("",)
                 ):
                     self.ensure_default_directory_subspace(instructions, default_path)
 
@@ -402,9 +402,9 @@ class DirectoryTest(Test):
 
             elif root_op == "DIRECTORY_UNPACK_KEY" or root_op == "DIRECTORY_CONTAINS":
                 if (
-                        not dir_entry.state.has_known_prefix
-                        or random.random() < 0.2
-                        or root_op == "DIRECTORY_UNPACK_KEY"
+                    not dir_entry.state.has_known_prefix
+                    or random.random() < 0.2
+                    or root_op == "DIRECTORY_UNPACK_KEY"
                 ):
                     t = self.random.random_tuple(5)
                     instructions.push_args(*test_util.with_length(t))
@@ -498,9 +498,9 @@ def generate_path(min_length=0):
     path = ()
     for i in range(length):
         if random.random() < 0.05:
-            path += "",
+            path += ("",)
         else:
-            path += random.choice(["1", "2", "3"]),
+            path += (random.choice(["1", "2", "3"]),)
 
     return path
 
@@ -510,10 +510,10 @@ def generate_prefix(require_unique=False, is_partition=False, min_length=1):
     if not require_unique and min_length == 0 and random.random() < 0.8:
         return None
     elif (
-            require_unique
-            or is_partition
-            or min_length > len(fixed_prefix)
-            or random.random() < 0.5
+        require_unique
+        or is_partition
+        or min_length > len(fixed_prefix)
+        or random.random() < 0.5
     ):
         if require_unique:
             min_length = max(min_length, 16)
@@ -533,5 +533,5 @@ def generate_prefix(require_unique=False, is_partition=False, min_length=1):
             )
     else:
         prefix = fixed_prefix
-        generated = prefix[0: random.randrange(min_length, len(prefix))]
+        generated = prefix[0 : random.randrange(min_length, len(prefix))]
         return generated

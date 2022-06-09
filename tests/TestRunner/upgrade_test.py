@@ -132,17 +132,16 @@ def read_to_str(filename):
 
 
 class UpgradeTest:
-    def __init__(
-        self,
-        args
-    ):
+    def __init__(self, args):
         self.build_dir = Path(args.build_dir).resolve()
         assert self.build_dir.exists(), "{} does not exist".format(args.build_dir)
         assert self.build_dir.is_dir(), "{} is not a directory".format(args.build_dir)
         self.upgrade_path = args.upgrade_path
         self.used_versions = set(self.upgrade_path).difference(set(CLUSTER_ACTIONS))
         for version in self.used_versions:
-            assert version in SUPPORTED_VERSIONS, "Unsupported version or cluster action {}".format(version)
+            assert (
+                version in SUPPORTED_VERSIONS
+            ), "Unsupported version or cluster action {}".format(version)
         self.platform = platform.machine()
         assert self.platform in SUPPORTED_PLATFORMS, "Unsupported platform {}".format(
             self.platform
@@ -163,7 +162,7 @@ class UpgradeTest:
             self.binary_path(init_version, "fdbcli"),
             args.process_number,
             create_config=False,
-            redundancy=args.redundancy
+            redundancy=args.redundancy,
         )
         self.cluster.create_cluster_file()
         self.configure_version(init_version)
@@ -188,13 +187,17 @@ class UpgradeTest:
 
     # Check if the binaries for the given version are available in the local old binaries repository
     def version_in_local_repo(self, version):
-        return (self.local_binary_repo is not None) and (self.local_binary_repo.joinpath(version).exists())
+        return (self.local_binary_repo is not None) and (
+            self.local_binary_repo.joinpath(version).exists()
+        )
 
     def binary_path(self, version, bin_name):
         if version == CURRENT_VERSION:
             return self.build_dir.joinpath("bin", bin_name)
         elif self.version_in_local_repo(version):
-            return self.local_binary_repo.joinpath(version, "bin", "{}-{}".format(bin_name, version))
+            return self.local_binary_repo.joinpath(
+                version, "bin", "{}-{}".format(bin_name, version)
+            )
         else:
             return self.download_dir.joinpath(version, bin_name)
 
@@ -263,9 +266,15 @@ class UpgradeTest:
             return
         # Avoid race conditions in case of parallel test execution by first copying to a temporary file
         # and then renaming it atomically
-        dest_file_tmp = Path("{}.{}".format(str(dest_lib_file), random_secret_string(8)))
-        src_lib_file = self.local_binary_repo.joinpath(version, "lib", "libfdb_c-{}.so".format(version))
-        assert src_lib_file.exists(), "Missing file {} in the local old binaries repository".format(src_lib_file)
+        dest_file_tmp = Path(
+            "{}.{}".format(str(dest_lib_file), random_secret_string(8))
+        )
+        src_lib_file = self.local_binary_repo.joinpath(
+            version, "lib", "libfdb_c-{}.so".format(version)
+        )
+        assert (
+            src_lib_file.exists()
+        ), "Missing file {} in the local old binaries repository".format(src_lib_file)
         self.download_dir.joinpath(version).mkdir(parents=True, exist_ok=True)
         shutil.copyfile(src_lib_file, dest_file_tmp)
         os.rename(dest_file_tmp, dest_lib_file)
@@ -402,7 +411,7 @@ class UpgradeTest:
                 "--transaction-retry-limit",
                 str(TRANSACTION_RETRY_LIMIT),
                 "--stats-interval",
-                str(TESTER_STATS_INTERVAL_SEC*1000)
+                str(TESTER_STATS_INTERVAL_SEC * 1000),
             ]
             if RUN_WITH_GDB:
                 cmd_args = ["gdb", "-ex", "run", "--args"] + cmd_args
@@ -427,7 +436,9 @@ class UpgradeTest:
             # If the tester failed to initialize, other threads of the test may stay
             # blocked on trying to open the named pipes
             if self.ctrl_pipe is None or self.output_pipe is None:
-                print("Tester failed before initializing named pipes. Aborting the test")
+                print(
+                    "Tester failed before initializing named pipes. Aborting the test"
+                )
                 os._exit(1)
 
     # Perform a progress check: Trigger it and wait until it is completed
@@ -471,7 +482,9 @@ class UpgradeTest:
                 if entry == "wiggle":
                     self.cluster.cluster_wiggle()
                 else:
-                    assert entry in self.used_versions, "Unexpected entry in the upgrade path: {}".format(entry)
+                    assert (
+                        entry in self.used_versions
+                    ), "Unexpected entry in the upgrade path: {}".format(entry)
                     self.upgrade_to(entry)
                 self.health_check()
                 self.progress_check()
@@ -617,8 +630,10 @@ if __name__ == "__main__":
     parser.add_argument(
         "--upgrade-path",
         nargs="+",
-        help="Cluster upgrade path: a space separated list of versions.\n" +
-        "The list may also contain cluster change actions: {}".format(CLUSTER_ACTIONS),
+        help="Cluster upgrade path: a space separated list of versions.\n"
+        + "The list may also contain cluster change actions: {}".format(
+            CLUSTER_ACTIONS
+        ),
         default=[CURRENT_VERSION],
     )
     parser.add_argument(
@@ -653,7 +668,9 @@ if __name__ == "__main__":
         print("Testing with {} processes".format(args.process_number))
 
     assert len(args.upgrade_path) > 0, "Upgrade path must be specified"
-    assert args.upgrade_path[0] in SUPPORTED_VERSIONS, "Upgrade path begin with a valid version number"
+    assert (
+        args.upgrade_path[0] in SUPPORTED_VERSIONS
+    ), "Upgrade path begin with a valid version number"
 
     if args.run_with_gdb:
         RUN_WITH_GDB = True

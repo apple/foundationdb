@@ -98,7 +98,7 @@ class ByteBuffer(object):
                 "Request to read %d bytes with only %d remaining"
                 % (n, self.get_remaining_bytes())
             )
-        ret = self.val[self._offset: self._offset + n]
+        ret = self.val[self._offset : self._offset + n]
         self._offset += n
         return ret
 
@@ -365,13 +365,13 @@ class ClientTransactionInfo:
 
     def has_types(self):
         return (
-                self.get_version
-                or self.gets
-                or self.get_ranges
-                or self.commit
-                or self.error_gets
-                or self.error_get_ranges
-                or self.error_commits
+            self.get_version
+            or self.gets
+            or self.get_ranges
+            or self.commit
+            or self.error_gets
+            or self.error_get_ranges
+            or self.error_commits
         )
 
     def to_json(self):
@@ -382,12 +382,12 @@ class TransactionInfoLoader(object):
     max_num_chunks_to_store = 1000  # Each chunk would be 100 KB in size
 
     def __init__(
-            self,
-            db,
-            full_output=True,
-            type_filter=None,
-            min_timestamp=None,
-            max_timestamp=None,
+        self,
+        db,
+        full_output=True,
+        type_filter=None,
+        min_timestamp=None,
+        max_timestamp=None,
     ):
         self.db = db
         self.full_output = full_output
@@ -432,20 +432,20 @@ class TransactionInfoLoader(object):
 
     def parse_key(self, k):
         version_stamp_bytes = k[
-                              self.version_stamp_start_idx: self.version_stamp_end_idx + 1
-                              ]
-        tr_id = k[self.tr_id_start_idx: self.tr_id_end_idx + 1]
+            self.version_stamp_start_idx : self.version_stamp_end_idx + 1
+        ]
+        tr_id = k[self.tr_id_start_idx : self.tr_id_end_idx + 1]
         num_chunks = struct.unpack(
-            ">i", k[self.num_chunks_start_idx: self.num_chunks_start_idx + 4]
+            ">i", k[self.num_chunks_start_idx : self.num_chunks_start_idx + 4]
         )[0]
         chunk_num = struct.unpack(
-            ">i", k[self.chunk_num_start_idx: self.chunk_num_start_idx + 4]
+            ">i", k[self.chunk_num_start_idx : self.chunk_num_start_idx + 4]
         )[0]
         return version_stamp_bytes, tr_id, num_chunks, chunk_num
 
     def get_key_prefix_for_version_stamp(self, version_stamp):
         return (
-                self.client_latency_start + struct.pack(">Q", version_stamp) + b"\x00\x00"
+            self.client_latency_start + struct.pack(">Q", version_stamp) + b"\x00\x00"
         )
 
     @fdb.transactional
@@ -562,8 +562,8 @@ class TransactionInfoLoader(object):
                                 continue
                             c_list = self.tr_info_map[tr_id]
                             if (
-                                    c_list[-1].num_chunks != num_chunks
-                                    or c_list[-1].chunk_num != chunk_num - 1
+                                c_list[-1].num_chunks != num_chunks
+                                or c_list[-1].chunk_num != chunk_num - 1
                             ):
                                 self.tr_info_map.pop(tr_id)
                                 self.num_chunks_stored -= len(c_list)
@@ -689,8 +689,8 @@ class ReadCounter(object):
             if filter_addresses:
                 filter_addresses = set(filter_addresses)
                 results = [r for r in results if filter_addresses.issubset(set(r[3]))][
-                          0:num
-                          ]
+                    0:num
+                ]
         else:
             results = [
                 (start, end, count) for (count, (start, end)) in count_pairs[0:num]
@@ -826,16 +826,16 @@ class ShardFinder(object):
                 while True:
                     try:
                         ranges[index] = (
-                                item[0:addr_idx]
-                                + ([a.decode("ascii") for a in item[addr_idx].wait()],)
-                                + item[addr_idx + 1:]
+                            item[0:addr_idx]
+                            + ([a.decode("ascii") for a in item[addr_idx].wait()],)
+                            + item[addr_idx + 1 :]
                         )
                         break
                     except fdb.FDBError:
                         ranges[index] = (
-                                item[0:addr_idx]
-                                + (self.get_addresses_for_key(item[key_idx]),)
-                                + item[addr_idx + 1:]
+                            item[0:addr_idx]
+                            + (self.get_addresses_for_key(item[key_idx]),)
+                            + item[addr_idx + 1 :]
                         )
 
 
@@ -908,8 +908,8 @@ class WriteCounter(object):
             if filter_addresses:
                 filter_addresses = set(filter_addresses)
                 results = [r for r in results if filter_addresses.issubset(set(r[3]))][
-                          0:num
-                          ]
+                    0:num
+                ]
         else:
             results = [(key, end, count) for (count, key) in count_pairs[0:num]]
 
@@ -1006,8 +1006,8 @@ def main():
     parser.add_argument(
         "--exclude-ports",
         action="store_true",
-        help="Print addresses without the port number. Only works in versions older than 6.3, and is required in " +
-             "versions older than 6.2.",
+        help="Print addresses without the port number. Only works in versions older than 6.3, and is required in "
+        + "versions older than 6.2.",
     )
     parser.add_argument(
         "--single-shard-ranges-only",
@@ -1018,8 +1018,8 @@ def main():
         "-a",
         "--filter-address",
         action="append",
-        help="Only print range boundaries that include the given address. This option can used multiple times to " +
-             "include more than one address in the filter, in which case all addresses must match.",
+        help="Only print range boundaries that include the given address. This option can used multiple times to "
+        + "include more than one address in the filter, in which case all addresses must match.",
     )
 
     args = parser.parse_args()
@@ -1136,13 +1136,13 @@ def main():
     def print_range_boundaries(range_boundaries, context):
         omit_start = None
         for (
-                idx,
-                (start, end, start_count, total_count, shard_count, addresses),
+            idx,
+            (start, end, start_count, total_count, shard_count, addresses),
         ) in enumerate(range_boundaries):
             omit = (
-                    args.single_shard_ranges_only
-                    and shard_count is not None
-                    and shard_count > 1
+                args.single_shard_ranges_only
+                and shard_count is not None
+                and shard_count > 1
             )
             if args.filter_address:
                 if not addresses:

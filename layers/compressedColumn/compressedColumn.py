@@ -109,13 +109,13 @@ class Column:
         )
 
     def _merge_results(
-            self,
-            packed,
-            unpacked,
-            total_unpacked,
-            packed_index=0,
-            min_packed_key="",
-            max_key=None,
+        self,
+        packed,
+        unpacked,
+        total_unpacked,
+        packed_index=0,
+        min_packed_key="",
+        max_key=None,
     ):
         data = _MergedData()
         if packed is None:
@@ -147,14 +147,12 @@ class Column:
 
                 exact_match = False
                 while (
-                        packed_index < len(packed.rows)
-                        and packed.rows[packed_index].key <= sub_key
-                        and (max_key is None or packed.rows[packed_index].key < max_key)
+                    packed_index < len(packed.rows)
+                    and packed.rows[packed_index].key <= sub_key
+                    and (max_key is None or packed.rows[packed_index].key < max_key)
                 ):
                     exact_match = packed.rows[packed_index].key == sub_key
-                    if (
-                            sub_key > packed.rows[packed_index].key >= min_packed_key
-                    ):
+                    if sub_key > packed.rows[packed_index].key >= min_packed_key:
                         data.results.append(packed.rows[packed_index])
 
                     packed_index += 1
@@ -172,7 +170,7 @@ class Column:
             # print "Packed index: %d, Unpacked: %d, total: %d" % (packedIndex, unpacked_count, totalUnpacked)
             if unpacked_count < total_unpacked:
                 while packed_index < len(packed.rows) and (
-                        max_key is None or packed.rows[packed_index].key < max_key
+                    max_key is None or packed.rows[packed_index].key < max_key
                 ):
                     if packed.rows[packed_index].key >= min_packed_key:
                         data.results.append(packed.rows[packed_index])
@@ -231,7 +229,9 @@ class Column:
                 while True:
                     # print 'inner: \'' + repr(current_row) + '\''
                     unpacked = list(
-                        self._get_unpacked_range(tr, last_row, end_row, self.packFetchCount)
+                        self._get_unpacked_range(
+                            tr, last_row, end_row, self.packFetchCount
+                        )
                     )
 
                     unpacked_count = len(unpacked)
@@ -241,9 +241,11 @@ class Column:
                     if packed_data is None:
                         sub_key = self._get_sub_key(unpacked[0].key)
                         packed_range = self._get_packed_range(tr, sub_key)
-                        [packed_key_range, key_range, packed_data] = self._get_packed_data(
-                            sub_key, packed_range, False, False
-                        )
+                        [
+                            packed_key_range,
+                            key_range,
+                            packed_data,
+                        ] = self._get_packed_data(sub_key, packed_range, False, False)
                         if packed_key_range is not None:
                             # print 'Deleting old rows'
                             old_rows.append(
@@ -279,7 +281,7 @@ class Column:
 
                     last_row = last_row + chr(0)
                     if (max_key is not None and merged.finishedPack) or (
-                            max_key is None and new_pack.bytes > self.targetChunkSize
+                        max_key is None and new_pack.bytes > self.targetChunkSize
                     ):
                         break
 
@@ -289,7 +291,7 @@ class Column:
                     del tr[row]
 
                 for k, v in new_pack.get_packed_key_values(
-                        self, self.targetChunkSize, self.maxChunkSize
+                    self, self.targetChunkSize, self.maxChunkSize
                 ):
                     tr[k] = v
 
@@ -357,7 +359,9 @@ class _ColumnStream:
         # Read next packed and unpacked entries
         # FIXME: Should we read unpacked after getting the result of the packed data?  If we do, then we can more accurately limit the number
         # of results that we get back
-        unpacked = self.column._get_unpacked_range(tr, start_key, "\xff", self.fetchCount)
+        unpacked = self.column._get_unpacked_range(
+            tr, start_key, "\xff", self.fetchCount
+        )
 
         if self.packedData is None:
             packed_range = self.column._get_packed_range(tr, start_key)
@@ -453,16 +457,16 @@ class _PackedData:
     def _unpack(self, str):
         self.bytes = len(str)
         header_length = struct.unpack("i", str[0:4])[0]
-        header = str[4: 4 + header_length]
-        body = str[4 + header_length:]
+        header = str[4 : 4 + header_length]
+        body = str[4 + header_length :]
 
         index = 0
         while index < header_length:
             # print 'header length: %d, %d' % (len(self.header), index)
             (keyLength, valueLength, valueOffset) = struct.unpack(
-                "iii", header[index: index + 12]
+                "iii", header[index : index + 12]
             )
-            key = header[index + 12: index + 12 + keyLength]
+            key = header[index + 12 : index + 12 + keyLength]
             index = index + 12 + keyLength
-            value = body[valueOffset: valueOffset + valueLength]
+            value = body[valueOffset : valueOffset + valueLength]
             self.rows.append(fdb.KeyValue(key, value))

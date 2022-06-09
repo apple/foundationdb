@@ -214,7 +214,9 @@ class IfF(F):
         ccx = copy.copy(cx)
         ccx.indent += 1
         self.toggle = cx.random.randint(0, 1)
-        self.ifbody = CompoundF(ccx, [HashF(ccx)] + [fuzz_code(ccx)(ccx)] + [HashF(ccx)])
+        self.ifbody = CompoundF(
+            ccx, [HashF(ccx)] + [fuzz_code(ccx)(ccx)] + [HashF(ccx)]
+        )
         if cx.random.random() < 0.5:
             ccx = copy.copy(cx)
             ccx.indent += 1

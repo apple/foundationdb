@@ -38,15 +38,15 @@ def setup(app):
     old_resolve = sphinx.environment.BuildEnvironment.resolve_toctree
 
     def resolve_toctree(
-            self,
-            docname,
-            builder,
-            toctree,
-            prune=True,
-            maxdepth=0,
-            titles_only=False,
-            collapse=False,
-            includehidden=False,
+        self,
+        docname,
+        builder,
+        toctree,
+        prune=True,
+        maxdepth=0,
+        titles_only=False,
+        collapse=False,
+        includehidden=False,
     ):
         result = old_resolve(
             self,
@@ -64,7 +64,7 @@ def setup(app):
 
         for node in result.traverse(nodes.reference):
             if not node["internal"] and node["refuri"].startswith("relative://"):
-                node["refuri"] = node["refuri"][len("relative://"):]
+                node["refuri"] = node["refuri"][len("relative://") :]
         return result
 
     sphinx.environment.BuildEnvironment.resolve_toctree = resolve_toctree

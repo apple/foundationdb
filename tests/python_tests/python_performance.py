@@ -140,7 +140,7 @@ class PythonPerformance(PythonTest):
 
             fxn_name = "run_%s" % test
             assert hasattr(self, fxn_name), (
-                    "Test function %s not implemented" % fxn_name
+                "Test function %s not implemented" % fxn_name
             )
 
             # Perform each test several times
@@ -195,7 +195,7 @@ class PythonPerformance(PythonTest):
 
         for i in range(count):
             key = self.random_key()
-            del tr[key: self.key(int(key) + 1)]
+            del tr[key : self.key(int(key) + 1)]
 
         return count / (time.time() - s)
 
@@ -270,7 +270,7 @@ class PythonPerformance(PythonTest):
         b = random.randint(0, self.key_count - count)
         s = time.time()
 
-        list(tr[self.key(b): self.key(b + count)])
+        list(tr[self.key(b) : self.key(b + count)])
 
         return count / (time.time() - s)
 
@@ -344,6 +344,6 @@ if __name__ == "__main__":
         "--tests-to-run",
         nargs="*",
         help="Names of tests to run. Can be any of %s. By default, all tests are run."
-             % test_string,
+        % test_string,
     )
     PythonPerformance().run(parser=parser)

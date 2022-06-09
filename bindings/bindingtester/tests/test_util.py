@@ -31,7 +31,7 @@ from bindingtester.known_testers import COMMON_TYPES
 
 class RandomGenerator(object):
     def __init__(
-            self, max_int_bits=64, api_version=FDB_API_VERSION, types=COMMON_TYPES
+        self, max_int_bits=64, api_version=FDB_API_VERSION, types=COMMON_TYPES
     ):
         self.max_int_bits = max_int_bits
         self.api_version = api_version
@@ -131,14 +131,15 @@ class RandomGenerator(object):
                 non_empty = [
                     x
                     for x in enumerate(to_add)
-                    if (isinstance(x[1], list) or isinstance(x[1], tuple)) and len(x[1]) > 0
+                    if (isinstance(x[1], list) or isinstance(x[1], tuple))
+                    and len(x[1]) > 0
                 ]
                 if len(non_empty) > 0 and random.random() < 0.25:
                     # Add a smaller list to test prefixes of nested structures.
                     idx, choice = random.choice(non_empty)
                     smaller_size = random.randint(0, len(to_add[idx]))
                     tuples.append(
-                        to_add[:idx] + (choice[:smaller_size],) + to_add[idx + 1:]
+                        to_add[:idx] + (choice[:smaller_size],) + to_add[idx + 1 :]
                     )
 
         random.shuffle(tuples)

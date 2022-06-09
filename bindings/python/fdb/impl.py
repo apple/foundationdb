@@ -69,7 +69,7 @@ class _TransactionOptions(object):
 
 def remove_prefix(text, prefix):
     if text.startswith(prefix):
-        return text[len(prefix):]
+        return text[len(prefix) :]
     return text
 
 
@@ -135,7 +135,7 @@ def fill_options(scope, predicates=False):
             elif param_type == type(""):
                 f = option_wrap_string(code)
             elif param_type == type(
-                    b""
+                b""
             ):  # This won't happen in Python 2 because type('') == type(b''), but it will happen in Python 3
                 f = option_wrap_bytes(code)
             elif param_type == type(0):
@@ -157,9 +157,9 @@ def add_operation(fname, v):
     f = operation_wrap(code)
     f.__name__ = fname
     f.__doc__ = (
-            desc
-            + "\n\nArguments are the key to which the operation is applied and the "
-            + param_desc
+        desc
+        + "\n\nArguments are the key to which the operation is applied and the "
+        + param_desc
     )
     setattr(globals()["Database"], fname, f)
     setattr(globals()["Transaction"], fname, f)
@@ -501,7 +501,7 @@ class TransactionRead(_FDBBase):
         return key_or_selector
 
     def get_range(
-            self, begin, end, limit=0, reverse=False, streaming_mode=StreamingMode.iterator
+        self, begin, end, limit=0, reverse=False, streaming_mode=StreamingMode.iterator
     ):
         if begin is None:
             begin = b""
@@ -838,7 +838,7 @@ class FutureKeyValueArray(Future):
                     ctypes.string_at(x.key, x.key_length),
                     ctypes.string_at(x.value, x.value_length),
                 )
-                for x in kvs[0: count.value]
+                for x in kvs[0 : count.value]
             ],
             count.value,
             more.value,
@@ -858,7 +858,7 @@ class FutureKeyArray(Future):
         self.capi.fdb_future_get_key_array(
             self.fpointer, ctypes.byref(ks), ctypes.byref(count)
         )
-        return [ctypes.string_at(x.key, x.key_length) for x in ks[0: count.value]]
+        return [ctypes.string_at(x.key, x.key_length) for x in ks[0 : count.value]]
 
 
 class FutureStringArray(Future):
@@ -869,7 +869,7 @@ class FutureStringArray(Future):
         self.capi.fdb_future_get_string_array(
             self.fpointer, ctypes.byref(strings), ctypes.byref(count)
         )
-        return list(strings[0: count.value])
+        return list(strings[0 : count.value])
 
 
 class ReplaceableProperty(object):
@@ -902,7 +902,7 @@ class LazyFuture(Future):
         except Exception:
             e = sys.exc_info()
             if not (
-                    isinstance(e[1], FDBError) and e[1].code == 1102
+                isinstance(e[1], FDBError) and e[1].code == 1102
             ):  # future_released
                 raise
 
@@ -999,10 +999,10 @@ def makewrapper(func):
 
 for i in dir(bytes):
     if not i.startswith("_") or i in (
-            "__getitem__",
-            "__getslice__",
-            "__hash__",
-            "__len__",
+        "__getitem__",
+        "__getslice__",
+        "__hash__",
+        "__len__",
     ):
         setattr(FutureString, i, makewrapper(getattr(bytes, i)))
 
@@ -1073,7 +1073,7 @@ class _TransactionCreator(_FDBBase):
         return _TransactionCreator.__creator_get_key(self, key_selector)
 
     def get_range(
-            self, begin, end, limit=0, reverse=False, streaming_mode=StreamingMode.want_all
+        self, begin, end, limit=0, reverse=False, streaming_mode=StreamingMode.want_all
     ):
         return _TransactionCreator.__creator_get_range(
             self, begin, end, limit, reverse, streaming_mode
@@ -1870,7 +1870,6 @@ if hasattr(ctypes.pythonapi, "Py_IncRef"):
 
     def _pin_callback(cb):
         ctypes.pythonapi.Py_IncRef(ctypes.py_object(cb))
-
 
     def _unpin_callback(cb):
         ctypes.pythonapi.Py_DecRef(ctypes.py_object(cb))

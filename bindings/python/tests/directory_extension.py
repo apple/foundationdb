@@ -257,7 +257,7 @@ class DirectoryExtension:
                         % (s, directory.key())
                     )
 
-                inst.push(s[len(directory.key()):])
+                inst.push(s[len(directory.key()) :])
             else:
                 raise Exception("Unknown op: %s" % inst.op)
         except Exception as e:

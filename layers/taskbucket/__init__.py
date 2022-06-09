@@ -47,7 +47,7 @@ class Subspace(object):
 
     def unpack(self, key):
         assert key.startswith(self.rawPrefix)
-        return fdb.tuple.unpack(key[len(self.rawPrefix):])
+        return fdb.tuple.unpack(key[len(self.rawPrefix) :])
 
     def range(self, tuple=()):
         p = fdb.tuple.range(tuple)
@@ -178,7 +178,9 @@ class TaskBucket(object):
         from the bucket.  If the task has already timed out, raises TaskTimedOutException."""
         if self.system_access:
             tr.options.set_access_system_keys()
-        rng = self.timeouts.range((task_dict["__task_timeout"], task_dict["__task_key"]))
+        rng = self.timeouts.range(
+            (task_dict["__task_timeout"], task_dict["__task_key"])
+        )
         if next(iter(tr[rng]), False):
             del tr[rng]
         else:
@@ -189,7 +191,9 @@ class TaskBucket(object):
         # print "checking if the task was finished at version: {0}".format(tr.get_read_version().wait())
         if self.system_access:
             tr.options.set_read_system_keys()
-        rng = self.timeouts.range((task_dict["__task_timeout"], task_dict["__task_key"]))
+        rng = self.timeouts.range(
+            (task_dict["__task_timeout"], task_dict["__task_key"])
+        )
         return not bool(next(iter(tr[rng]), False))
 
     def check_active(self, db):
@@ -230,7 +234,7 @@ class TaskBucket(object):
         rng = slice(self.timeouts.range((0,)).start, self.timeouts.range((end,)).stop)
         any_timeouts = False
         for k, v in tr.get_range(
-                rng.start, rng.stop, streaming_mode=fdb.StreamingMode.want_all
+            rng.start, rng.stop, streaming_mode=fdb.StreamingMode.want_all
         ):
             timeout, task_key, param = self.timeouts.unpack(k)
             any_timeouts = True

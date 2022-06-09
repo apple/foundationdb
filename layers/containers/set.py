@@ -147,9 +147,9 @@ class FdbSet(object):
         last_value = fdb.tuple.pack((self._path,))
         for k in self.intersection(tr, t):
             if k != last_value:
-                del tr[last_value + "\x00": fdb.tuple.pack((self._path, k))]
+                del tr[last_value + "\x00" : fdb.tuple.pack((self._path, k))]
             last_value = fdb.tuple.pack((self._path, k))
-        del tr[last_value + "\x00": fdb.tuple.pack((self._path + chr(0),))]
+        del tr[last_value + "\x00" : fdb.tuple.pack((self._path + chr(0),))]
 
     @fdb.transactional
     def difference_update(self, tr, t):  # s -= t

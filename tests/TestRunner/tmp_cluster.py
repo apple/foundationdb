@@ -95,7 +95,10 @@ if __name__ == "__main__":
         "--blob-granules-enabled", help="Enable blob granules", action="store_true"
     )
     parser.add_argument(
-        "--tls-enabled", help="Enable TLS (with test-only certificates)", action="store_true")
+        "--tls-enabled",
+        help="Enable TLS (with test-only certificates)",
+        action="store_true",
+    )
     parser.add_argument(
         "--server-cert-chain-len",
         help="Length of server TLS certificate chain including root CA. Negative value deliberately generates expired leaf certificate for TLS testing. Only takes effect with --tls-enabled.",
@@ -117,8 +120,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
     tls_config = None
     if args.tls_enabled:
-        tls_config = TLSConfig(server_chain_len=args.server_cert_chain_len,
-                               client_chain_len=args.client_cert_chain_len)
+        tls_config = TLSConfig(
+            server_chain_len=args.server_cert_chain_len,
+            client_chain_len=args.client_cert_chain_len,
+        )
     errcode = 1
     with TempCluster(
         args.build_dir,

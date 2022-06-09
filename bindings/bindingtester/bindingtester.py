@@ -143,14 +143,14 @@ class ResultSet(object):
 
             # If any of our results matches the global error filter, we ignore the result
             if any(
-                    r.matches_global_error_filter(self.specification) for r in result_list
+                r.matches_global_error_filter(self.specification) for r in result_list
             ):
                 has_filtered_error = True
 
             # The result is considered correct if every tester produced a value and all the values meet the matching
             # criteria
             if len(results) < len(all_results) or not all(
-                    result_list[0].matches(r, self.specification) for r in result_list
+                result_list[0].matches(r, self.specification) for r in result_list
             ):
                 util.get_logger().error("\nIncorrect result: \n%s" % result_str)
                 num_errors += 1
@@ -166,24 +166,24 @@ class ResultSet(object):
 
 
 def choose_api_version(
-        selected_api_version,
-        tester_min_version,
-        tester_max_version,
-        test_min_version,
-        test_max_version,
+    selected_api_version,
+    tester_min_version,
+    tester_max_version,
+    test_min_version,
+    test_max_version,
 ):
     if selected_api_version is not None:
         if (
-                selected_api_version < tester_min_version
-                or selected_api_version > tester_max_version
+            selected_api_version < tester_min_version
+            or selected_api_version > tester_max_version
         ):
             raise Exception(
                 "Not all testers support the API version %d (min=%d, max=%d)"
                 % (selected_api_version, tester_min_version, tester_max_version)
             )
         elif (
-                selected_api_version < test_min_version
-                or selected_api_version > test_max_version
+            selected_api_version < test_min_version
+            or selected_api_version > test_max_version
         ):
             raise Exception(
                 "API version %d is not supported by the specified test (min=%d, max=%d)"
@@ -308,15 +308,15 @@ class TestRunner(object):
         )
 
         self.args.no_directory_snapshot_ops = (
-                self.args.no_directory_snapshot_ops
-                or any(
-                    [not tester.directory_snapshot_ops_enabled for tester in self.testers]
-                )
+            self.args.no_directory_snapshot_ops
+            or any(
+                [not tester.directory_snapshot_ops_enabled for tester in self.testers]
+            )
         )
         self.args.no_tenants = (
-                self.args.no_tenants
-                or any([not tester.tenants_enabled for tester in self.testers])
-                or self.args.api_version < 710
+            self.args.no_tenants
+            or any([not tester.tenants_enabled for tester in self.testers])
+            or self.args.api_version < 710
         )
 
     def print_test(self):
@@ -324,7 +324,7 @@ class TestRunner(object):
 
         for top_level_subspace, top_level_thread in test_instructions.items():
             for subspace, thread in top_level_thread.get_threads(
-                    top_level_subspace
+                top_level_subspace
             ).items():
                 util.get_logger().error(
                     "\nThread at prefix %r:" % util.subspace_to_tuple(subspace)
@@ -338,8 +338,8 @@ class TestRunner(object):
 
                 for i, instruction in enumerate(instructions):
                     if self.args.print_all or (
-                            instruction.operation != "SWAP"
-                            and instruction.operation != "PUSH"
+                        instruction.operation != "SWAP"
+                        and instruction.operation != "PUSH"
                     ):
                         util.get_logger().error("  %d. %r" % (i + offset, instruction))
 
@@ -436,7 +436,7 @@ class TestRunner(object):
                 tr.options.set_special_key_space_enable_writes()
                 del tr[
                     b"\xff\xff/management/tenant_map/":b"\xff\xff/management/tenant_map0"
-                    ]
+                ]
                 tr.commit().wait()
                 break
             except fdb.FDBError as e:
@@ -523,14 +523,13 @@ class TestRunner(object):
                 for i, error in enumerate(errors):
                     util.get_logger().error("  %d. %s" % (i + 1, error))
 
-        log_message = "\nTest with seed %d and concurrency %d had %d incorrect result(s) and %d error(s) at API " \
-                      "version %d" % (
-                        self.args.seed,
-                        self.args.concurrency,
-                        num_incorrect,
-                        num_errors,
-                        self.args.api_version,
-                        )
+        log_message = "\nTest with seed %d and concurrency %d had %d incorrect result(s) and %d error(s) at API " "version %d" % (
+            self.args.seed,
+            self.args.concurrency,
+            num_incorrect,
+            num_errors,
+            self.args.api_version,
+        )
         if num_errors == 0 and (num_incorrect == 0 or has_filtered_error):
             util.get_logger().info(log_message)
             if has_filtered_error:
@@ -594,8 +593,8 @@ def parse_args(argv):
     parser.add_argument(
         "--test-name",
         default="scripted",
-        help="The name of the test to run. Must be the name of a test specified in the tests folder. (" +
-             "default='scripted')",
+        help="The name of the test to run. Must be the name of a test specified in the tests folder. ("
+        + "default='scripted')",
     )
 
     parser.add_argument(
@@ -609,14 +608,14 @@ def parse_args(argv):
         default=None,
         const="python",
         dest="test2",
-        help="When specified, a second tester will be run and compared against the first. This flag takes an optional" +
-             " argument for the second tester to invoke (default = 'python').",
+        help="When specified, a second tester will be run and compared against the first. This flag takes an optional"
+        + " argument for the second tester to invoke (default = 'python').",
     )
     parser.add_argument(
         "--print-test",
         action="store_true",
-        help="Instead of running a test, prints the set of instructions generated for that test. Unless --all is " +
-             "specified, all setup, finalization, PUSH, and SWAP instructions will be excluded.",
+        help="Instead of running a test, prints the set of instructions generated for that test. Unless --all is "
+        + "specified, all setup, finalization, PUSH, and SWAP instructions will be excluded.",
     )
     parser.add_argument(
         "--all",
@@ -627,8 +626,8 @@ def parse_args(argv):
     parser.add_argument(
         "--bisect",
         action="store_true",
-        help="Run the specified test varying the number of operations until a minimal failing test is found. Does not" +
-             " work for concurrent tests.",
+        help="Run the specified test varying the number of operations until a minimal failing test is found. Does not"
+        + " work for concurrent tests.",
     )
     parser.add_argument(
         "--insert-only",
@@ -654,15 +653,15 @@ def parse_args(argv):
         "--max-int-bits",
         type=int,
         default=None,
-        help="Maximum number of bits to use for int types in testers. By default, the largest value supported by the " +
-             "testers being run will be chosen.",
+        help="Maximum number of bits to use for int types in testers. By default, the largest value supported by the "
+        + "testers being run will be chosen.",
     )
     parser.add_argument(
         "--api-version",
         default=None,
         type=int,
-        help="The API version that the testers should use. Not supported in scripted mode. (default = random version " +
-             "supported by all testers)",
+        help="The API version that the testers should use. Not supported in scripted mode. (default = random version "
+        + "supported by all testers)",
     )
     parser.add_argument(
         "--cluster-file",
@@ -682,8 +681,8 @@ def parse_args(argv):
         type=str,
         default=None,
         const=".",
-        help="Enables trace file output. This flag takes an optional argument specifying the output directory (" +
-             "default = '.').",
+        help="Enables trace file output. This flag takes an optional argument specifying the output directory ("
+        + "default = '.').",
     )
     parser.add_argument(
         "--instruction-prefix",
@@ -695,8 +694,8 @@ def parse_args(argv):
         "--output-subspace",
         type=str,
         default="tester_output",
-        help="The string used to create the output subspace for the testers. The subspace will be of the form " +
-             "(<output_subspace>,). (default='tester_output')",
+        help="The string used to create the output subspace for the testers. The subspace will be of the form "
+        + "(<output_subspace>,). (default='tester_output')",
     )
 
     parser.add_argument(

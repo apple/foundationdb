@@ -59,9 +59,7 @@ class Tester:
         self.tenants_enabled = tenants_enabled
 
     def supports_api_version(self, api_version):
-        return (
-                self.min_api_version <= api_version <= self.max_api_version
-        )
+        return self.min_api_version <= api_version <= self.max_api_version
 
     @classmethod
     def get_test(cls, test_name_or_args):
