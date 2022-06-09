@@ -21,17 +21,30 @@
 #ifndef FOUNDATIONDB_DDTXNPROCESSOR_H
 #define FOUNDATIONDB_DDTXNPROCESSOR_H
 
-#include "fdbclient/Knobs.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/DataDistribution.actor.h"
 
 class IDDTxnProcessor {
 public:
 	// get the source server and complete source server for range
-	virtual Future<std::pair<std::vector<UID>, std::vector<UID>>> getSourceServersForRange(const KeyRangeRef range) = 0;
+	virtual Future<std::tuple<std::vector<UID>, std::vector<UID>>> getSourceServersForRange(
+	    const KeyRangeRef range) = 0;
+	virtual ~IDDTxnProcessor() = default;
 };
 
+class DDTxnProcessorImpl;
+
 // run transactions over real database
-class DDTxnProcessor : public IDDTxnProcessor {};
+class DDTxnProcessor : public IDDTxnProcessor {
+	friend class DDTxnProcessorImpl;
+	Database cx;
+
+public:
+	DDTxnProcessor() = default;
+	explicit DDTxnProcessor(Database cx) : cx(cx) {}
+
+	Future<std::tuple<std::vector<UID>, std::vector<UID>>> getSourceServersForRange(const KeyRangeRef range) override;
+};
 
 // run mock transaction
 class DDMockTxnProcessor : public IDDTxnProcessor {};

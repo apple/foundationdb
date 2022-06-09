@@ -22,7 +22,10 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 class DDTxnProcessorImpl {
-	ACTOR static Future<std::pair<std::vector<UID>, std::vector<UID>>> getSourceServersForRange(
+	friend class DDTxnProcessor;
+
+	// return {sourceServers, completeSources}
+	ACTOR static Future<std::tuple<std::vector<UID>, std::vector<UID>>> getSourceServersForRange(
 	    Database cx,
 	    const KeyRangeRef keys) {
 		state std::set<UID> servers;
@@ -31,6 +34,8 @@ class DDTxnProcessorImpl {
 
 		loop {
 			servers.clear();
+			completeSources.clear();
+
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			try {
 				state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
@@ -80,5 +85,12 @@ class DDTxnProcessorImpl {
 				wait(tr.onError(e));
 			}
 		}
+
+		return std::make_tuple(std::vector<UID>(servers.begin(), servers.end()), completeSources);
 	}
 };
+
+Future<std::tuple<std::vector<UID>, std::vector<UID>>> DDTxnProcessor::getSourceServersForRange(
+    const KeyRangeRef range) {
+	return DDTxnProcessorImpl::getSourceServersForRange(cx, range);
+}

@@ -33,6 +33,7 @@
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbrpc/simulator.h"
+#include "fdbserver/DDTxnProcessor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 #define WORK_FULL_UTILIZATION 10000 // This is not a knob; it is a fixed point scaling factor!
@@ -445,6 +446,7 @@ struct DDQueueData {
 	UID distributorId;
 	MoveKeysLock lock;
 	Database cx;
+	std::unique_ptr<IDDTxnProcessor> txnProcessor;
 
 	std::vector<TeamCollectionInterface> teamCollections;
 	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
@@ -552,8 +554,8 @@ struct DDQueueData {
 	            PromiseStream<GetMetricsRequest> getShardMetrics,
 	            PromiseStream<GetTopKMetricsRequest> getTopKMetrics,
 	            double* lastLimited)
-	  : distributorId(mid), lock(lock), cx(cx), teamCollections(teamCollections), shardsAffectedByTeamFailure(sABTF),
-	    getAverageShardBytes(getAverageShardBytes),
+	  : distributorId(mid), lock(lock), cx(cx), txnProcessor(new DDTxnProcessor(cx)), teamCollections(teamCollections),
+	    shardsAffectedByTeamFailure(sABTF), getAverageShardBytes(getAverageShardBytes),
 	    startMoveKeysParallelismLock(SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM),
 	    finishMoveKeysParallelismLock(SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM),
 	    fetchSourceLock(new FlowLock(SERVER_KNOBS->DD_FETCH_SOURCE_PARALLELISM)), activeRelocations(0),
@@ -707,12 +709,11 @@ struct DDQueueData {
 		}
 	}
 
-	ACTOR Future<Void> getSourceServersForRange(Database cx,
-	                                            RelocateData input,
-	                                            PromiseStream<RelocateData> output,
-	                                            Reference<FlowLock> fetchLock) {
-		state std::set<UID> servers;
-		state Transaction tr(cx);
+	ACTOR static Future<Void> getSourceServersForRange(DDQueueData* self,
+	                                                   Database cx,
+	                                                   RelocateData input,
+	                                                   PromiseStream<RelocateData> output,
+	                                                   Reference<FlowLock> fetchLock) {
 
 		// FIXME: is the merge case needed
 		if (input.priority == SERVER_KNOBS->PRIORITY_MERGE_SHARD) {
@@ -724,59 +725,9 @@ struct DDQueueData {
 		wait(fetchLock->take(TaskPriority::DataDistributionLaunch));
 		state FlowLock::Releaser releaser(*fetchLock);
 
-		loop {
-			servers.clear();
-			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			try {
-				state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
-				ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
-				RangeResult keyServersEntries = wait(tr.getRange(lastLessOrEqual(keyServersKey(input.keys.begin)),
-				                                                 firstGreaterOrEqual(keyServersKey(input.keys.end)),
-				                                                 SERVER_KNOBS->DD_QUEUE_MAX_KEY_SERVERS));
-
-				if (keyServersEntries.size() < SERVER_KNOBS->DD_QUEUE_MAX_KEY_SERVERS) {
-					for (int shard = 0; shard < keyServersEntries.size(); shard++) {
-						std::vector<UID> src, dest;
-						decodeKeyServersValue(UIDtoTagMap, keyServersEntries[shard].value, src, dest);
-						ASSERT(src.size());
-						for (int i = 0; i < src.size(); i++) {
-							servers.insert(src[i]);
-						}
-						if (shard == 0) {
-							input.completeSources = src;
-						} else {
-							for (int i = 0; i < input.completeSources.size(); i++) {
-								if (std::find(src.begin(), src.end(), input.completeSources[i]) == src.end()) {
-									swapAndPop(&input.completeSources, i--);
-								}
-							}
-						}
-					}
-
-					ASSERT(servers.size() > 0);
-				}
-
-				// If the size of keyServerEntries is large, then just assume we are using all storage servers
-				// Why the size can be large?
-				// When a shard is inflight and DD crashes, some destination servers may have already got the data.
-				// The new DD will treat the destination servers as source servers. So the size can be large.
-				else {
-					RangeResult serverList = wait(tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
-					ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
-
-					for (auto s = serverList.begin(); s != serverList.end(); ++s)
-						servers.insert(decodeServerListValue(s->value).id());
-
-					ASSERT(servers.size() > 0);
-				}
-
-				break;
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
-
-		input.src = std::vector<UID>(servers.begin(), servers.end());
+		auto future =
+		    storeTuple(self->txnProcessor->getSourceServersForRange(input.keys), input.src, input.completeSources);
+		wait(ready(future));
 		output.send(input);
 		return Void();
 	}
@@ -866,8 +817,8 @@ struct DDQueueData {
 				startRelocation(rrs.priority, rrs.healthPriority);
 
 				fetchingSourcesQueue.insert(rrs);
-				getSourceActors.insert(rrs.keys,
-				                       getSourceServersForRange(cx, rrs, fetchSourceServersComplete, fetchSourceLock));
+				getSourceActors.insert(
+				    rrs.keys, getSourceServersForRange(this, cx, rrs, fetchSourceServersComplete, fetchSourceLock));
 			} else {
 				RelocateData newData(rrs);
 				newData.keys = affectedQueuedItems[r];

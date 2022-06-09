@@ -24,6 +24,7 @@
 // version.
 #include "flow/FastRef.h"
 #include "flow/network.h"
+#include "flow/UnitTest.h"
 #include <utility>
 #include <functional>
 #if defined(NO_INTELLISENSE) && !defined(FLOW_GENERICACTORS_ACTOR_G_H)
@@ -296,6 +297,14 @@ template <class T>
 Future<Void> store(T& out, Future<T> what) {
 	return map(what, [&out](T const& v) {
 		out = v;
+		return Void();
+	});
+}
+
+template <class A, class... Bs>
+Future<Void> storeTuple(Future<std::tuple<A, Bs...>> what, A& a, Bs&... b) {
+	return map(what, [&](std::tuple<A, Bs...> const& v) {
+		std::tie(a, b...) = v;
 		return Void();
 	});
 }
