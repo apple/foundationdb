@@ -82,6 +82,9 @@ struct EncryptCipherKeyDetails {
 	                                 StringRef key)
 	  : encryptDomainId(dId), encryptKeyId(keyId), encryptKey(StringRef(arena, key)),
 	    refreshAfterSec(Optional<int64_t>()), expireAfterSec(Optional<int64_t>()) {}
+	explicit EncryptCipherKeyDetails(EncryptCipherDomainId dId, EncryptCipherBaseKeyId keyId, StringRef key)
+	  : encryptDomainId(dId), encryptKeyId(keyId), encryptKey(key), refreshAfterSec(Optional<int64_t>()),
+	    expireAfterSec(Optional<int64_t>()) {}
 	explicit EncryptCipherKeyDetails(Arena& arena,
 	                                 EncryptCipherDomainId dId,
 	                                 EncryptCipherBaseKeyId keyId,
@@ -89,6 +92,13 @@ struct EncryptCipherKeyDetails {
 	                                 Optional<int64_t> refAfterSec,
 	                                 Optional<int64_t> expAfterSec)
 	  : encryptDomainId(dId), encryptKeyId(keyId), encryptKey(StringRef(arena, key)), refreshAfterSec(refAfterSec),
+	    expireAfterSec(expAfterSec) {}
+	explicit EncryptCipherKeyDetails(EncryptCipherDomainId dId,
+	                                 EncryptCipherBaseKeyId keyId,
+	                                 StringRef key,
+	                                 Optional<int64_t> refAfterSec,
+	                                 Optional<int64_t> expAfterSec)
+	  : encryptDomainId(dId), encryptKeyId(keyId), encryptKey(key), refreshAfterSec(refAfterSec),
 	    expireAfterSec(expAfterSec) {}
 
 	bool operator==(const EncryptCipherKeyDetails& toCompare) {
@@ -104,13 +114,14 @@ struct EncryptCipherKeyDetails {
 
 struct KmsConnLookupEKsByKeyIdsRep {
 	constexpr static FileIdentifier file_identifier = 2313778;
+	Arena arena;
 	VectorRef<EncryptCipherKeyDetails> cipherKeyDetails;
 
 	KmsConnLookupEKsByKeyIdsRep() {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, cipherKeyDetails);
+		serializer(ar, arena, cipherKeyDetails);
 	}
 };
 
@@ -157,13 +168,14 @@ struct KmsConnLookupEKsByKeyIdsReq {
 
 struct KmsConnLookupEKsByDomainIdsRep {
 	constexpr static FileIdentifier file_identifier = 3009025;
+	Arena arena;
 	VectorRef<EncryptCipherKeyDetails> cipherKeyDetails;
 
 	KmsConnLookupEKsByDomainIdsRep() {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, cipherKeyDetails);
+		serializer(ar, arena, cipherKeyDetails);
 	}
 };
 
@@ -175,6 +187,8 @@ struct KmsConnLookupDomainIdsReqInfo {
 	KmsConnLookupDomainIdsReqInfo() : domainId(ENCRYPT_INVALID_DOMAIN_ID) {}
 	explicit KmsConnLookupDomainIdsReqInfo(Arena& arena, const EncryptCipherDomainId dId, StringRef name)
 	  : domainId(dId), domainName(StringRef(arena, name)) {}
+	explicit KmsConnLookupDomainIdsReqInfo(const EncryptCipherDomainId dId, StringRef name)
+	  : domainId(dId), domainName(name) {}
 
 	bool operator==(const KmsConnLookupDomainIdsReqInfo& info) const {
 		return domainId == info.domainId && (domainName.compare(info.domainName) == 0);

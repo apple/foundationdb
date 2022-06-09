@@ -286,8 +286,8 @@ ACTOR Future<Void> testRunWorkload(KmsConnectorInterface inf, uint32_t nEncrypti
 		for (i = 0; i < maxDomainIds; i++) {
 			// domainIdsReq.encryptDomainIds.push_back(i);
 			EncryptCipherDomainId domainId = i;
-			EncryptCipherDomainName domainName = StringRef(std::to_string(domainId));
-			domainIdsReq.encryptDomainInfos.emplace_back_deep(domainIdsReq.arena, i, domainName);
+			EncryptCipherDomainName domainName = StringRef(domainIdsReq.arena, std::to_string(domainId));
+			domainIdsReq.encryptDomainInfos.emplace_back(domainIdsReq.arena, i, domainName);
 		}
 		KmsConnLookupEKsByDomainIdsRep domainIdsRep = wait(inf.ekLookupByDomainIds.getReply(domainIdsReq));
 		for (auto& element : domainIdsRep.cipherKeyDetails) {
@@ -326,7 +326,7 @@ ACTOR Future<Void> testRunWorkload(KmsConnectorInterface inf, uint32_t nEncrypti
 		// Verify unknown key access returns the error
 		state KmsConnLookupEKsByKeyIdsReq req;
 		req.encryptKeyInfos.emplace_back_deep(
-		    req.arena, 1, maxEncryptionKeys + 1, StringRef(std::to_string(maxEncryptionKeys)));
+		    req.arena, 1, maxEncryptionKeys + 1, StringRef(req.arena, std::to_string(maxEncryptionKeys)));
 		try {
 			KmsConnLookupEKsByKeyIdsRep reply = wait(inf.ekLookupByIds.getReply(req));
 		} catch (Error& e) {

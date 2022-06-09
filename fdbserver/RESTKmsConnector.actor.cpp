@@ -614,7 +614,7 @@ ACTOR Future<KmsConnLookupEKsByKeyIdsRep> fetchEncryptionKeysByKeyIds(Reference<
 
 	StringRef requestBodyRef = getEncryptKeysByKeyIdsRequestBody(ctx, req, refreshKmsUrls, req.arena);
 
-	wait(fetchEncryptionKeys_impl(ctx, requestBodyRef, &req.arena, &reply.cipherKeyDetails));
+	wait(fetchEncryptionKeys_impl(ctx, requestBodyRef, &reply.arena, &reply.cipherKeyDetails));
 
 	return reply;
 }
@@ -702,7 +702,7 @@ ACTOR Future<KmsConnLookupEKsByDomainIdsRep> fetchEncryptionKeysByDomainIds(Refe
 	bool refreshKmsUrls = shouldRefreshKmsUrls(ctx);
 	StringRef requestBodyRef = getEncryptKeysByDomainIdsRequestBody(ctx, req, refreshKmsUrls, req.arena);
 
-	wait(fetchEncryptionKeys_impl(ctx, requestBodyRef, &req.arena, &reply.cipherKeyDetails));
+	wait(fetchEncryptionKeys_impl(ctx, requestBodyRef, &reply.arena, &reply.cipherKeyDetails));
 
 	return reply;
 }
