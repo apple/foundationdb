@@ -621,12 +621,12 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 					    .trackLatest(self->initialDDEventHolder->trackingKey);
 				}
 
-				TraceEvent("DataDistributionDisabled", self->ddId).log();
-
 				if (initData->mode && ddEnabledState->isDDEnabled()) {
 					// mode may be set true by system operator using fdbcli and isDDEnabled() set to true
 					break;
 				}
+
+				TraceEvent("DataDistributionDisabled", self->ddId).log();
 
 				TraceEvent("MovingData", self->ddId)
 				    .detail("InFlight", 0)

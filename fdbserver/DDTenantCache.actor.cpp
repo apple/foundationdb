@@ -66,7 +66,7 @@ public:
 	}
 
 	ACTOR static Future<Void> monitorTenantMap(DDTenantCache* tenantCache) {
-		TraceEvent(SevInfo, "StartingTenantCacheMonitor", tenantCache->id()).log();
+		TraceEvent(SevInfo, "StartingDDTenantCacheMonitor", tenantCache->id()).log();
 
 		state Transaction tr(tenantCache->dbcx());
 
@@ -119,8 +119,8 @@ void DDTenantCache::insert(TenantName& tenantName, TenantMapEntry& tenant) {
 	KeyRef tenantPrefix(tenant.prefix.begin(), tenant.prefix.size());
 	ASSERT(tenantCache.find(tenantPrefix) == tenantCache.end());
 
-	TenantInfo tinfo(tenantName, tenant.id);
-	tenantCache[tenantPrefix] = makeReference<TCTenantInfo>(tinfo, tenant.prefix);
+	TenantInfo tenantInfo(tenantName, tenant.id);
+	tenantCache[tenantPrefix] = makeReference<TCTenantInfo>(tenantInfo, tenant.prefix);
 	tenantCache[tenantPrefix]->updateCacheGeneration(generation);
 }
 
@@ -215,7 +215,7 @@ public:
 
 		constexpr static uint16_t tenantLimit = 64;
 
-		uint16_t tenantCount = deterministicRandom()->randomInt(0, tenantLimit);
+		uint16_t tenantCount = deterministicRandom()->randomInt(1, tenantLimit);
 		uint16_t tenantNumber = deterministicRandom()->randomInt(0, std::numeric_limits<uint16_t>::max());
 
 		for (uint16_t i = 0; i < tenantCount; i++) {
@@ -243,7 +243,7 @@ public:
 
 		constexpr static uint16_t tenantLimit = 64;
 
-		uint16_t tenantCount = deterministicRandom()->randomInt(0, tenantLimit);
+		uint16_t tenantCount = deterministicRandom()->randomInt(1, tenantLimit);
 		uint16_t tenantNumber = deterministicRandom()->randomInt(0, std::numeric_limits<uint16_t>::max());
 
 		for (uint16_t i = 0; i < tenantCount; i++) {
@@ -278,7 +278,6 @@ public:
 			uint16_t tenantOrdinal = tenantNumber + i;
 			Key k(format("%d", i));
 			if (tenantOrdinal % staleTenantFraction != 0) {
-
 				ASSERT(tenantCache.isTenantKey(k.withPrefix(TenantMapEntry::idToPrefix(tenantOrdinal))));
 				keptCount++;
 			} else {
