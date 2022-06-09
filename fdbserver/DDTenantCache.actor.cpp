@@ -177,7 +177,7 @@ std::string DDTenantCache::desc() {
 			s += ", ";
 		}
 
-		s += "Name: " + tenant->name().toString() + " ID: " + std::to_string(TenantMapEntry::prefixToId(tenantPrefix));
+		s += "Name: " + tenant->name().toString() + " Prefix: " + tenantPrefix.printable();
 		count++;
 	}
 
