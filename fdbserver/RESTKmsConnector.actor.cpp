@@ -1052,16 +1052,16 @@ void getFakeKmsResponse(StringRef jsonReqRef, const bool baseCipherIdPresent, Re
 		baseCipher.SetString((char*)&BASE_CIPHER_KEY_TEST[0], sizeof(BASE_CIPHER_KEY_TEST), resDoc.GetAllocator());
 		keyDetail.AddMember(key, baseCipher, resDoc.GetAllocator());
 
-		if (deterministicRandom()->randomInt(0, 100) < 50) {
+		if (deterministicRandom()->coinflip()) {
 			key.SetString(CIPHER_KEY_REFRESH_AFTER_SEC, resDoc.GetAllocator());
 			rapidjson::Value refreshInterval;
 			refreshInterval.SetInt64(10);
 			keyDetail.AddMember(key, refreshInterval, resDoc.GetAllocator());
 		}
-		if (deterministicRandom()->randomInt(0, 100) < 50) {
+		if (deterministicRandom()->coinflip()) {
 			key.SetString(CIPHER_KEY_EXPIRE_AFTER_SEC, resDoc.GetAllocator());
 			rapidjson::Value expireInterval;
-			deterministicRandom()->randomInt(0, 100) < 50 ? expireInterval.SetInt64(10) : expireInterval.SetInt64(-1);
+			deterministicRandom()->coinflip() ? expireInterval.SetInt64(10) : expireInterval.SetInt64(-1);
 			keyDetail.AddMember(key, expireInterval, resDoc.GetAllocator());
 		}
 
@@ -1109,8 +1109,8 @@ void testGetEncryptKeysByKeyIdsRequestBody(Reference<RESTKmsConnectorCtx> ctx, A
 		keyMap[i] = domainId;
 	}
 
-	bool refreshKmsUrls = deterministicRandom()->randomInt(0, 100) < 50;
-	if (deterministicRandom()->randomInt(0, 100) < 40) {
+	bool refreshKmsUrls = deterministicRandom()->coinflip();
+	if (deterministicRandom()->coinflip()) {
 		req.debugId = deterministicRandom()->randomUniqueID();
 	}
 
@@ -1150,7 +1150,7 @@ void testGetEncryptKeysByDomainIdsRequestBody(Reference<RESTKmsConnectorCtx> ctx
 		}
 	}
 
-	bool refreshKmsUrls = deterministicRandom()->randomInt(0, 100) < 50;
+	bool refreshKmsUrls = deterministicRandom()->coinflip();
 
 	StringRef jsonReqRef = getEncryptKeysByDomainIdsRequestBody(ctx, req, refreshKmsUrls, arena);
 	TraceEvent("FetchKeysByDomainIds", ctx->uid).detail("JsonReqStr", jsonReqRef.toString());

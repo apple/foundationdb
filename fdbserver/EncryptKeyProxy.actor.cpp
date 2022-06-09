@@ -71,28 +71,63 @@ bool canReplyWith(Error e) {
 	}
 }
 
-CipherKeyValidityTS getCipherKeyValidityTS(Optional<int64_t> refreshInterval, Optional<int64_t> expiryInterval) {
-	int64_t currTS = (int64_t)now();
-	int64_t defaultTTL = FLOW_KNOBS->ENCRYPT_CIPHER_KEY_CACHE_TTL;
+int64_t computeCipherRefreshTS(Optional<int64_t> refreshInterval, int64_t currTS) {
+	int64_t refreshAtTS = -1;
+	const int64_t defaultTTL = FLOW_KNOBS->ENCRYPT_CIPHER_KEY_CACHE_TTL;
 
-	CipherKeyValidityTS validityTS;
-	validityTS.refreshAtTS =
-	    refreshInterval.present() && refreshInterval.get() > 0 ? currTS + refreshInterval.get() : currTS + defaultTTL;
+	if (refreshInterval.present()) {
+		if (refreshInterval.get() < 0) {
+			// Never refresh the CipherKey
+			refreshAtTS = std::numeric_limits<int64_t>::max();
+		} else if (refreshInterval.get() > 0) {
+			refreshAtTS = currTS + refreshInterval.get();
+		} else {
+			ASSERT(refreshInterval.get() == 0);
+			// Fallback to default refreshInterval if not specified
+			refreshAtTS = currTS + defaultTTL;
+		}
+	} else {
+		// Fallback to default refreshInterval if not specified
+		refreshAtTS = currTS + defaultTTL;
+	}
+
+	ASSERT(refreshAtTS > 0);
+
+	return refreshAtTS;
+}
+
+int64_t computeCipherExpireTS(Optional<int64_t> expiryInterval, int64_t currTS, int64_t refreshAtTS) {
+	int64_t expireAtTS = -1;
+
+	ASSERT(refreshAtTS > 0);
+
 	if (expiryInterval.present()) {
 		if (expiryInterval.get() < 0) {
-			// Non-revocable CipherKey
-			validityTS.expAtTS = std::numeric_limits<int64_t>::max();
+			// Non-revocable CipherKey, never expire
+			expireAtTS = std::numeric_limits<int64_t>::max();
 		} else if (expiryInterval.get() > 0) {
-			validityTS.expAtTS = currTS + expiryInterval.get();
+			expireAtTS = currTS + expiryInterval.get();
 		} else {
 			ASSERT(expiryInterval.get() == 0);
 			// None supplied, match expiry to refresh timestamp
-			validityTS.expAtTS = validityTS.refreshAtTS;
+			expireAtTS = refreshAtTS;
 		}
 	} else {
 		// None supplied, match expiry to refresh timestamp
-		validityTS.expAtTS = validityTS.refreshAtTS;
+		expireAtTS = refreshAtTS;
 	}
+
+	ASSERT(expireAtTS > 0);
+
+	return expireAtTS;
+}
+
+CipherKeyValidityTS getCipherKeyValidityTS(Optional<int64_t> refreshInterval, Optional<int64_t> expiryInterval) {
+	int64_t currTS = (int64_t)now();
+
+	CipherKeyValidityTS validityTS;
+	validityTS.refreshAtTS = computeCipherRefreshTS(refreshInterval, currTS);
+	validityTS.expAtTS = computeCipherExpireTS(expiryInterval, currTS, validityTS.refreshAtTS);
 
 	return validityTS;
 }
@@ -216,25 +251,24 @@ public:
 		    EncryptBaseCipherKey(domainId, domainName, baseCipherId, baseCipherKey, refreshAtTS, expireAtTS);
 
 		// Update cached the information indexed using baseCipherId
-		insertIntoBaseCipherIdCache(domainId, domainName, baseCipherId, baseCipherKey);
+		// Cache indexed by 'baseCipherId' need not refresh cipher, however, it still needs to abide by KMS governed
+		// CipherKey lifetime rules
+		insertIntoBaseCipherIdCache(
+		    domainId, domainName, baseCipherId, baseCipherKey, std::numeric_limits<int64_t>::max(), expireAtTS);
 	}
 
 	void insertIntoBaseCipherIdCache(const EncryptCipherDomainId domainId,
 	                                 EncryptCipherDomainName domainName,
 	                                 const EncryptCipherBaseKeyId baseCipherId,
-	                                 const StringRef baseCipherKey) {
+	                                 const StringRef baseCipherKey,
+	                                 int64_t refreshAtTS,
+	                                 int64_t expireAtTS) {
 		// Given an cipherKey is immutable, it is OK to NOT expire cached information.
 		// TODO: Update cache to support LRU eviction policy to limit the total cache size.
 
 		EncryptBaseCipherDomainIdKeyIdCacheKey cacheKey = getBaseCipherDomainIdKeyIdCacheKey(domainId, baseCipherId);
 		baseCipherDomainIdKeyIdCache[cacheKey] =
-		    EncryptBaseCipherKey(domainId,
-		                         domainName,
-		                         baseCipherId,
-		                         baseCipherKey,
-		                         // CipherKey if NOT latest, don't expire or need-refresh
-		                         std::numeric_limits<int64_t>::max(),
-		                         std::numeric_limits<int64_t>::max());
+		    EncryptBaseCipherKey(domainId, domainName, baseCipherId, baseCipherKey, refreshAtTS, expireAtTS);
 	}
 
 	void insertIntoBlobMetadataCache(const BlobMetadataDomainId domainId,
@@ -348,21 +382,33 @@ ACTOR Future<Void> getCipherKeysByBaseCipherKeyIds(Reference<EncryptKeyProxyData
 			// Note: cache warm-up is done after reponding to the caller
 
 			for (auto& item : keysByIdsRep.cipherKeyDetails) {
+				// KMS governs lifetime of a given CipherKey, however, for non-latest CipherKey there isn't a necessity
+				// to 'refresh' cipher (rotation is not applicable). But, 'expireInterval' is still valid if CipherKey
+				// is a 'revocable key'
+
+				CipherKeyValidityTS validityTS = getCipherKeyValidityTS(Optional<int64_t>(-1), item.expireAfterSec);
+
 				const auto itr = lookupCipherInfoMap.find(std::make_pair(item.encryptDomainId, item.encryptKeyId));
 				if (itr == lookupCipherInfoMap.end()) {
 					TraceEvent(SevError, "GetCipherKeysByKeyIds_MappingNotFound", ekpProxyData->myId)
 					    .detail("DomainId", item.encryptDomainId);
 					throw encrypt_keys_fetch_failed();
 				}
-				ekpProxyData->insertIntoBaseCipherIdCache(
-				    item.encryptDomainId, itr->second.domainName, item.encryptKeyId, item.encryptKey);
+				ekpProxyData->insertIntoBaseCipherIdCache(item.encryptDomainId,
+				                                          itr->second.domainName,
+				                                          item.encryptKeyId,
+				                                          item.encryptKey,
+				                                          validityTS.refreshAtTS,
+				                                          validityTS.expAtTS);
 
 				if (dbgTrace.present()) {
 					// {encryptId, baseCipherId} forms a unique tuple across encryption domains
-					dbgTrace.get().detail(getEncryptDbgTraceKey(ENCRYPT_DBG_TRACE_INSERT_PREFIX,
-					                                            item.encryptDomainId,
-					                                            itr->second.domainName,
-					                                            item.encryptKeyId),
+					dbgTrace.get().detail(getEncryptDbgTraceKeyWithTS(ENCRYPT_DBG_TRACE_INSERT_PREFIX,
+					                                                  item.encryptDomainId,
+					                                                  itr->second.domainName,
+					                                                  item.encryptKeyId,
+					                                                  validityTS.refreshAtTS,
+					                                                  validityTS.expAtTS),
 					                      "");
 				}
 			}
@@ -427,7 +473,6 @@ ACTOR Future<Void> getLatestCipherKeys(Reference<EncryptKeyProxyData> ekpProxyDa
 	for (const auto& info : dedupedDomainInfos) {
 		const auto itr = ekpProxyData->baseCipherDomainIdCache.find(info.first);
 		if (itr != ekpProxyData->baseCipherDomainIdCache.end() && itr->second.isValid()) {
-			ASSERT(!itr->second.isExpired());
 			cachedCipherDetails.emplace_back(info.first,
 			                                 itr->second.baseCipherId,
 			                                 itr->second.baseCipherKey,
