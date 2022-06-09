@@ -79,7 +79,7 @@ if (BUGGIFY) (
 
 extern std::vector<double> P_BUGGIFIED_SECTION_ACTIVATED, P_BUGGIFIED_SECTION_FIRES;
 extern double P_EXPENSIVE_VALIDATION;
-enum class BuggifyType : uint8_t { General = 0, Client };
+enum class BuggifyType : uint8_t { General = 0, Client, Knobs };
 bool isBuggifyEnabled(BuggifyType type);
 void clearBuggifySections(BuggifyType type);
 int getSBVar(std::string const& file, int line, BuggifyType);
@@ -90,6 +90,7 @@ bool validationIsEnabled(BuggifyType type);
 #define BUGGIFY_WITH_PROB(x)                                                                                           \
 	(getSBVar(__FILE__, __LINE__, BuggifyType::General) && deterministicRandom()->random01() < (x))
 #define BUGGIFY BUGGIFY_WITH_PROB(P_BUGGIFIED_SECTION_FIRES[int(BuggifyType::General)])
+#define BUGGIFY_KNOB BUGGIFY_WITH_PROB(P_BUGGIFIED_SECTION_FIRES[int(BuggifyType::Knobs)])
 #define EXPENSIVE_VALIDATION                                                                                           \
 	(validationIsEnabled(BuggifyType::General) && deterministicRandom()->random01() < P_EXPENSIVE_VALIDATION)
 

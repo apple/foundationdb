@@ -1026,7 +1026,7 @@ struct CLIOptions {
 	               // SERVER_KNOBS->COMMIT_BATCHES_MEM_BYTES_HARD_LIMIT
 	uint64_t virtualMemLimit = 0; // unlimited
 	uint64_t storageMemLimit = 1LL << 30;
-	bool buggifyEnabled = false, faultInjectionEnabled = true, restarting = false;
+	bool buggifyEnabled = false, knobsBuggifyEnabled = false, faultInjectionEnabled = true, restarting = false;
 	Optional<Standalone<StringRef>> zoneId;
 	Optional<Standalone<StringRef>> dcId;
 	ProcessClass processClass = ProcessClass(ProcessClass::UnsetClass, ProcessClass::CommandLineSource);
@@ -1497,10 +1497,18 @@ private:
 				                                             // next smaller multiple of 4K.
 				break;
 			case OPT_BUGGIFY:
-				if (!strcmp(args.OptionArg(), "on"))
-					buggifyEnabled = true;
-				else if (!strcmp(args.OptionArg(), "off"))
-					buggifyEnabled = false;
+				if (!strcmp(args.OptionArg(), "on")) {
+					buggifyEnabled = knobsBuggifyEnabled = true;
+				}
+				else if (!strcmp(args.OptionArg(), "off")) {
+					buggifyEnabled = knobsBuggifyEnabled = false;
+				}
+				else if (!strcmp(args.OptionArg(), "knobs")) {
+					knobsBuggifyEnabled = true;
+				}
+				else if (!strcmp(args.OptionArg(), "macros")) {
+ 					buggifyEnabled = true;
+				}
 				else {
 					fprintf(stderr, "ERROR: Unknown buggify state `%s'\n", args.OptionArg());
 					printHelpTeaser(argv[0]);
@@ -1728,7 +1736,7 @@ private:
 		if (role == ServerRole::Simulation) {
 			Optional<bool> buggifyOverride = checkBuggifyOverride(testFile);
 			if (buggifyOverride.present())
-				buggifyEnabled = buggifyOverride.get();
+				buggifyEnabled = knobsBuggifyEnabled = buggifyOverride.get();
 		}
 
 		if (role == ServerRole::SearchMutations && !targetKey) {
@@ -1815,6 +1823,7 @@ int main(int argc, char* argv[]) {
 		setThreadLocalDeterministicRandomSeed(opts.randomSeed);
 
 		enableBuggify(opts.buggifyEnabled, BuggifyType::General);
+		enableBuggify(opts.knobsBuggifyEnabled, BuggifyType::Knobs);
 		enableFaultInjection(opts.faultInjectionEnabled);
 
 		IKnobCollection::setGlobalKnobCollection(IKnobCollection::Type::SERVER,

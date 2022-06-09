@@ -330,13 +330,13 @@ Standalone<StringRef> addVersionStampAtEnd(StringRef const& str) {
 
 namespace {
 
-std::vector<bool> buggifyActivated{ false, false };
+std::vector<bool> buggifyActivated{ false, false, false };
 std::map<BuggifyType, std::map<std::pair<std::string, int>, int>> typedSBVars;
 
 } // namespace
 
-std::vector<double> P_BUGGIFIED_SECTION_ACTIVATED{ .25, .25 };
-std::vector<double> P_BUGGIFIED_SECTION_FIRES{ .25, .25 };
+std::vector<double> P_BUGGIFIED_SECTION_ACTIVATED{ .25, .25, .25 };
+std::vector<double> P_BUGGIFIED_SECTION_FIRES{ .25, .25, .25 };
 
 double P_EXPENSIVE_VALIDATION = .05;
 
