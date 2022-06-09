@@ -1,3 +1,6 @@
+add_library(rapidjson INTERFACE)
+target_include_directories(rapidjson INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/rapidjson)
+
 add_subdirectory(fmt-8.1.1)
 if(NOT WIN32)
   add_subdirectory(debug_determinism)

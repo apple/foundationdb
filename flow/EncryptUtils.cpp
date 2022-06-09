@@ -19,20 +19,22 @@
  */
 
 #include "flow/EncryptUtils.h"
+
 #include "flow/Trace.h"
 
 #include <boost/format.hpp>
 
 std::string getEncryptDbgTraceKey(std::string_view prefix,
                                   EncryptCipherDomainId domainId,
+                                  StringRef domainName,
                                   Optional<EncryptCipherBaseKeyId> baseCipherId) {
 	// Construct the TraceEvent field key ensuring its uniqueness and compliance to TraceEvent field validator and log
 	// parsing tools
 	if (baseCipherId.present()) {
-		boost::format fmter("%s.%lld.%llu");
-		return boost::str(boost::format(fmter % prefix % domainId % baseCipherId.get()));
+		boost::format fmter("%s.%lld.%s.%llu");
+		return boost::str(boost::format(fmter % prefix % domainId % domainName.toString() % baseCipherId.get()));
 	} else {
-		boost::format fmter("%s.%lld");
-		return boost::str(boost::format(fmter % prefix % domainId));
+		boost::format fmter("%s.%lld.%s");
+		return boost::str(boost::format(fmter % prefix % domainId % domainName.toString()));
 	}
 }

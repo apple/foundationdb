@@ -70,6 +70,7 @@ include_directories(${CMAKE_BINARY_DIR})
 if(WIN32)
   add_definitions(-DBOOST_USE_WINDOWS_H)
   add_definitions(-DWIN32_LEAN_AND_MEAN)
+  add_definitions(-D_ITERATOR_DEBUG_LEVEL=0)
 endif()
 
 if (USE_CCACHE)

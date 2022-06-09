@@ -29,6 +29,7 @@
 #define BLOB_GRANULE_READER_CLIENT_H
 
 #include "fdbclient/BackupContainerFileSystem.h"
+#include "fdbclient/BlobConnectionProvider.h"
 #include "fdbclient/BlobGranuleCommon.h"
 #include "fdbclient/BlobGranuleFiles.h"
 #include "fdbclient/BlobWorkerInterface.h"
@@ -42,12 +43,12 @@ ACTOR Future<RangeResult> readBlobGranule(BlobGranuleChunkRef chunk,
                                           KeyRangeRef keyRange,
                                           Version beginVersion,
                                           Version readVersion,
-                                          Reference<BackupContainerFileSystem> bstore,
+                                          Reference<BlobConnectionProvider> bstore,
                                           Optional<BlobWorkerStats*> stats = Optional<BlobWorkerStats*>());
 
 ACTOR Future<Void> readBlobGranules(BlobGranuleFileRequest request,
                                     BlobGranuleFileReply reply,
-                                    Reference<BackupContainerFileSystem> bstore,
+                                    Reference<BlobConnectionProvider> bstore,
                                     PromiseStream<RangeResult> results);
 
 #include "flow/unactorcompiler.h"

@@ -45,6 +45,8 @@ set(FDBSERVER_SRCS
   FDBExecHelper.actor.cpp
   FDBExecHelper.actor.h
   fdbserver.actor.cpp
+  GetEncryptCipherKeys.actor.cpp
+  GetEncryptCipherKeys.h
   GrvProxyServer.actor.cpp
   IConfigConsumer.cpp
   IConfigConsumer.h
@@ -378,7 +380,7 @@ else()
   target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite)
 endif()
 
-target_link_libraries(fdbserver PRIVATE toml11_target jemalloc)
+target_link_libraries(fdbserver PRIVATE toml11_target jemalloc rapidjson)
 # target_compile_definitions(fdbserver PRIVATE -DENABLE_SAMPLING)
 
 if (GPERFTOOLS_FOUND)

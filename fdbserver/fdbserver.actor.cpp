@@ -1806,14 +1806,6 @@ int main(int argc, char* argv[]) {
 		auto opts = CLIOptions::parseArgs(argc, argv);
 		const auto role = opts.role;
 
-#ifdef _WIN32
-		// For now, ignore all tests for Windows
-		if (role == ServerRole::Simulation || role == ServerRole::UnitTests || role == ServerRole::Test) {
-			printf("Windows tests are not supported yet\n");
-			flushAndExit(FDB_EXIT_SUCCESS);
-		}
-#endif
-
 		if (role == ServerRole::Simulation)
 			printf("Random seed is %u...\n", opts.randomSeed);
 
@@ -1841,6 +1833,21 @@ int main(int argc, char* argv[]) {
 		g_knobs.setKnob("server_mem_limit", KnobValue::create(static_cast<int64_t>(opts.memLimit)));
 		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
 		g_knobs.initialize(Randomize::True, role == ServerRole::Simulation ? IsSimulated::True : IsSimulated::False);
+
+		if (!SERVER_KNOBS->ALLOW_DANGEROUS_KNOBS) {
+			if (SERVER_KNOBS->FETCH_USING_STREAMING) {
+				fprintf(stderr,
+				        "ERROR : explicitly setting FETCH_USING_STREAMING is dangerous! set ALLOW_DANGEROUS_KNOBS to "
+				        "proceed anyways\n");
+				flushAndExit(FDB_EXIT_ERROR);
+			}
+			if (SERVER_KNOBS->PEEK_USING_STREAMING) {
+				fprintf(stderr,
+				        "ERROR : explicitly setting PEEK_USING_STREAMING is dangerous! set ALLOW_DANGEROUS_KNOBS to "
+				        "proceed anyways\n");
+				flushAndExit(FDB_EXIT_ERROR);
+			}
+		}
 
 		// evictionPolicyStringToEnum will throw an exception if the string is not recognized as a valid
 		EvictablePageCache::evictionPolicyStringToEnum(FLOW_KNOBS->CACHE_EVICTION_POLICY);
