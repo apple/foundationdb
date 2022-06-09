@@ -25,9 +25,8 @@ class DDTxnProcessorImpl {
 	friend class DDTxnProcessor;
 
 	// return {sourceServers, completeSources}
-	ACTOR static Future<std::tuple<std::vector<UID>, std::vector<UID>>> getSourceServersForRange(
-	    Database cx,
-	    KeyRangeRef keys) {
+	ACTOR static Future<std::tuple<std::vector<UID>, std::vector<UID>>> getSourceServersForRange(Database cx,
+	                                                                                             KeyRangeRef keys) {
 		state std::set<UID> servers;
 		state std::vector<UID> completeSources;
 		state Transaction tr(cx);
