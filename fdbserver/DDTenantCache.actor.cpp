@@ -19,10 +19,13 @@
  */
 
 #include "fdbserver/DDTenantCache.h"
+#include "fdbserver/DDTeamCollection.h"
+#include <limits>
+#include <string>
 
 class DDTenantCacheImpl {
 
-	ACTOR static Future<RangeResult> getTenantList(DDTenantCache* self, Transaction* tr) {
+	ACTOR static Future<RangeResult> getTenantList(DDTenantCache* tenantCache, Transaction* tr) {
 		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 
@@ -34,78 +37,77 @@ class DDTenantCacheImpl {
 	}
 
 public:
-	ACTOR static Future<Void> build(DDTenantCache* self) {
-		state Transaction tr(self->dbcx());
+	ACTOR static Future<Void> build(DDTenantCache* tenantCache) {
+		state Transaction tr(tenantCache->dbcx());
 
-		TraceEvent(SevInfo, "BuildingDDTenantCache", self->id()).log();
+		TraceEvent(SevInfo, "BuildingDDTenantCache", tenantCache->id()).log();
 
 		try {
-			state RangeResult tenantList = wait(getTenantList(self, &tr));
+			state RangeResult tenantList = wait(getTenantList(tenantCache, &tr));
 
 			for (int i = 0; i < tenantList.size(); i++) {
 				TenantName tname = tenantList[i].key.removePrefix(tenantMapPrefix);
 				TenantMapEntry t = decodeTenantEntry(tenantList[i].value);
 
-				TenantInfo tinfo(tname, t.id);
-				self->tenantCache[t.id] = makeReference<TCTenantInfo>(tinfo);
+				tenantCache->insert(tname, t);
 
-				TraceEvent(SevInfo, "DDTenantFound", self->id()).detail("TenantName", tname).detail("TenantID", t.id);
+				TraceEvent(SevInfo, "DDTenantFound", tenantCache->id())
+				    .detail("TenantName", tname)
+				    .detail("TenantID", t.id)
+				    .detail("TenantPrefix", t.prefix);
 			}
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}
 
-		TraceEvent(SevInfo, "BuiltDDTenantCache", self->id()).log();
+		TraceEvent(SevInfo, "BuiltDDTenantCache", tenantCache->id()).log();
 
 		return Void();
 	}
 
-	ACTOR static Future<Void> monitorTenantMap(DDTenantCache* self) {
-		TraceEvent(SevInfo, "StartingTenantCacheMonitor", self->id()).log();
+	ACTOR static Future<Void> monitorTenantMap(DDTenantCache* tenantCache) {
+		TraceEvent(SevInfo, "StartingTenantCacheMonitor", tenantCache->id()).log();
 
-		state Transaction tr(self->dbcx());
+		state Transaction tr(tenantCache->dbcx());
 
 		state double lastTenantListFetchTime = now();
 
 		loop {
 			try {
 				if (now() - lastTenantListFetchTime > (2 * SERVER_KNOBS->DD_TENANT_LIST_REFRESH_INTERVAL)) {
-					TraceEvent(SevWarn, "DDTenantListRefreshDelay", self->id()).log();
+					TraceEvent(SevWarn, "DDTenantListRefreshDelay", tenantCache->id()).log();
 				}
 
-				state RangeResult tenantList = wait(getTenantList(self, &tr));
+				state RangeResult tenantList = wait(getTenantList(tenantCache, &tr));
 
-				DDTenantMap updatedTenantCache;
+				tenantCache->startRefresh();
 				bool tenantListUpdated = false;
 
 				for (int i = 0; i < tenantList.size(); i++) {
 					TenantName tname = tenantList[i].key.removePrefix(tenantMapPrefix);
 					TenantMapEntry t = decodeTenantEntry(tenantList[i].value);
 
-					TenantInfo tinfo(tname, t.id);
-					updatedTenantCache[t.id] = makeReference<TCTenantInfo>(tinfo);
-
-					if (!self->tenantCache.count(t.id)) {
+					if (tenantCache->update(tname, t)) {
 						tenantListUpdated = true;
 					}
 				}
 
-				if (self->tenantCache.size() != updatedTenantCache.size()) {
+				if (tenantCache->cleanup()) {
 					tenantListUpdated = true;
 				}
 
 				if (tenantListUpdated) {
-					self->tenantCache.swap(updatedTenantCache);
-					TraceEvent(SevInfo, "DDTenantCache", self->id()).detail("List", self->desc());
+					TraceEvent(SevInfo, "DDTenantCache", tenantCache->id()).detail("List", tenantCache->desc());
 				}
 
-				updatedTenantCache.clear();
-				tr.reset();
 				lastTenantListFetchTime = now();
-				wait(delay(2.0));
+				tr.reset();
+				wait(delay(SERVER_KNOBS->DD_TENANT_LIST_REFRESH_INTERVAL));
 			} catch (Error& e) {
 				if (e.code() != error_code_actor_cancelled) {
-					TraceEvent("DDTenantCacheGetTenantListError", self->id()).errorUnsuppressed(e).suppressFor(1.0);
+					TraceEvent("DDTenantCacheGetTenantListError", tenantCache->id())
+					    .errorUnsuppressed(e)
+					    .suppressFor(1.0);
 				}
 				wait(tr.onError(e));
 			}
@@ -113,10 +115,191 @@ public:
 	}
 };
 
+void DDTenantCache::insert(TenantName& tenantName, TenantMapEntry& tenant) {
+	KeyRef tenantPrefix(tenant.prefix.begin(), tenant.prefix.size());
+	ASSERT(tenantCache.find(tenantPrefix) == tenantCache.end());
+
+	TenantInfo tinfo(tenantName, tenant.id);
+	tenantCache[tenantPrefix] = makeReference<TCTenantInfo>(tinfo, tenant.prefix);
+	tenantCache[tenantPrefix]->updateCacheGeneration(generation);
+}
+
+void DDTenantCache::startRefresh() {
+	ASSERT(generation < std::numeric_limits<uint64_t>::max());
+	generation++;
+}
+
+void DDTenantCache::keep(TenantName& tenantName, TenantMapEntry& tenant) {
+	KeyRef tenantPrefix(tenant.prefix.begin(), tenant.prefix.size());
+
+	ASSERT(tenantCache.find(tenantPrefix) != tenantCache.end());
+	tenantCache[tenantPrefix]->updateCacheGeneration(generation);
+}
+
+bool DDTenantCache::update(TenantName& tenantName, TenantMapEntry& tenant) {
+	KeyRef tenantPrefix(tenant.prefix.begin(), tenant.prefix.size());
+
+	if (tenantCache.find(tenantPrefix) != tenantCache.end()) {
+		keep(tenantName, tenant);
+		return false;
+	}
+
+	insert(tenantName, tenant);
+	return true;
+}
+
+int DDTenantCache::cleanup() {
+	int tenantsRemoved = 0;
+	std::vector<Key> keysToErase;
+
+	for (auto& t : tenantCache) {
+		ASSERT(t.value->cacheGeneration() <= generation);
+		if (t.value->cacheGeneration() != generation) {
+			keysToErase.push_back(t.key);
+		}
+	}
+
+	for (auto& k : keysToErase) {
+		tenantCache.erase(k);
+		ASSERT(tenantCache.find(k) == tenantCache.end());
+		tenantsRemoved++;
+	}
+
+	return tenantsRemoved;
+}
+
+std::string DDTenantCache::desc() {
+	std::string s("@Generation: ");
+	s += std::to_string(generation) + " ";
+	int count = 0;
+	for (auto& [tenantPrefix, tenant] : tenantCache) {
+		if (count) {
+			s += ", ";
+		}
+
+		s += "Name: " + tenant->name().toString() + " ID: " + std::to_string(TenantMapEntry::prefixToId(tenantPrefix));
+		count++;
+	}
+
+	return s;
+}
+
+bool DDTenantCache::isTenantKey(KeyRef key) {
+	auto it = tenantCache.lastLessOrEqual(key);
+	if (it == tenantCache.end()) {
+		return false;
+	}
+
+	if (!key.startsWith(it->key)) {
+		return false;
+	}
+
+	return true;
+}
+
 Future<Void> DDTenantCache::build(Database cx) {
 	return DDTenantCacheImpl::build(this);
 }
 
 Future<Void> DDTenantCache::monitorTenantMap() {
 	return DDTenantCacheImpl::monitorTenantMap(this);
+}
+
+class DDTenantCacheUnitTest {
+public:
+	ACTOR static Future<Void> InsertAndTestPresence() {
+		wait(Future<Void>(Void()));
+
+		Database cx;
+		DDTenantCache tenantCache(cx, UID(1, 0));
+
+		constexpr static uint16_t tenantLimit = 64;
+
+		uint16_t tenantCount = deterministicRandom()->randomInt(0, tenantLimit);
+		uint16_t tenantNumber = deterministicRandom()->randomInt(0, std::numeric_limits<uint16_t>::max());
+
+		for (uint16_t i = 0; i < tenantCount; i++) {
+			TenantName tenantName(format("%s_%08d", "ddtc_test_tenant", tenantNumber + i));
+			TenantMapEntry tenant(tenantNumber + i, KeyRef());
+
+			tenantCache.insert(tenantName, tenant);
+		}
+
+		for (int i = 0; i < tenantLimit; i++) {
+			Key k(format("%d", i));
+			ASSERT(tenantCache.isTenantKey(k.withPrefix(TenantMapEntry::idToPrefix(tenantNumber + (i % tenantCount)))));
+			ASSERT(!tenantCache.isTenantKey(k.withPrefix(allKeys.begin)));
+			ASSERT(!tenantCache.isTenantKey(k));
+		}
+
+		return Void();
+	}
+
+	ACTOR static Future<Void> RefreshAndTestPresence() {
+		wait(Future<Void>(Void()));
+
+		Database cx;
+		DDTenantCache tenantCache(cx, UID(1, 0));
+
+		constexpr static uint16_t tenantLimit = 64;
+
+		uint16_t tenantCount = deterministicRandom()->randomInt(0, tenantLimit);
+		uint16_t tenantNumber = deterministicRandom()->randomInt(0, std::numeric_limits<uint16_t>::max());
+
+		for (uint16_t i = 0; i < tenantCount; i++) {
+			TenantName tenantName(format("%s_%08d", "ddtc_test_tenant", tenantNumber + i));
+			TenantMapEntry tenant(tenantNumber + i, KeyRef());
+
+			tenantCache.insert(tenantName, tenant);
+		}
+
+		uint16_t staleTenantFraction = deterministicRandom()->randomInt(1, 8);
+		tenantCache.startRefresh();
+
+		int keepCount = 0, removeCount = 0;
+		for (int i = 0; i < tenantCount; i++) {
+			uint16_t tenantOrdinal = tenantNumber + i;
+
+			if (tenantOrdinal % staleTenantFraction != 0) {
+				TenantName tenantName(format("%s_%08d", "ddtc_test_tenant", tenantOrdinal));
+				TenantMapEntry tenant(tenantOrdinal, KeyRef());
+				bool newTenant = tenantCache.update(tenantName, tenant);
+				ASSERT(!newTenant);
+				keepCount++;
+			} else {
+				removeCount++;
+			}
+		}
+		int tenantsRemoved = tenantCache.cleanup();
+		ASSERT(tenantsRemoved = removeCount);
+
+		int keptCount = 0, removedCount = 0;
+		for (int i = 0; i < tenantCount; i++) {
+			uint16_t tenantOrdinal = tenantNumber + i;
+			Key k(format("%d", i));
+			if (tenantOrdinal % staleTenantFraction != 0) {
+
+				ASSERT(tenantCache.isTenantKey(k.withPrefix(TenantMapEntry::idToPrefix(tenantOrdinal))));
+				keptCount++;
+			} else {
+				ASSERT(!tenantCache.isTenantKey(k.withPrefix(TenantMapEntry::idToPrefix(tenantOrdinal))));
+				removedCount++;
+			}
+		}
+
+		ASSERT(keepCount == keptCount);
+		ASSERT(removeCount == removedCount);
+
+		return Void();
+	}
+};
+
+TEST_CASE("/DataDistribution/TenantCache/InsertAndTestPresence") {
+	wait(DDTenantCacheUnitTest::InsertAndTestPresence());
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/TenantCache/RefreshAndTestPresence") {
+	wait(DDTenantCacheUnitTest::RefreshAndTestPresence());
+	return Void();
 }

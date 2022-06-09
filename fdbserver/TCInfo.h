@@ -170,7 +170,7 @@ class TCTeamInfo final : public ReferenceCounted<TCTeamInfo>, public IDataDistri
 	friend class TCTeamInfoImpl;
 	std::vector<Reference<TCServerInfo>> servers;
 	std::vector<UID> serverIDs;
-	Reference<TCTenantInfo> tenant;
+	Optional<Reference<TCTenantInfo>> tenant;
 	bool healthy;
 	bool wrongConfiguration; // True if any of the servers in the team have the wrong configuration
 	int priority;
@@ -180,9 +180,9 @@ public:
 	Reference<TCMachineTeamInfo> machineTeam;
 	Future<Void> tracker;
 
-	explicit TCTeamInfo(std::vector<Reference<TCServerInfo>> const& servers, Reference<TCTenantInfo> tenant);
+	explicit TCTeamInfo(std::vector<Reference<TCServerInfo>> const& servers, Optional<Reference<TCTenantInfo>> tenant);
 
-	Reference<TCTenantInfo>& getTenant() { return tenant; }
+	Optional<Reference<TCTenantInfo>>& getTenant() { return tenant; }
 
 	std::string getTeamID() const override { return id.shortString(); }
 
@@ -245,15 +245,21 @@ private:
 
 class TCTenantInfo : public ReferenceCounted<TCTenantInfo> {
 private:
-	TenantInfo t_info;
-	std::vector<Reference<TCTeamInfo>> t_teams;
+	TenantInfo m_tenantInfo;
+	Key m_prefix;
+	std::vector<Reference<TCTeamInfo>> m_tenantTeams;
+	int64_t m_cacheGeneration;
 
 public:
-	TCTenantInfo(TenantInfo tinfo) : t_info(tinfo) {}
-	std::vector<Reference<TCTeamInfo>>& teams() { return t_teams; }
+	TCTenantInfo() { m_prefix = allKeys.end; }
+	TCTenantInfo(TenantInfo tinfo, Key prefix) : m_tenantInfo(tinfo), m_prefix(prefix) {}
+	std::vector<Reference<TCTeamInfo>>& teams() { return m_tenantTeams; }
 
-	TenantName name() { return t_info.name.get(); }
+	TenantName name() { return m_tenantInfo.name.get(); }
+	std::string prefixDesc() { return m_prefix.printable(); }
 
 	void addTeam(TCTeamInfo team);
 	void removeTeam(TCTeamInfo team);
+	void updateCacheGeneration(int64_t generation) { m_cacheGeneration = generation; }
+	int64_t cacheGeneration() const { return m_cacheGeneration; }
 };

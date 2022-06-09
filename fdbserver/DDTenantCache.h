@@ -18,42 +18,55 @@
  * limitations under the License.
  */
 
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/Tenant.h"
 #include "fdbserver/DDTeamCollection.h"
 #include "fdbserver/TCInfo.h"
+#include "flow/IRandom.h"
+#include "flow/IndexedSet.h"
+#include <limits>
+#include <string>
 
-typedef std::map<int64_t, Reference<TCTenantInfo>> DDTenantMap;
+typedef Map<KeyRef, Reference<TCTenantInfo>> DDTenantMap;
 
 class DDTenantCache : public ReferenceCounted<DDTenantCache> {
+	friend class DDTenantCacheImpl;
+	friend class DDTenantCacheUnitTest;
+
 private:
+	constexpr static uint64_t INVALID_GENERATION = std::numeric_limits<uint64_t>::max();
+
 	UID distributorID;
 	Database cx;
-
-public:
+	uint64_t generation;
 	DDTenantMap tenantCache;
 
-	DDTenantCache(Database cx, UID distributorID) : distributorID(distributorID), cx(cx) {}
+	// mark the start of a new sweep of the tenant cache
+	void startRefresh();
+
+	void insert(TenantName& tenantName, TenantMapEntry& tenant);
+	void keep(TenantName& tenantName, TenantMapEntry& tenant);
+
+	// return true if a new tenant is inserted into the cache
+	bool update(TenantName& tenantName, TenantMapEntry& tenant);
+
+	// return count of tenants that were found to be stale and removed from the cache
+	int cleanup();
 
 	UID id() { return distributorID; }
 
 	Database dbcx() { return cx; }
 
+public:
+	DDTenantCache(Database cx, UID distributorID) : distributorID(distributorID), cx(cx) {
+		generation = deterministicRandom()->randomUInt32();
+	}
+
 	Future<Void> build(Database cx);
 
 	Future<Void> monitorTenantMap();
 
-	std::string desc() {
-		std::string s("");
-		int count = 0;
-		for (auto& [tid, tenant] : tenantCache) {
-			if (count) {
-				s += ", ";
-			}
+	std::string desc();
 
-			s += "Name: " + tenant->name().toString() + " ID: " + std::to_string(tid);
-			count++;
-		}
-
-		return s;
-	}
+	bool isTenantKey(KeyRef key);
 };
