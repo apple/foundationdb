@@ -540,6 +540,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 	state Reference<DDTeamCollection> primaryTeamCollection;
 	state Reference<DDTeamCollection> remoteTeamCollection;
 	state bool trackerCancelled;
+	state bool ddIsTenantAware = SERVER_KNOBS->DD_TENANT_AWARENESS_ENABLED;
 	loop {
 		trackerCancelled = false;
 
@@ -665,8 +666,11 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 				TraceEvent("DataDistributionEnabled").log();
 			}
 
-			state Reference<DDTenantCache> ddtc = makeReference<DDTenantCache>(cx, self->ddId);
-			wait(ddtc->build(cx));
+			state Reference<DDTenantCache> ddtc;
+			if (ddIsTenantAware) {
+				ddtc = makeReference<DDTenantCache>(cx, self->ddId);
+				wait(ddtc->build(cx));
+			}
 
 			// When/If this assertion fails, Evan owes Ben a pat on the back for his foresight
 			ASSERT(configuration.storageTeamSize > 0);
@@ -736,9 +740,10 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			} else {
 				anyZeroHealthyTeams = zeroHealthyTeams[0];
 			}
-
-			actors.push_back(reportErrorsExcept(
-			    ddtc->monitorTenantMap(), "DDTenantCacheMonitor", self->ddId, &normalDDQueueErrors()));
+			if (ddIsTenantAware) {
+				actors.push_back(reportErrorsExcept(
+				    ddtc->monitorTenantMap(), "DDTenantCacheMonitor", self->ddId, &normalDDQueueErrors()));
+			}
 
 			actors.push_back(pollMoveKeysLock(cx, lock, ddEnabledState));
 			actors.push_back(reportErrorsExcept(dataDistributionTracker(initData,

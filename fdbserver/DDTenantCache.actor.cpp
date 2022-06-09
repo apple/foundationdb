@@ -271,7 +271,7 @@ public:
 			}
 		}
 		int tenantsRemoved = tenantCache.cleanup();
-		ASSERT(tenantsRemoved = removeCount);
+		ASSERT(tenantsRemoved == removeCount);
 
 		int keptCount = 0, removedCount = 0;
 		for (int i = 0; i < tenantCount; i++) {
