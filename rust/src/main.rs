@@ -1,11 +1,11 @@
 mod fdbserver;
 mod flow;
-mod handlers;
+mod services;
 
 #[tokio::main]
 async fn main() -> flow::Result<()> {
     fdbserver::grv_master::foo();
-    handlers::hello().await?;
+    services::hello().await?;
     println!("Goodbye, cruel world!");
 
     Ok(())

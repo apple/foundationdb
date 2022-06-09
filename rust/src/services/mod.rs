@@ -30,10 +30,10 @@ async fn handle_frame(
 
     let response_frame = match frame.token.get_well_known_endpoint() {
         Some(uid::WLTOKEN::PingPacket) => {
-            super::handlers::ping_request::handle(parsed_file_identifier, frame).await?
+            ping_request::handle(parsed_file_identifier, frame).await?
         }
         Some(uid::WLTOKEN::ReservedForTesting) => {
-            super::handlers::network_test::handle(parsed_file_identifier, frame).await?
+            network_test::handle(parsed_file_identifier, frame).await?
         }
         Some(wltoken) => {
             println!("Got unhandled request for well-known enpoint {:?}: {:x?} {:04x?}", wltoken, frame.token, parsed_file_identifier);

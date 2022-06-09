@@ -12,6 +12,7 @@ flatbuffers = { version = "2.1" }
 num-traits = "0.2"
 num-derive = "0.3"
 tokio = { version = "1.10", features = ["full"] }
+tower = { version = "0.4.12", features = ["full"] }
 xxhash-rust = { version = "0.8.5", features = ["xxh3"] }
 
 [dev-dependencies]
