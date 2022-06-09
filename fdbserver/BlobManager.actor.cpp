@@ -2298,6 +2298,7 @@ ACTOR Future<Reference<BlobConnectionProvider>> getBStoreForGranule(Reference<Bl
 		state Reference<GranuleTenantData> data = self->tenantData.getDataForGranule(granuleRange);
 		if (data.isValid()) {
 			wait(data->bstoreLoaded.getFuture());
+			wait(delay(0));
 			return data->bstore;
 		} else {
 			// race on startup between loading tenant ranges and bgcc/purging. just wait

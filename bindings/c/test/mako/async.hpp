@@ -42,7 +42,6 @@ struct ResumableStateForPopulate : std::enable_shared_from_this<ResumableStateFo
 	Arguments const& args;
 	ThreadStatistics& stats;
 	std::atomic<int>& stopcount;
-	LatencySampleBinArray sample_bins;
 	int key_begin;
 	int key_end;
 	int key_checkpoint;
@@ -84,7 +83,6 @@ struct ResumableStateForRunWorkload : std::enable_shared_from_this<ResumableStat
 	std::atomic<int> const& signal;
 	int max_iters;
 	OpIterator iter;
-	LatencySampleBinArray sample_bins;
 	fdb::ByteString key1;
 	fdb::ByteString key2;
 	fdb::ByteString val;

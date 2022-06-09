@@ -345,7 +345,6 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
                                          UID distributorId,
                                          int teamSize,
                                          int singleRegionTeamSize,
-                                         double* lastLimited,
                                          const DDEnabledState* ddEnabledState);
 
 // Holds the permitted size and IO Bounds for a shard

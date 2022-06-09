@@ -487,7 +487,6 @@ struct DDQueueData {
 	PromiseStream<GetMetricsRequest> getShardMetrics;
 	PromiseStream<GetTopKMetricsRequest> getTopKMetrics;
 
-	double* lastLimited;
 	double lastInterval;
 	int suppressIntervals;
 
@@ -550,18 +549,17 @@ struct DDQueueData {
 	            PromiseStream<RelocateShard> output,
 	            FutureStream<RelocateShard> input,
 	            PromiseStream<GetMetricsRequest> getShardMetrics,
-	            PromiseStream<GetTopKMetricsRequest> getTopKMetrics,
-	            double* lastLimited)
+	            PromiseStream<GetTopKMetricsRequest> getTopKMetrics)
 	  : distributorId(mid), lock(lock), cx(cx), teamCollections(teamCollections), shardsAffectedByTeamFailure(sABTF),
 	    getAverageShardBytes(getAverageShardBytes),
 	    startMoveKeysParallelismLock(SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM),
 	    finishMoveKeysParallelismLock(SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM),
 	    fetchSourceLock(new FlowLock(SERVER_KNOBS->DD_FETCH_SOURCE_PARALLELISM)), activeRelocations(0),
 	    queuedRelocations(0), bytesWritten(0), teamSize(teamSize), singleRegionTeamSize(singleRegionTeamSize),
-	    output(output), input(input), getShardMetrics(getShardMetrics), getTopKMetrics(getTopKMetrics),
-	    lastLimited(lastLimited), lastInterval(0), suppressIntervals(0),
-	    rawProcessingUnhealthy(new AsyncVar<bool>(false)), rawProcessingWiggle(new AsyncVar<bool>(false)),
-	    unhealthyRelocations(0), movedKeyServersEventHolder(makeReference<EventCacheHolder>("MovedKeyServers")) {}
+	    output(output), input(input), getShardMetrics(getShardMetrics), getTopKMetrics(getTopKMetrics), lastInterval(0),
+	    suppressIntervals(0), rawProcessingUnhealthy(new AsyncVar<bool>(false)),
+	    rawProcessingWiggle(new AsyncVar<bool>(false)), unhealthyRelocations(0),
+	    movedKeyServersEventHolder(makeReference<EventCacheHolder>("MovedKeyServers")) {}
 
 	void validate() {
 		if (EXPENSIVE_VALIDATION) {
@@ -1819,7 +1817,6 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueueData* self, int teamCollectionIndex,
 
 ACTOR Future<Void> BgDDMountainChopper(DDQueueData* self, int teamCollectionIndex) {
 	state double rebalancePollingInterval = SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL;
-	state int resetCount = SERVER_KNOBS->DD_REBALANCE_RESET_AMOUNT;
 	state Transaction tr(self->cx);
 	state double lastRead = 0;
 	state bool skipCurrentLoop = false;
@@ -1828,10 +1825,6 @@ ACTOR Future<Void> BgDDMountainChopper(DDQueueData* self, int teamCollectionInde
 		state bool moved = false;
 		state TraceEvent traceEvent("BgDDMountainChopper_Old", self->distributorId);
 		traceEvent.suppressFor(5.0).detail("PollingInterval", rebalancePollingInterval).detail("Rebalance", "Disk");
-
-		if (*self->lastLimited > 0) {
-			traceEvent.detail("SecondsSinceLastLimited", now() - *self->lastLimited);
-		}
 
 		try {
 			state Future<Void> delayF = delay(rebalancePollingInterval, TaskPriority::DataDistributionLaunch);
@@ -1904,30 +1897,10 @@ ACTOR Future<Void> BgDDMountainChopper(DDQueueData* self, int teamCollectionInde
 						                                  teamCollectionIndex == 0,
 						                                  &traceEvent));
 						moved = _moved;
-						if (moved) {
-							resetCount = 0;
-						} else {
-							resetCount++;
-						}
 					}
 				}
 			}
 
-			if (now() - (*self->lastLimited) < SERVER_KNOBS->BG_DD_SATURATION_DELAY) {
-				rebalancePollingInterval = std::min(SERVER_KNOBS->BG_DD_MAX_WAIT,
-				                                    rebalancePollingInterval * SERVER_KNOBS->BG_DD_INCREASE_RATE);
-			} else {
-				rebalancePollingInterval = std::max(SERVER_KNOBS->BG_DD_MIN_WAIT,
-				                                    rebalancePollingInterval / SERVER_KNOBS->BG_DD_DECREASE_RATE);
-			}
-
-			if (resetCount >= SERVER_KNOBS->DD_REBALANCE_RESET_AMOUNT &&
-			    rebalancePollingInterval < SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL) {
-				rebalancePollingInterval = SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL;
-				resetCount = SERVER_KNOBS->DD_REBALANCE_RESET_AMOUNT;
-			}
-
-			traceEvent.detail("ResetCount", resetCount);
 			tr.reset();
 		} catch (Error& e) {
 			// Log actor_cancelled because it's not legal to suppress an event that's initialized
@@ -1942,7 +1915,6 @@ ACTOR Future<Void> BgDDMountainChopper(DDQueueData* self, int teamCollectionInde
 
 ACTOR Future<Void> BgDDValleyFiller(DDQueueData* self, int teamCollectionIndex) {
 	state double rebalancePollingInterval = SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL;
-	state int resetCount = SERVER_KNOBS->DD_REBALANCE_RESET_AMOUNT;
 	state Transaction tr(self->cx);
 	state double lastRead = 0;
 	state bool skipCurrentLoop = false;
@@ -1952,10 +1924,6 @@ ACTOR Future<Void> BgDDValleyFiller(DDQueueData* self, int teamCollectionIndex) 
 		state bool moved = false;
 		state TraceEvent traceEvent("BgDDValleyFiller_Old", self->distributorId);
 		traceEvent.suppressFor(5.0).detail("PollingInterval", rebalancePollingInterval).detail("Rebalance", "Disk");
-
-		if (*self->lastLimited > 0) {
-			traceEvent.detail("SecondsSinceLastLimited", now() - *self->lastLimited);
-		}
 
 		try {
 			state Future<Void> delayF = delay(rebalancePollingInterval, TaskPriority::DataDistributionLaunch);
@@ -2028,30 +1996,10 @@ ACTOR Future<Void> BgDDValleyFiller(DDQueueData* self, int teamCollectionIndex) 
 						                                  teamCollectionIndex == 0,
 						                                  &traceEvent));
 						moved = _moved;
-						if (moved) {
-							resetCount = 0;
-						} else {
-							resetCount++;
-						}
 					}
 				}
 			}
 
-			if (now() - (*self->lastLimited) < SERVER_KNOBS->BG_DD_SATURATION_DELAY) {
-				rebalancePollingInterval = std::min(SERVER_KNOBS->BG_DD_MAX_WAIT,
-				                                    rebalancePollingInterval * SERVER_KNOBS->BG_DD_INCREASE_RATE);
-			} else {
-				rebalancePollingInterval = std::max(SERVER_KNOBS->BG_DD_MIN_WAIT,
-				                                    rebalancePollingInterval / SERVER_KNOBS->BG_DD_DECREASE_RATE);
-			}
-
-			if (resetCount >= SERVER_KNOBS->DD_REBALANCE_RESET_AMOUNT &&
-			    rebalancePollingInterval < SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL) {
-				rebalancePollingInterval = SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL;
-				resetCount = SERVER_KNOBS->DD_REBALANCE_RESET_AMOUNT;
-			}
-
-			traceEvent.detail("ResetCount", resetCount);
 			tr.reset();
 		} catch (Error& e) {
 			// Log actor_cancelled because it's not legal to suppress an event that's initialized
@@ -2079,7 +2027,6 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
                                          UID distributorId,
                                          int teamSize,
                                          int singleRegionTeamSize,
-                                         double* lastLimited,
                                          const DDEnabledState* ddEnabledState) {
 	state DDQueueData self(distributorId,
 	                       lock,
@@ -2092,8 +2039,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 	                       output,
 	                       input,
 	                       getShardMetrics,
-	                       getTopKMetrics,
-	                       lastLimited);
+	                       getTopKMetrics);
 	state std::set<UID> serversToLaunchFrom;
 	state KeyRange keysToLaunchFrom;
 	state RelocateData launchData;
