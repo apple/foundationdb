@@ -7,6 +7,7 @@ mod ping_request;
 #[path = "../../target/flatbuffers/Void_generated.rs"]
 mod void;
 
+use super::{FlowRequest, FlowResponse};
 use crate::flow::file_identifier::{FileIdentifier, IdentifierType, ParsedFileIdentifier};
 use crate::flow::frame::Frame;
 use crate::flow::uid::UID;
@@ -41,14 +42,15 @@ fn serialize_response(token: UID) -> Result<Frame> {
     Ok(Frame::new_reply(token, payload))
 }
 
-pub async fn handle(
-    parsed_file_identifier: ParsedFileIdentifier,
-    frame: Frame,
-) -> Result<Option<Frame>> {
-    if parsed_file_identifier != PING_FILE_IDENTIFIER {
-        return Err(format!("Expected PingRequest.  Got {:?}", parsed_file_identifier).into());
+pub async fn handle(request: FlowRequest) -> Result<Option<FlowResponse>> {
+    if request.parsed_file_identifier != PING_FILE_IDENTIFIER {
+        return Err(format!(
+            "Expected PingRequest.  Got {:?}",
+            request.parsed_file_identifier
+        )
+        .into());
     }
-    let fake_root = ping_request::root_as_fake_root(&frame.payload[..])?;
+    let fake_root = ping_request::root_as_fake_root(&request.frame.payload[..])?;
     let reply_promise = fake_root.ping_request().unwrap().reply_promise().unwrap();
 
     let uid = reply_promise.uid().unwrap();
@@ -57,5 +59,5 @@ pub async fn handle(
     };
 
     let frame = serialize_response(uid)?;
-    Ok(Some(frame))
+    Ok(Some(FlowResponse { frame }))
 }

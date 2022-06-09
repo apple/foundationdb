@@ -249,9 +249,11 @@ dependencies = [
  "criterion",
  "flatbuffers",
  "flatc-rust",
+ "futures-util",
  "num-derive",
  "num-traits",
  "tokio",
+ "tokio-util",
  "tower",
  "xxhash-rust",
 ]
@@ -885,6 +887,7 @@ dependencies = [
  "futures-sink",
  "pin-project-lite",
  "tokio",
+ "tracing",
 ]
 
 [[package]]

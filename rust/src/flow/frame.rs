@@ -1,12 +1,16 @@
 use super::uid::UID;
 use super::Result;
+use crate::flow::file_identifier::FileIdentifier;
 use bytes::{Buf, BytesMut};
 use num_derive::{FromPrimitive, ToPrimitive};
 use num_traits::{FromPrimitive, ToPrimitive};
 use std::io::Cursor;
+use tokio_util::codec::{Decoder, Encoder};
 use xxhash_rust::xxh3;
 
-use crate::flow::file_identifier::FileIdentifier;
+// TODO:  Figure out what this is set to on the C++ side.
+const MAX_FDB_FRAME_LENGTH: u32 = 1024 * 1024;
+
 #[derive(Debug)]
 pub struct Frame {
     pub token: UID,
@@ -58,7 +62,7 @@ impl ConnectPacket {
             canonical_remote_ip6: [0; 16],
         }
     }
-    pub fn as_bytes(&self) -> Vec<u8> {
+    fn as_bytes(&self) -> Vec<u8> {
         let mut vec = Vec::new();
         let len_sz: usize = 4;
         vec.extend_from_slice(&u32::to_le_bytes(0)); // len
@@ -79,7 +83,7 @@ impl ConnectPacket {
     }
 }
 
-pub fn get_connect_packet(bytes: &mut BytesMut) -> Result<Option<ConnectPacket>> {
+fn get_connect_packet(bytes: &mut BytesMut) -> Result<Option<ConnectPacket>> {
     let cur = Cursor::new(&bytes[..]);
     let start: usize = cur.position().try_into()?;
     let src = &cur.get_ref()[start..];
@@ -92,6 +96,11 @@ pub fn get_connect_packet(bytes: &mut BytesMut) -> Result<Option<ConnectPacket>>
     }
 
     let len = u32::from_le_bytes(src[0..len_sz].try_into()?);
+
+    if len > MAX_FDB_FRAME_LENGTH {
+        return Err("Frame is too long!".into());
+    }
+
     let frame_length = len_sz + len as usize;
     let src = &src[len_sz..(len_sz + (len as usize))];
 
@@ -145,7 +154,7 @@ pub fn get_connect_packet(bytes: &mut BytesMut) -> Result<Option<ConnectPacket>>
     Ok(Some(cp))
 }
 
-pub fn get_frame(bytes: &mut BytesMut) -> Result<Option<Frame>> {
+fn get_frame(bytes: &mut BytesMut) -> Result<Option<Frame>> {
     let cur = Cursor::new(&bytes[..]);
     let start: usize = cur.position().try_into()?;
     let src = &cur.get_ref()[start..];
@@ -157,7 +166,14 @@ pub fn get_frame(bytes: &mut BytesMut) -> Result<Option<Frame>> {
         return Ok(None);
     }
 
-    let len = u32::from_le_bytes(src[0..len_sz].try_into()?) as usize;
+    let len = u32::from_le_bytes(src[0..len_sz].try_into()?);
+
+    if len > MAX_FDB_FRAME_LENGTH {
+        return Err("Frame is too long!".into());
+    }
+
+    let len = len as usize;
+
     let src = &src[len_sz..];
     let frame_length = len_sz + checksum_sz + len;
 
@@ -193,9 +209,14 @@ impl Frame {
 
         let mut vec = Vec::<u8>::with_capacity(len_sz + checksum_sz + uid_sz + self.payload.len());
 
-        vec.extend_from_slice(&u32::to_le_bytes(
-            (self.payload.len() + 2 * 8).try_into().unwrap(),
-        )); // we compute len below
+        let len: u32 = (self.payload.len() + 2 * 8).try_into().unwrap();
+
+        if len > MAX_FDB_FRAME_LENGTH {
+            println!("Attempt to serialize frame longer than FDB_MAX_FRAME_LENGTH");
+            panic!();
+        }
+
+        vec.extend_from_slice(&u32::to_le_bytes(len));
         match self.checksum {
             Some(checksum) => vec.extend_from_slice(&u64::to_le_bytes(checksum)),
             None => (),
@@ -258,5 +279,59 @@ impl Frame {
         };
         frame.checksum = Some(frame.compute_checksum());
         frame
+    }
+}
+
+pub struct FrameDecoder {
+    reading_connect_packet: bool,
+}
+
+impl FrameDecoder {
+    pub fn new() -> FrameDecoder {
+        FrameDecoder {
+            reading_connect_packet: true,
+        }
+    }
+}
+impl Decoder for FrameDecoder {
+    type Item = Frame;
+    type Error = super::Error;
+
+    fn decode(&mut self, src: &mut BytesMut) -> super::Result<Option<Frame>> {
+        if self.reading_connect_packet {
+            if let Some(_) = get_connect_packet(src)? {
+                self.reading_connect_packet = false;
+            } else {
+                return Ok(None);
+            }
+        }
+        get_frame(src)
+    }
+}
+
+// TODO: The FrameEncoder API is single threaded, in that it wants to append multiple
+// frames to a BytesMut.  To use this, response_tx needs to take Frames, not vec<u8>
+
+pub struct FrameEncoder {
+    writing_connect_packet: bool,
+}
+
+impl FrameEncoder {
+    pub fn new() -> FrameEncoder {
+        FrameEncoder {
+            writing_connect_packet: true,
+        }
+    }
+}
+impl Encoder<Frame> for FrameEncoder {
+    type Error = super::Error;
+
+    fn encode(&mut self, frame: Frame, dst: &mut BytesMut) -> super::Result<()> {
+        if self.writing_connect_packet {
+            dst.extend_from_slice(&ConnectPacket::new().as_bytes());
+            self.writing_connect_packet = false;
+        }
+        dst.extend_from_slice(&frame.as_bytes()); // TODO: Remove copies
+        Ok(())
     }
 }

@@ -20,6 +20,8 @@ use crate::flow::frame::Frame;
 use crate::flow::uid::UID;
 use crate::flow::Result;
 
+use super::{FlowRequest, FlowResponse};
+
 const NETWORK_TEST_REQUEST_IDENTIFIER: ParsedFileIdentifier = ParsedFileIdentifier {
     file_identifier: 0x3f4551,
     inner_wrapper: IdentifierType::None,
@@ -62,19 +64,16 @@ fn serialize_error_or_network_test_response(token: UID, response_len: u32) -> Re
     Ok(Frame::new_reply(token, payload))
 }
 
-pub async fn handle(
-    parsed_file_identifier: ParsedFileIdentifier,
-    frame: Frame,
-) -> Result<Option<Frame>> {
-    if parsed_file_identifier != NETWORK_TEST_REQUEST_IDENTIFIER {
+pub async fn handle(request: FlowRequest) -> Result<Option<FlowResponse>> {
+    if request.parsed_file_identifier != NETWORK_TEST_REQUEST_IDENTIFIER {
         return Err(format!(
             "Expected NetworkTestRequest.  Got {:?}",
-            parsed_file_identifier
+            request.parsed_file_identifier
         )
         .into());
     }
     // println!("frame: {:?}", frame.payload);
-    let fake_root = network_test_request::root_as_fake_root(&frame.payload[..])?;
+    let fake_root = network_test_request::root_as_fake_root(&request.frame.payload[..])?;
     let network_test_request = fake_root.network_test_request().unwrap();
     // println!("Got: {:?}", network_test_request);
     let reply_promise = network_test_request.reply_promise().unwrap();
@@ -90,5 +89,5 @@ pub async fn handle(
         uid,
         network_test_request.reply_size().try_into()?,
     )?;
-    Ok(Some(frame))
+    Ok(Some(FlowResponse { frame }))
 }
