@@ -555,7 +555,7 @@ public:
 			TraceEvent(SevError, "ShardedRocksDB").detail("Error", "write to non-exist shard").detail("WriteKey", key);
 			return;
 		}
-		writeBatch->Put(it->value()->physicalShard->cf, toSlice(key), toSlice(value));
+		writeBatch->Put(it.value()->physicalShard->cf, toSlice(key), toSlice(value));
 		dirtyShards->insert(it.value()->physicalShard);
 	}
 
@@ -564,7 +564,7 @@ public:
 		if (!it.value()) {
 			return;
 		}
-		writeBatch->Delete(it->value()->physicalShard->cf, toSlice(key));
+		writeBatch->Delete(it.value()->physicalShard->cf, toSlice(key));
 		dirtyShards->insert(it.value()->physicalShard);
 	}
 
@@ -575,7 +575,7 @@ public:
 			if (it.value() == nullptr) {
 				continue;
 			}
-			writeBatch->DeleteRange(it->value()->physicalShard->cf, toSlice(range.begin), toSlice(range.end));
+			writeBatch->DeleteRange(it.value()->physicalShard->cf, toSlice(range.begin), toSlice(range.end));
 			dirtyShards->insert(it.value()->physicalShard);
 		}
 	}
@@ -1431,11 +1431,11 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				return;
 			}
 
-			a.done.send(Void());
-
 			for (auto shard : *(a.dirtyShards)) {
 				shard->readIterPool->update();
 			}
+
+			a.done.send(Void());
 
 			for (const auto& [id, range] : deletes) {
 				auto cf = columnFamilyMap->find(id);
