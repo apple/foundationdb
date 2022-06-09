@@ -2536,6 +2536,7 @@ struct sort_result_chunks {
 	}
 };
 
+// TODO: doesn't need to be actor
 static int64_t nextHistoryQueryId = 0;
 ACTOR Future<std::vector<std::pair<KeyRange, Future<GranuleFiles>>>> loadHistoryChunks(Reference<BlobWorkerData> bwData,
                                                                                        Version expectedEndVersion,
@@ -2787,8 +2788,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 		fmt::print("BW {0} processing blobGranuleFileRequest for range [{1} - {2}) @ ",
 		           bwData->id.toString(),
 		           req.keyRange.begin.printable(),
-		           req.keyRange.end.printable(),
-		           req.readVersion);
+		           req.keyRange.end.printable());
 		if (req.beginVersion > 0) {
 			fmt::print("{0} - {1}\n", req.beginVersion, req.readVersion);
 		} else {
@@ -2995,7 +2995,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 			for (auto& c : chunks) {
 
 				// Right now we force a collapse if the version range crosses granule boundaries, for simplicity
-				if (granuleBeginVersion <= c.second.snapshotFiles.front().version) {
+				if (granuleBeginVersion > 0 && granuleBeginVersion <= c.second.snapshotFiles.front().version) {
 					TEST(true); // collapsed begin version request because of boundaries
 					didCollapse = true;
 					granuleBeginVersion = 0;

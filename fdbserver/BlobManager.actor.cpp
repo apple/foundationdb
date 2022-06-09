@@ -1633,6 +1633,7 @@ ACTOR Future<Void> persistMergeGranulesDone(Reference<BlobManagerData> bmData,
 				           mergeVersion,
 				           tr->getCommittedVersion());
 			}
+			TEST(true); // Granule merge complete
 			return Void();
 		} catch (Error& e) {
 			if (BM_DEBUG) {
