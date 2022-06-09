@@ -51,7 +51,7 @@ const std::array<Operation, MAX_OP> opTable{
 	        },
 	        [](Future& f, Transaction&, Arguments const&, ByteString&, ByteString&, ByteString& val) {
 	            if (f && !f.error()) {
-		            f.get<future_var::Value>();
+		            f.get<future_var::ValueRef>();
 	            }
 	        } } },
 	    1,
@@ -72,7 +72,7 @@ const std::array<Operation, MAX_OP> opTable{
 	        },
 	        [](Future& f, Transaction&, Arguments const&, ByteString&, ByteString&, ByteString& val) {
 	            if (f && !f.error()) {
-		            f.get<future_var::KeyValueArray>();
+		            f.get<future_var::KeyValueRefArray>();
 	            }
 	        } } },
 	    1,
@@ -84,7 +84,7 @@ const std::array<Operation, MAX_OP> opTable{
 	        },
 	        [](Future& f, Transaction&, Arguments const&, ByteString&, ByteString&, ByteString& val) {
 	            if (f && !f.error()) {
-		            f.get<future_var::Value>();
+		            f.get<future_var::ValueRef>();
 	            }
 	        } } },
 	    1,
@@ -107,7 +107,7 @@ const std::array<Operation, MAX_OP> opTable{
 	        },
 	        [](Future& f, Transaction&, Arguments const&, ByteString&, ByteString&, ByteString& val) {
 	            if (f && !f.error()) {
-		            f.get<future_var::KeyValueArray>();
+		            f.get<future_var::KeyValueRefArray>();
 	            }
 	        } } },
 	    1,
@@ -119,7 +119,7 @@ const std::array<Operation, MAX_OP> opTable{
 	        },
 	        [](Future& f, Transaction&, Arguments const&, ByteString&, ByteString&, ByteString& val) {
 	            if (f && !f.error()) {
-		            f.get<future_var::Value>();
+		            f.get<future_var::ValueRef>();
 	            }
 	        } },
 	      { StepKind::IMM,
@@ -257,7 +257,7 @@ const std::array<Operation, MAX_OP> opTable{
 
 	            user_context.clear();
 
-	            auto out = Result::KeyValueArray{};
+	            auto out = Result::KeyValueRefArray{};
 	            err = r.getKeyValueArrayNothrow(out);
 	            if (!err || err.is(2037 /*blob_granule_not_materialized*/))
 		            return Future();

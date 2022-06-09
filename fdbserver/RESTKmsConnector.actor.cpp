@@ -824,6 +824,11 @@ ACTOR Future<Void> connectorCore_impl(KmsConnectorInterface interf) {
 					byDomainIdReq.reply.sendError(e);
 				}
 			}
+			when(KmsConnBlobMetadataReq req = waitNext(interf.blobMetadataReq.getFuture())) {
+				// TODO: implement!
+				TraceEvent(SevWarn, "RESTKMSBlobMetadataNotImplemented!", interf.id());
+				req.reply.sendError(not_implemented());
+			}
 		}
 	}
 }

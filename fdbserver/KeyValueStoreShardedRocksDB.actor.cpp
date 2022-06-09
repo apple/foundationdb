@@ -286,9 +286,7 @@ rocksdb::Options getOptions() {
 		options.IncreaseParallelism(SERVER_KNOBS->ROCKSDB_BACKGROUND_PARALLELISM);
 	}
 
-	options.statistics = rocksdb::CreateDBStatistics();
-	options.statistics->set_stats_level(rocksdb::kExceptHistogramOrTimers);
-
+	// TODO: enable rocksdb metrics.
 	options.db_log_dir = SERVER_KNOBS->LOG_DIRECTORY;
 	return options;
 }
@@ -614,7 +612,7 @@ public:
 			TraceEvent(SevError, "ShardedRocksDB").detail("Error", "write to non-exist shard").detail("WriteKey", key);
 			return;
 		}
-		writeBatch->Put(it->value()->physicalShard->cf, toSlice(key), toSlice(value));
+		writeBatch->Put(it.value()->physicalShard->cf, toSlice(key), toSlice(value));
 		dirtyShards->insert(it.value()->physicalShard);
 	}
 
@@ -623,7 +621,7 @@ public:
 		if (!it.value()) {
 			return;
 		}
-		writeBatch->Delete(it->value()->physicalShard->cf, toSlice(key));
+		writeBatch->Delete(it.value()->physicalShard->cf, toSlice(key));
 		dirtyShards->insert(it.value()->physicalShard);
 	}
 
@@ -634,7 +632,7 @@ public:
 			if (it.value() == nullptr) {
 				continue;
 			}
-			writeBatch->DeleteRange(it->value()->physicalShard->cf, toSlice(range.begin), toSlice(range.end));
+			writeBatch->DeleteRange(it.value()->physicalShard->cf, toSlice(range.begin), toSlice(range.end));
 			dirtyShards->insert(it.value()->physicalShard);
 		}
 	}
@@ -697,6 +695,7 @@ private:
 	std::string path;
 	rocksdb::DB* db = nullptr;
 	std::unordered_map<std::string, std::shared_ptr<PhysicalShard>> physicalShards;
+	// Stores mapping between cf id and cf handle, used during compaction.
 	std::unordered_map<uint32_t, rocksdb::ColumnFamilyHandle*> columnFamilyMap;
 	std::unique_ptr<rocksdb::WriteBatch> writeBatch;
 	std::unique_ptr<std::set<PhysicalShard*>> dirtyShards;
@@ -1313,11 +1312,14 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 	struct Writer : IThreadPoolReceiver {
 		int threadIndex;
+		std::unordered_map<uint32_t, rocksdb::ColumnFamilyHandle*>* columnFamilyMap;
 		std::shared_ptr<RocksDBMetrics> rocksDBMetrics;
 		std::shared_ptr<rocksdb::RateLimiter> rateLimiter;
 
-		explicit Writer(int threadIndex, std::shared_ptr<RocksDBMetrics> rocksDBMetrics)
-		  : threadIndex(threadIndex), rocksDBMetrics(rocksDBMetrics),
+		explicit Writer(int threadIndex,
+		                std::unordered_map<uint32_t, rocksdb::ColumnFamilyHandle*>* columnFamilyMap,
+		                std::shared_ptr<RocksDBMetrics> rocksDBMetrics)
+		  : threadIndex(threadIndex), columnFamilyMap(columnFamilyMap), rocksDBMetrics(rocksDBMetrics),
 		    rateLimiter(SERVER_KNOBS->ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC > 0
 		                    ? rocksdb::NewGenericRateLimiter(
 		                          SERVER_KNOBS->ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC, // rate_bytes_per_sec
@@ -1373,15 +1375,9 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 		struct AddShardAction : TypedAction<Writer, AddShardAction> {
 			PhysicalShard* shard;
-			std::unordered_map<uint32_t, rocksdb::ColumnFamilyHandle*>* columnFamilyMap;
 			ThreadReturnPromise<Void> done;
 
-			AddShardAction(PhysicalShard* shard,
-			               std::unordered_map<uint32_t, rocksdb::ColumnFamilyHandle*>* columnFamilyMap)
-			  : shard(shard), columnFamilyMap(columnFamilyMap) {
-				ASSERT(shard);
-				ASSERT(columnFamilyMap);
-			}
+			AddShardAction(PhysicalShard* shard) : shard(shard) { ASSERT(shard); }
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
 
@@ -1392,7 +1388,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				return;
 			}
 			ASSERT(a.shard->cf);
-			(*a.columnFamilyMap)[a.shard->cf->GetID()] = a.shard->cf;
+			(*columnFamilyMap)[a.shard->cf->GetID()] = a.shard->cf;
 			a.done.send(Void());
 		}
 
@@ -1407,6 +1403,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		void action(RemoveShardAction& a) {
 			for (auto& shard : a.shards) {
 				shard->deletePending = true;
+				columnFamilyMap->erase(shard->cf->GetID());
 			}
 			a.shards.clear();
 			a.done.send(Void());
@@ -1524,15 +1521,14 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				return;
 			}
 
-			a.done.send(Void());
-
 			for (auto shard : *(a.dirtyShards)) {
 				shard->readIterPool->update();
 			}
 
+			a.done.send(Void());
 			for (const auto& [id, range] : deletes) {
-				auto cf = a.columnFamilyMap->find(id);
-				ASSERT(cf != a.columnFamilyMap->end());
+				auto cf = columnFamilyMap->find(id);
+				ASSERT(cf != columnFamilyMap->end());
 				auto begin = toSlice(range.begin);
 				auto end = toSlice(range.end);
 				ASSERT(a.db->SuggestCompactRange(cf->second, &begin, &end).ok());
@@ -1892,7 +1888,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			writeThread = createGenericThreadPool();
 			readThreads = createGenericThreadPool();
 		}
-		writeThread->addThread(new Writer(0, rocksDBMetrics), "fdb-rocksdb-wr");
+		writeThread->addThread(new Writer(0, shardManager.getColumnFamilyMap(), rocksDBMetrics), "fdb-rocksdb-wr");
 		TraceEvent("RocksDBReadThreads").detail("KnobRocksDBReadParallelism", SERVER_KNOBS->ROCKSDB_READ_PARALLELISM);
 		for (unsigned i = 0; i < SERVER_KNOBS->ROCKSDB_READ_PARALLELISM; ++i) {
 			readThreads->addThread(new Reader(i, rocksDBMetrics), "fdb-rocksdb-re");
@@ -1944,7 +1940,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		if (shard->initialized()) {
 			return Void();
 		}
-		auto a = new Writer::AddShardAction(shard, shardManager.getColumnFamilyMap());
+		auto a = new Writer::AddShardAction(shard);
 		Future<Void> res = a->done.getFuture();
 		writeThread->post(a);
 		return res;

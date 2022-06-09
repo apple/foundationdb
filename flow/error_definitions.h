@@ -258,6 +258,7 @@ ERROR( directory_prefix_in_use, 2265, "Directory layer already has a conflicting
 ERROR( invalid_destination_directory, 2266, "Target directory is invalid" )
 ERROR( cannot_modify_root_directory, 2267, "Root directory cannot be modified" )
 ERROR( invalid_uuid_size, 2268, "UUID is not sixteen bytes");
+ERROR( invalid_versionstamp_size, 2269, "Versionstamp is not exactly twelve bytes");
 
 // 2300 - backup and restore errors
 ERROR( backup_error, 2300, "Backup error")
