@@ -961,12 +961,6 @@ ACTOR Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> 
 			state std::vector<WorkerDetails> workers = wait(getWorkers(dbInfo));
 			for (const auto& worker : workers) {
 				workersMap[worker.interf.address()] = worker.interf;
-				if (worker.interf.secondaryAddress().present()) {
-					TraceEvent(SevDebug, "WorkerSecondAddress")
-					    .detail("SecondAddress", worker.interf.address().toString())
-					    .detail("PrimaryAddress", worker.interf.address().toString());
-					workersMap[worker.interf.secondaryAddress().get()] = worker.interf;
-				}
 			}
 
 			Optional<Value> regionsValue =
@@ -1030,20 +1024,21 @@ ACTOR Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> 
 			ClusterConnectionString ccs(coordinators.get().toString());
 			std::vector<NetworkAddress> coordinatorsAddr = wait(ccs.tryResolveHostnames());
 			std::set<NetworkAddress> coordinatorsAddrSet(coordinatorsAddr.begin(), coordinatorsAddr.end());
-			for (const auto& coordAddr : coordinatorsAddrSet) {
-				if (workersMap.find(coordAddr) == workersMap.end()) {
-					TraceEvent(SevWarn, "MissingCoordWorkerInterface").detail("CorrdAddress", coordAddr);
-					// throw snap_coord_failed();
-					continue;
-				}
-				if (result.count(coordAddr)) {
-					ASSERT(workersMap[coordAddr].id() == result[coordAddr].first.id());
-					result[coordAddr].second.append(",coord");
-				} else {
-					result[coordAddr] = std::make_pair(workersMap[coordAddr], "coord");
+			for (const auto& worker : workers) {
+				// Note : only considers second address for coordinators,
+				// as we use primary addresses from storage and tlog interfaces above
+				NetworkAddress primary = worker.interf.address();
+				Optional<NetworkAddress> secondary = worker.interf.tLog.getEndpoint().addresses.secondaryAddress;
+				if (coordinatorsAddrSet.find(primary) != coordinatorsAddrSet.end() ||
+				    (secondary.present() && (coordinatorsAddrSet.find(secondary.get()) != coordinatorsAddrSet.end()))) {
+					if (result.count(primary)) {
+						ASSERT(workersMap[primary].id() == result[primary].first.id());
+						result[primary].second.append(",coord");
+					} else {
+						result[primary] = std::make_pair(workersMap[primary], "coord");
+					}
 				}
 			}
-			// return result
 			return result;
 		} catch (Error& e) {
 			wait(tr.onError(e));
@@ -1093,6 +1088,7 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 		// snap local storage and tlog nodes
 		state std::map<NetworkAddress, std::pair<WorkerInterface, std::string>> statefulWorkers =
 		    wait(transformErrors(getStatefulWorkers(cx, db, &tlogs, &storageFaultTolerance), snap_storage_failed()));
+
 		TraceEvent("SnapDataDistributor_GotStatefulWorkers")
 		    .detail("SnapPayload", snapReq.snapPayload)
 		    .detail("SnapUID", snapReq.snapUID);
