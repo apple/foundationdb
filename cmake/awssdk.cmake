@@ -10,6 +10,7 @@ if(APPLE OR CLANG OR USE_LIBCXX)
 endif()
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
+  list(APPEND AWSSDK_COMPILER_FLAGS -mno-outline-atomics)
   list(APPEND AWSSDK_LINK_FLAGS -mno-outline-atomics)
 endif()
 
