@@ -2569,42 +2569,6 @@ void getQueuingMetrics(TLogData* self, Reference<LogData> logData, TLogQueuingMe
 	req.reply.send(reply);
 }
 
-ACTOR Future<Void> tLogSnapCreate(TLogSnapRequest snapReq, TLogData* self, Reference<LogData> logData) {
-	if (self->ignorePopUid != snapReq.snapUID.toString()) {
-		snapReq.reply.sendError(operation_failed());
-		return Void();
-	}
-	ExecCmdValueString snapArg(snapReq.snapPayload);
-	try {
-		int err = wait(execHelper(&snapArg, snapReq.snapUID, self->dataFolder, snapReq.role.toString()));
-
-		std::string uidStr = snapReq.snapUID.toString();
-		TraceEvent("ExecTraceTLog")
-		    .detail("Uid", uidStr)
-		    .detail("Status", err)
-		    .detail("Role", snapReq.role)
-		    .detail("Value", self->dataFolder)
-		    .detail("ExecPayload", snapReq.snapPayload)
-		    .detail("PersistentDataVersion", logData->persistentDataVersion)
-		    .detail("PersistentDatadurableVersion", logData->persistentDataDurableVersion)
-		    .detail("QueueCommittedVersion", logData->queueCommittedVersion.get())
-		    .detail("Version", logData->version.get());
-
-		if (err != 0) {
-			throw operation_failed();
-		}
-		snapReq.reply.send(Void());
-	} catch (Error& e) {
-		TraceEvent("TLogExecHelperError").errorUnsuppressed(e);
-		if (e.code() != error_code_operation_cancelled) {
-			snapReq.reply.sendError(e);
-		} else {
-			throw e;
-		}
-	}
-	return Void();
-}
-
 ACTOR Future<Void> tLogEnablePopReq(TLogEnablePopRequest enablePopReq, TLogData* self, Reference<LogData> logData) {
 	if (self->ignorePopUid != enablePopReq.snapUID.toString()) {
 		TraceEvent(SevWarn, "TLogPopDisableEnableUidMismatch")
@@ -2730,9 +2694,6 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 		}
 		when(TLogEnablePopRequest enablePopReq = waitNext(tli.enablePopRequest.getFuture())) {
 			logData->addActor.send(tLogEnablePopReq(enablePopReq, self, logData));
-		}
-		when(TLogSnapRequest snapReq = waitNext(tli.snapRequest.getFuture())) {
-			logData->addActor.send(tLogSnapCreate(snapReq, self, logData));
 		}
 	}
 }
