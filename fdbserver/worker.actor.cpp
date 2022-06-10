@@ -2516,13 +2516,12 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 			when(state WorkerSnapRequest snapReq = waitNext(interf.workerSnapReq.getFuture())) {
 				if (g_network->isSimulated() && lastSnapReq.snapUID == snapReq.snapUID &&
 				    (now() - lastSnapTime) < SERVER_KNOBS->SNAP_CREATE_MAX_TIMEOUT) {
-					TraceEvent(SevDebug, "DuplicateSnapRequest")
+					TraceEvent(SevError, "DuplicateSnapRequests")
 					    .detail("PrevUID", lastSnapReq.snapUID)
 					    .detail("CurrUID", snapReq.snapUID)
 					    .detail("PrevRole", lastSnapReq.role)
 					    .detail("CurrRole", snapReq.role)
 					    .detail("GapTime", now() - lastSnapTime);
-					ASSERT(false);
 				}
 				errorForwarders.add(workerSnapCreate(snapReq, folder, coordFolder));
 				if (g_network->isSimulated()) {
