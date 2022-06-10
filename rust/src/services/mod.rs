@@ -5,12 +5,13 @@ use crate::flow::frame::Frame;
 use crate::flow::uid;
 use crate::flow::Result;
 
-use std::future::Future; //
+use std::future::Future;
 use std::sync::Arc;
-use std::task::{Context, Poll}; // , Poll, Stream};
+use std::net::SocketAddr;
+use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::net::TcpListener;
-use tokio::sync::Semaphore;
+use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::{Semaphore, OwnedSemaphorePermit};
 use tower::Service;
 
 pub mod network_test;
@@ -141,61 +142,76 @@ fn spawn_sender<C: 'static + AsyncWrite + Unpin + Send>(
     });
 }
 
-pub async fn hello_tower(svc: Svc) -> Result<()> {
-    let bind = TcpListener::bind(&format!("127.0.0.1:{}", 6789)).await?;
+pub async fn spawn_connection_handler(svc: Svc, permit: Option<OwnedSemaphorePermit>, stream: TcpStream, addr: SocketAddr) -> Result<()> {
+    let (mut reader, writer) = match connection::new(stream).await {
+        Err(e) => {
+            println!("{}: {:?}", addr, e);
+            match permit {
+                Some(permit) => drop(permit),
+                None => ()
+            };
+            return Err(e);
+        } Ok((reader, writer, connect_packet)) => {
+            // TODO: Check protocol compatibility, create object w/ enough info to allow request routing
+            println!("{}: {:x?}", addr, connect_packet);
+            (reader, writer)
+        }
+    };
+
+    // Bound the number of backlogged messages to a given remote endpoint.  This is
+    // set to the process-wide MAX_REQUESTS / 10 so that a few backpressuring receivers
+    // can't consume all the request slots for this process.
+    let (response_tx, response_rx) = tokio::sync::mpsc::channel::<Frame>(MAX_REQUESTS / 10);
+    spawn_sender(response_rx, writer);
+
+    let mut svc = tower::limit::concurrency::ConcurrencyLimit::new(svc, MAX_REQUESTS);
+    loop {
+        match reader.read_frame().await? {
+            None => {
+                println!("clean shutdown!");
+                break;
+            }
+            Some(frame) => {
+                if frame.payload().len() < 8 {
+                    println!("Frame is too short! {:x?}", frame);
+                    continue;
+                }
+                let file_identifier = frame.peek_file_identifier()?;
+                let request = FlowRequest {
+                    frame,
+                    file_identifier,
+                };
+                let response_tx = response_tx.clone();
+                // poll_ready and call must be invoked atomically
+                // we could read this before reading the next frame to prevent the next, throttled request from consuming
+                // TCP buffers.  However, keeping one extra frame around (above the limit) is unlikely to matter in terms
+                // of memory usage, but it helps interleave network + processing time.
+                futures_util::future::poll_fn(|cx| svc.poll_ready(cx)).await?;
+                let fut = svc.call(request);
+                tokio::spawn(async move {
+                    // the real work happens in await, anyway
+                    let response = fut.await.unwrap();
+                    match response {
+                        Some(response) => response_tx.send(response.frame).await.unwrap(),
+                        None => (),
+                    };
+                });
+            }
+        }
+    }
+    match permit {
+        Some(permit) => drop(permit),
+        None => ()
+    };
+    Ok(())
+}
+pub async fn listen(bind: TcpListener, svc: Svc) -> Result<()> {
     let limit_connections = Arc::new(Semaphore::new(MAX_CONNECTIONS));
 
     loop {
         let permit = limit_connections.clone().acquire_owned().await?;
         let socket = bind.accept().await?;
-        println!("tower got socket from {}", socket.1);
-        let (mut reader, writer) = connection::new(socket.0).await?;
-
-        // Bound the number of backlogged messages to a given remote endpoint.  This is
-        // set to the process-wide MAX_REQUESTS / 10 so that a few backpressuring receivers
-        // can't consume all the request slots for this process.
-        let (response_tx, response_rx) = tokio::sync::mpsc::channel::<Frame>(MAX_REQUESTS / 10);
-        spawn_sender(response_rx, writer);
-        let svc = svc.clone();
-        tokio::spawn(async move {
-            let mut svc = tower::limit::concurrency::ConcurrencyLimit::new(svc, MAX_REQUESTS);
-            loop {
-                match reader.read_frame().await? {
-                    None => {
-                        println!("clean shutdown!");
-                        break;
-                    }
-                    Some(frame) => {
-                        if frame.payload().len() < 8 {
-                            println!("Frame is too short! {:x?}", frame);
-                            continue;
-                        }
-                        let file_identifier = frame.peek_file_identifier()?;
-                        let request = FlowRequest {
-                            frame,
-                            file_identifier,
-                        };
-                        let response_tx = response_tx.clone();
-                        // poll_ready and call must be invoked atomically
-                        // we could read this before reading the next frame to prevent the next, throttled request from consuming
-                        // TCP buffers.  However, keeping one extra frame around (above the limit) is unlikely to matter in terms
-                        // of memory usage, but it helps interleave network + processing time.
-                        futures_util::future::poll_fn(|cx| svc.poll_ready(cx)).await?;
-                        let fut = svc.call(request);
-                        tokio::spawn(async move {
-                            // the real work happens in await, anyway
-                            let response = fut.await.unwrap();
-                            match response {
-                                Some(response) => response_tx.send(response.frame).await.unwrap(),
-                                None => (),
-                            };
-                        });
-                    }
-                }
-            }
-            drop(permit);
-            Ok::<(), crate::flow::Error>(())
-        });
+        tokio::spawn(spawn_connection_handler(svc.clone(), Some(permit), socket.0, socket.1));
     }
 }
 
@@ -203,7 +219,7 @@ async fn handle_connection<C: 'static + AsyncRead + AsyncWrite + Unpin + Send>(
     limit_requests: Arc<Semaphore>,
     conn: C,
 ) -> Result<()> {
-    let (mut reader, writer) = connection::new(conn).await?;
+    let (mut reader, writer, _conn_packet) = connection::new(conn).await?;
 
     // Bound the number of backlogged messages to a given remote endpoint.  This is
     // set to the process-wide MAX_REQUESTS / 10 so that a few backpressuring receivers

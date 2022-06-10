@@ -24,6 +24,7 @@ pub async fn new<C: AsyncRead + AsyncWrite + Unpin + Send>(
 ) -> Result<(
     ConnectionReader<ReadHalf<C>>,
     ConnectionWriter<WriteHalf<C>>,
+    ConnectPacket,
 )> {
     let (reader, writer) = tokio::io::split(c);
     let mut reader = ConnectionReader {
@@ -39,9 +40,7 @@ pub async fn new<C: AsyncRead + AsyncWrite + Unpin + Send>(
 
     writer.write_connnect_packet().await?;
     let conn_packet = reader.read_connect_packet().await?;
-    println!("handshake succeeded: {:x?}", conn_packet);
-    // TODO: Check protocol compatibility, create object w/ enough info to allow request routing
-    Ok((reader, writer))
+    Ok((reader, writer, conn_packet))
 }
 
 impl<W: AsyncWrite + Unpin> ConnectionWriter<W> {
