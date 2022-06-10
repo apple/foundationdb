@@ -87,10 +87,10 @@ void enableBuggify(bool enabled,
                    BuggifyType type); // Currently controls buggification and (randomized) expensive validation
 bool validationIsEnabled(BuggifyType type);
 
-#define BUGGIFY_WITH_PROB(x)                                                                                           \
-	(getSBVar(__FILE__, __LINE__, BuggifyType::General) && deterministicRandom()->random01() < (x))
-#define BUGGIFY BUGGIFY_WITH_PROB(P_BUGGIFIED_SECTION_FIRES[int(BuggifyType::General)])
-#define BUGGIFY_KNOB BUGGIFY_WITH_PROB(P_BUGGIFIED_SECTION_FIRES[int(BuggifyType::Knobs)])
+#define BUGGIFY_IMPL(prob, type) (getSBVar(__FILE__, __LINE__, (type)) && deterministicRandom()->random01() < (prob))
+#define BUGGIFY_WITH_PROB(x) BUGGIFY_IMPL(x, BuggifyType::General)
+#define BUGGIFY BUGGIFY_IMPL(P_BUGGIFIED_SECTION_FIRES[int(BuggifyType::General)], BuggifyType::General)
+#define BUGGIFY_KNOB BUGGIFY_IMPL(P_BUGGIFIED_SECTION_FIRES[int(BuggifyType::Knobs)], BuggifyType::Knobs)
 #define EXPENSIVE_VALIDATION                                                                                           \
 	(validationIsEnabled(BuggifyType::General) && deterministicRandom()->random01() < P_EXPENSIVE_VALIDATION)
 
