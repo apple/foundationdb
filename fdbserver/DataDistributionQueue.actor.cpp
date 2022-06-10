@@ -79,7 +79,7 @@ struct RelocateData {
 	explicit RelocateData(RelocateShard const& rs)
 	  : keys(rs.keys), priority(rs.priority), boundaryPriority(isBoundaryPriority(rs.priority) ? rs.priority : -1),
 	    healthPriority(isHealthPriority(rs.priority) ? rs.priority : -1), reason(rs.reason), startTime(now()),
-	    randomId(deterministicRandom()->randomUniqueID()), wdataMoveId(rs.dataMoveId), orkFactor(0),
+	    randomId(deterministicRandom()->randomUniqueID()), dataMoveId(rs.dataMoveId), workFactor(0),
 	    wantsNewServers(isMountainChopperPriority(rs.priority) || isValleyFillerPriority(rs.priority) ||
 	                    rs.priority == SERVER_KNOBS->PRIORITY_SPLIT_SHARD ||
 	                    rs.priority == SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT),
@@ -1352,7 +1352,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 						// configuration when the remote DC is just brought up.
 						Future<std::pair<Optional<Reference<IDataDistributionTeam>>, bool>> fbestTeam =
 						    brokenPromiseToNever(self->teamCollections[tciIndex].getTeam.getReply(req));
-						state bool bestTeamReady = fbestTeam.isReady();
+						bestTeamReady = fbestTeam.isReady();
 						std::pair<Optional<Reference<IDataDistributionTeam>>, bool> bestTeam = wait(fbestTeam);
 						if (tciIndex > 0 && !bestTeamReady) {
 							// self->shardsAffectedByTeamFailure->moveShard must be called without any waits after

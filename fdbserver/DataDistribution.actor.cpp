@@ -790,7 +790,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			for (; it != initData->dataMoveMap.ranges().end(); ++it) {
 				const DataMoveMetaData& meta = it.value()->meta;
 				if (it.value()->isCancelled() || (it.value()->valid && !CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA)) {
-					RelocateShard rs(meta.range, SERVER_KNOBS->PRIORITY_RECOVER_MOVE);
+					RelocateShard rs(meta.range, SERVER_KNOBS->PRIORITY_RECOVER_MOVE, RelocateReason::OTHER);
 					rs.dataMoveId = meta.id;
 					rs.cancelled = true;
 					output.send(rs);
@@ -799,7 +799,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 					TraceEvent(SevDebug, "DDInitFoundDataMove", self->ddId).detail("DataMove", meta.toString());
 					ASSERT(meta.range == it.range());
 					// TODO: Persist priority in DataMoveMetaData.
-					RelocateShard rs(meta.range, SERVER_KNOBS->PRIORITY_RECOVER_MOVE);
+					RelocateShard rs(meta.range, SERVER_KNOBS->PRIORITY_RECOVER_MOVE, RelocateReason::OTHER);
 					rs.dataMoveId = meta.id;
 					rs.dataMove = it.value();
 					std::vector<ShardsAffectedByTeamFailure::Team> teams;

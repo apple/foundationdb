@@ -195,7 +195,9 @@ struct AddingShard : NonCopyable {
 
 	Phase phase;
 
-	AddingShard(StorageServer* server, KeyRangeRef const& keys);
+	Future<Void> kvReady;
+
+	AddingShard(StorageServer* server, KeyRangeRef const& keys, Future<Void> kvReady);
 
 	// When fetchKeys "partially completes" (splits an adding shard in two), this is used to construct the left half
 	AddingShard(AddingShard* prev, KeyRange const& keys)
@@ -246,8 +248,8 @@ public:
 	static ShardInfo* newReadWrite(KeyRange keys, StorageServer* data) {
 		return new ShardInfo(keys, nullptr, nullptr, data);
 	}
-	static ShardInfo* newAdding(StorageServer* data, KeyRange keys) {
-		return new ShardInfo(keys, std::make_unique<AddingShard>(data, keys), nullptr, nullptr);
+	static ShardInfo* newAdding(StorageServer* data, KeyRange keys, Future<Void> kvReady = Void()) {
+		return new ShardInfo(keys, std::make_unique<AddingShard>(data, keys, kvReady), nullptr, nullptr);
 	}
 	static ShardInfo* addingSplitLeft(KeyRange keys, AddingShard* oldShard) {
 		return new ShardInfo(keys, std::make_unique<AddingShard>(oldShard, keys), nullptr, nullptr);
@@ -255,7 +257,7 @@ public:
 	static ShardInfo* newMoveInShard(StorageServer* data, KeyRange keys) {
 		return new ShardInfo(keys, nullptr, std::make_unique<AddingShard>(data, keys), nullptr);
 	}
-	static ShardInfo* newShard(StorageServer* data, const StorageServerShard& shard) {
+	static ShardInfo* newShard(StorageServer* data, const StorageServerShard& shard, Future<Void> kvReady = Void()) {
 		ShardInfo* res = nullptr;
 		switch (shard.getShardState()) {
 		case StorageServerShard::NotAssigned:
@@ -263,7 +265,7 @@ public:
 			break;
 		case StorageServerShard::MovingIn:
 		case StorageServerShard::ReadWritePending:
-			res = newAdding(data, shard.range);
+			res = newAdding(data, shard.range, kvReady);
 			break;
 		case StorageServerShard::ReadWrite:
 			res = newReadWrite(shard.range, data);
@@ -375,6 +377,18 @@ struct StorageServerDisk {
 	void writeMutation(MutationRef mutation);
 	void writeKeyValue(KeyValueRef kv);
 	void clearRange(KeyRangeRef keys);
+
+	Future<Void> addShard(std::string id) { return storage->addShard(id); }
+
+	void addRange(KeyRangeRef range, std::string id) { storage->addRange(range, id); }
+
+	std::vector<std::string> removeRange(KeyRangeRef range) { return storage->removeRange(range); }
+
+	void persistRangeMapping(KeyRangeRef range, bool isAdd) { storage->persistRangeMapping(range, isAdd); }
+
+	Future<Void> cleanUpShardsIfNeeded(const std::vector<std::string>& shardIds) {
+		return storage->cleanUpShardsIfNeeded(shardIds);
+	};
 
 	Future<Void> getError() { return storage->getError(); }
 	Future<Void> init() { return storage->init(); }
@@ -648,10 +662,33 @@ private:
 	std::unordered_map<KeyRef, Reference<ServerWatchMetadata>> watchMap; // keep track of server watches
 
 public:
+	struct PendingNewShard {
+		PendingNewShard(StorageServer* data, uint64_t shardId, KeyRangeRef range, Promise<Void> kvReady)
+		  : data(data), shardId(std::to_string(shardId)), range(range), kvReady(kvReady) {
+			this->shardReady = data->storage.addShard(std::to_string(shardId));
+		}
+
+		ACTOR Future<Void> addRangeToShard(PendingNewShard* self) {
+			wait(self->shardReady);
+			TraceEvent(SevDebug, "StorageDiskAddedShard", self->data->thisServerID).detail("ShardID", self->shardId);
+			self->data->storage.addRange(self->range, self->shardId);
+			self->kvReady.send(Void());
+			return Void();
+		}
+
+		StorageServer* data;
+		std::string shardId;
+		KeyRange range;
+		Promise<Void> kvReady;
+		Future<Void> shardReady;
+	};
+
 	std::map<Version, std::vector<CheckpointMetaData>> pendingCheckpoints; // Pending checkpoint requests
 	std::unordered_map<UID, CheckpointMetaData> checkpoints; // Existing and deleting checkpoints
 	TenantMap tenantMap;
 	TenantPrefixIndex tenantPrefixIndex;
+	std::map<Version, std::vector<PendingNewShard>> pendingAddRanges; // Pending checkpoint requests
+	std::map<Version, std::vector<KeyRange>> pendingRemoveRanges; // Pending checkpoint requests
 
 	bool sharded;
 
@@ -6197,7 +6234,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 						data->shards[keys.begin]->populateShard(rightShard);
 					} else {
 						shard->server->addShard(ShardInfo::addingSplitLeft(KeyRangeRef(keys.begin, nfk), shard));
-						shard->server->addShard(ShardInfo::newAdding(data, KeyRangeRef(nfk, keys.end)));
+						shard->server->addShard(ShardInfo::newAdding(data, KeyRangeRef(nfk, keys.end), Void()));
 					}
 					shard = data->shards.rangeContaining(keys.begin).value()->adding.get();
 					warningLogger = logFetchKeysWarning(shard);
@@ -6443,8 +6480,9 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 	return Void();
 };
 
-AddingShard::AddingShard(StorageServer* server, KeyRangeRef const& keys)
-  : keys(keys), server(server), transferredVersion(invalidVersion), fetchVersion(invalidVersion), phase(WaitPrevious) {
+AddingShard::AddingShard(StorageServer* server, KeyRangeRef const& keys, Future<Void> kvReady = Void())
+  : keys(keys), server(server), transferredVersion(invalidVersion), fetchVersion(invalidVersion), phase(WaitPrevious),
+    kvReady(kvReady) {
 	fetchClient = fetchKeys(server, this);
 }
 
@@ -7295,7 +7333,7 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 	for (int i = 0; i < ranges.size(); i++) {
 		Reference<ShardInfo> currentShard = ranges[i].value;
 		KeyRangeRef currentRange = static_cast<KeyRangeRef>(ranges[i]);
-		if (!currentShard) {
+		if (!currentShard.isValid()) {
 			ASSERT(currentRange == keys); // there shouldn't be any nulls except for the range being inserted
 		} else if (currentShard->notAssigned()) {
 			ASSERT(nowAssigned); // Adding a new range to the server.
@@ -7342,6 +7380,8 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 	std::vector<KeyRange> removeRanges;
 	std::vector<KeyRange> newEmptyRanges;
 	std::vector<StorageServerShard> updatedShards;
+	Promise<Void> kvReady;
+	int totalAssignedAtVer = 0;
 	for (auto r = vr.begin(); r != vr.end(); ++r) {
 		KeyRangeRef range = keys & r->range();
 		bool dataAvailable = r->value()->isReadable();
@@ -7370,13 +7410,13 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 				removeRanges.push_back(range);
 			}
 			updatedShards.push_back(StorageServerShard::notAssigned(range, cVer));
-			// data->addShard(ShardInfo::newShard(data, updatedShards.back()));
+			data->watches.triggerRange(range.begin, range.end);
+			data->pendingRemoveRanges[cVer].push_back(range);
 			TraceEvent(SevVerbose, "SSUnassignShard", data->thisServerID)
 			    .detail("Range", range)
 			    .detail("NowAssigned", nowAssigned)
 			    .detail("Version", cVer)
 			    .detail("NewShard", updatedShards.back().toString());
-			data->watches.triggerRange(range.begin, range.end);
 		} else if (!dataAvailable) {
 			// SOMEDAY: Avoid restarting adding/transferred shards
 			// bypass fetchkeys; shard is known empty at initial cluster version
@@ -7387,7 +7427,6 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 				changeNewestAvailable.emplace_back(range, latestVersion);
 				updatedShards.push_back(
 				    StorageServerShard(range, version, desiredId, desiredId, StorageServerShard::ReadWrite));
-				// data->addShard(ShardInfo::newShard(data, updatedShards.back()));
 				setAvailableStatus(data, range, true);
 				TraceEvent(SevVerbose, "SSInitialShard", data->thisServerID)
 				    .detail("Range", range)
@@ -7399,11 +7438,12 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 				if (!shard->assigned()) {
 					updatedShards.push_back(
 					    StorageServerShard(range, cVer, desiredId, desiredId, StorageServerShard::MovingIn));
-					// data->addShard(ShardInfo::newShard(data, updatedShards.back()));
+					data->pendingAddRanges[cVer].emplace_back(data, desiredId, range, kvReady);
 					TraceEvent(SevVerbose, "SSAssignShard", data->thisServerID)
 					    .detail("Range", range)
 					    .detail("NowAssigned", nowAssigned)
 					    .detail("Version", cVer)
+					    .detail("TotalAssignedAtVer", ++totalAssignedAtVer)
 					    .detail("NewShard", updatedShards.back().toString());
 				} else {
 					ASSERT(shard->adding != nullptr);
@@ -7414,13 +7454,7 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 						    .detail("TargetShard", desiredId)
 						    .detail("CurrentShard", shard->desiredShardId)
 						    .detail("Version", cVer);
-						// TODO(heliu): Replace this with moveInShard->cancel().
-						// oldMoveInShard->updates->shardRemoved = true;
-						// cancelMoveIns.emplace(oldMoveInShard->meta->id, *oldMoveInShard);
-						// removeRanges.push_back(range); // This clearRange is unnecessary with physical shards.
-						// updatedShards.push_back(
-						//     StorageServerShard(range, cVer, desiredId, desiredId, StorageServerShard::MovingIn));
-						// newMoveInShards.emplace_back(dataMoveId, range, version + 1);
+						// TODO(psm): Replace this with moveInShard->cancel().
 						ASSERT(false);
 					} else {
 						TraceEvent(SevVerbose, "CSKMoveInToSameShard", data->thisServerID)
@@ -7437,7 +7471,6 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 			updatedShards.push_back(StorageServerShard(
 			    range, cVer, data->shards[range.begin]->shardId, desiredId, StorageServerShard::ReadWrite));
 			changeNewestAvailable.emplace_back(range, latestVersion);
-			// data->addShard(ShardInfo::newShard(data, updatedShards.back()));
 			TraceEvent(SevVerbose, "SSAssignShardAlreadyAvailable", data->thisServerID)
 			    .detail("Range", range)
 			    .detail("NowAssigned", nowAssigned)
@@ -7447,7 +7480,7 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 	}
 
 	for (const auto& shard : updatedShards) {
-		data->addShard(ShardInfo::newShard(data, shard));
+		data->addShard(ShardInfo::newShard(data, shard, kvReady.getFuture()));
 		updateStorageShard(data, shard);
 	}
 
@@ -8596,12 +8629,25 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		if (!data->pendingCheckpoints.empty()) {
 			const Version cVer = data->pendingCheckpoints.begin()->first;
 			if (cVer <= desiredVersion) {
-				TraceEvent("CheckpointVersionSatisfied", data->thisServerID)
+				TraceEvent(SevDebug, "CheckpointVersionSatisfied", data->thisServerID)
 				    .detail("DesiredVersion", desiredVersion)
 				    .detail("DurableVersion", data->durableVersion.get())
 				    .detail("CheckPointVersion", cVer);
 				desiredVersion = cVer;
 				requireCheckpoint = true;
+			}
+		}
+
+		state bool checkAddRanges = false;
+		if (!data->pendingAddRanges.empty()) {
+			const Version aVer = data->pendingAddRanges.begin()->first;
+			if (cVer <= desiredVersion) {
+				TraceEvent(SevDebug, "AddRangeVersionSatisfied", data->thisServerID)
+				    .detail("DesiredVersion", desiredVersion)
+				    .detail("DurableVersion", data->durableVersion.get())
+				    .detail("AddRangeVersion", aVer);
+				desiredVersion = aVer - 1;
+				checkAddRanges = true;
 			}
 		}
 
@@ -8917,7 +8963,6 @@ void setAvailableStatus(StorageServer* self, KeyRangeRef keys, bool available) {
 }
 
 void updateStorageShard(StorageServer* data, StorageServerShard shard) {
-	// data->shards[shard.range.begin]->setReadWriteReady(shard.getShardState() == StorageServerShard::ReadWrite);
 	if (shard.getShardState() == StorageServerShard::ReadWritePending) {
 		shard.setShardState(StorageServerShard::ReadWrite);
 	}

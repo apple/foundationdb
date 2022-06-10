@@ -204,7 +204,10 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR Future<Version> writeAndVerify(SSCheckpointRestoreWorkload* self, Database cx, Key key, Optional<Value> value) {
+	ACTOR Future<Version> writeAndVerify(SSCheckpointRestoreWorkload* self,
+	                                     Database cx,
+	                                     Key key,
+	                                     Optional<Value> value) {
 		state Transaction tr(cx);
 		state Version version;
 		loop {
