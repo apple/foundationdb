@@ -279,9 +279,6 @@ def process_traces(
     return_codes,
     cmake_seed,
 ):
-    res = True
-    backtraces = []
-    parser = None
     if log_format == "json":
         parser = JSONParser(
             basedir, testname, None, out, aggregation_policy, symbolicate_backtraces
@@ -448,7 +445,6 @@ def run_simulation_test(basedir, options):
         proc.wait()
         return_codes[command] = proc.returncode
         outfile = os.path.join(test_dir, "traces.{}".format(options.log_format))
-        res = True
         if options.aggregate_traces == "NONE":
             res = process_traces(
                 basedir,

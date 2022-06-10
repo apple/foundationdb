@@ -25,11 +25,11 @@ import os
 import sys
 import time
 import traceback
+import fdb
 
-sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 from python_tests import PythonTest
 
-import fdb
+sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
 fdb.api_version(400)
 
@@ -111,7 +111,7 @@ class RYWBenchmark(PythonTest):
                     break
 
             if len(results) == num_runs:
-                median = sorted(results)[num_runs / 2]
+                median = sorted(results)[int(num_runs / 2)]
                 self.result.add_kpi(RYWBenchmark.tests[test], int(median), "keys/s")
 
     def insert_data(self, tr):

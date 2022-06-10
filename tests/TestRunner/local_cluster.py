@@ -87,7 +87,7 @@ logdir = {logdir}
 {bg_knob_line}
 {tls_config}
 # logsize = 10MiB
-# maxlogssize = 100MiB
+# maxlogsize = 100MiB
 # machine-id =
 # datacenter-id =
 # class =

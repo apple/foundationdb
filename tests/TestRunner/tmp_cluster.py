@@ -101,19 +101,22 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--server-cert-chain-len",
-        help="Length of server TLS certificate chain including root CA. Negative value deliberately generates expired leaf certificate for TLS testing. Only takes effect with --tls-enabled.",
+        help="Length of server TLS certificate chain including root CA. Negative value deliberately generates expired" +
+             " leaf certificate for TLS testing. Only takes effect with --tls-enabled.",
         type=int,
         default=3,
     )
     parser.add_argument(
         "--client-cert-chain-len",
-        help="Length of client TLS certificate chain including root CA. Negative value deliberately generates expired leaf certificate for TLS testing. Only takes effect with --tls-enabled.",
+        help="Length of client TLS certificate chain including root CA. Negative value deliberately generates expired" +
+             " leaf certificate for TLS testing. Only takes effect with --tls-enabled.",
         type=int,
         default=2,
     )
     parser.add_argument(
         "--tls-verify-peer",
-        help="Rules to verify client certificate chain. See https://apple.github.io/foundationdb/tls.html#peer-verification",
+        help="Rules to verify client certificate chain. See "
+             "https://apple.github.io/foundationdb/tls.html#peer-verification",
         type=str,
         default="Check.Valid=1",
     )

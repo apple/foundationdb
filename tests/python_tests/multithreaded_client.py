@@ -1,6 +1,10 @@
 #!/bin/env python2
 
 import argparse
+import sys
+import fdb
+import os
+import random
 
 parser = argparse.ArgumentParser("Run multithreaded client tests")
 
@@ -31,25 +35,26 @@ parser.add_argument(
 )
 args = parser.parse_args()
 
-import sys
+# sample usage (from inside your FDB build output directory):
 
-### sample usage (from inside your FDB build output directory):
 
-## These should pass:
-# ../tests/loopback_cluster/run_cluster.sh . 3 '../tests/python_tests/multithreaded_client.py loopback-cluster-*/fdb.cluster'
-# ../tests/loopback_cluster/run_cluster.sh . 3 '../tests/python_tests/multithreaded_client.py loopback-cluster-*/fdb.cluster --threads 1'
-# ../tests/loopback_cluster/run_cluster.sh . 3 '../tests/python_tests/multithreaded_client.py loopback-cluster-*/fdb.cluster --threads 1 --skip-so-files'
-# ../tests/loopback_cluster/run_cluster.sh . 3 '../tests/python_tests/multithreaded_client.py loopback-cluster-*/fdb.cluster --threads 0'
-# ../tests/loopback_cluster/run_cluster.sh . 3 '../tests/python_tests/multithreaded_client.py loopback-cluster-*/fdb.cluster --threads 0 --skip-so-files'
+# These should pass:
+# ../tests/loopback_cluster/run_cluster.sh . 3 '../tests/python_tests/multithreaded_client.py
+# loopback-cluster-*/fdb.cluster'
+# ../tests/loopback_cluster/run_cluster.sh . 3 '../tests/python_tests/multithreaded_client.py
+# loopback-cluster-*/fdb.cluster --threads 1'
+# ../tests/loopback_cluster/run_cluster.sh . 3 '../tests/python_tests/multithreaded_client.py
+# loopback-cluster-*/fdb.cluster --threads 1 --skip-so-files'
+# ../tests/loopback_cluster/run_cluster.sh . 3 '../tests/python_tests/multithreaded_client.py
+# loopback-cluster-*/fdb.cluster --threads 0'
+# ../tests/loopback_cluster/run_cluster.sh . 3 '../tests/python_tests/multithreaded_client.py
+# loopback-cluster-*/fdb.cluster --threads 0 --skip-so-files'
 
-## This fails (unsupported configuration):
-# ../tests/loopback_cluster/run_cluster.sh . 3 '../tests/python_tests/multithreaded_client.py loopback-cluster-*/fdb.cluster --threads 2 --skip-so-files'
+# This fails (unsupported configuration):
+# ../tests/loopback_cluster/run_cluster.sh . 3 '../tests/python_tests/multithreaded_client.py
+# loopback-cluster-*/fdb.cluster --threads 2 --skip-so-files'
 
 sys.path.append(args.build_dir + "/bindings/python")
-
-import fdb
-import os
-import random
 
 fdb.api_version(630)
 

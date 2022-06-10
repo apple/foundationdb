@@ -522,14 +522,15 @@ class UpgradeTest:
 
             self.exec_upgrade_test()
             test_retcode = 0
-        except Exception:
-            print("Upgrade test failed")
-            print(traceback.format_exc())
-            self.kill_tester_if_alive(workload_thread)
-        finally:
+
             workload_thread.join(5)
             reader_thread.join(5)
             self.kill_tester_if_alive(workload_thread)
+        except Exception:
+            print("Upgrade test failed")
+            print(traceback.format_exc())
+            # self.kill_tester_if_alive(workload_thread)
+        finally:
             if test_retcode == 0:
                 test_retcode = self.tester_retcode
         return test_retcode
