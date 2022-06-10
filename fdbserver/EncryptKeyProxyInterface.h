@@ -20,15 +20,17 @@
 
 #ifndef FDBSERVER_ENCRYPTKEYPROXYINTERFACE_H
 #define FDBSERVER_ENCRYPTKEYPROXYINTERFACE_H
-#include "flow/Arena.h"
-#include "flow/FileIdentifier.h"
-#include "flow/IRandom.h"
-#include "flow/network.h"
 #pragma once
 
+#include "fdbclient/BlobMetadataUtils.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
+#include "flow/Arena.h"
+#include "flow/EncryptUtils.h"
+#include "flow/FileIdentifier.h"
+#include "flow/IRandom.h"
+#include "flow/network.h"
 
 struct EncryptKeyProxyInterface {
 	constexpr static FileIdentifier file_identifier = 1303419;
@@ -38,6 +40,7 @@ struct EncryptKeyProxyInterface {
 	RequestStream<struct HaltEncryptKeyProxyRequest> haltEncryptKeyProxy;
 	RequestStream<struct EKPGetBaseCipherKeysByIdsRequest> getBaseCipherKeysByIds;
 	RequestStream<struct EKPGetLatestBaseCipherKeysRequest> getLatestBaseCipherKeys;
+	RequestStream<struct EKPGetLatestBlobMetadataRequest> getLatestBlobMetadata;
 
 	EncryptKeyProxyInterface() {}
 	explicit EncryptKeyProxyInterface(const struct LocalityData& loc, UID id) : locality(loc), myId(id) {}
@@ -63,6 +66,8 @@ struct EncryptKeyProxyInterface {
 			    waitFailure.getEndpoint().getAdjustedEndpoint(2));
 			getLatestBaseCipherKeys = RequestStream<struct EKPGetLatestBaseCipherKeysRequest>(
 			    waitFailure.getEndpoint().getAdjustedEndpoint(3));
+			getLatestBlobMetadata =
+			    RequestStream<struct EKPGetLatestBlobMetadataRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(4));
 		}
 	}
 
@@ -72,6 +77,7 @@ struct EncryptKeyProxyInterface {
 		streams.push_back(haltEncryptKeyProxy.getReceiver(TaskPriority::DefaultPromiseEndpoint));
 		streams.push_back(getBaseCipherKeysByIds.getReceiver(TaskPriority::Worker));
 		streams.push_back(getLatestBaseCipherKeys.getReceiver(TaskPriority::Worker));
+		streams.push_back(getLatestBlobMetadata.getReceiver(TaskPriority::Worker));
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
@@ -121,19 +127,47 @@ struct EKPGetBaseCipherKeysByIdsReply {
 	}
 };
 
-struct EKPGetBaseCipherKeysByIdsRequest {
-	constexpr static FileIdentifier file_identifier = 4930263;
-	UID requesterID;
-	std::vector<std::pair<uint64_t, int64_t>> baseCipherIds;
-	ReplyPromise<EKPGetBaseCipherKeysByIdsReply> reply;
+struct EKPGetBaseCipherKeysRequestInfo {
+	constexpr static FileIdentifier file_identifier = 2180516;
+	// Encryption cipher domain identifier
+	EncryptCipherDomainId domainId;
+	// Encryption cipher KMS assigned identifier
+	EncryptCipherBaseKeyId baseCipherId;
+	// Encryption domain name - ancillairy metadata information, an encryption key should be uniquely identified by
+	// {domainId, cipherBaseId} tuple
+	EncryptCipherDomainName domainName;
 
-	EKPGetBaseCipherKeysByIdsRequest() : requesterID(deterministicRandom()->randomUniqueID()) {}
-	explicit EKPGetBaseCipherKeysByIdsRequest(UID uid, const std::vector<std::pair<uint64_t, int64_t>>& ids)
-	  : requesterID(uid), baseCipherIds(ids) {}
+	EKPGetBaseCipherKeysRequestInfo()
+	  : domainId(ENCRYPT_INVALID_DOMAIN_ID), baseCipherId(ENCRYPT_INVALID_CIPHER_KEY_ID) {}
+	EKPGetBaseCipherKeysRequestInfo(const EncryptCipherDomainId dId,
+	                                const EncryptCipherBaseKeyId bCId,
+	                                StringRef name,
+	                                Arena& arena)
+	  : domainId(dId), baseCipherId(bCId), domainName(StringRef(arena, name)) {}
+
+	bool operator==(const EKPGetBaseCipherKeysRequestInfo& info) const {
+		return domainId == info.domainId && baseCipherId == info.baseCipherId &&
+		       (domainName.compare(info.domainName) == 0);
+	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, requesterID, baseCipherIds, reply);
+		serializer(ar, domainId, baseCipherId, domainName);
+	}
+};
+
+struct EKPGetBaseCipherKeysByIdsRequest {
+	constexpr static FileIdentifier file_identifier = 4930263;
+	Arena arena;
+	std::vector<EKPGetBaseCipherKeysRequestInfo> baseCipherInfos;
+	Optional<UID> debugId;
+	ReplyPromise<EKPGetBaseCipherKeysByIdsReply> reply;
+
+	EKPGetBaseCipherKeysByIdsRequest() {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, arena, baseCipherInfos, debugId, reply);
 	}
 };
 
@@ -154,19 +188,80 @@ struct EKPGetLatestBaseCipherKeysReply {
 	}
 };
 
-struct EKPGetLatestBaseCipherKeysRequest {
-	constexpr static FileIdentifier file_identifier = 1910123;
-	UID requesterID;
-	std::vector<uint64_t> encryptDomainIds;
-	ReplyPromise<EKPGetLatestBaseCipherKeysReply> reply;
+struct EKPGetLatestCipherKeysRequestInfo {
+	constexpr static FileIdentifier file_identifier = 2180516;
+	// Encryption domain identifier
+	EncryptCipherDomainId domainId;
+	// Encryption domain name - ancillairy metadata information, an encryption key should be uniquely identified by
+	// {domainId, cipherBaseId} tuple
+	EncryptCipherDomainName domainName;
 
-	EKPGetLatestBaseCipherKeysRequest() : requesterID(deterministicRandom()->randomUniqueID()) {}
-	explicit EKPGetLatestBaseCipherKeysRequest(UID uid, const std::vector<uint64_t>& ids)
-	  : requesterID(uid), encryptDomainIds(ids) {}
+	EKPGetLatestCipherKeysRequestInfo() : domainId(ENCRYPT_INVALID_DOMAIN_ID) {}
+	EKPGetLatestCipherKeysRequestInfo(const EncryptCipherDomainId dId, StringRef name, Arena& arena)
+	  : domainId(dId), domainName(StringRef(arena, name)) {}
+
+	bool operator==(const EKPGetLatestCipherKeysRequestInfo& info) const {
+		return domainId == info.domainId && (domainName.compare(info.domainName) == 0);
+	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, requesterID, encryptDomainIds, reply);
+		serializer(ar, domainId, domainName);
+	}
+};
+
+struct EKPGetBaseCipherKeysRequestInfo_Hash {
+	std::size_t operator()(const EKPGetBaseCipherKeysRequestInfo& info) const {
+		boost::hash<std::pair<EncryptCipherDomainId, EncryptCipherBaseKeyId>> hasher;
+		return hasher(std::make_pair(info.domainId, info.baseCipherId));
+	}
+};
+
+struct EKPGetLatestBaseCipherKeysRequest {
+	constexpr static FileIdentifier file_identifier = 1910123;
+	Arena arena;
+	std::vector<EKPGetLatestCipherKeysRequestInfo> encryptDomainInfos;
+	Optional<UID> debugId;
+	ReplyPromise<EKPGetLatestBaseCipherKeysReply> reply;
+
+	EKPGetLatestBaseCipherKeysRequest() {}
+	explicit EKPGetLatestBaseCipherKeysRequest(const std::vector<EKPGetLatestCipherKeysRequestInfo>& infos)
+	  : encryptDomainInfos(infos) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, arena, encryptDomainInfos, debugId, reply);
+	}
+};
+
+// partition and credentials information for a given blob domain
+
+struct EKPGetLatestBlobMetadataReply {
+	constexpr static FileIdentifier file_identifier = 5761581;
+	Standalone<VectorRef<BlobMetadataDetailsRef>> blobMetadataDetails;
+
+	EKPGetLatestBlobMetadataReply() {}
+	explicit EKPGetLatestBlobMetadataReply(const Standalone<VectorRef<BlobMetadataDetailsRef>>& blobMetadataDetails)
+	  : blobMetadataDetails(blobMetadataDetails) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, blobMetadataDetails);
+	}
+};
+
+struct EKPGetLatestBlobMetadataRequest {
+	constexpr static FileIdentifier file_identifier = 3821549;
+	std::vector<BlobMetadataDomainId> domainIds;
+	Optional<UID> debugId;
+	ReplyPromise<EKPGetLatestBlobMetadataReply> reply;
+
+	EKPGetLatestBlobMetadataRequest() {}
+	explicit EKPGetLatestBlobMetadataRequest(const std::vector<BlobMetadataDomainId>& ids) : domainIds(ids) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, domainIds, debugId, reply);
 	}
 };
 

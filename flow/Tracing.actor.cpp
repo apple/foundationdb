@@ -167,14 +167,12 @@ struct UDPTracer : public ITracer {
 	// Serializes span fields as an array into the supplied TraceRequest
 	// buffer.
 	void serialize_span(const Span& span, TraceRequest& request) {
-		uint16_t size = 14;
+		uint16_t size = 12;
 		request.write_byte(size | 0b10010000); // write as array
 		serialize_value(span.context.traceID.first(), request, 0xcf); // trace id
 		serialize_value(span.context.traceID.second(), request, 0xcf); // trace id
 		serialize_value(span.context.spanID, request, 0xcf); // spanid
-		// parent value
-		serialize_value(span.parentContext.traceID.first(), request, 0xcf); // trace id
-		serialize_value(span.parentContext.traceID.second(), request, 0xcf); // trace id
+		// parent span id
 		serialize_value(span.parentContext.spanID, request, 0xcf); // spanId
 		// Payload
 		serialize_string(span.location.name.toString(), request);
@@ -477,10 +475,6 @@ TEST_CASE("/flow/Tracing/CreateOTELSpan") {
 	Span notSampled("foo"_loc);
 	ASSERT(!notSampled.context.isSampled());
 
-	// Force Sampling
-	// Span sampled("foo"_loc, []() { return 1.0; });
-	// ASSERT(sampled.context.isSampled());
-
 	// Ensure child traceID matches parent, when parent is sampled.
 	Span childTraceIDMatchesParent("foo"_loc, SpanContext(UID(100, 101), 200, TraceFlags::sampled));
 	ASSERT(childTraceIDMatchesParent.context.traceID.first() ==
@@ -493,11 +487,6 @@ TEST_CASE("/flow/Tracing/CreateOTELSpan") {
 	Span parentNotSampled("foo"_loc, SpanContext(UID(1, 1), 1, TraceFlags::unsampled));
 	ASSERT(!parentNotSampled.context.isSampled());
 
-	// When the parent isn't sampled AND it has zero values for traceID and spanID this means
-	// we should defer to the child as the new root of the trace as there was no actual parent.
-	// If the child was sampled we should send the child trace with a null parent.
-	// Span noParent("foo"_loc, SpanContext(UID(0, 0), 0, TraceFlags::unsampled));
-	// ASSERT(noParent.context.isSampled());
 	return Void();
 };
 
@@ -669,7 +658,7 @@ TEST_CASE("/flow/Tracing/FastUDPMessagePackEncoding") {
 	auto tracer = FastUDPTracer();
 	tracer.serialize_span(span1, request);
 	auto data = request.buffer.get();
-	ASSERT(data[0] == 0b10011110); // Default array size.
+	ASSERT(data[0] == 0b10011100); // Default array size.
 	request.reset();
 
 	// Test - constructor OTELSpan(const Location& location, const SpanContext parent, const SpanContext& link)
@@ -679,7 +668,7 @@ TEST_CASE("/flow/Tracing/FastUDPMessagePackEncoding") {
 	           { SpanContext(UID(200, 201), 2, TraceFlags::sampled) });
 	tracer.serialize_span(span2, request);
 	data = request.buffer.get();
-	ASSERT(data[0] == 0b10011110); // 14 element array.
+	ASSERT(data[0] == 0b10011100); // 12 element array.
 	// Verify the Parent Trace ID overwrites this spans Trace ID
 	ASSERT(data[1] == 0xcf);
 	ASSERT(swapUint64BE(&data[2]) == 100);
@@ -687,37 +676,33 @@ TEST_CASE("/flow/Tracing/FastUDPMessagePackEncoding") {
 	ASSERT(swapUint64BE(&data[11]) == 101);
 	ASSERT(data[19] == 0xcf);
 	// We don't care about the next 8 bytes, they are the ID for the span itself and will be random.
-	// Parent TraceID and Parent SpanID.
+	// Parent SpanID.
 	ASSERT(data[28] == 0xcf);
-	ASSERT(swapUint64BE(&data[29]) == 100);
-	ASSERT(data[37] == 0xcf);
-	ASSERT(swapUint64BE(&data[38]) == 101);
-	ASSERT(data[46] == 0xcf);
-	ASSERT(swapUint64BE(&data[47]) == 1);
+	ASSERT(swapUint64BE(&data[29]) == 1);
 	// Read and verify span name
-	ASSERT(readMPString(&data[55]) == "encoded_span");
+	ASSERT(readMPString(&data[37]) == "encoded_span");
 	// Verify begin/end is encoded, we don't care about the values
-	ASSERT(data[68] == 0xcb);
-	ASSERT(data[77] == 0xcb);
+	ASSERT(data[50] == 0xcb);
+	ASSERT(data[59] == 0xcb);
 	// SpanKind
-	ASSERT(data[86] == 0xcc);
-	ASSERT(data[87] == static_cast<uint8_t>(SpanKind::SERVER));
+	ASSERT(data[68] == 0xcc);
+	ASSERT(data[69] == static_cast<uint8_t>(SpanKind::SERVER));
 	// Status
-	ASSERT(data[88] == 0xcc);
-	ASSERT(data[89] == static_cast<uint8_t>(SpanStatus::OK));
+	ASSERT(data[70] == 0xcc);
+	ASSERT(data[71] == static_cast<uint8_t>(SpanStatus::OK));
 	// Linked SpanContext
-	ASSERT(data[90] == 0b10010001);
+	ASSERT(data[72] == 0b10010001);
+	ASSERT(data[73] == 0xcf);
+	ASSERT(swapUint64BE(&data[74]) == 200);
+	ASSERT(data[82] == 0xcf);
+	ASSERT(swapUint64BE(&data[83]) == 201);
 	ASSERT(data[91] == 0xcf);
-	ASSERT(swapUint64BE(&data[92]) == 200);
-	ASSERT(data[100] == 0xcf);
-	ASSERT(swapUint64BE(&data[101]) == 201);
-	ASSERT(data[109] == 0xcf);
-	ASSERT(swapUint64BE(&data[110]) == 2);
+	ASSERT(swapUint64BE(&data[92]) == 2);
 	// Events
-	ASSERT(data[118] == 0b10010000); // empty
+	ASSERT(data[100] == 0b10010000); // empty
 	// Attributes
-	ASSERT(data[119] == 0b10000001); // single k/v pair
-	ASSERT(data[120] == 0b10100111); // length of key string "address" == 7
+	ASSERT(data[101] == 0b10000001); // single k/v pair
+	ASSERT(data[102] == 0b10100111); // length of key string "address" == 7
 
 	request.reset();
 
@@ -731,41 +716,41 @@ TEST_CASE("/flow/Tracing/FastUDPMessagePackEncoding") {
 	    .addEvent(StringRef(s3Arena, LiteralStringRef("event1")), 100.101, attrs);
 	tracer.serialize_span(span3, request);
 	data = request.buffer.get();
-	ASSERT(data[0] == 0b10011110); // 14 element array.
-	// We don't care about the next 54 bytes as there is no parent and a randomly assigned Trace and SpanID
+	ASSERT(data[0] == 0b10011100); // 12 element array.
+	// We don't care about the next 36 bytes as there is no parent and a randomly assigned Trace and SpanID
 	// Read and verify span name
-	ASSERT(readMPString(&data[55]) == "encoded_span_3");
+	ASSERT(readMPString(&data[37]) == "encoded_span_3");
 	// Verify begin/end is encoded, we don't care about the values
-	ASSERT(data[70] == 0xcb);
-	ASSERT(data[79] == 0xcb);
+	ASSERT(data[52] == 0xcb);
+	ASSERT(data[61] == 0xcb);
 	// SpanKind
-	ASSERT(data[88] == 0xcc);
-	ASSERT(data[89] == static_cast<uint8_t>(SpanKind::SERVER));
+	ASSERT(data[70] == 0xcc);
+	ASSERT(data[71] == static_cast<uint8_t>(SpanKind::SERVER));
 	// Status
-	ASSERT(data[90] == 0xcc);
-	ASSERT(data[91] == static_cast<uint8_t>(SpanStatus::OK));
+	ASSERT(data[72] == 0xcc);
+	ASSERT(data[73] == static_cast<uint8_t>(SpanStatus::OK));
 	// Linked SpanContext
-	ASSERT(data[92] == 0b10010001);
+	ASSERT(data[74] == 0b10010001);
+	ASSERT(data[75] == 0xcf);
+	ASSERT(swapUint64BE(&data[76]) == 300);
+	ASSERT(data[84] == 0xcf);
+	ASSERT(swapUint64BE(&data[85]) == 301);
 	ASSERT(data[93] == 0xcf);
-	ASSERT(swapUint64BE(&data[94]) == 300);
-	ASSERT(data[102] == 0xcf);
-	ASSERT(swapUint64BE(&data[103]) == 301);
-	ASSERT(data[111] == 0xcf);
-	ASSERT(swapUint64BE(&data[112]) == 400);
+	ASSERT(swapUint64BE(&data[94]) == 400);
 	// Events
-	ASSERT(data[120] == 0b10010001); // empty
-	ASSERT(readMPString(&data[121]) == "event1");
-	ASSERT(data[128] == 0xcb);
-	ASSERT(swapDoubleBE(&data[129]) == 100.101);
+	ASSERT(data[102] == 0b10010001); // empty
+	ASSERT(readMPString(&data[103]) == "event1");
+	ASSERT(data[110] == 0xcb);
+	ASSERT(swapDoubleBE(&data[111]) == 100.101);
 	// Events Attributes
-	ASSERT(data[137] == 0b10000001); // single k/v pair
-	ASSERT(readMPString(&data[138]) == "foo");
-	ASSERT(readMPString(&data[142]) == "bar");
+	ASSERT(data[119] == 0b10000001); // single k/v pair
+	ASSERT(readMPString(&data[120]) == "foo");
+	ASSERT(readMPString(&data[124]) == "bar");
 	// Attributes
-	ASSERT(data[146] == 0b10000010); // two k/v pair
+	ASSERT(data[128] == 0b10000010); // two k/v pair
 	// Reconstruct map from MessagePack wire format data and verify.
 	std::unordered_map<std::string, std::string> attributes;
-	auto index = 147;
+	auto index = 129;
 
 	auto firstKey = readMPString(&data[index]);
 	index += firstKey.length() + 1; // +1 for control byte
@@ -797,11 +782,11 @@ TEST_CASE("/flow/Tracing/FastUDPMessagePackEncoding") {
 	span4.location = location;
 	tracer.serialize_span(span4, request);
 	data = request.buffer.get();
-	ASSERT(data[0] == 0b10011110); // 14 element array.
-	// We don't care about the next 54 bytes as there is no parent and a randomly assigned Trace and SpanID
+	ASSERT(data[0] == 0b10011100); // 12 element array.
+	// We don't care about the next 36 bytes as there is no parent and a randomly assigned Trace and SpanID
 	// Read and verify span name
-	ASSERT(data[55] == 0xda);
-	ASSERT(readMPString(&data[55]) == longString);
+	ASSERT(data[37] == 0xda);
+	ASSERT(readMPString(&data[37]) == longString);
 	return Void();
 };
 #endif

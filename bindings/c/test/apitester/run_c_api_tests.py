@@ -30,6 +30,8 @@ import glob
 import random
 import string
 
+TESTER_STATS_INTERVAL_SEC = 5
+
 
 def random_string(len):
     return ''.join(random.choice(string.ascii_letters + string.digits) for i in range(len))
@@ -66,7 +68,8 @@ def dump_client_logs(log_dir):
 def run_tester(args, test_file):
     cmd = [args.tester_binary,
            "--cluster-file", args.cluster_file,
-           "--test-file", test_file]
+           "--test-file", test_file,
+           "--stats-interval", str(TESTER_STATS_INTERVAL_SEC*1000)]
     if args.external_client_library is not None:
         cmd += ["--external-client-library", args.external_client_library]
     if args.tmp_dir is not None:
@@ -80,6 +83,15 @@ def run_tester(args, test_file):
     if args.blob_granule_local_file_path is not None:
         cmd += ["--blob-granule-local-file-path",
                 args.blob_granule_local_file_path]
+
+    if args.tls_ca_file is not None:
+        cmd += ["--tls-ca-file", args.tls_ca_file]
+
+    if args.tls_key_file is not None:
+        cmd += ["--tls-key-file", args.tls_key_file]
+
+    if args.tls_cert_file is not None:
+        cmd += ["--tls-cert-file", args.tls_cert_file]
 
     get_logger().info('\nRunning tester \'%s\'...' % ' '.join(cmd))
     proc = Popen(cmd, stdout=sys.stdout, stderr=sys.stderr)
@@ -146,6 +158,12 @@ def parse_args(argv):
                         help='The directory for storing temporary files (default: None)')
     parser.add_argument('--blob-granule-local-file-path', type=str, default=None,
                         help='Enable blob granule tests if set, value is path to local blob granule files')
+    parser.add_argument('--tls-ca-file', type=str, default=None,
+                        help='Path to client\'s TLS CA file: i.e. certificate of CA that signed the server certificate')
+    parser.add_argument('--tls-cert-file', type=str, default=None,
+                        help='Path to client\'s TLS certificate file')
+    parser.add_argument('--tls-key-file', type=str, default=None,
+                        help='Path to client\'s TLS private key file')
 
     return parser.parse_args(argv)
 

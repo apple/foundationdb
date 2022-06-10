@@ -298,6 +298,7 @@ ACTOR Future<Void> newTLogServers(Reference<ClusterRecoveryData> self,
 		                                                                 self->clusterId,
 		                                                                 self->configuration,
 		                                                                 self->cstate.myDBState.recoveryCount + 1,
+		                                                                 self->recoveryTransactionVersion,
 		                                                                 self->primaryLocality,
 		                                                                 self->dcId_locality[remoteDcId],
 		                                                                 self->allTags,
@@ -311,6 +312,7 @@ ACTOR Future<Void> newTLogServers(Reference<ClusterRecoveryData> self,
 		                                                                 self->clusterId,
 		                                                                 self->configuration,
 		                                                                 self->cstate.myDBState.recoveryCount + 1,
+		                                                                 self->recoveryTransactionVersion,
 		                                                                 self->primaryLocality,
 		                                                                 tagLocalitySpecial,
 		                                                                 self->allTags,
@@ -1466,7 +1468,6 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	                                   std::addressof(self->forceRecovery));
 
 	DBCoreState newState = self->cstate.myDBState;
-	newState.recoveryCount++;
 	newState.recoveryCount++;
 	if (self->cstate.prevDBState.newestProtocolVersion.isInvalid() ||
 	    self->cstate.prevDBState.newestProtocolVersion < currentProtocolVersion) {

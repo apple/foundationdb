@@ -160,16 +160,17 @@ ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
 		}
 	}
 	state int result = 0;
-	child = g_pSimulator->newProcess("remote flow process",
-	                                 self->address.ip,
-	                                 0,
-	                                 self->address.isTLS(),
-	                                 self->addresses.secondaryAddress.present() ? 2 : 1,
-	                                 self->locality,
-	                                 ProcessClass(ProcessClass::UnsetClass, ProcessClass::AutoSource),
-	                                 self->dataFolder,
-	                                 self->coordinationFolder, // do we need to customize this coordination folder path?
-	                                 self->protocolVersion);
+	child = g_pSimulator->newProcess(
+	    "remote flow process",
+	    self->address.ip,
+	    0,
+	    self->address.isTLS(),
+	    self->addresses.secondaryAddress.present() ? 2 : 1,
+	    self->locality,
+	    ProcessClass(ProcessClass::UnsetClass, ProcessClass::AutoSource),
+	    self->dataFolder.c_str(),
+	    self->coordinationFolder.c_str(), // do we need to customize this coordination folder path?
+	    self->protocolVersion);
 	wait(g_pSimulator->onProcess(child));
 	state Future<ISimulator::KillType> onShutdown = child->onShutdown();
 	state Future<ISimulator::KillType> parentShutdown = self->onShutdown();
@@ -268,7 +269,7 @@ static auto fork_child(const std::string& path, std::vector<char*>& paramList) {
 static void setupTraceWithOutput(TraceEvent& event, size_t bytesRead, char* outputBuffer) {
 	// get some errors printed for spawned process
 	std::cout << "Output bytesRead: " << bytesRead << std::endl;
-	std::cout << "output buffer: " << std::string(outputBuffer) << std::endl;
+	std::cout << "output buffer: " << std::string_view(outputBuffer, bytesRead) << std::endl;
 	if (bytesRead == 0)
 		return;
 	ASSERT(bytesRead <= SERVER_KNOBS->MAX_FORKED_PROCESS_OUTPUT);

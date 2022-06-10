@@ -1840,16 +1840,18 @@ ACTOR Future<Void> pullAsyncData(StorageCacheData* data) {
 	++data->counters.updateBatches;
 
 	loop {
-		loop {
-			choose {
-				when(wait(cursor ? cursor->getMore(TaskPriority::TLogCommit) : Never())) { break; }
-				when(wait(dbInfoChange)) {
+		loop choose {
+			when(wait(cursor ? cursor->getMore(TaskPriority::TLogCommit) : Never())) { break; }
+			when(wait(dbInfoChange)) {
+				dbInfoChange = data->db->onChange();
+				if (data->db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
+					data->logSystem = ILogSystem::fromServerDBInfo(data->thisServerID, data->db->get());
 					if (data->logSystem) {
 						cursor = data->logSystem->peekSingle(
 						    data->thisServerID, data->peekVersion, cacheTag, std::vector<std::pair<Version, Tag>>());
-					} else
+					} else {
 						cursor = Reference<ILogSystem::IPeekCursor>();
-					dbInfoChange = data->db->onChange();
+					}
 				}
 			}
 		}
@@ -2178,7 +2180,6 @@ ACTOR Future<Void> storageCacheServer(StorageServerInterface ssi,
                                       Reference<AsyncVar<ServerDBInfo> const> db) {
 	state StorageCacheData self(ssi.id(), id, db);
 	state ActorCollection actors(false);
-	state Future<Void> dbInfoChange = Void();
 	state StorageCacheUpdater updater(self.lastVersionWithData);
 	self.updater = &updater;
 
@@ -2210,10 +2211,6 @@ ACTOR Future<Void> storageCacheServer(StorageServerInterface ssi,
 	loop {
 		++self.counters.loops;
 		choose {
-			when(wait(dbInfoChange)) {
-				dbInfoChange = db->onChange();
-				self.logSystem = ILogSystem::fromServerDBInfo(self.thisServerID, self.db->get());
-			}
 			when(GetValueRequest req = waitNext(ssi.getValue.getFuture())) {
 				// TODO do we need to add throttling for cache servers? Probably not
 				// actors.add(self->readGuard(req , getValueQ));

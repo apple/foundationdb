@@ -19,6 +19,8 @@ set(FLOW_SRCS
   Error.cpp
   Error.h
   EventTypes.actor.h
+  EncryptUtils.h
+  EncryptUtils.cpp
   FastAlloc.cpp
   FastAlloc.h
   FastRef.h
@@ -46,14 +48,19 @@ set(FLOW_SRCS
   Knobs.cpp
   Knobs.h
   MetricSample.h
+  MkCert.h
+  MkCert.cpp
   Net2.actor.cpp
   Net2Packet.cpp
   Net2Packet.h
+  PKey.h
+  PKey.cpp
   Platform.actor.cpp
   Platform.actor.h
   Platform.h
   Profiler.actor.cpp
   Profiler.h
+  ScopeExit.h
   SendBufferIterator.h
   SignalSafeUnwind.cpp
   SignalSafeUnwind.h
@@ -191,3 +198,16 @@ if(APPLE)
   target_link_libraries(flow PRIVATE ${IO_KIT} ${CORE_FOUNDATION})
   target_link_libraries(flow_sampling PRIVATE ${IO_KIT} ${CORE_FOUNDATION})
 endif()
+
+add_executable(mkcert MkCertCli.cpp)
+target_link_libraries(mkcert PUBLIC fmt::fmt flow)
+
+add_executable(mtls_unittest TLSTest.cpp)
+target_link_libraries(mtls_unittest PUBLIC fmt::fmt flow)
+if(USE_SANITIZER)
+  target_link_libraries(mtls_unittest PUBLIC boost_asan)
+else()
+  target_link_libraries(mtls_unittest PUBLIC boost_target)
+endif()
+add_test(NAME mutual_tls_unittest
+         COMMAND $<TARGET_FILE:mtls_unittest>)

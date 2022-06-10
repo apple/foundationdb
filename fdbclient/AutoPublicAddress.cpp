@@ -31,7 +31,7 @@
 // Determine public IP address by calling the first available coordinator.
 // If fail connecting all coordinators, throw bind_failed().
 IPAddress determinePublicIPAutomatically(ClusterConnectionString& ccs) {
-	int size = ccs.coordinators().size() + ccs.hostnames.size();
+	int size = ccs.coords.size() + ccs.hostnames.size();
 	int index = 0;
 	loop {
 		try {
@@ -42,10 +42,10 @@ IPAddress determinePublicIPAutomatically(ClusterConnectionString& ccs) {
 
 			NetworkAddress coordAddr;
 			// Try coords first, because they don't need to be resolved.
-			if (index < ccs.coordinators().size()) {
-				coordAddr = ccs.coordinators()[index];
+			if (index < ccs.coords.size()) {
+				coordAddr = ccs.coords[index];
 			} else {
-				Hostname& h = ccs.hostnames[index - ccs.coordinators().size()];
+				Hostname& h = ccs.hostnames[index - ccs.coords.size()];
 				Optional<NetworkAddress> resolvedAddr = h.resolveBlocking();
 				if (!resolvedAddr.present()) {
 					throw lookup_failed();

@@ -262,7 +262,7 @@ void StorageWiggler::updateMetadata(const UID& serverId, const StorageMetadataTy
 	//	std::cout << "size: " << pq_handles.size() << " update " << serverId.toString()
 	//	          << " DC: " << teamCollection->isPrimary() << std::endl;
 	auto handle = pq_handles.at(serverId);
-	if ((*handle).first.createdTime == metadata.createdTime) {
+	if ((*handle).first == metadata) {
 		return;
 	}
 	wiggle_pq.update(handle, std::make_pair(metadata, serverId));
@@ -492,34 +492,10 @@ struct DataDistributorData : NonCopyable, ReferenceCounted<DataDistributorData> 
 	    totalDataInFlightRemoteEventHolder(makeReference<EventCacheHolder>("TotalDataInFlightRemote")) {}
 };
 
-ACTOR Future<Void> monitorBatchLimitedTime(Reference<AsyncVar<ServerDBInfo> const> db, double* lastLimited) {
-	loop {
-		wait(delay(SERVER_KNOBS->METRIC_UPDATE_RATE));
-
-		state Reference<GrvProxyInfo> grvProxies(new GrvProxyInfo(db->get().client.grvProxies));
-
-		choose {
-			when(wait(db->onChange())) {}
-			when(GetHealthMetricsReply reply =
-			         wait(grvProxies->size() ? basicLoadBalance(grvProxies,
-			                                                    &GrvProxyInterface::getHealthMetrics,
-			                                                    GetHealthMetricsRequest(false))
-			                                 : Never())) {
-				if (reply.healthMetrics.batchLimited) {
-					*lastLimited = now();
-				}
-			}
-		}
-	}
-}
-
 // Runs the data distribution algorithm for FDB, including the DD Queue, DD tracker, and DD team collection
 ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
                                     PromiseStream<GetMetricsListRequest> getShardMetricsList,
                                     const DDEnabledState* ddEnabledState) {
-	state double lastLimited = 0;
-	self->addActor.send(monitorBatchLimitedTime(self->dbInfo, &lastLimited));
-
 	state Database cx = openDBOnServer(self->dbInfo, TaskPriority::DataDistributionLaunch, LockAware::True);
 	cx->locationCacheSize = SERVER_KNOBS->DD_LOCATION_CACHE_SIZE;
 
@@ -669,6 +645,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			state PromiseStream<Promise<int64_t>> getAverageShardBytes;
 			state PromiseStream<Promise<int>> getUnhealthyRelocationCount;
 			state PromiseStream<GetMetricsRequest> getShardMetrics;
+			state PromiseStream<GetTopKMetricsRequest> getTopKShardMetrics;
 			state Reference<AsyncVar<bool>> processingUnhealthy(new AsyncVar<bool>(false));
 			state Reference<AsyncVar<bool>> processingWiggle(new AsyncVar<bool>(false));
 			state Promise<Void> readyToStart;
@@ -701,8 +678,10 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 					if (!unhealthy && configuration.usableRegions > 1) {
 						unhealthy = initData->shards[shard].remoteSrc.size() != configuration.storageTeamSize;
 					}
-					output.send(RelocateShard(
-					    keys, unhealthy ? SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY : SERVER_KNOBS->PRIORITY_RECOVER_MOVE));
+					output.send(RelocateShard(keys,
+					                          unhealthy ? SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY
+					                                    : SERVER_KNOBS->PRIORITY_RECOVER_MOVE,
+					                          RelocateReason::OTHER));
 				}
 				wait(yield(TaskPriority::DataDistribution));
 			}
@@ -733,6 +712,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			                                                            output,
 			                                                            shardsAffectedByTeamFailure,
 			                                                            getShardMetrics,
+			                                                            getTopKShardMetrics.getFuture(),
 			                                                            getShardMetricsList,
 			                                                            getAverageShardBytes.getFuture(),
 			                                                            readyToStart,
@@ -747,6 +727,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			                                                          output,
 			                                                          input.getFuture(),
 			                                                          getShardMetrics,
+			                                                          getTopKShardMetrics,
 			                                                          processingUnhealthy,
 			                                                          processingWiggle,
 			                                                          tcis,
@@ -757,7 +738,6 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			                                                          self->ddId,
 			                                                          storageTeamSize,
 			                                                          configuration.storageTeamSize,
-			                                                          &lastLimited,
 			                                                          ddEnabledState),
 			                                    "DDQueue",
 			                                    self->ddId,
@@ -1443,5 +1423,22 @@ TEST_CASE("/DataDistribution/WaitForMost") {
 			ASSERT_EQ(e.code(), error_code_operation_failed);
 		}
 	}
+	return Void();
+}
+
+TEST_CASE("/DataDistributor/StorageWiggler/Order") {
+	StorageWiggler wiggler(nullptr);
+	wiggler.addServer(UID(1, 0), StorageMetadataType(1, KeyValueStoreType::SSD_BTREE_V2));
+	wiggler.addServer(UID(2, 0), StorageMetadataType(2, KeyValueStoreType::MEMORY, true));
+	wiggler.addServer(UID(3, 0), StorageMetadataType(3, KeyValueStoreType::SSD_ROCKSDB_V1, true));
+	wiggler.addServer(UID(4, 0), StorageMetadataType(4, KeyValueStoreType::SSD_BTREE_V2));
+
+	std::vector<UID> correctOrder{ UID(2, 0), UID(3, 0), UID(1, 0), UID(4, 0) };
+	for (int i = 0; i < correctOrder.size(); ++i) {
+		auto id = wiggler.getNextServerId();
+		std::cout << "Get " << id.get().shortString() << "\n";
+		ASSERT(id == correctOrder[i]);
+	}
+	ASSERT(!wiggler.getNextServerId().present());
 	return Void();
 }

@@ -104,7 +104,7 @@ ServerCoordinators::ServerCoordinators(Reference<IClusterConnectionRecord> ccr) 
 		stateServers.emplace_back(h);
 		configServers.emplace_back(h);
 	}
-	for (auto s : cs.coordinators()) {
+	for (auto s : cs.coords) {
 		leaderElectionServers.emplace_back(s);
 		stateServers.emplace_back(s);
 		configServers.emplace_back(s);

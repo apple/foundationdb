@@ -518,12 +518,14 @@ class Server(BaseHTTPRequestHandler):
                 return
             if self.path.startswith("/check_hash/"):
                 try:
-                    self.send_text(check_hash(os.path.basename(self.path)), add_newline=False)
+                    self.send_text(
+                        check_hash(os.path.relpath(self.path, "/check_hash")), add_newline=False
+                    )
                 except FileNotFoundError:
                     self.send_error(404, "Path not found")
                     self.end_headers()
             if self.path.startswith("/is_present/"):
-                if is_present(os.path.basename(self.path))):
+                if is_present(os.path.relpath(self.path, "/is_present")):
                     self.send_text("OK")
                 else:
                     self.send_error(404, "Path not found")

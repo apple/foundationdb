@@ -82,10 +82,11 @@ struct BlobGranuleChunkRef {
 	Optional<BlobFilePointerRef> snapshotFile; // not set if it's an incremental read
 	VectorRef<BlobFilePointerRef> deltaFiles;
 	GranuleDeltas newDeltas;
+	Optional<KeyRef> tenantPrefix;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keyRange, includedVersion, snapshotVersion, snapshotFile, deltaFiles, newDeltas);
+		serializer(ar, keyRange, includedVersion, snapshotVersion, snapshotFile, deltaFiles, newDeltas, tenantPrefix);
 	}
 };
 

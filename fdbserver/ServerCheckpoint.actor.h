@@ -63,4 +63,10 @@ ACTOR Future<CheckpointMetaData> fetchCheckpoint(Database cx,
                                                  CheckpointMetaData initialState,
                                                  std::string dir,
                                                  std::function<Future<Void>(const CheckpointMetaData&)> cFun = nullptr);
+
+ACTOR Future<std::vector<CheckpointMetaData>> fetchCheckpoints(
+    Database cx,
+    std::vector<CheckpointMetaData> initialStates,
+    std::string dir,
+    std::function<Future<Void>(const CheckpointMetaData&)> cFun = nullptr);
 #endif

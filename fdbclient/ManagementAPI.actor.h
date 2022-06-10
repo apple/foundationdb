@@ -55,12 +55,10 @@ struct IQuorumChange : ReferenceCounted<IQuorumChange> {
 
 // Change to use the given set of coordination servers
 ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
-                                                               Reference<IQuorumChange> change,
-                                                               std::vector<NetworkAddress> desiredCoordinators);
+                                                               ClusterConnectionString* conn,
+                                                               std::string newName);
 ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChange> change);
 Reference<IQuorumChange> autoQuorumChange(int desired = -1);
-Reference<IQuorumChange> noQuorumChange();
-Reference<IQuorumChange> specifiedQuorumChange(std::vector<NetworkAddress> const&);
 Reference<IQuorumChange> nameQuorumChange(std::string const& name, Reference<IQuorumChange> const& other);
 
 // Exclude the given set of servers from use as state servers.  Returns as soon as the change is durable, without
@@ -139,7 +137,6 @@ ACTOR Future<int> setDDMode(Database cx, int mode);
 ACTOR Future<Void> forceRecovery(Reference<IClusterConnectionRecord> clusterFile, Standalone<StringRef> dcId);
 
 ACTOR Future<Void> printHealthyZone(Database cx);
-ACTOR Future<Void> setDDIgnoreRebalanceSwitch(Database cx, bool ignoreRebalance);
 ACTOR Future<bool> clearHealthyZone(Database cx, bool printWarning = false, bool clearSSFailureZoneString = false);
 ACTOR Future<bool> setHealthyZone(Database cx, StringRef zoneId, double seconds, bool printWarning = false);
 

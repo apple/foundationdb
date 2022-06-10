@@ -95,7 +95,7 @@ inline void save(Archive& ar, const Reference<IReplicationPolicy>& value) {
 	}
 }
 
-struct PolicyOne final : IReplicationPolicy, public ReferenceCounted<PolicyOne> {
+struct PolicyOne final : IReplicationPolicy {
 	PolicyOne(){};
 	explicit PolicyOne(const PolicyOne& o) {}
 	std::string name() const override { return "One"; }
@@ -115,7 +115,7 @@ struct PolicyOne final : IReplicationPolicy, public ReferenceCounted<PolicyOne> 
 	void attributeKeys(std::set<std::string>* set) const override { return; }
 };
 
-struct PolicyAcross final : IReplicationPolicy, public ReferenceCounted<PolicyAcross> {
+struct PolicyAcross final : IReplicationPolicy {
 	friend struct serializable_traits<PolicyAcross*>;
 	PolicyAcross(int count, std::string const& attribKey, Reference<IReplicationPolicy> const policy);
 	explicit PolicyAcross();
@@ -168,7 +168,7 @@ protected:
 	Arena _arena;
 };
 
-struct PolicyAnd final : IReplicationPolicy, public ReferenceCounted<PolicyAnd> {
+struct PolicyAnd final : IReplicationPolicy {
 	friend struct serializable_traits<PolicyAnd*>;
 	PolicyAnd(std::vector<Reference<IReplicationPolicy>> policies) : _policies(policies), _sortedPolicies(policies) {
 		// Sort the policy array

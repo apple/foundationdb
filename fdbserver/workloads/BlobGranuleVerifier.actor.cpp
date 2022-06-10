@@ -68,7 +68,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 
 	DatabaseConfiguration config;
 
-	Reference<BackupContainerFileSystem> bstore;
+	Reference<BlobConnectionProvider> bstore;
 	AsyncVar<Standalone<VectorRef<KeyRangeRef>>> granuleRanges;
 
 	BlobGranuleVerifierWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
@@ -87,21 +87,12 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 			printf("Initializing Blob Granule Verifier s3 stuff\n");
 		}
 		try {
-			if (g_network->isSimulated()) {
-
-				if (BGV_DEBUG) {
-					printf("Blob Granule Verifier constructing simulated backup container\n");
-				}
-				bstore = BackupContainerFileSystem::openContainerFS("file://fdbblob/", {}, {});
-			} else {
-				if (BGV_DEBUG) {
-					printf("Blob Granule Verifier constructing backup container from %s\n",
-					       SERVER_KNOBS->BG_URL.c_str());
-				}
-				bstore = BackupContainerFileSystem::openContainerFS(SERVER_KNOBS->BG_URL, {}, {});
-				if (BGV_DEBUG) {
-					printf("Blob Granule Verifier constructed backup container\n");
-				}
+			if (BGV_DEBUG) {
+				printf("Blob Granule Verifier constructing backup container from %s\n", SERVER_KNOBS->BG_URL.c_str());
+			}
+			bstore = BlobConnectionProvider::newBlobConnectionProvider(SERVER_KNOBS->BG_URL);
+			if (BGV_DEBUG) {
+				printf("Blob Granule Verifier constructed backup container\n");
 			}
 		} catch (Error& e) {
 			if (BGV_DEBUG) {

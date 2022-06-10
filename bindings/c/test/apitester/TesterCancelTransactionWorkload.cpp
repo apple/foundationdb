@@ -19,6 +19,7 @@
  */
 #include "TesterApiWorkload.h"
 #include "TesterUtil.h"
+#include "test/fdb_api.hpp"
 
 namespace FdbApiTester {
 
@@ -32,15 +33,15 @@ private:
 	// Start multiple concurrent gets and cancel the transaction
 	void randomCancelGetTx(TTaskFct cont) {
 		int numKeys = Random::get().randomInt(1, maxKeysPerTransaction);
-		auto keys = std::make_shared<std::vector<std::string>>();
+		auto keys = std::make_shared<std::vector<fdb::Key>>();
 		for (int i = 0; i < numKeys; i++) {
 			keys->push_back(randomKey(readExistingKeysRatio));
 		}
 		execTransaction(
 		    [keys](auto ctx) {
-			    std::vector<Future> futures;
+			    std::vector<fdb::Future> futures;
 			    for (const auto& key : *keys) {
-				    futures.push_back(ctx->tx()->get(key, false));
+				    futures.push_back(ctx->tx().get(key, false).eraseType());
 			    }
 			    ctx->done();
 		    },
@@ -50,24 +51,25 @@ private:
 	// Start multiple concurrent gets and cancel the transaction after the first get returns
 	void randomCancelAfterFirstResTx(TTaskFct cont) {
 		int numKeys = Random::get().randomInt(1, maxKeysPerTransaction);
-		auto keys = std::make_shared<std::vector<std::string>>();
+		auto keys = std::make_shared<std::vector<fdb::Key>>();
 		for (int i = 0; i < numKeys; i++) {
 			keys->push_back(randomKey(readExistingKeysRatio));
 		}
 		execTransaction(
 		    [this, keys](auto ctx) {
-			    std::vector<ValueFuture> futures;
+			    std::vector<fdb::Future> futures;
 			    for (const auto& key : *keys) {
-				    futures.push_back(ctx->tx()->get(key, false));
+				    futures.push_back(ctx->tx().get(key, false).eraseType());
 			    }
 			    for (int i = 0; i < keys->size(); i++) {
-				    ValueFuture f = futures[i];
+				    fdb::Future f = futures[i];
 				    auto expectedVal = store.get((*keys)[i]);
 				    ctx->continueAfter(f, [expectedVal, f, this, ctx]() {
-					    auto val = f.getValue();
+					    auto val = f.get<fdb::future_var::ValueRef>();
 					    if (expectedVal != val) {
-						    error(fmt::format(
-						        "cancelAfterFirstResTx mismatch. expected: {:.80} actual: {:.80}", expectedVal, val));
+						    error(fmt::format("cancelAfterFirstResTx mismatch. expected: {:.80} actual: {:.80}",
+						                      fdb::toCharsRef(expectedVal.value()),
+						                      fdb::toCharsRef(val.value())));
 					    }
 					    ctx->done();
 				    });

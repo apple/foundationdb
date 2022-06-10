@@ -72,7 +72,7 @@ class WorkloadProcessState {
 		                                            locality,
 		                                            ProcessClass(ProcessClass::TesterClass, ProcessClass::AutoSource),
 		                                            dataFolder.c_str(),
-		                                            parent->coordinationFolder,
+		                                            parent->coordinationFolder.c_str(),
 		                                            parent->protocolVersion);
 		self->childProcess->excludeFromRestarts = true;
 		wait(g_simulator.onProcess(self->childProcess, TaskPriority::DefaultYield));

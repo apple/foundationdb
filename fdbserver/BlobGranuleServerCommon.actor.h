@@ -29,7 +29,10 @@
 #include "flow/flow.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/BlobConnectionProvider.h"
 #include "fdbclient/BlobGranuleCommon.h"
+#include "fdbclient/Tenant.h"
+#include "fdbserver/ServerDBInfo.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 struct GranuleHistory {
@@ -79,4 +82,45 @@ ACTOR Future<Optional<GranuleHistory>> getLatestGranuleHistory(Transaction* tr, 
 ACTOR Future<Void> readGranuleFiles(Transaction* tr, Key* startKey, Key endKey, GranuleFiles* files, UID granuleID);
 
 ACTOR Future<GranuleFiles> loadHistoryFiles(Database cx, UID granuleID);
+
+// TODO: versioned like SS has?
+struct GranuleTenantData : NonCopyable, ReferenceCounted<GranuleTenantData> {
+	TenantName name;
+	TenantMapEntry entry;
+	Reference<BlobConnectionProvider> bstore;
+	Promise<Void> bstoreLoaded;
+
+	GranuleTenantData() {}
+	GranuleTenantData(TenantName name, TenantMapEntry entry) : name(name), entry(entry) {}
+
+	void setBStore(Reference<BlobConnectionProvider> bs) {
+		ASSERT(bstoreLoaded.canBeSet());
+		bstore = bs;
+		bstoreLoaded.send(Void());
+	}
+};
+
+// TODO: add refreshing
+struct BGTenantMap {
+public:
+	void addTenants(std::vector<std::pair<TenantName, TenantMapEntry>>);
+	void removeTenants(std::vector<int64_t> tenantIds);
+
+	Optional<TenantMapEntry> getTenantById(int64_t id);
+	Reference<GranuleTenantData> getDataForGranule(const KeyRangeRef& keyRange);
+
+	KeyRangeMap<Reference<GranuleTenantData>> tenantData;
+	std::unordered_map<int64_t, TenantMapEntry> tenantInfoById;
+	Reference<AsyncVar<ServerDBInfo> const> dbInfo;
+	PromiseStream<Future<Void>> addActor;
+
+	BGTenantMap() {}
+	explicit BGTenantMap(const Reference<AsyncVar<ServerDBInfo> const> dbInfo) : dbInfo(dbInfo) {
+		collection = actorCollection(addActor.getFuture());
+	}
+
+private:
+	Future<Void> collection;
+};
+
 #endif

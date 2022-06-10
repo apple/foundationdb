@@ -28,12 +28,14 @@
 #include "flow/Trace.h"
 #include "flow/flow.h"
 #include "flow/network.h"
+#include "fdbclient/BlobMetadataUtils.h"
 
 struct KmsConnectorInterface {
 	constexpr static FileIdentifier file_identifier = 2416711;
 	RequestStream<ReplyPromise<Void>> waitFailure;
 	RequestStream<struct KmsConnLookupEKsByKeyIdsReq> ekLookupByIds;
 	RequestStream<struct KmsConnLookupEKsByDomainIdsReq> ekLookupByDomainIds;
+	RequestStream<struct KmsConnBlobMetadataReq> blobMetadataReq;
 
 	KmsConnectorInterface() {}
 
@@ -49,6 +51,8 @@ struct KmsConnectorInterface {
 			    RequestStream<struct KmsConnLookupEKsByKeyIdsReq>(waitFailure.getEndpoint().getAdjustedEndpoint(1));
 			ekLookupByDomainIds =
 			    RequestStream<struct KmsConnLookupEKsByDomainIdsReq>(waitFailure.getEndpoint().getAdjustedEndpoint(2));
+			blobMetadataReq =
+			    RequestStream<struct KmsConnBlobMetadataReq>(waitFailure.getEndpoint().getAdjustedEndpoint(3));
 		}
 	}
 
@@ -57,6 +61,7 @@ struct KmsConnectorInterface {
 		streams.push_back(waitFailure.getReceiver());
 		streams.push_back(ekLookupByIds.getReceiver(TaskPriority::Worker));
 		streams.push_back(ekLookupByDomainIds.getReceiver(TaskPriority::Worker));
+		streams.push_back(blobMetadataReq.getReceiver(TaskPriority::Worker));
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
@@ -98,19 +103,44 @@ struct KmsConnLookupEKsByKeyIdsRep {
 	}
 };
 
-struct KmsConnLookupEKsByKeyIdsReq {
-	constexpr static FileIdentifier file_identifier = 6913396;
-	std::vector<std::pair<EncryptCipherBaseKeyId, EncryptCipherDomainId>> encryptKeyIds;
-	ReplyPromise<KmsConnLookupEKsByKeyIdsRep> reply;
+struct KmsConnLookupKeyIdsReqInfo {
+	constexpr static FileIdentifier file_identifier = 3092256;
+	EncryptCipherDomainId domainId;
+	EncryptCipherBaseKeyId baseCipherId;
+	EncryptCipherDomainName domainName;
 
-	KmsConnLookupEKsByKeyIdsReq() {}
-	explicit KmsConnLookupEKsByKeyIdsReq(
-	    const std::vector<std::pair<EncryptCipherBaseKeyId, EncryptCipherDomainId>>& keyIds)
-	  : encryptKeyIds(keyIds) {}
+	KmsConnLookupKeyIdsReqInfo() : domainId(ENCRYPT_INVALID_DOMAIN_ID), baseCipherId(ENCRYPT_INVALID_CIPHER_KEY_ID) {}
+	explicit KmsConnLookupKeyIdsReqInfo(const EncryptCipherDomainId dId,
+	                                    const EncryptCipherBaseKeyId bCId,
+	                                    StringRef name,
+	                                    Arena& arena)
+	  : domainId(dId), baseCipherId(bCId), domainName(StringRef(arena, name)) {}
+
+	bool operator==(const KmsConnLookupKeyIdsReqInfo& info) const {
+		return domainId == info.domainId && baseCipherId == info.baseCipherId &&
+		       (domainName.compare(info.domainName) == 0);
+	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, encryptKeyIds, reply);
+		serializer(ar, domainId, baseCipherId, domainName);
+	}
+};
+
+struct KmsConnLookupEKsByKeyIdsReq {
+	constexpr static FileIdentifier file_identifier = 6913396;
+	Arena arena;
+	std::vector<KmsConnLookupKeyIdsReqInfo> encryptKeyInfos;
+	Optional<UID> debugId;
+	ReplyPromise<KmsConnLookupEKsByKeyIdsRep> reply;
+
+	KmsConnLookupEKsByKeyIdsReq() {}
+	explicit KmsConnLookupEKsByKeyIdsReq(const std::vector<KmsConnLookupKeyIdsReqInfo>& keyInfos, Optional<UID> dbgId)
+	  : encryptKeyInfos(keyInfos), debugId(dbgId) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, arena, encryptKeyInfos, debugId, reply);
 	}
 };
 
@@ -127,17 +157,68 @@ struct KmsConnLookupEKsByDomainIdsRep {
 	}
 };
 
-struct KmsConnLookupEKsByDomainIdsReq {
-	constexpr static FileIdentifier file_identifier = 9918682;
-	std::vector<EncryptCipherDomainId> encryptDomainIds;
-	ReplyPromise<KmsConnLookupEKsByDomainIdsRep> reply;
+struct KmsConnLookupDomainIdsReqInfo {
+	constexpr static FileIdentifier file_identifier = 8980149;
+	EncryptCipherDomainId domainId;
+	EncryptCipherDomainName domainName;
 
-	KmsConnLookupEKsByDomainIdsReq() {}
-	explicit KmsConnLookupEKsByDomainIdsReq(const std::vector<EncryptCipherDomainId>& ids) : encryptDomainIds(ids) {}
+	KmsConnLookupDomainIdsReqInfo() : domainId(ENCRYPT_INVALID_DOMAIN_ID) {}
+	explicit KmsConnLookupDomainIdsReqInfo(const EncryptCipherDomainId dId, StringRef name, Arena& arena)
+	  : domainId(dId), domainName(StringRef(arena, name)) {}
+
+	bool operator==(const KmsConnLookupDomainIdsReqInfo& info) const {
+		return domainId == info.domainId && (domainName.compare(info.domainName) == 0);
+	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, encryptDomainIds, reply);
+		serializer(ar, domainId, domainName);
+	}
+};
+
+struct KmsConnLookupEKsByDomainIdsReq {
+	constexpr static FileIdentifier file_identifier = 9918682;
+	Arena arena;
+	std::vector<KmsConnLookupDomainIdsReqInfo> encryptDomainInfos;
+	Optional<UID> debugId;
+	ReplyPromise<KmsConnLookupEKsByDomainIdsRep> reply;
+
+	KmsConnLookupEKsByDomainIdsReq() {}
+	explicit KmsConnLookupEKsByDomainIdsReq(const std::vector<KmsConnLookupDomainIdsReqInfo>& infos,
+	                                        Optional<UID> dbgId)
+	  : encryptDomainInfos(infos), debugId(dbgId) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, arena, encryptDomainInfos, debugId, reply);
+	}
+};
+
+struct KmsConnBlobMetadataRep {
+	constexpr static FileIdentifier file_identifier = 2919714;
+	Standalone<VectorRef<BlobMetadataDetailsRef>> metadataDetails;
+
+	KmsConnBlobMetadataRep() {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, metadataDetails);
+	}
+};
+
+struct KmsConnBlobMetadataReq {
+	constexpr static FileIdentifier file_identifier = 3913147;
+	std::vector<BlobMetadataDomainId> domainIds;
+	Optional<UID> debugId;
+	ReplyPromise<KmsConnBlobMetadataRep> reply;
+
+	KmsConnBlobMetadataReq() {}
+	explicit KmsConnBlobMetadataReq(const std::vector<BlobMetadataDomainId>& ids, Optional<UID> dbgId)
+	  : domainIds(ids), debugId(dbgId) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, domainIds, debugId, reply);
 	}
 };
 

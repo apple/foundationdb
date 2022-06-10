@@ -27,7 +27,6 @@ ExternalProject_Add(awssdk_project
                     -DCMAKE_EXE_LINKER_FLAGS=${AWSSDK_COMPILER_FLAGS}
                     -DCMAKE_CXX_FLAGS=${AWSSDK_LINK_FLAGS}
   TEST_COMMAND      ""
-  BUILD_ALWAYS      TRUE
   # the sdk build produces a ton of artifacts, with their own dependency tree, so there is a very specific dependency order they must be linked in
   BUILD_BYPRODUCTS  "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/lib64/libaws-cpp-sdk-core.a"
                     "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/lib64/libaws-crt-cpp.a"

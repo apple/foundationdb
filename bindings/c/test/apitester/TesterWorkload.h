@@ -62,6 +62,9 @@ public:
 
 	// Get workload control interface if supported, nullptr otherwise
 	virtual IWorkloadControlIfc* getControlIfc() = 0;
+
+	// Print workload statistics
+	virtual void printStats() = 0;
 };
 
 // Workload configuration
@@ -99,6 +102,8 @@ public:
 	IWorkloadControlIfc* getControlIfc() override { return nullptr; }
 
 	std::string getWorkloadId() override { return workloadId; }
+
+	void printStats() override;
 
 protected:
 	// Schedule the a task as a part of the workload
@@ -150,6 +155,9 @@ protected:
 
 	// Workload is failed, no further transactions or continuations will be scheduled by the workload
 	std::atomic<bool> failed;
+
+	// Number of completed transactions
+	std::atomic<int> numTxCompleted;
 };
 
 // Workload manager
@@ -174,6 +182,9 @@ public:
 		std::unique_lock<std::mutex> lock(mutex);
 		return numWorkloadsFailed > 0;
 	}
+
+	// Schedule statistics to be printed in regular timeintervals
+	void schedulePrintStatistics(int timeIntervalMs);
 
 private:
 	friend WorkloadBase;
@@ -205,6 +216,9 @@ private:
 	// Handle CHECK command received from the test controller
 	void handleCheckCommand();
 
+	// A thread-safe operation to return a list of active workloads
+	std::vector<std::shared_ptr<IWorkload>> getActiveWorkloads();
+
 	// Transaction executor to be used by the workloads
 	ITransactionExecutor* txExecutor;
 
@@ -225,6 +239,9 @@ private:
 
 	// Output pipe for emitting test control events
 	std::ofstream outputPipe;
+
+	// Timer for printing statistics in regular intervals
+	std::unique_ptr<ITimer> statsTimer;
 };
 
 // A workload factory

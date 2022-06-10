@@ -226,7 +226,7 @@ struct EncryptionOpsWorkload : TestWorkload {
 		Reference<BlobCipherKey> cipherKey = cipherKeyCache->getCipherKey(domainId, baseCipherId, salt);
 
 		if (simCacheMiss) {
-			TraceEvent("SimKeyCacheMiss").detail("EncyrptDomainId", domainId).detail("BaseCipherId", baseCipherId);
+			TraceEvent("SimKeyCacheMiss").detail("EncryptDomainId", domainId).detail("BaseCipherId", baseCipherId);
 			// simulate KeyCache miss that may happen during decryption; insert a CipherKey with known 'salt'
 			cipherKeyCache->insertCipherKey(domainId,
 			                                baseCipherId,
@@ -280,7 +280,7 @@ struct EncryptionOpsWorkload : TestWorkload {
 		ASSERT(cipherKey.isValid());
 		ASSERT(cipherKey->isEqual(orgCipherKey));
 
-		DecryptBlobCipherAes256Ctr decryptor(cipherKey, headerCipherKey, &header.cipherTextDetails.iv[0]);
+		DecryptBlobCipherAes256Ctr decryptor(cipherKey, headerCipherKey, header.iv);
 		const bool validateHeaderAuthToken = deterministicRandom()->randomInt(0, 100) < 65;
 
 		auto start = std::chrono::high_resolution_clock::now();

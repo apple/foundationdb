@@ -43,8 +43,8 @@ public class CycleMultiClientIntegrationTest {
     public static final MultiClientHelper clientHelper = new MultiClientHelper();
 
     // more write txn than validate txn, as parent thread waits only for validate txn.
-    private static final int writeTxnCnt = 2000;
-    private static final int validateTxnCnt = 1000;
+    private static final int writeTxnCnt = 200;
+    private static final int validateTxnCnt = 100;
     private static final int threadPerDB = 5;
 
     private static final int cycleLength = 4;

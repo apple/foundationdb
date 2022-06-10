@@ -77,11 +77,12 @@ public:
 
 	template <bool reverse>
 	struct GetMappedRangeReq {
-		GetMappedRangeReq(KeySelector begin, KeySelector end, Key mapper, GetRangeLimits limits)
-		  : begin(begin), end(end), mapper(mapper), limits(limits) {}
+		GetMappedRangeReq(KeySelector begin, KeySelector end, Key mapper, int matchIndex, GetRangeLimits limits)
+		  : begin(begin), end(end), mapper(mapper), limits(limits), matchIndex(matchIndex) {}
 		KeySelector begin, end;
 		Key mapper;
 		GetRangeLimits limits;
+		int matchIndex;
 		using Result = MappedRangeResult;
 	};
 
@@ -252,6 +253,8 @@ public:
 
 		if (read.begin.getKey() < read.end.getKey()) {
 			rangeBegin = read.begin.getKey();
+			// If the end offset is 1 (first greater than / first greater or equal) or more, then no changes to the
+			// range after the returned results can change the outcome.
 			rangeEnd = read.end.offset > 0 && result.more ? read.begin.getKey() : read.end.getKey();
 		} else {
 			rangeBegin = read.end.getKey();
@@ -288,7 +291,9 @@ public:
 		bool endInArena = false;
 
 		if (read.begin.getKey() < read.end.getKey()) {
-			rangeBegin = read.begin.offset <= 0 && result.more ? read.end.getKey() : read.begin.getKey();
+			// If the begin offset is 1 (first greater than / first greater or equal) or less, then no changes to the
+			// range prior to the returned results can change the outcome.
+			rangeBegin = read.begin.offset <= 1 && result.more ? read.end.getKey() : read.begin.getKey();
 			rangeEnd = read.end.getKey();
 		} else {
 			rangeBegin = read.end.getKey();
@@ -1140,9 +1145,13 @@ public:
 			else
 				read.end = KeySelector(firstGreaterOrEqual(key), key.arena());
 		}
-
-		MappedRangeResult v = wait(ryw->tr.getMappedRange(
-		    read.begin, read.end, read.mapper, read.limits, snapshot, backwards ? Reverse::True : Reverse::False));
+		MappedRangeResult v = wait(ryw->tr.getMappedRange(read.begin,
+		                                                  read.end,
+		                                                  read.mapper,
+		                                                  read.limits,
+		                                                  read.matchIndex,
+		                                                  snapshot,
+		                                                  backwards ? Reverse::True : Reverse::False));
 		return v;
 	}
 
@@ -1677,6 +1686,7 @@ Future<MappedRangeResult> ReadYourWritesTransaction::getMappedRange(KeySelector 
                                                                     KeySelector end,
                                                                     Key mapper,
                                                                     GetRangeLimits limits,
+                                                                    int matchIndex,
                                                                     Snapshot snapshot,
                                                                     Reverse reverse) {
 	if (getDatabase()->apiVersionAtLeast(630)) {
@@ -1724,9 +1734,9 @@ Future<MappedRangeResult> ReadYourWritesTransaction::getMappedRange(KeySelector 
 
 	Future<MappedRangeResult> result =
 	    reverse ? RYWImpl::readWithConflictRangeForGetMappedRange(
-	                  this, RYWImpl::GetMappedRangeReq<true>(begin, end, mapper, limits), snapshot)
+	                  this, RYWImpl::GetMappedRangeReq<true>(begin, end, mapper, matchIndex, limits), snapshot)
 	            : RYWImpl::readWithConflictRangeForGetMappedRange(
-	                  this, RYWImpl::GetMappedRangeReq<false>(begin, end, mapper, limits), snapshot);
+	                  this, RYWImpl::GetMappedRangeReq<false>(begin, end, mapper, matchIndex, limits), snapshot);
 
 	return result;
 }

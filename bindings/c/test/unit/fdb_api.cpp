@@ -271,6 +271,7 @@ MappedKeyValueArrayFuture Transaction::get_mapped_range(const uint8_t* begin_key
                                                         int target_bytes,
                                                         FDBStreamingMode mode,
                                                         int iteration,
+                                                        int matchIndex,
                                                         fdb_bool_t snapshot,
                                                         fdb_bool_t reverse) {
 	return MappedKeyValueArrayFuture(fdb_transaction_get_mapped_range(tr_,
@@ -288,6 +289,7 @@ MappedKeyValueArrayFuture Transaction::get_mapped_range(const uint8_t* begin_key
 	                                                                  target_bytes,
 	                                                                  mode,
 	                                                                  iteration,
+	                                                                  matchIndex,
 	                                                                  snapshot,
 	                                                                  reverse));
 }

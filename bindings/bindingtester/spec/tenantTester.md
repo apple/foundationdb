@@ -38,6 +38,14 @@ The tenant API introduces some new operations:
 
     Unsets the active tenant.
 
+#### TENANT_LIST
+
+    Pops the top 3 items off of the stack as BEGIN, END, & LIMIT.
+    Performs a range read of the tenant management keyspace in a language-appropriate
+    way using these parameters. The resulting range of n tenant names are
+    packed into a tuple as [t1,t2,t3,...,tn], and this single packed value
+    is pushed onto the stack.
+
 Updates to Existing Instructions
 --------------------------------
 

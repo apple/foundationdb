@@ -104,7 +104,8 @@ struct ProxyStats {
 	explicit ProxyStats(UID id,
 	                    NotifiedVersion* pVersion,
 	                    NotifiedVersion* pCommittedVersion,
-	                    int64_t* commitBatchesMemBytesCountPtr)
+	                    int64_t* commitBatchesMemBytesCountPtr,
+	                    std::map<TenantName, TenantMapEntry>* pTenantMap)
 	  : cc("ProxyStats", id.toString()), txnCommitIn("TxnCommitIn", cc),
 	    txnCommitVersionAssigned("TxnCommitVersionAssigned", cc), txnCommitResolving("TxnCommitResolving", cc),
 	    txnCommitResolved("TxnCommitResolved", cc), txnCommitOut("TxnCommitOut", cc),
@@ -160,6 +161,7 @@ struct ProxyStats {
 		specialCounter(cc, "CommitBatchesMemBytesCount", [commitBatchesMemBytesCountPtr]() {
 			return *commitBatchesMemBytesCountPtr;
 		});
+		specialCounter(cc, "NumTenants", [pTenantMap]() { return pTenantMap ? pTenantMap->size() : 0; });
 		specialCounter(cc, "MaxCompute", [this]() { return this->getAndResetMaxCompute(); });
 		specialCounter(cc, "MinCompute", [this]() { return this->getAndResetMinCompute(); });
 		logger = traceCounters("ProxyMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ProxyMetrics");
@@ -169,6 +171,7 @@ struct ProxyStats {
 struct ProxyCommitData {
 	UID dbgid;
 	int64_t commitBatchesMemBytesCount;
+	std::map<TenantName, TenantMapEntry> tenantMap;
 	ProxyStats stats;
 	MasterInterface master;
 	std::vector<ResolverInterface> resolvers;
@@ -226,8 +229,7 @@ struct ProxyCommitData {
 	UIDTransactionTagMap<TransactionCommitCostEstimation> ssTrTagCommitCost;
 	double lastMasterReset;
 	double lastResolverReset;
-
-	std::map<TenantName, TenantMapEntry> tenantMap;
+	int localTLogCount = -1;
 
 	// The tag related to a storage server rarely change, so we keep a vector of tags for each key range to be slightly
 	// more CPU efficient. When a tag related to a storage server does change, we empty out all of these vectors to
@@ -288,11 +290,12 @@ struct ProxyCommitData {
 	                Reference<AsyncVar<ServerDBInfo> const> db,
 	                bool firstProxy)
 	  : dbgid(dbgid), commitBatchesMemBytesCount(0),
-	    stats(dbgid, &version, &committedVersion, &commitBatchesMemBytesCount), master(master), logAdapter(nullptr),
-	    txnStateStore(nullptr), committedVersion(recoveryTransactionVersion), minKnownCommittedVersion(0), version(0),
-	    lastVersionTime(0), commitVersionRequestNumber(1), mostRecentProcessedRequestNumber(0), firstProxy(firstProxy),
-	    lastCoalesceTime(0), locked(false), commitBatchInterval(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_MIN),
-	    localCommitBatchesStarted(0), getConsistentReadVersion(getConsistentReadVersion), commit(commit),
+	    stats(dbgid, &version, &committedVersion, &commitBatchesMemBytesCount, &tenantMap), master(master),
+	    logAdapter(nullptr), txnStateStore(nullptr), committedVersion(recoveryTransactionVersion),
+	    minKnownCommittedVersion(0), version(0), lastVersionTime(0), commitVersionRequestNumber(1),
+	    mostRecentProcessedRequestNumber(0), firstProxy(firstProxy), lastCoalesceTime(0), locked(false),
+	    commitBatchInterval(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_MIN), localCommitBatchesStarted(0),
+	    getConsistentReadVersion(getConsistentReadVersion), commit(commit),
 	    cx(openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::True)), db(db),
 	    singleKeyMutationEvent(LiteralStringRef("SingleKeyMutation")), lastTxsPop(0), popRemoteTxs(false),
 	    lastStartCommit(0), lastCommitLatency(SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION), lastCommitTime(0),

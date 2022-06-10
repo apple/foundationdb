@@ -202,8 +202,7 @@ void RESTUrl::parseUrl(const std::string& fullUrl, const bool isSecure) {
 // Only used to link unit tests
 void forceLinkRESTUtilsTests() {}
 
-TEST_CASE("fdbrpc/RESTUtils") {
-	// invalid protocol
+TEST_CASE("/RESTUtils/InvalidProtocol") {
 	try {
 		std::string uri("httpx://foo/bar");
 		RESTUrl r(uri, false);
@@ -213,7 +212,10 @@ TEST_CASE("fdbrpc/RESTUtils") {
 			throw e;
 		}
 	}
+	return Void();
+}
 
+TEST_CASE("/RESTUtils/MismatchKnobVal") {
 	// mismatch protocol and knob values
 	try {
 		std::string uri("http://foo/bar");
@@ -224,8 +226,10 @@ TEST_CASE("fdbrpc/RESTUtils") {
 			throw e;
 		}
 	}
+	return Void();
+}
 
-	// missing host
+TEST_CASE("/RESTUtils/MissingHost") {
 	try {
 		std::string uri("https://:/bar");
 		RESTUrl r(uri, true);
@@ -235,42 +239,33 @@ TEST_CASE("fdbrpc/RESTUtils") {
 			throw e;
 		}
 	}
+	return Void();
+}
 
-	// valid URI with service
-	try {
-		std::string uri("https://host:80/foo/bar");
-		RESTUrl r(uri, true);
-		ASSERT_EQ(r.host.compare("host"), 0);
-		ASSERT_EQ(r.service.compare("80"), 0);
-		ASSERT_EQ(r.resource.compare("foo/bar"), 0);
-	} catch (Error& e) {
-		throw e;
-	}
+TEST_CASE("/RESTUtils/ValidURIWithService") {
+	std::string uri("https://host:80/foo/bar");
+	RESTUrl r(uri, true);
+	ASSERT_EQ(r.host.compare("host"), 0);
+	ASSERT_EQ(r.service.compare("80"), 0);
+	ASSERT_EQ(r.resource.compare("foo/bar"), 0);
+	return Void();
+}
 
-	// valid URI with-out service
-	try {
-		std::string uri("https://host/foo/bar");
-		RESTUrl r(uri, true);
-		ASSERT_EQ(r.host.compare("host"), 0);
-		ASSERT(r.service.empty());
-		ASSERT_EQ(r.resource.compare("foo/bar"), 0);
-	} catch (Error& e) {
-		throw e;
-	}
+TEST_CASE("/RESTUtils/ValidURIWithoutService") {
+	std::string uri("https://host/foo/bar");
+	RESTUrl r(uri, true);
+	ASSERT_EQ(r.host.compare("host"), 0);
+	ASSERT(r.service.empty());
+	ASSERT_EQ(r.resource.compare("foo/bar"), 0);
+	return Void();
+}
 
-	// valid URI with parameters
-	try {
-		std::string uri("https://host/foo/bar?param1,param2");
-		RESTUrl r(uri, true);
-		ASSERT_EQ(r.host.compare("host"), 0);
-		ASSERT(r.service.empty());
-		ASSERT_EQ(r.resource.compare("foo/bar"), 0);
-		ASSERT_EQ(r.reqParameters.compare("param1,param2"), 0);
-	} catch (Error& e) {
-		throw e;
-	}
-
-	// ensure RESTClient::Knob default values and updates
-
+TEST_CASE("/RESTUtils/ValidURIWithParams") {
+	std::string uri("https://host/foo/bar?param1,param2");
+	RESTUrl r(uri, true);
+	ASSERT_EQ(r.host.compare("host"), 0);
+	ASSERT(r.service.empty());
+	ASSERT_EQ(r.resource.compare("foo/bar"), 0);
+	ASSERT_EQ(r.reqParameters.compare("param1,param2"), 0);
 	return Void();
 }

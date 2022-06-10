@@ -1128,8 +1128,12 @@ void printStatus(StatusObjectReader statusObj,
 					                "storage server failures.";
 				}
 				if (statusObjCluster.has("data_distribution_disabled_for_rebalance")) {
-					outputString += "\n\nWARNING: Data distribution is currently turned on but shard size balancing is "
-					                "currently disabled.";
+					outputString += "\n\nWARNING: Data distribution is currently turned on but one or both of shard "
+					                "size and read-load based balancing are disabled.";
+					// data_distribution_disabled_hex
+					if (statusObjCluster.has("data_distribution_disabled_hex")) {
+						outputString += " Ignore code: " + statusObjCluster["data_distribution_disabled_hex"].get_str();
+					}
 				}
 			}
 
