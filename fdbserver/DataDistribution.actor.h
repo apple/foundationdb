@@ -205,18 +205,11 @@ public:
 
 	struct PhysicalShard {
 		uint64_t id;
-		// On disk
-		int64_t bytesOnDisk = 0;
-		// In memory
-		int64_t bytesInMemory = 0;
-		// I/O
-		int64_t bytesPerKSecond = 0;
-		int64_t bytesWritePerKSecond = 0;
-		int64_t bytesReadPerKSecond = 0; 
+		StorageMetrics metrics;
 
 		PhysicalShard() : id(0) {}
-		explicit PhysicalShard(uint64_t id) : id(id), bytesOnDisk(0) {}
-		explicit PhysicalShard(uint64_t id,  StorageMetrics const& metrics) : id(id), bytesOnDisk(metrics.bytes) {}
+		explicit PhysicalShard(uint64_t id) : id(id), metrics(StorageMetrics()) {}
+		explicit PhysicalShard(uint64_t id,  StorageMetrics const& metrics) : id(id), metrics(metrics) {}
 		// operator< used for selecting the physicalShard with the minimal bytesOnDisk
 		bool operator<(const struct PhysicalShard& right) const { return id < right.id ? true : false; }
 		std::string toString() const { return std::to_string(id); }
@@ -253,18 +246,21 @@ public:
 	PromiseStream<KeyRange> restartRequests;
 
 	// For PhysicalShard
-	std::map<Team, std::set<uint64_t>> teamPhysicalShardIDs; // the mapping from team to physicalShards
-	KeyRangeMap<uint64_t> keyRangePhysicalShardIDMap;
+	// the mapping from a physicalShardID to its corresponding physicalShard
 	std::map<uint64_t, PhysicalShard> physicalShardCollection;
+	// the mapping from a team to physicalShards of the team
+	std::map<Team, std::set<uint64_t>> teamPhysicalShardIDs;
+	// the mapping from keyRange to physicalShardIDs
+	KeyRangeMap<uint64_t> keyRangePhysicalShardIDMap;
 	void updatePhysicalShardToTeams(uint64_t physicalShardID, 
 			std::vector<Team> inputTeams, int expectedNumServersPerTeam, uint64_t debugID);
 	Optional<uint64_t> tryGetPhysicalShardIDFor(Team team, StorageMetrics const& metrics, uint64_t debugID);
 	Optional<Team> tryGetRemoteTeamWith(uint64_t physicalShardID, int expectedTeamSize, uint64_t debugID);
-	void printTeamPhysicalShardsMapping(std::string);
 	uint64_t generateNewPhysicalShardID(uint64_t debugID);
 	void updatePhysicalShardMetrics(KeyRange keys, StorageMetrics const& newMetrics, StorageMetrics const& oldMetrics, bool forDDRestore);
 	void reduceMetricsForMoveOut(uint64_t physicalShardID, StorageMetrics const& metrics);
 	void increaseMetricsForMoveIn(uint64_t physicalShardID, StorageMetrics const& metrics);
+	void printTeamPhysicalShardsMapping(std::string);
 
 private:
 	struct OrderByTeamKey {

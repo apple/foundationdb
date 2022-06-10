@@ -1220,7 +1220,8 @@ std::string convertSetOfIDToString(std::set<uint64_t> ids) {
 	return r;
 }
 
-Optional<ShardsAffectedByTeamFailure::Team> ShardsAffectedByTeamFailure::tryGetRemoteTeamWith(uint64_t inputPhysicalShardID, int expectedTeamSize, uint64_t debugID) {
+Optional<ShardsAffectedByTeamFailure::Team> ShardsAffectedByTeamFailure::tryGetRemoteTeamWith(
+		uint64_t inputPhysicalShardID, int expectedTeamSize, uint64_t debugID) {
 	ASSERT(CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
 	for (auto [team, physicalShardIDs] : teamPhysicalShardIDs) {
 		if (team.primary == true) {
@@ -1251,7 +1252,7 @@ Optional<ShardsAffectedByTeamFailure::Team> ShardsAffectedByTeamFailure::tryGetR
 // At beginning of the transition from the initial state without physical shard notion
 // to the physical shard aware state, the physicalShard set only contains one element which is anonymousShardId[0]
 // After a period in the transition, the physicalShard set of the team contains some meaningful physicalShardIDs
-Optional<uint64_t> ShardsAffectedByTeamFailure::tryGetPhysicalShardIDFor(Team team, StorageMetrics const& metrics, uint64_t debugID) {
+Optional<uint64_t> ShardsAffectedByTeamFailure::tryGetPhysicalShardIDFor(Team team, StorageMetrics const& moveInMetrics, uint64_t debugID) {
 	ASSERT(CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
 	ASSERT(team.servers.size()!=0);
 	// Case: The team is not tracked in the mapping (teamPhysicalShardIDs)
@@ -1271,43 +1272,43 @@ Optional<uint64_t> ShardsAffectedByTeamFailure::tryGetPhysicalShardIDFor(Team te
 		
 	// Case: The team is tracked in the mapping and the system already has physical shard notion
 	// 		and the number of physicalShard is large
-	int64_t minTotalBytes = StorageMetrics::infinity;
+	int64_t minBytes = StorageMetrics::infinity;
 	uint64_t minPhysicalShardID = 0;
 	for (auto physicalShardID : teamPhysicalShardIDs[team]) {
-		int64_t totalBytes = physicalShardCollection[physicalShardID].bytesOnDisk;
+		int64_t bytes = physicalShardCollection[physicalShardID].metrics.bytes;
 		// if (debugID%20==0) {
 			TraceEvent("TryGetPhysicalShardID")
 				.detail("PhysicalShardID", physicalShardID)
-				.detail("TotalBytes", totalBytes)
+				.detail("Bytes", bytes)
 				.detail("BelongTeam", team.toString())
 				.detail("DebugID", debugID);
 		// }
-		if (totalBytes < minTotalBytes) {
-			minTotalBytes = totalBytes;
+		if (bytes < minBytes) {
+			minBytes = bytes;
 			minPhysicalShardID = physicalShardID;
 		}
 	}
 	ASSERT(minPhysicalShardID!=0);
-	if (minTotalBytes + metrics.bytes > SERVER_KNOBS->PHYSICAL_SHARD_SIZE_MIN_BYTES) {
+	if (minBytes + moveInMetrics.bytes > SERVER_KNOBS->MAX_PHYSICAL_PHYSICAL_SHARD_BYTES) {
 		// Case: The physicalShard with the minimal bytes is insufficient to store the new input bytes
 		// if (debugID%20==0) {
 			TraceEvent("TryGetPhysicalShardIDResult")
 				.detail("Result", 0)
 				.detail("FailedReason", "more than the upper bound of physicalShard")
-				.detail("MinTotalBytes", minTotalBytes)
-				.detail("MoveInBytes", metrics.bytes)
-				.detail("BoundBytes", SERVER_KNOBS->PHYSICAL_SHARD_SIZE_MIN_BYTES)
+				.detail("MinBytes", minBytes)
+				.detail("MoveInBytes", moveInMetrics.bytes)
+				.detail("MaxPhysicalShardBytes", SERVER_KNOBS->MAX_PHYSICAL_PHYSICAL_SHARD_BYTES)
 				.detail("DebugID", debugID);
 		// }
 		return Optional<uint64_t>();
 	} else {
-		// std::cout << "PhysicalShardID: " << minPhysicalShardID << " Bytes: " << minTotalBytes << "\n";
+		// std::cout << "PhysicalShardID: " << minPhysicalShardID << " Bytes: " << minBytes << "\n";
 		// if (debugID%20==0) {
 			TraceEvent("TryGetPhysicalShardIDResult")
 				.detail("Result", minPhysicalShardID)
-				.detail("MinTotalBytes", minTotalBytes)
-				.detail("MoveInBytes", metrics.bytes)
-				.detail("BoundBytes", SERVER_KNOBS->PHYSICAL_SHARD_SIZE_MIN_BYTES)
+				.detail("MinBytes", minBytes)
+				.detail("MoveInBytes", moveInMetrics.bytes)
+				.detail("MaxPhysicalShardBytes", SERVER_KNOBS->MAX_PHYSICAL_PHYSICAL_SHARD_BYTES)
 				.detail("DebugID", debugID);
 		// }
 		return minPhysicalShardID;
@@ -1332,46 +1333,29 @@ void ShardsAffectedByTeamFailure::updatePhysicalShardMetrics(KeyRange keys, Stor
 		physicalShardIDSet.insert(physicalShardID);
 	}
 	//std::cout << "updatePhysicalShardMetrics: " << physicalShardIDSet.size() << "\n";
-	if (physicalShardIDSet.size()==1) {
-		for (auto physicalShardID : physicalShardIDSet) {
-			int64_t delta = 0;
-			// int64_t oldBytes = physicalShardCollection[physicalShardID].bytesOnDisk;
-			// bool oldInit = physicalShardCollection[physicalShardID].init;
-			if (forDDRestore) {
-				delta = newMetrics.bytes;
-			} else {
-				delta = newMetrics.bytes - oldMetrics.bytes;
-			}
-			physicalShardCollection[physicalShardID].bytesOnDisk = 
-				physicalShardCollection[physicalShardID].bytesOnDisk + delta;
-			// std::cout << "Update: " << physicalShardID << ", init=" << oldInit << ": " << oldBytes << " add bytes: " << delta << " = " << physicalShardCollection[physicalShardID].bytesOnDisk <<"\n";
-			break;
+	for (auto physicalShardID : physicalShardIDSet) {
+		StorageMetrics delta = StorageMetrics();
+		// int64_t oldBytes = physicalShardCollection[physicalShardID].bytesOnDisk;
+		// bool oldInit = physicalShardCollection[physicalShardID].init;
+		if (forDDRestore) {
+			delta = newMetrics;
+		} else {
+			delta = newMetrics - oldMetrics;
 		}
-	} else { // imprecise: evenly assign the delta
-		for (auto physicalShardID : physicalShardIDSet) {
-			int64_t delta = 0;
-			// int64_t oldBytes = physicalShardCollection[physicalShardID].bytesOnDisk;
-			// bool oldInit = physicalShardCollection[physicalShardID].init;
-			if (forDDRestore) {
-				delta = newMetrics.bytes;
-			} else {
-				delta = newMetrics.bytes - oldMetrics.bytes;
-			}
-			physicalShardCollection[physicalShardID].bytesOnDisk = 
-				physicalShardCollection[physicalShardID].bytesOnDisk + (int64_t) (delta*(1.0/physicalShardIDSet.size()));
-			// std::cout << "Update: " << physicalShardID << ", init=" << oldInit << ": " << oldBytes << " add bytes: " << delta << " = " << physicalShardCollection[physicalShardID].bytesOnDisk <<"\n";
-		}
+		physicalShardCollection[physicalShardID].metrics = // imprecise: evenly assign the delta
+			physicalShardCollection[physicalShardID].metrics + (delta*(1.0/physicalShardIDSet.size()));
+		// std::cout << "Update: " << physicalShardID << ", init=" << oldInit << ": " << oldBytes << " add bytes: " << delta << " = " << physicalShardCollection[physicalShardID].bytesOnDisk <<"\n";
 	}
 }
 
-void ShardsAffectedByTeamFailure::reduceMetricsForMoveOut(uint64_t physicalShardID, StorageMetrics const& metrics) {
-	physicalShardCollection[physicalShardID].bytesOnDisk = 
-		physicalShardCollection[physicalShardID].bytesOnDisk - metrics.bytes;
+void ShardsAffectedByTeamFailure::reduceMetricsForMoveOut(uint64_t physicalShardID, StorageMetrics const& moveOutMetrics) {
+	physicalShardCollection[physicalShardID].metrics = 
+		physicalShardCollection[physicalShardID].metrics - moveOutMetrics;
 }
 
-void ShardsAffectedByTeamFailure::increaseMetricsForMoveIn(uint64_t physicalShardID, StorageMetrics const& metrics) {
-	physicalShardCollection[physicalShardID].bytesOnDisk = 
-		physicalShardCollection[physicalShardID].bytesOnDisk + metrics.bytes;
+void ShardsAffectedByTeamFailure::increaseMetricsForMoveIn(uint64_t physicalShardID, StorageMetrics const& moveInMetrics) {
+	physicalShardCollection[physicalShardID].metrics = 
+		physicalShardCollection[physicalShardID].metrics + moveInMetrics;
 }
 
 void ShardsAffectedByTeamFailure::printTeamPhysicalShardsMapping(std::string action) {

@@ -607,7 +607,7 @@ ACTOR Future<Void> monitorPhysicalShardStatus(Reference<ShardsAffectedByTeamFail
 			uint64_t minPhysicalShardID = 0;
 			for (auto physicalShardID : physicalShardIDs) {
 				uint64_t id = self->physicalShardCollection[physicalShardID].id;
-				int64_t bytes = self->physicalShardCollection[physicalShardID].bytesOnDisk;
+				int64_t bytes = self->physicalShardCollection[physicalShardID].metrics.bytes;
 				if (bytes > maxPhysicalShardBytes) {
 					maxPhysicalShardBytes = bytes;
 					maxPhysicalShardID = id;
@@ -636,13 +636,13 @@ ACTOR Future<Void> monitorPhysicalShardStatus(Reference<ShardsAffectedByTeamFail
 					if (storageServerPhysicalShardStatus.count(ssid)!=0) {
 						if (storageServerPhysicalShardStatus[ssid].count(physicalShardID)==0) {
 							storageServerPhysicalShardStatus[ssid].insert(
-								std::make_pair(physicalShardID, self->physicalShardCollection[physicalShardID].bytesOnDisk));
+								std::make_pair(physicalShardID, self->physicalShardCollection[physicalShardID].metrics.bytes));
 						} else {
 							ASSERT(false);
 						}
 					} else {
 						std::map<uint64_t, int64_t> tmp;
-						tmp.insert(std::make_pair(physicalShardID, self->physicalShardCollection[physicalShardID].bytesOnDisk));
+						tmp.insert(std::make_pair(physicalShardID, self->physicalShardCollection[physicalShardID].metrics.bytes));
 						storageServerPhysicalShardStatus.insert(std::make_pair(ssid, tmp));
 					}
 				}
