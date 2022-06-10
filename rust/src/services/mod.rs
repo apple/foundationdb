@@ -18,7 +18,7 @@ pub mod ping_request;
 
 pub struct FlowRequest {
     frame: frame::Frame,
-    parsed_file_identifier: file_identifier::ParsedFileIdentifier,
+    file_identifier: file_identifier::FileIdentifier,
 }
 
 pub struct FlowResponse {
@@ -36,7 +36,7 @@ const MAX_CONNECTIONS: usize = 250;
 const MAX_REQUESTS: usize = MAX_CONNECTIONS * 2;
 
 #[derive(Clone)]
-struct Svc {}
+pub struct Svc {}
 
 async fn handle_req(request: FlowRequest) -> Result<Option<FlowResponse>> {
     request.frame.validate()?;
@@ -44,20 +44,27 @@ async fn handle_req(request: FlowRequest) -> Result<Option<FlowResponse>> {
         Some(uid::WLTOKEN::PingPacket) => ping_request::handle(request).await?,
         Some(uid::WLTOKEN::ReservedForTesting) => network_test::handle(request).await?,
         Some(wltoken) => {
+            let fit = file_identifier::FileIdentifierNames::new()?;
             println!(
-                "Got unhandled request for well-known enpoint {:?}: {:x?} {:04x?}",
-                wltoken, request.frame.token, request.parsed_file_identifier
+                "Got unhandled request for well-known enpoint {:?}: {:x?} {:04x?} {:04x?}",
+                wltoken,
+                request.frame.token,
+                &request.file_identifier,
+                fit.from_id(&request.file_identifier)
             );
             None
         }
         None => {
+            let fit = file_identifier::FileIdentifierNames::new()?;
             println!(
                 "Message not destined for well-known endpoint: {:x?}",
                 request.frame
             );
             println!(
-                "{:x?} {:04x?}",
-                request.frame.token, request.parsed_file_identifier
+                "{:x?} {:04x?} {:04x?}",
+                request.frame.token,
+                request.file_identifier,
+                fit.from_id(&request.file_identifier)
             );
             None
         }
@@ -68,11 +75,9 @@ impl Service<FlowRequest> for Svc {
     // type Future: Future<Output = std::result::Result<Self::Response, Self::Error>>;
     type Response = Option<FlowResponse>;
     type Error = super::flow::Error;
-    type Future = std::pin::Pin<
-        Box<dyn Send + Future<Output = std::result::Result<Self::Response, Self::Error>>>,
-    >; // XXX get rid of box!
+    type Future = std::pin::Pin<Box<dyn Send + Future<Output = Result<Self::Response>>>>; // XXX get rid of box!
 
-    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<super::flow::Result<()>> {
+    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<()>> {
         Poll::Ready(Ok(()))
     }
 
@@ -83,12 +88,12 @@ impl Service<FlowRequest> for Svc {
 
 async fn handle_frame(
     frame: frame::Frame,
-    parsed_file_identifier: file_identifier::ParsedFileIdentifier,
+    file_identifier: file_identifier::FileIdentifier,
     response_tx: tokio::sync::mpsc::Sender<Frame>,
 ) -> Result<()> {
     let request = FlowRequest {
         frame,
-        parsed_file_identifier,
+        file_identifier,
     };
 
     match handle_req(request).await? {
@@ -124,7 +129,7 @@ fn spawn_sender<C: 'static + AsyncWrite + Unpin + Send>(
     });
 }
 
-pub async fn hello_tower() -> Result<()> {
+pub async fn hello_tower(svc: Svc) -> Result<()> {
     let bind = TcpListener::bind(&format!("127.0.0.1:{}", 6789)).await?;
     // let maker = ServiceBuilder::new().concurreny_limit(5).service(MakeSvc);
     // let server = Server::new(maker);
@@ -143,10 +148,9 @@ pub async fn hello_tower() -> Result<()> {
         // can't consume all the request slots for this process.
         let (response_tx, response_rx) = tokio::sync::mpsc::channel::<Frame>(MAX_REQUESTS / 10);
         spawn_sender(response_rx, writer);
-
+        let svc = svc.clone();
         tokio::spawn(async move {
-            let file_identifier_table = file_identifier::FileIdentifierNames::new()?;
-            let mut svc = tower::limit::concurrency::ConcurrencyLimit::new(Svc {}, MAX_REQUESTS);
+            let mut svc = tower::limit::concurrency::ConcurrencyLimit::new(svc, MAX_REQUESTS);
             loop {
                 match reader.read_frame().await? {
                     None => {
@@ -154,16 +158,14 @@ pub async fn hello_tower() -> Result<()> {
                         break;
                     }
                     Some(frame) => {
-                        if frame.payload.len() < 8 {
+                        if frame.payload().len() < 8 {
                             println!("Frame is too short! {:x?}", frame);
                             continue;
                         }
                         let file_identifier = frame.peek_file_identifier()?;
-                        let parsed_file_identifier =
-                            file_identifier_table.from_id(file_identifier)?;
                         let request = FlowRequest {
                             frame,
-                            parsed_file_identifier,
+                            file_identifier,
                         };
                         let response_tx = response_tx.clone();
                         // poll_ready and call must be invoked atomically
@@ -190,7 +192,6 @@ pub async fn hello_tower() -> Result<()> {
 }
 
 async fn handle_connection<C: 'static + AsyncRead + AsyncWrite + Unpin + Send>(
-    file_identifier_table: &file_identifier::FileIdentifierNames,
     limit_requests: Arc<Semaphore>,
     conn: C,
 ) -> Result<()> {
@@ -212,15 +213,14 @@ async fn handle_connection<C: 'static + AsyncRead + AsyncWrite + Unpin + Send>(
                 break;
             }
             Some(frame) => {
-                if frame.payload.len() < 8 {
+                if frame.payload().len() < 8 {
                     println!("Frame is too short! {:x?}", frame);
                     continue;
                 }
                 let file_identifier = frame.peek_file_identifier()?;
-                let parsed_file_identifier = file_identifier_table.from_id(file_identifier)?;
                 limit_requests.acquire().await.unwrap().forget();
                 tokio::spawn(async move {
-                    match handle_frame(frame, parsed_file_identifier, response_tx).await {
+                    match handle_frame(frame, file_identifier, response_tx).await {
                         Ok(()) => (),
                         Err(e) => println!("Error: {:?}", e),
                     };
@@ -250,8 +250,7 @@ pub async fn hello() -> Result<()> {
         println!("got socket from {}", socket.1);
         let limit_requests = server.limit_requests.clone();
         tokio::spawn(async move {
-            let file_identifier_table = file_identifier::FileIdentifierNames::new()?;
-            match handle_connection(&file_identifier_table, limit_requests, socket.0).await {
+            match handle_connection(limit_requests, socket.0).await {
                 Ok(()) => {
                     println!("Clean connection shutdown!");
                 }

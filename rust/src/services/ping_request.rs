@@ -33,24 +33,20 @@ fn serialize_response(token: UID) -> Result<Frame> {
         },
     );
     builder.finish(fake_root, Some("myfi"));
-    let mut payload = builder.finished_data().to_vec();
+    let (mut payload, offset) = builder.collapse();
     // See also: flow/README.md ### Flatbuffers/ObjectSerializer
     FileIdentifier::new(0x1ead4a)?
         .to_error_or()?
-        .rewrite_flatbuf(&mut payload)?;
+        .rewrite_flatbuf(&mut payload[offset..])?;
     // println!("reply: {:x?}", builder.finished_data());
-    Ok(Frame::new_reply(token, payload))
+    Ok(Frame::new_reply(token, payload, offset))
 }
 
 pub async fn handle(request: FlowRequest) -> Result<Option<FlowResponse>> {
-    if request.parsed_file_identifier != PING_FILE_IDENTIFIER {
-        return Err(format!(
-            "Expected PingRequest.  Got {:?}",
-            request.parsed_file_identifier
-        )
-        .into());
-    }
-    let fake_root = ping_request::root_as_fake_root(&request.frame.payload[..])?;
+    request
+        .file_identifier
+        .ensure_expected(PING_FILE_IDENTIFIER)?;
+    let fake_root = ping_request::root_as_fake_root(request.frame.payload())?;
     let reply_promise = fake_root.ping_request().unwrap().reply_promise().unwrap();
 
     let uid = reply_promise.uid().unwrap();

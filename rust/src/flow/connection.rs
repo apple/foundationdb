@@ -41,12 +41,16 @@ pub fn new<C: AsyncRead + AsyncWrite + Unpin + Send>(
 
 impl<W: AsyncWrite + Unpin> ConnectionWriter<W> {
     pub async fn write_frame(&mut self, frame: Frame) -> Result<()> {
-        self.frame_encoder.encode(frame, &mut self.buf)?; // TODO: Reuse buf!
-        self.writer.write_all(&self.buf).await?;
-        self.buf.clear();
+        self.frame_encoder.encode(frame, &mut self.buf)?;
+        if self.buf.len() > 1_000_000 {
+            self.writer.write_all(&self.buf).await?;
+            self.buf.clear();
+        }
         Ok(())
     }
     pub async fn flush(&mut self) -> Result<()> {
+        self.writer.write_all(&self.buf).await?;
+        self.buf.clear();
         self.writer.flush().await?;
         Ok(())
     }

@@ -31,11 +31,16 @@ const NETWORK_TEST_REQUEST_IDENTIFIER: ParsedFileIdentifier = ParsedFileIdentifi
 
 fn serialize_error_or_network_test_response(token: UID, response_len: u32) -> Result<Frame> {
     let mut builder = flatbuffers::FlatBufferBuilder::with_capacity(usize::min(
-        1024 + (response_len as usize),
+        128 + (response_len as usize),
         flatbuffers::FLATBUFFERS_MAX_BUFFER_SIZE,
     ));
-    let payload = vec!['.' as u8; response_len.try_into()?];
-    let payload = builder.create_vector(&payload[..]);
+    let response_len: usize = response_len.try_into()?;
+    builder.start_vector::<u8>(response_len);
+    for _i in 0..response_len {
+        builder.push('.' as u8);
+    }
+    let payload = builder.end_vector(response_len);
+
     let network_test_response = network_test_response::NetworkTestResponse::create(
         &mut builder,
         &network_test_response::NetworkTestResponseArgs {
@@ -56,24 +61,20 @@ fn serialize_error_or_network_test_response(token: UID, response_len: u32) -> Re
         },
     );
     builder.finish(fake_root, Some("myfi"));
-    let mut payload = builder.finished_data().to_vec();
+    let (mut payload, offset) = builder.collapse(); //finished_data();
     FileIdentifier::new(14465374)?
         .to_error_or()?
-        .rewrite_flatbuf(&mut payload)?;
+        .rewrite_flatbuf(&mut payload[offset..])?;
     // println!("reply: {:x?}", builder.finished_data());
-    Ok(Frame::new_reply(token, payload))
+    Ok(Frame::new_reply(token, payload, offset))
 }
 
 pub async fn handle(request: FlowRequest) -> Result<Option<FlowResponse>> {
-    if request.parsed_file_identifier != NETWORK_TEST_REQUEST_IDENTIFIER {
-        return Err(format!(
-            "Expected NetworkTestRequest.  Got {:?}",
-            request.parsed_file_identifier
-        )
-        .into());
-    }
+    request
+        .file_identifier
+        .ensure_expected(NETWORK_TEST_REQUEST_IDENTIFIER)?;
     // println!("frame: {:?}", frame.payload);
-    let fake_root = network_test_request::root_as_fake_root(&request.frame.payload[..])?;
+    let fake_root = network_test_request::root_as_fake_root(request.frame.payload())?;
     let network_test_request = fake_root.network_test_request().unwrap();
     // println!("Got: {:?}", network_test_request);
     let reply_promise = network_test_request.reply_promise().unwrap();

@@ -4,7 +4,6 @@ use crate::flow::file_identifier::FileIdentifier;
 use bytes::{Buf, BytesMut};
 use num_derive::{FromPrimitive, ToPrimitive};
 use num_traits::{FromPrimitive, ToPrimitive};
-use std::io::Cursor;
 use tokio_util::codec::{Decoder, Encoder};
 use xxhash_rust::xxh3;
 
@@ -15,8 +14,10 @@ const MAX_FDB_FRAME_LENGTH: u32 = 1024 * 1024;
 pub struct Frame {
     pub token: UID,
     pub checksum: Option<u64>,
-    pub payload: std::vec::Vec<u8>,
+    payload_inner: std::vec::Vec<u8>,
+    offset: usize, // offset into payload where the "real" data starts.
 }
+
 // // The value does not include the size of `connectPacketLength` itself,
 // // but only the other fields of this structure.
 // uint32_t connectPacketLength = 0;
@@ -62,31 +63,38 @@ impl ConnectPacket {
             canonical_remote_ip6: [0; 16],
         }
     }
-    fn as_bytes(&self) -> Vec<u8> {
-        let mut vec = Vec::new();
-        let len_sz: usize = 4;
-        vec.extend_from_slice(&u32::to_le_bytes(0)); // len
-        vec.extend_from_slice(&u64::to_le_bytes(
+    fn append_to_buf(&self, buf: &mut BytesMut) -> Result<()> {
+        //let len_sz: usize = 4;
+        let version_sz: usize = 8;
+        let port_sz = 2;
+        let conn_id_sz = 8;
+        let conn_ip4_sz = 4;
+        let flags_sz = 2;
+        let len: usize = version_sz
+            + port_sz
+            + conn_id_sz
+            + conn_ip4_sz
+            + flags_sz
+            + self.canonical_remote_ip6.len();
+        buf.extend_from_slice(&u32::to_le_bytes(len.try_into()?));
+        buf.extend_from_slice(&u64::to_le_bytes(
             (self.version_flags as u64) << 60 | self.version,
         ));
-        vec.extend_from_slice(&u16::to_le_bytes(self.canonical_remote_port));
-        vec.extend_from_slice(&u64::to_le_bytes(self.connection_id));
-        vec.extend_from_slice(&u32::to_le_bytes(self.canonical_remote_ip4));
-        vec.extend_from_slice(&u16::to_le_bytes(
+        buf.extend_from_slice(&u16::to_le_bytes(self.canonical_remote_port));
+        buf.extend_from_slice(&u64::to_le_bytes(self.connection_id));
+        buf.extend_from_slice(&u32::to_le_bytes(self.canonical_remote_ip4));
+        buf.extend_from_slice(&u16::to_le_bytes(
             self.connect_packet_flags.to_u16().unwrap(),
         ));
-        vec.extend_from_slice(&self.canonical_remote_ip6);
-
-        let frame_sz = vec.len();
-        vec[0..len_sz].copy_from_slice(&u32::to_le_bytes((frame_sz - len_sz).try_into().unwrap()));
-        vec
+        buf.extend_from_slice(&self.canonical_remote_ip6);
+        Ok(())
+        //let frame_sz = vec.len();
+        //vec[0..len_sz].copy_from_slice(&u32::to_le_bytes((frame_sz - len_sz).try_into().unwrap()));
     }
 }
 
 fn get_connect_packet(bytes: &mut BytesMut) -> Result<Option<ConnectPacket>> {
-    let cur = Cursor::new(&bytes[..]);
-    let start: usize = cur.position().try_into()?;
-    let src = &cur.get_ref()[start..];
+    let src = &bytes[..];
 
     let len_sz: usize = 4;
     let version_sz = 8; // note that the 4 msb of the version are flags.
@@ -155,9 +163,7 @@ fn get_connect_packet(bytes: &mut BytesMut) -> Result<Option<ConnectPacket>> {
 }
 
 fn get_frame(bytes: &mut BytesMut) -> Result<Option<Frame>> {
-    let cur = Cursor::new(&bytes[..]);
-    let start: usize = cur.position().try_into()?;
-    let src = &cur.get_ref()[start..];
+    let src = &bytes[..];
     let len_sz = 4;
     let checksum_sz = 8;
     let uid_sz = 16;
@@ -177,12 +183,12 @@ fn get_frame(bytes: &mut BytesMut) -> Result<Option<Frame>> {
     let src = &src[len_sz..];
     let frame_length = len_sz + checksum_sz + len;
 
-    let checksum = Some(u64::from_le_bytes(src[0..checksum_sz].try_into()?));
-    let src = &src[checksum_sz..];
-
-    if src.len() < len {
+    if bytes.len() < frame_length {
         return Ok(None);
     }
+
+    let checksum = Some(u64::from_le_bytes(src[0..checksum_sz].try_into()?));
+    let src = &src[checksum_sz..];
 
     let uid = UID::new(src[0..uid_sz].try_into()?)?;
     let src = &src[uid_sz..];
@@ -197,33 +203,44 @@ fn get_frame(bytes: &mut BytesMut) -> Result<Option<Frame>> {
     Ok(Some(Frame {
         token: uid,
         checksum,
-        payload,
+        payload_inner: payload,
+        offset: 0,
     }))
 }
 
 impl Frame {
-    pub fn as_bytes(&self) -> Vec<u8> {
+    pub fn payload(&self) -> &[u8] {
+        &self.payload_inner[self.offset..]
+    }
+
+    pub fn append_to_buf(&self, buf: &mut BytesMut) -> Result<()> {
         let len_sz = 4;
         let checksum_sz = 8;
         let uid_sz = 16;
 
-        let mut vec = Vec::<u8>::with_capacity(len_sz + checksum_sz + uid_sz + self.payload.len());
-
-        let len: u32 = (self.payload.len() + 2 * 8).try_into().unwrap();
+        let len_usize = self.payload().len() + uid_sz;
+        let len: u32 = len_usize.try_into()?;
 
         if len > MAX_FDB_FRAME_LENGTH {
             println!("Attempt to serialize frame longer than FDB_MAX_FRAME_LENGTH");
             panic!();
         }
 
-        vec.extend_from_slice(&u32::to_le_bytes(len));
+        buf.reserve(buf.len() + len_sz + checksum_sz + len_usize);
+        buf.extend_from_slice(&u32::to_le_bytes(len));
+        // let checksum_off = buf.len();
         match self.checksum {
-            Some(checksum) => vec.extend_from_slice(&u64::to_le_bytes(checksum)),
-            None => (),
+            Some(checksum) => buf.extend_from_slice(&u64::to_le_bytes(checksum)),
+            None => buf.extend_from_slice(&u64::to_le_bytes(0)),
         };
-        vec.extend_from_slice(&u64::to_le_bytes(self.token.uid[0]));
-        vec.extend_from_slice(&u64::to_le_bytes(self.token.uid[1]));
-        vec.extend_from_slice(&self.payload[..]);
+        buf.extend_from_slice(&u64::to_le_bytes(self.token.uid[0]));
+        buf.extend_from_slice(&u64::to_le_bytes(self.token.uid[1]));
+        buf.extend_from_slice(&self.payload());
+
+        // if self.checksum.is_none() {
+        //     let checksum = xxh3::xxh3_64(&buf[checksum_off+8..]);
+        //     buf[checksum_off..checksum_off+8].copy_from_slice(&u64::to_le_bytes(checksum));
+        // }
 
         // println!(
         //     "sent len: {}, vec len: {}, checksum: {}, payload: {:x?} send: {:x?}",
@@ -233,26 +250,27 @@ impl Frame {
         //     self.payload,
         //     &vec
         // );
-        vec
+        Ok(())
     }
     pub fn peek_file_identifier(&self) -> Result<FileIdentifier> {
-        if self.payload.len() < 8 {
+        if self.payload().len() < 8 {
             Err(format!(
                 "Payload too short to contain file identifier: {:x?}",
-                self.payload
+                self.payload()
             )
             .into())
         } else {
-            let file_identifier = u32::from_le_bytes(self.payload[4..8].try_into()?);
+            let file_identifier = u32::from_le_bytes(self.payload()[4..8].try_into()?);
             FileIdentifier::new_from_wire(file_identifier)
         }
     }
 
     fn compute_checksum(&self) -> u64 {
         let mut digest = xxh3::Xxh3::new();
+        digest.reset();
         digest.update(&u64::to_le_bytes(self.token.uid[0]));
         digest.update(&u64::to_le_bytes(self.token.uid[1]));
-        digest.update(&self.payload);
+        digest.update(&self.payload());
         digest.digest()
     }
 
@@ -271,11 +289,12 @@ impl Frame {
 
     // Called new_reply because this populates the checksum field instead of
     // letting some downstream thing validate it.
-    pub fn new_reply(token: UID, payload: Vec<u8>) -> Self {
+    pub fn new_reply(token: UID, payload: Vec<u8>, offset: usize) -> Self {
         let mut frame = Self {
             token,
             checksum: None,
-            payload,
+            payload_inner: payload,
+            offset,
         };
         frame.checksum = Some(frame.compute_checksum());
         frame
@@ -309,9 +328,6 @@ impl Decoder for FrameDecoder {
     }
 }
 
-// TODO: The FrameEncoder API is single threaded, in that it wants to append multiple
-// frames to a BytesMut.  To use this, response_tx needs to take Frames, not vec<u8>
-
 pub struct FrameEncoder {
     writing_connect_packet: bool,
 }
@@ -328,10 +344,9 @@ impl Encoder<Frame> for FrameEncoder {
 
     fn encode(&mut self, frame: Frame, dst: &mut BytesMut) -> super::Result<()> {
         if self.writing_connect_packet {
-            dst.extend_from_slice(&ConnectPacket::new().as_bytes());
+            ConnectPacket::new().append_to_buf(dst)?;
             self.writing_connect_packet = false;
         }
-        dst.extend_from_slice(&frame.as_bytes()); // TODO: Remove copies
-        Ok(())
+        frame.append_to_buf(dst)
     }
 }

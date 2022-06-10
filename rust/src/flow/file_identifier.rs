@@ -12,6 +12,20 @@ pub struct FileIdentifier {
 }
 
 impl FileIdentifier {
+    // bit twiddling.  (private)
+
+    fn _id(file_identifier: u32) -> u32 {
+        file_identifier & 0x00FF_FFFF
+    }
+
+    fn _inner(file_identifier: u32) -> u32 {
+        (file_identifier >> 24) & 0xF
+    }
+
+    fn _outer(file_identifier: u32) -> u32 {
+        (file_identifier >> 28) & 0xF
+    }
+
     pub fn new(file_identifier: u32) -> Result<FileIdentifier> {
         if (file_identifier & 0xFF00_0000) != 0 {
             Err(format!("raw file identifier {} must be < 2^24", file_identifier).into())
@@ -20,8 +34,8 @@ impl FileIdentifier {
         }
     }
     pub fn new_from_wire(file_identifier: u32) -> Result<FileIdentifier> {
-        let inner = (file_identifier >> 24) & 0xF;
-        let outer = (file_identifier >> 28) & 0xF;
+        let inner = Self::_inner(file_identifier);
+        let outer = Self::_outer(file_identifier);
         if inner > 4 {
             Err(format!("Invalid inner wrapper type {:x}", file_identifier).into())
         } else if outer > 4 {
@@ -30,6 +44,26 @@ impl FileIdentifier {
             Ok(FileIdentifier { file_identifier })
         }
     }
+
+    pub fn ensure_expected(&self, parsed: ParsedFileIdentifier) -> Result<()> {
+        if Self::_inner(self.file_identifier) == parsed.inner_wrapper.to_u32().unwrap_or(0)
+            && Self::_outer(self.file_identifier) == parsed.outer_wrapper.to_u32().unwrap_or(0)
+            && Self::_id(self.file_identifier) == parsed.file_identifier
+        {
+            Ok(())
+        } else {
+            Err(format!(
+                "Expected {:?} got {:04x} (id = {:x}, inner = {:x}, outer = {:x})",
+                parsed,
+                self.file_identifier,
+                Self::_id(self.file_identifier),
+                Self::_inner(self.file_identifier),
+                Self::_outer(self.file_identifier)
+            )
+            .into())
+        }
+    }
+
     fn compose(&self, b: u8) -> Result<FileIdentifier> {
         if self.is_nested_composed() {
             Err("Attempt to double nest FileIdentifier".into())
@@ -44,10 +78,10 @@ impl FileIdentifier {
         }
     }
     fn is_composed(&self) -> bool {
-        (self.file_identifier & 0xF << 24) != 0
+        Self::_inner(self.file_identifier) != 0
     }
     fn is_nested_composed(&self) -> bool {
-        (self.file_identifier & 0xF << 28) != 0
+        Self::_outer(self.file_identifier) != 0
     }
     #[allow(dead_code)]
     pub fn to_reply_promise(&self) -> Result<FileIdentifier> {
@@ -95,6 +129,7 @@ pub struct ParsedFileIdentifier {
     pub outer_wrapper: IdentifierType,
     pub file_identifier_name: Option<&'static str>,
 }
+#[derive(Clone)]
 pub struct FileIdentifierNames {
     name_to_id: HashMap<&'static str, u32>,
     id_to_name: HashMap<u32, &'static str>,
@@ -114,7 +149,7 @@ impl FileIdentifierNames {
         };
         Ok(fin)
     }
-    pub fn from_id(&self, id: FileIdentifier) -> Result<ParsedFileIdentifier> {
+    pub fn from_id(&self, id: &FileIdentifier) -> Result<ParsedFileIdentifier> {
         let id = id.file_identifier;
         let file_identifier = id & 0x00FF_FFFF;
         let inner_wrapper = IdentifierType::from_u16((id >> 24) as u16 & 0xF)
@@ -178,7 +213,7 @@ fn test_file_identifier_table() -> Result<()> {
 #[test]
 fn test_file_identifier_names() -> Result<()> {
     let names = FileIdentifierNames::new()?;
-    let parsed = names.from_id(FileIdentifier {
+    let parsed = names.from_id(&FileIdentifier {
         file_identifier: 0x121ead4a,
     })?;
     assert_eq!(parsed.file_identifier, 0x1ead4a);
@@ -190,12 +225,12 @@ fn test_file_identifier_names() -> Result<()> {
         // into human-readable form.
         assert_eq!(
             names
-                .from_id(FileIdentifier {
+                .from_id(&FileIdentifier {
                     file_identifier: 35564874
                 })
                 .unwrap(),
             names
-                .from_id(FileIdentifier {
+                .from_id(&FileIdentifier {
                     file_identifier: 48019806
                 })
                 .unwrap()
