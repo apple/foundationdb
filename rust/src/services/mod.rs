@@ -35,7 +35,7 @@ struct Listener {
 const MAX_CONNECTIONS: usize = 250;
 const MAX_REQUESTS: usize = MAX_CONNECTIONS * 2;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Svc {}
 
 async fn handle_req(request: FlowRequest) -> Result<Option<FlowResponse>> {
@@ -103,11 +103,9 @@ async fn handle_frame(
     Ok(())
 }
 
-fn spawn_sender<C: 'static + AsyncWrite + Unpin + Send>(
+async fn sender<C: 'static + AsyncWrite + Unpin + Send>(
     mut response_rx: tokio::sync::mpsc::Receiver<Frame>,
-    mut writer: connection::ConnectionWriter<C>,
-) {
-    tokio::spawn(async move {
+    mut writer: connection::ConnectionWriter<C>) -> Result<()> {
         while let Some(frame) = response_rx.recv().await {
             writer.write_frame(frame).await.unwrap(); //XXX unwrap!
             loop {
@@ -120,28 +118,38 @@ fn spawn_sender<C: 'static + AsyncWrite + Unpin + Send>(
                         break;
                     }
                     Err(e) => {
-                        println!("Unexpected error! {:?}", e);
-                        return;
+                        return Err(e.into())
                     }
                 }
             }
         }
+        Ok(())
+    }
+
+fn spawn_sender<C: 'static + AsyncWrite + Unpin + Send>(
+    response_rx: tokio::sync::mpsc::Receiver<Frame>,
+    writer: connection::ConnectionWriter<C>,
+) {
+    tokio::spawn(async move {
+        match sender(response_rx, writer).await {
+            Ok(_) => {},
+            Err(e) => {
+                println!("Unexpected error from sender! {:?}", e);
+            }
+        }
+        // TODO: Connection teardown logic?
     });
 }
 
 pub async fn hello_tower(svc: Svc) -> Result<()> {
     let bind = TcpListener::bind(&format!("127.0.0.1:{}", 6789)).await?;
-    // let maker = ServiceBuilder::new().concurreny_limit(5).service(MakeSvc);
-    // let server = Server::new(maker);
     let limit_connections = Arc::new(Semaphore::new(MAX_CONNECTIONS));
 
     loop {
         let permit = limit_connections.clone().acquire_owned().await?;
         let socket = bind.accept().await?;
         println!("tower got socket from {}", socket.1);
-        let (mut reader, writer) = connection::new(socket.0);
-        // writer.send_connect_packet().await?;
-        // println!("sent ConnectPacket");
+        let (mut reader, writer) = connection::new(socket.0).await?;
 
         // Bound the number of backlogged messages to a given remote endpoint.  This is
         // set to the process-wide MAX_REQUESTS / 10 so that a few backpressuring receivers
@@ -195,7 +203,7 @@ async fn handle_connection<C: 'static + AsyncRead + AsyncWrite + Unpin + Send>(
     limit_requests: Arc<Semaphore>,
     conn: C,
 ) -> Result<()> {
-    let (mut reader, writer) = connection::new(conn);
+    let (mut reader, writer) = connection::new(conn).await?;
 
     // Bound the number of backlogged messages to a given remote endpoint.  This is
     // set to the process-wide MAX_REQUESTS / 10 so that a few backpressuring receivers

@@ -1,4 +1,4 @@
-use super::frame::{Frame, FrameDecoder, FrameEncoder};
+use super::frame::{ConnectPacket, Frame, FrameDecoder, FrameEncoder};
 use super::Result;
 use tokio_util::codec::{Decoder, Encoder};
 
@@ -19,27 +19,39 @@ pub struct ConnectionWriter<W: AsyncWrite> {
     frame_encoder: FrameEncoder,
 }
 
-pub fn new<C: AsyncRead + AsyncWrite + Unpin + Send>(
+pub async fn new<C: AsyncRead + AsyncWrite + Unpin + Send>(
     c: C,
-) -> (
+) -> Result<(
     ConnectionReader<ReadHalf<C>>,
     ConnectionWriter<WriteHalf<C>>,
-) {
+)> {
     let (reader, writer) = tokio::io::split(c);
-    let reader = ConnectionReader {
+    let mut reader = ConnectionReader {
         reader,
         buffer: BytesMut::new(),
         frame_decoder: FrameDecoder::new(),
     };
-    let writer = ConnectionWriter {
+    let mut writer = ConnectionWriter {
         writer: BufWriter::new(writer),
         buf: BytesMut::new(),
         frame_encoder: FrameEncoder::new(),
     };
-    (reader, writer)
+
+    writer.write_connnect_packet().await?;
+    let conn_packet = reader.read_connect_packet().await?;
+    println!("handshake succeeded: {:x?}", conn_packet);
+    // TODO: Check protocol compatibility, create object w/ enough info to allow request routing
+    Ok((reader, writer))
 }
 
 impl<W: AsyncWrite + Unpin> ConnectionWriter<W> {
+
+    pub async fn write_connnect_packet(&mut self) -> Result<()> {
+        ConnectPacket::new().serialize(&mut self.buf)?;
+        self.flush().await?;
+        Ok(())
+    }
+
     pub async fn write_frame(&mut self, frame: Frame) -> Result<()> {
         self.frame_encoder.encode(frame, &mut self.buf)?;
         if self.buf.len() > 1_000_000 {
@@ -57,6 +69,18 @@ impl<W: AsyncWrite + Unpin> ConnectionWriter<W> {
 }
 
 impl<R: AsyncRead + Unpin> ConnectionReader<R> {
+    pub async fn read_connect_packet(&mut self) -> Result<ConnectPacket> {
+        loop {
+            if let Some(connect_packet) = ConnectPacket::deserialize(&mut self.buffer)? {
+                return Ok(connect_packet);
+            }
+            if 0 == self.reader.read_buf(&mut self.buffer).await? {
+                // eof
+                return Err(format!("connection closed during handshake!").into());
+            }
+        }
+    }
+
     pub async fn read_frame(&mut self) -> Result<Option<Frame>> {
         loop {
             if let Some(frame) = self.frame_decoder.decode(&mut self.buffer)? {
