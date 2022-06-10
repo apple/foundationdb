@@ -54,6 +54,25 @@ public:
 	enum TSSMode { Disabled, EnabledNormal, EnabledAddDelay, EnabledDropMutations };
 
 	enum class BackupAgentType { NoBackupAgents, WaitForType, BackupToFile, BackupToDB };
+	enum class ExtraDatabaseMode { Disabled, LocalOrSingle, Single, Local, Multiple };
+
+	static ExtraDatabaseMode stringToExtraDatabaseMode(std::string databaseMode) {
+		if (databaseMode == "Disabled") {
+			return ExtraDatabaseMode::Disabled;
+		} else if (databaseMode == "LocalOrSingle") {
+			return ExtraDatabaseMode::LocalOrSingle;
+		} else if (databaseMode == "Single") {
+			return ExtraDatabaseMode::Single;
+		} else if (databaseMode == "Local") {
+			return ExtraDatabaseMode::Local;
+		} else if (databaseMode == "Multiple") {
+			return ExtraDatabaseMode::Multiple;
+		} else {
+			TraceEvent(SevError, "UnknownExtraDatabaseMode").detail("DatabaseMode", databaseMode);
+			ASSERT(false);
+			throw internal_error();
+		}
+	};
 
 	// Subclasses may subclass ProcessInfo as well
 	struct MachineInfo;
@@ -392,7 +411,7 @@ public:
 		allSwapsDisabled = false;
 	}
 	bool canSwapToMachine(Optional<Standalone<StringRef>> zoneId) const {
-		return swapsDisabled.count(zoneId) == 0 && !allSwapsDisabled && !extraDB;
+		return swapsDisabled.count(zoneId) == 0 && !allSwapsDisabled && extraDatabases.empty();
 	}
 	void enableSwapsToAll() {
 		swapsDisabled.clear();
@@ -419,7 +438,7 @@ public:
 	int listenersPerProcess;
 	std::set<NetworkAddress> protectedAddresses;
 	std::map<NetworkAddress, ProcessInfo*> currentlyRebootingProcesses;
-	std::unique_ptr<class ClusterConnectionString> extraDB;
+	std::vector<class ClusterConnectionString> extraDatabases;
 	Reference<IReplicationPolicy> storagePolicy;
 	Reference<IReplicationPolicy> tLogPolicy;
 	int32_t tLogWriteAntiQuorum;

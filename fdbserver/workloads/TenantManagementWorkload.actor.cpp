@@ -49,7 +49,7 @@ struct TenantManagementWorkload : TestWorkload {
 	Key tenantSubspace;
 
 	const Key keyName = "key"_sr;
-	const Key tenantSubspaceKey = "tenant_subspace"_sr;
+	const Key testParametersKey = "test_parameters"_sr;
 	const Value noTenantValue = "no_tenant"_sr;
 	const TenantName tenantNamePrefix = "tenant_management_workload_"_sr;
 	TenantName localTenantNamePrefix;
@@ -98,36 +98,59 @@ struct TenantManagementWorkload : TestWorkload {
 		testDuration = getOption(options, "testDuration"_sr, 60.0);
 
 		localTenantNamePrefix = format("%stenant_%d_", tenantNamePrefix.toString().c_str(), clientId);
-		useMetacluster = false;
+
+		bool defaultUseMetacluster = false;
+		if (clientId == 0 && g_network->isSimulated() && !g_simulator.extraDatabases.empty()) {
+			defaultUseMetacluster = deterministicRandom()->coinflip();
+		}
+
+		useMetacluster = getOption(options, "useMetacluster"_sr, defaultUseMetacluster);
 	}
 
 	std::string description() const override { return "TenantManagement"; }
+
+	struct TestParameters {
+		constexpr static FileIdentifier file_identifier = 1527576;
+
+		Key tenantSubspace;
+		bool useMetacluster = false;
+
+		TestParameters() {}
+		TestParameters(Key tenantSubspace, bool useMetacluster)
+		  : tenantSubspace(tenantSubspace), useMetacluster(useMetacluster) {}
+
+		template <class Ar>
+		void serialize(Ar& ar) {
+			serializer(ar, tenantSubspace, useMetacluster);
+		}
+
+		Value encode() const { return ObjectWriter::toValue(*this, Unversioned()); }
+
+		static TestParameters decode(ValueRef const& value) {
+			TestParameters params;
+			ObjectReader reader(value.begin(), Unversioned());
+			reader.deserialize(params);
+			return params;
+		}
+	};
 
 	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
 	ACTOR Future<Void> _setup(Database cx, TenantManagementWorkload* self) {
 		Reference<IDatabase> threadSafeHandle =
 		    wait(unsafeThreadFutureToFuture(ThreadSafeDatabase::createFromExistingDatabase(cx)));
-		TraceEvent("CreatedThreadSafeHandle");
 
 		MultiVersionApi::api->selectApiVersion(cx->apiVersion);
 		self->mvDb = MultiVersionDatabase::debugCreateFromExistingDatabase(threadSafeHandle);
 
-		if (self->useMetacluster) {
-
-			auto extraFile = makeReference<ClusterConnectionMemoryRecord>(*g_simulator.extraDB);
-			self->dataDb = Database::createDatabase(extraFile, -1);
-
-			if (self->clientId == 0) {
+		if (self->useMetacluster && self->clientId == 0) {
 				wait(success(ManagementAPI::changeConfig(cx.getReference(), "tenant_mode=management", true)));
 
 				DataClusterEntry entry;
 				entry.capacity.numTenantGroups = 1e9;
-				wait(MetaclusterAPI::registerCluster(self->mvDb, "cluster1"_sr, *g_simulator.extraDB, entry));
+			wait(MetaclusterAPI::registerCluster(self->mvDb, "cluster1"_sr, g_simulator.extraDatabases[0], entry));
 			}
-		} else {
-			self->dataDb = cx;
-		}
-		state Transaction tr(self->dataDb);
+
+		state Transaction tr(cx);
 		if (self->clientId == 0) {
 			// Configure the tenant subspace prefix that is applied to all tenants
 			// This feature isn't supported in a metacluster, so we skip it if doing a metacluster test.
@@ -143,13 +166,12 @@ struct TenantManagementWorkload : TestWorkload {
 				}
 			}
 
-			// Set a key outside of all tenants to make sure that our tenants aren't writing to the regular key-space
-			// Also communicates the chosen tenant subspace to all other clients by storing it in a key
+			// Communicates test parameters to all other clients by storing it in a key
 			loop {
 				try {
 					tr.setOption(FDBTransactionOptions::RAW_ACCESS);
-					tr.set(self->keyName, self->noTenantValue);
-					tr.set(self->tenantSubspaceKey, self->tenantSubspace);
+					tr.set(self->testParametersKey,
+					       TestParameters(self->tenantSubspace, self->useMetacluster).encode());
 					tr.set(tenantDataPrefixKey, self->tenantSubspace);
 					wait(tr.commit());
 					break;
@@ -157,14 +179,17 @@ struct TenantManagementWorkload : TestWorkload {
 					wait(tr.onError(e));
 				}
 			}
+
 		} else {
 			// Read the tenant subspace chosen and saved by client 0
 			loop {
 				try {
 					tr.setOption(FDBTransactionOptions::RAW_ACCESS);
-					Optional<Value> val = wait(tr.get(self->tenantSubspaceKey));
+					Optional<Value> val = wait(tr.get(self->testParametersKey));
 					if (val.present()) {
-						self->tenantSubspace = val.get();
+						TestParameters params = TestParameters::decode(val.get());
+						self->tenantSubspace = params.tenantSubspace;
+						self->useMetacluster = params.useMetacluster;
 						break;
 					}
 
@@ -172,6 +197,29 @@ struct TenantManagementWorkload : TestWorkload {
 					tr.reset();
 				} catch (Error& e) {
 					wait(tr.onError(e));
+				}
+			}
+		}
+
+		if (self->useMetacluster) {
+			ASSERT(g_simulator.extraDatabases.size() == 1);
+			auto extraFile = makeReference<ClusterConnectionMemoryRecord>(g_simulator.extraDatabases[0]);
+			self->dataDb = Database::createDatabase(extraFile, -1);
+		} else {
+			self->dataDb = cx;
+		}
+
+		if (self->clientId == 0) {
+			// Set a key outside of all tenants to make sure that our tenants aren't writing to the regular key-space
+			state Transaction dataTr(self->dataDb);
+			loop {
+				try {
+					dataTr.setOption(FDBTransactionOptions::RAW_ACCESS);
+					dataTr.set(self->keyName, self->noTenantValue);
+					wait(dataTr.commit());
+					break;
+				} catch (Error& e) {
+					wait(dataTr.onError(e));
 				}
 			}
 		}
@@ -281,7 +329,8 @@ struct TenantManagementWorkload : TestWorkload {
 				loop {
 					try {
 						Optional<Void> result =
-						    wait(timeout(self->createImpl(cx, tr, tenantsToCreate, operationType, self), 30));
+						    wait(timeout(self->createImpl(cx, tr, tenantsToCreate, operationType, self),
+						                 deterministicRandom()->randomInt(1, 30)));
 
 						if (result.present()) {
 							// Database operations shouldn't get here if the tenant already exists
@@ -570,8 +619,9 @@ struct TenantManagementWorkload : TestWorkload {
 				state bool retried = false;
 				loop {
 					try {
-						Optional<Void> result = wait(timeout(
-						    self->deleteImpl(cx, tr, beginTenant, endTenant, tenants, operationType, self), 30));
+						Optional<Void> result =
+						    wait(timeout(self->deleteImpl(cx, tr, beginTenant, endTenant, tenants, operationType, self),
+						                 deterministicRandom()->randomInt(1, 30)));
 
 						if (result.present()) {
 							// Database operations shouldn't get here if the tenant didn't exist
@@ -608,9 +658,6 @@ struct TenantManagementWorkload : TestWorkload {
 						} else {
 							ASSERT(resultEntry.get().tenantState == TenantState::READY);
 						}
-					} else if (deterministicRandom()->coinflip()) {
-						// Nothing to delete, so randomly retry
-						break;
 					}
 				}
 

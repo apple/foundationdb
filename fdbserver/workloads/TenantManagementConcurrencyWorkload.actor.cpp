@@ -35,6 +35,7 @@
 
 struct TenantManagementConcurrencyWorkload : TestWorkload {
 	const TenantName tenantNamePrefix = "tenant_management_concurrency_workload_"_sr;
+	const Key testParametersKey = "test_parameters"_sr;
 
 	int maxTenants;
 	int maxTenantGroups;
@@ -49,22 +50,50 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 		maxTenantGroups = std::min<int>(2 * maxTenants, getOption(options, "maxTenantGroups"_sr, 20));
 		testDuration = getOption(options, "testDuration"_sr, 60.0);
 
+		if (clientId == 0) {
+			useMetacluster = deterministicRandom()->coinflip();
+		} else {
+			// Other clients read the metacluster state from the database
 		useMetacluster = false;
+	}
 	}
 
 	std::string description() const override { return "TenantManagementConcurrency"; }
+
+	struct TestParameters {
+		constexpr static FileIdentifier file_identifier = 14350843;
+
+		bool useMetacluster = false;
+
+		TestParameters() {}
+		TestParameters(bool useMetacluster) : useMetacluster(useMetacluster) {}
+
+		template <class Ar>
+		void serialize(Ar& ar) {
+			serializer(ar, useMetacluster);
+		}
+
+		Value encode() const { return ObjectWriter::toValue(*this, Unversioned()); }
+
+		static TestParameters decode(ValueRef const& value) {
+			TestParameters params;
+			ObjectReader reader(value.begin(), Unversioned());
+			reader.deserialize(params);
+			return params;
+		}
+	};
 
 	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
 	ACTOR Future<Void> _setup(Database cx, TenantManagementConcurrencyWorkload* self) {
 		Reference<IDatabase> threadSafeHandle =
 		    wait(unsafeThreadFutureToFuture(ThreadSafeDatabase::createFromExistingDatabase(cx)));
-		TraceEvent("CreatedThreadSafeHandle");
 
 		MultiVersionApi::api->selectApiVersion(cx->apiVersion);
 		self->mvDb = MultiVersionDatabase::debugCreateFromExistingDatabase(threadSafeHandle);
 
 		if (self->useMetacluster) {
-			auto extraFile = makeReference<ClusterConnectionMemoryRecord>(*g_simulator.extraDB);
+			ASSERT(g_simulator.extraDatabases.size() == 1);
+			auto extraFile = makeReference<ClusterConnectionMemoryRecord>(g_simulator.extraDatabases[0]);
 			self->dataDb = Database::createDatabase(extraFile, -1);
 
 			if (self->clientId == 0) {
@@ -72,10 +101,43 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 
 				DataClusterEntry entry;
 				entry.capacity.numTenantGroups = 1e9;
-				wait(MetaclusterAPI::registerCluster(self->mvDb, "cluster1"_sr, *g_simulator.extraDB, entry));
+				wait(MetaclusterAPI::registerCluster(self->mvDb, "cluster1"_sr, g_simulator.extraDatabases[0], entry));
 			}
 		} else {
 			self->dataDb = cx;
+		}
+
+		state Transaction tr(cx);
+		if (self->clientId == 0) {
+			// Send test parameters to the other clients
+			loop {
+				try {
+					tr.setOption(FDBTransactionOptions::RAW_ACCESS);
+					tr.set(self->testParametersKey, TestParameters(self->useMetacluster).encode());
+					wait(tr.commit());
+					break;
+				} catch (Error& e) {
+					wait(tr.onError(e));
+				}
+			}
+		} else {
+			// Read the tenant subspace chosen and saved by client 0
+			loop {
+				try {
+					tr.setOption(FDBTransactionOptions::RAW_ACCESS);
+					Optional<Value> val = wait(tr.get(self->testParametersKey));
+					if (val.present()) {
+						TestParameters params = TestParameters::decode(val.get());
+						self->useMetacluster = params.useMetacluster;
+						break;
+					}
+
+					wait(delay(1.0));
+					tr.reset();
+				} catch (Error& e) {
+					wait(tr.onError(e));
+				}
+			}
 		}
 
 		return Void();

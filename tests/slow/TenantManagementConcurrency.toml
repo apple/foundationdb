@@ -1,7 +1,7 @@
 [configuration]
 allowDefaultTenant = false
 allowDisablingTenants = false
-extraDB = 2
+extraDatabaseMode = 'Single' 
 
 [[test]]
 testTitle = 'TenantManagementConcurrencyTest'
