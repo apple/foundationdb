@@ -177,13 +177,24 @@ struct GetRangeResult {
 };
 
 struct GetMappedRangeResult {
-	std::vector<std::tuple<std::string, // key
-	                       std::string, // value
-	                       std::string, // begin
-	                       std::string, // end
-	                       std::vector<std::pair<std::string, std::string>>, // range results
-	                       fdb_bool_t>>
-	    mkvs;
+	struct MappedKV {
+		MappedKV(const std::string& key,
+		         const std::string& value,
+		         const std::string& begin,
+		         const std::string& end,
+		         const std::vector<std::pair<std::string, std::string>>& range_results,
+		         fdb_bool_t boundaryAndExist)
+		  : key(key), value(value), begin(begin), end(end), range_results(range_results),
+		    boundaryAndExist(boundaryAndExist) {}
+
+		std::string key;
+		std::string value;
+		std::string begin;
+		std::string end;
+		std::vector<std::pair<std::string, std::string>> range_results;
+		fdb_bool_t boundaryAndExist;
+	};
+	std::vector<MappedKV> mkvs;
 	// True if values remain in the key range requested.
 	bool more;
 	// Set to a non-zero value if an error occurred during the transaction.
@@ -1093,24 +1104,24 @@ TEST_CASE("fdb_transaction_get_mapped_range") {
 		bool boundary;
 		for (int i = 0; i < expectSize; i++, id++) {
 			boundary = i == 0 || i == expectSize - 1;
-			const auto& [key, value, begin, end, range_results, boundaryAndExist] = result.mkvs[i];
+			const auto& mkv = result.mkvs[i];
 			if (matchIndex == MATCH_INDEX_ALL || i == 0 || i == expectSize - 1) {
-				CHECK(indexEntryKey(id).compare(key) == 0);
+				CHECK(indexEntryKey(id).compare(mkv.key) == 0);
 			} else if (matchIndex == MATCH_INDEX_MATCHED_ONLY) {
-				CHECK(indexEntryKey(id).compare(key) == 0);
+				CHECK(indexEntryKey(id).compare(mkv.key) == 0);
 			} else if (matchIndex == MATCH_INDEX_UNMATCHED_ONLY) {
-				CHECK(EMPTY.compare(key) == 0);
+				CHECK(EMPTY.compare(mkv.key) == 0);
 			} else {
-				CHECK(EMPTY.compare(key) == 0);
+				CHECK(EMPTY.compare(mkv.key) == 0);
 			}
-			bool empty = range_results.empty();
-			CHECK(boundaryAndExist == (boundary && !empty));
-			CHECK(EMPTY.compare(value) == 0);
-			CHECK(range_results.size() == SPLIT_SIZE);
+			bool empty = mkv.range_results.empty();
+			CHECK(mkv.boundaryAndExist == (boundary && !empty));
+			CHECK(EMPTY.compare(mkv.value) == 0);
+			CHECK(mkv.range_results.size() == SPLIT_SIZE);
 			for (int split = 0; split < SPLIT_SIZE; split++) {
-				auto& [k, v] = range_results[split];
-				CHECK(recordKey(id, split).compare(k) == 0);
-				CHECK(recordValue(id, split).compare(v) == 0);
+				auto& kv = mkv.range_results[split];
+				CHECK(recordKey(id, split).compare(kv.first) == 0);
+				CHECK(recordValue(id, split).compare(kv.second) == 0);
 			}
 		}
 		break;
@@ -1151,19 +1162,19 @@ TEST_CASE("fdb_transaction_get_mapped_range_missing_all_secondary") {
 		bool boundary;
 		for (int i = 0; i < expectSize; i++, id++) {
 			boundary = i == 0 || i == expectSize - 1;
-			const auto& [key, value, begin, end, range_results, boundaryAndExist] = result.mkvs[i];
+			const auto& mkv = result.mkvs[i];
 			if (matchIndex == MATCH_INDEX_ALL || i == 0 || i == expectSize - 1) {
-				CHECK(indexEntryKey(id).compare(key) == 0);
+				CHECK(indexEntryKey(id).compare(mkv.key) == 0);
 			} else if (matchIndex == MATCH_INDEX_MATCHED_ONLY) {
-				CHECK(EMPTY.compare(key) == 0);
+				CHECK(EMPTY.compare(mkv.key) == 0);
 			} else if (matchIndex == MATCH_INDEX_UNMATCHED_ONLY) {
-				CHECK(indexEntryKey(id).compare(key) == 0);
+				CHECK(indexEntryKey(id).compare(mkv.key) == 0);
 			} else {
-				CHECK(EMPTY.compare(key) == 0);
+				CHECK(EMPTY.compare(mkv.key) == 0);
 			}
-			bool empty = range_results.empty();
-			CHECK(boundaryAndExist == (boundary && !empty));
-			CHECK(EMPTY.compare(value) == 0);
+			bool empty = mkv.range_results.empty();
+			CHECK(mkv.boundaryAndExist == (boundary && !empty));
+			CHECK(EMPTY.compare(mkv.value) == 0);
 		}
 		break;
 	}
@@ -1269,10 +1280,8 @@ TEST_CASE("fdb_transaction_get_range reverse") {
 			std::string data_key = it->first;
 			std::string data_value = it->second;
 
-			auto [key, value] = *results_it;
-
-			CHECK(data_key.compare(key) == 0);
-			CHECK(data[data_key].compare(value) == 0);
+			CHECK(data_key.compare(results_it->first /*key*/) == 0);
+			CHECK(data[data_key].compare(results_it->second /*value*/) == 0);
 		}
 		break;
 	}
@@ -1306,8 +1315,8 @@ TEST_CASE("fdb_transaction_get_range limit") {
 			CHECK(result.more);
 		}
 
-		for (const auto& [key, value] : result.kvs) {
-			CHECK(data[key].compare(value) == 0);
+		for (const auto& kv : result.kvs) {
+			CHECK(data[kv.first].compare(kv.second) == 0);
 		}
 		break;
 	}
@@ -1338,8 +1347,8 @@ TEST_CASE("fdb_transaction_get_range FDB_STREAMING_MODE_EXACT") {
 		CHECK(result.kvs.size() == 3);
 		CHECK(result.more);
 
-		for (const auto& [key, value] : result.kvs) {
-			CHECK(data[key].compare(value) == 0);
+		for (const auto& kv : result.kvs) {
+			CHECK(data[kv.first].compare(kv.second) == 0);
 		}
 		break;
 	}
@@ -2212,7 +2221,7 @@ TEST_CASE("special-key-space custom transaction ID") {
 		fdb_check(f1.get(&out_present, (const uint8_t**)&val, &vallen));
 
 		REQUIRE(out_present);
-		UID transaction_id = UID::fromString(val);
+		UID transaction_id = UID::fromString(std::string(val, vallen));
 		CHECK(transaction_id == randomTransactionID);
 		break;
 	}

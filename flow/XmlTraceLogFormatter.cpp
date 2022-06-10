@@ -86,6 +86,6 @@ std::string XmlTraceLogFormatter::formatEvent(const TraceEventFields& fields) co
 		oss << "\" ";
 	}
 
-	oss << "/>\r\n";
+	oss << "/>\n";
 	return std::move(oss).str();
 }

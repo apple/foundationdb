@@ -43,6 +43,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ENABLE_VERSION_VECTOR_TLOG_UNICAST,                  false );
 	init( MAX_VERSION_RATE_MODIFIER,                             0.1 );
 	init( MAX_VERSION_RATE_OFFSET,               VERSIONS_PER_SECOND ); // If the calculated version is more than this amount away from the expected version, it will be clamped to this value. This prevents huge version jumps.
+	init( ENABLE_VERSION_VECTOR_HA_OPTIMIZATION,               false );
 
 	// TLogs
 	init( TLOG_TIMEOUT,                                          0.4 ); //cannot buggify because of availability
@@ -866,16 +867,17 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( LATENCY_METRICS_LOGGING_INTERVAL,                     60.0 );
 
 	// Cluster recovery
-	init ( CLUSTER_RECOVERY_EVENT_NAME_PREFIX,               "Master");
+	init ( CLUSTER_RECOVERY_EVENT_NAME_PREFIX,              "Master" );
 
-    // encrypt key proxy
-    init( ENABLE_ENCRYPTION,                                   false );
-    init( ENCRYPTION_MODE,                              "AES-256-CTR");
-    init( SIM_KMS_MAX_KEYS,                                      4096);
-    init( ENCRYPT_PROXY_MAX_DBG_TRACE_LENGTH,                  100000);
+	// encrypt key proxy
+	init( ENABLE_ENCRYPTION,                                   false ); if ( randomize && BUGGIFY ) { ENABLE_ENCRYPTION = deterministicRandom()->coinflip(); }
+	init( ENCRYPTION_MODE,                             "AES-256-CTR" );
+	init( SIM_KMS_MAX_KEYS,                                     4096 );
+	init( ENCRYPT_PROXY_MAX_DBG_TRACE_LENGTH,                 100000 );
+	init( ENABLE_TLOG_ENCRYPTION,                  ENABLE_ENCRYPTION ); if ( randomize && BUGGIFY) { ENABLE_TLOG_ENCRYPTION = (ENABLE_ENCRYPTION && !PROXY_USE_RESOLVER_PRIVATE_MUTATIONS && deterministicRandom()->coinflip()); }
 
     // KMS connector type
-    init( KMS_CONNECTOR_TYPE,                      "RESTKmsConnector");
+	init( KMS_CONNECTOR_TYPE,                     "RESTKmsConnector" );
 
 	// Blob granlues
 	init( BG_URL,               isSimulated ? "file://fdbblob/" : "" ); // TODO: store in system key space or something, eventually

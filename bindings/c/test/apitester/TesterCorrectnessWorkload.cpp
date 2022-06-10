@@ -19,6 +19,7 @@
  */
 #include "TesterApiWorkload.h"
 #include "TesterUtil.h"
+#include "test/fdb_api.hpp"
 #include <memory>
 #include <fmt/format.h>
 
@@ -33,36 +34,36 @@ private:
 
 	void randomCommitReadOp(TTaskFct cont) {
 		int numKeys = Random::get().randomInt(1, maxKeysPerTransaction);
-		auto kvPairs = std::make_shared<std::vector<KeyValue>>();
+		auto kvPairs = std::make_shared<std::vector<fdb::KeyValue>>();
 		for (int i = 0; i < numKeys; i++) {
-			kvPairs->push_back(KeyValue{ randomKey(readExistingKeysRatio), randomValue() });
+			kvPairs->push_back(fdb::KeyValue{ randomKey(readExistingKeysRatio), randomValue() });
 		}
 		execTransaction(
 		    [kvPairs](auto ctx) {
-			    for (const KeyValue& kv : *kvPairs) {
-				    ctx->tx()->set(kv.key, kv.value);
+			    for (const fdb::KeyValue& kv : *kvPairs) {
+				    ctx->tx().set(kv.key, kv.value);
 			    }
 			    ctx->commit();
 		    },
 		    [this, kvPairs, cont]() {
-			    for (const KeyValue& kv : *kvPairs) {
+			    for (const fdb::KeyValue& kv : *kvPairs) {
 				    store.set(kv.key, kv.value);
 			    }
-			    auto results = std::make_shared<std::vector<std::optional<std::string>>>();
+			    auto results = std::make_shared<std::vector<std::optional<fdb::Value>>>();
 			    execTransaction(
 			        [kvPairs, results, this](auto ctx) {
 				        if (apiVersion >= 710) {
 					        // Test GRV caching in 7.1 and later
-					        ctx->tx()->setOption(FDB_TR_OPTION_USE_GRV_CACHE);
+					        ctx->tx().setOption(FDB_TR_OPTION_USE_GRV_CACHE);
 				        }
-				        auto futures = std::make_shared<std::vector<Future>>();
+				        auto futures = std::make_shared<std::vector<fdb::Future>>();
 				        for (const auto& kv : *kvPairs) {
-					        futures->push_back(ctx->tx()->get(kv.key, false));
+					        futures->push_back(ctx->tx().get(kv.key, false));
 				        }
 				        ctx->continueAfterAll(*futures, [ctx, futures, results]() {
 					        results->clear();
 					        for (auto& f : *futures) {
-						        results->push_back(((ValueFuture&)f).getValue());
+						        results->push_back(copyValueRef(f.get<fdb::future_var::ValueRef>()));
 					        }
 					        ASSERT(results->size() == futures->size());
 					        ctx->done();
@@ -76,9 +77,9 @@ private:
 					        if (actual != expected) {
 						        error(
 						            fmt::format("randomCommitReadOp mismatch. key: {} expected: {:.80} actual: {:.80}",
-						                        (*kvPairs)[i].key,
-						                        expected,
-						                        actual));
+						                        fdb::toCharsRef((*kvPairs)[i].key),
+						                        fdb::toCharsRef(expected.value()),
+						                        fdb::toCharsRef(actual.value())));
 						        ASSERT(false);
 					        }
 				        }
@@ -89,21 +90,21 @@ private:
 
 	void randomGetOp(TTaskFct cont) {
 		int numKeys = Random::get().randomInt(1, maxKeysPerTransaction);
-		auto keys = std::make_shared<std::vector<std::string>>();
-		auto results = std::make_shared<std::vector<std::optional<std::string>>>();
+		auto keys = std::make_shared<std::vector<fdb::Key>>();
+		auto results = std::make_shared<std::vector<std::optional<fdb::Value>>>();
 		for (int i = 0; i < numKeys; i++) {
 			keys->push_back(randomKey(readExistingKeysRatio));
 		}
 		execTransaction(
 		    [keys, results](auto ctx) {
-			    auto futures = std::make_shared<std::vector<Future>>();
+			    auto futures = std::make_shared<std::vector<fdb::Future>>();
 			    for (const auto& key : *keys) {
-				    futures->push_back(ctx->tx()->get(key, false));
+				    futures->push_back(ctx->tx().get(key, false));
 			    }
 			    ctx->continueAfterAll(*futures, [ctx, futures, results]() {
 				    results->clear();
 				    for (auto& f : *futures) {
-					    results->push_back(((ValueFuture&)f).getValue());
+					    results->push_back(copyValueRef(f.get<fdb::future_var::ValueRef>()));
 				    }
 				    ASSERT(results->size() == futures->size());
 				    ctx->done();
@@ -115,9 +116,9 @@ private:
 				    auto expected = store.get((*keys)[i]);
 				    if ((*results)[i] != expected) {
 					    error(fmt::format("randomGetOp mismatch. key: {} expected: {:.80} actual: {:.80}",
-					                      (*keys)[i],
-					                      expected,
-					                      (*results)[i]));
+					                      fdb::toCharsRef((*keys)[i]),
+					                      fdb::toCharsRef(expected.value()),
+					                      fdb::toCharsRef((*results)[i].value())));
 				    }
 			    }
 			    schedule(cont);
