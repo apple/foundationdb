@@ -1499,17 +1499,13 @@ private:
 			case OPT_BUGGIFY:
 				if (!strcmp(args.OptionArg(), "on")) {
 					buggifyEnabled = knobsBuggifyEnabled = true;
-				}
-				else if (!strcmp(args.OptionArg(), "off")) {
+				} else if (!strcmp(args.OptionArg(), "off")) {
 					buggifyEnabled = knobsBuggifyEnabled = false;
-				}
-				else if (!strcmp(args.OptionArg(), "knobs")) {
+				} else if (!strcmp(args.OptionArg(), "knobs")) {
 					knobsBuggifyEnabled = true;
-				}
-				else if (!strcmp(args.OptionArg(), "macros")) {
- 					buggifyEnabled = true;
-				}
-				else {
+				} else if (!strcmp(args.OptionArg(), "macros")) {
+					buggifyEnabled = true;
+				} else {
 					fprintf(stderr, "ERROR: Unknown buggify state `%s'\n", args.OptionArg());
 					printHelpTeaser(argv[0]);
 					flushAndExit(FDB_EXIT_ERROR);
