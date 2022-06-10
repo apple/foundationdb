@@ -1,7 +1,7 @@
 use super::Result;
 
-use num_derive::FromPrimitive;
-use num_traits::FromPrimitive;
+use num_derive::{FromPrimitive, ToPrimitive};
+use num_traits::{FromPrimitive, ToPrimitive};
 
 #[derive(PartialEq, PartialOrd)]
 pub struct UID {
@@ -9,7 +9,7 @@ pub struct UID {
 }
 // This needs to be kept in sync with FlowTransport.h, but these almost never change.
 // Enum members are spelled like this in C++: WLTOKEN_ENDPOINT_NOT_FOUND
-#[derive(FromPrimitive, Debug)]
+#[derive(FromPrimitive, ToPrimitive, Debug)]
 pub enum WLTOKEN {
     EndpointNotFound = 0,
     PingPacket = 1,
@@ -56,9 +56,9 @@ impl UID {
         })
     }
     #[allow(dead_code)]
-    pub fn well_known_token(id: u64) -> UID {
+    pub fn well_known_token(id: WLTOKEN) -> UID {
         UID {
-            uid: [u64::MAX, id],
+            uid: [u64::MAX, id.to_u64().unwrap()],
         }
     }
     #[allow(dead_code)]

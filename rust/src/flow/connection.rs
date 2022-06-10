@@ -44,7 +44,6 @@ pub async fn new<C: AsyncRead + AsyncWrite + Unpin + Send>(
 }
 
 impl<W: AsyncWrite + Unpin> ConnectionWriter<W> {
-
     pub async fn write_connnect_packet(&mut self) -> Result<()> {
         ConnectPacket::new().serialize(&mut self.buf)?;
         self.flush().await?;

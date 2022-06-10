@@ -39,7 +39,7 @@ fn serialize_response(token: UID) -> Result<Frame> {
         .to_error_or()?
         .rewrite_flatbuf(&mut payload[offset..])?;
     // println!("reply: {:x?}", builder.finished_data());
-    Ok(Frame::new_reply(token, payload, offset))
+    Ok(Frame::new(token, payload, offset))
 }
 
 pub async fn handle(request: FlowRequest) -> Result<Option<FlowResponse>> {

@@ -94,47 +94,49 @@ impl ConnectPacket {
 
     pub fn deserialize(bytes: &mut BytesMut) -> Result<Option<ConnectPacket>> {
         let src = &bytes[..];
-    
+
         let len_sz: usize = 4;
         let version_sz = 8; // note that the 4 msb of the version are flags.
-    
+
         if src.len() < len_sz + version_sz {
             return Ok(None);
         }
-    
+
         let len = u32::from_le_bytes(src[0..len_sz].try_into()?);
-    
+
         if len > MAX_FDB_FRAME_LENGTH {
             return Err("Frame is too long!".into());
         }
-    
+
         let frame_length = len_sz + len as usize;
         let src = &src[len_sz..(len_sz + (len as usize))];
-    
+
         let version = u64::from_le_bytes(src[0..version_sz].try_into()?);
         let src = &src[version_sz..];
-    
+
         let version_flags: u8 = (version >> (60)).try_into()?;
         let version = version & !(0b1111 << 60);
-    
+
         let canonical_remote_port_sz = 2;
-        let canonical_remote_port = u16::from_le_bytes(src[0..canonical_remote_port_sz].try_into()?);
+        let canonical_remote_port =
+            u16::from_le_bytes(src[0..canonical_remote_port_sz].try_into()?);
         let src = &src[canonical_remote_port_sz..];
-    
+
         let connection_id_sz = 8;
         let connection_id = u64::from_le_bytes(src[0..connection_id_sz].try_into()?);
         let src = &src[connection_id_sz..];
-    
+
         let canonical_remote_ip4_sz = 4;
         let canonical_remote_ip4 = u32::from_le_bytes(src[0..canonical_remote_ip4_sz].try_into()?);
         let src = &src[canonical_remote_ip4_sz..];
-    
+
         let connect_packet_flags_sz = 2;
-        let connect_packet_flags_u16 = u16::from_le_bytes(src[0..connect_packet_flags_sz].try_into()?);
+        let connect_packet_flags_u16 =
+            u16::from_le_bytes(src[0..connect_packet_flags_sz].try_into()?);
         let connect_packet_flags = ConnectPacketFlags::from_u16(connect_packet_flags_u16)
             .ok_or::<super::Error>("Bad connect_packet_flags".into())?;
         let mut src = &src[connect_packet_flags_sz..];
-    
+
         let canonical_remote_ip6_sz = 16;
         let canonical_remote_ip6 = if src.len() >= 16 {
             let slice = &src[0..canonical_remote_ip6_sz];
@@ -143,7 +145,7 @@ impl ConnectPacket {
         } else {
             &[0; 16]
         };
-    
+
         let cp = ConnectPacket {
             version_flags,
             canonical_remote_port: canonical_remote_port,
@@ -153,14 +155,13 @@ impl ConnectPacket {
             connect_packet_flags: connect_packet_flags,
             canonical_remote_ip6: canonical_remote_ip6.try_into()?,
         };
-    
+
         if src.len() > 0 {
             println!("ConnectPacket: {:x?} (trailing garbage(?): {:?}", cp, src);
         }
         bytes.advance(frame_length);
         Ok(Some(cp))
     }
-    
 }
 
 fn get_frame(bytes: &mut BytesMut) -> Result<Option<Frame>> {
@@ -290,7 +291,7 @@ impl Frame {
 
     // Called new_reply because this populates the checksum field instead of
     // letting some downstream thing validate it.
-    pub fn new_reply(token: UID, payload: Vec<u8>, offset: usize) -> Self {
+    pub fn new(token: UID, payload: Vec<u8>, offset: usize) -> Self {
         let mut frame = Self {
             token,
             checksum: None,
@@ -302,13 +303,11 @@ impl Frame {
     }
 }
 
-pub struct FrameDecoder {
-}
+pub struct FrameDecoder {}
 
 impl FrameDecoder {
     pub fn new() -> FrameDecoder {
-        FrameDecoder {
-        }
+        FrameDecoder {}
     }
 }
 impl Decoder for FrameDecoder {
@@ -320,13 +319,11 @@ impl Decoder for FrameDecoder {
     }
 }
 
-pub struct FrameEncoder {
-}
+pub struct FrameEncoder {}
 
 impl FrameEncoder {
     pub fn new() -> FrameEncoder {
-        FrameEncoder {
-        }
+        FrameEncoder {}
     }
 }
 impl Encoder<Frame> for FrameEncoder {

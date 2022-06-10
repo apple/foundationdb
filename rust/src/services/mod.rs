@@ -6,12 +6,13 @@ use crate::flow::uid;
 use crate::flow::Result;
 
 use std::future::Future;
-use std::sync::Arc;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{Semaphore, OwnedSemaphorePermit};
+use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tower::Service;
 
 pub mod network_test;
@@ -37,7 +38,19 @@ const MAX_CONNECTIONS: usize = 250;
 const MAX_REQUESTS: usize = MAX_CONNECTIONS * 2;
 
 #[derive(Clone, Debug)]
-pub struct Svc {}
+pub struct Svc {
+    pub response_tx: Sender<Frame>,
+}
+
+impl Svc {
+    pub fn new() -> (Self, Receiver<Frame>) {
+        // Bound the number of backlogged messages to a given remote endpoint.  This is
+        // set to the process-wide MAX_REQUESTS / 10 so that a few backpressuring receivers
+        // can't consume all the request slots for this process.
+        let (response_tx, response_rx) = tokio::sync::mpsc::channel::<Frame>(MAX_REQUESTS / 10);
+        (Svc { response_tx }, response_rx)
+    }
+}
 
 async fn handle_req(request: FlowRequest) -> Result<Option<FlowResponse>> {
     request.frame.validate()?;
@@ -106,26 +119,25 @@ async fn handle_frame(
 
 async fn sender<C: 'static + AsyncWrite + Unpin + Send>(
     mut response_rx: tokio::sync::mpsc::Receiver<Frame>,
-    mut writer: connection::ConnectionWriter<C>) -> Result<()> {
-        while let Some(frame) = response_rx.recv().await {
-            writer.write_frame(frame).await.unwrap(); //XXX unwrap!
-            loop {
-                match response_rx.try_recv() {
-                    Ok(frame) => {
-                        writer.write_frame(frame).await.unwrap();
-                    }
-                    Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
-                        writer.flush().await.unwrap();
-                        break;
-                    }
-                    Err(e) => {
-                        return Err(e.into())
-                    }
+    mut writer: connection::ConnectionWriter<C>,
+) -> Result<()> {
+    while let Some(frame) = response_rx.recv().await {
+        writer.write_frame(frame).await.unwrap(); //XXX unwrap!
+        loop {
+            match response_rx.try_recv() {
+                Ok(frame) => {
+                    writer.write_frame(frame).await.unwrap();
                 }
+                Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
+                    writer.flush().await.unwrap();
+                    break;
+                }
+                Err(e) => return Err(e.into()),
             }
         }
-        Ok(())
     }
+    Ok(())
+}
 
 fn spawn_sender<C: 'static + AsyncWrite + Unpin + Send>(
     response_rx: tokio::sync::mpsc::Receiver<Frame>,
@@ -133,7 +145,7 @@ fn spawn_sender<C: 'static + AsyncWrite + Unpin + Send>(
 ) {
     tokio::spawn(async move {
         match sender(response_rx, writer).await {
-            Ok(_) => {},
+            Ok(_) => {}
             Err(e) => {
                 println!("Unexpected error from sender! {:?}", e);
             }
@@ -142,26 +154,29 @@ fn spawn_sender<C: 'static + AsyncWrite + Unpin + Send>(
     });
 }
 
-pub async fn spawn_connection_handler(svc: Svc, permit: Option<OwnedSemaphorePermit>, stream: TcpStream, addr: SocketAddr) -> Result<()> {
+pub async fn connection_handler(
+    svc: Svc,
+    response_rx: Receiver<Frame>,
+    permit: Option<OwnedSemaphorePermit>,
+    stream: TcpStream,
+    addr: SocketAddr,
+) -> Result<()> {
     let (mut reader, writer) = match connection::new(stream).await {
         Err(e) => {
             println!("{}: {:?}", addr, e);
             match permit {
                 Some(permit) => drop(permit),
-                None => ()
+                None => (),
             };
             return Err(e);
-        } Ok((reader, writer, connect_packet)) => {
+        }
+        Ok((reader, writer, connect_packet)) => {
             // TODO: Check protocol compatibility, create object w/ enough info to allow request routing
             println!("{}: {:x?}", addr, connect_packet);
             (reader, writer)
         }
     };
 
-    // Bound the number of backlogged messages to a given remote endpoint.  This is
-    // set to the process-wide MAX_REQUESTS / 10 so that a few backpressuring receivers
-    // can't consume all the request slots for this process.
-    let (response_tx, response_rx) = tokio::sync::mpsc::channel::<Frame>(MAX_REQUESTS / 10);
     spawn_sender(response_rx, writer);
 
     let mut svc = tower::limit::concurrency::ConcurrencyLimit::new(svc, MAX_REQUESTS);
@@ -181,7 +196,7 @@ pub async fn spawn_connection_handler(svc: Svc, permit: Option<OwnedSemaphorePer
                     frame,
                     file_identifier,
                 };
-                let response_tx = response_tx.clone();
+                let response_tx = svc.get_ref().response_tx.clone();
                 // poll_ready and call must be invoked atomically
                 // we could read this before reading the next frame to prevent the next, throttled request from consuming
                 // TCP buffers.  However, keeping one extra frame around (above the limit) is unlikely to matter in terms
@@ -201,17 +216,24 @@ pub async fn spawn_connection_handler(svc: Svc, permit: Option<OwnedSemaphorePer
     }
     match permit {
         Some(permit) => drop(permit),
-        None => ()
+        None => (),
     };
     Ok(())
 }
-pub async fn listen(bind: TcpListener, svc: Svc) -> Result<()> {
+pub async fn listen(bind: TcpListener) -> Result<()> {
     let limit_connections = Arc::new(Semaphore::new(MAX_CONNECTIONS));
 
     loop {
         let permit = limit_connections.clone().acquire_owned().await?;
         let socket = bind.accept().await?;
-        tokio::spawn(spawn_connection_handler(svc.clone(), Some(permit), socket.0, socket.1));
+        let (svc, response_rx) = Svc::new();
+        tokio::spawn(connection_handler(
+            svc,
+            response_rx,
+            Some(permit),
+            socket.0,
+            socket.1,
+        ));
     }
 }
 

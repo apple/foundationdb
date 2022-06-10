@@ -7,7 +7,7 @@ use tokio::net::TcpListener;
 async fn main() -> flow::Result<()> {
     let bind = TcpListener::bind(&format!("127.0.0.1:{}", 6789)).await?;
 
-    services::listen(bind, services::Svc{}).await?;
+    services::listen(bind).await?;
     println!("Goodbye, cruel world!");
 
     Ok(())

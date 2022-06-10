@@ -66,7 +66,7 @@ fn serialize_error_or_network_test_response(token: UID, response_len: u32) -> Re
         .to_error_or()?
         .rewrite_flatbuf(&mut payload[offset..])?;
     // println!("reply: {:x?}", builder.finished_data());
-    Ok(Frame::new_reply(token, payload, offset))
+    Ok(Frame::new(token, payload, offset))
 }
 
 pub async fn handle(request: FlowRequest) -> Result<Option<FlowResponse>> {
