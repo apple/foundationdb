@@ -56,7 +56,7 @@ set(FDBSERVER_SRCS
   KeyValueStoreCompressTestData.actor.cpp
   KeyValueStoreMemory.actor.cpp
   KeyValueStoreRocksDB.actor.cpp
-  # KeyValueStoreShardedRocksDB.actor.cpp
+  KeyValueStoreShardedRocksDB.actor.cpp
   KeyValueStoreSQLite.actor.cpp
   KmsConnector.h
   KmsConnectorInterface.h

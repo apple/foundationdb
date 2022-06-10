@@ -1759,16 +1759,16 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		}
 	}
 
-	// Future<Void> addRange(KeyRangeRef range, std::string id) override {
-	// 	auto shard = shardManager.addRange(range, id);
-	// 	if (shard->initialized()) {
-	// 		return Void();
-	// 	}
-	// 	auto a = new Writer::AddShardAction(shard);
-	// 	Future<Void> res = a->done.getFuture();
-	// 	writeThread->post(a);
-	// 	return res;
-	// }
+	Future<Void> addRange(KeyRangeRef range, std::string id) override {
+		auto shard = shardManager.addRange(range, id);
+		if (shard->initialized()) {
+			return Void();
+		}
+		auto a = new Writer::AddShardAction(shard);
+		Future<Void> res = a->done.getFuture();
+		writeThread->post(a);
+		return res;
+	}
 
 	void set(KeyValueRef kv, const Arena*) override { shardManager.put(kv.key, kv.value); }
 

@@ -378,9 +378,7 @@ struct StorageServerDisk {
 	void writeKeyValue(KeyValueRef kv);
 	void clearRange(KeyRangeRef keys);
 
-	Future<Void> addShard(std::string id) { return storage->addShard(id); }
-
-	void addRange(KeyRangeRef range, std::string id) { storage->addRange(range, id); }
+	Future<Void> addRange(KeyRangeRef range, std::string id) { return storage->addRange(range, id); }
 
 	std::vector<std::string> removeRange(KeyRangeRef range) { return storage->removeRange(range); }
 
@@ -665,8 +663,11 @@ public:
 	struct PendingNewShard {
 		PendingNewShard(StorageServer* data, uint64_t shardId, KeyRangeRef range, Promise<Void> kvReady)
 		  : data(data), shardId(std::to_string(shardId)), range(range), kvReady(kvReady) {
-			this->shardReady = data->storage.addShard(std::to_string(shardId));
+			// this->shardReady = data->storage.addShard(std::to_string(shardId));
 		}
+
+		PendingNewShard(uint64_t shardId, KeyRangeRef range, Promise<Void> kvReady)
+		  : shardId(std::to_string(shardId)), range(range), kvReady(kvReady) {}
 
 		ACTOR Future<Void> addRangeToShard(PendingNewShard* self) {
 			wait(self->shardReady);
@@ -674,6 +675,12 @@ public:
 			self->data->storage.addRange(self->range, self->shardId);
 			self->kvReady.send(Void());
 			return Void();
+		}
+
+		std::string toString() const {
+			return format("PendingNewShard: [ShardID]: %s [Range]: %s",
+			              this->shardId,
+			              Traceable<KeyRangeRef>::toString(this->range));
 		}
 
 		StorageServer* data;
@@ -7438,7 +7445,7 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 				if (!shard->assigned()) {
 					updatedShards.push_back(
 					    StorageServerShard(range, cVer, desiredId, desiredId, StorageServerShard::MovingIn));
-					data->pendingAddRanges[cVer].emplace_back(data, desiredId, range, kvReady);
+					data->pendingAddRanges[cVer].emplace_back(desiredId, range, kvReady);
 					TraceEvent(SevVerbose, "SSAssignShard", data->thisServerID)
 					    .detail("Range", range)
 					    .detail("NowAssigned", nowAssigned)
@@ -8638,16 +8645,35 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 			}
 		}
 
-		state bool checkAddRanges = false;
+		if (!data->pendingAddRanges.empty()) {
+			auto u = data->getMutationLog().upper_bound(newOldestVersion);
+			ASSERT(u != data->getMutationLog().end());
+			ASSERT(u->first <= data->pendingAddRanges.begin()->first);
+			if (u->first == data->pendingAddRanges.begin()->first) {
+				ASSERT(!data->pendingAddRanges.begin()->second.empty());
+				TraceEvent(SevDebug, "AddingRangesReady", data->thisServerID)
+				    .detail("Version", data->pendingAddRanges.begin()->first)
+				    .detail("DurableVersion", data->durableVersion.get())
+				    .detail("NewRanges", describe(data->pendingAddRanges.begin()->second));
+				state std::vector<Future<Void>> fAddRanges;
+				for (const auto& shard : data->pendingAddRanges.begin()->second) {
+					fAddRanges.push_back(data->storage.addRange(shard.range, shard.shardId));
+				}
+				wait(waitForAll(fAddRanges));
+				data->pendingAddRanges.erase(data->pendingAddRanges.begin());
+			}
+		}
+
 		if (!data->pendingAddRanges.empty()) {
 			const Version aVer = data->pendingAddRanges.begin()->first;
-			if (cVer <= desiredVersion) {
+			if (aVer <= desiredVersion) {
 				TraceEvent(SevDebug, "AddRangeVersionSatisfied", data->thisServerID)
 				    .detail("DesiredVersion", desiredVersion)
 				    .detail("DurableVersion", data->durableVersion.get())
 				    .detail("AddRangeVersion", aVer);
-				desiredVersion = aVer - 1;
-				checkAddRanges = true;
+				auto it = data->getMutationLog().find(aVer);
+				ASSERT(it != data->getMutationLog().end());
+				desiredVersion = (--it)->first;
 			}
 		}
 

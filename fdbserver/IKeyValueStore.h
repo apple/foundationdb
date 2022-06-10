@@ -92,9 +92,7 @@ public:
 	                                      ReadType type = ReadType::NORMAL) = 0;
 
 	// Shard management APIs.
-	virtual Future<Void> addShard(std::string id) { return Void(); }
-
-	virtual void addRange(KeyRangeRef range, std::string id) {}
+	virtual Future<Void> addRange(KeyRangeRef range, std::string id) { return Void(); }
 
 	virtual std::vector<std::string> removeRange(KeyRangeRef range) { return std::vector<std::string>(); }
 
