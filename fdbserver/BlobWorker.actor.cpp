@@ -2875,7 +2875,6 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 				continue;
 			}
 			state Reference<GranuleMetadata> metadata = m;
-			state Version granuleBeginVersion = req.beginVersion;
 
 			choose {
 				when(wait(metadata->readable.getFuture())) {}
@@ -2993,7 +2992,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 			ASSERT(metadata->cancelled.canBeSet());
 
 			for (auto& c : chunks) {
-
+				Version granuleBeginVersion = req.beginVersion;
 				// Right now we force a collapse if the version range crosses granule boundaries, for simplicity
 				if (granuleBeginVersion > 0 && granuleBeginVersion <= c.second.snapshotFiles.front().version) {
 					TEST(true); // collapsed begin version request because of boundaries
