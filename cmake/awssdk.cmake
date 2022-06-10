@@ -3,10 +3,16 @@ project(awssdk-download NONE)
 # Compile the sdk with clang and libc++, since otherwise we get libc++ vs libstdc++ link errors when compiling fdb with clang
 set(AWSSDK_COMPILER_FLAGS "")
 set(AWSSDK_LINK_FLAGS "")
+
 if(APPLE OR CLANG OR USE_LIBCXX)
   set(AWSSDK_COMPILER_FLAGS -stdlib=libc++ -nostdlib++)
   set(AWSSDK_LINK_FLAGS -stdlib=libc++ -lc++abi)
 endif()
+
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
+  list(APPEND AWSSDK_LINK_FLAGS -mno-outline-atomics)
+endif()
+
 
 include(ExternalProject)
 ExternalProject_Add(awssdk_project

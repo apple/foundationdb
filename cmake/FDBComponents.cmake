@@ -228,7 +228,8 @@ set(COROUTINE_IMPL ${DEFAULT_COROUTINE_IMPL} CACHE STRING "Which coroutine imple
 # AWS SDK
 ################################################################################
 
-set(BUILD_AWS_BACKUP OFF CACHE BOOL "Build AWS S3 SDK backup client")
+# TODO: change back after CI completes!
+set(BUILD_AWS_BACKUP ON CACHE BOOL "Build AWS S3 SDK backup client")
 if (BUILD_AWS_BACKUP)
   set(WITH_AWS_BACKUP ON)
 else()
