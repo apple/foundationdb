@@ -164,7 +164,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( BACKUP_MAX_LOG_RANGES,                    21 ); if( randomize && BUGGIFY_KNOB ) BACKUP_MAX_LOG_RANGES = 4;
 	init( BACKUP_SIM_COPY_LOG_RANGES,              100 );
 	init( BACKUP_VERSION_DELAY,           5*CORE_VERSIONSPERSECOND );
-	bool buggifyMapLimits = randomize && BUGGIFY;
+	bool buggifyMapLimits = randomize && BUGGIFY_KNOB;
 	init( BACKUP_MAP_KEY_LOWER_LIMIT,              1e4 ); if( buggifyMapLimits ) BACKUP_MAP_KEY_LOWER_LIMIT = 4;
 	init( BACKUP_MAP_KEY_UPPER_LIMIT,              1e5 ); if( buggifyMapLimits ) BACKUP_MAP_KEY_UPPER_LIMIT = 30;
 	init( BACKUP_COPY_TASKS,                        90 );
@@ -249,7 +249,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	// Client Status Info
 	init(CSI_SAMPLING_PROBABILITY, -1.0);
 	init(CSI_SIZE_LIMIT, std::numeric_limits<int64_t>::max());
-	if (randomize && BUGGIFY) {
+	if (randomize && BUGGIFY_KNOB) {
 		CSI_SAMPLING_PROBABILITY = deterministicRandom()->random01() / 10; // rand range 0 - 0.1
 		CSI_SIZE_LIMIT = deterministicRandom()->randomInt(1024 * 1024, 100 * 1024 * 1024); // 1 MB - 100 MB
 	}
