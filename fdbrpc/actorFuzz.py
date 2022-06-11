@@ -420,8 +420,8 @@ def random_actor(index):
         )  # Add a return at the end if the end is reachable
         name = "actorFuzz%d" % index
         text = (
-            "ACTOR Future<int> %s( FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error ) {\n"
-            % name
+            "ACTOR Future<int> %s( FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error"
+            " ) {\n " % name
             + "\tstate int ifstate = 0;\n"
             + str(actor)
             + "}"
@@ -433,7 +433,7 @@ def random_actor(index):
             print("Infinite loop for actor %s" % name)
             continue
         if result == RETURN:
-            ecx.out(ecx.returnValue)
+            ecx.out(ecx.inp)
         elif result == THROW:
             ecx.out(1000)
         else:
