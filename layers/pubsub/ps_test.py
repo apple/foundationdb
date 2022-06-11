@@ -23,11 +23,12 @@
 import os
 import sys
 
+import fdb
+from pubsub_bigdoc import PubSub
+
 sys.path[:0] = [
     os.path.join(os.path.dirname(__file__), "..", "..", "bindings", "python")
 ]
-import fdb
-from pubsub_bigdoc import PubSub
 
 fdb.api_version(14)
 db = fdb.open("/home/bbc/fdb.cluster", "DB")

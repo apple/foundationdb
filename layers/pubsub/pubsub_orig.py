@@ -59,12 +59,12 @@ Created on May 14, 2012
 
 import os
 import sys
+import fdb
+import struct
 
 sys.path[:0] = [
     os.path.join(os.path.dirname(__file__), "..", "..", "bindings", "python")
 ]
-import fdb
-import struct
 
 
 def key_for_feed(feed):

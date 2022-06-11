@@ -22,20 +22,19 @@
 
 import os
 import sys
-
-sys.path[:0] = [
-    os.path.join(os.path.dirname(__file__), "..", "..", "bindings", "python")
-]
 import fdb
 import argparse
 import random
 import gevent
 
 from gevent import monkey
+from pubsub_bigdoc import PubSub
+
+sys.path[:0] = [
+    os.path.join(os.path.dirname(__file__), "..", "..", "bindings", "python")
+]
 
 monkey.patch_thread()
-
-from pubsub_bigdoc import PubSub
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--zkAddr")
@@ -58,7 +57,7 @@ name = os.uname()[1]
 print("sending messages", end=" ")
 
 
-def message_client():
+def message_client(i):
     gevent.sleep(random.random())
     messages_sent = 0
     while messages_sent < args.messages / args.threads:
@@ -72,7 +71,7 @@ def message_client():
             ps.get_inbox_messages(ps.get_inbox_by_name("%09d" % user), 10)
 
 
-jobs = [gevent.spawn(message_client) for i in range(0, args.threads)]
+jobs = [gevent.spawn(message_client(i)) for i in range(0, args.threads)]
 gevent.joinall(jobs)
 
 print("done")

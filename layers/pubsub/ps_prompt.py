@@ -23,11 +23,12 @@
 import os
 import sys
 
+import fdb
+from pubsub_bigdoc import PubSub
+
 sys.path[:0] = [
     os.path.join(os.path.dirname(__file__), "..", "..", "bindings", "python")
 ]
-import fdb
-from pubsub_bigdoc import PubSub
 
 db = fdb.open("10.0.3.1:2181/bbc", "TwitDB")
 

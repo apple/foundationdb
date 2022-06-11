@@ -84,7 +84,7 @@ class FdbTreap(object):
     def set_key(self, tr, key, value, metric):
         is_new = True
         is_root = True
-        child = tuple(key, tuple("", "", random.random(), metric, value))
+        child = tuple(key, ["", "", random.random(), metric, value])
         parent = tuple()
 
         # find self or parent

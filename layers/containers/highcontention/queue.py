@@ -35,6 +35,7 @@ only one popping client, but will not scale well to many popping clients.
 
 import time
 import os
+import threading
 
 import fdb
 import fdb.tuple
@@ -165,12 +166,12 @@ class Queue:
     @fdb.transactional
     def _pop_simple(self, tr):
 
-        firstItem = self._get_first_item(tr)
-        if firstItem is None:
+        first_item = self._get_first_item(tr)
+        if first_item is None:
             return None
 
-        del tr[firstItem.key]
-        return firstItem.value
+        del tr[first_item.key]
+        return first_item.value
 
     @fdb.transactional
     def _add_conflicted_pop(self, tr, forced=False):
@@ -206,7 +207,7 @@ class Queue:
             tr[storage_key] = v
             del tr[pop.key]
             del tr[k]
-            i = i + 1
+            i += 1
 
         for pop in pops[i:]:
             del tr[pop.key]
@@ -338,9 +339,6 @@ def pop_thread(queue, db, id, num):
     print("Finished pop thread %d" % id)
 
 
-import threading
-
-
 def queue_multi_client_example(db):
     descriptions = ["simple queue", "high contention queue"]
 
@@ -349,24 +347,24 @@ def queue_multi_client_example(db):
         queue = Queue(Subspace(("queue_example",)), highContention > 0)
         queue.clear(db)
 
-        pushThreads = [
+        push_threads = [
             threading.Thread(target=push_thread, args=(queue, db, i, 100))
             for i in range(10)
         ]
-        popThreads = [
+        pop_threads = [
             threading.Thread(target=pop_thread, args=(queue, db, i, 100))
             for i in range(10)
         ]
 
         start = time.time()
 
-        for push in pushThreads:
+        for push in push_threads:
             push.start()
-        for pop in popThreads:
+        for pop in pop_threads:
             pop.start()
-        for push in pushThreads:
+        for push in push_threads:
             push.join()
-        for pop in popThreads:
+        for pop in pop_threads:
             pop.join()
 
         end = time.time()

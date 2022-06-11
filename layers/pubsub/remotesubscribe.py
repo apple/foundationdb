@@ -22,14 +22,15 @@
 
 import os
 import sys
+import fdb
+import argparse
+import random
+
+from pubsub_bigdoc import PubSub
 
 sys.path[:0] = [
     os.path.join(os.path.dirname(__file__), "..", "..", "bindings", "python")
 ]
-import fdb
-import argparse
-import random
-from pubsub_bigdoc import PubSub
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--zkAddr")

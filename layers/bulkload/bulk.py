@@ -24,7 +24,7 @@ Provides a BulkLoader class for loading external datasets to FoundationDB. The
 layer assumes that the loading operation has no requirements for atomicity or
 isolation.
 
-The layer is designed to be extensibly via subclasses of BulkLoader that handle
+The layer is designed to be extensible via subclasses of BulkLoader that handle
 external data sources and internal data models. Example subclasses are supplied
 for:
 
@@ -57,9 +57,9 @@ fdb.api_version(22)
 db = fdb.open(event_model="gevent")
 
 
-#####################################
-## This defines a Subspace of keys ##
-#####################################
+###################################
+# This defines a Subspace of keys #
+###################################
 
 
 class Subspace(object):
@@ -89,9 +89,9 @@ def clear_subspace(tr, subspace):
     tr.clear_range_startswith(subspace.key())
 
 
-##############################
-## Base class for the layer ##
-##############################
+############################
+# Base class for the layer #
+############################
 
 
 class BulkLoader(Queue):
@@ -124,10 +124,10 @@ class BulkLoader(Queue):
 
     def produce_and_consume(self):
         producers = [
-            gevent.spawn(self._producer) for _ in xrange(self._number_producers)
+            gevent.spawn(self._producer) for _ in range(self._number_producers)
         ]
         consumers = [
-            gevent.spawn(self._consumer) for _ in xrange(self._number_consumers)
+            gevent.spawn(self._consumer) for _ in range(self._number_consumers)
         ]
         gevent.joinall(producers)
         gevent.joinall(consumers)
@@ -150,9 +150,9 @@ def test_loader():
     tasks.produce_and_consume()
 
 
-####################
-## Reader classes ##
-####################
+##################
+# Reader classes #
+##################
 
 
 class ReadCSV(BulkLoader):
@@ -228,12 +228,12 @@ class ReadJSON(BulkLoader):
         if isinstance(input, dict):
             return {
                 self._convert(key, number): self._convert(value, number)
-                for key, value in input.iteritems()
+                for key, value in input.items()
             }
         elif isinstance(input, list):
             return [self._convert(element, number) for element in input]
-        elif isinstance(input, unicode):
-            return input.encode("utf-8")
+        elif isinstance(input, bytes):
+            return input.decode("ascii")
         elif number and isinstance(input, numbers.Number):
             return str(input).encode("utf-8")
         else:
@@ -298,9 +298,9 @@ class ReadBlob(BulkLoader):
                     print("I/O error({0}): {1}".format(e.errno, e.strerror))
 
 
-####################
-## Writer classes ##
-####################
+##################
+# Writer classes #
+##################
 
 
 class WriteKVP(BulkLoader):
@@ -410,9 +410,9 @@ class WriteBlob(BulkLoader):
         self._blob.write(tr, offset, chunk)
 
 
-##################################
-## Combined readers and writers ##
-##################################
+################################
+# Combined readers and writers #
+################################
 
 
 class CSVtoKVP(ReadCSV, WriteKVP):

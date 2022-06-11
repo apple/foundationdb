@@ -134,9 +134,7 @@ class TaskBucket(object):
                 return None
         key = self.available.unpack(k)[0]
         avail = self.available[key]
-        timeout = tr.get_read_version().wait() + long(
-            self.timeout * (0.9 + 0.2 * random.random())
-        )
+        timeout = tr.get_read_version().wait() + self.timeout * (0.9 + 0.2 * random.random())
 
         task_dict = {}
         for k, v in tr[avail.range(())]:

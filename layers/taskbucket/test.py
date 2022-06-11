@@ -22,16 +22,15 @@
 
 import sys
 import os
+import fdb
+import taskbucket
+import time
+import sys
 
 sys.path[:0] = [
     os.path.join(os.path.dirname(__file__), "..", "..", "bindings", "python")
 ]
 sys.path[:0] = [os.path.join(os.path.dirname(__file__), "..", "..", "layers")]
-
-import fdb
-import taskbucket
-import time
-import sys
 
 fdb.api_version(200)
 

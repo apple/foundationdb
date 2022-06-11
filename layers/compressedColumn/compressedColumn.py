@@ -54,7 +54,8 @@ class Column:
     def _is_packed_key(self, key):
         return str(key).startswith(fdb.tuple.pack((self.columnName, _packedPrefix)))
 
-    # This results in slight inefficiencies when the key being searched for comes before the first packed segment with strictRange=False
+    # This results in slight inefficiencies when the key being searched for comes before the first packed segment
+    # with strictRange=False
     def _get_packed_data(self, key, packed_range, require_key=True, strict_range=True):
         found = False
         key_range = None
@@ -279,7 +280,7 @@ class Column:
                         last_row = row.key
                         # print 'Set last_row = \'' + repr(last_row) + '\''
 
-                    last_row = last_row + chr(0)
+                    last_row += chr(0)
                     if (max_key is not None and merged.finishedPack) or (
                         max_key is None and new_pack.bytes > self.targetChunkSize
                     ):
@@ -306,10 +307,10 @@ class Column:
 
 
 class _ColumnStream:
-    def __init__(self, db, column, startKey):
+    def __init__(self, db, column, start_key):
         self.column = column
         self.db = db
-        self.currentKey = startKey
+        self.currentKey = start_key
         self.results = []
         self.resultsIndex = 0
         self.firstRead = True
@@ -321,13 +322,13 @@ class _ColumnStream:
         return self
 
     def next(self):
-        value = self._readNextRow(self.db)
+        value = self._read_next_row(self.db)
         if value is None:
             raise StopIteration
         else:
             return value
 
-    def _readNextRow(self, db):
+    def _read_next_row(self, db):
         # print 'Reading next row'
         if self.resultsIndex >= len(self.results):
             # print 'Fetching rows'
@@ -357,7 +358,8 @@ class _ColumnStream:
         # print 'Using start key %s' % start_key
 
         # Read next packed and unpacked entries
-        # FIXME: Should we read unpacked after getting the result of the packed data?  If we do, then we can more accurately limit the number
+        # FIXME: Should we read unpacked after getting the result of the packed data?  If we do, then we can more
+        #  accurately limit the number
         # of results that we get back
         unpacked = self.column._get_unpacked_range(
             tr, start_key, "\xff", self.fetchCount
@@ -383,7 +385,8 @@ class _ColumnStream:
 
         self.results = merged.results
 
-        # print 'Getting range %s - %s (%d)' % (start_key, fdb.tuple.pack((self.column.columnName + chr(0))), self.fetchCount)
+        # print 'Getting range %s - %s (%d)' % (start_key, fdb.tuple.pack((self.column.columnName + chr(0))),
+        # self.fetchCount)
         self.resultsIndex = 0
         self.firstRead = False
 

@@ -50,7 +50,7 @@ def setup_topology(feeds, inboxes):
     inbox_map = {}
     for i in range(inboxes):
         inbox_map[i] = ps.create_inbox("Bob " + str(i))
-        for f in random.sample(xrange(feeds), random.randint(1, feeds)):
+        for f in random.sample(range(feeds), random.randint(1, feeds)):
             ps.create_subscription(inbox_map[i], feed_map[f])
     return feed_map, inbox_map
 

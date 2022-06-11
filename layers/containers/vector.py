@@ -24,6 +24,8 @@ Provides the Vector() class for storing and manipulating arrays
 in FoundationDB.
 """
 
+import sys
+
 import fdb
 import fdb.tuple
 
@@ -521,9 +523,6 @@ def vector_test(tr):
 ##############################
 # Vector sample usage #
 ##############################
-
-
-import sys
 
 
 # caution: modifies the database!
