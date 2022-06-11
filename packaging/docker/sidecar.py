@@ -239,7 +239,7 @@ class Config(object):
         if self.main_container_version == self.primary_version:
             self.substitutions["BINARY_DIR"] = "/usr/bin"
         else:
-            self.substitutions["BINARY_DIR"] = target_path = str(
+            self.substitutions["BINARY_DIR"] = str(
                 Path("%s/bin/%s" % (args.main_container_conf_dir, self.primary_version))
             )
 
@@ -367,12 +367,7 @@ class Server(BaseHTTPRequestHandler):
             server.socket = context.wrap_socket(server.socket, server_side=True)
             observer = Observer()
             event_handler = CertificateEventHandler()
-            for path in set(
-                [
-                    Path(config.certificate_file).parent.as_posix(),
-                    Path(config.key_file).parent.as_posix(),
-                ]
-            ):
+            for path in {Path(config.certificate_file).parent.as_posix(), Path(config.key_file).parent.as_posix()}:
                 observer.schedule(event_handler, path)
             observer.start()
 
@@ -505,7 +500,7 @@ class Server(BaseHTTPRequestHandler):
                     elif operator == ">" and entry[1].startswith(expected_value):
                         return True
 
-    def do_GET(self):
+    def do_get(self):
         """
         This method executes a GET request.
         """
@@ -541,7 +536,7 @@ class Server(BaseHTTPRequestHandler):
             self.send_error(500)
             self.end_headers()
 
-    def do_POST(self):
+    def do_post(self):
         """
         This method executes a POST request.
         """

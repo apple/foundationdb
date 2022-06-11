@@ -120,7 +120,8 @@ if __name__ == "__main__":
         "-C",
         dest="clusterFile",
         type=str,
-        help="The cluster file to be converted. If unspecified, the cluster file at /etc/foundationdb/fdb.cluster is used.",
+        help="The cluster file to be converted. If unspecified, the cluster file at /etc/foundationdb/fdb.cluster is " +
+             "used.",
         default="/etc/foundationdb/fdb.cluster",
     )
     parser.add_argument(
