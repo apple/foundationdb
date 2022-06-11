@@ -8797,6 +8797,13 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 			requireCheckpoint = false;
 		}
 
+		while (!data->pendingRemoveRanges.empty() && data->pendingRemoveRanges.begin()->first <= newOldestVersion) {
+			for (const auto& range : data->pendingRemoveRanges.begin()->second) {
+				std::vector<std::string> ignored = data->storage.removeRange(range);
+			}
+			data->pendingRemoveRanges.erase(data->pendingRemoveRanges.begin());
+		}
+
 		if (newOldestVersion > data->rebootAfterDurableVersion) {
 			TraceEvent("RebootWhenDurableTriggered", data->thisServerID)
 			    .detail("NewOldestVersion", newOldestVersion)
