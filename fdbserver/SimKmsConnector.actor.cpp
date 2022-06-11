@@ -109,7 +109,7 @@ ACTOR Future<Void> ekLookupByIds(Reference<SimKmsConnectorContext> ctx,
 		const auto& itr = ctx->simEncryptKeyStore.find(item.baseCipherId);
 		if (itr != ctx->simEncryptKeyStore.end()) {
 			rep.cipherKeyDetails.emplace_back_deep(
-			    req.arena, item.domainId, itr->first, StringRef(itr->second.get()->key));
+			    rep.arena, item.domainId, itr->first, StringRef(itr->second.get()->key));
 
 			if (dbgKIdTrace.present()) {
 				// {encryptDomainId, baseCipherId} forms a unique tuple across encryption domains
