@@ -36,8 +36,8 @@ class Workspace(object):
 
     @fdb.transactional
     def _update(self, tr):
-        self.dir.remove(tr, (u"current"))
-        self.dir.move(tr, (u"new"), (u"current"))
+        self.dir.remove(tr, u"current")
+        self.dir.move(tr, u"new", u"current")
 
     @property
     def current(self):

@@ -19,13 +19,12 @@
 #
 
 import fdb
-
-fdb.api_version(300)
-db = fdb.open()
-
 import itertools
 import json
 import random
+
+fdb.api_version(300)
+db = fdb.open()
 
 doc_space = fdb.Subspace(("D",))
 
