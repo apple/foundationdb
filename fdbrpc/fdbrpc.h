@@ -98,7 +98,7 @@ struct NetSAV final : SAV<T>, FlowReceiver, FastAllocated<NetSAV<T>> {
 	  : SAV<T>(futures, promises), FlowReceiver(remoteEndpoint, false) {}
 
 	void destroy() override { delete this; }
-	void receive(ArenaObjectReader& reader) override {
+	void receive(ArenaObjectReader& reader, SessionInfo&) override {
 		if (!SAV<T>::canBeSet())
 			return;
 		this->addPromiseRef();
@@ -294,7 +294,7 @@ struct AcknowledgementReceiver final : FlowReceiver, FastAllocated<Acknowledgeme
 
 	bool isPublic() const override { return true; }
 
-	void receive(ArenaObjectReader& reader) override {
+	void receive(ArenaObjectReader& reader, SessionInfo&) override {
 		ErrorOr<AcknowledgementReply> message;
 		reader.deserialize(message);
 		if (message.isError()) {
@@ -344,7 +344,7 @@ struct NetNotifiedQueueWithAcknowledgements final : NotifiedQueue<T>,
 	bool isPublic() const override { return true; }
 
 	void destroy() override { delete this; }
-	void receive(ArenaObjectReader& reader) override {
+	void receive(ArenaObjectReader& reader, SessionInfo&) override {
 		this->addPromiseRef();
 		ErrorOr<EnsureTable<T>> message;
 		reader.deserialize(message);
@@ -658,7 +658,7 @@ struct NetNotifiedQueue final : NotifiedQueue<T>, FlowReceiver, FastAllocated<Ne
 	  : NotifiedQueue<T>(futures, promises), FlowReceiver(remoteEndpoint, true) {}
 
 	void destroy() override { delete this; }
-	void receive(ArenaObjectReader& reader) override {
+	void receive(ArenaObjectReader& reader, SessionInfo&) override {
 		this->addPromiseRef();
 		T message;
 		reader.deserialize(message);

@@ -28,7 +28,6 @@
 #include <memcheck.h>
 #endif
 
-#include "fdbrpc/TenantInfo.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/HealthMonitor.h"
@@ -204,7 +203,7 @@ struct EndpointNotFoundReceiver final : NetworkMessageReceiver {
 		    this, Endpoint::wellKnownToken(WLTOKEN_ENDPOINT_NOT_FOUND), TaskPriority::DefaultEndpoint);
 	}
 
-	void receive(ArenaObjectReader& reader) override {
+	void receive(ArenaObjectReader& reader, SessionInfo&) override {
 		// Remote machine tells us it doesn't have endpoint e
 		UID token;
 		reader.deserialize(token);
@@ -216,8 +215,8 @@ struct EndpointNotFoundReceiver final : NetworkMessageReceiver {
 
 struct PingRequest {
 	constexpr static FileIdentifier file_identifier = 4707015;
-	ReplyPromise<Void> reply{ PeerCompatibilityPolicy{ RequirePeer::AtLeast,
-		                                               ProtocolVersion::withStableInterfaces() } };
+	ReplyPromise<SessionInfo> reply{ PeerCompatibilityPolicy{ RequirePeer::AtLeast,
+															  ProtocolVersion::withStableInterfaces() } };
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, reply);
@@ -228,10 +227,10 @@ struct PingReceiver final : NetworkMessageReceiver {
 	PingReceiver(EndpointMap& endpoints) {
 		endpoints.insertWellKnown(this, Endpoint::wellKnownToken(WLTOKEN_PING_PACKET), TaskPriority::ReadSocket);
 	}
-	void receive(ArenaObjectReader& reader) override {
+	void receive(ArenaObjectReader& reader, SessionInfo& sessionInfo) override {
 		PingRequest req;
 		reader.deserialize(req);
-		req.reply.send(Void());
+		req.reply.send(sessionInfo);
 	}
 	PeerCompatibilityPolicy peerCompatibilityPolicy() const override {
 		return PeerCompatibilityPolicy{ RequirePeer::AtLeast, ProtocolVersion::withStableInterfaces() };
@@ -239,18 +238,30 @@ struct PingReceiver final : NetworkMessageReceiver {
 	bool isPublic() const override { return true; }
 };
 
+struct AuthorizationRequest {
+	constexpr static FileIdentifier file_identifier = 11499331;
+
+	Arena arena;
+	VectorRef<StringRef> tenants;
+	ReplyPromise<Void> reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, tenants, reply, arena);
+	}
+};
+
 struct TenantAuthorizer final : NetworkMessageReceiver {
 	TenantAuthorizer(EndpointMap& endpoints) {
 		endpoints.insertWellKnown(this, Endpoint::wellKnownToken(WLTOKEN_AUTH_TENANT), TaskPriority::ReadSocket);
 	}
-	void receive(ArenaObjectReader& reader) override {
+	void receive(ArenaObjectReader& reader, SessionInfo& sessionInfo) override {
 		AuthorizationRequest req;
 		try {
 			reader.deserialize(req);
 			// TODO: verify that token is valid
-			AuthorizedTenants& auth = reader.variable<AuthorizedTenants>("AuthorizedTenants");
 			for (auto const& t : req.tenants) {
-				auth.authorizedTenants.insert(TenantInfoRef(auth.arena, t));
+				sessionInfo.authorizedTenants.emplace(sessionInfo.arena, t);
 			}
 			req.reply.send(Void());
 		} catch (Error& e) {
@@ -270,7 +281,7 @@ struct UnauthorizedEndpointReceiver final : NetworkMessageReceiver {
 		    this, Endpoint::wellKnownToken(WLTOKEN_UNAUTHORIZED_ENDPOINT), TaskPriority::ReadSocket);
 	}
 
-	void receive(ArenaObjectReader& reader) override {
+	void receive(ArenaObjectReader& reader, SessionInfo&) override {
 		UID token;
 		reader.deserialize(token);
 		Endpoint e = FlowTransport::transport().loadedEndpoint(token);
@@ -356,7 +367,6 @@ public:
 	double lastIncompatibleMessage;
 	uint64_t transportId;
 	IPAllowList allowList;
-	std::shared_ptr<ContextVariableMap> localCVM = std::make_shared<ContextVariableMap>(); // for local delivery
 
 	Future<Void> multiVersionCleanup;
 	Future<Void> pingLogger;
@@ -578,7 +588,7 @@ ACTOR Future<Void> connectionMonitor(Reference<Peer> peer) {
 					startingBytes = peer->bytesReceived;
 					timeouts++;
 				}
-				when(wait(pingRequest.reply.getFuture())) {
+				when(SessionInfo sessionInfo = wait(pingRequest.reply.getFuture())) {
 					if (peer->destination.isPublic()) {
 						peer->pingLatencies.addSample(now() - startTime);
 					}
@@ -1013,8 +1023,7 @@ ACTOR static void deliver(TransportData* self,
                           TaskPriority priority,
                           ArenaReader reader,
                           NetworkAddress peerAddress,
-                          Reference<AuthorizedTenants> authorizedTenants,
-                          std::shared_ptr<ContextVariableMap> cvm,
+						  std::shared_ptr<SessionInfo> sessionInfo,
                           InReadSocket inReadSocket,
                           Future<Void> disconnect) {
 	// We want to run the task at the right priority. If the priority is higher than the current priority (which is
@@ -1029,7 +1038,7 @@ ACTOR static void deliver(TransportData* self,
 	}
 
 	auto receiver = self->endpoints.get(destination.token);
-	if (receiver && (authorizedTenants->trusted || receiver->isPublic())) {
+	if (receiver && (sessionInfo->isPeerTrusted || receiver->isPublic())) {
 		if (!checkCompatible(receiver->peerCompatibilityPolicy(), reader.protocolVersion())) {
 			return;
 		}
@@ -1039,8 +1048,7 @@ ACTOR static void deliver(TransportData* self,
 			StringRef data = reader.arenaReadAll();
 			ASSERT(data.size() > 8);
 			ArenaObjectReader objReader(reader.arena(), reader.arenaReadAll(), AssumeVersion(reader.protocolVersion()));
-			objReader.setContextVariableMap(cvm);
-			receiver->receive(objReader);
+			receiver->receive(objReader, *sessionInfo);
 			g_currentDeliveryPeerAddress = { NetworkAddress() };
 			g_currentDeliveryPeerDisconnect = Future<Void>();
 		} catch (Error& e) {
@@ -1092,8 +1100,7 @@ static void scanPackets(TransportData* transport,
                         const uint8_t* e,
                         Arena& arena,
                         NetworkAddress const& peerAddress,
-                        Reference<AuthorizedTenants> const& authorizedTenants,
-                        std::shared_ptr<ContextVariableMap> cvm,
+						std::shared_ptr<SessionInfo> sessionInfo,
                         ProtocolVersion peerProtocolVersion,
                         Future<Void> disconnect,
                         IsStableConnection isStableConnection) {
@@ -1215,8 +1222,7 @@ static void scanPackets(TransportData* transport,
 			        priority,
 			        std::move(reader),
 			        peerAddress,
-			        authorizedTenants,
-			        cvm,
+			        sessionInfo,
 			        InReadSocket::True,
 			        disconnect);
 		}
@@ -1263,14 +1269,11 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 	state bool incompatiblePeerCounted = false;
 	state NetworkAddress peerAddress;
 	state ProtocolVersion peerProtocolVersion;
-	state Reference<AuthorizedTenants> authorizedTenants = makeReference<AuthorizedTenants>();
-	state std::shared_ptr<ContextVariableMap> cvm = std::make_shared<ContextVariableMap>();
+	state std::shared_ptr<SessionInfo> sessionInfo = std::make_shared<SessionInfo>();
 	peerAddress = conn->getPeerAddress();
-	authorizedTenants->trusted = transport->allowList(conn->getPeerAddress().ip);
-	(*cvm)["AuthorizedTenants"] = &authorizedTenants;
-	(*cvm)["PeerAddress"] = &peerAddress;
+	sessionInfo->peerAddress = peerAddress;
+	sessionInfo->isPeerTrusted = conn->hasTrustedPeer() && transport->allowList(peerAddress.ip);
 
-	authorizedTenants->trusted = transport->allowList(peerAddress.ip);
 	if (!peer) {
 		ASSERT(!peerAddress.isPublic());
 	}
@@ -1420,8 +1423,7 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 						            unprocessed_end,
 						            arena,
 						            peerAddress,
-						            authorizedTenants,
-						            cvm,
+						            sessionInfo,
 						            peerProtocolVersion,
 						            peer->disconnect.getFuture(),
 						            IsStableConnection(g_network->isSimulated() && conn->isStableConnection()));
@@ -1717,15 +1719,17 @@ static void sendLocal(TransportData* self, ISerializeSource const& what, const E
 	ASSERT(copy.size() > 0);
 	TaskPriority priority = self->endpoints.getPriority(destination.token);
 	if (priority != TaskPriority::UnknownEndpoint || (destination.token.first() & TOKEN_STREAM_FLAG) != 0) {
-		Reference<AuthorizedTenants> authorizedTenants = makeReference<AuthorizedTenants>();
-		authorizedTenants->trusted = true;
+		auto sessionInfo = std::make_shared<SessionInfo>();
+		// Assumption: sendLocal is always server-to-itself traffic and therefore trusted
+		// TODO: decide whether this is good as it is, or we should bind a pre-existing,
+		//       client-related authz outcome to authorize this properly
+		sessionInfo->isPeerTrusted = true;
 		deliver(self,
 		        destination,
 		        priority,
 		        ArenaReader(copy.arena(), copy, AssumeVersion(currentProtocolVersion)),
 		        NetworkAddress(),
-		        authorizedTenants,
-		        self->localCVM,
+		        sessionInfo,
 		        InReadSocket::False,
 		        Never());
 	}

@@ -24,13 +24,14 @@
 #pragma once
 
 #include <algorithm>
-#include "fdbrpc/HealthMonitor.h"
+#include <set>
 #include "flow/genericactors.actor.h"
 #include "flow/network.h"
 #include "flow/FileIdentifier.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/Net2Packet.h"
 #include "fdbrpc/ContinuousSample.h"
+#include "fdbrpc/HealthMonitor.h"
 
 enum {
 	WLTOKEN_ENDPOINT_NOT_FOUND = 0,
@@ -131,10 +132,28 @@ struct PeerCompatibilityPolicy {
 	ProtocolVersion version;
 };
 
+// information about the peer that request streams might need or need to modify
+struct SessionInfo {
+	static constexpr FileIdentifier file_identifier = 1968531;
+	Arena arena;
+	bool isPeerTrusted;
+	NetworkAddress peerAddress;
+	std::set<StringRef> authorizedTenants;
+
+	bool isAuthorizedForTenant(StringRef tenant) const {
+		return authorizedTenants.find(tenant) != authorizedTenants.end();
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, isPeerTrusted, peerAddress, authorizedTenants, arena);
+	}
+};
+
 class ArenaObjectReader;
 class NetworkMessageReceiver {
 public:
-	virtual void receive(ArenaObjectReader&) = 0;
+	virtual void receive(ArenaObjectReader&, SessionInfo&) = 0;
 	virtual bool isStream() const { return false; }
 	virtual bool isPublic() const = 0;
 	virtual PeerCompatibilityPolicy peerCompatibilityPolicy() const {

@@ -26,8 +26,6 @@
 
 #include <unordered_map>
 
-using ContextVariableMap = std::unordered_map<std::string_view, void*>;
-
 template <class Ar>
 struct LoadContext {
 	Ar* ar;
@@ -75,12 +73,10 @@ template <class ReaderImpl>
 class _ObjectReader {
 protected:
 	Optional<ProtocolVersion> mProtocolVersion;
-	std::shared_ptr<ContextVariableMap> variables;
 
 public:
 	ProtocolVersion protocolVersion() const { return mProtocolVersion.get(); }
 	void setProtocolVersion(ProtocolVersion v) { mProtocolVersion = v; }
-	void setContextVariableMap(std::shared_ptr<ContextVariableMap> const& cvm) { variables = cvm; }
 
 	template <class... Items>
 	void deserialize(FileIdentifier file_identifier, Items&... items) {
@@ -108,24 +104,6 @@ public:
 	template <class Item>
 	void deserialize(Item& item) {
 		deserialize(FileIdentifierFor<Item>::value, item);
-	}
-
-	template <class T>
-	bool variable(std::string_view name, T* val) {
-		auto p = variables->insert(std::make_pair(name, val));
-		return p.second;
-	}
-
-	template <class T>
-	T& variable(std::string_view name) {
-		auto res = variables->at(name);
-		return *reinterpret_cast<T*>(res);
-	}
-
-	template <class T>
-	T const& variable(std::string_view name) const {
-		auto res = variables->at(name);
-		return *reinterpret_cast<T*>(res);
 	}
 };
 
