@@ -18,8 +18,6 @@
 # limitations under the License.
 #
 
-import numpy
-
 
 class RateModel:
     def __init__(self):

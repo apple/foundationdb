@@ -82,7 +82,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(
         description="Prints version information for an FDB client library (e.g. %s). Must be run on a library built "
-        + "for the current platform (%s). " % (default_lib, platform_name)
+                    "for the current platform (%s). " % (default_lib, platform_name)
     )
     parser.add_argument(
         "library_path",

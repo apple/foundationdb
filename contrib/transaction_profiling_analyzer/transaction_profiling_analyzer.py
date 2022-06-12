@@ -911,7 +911,7 @@ class WriteCounter(object):
                     0:num
                 ]
         else:
-            results = [(key, end, count) for (count, key) in count_pairs[0:num]]
+            results = [(key, count) for (count, key) in count_pairs[0:num]]
 
         return results
 
@@ -1172,7 +1172,7 @@ def main():
                 if not shard_count:
                     print(
                         " %d. [%s, %s]\n     %d sampled %s\n"
-                        % (idx + 1, start, end, count, context)
+                        % (idx + 1, start, end, total_count, context)
                     )
                 else:
                     addresses_string = (

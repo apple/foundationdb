@@ -182,6 +182,7 @@ class TimePositiveBudgetLimiter(PositiveBudgetLimiter):
         # params.num_started, self.priority, params.min_priority, params.last_batch))
 
         if params.num_started > self.limit:
+            penalty = 0  # No idea what this should be
             self.locked_until = min(
                 params.time + 2.0,
                 max(params.time, self.locked_until) + penalty / self.rate,
