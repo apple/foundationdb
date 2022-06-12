@@ -130,15 +130,14 @@ def fill_options(scope, predicates=False):
         if predicates:
             f = pred_wrap(code)
         else:
-            if param_type == type(None):
+            if isinstance(param_type, type(None)):
                 f = option_wrap(code)
-            elif param_type == type(""):
+            elif isinstance(param_type, type("")):
                 f = option_wrap_string(code)
-            elif param_type == type(
-                b""
-            ):  # This won't happen in Python 2 because type('') == type(b''), but it will happen in Python 3
+            elif isinstance(param_type, type(b"")):
+                # This won't happen in Python 2 because type('') == type(b''), but it will happen in Python 3
                 f = option_wrap_bytes(code)
-            elif param_type == type(0):
+            elif isinstance(param_type, type(0)):
                 f = option_wrap_int(code)
             else:
                 raise TypeError(
@@ -385,11 +384,11 @@ class FDBRange(object):
         )
 
     def to_list(self):
-        if self._mode == StreamingMode.iterator:
+        if self._mode == fdb.StreamingMode.iterator:
             if self._limit > 0:
-                mode = StreamingMode.exact
+                mode = fdb.StreamingMode.exact
             else:
-                mode = StreamingMode.want_all
+                mode = fdb.StreamingMode.want_all
         else:
             mode = self._mode
 
@@ -501,7 +500,7 @@ class TransactionRead(_FDBBase):
         return key_or_selector
 
     def get_range(
-        self, begin, end, limit=0, reverse=False, streaming_mode=StreamingMode.iterator
+        self, begin, end, limit=0, reverse=False, streaming_mode=fdb.StreamingMode.iterator
     ):
         if begin is None:
             begin = b""
@@ -619,7 +618,7 @@ class Transaction(TransactionRead):
         begin = key_to_bytes(begin)
         end = key_to_bytes(end)
         self.capi.fdb_transaction_add_conflict_range(
-            self.tpointer, begin, len(begin), end, len(end), ConflictRangeType.read
+            self.tpointer, begin, len(begin), end, len(end), fdb.ConflictRangeType.read
         )
 
     def add_read_conflict_key(self, key):
@@ -630,7 +629,7 @@ class Transaction(TransactionRead):
         begin = key_to_bytes(begin)
         end = key_to_bytes(end)
         self.capi.fdb_transaction_add_conflict_range(
-            self.tpointer, begin, len(begin), end, len(end), ConflictRangeType.write
+            self.tpointer, begin, len(begin), end, len(end), fdb.ConflictRangeType.write
         )
 
     def add_write_conflict_key(self, key):
@@ -1073,7 +1072,7 @@ class _TransactionCreator(_FDBBase):
         return _TransactionCreator.__creator_get_key(self, key_selector)
 
     def get_range(
-        self, begin, end, limit=0, reverse=False, streaming_mode=StreamingMode.want_all
+        self, begin, end, limit=0, reverse=False, streaming_mode=fdb.StreamingMode.want_all
     ):
         return _TransactionCreator.__creator_get_range(
             self, begin, end, limit, reverse, streaming_mode
@@ -2042,11 +2041,11 @@ def init(event_model=None):
                             setattr(_TransactionCreator, name, getattr(at, name))
 
                     def to_list(self):
-                        if self._mode == StreamingMode.iterator:
+                        if self._mode == fdb.StreamingMode.iterator:
                             if self._limit > 0:
-                                mode = StreamingMode.exact
+                                mode = fdb.StreamingMode.exact
                             else:
-                                mode = StreamingMode.want_all
+                                mode = fdb.StreamingMode.want_all
                         else:
                             mode = self._mode
                         yield asyncio.From(self._future)

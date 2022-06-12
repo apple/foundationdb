@@ -58,6 +58,7 @@ class Test(object):
         self.subspace = subspace
         self.min_api_version = min_api_version
         self.max_api_version = max_api_version
+        self.api_version = FDB_API_VERSION
 
     # Returns nothing
     def setup(self, args):

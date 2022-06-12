@@ -121,7 +121,7 @@ def run_tester(args, test_file):
         else:
             reason = "exit code: %d" % ret_code
         get_logger().error(
-            "\n'%s' did not complete succesfully (%s)" % (cmd[0], reason)
+            "\n'%s' did not complete successfully (%s)" % (cmd[0], reason)
         )
         if log_dir is not None:
             dump_client_logs(log_dir)

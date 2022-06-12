@@ -56,7 +56,7 @@ def api_version(ver):
 
     if "_version" in globals():
         if globals()["_version"] != ver:
-            raise RuntimeError("FDB API already loaded at version %d" % _version)
+            raise RuntimeError("FDB API already loaded at version %d" % ver)
         return
 
     if ver < 13:

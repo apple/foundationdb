@@ -617,7 +617,7 @@ def _to_unicode_path(path):
         path = six.text_type(path)
 
     if isinstance(path, six.text_type):
-        return (path,)
+        return path,
 
     if isinstance(path, tuple):
         path = list(path)

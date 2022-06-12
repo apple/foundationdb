@@ -38,8 +38,8 @@ _range = range
 def random_unicode():
     while True:
         c = random.randint(0, 0xFFFF)
-        if unicodedata.category(unichr(c))[0] in "LMNPSZ":
-            return unichr(c)
+        if unicodedata.category(chr(c))[0] in "LMNPSZ":
+            return chr(c)
 
 
 def random_element():

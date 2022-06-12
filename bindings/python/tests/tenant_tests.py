@@ -112,7 +112,7 @@ def test_tenant_operations(db):
 
     fdb.tenant_management.delete_tenant(db, b"tenant1")
     try:
-        tenant1[b"tenant_test_key"]
+        _ = tenant1[b"tenant_test_key"]
         assert False
     except fdb.FDBError as e:
         assert e.code == 2131  # tenant not found

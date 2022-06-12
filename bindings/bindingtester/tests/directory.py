@@ -461,7 +461,7 @@ class DirectoryTest(Test):
         for (path, layer) in self.prepopulated_dirs:
             try:
                 util.get_logger().debug(
-                    "Prepopulating directory: %r (layer=%r)" % (path, layer)
+                    "Pre-populating directory: %r (layer=%r)" % (path, layer)
                 )
                 fdb.directory.create_or_open(db, path, layer)
             except Exception as e:
