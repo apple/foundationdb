@@ -2014,7 +2014,9 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 	reply.messages = StringRef(reply.arena, messages.toValue());
 	reply.end = endVersion;
 	reply.onlySpilled = onlySpilled;
-
+	if (reqTag.locality == tagLocalityTxs) {
+		reply.popped = poppedVer;
+	}
 	DisabledTraceEvent("TLogPeekMessages4", self->dbgid)
 	    .detail("LogId", logData->logId)
 	    .detail("Tag", reqTag.toString())
