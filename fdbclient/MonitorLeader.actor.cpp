@@ -881,6 +881,7 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 	state std::vector<UID> lastGrvProxyUIDs;
 	state std::vector<GrvProxyInterface> lastGrvProxies;
 	state std::vector<ClientLeaderRegInterface> clientLeaderServers;
+	state bool allConnectionsFailed = false;
 
 	clientLeaderServers.reserve(coordinatorsSize);
 	for (const auto& h : cs.hostnames) {
@@ -906,7 +907,23 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 		state ClusterConnectionString storedConnectionString;
 		if (connRecord) {
 			bool upToDate = wait(connRecord->upToDate(storedConnectionString));
-			if (!upToDate) {
+			if (upToDate) {
+				incorrectTime = Optional<double>();
+			} else if (allConnectionsFailed) {
+				// Failed to connect to all coordinators from the current connection string,
+				// so it is not possible to get any new updates from the cluster. It can be that
+				// all the coordinators have changed, but the client missed that, because it had
+				// an incompatible protocol version. Since the cluster file is different,
+				// it may have been updated by other clients.
+				TraceEvent("UpdatingConnectionStringFromFile")
+				    .detail("ClusterFile", connRecord->toString())
+				    .detail("StoredConnectionString", storedConnectionString.toString())
+				    .detail("CurrentConnectionString", connRecord->getConnectionString().toString());
+				connRecord->setAndPersistConnectionString(storedConnectionString);
+				info.intermediateConnRecord =
+				    connRecord->makeIntermediateRecord(ClusterConnectionString(storedConnectionString));
+				return info;
+			} else {
 				req.issues.push_back_deep(req.issues.arena(), LiteralStringRef("incorrect_cluster_file_contents"));
 				std::string connectionString = connRecord->getConnectionString().toString();
 				if (!incorrectTime.present()) {
@@ -919,8 +936,6 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 				    .detail("ClusterFile", connRecord->toString())
 				    .detail("StoredConnectionString", storedConnectionString.toString())
 				    .detail("CurrentConnectionString", connectionString);
-			} else {
-				incorrectTime = Optional<double>();
 			}
 		} else {
 			incorrectTime = Optional<double>();
@@ -974,6 +989,7 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 			shrinkProxyList(ni, lastCommitProxyUIDs, lastCommitProxies, lastGrvProxyUIDs, lastGrvProxies);
 			clientInfo->setUnconditional(ni);
 			successIndex = index;
+			allConnectionsFailed = false;
 		} else {
 			TEST(rep.getError().code() == error_code_failed_to_progress); // Coordinator cant talk to cluster controller
 			TEST(rep.getError().code() == error_code_lookup_failed); // Coordinator hostname resolving failure
@@ -981,7 +997,8 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 			    .detail("Error", rep.getError().name())
 			    .detail("Coordinator", clientLeaderServer.getAddressString());
 			index = (index + 1) % coordinatorsSize;
-			if (index == successIndex) {
+			allConnectionsFailed = (index == successIndex);
+			if (allConnectionsFailed) {
 				wait(delay(CLIENT_KNOBS->COORDINATOR_RECONNECTION_DELAY));
 			}
 		}
