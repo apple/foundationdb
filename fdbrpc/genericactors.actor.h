@@ -78,11 +78,7 @@ Future<Void> tryInitializeRequestStream(RequestStream<Req>* stream, Hostname hos
 	if (!address.present()) {
 		return Void();
 	}
-	if (stream == nullptr) {
-		stream = new RequestStream<Req>(Endpoint::wellKnown({ address.get() }, token));
-	} else {
-		*stream = RequestStream<Req>(Endpoint::wellKnown({ address.get() }, token));
-	}
+	*stream = RequestStream<Req>(Endpoint::wellKnown({ address.get() }, token));
 	return Void();
 }
 
