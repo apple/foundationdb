@@ -1039,7 +1039,7 @@ ACTOR static void deliver(TransportData* self,
                           TaskPriority priority,
                           ArenaReader reader,
                           NetworkAddress peerAddress,
-						  std::shared_ptr<SessionInfo> sessionInfo,
+                          std::shared_ptr<SessionInfo> sessionInfo,
                           InReadSocket inReadSocket,
                           Future<Void> disconnect) {
 	// We want to run the task at the right priority. If the priority is higher than the current priority (which is
@@ -1116,7 +1116,7 @@ static void scanPackets(TransportData* transport,
                         const uint8_t* e,
                         Arena& arena,
                         NetworkAddress const& peerAddress,
-						std::shared_ptr<SessionInfo> sessionInfo,
+                        std::shared_ptr<SessionInfo> sessionInfo,
                         ProtocolVersion peerProtocolVersion,
                         Future<Void> disconnect,
                         IsStableConnection isStableConnection) {
