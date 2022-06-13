@@ -27,6 +27,8 @@ API version 710
 General
 -------
 
+* `fdb_transaction_get_range_and_flat_map` API is renamed to `fdb_transaction_get_mapped_range` in version 710, `fdb_transaction_get_range_and_flat_map` is not supported at any API verison after 710.
+
 .. _api-version-upgrade-guide-700:
 
 API version 700
