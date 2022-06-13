@@ -446,7 +446,7 @@ struct DDQueueData {
 	UID distributorId;
 	MoveKeysLock lock;
 	Database cx;
-	std::unique_ptr<IDDTxnProcessor> txnProcessor;
+	std::shared_ptr<IDDTxnProcessor> txnProcessor;
 
 	std::vector<TeamCollectionInterface> teamCollections;
 	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
