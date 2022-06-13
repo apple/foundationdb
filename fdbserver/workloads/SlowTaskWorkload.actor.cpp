@@ -48,15 +48,15 @@ struct SlowTaskWorkload : TestWorkload {
 		int64_t startProfilesOverflowed = getNumProfilesOverflowed();
 		int64_t startProfilesCaptured = getNumProfilesCaptured();
 		int64_t exc = 0;
-		fprintf(stderr, "Slow task starting\n");
+		fprintf(stdout, "Slow task starting\n");
 		for (int i = 0; i < 10; i++) {
-			fprintf(stderr, "  %d\n", i);
+			fprintf(stdout, "  %d\n", i);
 			double end = timer() + 1;
 			while (timer() < end) {
 				do_slow_exception_thing(&exc);
 			}
 		}
-		fmt::print(stderr,
+		fmt::print(stdout,
 		           "Slow task complete: {0} exceptions; {1} calls to dl_iterate_phdr, {2}"
 		           " profiles deferred, {3} profiles overflowed, {4} profiles captured\n",
 		           exc,
