@@ -33,6 +33,7 @@
 #include "flow/Arena.h"
 #include "flow/IRandom.h"
 #include "flow/genericactors.actor.h"
+#include "flow/actorcompiler.h" // must be last include
 
 struct ResolutionBalancer {
 	AsyncVar<Standalone<VectorRef<ResolverMoveRef>>> resolverChanges;

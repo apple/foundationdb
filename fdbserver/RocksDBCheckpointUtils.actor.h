@@ -260,4 +260,7 @@ ICheckpointReader* newRocksDBCheckpointReader(const CheckpointMetaData& checkpoi
 RocksDBColumnFamilyCheckpoint getRocksCF(const CheckpointMetaData& checkpoint);
 
 RocksDBCheckpoint getRocksCheckpoint(const CheckpointMetaData& checkpoint);
+
+#include "flow/unactorcompiler.h"
+
 #endif

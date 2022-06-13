@@ -26,7 +26,6 @@
 #include "fdbclient/DatabaseContext.h" // for clone()
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
-#include "flow/actorcompiler.h"
 
 Future<int64_t> getDataInFlight(Database const& cx, Reference<AsyncVar<struct ServerDBInfo> const> const&);
 Future<std::pair<int64_t, int64_t>> getTLogQueueInfo(Database const& cx,
@@ -54,5 +53,4 @@ getStorageWorkers(Database const& cx, Reference<AsyncVar<ServerDBInfo> const> co
 Future<std::vector<WorkerInterface>> getCoordWorkers(Database const& cx,
                                                      Reference<AsyncVar<ServerDBInfo> const> const& dbInfo);
 
-#include "flow/unactorcompiler.h"
 #endif
