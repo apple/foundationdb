@@ -26,7 +26,7 @@
 
 class IDDTxnProcessor {
 public:
-	// get the source server and complete source server for range
+	// get the source server list and complete source server list for range
 	virtual Future<std::tuple<std::vector<UID>, std::vector<UID>>> getSourceServersForRange(
 	    const KeyRangeRef range) = 0;
 	virtual ~IDDTxnProcessor() = default;
