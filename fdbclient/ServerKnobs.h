@@ -44,6 +44,7 @@ public:
 	                                  // often, so that versions always advance smoothly
 	double MAX_VERSION_RATE_MODIFIER;
 	int64_t MAX_VERSION_RATE_OFFSET;
+	bool ENABLE_VERSION_VECTOR_HA_OPTIMIZATION;
 
 	// TLogs
 	bool PEEK_USING_STREAMING;
@@ -839,6 +840,7 @@ public:
 	std::string ENCRYPTION_MODE;
 	int SIM_KMS_MAX_KEYS;
 	int ENCRYPT_PROXY_MAX_DBG_TRACE_LENGTH;
+	bool ENABLE_TLOG_ENCRYPTION;
 
 	// Key Management Service (KMS) Connector
 	std::string KMS_CONNECTOR_TYPE;
