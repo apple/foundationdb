@@ -723,7 +723,9 @@ struct DDQueueData {
 		wait(fetchLock->take(TaskPriority::DataDistributionLaunch));
 		state FlowLock::Releaser releaser(*fetchLock);
 
-		wait(storeTuple(self->txnProcessor->getSourceServersForRange(input.keys), input.src, input.completeSources));
+		IDDTxnProcessor::SourceServers res = wait(self->txnProcessor->getSourceServersForRange(input.keys));
+		input.src = std::move(res.srcServers);
+		input.completeSources = std::move(res.completeSources);
 		output.send(input);
 		return Void();
 	}

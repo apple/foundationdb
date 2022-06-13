@@ -26,9 +26,11 @@
 
 class IDDTxnProcessor {
 public:
+	struct SourceServers {
+		std::vector<UID> srcServers, completeSources; // the same as RelocateData.src, RelocateData.completeSources;
+	};
 	// get the source server list and complete source server list for range
-	virtual Future<std::tuple<std::vector<UID>, std::vector<UID>>> getSourceServersForRange(
-	    const KeyRangeRef range) = 0;
+	virtual Future<SourceServers> getSourceServersForRange(const KeyRangeRef range) = 0;
 	virtual ~IDDTxnProcessor() = default;
 };
 
@@ -43,7 +45,7 @@ public:
 	DDTxnProcessor() = default;
 	explicit DDTxnProcessor(Database cx) : cx(cx) {}
 
-	Future<std::tuple<std::vector<UID>, std::vector<UID>>> getSourceServersForRange(const KeyRangeRef range) override;
+	Future<SourceServers> getSourceServersForRange(const KeyRangeRef range) override;
 };
 
 // run mock transaction
