@@ -723,9 +723,7 @@ struct DDQueueData {
 		wait(fetchLock->take(TaskPriority::DataDistributionLaunch));
 		state FlowLock::Releaser releaser(*fetchLock);
 
-		auto future =
-		    storeTuple(self->txnProcessor->getSourceServersForRange(input.keys), input.src, input.completeSources);
-		wait(ready(future));
+		wait(storeTuple(self->txnProcessor->getSourceServersForRange(input.keys), input.src, input.completeSources));
 		output.send(input);
 		return Void();
 	}
