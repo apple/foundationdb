@@ -926,15 +926,5 @@ struct serializable_traits<RequestStream<T, P>> : std::true_type {
 	}
 };
 
-struct SessionProbeRequest {
-	constexpr static FileIdentifier file_identifier = 1559713;
-	ReplyPromise<SessionInfo> reply{ PeerCompatibilityPolicy{ RequirePeer::AtLeast,
-		                                                      ProtocolVersion::withStableInterfaces() } };
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, reply);
-	}
-};
-
 #endif
 #include "fdbrpc/genericactors.actor.h"

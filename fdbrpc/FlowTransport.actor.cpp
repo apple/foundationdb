@@ -238,21 +238,6 @@ struct PingReceiver final : NetworkMessageReceiver {
 	bool isPublic() const override { return true; }
 };
 
-struct SessionProbeReceiver final : NetworkMessageReceiver {
-	SessionProbeReceiver(EndpointMap& endpoints) {
-		endpoints.insertWellKnown(this, Endpoint::wellKnownToken(WLTOKEN_SESSION_PROBE), TaskPriority::ReadSocket);
-	}
-	void receive(ArenaObjectReader& reader, SessionInfo& sessionInfo) override {
-		SessionProbeRequest req;
-		reader.deserialize(req);
-		req.reply.send(sessionInfo);
-	}
-	PeerCompatibilityPolicy peerCompatibilityPolicy() const override {
-		return PeerCompatibilityPolicy{ RequirePeer::AtLeast, ProtocolVersion::withStableInterfaces() };
-	}
-	bool isPublic() const override { return true; }
-};
-
 struct AuthorizationRequest {
 	constexpr static FileIdentifier file_identifier = 11499331;
 
@@ -367,7 +352,6 @@ public:
 	PingReceiver pingReceiver{ endpoints };
 	TenantAuthorizer tenantReceiver{ endpoints };
 	UnauthorizedEndpointReceiver unauthorizedEndpointReceiver{ endpoints };
-	SessionProbeReceiver sessionProbeReceiver{ endpoints };
 
 	Int64MetricHandle bytesSent;
 	Int64MetricHandle countPacketsReceived;

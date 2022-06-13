@@ -133,12 +133,40 @@ Future<T> stopNetworkAfter(Future<T> what) {
 	return t;
 }
 
-Future<Void> runServer(Future<Void> listenFuture, int addrPipe, int completionPipe) {
+struct SessionProbeRequest {
+	constexpr static FileIdentifier file_identifier = 1559713;
+	ReplyPromise<SessionInfo> reply{ PeerCompatibilityPolicy{ RequirePeer::AtLeast,
+		                                                      ProtocolVersion::withStableInterfaces() } };
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply);
+	}
+};
+
+struct SessionProbeReceiver final : NetworkMessageReceiver {
+	SessionProbeReceiver() {}
+	void receive(ArenaObjectReader& reader, SessionInfo& sessionInfo) override {
+		SessionProbeRequest req;
+		reader.deserialize(req);
+		req.reply.send(sessionInfo);
+	}
+	PeerCompatibilityPolicy peerCompatibilityPolicy() const override {
+		return PeerCompatibilityPolicy{ RequirePeer::AtLeast, ProtocolVersion::withStableInterfaces() };
+	}
+	bool isPublic() const override { return true; }
+};
+
+Future<Void> runServer(Future<Void> listenFuture, const Endpoint& endpoint, int addrPipe, int completionPipe) {
 	auto realAddr = FlowTransport::transport().getLocalAddresses().address;
 	logs("Listening at {}", realAddr.toString());
+	logs("Endpoint token is {}", endpoint.token.toString());
 	// below writes/reads would block, but this is good enough for a test.
 	if (sizeof(realAddr) != ::write(addrPipe, &realAddr, sizeof(realAddr))) {
 		logs("Failed to write server addr to pipe: {}", strerror(errno));
+		return Void();
+	}
+	if (sizeof(endpoint.token) != ::write(addrPipe, &endpoint.token, sizeof(endpoint.token))) {
+		logs("Failed to write server endpoint to pipe: {}", strerror(errno));
 		return Void();
 	}
 	auto done = false;
@@ -181,21 +209,30 @@ int runHost(TLSCreds creds, int addrPipe, int completionPipe, Result expect) {
 			g_network->run();
 			flushTraceFileVoid();
 		});
-		runServer(transport.bind(addr, addr), addrPipe, completionPipe);
+		auto endpoint = Endpoint();
+		auto receiver = SessionProbeReceiver();
+		transport.addEndpoint(endpoint, &receiver, TaskPriority::ReadSocket);
+		runServer(transport.bind(addr, addr), endpoint, addrPipe, completionPipe);
 		auto cleanupGuard = ScopeExit([&thread]() {
 			g_network->stop();
 			thread.join();
 		});
 	} else {
-		auto serverAddr = NetworkAddress();
+		auto dest = Endpoint();
+		auto& serverAddr = dest.addresses.address;
 		if (sizeof(serverAddr) != ::read(addrPipe, &serverAddr, sizeof(serverAddr))) {
 			logc("Failed to read server addr from pipe: {}", strerror(errno));
-			return 3;
+			return 1;
+		}
+		auto& token = dest.token;
+		if (sizeof(token) != ::read(addrPipe, &token, sizeof(token))) {
+			logc("Failed to read server endpoint token from pipe: {}", strerror(errno));
+			return 2;
 		}
 		logc("Server address is {}", serverAddr.toString());
-		auto sessionProbeDest = Endpoint({ serverAddr }, Endpoint::wellKnownToken(WLTOKEN_SESSION_PROBE));
+		logc("Server endpoint token is {}", token.toString());
 		auto sessionProbeReq = SessionProbeRequest{};
-		transport.sendUnreliable(SerializeSource(sessionProbeReq), sessionProbeDest, true /*openConnection*/);
+		transport.sendUnreliable(SerializeSource(sessionProbeReq), dest, true /*openConnection*/);
 		logc("Request is sent");
 		auto probeResponse = sessionProbeReq.reply.getFuture();
 		auto result = Result::TRUSTED;
@@ -206,17 +243,17 @@ int runHost(TLSCreds creds, int addrPipe, int completionPipe, Result expect) {
 		g_network->run();
 		if (!complete.isReady()) {
 			logc("Error: Probe request timed out");
-			rc = 1;
+			rc = 3;
 		}
 		auto done = true;
 		if (sizeof(done) != ::write(completionPipe, &done, sizeof(done))) {
 			logc("Failed to signal server to terminate: {}", strerror(errno));
-			rc = 2;
+			rc = 4;
 		}
 		if (rc == 0) {
 			if (expect != result) {
 				logc("Test failed: expected {}, got {}", expect, result);
-				rc = 3;
+				rc = 5;
 			} else {
 				logc("Response OK: got {} as expected", result);
 			}
