@@ -52,7 +52,7 @@ extern const KeyRef afterAllKeys;
 //	An internal mapping of where shards are located in the database. [[begin]] is the start of the shard range
 //	and the result is a list of serverIDs or Tags where these shards are located. These values can be changed
 //	as data movement occurs.
-// With ShardEncodLocationMetaData, the encoding format is:
+// With ShardEncodeLocationMetaData, the encoding format is:
 //    "\xff/keyServers/[[begin]]" := "[[std::vector<serverID>, std::vector<serverID>], srcID, destID]", where srcID
 //  and destID are the source and destination `shard id`, respectively.
 extern const KeyRangeRef keyServersKeys, keyServersKeyServersKeys;

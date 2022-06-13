@@ -99,7 +99,7 @@ const Value keyServersValue(const std::vector<UID>& src,
                             const std::vector<UID>& dest,
                             const UID& srcID,
                             const UID& destID) {
-	BinaryWriter wr(IncludeVersion(ProtocolVersion::withShardEncodLocationMetaData()));
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withShardEncodeLocationMetaData()));
 	if (dest.empty()) {
 		ASSERT(!destID.isValid());
 		wr << src << dest << srcID;
@@ -138,7 +138,7 @@ void decodeKeyServersValue(RangeResult result,
 	}
 
 	BinaryReader rd(value, IncludeVersion());
-	if (rd.protocolVersion().hasShardEncodLocationMetaData()) {
+	if (rd.protocolVersion().hasShardEncodeLocationMetaData()) {
 		UID srcId, destId;
 		decodeKeyServersValue(result, value, src, dest, srcId, destId);
 		return;
@@ -199,7 +199,7 @@ void decodeKeyServersValue(RangeResult result,
 	}
 
 	BinaryReader rd(value, IncludeVersion());
-	if (rd.protocolVersion().hasShardEncodLocationMetaData()) {
+	if (rd.protocolVersion().hasShardEncodeLocationMetaData()) {
 		rd >> src >> dest >> srcID;
 		if (rd.empty()) {
 			ASSERT(dest.empty());
@@ -240,7 +240,7 @@ void decodeKeyServersValue(std::map<Tag, UID> const& tag_uid,
 	if (value.size() !=
 	    sizeof(ProtocolVersion) + sizeof(int) + srcLen * sizeof(Tag) + sizeof(int) + destLen * sizeof(Tag)) {
 		rd >> src >> dest;
-		if (rd.protocolVersion().hasShardEncodLocationMetaData()) {
+		if (rd.protocolVersion().hasShardEncodeLocationMetaData()) {
 			UID srcId, destId;
 			rd >> srcId;
 			if (rd.empty()) {
@@ -478,7 +478,7 @@ const Value serverKeysValue(const UID& id) {
 	}
 
 	ASSERT(CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
-	BinaryWriter wr(IncludeVersion(ProtocolVersion::withShardEncodLocationMetaData()));
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withShardEncodeLocationMetaData()));
 	wr << id;
 	return wr.toValue();
 }
@@ -499,7 +499,7 @@ void decodeServerKeysValue(const ValueRef& value, bool& assigned, bool& emptyRan
 		emptyRange = false;
 	} else {
 		BinaryReader rd(value, IncludeVersion());
-		ASSERT(rd.protocolVersion().hasShardEncodLocationMetaData());
+		ASSERT(rd.protocolVersion().hasShardEncodeLocationMetaData());
 		rd >> id;
 		assigned = id.second() != 0;
 		emptyRange = id.second() == emptyShardId;
