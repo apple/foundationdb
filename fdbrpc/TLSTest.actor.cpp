@@ -250,11 +250,11 @@ int runTlsTest(int serverChainLen, int clientChainLen) {
 		return 1;
 	}
 	auto pipeCleanup = ScopeExit([&addrPipe, &completionPipe]() {
-			::close(addrPipe[0]);
-			::close(addrPipe[1]);
-			::close(completionPipe[0]);
-			::close(completionPipe[1]);
-		});
+		::close(addrPipe[0]);
+		::close(addrPipe[1]);
+		::close(completionPipe[0]);
+		::close(completionPipe[1]);
+	});
 	serverPid = fork();
 	if (serverPid == 0) {
 		_exit(runHost<true>(std::move(serverCreds), addrPipe[1], completionPipe[0], expect));
