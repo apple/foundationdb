@@ -314,8 +314,14 @@ ACTOR Future<Void> serverPeekParallelGetMore(ILogSystem::ServerPeekCursor* self,
 				// We *should* never get timed_out(), as it means the TLog got stuck while handling a parallel peek,
 				// and thus we've likely just wasted 10min.
 				// timed_out() is sent by cleanupPeekTrackers as value PEEK_TRACKER_EXPIRATION_TIME
-				ASSERT_WE_THINK(e.code() == error_code_operation_obsolete ||
-				                SERVER_KNOBS->PEEK_TRACKER_EXPIRATION_TIME < 10);
+				//
+				// A cursor for a log router can be delayed indefinitely during a network partition, so only fail
+				// simulation tests sufficiently far after we finish simulating network partitions.
+				TEST(e.code() == error_code_timed_out); // peek cursor timed out
+				if (now() >= FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS + SERVER_KNOBS->PEEK_TRACKER_EXPIRATION_TIME) {
+					ASSERT_WE_THINK(e.code() == error_code_operation_obsolete ||
+					                SERVER_KNOBS->PEEK_TRACKER_EXPIRATION_TIME < 10);
+				}
 				self->interfaceChanged = self->interf->onChange();
 				self->randomID = deterministicRandom()->randomUniqueID();
 				self->sequence = 0;

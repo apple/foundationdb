@@ -30,7 +30,7 @@
 #define FILESYSTEM_IMPL 1
 
 #include "fdbrpc/AsyncFileCached.actor.h"
-#include "fdbrpc/AsyncFileChaos.actor.h"
+#include "fdbrpc/AsyncFileChaos.h"
 #include "fdbrpc/AsyncFileEIO.actor.h"
 #include "fdbrpc/AsyncFileEncrypted.h"
 #include "fdbrpc/AsyncFileWinASIO.actor.h"
