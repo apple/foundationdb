@@ -586,6 +586,7 @@ public:
 	double GLOBAL_TAG_THROTTLING_MIN_RATE;
 	// Used by global tag throttling counters
 	double GLOBAL_TAG_THROTTLING_FOLDING_TIME;
+	double GLOBAL_TAG_THROTTLING_TRACE_INTERVAL;
 
 	double MAX_TRANSACTIONS_PER_BYTE;
 

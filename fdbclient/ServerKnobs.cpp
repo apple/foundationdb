@@ -665,6 +665,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( GLOBAL_TAG_THROTTLING,                               false );
 	init( GLOBAL_TAG_THROTTLING_MIN_RATE,                        1.0 );
 	init( GLOBAL_TAG_THROTTLING_FOLDING_TIME,                   60.0 );
+	init( GLOBAL_TAG_THROTTLING_TRACE_INTERVAL,                  5.0 );
 
 	//Storage Metrics
 	init( STORAGE_METRICS_AVERAGE_INTERVAL,                    120.0 );

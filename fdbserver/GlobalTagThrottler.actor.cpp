@@ -113,8 +113,7 @@ class GlobalTagThrottlerImpl {
 				te.detail("Tag", tag);
 				quotaAndCounters.processTraceEvent(te);
 			}
-			// TODO: Make delay time a knob?
-			wait(delay(5.0));
+			wait(delay(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_TRACE_INTERVAL));
 		}
 	}
 
