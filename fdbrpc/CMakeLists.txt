@@ -84,6 +84,13 @@ if(WIN32)
   add_dependencies(fdbrpc_sampling_actors fdbrpc_actors)
 endif()
 
+if(UNIX)
+  add_flow_target(EXECUTABLE NAME mtls_unittest SRCS TLSTest.actor.cpp)
+  target_link_libraries(mtls_unittest PRIVATE flow fdbrpc fmt::fmt)
+  add_test(NAME mutual_tls_unittest
+           COMMAND $<TARGET_FILE:mtls_unittest>)
+endif()
+
 if(COMPILE_EIO)
   add_library(eio STATIC libeio/eio.c)
   if(USE_VALGRIND)

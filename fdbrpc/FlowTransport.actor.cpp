@@ -215,8 +215,8 @@ struct EndpointNotFoundReceiver final : NetworkMessageReceiver {
 
 struct PingRequest {
 	constexpr static FileIdentifier file_identifier = 4707015;
-	ReplyPromise<SessionInfo> reply{ PeerCompatibilityPolicy{ RequirePeer::AtLeast,
-															  ProtocolVersion::withStableInterfaces() } };
+	ReplyPromise<Void> reply{ PeerCompatibilityPolicy{ RequirePeer::AtLeast,
+		                                               ProtocolVersion::withStableInterfaces() } };
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, reply);
@@ -227,8 +227,23 @@ struct PingReceiver final : NetworkMessageReceiver {
 	PingReceiver(EndpointMap& endpoints) {
 		endpoints.insertWellKnown(this, Endpoint::wellKnownToken(WLTOKEN_PING_PACKET), TaskPriority::ReadSocket);
 	}
-	void receive(ArenaObjectReader& reader, SessionInfo& sessionInfo) override {
+	void receive(ArenaObjectReader& reader, SessionInfo&) override {
 		PingRequest req;
+		reader.deserialize(req);
+		req.reply.send(Void());
+	}
+	PeerCompatibilityPolicy peerCompatibilityPolicy() const override {
+		return PeerCompatibilityPolicy{ RequirePeer::AtLeast, ProtocolVersion::withStableInterfaces() };
+	}
+	bool isPublic() const override { return true; }
+};
+
+struct SessionProbeReceiver final : NetworkMessageReceiver {
+	SessionProbeReceiver(EndpointMap& endpoints) {
+		endpoints.insertWellKnown(this, Endpoint::wellKnownToken(WLTOKEN_SESSION_PROBE), TaskPriority::ReadSocket);
+	}
+	void receive(ArenaObjectReader& reader, SessionInfo& sessionInfo) override {
+		SessionProbeRequest req;
 		reader.deserialize(req);
 		req.reply.send(sessionInfo);
 	}
@@ -352,6 +367,7 @@ public:
 	PingReceiver pingReceiver{ endpoints };
 	TenantAuthorizer tenantReceiver{ endpoints };
 	UnauthorizedEndpointReceiver unauthorizedEndpointReceiver{ endpoints };
+	SessionProbeReceiver sessionProbeReceiver{ endpoints };
 
 	Int64MetricHandle bytesSent;
 	Int64MetricHandle countPacketsReceived;
@@ -588,7 +604,7 @@ ACTOR Future<Void> connectionMonitor(Reference<Peer> peer) {
 					startingBytes = peer->bytesReceived;
 					timeouts++;
 				}
-				when(SessionInfo sessionInfo = wait(pingRequest.reply.getFuture())) {
+				when(wait(pingRequest.reply.getFuture())) {
 					if (peer->destination.isPublic()) {
 						peer->pingLatencies.addSample(now() - startTime);
 					}
@@ -975,7 +991,7 @@ void Peer::onIncomingConnection(Reference<Peer> self, Reference<IConnection> con
 		    .detail("FromAddr", conn->getPeerAddress())
 		    .detail("CanonicalAddr", destination)
 		    .detail("IsPublic", destination.isPublic())
-		    .detail("Trusted", self->transport->allowList(conn->getPeerAddress().ip));
+		    .detail("Trusted", self->transport->allowList(conn->getPeerAddress().ip) && conn->hasTrustedPeer());
 
 		connect.cancel();
 		prependConnectPacket();
