@@ -181,6 +181,7 @@ TEST_CASE("/flow/genericactors/AsyncListener") {
 	return Void();
 }
 
+#if false
 TEST_CASE("/flow/genericactors/generic/storeTuple") {
 	state std::vector<UID> resA;
 	state int resB;
@@ -197,3 +198,4 @@ TEST_CASE("/flow/genericactors/generic/storeTuple") {
 	ASSERT(resC == 2.0);
 	return Void();
 }
+#endif
