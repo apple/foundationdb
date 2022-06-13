@@ -153,18 +153,6 @@ void GlobalConfig::erase(KeyRangeRef range) {
 	}
 }
 
-// Similar to tr.onError(), but doesn't require a DatabaseContext.
-struct Backoff {
-	Future<Void> onError() {
-		double currentBackoff = backoff;
-		backoff = std::min(backoff * CLIENT_KNOBS->BACKOFF_GROWTH_RATE, CLIENT_KNOBS->DEFAULT_MAX_BACKOFF);
-		return delay(currentBackoff * deterministicRandom()->random01());
-	}
-
-private:
-	double backoff = CLIENT_KNOBS->DEFAULT_BACKOFF;
-};
-
 // Older FDB versions used different keys for client profiling data. This
 // function performs a one-time migration of data in these keys to the new
 // global configuration key space.

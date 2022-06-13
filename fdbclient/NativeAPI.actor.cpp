@@ -1036,6 +1036,7 @@ ACTOR Future<Void> monitorCacheList(DatabaseContext* self) {
 	state Transaction tr;
 	state std::map<UID, StorageServerInterface> cacheServerMap;
 	state Future<Void> updateRanges = updateCachedRanges(self, &cacheServerMap);
+	state Backoff backoff;
 	// if no caches are configured, we don't want to run this actor at all
 	// so we just wait for the first trigger from a storage server
 	wait(self->updateCache.onTrigger());
@@ -1073,8 +1074,10 @@ ACTOR Future<Void> monitorCacheList(DatabaseContext* self) {
 				}
 				cacheServerMap = std::move(allCacheServers);
 				wait(delay(5.0));
+				backoff = Backoff();
 			} catch (Error& e) {
 				wait(tr.onError(e));
+				wait(backoff.onError());
 			}
 		}
 	} catch (Error& e) {
@@ -1154,6 +1157,7 @@ ACTOR static Future<Void> handleTssMismatches(DatabaseContext* cx) {
 ACTOR static Future<Void> backgroundGrvUpdater(DatabaseContext* cx) {
 	state Transaction tr;
 	state double grvDelay = 0.001;
+	state Backoff backoff;
 	try {
 		loop {
 			if (CLIENT_KNOBS->FORCE_GRV_CACHE_OFF)
@@ -1181,9 +1185,11 @@ ACTOR static Future<Void> backgroundGrvUpdater(DatabaseContext* cx) {
 					    .detail("GrvDelay", grvDelay)
 					    .detail("CachedReadVersion", cx->getCachedReadVersion())
 					    .detail("CachedTime", cx->getLastGrvTime());
+					backoff = Backoff();
 				} catch (Error& e) {
 					TraceEvent(SevInfo, "BackgroundGrvUpdaterTxnError").errorUnsuppressed(e);
 					wait(tr.onError(e));
+					wait(backoff.onError());
 				}
 			} else {
 				wait(
