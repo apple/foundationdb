@@ -53,9 +53,9 @@ private:
 	// return count of tenants that were found to be stale and removed from the cache
 	int cleanup();
 
-	UID id() { return distributorID; }
+	UID id() const { return distributorID; }
 
-	Database dbcx() { return cx; }
+	Database dbcx() const { return cx; }
 
 public:
 	DDTenantCache(Database cx, UID distributorID) : distributorID(distributorID), cx(cx) {
@@ -66,7 +66,7 @@ public:
 
 	Future<Void> monitorTenantMap();
 
-	std::string desc();
+	std::string desc() const;
 
-	bool isTenantKey(KeyRef key);
+	bool isTenantKey(KeyRef key) const;
 };

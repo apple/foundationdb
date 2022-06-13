@@ -168,7 +168,7 @@ int DDTenantCache::cleanup() {
 	return tenantsRemoved;
 }
 
-std::string DDTenantCache::desc() {
+std::string DDTenantCache::desc() const {
 	std::string s("@Generation: ");
 	s += std::to_string(generation) + " ";
 	int count = 0;
@@ -184,7 +184,7 @@ std::string DDTenantCache::desc() {
 	return s;
 }
 
-bool DDTenantCache::isTenantKey(KeyRef key) {
+bool DDTenantCache::isTenantKey(KeyRef key) const {
 	auto it = tenantCache.lastLessOrEqual(key);
 	if (it == tenantCache.end()) {
 		return false;

@@ -666,10 +666,10 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 				TraceEvent("DataDistributionEnabled").log();
 			}
 
-			state Reference<DDTenantCache> ddtc;
+			state Reference<DDTenantCache> ddTenantCache;
 			if (ddIsTenantAware) {
-				ddtc = makeReference<DDTenantCache>(cx, self->ddId);
-				wait(ddtc->build(cx));
+				ddTenantCache = makeReference<DDTenantCache>(cx, self->ddId);
+				wait(ddTenantCache->build(cx));
 			}
 
 			// When/If this assertion fails, Evan owes Ben a pat on the back for his foresight
@@ -742,7 +742,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			}
 			if (ddIsTenantAware) {
 				actors.push_back(reportErrorsExcept(
-				    ddtc->monitorTenantMap(), "DDTenantCacheMonitor", self->ddId, &normalDDQueueErrors()));
+				    ddTenantCache->monitorTenantMap(), "DDTenantCacheMonitor", self->ddId, &normalDDQueueErrors()));
 			}
 
 			actors.push_back(pollMoveKeysLock(cx, lock, ddEnabledState));
