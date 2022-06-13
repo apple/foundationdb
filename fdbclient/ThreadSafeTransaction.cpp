@@ -587,6 +587,7 @@ void ThreadSafeApi::runNetwork() {
 	}
 
 	if (runErr.present()) {
+		closeTraceFile();
 		throw runErr.get();
 	}
 
