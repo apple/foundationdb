@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    '../',
-        VERSION:     '7.1.5',
+        VERSION:     '7.1.9',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -81,12 +81,14 @@
       role="menu"
       aria-labelledby="dLabelLocalToc"><ul>
 <li><a class="reference internal" href="#">Release Notes</a><ul>
-<li><a class="reference internal" href="#id2">7.1.5</a></li>
-<li><a class="reference internal" href="#id3">7.1.4</a></li>
-<li><a class="reference internal" href="#id4">7.1.3</a></li>
-<li><a class="reference internal" href="#id5">7.1.2</a></li>
-<li><a class="reference internal" href="#id6">7.1.1</a></li>
-<li><a class="reference internal" href="#id7">7.1.0</a><ul>
+<li><a class="reference internal" href="#id2">7.1.7</a></li>
+<li><a class="reference internal" href="#id3">7.1.6</a></li>
+<li><a class="reference internal" href="#id4">7.1.5</a></li>
+<li><a class="reference internal" href="#id5">7.1.4</a></li>
+<li><a class="reference internal" href="#id6">7.1.3</a></li>
+<li><a class="reference internal" href="#id7">7.1.2</a></li>
+<li><a class="reference internal" href="#id8">7.1.1</a></li>
+<li><a class="reference internal" href="#id9">7.1.0</a><ul>
 <li><a class="reference internal" href="#features">Features</a></li>
 <li><a class="reference internal" href="#performance">Performance</a></li>
 <li><a class="reference internal" href="#reliability">Reliability</a></li>
@@ -137,12 +139,14 @@
       <div class="col-md-3">
         <div id="sidebar" class="bs-sidenav" role="complementary"><ul>
 <li><a class="reference internal" href="#">Release Notes</a><ul>
-<li><a class="reference internal" href="#id2">7.1.5</a></li>
-<li><a class="reference internal" href="#id3">7.1.4</a></li>
-<li><a class="reference internal" href="#id4">7.1.3</a></li>
-<li><a class="reference internal" href="#id5">7.1.2</a></li>
-<li><a class="reference internal" href="#id6">7.1.1</a></li>
-<li><a class="reference internal" href="#id7">7.1.0</a><ul>
+<li><a class="reference internal" href="#id2">7.1.7</a></li>
+<li><a class="reference internal" href="#id3">7.1.6</a></li>
+<li><a class="reference internal" href="#id4">7.1.5</a></li>
+<li><a class="reference internal" href="#id5">7.1.4</a></li>
+<li><a class="reference internal" href="#id6">7.1.3</a></li>
+<li><a class="reference internal" href="#id7">7.1.2</a></li>
+<li><a class="reference internal" href="#id8">7.1.1</a></li>
+<li><a class="reference internal" href="#id9">7.1.0</a><ul>
 <li><a class="reference internal" href="#features">Features</a></li>
 <li><a class="reference internal" href="#performance">Performance</a></li>
 <li><a class="reference internal" href="#reliability">Reliability</a></li>
@@ -164,6 +168,20 @@
   <div class="section" id="release-notes">
 <span id="id1"></span><h1>Release Notes</h1>
 <div class="section" id="id2">
+<h2>7.1.7</h2>
+<ul class="simple">
+<li>Same as 7.1.6 release with AVX enabled.</li>
+</ul>
+</div>
+<div class="section" id="id3">
+<h2>7.1.6</h2>
+<ul class="simple">
+<li>Released with AVX disabled.</li>
+<li>Fixed a fdbserver crash when given invalid knob name. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7189">(PR #7189)</a></li>
+<li>Fixed a storage server bug that read data after its failure. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7217">(PR #7217)</a></li>
+</ul>
+</div>
+<div class="section" id="id4">
 <h2>7.1.5</h2>
 <ul class="simple">
 <li>Fixed a fdbcli kill bug that was not killing in parallel. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7150">(PR #7150)</a></li>
@@ -172,7 +190,7 @@
 <li>Added a backtrace before throwing serialization_failed. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7155">(PR #7155)</a></li>
 </ul>
 </div>
-<div class="section" id="id3">
+<div class="section" id="id5">
 <h2>7.1.4</h2>
 <ul class="simple">
 <li>Fixed a bug that prevents client from connecting to a cluster. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7060">(PR #7060)</a></li>
@@ -193,7 +211,7 @@
 <li>Fixed a limit bug in indexPrefetch. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7005">(PR #7005)</a></li>
 </ul>
 </div>
-<div class="section" id="id4">
+<div class="section" id="id6">
 <h2>7.1.3</h2>
 <ul class="simple">
 <li>Added logging measuring commit compute duration. <a class="reference external" href="https://github.com/apple/foundationdb/pull/6906">(PR #6906)</a></li>
@@ -204,7 +222,7 @@
 <li>Fixed a bug that prevents a cluster from fully recovered state after taking a snapshot. <a class="reference external" href="https://github.com/apple/foundationdb/pull/6892">(PR #6892)</a></li>
 </ul>
 </div>
-<div class="section" id="id5">
+<div class="section" id="id7">
 <h2>7.1.2</h2>
 <ul class="simple">
 <li>Fixed failing upgrades due to non-persisted initial cluster version. <a class="reference external" href="https://github.com/apple/foundationdb/pull/6864">(PR #6864)</a></li>
@@ -213,13 +231,13 @@
 <li>Fixed a client-side infinite loop due to provisional GRV Proxy ID not set in GetReadVersionReply. <a class="reference external" href="https://github.com/apple/foundationdb/pull/6849">(PR #6849)</a></li>
 </ul>
 </div>
-<div class="section" id="id6">
+<div class="section" id="id8">
 <h2>7.1.1</h2>
 <ul class="simple">
 <li>Added new c libs to client package. <a class="reference external" href="https://github.com/apple/foundationdb/pull/6828">(PR #6828)</a></li>
 </ul>
 </div>
-<div class="section" id="id7">
+<div class="section" id="id9">
 <h2>7.1.0</h2>
 <div class="section" id="features">
 <h3>Features</h3>
@@ -309,7 +327,7 @@
     </p>
     <p>
         &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on May 15, 2022.<br/>
+      Last updated on Jun 12, 2022.<br/>
     </p>
   </div>
 </footer>
