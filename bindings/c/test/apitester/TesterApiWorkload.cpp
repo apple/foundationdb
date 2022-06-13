@@ -20,6 +20,7 @@
 
 #include "TesterApiWorkload.h"
 #include "TesterUtil.h"
+#include "test/fdb_api.hpp"
 #include <fmt/format.h>
 
 namespace FdbApiTester {
@@ -35,7 +36,7 @@ ApiWorkload::ApiWorkload(const WorkloadConfig& config) : WorkloadBase(config) {
 	runUntilStop = config.getBoolOption("runUntilStop", false);
 	numRandomOperations = config.getIntOption("numRandomOperations", 1000);
 	numOperationsForProgressCheck = config.getIntOption("numOperationsForProgressCheck", 10);
-	keyPrefix = fmt::format("{}/", workloadId);
+	keyPrefix = fdb::toBytesRef(fmt::format("{}/", workloadId));
 	numRandomOpLeft = 0;
 	stopReceived = false;
 	checkingProgress = false;
@@ -105,26 +106,26 @@ void ApiWorkload::randomOperation(TTaskFct cont) {
 	ASSERT(false);
 }
 
-std::string ApiWorkload::randomKeyName() {
+fdb::Key ApiWorkload::randomKeyName() {
 	return keyPrefix + Random::get().randomStringLowerCase(minKeyLength, maxKeyLength);
 }
 
-std::string ApiWorkload::randomValue() {
+fdb::Value ApiWorkload::randomValue() {
 	return Random::get().randomStringLowerCase(minValueLength, maxValueLength);
 }
 
-std::string ApiWorkload::randomNotExistingKey() {
+fdb::Key ApiWorkload::randomNotExistingKey() {
 	while (true) {
-		std::string key = randomKeyName();
+		fdb::Key key = randomKeyName();
 		if (!store.exists(key)) {
 			return key;
 		}
 	}
 }
 
-std::string ApiWorkload::randomExistingKey() {
-	std::string genKey = randomKeyName();
-	std::string key = store.getKey(genKey, true, 1);
+fdb::Key ApiWorkload::randomExistingKey() {
+	fdb::Key genKey = randomKeyName();
+	fdb::Key key = store.getKey(genKey, true, 1);
 	if (key != store.endKey()) {
 		return key;
 	}
@@ -136,7 +137,7 @@ std::string ApiWorkload::randomExistingKey() {
 	return genKey;
 }
 
-std::string ApiWorkload::randomKey(double existingKeyRatio) {
+fdb::Key ApiWorkload::randomKey(double existingKeyRatio) {
 	if (Random::get().randomBool(existingKeyRatio)) {
 		return randomExistingKey();
 	} else {
@@ -146,19 +147,19 @@ std::string ApiWorkload::randomKey(double existingKeyRatio) {
 
 void ApiWorkload::populateDataTx(TTaskFct cont) {
 	int numKeys = maxKeysPerTransaction;
-	auto kvPairs = std::make_shared<std::vector<KeyValue>>();
+	auto kvPairs = std::make_shared<std::vector<fdb::KeyValue>>();
 	for (int i = 0; i < numKeys; i++) {
-		kvPairs->push_back(KeyValue{ randomNotExistingKey(), randomValue() });
+		kvPairs->push_back(fdb::KeyValue{ randomNotExistingKey(), randomValue() });
 	}
 	execTransaction(
 	    [kvPairs](auto ctx) {
-		    for (const KeyValue& kv : *kvPairs) {
-			    ctx->tx()->set(kv.key, kv.value);
+		    for (const fdb::KeyValue& kv : *kvPairs) {
+			    ctx->tx().set(kv.key, kv.value);
 		    }
 		    ctx->commit();
 	    },
 	    [this, kvPairs, cont]() {
-		    for (const KeyValue& kv : *kvPairs) {
+		    for (const fdb::KeyValue& kv : *kvPairs) {
 			    store.set(kv.key, kv.value);
 		    }
 		    schedule(cont);
@@ -168,7 +169,7 @@ void ApiWorkload::populateDataTx(TTaskFct cont) {
 void ApiWorkload::clearData(TTaskFct cont) {
 	execTransaction(
 	    [this](auto ctx) {
-		    ctx->tx()->clearRange(keyPrefix, fmt::format("{}\xff", keyPrefix));
+		    ctx->tx().clearRange(keyPrefix, keyPrefix + fdb::Key(1, '\xff'));
 		    ctx->commit();
 	    },
 	    [this, cont]() { schedule(cont); });
@@ -185,19 +186,19 @@ void ApiWorkload::populateData(TTaskFct cont) {
 
 void ApiWorkload::randomInsertOp(TTaskFct cont) {
 	int numKeys = Random::get().randomInt(1, maxKeysPerTransaction);
-	auto kvPairs = std::make_shared<std::vector<KeyValue>>();
+	auto kvPairs = std::make_shared<std::vector<fdb::KeyValue>>();
 	for (int i = 0; i < numKeys; i++) {
-		kvPairs->push_back(KeyValue{ randomNotExistingKey(), randomValue() });
+		kvPairs->push_back(fdb::KeyValue{ randomNotExistingKey(), randomValue() });
 	}
 	execTransaction(
 	    [kvPairs](auto ctx) {
-		    for (const KeyValue& kv : *kvPairs) {
-			    ctx->tx()->set(kv.key, kv.value);
+		    for (const fdb::KeyValue& kv : *kvPairs) {
+			    ctx->tx().set(kv.key, kv.value);
 		    }
 		    ctx->commit();
 	    },
 	    [this, kvPairs, cont]() {
-		    for (const KeyValue& kv : *kvPairs) {
+		    for (const fdb::KeyValue& kv : *kvPairs) {
 			    store.set(kv.key, kv.value);
 		    }
 		    schedule(cont);
@@ -206,14 +207,14 @@ void ApiWorkload::randomInsertOp(TTaskFct cont) {
 
 void ApiWorkload::randomClearOp(TTaskFct cont) {
 	int numKeys = Random::get().randomInt(1, maxKeysPerTransaction);
-	auto keys = std::make_shared<std::vector<std::string>>();
+	auto keys = std::make_shared<std::vector<fdb::Key>>();
 	for (int i = 0; i < numKeys; i++) {
 		keys->push_back(randomExistingKey());
 	}
 	execTransaction(
 	    [keys](auto ctx) {
 		    for (const auto& key : *keys) {
-			    ctx->tx()->clear(key);
+			    ctx->tx().clear(key);
 		    }
 		    ctx->commit();
 	    },
@@ -226,14 +227,14 @@ void ApiWorkload::randomClearOp(TTaskFct cont) {
 }
 
 void ApiWorkload::randomClearRangeOp(TTaskFct cont) {
-	std::string begin = randomKeyName();
-	std::string end = randomKeyName();
+	fdb::Key begin = randomKeyName();
+	fdb::Key end = randomKeyName();
 	if (begin > end) {
 		std::swap(begin, end);
 	}
 	execTransaction(
 	    [begin, end](auto ctx) {
-		    ctx->tx()->clearRange(begin, end);
+		    ctx->tx().clearRange(begin, end);
 		    ctx->commit();
 	    },
 	    [this, begin, end, cont]() {

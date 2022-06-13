@@ -454,7 +454,9 @@ public:
 	}
 
 	ThreadFuture<Void> flush() {
-		traceEventThrottlerCache->poll();
+		if (TraceEvent::isNetworkThread()) {
+			traceEventThrottlerCache->poll();
+		}
 
 		MutexHolder hold(mutex);
 		bool roll = false;

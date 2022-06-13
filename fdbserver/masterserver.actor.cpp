@@ -66,6 +66,8 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	// up-to-date in the presence of key range splits/merges.
 	VersionVector ssVersionVector;
 
+	int8_t locality; // sequencer locality
+
 	CounterCollection cc;
 	Counter getCommitVersionRequests;
 	Counter getLiveCommittedVersionRequests;
@@ -115,6 +117,8 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 			forceRecovery = false;
 		}
 		balancer = resolutionBalancer.resolutionBalancing();
+		locality = myInterface.locality.dcId().present() ? std::stoi(myInterface.locality.dcId().get().toString())
+		                                                 : tagLocalityInvalid;
 	}
 	~MasterData() = default;
 };
@@ -241,7 +245,9 @@ void updateLiveCommittedVersion(Reference<MasterData> self, ReportRawCommittedVe
 	if (req.version > self->liveCommittedVersion.get()) {
 		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR && req.writtenTags.present()) {
 			// TraceEvent("Received ReportRawCommittedVersionRequest").detail("Version",req.version);
-			self->ssVersionVector.setVersion(req.writtenTags.get(), req.version);
+			int8_t primaryLocality =
+			    SERVER_KNOBS->ENABLE_VERSION_VECTOR_HA_OPTIMIZATION ? self->locality : tagLocalityInvalid;
+			self->ssVersionVector.setVersion(req.writtenTags.get(), req.version, primaryLocality);
 			self->versionVectorTagUpdates += req.writtenTags.get().size();
 		}
 		auto curTime = now();
@@ -312,18 +318,16 @@ ACTOR Future<Void> updateRecoveryData(Reference<MasterData> self) {
 	loop {
 		UpdateRecoveryDataRequest req = waitNext(self->myInterface.updateRecoveryData.getFuture());
 		TraceEvent("UpdateRecoveryData", self->dbgid)
-		    .detail("RecoveryTxnVersion", req.recoveryTransactionVersion)
-		    .detail("LastEpochEnd", req.lastEpochEnd)
+		    .detail("ReceivedRecoveryTxnVersion", req.recoveryTransactionVersion)
+		    .detail("ReceivedLastEpochEnd", req.lastEpochEnd)
+		    .detail("CurrentRecoveryTxnVersion", self->recoveryTransactionVersion)
+		    .detail("CurrentLastEpochEnd", self->lastEpochEnd)
 		    .detail("NumCommitProxies", req.commitProxies.size())
 		    .detail("VersionEpoch", req.versionEpoch);
 
-		if (self->recoveryTransactionVersion == invalidVersion ||
-		    req.recoveryTransactionVersion > self->recoveryTransactionVersion) {
-			self->recoveryTransactionVersion = req.recoveryTransactionVersion;
-		}
-		if (self->lastEpochEnd == invalidVersion || req.lastEpochEnd > self->lastEpochEnd) {
-			self->lastEpochEnd = req.lastEpochEnd;
-		}
+		self->recoveryTransactionVersion = req.recoveryTransactionVersion;
+		self->lastEpochEnd = req.lastEpochEnd;
+
 		if (req.commitProxies.size() > 0) {
 			self->lastCommitProxyVersionReplies.clear();
 

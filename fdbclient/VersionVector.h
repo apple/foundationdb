@@ -79,12 +79,14 @@ public:
 		invalidateCachedEncodedSize();
 	}
 
-	void setVersion(const std::set<Tag>& tags, Version version) {
+	void setVersion(const std::set<Tag>& tags, Version version, int8_t localityFilter = tagLocalityInvalid) {
 		ASSERT(version > maxVersion);
 		for (auto& tag : tags) {
 			ASSERT(tag != invalidTag);
 			ASSERT(tag.locality > tagLocalityInvalid);
-			versions[tag] = version;
+			if (localityFilter == tagLocalityInvalid || tag.locality == localityFilter) {
+				versions[tag] = version;
+			}
 		}
 		maxVersion = version;
 		invalidateCachedEncodedSize();
