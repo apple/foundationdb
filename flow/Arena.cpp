@@ -27,6 +27,10 @@ extern "C" const char* __lsan_default_options(void) {
 	return "use_unaligned=1";
 }
 
+#ifdef ADDRESS_SANITIZER
+#include <sanitizer/asan_interface.h>
+#endif
+
 // See https://dox.ipxe.org/memcheck_8h_source.html and https://dox.ipxe.org/valgrind_8h_source.html for an explanation
 // of valgrind client requests
 #if VALGRIND
@@ -67,6 +71,29 @@ void makeUndefined(void* addr, size_t size) {
 	if (valgrindPrecise()) {
 		VALGRIND_MAKE_MEM_UNDEFINED(addr, size);
 	}
+}
+#elif defined(ADDRESS_SANITZER)
+void allowAccess(ArenaBlock* b) {
+	if (b) {
+		ASAN_UNPOISON_MEMORY_REGION(b, ArenaBlock::TINY_HEADER);
+		int headerSize = b->isTiny() ? ArenaBlock::TINY_HEADER : sizeof(ArenaBlock);
+		ASAN_UNPOISON_MEMORY_REGION(b, headerSize);
+	}
+}
+void disallowAccess(ArenaBlock* b) {
+	if (b) {
+		int headerSize = b->isTiny() ? ArenaBlock::TINY_HEADER : sizeof(ArenaBlock);
+		ASAN_POISON_MEMORY_REGION(b, headerSize);
+	}
+}
+void makeNoAccess(void* addr, size_t size) {
+	ASAN_POISON_MEMORY_REGION(addr, size);
+}
+void makeDefined(void* addr, size_t size) {
+	ASAN_UNPOISON_MEMORY_REGION(addr, size);
+}
+void makeUndefined(void* addr, size_t size) {
+	ASAN_UNPOISON_MEMORY_REGION(addr, size);
 }
 #else
 void allowAccess(ArenaBlock*) {}
