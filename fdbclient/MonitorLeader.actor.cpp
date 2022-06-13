@@ -624,10 +624,7 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderOneGeneration(Reference<IClusterCon
 
 			outSerializedLeaderInfo->set(leader.get().first.serializedInfo);
 		}
-		choose {
-			when(wait(nomineeChange.onTrigger())) { TraceEvent("MonitorLeaderChangeLoop1").log(); }
-			when(wait(allActors)) { TraceEvent("MonitorLeaderChangeLoop2").log(); }
-		}
+		wait(nomineeChange.onTrigger() || allActors);
 	}
 }
 
