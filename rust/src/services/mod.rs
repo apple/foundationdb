@@ -2,7 +2,7 @@ use crate::flow::connection;
 use crate::flow::file_identifier;
 use crate::flow::frame;
 use crate::flow::frame::Frame;
-use crate::flow::uid;
+use crate::flow::uid::{UID, WLTOKEN};
 use crate::flow::Result;
 
 use std::future::Future;
@@ -40,6 +40,7 @@ const MAX_REQUESTS: usize = MAX_CONNECTIONS * 2;
 #[derive(Clone, Debug)]
 pub struct Svc {
     pub response_tx: Sender<Frame>,
+    pub in_flight_requests: Arc<dashmap::DashMap<UID, String>>,
 }
 
 impl Svc {
@@ -48,15 +49,15 @@ impl Svc {
         // set to the process-wide MAX_REQUESTS / 10 so that a few backpressuring receivers
         // can't consume all the request slots for this process.
         let (response_tx, response_rx) = tokio::sync::mpsc::channel::<Frame>(MAX_REQUESTS / 10);
-        (Svc { response_tx }, response_rx)
+        (Svc { response_tx, in_flight_requests: Arc::new(dashmap::DashMap::new()) }, response_rx)
     }
 }
 
 async fn handle_req(request: FlowRequest) -> Result<Option<FlowResponse>> {
     request.frame.validate()?;
     Ok(match request.frame.token.get_well_known_endpoint() {
-        Some(uid::WLTOKEN::PingPacket) => ping_request::handle(request).await?,
-        Some(uid::WLTOKEN::ReservedForTesting) => network_test::handle(request).await?,
+        Some(WLTOKEN::PingPacket) => ping_request::handle(request).await?,
+        Some(WLTOKEN::ReservedForTesting) => network_test::handle(request).await?,
         Some(wltoken) => {
             let fit = file_identifier::FileIdentifierNames::new()?;
             println!(

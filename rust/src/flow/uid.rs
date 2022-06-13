@@ -3,7 +3,7 @@ use super::Result;
 use num_derive::{FromPrimitive, ToPrimitive};
 use num_traits::{FromPrimitive, ToPrimitive};
 
-#[derive(PartialEq, PartialOrd)]
+#[derive(PartialEq, PartialOrd, Hash, Eq)]
 pub struct UID {
     pub uid: [u64; 2],
 }

@@ -11,6 +11,8 @@ debug = true
 
 [dependencies]
 bytes = {version = "1.1"}
+dashmap = {version = "5.3" }
+fxhash = {version = "0.2.1" }
 flatbuffers = { version = "2.1" }
 futures-util = { version = "0.3.1", default-features = false }
 num-traits = "0.2"
