@@ -87,15 +87,16 @@ class GlobalTagThrottlerImpl {
 		}
 
 		void processTraceEvent(TraceEvent& te) const {
-			ASSERT(quota.present());
-			te.detail("ProvidedReadLimit", getReadLimit())
-			    .detail("ProvidedWriteLimit", getWriteLimit())
-			    .detail("ReadCostRate", readCostCounter.smoothRate())
-			    .detail("WriteCostRate", writeCostCounter.smoothRate())
-			    .detail("TotalReadQuota", quota.get().totalReadQuota)
-			    .detail("ReservedReadQuota", quota.get().reservedReadQuota)
-			    .detail("TotalWriteQuota", quota.get().totalWriteQuota)
-			    .detail("ReservedWriteQuota", quota.get().reservedWriteQuota);
+			if (quota.present()) {
+				te.detail("ProvidedReadLimit", getReadLimit())
+				    .detail("ProvidedWriteLimit", getWriteLimit())
+				    .detail("ReadCostRate", readCostCounter.smoothRate())
+				    .detail("WriteCostRate", writeCostCounter.smoothRate())
+				    .detail("TotalReadQuota", quota.get().totalReadQuota)
+				    .detail("ReservedReadQuota", quota.get().reservedReadQuota)
+				    .detail("TotalWriteQuota", quota.get().totalWriteQuota)
+				    .detail("ReservedWriteQuota", quota.get().reservedWriteQuota);
+			}
 		}
 	};
 

@@ -25,7 +25,10 @@
 
 class GlobalTagThrottlingWorkload : public TestWorkload {
 	TransactionTag transactionTag;
-	double quota;
+	double reservedReadQuota{ 0.0 };
+	double totalReadQuota{ 0.0 };
+	double reservedWriteQuota{ 0.0 };
+	double totalWriteQuota{ 0.0 };
 
 	ACTOR static Future<Void> setup(GlobalTagThrottlingWorkload* self, Database cx) {
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
@@ -34,8 +37,16 @@ class GlobalTagThrottlingWorkload : public TestWorkload {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				TraceEvent("GlobalTagThrottlingWorkload_SettingTagQuota")
 				    .detail("Tag", self->transactionTag)
-				    .detail("Quota", self->quota);
-				ThrottleApi::setTagQuota(tr, self->transactionTag, self->quota, self->quota, 0, 0);
+				    .detail("ReservedReadQuota", self->reservedReadQuota)
+				    .detail("TotalReadQuota", self->totalReadQuota)
+				    .detail("ReservedWriteQuota", self->reservedWriteQuota)
+				    .detail("TotalWriteQuota", self->totalWriteQuota);
+				ThrottleApi::setTagQuota(tr,
+				                         self->transactionTag,
+				                         self->reservedReadQuota,
+				                         self->totalReadQuota,
+				                         self->reservedWriteQuota,
+				                         self->totalWriteQuota);
 				wait(tr->commit());
 				return Void();
 			} catch (Error& e) {
@@ -47,7 +58,10 @@ class GlobalTagThrottlingWorkload : public TestWorkload {
 public:
 	explicit GlobalTagThrottlingWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		transactionTag = getOption(options, "transactionTag"_sr, "sampleTag"_sr);
-		quota = getOption(options, "quota"_sr, 100.0);
+		reservedReadQuota = getOption(options, "reservedReadQuota"_sr, 0.0);
+		totalReadQuota = getOption(options, "totalReadQuota"_sr, 0.0);
+		reservedWriteQuota = getOption(options, "reservedWriteQuota"_sr, 0.0);
+		totalWriteQuota = getOption(options, "totalWriteQuota"_sr, 0.0);
 	}
 
 	std::string description() const override { return "GlobalTagThrottling"; }

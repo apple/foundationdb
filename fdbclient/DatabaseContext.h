@@ -115,23 +115,7 @@ public:
 
 	bool canRecheck() const { return lastCheck < now() - CLIENT_KNOBS->TAG_THROTTLE_RECHECK_INTERVAL; }
 
-	double throttleDuration() const {
-		if (expiration <= now()) {
-			return 0.0;
-		}
-
-		double capacity =
-		    (smoothRate.smoothTotal() - smoothReleased.smoothRate()) * CLIENT_KNOBS->TAG_THROTTLE_SMOOTHING_WINDOW;
-		if (capacity >= 1) {
-			return 0.0;
-		}
-
-		if (tpsRate == 0) {
-			return std::max(0.0, expiration - now());
-		}
-
-		return std::min(expiration - now(), capacity / tpsRate);
-	}
+	double throttleDuration() const;
 };
 
 struct WatchParameters : public ReferenceCounted<WatchParameters> {

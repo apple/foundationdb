@@ -5146,8 +5146,9 @@ Future<Optional<Value>> Transaction::get(const Key& key, Snapshot snapshot) {
 		if (!ver.isReady() || metadataVersion.isSet()) {
 			return metadataVersion.getFuture();
 		} else {
-			if (ver.isError())
+			if (ver.isError()) {
 				return ver.getError();
+			}
 			if (ver.get() == trState->cx->metadataVersionCache[trState->cx->mvCacheInsertLocation].first) {
 				return trState->cx->metadataVersionCache[trState->cx->mvCacheInsertLocation].second;
 			}
@@ -7057,6 +7058,26 @@ ACTOR Future<ProtocolVersion> getClusterProtocolImpl(
 // Note: this will never return if the server is running a protocol from FDB 5.0 or older
 Future<ProtocolVersion> DatabaseContext::getClusterProtocol(Optional<ProtocolVersion> expectedVersion) {
 	return getClusterProtocolImpl(coordinator, expectedVersion);
+}
+
+double ClientTagThrottleData::throttleDuration() const {
+	if (expiration <= now()) {
+		return 0.0;
+	}
+
+	double capacity =
+	    (smoothRate.smoothTotal() - smoothReleased.smoothRate()) * CLIENT_KNOBS->TAG_THROTTLE_SMOOTHING_WINDOW;
+
+	if (capacity >= 1) {
+		TraceEvent("DEBUG_ReturningEarly1");
+		return 0.0;
+	}
+
+	if (tpsRate == 0) {
+		return std::max(0.0, expiration - now());
+	}
+
+	return std::min(expiration - now(), capacity / tpsRate);
 }
 
 uint32_t Transaction::getSize() {
