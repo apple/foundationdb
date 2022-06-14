@@ -116,16 +116,6 @@ const Value keyServersValue(const std::vector<Tag>& srcTag, const std::vector<Ta
 	return wr.toValue();
 }
 
-const Value keyServersValue(const std::vector<Tag>& srcTag,
-                            const std::vector<Tag>& destTag,
-                            const UID& srcId,
-                            const UID& destId) {
-	// src and dest are expected to be sorted
-	BinaryWriter wr(IncludeVersion(ProtocolVersion::withKeyServerValueV2()));
-	wr << srcTag << destTag << srcId << destId;
-	return wr.toValue();
-}
-
 void decodeKeyServersValue(RangeResult result,
                            const ValueRef& value,
                            std::vector<UID>& src,

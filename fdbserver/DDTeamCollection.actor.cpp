@@ -46,6 +46,7 @@ FDB_DEFINE_BOOLEAN_PARAM(PreferLowerDiskUtil);
 FDB_DEFINE_BOOLEAN_PARAM(TeamMustHaveShards);
 FDB_DEFINE_BOOLEAN_PARAM(ForReadBalance);
 FDB_DEFINE_BOOLEAN_PARAM(PreferLowerReadUtil);
+FDB_DEFINE_BOOLEAN_PARAM(FindTeamByServers);
 
 class DDTeamCollectionImpl {
 	ACTOR static Future<Void> checkAndRemoveInvalidLocalityAddr(DDTeamCollection* self) {

@@ -73,10 +73,6 @@ const Value keyServersValue(const std::vector<UID>& src,
                             const std::vector<UID>& dest,
                             const UID& srcID,
                             const UID& destID);
-const Value keyServersValue(const std::vector<Tag>& srcTag,
-                            const std::vector<Tag>& destTag,
-                            const UID& srcId,
-                            const UID& destId);
 // `result` must be the full result of getting serverTagKeys
 void decodeKeyServersValue(RangeResult result,
                            const ValueRef& value,

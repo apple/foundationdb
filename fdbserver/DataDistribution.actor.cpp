@@ -316,7 +316,7 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution(Data
 	result->shards.push_back(DDShardInfo(allKeys.end));
 
 	if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
-		for (int shard = 0; shard < result->shards.size() - 1; shard++) {
+		for (int shard = 0; shard < result->shards.size() - 1; ++shard) {
 			const DDShardInfo& iShard = result->shards[shard];
 			KeyRangeRef keys = KeyRangeRef(iShard.key, result->shards[shard + 1].key);
 			result->dataMoveMap[keys.begin]->validateShard(iShard, keys);
@@ -859,7 +859,6 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			                                    self->ddId,
 			                                    &normalDDQueueErrors()));
 			actors.push_back(reportErrorsExcept(dataDistributionQueue(cx,
-			                                                          readyToStart.getFuture(),
 			                                                          output,
 			                                                          input.getFuture(),
 			                                                          getShardMetrics,

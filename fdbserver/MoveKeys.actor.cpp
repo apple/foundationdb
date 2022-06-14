@@ -2295,7 +2295,7 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
                                    FlowLock* cleanUpDataMoveParallelismLock,
                                    KeyRange keys,
                                    const DDEnabledState* ddEnabledState) {
-	TraceEvent(SevVerbose, "CleanUpDataMoveBegin", dataMoveId).detail("DataMoveID", dataMoveId);
+	TraceEvent(SevVerbose, "CleanUpDataMoveBegin", dataMoveId).detail("DataMoveID", dataMoveId).detail("Range", keys);
 	state bool complete = false;
 
 	wait(cleanUpDataMoveParallelismLock->take(TaskPriority::DataDistributionLaunch));

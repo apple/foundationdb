@@ -106,18 +106,18 @@ struct DataMoveMetaData {
 	int16_t phase; // DataMoveMetaData::Phase.
 
 	DataMoveMetaData() = default;
-	DataMoveMetaData(UID id, Version version, KeyRange const& range)
-	  : id(id), version(version), range(range), priority(0) {}
-	DataMoveMetaData(UID id, KeyRange const& range) : id(id), version(invalidVersion), range(range), priority(0) {}
+	DataMoveMetaData(UID id, Version version, KeyRange range)
+	  : id(id), version(version), range(std::move(range)), priority(0) {}
+	DataMoveMetaData(UID id, KeyRange range) : id(id), version(invalidVersion), range(std::move(range)), priority(0) {}
 
 	Phase getPhase() const { return static_cast<Phase>(phase); }
 
 	void setPhase(Phase phase) { this->phase = static_cast<int16_t>(phase); }
 
 	std::string toString() const {
-		std::string res = "DataMoveMetaData:\nID: " + id.shortString() + "\nRange: " + range.toString() +
-		                  "\nPhase: " + std::to_string(static_cast<int>(phase)) + "\nSource Servers: " + describe(src) +
-		                  "\nDestination Servers: " + describe(dest) + "\n";
+		std::string res = "DataMoveMetaData: [ID]: " + id.shortString() + " [Range]: " + range.toString() +
+		                  " [Phase]: " + std::to_string(static_cast<int>(phase)) +
+		                  " [Source Servers]: " + describe(src) + " [Destination Servers]: " + describe(dest);
 		return res;
 	}
 
