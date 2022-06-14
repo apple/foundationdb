@@ -461,7 +461,7 @@ public:
 
 	bool allowStorageMigrationTypeChange = false;
 
-	std::unordered_map<Standalone<StringRef>, Standalone<KeyPairRef>> authKeys;
+	std::unordered_map<Standalone<StringRef>, PrivateKey> authKeys;
 
 	flowGlobalType global(int id) const final { return getCurrentProcess()->global(id); };
 	void setGlobal(size_t id, flowGlobalType v) final { getCurrentProcess()->setGlobal(id, v); };

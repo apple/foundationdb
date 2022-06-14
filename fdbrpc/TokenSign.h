@@ -56,10 +56,6 @@ struct TokenRef {
 
 struct SignedTokenRef {
 	static constexpr FileIdentifier file_identifier = 5916732;
-	SignedAuthTokenRef() {}
-	SignedAuthTokenRef(Arena& p, const SignedAuthTokenRef& other)
-	  : token(p, other.token), keyName(p, other.keyName), signature(p, other.signature) {}
-
 	StringRef token;
 	StringRef keyName;
 	StringRef signature;
@@ -124,6 +120,9 @@ bool parsePayloadPart(Arena& arena, TokenRef& tokenOut, StringRef b64urlPayloadI
 // using memory allocated from arena
 bool parseSignaturePart(Arena& arena, TokenRef& tokenOut, StringRef b64urlSignatureIn);
 
+// Returns the base64 encoded signature of the token
+StringRef signaturePart(StringRef token);
+
 // Parse passed token string and materialize its contents into tokenOut,
 // using memory allocated from arena
 // Return whether the signed token string is well-formed
@@ -133,14 +132,5 @@ bool parseToken(Arena& arena, TokenRef& tokenOut, StringRef signedTokenIn);
 bool verifyToken(StringRef signedToken, StringRef publicKeyDer);
 
 } // namespace authz::jwt
-
-// Below method is intented to be used for testing only
-
-struct KeyPairRef {
-	StringRef privateKey;
-	StringRef publicKey;
-};
-
-Standalone<KeyPairRef> generateEcdsaKeyPair();
 
 #endif // FDBRPC_TOKEN_SIGN_H

@@ -42,6 +42,7 @@
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/versions.h"
 #include "fdbclient/WellKnownEndpoints.h"
+#include "flow/MkCert.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/network.h"
 #include "flow/TypeTraits.h"
@@ -59,7 +60,7 @@ ISimulator::ISimulator()
     allowLogSetKills(true), tssMode(TSSMode::Disabled), isStopped(false), lastConnectionFailure(0),
     connectionFailuresDisableDuration(0), speedUpSimulation(false), backupAgents(BackupAgentType::WaitForType),
     drAgents(BackupAgentType::WaitForType), allSwapsDisabled(false) {
-	authKeys["defaultKey"_sr] = generateEcdsaKeyPair();
+	authKeys["defaultKey"_sr] = mkcert::makeEcP256();
 }
 ISimulator::~ISimulator() = default;
 
@@ -590,7 +591,8 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 				                              WLTOKEN_RESERVED_COUNT,
 				                              &allowList);
 				for (const auto& p : g_simulator.authKeys) {
-					FlowTransport::transport().addPublicKey(p.first, p.second.publicKey);
+					Arena tmp;
+					FlowTransport::transport().addPublicKey(p.first, p.second.toPublicKey().writeDer(tmp));
 				}
 				Sim2FileSystem::newFileSystem();
 

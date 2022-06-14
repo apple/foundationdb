@@ -7478,7 +7478,7 @@ ACTOR Future<TenantMapEntry> blobGranuleGetTenantEntry(Transaction* self, Key ra
 	    self->trState->cx->getCachedLocation(self->getTenant().get(), rangeStartKey, Reverse::False);
 	if (!cachedLocationInfo.present()) {
 		KeyRangeLocationInfo l = wait(getKeyLocation_internal(self->trState->cx,
-		                                                      self->getTenant().get(),
+		                                                      self->trState->getTenantInfo(true),
 		                                                      rangeStartKey,
 		                                                      self->trState->spanContext,
 		                                                      self->trState->debugID,

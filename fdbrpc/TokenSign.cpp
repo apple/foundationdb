@@ -302,6 +302,10 @@ StringRef signToken(Arena& arena, TokenRef tokenSpec, PrivateKey privateKey) {
 	return StringRef(out, totalLen);
 }
 
+StringRef signToken(Arena& arena, TokenRef tokenSpec, StringRef privateKeyDer) {
+	return signToken(arena, tokenSpec, PrivateKey(DerEncoded{}, privateKeyDer));
+}
+
 bool parseHeaderPart(TokenRef& token, StringRef b64urlHeader) {
 	auto tmpArena = Arena();
 	auto [header, valid] = base64url::decode(tmpArena, b64urlHeader);
@@ -412,6 +416,10 @@ bool parseSignaturePart(Arena& arena, TokenRef& token, StringRef b64urlSignature
 	return valid;
 }
 
+StringRef signaturePart(StringRef token) {
+	return token.eat("."_sr).eat("."_sr);
+}
+
 bool parseToken(Arena& arena, TokenRef& token, StringRef signedToken) {
 	auto b64urlHeader = signedToken.eat("."_sr);
 	auto b64urlPayload = signedToken.eat("."_sr);
@@ -444,6 +452,10 @@ bool verifyToken(StringRef signedToken, PublicKey publicKey) {
 		return false;
 	auto [keyAlgNid, digest] = getMethod(parsedToken.algorithm);
 	return verifyStringSignature(b64urlTokenPart, sig, publicKey, keyAlgNid, digest);
+}
+
+bool verifyToken(StringRef signedToken, StringRef publicKeyDer) {
+	return verifyToken(signedToken, PublicKey(DerEncoded{}, publicKeyDer));
 }
 
 TokenRef makeRandomTokenSpec(Arena& arena, IRandom& rng, Algorithm alg) {

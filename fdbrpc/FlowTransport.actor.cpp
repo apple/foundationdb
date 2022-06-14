@@ -308,15 +308,21 @@ public:
 	bool empty() const { return queue.empty(); }
 };
 
-using SignedAuthTokenTTL = std::pair<double, SignedAuthToken>;
+struct SignedAuthTokenTTL {
+	Arena arena;
+	double expirationTime;
+	StringRef serializedToken;
+	authz::jwt::TokenRef token;
+};
 struct SignedAuthTokenTTLCmp {
 	constexpr bool operator()(const SignedAuthTokenTTL& lhs, const SignedAuthTokenTTL& rhs) const {
-		return lhs.first > rhs.first;
+		return lhs.expirationTime > rhs.expirationTime;
 	}
 };
+
 struct SignedAuthTokenCmp {
 	bool operator()(const SignedAuthTokenTTL& lhs, const SignedAuthTokenTTL& rhs) const {
-		return lhs.second.signature == rhs.second.signature;
+		return lhs.token.signature == rhs.token.signature;
 	}
 };
 
@@ -337,7 +343,7 @@ class TokenCache : NonCopyable {
 	};
 
 	class LRUCache {
-		using ListEntry = std::pair<StringRef, CachedToken>;
+		using ListEntry = StringRef;
 		using List = std::list<ListEntry>;
 		List list;
 		boost::unordered_map<StringRef, List::iterator> map;
@@ -346,13 +352,14 @@ class TokenCache : NonCopyable {
 		void deleteOldestIfFull() {
 			while (map.size() > max_size) {
 				auto last = list.rbegin();
-				map.erase(last->first);
+				map.erase(*last);
 				list.pop_back();
 			}
 		}
+
 	public:
-		void add(StringRef signature, CachedToken&& token) {
-			list.emplace_front(signature, std::move(token));
+		void add(StringRef signature) {
+			list.emplace_front(signature);
 			map[signature] = list.begin();
 			deleteOldestIfFull();
 		}
@@ -364,7 +371,7 @@ class TokenCache : NonCopyable {
 				// we don't need to update the LRU
 				return true;
 			} else {
-				list.emplace_front(signature, iter->second->second);
+				list.emplace_front(signature);
 				list.erase(iter->second);
 				return true;
 			}
@@ -383,7 +390,7 @@ class TokenCache : NonCopyable {
 				StringRef signature = self->priorityQueue.top().second;
 				auto iter = self->tokens.find(signature);
 				ASSERT(iter != self->tokens.end());
-				self->expiredTokens.add(signature, CachedToken(iter->second));
+				self->expiredTokens.add(signature);
 				self->tokens.erase(iter);
 				self->priorityQueue.pop();
 			}
@@ -399,37 +406,63 @@ class TokenCache : NonCopyable {
 public:
 	explicit TokenCache() { cleaner = cleanerJob(this); }
 
-	void addToken(Reference<AuthorizedTenants> tenants, SignedAuthTokenRef token) {
-		auto iter = tokens.find(token.signature);
+	void addToken(Reference<AuthorizedTenants> tenants, StringRef token) {
+		auto sig = authz::jwt::signaturePart(token);
+		auto iter = tokens.find(sig);
 		if (iter != tokens.end()) {
 			tenants->add(iter->second.expiresAt, iter->second.tenants);
-		} else if (expiredTokens.has(token.signature)) {
+		} else if (expiredTokens.has(sig)) {
 			TraceEvent(SevWarn, "InvalidToken")
 			    .detail("From", g_currentDeliveryPeerAddress.address)
 			    .detail("Reason", "Expired");
 		} else {
-			auto key = FlowTransport::transport().getPublicKeyByName(token.keyName);
-			if (key.present() && verifyToken(token, key.get())) {
-				AuthTokenRef ref;
-				ObjectReader r(token.token.begin(), AssumeVersion(g_network->protocolVersion()));
-				r.deserialize(ref);
-				CachedToken c;
-				c.expiresAt = ref.expiresAt;
-				for (auto tenant : ref.tenants) {
-					c.tenants.push_back_deep(c.arena, tenant);
-				}
-				StringRef signature(c.arena, token.signature);
-				if (ref.expiresAt <= now()) {
-					expiredTokens.add(signature, std::move(c));
+			Arena arena;
+			authz::jwt::TokenRef t;
+			if (!authz::jwt::parseToken(arena, t, token)) {
+				return;
+			}
+			if (!t.keyId.present()) {
+				TraceEvent(SevWarn, "InvalidToken")
+				    .detail("From", g_currentDeliveryPeerAddress.address)
+				    .detail("Reason", "NoKeyID");
+				return;
+			}
+			auto key = FlowTransport::transport().getPublicKeyByName(t.keyId.get());
+			if (key.present() && authz::jwt::verifyToken(token, key.get())) {
+				double currentTime = g_network->timer();
+				if (!t.expiresAtUnixTime.present()) {
+					TraceEvent(SevWarn, "InvalidToken")
+					    .detail("From", g_currentDeliveryPeerAddress.address)
+					    .detail("Reason", "NoExpirationTime");
+				} else if (double(t.expiresAtUnixTime.get()) <= currentTime) {
 					TraceEvent(SevWarn, "InvalidToken")
 					    .detail("From", g_currentDeliveryPeerAddress.address)
 					    .detail("Reason", "Expired");
-				} else {
-					priorityQueue.emplace(c.expiresAt, signature);
-					tenants->add(c.expiresAt, c.tenants);
-					tokens.emplace(signature, std::move(c));
-					insert.trigger();
 				}
+				if (!t.notBeforeUnixTime.present()) {
+					TraceEvent(SevWarn, "InvalidToken")
+					    .detail("From", g_currentDeliveryPeerAddress.address)
+					    .detail("Reason", "NoNotBefore");
+				} else if (double(t.notBeforeUnixTime.get()) > currentTime) {
+					TraceEvent(SevWarn, "InvalidToken")
+					    .detail("From", g_currentDeliveryPeerAddress.address)
+					    .detail("Reason", "TokenNotYetValid");
+				}
+				if (!t.tenants.present()) {
+					TraceEvent(SevWarn, "InvalidToken")
+					    .detail("From", g_currentDeliveryPeerAddress.address)
+					    .detail("Reason", "NoTenants");
+				}
+				CachedToken c;
+				c.expiresAt = double(t.expiresAtUnixTime.get());
+				for (auto tenant : t.tenants.get()) {
+					c.tenants.push_back_deep(c.arena, tenant);
+				}
+				StringRef signature(c.arena, sig);
+				priorityQueue.emplace(c.expiresAt, signature);
+				tenants->add(c.expiresAt, c.tenants);
+				tokens.emplace(signature, std::move(c));
+				insert.trigger();
 			} else {
 				TraceEvent(SevWarn, "InvalidSignature")
 				    .detail("From", g_currentDeliveryPeerAddress.address)
@@ -446,6 +479,7 @@ public:
 // needs to change, do not attempt to update it directly, use the setNetworkAddress API as it
 // will ensure the new toString() cached value is updated.
 class NetworkAddressCachedString {
+public:
 	NetworkAddressCachedString() { setAddressList(NetworkAddressList()); }
 	NetworkAddressCachedString(NetworkAddressList const& list) { setAddressList(list); }
 	NetworkAddressList const& getAddressList() const { return addressList; }
@@ -1117,7 +1151,7 @@ void Peer::prependConnectPacket() {
 	if (!transport->tokens.empty()) {
 		AuthorizationRequest req;
 		for (auto t : transport->tokens) {
-			req.tokens.push_back(req.arena, t.second);
+			req.tokens.push_back(req.arena, t.serializedToken);
 		}
 		++transport->countPacketsGenerated;
 		SplitBuffer packetInfoBuffer;
@@ -1845,7 +1879,9 @@ FlowTransport::FlowTransport(uint64_t transportId, int maxWellKnownEndpoints, IP
 	self->multiVersionCleanup = multiVersionCleanupWorker(self);
 	if (g_network->isSimulated()) {
 		for (auto const& p : g_simulator.authKeys) {
-			self->publicKeys.emplace(p.first, p.second.publicKey);
+			Standalone<StringRef> pk;
+			pk = p.second.toPublicKey().writeDer(pk.arena());
+			self->publicKeys.emplace(p.first, pk);
 		}
 	}
 }
@@ -2224,20 +2260,25 @@ HealthMonitor* FlowTransport::healthMonitor() {
 }
 
 void FlowTransport::authorizationTokenAdd(StringRef signedToken) {
-	ObjectReader reader(signedToken.begin(), AssumeVersion(g_network->protocolVersion()));
-	SignedAuthTokenRef tokenRef;
-	reader.deserialize(tokenRef);
-	SignedAuthToken token(tokenRef);
-	// we need the TTL to invalidate tokens on the client side
-	auto authToken =
-	    ObjectReader::fromStringRef<AuthTokenRef>(token.token, AssumeVersion(g_network->protocolVersion()));
-	if (authToken.expiresAt < now()) {
-		TraceEvent(SevWarnAlways, "AddedExpiredToken").detail("Expired", authToken.expiresAt);
+	SignedAuthTokenTTL token;
+	token.serializedToken = StringRef(token.arena, signedToken);
+	if (authz::jwt::parseToken(token.arena, token.token, token.serializedToken)) {
+		TraceEvent(SevWarnAlways, "AddedInvalidToken").detail("Reason", "CanNotParse").log();
 		return;
 	}
-	self->tokens.emplace(authToken.expiresAt, token);
+	if (!token.token.expiresAtUnixTime.present()) {
+		TraceEvent(SevWarnAlways, "AddedInvalidToken").detail("Reason", "NoExpirationTime").log();
+	}
+	double expiresAt = double(token.token.expiresAtUnixTime.get());
+	if (expiresAt < timer()) {
+		TraceEvent(SevWarnAlways, "AddedInvalidToken")
+		    .detail("Reason", "Expired")
+		    .detail("ExpirationTime", expiresAt)
+		    .log();
+	}
+	self->tokens.emplace(token);
 	AuthorizationRequest req;
-	req.tokens.push_back(req.arena, token);
+	req.tokens.push_back(req.arena, signedToken);
 	// send the token to all existing peers
 	for (auto peer : self->peers) {
 		NetworkAddressList addr;
@@ -2259,7 +2300,8 @@ Optional<StringRef> FlowTransport::getPublicKeyByName(StringRef name) const {
 }
 
 void FlowTransport::addPublicKey(StringRef name, StringRef key) {
-	self->publicKeys[name] = key;
+	Standalone<StringRef>& pk = self->publicKeys[name];
+	pk = StringRef(pk.arena(), key);
 }
 
 void FlowTransport::removePublicKey(StringRef name) {

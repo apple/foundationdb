@@ -39,8 +39,10 @@ struct CycleMembers {};
 
 template <>
 struct CycleMembers<true> {
+	Arena arena;
 	TenantName tenant;
-	SignedAuthToken token;
+	authz::jwt::TokenRef token;
+	StringRef signedToken;
 };
 
 template <bool MultiTenancy>
@@ -64,15 +66,20 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 		traceParentProbability = getOption(options, "traceParentProbability"_sr, 0.01);
 		minExpectedTransactionsPerSecond = transactionsPerSecond * getOption(options, "expectedRate"_sr, 0.7);
 		if constexpr (MultiTenancy) {
-			this->tenant = getOption(options, "tenant"_sr, "CycleTenant"_sr);
-			AuthTokenRef authToken;
-			// make it confortably longer than the timeout of the workload
-			authToken.expiresAt = now() + getCheckTimeout() + 100;
-			authToken.tenants.push_back_deep(this->token.arena(), this->tenant);
-			// we currently don't support this workload to be run outside of simulation
 			ASSERT(g_network->isSimulated());
 			auto k = g_simulator.authKeys.begin();
-			this->token = signToken(authToken, k->first, k->second.privateKey);
+			this->tenant = getOption(options, "tenant"_sr, "CycleTenant"_sr);
+			// make it confortably longer than the timeout of the workload
+			auto currentTime = uint64_t(lround(g_network->timer()));
+			this->token.algorithm = authz::Algorithm::ES256;
+			this->token.issuedAtUnixTime = currentTime;
+			this->token.expiresAtUnixTime = currentTime + uint64_t(std::lround(getCheckTimeout())) + uint64_t(100);
+			this->token.keyId = k->first;
+			VectorRef<StringRef> tenants;
+			tenants.push_back_deep(this->arena, this->tenant);
+			this->token.tenants = tenants;
+			// we currently don't support this workload to be run outside of simulation
+			this->signedToken = authz::jwt::signToken(this->arena, this->token, k->second.writeDer(this->arena));
 		}
 	}
 
@@ -85,9 +92,7 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 	}
 	Future<Void> setup(Database const& cx) override {
 		if constexpr (MultiTenancy) {
-			cx->defaultTenant = this->tenant;
-			Value v = ObjectWriter::toValue(this->token, Unversioned());
-			FlowTransport::transport().authorizationTokenAdd(v);
+			FlowTransport::transport().authorizationTokenAdd(this->signedToken);
 		}
 		return bulkSetup(cx, this, nodeCount, Promise<double>());
 	}

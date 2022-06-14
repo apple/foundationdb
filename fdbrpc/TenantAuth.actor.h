@@ -71,7 +71,7 @@ struct AuthorizationRequest {
 	constexpr static FileIdentifier file_identifier = 11499331;
 
 	Arena arena;
-	VectorRef<SignedAuthTokenRef> tokens;
+	VectorRef<StringRef> tokens;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
