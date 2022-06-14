@@ -122,7 +122,7 @@ struct TPCC : TestWorkload {
 		expectedTransactionsPerMinute = getOption(options, LiteralStringRef("expectedTransactionsPerMinute"), 1000);
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 600);
 		warmupTime = getOption(options, LiteralStringRef("warmupTime"), 30);
-		getOption(options, LiteralStringRef("clientsUsed"), 40);
+		clientsUsed = getOption(options, LiteralStringRef("clientsUsed"), 40);
 	}
 
 	int NURand(int C, int A, int x, int y) {

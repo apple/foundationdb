@@ -28,10 +28,8 @@ void forceLinkFlowTests();
 void forceLinkVersionedMapTests();
 void forceLinkMemcpyTests();
 void forceLinkMemcpyPerfTests();
-#if (!defined(TLS_DISABLED) && !defined(_WIN32))
 void forceLinkStreamCipherTests();
-void forceLinkBLockCiherTests();
-#endif
+void forceLinkBlobCipherTests();
 void forceLinkParallelStreamTests();
 void forceLinkSimExternalConnectionTests();
 void forceLinkMutationLogReaderTests();
@@ -39,6 +37,9 @@ void forceLinkSimKmsConnectorTests();
 void forceLinkIThreadPoolTests();
 void forceLinkTokenSignTests();
 void forceLinkVersionVectorTests();
+void forceLinkRESTClientTests();
+void forceLinkRESTUtilsTests();
+void forceLinkRESTKmsConnectorTest();
 
 struct UnitTestWorkload : TestWorkload {
 	bool enabled;
@@ -77,10 +78,8 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkVersionedMapTests();
 		forceLinkMemcpyTests();
 		forceLinkMemcpyPerfTests();
-#if (!defined(TLS_DISABLED) && !defined(_WIN32))
 		forceLinkStreamCipherTests();
 		void forceLinkBlobCipherTests();
-#endif
 		forceLinkParallelStreamTests();
 		forceLinkSimExternalConnectionTests();
 		forceLinkMutationLogReaderTests();
@@ -88,6 +87,9 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkIThreadPoolTests();
 		forceLinkTokenSignTests();
 		forceLinkVersionVectorTests();
+		forceLinkRESTClientTests();
+		forceLinkRESTUtilsTests();
+		forceLinkRESTKmsConnectorTest();
 	}
 
 	std::string description() const override { return "UnitTests"; }

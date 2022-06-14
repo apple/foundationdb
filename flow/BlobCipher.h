@@ -20,18 +20,12 @@
 #pragma once
 
 #include "flow/network.h"
+#include <cinttypes>
 #include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
-
-#if (!defined(TLS_DISABLED))
-#define ENCRYPTION_ENABLED 1
-#else
-#define ENCRYPTION_ENABLED 0
-#endif
-
-#if ENCRYPTION_ENABLED
+#include <boost/functional/hash.hpp>
 
 #include "flow/Arena.h"
 #include "flow/EncryptUtils.h"
@@ -39,6 +33,9 @@
 #include "flow/flow.h"
 #include "flow/genericactors.actor.h"
 
+#if defined(HAVE_WOLFSSL)
+#include <wolfssl/options.h>
+#endif
 #include <openssl/aes.h>
 #include <openssl/engine.h>
 #include <openssl/evp.h>
@@ -72,11 +69,41 @@ public:
 	}
 	uint8_t* begin() { return buffer; }
 
+	StringRef toStringRef() { return StringRef(buffer, logicalSize); }
+
 private:
 	int allocSize;
 	int logicalSize;
 	uint8_t* buffer;
 };
+
+#pragma pack(push, 1) // exact fit - no padding
+struct BlobCipherDetails {
+	// Encryption domain boundary identifier.
+	EncryptCipherDomainId encryptDomainId = ENCRYPT_INVALID_DOMAIN_ID;
+	// BaseCipher encryption key identifier
+	EncryptCipherBaseKeyId baseCipherId = ENCRYPT_INVALID_CIPHER_KEY_ID;
+	// Random salt
+	EncryptCipherRandomSalt salt{};
+
+	bool operator==(const BlobCipherDetails& o) const {
+		return encryptDomainId == o.encryptDomainId && baseCipherId == o.baseCipherId && salt == o.salt;
+	}
+};
+#pragma pack(pop)
+
+namespace std {
+template <>
+struct hash<BlobCipherDetails> {
+	std::size_t operator()(BlobCipherDetails const& details) const {
+		std::size_t seed = 0;
+		boost::hash_combine(seed, std::hash<EncryptCipherDomainId>{}(details.encryptDomainId));
+		boost::hash_combine(seed, std::hash<EncryptCipherBaseKeyId>{}(details.baseCipherId));
+		boost::hash_combine(seed, std::hash<EncryptCipherRandomSalt>{}(details.salt));
+		return seed;
+	}
+};
+} // namespace std
 
 // BlobCipher Encryption header format
 // This header is persisted along with encrypted buffer, it contains information necessary
@@ -100,25 +127,11 @@ typedef struct BlobCipherEncryptHeader {
 	};
 
 	// Cipher text encryption information
-	struct {
-		// Encryption domain boundary identifier.
-		EncryptCipherDomainId encryptDomainId{};
-		// BaseCipher encryption key identifier
-		EncryptCipherBaseKeyId baseCipherId{};
-		// Random salt
-		EncryptCipherRandomSalt salt{};
-		// Initialization vector used to encrypt the payload.
-		uint8_t iv[AES_256_IV_LENGTH];
-	} cipherTextDetails;
-
-	struct {
-		// Encryption domainId for the header
-		EncryptCipherDomainId encryptDomainId{};
-		// BaseCipher encryption key identifier.
-		EncryptCipherBaseKeyId baseCipherId{};
-		// Random salt
-		EncryptCipherRandomSalt salt{};
-	} cipherHeaderDetails;
+	BlobCipherDetails cipherTextDetails;
+	// Cipher header encryption information
+	BlobCipherDetails cipherHeaderDetails;
+	// Initialization vector used to encrypt the payload.
+	uint8_t iv[AES_256_IV_LENGTH];
 
 	// Encryption header is stored as plaintext on a persistent storage to assist reconstruction of cipher-key(s) for
 	// reads. FIPS compliance recommendation is to leverage cryptographic digest mechanism to generate 'authentication
@@ -149,6 +162,17 @@ typedef struct BlobCipherEncryptHeader {
 	};
 
 	BlobCipherEncryptHeader() {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		ar.serializeBytes(this, headerSize);
+	}
+
+	std::string toString() const {
+		return format("domain id: %" PRId64 ", cipher id: %" PRIu64,
+		              cipherTextDetails.encryptDomainId,
+		              cipherTextDetails.baseCipherId);
+	}
 } BlobCipherEncryptHeader;
 #pragma pack(pop)
 
@@ -249,12 +273,12 @@ public:
 	                                    const EncryptCipherRandomSalt& salt);
 
 	// API returns the last inserted cipherKey.
-	// If none exists, 'encrypt_key_not_found' is thrown.
+	// If none exists, null reference is returned.
 
 	Reference<BlobCipherKey> getLatestCipherKey();
 
 	// API returns cipherKey corresponding to input 'baseCipherKeyId'.
-	// If none exists, 'encrypt_key_not_found' is thrown.
+	// If none exists, null reference is returned.
 
 	Reference<BlobCipherKey> getCipherByBaseCipherId(const EncryptCipherBaseKeyId& baseCipherKeyId,
 	                                                 const EncryptCipherRandomSalt& salt);
@@ -262,27 +286,29 @@ public:
 	// API enables inserting base encryption cipher details to the BlobCipherKeyIdCache.
 	// Given cipherKeys are immutable, attempting to re-insert same 'identical' cipherKey
 	// is treated as a NOP (success), however, an attempt to update cipherKey would throw
-	// 'encrypt_update_cipher' exception.
+	// 'encrypt_update_cipher' exception. Returns the inserted cipher key if success.
 	//
 	// API NOTE: Recommended usecase is to update encryption cipher-key is updated the external
 	// keyManagementSolution to limit an encryption key lifetime
 
-	void insertBaseCipherKey(const EncryptCipherBaseKeyId& baseCipherId, const uint8_t* baseCipher, int baseCipherLen);
+	Reference<BlobCipherKey> insertBaseCipherKey(const EncryptCipherBaseKeyId& baseCipherId,
+	                                             const uint8_t* baseCipher,
+	                                             int baseCipherLen);
 
 	// API enables inserting base encryption cipher details to the BlobCipherKeyIdCache
 	// Given cipherKeys are immutable, attempting to re-insert same 'identical' cipherKey
 	// is treated as a NOP (success), however, an attempt to update cipherKey would throw
-	// 'encrypt_update_cipher' exception.
+	// 'encrypt_update_cipher' exception. Returns the inserted cipher key if sucess.
 	//
 	// API NOTE: Recommended usecase is to update encryption cipher-key regeneration while performing
 	// decryption. The encryptionheader would contain relevant details including: 'encryptDomainId',
 	// 'baseCipherId' & 'salt'. The caller needs to fetch 'baseCipherKey' detail and re-populate KeyCache.
 	// Also, the invocation will NOT update the latest cipher-key details.
 
-	void insertBaseCipherKey(const EncryptCipherBaseKeyId& baseCipherId,
-	                         const uint8_t* baseCipher,
-	                         int baseCipherLen,
-	                         const EncryptCipherRandomSalt& salt);
+	Reference<BlobCipherKey> insertBaseCipherKey(const EncryptCipherBaseKeyId& baseCipherId,
+	                                             const uint8_t* baseCipher,
+	                                             int baseCipherLen,
+	                                             const EncryptCipherRandomSalt& salt);
 
 	// API cleanup the cache by dropping all cached cipherKeys
 	void cleanup();
@@ -293,8 +319,8 @@ public:
 private:
 	EncryptCipherDomainId domainId;
 	BlobCipherKeyIdCacheMap keyIdCache;
-	EncryptCipherBaseKeyId latestBaseCipherKeyId;
-	EncryptCipherRandomSalt latestRandomSalt;
+	Optional<EncryptCipherBaseKeyId> latestBaseCipherKeyId;
+	Optional<EncryptCipherRandomSalt> latestRandomSalt;
 };
 
 using BlobCipherDomainCacheMap = std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKeyIdCache>>;
@@ -310,38 +336,41 @@ public:
 	// The cipherKeys are indexed using 'baseCipherId', given cipherKeys are immutable,
 	// attempting to re-insert same 'identical' cipherKey is treated as a NOP (success),
 	// however, an attempt to update cipherKey would throw 'encrypt_update_cipher' exception.
+	// Returns the inserted cipher key if success.
 	//
-	// API NOTE: Recommended usecase is to update encryption cipher-key is updated the external
+	// API NOTE: Recommended use case is to update encryption cipher-key is updated the external
 	// keyManagementSolution to limit an encryption key lifetime
 
-	void insertCipherKey(const EncryptCipherDomainId& domainId,
-	                     const EncryptCipherBaseKeyId& baseCipherId,
-	                     const uint8_t* baseCipher,
-	                     int baseCipherLen);
+	Reference<BlobCipherKey> insertCipherKey(const EncryptCipherDomainId& domainId,
+	                                         const EncryptCipherBaseKeyId& baseCipherId,
+	                                         const uint8_t* baseCipher,
+	                                         int baseCipherLen);
 
 	// Enable clients to insert base encryption cipher details to the BlobCipherKeyCache.
 	// The cipherKeys are indexed using 'baseCipherId', given cipherKeys are immutable,
 	// attempting to re-insert same 'identical' cipherKey is treated as a NOP (success),
 	// however, an attempt to update cipherKey would throw 'encrypt_update_cipher' exception.
+	// Returns the inserted cipher key if success.
 	//
 	// API NOTE: Recommended usecase is to update encryption cipher-key regeneration while performing
 	// decryption. The encryptionheader would contain relevant details including: 'encryptDomainId',
 	// 'baseCipherId' & 'salt'. The caller needs to fetch 'baseCipherKey' detail and re-populate KeyCache.
 	// Also, the invocation will NOT update the latest cipher-key details.
 
-	void insertCipherKey(const EncryptCipherDomainId& domainId,
-	                     const EncryptCipherBaseKeyId& baseCipherId,
-	                     const uint8_t* baseCipher,
-	                     int baseCipherLen,
-	                     const EncryptCipherRandomSalt& salt);
+	Reference<BlobCipherKey> insertCipherKey(const EncryptCipherDomainId& domainId,
+	                                         const EncryptCipherBaseKeyId& baseCipherId,
+	                                         const uint8_t* baseCipher,
+	                                         int baseCipherLen,
+	                                         const EncryptCipherRandomSalt& salt);
 
 	// API returns the last insert cipherKey for a given encryption domain Id.
-	// If none exists, it would throw 'encrypt_key_not_found' exception.
+	// If domain Id is invalid, it would throw 'encrypt_invalid_id' exception,
+	// otherwise, and if none exists, it would return null reference.
 
 	Reference<BlobCipherKey> getLatestCipherKey(const EncryptCipherDomainId& domainId);
 
 	// API returns cipherKey corresponding to {encryptionDomainId, baseCipherId} tuple.
-	// If none exists, it would throw 'encrypt_key_not_found' exception.
+	// If none exists, it would return null reference.
 
 	Reference<BlobCipherKey> getCipherKey(const EncryptCipherDomainId& domainId,
 	                                      const EncryptCipherBaseKeyId& baseCipherId,
@@ -389,6 +418,9 @@ public:
 	                           const uint8_t* iv,
 	                           const int ivLen,
 	                           const EncryptAuthTokenMode mode);
+	EncryptBlobCipherAes265Ctr(Reference<BlobCipherKey> tCipherKey,
+	                           Reference<BlobCipherKey> hCipherKey,
+	                           const EncryptAuthTokenMode mode);
 	~EncryptBlobCipherAes265Ctr();
 
 	Reference<EncryptBuf> encrypt(const uint8_t* plaintext,
@@ -402,6 +434,8 @@ private:
 	Reference<BlobCipherKey> headerCipherKey;
 	EncryptAuthTokenMode authTokenMode;
 	uint8_t iv[AES_256_IV_LENGTH];
+
+	void init();
 };
 
 // This interface enable data block decryption. An invocation to decrypt() would generate
@@ -465,5 +499,3 @@ StringRef computeAuthToken(const uint8_t* payload,
                            const uint8_t* key,
                            const int keyLen,
                            Arena& arena);
-
-#endif // ENCRYPTION_ENABLED

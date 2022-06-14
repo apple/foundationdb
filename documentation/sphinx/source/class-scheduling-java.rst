@@ -148,7 +148,7 @@ is equivalent to something like:
         tr.set(Tuple.from("class", "class1").pack(), encodeInt(100));
         t.commit().join();
       } catch (RuntimeException e) {
-        t = t.onError(e).get();
+        t = t.onError(e).join();
       }
     }
 
@@ -290,10 +290,10 @@ This is easy -- we simply add a condition to check that the value is non-zero. L
   private static void signup(TransactionContext db, final String s, final String c) {
     db.run((Transaction tr) -> {
       byte[] rec = Tuple.from("attends", s, c).pack();
-      if (tr.get(rec).get() != null)
+      if (tr.get(rec).join() != null)
         return null; // already signed up
 
-      int seatsLeft = decodeInt(tr.get(Tuple.from("class", c).pack()).get());
+      int seatsLeft = decodeInt(tr.get(Tuple.from("class", c).pack()).join());
       if (seatsLeft == 0)
         throw new IllegalStateException("No remaining seats");
 

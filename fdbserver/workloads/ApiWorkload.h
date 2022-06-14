@@ -27,7 +27,6 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "fdbserver/workloads/MemoryKeyValueStore.h"
-#include "flow/actorcompiler.h"
 
 // an enumeration of apis being tested
 enum TransactionType { NATIVE, READ_YOUR_WRITES, THREAD_SAFE, MULTI_VERSION };
@@ -56,6 +55,7 @@ struct TransactionWrapper : public ReferenceCounted<TransactionWrapper> {
 	                                                 KeySelector& end,
 	                                                 Key& mapper,
 	                                                 GetRangeLimits limits,
+	                                                 int matchIndex,
 	                                                 Snapshot snapshot,
 	                                                 Reverse reverse) = 0;
 
@@ -80,8 +80,8 @@ struct TransactionWrapper : public ReferenceCounted<TransactionWrapper> {
 	// Gets the version vector cached in a transaction
 	virtual VersionVector getVersionVector() = 0;
 
-	// Gets the spanID of a transaction
-	virtual UID getSpanID() = 0;
+	// Gets the spanContext of a transaction
+	virtual SpanContext getSpanContext() = 0;
 
 	// Prints debugging messages for a transaction; not implemented for all transaction types
 	virtual void debugTransaction(UID debugId) {}
@@ -128,9 +128,10 @@ struct FlowTransactionWrapper : public TransactionWrapper {
 	                                         KeySelector& end,
 	                                         Key& mapper,
 	                                         GetRangeLimits limits,
+	                                         int matchIndex,
 	                                         Snapshot snapshot,
 	                                         Reverse reverse) override {
-		return transaction.getMappedRange(begin, end, mapper, limits, snapshot, reverse);
+		return transaction.getMappedRange(begin, end, mapper, limits, matchIndex, snapshot, reverse);
 	}
 
 	// Gets the key from the database specified by a given key selector
@@ -161,8 +162,8 @@ struct FlowTransactionWrapper : public TransactionWrapper {
 	// Gets the version vector cached in a transaction
 	VersionVector getVersionVector() override { return transaction.getVersionVector(); }
 
-	// Gets the spanID of a transaction
-	UID getSpanID() override { return transaction.getSpanID(); }
+	// Gets the spanContext of a transaction
+	SpanContext getSpanContext() override { return transaction.getSpanContext(); }
 
 	// Prints debugging messages for a transaction
 	void debugTransaction(UID debugId) override { transaction.debugTransaction(debugId); }
@@ -203,9 +204,11 @@ struct ThreadTransactionWrapper : public TransactionWrapper {
 	                                         KeySelector& end,
 	                                         Key& mapper,
 	                                         GetRangeLimits limits,
+	                                         int matchIndex,
 	                                         Snapshot snapshot,
 	                                         Reverse reverse) override {
-		return unsafeThreadFutureToFuture(transaction->getMappedRange(begin, end, mapper, limits, snapshot, reverse));
+		return unsafeThreadFutureToFuture(
+		    transaction->getMappedRange(begin, end, mapper, limits, matchIndex, snapshot, reverse));
 	}
 
 	// Gets the key from the database specified by a given key selector
@@ -229,8 +232,8 @@ struct ThreadTransactionWrapper : public TransactionWrapper {
 	// Gets the version vector cached in a transaction
 	VersionVector getVersionVector() override { return transaction->getVersionVector(); }
 
-	// Gets the spanID of a transaction
-	UID getSpanID() override { return transaction->getSpanID(); }
+	// Gets the spanContext of a transaction
+	SpanContext getSpanContext() override { return transaction->getSpanContext(); }
 
 	void addReadConflictRange(KeyRangeRef const& keys) override { transaction->addReadConflictRange(keys); }
 };
@@ -394,7 +397,5 @@ struct ApiWorkload : TestWorkload {
 	// Transaction type of the transaction factory above.
 	TransactionType transactionType;
 };
-
-#include "flow/unactorcompiler.h"
 
 #endif

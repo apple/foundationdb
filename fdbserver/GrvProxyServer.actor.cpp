@@ -542,7 +542,7 @@ ACTOR Future<Void> lastCommitUpdater(GrvProxyData* self, PromiseStream<Future<Vo
 	}
 }
 
-ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(SpanID parentSpan,
+ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(SpanContext parentSpan,
                                                           GrvProxyData* grvProxyData,
                                                           uint32_t flags,
                                                           Optional<UID> debugID,
@@ -945,7 +945,7 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 		int batchGRVProcessed = 0;
 		for (int i = 0; i < start.size(); i++) {
 			if (start[i].size()) {
-				Future<GetReadVersionReply> readVersionReply = getLiveCommittedVersion(UID() /*span.context*/,
+				Future<GetReadVersionReply> readVersionReply = getLiveCommittedVersion(SpanContext(),
 				                                                                       grvProxyData,
 				                                                                       i,
 				                                                                       debugID,

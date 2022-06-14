@@ -174,7 +174,7 @@ struct MiniCycleWorkload : TestWorkload {
 				state Transaction tr(cx);
 				if (deterministicRandom()->random01() >= self->traceParentProbability) {
 					state Span span("MiniCycleClient"_loc);
-					TraceEvent("MiniCycleTracingTransaction", span.context).log();
+					TraceEvent("MiniCycleTracingTransaction", span.context.traceID).log();
 					tr.setOption(FDBTransactionOptions::SPAN_PARENT,
 					             BinaryWriter::toValue(span.context, Unversioned()));
 				}

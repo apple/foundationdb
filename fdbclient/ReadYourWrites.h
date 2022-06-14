@@ -112,6 +112,7 @@ public:
 	                                         KeySelector end,
 	                                         Key mapper,
 	                                         GetRangeLimits limits,
+	                                         int matchIndex,
 	                                         Snapshot = Snapshot::False,
 	                                         Reverse = Reverse::False) override;
 
@@ -140,7 +141,7 @@ public:
 	[[nodiscard]] Future<Void> commit() override;
 	Version getCommittedVersion() const override { return tr.getCommittedVersion(); }
 	VersionVector getVersionVector() const override { return tr.getVersionVector(); }
-	UID getSpanID() const override { return tr.getSpanID(); }
+	SpanContext getSpanContext() const override { return tr.getSpanContext(); }
 
 	int64_t getApproximateSize() const override { return approximateSize; }
 	[[nodiscard]] Future<Standalone<StringRef>> getVersionstamp() override;
@@ -177,7 +178,7 @@ public:
 
 	Reference<const TransactionState> getTransactionState() const { return tr.trState; }
 
-	void setTransactionID(uint64_t id);
+	void setTransactionID(UID id);
 	void setToken(uint64_t token);
 
 	// Read from the special key space readConflictRangeKeysRange

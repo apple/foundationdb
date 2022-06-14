@@ -176,6 +176,7 @@ func loadAdditionalEnvironment(logger logr.Logger) (map[string]string, error) {
 		if err != nil {
 			return nil, err
 		}
+		defer file.Close()
 
 		envScanner := bufio.NewScanner(file)
 		for envScanner.Scan() {

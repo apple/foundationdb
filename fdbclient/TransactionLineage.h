@@ -34,10 +34,13 @@ struct TransactionLineage : LineageProperties<TransactionLineage> {
 		GetKeyServersLocations
 	};
 	static constexpr std::string_view name = "Transaction"sv;
-	uint64_t txID;
+	UID txID;
 	Operation operation = Operation::Unset;
 
 	bool isSet(uint64_t TransactionLineage::*member) const { return this->*member > 0; }
+	bool isSet(UID TransactionLineage::*member) const {
+		return static_cast<UID>(this->*member).first() > 0 && static_cast<UID>(this->*member).second() > 0;
+	}
 	bool isSet(Operation TransactionLineage::*member) const { return this->*member != Operation::Unset; }
 };
 

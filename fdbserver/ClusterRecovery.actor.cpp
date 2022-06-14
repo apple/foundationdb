@@ -189,7 +189,7 @@ ACTOR Future<Void> newCommitProxies(Reference<ClusterRecoveryData> self, Recruit
 		req.firstProxy = i == 0;
 		TraceEvent("CommitProxyReplies", self->dbgid)
 		    .detail("WorkerID", recr.commitProxies[i].id())
-		    .detail("ReocoveryTxnVersion", self->recoveryTransactionVersion)
+		    .detail("RecoveryTxnVersion", self->recoveryTransactionVersion)
 		    .detail("FirstProxy", req.firstProxy ? "True" : "False");
 		initializationReplies.push_back(
 		    transformErrors(throwErrorOr(recr.commitProxies[i].commitProxy.getReplyUnlessFailedFor(
@@ -298,6 +298,7 @@ ACTOR Future<Void> newTLogServers(Reference<ClusterRecoveryData> self,
 		                                                                 self->clusterId,
 		                                                                 self->configuration,
 		                                                                 self->cstate.myDBState.recoveryCount + 1,
+		                                                                 self->recoveryTransactionVersion,
 		                                                                 self->primaryLocality,
 		                                                                 self->dcId_locality[remoteDcId],
 		                                                                 self->allTags,
@@ -311,6 +312,7 @@ ACTOR Future<Void> newTLogServers(Reference<ClusterRecoveryData> self,
 		                                                                 self->clusterId,
 		                                                                 self->configuration,
 		                                                                 self->cstate.myDBState.recoveryCount + 1,
+		                                                                 self->recoveryTransactionVersion,
 		                                                                 self->primaryLocality,
 		                                                                 tagLocalitySpecial,
 		                                                                 self->allTags,
@@ -537,8 +539,7 @@ ACTOR Future<Void> changeCoordinators(Reference<ClusterRecoveryData> self) {
 		}
 
 		try {
-			state ClusterConnectionString conn(changeCoordinatorsRequest.newConnectionString.toString());
-			wait(conn.resolveHostnames());
+			ClusterConnectionString conn(changeCoordinatorsRequest.newConnectionString.toString());
 			wait(self->cstate.move(conn));
 		} catch (Error& e) {
 			if (e.code() != error_code_actor_cancelled)
@@ -1468,7 +1469,6 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 
 	DBCoreState newState = self->cstate.myDBState;
 	newState.recoveryCount++;
-	newState.recoveryCount++;
 	if (self->cstate.prevDBState.newestProtocolVersion.isInvalid() ||
 	    self->cstate.prevDBState.newestProtocolVersion < currentProtocolVersion) {
 		ASSERT(self->cstate.myDBState.lowestCompatibleProtocolVersion.isInvalid() ||
@@ -1630,7 +1630,7 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 		tr.set(recoveryCommitRequest.arena, clusterIdKey, BinaryWriter::toValue(self->clusterId, Unversioned()));
 	}
 
-	applyMetadataMutations(SpanID(),
+	applyMetadataMutations(SpanContext(),
 	                       self->dbgid,
 	                       recoveryCommitRequest.arena,
 	                       tr.mutations.slice(mmApplied, tr.mutations.size()),

@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include "boost/algorithm/string.hpp"
+
 #include "fdbcli/fdbcli.actor.h"
 
 #include "fdbclient/FDBOptions.g.h"
@@ -40,8 +42,10 @@ ACTOR Future<bool> expensiveDataCheckCommandActor(
     std::vector<StringRef> tokens,
     std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface) {
 	state bool result = true;
+	state std::string addressesStr;
 	if (tokens.size() == 1) {
 		// initialize worker interfaces
+		address_interface->clear();
 		wait(getWorkerInterfaces(tr, address_interface));
 	}
 	if (tokens.size() == 1 || tokencmp(tokens[1], "list")) {
@@ -57,20 +61,26 @@ ACTOR Future<bool> expensiveDataCheckCommandActor(
 		}
 		printf("\n");
 	} else if (tokencmp(tokens[1], "all")) {
-		state std::map<Key, std::pair<Value, ClientLeaderRegInterface>>::const_iterator it;
-		for (it = address_interface->cbegin(); it != address_interface->cend(); it++) {
-			int64_t checkRequestSent = wait(safeThreadFutureToFuture(db->rebootWorker(it->first, true, 0)));
-			if (!checkRequestSent) {
-				result = false;
-				fprintf(stderr, "ERROR: failed to send request to check process `%s'.\n", it->first.toString().c_str());
-			}
-		}
 		if (address_interface->size() == 0) {
 			fprintf(stderr,
 			        "ERROR: no processes to check. You must run the `expensive_data_check’ "
 			        "command before running `expensive_data_check all’.\n");
 		} else {
-			printf("Attempted to kill and check %zu processes\n", address_interface->size());
+			std::vector<std::string> addressesVec;
+			for (const auto& [address, _] : *address_interface) {
+				addressesVec.push_back(address.toString());
+			}
+			addressesStr = boost::algorithm::join(addressesVec, ",");
+			// make sure we only call the interface once to send requests in parallel
+			int64_t checkRequestsSent = wait(safeThreadFutureToFuture(db->rebootWorker(addressesStr, true, 0)));
+			if (!checkRequestsSent) {
+				result = false;
+				fprintf(stderr,
+				        "ERROR: failed to send requests to check all processes, please run the `expensive_data_check’ "
+				        "command again to fetch latest addresses.\n");
+			} else {
+				printf("Attempted to kill and check %zu processes\n", address_interface->size());
+			}
 		}
 	} else {
 		state int i;
@@ -83,15 +93,21 @@ ACTOR Future<bool> expensiveDataCheckCommandActor(
 		}
 
 		if (result) {
+			std::vector<std::string> addressesVec;
 			for (i = 1; i < tokens.size(); i++) {
-				int64_t checkRequestSent = wait(safeThreadFutureToFuture(db->rebootWorker(tokens[i], true, 0)));
-				if (!checkRequestSent) {
-					result = false;
-					fprintf(
-					    stderr, "ERROR: failed to send request to check process `%s'.\n", tokens[i].toString().c_str());
-				}
+				addressesVec.push_back(tokens[i].toString());
 			}
-			printf("Attempted to kill and check %zu processes\n", tokens.size() - 1);
+			addressesStr = boost::algorithm::join(addressesVec, ",");
+			int64_t checkRequestsSent = wait(safeThreadFutureToFuture(db->rebootWorker(addressesStr, true, 0)));
+			if (!checkRequestsSent) {
+				result = false;
+				fprintf(stderr,
+				        "ERROR: failed to send requests to check processes `%s', please run the `expensive_data_check’ "
+				        "command again to fetch latest addresses.\n",
+				        addressesStr.c_str());
+			} else {
+				printf("Attempted to kill and check %zu processes\n", tokens.size() - 1);
+			}
 		}
 	}
 	return result;

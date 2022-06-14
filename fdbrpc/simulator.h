@@ -60,9 +60,9 @@ public:
 	struct MachineInfo;
 
 	struct ProcessInfo : NonCopyable {
-		const char* name;
-		const char* coordinationFolder;
-		const char* dataFolder;
+		std::string name;
+		std::string coordinationFolder;
+		std::string dataFolder;
 		MachineInfo* machine;
 		NetworkAddressList addresses;
 		NetworkAddress address;
@@ -183,7 +183,7 @@ public:
 		std::string toString() const {
 			return format(
 			    "name: %s address: %s zone: %s datahall: %s class: %s excluded: %d cleared: %d",
-			    name,
+			    name.c_str(),
 			    formatIpPort(addresses.address.ip, addresses.address.port).c_str(),
 			    (locality.zoneId().present() ? locality.zoneId().get().printable().c_str() : "[unset]"),
 			    (locality.dataHallId().present() ? locality.dataHallId().get().printable().c_str() : "[unset]"),
@@ -204,7 +204,7 @@ public:
 		// A map from filename to file handle for all open files on a machine
 		std::map<std::string, UnsafeWeakFutureReference<IAsyncFile>> openFiles;
 
-		std::set<std::string> deletingFiles;
+		std::set<std::string> deletingOrClosingFiles;
 		std::set<std::string> closingFiles;
 		Optional<Standalone<StringRef>> machineId;
 
@@ -267,6 +267,10 @@ public:
 	                            KillType kt,
 	                            bool forceKill = false,
 	                            KillType* ktFinal = nullptr) = 0;
+	virtual bool killDataHall(Optional<Standalone<StringRef>> dcId,
+	                          KillType kt,
+	                          bool forceKill = false,
+	                          KillType* ktFinal = nullptr) = 0;
 	// virtual KillType getMachineKillState( UID zoneID ) = 0;
 	virtual bool canKillProcesses(std::vector<ProcessInfo*> const& availableProcesses,
 	                              std::vector<ProcessInfo*> const& deadProcesses,

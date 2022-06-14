@@ -66,7 +66,7 @@ bool WorkloadConfig::getBoolOption(const std::string& name, bool defaultVal) con
 	if (iter == options.end()) {
 		return defaultVal;
 	} else {
-		std::string val = lowerCase(iter->second);
+		std::string val(fdb::toCharsRef(lowerCase(fdb::toBytesRef(iter->second))));
 		if (val == "true") {
 			return true;
 		} else if (val == "false") {
@@ -80,13 +80,17 @@ bool WorkloadConfig::getBoolOption(const std::string& name, bool defaultVal) con
 
 WorkloadBase::WorkloadBase(const WorkloadConfig& config)
   : manager(nullptr), tasksScheduled(0), numErrors(0), clientId(config.clientId), numClients(config.numClients),
-    failed(false) {
+    failed(false), numTxCompleted(0) {
 	maxErrors = config.getIntOption("maxErrors", 10);
 	workloadId = fmt::format("{}{}", config.name, clientId);
 }
 
 void WorkloadBase::init(WorkloadManager* manager) {
 	this->manager = manager;
+}
+
+void WorkloadBase::printStats() {
+	info(fmt::format("{} transactions completed", numTxCompleted.load()));
 }
 
 void WorkloadBase::schedule(TTaskFct task) {
@@ -106,11 +110,12 @@ void WorkloadBase::execTransaction(std::shared_ptr<ITransactionActor> tx, TTaskF
 	}
 	tasksScheduled++;
 	manager->txExecutor->execute(tx, [this, tx, cont, failOnError]() {
-		fdb_error_t err = tx->getErrorCode();
-		if (tx->getErrorCode() == error_code_success) {
+		numTxCompleted++;
+		fdb::Error err = tx->getError();
+		if (err.code() == error_code_success) {
 			cont();
 		} else {
-			std::string msg = fmt::format("Transaction failed with error: {} ({})", err, fdb_get_error(err));
+			std::string msg = fmt::format("Transaction failed with error: {} ({})", err.code(), err.what());
 			if (failOnError) {
 				error(msg);
 				failed = true;
@@ -198,6 +203,9 @@ void WorkloadManager::workloadDone(IWorkload* workload, bool failed) {
 	bool done = workloads.empty();
 	lock.unlock();
 	if (done) {
+		if (statsTimer) {
+			statsTimer->cancel();
+		}
 		scheduler->stop();
 	}
 }
@@ -239,6 +247,24 @@ void WorkloadManager::readControlInput(std::string pipeName) {
 		}
 		line.clear();
 	}
+}
+
+void WorkloadManager::schedulePrintStatistics(int timeIntervalMs) {
+	statsTimer = scheduler->scheduleWithDelay(timeIntervalMs, [this, timeIntervalMs]() {
+		for (auto workload : getActiveWorkloads()) {
+			workload->printStats();
+		}
+		this->schedulePrintStatistics(timeIntervalMs);
+	});
+}
+
+std::vector<std::shared_ptr<IWorkload>> WorkloadManager::getActiveWorkloads() {
+	std::unique_lock<std::mutex> lock(mutex);
+	std::vector<std::shared_ptr<IWorkload>> res;
+	for (auto iter : workloads) {
+		res.push_back(iter.second.ref);
+	}
+	return res;
 }
 
 void WorkloadManager::handleStopCommand() {

@@ -906,7 +906,7 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 				ASSERT(it.second.get().canGet());
 			}
 
-			for (auto it : g_simulator.getMachineById(localities.machineId())->deletingFiles) {
+			for (auto it : g_simulator.getMachineById(localities.machineId())->deletingOrClosingFiles) {
 				filenames.insert(it);
 				closingStr += it + ", ";
 			}
@@ -2367,6 +2367,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 	allowList.addTrustedSubnet("abcd::/16"sv);
 	state bool allowDefaultTenant = testConfig.allowDefaultTenant;
 	state bool allowDisablingTenants = testConfig.allowDisablingTenants;
+	state bool allowCreatingTenants = true;
 
 	// The RocksDB storage engine does not support the restarting tests because you cannot consistently get a clean
 	// snapshot of the storage engine without a snapshotting file system.
@@ -2377,6 +2378,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 		// Disable the default tenant in restarting tests for now
 		// TODO: persist the chosen default tenant in the restartInfo.ini file for the second test
 		allowDefaultTenant = false;
+		allowCreatingTenants = false;
 	}
 
 	// TODO: Currently backup and restore related simulation tests are failing when run with rocksDB storage engine
@@ -2389,8 +2391,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 	// Disable the default tenant in backup and DR tests for now. This is because backup does not currently duplicate
 	// the tenant map and related state.
 	// TODO: reenable when backup/DR or BlobGranule supports tenants.
-	if (std::string_view(testFile).find("Backup") != std::string_view::npos ||
-	    std::string_view(testFile).find("BlobGranule") != std::string_view::npos || testConfig.extraDB != 0) {
+	if (std::string_view(testFile).find("Backup") != std::string_view::npos || testConfig.extraDB != 0) {
 		allowDefaultTenant = false;
 	}
 
@@ -2430,9 +2431,11 @@ ACTOR void setupAndRun(std::string dataFolder,
 	TEST(true); // Simulation start
 
 	state Optional<TenantName> defaultTenant;
+	state Standalone<VectorRef<TenantNameRef>> tenantsToCreate;
 	state TenantMode tenantMode = TenantMode::DISABLED;
 	if (allowDefaultTenant && deterministicRandom()->random01() < 0.5) {
 		defaultTenant = "SimulatedDefaultTenant"_sr;
+		tenantsToCreate.push_back_deep(tenantsToCreate.arena(), defaultTenant.get());
 		if (deterministicRandom()->random01() < 0.9) {
 			tenantMode = TenantMode::REQUIRED;
 		} else {
@@ -2442,9 +2445,18 @@ ACTOR void setupAndRun(std::string dataFolder,
 		tenantMode = TenantMode::OPTIONAL_TENANT;
 	}
 
+	if (allowCreatingTenants && tenantMode != TenantMode::DISABLED && deterministicRandom()->random01() < 0.5) {
+		int numTenants = deterministicRandom()->randomInt(1, 6);
+		for (int i = 0; i < numTenants; ++i) {
+			tenantsToCreate.push_back_deep(tenantsToCreate.arena(),
+			                               TenantNameRef(format("SimulatedExtraTenant%04d", i)));
+		}
+	}
+
 	TraceEvent("SimulatedClusterTenantMode")
 	    .detail("UsingTenant", defaultTenant)
-	    .detail("TenantRequired", tenantMode.toString());
+	    .detail("TenantRequired", tenantMode.toString())
+	    .detail("TotalTenants", tenantsToCreate.size());
 
 	try {
 		// systemActors.push_back( startSystemMonitor(dataFolder) );
@@ -2486,7 +2498,8 @@ ACTOR void setupAndRun(std::string dataFolder,
 		                           startingConfiguration,
 		                           LocalityData(),
 		                           UnitTestParameters(),
-		                           defaultTenant),
+		                           defaultTenant,
+		                           tenantsToCreate),
 		                  isBuggifyEnabled(BuggifyType::General) ? 36000.0 : 5400.0));
 	} catch (Error& e) {
 		TraceEvent(SevError, "SetupAndRunError").error(e);

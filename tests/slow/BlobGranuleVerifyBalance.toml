@@ -1,7 +1,11 @@
 [configuration]
 blobGranulesEnabled = true
+allowDefaultTenant = false
 # FIXME: re-enable rocks at some point
 storageEngineExcludeTypes = [4]
+
+[[knobs]]
+bg_range_source = "blobRangeKeys"
 
 [[test]]
 testTitle = 'BlobGranuleVerifyBalance'

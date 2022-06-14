@@ -260,7 +260,8 @@
                "available_bytes":0, // an estimate of the process' fair share of the memory available to fdbservers
                "limit_bytes":0, // memory limit per process
                "unused_allocated_memory":0,
-               "used_bytes":0 // virtual memory size of the process
+               "used_bytes":0, // virtual memory size of the process
+               "rss_bytes":0 // resident memory size of the process
             },
             "messages":[
                {
@@ -877,6 +878,9 @@
                "logical_core_utilization":0.4 // computed as cpu_seconds / elapsed_seconds; value may be capped at 0.5 due to hyper-threading
             }
          }
+      },
+      "tenants":{
+         "num_tenants":0
       }
    },
    "client":{

@@ -61,7 +61,7 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 		actorCount = getOption(options, "actorsPerClient"_sr, transactionsPerSecond / 5);
 		nodeCount = getOption(options, "nodeCount"_sr, transactionsPerSecond * clientCount);
 		keyPrefix = unprintable(getOption(options, "keyPrefix"_sr, LiteralStringRef("")).toString());
-		traceParentProbability = getOption(options, "traceParentProbability "_sr, 0.01);
+		traceParentProbability = getOption(options, "traceParentProbability"_sr, 0.01);
 		minExpectedTransactionsPerSecond = transactionsPerSecond * getOption(options, "expectedRate"_sr, 0.7);
 		if constexpr (MultiTenancy) {
 			this->tenant = getOption(options, "tenant"_sr, "CycleTenant"_sr);
@@ -146,11 +146,11 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 				state double tstart = now();
 				state int r = deterministicRandom()->randomInt(0, self->nodeCount);
 				state Transaction tr(cx);
-				if (deterministicRandom()->random01() >= self->traceParentProbability) {
+				if (deterministicRandom()->random01() <= self->traceParentProbability) {
 					state Span span("CycleClient"_loc);
-					TraceEvent("CycleTracingTransaction", span.context).log();
+					TraceEvent("CycleTracingTransaction", span.context.traceID).log();
 					tr.setOption(FDBTransactionOptions::SPAN_PARENT,
-					             BinaryWriter::toValue(span.context, Unversioned()));
+					             BinaryWriter::toValue(span.context, IncludeVersion()));
 				}
 				while (true) {
 					try {

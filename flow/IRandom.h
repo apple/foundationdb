@@ -90,6 +90,7 @@ public:
 	uint64_t second() const { return part[1]; }
 
 	static UID fromString(std::string const&);
+	static UID fromStringThrowsOnFailure(std::string const&);
 
 	template <class Ar>
 	void serialize_unversioned(
@@ -157,7 +158,12 @@ public:
 
 	template <class C>
 	void randomShuffle(C& container) {
-		int s = (int)container.size();
+		randomShuffle(container, container.size());
+	}
+
+	template <class C>
+	void randomShuffle(C& container, size_t shuffleLen) {
+		int s = shuffleLen > container.size() ? container.size() : shuffleLen;
 		for (int i = 0; i < s; i++) {
 			int j = randomInt(i, s);
 			if (i != j) {

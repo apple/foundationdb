@@ -873,7 +873,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		state Key begin = kr.begin;
 		state Key end = kr.end;
 		state int limitKeyServers = BUGGIFY ? 1 : 100;
-		state Span span(deterministicRandom()->randomUniqueID(), "WL:ConsistencyCheck"_loc);
+		state Span span(SpanContext(deterministicRandom()->randomUniqueID(), deterministicRandom()->randomUInt64()),
+		                "WL:ConsistencyCheck"_loc);
 
 		while (begin < end) {
 			state Reference<CommitProxyInfo> commitProxyInfo =
@@ -1620,8 +1621,10 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 							break;
 						} else if (estimatedBytes[j] < 0 &&
-						           (g_network->isSimulated() || !storageServerInterfaces[j].isTss())) {
-							self->testFailure("Could not get storage metrics from server");
+						           ((g_network->isSimulated() &&
+						             g_simulator.tssMode <= ISimulator::TSSMode::EnabledNormal) ||
+						            !storageServerInterfaces[j].isTss())) {
+							// Ignore a non-responding TSS outside of simulation, or if tss fault injection is enabled
 							hasValidEstimate = false;
 							break;
 						}
@@ -2091,7 +2094,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					return false;
 				}
 
-				state ClusterConnectionString old(currentKey.get().toString());
+				ClusterConnectionString old(currentKey.get().toString());
+				state std::vector<NetworkAddress> oldCoordinators = wait(old.tryResolveHostnames());
 
 				std::vector<ProcessData> workers = wait(::getWorkers(&tr));
 
@@ -2101,7 +2105,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				}
 
 				std::set<Optional<Standalone<StringRef>>> checkDuplicates;
-				for (const auto& addr : old.coordinators()) {
+				for (const auto& addr : oldCoordinators) {
 					auto findResult = addr_locality.find(addr);
 					if (findResult != addr_locality.end()) {
 						if (checkDuplicates.count(findResult->second.zoneId())) {
@@ -2369,7 +2373,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		}
 
 		// Check EncryptKeyProxy
-		if (SERVER_KNOBS->ENABLE_ENCRYPTION && db.encryptKeyProxy.present() &&
+		if ((SERVER_KNOBS->ENABLE_ENCRYPTION || g_network->isSimulated()) && db.encryptKeyProxy.present() &&
 		    (!nonExcludedWorkerProcessMap.count(db.encryptKeyProxy.get().address()) ||
 		     nonExcludedWorkerProcessMap[db.encryptKeyProxy.get().address()].processClass.machineClassFitness(
 		         ProcessClass::EncryptKeyProxy) > fitnessLowerBound)) {

@@ -1,5 +1,5 @@
 /*
- * SimKmsConnector.actor.h
+ * macro.hpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,23 +18,15 @@
  * limitations under the License.
  */
 
-#pragma once
+#ifndef MAKO_MACRO_HPP
+#define MAKO_MACRO_HPP
 
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_SIMKMSCONNECTOR_ACTOR_G_H)
-#define FDBSERVER_SIMKMSCONNECTOR_ACTOR_G_H
-#include "fdbserver/SimKmsConnector.actor.g.h"
-#elif !defined(FDBSERVER_SIMKMSCONNECTOR_ACTOR_H)
-#define FDBSERVER_SIMKMSCONNECTOR_ACTOR_H
-
-#include "fdbserver/KmsConnector.h"
-#include "flow/BlobCipher.h"
-
-#include "flow/actorcompiler.h" // This must be the last #include.
-
-class SimKmsConnector : public KmsConnector {
-public:
-	SimKmsConnector() = default;
-	Future<Void> connectorCore(KmsConnectorInterface interf);
-};
-
+#if defined(__GNUG__)
+#define force_inline inline __attribute__((__always_inline__))
+#elif defined(_MSC_VER)
+#define force_inline __forceinline
+#else
+#error Missing force inline
 #endif
+
+#endif /*MAKO_MACRO_HPP*/

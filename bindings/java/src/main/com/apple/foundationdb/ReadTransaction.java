@@ -433,7 +433,9 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 *
 	 * @param begin the beginning of the range (inclusive)
 	 * @param end the end of the range (exclusive)
-	 * @param mapper TODO
+	 * @param mapper defines how to map a key-value pair (one of the key-value pairs got
+	 *  from the first range query) to a GetRange (or GetValue) request.
+	 *  more details: https://github.com/apple/foundationdb/wiki/Everything-about-GetMappedRange
 	 * @param limit the maximum number of results to return. Limits results to the
 	 *  <i>first</i> keys in the range. Pass {@link #ROW_LIMIT_UNLIMITED} if this query
 	 *  should not limit the number of results. If {@code reverse} is {@code true} rows
@@ -458,7 +460,7 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 * @return a handle to access the results of the asynchronous call
 	 */
 	AsyncIterable<MappedKeyValue> getMappedRange(KeySelector begin, KeySelector end, byte[] mapper, int limit,
-	                                                 boolean reverse, StreamingMode mode);
+	                                             int matchIndex, boolean reverse, StreamingMode mode);
 
 	/**
 	 * Gets an estimate for the number of bytes stored in the given range.

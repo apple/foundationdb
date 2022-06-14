@@ -72,13 +72,13 @@ struct SaveAndKillWorkload : TestWorkload {
 		std::map<std::string, ISimulator::ProcessInfo*> allProcessesMap;
 		for (const auto& [_, process] : rebootingProcesses) {
 			if (allProcessesMap.find(process->dataFolder) == allProcessesMap.end() &&
-			    std::string(process->name) != "remote flow process") {
+			    process->name != "remote flow process") {
 				allProcessesMap[process->dataFolder] = process;
 			}
 		}
 		for (const auto& process : processes) {
 			if (allProcessesMap.find(process->dataFolder) == allProcessesMap.end() &&
-			    std::string(process->name) != "remote flow process") {
+			    process->name != "remote flow process") {
 				allProcessesMap[process->dataFolder] = process;
 			}
 		}
@@ -106,18 +106,22 @@ struct SaveAndKillWorkload : TestWorkload {
 					ini.SetValue(machineIdString,
 					             format("ipAddr%d", process->address.port - 1).c_str(),
 					             process->address.ip.toString().c_str());
-					ini.SetValue(machineIdString, format("%d", process->address.port - 1).c_str(), process->dataFolder);
 					ini.SetValue(
-					    machineIdString, format("c%d", process->address.port - 1).c_str(), process->coordinationFolder);
+					    machineIdString, format("%d", process->address.port - 1).c_str(), process->dataFolder.c_str());
+					ini.SetValue(machineIdString,
+					             format("c%d", process->address.port - 1).c_str(),
+					             process->coordinationFolder.c_str());
 					j++;
 				} else {
 					ini.SetValue(machineIdString,
 					             format("ipAddr%d", process->address.port - 1).c_str(),
 					             process->address.ip.toString().c_str());
 					int oldValue = machines.find(machineId)->second;
-					ini.SetValue(machineIdString, format("%d", process->address.port - 1).c_str(), process->dataFolder);
 					ini.SetValue(
-					    machineIdString, format("c%d", process->address.port - 1).c_str(), process->coordinationFolder);
+					    machineIdString, format("%d", process->address.port - 1).c_str(), process->dataFolder.c_str());
+					ini.SetValue(machineIdString,
+					             format("c%d", process->address.port - 1).c_str(),
+					             process->coordinationFolder.c_str());
 					machines.erase(machines.find(machineId));
 					machines.insert(std::pair<std::string, int>(machineId, oldValue + 1));
 				}

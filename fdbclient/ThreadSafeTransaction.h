@@ -136,6 +136,7 @@ public:
 	                                               const KeySelectorRef& end,
 	                                               const StringRef& mapper,
 	                                               GetRangeLimits limits,
+	                                               int matchIndex,
 	                                               bool snapshot,
 	                                               bool reverse) override;
 	ThreadFuture<Standalone<VectorRef<const char*>>> getAddressesForKey(const KeyRef& key) override;
@@ -167,7 +168,7 @@ public:
 	ThreadFuture<Void> commit() override;
 	Version getCommittedVersion() override;
 	VersionVector getVersionVector() override;
-	UID getSpanID() override;
+	SpanContext getSpanContext() override;
 	ThreadFuture<int64_t> getApproximateSize() override;
 
 	ThreadFuture<uint64_t> getProtocolVersion();

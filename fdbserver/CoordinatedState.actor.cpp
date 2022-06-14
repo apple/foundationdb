@@ -26,21 +26,29 @@
 #include "fdbserver/LeaderElection.h"
 #include "flow/actorcompiler.h" // has to be last include
 
-ACTOR Future<GenerationRegReadReply> waitAndSendRead(RequestStream<GenerationRegReadRequest> to,
-                                                     GenerationRegReadRequest req) {
+ACTOR Future<GenerationRegReadReply> waitAndSendRead(GenerationRegInterface stateServer, GenerationRegReadRequest req) {
 	if (SERVER_KNOBS->BUGGIFY_ALL_COORDINATION || BUGGIFY)
 		wait(delay(SERVER_KNOBS->BUGGIFIED_EVENTUAL_CONSISTENCY * deterministicRandom()->random01()));
-	state GenerationRegReadReply reply = wait(retryBrokenPromise(to, req));
+	state GenerationRegReadReply reply;
+	if (stateServer.hostname.present()) {
+		wait(store(reply, retryGetReplyFromHostname(req, stateServer.hostname.get(), WLTOKEN_GENERATIONREG_READ)));
+	} else {
+		wait(store(reply, retryBrokenPromise(stateServer.read, req)));
+	}
 	if (SERVER_KNOBS->BUGGIFY_ALL_COORDINATION || BUGGIFY)
 		wait(delay(SERVER_KNOBS->BUGGIFIED_EVENTUAL_CONSISTENCY * deterministicRandom()->random01()));
 	return reply;
 }
 
-ACTOR Future<UniqueGeneration> waitAndSendWrite(RequestStream<GenerationRegWriteRequest> to,
-                                                GenerationRegWriteRequest req) {
+ACTOR Future<UniqueGeneration> waitAndSendWrite(GenerationRegInterface stateServer, GenerationRegWriteRequest req) {
 	if (SERVER_KNOBS->BUGGIFY_ALL_COORDINATION || BUGGIFY)
 		wait(delay(SERVER_KNOBS->BUGGIFIED_EVENTUAL_CONSISTENCY * deterministicRandom()->random01()));
-	state UniqueGeneration reply = wait(retryBrokenPromise(to, req));
+	state UniqueGeneration reply;
+	if (stateServer.hostname.present()) {
+		wait(store(reply, retryGetReplyFromHostname(req, stateServer.hostname.get(), WLTOKEN_GENERATIONREG_WRITE)));
+	} else {
+		wait(store(reply, retryBrokenPromise(stateServer.write, req)));
+	}
 	if (SERVER_KNOBS->BUGGIFY_ALL_COORDINATION || BUGGIFY)
 		wait(delay(SERVER_KNOBS->BUGGIFIED_EVENTUAL_CONSISTENCY * deterministicRandom()->random01()));
 	return reply;
@@ -152,7 +160,7 @@ struct CoordinatedStateImpl {
 		state std::vector<Future<GenerationRegReadReply>> rep_reply;
 		for (int i = 0; i < replicas.size(); i++) {
 			Future<GenerationRegReadReply> reply =
-			    waitAndSendRead(replicas[i].read, GenerationRegReadRequest(req.key, req.gen));
+			    waitAndSendRead(replicas[i], GenerationRegReadRequest(req.key, req.gen));
 			rep_empty_reply.push_back(nonemptyToNever(reply));
 			rep_reply.push_back(emptyToNever(reply));
 			self->ac.add(success(reply));
@@ -192,8 +200,7 @@ struct CoordinatedStateImpl {
 		state std::vector<GenerationRegInterface>& replicas = self->coordinators.stateServers;
 		state std::vector<Future<UniqueGeneration>> wrep_reply;
 		for (int i = 0; i < replicas.size(); i++) {
-			Future<UniqueGeneration> reply =
-			    waitAndSendWrite(replicas[i].write, GenerationRegWriteRequest(req.kv, req.gen));
+			Future<UniqueGeneration> reply = waitAndSendWrite(replicas[i], GenerationRegWriteRequest(req.kv, req.gen));
 			wrep_reply.push_back(reply);
 			self->ac.add(success(reply));
 		}

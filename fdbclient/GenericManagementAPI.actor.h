@@ -746,6 +746,17 @@ Future<Optional<TenantMapEntry>> createTenantTransaction(Transaction tr, TenantN
 	state Optional<Value> lastIdVal = wait(safeThreadFutureToFuture(lastIdFuture));
 	Optional<Value> tenantDataPrefix = wait(safeThreadFutureToFuture(tenantDataPrefixFuture));
 
+	if (tenantDataPrefix.present() &&
+	    tenantDataPrefix.get().size() + TenantMapEntry::ROOT_PREFIX_SIZE > CLIENT_KNOBS->TENANT_PREFIX_SIZE_LIMIT) {
+		TraceEvent(SevWarnAlways, "TenantPrefixTooLarge")
+		    .detail("TenantSubspace", tenantDataPrefix.get())
+		    .detail("TenantSubspaceLength", tenantDataPrefix.get().size())
+		    .detail("RootPrefixLength", TenantMapEntry::ROOT_PREFIX_SIZE)
+		    .detail("MaxTenantPrefixSize", CLIENT_KNOBS->TENANT_PREFIX_SIZE_LIMIT);
+
+		throw client_invalid_operation();
+	}
+
 	state TenantMapEntry newTenant(lastIdVal.present() ? TenantMapEntry::prefixToId(lastIdVal.get()) + 1 : 0,
 	                               tenantDataPrefix.present() ? (KeyRef)tenantDataPrefix.get() : ""_sr);
 

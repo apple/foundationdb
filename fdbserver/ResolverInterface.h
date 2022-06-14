@@ -118,7 +118,7 @@ struct ResolveTransactionBatchRequest {
 	constexpr static FileIdentifier file_identifier = 16462858;
 	Arena arena;
 
-	SpanID spanContext;
+	SpanContext spanContext;
 	Version prevVersion;
 	Version version; // FIXME: ?
 	Version lastReceivedVersion;

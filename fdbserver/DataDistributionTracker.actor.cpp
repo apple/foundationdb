@@ -525,12 +525,12 @@ ACTOR Future<Void> shardSplitter(DataDistributionTracker* self,
 		for (int i = 0; i < skipRange; i++) {
 			KeyRangeRef r(splitKeys[i], splitKeys[i + 1]);
 			self->shardsAffectedByTeamFailure->defineShard(r);
-			self->output.send(RelocateShard(r, SERVER_KNOBS->PRIORITY_SPLIT_SHARD));
+			self->output.send(RelocateShard(r, SERVER_KNOBS->PRIORITY_SPLIT_SHARD, RelocateReason::OTHER));
 		}
 		for (int i = numShards - 1; i > skipRange; i--) {
 			KeyRangeRef r(splitKeys[i], splitKeys[i + 1]);
 			self->shardsAffectedByTeamFailure->defineShard(r);
-			self->output.send(RelocateShard(r, SERVER_KNOBS->PRIORITY_SPLIT_SHARD));
+			self->output.send(RelocateShard(r, SERVER_KNOBS->PRIORITY_SPLIT_SHARD, RelocateReason::OTHER));
 		}
 
 		self->sizeChanges.add(changeSizes(self, keys, shardSize->get().get().metrics.bytes));
@@ -676,7 +676,7 @@ Future<Void> shardMerger(DataDistributionTracker* self,
 	}
 	restartShardTrackers(self, mergeRange, ShardMetrics(endingStats, lastLowBandwidthStartTime, shardCount));
 	self->shardsAffectedByTeamFailure->defineShard(mergeRange);
-	self->output.send(RelocateShard(mergeRange, SERVER_KNOBS->PRIORITY_MERGE_SHARD));
+	self->output.send(RelocateShard(mergeRange, SERVER_KNOBS->PRIORITY_MERGE_SHARD, RelocateReason::OTHER));
 
 	// We are about to be cancelled by the call to restartShardTrackers
 	return Void();
@@ -832,6 +832,86 @@ ACTOR Future<Void> trackInitialShards(DataDistributionTracker* self, Reference<I
 	return Void();
 }
 
+ACTOR Future<Void> fetchTopKShardMetrics_impl(DataDistributionTracker* self, GetTopKMetricsRequest req) {
+	ASSERT(req.comparator);
+	state Future<Void> onChange;
+	state std::vector<StorageMetrics> returnMetrics;
+	// random pick a portion of shard
+	if (req.keys.size() > SERVER_KNOBS->DD_SHARD_COMPARE_LIMIT) {
+		deterministicRandom()->randomShuffle(req.keys, SERVER_KNOBS->DD_SHARD_COMPARE_LIMIT);
+	}
+	try {
+		loop {
+			onChange = Future<Void>();
+			returnMetrics.clear();
+			state int64_t minReadLoad = std::numeric_limits<int64_t>::max();
+			state int64_t maxReadLoad = std::numeric_limits<int64_t>::min();
+			state int i;
+			for (i = 0; i < SERVER_KNOBS->DD_SHARD_COMPARE_LIMIT && i < req.keys.size(); ++i) {
+				auto range = req.keys[i];
+				StorageMetrics metrics;
+				for (auto t : self->shards.intersectingRanges(range)) {
+					auto& stats = t.value().stats;
+					if (!stats->get().present()) {
+						onChange = stats->onChange();
+						break;
+					}
+					metrics += t.value().stats->get().get().metrics;
+				}
+
+				// skip if current stats is invalid
+				if (onChange.isValid()) {
+					break;
+				}
+
+				if (metrics.bytesReadPerKSecond > 0) {
+					minReadLoad = std::min(metrics.bytesReadPerKSecond, minReadLoad);
+					maxReadLoad = std::max(metrics.bytesReadPerKSecond, maxReadLoad);
+					if (req.minBytesReadPerKSecond <= metrics.bytesReadPerKSecond &&
+					    metrics.bytesReadPerKSecond <= req.maxBytesReadPerKSecond) {
+						metrics.keys = range;
+						returnMetrics.push_back(metrics);
+					}
+				}
+
+				wait(yield());
+			}
+			// FIXME(xwang): Do we need to track slow task here?
+			if (!onChange.isValid()) {
+				if (req.topK >= returnMetrics.size())
+					req.reply.send(GetTopKMetricsReply(returnMetrics, minReadLoad, maxReadLoad));
+				else {
+					std::nth_element(returnMetrics.begin(),
+					                 returnMetrics.begin() + req.topK - 1,
+					                 returnMetrics.end(),
+					                 req.comparator);
+					req.reply.send(GetTopKMetricsReply(
+					    std::vector<StorageMetrics>(returnMetrics.begin(), returnMetrics.begin() + req.topK),
+					    minReadLoad,
+					    maxReadLoad));
+				}
+				return Void();
+			}
+			wait(onChange);
+		}
+	} catch (Error& e) {
+		if (e.code() != error_code_actor_cancelled && !req.reply.isSet())
+			req.reply.sendError(e);
+		throw;
+	}
+}
+
+ACTOR Future<Void> fetchTopKShardMetrics(DataDistributionTracker* self, GetTopKMetricsRequest req) {
+	choose {
+		when(wait(fetchTopKShardMetrics_impl(self, req))) {}
+		when(wait(delay(SERVER_KNOBS->DD_SHARD_METRICS_TIMEOUT))) {
+			TEST(true); // TopK DD_SHARD_METRICS_TIMEOUT
+			req.reply.send(GetTopKMetricsReply());
+		}
+	}
+	return Void();
+}
+
 ACTOR Future<Void> fetchShardMetrics_impl(DataDistributionTracker* self, GetMetricsRequest req) {
 	try {
 		loop {
@@ -924,6 +1004,7 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
                                            PromiseStream<RelocateShard> output,
                                            Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
                                            PromiseStream<GetMetricsRequest> getShardMetrics,
+                                           FutureStream<GetTopKMetricsRequest> getTopKMetrics,
                                            PromiseStream<GetMetricsListRequest> getShardMetricsList,
                                            FutureStream<Promise<int64_t>> getAverageShardBytes,
                                            Promise<Void> readyToStart,
@@ -961,6 +1042,9 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
 			}
 			when(GetMetricsRequest req = waitNext(getShardMetrics.getFuture())) {
 				self.sizeChanges.add(fetchShardMetrics(&self, req));
+			}
+			when(GetTopKMetricsRequest req = waitNext(getTopKMetrics)) {
+				self.sizeChanges.add(fetchTopKShardMetrics(&self, req));
 			}
 			when(GetMetricsListRequest req = waitNext(getShardMetricsList.getFuture())) {
 				self.sizeChanges.add(fetchShardMetricsList(&self, req));

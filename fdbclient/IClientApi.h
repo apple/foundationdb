@@ -27,6 +27,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/Tenant.h"
 
+#include "flow/Tracing.h"
 #include "flow/ThreadHelper.actor.h"
 
 struct VersionVector;
@@ -67,6 +68,7 @@ public:
 	                                                       const KeySelectorRef& end,
 	                                                       const StringRef& mapper,
 	                                                       GetRangeLimits limits,
+	                                                       int matchIndex = MATCH_INDEX_ALL,
 	                                                       bool snapshot = false,
 	                                                       bool reverse = false) = 0;
 	virtual ThreadFuture<Standalone<VectorRef<const char*>>> getAddressesForKey(const KeyRef& key) = 0;
@@ -96,11 +98,11 @@ public:
 
 	virtual ThreadFuture<Void> commit() = 0;
 	virtual Version getCommittedVersion() = 0;
-	// @todo This API and the "getSpanID()" API may help with debugging simulation
+	// @todo This API and the "getSpanContext()" API may help with debugging simulation
 	// test failures. (These APIs are not currently invoked anywhere.) Remove them
 	// later if they are not really needed.
 	virtual VersionVector getVersionVector() = 0;
-	virtual UID getSpanID() = 0;
+	virtual SpanContext getSpanContext() = 0;
 	virtual ThreadFuture<int64_t> getApproximateSize() = 0;
 
 	virtual void setOption(FDBTransactionOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) = 0;
@@ -151,7 +153,11 @@ public:
 	virtual void addref() = 0;
 	virtual void delref() = 0;
 
-	// Management API, attempt to kill or suspend a process, return 1 for request sent out, 0 for failure
+	// Management API, attempt to kill or suspend a process, return 1 for request being sent out, 0 for failure
+	// The address string can be extended to a comma-delimited string like <addr1>,<addr2>...,<addrN> to send reboot
+	// requests to multiple processes simultaneously
+	// If multiple addresses are provided, it returns 1 for requests being sent out to all provided addresses.
+	// On the contrary, if the client cannot connect to any of the given address, no requests will be sent out
 	virtual ThreadFuture<int64_t> rebootWorker(const StringRef& address, bool check, int duration) = 0;
 	// Management API, force the database to recover into DCID, causing the database to lose the most recently committed
 	// mutations

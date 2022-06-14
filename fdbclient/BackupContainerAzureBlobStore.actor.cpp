@@ -213,9 +213,7 @@ public:
 	// Hack to get around the fact that macros don't work inside actor functions
 	static Reference<IAsyncFile> encryptFile(Reference<IAsyncFile> const& f, AsyncFileEncrypted::Mode mode) {
 		Reference<IAsyncFile> result = f;
-#if ENCRYPTION_ENABLED
 		result = makeReference<AsyncFileEncrypted>(result, mode);
-#endif
 		return result;
 	}
 

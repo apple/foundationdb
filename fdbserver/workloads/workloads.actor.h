@@ -131,6 +131,8 @@ struct KVWorkload : TestWorkload {
 	Key getRandomKey(bool absent) const;
 	Key keyForIndex(uint64_t index) const;
 	Key keyForIndex(uint64_t index, bool absent) const;
+	// the reverse process of keyForIndex() without division. Set absent=true to ignore the last byte in Key
+	int64_t indexForKey(const KeyRef& key, bool absent = false) const;
 };
 
 struct IWorkloadFactory : ReferenceCounted<IWorkloadFactory> {

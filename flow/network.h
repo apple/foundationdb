@@ -30,9 +30,6 @@
 #include <variant>
 #include <atomic>
 #include "boost/asio.hpp"
-#ifndef TLS_DISABLED
-#include "boost/asio/ssl.hpp"
-#endif
 #include "flow/Arena.h"
 #include "flow/BooleanParam.h"
 #include "flow/IRandom.h"

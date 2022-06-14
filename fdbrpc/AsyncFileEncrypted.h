@@ -26,8 +26,6 @@
 #include "flow/IRandom.h"
 #include "flow/StreamCipher.h"
 
-#if ENCRYPTION_ENABLED
-
 #include <array>
 
 /*
@@ -81,5 +79,3 @@ public:
 	void releaseZeroCopy(void* data, int length, int64_t offset) override;
 	int64_t debugFD() const override;
 };
-
-#endif // ENCRYPTION_ENABLED

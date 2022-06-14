@@ -65,9 +65,7 @@ CSimpleOpt::SOption gConverterOptions[] = { { OPT_CONTAINER, "-r", SO_REQ_SEP },
 	                                        { OPT_INPUT_FILE, "-i", SO_REQ_SEP },
 	                                        { OPT_INPUT_FILE, "--input", SO_REQ_SEP },
 	                                        { OPT_BLOB_CREDENTIALS, "--blob-credentials", SO_REQ_SEP },
-#ifndef TLS_DISABLED
-	                                        TLS_OPTION_FLAGS
-#endif
+	                                        TLS_OPTION_FLAGS,
 	                                        { OPT_BUILD_FLAGS, "--build-flags", SO_NONE },
 	                                        { OPT_LIST_ONLY, "--list-only", SO_NONE },
 	                                        { OPT_KEY_PREFIX, "-k", SO_REQ_SEP },
