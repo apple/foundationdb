@@ -395,7 +395,9 @@ std::string S3BlobStoreEndpoint::getResourceURL(std::string resource, std::strin
 	return r;
 }
 
-std::string constructResourcePath(Reference<S3BlobStoreEndpoint> b, const std::string& bucket, const std::string& object) {
+std::string constructResourcePath(Reference<S3BlobStoreEndpoint> b,
+                                  const std::string& bucket,
+                                  const std::string& object) {
 	std::string resource;
 
 	if (b->getHost().find(bucket + ".") != 0) {
@@ -482,7 +484,9 @@ ACTOR Future<Void> deleteRecursively_impl(Reference<S3BlobStoreEndpoint> b,
 		loop {
 			choose {
 				// Throw if done throws, otherwise don't stop until end_of_stream
-				when(wait(done)) { done = Never(); }
+				when(wait(done)) {
+					done = Never();
+				}
 
 				when(S3BlobStoreEndpoint::ListResult list = waitNext(resultStream.getFuture())) {
 					for (auto& object : list.objects) {
@@ -1193,7 +1197,9 @@ ACTOR Future<S3BlobStoreEndpoint::ListResult> listObjects_impl(Reference<S3BlobS
 		loop {
 			choose {
 				// Throw if done throws, otherwise don't stop until end_of_stream
-				when(wait(done)) { done = Never(); }
+				when(wait(done)) {
+					done = Never();
+				}
 
 				when(S3BlobStoreEndpoint::ListResult info = waitNext(resultStream.getFuture())) {
 					results.commonPrefixes.insert(
