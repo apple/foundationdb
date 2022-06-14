@@ -24,6 +24,7 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/Knobs.h"
+#include "fdbserver/ServerDBInfo.h"
 #include "fdbclient/StorageCheckpoint.h"
 
 struct CheckpointRequest {
@@ -162,11 +163,13 @@ extern IKeyValueStore* keyValueStoreMemory(std::string const& basename,
                                            std::string ext = "fdq",
                                            KeyValueStoreType storeType = KeyValueStoreType::MEMORY);
 extern IKeyValueStore* keyValueStoreLogSystem(class IDiskQueue* queue,
+                                              Reference<AsyncVar<ServerDBInfo> const> db,
                                               UID logID,
                                               int64_t memoryLimit,
                                               bool disableSnapshot,
                                               bool replaceContent,
-                                              bool exactRecovery);
+                                              bool exactRecovery,
+                                              bool enableEncryption);
 
 extern IKeyValueStore* openRemoteKVStore(KeyValueStoreType storeType,
                                          std::string const& filename,
