@@ -129,7 +129,7 @@ pub struct ParsedFileIdentifier {
     pub outer_wrapper: IdentifierType,
     pub file_identifier_name: Option<&'static str>,
 }
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct FileIdentifierNames {
     name_to_id: HashMap<&'static str, u32>,
     id_to_name: HashMap<u32, &'static str>,

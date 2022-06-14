@@ -13,12 +13,34 @@ use crate::flow::frame::Frame;
 use crate::flow::uid::UID;
 use crate::flow::Result;
 
-const PING_FILE_IDENTIFIER: ParsedFileIdentifier = ParsedFileIdentifier {
+const PING_REQUEST_FILE_IDENTIFIER: ParsedFileIdentifier = ParsedFileIdentifier {
     file_identifier: 0x47d2c7,
     inner_wrapper: IdentifierType::None,
     outer_wrapper: IdentifierType::None,
     file_identifier_name: Some("PingRequest"),
 };
+
+const PING_RESPONSE_FILE_IDENTIFIER: ParsedFileIdentifier = ParsedFileIdentifier {
+    file_identifier: 0x1ead4a,
+    inner_wrapper: IdentifierType::ErrorOr,
+    outer_wrapper: IdentifierType::None,
+    file_identifier_name: Some("PingResponse"),
+};
+
+fn serialize_request(endpoint_token: UID, response_token: UID) -> Result<Frame> {
+    use ping_request::{ReplyPromise, ReplyPromiseArgs, PingRequest, PingRequestArgs, FakeRoot, FakeRootArgs};
+    let mut builder = flatbuffers::FlatBufferBuilder::with_capacity(1024);
+    let response_token = ping_request::UID::new(response_token.uid[0], response_token.uid[1]);
+    let uid = Some(&response_token);
+    let reply_promise = Some(ReplyPromise::create(&mut builder, &ReplyPromiseArgs { uid }));
+    let ping_request = Some(PingRequest::create(&mut builder, &PingRequestArgs { reply_promise }));
+    let fake_root = FakeRoot::create(&mut builder, &FakeRootArgs { ping_request });
+    builder.finish(fake_root, Some("myfi"));
+    let (mut payload, offset) = builder.collapse();
+    FileIdentifier::new(PING_REQUEST_FILE_IDENTIFIER.file_identifier)?
+        .rewrite_flatbuf(&mut payload[offset..])?;
+    Ok(Frame::new(endpoint_token, payload, offset))
+}
 
 fn serialize_response(token: UID) -> Result<Frame> {
     let mut builder = flatbuffers::FlatBufferBuilder::with_capacity(1024);
@@ -35,17 +57,16 @@ fn serialize_response(token: UID) -> Result<Frame> {
     builder.finish(fake_root, Some("myfi"));
     let (mut payload, offset) = builder.collapse();
     // See also: flow/README.md ### Flatbuffers/ObjectSerializer
-    FileIdentifier::new(0x1ead4a)?
+    FileIdentifier::new(PING_RESPONSE_FILE_IDENTIFIER.file_identifier)?
         .to_error_or()?
         .rewrite_flatbuf(&mut payload[offset..])?;
-    // println!("reply: {:x?}", builder.finished_data());
     Ok(Frame::new(token, payload, offset))
 }
 
 pub async fn handle(request: FlowRequest) -> Result<Option<FlowResponse>> {
     request
         .file_identifier
-        .ensure_expected(PING_FILE_IDENTIFIER)?;
+        .ensure_expected(PING_REQUEST_FILE_IDENTIFIER)?;
     let fake_root = ping_request::root_as_fake_root(request.frame.payload())?;
     let reply_promise = fake_root.ping_request().unwrap().reply_promise().unwrap();
 

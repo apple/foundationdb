@@ -1,12 +1,3 @@
-// #[allow(non_snake_case)]
-#[allow(dead_code, unused_imports)]
-#[path = "../../target/flatbuffers/PingRequest_generated.rs"]
-mod ping_request;
-
-#[allow(dead_code, unused_imports)]
-#[path = "../../target/flatbuffers/ErrorOrVoid_generated.rs"]
-mod error_or_void;
-
 #[allow(dead_code, unused_imports)]
 #[path = "../../target/flatbuffers/NetworkTestRequest_generated.rs"]
 mod network_test_request;
@@ -19,6 +10,7 @@ use crate::flow::file_identifier::{FileIdentifier, IdentifierType, ParsedFileIde
 use crate::flow::frame::Frame;
 use crate::flow::uid::UID;
 use crate::flow::Result;
+use flatbuffers::{FlatBufferBuilder, FLATBUFFERS_MAX_BUFFER_SIZE};
 
 use super::{FlowRequest, FlowResponse};
 
@@ -29,39 +21,65 @@ const NETWORK_TEST_REQUEST_IDENTIFIER: ParsedFileIdentifier = ParsedFileIdentifi
     file_identifier_name: Some("NetworkTestRequest"),
 };
 
-fn serialize_error_or_network_test_response(token: UID, response_len: u32) -> Result<Frame> {
-    let mut builder = flatbuffers::FlatBufferBuilder::with_capacity(usize::min(
-        128 + (response_len as usize),
-        flatbuffers::FLATBUFFERS_MAX_BUFFER_SIZE,
+fn serialize_request(endpoint_token: UID, response_token: UID, request_len: u32, reply_size: u32) -> Result<Frame> {
+    use network_test_request::{ReplyPromise, ReplyPromiseArgs, NetworkTestRequest, NetworkTestRequestArgs, FakeRoot, FakeRootArgs};
+    let mut builder = FlatBufferBuilder::with_capacity(usize::min(
+        128 + (request_len as usize),
+        FLATBUFFERS_MAX_BUFFER_SIZE,
     ));
-    let response_len: usize = response_len.try_into()?;
-    builder.start_vector::<u8>(response_len);
-    for _i in 0..response_len {
+    let request_len: usize = request_len.try_into()?;
+    builder.start_vector::<u8>(request_len);
+    for _i in 0..request_len {
         builder.push('.' as u8);
     }
-    let payload = builder.end_vector(response_len);
+    let payload = Some(builder.end_vector(request_len));
+    let uid = network_test_request::UID::new(response_token.uid[0], response_token.uid[1]);
+    let uid = Some(&uid);
+    let reply_promise = Some(ReplyPromise::create(&mut builder, &ReplyPromiseArgs { uid }));
+    let network_test_request = Some(NetworkTestRequest::create(&mut builder, &NetworkTestRequestArgs{ payload, reply_size, reply_promise }));
+    let fake_root = FakeRoot::create(&mut builder, &FakeRootArgs { network_test_request });
+    builder.finish(fake_root, Some("myfi"));
+    let (mut payload, offset) = builder.collapse();
+    FileIdentifier::new(4146513)?
+        .rewrite_flatbuf(&mut payload[offset..])?;
+    // println!("reply: {:x?}", builder.finished_data());
+    Ok(Frame::new(endpoint_token, payload, offset))
 
-    let network_test_response = network_test_response::NetworkTestResponse::create(
+}
+
+fn serialize_response(token: UID, reply_size: usize) -> Result<Frame> {
+    use network_test_response::{NetworkTestResponse, NetworkTestResponseArgs, EnsureTable, EnsureTableArgs, ErrorOr, FakeRoot, FakeRootArgs};
+    let mut builder = FlatBufferBuilder::with_capacity(usize::min(
+        128 + (reply_size),
+        FLATBUFFERS_MAX_BUFFER_SIZE,
+    ));
+    builder.start_vector::<u8>(reply_size);
+    for _i in 0..reply_size {
+        builder.push('.' as u8);
+    }
+    let payload = builder.end_vector(reply_size);
+
+    let network_test_response = NetworkTestResponse::create(
         &mut builder,
-        &network_test_response::NetworkTestResponseArgs {
+        &NetworkTestResponseArgs {
             payload: Some(payload),
         },
     );
-    let ensure_table = network_test_response::EnsureTable::create(
+    let ensure_table = EnsureTable::create(
         &mut builder,
-        &network_test_response::EnsureTableArgs {
+        &EnsureTableArgs {
             network_test_response: Some(network_test_response),
         },
     );
-    let fake_root = network_test_response::FakeRoot::create(
+    let fake_root = FakeRoot::create(
         &mut builder,
-        &network_test_response::FakeRootArgs {
-            error_or_type: network_test_response::ErrorOr::EnsureTable,
+        &FakeRootArgs {
+            error_or_type: ErrorOr::EnsureTable,
             error_or: Some(ensure_table.as_union_value()),
         },
     );
     builder.finish(fake_root, Some("myfi"));
-    let (mut payload, offset) = builder.collapse(); //finished_data();
+    let (mut payload, offset) = builder.collapse();
     FileIdentifier::new(14465374)?
         .to_error_or()?
         .rewrite_flatbuf(&mut payload[offset..])?;
@@ -86,7 +104,7 @@ pub async fn handle(request: FlowRequest) -> Result<Option<FlowResponse>> {
         uid: [uid.first(), uid.second()],
     };
 
-    let frame = serialize_error_or_network_test_response(
+    let frame = serialize_response(
         uid,
         network_test_request.reply_size().try_into()?,
     )?;

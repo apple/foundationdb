@@ -39,6 +39,7 @@ const MAX_REQUESTS: usize = MAX_CONNECTIONS * 2;
 
 #[derive(Clone, Debug)]
 pub struct Svc {
+    pub fit: Arc<file_identifier::FileIdentifierNames>,
     pub response_tx: mpsc::Sender<Frame>,
     pub in_flight_requests: Arc<dashmap::DashMap<UID, oneshot::Sender<Frame>>>,
 }
@@ -51,42 +52,58 @@ impl Svc {
         let (response_tx, response_rx) = tokio::sync::mpsc::channel::<Frame>(MAX_REQUESTS / 10);
         (
             Svc {
+                fit: Arc::new(file_identifier::FileIdentifierNames::new().unwrap()),
                 response_tx,
                 in_flight_requests: Arc::new(dashmap::DashMap::new()),
             },
             response_rx,
         )
     }
-}
 
-fn handle_req<'a, 'b>(
-    in_flight_requests: &dashmap::DashMap<UID, oneshot::Sender<Frame>>,
-    request: FlowRequest,
-) -> Result<
-    std::pin::Pin<Box<dyn Send + futures_util::Future<Output = Result<Option<FlowResponse>>>>>,
-> {
-    // TODO: Put this back in the async path?
-    request.frame.validate()?;
-    let wltoken = request.frame.token.get_well_known_endpoint();
-    let response_handler = match wltoken {
-        None => in_flight_requests.remove(&request.frame.token),
-        Some(_) => None,
-    };
-
-    if let Some((_uid, tx)) = response_handler {
+    fn dispatch_response(&self, tx: oneshot::Sender<Frame>, request: FlowRequest) {
         match tx.send(request.frame) {
             Ok(()) => (),
             Err(frame) => {
                 println!("Dropping duplicate response for token {:?}", frame.token)
             }
-        };
-        return Ok(Box::pin(async move { Ok(None) } )); // XXX inefficient
+        }
     }
-    // TODO: remove the closure?  Many of these paths just await a future.  May as well pin those instead.  Also, response_tx.send() is sync...
-    Ok(Box::pin(async move {
-        Ok(match request.frame.token.get_well_known_endpoint() {
-            Some(WLTOKEN::PingPacket) => ping_request::handle(request).await?,
-            Some(WLTOKEN::ReservedForTesting) => network_test::handle(request).await?,
+
+    fn dbg_unkown_msg(&self, request: FlowRequest) {
+        println!(
+            "Message not destined for well-known endpoint and not a known respsonse: {:x?}",
+            request.frame
+        );
+
+        println!(
+            "{:x?} {:04x?} {:04x?}",
+            request.frame.token,
+            request.file_identifier,
+            self.fit.from_id(&request.file_identifier)
+        );
+    }
+
+    fn handle_req<'a, 'b>(
+        &self, // in_flight_requests: &dashmap::DashMap<UID, oneshot::Sender<Frame>>,
+        request: FlowRequest,
+    ) -> Result<
+        Option<std::pin::Pin<Box<dyn Send + futures_util::Future<Output = Result<Option<FlowResponse>>>>>>,
+    > {
+        request.frame.validate()?;
+        let wltoken = request.frame.token.get_well_known_endpoint();
+        Ok(match wltoken {
+            None => match self.in_flight_requests.remove(&request.frame.token) {
+                Some((_uid, tx)) => {
+                    self.dispatch_response(tx, request);
+                    None
+                },
+                None => {
+                    self.dbg_unkown_msg(request);
+                    None
+                }
+            }
+            Some(WLTOKEN::PingPacket) => Some(Box::pin(ping_request::handle(request))),
+            Some(WLTOKEN::ReservedForTesting) => Some(Box::pin(network_test::handle(request))),
             Some(wltoken) => {
                 let fit = file_identifier::FileIdentifierNames::new()?;
                 println!(
@@ -98,27 +115,12 @@ fn handle_req<'a, 'b>(
                 );
                 None
             }
-            None => {
-                let fit = file_identifier::FileIdentifierNames::new()?;
-                println!(
-                    "Message not destined for well-known endpoint and not a known respsonse: {:x?}",
-                    request.frame
-                );
-
-                println!(
-                    "{:x?} {:04x?} {:04x?}",
-                    request.frame.token,
-                    request.file_identifier,
-                    fit.from_id(&request.file_identifier)
-                );
-                None
-            }
         })
-    }))
+    }
 }
 
+
 impl Service<FlowRequest> for Svc {
-    // type Future: Future<Output = std::result::Result<Self::Response, Self::Error>>;
     type Response = Option<FlowResponse>;
     type Error = super::flow::Error;
     type Future = std::pin::Pin<Box<dyn 'static + Send + Future<Output = Result<Self::Response>>>>; // XXX get rid of box!
@@ -128,8 +130,9 @@ impl Service<FlowRequest> for Svc {
     }
 
     fn call(&mut self, req: FlowRequest) -> Self::Future {
-        match handle_req(&self.in_flight_requests, req) {
-            Ok(fut) => fut,
+        match self.handle_req(req) {
+            Ok(Some(fut)) => fut,
+            Ok(None) => Box::pin(async move { Ok(None) }),
             Err(e) => Box::pin(async move { Err(e) }),
         }
     }
@@ -146,7 +149,7 @@ async fn handle_frame(
         file_identifier,
     };
 
-    // match handle_req(request).await? {
+    // match handle_req(&svc.in_flight_requests, request).await? {
     //     Some(response) => response_tx.send(response.frame).await?,
     //     None => (),
     // };
