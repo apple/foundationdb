@@ -950,6 +950,7 @@ private:
 		return Void();
 	}
 
+	// TODO(yiwu): Implement background refresh mechanism for BlobCipher and use that mechanism to refresh cipher key.
 	ACTOR static Future<Void> refreshCipherKeys(KeyValueStoreMemory* self) {
 		loop {
 			wait(updateCipherKeys(self));
