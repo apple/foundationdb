@@ -227,11 +227,6 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> monitorThrottlingChanges(Ratekeeper* self) {
-		wait(self->tagThrottler->monitorThrottlingChanges());
-		return Void();
-	}
-
 	ACTOR static Future<Void> run(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 		state Ratekeeper self(rkInterf.id(), openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True));
 		state Future<Void> timeout = Void();
@@ -408,7 +403,7 @@ Future<Void> Ratekeeper::trackTLogQueueInfo(TLogInterface tli) {
 }
 
 Future<Void> Ratekeeper::monitorThrottlingChanges() {
-	return RatekeeperImpl::monitorThrottlingChanges(this);
+	return tagThrottler->monitorThrottlingChanges();
 }
 
 Future<Void> Ratekeeper::run(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
