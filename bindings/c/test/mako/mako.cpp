@@ -2104,13 +2104,13 @@ int main(int argc, char* argv[]) {
 		return -1;
 	}
 	rc = parseArguments(argc, argv, args);
-	if (args.tenants > 1) {
-		args.rows = args.rows / args.tenants;
-		args.row_digits = digits(args.rows);
-	}
 	if (rc < 0) {
 		/* usage printed */
 		return 0;
+	}
+	if (args.tenants > 1) {
+		args.rows = args.rows / args.tenants;
+		args.row_digits = digits(args.rows);
 	}
 
 	rc = validateArguments(args);
