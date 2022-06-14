@@ -203,18 +203,6 @@ public:
 		std::string toString() const { return describe(servers); };
 	};
 
-	struct PhysicalShard {
-		uint64_t id;
-		StorageMetrics metrics;
-
-		PhysicalShard() : id(0) {}
-		explicit PhysicalShard(uint64_t id) : id(id), metrics(StorageMetrics()) {}
-		explicit PhysicalShard(uint64_t id,  StorageMetrics const& metrics) : id(id), metrics(metrics) {}
-		// operator< used for selecting the physicalShard with the minimal bytesOnDisk
-		bool operator<(const struct PhysicalShard& right) const { return id < right.id ? true : false; }
-		std::string toString() const { return std::to_string(id); }
-	};
-
 	// This tracks the data distribution on the data distribution server so that teamTrackers can
 	//   relocate the right shards when a team is degraded.
 
@@ -246,6 +234,17 @@ public:
 	PromiseStream<KeyRange> restartRequests;
 
 	// For PhysicalShard
+	struct PhysicalShard {
+		uint64_t id;
+		StorageMetrics metrics;
+
+		PhysicalShard() : id(0) {}
+		explicit PhysicalShard(uint64_t id) : id(id), metrics(StorageMetrics()) {}
+		explicit PhysicalShard(uint64_t id,  StorageMetrics const& metrics) : id(id), metrics(metrics) {}
+		// operator< used for selecting the physicalShard with the minimal bytesOnDisk
+		bool operator<(const struct PhysicalShard& right) const { return id < right.id ? true : false; }
+		std::string toString() const { return std::to_string(id); }
+	};
 	// the mapping from a physicalShardID to its corresponding physicalShard
 	std::map<uint64_t, PhysicalShard> physicalShardCollection;
 	// the mapping from a team to physicalShards of the team

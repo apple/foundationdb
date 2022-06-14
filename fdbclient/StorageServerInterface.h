@@ -1049,11 +1049,20 @@ struct GetStorageMetricsReply {
 	int64_t versionLag;
 	double lastUpdate;
 
+	int64_t bytesDurable;
+	int64_t bytesInput;
+	Version version; // current storage server version
+	Version durableVersion; // latest version durable on storage server
+	double cpuUsage;
+	double diskUsage;
+	double localRateLimit;
+
 	GetStorageMetricsReply() : bytesInputRate(0) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, load, available, capacity, bytesInputRate, versionLag, lastUpdate);
+		serializer(ar, load, available, capacity, bytesInputRate, versionLag, lastUpdate,
+			bytesDurable, bytesInput, version, durableVersion, cpuUsage, diskUsage, localRateLimit);
 	}
 };
 

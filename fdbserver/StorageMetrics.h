@@ -429,10 +429,18 @@ struct StorageServerMetrics {
 	}
 
 	void getStorageMetrics(GetStorageMetricsRequest req,
-	                       StorageBytes sb,
-	                       double bytesInputRate,
-	                       int64_t versionLag,
-	                       double lastUpdate) const {
+	                       	StorageBytes sb,
+	                       	double bytesInputRate,
+	                       	int64_t versionLag,
+	                       	double lastUpdate,
+	                       	// new below
+	                       	int64_t bytesDurable,
+	                       	int64_t bytesInput,
+							Version version, // current storage server version
+							Version durableVersion, // latest version durable on storage server
+							double cpuUsage,
+							double diskUsage,
+							double localRateLimit) const {
 		GetStorageMetricsReply rep;
 
 		// SOMEDAY: make bytes dynamic with hard disk space
@@ -461,6 +469,14 @@ struct StorageServerMetrics {
 
 		rep.versionLag = versionLag;
 		rep.lastUpdate = lastUpdate;
+
+		rep.bytesDurable = bytesDurable;
+		rep.bytesInput = bytesInput;
+		rep.version = version;
+		rep.durableVersion = durableVersion;
+		rep.cpuUsage = cpuUsage;
+		rep.diskUsage = diskUsage;
+		rep.localRateLimit = localRateLimit;
 
 		req.reply.send(rep);
 	}
