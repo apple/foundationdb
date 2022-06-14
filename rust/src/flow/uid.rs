@@ -61,6 +61,11 @@ impl UID {
             uid: [u64::MAX, id.to_u64().unwrap()],
         }
     }
+    pub fn random_token() -> UID {
+        UID {
+            uid: [fastrand::u64(..), fastrand::u64(..)],
+        }
+    }
     #[allow(dead_code)]
     pub fn get_adjusted_token(&self, index: u32) -> UID {
         let new_index = self.uid[1] + (index as u64);

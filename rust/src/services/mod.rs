@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::{mpsc, oneshot};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tower::Service;
 
@@ -39,68 +39,103 @@ const MAX_REQUESTS: usize = MAX_CONNECTIONS * 2;
 
 #[derive(Clone, Debug)]
 pub struct Svc {
-    pub response_tx: Sender<Frame>,
-    pub in_flight_requests: Arc<dashmap::DashMap<UID, String>>,
+    pub response_tx: mpsc::Sender<Frame>,
+    pub in_flight_requests: Arc<dashmap::DashMap<UID, oneshot::Sender<Frame>>>,
 }
 
 impl Svc {
-    pub fn new() -> (Self, Receiver<Frame>) {
+    pub fn new() -> (Self, mpsc::Receiver<Frame>) {
         // Bound the number of backlogged messages to a given remote endpoint.  This is
         // set to the process-wide MAX_REQUESTS / 10 so that a few backpressuring receivers
         // can't consume all the request slots for this process.
         let (response_tx, response_rx) = tokio::sync::mpsc::channel::<Frame>(MAX_REQUESTS / 10);
-        (Svc { response_tx, in_flight_requests: Arc::new(dashmap::DashMap::new()) }, response_rx)
+        (
+            Svc {
+                response_tx,
+                in_flight_requests: Arc::new(dashmap::DashMap::new()),
+            },
+            response_rx,
+        )
     }
 }
 
-async fn handle_req(request: FlowRequest) -> Result<Option<FlowResponse>> {
+fn handle_req<'a, 'b>(
+    in_flight_requests: &dashmap::DashMap<UID, oneshot::Sender<Frame>>,
+    request: FlowRequest,
+) -> Result<
+    std::pin::Pin<Box<dyn Send + futures_util::Future<Output = Result<Option<FlowResponse>>>>>,
+> {
+    // TODO: Put this back in the async path?
     request.frame.validate()?;
-    Ok(match request.frame.token.get_well_known_endpoint() {
-        Some(WLTOKEN::PingPacket) => ping_request::handle(request).await?,
-        Some(WLTOKEN::ReservedForTesting) => network_test::handle(request).await?,
-        Some(wltoken) => {
-            let fit = file_identifier::FileIdentifierNames::new()?;
-            println!(
-                "Got unhandled request for well-known enpoint {:?}: {:x?} {:04x?} {:04x?}",
-                wltoken,
-                request.frame.token,
-                &request.file_identifier,
-                fit.from_id(&request.file_identifier)
-            );
-            None
-        }
-        None => {
-            let fit = file_identifier::FileIdentifierNames::new()?;
-            println!(
-                "Message not destined for well-known endpoint: {:x?}",
-                request.frame
-            );
-            println!(
-                "{:x?} {:04x?} {:04x?}",
-                request.frame.token,
-                request.file_identifier,
-                fit.from_id(&request.file_identifier)
-            );
-            None
-        }
-    })
+    let wltoken = request.frame.token.get_well_known_endpoint();
+    let response_handler = match wltoken {
+        None => in_flight_requests.remove(&request.frame.token),
+        Some(_) => None,
+    };
+
+    if let Some((_uid, tx)) = response_handler {
+        match tx.send(request.frame) {
+            Ok(()) => (),
+            Err(frame) => {
+                println!("Dropping duplicate response for token {:?}", frame.token)
+            }
+        };
+        return Ok(Box::pin(async move { Ok(None) } )); // XXX inefficient
+    }
+    // TODO: remove the closure?  Many of these paths just await a future.  May as well pin those instead.  Also, response_tx.send() is sync...
+    Ok(Box::pin(async move {
+        Ok(match request.frame.token.get_well_known_endpoint() {
+            Some(WLTOKEN::PingPacket) => ping_request::handle(request).await?,
+            Some(WLTOKEN::ReservedForTesting) => network_test::handle(request).await?,
+            Some(wltoken) => {
+                let fit = file_identifier::FileIdentifierNames::new()?;
+                println!(
+                    "Got unhandled request for well-known enpoint {:?}: {:x?} {:04x?} {:04x?}",
+                    wltoken,
+                    request.frame.token,
+                    &request.file_identifier,
+                    fit.from_id(&request.file_identifier)
+                );
+                None
+            }
+            None => {
+                let fit = file_identifier::FileIdentifierNames::new()?;
+                println!(
+                    "Message not destined for well-known endpoint and not a known respsonse: {:x?}",
+                    request.frame
+                );
+
+                println!(
+                    "{:x?} {:04x?} {:04x?}",
+                    request.frame.token,
+                    request.file_identifier,
+                    fit.from_id(&request.file_identifier)
+                );
+                None
+            }
+        })
+    }))
 }
 
 impl Service<FlowRequest> for Svc {
     // type Future: Future<Output = std::result::Result<Self::Response, Self::Error>>;
     type Response = Option<FlowResponse>;
     type Error = super::flow::Error;
-    type Future = std::pin::Pin<Box<dyn Send + Future<Output = Result<Self::Response>>>>; // XXX get rid of box!
+    type Future = std::pin::Pin<Box<dyn 'static + Send + Future<Output = Result<Self::Response>>>>; // XXX get rid of box!
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<()>> {
         Poll::Ready(Ok(()))
     }
 
     fn call(&mut self, req: FlowRequest) -> Self::Future {
-        Box::pin(handle_req(req))
+        match handle_req(&self.in_flight_requests, req) {
+            Ok(fut) => fut,
+            Err(e) => Box::pin(async move { Err(e) }),
+        }
     }
 }
 
+#[allow(unused_variables)]
 async fn handle_frame(
     frame: frame::Frame,
     file_identifier: file_identifier::FileIdentifier,
@@ -111,10 +146,10 @@ async fn handle_frame(
         file_identifier,
     };
 
-    match handle_req(request).await? {
-        Some(response) => response_tx.send(response.frame).await?,
-        None => (),
-    };
+    // match handle_req(request).await? {
+    //     Some(response) => response_tx.send(response.frame).await?,
+    //     None => (),
+    // };
     Ok(())
 }
 
@@ -157,7 +192,7 @@ fn spawn_sender<C: 'static + AsyncWrite + Unpin + Send>(
 
 pub async fn connection_handler(
     svc: Svc,
-    response_rx: Receiver<Frame>,
+    response_rx: mpsc::Receiver<Frame>,
     permit: Option<OwnedSemaphorePermit>,
     stream: TcpStream,
     addr: SocketAddr,
