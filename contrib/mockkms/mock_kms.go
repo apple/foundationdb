@@ -30,6 +30,7 @@ package main
 // 2. No cross-compilation support
 // 3. Limited `go tools` availability.
 // TODO: Replace with a better scheme if possible.
+
 import "C"
 
 import (
