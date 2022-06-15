@@ -82,4 +82,11 @@ std::string getEncryptDbgTraceKey(std::string_view prefix,
                                   StringRef domainName,
                                   Optional<EncryptCipherBaseKeyId> baseCipherId = Optional<EncryptCipherBaseKeyId>());
 
+std::string getEncryptDbgTraceKeyWithTS(std::string_view prefix,
+                                        EncryptCipherDomainId domainId,
+                                        StringRef domainName,
+                                        EncryptCipherBaseKeyId baseCipherId,
+                                        int64_t refAfterTS,
+                                        int64_t expAfterTS);
+
 #endif

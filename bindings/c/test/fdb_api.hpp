@@ -29,9 +29,11 @@
 #include <cassert>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <vector>
 #include <fmt/format.h>
 
 // introduce the option enums
@@ -47,8 +49,19 @@ namespace native {
 using ByteString = std::basic_string<uint8_t>;
 using BytesRef = std::basic_string_view<uint8_t>;
 using CharsRef = std::string_view;
+using Key = ByteString;
 using KeyRef = BytesRef;
+using Value = ByteString;
 using ValueRef = BytesRef;
+
+struct KeyValue {
+	Key key;
+	Value value;
+};
+struct KeyRange {
+	Key beginKey;
+	Key endKey;
+};
 
 inline uint8_t const* toBytePtr(char const* ptr) noexcept {
 	return reinterpret_cast<uint8_t const*>(ptr);
@@ -96,6 +109,8 @@ public:
 
 	bool retryable() const noexcept { return native::fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, err) != 0; }
 
+	static Error success() { return Error(); }
+
 private:
 	CodeType err;
 };
@@ -113,20 +128,24 @@ struct Int64 {
 		return Error(native::fdb_future_get_int64(f, &out));
 	}
 };
-struct Key {
-	using Type = std::pair<uint8_t const*, int>;
+struct KeyRef {
+	using Type = fdb::KeyRef;
 	static Error extract(native::FDBFuture* f, Type& out) noexcept {
-		auto& [out_key, out_key_length] = out;
-		return Error(native::fdb_future_get_key(f, &out_key, &out_key_length));
+		uint8_t const* out_key = nullptr;
+		int out_key_length = 0;
+		auto err = Error(native::fdb_future_get_key(f, &out_key, &out_key_length));
+		out = fdb::KeyRef(out_key, out_key_length);
+		return Error(err);
 	}
 };
-struct Value {
-	using Type = std::tuple<bool, uint8_t const*, int>;
+struct ValueRef {
+	using Type = std::optional<fdb::ValueRef>;
 	static Error extract(native::FDBFuture* f, Type& out) noexcept {
-		auto& [out_present, out_value, out_value_length] = out;
-		auto out_present_native = native::fdb_bool_t{};
-		auto err = native::fdb_future_get_value(f, &out_present_native, &out_value, &out_value_length);
-		out_present = (out_present_native != 0);
+		auto out_present = native::fdb_bool_t{};
+		uint8_t const* out_value = nullptr;
+		int out_value_length = 0;
+		auto err = native::fdb_future_get_value(f, &out_present, &out_value, &out_value_length);
+		out = out_present != 0 ? std::make_optional(fdb::ValueRef(out_value, out_value_length)) : std::nullopt;
 		return Error(err);
 	}
 };
@@ -137,16 +156,35 @@ struct StringArray {
 		return Error(native::fdb_future_get_string_array(f, &out_strings, &out_count));
 	}
 };
-struct KeyValueArray {
-	using Type = std::tuple<native::FDBKeyValue const*, int, bool>;
+struct KeyValueRef : native::FDBKeyValue {
+	fdb::KeyRef key() const noexcept { return fdb::KeyRef(native::FDBKeyValue::key, key_length); }
+	fdb::ValueRef value() const noexcept { return fdb::ValueRef(native::FDBKeyValue::value, value_length); }
+};
+struct KeyValueRefArray {
+	using Type = std::tuple<KeyValueRef const*, int, bool>;
 	static Error extract(native::FDBFuture* f, Type& out) noexcept {
 		auto& [out_kv, out_count, out_more] = out;
 		auto out_more_native = native::fdb_bool_t{};
-		auto err = native::fdb_future_get_keyvalue_array(f, &out_kv, &out_count, &out_more_native);
+		auto err = native::fdb_future_get_keyvalue_array(
+		    f, reinterpret_cast<const native::FDBKeyValue**>(&out_kv), &out_count, &out_more_native);
 		out_more = (out_more_native != 0);
 		return Error(err);
 	}
 };
+struct KeyRangeRef : native::FDBKeyRange {
+	fdb::KeyRef beginKey() const noexcept { return fdb::KeyRef(native::FDBKeyRange::begin_key, begin_key_length); }
+	fdb::KeyRef endKey() const noexcept { return fdb::KeyRef(native::FDBKeyRange::end_key, end_key_length); }
+};
+struct KeyRangeRefArray {
+	using Type = std::tuple<KeyRangeRef const*, int>;
+	static Error extract(native::FDBFuture* f, Type& out) noexcept {
+		auto& [out_ranges, out_count] = out;
+		auto err = native::fdb_future_get_keyrange_array(
+		    f, reinterpret_cast<const native::FDBKeyRange**>(&out_ranges), &out_count);
+		return Error(err);
+	}
+};
+
 } // namespace future_var
 
 [[noreturn]] inline void throwError(std::string_view preamble, Error err) {
@@ -175,9 +213,17 @@ inline Error setOptionNothrow(FDBNetworkOption option, BytesRef str) noexcept {
 	return Error(native::fdb_network_set_option(option, str.data(), intSize(str)));
 }
 
+inline Error setOptionNothrow(FDBNetworkOption option, CharsRef str) noexcept {
+	return setOptionNothrow(option, toBytesRef(str));
+}
+
 inline Error setOptionNothrow(FDBNetworkOption option, int64_t value) noexcept {
 	return Error(native::fdb_network_set_option(
 	    option, reinterpret_cast<const uint8_t*>(&value), static_cast<int>(sizeof(value))));
+}
+
+inline Error setOptionNothrow(FDBNetworkOption option) noexcept {
+	return setOptionNothrow(option, "");
 }
 
 inline void setOption(FDBNetworkOption option, BytesRef str) {
@@ -188,6 +234,10 @@ inline void setOption(FDBNetworkOption option, BytesRef str) {
 	}
 }
 
+inline void setOption(FDBNetworkOption option, CharsRef str) {
+	setOption(option, toBytesRef(str));
+}
+
 inline void setOption(FDBNetworkOption option, int64_t value) {
 	if (auto err = setOptionNothrow(option, value)) {
 		throwError(fmt::format("ERROR: fdb_network_set_option({}, {}): ",
@@ -195,6 +245,10 @@ inline void setOption(FDBNetworkOption option, int64_t value) {
 		                       value),
 		           err);
 	}
+}
+
+inline void setOption(FDBNetworkOption option) {
+	setOption(option, "");
 }
 
 inline Error setupNothrow() noexcept {
@@ -229,18 +283,19 @@ class Result {
 	}
 
 public:
-	using KeyValueArray = future_var::KeyValueArray::Type;
+	using KeyValueRefArray = future_var::KeyValueRefArray::Type;
 
-	Error getKeyValueArrayNothrow(KeyValueArray& out) const noexcept {
+	Error getKeyValueArrayNothrow(KeyValueRefArray& out) const noexcept {
 		auto out_more_native = native::fdb_bool_t{};
 		auto& [out_kv, out_count, out_more] = out;
-		auto err_raw = native::fdb_result_get_keyvalue_array(r.get(), &out_kv, &out_count, &out_more_native);
+		auto err_raw = native::fdb_result_get_keyvalue_array(
+		    r.get(), reinterpret_cast<const native::FDBKeyValue**>(&out_kv), &out_count, &out_more_native);
 		out_more = out_more_native != 0;
 		return Error(err_raw);
 	}
 
-	KeyValueArray getKeyValueArray() const {
-		auto ret = KeyValueArray{};
+	KeyValueRefArray getKeyValueArray() const {
+		auto ret = KeyValueRefArray{};
 		if (auto err = getKeyValueArrayNothrow(ret))
 			throwError("ERROR: result_get_keyvalue_array(): ", err);
 		return ret;
@@ -250,12 +305,15 @@ public:
 class Future {
 protected:
 	friend class Transaction;
+	friend std::hash<Future>;
 	std::shared_ptr<native::FDBFuture> f;
 
 	Future(native::FDBFuture* future) {
 		if (future)
 			f = std::shared_ptr<native::FDBFuture>(future, &native::fdb_future_destroy);
 	}
+
+	native::FDBFuture* nativeHandle() const noexcept { return f.get(); }
 
 	// wrap any capturing lambda as callback passable to fdb_future_set_callback().
 	// destroy after invocation.
@@ -330,6 +388,9 @@ public:
 	void then(UserFunc&& fn) {
 		then<Future>(std::forward<UserFunc>(fn));
 	}
+
+	bool operator==(const Future& other) const { return nativeHandle() == other.nativeHandle(); }
+	bool operator!=(const Future& other) const { return !(*this == other); }
 };
 
 template <typename VarTraits>
@@ -414,6 +475,12 @@ public:
 		return Error(native::fdb_transaction_set_option(tr.get(), option, str.data(), intSize(str)));
 	}
 
+	Error setOptionNothrow(FDBTransactionOption option, CharsRef str) noexcept {
+		return setOptionNothrow(option, toBytesRef(str));
+	}
+
+	Error setOptionNothrow(FDBTransactionOption option) noexcept { return setOptionNothrow(option, ""); }
+
 	void setOption(FDBTransactionOption option, int64_t value) {
 		if (auto err = setOptionNothrow(option, value)) {
 			throwError(fmt::format("transaction_set_option({}, {}) returned error: ",
@@ -431,6 +498,10 @@ public:
 		}
 	}
 
+	void setOption(FDBTransactionOption option, CharsRef str) { setOption(option, toBytesRef(str)); }
+
+	void setOption(FDBTransactionOption option) { setOption(option, ""); }
+
 	TypedFuture<future_var::Int64> getReadVersion() { return native::fdb_transaction_get_read_version(tr.get()); }
 
 	Error getCommittedVersionNothrow(int64_t& out) {
@@ -445,24 +516,24 @@ public:
 		return out;
 	}
 
-	TypedFuture<future_var::Key> getKey(KeySelector sel, bool snapshot) {
+	TypedFuture<future_var::KeyRef> getKey(KeySelector sel, bool snapshot) {
 		return native::fdb_transaction_get_key(tr.get(), sel.key, sel.keyLength, sel.orEqual, sel.offset, snapshot);
 	}
 
-	TypedFuture<future_var::Value> get(KeyRef key, bool snapshot) {
+	TypedFuture<future_var::ValueRef> get(KeyRef key, bool snapshot) {
 		return native::fdb_transaction_get(tr.get(), key.data(), intSize(key), snapshot);
 	}
 
 	// Usage: tx.getRange(key_select::firstGreaterOrEqual(firstKey), key_select::lastLessThan(lastKey), ...)
 	// gets key-value pairs in key range [begin, end)
-	TypedFuture<future_var::KeyValueArray> getRange(KeySelector first,
-	                                                KeySelector last,
-	                                                int limit,
-	                                                int target_bytes,
-	                                                FDBStreamingMode mode,
-	                                                int iteration,
-	                                                bool snapshot,
-	                                                bool reverse) {
+	TypedFuture<future_var::KeyValueRefArray> getRange(KeySelector first,
+	                                                   KeySelector last,
+	                                                   int limit,
+	                                                   int target_bytes,
+	                                                   FDBStreamingMode mode,
+	                                                   int iteration,
+	                                                   bool snapshot,
+	                                                   bool reverse) {
 		return native::fdb_transaction_get_range(tr.get(),
 		                                         first.key,
 		                                         first.keyLength,
@@ -480,6 +551,11 @@ public:
 		                                         reverse);
 	}
 
+	TypedFuture<future_var::KeyRangeRefArray> getBlobGranuleRanges(KeyRef begin, KeyRef end) {
+		return native::fdb_transaction_get_blob_granule_ranges(
+		    tr.get(), begin.data(), intSize(begin), end.data(), intSize(end));
+	}
+
 	Result readBlobGranules(KeyRef begin,
 	                        KeyRef end,
 	                        int64_t begin_version,
@@ -494,6 +570,8 @@ public:
 	TypedFuture<future_var::None> onError(Error err) { return native::fdb_transaction_on_error(tr.get(), err.code()); }
 
 	void reset() { return native::fdb_transaction_reset(tr.get()); }
+
+	void cancel() { return native::fdb_transaction_cancel(tr.get()); }
 
 	void set(KeyRef key, ValueRef value) {
 		native::fdb_transaction_set(tr.get(), key.data(), intSize(key), value.data(), intSize(value));
@@ -607,5 +685,10 @@ public:
 };
 
 } // namespace fdb
+
+template <>
+struct std::hash<fdb::Future> {
+	size_t operator()(const fdb::Future& f) const { return std::hash<fdb::native::FDBFuture*>{}(f.nativeHandle()); }
+};
 
 #endif /*FDB_API_HPP*/

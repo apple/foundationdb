@@ -23,26 +23,26 @@
 namespace FdbApiTester {
 
 // Get the value associated with a key
-std::optional<std::string> KeyValueStore::get(std::string_view key) const {
+std::optional<fdb::Value> KeyValueStore::get(fdb::KeyRef key) const {
 	std::unique_lock<std::mutex> lock(mutex);
-	auto value = store.find(std::string(key));
+	auto value = store.find(fdb::Key(key));
 	if (value != store.end())
 		return value->second;
 	else
-		return std::optional<std::string>();
+		return std::optional<fdb::Value>();
 }
 
 // Checks if the key exists
-bool KeyValueStore::exists(std::string_view key) {
+bool KeyValueStore::exists(fdb::KeyRef key) {
 	std::unique_lock<std::mutex> lock(mutex);
-	return (store.find(std::string(key)) != store.end());
+	return (store.find(fdb::Key(key)) != store.end());
 }
 
 // Returns the key designated by a key selector
-std::string KeyValueStore::getKey(std::string_view keyName, bool orEqual, int offset) const {
+fdb::Key KeyValueStore::getKey(fdb::KeyRef keyName, bool orEqual, int offset) const {
 	std::unique_lock<std::mutex> lock(mutex);
 	// Begin by getting the start key referenced by the key selector
-	std::map<std::string, std::string>::const_iterator mapItr = store.lower_bound(keyName);
+	std::map<fdb::Key, fdb::Value>::const_iterator mapItr = store.lower_bound(keyName);
 
 	// Update the iterator position if necessary based on the value of orEqual
 	int count = 0;
@@ -88,28 +88,25 @@ std::string KeyValueStore::getKey(std::string_view keyName, bool orEqual, int of
 }
 
 // Gets a range of key-value pairs, returning a maximum of <limit> results
-std::vector<KeyValue> KeyValueStore::getRange(std::string_view begin,
-                                              std::string_view end,
-                                              int limit,
-                                              bool reverse) const {
+std::vector<fdb::KeyValue> KeyValueStore::getRange(fdb::KeyRef begin, fdb::KeyRef end, int limit, bool reverse) const {
 	std::unique_lock<std::mutex> lock(mutex);
-	std::vector<KeyValue> results;
+	std::vector<fdb::KeyValue> results;
 	if (!reverse) {
-		std::map<std::string, std::string>::const_iterator mapItr = store.lower_bound(begin);
+		std::map<fdb::Key, fdb::Value>::const_iterator mapItr = store.lower_bound(begin);
 
 		for (; mapItr != store.end() && mapItr->first < end && results.size() < limit; mapItr++)
-			results.push_back(KeyValue{ mapItr->first, mapItr->second });
+			results.push_back(fdb::KeyValue{ mapItr->first, mapItr->second });
 	}
 
 	// Support for reverse getRange queries is supported, but not tested at this time.  This is because reverse range
 	// queries have been disallowed by the database at the API level
 	else {
-		std::map<std::string, std::string>::const_iterator mapItr = store.lower_bound(end);
+		std::map<fdb::Key, fdb::Value>::const_iterator mapItr = store.lower_bound(end);
 		if (mapItr == store.begin())
 			return results;
 
 		for (--mapItr; mapItr->first >= begin && results.size() < abs(limit); mapItr--) {
-			results.push_back(KeyValue{ mapItr->first, mapItr->second });
+			results.push_back(fdb::KeyValue{ mapItr->first, mapItr->second });
 			if (mapItr == store.begin())
 				break;
 		}
@@ -119,13 +116,13 @@ std::vector<KeyValue> KeyValueStore::getRange(std::string_view begin,
 }
 
 // Stores a key-value pair in the database
-void KeyValueStore::set(std::string_view key, std::string_view value) {
+void KeyValueStore::set(fdb::KeyRef key, fdb::ValueRef value) {
 	std::unique_lock<std::mutex> lock(mutex);
-	store[std::string(key)] = value;
+	store[fdb::Key(key)] = value;
 }
 
 // Removes a key from the database
-void KeyValueStore::clear(std::string_view key) {
+void KeyValueStore::clear(fdb::KeyRef key) {
 	std::unique_lock<std::mutex> lock(mutex);
 	auto iter = store.find(key);
 	if (iter != store.end()) {
@@ -134,7 +131,7 @@ void KeyValueStore::clear(std::string_view key) {
 }
 
 // Removes a range of keys from the database
-void KeyValueStore::clear(std::string_view begin, std::string_view end) {
+void KeyValueStore::clear(fdb::KeyRef begin, fdb::KeyRef end) {
 	std::unique_lock<std::mutex> lock(mutex);
 	store.erase(store.lower_bound(begin), store.lower_bound(end));
 }
@@ -146,20 +143,20 @@ uint64_t KeyValueStore::size() const {
 }
 
 // The first key in the database; returned by key selectors that choose a key off the front
-std::string KeyValueStore::startKey() const {
-	return "";
+fdb::Key KeyValueStore::startKey() const {
+	return fdb::Key();
 }
 
 // The last key in the database; returned by key selectors that choose a key off the back
-std::string KeyValueStore::endKey() const {
-	return "\xff";
+fdb::Key KeyValueStore::endKey() const {
+	return fdb::Key(1, '\xff');
 }
 
 // Debugging function that prints all key-value pairs
 void KeyValueStore::printContents() const {
 	std::unique_lock<std::mutex> lock(mutex);
 	printf("Contents:\n");
-	std::map<std::string, std::string>::const_iterator mapItr;
+	std::map<fdb::Key, fdb::Value>::const_iterator mapItr;
 	for (mapItr = store.begin(); mapItr != store.end(); mapItr++)
 		printf("%s\n", mapItr->first.c_str());
 }
