@@ -6,13 +6,14 @@ mod network_test_request;
 #[path = "../../target/flatbuffers/NetworkTestResponse_generated.rs"]
 mod network_test_response;
 
+use super::FlowMessage;
 use crate::flow::file_identifier::{FileIdentifier, IdentifierType, ParsedFileIdentifier};
-use crate::flow::uid::UID;
+use crate::flow::uid::{UID, WLTOKEN};
 use crate::flow::Frame;
 use crate::flow::Result;
 use flatbuffers::{FlatBufferBuilder, FLATBUFFERS_MAX_BUFFER_SIZE};
 
-use super::FlowMessage;
+use std::net::SocketAddr;
 
 const NETWORK_TEST_REQUEST_IDENTIFIER: ParsedFileIdentifier = ParsedFileIdentifier {
     file_identifier: 0x3f4551,
@@ -21,12 +22,13 @@ const NETWORK_TEST_REQUEST_IDENTIFIER: ParsedFileIdentifier = ParsedFileIdentifi
     file_identifier_name: Some("NetworkTestRequest"),
 };
 
-fn serialize_request(
-    endpoint_token: UID,
-    response_token: UID,
+pub fn serialize_request(
+    peer: SocketAddr,
     request_len: u32,
     reply_size: u32,
-) -> Result<Frame> {
+) -> Result<FlowMessage> {
+    let completion = UID::random_token();
+    let wltoken = UID::well_known_token(WLTOKEN::ReservedForTesting);
     use network_test_request::{
         FakeRoot, FakeRootArgs, NetworkTestRequest, NetworkTestRequestArgs, ReplyPromise,
         ReplyPromiseArgs,
@@ -41,7 +43,7 @@ fn serialize_request(
         builder.push('.' as u8);
     }
     let payload = Some(builder.end_vector(request_len));
-    let uid = network_test_request::UID::new(response_token.uid[0], response_token.uid[1]);
+    let uid = network_test_request::UID::new(completion.uid[0], completion.uid[1]);
     let uid = Some(&uid);
     let reply_promise = Some(ReplyPromise::create(
         &mut builder,
@@ -65,7 +67,7 @@ fn serialize_request(
     let (mut payload, offset) = builder.collapse();
     FileIdentifier::new(4146513)?.rewrite_flatbuf(&mut payload[offset..])?;
     // println!("reply: {:x?}", builder.finished_data());
-    Ok(Frame::new(endpoint_token, payload, offset))
+    FlowMessage::new(peer, Some(completion), Frame::new(wltoken, payload, offset))
 }
 
 fn serialize_response(token: UID, reply_size: usize) -> Result<Frame> {
@@ -111,6 +113,11 @@ fn serialize_response(token: UID, reply_size: usize) -> Result<Frame> {
     Ok(Frame::new(token, payload, offset))
 }
 
+pub fn deserialize_response(frame: Frame) -> Result<()> {
+    let _fake_root = network_test_response::root_as_fake_root(frame.payload())?;
+    println!("got network test response");
+    Ok(())
+}
 pub async fn handle(request: FlowMessage) -> Result<Option<FlowMessage>> {
     request
         .file_identifier()
@@ -129,6 +136,5 @@ pub async fn handle(request: FlowMessage) -> Result<Option<FlowMessage>> {
     };
 
     let frame = serialize_response(uid, network_test_request.reply_size().try_into()?)?;
-    // Ok(Some(FlowMessage { frame }))
-    Ok(None)
+    Ok(Some(FlowMessage::new(request.peer, None, frame)?))
 }

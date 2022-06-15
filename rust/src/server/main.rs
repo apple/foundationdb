@@ -7,7 +7,7 @@ async fn main() -> Result<()> {
     let mut rx = ConnectionHandler::new_listener(&format!("127.0.0.1:{}", 6789)).await?;
     println!("Listening.");
     while let Some(connection_handler) = rx.recv().await {
-        println!("New connection: {:?}", connection_handler.addr);
+        println!("New connection: {:?}", connection_handler.peer);
     }
     println!("Goodbye, cruel world!");
     Ok(())

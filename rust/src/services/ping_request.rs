@@ -53,7 +53,11 @@ pub fn serialize_request(peer: SocketAddr) -> Result<FlowMessage> {
     let (mut payload, offset) = builder.collapse();
     FileIdentifier::new(PING_REQUEST_FILE_IDENTIFIER.file_identifier)?
         .rewrite_flatbuf(&mut payload[offset..])?;
-    Ok(FlowMessage{ peer, completion: Some(completion.clone()), frame: Frame::new(wltoken, payload, offset) })
+    Ok(FlowMessage {
+        peer,
+        completion: Some(completion.clone()),
+        frame: Frame::new(wltoken, payload, offset),
+    })
 }
 
 fn serialize_response(token: UID) -> Result<Frame> {
@@ -82,17 +86,17 @@ pub fn deserialize_response(frame: Frame) -> Result<()> {
     if fake_root.error_or_type() == void::ErrorOr::Error {
         Err(format!("ping returned error: {:?}", fake_root.error_or()).into())
     } else {
-        println!("ping response: {:?}", fake_root);
         Ok(())
     }
 }
 
-pub async fn handle(peer: SocketAddr, request: FlowMessage) -> Result<Option<FlowMessage>> {
+pub async fn handle(request: FlowMessage) -> Result<Option<FlowMessage>> {
     request
         .file_identifier()
         .ensure_expected(PING_REQUEST_FILE_IDENTIFIER)?;
     let fake_root = ping_request::root_as_fake_root(request.frame.payload())?;
-    let reply_promise = fake_root.ping_request().unwrap().reply_promise().unwrap();
+    let ping_request = fake_root.ping_request().unwrap();
+    let reply_promise = ping_request.reply_promise().unwrap();
 
     let uid = reply_promise.uid().unwrap();
     let uid = UID {
@@ -100,5 +104,5 @@ pub async fn handle(peer: SocketAddr, request: FlowMessage) -> Result<Option<Flo
     };
 
     let frame = serialize_response(uid)?;
-    Ok(Some(FlowMessage { peer, completion: None, frame }))
+    Ok(Some(FlowMessage::new(request.peer, None, frame)?))
 }

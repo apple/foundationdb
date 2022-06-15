@@ -62,7 +62,7 @@ where
     let mut svc =
         tower::limit::concurrency::ConcurrencyLimit::new(connection_handler.deref(), MAX_REQUESTS);
     while let Some(frame) = reader.read_frame().await? {
-        let request = FlowMessage::new(connection_handler.peer, None,  frame)?;
+        let request = FlowMessage::new(connection_handler.peer, None, frame)?;
         let response_tx = svc.get_ref().response_tx.clone();
         // poll_ready and call must be invoked atomically
         // we could read this before reading the next frame to prevent the next, throttled request from consuming
@@ -215,15 +215,14 @@ impl ConnectionHandler {
         Ok(rx)
     }
 
-    pub async fn rpc(&self, req : FlowMessage) -> Result<FlowMessage> {
+    pub async fn rpc(&self, req: FlowMessage) -> Result<FlowMessage> {
         match req.completion() {
             Some(uid) => {
                 let (tx, rx) = oneshot::channel();
                 self.in_flight_requests.insert(uid, tx);
                 self.response_tx.send(req).await?;
-                println!("waiting for response!");
                 Ok(rx.await?)
-            },
+            }
             None => Err("attempt to dispatch RPC without a completion token".into()),
         }
     }
@@ -234,6 +233,11 @@ impl ConnectionHandler {
         ping_request::deserialize_response(response_frame.frame())
     }
 
+    pub async fn network_test(&self, request_sz: u32, response_sz: u32) -> Result<()> {
+        let req = network_test::serialize_request(self.peer, request_sz, response_sz)?;
+        let response_frame = self.rpc(req).await?;
+        network_test::deserialize_response(response_frame.frame())
+    }
     fn dispatch_response(&self, tx: oneshot::Sender<FlowMessage>, request: FlowMessage) {
         match tx.send(request) {
             Ok(()) => (),
@@ -285,7 +289,7 @@ impl ConnectionHandler {
                     None
                 }
             },
-            Some(wltoken) => Some(Box::pin(route_well_known_request(self.peer, wltoken, request))),
+            Some(wltoken) => Some(Box::pin(route_well_known_request(wltoken, request))),
         })
     }
 }
