@@ -30,21 +30,23 @@
 class GlobalTagThrottlerImpl {
 	class QuotaAndCounters {
 		Optional<ThrottleApi::TagQuotaValue> quota;
-		Smoother readCostCounter;
-		Smoother writeCostCounter;
+		std::unordered_map<UID, double> ssToReadCostRate;
+		std::unordered_map<UID, double> ssToWriteCostRate;
+		Smoother totalReadCostRate;
+		Smoother totalWriteCostRate;
 		Smoother transactionCounter;
 
-		Optional<double> getReadLimit() const {
-			if (readCostCounter.smoothRate() > 0) {
-				return quota.get().totalReadQuota * transactionCounter.smoothRate() / readCostCounter.smoothRate();
+		Optional<double> getReadTPSLimit() const {
+			if (totalReadCostRate.smoothTotal() > 0) {
+				return quota.get().totalReadQuota * transactionCounter.smoothRate() / totalReadCostRate.smoothTotal();
 			} else {
 				return {};
 			}
 		}
 
-		Optional<double> getWriteLimit() const {
-			if (writeCostCounter.smoothRate() > 0) {
-				return quota.get().totalWriteQuota * transactionCounter.smoothRate() / writeCostCounter.smoothRate();
+		Optional<double> getWriteTPSLimit() const {
+			if (totalWriteCostRate.smoothTotal() > 0) {
+				return quota.get().totalWriteQuota * transactionCounter.smoothRate() / totalWriteCostRate.smoothTotal();
 			} else {
 				return {};
 			}
@@ -52,23 +54,33 @@ class GlobalTagThrottlerImpl {
 
 	public:
 		QuotaAndCounters()
-		  : readCostCounter(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_FOLDING_TIME),
-		    writeCostCounter(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_FOLDING_TIME),
+		  : totalReadCostRate(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_FOLDING_TIME),
+		    totalWriteCostRate(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_FOLDING_TIME),
 		    transactionCounter(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_FOLDING_TIME) {}
 
 		void setQuota(ThrottleApi::TagQuotaValue const& quota) { this->quota = quota; }
 
-		void addReadCost(double readCost) { readCostCounter.addDelta(readCost); }
+		void updateReadCostRate(UID ssId, double newReadCost) {
+			auto& currentReadCostRate = ssToReadCostRate[ssId];
+			auto diff = newReadCost - currentReadCostRate;
+			currentReadCostRate += diff;
+			totalReadCostRate.addDelta(diff);
+		}
 
-		void addWriteCost(double writeCost) { writeCostCounter.addDelta(writeCost); }
+		void updateWriteCostRate(UID ssId, double newWriteCost) {
+			auto& currentWriteCostRate = ssToWriteCostRate[ssId];
+			auto diff = newWriteCost - currentWriteCostRate;
+			currentWriteCostRate += diff;
+			totalWriteCostRate.addDelta(diff);
+		}
 
 		void addTransactions(int count) { transactionCounter.addDelta(count); }
 
 		Optional<ClientTagThrottleLimits> getTotalLimit() const {
 			if (!quota.present())
 				return {};
-			auto readLimit = getReadLimit();
-			auto writeLimit = getWriteLimit();
+			auto readLimit = getReadTPSLimit();
+			auto writeLimit = getWriteTPSLimit();
 
 			// TODO: Implement expiration logic
 			if (!readLimit.present() && !writeLimit.present()) {
@@ -88,10 +100,10 @@ class GlobalTagThrottlerImpl {
 
 		void processTraceEvent(TraceEvent& te) const {
 			if (quota.present()) {
-				te.detail("ProvidedReadLimit", getReadLimit())
-				    .detail("ProvidedWriteLimit", getWriteLimit())
-				    .detail("ReadCostRate", readCostCounter.smoothRate())
-				    .detail("WriteCostRate", writeCostCounter.smoothRate())
+				te.detail("ProvidedReadTPSLimit", getReadTPSLimit())
+				    .detail("ProvidedWriteTPSLimit", getWriteTPSLimit())
+				    .detail("ReadCostRate", totalReadCostRate.smoothTotal())
+				    .detail("WriteCostRate", totalWriteCostRate.smoothTotal())
 				    .detail("TotalReadQuota", quota.get().totalReadQuota)
 				    .detail("ReservedReadQuota", quota.get().reservedReadQuota)
 				    .detail("TotalWriteQuota", quota.get().totalWriteQuota)
@@ -180,10 +192,10 @@ public:
 	int64_t manualThrottleCount() const { return trackedTags.size(); }
 	Future<Void> tryUpdateAutoThrottling(StorageQueueInfo const& ss) {
 		for (const auto& busyReadTag : ss.busiestReadTags) {
-			trackedTags[busyReadTag.tag].addReadCost(busyReadTag.rate);
+			trackedTags[busyReadTag.tag].updateReadCostRate(ss.id, busyReadTag.rate);
 		}
 		for (const auto& busyWriteTag : ss.busiestWriteTags) {
-			trackedTags[busyWriteTag.tag].addWriteCost(busyWriteTag.rate);
+			trackedTags[busyWriteTag.tag].updateWriteCostRate(ss.id, busyWriteTag.rate);
 		}
 		// TODO: Call ThrottleApi::throttleTags
 		return Void();
