@@ -4,6 +4,7 @@ use foundationdb::fdbserver;
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use tokio::net::TcpStream;
+use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> flow::Result<()> {
@@ -11,6 +12,7 @@ async fn main() -> flow::Result<()> {
     let conn = TcpStream::connect(saddr).await?;
 
     let (svc, response_rx) = services::Svc::new();
+    let svc = Arc::new(svc);
     tokio::spawn(fdbserver::connection_handler::connection_handler(
         svc.clone(),
         response_rx,

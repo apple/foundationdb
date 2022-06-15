@@ -7,7 +7,7 @@ mod ping_request;
 #[path = "../../target/flatbuffers/Void_generated.rs"]
 mod void;
 
-use super::{FlowRequest, FlowResponse};
+use super::FlowMessage;
 use crate::flow::file_identifier::{FileIdentifier, IdentifierType, ParsedFileIdentifier};
 use crate::flow::Frame;
 use crate::flow::uid::{UID, WLTOKEN};
@@ -74,9 +74,9 @@ pub fn deserialize_response(frame: Frame) -> Result<()> {
     }
 }
 
-pub async fn handle(request: FlowRequest) -> Result<Option<FlowResponse>> {
+pub async fn handle(request: FlowMessage) -> Result<Option<FlowMessage>> {
     request
-        .file_identifier
+        .file_identifier()
         .ensure_expected(PING_REQUEST_FILE_IDENTIFIER)?;
     let fake_root = ping_request::root_as_fake_root(request.frame.payload())?;
     let reply_promise = fake_root.ping_request().unwrap().reply_promise().unwrap();
@@ -87,5 +87,5 @@ pub async fn handle(request: FlowRequest) -> Result<Option<FlowResponse>> {
     };
 
     let frame = serialize_response(uid)?;
-    Ok(Some(FlowResponse { frame }))
+    Ok(Some(FlowMessage { frame }))
 }

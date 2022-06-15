@@ -12,7 +12,7 @@ use crate::flow::uid::UID;
 use crate::flow::Result;
 use flatbuffers::{FlatBufferBuilder, FLATBUFFERS_MAX_BUFFER_SIZE};
 
-use super::{FlowRequest, FlowResponse};
+use super::FlowMessage;
 
 const NETWORK_TEST_REQUEST_IDENTIFIER: ParsedFileIdentifier = ParsedFileIdentifier {
     file_identifier: 0x3f4551,
@@ -87,9 +87,9 @@ fn serialize_response(token: UID, reply_size: usize) -> Result<Frame> {
     Ok(Frame::new(token, payload, offset))
 }
 
-pub async fn handle(request: FlowRequest) -> Result<Option<FlowResponse>> {
+pub async fn handle(request: FlowMessage) -> Result<Option<FlowMessage>> {
     request
-        .file_identifier
+        .file_identifier()
         .ensure_expected(NETWORK_TEST_REQUEST_IDENTIFIER)?;
     // println!("frame: {:?}", frame.payload);
     let fake_root = network_test_request::root_as_fake_root(request.frame.payload())?;
@@ -108,5 +108,5 @@ pub async fn handle(request: FlowRequest) -> Result<Option<FlowResponse>> {
         uid,
         network_test_request.reply_size().try_into()?,
     )?;
-    Ok(Some(FlowResponse { frame }))
+    Ok(Some(FlowMessage { frame }))
 }

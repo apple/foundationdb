@@ -1,9 +1,10 @@
-use crate::services::{FlowRequest, Svc};
-use crate::flow::{Frame, Result, connection};
+use crate::services::{FlowMessage, Svc};
+use crate::flow::{Result, connection};
 use tokio::io::{AsyncWrite};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc};
 use tokio::net::{TcpListener, TcpStream};
 use tower::Service;
+use std::ops::Deref;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -12,15 +13,15 @@ const MAX_CONNECTIONS: usize = 250;
 const MAX_REQUESTS: usize = MAX_CONNECTIONS * 2;
 
 async fn sender<C: 'static + AsyncWrite + Unpin + Send>(
-    mut response_rx: tokio::sync::mpsc::Receiver<Frame>,
+    mut response_rx: tokio::sync::mpsc::Receiver<FlowMessage>,
     mut writer: connection::ConnectionWriter<C>,
 ) -> Result<()> {
-    while let Some(frame) = response_rx.recv().await {
-        writer.write_frame(frame).await.unwrap(); //XXX unwrap!
+    while let Some(message) = response_rx.recv().await {
+        writer.write_frame(message.frame()).await?;
         loop {
             match response_rx.try_recv() {
-                Ok(frame) => {
-                    writer.write_frame(frame).await.unwrap();
+                Ok(message) => {
+                    writer.write_frame(message.frame()).await.unwrap();
                 }
                 Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
                     writer.flush().await.unwrap();
@@ -34,7 +35,7 @@ async fn sender<C: 'static + AsyncWrite + Unpin + Send>(
 }
 
 fn spawn_sender<C: 'static + AsyncWrite + Unpin + Send>(
-    response_rx: mpsc::Receiver<Frame>,
+    response_rx: mpsc::Receiver<FlowMessage>,
     writer: connection::ConnectionWriter<C>,
 ) {
     tokio::spawn(async move {
@@ -49,8 +50,8 @@ fn spawn_sender<C: 'static + AsyncWrite + Unpin + Send>(
 }
 
 pub async fn connection_handler(
-    svc: Svc,
-    response_rx: mpsc::Receiver<Frame>,
+    svc: Arc<Svc>,
+    response_rx: mpsc::Receiver<FlowMessage>,
     permit: Option<OwnedSemaphorePermit>,
     stream: TcpStream,
     addr: SocketAddr,
@@ -73,7 +74,7 @@ pub async fn connection_handler(
 
     spawn_sender(response_rx, writer);
 
-    let mut svc = tower::limit::concurrency::ConcurrencyLimit::new(svc, MAX_REQUESTS);
+    let mut svc = tower::limit::concurrency::ConcurrencyLimit::new(svc.deref(), MAX_REQUESTS);
     loop {
         match reader.read_frame().await? {
             None => {
@@ -81,15 +82,7 @@ pub async fn connection_handler(
                 break;
             }
             Some(frame) => {
-                if frame.payload().len() < 8 {
-                    println!("Frame is too short! {:x?}", frame);
-                    continue;
-                }
-                let file_identifier = frame.peek_file_identifier()?;
-                let request = FlowRequest {
-                    frame,
-                    file_identifier,
-                };
+                let request = FlowMessage::new(frame)?;
                 let response_tx = svc.get_ref().response_tx.clone();
                 // poll_ready and call must be invoked atomically
                 // we could read this before reading the next frame to prevent the next, throttled request from consuming
@@ -101,7 +94,7 @@ pub async fn connection_handler(
                     // the real work happens in await, anyway
                     let response = fut.await.unwrap();
                     match response {
-                        Some(response) => response_tx.send(response.frame).await.unwrap(),
+                        Some(response) => response_tx.send(response).await.unwrap(),
                         None => (),
                     };
                 });
@@ -121,6 +114,7 @@ pub async fn listen(bind: TcpListener) -> Result<()> {
         let permit = limit_connections.clone().acquire_owned().await?;
         let socket = bind.accept().await?;
         let (svc, response_rx) = Svc::new();
+        let svc = Arc::new(svc);
         tokio::spawn(connection_handler(
             svc,
             response_rx,
