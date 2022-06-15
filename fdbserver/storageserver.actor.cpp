@@ -6541,15 +6541,8 @@ ACTOR Future<Void> restoreShards(StorageServer* data, RangeResult storageShards,
 		TraceEvent(SevVerbose, "RestoreShardsStorageShard", data->thisServerID)
 		    .detail("Range", shardRange)
 		    .detail("StorageShard", shard.toString());
-		// ASSERT(shardRange == shard.range);
-		// if (shard.getShardState() == StorageServerShard::NotAssigned) {
-		// 	continue;
-		// }
+
 		// TODO(psm): Schedule deletion of finished moveInShard.
-		// if (metaData.getPhase() == MoveInShardMetaData::Complete) {
-		// 	data->actors.add(deleteMoveInShardQ(data, version, metaData));
-		// 	continue;
-		// }
 		const StorageServerShard::ShardState shardState = shard.getShardState();
 		auto existingShards = data->shards.intersectingRanges(shardRange);
 		for (auto it = existingShards.begin(); it != existingShards.end(); ++it) {
@@ -6565,7 +6558,6 @@ ACTOR Future<Void> restoreShards(StorageServer* data, RangeResult storageShards,
 			case StorageServerShard::MovingIn:
 				ASSERT(it->value()->assigned());
 				ASSERT(!it->value()->isReadable());
-				// ASSERT(it->value()->keys == shard.range);
 				ASSERT(it->value()->keys.contains(shard.range));
 				break;
 			case StorageServerShard::ReadWrite:
@@ -6588,15 +6580,7 @@ ACTOR Future<Void> restoreShards(StorageServer* data, RangeResult storageShards,
 			    .detail("Shard", shard.toString())
 			    .detail("Range", range);
 			if (range == shard.range) {
-				// auto currentShard = data->shards[range.begin];
-				// if (shardState == StorageServerShard::MovingIn) {
-				// ASSERT(currentShard->keys == shard.range);
-				// 	currentShard->populateShard(shard);
-				// } else if (currentShard->keys == shard.range) {
-				// 	currentShard->populateShard(shard);
-				// } else {
 				data->addShard(ShardInfo::newShard(data, shard));
-				// }
 			} else {
 				ASSERT(range.begin == shard.range.end);
 				StorageServerShard rightShard = ranges[i].value->toStorageServerShard();
@@ -6611,11 +6595,11 @@ ACTOR Future<Void> restoreShards(StorageServer* data, RangeResult storageShards,
 		wait(yield());
 	}
 
-	TraceEvent(SevDebug, "StorageServerRestoreShardsCoalesce", data->thisServerID).detail("Version", version);
+	TraceEvent(SevVerbose, "StorageServerRestoreShardsCoalesce", data->thisServerID).detail("Version", version);
 	coalescePhysicalShards(data, allKeys);
-	TraceEvent(SevDebug, "StorageServerRestoreShardsValidate", data->thisServerID).detail("Version", version);
+	TraceEvent(SevVerbose, "StorageServerRestoreShardsValidate", data->thisServerID).detail("Version", version);
 	validate(data, /*force=*/true);
-	TraceEvent(SevDebug, "StorageServerRestoreShardsEnd", data->thisServerID).detail("Version", version);
+	TraceEvent(SevVerbose, "StorageServerRestoreShardsEnd", data->thisServerID).detail("Version", version);
 
 	return Void();
 }
