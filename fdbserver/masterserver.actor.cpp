@@ -117,8 +117,9 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 			forceRecovery = false;
 		}
 		balancer = resolutionBalancer.resolutionBalancing();
-		locality = myInterface.locality.dcId().present() ? std::stoi(myInterface.locality.dcId().get().toString())
-		                                                 : tagLocalityInvalid;
+		locality = (SERVER_KNOBS->ENABLE_VERSION_VECTOR_HA_OPTIMIZATION && myInterface.locality.dcId().present())
+		               ? std::stoi(myInterface.locality.dcId().get().toString())
+		               : tagLocalityInvalid;
 	}
 	~MasterData() = default;
 };
