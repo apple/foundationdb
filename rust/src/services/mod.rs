@@ -60,6 +60,21 @@ impl Svc {
         )
     }
 
+    pub async fn ping(&self) -> Result<()> {
+        let uid = UID::random_token();
+        let frame = ping_request::serialize_request(&uid)?;
+        let (tx, rx) = oneshot::channel();
+        self.in_flight_requests.insert(uid, tx);
+    
+        self.response_tx.send(frame).await?;
+    
+        println!("waiting for response!");
+        let response_frame = rx.await?;
+        println!("ping reponse frame: {:?}", response_frame);
+        ping_request::deserialize_response(response_frame)?;
+        Ok(())
+    }
+
     fn dispatch_response(&self, tx: oneshot::Sender<Frame>, request: FlowRequest) {
         match tx.send(request.frame) {
             Ok(()) => (),

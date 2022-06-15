@@ -10,7 +10,7 @@ mod void;
 use super::{FlowRequest, FlowResponse};
 use crate::flow::file_identifier::{FileIdentifier, IdentifierType, ParsedFileIdentifier};
 use crate::flow::frame::Frame;
-use crate::flow::uid::UID;
+use crate::flow::uid::{UID, WLTOKEN};
 use crate::flow::Result;
 
 const PING_REQUEST_FILE_IDENTIFIER: ParsedFileIdentifier = ParsedFileIdentifier {
@@ -27,7 +27,8 @@ const PING_RESPONSE_FILE_IDENTIFIER: ParsedFileIdentifier = ParsedFileIdentifier
     file_identifier_name: Some("PingResponse"),
 };
 
-fn serialize_request(endpoint_token: UID, response_token: UID) -> Result<Frame> {
+pub fn serialize_request(response_token: &UID) -> Result<Frame> {
+    let wltoken = UID::well_known_token(WLTOKEN::PingPacket);
     use ping_request::{ReplyPromise, ReplyPromiseArgs, PingRequest, PingRequestArgs, FakeRoot, FakeRootArgs};
     let mut builder = flatbuffers::FlatBufferBuilder::with_capacity(1024);
     let response_token = ping_request::UID::new(response_token.uid[0], response_token.uid[1]);
@@ -39,7 +40,7 @@ fn serialize_request(endpoint_token: UID, response_token: UID) -> Result<Frame> 
     let (mut payload, offset) = builder.collapse();
     FileIdentifier::new(PING_REQUEST_FILE_IDENTIFIER.file_identifier)?
         .rewrite_flatbuf(&mut payload[offset..])?;
-    Ok(Frame::new(endpoint_token, payload, offset))
+    Ok(Frame::new(wltoken, payload, offset))
 }
 
 fn serialize_response(token: UID) -> Result<Frame> {
@@ -61,6 +62,16 @@ fn serialize_response(token: UID) -> Result<Frame> {
         .to_error_or()?
         .rewrite_flatbuf(&mut payload[offset..])?;
     Ok(Frame::new(token, payload, offset))
+}
+
+pub fn deserialize_response(frame: Frame) -> Result<()> {
+    let fake_root = void::root_as_fake_root(frame.payload())?;
+    if fake_root.error_or_type() == void::ErrorOr::Error {
+        Err(format!("ping returned error: {:?}", fake_root.error_or()).into())
+    } else {
+        println!("ping response: {:?}", fake_root);
+        Ok(())
+    }
 }
 
 pub async fn handle(request: FlowRequest) -> Result<Option<FlowResponse>> {

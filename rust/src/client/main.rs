@@ -1,10 +1,8 @@
 use foundationdb::flow;
-use foundationdb::flow::uid::{UID, WLTOKEN};
 use foundationdb::services;
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use tokio::net::TcpStream;
-use tokio::sync::oneshot;
 
 #[tokio::main]
 async fn main() -> flow::Result<()> {
@@ -20,19 +18,8 @@ async fn main() -> flow::Result<()> {
         saddr,
     ));
 
-    let token = UID::well_known_token(WLTOKEN::UnauthorizedEndpoint);
-    let payload = vec![1; 33];
-    let offset = 0;
-    let uid = UID::random_token();
-    let frame = flow::frame::Frame::new(token, payload, offset);
-    let (tx, rx) = oneshot::channel();
-    svc.in_flight_requests.insert(uid, tx);
+    svc.ping().await?;
 
-    svc.response_tx.send(frame).await?;
-
-    println!("waiting for response!");
-    let response_frame = rx.await?;
-    println!("reponse frame: {:?}", response_frame);
     println!("Goodbye, cruel world!");
 
     Ok(())
