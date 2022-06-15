@@ -467,7 +467,6 @@ const Value serverKeysValue(const UID& id) {
 		return serverKeysFalse;
 	}
 
-	ASSERT(CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
 	BinaryWriter wr(IncludeVersion(ProtocolVersion::withShardEncodeLocationMetaData()));
 	wr << id;
 	return wr.toValue();
