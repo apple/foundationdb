@@ -217,20 +217,8 @@ struct AddingShard : NonCopyable {
 };
 
 class ShardInfo : public ReferenceCounted<ShardInfo>, NonCopyable {
-	ShardInfo(KeyRange keys,
-	          std::unique_ptr<AddingShard>&& adding,
-	          std::unique_ptr<AddingShard>&& moveInShard,
-	          StorageServer* readWrite)
-	  : adding(std::move(adding)), moveInShard(std::move(moveInShard)), readWrite(readWrite), keys(keys), shardId(0),
-	    desiredShardId(0), version(0), readWriteReady(false) {}
-
-	ShardInfo(KeyRange keys,
-	          std::unique_ptr<AddingShard>&& adding,
-	          std::unique_ptr<AddingShard>&& moveInShard,
-	          StorageServer* readWrite,
-	          const bool readWriteReady)
-	  : adding(std::move(adding)), moveInShard(std::move(moveInShard)), readWrite(readWrite), keys(keys), shardId(0),
-	    desiredShardId(0), version(0), readWriteReady(readWriteReady) {}
+	ShardInfo(KeyRange keys, std::unique_ptr<AddingShard>&& adding, StorageServer* readWrite)
+	  : adding(std::move(adding)), readWrite(readWrite), keys(keys), version(0) {}
 
 public:
 	// A shard has 3 mutual exclusive states: adding, readWrite and notAssigned.
@@ -242,20 +230,14 @@ public:
 	uint64_t shardId;
 	uint64_t desiredShardId;
 	Version version;
-	bool readWriteReady;
 
-	static ShardInfo* newNotAssigned(KeyRange keys) { return new ShardInfo(keys, nullptr, nullptr, nullptr); }
-	static ShardInfo* newReadWrite(KeyRange keys, StorageServer* data) {
-		return new ShardInfo(keys, nullptr, nullptr, data);
-	}
+	static ShardInfo* newNotAssigned(KeyRange keys) { return new ShardInfo(keys, nullptr, nullptr); }
+	static ShardInfo* newReadWrite(KeyRange keys, StorageServer* data) { return new ShardInfo(keys, nullptr, data); }
 	static ShardInfo* newAdding(StorageServer* data, KeyRange keys, Future<Void> kvReady = Void()) {
-		return new ShardInfo(keys, std::make_unique<AddingShard>(data, keys, kvReady), nullptr, nullptr);
+		return new ShardInfo(keys, std::make_unique<AddingShard>(data, keys, kvReady), nullptr);
 	}
 	static ShardInfo* addingSplitLeft(KeyRange keys, AddingShard* oldShard) {
-		return new ShardInfo(keys, std::make_unique<AddingShard>(oldShard, keys), nullptr, nullptr);
-	}
-	static ShardInfo* newMoveInShard(StorageServer* data, KeyRange keys) {
-		return new ShardInfo(keys, nullptr, std::make_unique<AddingShard>(data, keys), nullptr);
+		return new ShardInfo(keys, std::make_unique<AddingShard>(oldShard, keys), nullptr);
 	}
 	static ShardInfo* newShard(StorageServer* data, const StorageServerShard& shard, Future<Void> kvReady = Void()) {
 		ShardInfo* res = nullptr;
@@ -277,9 +259,6 @@ public:
 		res->populateShard(shard);
 		return res;
 	}
-
-	void setReadWriteReady(bool ready) { this->readWriteReady = ready; }
-	bool isReadWriteReady() const { return this->readWriteReady; }
 
 	static bool canMerge(const ShardInfo* l, const ShardInfo* r) {
 		if (l == nullptr || r == nullptr || l->keys.end != r->keys.begin || l->version == invalidVersion ||
