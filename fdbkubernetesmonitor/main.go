@@ -22,6 +22,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"path"
 	"regexp"
@@ -31,6 +32,8 @@ import (
 	"github.com/go-logr/zapr"
 	"github.com/spf13/pflag"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 var (
@@ -62,6 +65,25 @@ const (
 	executionModeSidecar  executionMode = "sidecar"
 )
 
+func initLogger(logPath string) *zap.Logger {
+	var logWriter io.Writer
+
+	if logPath != "" {
+		lumberjackLogger := &lumberjack.Logger{
+			Filename:   logPath,
+			MaxSize:    100,
+			MaxAge:     7,
+			MaxBackups: 2,
+			Compress:   false,
+		}
+		logWriter = io.MultiWriter(os.Stdout, lumberjackLogger)
+	} else {
+		logWriter = os.Stdout
+	}
+
+	return zap.New(zapcore.NewCore(zapcore.NewJSONEncoder(zap.NewProductionEncoderConfig()), zapcore.AddSync(logWriter), zapcore.InfoLevel))
+}
+
 func main() {
 	pflag.StringVar(&executionModeString, "mode", "launcher", "Execution mode. Valid options are launcher, sidecar, and init")
 	pflag.StringVar(&fdbserverPath, "fdbserver-path", "/usr/bin/fdbserver", "Path to the fdbserver binary")
@@ -82,13 +104,12 @@ func main() {
 	pflag.IntVar(&processCount, "process-count", 1, "The number of processes to start")
 	pflag.Parse()
 
-	zapConfig := zap.NewProductionConfig()
-	if logPath != "" {
-		zapConfig.OutputPaths = append(zapConfig.OutputPaths, logPath)
-	}
-	zapLogger, err := zapConfig.Build()
+	logger := zapr.NewLogger(initLogger(logPath))
+
+	copyDetails, requiredCopies, err := getCopyDetails()
 	if err != nil {
-		panic(err)
+		logger.Error(err, "Error getting list of files to copy")
+		os.Exit(1)
 	}
 
 	versionBytes, err := os.ReadFile(versionFilePath)
@@ -96,13 +117,6 @@ func main() {
 		panic(err)
 	}
 	currentContainerVersion = strings.TrimSpace(string(versionBytes))
-
-	logger := zapr.NewLogger(zapLogger)
-	copyDetails, requiredCopies, err := getCopyDetails()
-	if err != nil {
-		logger.Error(err, "Error getting list of files to copy")
-		os.Exit(1)
-	}
 
 	mode := executionMode(executionModeString)
 	switch mode {
@@ -165,6 +179,7 @@ func getCopyDetails() (map[string]string, map[string]bool, error) {
 		}
 		requiredCopyMap[fullFilePath] = true
 	}
+
 	return copyDetails, requiredCopyMap, nil
 }
 
@@ -189,5 +204,6 @@ func loadAdditionalEnvironment(logger logr.Logger) (map[string]string, error) {
 			customEnvironment[matches[1]] = matches[2]
 		}
 	}
+
 	return customEnvironment, nil
 }
