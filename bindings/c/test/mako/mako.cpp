@@ -66,7 +66,8 @@ namespace mako {
 struct alignas(64) ThreadArgs {
 	int worker_id;
 	int thread_id;
-	int tenants;
+	int active_tenants;
+	int total_tenants;
 	pid_t parent_id;
 	Arguments const* args;
 	shared_memory::Access shm;
@@ -82,11 +83,11 @@ thread_local Logger logr = Logger(MainProcess{}, VERBOSE_DEFAULT);
 
 Transaction createNewTransaction(Database db, Arguments const& args, int id = -1, Tenant* tenants = nullptr) {
 	// No tenants specified
-	if (args.tenants <= 0) {
+	if (args.active_tenants <= 0) {
 		return db.createTransaction();
 	}
 	// Create Tenant Transaction
-	int tenant_id = (id == -1) ? urand(0, args.tenants - 1) : id;
+	int tenant_id = (id == -1) ? urand(0, args.active_tenants - 1) : id;
 	// If provided tenants array (only necessary in runWorkload), use it
 	if (tenants) {
 		return tenants[tenant_id].createTransaction();
@@ -117,9 +118,9 @@ int cleanup(Database db, Arguments const& args) {
 
 	auto watch = Stopwatch(StartAtCtor{});
 
-	int num_iterations = (args.tenants > 1) ? args.tenants : 1;
+	int num_iterations = (args.total_tenants > 1) ? args.total_tenants : 1;
 	for (int i = 0; i < num_iterations; ++i) {
-		// If args.tenants is zero, this will use a non-tenant txn and perform a single range clear.
+		// If args.total_tenants is zero, this will use a non-tenant txn and perform a single range clear.
 		// If 1, it will use a tenant txn and do a single range clear instead.
 		// If > 1, it will perform a range clear with a different tenant txn per iteration.
 		Transaction tx = createNewTransaction(db, args, i);
@@ -138,7 +139,7 @@ int cleanup(Database db, Arguments const& args) {
 		}
 
 		// If tenants are specified, also delete the tenant after clearing out its keyspace
-		if (args.tenants > 0) {
+		if (args.total_tenants > 0) {
 			Transaction systemTx = db.createTransaction();
 			while (true) {
 				Tenant::deleteTenant(systemTx, toBytesRef("tenant" + std::to_string(i)));
@@ -184,11 +185,11 @@ int populate(Database db,
 	auto key_checkpoint = key_begin; // in case of commit failure, restart from this key
 
 	Transaction systemTx = db.createTransaction();
-	for (int i = 0; i < args.tenants; ++i) {
+	for (int i = 0; i < args.total_tenants; ++i) {
 		while (true) {
 			// Until this issue https://github.com/apple/foundationdb/issues/7260 is resolved
 			// we have to commit each tenant creation transaction one-by-one
-			// while (i % 10 == 9 || i == args.tenants - 1) {
+			// while (i % 10 == 9 || i == args.total_tenants - 1) {
 			std::string tenant_name = "tenant" + std::to_string(i);
 			Tenant::createTenant(systemTx, toBytesRef(tenant_name));
 			auto future_commit = systemTx.commit();
@@ -428,8 +429,8 @@ int runWorkload(Database db,
 
 	// mimic typical tenant usage: keep tenants in memory
 	// and create transactions as needed
-	Tenant tenants[args.tenants];
-	for (int i = 0; i < args.tenants; ++i) {
+	Tenant tenants[args.active_tenants];
+	for (int i = 0; i < args.active_tenants; ++i) {
 		std::string tenantStr = "tenant" + std::to_string(i);
 		BytesRef tenant_name = toBytesRef(tenantStr);
 		tenants[i] = db.openTenant(tenant_name);
@@ -437,7 +438,7 @@ int runWorkload(Database db,
 
 	/* main transaction loop */
 	while (1) {
-		Transaction tx = createNewTransaction(db, args, -1, args.tenants > 0 ? tenants : nullptr);
+		Transaction tx = createNewTransaction(db, args, -1, args.active_tenants > 0 ? tenants : nullptr);
 		while ((thread_tps > 0) && (xacts >= current_tps)) {
 			/* throttle on */
 			const auto time_now = steady_clock::now();
@@ -797,7 +798,8 @@ int workerProcessMain(Arguments const& args, int worker_id, shared_memory::Acces
 			this_args.worker_id = worker_id;
 			this_args.thread_id = i;
 			this_args.parent_id = pid_main;
-			this_args.tenants = args.tenants;
+			this_args.active_tenants = args.active_tenants;
+			this_args.total_tenants = args.total_tenants;
 			this_args.args = &args;
 			this_args.shm = shm;
 			this_args.database = databases[i % args.num_databases];
@@ -866,7 +868,8 @@ int initArguments(Arguments& args) {
 	args.sampling = 1000;
 	args.key_length = 32;
 	args.value_length = 16;
-	args.tenants = 0;
+	args.active_tenants = 0;
+	args.total_tenants = 0;
 	args.zipf = 0;
 	args.commit_get = 0;
 	args.verbose = 1;
@@ -1097,7 +1100,8 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			{ "iteration", required_argument, NULL, 'i' },
 			{ "keylen", required_argument, NULL, ARG_KEYLEN },
 			{ "vallen", required_argument, NULL, ARG_VALLEN },
-			{ "tenants", required_argument, NULL, ARG_TENANTS },
+			{ "active_tenants", required_argument, NULL, ARG_ACTIVE_TENANTS },
+			{ "total_tenants", required_argument, NULL, ARG_TOTAL_TENANTS },
 			{ "transaction", required_argument, NULL, 'x' },
 			{ "tps", required_argument, NULL, ARG_TPS },
 			{ "tpsmax", required_argument, NULL, ARG_TPSMAX },
@@ -1214,8 +1218,11 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 		case ARG_VALLEN:
 			args.value_length = atoi(optarg);
 			break;
-		case ARG_TENANTS:
-			args.tenants = atoi(optarg);
+		case ARG_ACTIVE_TENANTS:
+			args.active_tenants = atoi(optarg);
+			break;
+		case ARG_TOTAL_TENANTS:
+			args.total_tenants = atoi(optarg);
 			break;
 		case ARG_TPS:
 		case ARG_TPSMAX:
@@ -1404,6 +1411,10 @@ int validateArguments(Arguments const& args) {
 		logr.error("--keylen must be larger than {} to store \"mako\" prefix "
 		           "and maximum row number",
 		           4 + args.row_digits);
+		return -1;
+	}
+	if (args.active_tenants > args.total_tenants) {
+		logr.error("--active_tenants must be less than or equal to --total_tenants");
 		return -1;
 	}
 	if (args.mode == MODE_RUN) {
@@ -1972,7 +1983,7 @@ int statsProcessMain(Arguments const& args,
 		fmt::fprintf(fp, "\"sampling\": %d,", args.sampling);
 		fmt::fprintf(fp, "\"key_length\": %d,", args.key_length);
 		fmt::fprintf(fp, "\"value_length\": %d,", args.value_length);
-		fmt::fprintf(fp, "\"tenants\": %d,", args.tenants);
+		fmt::fprintf(fp, "\"tenants\": %d,", args.active_tenants);
 		fmt::fprintf(fp, "\"commit_get\": %d,", args.commit_get);
 		fmt::fprintf(fp, "\"verbose\": %d,", args.verbose);
 		fmt::fprintf(fp, "\"cluster_files\": \"%s\",", args.cluster_files[0]);
