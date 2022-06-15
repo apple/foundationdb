@@ -1,16 +1,14 @@
+use fdbserver::connection_handler::ConnectionHandler;
 use foundationdb::fdbserver;
 use foundationdb::flow::Result;
 
-use tokio::net::TcpListener;
-
 #[tokio::main]
 async fn main() -> Result<()> {
-    println!("binding");
-    let bind = TcpListener::bind(&format!("127.0.0.1:{}", 6789)).await?;
-
-    println!("listening");
-    fdbserver::connection_handler::listen(bind).await?;
+    let mut rx = ConnectionHandler::new_listener(&format!("127.0.0.1:{}", 6789)).await?;
+    println!("Listening.");
+    while let Some(connection_handler) = rx.recv().await {
+        println!("New connection: {:?}", connection_handler.addr);
+    }
     println!("Goodbye, cruel world!");
-
     Ok(())
 }

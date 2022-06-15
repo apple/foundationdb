@@ -129,5 +129,6 @@ pub async fn handle(request: FlowMessage) -> Result<Option<FlowMessage>> {
     };
 
     let frame = serialize_response(uid, network_test_request.reply_size().try_into()?)?;
-    Ok(Some(FlowMessage { frame }))
+    // Ok(Some(FlowMessage { frame }))
+    Ok(None)
 }
