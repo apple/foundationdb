@@ -116,12 +116,16 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution(Data
 	state std::map<UID, Optional<Key>> server_dc;
 	state std::map<std::vector<UID>, std::pair<std::vector<UID>, std::vector<UID>>> team_cache;
 	state std::vector<std::pair<StorageServerInterface, ProcessClass>> tss_servers;
+	state int numDataMoves = 0;
 
 	// Get the server list in its own try/catch block since it modifies result.  We don't want a subsequent failure
 	// causing entries to be duplicated
 	loop {
+		numDataMoves = 0;
 		server_dc.clear();
 		result->allServers.clear();
+		tss_servers.clear();
+		team_cache.clear();
 		succeeded = false;
 		try {
 			// Read healthyZone value which is later used to determine on/off of failure triggered DD
@@ -202,6 +206,7 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution(Data
 					ASSERT(!r.value()->valid);
 				}
 				result->dataMoveMap.insert(meta.range, std::move(dataMove));
+				++numDataMoves;
 			}
 
 			succeeded = true;
@@ -315,7 +320,7 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution(Data
 	// a dummy shard at the end with no keys or servers makes life easier for trackInitialShards()
 	result->shards.push_back(DDShardInfo(allKeys.end));
 
-	if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+	if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA && numDataMoves > 0) {
 		for (int shard = 0; shard < result->shards.size() - 1; ++shard) {
 			const DDShardInfo& iShard = result->shards[shard];
 			KeyRangeRef keys = KeyRangeRef(iShard.key, result->shards[shard + 1].key);
