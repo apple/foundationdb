@@ -32,6 +32,8 @@ import (
 	"syscall"
 	"time"
 
+	"k8s.io/utils/pointer"
+
 	"github.com/apple/foundationdb/fdbkubernetesmonitor/api"
 	"github.com/fsnotify/fsnotify"
 	"github.com/go-logr/logr"
@@ -289,12 +291,13 @@ func (monitor *Monitor) checkProcessRequired(processNumber int) bool {
 	monitor.Mutex.Lock()
 	defer monitor.Mutex.Unlock()
 	logger := monitor.Logger.WithValues("processNumber", processNumber, "area", "checkProcessRequired")
-	runProcesses := monitor.ActiveConfiguration.RunServers
-	if monitor.ProcessCount < processNumber || (runProcesses != nil && !*runProcesses) {
+	runProcesses := pointer.BoolDeref(monitor.ActiveConfiguration.RunServers, true)
+	if monitor.ProcessCount < processNumber || !runProcesses {
 		logger.Info("Terminating run loop")
 		monitor.ProcessIDs[processNumber] = 0
 		return false
 	}
+
 	return true
 }
 
@@ -370,12 +373,18 @@ func (monitor *Monitor) Run() {
 		panic(err)
 	}
 
-	defer watcher.Close()
+	defer func(watcher *fsnotify.Watcher) {
+		err := watcher.Close()
+		if err != nil {
+			monitor.Logger.Error(err, "could not close watcher")
+		}
+	}(watcher)
 	go func() { monitor.WatchConfiguration(watcher) }()
 
 	<-done
 }
 
+// WatchPodTimestamps watches the timestamp feed to reload the configuration.
 func (monitor *Monitor) WatchPodTimestamps() {
 	for timestamp := range monitor.PodClient.TimestampFeed {
 		if timestamp > monitor.LastConfigurationTime.Unix() {
