@@ -9,8 +9,8 @@ mod void;
 
 use super::FlowMessage;
 use crate::flow::file_identifier::{FileIdentifier, IdentifierType, ParsedFileIdentifier};
-use crate::flow::Frame;
 use crate::flow::uid::{UID, WLTOKEN};
+use crate::flow::Frame;
 use crate::flow::Result;
 
 const PING_REQUEST_FILE_IDENTIFIER: ParsedFileIdentifier = ParsedFileIdentifier {
@@ -29,12 +29,20 @@ const PING_RESPONSE_FILE_IDENTIFIER: ParsedFileIdentifier = ParsedFileIdentifier
 
 pub fn serialize_request(response_token: &UID) -> Result<Frame> {
     let wltoken = UID::well_known_token(WLTOKEN::PingPacket);
-    use ping_request::{ReplyPromise, ReplyPromiseArgs, PingRequest, PingRequestArgs, FakeRoot, FakeRootArgs};
+    use ping_request::{
+        FakeRoot, FakeRootArgs, PingRequest, PingRequestArgs, ReplyPromise, ReplyPromiseArgs,
+    };
     let mut builder = flatbuffers::FlatBufferBuilder::with_capacity(1024);
     let response_token = ping_request::UID::new(response_token.uid[0], response_token.uid[1]);
     let uid = Some(&response_token);
-    let reply_promise = Some(ReplyPromise::create(&mut builder, &ReplyPromiseArgs { uid }));
-    let ping_request = Some(PingRequest::create(&mut builder, &PingRequestArgs { reply_promise }));
+    let reply_promise = Some(ReplyPromise::create(
+        &mut builder,
+        &ReplyPromiseArgs { uid },
+    ));
+    let ping_request = Some(PingRequest::create(
+        &mut builder,
+        &PingRequestArgs { reply_promise },
+    ));
     let fake_root = FakeRoot::create(&mut builder, &FakeRootArgs { ping_request });
     builder.finish(fake_root, Some("myfi"));
     let (mut payload, offset) = builder.collapse();

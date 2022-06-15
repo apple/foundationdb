@@ -10,7 +10,6 @@ pub type Error = Box<dyn std::error::Error + Send + Sync>;
 pub type Result<T> = std::result::Result<T, Error>;
 pub type Frame = frame::Frame;
 
-
 // #[test]
 // fn test_uid() -> Result<()> {
 //     let s = "0123456789abcdeffedcba9876543210";
