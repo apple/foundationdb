@@ -9,7 +9,7 @@ mod void;
 
 use super::{FlowRequest, FlowResponse};
 use crate::flow::file_identifier::{FileIdentifier, IdentifierType, ParsedFileIdentifier};
-use crate::flow::frame::Frame;
+use crate::flow::Frame;
 use crate::flow::uid::{UID, WLTOKEN};
 use crate::flow::Result;
 

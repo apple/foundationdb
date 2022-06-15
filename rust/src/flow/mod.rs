@@ -1,13 +1,15 @@
+pub mod connection;
+pub mod file_identifier;
+mod file_identifier_table;
+mod frame;
+pub mod uid;
+
 // Implementation of the flow network protocol.  See flow_transport.md for more information.
 // TODO
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
 pub type Result<T> = std::result::Result<T, Error>;
+pub type Frame = frame::Frame;
 
-pub mod connection;
-pub mod file_identifier;
-mod file_identifier_table;
-pub mod frame;
-pub mod uid;
 
 // #[test]
 // fn test_uid() -> Result<()> {

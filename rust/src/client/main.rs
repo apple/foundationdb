@@ -1,5 +1,6 @@
 use foundationdb::flow;
 use foundationdb::services;
+use foundationdb::fdbserver;
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use tokio::net::TcpStream;
@@ -10,16 +11,14 @@ async fn main() -> flow::Result<()> {
     let conn = TcpStream::connect(saddr).await?;
 
     let (svc, response_rx) = services::Svc::new();
-    tokio::spawn(services::connection_handler(
+    tokio::spawn(fdbserver::connection_handler::connection_handler(
         svc.clone(),
         response_rx,
         None,
         conn,
         saddr,
     ));
-
     svc.ping().await?;
-
     println!("Goodbye, cruel world!");
 
     Ok(())

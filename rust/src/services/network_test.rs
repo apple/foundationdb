@@ -7,7 +7,7 @@ mod network_test_request;
 mod network_test_response;
 
 use crate::flow::file_identifier::{FileIdentifier, IdentifierType, ParsedFileIdentifier};
-use crate::flow::frame::Frame;
+use crate::flow::Frame;
 use crate::flow::uid::UID;
 use crate::flow::Result;
 use flatbuffers::{FlatBufferBuilder, FLATBUFFERS_MAX_BUFFER_SIZE};

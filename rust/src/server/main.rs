@@ -1,13 +1,13 @@
-use foundationdb::flow;
-use foundationdb::services;
+use foundationdb::flow::Result;
+use foundationdb::fdbserver;
 
 use tokio::net::TcpListener;
 
 #[tokio::main]
-async fn main() -> flow::Result<()> {
+async fn main() -> Result<()> {
     let bind = TcpListener::bind(&format!("127.0.0.1:{}", 6789)).await?;
 
-    services::listen(bind).await?;
+    fdbserver::connection_handler::listen(bind).await?;
     println!("Goodbye, cruel world!");
 
     Ok(())
