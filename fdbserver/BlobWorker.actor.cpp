@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "contrib/fmt-8.1.1/include/fmt/format.h"
+#include "fdbclient/BlobGranuleFiles.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/BackupContainerFileSystem.h"
@@ -622,7 +623,7 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 		}
 	}
 
-	state Value serialized = ObjectWriter::toValue(snapshot, Unversioned());
+	state Value serialized = serializeChunkedSnapshot(snapshot, SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_CHUNKS);
 	state size_t serializedSize = serialized.size();
 
 	// free snapshot to reduce memory

@@ -18,9 +18,11 @@
  * limitations under the License.
  */
 
+#include <cstring>
 #include <vector>
 
 #include "contrib/fmt-8.1.1/include/fmt/format.h"
+#include "flow/IRandom.h"
 #include "flow/serialize.h"
 #include "fdbclient/BlobGranuleFiles.h"
 #include "fdbclient/Knobs.h"
@@ -34,53 +36,216 @@
 // Implements granule file parsing and materialization with normal c++ functions (non-actors) so that this can be used
 // outside the FDB network thread.
 
+// File Format stuff
+
+// Version info for file format of chunked files.
+uint16_t LATEST_BG_FORMAT_VERSION = 1;
+uint16_t MIN_SUPPORTED_BG_FORMAT_VERSION = 1;
+
+struct BlockOffsetRef {
+	StringRef key;
+	uint32_t offset;
+
+	BlockOffsetRef() {}
+	explicit BlockOffsetRef(StringRef key, uint32_t offset) : key(key), offset(offset) {}
+	explicit BlockOffsetRef(Arena& arena, StringRef key, uint32_t offset) : key(arena, key), offset(offset) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, key, offset);
+	}
+
+	struct OrderByKey {
+		bool operator()(BlockOffsetRef const& a, BlockOffsetRef const& b) const { return a.key < b.key; }
+	};
+
+	struct OrderByKeyCommonPrefix {
+		int prefixLen;
+		OrderByKeyCommonPrefix(int prefixLen) : prefixLen(prefixLen) {}
+		bool operator()(BlockOffsetRef const& a, BlockOffsetRef const& b) const {
+			return a.key.compareSuffix(b.key, prefixLen);
+		}
+	};
+};
+
+/*
+ * A file header for a key-ordered file that is chunked on disk, where each chunk is a disjoint key range of data.
+ */
+struct BGChunkedFileIndex {
+	constexpr static FileIdentifier file_identifier = 3828201;
+	uint16_t formatVersion;
+	uint8_t fileType;
+	Optional<StringRef> filter; // not used currently
+	VectorRef<BlockOffsetRef> dataBlockOffsets;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, formatVersion, fileType, filter, dataBlockOffsets);
+	}
+};
+
+// TODO combine with SystemData? These don't actually have to match though
+
+const uint8_t SNAPSHOT_FILE_TYPE = 'S';
+const uint8_t DELTA_FILE_TYPE = 'D';
+
+// TODO: this should probably be in actor file with yields?
+// TODO: optimize memory copying
+// TODO: sanity check no oversized files
+Value serializeChunkedSnapshot(Standalone<GranuleSnapshot> snapshot, int chunkCount) {
+	Standalone<BGChunkedFileIndex> idx;
+	idx.formatVersion = LATEST_BG_FORMAT_VERSION;
+	idx.fileType = SNAPSHOT_FILE_TYPE;
+
+	size_t targetChunkBytes = snapshot.expectedSize() / chunkCount;
+	size_t currentChunkBytesEstimate = 0;
+	size_t previousChunkBytes = 0;
+
+	std::vector<Value> chunks;
+	chunks.push_back(Value()); // dummy value for index block
+	Standalone<GranuleSnapshot> currentChunk;
+
+	// fmt::print("Chunk index:\n");
+	for (int i = 0; i < snapshot.size(); i++) {
+		// TODO REMOVE sanity check
+		if (i > 0) {
+			ASSERT(snapshot[i - 1].key < snapshot[i].key);
+		}
+
+		currentChunk.push_back_deep(currentChunk.arena(), snapshot[i]);
+		currentChunkBytesEstimate += snapshot[i].expectedSize();
+
+		if (currentChunkBytesEstimate >= targetChunkBytes || i == snapshot.size() - 1) {
+			// TODO: add encryption/compression for each chunk
+			// TODO: protocol version
+			Value serialized = ObjectWriter::toValue(currentChunk, Unversioned());
+			chunks.push_back(serialized);
+			// TODO remove validation
+			if (!idx.dataBlockOffsets.empty()) {
+				ASSERT(idx.dataBlockOffsets.back().key < currentChunk.begin()->key);
+			}
+			idx.dataBlockOffsets.emplace_back_deep(idx.arena(), currentChunk.begin()->key, previousChunkBytes);
+			/*
+			fmt::print(
+			    "  {0}={1} ({2})\n", currentChunk.begin()->key.printable(), previousChunkBytes, currentChunk.size());
+			    */
+
+			previousChunkBytes += serialized.size();
+			currentChunkBytesEstimate = 0;
+			currentChunk = Standalone<GranuleSnapshot>();
+		}
+	}
+	ASSERT(currentChunk.empty());
+	// push back dummy last chunk to get last chunk size, and to know last key in last block without having to read it
+	if (!snapshot.empty()) {
+		idx.dataBlockOffsets.emplace_back_deep(idx.arena(), keyAfter(snapshot.back().key), previousChunkBytes);
+	}
+
+	Value indexBlock = ObjectWriter::toValue(idx, Unversioned());
+	chunks[0] = indexBlock;
+
+	// TODO: better way to get header size upfront? Flatbuffer can't parse from stream and have offset from end easily
+	Arena ret;
+	int32_t indexSize = indexBlock.size();
+	size_t size = sizeof(indexSize) + indexSize + previousChunkBytes;
+	uint8_t* buffer = new (ret) uint8_t[size];
+
+	memcpy(buffer, &indexSize, sizeof(indexSize));
+	previousChunkBytes = sizeof(indexSize);
+	for (auto& it : chunks) {
+		memcpy(buffer + previousChunkBytes, it.begin(), it.size());
+		previousChunkBytes += it.size();
+	}
+	ASSERT(size == previousChunkBytes);
+
+	return Standalone<StringRef>(StringRef(buffer, size), ret);
+}
+
+// TODO: use redwood prefix trick to optimize cpu comparison
 static Arena loadSnapshotFile(const StringRef& snapshotData,
                               KeyRangeRef keyRange,
                               std::map<KeyRef, ValueRef>& dataMap) {
+	Arena rootArena;
 
-	Arena parseArena;
-	GranuleSnapshot snapshot;
-	ObjectReader reader(snapshotData.begin(), Unversioned());
-	reader.deserialize(FileIdentifierFor<GranuleSnapshot>::value, snapshot, parseArena);
+	Arena indexArena;
+	BGChunkedFileIndex index;
+	// TODO version?
+	int32_t indexBlockSize;
+	memcpy(&indexBlockSize, snapshotData.begin(), sizeof(indexBlockSize));
+	size_t skipSize = sizeof(indexBlockSize) + indexBlockSize;
 
-	// TODO REMOVE sanity check eventually
-	for (int i = 0; i < snapshot.size() - 1; i++) {
-		if (snapshot[i].key >= snapshot[i + 1].key) {
-			printf("BG SORT ORDER VIOLATION IN SNAPSHOT FILE: '%s', '%s'\n",
-			       snapshot[i].key.printable().c_str(),
-			       snapshot[i + 1].key.printable().c_str());
-		}
-		ASSERT(snapshot[i].key < snapshot[i + 1].key);
+	ObjectReader indexReader(snapshotData.begin() + sizeof(indexBlockSize), Unversioned());
+	indexReader.deserialize(FileIdentifierFor<BGChunkedFileIndex>::value, index, indexArena);
+	rootArena.dependsOn(indexArena);
+
+	if (index.formatVersion > LATEST_BG_FORMAT_VERSION || index.formatVersion < MIN_SUPPORTED_BG_FORMAT_VERSION) {
+		TraceEvent(SevWarn, "BlobGranuleInvalidFormatVersion")
+		    .suppressFor(5.0)
+		    .detail("FoundFormatVersion", index.formatVersion)
+		    .detail("MinSupported", MIN_SUPPORTED_BG_FORMAT_VERSION)
+		    .detail("LatestSupported", LATEST_BG_FORMAT_VERSION);
+		throw unsupported_format_version();
 	}
 
-	int i = 0;
-	while (i < snapshot.size() && snapshot[i].key < keyRange.begin) {
-		/*if (snapshot.size() < 10) { // debug
-		    printf("  Pruning %s < %s\n", snapshot[i].key.printable().c_str(), keyRange.begin.printable().c_str());
-		}*/
-		i++;
-	}
-	while (i < snapshot.size() && snapshot[i].key < keyRange.end) {
-		dataMap.insert({ snapshot[i].key, snapshot[i].value });
-		/*if (snapshot.size() < 10) { // debug
-		    printf("  Including %s\n", snapshot[i].key.printable().c_str());
-		}*/
-		i++;
-	}
-	/*if (snapshot.size() < 10) { // debug
-	    while (i < snapshot.size()) {
-	        printf("  Pruning %s >= %s\n", snapshot[i].key.printable().c_str(), keyRange.end.printable().c_str());
-	        i++;
-	    }
+	ASSERT(index.fileType == SNAPSHOT_FILE_TYPE);
+
+	/*fmt::print("ChunksParsed={}\n", index.dataBlockOffsets.size());
+	for (auto& it : index.dataBlockOffsets) {
+	    fmt::print("    {0}={1}\n", it.key.printable(), it.offset);
 	}*/
-	if (BG_READ_DEBUG) {
-		fmt::print("Started with {0} rows from snapshot after pruning to [{1} - {2})\n",
-		           dataMap.size(),
-		           keyRange.begin.printable(),
-		           keyRange.end.printable());
+
+	// empty snapshot file
+	if (index.dataBlockOffsets.empty()) {
+		return rootArena;
 	}
 
-	return parseArena;
+	ASSERT(index.dataBlockOffsets.size() >= 2);
+
+	// TODO: refactor this out of delta tree
+	// int commonPrefixLen = commonPrefixLength(index.dataBlockOffsets.front().first,
+	// index.dataBlockOffsets.back().first);
+
+	// find range of blocks needed to read
+	BlockOffsetRef searchKey(keyRange.begin, 0);
+	auto startBlock = std::lower_bound(
+	    index.dataBlockOffsets.begin(), index.dataBlockOffsets.end(), searchKey, BlockOffsetRef::OrderByKey());
+
+	if (startBlock != index.dataBlockOffsets.end() && startBlock != index.dataBlockOffsets.begin() &&
+	    keyRange.begin < startBlock->key) {
+		startBlock--;
+	} else if (startBlock == index.dataBlockOffsets.end()) {
+		startBlock--;
+	}
+
+	// FIXME: optimize cpu comparisons here in first/last partial blocks, doing entire blocks at once based on
+	// comparison, and using shared prefix for key comparison
+	while (startBlock != (index.dataBlockOffsets.end() - 1) && keyRange.end > startBlock->key) {
+		size_t blockSize = (startBlock + 1)->offset - startBlock->offset;
+		// fmt::print("Reading chunk {0}={1} {2}\n", startBlock->key.printable(), startBlock->offset, blockSize);
+		// part of block is included in response, parse it
+		StringRef blockData(snapshotData.begin() + skipSize + startBlock->offset, blockSize);
+
+		Arena blockArena;
+		GranuleSnapshot dataBlock;
+		ObjectReader dataReader(blockData.begin(), Unversioned());
+		dataReader.deserialize(FileIdentifierFor<GranuleSnapshot>::value, dataBlock, blockArena);
+		rootArena.dependsOn(blockArena);
+
+		ASSERT(!dataBlock.empty());
+
+		// fmt::print("Read chunk starting at {0} with {1} rows\n", dataBlock.front().key.printable(),
+		// dataBlock.size());
+		ASSERT(startBlock->key == dataBlock.front().key);
+
+		for (auto& entry : dataBlock) {
+			if (entry.key >= keyRange.begin && entry.key < keyRange.end) {
+				dataMap.insert({ entry.key, entry.value });
+			}
+		}
+		startBlock++;
+	}
+
+	return rootArena;
 }
 
 static void applyDelta(KeyRangeRef keyRange, MutationRef m, std::map<KeyRef, ValueRef>& dataMap) {
@@ -347,6 +512,16 @@ ErrorOr<RangeResult> loadAndMaterializeBlobGranules(const Standalone<VectorRef<B
 	}
 }
 
+std::string randomBGFilename(UID blobWorkerID, UID granuleID, Version version, std::string suffix) {
+	// Start with random bytes to avoid metadata hotspotting
+	// Worker ID for uniqueness and attribution
+	// Granule ID for uniqueness and attribution
+	// Version for uniqueness and possible future use
+	return deterministicRandom()->randomUniqueID().shortString().substr(0, 8) + "_" +
+	       blobWorkerID.shortString().substr(0, 8) + "_" + granuleID.shortString() + "_V" + std::to_string(version) +
+	       suffix;
+}
+
 TEST_CASE("/blobgranule/files/applyDelta") {
 	printf("Testing blob granule delta applying\n");
 	Arena a;
@@ -494,12 +669,131 @@ TEST_CASE("/blobgranule/files/applyDelta") {
 	return Void();
 }
 
-std::string randomBGFilename(UID blobWorkerID, UID granuleID, Version version, std::string suffix) {
-	// Start with random bytes to avoid metadata hotspotting
-	// Worker ID for uniqueness and attribution
-	// Granule ID for uniqueness and attribution
-	// Version for uniqueness and possible future use
-	return deterministicRandom()->randomUniqueID().shortString().substr(0, 8) + "_" +
-	       blobWorkerID.shortString().substr(0, 8) + "_" + granuleID.shortString() + "_V" + std::to_string(version) +
-	       suffix;
+// picks a number between 2^minExp and 2^maxExp, but uniformly distributed over exponential buckets 2^n an 2^n+1
+int randomExp(int minExp, int maxExp) {
+	if (minExp == maxExp) { // N=2, case
+		return 1 << minExp;
+	}
+	int val = 1 << deterministicRandom()->randomInt(minExp, maxExp);
+	ASSERT(val > 0);
+	return deterministicRandom()->randomInt(val, val * 2);
+}
+
+void checkEmpty(const Value& serialized, Key begin, Key end) {
+	std::map<KeyRef, ValueRef> result;
+	Arena ar = loadSnapshotFile(serialized, KeyRangeRef(begin, end), result);
+	ASSERT(result.empty());
+}
+
+// endIdx is exclusive
+void checkRead(const Standalone<GranuleSnapshot>& snapshot, const Value& serialized, int beginIdx, int endIdx) {
+	ASSERT(beginIdx < endIdx);
+	ASSERT(endIdx <= snapshot.size());
+	std::map<KeyRef, ValueRef> result;
+	KeyRef beginKey = snapshot[beginIdx].key;
+	Key endKey = endIdx == snapshot.size() ? keyAfter(snapshot.back().key) : snapshot[endIdx].key;
+	KeyRangeRef range(beginKey, endKey);
+
+	Arena ar = loadSnapshotFile(serialized, range, result);
+
+	if (result.size() != endIdx - beginIdx) {
+		fmt::print("Read {0} rows != {1}\n", result.size(), endIdx - beginIdx);
+	}
+	ASSERT(result.size() == endIdx - beginIdx);
+	for (auto& it : result) {
+		ASSERT(it.first == snapshot[beginIdx].key);
+		ASSERT(it.second == snapshot[beginIdx].value);
+		beginIdx++;
+	}
+}
+
+TEST_CASE("/blobgranule/files/snapshotFormatUnitTest") {
+	// snapshot files are likely to have a non-trivial shared prefix since they're for a small contiguous key range
+	std::string sharedPrefix = deterministicRandom()->randomUniqueID().toString();
+	int uidSize = sharedPrefix.size();
+	int sharedPrefixLen = deterministicRandom()->randomInt(0, uidSize);
+	int targetKeyLength = deterministicRandom()->randomInt(4, uidSize);
+	sharedPrefix = sharedPrefix.substr(0, sharedPrefixLen) + "_";
+
+	int targetValueLen = randomExp(0, 12);
+	int targetChunks = randomExp(0, 9);
+	int targetDataBytes = randomExp(0, 25);
+
+	std::unordered_set<std::string> usedKeys;
+	Standalone<GranuleSnapshot> data;
+	int totalDataBytes = 0;
+	while (totalDataBytes < targetDataBytes) {
+		int keySize = deterministicRandom()->randomInt(targetKeyLength / 2, targetKeyLength * 3 / 2);
+		keySize = std::min(keySize, uidSize);
+		std::string key = sharedPrefix + deterministicRandom()->randomUniqueID().toString().substr(0, keySize);
+		if (usedKeys.insert(key).second) {
+			int valueSize = deterministicRandom()->randomInt(targetValueLen / 2, targetValueLen * 3 / 2);
+			std::string value = deterministicRandom()->randomUniqueID().toString();
+			if (value.size() > valueSize) {
+				value = value.substr(0, valueSize);
+			}
+			if (value.size() < valueSize) {
+				value += std::string(valueSize - value.size(), 'x');
+			}
+
+			data.push_back_deep(data.arena(), KeyValueRef(KeyRef(key), ValueRef(value)));
+			totalDataBytes += key.size() + value.size();
+		}
+	}
+
+	std::sort(data.begin(), data.end(), KeyValueRef::OrderByKey());
+
+	int maxExp = 0;
+	while (1 << maxExp < data.size()) {
+		maxExp++;
+	}
+	maxExp--;
+	fmt::print("data size={0}, maxExp={1}\n", data.size(), maxExp);
+
+	fmt::print("Validating snapshot data is sorted\n");
+	for (int i = 0; i < data.size() - 1; i++) {
+		ASSERT(data[i].key < data[i + 1].key);
+	}
+
+	fmt::print(
+	    "Constructing snapshot with {0} rows, {1} bytes, and {2} chunks\n", data.size(), totalDataBytes, targetChunks);
+
+	Value serialized = serializeChunkedSnapshot(data, targetChunks);
+
+	fmt::print("Snapshot serialized!\n");
+
+	fmt::print("Validating snapshot data is sorted again\n");
+	for (int i = 0; i < data.size() - 1; i++) {
+		ASSERT(data[i].key < data[i + 1].key);
+	}
+
+	fmt::print("Initial read starting\n");
+
+	checkRead(data, serialized, 0, data.size());
+
+	fmt::print("Initial read complete\n");
+
+	if (data.size() > 1) {
+		for (int i = 0; i < std::min(100, data.size() * 2); i++) {
+			int width = randomExp(0, maxExp);
+			ASSERT(width <= data.size());
+			int start = deterministicRandom()->randomInt(0, data.size() - width);
+			checkRead(data, serialized, start, start + width);
+		}
+
+		fmt::print("Doing empty checks\n");
+		int randomIdx = deterministicRandom()->randomInt(0, data.size() - 1);
+		checkEmpty(serialized, keyAfter(data[randomIdx].key), data[randomIdx + 1].key);
+	} else {
+		fmt::print("Doing empty checks\n");
+	}
+
+	checkEmpty(serialized, normalKeys.begin, data.front().key);
+	checkEmpty(serialized, normalKeys.begin, LiteralStringRef("\x00"));
+	checkEmpty(serialized, keyAfter(data.back().key), normalKeys.end);
+	checkEmpty(serialized, LiteralStringRef("\xfe"), normalKeys.end);
+
+	fmt::print("Snapshot format test done!\n");
+
+	return Void();
 }
