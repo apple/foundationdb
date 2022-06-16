@@ -490,3 +490,22 @@ TEST_CASE("/GlobalTagThrottler/MultiClientActiveThrottling") {
 	wait(timeoutError(monitor || client || updater, 300.0));
 	return Void();
 }
+
+// Global transaction rate should be 20.0, with a distribution of (5, 15) between the 2 clients
+TEST_CASE("/GlobalTagThrottler/SkewedMultiClientActiveThrottling") {
+	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
+	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10);
+	ThrottleApi::TagQuotaValue tagQuotaValue;
+	TransactionTag testTag = "sampleTag1"_sr;
+	tagQuotaValue.totalReadQuota = 100.0;
+	globalTagThrottler.setQuota(testTag, tagQuotaValue);
+	state Future<Void> client =
+	    GlobalTagThrottlerTesting::runClient(&globalTagThrottler, &storageServers, testTag, 5.0, 5.0, false);
+	state Future<Void> client2 =
+	    GlobalTagThrottlerTesting::runClient(&globalTagThrottler, &storageServers, testTag, 25.0, 5.0, false);
+	state Future<Void> monitor = GlobalTagThrottlerTesting::monitorClientRates(&globalTagThrottler, testTag, 15.0);
+	state Future<Void> updater =
+	    GlobalTagThrottlerTesting::updateGlobalTagThrottler(&globalTagThrottler, &storageServers);
+	wait(timeoutError(monitor || client || updater, 300.0));
+	return Void();
+}
