@@ -60,16 +60,16 @@ class GlobalTagThrottlerImpl {
 
 		void setQuota(ThrottleApi::TagQuotaValue const& quota) { this->quota = quota; }
 
-		void updateReadCostRate(UID ssId, double newReadCost) {
+		void updateReadCostRate(UID ssId, double newReadCostRate) {
 			auto& currentReadCostRate = ssToReadCostRate[ssId];
-			auto diff = newReadCost - currentReadCostRate;
+			auto diff = newReadCostRate - currentReadCostRate;
 			currentReadCostRate += diff;
 			totalReadCostRate.addDelta(diff);
 		}
 
-		void updateWriteCostRate(UID ssId, double newWriteCost) {
+		void updateWriteCostRate(UID ssId, double newWriteCostRate) {
 			auto& currentWriteCostRate = ssToWriteCostRate[ssId];
-			auto diff = newWriteCost - currentWriteCostRate;
+			auto diff = newWriteCostRate - currentWriteCostRate;
 			currentWriteCostRate += diff;
 			totalWriteCostRate.addDelta(diff);
 		}
@@ -245,13 +245,6 @@ void GlobalTagThrottler::setQuota(TransactionTagRef tag, ThrottleApi::TagQuotaVa
 	return impl->setQuota(tag, tagQuotaValue);
 }
 
-StorageQueueInfo getTestStorageQueueInfo(UID id, TransactionTag tag, double rate) {
-	StorageQueueInfo result(id, LocalityData{});
-	double fractionalBusyness{ 0.0 }; // unused for global tag throttling
-	result.busiestReadTags.emplace_back(tag, rate, fractionalBusyness);
-	return result;
-}
-
 Optional<double> testGetTPSLimit(GlobalTagThrottler& globalTagThrottler, TransactionTag tag) {
 	auto clientRates = globalTagThrottler.getClientRates();
 	auto it1 = clientRates.find(TransactionPriority::DEFAULT);
@@ -264,18 +257,57 @@ Optional<double> testGetTPSLimit(GlobalTagThrottler& globalTagThrottler, Transac
 	return {};
 }
 
+class TestStorageServers {
+	class ReadCost {
+		Smoother smoother;
+
+	public:
+		ReadCost() : smoother(5.0) {}
+		ReadCost& operator+=(double delta) {
+			smoother.addDelta(delta);
+			return *this;
+		}
+		double smoothRate() const { return smoother.smoothRate(); }
+	};
+
+	std::vector<std::map<TransactionTag, ReadCost>> readCosts;
+
+public:
+	TestStorageServers(size_t size) : readCosts(size) { ASSERT_GT(size, 0); }
+
+	void addReadCost(TransactionTag tag, double cost) {
+		auto const costPerSS = cost / readCosts.size();
+		for (auto& readCost : readCosts) {
+			readCost[tag] += costPerSS;
+		}
+	}
+
+	std::vector<StorageQueueInfo> getStorageQueueInfos() const {
+		std::vector<StorageQueueInfo> result;
+		result.reserve(readCosts.size());
+		for (int i = 0; i < readCosts.size(); ++i) {
+			StorageQueueInfo sqInfo(UID(i, i), LocalityData{});
+			for (const auto& [tag, readCost] : readCosts[i]) {
+				double fractionalBusyness{ 0.0 }; // unused for global tag throttling
+				sqInfo.busiestReadTags.emplace_back(tag, readCost.smoothRate(), fractionalBusyness);
+			}
+			result.push_back(sqInfo);
+		}
+		return result;
+	}
+};
+
 ACTOR static Future<Void> testClient(GlobalTagThrottler* globalTagThrottler,
+                                     TestStorageServers* testStorageServers,
                                      TransactionTag tag,
                                      double desiredTpsRate,
-                                     double costPerTransaction,
-                                     UID ssId) {
+                                     double costPerTransaction) {
 	loop {
 		auto tpsLimit = testGetTPSLimit(*globalTagThrottler, tag);
 		state double tpsRate = tpsLimit.present() ? std::min<double>(desiredTpsRate, tpsLimit.get()) : desiredTpsRate;
 		loop {
 			wait(delay(1 / tpsRate));
-			globalTagThrottler->tryUpdateAutoThrottling(
-			    getTestStorageQueueInfo(ssId, tag, costPerTransaction * tpsRate));
+			testStorageServers->addReadCost(tag, costPerTransaction);
 			globalTagThrottler->addRequests(tag, 1);
 		}
 	}
@@ -306,26 +338,41 @@ ACTOR static Future<Void> monitorClientRates(GlobalTagThrottler* globalTagThrott
 	}
 }
 
+ACTOR static Future<Void> updateGlobalTagThrottler(GlobalTagThrottler* globalTagThrottler,
+                                                   TestStorageServers const* testStorageServers) {
+	loop {
+		wait(delay(1.0));
+		auto const storageQueueInfos = testStorageServers->getStorageQueueInfos();
+		for (const auto& sq : storageQueueInfos) {
+			globalTagThrottler->tryUpdateAutoThrottling(sq);
+		}
+	}
+}
+
 TEST_CASE("/GlobalTagThrottler/NoActiveThrottling") {
 	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
+	state TestStorageServers testStorageServers(1);
 	ThrottleApi::TagQuotaValue tagQuotaValue;
 	TransactionTag testTag = "sampleTag1"_sr;
 	tagQuotaValue.totalReadQuota = 100.0;
 	globalTagThrottler.setQuota(testTag, tagQuotaValue);
-	state Future<Void> client = testClient(&globalTagThrottler, testTag, 5.0, 6.0, UID{});
+	state Future<Void> client = testClient(&globalTagThrottler, &testStorageServers, testTag, 5.0, 6.0);
 	state Future<Void> monitor = monitorClientRates(&globalTagThrottler, testTag, 100.0 / 6.0);
-	wait(timeoutError(monitor || client, 300.0));
+	state Future<Void> updater = updateGlobalTagThrottler(&globalTagThrottler, &testStorageServers);
+	wait(timeoutError(monitor || client || updater, 300.0));
 	return Void();
 }
 
 TEST_CASE("/GlobalTagThrottler/ActiveThrottling") {
 	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
+	state TestStorageServers testStorageServers(1);
 	ThrottleApi::TagQuotaValue tagQuotaValue;
 	TransactionTag testTag = "sampleTag1"_sr;
 	tagQuotaValue.totalReadQuota = 100.0;
 	globalTagThrottler.setQuota(testTag, tagQuotaValue);
-	state Future<Void> client = testClient(&globalTagThrottler, testTag, 20.0, 10.0, UID{});
+	state Future<Void> client = testClient(&globalTagThrottler, &testStorageServers, testTag, 20.0, 10.0);
 	state Future<Void> monitor = monitorClientRates(&globalTagThrottler, testTag, 10.0);
-	wait(timeoutError(monitor || client, 300.0));
+	state Future<Void> updater = updateGlobalTagThrottler(&globalTagThrottler, &testStorageServers);
+	wait(timeoutError(monitor || client || updater, 300.0));
 	return Void();
 }
