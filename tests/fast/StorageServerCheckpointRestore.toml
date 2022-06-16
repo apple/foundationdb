@@ -7,8 +7,8 @@ machineCount = 15
 allowDefaultTenant = false
 
 [[test]]
-testTitle = 'PhysicalShardMove'
+testTitle = 'SSCheckpointRestoreWorkload'
 useDB = true
 
     [[test.workload]]
-    testName = 'PhysicalShardMove'
+    testName = 'SSCheckpointRestoreWorkload'

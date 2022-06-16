@@ -319,6 +319,21 @@ TCTeamInfo::TCTeamInfo(std::vector<Reference<TCServerInfo>> const& servers)
 	}
 }
 
+// static
+std::string TCTeamInfo::serversToString(std::vector<UID> servers) {
+	if (servers.empty()) {
+		return "[unset]";
+	}
+
+	std::sort(servers.begin(), servers.end());
+	std::stringstream ss;
+	for (const auto& id : servers) {
+		ss << id.toString() << " ";
+	}
+
+	return ss.str();
+}
+
 std::vector<StorageServerInterface> TCTeamInfo::getLastKnownServerInterfaces() const {
 	std::vector<StorageServerInterface> v;
 	v.reserve(servers.size());
@@ -329,16 +344,7 @@ std::vector<StorageServerInterface> TCTeamInfo::getLastKnownServerInterfaces() c
 }
 
 std::string TCTeamInfo::getServerIDsStr() const {
-	std::stringstream ss;
-
-	if (serverIDs.empty())
-		return "[unset]";
-
-	for (const auto& id : serverIDs) {
-		ss << id.toString() << " ";
-	}
-
-	return std::move(ss).str();
+	return serversToString(this->serverIDs);
 }
 
 void TCTeamInfo::addDataInFlightToTeam(int64_t delta) {
