@@ -6441,9 +6441,9 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				data->byteSampleApplyClear(keys, invalidVersion);
 			} else {
 				ASSERT(data->data().getLatestVersion() > data->version.get());
-				if (data->sharded) {
-					updateStorageShard(data, StorageServerShard::notAssigned(keys, data->data().getLatestVersion()));
-				}
+				// if (data->sharded) {
+				// 	updateStorageShard(data, StorageServerShard::notAssigned(keys, data->data().getLatestVersion()));
+				// }
 				setAvailableStatus(data, keys, false);
 				removeDataRange(
 				    data, data->addVersionToMutationLog(data->data().getLatestVersion()), data->shards, keys);
@@ -8520,6 +8520,10 @@ void updateStorageShard(StorageServer* data, StorageServerShard shard) {
 		if (endShard.getShardState() == StorageServerShard::ReadWritePending) {
 			endShard.setShardState(StorageServerShard::ReadWrite);
 		}
+		TraceEvent(SevVerbose, "UpdateStorageServerShardEndShard", data->thisServerID)
+		    .detail("Version", mLV.version)
+		    .detail("Shard", endShard.toString())
+		    .detail("ShardKey", shardKeys.end);
 		data->addMutationToMutationLog(
 		    mLV, MutationRef(MutationRef::SetValue, shardKeys.end, ObjectWriter::toValue(endShard, IncludeVersion())));
 	}
