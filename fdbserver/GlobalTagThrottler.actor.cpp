@@ -305,11 +305,9 @@ ACTOR static Future<Void> testClient(GlobalTagThrottler* globalTagThrottler,
 	loop {
 		auto tpsLimit = testGetTPSLimit(*globalTagThrottler, tag);
 		state double tpsRate = tpsLimit.present() ? std::min<double>(desiredTpsRate, tpsLimit.get()) : desiredTpsRate;
-		loop {
-			wait(delay(1 / tpsRate));
-			testStorageServers->addReadCost(tag, costPerTransaction);
-			globalTagThrottler->addRequests(tag, 1);
-		}
+		wait(delay(1 / tpsRate));
+		testStorageServers->addReadCost(tag, costPerTransaction);
+		globalTagThrottler->addRequests(tag, 1);
 	}
 }
 
