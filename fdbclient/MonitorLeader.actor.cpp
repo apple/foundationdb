@@ -920,8 +920,7 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 				    .detail("StoredConnectionString", storedConnectionString.toString())
 				    .detail("CurrentConnectionString", connRecord->getConnectionString().toString());
 				wait(connRecord->setAndPersistConnectionString(storedConnectionString));
-				info.intermediateConnRecord =
-				    connRecord->makeIntermediateRecord(ClusterConnectionString(storedConnectionString));
+				info.intermediateConnRecord = connRecord;
 				return info;
 			} else {
 				req.issues.push_back_deep(req.issues.arena(), LiteralStringRef("incorrect_cluster_file_contents"));
