@@ -6441,9 +6441,6 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				data->byteSampleApplyClear(keys, invalidVersion);
 			} else {
 				ASSERT(data->data().getLatestVersion() > data->version.get());
-				// if (data->sharded) {
-				// 	updateStorageShard(data, StorageServerShard::notAssigned(keys, data->data().getLatestVersion()));
-				// }
 				setAvailableStatus(data, keys, false);
 				removeDataRange(
 				    data, data->addVersionToMutationLog(data->data().getLatestVersion()), data->shards, keys);
@@ -6604,6 +6601,65 @@ ACTOR Future<Void> restoreShards(StorageServer* data, RangeResult storageShards,
 	return Void();
 }
 
+// Finds any change feeds that no longer have shards on this server, and clean them up
+void cleanUpChangeFeeds(StorageServer* data, const KeyRangeRef& keys, Version version) {
+	std::map<Key, KeyRange> candidateFeeds;
+	auto ranges = data->keyChangeFeed.intersectingRanges(keys);
+	for (auto r : ranges) {
+		for (auto feed : r.value()) {
+			candidateFeeds[feed->id] = feed->range;
+		}
+	}
+	for (auto f : candidateFeeds) {
+		bool foundAssigned = false;
+		auto shards = data->shards.intersectingRanges(f.second);
+		for (auto shard : shards) {
+			if (shard->value()->assigned()) {
+				foundAssigned = true;
+				break;
+			}
+		}
+
+		if (!foundAssigned) {
+			Version durableVersion = data->data().getLatestVersion();
+			TraceEvent(SevDebug, "ChangeFeedCleanup", data->thisServerID)
+			    .detail("FeedID", f.first)
+			    .detail("Version", version)
+			    .detail("DurableVersion", durableVersion);
+
+			data->changeFeedCleanupDurable[f.first] = durableVersion;
+
+			Key beginClearKey = f.first.withPrefix(persistChangeFeedKeys.begin);
+			auto& mLV = data->addVersionToMutationLog(durableVersion);
+			data->addMutationToMutationLog(
+			    mLV, MutationRef(MutationRef::ClearRange, beginClearKey, keyAfter(beginClearKey)));
+			++data->counters.kvSystemClearRanges;
+			data->addMutationToMutationLog(mLV,
+			                               MutationRef(MutationRef::ClearRange,
+			                                           changeFeedDurableKey(f.first, 0),
+			                                           changeFeedDurableKey(f.first, version)));
+
+			// We can't actually remove this change feed fully until the mutations clearing its data become durable.
+			// If the SS restarted at version R before the clearing mutations became durable at version D (R < D),
+			// then the restarted SS would restore the change feed clients would be able to read data and would miss
+			// mutations from versions [R, D), up until we got the private mutation triggering the cleanup again.
+
+			auto feed = data->uidChangeFeed.find(f.first);
+			if (feed != data->uidChangeFeed.end()) {
+				feed->second->removing = true;
+				feed->second->moved(feed->second->range);
+				feed->second->newMutations.trigger();
+			}
+		} else {
+			// if just part of feed's range is moved away
+			auto feed = data->uidChangeFeed.find(f.first);
+			if (feed != data->uidChangeFeed.end()) {
+				feed->second->moved(keys);
+			}
+		}
+	}
+}
+
 void changeServerKeys(StorageServer* data,
                       const KeyRangeRef& keys,
                       bool nowAssigned,
@@ -6746,63 +6802,8 @@ void changeServerKeys(StorageServer* data,
 	}
 	validate(data);
 
-	// find any change feeds that no longer have shards on this server, and clean them up
 	if (!nowAssigned) {
-		std::map<Key, KeyRange> candidateFeeds;
-		auto ranges = data->keyChangeFeed.intersectingRanges(keys);
-		for (auto r : ranges) {
-			for (auto feed : r.value()) {
-				candidateFeeds[feed->id] = feed->range;
-			}
-		}
-		for (auto f : candidateFeeds) {
-			bool foundAssigned = false;
-			auto shards = data->shards.intersectingRanges(f.second);
-			for (auto shard : shards) {
-				if (shard->value()->assigned()) {
-					foundAssigned = true;
-					break;
-				}
-			}
-
-			if (!foundAssigned) {
-				Version durableVersion = data->data().getLatestVersion();
-				TraceEvent(SevDebug, "ChangeFeedCleanup", data->thisServerID)
-				    .detail("FeedID", f.first)
-				    .detail("Version", version)
-				    .detail("DurableVersion", durableVersion);
-
-				data->changeFeedCleanupDurable[f.first] = durableVersion;
-
-				Key beginClearKey = f.first.withPrefix(persistChangeFeedKeys.begin);
-				auto& mLV = data->addVersionToMutationLog(durableVersion);
-				data->addMutationToMutationLog(
-				    mLV, MutationRef(MutationRef::ClearRange, beginClearKey, keyAfter(beginClearKey)));
-				++data->counters.kvSystemClearRanges;
-				data->addMutationToMutationLog(mLV,
-				                               MutationRef(MutationRef::ClearRange,
-				                                           changeFeedDurableKey(f.first, 0),
-				                                           changeFeedDurableKey(f.first, version)));
-
-				// We can't actually remove this change feed fully until the mutations clearing its data become durable.
-				// If the SS restarted at version R before the clearing mutations became durable at version D (R < D),
-				// then the restarted SS would restore the change feed clients would be able to read data and would miss
-				// mutations from versions [R, D), up until we got the private mutation triggering the cleanup again.
-
-				auto feed = data->uidChangeFeed.find(f.first);
-				if (feed != data->uidChangeFeed.end()) {
-					feed->second->removing = true;
-					feed->second->moved(feed->second->range);
-					feed->second->newMutations.trigger();
-				}
-			} else {
-				// if just part of feed's range is moved away
-				auto feed = data->uidChangeFeed.find(f.first);
-				if (feed != data->uidChangeFeed.end()) {
-					feed->second->moved(keys);
-				}
-			}
-		}
+		cleanUpChangeFeeds(data, keys, version);
 	}
 }
 
@@ -6840,8 +6841,8 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 	    keys,
 	    Reference<ShardInfo>()); // null reference indicates the range being changed
 	for (int i = 0; i < ranges.size(); i++) {
-		Reference<ShardInfo> currentShard = ranges[i].value;
-		KeyRangeRef currentRange = static_cast<KeyRangeRef>(ranges[i]);
+		const Reference<ShardInfo> currentShard = ranges[i].value;
+		const KeyRangeRef currentRange = static_cast<KeyRangeRef>(ranges[i]);
 		if (!currentShard.isValid()) {
 			ASSERT(currentRange == keys); // there shouldn't be any nulls except for the range being inserted
 		} else if (currentShard->notAssigned()) {
@@ -6865,9 +6866,9 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 			    .detail("ResultingShard", newShard.toString());
 		} else if (ranges[i].value->adding) {
 			ASSERT(!nowAssigned);
-			// const AddingShard* oldMoveInShard = ranges[i].value->adding.get();
 			StorageServerShard newShard = currentShard->toStorageServerShard();
 			newShard.range = currentRange;
+			// TODO(psm): Cancel or update the moving-in shard when physical shard move is enabled.
 			data->addShard(ShardInfo::newShard(data, newShard));
 			TraceEvent(SevVerbose, "SSSplitShardAdding", data->thisServerID)
 			    .detail("Range", keys)
@@ -6879,11 +6880,6 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 		}
 	}
 
-	// Shard state depends on nowAssigned and whether the data is available (actually assigned in memory or on the disk)
-	// up to the given version.  The latter depends on data->newestAvailableVersion, so loop over the ranges of that.
-	// SOMEDAY: Could this just use shards?  Then we could explicitly do the removeDataRange here when an
-	// adding/transferred shard is cancelled
-	// auto vr = data->newestAvailableVersion.intersectingRanges(keys);
 	auto vr = data->shards.intersectingRanges(keys);
 	std::vector<std::pair<KeyRange, Version>> changeNewestAvailable;
 	std::vector<KeyRange> removeRanges;
@@ -6893,27 +6889,25 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 	int totalAssignedAtVer = 0;
 	for (auto r = vr.begin(); r != vr.end(); ++r) {
 		KeyRangeRef range = keys & r->range();
-		bool dataAvailable = r->value()->isReadable();
+		const bool dataAvailable = r->value()->isReadable();
 		TraceEvent(SevVerbose, "CSKPhysicalShard", data->thisServerID)
 		    .detail("Range", range)
-		    .detail("ExistingRange", r->range())
+		    .detail("ExistingShardRange", r->range())
 		    .detail("Available", dataAvailable)
 		    .detail("NowAssigned", nowAssigned)
-		    // .detail("NewestAvailable", r->value())
-		    .detail("ShardState", data->shards[range.begin]->debugDescribeState());
+		    .detail("ShardState", r->value()->debugDescribeState());
 		ASSERT(keys.contains(r->range()));
 		if (context == CSK_ASSIGN_EMPTY && !dataAvailable) {
 			ASSERT(nowAssigned);
 			TraceEvent(SevVerbose, "ChangeServerKeysAddEmptyRange", data->thisServerID)
-			    .detail("Begin", range.begin)
-			    .detail("End", range.end);
+			    .detail("Range", range)
+			    .detail("Version", cVer);
 			newEmptyRanges.push_back(range);
 			updatedShards.emplace_back(range, cVer, desiredId, desiredId, StorageServerShard::ReadWrite);
-			// data->addShard(ShardInfo::newShard(data, updatedShards.back()));
 		} else if (!nowAssigned) {
 			if (dataAvailable) {
-				// ASSERT(r->value() ==
-				//        latestVersion); // Not that we care, but this used to be checked instead of dataAvailable
+				ASSERT(data->newestAvailableVersion[range.begin] ==
+				       latestVersion); // Not that we care, but this used to be checked instead of dataAvailable
 				ASSERT(data->mutableData().getLatestVersion() > version || context == CSK_RESTORE);
 				changeNewestAvailable.emplace_back(range, version);
 				removeRanges.push_back(range);
@@ -6921,14 +6915,14 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 			updatedShards.push_back(StorageServerShard::notAssigned(range, cVer));
 			data->watches.triggerRange(range.begin, range.end);
 			data->pendingRemoveRanges[cVer].push_back(range);
+			// TODO(psm): When fetchKeys() is not used, make sure KV will remove the data, otherwise, removeDataShard()
+			// here.
 			TraceEvent(SevVerbose, "SSUnassignShard", data->thisServerID)
 			    .detail("Range", range)
 			    .detail("NowAssigned", nowAssigned)
 			    .detail("Version", cVer)
 			    .detail("NewShard", updatedShards.back().toString());
 		} else if (!dataAvailable) {
-			// SOMEDAY: Avoid restarting adding/transferred shards
-			// bypass fetchkeys; shard is known empty at initial cluster version
 			if (version == data->initialClusterVersion - 1) {
 				TraceEvent(SevVerbose, "CSKWithPhysicalShardsSeedRange", data->thisServerID)
 				    .detail("ShardID", desiredId)
@@ -7024,61 +7018,7 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 
 	// find any change feeds that no longer have shards on this server, and clean them up
 	if (!nowAssigned) {
-		std::map<Key, KeyRange> candidateFeeds;
-		auto ranges = data->keyChangeFeed.intersectingRanges(keys);
-		for (auto r : ranges) {
-			for (auto feed : r.value()) {
-				candidateFeeds[feed->id] = feed->range;
-			}
-		}
-		for (auto f : candidateFeeds) {
-			bool foundAssigned = false;
-			auto shards = data->shards.intersectingRanges(f.second);
-			for (auto shard : shards) {
-				if (shard->value()->assigned()) {
-					foundAssigned = true;
-					break;
-				}
-			}
-
-			if (!foundAssigned) {
-				Version durableVersion = data->data().getLatestVersion();
-				TraceEvent(SevDebug, "ChangeFeedCleanup", data->thisServerID)
-				    .detail("FeedID", f.first)
-				    .detail("Version", version)
-				    .detail("DurableVersion", durableVersion);
-
-				data->changeFeedCleanupDurable[f.first] = durableVersion;
-
-				Key beginClearKey = f.first.withPrefix(persistChangeFeedKeys.begin);
-				auto& mLV = data->addVersionToMutationLog(durableVersion);
-				data->addMutationToMutationLog(
-				    mLV, MutationRef(MutationRef::ClearRange, beginClearKey, keyAfter(beginClearKey)));
-				++data->counters.kvSystemClearRanges;
-				data->addMutationToMutationLog(mLV,
-				                               MutationRef(MutationRef::ClearRange,
-				                                           changeFeedDurableKey(f.first, 0),
-				                                           changeFeedDurableKey(f.first, version)));
-
-				// We can't actually remove this change feed fully until the mutations clearing its data become durable.
-				// If the SS restarted at version R before the clearing mutations became durable at version D (R < D),
-				// then the restarted SS would restore the change feed clients would be able to read data and would miss
-				// mutations from versions [R, D), up until we got the private mutation triggering the cleanup again.
-
-				auto feed = data->uidChangeFeed.find(f.first);
-				if (feed != data->uidChangeFeed.end()) {
-					feed->second->removing = true;
-					feed->second->moved(feed->second->range);
-					feed->second->newMutations.trigger();
-				}
-			} else {
-				// if just part of feed's range is moved away
-				auto feed = data->uidChangeFeed.find(f.first);
-				if (feed != data->uidChangeFeed.end()) {
-					feed->second->moved(keys);
-				}
-			}
-		}
+		cleanUpChangeFeeds(data, keys, version);
 	}
 }
 
