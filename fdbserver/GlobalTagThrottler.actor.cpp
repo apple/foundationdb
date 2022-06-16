@@ -349,7 +349,7 @@ ACTOR static Future<Void> updateGlobalTagThrottler(GlobalTagThrottler* globalTag
 
 TEST_CASE("/GlobalTagThrottler/NoActiveThrottling") {
 	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
-	state TestStorageServers testStorageServers(1);
+	state TestStorageServers testStorageServers(10);
 	ThrottleApi::TagQuotaValue tagQuotaValue;
 	TransactionTag testTag = "sampleTag1"_sr;
 	tagQuotaValue.totalReadQuota = 100.0;
@@ -363,7 +363,7 @@ TEST_CASE("/GlobalTagThrottler/NoActiveThrottling") {
 
 TEST_CASE("/GlobalTagThrottler/ActiveThrottling") {
 	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
-	state TestStorageServers testStorageServers(1);
+	state TestStorageServers testStorageServers(10);
 	ThrottleApi::TagQuotaValue tagQuotaValue;
 	TransactionTag testTag = "sampleTag1"_sr;
 	tagQuotaValue.totalReadQuota = 100.0;
