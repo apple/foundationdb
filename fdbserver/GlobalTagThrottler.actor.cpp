@@ -200,6 +200,10 @@ public:
 		// TODO: Call ThrottleApi::throttleTags
 		return Void();
 	}
+
+	void setQuota(TransactionTagRef tag, ThrottleApi::TagQuotaValue const& tagQuotaValue) {
+		trackedTags[tag].setQuota(tagQuotaValue);
+	}
 };
 
 GlobalTagThrottler::GlobalTagThrottler(Database db, UID id) : impl(PImpl<GlobalTagThrottlerImpl>::create(db, id)) {}
@@ -235,4 +239,67 @@ bool GlobalTagThrottler::isAutoThrottlingEnabled() const {
 }
 Future<Void> GlobalTagThrottler::tryUpdateAutoThrottling(StorageQueueInfo const& ss) {
 	return impl->tryUpdateAutoThrottling(ss);
+}
+
+void GlobalTagThrottler::setQuota(TransactionTagRef tag, ThrottleApi::TagQuotaValue const& tagQuotaValue) {
+	return impl->setQuota(tag, tagQuotaValue);
+}
+
+StorageQueueInfo getTestStorageQueueInfo(UID id, TransactionTag tag, double rate) {
+	StorageQueueInfo result(id, LocalityData{});
+	double fractionalBusyness{ 0.0 }; // unused for global tag throttling
+	result.busiestReadTags.emplace_back(tag, rate, fractionalBusyness);
+	return result;
+}
+
+ACTOR static Future<Void> testClient(GlobalTagThrottler* globalTagThrottler,
+                                     TransactionTag tag,
+                                     double tpsRate,
+                                     double costPerTransaction,
+                                     UID ssId) {
+	loop {
+		wait(delay(1 / tpsRate));
+		globalTagThrottler->tryUpdateAutoThrottling(getTestStorageQueueInfo(ssId, tag, costPerTransaction * tpsRate));
+		globalTagThrottler->addRequests(tag, 1);
+	}
+}
+
+ACTOR static Future<Void> monitorClientRates(GlobalTagThrottler* globalTagThrottler,
+                                             TransactionTag tag,
+                                             double desiredTPS) {
+	state int successes = 0;
+	loop {
+		wait(delay(1.0));
+		auto clientRates = globalTagThrottler->getClientRates();
+		auto it1 = clientRates.find(TransactionPriority::DEFAULT);
+		if (it1 != clientRates.end()) {
+			auto it2 = it1->second.find(tag);
+			if (it2 != it1->second.end()) {
+				auto currentTPS = it2->second.tpsRate;
+				TraceEvent("GlobalTagThrottling_RateMonitor")
+				    .detail("Tag", tag)
+				    .detail("CurrentTPSRate", currentTPS)
+				    .detail("DesiredTPSRate", desiredTPS);
+				if (abs(currentTPS - desiredTPS) < 0.1) {
+					if (++successes == 3) {
+						return Void();
+					}
+				} else {
+					successes = 0;
+				}
+			}
+		}
+	}
+}
+
+TEST_CASE("/GlobalTagThrottler/Simple") {
+	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
+	ThrottleApi::TagQuotaValue tagQuotaValue;
+	TransactionTag testTag = "sampleTag1"_sr;
+	tagQuotaValue.totalReadQuota = 100.0;
+	globalTagThrottler.setQuota(testTag, tagQuotaValue);
+	state Future<Void> client = testClient(&globalTagThrottler, testTag, 5.0, 6.0, UID{});
+	state Future<Void> monitor = monitorClientRates(&globalTagThrottler, testTag, 16.6);
+	wait(timeoutError(monitor || client, 300.0));
+	return Void();
 }

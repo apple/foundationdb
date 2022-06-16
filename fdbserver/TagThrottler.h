@@ -87,4 +87,8 @@ public:
 	int64_t manualThrottleCount() const override;
 	bool isAutoThrottlingEnabled() const override;
 	Future<Void> tryUpdateAutoThrottling(StorageQueueInfo const&) override;
+
+	// testing only
+public:
+	void setQuota(TransactionTagRef, ThrottleApi::TagQuotaValue const&);
 };
