@@ -30,6 +30,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
          "wiggle_server_addresses": ["127.0.0.1"],
          "primary": {
             "state": {"$enum":["running", "paused", "unknown"]},
+            "last_state_change_datetime": "2022-04-02 00:05:05.123 +0000",
             "last_state_change_timestamp": 1648857905.123,
             "last_round_start_datetime": "2022-04-02 00:05:05.123 +0000",
             "last_round_start_timestamp": 1648857905.123,
@@ -46,6 +47,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
          },
          "remote": {
             "state": {"$enum":["running", "paused", "unknown"]},
+            "last_state_change_datetime": "2022-04-02 00:05:05.123 +0000",
             "last_state_change_timestamp": 1648857905.123,
             "last_round_start_datetime": "2022-04-02 00:05:05.123 +0000",
             "last_round_start_timestamp": 1648857905.123,
