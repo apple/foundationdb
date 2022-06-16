@@ -392,6 +392,26 @@ TEST_CASE("/GlobalTagThrottler/WriteThrottling") {
 	return Void();
 }
 
+TEST_CASE("/GlobalTagThrottler/MultiTagThrottling") {
+	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
+	state TestStorageServers testStorageServers(10);
+	ThrottleApi::TagQuotaValue tagQuotaValue;
+	TransactionTag testTag1 = "sampleTag1"_sr;
+	TransactionTag testTag2 = "sampleTag2"_sr;
+	tagQuotaValue.totalReadQuota = 100.0;
+	globalTagThrottler.setQuota(testTag1, tagQuotaValue);
+	globalTagThrottler.setQuota(testTag2, tagQuotaValue);
+	state std::vector<Future<Void>> futures;
+	state std::vector<Future<Void>> monitorFutures;
+	futures.push_back(testClient(&globalTagThrottler, &testStorageServers, testTag1, 5.0, 6.0, false));
+	futures.push_back(testClient(&globalTagThrottler, &testStorageServers, testTag2, 5.0, 6.0, false));
+	futures.push_back(updateGlobalTagThrottler(&globalTagThrottler, &testStorageServers));
+	monitorFutures.push_back(monitorClientRates(&globalTagThrottler, testTag1, 100.0 / 6.0));
+	monitorFutures.push_back(monitorClientRates(&globalTagThrottler, testTag2, 100.0 / 6.0));
+	wait(timeoutError(waitForAny(futures) || waitForAll(monitorFutures), 300.0));
+	return Void();
+}
+
 TEST_CASE("/GlobalTagThrottler/ActiveThrottling") {
 	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
 	state TestStorageServers testStorageServers(10);
