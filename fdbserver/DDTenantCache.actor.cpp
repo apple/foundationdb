@@ -161,7 +161,6 @@ int DDTenantCache::cleanup() {
 
 	for (auto& k : keysToErase) {
 		tenantCache.erase(k);
-		ASSERT(tenantCache.find(k) == tenantCache.end());
 		tenantsRemoved++;
 	}
 
