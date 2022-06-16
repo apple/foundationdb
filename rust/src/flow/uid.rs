@@ -9,7 +9,7 @@ pub struct UID {
 }
 // This needs to be kept in sync with FlowTransport.h, but these almost never change.
 // Enum members are spelled like this in C++: WLTOKEN_ENDPOINT_NOT_FOUND
-#[derive(FromPrimitive, ToPrimitive, Debug)]
+#[derive(PartialEq, FromPrimitive, ToPrimitive, Debug, Eq, Hash)]
 pub enum WLTOKEN {
     EndpointNotFound = 0,
     PingPacket = 1,

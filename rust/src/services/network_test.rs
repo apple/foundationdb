@@ -6,11 +6,12 @@ mod network_test_request;
 #[path = "../../target/flatbuffers/NetworkTestResponse_generated.rs"]
 mod network_test_response;
 
-use super::FlowMessage;
+use super::{FlowFuture, FlowMessage};
+use crate::fdbserver::connection_handler::ConnectionHandler;
 use crate::flow::file_identifier::{FileIdentifier, IdentifierType, ParsedFileIdentifier};
 use crate::flow::uid::{UID, WLTOKEN};
-use crate::flow::Frame;
-use crate::flow::Result;
+use crate::flow::{Frame, Result};
+
 use flatbuffers::{FlatBufferBuilder, FLATBUFFERS_MAX_BUFFER_SIZE};
 
 use std::net::SocketAddr;
@@ -118,7 +119,7 @@ pub fn deserialize_response(frame: Frame) -> Result<()> {
     println!("got network test response");
     Ok(())
 }
-pub async fn handle(request: FlowMessage) -> Result<Option<FlowMessage>> {
+async fn handle(request: FlowMessage) -> Result<Option<FlowMessage>> {
     request
         .file_identifier()
         .ensure_expected(NETWORK_TEST_REQUEST_IDENTIFIER)?;
@@ -137,4 +138,18 @@ pub async fn handle(request: FlowMessage) -> Result<Option<FlowMessage>> {
 
     let frame = serialize_response(uid, network_test_request.reply_size().try_into()?)?;
     Ok(Some(FlowMessage::new(request.peer, None, frame)?))
+}
+
+pub fn handler(msg: FlowMessage) -> FlowFuture {
+    Box::pin(handle(msg))
+}
+
+pub async fn network_test(
+    svc: &ConnectionHandler,
+    request_sz: u32,
+    response_sz: u32,
+) -> Result<()> {
+    let req = serialize_request(svc.peer, request_sz, response_sz)?;
+    let response_frame = svc.rpc(req).await?;
+    deserialize_response(response_frame.frame())
 }

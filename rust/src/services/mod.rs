@@ -1,11 +1,18 @@
-use crate::flow::uid::{UID, WLTOKEN};
-use crate::flow::Result;
-use crate::flow::{file_identifier::FileIdentifier, Frame};
+use crate::flow::file_identifier::FileIdentifier;
+use crate::flow::uid::UID;
+use crate::flow::{Frame, Result};
 use std::clone::Clone;
+use std::future::Future;
 use std::net::SocketAddr;
 
 pub mod network_test;
 pub mod ping_request;
+
+pub type FlowResponse = Option<FlowMessage>;
+// XXX get rid of pin?
+pub type FlowFuture =
+    std::pin::Pin<Box<dyn 'static + Send + Future<Output = Result<FlowResponse>>>>;
+pub type FlowFn = dyn Send + Sync + Fn(FlowMessage) -> FlowFuture;
 
 #[derive(Debug)]
 pub struct FlowMessage {
@@ -37,20 +44,5 @@ impl FlowMessage {
     }
     pub fn token(&self) -> UID {
         self.frame.token.clone()
-    }
-}
-
-pub async fn route_well_known_request(
-    wltoken: WLTOKEN,
-    request: FlowMessage,
-) -> Result<Option<FlowMessage>> {
-    match wltoken {
-        WLTOKEN::PingPacket => ping_request::handle(request).await,
-        WLTOKEN::ReservedForTesting => network_test::handle(request).await,
-        wltoken => Err(format!(
-            "Got unhandled request for well-known endpoint {:?}",
-            wltoken,
-        )
-        .into()),
     }
 }

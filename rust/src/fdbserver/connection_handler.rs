@@ -1,5 +1,7 @@
-use crate::flow::{connection, file_identifier::FileIdentifierNames, uid::UID, Error, Result};
-use crate::services::{network_test, ping_request, route_well_known_request, FlowMessage};
+use crate::flow::{
+    connection, file_identifier::FileIdentifierNames, uid::UID, uid::WLTOKEN, Error, Result,
+};
+use crate::services::{network_test, ping_request, FlowFn, FlowFuture, FlowMessage};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, oneshot, OwnedSemaphorePermit, Semaphore};
@@ -152,12 +154,20 @@ pub async fn connection_handler(
     Ok(())
 }
 
-#[derive(Debug)]
 pub struct ConnectionHandler {
     pub peer: SocketAddr,
     pub fit: FileIdentifierNames,
     pub response_tx: mpsc::Sender<FlowMessage>,
     pub in_flight_requests: dashmap::DashMap<UID, oneshot::Sender<FlowMessage>>,
+    pub well_known_endpoints: dashmap::DashMap<WLTOKEN, Box<FlowFn>>,
+}
+
+impl std::fmt::Debug for ConnectionHandler {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::result::Result<(), std::fmt::Error> {
+        f.debug_struct("ConnectionHandler")
+            .field("peer", &self.peer)
+            .finish()
+    }
 }
 
 impl ConnectionHandler {
@@ -176,7 +186,11 @@ impl ConnectionHandler {
             fit: FileIdentifierNames::new().unwrap(),
             response_tx,
             in_flight_requests: dashmap::DashMap::new(),
+            well_known_endpoints: dashmap::DashMap::new(),
         };
+        connection_handler.register_well_known_endpoint(WLTOKEN::PingPacket, ping_request::handler);
+        connection_handler
+            .register_well_known_endpoint(WLTOKEN::ReservedForTesting, network_test::handler);
         let connection_handler = Arc::new(connection_handler);
         let (reader, writer, connect_packet) = connection::new(stream).await?;
         // TODO: Check protocol compatibility, create object w/ enough info to allow request routing
@@ -185,6 +199,13 @@ impl ConnectionHandler {
         spawn_sender(response_rx, writer);
         spawn_receiver(connection_handler.clone(), reader, permit);
         Ok(connection_handler)
+    }
+
+    pub fn register_well_known_endpoint<F>(&self, wltoken: WLTOKEN, f: F)
+    where
+        F: 'static + Send + Sync + Fn(FlowMessage) -> FlowFuture,
+    {
+        self.well_known_endpoints.insert(wltoken, Box::new(f));
     }
 
     pub async fn new_outgoing_connection(saddr: SocketAddr) -> Result<Arc<ConnectionHandler>> {
@@ -227,17 +248,6 @@ impl ConnectionHandler {
         }
     }
 
-    pub async fn ping(&self) -> Result<()> {
-        let req = ping_request::serialize_request(self.peer)?;
-        let response_frame = self.rpc(req).await?;
-        ping_request::deserialize_response(response_frame.frame())
-    }
-
-    pub async fn network_test(&self, request_sz: u32, response_sz: u32) -> Result<()> {
-        let req = network_test::serialize_request(self.peer, request_sz, response_sz)?;
-        let response_frame = self.rpc(req).await?;
-        network_test::deserialize_response(response_frame.frame())
-    }
     fn dispatch_response(&self, tx: oneshot::Sender<FlowMessage>, request: FlowMessage) {
         match tx.send(request) {
             Ok(()) => (),
@@ -266,16 +276,7 @@ impl ConnectionHandler {
         );
     }
 
-    fn handle_req<'a, 'b>(
-        &self, // in_flight_requests: &dashmap::DashMap<UID, oneshot::Sender<Frame>>,
-        request: FlowMessage,
-    ) -> Result<
-        Option<
-            std::pin::Pin<
-                Box<dyn Send + futures_util::Future<Output = Result<Option<FlowMessage>>>>,
-            >,
-        >,
-    > {
+    fn handle_req<'a, 'b>(&self, request: FlowMessage) -> Result<Option<FlowFuture>> {
         request.validate()?;
         let wltoken = request.token().get_well_known_endpoint();
         Ok(match wltoken {
@@ -289,7 +290,16 @@ impl ConnectionHandler {
                     None
                 }
             },
-            Some(wltoken) => Some(Box::pin(route_well_known_request(wltoken, request))),
+            Some(wltoken) => match self.well_known_endpoints.get(&wltoken) {
+                Some(func) => Some((**func)(request)),
+                None => Some(Box::pin(async move {
+                    Err(format!(
+                        "Got unhandled request for well-known endpoint {:?}",
+                        wltoken,
+                    )
+                    .into())
+                })),
+            },
         })
     }
 }
