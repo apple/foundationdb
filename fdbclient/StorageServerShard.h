@@ -68,8 +68,8 @@ struct StorageServerShard {
 
 	std::string toString() const {
 		return "StorageServerShard: [Range]: " + Traceable<KeyRangeRef>::toString(range) +
-		       " [Shard ID]: " + format("%016llx", this->id) + " [State]: " + getShardStateString() +
-		       " [Desired Shard ID]: " + format("%016llx", this->desiredId);
+		       " [Shard ID]: " + format("%016llx", this->id) + " [Version]: " + std::to_string(version) +
+		       " [State]: " + getShardStateString() + " [Desired Shard ID]: " + format("%016llx", this->desiredId);
 	}
 
 	template <class Ar>
