@@ -266,13 +266,18 @@ Optional<double> testGetTPSLimit(GlobalTagThrottler& globalTagThrottler, Transac
 
 ACTOR static Future<Void> testClient(GlobalTagThrottler* globalTagThrottler,
                                      TransactionTag tag,
-                                     double tpsRate,
+                                     double desiredTpsRate,
                                      double costPerTransaction,
                                      UID ssId) {
 	loop {
-		wait(delay(1 / tpsRate));
-		globalTagThrottler->tryUpdateAutoThrottling(getTestStorageQueueInfo(ssId, tag, costPerTransaction * tpsRate));
-		globalTagThrottler->addRequests(tag, 1);
+		auto tpsLimit = testGetTPSLimit(*globalTagThrottler, tag);
+		state double tpsRate = tpsLimit.present() ? std::min<double>(desiredTpsRate, tpsLimit.get()) : desiredTpsRate;
+		loop {
+			wait(delay(1 / tpsRate));
+			globalTagThrottler->tryUpdateAutoThrottling(
+			    getTestStorageQueueInfo(ssId, tag, costPerTransaction * tpsRate));
+			globalTagThrottler->addRequests(tag, 1);
+		}
 	}
 }
 
@@ -301,14 +306,26 @@ ACTOR static Future<Void> monitorClientRates(GlobalTagThrottler* globalTagThrott
 	}
 }
 
-TEST_CASE("/GlobalTagThrottler/Simple") {
+TEST_CASE("/GlobalTagThrottler/NoActiveThrottling") {
 	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
 	ThrottleApi::TagQuotaValue tagQuotaValue;
 	TransactionTag testTag = "sampleTag1"_sr;
 	tagQuotaValue.totalReadQuota = 100.0;
 	globalTagThrottler.setQuota(testTag, tagQuotaValue);
 	state Future<Void> client = testClient(&globalTagThrottler, testTag, 5.0, 6.0, UID{});
-	state Future<Void> monitor = monitorClientRates(&globalTagThrottler, testTag, 16.6);
+	state Future<Void> monitor = monitorClientRates(&globalTagThrottler, testTag, 100.0 / 6.0);
+	wait(timeoutError(monitor || client, 300.0));
+	return Void();
+}
+
+TEST_CASE("/GlobalTagThrottler/ActiveThrottling") {
+	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
+	ThrottleApi::TagQuotaValue tagQuotaValue;
+	TransactionTag testTag = "sampleTag1"_sr;
+	tagQuotaValue.totalReadQuota = 100.0;
+	globalTagThrottler.setQuota(testTag, tagQuotaValue);
+	state Future<Void> client = testClient(&globalTagThrottler, testTag, 20.0, 10.0, UID{});
+	state Future<Void> monitor = monitorClientRates(&globalTagThrottler, testTag, 10.0);
 	wait(timeoutError(monitor || client, 300.0));
 	return Void();
 }
