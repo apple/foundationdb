@@ -663,6 +663,9 @@ public:
 
 	bool isPrimary() const { return primary; }
 
+	// state and last state change timestamp
+	std::pair<StorageWiggler::State, double> getStorageWigglerState() const;
+
 	UID getDistributorId() const { return distributorId; }
 
 	// Keep track of servers and teams -- serves requests for getRandomTeam
