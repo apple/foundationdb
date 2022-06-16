@@ -105,7 +105,7 @@ func main() {
 	pflag.StringVar(&additionalEnvFile, "additional-env-file", "", "A file with additional environment variables to use when interpreting the monitor configuration")
 	pflag.IntVar(&processCount, "process-count", 1, "The number of processes to start")
 	pflag.BoolVar(&enablePprof, "enable-pprof", false, "Enables /debug/pprof endpoints on the listen address")
-	pflag.StringVar(&listenAddress, "listen-address", ":8081", "A file with additional environment variables to use when interpreting the monitor configuration")
+	pflag.StringVar(&listenAddress, "listen-address", ":8081", "An address and port to listen on")
 	pflag.Parse()
 
 	logger := zapr.NewLogger(initLogger(logPath))
