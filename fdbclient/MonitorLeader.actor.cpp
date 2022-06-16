@@ -591,6 +591,7 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderOneGeneration(Reference<IClusterCon
 	state AsyncTrigger nomineeChange;
 	state std::vector<Optional<LeaderInfo>> nominees;
 	state Future<Void> allActors;
+	state Optional<std::pair<LeaderInfo, bool>> leader;
 
 	nominees.resize(coordinators.clientLeaderServers.size());
 
@@ -604,7 +605,7 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderOneGeneration(Reference<IClusterCon
 	allActors = waitForAll(actors);
 
 	loop {
-		Optional<std::pair<LeaderInfo, bool>> leader = getLeader(nominees);
+		leader = getLeader(nominees);
 		TraceEvent("MonitorLeaderChange")
 		    .detail("NewLeader", leader.present() ? leader.get().first.changeID : UID(1, 1));
 		if (leader.present()) {
@@ -625,7 +626,7 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderOneGeneration(Reference<IClusterCon
 					    .detail("CurrentConnectionString",
 					            info.intermediateConnRecord->getConnectionString().toString());
 				}
-				connRecord->setAndPersistConnectionString(info.intermediateConnRecord->getConnectionString());
+				wait(connRecord->setAndPersistConnectionString(info.intermediateConnRecord->getConnectionString()));
 				info.intermediateConnRecord = connRecord;
 			}
 
@@ -977,7 +978,7 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 					    .detail("CurrentConnectionString",
 					            info.intermediateConnRecord->getConnectionString().toString());
 				}
-				connRecord->setAndPersistConnectionString(info.intermediateConnRecord->getConnectionString());
+				wait(connRecord->setAndPersistConnectionString(info.intermediateConnRecord->getConnectionString()));
 				info.intermediateConnRecord = connRecord;
 			}
 
