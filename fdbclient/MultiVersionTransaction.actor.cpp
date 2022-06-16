@@ -398,6 +398,38 @@ Reference<ITransaction> DLTenant::createTransaction() {
 	return Reference<ITransaction>(new DLTransaction(api, tr));
 }
 
+ThreadFuture<Key> DLTenant::purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) {
+	if (!api->tenantPurgeBlobGranules) {
+		return unsupported_operation();
+	}
+	FdbCApi::FDBFuture* f = api->tenantPurgeBlobGranules(tenant,
+	                                                     keyRange.begin.begin(),
+	                                                     keyRange.begin.size(),
+	                                                     keyRange.end.begin(),
+	                                                     keyRange.end.size(),
+	                                                     purgeVersion,
+	                                                     force);
+
+	return toThreadFuture<Key>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+		const uint8_t* key;
+		int keyLength;
+		FdbCApi::fdb_error_t error = api->futureGetKey(f, &key, &keyLength);
+		ASSERT(!error);
+
+		// The memory for this is stored in the FDBFuture and is released when the future gets destroyed
+		return Key(KeyRef(key, keyLength), Arena());
+	});
+}
+
+ThreadFuture<Void> DLTenant::waitPurgeGranulesComplete(const KeyRef& purgeKey) {
+	if (!api->tenantWaitPurgeGranulesComplete) {
+		return unsupported_operation();
+	}
+
+	FdbCApi::FDBFuture* f = api->tenantWaitPurgeGranulesComplete(tenant, purgeKey.begin(), purgeKey.size());
+	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) { return Void(); });
+}
+
 // DLDatabase
 DLDatabase::DLDatabase(Reference<FdbCApi> api, ThreadFuture<FdbCApi::FDBDatabase*> dbFuture) : api(api), db(nullptr) {
 	addref();
@@ -520,16 +552,16 @@ ThreadFuture<ProtocolVersion> DLDatabase::getServerProtocol(Optional<ProtocolVer
 }
 
 ThreadFuture<Key> DLDatabase::purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) {
-	if (!api->purgeBlobGranules) {
+	if (!api->databasePurgeBlobGranules) {
 		return unsupported_operation();
 	}
-	FdbCApi::FDBFuture* f = api->purgeBlobGranules(db,
-	                                               keyRange.begin.begin(),
-	                                               keyRange.begin.size(),
-	                                               keyRange.end.begin(),
-	                                               keyRange.end.size(),
-	                                               purgeVersion,
-	                                               force);
+	FdbCApi::FDBFuture* f = api->databasePurgeBlobGranules(db,
+	                                                       keyRange.begin.begin(),
+	                                                       keyRange.begin.size(),
+	                                                       keyRange.end.begin(),
+	                                                       keyRange.end.size(),
+	                                                       purgeVersion,
+	                                                       force);
 
 	return toThreadFuture<Key>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
 		const uint8_t* key;
@@ -543,11 +575,11 @@ ThreadFuture<Key> DLDatabase::purgeBlobGranules(const KeyRangeRef& keyRange, Ver
 }
 
 ThreadFuture<Void> DLDatabase::waitPurgeGranulesComplete(const KeyRef& purgeKey) {
-	if (!api->waitPurgeGranulesComplete) {
+	if (!api->databaseWaitPurgeGranulesComplete) {
 		return unsupported_operation();
 	}
 
-	FdbCApi::FDBFuture* f = api->waitPurgeGranulesComplete(db, purgeKey.begin(), purgeKey.size());
+	FdbCApi::FDBFuture* f = api->databaseWaitPurgeGranulesComplete(db, purgeKey.begin(), purgeKey.size());
 	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) { return Void(); });
 }
 
@@ -624,11 +656,9 @@ void DLApi::init() {
 	                   headerVersion >= 700);
 	loadClientFunction(
 	    &api->databaseCreateSnapshot, lib, fdbCPath, "fdb_database_create_snapshot", headerVersion >= 700);
-
 	loadClientFunction(
-	    &api->purgeBlobGranules, lib, fdbCPath, "fdb_database_purge_blob_granules", headerVersion >= 710);
-
-	loadClientFunction(&api->waitPurgeGranulesComplete,
+	    &api->databasePurgeBlobGranules, lib, fdbCPath, "fdb_database_purge_blob_granules", headerVersion >= 710);
+	loadClientFunction(&api->databaseWaitPurgeGranulesComplete,
 	                   lib,
 	                   fdbCPath,
 	                   "fdb_database_wait_purge_granules_complete",
@@ -636,6 +666,13 @@ void DLApi::init() {
 
 	loadClientFunction(
 	    &api->tenantCreateTransaction, lib, fdbCPath, "fdb_tenant_create_transaction", headerVersion >= 710);
+	loadClientFunction(
+	    &api->tenantPurgeBlobGranules, lib, fdbCPath, "fdb_tenant_purge_blob_granules", headerVersion >= 720);
+	loadClientFunction(&api->tenantWaitPurgeGranulesComplete,
+	                   lib,
+	                   fdbCPath,
+	                   "fdb_tenant_wait_purge_granules_complete",
+	                   headerVersion >= 720);
 	loadClientFunction(&api->tenantDestroy, lib, fdbCPath, "fdb_tenant_destroy", headerVersion >= 710);
 
 	loadClientFunction(&api->transactionSetOption, lib, fdbCPath, "fdb_transaction_set_option", headerVersion >= 0);
@@ -1314,6 +1351,16 @@ Reference<ITransaction> MultiVersionTenant::createTransaction() {
 	return Reference<ITransaction>(new MultiVersionTransaction(tenantState->db,
 	                                                           Reference<MultiVersionTenant>::addRef(this),
 	                                                           tenantState->db->dbState->transactionDefaultOptions));
+}
+
+ThreadFuture<Key> MultiVersionTenant::purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) {
+	auto f = tenantState->db ? tenantState->db->purgeBlobGranules(keyRange, purgeVersion, force)
+	                         : ThreadFuture<Key>(Never());
+	return abortableFuture(f, tenantState->db->dbState->dbVar->get().onChange);
+}
+ThreadFuture<Void> MultiVersionTenant::waitPurgeGranulesComplete(const KeyRef& purgeKey) {
+	auto f = tenantState->db ? tenantState->db->waitPurgeGranulesComplete(purgeKey) : ThreadFuture<Void>(Never());
+	return abortableFuture(f, tenantState->db->dbState->dbVar->get().onChange);
 }
 
 MultiVersionTenant::TenantState::TenantState(Reference<MultiVersionDatabase> db, StringRef tenantName)

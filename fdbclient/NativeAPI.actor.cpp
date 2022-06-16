@@ -9476,19 +9476,29 @@ Reference<DatabaseContext::TransactionT> DatabaseContext::createTransaction() {
 ACTOR Future<Key> purgeBlobGranulesActor(Reference<DatabaseContext> db,
                                          KeyRange range,
                                          Version purgeVersion,
+                                         Optional<TenantName> tenant,
                                          bool force) {
 	state Database cx(db);
 	state Transaction tr(cx);
 	state Key purgeKey;
+	state KeyRange purgeRange = range;
+	state bool loadedTenantPrefix = false;
 
 	// FIXME: implement force
 	if (!force) {
 		throw unsupported_operation();
 	}
+
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
+			if (tenant.present() && !loadedTenantPrefix) {
+				TenantMapEntry tenantEntry = wait(blobGranuleGetTenantEntry(&tr, range.begin));
+				loadedTenantPrefix = true;
+				purgeRange = purgeRange.withPrefix(tenantEntry.prefix);
+			}
 
 			Value purgeValue = blobGranulePurgeValueFor(purgeVersion, range, force);
 			tr.atomicOp(
@@ -9520,8 +9530,11 @@ ACTOR Future<Key> purgeBlobGranulesActor(Reference<DatabaseContext> db,
 	return purgeKey;
 }
 
-Future<Key> DatabaseContext::purgeBlobGranules(KeyRange range, Version purgeVersion, bool force) {
-	return purgeBlobGranulesActor(Reference<DatabaseContext>::addRef(this), range, purgeVersion, force);
+Future<Key> DatabaseContext::purgeBlobGranules(KeyRange range,
+                                               Version purgeVersion,
+                                               Optional<TenantName> tenant,
+                                               bool force) {
+	return purgeBlobGranulesActor(Reference<DatabaseContext>::addRef(this), range, purgeVersion, tenant, force);
 }
 
 ACTOR Future<Void> waitPurgeGranulesCompleteActor(Reference<DatabaseContext> db, Key purgeKey) {

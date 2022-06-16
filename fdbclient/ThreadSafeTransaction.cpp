@@ -131,7 +131,7 @@ ThreadFuture<Key> ThreadSafeDatabase::purgeBlobGranules(const KeyRangeRef& keyRa
 	DatabaseContext* db = this->db;
 	KeyRange range = keyRange;
 	return onMainThread([db, range, purgeVersion, force]() -> Future<Key> {
-		return db->purgeBlobGranules(range, purgeVersion, force);
+		return db->purgeBlobGranules(range, purgeVersion, {}, force);
 	});
 }
 
@@ -172,6 +172,21 @@ ThreadSafeDatabase::~ThreadSafeDatabase() {
 Reference<ITransaction> ThreadSafeTenant::createTransaction() {
 	auto type = db->isConfigDB ? ISingleThreadTransaction::Type::SIMPLE_CONFIG : ISingleThreadTransaction::Type::RYW;
 	return Reference<ITransaction>(new ThreadSafeTransaction(db->db, type, name));
+}
+
+ThreadFuture<Key> ThreadSafeTenant::purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) {
+	DatabaseContext* db = this->db->db;
+	Standalone<StringRef> tenantName = this->name;
+	KeyRange range = keyRange;
+	return onMainThread([db, range, purgeVersion, tenantName, force]() -> Future<Key> {
+		return db->purgeBlobGranules(range, purgeVersion, tenantName, force);
+	});
+}
+
+ThreadFuture<Void> ThreadSafeTenant::waitPurgeGranulesComplete(const KeyRef& purgeKey) {
+	DatabaseContext* db = this->db->db;
+	Key key = purgeKey;
+	return onMainThread([db, key]() -> Future<Void> { return db->waitPurgeGranulesComplete(key); });
 }
 
 ThreadSafeTenant::~ThreadSafeTenant() {}
