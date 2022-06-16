@@ -1055,7 +1055,8 @@ void usage() {
 	printf("%-24s %s\n", "", "This option cannot be specified with --seconds.");
 	printf("%-24s %s\n", "    --keylen=LENGTH", "Specify the key lengths");
 	printf("%-24s %s\n", "    --vallen=LENGTH", "Specify the value lengths");
-	printf("%-24s %s\n", "    --tenants=TENANTS", "Specify the number of tenants to use");
+	printf("%-24s %s\n", "    --active_tenants=ACTIVE_TENANTS", "Specify the number of tenants to use");
+	printf("%-24s %s\n", "    --total_tenants=TOTAL_TENANTS", "Specify the number of tenants to create");
 	printf("%-24s %s\n", "-x, --transaction=SPEC", "Transaction specification");
 	printf("%-24s %s\n", "    --tps|--tpsmax=TPS", "Specify the target max TPS");
 	printf("%-24s %s\n", "    --tpsmin=TPS", "Specify the target min TPS");
@@ -1994,7 +1995,8 @@ int statsProcessMain(Arguments const& args,
 		fmt::fprintf(fp, "\"sampling\": %d,", args.sampling);
 		fmt::fprintf(fp, "\"key_length\": %d,", args.key_length);
 		fmt::fprintf(fp, "\"value_length\": %d,", args.value_length);
-		fmt::fprintf(fp, "\"tenants\": %d,", args.active_tenants);
+		fmt::fprintf(fp, "\"active_tenants\": %d,", args.active_tenants);
+		fmt::fprintf(fp, "\"total_tenants\": %d,", args.total_tenants);
 		fmt::fprintf(fp, "\"commit_get\": %d,", args.commit_get);
 		fmt::fprintf(fp, "\"verbose\": %d,", args.verbose);
 		fmt::fprintf(fp, "\"cluster_files\": \"%s\",", args.cluster_files[0]);
