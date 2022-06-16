@@ -509,3 +509,25 @@ TEST_CASE("/GlobalTagThrottler/SkewedMultiClientActiveThrottling") {
 	wait(timeoutError(monitor || client || updater, 300.0));
 	return Void();
 }
+
+// Test that the tag throttler can reach equilibrium, then adjust to a new equilibrium once the quota is changed
+TEST_CASE("/GlobalTagThrottler/UpdateQuota") {
+	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
+	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10);
+	state ThrottleApi::TagQuotaValue tagQuotaValue;
+	state TransactionTag testTag = "sampleTag1"_sr;
+	tagQuotaValue.totalReadQuota = 100.0;
+	globalTagThrottler.setQuota(testTag, tagQuotaValue);
+	state Future<Void> client =
+	    GlobalTagThrottlerTesting::runClient(&globalTagThrottler, &storageServers, testTag, 5.0, 6.0, false);
+	state Future<Void> monitor =
+	    GlobalTagThrottlerTesting::monitorClientRates(&globalTagThrottler, testTag, 100.0 / 6.0);
+	state Future<Void> updater =
+	    GlobalTagThrottlerTesting::updateGlobalTagThrottler(&globalTagThrottler, &storageServers);
+	wait(timeoutError(monitor || client || updater, 300.0));
+	tagQuotaValue.totalReadQuota = 50.0;
+	globalTagThrottler.setQuota(testTag, tagQuotaValue);
+	monitor = GlobalTagThrottlerTesting::monitorClientRates(&globalTagThrottler, testTag, 50.0 / 6.0);
+	wait(timeoutError(monitor || client || updater, 300.0));
+	return Void();
+}
