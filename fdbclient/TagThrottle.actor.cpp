@@ -135,6 +135,11 @@ Key ThrottleApi::getTagQuotaKey(TransactionTagRef tag) {
 	return tag.withPrefix(tagQuotaPrefix);
 }
 
+bool ThrottleApi::TagQuotaValue::isValid() const {
+	return reservedReadQuota <= totalReadQuota && reservedWriteQuota <= totalWriteQuota && reservedReadQuota >= 0 &&
+	       reservedWriteQuota >= 0;
+}
+
 Value ThrottleApi::TagQuotaValue::toValue() const {
 	Tuple tuple;
 	tuple.appendDouble(reservedReadQuota);
@@ -159,7 +164,7 @@ ThrottleApi::TagQuotaValue ThrottleApi::TagQuotaValue::fromValue(ValueRef value)
 		TraceEvent(SevWarnAlways, "TagQuotaValueFailedToDeserialize").error(e);
 		throw invalid_throttle_quota_value();
 	}
-	if (result.reservedReadQuota > result.totalReadQuota || result.reservedWriteQuota > result.totalWriteQuota) {
+	if (!result.isValid()) {
 		TraceEvent(SevWarnAlways, "TagQuotaValueInvalidQuotas")
 		    .detail("ReservedReadQuota", result.reservedReadQuota)
 		    .detail("TotalReadQuota", result.totalReadQuota)

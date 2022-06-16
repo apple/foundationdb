@@ -603,6 +603,7 @@ public:
 	double totalReadQuota{ 0.0 };
 	double reservedWriteQuota{ 0.0 };
 	double totalWriteQuota{ 0.0 };
+	bool isValid() const;
 	Value toValue() const;
 	static TagQuotaValue fromValue(ValueRef);
 };
@@ -621,6 +622,9 @@ void setTagQuota(Reference<Tr> tr,
 	tagQuotaValue.totalReadQuota = totalReadQuota;
 	tagQuotaValue.reservedWriteQuota = reservedWriteQuota;
 	tagQuotaValue.totalWriteQuota = totalWriteQuota;
+	if (!tagQuotaValue.isValid()) {
+		throw invalid_throttle_quota_value();
+	}
 	tr->set(getTagQuotaKey(tag), tagQuotaValue.toValue());
 	signalThrottleChange(tr);
 }
