@@ -300,6 +300,19 @@ Future<Void> store(T& out, Future<T> what) {
 	});
 }
 
+#if false
+// NOTE: Think twice whether create a new struct for a complex return type is better before using tuple.
+// If we just use the return type once, is it worth to create a new struct?
+// And enable the unit test in genericactors.actor.cpp
+template <class A, class... Bs>
+Future<Void> storeTuple(Future<std::tuple<A, Bs...>> what, A& a, Bs&... b) {
+	return map(what, [&](std::tuple<A, Bs...> const& v) {
+		std::tie(a, b...) = v;
+		return Void();
+	});
+}
+#endif
+
 template <class T>
 Future<Void> storeOrThrow(T& out, Future<Optional<T>> what, Error e = key_not_found()) {
 	return map(what, [&out, e](Optional<T> const& o) {

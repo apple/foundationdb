@@ -40,6 +40,7 @@ set(FDBSERVER_SRCS
   DDTeamCollection.h
   DDTenantCache.actor.cpp
   DDTenantCache.h
+  DDTxnProcessor.actor.cpp
   DiskQueue.actor.cpp
   EncryptKeyProxy.actor.cpp
   EncryptKeyProxyInterface.h
