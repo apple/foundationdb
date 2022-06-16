@@ -7352,8 +7352,8 @@ public:
 		PagerEventReasons reason;
 		VersionedBTree* btree;
 		Reference<IPagerSnapshot> pager;
-		bool valid;
 		std::vector<PathEntry> path;
+		bool valid;
 
 	public:
 		BTreeCursor() : reason(PagerEventReasons::MAXEVENTREASONS) {}
@@ -7405,7 +7405,7 @@ public:
 		// of the cursor and pop it.
 		PathEntry& back() { return path.back(); }
 		void popPath() { path.pop_back(); }
-
+		//reason != PagerEventReasons::FetchRange 
 		Future<Void> pushPage(const BTreePage::BinaryTree::Cursor& link) {
 			debug_printf("pushPage(link=%s)\n", link.get().toString(false).c_str());
 			return map(readPage(btree,
@@ -7415,7 +7415,8 @@ public:
 			                    link.get().getChildPage(),
 			                    ioMaxPriority,
 			                    false,
-			                    true),
+			                    !(path.back().btPage()->height == 2 && reason == PagerEventReasons::FetchRange)
+							),
 			           [=](Reference<const ArenaPage> p) {
 #if REDWOOD_DEBUG
 				           path.push_back({ p, btree->getCursor(p.getPtr(), link), link.get().getChildPage() });
@@ -7793,18 +7794,20 @@ public:
 		m_tree->set(keyValue);
 	}
 
-	Future<RangeResult> readRange(KeyRangeRef keys, int rowLimit, int byteLimit, IKeyValueStore::ReadType) override {
+	Future<RangeResult> readRange(KeyRangeRef keys, int rowLimit, int byteLimit, IKeyValueStore::ReadType readType) override {
 		debug_printf("READRANGE %s\n", printable(keys).c_str());
-		return catchError(readRange_impl(this, keys, rowLimit, byteLimit));
+		return catchError(readRange_impl(this, keys, rowLimit, byteLimit, readType));
 	}
 
 	ACTOR static Future<RangeResult> readRange_impl(KeyValueStoreRedwood* self,
 	                                                KeyRange keys,
 	                                                int rowLimit,
-	                                                int byteLimit) {
+	                                                int byteLimit,
+													IKeyValueStore::ReadType readType) {
+		state PagerEventReasons reason = (readType == IKeyValueStore::ReadType::FETCH) ?  PagerEventReasons::FetchRange : PagerEventReasons::RangeRead; 
 		state VersionedBTree::BTreeCursor cur;
 		wait(
-		    self->m_tree->initBTreeCursor(&cur, self->m_tree->getLastCommittedVersion(), PagerEventReasons::RangeRead));
+		    self->m_tree->initBTreeCursor(&cur, self->m_tree->getLastCommittedVersion(), reason));
 		state PriorityMultiLock::Lock lock;
 		state Future<Void> f;
 		++g_redwoodMetrics.metric.opGetRange;
