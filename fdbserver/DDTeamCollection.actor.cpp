@@ -1978,7 +1978,7 @@ public:
 						    teamCollection->server_info.size() <= teamCollection->configuration.storageTeamSize ||
 						    teamCollection->machine_info.size() < teamCollection->configuration.storageTeamSize;
 						if (takeRest) {
-							teamCollection->storageWiggler->setState(StorageWiggler::PAUSE);
+							teamCollection->storageWiggler->setWiggleState(StorageWiggler::PAUSE);
 							if (teamCollection->configuration.storageMigrationType == StorageMigrationType::GRADUAL) {
 								TraceEvent(SevWarn, "PerpetualStorageWiggleSleep", teamCollection->distributorId)
 								    .suppressFor(SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY * 4)
@@ -2056,7 +2056,7 @@ public:
 					TEST(true); // paused because cluster is unhealthy
 					moveFinishFuture = Never();
 					self->includeStorageServersForWiggle();
-					self->storageWiggler->setState(StorageWiggler::PAUSE);
+					self->storageWiggler->setWiggleState(StorageWiggler::PAUSE);
 					TraceEvent(self->configuration.storageMigrationType == StorageMigrationType::AGGRESSIVE ? SevInfo
 					                                                                                        : SevWarn,
 					           "PerpetualStorageWigglePause",
@@ -2073,7 +2073,7 @@ public:
 							wait(self->storageWiggler->startWiggle());
 							auto fv = self->excludeStorageServersForWiggle(id);
 							moveFinishFuture = fv;
-							self->storageWiggler->setState(StorageWiggler::RUN);
+							self->storageWiggler->setWiggleState(StorageWiggler::RUN);
 							TraceEvent("PerpetualStorageWiggleStart", self->distributorId)
 							    .detail("Primary", self->primary)
 							    .detail("ServerId", id)
@@ -5112,7 +5112,7 @@ bool DDTeamCollection::exclusionSafetyCheck(std::vector<UID>& excludeServerIDs) 
 
 std::pair<StorageWiggler::State, double> DDTeamCollection::getStorageWigglerState() const {
 	if (storageWiggler) {
-		return { storageWiggler->getState(), storageWiggler->lastStateChangeTs };
+		return { storageWiggler->getWiggleState(), storageWiggler->lastStateChangeTs };
 	}
 	return { StorageWiggler::INVALID, 0.0 };
 }

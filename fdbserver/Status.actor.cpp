@@ -2827,8 +2827,9 @@ ACTOR Future<JsonBuilderObject> storageWigglerStatsFetcher(Optional<DataDistribu
 		auto obj = ObjectReader::fromStringRef<StorageWiggleMetrics>(primaryV.get(), IncludeVersion()).toJSON();
 		if (stateFut.canGet() && stateFut.get().present()) {
 			auto& reply = stateFut.get().get();
-			obj["state"] = StorageWiggler::getStateStr(static_cast<StorageWiggler::State>(reply.primary));
+			obj["state"] = StorageWiggler::getWiggleStateStr(static_cast<StorageWiggler::State>(reply.primary));
 			obj["last_state_change_timestamp"] = reply.lastStateChangePrimary;
+			obj["last_state_change_datetime"] = epochsToGMTString(reply.lastStateChangePrimary);
 		}
 		res["primary"] = obj;
 	}
@@ -2836,8 +2837,9 @@ ACTOR Future<JsonBuilderObject> storageWigglerStatsFetcher(Optional<DataDistribu
 		auto obj = ObjectReader::fromStringRef<StorageWiggleMetrics>(remoteV.get(), IncludeVersion()).toJSON();
 		if (stateFut.canGet() && stateFut.get().present()) {
 			auto& reply = stateFut.get().get();
-			obj["state"] = StorageWiggler::getStateStr(static_cast<StorageWiggler::State>(reply.remote));
+			obj["state"] = StorageWiggler::getWiggleStateStr(static_cast<StorageWiggler::State>(reply.remote));
 			obj["last_state_change_timestamp"] = reply.lastStateChangeRemote;
+			obj["last_state_change_datetime"] = epochsToGMTString(reply.lastStateChangeRemote);
 		}
 		res["remote"] = obj;
 	}

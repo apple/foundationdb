@@ -504,7 +504,7 @@ struct StorageWiggleMetrics {
 };
 
 struct StorageWiggler : ReferenceCounted<StorageWiggler> {
-	enum State : uint8_t { INVALID = 0, RUN, PAUSE };
+	enum State : uint8_t { INVALID = 0, RUN = 1, PAUSE = 2 };
 	AsyncVar<bool> nonEmpty;
 	DDTeamCollection const* teamCollection;
 	StorageWiggleMetrics metrics;
@@ -515,7 +515,7 @@ struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 	    wiggle_pq;
 	std::unordered_map<UID, decltype(wiggle_pq)::handle_type> pq_handles;
 
-	State _state = State::INVALID;
+	State wiggleState = State::INVALID;
 	double lastStateChangeTs = 0.0; // timestamp describes when did the state change
 
 	explicit StorageWiggler(DDTeamCollection* collection) : nonEmpty(false), teamCollection(collection){};
@@ -529,14 +529,14 @@ struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 	bool empty() const { return wiggle_pq.empty(); }
 	Optional<UID> getNextServerId();
 
-	State getState() const { return _state; }
-	void setState(State s) {
-		if (_state != s) {
-			_state = s;
+	State getWiggleState() const { return wiggleState; }
+	void setWiggleState(State s) {
+		if (wiggleState != s) {
+			wiggleState = s;
 			lastStateChangeTs = g_network->now();
 		}
 	}
-	static std::string getStateStr(State s) {
+	static std::string getWiggleStateStr(State s) {
 		switch (s) {
 		case State::RUN:
 			return "running";
