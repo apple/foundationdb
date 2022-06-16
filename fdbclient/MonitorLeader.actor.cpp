@@ -919,7 +919,7 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 				    .detail("ClusterFile", connRecord->toString())
 				    .detail("StoredConnectionString", storedConnectionString.toString())
 				    .detail("CurrentConnectionString", connRecord->getConnectionString().toString());
-				connRecord->setAndPersistConnectionString(storedConnectionString);
+				wait(connRecord->setAndPersistConnectionString(storedConnectionString));
 				info.intermediateConnRecord =
 				    connRecord->makeIntermediateRecord(ClusterConnectionString(storedConnectionString));
 				return info;
@@ -997,8 +997,8 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 			    .detail("Error", rep.getError().name())
 			    .detail("Coordinator", clientLeaderServer.getAddressString());
 			index = (index + 1) % coordinatorsSize;
-			allConnectionsFailed = (index == successIndex);
-			if (allConnectionsFailed) {
+			if (index == successIndex) {
+				allConnectionsFailed = true;
 				wait(delay(CLIENT_KNOBS->COORDINATOR_RECONNECTION_DELAY));
 			}
 		}
