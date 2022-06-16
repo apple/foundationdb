@@ -22,7 +22,7 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/RkTagThrottleCollection.h"
 
-double RkTagThrottleCollection::RkTagThrottleData::getTargetRate(Optional<double> requestRate) {
+double RkTagThrottleCollection::RkTagThrottleData::getTargetRate(Optional<double> requestRate) const {
 	if (limits.tpsRate == 0.0 || !requestRate.present() || requestRate.get() == 0.0 || !rateSet) {
 		return limits.tpsRate;
 	} else {
