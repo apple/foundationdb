@@ -130,6 +130,7 @@ set(FDBCLIENT_SRCS
   StatusClient.h
   StorageServerInterface.cpp
   StorageServerInterface.h
+  StorageServerShard.h
   StorageCheckpoint.h
   Subspace.cpp
   Subspace.h

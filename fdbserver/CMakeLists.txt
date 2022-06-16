@@ -259,6 +259,7 @@ set(FDBSERVER_SRCS
   workloads/ParallelRestore.actor.cpp
   workloads/Performance.actor.cpp
   workloads/PhysicalShardMove.actor.cpp
+  workloads/StorageServerCheckpointRestoreTest.actor.cpp
   workloads/Ping.actor.cpp
   workloads/PopulateTPCC.actor.cpp
   workloads/PrivateEndpoints.actor.cpp
