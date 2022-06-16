@@ -130,7 +130,14 @@ ACTOR Future<Void> setQuota(Reference<IDatabase> db,
 	}
 }
 
-constexpr auto usage = "Usage: quota [get|set] <tag> [reserved|total] [read|write] <value>\n";
+constexpr auto usage =
+    "quota [get <tag> [reserved|total] [read|write]|set <tag> [reserved|total] [read|write] <value>]";
+
+bool exitFailure() {
+	fmt::print(usage);
+	return false;
+}
+
 } // namespace
 
 namespace fdb_cli {
@@ -138,38 +145,32 @@ namespace fdb_cli {
 ACTOR Future<bool> quotaCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	state bool result = true;
 	if (tokens.size() != 5 && tokens.size() != 6) {
-		printf(usage);
-		return false;
+		return exitFailure();
 	} else {
 		auto tag = parseTag(tokens[2]);
 		auto limitType = parseLimitType(tokens[3]);
 		auto opType = parseOpType(tokens[4]);
 		if (!tag.present() || !limitType.present() || !opType.present()) {
-			printf(usage);
-			return false;
+			return exitFailure();
 		}
 		if (tokens[1] == "get"_sr) {
 			if (tokens.size() != 5) {
-				printf(usage);
-				return false;
+				return exitFailure();
 			}
 			wait(getQuota(db, tag.get(), limitType.get(), opType.get()));
 			return true;
 		} else if (tokens[1] == "set"_sr) {
 			if (tokens.size() != 6) {
-				printf(usage);
-				return false;
+				return exitFailure();
 			}
 			auto const limitValue = parseLimitValue(tokens[5]);
 			if (!limitValue.present()) {
-				printf(usage);
-				return false;
+				return exitFailure();
 			}
 			wait(setQuota(db, tag.get(), limitType.get(), opType.get(), limitValue.get()));
 			return true;
 		} else {
-			printf(usage);
-			return false;
+			return exitFailure();
 		}
 	}
 }
