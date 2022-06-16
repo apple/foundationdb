@@ -252,6 +252,18 @@ StorageQueueInfo getTestStorageQueueInfo(UID id, TransactionTag tag, double rate
 	return result;
 }
 
+Optional<double> testGetTPSLimit(GlobalTagThrottler& globalTagThrottler, TransactionTag tag) {
+	auto clientRates = globalTagThrottler.getClientRates();
+	auto it1 = clientRates.find(TransactionPriority::DEFAULT);
+	if (it1 != clientRates.end()) {
+		auto it2 = it1->second.find(tag);
+		if (it2 != it1->second.end()) {
+			return it2->second.tpsRate;
+		}
+	}
+	return {};
+}
+
 ACTOR static Future<Void> testClient(GlobalTagThrottler* globalTagThrottler,
                                      TransactionTag tag,
                                      double tpsRate,
@@ -266,28 +278,25 @@ ACTOR static Future<Void> testClient(GlobalTagThrottler* globalTagThrottler,
 
 ACTOR static Future<Void> monitorClientRates(GlobalTagThrottler* globalTagThrottler,
                                              TransactionTag tag,
-                                             double desiredTPS) {
+                                             double desiredTPSLimit) {
 	state int successes = 0;
 	loop {
 		wait(delay(1.0));
-		auto clientRates = globalTagThrottler->getClientRates();
-		auto it1 = clientRates.find(TransactionPriority::DEFAULT);
-		if (it1 != clientRates.end()) {
-			auto it2 = it1->second.find(tag);
-			if (it2 != it1->second.end()) {
-				auto currentTPS = it2->second.tpsRate;
-				TraceEvent("GlobalTagThrottling_RateMonitor")
-				    .detail("Tag", tag)
-				    .detail("CurrentTPSRate", currentTPS)
-				    .detail("DesiredTPSRate", desiredTPS);
-				if (abs(currentTPS - desiredTPS) < 0.1) {
-					if (++successes == 3) {
-						return Void();
-					}
-				} else {
-					successes = 0;
+		auto currentTPSLimit = testGetTPSLimit(*globalTagThrottler, tag);
+		if (currentTPSLimit.present()) {
+			TraceEvent("GlobalTagThrottling_RateMonitor")
+			    .detail("Tag", tag)
+			    .detail("CurrentTPSRate", currentTPSLimit.get())
+			    .detail("DesiredTPSRate", desiredTPSLimit);
+			if (abs(currentTPSLimit.get() - desiredTPSLimit) < 0.1) {
+				if (++successes == 3) {
+					return Void();
 				}
+			} else {
+				successes = 0;
 			}
+		} else {
+			successes = 0;
 		}
 	}
 }
