@@ -206,30 +206,14 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		if (BGW_DEBUG) {
 			fmt::print("Setting up blob granule range for tenant {0}\n", name.printable());
 		}
-		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
-		loop {
-			try {
-				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
-				state Optional<TenantMapEntry> entry = wait(ManagementAPI::createTenantTransaction(tr, name));
-				if (!entry.present()) {
-					// if tenant already exists because of retry, load it
-					wait(store(entry, ManagementAPI::tryGetTenantTransaction(tr, name)));
-					ASSERT(entry.present());
-				}
+		TenantMapEntry entry = wait(ManagementAPI::createTenant(cx.getReference(), name));
 
-				wait(tr->commit());
-				if (BGW_DEBUG) {
-					fmt::print("Set up blob granule range for tenant {0}: {1}\n",
-					           name.printable(),
-					           entry.get().prefix.printable());
-				}
-				return entry.get();
-			} catch (Error& e) {
-				wait(tr->onError(e));
-			}
+		if (BGW_DEBUG) {
+			fmt::print("Set up blob granule range for tenant {0}: {1}\n", name.printable(), entry.prefix.printable());
 		}
+
+		return entry;
 	}
 
 	std::string description() const override { return "BlobGranuleCorrectnessWorkload"; }
