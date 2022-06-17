@@ -96,12 +96,15 @@ public:
 				    .detail("HasMessage", self->cursor->hasMessage())
 				    .detail("Version", self->cursor->version().version);
 
-				if (self->cursor->popped() != 0 || (!self->hasDiscardedData && BUGGIFY_WITH_PROB(0.01))) {
+				bool buggify = !self->hasDiscardedData && BUGGIFY_WITH_PROB(0.01);
+				if (self->cursor->popped() != 0 || buffify) {
 					TEST(true); // disk adapter reset
 					TraceEvent(SevWarnAlways, "DiskQueueAdapterReset").detail("Version", self->cursor->popped());
 					self->recoveryQueue.clear();
 					self->recoveryQueueDataSize = 0;
-					self->recoveryLoc = self->cursor->popped();
+					if (!buggify || self->cursor->popped() != 0) {
+						self->recoveryLoc = self->cursor->popped();
+					}
 					self->recoveryQueueLoc = self->recoveryLoc;
 					self->totalRecoveredBytes = 0;
 					if (self->peekTypeSwitches % 3 == 1) {
