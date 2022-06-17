@@ -78,7 +78,8 @@ void ThreadSafeDatabase::setOption(FDBDatabaseOptions::Option option, Optional<S
 		    db->checkDeferredError();
 		    db->setOption(option, passValue.contents());
 	    },
-	    &db->deferredError);
+	    db,
+	    &DatabaseContext::deferredError);
 }
 
 ThreadFuture<int64_t> ThreadSafeDatabase::rebootWorker(const StringRef& address, bool check, int duration) {
@@ -243,7 +244,7 @@ void ThreadSafeTransaction::cancel() {
 
 void ThreadSafeTransaction::setVersion(Version v) {
 	ISingleThreadTransaction* tr = this->tr;
-	onMainThreadVoid([tr, v]() { tr->setVersion(v); }, &tr->deferredError);
+	onMainThreadVoid([tr, v]() { tr->setVersion(v); }, tr, &ISingleThreadTransaction::deferredError);
 }
 
 ThreadFuture<Version> ThreadSafeTransaction::getReadVersion() {
@@ -402,12 +403,12 @@ void ThreadSafeTransaction::addReadConflictRange(const KeyRangeRef& keys) {
 	KeyRange r = keys;
 
 	ISingleThreadTransaction* tr = this->tr;
-	onMainThreadVoid([tr, r]() { tr->addReadConflictRange(r); }, &tr->deferredError);
+	onMainThreadVoid([tr, r]() { tr->addReadConflictRange(r); }, tr, &ISingleThreadTransaction::deferredError);
 }
 
 void ThreadSafeTransaction::makeSelfConflicting() {
 	ISingleThreadTransaction* tr = this->tr;
-	onMainThreadVoid([tr]() { tr->makeSelfConflicting(); }, &tr->deferredError);
+	onMainThreadVoid([tr]() { tr->makeSelfConflicting(); }, tr, &ISingleThreadTransaction::deferredError);
 }
 
 void ThreadSafeTransaction::atomicOp(const KeyRef& key, const ValueRef& value, uint32_t operationType) {
@@ -415,7 +416,9 @@ void ThreadSafeTransaction::atomicOp(const KeyRef& key, const ValueRef& value, u
 	Value v = value;
 
 	ISingleThreadTransaction* tr = this->tr;
-	onMainThreadVoid([tr, k, v, operationType]() { tr->atomicOp(k, v, operationType); }, &tr->deferredError);
+	onMainThreadVoid([tr, k, v, operationType]() { tr->atomicOp(k, v, operationType); },
+	                 tr,
+	                 &ISingleThreadTransaction::deferredError);
 }
 
 void ThreadSafeTransaction::set(const KeyRef& key, const ValueRef& value) {
@@ -423,14 +426,14 @@ void ThreadSafeTransaction::set(const KeyRef& key, const ValueRef& value) {
 	Value v = value;
 
 	ISingleThreadTransaction* tr = this->tr;
-	onMainThreadVoid([tr, k, v]() { tr->set(k, v); }, &tr->deferredError);
+	onMainThreadVoid([tr, k, v]() { tr->set(k, v); }, tr, &ISingleThreadTransaction::deferredError);
 }
 
 void ThreadSafeTransaction::clear(const KeyRangeRef& range) {
 	KeyRange r = range;
 
 	ISingleThreadTransaction* tr = this->tr;
-	onMainThreadVoid([tr, r]() { tr->clear(r); }, &tr->deferredError);
+	onMainThreadVoid([tr, r]() { tr->clear(r); }, tr, &ISingleThreadTransaction::deferredError);
 }
 
 void ThreadSafeTransaction::clear(const KeyRef& begin, const KeyRef& end) {
@@ -445,14 +448,15 @@ void ThreadSafeTransaction::clear(const KeyRef& begin, const KeyRef& end) {
 
 		    tr->clear(KeyRangeRef(b, e));
 	    },
-	    &tr->deferredError);
+	    tr,
+	    &ISingleThreadTransaction::deferredError);
 }
 
 void ThreadSafeTransaction::clear(const KeyRef& key) {
 	Key k = key;
 
 	ISingleThreadTransaction* tr = this->tr;
-	onMainThreadVoid([tr, k]() { tr->clear(k); }, &tr->deferredError);
+	onMainThreadVoid([tr, k]() { tr->clear(k); }, tr, &ISingleThreadTransaction::deferredError);
 }
 
 ThreadFuture<Void> ThreadSafeTransaction::watch(const KeyRef& key) {
@@ -469,7 +473,7 @@ void ThreadSafeTransaction::addWriteConflictRange(const KeyRangeRef& keys) {
 	KeyRange r = keys;
 
 	ISingleThreadTransaction* tr = this->tr;
-	onMainThreadVoid([tr, r]() { tr->addWriteConflictRange(r); }, &tr->deferredError);
+	onMainThreadVoid([tr, r]() { tr->addWriteConflictRange(r); }, tr, &ISingleThreadTransaction::deferredError);
 }
 
 ThreadFuture<Void> ThreadSafeTransaction::commit() {
@@ -481,16 +485,18 @@ ThreadFuture<Void> ThreadSafeTransaction::commit() {
 }
 
 Version ThreadSafeTransaction::getCommittedVersion() {
-	// This should be thread safe when called legally, but it is fragile
-	return tr->getCommittedVersion();
+	ISingleThreadTransaction* tr = this->tr;
+	return onMainThread([tr]() -> Future<Version> { return tr->getCommittedVersion(); }).get();
 }
 
 VersionVector ThreadSafeTransaction::getVersionVector() {
-	return tr->getVersionVector();
+	ISingleThreadTransaction* tr = this->tr;
+	return onMainThread([tr]() -> Future<VersionVector> { return tr->getVersionVector(); }).get();
 }
 
 SpanContext ThreadSafeTransaction::getSpanContext() {
-	return tr->getSpanContext();
+	ISingleThreadTransaction* tr = this->tr;
+	return onMainThread([tr]() -> Future<SpanContext> { return tr->getSpanContext(); }).get();
 }
 
 ThreadFuture<int64_t> ThreadSafeTransaction::getApproximateSize() {
@@ -513,7 +519,9 @@ void ThreadSafeTransaction::setOption(FDBTransactionOptions::Option option, Opti
 	Standalone<Optional<StringRef>> passValue = value;
 
 	// ThreadSafeTransaction is not allowed to do anything with options except pass them through to RYW.
-	onMainThreadVoid([tr, option, passValue]() { tr->setOption(option, passValue.contents()); }, &tr->deferredError);
+	onMainThreadVoid([tr, option, passValue]() { tr->setOption(option, passValue.contents()); },
+	                 tr,
+	                 &ISingleThreadTransaction::deferredError);
 }
 
 ThreadFuture<Void> ThreadSafeTransaction::checkDeferredError() {
