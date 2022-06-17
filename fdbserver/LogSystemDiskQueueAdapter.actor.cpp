@@ -97,7 +97,7 @@ public:
 				    .detail("Version", self->cursor->version().version);
 
 				bool buggify = !self->hasDiscardedData && BUGGIFY_WITH_PROB(0.01);
-				if (self->cursor->popped() != 0 || buffify) {
+				if (self->cursor->popped() != 0 || buggify) {
 					TEST(true); // disk adapter reset
 					TraceEvent(SevWarnAlways, "DiskQueueAdapterReset").detail("Version", self->cursor->popped());
 					self->recoveryQueue.clear();
