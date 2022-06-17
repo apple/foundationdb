@@ -26,9 +26,14 @@
 
 ISingleThreadTransaction* ISingleThreadTransaction::allocateOnForeignThread(Type type) {
 	if (type == Type::RYW) {
-		auto tr = new ReadYourWritesTransaction;
+		// We only want to allocate memory for the transaction, not initialize
+		// the object, so use operator new instead of new. The RYWTransaction
+		// will get initialized on the main thread.
+		auto tr =
+		    (ReadYourWritesTransaction*)ReadYourWritesTransaction::operator new(sizeof(ReadYourWritesTransaction));
 		return tr;
 	} else if (type == Type::SIMPLE_CONFIG) {
+		// Configuration transaction objects expect to be initialized.
 		auto tr = new SimpleConfigTransaction;
 		return tr;
 	} else if (type == Type::PAXOS_CONFIG) {

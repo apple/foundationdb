@@ -32,7 +32,9 @@
 #include "flow/FastRef.h"
 #include "flow/IRandom.h"
 #include "flow/ITrace.h"
+#include "flow/Knobs.h"
 #include "flow/Trace.h"
+#include "flow/flow.h"
 #include "flow/network.h"
 #include "flow/UnitTest.h"
 
@@ -73,6 +75,22 @@ struct SimKmsConnectorContext : NonCopyable, ReferenceCounted<SimKmsConnectorCon
 	}
 };
 
+namespace {
+Optional<int64_t> getRefreshInterval(int64_t now, int64_t defaultTtl) {
+	if (BUGGIFY) {
+		return Optional<int64_t>(now + defaultTtl);
+	}
+	return Optional<int64_t>();
+}
+
+Optional<int64_t> getExpireInterval(Optional<int64_t> refTS) {
+	if (BUGGIFY) {
+		return Optional<int64_t>(-1);
+	}
+	return refTS;
+}
+} // namespace
+
 ACTOR Future<Void> ekLookupByIds(Reference<SimKmsConnectorContext> ctx,
                                  KmsConnectorInterface interf,
                                  KmsConnLookupEKsByKeyIdsReq req) {
@@ -90,8 +108,8 @@ ACTOR Future<Void> ekLookupByIds(Reference<SimKmsConnectorContext> ctx,
 	for (const auto& item : req.encryptKeyInfos) {
 		const auto& itr = ctx->simEncryptKeyStore.find(item.baseCipherId);
 		if (itr != ctx->simEncryptKeyStore.end()) {
-			rep.cipherKeyDetails.emplace_back(
-			    item.domainId, itr->first, StringRef(rep.arena, itr->second.get()->key), rep.arena);
+			rep.cipherKeyDetails.emplace_back_deep(
+			    rep.arena, item.domainId, itr->first, StringRef(itr->second.get()->key));
 
 			if (dbgKIdTrace.present()) {
 				// {encryptDomainId, baseCipherId} forms a unique tuple across encryption domains
@@ -127,11 +145,17 @@ ACTOR Future<Void> ekLookupByDomainIds(Reference<SimKmsConnectorContext> ctx,
 	// Map encryptionDomainId to corresponding EncryptKeyCtx element using a modulo operation. This
 	// would mean multiple domains gets mapped to the same encryption key which is fine, the
 	// EncryptKeyStore guarantees that keyId -> plaintext encryptKey mapping is idempotent.
+	int64_t currTS = (int64_t)now();
+	// Fetch default TTL to avoid BUGGIFY giving different value per invocation causing refTS > expTS
+	int64_t defaultTtl = FLOW_KNOBS->ENCRYPT_CIPHER_KEY_CACHE_TTL;
+	Optional<int64_t> refAtTS = getRefreshInterval(currTS, defaultTtl);
+	Optional<int64_t> expAtTS = getExpireInterval(refAtTS);
 	for (const auto& info : req.encryptDomainInfos) {
 		EncryptCipherBaseKeyId keyId = 1 + abs(info.domainId) % SERVER_KNOBS->SIM_KMS_MAX_KEYS;
 		const auto& itr = ctx->simEncryptKeyStore.find(keyId);
 		if (itr != ctx->simEncryptKeyStore.end()) {
-			rep.cipherKeyDetails.emplace_back(info.domainId, keyId, StringRef(itr->second.get()->key), rep.arena);
+			rep.cipherKeyDetails.emplace_back_deep(
+			    req.arena, info.domainId, keyId, StringRef(itr->second.get()->key), refAtTS, expAtTS);
 			if (dbgDIdTrace.present()) {
 				// {encryptId, baseCipherId} forms a unique tuple across encryption domains
 				dbgDIdTrace.get().detail(
@@ -262,9 +286,8 @@ ACTOR Future<Void> testRunWorkload(KmsConnectorInterface inf, uint32_t nEncrypti
 		for (i = 0; i < maxDomainIds; i++) {
 			// domainIdsReq.encryptDomainIds.push_back(i);
 			EncryptCipherDomainId domainId = i;
-			EncryptCipherDomainName domainName = StringRef(std::to_string(domainId));
-			domainIdsReq.encryptDomainInfos.emplace_back(
-			    KmsConnLookupDomainIdsReqInfo(i, domainName, domainIdsReq.arena));
+			EncryptCipherDomainName domainName = StringRef(domainIdsReq.arena, std::to_string(domainId));
+			domainIdsReq.encryptDomainInfos.emplace_back(domainIdsReq.arena, i, domainName);
 		}
 		KmsConnLookupEKsByDomainIdsRep domainIdsRep = wait(inf.ekLookupByDomainIds.getReply(domainIdsReq));
 		for (auto& element : domainIdsRep.cipherKeyDetails) {
@@ -285,8 +308,8 @@ ACTOR Future<Void> testRunWorkload(KmsConnectorInterface inf, uint32_t nEncrypti
 
 		state KmsConnLookupEKsByKeyIdsReq keyIdsReq;
 		for (const auto& item : idsToLookup) {
-			keyIdsReq.encryptKeyInfos.emplace_back(KmsConnLookupKeyIdsReqInfo(
-			    item.second, item.first, StringRef(std::to_string(item.second)), keyIdsReq.arena));
+			keyIdsReq.encryptKeyInfos.emplace_back_deep(
+			    keyIdsReq.arena, item.second, item.first, StringRef(std::to_string(item.second)));
 		}
 		state KmsConnLookupEKsByKeyIdsRep keyIdsReply = wait(inf.ekLookupByIds.getReply(keyIdsReq));
 		/* TraceEvent("Lookup")
@@ -302,8 +325,8 @@ ACTOR Future<Void> testRunWorkload(KmsConnectorInterface inf, uint32_t nEncrypti
 	{
 		// Verify unknown key access returns the error
 		state KmsConnLookupEKsByKeyIdsReq req;
-		req.encryptKeyInfos.emplace_back(KmsConnLookupKeyIdsReqInfo(
-		    1, maxEncryptionKeys + 1, StringRef(std::to_string(maxEncryptionKeys)), req.arena));
+		req.encryptKeyInfos.emplace_back_deep(
+		    req.arena, 1, maxEncryptionKeys + 1, StringRef(req.arena, std::to_string(maxEncryptionKeys)));
 		try {
 			KmsConnLookupEKsByKeyIdsRep reply = wait(inf.ekLookupByIds.getReply(req));
 		} catch (Error& e) {
