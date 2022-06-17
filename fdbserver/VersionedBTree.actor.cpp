@@ -7352,8 +7352,8 @@ public:
 		PagerEventReasons reason;
 		VersionedBTree* btree;
 		Reference<IPagerSnapshot> pager;
-		std::vector<PathEntry> path;
 		bool valid;
+		std::vector<PathEntry> path;
 
 	public:
 		BTreeCursor() : reason(PagerEventReasons::MAXEVENTREASONS) {}
