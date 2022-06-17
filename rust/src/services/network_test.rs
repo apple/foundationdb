@@ -6,9 +6,9 @@ mod network_test_request;
 #[path = "../../target/flatbuffers/NetworkTestResponse_generated.rs"]
 mod network_test_response;
 
-use crate::fdbserver::connection_handler::ConnectionHandler;
 use crate::flow::file_identifier::{FileIdentifier, IdentifierType, ParsedFileIdentifier};
 use crate::flow::uid::{UID, WLTOKEN};
+use crate::flow::ConnectionHandler;
 use crate::flow::{FlowFuture, FlowMessage, Frame, Result};
 
 use flatbuffers::{FlatBufferBuilder, FLATBUFFERS_MAX_BUFFER_SIZE};

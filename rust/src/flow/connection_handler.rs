@@ -1,5 +1,6 @@
-use crate::fdbserver::loopback_handler::LoopbackHandler;
-use crate::flow::{connection, file_identifier::FileIdentifierNames, Error, Result};
+use crate::flow::{
+    connection, file_identifier::FileIdentifierNames, Error, LoopbackHandler, Result,
+};
 use crate::flow::{FlowFuture, FlowMessage};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, TcpStream};
@@ -15,6 +16,7 @@ use std::task::{Context, Poll};
 const MAX_CONNECTIONS: usize = 250;
 const MAX_REQUESTS: usize = MAX_CONNECTIONS * 2;
 
+/// Takes FlowMessages from multiple threads and writes them to a ConnectionWriter in a single-threaded way
 async fn sender<C: 'static + AsyncWrite + Unpin + Send>(
     mut response_rx: tokio::sync::mpsc::Receiver<FlowMessage>,
     mut writer: connection::ConnectionWriter<C>,
@@ -37,33 +39,17 @@ async fn sender<C: 'static + AsyncWrite + Unpin + Send>(
     Ok(())
 }
 
-fn spawn_sender<C: 'static + AsyncWrite + Unpin + Send>(
-    response_rx: mpsc::Receiver<FlowMessage>,
-    writer: connection::ConnectionWriter<C>,
-) {
-    tokio::spawn(async move {
-        match sender(response_rx, writer).await {
-            Ok(_) => {}
-            Err(e) => {
-                println!("Unexpected error from sender! {:?}", e);
-            }
-        }
-        // TODO: Connection teardown logic?
-    });
-}
-
+/// Takes FlowMessages from a single-threaded connection reader, and runs them in parallel by spawning concurrent tasks.
 async fn receiver<C>(
-    connection_handler: Arc<ConnectionHandler>,
+    svc: Arc<ConnectionHandler>,
     mut reader: connection::ConnectionReader<C>,
-    permit: OwnedSemaphorePermit,
 ) -> Result<()>
 where
     C: 'static + AsyncRead + Unpin + Send,
 {
-    let mut svc =
-        tower::limit::concurrency::ConcurrencyLimit::new(connection_handler.deref(), MAX_REQUESTS);
+    let mut svc = tower::limit::concurrency::ConcurrencyLimit::new(svc.deref(), MAX_REQUESTS);
     while let Some(frame) = reader.read_frame().await? {
-        let request = FlowMessage::new_remote(connection_handler.peer, None, frame)?;
+        let request = FlowMessage::new_remote(svc.get_ref().peer, None, frame)?;
         let response_tx = svc.get_ref().response_tx.clone();
         // poll_ready and call must be invoked atomically
         // we could read this before reading the next frame to prevent the next, throttled request from consuming
@@ -80,8 +66,6 @@ where
             };
         });
     }
-    println!("clean shutdown!");
-    drop(permit);
     Ok(())
 }
 
@@ -92,7 +76,34 @@ fn spawn_receiver<C>(
 ) where
     C: 'static + AsyncRead + Unpin + Send,
 {
-    tokio::spawn(receiver(connection_handler, reader, permit));
+    tokio::spawn(async move {
+        match receiver(connection_handler, reader).await {
+            Ok(_) => {
+                println!("clean shutdown!");
+            }
+            Err(e) => {
+                println!("Unexpected error from receiver! {:?}", e)
+            }
+        }
+        drop(permit);
+    });
+}
+
+fn spawn_sender<C>(
+    response_rx: mpsc::Receiver<FlowMessage>,
+    writer: connection::ConnectionWriter<C>,
+) where
+    C: 'static + AsyncWrite + Unpin + Send,
+{
+    tokio::spawn(async move {
+        match sender(response_rx, writer).await {
+            Ok(_) => {}
+            Err(e) => {
+                println!("Unexpected error from sender! {:?}", e);
+            }
+        }
+        // TODO: Connection teardown logic?
+    });
 }
 
 pub struct ConnectionHandler {
@@ -198,6 +209,7 @@ impl ConnectionHandler {
     }
     fn handle_req(&self, request: FlowMessage) -> Result<Option<FlowFuture>> {
         request.validate()?;
+        // This futures / async pattern will allow the router service to route requests to appropriate services.
         Ok(Some(Box::pin(Self::handle(
             self.loopback_handler.clone(),
             request,

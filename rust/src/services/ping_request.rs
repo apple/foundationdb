@@ -7,9 +7,9 @@ mod ping_request;
 #[path = "../../target/flatbuffers/Void_generated.rs"]
 mod void;
 
-use crate::fdbserver::connection_handler::ConnectionHandler;
 use crate::flow::file_identifier::{FileIdentifier, IdentifierType, ParsedFileIdentifier};
 use crate::flow::uid::{UID, WLTOKEN};
+use crate::flow::ConnectionHandler;
 use crate::flow::{FlowFuture, FlowMessage, Frame, Result};
 use std::net::SocketAddr;
 

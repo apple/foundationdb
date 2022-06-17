@@ -1,8 +1,5 @@
-use foundationdb::fdbserver::connection_handler::ConnectionHandler;
-use foundationdb::fdbserver::loopback_handler::LoopbackHandler;
+use foundationdb::flow::{uid::WLTOKEN, ConnectionHandler, LoopbackHandler, Result};
 use foundationdb::services::{network_test, ping_request};
-
-use foundationdb::flow::{uid::WLTOKEN, Result};
 
 #[tokio::main]
 async fn main() -> Result<()> {

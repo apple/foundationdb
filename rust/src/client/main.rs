@@ -1,7 +1,4 @@
-use foundationdb::fdbserver::{
-    connection_handler::ConnectionHandler, loopback_handler::LoopbackHandler,
-};
-use foundationdb::flow::{uid::WLTOKEN, Result};
+use foundationdb::flow::{uid::WLTOKEN, ConnectionHandler, LoopbackHandler, Result};
 use foundationdb::services::{network_test, ping_request};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
