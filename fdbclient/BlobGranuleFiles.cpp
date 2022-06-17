@@ -42,13 +42,18 @@
 uint16_t LATEST_BG_FORMAT_VERSION = 1;
 uint16_t MIN_SUPPORTED_BG_FORMAT_VERSION = 1;
 
-struct BlockOffsetRef {
+// TODO combine with SystemData? These don't actually have to match though
+
+const uint8_t SNAPSHOT_FILE_TYPE = 'S';
+const uint8_t DELTA_FILE_TYPE = 'D';
+
+struct ChildBlockPointerRef {
 	StringRef key;
 	uint32_t offset;
 
-	BlockOffsetRef() {}
-	explicit BlockOffsetRef(StringRef key, uint32_t offset) : key(key), offset(offset) {}
-	explicit BlockOffsetRef(Arena& arena, StringRef key, uint32_t offset) : key(arena, key), offset(offset) {}
+	ChildBlockPointerRef() {}
+	explicit ChildBlockPointerRef(StringRef key, uint32_t offset) : key(key), offset(offset) {}
+	explicit ChildBlockPointerRef(Arena& arena, StringRef key, uint32_t offset) : key(arena, key), offset(offset) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -56,46 +61,133 @@ struct BlockOffsetRef {
 	}
 
 	struct OrderByKey {
-		bool operator()(BlockOffsetRef const& a, BlockOffsetRef const& b) const { return a.key < b.key; }
+		bool operator()(ChildBlockPointerRef const& a, ChildBlockPointerRef const& b) const { return a.key < b.key; }
 	};
 
 	struct OrderByKeyCommonPrefix {
 		int prefixLen;
 		OrderByKeyCommonPrefix(int prefixLen) : prefixLen(prefixLen) {}
-		bool operator()(BlockOffsetRef const& a, BlockOffsetRef const& b) const {
+		bool operator()(ChildBlockPointerRef const& a, ChildBlockPointerRef const& b) const {
 			return a.key.compareSuffix(b.key, prefixLen);
 		}
 	};
 };
 
-/*
- * A file header for a key-ordered file that is chunked on disk, where each chunk is a disjoint key range of data.
- */
-struct BGChunkedFileIndex {
-	constexpr static FileIdentifier file_identifier = 3828201;
-	uint16_t formatVersion;
-	uint8_t fileType;
-	Optional<StringRef> filter; // not used currently
-	VectorRef<BlockOffsetRef> dataBlockOffsets;
+struct IndexBlockRef {
+	VectorRef<ChildBlockPointerRef> children;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, formatVersion, fileType, filter, dataBlockOffsets);
+		serializer(ar, children);
 	}
 };
 
-// TODO combine with SystemData? These don't actually have to match though
+/*
+ * A file header for a key-ordered file that is chunked on disk, where each chunk is a disjoint key range of data.
+ * FIXME: encryption and compression support
+ */
+struct IndexedBlobGranuleFile {
+	constexpr static FileIdentifier file_identifier = 3828201;
+	// serialized fields
+	uint16_t formatVersion;
+	uint8_t fileType;
+	Optional<StringRef> filter; // not used currently
 
-const uint8_t SNAPSHOT_FILE_TYPE = 'S';
-const uint8_t DELTA_FILE_TYPE = 'D';
+	// TODO: add encrypted/compressed versions of index block
+	IndexBlockRef indexBlock;
+
+	// Non-serialized member fields
+	// TODO: add encryption and compression metadata for whole file
+	StringRef fileBytes;
+
+	static Standalone<IndexedBlobGranuleFile> fromFileBytes(const StringRef& fileBytes) {
+		// TODO: decrypt/decompress index block here if necessary first
+
+		// parse index block at head of file
+		Arena arena;
+		IndexedBlobGranuleFile file;
+		// TODO: version?
+		ObjectReader dataReader(fileBytes.begin(), Unversioned());
+		dataReader.deserialize(FileIdentifierFor<IndexedBlobGranuleFile>::value, file, arena);
+
+		file.fileBytes = fileBytes;
+
+		// do sanity checks
+		if (file.formatVersion > LATEST_BG_FORMAT_VERSION || file.formatVersion < MIN_SUPPORTED_BG_FORMAT_VERSION) {
+			TraceEvent(SevWarn, "BlobGranuleFileInvalidFormatVersion")
+			    .suppressFor(5.0)
+			    .detail("FoundFormatVersion", file.formatVersion)
+			    .detail("MinSupported", MIN_SUPPORTED_BG_FORMAT_VERSION)
+			    .detail("LatestSupported", LATEST_BG_FORMAT_VERSION);
+			throw unsupported_format_version();
+		}
+		ASSERT(file.fileType == SNAPSHOT_FILE_TYPE || file.fileType == DELTA_FILE_TYPE);
+
+		return Standalone<IndexedBlobGranuleFile>(file, arena);
+	}
+
+	ChildBlockPointerRef* findStartBlock(const KeyRef& beginKey) const {
+		ChildBlockPointerRef searchKey(beginKey, 0);
+		ChildBlockPointerRef* startBlock = (ChildBlockPointerRef*)std::lower_bound(
+		    indexBlock.children.begin(), indexBlock.children.end(), searchKey, ChildBlockPointerRef::OrderByKey());
+
+		if (startBlock != indexBlock.children.end() && startBlock != indexBlock.children.begin() &&
+		    beginKey < startBlock->key) {
+			startBlock--;
+		} else if (startBlock == indexBlock.children.end()) {
+			startBlock--;
+		}
+
+		return startBlock;
+	}
+
+	// FIXME: implement some sort of iterator type interface?
+	template <class ChildType>
+	Standalone<ChildType> getChild(const ChildBlockPointerRef* childPointer) {
+		// TODO decrypt/decompress if necessary
+		ASSERT(childPointer != indexBlock.children.end());
+		const ChildBlockPointerRef* nextPointer = childPointer + 1;
+		ASSERT(nextPointer != indexBlock.children.end());
+
+		size_t blockSize = nextPointer->offset - childPointer->offset;
+		StringRef childData(fileBytes.begin() + childPointer->offset, blockSize);
+
+		Arena childArena;
+		ChildType child;
+		// TODO: version?
+		ObjectReader dataReader(childData.begin(), Unversioned());
+		dataReader.deserialize(FileIdentifierFor<ChildType>::value, child, childArena);
+
+		// TODO implement some sort of decrypted+decompressed+deserialized cache, if this object gets reused?
+		return Standalone<ChildType>(child, childArena);
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, formatVersion, fileType, filter, indexBlock);
+	}
+};
+
+// Since ObjectReader doesn't update read offset after reading, we have to make the block offsets absolute offsets by
+// serializing once, adding the serialized size to each offset, and serializing again. This relies on the fact that
+// ObjectWriter/flatbuffers uses fixed size integers instead of variable size.
+
+Value serializeIndexBlock(Standalone<IndexedBlobGranuleFile>& file) {
+	// TODO: version?
+	Value indexBlock = ObjectWriter::toValue(file, Unversioned());
+	for (auto& it : file.indexBlock.children) {
+		it.offset += indexBlock.size();
+	}
+	return ObjectWriter::toValue(file, Unversioned());
+}
 
 // TODO: this should probably be in actor file with yields?
 // TODO: optimize memory copying
 // TODO: sanity check no oversized files
 Value serializeChunkedSnapshot(Standalone<GranuleSnapshot> snapshot, int chunkCount) {
-	Standalone<BGChunkedFileIndex> idx;
-	idx.formatVersion = LATEST_BG_FORMAT_VERSION;
-	idx.fileType = SNAPSHOT_FILE_TYPE;
+	Standalone<IndexedBlobGranuleFile> file;
+	file.formatVersion = LATEST_BG_FORMAT_VERSION;
+	file.fileType = SNAPSHOT_FILE_TYPE;
 
 	size_t targetChunkBytes = snapshot.expectedSize() / chunkCount;
 	size_t currentChunkBytesEstimate = 0;
@@ -121,14 +213,10 @@ Value serializeChunkedSnapshot(Standalone<GranuleSnapshot> snapshot, int chunkCo
 			Value serialized = ObjectWriter::toValue(currentChunk, Unversioned());
 			chunks.push_back(serialized);
 			// TODO remove validation
-			if (!idx.dataBlockOffsets.empty()) {
-				ASSERT(idx.dataBlockOffsets.back().key < currentChunk.begin()->key);
+			if (!file.indexBlock.children.empty()) {
+				ASSERT(file.indexBlock.children.back().key < currentChunk.begin()->key);
 			}
-			idx.dataBlockOffsets.emplace_back_deep(idx.arena(), currentChunk.begin()->key, previousChunkBytes);
-			/*
-			fmt::print(
-			    "  {0}={1} ({2})\n", currentChunk.begin()->key.printable(), previousChunkBytes, currentChunk.size());
-			    */
+			file.indexBlock.children.emplace_back_deep(file.arena(), currentChunk.begin()->key, previousChunkBytes);
 
 			previousChunkBytes += serialized.size();
 			currentChunkBytesEstimate = 0;
@@ -138,20 +226,20 @@ Value serializeChunkedSnapshot(Standalone<GranuleSnapshot> snapshot, int chunkCo
 	ASSERT(currentChunk.empty());
 	// push back dummy last chunk to get last chunk size, and to know last key in last block without having to read it
 	if (!snapshot.empty()) {
-		idx.dataBlockOffsets.emplace_back_deep(idx.arena(), keyAfter(snapshot.back().key), previousChunkBytes);
+		file.indexBlock.children.emplace_back_deep(file.arena(), keyAfter(snapshot.back().key), previousChunkBytes);
 	}
 
-	Value indexBlock = ObjectWriter::toValue(idx, Unversioned());
+	Value indexBlock = serializeIndexBlock(file);
+	int32_t indexSize = indexBlock.size();
 	chunks[0] = indexBlock;
 
-	// TODO: better way to get header size upfront? Flatbuffer can't parse from stream and have offset from end easily
+	// TODO: write this directly to stream to avoid extra copy?
 	Arena ret;
-	int32_t indexSize = indexBlock.size();
-	size_t size = sizeof(indexSize) + indexSize + previousChunkBytes;
+
+	size_t size = indexSize + previousChunkBytes;
 	uint8_t* buffer = new (ret) uint8_t[size];
 
-	memcpy(buffer, &indexSize, sizeof(indexSize));
-	previousChunkBytes = sizeof(indexSize);
+	previousChunkBytes = 0;
 	for (auto& it : chunks) {
 		memcpy(buffer + previousChunkBytes, it.begin(), it.size());
 		previousChunkBytes += it.size();
@@ -167,82 +255,42 @@ static Arena loadSnapshotFile(const StringRef& snapshotData,
                               std::map<KeyRef, ValueRef>& dataMap) {
 	Arena rootArena;
 
-	Arena indexArena;
-	BGChunkedFileIndex index;
-	// TODO version?
-	int32_t indexBlockSize;
-	memcpy(&indexBlockSize, snapshotData.begin(), sizeof(indexBlockSize));
-	size_t skipSize = sizeof(indexBlockSize) + indexBlockSize;
+	Standalone<IndexedBlobGranuleFile> file = IndexedBlobGranuleFile::fromFileBytes(snapshotData);
 
-	ObjectReader indexReader(snapshotData.begin() + sizeof(indexBlockSize), Unversioned());
-	indexReader.deserialize(FileIdentifierFor<BGChunkedFileIndex>::value, index, indexArena);
-	rootArena.dependsOn(indexArena);
-
-	if (index.formatVersion > LATEST_BG_FORMAT_VERSION || index.formatVersion < MIN_SUPPORTED_BG_FORMAT_VERSION) {
-		TraceEvent(SevWarn, "BlobGranuleInvalidFormatVersion")
-		    .suppressFor(5.0)
-		    .detail("FoundFormatVersion", index.formatVersion)
-		    .detail("MinSupported", MIN_SUPPORTED_BG_FORMAT_VERSION)
-		    .detail("LatestSupported", LATEST_BG_FORMAT_VERSION);
-		throw unsupported_format_version();
-	}
-
-	ASSERT(index.fileType == SNAPSHOT_FILE_TYPE);
-
-	/*fmt::print("ChunksParsed={}\n", index.dataBlockOffsets.size());
-	for (auto& it : index.dataBlockOffsets) {
-	    fmt::print("    {0}={1}\n", it.key.printable(), it.offset);
-	}*/
+	ASSERT(file.fileType == SNAPSHOT_FILE_TYPE);
 
 	// empty snapshot file
-	if (index.dataBlockOffsets.empty()) {
+	if (file.indexBlock.children.empty()) {
 		return rootArena;
 	}
 
-	ASSERT(index.dataBlockOffsets.size() >= 2);
+	ASSERT(file.indexBlock.children.size() >= 2);
 
 	// TODO: refactor this out of delta tree
 	// int commonPrefixLen = commonPrefixLength(index.dataBlockOffsets.front().first,
 	// index.dataBlockOffsets.back().first);
 
 	// find range of blocks needed to read
-	BlockOffsetRef searchKey(keyRange.begin, 0);
-	auto startBlock = std::lower_bound(
-	    index.dataBlockOffsets.begin(), index.dataBlockOffsets.end(), searchKey, BlockOffsetRef::OrderByKey());
-
-	if (startBlock != index.dataBlockOffsets.end() && startBlock != index.dataBlockOffsets.begin() &&
-	    keyRange.begin < startBlock->key) {
-		startBlock--;
-	} else if (startBlock == index.dataBlockOffsets.end()) {
-		startBlock--;
-	}
+	ChildBlockPointerRef* currentBlock = file.findStartBlock(keyRange.begin);
 
 	// FIXME: optimize cpu comparisons here in first/last partial blocks, doing entire blocks at once based on
 	// comparison, and using shared prefix for key comparison
-	while (startBlock != (index.dataBlockOffsets.end() - 1) && keyRange.end > startBlock->key) {
-		size_t blockSize = (startBlock + 1)->offset - startBlock->offset;
-		// fmt::print("Reading chunk {0}={1} {2}\n", startBlock->key.printable(), startBlock->offset, blockSize);
-		// part of block is included in response, parse it
-		StringRef blockData(snapshotData.begin() + skipSize + startBlock->offset, blockSize);
-
-		Arena blockArena;
-		GranuleSnapshot dataBlock;
-		ObjectReader dataReader(blockData.begin(), Unversioned());
-		dataReader.deserialize(FileIdentifierFor<GranuleSnapshot>::value, dataBlock, blockArena);
-		rootArena.dependsOn(blockArena);
-
+	while (currentBlock != (file.indexBlock.children.end() - 1) && keyRange.end > currentBlock->key) {
+		Standalone<GranuleSnapshot> dataBlock = file.getChild<GranuleSnapshot>(currentBlock);
 		ASSERT(!dataBlock.empty());
+		ASSERT(currentBlock->key == dataBlock.front().key);
 
-		// fmt::print("Read chunk starting at {0} with {1} rows\n", dataBlock.front().key.printable(),
-		// dataBlock.size());
-		ASSERT(startBlock->key == dataBlock.front().key);
-
+		bool anyRows = false;
 		for (auto& entry : dataBlock) {
 			if (entry.key >= keyRange.begin && entry.key < keyRange.end) {
 				dataMap.insert({ entry.key, entry.value });
+				anyRows = true;
 			}
 		}
-		startBlock++;
+		if (anyRows) {
+			rootArena.dependsOn(dataBlock.arena());
+		}
+		currentBlock++;
 	}
 
 	return rootArena;
@@ -701,7 +749,16 @@ void checkRead(const Standalone<GranuleSnapshot>& snapshot, const Value& seriali
 	}
 	ASSERT(result.size() == endIdx - beginIdx);
 	for (auto& it : result) {
+		if (it.first != snapshot[beginIdx].key) {
+			fmt::print("Key {0} != {1}\n", it.first.printable(), snapshot[beginIdx].key.printable());
+		}
 		ASSERT(it.first == snapshot[beginIdx].key);
+		if (it.first != snapshot[beginIdx].key) {
+			fmt::print("Value {0} != {1} for Key {2}\n",
+			           it.second.printable(),
+			           snapshot[beginIdx].value.printable(),
+			           it.first.printable());
+		}
 		ASSERT(it.second == snapshot[beginIdx].value);
 		beginIdx++;
 	}
@@ -748,7 +805,6 @@ TEST_CASE("/blobgranule/files/snapshotFormatUnitTest") {
 		maxExp++;
 	}
 	maxExp--;
-	fmt::print("data size={0}, maxExp={1}\n", data.size(), maxExp);
 
 	fmt::print("Validating snapshot data is sorted\n");
 	for (int i = 0; i < data.size() - 1; i++) {
@@ -760,7 +816,7 @@ TEST_CASE("/blobgranule/files/snapshotFormatUnitTest") {
 
 	Value serialized = serializeChunkedSnapshot(data, targetChunks);
 
-	fmt::print("Snapshot serialized!\n");
+	fmt::print("Snapshot serialized! {0} bytes\n", serialized.size());
 
 	fmt::print("Validating snapshot data is sorted again\n");
 	for (int i = 0; i < data.size() - 1; i++) {
