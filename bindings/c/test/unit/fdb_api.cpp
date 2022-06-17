@@ -157,23 +157,23 @@ Tenant::Tenant(FDBDatabase* db, const uint8_t* name, int name_length) {
 	}
 }
 
-KeyFuture Tenant::purge_blob_granules(FDBDatabase* db,
-                                        std::string_view begin_key,
-                                        std::string_view end_key,
-                                        int64_t purge_version,
-                                        fdb_bool_t force) {
-	return KeyFuture(fdb_database_purge_blob_granules(db,
-	                                                  (const uint8_t*)begin_key.data(),
-	                                                  begin_key.size(),
-	                                                  (const uint8_t*)end_key.data(),
-	                                                  end_key.size(),
-	                                                  purge_version,
-	                                                  force));
+KeyFuture Tenant::purge_blob_granules(FDBTenant* tenant,
+                                      std::string_view begin_key,
+                                      std::string_view end_key,
+                                      int64_t purge_version,
+                                      fdb_bool_t force) {
+	return KeyFuture(fdb_tenant_purge_blob_granules(tenant,
+	                                                (const uint8_t*)begin_key.data(),
+	                                                begin_key.size(),
+	                                                (const uint8_t*)end_key.data(),
+	                                                end_key.size(),
+	                                                purge_version,
+	                                                force));
 }
 
-EmptyFuture Tenant::wait_purge_granules_complete(FDBDatabase* db, std::string_view purge_key) {
+EmptyFuture Tenant::wait_purge_granules_complete(FDBTenant* tenant, std::string_view purge_key) {
 	return EmptyFuture(
-	    fdb_database_wait_purge_granules_complete(db, (const uint8_t*)purge_key.data(), purge_key.size()));
+	    fdb_tenant_wait_purge_granules_complete(tenant, (const uint8_t*)purge_key.data(), purge_key.size()));
 }
 
 Tenant::~Tenant() {

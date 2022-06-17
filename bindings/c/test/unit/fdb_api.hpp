@@ -223,13 +223,13 @@ public:
 	Tenant(Tenant&&) = delete;
 	Tenant& operator=(Tenant&&) = delete;
 
-	static KeyFuture purge_blob_granules(FDBDatabase* db,
+	static KeyFuture purge_blob_granules(FDBTenant* tenant,
 	                                     std::string_view begin_key,
 	                                     std::string_view end_key,
 	                                     int64_t purge_version,
 	                                     fdb_bool_t force);
 
-	static EmptyFuture wait_purge_granules_complete(FDBDatabase* db, std::string_view purge_key);
+	static EmptyFuture wait_purge_granules_complete(FDBTenant* tenant, std::string_view purge_key);
 
 private:
 	friend class Transaction;

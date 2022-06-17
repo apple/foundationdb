@@ -7520,11 +7520,10 @@ ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRangesActor(Trans
 	} else {
 		self->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	}
-	// FIXME: limit to tenant range if set
 	loop {
 		state RangeResult blobGranuleMapping;
 		if (tenantPrefix.present()) {
-			Standalone<StringRef> mappingPrefix = tenantPrefix.get().withPrefix(blobGranuleMappingKeys.begin);
+			state Standalone<StringRef> mappingPrefix = tenantPrefix.get().withPrefix(blobGranuleMappingKeys.begin);
 
 			// basically krmGetRange, but enable it to not use tenant without RAW_ACCESS by doing manual getRange with
 			// UseTenant::False
@@ -7538,9 +7537,7 @@ ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRangesActor(Trans
 			                                       Reverse::False,
 			                                       UseTenant::False));
 			// strip off mapping prefix
-			Standalone<StringRef> prefix =
-			    StringRef(blobGranuleMappingKeys.begin.toString() + tenantPrefix.get().toString());
-			blobGranuleMapping = krmDecodeRanges(prefix, currentRange, rawMapping);
+			blobGranuleMapping = krmDecodeRanges(mappingPrefix, currentRange, rawMapping);
 		} else {
 			wait(store(
 			    blobGranuleMapping,
@@ -9472,7 +9469,6 @@ Reference<DatabaseContext::TransactionT> DatabaseContext::createTransaction() {
 	return makeReference<ReadYourWritesTransaction>(Database(Reference<DatabaseContext>::addRef(this)));
 }
 
-// FIXME: handle tenants?
 ACTOR Future<Key> purgeBlobGranulesActor(Reference<DatabaseContext> db,
                                          KeyRange range,
                                          Version purgeVersion,
