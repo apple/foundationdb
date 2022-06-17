@@ -9108,7 +9108,7 @@ ACTOR Future<Void> initTenantMap(StorageServer* self) {
 			state Version version = wait(tr->getReadVersion());
 			// This limits the number of tenants, but eventually we shouldn't need to do this at all
 			// when SSs store only the local tenants
-			RangeResult entries = wait(tr->getRange(tenantMapKeys, CLIENT_KNOBS->TOO_MANY));
+			RangeResult entries = wait(tr->getRange(tenantMapKeys, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER));
 
 			TraceEvent("InitTenantMap", self->thisServerID)
 			    .detail("Version", version)

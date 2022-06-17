@@ -143,12 +143,12 @@ struct TenantManagementWorkload : TestWorkload {
 		self->mvDb = MultiVersionDatabase::debugCreateFromExistingDatabase(threadSafeHandle);
 
 		if (self->useMetacluster && self->clientId == 0) {
-				wait(success(ManagementAPI::changeConfig(cx.getReference(), "tenant_mode=management", true)));
+			wait(success(ManagementAPI::changeConfig(cx.getReference(), "tenant_mode=management", true)));
 
-				DataClusterEntry entry;
-				entry.capacity.numTenantGroups = 1e9;
+			DataClusterEntry entry;
+			entry.capacity.numTenantGroups = 1e9;
 			wait(MetaclusterAPI::registerCluster(self->mvDb, "cluster1"_sr, g_simulator.extraDatabases[0], entry));
-			}
+		}
 
 		state Transaction tr(cx);
 		if (self->clientId == 0) {
@@ -920,7 +920,8 @@ struct TenantManagementWorkload : TestWorkload {
 	ACTOR Future<Void> listTenants(Database cx, TenantManagementWorkload* self) {
 		state TenantName beginTenant = self->chooseTenantName(false);
 		state TenantName endTenant = self->chooseTenantName(false);
-		state int limit = std::min(CLIENT_KNOBS->TOO_MANY, deterministicRandom()->randomInt(1, self->maxTenants * 2));
+		state int limit = std::min(CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1,
+		                           deterministicRandom()->randomInt(1, self->maxTenants * 2));
 		state OperationType operationType = self->randomOperationType();
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->dataDb);
 

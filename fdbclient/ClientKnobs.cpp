@@ -287,6 +287,9 @@ void ClientKnobs::initialize(Randomize randomize) {
 	// Blob granules
 	init( BG_MAX_GRANULE_PARALLELISM,                10 );
 
+	init( MAX_TENANTS_PER_CLUSTER,                  1e6 );
+	init( MAX_DATA_CLUSTERS,                        1e5 );
+
 	// clang-format on
 }
 

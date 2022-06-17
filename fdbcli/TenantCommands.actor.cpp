@@ -34,6 +34,7 @@
 
 namespace fdb_cli {
 
+// TODO: API version
 const KeyRangeRef tenantMapSpecialKeyRange(LiteralStringRef("\xff\xff/management/tenant/map/"),
                                            LiteralStringRef("\xff\xff/management/tenant/map0"));
 const KeyRangeRef tenantConfigSpecialKeyRange(LiteralStringRef("\xff\xff/management/tenant/configure/"),

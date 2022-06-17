@@ -128,8 +128,8 @@ ACTOR Future<Void> deleteTenantRange(ReadYourWritesTransaction* ryw, TenantName 
 	    ryw->getTransaction().get(configKeysPrefix.withSuffix("tenant_mode"_sr));
 	state Future<Optional<Value>> metaclusterRegistrationFuture = ryw->getTransaction().get(dataClusterRegistrationKey);
 
-	state std::map<TenantName, TenantMapEntry> tenants = wait(
-	    ManagementAPI::listTenantsTransaction(&ryw->getTransaction(), beginTenant, endTenant, CLIENT_KNOBS->TOO_MANY));
+	state std::map<TenantName, TenantMapEntry> tenants = wait(ManagementAPI::listTenantsTransaction(
+	    &ryw->getTransaction(), beginTenant, endTenant, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1));
 
 	state Optional<Value> tenantMode = wait(safeThreadFutureToFuture(tenantModeFuture));
 	Optional<Value> metaclusterRegistration = wait(safeThreadFutureToFuture(metaclusterRegistrationFuture));
@@ -139,7 +139,7 @@ ACTOR Future<Void> deleteTenantRange(ReadYourWritesTransaction* ryw, TenantName 
 		throw tenants_disabled();
 	}
 
-	if (tenants.size() == CLIENT_KNOBS->TOO_MANY) {
+	if (tenants.size() > CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER) {
 		TraceEvent(SevWarn, "DeleteTenantRangeTooLange")
 		    .detail("BeginTenant", beginTenant)
 		    .detail("EndTenant", endTenant);

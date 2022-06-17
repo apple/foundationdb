@@ -48,13 +48,13 @@ parseClusterConfiguration(std::vector<StringRef> const& tokens, DataClusterEntry
 			int n;
 			if (sscanf(value.c_str(), "%d%n", &entry.get().capacity.numTenantGroups, &n) != 1 || n != value.size() ||
 			    entry.get().capacity.numTenantGroups < 0) {
-				fprintf(stderr, "ERROR: invalid number of tenant groups %s\n", value.c_str());
+				fmt::print(stderr, "ERROR: invalid number of tenant groups {}\n", value.c_str());
 				return Optional<std::pair<Optional<ClusterConnectionString>, Optional<DataClusterEntry>>>();
 			}
 		} else if (tokencmp(param, "connection_string")) {
 			connectionString = ClusterConnectionString(value);
 		} else {
-			fprintf(stderr, "ERROR: unrecognized configuration parameter %s\n", param.toString().c_str());
+			fmt::print(stderr, "ERROR: unrecognized configuration parameter {}\n", param.toString().c_str());
 			return Optional<std::pair<Optional<ClusterConnectionString>, Optional<DataClusterEntry>>>();
 		}
 	}
@@ -84,14 +84,14 @@ ACTOR Future<bool> metaclusterRegisterCommand(Reference<IDatabase> db, std::vect
 	if (!config.present()) {
 		return false;
 	} else if (!config.get().first.present()) {
-		fprintf(stderr, "ERROR: connection_string must be configured when registering a cluster.\n");
+		fmt::print(stderr, "ERROR: connection_string must be configured when registering a cluster.\n");
 		return false;
 	}
 
 	wait(MetaclusterAPI::registerCluster(
 	    db, tokens[2], config.get().first.get(), config.get().second.orDefault(defaultEntry)));
 
-	printf("The cluster `%s' has been added\n", printable(tokens[2]).c_str());
+	fmt::print("The cluster `{}' has been added\n", printable(tokens[2]).c_str());
 	return true;
 }
 
@@ -108,7 +108,7 @@ ACTOR Future<bool> metaclusterRemoveCommand(Reference<IDatabase> db, std::vector
 	state ClusterNameRef clusterName = tokens[tokens.size() - 1];
 	wait(MetaclusterAPI::removeCluster(db, clusterName, tokens.size() == 4));
 
-	printf("The cluster `%s' has been removed\n", printable(clusterName).c_str());
+	fmt::print("The cluster `{}' has been removed\n", printable(clusterName).c_str());
 	return true;
 }
 
@@ -129,7 +129,7 @@ ACTOR Future<bool> metaclusterListCommand(Reference<IDatabase> db, std::vector<S
 	if (tokens.size() > 4) {
 		int n = 0;
 		if (sscanf(tokens[3].toString().c_str(), "%d%n", &limit, &n) != 1 || n != tokens[3].size() || limit < 0) {
-			fprintf(stderr, "ERROR: invalid limit %s\n", tokens[3].toString().c_str());
+			fmt::print(stderr, "ERROR: invalid limit {}\n", tokens[3].toString().c_str());
 			return false;
 		}
 	}
@@ -137,15 +137,15 @@ ACTOR Future<bool> metaclusterListCommand(Reference<IDatabase> db, std::vector<S
 	std::map<ClusterName, DataClusterMetadata> clusters = wait(MetaclusterAPI::listClusters(db, begin, end, limit));
 	if (clusters.empty()) {
 		if (tokens.size() == 2) {
-			printf("The metacluster has no registered data clusters\n");
+			fmt::print("The metacluster has no registered data clusters\n");
 		} else {
-			printf("The metacluster has no registered data clusters in the specified range\n");
+			fmt::print("The metacluster has no registered data clusters in the specified range\n");
 		}
 	}
 
 	int index = 0;
 	for (auto cluster : clusters) {
-		printf("  %d. %s\n", ++index, printable(cluster.first).c_str());
+		fmt::print("  {}. {}\n", ++index, printable(cluster.first).c_str());
 	}
 
 	return true;
@@ -169,18 +169,18 @@ ACTOR Future<bool> metaclusterGetCommand(Reference<IDatabase> db, std::vector<St
 			json_spirit::mObject obj;
 			obj["type"] = "success";
 			obj["cluster"] = metadata.toJson();
-			printf("%s\n", json_spirit::write_string(json_spirit::mValue(obj), json_spirit::pretty_print).c_str());
+			fmt::print("{}\n", json_spirit::write_string(json_spirit::mValue(obj), json_spirit::pretty_print).c_str());
 		} else {
-			printf("  connection string: %s\n", metadata.connectionString.toString().c_str());
-			printf("  tenant group capacity: %d\n", metadata.entry.capacity.numTenantGroups);
-			printf("  allocated tenant groups: %d\n", metadata.entry.allocated.numTenantGroups);
+			fmt::print("  connection string: {}\n", metadata.connectionString.toString().c_str());
+			fmt::print("  tenant group capacity: {}\n", metadata.entry.capacity.numTenantGroups);
+			fmt::print("  allocated tenant groups: {}\n", metadata.entry.allocated.numTenantGroups);
 		}
 	} catch (Error& e) {
 		if (useJson) {
 			json_spirit::mObject obj;
 			obj["type"] = "error";
 			obj["error"] = e.what();
-			printf("%s\n", json_spirit::write_string(json_spirit::mValue(obj), json_spirit::pretty_print).c_str());
+			fmt::print("{}\n", json_spirit::write_string(json_spirit::mValue(obj), json_spirit::pretty_print).c_str());
 			return false;
 		} else {
 			throw;
@@ -228,6 +228,60 @@ ACTOR Future<bool> metaclusterConfigureCommand(Reference<IDatabase> db, std::vec
 	return true;
 }
 
+// metacluster status command
+ACTOR Future<bool> metaclusterStatusCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
+	if (tokens.size() < 2 || tokens.size() > 3) {
+		fmt::print("Usage: metacluster status [JSON]\n\n");
+		fmt::print("Prints metacluster metadata.\n");
+		fmt::print("If JSON is specified, then the output will be in JSON format.\n");
+		return false;
+	}
+
+	state bool useJson = tokens.size() == 3;
+
+	try {
+		std::map<ClusterName, DataClusterMetadata> clusters =
+		    wait(MetaclusterAPI::listClusters(db, ""_sr, "\xff"_sr, CLIENT_KNOBS->MAX_DATA_CLUSTERS));
+
+		ClusterUsage totalCapacity;
+		ClusterUsage totalAllocated;
+		for (auto cluster : clusters) {
+			totalCapacity.numTenantGroups +=
+			    std::max(cluster.second.entry.capacity.numTenantGroups, cluster.second.entry.allocated.numTenantGroups);
+			totalAllocated.numTenantGroups += cluster.second.entry.allocated.numTenantGroups;
+		}
+
+		if (useJson) {
+			json_spirit::mObject obj;
+			obj["type"] = "success";
+
+			json_spirit::mObject metaclusterObj;
+			metaclusterObj["data_clusters"] = (int)clusters.size();
+			metaclusterObj["capacity"] = totalCapacity.toJson();
+			metaclusterObj["allocated"] = totalAllocated.toJson();
+
+			obj["metacluster"] = metaclusterObj;
+			fmt::print("{}\n", json_spirit::write_string(json_spirit::mValue(obj), json_spirit::pretty_print).c_str());
+		} else {
+			fmt::print("  number of data clusters: {}\n", clusters.size());
+			fmt::print("  tenant group capacity: {}\n", totalCapacity.numTenantGroups);
+			fmt::print("  allocated tenant groups: {}\n", totalAllocated.numTenantGroups);
+		}
+
+		return true;
+	} catch (Error& e) {
+		if (useJson) {
+			json_spirit::mObject obj;
+			obj["type"] = "error";
+			obj["error"] = e.what();
+			fmt::print("{}\n", json_spirit::write_string(json_spirit::mValue(obj), json_spirit::pretty_print).c_str());
+			return false;
+		} else {
+			throw;
+		}
+	}
+}
+
 // metacluster command
 Future<bool> metaclusterCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	if (tokens.size() == 1) {
@@ -243,6 +297,8 @@ Future<bool> metaclusterCommand(Reference<IDatabase> db, std::vector<StringRef> 
 		return metaclusterGetCommand(db, tokens);
 	} else if (tokencmp(tokens[1], "configure")) {
 		return metaclusterConfigureCommand(db, tokens);
+	} else if (tokencmp(tokens[1], "status")) {
+		return metaclusterStatusCommand(db, tokens);
 	} else {
 		printUsage(tokens[0]);
 		return true;
@@ -254,10 +310,14 @@ void metaclusterGenerator(const char* text,
                           std::vector<std::string>& lc,
                           std::vector<StringRef> const& tokens) {
 	if (tokens.size() == 1) {
-		const char* opts[] = { "register", "remove", "list", "get", "configure", nullptr };
+		const char* opts[] = { "register", "remove", "list", "get", "configure", "status", nullptr };
 		arrayGenerator(text, line, opts, lc);
 	} else if (tokens.size() > 1 && (tokencmp(tokens[1], "register") || tokencmp(tokens[1], "configure"))) {
 		const char* opts[] = { "max_tenant_groups=", "connection_string=", nullptr };
+		arrayGenerator(text, line, opts, lc);
+	} else if ((tokens.size() == 2 && tokencmp(tokens[1], "status")) ||
+	           (tokens.size() == 3 && tokencmp(tokens[1], "get"))) {
+		const char* opts[] = { "JSON", nullptr };
 		arrayGenerator(text, line, opts, lc);
 	}
 }
@@ -291,13 +351,15 @@ std::vector<const char*> metaclusterHintGenerator(std::vector<StringRef> const& 
 			"<NAME>", "<max_tenant_groups=<NUM_GROUPS>|connection_string=<CONNECTION_STRING>>"
 		};
 		return std::vector<const char*>(opts.begin() + std::min<int>(1, tokens.size() - 2), opts.end());
+	} else if (tokencmp(tokens[1], "status") && tokens.size() == 2) {
+		return { "[JSON]" };
 	} else {
 		return std::vector<const char*>();
 	}
 }
 
 CommandFactory metaclusterRegisterFactory("metacluster",
-                                          CommandHelp("metacluster <register|remove|list|get|configure> [ARGS]",
+                                          CommandHelp("metacluster <register|remove|list|get|configure|status> [ARGS]",
                                                       "view and manage a metacluster",
                                                       "Use `register' to add a data cluster to the metacluster."),
                                           &metaclusterGenerator,

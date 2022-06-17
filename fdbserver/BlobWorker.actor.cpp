@@ -3182,9 +3182,9 @@ ACTOR Future<Void> monitorTenants(Reference<BlobWorkerData> bwData) {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				state RangeResult tenantResults;
-				wait(store(tenantResults, tr->getRange(tenantMapKeys, CLIENT_KNOBS->TOO_MANY)));
-				ASSERT_WE_THINK(!tenantResults.more && tenantResults.size() < CLIENT_KNOBS->TOO_MANY);
-				if (tenantResults.more || tenantResults.size() >= CLIENT_KNOBS->TOO_MANY) {
+				wait(store(tenantResults, tr->getRange(tenantMapKeys, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1)));
+				ASSERT_WE_THINK(!tenantResults.more && tenantResults.size() <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER);
+				if (tenantResults.more || tenantResults.size() > CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER) {
 					TraceEvent(SevError, "BlobWorkerTooManyTenants", bwData->id)
 					    .detail("TenantCount", tenantResults.size());
 					wait(delay(600));

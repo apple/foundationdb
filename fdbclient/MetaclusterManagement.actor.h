@@ -413,9 +413,24 @@ Future<Optional<DataClusterMetadata>> managementClusterRemove(Transaction tr, Cl
 	return metadata;
 }
 
-template <class Transaction>
-Future<Void> dataClusterRemove(Transaction tr) {
+ACTOR template <class Transaction>
+Future<Void> dataClusterRemove(Transaction tr, Optional<int64_t> lastTenantId) {
 	tr->clear(dataClusterRegistrationKey);
+	tr->clear(tenantTombstoneKeys);
+
+	// If we are force removing a cluster, then it will potentially contain tenants that have IDs
+	// larger than the next tenant ID to be allocated on the cluster. To avoid collisions, we advance
+	// the ID so that it will be the larger of the current one on the data cluster and the management
+	// cluster.
+	if (lastTenantId.present()) {
+		state typename transaction_future_type<Transaction, Optional<Value>>::type lastIdFuture =
+		    tr->get(tenantLastIdKey);
+		Optional<Value> lastIdVal = wait(safeThreadFutureToFuture(lastIdFuture));
+		if (!lastIdVal.present() || TenantMapEntry::prefixToId(lastIdVal.get()) < lastTenantId.get()) {
+			tr->set(tenantLastIdKey, TenantMapEntry::idToPrefix(lastTenantId.get()));
+		}
+	}
+
 	return Void();
 }
 
@@ -424,6 +439,7 @@ Future<Void> removeCluster(Reference<DB> db, ClusterName name, bool forceRemove)
 	// Step 1: Remove the data cluster from the metacluster
 	state Reference<typename DB::TransactionT> tr = db->createTransaction();
 	state DataClusterMetadata metadata;
+	state Optional<int64_t> lastTenantId;
 
 	loop {
 		try {
@@ -433,8 +449,17 @@ Future<Void> removeCluster(Reference<DB> db, ClusterName name, bool forceRemove)
 			if (!_metadata.present()) {
 				return Void();
 			}
-
 			metadata = _metadata.get();
+
+			if (forceRemove) {
+				state typename DB::TransactionT::template FutureT<Optional<Value>> lastIdFuture =
+				    tr->get(tenantLastIdKey);
+				Optional<Value> lastIdVal = wait(safeThreadFutureToFuture(lastIdFuture));
+				if (lastIdVal.present()) {
+					lastTenantId = TenantMapEntry::prefixToId(lastIdVal.get());
+				}
+			}
+
 			wait(buggifiedCommit(tr, BUGGIFY));
 
 			TraceEvent("RemovedDataCluster").detail("Name", name).detail("Version", tr->getCommittedVersion());
@@ -452,7 +477,7 @@ Future<Void> removeCluster(Reference<DB> db, ClusterName name, bool forceRemove)
 		try {
 			dataClusterTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
-			wait(dataClusterRemove(dataClusterTr));
+			wait(dataClusterRemove(dataClusterTr, lastTenantId));
 			wait(buggifiedCommit(dataClusterTr, BUGGIFY));
 
 			TraceEvent("ReconfiguredDataCluster")
@@ -578,7 +603,7 @@ Future<std::pair<ClusterName, DataClusterMetadata>> assignTenant(Transaction tr,
 
 	// TODO: more efficient
 	std::map<ClusterName, DataClusterMetadata> clusters =
-	    wait(listClustersTransaction(tr, ""_sr, "\xff"_sr, CLIENT_KNOBS->TOO_MANY));
+	    wait(listClustersTransaction(tr, ""_sr, "\xff"_sr, CLIENT_KNOBS->MAX_DATA_CLUSTERS));
 
 	for (auto c : clusters) {
 		if (!creatingTenantGroup || c.second.entry.hasCapacity()) {

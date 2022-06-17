@@ -278,6 +278,9 @@ public:
 	// Blob Granules
 	int BG_MAX_GRANULE_PARALLELISM;
 
+	int MAX_TENANTS_PER_CLUSTER;
+	int MAX_DATA_CLUSTERS;
+
 	ClientKnobs(Randomize randomize);
 	void initialize(Randomize randomize);
 };
