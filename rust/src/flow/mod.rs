@@ -1,7 +1,5 @@
 pub mod connection;
-mod connection_handler;
 pub mod file_identifier;
-mod loopback_handler;
 
 mod file_identifier_table;
 mod frame;
@@ -20,9 +18,6 @@ use std::net::SocketAddr;
 use uid::UID;
 
 use tokio::sync::oneshot;
-
-pub use connection_handler::ConnectionHandler;
-pub use loopback_handler::LoopbackHandler;
 
 pub type FlowResponse = Option<FlowMessage>;
 // XXX get rid of pin?

@@ -8,8 +8,8 @@ mod network_test_response;
 
 use crate::flow::file_identifier::{FileIdentifier, IdentifierType, ParsedFileIdentifier};
 use crate::flow::uid::{UID, WLTOKEN};
-use crate::flow::ConnectionHandler;
 use crate::flow::{FlowFuture, FlowMessage, Frame, Result};
+use crate::services::ConnectionHandler;
 
 use flatbuffers::{FlatBufferBuilder, FLATBUFFERS_MAX_BUFFER_SIZE};
 

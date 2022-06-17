@@ -1,7 +1,7 @@
 use crate::flow::{
-    connection, file_identifier::FileIdentifierNames, Error, LoopbackHandler, Result,
+    connection, file_identifier::FileIdentifierNames, Error, FlowFuture, FlowMessage, Result,
 };
-use crate::flow::{FlowFuture, FlowMessage};
+use crate::services::LoopbackHandler;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, oneshot, OwnedSemaphorePermit, Semaphore};

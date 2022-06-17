@@ -50,7 +50,8 @@ impl LoopbackHandler {
                     Err(message) => Err(format!(
                         "Dropping duplicate response for token {:?}",
                         message.frame.token
-                    ).into()),
+                    )
+                    .into()),
                 },
                 None => {
                     let file_identifier = request.file_identifier();
