@@ -10,6 +10,79 @@ pub type Error = Box<dyn std::error::Error + Send + Sync>;
 pub type Result<T> = std::result::Result<T, Error>;
 pub type Frame = frame::Frame;
 
+use file_identifier::FileIdentifier;
+use std::clone::Clone;
+use std::future::Future;
+use std::net::SocketAddr;
+use uid::UID;
+
+use tokio::sync::oneshot;
+
+pub type FlowResponse = Option<FlowMessage>;
+// XXX get rid of pin?
+pub type FlowFuture =
+    std::pin::Pin<Box<dyn 'static + Send + Sync + Future<Output = Result<FlowResponse>>>>;
+pub type FlowFn = dyn Send + Sync + Fn(FlowMessage) -> FlowFuture;
+
+#[derive(Debug)]
+pub enum Peer {
+    Remote(SocketAddr, Option<UID>),
+    Local(Option<(UID, oneshot::Receiver<FlowMessage>)>),
+}
+
+#[derive(Debug)]
+pub struct FlowMessage {
+    pub peer: Peer,
+    pub frame: Frame,
+}
+
+impl FlowMessage {
+    pub fn new_remote(peer: SocketAddr, completion: Option<UID>, frame: Frame) -> Result<Self> {
+        frame.peek_file_identifier()?;
+        Ok(Self {
+            peer: Peer::Remote(peer, completion),
+            frame,
+        })
+    }
+    pub fn new_local(
+        completion: Option<(UID, oneshot::Receiver<FlowMessage>)>,
+        frame: Frame,
+    ) -> Result<Self> {
+        frame.peek_file_identifier()?;
+        Ok(Self {
+            peer: Peer::Local(completion),
+            frame,
+        })
+    }
+    pub fn new_response(peer: Peer, frame: Frame) -> Result<Self> {
+        use Peer::*;
+        frame.peek_file_identifier()?;
+        Ok(Self {
+            peer: match peer {
+                Remote(peer, _completion) => Remote(peer, None),
+                Local(_completion) => Local(None),
+            },
+            frame,
+        })
+    }
+    pub fn file_identifier(&self) -> FileIdentifier {
+        self.frame.peek_file_identifier().unwrap()
+    }
+    pub fn completion(&self) -> Option<UID> {
+        match &self.peer {
+            Peer::Remote(_, uid) => uid.clone(),
+            Peer::Local(Some((uid, _))) => Some(uid.clone()),
+            Peer::Local(None) => None,
+        }
+    }
+    pub fn validate(&self) -> Result<()> {
+        self.frame.validate()
+    }
+    pub fn token(&self) -> UID {
+        self.frame.token.clone()
+    }
+}
+
 // #[test]
 // fn test_uid() -> Result<()> {
 //     let s = "0123456789abcdeffedcba9876543210";

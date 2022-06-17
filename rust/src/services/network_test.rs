@@ -6,11 +6,10 @@ mod network_test_request;
 #[path = "../../target/flatbuffers/NetworkTestResponse_generated.rs"]
 mod network_test_response;
 
-use super::{FlowFuture, FlowMessage};
 use crate::fdbserver::connection_handler::ConnectionHandler;
 use crate::flow::file_identifier::{FileIdentifier, IdentifierType, ParsedFileIdentifier};
 use crate::flow::uid::{UID, WLTOKEN};
-use crate::flow::{Frame, Result};
+use crate::flow::{FlowFuture, FlowMessage, Frame, Result};
 
 use flatbuffers::{FlatBufferBuilder, FLATBUFFERS_MAX_BUFFER_SIZE};
 
@@ -68,7 +67,7 @@ pub fn serialize_request(
     let (mut payload, offset) = builder.collapse();
     FileIdentifier::new(4146513)?.rewrite_flatbuf(&mut payload[offset..])?;
     // println!("reply: {:x?}", builder.finished_data());
-    FlowMessage::new(peer, Some(completion), Frame::new(wltoken, payload, offset))
+    FlowMessage::new_remote(peer, Some(completion), Frame::new(wltoken, payload, offset))
 }
 
 fn serialize_response(token: UID, reply_size: usize) -> Result<Frame> {
@@ -137,7 +136,7 @@ async fn handle(request: FlowMessage) -> Result<Option<FlowMessage>> {
     };
 
     let frame = serialize_response(uid, network_test_request.reply_size().try_into()?)?;
-    Ok(Some(FlowMessage::new(request.peer, None, frame)?))
+    Ok(Some(FlowMessage::new_response(request.peer, frame)?))
 }
 
 pub fn handler(msg: FlowMessage) -> FlowFuture {
@@ -151,5 +150,5 @@ pub async fn network_test(
 ) -> Result<()> {
     let req = serialize_request(svc.peer, request_sz, response_sz)?;
     let response_frame = svc.rpc(req).await?;
-    deserialize_response(response_frame.frame())
+    deserialize_response(response_frame.frame)
 }

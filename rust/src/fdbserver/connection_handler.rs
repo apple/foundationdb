@@ -1,7 +1,6 @@
-use crate::flow::{
-    connection, file_identifier::FileIdentifierNames, uid::UID, uid::WLTOKEN, Error, Result,
-};
-use crate::services::{network_test, ping_request, FlowFn, FlowFuture, FlowMessage};
+use crate::fdbserver::loopback_handler::LoopbackHandler;
+use crate::flow::{connection, file_identifier::FileIdentifierNames, Error, Result};
+use crate::flow::{FlowFuture, FlowMessage};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, oneshot, OwnedSemaphorePermit, Semaphore};
@@ -21,11 +20,11 @@ async fn sender<C: 'static + AsyncWrite + Unpin + Send>(
     mut writer: connection::ConnectionWriter<C>,
 ) -> Result<()> {
     while let Some(message) = response_rx.recv().await {
-        writer.write_frame(message.frame()).await?;
+        writer.write_frame(message.frame).await?;
         loop {
             match response_rx.try_recv() {
                 Ok(message) => {
-                    writer.write_frame(message.frame()).await.unwrap();
+                    writer.write_frame(message.frame).await.unwrap();
                 }
                 Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
                     writer.flush().await.unwrap();
@@ -64,7 +63,7 @@ where
     let mut svc =
         tower::limit::concurrency::ConcurrencyLimit::new(connection_handler.deref(), MAX_REQUESTS);
     while let Some(frame) = reader.read_frame().await? {
-        let request = FlowMessage::new(connection_handler.peer, None, frame)?;
+        let request = FlowMessage::new_remote(connection_handler.peer, None, frame)?;
         let response_tx = svc.get_ref().response_tx.clone();
         // poll_ready and call must be invoked atomically
         // we could read this before reading the next frame to prevent the next, throttled request from consuming
@@ -95,71 +94,12 @@ fn spawn_receiver<C>(
 {
     tokio::spawn(receiver(connection_handler, reader, permit));
 }
-pub async fn connection_handler(
-    svc: Arc<ConnectionHandler>,
-    response_rx: mpsc::Receiver<FlowMessage>,
-    permit: Option<OwnedSemaphorePermit>,
-    stream: TcpStream,
-    addr: SocketAddr,
-) -> Result<()> {
-    let (mut reader, writer) = match connection::new(stream).await {
-        Err(e) => {
-            println!("{}: {:?}", addr, e);
-            match permit {
-                Some(permit) => drop(permit),
-                None => (),
-            };
-            return Err(e);
-        }
-        Ok((reader, writer, connect_packet)) => {
-            // TODO: Check protocol compatibility, create object w/ enough info to allow request routing
-            println!("{}: {:x?}", addr, connect_packet);
-            (reader, writer)
-        }
-    };
-
-    spawn_sender(response_rx, writer);
-
-    let mut svc = tower::limit::concurrency::ConcurrencyLimit::new(svc.deref(), MAX_REQUESTS);
-    loop {
-        match reader.read_frame().await? {
-            None => {
-                println!("clean shutdown!");
-                break;
-            }
-            Some(frame) => {
-                let request = FlowMessage::new(svc.get_ref().peer, None, frame)?;
-                let response_tx = svc.get_ref().response_tx.clone();
-                // poll_ready and call must be invoked atomically
-                // we could read this before reading the next frame to prevent the next, throttled request from consuming
-                // TCP buffers.  However, keeping one extra frame around (above the limit) is unlikely to matter in terms
-                // of memory usage, but it helps interleave network + processing time.
-                futures_util::future::poll_fn(|cx| svc.poll_ready(cx)).await?;
-                let fut = svc.call(request);
-                tokio::spawn(async move {
-                    // the real work happens in await, anyway
-                    let response = fut.await.unwrap();
-                    match response {
-                        Some(response) => response_tx.send(response).await.unwrap(),
-                        None => (),
-                    };
-                });
-            }
-        }
-    }
-    match permit {
-        Some(permit) => drop(permit),
-        None => (),
-    };
-    Ok(())
-}
 
 pub struct ConnectionHandler {
     pub peer: SocketAddr,
     pub fit: FileIdentifierNames,
     pub response_tx: mpsc::Sender<FlowMessage>,
-    pub in_flight_requests: dashmap::DashMap<UID, oneshot::Sender<FlowMessage>>,
-    pub well_known_endpoints: dashmap::DashMap<WLTOKEN, Box<FlowFn>>,
+    pub loopback_handler: Arc<LoopbackHandler>,
 }
 
 impl std::fmt::Debug for ConnectionHandler {
@@ -174,6 +114,7 @@ impl ConnectionHandler {
     async fn new(
         socket: (TcpStream, SocketAddr),
         permit: OwnedSemaphorePermit,
+        loopback_handler: Arc<LoopbackHandler>,
     ) -> Result<Arc<Self>> {
         let (stream, peer) = socket;
         // Bound the number of backlogged messages to a given remote endpoint.  This is
@@ -185,54 +126,54 @@ impl ConnectionHandler {
             peer,
             fit: FileIdentifierNames::new().unwrap(),
             response_tx,
-            in_flight_requests: dashmap::DashMap::new(),
-            well_known_endpoints: dashmap::DashMap::new(),
+            loopback_handler,
         };
-        connection_handler.register_well_known_endpoint(WLTOKEN::PingPacket, ping_request::handler);
-        connection_handler
-            .register_well_known_endpoint(WLTOKEN::ReservedForTesting, network_test::handler);
-        let connection_handler = Arc::new(connection_handler);
         let (reader, writer, connect_packet) = connection::new(stream).await?;
         // TODO: Check protocol compatibility, create object w/ enough info to allow request routing
         println!("{} {:x?}", peer, connect_packet);
-
+        let connection_handler = Arc::new(connection_handler);
         spawn_sender(response_rx, writer);
         spawn_receiver(connection_handler.clone(), reader, permit);
         Ok(connection_handler)
     }
 
-    pub fn register_well_known_endpoint<F>(&self, wltoken: WLTOKEN, f: F)
-    where
-        F: 'static + Send + Sync + Fn(FlowMessage) -> FlowFuture,
-    {
-        self.well_known_endpoints.insert(wltoken, Box::new(f));
-    }
-
-    pub async fn new_outgoing_connection(saddr: SocketAddr) -> Result<Arc<ConnectionHandler>> {
+    pub async fn new_outgoing_connection(
+        saddr: SocketAddr,
+        loopback_handler: Arc<LoopbackHandler>,
+    ) -> Result<Arc<ConnectionHandler>> {
         let conn = TcpStream::connect(saddr).await?;
         let limit_connections = Arc::new(Semaphore::new(1));
         let permit = limit_connections.clone().acquire_owned().await?;
-        ConnectionHandler::new((conn, saddr), permit).await
+        ConnectionHandler::new((conn, saddr), permit, loopback_handler).await
     }
 
     async fn listener(
         bind: TcpListener,
         limit_connections: Arc<Semaphore>,
         tx: mpsc::Sender<Arc<ConnectionHandler>>,
+        loopback_handler: Arc<LoopbackHandler>,
     ) -> Result<()> {
         loop {
             let permit = limit_connections.clone().acquire_owned().await?;
             let socket = bind.accept().await?;
-            tx.send(ConnectionHandler::new(socket, permit).await?)
+            tx.send(ConnectionHandler::new(socket, permit, loopback_handler.clone()).await?)
                 .await?; // Send will return error if the Receiver has been close()'ed.
         }
     }
 
-    pub async fn new_listener(addr: &str) -> Result<mpsc::Receiver<Arc<ConnectionHandler>>> {
+    pub async fn new_listener(
+        addr: &str,
+        loopback_handler: Arc<LoopbackHandler>,
+    ) -> Result<mpsc::Receiver<Arc<ConnectionHandler>>> {
         let bind = TcpListener::bind(addr).await?;
         let limit_connections = Arc::new(Semaphore::new(MAX_CONNECTIONS));
         let (tx, rx) = mpsc::channel(100);
-        tokio::spawn(Self::listener(bind, limit_connections, tx));
+        tokio::spawn(Self::listener(
+            bind,
+            limit_connections,
+            tx,
+            loopback_handler,
+        ));
         Ok(rx)
     }
 
@@ -240,7 +181,7 @@ impl ConnectionHandler {
         match req.completion() {
             Some(uid) => {
                 let (tx, rx) = oneshot::channel();
-                self.in_flight_requests.insert(uid, tx);
+                self.loopback_handler.in_flight_requests.insert(uid, tx);
                 self.response_tx.send(req).await?;
                 Ok(rx.await?)
             }
@@ -248,59 +189,19 @@ impl ConnectionHandler {
         }
     }
 
-    fn dispatch_response(&self, tx: oneshot::Sender<FlowMessage>, request: FlowMessage) {
-        match tx.send(request) {
-            Ok(()) => (),
-            Err(message) => {
-                println!(
-                    "Dropping duplicate response for token {:?}",
-                    message.frame().token
-                )
-            }
-        }
+    async fn handle(
+        handler: Arc<LoopbackHandler>,
+        request: FlowMessage,
+    ) -> Result<Option<FlowMessage>> {
+        futures_util::future::poll_fn(|cx| handler.as_ref().poll_ready(cx)).await?;
+        handler.as_ref().call(request).await
     }
-
-    fn dbg_unkown_msg(&self, request: FlowMessage) {
-        let file_identifier = request.file_identifier();
-        let frame = request.frame();
-        println!(
-            "Message not destined for well-known endpoint and not a known respsonse: {:x?}",
-            frame
-        );
-
-        println!(
-            "{:?} {:04x?} {:04x?}",
-            frame.token,
-            file_identifier,
-            self.fit.from_id(&file_identifier)
-        );
-    }
-
-    fn handle_req<'a, 'b>(&self, request: FlowMessage) -> Result<Option<FlowFuture>> {
+    fn handle_req(&self, request: FlowMessage) -> Result<Option<FlowFuture>> {
         request.validate()?;
-        let wltoken = request.token().get_well_known_endpoint();
-        Ok(match wltoken {
-            None => match self.in_flight_requests.remove(&request.token()) {
-                Some((_uid, tx)) => {
-                    self.dispatch_response(tx, request);
-                    None
-                }
-                None => {
-                    self.dbg_unkown_msg(request);
-                    None
-                }
-            },
-            Some(wltoken) => match self.well_known_endpoints.get(&wltoken) {
-                Some(func) => Some((**func)(request)),
-                None => Some(Box::pin(async move {
-                    Err(format!(
-                        "Got unhandled request for well-known endpoint {:?}",
-                        wltoken,
-                    )
-                    .into())
-                })),
-            },
-        })
+        Ok(Some(Box::pin(Self::handle(
+            self.loopback_handler.clone(),
+            request,
+        ))))
     }
 }
 
