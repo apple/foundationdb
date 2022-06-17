@@ -326,7 +326,9 @@ namespace SummarizeTest
                     IEnumerable<string> oldBinaries = Array.FindAll(
                                                          Directory.GetFiles(oldBinaryFolder),
                                                          x => versionGreaterThanOrEqual(Path.GetFileName(x).Split('-').Last(), oldBinaryVersionLowerBound)
-                                                           && versionLessThan(Path.GetFileName(x).Split('-').Last(), oldBinaryVersionUpperBound));
+                                                           && versionLessThan(Path.GetFileName(x).Split('-').Last(), oldBinaryVersionUpperBound)
+                                                           && !x.Contains("snowflake")
+                                                           );
                     if (!lastFolderName.Contains("until_")) {
                         // only add current binary to the list of old binaries if "until_" is not specified in the folder name
                         // <version> in until_<version> should be less or equal to the current binary version
