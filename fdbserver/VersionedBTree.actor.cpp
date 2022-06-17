@@ -2968,7 +2968,7 @@ public:
 		                                       page->rawData(),
 		                                       page->rawSize(),
 		                                       (int64_t)pageID * page->rawSize(),
-		                                       std::min(priority, ioMaxPriority)));
+		                                       priority));
 		debug_printf("DWALPager(%s) op=readPhysicalDiskReadComplete %s ptr=%p bytes=%d\n",
 		             self->filename.c_str(),
 		             toString(pageID).c_str(),
@@ -7405,7 +7405,7 @@ public:
 		// of the cursor and pop it.
 		PathEntry& back() { return path.back(); }
 		void popPath() { path.pop_back(); }
-		//reason != PagerEventReasons::FetchRange 
+
 		Future<Void> pushPage(const BTreePage::BinaryTree::Cursor& link) {
 			debug_printf("pushPage(link=%s)\n", link.get().toString(false).c_str());
 			return map(readPage(btree,
