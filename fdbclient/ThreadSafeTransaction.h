@@ -166,8 +166,8 @@ public:
 
 	ThreadFuture<Void> commit() override;
 	Version getCommittedVersion() override;
-	VersionVector getVersionVector() override;
-	UID getSpanID() override;
+	ThreadFuture<VersionVector> getVersionVector() override;
+	ThreadFuture<UID> getSpanID() override;
 	ThreadFuture<int64_t> getApproximateSize() override;
 
 	ThreadFuture<uint64_t> getProtocolVersion();
@@ -192,6 +192,7 @@ public:
 private:
 	ISingleThreadTransaction* tr;
 	const Optional<TenantName> tenantName;
+	std::atomic<bool> initialized = false;
 };
 
 // An implementation of IClientApi that serializes operations onto the network thread and interacts with the lower-level
