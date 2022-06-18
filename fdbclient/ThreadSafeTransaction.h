@@ -190,6 +190,7 @@ public:
 private:
 	ISingleThreadTransaction* tr;
 	const Optional<TenantName> tenantName;
+	std::atomic<bool> initialized = false;
 };
 
 // An implementation of IClientApi that serializes operations onto the network thread and interacts with the lower-level
