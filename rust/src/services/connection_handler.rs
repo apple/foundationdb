@@ -7,7 +7,6 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, oneshot, OwnedSemaphorePermit, Semaphore};
 use tower::Service;
 
-use std::future::Future;
 use std::net::SocketAddr;
 use std::ops::Deref;
 use std::sync::Arc;
@@ -209,7 +208,6 @@ impl ConnectionHandler {
     }
     fn handle_req(&self, request: FlowMessage) -> Result<Option<FlowFuture>> {
         request.validate()?;
-        // This futures / async pattern will allow the router service to route requests to appropriate services.
         Ok(Some(Box::pin(Self::handle(
             self.loopback_handler.clone(),
             request,
@@ -220,13 +218,14 @@ impl ConnectionHandler {
 impl Service<FlowMessage> for &ConnectionHandler {
     type Response = Option<FlowMessage>;
     type Error = Error;
-    type Future = std::pin::Pin<Box<dyn 'static + Send + Future<Output = Result<Self::Response>>>>; // XXX get rid of box!
+    type Future = FlowFuture;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<()>> {
         Poll::Ready(Ok(()))
     }
 
     fn call(&mut self, req: FlowMessage) -> Self::Future {
+        // TODO: For RequestRouter to work, this needs to send the message, not process it!
         match self.handle_req(req) {
             Ok(Some(fut)) => fut,
             Ok(None) => Box::pin(async move { Ok(None) }),
