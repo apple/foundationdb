@@ -110,7 +110,7 @@ ThreadFuture<DatabaseSharedState*> ThreadSafeDatabase::createSharedState() {
 
 void ThreadSafeDatabase::setSharedState(DatabaseSharedState* p) {
 	DatabaseContext* db = this->db;
-	onMainThreadVoid([db, p]() { db->setSharedState(p); }, nullptr);
+	onMainThreadVoid([db, p]() { db->setSharedState(p); });
 }
 
 // Return the main network thread busyness
@@ -150,24 +150,22 @@ ThreadSafeDatabase::ThreadSafeDatabase(std::string connFilename, int apiVersion)
 	// but run its constructor on the main thread
 	DatabaseContext* db = this->db = DatabaseContext::allocateOnForeignThread();
 
-	onMainThreadVoid(
-	    [db, connFile, apiVersion]() {
-		    try {
-			    Database::createDatabase(
-			        Reference<ClusterConnectionFile>(connFile), apiVersion, IsInternal::False, LocalityData(), db)
-			        .extractPtr();
-		    } catch (Error& e) {
-			    new (db) DatabaseContext(e);
-		    } catch (...) {
-			    new (db) DatabaseContext(unknown_error());
-		    }
-	    },
-	    nullptr);
+	onMainThreadVoid([db, connFile, apiVersion]() {
+		try {
+			Database::createDatabase(
+			    Reference<ClusterConnectionFile>(connFile), apiVersion, IsInternal::False, LocalityData(), db)
+			    .extractPtr();
+		} catch (Error& e) {
+			new (db) DatabaseContext(e);
+		} catch (...) {
+			new (db) DatabaseContext(unknown_error());
+		}
+	});
 }
 
 ThreadSafeDatabase::~ThreadSafeDatabase() {
 	DatabaseContext* db = this->db;
-	onMainThreadVoid([db]() { db->delref(); }, nullptr);
+	onMainThreadVoid([db]() { db->delref(); });
 }
 
 Reference<ITransaction> ThreadSafeTenant::createTransaction() {
@@ -205,24 +203,22 @@ ThreadSafeTransaction::ThreadSafeTransaction(DatabaseContext* cx,
 	// these operations).
 	auto tr = this->tr = ISingleThreadTransaction::allocateOnForeignThread(type);
 	// No deferred error -- if the construction of the RYW transaction fails, we have no where to put it
-	onMainThreadVoid(
-	    [tr, cx, type, tenant]() {
-		    cx->addref();
-		    if (tenant.present()) {
-			    if (type == ISingleThreadTransaction::Type::RYW) {
-				    new (tr) ReadYourWritesTransaction(Database(cx), tenant.get());
-			    } else {
-				    tr->construct(Database(cx), tenant.get());
-			    }
-		    } else {
-			    if (type == ISingleThreadTransaction::Type::RYW) {
-				    new (tr) ReadYourWritesTransaction(Database(cx));
-			    } else {
-				    tr->construct(Database(cx));
-			    }
-		    }
-	    },
-	    nullptr);
+	onMainThreadVoid([tr, cx, type, tenant]() {
+		cx->addref();
+		if (tenant.present()) {
+			if (type == ISingleThreadTransaction::Type::RYW) {
+				new (tr) ReadYourWritesTransaction(Database(cx), tenant.get());
+			} else {
+				tr->construct(Database(cx), tenant.get());
+			}
+		} else {
+			if (type == ISingleThreadTransaction::Type::RYW) {
+				new (tr) ReadYourWritesTransaction(Database(cx));
+			} else {
+				tr->construct(Database(cx));
+			}
+		}
+	});
 	this->initialized = true;
 }
 
@@ -235,12 +231,12 @@ ThreadSafeTransaction::ThreadSafeTransaction(ReadYourWritesTransaction* ryw) : t
 ThreadSafeTransaction::~ThreadSafeTransaction() {
 	ISingleThreadTransaction* tr = this->tr;
 	if (tr)
-		onMainThreadVoid([tr]() { tr->delref(); }, nullptr);
+		onMainThreadVoid([tr]() { tr->delref(); });
 }
 
 void ThreadSafeTransaction::cancel() {
 	ISingleThreadTransaction* tr = this->tr;
-	onMainThreadVoid([tr]() { tr->cancel(); }, nullptr);
+	onMainThreadVoid([tr]() { tr->cancel(); });
 }
 
 void ThreadSafeTransaction::setVersion(Version v) {
@@ -565,7 +561,7 @@ ThreadSafeTransaction::ThreadSafeTransaction(ThreadSafeTransaction&& r) noexcept
 
 void ThreadSafeTransaction::reset() {
 	ISingleThreadTransaction* tr = this->tr;
-	onMainThreadVoid([tr]() { tr->reset(); }, nullptr);
+	onMainThreadVoid([tr]() { tr->reset(); });
 }
 
 extern const char* getSourceVersion();

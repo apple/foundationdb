@@ -194,13 +194,13 @@ public:
 		if (thread_network == this)
 			stopImmediately();
 		else
-			onMainThreadVoid([this] { this->stopImmediately(); }, nullptr);
+			onMainThreadVoid([this] { this->stopImmediately(); });
 	}
 	void addStopCallback(std::function<void()> fn) override {
 		if (thread_network == this)
 			stopCallbacks.emplace_back(std::move(fn));
 		else
-			onMainThreadVoid([this, fn] { this->stopCallbacks.emplace_back(std::move(fn)); }, nullptr);
+			onMainThreadVoid([this, fn] { this->stopCallbacks.emplace_back(std::move(fn)); });
 	}
 
 	bool isSimulated() const override { return false; }
