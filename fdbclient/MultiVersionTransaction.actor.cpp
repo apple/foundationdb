@@ -387,7 +387,7 @@ void DLTransaction::reset() {
 	api->transactionReset(tr);
 }
 
-VersionVector DLTransaction::getVersionVector() {
+ThreadFuture<VersionVector> DLTransaction::getVersionVector() {
 	return VersionVector(); // not implemented
 }
 
@@ -1100,7 +1100,7 @@ Version MultiVersionTransaction::getCommittedVersion() {
 	return invalidVersion;
 }
 
-VersionVector MultiVersionTransaction::getVersionVector() {
+ThreadFuture<VersionVector> MultiVersionTransaction::getVersionVector() {
 	auto tr = getTransaction();
 	if (tr.transaction) {
 		return tr.transaction->getVersionVector();
@@ -1109,7 +1109,7 @@ VersionVector MultiVersionTransaction::getVersionVector() {
 	return VersionVector();
 }
 
-UID MultiVersionTransaction::getSpanID() {
+ThreadFuture<UID> MultiVersionTransaction::getSpanID() {
 	auto tr = getTransaction();
 	if (tr.transaction) {
 		return tr.transaction->getSpanID();
