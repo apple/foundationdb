@@ -208,6 +208,7 @@ ThreadSafeTransaction::ThreadSafeTransaction(DatabaseContext* cx,
 		    }
 	    },
 	    nullptr);
+	this->initialized = true;
 }
 
 // This constructor is only used while refactoring fdbcli and only called from the main thread
@@ -469,8 +470,8 @@ ThreadFuture<Void> ThreadSafeTransaction::commit() {
 }
 
 Version ThreadSafeTransaction::getCommittedVersion() {
-	ISingleThreadTransaction* tr = this->tr;
-	return onMainThread([tr]() -> Future<Version> { return tr->getCommittedVersion(); }).get();
+	// This should be thread safe when called legally, but it is fragile
+	return tr->getCommittedVersion();
 }
 
 ThreadFuture<int64_t> ThreadSafeTransaction::getApproximateSize() {
