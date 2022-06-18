@@ -84,7 +84,7 @@ void onMainThreadVoid(F f, T* t, Error T::*member, TaskPriority taskID = TaskPri
 }
 
 template <class F>
-void onMainThreadVoid(F f, std::nullptr_t = nullptr, TaskPriority taskID = TaskPriority::DefaultOnMainThread) {
+void onMainThreadVoid(F f, TaskPriority taskID = TaskPriority::DefaultOnMainThread) {
 	Promise<Void> signal;
 	internal_thread_helper::doOnMainThreadVoid(signal.getFuture(), f);
 	g_network->onMainThread(std::move(signal), taskID);
