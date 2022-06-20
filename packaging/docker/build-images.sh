@@ -197,12 +197,12 @@ logg "STARTING ${0}"
 echo "${blue}################################################################################${reset}"
 
 ################################################################################
-# The intent of this script is to build the set of docker images needed to run
-# FoundationDB in kubernetes from binaries that are not available the website:
-# https://foundationdb.org/downloads
+# The intent of this script is to build the set of Docker images needed to run
+# FoundationDB in Kubernetes from binaries that are not available the website:
+# https://github.com/apple/foundationdb/releases/download
 #
-# The docker file itself will pull released binaries from the foundationdb
-# website. If the intent is to build images for an already released version of
+# The Docker file itself will pull released binaries from GitHub releases.
+# If the intent is to build images for an already released version of
 # FoundationDB, a simple docker build command will work.
 #
 # This script has enough stupid built into it that trying to come up with a set
