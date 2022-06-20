@@ -7068,7 +7068,6 @@ double ClientTagThrottleData::throttleDuration() const {
 	    (smoothRate.smoothTotal() - smoothReleased.smoothRate()) * CLIENT_KNOBS->TAG_THROTTLE_SMOOTHING_WINDOW;
 
 	if (capacity >= 1) {
-		TraceEvent("DEBUG_ReturningEarly1");
 		return 0.0;
 	}
 
