@@ -21,9 +21,14 @@
 #include "fdbrpc/FlowTransport.h"
 #include "flow/Arena.h"
 #include "flow/network.h"
+#include "flow/ScopeExit.h"
 
 #include <cstdint>
+#include <execinfo.h>
 #include <unordered_map>
+#include <fmt/format.h>
+#include <unistd.h>
+#include <pthread.h>
 #if VALGRIND
 #include <memcheck.h>
 #endif
@@ -106,9 +111,11 @@ void EndpointMap::insertWellKnown(NetworkMessageReceiver* r, const Endpoint::Tok
 	int index = token.second();
 	ASSERT(index <= wellKnownEndpointCount);
 	ASSERT(data[index].receiver == nullptr);
+	//auto oldToken = data[index].token();
 	data[index].receiver = r;
 	data[index].token() =
 	    Endpoint::Token(token.first(), (token.second() & 0xffffffff00000000LL) | static_cast<uint32_t>(priority));
+	//fmt::print(stderr, "Insert (WL) {} localAddr={} token={} held_token={}-{} type={}\n", fmt::ptr(r), g_simulator.getCurrentProcess()->address.toString(), token.toString(), oldToken.toString(), data[index].token().toString(), typeid(*r).name());
 }
 
 void EndpointMap::insert(NetworkMessageReceiver* r, Endpoint::Token& token, TaskPriority priority) {
@@ -117,9 +124,14 @@ void EndpointMap::insert(NetworkMessageReceiver* r, Endpoint::Token& token, Task
 	int index = firstFree;
 	firstFree = data[index].nextFree;
 	token = Endpoint::Token(token.first(), (token.second() & 0xffffffff00000000LL) | index);
+	auto oldToken = data[index].token();
 	data[index].token() =
 	    Endpoint::Token(token.first(), (token.second() & 0xffffffff00000000LL) | static_cast<uint32_t>(priority));
 	data[index].receiver = r;
+	if (token.first() == 0x9d0b587c78735792ul) {
+		fmt::print(stderr, "Insert      {} localAddr={} token={} held_token={}-{} type={}\n", fmt::ptr(r), g_simulator.getCurrentProcess()->addresses.toString(), token.toString(), oldToken.toString(), data[index].token().toString(), typeid(*r).name());
+		printBt();
+	}
 }
 
 const Endpoint& EndpointMap::insert(NetworkAddressList localAddresses,
@@ -170,8 +182,11 @@ NetworkMessageReceiver* EndpointMap::get(Endpoint::Token const& token) {
 		    .backtrace();
 	}
 	if (index < data.size() && data[index].token().first() == token.first() &&
-	    ((data[index].token().second() & 0xffffffff00000000LL) | index) == token.second())
+	    ((data[index].token().second() & 0xffffffff00000000LL) | index) == token.second()) {
+		if (token.first() == 0x9d0b587c78735792ul)
+			fmt::print(stderr, "Fetch {} localAddr={} token={} held_token={}\n", fmt::ptr(data[index].receiver), g_simulator.getCurrentProcess()->addresses.toString(), token.toString(), data[index].token().toString());
 		return data[index].receiver;
+	}
 	return 0;
 }
 
@@ -192,12 +207,26 @@ void EndpointMap::remove(Endpoint::Token const& token, NetworkMessageReceiver* r
 	uint32_t index = token.second();
 	if (index < wellKnownEndpointCount) {
 		data[index].receiver = nullptr;
+		fmt::print(stderr, "Remove (WL) {} localAddr={} token={} held_token={} type={} OK\n", fmt::ptr(r), g_simulator.getCurrentProcess()->addresses.toString(), token.toString(), data[index].token().toString(), typeid(*r).name());
 	} else if (index < data.size() && data[index].token().first() == token.first() &&
 	           ((data[index].token().second() & 0xffffffff00000000LL) | index) == token.second() &&
 	           data[index].receiver == r) {
+		auto heldTokenOld = data[index].token();
 		data[index].receiver = 0;
 		data[index].nextFree = firstFree;
 		firstFree = index;
+		auto heldTokenNew = data[index].token();
+		if (token.first() == 0x9d0b587c78735792ul)
+			fmt::print(stderr, "Remove      {} localAddr={} token={} held_token={}-{} type={} OK\n", fmt::ptr(r), g_simulator.getCurrentProcess()->addresses.toString(), token.toString(), heldTokenOld.toString(), heldTokenNew.toString(), typeid(*r).name());
+	} else {
+		if (token.first() == 0x9d0b587c78735792ul) {
+			fmt::print(stderr, "Remove      {} localAddr={} token={} held_token={} type={} proc={} FAILED\n", fmt::ptr(r), g_simulator.getCurrentProcess()->addresses.toString(), token.toString(), index < data.size() ? data[index].token().toString() : "UNKNOWN", typeid(*r).name(), fmt::ptr(g_simulator.getCurrentProcess()));
+			void* array[30];
+			auto size = ::backtrace(array, 30);
+			for (auto i = 0; i < size; i++)
+				fmt::print(stderr, "{} ", fmt::ptr(array[i]));
+			fmt::print(stderr, "\n");
+		}
 	}
 }
 
@@ -1336,6 +1365,14 @@ ACTOR static void deliver(TransportData* self,
 	}
 
 	auto receiver = self->endpoints.get(destination.token);
+	if (receiver) {
+		fmt::print(stderr, "receiver={}\n", fmt::ptr(receiver));
+		fmt::print(stderr, "token={}\n", destination.token.toString());
+		fmt::print(stderr, "authTenants={}\n", fmt::ptr(authorizedTenants.getPtr()));
+		fmt::print(stderr, "isReceiverPublic={}\n", receiver->isPublic());
+		fmt::print(stderr, "receiverPeerCompat={}\n", static_cast<std::underlying_type_t<RequirePeer>>(receiver->peerCompatibilityPolicy().requirement));
+		fmt::print(stderr, "receiverPeerCompat={}\n", receiver->peerCompatibilityPolicy().version.version());
+	}
 	if (receiver && (authorizedTenants->isTrusted() || receiver->isPublic())) {
 		if (!checkCompatible(receiver->peerCompatibilityPolicy(), reader.protocolVersion())) {
 			return;
@@ -2262,7 +2299,7 @@ HealthMonitor* FlowTransport::healthMonitor() {
 void FlowTransport::authorizationTokenAdd(StringRef signedToken) {
 	SignedAuthTokenTTL token;
 	token.serializedToken = StringRef(token.arena, signedToken);
-	if (authz::jwt::parseToken(token.arena, token.token, token.serializedToken)) {
+	if (!authz::jwt::parseToken(token.arena, token.token, token.serializedToken)) {
 		TraceEvent(SevWarnAlways, "AddedInvalidToken").detail("Reason", "CanNotParse").log();
 		return;
 	}
@@ -2270,10 +2307,12 @@ void FlowTransport::authorizationTokenAdd(StringRef signedToken) {
 		TraceEvent(SevWarnAlways, "AddedInvalidToken").detail("Reason", "NoExpirationTime").log();
 	}
 	double expiresAt = double(token.token.expiresAtUnixTime.get());
-	if (expiresAt < timer()) {
+	auto timeNow = timer();
+	if (expiresAt < timeNow) {
 		TraceEvent(SevWarnAlways, "AddedInvalidToken")
 		    .detail("Reason", "Expired")
 		    .detail("ExpirationTime", expiresAt)
+			.detail("Now", timeNow)
 		    .log();
 	}
 	self->tokens.emplace(token);
@@ -2289,6 +2328,7 @@ void FlowTransport::authorizationTokenAdd(StringRef signedToken) {
 		           Endpoint::wellKnown(addr, WLTOKEN_AUTH_TENANT),
 		           false);
 	}
+	fmt::print(stderr, "Add tenant token for {}\n", g_simulator.getCurrentProcess()->addresses.toString());
 }
 
 Optional<StringRef> FlowTransport::getPublicKeyByName(StringRef name) const {

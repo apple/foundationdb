@@ -25,6 +25,7 @@
 #include "contrib/fmt-8.1.1/include/fmt/format.h"
 #include "fdbrpc/simulator.h"
 #include "flow/Arena.h"
+#include <pthread.h>
 #define BOOST_SYSTEM_NO_LIB
 #define BOOST_DATE_TIME_NO_LIB
 #define BOOST_REGEX_NO_LIB
@@ -52,6 +53,8 @@
 #include "fdbrpc/ReplicationUtils.h"
 #include "fdbrpc/AsyncFileWriteChecker.h"
 #include "flow/FaultInjection.h"
+#include <fmt/format.h>
+#include <unistd.h>
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 bool simulator_should_inject_fault(const char* context, const char* file, int line, int error_code) {
@@ -2177,6 +2180,8 @@ public:
 
 			this->currentProcess = t.machine;
 			try {
+				ASSERT(this->currentProcess == t.machine);
+				fmt::print(stderr, "enter task with process at {}, {}\n", this->currentProcess->addresses.toString(), fmt::ptr(g_simulator.getCurrentProcess()));
 				t.action.send(Void());
 				ASSERT(this->currentProcess == t.machine);
 			} catch (Error& e) {

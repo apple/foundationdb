@@ -27,6 +27,19 @@
 #include "fdbrpc/FlowTransport.h" // NetworkMessageReceiver Endpoint
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/networksender.actor.h"
+#include "fdbrpc/simulator.h"
+#include <type_traits>
+#include <fmt/format.h>
+#include <execinfo.h>
+
+inline void printBt(const char* prefix="") {
+	void* array[30];
+	auto size = ::backtrace(array, 30);
+	fmt::print(stderr, "{}", prefix);
+	for (auto i = 0; i < size; i++)
+		fmt::print(stderr, "{} ", fmt::ptr(array[i]));
+	fmt::print(stderr, "\n");
+}
 
 struct FlowReceiver : public NetworkMessageReceiver {
 	// Common endpoint code for NetSAV<> and NetNotifiedQueue<>
@@ -81,6 +94,10 @@ struct FlowReceiver : public NetworkMessageReceiver {
 
 	const Endpoint& getRawEndpoint() { return endpoint; }
 
+	std::string toString() const {
+		return endpoint.toString() + (m_isLocalEndpoint ? "[LOCAL]" : "[REMOTE]");
+	}
+
 private:
 	Optional<PeerCompatibilityPolicy> peerCompatibilityPolicy_;
 	Endpoint endpoint;
@@ -88,14 +105,33 @@ private:
 	bool m_stream;
 };
 
+template <class T, class = void>
+struct WrappedFileId {
+	static constexpr uint32_t value = (uint32_t)-1;
+};
+
+template <class T>
+struct WrappedFileId<T, std::enable_if_t<HasFileIdentifierMember<T>::value>> {
+	static constexpr uint32_t value = T::file_identifier;
+};
+
 template <class T>
 struct NetSAV final : SAV<T>, FlowReceiver, FastAllocated<NetSAV<T>> {
 	using FastAllocated<NetSAV<T>>::operator new;
 	using FastAllocated<NetSAV<T>>::operator delete;
 
-	NetSAV(int futures, int promises) : SAV<T>(futures, promises) {}
+	NetSAV(int futures, int promises) : SAV<T>(futures, promises) {
+		if constexpr (WrappedFileId<T>::value == 10636023) {
+			printBt("NetSAV without endpoint: ");
+		}
+	}
 	NetSAV(int futures, int promises, const Endpoint& remoteEndpoint)
-	  : SAV<T>(futures, promises), FlowReceiver(remoteEndpoint, false) {}
+	  : SAV<T>(futures, promises), FlowReceiver(remoteEndpoint, false) {
+		if constexpr (WrappedFileId<T>::value == 10636023) {
+			printBt("NetSAV with endpoint:    ");
+			fmt::print(stderr, "endpoint: {}\n", getEndpoint(TaskPriority::DefaultPromiseEndpoint).toString());
+		}
+	  }
 
 	void destroy() override { delete this; }
 	void receive(ArenaObjectReader& reader) override {
@@ -187,6 +223,9 @@ template <class Ar, class T>
 void save(Ar& ar, const ReplyPromise<T>& value) {
 	auto const& ep = value.getEndpoint().token;
 	ar << ep;
+	if constexpr (T::file_identifier == 10636023) {
+		fmt::print(stderr, "Serialize  : endpoint={} localAddr={} \n", value.getEndpoint().toString(), g_simulator.getCurrentProcess()->addresses.toString());
+	}
 }
 
 template <class Ar, class T>
@@ -194,6 +233,9 @@ void load(Ar& ar, ReplyPromise<T>& value) {
 	UID token;
 	ar >> token;
 	Endpoint endpoint = FlowTransport::transport().loadedEndpoint(token);
+	if constexpr (T::file_identifier == 10636023) {
+		fmt::print(stderr, "Deserialize: endpoint={} localAddr={} \n", endpoint.toString(), g_simulator.getCurrentProcess()->addresses.toString());
+	}
 	value = ReplyPromise<T>(endpoint);
 	networkSender(value.getFuture(), endpoint);
 }

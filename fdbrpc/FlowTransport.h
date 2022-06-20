@@ -116,6 +116,10 @@ public:
 			}
 		}
 	}
+
+	std::string toString() const {
+		return addresses.toString() + ":" + token.toString();
+	}
 };
 #pragma pack(pop)
 

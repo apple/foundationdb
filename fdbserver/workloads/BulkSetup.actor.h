@@ -275,6 +275,7 @@ Future<Void> bulkSetup(Database cx,
 		if (e.code() == error_code_operation_failed) {
 			TraceEvent(SevError, "BulkSetupFailed").error(e);
 		}
+		fmt::print(stderr, "Error: {}\n", e.what());
 		throw;
 	}
 

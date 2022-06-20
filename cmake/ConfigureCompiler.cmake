@@ -166,7 +166,7 @@ else()
 
   # we always compile with debug symbols. CPack will strip them out
   # and create a debuginfo rpm
-  add_compile_options(-ggdb -fno-omit-frame-pointer)
+  add_compile_options(-ggdb3 -fno-omit-frame-pointer)
   if(TRACE_PC_GUARD_INSTRUMENTATION_LIB)
       add_compile_options(-fsanitize-coverage=trace-pc-guard)
       link_libraries(${TRACE_PC_GUARD_INSTRUMENTATION_LIB})
