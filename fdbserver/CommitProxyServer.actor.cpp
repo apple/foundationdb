@@ -1138,7 +1138,8 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 	if (!self->isMyFirstBatch &&
 	    pProxyCommitData->txnStateStore->readValue(coordinatorsKey).get().get() != self->oldCoordinators.get()) {
 		wait(brokenPromiseToNever(pProxyCommitData->db->get().clusterInterface.changeCoordinators.getReply(
-		    ChangeCoordinatorsRequest(pProxyCommitData->txnStateStore->readValue(coordinatorsKey).get().get()))));
+		    ChangeCoordinatorsRequest(pProxyCommitData->txnStateStore->readValue(coordinatorsKey).get().get(),
+		                              self->pProxyCommitData->master.id()))));
 		ASSERT(false); // ChangeCoordinatorsRequest should always throw
 	}
 
