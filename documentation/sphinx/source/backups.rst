@@ -83,7 +83,7 @@ For blob store backup locations, the Backup URL format is
 
 ::
 
-    blobstore://[<api_key>][:<secret>[:<security_token>]]@<hostname>[:<port>]/<name>?bucket=<bucket_name>[&<param>=<value>]...]
+    blobstore://[<api_key>][:<secret>[:<security_token>]]@<hostname>[:<port>]/<name>?bucket=<bucket_name>[&region=<region_name>][&<param>=<value>]...]
 
       <api_key> - API key to use for authentication. Optional.
       <secret> - API key's secret.  Optional.
@@ -92,6 +92,7 @@ For blob store backup locations, the Backup URL format is
       <port> - Remote port to connect to.  Optional.  Default is 80.
       <name> - Name of the backup within the backup bucket.  It can contain '/' characters in order to organize backups into a folder-like structure.
       <bucket_name> - Name of the bucket to use for backup data.
+      <region_name> - If <hostname> is not in s3 compatible form (s3.region-name.example.com) and aws v4 signature is enabled, region name is required.
       
       <param>=<value> - Optional URL parameters.  See below for details.
 

@@ -92,13 +92,14 @@ public:
 
 	BlobStoreEndpoint(std::string const& host,
 	                  std::string service,
+	                  std::string region,
 	                  std::string const& key,
 	                  std::string const& secret,
 	                  std::string const& securityToken = "",
 	                  BlobKnobs const& knobs = BlobKnobs(),
 	                  HTTP::Headers extraHeaders = HTTP::Headers())
-	  : host(host), service(service), key(key), lookupKey(key.empty()), secret(secret), lookupSecret(secret.empty()),
-	    securityToken(securityToken), knobs(knobs), extraHeaders(extraHeaders),
+	  : host(host), service(service), region(region), key(key), lookupKey(key.empty()), secret(secret),
+	    lookupSecret(secret.empty()), securityToken(securityToken), knobs(knobs), extraHeaders(extraHeaders),
 	    requestRate(new SpeedLimit(knobs.requests_per_second, 1)),
 	    requestRateList(new SpeedLimit(knobs.list_requests_per_second, 1)),
 	    requestRateWrite(new SpeedLimit(knobs.write_requests_per_second, 1)),
@@ -145,6 +146,7 @@ public:
 
 	std::string host;
 	std::string service;
+	std::string region;
 	std::string key;
 	bool lookupKey;
 	std::string secret;
@@ -164,6 +166,10 @@ public:
 	FlowLock concurrentRequests;
 	FlowLock concurrentUploads;
 	FlowLock concurrentLists;
+
+	std::string getHost() const { return host; }
+
+	std::string getRegion() const { return region; }
 
 	Future<Void> updateSecret();
 
