@@ -18,12 +18,11 @@ function popd () {
 
 function create_fake_website_directory() {
     fdb_binaries=( 'fdbbackup' 'fdbcli' 'fdbserver' 'fdbmonitor' )
-    fake_fdb_binaries=( 'backup_agent' 'dr_agent' 'fastrestore_tool' 'fdbdr' 'fdbrestore' )
     logg "PREPARING WEBSITE"
     website_directory="${script_dir}/website"
     rm -rf "${website_directory}"
-    mkdir -p "${website_directory}/downloads/${fdb_version}/linux/bin"
-    pushd "${website_directory}/downloads/${fdb_version}/linux/bin" || exit 127
+    mkdir -p "${website_directory}/${fdb_version}"
+    pushd "${website_directory}/${fdb_version}" || exit 127
     ############################################################################
     # there are four intended paths here:
     # 1) fetch the unstripped binaries and client library from artifactory_base_url
@@ -39,43 +38,34 @@ function create_fake_website_directory() {
         "unstripped_artifactory")
             logg "DOWNLOADING BINARIES TAR FILE"
             curl -Ls "${artifactory_base_url}/${fdb_version}/release/api/foundationdb-binaries-${fdb_version}-linux.tar.gz" | tar -xzf -
+            # Add the x86_64 to all binaries
+            for file in "${fdb_binaries[@]}"; do
+                cp -pr "${file}" "${file}.x86_64"
+            done
             ;;
         "stripped_artifactory")
             for file in "${fdb_binaries[@]}"; do
                 logg "DOWNLOADING ${file}"
-                curl -Ls "${artifactory_base_url}/${fdb_version}/release/files/linux/bin/${file}" -o "${file}"
+                curl -Ls "${artifactory_base_url}/${fdb_version}/release/files/linux/bin/${file}" -o "${file}.x86_64"
                 chmod 755 "${file}"
             done
             ;;
         "unstripped_local")
             for file in "${fdb_binaries[@]}"; do
                 logg "COPYING ${file}"
-                cp -pr "${build_output_directory}/bin/${file}" "${file}"
+                cp -pr "${build_output_directory}/bin/${file}" "${file}.x86_64"
                 chmod 755 "${file}"
             done
             ;;
         "stripped_local")
             for file in "${fdb_binaries[@]}"; do
                 logg "COPYING ${file}"
-                cp -pr "${build_output_directory}/packages/bin/${file}" "${file}"
+                cp -pr "${build_output_directory}/packages/bin/${file}" "${file}.x86_64"
                 chmod 755 "${file}"
             done
             ;;
     esac
-    # dont download files that are binary duplicates of fdbbackup, recreate the
-    # symlinks (to fdbbackup in the same directory)
-    logg "CREATING fdbbackup SYMLINKS"
-    for fake in "${fake_fdb_binaries[@]}"; do
-        logg "CREATING ${fake}"
-        ln -sf fdbbackup "${fake}"
-    done
     popd || exit 128
-    # re-create the same file that is present in the downloads path of
-    # foundationdb.org such that it can be copied into the Docker image and
-    # referenced with a file:// url by the container image build
-    logg "CREATING BINARIES TAR FILE"
-    tar -czf "${website_directory}/downloads/${fdb_version}/linux/fdb_${fdb_version}.tar.gz" --directory "${website_directory}/downloads/${fdb_version}/linux/bin" .
-    rm -rf "${website_directory}/downloads/${fdb_version}/linux/bin"
 
     ############################################################################
     # this follows the same logic as the case statement above, they are separate
@@ -87,8 +77,8 @@ function create_fake_website_directory() {
         "unstripped_artifactory")
             for version in "${fdb_library_versions[@]}"; do
                 logg "FETCHING ${version} CLIENT LIBRARY"
-                destination_directory="${website_directory}/downloads/${version}/linux"
-                destination_filename="libfdb_c_${version}.so"
+                destination_directory="${website_directory}/${version}"
+                destination_filename="libfdb_c_${version}.x86_64.so"
                 mkdir -p "${destination_directory}"
                 pushd "${destination_directory}" || exit 127
                 curl -Ls "${artifactory_base_url}/${version}/release/api/fdb-server-${version}-linux.tar.gz" | tar -xzf - ./lib/libfdb_c.so --strip-components 2
@@ -100,8 +90,8 @@ function create_fake_website_directory() {
         "stripped_artifactory")
             for version in "${fdb_library_versions[@]}"; do
                 logg "FETCHING ${version} CLIENT LIBRARY"
-                destination_directory="${website_directory}/downloads/${version}/linux"
-                destination_filename="libfdb_c_${version}.so"
+                destination_directory="${website_directory}/${version}"
+                destination_filename="libfdb_c_${version}.x86_64.so"
                 mkdir -p "${destination_directory}"
                 pushd "${destination_directory}" || exit 127
                 curl -Ls "${artifactory_base_url}/${version}/release/files/linux/lib/libfdb_c.so" -o "${destination_filename}"
@@ -111,11 +101,11 @@ function create_fake_website_directory() {
             ;;
         "unstripped_local")
             logg "COPYING UNSTRIPPED CLIENT LIBRARY"
-            cp -pr "${build_output_directory}/lib/libfdb_c.so" "${website_directory}/downloads/${fdb_version}/linux/libfdb_c_${fdb_version}.so"
+            cp -pr "${build_output_directory}/lib/libfdb_c.so" "${website_directory}/${fdb_version}/libfdb_c_${fdb_version}.x86_64.so"
             ;;
         "stripped_local")
             logg "COPYING STRIPPED CLIENT LIBRARY"
-            cp -pr "${build_output_directory}/packages/lib/libfdb_c.so" "${website_directory}/downloads/${fdb_version}/linux/libfdb_c_${fdb_version}.so"
+            cp -pr "${build_output_directory}/packages/lib/libfdb_c.so" "${website_directory}/${fdb_version}/libfdb_c_${fdb_version}.x86_64.so"
             ;;
     esac
     # override fdb_website variable that is passed to Docker build
@@ -233,7 +223,7 @@ source_code_diretory=$(awk -F= '/foundationdb_SOURCE_DIR:STATIC/{print $2}' "${b
 commit_sha=$(cd "${source_code_diretory}" && git rev-parse --verify HEAD --short=10)
 fdb_version=$(cat "${build_output_directory}/version.txt")
 fdb_library_versions=( '5.1.7' '6.1.13' '6.2.30' '6.3.18' "${fdb_version}" )
-fdb_website="https://www.foundationdb.org"
+fdb_website="https://github.com/apple/foundationdb/releases/download"
 image_list=(
     'base'
     # 'go-build'
