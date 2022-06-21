@@ -46,10 +46,18 @@ typedef uint32_t QueueID;
 enum class PagerEvents { CacheLookup = 0, CacheHit, CacheMiss, PageWrite, MAXEVENTS };
 static const char* const PagerEventsStrings[] = { "Lookup", "Hit", "Miss", "Write", "Unknown" };
 // Reasons for page level events.
-enum class PagerEventReasons { PointRead = 0, FetchRange, RangeRead, RangePrefetch, Commit, LazyClear, MetaData, MAXEVENTREASONS };
-static const char* const PagerEventReasonsStrings[] = {
-	"Get", "FetchR", "GetR", "GetRPF", "Commit", "LazyClr", "Meta", "Unknown"
+enum class PagerEventReasons {
+	PointRead = 0,
+	FetchRange,
+	RangeRead,
+	RangePrefetch,
+	Commit,
+	LazyClear,
+	MetaData,
+	MAXEVENTREASONS
 };
+static const char* const PagerEventReasonsStrings[] = { "Get",    "FetchR",  "GetR", "GetRPF",
+	                                                    "Commit", "LazyClr", "Meta", "Unknown" };
 
 static const unsigned int nonBtreeLevel = 0;
 static const std::vector<std::pair<PagerEvents, PagerEventReasons>> possibleEventReasonPairs = {
