@@ -749,7 +749,7 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 		break;
 	}
 
-	if (self->configuration.blobGranulesEnabled) {
+	if (configuration.blobGranulesEnabled) {
 		Version blobWorkerLag =
 		    minBlobWorkerGRV + (now() - minBlobWorkerTime) * SERVER_KNOBS->VERSIONS_PER_SECOND - minBlobWorkerVersion;
 		if (blobWorkerLag > limits->bwLagTargetVersions &&
