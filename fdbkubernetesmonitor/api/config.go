@@ -39,7 +39,7 @@ type ProcessConfiguration struct {
 	// BinaryPath provides the path to the binary to launch.
 	BinaryPath string `json:"-"`
 
-	// Arguments provides the arugments to the process.
+	// Arguments provides the arguments to the process.
 	Arguments []Argument `json:"arguments,omitempty"`
 }
 
@@ -125,11 +125,11 @@ func (argument Argument) GenerateArgument(processNumber int, env map[string]stri
 		}
 		return value, nil
 	default:
-		return "", fmt.Errorf("Unsupported argument type %s", argument.ArgumentType)
+		return "", fmt.Errorf("unsupported argument type %s", argument.ArgumentType)
 	}
 }
 
-// GenerateArguments intreprets the arguments in the process configuration and
+// GenerateArguments interprets the arguments in the process configuration and
 // generates a command invocation.
 func (configuration *ProcessConfiguration) GenerateArguments(processNumber int, env map[string]string) ([]string, error) {
 	results := make([]string, 0, len(configuration.Arguments)+1)

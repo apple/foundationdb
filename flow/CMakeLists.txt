@@ -62,8 +62,6 @@ set(FLOW_SRCS
   Profiler.h
   ScopeExit.h
   SendBufferIterator.h
-  SignalSafeUnwind.cpp
-  SignalSafeUnwind.h
   SimpleOpt.h
   StreamCipher.cpp
   StreamCipher.h

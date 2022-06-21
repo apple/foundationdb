@@ -38,8 +38,7 @@ set(FDBSERVER_SRCS
   DBCoreState.h
   DDTeamCollection.actor.cpp
   DDTeamCollection.h
-  TenantCache.actor.cpp
-  TenantCache.h
+  DDTxnProcessor.actor.cpp
   DiskQueue.actor.cpp
   EncryptKeyProxy.actor.cpp
   EncryptKeyProxyInterface.h
@@ -165,6 +164,8 @@ set(FDBSERVER_SRCS
   TCInfo.h
   template_fdb.h
   tester.actor.cpp
+  TenantCache.actor.cpp
+  TenantCache.h
   TesterInterface.actor.h
   TLogInterface.h
   TLogServer.actor.cpp

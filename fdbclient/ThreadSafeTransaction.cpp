@@ -190,12 +190,20 @@ ThreadSafeTransaction::ThreadSafeTransaction(DatabaseContext* cx,
 	auto tr = this->tr = ISingleThreadTransaction::allocateOnForeignThread(type);
 	// No deferred error -- if the construction of the RYW transaction fails, we have no where to put it
 	onMainThreadVoid(
-	    [tr, cx, tenant]() {
+	    [tr, cx, type, tenant]() {
 		    cx->addref();
 		    if (tenant.present()) {
-			    tr->construct(Database(cx), tenant.get());
+			    if (type == ISingleThreadTransaction::Type::RYW) {
+				    new (tr) ReadYourWritesTransaction(Database(cx), tenant.get());
+			    } else {
+				    tr->construct(Database(cx), tenant.get());
+			    }
 		    } else {
-			    tr->construct(Database(cx));
+			    if (type == ISingleThreadTransaction::Type::RYW) {
+				    new (tr) ReadYourWritesTransaction(Database(cx));
+			    } else {
+				    tr->construct(Database(cx));
+			    }
 		    }
 	    },
 	    nullptr);
@@ -587,6 +595,7 @@ void ThreadSafeApi::runNetwork() {
 	}
 
 	if (runErr.present()) {
+		closeTraceFile();
 		throw runErr.get();
 	}
 
