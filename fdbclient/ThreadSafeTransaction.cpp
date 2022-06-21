@@ -178,7 +178,7 @@ ThreadSafeTenant::~ThreadSafeTenant() {}
 ThreadSafeTransaction::ThreadSafeTransaction(DatabaseContext* cx,
                                              ISingleThreadTransaction::Type type,
                                              Optional<TenantName> tenant)
-  : tenantName(tenant) {
+  : tenantName(tenant), initialized(std::make_shared<std::atomic_bool>(false)) {
 	// Allocate memory for the transaction from this thread (so the pointer is known for subsequent method calls)
 	// but run its constructor on the main thread
 
@@ -187,8 +187,9 @@ ThreadSafeTransaction::ThreadSafeTransaction(DatabaseContext* cx,
 	// immediately after this call, it will defer the DatabaseContext::delref (and onMainThread preserves the order of
 	// these operations).
 	auto tr = this->tr = ISingleThreadTransaction::allocateOnForeignThread(type);
+	auto init = this->initialized;
 	// No deferred error -- if the construction of the RYW transaction fails, we have no where to put it
-	onMainThreadVoid([this, tr, cx, type, tenant]() {
+	onMainThreadVoid([tr, cx, type, tenant, init]() {
 		cx->addref();
 		if (tenant.present()) {
 			if (type == ISingleThreadTransaction::Type::RYW) {
@@ -203,12 +204,13 @@ ThreadSafeTransaction::ThreadSafeTransaction(DatabaseContext* cx,
 				tr->construct(Database(cx));
 			}
 		}
-		this->initialized = true;
+		*init = true;
 	});
 }
 
 // This constructor is only used while refactoring fdbcli and only called from the main thread
-ThreadSafeTransaction::ThreadSafeTransaction(ReadYourWritesTransaction* ryw) : tr(ryw) {
+ThreadSafeTransaction::ThreadSafeTransaction(ReadYourWritesTransaction* ryw)
+  : tr(ryw), initialized(std::make_shared<std::atomic_bool>(true)) {
 	if (tr)
 		tr->addref();
 }
@@ -467,7 +469,7 @@ ThreadFuture<Void> ThreadSafeTransaction::commit() {
 
 Version ThreadSafeTransaction::getCommittedVersion() {
 	// This should be thread safe when called legally, but it is fragile
-	if (!initialized) {
+	if (!initialized || !*initialized) {
 		return ::invalidVersion;
 	}
 	return tr->getCommittedVersion();
@@ -479,9 +481,6 @@ ThreadFuture<VersionVector> ThreadSafeTransaction::getVersionVector() {
 }
 
 ThreadFuture<UID> ThreadSafeTransaction::getSpanID() {
-	if (!initialized) {
-		return UID();
-	}
 	ISingleThreadTransaction* tr = this->tr;
 	return onMainThread([tr]() -> Future<UID> { return tr->getSpanID(); });
 }
@@ -536,11 +535,14 @@ Optional<TenantName> ThreadSafeTransaction::getTenant() {
 void ThreadSafeTransaction::operator=(ThreadSafeTransaction&& r) noexcept {
 	tr = r.tr;
 	r.tr = nullptr;
+	initialized = r.initialized;
+	r.initialized.reset();
 }
 
 ThreadSafeTransaction::ThreadSafeTransaction(ThreadSafeTransaction&& r) noexcept {
 	tr = r.tr;
 	r.tr = nullptr;
+	initialized = std::move(r.initialized);
 }
 
 void ThreadSafeTransaction::reset() {
