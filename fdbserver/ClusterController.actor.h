@@ -2907,13 +2907,6 @@ public:
 		    .detail("WorkerAddress", req.address)
 		    .detail("DegradedPeers", degradedPeersString);
 
-		// `req.degradedPeers` contains the latest peer performance view from the worker. Clear the worker if the
-		// requested worker doesn't see any degraded peers.
-		if (req.degradedPeers.empty()) {
-			workerHealth.erase(req.address);
-			return;
-		}
-
 		double currentTime = now();
 
 		// Current `workerHealth` doesn't have any information about the incoming worker. Add the worker into
@@ -2930,21 +2923,6 @@ public:
 		// The incoming worker already exists in `workerHealth`.
 
 		auto& health = workerHealth[req.address];
-
-		// First, remove any degraded peers recorded in the `workerHealth`, but aren't in the incoming request. These
-		// machines network performance should have recovered.
-		std::unordered_set<NetworkAddress> recoveredPeers;
-		for (const auto& [peer, times] : health.degradedPeers) {
-			recoveredPeers.insert(peer);
-		}
-		for (const auto& peer : req.degradedPeers) {
-			if (recoveredPeers.find(peer) != recoveredPeers.end()) {
-				recoveredPeers.erase(peer);
-			}
-		}
-		for (const auto& peer : recoveredPeers) {
-			health.degradedPeers.erase(peer);
-		}
 
 		// Update the worker's degradedPeers.
 		for (const auto& peer : req.degradedPeers) {
