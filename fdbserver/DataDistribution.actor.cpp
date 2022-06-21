@@ -1222,6 +1222,18 @@ static int64_t getMedianShardSize(VectorRef<DDMetricsRef> metricVec) {
 	return metricVec[metricVec.size() / 2].shardBytes;
 }
 
+GetStorageWigglerStateReply getStorageWigglerStates(Reference<DataDistributorData> self) {
+	GetStorageWigglerStateReply reply;
+	if (self->teamCollection) {
+		std::tie(reply.primary, reply.lastStateChangePrimary) = self->teamCollection->getStorageWigglerState();
+		if (self->teamCollection->teamCollections.size() > 1) {
+			std::tie(reply.remote, reply.lastStateChangeRemote) =
+			    self->teamCollection->teamCollections[1]->getStorageWigglerState();
+		}
+	}
+	return reply;
+}
+
 ACTOR Future<Void> ddGetMetrics(GetDataDistributorMetricsRequest req,
                                 PromiseStream<GetMetricsListRequest> getShardMetricsList) {
 	ErrorOr<Standalone<VectorRef<DDMetricsRef>>> result = wait(
@@ -1286,6 +1298,9 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 			when(DistributorExclusionSafetyCheckRequest exclCheckReq =
 			         waitNext(di.distributorExclCheckReq.getFuture())) {
 				actors.add(ddExclusionSafetyCheck(exclCheckReq, self, cx));
+			}
+			when(GetStorageWigglerStateRequest req = waitNext(di.storageWigglerState.getFuture())) {
+				req.reply.send(getStorageWigglerStates(self));
 			}
 		}
 	} catch (Error& err) {
