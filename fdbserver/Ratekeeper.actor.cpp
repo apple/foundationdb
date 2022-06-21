@@ -72,6 +72,18 @@ ACTOR static Future<Void> splitError(Future<Void> in, Promise<Void> errOut) {
 	}
 }
 
+ACTOR Future<Version> getDBVersion(Database cx) {
+	state Transaction tr(cx);
+	loop {
+		try {
+			Version v = wait(tr.getReadVersion());
+			return v;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
 class RatekeeperImpl {
 public:
 	ACTOR static Future<Void> configurationMonitor(Ratekeeper* self) {
@@ -236,6 +248,8 @@ public:
 	}
 
 	ACTOR static Future<Void> monitorBlobWorkers(Ratekeeper* self) {
+		state std::vector<BlobWorkerInterface> blobWorkers;
+		state int workerFetchCount = 0;
 		loop {
 			while (!self->configuration.blobGranulesEnabled) {
 				wait(delay(SERVER_KNOBS->SERVER_LIST_DELAY));
@@ -243,7 +257,14 @@ public:
 
 			state double startTime = now();
 			state Version grv;
-			std::vector<BlobWorkerInterface> blobWorkers = wait(getBlobWorkers(self->db, true, &grv));
+			state Future<Void> blobWorkerDelay = delay(SERVER_KNOBS->METRIC_UPDATE_RATE);
+			if (workerFetchCount++ % 10 == 0) {
+				std::vector<BlobWorkerInterface> _blobWorkers = wait(getBlobWorkers(self->db, true, &grv));
+				blobWorkers = _blobWorkers
+			} else {
+				Version v = wait(getDBVersion(self->db));
+				grv = v;
+			}
 			self->minBlobWorkerGRV = grv;
 			if (blobWorkers.size() > 0) {
 				state std::vector<Future<Optional<MinBlobVersionReply>>> aliveVersions;
@@ -270,7 +291,7 @@ public:
 					self->minBlobWorkerTime = startTime;
 				}
 			}
-			wait(delay(SERVER_KNOBS->SERVER_LIST_DELAY));
+			wait(blobWorkerDelay);
 		}
 	}
 
