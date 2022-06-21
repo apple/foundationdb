@@ -188,7 +188,7 @@ ThreadSafeTransaction::ThreadSafeTransaction(DatabaseContext* cx,
 	// these operations).
 	auto tr = this->tr = ISingleThreadTransaction::allocateOnForeignThread(type);
 	// No deferred error -- if the construction of the RYW transaction fails, we have no where to put it
-	onMainThreadVoid([tr, cx, type, tenant]() {
+	onMainThreadVoid([this, tr, cx, type, tenant]() {
 		cx->addref();
 		if (tenant.present()) {
 			if (type == ISingleThreadTransaction::Type::RYW) {
@@ -203,8 +203,8 @@ ThreadSafeTransaction::ThreadSafeTransaction(DatabaseContext* cx,
 				tr->construct(Database(cx));
 			}
 		}
+		this->initialized = true;
 	});
-	this->initialized = true;
 }
 
 // This constructor is only used while refactoring fdbcli and only called from the main thread
@@ -467,6 +467,9 @@ ThreadFuture<Void> ThreadSafeTransaction::commit() {
 
 Version ThreadSafeTransaction::getCommittedVersion() {
 	// This should be thread safe when called legally, but it is fragile
+	if (!initialized) {
+		return ::invalidVersion;
+	}
 	return tr->getCommittedVersion();
 }
 
