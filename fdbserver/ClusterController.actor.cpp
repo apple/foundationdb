@@ -260,7 +260,8 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 			if (SERVER_KNOBS->ENABLE_ENCRYPTION && !recoveredDisk) {
 				// EKP singleton recruitment waits for 'Master/Sequencer' recruitment, execute wait for
 				// 'recoveredDiskFiles' optimization once EKP recruitment is unblocked to avoid circular dependencies
-				// with StorageServer initialization
+				// with StorageServer initialization. The waiting for recoveredDiskFiles is to make sure the worker
+				// server on the same process has been registered with the new CC before recruitment.
 
 				wait(recoveredDiskFiles);
 				TraceEvent("CCWDB_RecoveredDiskFiles", cluster->id).log();
@@ -2724,6 +2725,9 @@ ACTOR Future<Void> clusterController(Reference<IClusterConnectionRecord> connRec
 	// Defer this wait optimization of cluster configuration has 'Encryption data at-rest' enabled.
 	// Encryption depends on available of EncryptKeyProxy (EKP) FDB role to enable fetch/refresh of encryption keys
 	// created and managed by external KeyManagementService (KMS).
+	//
+	// TODO: Wait optimization is to ensure the worker server on the same process gets registered with the new CC before
+	// recruitment. Unify the codepath for both Encryption enable vs disable scenarios.
 
 	if (!SERVER_KNOBS->ENABLE_ENCRYPTION) {
 		wait(recoveredDiskFiles);
