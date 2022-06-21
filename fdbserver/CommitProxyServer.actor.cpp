@@ -1149,16 +1149,20 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 }
 
 void writeMutation(CommitBatchContext* self, int64_t tenantId, const MutationRef& mutation) {
-	// TODO: encrypt system keys after support encrypting txnStateStore.
-	if (!SERVER_KNOBS->ENABLE_TLOG_ENCRYPTION) {
-		self->toCommit.writeTypedMessage(mutation);
-		return;
-	}
-	Arena arena;
 	static_assert(TenantInfo::INVALID_TENANT == ENCRYPT_INVALID_DOMAIN_ID);
-	EncryptCipherDomainId domainId =
-	    tenantId == TenantInfo::INVALID_TENANT ? SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID : tenantId;
-	self->toCommit.writeTypedMessage(EncryptedMutationMessage::encrypt(arena, self->cipherKeys, domainId, mutation));
+	if (!SERVER_KNOBS->ENABLE_TLOG_ENCRYPTION || tenantId == TenantInfo::INVALID_TENANT) {
+		// TODO(yiwu): Use tenant prefix to figure out tenant id for user data, which required a tenant map maintained
+		// either by CP itself or by EKP.
+		bool isRawAccess = tenantId == TenantInfo::INVALID_TENANT && !isSystemKey(mutation.param1) &&
+		                   !(mutation.type == MutationRef::ClearRange && isSystemKey(mutation.param2)) &&
+		                   self->pProxyCommitData->db->get().client.tenantMode == TenantMode::REQUIRED;
+		TEST(isRawAccess); // Raw access to tenant key space
+		self->toCommit.writeTypedMessage(mutation);
+	} else {
+		Arena arena;
+		self->toCommit.writeTypedMessage(
+		    EncryptedMutationMessage::encrypt(arena, self->cipherKeys, tenantId /*domainId*/, mutation));
+	}
 }
 
 /// This second pass through committed transactions assigns the actual mutations to the appropriate storage servers'
