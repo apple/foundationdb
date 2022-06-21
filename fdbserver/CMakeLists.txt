@@ -164,6 +164,8 @@ set(FDBSERVER_SRCS
   TCInfo.h
   template_fdb.h
   tester.actor.cpp
+  TenantCache.actor.cpp
+  TenantCache.h
   TesterInterface.actor.h
   TLogInterface.h
   TLogServer.actor.cpp
