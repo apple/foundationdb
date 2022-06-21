@@ -61,8 +61,8 @@ public:
 	                          Version txsPoppedVersion,
 	                          bool recover)
 	  : peekLocality(peekLocality), peekTypeSwitches(0), enableRecovery(recover), logSystem(logSystem),
-	    recoveryLoc(txsPoppedVersion), recoveryQueueLoc(txsPoppedVersion), recoveryQueueDataSize(0), poppedUpTo(0),
-	    nextCommit(1), hasDiscardedData(false), totalRecoveredBytes(0) {
+	    startLoc(txsPoppedVersion), recoveryLoc(txsPoppedVersion), recoveryQueueLoc(txsPoppedVersion),
+	    recoveryQueueDataSize(0), poppedUpTo(0), nextCommit(1), hasDiscardedData(false), totalRecoveredBytes(0) {
 		if (enableRecovery) {
 			localityChanged = peekLocality ? peekLocality->onChange() : Never();
 			cursor = logSystem->peekTxs(UID(),
@@ -127,7 +127,7 @@ private:
 	// Recovery state (used while readNext() is being called repeatedly)
 	bool enableRecovery;
 	Reference<ILogSystem> logSystem;
-	Version recoveryLoc, recoveryQueueLoc;
+	Version startLoc, recoveryLoc, recoveryQueueLoc;
 	std::vector<Standalone<StringRef>> recoveryQueue;
 	int recoveryQueueDataSize;
 
