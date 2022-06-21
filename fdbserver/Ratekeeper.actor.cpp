@@ -260,7 +260,7 @@ public:
 			state Future<Void> blobWorkerDelay = delay(SERVER_KNOBS->METRIC_UPDATE_RATE);
 			if (workerFetchCount++ % 10 == 0) {
 				std::vector<BlobWorkerInterface> _blobWorkers = wait(getBlobWorkers(self->db, true, &grv));
-				blobWorkers = _blobWorkers
+				blobWorkers = _blobWorkers;
 			} else {
 				Version v = wait(getDBVersion(self->db));
 				grv = v;
