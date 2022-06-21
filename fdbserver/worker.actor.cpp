@@ -1416,12 +1416,15 @@ ACTOR Future<Void> traceRole(Role role, UID roleId) {
 	}
 }
 
-ACTOR Future<Void> workerSnapCreate(WorkerSnapRequest snapReq,
-                                    std::string snapDataFolder,
-                                    std::string snapCoordFolder) {
+ACTOR Future<Void> workerSnapCreate(
+    WorkerSnapRequest snapReq,
+    std::string snapDataFolder,
+    std::string snapCoordFolder,
+    std::map<UID, WorkerSnapRequest>* snapReqMap /* ongoing snapshot requests */,
+    std::map<UID, ErrorOr<Void>>*
+        snapReqResultMap /* finished snapshot requests, expired in SNAP_MINIMUM_TIME_GAP seconds */) {
 	state ExecCmdValueString snapArg(snapReq.snapPayload);
 	try {
-		TraceEvent(SevDebug, "DebugSnapBeforeSplit").detail("RoleStr", snapReq.role.toString());
 		std::vector<std::string> roles;
 		boost::algorithm::split(roles, snapReq.role.toString(), boost::is_any_of(","));
 		ASSERT(roles.size() >= 1 && roles.size() <= 3);
@@ -1430,9 +1433,6 @@ ACTOR Future<Void> workerSnapCreate(WorkerSnapRequest snapReq,
 			folders.push_back(role == "coord" ? snapCoordFolder : snapDataFolder);
 		}
 		state std::string snapFolder = boost::algorithm::join(folders, ",");
-		TraceEvent(SevDebug, "DebugSnapSplitResult")
-		    .detail("Folders", describe(folders))
-		    .detail("Roles", describe(roles));
 		int err = wait(execHelper(&snapArg, snapReq.snapUID, snapFolder, snapReq.role.toString()));
 		std::string uidStr = snapReq.snapUID.toString();
 		TraceEvent("ExecTraceWorker")
@@ -1447,11 +1447,15 @@ ACTOR Future<Void> workerSnapCreate(WorkerSnapRequest snapReq,
 		if (snapReq.role.toString().find("storage") != std::string::npos) {
 			printStorageVersionInfo();
 		}
-		snapReq.reply.send(Void());
+		snapReqMap->at(snapReq.snapUID).reply.send(Void());
+		snapReqMap->erase(snapReq.snapUID);
+		(*snapReqResultMap)[snapReq.snapUID] = ErrorOr<Void>(Void());
 	} catch (Error& e) {
 		TraceEvent("ExecHelperError").errorUnsuppressed(e);
 		if (e.code() != error_code_operation_cancelled) {
-			snapReq.reply.sendError(e);
+			snapReqMap->at(snapReq.snapUID).reply.sendError(e);
+			snapReqMap->erase(snapReq.snapUID);
+			(*snapReqResultMap)[snapReq.snapUID] = ErrorOr<Void>(e);
 		} else {
 			throw e;
 		}
@@ -1600,7 +1604,9 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	state WorkerCache<InitializeBlobWorkerReply> blobWorkerCache;
 
 	state WorkerSnapRequest lastSnapReq;
-	state double lastSnapTime = now();
+	state std::map<UID, WorkerSnapRequest> snapReqMap;
+	state std::map<UID, ErrorOr<Void>> snapReqResultMap;
+	state double lastSnapTime = -SERVER_KNOBS->SNAP_MINIMUM_TIME_GAP; // always successful for the first Snap Request
 	state std::string coordFolder = abspath(_coordFolder);
 
 	state WorkerInterface interf(locality);
@@ -2514,19 +2520,43 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				loggingTrigger = delay(loggingDelay, TaskPriority::FlushTrace);
 			}
 			when(state WorkerSnapRequest snapReq = waitNext(interf.workerSnapReq.getFuture())) {
-				if (g_network->isSimulated() && lastSnapReq.snapUID == snapReq.snapUID &&
-				    (now() - lastSnapTime) < SERVER_KNOBS->SNAP_CREATE_MAX_TIMEOUT) {
-					TraceEvent(SevError, "DuplicateSnapRequests")
-					    .detail("PrevUID", lastSnapReq.snapUID)
-					    .detail("CurrUID", snapReq.snapUID)
-					    .detail("PrevRole", lastSnapReq.role)
-					    .detail("CurrRole", snapReq.role)
-					    .detail("GapTime", now() - lastSnapTime);
-				}
-				errorForwarders.add(workerSnapCreate(snapReq, folder, coordFolder));
-				if (g_network->isSimulated()) {
-					lastSnapTime = now();
-					lastSnapReq = snapReq;
+				auto& snapUID = snapReq.snapUID;
+				if (snapReqResultMap.count(snapUID)) {
+					auto result = snapReqResultMap[snapUID];
+					result.isError() ? snapReq.reply.sendError(result.getError()) : snapReq.reply.send(result.get());
+					TraceEvent("RetryFinishedWorkerSnapRequest")
+					    .detail("SnapUID", snapUID)
+						.detail("Role", snapReq.role)
+					    .detail("Result", result.isError() ? result.getError().code() : 0);
+				} else if (snapReqMap.count(snapUID)) {
+					TraceEvent("RetryOngoingWorkerSnapRequest")
+					    .detail("SnapUID", snapUID)
+					    .detail("Role", snapReq.role);
+					ASSERT(snapReq.role == snapReqMap[snapUID].role);
+					ASSERT(snapReq.snapPayload == snapReqMap[snapUID].snapPayload);
+					snapReqMap[snapUID] = snapReq;
+				} else {
+					snapReqMap[snapUID] = snapReq; // set map point to the request
+					if (g_network->isSimulated() && (now() - lastSnapTime) < SERVER_KNOBS->SNAP_MINIMUM_TIME_GAP) {
+						TraceEvent(SevError, "RapidSnapRequestsOnSameProcess")
+						    .detail("CurrSnapUID", snapUID)
+							.detail("PrevSnapUID", lastSnapReq.snapUID)
+							.detail("CurrRole", snapReq.role)
+						    .detail("PrevRole", lastSnapReq.role)
+						    .detail("GapTime", now() - lastSnapTime);
+					}
+					errorForwarders.add(workerSnapCreate(snapReq, folder, coordFolder, &snapReqMap, &snapReqResultMap));
+					auto* snapReqResultMapPtr = &snapReqResultMap;
+					errorForwarders.add(fmap(
+					    [snapReqResultMapPtr, snapUID](Void _) {
+						    snapReqResultMapPtr->erase(snapUID);
+						    return Void();
+					    },
+					    delay(SERVER_KNOBS->SNAP_MINIMUM_TIME_GAP)));
+					if (g_network->isSimulated()) {
+						lastSnapReq = snapReq;
+						lastSnapTime = now();
+					}
 				}
 			}
 			when(wait(errorForwarders.getResult())) {}

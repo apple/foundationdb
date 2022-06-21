@@ -2086,21 +2086,28 @@ ACTOR Future<Void> proxySnapCreate(ProxySnapRequest snapReq, ProxyCommitData* co
 			throw snap_log_anti_quorum_unsupported();
 		}
 
-		// send a snap request to DD
-		if (!commitData->db->get().distributor.present()) {
-			TraceEvent(SevWarnAlways, "DataDistributorNotPresent").detail("Operation", "SnapRequest");
-			throw dd_not_found();
-		}
-		state Future<ErrorOr<Void>> ddSnapReq = commitData->db->get().distributor.get().distributorSnapReq.tryGetReply(
-		    DistributorSnapRequest(snapReq.snapPayload, snapReq.snapUID));
-		try {
-			wait(throwErrorOr(ddSnapReq));
-		} catch (Error& e) {
-			TraceEvent("SnapCommitProxy_DDSnapResponseError")
-			    .errorUnsuppressed(e)
-			    .detail("SnapPayload", snapReq.snapPayload)
-			    .detail("SnapUID", snapReq.snapUID);
-			throw e;
+		loop {
+			// send a snap request to DD
+			if (!commitData->db->get().distributor.present()) {
+				TraceEvent(SevWarnAlways, "DataDistributorNotPresent").detail("Operation", "SnapRequest");
+				throw dd_not_found();
+			}
+			try {
+				Future<ErrorOr<Void>> ddSnapReq =
+				    commitData->db->get().distributor.get().distributorSnapReq.tryGetReply(
+				        DistributorSnapRequest(snapReq.snapPayload, snapReq.snapUID));
+				wait(throwErrorOr(ddSnapReq));
+				break;
+			} catch (Error& e) {
+				TraceEvent("SnapCommitProxy_DDSnapResponseError")
+				    .errorUnsuppressed(e)
+				    .detail("SnapPayload", snapReq.snapPayload)
+				    .detail("SnapUID", snapReq.snapUID);
+				// Retry if we have network issues
+				if (e.code() != error_code_request_maybe_delivered)
+					throw e;
+				wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
+			}
 		}
 		snapReq.reply.send(Void());
 	} catch (Error& e) {

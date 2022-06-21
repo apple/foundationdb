@@ -881,14 +881,22 @@ Future<Void> sendSnapReq(RequestStream<Req> stream, Req req, Error e) {
 	return Void();
 }
 
-ACTOR template <class Req>
-Future<ErrorOr<Void>> trySendSnapReq(RequestStream<Req> stream, Req req) {
-	ErrorOr<REPLY_TYPE(Req)> reply = wait(stream.tryGetReply(req));
-	if (reply.isError()) {
-		TraceEvent("SnapDataDistributor_ReqError")
-		    .errorUnsuppressed(reply.getError())
-		    .detail("Peer", stream.getEndpoint().getPrimaryAddress());
-		return ErrorOr<Void>(reply.getError());
+ACTOR Future<ErrorOr<Void>> trySendSnapReq(RequestStream<WorkerSnapRequest> stream, WorkerSnapRequest req) {
+	loop {
+		ErrorOr<REPLY_TYPE(WorkerSnapRequest)> reply = wait(stream.tryGetReply(req));
+		if (reply.isError()) {
+			TraceEvent("SnapDataDistributor_ReqError")
+			    .errorUnsuppressed(reply.getError())
+			    .detail("Peer", stream.getEndpoint().getPrimaryAddress());
+			if (reply.getError().code() != error_code_request_maybe_delivered)
+				return ErrorOr<Void>(reply.getError());
+			else {
+				// retry for network failures with same snap UID to avoid snapshot twice
+				req = WorkerSnapRequest(req.snapPayload, req.snapUID, req.role);
+				wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
+			}
+		} else
+			break;
 	}
 	return ErrorOr<Void>(Void());
 }
@@ -1163,15 +1171,21 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 	return Void();
 }
 
-ACTOR Future<Void> ddSnapCreate(DistributorSnapRequest snapReq,
-                                Reference<AsyncVar<ServerDBInfo> const> db,
-                                DDEnabledState* ddEnabledState) {
+ACTOR Future<Void> ddSnapCreate(
+    DistributorSnapRequest snapReq,
+    Reference<AsyncVar<ServerDBInfo> const> db,
+    DDEnabledState* ddEnabledState,
+    std::map<UID, DistributorSnapRequest>* ddSnapMap /* ongoing snapshot requests */,
+    std::map<UID, ErrorOr<Void>>*
+        ddSnapResultMap /* finished snapshot requests, expired in SNAP_MINIMUM_TIME_GAP seconds */) {
 	state Future<Void> dbInfoChange = db->onChange();
 	if (!ddEnabledState->setDDEnabled(false, snapReq.snapUID)) {
 		// disable DD before doing snapCreate, if previous snap req has already disabled DD then this operation fails
 		// here
-		TraceEvent("SnapDDSetDDEnabledFailedInMemoryCheck").log();
-		snapReq.reply.sendError(operation_failed());
+		TraceEvent("SnapDDSetDDEnabledFailedInMemoryCheck").detail("SnapUID", snapReq.snapUID);
+		ddSnapMap->at(snapReq.snapUID).reply.sendError(operation_failed());
+		ddSnapMap->erase(snapReq.snapUID);
+		(*ddSnapResultMap)[snapReq.snapUID] = ErrorOr<Void>(operation_failed());
 		return Void();
 	}
 	try {
@@ -1186,7 +1200,9 @@ ACTOR Future<Void> ddSnapCreate(DistributorSnapRequest snapReq,
 				TraceEvent("SnapDDCreateSuccess")
 				    .detail("SnapPayload", snapReq.snapPayload)
 				    .detail("SnapUID", snapReq.snapUID);
-				snapReq.reply.send(Void());
+				ddSnapMap->at(snapReq.snapUID).reply.send(Void());
+				ddSnapMap->erase(snapReq.snapUID);
+				(*ddSnapResultMap)[snapReq.snapUID] = ErrorOr<Void>(Void());
 			}
 			when(wait(delay(SERVER_KNOBS->SNAP_CREATE_MAX_TIMEOUT))) {
 				TraceEvent("SnapDDCreateTimedOut")
@@ -1201,7 +1217,9 @@ ACTOR Future<Void> ddSnapCreate(DistributorSnapRequest snapReq,
 		    .detail("SnapPayload", snapReq.snapPayload)
 		    .detail("SnapUID", snapReq.snapUID);
 		if (e.code() != error_code_operation_cancelled) {
-			snapReq.reply.sendError(e);
+			ddSnapMap->at(snapReq.snapUID).reply.sendError(e);
+			ddSnapMap->erase(snapReq.snapUID);
+			(*ddSnapResultMap)[snapReq.snapUID] = ErrorOr<Void>(e);
 		} else {
 			// enable DD should always succeed
 			bool success = ddEnabledState->setDDEnabled(true, snapReq.snapUID);
@@ -1340,6 +1358,8 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 	state Database cx = openDBOnServer(db, TaskPriority::DefaultDelay, LockAware::True);
 	state ActorCollection actors(false);
 	state DDEnabledState ddEnabledState;
+	state std::map<UID, DistributorSnapRequest> ddSnapReqMap;
+	state std::map<UID, ErrorOr<Void>> ddSnapReqResultMap;
 	self->addActor.send(actors.getResult());
 	self->addActor.send(traceRole(Role::DATA_DISTRIBUTOR, di.id()));
 
@@ -1367,7 +1387,28 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 				actors.add(ddGetMetrics(req, getShardMetricsList));
 			}
 			when(DistributorSnapRequest snapReq = waitNext(di.distributorSnapReq.getFuture())) {
-				actors.add(ddSnapCreate(snapReq, db, &ddEnabledState));
+				auto& snapUID = snapReq.snapUID;
+				if (ddSnapReqResultMap.count(snapUID)) {
+					auto result = ddSnapReqResultMap[snapUID];
+					result.isError() ? snapReq.reply.sendError(result.getError()) : snapReq.reply.send(result.get());
+					TraceEvent("RetryFinishedDistributorSnapRequest")
+					    .detail("SnapUID", snapUID)
+					    .detail("Result", result.isError() ? result.getError().code() : 0);
+				} else if (ddSnapReqMap.count(snapReq.snapUID)) {
+					TraceEvent("RetryOngoingDistributorSnapRequest").detail("SnapUID", snapUID);
+					ASSERT(snapReq.snapPayload == ddSnapReqMap[snapUID].snapPayload);
+					ddSnapReqMap[snapUID] = snapReq;
+				} else {
+					ddSnapReqMap[snapUID] = snapReq;
+					actors.add(ddSnapCreate(snapReq, db, &ddEnabledState, &ddSnapReqMap, &ddSnapReqResultMap));
+					auto* ddSnapReqResultMapPtr = &ddSnapReqResultMap;
+					actors.add(fmap(
+					    [ddSnapReqResultMapPtr, snapUID](Void _) {
+						    ddSnapReqResultMapPtr->erase(snapUID);
+						    return Void();
+					    },
+					    delay(SERVER_KNOBS->SNAP_MINIMUM_TIME_GAP)));
+				}
 			}
 			when(DistributorExclusionSafetyCheckRequest exclCheckReq =
 			         waitNext(di.distributorExclCheckReq.getFuture())) {

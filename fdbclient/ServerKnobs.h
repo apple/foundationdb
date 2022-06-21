@@ -603,6 +603,8 @@ public:
 	// disk snapshot
 	int64_t MAX_FORKED_PROCESS_OUTPUT;
 	double SNAP_CREATE_MAX_TIMEOUT;
+	// minimum gap time between two snapshot requests for the same process
+	double SNAP_MINIMUM_TIME_GAP;
 	// Maximum number of storage servers a snapshot can fail to
 	// capture while still succeeding
 	int64_t MAX_STORAGE_SNAPSHOT_FAULT_TOLERANCE;

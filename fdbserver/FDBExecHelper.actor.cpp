@@ -440,9 +440,8 @@ ACTOR Future<int> execHelper(ExecCmdValueString* execArg, UID snapUID, std::stri
 			role = roles[index];
 			// copy the files
 			state std::string folderFrom = folder + "/.";
-			state std::string folderTo = folder + "-snap-" + uidStr.toString();
+			state std::string folderTo = folder + "-snap-" + uidStr.toString() + "-" + role;
 			double maxSimDelayTime = 10.0;
-			folderTo = folder + "-snap-" + uidStr.toString() + "-" + role;
 			std::vector<std::string> paramList;
 			std::string mkdirBin = "/bin/mkdir";
 			paramList.push_back(mkdirBin);
