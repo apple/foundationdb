@@ -2249,7 +2249,7 @@ TEST_CASE("special-key-space set transaction ID after write") {
 		fdb_check(f1.get(&out_present, (const uint8_t**)&val, &vallen));
 
 		REQUIRE(out_present);
-		UID transaction_id = UID::fromString(val);
+		UID transaction_id = UID::fromString(std::string(val, vallen));
 		CHECK(transaction_id.first() > 0);
 		CHECK(transaction_id.second() > 0);
 		break;
@@ -2316,7 +2316,7 @@ TEST_CASE("special-key-space tracing get range") {
 		CHECK(out_count == 2);
 
 		CHECK(std::string((char*)out_kv[1].key, out_kv[1].key_length) == tracingBegin + "transaction_id");
-		UID transaction_id = UID::fromString(std::string((char*)out_kv[1].value));
+		UID transaction_id = UID::fromString(std::string((char*)out_kv[1].value, out_kv[1].value_length));
 		CHECK(transaction_id.first() > 0);
 		CHECK(transaction_id.second() > 0);
 		break;

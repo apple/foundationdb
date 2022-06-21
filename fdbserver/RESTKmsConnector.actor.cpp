@@ -55,6 +55,8 @@ const char* BASE_CIPHER_TAG = "baseCipher";
 const char* CIPHER_KEY_DETAILS_TAG = "cipher_key_details";
 const char* ENCRYPT_DOMAIN_ID_TAG = "encrypt_domain_id";
 const char* ENCRYPT_DOMAIN_NAME_TAG = "encrypt_domain_name";
+const char* CIPHER_KEY_REFRESH_AFTER_SEC = "refresh_after_sec";
+const char* CIPHER_KEY_EXPIRE_AFTER_SEC = "expire_after_sec";
 const char* ERROR_TAG = "error";
 const char* ERROR_MSG_TAG = "errMsg";
 const char* ERROR_CODE_TAG = "errCode";
@@ -83,11 +85,18 @@ bool canReplyWith(Error e) {
 	case error_code_io_error:
 	case error_code_operation_failed:
 	case error_code_value_too_large:
+	case error_code_timed_out:
+	case error_code_connection_failed:
 		return true;
 	default:
 		return false;
 	}
 }
+
+bool isKmsNotReachable(const int errCode) {
+	return errCode == error_code_timed_out || errCode == error_code_connection_failed;
+}
+
 } // namespace
 
 struct KmsUrlCtx {
@@ -267,7 +276,7 @@ ACTOR Future<Void> discoverKmsUrls(Reference<RESTKmsConnectorCtx> ctx, bool refr
 void parseKmsResponse(Reference<RESTKmsConnectorCtx> ctx,
                       Reference<HTTP::Response> resp,
                       Arena* arena,
-                      std::vector<EncryptCipherKeyDetails>* outCipherKeyDetails) {
+                      VectorRef<EncryptCipherKeyDetails>* outCipherKeyDetails) {
 	// Acceptable response payload json format:
 	//
 	// response_json_payload {
@@ -276,6 +285,8 @@ void parseKmsResponse(Reference<RESTKmsConnectorCtx> ctx,
 	//        "base_cipher_id"    : <cipherKeyId>,
 	//        "encrypt_domain_id" : <domainId>,
 	//        "base_cipher"       : <baseCipher>
+	//        "refresh_after_sec"   : <refreshCipherTimeInterval> (Optional)
+	//        "expire_after_sec"    : <expireCipherTimeInterval>  (Optional)
 	//     },
 	//     {
 	//         ....
@@ -329,13 +340,13 @@ void parseKmsResponse(Reference<RESTKmsConnectorCtx> ctx,
 
 	// Extract CipherKeyDetails
 	if (!doc.HasMember(CIPHER_KEY_DETAILS_TAG) || !doc[CIPHER_KEY_DETAILS_TAG].IsArray()) {
-		TraceEvent("ParseKmsResponse_FailureMissingCipherKeyDetails", ctx->uid).log();
+		TraceEvent(SevWarn, "ParseKmsResponse_FailureMissingCipherKeyDetails", ctx->uid).log();
 		throw operation_failed();
 	}
 
 	for (const auto& cipherDetail : doc[CIPHER_KEY_DETAILS_TAG].GetArray()) {
 		if (!cipherDetail.IsObject()) {
-			TraceEvent("ParseKmsResponse_FailureEncryptKeyDetailsNotObject", ctx->uid)
+			TraceEvent(SevWarn, "ParseKmsResponse_FailureEncryptKeyDetailsNotObject", ctx->uid)
 			    .detail("Type", cipherDetail.GetType());
 			throw operation_failed();
 		}
@@ -344,7 +355,7 @@ void parseKmsResponse(Reference<RESTKmsConnectorCtx> ctx,
 		const bool isBaseCipherPresent = cipherDetail.HasMember(BASE_CIPHER_TAG);
 		const bool isEncryptDomainIdPresent = cipherDetail.HasMember(ENCRYPT_DOMAIN_ID_TAG);
 		if (!isBaseCipherIdPresent || !isBaseCipherPresent || !isEncryptDomainIdPresent) {
-			TraceEvent("ParseKmsResponse_MalformedKeyDetail", ctx->uid)
+			TraceEvent(SevWarn, "ParseKmsResponse_MalformedKeyDetail", ctx->uid)
 			    .detail("BaseCipherIdPresent", isBaseCipherIdPresent)
 			    .detail("BaseCipherPresent", isBaseCipherPresent)
 			    .detail("EncryptDomainIdPresent", isEncryptDomainIdPresent);
@@ -354,10 +365,22 @@ void parseKmsResponse(Reference<RESTKmsConnectorCtx> ctx,
 		const int cipherKeyLen = cipherDetail[BASE_CIPHER_TAG].GetStringLength();
 		std::unique_ptr<uint8_t[]> cipherKey = std::make_unique<uint8_t[]>(cipherKeyLen);
 		memcpy(cipherKey.get(), cipherDetail[BASE_CIPHER_TAG].GetString(), cipherKeyLen);
-		outCipherKeyDetails->emplace_back(cipherDetail[ENCRYPT_DOMAIN_ID_TAG].GetInt64(),
-		                                  cipherDetail[BASE_CIPHER_ID_TAG].GetUint64(),
-		                                  StringRef(cipherKey.get(), cipherKeyLen),
-		                                  *arena);
+
+		// Extract cipher refresh and/or expiry interval if supplied
+		Optional<int64_t> refreshAfterSec = cipherDetail.HasMember(CIPHER_KEY_REFRESH_AFTER_SEC) &&
+		                                            cipherDetail[CIPHER_KEY_REFRESH_AFTER_SEC].GetInt64() > 0
+		                                        ? cipherDetail[CIPHER_KEY_REFRESH_AFTER_SEC].GetInt64()
+		                                        : Optional<int64_t>();
+		Optional<int64_t> expireAfterSec = cipherDetail.HasMember(CIPHER_KEY_EXPIRE_AFTER_SEC)
+		                                       ? cipherDetail[CIPHER_KEY_EXPIRE_AFTER_SEC].GetInt64()
+		                                       : Optional<int64_t>();
+
+		outCipherKeyDetails->emplace_back_deep(*arena,
+		                                       cipherDetail[ENCRYPT_DOMAIN_ID_TAG].GetInt64(),
+		                                       cipherDetail[BASE_CIPHER_ID_TAG].GetUint64(),
+		                                       StringRef(cipherKey.get(), cipherKeyLen),
+		                                       refreshAfterSec,
+		                                       expireAfterSec);
 	}
 
 	if (doc.HasMember(KMS_URLS_TAG)) {
@@ -519,7 +542,7 @@ ACTOR
 Future<Void> fetchEncryptionKeys_impl(Reference<RESTKmsConnectorCtx> ctx,
                                       StringRef requestBodyRef,
                                       Arena* arena,
-                                      std::vector<EncryptCipherKeyDetails>* outCipherKeyDetails) {
+                                      VectorRef<EncryptCipherKeyDetails>* outCipherKeyDetails) {
 	state Reference<HTTP::Response> resp;
 
 	// Follow 2-phase scheme:
@@ -558,14 +581,18 @@ Future<Void> fetchEncryptionKeys_impl(Reference<RESTKmsConnectorCtx> ctx,
 					TraceEvent("FetchEncryptionKeys_Success", ctx->uid).detail("KmsUrl", curUrl->url);
 					return Void();
 				} catch (Error& e) {
-					TraceEvent("FetchEncryptionKeys_RespParseFailure").error(e);
+					TraceEvent(SevWarn, "FetchEncryptionKeys_RespParseFailure").error(e);
 					curUrl->nResponseParseFailures++;
 					// attempt to fetch encryption details from next KmsUrl
 				}
 			} catch (Error& e) {
 				TraceEvent("FetchEncryptionKeys_Failed", ctx->uid).error(e);
 				curUrl->nFailedResponses++;
-				// attempt to fetch encryption details from next KmsUrl
+				if (pass > 1 && isKmsNotReachable(e.code())) {
+					throw e;
+				} else {
+					// attempt to fetch encryption details from next KmsUrl
+				}
 			}
 		}
 
@@ -585,7 +612,7 @@ ACTOR Future<KmsConnLookupEKsByKeyIdsRep> fetchEncryptionKeysByKeyIds(Reference<
 	bool refreshKmsUrls = shouldRefreshKmsUrls(ctx);
 	std::string requestBody;
 
-	StringRef requestBodyRef = getEncryptKeysByKeyIdsRequestBody(ctx, req, refreshKmsUrls, reply.arena);
+	StringRef requestBodyRef = getEncryptKeysByKeyIdsRequestBody(ctx, req, refreshKmsUrls, req.arena);
 
 	wait(fetchEncryptionKeys_impl(ctx, requestBodyRef, &reply.arena, &reply.cipherKeyDetails));
 
@@ -673,7 +700,7 @@ ACTOR Future<KmsConnLookupEKsByDomainIdsRep> fetchEncryptionKeysByDomainIds(Refe
                                                                             KmsConnLookupEKsByDomainIdsReq req) {
 	state KmsConnLookupEKsByDomainIdsRep reply;
 	bool refreshKmsUrls = shouldRefreshKmsUrls(ctx);
-	StringRef requestBodyRef = getEncryptKeysByDomainIdsRequestBody(ctx, req, refreshKmsUrls, reply.arena);
+	StringRef requestBodyRef = getEncryptKeysByDomainIdsRequestBody(ctx, req, refreshKmsUrls, req.arena);
 
 	wait(fetchEncryptionKeys_impl(ctx, requestBodyRef, &reply.arena, &reply.cipherKeyDetails));
 
@@ -1025,6 +1052,19 @@ void getFakeKmsResponse(StringRef jsonReqRef, const bool baseCipherIdPresent, Re
 		baseCipher.SetString((char*)&BASE_CIPHER_KEY_TEST[0], sizeof(BASE_CIPHER_KEY_TEST), resDoc.GetAllocator());
 		keyDetail.AddMember(key, baseCipher, resDoc.GetAllocator());
 
+		if (deterministicRandom()->coinflip()) {
+			key.SetString(CIPHER_KEY_REFRESH_AFTER_SEC, resDoc.GetAllocator());
+			rapidjson::Value refreshInterval;
+			refreshInterval.SetInt64(10);
+			keyDetail.AddMember(key, refreshInterval, resDoc.GetAllocator());
+		}
+		if (deterministicRandom()->coinflip()) {
+			key.SetString(CIPHER_KEY_EXPIRE_AFTER_SEC, resDoc.GetAllocator());
+			rapidjson::Value expireInterval;
+			deterministicRandom()->coinflip() ? expireInterval.SetInt64(10) : expireInterval.SetInt64(-1);
+			keyDetail.AddMember(key, expireInterval, resDoc.GetAllocator());
+		}
+
 		cipherKeyDetails.PushBack(keyDetail, resDoc.GetAllocator());
 	}
 	rapidjson::Value memberKey(CIPHER_KEY_DETAILS_TAG, resDoc.GetAllocator());
@@ -1065,12 +1105,12 @@ void testGetEncryptKeysByKeyIdsRequestBody(Reference<RESTKmsConnectorCtx> ctx, A
 		EncryptCipherDomainName domainName = domainId < 0
 		                                         ? StringRef(arena, std::string(FDB_DEFAULT_ENCRYPT_DOMAIN_NAME))
 		                                         : StringRef(arena, std::to_string(domainId));
-		req.encryptKeyInfos.emplace_back(KmsConnLookupKeyIdsReqInfo(domainId, i, domainName, req.arena));
+		req.encryptKeyInfos.emplace_back_deep(req.arena, domainId, i, domainName);
 		keyMap[i] = domainId;
 	}
 
-	bool refreshKmsUrls = deterministicRandom()->randomInt(0, 100) < 50;
-	if (deterministicRandom()->randomInt(0, 100) < 40) {
+	bool refreshKmsUrls = deterministicRandom()->coinflip();
+	if (deterministicRandom()->coinflip()) {
 		req.debugId = deterministicRandom()->randomUniqueID();
 	}
 
@@ -1081,7 +1121,7 @@ void testGetEncryptKeysByKeyIdsRequestBody(Reference<RESTKmsConnectorCtx> ctx, A
 	getFakeKmsResponse(requestBodyRef, true, httpResp);
 	TraceEvent("FetchKeysByKeyIds", ctx->uid).setMaxFieldLength(100000).detail("HttpRespStr", httpResp->content);
 
-	std::vector<EncryptCipherKeyDetails> cipherDetails;
+	VectorRef<EncryptCipherKeyDetails> cipherDetails;
 	parseKmsResponse(ctx, httpResp, &arena, &cipherDetails);
 	ASSERT_EQ(cipherDetails.size(), keyMap.size());
 	for (const auto& detail : cipherDetails) {
@@ -1104,13 +1144,13 @@ void testGetEncryptKeysByDomainIdsRequestBody(Reference<RESTKmsConnectorCtx> ctx
 		EncryptCipherDomainName domainName = domainId < 0
 		                                         ? StringRef(arena, std::string(FDB_DEFAULT_ENCRYPT_DOMAIN_NAME))
 		                                         : StringRef(arena, std::to_string(domainId));
-		KmsConnLookupDomainIdsReqInfo reqInfo(domainId, domainName, req.arena);
+		KmsConnLookupDomainIdsReqInfo reqInfo(req.arena, domainId, domainName);
 		if (domainInfoMap.insert({ domainId, reqInfo }).second) {
-			req.encryptDomainInfos.emplace_back(reqInfo);
+			req.encryptDomainInfos.push_back(req.arena, reqInfo);
 		}
 	}
 
-	bool refreshKmsUrls = deterministicRandom()->randomInt(0, 100) < 50;
+	bool refreshKmsUrls = deterministicRandom()->coinflip();
 
 	StringRef jsonReqRef = getEncryptKeysByDomainIdsRequestBody(ctx, req, refreshKmsUrls, arena);
 	TraceEvent("FetchKeysByDomainIds", ctx->uid).detail("JsonReqStr", jsonReqRef.toString());
@@ -1119,7 +1159,7 @@ void testGetEncryptKeysByDomainIdsRequestBody(Reference<RESTKmsConnectorCtx> ctx
 	getFakeKmsResponse(jsonReqRef, false, httpResp);
 	TraceEvent("FetchKeysByDomainIds", ctx->uid).detail("HttpRespStr", httpResp->content);
 
-	std::vector<EncryptCipherKeyDetails> cipherDetails;
+	VectorRef<EncryptCipherKeyDetails> cipherDetails;
 	parseKmsResponse(ctx, httpResp, &arena, &cipherDetails);
 	ASSERT_EQ(domainInfoMap.size(), cipherDetails.size());
 	for (const auto& detail : cipherDetails) {
@@ -1134,7 +1174,7 @@ void testGetEncryptKeysByDomainIdsRequestBody(Reference<RESTKmsConnectorCtx> ctx
 
 void testMissingCipherDetailsTag(Reference<RESTKmsConnectorCtx> ctx) {
 	Arena arena;
-	std::vector<EncryptCipherKeyDetails> cipherDetails;
+	VectorRef<EncryptCipherKeyDetails> cipherDetails;
 
 	rapidjson::Document doc;
 	doc.SetObject();
@@ -1161,7 +1201,7 @@ void testMissingCipherDetailsTag(Reference<RESTKmsConnectorCtx> ctx) {
 
 void testMalformedCipherDetails(Reference<RESTKmsConnectorCtx> ctx) {
 	Arena arena;
-	std::vector<EncryptCipherKeyDetails> cipherDetails;
+	VectorRef<EncryptCipherKeyDetails> cipherDetails;
 
 	rapidjson::Document doc;
 	doc.SetObject();
@@ -1188,7 +1228,7 @@ void testMalformedCipherDetails(Reference<RESTKmsConnectorCtx> ctx) {
 
 void testMalfromedCipherDetailObj(Reference<RESTKmsConnectorCtx> ctx) {
 	Arena arena;
-	std::vector<EncryptCipherKeyDetails> cipherDetails;
+	VectorRef<EncryptCipherKeyDetails> cipherDetails;
 
 	rapidjson::Document doc;
 	doc.SetObject();
@@ -1220,7 +1260,7 @@ void testMalfromedCipherDetailObj(Reference<RESTKmsConnectorCtx> ctx) {
 
 void testKMSErrorResponse(Reference<RESTKmsConnectorCtx> ctx) {
 	Arena arena;
-	std::vector<EncryptCipherKeyDetails> cipherDetails;
+	VectorRef<EncryptCipherKeyDetails> cipherDetails;
 
 	rapidjson::Document doc;
 	doc.SetObject();

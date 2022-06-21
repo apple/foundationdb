@@ -254,7 +254,7 @@ public:
 			double getTimeEstimate() const override { return .001; }
 		};
 		void action(WriteBuffer& a) {
-			for (auto event : a.events) {
+			for (const auto& event : a.events) {
 				event.validateFormat();
 				logWriter->write(formatter->formatEvent(event));
 			}

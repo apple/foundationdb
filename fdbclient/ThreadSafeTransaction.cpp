@@ -131,7 +131,7 @@ ThreadFuture<Key> ThreadSafeDatabase::purgeBlobGranules(const KeyRangeRef& keyRa
 	DatabaseContext* db = this->db;
 	KeyRange range = keyRange;
 	return onMainThread([db, range, purgeVersion, force]() -> Future<Key> {
-		return db->purgeBlobGranules(range, purgeVersion, force);
+		return db->purgeBlobGranules(range, purgeVersion, {}, force);
 	});
 }
 
@@ -174,6 +174,21 @@ Reference<ITransaction> ThreadSafeTenant::createTransaction() {
 	return Reference<ITransaction>(new ThreadSafeTransaction(db->db, type, name));
 }
 
+ThreadFuture<Key> ThreadSafeTenant::purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) {
+	DatabaseContext* db = this->db->db;
+	Standalone<StringRef> tenantName = this->name;
+	KeyRange range = keyRange;
+	return onMainThread([db, range, purgeVersion, tenantName, force]() -> Future<Key> {
+		return db->purgeBlobGranules(range, purgeVersion, tenantName, force);
+	});
+}
+
+ThreadFuture<Void> ThreadSafeTenant::waitPurgeGranulesComplete(const KeyRef& purgeKey) {
+	DatabaseContext* db = this->db->db;
+	Key key = purgeKey;
+	return onMainThread([db, key]() -> Future<Void> { return db->waitPurgeGranulesComplete(key); });
+}
+
 ThreadSafeTenant::~ThreadSafeTenant() {}
 
 ThreadSafeTransaction::ThreadSafeTransaction(DatabaseContext* cx,
@@ -190,12 +205,20 @@ ThreadSafeTransaction::ThreadSafeTransaction(DatabaseContext* cx,
 	auto tr = this->tr = ISingleThreadTransaction::allocateOnForeignThread(type);
 	// No deferred error -- if the construction of the RYW transaction fails, we have no where to put it
 	onMainThreadVoid(
-	    [tr, cx, tenant]() {
+	    [tr, cx, type, tenant]() {
 		    cx->addref();
 		    if (tenant.present()) {
-			    tr->construct(Database(cx), tenant.get());
+			    if (type == ISingleThreadTransaction::Type::RYW) {
+				    new (tr) ReadYourWritesTransaction(Database(cx), tenant.get());
+			    } else {
+				    tr->construct(Database(cx), tenant.get());
+			    }
 		    } else {
-			    tr->construct(Database(cx));
+			    if (type == ISingleThreadTransaction::Type::RYW) {
+				    new (tr) ReadYourWritesTransaction(Database(cx));
+			    } else {
+				    tr->construct(Database(cx));
+			    }
 		    }
 	    },
 	    nullptr);
@@ -587,6 +610,7 @@ void ThreadSafeApi::runNetwork() {
 	}
 
 	if (runErr.present()) {
+		closeTraceFile();
 		throw runErr.get();
 	}
 

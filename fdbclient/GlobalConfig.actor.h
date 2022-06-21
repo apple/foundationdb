@@ -179,4 +179,6 @@ private:
 	std::unordered_map<KeyRef, std::function<void(std::optional<std::any>)>> callbacks;
 };
 
+#include "flow/unactorcompiler.h"
+
 #endif

@@ -51,4 +51,6 @@ bool compareFDBAndBlob(RangeResult fdb,
                        Version v,
                        bool debug);
 
+#include "flow/unactorcompiler.h"
+
 #endif
