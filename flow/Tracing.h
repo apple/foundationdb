@@ -226,7 +226,9 @@ public:
 	}
 
 	Span& addAttribute(const StringRef& key, const StringRef& value) {
-		attributes.push_back_deep(arena, KeyValueRef(key, value));
+		if (FLOW_KNOBS->TRACING_SPAN_ATTRIBUTES_ENABLED) {
+			attributes.push_back_deep(arena, KeyValueRef(key, value));
+		}
 		return *this;
 	}
 

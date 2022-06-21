@@ -37,7 +37,8 @@
 
 #define SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID -1
 #define ENCRYPT_HEADER_DOMAIN_ID -2
-#define FDB_DEFAULT_ENCRYPT_DOMAIN_NAME "FdbDefaultEncryptDomain"
+
+const std::string FDB_DEFAULT_ENCRYPT_DOMAIN_NAME = "FdbDefaultEncryptDomain";
 
 using EncryptCipherDomainId = int64_t;
 using EncryptCipherDomainName = StringRef;
@@ -80,5 +81,12 @@ std::string getEncryptDbgTraceKey(std::string_view prefix,
                                   EncryptCipherDomainId domainId,
                                   StringRef domainName,
                                   Optional<EncryptCipherBaseKeyId> baseCipherId = Optional<EncryptCipherBaseKeyId>());
+
+std::string getEncryptDbgTraceKeyWithTS(std::string_view prefix,
+                                        EncryptCipherDomainId domainId,
+                                        StringRef domainName,
+                                        EncryptCipherBaseKeyId baseCipherId,
+                                        int64_t refAfterTS,
+                                        int64_t expAfterTS);
 
 #endif

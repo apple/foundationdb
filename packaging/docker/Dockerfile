@@ -43,6 +43,7 @@ RUN yum install -y \
     telnet-0.17-66.el7 \
     traceroute-2.0.22-2.el7 \
     unzip-6.0-22.el7_9 \
+    openssl-1.0.2k-24.el7_9.x86_64 \
     vim-enhanced-7.4.629-8.el7_9 && \
     yum clean all && \
     rm -rf /var/cache/yum
@@ -58,7 +59,7 @@ RUN curl -Ls https://github.com/krallin/tini/releases/download/v0.19.0/tini-amd6
 
 WORKDIR /
 
-FROM golang:1.16.7-bullseye AS go-build
+FROM golang:1.17.11-bullseye AS go-build
 
 COPY fdbkubernetesmonitor/ /fdbkubernetesmonitor
 WORKDIR /fdbkubernetesmonitor

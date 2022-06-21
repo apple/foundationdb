@@ -278,14 +278,11 @@ int main(int argc, char** argv) {
 		Error::init();
 		g_network = newNet2(TLSConfig());
 		openTraceFile(NetworkAddress(), 10 << 20, 10 << 20, ".", "mkcert");
-		auto thread = std::thread([]() {
-			TraceEvent::setNetworkThread();
-			g_network->run();
-		});
+		auto thread = std::thread([]() { g_network->run(); });
 		auto cleanUpGuard = ScopeExit([&thread]() {
-			flushTraceFileVoid();
 			g_network->stop();
 			thread.join();
+			closeTraceFile();
 		});
 
 		serverArgs.transformPathToAbs();

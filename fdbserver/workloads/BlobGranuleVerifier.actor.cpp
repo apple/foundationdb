@@ -254,7 +254,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 							if (prevPurgeVersion < maxPurgeVersion) {
 								newPurgeVersion = deterministicRandom()->randomInt64(prevPurgeVersion, maxPurgeVersion);
 								prevPurgeVersion = std::max(prevPurgeVersion, newPurgeVersion);
-								Key purgeKey = wait(cx->purgeBlobGranules(normalKeys, newPurgeVersion, false));
+								Key purgeKey = wait(cx->purgeBlobGranules(normalKeys, newPurgeVersion, {}, false));
 								wait(cx->waitPurgeGranulesComplete(purgeKey));
 								self->purges++;
 							} else {

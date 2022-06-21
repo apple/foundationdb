@@ -25,7 +25,7 @@
 #include "TesterTestSpec.h"
 #include "TesterUtil.h"
 #include "flow/SimpleOpt.h"
-#include "bindings/c/foundationdb/fdb_c.h"
+#include "test/fdb_api.hpp"
 
 #include <memory>
 #include <stdexcept>
@@ -270,27 +270,26 @@ bool parseArgs(TesterOptions& options, int argc, char** argv) {
 	return true;
 }
 
-void fdb_check(fdb_error_t e) {
+void fdb_check(fdb::Error e) {
 	if (e) {
-		fmt::print(stderr, "Unexpected FDB error: {}({})\n", e, fdb_get_error(e));
+		fmt::print(stderr, "Unexpected FDB error: {}({})\n", e.code(), e.what());
 		std::abort();
 	}
 }
 
 void applyNetworkOptions(TesterOptions& options) {
 	if (!options.tmpDir.empty()) {
-		fdb_check(FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_CLIENT_TMP_DIR, options.tmpDir));
+		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_CLIENT_TMP_DIR, options.tmpDir);
 	}
 	if (!options.externalClientLibrary.empty()) {
-		fdb_check(FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_DISABLE_LOCAL_CLIENT));
-		fdb_check(
-		    FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_EXTERNAL_CLIENT_LIBRARY, options.externalClientLibrary));
+		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_DISABLE_LOCAL_CLIENT);
+		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_EXTERNAL_CLIENT_LIBRARY,
+		                        options.externalClientLibrary);
 	} else if (!options.externalClientDir.empty()) {
 		if (options.disableLocalClient) {
-			fdb_check(FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_DISABLE_LOCAL_CLIENT));
+			fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_DISABLE_LOCAL_CLIENT);
 		}
-		fdb_check(
-		    FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_EXTERNAL_CLIENT_DIRECTORY, options.externalClientDir));
+		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_EXTERNAL_CLIENT_DIRECTORY, options.externalClientDir);
 	} else {
 		if (options.disableLocalClient) {
 			throw TesterError("Invalid options: Cannot disable local client if no external library is provided");
@@ -298,39 +297,38 @@ void applyNetworkOptions(TesterOptions& options) {
 	}
 
 	if (options.testSpec.multiThreaded) {
-		fdb_check(
-		    FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_CLIENT_THREADS_PER_VERSION, options.numFdbThreads));
+		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_CLIENT_THREADS_PER_VERSION, options.numFdbThreads);
 	}
 
 	if (options.testSpec.fdbCallbacksOnExternalThreads) {
-		fdb_check(FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_CALLBACKS_ON_EXTERNAL_THREADS));
+		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_CALLBACKS_ON_EXTERNAL_THREADS);
 	}
 
 	if (options.testSpec.buggify) {
-		fdb_check(FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_CLIENT_BUGGIFY_ENABLE));
+		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_CLIENT_BUGGIFY_ENABLE);
 	}
 
 	if (options.trace) {
-		fdb_check(FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_TRACE_ENABLE, options.traceDir));
-		fdb_check(FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_TRACE_FORMAT, options.traceFormat));
-		fdb_check(FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_TRACE_LOG_GROUP, options.logGroup));
+		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_TRACE_ENABLE, options.traceDir);
+		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_TRACE_FORMAT, options.traceFormat);
+		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_TRACE_LOG_GROUP, options.logGroup);
 	}
 
 	for (auto knob : options.knobs) {
-		fdb_check(FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_KNOB,
-		                            fmt::format("{}={}", knob.first.c_str(), knob.second.c_str())));
+		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_KNOB,
+		                        fmt::format("{}={}", knob.first.c_str(), knob.second.c_str()));
 	}
 
 	if (!options.tlsCertFile.empty()) {
-		fdb_check(FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_TLS_CERT_PATH, options.tlsCertFile));
+		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_TLS_CERT_PATH, options.tlsCertFile);
 	}
 
 	if (!options.tlsKeyFile.empty()) {
-		fdb_check(FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_TLS_KEY_PATH, options.tlsKeyFile));
+		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_TLS_KEY_PATH, options.tlsKeyFile);
 	}
 
 	if (!options.tlsCaFile.empty()) {
-		fdb_check(FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_TLS_CA_PATH, options.tlsCaFile));
+		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_TLS_CA_PATH, options.tlsCaFile);
 	}
 }
 
@@ -400,17 +398,17 @@ int main(int argc, char** argv) {
 		}
 		randomizeOptions(options);
 
-		fdb_check(fdb_select_api_version(options.apiVersion));
+		fdb::selectApiVersion(options.apiVersion);
 		applyNetworkOptions(options);
-		fdb_check(fdb_setup_network());
+		fdb::network::setup();
 
-		std::thread network_thread{ &fdb_run_network };
+		std::thread network_thread{ &fdb::network::run };
 
 		if (!runWorkloads(options)) {
 			retCode = 1;
 		}
 
-		fdb_check(fdb_stop_network());
+		fdb_check(fdb::network::stop());
 		network_thread.join();
 	} catch (const std::runtime_error& err) {
 		fmt::print(stderr, "ERROR: {}\n", err.what());

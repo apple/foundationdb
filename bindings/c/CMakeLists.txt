@@ -121,8 +121,6 @@ if(NOT WIN32)
     test/apitester/fdb_c_api_tester.cpp
     test/apitester/TesterApiWorkload.cpp
     test/apitester/TesterApiWorkload.h
-    test/apitester/TesterApiWrapper.cpp
-    test/apitester/TesterApiWrapper.h
     test/apitester/TesterTestSpec.cpp
     test/apitester/TesterTestSpec.h
     test/apitester/TesterBlobGranuleCorrectnessWorkload.cpp
@@ -191,9 +189,9 @@ if(NOT WIN32)
   target_link_libraries(disconnected_timeout_unit_tests PRIVATE fdb_c Threads::Threads)
 
 if(USE_SANITIZER)
-  target_link_libraries(fdb_c_api_tester PRIVATE fdb_c toml11_target Threads::Threads fmt::fmt boost_asan)
+  target_link_libraries(fdb_c_api_tester PRIVATE fdb_c fdb_cpp toml11_target Threads::Threads fmt::fmt boost_asan)
 else()
-  target_link_libraries(fdb_c_api_tester PRIVATE fdb_c toml11_target Threads::Threads fmt::fmt boost_target)
+  target_link_libraries(fdb_c_api_tester PRIVATE fdb_c fdb_cpp toml11_target Threads::Threads fmt::fmt boost_target)
 endif()
 
   # do not set RPATH for mako
