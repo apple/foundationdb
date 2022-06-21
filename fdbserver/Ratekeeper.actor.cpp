@@ -237,6 +237,10 @@ public:
 
 	ACTOR static Future<Void> monitorBlobWorkers(Ratekeeper* self) {
 		loop {
+			while (!self->configuration.blobGranulesEnabled) {
+				wait(delay(SERVER_KNOBS->SERVER_LIST_DELAY));
+			}
+
 			state double startTime = now();
 			state Version grv;
 			std::vector<BlobWorkerInterface> blobWorkers = wait(getBlobWorkers(self->db, true, &grv));
@@ -250,7 +254,7 @@ public:
 					                                SERVER_KNOBS->BLOB_WORKER_TIMEOUT));
 				}
 				wait(waitForAll(aliveVersions));
-				Version minVer = std::numeric_limits<Version>::max();
+				Version minVer = grv;
 				for (auto& it : aliveVersions) {
 					if (it.get().present()) {
 						minVer = std::min(minVer, it.get().get().version);
@@ -745,39 +749,41 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 		break;
 	}
 
-	Version blobWorkerLag =
-	    minBlobWorkerGRV + (now() - minBlobWorkerTime) * SERVER_KNOBS->VERSIONS_PER_SECOND - minBlobWorkerVersion;
-	if (blobWorkerLag > limits->bwLagTargetVersions &&
-	    actualTpsHistory.size() > SERVER_KNOBS->NEEDED_TPS_HISTORY_SAMPLES) {
-		if (limits->bwLagLimit == std::numeric_limits<double>::infinity()) {
-			double maxTps = 0;
-			for (int i = 0; i < actualTpsHistory.size(); i++) {
-				maxTps = std::max(maxTps, actualTpsHistory[i]);
+	if (self->configuration.blobGranulesEnabled) {
+		Version blobWorkerLag =
+		    minBlobWorkerGRV + (now() - minBlobWorkerTime) * SERVER_KNOBS->VERSIONS_PER_SECOND - minBlobWorkerVersion;
+		if (blobWorkerLag > limits->bwLagTargetVersions &&
+		    actualTpsHistory.size() > SERVER_KNOBS->NEEDED_TPS_HISTORY_SAMPLES) {
+			if (limits->bwLagLimit == std::numeric_limits<double>::infinity()) {
+				double maxTps = 0;
+				for (int i = 0; i < actualTpsHistory.size(); i++) {
+					maxTps = std::max(maxTps, actualTpsHistory[i]);
+				}
+				limits->bwLagLimit = SERVER_KNOBS->INITIAL_BW_LAG_MULTIPLIER * maxTps;
 			}
-			limits->bwLagLimit = SERVER_KNOBS->INITIAL_BW_LAG_MULTIPLIER * maxTps;
+			if (minBlobWorkerRate < SERVER_KNOBS->VERSIONS_PER_SECOND) {
+				limits->bwLagLimit = SERVER_KNOBS->BW_LAG_REDUCTION_RATE * limits->bwLagLimit;
+			}
+		} else if (limits->bwLagLimit != std::numeric_limits<double>::infinity() &&
+		           blobWorkerLag > limits->bwLagTargetVersions - SERVER_KNOBS->BW_LAG_UNLIMITED_THRESHOLD) {
+			if (minBlobWorkerRate > SERVER_KNOBS->VERSIONS_PER_SECOND) {
+				limits->bwLagLimit = SERVER_KNOBS->BW_LAG_INCREASE_RATE * limits->bwLagLimit;
+			}
+		} else {
+			limits->bwLagLimit = std::numeric_limits<double>::infinity();
 		}
-		if (minBlobWorkerRate < SERVER_KNOBS->VERSIONS_PER_SECOND) {
-			limits->bwLagLimit = SERVER_KNOBS->BW_LAG_REDUCTION_RATE * limits->bwLagLimit;
+		if (limits->bwLagLimit < limits->tpsLimit) {
+			if (printRateKeepLimitReasonDetails) {
+				TraceEvent("RatekeeperLimitReasonDetails")
+				    .detail("Reason", limitReason_t::blob_worker_lag)
+				    .detail("BWLag", blobWorkerLag)
+				    .detail("BWRate", minBlobWorkerRate)
+				    .detail("LimitsBWLagLimit", limits->bwLagLimit)
+				    .detail("LimitsTpsLimit", limits->tpsLimit);
+			}
+			limits->tpsLimit = limits->bwLagLimit;
+			limitReason = limitReason_t::blob_worker_lag;
 		}
-	} else if (limits->bwLagLimit != std::numeric_limits<double>::infinity() &&
-	           blobWorkerLag > limits->bwLagTargetVersions - SERVER_KNOBS->BW_LAG_UNLIMITED_THRESHOLD) {
-		if (minBlobWorkerRate > SERVER_KNOBS->VERSIONS_PER_SECOND) {
-			limits->bwLagLimit = SERVER_KNOBS->BW_LAG_INCREASE_RATE * limits->bwLagLimit;
-		}
-	} else {
-		limits->bwLagLimit = std::numeric_limits<double>::infinity();
-	}
-	if (limits->bwLagLimit < limits->tpsLimit) {
-		if (printRateKeepLimitReasonDetails) {
-			TraceEvent("RatekeeperLimitReasonDetails")
-			    .detail("Reason", limitReason_t::blob_worker_lag)
-			    .detail("BWLag", blobWorkerLag)
-			    .detail("BWRate", minBlobWorkerRate)
-			    .detail("LimitsBWLagLimit", limits->bwLagLimit)
-			    .detail("LimitsTpsLimit", limits->tpsLimit);
-		}
-		limits->tpsLimit = limits->bwLagLimit;
-		limitReason = limitReason_t::blob_worker_lag;
 	}
 
 	healthMetrics.worstStorageQueue = worstStorageQueueStorageServer;
