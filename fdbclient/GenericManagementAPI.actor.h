@@ -671,7 +671,6 @@ Future<Optional<TenantMapEntry>> tryGetTenantTransaction(Transaction tr, TenantN
 	state Key tenantMapKey = name.withPrefix(tenantMapPrefix);
 
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
-	tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 
 	state typename transaction_future_type<Transaction, Optional<Value>>::type tenantFuture = tr->get(tenantMapKey);
 	Optional<Value> val = wait(safeThreadFutureToFuture(tenantFuture));
@@ -685,6 +684,7 @@ Future<Optional<TenantMapEntry>> tryGetTenant(Reference<DB> db, TenantName name)
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			Optional<TenantMapEntry> entry = wait(tryGetTenantTransaction(tr, name));
 			return entry;
 		} catch (Error& e) {
@@ -714,8 +714,10 @@ Future<TenantMapEntry> getTenant(Reference<DB> db, TenantName name) {
 }
 
 // Creates a tenant with the given name. If the tenant already exists, an empty optional will be returned.
+// The caller must enforce that the tenant ID be unique from all current and past tenants, and it must also be unique
+// from all other tenants created in the same transaction.
 ACTOR template <class Transaction>
-Future<Optional<TenantMapEntry>> createTenantTransaction(Transaction tr, TenantNameRef name) {
+Future<std::pair<TenantMapEntry, bool>> createTenantTransaction(Transaction tr, TenantNameRef name, int64_t tenantId) {
 	state Key tenantMapKey = name.withPrefix(tenantMapPrefix);
 
 	if (name.startsWith("\xff"_sr)) {
@@ -723,12 +725,10 @@ Future<Optional<TenantMapEntry>> createTenantTransaction(Transaction tr, TenantN
 	}
 
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
-	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 	state Future<Optional<TenantMapEntry>> tenantEntryFuture = tryGetTenantTransaction(tr, name);
 	state typename transaction_future_type<Transaction, Optional<Value>>::type tenantDataPrefixFuture =
 	    tr->get(tenantDataPrefixKey);
-	state typename transaction_future_type<Transaction, Optional<Value>>::type lastIdFuture = tr->get(tenantLastIdKey);
 	state typename transaction_future_type<Transaction, Optional<Value>>::type tenantModeFuture =
 	    tr->get(configKeysPrefix.withSuffix("tenant_mode"_sr));
 
@@ -740,12 +740,10 @@ Future<Optional<TenantMapEntry>> createTenantTransaction(Transaction tr, TenantN
 
 	Optional<TenantMapEntry> tenantEntry = wait(tenantEntryFuture);
 	if (tenantEntry.present()) {
-		return Optional<TenantMapEntry>();
+		return std::make_pair(tenantEntry.get(), false);
 	}
 
-	state Optional<Value> lastIdVal = wait(safeThreadFutureToFuture(lastIdFuture));
 	Optional<Value> tenantDataPrefix = wait(safeThreadFutureToFuture(tenantDataPrefixFuture));
-
 	if (tenantDataPrefix.present() &&
 	    tenantDataPrefix.get().size() + TenantMapEntry::ROOT_PREFIX_SIZE > CLIENT_KNOBS->TENANT_PREFIX_SIZE_LIMIT) {
 		TraceEvent(SevWarnAlways, "TenantPrefixTooLarge")
@@ -757,8 +755,7 @@ Future<Optional<TenantMapEntry>> createTenantTransaction(Transaction tr, TenantN
 		throw client_invalid_operation();
 	}
 
-	state TenantMapEntry newTenant(lastIdVal.present() ? TenantMapEntry::prefixToId(lastIdVal.get()) + 1 : 0,
-	                               tenantDataPrefix.present() ? (KeyRef)tenantDataPrefix.get() : ""_sr);
+	state TenantMapEntry newTenant(tenantId, tenantDataPrefix.present() ? (KeyRef)tenantDataPrefix.get() : ""_sr);
 
 	state typename transaction_future_type<Transaction, RangeResult>::type prefixRangeFuture =
 	    tr->getRange(prefixRange(newTenant.prefix), 1);
@@ -767,20 +764,21 @@ Future<Optional<TenantMapEntry>> createTenantTransaction(Transaction tr, TenantN
 		throw tenant_prefix_allocator_conflict();
 	}
 
-	tr->set(tenantLastIdKey, TenantMapEntry::idToPrefix(newTenant.id));
 	tr->set(tenantMapKey, encodeTenantEntry(newTenant));
 
-	return newTenant;
+	return std::make_pair(newTenant, true);
 }
 
 ACTOR template <class DB>
-Future<Void> createTenant(Reference<DB> db, TenantName name) {
+Future<TenantMapEntry> createTenant(Reference<DB> db, TenantName name) {
 	state Reference<typename DB::TransactionT> tr = db->createTransaction();
 
 	state bool firstTry = true;
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			state typename DB::TransactionT::template FutureT<Optional<Value>> lastIdFuture = tr->get(tenantLastIdKey);
 
 			if (firstTry) {
 				Optional<TenantMapEntry> entry = wait(tryGetTenantTransaction(tr, name));
@@ -791,7 +789,10 @@ Future<Void> createTenant(Reference<DB> db, TenantName name) {
 				firstTry = false;
 			}
 
-			state Optional<TenantMapEntry> newTenant = wait(createTenantTransaction(tr, name));
+			Optional<Value> lastIdVal = wait(safeThreadFutureToFuture(lastIdFuture));
+			int64_t tenantId = lastIdVal.present() ? TenantMapEntry::prefixToId(lastIdVal.get()) + 1 : 0;
+			tr->set(tenantLastIdKey, TenantMapEntry::idToPrefix(tenantId));
+			state std::pair<TenantMapEntry, bool> newTenant = wait(createTenantTransaction(tr, name, tenantId));
 
 			if (BUGGIFY) {
 				throw commit_unknown_result();
@@ -805,11 +806,11 @@ Future<Void> createTenant(Reference<DB> db, TenantName name) {
 
 			TraceEvent("CreatedTenant")
 			    .detail("Tenant", name)
-			    .detail("TenantId", newTenant.present() ? newTenant.get().id : -1)
-			    .detail("Prefix", newTenant.present() ? (StringRef)newTenant.get().prefix : "Unknown"_sr)
+			    .detail("TenantId", newTenant.first.id)
+			    .detail("Prefix", newTenant.first.prefix)
 			    .detail("Version", tr->getCommittedVersion());
 
-			return Void();
+			return newTenant.first;
 		} catch (Error& e) {
 			wait(safeThreadFutureToFuture(tr->onError(e)));
 		}
@@ -821,7 +822,6 @@ Future<Void> deleteTenantTransaction(Transaction tr, TenantNameRef name) {
 	state Key tenantMapKey = name.withPrefix(tenantMapPrefix);
 
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
-	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 	state Optional<TenantMapEntry> tenantEntry = wait(tryGetTenantTransaction(tr, name));
 	if (!tenantEntry.present()) {
@@ -848,6 +848,7 @@ Future<Void> deleteTenant(Reference<DB> db, TenantName name) {
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 			if (firstTry) {
 				Optional<TenantMapEntry> entry = wait(tryGetTenantTransaction(tr, name));
@@ -886,7 +887,6 @@ Future<std::map<TenantName, TenantMapEntry>> listTenantsTransaction(Transaction 
 	state KeyRange range = KeyRangeRef(begin, end).withPrefix(tenantMapPrefix);
 
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
-	tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 
 	state typename transaction_future_type<Transaction, RangeResult>::type listFuture =
 	    tr->getRange(firstGreaterOrEqual(range.begin), firstGreaterOrEqual(range.end), limit);
@@ -910,6 +910,7 @@ Future<std::map<TenantName, TenantMapEntry>> listTenants(Reference<DB> db,
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			std::map<TenantName, TenantMapEntry> tenants = wait(listTenantsTransaction(tr, begin, end, limit));
 			return tenants;
 		} catch (Error& e) {

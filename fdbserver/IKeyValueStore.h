@@ -24,6 +24,7 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/Knobs.h"
+#include "fdbserver/ServerDBInfo.h"
 #include "fdbclient/StorageCheckpoint.h"
 
 struct CheckpointRequest {
@@ -92,12 +93,16 @@ public:
 	                                      ReadType type = ReadType::NORMAL) = 0;
 
 	// Shard management APIs.
+	// Adds key range to a physical shard.
 	virtual Future<Void> addRange(KeyRangeRef range, std::string id) { return Void(); }
 
+	// Removes a key range from KVS and returns a list of empty physical shards after the removal.
 	virtual std::vector<std::string> removeRange(KeyRangeRef range) { return std::vector<std::string>(); }
 
+	// Persists key range and physical shard mapping.
 	virtual void persistRangeMapping(KeyRangeRef range, bool isAdd) {}
 
+	// Destroys the physical shards if they're empty.
 	virtual Future<Void> cleanUpShardsIfNeeded(const std::vector<std::string>& shardIds) { return Void(); };
 
 	// To debug MEMORY_RADIXTREE type ONLY
@@ -162,11 +167,13 @@ extern IKeyValueStore* keyValueStoreMemory(std::string const& basename,
                                            std::string ext = "fdq",
                                            KeyValueStoreType storeType = KeyValueStoreType::MEMORY);
 extern IKeyValueStore* keyValueStoreLogSystem(class IDiskQueue* queue,
+                                              Reference<AsyncVar<ServerDBInfo> const> db,
                                               UID logID,
                                               int64_t memoryLimit,
                                               bool disableSnapshot,
                                               bool replaceContent,
-                                              bool exactRecovery);
+                                              bool exactRecovery,
+                                              bool enableEncryption);
 
 extern IKeyValueStore* openRemoteKVStore(KeyValueStoreType storeType,
                                          std::string const& filename,

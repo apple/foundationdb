@@ -206,30 +206,14 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		if (BGW_DEBUG) {
 			fmt::print("Setting up blob granule range for tenant {0}\n", name.printable());
 		}
-		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
-		loop {
-			try {
-				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
-				state Optional<TenantMapEntry> entry = wait(ManagementAPI::createTenantTransaction(tr, name));
-				if (!entry.present()) {
-					// if tenant already exists because of retry, load it
-					wait(store(entry, ManagementAPI::tryGetTenantTransaction(tr, name)));
-					ASSERT(entry.present());
-				}
+		TenantMapEntry entry = wait(ManagementAPI::createTenant(cx.getReference(), name));
 
-				wait(tr->commit());
-				if (BGW_DEBUG) {
-					fmt::print("Set up blob granule range for tenant {0}: {1}\n",
-					           name.printable(),
-					           entry.get().prefix.printable());
-				}
-				return entry.get();
-			} catch (Error& e) {
-				wait(tr->onError(e));
-			}
+		if (BGW_DEBUG) {
+			fmt::print("Set up blob granule range for tenant {0}: {1}\n", name.printable(), entry.prefix.printable());
 		}
+
+		return entry;
 	}
 
 	std::string description() const override { return "BlobGranuleCorrectnessWorkload"; }
@@ -855,6 +839,29 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		return delay(testDuration);
 	}
 
+	ACTOR Future<Void> checkTenantRanges(BlobGranuleCorrectnessWorkload* self,
+	                                     Database cx,
+
+	                                     Reference<ThreadData> threadData) {
+		// check that reading ranges with tenant name gives valid result of ranges just for tenant, with no tenant
+		// prefix
+		loop {
+			state Transaction tr(cx, threadData->tenantName);
+			try {
+				Standalone<VectorRef<KeyRangeRef>> ranges = wait(tr.getBlobGranuleRanges(normalKeys));
+				ASSERT(ranges.size() >= 1);
+				ASSERT(ranges.front().begin == normalKeys.begin);
+				ASSERT(ranges.back().end == normalKeys.end);
+				for (int i = 0; i < ranges.size() - 1; i++) {
+					ASSERT(ranges[i].end == ranges[i + 1].begin);
+				}
+				return Void();
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+
 	ACTOR Future<bool> checkDirectory(Database cx,
 	                                  BlobGranuleCorrectnessWorkload* self,
 	                                  Reference<ThreadData> threadData) {
@@ -891,6 +898,11 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 				wait(self->waitFirstSnapshot(self, cx, threadData, false));
 			}
 		}
+		// read granule ranges with tenant and validate
+		if (BGW_DEBUG) {
+			fmt::print("Directory {0} checking tenant ranges\n", threadData->directoryID);
+		}
+		wait(self->checkTenantRanges(self, cx, threadData));
 
 		bool initialCheck = result;
 		result &= threadData->mismatches == 0 && (threadData->timeTravelTooOld == 0);

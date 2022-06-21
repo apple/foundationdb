@@ -225,7 +225,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 			// The last tenant will not be created
 			if (i < self->numTenants) {
-				tenantFutures.push_back(ManagementAPI::createTenant(cx.getReference(), tenantName));
+				tenantFutures.push_back(::success(ManagementAPI::createTenant(cx.getReference(), tenantName)));
 				self->createdTenants.insert(tenantName);
 			}
 		}
