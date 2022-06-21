@@ -43,6 +43,7 @@ enum limitReason_t {
 	log_server_min_free_space_ratio,
 	storage_server_durability_lag, // 10
 	storage_server_list_fetch_failed,
+	blob_worker_lag,
 	limitReason_t_end
 };
 
@@ -103,6 +104,9 @@ struct RatekeeperLimits {
 	int64_t lastDurabilityLag;
 	double durabilityLagLimit;
 
+	int64_t bwLagTargetVersions;
+	double bwLagLimit;
+
 	TransactionPriority priority;
 	std::string context;
 
@@ -115,7 +119,8 @@ struct RatekeeperLimits {
 	                 int64_t logTargetBytes,
 	                 int64_t logSpringBytes,
 	                 double maxVersionDifference,
-	                 int64_t durabilityLagTargetVersions);
+	                 int64_t durabilityLagTargetVersions,
+	                 int64_t bwLagTargetVersions);
 };
 
 class Ratekeeper {
@@ -154,6 +159,10 @@ class Ratekeeper {
 	RatekeeperLimits batchLimits;
 
 	Deque<double> actualTpsHistory;
+	Version minBlobWorkerVersion;
+	Version minBlobWorkerGRV;
+	double minBlobWorkerTime;
+	double minBlobWorkerRate;
 	Optional<Key> remoteDC;
 
 	Ratekeeper(UID id, Database db);
@@ -172,6 +181,7 @@ class Ratekeeper {
 	void tryAutoThrottleTag(TransactionTag, double rate, double busyness, TagThrottledReason);
 	void tryAutoThrottleTag(StorageQueueInfo&, int64_t storageQueue, int64_t storageDurabilityLag);
 	Future<Void> monitorThrottlingChanges();
+	Future<Void> monitorBlobWorkers();
 
 public:
 	static Future<Void> run(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo);

@@ -2308,6 +2308,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					DUMPTOKEN(recruited.granuleAssignmentsRequest);
 					DUMPTOKEN(recruited.granuleStatusStreamRequest);
 					DUMPTOKEN(recruited.haltBlobWorker);
+					DUMPTOKEN(recruited.minBlobVersionRequest);
 
 					ReplyPromise<InitializeBlobWorkerReply> blobWorkerReady = req.reply;
 					Future<Void> bw = blobWorker(recruited, blobWorkerReady, dbInfo);

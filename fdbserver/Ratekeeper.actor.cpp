@@ -22,6 +22,7 @@
 #include "fdbserver/Ratekeeper.h"
 #include "fdbserver/TagThrottler.h"
 #include "fdbserver/WaitFailure.h"
+#include "fdbserver/QuietDatabase.h"
 
 #include "flow/actorcompiler.h" // must be last include
 
@@ -36,7 +37,8 @@ const char* limitReasonName[] = { "workload",
 	                              "log_server_min_free_space",
 	                              "log_server_min_free_space_ratio",
 	                              "storage_server_durability_lag",
-	                              "storage_server_list_fetch_failed" };
+	                              "storage_server_list_fetch_failed",
+	                              "blob_worker_lag" };
 static_assert(sizeof(limitReasonName) / sizeof(limitReasonName[0]) == limitReason_t_end, "limitReasonDesc table size");
 
 int limitReasonEnd = limitReason_t_end;
@@ -54,7 +56,8 @@ const char* limitReasonDesc[] = { "Workload or read performance.",
 	                              "Log server running out of space (approaching 100MB limit).",
 	                              "Log server running out of space (approaching 5% limit).",
 	                              "Storage server durable version falling behind.",
-	                              "Unable to fetch storage server list." };
+	                              "Unable to fetch storage server list.",
+	                              "Blob worker granule version falling behind." };
 
 static_assert(sizeof(limitReasonDesc) / sizeof(limitReasonDesc[0]) == limitReason_t_end, "limitReasonDesc table size");
 
@@ -232,6 +235,41 @@ public:
 		return Void();
 	}
 
+	ACTOR static Future<Void> monitorBlobWorkers(Ratekeeper* self) {
+		loop {
+			state double startTime = now();
+			state Version grv;
+			std::vector<BlobWorkerInterface> blobWorkers = wait(getBlobWorkers(self->db, true, &grv));
+			self->minBlobWorkerGRV = grv;
+			if (blobWorkers.size() > 0) {
+				state std::vector<Future<Optional<MinBlobVersionReply>>> aliveVersions;
+				aliveVersions.reserve(blobWorkers.size());
+				for (auto& it : blobWorkers) {
+					MinBlobVersionRequest req;
+					aliveVersions.push_back(timeout(brokenPromiseToNever(it.minBlobVersionRequest.getReply(req)),
+					                                SERVER_KNOBS->BLOB_WORKER_TIMEOUT));
+				}
+				wait(waitForAll(aliveVersions));
+				Version minVer = std::numeric_limits<Version>::max();
+				for (auto& it : aliveVersions) {
+					if (it.get().present()) {
+						minVer = std::min(minVer, it.get().get().version);
+					} else {
+						minVer = 0;
+						break;
+					}
+				}
+				if (minVer > 0) {
+					self->minBlobWorkerRate =
+					    (minVer - self->minBlobWorkerVersion) / (startTime - self->minBlobWorkerTime);
+					self->minBlobWorkerVersion = minVer;
+					self->minBlobWorkerTime = startTime;
+				}
+			}
+			wait(delay(SERVER_KNOBS->SERVER_LIST_DELAY));
+		}
+	}
+
 	ACTOR static Future<Void> run(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 		state Ratekeeper self(rkInterf.id(), openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True));
 		state Future<Void> timeout = Void();
@@ -250,6 +288,7 @@ public:
 		self.addActor.send(traceRole(Role::RATEKEEPER, rkInterf.id()));
 
 		self.addActor.send(self.monitorThrottlingChanges());
+		self.addActor.send(self.monitorBlobWorkers());
 		self.addActor.send(self.refreshStorageServerCommitCosts());
 
 		TraceEvent("RkTLogQueueSizeParameters", rkInterf.id())
@@ -411,6 +450,10 @@ Future<Void> Ratekeeper::monitorThrottlingChanges() {
 	return RatekeeperImpl::monitorThrottlingChanges(this);
 }
 
+Future<Void> Ratekeeper::monitorBlobWorkers() {
+	return RatekeeperImpl::monitorBlobWorkers(this);
+}
+
 Future<Void> Ratekeeper::run(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	return RatekeeperImpl::run(rkInterf, dbInfo);
 }
@@ -427,7 +470,8 @@ Ratekeeper::Ratekeeper(UID id, Database db)
                  SERVER_KNOBS->TARGET_BYTES_PER_TLOG,
                  SERVER_KNOBS->SPRING_BYTES_TLOG,
                  SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE,
-                 SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS),
+                 SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS,
+                 SERVER_KNOBS->TARGET_BW_LAG_VERSIONS),
     batchLimits(TransactionPriority::BATCH,
                 "Batch",
                 SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER_BATCH,
@@ -435,7 +479,9 @@ Ratekeeper::Ratekeeper(UID id, Database db)
                 SERVER_KNOBS->TARGET_BYTES_PER_TLOG_BATCH,
                 SERVER_KNOBS->SPRING_BYTES_TLOG_BATCH,
                 SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE_BATCH,
-                SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS_BATCH) {
+                SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS_BATCH,
+                SERVER_KNOBS->TARGET_BW_LAG_VERSIONS_BATCH),
+    minBlobWorkerVersion(0), minBlobWorkerGRV(0), minBlobWorkerTime(0), minBlobWorkerRate(0) {
 	tagThrottler = std::make_unique<TagThrottler>(db, id);
 }
 
@@ -697,6 +743,41 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 		}
 		limits->lastDurabilityLag = limitingDurabilityLag;
 		break;
+	}
+
+	Version blobWorkerLag =
+	    minBlobWorkerGRV + (now() - minBlobWorkerTime) * SERVER_KNOBS->VERSIONS_PER_SECOND - minBlobWorkerVersion;
+	if (blobWorkerLag > limits->bwLagTargetVersions &&
+	    actualTpsHistory.size() > SERVER_KNOBS->NEEDED_TPS_HISTORY_SAMPLES) {
+		if (limits->bwLagLimit == std::numeric_limits<double>::infinity()) {
+			double maxTps = 0;
+			for (int i = 0; i < actualTpsHistory.size(); i++) {
+				maxTps = std::max(maxTps, actualTpsHistory[i]);
+			}
+			limits->bwLagLimit = SERVER_KNOBS->INITIAL_BW_LAG_MULTIPLIER * maxTps;
+		}
+		if (minBlobWorkerRate < SERVER_KNOBS->VERSIONS_PER_SECOND) {
+			limits->bwLagLimit = SERVER_KNOBS->BW_LAG_REDUCTION_RATE * limits->bwLagLimit;
+		}
+	} else if (limits->bwLagLimit != std::numeric_limits<double>::infinity() &&
+	           blobWorkerLag > limits->bwLagTargetVersions - SERVER_KNOBS->BW_LAG_UNLIMITED_THRESHOLD) {
+		if (minBlobWorkerRate > SERVER_KNOBS->VERSIONS_PER_SECOND) {
+			limits->bwLagLimit = SERVER_KNOBS->BW_LAG_INCREASE_RATE * limits->bwLagLimit;
+		}
+	} else {
+		limits->bwLagLimit = std::numeric_limits<double>::infinity();
+	}
+	if (limits->bwLagLimit < limits->tpsLimit) {
+		if (printRateKeepLimitReasonDetails) {
+			TraceEvent("RatekeeperLimitReasonDetails")
+			    .detail("Reason", limitReason_t::blob_worker_lag)
+			    .detail("BWLag", blobWorkerLag)
+			    .detail("BWRate", minBlobWorkerRate)
+			    .detail("LimitsBWLagLimit", limits->bwLagLimit)
+			    .detail("LimitsTpsLimit", limits->tpsLimit);
+		}
+		limits->tpsLimit = limits->bwLagLimit;
+		limitReason = limitReason_t::blob_worker_lag;
 	}
 
 	healthMetrics.worstStorageQueue = worstStorageQueueStorageServer;
@@ -1055,7 +1136,8 @@ RatekeeperLimits::RatekeeperLimits(TransactionPriority priority,
                                    int64_t logTargetBytes,
                                    int64_t logSpringBytes,
                                    double maxVersionDifference,
-                                   int64_t durabilityLagTargetVersions)
+                                   int64_t durabilityLagTargetVersions,
+                                   int64_t bwLagTargetVersions)
   : tpsLimit(std::numeric_limits<double>::infinity()), tpsLimitMetric(StringRef("Ratekeeper.TPSLimit" + context)),
     reasonMetric(StringRef("Ratekeeper.Reason" + context)), storageTargetBytes(storageTargetBytes),
     storageSpringBytes(storageSpringBytes), logTargetBytes(logTargetBytes), logSpringBytes(logSpringBytes),
@@ -1064,5 +1146,6 @@ RatekeeperLimits::RatekeeperLimits(TransactionPriority priority,
         durabilityLagTargetVersions +
         SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS), // The read transaction life versions are expected to not
     // be durable on the storage servers
-    lastDurabilityLag(0), durabilityLagLimit(std::numeric_limits<double>::infinity()), priority(priority),
+    lastDurabilityLag(0), durabilityLagLimit(std::numeric_limits<double>::infinity()),
+    bwLagTargetVersions(bwLagTargetVersions), bwLagLimit(std::numeric_limits<double>::infinity()), priority(priority),
     context(context), rkUpdateEventCacheHolder(makeReference<EventCacheHolder>("RkUpdate" + context)) {}
