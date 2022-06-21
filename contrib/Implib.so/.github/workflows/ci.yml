@@ -1,0 +1,144 @@
+# TODO:
+# * Android
+# * FreeBSD
+
+name: CI
+on:
+  push:
+    paths-ignore:
+    - 'LICENSE.txt'
+    - 'README.md'
+  pull_request:
+    paths-ignore:
+    - 'LICENSE.txt'
+    - 'README.md'
+jobs:
+  Baseline:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-18.04, ubuntu-20.04, ubuntu-latest]
+        cc: [[gcc, g++], [clang, clang++]]
+        py: [python3.6, python3.7, python3]  # We need f-strings so 3.6+
+    runs-on: ${{ matrix.os }}
+    env:
+      CC: ${{ matrix.cc[0] }}
+      CXX: ${{ matrix.cc[1] }}
+      PYTHON: ${{ matrix.py }}
+    steps:
+    - uses: actions/checkout@v2
+    - name: Install deps
+      run: |
+        sudo add-apt-repository ppa:deadsnakes/ppa
+        sudo apt-get update
+        sudo apt-get install ${PYTHON}
+        sudo apt-get install ${PYTHON}-pip || true
+    - name: Run tests
+      run: scripts/travis.sh
+  PyPy:  # Can't test this in matrix, pypy package has different names in old distros
+    runs-on: ubuntu-latest
+    env:
+      PYTHON: pypy3
+    steps:
+    - uses: actions/checkout@v2
+    - name: Install deps
+      run: sudo apt-get install ${PYTHON}
+    - name: Run tests
+      run: scripts/travis.sh
+  Pylint:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Install deps
+      run: sudo apt-get install pylint
+    - name: Run tests
+      run: |
+        pylint implib-gen.py
+        pylint scripts/ld
+  Coverage:
+    runs-on: ubuntu-latest
+    environment: secrets
+    env:
+      COVERAGE: 1
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+      PYTHON: 'coverage run -a'
+    steps:
+    - uses: actions/checkout@v2
+    - name: Install deps
+      run: |
+        sudo apt-get install python3 python3-pip
+        sudo python3 -mpip install codecov
+    - name: Run tests
+      run: scripts/travis.sh
+    - name: Upload coverage
+      run: |
+        for t in tests/*; do
+          if test -d $t; then
+            (cd $t && coverage xml)
+          fi
+        done
+        codecov --required
+  x86:
+    runs-on: ubuntu-latest
+    env:
+      ARCH: i386-linux-gnueabi
+    steps:
+    - uses: actions/checkout@v2
+    - name: Install deps
+      run: sudo apt-get install gcc-multilib g++-multilib
+    - name: Run tests
+      run: scripts/travis.sh
+  arm-arm:
+    runs-on: ubuntu-latest
+    env:
+      ARCH: arm-linux-gnueabi
+      CFLAGS: -marm
+    steps:
+    - uses: actions/checkout@v2
+    - name: Install deps
+      run: sudo apt-get install qemu-user gcc-arm-linux-gnueabi g++-arm-linux-gnueabi binutils-arm-linux-gnueabi libc6-armel-cross libc6-dev-armel-cross
+    - name: Run tests
+      run: scripts/travis.sh
+  arm-thumb:
+    runs-on: ubuntu-latest
+    env:
+      ARCH: arm-linux-gnueabi
+      CFLAGS: -mthumb
+    steps:
+    - uses: actions/checkout@v2
+    - name: Install deps
+      run: sudo apt-get install qemu-user gcc-arm-linux-gnueabi g++-arm-linux-gnueabi binutils-arm-linux-gnueabi libc6-armel-cross libc6-dev-armel-cross
+    - name: Run tests
+      run: scripts/travis.sh
+  armhf-arm:
+    runs-on: ubuntu-latest
+    env:
+      ARCH: arm-linux-gnueabihf
+      CFLAGS: -marm
+    steps:
+    - uses: actions/checkout@v2
+    - name: Install deps
+      run: sudo apt-get install qemu-user gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf binutils-arm-linux-gnueabihf libc6-armhf-cross libc6-dev-armhf-cross
+    - name: Run tests
+      run: scripts/travis.sh
+  armhf-thumb:
+    runs-on: ubuntu-latest
+    env:
+      ARCH: arm-linux-gnueabihf
+      CFLAGS: -mthumb
+    steps:
+    - uses: actions/checkout@v2
+    - name: Install deps
+      run: sudo apt-get install qemu-user gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf binutils-arm-linux-gnueabihf libc6-armhf-cross libc6-dev-armhf-cross
+    - name: Run tests
+      run: scripts/travis.sh
+  aarch64:
+    runs-on: ubuntu-latest
+    env:
+      ARCH: aarch64-linux-gnueabi
+    steps:
+    - uses: actions/checkout@v2
+    - name: Install deps
+      run: sudo apt-get install qemu-user gcc-aarch64-linux-gnu g++-aarch64-linux-gnu binutils-aarch64-linux-gnu libc6-arm64-cross libc6-dev-arm64-cross
+    - name: Run tests
+      run: scripts/travis.sh

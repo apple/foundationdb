@@ -78,6 +78,27 @@ if(WIN32)
   set_property(SOURCE ${asm_file} PROPERTY LANGUAGE ASM_MASM)
 endif()
 
+
+# Generate shim library in Linux builds
+if (NOT WIN32 AND NOT APPLE AND NOT OPEN_FOR_IDE)
+
+  set(SHIM_LIB_OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR})
+
+  set(SHIM_LIB_GEN_SRC
+    ${SHIM_LIB_OUTPUT_DIR}/libfdb_c.so.init.c
+    ${SHIM_LIB_OUTPUT_DIR}/libfdb_c.so.tramp.S)
+
+  add_custom_command(OUTPUT ${SHIM_LIB_GEN_SRC}
+  COMMAND $<TARGET_FILE:Python::Interpreter> ${CMAKE_SOURCE_DIR}/contrib/Implib.so/implib-gen.py
+      --target ${CMAKE_SYSTEM_PROCESSOR}
+      --outdir ${SHIM_LIB_OUTPUT_DIR}
+      $<TARGET_FILE:fdb_c>)
+
+  add_library(fdb_c_shim SHARED ${SHIM_LIB_GEN_SRC})
+
+endif() # End Linux only
+
+
 # The tests don't build on windows
 if(NOT WIN32)
   set(MAKO_SRCS
