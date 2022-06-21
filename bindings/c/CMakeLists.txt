@@ -78,27 +78,6 @@ if(WIN32)
   set_property(SOURCE ${asm_file} PROPERTY LANGUAGE ASM_MASM)
 endif()
 
-
-# Generate shim library in Linux builds
-if (NOT WIN32 AND NOT APPLE AND NOT OPEN_FOR_IDE)
-
-  set(SHIM_LIB_OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR})
-
-  set(SHIM_LIB_GEN_SRC
-    ${SHIM_LIB_OUTPUT_DIR}/libfdb_c.so.init.c
-    ${SHIM_LIB_OUTPUT_DIR}/libfdb_c.so.tramp.S)
-
-  add_custom_command(OUTPUT ${SHIM_LIB_GEN_SRC}
-  COMMAND $<TARGET_FILE:Python::Interpreter> ${CMAKE_SOURCE_DIR}/contrib/Implib.so/implib-gen.py
-      --target ${CMAKE_SYSTEM_PROCESSOR}
-      --outdir ${SHIM_LIB_OUTPUT_DIR}
-      $<TARGET_FILE:fdb_c>)
-
-  add_library(fdb_c_shim SHARED ${SHIM_LIB_GEN_SRC})
-
-endif() # End Linux only
-
-
 # The tests don't build on windows
 if(NOT WIN32)
   set(MAKO_SRCS
@@ -439,6 +418,73 @@ target_link_libraries(c_workloads PUBLIC fdb_c)
 if (NOT WIN32 AND NOT APPLE AND NOT OPEN_FOR_IDE)
   target_link_options(c_workloads PRIVATE "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/external_workload.map,-z,nodelete")
 endif()
+
+# Generate shim library in Linux builds
+if (NOT WIN32 AND NOT APPLE AND NOT OPEN_FOR_IDE)
+
+  set(SHIM_LIB_OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR})
+
+  set(SHIM_LIB_GEN_SRC
+    ${SHIM_LIB_OUTPUT_DIR}/libfdb_c.so.init.c
+    ${SHIM_LIB_OUTPUT_DIR}/libfdb_c.so.tramp.S)
+
+  add_custom_command(OUTPUT ${SHIM_LIB_GEN_SRC}
+  COMMAND $<TARGET_FILE:Python::Interpreter> ${CMAKE_SOURCE_DIR}/contrib/Implib.so/implib-gen.py
+      --target ${CMAKE_SYSTEM_PROCESSOR}
+      --outdir ${SHIM_LIB_OUTPUT_DIR}
+      $<TARGET_FILE:fdb_c>)
+
+  add_library(fdb_c_shim SHARED ${SHIM_LIB_GEN_SRC})
+  target_link_options(fdb_c_shim PRIVATE "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/fdb_c.map,-z,nodelete,-z,noexecstack")
+  target_link_libraries(fdb_c_shim PUBLIC dl)
+
+  add_executable(fdb_c_shim_unit_tests ${UNIT_TEST_SRCS})
+  add_dependencies(fdb_c_shim_unit_tests doctest)
+  target_include_directories(fdb_c_shim_unit_tests PUBLIC ${DOCTEST_INCLUDE_DIR} ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/)
+  target_link_libraries(fdb_c_shim_unit_tests PRIVATE fdb_c_shim Threads::Threads fdbclient rapidjson)
+  add_dependencies(fdb_c_shim_unit_tests external_client)
+
+  add_executable(fdb_c_shim_api_tester ${API_TESTER_SRCS})
+  target_include_directories(fdb_c_shim_api_tester PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/)
+  if(USE_SANITIZER)
+    target_link_libraries(fdb_c_shim_api_tester PRIVATE fdb_c_shim fdb_cpp toml11_target Threads::Threads fmt::fmt boost_asan)
+  else()
+    target_link_libraries(fdb_c_shim_api_tester PRIVATE fdb_c_shim fdb_cpp toml11_target Threads::Threads fmt::fmt boost_target)
+  endif()
+  add_dependencies(fdb_c_shim_api_tester external_client)
+
+  add_fdbclient_test(
+    NAME fdb_c_shim_unit_tests
+    COMMAND $<TARGET_FILE:fdb_c_shim_unit_tests>
+            @CLUSTER_FILE@
+            fdb)
+
+  add_fdbclient_test(
+    NAME fdb_c_shim_external_client_unit_tests
+    COMMAND $<TARGET_FILE:fdb_c_shim_unit_tests>
+            @CLUSTER_FILE@
+            fdb
+            ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c_external.so)
+
+  add_fdbclient_test(
+    NAME fdb_c_shim_api_tests
+    DISABLE_LOG_DUMP
+    COMMAND ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/run_c_api_tests.py
+            --cluster-file
+            @CLUSTER_FILE@
+            --tester-binary
+            $<TARGET_FILE:fdb_c_shim_api_tester>
+            --external-client-library
+            ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c_external.so
+            --test-dir
+            ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests
+            --tmp-dir
+            @TMP_DIR@
+            --log-dir
+            @LOG_DIR@
+            )
+
+endif() # End Linux only
 
 # TODO: re-enable once the old vcxproj-based build system is removed.
 #generate_export_header(fdb_c EXPORT_MACRO_NAME "DLLEXPORT"

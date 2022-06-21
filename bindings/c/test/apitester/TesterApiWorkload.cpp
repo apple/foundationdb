@@ -20,7 +20,7 @@
 
 #include "TesterApiWorkload.h"
 #include "TesterUtil.h"
-#include "test/fdb_api.hpp"
+#include "../fdb_api.hpp"
 #include <fmt/format.h>
 
 namespace FdbApiTester {
