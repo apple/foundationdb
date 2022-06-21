@@ -38,8 +38,8 @@ set(FDBSERVER_SRCS
   DBCoreState.h
   DDTeamCollection.actor.cpp
   DDTeamCollection.h
-  DDTenantCache.actor.cpp
-  DDTenantCache.h
+  TenantCache.actor.cpp
+  TenantCache.h
   DiskQueue.actor.cpp
   EncryptKeyProxy.actor.cpp
   EncryptKeyProxyInterface.h

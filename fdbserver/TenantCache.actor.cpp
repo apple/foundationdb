@@ -1,5 +1,5 @@
 /*
- * DDTenantCache.actor.cpp
+ * TenantCache.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,14 +18,15 @@
  * limitations under the License.
  */
 
-#include "fdbserver/DDTenantCache.h"
 #include "fdbserver/DDTeamCollection.h"
+#include "fdbserver/TenantCache.h"
 #include <limits>
 #include <string>
+#include "flow/actorcompiler.h"
 
-class DDTenantCacheImpl {
+class TenantCacheImpl {
 
-	ACTOR static Future<RangeResult> getTenantList(DDTenantCache* tenantCache, Transaction* tr) {
+	ACTOR static Future<RangeResult> getTenantList(TenantCache* tenantCache, Transaction* tr) {
 		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 
@@ -37,10 +38,10 @@ class DDTenantCacheImpl {
 	}
 
 public:
-	ACTOR static Future<Void> build(DDTenantCache* tenantCache) {
+	ACTOR static Future<Void> build(TenantCache* tenantCache) {
 		state Transaction tr(tenantCache->dbcx());
 
-		TraceEvent(SevInfo, "BuildingDDTenantCache", tenantCache->id()).log();
+		TraceEvent(SevInfo, "BuildingTenantCache", tenantCache->id()).log();
 
 		try {
 			state RangeResult tenantList = wait(getTenantList(tenantCache, &tr));
@@ -51,7 +52,7 @@ public:
 
 				tenantCache->insert(tname, t);
 
-				TraceEvent(SevInfo, "DDTenantFound", tenantCache->id())
+				TraceEvent(SevInfo, "TenantFound", tenantCache->id())
 				    .detail("TenantName", tname)
 				    .detail("TenantID", t.id)
 				    .detail("TenantPrefix", t.prefix);
@@ -60,13 +61,13 @@ public:
 			wait(tr.onError(e));
 		}
 
-		TraceEvent(SevInfo, "BuiltDDTenantCache", tenantCache->id()).log();
+		TraceEvent(SevInfo, "BuiltTenantCache", tenantCache->id()).log();
 
 		return Void();
 	}
 
-	ACTOR static Future<Void> monitorTenantMap(DDTenantCache* tenantCache) {
-		TraceEvent(SevInfo, "StartingDDTenantCacheMonitor", tenantCache->id()).log();
+	ACTOR static Future<Void> monitorTenantMap(TenantCache* tenantCache) {
+		TraceEvent(SevInfo, "StartingTenantCacheMonitor", tenantCache->id()).log();
 
 		state Transaction tr(tenantCache->dbcx());
 
@@ -74,8 +75,8 @@ public:
 
 		loop {
 			try {
-				if (now() - lastTenantListFetchTime > (2 * SERVER_KNOBS->DD_TENANT_LIST_REFRESH_INTERVAL)) {
-					TraceEvent(SevWarn, "DDTenantListRefreshDelay", tenantCache->id()).log();
+				if (now() - lastTenantListFetchTime > (2 * SERVER_KNOBS->TENANT_CACHE_LIST_REFRESH_INTERVAL)) {
+					TraceEvent(SevWarn, "TenantListRefreshDelay", tenantCache->id()).log();
 				}
 
 				state RangeResult tenantList = wait(getTenantList(tenantCache, &tr));
@@ -97,15 +98,15 @@ public:
 				}
 
 				if (tenantListUpdated) {
-					TraceEvent(SevInfo, "DDTenantCache", tenantCache->id()).detail("List", tenantCache->desc());
+					TraceEvent(SevInfo, "TenantCache", tenantCache->id()).detail("List", tenantCache->desc());
 				}
 
 				lastTenantListFetchTime = now();
 				tr.reset();
-				wait(delay(SERVER_KNOBS->DD_TENANT_LIST_REFRESH_INTERVAL));
+				wait(delay(SERVER_KNOBS->TENANT_CACHE_LIST_REFRESH_INTERVAL));
 			} catch (Error& e) {
 				if (e.code() != error_code_actor_cancelled) {
-					TraceEvent("DDTenantCacheGetTenantListError", tenantCache->id())
+					TraceEvent("TenantCacheGetTenantListError", tenantCache->id())
 					    .errorUnsuppressed(e)
 					    .suppressFor(1.0);
 				}
@@ -115,7 +116,7 @@ public:
 	}
 };
 
-void DDTenantCache::insert(TenantName& tenantName, TenantMapEntry& tenant) {
+void TenantCache::insert(TenantName& tenantName, TenantMapEntry& tenant) {
 	KeyRef tenantPrefix(tenant.prefix.begin(), tenant.prefix.size());
 	ASSERT(tenantCache.find(tenantPrefix) == tenantCache.end());
 
@@ -124,19 +125,19 @@ void DDTenantCache::insert(TenantName& tenantName, TenantMapEntry& tenant) {
 	tenantCache[tenantPrefix]->updateCacheGeneration(generation);
 }
 
-void DDTenantCache::startRefresh() {
+void TenantCache::startRefresh() {
 	ASSERT(generation < std::numeric_limits<uint64_t>::max());
 	generation++;
 }
 
-void DDTenantCache::keep(TenantName& tenantName, TenantMapEntry& tenant) {
+void TenantCache::keep(TenantName& tenantName, TenantMapEntry& tenant) {
 	KeyRef tenantPrefix(tenant.prefix.begin(), tenant.prefix.size());
 
 	ASSERT(tenantCache.find(tenantPrefix) != tenantCache.end());
 	tenantCache[tenantPrefix]->updateCacheGeneration(generation);
 }
 
-bool DDTenantCache::update(TenantName& tenantName, TenantMapEntry& tenant) {
+bool TenantCache::update(TenantName& tenantName, TenantMapEntry& tenant) {
 	KeyRef tenantPrefix(tenant.prefix.begin(), tenant.prefix.size());
 
 	if (tenantCache.find(tenantPrefix) != tenantCache.end()) {
@@ -148,7 +149,7 @@ bool DDTenantCache::update(TenantName& tenantName, TenantMapEntry& tenant) {
 	return true;
 }
 
-int DDTenantCache::cleanup() {
+int TenantCache::cleanup() {
 	int tenantsRemoved = 0;
 	std::vector<Key> keysToErase;
 
@@ -167,7 +168,7 @@ int DDTenantCache::cleanup() {
 	return tenantsRemoved;
 }
 
-std::string DDTenantCache::desc() const {
+std::string TenantCache::desc() const {
 	std::string s("@Generation: ");
 	s += std::to_string(generation) + " ";
 	int count = 0;
@@ -183,7 +184,7 @@ std::string DDTenantCache::desc() const {
 	return s;
 }
 
-bool DDTenantCache::isTenantKey(KeyRef key) const {
+bool TenantCache::isTenantKey(KeyRef key) const {
 	auto it = tenantCache.lastLessOrEqual(key);
 	if (it == tenantCache.end()) {
 		return false;
@@ -196,21 +197,21 @@ bool DDTenantCache::isTenantKey(KeyRef key) const {
 	return true;
 }
 
-Future<Void> DDTenantCache::build(Database cx) {
-	return DDTenantCacheImpl::build(this);
+Future<Void> TenantCache::build(Database cx) {
+	return TenantCacheImpl::build(this);
 }
 
-Future<Void> DDTenantCache::monitorTenantMap() {
-	return DDTenantCacheImpl::monitorTenantMap(this);
+Future<Void> TenantCache::monitorTenantMap() {
+	return TenantCacheImpl::monitorTenantMap(this);
 }
 
-class DDTenantCacheUnitTest {
+class TenantCacheUnitTest {
 public:
 	ACTOR static Future<Void> InsertAndTestPresence() {
 		wait(Future<Void>(Void()));
 
 		Database cx;
-		DDTenantCache tenantCache(cx, UID(1, 0));
+		TenantCache tenantCache(cx, UID(1, 0));
 
 		constexpr static uint16_t tenantLimit = 64;
 
@@ -238,7 +239,7 @@ public:
 		wait(Future<Void>(Void()));
 
 		Database cx;
-		DDTenantCache tenantCache(cx, UID(1, 0));
+		TenantCache tenantCache(cx, UID(1, 0));
 
 		constexpr static uint16_t tenantLimit = 64;
 
@@ -292,12 +293,12 @@ public:
 	}
 };
 
-TEST_CASE("/DataDistribution/TenantCache/InsertAndTestPresence") {
-	wait(DDTenantCacheUnitTest::InsertAndTestPresence());
+TEST_CASE("/TenantCache/InsertAndTestPresence") {
+	wait(TenantCacheUnitTest::InsertAndTestPresence());
 	return Void();
 }
 
-TEST_CASE("/DataDistribution/TenantCache/RefreshAndTestPresence") {
-	wait(DDTenantCacheUnitTest::RefreshAndTestPresence());
+TEST_CASE("/TenantCache/RefreshAndTestPresence") {
+	wait(TenantCacheUnitTest::RefreshAndTestPresence());
 	return Void();
 }

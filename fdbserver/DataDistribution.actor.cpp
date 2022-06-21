@@ -33,13 +33,13 @@
 #include "fdbrpc/Replication.h"
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/DDTeamCollection.h"
-#include "fdbserver/DDTenantCache.h"
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/TenantCache.h"
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/WaitFailure.h"
 #include "flow/ActorCollection.h"
@@ -642,9 +642,9 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 				TraceEvent("DataDistributionEnabled").log();
 			}
 
-			state Reference<DDTenantCache> ddTenantCache;
+			state Reference<TenantCache> ddTenantCache;
 			if (ddIsTenantAware) {
-				ddTenantCache = makeReference<DDTenantCache>(cx, self->ddId);
+				ddTenantCache = makeReference<TenantCache>(cx, self->ddId);
 				wait(ddTenantCache->build(cx));
 			}
 

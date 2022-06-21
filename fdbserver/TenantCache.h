@@ -1,5 +1,5 @@
 /*
- * DDTenantCache.h
+ * TenantCache.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -27,11 +27,11 @@
 #include <limits>
 #include <string>
 
-typedef Map<KeyRef, Reference<TCTenantInfo>> DDTenantMap;
+typedef Map<KeyRef, Reference<TCTenantInfo>> TenantMapByPrefix;
 
-class DDTenantCache : public ReferenceCounted<DDTenantCache> {
-	friend class DDTenantCacheImpl;
-	friend class DDTenantCacheUnitTest;
+class TenantCache : public ReferenceCounted<TenantCache> {
+	friend class TenantCacheImpl;
+	friend class TenantCacheUnitTest;
 
 private:
 	constexpr static uint64_t INVALID_GENERATION = std::numeric_limits<uint64_t>::max();
@@ -39,7 +39,7 @@ private:
 	UID distributorID;
 	Database cx;
 	uint64_t generation;
-	DDTenantMap tenantCache;
+	TenantMapByPrefix tenantCache;
 
 	// mark the start of a new sweep of the tenant cache
 	void startRefresh();
@@ -58,7 +58,7 @@ private:
 	Database dbcx() const { return cx; }
 
 public:
-	DDTenantCache(Database cx, UID distributorID) : distributorID(distributorID), cx(cx) {
+	TenantCache(Database cx, UID distributorID) : distributorID(distributorID), cx(cx) {
 		generation = deterministicRandom()->randomUInt32();
 	}
 
