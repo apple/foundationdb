@@ -3082,7 +3082,7 @@ ACTOR Future<Void> handleRangeRevoke(Reference<BlobWorkerData> bwData, RevokeBlo
 	}
 }
 
-ACTOR Future<Void> handleBlobVersionRequest(Reference<BlobWorkerData> bwData, MinBlobVersionRequest req) {
+void handleBlobVersionRequest(Reference<BlobWorkerData> bwData, MinBlobVersionRequest req) {
 	MinBlobVersionReply rep;
 	Version minVer = std::numeric_limits<Version>::max();
 	auto allRanges = bwData->granuleMetadata.intersectingRanges(normalKeys);
@@ -3093,7 +3093,6 @@ ACTOR Future<Void> handleBlobVersionRequest(Reference<BlobWorkerData> bwData, Mi
 	}
 	rep.version = minVer;
 	req.reply.send(rep);
-	return Void();
 }
 
 ACTOR Future<Void> registerBlobWorker(Reference<BlobWorkerData> bwData, BlobWorkerInterface interf) {
@@ -3408,7 +3407,7 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 				}
 			}
 			when(MinBlobVersionRequest req = waitNext(bwInterf.minBlobVersionRequest.getFuture())) {
-				self->addActor.send(handleBlobVersionRequest(self, req));
+				handleBlobVersionRequest(self, req);
 			}
 			when(wait(collection)) {
 				self->shuttingDown = true;
