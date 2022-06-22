@@ -186,7 +186,7 @@ int populate(Database db,
 	// This can be parameterized for mako or just left hardcoded to
 	// whatever value we find suitable
 	int batch_size = 10;
-	int batches = args.total_tenants / batch_size;
+	int batches = args.total_tenants / batch_size + 1;
 	for (int batch = 0; batch < batches; ++batch) {
 		for (int i = batch * batch_size; i < args.total_tenants && i < (batch + 1) * batch_size; ++i) {
 			std::string tenant_name = "tenant" + std::to_string(i);
