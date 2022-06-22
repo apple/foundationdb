@@ -184,10 +184,7 @@ int populate(Database db,
 
 	Transaction systemTx = db.createTransaction();
 	for (int i = 0; i < args.total_tenants; ++i) {
-		while (true) {
-			// Until this issue https://github.com/apple/foundationdb/issues/7260 is resolved
-			// we have to commit each tenant creation transaction one-by-one
-			// while (i % 10 == 9 || i == args.total_tenants - 1) {
+		while (i % 10 == 9 || i == args.total_tenants - 1) {
 			std::string tenant_name = "tenant" + std::to_string(i);
 			Tenant::createTenant(systemTx, toBytesRef(tenant_name));
 			auto future_commit = systemTx.commit();
@@ -2125,6 +2122,11 @@ int main(int argc, char* argv[]) {
 	if (args.active_tenants > 1) {
 		args.rows = args.rows / args.active_tenants;
 		args.row_digits = digits(args.rows);
+	}
+
+	// Allow specifying only the number of active tenants, in which case # active = # total
+	if (args.active_tenants > 0 && args.total_tenants == 0) {
+		args.total_tenants = args.active_tenants;
 	}
 
 	rc = validateArguments(args);
