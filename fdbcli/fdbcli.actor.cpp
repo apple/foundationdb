@@ -1907,9 +1907,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "renametenant")) {
-					bool _result = wait(makeInterruptable(renameTenantCommandActor(db, tokens)));
-					if (!_result)
-						is_error = true;
+					wait(makeInterruptable(ManagementAPI::renameTenant(db, tokens[1], tokens[2])));
 					continue;
 				}
 
