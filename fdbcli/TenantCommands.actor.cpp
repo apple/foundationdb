@@ -285,6 +285,18 @@ CommandFactory getTenantFactory(
                 "prints the metadata for a tenant",
                 "Prints the metadata for a tenant. If JSON is specified, then the output will be in JSON format."));
 
+// renametenant command
+ACTOR Future<bool> renameTenantCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
+	if (tokens.size() != 3) {
+		printUsage(tokens[0]);
+		return false;
+	}
+	wait(safeThreadFutureToFuture(ManagementAPI::renameTenant(db, tokens[1], tokens[2])));
+
+	printf("The tenant `%s' has been renamed to `%s'\n", printable(tokens[1]).c_str(), printable(tokens[2]).c_str());
+	return true;
+}
+
 CommandFactory renameTenantFactory(
     "renametenant",
     CommandHelp(
