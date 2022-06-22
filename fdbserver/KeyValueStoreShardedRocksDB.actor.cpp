@@ -510,13 +510,12 @@ int readRangeInDb(DataShard* shard, const KeyRangeRef& range, int rowLimit, int 
 	int accumulatedRows = 0;
 	int accumulatedBytes = 0;
 	// TODO: Pass read timeout.
-	int readRangeTimeout = SERVER_KNOBS->ROCKSDB_READ_RANGE_TIMEOUT;
+	const int readRangeTimeout = SERVER_KNOBS->ROCKSDB_READ_RANGE_TIMEOUT;
 	rocksdb::Status s;
 	auto options = getReadOptions();
 	// TODO: define single shard read timeout.
-	uint64_t deadlineMircos = shard->physicalShard->db->GetEnv()->NowMicros() + readRangeTimeout * 1000000;
-	std::chrono::seconds deadlineSeconds(deadlineMircos / 1000000);
-	options.deadline = std::chrono::duration_cast<std::chrono::microseconds>(deadlineSeconds);
+	const uint64_t deadlineMircos = shard->physicalShard->db->GetEnv()->NowMicros() + readRangeTimeout * 1000000;
+	options.deadline = std::chrono::microseconds(deadlineMircos / 1000000);
 
 	// When using a prefix extractor, ensure that keys are returned in order even if they cross
 	// a prefix boundary.
@@ -622,13 +621,8 @@ public:
 				auto it = physicalShards.find(name);
 				// Create missing shards.
 				if (it == physicalShards.end()) {
-					std::shared_ptr<PhysicalShard> shard = std::make_shared<PhysicalShard>(db, name);
-					status = shard->init();
-					if (!status.ok()) {
-						logRocksDBError(status, "CreateCF");
-					}
-					columnFamilyMap[shard->cf->GetID()] = shard->cf;
-					it = physicalShards.insert({ name, shard }).first;
+					TraceEvent(SevError, "ShardedRocksDB").detail("MissingShard", name);
+					return rocksdb::Status::NotFound();
 				}
 				std::unique_ptr<DataShard> dataShard = std::make_unique<DataShard>(range, it->second.get());
 				dataShardMap.insert(range, dataShard.get());
