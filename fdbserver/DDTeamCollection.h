@@ -49,6 +49,7 @@
 #include "flow/UnitTest.h"
 
 class TCTeamInfo;
+class TCTenantInfo;
 class TCMachineInfo;
 class TCMachineTeamInfo;
 
@@ -662,6 +663,9 @@ public:
 	bool exclusionSafetyCheck(std::vector<UID>& excludeServerIDs);
 
 	bool isPrimary() const { return primary; }
+
+	// state and last state change timestamp
+	std::pair<StorageWiggler::State, double> getStorageWigglerState() const;
 
 	UID getDistributorId() const { return distributorId; }
 

@@ -7514,14 +7514,42 @@ ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRangesActor(Trans
 	// FIXME: use streaming range read
 	state KeyRange currentRange = keyRange;
 	state Standalone<VectorRef<KeyRangeRef>> results;
+	state Optional<Key> tenantPrefix;
 	if (BG_REQUEST_DEBUG) {
 		fmt::print("Getting Blob Granules for [{0} - {1})\n", keyRange.begin.printable(), keyRange.end.printable());
 	}
-	self->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	// FIXME: limit to tenant range if set
+
+	if (self->getTenant().present()) {
+		// have to bypass tenant to read system key space, and add tenant prefix to part of mapping
+		TenantMapEntry tenantEntry = wait(blobGranuleGetTenantEntry(self, currentRange.begin));
+		tenantPrefix = tenantEntry.prefix;
+	} else {
+		self->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	}
 	loop {
-		state RangeResult blobGranuleMapping = wait(
-		    krmGetRanges(self, blobGranuleMappingKeys.begin, currentRange, 1000, GetRangeLimits::BYTE_LIMIT_UNLIMITED));
+		state RangeResult blobGranuleMapping;
+		if (tenantPrefix.present()) {
+			state Standalone<StringRef> mappingPrefix = tenantPrefix.get().withPrefix(blobGranuleMappingKeys.begin);
+
+			// basically krmGetRange, but enable it to not use tenant without RAW_ACCESS by doing manual getRange with
+			// UseTenant::False
+			GetRangeLimits limits(1000);
+			limits.minRows = 2;
+			RangeResult rawMapping = wait(getRange(self->trState,
+			                                       self->getReadVersion(),
+			                                       lastLessOrEqual(keyRange.begin.withPrefix(mappingPrefix)),
+			                                       firstGreaterThan(keyRange.end.withPrefix(mappingPrefix)),
+			                                       limits,
+			                                       Reverse::False,
+			                                       UseTenant::False));
+			// strip off mapping prefix
+			blobGranuleMapping = krmDecodeRanges(mappingPrefix, currentRange, rawMapping);
+		} else {
+			wait(store(
+			    blobGranuleMapping,
+			    krmGetRanges(
+			        self, blobGranuleMappingKeys.begin, currentRange, 1000, GetRangeLimits::BYTE_LIMIT_UNLIMITED)));
+		}
 
 		for (int i = 0; i < blobGranuleMapping.size() - 1; i++) {
 			if (blobGranuleMapping[i].value.size()) {
@@ -9447,23 +9475,32 @@ Reference<DatabaseContext::TransactionT> DatabaseContext::createTransaction() {
 	return makeReference<ReadYourWritesTransaction>(Database(Reference<DatabaseContext>::addRef(this)));
 }
 
-// FIXME: handle tenants?
 ACTOR Future<Key> purgeBlobGranulesActor(Reference<DatabaseContext> db,
                                          KeyRange range,
                                          Version purgeVersion,
+                                         Optional<TenantName> tenant,
                                          bool force) {
 	state Database cx(db);
 	state Transaction tr(cx);
 	state Key purgeKey;
+	state KeyRange purgeRange = range;
+	state bool loadedTenantPrefix = false;
 
 	// FIXME: implement force
 	if (!force) {
 		throw unsupported_operation();
 	}
+
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
+			if (tenant.present() && !loadedTenantPrefix) {
+				TenantMapEntry tenantEntry = wait(blobGranuleGetTenantEntry(&tr, range.begin));
+				loadedTenantPrefix = true;
+				purgeRange = purgeRange.withPrefix(tenantEntry.prefix);
+			}
 
 			Value purgeValue = blobGranulePurgeValueFor(purgeVersion, range, force);
 			tr.atomicOp(
@@ -9495,8 +9532,11 @@ ACTOR Future<Key> purgeBlobGranulesActor(Reference<DatabaseContext> db,
 	return purgeKey;
 }
 
-Future<Key> DatabaseContext::purgeBlobGranules(KeyRange range, Version purgeVersion, bool force) {
-	return purgeBlobGranulesActor(Reference<DatabaseContext>::addRef(this), range, purgeVersion, force);
+Future<Key> DatabaseContext::purgeBlobGranules(KeyRange range,
+                                               Version purgeVersion,
+                                               Optional<TenantName> tenant,
+                                               bool force) {
+	return purgeBlobGranulesActor(Reference<DatabaseContext>::addRef(this), range, purgeVersion, tenant, force);
 }
 
 ACTOR Future<Void> waitPurgeGranulesCompleteActor(Reference<DatabaseContext> db, Key purgeKey) {
