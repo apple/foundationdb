@@ -21,9 +21,11 @@
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/DataDistribution.actor.h"
+#include "fdbserver/TenantCache.h"
 #include "fdbserver/Knobs.h"
 #include "fdbclient/DatabaseContext.h"
 #include "flow/ActorCollection.h"
+#include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -117,6 +119,8 @@ struct DataDistributionTracker {
 		}
 	};
 
+	Optional<Reference<TenantCache>> ddTenantCache;
+
 	DataDistributionTracker(Database cx,
 	                        UID distributorId,
 	                        Promise<Void> const& readyToStart,
@@ -124,11 +128,12 @@ struct DataDistributionTracker {
 	                        Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
 	                        Reference<AsyncVar<bool>> anyZeroHealthyTeams,
 	                        KeyRangeMap<ShardTrackedData>& shards,
-	                        bool& trackerCancelled)
+	                        bool& trackerCancelled,
+	                        Optional<Reference<TenantCache>> ddTenantCache)
 	  : cx(cx), distributorId(distributorId), shards(shards), sizeChanges(false), systemSizeEstimate(0),
 	    dbSizeEstimate(new AsyncVar<int64_t>()), maxShardSize(new AsyncVar<Optional<int64_t>>()), output(output),
 	    shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), readyToStart(readyToStart),
-	    anyZeroHealthyTeams(anyZeroHealthyTeams), trackerCancelled(trackerCancelled) {}
+	    anyZeroHealthyTeams(anyZeroHealthyTeams), trackerCancelled(trackerCancelled), ddTenantCache(ddTenantCache) {}
 
 	~DataDistributionTracker() {
 		trackerCancelled = true;
@@ -474,6 +479,103 @@ private:
 	Promise<Void> cleared;
 };
 
+std::string describeSplit(KeyRange keys, Standalone<VectorRef<KeyRef>>& splitKeys) {
+	std::string s;
+	s += "[" + keys.begin.printable() + ", " + keys.end.printable() + ") -> ";
+
+	for (auto& sk : splitKeys) {
+		s += sk.printable() + " ";
+	}
+
+	return s;
+}
+
+void executeShardSplit(DataDistributionTracker* self,
+                       KeyRange keys,
+                       Standalone<VectorRef<KeyRef>> splitKeys,
+                       Reference<AsyncVar<Optional<ShardMetrics>>> shardSize,
+                       bool relocate) {
+	int numShards = splitKeys.size() - 1;
+	ASSERT(numShards > 1);
+
+	int skipRange = deterministicRandom()->randomInt(0, numShards);
+
+	auto s = describeSplit(keys, splitKeys);
+	TraceEvent(SevInfo, "ExecutingShardSplit").detail("Spltting", s).detail("NumShards", numShards);
+
+	// The queue can't deal with RelocateShard requests which split an existing shard into three pieces, so
+	// we have to send the unskipped ranges in this order (nibbling in from the edges of the old range)
+	for (int i = 0; i < skipRange; i++)
+		restartShardTrackers(self, KeyRangeRef(splitKeys[i], splitKeys[i + 1]));
+	restartShardTrackers(self, KeyRangeRef(splitKeys[skipRange], splitKeys[skipRange + 1]));
+	for (int i = numShards - 1; i > skipRange; i--)
+		restartShardTrackers(self, KeyRangeRef(splitKeys[i], splitKeys[i + 1]));
+
+	for (int i = 0; i < skipRange; i++) {
+		KeyRangeRef r(splitKeys[i], splitKeys[i + 1]);
+		self->shardsAffectedByTeamFailure->defineShard(r);
+		if (relocate) {
+			self->output.send(RelocateShard(r, SERVER_KNOBS->PRIORITY_SPLIT_SHARD, RelocateReason::OTHER));
+		}
+	}
+	for (int i = numShards - 1; i > skipRange; i--) {
+		KeyRangeRef r(splitKeys[i], splitKeys[i + 1]);
+		self->shardsAffectedByTeamFailure->defineShard(r);
+		if (relocate) {
+			self->output.send(RelocateShard(r, SERVER_KNOBS->PRIORITY_SPLIT_SHARD, RelocateReason::OTHER));
+		}
+	}
+
+	self->sizeChanges.add(changeSizes(self, keys, shardSize->get().get().metrics.bytes));
+}
+
+ACTOR Future<Void> tenantShardSplitter(DataDistributionTracker* self, KeyRange tenantKeys) {
+	wait(Future<Void>(Void()));
+
+	auto shardContainingTenantStart = self->shards.rangeContaining(tenantKeys.begin);
+
+	state Standalone<VectorRef<KeyRef>> splitAtTenantStart;
+	if (shardContainingTenantStart.begin() != tenantKeys.begin) {
+		splitAtTenantStart.push_back_deep(splitAtTenantStart.arena(), shardContainingTenantStart.begin());
+		splitAtTenantStart.push_back_deep(splitAtTenantStart.arena(), tenantKeys.begin);
+	}
+
+	auto startShardSize = shardContainingTenantStart->value().stats;
+
+	auto shardContainingTenantEnd = self->shards.rangeContainingKeyBefore(tenantKeys.end);
+
+	state Standalone<VectorRef<KeyRef>> splitAtTenantEnd;
+	if (shardContainingTenantEnd == shardContainingTenantStart) {
+		splitAtTenantStart.push_back_deep(splitAtTenantStart.arena(), tenantKeys.end);
+		splitAtTenantStart.push_back_deep(splitAtTenantStart.arena(), shardContainingTenantStart->end());
+		KeyRangeRef startKeys = KeyRangeRef(shardContainingTenantStart.begin(), shardContainingTenantStart.end());
+
+		auto s = describeSplit(startKeys, splitAtTenantStart);
+		TraceEvent(SevInfo, "ExecutingShardSplit").detail("SplttingAroundStartAndEndKeys", s);
+
+		executeShardSplit(self, startKeys, splitAtTenantStart, startShardSize, true);
+	} else {
+		auto endShardSize = shardContainingTenantStart->value().stats;
+		KeyRangeRef endKeys = KeyRangeRef(shardContainingTenantStart.begin(), shardContainingTenantStart.end());
+		splitAtTenantEnd.push_back_deep(splitAtTenantEnd.arena(), shardContainingTenantEnd.begin());
+		splitAtTenantEnd.push_back_deep(splitAtTenantEnd.arena(), tenantKeys.end);
+		splitAtTenantEnd.push_back_deep(splitAtTenantEnd.arena(), shardContainingTenantEnd.end());
+
+		KeyRangeRef startKeys = KeyRangeRef(shardContainingTenantStart.begin(), shardContainingTenantStart.end());
+
+		auto s = describeSplit(startKeys, splitAtTenantStart);
+		TraceEvent(SevInfo, "ExecutingShardSplit").detail("SplttingAroundStartKey", s);
+
+		s = describeSplit(startKeys, splitAtTenantEnd);
+		TraceEvent(SevInfo, "ExecutingShardSplit").detail("SplttingAroundEndKey", s);
+
+		executeShardSplit(self, startKeys, splitAtTenantStart, startShardSize, true);
+		executeShardSplit(self, endKeys, splitAtTenantEnd, endShardSize, true);
+	}
+
+	return Void();
+}
+
 ACTOR Future<Void> shardSplitter(DataDistributionTracker* self,
                                  KeyRange keys,
                                  Reference<AsyncVar<Optional<ShardMetrics>>> shardSize,
@@ -513,27 +615,7 @@ ACTOR Future<Void> shardSplitter(DataDistributionTracker* self,
 	}
 
 	if (numShards > 1) {
-		int skipRange = deterministicRandom()->randomInt(0, numShards);
-		// The queue can't deal with RelocateShard requests which split an existing shard into three pieces, so
-		// we have to send the unskipped ranges in this order (nibbling in from the edges of the old range)
-		for (int i = 0; i < skipRange; i++)
-			restartShardTrackers(self, KeyRangeRef(splitKeys[i], splitKeys[i + 1]));
-		restartShardTrackers(self, KeyRangeRef(splitKeys[skipRange], splitKeys[skipRange + 1]));
-		for (int i = numShards - 1; i > skipRange; i--)
-			restartShardTrackers(self, KeyRangeRef(splitKeys[i], splitKeys[i + 1]));
-
-		for (int i = 0; i < skipRange; i++) {
-			KeyRangeRef r(splitKeys[i], splitKeys[i + 1]);
-			self->shardsAffectedByTeamFailure->defineShard(r);
-			self->output.send(RelocateShard(r, SERVER_KNOBS->PRIORITY_SPLIT_SHARD, RelocateReason::OTHER));
-		}
-		for (int i = numShards - 1; i > skipRange; i--) {
-			KeyRangeRef r(splitKeys[i], splitKeys[i + 1]);
-			self->shardsAffectedByTeamFailure->defineShard(r);
-			self->output.send(RelocateShard(r, SERVER_KNOBS->PRIORITY_SPLIT_SHARD, RelocateReason::OTHER));
-		}
-
-		self->sizeChanges.add(changeSizes(self, keys, shardSize->get().get().metrics.bytes));
+		executeShardSplit(self, keys, splitKeys, shardSize, true);
 	} else {
 		wait(delay(1.0, TaskPriority::DataDistribution)); // In case the reason the split point was off was due to a
 		                                                  // discrepancy between storage servers
@@ -582,8 +664,12 @@ Future<Void> shardMerger(DataDistributionTracker* self,
 
 	loop {
 		Optional<ShardMetrics> newMetrics;
+		bool honorTenantKeyspaceBoundaries = self->ddTenantCache.present();
+
 		if (!forwardComplete) {
-			if (nextIter->range().end == allKeys.end) {
+			if (nextIter->range().end == allKeys.end || !honorTenantKeyspaceBoundaries ||
+			    self->ddTenantCache.get()->tenantOwning(keys.begin) !=
+			        self->ddTenantCache.get()->tenantOwning(nextIter->range().begin)) {
 				forwardComplete = true;
 				continue;
 			}
@@ -599,6 +685,13 @@ Future<Void> shardMerger(DataDistributionTracker* self,
 		} else {
 			--prevIter;
 			newMetrics = prevIter->value().stats->get();
+
+			if (honorTenantKeyspaceBoundaries && self->ddTenantCache.get()->tenantOwning(keys.begin) !=
+			                                         self->ddTenantCache.get()->tenantOwning(prevIter->range().begin)) {
+
+				++prevIter;
+				break;
+			}
 
 			// If going backward, stop when the stats are not present or if the shard is already over the merge
 			//  bounds. If this check triggers right away (if we have not merged anything) then return a trigger
@@ -624,8 +717,8 @@ Future<Void> shardMerger(DataDistributionTracker* self,
 		shardsMerged++;
 
 		auto shardBounds = getShardSizeBounds(merged, maxShardSize);
-		// If we just recently get the current shard's metrics (i.e., less than DD_LOW_BANDWIDTH_DELAY ago), it means
-		// the shard's metric may not be stable yet. So we cannot continue merging in this direction.
+		// If we just recently get the current shard's metrics (i.e., less than DD_LOW_BANDWIDTH_DELAY ago), it
+		// means the shard's metric may not be stable yet. So we cannot continue merging in this direction.
 		if (endingStats.bytes >= shardBounds.min.bytes || getBandwidthStatus(endingStats) != BandwidthStatusLow ||
 		    now() - lastLowBandwidthStartTime < SERVER_KNOBS->DD_LOW_BANDWIDTH_DELAY ||
 		    shardsMerged >= SERVER_KNOBS->DD_MERGE_LIMIT) {
@@ -659,9 +752,11 @@ Future<Void> shardMerger(DataDistributionTracker* self,
 	// NewKeys: New key range after shards are merged;
 	// EndingSize: The new merged shard size in bytes;
 	// BatchedMerges: The number of shards merged. Each shard is defined in self->shards;
-	// LastLowBandwidthStartTime: When does a shard's bandwidth status becomes BandwidthStatusLow. If a shard's status
+	// LastLowBandwidthStartTime: When does a shard's bandwidth status becomes BandwidthStatusLow. If a shard's
+	// status
 	//   becomes BandwidthStatusLow less than DD_LOW_BANDWIDTH_DELAY ago, the merging logic will stop at the shard;
-	// ShardCount: The number of non-splittable shards that are merged. Each shard is defined in self->shards may have
+	// ShardCount: The number of non-splittable shards that are merged. Each shard is defined in self->shards may
+	// have
 	//   more than 1 shards.
 	TraceEvent("RelocateShardMergeMetrics", self->distributorId)
 	    .detail("OldKeys", keys)
@@ -767,8 +862,8 @@ ACTOR Future<Void> shardTracker(DataDistributionTracker::SafeAccessor self,
 			// Use the current known size to check for (and start) splits and merges.
 			wait(shardEvaluator(self(), keys, shardSize, wantsToMerge));
 
-			// We could have a lot of actors being released from the previous wait at the same time. Immediately calling
-			// delay(0) mitigates the resulting SlowTask
+			// We could have a lot of actors being released from the previous wait at the same time. Immediately
+			// calling delay(0) mitigates the resulting SlowTask
 			wait(delay(0, TaskPriority::DataDistribution));
 		}
 	} catch (Error& e) {
@@ -1007,11 +1102,13 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
                                            FutureStream<GetTopKMetricsRequest> getTopKMetrics,
                                            PromiseStream<GetMetricsListRequest> getShardMetricsList,
                                            FutureStream<Promise<int64_t>> getAverageShardBytes,
+                                           PromiseStream<TenantCacheTenantCreated> newTenantSignal,
                                            Promise<Void> readyToStart,
                                            Reference<AsyncVar<bool>> anyZeroHealthyTeams,
                                            UID distributorId,
                                            KeyRangeMap<ShardTrackedData>* shards,
-                                           bool* trackerCancelled) {
+                                           bool* trackerCancelled,
+                                           Optional<Reference<TenantCache>> ddTenantCache) {
 	state DataDistributionTracker self(cx,
 	                                   distributorId,
 	                                   readyToStart,
@@ -1019,7 +1116,8 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
 	                                   shardsAffectedByTeamFailure,
 	                                   anyZeroHealthyTeams,
 	                                   *shards,
-	                                   *trackerCancelled);
+	                                   *trackerCancelled,
+	                                   ddTenantCache);
 	state Future<Void> loggingTrigger = Void();
 	state Future<Void> readHotDetect = readHotDetector(&self);
 	state Reference<EventCacheHolder> ddTrackerStatsEventHolder = makeReference<EventCacheHolder>("DDTrackerStats");
@@ -1050,6 +1148,13 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
 				self.sizeChanges.add(fetchShardMetricsList(&self, req));
 			}
 			when(wait(self.sizeChanges.getResult())) {}
+			when(TenantCacheTenantCreated tenantCreationSignal = waitNext(newTenantSignal.getFuture())) {
+				TraceEvent(SevInfo, "TenantCacheTenantCreated")
+				    .detail("Begin", tenantCreationSignal.keys.begin.printable())
+				    .detail("End", tenantCreationSignal.keys.end.printable());
+				self.sizeChanges.add(tenantShardSplitter(&self, tenantCreationSignal.keys));
+				tenantCreationSignal.reply.send(true);
+			}
 		}
 	} catch (Error& e) {
 		TraceEvent(SevError, "DataDistributionTrackerError", self.distributorId).error(e);

@@ -642,12 +642,6 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 				TraceEvent("DataDistributionEnabled").log();
 			}
 
-			state Reference<TenantCache> ddTenantCache;
-			if (ddIsTenantAware) {
-				ddTenantCache = makeReference<TenantCache>(cx, self->ddId);
-				wait(ddTenantCache->build(cx));
-			}
-
 			// When/If this assertion fails, Evan owes Ben a pat on the back for his foresight
 			ASSERT(configuration.storageTeamSize > 0);
 
@@ -657,10 +651,17 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			state PromiseStream<Promise<int>> getUnhealthyRelocationCount;
 			state PromiseStream<GetMetricsRequest> getShardMetrics;
 			state PromiseStream<GetTopKMetricsRequest> getTopKShardMetrics;
+			state PromiseStream<TenantCacheTenantCreated> tenantCreationSignal;
 			state Reference<AsyncVar<bool>> processingUnhealthy(new AsyncVar<bool>(false));
 			state Reference<AsyncVar<bool>> processingWiggle(new AsyncVar<bool>(false));
 			state Promise<Void> readyToStart;
 			state Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure(new ShardsAffectedByTeamFailure);
+
+			state Optional<Reference<TenantCache>> ddTenantCache;
+			if (ddIsTenantAware) {
+				ddTenantCache = makeReference<TenantCache>(cx, self->ddId, tenantCreationSignal);
+				wait(ddTenantCache.get()->build());
+			}
 
 			state int shard = 0;
 			for (; shard < initData->shards.size() - 1; shard++) {
@@ -716,10 +717,6 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			} else {
 				anyZeroHealthyTeams = zeroHealthyTeams[0];
 			}
-			if (ddIsTenantAware) {
-				actors.push_back(reportErrorsExcept(
-				    ddTenantCache->monitorTenantMap(), "DDTenantCacheMonitor", self->ddId, &normalDDQueueErrors()));
-			}
 
 			actors.push_back(pollMoveKeysLock(cx, lock, ddEnabledState));
 			actors.push_back(reportErrorsExcept(dataDistributionTracker(initData,
@@ -730,11 +727,13 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			                                                            getTopKShardMetrics.getFuture(),
 			                                                            getShardMetricsList,
 			                                                            getAverageShardBytes.getFuture(),
+			                                                            tenantCreationSignal,
 			                                                            readyToStart,
 			                                                            anyZeroHealthyTeams,
 			                                                            self->ddId,
 			                                                            &shards,
-			                                                            &trackerCancelled),
+			                                                            &trackerCancelled,
+			                                                            ddTenantCache),
 			                                    "DDTracker",
 			                                    self->ddId,
 			                                    &normalDDQueueErrors()));
@@ -757,6 +756,13 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			                                    "DDQueue",
 			                                    self->ddId,
 			                                    &normalDDQueueErrors()));
+
+			if (ddIsTenantAware) {
+				actors.push_back(reportErrorsExcept(ddTenantCache.get()->monitorTenantMap(),
+				                                    "DDTenantCacheMonitor",
+				                                    self->ddId,
+				                                    &normalDDQueueErrors()));
+			}
 
 			std::vector<DDTeamCollection*> teamCollectionsPtrs;
 			primaryTeamCollection = makeReference<DDTeamCollection>(

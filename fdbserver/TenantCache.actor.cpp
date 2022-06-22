@@ -18,8 +18,11 @@
  * limitations under the License.
  */
 
+#include "fdbclient/SystemData.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbserver/DDTeamCollection.h"
 #include "fdbserver/TenantCache.h"
+#include "flow/flow.h"
 #include <limits>
 #include <string>
 #include "flow/actorcompiler.h"
@@ -90,6 +93,10 @@ public:
 
 					if (tenantCache->update(tname, t)) {
 						tenantListUpdated = true;
+						TenantCacheTenantCreated req;
+						KeyRangeRef kr = KeyRangeRef(t.prefix, keyAfter(t.prefix));
+						req.keys = kr;
+						tenantCache->tenantCreationSignal.send(req);
 					}
 				}
 
@@ -197,8 +204,21 @@ bool TenantCache::isTenantKey(KeyRef key) const {
 	return true;
 }
 
-Future<Void> TenantCache::build(Database cx) {
+Future<Void> TenantCache::build() {
 	return TenantCacheImpl::build(this);
+}
+
+Optional<Reference<TCTenantInfo>> TenantCache::tenantOwning(KeyRef key) const {
+	auto it = tenantCache.lastLessOrEqual(key);
+	if (it == tenantCache.end()) {
+		return {};
+	}
+
+	if (!key.startsWith(it->key)) {
+		return {};
+	}
+
+	return it->value;
 }
 
 Future<Void> TenantCache::monitorTenantMap() {
@@ -211,7 +231,8 @@ public:
 		wait(Future<Void>(Void()));
 
 		Database cx;
-		TenantCache tenantCache(cx, UID(1, 0));
+		PromiseStream<TenantCacheTenantCreated> tenantCreationSignal;
+		TenantCache tenantCache(cx, UID(1, 0), tenantCreationSignal);
 
 		constexpr static uint16_t tenantLimit = 64;
 
@@ -239,7 +260,8 @@ public:
 		wait(Future<Void>(Void()));
 
 		Database cx;
-		TenantCache tenantCache(cx, UID(1, 0));
+		PromiseStream<TenantCacheTenantCreated> tenantCreationSignal;
+		TenantCache tenantCache(cx, UID(1, 0), tenantCreationSignal);
 
 		constexpr static uint16_t tenantLimit = 64;
 

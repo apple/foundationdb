@@ -32,6 +32,7 @@ set(FDBSERVER_SRCS
   CoroFlow.h
   DataDistribution.actor.cpp
   DataDistribution.actor.h
+  DataDistributionTeam.h
   DataDistributionQueue.actor.cpp
   DataDistributionTracker.actor.cpp
   DataDistributorInterface.h
