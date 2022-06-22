@@ -30,6 +30,7 @@
 #include <list>
 #include <new>
 #include <ostream>
+#include <unordered_map>
 #include <utility>
 #include "mako/mako.hpp"
 #include "operations.hpp"
@@ -95,12 +96,23 @@ class alignas(64) ThreadStatistics {
 	std::array<uint64_t, MAX_OP> errors;
 	std::array<uint64_t, MAX_OP> latency_samples;
 	std::array<uint64_t, MAX_OP> latency_us_total;
-	std::vector<DDSketchMako> sketches;
+	// std::vector<DDSketchMako> sketches;
+	std::unordered_map<int, DDSketchMako> sketches;
 
 public:
 	ThreadStatistics() noexcept {
 		memset(this, 0, sizeof(ThreadStatistics));
-		sketches.resize(MAX_OP);
+		sketches = std::unordered_map<int, DDSketchMako>{};
+	}
+
+	ThreadStatistics(const Arguments& args) noexcept {
+		memset(this, 0, sizeof(ThreadStatistics));
+		for (int op = 0; op < MAX_OP; op++) {
+			if (args.txnspec.ops[op][OP_COUNT] > 0) {
+				// This will allocate and initialize an empty sketch
+				sketches[op];
+			}
+		}
 	}
 
 	ThreadStatistics(const ThreadStatistics& other) = default;
@@ -118,19 +130,40 @@ public:
 
 	uint64_t getLatencyUsTotal(int op) const noexcept { return latency_us_total[op]; }
 
-	uint64_t getLatencyUsMin(int op) const noexcept { return sketches[op].min(); }
+	uint64_t getLatencyUsMin(int op) const noexcept {
+		auto it = sketches.find(op);
+		if (it != sketches.end()) {
+			return it->second.min();
+		}
+		return 0;
+	}
 
-	uint64_t getLatencyUsMax(int op) const noexcept { return sketches[op].max(); }
+	uint64_t getLatencyUsMax(int op) const noexcept {
+		auto it = sketches.find(op);
+		if (it != sketches.end()) {
+			return it->second.max();
+		}
+		return 0;
+	}
 
 	uint64_t percentile(int op, double quantile) { return sketches[op].percentile(quantile); }
 
-	uint64_t mean(int op) const noexcept { return sketches[op].mean(); }
+	uint64_t mean(int op) const noexcept {
+		auto it = sketches.find(op);
+		if (it != sketches.end()) {
+			return it->second.max();
+		}
+		return 0;
+	}
 
 	// with 'this' as final aggregation, factor in 'other'
 	void combine(const ThreadStatistics& other) {
 		conflicts += other.conflicts;
 		for (auto op = 0; op < MAX_OP; op++) {
-			sketches[op].mergeWith(other.sketches[op]);
+			auto it = other.sketches.find(op);
+			if (it != other.sketches.end()) {
+				sketches[op].mergeWith(it->second);
+			}
 			ops[op] += other.ops[op];
 			errors[op] += other.errors[op];
 			total_errors += other.errors[op];
@@ -157,14 +190,19 @@ public:
 	}
 
 	void writeToFile(const std::string& filename, int op) const {
-		rapidjson::StringBuffer ss;
-		rapidjson::Writer<rapidjson::StringBuffer> writer(ss);
-		sketches[op].serialize(writer);
-		std::ofstream f(filename);
-		f << ss.GetString();
+		auto it = sketches.find(op);
+		if (it != sketches.end()) {
+			rapidjson::StringBuffer ss;
+			rapidjson::Writer<rapidjson::StringBuffer> writer(ss);
+			it->second.serialize(writer);
+			std::ofstream f(filename);
+			f << ss.GetString();
+		}
 	}
 
-	void updateLatencies(const std::vector<DDSketchMako> other_sketches) { sketches = other_sketches; }
+	void updateLatencies(const std::unordered_map<int, DDSketchMako>& other_sketches) {
+		sketches = std::move(other_sketches);
+	}
 
 	friend std::ofstream& operator<<(std::ofstream& os, ThreadStatistics& stats);
 	friend std::ifstream& operator>>(std::ifstream& is, ThreadStatistics& stats);
@@ -208,7 +246,7 @@ inline std::ofstream& operator<<(std::ofstream& os, ThreadStatistics& stats) {
 	writer.EndArray();
 
 	for (auto op = 0; op < MAX_OP; op++) {
-		if (stats.sketches[op].getPopulationSize() > 0) {
+		if (stats.sketches.find(op) != stats.sketches.end()) {
 			std::string op_name = getOpName(op);
 			writer.String(op_name.c_str());
 			stats.sketches[op].serialize(writer);
@@ -246,8 +284,10 @@ inline std::ifstream& operator>>(std::ifstream& is, ThreadStatistics& stats) {
 	populateArray(stats.latency_samples, jsonLatencySamples);
 	populateArray(stats.latency_us_total, jsonLatencyUsTotal);
 	for (int op = 0; op < MAX_OP; op++) {
-		const std::string op_name = getOpName(op);
-		stats.sketches[op].deserialize(doc[op_name.c_str()]);
+		if (stats.latency_samples[op] > 0) {
+			const std::string op_name = getOpName(op);
+			stats.sketches[op].deserialize(doc[op_name.c_str()]);
+		}
 	}
 
 	return is;

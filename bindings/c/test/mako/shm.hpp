@@ -24,6 +24,7 @@
 #include <atomic>
 #include <cassert>
 #include <cstdint>
+#include "mako/mako.hpp"
 #include "stats.hpp"
 
 /* shared memory */
@@ -75,11 +76,11 @@ public:
 
 	size_t size() const noexcept { return storageSize(num_processes, num_threads); }
 
-	void initMemory() noexcept {
+	void initMemory(const Arguments& args) noexcept {
 		new (&header()) Header{};
 		for (auto i = 0; i < num_processes; i++)
 			for (auto j = 0; j < num_threads; j++)
-				new (&statsSlot(i, j)) ThreadStatistics();
+				new (&statsSlot(i, j)) ThreadStatistics(args);
 	}
 
 	Header const& headerConst() const noexcept { return *static_cast<Header const*>(base); }

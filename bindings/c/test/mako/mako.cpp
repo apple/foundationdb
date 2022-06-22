@@ -1907,7 +1907,11 @@ void printThreadStats(ThreadStatistics& final_stats, Arguments args, FILE* fp, b
 	}
 }
 
-void loadSample(int pid_main, int op, std::vector<DDSketchMako>& data_points, int process_id, int thread_id) {
+void loadSample(int pid_main,
+                int op,
+                std::unordered_map<int, DDSketchMako>& data_points,
+                int process_id,
+                int thread_id) {
 	const auto dirname = fmt::format("{}{}", TEMP_DATA_STORE, pid_main);
 	const auto filename = getStatsFilename(dirname, process_id, thread_id, op);
 	std::ifstream fp{ filename };
@@ -2043,7 +2047,7 @@ void printReport(Arguments const& args,
 	fmt::print("\n\n");
 
 	// Get the sketches stored in file and merge them together
-	std::vector<DDSketchMako> data_points(MAX_OP);
+	std::unordered_map<int, DDSketchMako> data_points;
 	for (auto op = 0; op < MAX_OP; op++) {
 		for (auto i = 0; i < args.num_processes; i++) {
 
@@ -2305,7 +2309,7 @@ int main(int argc, char* argv[]) {
 	auto shm_access = shared_memory::Access(shm, args.num_processes, nthreads_for_shm);
 
 	/* initialize the shared memory */
-	shm_access.initMemory();
+	shm_access.initMemory(args);
 
 	/* get ready */
 	auto& shm_hdr = shm_access.header();
