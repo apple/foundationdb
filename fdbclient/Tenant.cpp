@@ -22,6 +22,35 @@
 #include "fdbclient/Tenant.h"
 #include "flow/UnitTest.h"
 
+Key TenantMapEntry::idToPrefix(int64_t id) {
+	int64_t swapped = bigEndian64(id);
+	return StringRef(reinterpret_cast<const uint8_t*>(&swapped), 8);
+}
+
+int64_t TenantMapEntry::prefixToId(KeyRef prefix) {
+	ASSERT(prefix.size() == 8);
+	int64_t id = *reinterpret_cast<const int64_t*>(prefix.begin());
+	id = bigEndian64(id);
+	ASSERT(id >= 0);
+	return id;
+}
+
+void TenantMapEntry::initPrefix(KeyRef subspace) {
+	ASSERT(id >= 0);
+	prefix = makeString(8 + subspace.size());
+	uint8_t* data = mutateString(prefix);
+	if (subspace.size() > 0) {
+		memcpy(data, subspace.begin(), subspace.size());
+	}
+	int64_t swapped = bigEndian64(id);
+	memcpy(data + subspace.size(), &swapped, 8);
+}
+
+TenantMapEntry::TenantMapEntry() : id(-1) {}
+TenantMapEntry::TenantMapEntry(int64_t id, KeyRef subspace) : id(id) {
+	initPrefix(subspace);
+}
+
 TEST_CASE("/fdbclient/TenantMapEntry/Serialization") {
 	TenantMapEntry entry1(1, ""_sr);
 	ASSERT(entry1.prefix == "\x00\x00\x00\x00\x00\x00\x00\x01"_sr);
