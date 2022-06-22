@@ -917,6 +917,67 @@ Future<std::map<TenantName, TenantMapEntry>> listTenants(Reference<DB> db,
 		}
 	}
 }
+
+ACTOR template <class DB>
+Future<Void> renameTenant(Reference<DB> db, TenantName oldName, TenantName newName) {
+	state Reference<typename DB::TransactionT> tr = db->createTransaction();
+
+	state Key oldNameKey = oldName.withPrefix(tenantMapPrefix);
+	state Key newNameKey = newName.withPrefix(tenantMapPrefix);
+	state bool firstTry = true;
+	state int64_t id;
+	state Key prefix;
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			Optional<TenantMapEntry> oldEntry = wait(tryGetTenantTransaction(tr, oldName));
+			Optional<TenantMapEntry> newEntry = wait(tryGetTenantTransaction(tr, newName));
+			if (firstTry) {
+				if (!oldEntry.present()) {
+					throw tenant_not_found();
+				}
+				if (newEntry.present()) {
+					throw tenant_already_exists();
+				}
+				// Store the id and prefix we see when first reading this key
+				id = oldEntry.get().id;
+				prefix = oldEntry.get().prefix;
+
+				firstTry = false;
+			} else {
+				// If we got commit_unknown_result, the rename may have already occurred.
+				if (!oldEntry.present() && newEntry.present()) {
+					int64_t check_id = newEntry.get().id;
+					Key check_prefix = newEntry.get().prefix;
+					if (id == check_id && prefix == check_prefix) {
+						return Void();
+					}
+					// If the old entry is gone but the new entry does not match
+					// the rename should fail, so we throw an error.
+					throw tenant_not_found();
+				}
+				if (!oldEntry.present()) {
+					throw tenant_not_found();
+				}
+				if (newEntry.present()) {
+					throw tenant_already_exists();
+				}
+				int64_t check_id = oldEntry.get().id;
+				Key check_prefix = oldEntry.get().prefix;
+				// Assert that the id and prefix have not changed since we first read this
+				if (id != check_id || prefix != check_prefix) {
+					throw tenant_not_found();
+				}
+			}
+			tr->clear(oldNameKey);
+			tr->set(newNameKey, encodeTenantEntry(oldEntry.get()));
+			wait(safeThreadFutureToFuture(tr->commit()));
+			return Void();
+		} catch (Error& e) {
+			wait(safeThreadFutureToFuture(tr->onError(e)));
+		}
+	}
+}
 } // namespace ManagementAPI
 
 #include "flow/unactorcompiler.h"

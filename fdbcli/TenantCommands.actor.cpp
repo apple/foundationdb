@@ -254,4 +254,103 @@ CommandFactory getTenantFactory("gettenant",
                                 CommandHelp("gettenant <TENANT_NAME>",
                                             "prints the metadata for a tenant",
                                             "Prints the metadata for a tenant."));
+
+// renametenant command
+ACTOR Future<bool> renameTenantCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
+	if (tokens.size() != 3) {
+		printUsage(tokens[0]);
+		return false;
+	}
+	state Key oldNameKey = fdb_cli::tenantSpecialKeyRange.begin.withSuffix(tokens[1]);
+	state Key newNameKey = fdb_cli::tenantSpecialKeyRange.begin.withSuffix(tokens[2]);
+	state Reference<ITransaction> tr = db->createTransaction();
+	state bool doneExistenceCheck = false;
+	state int64_t id;
+	state std::string prefix;
+
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+			state ThreadFuture<Optional<Value>> existingTenantFuture = tr->get(oldNameKey);
+			state ThreadFuture<Optional<Value>> emptyTenantFuture = tr->get(newNameKey);
+			Optional<Value> existingTenant = wait(safeThreadFutureToFuture(existingTenantFuture));
+			Optional<Value> emptyTenant = wait(safeThreadFutureToFuture(emptyTenantFuture));
+			if (!doneExistenceCheck) {
+				if (!existingTenant.present()) {
+					throw tenant_not_found();
+				}
+				if (emptyTenant.present()) {
+					throw tenant_already_exists();
+				}
+				json_spirit::mValue jsonObject;
+				json_spirit::read_string(existingTenant.get().toString(), jsonObject);
+				JSONDoc doc(jsonObject);
+				// Store the id and prefix we see when first reading this key
+				doc.get("id", id);
+				doc.get("prefix", prefix);
+				doneExistenceCheck = true;
+			} else {
+				// If we got commit_unknown_result, the rename may have already occurred.
+				if (!existingTenant.present() && emptyTenant.present()) {
+					json_spirit::mValue jsonObject;
+					json_spirit::read_string(emptyTenant.get().toString(), jsonObject);
+					JSONDoc doc(jsonObject);
+
+					int64_t check_id;
+					std::string check_prefix;
+					doc.get("id", check_id);
+					doc.get("prefix", check_prefix);
+					if (id == check_id && prefix == check_prefix) {
+						return true;
+					}
+					// If the old entry is gone but the new entry does not match
+					// the rename should fail, so we throw an error.
+					throw tenant_not_found();
+				}
+				if (!existingTenant.present()) {
+					throw tenant_not_found();
+				}
+				if (emptyTenant.present()) {
+					throw tenant_already_exists();
+				}
+				json_spirit::mValue jsonObject;
+				json_spirit::read_string(existingTenant.get().toString(), jsonObject);
+				JSONDoc doc(jsonObject);
+
+				int64_t check_id;
+				std::string check_prefix;
+				doc.get("id", check_id);
+				doc.get("prefix", check_prefix);
+
+				// Assert that the id and prefix have not changed since we first read this
+				if (id != check_id || prefix != check_prefix) {
+					throw tenant_not_found();
+				}
+			}
+
+			tr->clear(oldNameKey);
+			// TODO: change this to either not use management keyspace
+			// or have a way to specify the contents of the tenant map from there
+			tr->set(newNameKey, KeyRef());
+		} catch (Error& e) {
+			state Error err(e);
+			if (e.code() == error_code_special_keys_api_failure) {
+				std::string errorMsgStr = wait(fdb_cli::getSpecialKeysFailureErrorMessage(tr));
+				fprintf(stderr, "ERROR: %s\n", errorMsgStr.c_str());
+				return false;
+			}
+			wait(safeThreadFutureToFuture(tr->onError(err)));
+		}
+	}
+
+	printf("The tenant `%s' has been renamed to `%s'\n", printable(tokens[1]).c_str(), printable(tokens[2]).c_str());
+	return true;
+}
+
+CommandFactory renameTenantFactory(
+    "renametenant",
+    CommandHelp(
+        "renametenant <OLD_NAME> <NEW_NAME>",
+        "renames a tenant in the cluster.",
+        "Renames a tenant in the cluster. The old name must exist and the new name must not exist in the cluster."));
 } // namespace fdb_cli
