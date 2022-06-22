@@ -1840,7 +1840,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						}
 					} else {
 						Optional<TenantMapEntry> entry =
-						    wait(makeInterruptable(ManagementAPI::tryGetTenant(db, tokens[1])));
+						    wait(makeInterruptable(TenantAPI::tryGetTenant(db, tokens[1])));
 						if (!entry.present()) {
 							fprintf(stderr, "ERROR: Tenant `%s' does not exist\n", printable(tokens[1]).c_str());
 							is_error = true;

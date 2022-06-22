@@ -28,9 +28,6 @@
 #include "fdbclient/VersionedMap.h"
 #include "flow/flat_buffers.h"
 
-typedef StringRef ClusterNameRef;
-typedef Standalone<ClusterNameRef> ClusterName;
-
 struct ClusterUsage {
 	int numTenantGroups = 0;
 
@@ -96,28 +93,41 @@ struct DataClusterEntry {
 	}
 };
 
-struct DataClusterRegistrationEntry {
+struct MetaclusterRegistrationEntry {
 	constexpr static FileIdentifier file_identifier = 13448589;
 
+	ClusterType clusterType;
+
+	ClusterName metaclusterName;
 	ClusterName name;
 	UID metaclusterId;
 	UID id;
 
-	DataClusterRegistrationEntry() = default;
-	DataClusterRegistrationEntry(ClusterName name, UID metaclusterId, UID id)
-	  : name(name), metaclusterId(metaclusterId), id(id) {}
+	MetaclusterRegistrationEntry() = default;
+	MetaclusterRegistrationEntry(ClusterName metaclusterName, UID metaclusterId)
+	  : clusterType(ClusterType::METACLUSTER_MANAGEMENT), metaclusterName(metaclusterName), name(metaclusterName),
+	    metaclusterId(metaclusterId), id(metaclusterId) {}
+	MetaclusterRegistrationEntry(ClusterName metaclusterName, ClusterName name, UID metaclusterId, UID id)
+	  : clusterType(ClusterType::METACLUSTER_DATA), metaclusterName(metaclusterName), name(name),
+	    metaclusterId(metaclusterId), id(id) {
+		ASSERT(metaclusterName != name && metaclusterId != id);
+	}
 
 	Value encode() { return ObjectWriter::toValue(*this, IncludeVersion(ProtocolVersion::withMetacluster())); }
-	static DataClusterRegistrationEntry decode(ValueRef const& value) {
-		DataClusterRegistrationEntry entry;
+	static MetaclusterRegistrationEntry decode(ValueRef const& value) {
+		MetaclusterRegistrationEntry entry;
 		ObjectReader reader(value.begin(), IncludeVersion());
 		reader.deserialize(entry);
 		return entry;
 	}
+	static Optional<MetaclusterRegistrationEntry> decode(Optional<Value> value) {
+		return value.map<MetaclusterRegistrationEntry>(
+		    [](ValueRef const& v) { return MetaclusterRegistrationEntry::decode(v); });
+	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, name, metaclusterId, id);
+		serializer(ar, clusterType, metaclusterName, name, metaclusterId, id);
 	}
 };
 

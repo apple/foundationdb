@@ -1344,7 +1344,7 @@ struct TenantMode {
 	// These enumerated values are stored in the database configuration, so can NEVER be changed.  Only add new ones
 	// just before END.
 	// Note: OPTIONAL_TENANT is not named OPTIONAL because of a collision with a Windows macro.
-	enum Mode { DISABLED = 0, OPTIONAL_TENANT = 1, REQUIRED = 2, MANAGEMENT = 3, END = 4 };
+	enum Mode { DISABLED = 0, OPTIONAL_TENANT = 1, REQUIRED = 2, END = 4 };
 
 	TenantMode() : mode(DISABLED) {}
 	TenantMode(Mode mode) : mode(mode) {
@@ -1367,8 +1367,6 @@ struct TenantMode {
 			return "optional";
 		case REQUIRED:
 			return "required";
-		case MANAGEMENT:
-			return "management";
 		default:
 			ASSERT(false);
 		}
@@ -1393,6 +1391,12 @@ struct TenantMode {
 
 	uint32_t mode;
 };
+
+typedef StringRef ClusterNameRef;
+typedef Standalone<ClusterNameRef> ClusterName;
+
+enum class ClusterType { STANDALONE, METACLUSTER_MANAGEMENT, METACLUSTER_DATA };
+
 struct GRVCacheSpace {
 	Version cachedReadVersion;
 	double lastGrvTime;

@@ -669,6 +669,26 @@ private:
 		}
 	}
 
+	void checkSetMetaclusterRegistration(MutationRef m) {
+		if (m.param1 == metaclusterRegistrationKey) {
+			MetaclusterRegistrationEntry entry = MetaclusterRegistrationEntry::decode(m.param2);
+
+			TraceEvent("SetMetaclusterRegistration", dbgid)
+			    .detail("ClusterType", entry.clusterType)
+			    .detail("MetaclusterID", entry.metaclusterId)
+			    .detail("MetaclusterName", entry.metaclusterName)
+			    .detail("ClusterID", entry.id)
+			    .detail("ClusterName", entry.name);
+
+			if (!initialCommit) {
+				txnStateStore->set(KeyValueRef(m.param1, m.param2));
+			}
+
+			confChange = true;
+			TEST(true); // Metacluster registration set
+		}
+	}
+
 	void checkClearKeyServerKeys(KeyRangeRef range) {
 		if (!keyServersKeys.intersects(range)) {
 			return;
@@ -1057,6 +1077,19 @@ private:
 		}
 	}
 
+	void checkClearMetaclusterRegistration(KeyRangeRef range) {
+		if (range.contains(metaclusterRegistrationKey)) {
+			TraceEvent("ClearMetaclusterRegistration", dbgid);
+
+			if (!initialCommit) {
+				txnStateStore->clear(singleKeyRange(metaclusterRegistrationKey));
+			}
+
+			confChange = true;
+			TEST(true); // Metacluster registration cleared
+		}
+	}
+
 	void checkClearMiscRangeKeys(KeyRangeRef range) {
 		if (initialCommit) {
 			return;
@@ -1179,6 +1212,7 @@ public:
 				checkSetMinRequiredCommitVersionKey(m);
 				checkSetVersionEpochKey(m);
 				checkSetTenantMapPrefix(m);
+				checkSetMetaclusterRegistration(m);
 				checkSetOtherKeys(m);
 			} else if (m.type == MutationRef::ClearRange && isSystemKey(m.param2)) {
 				KeyRangeRef range(m.param1, m.param2);
@@ -1196,6 +1230,7 @@ public:
 				checkClearTssQuarantineKeys(m, range);
 				checkClearVersionEpochKeys(m, range);
 				checkClearTenantMapPrefix(range);
+				checkClearMetaclusterRegistration(range);
 				checkClearMiscRangeKeys(range);
 			}
 		}

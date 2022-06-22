@@ -272,12 +272,8 @@ ACTOR Future<bool> configureCommandActor(Reference<IDatabase> db,
 		    stderr,
 		    "WARN: Sharded RocksDB storage engine type is still in experimental stage, not yet production tested.\n");
 		break;
-	case ConfigurationResult::DATABASE_NOT_EMPTY:
-		fprintf(stderr, "ERROR: The cluster configuration cannot be changed because the cluster is not empty.\n");
-		ret = false;
-		break;
 	case ConfigurationResult::DATABASE_IS_REGISTERED:
-		fprintf(stderr, "ERROR: A cluster cannot be configured out of `required' mode while part of a metacluster.\n");
+		fprintf(stderr, "ERROR: A cluster cannot change its tenant mode while part of a metacluster.\n");
 		ret = false;
 		break;
 	default:
@@ -325,7 +321,7 @@ CommandFactory configureFactory(
         "commit_proxies=<COMMIT_PROXIES>|grv_proxies=<GRV_PROXIES>|logs=<LOGS>|resolvers=<RESOLVERS>>*|"
         "count=<TSS_COUNT>|perpetual_storage_wiggle=<WIGGLE_SPEED>|perpetual_storage_wiggle_locality="
         "<<LOCALITY_KEY>:<LOCALITY_VALUE>|0>|storage_migration_type={disabled|gradual|aggressive}"
-        "|tenant_mode={disabled|optional|required|management}|blob_granules_enabled={0|1}",
+        "|tenant_mode={disabled|optional|required}|blob_granules_enabled={0|1}",
         "change the database configuration",
         "The `new' option, if present, initializes a new database with the given configuration rather than changing "
         "the configuration of an existing one. When used, both a redundancy mode and a storage engine must be "
@@ -356,7 +352,7 @@ CommandFactory configureFactory(
         "perpetual_storage_wiggle_locality=<<LOCALITY_KEY>:<LOCALITY_VALUE>|0>: Set the process filter for wiggling. "
         "The processes that match the given locality key and locality value are only wiggled. The value 0 will disable "
         "the locality filter and matches all the processes for wiggling.\n\n"
-        "tenant_mode=<disabled|optional|required|management>: Sets the tenant mode for the cluster. If "
+        "tenant_mode=<disabled|optional|required>: Sets the tenant mode for the cluster. If "
         "optional, then transactions can be run with or without specifying tenants. If required, all data must be "
         "accessed using tenants.\n\n"
 

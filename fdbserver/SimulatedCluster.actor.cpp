@@ -334,6 +334,7 @@ public:
 
 	bool allowDefaultTenant = true;
 	bool allowDisablingTenants = true;
+	bool allowCreatingTenants = true;
 
 	ConfigDBType getConfigDBType() const { return configDBType; }
 
@@ -392,6 +393,7 @@ public:
 		    .add("blobGranulesEnabled", &blobGranulesEnabled)
 		    .add("allowDefaultTenant", &allowDefaultTenant)
 		    .add("allowDisablingTenants", &allowDisablingTenants)
+		    .add("allowCreatingTenants", &allowCreatingTenants)
 		    .add("randomlyRenameZoneId", &randomlyRenameZoneId);
 		try {
 			auto file = toml::parse(testFile);
@@ -2382,7 +2384,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 	allowList.addTrustedSubnet("abcd::/16"sv);
 	state bool allowDefaultTenant = testConfig.allowDefaultTenant;
 	state bool allowDisablingTenants = testConfig.allowDisablingTenants;
-	state bool allowCreatingTenants = true;
+	state bool allowCreatingTenants = testConfig.allowCreatingTenants;
 
 	// The RocksDB storage engine does not support the restarting tests because you cannot consistently get a clean
 	// snapshot of the storage engine without a snapshotting file system.

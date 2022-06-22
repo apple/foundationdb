@@ -1436,7 +1436,7 @@ const KeyRangeRef tenantGroupMetadataKeys("\xff/metacluster/tenantGroup/metadata
                                           "\xff/metacluster/tenantGroup/metadata0"_sr);
 
 // Metacluster data cluster keys
-const KeyRef dataClusterRegistrationKey = "\xff/metacluster/dataCluster/clusterRegistration"_sr;
+const KeyRef metaclusterRegistrationKey = "\xff/metacluster/clusterRegistration"_sr;
 
 // for tests
 void testSSISerdes(StorageServerInterface const& ssi) {

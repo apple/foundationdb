@@ -71,7 +71,6 @@ enum class ConfigurationResult {
 	SUCCESS_WARN_SHARDED_ROCKSDB_EXPERIMENTAL,
 	DATABASE_CREATED_WARN_ROCKSDB_EXPERIMENTAL,
 	DATABASE_CREATED_WARN_SHARDED_ROCKSDB_EXPERIMENTAL,
-	DATABASE_NOT_EMPTY,
 	DATABASE_IS_REGISTERED
 };
 
@@ -480,39 +479,13 @@ Future<ConfigurationResult> changeConfigTransaction(Transaction tr,
 			}
 
 			if (newConfig.tenantMode != oldConfig.tenantMode) {
-				if (newConfig.tenantMode == TenantMode::MANAGEMENT || oldConfig.tenantMode == TenantMode::MANAGEMENT) {
-					state Future<std::map<TenantName, TenantMapEntry>> tenantsFuture =
-					    listTenantsTransaction(tr, ""_sr, "\xff\xff"_sr, 1);
-					state typename transaction_future_type<Transaction, RangeResult>::type dataClustersFuture =
-					    tr->getRange(dataClusterMetadataKeys, 1);
+				state
+				    typename transaction_future_type<Transaction, Optional<Value>>::type metaclusterRegistrationFuture =
+				        tr->get(metaclusterRegistrationKey);
 
-					if (newConfig.tenantMode == TenantMode::MANAGEMENT) {
-						state typename transaction_future_type<Transaction, RangeResult>::type dbContentsFuture =
-						    tr->getRange(normalKeys, 1);
-
-						RangeResult dbContents = wait(safeThreadFutureToFuture(dbContentsFuture));
-						if (!dbContents.empty()) {
-							return ConfigurationResult::DATABASE_NOT_EMPTY;
-						}
-					}
-
-					RangeResult dataClusters = wait(safeThreadFutureToFuture(dataClustersFuture));
-					if (!dataClusters.empty()) {
-						return ConfigurationResult::DATABASE_NOT_EMPTY;
-					}
-
-					std::map<TenantName, TenantMapEntry> tenants = wait(tenantsFuture);
-					if (!tenants.empty()) {
-						return ConfigurationResult::DATABASE_NOT_EMPTY;
-					}
-				} else if (oldConfig.tenantMode == TenantMode::REQUIRED) {
-					state typename transaction_future_type<Transaction, Optional<Value>>::type dbRegistrationFuture =
-					    tr->get(dataClusterRegistrationKey);
-
-					Optional<Value> dbRegistration = wait(safeThreadFutureToFuture(dbRegistrationFuture));
-					if (dbRegistration.present()) {
-						return ConfigurationResult::DATABASE_IS_REGISTERED;
-					}
+				Optional<Value> metaclusterRegistration = wait(safeThreadFutureToFuture(metaclusterRegistrationFuture));
+				if (metaclusterRegistration.present()) {
+					return ConfigurationResult::DATABASE_IS_REGISTERED;
 				}
 			}
 		}

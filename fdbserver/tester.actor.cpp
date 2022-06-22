@@ -779,7 +779,7 @@ ACTOR Future<Void> clearData(Database cx) {
 			//    it should disable the default tenant.
 			if (!rangeResult.empty()) {
 				if (cx->defaultTenant.present()) {
-					TenantMapEntry entry = wait(ManagementAPI::getTenant(cx.getReference(), cx->defaultTenant.get()));
+					TenantMapEntry entry = wait(TenantAPI::getTenant(cx.getReference(), cx->defaultTenant.get()));
 					tenantPrefix = entry.prefix;
 				}
 
@@ -1636,7 +1636,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 				entry.tenantGroup = "TestTenantGroup"_sr;
 			}
 			TraceEvent("CreatingTenant").detail("Tenant", tenant).detail("TenantGroup", entry.tenantGroup);
-			tenantFutures.push_back(ManagementAPI::createTenant(cx.getReference(), tenant, entry));
+			tenantFutures.push_back(TenantAPI::createTenant(cx.getReference(), tenant, entry));
 		}
 
 		wait(waitForAll(tenantFutures));

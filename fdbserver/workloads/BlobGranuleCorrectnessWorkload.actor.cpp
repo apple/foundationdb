@@ -207,7 +207,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 			fmt::print("Setting up blob granule range for tenant {0}\n", name.printable());
 		}
 
-		Optional<TenantMapEntry> entry = wait(ManagementAPI::createTenant(cx.getReference(), name));
+		Optional<TenantMapEntry> entry = wait(TenantAPI::createTenant(cx.getReference(), name));
 		ASSERT(entry.present());
 
 		if (BGW_DEBUG) {

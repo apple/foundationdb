@@ -31,9 +31,7 @@
 #include "fdbclient/SystemData.h"
 #include "flow/actorcompiler.h" // has to be last include
 
-namespace ManagementAPI {
-
-enum class TenantOperationType { STANDALONE_CLUSTER, MANAGEMENT_CLUSTER, DATA_CLUSTER };
+namespace TenantAPI {
 
 ACTOR template <class Transaction>
 Future<Optional<TenantMapEntry>> tryGetTenantTransaction(Transaction tr, TenantName name) {
@@ -82,7 +80,20 @@ Future<TenantMapEntry> getTenant(Reference<DB> db, TenantName name) {
 	return entry.get();
 }
 
-bool checkTenantMode(Optional<Value> tenantModeValue, bool isDataCluster, TenantOperationType operationType);
+ACTOR template <class Transaction>
+Future<ClusterType> getClusterType(Transaction tr) {
+	state typename transaction_future_type<Transaction, Optional<Value>>::type metaclusterRegistrationFuture =
+	    tr->get(metaclusterRegistrationKey);
+
+	Optional<Value> metaclusterRegistrationVal = wait(safeThreadFutureToFuture(metaclusterRegistrationFuture));
+	Optional<MetaclusterRegistrationEntry> metaclusterRegistration =
+	    MetaclusterRegistrationEntry::decode(metaclusterRegistrationVal);
+
+	return metaclusterRegistration.present() ? metaclusterRegistration.get().clusterType : ClusterType::STANDALONE;
+}
+
+bool checkTenantMode(Optional<Value> tenantModeValue, ClusterType actualClusterType, ClusterType expectedClusterType);
+TenantMode tenantModeForClusterType(ClusterType clusterType, TenantMode tenantMode);
 
 Key getTenantGroupIndexKey(TenantGroupNameRef tenantGroup, Optional<TenantNameRef> tenant);
 
@@ -92,12 +103,12 @@ Future<std::pair<Optional<TenantMapEntry>, bool>> createTenantTransaction(
     Transaction tr,
     TenantNameRef name,
     TenantMapEntry tenantEntry,
-    TenantOperationType operationType = TenantOperationType::STANDALONE_CLUSTER) {
+    ClusterType clusterType = ClusterType::STANDALONE) {
 	state Key tenantMapKey = name.withPrefix(tenantMapPrefix);
 
-	state bool allowSubspace = operationType == TenantOperationType::STANDALONE_CLUSTER;
+	state bool allowSubspace = clusterType == ClusterType::STANDALONE;
 
-	ASSERT(operationType != TenantOperationType::MANAGEMENT_CLUSTER || tenantEntry.assignedCluster.present());
+	ASSERT(clusterType != ClusterType::METACLUSTER_MANAGEMENT || tenantEntry.assignedCluster.present());
 	ASSERT(tenantEntry.id >= 0);
 
 	if (name.startsWith("\xff"_sr)) {
@@ -113,15 +124,14 @@ Future<std::pair<Optional<TenantMapEntry>, bool>> createTenantTransaction(
 	}
 	state typename transaction_future_type<Transaction, Optional<Value>>::type tenantModeFuture =
 	    tr->get(configKeysPrefix.withSuffix("tenant_mode"_sr));
-	state typename transaction_future_type<Transaction, Optional<Value>>::type metaclusterRegistrationFuture =
-	    tr->get(dataClusterRegistrationKey);
 	state typename transaction_future_type<Transaction, Optional<Value>>::type tombstoneFuture =
 	    tr->get(tenantTombstoneKeys.begin.withSuffix(TenantMapEntry::idToPrefix(tenantEntry.id)));
+	state Future<ClusterType> clusterTypeFuture = getClusterType(tr);
 
 	state Optional<Value> tenantMode = wait(safeThreadFutureToFuture(tenantModeFuture));
-	Optional<Value> metaclusterRegistration = wait(safeThreadFutureToFuture(metaclusterRegistrationFuture));
+	ClusterType actualClusterType = wait(clusterTypeFuture);
 
-	if (!checkTenantMode(tenantMode, metaclusterRegistration.present(), operationType)) {
+	if (!checkTenantMode(tenantMode, actualClusterType, clusterType)) {
 		throw tenants_disabled();
 	}
 
@@ -152,7 +162,7 @@ Future<std::pair<Optional<TenantMapEntry>, bool>> createTenantTransaction(
 		tenantEntry.setSubspace(""_sr);
 	}
 
-	if (operationType != TenantOperationType::MANAGEMENT_CLUSTER) {
+	if (clusterType != ClusterType::METACLUSTER_MANAGEMENT) {
 		state typename transaction_future_type<Transaction, RangeResult>::type prefixRangeFuture =
 		    tr->getRange(prefixRange(tenantEntry.prefix), 1);
 
@@ -167,7 +177,7 @@ Future<std::pair<Optional<TenantMapEntry>, bool>> createTenantTransaction(
 	}
 
 	// We don't store some metadata in the tenant entries on data clusters
-	if (operationType == TenantOperationType::DATA_CLUSTER) {
+	if (clusterType == ClusterType::METACLUSTER_DATA) {
 		tenantEntry.assignedCluster = Optional<ClusterName>();
 	}
 
@@ -179,14 +189,13 @@ Future<std::pair<Optional<TenantMapEntry>, bool>> createTenantTransaction(
 }
 
 ACTOR template <class DB>
-Future<Optional<TenantMapEntry>> createTenant(
-    Reference<DB> db,
-                                    TenantName name,
-                                    TenantMapEntry tenantEntry = TenantMapEntry(),
-                                    TenantOperationType operationType = TenantOperationType::STANDALONE_CLUSTER) {
+Future<Optional<TenantMapEntry>> createTenant(Reference<DB> db,
+                                              TenantName name,
+                                              TenantMapEntry tenantEntry = TenantMapEntry(),
+                                              ClusterType clusterType = ClusterType::STANDALONE) {
 	state Reference<typename DB::TransactionT> tr = db->createTransaction();
 
-	state bool checkExistence = operationType != TenantOperationType::DATA_CLUSTER;
+	state bool checkExistence = clusterType != ClusterType::METACLUSTER_DATA;
 	state bool generateTenantId = tenantEntry.id < 0;
 	loop {
 		try {
@@ -208,13 +217,13 @@ Future<Optional<TenantMapEntry>> createTenant(
 			}
 
 			if (generateTenantId) {
-			Optional<Value> lastIdVal = wait(safeThreadFutureToFuture(lastIdFuture));
-			tenantEntry.id = lastIdVal.present() ? TenantMapEntry::prefixToId(lastIdVal.get()) + 1 : 0;
-			tr->set(tenantLastIdKey, TenantMapEntry::idToPrefix(tenantEntry.id));
+				Optional<Value> lastIdVal = wait(safeThreadFutureToFuture(lastIdFuture));
+				tenantEntry.id = lastIdVal.present() ? TenantMapEntry::prefixToId(lastIdVal.get()) + 1 : 0;
+				tr->set(tenantLastIdKey, TenantMapEntry::idToPrefix(tenantEntry.id));
 			}
 
 			state std::pair<Optional<TenantMapEntry>, bool> newTenant =
-			    wait(createTenantTransaction(tr, name, tenantEntry, operationType));
+			    wait(createTenantTransaction(tr, name, tenantEntry, clusterType));
 
 			if (newTenant.second) {
 				ASSERT(newTenant.first.present());
@@ -238,68 +247,64 @@ Future<Optional<TenantMapEntry>> createTenant(
 ACTOR template <class Transaction>
 Future<Void> deleteTenantTransaction(Transaction tr,
                                      TenantNameRef name,
-                                     TenantOperationType operationType = TenantOperationType::STANDALONE_CLUSTER,
+                                     ClusterType clusterType = ClusterType::STANDALONE,
                                      Optional<int64_t> tenantId = Optional<int64_t>()) {
 	state Key tenantMapKey = name.withPrefix(tenantMapPrefix);
-	ASSERT(operationType == TenantOperationType::STANDALONE_CLUSTER || tenantId.present());
+	ASSERT(clusterType == ClusterType::STANDALONE || tenantId.present());
 
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 
 	state typename transaction_future_type<Transaction, Optional<Value>>::type tenantModeFuture =
 	    tr->get(configKeysPrefix.withSuffix("tenant_mode"_sr));
-	state typename transaction_future_type<Transaction, Optional<Value>>::type metaclusterRegistrationFuture =
-	    tr->get(dataClusterRegistrationKey);
 	state Future<Optional<TenantMapEntry>> tenantEntryFuture = tryGetTenantTransaction(tr, name);
+	state Future<ClusterType> clusterTypeFuture = getClusterType(tr);
 
 	state Optional<Value> tenantMode = wait(safeThreadFutureToFuture(tenantModeFuture));
-	Optional<Value> metaclusterRegistration = wait(safeThreadFutureToFuture(metaclusterRegistrationFuture));
+	ClusterType actualClusterType = wait(clusterTypeFuture);
 
-	if (!checkTenantMode(tenantMode, metaclusterRegistration.present(), operationType)) {
+	if (!checkTenantMode(tenantMode, actualClusterType, clusterType)) {
 		throw tenants_disabled();
 	}
 
 	state Optional<TenantMapEntry> tenantEntry = wait(tenantEntryFuture);
 	if (tenantEntry.present() && (!tenantId.present() || tenantEntry.get().id == tenantId.get())) {
-	if (operationType == TenantOperationType::MANAGEMENT_CLUSTER &&
-	    tenantEntry.get().tenantState != TenantState::REMOVING) {
-		// TODO: better error
-		throw operation_failed();
+		if (clusterType == ClusterType::METACLUSTER_MANAGEMENT &&
+		    tenantEntry.get().tenantState != TenantState::REMOVING) {
+			// TODO: better error
+			throw operation_failed();
+		}
+
+		state typename transaction_future_type<Transaction, RangeResult>::type prefixRangeFuture =
+		    tr->getRange(prefixRange(tenantEntry.get().prefix), 1);
+
+		RangeResult contents = wait(safeThreadFutureToFuture(prefixRangeFuture));
+		if (!contents.empty()) {
+			throw tenant_not_empty();
+		}
+
+		tr->clear(tenantMapKey);
+		if (tenantEntry.get().tenantGroup.present()) {
+			tr->clear(getTenantGroupIndexKey(tenantEntry.get().tenantGroup.get(), name));
+		}
 	}
 
-	state typename transaction_future_type<Transaction, RangeResult>::type prefixRangeFuture =
-	    tr->getRange(prefixRange(tenantEntry.get().prefix), 1);
-
-	RangeResult contents = wait(safeThreadFutureToFuture(prefixRangeFuture));
-	if (!contents.empty()) {
-		throw tenant_not_empty();
-	}
-
-	tr->clear(tenantMapKey);
-	if (tenantEntry.get().tenantGroup.present()) {
-		tr->clear(getTenantGroupIndexKey(tenantEntry.get().tenantGroup.get(), name));
-	}
-	}
-
-	if (operationType == TenantOperationType::DATA_CLUSTER) {
+	if (clusterType == ClusterType::METACLUSTER_DATA) {
 		// In data clusters, we store a tombstone
 		// TODO: periodically clean up tombstones
 		tr->set(tenantTombstoneKeys.begin.withSuffix(TenantMapEntry::idToPrefix(tenantId.get())), ""_sr);
 	}
 
-	/*if (name == "tenant_management_concurrency_workload_00000006"_sr) {
-		fprintf(stderr, "Delete tenant transaction done\n");
-	}*/
 	return Void();
 }
 
 ACTOR template <class DB>
 Future<Void> deleteTenant(Reference<DB> db,
                           TenantName name,
-                          TenantOperationType operationType = TenantOperationType::STANDALONE_CLUSTER,
+                          ClusterType clusterType = ClusterType::STANDALONE,
                           Optional<int64_t> tenantId = Optional<int64_t>()) {
 	state Reference<typename DB::TransactionT> tr = db->createTransaction();
 
-	state bool checkExistence = operationType == TenantOperationType::STANDALONE_CLUSTER;
+	state bool checkExistence = clusterType == ClusterType::STANDALONE;
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -314,7 +319,7 @@ Future<Void> deleteTenant(Reference<DB> db,
 				checkExistence = false;
 			}
 
-			wait(deleteTenantTransaction(tr, name, operationType, tenantId));
+			wait(deleteTenantTransaction(tr, name, clusterType, tenantId));
 			wait(buggifiedCommit(tr, BUGGIFY));
 
 			TraceEvent("DeletedTenant").detail("Tenant", name).detail("Version", tr->getCommittedVersion());
@@ -373,7 +378,7 @@ Future<std::map<TenantName, TenantMapEntry>> listTenants(Reference<DB> db,
 		}
 	}
 }
-} // namespace ManagementAPI
+} // namespace TenantAPI
 
 #include "flow/unactorcompiler.h"
 #endif

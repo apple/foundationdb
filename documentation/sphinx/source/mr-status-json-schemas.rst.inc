@@ -784,8 +784,7 @@
              "$enum":[
              "disabled",
              "optional",
-             "required",
-             "management"
+             "required"
          ]}
       },
       "data":{

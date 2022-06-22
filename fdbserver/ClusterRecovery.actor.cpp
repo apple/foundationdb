@@ -1142,6 +1142,16 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 		self->allTags.push_back(decodeServerTagValue(kv.value));
 	}
 
+	Optional<Value> metaclusterRegistrationVal = wait(self->txnStateStore->readValue(metaclusterRegistrationKey));
+	Optional<MetaclusterRegistrationEntry> metaclusterRegistration =
+	    MetaclusterRegistrationEntry::decode(metaclusterRegistrationVal);
+	if (metaclusterRegistration.present()) {
+		self->controllerData->db.metaclusterName = metaclusterRegistration.get().metaclusterName;
+		self->controllerData->db.clusterType = metaclusterRegistration.get().clusterType;
+	} else {
+		self->controllerData->db.clusterType = ClusterType::STANDALONE;
+	}
+
 	uniquify(self->allTags);
 
 	// auto kvs = self->txnStateStore->readRange( systemKeys );

@@ -94,8 +94,7 @@ ACTOR Future<bool> createTenantCommandActor(Reference<IDatabase> db, std::vector
 		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 
 		try {
-			state ThreadFuture<Optional<Value>> tenantModeFuture =
-			    tr->get(configKeysPrefix.withSuffix("tenant_mode"_sr));
+			state Future<ClusterType> clusterTypeFuture = TenantAPI::getClusterType(tr);
 
 			if (!doneExistenceCheck) {
 				// Hold the reference to the standalone's memory
@@ -107,8 +106,8 @@ ACTOR Future<bool> createTenantCommandActor(Reference<IDatabase> db, std::vector
 				doneExistenceCheck = true;
 			}
 
-			Optional<Value> tenantMode = wait(safeThreadFutureToFuture(tenantModeFuture));
-			if (TenantMode::fromValue(tenantMode.castTo<ValueRef>()) == TenantMode::MANAGEMENT) {
+			ClusterType clusterType = wait(clusterTypeFuture);
+			if (clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
 				wait(MetaclusterAPI::createTenant(db, tokens[1], configuration.second));
 			} else {
 				tr->set(tenantNameKey, ValueRef());
@@ -156,8 +155,7 @@ ACTOR Future<bool> deleteTenantCommandActor(Reference<IDatabase> db, std::vector
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		try {
-			state ThreadFuture<Optional<Value>> tenantModeFuture =
-			    tr->get(configKeysPrefix.withSuffix("tenant_mode"_sr));
+			state Future<ClusterType> clusterTypeFuture = TenantAPI::getClusterType(tr);
 
 			if (!doneExistenceCheck) {
 				// Hold the reference to the standalone's memory
@@ -169,8 +167,8 @@ ACTOR Future<bool> deleteTenantCommandActor(Reference<IDatabase> db, std::vector
 				doneExistenceCheck = true;
 			}
 
-			Optional<Value> tenantMode = wait(safeThreadFutureToFuture(tenantModeFuture));
-			if (TenantMode::fromValue(tenantMode.castTo<ValueRef>()) == TenantMode::MANAGEMENT) {
+			ClusterType clusterType = wait(clusterTypeFuture);
+			if (clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
 				wait(MetaclusterAPI::deleteTenant(db, tokens[1]));
 			} else {
 				tr->clear(tenantNameKey);

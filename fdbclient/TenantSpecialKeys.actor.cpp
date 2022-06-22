@@ -71,7 +71,7 @@ ACTOR Future<Void> getTenantList(ReadYourWritesTransaction* ryw,
                                  RangeResult* results,
                                  GetRangeLimits limitsHint) {
 	std::map<TenantName, TenantMapEntry> tenants =
-	    wait(ManagementAPI::listTenantsTransaction(&ryw->getTransaction(), kr.begin, kr.end, limitsHint.rows));
+	    wait(TenantAPI::listTenantsTransaction(&ryw->getTransaction(), kr.begin, kr.end, limitsHint.rows));
 
 	for (auto tenant : tenants) {
 		json_spirit::mObject tenantEntry;
@@ -126,16 +126,15 @@ Future<RangeResult> TenantRangeImpl::getRange(ReadYourWritesTransaction* ryw,
 ACTOR Future<Void> deleteTenantRange(ReadYourWritesTransaction* ryw, TenantName beginTenant, TenantName endTenant) {
 	state Future<Optional<Value>> tenantModeFuture =
 	    ryw->getTransaction().get(configKeysPrefix.withSuffix("tenant_mode"_sr));
-	state Future<Optional<Value>> metaclusterRegistrationFuture = ryw->getTransaction().get(dataClusterRegistrationKey);
+	state Future<ClusterType> clusterTypeFuture = TenantAPI::getClusterType(&ryw->getTransaction());
 
-	state std::map<TenantName, TenantMapEntry> tenants = wait(ManagementAPI::listTenantsTransaction(
+	state std::map<TenantName, TenantMapEntry> tenants = wait(TenantAPI::listTenantsTransaction(
 	    &ryw->getTransaction(), beginTenant, endTenant, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1));
 
 	state Optional<Value> tenantMode = wait(safeThreadFutureToFuture(tenantModeFuture));
-	Optional<Value> metaclusterRegistration = wait(safeThreadFutureToFuture(metaclusterRegistrationFuture));
+	ClusterType clusterType = wait(clusterTypeFuture);
 
-	if (!checkTenantMode(
-	        tenantMode, metaclusterRegistration.present(), ManagementAPI::TenantOperationType::STANDALONE_CLUSTER)) {
+	if (!TenantAPI::checkTenantMode(tenantMode, clusterType, ClusterType::STANDALONE)) {
 		throw tenants_disabled();
 	}
 
@@ -150,7 +149,7 @@ ACTOR Future<Void> deleteTenantRange(ReadYourWritesTransaction* ryw, TenantName 
 
 	std::vector<Future<Void>> deleteFutures;
 	for (auto tenant : tenants) {
-		deleteFutures.push_back(ManagementAPI::deleteTenantTransaction(&ryw->getTransaction(), tenant.first));
+		deleteFutures.push_back(TenantAPI::deleteTenantTransaction(&ryw->getTransaction(), tenant.first));
 	}
 
 	wait(waitForAll(deleteFutures));
@@ -227,7 +226,7 @@ ACTOR Future<Void> createTenant(ReadYourWritesTransaction* ryw,
 	}
 
 	std::pair<Optional<TenantMapEntry>, bool> entry =
-	    wait(ManagementAPI::createTenantTransaction(&ryw->getTransaction(), tenantName, tenantEntry));
+	    wait(TenantAPI::createTenantTransaction(&ryw->getTransaction(), tenantName, tenantEntry));
 
 	return Void();
 }
@@ -251,7 +250,7 @@ ACTOR Future<Void> createTenants(
 ACTOR Future<Void> changeTenantConfig(ReadYourWritesTransaction* ryw,
                                       TenantNameRef tenantName,
                                       std::vector<std::pair<StringRef, Optional<Value>>> configEntries) {
-	state Optional<TenantMapEntry> tenantEntry = wait(ManagementAPI::tryGetTenantTransaction(ryw, tenantName));
+	state Optional<TenantMapEntry> tenantEntry = wait(TenantAPI::tryGetTenantTransaction(ryw, tenantName));
 	if (!tenantEntry.present()) {
 		TraceEvent(SevWarn, "ConfigureUnknownTenant").detail("TenantName", tenantName);
 		ryw->setSpecialKeySpaceErrorMsg(ManagementAPIError::toJsonString(
@@ -263,7 +262,7 @@ ACTOR Future<Void> changeTenantConfig(ReadYourWritesTransaction* ryw,
 
 	TenantMapEntry& entry = tenantEntry.get();
 	wait(applyTenantConfig(ryw, tenantName, configEntries, &entry, false));
-	ManagementAPI::configureTenantTransaction(ryw, tenantName, tenantEntry.get());
+	TenantAPI::configureTenantTransaction(ryw, tenantName, tenantEntry.get());
 
 	return Void();
 }
@@ -317,7 +316,7 @@ Future<Optional<std::string>> TenantRangeImpl::commit(ReadYourWritesTransaction*
 			// For a single key clear, just issue the delete
 			if (mapMutation.first.singleKeyRange()) {
 				tenantManagementFutures.push_back(
-				    ManagementAPI::deleteTenantTransaction(&ryw->getTransaction(), tenantName));
+				    TenantAPI::deleteTenantTransaction(&ryw->getTransaction(), tenantName));
 			} else {
 				tenantManagementFutures.push_back(deleteTenantRange(ryw, tenantName, mapMutation.first.end));
 			}

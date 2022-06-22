@@ -143,7 +143,7 @@ struct TenantManagementWorkload : TestWorkload {
 		self->mvDb = MultiVersionDatabase::debugCreateFromExistingDatabase(threadSafeHandle);
 
 		if (self->useMetacluster && self->clientId == 0) {
-			wait(success(ManagementAPI::changeConfig(cx.getReference(), "tenant_mode=management", true)));
+			wait(success(MetaclusterAPI::createMetacluster(cx.getReference(), "management_cluster"_sr)));
 
 			DataClusterEntry entry;
 			entry.capacity.numTenantGroups = 1e9;
@@ -265,7 +265,7 @@ struct TenantManagementWorkload : TestWorkload {
 			wait(tr->commit());
 		} else if (operationType == OperationType::MANAGEMENT_DATABASE) {
 			ASSERT(tenantsToCreate.size() == 1);
-			Optional<TenantMapEntry> result = wait(ManagementAPI::createTenant(
+			Optional<TenantMapEntry> result = wait(TenantAPI::createTenant(
 			    self->dataDb.getReference(), tenantsToCreate.begin()->first, tenantsToCreate.begin()->second));
 		} else if (operationType == OperationType::MANAGEMENT_TRANSACTION) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -275,7 +275,7 @@ struct TenantManagementWorkload : TestWorkload {
 			std::vector<Future<Void>> createFutures;
 			for (auto [tenant, entry] : tenantsToCreate) {
 				entry.id = ++previousId;
-				createFutures.push_back(success(ManagementAPI::createTenantTransaction(tr, tenant, entry)));
+				createFutures.push_back(success(TenantAPI::createTenantTransaction(tr, tenant, entry)));
 			}
 			tr->set(tenantLastIdKey, TenantMapEntry::idToPrefix(previousId));
 			wait(waitForAll(createFutures));
@@ -357,7 +357,7 @@ struct TenantManagementWorkload : TestWorkload {
 
 					// Check the state of the first created tenant
 					Optional<TenantMapEntry> resultEntry =
-					    wait(ManagementAPI::tryGetTenant(cx.getReference(), tenantsToCreate.begin()->first));
+					    wait(TenantAPI::tryGetTenant(cx.getReference(), tenantsToCreate.begin()->first));
 
 					if (resultEntry.present()) {
 						if (resultEntry.get().tenantState == TenantState::READY) {
@@ -393,7 +393,7 @@ struct TenantManagementWorkload : TestWorkload {
 
 					// Read the created tenant object and verify that its state is correct
 					state Optional<TenantMapEntry> entry =
-					    wait(ManagementAPI::tryGetTenant(cx.getReference(), tenantItr->first));
+					    wait(TenantAPI::tryGetTenant(cx.getReference(), tenantItr->first));
 
 					ASSERT(entry.present());
 					ASSERT(entry.get().id > self->maxId);
@@ -404,7 +404,7 @@ struct TenantManagementWorkload : TestWorkload {
 					if (self->useMetacluster) {
 						// In a metacluster, we should also see that the tenant was created on the data cluster
 						Optional<TenantMapEntry> dataEntry =
-						    wait(ManagementAPI::tryGetTenant(self->dataDb.getReference(), tenantItr->first));
+						    wait(TenantAPI::tryGetTenant(self->dataDb.getReference(), tenantItr->first));
 						ASSERT(dataEntry.present());
 						ASSERT(dataEntry.get().id == entry.get().id);
 						ASSERT(dataEntry.get().prefix.size() == 8);
@@ -516,12 +516,12 @@ struct TenantManagementWorkload : TestWorkload {
 			wait(tr->commit());
 		} else if (operationType == OperationType::MANAGEMENT_DATABASE) {
 			ASSERT(!endTenant.present() && tenants.size() == 1);
-			wait(ManagementAPI::deleteTenant(self->dataDb.getReference(), beginTenant));
+			wait(TenantAPI::deleteTenant(self->dataDb.getReference(), beginTenant));
 		} else if (operationType == OperationType::MANAGEMENT_TRANSACTION) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			std::vector<Future<Void>> deleteFutures;
 			for (tenantIndex = 0; tenantIndex != tenants.size(); ++tenantIndex) {
-				deleteFutures.push_back(ManagementAPI::deleteTenantTransaction(tr, tenants[tenantIndex]));
+				deleteFutures.push_back(TenantAPI::deleteTenantTransaction(tr, tenants[tenantIndex]));
 			}
 
 			wait(waitForAll(deleteFutures));
@@ -649,7 +649,7 @@ struct TenantManagementWorkload : TestWorkload {
 					if (!tenants.empty()) {
 						// Check the state of the first deleted tenant
 						Optional<TenantMapEntry> resultEntry =
-						    wait(ManagementAPI::tryGetTenant(cx.getReference(), *tenants.begin()));
+						    wait(TenantAPI::tryGetTenant(cx.getReference(), *tenants.begin()));
 
 						if (!resultEntry.present()) {
 							alreadyExists = false;
@@ -817,14 +817,14 @@ struct TenantManagementWorkload : TestWorkload {
 			}
 			entry = TenantManagementWorkload::jsonToTenantMapEntry(value.get());
 		} else if (operationType == OperationType::MANAGEMENT_DATABASE) {
-			TenantMapEntry _entry = wait(ManagementAPI::getTenant(self->dataDb.getReference(), tenant));
+			TenantMapEntry _entry = wait(TenantAPI::getTenant(self->dataDb.getReference(), tenant));
 			entry = _entry;
 		} else if (operationType == OperationType::MANAGEMENT_TRANSACTION) {
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			TenantMapEntry _entry = wait(ManagementAPI::getTenantTransaction(tr, tenant));
+			TenantMapEntry _entry = wait(TenantAPI::getTenantTransaction(tr, tenant));
 			entry = _entry;
 		} else {
-			TenantMapEntry _entry = wait(ManagementAPI::getTenant(self->mvDb, tenant));
+			TenantMapEntry _entry = wait(TenantAPI::getTenant(self->mvDb, tenant));
 			entry = _entry;
 		}
 
@@ -901,16 +901,16 @@ struct TenantManagementWorkload : TestWorkload {
 			}
 		} else if (operationType == OperationType::MANAGEMENT_DATABASE) {
 			std::map<TenantName, TenantMapEntry> _tenants =
-			    wait(ManagementAPI::listTenants(self->dataDb.getReference(), beginTenant, endTenant, limit));
+			    wait(TenantAPI::listTenants(self->dataDb.getReference(), beginTenant, endTenant, limit));
 			tenants = _tenants;
 		} else if (operationType == OperationType::MANAGEMENT_TRANSACTION) {
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			std::map<TenantName, TenantMapEntry> _tenants =
-			    wait(ManagementAPI::listTenantsTransaction(tr, beginTenant, endTenant, limit));
+			    wait(TenantAPI::listTenantsTransaction(tr, beginTenant, endTenant, limit));
 			tenants = _tenants;
 		} else {
 			std::map<TenantName, TenantMapEntry> _tenants =
-			    wait(ManagementAPI::listTenants(self->mvDb, beginTenant, endTenant, limit));
+			    wait(TenantAPI::listTenants(self->mvDb, beginTenant, endTenant, limit));
 			tenants = _tenants;
 		}
 
@@ -1025,12 +1025,12 @@ struct TenantManagementWorkload : TestWorkload {
 			// Read the tenant map from the primary cluster (either management cluster in a metacluster, or just the
 			// cluster otherwise).
 			state std::map<TenantName, TenantMapEntry> tenants =
-			    wait(ManagementAPI::listTenants(cx.getReference(), beginTenant, endTenant, 1000));
+			    wait(TenantAPI::listTenants(cx.getReference(), beginTenant, endTenant, 1000));
 
 			// Read the tenant map from the data cluster. If this is not a metacluster it will read from the same
 			// database as above, making it superfluous but still correct.
 			std::map<TenantName, TenantMapEntry> dataClusterTenants =
-			    wait(ManagementAPI::listTenants(self->dataDb.getReference(), beginTenant, endTenant, 1000));
+			    wait(TenantAPI::listTenants(self->dataDb.getReference(), beginTenant, endTenant, 1000));
 
 			auto managementItr = tenants.begin();
 			auto dataItr = dataClusterTenants.begin();

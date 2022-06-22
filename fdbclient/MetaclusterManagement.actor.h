@@ -94,16 +94,14 @@ Future<Optional<DataClusterMetadata>> tryGetClusterTransaction(Transaction tr, C
 
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 
-	state typename transaction_future_type<Transaction, Optional<Value>>::type tenantModeFuture =
-	    tr->get(configKeysPrefix.withSuffix("tenant_mode"_sr));
+	state Future<ClusterType> clusterTypeFuture = TenantAPI::getClusterType(tr);
 	state typename transaction_future_type<Transaction, Optional<Value>>::type metadataFuture =
 	    tr->get(dataClusterMetadataKey);
 	state typename transaction_future_type<Transaction, Optional<Value>>::type connectionRecordFuture =
 	    tr->get(dataClusterConnectionRecordKey);
 
-	Optional<Value> tenantModeVal = wait(safeThreadFutureToFuture(tenantModeFuture));
-
-	if (TenantMode::fromValue(tenantModeVal.castTo<ValueRef>()) != TenantMode::MANAGEMENT) {
+	ClusterType clusterType = wait(clusterTypeFuture);
+	if (clusterType != ClusterType::METACLUSTER_MANAGEMENT) {
 		throw invalid_metacluster_operation();
 	}
 
@@ -154,6 +152,116 @@ Future<DataClusterMetadata> getCluster(Reference<DB> db, ClusterName name) {
 	return metadata.get();
 }
 
+ACTOR template <class DB>
+Future<Optional<std::string>> createMetacluster(Reference<DB> db, ClusterName name) {
+	state Reference<typename DB::TransactionT> tr = db->createTransaction();
+	state Optional<UID> metaclusterUid;
+
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+
+			state typename DB::TransactionT::template FutureT<Optional<Value>> metaclusterRegistrationFuture =
+			    tr->get(metaclusterRegistrationKey);
+			state Future<std::map<TenantName, TenantMapEntry>> tenantsFuture =
+			    TenantAPI::listTenantsTransaction(tr, ""_sr, "\xff\xff"_sr, 1);
+			state typename DB::TransactionT::template FutureT<RangeResult> dataClustersFuture =
+			    tr->getRange(dataClusterMetadataKeys, 1);
+			state typename DB::TransactionT::template FutureT<RangeResult> dbContentsFuture =
+			    tr->getRange(normalKeys, 1);
+
+			Optional<Value> existingRegistrationValue = wait(safeThreadFutureToFuture(metaclusterRegistrationFuture));
+			Optional<MetaclusterRegistrationEntry> existingRegistration =
+			    MetaclusterRegistrationEntry::decode(existingRegistrationValue);
+			if (existingRegistration.present()) {
+				if (metaclusterUid.present() && metaclusterUid.get() == existingRegistration.get().metaclusterId) {
+					return Optional<std::string>();
+				} else {
+					return format("cluster is already registered as a %s named `%s'",
+					              existingRegistration.get().clusterType == ClusterType::METACLUSTER_DATA
+					                  ? "data cluster"
+					                  : "metacluster",
+					              printable(existingRegistration.get().name).c_str());
+				}
+			}
+
+			std::map<TenantName, TenantMapEntry> tenants = wait(tenantsFuture);
+			if (!tenants.empty()) {
+				throw cluster_not_empty();
+			}
+
+			RangeResult dataClusters = wait(safeThreadFutureToFuture(dataClustersFuture));
+			if (!dataClusters.empty()) {
+				throw cluster_not_empty();
+			}
+
+			RangeResult dbContents = wait(safeThreadFutureToFuture(dbContentsFuture));
+			if (!dbContents.empty()) {
+				throw cluster_not_empty();
+			}
+
+			if (!metaclusterUid.present()) {
+				metaclusterUid = deterministicRandom()->randomUniqueID();
+			}
+			tr->set(metaclusterRegistrationKey, MetaclusterRegistrationEntry(name, metaclusterUid.get()).encode());
+
+			wait(safeThreadFutureToFuture(tr->commit()));
+			break;
+		} catch (Error& e) {
+			wait(safeThreadFutureToFuture(tr->onError(e)));
+		}
+	}
+
+	return Optional<std::string>();
+}
+
+ACTOR template <class DB>
+Future<Void> decommissionMetacluster(Reference<DB> db) {
+	state Reference<typename DB::TransactionT> tr = db->createTransaction();
+	state bool firstTry = true;
+
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+
+			state Future<ClusterType> clusterTypeFuture = TenantAPI::getClusterType(tr);
+			state Future<std::map<TenantName, TenantMapEntry>> tenantsFuture =
+			    TenantAPI::listTenantsTransaction(tr, ""_sr, "\xff\xff"_sr, 1);
+			state typename DB::TransactionT::template FutureT<RangeResult> dataClustersFuture =
+			    tr->getRange(dataClusterMetadataKeys, 1);
+
+			ClusterType clusterType = wait(clusterTypeFuture);
+			if (clusterType != ClusterType::METACLUSTER_MANAGEMENT) {
+				if (firstTry) {
+					throw invalid_metacluster_operation();
+				} else {
+					return Void();
+				}
+			}
+
+			std::map<TenantName, TenantMapEntry> tenants = wait(tenantsFuture);
+			if (!tenants.empty()) {
+				throw cluster_not_empty();
+			}
+
+			RangeResult dataClusters = wait(safeThreadFutureToFuture(dataClustersFuture));
+			if (!dataClusters.empty()) {
+				throw cluster_not_empty();
+			}
+
+			tr->clear(metaclusterRegistrationKey);
+
+			firstTry = false;
+			wait(safeThreadFutureToFuture(tr->commit()));
+			break;
+		} catch (Error& e) {
+			wait(safeThreadFutureToFuture(tr->onError(e)));
+		}
+	}
+
+	return Void();
+}
+
 // This should only be called from a transaction that has already confirmed that the cluster entry
 // is present. The updatedEntry should use the existing entry and modify only those fields that need
 // to be changed.
@@ -172,18 +280,18 @@ void updateClusterMetadata(Transaction tr,
 }
 
 ACTOR template <class Transaction>
-Future<std::pair<UID, bool>> managementClusterRegisterPrecheck(Transaction tr,
-                                                               ClusterNameRef name,
-                                                               Optional<DataClusterMetadata> metadata) {
+Future<std::pair<MetaclusterRegistrationEntry, bool>>
+managementClusterRegisterPrecheck(Transaction tr, ClusterNameRef name, Optional<DataClusterMetadata> metadata) {
 	state Future<Optional<DataClusterMetadata>> dataClusterMetadataFuture = tryGetClusterTransaction(tr, name);
-	state typename transaction_future_type<Transaction, Optional<Value>>::type tenantModeFuture =
-	    tr->get(configKeysPrefix.withSuffix("tenant_mode"_sr));
-	state typename transaction_future_type<Transaction, Optional<Value>>::type metaclusterIdFuture =
-	    tr->get(clusterIdKey);
+	state typename transaction_future_type<Transaction, Optional<Value>>::type metaclusterRegistrationFuture =
+	    tr->get(metaclusterRegistrationKey);
 
-	Optional<Value> tenantMode = wait(safeThreadFutureToFuture(tenantModeFuture));
+	Optional<Value> metaclusterRegistrationValue = wait(safeThreadFutureToFuture(metaclusterRegistrationFuture));
+	state Optional<MetaclusterRegistrationEntry> metaclusterRegistration =
+	    MetaclusterRegistrationEntry::decode(metaclusterRegistrationValue);
 
-	if (!tenantMode.present() || tenantMode.get() != StringRef(format("%d", TenantMode::MANAGEMENT))) {
+	if (!metaclusterRegistration.present() ||
+	    metaclusterRegistration.get().clusterType != ClusterType::METACLUSTER_MANAGEMENT) {
 		throw invalid_metacluster_operation();
 	}
 
@@ -193,11 +301,7 @@ Future<std::pair<UID, bool>> managementClusterRegisterPrecheck(Transaction tr,
 		throw cluster_already_exists();
 	}
 
-	Optional<Value> metaclusterIdValue = wait(safeThreadFutureToFuture(metaclusterIdFuture));
-	ASSERT(metaclusterIdValue.present());
-
-	return std::make_pair(BinaryReader::fromStringRef<UID>(metaclusterIdValue.get(), Unversioned()),
-	                      dataClusterMetadata.present());
+	return std::make_pair(metaclusterRegistration.get(), dataClusterMetadata.present());
 }
 
 ACTOR template <class Transaction>
@@ -208,7 +312,7 @@ Future<Void> managementClusterRegister(Transaction tr,
 	state Key dataClusterMetadataKey = name.withPrefix(dataClusterMetadataPrefix);
 	state Key dataClusterConnectionRecordKey = name.withPrefix(dataClusterConnectionRecordPrefix);
 
-	std::pair<UID, bool> result =
+	std::pair<MetaclusterRegistrationEntry, bool> result =
 	    wait(managementClusterRegisterPrecheck(tr, name, DataClusterMetadata(entry, connectionString)));
 
 	if (!result.second) {
@@ -222,23 +326,28 @@ Future<Void> managementClusterRegister(Transaction tr,
 }
 
 ACTOR template <class Transaction>
-Future<UID> dataClusterRegister(Transaction tr, ClusterNameRef name, UID metaclusterId) {
+Future<UID> dataClusterRegister(Transaction tr,
+                                ClusterNameRef name,
+                                ClusterNameRef metaclusterName,
+                                UID metaclusterId) {
 	state Future<std::map<TenantName, TenantMapEntry>> existingTenantsFuture =
-	    ManagementAPI::listTenantsTransaction(tr, ""_sr, "\xff\xff"_sr, 1);
+	    TenantAPI::listTenantsTransaction(tr, ""_sr, "\xff\xff"_sr, 1);
 	state typename transaction_future_type<Transaction, RangeResult>::type existingDataFuture =
 	    tr->getRange(normalKeys, 1);
 	state typename transaction_future_type<Transaction, Optional<Value>>::type clusterRegistrationFuture =
-	    tr->get(dataClusterRegistrationKey);
+	    tr->get(metaclusterRegistrationKey);
 
 	Optional<Value> storedClusterRegistration = wait(safeThreadFutureToFuture(clusterRegistrationFuture));
 	if (storedClusterRegistration.present()) {
-		DataClusterRegistrationEntry existingRegistration =
-		    DataClusterRegistrationEntry::decode(storedClusterRegistration.get());
+		MetaclusterRegistrationEntry existingRegistration =
+		    MetaclusterRegistrationEntry::decode(storedClusterRegistration.get());
 
-		if (existingRegistration.name != name || existingRegistration.metaclusterId != metaclusterId) {
+		if (existingRegistration.clusterType != ClusterType::METACLUSTER_DATA || existingRegistration.name != name ||
+		    existingRegistration.metaclusterId != metaclusterId) {
 			throw cluster_already_registered();
 		} else {
 			// We already successfully registered the cluster with these details, so there's nothing to do
+			ASSERT(existingRegistration.metaclusterName == metaclusterName);
 			return existingRegistration.id;
 		}
 	}
@@ -256,21 +365,8 @@ Future<UID> dataClusterRegister(Transaction tr, ClusterNameRef name, UID metaclu
 	}
 
 	state UID clusterId = deterministicRandom()->randomUniqueID();
-	tr->set(dataClusterRegistrationKey, DataClusterRegistrationEntry(name, metaclusterId, clusterId).encode());
-
-	std::vector<StringRef> tokens = { "tenant_mode=required"_sr };
-
-	// TODO: special keys?
-	ConfigurationResult configResult = wait(
-	    ManagementAPI::changeConfigTransaction(tr, tokens, Optional<ConfigureAutoResult>(), false, Optional<UID>()));
-
-	if (configResult != ConfigurationResult::SUCCESS) {
-		TraceEvent(SevWarn, "CouldNotConfigureDataCluster")
-		    .detail("Name", name)
-		    .detail("ConfigurationResult", configResult);
-
-		throw cluster_configuration_failure();
-	}
+	tr->set(metaclusterRegistrationKey,
+	        MetaclusterRegistrationEntry(metaclusterName, name, metaclusterId, clusterId).encode());
 
 	return clusterId;
 }
@@ -284,16 +380,16 @@ Future<Void> registerCluster(Reference<DB> db,
 		throw invalid_cluster_name();
 	}
 
-	state UID metaclusterId;
+	state MetaclusterRegistrationEntry managementClusterRegistration;
 
 	// Step 1: Check for a conflicting cluster in the management cluster and get the metacluster ID
 	state Reference<typename DB::TransactionT> precheckTr = db->createTransaction();
 	loop {
 		try {
 			precheckTr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			std::pair<UID, bool> result =
+			std::pair<MetaclusterRegistrationEntry, bool> result =
 			    wait(managementClusterRegisterPrecheck(precheckTr, name, Optional<DataClusterMetadata>()));
-			metaclusterId = result.first;
+			managementClusterRegistration = result.first;
 
 			wait(buggifiedCommit(precheckTr, BUGGIFY));
 			break;
@@ -308,7 +404,8 @@ Future<Void> registerCluster(Reference<DB> db,
 	loop {
 		try {
 			dataClusterTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			UID clusterId = wait(dataClusterRegister(dataClusterTr, name, metaclusterId));
+			UID clusterId = wait(dataClusterRegister(
+			    dataClusterTr, name, managementClusterRegistration.name, managementClusterRegistration.metaclusterId));
 			entry.id = clusterId;
 
 			wait(buggifiedCommit(dataClusterTr, BUGGIFY));
@@ -414,8 +511,22 @@ Future<Optional<DataClusterMetadata>> managementClusterRemove(Transaction tr, Cl
 }
 
 ACTOR template <class Transaction>
-Future<Void> dataClusterRemove(Transaction tr, Optional<int64_t> lastTenantId) {
-	tr->clear(dataClusterRegistrationKey);
+Future<Void> dataClusterRemove(Transaction tr, Optional<int64_t> lastTenantId, UID dataClusterId) {
+	state typename transaction_future_type<Transaction, Optional<Value>>::type metaclusterRegistrationFuture =
+	    tr->get(metaclusterRegistrationKey);
+	Optional<Value> metaclusterRegistrationVal = wait(safeThreadFutureToFuture(metaclusterRegistrationFuture));
+	if (!metaclusterRegistrationVal.present()) {
+		return Void();
+	}
+
+	MetaclusterRegistrationEntry metaclusterRegistration =
+	    MetaclusterRegistrationEntry::decode(metaclusterRegistrationVal.get());
+
+	if (metaclusterRegistration.id != dataClusterId) {
+		return Void();
+	}
+
+	tr->clear(metaclusterRegistrationKey);
 	tr->clear(tenantTombstoneKeys);
 
 	// If we are force removing a cluster, then it will potentially contain tenants that have IDs
@@ -440,6 +551,7 @@ Future<Void> removeCluster(Reference<DB> db, ClusterName name, bool forceRemove)
 	state Reference<typename DB::TransactionT> tr = db->createTransaction();
 	state DataClusterMetadata metadata;
 	state Optional<int64_t> lastTenantId;
+	state Optional<UID> removedId;
 
 	loop {
 		try {
@@ -447,9 +559,20 @@ Future<Void> removeCluster(Reference<DB> db, ClusterName name, bool forceRemove)
 
 			Optional<DataClusterMetadata> _metadata = wait(managementClusterRemove(tr, name, !forceRemove));
 			if (!_metadata.present()) {
+				if (!removedId.present()) {
+					throw cluster_not_found();
+				} else {
+					return Void();
+				}
+			}
+
+			metadata = _metadata.get();
+			if (!removedId.present()) {
+				removedId = metadata.entry.id;
+			} else if (removedId.get() != metadata.entry.id) {
+				// The cluster we were removing is gone and has already been replaced
 				return Void();
 			}
-			metadata = _metadata.get();
 
 			if (forceRemove) {
 				state typename DB::TransactionT::template FutureT<Optional<Value>> lastIdFuture =
@@ -469,6 +592,8 @@ Future<Void> removeCluster(Reference<DB> db, ClusterName name, bool forceRemove)
 		}
 	}
 
+	ASSERT(removedId.present());
+
 	// Step 2: Reconfigure data cluster and remove metadata.
 	//         Note that this is best effort; if it fails the cluster will still have been removed.
 	state Reference<IDatabase> dataClusterDb = wait(openDatabase(metadata.connectionString));
@@ -477,7 +602,7 @@ Future<Void> removeCluster(Reference<DB> db, ClusterName name, bool forceRemove)
 		try {
 			dataClusterTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
-			wait(dataClusterRemove(dataClusterTr, lastTenantId));
+			wait(dataClusterRemove(dataClusterTr, lastTenantId, removedId.get()));
 			wait(buggifiedCommit(dataClusterTr, BUGGIFY));
 
 			TraceEvent("ReconfiguredDataCluster")
@@ -532,16 +657,14 @@ Future<std::map<ClusterName, DataClusterMetadata>> listClustersTransaction(Trans
 
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 
-	state typename transaction_future_type<Transaction, Optional<Value>>::type tenantModeFuture =
-	    tr->get(configKeysPrefix.withSuffix("tenant_mode"_sr));
+	state Future<ClusterType> clusterTypeFuture = TenantAPI::getClusterType(tr);
 	state typename transaction_future_type<Transaction, RangeResult>::type metadataFuture =
 	    tr->getRange(firstGreaterOrEqual(metadataRange.begin), firstGreaterOrEqual(metadataRange.end), limit);
 	state typename transaction_future_type<Transaction, RangeResult>::type connectionStringFuture = tr->getRange(
 	    firstGreaterOrEqual(connectionStringRange.begin), firstGreaterOrEqual(connectionStringRange.end), limit);
 
-	Optional<Value> tenantModeVal = wait(safeThreadFutureToFuture(tenantModeFuture));
-
-	if (TenantMode::fromValue(tenantModeVal.castTo<ValueRef>()) != TenantMode::MANAGEMENT) {
+	ClusterType clusterType = wait(clusterTypeFuture);
+	if (clusterType != ClusterType::METACLUSTER_MANAGEMENT) {
 		throw invalid_metacluster_operation();
 	}
 
@@ -642,8 +765,8 @@ Future<Void> createTenant(Reference<DB> db, TenantName name, TenantMapEntry tena
 			Optional<Value> lastIdVal = wait(safeThreadFutureToFuture(lastIdFuture));
 			tenantEntry.id = lastIdVal.present() ? TenantMapEntry::prefixToId(lastIdVal.get()) + 1 : 0;
 
-			std::pair<Optional<TenantMapEntry>, bool> result = wait(ManagementAPI::createTenantTransaction(
-			    assignTr, name, tenantEntry, ManagementAPI::TenantOperationType::MANAGEMENT_CLUSTER));
+			std::pair<Optional<TenantMapEntry>, bool> result = wait(
+			    TenantAPI::createTenantTransaction(assignTr, name, tenantEntry, ClusterType::METACLUSTER_MANAGEMENT));
 
 			// The management cluster doesn't use tombstones, so we should always get back an entry
 			ASSERT(result.first.present());
@@ -679,8 +802,8 @@ Future<Void> createTenant(Reference<DB> db, TenantName name, TenantMapEntry tena
 
 	// Step 2: store the tenant info in the data cluster
 	state Reference<IDatabase> dataClusterDb = wait(openDatabase(clusterMetadata.connectionString));
-	Optional<TenantMapEntry> dataClusterTenant = wait(ManagementAPI::createTenant(
-	    dataClusterDb, name, createdTenant, ManagementAPI::TenantOperationType::DATA_CLUSTER));
+	Optional<TenantMapEntry> dataClusterTenant =
+	    wait(TenantAPI::createTenant(dataClusterDb, name, createdTenant, ClusterType::METACLUSTER_DATA));
 
 	if (!dataClusterTenant.present()) {
 		// We were deleted simultaneously
@@ -692,7 +815,7 @@ Future<Void> createTenant(Reference<DB> db, TenantName name, TenantMapEntry tena
 	loop {
 		try {
 			finalizeTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			Optional<TenantMapEntry> managementEntry = wait(ManagementAPI::tryGetTenantTransaction(finalizeTr, name));
+			Optional<TenantMapEntry> managementEntry = wait(TenantAPI::tryGetTenantTransaction(finalizeTr, name));
 			if (!managementEntry.present()) {
 				throw tenant_removed();
 			} else if (managementEntry.get().id != createdTenant.id) {
@@ -702,7 +825,7 @@ Future<Void> createTenant(Reference<DB> db, TenantName name, TenantMapEntry tena
 			if (managementEntry.get().tenantState == TenantState::REGISTERING) {
 				TenantMapEntry updatedEntry = managementEntry.get();
 				updatedEntry.tenantState = TenantState::READY;
-				ManagementAPI::configureTenantTransaction(finalizeTr, name, updatedEntry);
+				TenantAPI::configureTenantTransaction(finalizeTr, name, updatedEntry);
 				wait(buggifiedCommit(finalizeTr, BUGGIFY));
 			}
 
@@ -726,8 +849,7 @@ Future<Void> deleteTenant(Reference<DB> db, TenantName name) {
 	loop {
 		try {
 			managementTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			state Optional<TenantMapEntry> tenantEntry1 =
-			    wait(ManagementAPI::tryGetTenantTransaction(managementTr, name));
+			state Optional<TenantMapEntry> tenantEntry1 = wait(TenantAPI::tryGetTenantTransaction(managementTr, name));
 			if (!tenantEntry1.present()) {
 				throw tenant_not_found();
 			}
@@ -748,9 +870,9 @@ Future<Void> deleteTenant(Reference<DB> db, TenantName name) {
 				// The record only exists on the management cluster, so we can just delete it.
 				TenantMapEntry updatedEntry = tenantEntry1.get();
 				updatedEntry.tenantState = TenantState::REMOVING;
-				ManagementAPI::configureTenantTransaction(managementTr, name, updatedEntry);
-				wait(ManagementAPI::deleteTenantTransaction(
-				    managementTr, name, ManagementAPI::TenantOperationType::MANAGEMENT_CLUSTER, tenantId));
+				TenantAPI::configureTenantTransaction(managementTr, name, updatedEntry);
+				wait(TenantAPI::deleteTenantTransaction(
+				    managementTr, name, ClusterType::METACLUSTER_MANAGEMENT, tenantId));
 				wait(buggifiedCommit(managementTr, BUGGIFY));
 				return Void();
 			}
@@ -786,7 +908,7 @@ Future<Void> deleteTenant(Reference<DB> db, TenantName name) {
 			try {
 				managementTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				state Optional<TenantMapEntry> tenantEntry2 =
-				    wait(ManagementAPI::tryGetTenantTransaction(managementTr, name));
+				    wait(TenantAPI::tryGetTenantTransaction(managementTr, name));
 				if (!tenantEntry2.present() || tenantEntry2.get().id != tenantId) {
 					// The tenant must have been removed simultaneously
 					return Void();
@@ -795,7 +917,7 @@ Future<Void> deleteTenant(Reference<DB> db, TenantName name) {
 				if (tenantEntry2.get().tenantState != TenantState::REMOVING) {
 					TenantMapEntry updatedEntry = tenantEntry2.get();
 					updatedEntry.tenantState = TenantState::REMOVING;
-					ManagementAPI::configureTenantTransaction(managementTr, name, updatedEntry);
+					TenantAPI::configureTenantTransaction(managementTr, name, updatedEntry);
 					wait(buggifiedCommit(managementTr, BUGGIFY));
 				}
 
@@ -807,28 +929,26 @@ Future<Void> deleteTenant(Reference<DB> db, TenantName name) {
 	}
 
 	// Step 4: remove the tenant from the data cluster
-	wait(ManagementAPI::deleteTenant(dataClusterDb, name, ManagementAPI::TenantOperationType::DATA_CLUSTER, tenantId));
+	wait(TenantAPI::deleteTenant(dataClusterDb, name, ClusterType::METACLUSTER_DATA, tenantId));
 
 	// Step 5: delete the tenant from the management cluster
 	managementTr = db->createTransaction();
 	loop {
 		try {
 			managementTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			state Optional<TenantMapEntry> tenantEntry3 =
-			    wait(ManagementAPI::tryGetTenantTransaction(managementTr, name));
+			state Optional<TenantMapEntry> tenantEntry3 = wait(TenantAPI::tryGetTenantTransaction(managementTr, name));
 
 			if (!tenantEntry3.present() || tenantEntry3.get().id != tenantId) {
 				return Void();
 			}
 
-			wait(ManagementAPI::deleteTenantTransaction(
-			    managementTr, name, ManagementAPI::TenantOperationType::MANAGEMENT_CLUSTER, tenantId));
+			wait(TenantAPI::deleteTenantTransaction(managementTr, name, ClusterType::METACLUSTER_MANAGEMENT, tenantId));
 
 			if (tenantEntry3.get().assignedCluster.present()) {
 				state typename DB::TransactionT::template FutureT<RangeResult> tenantGroupIndexFuture;
 				if (tenantEntry3.get().tenantGroup.present()) {
 					tenantGroupIndexFuture =
-					    managementTr->getRange(prefixRange(ManagementAPI::getTenantGroupIndexKey(
+					    managementTr->getRange(prefixRange(TenantAPI::getTenantGroupIndexKey(
 					                               tenantEntry3.get().tenantGroup.get(), Optional<TenantNameRef>())),
 					                           1);
 				}

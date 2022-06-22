@@ -54,8 +54,8 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 			useMetacluster = deterministicRandom()->coinflip();
 		} else {
 			// Other clients read the metacluster state from the database
-		useMetacluster = false;
-	}
+			useMetacluster = false;
+		}
 	}
 
 	std::string description() const override { return "TenantManagementConcurrency"; }
@@ -97,7 +97,7 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 			self->dataDb = Database::createDatabase(extraFile, -1);
 
 			if (self->clientId == 0) {
-				wait(success(ManagementAPI::changeConfig(cx.getReference(), "tenant_mode=management", true)));
+				wait(success(MetaclusterAPI::createMetacluster(cx.getReference(), "management_cluster"_sr)));
 
 				DataClusterEntry entry;
 				entry.capacity.numTenantGroups = 1e9;
@@ -170,7 +170,7 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 					Future<Void> createFuture =
 					    self->useMetacluster
 					        ? MetaclusterAPI::createTenant(self->mvDb, tenant, entry)
-					        : success(ManagementAPI::createTenant(self->dataDb.getReference(), tenant, entry));
+					        : success(TenantAPI::createTenant(self->dataDb.getReference(), tenant, entry));
 					Optional<Void> result = wait(timeout(createFuture, 30));
 					if (result.present()) {
 						break;
@@ -208,7 +208,7 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 				try {
 					Future<Void> deleteFuture = self->useMetacluster
 					                                ? MetaclusterAPI::deleteTenant(self->mvDb, tenant)
-					                                : ManagementAPI::deleteTenant(self->dataDb.getReference(), tenant);
+					                                : TenantAPI::deleteTenant(self->dataDb.getReference(), tenant);
 					Optional<Void> result = wait(timeout(deleteFuture, 30));
 
 					if (result.present()) {
@@ -254,11 +254,11 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 
 	Future<bool> check(Database const& cx) override { return _check(cx, this); }
 	ACTOR Future<bool> _check(Database cx, TenantManagementConcurrencyWorkload* self) {
-		state std::map<TenantName, TenantMapEntry> metaclusterMap = wait(ManagementAPI::listTenants(
+		state std::map<TenantName, TenantMapEntry> metaclusterMap = wait(TenantAPI::listTenants(
 		    self->mvDb, self->tenantNamePrefix, self->tenantNamePrefix.withSuffix("\xff"_sr), self->maxTenants + 1));
 
 		state std::map<TenantName, TenantMapEntry> dataClusterMap =
-		    wait(ManagementAPI::listTenants(self->dataDb.getReference(),
+		    wait(TenantAPI::listTenants(self->dataDb.getReference(),
 		                                    self->tenantNamePrefix,
 		                                    self->tenantNamePrefix.withSuffix("\xff"_sr),
 		                                    self->maxTenants + 1));

@@ -25,24 +25,27 @@
 #include "fdbclient/Tuple.h"
 #include "flow/actorcompiler.h" // has to be last include
 
-namespace ManagementAPI {
+namespace TenantAPI {
 
-bool checkTenantMode(Optional<Value> tenantModeValue, bool isDataCluster, TenantOperationType operationType) {
+bool checkTenantMode(Optional<Value> tenantModeValue, ClusterType actualClusterType, ClusterType expectedClusterType) {
 	TenantMode tenantMode = TenantMode::fromValue(tenantModeValue.castTo<ValueRef>());
-
-	if (tenantMode == TenantMode::DISABLED) {
+	if (actualClusterType != expectedClusterType) {
 		return false;
-	} else if (operationType == TenantOperationType::MANAGEMENT_CLUSTER && tenantMode != TenantMode::MANAGEMENT) {
-		return false;
-	} else if (operationType == TenantOperationType::DATA_CLUSTER &&
-	           (tenantMode != TenantMode::REQUIRED || !isDataCluster)) {
-		return false;
-	} else if (operationType == TenantOperationType::STANDALONE_CLUSTER &&
-	           (tenantMode == TenantMode::MANAGEMENT || isDataCluster)) {
+	} else if (actualClusterType == ClusterType::STANDALONE && tenantMode == TenantMode::DISABLED) {
 		return false;
 	}
 
 	return true;
+}
+
+TenantMode tenantModeForClusterType(ClusterType clusterType, TenantMode tenantMode) {
+	if (clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
+		return TenantMode::DISABLED;
+	} else if (clusterType == ClusterType::METACLUSTER_DATA) {
+		return TenantMode::REQUIRED;
+	} else {
+		return tenantMode;
+	}
 }
 
 Key getTenantGroupIndexKey(TenantGroupNameRef tenantGroup, Optional<TenantNameRef> tenant) {
@@ -54,4 +57,4 @@ Key getTenantGroupIndexKey(TenantGroupNameRef tenantGroup, Optional<TenantNameRe
 	return tenantGroupTenantIndexKeys.begin.withSuffix(tuple.pack());
 }
 
-} // namespace ManagementAPI
+} // namespace TenantAPI
