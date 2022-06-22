@@ -118,7 +118,7 @@ public:
 			return T(0);
 
 		int index = -1;
-		bool found = false;
+		[[maybe_unused]] bool found = false;
 		if (percentile <= 0.5) { // count up
 			uint64_t count = zeroPopulationSize;
 			for (size_t i = 0; i < buckets.size(); i++) {

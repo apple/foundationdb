@@ -157,18 +157,33 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	double (*databaseGetMainThreadBusyness)(FDBDatabase* database);
 	FDBFuture* (*databaseGetServerProtocol)(FDBDatabase* database, uint64_t expectedVersion);
 
-	FDBFuture* (*purgeBlobGranules)(FDBDatabase* db,
-	                                uint8_t const* begin_key_name,
-	                                int begin_key_name_length,
-	                                uint8_t const* end_key_name,
-	                                int end_key_name_length,
-	                                int64_t purge_version,
-	                                fdb_bool_t force);
+	FDBFuture* (*databasePurgeBlobGranules)(FDBDatabase* db,
+	                                        uint8_t const* begin_key_name,
+	                                        int begin_key_name_length,
+	                                        uint8_t const* end_key_name,
+	                                        int end_key_name_length,
+	                                        int64_t purge_version,
+	                                        fdb_bool_t force);
 
-	FDBFuture* (*waitPurgeGranulesComplete)(FDBDatabase* db, uint8_t const* purge_key_name, int purge_key_name_length);
+	FDBFuture* (*databaseWaitPurgeGranulesComplete)(FDBDatabase* db,
+	                                                uint8_t const* purge_key_name,
+	                                                int purge_key_name_length);
 
 	// Tenant
 	fdb_error_t (*tenantCreateTransaction)(FDBTenant* tenant, FDBTransaction** outTransaction);
+
+	FDBFuture* (*tenantPurgeBlobGranules)(FDBTenant* db,
+	                                      uint8_t const* begin_key_name,
+	                                      int begin_key_name_length,
+	                                      uint8_t const* end_key_name,
+	                                      int end_key_name_length,
+	                                      int64_t purge_version,
+	                                      fdb_bool_t force);
+
+	FDBFuture* (*tenantWaitPurgeGranulesComplete)(FDBTenant* db,
+	                                              uint8_t const* purge_key_name,
+	                                              int purge_key_name_length);
+
 	void (*tenantDestroy)(FDBTenant* tenant);
 
 	// Transaction
@@ -412,6 +427,9 @@ public:
 	}
 
 	Reference<ITransaction> createTransaction() override;
+
+	ThreadFuture<Key> purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) override;
+	ThreadFuture<Void> waitPurgeGranulesComplete(const KeyRef& purgeKey) override;
 
 	void addref() override { ThreadSafeReferenceCounted<DLTenant>::addref(); }
 	void delref() override { ThreadSafeReferenceCounted<DLTenant>::delref(); }
@@ -671,6 +689,9 @@ public:
 	~MultiVersionTenant() override;
 
 	Reference<ITransaction> createTransaction() override;
+
+	ThreadFuture<Key> purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) override;
+	ThreadFuture<Void> waitPurgeGranulesComplete(const KeyRef& purgeKey) override;
 
 	void addref() override { ThreadSafeReferenceCounted<MultiVersionTenant>::addref(); }
 	void delref() override { ThreadSafeReferenceCounted<MultiVersionTenant>::delref(); }
