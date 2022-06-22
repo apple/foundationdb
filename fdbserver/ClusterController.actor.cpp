@@ -28,6 +28,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbserver/EncryptKeyProxyInterface.h"
+#include "fdbserver/Knobs.h"
 #include "flow/ActorCollection.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/NativeAPI.actor.h"
@@ -208,11 +209,13 @@ ACTOR Future<Void> handleLeaderReplacement(Reference<ClusterRecoveryData> self, 
 ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
                                         ClusterControllerData::DBInfo* db,
                                         ServerCoordinators coordinators,
-                                        Future<Void> leaderFail) {
+                                        Future<Void> leaderFail,
+                                        Future<Void> recoveredDiskFiles) {
 	state MasterInterface iMaster;
 	state Reference<ClusterRecoveryData> recoveryData;
 	state PromiseStream<Future<Void>> addActor;
 	state Future<Void> recoveryCore;
+	state bool recoveredDisk = false;
 
 	// SOMEDAY: If there is already a non-failed master referenced by zkMasterInfo, use that one until it fails
 	// When this someday is implemented, make sure forced failures still cause the master to be recruited again
@@ -253,6 +256,18 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 			    .detail("Lifetime", dbInfo.masterLifetime.toString())
 			    .detail("ChangeID", dbInfo.id);
 			db->serverInfo->set(dbInfo);
+
+			if (SERVER_KNOBS->ENABLE_ENCRYPTION && !recoveredDisk) {
+				// EKP singleton recruitment waits for 'Master/Sequencer' recruitment, execute wait for
+				// 'recoveredDiskFiles' optimization once EKP recruitment is unblocked to avoid circular dependencies
+				// with StorageServer initialization. The waiting for recoveredDiskFiles is to make sure the worker
+				// server on the same process has been registered with the new CC before recruitment.
+
+				wait(recoveredDiskFiles);
+				TraceEvent("CCWDB_RecoveredDiskFiles", cluster->id).log();
+				// Need to be done for the first once in the lifetime of ClusterController
+				recoveredDisk = true;
+			}
 
 			state Future<Void> spinDelay = delay(
 			    SERVER_KNOBS
@@ -2511,7 +2526,8 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
                                          Future<Void> leaderFail,
                                          ServerCoordinators coordinators,
                                          LocalityData locality,
-                                         ConfigDBType configDBType) {
+                                         ConfigDBType configDBType,
+                                         Future<Void> recoveredDiskFiles) {
 	state ClusterControllerData self(interf, locality, coordinators);
 	state ConfigBroadcaster configBroadcaster(coordinators, configDBType);
 	state Future<Void> coordinationPingDelay = delay(SERVER_KNOBS->WORKER_COORDINATION_PING_DELAY);
@@ -2522,7 +2538,8 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	if (SERVER_KNOBS->ENABLE_ENCRYPTION || g_network->isSimulated()) {
 		self.addActor.send(monitorEncryptKeyProxy(&self));
 	}
-	self.addActor.send(clusterWatchDatabase(&self, &self.db, coordinators, leaderFail)); // Start the master database
+	self.addActor.send(clusterWatchDatabase(
+	    &self, &self.db, coordinators, leaderFail, recoveredDiskFiles)); // Start the master database
 	self.addActor.send(self.updateWorkerList.init(self.db.db));
 	self.addActor.send(statusServer(interf.clientInterface.databaseStatus.getFuture(),
 	                                &self,
@@ -2651,7 +2668,8 @@ ACTOR Future<Void> clusterController(ServerCoordinators coordinators,
                                      bool hasConnected,
                                      Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
                                      LocalityData locality,
-                                     ConfigDBType configDBType) {
+                                     ConfigDBType configDBType,
+                                     Future<Void> recoveredDiskFiles) {
 	loop {
 		state ClusterControllerFullInterface cci;
 		state bool inRole = false;
@@ -2678,7 +2696,7 @@ ACTOR Future<Void> clusterController(ServerCoordinators coordinators,
 				startRole(Role::CLUSTER_CONTROLLER, cci.id(), UID());
 				inRole = true;
 
-				wait(clusterControllerCore(cci, leaderFail, coordinators, locality, configDBType));
+				wait(clusterControllerCore(cci, leaderFail, coordinators, locality, configDBType, recoveredDiskFiles));
 			}
 		} catch (Error& e) {
 			if (inRole)
@@ -2703,12 +2721,27 @@ ACTOR Future<Void> clusterController(Reference<IClusterConnectionRecord> connRec
                                      Future<Void> recoveredDiskFiles,
                                      LocalityData locality,
                                      ConfigDBType configDBType) {
-	wait(recoveredDiskFiles);
+
+	// Defer this wait optimization of cluster configuration has 'Encryption data at-rest' enabled.
+	// Encryption depends on available of EncryptKeyProxy (EKP) FDB role to enable fetch/refresh of encryption keys
+	// created and managed by external KeyManagementService (KMS).
+	//
+	// TODO: Wait optimization is to ensure the worker server on the same process gets registered with the new CC before
+	// recruitment. Unify the codepath for both Encryption enable vs disable scenarios.
+
+	if (!SERVER_KNOBS->ENABLE_ENCRYPTION) {
+		wait(recoveredDiskFiles);
+		TraceEvent("RecoveredDiskFiles").log();
+	} else {
+		TraceEvent("RecoveredDiskFiles_Deferred").log();
+	}
+
 	state bool hasConnected = false;
 	loop {
 		try {
 			ServerCoordinators coordinators(connRecord);
-			wait(clusterController(coordinators, currentCC, hasConnected, asyncPriorityInfo, locality, configDBType));
+			wait(clusterController(
+			    coordinators, currentCC, hasConnected, asyncPriorityInfo, locality, configDBType, recoveredDiskFiles));
 			hasConnected = true;
 		} catch (Error& e) {
 			if (e.code() != error_code_coordinators_changed)
