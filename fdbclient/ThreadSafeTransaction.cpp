@@ -551,8 +551,7 @@ Optional<TenantName> ThreadSafeTransaction::getTenant() {
 void ThreadSafeTransaction::operator=(ThreadSafeTransaction&& r) noexcept {
 	tr = r.tr;
 	r.tr = nullptr;
-	initialized = r.initialized;
-	r.initialized.reset();
+	initialized = std::move(r.initialized);
 }
 
 ThreadSafeTransaction::ThreadSafeTransaction(ThreadSafeTransaction&& r) noexcept {
