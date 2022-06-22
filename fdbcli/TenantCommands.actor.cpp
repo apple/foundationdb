@@ -361,6 +361,8 @@ ACTOR Future<bool> renameTenantCommandActor(Reference<IDatabase> db, std::vector
 			// TODO: change this to either not use management keyspace
 			// or have a way to specify the contents of the tenant map from there
 			tr->set(newNameKey, KeyRef());
+			wait(safeThreadFutureToFuture(tr->commit()));
+			break;
 		} catch (Error& e) {
 			state Error err(e);
 			if (e.code() == error_code_special_keys_api_failure) {
