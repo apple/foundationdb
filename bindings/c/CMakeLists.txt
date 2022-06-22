@@ -436,9 +436,10 @@ if (NOT WIN32 AND NOT APPLE AND NOT OPEN_FOR_IDE)
   COMMAND $<TARGET_FILE:Python::Interpreter> ${CMAKE_SOURCE_DIR}/contrib/Implib.so/implib-gen.py
       --target ${CMAKE_SYSTEM_PROCESSOR}
       --outdir ${SHIM_LIB_OUTPUT_DIR}
+      --dlopen-callback=fdb_shim_dlopen_callback
       $<TARGET_FILE:fdb_c>)
 
-  add_library(fdb_c_shim SHARED ${SHIM_LIB_GEN_SRC})
+  add_library(fdb_c_shim SHARED ${SHIM_LIB_GEN_SRC} fdb_c_shim.cpp)
   target_link_options(fdb_c_shim PRIVATE "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/fdb_c.map,-z,nodelete,-z,noexecstack")
   target_link_libraries(fdb_c_shim PUBLIC dl)
 
