@@ -1420,10 +1420,11 @@ ACTOR Future<Void> workerSnapCreate(
     WorkerSnapRequest snapReq,
     std::string snapDataFolder,
     std::string snapCoordFolder,
-    std::map<UID, WorkerSnapRequest>* snapReqMap /* ongoing snapshot requests */,
-    std::map<UID, ErrorOr<Void>>*
+    std::map<std::string, WorkerSnapRequest>* snapReqMap /* ongoing snapshot requests */,
+    std::map<std::string, ErrorOr<Void>>*
         snapReqResultMap /* finished snapshot requests, expired in SNAP_MINIMUM_TIME_GAP seconds */) {
 	state ExecCmdValueString snapArg(snapReq.snapPayload);
+	state std::string snapReqKey = snapReq.snapUID.toString() + snapReq.role.toString();
 	try {
 		std::vector<std::string> roles;
 		boost::algorithm::split(roles, snapReq.role.toString(), boost::is_any_of(","));
@@ -1447,15 +1448,15 @@ ACTOR Future<Void> workerSnapCreate(
 		if (snapReq.role.toString().find("storage") != std::string::npos) {
 			printStorageVersionInfo();
 		}
-		snapReqMap->at(snapReq.snapUID).reply.send(Void());
-		snapReqMap->erase(snapReq.snapUID);
-		(*snapReqResultMap)[snapReq.snapUID] = ErrorOr<Void>(Void());
+		snapReqMap->at(snapReqKey).reply.send(Void());
+		snapReqMap->erase(snapReqKey);
+		(*snapReqResultMap)[snapReqKey] = ErrorOr<Void>(Void());
 	} catch (Error& e) {
 		TraceEvent("ExecHelperError").errorUnsuppressed(e);
 		if (e.code() != error_code_operation_cancelled) {
-			snapReqMap->at(snapReq.snapUID).reply.sendError(e);
-			snapReqMap->erase(snapReq.snapUID);
-			(*snapReqResultMap)[snapReq.snapUID] = ErrorOr<Void>(e);
+			snapReqMap->at(snapReqKey).reply.sendError(e);
+			snapReqMap->erase(snapReqKey);
+			(*snapReqResultMap)[snapReqKey] = ErrorOr<Void>(e);
 		} else {
 			throw e;
 		}
@@ -1604,8 +1605,9 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	state WorkerCache<InitializeBlobWorkerReply> blobWorkerCache;
 
 	state WorkerSnapRequest lastSnapReq;
-	state std::map<UID, WorkerSnapRequest> snapReqMap;
-	state std::map<UID, ErrorOr<Void>> snapReqResultMap;
+	// Here the key is UID+role, as we still send duplicate requests to a process which is both storage and tlog
+	state std::map<std::string, WorkerSnapRequest> snapReqMap;
+	state std::map<std::string, ErrorOr<Void>> snapReqResultMap;
 	state double lastSnapTime = -SERVER_KNOBS->SNAP_MINIMUM_TIME_GAP; // always successful for the first Snap Request
 	state std::string coordFolder = abspath(_coordFolder);
 
@@ -2520,28 +2522,30 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				loggingTrigger = delay(loggingDelay, TaskPriority::FlushTrace);
 			}
 			when(state WorkerSnapRequest snapReq = waitNext(interf.workerSnapReq.getFuture())) {
-				auto& snapUID = snapReq.snapUID;
+				std::string snapUID = snapReq.snapUID.toString() + snapReq.role.toString();
 				if (snapReqResultMap.count(snapUID)) {
 					auto result = snapReqResultMap[snapUID];
 					result.isError() ? snapReq.reply.sendError(result.getError()) : snapReq.reply.send(result.get());
 					TraceEvent("RetryFinishedWorkerSnapRequest")
 					    .detail("SnapUID", snapUID)
-						.detail("Role", snapReq.role)
+					    .detail("Role", snapReq.role)
 					    .detail("Result", result.isError() ? result.getError().code() : 0);
 				} else if (snapReqMap.count(snapUID)) {
-					TraceEvent("RetryOngoingWorkerSnapRequest")
-					    .detail("SnapUID", snapUID)
-					    .detail("Role", snapReq.role);
+					TraceEvent("RetryOngoingWorkerSnapRequest").detail("SnapUID", snapUID).detail("Role", snapReq.role);
 					ASSERT(snapReq.role == snapReqMap[snapUID].role);
 					ASSERT(snapReq.snapPayload == snapReqMap[snapUID].snapPayload);
 					snapReqMap[snapUID] = snapReq;
 				} else {
 					snapReqMap[snapUID] = snapReq; // set map point to the request
 					if (g_network->isSimulated() && (now() - lastSnapTime) < SERVER_KNOBS->SNAP_MINIMUM_TIME_GAP) {
-						TraceEvent(SevError, "RapidSnapRequestsOnSameProcess")
+						// only allow duplicate snapshots on same process in a short time if it's both storge and tlog
+						auto okay = (lastSnapReq.snapUID == snapReq.snapUID) &&
+						            lastSnapReq.role.toString().find("storage") != std::string::npos &&
+						            snapReq.role.toString().find("tlog") != std::string::npos;
+						TraceEvent(okay ? SevInfo : SevError, "RapidSnapRequestsOnSameProcess")
 						    .detail("CurrSnapUID", snapUID)
-							.detail("PrevSnapUID", lastSnapReq.snapUID)
-							.detail("CurrRole", snapReq.role)
+						    .detail("PrevSnapUID", lastSnapReq.snapUID)
+						    .detail("CurrRole", snapReq.role)
 						    .detail("PrevRole", lastSnapReq.role)
 						    .detail("GapTime", now() - lastSnapTime);
 					}

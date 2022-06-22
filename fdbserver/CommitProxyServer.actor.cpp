@@ -2086,6 +2086,7 @@ ACTOR Future<Void> proxySnapCreate(ProxySnapRequest snapReq, ProxyCommitData* co
 			throw snap_log_anti_quorum_unsupported();
 		}
 
+		state double snapReqRetry = 0;
 		loop {
 			// send a snap request to DD
 			if (!commitData->db->get().distributor.present()) {
@@ -2104,7 +2105,7 @@ ACTOR Future<Void> proxySnapCreate(ProxySnapRequest snapReq, ProxyCommitData* co
 				    .detail("SnapPayload", snapReq.snapPayload)
 				    .detail("SnapUID", snapReq.snapUID);
 				// Retry if we have network issues
-				if (e.code() != error_code_request_maybe_delivered)
+				if (e.code() != error_code_request_maybe_delivered || snapReqRetry++ > 10)
 					throw e;
 				wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
 			}
