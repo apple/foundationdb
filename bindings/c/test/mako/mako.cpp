@@ -183,22 +183,26 @@ int populate(Database db,
 	auto watch_trace = Stopwatch(watch_total.getStart());
 
 	Transaction systemTx = db.createTransaction();
-	for (int i = 0; i < args.total_tenants; ++i) {
-		while (i % 10 == 9 || i == args.total_tenants - 1) {
+	// This can be parameterized for mako or just left hardcoded to
+	// whatever value we find suitable
+	int batch_size = 10;
+	int batches = args.total_tenants / batch_size;
+	for (int batch = 0; batch < batches; ++batch) {
+		for (int i = batch * batch_size; i < args.total_tenants && i < (batch + 1) * batch_size; ++i) {
 			std::string tenant_name = "tenant" + std::to_string(i);
 			Tenant::createTenant(systemTx, toBytesRef(tenant_name));
-			auto future_commit = systemTx.commit();
-			const auto rc = waitAndHandleError(systemTx, future_commit, "CREATE_TENANT");
-			if (rc == FutureRC::RETRY) {
-				continue;
-			} else {
-				// Keep going if commit was successful (FutureRC::OK)
-				// If not a retryable error, expected to be the error
-				// tenant_already_exists, meaning another thread finished creating it
-				systemTx.reset();
-				break;
-			}
 		}
+		auto future_commit = systemTx.commit();
+		const auto rc = waitAndHandleError(systemTx, future_commit, "CREATE_TENANT");
+		if (rc == FutureRC::RETRY) {
+			// We want to retry this batch, so decrement the number
+			// and go back through the loop to get the same value
+			--batch;
+		}
+		// Otherwise, keep going if commit was successful (FutureRC::OK)
+		// If not a retryable error, expected to be the error
+		// tenant_already_exists, meaning another thread finished creating it
+		systemTx.reset();
 	}
 	// mimic typical tenant usage: keep tenants in memory
 	// and create transactions as needed
