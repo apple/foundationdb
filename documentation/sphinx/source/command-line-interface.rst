@@ -414,6 +414,13 @@ heap
 
 Enables heap profiling for the specified process.
 
+renametenant
+------------
+
+The ``renametenant`` command can rename an existing tenant to a new name. Its syntax is ``renametenant <OLD_NAME> <NEW_NAME>``.
+
+This command requires that ``OLD_NAME`` is a tenant that already exists on the cluster, and that ``NEW_NAME`` is not already a name of a tenant in the cluster.
+
 reset
 -----
 
@@ -430,13 +437,6 @@ set
 The ``set`` command sets a value for a given key. Its syntax is ``set <KEY> <VALUE>``. If ``<KEY>`` is not already present in the database, it will be created.
 
 Note that :ref:`characters can be escaped <cli-escaping>` when specifying keys (or values) in ``fdbcli``.
-
-renametenant
-------------
-
-The ``renametenant`` command can rename an existing tenant to a new name. Its syntax is ``renametenant [OLD_NAME] [NEW_NAME]``.
-
-This command requires that ``OLD_NAME`` is a tenant that already exists on the cluster, and that ``NEW_NAME`` is not already a name of a tenant in the cluster.
 
 setclass
 --------
