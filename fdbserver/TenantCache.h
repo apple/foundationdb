@@ -35,8 +35,7 @@ typedef Map<KeyRef, Reference<TCTenantInfo>> TenantMapByPrefix;
 struct TenantCacheTenantCreated {
 	KeyRange keys;
 	Promise<bool> reply;
-	TenantCacheTenantCreated() {}
-	TenantCacheTenantCreated(KeyRange const& keys) : keys(keys) {}
+	TenantCacheTenantCreated(Key prefix) { keys = prefixRange(prefix); }
 };
 
 class TenantCache : public ReferenceCounted<TenantCache> {

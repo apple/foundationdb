@@ -93,9 +93,7 @@ public:
 
 					if (tenantCache->update(tname, t)) {
 						tenantListUpdated = true;
-						TenantCacheTenantCreated req;
-						KeyRangeRef kr = KeyRangeRef(t.prefix, keyAfter(t.prefix));
-						req.keys = kr;
+						TenantCacheTenantCreated req(t.prefix);
 						tenantCache->tenantCreationSignal.send(req);
 					}
 				}

@@ -533,40 +533,53 @@ ACTOR Future<Void> tenantShardSplitter(DataDistributionTracker* self, KeyRange t
 	wait(Future<Void>(Void()));
 
 	auto shardContainingTenantStart = self->shards.rangeContaining(tenantKeys.begin);
-
-	state Standalone<VectorRef<KeyRef>> splitAtTenantStart;
-	if (shardContainingTenantStart.begin() != tenantKeys.begin) {
-		splitAtTenantStart.push_back_deep(splitAtTenantStart.arena(), shardContainingTenantStart.begin());
-		splitAtTenantStart.push_back_deep(splitAtTenantStart.arena(), tenantKeys.begin);
-	}
+	KeyRangeRef startKeys = KeyRangeRef(shardContainingTenantStart.begin(), shardContainingTenantStart.end());
+	auto shardContainingTenantEnd = self->shards.rangeContainingKeyBefore(tenantKeys.end);
+	KeyRangeRef endKeys = KeyRangeRef(shardContainingTenantEnd.begin(), shardContainingTenantEnd.end());
 
 	auto startShardSize = shardContainingTenantStart->value().stats;
 
-	auto shardContainingTenantEnd = self->shards.rangeContainingKeyBefore(tenantKeys.end);
-
+	state Standalone<VectorRef<KeyRef>> splitAtTenantStart;
 	state Standalone<VectorRef<KeyRef>> splitAtTenantEnd;
+
 	if (shardContainingTenantEnd == shardContainingTenantStart) {
+		if (shardContainingTenantStart.begin() != tenantKeys.begin ||
+		    shardContainingTenantStart.end() != tenantKeys.end) {
+			splitAtTenantStart.push_back_deep(splitAtTenantStart.arena(), shardContainingTenantStart.begin());
+
+			if (shardContainingTenantStart.begin() != tenantKeys.begin) {
+				splitAtTenantStart.push_back_deep(splitAtTenantStart.arena(), tenantKeys.begin);
+			}
+		}
 		splitAtTenantStart.push_back_deep(splitAtTenantStart.arena(), tenantKeys.end);
-		splitAtTenantStart.push_back_deep(splitAtTenantStart.arena(), shardContainingTenantStart->end());
-		KeyRangeRef startKeys = KeyRangeRef(shardContainingTenantStart.begin(), shardContainingTenantStart.end());
+
+		if (shardContainingTenantStart.end() != tenantKeys.end) {
+			splitAtTenantStart.push_back_deep(splitAtTenantStart.arena(), shardContainingTenantStart->end());
+		}
 
 		auto s = describeSplit(startKeys, splitAtTenantStart);
 		TraceEvent(SevInfo, "ExecutingShardSplit").detail("SplttingAroundStartAndEndKeys", s);
 
 		executeShardSplit(self, startKeys, splitAtTenantStart, startShardSize, true);
 	} else {
-		auto endShardSize = shardContainingTenantStart->value().stats;
-		KeyRangeRef endKeys = KeyRangeRef(shardContainingTenantStart.begin(), shardContainingTenantStart.end());
-		splitAtTenantEnd.push_back_deep(splitAtTenantEnd.arena(), shardContainingTenantEnd.begin());
-		splitAtTenantEnd.push_back_deep(splitAtTenantEnd.arena(), tenantKeys.end);
-		splitAtTenantEnd.push_back_deep(splitAtTenantEnd.arena(), shardContainingTenantEnd.end());
+		auto endShardSize = shardContainingTenantEnd->value().stats;
 
-		KeyRangeRef startKeys = KeyRangeRef(shardContainingTenantStart.begin(), shardContainingTenantStart.end());
+		if (shardContainingTenantStart.begin() != tenantKeys.begin) {
+			splitAtTenantStart.push_back_deep(splitAtTenantStart.arena(), shardContainingTenantStart.begin());
+			splitAtTenantStart.push_back_deep(splitAtTenantStart.arena(), tenantKeys.begin);
+			splitAtTenantStart.push_back_deep(splitAtTenantStart.arena(), shardContainingTenantStart->end());
+		}
+
+		if (shardContainingTenantStart.end() != tenantKeys.end) {
+			splitAtTenantEnd.push_back_deep(splitAtTenantEnd.arena(), shardContainingTenantEnd.begin());
+			splitAtTenantEnd.push_back_deep(splitAtTenantEnd.arena(), tenantKeys.end);
+			splitAtTenantEnd.push_back_deep(splitAtTenantEnd.arena(), shardContainingTenantEnd.end());
+		}
 
 		auto s = describeSplit(startKeys, splitAtTenantStart);
 		TraceEvent(SevInfo, "ExecutingShardSplit").detail("SplttingAroundStartKey", s);
 
-		s = describeSplit(startKeys, splitAtTenantEnd);
+		s = describeSplit(endKeys, splitAtTenantEnd);
 		TraceEvent(SevInfo, "ExecutingShardSplit").detail("SplttingAroundEndKey", s);
 
 		executeShardSplit(self, startKeys, splitAtTenantStart, startShardSize, true);
@@ -1102,7 +1115,7 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
                                            FutureStream<GetTopKMetricsRequest> getTopKMetrics,
                                            PromiseStream<GetMetricsListRequest> getShardMetricsList,
                                            FutureStream<Promise<int64_t>> getAverageShardBytes,
-                                           PromiseStream<TenantCacheTenantCreated> newTenantSignal,
+                                           PromiseStream<TenantCacheTenantCreated> tenantCreationSignal,
                                            Promise<Void> readyToStart,
                                            Reference<AsyncVar<bool>> anyZeroHealthyTeams,
                                            UID distributorId,
@@ -1148,12 +1161,12 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
 				self.sizeChanges.add(fetchShardMetricsList(&self, req));
 			}
 			when(wait(self.sizeChanges.getResult())) {}
-			when(TenantCacheTenantCreated tenantCreationSignal = waitNext(newTenantSignal.getFuture())) {
+			when(TenantCacheTenantCreated newTenant = waitNext(tenantCreationSignal.getFuture())) {
 				TraceEvent(SevInfo, "TenantCacheTenantCreated")
-				    .detail("Begin", tenantCreationSignal.keys.begin.printable())
-				    .detail("End", tenantCreationSignal.keys.end.printable());
-				self.sizeChanges.add(tenantShardSplitter(&self, tenantCreationSignal.keys));
-				tenantCreationSignal.reply.send(true);
+				    .detail("Begin", newTenant.keys.begin.printable())
+				    .detail("End", newTenant.keys.end.printable());
+				self.sizeChanges.add(tenantShardSplitter(&self, newTenant.keys));
+				newTenant.reply.send(true);
 			}
 		}
 	} catch (Error& e) {
