@@ -3462,11 +3462,11 @@ ACTOR Future<Version> waitForCommittedVersion(Database cx, Version version, Span
 					cx->minAcceptableReadVersion = std::min(cx->minAcceptableReadVersion, v.version);
 					if (v.midShardSize > 0)
 						cx->smoothMidShardSize.setTotal(v.midShardSize);
-					if (cx->isCurrentGrvProxy(v.proxyId)) {
+//					if (cx->isCurrentGrvProxy(v.proxyId)) {
 //						cx->ssVersionVectorCache.applyDelta(v.ssVersionVectorDelta);
-					} else {
+//					} else {
 //						cx->ssVersionVectorCache.clear();
-					}
+//					}
 					if (v.version >= version)
 						return v.version;
 					// SOMEDAY: Do the wait on the server side, possibly use less expensive source of committed version
@@ -3494,11 +3494,11 @@ ACTOR Future<Version> getRawVersion(Reference<TransactionState> trState) {
 			                                                     TransactionPriority::IMMEDIATE,
 			                                                     trState->cx->ssVersionVectorCache.getMaxVersion()),
 			                               trState->cx->taskID))) {
-				if (trState->cx->isCurrentGrvProxy(v.proxyId)) {
+//				if (trState->cx->isCurrentGrvProxy(v.proxyId)) {
 //					trState->cx->ssVersionVectorCache.applyDelta(v.ssVersionVectorDelta);
-				} else {
+//				} else {
 //					trState->cx->ssVersionVectorCache.clear();
-				}
+//				}
 				return v.version;
 			}
 		}
@@ -6796,11 +6796,11 @@ ACTOR Future<Version> extractReadVersion(Reference<TransactionState> trState,
 	}
 
 	metadataVersion.send(rep.metadataVersion);
-	if (trState->cx->isCurrentGrvProxy(rep.proxyId)) {
+//	if (trState->cx->isCurrentGrvProxy(rep.proxyId)) {
 //		trState->cx->ssVersionVectorCache.applyDelta(rep.ssVersionVectorDelta);
-	} else {
+//	} else {
 //		trState->cx->ssVersionVectorCache.clear();
-	}
+//	}
 	return rep.version;
 }
 
