@@ -22,7 +22,6 @@
 #include "flow/IRandom.h"
 #include "flow/UnitTest.h"
 #include "flow/Knobs.h"
-#include "fdbclient/IKnobCollection.h"
 #include "flow/network.h"
 #include <functional>
 #include <iomanip>
@@ -534,8 +533,8 @@ TEST_CASE("/flow/Tracing/AddAttributes") {
 	           SpanContext(deterministicRandom()->randomUniqueID(),
 	                       deterministicRandom()->randomUInt64(),
 	                       TraceFlags::sampled));
-	IKnobCollection::getMutableGlobalKnobCollection().setKnob("tracing_span_attributes_enabled",
-	                                                          KnobValueRef::create(bool{ true }));
+	bootstrapGlobalFlowKnobs.TRACING_SPAN_ATTRIBUTES_ENABLED = true;
+	FLOW_KNOBS = &bootstrapGlobalFlowKnobs;
 	auto arena = span1.arena;
 	span1.addAttribute(StringRef(arena, LiteralStringRef("foo")), StringRef(arena, LiteralStringRef("bar")));
 	span1.addAttribute(StringRef(arena, LiteralStringRef("operation")), StringRef(arena, LiteralStringRef("grv")));
@@ -654,8 +653,8 @@ std::string readMPString(uint8_t* index) {
 // Windows doesn't like lack of header and declaration of constructor for FastUDPTracer
 #ifndef WIN32
 TEST_CASE("/flow/Tracing/FastUDPMessagePackEncoding") {
-	IKnobCollection::getMutableGlobalKnobCollection().setKnob("tracing_span_attributes_enabled",
-	                                                          KnobValueRef::create(bool{ true }));
+	bootstrapGlobalFlowKnobs.TRACING_SPAN_ATTRIBUTES_ENABLED = true;
+	FLOW_KNOBS = &bootstrapGlobalFlowKnobs;
 	Span span1("encoded_span"_loc);
 	auto request = TraceRequest{ .buffer = std::make_unique<uint8_t[]>(kTraceBufferSize),
 		                         .data_size = 0,
