@@ -654,6 +654,8 @@ void AccessAttrsUnitTest::RunAddAttributes() {
 }
 
 void AccessAttrsUnitTest::RunFastUDPMessagePackEncoding() {
+// Windows doesn't like lack of header and declaration of constructor for FastUDPTracer
+#ifndef WIN32
 	Span span1("encoded_span"_loc);
 	auto request = TraceRequest{ .buffer = std::make_unique<uint8_t[]>(kTraceBufferSize),
 		                         .data_size = 0,
@@ -790,6 +792,7 @@ void AccessAttrsUnitTest::RunFastUDPMessagePackEncoding() {
 	// Read and verify span name
 	ASSERT(data[37] == 0xda);
 	ASSERT(readMPString(&data[37]) == longString);
+#endif
 };
 
 TEST_CASE("/flow/Tracing/AddAttributes") {
@@ -798,11 +801,8 @@ TEST_CASE("/flow/Tracing/AddAttributes") {
 	return Void();
 };
 
-// Windows doesn't like lack of header and declaration of constructor for FastUDPTracer
-#ifndef WIN32
 TEST_CASE("/flow/Tracing/FastUDPMessagePackEncoding") {
 	AccessAttrsUnitTest test;
 	test.RunFastUDPMessagePackEncoding();
 	return Void();
 };
-#endif
