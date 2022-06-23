@@ -52,8 +52,8 @@ TLSPolicy::~TLSPolicy() {}
 //
 // Either way, the only way to break this dependency cycle is to move all of
 // AsyncFile to flow/
-#include "fdbrpc/IAsyncFile.h"
 #include "flow/Platform.h"
+#include "flow/IAsyncFile.h"
 
 #include "flow/FastRef.h"
 #include "flow/Trace.h"

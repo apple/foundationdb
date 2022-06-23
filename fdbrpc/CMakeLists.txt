@@ -23,8 +23,6 @@ set(FDBRPC_SRCS
   genericactors.actor.cpp
   HealthMonitor.actor.cpp
   HTTP.actor.cpp
-  IAsyncFile.h
-  IAsyncFile.actor.cpp
   IPAllowList.cpp
   LoadBalance.actor.cpp
   LoadBalance.actor.h

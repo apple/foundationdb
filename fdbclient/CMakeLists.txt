@@ -147,6 +147,8 @@ set(FDBCLIENT_SRCS
   TestKnobCollection.h
   ThreadSafeTransaction.cpp
   ThreadSafeTransaction.h
+  Tracing.h
+  Tracing.actor.cpp
   Tuple.cpp
   Tuple.h
   VersionedMap.actor.h

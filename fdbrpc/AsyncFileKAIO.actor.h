@@ -37,7 +37,6 @@
 #include <sys/eventfd.h>
 #include <sys/syscall.h>
 #include "fdbrpc/linux_kaio.h"
-#include "fdbserver/Knobs.h"
 #include "flow/Knobs.h"
 #include "flow/Histogram.h"
 #include "flow/UnitTest.h"

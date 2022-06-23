@@ -35,8 +35,11 @@ set(FLOW_SRCS
   Histogram.h
   Hostname.actor.cpp
   Hostname.h
+  IAsyncFile.h
+  IAsyncFile.actor.cpp
   IDispatched.h
   IRandom.h
+  IRateControl.h
   IThreadPoolTest.actor.cpp
   IThreadPool.cpp
   IThreadPool.h
@@ -82,8 +85,6 @@ set(FLOW_SRCS
   ThreadSafeQueue.h
   Trace.cpp
   Trace.h
-  Tracing.h
-  Tracing.actor.cpp
   TreeBenchmark.h
   TypeTraits.h
   UnitTest.cpp
@@ -106,6 +107,7 @@ set(FLOW_SRCS
   flat_buffers.h
   flow.cpp
   flow.h
+  folly_memcpy.h
   genericactors.actor.cpp
   genericactors.actor.h
   network.cpp
