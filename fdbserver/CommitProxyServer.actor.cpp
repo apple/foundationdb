@@ -915,12 +915,9 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 		for (int t = 0; t < trs.size(); t++) {
 			int64_t tenantId = trs[t].tenantInfo.tenantId;
 			Optional<TenantName> tenantName = trs[t].tenantInfo.name;
+			// TODO(yiwu): In raw access mode, use tenant prefix to figure out tenant id for user data
 			if (tenantId != TenantInfo::INVALID_TENANT) {
-				if (!tenantName.present()) {
-					TraceEvent(SevWarn, "CommitProxyGetEncryptCipherKeys_MissingTenantName")
-					    .detail("TenantId", tenantId);
-					throw encrypt_domain_name_missing();
-				}
+				ASSERT(tenantName.present());
 				encryptDomains[tenantId] = tenantName.get();
 			}
 		}
@@ -1151,8 +1148,7 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 void writeMutation(CommitBatchContext* self, int64_t tenantId, const MutationRef& mutation) {
 	static_assert(TenantInfo::INVALID_TENANT == ENCRYPT_INVALID_DOMAIN_ID);
 	if (!SERVER_KNOBS->ENABLE_TLOG_ENCRYPTION || tenantId == TenantInfo::INVALID_TENANT) {
-		// TODO(yiwu): Use tenant prefix to figure out tenant id for user data, which required a tenant map maintained
-		// either by CP itself or by EKP.
+		// TODO(yiwu): In raw access mode, use tenant prefix to figure out tenant id for user data
 		bool isRawAccess = tenantId == TenantInfo::INVALID_TENANT && !isSystemKey(mutation.param1) &&
 		                   !(mutation.type == MutationRef::ClearRange && isSystemKey(mutation.param2)) &&
 		                   self->pProxyCommitData->db->get().client.tenantMode == TenantMode::REQUIRED;
