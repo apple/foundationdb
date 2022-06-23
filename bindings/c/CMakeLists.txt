@@ -119,6 +119,7 @@ if(NOT WIN32)
 
   set(API_TESTER_SRCS
     test/apitester/fdb_c_api_tester.cpp
+    test/apitester/TesterAtomicOpsCorrectnessWorkload.cpp
     test/apitester/TesterApiWorkload.cpp
     test/apitester/TesterApiWorkload.h
     test/apitester/TesterTestSpec.cpp
