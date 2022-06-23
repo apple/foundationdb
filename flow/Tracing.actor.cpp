@@ -22,6 +22,7 @@
 #include "flow/IRandom.h"
 #include "flow/UnitTest.h"
 #include "flow/Knobs.h"
+#include "flow/flow.h"
 #include "flow/network.h"
 #include <functional>
 #include <iomanip>
@@ -528,36 +529,6 @@ TEST_CASE("/flow/Tracing/AddEvents") {
 	return Void();
 };
 
-TEST_CASE("/flow/Tracing/AddAttributes") {
-	Span span1("span_with_attrs"_loc,
-	           SpanContext(deterministicRandom()->randomUniqueID(),
-	                       deterministicRandom()->randomUInt64(),
-	                       TraceFlags::sampled));
-	bootstrapGlobalFlowKnobs.TRACING_SPAN_ATTRIBUTES_ENABLED = true;
-	FLOW_KNOBS = &bootstrapGlobalFlowKnobs;
-	auto arena = span1.arena;
-	span1.addAttribute(StringRef(arena, LiteralStringRef("foo")), StringRef(arena, LiteralStringRef("bar")));
-	span1.addAttribute(StringRef(arena, LiteralStringRef("operation")), StringRef(arena, LiteralStringRef("grv")));
-	ASSERT_EQ(span1.attributes.size(), 3); // Includes default attribute of "address"
-	ASSERT(span1.attributes[1] == KeyValueRef("foo"_sr, "bar"_sr));
-	ASSERT(span1.attributes[2] == KeyValueRef("operation"_sr, "grv"_sr));
-
-	Span span2("span_with_attrs"_loc,
-	           SpanContext(deterministicRandom()->randomUniqueID(),
-	                       deterministicRandom()->randomUInt64(),
-	                       TraceFlags::sampled));
-	auto s2Arena = span2.arena;
-	span2.addAttribute(StringRef(s2Arena, LiteralStringRef("a")), StringRef(s2Arena, LiteralStringRef("1")))
-	    .addAttribute(StringRef(s2Arena, LiteralStringRef("b")), LiteralStringRef("2"))
-	    .addAttribute(StringRef(s2Arena, LiteralStringRef("c")), LiteralStringRef("3"));
-
-	ASSERT_EQ(span2.attributes.size(), 4); // Includes default attribute of "address"
-	ASSERT(span2.attributes[1] == KeyValueRef("a"_sr, "1"_sr));
-	ASSERT(span2.attributes[2] == KeyValueRef("b"_sr, "2"_sr));
-	ASSERT(span2.attributes[3] == KeyValueRef("c"_sr, "3"_sr));
-	return Void();
-};
-
 TEST_CASE("/flow/Tracing/AddLinks") {
 	Span span1("span_with_links"_loc);
 	ASSERT(!span1.context.isSampled());
@@ -650,11 +621,40 @@ std::string readMPString(uint8_t* index) {
 	return reinterpret_cast<char*>(data);
 }
 
-// Windows doesn't like lack of header and declaration of constructor for FastUDPTracer
-#ifndef WIN32
-TEST_CASE("/flow/Tracing/FastUDPMessagePackEncoding") {
-	bootstrapGlobalFlowKnobs.TRACING_SPAN_ATTRIBUTES_ENABLED = true;
-	FLOW_KNOBS = &bootstrapGlobalFlowKnobs;
+class AccessAttrsUnitTest {
+public:
+	void RunAddAttributes();
+	void RunFastUDPMessagePackEncoding();
+};
+void AccessAttrsUnitTest::RunAddAttributes() {
+	Span span1("span_with_attrs"_loc,
+	           SpanContext(deterministicRandom()->randomUniqueID(),
+	                       deterministicRandom()->randomUInt64(),
+	                       TraceFlags::sampled));
+	auto arena = span1.arena;
+	span1.addAttribute(StringRef(arena, LiteralStringRef("foo")), StringRef(arena, LiteralStringRef("bar")), true);
+	span1.addAttribute(
+	    StringRef(arena, LiteralStringRef("operation")), StringRef(arena, LiteralStringRef("grv")), true);
+	ASSERT_EQ(span1.attributes.size(), 3); // Includes default attribute of "address"
+	ASSERT(span1.attributes[1] == KeyValueRef("foo"_sr, "bar"_sr));
+	ASSERT(span1.attributes[2] == KeyValueRef("operation"_sr, "grv"_sr));
+
+	Span span2("span_with_attrs"_loc,
+	           SpanContext(deterministicRandom()->randomUniqueID(),
+	                       deterministicRandom()->randomUInt64(),
+	                       TraceFlags::sampled));
+	auto s2Arena = span2.arena;
+	span2.addAttribute(StringRef(s2Arena, LiteralStringRef("a")), StringRef(s2Arena, LiteralStringRef("1")), true)
+	    .addAttribute(StringRef(s2Arena, LiteralStringRef("b")), LiteralStringRef("2"), true)
+	    .addAttribute(StringRef(s2Arena, LiteralStringRef("c")), LiteralStringRef("3"), true);
+
+	ASSERT_EQ(span2.attributes.size(), 4); // Includes default attribute of "address"
+	ASSERT(span2.attributes[1] == KeyValueRef("a"_sr, "1"_sr));
+	ASSERT(span2.attributes[2] == KeyValueRef("b"_sr, "2"_sr));
+	ASSERT(span2.attributes[3] == KeyValueRef("c"_sr, "3"_sr));
+}
+
+void AccessAttrsUnitTest::RunFastUDPMessagePackEncoding() {
 	Span span1("encoded_span"_loc);
 	auto request = TraceRequest{ .buffer = std::make_unique<uint8_t[]>(kTraceBufferSize),
 		                         .data_size = 0,
@@ -715,7 +715,7 @@ TEST_CASE("/flow/Tracing/FastUDPMessagePackEncoding") {
 	auto s3Arena = span3.arena;
 	SmallVectorRef<KeyValueRef> attrs;
 	attrs.push_back(s3Arena, KeyValueRef("foo"_sr, "bar"_sr));
-	span3.addAttribute("operation"_sr, "grv"_sr)
+	span3.addAttribute("operation"_sr, "grv"_sr, true)
 	    .addLink(SpanContext(UID(300, 301), 400, TraceFlags::sampled))
 	    .addEvent(StringRef(s3Arena, LiteralStringRef("event1")), 100.101, attrs);
 	tracer.serialize_span(span3, request);
@@ -791,6 +791,19 @@ TEST_CASE("/flow/Tracing/FastUDPMessagePackEncoding") {
 	// Read and verify span name
 	ASSERT(data[37] == 0xda);
 	ASSERT(readMPString(&data[37]) == longString);
+};
+
+TEST_CASE("/flow/Tracing/AddAttributes") {
+	AccessAttrsUnitTest test;
+	test.RunAddAttributes();
+	return Void();
+};
+
+// Windows doesn't like lack of header and declaration of constructor for FastUDPTracer
+#ifndef WIN32
+TEST_CASE("/flow/Tracing/FastUDPMessagePackEncoding") {
+	AccessAttrsUnitTest test;
+	test.RunFastUDPMessagePackEncoding();
 	return Void();
 };
 #endif

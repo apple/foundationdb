@@ -114,6 +114,8 @@ struct SpanEventRef {
 };
 
 class Span {
+	friend class AccessAttrsUnitTest;
+
 public:
 	// Construct a Span with a given context, location, parentContext and optional links.
 	//
@@ -226,10 +228,7 @@ public:
 	}
 
 	Span& addAttribute(const StringRef& key, const StringRef& value) {
-		if (FLOW_KNOBS->TRACING_SPAN_ATTRIBUTES_ENABLED) {
-			attributes.push_back_deep(arena, KeyValueRef(key, value));
-		}
-		return *this;
+		return addAttribute(key, value, FLOW_KNOBS->TRACING_SPAN_ATTRIBUTES_ENABLED);
 	}
 
 	Span& setParent(const SpanContext& parent) {
@@ -250,6 +249,15 @@ public:
 	SmallVectorRef<KeyValueRef> attributes; // not necessarily sorted
 	SmallVectorRef<SpanEventRef> events;
 	SpanStatus status;
+
+private:
+	// For unit testing only.
+	Span& addAttribute(const StringRef& key, const StringRef& value, bool tracingAttrsEnabled) {
+		if (tracingAttrsEnabled) {
+			attributes.push_back_deep(arena, KeyValueRef(key, value));
+		}
+		return *this;
+	}
 };
 
 // The user selects a tracer using a string passed to fdbserver on boot.
