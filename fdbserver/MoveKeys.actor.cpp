@@ -1525,6 +1525,7 @@ ACTOR static Future<Void> checkDataMoveComplete(Database occ, UID dataMoveId, Ke
 						    .detail("DestID", destId)
 						    .detail("Dest", describe(dest));
 						if (!dest.empty() || srcId != dataMoveId) {
+							// There is ongoing data move, or the data move is complete, but moved to a different shard.
 							throw data_move_cancelled();
 						}
 					}
