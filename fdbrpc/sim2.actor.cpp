@@ -990,9 +990,11 @@ public:
 		if (mock.present()) {
 			return mock.get();
 		}
-		Optional<std::vector<NetworkAddress>> cache = dnsCache.find(host, service);
-		if (cache.present()) {
-			return cache.get();
+		if (FLOW_KNOBS->ENABLE_COORDINATOR_DNS_CACHE) {
+			Optional<std::vector<NetworkAddress>> cache = dnsCache.find(host, service);
+			if (cache.present()) {
+				return cache.get();
+			}
 		}
 		return SimExternalConnection::resolveTCPEndpoint(host, service, &dnsCache);
 	}
@@ -1012,9 +1014,11 @@ public:
 		if (mock.present()) {
 			return mock.get();
 		}
-		Optional<std::vector<NetworkAddress>> cache = dnsCache.find(host, service);
-		if (cache.present()) {
-			return cache.get();
+		if (FLOW_KNOBS->ENABLE_COORDINATOR_DNS_CACHE) {
+			Optional<std::vector<NetworkAddress>> cache = dnsCache.find(host, service);
+			if (cache.present()) {
+				return cache.get();
+			}
 		}
 		return SimExternalConnection::resolveTCPEndpointBlocking(host, service, &dnsCache);
 	}

@@ -58,6 +58,7 @@ ILogSystem::ServerPeekCursor::ServerPeekCursor(Reference<AsyncVar<OptionalInterf
 	this->results.minKnownCommittedVersion = 0;
 	DisabledTraceEvent(SevDebug, "SPC_Starting", randomID)
 	    .detail("Tag", tag.toString())
+	    .detail("UsePeekStream", usePeekStream)
 	    .detail("Begin", begin)
 	    .detail("End", end);
 }

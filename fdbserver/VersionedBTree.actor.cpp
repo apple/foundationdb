@@ -2108,7 +2108,9 @@ public:
 			return !reading() && !writing();
 		}
 
-		Future<Void> onEvictable() const { return ready(readFuture) && writeFuture; }
+		// Entry is evictable when its write and read futures are ready, even if they are
+		// errors, so any buffers they hold are no longer needed by the underlying file actors
+		Future<Void> onEvictable() const { return ready(readFuture) && ready(writeFuture); }
 	};
 	typedef ObjectCache<LogicalPageID, PageCacheEntry> PageCacheT;
 
@@ -3761,7 +3763,9 @@ public:
 		// Must wait for pending operations to complete, canceling them can cause a crash because the underlying
 		// operations may be uncancellable and depend on memory from calling scope's page reference
 		debug_printf("DWALPager(%s) shutdown wait for operations\n", self->filename.c_str());
-		wait(waitForAll(self->operations));
+
+		// Pending ops must be all ready, errors are okay
+		wait(waitForAllReady(self->operations));
 		self->operations.clear();
 
 		debug_printf("DWALPager(%s) shutdown destroy page cache\n", self->filename.c_str());

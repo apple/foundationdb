@@ -22,12 +22,14 @@
 
 #include <algorithm>
 #include <iterator>
+#include <memory>
 #include <regex>
 #include <unordered_set>
 #include <tuple>
 #include <utility>
 #include <vector>
 
+#include "boost/algorithm/string.hpp"
 #include "contrib/fmt-8.1.1/include/fmt/format.h"
 
 #include "fdbclient/FDBOptions.g.h"
@@ -235,11 +237,14 @@ void DatabaseContext::getLatestCommitVersions(const Reference<LocationInfo>& loc
 	}
 
 	if (ssVersionVectorCache.getMaxVersion() != invalidVersion && readVersion > ssVersionVectorCache.getMaxVersion()) {
-		TraceEvent(SevDebug, "GetLatestCommitVersions")
-		    .detail("ReadVersion", readVersion)
-		    .detail("VersionVector", ssVersionVectorCache.toString());
-		ssVersionVectorCache.clear();
-		throw stale_version_vector(); // TODO: investigate why
+		if (!CLIENT_KNOBS->FORCE_GRV_CACHE_OFF && !info->options.skipGrvCache && info->options.useGrvCache) {
+			return;
+		} else {
+			TraceEvent(SevError, "GetLatestCommitVersions")
+			    .detail("ReadVersion", readVersion)
+			    .detail("VersionVector", ssVersionVectorCache.toString());
+			ASSERT(false);
+		}
 	}
 
 	std::map<Version, std::set<Tag>> versionMap; // order the versions to be returned
@@ -265,11 +270,11 @@ void DatabaseContext::getLatestCommitVersions(const Reference<LocationInfo>& loc
 void updateCachedReadVersionShared(double t, Version v, DatabaseSharedState* p) {
 	MutexHolder mutex(p->mutexLock);
 	if (v >= p->grvCacheSpace.cachedReadVersion) {
-		TraceEvent(SevDebug, "CacheReadVersionUpdate")
-		    .detail("Version", v)
-		    .detail("CurTime", t)
-		    .detail("LastVersion", p->grvCacheSpace.cachedReadVersion)
-		    .detail("LastTime", p->grvCacheSpace.lastGrvTime);
+		//TraceEvent(SevDebug, "CacheReadVersionUpdate")
+		//    .detail("Version", v)
+		//    .detail("CurTime", t)
+		//    .detail("LastVersion", p->grvCacheSpace.cachedReadVersion)
+		//    .detail("LastTime", p->grvCacheSpace.lastGrvTime);
 		p->grvCacheSpace.cachedReadVersion = v;
 		if (t > p->grvCacheSpace.lastGrvTime) {
 			p->grvCacheSpace.lastGrvTime = t;
@@ -282,11 +287,11 @@ void DatabaseContext::updateCachedReadVersion(double t, Version v) {
 		return updateCachedReadVersionShared(t, v, sharedStatePtr);
 	}
 	if (v >= cachedReadVersion) {
-		TraceEvent(SevDebug, "CachedReadVersionUpdate")
-		    .detail("Version", v)
-		    .detail("GrvStartTime", t)
-		    .detail("LastVersion", cachedReadVersion)
-		    .detail("LastTime", lastGrvTime);
+		//TraceEvent(SevDebug, "CachedReadVersionUpdate")
+		//    .detail("Version", v)
+		//    .detail("GrvStartTime", t)
+		//    .detail("LastVersion", cachedReadVersion)
+		//    .detail("LastTime", lastGrvTime);
 		cachedReadVersion = v;
 		// Since the time is based on the start of the request, it's possible that we
 		// get a newer version with an older time.
@@ -805,12 +810,12 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext* cx) {
 				}
 			}
 			cx->clientStatusUpdater.outStatusQ.clear();
-			wait(GlobalConfig::globalConfig().onInitialized());
-			double sampleRate = GlobalConfig::globalConfig().get<double>(fdbClientInfoTxnSampleRate,
-			                                                             std::numeric_limits<double>::infinity());
+			wait(cx->globalConfig->onInitialized());
+			double sampleRate =
+			    cx->globalConfig->get<double>(fdbClientInfoTxnSampleRate, std::numeric_limits<double>::infinity());
 			double clientSamplingProbability =
 			    std::isinf(sampleRate) ? CLIENT_KNOBS->CSI_SAMPLING_PROBABILITY : sampleRate;
-			int64_t sizeLimit = GlobalConfig::globalConfig().get<int64_t>(fdbClientInfoTxnSizeLimit, -1);
+			int64_t sizeLimit = cx->globalConfig->get<int64_t>(fdbClientInfoTxnSizeLimit, -1);
 			int64_t clientTxnInfoSizeLimit = sizeLimit == -1 ? CLIENT_KNOBS->CSI_SIZE_LIMIT : sizeLimit;
 			if (!trChunksQ.empty() && deterministicRandom()->random01() < clientSamplingProbability)
 				wait(delExcessClntTxnEntriesActor(&tr, clientTxnInfoSizeLimit));
@@ -1436,13 +1441,13 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
     transactionsProcessBehind("ProcessBehind", cc), transactionsThrottled("Throttled", cc),
     transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
     transactionGrvFullBatches("NumGrvFullBatches", cc), transactionGrvTimedOutBatches("NumGrvTimedOutBatches", cc),
-    transactionsStaleVersionVectors("NumStaleVersionVectors", cc), latencies(1000), readLatencies(1000),
-    commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), bgLatencies(1000),
-    bgGranulesPerRequest(1000), outstandingWatches(0), sharedStatePtr(nullptr), lastGrvTime(0.0), cachedReadVersion(0),
-    lastRkBatchThrottleTime(0.0), lastRkDefaultThrottleTime(0.0), lastProxyRequestTime(0.0),
-    transactionTracingSample(false), taskID(taskID), clientInfo(clientInfo), clientInfoMonitor(clientInfoMonitor),
-    coordinator(coordinator), apiVersion(apiVersion), mvCacheInsertLocation(0), healthMetricsLastUpdated(0),
-    detailedHealthMetricsLastUpdated(0), smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
+    latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000),
+    bytesPerCommit(1000), bgLatencies(1000), bgGranulesPerRequest(1000), outstandingWatches(0), sharedStatePtr(nullptr),
+    lastGrvTime(0.0), cachedReadVersion(0), lastRkBatchThrottleTime(0.0), lastRkDefaultThrottleTime(0.0),
+    lastProxyRequestTime(0.0), transactionTracingSample(false), taskID(taskID), clientInfo(clientInfo),
+    clientInfoMonitor(clientInfoMonitor), coordinator(coordinator), apiVersion(apiVersion), mvCacheInsertLocation(0),
+    healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0),
+    smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
     specialKeySpace(std::make_unique<SpecialKeySpace>(specialKeys.begin, specialKeys.end, /* test */ false)),
     connectToDatabaseEventCacheHolder(format("ConnectToDatabase/%s", dbId.toString().c_str())) {
 	dbId = deterministicRandom()->randomUniqueID();
@@ -1470,6 +1475,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 	cacheListMonitor = monitorCacheList(this);
 
 	smoothMidShardSize.reset(CLIENT_KNOBS->INIT_MID_SHARD_BYTES);
+	globalConfig = std::make_unique<GlobalConfig>(this);
 
 	if (apiVersionAtLeast(710)) {
 		registerSpecialKeySpaceModule(
@@ -1709,9 +1715,8 @@ DatabaseContext::DatabaseContext(const Error& err)
     transactionsProcessBehind("ProcessBehind", cc), transactionsThrottled("Throttled", cc),
     transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
     transactionGrvFullBatches("NumGrvFullBatches", cc), transactionGrvTimedOutBatches("NumGrvTimedOutBatches", cc),
-    transactionsStaleVersionVectors("NumStaleVersionVectors", cc), latencies(1000), readLatencies(1000),
-    commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), bgLatencies(1000),
-    bgGranulesPerRequest(1000), transactionTracingSample(false),
+    latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000),
+    bytesPerCommit(1000), bgLatencies(1000), bgGranulesPerRequest(1000), transactionTracingSample(false),
     smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
     connectToDatabaseEventCacheHolder(format("ConnectToDatabase/%s", dbId.toString().c_str())) {}
 
@@ -1927,13 +1932,12 @@ Future<Void> DatabaseContext::onProxiesChanged() const {
 }
 
 bool DatabaseContext::sampleReadTags() const {
-	double sampleRate = GlobalConfig::globalConfig().get(transactionTagSampleRate, CLIENT_KNOBS->READ_TAG_SAMPLE_RATE);
+	double sampleRate = globalConfig->get(transactionTagSampleRate, CLIENT_KNOBS->READ_TAG_SAMPLE_RATE);
 	return sampleRate > 0 && deterministicRandom()->random01() <= sampleRate;
 }
 
 bool DatabaseContext::sampleOnCost(uint64_t cost) const {
-	double sampleCost =
-	    GlobalConfig::globalConfig().get<double>(transactionTagSampleCost, CLIENT_KNOBS->COMMIT_SAMPLE_COST);
+	double sampleCost = globalConfig->get<double>(transactionTagSampleCost, CLIENT_KNOBS->COMMIT_SAMPLE_COST);
 	if (sampleCost <= 0)
 		return false;
 	return deterministicRandom()->random01() <= (double)cost / sampleCost;
@@ -2209,10 +2213,10 @@ Database Database::createDatabase(Reference<IClusterConnectionRecord> connRecord
 	}
 
 	auto database = Database(db);
-	GlobalConfig::create(
-	    database, Reference<AsyncVar<ClientDBInfo> const>(clientInfo), std::addressof(clientInfo->get()));
-	GlobalConfig::globalConfig().trigger(samplingFrequency, samplingProfilerUpdateFrequency);
-	GlobalConfig::globalConfig().trigger(samplingWindow, samplingProfilerUpdateWindow);
+	database->globalConfig->init(Reference<AsyncVar<ClientDBInfo> const>(clientInfo),
+	                             std::addressof(clientInfo->get()));
+	database->globalConfig->trigger(samplingFrequency, samplingProfilerUpdateFrequency);
+	database->globalConfig->trigger(samplingWindow, samplingProfilerUpdateWindow);
 
 	TraceEvent("ConnectToDatabase", database->dbId)
 	    .detail("Version", FDB_VT_VERSION)
@@ -4366,11 +4370,10 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 					TEST(true); // !GetKeyValuesFamilyReply.more and modifiedSelectors in getRange
 
 					if (!rep.data.size()) {
-						// VERSION_VECTOR change version to readVersion in getRangeFallback
 						RangeResultFamily result = wait(
 						    getRangeFallback<GetKeyValuesFamilyRequest, GetKeyValuesFamilyReply, RangeResultFamily>(
 						        trState,
-						        version,
+						        readVersion,
 						        originalBegin,
 						        originalEnd,
 						        mapper,
@@ -5095,10 +5098,10 @@ Future<Optional<Value>> Transaction::get(const Key& key, Snapshot snapshot) {
 	++trState->cx->transactionGetValueRequests;
 	// ASSERT (key < allKeys.end);
 
-	// There are no keys in the database with size greater than KEY_SIZE_LIMIT
-	if (key.size() >
-	    (key.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT))
+	// There are no keys in the database with size greater than the max key size
+	if (key.size() > getMaxReadKeySize(key)) {
 		return Optional<Value>();
+	}
 
 	auto ver = getReadVersion();
 
@@ -5479,23 +5482,19 @@ Future<Void> Transaction::getRangeStream(const PromiseStream<RangeResult>& resul
 void Transaction::addReadConflictRange(KeyRangeRef const& keys) {
 	ASSERT(!keys.empty());
 
-	// There aren't any keys in the database with size larger than KEY_SIZE_LIMIT, so if range contains large keys
+	// There aren't any keys in the database with size larger than the max key size, so if range contains large keys
 	// we can translate it to an equivalent one with smaller keys
 	KeyRef begin = keys.begin;
 	KeyRef end = keys.end;
 
-	if (begin.size() >
-	    (begin.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT))
-		begin = begin.substr(
-		    0,
-		    (begin.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT) +
-		        1);
-	if (end.size() >
-	    (end.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT))
-		end = end.substr(
-		    0,
-		    (end.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT) +
-		        1);
+	int64_t beginMaxSize = getMaxReadKeySize(begin);
+	int64_t endMaxSize = getMaxReadKeySize(end);
+	if (begin.size() > beginMaxSize) {
+		begin = begin.substr(0, beginMaxSize + 1);
+	}
+	if (end.size() > endMaxSize) {
+		end = end.substr(0, endMaxSize + 1);
+	}
 
 	KeyRangeRef r = KeyRangeRef(begin, end);
 
@@ -5517,8 +5516,7 @@ void Transaction::makeSelfConflicting() {
 
 void Transaction::set(const KeyRef& key, const ValueRef& value, AddConflictRange addConflictRange) {
 	++trState->cx->transactionSetMutations;
-	if (key.size() >
-	    (key.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT))
+	if (key.size() > getMaxWriteKeySize(key, trState->options.rawAccess))
 		throw key_too_large();
 	if (value.size() > CLIENT_KNOBS->VALUE_SIZE_LIMIT)
 		throw value_too_large();
@@ -5539,8 +5537,7 @@ void Transaction::atomicOp(const KeyRef& key,
                            MutationRef::Type operationType,
                            AddConflictRange addConflictRange) {
 	++trState->cx->transactionAtomicMutations;
-	if (key.size() >
-	    (key.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT))
+	if (key.size() > getMaxWriteKeySize(key, trState->options.rawAccess))
 		throw key_too_large();
 	if (operand.size() > CLIENT_KNOBS->VALUE_SIZE_LIMIT)
 		throw value_too_large();
@@ -5573,20 +5570,16 @@ void Transaction::clear(const KeyRangeRef& range, AddConflictRange addConflictRa
 	KeyRef begin = range.begin;
 	KeyRef end = range.end;
 
-	// There aren't any keys in the database with size larger than KEY_SIZE_LIMIT, so if range contains large keys
+	// There aren't any keys in the database with size larger than the max key size, so if range contains large keys
 	// we can translate it to an equivalent one with smaller keys
-	if (begin.size() >
-	    (begin.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT))
-		begin = begin.substr(
-		    0,
-		    (begin.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT) +
-		        1);
-	if (end.size() >
-	    (end.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT))
-		end = end.substr(
-		    0,
-		    (end.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT) +
-		        1);
+	int64_t beginMaxSize = getMaxClearKeySize(begin);
+	int64_t endMaxSize = getMaxClearKeySize(end);
+	if (begin.size() > beginMaxSize) {
+		begin = begin.substr(0, beginMaxSize + 1);
+	}
+	if (end.size() > endMaxSize) {
+		end = end.substr(0, endMaxSize + 1);
+	}
 
 	auto r = KeyRangeRef(req.arena, KeyRangeRef(begin, end));
 	if (r.empty())
@@ -5599,10 +5592,10 @@ void Transaction::clear(const KeyRangeRef& range, AddConflictRange addConflictRa
 }
 void Transaction::clear(const KeyRef& key, AddConflictRange addConflictRange) {
 	++trState->cx->transactionClearMutations;
-	// There aren't any keys in the database with size larger than KEY_SIZE_LIMIT
-	if (key.size() >
-	    (key.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT))
+	// There aren't any keys in the database with size larger than the max key size
+	if (key.size() > getMaxClearKeySize(key)) {
 		return;
+	}
 
 	auto& req = tr;
 	auto& t = req.transaction;
@@ -5621,24 +5614,19 @@ void Transaction::addWriteConflictRange(const KeyRangeRef& keys) {
 	auto& req = tr;
 	auto& t = req.transaction;
 
-	// There aren't any keys in the database with size larger than KEY_SIZE_LIMIT, so if range contains large keys
+	// There aren't any keys in the database with size larger than the max key size, so if range contains large keys
 	// we can translate it to an equivalent one with smaller keys
 	KeyRef begin = keys.begin;
 	KeyRef end = keys.end;
 
-	if (begin.size() >
-	    (begin.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT))
-		begin = begin.substr(
-		    0,
-		    (begin.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT) +
-		        1);
-	if (end.size() >
-	    (end.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT))
-		end = end.substr(
-		    0,
-		    (end.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT) +
-		        1);
-
+	int64_t beginMaxSize = getMaxKeySize(begin);
+	int64_t endMaxSize = getMaxKeySize(end);
+	if (begin.size() > beginMaxSize) {
+		begin = begin.substr(0, beginMaxSize + 1);
+	}
+	if (end.size() > endMaxSize) {
+		end = end.substr(0, endMaxSize + 1);
+	}
 	KeyRangeRef r = KeyRangeRef(begin, end);
 
 	if (r.empty()) {
@@ -6937,18 +6925,10 @@ Future<Standalone<StringRef>> Transaction::getVersionstamp() {
 }
 
 // Gets the protocol version reported by a coordinator via the protocol info interface
-ACTOR Future<ProtocolVersion> getCoordinatorProtocol(
-    Reference<AsyncVar<Optional<ClientLeaderRegInterface>> const> coordinator) {
-	state ProtocolInfoReply reply;
-	if (coordinator->get().get().hostname.present()) {
-		wait(store(reply,
-		           retryGetReplyFromHostname(
-		               ProtocolInfoRequest{}, coordinator->get().get().hostname.get(), WLTOKEN_PROTOCOL_INFO)));
-	} else {
-		RequestStream<ProtocolInfoRequest> requestStream(
-		    Endpoint::wellKnown({ coordinator->get().get().getLeader.getEndpoint().addresses }, WLTOKEN_PROTOCOL_INFO));
-		wait(store(reply, retryBrokenPromise(requestStream, ProtocolInfoRequest{})));
-	}
+ACTOR Future<ProtocolVersion> getCoordinatorProtocol(NetworkAddress coordinatorAddress) {
+	RequestStream<ProtocolInfoRequest> requestStream(
+	    Endpoint::wellKnown({ coordinatorAddress }, WLTOKEN_PROTOCOL_INFO));
+	ProtocolInfoReply reply = wait(retryBrokenPromise(requestStream, ProtocolInfoRequest{}));
 	return reply.version;
 }
 
@@ -6957,34 +6937,32 @@ ACTOR Future<ProtocolVersion> getCoordinatorProtocol(
 // function will return with an unset result.
 // If an expected version is given, this future won't return if the actual protocol version matches the expected version
 ACTOR Future<Optional<ProtocolVersion>> getCoordinatorProtocolFromConnectPacket(
-    Reference<AsyncVar<Optional<ClientLeaderRegInterface>> const> coordinator,
+    NetworkAddress coordinatorAddress,
     Optional<ProtocolVersion> expectedVersion) {
-	state NetworkAddress coordinatorAddress;
-	if (coordinator->get().get().hostname.present()) {
-		Hostname h = coordinator->get().get().hostname.get();
-		wait(store(coordinatorAddress, h.resolveWithRetry()));
-	} else {
-		coordinatorAddress = coordinator->get().get().getLeader.getEndpoint().getPrimaryAddress();
-	}
-
-	state Reference<AsyncVar<Optional<ProtocolVersion>> const> protocolVersion =
+	state Optional<Reference<AsyncVar<Optional<ProtocolVersion>> const>> protocolVersion =
 	    FlowTransport::transport().getPeerProtocolAsyncVar(coordinatorAddress);
 
+	if (!protocolVersion.present()) {
+		TraceEvent(SevWarnAlways, "GetCoordinatorProtocolPeerMissing").detail("Address", coordinatorAddress);
+		wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT));
+		return Optional<ProtocolVersion>();
+	}
+
 	loop {
-		if (protocolVersion->get().present() && protocolVersion->get() != expectedVersion) {
-			return protocolVersion->get();
+		if (protocolVersion.get()->get().present() && protocolVersion.get()->get() != expectedVersion) {
+			return protocolVersion.get()->get();
 		}
 
-		Future<Void> change = protocolVersion->onChange();
-		if (!protocolVersion->get().present()) {
+		Future<Void> change = protocolVersion.get()->onChange();
+		if (!protocolVersion.get()->get().present()) {
 			// If we still don't have any connection info after a timeout, retry sending the protocol version request
 			change = timeout(change, FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT, Void());
 		}
 
 		wait(change);
 
-		if (!protocolVersion->get().present()) {
-			return protocolVersion->get();
+		if (!protocolVersion.get()->get().present()) {
+			return protocolVersion.get()->get();
 		}
 	}
 }
@@ -7001,10 +6979,18 @@ ACTOR Future<ProtocolVersion> getClusterProtocolImpl(
 		if (!coordinator->get().present()) {
 			wait(coordinator->onChange());
 		} else {
+			state NetworkAddress coordinatorAddress;
+			if (coordinator->get().get().hostname.present()) {
+				Hostname h = coordinator->get().get().hostname.get();
+				wait(store(coordinatorAddress, h.resolveWithRetry()));
+			} else {
+				coordinatorAddress = coordinator->get().get().getLeader.getEndpoint().getPrimaryAddress();
+			}
+
 			if (needToConnect) {
 				// Even though we typically rely on the connect packet to get the protocol version, we need to send some
 				// request in order to start a connection. This protocol version request serves that purpose.
-				protocolVersion = getCoordinatorProtocol(coordinator);
+				protocolVersion = getCoordinatorProtocol(coordinatorAddress);
 				needToConnect = false;
 			}
 			choose {
@@ -7021,7 +7007,7 @@ ACTOR Future<ProtocolVersion> getClusterProtocolImpl(
 				// Older versions of FDB don't have an endpoint to return the protocol version, so we get this info from
 				// the connect packet
 				when(Optional<ProtocolVersion> pv =
-				         wait(getCoordinatorProtocolFromConnectPacket(coordinator, expectedVersion))) {
+				         wait(getCoordinatorProtocolFromConnectPacket(coordinatorAddress, expectedVersion))) {
 					if (pv.present()) {
 						return pv.get();
 					} else {
@@ -7073,14 +7059,11 @@ Future<Void> Transaction::onError(Error const& e) {
 		reset();
 		return delay(backoff, trState->taskID);
 	}
-	if (e.code() == error_code_transaction_too_old || e.code() == error_code_future_version ||
-	    e.code() == error_code_stale_version_vector) {
+	if (e.code() == error_code_transaction_too_old || e.code() == error_code_future_version) {
 		if (e.code() == error_code_transaction_too_old)
 			++trState->cx->transactionsTooOld;
 		else if (e.code() == error_code_future_version)
 			++trState->cx->transactionsFutureVersions;
-		else if (e.code() == error_code_stale_version_vector)
-			++trState->cx->transactionsStaleVersionVectors;
 
 		double maxBackoff = trState->options.maxBackoff;
 		reset();
@@ -7239,10 +7222,10 @@ ACTOR Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> getReadHotRanges(Da
 			// condition. Should we abort and wait for the newly split shards to be hot again?
 			state int nLocs = locations.size();
 			// if (nLocs > 1) {
-			// 	TraceEvent("RHDDebug")
-			// 	    .detail("NumSSIs", nLocs)
-			// 	    .detail("KeysBegin", keys.begin.printable().c_str())
-			// 	    .detail("KeysEnd", keys.end.printable().c_str());
+			//	TraceEvent("RHDDebug")
+			//	    .detail("NumSSIs", nLocs)
+			//	    .detail("KeysBegin", keys.begin.printable().c_str())
+			//	    .detail("KeysEnd", keys.end.printable().c_str());
 			// }
 			state std::vector<Future<ReadHotSubRangeReply>> fReplies(nLocs);
 			KeyRef partBegin, partEnd;
@@ -7954,8 +7937,8 @@ void Transaction::checkDeferredError() const {
 
 Reference<TransactionLogInfo> Transaction::createTrLogInfoProbabilistically(const Database& cx) {
 	if (!cx->isError()) {
-		double clientSamplingProbability = GlobalConfig::globalConfig().get<double>(
-		    fdbClientInfoTxnSampleRate, CLIENT_KNOBS->CSI_SAMPLING_PROBABILITY);
+		double clientSamplingProbability =
+		    cx->globalConfig->get<double>(fdbClientInfoTxnSampleRate, CLIENT_KNOBS->CSI_SAMPLING_PROBABILITY);
 		if (((networkOptions.logClientInfo.present() && networkOptions.logClientInfo.get()) || BUGGIFY) &&
 		    deterministicRandom()->random01() < clientSamplingProbability &&
 		    (!g_network->isSimulated() || !g_simulator.speedUpSimulation)) {
@@ -8246,57 +8229,74 @@ ACTOR Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion
 	return (ddCheck && coordinatorCheck);
 }
 
-ACTOR Future<Void> addInterfaceActor(std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface,
-                                     Reference<FlowLock> connectLock,
-                                     KeyValue kv) {
+// returns true if we can connect to the given worker interface
+ACTOR Future<bool> verifyInterfaceActor(Reference<FlowLock> connectLock, ClientWorkerInterface workerInterf) {
 	wait(connectLock->take());
 	state FlowLock::Releaser releaser(*connectLock);
-	state ClientWorkerInterface workerInterf =
-	    BinaryReader::fromStringRef<ClientWorkerInterface>(kv.value, IncludeVersion());
 	state ClientLeaderRegInterface leaderInterf(workerInterf.address());
 	choose {
 		when(Optional<LeaderInfo> rep =
 		         wait(brokenPromiseToNever(leaderInterf.getLeader.getReply(GetLeaderRequest())))) {
-			StringRef ip_port =
-			    kv.key.endsWith(LiteralStringRef(":tls")) ? kv.key.removeSuffix(LiteralStringRef(":tls")) : kv.key;
-			(*address_interface)[ip_port] = std::make_pair(kv.value, leaderInterf);
-
-			if (workerInterf.reboot.getEndpoint().addresses.secondaryAddress.present()) {
-				Key full_ip_port2 =
-				    StringRef(workerInterf.reboot.getEndpoint().addresses.secondaryAddress.get().toString());
-				StringRef ip_port2 = full_ip_port2.endsWith(LiteralStringRef(":tls"))
-				                         ? full_ip_port2.removeSuffix(LiteralStringRef(":tls"))
-				                         : full_ip_port2;
-				(*address_interface)[ip_port2] = std::make_pair(kv.value, leaderInterf);
-			}
+			return true;
 		}
-		when(wait(delay(CLIENT_KNOBS->CLI_CONNECT_TIMEOUT))) {} // NOTE : change timeout time here if necessary
+		when(wait(delay(CLIENT_KNOBS->CLI_CONNECT_TIMEOUT))) {
+			// NOTE : change timeout time here if necessary
+			return false;
+		}
 	}
-	return Void();
 }
 
 ACTOR static Future<int64_t> rebootWorkerActor(DatabaseContext* cx, ValueRef addr, bool check, int duration) {
 	// ignore negative value
 	if (duration < 0)
 		duration = 0;
-	// fetch the addresses of all workers
-	state std::map<Key, std::pair<Value, ClientLeaderRegInterface>> address_interface;
 	if (!cx->getConnectionRecord())
 		return 0;
+	// fetch all workers' addresses and interfaces from CC
 	RangeResult kvs = wait(getWorkerInterfaces(cx->getConnectionRecord()));
 	ASSERT(!kvs.more);
+	// map worker network address to its interface
+	state std::map<Key, ClientWorkerInterface> workerInterfaces;
+	for (const auto& it : kvs) {
+		ClientWorkerInterface workerInterf =
+		    BinaryReader::fromStringRef<ClientWorkerInterface>(it.value, IncludeVersion());
+		Key primaryAddress =
+		    it.key.endsWith(LiteralStringRef(":tls")) ? it.key.removeSuffix(LiteralStringRef(":tls")) : it.key;
+		workerInterfaces[primaryAddress] = workerInterf;
+		// Also add mapping from a worker's second address(if present) to its interface
+		if (workerInterf.reboot.getEndpoint().addresses.secondaryAddress.present()) {
+			Key secondAddress =
+			    StringRef(workerInterf.reboot.getEndpoint().addresses.secondaryAddress.get().toString());
+			secondAddress = secondAddress.endsWith(LiteralStringRef(":tls"))
+			                    ? secondAddress.removeSuffix(LiteralStringRef(":tls"))
+			                    : secondAddress;
+			workerInterfaces[secondAddress] = workerInterf;
+		}
+	}
+	// split and get all the requested addresses to send reboot requests
+	state std::vector<std::string> addressesVec;
+	boost::algorithm::split(addressesVec, addr.toString(), boost::is_any_of(","));
 	// Note: reuse this knob from fdbcli, change it if necessary
 	Reference<FlowLock> connectLock(new FlowLock(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM));
-	std::vector<Future<Void>> addInterfs;
-	for (const auto& it : kvs) {
-		addInterfs.push_back(addInterfaceActor(&address_interface, connectLock, it));
+	state std::vector<Future<bool>> verifyInterfs;
+	for (const auto& requestedAddress : addressesVec) {
+		// step 1: check that the requested address is in the worker list provided by CC
+		if (!workerInterfaces.count(Key(requestedAddress)))
+			return 0;
+		// step 2: try to establish connections to the requested worker
+		verifyInterfs.push_back(verifyInterfaceActor(connectLock, workerInterfaces[Key(requestedAddress)]));
 	}
-	wait(waitForAll(addInterfs));
-	if (!address_interface.count(addr))
-		return 0;
-
-	BinaryReader::fromStringRef<ClientWorkerInterface>(address_interface[addr].first, IncludeVersion())
-	    .reboot.send(RebootRequest(false, check, duration));
+	// step 3: check if we can establish connections to all requested workers, return if not
+	wait(waitForAll(verifyInterfs));
+	for (const auto& f : verifyInterfs) {
+		if (!f.get())
+			return 0;
+	}
+	// step 4: After verifying we can connect to all requested workers, send reboot requests together
+	for (const auto& address : addressesVec) {
+		// Note: We want to make sure these requests are sent in parallel
+		workerInterfaces[Key(address)].reboot.send(RebootRequest(false, check, duration));
+	}
 	return 1;
 }
 
@@ -9409,4 +9409,22 @@ ACTOR Future<Void> waitPurgeGranulesCompleteActor(Reference<DatabaseContext> db,
 
 Future<Void> DatabaseContext::waitPurgeGranulesComplete(Key purgeKey) {
 	return waitPurgeGranulesCompleteActor(Reference<DatabaseContext>::addRef(this), purgeKey);
+}
+
+int64_t getMaxKeySize(KeyRef const& key) {
+	return getMaxWriteKeySize(key, true);
+}
+
+int64_t getMaxReadKeySize(KeyRef const& key) {
+	return getMaxKeySize(key);
+}
+
+int64_t getMaxWriteKeySize(KeyRef const& key, bool hasRawAccess) {
+	int64_t tenantSize = hasRawAccess ? CLIENT_KNOBS->TENANT_PREFIX_SIZE_LIMIT : 0;
+	return key.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT
+	                                        : CLIENT_KNOBS->KEY_SIZE_LIMIT + tenantSize;
+}
+
+int64_t getMaxClearKeySize(KeyRef const& key) {
+	return getMaxKeySize(key);
 }

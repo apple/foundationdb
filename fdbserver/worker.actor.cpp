@@ -159,9 +159,9 @@ Database openDBOnServer(Reference<AsyncVar<ServerDBInfo> const> const& db,
 	                                  enableLocalityLoadBalance,
 	                                  taskID,
 	                                  lockAware);
-	GlobalConfig::create(cx, db, std::addressof(db->get().client));
-	GlobalConfig::globalConfig().trigger(samplingFrequency, samplingProfilerUpdateFrequency);
-	GlobalConfig::globalConfig().trigger(samplingWindow, samplingProfilerUpdateWindow);
+	cx->globalConfig->init(db, std::addressof(db->get().client));
+	cx->globalConfig->trigger(samplingFrequency, samplingProfilerUpdateFrequency);
+	cx->globalConfig->trigger(samplingWindow, samplingProfilerUpdateWindow);
 	return cx;
 }
 
@@ -1588,16 +1588,16 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				state Database db =
 				    Database::createDatabase(metricsConnFile, Database::API_VERSION_LATEST, IsInternal::True, locality);
 				metricsLogger = runMetrics(db, KeyRef(metricsPrefix));
+				db->globalConfig->trigger(samplingFrequency, samplingProfilerUpdateFrequency);
 			} catch (Error& e) {
 				TraceEvent(SevWarnAlways, "TDMetricsBadClusterFile").error(e).detail("ConnFile", metricsConnFile);
 			}
 		} else {
 			auto lockAware = metricsPrefix.size() && metricsPrefix[0] == '\xff' ? LockAware::True : LockAware::False;
-			metricsLogger =
-			    runMetrics(openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, lockAware), KeyRef(metricsPrefix));
+			auto database = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, lockAware);
+			metricsLogger = runMetrics(database, KeyRef(metricsPrefix));
+			database->globalConfig->trigger(samplingFrequency, samplingProfilerUpdateFrequency);
 		}
-
-		GlobalConfig::globalConfig().trigger(samplingFrequency, samplingProfilerUpdateFrequency);
 	}
 
 	errorForwarders.add(resetAfter(degraded,
@@ -2670,7 +2670,7 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderWithDelayedCandidacyImplOneGenerati
     Reference<AsyncVar<Value>> result,
     MonitorLeaderInfo info) {
 	ClusterConnectionString cs = info.intermediateConnRecord->getConnectionString();
-	state int coordinatorsSize = cs.hostnames.size() + cs.coordinators().size();
+	state int coordinatorsSize = cs.hostnames.size() + cs.coords.size();
 	state ElectionResultRequest request;
 	state int index = 0;
 	state int successIndex = 0;
@@ -2680,14 +2680,14 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderWithDelayedCandidacyImplOneGenerati
 	for (const auto& h : cs.hostnames) {
 		leaderElectionServers.push_back(LeaderElectionRegInterface(h));
 	}
-	for (const auto& c : cs.coordinators()) {
+	for (const auto& c : cs.coords) {
 		leaderElectionServers.push_back(LeaderElectionRegInterface(c));
 	}
 	deterministicRandom()->randomShuffle(leaderElectionServers);
 
 	request.key = cs.clusterKey();
 	request.hostnames = cs.hostnames;
-	request.coordinators = cs.coordinators();
+	request.coordinators = cs.coords;
 
 	loop {
 		LeaderElectionRegInterface interf = leaderElectionServers[index];

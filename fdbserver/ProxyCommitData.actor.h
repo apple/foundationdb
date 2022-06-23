@@ -225,6 +225,7 @@ struct ProxyCommitData {
 	double lastResolverReset;
 
 	std::map<TenantName, TenantMapEntry> tenantMap;
+	int localTLogCount = -1;
 
 	// The tag related to a storage server rarely change, so we keep a vector of tags for each key range to be slightly
 	// more CPU efficient. When a tag related to a storage server does change, we empty out all of these vectors to

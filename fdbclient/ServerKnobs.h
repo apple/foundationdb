@@ -31,6 +31,7 @@ static constexpr int _PAGE_SIZE = 4096;
 
 class ServerKnobs : public KnobsImpl<ServerKnobs> {
 public:
+	bool ALLOW_DANGEROUS_KNOBS;
 	// Versions
 	int64_t VERSIONS_PER_SECOND;
 	int64_t MAX_VERSIONS_IN_FLIGHT;
@@ -43,6 +44,7 @@ public:
 	                                  // often, so that versions always advance smoothly
 	double MAX_VERSION_RATE_MODIFIER;
 	int64_t MAX_VERSION_RATE_OFFSET;
+	bool ENABLE_VERSION_VECTOR_HA_OPTIMIZATION;
 
 	// TLogs
 	bool PEEK_USING_STREAMING;

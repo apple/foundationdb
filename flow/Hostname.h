@@ -33,16 +33,6 @@ struct Hostname {
 	Hostname(const std::string& host, const std::string& service, bool isTLS)
 	  : host(host), service(service), isTLS(isTLS) {}
 	Hostname() : host(""), service(""), isTLS(false) {}
-	Hostname(const Hostname& rhs) { operator=(rhs); }
-	Hostname& operator=(const Hostname& rhs) {
-		// Copy everything except AsyncTrigger resolveFinish.
-		host = rhs.host;
-		service = rhs.service;
-		isTLS = rhs.isTLS;
-		resolvedAddress = rhs.resolvedAddress;
-		status = rhs.status;
-		return *this;
-	}
 
 	bool operator==(const Hostname& r) const { return host == r.host && service == r.service && isTLS == r.isTLS; }
 	bool operator!=(const Hostname& r) const { return !(*this == r); }
@@ -72,20 +62,15 @@ struct Hostname {
 
 	std::string toString() const { return host + ":" + service + (isTLS ? ":tls" : ""); }
 
-	Optional<NetworkAddress> resolvedAddress;
-	enum HostnameStatus { UNRESOLVED, RESOLVING, RESOLVED };
 	// The resolve functions below use DNS cache.
 	Future<Optional<NetworkAddress>> resolve();
 	Future<NetworkAddress> resolveWithRetry();
 	Optional<NetworkAddress> resolveBlocking(); // This one should only be used when resolving asynchronously is
 	                                            // impossible. For all other cases, resolve() should be preferred.
-	void resetToUnresolved();
-	HostnameStatus status = UNRESOLVED;
-	AsyncTrigger resolveFinish;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, host, service, isTLS, resolvedAddress, status);
+		serializer(ar, host, service, isTLS);
 	}
 };
 
