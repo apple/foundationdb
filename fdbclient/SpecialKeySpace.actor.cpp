@@ -79,7 +79,7 @@ std::unordered_map<SpecialKeySpace::MODULE, KeyRange> SpecialKeySpace::moduleToB
 	  KeyRangeRef(LiteralStringRef("\xff\xff/actor_lineage/"), LiteralStringRef("\xff\xff/actor_lineage0")) },
 	{ SpecialKeySpace::MODULE::ACTOR_PROFILER_CONF,
 	  KeyRangeRef(LiteralStringRef("\xff\xff/actor_profiler_conf/"),
-	              LiteralStringRef("\xff\xff/actor_profiler_conf0")) },
+	              LiteralStringRef("\xff\xff/actor_profiler_conf0")) }
 };
 
 std::unordered_map<std::string, KeyRange> SpecialKeySpace::managementApiCommandToRange = {

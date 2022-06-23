@@ -228,9 +228,6 @@ public:
 	static KeyRef getActorLineageApiCommandPrefix(const std::string& command) {
 		return actorLineageApiCommandToRange.at(command).begin;
 	}
-	static KeyRangeRef getMetaclusterInternalApiCommandRange(const std::string& command) {
-		return metaclusterInternalApiCommandToRange.at(command);
-	}
 	static Key getManagementApiCommandOptionSpecialKey(const std::string& command, const std::string& option);
 	static const std::set<std::string>& getManagementApiOptionsSet() { return options; }
 	static const std::set<std::string>& getTracingOptions() { return tracingOptions; }
@@ -263,7 +260,6 @@ private:
 	// module command to special keys range
 	static std::unordered_map<std::string, KeyRange> managementApiCommandToRange;
 	static std::unordered_map<std::string, KeyRange> actorLineageApiCommandToRange;
-	static std::unordered_map<std::string, KeyRange> metaclusterInternalApiCommandToRange;
 
 	// "<command>/<option>"
 	static std::set<std::string> options;

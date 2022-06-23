@@ -1344,7 +1344,7 @@ struct TenantMode {
 	// These enumerated values are stored in the database configuration, so can NEVER be changed.  Only add new ones
 	// just before END.
 	// Note: OPTIONAL_TENANT is not named OPTIONAL because of a collision with a Windows macro.
-	enum Mode { DISABLED = 0, OPTIONAL_TENANT = 1, REQUIRED = 2, END = 4 };
+	enum Mode { DISABLED = 0, OPTIONAL_TENANT = 1, REQUIRED = 2, END = 3 };
 
 	TenantMode() : mode(DISABLED) {}
 	TenantMode(Mode mode) : mode(mode) {

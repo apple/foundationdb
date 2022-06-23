@@ -58,9 +58,6 @@ struct DataClusterMetadata {
 	}
 
 	Value encode() const { return ObjectWriter::toValue(*this, IncludeVersion(ProtocolVersion::withMetacluster())); }
-	Value encode(Arena& arena) const {
-		return ObjectWriter::toValue(*this, IncludeVersion(ProtocolVersion::withMetacluster()), arena);
-	}
 	static DataClusterMetadata decode(ValueRef const& value) {
 		DataClusterMetadata metadata;
 		ObjectReader reader(value.begin(), IncludeVersion());
