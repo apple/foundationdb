@@ -22,7 +22,7 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/HTTP.h"
-#include "fdbrpc/IAsyncFile.h"
+#include "flow/IAsyncFile.h"
 #include "fdbserver/KmsConnectorInterface.h"
 #include "fdbserver/Knobs.h"
 #include "fdbrpc/RESTClient.h"

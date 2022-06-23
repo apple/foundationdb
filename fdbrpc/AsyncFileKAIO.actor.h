@@ -29,7 +29,7 @@
 #elif !defined(FLOW_ASYNCFILEKAIO_ACTOR_H)
 #define FLOW_ASYNCFILEKAIO_ACTOR_H
 
-#include "fdbrpc/IAsyncFile.h"
+#include "flow/IAsyncFile.h"
 
 #include <stdio.h>
 #include <fcntl.h>

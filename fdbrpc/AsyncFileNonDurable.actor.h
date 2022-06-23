@@ -29,7 +29,7 @@
 #define FLOW_ASYNCFILENONDURABLE_ACTOR_H
 
 #include "flow/flow.h"
-#include "fdbrpc/IAsyncFile.h"
+#include "flow/IAsyncFile.h"
 #include "flow/ActorCollection.h"
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/TraceFileIO.h"

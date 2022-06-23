@@ -29,7 +29,7 @@
 #include "flow/Histogram.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/Locality.h"
-#include "fdbrpc/IAsyncFile.h"
+#include "flow/IAsyncFile.h"
 #include "flow/TDMetric.actor.h"
 #include <random>
 #include "fdbrpc/ReplicationPolicy.h"

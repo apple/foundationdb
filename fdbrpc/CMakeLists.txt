@@ -16,24 +16,41 @@ set(FDBRPC_SRCS
   Base64UrlDecode.cpp
   Base64UrlEncode.h
   Base64UrlEncode.cpp
+  ContinuousSample.h
+  FailureMonitor.h
   FailureMonitor.actor.cpp
+  fdbrpc.h
   FlowProcess.actor.h
+  FlowTransport.h
   FlowTransport.actor.cpp
   genericactors.actor.h
   genericactors.actor.cpp
+  HealthMonitor.h
   HealthMonitor.actor.cpp
+  HTTP.h
   HTTP.actor.cpp
+  IPAllowList.h
   IPAllowList.cpp
-  LoadBalance.actor.cpp
+  LoadBalance.h
   LoadBalance.actor.h
+  LoadBalance.actor.cpp
+  Locality.h
   Locality.cpp
+  MultiInterface.h
+  Net2FileSystem.h
   Net2FileSystem.cpp
   networksender.actor.h
   PerfMetric.cpp
   PerfMetric.h
+  QueueModel.h
   QueueModel.cpp
+  RangeMap.h
+  Replication.h
+  ReplicationPolicy.h
   ReplicationPolicy.cpp
+  ReplicationTypes.h
   ReplicationTypes.cpp
+  ReplicationUtils.h
   ReplicationUtils.cpp
   RESTClient.h
   RESTClient.actor.cpp
@@ -41,16 +58,20 @@ set(FDBRPC_SRCS
   RESTUtils.actor.cpp
   SimExternalConnection.actor.cpp
   SimExternalConnection.h
+  Smoother.h
   Stats.actor.cpp
   Stats.h
   simulator.h
   sim2.actor.cpp
   sim_validation.cpp
+  TenantInfo.h
   TimedRequest.h
   TokenSign.h
   TokenSign.cpp
+  TraceFileIO.h
   TraceFileIO.cpp
-  TSSComparison.h)
+  TSSComparison.h
+  WellKnownEndpoints.h)
 
 set(COMPILE_EIO OFF)
 

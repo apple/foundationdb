@@ -25,7 +25,7 @@
 #include "flow/flow.h"
 #include "flow/Net2Packet.h"
 #include "fdbclient/Knobs.h"
-#include "fdbrpc/IRateControl.h"
+#include "flow/IRateControl.h"
 #include "fdbrpc/HTTP.h"
 #include "fdbclient/JSONDoc.h"
 

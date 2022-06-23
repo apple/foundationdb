@@ -19,7 +19,7 @@
  */
 
 #include "fdbserver/IDiskQueue.h"
-#include "fdbrpc/IAsyncFile.h"
+#include "flow/IAsyncFile.h"
 #include "fdbserver/Knobs.h"
 #include "fdbrpc/simulator.h"
 #include "flow/crc32c.h"

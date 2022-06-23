@@ -21,7 +21,7 @@
 #include "fdbrpc/RESTClient.h"
 
 #include "fdbrpc/HTTP.h"
-#include "fdbrpc/IRateControl.h"
+#include "flow/IRateControl.h"
 #include "fdbrpc/RESTUtils.h"
 #include "flow/Arena.h"
 #include "flow/Error.h"

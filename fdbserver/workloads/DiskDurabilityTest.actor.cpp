@@ -21,7 +21,7 @@
 #include <cinttypes>
 #include "fmt/format.h"
 #include "fdbserver/workloads/workloads.actor.h"
-#include "fdbrpc/IAsyncFile.h"
+#include "flow/IAsyncFile.h"
 #include "fdbclient/FDBTypes.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
