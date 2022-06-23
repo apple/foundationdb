@@ -31,7 +31,7 @@
 #include <vector>
 
 #include "boost/algorithm/string.hpp"
-#include "contrib/fmt-8.1.1/include/fmt/format.h"
+#include "fmt/format.h"
 
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"

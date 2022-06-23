@@ -10,6 +10,7 @@ set(FDBRPC_SRCS
   AsyncFileCached.actor.cpp
   AsyncFileEncrypted.actor.cpp
   AsyncFileNonDurable.actor.cpp
+  AsyncFileWriteChecker.h
   AsyncFileWriteChecker.cpp
   Base64UrlDecode.h
   Base64UrlDecode.cpp
@@ -22,6 +23,7 @@ set(FDBRPC_SRCS
   genericactors.actor.cpp
   HealthMonitor.actor.cpp
   HTTP.actor.cpp
+  IAsyncFile.h
   IAsyncFile.actor.cpp
   IPAllowList.cpp
   LoadBalance.actor.cpp
@@ -43,6 +45,7 @@ set(FDBRPC_SRCS
   SimExternalConnection.h
   Stats.actor.cpp
   Stats.h
+  simulator.h
   sim2.actor.cpp
   sim_validation.cpp
   TimedRequest.h

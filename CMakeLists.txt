@@ -105,14 +105,11 @@ set(FDB_PACKAGE_NAME "${FDB_MAJOR}.${FDB_MINOR}")
 configure_file(${CMAKE_SOURCE_DIR}/versions.target.cmake ${CMAKE_CURRENT_BINARY_DIR}/versions.target)
 file(WRITE ${CMAKE_BINARY_DIR}/version.txt ${FDB_VERSION})
 
-message(STATUS "FDB version is ${FDB_VERSION}")
-message(STATUS "FDB package name is ${FDB_PACKAGE_NAME}")
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/fdbclient/versions.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/fdbclient/versions.h)
-
-
 ################################################################################
 # Flow
 ################################################################################
+
+include(utils)
 
 # Flow and other tools are written in C# - so we need that dependency
 include(EnableCsharp)

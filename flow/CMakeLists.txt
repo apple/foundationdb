@@ -26,6 +26,7 @@ set(FLOW_SRCS
   FastRef.h
   FaultInjection.cpp
   FaultInjection.h
+  FileIdentifier.h
   FileTraceLogWriter.cpp
   FileTraceLogWriter.h
   Hash3.c
@@ -53,6 +54,8 @@ set(FLOW_SRCS
   Net2.actor.cpp
   Net2Packet.cpp
   Net2Packet.h
+  ObjectSerializer.h
+  ObjectSerializerTraits.h
   PKey.h
   PKey.cpp
   Platform.actor.cpp
@@ -60,6 +63,7 @@ set(FLOW_SRCS
   Platform.h
   Profiler.actor.cpp
   Profiler.h
+  ProtocolVersion.h
   ScopeExit.h
   SendBufferIterator.h
   SimpleOpt.h
@@ -84,6 +88,8 @@ set(FLOW_SRCS
   TypeTraits.h
   UnitTest.cpp
   UnitTest.h
+  Util.h
+  WriteOnlySet.h
   WriteOnlySet.actor.cpp
   XmlTraceLogFormatter.cpp
   XmlTraceLogFormatter.h
@@ -95,7 +101,7 @@ set(FLOW_SRCS
   crc32_wrapper.h
   crc32_wrapper.c
   error_definitions.h
-  ${CMAKE_CURRENT_BINARY_DIR}/SourceVersion.h
+  ${CMAKE_CURRENT_BINARY_DIR}/include/flow/SourceVersion.h
   flat_buffers.cpp
   flat_buffers.h
   flow.cpp
@@ -107,9 +113,11 @@ set(FLOW_SRCS
   rte_memcpy.h
   serialize.cpp
   serialize.h
+  sse2neon.h
   stacktrace.h
   test_memcpy.cpp
   test_memcpy_perf.cpp
+  unactorcompiler.h
   version.cpp
   xxhash.c
   xxhash.h)
@@ -133,8 +141,9 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
   list(APPEND FLOW_SRCS aarch64/memcmp.S aarch64/memcpy.S)
 endif()
 
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/SourceVersion.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/SourceVersion.h)
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/config.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/config.h)
+make_directory(${CMAKE_CURRENT_BINARY_DIR}/include/flow)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/SourceVersion.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/include/flow/SourceVersion.h)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/config.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/include/flow/config.h)
 
 add_flow_target(STATIC_LIBRARY NAME flow SRCS ${FLOW_SRCS})
 target_link_libraries(flow PRIVATE stacktrace)

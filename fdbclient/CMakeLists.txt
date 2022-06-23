@@ -171,6 +171,9 @@ set(FDBCLIENT_SRCS
   zipf.c
   zipf.h)
 
+message(STATUS "FDB version is ${FDB_VERSION}")
+message(STATUS "FDB package name is ${FDB_PACKAGE_NAME}")
+
 set(options_srcs ${CMAKE_CURRENT_BINARY_DIR}/FDBOptions.g.cpp)
 
 vexillographer_compile(TARGET fdboptions LANG cpp OUT ${CMAKE_CURRENT_BINARY_DIR}/FDBOptions.g
@@ -224,6 +227,7 @@ if(WITH_AWS_BACKUP)
 endif()
 
 add_flow_target(STATIC_LIBRARY NAME fdbclient SRCS ${FDBCLIENT_SRCS} ADDL_SRCS ${options_srcs})
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/versions.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/include/fdbclient/versions.h)
 add_dependencies(fdbclient fdboptions)
 target_link_libraries(fdbclient PUBLIC fdbrpc msgpack)
 
