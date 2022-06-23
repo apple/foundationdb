@@ -25,6 +25,7 @@
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
+#include "fdbserver/QuietDatabase.h"
 #include "flow/Arena.h"
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
@@ -33,6 +34,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct CycleWorkload : TestWorkload {
+	Version maxCommittedVersion = 0;
 	int actorCount, nodeCount;
 	double testDuration, transactionsPerSecond, minExpectedTransactionsPerSecond, traceParentProbability;
 	Key keyPrefix;
@@ -135,6 +137,7 @@ struct CycleWorkload : TestWorkload {
 						// TraceEvent("CyclicTest").detail("Key", self->key(r3).toString()).detail("Value", self->value(r2).toString());
 
 						wait(tr.commit());
+						self->maxCommittedVersion = std::max(self->maxCommittedVersion, tr.getCommittedVersion());
 						// TraceEvent("CycleCommit");
 						break;
 					} catch (Error& e) {
@@ -245,6 +248,7 @@ struct CycleWorkload : TestWorkload {
 			    .detail("TransactionGoal", self->transactionsPerSecond * self->testDuration);
 			ok = false;
 		}
+		TraceEvent(SevDebug, "CycleClient").detail("MaxCommittedVersion", self->maxCommittedVersion);
 		if (!self->clientId) {
 			// One client checks the validity of the cycle
 			state Transaction tr(cx);

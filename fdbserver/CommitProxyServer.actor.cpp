@@ -795,7 +795,7 @@ ACTOR Future<Void> preresolutionProcessing(CommitBatchContext* self) {
 	double queuingDelay = g_network->now() - timeStart;
 	pProxyCommitData->stats.commitBatchQueuingDist->sampleSeconds(queuingDelay);
 	if ((queuingDelay > (double)SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS / SERVER_KNOBS->VERSIONS_PER_SECOND ||
-	     (g_network->isSimulated() && BUGGIFY_WITH_PROB(0.01))) &&
+	     (g_network->isSimulated() && BUGGIFY_WITH_PROB(0.0))) &&
 	    SERVER_KNOBS->PROXY_REJECT_BATCH_QUEUED_TOO_LONG && canReject(trs)) {
 		// Disabled for the recovery transaction. otherwise, recovery can't finish and keeps doing more recoveries.
 		TEST(true); // Reject transactions in the batch
