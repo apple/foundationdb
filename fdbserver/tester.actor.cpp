@@ -709,6 +709,7 @@ ACTOR Future<Void> testerServerWorkload(WorkloadRequest work,
 
 		endRole(Role::TESTER, workIface.id(), "Complete");
 	} catch (Error& e) {
+		TraceEvent(SevDebug, "TesterWorkloadFailed").errorUnsuppressed(e);
 		if (!replied) {
 			if (e.code() == error_code_test_specification_invalid)
 				work.reply.sendError(e);

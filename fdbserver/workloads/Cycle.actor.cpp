@@ -90,6 +90,7 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 			return "CycleWorkload";
 		}
 	}
+
 	Future<Void> setup(Database const& cx) override {
 		if constexpr (MultiTenancy) {
 			FlowTransport::transport().authorizationTokenAdd(this->signedToken);
