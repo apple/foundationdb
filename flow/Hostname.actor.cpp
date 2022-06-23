@@ -50,7 +50,11 @@ ACTOR Future<Optional<NetworkAddress>> resolveImpl(Hostname* self) {
 			address.flags |= NetworkAddress::FLAG_TLS;
 		}
 		return address;
-	} catch (...) {
+	} catch (Error& e) {
+		TraceEvent("RenxuanResolveError").error(e).log();
+		if (e.code() == error_code_actor_cancelled) {
+			throw e;
+		}
 		return Optional<NetworkAddress>();
 	}
 }

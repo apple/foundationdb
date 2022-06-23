@@ -965,6 +965,10 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 			clientInfo->setUnconditional(ni);
 			successIndex = index;
 		} else {
+			if (rep.getError().code() == error_code_actor_cancelled) {
+				TraceEvent("RenxuanMonitorProxiesCancelled").log();
+				throw actor_cancelled();
+			}
 			TEST(rep.getError().code() == error_code_failed_to_progress); // Coordinator cant talk to cluster controller
 			TEST(rep.getError().code() == error_code_lookup_failed); // Coordinator hostname resolving failure
 			index = (index + 1) % coordinatorsSize;

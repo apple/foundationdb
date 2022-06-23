@@ -6926,10 +6926,20 @@ Future<Standalone<StringRef>> Transaction::getVersionstamp() {
 
 // Gets the protocol version reported by a coordinator via the protocol info interface
 ACTOR Future<ProtocolVersion> getCoordinatorProtocol(NetworkAddress coordinatorAddress) {
-	RequestStream<ProtocolInfoRequest> requestStream(
-	    Endpoint::wellKnown({ coordinatorAddress }, WLTOKEN_PROTOCOL_INFO));
-	ProtocolInfoReply reply = wait(retryBrokenPromise(requestStream, ProtocolInfoRequest{}));
-	return reply.version;
+	try {
+		try {
+			RequestStream<ProtocolInfoRequest> requestStream(
+				Endpoint::wellKnown({ coordinatorAddress }, WLTOKEN_PROTOCOL_INFO));
+			ProtocolInfoReply reply = wait(retryBrokenPromise(requestStream, ProtocolInfoRequest{}));
+			return reply.version;
+		} catch(Error& e) {
+			TraceEvent("RenxuanGetCoordinatorProtocolError1").error(e).log();
+			throw e;
+		}
+	} catch(...) {
+		TraceEvent("RenxuanGetCoordinatorProtocolError2").log();
+		throw;
+	}
 }
 
 // Gets the protocol version reported by a coordinator in its connect packet

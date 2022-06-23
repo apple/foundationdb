@@ -1892,6 +1892,8 @@ ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpoint_impl(Net2* s
 	try {
 		wait(ready(result));
 	} catch (Error& e) {
+		tcpResolver.cancel();
+		TraceEvent("RenxuanAsyncResolveCancelled").error(e).log();
 		if (e.code() == error_code_lookup_failed) {
 			self->dnsCache.remove(host, service);
 		}

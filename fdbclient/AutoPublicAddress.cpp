@@ -62,10 +62,32 @@ IPAddress determinePublicIPAutomatically(ClusterConnectionString& ccs) {
 			socket.close();
 
 			return ip;
+		} catch (Error& e) {
+			++index;
+			TraceEvent("RenxuanDeterminePublicIPAutomatically1").error(e).detail("Index", index).detail("Size", size).log();
+			if (index == size) {
+				fprintf(stderr, "Error determining public address 1 %d %d: %s\n", index, size, e.what());
+				throw bind_failed();
+			}
+		} catch (boost::system::system_error& e) {
+			++index;
+			TraceEvent("RenxuanDeterminePublicIPAutomatically2").detail("Error", e.what()).detail("Index", index).detail("Size", size).log();
+			if (index == size) {
+				fprintf(stderr, "Error determining public address 2 %d %d: %s\n", index, size, e.what());
+				throw bind_failed();
+			}
+		} catch (std::exception& e) {
+			++index;
+			TraceEvent("RenxuanDeterminePublicIPAutomatically3").detail("Error", e.what()).detail("Index", index).detail("Size", size).log();
+			if (index == size) {
+				fprintf(stderr, "Error determining public address 3 %d %d: %s\n", index, size, e.what());
+				throw bind_failed();
+			}
 		} catch (...) {
 			++index;
+			TraceEvent("RenxuanDeterminePublicIPAutomatically4").detail("Index", index).detail("Size", size).log();
 			if (index == size) {
-				fprintf(stderr, "Error determining public address.\n");
+				fprintf(stderr, "Error determining public address 4 %d %d.\n", index, size);
 				throw bind_failed();
 			}
 		}
