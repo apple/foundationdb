@@ -48,6 +48,8 @@ struct TenantMapEntry {
 	int64_t id;
 	Key prefix;
 
+	constexpr static int ROOT_PREFIX_SIZE = sizeof(id);
+
 private:
 	void initPrefix(KeyRef subspace) {
 		ASSERT(id >= 0);

@@ -144,7 +144,8 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		return Void();
 	}
 
-	static void validateRecord(int expectedId, const MappedKeyValueRef* it, GetMappedRangeWorkload* self) {
+	// Return true if need to retry.
+	static bool validateRecord(int expectedId, const MappedKeyValueRef* it, GetMappedRangeWorkload* self) {
 		//		std::cout << "validateRecord expectedId " << expectedId << " it->key " << printable(it->key) << "
 		// indexEntryKey(expectedId) " << printable(indexEntryKey(expectedId)) << std::endl;
 		ASSERT(it->key == indexEntryKey(expectedId));
@@ -155,7 +156,12 @@ struct GetMappedRangeWorkload : ApiWorkload {
 			auto& getRange = std::get<GetRangeReqAndResultRef>(it->reqAndResult);
 			auto& rangeResult = getRange.result;
 			//					std::cout << "rangeResult.size()=" << rangeResult.size() << std::endl;
-			ASSERT(rangeResult.more == false);
+			// In the future, we may be able to do the continuation more efficiently by combining partial results
+			// together and then validate.
+			if (rangeResult.more) {
+				// Retry if the underlying request is not fully completed.
+				return true;
+			}
 			ASSERT(rangeResult.size() == SPLIT_SIZE);
 			for (int split = 0; split < SPLIT_SIZE; split++) {
 				auto& kv = rangeResult[split];
@@ -174,6 +180,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 			ASSERT(getValue.result.present());
 			ASSERT(getValue.result.get() == recordValue(expectedId));
 		}
+		return false;
 	}
 
 	ACTOR Future<MappedRangeResult> scanMappedRangeWithLimits(Database cx,
@@ -200,9 +207,16 @@ struct GetMappedRangeWorkload : ApiWorkload {
 				std::cout << "result.more=" << result.more << std::endl;
 				ASSERT(result.size() <= limit);
 				int expectedId = expectedBeginId;
+				bool needRetry = false;
 				for (const MappedKeyValueRef* it = result.begin(); it != result.end(); it++) {
-					validateRecord(expectedId, it, self);
+					if (validateRecord(expectedId, it, self)) {
+						needRetry = true;
+						break;
+					}
 					expectedId++;
+				}
+				if (needRetry) {
+					continue;
 				}
 				std::cout << "finished scanMappedRangeWithLimits" << std::endl;
 				return result;

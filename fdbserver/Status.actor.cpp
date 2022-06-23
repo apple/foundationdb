@@ -413,10 +413,11 @@ static JsonBuilderObject getBounceImpactInfo(int recoveryStatusCode) {
 }
 
 struct MachineMemoryInfo {
-	double memoryUsage;
+	double memoryUsage; // virtual memory usage
+	double rssUsage; // RSS memory usage
 	double aggregateLimit;
 
-	MachineMemoryInfo() : memoryUsage(0), aggregateLimit(0) {}
+	MachineMemoryInfo() : memoryUsage(0), rssUsage(0), aggregateLimit(0) {}
 
 	bool valid() { return memoryUsage >= 0; }
 	void invalidate() { memoryUsage = -1; }
@@ -782,6 +783,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 			if (memInfo->second.valid()) {
 				if (processMetrics.size() > 0 && programStart.size() > 0) {
 					memInfo->second.memoryUsage += processMetrics.getDouble("Memory");
+					memInfo->second.rssUsage += processMetrics.getDouble("ResidentMemory");
 					memInfo->second.aggregateLimit += programStart.getDouble("MemoryLimit");
 				} else
 					memInfo->second.invalidate();
@@ -830,7 +832,8 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 		}
 	}
 
-	for (auto& coordinator : coordinators.ccr->getConnectionString().coordinators()) {
+	std::vector<NetworkAddress> addressVec = wait(coordinators.ccr->getConnectionString().tryResolveHostnames());
+	for (const auto& coordinator : addressVec) {
 		roles.addCoordinatorRole(coordinator);
 	}
 
@@ -971,6 +974,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 				statusObj["network"] = networkObj;
 
 				memoryObj.setKeyRawNumber("used_bytes", processMetrics.getValue("Memory"));
+				memoryObj.setKeyRawNumber("rss_bytes", processMetrics.getValue("ResidentMemory"));
 				memoryObj.setKeyRawNumber("unused_allocated_memory", processMetrics.getValue("UnusedAllocatedMemory"));
 			}
 
@@ -1003,7 +1007,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 				if (machineMemInfo.valid() && memoryLimit > 0) {
 					ASSERT(machineMemInfo.aggregateLimit > 0);
 					int64_t memory =
-					    (availableMemory + machineMemInfo.memoryUsage) * memoryLimit / machineMemInfo.aggregateLimit;
+					    (availableMemory + machineMemInfo.rssUsage) * memoryLimit / machineMemInfo.aggregateLimit;
 					memoryObj["available_bytes"] = std::min<int64_t>(std::max<int64_t>(memory, 0), memoryLimit);
 				}
 			}
@@ -1653,8 +1657,7 @@ static JsonBuilderObject configurationFetcher(Optional<DatabaseConfiguration> co
 			}
 			statusObj["excluded_servers"] = excludedServersArr;
 		}
-		std::vector<ClientLeaderRegInterface> coordinatorLeaderServers = coordinators.clientLeaderServers;
-		int count = coordinatorLeaderServers.size();
+		int count = coordinators.clientLeaderServers.size();
 		statusObj["coordinators_count"] = count;
 	} catch (Error&) {
 		incomplete_reasons->insert("Could not retrieve all configuration status information.");
@@ -2469,7 +2472,8 @@ static JsonBuilderArray tlogFetcher(int* logFaultTolerance,
 
 static JsonBuilderObject faultToleranceStatusFetcher(DatabaseConfiguration configuration,
                                                      ServerCoordinators coordinators,
-                                                     std::vector<WorkerDetails>& workers,
+                                                     const std::vector<NetworkAddress>& coordinatorAddresses,
+                                                     const std::vector<WorkerDetails>& workers,
                                                      int extraTlogEligibleZones,
                                                      int minStorageReplicasRemaining,
                                                      int oldLogFaultTolerance,
@@ -2485,11 +2489,11 @@ static JsonBuilderObject faultToleranceStatusFetcher(DatabaseConfiguration confi
 	int maxCoordinatorFailures = (coordinators.clientLeaderServers.size() - 1) / 2;
 
 	std::map<NetworkAddress, StringRef> workerZones;
-	for (auto& worker : workers) {
+	for (const auto& worker : workers) {
 		workerZones[worker.interf.address()] = worker.interf.locality.zoneId().orDefault(LiteralStringRef(""));
 	}
 	std::map<StringRef, int> coordinatorZoneCounts;
-	for (auto& coordinator : coordinators.ccr->getConnectionString().coordinators()) {
+	for (const auto& coordinator : coordinatorAddresses) {
 		auto zone = workerZones[coordinator];
 		coordinatorZoneCounts[zone] += 1;
 	}
@@ -3020,6 +3024,9 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			state std::vector<JsonBuilderObject> workerStatuses = wait(getAll(futures2));
 			wait(success(primaryDCFO));
 
+			std::vector<NetworkAddress> coordinatorAddresses =
+			    wait(coordinators.ccr->getConnectionString().tryResolveHostnames());
+
 			int logFaultTolerance = 100;
 			if (db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
 				statusObj["logs"] = tlogFetcher(&logFaultTolerance, db, address_workers);
@@ -3029,6 +3036,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			statusObj["fault_tolerance"] =
 			    faultToleranceStatusFetcher(configuration.get(),
 			                                coordinators,
+			                                coordinatorAddresses,
 			                                workers,
 			                                extraTlogEligibleZones,
 			                                minStorageReplicasRemaining,

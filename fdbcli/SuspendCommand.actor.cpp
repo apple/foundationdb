@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include "boost/algorithm/string.hpp"
+
 #include "fdbcli/fdbcli.actor.h"
 
 #include "fdbclient/FDBOptions.g.h"
@@ -37,8 +39,10 @@ ACTOR Future<bool> suspendCommandActor(Reference<IDatabase> db,
                                        std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface) {
 	ASSERT(tokens.size() >= 1);
 	state bool result = true;
+	state std::string addressesStr;
 	if (tokens.size() == 1) {
 		// initialize worker interfaces
+		address_interface->clear();
 		wait(getWorkerInterfaces(tr, address_interface));
 		if (address_interface->size() == 0) {
 			printf("\nNo addresses can be suspended.\n");
@@ -72,19 +76,23 @@ ACTOR Future<bool> suspendCommandActor(Reference<IDatabase> db,
 				printUsage(tokens[0]);
 				result = false;
 			} else {
-				int64_t timeout_ms = seconds * 1000;
-				tr->setOption(FDBTransactionOptions::TIMEOUT, StringRef((uint8_t*)&timeout_ms, sizeof(int64_t)));
+				std::vector<std::string> addressesVec;
 				for (i = 2; i < tokens.size(); i++) {
-					int64_t suspendRequestSent =
-					    wait(safeThreadFutureToFuture(db->rebootWorker(tokens[i], false, static_cast<int>(seconds))));
-					if (!suspendRequestSent) {
-						result = false;
-						fprintf(stderr,
-						        "ERROR: failed to send request to suspend process `%s'.\n",
-						        tokens[i].toString().c_str());
-					}
+					addressesVec.push_back(tokens[i].toString());
 				}
-				printf("Attempted to suspend %zu processes\n", tokens.size() - 2);
+				addressesStr = boost::algorithm::join(addressesVec, ",");
+				int64_t suspendRequestSent =
+				    wait(safeThreadFutureToFuture(db->rebootWorker(addressesStr, false, static_cast<int>(seconds))));
+				if (!suspendRequestSent) {
+					result = false;
+					fprintf(
+					    stderr,
+					    "ERROR: failed to send requests to suspend processes `%s', please run the `suspend’ command "
+					    "to fetch latest addresses.\n",
+					    addressesStr.c_str());
+				} else {
+					printf("Attempted to suspend %zu processes\n", tokens.size() - 2);
+				}
 			}
 		}
 	}

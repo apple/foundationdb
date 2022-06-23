@@ -399,6 +399,7 @@ struct ConnectPacket {
 		serializer(ar, connectPacketLength);
 		if (connectPacketLength > sizeof(ConnectPacket) - sizeof(connectPacketLength)) {
 			ASSERT(!g_network->isSimulated());
+			TraceEvent("SerializationFailed").detail("PacketLength", connectPacketLength).backtrace();
 			throw serialization_failed();
 		}
 
@@ -736,6 +737,9 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 				    .errorUnsuppressed(e)
 				    .suppressFor(1.0)
 				    .detail("PeerAddr", self->destination);
+
+				// Since the connection has closed, we need to check the protocol version the next time we connect
+				self->incompatibleProtocolVersionNewer = false;
 			}
 
 			if (self->destination.isPublic() &&
@@ -1777,8 +1781,14 @@ Reference<AsyncVar<bool>> FlowTransport::getDegraded() {
 //
 // Note that this function does not establish a connection to the peer. In order to obtain a peer's protocol
 // version, some other mechanism should be used to connect to that peer.
-Reference<AsyncVar<Optional<ProtocolVersion>> const> FlowTransport::getPeerProtocolAsyncVar(NetworkAddress addr) {
-	return self->peers.at(addr)->protocolVersion;
+Optional<Reference<AsyncVar<Optional<ProtocolVersion>> const>> FlowTransport::getPeerProtocolAsyncVar(
+    NetworkAddress addr) {
+	auto itr = self->peers.find(addr);
+	if (itr != self->peers.end()) {
+		return itr->second->protocolVersion;
+	} else {
+		return Optional<Reference<AsyncVar<Optional<ProtocolVersion>> const>>();
+	}
 }
 
 void FlowTransport::resetConnection(NetworkAddress address) {

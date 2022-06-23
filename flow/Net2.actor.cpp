@@ -193,13 +193,13 @@ public:
 		if (thread_network == this)
 			stopImmediately();
 		else
-			onMainThreadVoid([this] { this->stopImmediately(); }, nullptr);
+			onMainThreadVoid([this] { this->stopImmediately(); });
 	}
 	void addStopCallback(std::function<void()> fn) override {
 		if (thread_network == this)
 			stopCallbacks.emplace_back(std::move(fn));
 		else
-			onMainThreadVoid([this, fn] { this->stopCallbacks.emplace_back(std::move(fn)); }, nullptr);
+			onMainThreadVoid([this, fn] { this->stopCallbacks.emplace_back(std::move(fn)); });
 	}
 
 	bool isSimulated() const override { return false; }
@@ -1432,6 +1432,8 @@ void Net2::run() {
 
 	thread_network = this;
 
+	unsigned int tasksSinceReact = 0;
+
 #ifdef WIN32
 	if (timeBeginPeriod(1) != TIMERR_NOERROR)
 		TraceEvent(SevError, "TimeBeginPeriodError").log();
@@ -1500,6 +1502,7 @@ void Net2::run() {
 		taskBegin = timer_monotonic();
 		trackAtPriority(TaskPriority::ASIOReactor, taskBegin);
 		reactor.react();
+		tasksSinceReact = 0;
 
 		updateNow();
 		double now = this->currentTime;
@@ -1541,6 +1544,7 @@ void Net2::run() {
 			ready.pop();
 
 			try {
+				++tasksSinceReact;
 				(*task)();
 			} catch (Error& e) {
 				TraceEvent(SevError, "TaskError").error(e);
@@ -1554,11 +1558,12 @@ void Net2::run() {
 			}
 
 			// attempt to empty out the IO backlog
-			if (ready.size() % FLOW_KNOBS->ITERATIONS_PER_REACTOR_CHECK == 1) {
+			if (tasksSinceReact >= FLOW_KNOBS->TASKS_PER_REACTOR_CHECK) {
 				if (runFunc) {
 					runFunc();
 				}
 				reactor.react();
+				tasksSinceReact = 0;
 			}
 
 			double tscNow = timestampCounter();
@@ -1856,37 +1861,42 @@ ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpoint_impl(Net2* s
 	Promise<std::vector<NetworkAddress>> promise;
 	state Future<std::vector<NetworkAddress>> result = promise.getFuture();
 
-	tcpResolver.async_resolve(tcp::resolver::query(host, service),
-	                          [=](const boost::system::error_code& ec, tcp::resolver::iterator iter) {
-		                          if (ec) {
-			                          self->dnsCache.remove(host, service);
-			                          promise.sendError(lookup_failed());
-			                          return;
-		                          }
+	tcpResolver.async_resolve(
+	    host, service, [promise](const boost::system::error_code& ec, tcp::resolver::iterator iter) {
+		    if (ec) {
+			    promise.sendError(lookup_failed());
+			    return;
+		    }
 
-		                          std::vector<NetworkAddress> addrs;
+		    std::vector<NetworkAddress> addrs;
 
-		                          tcp::resolver::iterator end;
-		                          while (iter != end) {
-			                          auto endpoint = iter->endpoint();
-			                          auto addr = endpoint.address();
-			                          if (addr.is_v6()) {
-				                          addrs.emplace_back(IPAddress(addr.to_v6().to_bytes()), endpoint.port());
-			                          } else {
-				                          addrs.emplace_back(addr.to_v4().to_ulong(), endpoint.port());
-			                          }
-			                          ++iter;
-		                          }
+		    tcp::resolver::iterator end;
+		    while (iter != end) {
+			    auto endpoint = iter->endpoint();
+			    auto addr = endpoint.address();
+			    if (addr.is_v6()) {
+				    addrs.emplace_back(IPAddress(addr.to_v6().to_bytes()), endpoint.port());
+			    } else {
+				    addrs.emplace_back(addr.to_v4().to_ulong(), endpoint.port());
+			    }
+			    ++iter;
+		    }
 
-		                          if (addrs.empty()) {
-			                          self->dnsCache.remove(host, service);
-			                          promise.sendError(lookup_failed());
-		                          } else {
-			                          promise.send(addrs);
-		                          }
-	                          });
+		    if (addrs.empty()) {
+			    promise.sendError(lookup_failed());
+		    } else {
+			    promise.send(addrs);
+		    }
+	    });
 
-	wait(ready(result));
+	try {
+		wait(ready(result));
+	} catch (Error& e) {
+		if (e.code() == error_code_lookup_failed) {
+			self->dnsCache.remove(host, service);
+		}
+		throw e;
+	}
 	tcpResolver.cancel();
 	std::vector<NetworkAddress> ret = result.get();
 	self->dnsCache.add(host, service, ret);
@@ -1900,9 +1910,11 @@ Future<std::vector<NetworkAddress>> Net2::resolveTCPEndpoint(const std::string& 
 
 Future<std::vector<NetworkAddress>> Net2::resolveTCPEndpointWithDNSCache(const std::string& host,
                                                                          const std::string& service) {
-	Optional<std::vector<NetworkAddress>> cache = dnsCache.find(host, service);
-	if (cache.present()) {
-		return cache.get();
+	if (FLOW_KNOBS->ENABLE_COORDINATOR_DNS_CACHE) {
+		Optional<std::vector<NetworkAddress>> cache = dnsCache.find(host, service);
+		if (cache.present()) {
+			return cache.get();
+		}
 	}
 	return resolveTCPEndpoint_impl(this, host, service);
 }
@@ -1935,9 +1947,11 @@ std::vector<NetworkAddress> Net2::resolveTCPEndpointBlocking(const std::string& 
 
 std::vector<NetworkAddress> Net2::resolveTCPEndpointBlockingWithDNSCache(const std::string& host,
                                                                          const std::string& service) {
-	Optional<std::vector<NetworkAddress>> cache = dnsCache.find(host, service);
-	if (cache.present()) {
-		return cache.get();
+	if (FLOW_KNOBS->ENABLE_COORDINATOR_DNS_CACHE) {
+		Optional<std::vector<NetworkAddress>> cache = dnsCache.find(host, service);
+		if (cache.present()) {
+			return cache.get();
+		}
 	}
 	return resolveTCPEndpointBlocking(host, service);
 }

@@ -70,6 +70,8 @@ struct ProxyStats {
 
 	LatencySample commitBatchingWindowSize;
 
+	LatencySample computeLatency;
+
 	Future<Void> logger;
 
 	int64_t maxComputeNS;
@@ -123,6 +125,10 @@ struct ProxyStats {
 	                             id,
 	                             SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
 	                             SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+	    computeLatency("ComputeLatency",
+	                   id,
+	                   SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+	                   SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
 	    maxComputeNS(0), minComputeNS(1e12),
 	    commitBatchQueuingDist(Histogram::getHistogram(LiteralStringRef("CommitProxy"),
 	                                                   LiteralStringRef("CommitBatchQueuing"),
@@ -219,6 +225,7 @@ struct ProxyCommitData {
 	double lastResolverReset;
 
 	std::map<TenantName, TenantMapEntry> tenantMap;
+	int localTLogCount = -1;
 
 	// The tag related to a storage server rarely change, so we keep a vector of tags for each key range to be slightly
 	// more CPU efficient. When a tag related to a storage server does change, we empty out all of these vectors to

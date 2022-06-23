@@ -31,6 +31,7 @@ static constexpr int _PAGE_SIZE = 4096;
 
 class ServerKnobs : public KnobsImpl<ServerKnobs> {
 public:
+	bool ALLOW_DANGEROUS_KNOBS;
 	// Versions
 	int64_t VERSIONS_PER_SECOND;
 	int64_t MAX_VERSIONS_IN_FLIGHT;
@@ -43,6 +44,7 @@ public:
 	                                  // often, so that versions always advance smoothly
 	double MAX_VERSION_RATE_MODIFIER;
 	int64_t MAX_VERSION_RATE_OFFSET;
+	bool ENABLE_VERSION_VECTOR_HA_OPTIMIZATION;
 
 	// TLogs
 	bool PEEK_USING_STREAMING;
@@ -373,6 +375,7 @@ public:
 	int MAX_COMMIT_UPDATES;
 	double MAX_PROXY_COMPUTE;
 	double MAX_COMPUTE_PER_OPERATION;
+	double MAX_COMPUTE_DURATION_LOG_CUTOFF;
 	int PROXY_COMPUTE_BUCKETS;
 	double PROXY_COMPUTE_GROWTH_RATE;
 	int TXN_STATE_SEND_AMOUNT;
@@ -479,6 +482,8 @@ public:
 	                                             // be determined as degraded worker.
 	int CC_SATELLITE_DEGRADATION_MIN_BAD_SERVER; // The minimum amount of degraded server in satellite DC to be
 	                                             // determined as degraded satellite.
+	double CC_THROTTLE_SINGLETON_RERECRUIT_INTERVAL; // The interval to prevent re-recruiting the same singleton if a
+	                                                 // recruiting fight between two cluster controllers occurs.
 
 	// Knobs used to select the best policy (via monte carlo)
 	int POLICY_RATING_TESTS; // number of tests per policy (in order to compare)

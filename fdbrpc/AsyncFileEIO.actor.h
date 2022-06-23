@@ -538,7 +538,7 @@ private:
 	static void eio_want_poll() {
 		want_poll = 1;
 		// SOMEDAY: nullptr for deferred error, no analysis of correctness (itp)
-		onMainThreadVoid([]() { poll_eio(); }, nullptr, TaskPriority::PollEIO);
+		onMainThreadVoid([]() { poll_eio(); }, TaskPriority::PollEIO);
 	}
 
 	static int eio_callback(eio_req* req) {

@@ -85,6 +85,27 @@ public class MappedKeyValue extends KeyValue {
 	}
 
 	@Override
+	public boolean equals(Object obj) {
+		if (obj == null)
+			return false;
+		if (obj == this)
+			return true;
+		if (!(obj instanceof MappedKeyValue))
+			return false;
+
+		MappedKeyValue rhs = (MappedKeyValue) obj;
+		return Arrays.equals(rangeBegin, rhs.rangeBegin)
+				&& Arrays.equals(rangeEnd, rhs.rangeEnd)
+				&& Objects.equals(rangeResult, rhs.rangeResult);
+	}
+
+	@Override
+	public int hashCode() {
+		int hashForResult = rangeResult == null ? 0 : rangeResult.hashCode();
+		return 17 + (29 * hashForResult + 37 * Arrays.hashCode(rangeBegin) + Arrays.hashCode(rangeEnd));
+	}
+
+	@Override
 	public String toString() {
 		final StringBuilder sb = new StringBuilder("MappedKeyValue{");
 		sb.append("rangeBegin=").append(ByteArrayUtil.printable(rangeBegin));

@@ -44,6 +44,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( HOSTNAME_RESOLVE_MAX_INTERVAL,                       1.0 );
 	init( HOSTNAME_RECONNECT_INIT_INTERVAL,                    .05 );
 	init( HOSTNAME_RECONNECT_MAX_INTERVAL,                     1.0 );
+	init( ENABLE_COORDINATOR_DNS_CACHE,                      false ); if( randomize && BUGGIFY ) ENABLE_COORDINATOR_DNS_CACHE = true;
 	init( CACHE_REFRESH_INTERVAL_WHEN_ALL_ALTERNATIVES_FAILED, 1.0 );
 
 	init( DELAY_JITTER_OFFSET,                                 0.9 );
@@ -178,7 +179,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( MIN_LOGGED_PRIORITY_BUSY_FRACTION,                  0.05 );
 	init( CERT_FILE_MAX_SIZE,                      5 * 1024 * 1024 );
 	init( READY_QUEUE_RESERVED_SIZE,                          8192 );
-	init( ITERATIONS_PER_REACTOR_CHECK,                        100 );
+	init( TASKS_PER_REACTOR_CHECK,                             100 );
 
 	//Network
 	init( PACKET_LIMIT,                                  100LL<<20 );
@@ -217,6 +218,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( MAX_TRACE_EVENT_LENGTH,                             4000 ); // If the value of this is changed, the corresponding default in Trace.cpp should be changed as well
 	init( ALLOCATION_TRACING_ENABLED,                         true );
 	init( SIM_SPEEDUP_AFTER_SECONDS,                           450 );
+	init( MAX_TRACE_LINES,                               1'000'000 );
 	init( CODE_COV_TRACE_EVENT_SEVERITY,                        10 ); // Code coverage TraceEvent severity level
 
 	//TDMetrics
