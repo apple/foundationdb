@@ -358,6 +358,11 @@ if(NOT WIN32)
   target_compile_options(fdb_sqlite BEFORE PRIVATE -w) # disable warnings for third party
 endif()
 
+# SQLite won't build with -ffast-math
+if(ICX)
+  target_compile_options(fdb_sqlite PRIVATE -fno-fast-math)
+endif()
+
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/workloads)
 
 add_flow_target(EXECUTABLE NAME fdbserver SRCS ${FDBSERVER_SRCS})
