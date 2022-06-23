@@ -227,7 +227,7 @@ void DatabaseContext::getLatestCommitVersions(const Reference<LocationInfo>& loc
                                               Reference<TransactionState> info,
                                               VersionVector& latestCommitVersions) {
 	latestCommitVersions.clear();
-
+return;
 	if (info->debugID.present()) {
 		g_traceBatch.addEvent("TransactionDebug", info->debugID.get().first(), "NativeAPI.getLatestCommitVersions");
 	}
@@ -3463,9 +3463,9 @@ ACTOR Future<Version> waitForCommittedVersion(Database cx, Version version, Span
 					if (v.midShardSize > 0)
 						cx->smoothMidShardSize.setTotal(v.midShardSize);
 					if (cx->isCurrentGrvProxy(v.proxyId)) {
-						cx->ssVersionVectorCache.applyDelta(v.ssVersionVectorDelta);
+//						cx->ssVersionVectorCache.applyDelta(v.ssVersionVectorDelta);
 					} else {
-						cx->ssVersionVectorCache.clear();
+//						cx->ssVersionVectorCache.clear();
 					}
 					if (v.version >= version)
 						return v.version;
@@ -3495,9 +3495,9 @@ ACTOR Future<Version> getRawVersion(Reference<TransactionState> trState) {
 			                                                     trState->cx->ssVersionVectorCache.getMaxVersion()),
 			                               trState->cx->taskID))) {
 				if (trState->cx->isCurrentGrvProxy(v.proxyId)) {
-					trState->cx->ssVersionVectorCache.applyDelta(v.ssVersionVectorDelta);
+//					trState->cx->ssVersionVectorCache.applyDelta(v.ssVersionVectorDelta);
 				} else {
-					trState->cx->ssVersionVectorCache.clear();
+//					trState->cx->ssVersionVectorCache.clear();
 				}
 				return v.version;
 			}
@@ -6607,7 +6607,7 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion(SpanID parentSpan,
 					ASSERT(v.version > 0);
 					cx->minAcceptableReadVersion = std::min(cx->minAcceptableReadVersion, v.version);
 					if (cx->isCurrentGrvProxy(v.proxyId)) {
-						cx->ssVersionVectorCache.applyDelta(v.ssVersionVectorDelta);
+//						cx->ssVersionVectorCache.applyDelta(v.ssVersionVectorDelta);
 					} else {
 						continue; // stale GRV reply, retry
 					}
@@ -6661,7 +6661,7 @@ ACTOR Future<Void> readVersionBatcher(DatabaseContext* cx,
 	loop {
 		send_batch = false;
 		choose {
-			when(DatabaseContext::VersionRequest req = waitNext(versionStream)) {
+                   when(DatabaseContext::VersionRequest req = waitNext(versionStream)) {
 				if (req.debugID.present()) {
 					if (!debugID.present()) {
 						debugID = nondeterministicRandom()->randomUniqueID();
@@ -6797,9 +6797,9 @@ ACTOR Future<Version> extractReadVersion(Reference<TransactionState> trState,
 
 	metadataVersion.send(rep.metadataVersion);
 	if (trState->cx->isCurrentGrvProxy(rep.proxyId)) {
-		trState->cx->ssVersionVectorCache.applyDelta(rep.ssVersionVectorDelta);
+//		trState->cx->ssVersionVectorCache.applyDelta(rep.ssVersionVectorDelta);
 	} else {
-		trState->cx->ssVersionVectorCache.clear();
+//		trState->cx->ssVersionVectorCache.clear();
 	}
 	return rep.version;
 }
