@@ -873,7 +873,8 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 	state std::vector<ClientLeaderRegInterface> clientLeaderServers;
 
 	clientLeaderServers.reserve(coordinatorsSize);
-	for (const auto& h : cs.hostnames) {
+	for (const Hostname& h : cs.hostnames) {
+		TraceEvent("RenxuanMonitorProxies").detail("Hostname", h.toString()).log();
 		clientLeaderServers.push_back(ClientLeaderRegInterface(h));
 	}
 	for (const auto& c : cs.coords) {

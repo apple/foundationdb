@@ -6930,7 +6930,9 @@ ACTOR Future<ProtocolVersion> getCoordinatorProtocol(NetworkAddress coordinatorA
 		try {
 			RequestStream<ProtocolInfoRequest> requestStream(
 				Endpoint::wellKnown({ coordinatorAddress }, WLTOKEN_PROTOCOL_INFO));
+			TraceEvent("RenxuanGetCoordinatorProtocol1").detail("Addr", coordinatorAddress).log();
 			ProtocolInfoReply reply = wait(retryBrokenPromise(requestStream, ProtocolInfoRequest{}));
+			TraceEvent("RenxuanGetCoordinatorProtocol2").detail("Addr", coordinatorAddress).log();
 			return reply.version;
 		} catch(Error& e) {
 			TraceEvent("RenxuanGetCoordinatorProtocolError1").error(e).log();
@@ -6991,8 +6993,9 @@ ACTOR Future<ProtocolVersion> getClusterProtocolImpl(
 		} else {
 			state NetworkAddress coordinatorAddress;
 			if (coordinator->get().get().hostname.present()) {
-				Hostname h = coordinator->get().get().hostname.get();
+				state Hostname h = coordinator->get().get().hostname.get();
 				wait(store(coordinatorAddress, h.resolveWithRetry()));
+				TraceEvent("RenxuanClusterProtocolImpl").detail("Hostname", h.toString()).detail("Addr", coordinatorAddress).log();
 			} else {
 				coordinatorAddress = coordinator->get().get().getLeader.getEndpoint().getPrimaryAddress();
 			}
