@@ -2115,6 +2115,10 @@ int main(int argc, char* argv[]) {
 						}
 					}
 				}
+				g_knobs.setKnob("enable_encryption",
+				                KnobValue::create(ini.GetBoolValue("META", "enableEncryption", false)));
+				g_knobs.setKnob("enable_tlog_encryption",
+				                KnobValue::create(ini.GetBoolValue("META", "enableTLogEncryption", false)));
 			}
 			setupAndRun(dataFolder, opts.testFile, opts.restarting, (isRestoring >= 1), opts.whitelistBinPaths);
 			g_simulator.run();
