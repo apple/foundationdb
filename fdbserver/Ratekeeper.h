@@ -106,6 +106,7 @@ struct RatekeeperLimits {
 
 	int64_t bwLagTargetVersions;
 	double bwLagLimit;
+	double bwLagTime;
 
 	TransactionPriority priority;
 	std::string context;

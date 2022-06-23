@@ -649,12 +649,13 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( DURABILITY_LAG_REDUCTION_RATE,                      0.9999 );
 	init( DURABILITY_LAG_INCREASE_RATE,                        1.001 );
 	init( STORAGE_SERVER_LIST_FETCH_TIMEOUT,                    20.0 );
-	init( TARGET_BW_LAG_VERSIONS,                              200e6 );
-	init( TARGET_BW_LAG_VERSIONS_BATCH,                        150e6 );
-	init( BW_LAG_UNLIMITED_THRESHOLD,                           50e6 );
+	init( TARGET_BW_LAG_VERSIONS,                               60e6 );
+	init( TARGET_BW_LAG_VERSIONS_BATCH,                         30e6 );
+	init( BW_LAG_UNLIMITED_THRESHOLD,                           15e6 );
 	init( INITIAL_BW_LAG_MULTIPLIER,                            1.02 );
-	init( BW_LAG_REDUCTION_RATE,                              0.9999 );
+	init( BW_LAG_REDUCTION_RATE,                               0.999 );
 	init( BW_LAG_INCREASE_RATE,                                1.001 );
+	init( BW_LAG_DELAY,                                          5.0 );
 
 	init( MAX_AUTO_THROTTLED_TRANSACTION_TAGS,                     5 ); if(randomize && BUGGIFY) MAX_AUTO_THROTTLED_TRANSACTION_TAGS = 1;
 	init( MAX_MANUAL_THROTTLED_TRANSACTION_TAGS,                  40 ); if(randomize && BUGGIFY) MAX_MANUAL_THROTTLED_TRANSACTION_TAGS = 1;

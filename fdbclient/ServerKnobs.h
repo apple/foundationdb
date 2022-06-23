@@ -604,6 +604,7 @@ public:
 	double INITIAL_BW_LAG_MULTIPLIER;
 	double BW_LAG_REDUCTION_RATE;
 	double BW_LAG_INCREASE_RATE;
+	double BW_LAG_DELAY;
 
 	// disk snapshot
 	int64_t MAX_FORKED_PROCESS_OUTPUT;

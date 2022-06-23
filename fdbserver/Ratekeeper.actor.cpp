@@ -773,16 +773,20 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 	if (configuration.blobGranulesEnabled) {
 		Version blobWorkerLag =
 		    minBlobWorkerGRV + (now() - minBlobWorkerTime) * SERVER_KNOBS->VERSIONS_PER_SECOND - minBlobWorkerVersion;
+		if (blobWorkerLag < limits->bwLagTargetVersions) {
+			limits->bwLagTime = now();
+		}
 		if (blobWorkerLag > limits->bwLagTargetVersions &&
 		    actualTpsHistory.size() > SERVER_KNOBS->NEEDED_TPS_HISTORY_SAMPLES) {
-			if (limits->bwLagLimit == std::numeric_limits<double>::infinity()) {
+			if (limits->bwLagLimit == std::numeric_limits<double>::infinity() &&
+			    now() - limits->bwLagTime > SERVER_KNOBS->BW_LAG_DELAY) {
 				double maxTps = 0;
 				for (int i = 0; i < actualTpsHistory.size(); i++) {
 					maxTps = std::max(maxTps, actualTpsHistory[i]);
 				}
 				limits->bwLagLimit = SERVER_KNOBS->INITIAL_BW_LAG_MULTIPLIER * maxTps;
-			}
-			if (minBlobWorkerRate < SERVER_KNOBS->VERSIONS_PER_SECOND) {
+			} else if (limits->bwLagLimit != std::numeric_limits<double>::infinity() &&
+			           minBlobWorkerRate < SERVER_KNOBS->VERSIONS_PER_SECOND) {
 				limits->bwLagLimit = SERVER_KNOBS->BW_LAG_REDUCTION_RATE * limits->bwLagLimit;
 			}
 		} else if (limits->bwLagLimit != std::numeric_limits<double>::infinity() &&
@@ -800,7 +804,8 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 				    .detail("BWLag", blobWorkerLag)
 				    .detail("BWRate", minBlobWorkerRate)
 				    .detail("LimitsBWLagLimit", limits->bwLagLimit)
-				    .detail("LimitsTpsLimit", limits->tpsLimit);
+				    .detail("LimitsTpsLimit", limits->tpsLimit)
+				    .detail("BWLagTime", limits->bwLagTime);
 			}
 			limits->tpsLimit = limits->bwLagLimit;
 			limitReason = limitReason_t::blob_worker_lag;
@@ -1174,5 +1179,6 @@ RatekeeperLimits::RatekeeperLimits(TransactionPriority priority,
         SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS), // The read transaction life versions are expected to not
     // be durable on the storage servers
     lastDurabilityLag(0), durabilityLagLimit(std::numeric_limits<double>::infinity()),
-    bwLagTargetVersions(bwLagTargetVersions), bwLagLimit(std::numeric_limits<double>::infinity()), priority(priority),
-    context(context), rkUpdateEventCacheHolder(makeReference<EventCacheHolder>("RkUpdate" + context)) {}
+    bwLagTargetVersions(bwLagTargetVersions), bwLagLimit(std::numeric_limits<double>::infinity()), bwLagTime(0),
+    priority(priority), context(context),
+    rkUpdateEventCacheHolder(makeReference<EventCacheHolder>("RkUpdate" + context)) {}
