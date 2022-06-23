@@ -20,14 +20,13 @@
 
 #ifndef FDBCLIENT_ICLIENTAPI_H
 #define FDBCLIENT_ICLIENTAPI_H
-#include "flow/ProtocolVersion.h"
 #pragma once
 
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/Tenant.h"
-
-#include "fdbclient/Tracing.h"
+#include "flow/ProtocolVersion.h"
+#include "flow/Tracing.h"
 #include "flow/ThreadHelper.actor.h"
 
 struct VersionVector;
@@ -199,6 +198,7 @@ public:
 	virtual void stopNetwork() = 0;
 
 	virtual Reference<IDatabase> createDatabase(const char* clusterFilePath) = 0;
+	virtual Reference<IDatabase> createDatabaseFromConnectionString(const char* connectionString) = 0;
 
 	virtual void addNetworkThreadCompletionHook(void (*hook)(void*), void* hookParameter) = 0;
 };

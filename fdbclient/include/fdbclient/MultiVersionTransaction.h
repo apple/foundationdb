@@ -20,14 +20,13 @@
 
 #ifndef FDBCLIENT_MULTIVERSIONTRANSACTION_H
 #define FDBCLIENT_MULTIVERSIONTRANSACTION_H
-#include "flow/ProtocolVersion.h"
 #pragma once
 
 #include "fdbclient/fdb_c_options.g.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/IClientApi.h"
-
+#include "flow/ProtocolVersion.h"
 #include "flow/ThreadHelper.actor.h"
 
 // FdbCApi is used as a wrapper around the FoundationDB C API that gets loaded from an external client library.
@@ -128,6 +127,7 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	fdb_error_t (*runNetwork)();
 	fdb_error_t (*stopNetwork)();
 	fdb_error_t (*createDatabase)(const char* clusterFilePath, FDBDatabase** db);
+	fdb_error_t (*createDatabaseFromConnectionString)(const char* connectionString, FDBDatabase** db);
 
 	// Database
 	fdb_error_t (*databaseOpenTenant)(FDBDatabase* database,
@@ -498,8 +498,10 @@ public:
 	void runNetwork() override;
 	void stopNetwork() override;
 
-	Reference<IDatabase> createDatabase(const char* clusterFilePath) override;
+	Reference<IDatabase> createDatabase(const char* clusterFile) override;
 	Reference<IDatabase> createDatabase609(const char* clusterFilePath); // legacy database creation
+
+	Reference<IDatabase> createDatabaseFromConnectionString(const char* connectionString) override;
 
 	void addNetworkThreadCompletionHook(void (*hook)(void*), void* hookParameter) override;
 
@@ -722,6 +724,35 @@ public:
 	Reference<TenantState> tenantState;
 };
 
+struct ClusterConnectionRecord {
+	enum class Type { FILE, CONNECTION_STRING };
+
+	Type type;
+	std::string recordStr;
+
+	static ClusterConnectionRecord fromFile(std::string clusterFilePath) {
+		return ClusterConnectionRecord(Type::FILE, clusterFilePath);
+	}
+
+	static ClusterConnectionRecord fromConnectionString(std::string connectionString) {
+		return ClusterConnectionRecord(Type::CONNECTION_STRING, connectionString);
+	}
+
+	Reference<IDatabase> createDatabase(IClientApi* api) {
+		if (type == Type::FILE) {
+			return api->createDatabase(recordStr.c_str());
+		} else if (type == Type::CONNECTION_STRING) {
+			return api->createDatabaseFromConnectionString(recordStr.c_str());
+		}
+
+		ASSERT(false);
+		throw internal_error();
+	}
+
+private:
+	ClusterConnectionRecord(Type type, std::string recordStr) : type(type), recordStr(recordStr) {}
+};
+
 // An implementation of IDatabase that wraps a database created either locally or through a dynamically loaded
 // external client. The MultiVersionDatabase monitors the protocol version of the cluster and automatically
 // replaces the wrapped database when the protocol version changes.
@@ -729,7 +760,7 @@ class MultiVersionDatabase final : public IDatabase, ThreadSafeReferenceCounted<
 public:
 	MultiVersionDatabase(MultiVersionApi* api,
 	                     int threadIdx,
-	                     std::string clusterFilePath,
+	                     ClusterConnectionRecord connectionRecord,
 	                     Reference<IDatabase> db,
 	                     Reference<IDatabase> versionMonitorDb,
 	                     bool openConnectors = true);
@@ -771,7 +802,7 @@ public:
 	// A struct that manages the current connection state of the MultiVersionDatabase. This wraps the underlying
 	// IDatabase object that is currently interacting with the cluster.
 	struct DatabaseState : ThreadSafeReferenceCounted<DatabaseState> {
-		DatabaseState(std::string clusterFilePath, Reference<IDatabase> versionMonitorDb);
+		DatabaseState(ClusterConnectionRecord connectionRecord, Reference<IDatabase> versionMonitorDb);
 
 		// Replaces the active database connection with a new one. Must be called from the main thread.
 		void updateDatabase(Reference<IDatabase> newDb, Reference<ClientInfo> client);
@@ -796,7 +827,7 @@ public:
 
 		Reference<IDatabase> db;
 		const Reference<ThreadSafeAsyncVar<Reference<IDatabase>>> dbVar;
-		std::string clusterFilePath;
+		ClusterConnectionRecord connectionRecord;
 
 		// Used to monitor the cluster protocol version. Will be the same as db unless we have either not connected
 		// yet or if the client version associated with db does not support protocol monitoring. In those cases,
@@ -873,7 +904,10 @@ public:
 	void addNetworkThreadCompletionHook(void (*hook)(void*), void* hookParameter) override;
 
 	// Creates an IDatabase object that represents a connection to the cluster
+	Reference<IDatabase> createDatabase(ClusterConnectionRecord connectionRecord);
 	Reference<IDatabase> createDatabase(const char* clusterFilePath) override;
+	Reference<IDatabase> createDatabaseFromConnectionString(const char* connectionString) override;
+
 	static MultiVersionApi* api;
 
 	Reference<ClientInfo> getLocalClient();
@@ -886,10 +920,10 @@ public:
 
 	bool callbackOnMainThread;
 	bool localClientDisabled;
-	ThreadFuture<Void> updateClusterSharedStateMap(std::string clusterFilePath,
+	ThreadFuture<Void> updateClusterSharedStateMap(std::string connectionRecord,
 	                                               ProtocolVersion dbProtocolVersion,
 	                                               Reference<IDatabase> db);
-	void clearClusterSharedStateMapEntry(std::string clusterFilePath, ProtocolVersion dbProtocolVersion);
+	void clearClusterSharedStateMapEntry(std::string connectionRecord, ProtocolVersion dbProtocolVersion);
 
 	static bool apiVersionAtLeast(int minVersion);
 
@@ -913,7 +947,7 @@ private:
 	Reference<ClientInfo> localClient;
 	std::map<std::string, ClientDesc> externalClientDescriptions;
 	std::map<std::string, std::vector<Reference<ClientInfo>>> externalClients;
-	// Map of clusterFilePath -> DatabaseSharedState pointer Future
+	// Map of connection record -> DatabaseSharedState pointer Future
 	// Upon cluster version upgrade, clear the map entry for that cluster
 	struct SharedStateInfo {
 		ThreadFuture<DatabaseSharedState*> sharedStateFuture;
