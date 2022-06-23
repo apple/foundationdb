@@ -378,7 +378,10 @@ public:
 	Future<std::vector<OverlappingChangeFeedEntry>> getOverlappingChangeFeeds(KeyRangeRef ranges, Version minVersion);
 	Future<Void> popChangeFeedMutations(Key rangeID, Version version);
 
-	Future<Key> purgeBlobGranules(KeyRange keyRange, Version purgeVersion, bool force = false);
+	Future<Key> purgeBlobGranules(KeyRange keyRange,
+	                              Version purgeVersion,
+	                              Optional<TenantName> tenant,
+	                              bool force = false);
 	Future<Void> waitPurgeGranulesComplete(Key purgeKey);
 
 	// private:

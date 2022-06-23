@@ -19,6 +19,7 @@
  */
 
 #include <set>
+#include <string>
 
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/FDBOptions.g.h"
@@ -28,6 +29,7 @@
 #include "fdbclient/RunTransaction.actor.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/SystemData.h"
+#include "fdbclient/Tenant.h"
 #include "fdbrpc/Replication.h"
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/DDTeamCollection.h"
@@ -37,6 +39,7 @@
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/TenantCache.h"
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/WaitFailure.h"
 #include "flow/ActorCollection.h"
@@ -608,6 +611,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 	state Reference<DDTeamCollection> primaryTeamCollection;
 	state Reference<DDTeamCollection> remoteTeamCollection;
 	state bool trackerCancelled;
+	state bool ddIsTenantAware = SERVER_KNOBS->DD_TENANT_AWARENESS_ENABLED;
 	loop {
 		trackerCancelled = false;
 
@@ -692,6 +696,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 					// mode may be set true by system operator using fdbcli and isDDEnabled() set to true
 					break;
 				}
+
 				TraceEvent("DataDistributionDisabled", self->ddId).log();
 
 				TraceEvent("MovingData", self->ddId)
@@ -730,6 +735,12 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 
 				wait(waitForDataDistributionEnabled(cx, ddEnabledState));
 				TraceEvent("DataDistributionEnabled").log();
+			}
+
+			state Reference<TenantCache> ddTenantCache;
+			if (ddIsTenantAware) {
+				ddTenantCache = makeReference<TenantCache>(cx, self->ddId);
+				wait(ddTenantCache->build(cx));
 			}
 
 			// When/If this assertion fails, Evan owes Ben a pat on the back for his foresight
@@ -838,6 +849,10 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 				actors.push_back(anyTrue(zeroHealthyTeams, anyZeroHealthyTeams));
 			} else {
 				anyZeroHealthyTeams = zeroHealthyTeams[0];
+			}
+			if (ddIsTenantAware) {
+				actors.push_back(reportErrorsExcept(
+				    ddTenantCache->monitorTenantMap(), "DDTenantCacheMonitor", self->ddId, &normalDDQueueErrors()));
 			}
 
 			actors.push_back(pollMoveKeysLock(cx, lock, ddEnabledState));
@@ -1344,6 +1359,18 @@ static int64_t getMedianShardSize(VectorRef<DDMetricsRef> metricVec) {
 	return metricVec[metricVec.size() / 2].shardBytes;
 }
 
+GetStorageWigglerStateReply getStorageWigglerStates(Reference<DataDistributorData> self) {
+	GetStorageWigglerStateReply reply;
+	if (self->teamCollection) {
+		std::tie(reply.primary, reply.lastStateChangePrimary) = self->teamCollection->getStorageWigglerState();
+		if (self->teamCollection->teamCollections.size() > 1) {
+			std::tie(reply.remote, reply.lastStateChangeRemote) =
+			    self->teamCollection->teamCollections[1]->getStorageWigglerState();
+		}
+	}
+	return reply;
+}
+
 ACTOR Future<Void> ddGetMetrics(GetDataDistributorMetricsRequest req,
                                 PromiseStream<GetMetricsListRequest> getShardMetricsList) {
 	ErrorOr<Standalone<VectorRef<DDMetricsRef>>> result = wait(
@@ -1408,6 +1435,9 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 			when(DistributorExclusionSafetyCheckRequest exclCheckReq =
 			         waitNext(di.distributorExclCheckReq.getFuture())) {
 				actors.add(ddExclusionSafetyCheck(exclCheckReq, self, cx));
+			}
+			when(GetStorageWigglerStateRequest req = waitNext(di.storageWigglerState.getFuture())) {
+				req.reply.send(getStorageWigglerStates(self));
 			}
 		}
 	} catch (Error& err) {
