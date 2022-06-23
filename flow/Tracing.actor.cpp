@@ -22,7 +22,6 @@
 #include "flow/IRandom.h"
 #include "flow/UnitTest.h"
 #include "flow/Knobs.h"
-#include "flow/flow.h"
 #include "flow/network.h"
 #include <functional>
 #include <iomanip>
