@@ -1,0 +1,58 @@
+# Attempt to reproduce failures which occur in three_data_hall mode
+# when one data hall is down and other machines are being rebooted.
+#
+# three_data_hall is supposed to tolerate the failure of one data hall
+# plus one other machine.
+#
+# CONFIGURATION NOTES
+#
+# For the simulated test setup, there is currently no way to configure
+# three data halls within one data center. Instead, we need to specify
+# three data centers, since the simulated setup will place one data
+# hall in each data center.
+#
+# We also need to disable 'generateFearless', since that option will
+# sometimes generate configs with a satellite data center, and we have
+# a policy of not placing tlogs there. It's impossible to place tlogs
+# in a way that satisfies the three_data_hall contstraints.
+[configuration]
+config = 'three_data_hall'
+datacenters = 3
+generateFearless = false
+
+[[test]]
+testTitle = 'Two out of Three Data Halls'
+
+    # Baseline workload during test.
+    [[test.workload]]
+    testName = 'Cycle'
+    transactionsPerSecond = 2500.0
+    testDuration = 30.0
+    expectedRate = 0.01
+
+    # Immediately take down a data hall.
+    [[test.workload]]
+    testName = 'Attrition'
+    killDatahall = true
+    killDc = false
+    machinesToKill = 1
+    targetIds = 1
+    testDuration = 0
+
+    # Continuously reboot machines.
+    # (waitForVersion ensures the cluster recovers between reboots.)
+    [[test.workload]]
+    testName = 'Attrition'
+    testDuration = 30.0
+    machinesToKill = 300   # causes the mean delay to be 30s/300 = 100ms.
+    reboot = true          # reboot, don't kill.
+    replacement = true     # yes, we can reboot the same machine again.
+    waitForVersion = true  # wait for the cluster to reform between reboots.
+
+    # Consistency checks won't pass with one data hall missing.
+    # Change to fallback mode after the test as a workaround.
+    [[test.workload]]
+    testName = 'ChangeConfig'
+    configMode = 'three_data_hall_fallback'
+    minDelayBeforeChange = 30.0
+    maxDelayBeforeChange = 30.0

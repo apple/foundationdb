@@ -69,4 +69,7 @@ ACTOR Future<std::vector<CheckpointMetaData>> fetchCheckpoints(
     std::vector<CheckpointMetaData> initialStates,
     std::string dir,
     std::function<Future<Void>(const CheckpointMetaData&)> cFun = nullptr);
+
+#include "flow/unactorcompiler.h"
+
 #endif

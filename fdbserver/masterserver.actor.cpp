@@ -66,6 +66,8 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	// up-to-date in the presence of key range splits/merges.
 	VersionVector ssVersionVector;
 
+	int8_t locality; // sequencer locality
+
 	CounterCollection cc;
 	Counter getCommitVersionRequests;
 	Counter getLiveCommittedVersionRequests;
@@ -115,6 +117,9 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 			forceRecovery = false;
 		}
 		balancer = resolutionBalancer.resolutionBalancing();
+		locality = (SERVER_KNOBS->ENABLE_VERSION_VECTOR_HA_OPTIMIZATION && myInterface.locality.dcId().present())
+		               ? std::stoi(myInterface.locality.dcId().get().toString())
+		               : tagLocalityInvalid;
 	}
 	~MasterData() = default;
 };
@@ -241,7 +246,9 @@ void updateLiveCommittedVersion(Reference<MasterData> self, ReportRawCommittedVe
 	if (req.version > self->liveCommittedVersion.get()) {
 		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR && req.writtenTags.present()) {
 			// TraceEvent("Received ReportRawCommittedVersionRequest").detail("Version",req.version);
-			self->ssVersionVector.setVersion(req.writtenTags.get(), req.version);
+			int8_t primaryLocality =
+			    SERVER_KNOBS->ENABLE_VERSION_VECTOR_HA_OPTIMIZATION ? self->locality : tagLocalityInvalid;
+			self->ssVersionVector.setVersion(req.writtenTags.get(), req.version, primaryLocality);
 			self->versionVectorTagUpdates += req.writtenTags.get().size();
 		}
 		auto curTime = now();

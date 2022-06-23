@@ -422,10 +422,11 @@ static JsonBuilderObject getBounceImpactInfo(int recoveryStatusCode) {
 }
 
 struct MachineMemoryInfo {
-	double memoryUsage;
+	double memoryUsage; // virtual memory usage
+	double rssUsage; // RSS memory usage
 	double aggregateLimit;
 
-	MachineMemoryInfo() : memoryUsage(0), aggregateLimit(0) {}
+	MachineMemoryInfo() : memoryUsage(0), rssUsage(0), aggregateLimit(0) {}
 
 	bool valid() { return memoryUsage >= 0; }
 	void invalidate() { memoryUsage = -1; }
@@ -789,6 +790,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 			if (memInfo->second.valid()) {
 				if (processMetrics.size() > 0 && programStart.size() > 0) {
 					memInfo->second.memoryUsage += processMetrics.getDouble("Memory");
+					memInfo->second.rssUsage += processMetrics.getDouble("ResidentMemory");
 					memInfo->second.aggregateLimit += programStart.getDouble("MemoryLimit");
 				} else
 					memInfo->second.invalidate();
@@ -815,7 +817,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 		roles.addRole("blob_manager", db->get().blobManager.get());
 	}
 
-	if (SERVER_KNOBS->ENABLE_ENCRYPTION && db->get().encryptKeyProxy.present()) {
+	if ((SERVER_KNOBS->ENABLE_ENCRYPTION || g_network->isSimulated()) && db->get().encryptKeyProxy.present()) {
 		roles.addRole("encrypt_key_proxy", db->get().encryptKeyProxy.get());
 	}
 
@@ -979,6 +981,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 				statusObj["network"] = networkObj;
 
 				memoryObj.setKeyRawNumber("used_bytes", processMetrics.getValue("Memory"));
+				memoryObj.setKeyRawNumber("rss_bytes", processMetrics.getValue("ResidentMemory"));
 				memoryObj.setKeyRawNumber("unused_allocated_memory", processMetrics.getValue("UnusedAllocatedMemory"));
 			}
 
@@ -1011,7 +1014,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 				if (machineMemInfo.valid() && memoryLimit > 0) {
 					ASSERT(machineMemInfo.aggregateLimit > 0);
 					int64_t memory =
-					    (availableMemory + machineMemInfo.memoryUsage) * memoryLimit / machineMemInfo.aggregateLimit;
+					    (availableMemory + machineMemInfo.rssUsage) * memoryLimit / machineMemInfo.aggregateLimit;
 					memoryObj["available_bytes"] = std::min<int64_t>(std::max<int64_t>(memory, 0), memoryLimit);
 				}
 			}
@@ -1951,13 +1954,7 @@ static Future<std::vector<StorageServerStatusInfo>> readStorageInterfaceAndMetad
 			}
 			state std::vector<Future<Void>> futures(servers.size());
 			for (int i = 0; i < servers.size(); ++i) {
-				auto& info = servers[i];
-				futures[i] = fmap(
-				    [&info](Optional<StorageMetadataType> meta) -> Void {
-					    info.metadata = meta;
-					    return Void();
-				    },
-				    metadataMap.get(tr, servers[i].id()));
+				futures[i] = store(servers[i].metadata, metadataMap.get(tr, servers[i].id()));
 				// TraceEvent(SevDebug, "MetadataAppear", servers[i].id()).detail("Present", metadata.present());
 			}
 			wait(waitForAll(futures));
@@ -2797,12 +2794,18 @@ ACTOR Future<Optional<Value>> getActivePrimaryDC(Database cx, int* fullyReplicat
 }
 
 // read storageWigglerStats through Read-only tx, then convert it to JSON field
-ACTOR Future<JsonBuilderObject> storageWigglerStatsFetcher(DatabaseConfiguration conf,
+ACTOR Future<JsonBuilderObject> storageWigglerStatsFetcher(Optional<DataDistributorInterface> ddWorker,
+                                                           DatabaseConfiguration conf,
                                                            Database cx,
                                                            bool use_system_priority) {
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	state Optional<Value> primaryV;
 	state Optional<Value> remoteV;
+	state Future<ErrorOr<GetStorageWigglerStateReply>> stateFut;
+	if (ddWorker.present()) {
+		stateFut = ddWorker.get().storageWigglerState.tryGetReply(GetStorageWigglerStateRequest());
+	}
+
 	loop {
 		try {
 			if (use_system_priority) {
@@ -2816,13 +2819,36 @@ ACTOR Future<JsonBuilderObject> storageWigglerStatsFetcher(DatabaseConfiguration
 			wait(tr->onError(e));
 		}
 	}
-
+	if (ddWorker.present()) {
+		wait(ready(stateFut));
+	}
 	JsonBuilderObject res;
 	if (primaryV.present()) {
-		res["primary"] = ObjectReader::fromStringRef<StorageWiggleMetrics>(primaryV.get(), IncludeVersion()).toJSON();
+		auto obj = ObjectReader::fromStringRef<StorageWiggleMetrics>(primaryV.get(), IncludeVersion()).toJSON();
+		if (stateFut.canGet() && stateFut.get().present()) {
+			auto& reply = stateFut.get().get();
+			obj["state"] = StorageWiggler::getWiggleStateStr(static_cast<StorageWiggler::State>(reply.primary));
+			obj["last_state_change_timestamp"] = reply.lastStateChangePrimary;
+			obj["last_state_change_datetime"] = epochsToGMTString(reply.lastStateChangePrimary);
+		}
+		res["primary"] = obj;
 	}
 	if (conf.regions.size() > 1 && remoteV.present()) {
-		res["remote"] = ObjectReader::fromStringRef<StorageWiggleMetrics>(remoteV.get(), IncludeVersion()).toJSON();
+		auto obj = ObjectReader::fromStringRef<StorageWiggleMetrics>(remoteV.get(), IncludeVersion()).toJSON();
+		if (stateFut.canGet() && stateFut.get().present()) {
+			auto& reply = stateFut.get().get();
+			obj["state"] = StorageWiggler::getWiggleStateStr(static_cast<StorageWiggler::State>(reply.remote));
+			obj["last_state_change_timestamp"] = reply.lastStateChangeRemote;
+			obj["last_state_change_datetime"] = epochsToGMTString(reply.lastStateChangeRemote);
+		}
+		res["remote"] = obj;
+	}
+	if (stateFut.canGet() && stateFut.isError()) {
+		res["error"] = std::string("Can't get storage wiggler state: ") + stateFut.getError().name();
+		TraceEvent(SevWarn, "StorageWigglerStatsFetcher").error(stateFut.getError());
+	} else if (stateFut.canGet() && stateFut.get().isError()) {
+		res["error"] = std::string("Can't get storage wiggler state: ") + stateFut.get().getError().name();
+		TraceEvent(SevWarn, "StorageWigglerStatsFetcher").error(stateFut.get().getError());
 	}
 	return res;
 }
@@ -3073,7 +3099,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 				primaryWiggleValues = readStorageWiggleValues(cx, true, true);
 				remoteWiggleValues = readStorageWiggleValues(cx, false, true);
-				wait(store(storageWiggler, storageWigglerStatsFetcher(configuration.get(), cx, true)) &&
+				wait(store(storageWiggler,
+				           storageWigglerStatsFetcher(db->get().distributor, configuration.get(), cx, true)) &&
 				     success(primaryWiggleValues) && success(remoteWiggleValues));
 
 				for (auto& p : primaryWiggleValues.get())
@@ -3122,12 +3149,10 @@ ACTOR Future<StatusReply> clusterGetStatus(
 				statusObj["workload"] = workerStatuses[1];
 
 			statusObj["layers"] = workerStatuses[2];
-			/*
 			if (configBroadcaster) {
-			    // TODO: Read from coordinators for more up-to-date config database status?
-			    statusObj["configuration_database"] = configBroadcaster->getStatus();
+				// TODO: Read from coordinators for more up-to-date config database status?
+				statusObj["configuration_database"] = configBroadcaster->getStatus();
 			}
-			*/
 
 			// Add qos section if it was populated
 			if (!qos.empty())

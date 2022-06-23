@@ -53,6 +53,8 @@ set(FLOW_SRCS
   Net2.actor.cpp
   Net2Packet.cpp
   Net2Packet.h
+  PKey.h
+  PKey.cpp
   Platform.actor.cpp
   Platform.actor.h
   Platform.h
@@ -60,8 +62,6 @@ set(FLOW_SRCS
   Profiler.h
   ScopeExit.h
   SendBufferIterator.h
-  SignalSafeUnwind.cpp
-  SignalSafeUnwind.h
   SimpleOpt.h
   StreamCipher.cpp
   StreamCipher.h

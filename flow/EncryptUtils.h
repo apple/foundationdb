@@ -38,7 +38,10 @@
 #define SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID -1
 #define ENCRYPT_HEADER_DOMAIN_ID -2
 
+const std::string FDB_DEFAULT_ENCRYPT_DOMAIN_NAME = "FdbDefaultEncryptDomain";
+
 using EncryptCipherDomainId = int64_t;
+using EncryptCipherDomainName = StringRef;
 using EncryptCipherBaseKeyId = uint64_t;
 using EncryptCipherRandomSalt = uint64_t;
 
@@ -76,5 +79,14 @@ constexpr std::string_view ENCRYPT_DBG_TRACE_RESULT_PREFIX = "Res";
 // Utility interface to construct TraceEvent key for debugging
 std::string getEncryptDbgTraceKey(std::string_view prefix,
                                   EncryptCipherDomainId domainId,
+                                  StringRef domainName,
                                   Optional<EncryptCipherBaseKeyId> baseCipherId = Optional<EncryptCipherBaseKeyId>());
+
+std::string getEncryptDbgTraceKeyWithTS(std::string_view prefix,
+                                        EncryptCipherDomainId domainId,
+                                        StringRef domainName,
+                                        EncryptCipherBaseKeyId baseCipherId,
+                                        int64_t refAfterTS,
+                                        int64_t expAfterTS);
+
 #endif

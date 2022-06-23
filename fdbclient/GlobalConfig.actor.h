@@ -33,7 +33,6 @@
 #include <unordered_map>
 
 #include "fdbclient/CommitProxyInterface.h"
-#include "fdbclient/DatabaseContext.h"
 #include "fdbclient/GlobalConfig.h"
 #include "fdbclient/ReadYourWrites.h"
 
@@ -67,9 +66,9 @@ struct ConfigValue : ReferenceCounted<ConfigValue> {
 
 class GlobalConfig : NonCopyable {
 public:
-	// Requires a database object to allow global configuration to run
+	// Requires a database pointer to allow global configuration to run
 	// transactions on the database.
-	explicit GlobalConfig(const Database& cx);
+	explicit GlobalConfig(DatabaseContext* cx);
 
 	// Requires an AsyncVar object to watch for changes on. The ClientDBInfo pointer
 	// should point to a ClientDBInfo object which will contain the updated
@@ -168,7 +167,7 @@ private:
 	ACTOR static Future<Void> refresh(GlobalConfig* self);
 	ACTOR static Future<Void> updater(GlobalConfig* self, const ClientDBInfo* dbInfo);
 
-	Database cx;
+	DatabaseContext* cx;
 	AsyncTrigger dbInfoChanged;
 	Future<Void> _forward;
 	Future<Void> _updater;
@@ -179,5 +178,7 @@ private:
 	// The key should be a global config string literal key (see the top of this class).
 	std::unordered_map<KeyRef, std::function<void(std::optional<std::any>)>> callbacks;
 };
+
+#include "flow/unactorcompiler.h"
 
 #endif

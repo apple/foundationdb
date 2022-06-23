@@ -26,20 +26,34 @@
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/FileIdentifier.h"
+#include "flow/PKey.h"
 
-struct AuthTokenRef {
+namespace authz {
+
+enum class Algorithm : int {
+	RS256,
+	ES256,
+	UNKNOWN,
+};
+
+Algorithm algorithmFromString(StringRef s) noexcept;
+
+} // namespace authz
+
+namespace authz::flatbuffers {
+
+struct TokenRef {
 	static constexpr FileIdentifier file_identifier = 1523118;
 	double expiresAt;
-	IPAddress ipAddress;
 	VectorRef<StringRef> tenants;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, expiresAt, ipAddress, tenants);
+		serializer(ar, expiresAt, tenants);
 	}
 };
 
-struct SignedAuthTokenRef {
+struct SignedTokenRef {
 	static constexpr FileIdentifier file_identifier = 5916732;
 	StringRef token;
 	StringRef keyName;
@@ -51,8 +65,66 @@ struct SignedAuthTokenRef {
 	}
 };
 
-Standalone<SignedAuthTokenRef> signToken(AuthTokenRef token, StringRef keyName, StringRef privateKeyDer);
+SignedTokenRef signToken(Arena& arena, TokenRef token, StringRef keyName, PrivateKey privateKey);
 
-bool verifyToken(SignedAuthTokenRef signedToken, StringRef publicKeyDer);
+bool verifyToken(SignedTokenRef signedToken, PublicKey publicKey);
+
+} // namespace authz::flatbuffers
+
+namespace authz::jwt {
+
+// Given T = concat(B64UrlEnc(headerJson), ".", B64UrlEnc(payloadJson)),
+// JWT is concat(T, ".", B64UrlEnc(sign(T, PrivateKey))).
+// Below we refer to T as "token part"
+
+// This struct is not meant to be flatbuffer-serialized
+// This is a parsed, flattened view of T and signature
+struct TokenRef {
+	// header part ("typ": "JWT" implicitly enforced)
+	Algorithm algorithm; // alg
+	// payload part
+	Optional<StringRef> issuer; // iss
+	Optional<StringRef> subject; // sub
+	Optional<VectorRef<StringRef>> audience; // aud
+	Optional<uint64_t> issuedAtUnixTime; // iat
+	Optional<uint64_t> expiresAtUnixTime; // exp
+	Optional<uint64_t> notBeforeUnixTime; // nbf
+	Optional<StringRef> keyId; // kid
+	Optional<StringRef> tokenId; // jti
+	Optional<VectorRef<StringRef>> tenants; // tenants
+	// signature part
+	StringRef signature;
+};
+
+// Make plain JSON token string with fields (except signature) from passed spec
+StringRef makeTokenPart(Arena& arena, TokenRef tokenSpec);
+
+// Generate plaintext signature of token part
+StringRef makePlainSignature(Arena& arena, Algorithm alg, StringRef tokenPart, StringRef privateKeyDer);
+
+// One-stop function to make JWT from spec
+StringRef signToken(Arena& arena, TokenRef tokenSpec, StringRef privateKeyDer);
+
+// Parse passed b64url-encoded header part and materialize its contents into tokenOut,
+// using memory allocated from arena
+bool parseHeaderPart(TokenRef& tokenOut, StringRef b64urlHeaderIn);
+
+// Parse passed b64url-encoded payload part and materialize its contents into tokenOut,
+// using memory allocated from arena
+bool parsePayloadPart(Arena& arena, TokenRef& tokenOut, StringRef b64urlPayloadIn);
+
+// Parse passed b64url-encoded signature part and materialize its contents into tokenOut,
+// using memory allocated from arena
+bool parseSignaturePart(Arena& arena, TokenRef& tokenOut, StringRef b64urlSignatureIn);
+
+// Parse passed token string and materialize its contents into tokenOut,
+// using memory allocated from arena
+// Return whether the signed token string is well-formed
+bool parseToken(Arena& arena, TokenRef& tokenOut, StringRef signedTokenIn);
+
+// Verify only the signature part of signed token string against its token part, not its content
+bool verifyToken(StringRef signedToken, StringRef publicKeyDer);
+
+} // namespace authz::jwt
 
 #endif // FDBRPC_TOKEN_SIGN_H

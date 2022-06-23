@@ -23,6 +23,7 @@
 #include "fdbclient/Notified.h"
 #include "flow/FastAlloc.h"
 #include "flow/FastRef.h"
+#include "fdbclient/GlobalConfig.actor.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "flow/genericactors.actor.h"
 #include <vector>
@@ -222,8 +223,6 @@ struct KeyRangeLocationInfo {
 	  : tenantEntry(tenantEntry), range(range), locations(locations) {}
 };
 
-class GlobalConfig;
-
 class DatabaseContext : public ReferenceCounted<DatabaseContext>, public FastAllocated<DatabaseContext>, NonCopyable {
 public:
 	static DatabaseContext* allocateOnForeignThread() {
@@ -245,18 +244,21 @@ public:
 
 	// Constructs a new copy of this DatabaseContext from the parameters of this DatabaseContext
 	Database clone() const {
-		return Database(new DatabaseContext(connectionRecord,
-		                                    clientInfo,
-		                                    coordinator,
-		                                    clientInfoMonitor,
-		                                    taskID,
-		                                    clientLocality,
-		                                    enableLocalityLoadBalance,
-		                                    lockAware,
-		                                    internal,
-		                                    apiVersion,
-		                                    switchable,
-		                                    defaultTenant));
+		Database cx = Database(new DatabaseContext(connectionRecord,
+		                                           clientInfo,
+		                                           coordinator,
+		                                           clientInfoMonitor,
+		                                           taskID,
+		                                           clientLocality,
+		                                           enableLocalityLoadBalance,
+		                                           lockAware,
+		                                           internal,
+		                                           apiVersion,
+		                                           switchable,
+		                                           defaultTenant));
+		cx->globalConfig->init(Reference<AsyncVar<ClientDBInfo> const>(cx->clientInfo),
+		                       std::addressof(cx->clientInfo->get()));
+		return cx;
 	}
 
 	Optional<KeyRangeLocationInfo> getCachedLocation(const Optional<TenantName>& tenant,
@@ -376,7 +378,10 @@ public:
 	Future<std::vector<OverlappingChangeFeedEntry>> getOverlappingChangeFeeds(KeyRangeRef ranges, Version minVersion);
 	Future<Void> popChangeFeedMutations(Key rangeID, Version version);
 
-	Future<Key> purgeBlobGranules(KeyRange keyRange, Version purgeVersion, bool force = false);
+	Future<Key> purgeBlobGranules(KeyRange keyRange,
+	                              Version purgeVersion,
+	                              Optional<TenantName> tenant,
+	                              bool force = false);
 	Future<Void> waitPurgeGranulesComplete(Key purgeKey);
 
 	// private:
@@ -635,6 +640,18 @@ public:
 private:
 	std::unordered_map<std::pair<int64_t, Key>, Reference<WatchMetadata>, boost::hash<std::pair<int64_t, Key>>>
 	    watchMap;
+};
+
+// Similar to tr.onError(), but doesn't require a DatabaseContext.
+struct Backoff {
+	Future<Void> onError() {
+		double currentBackoff = backoff;
+		backoff = std::min(backoff * CLIENT_KNOBS->BACKOFF_GROWTH_RATE, CLIENT_KNOBS->DEFAULT_MAX_BACKOFF);
+		return delay(currentBackoff * deterministicRandom()->random01());
+	}
+
+private:
+	double backoff = CLIENT_KNOBS->DEFAULT_BACKOFF;
 };
 
 #endif

@@ -202,7 +202,7 @@ public:
 		auto sav = (DLThreadSingleAssignmentVar<T>*)param;
 
 		if (MultiVersionApi::api->callbackOnMainThread) {
-			onMainThreadVoid([sav]() { sav->apply(); }, nullptr);
+			onMainThreadVoid([sav]() { sav->apply(); });
 		} else {
 			sav->apply();
 		}

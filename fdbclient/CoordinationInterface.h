@@ -46,6 +46,8 @@ struct ClientLeaderRegInterface {
 	bool operator==(const ClientLeaderRegInterface& rhs) const {
 		return getLeader == rhs.getLeader && openDatabase == rhs.openDatabase;
 	}
+
+	std::string getAddressString() const;
 };
 
 // A string containing the information necessary to connect to a cluster.

@@ -38,4 +38,6 @@ RangeResult materializeBlobGranule(const BlobGranuleChunkRef& chunk,
                                    Optional<StringRef> snapshotData,
                                    StringRef deltaFileData[]);
 
+std::string randomBGFilename(UID blobWorkerID, UID granuleID, Version version, std::string suffix);
+
 #endif

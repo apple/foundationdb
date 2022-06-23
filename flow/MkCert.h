@@ -23,6 +23,7 @@
 
 #include "flow/Arena.h"
 #include "flow/Error.h"
+#include "flow/PKey.h"
 #include <fmt/format.h>
 #include <string>
 #include <type_traits>
@@ -30,19 +31,13 @@
 
 namespace mkcert {
 
+// Print X509 cert PEM in human-readable form
 void printCert(FILE* out, StringRef certPem);
 
+// Print PKCS#8 private key PEM in human-readable form
 void printPrivateKey(FILE* out, StringRef privateKeyPem);
 
-struct KeyPairRef {
-	using SelfType = KeyPairRef;
-
-	// Make new Elliptic Curve private-public key pair in DER
-	static SelfType make(Arena& arena);
-
-	StringRef privateKeyDer;
-	StringRef publicKeyDer;
-};
+PrivateKey makeEcP256();
 
 struct Asn1EntryRef {
 	// field must match one of ASN.1 object short/long names: e.g. "C", "countryName", "CN", "commonName",

@@ -37,7 +37,7 @@
 
 ACTOR Future<std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>>> readFromBlob(
     Database cx,
-    Reference<BackupContainerFileSystem> bstore,
+    Reference<BlobConnectionProvider> bstore,
     KeyRange range,
     Version beginVersion,
     Version readVersion,
@@ -50,5 +50,7 @@ bool compareFDBAndBlob(RangeResult fdb,
                        KeyRange range,
                        Version v,
                        bool debug);
+
+#include "flow/unactorcompiler.h"
 
 #endif

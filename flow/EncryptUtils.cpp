@@ -25,14 +25,28 @@
 
 std::string getEncryptDbgTraceKey(std::string_view prefix,
                                   EncryptCipherDomainId domainId,
+                                  StringRef domainName,
                                   Optional<EncryptCipherBaseKeyId> baseCipherId) {
 	// Construct the TraceEvent field key ensuring its uniqueness and compliance to TraceEvent field validator and log
 	// parsing tools
 	if (baseCipherId.present()) {
-		boost::format fmter("%s.%lld.%llu");
-		return boost::str(boost::format(fmter % prefix % domainId % baseCipherId.get()));
+		boost::format fmter("%s.%lld.%s.%llu");
+		return boost::str(boost::format(fmter % prefix % domainId % domainName.toString() % baseCipherId.get()));
 	} else {
-		boost::format fmter("%s.%lld");
-		return boost::str(boost::format(fmter % prefix % domainId));
+		boost::format fmter("%s.%lld.%s");
+		return boost::str(boost::format(fmter % prefix % domainId % domainName.toString()));
 	}
+}
+
+std::string getEncryptDbgTraceKeyWithTS(std::string_view prefix,
+                                        EncryptCipherDomainId domainId,
+                                        StringRef domainName,
+                                        EncryptCipherBaseKeyId baseCipherId,
+                                        int64_t refAfterTS,
+                                        int64_t expAfterTS) {
+	// Construct the TraceEvent field key ensuring its uniqueness and compliance to TraceEvent field validator and log
+	// parsing tools
+	boost::format fmter("%s.%lld.%s.%llu.%lld.%lld");
+	return boost::str(
+	    boost::format(fmter % prefix % domainId % domainName.toString() % baseCipherId % refAfterTS % expAfterTS));
 }

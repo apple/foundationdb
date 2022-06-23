@@ -644,6 +644,7 @@ struct ILogSystem {
 	    UID clusterId,
 	    DatabaseConfiguration const& config,
 	    LogEpoch recoveryCount,
+	    Version recoveryTransactionVersion,
 	    int8_t primaryLocality,
 	    int8_t remoteLocality,
 	    std::vector<Tag> const& allTags,

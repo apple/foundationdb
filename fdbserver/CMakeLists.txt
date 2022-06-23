@@ -38,12 +38,15 @@ set(FDBSERVER_SRCS
   DBCoreState.h
   DDTeamCollection.actor.cpp
   DDTeamCollection.h
+  DDTxnProcessor.actor.cpp
   DiskQueue.actor.cpp
   EncryptKeyProxy.actor.cpp
   EncryptKeyProxyInterface.h
   FDBExecHelper.actor.cpp
   FDBExecHelper.actor.h
   fdbserver.actor.cpp
+  GetEncryptCipherKeys.actor.cpp
+  GetEncryptCipherKeys.h
   GrvProxyServer.actor.cpp
   IConfigConsumer.cpp
   IConfigConsumer.h
@@ -161,6 +164,8 @@ set(FDBSERVER_SRCS
   TCInfo.h
   template_fdb.h
   tester.actor.cpp
+  TenantCache.actor.cpp
+  TenantCache.h
   TesterInterface.actor.h
   TLogInterface.h
   TLogServer.actor.cpp
@@ -377,7 +382,7 @@ else()
   target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite)
 endif()
 
-target_link_libraries(fdbserver PRIVATE toml11_target jemalloc)
+target_link_libraries(fdbserver PRIVATE toml11_target jemalloc rapidjson)
 # target_compile_definitions(fdbserver PRIVATE -DENABLE_SAMPLING)
 
 if (GPERFTOOLS_FOUND)

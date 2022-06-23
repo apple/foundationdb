@@ -278,6 +278,13 @@ public:
 	// Blob Granules
 	int BG_MAX_GRANULE_PARALLELISM;
 
+	// The coordinator key/value in storage server might be inconsistent to the value stored in the cluster file.
+	// This might happen when a recovery is happening together with a cluster controller coordinator key change.
+	// During this process the database will be marked as "bad state" in changeQuorumChecker while later it will be
+	// available again. Using a backoffed retry when it happens.
+	int CHANGE_QUORUM_BAD_STATE_RETRY_TIMES;
+	double CHANGE_QUORUM_BAD_STATE_RETRY_DELAY;
+
 	ClientKnobs(Randomize randomize);
 	void initialize(Randomize randomize);
 };

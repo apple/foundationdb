@@ -493,3 +493,13 @@ TEST_CASE("/blobgranule/files/applyDelta") {
 
 	return Void();
 }
+
+std::string randomBGFilename(UID blobWorkerID, UID granuleID, Version version, std::string suffix) {
+	// Start with random bytes to avoid metadata hotspotting
+	// Worker ID for uniqueness and attribution
+	// Granule ID for uniqueness and attribution
+	// Version for uniqueness and possible future use
+	return deterministicRandom()->randomUniqueID().shortString().substr(0, 8) + "_" +
+	       blobWorkerID.shortString().substr(0, 8) + "_" + granuleID.shortString() + "_V" + std::to_string(version) +
+	       suffix;
+}

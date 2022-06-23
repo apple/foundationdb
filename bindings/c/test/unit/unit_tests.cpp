@@ -39,8 +39,8 @@
 #include <chrono>
 
 #define DOCTEST_CONFIG_IMPLEMENT
+#include <rapidjson/document.h>
 #include "doctest.h"
-#include "fdbclient/rapidjson/document.h"
 #include "fdbclient/Tuple.h"
 
 #include "flow/config.h"
@@ -177,13 +177,24 @@ struct GetRangeResult {
 };
 
 struct GetMappedRangeResult {
-	std::vector<std::tuple<std::string, // key
-	                       std::string, // value
-	                       std::string, // begin
-	                       std::string, // end
-	                       std::vector<std::pair<std::string, std::string>>, // range results
-	                       fdb_bool_t>>
-	    mkvs;
+	struct MappedKV {
+		MappedKV(const std::string& key,
+		         const std::string& value,
+		         const std::string& begin,
+		         const std::string& end,
+		         const std::vector<std::pair<std::string, std::string>>& range_results,
+		         fdb_bool_t boundaryAndExist)
+		  : key(key), value(value), begin(begin), end(end), range_results(range_results),
+		    boundaryAndExist(boundaryAndExist) {}
+
+		std::string key;
+		std::string value;
+		std::string begin;
+		std::string end;
+		std::vector<std::pair<std::string, std::string>> range_results;
+		fdb_bool_t boundaryAndExist;
+	};
+	std::vector<MappedKV> mkvs;
 	// True if values remain in the key range requested.
 	bool more;
 	// Set to a non-zero value if an error occurred during the transaction.
@@ -992,6 +1003,73 @@ GetMappedRangeResult getMappedIndexEntries(int beginId,
 	return getMappedIndexEntries(beginId, endId, tr, mapper, matchIndex);
 }
 
+TEST_CASE("versionstamp_unit_test") {
+	// a random 12 bytes long StringRef as a versionstamp
+	StringRef str = "\x01\x02\x03\x04\x05\x06\x07\x08\x09\x10\x11\x12"_sr;
+	Versionstamp vs(str), vs2(str);
+	ASSERT(vs == vs2);
+	ASSERT(vs.begin() != vs2.begin());
+
+	int64_t version = vs.getVersion();
+	int64_t version2 = vs2.getVersion();
+	int64_t versionExpected = ((int64_t)0x01 << 56) + ((int64_t)0x02 << 48) + ((int64_t)0x03 << 40) +
+	                          ((int64_t)0x04 << 32) + (0x05 << 24) + (0x06 << 16) + (0x07 << 8) + 0x08;
+	ASSERT(version == versionExpected);
+	ASSERT(version2 == versionExpected);
+
+	int16_t batch = vs.getBatchNumber();
+	int16_t batch2 = vs2.getBatchNumber();
+	int16_t batchExpected = (0x09 << 8) + 0x10;
+	ASSERT(batch == batchExpected);
+	ASSERT(batch2 == batchExpected);
+
+	int16_t user = vs.getUserVersion();
+	int16_t user2 = vs2.getUserVersion();
+	int16_t userExpected = (0x11 << 8) + 0x12;
+	ASSERT(user == userExpected);
+	ASSERT(user2 == userExpected);
+
+	ASSERT(vs.size() == VERSIONSTAMP_TUPLE_SIZE);
+	ASSERT(vs2.size() == VERSIONSTAMP_TUPLE_SIZE);
+}
+
+TEST_CASE("tuple_support_versionstamp") {
+	// a random 12 bytes long StringRef as a versionstamp
+	StringRef str = "\x01\x02\x03\x04\x05\x06\x07\x08\x09\x10\x11\x12"_sr;
+	Versionstamp vs(str);
+	const Tuple t = Tuple().append(prefix).append(RECORD).appendVersionstamp(vs).append("{K[3]}"_sr).append("{...}"_sr);
+	ASSERT(t.getVersionstamp(2) == vs);
+
+	// verify the round-way pack-unpack path for a Tuple containing a versionstamp
+	StringRef result1 = t.pack();
+	Tuple t2 = Tuple::unpack(result1);
+	StringRef result2 = t2.pack();
+	ASSERT(t2.getVersionstamp(2) == vs);
+	ASSERT(result1.toString() == result2.toString());
+}
+
+TEST_CASE("tuple_fail_to_append_truncated_versionstamp") {
+	// a truncated 11 bytes long StringRef as a versionstamp
+	StringRef str = "\x01\x02\x03\x04\x05\x06\x07\x08\x09\x10\x11"_sr;
+	try {
+		Versionstamp truncatedVersionstamp(str);
+	} catch (Error& e) {
+		return;
+	}
+	UNREACHABLE();
+}
+
+TEST_CASE("tuple_fail_to_append_longer_versionstamp") {
+	// a longer than expected 13 bytes long StringRef as a versionstamp
+	StringRef str = "\x01\x02\x03\x04\x05\x06\x07\x08\x09\x10\x11"_sr;
+	try {
+		Versionstamp longerVersionstamp(str);
+	} catch (Error& e) {
+		return;
+	}
+	UNREACHABLE();
+}
+
 TEST_CASE("fdb_transaction_get_mapped_range") {
 	const int TOTAL_RECORDS = 20;
 	fillInRecords(TOTAL_RECORDS);
@@ -1026,24 +1104,24 @@ TEST_CASE("fdb_transaction_get_mapped_range") {
 		bool boundary;
 		for (int i = 0; i < expectSize; i++, id++) {
 			boundary = i == 0 || i == expectSize - 1;
-			const auto& [key, value, begin, end, range_results, boundaryAndExist] = result.mkvs[i];
+			const auto& mkv = result.mkvs[i];
 			if (matchIndex == MATCH_INDEX_ALL || i == 0 || i == expectSize - 1) {
-				CHECK(indexEntryKey(id).compare(key) == 0);
+				CHECK(indexEntryKey(id).compare(mkv.key) == 0);
 			} else if (matchIndex == MATCH_INDEX_MATCHED_ONLY) {
-				CHECK(indexEntryKey(id).compare(key) == 0);
+				CHECK(indexEntryKey(id).compare(mkv.key) == 0);
 			} else if (matchIndex == MATCH_INDEX_UNMATCHED_ONLY) {
-				CHECK(EMPTY.compare(key) == 0);
+				CHECK(EMPTY.compare(mkv.key) == 0);
 			} else {
-				CHECK(EMPTY.compare(key) == 0);
+				CHECK(EMPTY.compare(mkv.key) == 0);
 			}
-			bool empty = range_results.empty();
-			CHECK(boundaryAndExist == (boundary && !empty));
-			CHECK(EMPTY.compare(value) == 0);
-			CHECK(range_results.size() == SPLIT_SIZE);
+			bool empty = mkv.range_results.empty();
+			CHECK(mkv.boundaryAndExist == (boundary && !empty));
+			CHECK(EMPTY.compare(mkv.value) == 0);
+			CHECK(mkv.range_results.size() == SPLIT_SIZE);
 			for (int split = 0; split < SPLIT_SIZE; split++) {
-				auto& [k, v] = range_results[split];
-				CHECK(recordKey(id, split).compare(k) == 0);
-				CHECK(recordValue(id, split).compare(v) == 0);
+				auto& kv = mkv.range_results[split];
+				CHECK(recordKey(id, split).compare(kv.first) == 0);
+				CHECK(recordValue(id, split).compare(kv.second) == 0);
 			}
 		}
 		break;
@@ -1084,19 +1162,19 @@ TEST_CASE("fdb_transaction_get_mapped_range_missing_all_secondary") {
 		bool boundary;
 		for (int i = 0; i < expectSize; i++, id++) {
 			boundary = i == 0 || i == expectSize - 1;
-			const auto& [key, value, begin, end, range_results, boundaryAndExist] = result.mkvs[i];
+			const auto& mkv = result.mkvs[i];
 			if (matchIndex == MATCH_INDEX_ALL || i == 0 || i == expectSize - 1) {
-				CHECK(indexEntryKey(id).compare(key) == 0);
+				CHECK(indexEntryKey(id).compare(mkv.key) == 0);
 			} else if (matchIndex == MATCH_INDEX_MATCHED_ONLY) {
-				CHECK(EMPTY.compare(key) == 0);
+				CHECK(EMPTY.compare(mkv.key) == 0);
 			} else if (matchIndex == MATCH_INDEX_UNMATCHED_ONLY) {
-				CHECK(indexEntryKey(id).compare(key) == 0);
+				CHECK(indexEntryKey(id).compare(mkv.key) == 0);
 			} else {
-				CHECK(EMPTY.compare(key) == 0);
+				CHECK(EMPTY.compare(mkv.key) == 0);
 			}
-			bool empty = range_results.empty();
-			CHECK(boundaryAndExist == (boundary && !empty));
-			CHECK(EMPTY.compare(value) == 0);
+			bool empty = mkv.range_results.empty();
+			CHECK(mkv.boundaryAndExist == (boundary && !empty));
+			CHECK(EMPTY.compare(mkv.value) == 0);
 		}
 		break;
 	}
@@ -1153,11 +1231,13 @@ void assertNotTuple(std::string str) {
 TEST_CASE("fdb_transaction_get_mapped_range_fail_on_mapper_not_tuple") {
 	// A string that cannot be parsed as tuple.
 	// "\x15:\x152\x15E\x15\x09\x15\x02\x02MySimpleRecord$repeater-version\x00\x15\x013\x00\x00\x00\x00\x1aU\x90\xba\x00\x00\x00\x02\x15\x04"
+	// should fail at \x35
+
 	std::string mapper = {
 		'\x15', ':',    '\x15', '2', '\x15', 'E',    '\x15', '\t',   '\x15', '\x02', '\x02', 'M',
 		'y',    'S',    'i',    'm', 'p',    'l',    'e',    'R',    'e',    'c',    'o',    'r',
 		'd',    '$',    'r',    'e', 'p',    'e',    'a',    't',    'e',    'r',    '-',    'v',
-		'e',    'r',    's',    'i', 'o',    'n',    '\x00', '\x15', '\x01', '3',    '\x00', '\x00',
+		'e',    'r',    's',    'i', 'o',    'n',    '\x00', '\x15', '\x01', '\x35', '\x00', '\x00',
 		'\x00', '\x00', '\x1a', 'U', '\x90', '\xba', '\x00', '\x00', '\x00', '\x02', '\x15', '\x04'
 	};
 	assertNotTuple(mapper);
@@ -1200,10 +1280,8 @@ TEST_CASE("fdb_transaction_get_range reverse") {
 			std::string data_key = it->first;
 			std::string data_value = it->second;
 
-			auto [key, value] = *results_it;
-
-			CHECK(data_key.compare(key) == 0);
-			CHECK(data[data_key].compare(value) == 0);
+			CHECK(data_key.compare(results_it->first /*key*/) == 0);
+			CHECK(data[data_key].compare(results_it->second /*value*/) == 0);
 		}
 		break;
 	}
@@ -1237,8 +1315,8 @@ TEST_CASE("fdb_transaction_get_range limit") {
 			CHECK(result.more);
 		}
 
-		for (const auto& [key, value] : result.kvs) {
-			CHECK(data[key].compare(value) == 0);
+		for (const auto& kv : result.kvs) {
+			CHECK(data[kv.first].compare(kv.second) == 0);
 		}
 		break;
 	}
@@ -1269,8 +1347,8 @@ TEST_CASE("fdb_transaction_get_range FDB_STREAMING_MODE_EXACT") {
 		CHECK(result.kvs.size() == 3);
 		CHECK(result.more);
 
-		for (const auto& [key, value] : result.kvs) {
-			CHECK(data[key].compare(value) == 0);
+		for (const auto& kv : result.kvs) {
+			CHECK(data[kv.first].compare(kv.second) == 0);
 		}
 		break;
 	}
@@ -2143,7 +2221,7 @@ TEST_CASE("special-key-space custom transaction ID") {
 		fdb_check(f1.get(&out_present, (const uint8_t**)&val, &vallen));
 
 		REQUIRE(out_present);
-		UID transaction_id = UID::fromString(val);
+		UID transaction_id = UID::fromString(std::string(val, vallen));
 		CHECK(transaction_id == randomTransactionID);
 		break;
 	}
@@ -2171,7 +2249,7 @@ TEST_CASE("special-key-space set transaction ID after write") {
 		fdb_check(f1.get(&out_present, (const uint8_t**)&val, &vallen));
 
 		REQUIRE(out_present);
-		UID transaction_id = UID::fromString(val);
+		UID transaction_id = UID::fromString(std::string(val, vallen));
 		CHECK(transaction_id.first() > 0);
 		CHECK(transaction_id.second() > 0);
 		break;
@@ -2238,7 +2316,7 @@ TEST_CASE("special-key-space tracing get range") {
 		CHECK(out_count == 2);
 
 		CHECK(std::string((char*)out_kv[1].key, out_kv[1].key_length) == tracingBegin + "transaction_id");
-		UID transaction_id = UID::fromString(std::string((char*)out_kv[1].value));
+		UID transaction_id = UID::fromString(std::string((char*)out_kv[1].value, out_kv[1].value_length));
 		CHECK(transaction_id.first() > 0);
 		CHECK(transaction_id.second() > 0);
 		break;

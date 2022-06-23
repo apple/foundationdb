@@ -171,7 +171,7 @@ ACTOR Future<Void> moveKeySelectorOverRangeActor(const SpecialKeyRangeReadImpl* 
 	// Note : startKey never equals endKey here
 	ASSERT(startKey < endKey);
 
-	TraceEvent(SevDebug, "NormalizeKeySelector")
+	DisabledTraceEvent(SevDebug, "NormalizeKeySelector")
 	    .detail("OriginalKey", ks->getKey())
 	    .detail("OriginalOffset", ks->offset)
 	    .detail("SpecialKeyRangeStart", skrImpl->getKeyRange().begin)
@@ -211,7 +211,7 @@ ACTOR Future<Void> moveKeySelectorOverRangeActor(const SpecialKeyRangeReadImpl* 
 			ks->offset -= result.size();
 		}
 	}
-	TraceEvent(SevDebug, "NormalizeKeySelector")
+	DisabledTraceEvent(SevDebug, "NormalizeKeySelector")
 	    .detail("NormalizedKey", ks->getKey())
 	    .detail("NormalizedOffset", ks->offset)
 	    .detail("SpecialKeyRangeStart", skrImpl->getKeyRange().begin)
@@ -1940,12 +1940,13 @@ Future<Optional<std::string>> VersionEpochImpl::commit(ReadYourWritesTransaction
 
 ClientProfilingImpl::ClientProfilingImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
 
-ACTOR static Future<RangeResult> ClientProfilingGetRangeActor(ReadYourWritesTransaction* ryw,
-                                                              KeyRef prefix,
-                                                              KeyRangeRef kr) {
-	state RangeResult result;
+Future<RangeResult> ClientProfilingImpl::getRange(ReadYourWritesTransaction* ryw,
+                                                  KeyRangeRef kr,
+                                                  GetRangeLimits limitsHint) const {
+	KeyRef prefix = getKeyRange().begin;
+	RangeResult result = RangeResult();
 	// client_txn_sample_rate
-	state Key sampleRateKey = LiteralStringRef("client_txn_sample_rate").withPrefix(prefix);
+	Key sampleRateKey = LiteralStringRef("client_txn_sample_rate").withPrefix(prefix);
 
 	ryw->getTransaction().setOption(FDBTransactionOptions::RAW_ACCESS);
 
@@ -1966,7 +1967,7 @@ ACTOR static Future<RangeResult> ClientProfilingGetRangeActor(ReadYourWritesTran
 		}
 	}
 	// client_txn_size_limit
-	state Key txnSizeLimitKey = LiteralStringRef("client_txn_size_limit").withPrefix(prefix);
+	Key txnSizeLimitKey = LiteralStringRef("client_txn_size_limit").withPrefix(prefix);
 	if (kr.contains(txnSizeLimitKey)) {
 		auto entry = ryw->getSpecialKeySpaceWriteMap()[txnSizeLimitKey];
 		if (!ryw->readYourWritesDisabled() && entry.first) {
@@ -1983,12 +1984,6 @@ ACTOR static Future<RangeResult> ClientProfilingGetRangeActor(ReadYourWritesTran
 		}
 	}
 	return result;
-}
-
-Future<RangeResult> ClientProfilingImpl::getRange(ReadYourWritesTransaction* ryw,
-                                                  KeyRangeRef kr,
-                                                  GetRangeLimits limitsHint) const {
-	return ClientProfilingGetRangeActor(ryw, getKeyRange().begin, kr);
 }
 
 Future<Optional<std::string>> ClientProfilingImpl::commit(ReadYourWritesTransaction* ryw) {
@@ -2777,7 +2772,24 @@ Future<RangeResult> TenantMapRangeImpl::getRange(ReadYourWritesTransaction* ryw,
 	return getTenantList(ryw, kr, limitsHint);
 }
 
-ACTOR Future<Void> deleteTenantRange(ReadYourWritesTransaction* ryw, TenantName beginTenant, TenantName endTenant) {
+ACTOR Future<Void> createTenants(ReadYourWritesTransaction* ryw, std::vector<TenantNameRef> tenants) {
+	Optional<Value> lastIdVal = wait(ryw->getTransaction().get(tenantLastIdKey));
+	int64_t previousId = lastIdVal.present() ? TenantMapEntry::prefixToId(lastIdVal.get()) : -1;
+
+	std::vector<Future<Void>> createFutures;
+	for (auto tenant : tenants) {
+		createFutures.push_back(
+		    success(ManagementAPI::createTenantTransaction(&ryw->getTransaction(), tenant, ++previousId)));
+	}
+
+	ryw->getTransaction().set(tenantLastIdKey, TenantMapEntry::idToPrefix(previousId));
+	wait(waitForAll(createFutures));
+	return Void();
+}
+
+ACTOR Future<Void> deleteTenantRange(ReadYourWritesTransaction* ryw,
+                                     TenantNameRef beginTenant,
+                                     TenantNameRef endTenant) {
 	std::map<TenantName, TenantMapEntry> tenants = wait(
 	    ManagementAPI::listTenantsTransaction(&ryw->getTransaction(), beginTenant, endTenant, CLIENT_KNOBS->TOO_MANY));
 
@@ -2800,6 +2812,7 @@ ACTOR Future<Void> deleteTenantRange(ReadYourWritesTransaction* ryw, TenantName 
 
 Future<Optional<std::string>> TenantMapRangeImpl::commit(ReadYourWritesTransaction* ryw) {
 	auto ranges = ryw->getSpecialKeySpaceWriteMap().containedRanges(range);
+	std::vector<TenantNameRef> tenantsToCreate;
 	std::vector<Future<Void>> tenantManagementFutures;
 	for (auto range : ranges) {
 		if (!range.value().first) {
@@ -2812,8 +2825,7 @@ Future<Optional<std::string>> TenantMapRangeImpl::commit(ReadYourWritesTransacti
 		        .removePrefix(TenantMapRangeImpl::submoduleRange.begin);
 
 		if (range.value().second.present()) {
-			tenantManagementFutures.push_back(
-			    success(ManagementAPI::createTenantTransaction(&ryw->getTransaction(), tenantName)));
+			tenantsToCreate.push_back(tenantName);
 		} else {
 			// For a single key clear, just issue the delete
 			if (KeyRangeRef(range.begin(), range.end()).singleKeyRange()) {
@@ -2830,6 +2842,10 @@ Future<Optional<std::string>> TenantMapRangeImpl::commit(ReadYourWritesTransacti
 				tenantManagementFutures.push_back(deleteTenantRange(ryw, tenantName, endTenant));
 			}
 		}
+	}
+
+	if (tenantsToCreate.size()) {
+		tenantManagementFutures.push_back(createTenants(ryw, tenantsToCreate));
 	}
 
 	return tag(waitForAll(tenantManagementFutures), Optional<std::string>());

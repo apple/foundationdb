@@ -328,6 +328,7 @@ class PaxosConfigConsumerImpl {
 			}
 			try {
 				wait(timeoutError(waitForAll(compactionRequests), 1.0));
+				broadcaster->compact(compactionVersion);
 			} catch (Error& e) {
 				TraceEvent(SevWarn, "ErrorSendingCompactionRequest").error(e);
 			}

@@ -255,7 +255,7 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 
 	BlobManagerStats stats;
 
-	Reference<BackupContainerFileSystem> bstore;
+	Reference<BlobConnectionProvider> bstore;
 
 	std::unordered_map<UID, BlobWorkerInterface> workersById;
 	std::unordered_map<UID, BlobWorkerInfo> workerStats; // mapping between workerID -> workerStats
@@ -265,6 +265,7 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 	KeyRangeActorMap assignsInProgress;
 	KeyRangeMap<SplitEvaluation> splitEvaluations;
 	KeyRangeMap<bool> knownBlobRanges;
+	BGTenantMap tenantData;
 
 	AsyncTrigger startRecruiting;
 	Debouncer restartRecruiting;
@@ -282,18 +283,18 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 	// assigned sequence numbers
 	PromiseStream<RangeAssignment> rangesToAssign;
 
-	BlobManagerData(UID id, Database db, Optional<Key> dcId)
+	BlobManagerData(UID id, Reference<AsyncVar<ServerDBInfo> const> dbInfo, Database db, Optional<Key> dcId)
 	  : id(id), db(db), dcId(dcId), stats(id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &workersById),
-	    knownBlobRanges(false, normalKeys.end), restartRecruiting(SERVER_KNOBS->DEBOUNCE_RECRUITING_DELAY),
-	    recruitingStream(0) {}
+	    knownBlobRanges(false, normalKeys.end), tenantData(BGTenantMap(dbInfo)),
+	    restartRecruiting(SERVER_KNOBS->DEBOUNCE_RECRUITING_DELAY), recruitingStream(0) {}
 
 	// only initialize blob store if actually needed
 	void initBStore() {
-		if (!bstore.isValid()) {
+		if (!bstore.isValid() && SERVER_KNOBS->BG_METADATA_SOURCE != "tenant") {
 			if (BM_DEBUG) {
 				fmt::print("BM {} constructing backup container from {}\n", epoch, SERVER_KNOBS->BG_URL.c_str());
 			}
-			bstore = BackupContainerFileSystem::openContainerFS(SERVER_KNOBS->BG_URL, {}, {});
+			bstore = BlobConnectionProvider::newBlobConnectionProvider(SERVER_KNOBS->BG_URL);
 			if (BM_DEBUG) {
 				fmt::print("BM {} constructed backup container\n", epoch);
 			}
@@ -840,11 +841,15 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 						throw internal_error();
 					}
 
+					std::vector<std::pair<TenantName, TenantMapEntry>> tenants;
 					std::vector<Key> prefixes;
 					for (auto& it : tenantResults) {
+						StringRef tenantName = it.key.removePrefix(tenantMapPrefix);
 						TenantMapEntry entry = decodeTenantEntry(it.value);
+						tenants.push_back(std::pair(tenantName, entry));
 						prefixes.push_back(entry.prefix);
 					}
+					bmData->tenantData.addTenants(tenants);
 
 					// make this look like knownBlobRanges
 					std::sort(prefixes.begin(), prefixes.end());
@@ -2279,6 +2284,29 @@ ACTOR Future<Void> canDeleteFullGranule(Reference<BlobManagerData> self, UID gra
 	return Void();
 }
 
+static Future<Void> deleteFile(Reference<BlobConnectionProvider> bstoreProvider, std::string filePath) {
+	Reference<BackupContainerFileSystem> bstore = bstoreProvider->getForRead(filePath);
+	return bstore->deleteFile(filePath);
+}
+
+ACTOR Future<Reference<BlobConnectionProvider>> getBStoreForGranule(Reference<BlobManagerData> self,
+                                                                    KeyRange granuleRange) {
+	if (self->bstore.isValid()) {
+		return self->bstore;
+	}
+	loop {
+		state Reference<GranuleTenantData> data = self->tenantData.getDataForGranule(granuleRange);
+		if (data.isValid()) {
+			wait(data->bstoreLoaded.getFuture());
+			wait(delay(0));
+			return data->bstore;
+		} else {
+			// race on startup between loading tenant ranges and bgcc/purging. just wait
+			wait(delay(0.1));
+		}
+	}
+}
+
 /*
  * Deletes all files pertaining to the granule with id granuleId and
  * also removes the history entry for this granule from the system keyspace
@@ -2286,7 +2314,8 @@ ACTOR Future<Void> canDeleteFullGranule(Reference<BlobManagerData> self, UID gra
 ACTOR Future<Void> fullyDeleteGranule(Reference<BlobManagerData> self,
                                       UID granuleId,
                                       Key historyKey,
-                                      Version purgeVersion) {
+                                      Version purgeVersion,
+                                      KeyRange granuleRange) {
 	if (BM_DEBUG) {
 		fmt::print("Fully deleting granule {0}: init\n", granuleId.toString());
 	}
@@ -2294,6 +2323,7 @@ ACTOR Future<Void> fullyDeleteGranule(Reference<BlobManagerData> self,
 	// if granule is still splitting and files are needed for new sub-granules to re-snapshot, we can only partially
 	// delete the granule, since we need to keep the last snapshot and deltas for splitting
 	wait(canDeleteFullGranule(self, granuleId));
+	state Reference<BlobConnectionProvider> bstore = wait(getBStoreForGranule(self, granuleRange));
 
 	// get files
 	GranuleFiles files = wait(loadHistoryFiles(self->db, granuleId));
@@ -2303,13 +2333,13 @@ ACTOR Future<Void> fullyDeleteGranule(Reference<BlobManagerData> self,
 
 	for (auto snapshotFile : files.snapshotFiles) {
 		std::string fname = snapshotFile.filename;
-		deletions.emplace_back(self->bstore->deleteFile(fname));
+		deletions.push_back(deleteFile(bstore, fname));
 		filesToDelete.emplace_back(fname);
 	}
 
 	for (auto deltaFile : files.deltaFiles) {
 		std::string fname = deltaFile.filename;
-		deletions.emplace_back(self->bstore->deleteFile(fname));
+		deletions.push_back(deleteFile(bstore, fname));
 		filesToDelete.emplace_back(fname);
 	}
 
@@ -2371,10 +2401,15 @@ ACTOR Future<Void> fullyDeleteGranule(Reference<BlobManagerData> self,
  * file might be deleted. We will need to ensure we don't rely on the granule's startVersion
  * (that's persisted as part of the key), but rather use the granule's first snapshot's version when needed
  */
-ACTOR Future<Void> partiallyDeleteGranule(Reference<BlobManagerData> self, UID granuleId, Version purgeVersion) {
+ACTOR Future<Void> partiallyDeleteGranule(Reference<BlobManagerData> self,
+                                          UID granuleId,
+                                          Version purgeVersion,
+                                          KeyRange granuleRange) {
 	if (BM_DEBUG) {
 		fmt::print("Partially deleting granule {0}: init\n", granuleId.toString());
 	}
+
+	state Reference<BlobConnectionProvider> bstore = wait(getBStoreForGranule(self, granuleRange));
 
 	// get files
 	GranuleFiles files = wait(loadHistoryFiles(self->db, granuleId));
@@ -2391,7 +2426,7 @@ ACTOR Future<Void> partiallyDeleteGranule(Reference<BlobManagerData> self, UID g
 		// if we already found the latestSnapshotVersion, this snapshot can be deleted
 		if (latestSnapshotVersion != invalidVersion) {
 			std::string fname = files.snapshotFiles[idx].filename;
-			deletions.emplace_back(self->bstore->deleteFile(fname));
+			deletions.push_back(deleteFile(bstore, fname));
 			deletedFileKeys.emplace_back(blobGranuleFileKeyFor(granuleId, files.snapshotFiles[idx].version, 'S'));
 			filesToDelete.emplace_back(fname);
 		} else if (files.snapshotFiles[idx].version <= purgeVersion) {
@@ -2415,7 +2450,7 @@ ACTOR Future<Void> partiallyDeleteGranule(Reference<BlobManagerData> self, UID g
 		// otherwise deltaFile.version <= latestSnapshotVersion so delete it
 		// == should also be deleted because the last delta file before a snapshot would have the same version
 		std::string fname = deltaFile.filename;
-		deletions.emplace_back(self->bstore->deleteFile(fname));
+		deletions.push_back(deleteFile(bstore, fname));
 		deletedFileKeys.emplace_back(blobGranuleFileKeyFor(granuleId, deltaFile.version, 'D'));
 		filesToDelete.emplace_back(fname);
 	}
@@ -2500,8 +2535,8 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 	state std::queue<std::tuple<KeyRange, Version, Version>> historyEntryQueue;
 
 	// stacks of <granuleId, historyKey> and <granuleId> to track which granules to delete
-	state std::vector<std::tuple<UID, Key>> toFullyDelete;
-	state std::vector<UID> toPartiallyDelete;
+	state std::vector<std::tuple<UID, Key, KeyRange>> toFullyDelete;
+	state std::vector<std::pair<UID, KeyRange>> toPartiallyDelete;
 
 	// track which granules we have already added to traversal
 	// note: (startKey, startVersion) uniquely identifies a granule
@@ -2562,7 +2597,7 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 	}
 	while (!historyEntryQueue.empty()) {
 		// process the node at the front of the queue and remove it
-		KeyRange currRange;
+		state KeyRange currRange;
 		state Version startVersion;
 		state Version endVersion;
 		std::tie(currRange, startVersion, endVersion) = historyEntryQueue.front();
@@ -2612,12 +2647,12 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 			if (BM_DEBUG) {
 				fmt::print("Granule {0} will be FULLY deleted\n", currHistoryNode.granuleID.toString());
 			}
-			toFullyDelete.push_back({ currHistoryNode.granuleID, historyKey });
+			toFullyDelete.push_back({ currHistoryNode.granuleID, historyKey, currRange });
 		} else if (startVersion < purgeVersion) {
 			if (BM_DEBUG) {
 				fmt::print("Granule {0} will be partially deleted\n", currHistoryNode.granuleID.toString());
 			}
-			toPartiallyDelete.push_back({ currHistoryNode.granuleID });
+			toPartiallyDelete.push_back({ currHistoryNode.granuleID, currRange });
 		}
 
 		// add all of the node's parents to the queue
@@ -2668,12 +2703,13 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 	for (i = toFullyDelete.size() - 1; i >= 0; --i) {
 		state UID granuleId;
 		Key historyKey;
-		std::tie(granuleId, historyKey) = toFullyDelete[i];
+		KeyRange keyRange;
+		std::tie(granuleId, historyKey, keyRange) = toFullyDelete[i];
 		// FIXME: consider batching into a single txn (need to take care of txn size limit)
 		if (BM_DEBUG) {
 			fmt::print("About to fully delete granule {0}\n", granuleId.toString());
 		}
-		wait(fullyDeleteGranule(self, granuleId, historyKey, purgeVersion));
+		wait(fullyDeleteGranule(self, granuleId, historyKey, purgeVersion, range));
 	}
 
 	if (BM_DEBUG) {
@@ -2681,11 +2717,13 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 	}
 
 	for (i = toPartiallyDelete.size() - 1; i >= 0; --i) {
-		UID granuleId = toPartiallyDelete[i];
+		UID granuleId;
+		KeyRange range;
+		std::tie(granuleId, range) = toPartiallyDelete[i];
 		if (BM_DEBUG) {
 			fmt::print("About to partially delete granule {0}\n", granuleId.toString());
 		}
-		partialDeletions.emplace_back(partiallyDeleteGranule(self, granuleId, purgeVersion));
+		partialDeletions.emplace_back(partiallyDeleteGranule(self, granuleId, purgeVersion, range));
 	}
 
 	wait(waitForAll(partialDeletions));
@@ -2906,9 +2944,10 @@ static void blobManagerExclusionSafetyCheck(Reference<BlobManagerData> self,
 
 ACTOR Future<int64_t> bgccCheckGranule(Reference<BlobManagerData> bmData, KeyRange range) {
 	state std::pair<RangeResult, Version> fdbResult = wait(readFromFDB(bmData->db, range));
+	state Reference<BlobConnectionProvider> bstore = wait(getBStoreForGranule(bmData, range));
 
 	std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> blobResult =
-	    wait(readFromBlob(bmData->db, bmData->bstore, range, 0, fdbResult.second));
+	    wait(readFromBlob(bmData->db, bstore, range, 0, fdbResult.second));
 
 	if (!compareFDBAndBlob(fdbResult.first, blobResult, range, fdbResult.second, BM_DEBUG)) {
 		++bmData->stats.ccMismatches;
@@ -3008,6 +3047,7 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 	}
 	state Reference<BlobManagerData> self =
 	    makeReference<BlobManagerData>(deterministicRandom()->randomUniqueID(),
+	                                   dbInfo,
 	                                   openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True),
 	                                   bmInterf.locality.dcId());
 
