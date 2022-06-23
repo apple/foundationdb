@@ -4,6 +4,31 @@
 Release Notes
 #############
 
+7.1.9
+=====
+* Same as 7.1.8 release with AVX enabled.
+
+7.1.8
+=====
+* Released with AVX disabled.
+* Fixed a performance regression in network run loop.  `(PR #7342) <https://github.com/apple/foundationdb/pull/7342>`_
+* Added RSS bytes for processes in status json output and corrected available_bytes calculation. `(PR #7348) <https://github.com/apple/foundationdb/pull/7348>`_
+* Added versionstamp support in tuples. `(PR #7313) <https://github.com/apple/foundationdb/pull/7313>`_
+* Fixed some spammy trace events. `(PR #7300) <https://github.com/apple/foundationdb/pull/7300>`_
+* Fixed a memory corruption bug for using streaming peeks. `(PR #7288) <https://github.com/apple/foundationdb/pull/7288>`_
+* Fixed a hang bug in fdbcli exclude command. `(PR #7268) <https://github.com/apple/foundationdb/pull/7268>`_
+* Fixed an issue that a remote TLog blocks peeks. `(PR #7255) <https://github.com/apple/foundationdb/pull/7255>`_
+* Fixed a connection issue using hostnames. `(PR #7264) <https://github.com/apple/foundationdb/pull/7264>`_
+* Added support of the reboot command in go bindings. `(PR #7270) <https://github.com/apple/foundationdb/pull/7270>`_
+* Fixed several issues in profiling special keys using GlobalConfig. `(PR #7120) <https://github.com/apple/foundationdb/pull/7120>`_
+* Fixed a stuck transaction system bug due to inconsistent recovery transaction version. `(PR #7261) <https://github.com/apple/foundationdb/pull/7261>`_
+* Fixed a unknown_error crash due to not resolving hostnames. `(PR #7254) <https://github.com/apple/foundationdb/pull/7254>`_
+* Fixed a heap-use-after-free bug. `(PR #7250) <https://github.com/apple/foundationdb/pull/7250>`_
+* Fixed a performance issue that remote TLogs are sending too many pops to log routers. `(PR #7235) <https://github.com/apple/foundationdb/pull/7235>`_
+* Fixed an issue that SharedTLogs are not displaced and leaking disk space. `(PR #7246) <https://github.com/apple/foundationdb/pull/7246>`_
+* Fixed an issue that coordinatorsKey does not store DNS names. `(PR #7203) <https://github.com/apple/foundationdb/pull/7203>`_
+* Fixed a sequential execution issue for fdbcli kill, suspend, and expensive_data_check commands. `(PR #7211) <https://github.com/apple/foundationdb/pull/7211>`_
+
 7.1.7
 =====
 * Same as 7.1.6 release with AVX enabled.

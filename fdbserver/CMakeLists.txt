@@ -38,12 +38,15 @@ set(FDBSERVER_SRCS
   DBCoreState.h
   DDTeamCollection.actor.cpp
   DDTeamCollection.h
+  DDTxnProcessor.actor.cpp
   DiskQueue.actor.cpp
   EncryptKeyProxy.actor.cpp
   EncryptKeyProxyInterface.h
   FDBExecHelper.actor.cpp
   FDBExecHelper.actor.h
   fdbserver.actor.cpp
+  GetEncryptCipherKeys.actor.cpp
+  GetEncryptCipherKeys.h
   GrvProxyServer.actor.cpp
   IConfigConsumer.cpp
   IConfigConsumer.h

@@ -47,7 +47,6 @@
 #include "flow/BooleanParam.h"
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 class TCTeamInfo;
 class TCMachineInfo;
@@ -663,6 +662,9 @@ public:
 	bool exclusionSafetyCheck(std::vector<UID>& excludeServerIDs);
 
 	bool isPrimary() const { return primary; }
+
+	// state and last state change timestamp
+	std::pair<StorageWiggler::State, double> getStorageWigglerState() const;
 
 	UID getDistributorId() const { return distributorId; }
 
