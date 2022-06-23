@@ -67,6 +67,8 @@ set(FDBCLIENT_SRCS
   GlobalConfig.actor.h
   GlobalConfig.actor.cpp
   GrvProxyInterface.h
+  HTTP.h
+  HTTP.actor.cpp
   HighContentionPrefixAllocator.actor.h
   IClientApi.h
   IConfigTransaction.cpp
@@ -106,6 +108,10 @@ set(FDBCLIENT_SRCS
   SimpleConfigTransaction.actor.cpp
   SpecialKeySpace.actor.cpp
   SpecialKeySpace.actor.h
+  RESTClient.h
+  RESTClient.actor.cpp
+  RESTUtils.h
+  RESTUtils.actor.cpp
   ReadYourWrites.actor.cpp
   ReadYourWrites.h
   RestoreInterface.cpp

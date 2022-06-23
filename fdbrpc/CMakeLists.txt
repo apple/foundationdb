@@ -1,4 +1,5 @@
 set(FDBRPC_SRCS
+  ActorFuzz.h
   AsyncFileCached.actor.h
   AsyncFileChaos.h
   AsyncFileEIO.actor.h
@@ -27,8 +28,6 @@ set(FDBRPC_SRCS
   genericactors.actor.cpp
   HealthMonitor.h
   HealthMonitor.actor.cpp
-  HTTP.h
-  HTTP.actor.cpp
   IPAllowList.h
   IPAllowList.cpp
   LoadBalance.h
@@ -52,10 +51,6 @@ set(FDBRPC_SRCS
   ReplicationTypes.cpp
   ReplicationUtils.h
   ReplicationUtils.cpp
-  RESTClient.h
-  RESTClient.actor.cpp
-  RESTUtils.h
-  RESTUtils.actor.cpp
   SimExternalConnection.actor.cpp
   SimExternalConnection.h
   Smoother.h
