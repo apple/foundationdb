@@ -54,13 +54,6 @@
 extern "C" int g_expect_full_pointermap;
 extern const char* getSourceVersion();
 
-ISimulator::ISimulator()
-  : desiredCoordinators(1), physicalDatacenters(1), processesPerMachine(0), listenersPerProcess(1), usableRegions(1),
-    allowLogSetKills(true), tssMode(TSSMode::Disabled), isStopped(false), lastConnectionFailure(0),
-    connectionFailuresDisableDuration(0), speedUpSimulation(false), backupAgents(BackupAgentType::WaitForType),
-    drAgents(BackupAgentType::WaitForType), allSwapsDisabled(false) {}
-ISimulator::~ISimulator() = default;
-
 using namespace std::literals;
 
 // TODO: Defining these here is just asking for ODR violations.
