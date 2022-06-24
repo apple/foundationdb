@@ -147,6 +147,11 @@ function(strip_debug_symbols target)
   add_dependencies(strip_targets strip_${target})
 endfunction()
 
+# This will copy the header from a flow target into ${CMAKE_BINARY_DIR}/include/target-name
+# We're doing this to enforce proper dependencies. In the past we simply added the source
+# and binary dir to the include list, which means that for example a compilation unit in
+# flow could include a header file that lives in fdbserver. This is a somewhat hacky solution
+# but due to our directory structure it seems to be the least invasive one.
 function(copy_headers)
   set(options)
   set(oneValueArgs NAME OUT_DIR INC_DIR)

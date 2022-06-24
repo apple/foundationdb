@@ -30,6 +30,7 @@ set(FDBRPC_SRCS
   HealthMonitor.actor.cpp
   IPAllowList.h
   IPAllowList.cpp
+  linux_kaio.h
   LoadBalance.h
   LoadBalance.actor.h
   LoadBalance.actor.cpp
@@ -123,6 +124,11 @@ if(${COROUTINE_IMPL} STREQUAL libcoro)
     list(APPEND CORO_SRCS libcoroutine/context.c)
   endif()
   add_library(coro STATIC ${CORO_SRCS})
+  target_include_directories(coro PRIVATE ${CMAKE_BINARY_DIR}/flow/include)
+  target_include_directories(coro PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/libcoroutine)
+  # we don't want to link against flow, but we need tob make sure it is built first
+  # since we rely on files being copied because we include Platform.h
+  add_dependencies(coro flow)
   if(WIN32)
     target_compile_definitions(coro PRIVATE USE_FIBERS)
   else()
@@ -132,6 +138,6 @@ if(${COROUTINE_IMPL} STREQUAL libcoro)
   if(USE_VALGRIND)
     target_link_libraries(coro PUBLIC Valgrind)
   endif()
-  target_link_libraries(fdbrpc PRIVATE coro)
-  target_link_libraries(fdbrpc_sampling PRIVATE coro)
+  target_link_libraries(fdbrpc PUBLIC coro)
+  target_link_libraries(fdbrpc_sampling PUBLIC coro)
 endif()
