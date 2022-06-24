@@ -52,6 +52,7 @@ enum ArgKind {
 	ARG_VALLEN,
 	ARG_ACTIVE_TENANTS,
 	ARG_TOTAL_TENANTS,
+	ARG_TENANT_BATCH_SIZE,
 	ARG_TPS,
 	ARG_ASYNC,
 	ARG_COMMITGET,
@@ -148,6 +149,7 @@ struct Arguments {
 	int value_length;
 	int active_tenants;
 	int total_tenants;
+	int tenant_batch_size;
 	int zipf;
 	int commit_get;
 	int verbose;
