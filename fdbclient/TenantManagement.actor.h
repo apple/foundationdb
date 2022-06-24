@@ -270,8 +270,9 @@ Future<Void> deleteTenantTransaction(Transaction tr,
 	if (tenantEntry.present() && (!tenantId.present() || tenantEntry.get().id == tenantId.get())) {
 		if (clusterType == ClusterType::METACLUSTER_MANAGEMENT &&
 		    tenantEntry.get().tenantState != TenantState::REMOVING) {
-			// TODO: better error
-			throw operation_failed();
+			// The metacluster API will not delete a tenant from the management cluster without first putting it into a
+			// REMOVING state
+			ASSERT(false);
 		}
 
 		state typename transaction_future_type<Transaction, RangeResult>::type prefixRangeFuture =

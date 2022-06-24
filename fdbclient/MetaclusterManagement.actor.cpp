@@ -37,4 +37,23 @@ ACTOR Future<Reference<IDatabase>> openDatabase(ClusterConnectionString connecti
 		return MultiVersionApi::api->createDatabase(clusterFile);
 	}
 }
+
+Key getDataClusterTenantIndexKey(ClusterNameRef cluster, Optional<TenantNameRef> tenant) {
+	Tuple tuple;
+	tuple.append(cluster);
+	if (tenant.present()) {
+		tuple.append(tenant.get());
+	}
+	return dataClusterTenantIndexKeys.begin.withSuffix(tuple.pack());
+}
+
+Key getDataClusterTenantGroupIndexKey(ClusterNameRef cluster, Optional<TenantGroupNameRef> tenantGroup) {
+	Tuple tuple;
+	tuple.append(cluster);
+	if (tenantGroup.present()) {
+		tuple.append(tenantGroup.get());
+	}
+	return dataClusterTenantGroupIndexKeys.begin.withSuffix(tuple.pack());
+}
+
 }; // namespace MetaclusterAPI

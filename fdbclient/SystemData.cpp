@@ -1425,15 +1425,20 @@ const KeyRangeRef tenantGroupTenantIndexKeys("\xff/tenant/tenantGroup/tenantMap/
 const KeyRangeRef tenantTombstoneKeys("\xff/tenant/tombstones/"_sr, "\xff/tenant/tombstones0"_sr);
 
 // Metacluster management cluster keys
-const KeyRangeRef dataClusterMetadataKeys("\xff/metacluster/dataCluster/metadata/"_sr,
-                                          "\xff/metacluster/dataCluster/metadata0"_sr);
+const KeyRangeRef dataClusterMetadataKeys("metacluster/dataCluster/metadata/"_sr,
+                                          "metacluster/dataCluster/metadata0"_sr);
 const KeyRef dataClusterMetadataPrefix = dataClusterMetadataKeys.begin;
-const KeyRangeRef dataClusterConnectionRecordKeys("\xff/metacluster/dataCluster/connectionString/"_sr,
-                                                  "\xff/metacluster/dataCluster/connectionString0"_sr);
+const KeyRangeRef dataClusterConnectionRecordKeys("metacluster/dataCluster/connectionString/"_sr,
+                                                  "metacluster/dataCluster/connectionString0"_sr);
 const KeyRef dataClusterConnectionRecordPrefix = dataClusterConnectionRecordKeys.begin;
 
-const KeyRangeRef tenantGroupMetadataKeys("\xff/metacluster/tenantGroup/metadata/"_sr,
-                                          "\xff/metacluster/tenantGroup/metadata0"_sr);
+const KeyRangeRef tenantGroupMetadataKeys("metacluster/tenantGroup/metadata/"_sr,
+                                          "metacluster/tenantGroup/metadata0"_sr);
+
+const KeyRangeRef dataClusterTenantIndexKeys("metacluster/dataCluster/tenantMap/"_sr,
+                                             "metacluster/dataCluster/tenantMap0"_sr);
+const KeyRangeRef dataClusterTenantGroupIndexKeys("metacluster/dataCluster/tenantGroupMap/"_sr,
+                                                  "metacluster/dataCluster/tenantGroupMap0"_sr);
 
 // Metacluster data cluster keys
 const KeyRef metaclusterRegistrationKey = "\xff/metacluster/clusterRegistration"_sr;

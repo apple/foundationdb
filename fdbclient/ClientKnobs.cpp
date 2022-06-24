@@ -289,6 +289,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 
 	init( MAX_TENANTS_PER_CLUSTER,                  1e6 );
 	init( MAX_DATA_CLUSTERS,                        1e5 );
+	init( REMOVE_CLUSTER_TENANT_BATCH_SIZE,         1e4 ); if ( randomize && BUGGIFY ) REMOVE_CLUSTER_TENANT_BATCH_SIZE = 1;
 
 	// clang-format on
 }

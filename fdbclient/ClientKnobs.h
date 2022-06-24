@@ -280,6 +280,7 @@ public:
 
 	int MAX_TENANTS_PER_CLUSTER;
 	int MAX_DATA_CLUSTERS;
+	int REMOVE_CLUSTER_TENANT_BATCH_SIZE;
 
 	ClientKnobs(Randomize randomize);
 	void initialize(Randomize randomize);

@@ -60,6 +60,10 @@ struct DataClusterEntry {
 	ClusterUsage capacity;
 	ClusterUsage allocated;
 
+	// If true, then tenants cannot be assigned to this cluster. This is used when a cluster is being forcefully
+	// removed.
+	bool locked = false;
+
 	DataClusterEntry() = default;
 	DataClusterEntry(ClusterUsage capacity) : capacity(capacity) {}
 	DataClusterEntry(UID id, ClusterUsage capacity, ClusterUsage allocated)
@@ -84,12 +88,15 @@ struct DataClusterEntry {
 		json_spirit::mObject obj;
 		obj["capacity"] = capacity.toJson();
 		obj["allocated"] = allocated.toJson();
+		if (locked) {
+			obj["locked"] = locked;
+		}
 		return obj;
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, id, capacity, allocated);
+		serializer(ar, id, capacity, allocated, locked);
 	}
 };
 

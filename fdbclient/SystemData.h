@@ -642,6 +642,8 @@ extern const KeyRangeRef dataClusterConnectionRecordKeys;
 extern const KeyRef dataClusterConnectionRecordPrefix;
 extern const KeyRef metaclusterRegistrationKey;
 extern const KeyRangeRef tenantGroupMetadataKeys;
+extern const KeyRangeRef dataClusterTenantIndexKeys;
+extern const KeyRangeRef dataClusterTenantGroupIndexKeys;
 
 #pragma clang diagnostic pop
 
