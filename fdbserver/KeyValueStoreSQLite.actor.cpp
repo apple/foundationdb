@@ -31,7 +31,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 
 extern "C" {
-#include "fdbserver/sqlite/sqliteInt.h"
+#include "sqliteInt.h"
 u32 sqlite3VdbeSerialGet(const unsigned char*, u32, Mem*);
 }
 #include "flow/ThreadPrimitives.h"

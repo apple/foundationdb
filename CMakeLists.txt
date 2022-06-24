@@ -201,12 +201,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
 endif()
 
 ################################################################################
-# Build information
-################################################################################
-
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/fdbclient/BuildFlags.h.in ${CMAKE_CURRENT_BINARY_DIR}/fdbclient/BuildFlags.h)
-
-################################################################################
 # process compile commands for IDE
 ################################################################################
 if (CMAKE_EXPORT_COMPILE_COMMANDS AND WITH_PYTHON)
