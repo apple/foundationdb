@@ -197,9 +197,11 @@ struct ResolutionRequestBuilder {
 };
 
 ACTOR Future<Void> emptyCommitBatcher(ProxyCommitData* commitData,
-                                      PromiseStream<std::pair<std::vector<CommitTransactionRequest>, int>> out) {
+                                      PromiseStream<std::pair<std::vector<CommitTransactionRequest>, int>> out,
+                                      bool firstProxy) {
 	loop {
-		wait(delay(0.05, TaskPriority::ProxyCommitBatcher)); // FIXME: revert once integrated with version indexers
+		wait(delay(firstProxy ? 0.05 : 2.0,
+		           TaskPriority::ProxyCommitBatcher)); // FIXME: revert once integrated with version indexers
 		// wait(delay(SERVER_KNOBS->MAX_COMMIT_BATCH_INTERVAL, TaskPriority::ProxyCommitBatcher));
 		out.send({ std::vector<CommitTransactionRequest>(), 0 });
 	}
@@ -2049,9 +2051,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 
 	addActor.send(commitBatcher(
 	    &commitData, batchedCommits, proxy.commit.getFuture(), commitBatchByteLimit, commitBatchesMemoryLimit));
-	if (firstProxy) {
-		addActor.send(emptyCommitBatcher(&commitData, batchedCommits));
-	}
+	addActor.send(emptyCommitBatcher(&commitData, batchedCommits, firstProxy));
 
 	// This has to be declared after the commitData.txnStateStore get initialized
 	state TransactionStateResolveContext transactionStateResolveContext(&commitData, &addActor);
