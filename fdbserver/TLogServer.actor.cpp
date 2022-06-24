@@ -680,7 +680,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 		specialCounter(cc, "PeekSpilled", [this](){return this->peekSpilled;});
 		specialCounter(cc, "PeekMemory", [this](){return this->peekMemory;});
 		specialCounter(cc, "PeekEmpty", [this](){return this->peekEmpty;});
-		specialCounter(cc, "PeekSpilled", [this](){return this->peekNonEmpty;});
+		specialCounter(cc, "PeekNonEmpty", [this](){return this->peekNonEmpty;});
 	}
 
 	~LogData() {
@@ -2044,8 +2044,10 @@ ACTOR Future<Void> tLogPeekStream(TLogData* self, TLogPeekStreamRequest req, Ref
 			req.reply.send(reply);
 			begin = reply.rep.end;
 			onlySpilled = reply.rep.onlySpilled;
-			if (reply.rep.end > logData->version.get()) {
-				wait(delay(SERVER_KNOBS->TLOG_PEEK_DELAY, g_network->getCurrentTask()));
+			TraceEvent(SevDebug, "TLogPeekStream", logData->logId).detail("TaskPriority", g_network->getCurrentTask());
+			// FIXME: debug purpose, increase the probability peeking from spilled data
+			if (reply.rep.end > logData->persistentDataDurableVersion) {
+				wait(delay(SERVER_KNOBS->TLOG_PEEK_DELAY, TaskPriority::UpdateStorage));
 			} else {
 				wait(delay(0, g_network->getCurrentTask()));
 			}
