@@ -622,6 +622,8 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	std::map<Tag, Version> toBePopped; // map of Tag->Version for all the pops
 	                                   // that came when ignorePopRequest was set
 
+	uint64_t peekSpilled = 0, peekMemory = 0, peekNonEmpty = 0, peekEmpty = 0;
+
 	explicit LogData(TLogData* tLogData,
 	                 TLogInterface interf,
 	                 Tag remoteTag,
@@ -675,6 +677,10 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 		specialCounter(cc, "PeekMemoryRequestsStalled", [tLogData]() { return tLogData->peekMemoryLimiter.waiters(); });
 		specialCounter(cc, "Generation", [this]() { return this->recoveryCount; });
 		specialCounter(cc, "ActivePeekStreams", [tLogData]() { return tLogData->activePeekStreams; });
+		specialCounter(cc, "PeekSpilled", [this](){return this->peekSpilled;});
+		specialCounter(cc, "PeekMemory", [this](){return this->peekMemory;});
+		specialCounter(cc, "PeekEmpty", [this](){return this->peekEmpty;});
+		specialCounter(cc, "PeekSpilled", [this](){return this->peekNonEmpty;});
 	}
 
 	~LogData() {
@@ -1798,6 +1804,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 			if (reqOnlySpilled) {
 				endVersion = logData->persistentDataDurableVersion + 1;
 			} else {
+				logData->peekMemory ++;
 				peekMessagesFromMemory(logData, reqTag, reqBegin, messages2, endVersion);
 			}
 
@@ -1864,6 +1871,11 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 				state FlowLock::Releaser memoryReservation(self->peekMemoryLimiter, commitBytes);
 				state std::vector<Future<Standalone<StringRef>>> messageReads;
 				messageReads.reserve(commitLocations.size());
+
+				if(!commitLocations.empty()) {
+					logData->peekSpilled ++;
+				}
+
 				for (const auto& pair : commitLocations) {
 					messageReads.push_back(self->rawPersistentQueue->read(pair.first, pair.second, CheckHashes::True));
 				}
@@ -1914,10 +1926,17 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 			if (reqOnlySpilled) {
 				endVersion = logData->persistentDataDurableVersion + 1;
 			} else {
+				logData->peekMemory ++;
 				peekMessagesFromMemory(logData, reqTag, reqBegin, messages, endVersion);
 			}
 
 			//TraceEvent("TLogPeekResults", self->dbgid).detail("ForAddress", replyPromise.getEndpoint().getPrimaryAddress()).detail("MessageBytes", messages.getLength()).detail("NextEpoch", next_pos.epoch).detail("NextSeq", next_pos.sequence).detail("NowSeq", self->sequence.getNextSequence());
+		}
+
+		if(messages.getLength() == 0) {
+			logData->peekEmpty ++;
+		} else {
+			logData->peekNonEmpty ++;
 		}
 
 		// Reply the peek request when
