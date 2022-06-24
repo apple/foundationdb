@@ -534,14 +534,12 @@ public:
 		// If there are too few machines to even build teams or there are too few represented datacenters, build no new
 		// teams
 		if (uniqueMachines >= self->configuration.storageTeamSize) {
-			desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * serverCount;
-			int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * serverCount;
-
 			// Exclude teams who have members in the wrong configuration, since we don't want these teams
-			int teamCount = 0;
-			int totalTeamCount = 0;
-			int wigglingTeams = 0;
-			for (int i = 0; i < self->teams.size(); ++i) {
+			state int teamCount = 0;
+			state int totalTeamCount = 0;
+			state int wigglingTeams = 0;
+			state int i = 0;
+			for (; i < self->teams.size(); ++i) {
 				if (!self->teams[i]->isWrongConfiguration()) {
 					if (self->teams[i]->isHealthy()) {
 						teamCount++;
@@ -551,8 +549,11 @@ public:
 				if (self->teams[i]->getPriority() == SERVER_KNOBS->PRIORITY_PERPETUAL_STORAGE_WIGGLE) {
 					wigglingTeams++;
 				}
+				if (i % 100 == 0) wait(yield());
 			}
 
+			desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * serverCount;
+			int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * serverCount;
 			// teamsToBuild is calculated such that we will not build too many teams in the situation
 			// when all (or most of) teams become unhealthy temporarily and then healthy again
 			state int teamsToBuild;
