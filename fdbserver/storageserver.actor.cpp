@@ -37,7 +37,7 @@
 #include "flow/IndexedSet.h"
 #include "flow/SystemMonitor.h"
 #include "flow/Trace.h"
-#include "flow/Tracing.h"
+#include "fdbclient/Tracing.h"
 #include "flow/Util.h"
 #include "fdbclient/Atomic.h"
 #include "fdbclient/DatabaseContext.h"

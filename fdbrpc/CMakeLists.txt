@@ -58,6 +58,7 @@ set(FDBRPC_SRCS
   Stats.h
   simulator.h
   sim2.actor.cpp
+  sim_validation.h
   sim_validation.cpp
   TenantInfo.h
   TimedRequest.h

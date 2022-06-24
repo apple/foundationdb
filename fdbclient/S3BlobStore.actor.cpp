@@ -41,7 +41,9 @@
 #include "flow/Hostname.h"
 #include "flow/UnitTest.h"
 #include "fdbclient/rapidxml/rapidxml.hpp"
+#ifdef BUILD_AWS_BACKUP
 #include "fdbclient/FDBAWSCredentialsProvider.h"
+#endif
 
 #include "flow/actorcompiler.h" // has to be last include
 

@@ -1,6 +1,7 @@
 set(FDBCLIENT_SRCS
   ActorLineageProfiler.h
   ActorLineageProfiler.cpp
+  AnnotateActor.h
   AnnotateActor.cpp
   AsyncFileS3BlobStore.actor.cpp
   AsyncFileS3BlobStore.actor.h
@@ -75,6 +76,7 @@ set(FDBCLIENT_SRCS
   IConfigTransaction.h
   ISingleThreadTransaction.cpp
   ISingleThreadTransaction.h
+  JSONDoc.h
   JsonBuilder.cpp
   JsonBuilder.h
   KeyBackedTypes.h
@@ -105,6 +107,7 @@ set(FDBCLIENT_SRCS
   PaxosConfigTransaction.actor.cpp
   PaxosConfigTransaction.h
   PImpl.h
+  ProcessInterface.h
   SimpleConfigTransaction.actor.cpp
   SpecialKeySpace.actor.cpp
   SpecialKeySpace.actor.h
@@ -119,6 +122,7 @@ set(FDBCLIENT_SRCS
   RunTransaction.actor.h
   RYWIterator.cpp
   RYWIterator.h
+  S3BlobStore.h
   S3BlobStore.actor.cpp
   Schemas.cpp
   Schemas.h
@@ -155,6 +159,7 @@ set(FDBCLIENT_SRCS
   ThreadSafeTransaction.h
   Tracing.h
   Tracing.actor.cpp
+  TransactionLineage.h
   Tuple.cpp
   Tuple.h
   VersionedMap.actor.h
@@ -164,7 +169,6 @@ set(FDBCLIENT_SRCS
   Versionstamp.h
   VersionVector.h
   VersionVector.cpp
-  WellKnownEndpoints.h
   WriteMap.h
   WriteMap.cpp
   json_spirit/json_spirit_error_position.h
@@ -172,9 +176,19 @@ set(FDBCLIENT_SRCS
   json_spirit/json_spirit_value.h
   json_spirit/json_spirit_writer_options.h
   json_spirit/json_spirit_writer_template.h
+  libb64/encode.h
+  libb64/decode.h
+  libb64/cdecode.h
   libb64/cdecode.c
+  libb64/cencode.h
   libb64/cencode.c
+  md5/md5.h
   md5/md5.c
+  rapidxml/rapidxml.hpp
+  rapidxml/rapidxml_iterators.hpp
+  rapidxml/rapidxml_print.hpp
+  rapidxml/rapidxml_utils.hpp
+  sha1/SHA1.h
   sha1/SHA1.cpp
   zipf.c
   zipf.h)
@@ -184,8 +198,19 @@ message(STATUS "FDB package name is ${FDB_PACKAGE_NAME}")
 
 set(options_srcs ${CMAKE_CURRENT_BINARY_DIR}/FDBOptions.g.cpp)
 
-vexillographer_compile(TARGET fdboptions LANG cpp OUT ${CMAKE_CURRENT_BINARY_DIR}/FDBOptions.g
+make_directory(${CMAKE_CURRENT_BINARY_DIR}/include/fdbclient/)
+vexillographer_compile(TARGET fdboptions_vex LANG cpp OUT ${CMAKE_CURRENT_BINARY_DIR}/FDBOptions.g
   OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/FDBOptions.g.h ${CMAKE_CURRENT_BINARY_DIR}/FDBOptions.g.cpp)
+
+add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/include/fdbclient/FDBOptions.g.h
+  DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/FDBOptions.g.h
+  COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_BINARY_DIR}/FDBOptions.g.h ${CMAKE_CURRENT_BINARY_DIR}/include/fdbclient/FDBOptions.g.h)
+
+vexillographer_compile(TARGET fdboptions_c LANG c OUT ${CMAKE_CURRENT_BINARY_DIR}/include/fdbclient/fdb_c_options.g.h
+  OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/include/fdbclient/fdb_c_options.g.h)
+
+add_custom_target(fdboptions DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/include/fdbclient/FDBOptions.g.h)
+add_dependencies(fdboptions fdboptions_c)
 
 set(BUILD_AZURE_BACKUP OFF CACHE BOOL "Build Azure backup client")
 if(BUILD_AZURE_BACKUP)

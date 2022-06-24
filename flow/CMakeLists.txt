@@ -116,6 +116,7 @@ set(FLOW_SRCS
   serialize.cpp
   serialize.h
   sse2neon.h
+  singleton.h
   stacktrace.h
   test_memcpy.cpp
   test_memcpy_perf.cpp
