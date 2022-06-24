@@ -790,7 +790,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 
 	// Hackathon-2021
 	// supported values {"random" , "round-robin", "least-loaded", "time-decay", "shortest-wait"}
-	init( HACKATHON_TLOG_SELECTION_STRATEGY,                "random" );
+	init( HACKATHON_TLOG_SELECTION_STRATEGY,              "least-loaded" );
 	init( HACKATHON_TLOG_FLUSH_BYTES_PER_SECOND,      60.0*1024*1024 );
 
 	// clang-format on
