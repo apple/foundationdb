@@ -1257,19 +1257,19 @@ void PhysicalShardCollection::updatePhysicalShardToTeams(uint64_t inputPhysicalS
 	}
 	std::string caller;
 	// if (debugID % 20 == 0) {
-		if (debugID == 0) {
-			caller = "InitBySrc";
-		} else if (debugID == 1) {
-			caller = "InitByDest";
-		} else {
-			caller = "Update";
-		}
-		TraceEvent("UpdatePhysicalShardMapping")
-		    .detail("PhysicalShardID", inputPhysicalShardID)
-		    .detail("NewTeam", describe(inputTeams))
-		    .detail("SingleRegionTeamSize", expectedNumServersPerTeam)
-		    .detail("Caller", caller)
-		    .detail("DebugID", debugID);
+	if (debugID == 0) {
+		caller = "InitBySrc";
+	} else if (debugID == 1) {
+		caller = "InitByDest";
+	} else {
+		caller = "Update";
+	}
+	TraceEvent("UpdatePhysicalShardMapping")
+	    .detail("PhysicalShardID", inputPhysicalShardID)
+	    .detail("NewTeam", describe(inputTeams))
+	    .detail("SingleRegionTeamSize", expectedNumServersPerTeam)
+	    .detail("Caller", caller)
+	    .detail("DebugID", debugID);
 	// }
 	// remove old ones
 	for (auto [team, physicalShardIDs] : teamPhysicalShardIDs) {

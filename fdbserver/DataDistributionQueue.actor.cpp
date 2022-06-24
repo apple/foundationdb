@@ -1341,9 +1341,9 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 								// use the remoteTeam with the physicalShard as the bestTeam
 								req = GetTeamRequest(remoteTeamWithPhysicalShard.get().servers);
 								TraceEvent("GetRemoteTeamWithPhysicalShard")
-								 	.detail("SelectedServers", remoteTeamWithPhysicalShard.get().servers)
-								 	.detail("PhysicalShardIDCandidate", physicalShardIDCandidate)
-								 	.detail("DebugID", debugID);
+								    .detail("SelectedServers", remoteTeamWithPhysicalShard.get().servers)
+								    .detail("PhysicalShardIDCandidate", physicalShardIDCandidate)
+								    .detail("DebugID", debugID);
 							}
 						}
 
