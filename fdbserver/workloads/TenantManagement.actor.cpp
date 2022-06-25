@@ -131,88 +131,129 @@ struct TenantManagementWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> createTenant(Database cx, TenantManagementWorkload* self) {
-		state TenantName tenant = self->chooseTenantName(true);
-		state bool alreadyExists = self->createdTenants.count(tenant);
 		state OperationType operationType = TenantManagementWorkload::randomOperationType();
+		int numTenants = 1;
+
+		// For transaction-based operations, test creating multiple tenants in the same transaction
+		if (operationType == OperationType::SPECIAL_KEYS || operationType == OperationType::MANAGEMENT_TRANSACTION) {
+			numTenants = deterministicRandom()->randomInt(1, 5);
+		}
+
+		state bool alreadyExists = false;
+		state bool hasSystemTenant = false;
+
+		state std::set<TenantName> tenantsToCreate;
+		for (int i = 0; i < numTenants; ++i) {
+			TenantName tenant = self->chooseTenantName(true);
+			tenantsToCreate.insert(tenant);
+
+			alreadyExists = alreadyExists || self->createdTenants.count(tenant);
+			hasSystemTenant = hasSystemTenant || tenant.startsWith("\xff"_sr);
+		}
+
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 
 		loop {
 			try {
 				if (operationType == OperationType::SPECIAL_KEYS) {
 					tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-					Key key = self->specialKeysTenantMapPrefix.withSuffix(tenant);
-					tr->set(key, ""_sr);
+					for (auto tenant : tenantsToCreate) {
+						tr->set(self->specialKeysTenantMapPrefix.withSuffix(tenant), ""_sr);
+					}
 					wait(tr->commit());
 				} else if (operationType == OperationType::MANAGEMENT_DATABASE) {
-					wait(ManagementAPI::createTenant(cx.getReference(), tenant));
+					ASSERT(tenantsToCreate.size() == 1);
+					wait(success(ManagementAPI::createTenant(cx.getReference(), *tenantsToCreate.begin())));
 				} else {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					Optional<TenantMapEntry> _ = wait(ManagementAPI::createTenantTransaction(tr, tenant));
+
+					Optional<Value> lastIdVal = wait(tr->get(tenantLastIdKey));
+					int64_t previousId = lastIdVal.present() ? TenantMapEntry::prefixToId(lastIdVal.get()) : -1;
+
+					std::vector<Future<Void>> createFutures;
+					for (auto tenant : tenantsToCreate) {
+						createFutures.push_back(
+						    success(ManagementAPI::createTenantTransaction(tr, tenant, ++previousId)));
+					}
+					tr->set(tenantLastIdKey, TenantMapEntry::idToPrefix(previousId));
+					wait(waitForAll(createFutures));
 					wait(tr->commit());
 				}
 
-				if (operationType != OperationType::MANAGEMENT_DATABASE && alreadyExists) {
-					return Void();
+				if (operationType == OperationType::MANAGEMENT_DATABASE) {
+					ASSERT(!alreadyExists);
 				}
 
-				ASSERT(!alreadyExists);
-				ASSERT(!tenant.startsWith("\xff"_sr));
+				ASSERT(!hasSystemTenant);
 
-				state Optional<TenantMapEntry> entry = wait(ManagementAPI::tryGetTenant(cx.getReference(), tenant));
-				ASSERT(entry.present());
-				ASSERT(entry.get().id > self->maxId);
-				ASSERT(entry.get().prefix.startsWith(self->tenantSubspace));
+				state std::set<TenantName>::iterator tenantItr;
+				for (tenantItr = tenantsToCreate.begin(); tenantItr != tenantsToCreate.end(); ++tenantItr) {
+					if (self->createdTenants.count(*tenantItr)) {
+						continue;
+					}
 
-				self->maxId = entry.get().id;
-				self->createdTenants[tenant] = TenantState(entry.get().id, true);
+					state Optional<TenantMapEntry> entry =
+					    wait(ManagementAPI::tryGetTenant(cx.getReference(), *tenantItr));
+					ASSERT(entry.present());
+					ASSERT(entry.get().id > self->maxId);
+					ASSERT(entry.get().prefix.startsWith(self->tenantSubspace));
 
-				state bool insertData = deterministicRandom()->random01() < 0.5;
-				if (insertData) {
-					state Transaction insertTr(cx, tenant);
-					loop {
-						try {
-							insertTr.set(self->keyName, tenant);
-							wait(insertTr.commit());
-							break;
-						} catch (Error& e) {
-							wait(insertTr.onError(e));
+					self->maxId = entry.get().id;
+					self->createdTenants[*tenantItr] = TenantState(entry.get().id, true);
+
+					state bool insertData = deterministicRandom()->random01() < 0.5;
+					if (insertData) {
+						state Transaction insertTr(cx, *tenantItr);
+						loop {
+							try {
+								insertTr.set(self->keyName, *tenantItr);
+								wait(insertTr.commit());
+								break;
+							} catch (Error& e) {
+								wait(insertTr.onError(e));
+							}
+						}
+
+						self->createdTenants[*tenantItr].empty = false;
+
+						state Transaction checkTr(cx);
+						loop {
+							try {
+								checkTr.setOption(FDBTransactionOptions::RAW_ACCESS);
+								Optional<Value> val = wait(checkTr.get(self->keyName.withPrefix(entry.get().prefix)));
+								ASSERT(val.present());
+								ASSERT(val.get() == *tenantItr);
+								break;
+							} catch (Error& e) {
+								wait(checkTr.onError(e));
+							}
 						}
 					}
 
-					self->createdTenants[tenant].empty = false;
-
-					state Transaction checkTr(cx);
-					loop {
-						try {
-							checkTr.setOption(FDBTransactionOptions::RAW_ACCESS);
-							Optional<Value> val = wait(checkTr.get(self->keyName.withPrefix(entry.get().prefix)));
-							ASSERT(val.present());
-							ASSERT(val.get() == tenant);
-							break;
-						} catch (Error& e) {
-							wait(checkTr.onError(e));
-						}
-					}
+					wait(self->checkTenant(cx, self, *tenantItr, self->createdTenants[*tenantItr]));
 				}
-
-				wait(self->checkTenant(cx, self, tenant, self->createdTenants[tenant]));
 				return Void();
 			} catch (Error& e) {
 				if (e.code() == error_code_invalid_tenant_name) {
-					ASSERT(tenant.startsWith("\xff"_sr));
+					ASSERT(hasSystemTenant);
 					return Void();
 				} else if (operationType == OperationType::MANAGEMENT_DATABASE) {
 					if (e.code() == error_code_tenant_already_exists) {
 						ASSERT(alreadyExists && operationType == OperationType::MANAGEMENT_DATABASE);
 					} else {
-						TraceEvent(SevError, "CreateTenantFailure").error(e).detail("TenantName", tenant);
+						ASSERT(tenantsToCreate.size() == 1);
+						TraceEvent(SevError, "CreateTenantFailure")
+						    .error(e)
+						    .detail("TenantName", *tenantsToCreate.begin());
 					}
 					return Void();
 				} else {
 					try {
 						wait(tr->onError(e));
 					} catch (Error& e) {
-						TraceEvent(SevError, "CreateTenantFailure").error(e).detail("TenantName", tenant);
+						for (auto tenant : tenantsToCreate) {
+							TraceEvent(SevError, "CreateTenantFailure").error(e).detail("TenantName", tenant);
+						}
 						return Void();
 					}
 				}
