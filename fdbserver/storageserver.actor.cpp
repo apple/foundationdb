@@ -6928,6 +6928,7 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 					updatedShards.push_back(
 					    StorageServerShard(range, cVer, desiredId, desiredId, StorageServerShard::MovingIn));
 					data->pendingAddRanges[cVer].emplace_back(desiredId, range);
+					data->newestDirtyVersion.insert(range, cVer);
 					TraceEvent(SevVerbose, "SSAssignShard", data->thisServerID)
 					    .detail("Range", range)
 					    .detail("NowAssigned", nowAssigned)
