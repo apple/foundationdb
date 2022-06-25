@@ -29,7 +29,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/TaskBucket.h"
 #include "fdbclient/Notified.h"
-#include "fdbrpc/IAsyncFile.h"
+#include "flow/IAsyncFile.h"
 #include "fdbclient/KeyBackedTypes.h"
 #include <ctime>
 #include <climits>

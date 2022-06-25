@@ -41,7 +41,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/versions.h"
-#include "fdbclient/WellKnownEndpoints.h"
+#include "fdbrpc/WellKnownEndpoints.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/network.h"
 #include "flow/TypeTraits.h"
@@ -53,13 +53,6 @@
 
 extern "C" int g_expect_full_pointermap;
 extern const char* getSourceVersion();
-
-ISimulator::ISimulator()
-  : desiredCoordinators(1), physicalDatacenters(1), processesPerMachine(0), listenersPerProcess(1), usableRegions(1),
-    allowLogSetKills(true), tssMode(TSSMode::Disabled), isStopped(false), lastConnectionFailure(0),
-    connectionFailuresDisableDuration(0), speedUpSimulation(false), backupAgents(BackupAgentType::WaitForType),
-    drAgents(BackupAgentType::WaitForType), allSwapsDisabled(false) {}
-ISimulator::~ISimulator() = default;
 
 using namespace std::literals;
 
@@ -1090,7 +1083,7 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 		bool enableExtraDB = (testConfig.extraDB == 3);
 		ClusterConnectionString conn(ini.GetValue("META", "connectionString"));
 		if (enableExtraDB) {
-			g_simulator.extraDB = std::make_unique<ClusterConnectionString>(ini.GetValue("META", "connectionString"));
+			g_simulator.extraDB = new ClusterConnectionString(ini.GetValue("META", "connectionString"));
 		}
 		if (!testConfig.disableHostname) {
 			auto mockDNSStr = ini.GetValue("META", "mockDNS");
@@ -2104,22 +2097,18 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	if (testConfig.extraDB == 1) {
 		// The DR database can be either a new database or itself
 		g_simulator.extraDB =
-		    BUGGIFY
-		        ? (useHostname ? std::make_unique<ClusterConnectionString>(coordinatorHostnames, "TestCluster:0"_sr)
-		                       : std::make_unique<ClusterConnectionString>(coordinatorAddresses, "TestCluster:0"_sr))
-		        : (useHostname
-		               ? std::make_unique<ClusterConnectionString>(extraCoordinatorHostnames, "ExtraCluster:0"_sr)
-		               : std::make_unique<ClusterConnectionString>(extraCoordinatorAddresses, "ExtraCluster:0"_sr));
+		    BUGGIFY ? (useHostname ? new ClusterConnectionString(coordinatorHostnames, "TestCluster:0"_sr)
+		                           : new ClusterConnectionString(coordinatorAddresses, "TestCluster:0"_sr))
+		            : (useHostname ? new ClusterConnectionString(extraCoordinatorHostnames, "ExtraCluster:0"_sr)
+		                           : new ClusterConnectionString(extraCoordinatorAddresses, "ExtraCluster:0"_sr));
 	} else if (testConfig.extraDB == 2) {
 		// The DR database is a new database
-		g_simulator.extraDB =
-		    useHostname ? std::make_unique<ClusterConnectionString>(extraCoordinatorHostnames, "ExtraCluster:0"_sr)
-		                : std::make_unique<ClusterConnectionString>(extraCoordinatorAddresses, "ExtraCluster:0"_sr);
+		g_simulator.extraDB = useHostname ? new ClusterConnectionString(extraCoordinatorHostnames, "ExtraCluster:0"_sr)
+		                                  : new ClusterConnectionString(extraCoordinatorAddresses, "ExtraCluster:0"_sr);
 	} else if (testConfig.extraDB == 3) {
 		// The DR database is the same database
-		g_simulator.extraDB = useHostname
-		                          ? std::make_unique<ClusterConnectionString>(coordinatorHostnames, "TestCluster:0"_sr)
-		                          : std::make_unique<ClusterConnectionString>(coordinatorAddresses, "TestCluster:0"_sr);
+		g_simulator.extraDB = useHostname ? new ClusterConnectionString(coordinatorHostnames, "TestCluster:0"_sr)
+		                                  : new ClusterConnectionString(coordinatorAddresses, "TestCluster:0"_sr);
 	}
 
 	*pConnString = conn;

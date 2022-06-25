@@ -19,7 +19,7 @@
 * limitations under the License.
 */
 
-#include "contrib/fmt-8.1.1/include/fmt/format.h"
+#include "fmt/format.h"
 #include "flow/flow.h"
 #include "flow/Platform.h"
 #include "flow/DeterministicRandom.h"

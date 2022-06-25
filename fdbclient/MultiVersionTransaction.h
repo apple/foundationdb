@@ -23,7 +23,7 @@
 #include "flow/ProtocolVersion.h"
 #pragma once
 
-#include "bindings/c/foundationdb/fdb_c_options.g.h"
+#include "fdbclient/fdb_c_options.g.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/IClientApi.h"

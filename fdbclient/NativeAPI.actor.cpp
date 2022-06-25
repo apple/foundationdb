@@ -31,7 +31,7 @@
 #include <vector>
 
 #include "boost/algorithm/string.hpp"
-#include "contrib/fmt-8.1.1/include/fmt/format.h"
+#include "fmt/format.h"
 
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
@@ -63,7 +63,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/TransactionLineage.h"
 #include "fdbclient/versions.h"
-#include "fdbclient/WellKnownEndpoints.h"
+#include "fdbrpc/WellKnownEndpoints.h"
 #include "fdbrpc/LoadBalance.h"
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/simulator.h"
@@ -82,7 +82,7 @@
 #include "flow/Platform.h"
 #include "flow/SystemMonitor.h"
 #include "flow/TLSConfig.actor.h"
-#include "flow/Tracing.h"
+#include "fdbclient/Tracing.h"
 #include "flow/UnitTest.h"
 #include "flow/network.h"
 #include "flow/serialize.h"

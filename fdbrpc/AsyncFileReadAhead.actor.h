@@ -29,7 +29,7 @@
 #define FDBRPC_ASYNCFILEREADAHEAD_ACTOR_H
 
 #include "flow/flow.h"
-#include "fdbrpc/IAsyncFile.h"
+#include "flow/IAsyncFile.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // Read-only file type that wraps another file instance, reads in large blocks, and reads ahead of the actual range
