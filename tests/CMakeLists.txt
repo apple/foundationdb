@@ -88,7 +88,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES RedwoodPerfRandomRangeScans.txt IGNORE)
   add_fdb_test(TEST_FILES RocksDBTest.txt IGNORE)
   add_fdb_test(TEST_FILES S3BlobStore.txt IGNORE)
-  add_fdb_test(TEST_FILES SampleNoSimAttrition.txt IGNORE)
+  add_fdb_test(TEST_FILES SampleNoSimAttrition.txt)
   if (NOT USE_UBSAN) # TODO re-enable in UBSAN after https://github.com/apple/foundationdb/issues/2410 is resolved
     add_fdb_test(TEST_FILES SimpleExternalTest.txt)
   else()
