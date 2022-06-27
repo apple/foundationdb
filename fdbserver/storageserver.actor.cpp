@@ -195,9 +195,7 @@ struct AddingShard : NonCopyable {
 
 	Phase phase;
 
-	Future<Void> kvReady;
-
-	AddingShard(StorageServer* server, KeyRangeRef const& keys, Future<Void> kvReady);
+	AddingShard(StorageServer* server, KeyRangeRef const& keys);
 
 	// When fetchKeys "partially completes" (splits an adding shard in two), this is used to construct the left half
 	AddingShard(AddingShard* prev, KeyRange const& keys)
@@ -233,13 +231,13 @@ public:
 
 	static ShardInfo* newNotAssigned(KeyRange keys) { return new ShardInfo(keys, nullptr, nullptr); }
 	static ShardInfo* newReadWrite(KeyRange keys, StorageServer* data) { return new ShardInfo(keys, nullptr, data); }
-	static ShardInfo* newAdding(StorageServer* data, KeyRange keys, Future<Void> kvReady = Void()) {
-		return new ShardInfo(keys, std::make_unique<AddingShard>(data, keys, kvReady), nullptr);
+	static ShardInfo* newAdding(StorageServer* data, KeyRange keys) {
+		return new ShardInfo(keys, std::make_unique<AddingShard>(data, keys), nullptr);
 	}
 	static ShardInfo* addingSplitLeft(KeyRange keys, AddingShard* oldShard) {
 		return new ShardInfo(keys, std::make_unique<AddingShard>(oldShard, keys), nullptr);
 	}
-	static ShardInfo* newShard(StorageServer* data, const StorageServerShard& shard, Future<Void> kvReady = Void()) {
+	static ShardInfo* newShard(StorageServer* data, const StorageServerShard& shard) {
 		ShardInfo* res = nullptr;
 		switch (shard.getShardState()) {
 		case StorageServerShard::NotAssigned:
@@ -247,7 +245,7 @@ public:
 			break;
 		case StorageServerShard::MovingIn:
 		case StorageServerShard::ReadWritePending:
-			res = newAdding(data, shard.range, kvReady);
+			res = newAdding(data, shard.range);
 			break;
 		case StorageServerShard::ReadWrite:
 			res = newReadWrite(shard.range, data);
@@ -640,21 +638,12 @@ private:
 
 public:
 	struct PendingNewShard {
-		PendingNewShard(StorageServer* data, uint64_t shardId, KeyRangeRef range, Promise<Void> kvReady)
-		  : data(data), shardId(std::to_string(shardId)), range(range), kvReady(kvReady) {
+		PendingNewShard(StorageServer* data, uint64_t shardId, KeyRangeRef range)
+		  : data(data), shardId(std::to_string(shardId)), range(range) {
 			// this->shardReady = data->storage.addShard(std::to_string(shardId));
 		}
 
-		PendingNewShard(uint64_t shardId, KeyRangeRef range, Promise<Void> kvReady)
-		  : shardId(std::to_string(shardId)), range(range), kvReady(kvReady) {}
-
-		ACTOR Future<Void> addRangeToShard(PendingNewShard* self) {
-			wait(self->shardReady);
-			TraceEvent(SevDebug, "StorageDiskAddedShard", self->data->thisServerID).detail("ShardID", self->shardId);
-			self->data->storage.addRange(self->range, self->shardId);
-			self->kvReady.send(Void());
-			return Void();
-		}
+		PendingNewShard(uint64_t shardId, KeyRangeRef range) : shardId(std::to_string(shardId)), range(range) {}
 
 		std::string toString() const {
 			return format("PendingNewShard: [ShardID]: %s [Range]: %s",
@@ -665,7 +654,6 @@ public:
 		StorageServer* data;
 		std::string shardId;
 		KeyRange range;
-		Promise<Void> kvReady;
 		Future<Void> shardReady;
 	};
 
@@ -6220,7 +6208,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 						data->shards[keys.begin]->populateShard(rightShard);
 					} else {
 						shard->server->addShard(ShardInfo::addingSplitLeft(KeyRangeRef(keys.begin, nfk), shard));
-						shard->server->addShard(ShardInfo::newAdding(data, KeyRangeRef(nfk, keys.end), Void()));
+						shard->server->addShard(ShardInfo::newAdding(data, KeyRangeRef(nfk, keys.end)));
 					}
 					shard = data->shards.rangeContaining(keys.begin).value()->adding.get();
 					warningLogger = logFetchKeysWarning(shard);
@@ -6463,9 +6451,8 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 	return Void();
 };
 
-AddingShard::AddingShard(StorageServer* server, KeyRangeRef const& keys, Future<Void> kvReady = Void())
-  : keys(keys), server(server), transferredVersion(invalidVersion), fetchVersion(invalidVersion), phase(WaitPrevious),
-    kvReady(kvReady) {
+AddingShard::AddingShard(StorageServer* server, KeyRangeRef const& keys)
+  : keys(keys), server(server), transferredVersion(invalidVersion), fetchVersion(invalidVersion), phase(WaitPrevious) {
 	fetchClient = fetchKeys(server, this);
 }
 
@@ -6885,7 +6872,6 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 	std::vector<KeyRange> removeRanges;
 	std::vector<KeyRange> newEmptyRanges;
 	std::vector<StorageServerShard> updatedShards;
-	Promise<Void> kvReady;
 	int totalAssignedAtVer = 0;
 	for (auto r = vr.begin(); r != vr.end(); ++r) {
 		KeyRangeRef range = keys & r->range();
@@ -6941,7 +6927,8 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 				if (!shard->assigned()) {
 					updatedShards.push_back(
 					    StorageServerShard(range, cVer, desiredId, desiredId, StorageServerShard::MovingIn));
-					data->pendingAddRanges[cVer].emplace_back(desiredId, range, kvReady);
+					data->pendingAddRanges[cVer].emplace_back(desiredId, range);
+					data->newestDirtyVersion.insert(range, cVer);
 					TraceEvent(SevVerbose, "SSAssignShard", data->thisServerID)
 					    .detail("Range", range)
 					    .detail("NowAssigned", nowAssigned)
@@ -6983,7 +6970,7 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 	}
 
 	for (const auto& shard : updatedShards) {
-		data->addShard(ShardInfo::newShard(data, shard, kvReady.getFuture()));
+		data->addShard(ShardInfo::newShard(data, shard));
 		updateStorageShard(data, shard);
 	}
 
@@ -8115,7 +8102,11 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 				    .detail("AddRangeVersion", aVer);
 				auto it = data->getMutationLog().find(aVer);
 				ASSERT(it != data->getMutationLog().end());
-				desiredVersion = (--it)->first;
+				if (it == data->getMutationLog().begin()) {
+					desiredVersion = data->storageVersion();
+				} else {
+					desiredVersion = (--it)->first;
+				}
 			}
 		}
 
