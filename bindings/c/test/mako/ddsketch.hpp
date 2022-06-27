@@ -92,9 +92,9 @@ public:
 			assert(index >= 0 && index < int(buckets.size()));
 			if (buckets[index] == std::numeric_limits<uint32_t>::max()) {
 				std::cerr << "Terminating. "
-				          << "Maximum threshold for statistics collection hit "
+				          << "Maximum threshold for statistics "
 				          << "has hit maximum size." << std::endl;
-				std::cerr << "Consider increasing --sampling to a smaller value.";
+				std::cerr << "Consider increasing --sampling to sample less frequently";
 				std::exit(-1);
 			}
 			buckets[index]++;
