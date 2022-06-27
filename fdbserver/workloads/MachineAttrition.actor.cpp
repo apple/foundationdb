@@ -285,7 +285,7 @@ struct MachineAttritionWorkload : TestWorkload {
 						workers.pop_back();
 					}
 				}
-
+				killDelay = self->liveDuration;
 			} catch (Error& e) {
 				if(e.isDiskError() || e.isInjectedFault() || e.code() == error_code_operation_failed) {
 					TraceEvent(SevWarnAlways, "KillLoopError").error(e);
