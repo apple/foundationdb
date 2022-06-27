@@ -172,10 +172,15 @@ struct MachineAttritionWorkload : TestWorkload {
 			// kill all matching workers
 			if (idAccess(worker).present()) {
 				auto id = idAccess(worker).get().toString();
-				TraceEvent("SendingRebootRequest")
-				    .detail("Id", id)
-				    .detail("Count", std::count(targets.begin(), targets.end(), id));
-				if(std::count(targets.begin(), targets.end(), id) > 0) {
+				bool found = false;
+				for(auto& target: targets) {
+					found |= target == id;
+					TraceEvent("SendingRebootRequest_Debug")
+					    .detail("Id", id)
+					    .detail("Target", target);
+					if(found) {break;}
+				}
+				if(found) {
 					TraceEvent("SendingRebootRequest").detail("TargetWorker", worker.interf.locality.toString());
 					worker.interf.clientInterface.reboot.send(rbReq);
 				}
