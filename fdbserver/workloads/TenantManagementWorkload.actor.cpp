@@ -589,7 +589,16 @@ struct TenantManagementWorkload : TestWorkload {
 				for (; tenantIndex != oldTenantNames.size(); ++tenantIndex) {
 					state TenantName oldTenantName = oldTenantNames[tenantIndex];
 					state TenantName newTenantName = newTenantNames[tenantIndex];
+					// Perform rename, then check against the DB for the new results
 					wait(ManagementAPI::renameTenant(cx.getReference(), oldTenantName, newTenantName));
+					state Optional<TenantMapEntry> oldTenantEntry =
+					    wait(ManagementAPI::tryGetTenant(cx.getReference(), oldTenantName));
+					state Optional<TenantMapEntry> newTenantEntry =
+					    wait(ManagementAPI::tryGetTenant(cx.getReference(), newTenantName));
+					ASSERT(!oldTenantEntry.present());
+					ASSERT(newTenantEntry.present());
+
+					// Update Internal Tenant Map and check for correctness
 					TenantState tState = self->createdTenants[oldTenantName];
 					self->createdTenants[newTenantName] = tState;
 					self->createdTenants.erase(oldTenantName);
