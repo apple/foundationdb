@@ -73,13 +73,12 @@ function create_fake_website_directory() {
     # symlinks and the binaries tarball
     ############################################################################
     logg "FETCHING CLIENT LIBRARY"
-    destination_directory="${website_directory}/${version}"
-    destination_filename="libfdb_c.x86_64.so"
-
     case "${stripped_binaries_and_from_where}" in
         "unstripped_artifactory")
             for version in "${fdb_library_versions[@]}"; do
                 logg "FETCHING ${version} CLIENT LIBRARY"
+                destination_directory="${website_directory}/${version}"
+                destination_filename="libfdb_c.x86_64.so"
                 mkdir -p "${destination_directory}"
                 pushd "${destination_directory}" || exit 127
                 curl -Ls "${artifactory_base_url}/${version}/release/api/fdb-server-${version}-linux.tar.gz" | tar -xzf - ./lib/libfdb_c.so --strip-components 2
@@ -91,18 +90,22 @@ function create_fake_website_directory() {
         "stripped_artifactory")
             for version in "${fdb_library_versions[@]}"; do
                 logg "FETCHING ${version} CLIENT LIBRARY"
+                destination_directory="${website_directory}/${version}"
+                destination_filename="libfdb_c.x86_64.so"
                 mkdir -p "${destination_directory}"
-                curl -Ls "${artifactory_base_url}/${version}/release/files/linux/lib/libfdb_c.so" -o "${destination_directory}/${destination_filename}"
-                chmod 755 "${destination_directory}/${destination_filename}"
+                pushd "${destination_directory}" || exit 127
+                curl -Ls "${artifactory_base_url}/${version}/release/files/linux/lib/libfdb_c.so" -o "${destination_filename}"
+                chmod 755 "${destination_filename}"
+                popd || exit 128
             done
             ;;
         "unstripped_local")
             logg "COPYING UNSTRIPPED CLIENT LIBRARY"
-            cp -pr "${build_output_directory}/lib/libfdb_c.so" "${destination_directory}/${destination_filename}"
+            cp -pr "${build_output_directory}/lib/libfdb_c.so" "${website_directory}/${fdb_version}/libfdb_c.x86_64.so"
             ;;
         "stripped_local")
             logg "COPYING STRIPPED CLIENT LIBRARY"
-            cp -pr "${build_output_directory}/packages/lib/libfdb_c.so" "${destination_directory}/${destination_filename}"
+            cp -pr "${build_output_directory}/packages/lib/libfdb_c.so" "${website_directory}/${fdb_version}/libfdb_c.x86_64.so"
             ;;
     esac
     # override fdb_website variable that is passed to Docker build
