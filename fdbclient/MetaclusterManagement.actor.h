@@ -29,6 +29,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/GenericTransactionHelper.h"
 #include "fdbclient/GenericManagementAPI.actor.h"
+#include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/Metacluster.h"
 #include "fdbclient/MultiVersionTransaction.h"
 #include "fdbclient/SystemData.h"
@@ -82,6 +83,12 @@ FDB_DECLARE_BOOLEAN_PARAM(AddNewTenants);
 FDB_DECLARE_BOOLEAN_PARAM(RemoveMissingTenants);
 
 namespace MetaclusterAPI {
+
+struct ManagementClusterMetadata {
+	// A set of non-full clusters where the key is the tuple (num tenant groups allocated, cluster name).
+	static KeyBackedSet<Tuple> clusterCapacityIndex;
+	static Tuple getClusterCapacityTuple(ClusterNameRef const& clusterName, DataClusterEntry const& entry);
+};
 
 ACTOR Future<Reference<IDatabase>> openDatabase(ClusterConnectionString connectionString);
 
@@ -263,17 +270,35 @@ Future<Void> decommissionMetacluster(Reference<DB> db) {
 	return Void();
 }
 
+template <class Transaction>
+void updateClusterCapacityIndex(Transaction tr,
+                                ClusterName name,
+                                DataClusterEntry previousEntry,
+                                DataClusterEntry updatedEntry) {
+	// Entries are put in the cluster capacity index ordered by how many items are already allocated to them
+	if (previousEntry.hasCapacity()) {
+		ManagementClusterMetadata::clusterCapacityIndex.erase(
+		    tr, ManagementClusterMetadata::getClusterCapacityTuple(name, previousEntry));
+	}
+	if (updatedEntry.hasCapacity()) {
+		ManagementClusterMetadata::clusterCapacityIndex.insert(
+		    tr, ManagementClusterMetadata::getClusterCapacityTuple(name, updatedEntry));
+	}
+}
+
 // This should only be called from a transaction that has already confirmed that the cluster entry
 // is present. The updatedEntry should use the existing entry and modify only those fields that need
 // to be changed.
 template <class Transaction>
 void updateClusterMetadata(Transaction tr,
                            ClusterNameRef name,
+                           DataClusterMetadata previousMetadata,
                            Optional<ClusterConnectionString> updatedConnectionString,
                            Optional<DataClusterEntry> updatedEntry) {
 
 	if (updatedEntry.present()) {
 		tr->set(dataClusterMetadataPrefix.withSuffix(name), updatedEntry.get().encode());
+		updateClusterCapacityIndex(tr, name, previousMetadata.entry, updatedEntry.get());
 	}
 	if (updatedConnectionString.present()) {
 		tr->set(dataClusterConnectionRecordPrefix.withSuffix(name), updatedConnectionString.get().toString());
@@ -319,6 +344,10 @@ Future<Void> managementClusterRegister(Transaction tr,
 	if (!result.second) {
 		entry.allocated = ClusterUsage();
 
+		if (entry.hasCapacity()) {
+			ManagementClusterMetadata::clusterCapacityIndex.insert(
+			    tr, ManagementClusterMetadata::getClusterCapacityTuple(name, entry));
+		}
 		tr->set(dataClusterMetadataKey, entry.encode());
 		tr->set(dataClusterConnectionRecordKey, connectionString.toString());
 	}
@@ -506,21 +535,26 @@ Future<std::pair<Optional<DataClusterMetadata>, bool>> managementClusterRemove(T
 		return std::make_pair(metadata, true);
 	}
 
+	bool purged = false;
 	if (checkEmpty && metadata.get().entry.allocated.numTenantGroups > 0) {
 		throw cluster_not_empty();
 	} else if (metadata.get().entry.allocated.numTenantGroups == 0) {
 		tr->clear(dataClusterMetadataKey);
 		tr->clear(dataClusterConnectionRecordKey);
-		return std::make_pair(metadata, true);
+		purged = true;
 	} else {
 		// We need to clean up the tenant metadata for this cluster before erasing it. While we are doing that,
 		// lock the entry to prevent other assignments.
 		DataClusterEntry updatedEntry = metadata.get().entry;
 		updatedEntry.locked = true;
 
-		updateClusterMetadata(tr, name, Optional<ClusterConnectionString>(), updatedEntry);
-		return std::make_pair(metadata, false);
+		updateClusterMetadata(tr, name, metadata.get(), Optional<ClusterConnectionString>(), updatedEntry);
 	}
+
+	ManagementClusterMetadata::clusterCapacityIndex.erase(
+	    tr, ManagementClusterMetadata::getClusterCapacityTuple(name, metadata.get().entry));
+
+	return std::make_pair(metadata, purged);
 }
 
 ACTOR template <class DB>
@@ -819,42 +853,50 @@ Future<std::map<ClusterName, DataClusterMetadata>> listClusters(Reference<DB> db
 
 ACTOR template <class Transaction>
 Future<std::pair<ClusterName, DataClusterMetadata>> assignTenant(Transaction tr, TenantMapEntry tenantEntry) {
-	// TODO: check for invalid tenant group name
-	// TODO: check that the chosen cluster is available, otherwise we can try another
-
 	state typename transaction_future_type<Transaction, Optional<Value>>::type groupMetadataFuture;
-	state bool creatingTenantGroup = true;
 	if (tenantEntry.tenantGroup.present()) {
+		if (tenantEntry.tenantGroup.get().startsWith("\xff"_sr)) {
+			throw invalid_tenant_group_name();
+		}
+
 		groupMetadataFuture = tr->get(tenantGroupMetadataKeys.begin.withSuffix(tenantEntry.tenantGroup.get()));
 		Optional<Value> groupMetadata = wait(safeThreadFutureToFuture(groupMetadataFuture));
 		if (groupMetadata.present()) {
-			creatingTenantGroup = false;
 			state TenantGroupEntry groupEntry = TenantGroupEntry::decode(groupMetadata.get());
 			Optional<DataClusterMetadata> clusterMetadata =
 			    wait(tryGetClusterTransaction(tr, groupEntry.assignedCluster));
 
-			// TODO: This is only true if we clean up tenant state after force removal.
 			ASSERT(clusterMetadata.present());
 			return std::make_pair(groupEntry.assignedCluster, clusterMetadata.get());
 		}
 	}
 
-	// TODO: more efficient
-	std::map<ClusterName, DataClusterMetadata> clusters =
-	    wait(listClustersTransaction(tr, ""_sr, "\xff"_sr, CLIENT_KNOBS->MAX_DATA_CLUSTERS));
+	state KeyBackedSet<Tuple>::Values availableClusters = wait(ManagementClusterMetadata::clusterCapacityIndex.getRange(
+	    tr, Optional<Tuple>(), Optional<Tuple>(), 1, Snapshot::False, Reverse::True));
 
-	for (auto c : clusters) {
-		if (!creatingTenantGroup || c.second.entry.hasCapacity()) {
-			if (creatingTenantGroup) {
-				++c.second.entry.allocated.numTenantGroups;
-				updateClusterMetadata(tr, c.first, Optional<ClusterConnectionString>(), c.second.entry);
-				if (tenantEntry.tenantGroup.present()) {
-					tr->set(tenantGroupMetadataKeys.begin.withSuffix(tenantEntry.tenantGroup.get()),
-					        TenantGroupEntry(c.first).encode());
-				}
-			}
-			return c;
+	state Optional<ClusterName> chosenCluster;
+	if (!availableClusters.empty()) {
+		// TODO: check that the chosen cluster is available, otherwise we can try another
+		chosenCluster = availableClusters[0].getString(1);
+	}
+
+	if (chosenCluster.present()) {
+		Optional<DataClusterMetadata> clusterMetadata = wait(tryGetClusterTransaction(tr, chosenCluster.get()));
+		ASSERT(clusterMetadata.present());
+
+		DataClusterEntry clusterEntry = clusterMetadata.get().entry;
+		ASSERT(clusterEntry.hasCapacity());
+
+		++clusterEntry.allocated.numTenantGroups;
+
+		updateClusterMetadata(
+		    tr, chosenCluster.get(), clusterMetadata.get(), Optional<ClusterConnectionString>(), clusterEntry);
+		if (tenantEntry.tenantGroup.present()) {
+			tr->set(tenantGroupMetadataKeys.begin.withSuffix(tenantEntry.tenantGroup.get()),
+			        TenantGroupEntry(chosenCluster.get()).encode());
 		}
+
+		return std::make_pair(chosenCluster.get(), clusterMetadata.get());
 	}
 
 	throw metacluster_no_capacity();
@@ -1082,14 +1124,11 @@ Future<Void> deleteTenant(Reference<DB> db, TenantName name) {
 				    finalClusterMetadata.present() && !tenantEntry3.get().tenantGroup.present();
 
 				if (finalClusterMetadata.present()) {
-					managementTr->clear(getDataClusterTenantIndexKey(tenantEntry3.get().assignedCluster.get(), name),
-					                    ""_sr);
+					managementTr->clear(getDataClusterTenantIndexKey(tenantEntry3.get().assignedCluster.get(), name));
 
 					if (tenantEntry3.get().tenantGroup.present()) {
 						managementTr->clear(getDataClusterTenantGroupIndexKey(tenantEntry3.get().assignedCluster.get(),
-						                                                      tenantEntry3.get().tenantGroup.get()),
-
-						                    ""_sr);
+						                                                      tenantEntry3.get().tenantGroup.get()));
 						RangeResult result = wait(safeThreadFutureToFuture(tenantGroupIndexFuture));
 						if (result.size() == 0) {
 							managementTr->clear(
@@ -1102,6 +1141,7 @@ Future<Void> deleteTenant(Reference<DB> db, TenantName name) {
 					--updatedEntry.allocated.numTenantGroups;
 					updateClusterMetadata(managementTr,
 					                      tenantEntry3.get().assignedCluster.get(),
+					                      finalClusterMetadata.get(),
 					                      Optional<ClusterConnectionString>(),
 					                      updatedEntry);
 				}

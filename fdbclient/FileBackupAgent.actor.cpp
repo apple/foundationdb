@@ -3617,8 +3617,8 @@ struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 		// Get a batch of files.  We're targeting batchSize blocks being dispatched so query for batchSize files (each
 		// of which is 0 or more blocks).
 		state int taskBatchSize = BUGGIFY ? 1 : CLIENT_KNOBS->RESTORE_DISPATCH_ADDTASK_SIZE;
-		state RestoreConfig::FileSetT::Values files =
-		    wait(restore.fileSet().getRange(tr, { beginVersion, beginFile }, {}, taskBatchSize));
+		state RestoreConfig::FileSetT::Values files = wait(restore.fileSet().getRange(
+		    tr, Optional<RestoreConfig::RestoreFile>({ beginVersion, beginFile }), {}, taskBatchSize));
 
 		// allPartsDone will be set once all block tasks in the current batch are finished.
 		state Reference<TaskFuture> allPartsDone;

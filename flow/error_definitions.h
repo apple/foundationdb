@@ -197,7 +197,6 @@ ERROR( value_not_tuple, 2042, "The value cannot be parsed as a tuple" );
 ERROR( mapper_not_tuple, 2043, "The mapper cannot be parsed as a tuple" );
 ERROR( invalid_checkpoint_format, 2044, "Invalid checkpoint format" )
 
-
 ERROR( incompatible_protocol_version, 2100, "Incompatible protocol version" )
 ERROR( transaction_too_large, 2101, "Transaction exceeds byte limit" )
 ERROR( key_too_large, 2102, "Key length exceeds limit" )
@@ -232,6 +231,7 @@ ERROR( tenants_disabled, 2136, "Tenants have been disabled in the cluster" )
 ERROR( unknown_tenant, 2137, "Tenant is not available from this server" )
 ERROR( illegal_tenant_access, 2138, "Illegal tenant access" )
 ERROR( tenant_removed, 2139, "The tenant was removed" )
+ERROR( invalid_tenant_group_name, 2140, "Tenant group name cannot begin with \\xff" )
 
 ERROR( invalid_cluster_name, 2150, "Data cluster name cannot begin with \\xff" )
 ERROR( invalid_metacluster_operation, 2151, "Metacluster operation performed on non-metacluster" )

@@ -56,4 +56,10 @@ Key getDataClusterTenantGroupIndexKey(ClusterNameRef cluster, Optional<TenantGro
 	return dataClusterTenantGroupIndexKeys.begin.withSuffix(tuple.pack());
 }
 
+KeyBackedSet<Tuple> ManagementClusterMetadata::clusterCapacityIndex("metacluster/clusterCapacityIndex/"_sr);
+Tuple ManagementClusterMetadata::getClusterCapacityTuple(ClusterNameRef const& clusterName,
+                                                         DataClusterEntry const& entry) {
+	return Tuple().append(entry.allocated.numTenantGroups).append(clusterName);
+}
+
 }; // namespace MetaclusterAPI

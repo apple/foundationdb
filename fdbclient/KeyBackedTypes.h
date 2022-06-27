@@ -23,6 +23,7 @@
 #include <utility>
 #include <vector>
 
+#include "fdbclient/GenericTransactionHelper.h"
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/Subspace.h"
@@ -497,48 +498,63 @@ public:
 	typedef std::vector<ValueType> Values;
 
 	// If end is not present one key past the end of the map is used.
-	Future<Values> getRange(Reference<ReadYourWritesTransaction> tr,
-	                        ValueType const& begin,
+	template <class Transaction>
+	Future<Values> getRange(Transaction tr,
+	                        Optional<ValueType> const& begin,
 	                        Optional<ValueType> const& end,
 	                        int limit,
-	                        Snapshot snapshot = Snapshot::False) const {
+	                        Snapshot snapshot = Snapshot::False,
+	                        Reverse reverse = Reverse::False) const {
 		Subspace s = space; // 'this' could be invalid inside lambda
+		Key beginKey = begin.present() ? s.pack(Codec<ValueType>::pack(begin.get())) : space.range().begin;
 		Key endKey = end.present() ? s.pack(Codec<ValueType>::pack(end.get())) : space.range().end;
-		return map(
-		    tr->getRange(KeyRangeRef(s.pack(Codec<ValueType>::pack(begin)), endKey), GetRangeLimits(limit), snapshot),
-		    [s](RangeResult const& kvs) -> Values {
-			    Values results;
-			    for (int i = 0; i < kvs.size(); ++i) {
-				    results.push_back(Codec<ValueType>::unpack(s.unpack(kvs[i].key)));
-			    }
-			    return results;
-		    });
+
+		typename transaction_future_type<Transaction, RangeResult>::type getRangeFuture =
+		    tr->getRange(KeyRangeRef(beginKey, endKey), GetRangeLimits(limit), snapshot, reverse);
+
+		return holdWhile(getRangeFuture,
+		                 map(safeThreadFutureToFuture(getRangeFuture), [s](RangeResult const& kvs) -> Values {
+			                 Values results;
+			                 for (int i = 0; i < kvs.size(); ++i) {
+				                 results.push_back(Codec<ValueType>::unpack(s.unpack(kvs[i].key)));
+			                 }
+			                 return results;
+		                 }));
 	}
 
-	Future<bool> exists(Reference<ReadYourWritesTransaction> tr,
-	                    ValueType const& val,
-	                    Snapshot snapshot = Snapshot::False) const {
-		return map(tr->get(space.pack(Codec<ValueType>::pack(val)), snapshot),
-		           [](Optional<Value> const& val) -> bool { return val.present(); });
+	template <class Transaction>
+	Future<bool> exists(Transaction tr, ValueType const& val, Snapshot snapshot = Snapshot::False) const {
+		typename transaction_future_type<Transaction, Optional<Value>>::type getFuture =
+		    tr->get(space.pack(Codec<ValueType>::pack(val)), snapshot);
+
+		return holdWhile(getFuture, map(safeThreadFutureToFuture(getFuture), [](Optional<Value> const& val) -> bool {
+			                 return val.present();
+		                 }));
 	}
 
 	// Returns the expectedSize of the set key
-	int insert(Reference<ReadYourWritesTransaction> tr, ValueType const& val) {
+	template <class Transaction>
+	int insert(Transaction tr, ValueType const& val) {
 		Key k = space.pack(Codec<ValueType>::pack(val));
 		tr->set(k, StringRef());
 		return k.expectedSize();
 	}
 
-	void erase(Reference<ReadYourWritesTransaction> tr, ValueType const& val) {
+	template <class Transaction>
+	void erase(Transaction tr, ValueType const& val) {
 		return tr->clear(space.pack(Codec<ValueType>::pack(val)));
 	}
 
-	void erase(Reference<ReadYourWritesTransaction> tr, ValueType const& begin, ValueType const& end) {
+	template <class Transaction>
+	void erase(Transaction tr, ValueType const& begin, ValueType const& end) {
 		return tr->clear(
 		    KeyRangeRef(space.pack(Codec<ValueType>::pack(begin)), space.pack(Codec<ValueType>::pack(end))));
 	}
 
-	void clear(Reference<ReadYourWritesTransaction> tr) { return tr->clear(space.range()); }
+	template <class Transaction>
+	void clear(Transaction tr) {
+		return tr->clear(space.range());
+	}
 
 	Subspace space;
 };
