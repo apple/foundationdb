@@ -11,3 +11,8 @@ clearAfterTest = false
     targetIds = 'testmachine'
     testDuration = 86400.0
     liveDuration = 120.0
+
+    [[test.workload]]
+    testName = 'Cycle'
+    testDuration = 86400.0
+    nodeCount = 1000000000
