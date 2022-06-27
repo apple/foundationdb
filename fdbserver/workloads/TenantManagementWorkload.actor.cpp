@@ -559,10 +559,6 @@ struct TenantManagementWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> renameTenant(Database cx, TenantManagementWorkload* self) {
-		if (self->createdTenants.size() == 0) {
-			TraceEvent("RenameTenantNoneExisting");
-			return Void();
-		}
 		// Currently only supporting MANAGEMENT_DATABASE op, so numTenants should always be 1
 		// state OperationType operationType = TenantManagementWorkload::randomOperationType();
 		int numTenants = 1;
@@ -571,19 +567,18 @@ struct TenantManagementWorkload : TestWorkload {
 		state std::vector<TenantName> newTenantNames;
 		// For the future in supporting different operation types and number of tenants:
 		// The number of tenants we rename should be min(numTenants, self->createdTenants.size())
-		int i = 0;
-		for (auto existingEntry : self->createdTenants) {
-			oldTenantNames.push_back(existingEntry.first);
-			loop {
-				TenantName newTenant = self->chooseTenantName(false);
-				if (!self->createdTenants.count(newTenant) &&
-				    std::find(newTenantNames.begin(), newTenantNames.end(), newTenant) == newTenantNames.end()) {
-					newTenantNames.push_back(newTenant);
-					break;
-				}
+		state bool tenantExists = false;
+		state bool tenantNotFound = false;
+		for (int i = 0; i < numTenants; ++i) {
+			TenantName oldTenant = self->chooseTenantName(false);
+			TenantName newTenant = self->chooseTenantName(false);
+			newTenantNames.push_back(newTenant);
+			oldTenantNames.push_back(oldTenant);
+			if (!self->createdTenants.count(oldTenant)) {
+				tenantNotFound = true;
 			}
-			if (++i == numTenants) {
-				break;
+			if (self->createdTenants.count(newTenant)) {
+				tenantExists = true;
 			}
 		}
 
@@ -615,10 +610,22 @@ struct TenantManagementWorkload : TestWorkload {
 				return Void();
 			} catch (Error& e) {
 				ASSERT(oldTenantNames.size() == 1);
-				TraceEvent(SevError, "RenameTenantFailure")
-				    .error(e)
-				    .detail("OldTenantName", oldTenantNames[0])
-				    .detail("NewTenantName", newTenantNames[0]);
+				if (e.code() == error_code_tenant_not_found) {
+					TraceEvent("RenameTenantOldTenantNotFound")
+					    .detail("OldTenantName", oldTenantNames[0])
+					    .detail("NewTenantName", newTenantNames[0]);
+					ASSERT(tenantNotFound);
+				} else if (e.code() == error_code_tenant_already_exists) {
+					TraceEvent("RenameTenantNewTenantAlreadyExists")
+					    .detail("OldTenantName", oldTenantNames[0])
+					    .detail("NewTenantName", newTenantNames[0]);
+					ASSERT(tenantExists);
+				} else {
+					TraceEvent(SevError, "RenameTenantFailure")
+					    .error(e)
+					    .detail("OldTenantName", oldTenantNames[0])
+					    .detail("NewTenantName", newTenantNames[0]);
+				}
 				return Void();
 			}
 		}
