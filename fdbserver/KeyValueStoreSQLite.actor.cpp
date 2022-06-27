@@ -19,7 +19,7 @@
  */
 
 #define SQLITE_THREADSAFE 0 // also in sqlite3.amalgamation.c!
-#include "contrib/fmt-8.1.1/include/fmt/format.h"
+#include "fmt/format.h"
 #include "flow/crc32c.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/CoroFlow.h"
@@ -31,7 +31,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 
 extern "C" {
-#include "fdbserver/sqlite/sqliteInt.h"
+#include "sqliteInt.h"
 u32 sqlite3VdbeSerialGet(const unsigned char*, u32, Mem*);
 }
 #include "flow/ThreadPrimitives.h"
@@ -1996,7 +1996,7 @@ private:
 		state int64_t lastReadsComplete = 0;
 		state int64_t lastWritesComplete = 0;
 		loop {
-			wait(delay(SERVER_KNOBS->DISK_METRIC_LOGGING_INTERVAL));
+			wait(delay(FLOW_KNOBS->DISK_METRIC_LOGGING_INTERVAL));
 
 			int64_t rc = self->readsComplete, wc = self->writesComplete;
 			TraceEvent("DiskMetrics", self->logID)

@@ -86,10 +86,10 @@ public:
 		addTask([promise, func, priority] {
 			try {
 				auto funcResult = func();
-				onMainThreadVoid([promise, funcResult] { promise.send(funcResult); }, nullptr, priority);
+				onMainThreadVoid([promise, funcResult] { promise.send(funcResult); }, priority);
 			} catch (Error& e) {
 				TraceEvent("ErrorExecutingAsyncTask").error(e);
-				onMainThreadVoid([promise, e] { promise.sendError(e); }, nullptr, priority);
+				onMainThreadVoid([promise, e] { promise.sendError(e); }, priority);
 			}
 		});
 		return promise.getFuture();

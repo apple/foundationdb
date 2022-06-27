@@ -52,7 +52,7 @@
 #include "flow/IRandom.h"
 #include "flow/Knobs.h"
 #include "flow/Trace.h"
-#include "flow/Tracing.h"
+#include "fdbclient/Tracing.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 

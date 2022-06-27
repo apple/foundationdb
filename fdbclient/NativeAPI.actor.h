@@ -20,7 +20,7 @@
 
 #pragma once
 #include "flow/IRandom.h"
-#include "flow/Tracing.h"
+#include "fdbclient/Tracing.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_NATIVEAPI_ACTOR_G_H)
 #define FDBCLIENT_NATIVEAPI_ACTOR_G_H
 #include "fdbclient/NativeAPI.actor.g.h"
@@ -556,5 +556,9 @@ int64_t getMaxWriteKeySize(KeyRef const& key, bool hasRawAccess);
 // Returns the maximum legal size of a key that can be cleared. Keys larger than this will be assumed not to exist.
 int64_t getMaxClearKeySize(KeyRef const& key);
 
+namespace NativeAPI {
+ACTOR Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses(
+    Transaction* tr);
+}
 #include "flow/unactorcompiler.h"
 #endif

@@ -21,7 +21,7 @@
 // At the moment, this file just contains tests.  IndexedSet<> is a template
 // and so all the important implementation is in the header file
 
-#include "contrib/fmt-8.1.1/include/fmt/format.h"
+#include "fmt/format.h"
 #include "flow/IndexedSet.h"
 #include "flow/IRandom.h"
 #include "flow/ThreadPrimitives.h"
