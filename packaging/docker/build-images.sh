@@ -40,7 +40,7 @@ function create_fake_website_directory() {
             curl -Ls "${artifactory_base_url}/${fdb_version}/release/api/foundationdb-binaries-${fdb_version}-linux.tar.gz" | tar -xzf -
             # Add the x86_64 to all binaries
             for file in "${fdb_binaries[@]}"; do
-                mv -pr "${file}" "${file}.x86_64"
+                mv "${file}" "${file}.x86_64"
             done
             ;;
         "stripped_artifactory")
