@@ -437,7 +437,7 @@ struct DataShard {
 // PhysicalShard represent a collection of logical shards. A PhysicalShard could have one or more DataShards. A
 // PhysicalShard is stored as a column family in rocksdb. Each PhysicalShard has its own iterator pool.
 struct PhysicalShard {
-	PhysicalShard(rocksdb::DB* db, std::string id) : db(db), id(id), inited(false) {}
+	PhysicalShard(rocksdb::DB* db, std::string id) : db(db), id(id), isInitialized(false) {}
 
 	rocksdb::Status init() {
 		if (cf) {
@@ -449,11 +449,11 @@ struct PhysicalShard {
 			return status;
 		}
 		readIterPool = std::make_shared<ReadIteratorPool>(db, cf, id);
-		this->inited.store(true);
+		this->isInitialized.store(true);
 		return status;
 	}
 
-	bool initialized() { return this->inited.load(); }
+	bool initialized() { return this->isInitialized.load(); }
 
 	void refreshReadIteratorPool() {
 		ASSERT(this->readIterPool != nullptr);
@@ -480,7 +480,7 @@ struct PhysicalShard {
 	std::unordered_map<std::string, std::unique_ptr<DataShard>> dataShards;
 	std::shared_ptr<ReadIteratorPool> readIterPool;
 	bool deletePending = false;
-	std::atomic<bool> inited;
+	std::atomic<bool> isInitialized;
 };
 
 // Manages physical shards and maintains logical shard mapping.
