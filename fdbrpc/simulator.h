@@ -28,9 +28,11 @@
 #include "flow/flow.h"
 #include "flow/Histogram.h"
 #include "flow/ProtocolVersion.h"
+#include "fdbrpc/FailureMonitor.h"
+#include "fdbrpc/Locality.h"
+#include "flow/IAsyncFile.h"
 #include "flow/TDMetric.actor.h"
 #include "fdbrpc/FailureMonitor.h"
-#include "fdbrpc/IAsyncFile.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/ReplicationPolicy.h"
 #include "fdbrpc/TokenSign.h"
@@ -420,7 +422,7 @@ public:
 	int listenersPerProcess;
 	std::set<NetworkAddress> protectedAddresses;
 	std::map<NetworkAddress, ProcessInfo*> currentlyRebootingProcesses;
-	std::unique_ptr<class ClusterConnectionString> extraDB;
+	class ClusterConnectionString* extraDB;
 	Reference<IReplicationPolicy> storagePolicy;
 	Reference<IReplicationPolicy> tLogPolicy;
 	int32_t tLogWriteAntiQuorum;

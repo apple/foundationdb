@@ -67,7 +67,7 @@ RUN curl -Ls https://amazon-eks.s3.amazonaws.com/1.19.6/2021-01-05/bin/linux/amd
 
 WORKDIR /
 
-FROM golang:1.16.7-bullseye AS go-build
+FROM golang:1.17.11-bullseye AS go-build
 
 COPY fdbkubernetesmonitor/ /fdbkubernetesmonitor
 WORKDIR /fdbkubernetesmonitor

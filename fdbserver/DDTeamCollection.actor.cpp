@@ -1956,13 +1956,15 @@ public:
 						takeRest =
 						    teamCollection->server_info.size() <= teamCollection->configuration.storageTeamSize ||
 						    teamCollection->machine_info.size() < teamCollection->configuration.storageTeamSize;
-						if (takeRest &&
-						    teamCollection->configuration.storageMigrationType == StorageMigrationType::GRADUAL) {
-							TraceEvent(SevWarn, "PerpetualWiggleSleep", teamCollection->distributorId)
-							    .suppressFor(SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY * 4)
-							    .detail("ServerSize", teamCollection->server_info.size())
-							    .detail("MachineSize", teamCollection->machine_info.size())
-							    .detail("StorageTeamSize", teamCollection->configuration.storageTeamSize);
+						if (takeRest) {
+							teamCollection->storageWiggler->setWiggleState(StorageWiggler::PAUSE);
+							if (teamCollection->configuration.storageMigrationType == StorageMigrationType::GRADUAL) {
+								TraceEvent(SevWarn, "PerpetualStorageWiggleSleep", teamCollection->distributorId)
+								    .suppressFor(SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY * 4)
+								    .detail("ServerSize", teamCollection->server_info.size())
+								    .detail("MachineSize", teamCollection->machine_info.size())
+								    .detail("StorageTeamSize", teamCollection->configuration.storageTeamSize);
+							}
 						}
 					}
 					wait(updateNextWigglingStorageID(teamCollection));
@@ -2033,6 +2035,7 @@ public:
 					TEST(true); // paused because cluster is unhealthy
 					moveFinishFuture = Never();
 					self->includeStorageServersForWiggle();
+					self->storageWiggler->setWiggleState(StorageWiggler::PAUSE);
 					TraceEvent(self->configuration.storageMigrationType == StorageMigrationType::AGGRESSIVE ? SevInfo
 					                                                                                        : SevWarn,
 					           "PerpetualStorageWigglePause",
@@ -2049,6 +2052,7 @@ public:
 							wait(self->storageWiggler->startWiggle());
 							auto fv = self->excludeStorageServersForWiggle(id);
 							moveFinishFuture = fv;
+							self->storageWiggler->setWiggleState(StorageWiggler::RUN);
 							TraceEvent("PerpetualStorageWiggleStart", self->distributorId)
 							    .detail("Primary", self->primary)
 							    .detail("ServerId", id)
@@ -3826,7 +3830,8 @@ int DDTeamCollection::overlappingMachineMembers(std::vector<Standalone<StringRef
 void DDTeamCollection::addTeam(const std::vector<Reference<TCServerInfo>>& newTeamServers,
                                IsInitialTeam isInitialTeam,
                                IsRedundantTeam redundantTeam) {
-	auto teamInfo = makeReference<TCTeamInfo>(newTeamServers);
+	Optional<Reference<TCTenantInfo>> no_tenant = {};
+	auto teamInfo = makeReference<TCTeamInfo>(newTeamServers, no_tenant);
 
 	// Move satisfiesPolicy to the end for performance benefit
 	auto badTeam = IsBadTeam{ redundantTeam || teamInfo->size() != configuration.storageTeamSize ||
@@ -5073,6 +5078,13 @@ bool DDTeamCollection::exclusionSafetyCheck(std::vector<UID>& excludeServerIDs) 
 		}
 	}
 	return true;
+}
+
+std::pair<StorageWiggler::State, double> DDTeamCollection::getStorageWigglerState() const {
+	if (storageWiggler) {
+		return { storageWiggler->getWiggleState(), storageWiggler->lastStateChangeTs };
+	}
+	return { StorageWiggler::INVALID, 0.0 };
 }
 
 Future<Void> DDTeamCollection::run(Reference<DDTeamCollection> teamCollection,

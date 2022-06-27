@@ -29,7 +29,7 @@
 #elif !defined(FLOW_ASYNCFILEKAIO_ACTOR_H)
 #define FLOW_ASYNCFILEKAIO_ACTOR_H
 
-#include "fdbrpc/IAsyncFile.h"
+#include "flow/IAsyncFile.h"
 
 #include <stdio.h>
 #include <fcntl.h>
@@ -37,7 +37,6 @@
 #include <sys/eventfd.h>
 #include <sys/syscall.h>
 #include "fdbrpc/linux_kaio.h"
-#include "fdbserver/Knobs.h"
 #include "flow/Knobs.h"
 #include "flow/Histogram.h"
 #include "flow/UnitTest.h"
@@ -649,7 +648,7 @@ private:
 				    Reference<HistogramRegistry>(), "AsyncFileKAIO", "WriteLatency", Histogram::Unit::microseconds));
 				metrics.syncLatencyDist = Reference<Histogram>(new Histogram(
 				    Reference<HistogramRegistry>(), "AsyncFileKAIO", "SyncLatency", Histogram::Unit::microseconds));
-				g_asyncFileKAIOHistogramLogger = histogramLogger(SERVER_KNOBS->DISK_METRIC_LOGGING_INTERVAL);
+				g_asyncFileKAIOHistogramLogger = histogramLogger(FLOW_KNOBS->DISK_METRIC_LOGGING_INTERVAL);
 			}
 		}
 

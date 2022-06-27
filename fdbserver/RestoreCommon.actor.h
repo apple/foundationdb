@@ -33,7 +33,7 @@
 #include "flow/genericactors.actor.h"
 #include "fdbclient/Tuple.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbrpc/IAsyncFile.h"
+#include "flow/IAsyncFile.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbserver/Knobs.h"
 

@@ -458,9 +458,10 @@ struct StorageWiggleMetrics {
 };
 
 struct StorageWiggler : ReferenceCounted<StorageWiggler> {
+	enum State : uint8_t { INVALID = 0, RUN = 1, PAUSE = 2 };
+	AsyncVar<bool> nonEmpty;
 	DDTeamCollection const* teamCollection;
 	StorageWiggleMetrics metrics;
-
 	// data structures
 	typedef std::pair<StorageMetadataType, UID> MetadataUIDP;
 	// min-heap
@@ -468,9 +469,10 @@ struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 	    wiggle_pq;
 	std::unordered_map<UID, decltype(wiggle_pq)::handle_type> pq_handles;
 
-	AsyncVar<bool> nonEmpty;
+	State wiggleState = State::INVALID;
+	double lastStateChangeTs = 0.0; // timestamp describes when did the state change
 
-	explicit StorageWiggler(DDTeamCollection* collection) : teamCollection(collection), nonEmpty(false){};
+	explicit StorageWiggler(DDTeamCollection* collection) : nonEmpty(false), teamCollection(collection){};
 	// add server to wiggling queue
 	void addServer(const UID& serverId, const StorageMetadataType& metadata);
 	// remove server from wiggling queue
@@ -480,6 +482,24 @@ struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 	bool contains(const UID& serverId) const { return pq_handles.count(serverId) > 0; }
 	bool empty() const { return wiggle_pq.empty(); }
 	Optional<UID> getNextServerId();
+
+	State getWiggleState() const { return wiggleState; }
+	void setWiggleState(State s) {
+		if (wiggleState != s) {
+			wiggleState = s;
+			lastStateChangeTs = g_network->now();
+		}
+	}
+	static std::string getWiggleStateStr(State s) {
+		switch (s) {
+		case State::RUN:
+			return "running";
+		case State::PAUSE:
+			return "paused";
+		default:
+			return "unknown";
+		}
+	}
 
 	// -- statistic update
 

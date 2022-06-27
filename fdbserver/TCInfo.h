@@ -20,9 +20,13 @@
 
 #pragma once
 
+#include "fdbclient/Tenant.h"
 #include "fdbserver/DDTeamCollection.h"
+#include "flow/Arena.h"
+#include "flow/FastRef.h"
 
 class TCTeamInfo;
+class TCTenantInfo;
 class TCMachineInfo;
 class TCMachineTeamInfo;
 
@@ -166,6 +170,7 @@ class TCTeamInfo final : public ReferenceCounted<TCTeamInfo>, public IDataDistri
 	friend class TCTeamInfoImpl;
 	std::vector<Reference<TCServerInfo>> servers;
 	std::vector<UID> serverIDs;
+	Optional<Reference<TCTenantInfo>> tenant;
 	bool healthy;
 	bool wrongConfiguration; // True if any of the servers in the team have the wrong configuration
 	int priority;
@@ -175,7 +180,9 @@ public:
 	Reference<TCMachineTeamInfo> machineTeam;
 	Future<Void> tracker;
 
-	explicit TCTeamInfo(std::vector<Reference<TCServerInfo>> const& servers);
+	explicit TCTeamInfo(std::vector<Reference<TCServerInfo>> const& servers, Optional<Reference<TCTenantInfo>> tenant);
+
+	Optional<Reference<TCTenantInfo>>& getTenant() { return tenant; }
 
 	std::string getTeamID() const override { return id.shortString(); }
 
@@ -234,4 +241,25 @@ private:
 	int64_t getLoadAverage() const;
 
 	bool allServersHaveHealthyAvailableSpace() const;
+};
+
+class TCTenantInfo : public ReferenceCounted<TCTenantInfo> {
+private:
+	TenantInfo m_tenantInfo;
+	Key m_prefix;
+	std::vector<Reference<TCTeamInfo>> m_tenantTeams;
+	int64_t m_cacheGeneration;
+
+public:
+	TCTenantInfo() { m_prefix = allKeys.end; }
+	TCTenantInfo(TenantInfo tinfo, Key prefix) : m_tenantInfo(tinfo), m_prefix(prefix) {}
+	std::vector<Reference<TCTeamInfo>>& teams() { return m_tenantTeams; }
+
+	TenantName name() { return m_tenantInfo.name.get(); }
+	std::string prefixDesc() { return m_prefix.printable(); }
+
+	void addTeam(TCTeamInfo team);
+	void removeTeam(TCTeamInfo team);
+	void updateCacheGeneration(int64_t generation) { m_cacheGeneration = generation; }
+	int64_t cacheGeneration() const { return m_cacheGeneration; }
 };

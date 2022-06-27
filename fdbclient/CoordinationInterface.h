@@ -27,7 +27,7 @@
 #include "fdbrpc/Locality.h"
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/ClusterInterface.h"
-#include "fdbclient/WellKnownEndpoints.h"
+#include "fdbrpc/WellKnownEndpoints.h"
 #include "flow/Hostname.h"
 
 const int MAX_CLUSTER_FILE_BYTES = 60000;
@@ -46,6 +46,8 @@ struct ClientLeaderRegInterface {
 	bool operator==(const ClientLeaderRegInterface& rhs) const {
 		return getLeader == rhs.getLeader && openDatabase == rhs.openDatabase;
 	}
+
+	std::string getAddressString() const;
 };
 
 // A string containing the information necessary to connect to a cluster.

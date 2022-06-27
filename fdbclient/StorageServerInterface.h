@@ -36,7 +36,7 @@
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/TagThrottle.actor.h"
 #include "fdbclient/Tenant.h"
-#include "flow/Tracing.h"
+#include "fdbclient/Tracing.h"
 #include "flow/UnitTest.h"
 #include "fdbclient/VersionVector.h"
 

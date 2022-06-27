@@ -27,7 +27,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/Tenant.h"
 
-#include "flow/Tracing.h"
+#include "fdbclient/Tracing.h"
 #include "flow/ThreadHelper.actor.h"
 
 struct VersionVector;
@@ -101,8 +101,8 @@ public:
 	// @todo This API and the "getSpanContext()" API may help with debugging simulation
 	// test failures. (These APIs are not currently invoked anywhere.) Remove them
 	// later if they are not really needed.
-	virtual VersionVector getVersionVector() = 0;
-	virtual SpanContext getSpanContext() = 0;
+	virtual ThreadFuture<VersionVector> getVersionVector() = 0;
+	virtual ThreadFuture<SpanContext> getSpanContext() = 0;
 	virtual ThreadFuture<int64_t> getApproximateSize() = 0;
 
 	virtual void setOption(FDBTransactionOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) = 0;
@@ -129,6 +129,9 @@ public:
 	virtual ~ITenant() {}
 
 	virtual Reference<ITransaction> createTransaction() = 0;
+
+	virtual ThreadFuture<Key> purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) = 0;
+	virtual ThreadFuture<Void> waitPurgeGranulesComplete(const KeyRef& purgeKey) = 0;
 
 	virtual void addref() = 0;
 	virtual void delref() = 0;
