@@ -1382,6 +1382,7 @@ TestSet readTOMLTests_(std::string fileName) {
 				const std::string& value = toml_to_string(v);
 				workloadOptions.push_back_deep(workloadOptions.arena(),
 				                               KeyValueRef(StringRef(attrib), StringRef(value)));
+				// FIXME: StringRef(value) result to a array parse bug
 				TraceEvent("TestParserOption").detail("ParsedKey", attrib).detail("ParsedValue", value);
 			}
 			spec.options.push_back_deep(spec.options.arena(), workloadOptions);

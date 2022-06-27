@@ -198,9 +198,11 @@ struct MachineAttritionWorkload : TestWorkload {
 			state RebootRequest rbReq;
 			if (self->reboot) {
 				rbReq.waitForDuration = self->suspendDuration;
-			} else {
-				rbReq.waitForDuration = std::numeric_limits<uint32_t>::max();
 			}
+			// FIXME: why wait? this result to operation_fail()
+//			else {
+//				rbReq.waitForDuration = std::numeric_limits<uint32_t>::max();
+//			}
 			state std::vector<WorkerDetails> workers;
 			// Pre-processing step: remove all testers from list of workers
 			for (const auto& worker : allWorkers) {
