@@ -190,110 +190,98 @@ struct MachineAttritionWorkload : TestWorkload {
 
 	ACTOR static Future<Void> noSimMachineKillWorker(MachineAttritionWorkload* self, Database cx) {
 		ASSERT(!g_network->isSimulated());
-		state double killDelay = self->liveDuration;
-		while (true) {
-			try {
-				state int killedWorkers = 0;
-				state std::vector<WorkerDetails> allWorkers =
-				    wait(self->dbInfo->get().clusterInterface.getWorkers.getReply(GetWorkersRequest()));
-				// Can reuse reboot request to send to each interface since no reply promise needed
-				state RebootRequest rbReq;
-				if (self->reboot) {
-					rbReq.waitForDuration = self->suspendDuration;
-				}
-				// FIXME: why wait? this result to the threadSleep(waitForDuration)
-				//			else {
-				//				rbReq.waitForDuration = std::numeric_limits<uint32_t>::max();
-				//			}
-				state std::vector<WorkerDetails> workers;
-				// Pre-processing step: remove all testers from list of workers
-				for (const auto& worker : allWorkers) {
-					if (noSimIsViableKill(worker)) {
-						workers.push_back(worker);
-					}
-				}
-				deterministicRandom()->randomShuffle(workers);
-				std::cout << "Kill candidates: " << workers.size() << std::endl;
-				// if a specific kill is requested, it must be accompanied by a set of target IDs otherwise no kills will occur
-				if (self->killDc) {
-					TraceEvent("Assassination").detail("TargetDataCenterIds", describe(self->targetIds));
-					sendRebootRequests(workers,
-					                   self->targetIds,
-					                   rbReq,
-					                   // idAccess lambda
-					                   [](WorkerDetails worker) { return worker.interf.locality.dcId(); });
-				} else if (self->killMachine) {
-					TraceEvent("Assassination").detail("TargetMachineIds", describe(self->targetIds));
-					sendRebootRequests(workers,
-					                   self->targetIds,
-					                   rbReq,
-					                   // idAccess lambda
-					                   [](WorkerDetails worker) { return worker.interf.locality.machineId(); });
-				} else if (self->killDatahall) {
-					TraceEvent("Assassination").detail("TargetDatahallIds", describe(self->targetIds));
-					sendRebootRequests(workers,
-					                   self->targetIds,
-					                   rbReq,
-					                   // idAccess lambda
-					                   [](WorkerDetails worker) { return worker.interf.locality.dataHallId(); });
-				} else if (self->killProcess) {
-					TraceEvent("Assassination").detail("TargetProcessIds", describe(self->targetIds));
-					sendRebootRequests(workers,
-					                   self->targetIds,
-					                   rbReq,
-					                   // idAccess lambda
-					                   [](WorkerDetails worker) { return worker.interf.locality.processId(); });
-				} else if (self->killZone) {
-					TraceEvent("Assassination").detail("TargetZoneIds", describe(self->targetIds));
-					sendRebootRequests(workers,
-					                   self->targetIds,
-					                   rbReq,
-					                   // idAccess lambda
-					                   [](WorkerDetails worker) { return worker.interf.locality.zoneId(); });
-				} else {
-					while (killedWorkers < self->workersToKill && workers.size() > self->workersToLeave) {
-						TraceEvent("WorkerKillBegin")
-						    .detail("KilledWorkers", killedWorkers)
-						    .detail("WorkersToKill", self->workersToKill)
-						    .detail("WorkersToLeave", self->workersToLeave)
-						    .detail("Workers", workers.size());
-						if (self->waitForVersion) {
-							state Transaction tr(cx);
-							loop {
-								try {
-									tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-									tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-									wait(success(tr.getReadVersion()));
-									break;
-								} catch (Error& e) {
-									wait(tr.onError(e));
-								}
-							}
-						}
-						// Pick a worker to kill
-						state WorkerDetails targetWorker;
-						targetWorker = workers.back();
-						TraceEvent("Assassination")
-						    .detail("TargetWorker", targetWorker.interf.locality.toString())
-						    .detail("ZoneId", targetWorker.interf.locality.zoneId())
-						    .detail("KilledWorkers", killedWorkers)
-						    .detail("WorkersToKill", self->workersToKill)
-						    .detail("WorkersToLeave", self->workersToLeave)
-						    .detail("Workers", workers.size());
-						targetWorker.interf.clientInterface.reboot.send(rbReq);
-						killedWorkers++;
-						workers.pop_back();
-					}
-				}
-				killDelay = self->liveDuration;
-			} catch (Error& e) {
-				if(e.isDiskError() || e.isInjectedFault() || e.code() == error_code_operation_failed) {
-					TraceEvent(SevWarnAlways, "KillLoopError").error(e);
-					killDelay = 1.0;
-				}
-				throw;
+		wait(self->liveDuration);
+		state int killedWorkers = 0;
+		state std::vector<WorkerDetails> allWorkers =
+			wait(self->dbInfo->get().clusterInterface.getWorkers.getReply(GetWorkersRequest()));
+		// Can reuse reboot request to send to each interface since no reply promise needed
+		state RebootRequest rbReq;
+		if (self->reboot) {
+			rbReq.waitForDuration = self->suspendDuration;
+		}
+		// FIXME: why wait? this result to the threadSleep(waitForDuration)
+		//			else {
+		//				rbReq.waitForDuration = std::numeric_limits<uint32_t>::max();
+		//			}
+		state std::vector<WorkerDetails> workers;
+		// Pre-processing step: remove all testers from list of workers
+		for (const auto& worker : allWorkers) {
+			if (noSimIsViableKill(worker)) {
+				workers.push_back(worker);
 			}
-			wait(delay(killDelay));
+		}
+		deterministicRandom()->randomShuffle(workers);
+		std::cout << "Kill candidates: " << workers.size() << std::endl;
+		// if a specific kill is requested, it must be accompanied by a set of target IDs otherwise no kills will occur
+		if (self->killDc) {
+			TraceEvent("Assassination").detail("TargetDataCenterIds", describe(self->targetIds));
+			sendRebootRequests(workers,
+							   self->targetIds,
+							   rbReq,
+							   // idAccess lambda
+							   [](WorkerDetails worker) { return worker.interf.locality.dcId(); });
+		} else if (self->killMachine) {
+			TraceEvent("Assassination").detail("TargetMachineIds", describe(self->targetIds));
+			sendRebootRequests(workers,
+							   self->targetIds,
+							   rbReq,
+							   // idAccess lambda
+							   [](WorkerDetails worker) { return worker.interf.locality.machineId(); });
+		} else if (self->killDatahall) {
+			TraceEvent("Assassination").detail("TargetDatahallIds", describe(self->targetIds));
+			sendRebootRequests(workers,
+							   self->targetIds,
+							   rbReq,
+							   // idAccess lambda
+							   [](WorkerDetails worker) { return worker.interf.locality.dataHallId(); });
+		} else if (self->killProcess) {
+			TraceEvent("Assassination").detail("TargetProcessIds", describe(self->targetIds));
+			sendRebootRequests(workers,
+							   self->targetIds,
+							   rbReq,
+							   // idAccess lambda
+							   [](WorkerDetails worker) { return worker.interf.locality.processId(); });
+		} else if (self->killZone) {
+			TraceEvent("Assassination").detail("TargetZoneIds", describe(self->targetIds));
+			sendRebootRequests(workers,
+							   self->targetIds,
+							   rbReq,
+							   // idAccess lambda
+							   [](WorkerDetails worker) { return worker.interf.locality.zoneId(); });
+		} else {
+			while (killedWorkers < self->workersToKill && workers.size() > self->workersToLeave) {
+				TraceEvent("WorkerKillBegin")
+					.detail("KilledWorkers", killedWorkers)
+					.detail("WorkersToKill", self->workersToKill)
+					.detail("WorkersToLeave", self->workersToLeave)
+					.detail("Workers", workers.size());
+				if (self->waitForVersion) {
+					state Transaction tr(cx);
+					loop {
+						try {
+							tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+							tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+							wait(success(tr.getReadVersion()));
+							break;
+						} catch (Error& e) {
+							wait(tr.onError(e));
+						}
+					}
+				}
+				// Pick a worker to kill
+				state WorkerDetails targetWorker;
+				targetWorker = workers.back();
+				TraceEvent("Assassination")
+					.detail("TargetWorker", targetWorker.interf.locality.toString())
+					.detail("ZoneId", targetWorker.interf.locality.zoneId())
+					.detail("KilledWorkers", killedWorkers)
+					.detail("WorkersToKill", self->workersToKill)
+					.detail("WorkersToLeave", self->workersToLeave)
+					.detail("Workers", workers.size());
+				targetWorker.interf.clientInterface.reboot.send(rbReq);
+				killedWorkers++;
+				workers.pop_back();
+			}
 		}
 	}
 
