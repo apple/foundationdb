@@ -283,6 +283,7 @@ struct MachineAttritionWorkload : TestWorkload {
 				workers.pop_back();
 			}
 		}
+		return Void();
 	}
 
 	ACTOR static Future<Void> machineKillWorker(MachineAttritionWorkload* self, double meanDelay, Database cx) {
