@@ -107,12 +107,16 @@ public:
 
 	ThreadStatistics(const Arguments& args) noexcept {
 		memset(this, 0, sizeof(ThreadStatistics));
+		sketches = std::unordered_map<int, DDSketchMako>{};
 		for (int op = 0; op < MAX_OP; op++) {
 			if (args.txnspec.ops[op][OP_COUNT] > 0) {
 				// This will allocate and initialize an empty sketch
 				sketches[op];
 			}
 		}
+		// These always need to be created since they are reported
+		sketches[OP_COMMIT];
+		sketches[OP_TRANSACTION];
 	}
 
 	ThreadStatistics(const ThreadStatistics& other) = default;
@@ -132,28 +136,22 @@ public:
 
 	uint64_t getLatencyUsMin(int op) const noexcept {
 		auto it = sketches.find(op);
-		if (it != sketches.end()) {
-			return it->second.min();
-		}
-		return 0;
+		assert(it != sketches.end());
+		return it->second.min();
 	}
 
 	uint64_t getLatencyUsMax(int op) const noexcept {
 		auto it = sketches.find(op);
-		if (it != sketches.end()) {
-			return it->second.max();
-		}
-		return 0;
+		assert(it != sketches.end());
+		return it->second.max();
 	}
 
 	uint64_t percentile(int op, double quantile) { return sketches[op].percentile(quantile); }
 
 	uint64_t mean(int op) const noexcept {
 		auto it = sketches.find(op);
-		if (it != sketches.end()) {
-			return it->second.max();
-		}
-		return 0;
+		assert(it != sketches.end());
+		return it->second.mean();
 	}
 
 	// with 'this' as final aggregation, factor in 'other'
@@ -185,7 +183,9 @@ public:
 	void addLatency(int op, timediff_t diff) noexcept {
 		const auto latency_us = toIntegerMicroseconds(diff);
 		latency_samples[op]++;
-		sketches[op].addSample(latency_us);
+		if (sketches.find(op) != sketches.end()) {
+			sketches[op].addSample(latency_us);
+		}
 		latency_us_total[op] += latency_us;
 	}
 
@@ -292,7 +292,6 @@ inline std::ifstream& operator>>(std::ifstream& is, ThreadStatistics& stats) {
 
 	return is;
 }
-
 } // namespace mako
 
 #endif /* MAKO_STATS_HPP */
