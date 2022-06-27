@@ -4,6 +4,7 @@ allowDisablingTenants = false
 
 [[test]]
 testTitle = 'TenantCreation'
+
     [[test.workload]]
     testName = 'CreateTenant'
     name = 'First'

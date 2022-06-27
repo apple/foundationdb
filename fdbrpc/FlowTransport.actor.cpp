@@ -345,8 +345,9 @@ class TokenCache : NonCopyable {
 	class LRUCache {
 		using ListEntry = StringRef;
 		using List = std::list<ListEntry>;
+		using Map = boost::unordered_map<Standalone<StringRef>, List::iterator>;
 		List list;
-		boost::unordered_map<StringRef, List::iterator> map;
+		Map map;
 		const unsigned max_size = FLOW_KNOBS->MAX_CACHED_EXPIRED_TOKENS;
 
 		void deleteOldestIfFull() {
@@ -357,22 +358,35 @@ class TokenCache : NonCopyable {
 			}
 		}
 
+		void access(Map::iterator iter) {
+			if (iter->second == list.begin()) {
+				return;
+			}
+			auto lIter = iter->second;
+			list.emplace_front(iter->first);
+			iter->second = list.begin();
+			list.erase(lIter);
+		}
+
 	public:
-		void add(StringRef signature) {
-			list.emplace_front(signature);
-			map[signature] = list.begin();
+		void add(Standalone<StringRef> const& signature) {
+			bool didInsert;
+			decltype(map.begin()) iter;
+			std::tie(iter, didInsert) = map.insert(std::make_pair(signature, list.end()));
+			if (didInsert) {
+				list.emplace_front(iter->first);
+				iter->second = list.begin();
+			} else {
+				access(iter);
+			}
 			deleteOldestIfFull();
 		}
 		bool has(StringRef signature) {
 			auto iter = map.find(signature);
 			if (iter == map.end()) {
-				return true;
-			} else if (iter == map.begin()) {
-				// we don't need to update the LRU
-				return true;
+				return false;
 			} else {
-				list.emplace_front(signature);
-				list.erase(iter->second);
+				access(iter);
 				return true;
 			}
 		}
@@ -406,26 +420,27 @@ class TokenCache : NonCopyable {
 public:
 	explicit TokenCache() { cleaner = cleanerJob(this); }
 
-	void addToken(Reference<AuthorizedTenants> tenants, StringRef token) {
+	bool addToken(Reference<AuthorizedTenants> tenants, StringRef token) {
 		auto sig = authz::jwt::signaturePart(token);
 		auto iter = tokens.find(sig);
 		if (iter != tokens.end()) {
-			tenants->add(iter->second.expiresAt, iter->second.tenants);
+			return tenants->add(iter->second.expiresAt, iter->second.tenants);
 		} else if (expiredTokens.has(sig)) {
 			TraceEvent(SevWarn, "InvalidToken")
 			    .detail("From", g_currentDeliveryPeerAddress.address)
 			    .detail("Reason", "Expired");
+			throw permission_denied();
 		} else {
 			Arena arena;
 			authz::jwt::TokenRef t;
 			if (!authz::jwt::parseToken(arena, t, token)) {
-				return;
+				throw permission_denied();
 			}
 			if (!t.keyId.present()) {
 				TraceEvent(SevWarn, "InvalidToken")
 				    .detail("From", g_currentDeliveryPeerAddress.address)
 				    .detail("Reason", "NoKeyID");
-				return;
+				throw permission_denied();
 			}
 			auto key = FlowTransport::transport().getPublicKeyByName(t.keyId.get());
 			if (key.present() && authz::jwt::verifyToken(token, key.get())) {
@@ -434,24 +449,29 @@ public:
 					TraceEvent(SevWarn, "InvalidToken")
 					    .detail("From", g_currentDeliveryPeerAddress.address)
 					    .detail("Reason", "NoExpirationTime");
+					throw permission_denied();
 				} else if (double(t.expiresAtUnixTime.get()) <= currentTime) {
 					TraceEvent(SevWarn, "InvalidToken")
 					    .detail("From", g_currentDeliveryPeerAddress.address)
 					    .detail("Reason", "Expired");
+					throw permission_denied();
 				}
 				if (!t.notBeforeUnixTime.present()) {
 					TraceEvent(SevWarn, "InvalidToken")
 					    .detail("From", g_currentDeliveryPeerAddress.address)
 					    .detail("Reason", "NoNotBefore");
+					throw permission_denied();
 				} else if (double(t.notBeforeUnixTime.get()) > currentTime) {
 					TraceEvent(SevWarn, "InvalidToken")
 					    .detail("From", g_currentDeliveryPeerAddress.address)
 					    .detail("Reason", "TokenNotYetValid");
+					throw permission_denied();
 				}
 				if (!t.tenants.present()) {
 					TraceEvent(SevWarn, "InvalidToken")
 					    .detail("From", g_currentDeliveryPeerAddress.address)
 					    .detail("Reason", "NoTenants");
+					throw permission_denied();
 				}
 				CachedToken c;
 				c.expiresAt = double(t.expiresAtUnixTime.get());
@@ -463,10 +483,12 @@ public:
 				tenants->add(c.expiresAt, c.tenants);
 				tokens.emplace(signature, std::move(c));
 				insert.trigger();
+				return true;
 			} else {
 				TraceEvent(SevWarn, "InvalidSignature")
 				    .detail("From", g_currentDeliveryPeerAddress.address)
 				    .detail("Reason", key.present() ? "VerificationFailed" : "KeyNotFound");
+				throw permission_denied();
 			}
 		}
 	}
@@ -629,18 +651,21 @@ TransportData::TransportData(uint64_t transportId, int maxWellKnownEndpoints, IP
 
 void TenantAuthorizer::receive(ArenaObjectReader& reader) {
 	AuthorizationRequest req;
-	try {
-		reader.deserialize(req);
-		Reference<AuthorizedTenants>& auth =
-		    std::any_cast<Reference<AuthorizedTenants>&>(reader.variable("AuthorizedTenants"));
-		for (const auto& t : req.tokens) {
-			transportData.tokenCache.addToken(auth, t);
-		}
-	} catch (Error& e) {
-		if (e.code() == error_code_permission_denied) {
-			TraceEvent(SevError, "ReceivedInvalidToken").detail("From", g_currentDeliveryPeerAddress.address).log();
-		} else {
-			throw;
+	reader.deserialize(req);
+	Reference<AuthorizedTenants>& auth =
+	    std::any_cast<Reference<AuthorizedTenants>&>(reader.variable("AuthorizedTenants"));
+	for (const auto& t : req.tokens) {
+		try {
+			bool wasAdded = transportData.tokenCache.addToken(auth, t);
+			TEST(wasAdded); // A token was successfully added
+			TEST(!wasAdded); // Duplicate token for connection
+		} catch (Error& e) {
+			if (e.code() == error_code_permission_denied) {
+				TraceEvent(SevError, "ReceivedInvalidToken").detail("From", g_currentDeliveryPeerAddress.address).log();
+				TEST(true); // Token rejected
+			} else {
+				throw;
+			}
 		}
 	}
 }

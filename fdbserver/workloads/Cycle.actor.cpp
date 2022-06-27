@@ -94,6 +94,7 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 	Future<Void> setup(Database const& cx) override {
 		if constexpr (MultiTenancy) {
 			FlowTransport::transport().authorizationTokenAdd(this->signedToken);
+			cx->defaultTenant = this->tenant;
 		}
 		return bulkSetup(cx, this, nodeCount, Promise<double>());
 	}

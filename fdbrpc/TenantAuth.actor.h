@@ -42,14 +42,18 @@ class AuthorizedTenants : public ReferenceCounted<AuthorizedTenants> {
 
 public:
 	AuthorizedTenants(bool trusted = false) : trusted(trusted) {}
-	void add(double expire, VectorRef<TenantNameRef> const& tenants) {
+	bool add(double expire, VectorRef<TenantNameRef> const& tenants) {
+		bool res = false;
 		for (auto tenant : tenants) {
-			authorizedTenants.emplace(expire, TenantName(tenant));
+			bool didAdd = false;
+			std::tie(std::ignore, didAdd) = authorizedTenants.emplace(expire, TenantName(tenant));
+			res = didAdd || res;
 		}
+		return res;
 	}
 
 	void cleanTenants() {
-		while (authorizedTenants.begin()->first < now()) {
+		while (!authorizedTenants.empty() && authorizedTenants.begin()->first < now()) {
 			authorizedTenants.erase(authorizedTenants.begin());
 		}
 	}
