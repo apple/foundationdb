@@ -92,7 +92,7 @@ RUN for file in fdbserver fdbbackup fdbcli fdbmonitor; do \
     done
 
 # Setup all symlinks for the other binaries that are a copy of fdbbackup
-RUN for file in fdbdr fdbrestore fdbserver backup_agent dr_agent fastrestore_tool; do \
+RUN for file in fdbdr fdbrestore backup_agent dr_agent fastrestore_tool; do \
         ln -s /usr/bin/fdbbackup /usr/bin/$file; \
     done
 
