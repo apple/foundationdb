@@ -169,6 +169,8 @@ struct MachineAttritionWorkload : TestWorkload {
 	                               RebootRequest rbReq,
 	                               Proc idAccess) {
 		for (const auto& worker : workers) {
+			TraceEvent("SendingRebootRequest")
+			    .detail("IdPresent", idAccess(worker).present() ? idAccess(worker).get().toString() : "");
 			// kill all matching workers
 			if (idAccess(worker).present() &&
 			    std::count(targets.begin(), targets.end(), idAccess(worker).get().toString())) {
@@ -179,7 +181,7 @@ struct MachineAttritionWorkload : TestWorkload {
 	}
 
 	ACTOR static Future<Void> noSimMachineKillWorker(MachineAttritionWorkload* self, Database cx) {
-		while(true) {
+		while (true) {
 			ASSERT(!g_network->isSimulated());
 			state int killedWorkers = 0;
 			state std::vector<WorkerDetails> allWorkers =
@@ -199,8 +201,9 @@ struct MachineAttritionWorkload : TestWorkload {
 				}
 			}
 			deterministicRandom()->randomShuffle(workers);
-			wait(delay(self->liveDuration));
-			// if a specific kill is requested, it must be accompanied by a set of target IDs otherwise no kills will occur
+			std::cout << "Kill candidates: " << workers.size() << std::endl;
+			// if a specific kill is requested, it must be accompanied by a set of target IDs otherwise no kills will
+			// occur
 			if (self->killDc) {
 				TraceEvent("Assassination").detail("TargetDataCenterIds", describe(self->targetIds));
 				sendRebootRequests(workers,
@@ -271,6 +274,7 @@ struct MachineAttritionWorkload : TestWorkload {
 					workers.pop_back();
 				}
 			}
+			wait(delay(self->liveDuration));
 		}
 	}
 
