@@ -22,7 +22,7 @@
 #define FDBSERVER_OTELSPANCONTEXTMESSAGE_H
 #pragma once
 
-#include "flow/Tracing.h"
+#include "fdbclient/Tracing.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/CommitTransaction.h"
 

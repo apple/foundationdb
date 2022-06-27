@@ -20,7 +20,7 @@
 #ifndef ART_MUTATION_BUFFER
 #define ART_MUTATION_BUFFER
 
-#include "art.h"
+#include "fdbserver/art.h"
 #include "flow/Arena.h"
 
 struct MutationBufferART {

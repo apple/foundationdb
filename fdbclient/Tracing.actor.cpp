@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "flow/Tracing.h"
+#include "fdbclient/Tracing.h"
 #include "flow/IRandom.h"
 #include "flow/UnitTest.h"
 #include "flow/Knobs.h"

@@ -22,7 +22,7 @@
 
 #include "flow/flow.h"
 #include "flow/serialize.h"
-#include "fdbrpc/IAsyncFile.h"
+#include "flow/IAsyncFile.h"
 #include "flow/network.h"
 #include "flow/ActorCollection.h"
 

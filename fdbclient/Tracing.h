@@ -20,9 +20,11 @@
 
 #pragma once
 
-#include "fdbclient/FDBTypes.h"
-#include "fdbrpc/FlowTransport.h"
+#include "flow/network.h"
 #include "flow/IRandom.h"
+#include "flow/Arena.h"
+#include "fdbrpc/FlowTransport.h"
+#include "fdbclient/FDBTypes.h"
 #include <unordered_set>
 #include <atomic>
 

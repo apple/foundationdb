@@ -25,7 +25,6 @@
 #include <boost/range.hpp>
 #include <thread>
 
-#include "fdbclient/FDBTypes.h"
 #include "fdbrpc/SimExternalConnection.h"
 #include "flow/Net2Packet.h"
 #include "flow/Platform.h"
@@ -214,7 +213,8 @@ TEST_CASE("fdbrpc/SimExternalClient") {
 		// Wait until server is ready
 		threadSleep(0.01);
 	}
-	state Key data = deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(0, maxDataLength + 1));
+	state Standalone<StringRef> data =
+	    deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(0, maxDataLength + 1));
 	PacketWriter packetWriter(packetQueue.getWriteBuffer(data.size()), nullptr, Unversioned());
 	packetWriter.serializeBytes(data);
 	wait(externalConn->onWritable());

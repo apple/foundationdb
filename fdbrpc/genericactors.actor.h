@@ -28,7 +28,7 @@
 
 #include "flow/genericactors.actor.h"
 #include "fdbrpc/fdbrpc.h"
-#include "fdbclient/WellKnownEndpoints.h"
+#include "fdbrpc/WellKnownEndpoints.h"
 #include "flow/Hostname.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 

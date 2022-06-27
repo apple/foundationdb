@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/IAsyncFile.h"
+#include "flow/IAsyncFile.h"
 #include "flow/crc32c.h"
 
 #if VALGRIND
