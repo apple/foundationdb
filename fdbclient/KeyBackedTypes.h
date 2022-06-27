@@ -26,6 +26,7 @@
 #include "fdbclient/GenericTransactionHelper.h"
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/ReadYourWrites.h"
+#include "fdbclient/DatabaseContext.h"
 #include "fdbclient/Subspace.h"
 #include "flow/ObjectSerializer.h"
 #include "flow/genericactors.actor.h"
@@ -154,23 +155,31 @@ template <typename T>
 class KeyBackedProperty {
 public:
 	KeyBackedProperty(KeyRef key) : key(key) {}
-	Future<Optional<T>> get(Reference<ReadYourWritesTransaction> tr, Snapshot snapshot = Snapshot::False) const {
-		return map(tr->get(key, snapshot), [](Optional<Value> const& val) -> Optional<T> {
-			if (val.present())
-				return Codec<T>::unpack(Tuple::unpack(val.get()));
-			return {};
-		});
+
+	template <class Transaction>
+	typename std::enable_if<!is_transaction_creator<Transaction>, Future<Optional<T>>>::type get(
+	    Transaction tr,
+	    Snapshot snapshot = Snapshot::False) const {
+		typename transaction_future_type<Transaction, Optional<Value>>::type getFuture = tr->get(key, snapshot);
+
+		return holdWhile(getFuture, map(safeThreadFutureToFuture(getFuture), [](Optional<Value> const& val) -> Optional<T> {
+			                 if (val.present())
+				                 return Codec<T>::unpack(Tuple::unpack(val.get()));
+			                 return {};
+		                 }));
 	}
+
 	// Get property's value or defaultValue if it doesn't exist
-	Future<T> getD(Reference<ReadYourWritesTransaction> tr,
-	               Snapshot snapshot = Snapshot::False,
-	               T defaultValue = T()) const {
+	template <class Transaction>
+	typename std::enable_if<!is_transaction_creator<Transaction>, Future<T>>::type
+	getD(Transaction tr, Snapshot snapshot = Snapshot::False, T defaultValue = T()) const {
 		return map(get(tr, snapshot), [=](Optional<T> val) -> T { return val.present() ? val.get() : defaultValue; });
 	}
+
 	// Get property's value or throw error if it doesn't exist
-	Future<T> getOrThrow(Reference<ReadYourWritesTransaction> tr,
-	                     Snapshot snapshot = Snapshot::False,
-	                     Error err = key_not_found()) const {
+	template <class Transaction>
+	typename std::enable_if<!is_transaction_creator<Transaction>, Future<T>>::type
+	getOrThrow(Transaction tr, Snapshot snapshot = Snapshot::False, Error err = key_not_found()) const {
 		return map(get(tr, snapshot), [=](Optional<T> val) -> T {
 			if (!val.present()) {
 				throw err;
@@ -180,8 +189,11 @@ public:
 		});
 	}
 
-	Future<Optional<T>> get(Database cx, Snapshot snapshot = Snapshot::False) const {
-		return runRYWTransaction(cx, [=, self = *this](Reference<ReadYourWritesTransaction> tr) {
+	template <class DB>
+	typename std::enable_if<is_transaction_creator<DB>, Future<Optional<T>>>::type get(
+	    Reference<DB> db,
+	    Snapshot snapshot = Snapshot::False) const {
+		return runTransaction(db, [=, self = *this](Reference<ReadYourWritesTransaction> tr) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
@@ -189,8 +201,11 @@ public:
 		});
 	}
 
-	Future<T> getD(Database cx, Snapshot snapshot = Snapshot::False, T defaultValue = T()) const {
-		return runRYWTransaction(cx, [=, self = *this](Reference<ReadYourWritesTransaction> tr) {
+	template <class DB>
+	typename std::enable_if<is_transaction_creator<DB>, Future<T>>::type getD(Reference<DB> db,
+	                                                                          Snapshot snapshot = Snapshot::False,
+	                                                                          T defaultValue = T()) const {
+		return runTransaction(db, [=, self = *this](Reference<ReadYourWritesTransaction> tr) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
@@ -198,8 +213,11 @@ public:
 		});
 	}
 
-	Future<T> getOrThrow(Database cx, Snapshot snapshot = Snapshot::False, Error err = key_not_found()) const {
-		return runRYWTransaction(cx, [=, self = *this](Reference<ReadYourWritesTransaction> tr) {
+	template <class DB>
+	typename std::enable_if<is_transaction_creator<DB>, Future<T>>::type getOrThrow(Reference<DB> db,
+	                                                                                Snapshot snapshot = Snapshot::False,
+	                                                                                Error err = key_not_found()) const {
+		return runTransaction(db, [=, self = *this](Reference<ReadYourWritesTransaction> tr) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
@@ -207,10 +225,14 @@ public:
 		});
 	}
 
-	void set(Reference<ReadYourWritesTransaction> tr, T const& val) { return tr->set(key, Codec<T>::pack(val).pack()); }
+	template <class Transaction>
+	typename std::enable_if<!is_transaction_creator<Transaction>, void>::type set(Transaction tr, T const& val) {
+		return tr->set(key, Codec<T>::pack(val).pack());
+	}
 
-	Future<Void> set(Database cx, T const& val) {
-		return runRYWTransaction(cx, [=, self = *this](Reference<ReadYourWritesTransaction> tr) {
+	template <class DB>
+	typename std::enable_if<is_transaction_creator<DB>, Future<Void>>::type set(Reference<DB> db, T const& val) {
+		return runTransaction(db, [=, self = *this](Reference<ReadYourWritesTransaction> tr) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			self->set(tr, val);
@@ -218,7 +240,11 @@ public:
 		});
 	}
 
-	void clear(Reference<ReadYourWritesTransaction> tr) { return tr->clear(key); }
+	template <class Transaction>
+	typename std::enable_if<!is_transaction_creator<Transaction>, void>::type clear(Transaction tr) {
+		return tr->clear(key);
+	}
+
 	Key key;
 };
 
@@ -229,27 +255,39 @@ template <typename T>
 class KeyBackedBinaryValue {
 public:
 	KeyBackedBinaryValue(KeyRef key) : key(key) {}
-	Future<Optional<T>> get(Reference<ReadYourWritesTransaction> tr, Snapshot snapshot = Snapshot::False) const {
-		return map(tr->get(key, snapshot), [](Optional<Value> const& val) -> Optional<T> {
-			if (val.present())
-				return BinaryReader::fromStringRef<T>(val.get(), Unversioned());
-			return {};
-		});
+
+	template <class Transaction>
+	Future<Optional<T>> get(Transaction tr, Snapshot snapshot = Snapshot::False) const {
+		typename transaction_future_type<Transaction, Optional<Value>>::type getFuture = tr->get(key, snapshot);
+
+		return holdWhile(getFuture, map(safeThreadFutureToFuture(getFuture), [](Optional<Value> const& val) -> Optional<T> {
+			                 if (val.present())
+				                 return BinaryReader::fromStringRef<T>(val.get(), Unversioned());
+			                 return {};
+		                 }));
 	}
 	// Get property's value or defaultValue if it doesn't exist
-	Future<T> getD(Reference<ReadYourWritesTransaction> tr,
-	               Snapshot snapshot = Snapshot::False,
-	               T defaultValue = T()) const {
+	template <class Transaction>
+	Future<T> getD(Transaction tr, Snapshot snapshot = Snapshot::False, T defaultValue = T()) const {
 		return map(get(tr, Snapshot::False),
 		           [=](Optional<T> val) -> T { return val.present() ? val.get() : defaultValue; });
 	}
-	void set(Reference<ReadYourWritesTransaction> tr, T const& val) {
+
+	template <class Transaction>
+	void set(Transaction tr, T const& val) {
 		return tr->set(key, BinaryWriter::toValue<T>(val, Unversioned()));
 	}
-	void atomicOp(Reference<ReadYourWritesTransaction> tr, T const& val, MutationRef::Type type) {
+
+	template <class Transaction>
+	void atomicOp(Transaction tr, T const& val, MutationRef::Type type) {
 		return tr->atomicOp(key, BinaryWriter::toValue<T>(val, Unversioned()), type);
 	}
-	void clear(Reference<ReadYourWritesTransaction> tr) { return tr->clear(key); }
+
+	template <class Transaction>
+	void clear(Transaction tr) {
+		return tr->clear(key);
+	}
+
 	Key key;
 };
 
@@ -266,63 +304,70 @@ public:
 	typedef std::vector<PairType> PairsType;
 
 	// If end is not present one key past the end of the map is used.
-	Future<PairsType> getRange(Reference<ReadYourWritesTransaction> tr,
-	                           KeyType const& begin,
+	template <class Transaction>
+	Future<PairsType> getRange(Transaction tr,
+	                           Optional<KeyType> const& begin,
 	                           Optional<KeyType> const& end,
 	                           int limit,
 	                           Snapshot snapshot = Snapshot::False,
 	                           Reverse reverse = Reverse::False) const {
 		Subspace s = space; // 'this' could be invalid inside lambda
-		Key endKey = end.present() ? s.pack(Codec<KeyType>::pack(end.get())) : space.range().end;
-		return map(
-		    tr->getRange(
-		        KeyRangeRef(s.pack(Codec<KeyType>::pack(begin)), endKey), GetRangeLimits(limit), snapshot, reverse),
-		    [s](RangeResult const& kvs) -> PairsType {
-			    PairsType results;
-			    for (int i = 0; i < kvs.size(); ++i) {
-				    KeyType key = Codec<KeyType>::unpack(s.unpack(kvs[i].key));
-				    ValueType val = Codec<ValueType>::unpack(Tuple::unpack(kvs[i].value));
-				    results.push_back(PairType(key, val));
-			    }
-			    return results;
-		    });
+
+		Key beginKey = begin.present() ? s.pack(Codec<KeyType>::pack(begin.get())) : s.range().begin;
+		Key endKey = end.present() ? s.pack(Codec<KeyType>::pack(end.get())) : s.range().end;
+
+		typename transaction_future_type<Transaction, RangeResult>::type getRangeFuture =
+		    tr->getRange(KeyRangeRef(beginKey, endKey), GetRangeLimits(limit), snapshot, reverse);
+
+		return holdWhile(getRangeFuture, map(safeThreadFutureToFuture(getRangeFuture), [s](RangeResult const& kvs) -> PairsType {
+			                 PairsType results;
+			                 for (int i = 0; i < kvs.size(); ++i) {
+				                 KeyType key = Codec<KeyType>::unpack(s.unpack(kvs[i].key));
+				                 ValueType val = Codec<ValueType>::unpack(Tuple::unpack(kvs[i].value));
+				                 results.push_back(PairType(key, val));
+			                 }
+			                 return results;
+		                 }));
 	}
 
-	Future<Optional<ValueType>> get(Reference<ReadYourWritesTransaction> tr,
-	                                KeyType const& key,
-	                                Snapshot snapshot = Snapshot::False) const {
-		return map(tr->get(space.pack(Codec<KeyType>::pack(key)), snapshot),
-		           [](Optional<Value> const& val) -> Optional<ValueType> {
-			           if (val.present())
-				           return Codec<ValueType>::unpack(Tuple::unpack(val.get()));
-			           return {};
-		           });
+	template <class Transaction>
+	Future<Optional<ValueType>> get(Transaction tr, KeyType const& key, Snapshot snapshot = Snapshot::False) const {
+		typename transaction_future_type<Transaction, Optional<Value>>::type getFuture =
+		    tr->get(space.pack(Codec<KeyType>::pack(key)), snapshot);
+
+		return holdWhile(getFuture, map(safeThreadFutureToFuture(getFuture), [](Optional<Value> const& val) -> Optional<ValueType> {
+			                 if (val.present())
+				                 return Codec<ValueType>::unpack(Tuple::unpack(val.get()));
+			                 return {};
+		                 }));
 	}
 
 	// Returns a Property that can be get/set that represents key's entry in this this.
 	KeyBackedProperty<ValueType> getProperty(KeyType const& key) const { return space.pack(Codec<KeyType>::pack(key)); }
 
 	// Returns the expectedSize of the set key
-	int set(Reference<ReadYourWritesTransaction> tr, KeyType const& key, ValueType const& val) {
+	template <class Transaction>
+	int set(Transaction tr, KeyType const& key, ValueType const& val) {
 		Key k = space.pack(Codec<KeyType>::pack(key));
 		Value v = Codec<ValueType>::pack(val).pack();
 		tr->set(k, v);
 		return k.expectedSize() + v.expectedSize();
 	}
 
-	void erase(Reference<ReadYourWritesTransaction> tr, KeyType const& key) {
+	template <class Transaction>
+	void erase(Transaction tr, KeyType const& key) {
 		return tr->clear(space.pack(Codec<KeyType>::pack(key)));
 	}
 
-	void erase(Reference<ITransaction> tr, KeyType const& key) {
-		return tr->clear(space.pack(Codec<KeyType>::pack(key)));
-	}
-
-	void erase(Reference<ReadYourWritesTransaction> tr, KeyType const& begin, KeyType const& end) {
+	template <class Transaction>
+	void erase(Transaction tr, KeyType const& begin, KeyType const& end) {
 		return tr->clear(KeyRangeRef(space.pack(Codec<KeyType>::pack(begin)), space.pack(Codec<KeyType>::pack(end))));
 	}
 
-	void clear(Reference<ReadYourWritesTransaction> tr) { return tr->clear(space.range()); }
+	template <class Transaction>
+	void clear(Transaction tr) {
+		return tr->clear(space.range());
+	}
 
 	Subspace space;
 };
@@ -333,25 +378,30 @@ template <typename T, typename VersionOptions>
 class KeyBackedObjectProperty {
 public:
 	KeyBackedObjectProperty(KeyRef key, VersionOptions versionOptions) : key(key), versionOptions(versionOptions) {}
-	Future<Optional<T>> get(Reference<ReadYourWritesTransaction> tr, Snapshot snapshot = Snapshot::False) const {
 
-		return map(tr->get(key, snapshot), [vo = versionOptions](Optional<Value> const& val) -> Optional<T> {
-			if (val.present())
-				return ObjectReader::fromStringRef<T>(val.get(), vo);
-			return {};
-		});
+	template <class Transaction>
+	typename std::enable_if<!is_transaction_creator<Transaction>, Future<Optional<T>>>::type get(
+	    Transaction tr,
+	    Snapshot snapshot = Snapshot::False) const {
+		typename transaction_future_type<Transaction, Optional<Value>>::type getFuture = tr->get(key, snapshot);
+
+		return holdWhile(getFuture, map(safeThreadFutureToFuture(getFuture), [vo = versionOptions](Optional<Value> const& val) -> Optional<T> {
+			                 if (val.present())
+				                 return ObjectReader::fromStringRef<T>(val.get(), vo);
+			                 return {};
+		                 }));
 	}
 
 	// Get property's value or defaultValue if it doesn't exist
-	Future<T> getD(Reference<ReadYourWritesTransaction> tr,
-	               Snapshot snapshot = Snapshot::False,
-	               T defaultValue = T()) const {
+	template <class Transaction>
+	typename std::enable_if<!is_transaction_creator<Transaction>, Future<T>>::type
+	getD(Transaction tr, Snapshot snapshot = Snapshot::False, T defaultValue = T()) const {
 		return map(get(tr, snapshot), [=](Optional<T> val) -> T { return val.present() ? val.get() : defaultValue; });
 	}
 	// Get property's value or throw error if it doesn't exist
-	Future<T> getOrThrow(Reference<ReadYourWritesTransaction> tr,
-	                     Snapshot snapshot = Snapshot::False,
-	                     Error err = key_not_found()) const {
+	template <class Transaction>
+	typename std::enable_if<!is_transaction_creator<Transaction>, Future<T>>::type
+	getOrThrow(Transaction tr, Snapshot snapshot = Snapshot::False, Error err = key_not_found()) const {
 		return map(get(tr, snapshot), [=](Optional<T> val) -> T {
 			if (!val.present()) {
 				throw err;
@@ -361,8 +411,11 @@ public:
 		});
 	}
 
-	Future<Optional<T>> get(Database cx, Snapshot snapshot = Snapshot::False) const {
-		return runRYWTransaction(cx, [=, self = *this](Reference<ReadYourWritesTransaction> tr) {
+	template <class DB>
+	typename std::enable_if<is_transaction_creator<DB>, Future<Optional<T>>>::type get(
+	    Reference<DB> db,
+	    Snapshot snapshot = Snapshot::False) const {
+		return runTransaction(db, [=, self = *this](Reference<ReadYourWritesTransaction> tr) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
@@ -370,8 +423,11 @@ public:
 		});
 	}
 
-	Future<T> getD(Database cx, Snapshot snapshot = Snapshot::False, T defaultValue = T()) const {
-		return runRYWTransaction(cx, [=, self = *this](Reference<ReadYourWritesTransaction> tr) {
+	template <class DB>
+	typename std::enable_if<is_transaction_creator<DB>, Future<T>>::type getD(Reference<DB> db,
+	                                                                          Snapshot snapshot = Snapshot::False,
+	                                                                          T defaultValue = T()) const {
+		return runTransaction(db, [=, self = *this](Reference<ReadYourWritesTransaction> tr) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
@@ -379,8 +435,11 @@ public:
 		});
 	}
 
-	Future<T> getOrThrow(Database cx, Snapshot snapshot = Snapshot::False, Error err = key_not_found()) const {
-		return runRYWTransaction(cx, [=, self = *this](Reference<ReadYourWritesTransaction> tr) {
+	template <class DB>
+	typename std::enable_if<is_transaction_creator<DB>, Future<T>>::type getOrThrow(Reference<DB> db,
+	                                                                                Snapshot snapshot = Snapshot::False,
+	                                                                                Error err = key_not_found()) const {
+		return runTransaction(db, [=, self = *this](Reference<ReadYourWritesTransaction> tr) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
@@ -388,12 +447,14 @@ public:
 		});
 	}
 
-	void set(Reference<ReadYourWritesTransaction> tr, T const& val) {
+	template <class Transaction>
+	typename std::enable_if<!is_transaction_creator<Transaction>, void>::type set(Transaction tr, T const& val) {
 		return tr->set(key, ObjectWriter::toValue(val, versionOptions));
 	}
 
-	Future<Void> set(Database cx, T const& val) {
-		return runRYWTransaction(cx, [=, self = *this](Reference<ReadYourWritesTransaction> tr) {
+	template <class DB>
+	typename std::enable_if<is_transaction_creator<DB>, Future<Void>>::type set(Reference<DB> db, T const& val) {
+		return runTransaction(db, [=, self = *this](Reference<ReadYourWritesTransaction> tr) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			self.set(tr, val);
@@ -401,7 +462,10 @@ public:
 		});
 	}
 
-	void clear(Reference<ReadYourWritesTransaction> tr) { return tr->clear(key); }
+	template <class Transaction>
+	typename std::enable_if<!is_transaction_creator<Transaction>, void>::type clear(Transaction tr) {
+		return tr->clear(key);
+	}
 
 	Key key;
 	VersionOptions versionOptions;
@@ -420,18 +484,22 @@ public:
 	typedef std::pair<KeyType, ValueType> PairType;
 	typedef std::vector<PairType> PairsType;
 
-	// If end is not present one key past the end of the map is used.
-	Future<PairsType> getRange(Reference<ReadYourWritesTransaction> tr,
-	                           KeyType const& begin,
+	template <class Transaction>
+	Future<PairsType> getRange(Transaction tr,
+	                           Optional<KeyType> const& begin,
 	                           Optional<KeyType> const& end,
 	                           int limit,
 	                           Snapshot snapshot = Snapshot::False,
 	                           Reverse reverse = Reverse::False) const {
+		Key beginKey = begin.present() ? space.pack(Codec<KeyType>::pack(begin.get())) : space.range().begin;
 		Key endKey = end.present() ? space.pack(Codec<KeyType>::pack(end.get())) : space.range().end;
-		return map(
-		    tr->getRange(
-		        KeyRangeRef(space.pack(Codec<KeyType>::pack(begin)), endKey), GetRangeLimits(limit), snapshot, reverse),
-		    [self = *this](RangeResult const& kvs) -> PairsType {
+
+		typename transaction_future_type<Transaction, RangeResult>::type getRangeFuture =
+		    tr->getRange(KeyRangeRef(beginKey, endKey), GetRangeLimits(limit), snapshot, reverse);
+
+		return holdWhile(
+		    getRangeFuture,
+		    map(safeThreadFutureToFuture(getRangeFuture), [self = *this](RangeResult const& kvs) -> PairsType {
 			    PairsType results;
 			    for (int i = 0; i < kvs.size(); ++i) {
 				    KeyType key = Codec<KeyType>::unpack(self.space.unpack(kvs[i].key));
@@ -439,18 +507,21 @@ public:
 				    results.push_back(PairType(key, val));
 			    }
 			    return results;
-		    });
+		    }));
 	}
 
-	Future<Optional<ValueType>> get(Reference<ReadYourWritesTransaction> tr,
-	                                KeyType const& key,
-	                                Snapshot snapshot = Snapshot::False) const {
-		return map(tr->get(space.pack(Codec<KeyType>::pack(key)), snapshot),
-		           [vo = versionOptions](Optional<Value> const& val) -> Optional<ValueType> {
-			           if (val.present())
-				           return ObjectReader::fromStringRef<ValueType>(val.get(), vo);
-			           return {};
-		           });
+	template <class Transaction>
+	Future<Optional<ValueType>> get(Transaction tr, KeyType const& key, Snapshot snapshot = Snapshot::False) const {
+		typename transaction_future_type<Transaction, Optional<Value>>::type getFuture =
+		    tr->get(space.pack(Codec<KeyType>::pack(key)), snapshot);
+
+		return holdWhile(getFuture,
+		                 map(safeThreadFutureToFuture(getFuture),
+		                     [vo = versionOptions](Optional<Value> const& val) -> Optional<ValueType> {
+			                     if (val.present())
+				                     return ObjectReader::fromStringRef<ValueType>(val.get(), vo);
+			                     return {};
+		                     }));
 	}
 
 	// Returns a Property that can be get/set that represents key's entry in this this.
@@ -460,7 +531,8 @@ public:
 	}
 
 	// Returns the expectedSize of the set key
-	int set(Reference<ReadYourWritesTransaction> tr, KeyType const& key, ValueType const& val) {
+	template <class Transaction>
+	int set(Transaction tr, KeyType const& key, ValueType const& val) {
 		Key k = space.pack(Codec<KeyType>::pack(key));
 		Value v = ObjectWriter::toValue(val, versionOptions);
 		tr->set(k, v);
@@ -471,19 +543,20 @@ public:
 
 	Value serializeValue(ValueType const& val) { return ObjectWriter::toValue(val, versionOptions); }
 
-	void erase(Reference<ReadYourWritesTransaction> tr, KeyType const& key) {
+	template <class Transaction>
+	void erase(Transaction tr, KeyType const& key) {
 		return tr->clear(space.pack(Codec<KeyType>::pack(key)));
 	}
 
-	void erase(Reference<ITransaction> tr, KeyType const& key) {
-		return tr->clear(space.pack(Codec<KeyType>::pack(key)));
-	}
-
-	void erase(Reference<ReadYourWritesTransaction> tr, KeyType const& begin, KeyType const& end) {
+	template <class Transaction>
+	void erase(Transaction tr, KeyType const& begin, KeyType const& end) {
 		return tr->clear(KeyRangeRef(space.pack(Codec<KeyType>::pack(begin)), space.pack(Codec<KeyType>::pack(end))));
 	}
 
-	void clear(Reference<ReadYourWritesTransaction> tr) { return tr->clear(space.range()); }
+	template <class Transaction>
+	void clear(Transaction tr) {
+		return tr->clear(space.range());
+	}
 
 	Subspace space;
 	VersionOptions versionOptions;
@@ -497,7 +570,6 @@ public:
 	typedef _ValueType ValueType;
 	typedef std::vector<ValueType> Values;
 
-	// If end is not present one key past the end of the map is used.
 	template <class Transaction>
 	Future<Values> getRange(Transaction tr,
 	                        Optional<ValueType> const& begin,

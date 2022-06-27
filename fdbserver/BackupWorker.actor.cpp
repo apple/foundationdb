@@ -104,8 +104,8 @@ struct BackupData {
 		PerBackupInfo(BackupData* data, UID uid, Version v) : self(data), startVersion(v) {
 			// Open the container and get key ranges
 			BackupConfig config(uid);
-			container = config.backupContainer().get(data->cx);
-			ranges = config.backupRanges().get(data->cx);
+			container = config.backupContainer().get(data->cx.getReference());
+			ranges = config.backupRanges().get(data->cx.getReference());
 			if (self->backupEpoch == self->recruitedEpoch) {
 				// Only current epoch's worker update the number of backup workers.
 				updateWorker = _updateStartedWorkers(this, data, uid);

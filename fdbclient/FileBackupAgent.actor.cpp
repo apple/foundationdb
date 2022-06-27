@@ -1221,7 +1221,7 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 
 		// Don't need to check keepRunning(task) here because we will do that while finishing each output file, but if
 		// bc is false then clearly the backup is no longer in progress
-		state Reference<IBackupContainer> bc = wait(backup.backupContainer().getD(cx));
+		state Reference<IBackupContainer> bc = wait(backup.backupContainer().getD(cx.getReference()));
 		if (!bc) {
 			return Void();
 		}
@@ -5497,7 +5497,7 @@ public:
 			}
 		}
 
-		Reference<IBackupContainer> bc = wait(backupConfig.backupContainer().getOrThrow(cx));
+		Reference<IBackupContainer> bc = wait(backupConfig.backupContainer().getOrThrow(cx.getReference()));
 
 		if (fastRestore) {
 			TraceEvent("AtomicParallelRestoreStartRestore").log();
