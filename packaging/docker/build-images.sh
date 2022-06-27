@@ -40,28 +40,28 @@ function create_fake_website_directory() {
             curl -Ls "${artifactory_base_url}/${fdb_version}/release/api/foundationdb-binaries-${fdb_version}-linux.tar.gz" | tar -xzf -
             # Add the x86_64 to all binaries
             for file in "${fdb_binaries[@]}"; do
-                cp -pr "${file}" "${file}.x86_64"
+                mv -pr "${file}" "${file}.x86_64"
             done
             ;;
         "stripped_artifactory")
             for file in "${fdb_binaries[@]}"; do
                 logg "DOWNLOADING ${file}"
                 curl -Ls "${artifactory_base_url}/${fdb_version}/release/files/linux/bin/${file}" -o "${file}.x86_64"
-                chmod 755 "${file}"
+                chmod 755 "${file}.x86_64"
             done
             ;;
         "unstripped_local")
             for file in "${fdb_binaries[@]}"; do
                 logg "COPYING ${file}"
                 cp -pr "${build_output_directory}/bin/${file}" "${file}.x86_64"
-                chmod 755 "${file}"
+                chmod 755 "${file}.x86_64"
             done
             ;;
         "stripped_local")
             for file in "${fdb_binaries[@]}"; do
                 logg "COPYING ${file}"
                 cp -pr "${build_output_directory}/packages/bin/${file}" "${file}.x86_64"
-                chmod 755 "${file}"
+                chmod 755 "${file}.x86_64"
             done
             ;;
     esac
@@ -73,12 +73,13 @@ function create_fake_website_directory() {
     # symlinks and the binaries tarball
     ############################################################################
     logg "FETCHING CLIENT LIBRARY"
+    destination_directory="${website_directory}/${version}"
+    destination_filename="libfdb_c.x86_64.so"
+
     case "${stripped_binaries_and_from_where}" in
         "unstripped_artifactory")
             for version in "${fdb_library_versions[@]}"; do
                 logg "FETCHING ${version} CLIENT LIBRARY"
-                destination_directory="${website_directory}/${version}"
-                destination_filename="libfdb_c_${version}.x86_64.so"
                 mkdir -p "${destination_directory}"
                 pushd "${destination_directory}" || exit 127
                 curl -Ls "${artifactory_base_url}/${version}/release/api/fdb-server-${version}-linux.tar.gz" | tar -xzf - ./lib/libfdb_c.so --strip-components 2
@@ -90,22 +91,18 @@ function create_fake_website_directory() {
         "stripped_artifactory")
             for version in "${fdb_library_versions[@]}"; do
                 logg "FETCHING ${version} CLIENT LIBRARY"
-                destination_directory="${website_directory}/${version}"
-                destination_filename="libfdb_c_${version}.x86_64.so"
                 mkdir -p "${destination_directory}"
-                pushd "${destination_directory}" || exit 127
-                curl -Ls "${artifactory_base_url}/${version}/release/files/linux/lib/libfdb_c.so" -o "${destination_filename}"
-                chmod 755 "${destination_filename}"
-                popd || exit 128
+                curl -Ls "${artifactory_base_url}/${version}/release/files/linux/lib/libfdb_c.so" -o "${destination_directory}/${destination_filename}"
+                chmod 755 "${destination_directory}/${destination_filename}"
             done
             ;;
         "unstripped_local")
             logg "COPYING UNSTRIPPED CLIENT LIBRARY"
-            cp -pr "${build_output_directory}/lib/libfdb_c.so" "${website_directory}/${fdb_version}/libfdb_c_${fdb_version}.x86_64.so"
+            cp -pr "${build_output_directory}/lib/libfdb_c.so" "${destination_directory}/${destination_filename}"
             ;;
         "stripped_local")
             logg "COPYING STRIPPED CLIENT LIBRARY"
-            cp -pr "${build_output_directory}/packages/lib/libfdb_c.so" "${website_directory}/${fdb_version}/libfdb_c_${fdb_version}.x86_64.so"
+            cp -pr "${build_output_directory}/packages/lib/libfdb_c.so" "${destination_directory}/${destination_filename}"
             ;;
     esac
     # override fdb_website variable that is passed to Docker build
@@ -176,6 +173,8 @@ function build_and_push_images(){
             --build-arg FDB_VERSION="${fdb_version}" \
             --build-arg FDB_LIBRARY_VERSIONS="${fdb_library_versions[*]}" \
             --build-arg FDB_WEBSITE="${fdb_website}" \
+            --build-arg HTTPS_PROXY="${HTTPS_PROXY}" \
+            --build-arg HTTP_PROXY="${HTTP_PROXY}" \
             --tag "${image_tag}" \
             --file "${dockerfile_name}" \
             --target "${image}" .
