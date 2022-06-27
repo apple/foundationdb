@@ -518,7 +518,5 @@ struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 	}
 };
 
-ACTOR Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses(
-    Transaction* tr);
 #include "flow/unactorcompiler.h"
 #endif

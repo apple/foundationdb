@@ -9588,3 +9588,27 @@ int64_t getMaxWriteKeySize(KeyRef const& key, bool hasRawAccess) {
 int64_t getMaxClearKeySize(KeyRef const& key) {
 	return getMaxKeySize(key);
 }
+
+namespace NativeAPI {
+
+ACTOR Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses(
+    Transaction* tr) {
+	state Future<std::vector<ProcessData>> workers = getWorkers(tr);
+	state Future<RangeResult> serverList = tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
+	wait(success(workers) && success(serverList));
+	ASSERT(!serverList.get().more && serverList.get().size() < CLIENT_KNOBS->TOO_MANY);
+
+	std::map<Optional<Standalone<StringRef>>, ProcessData> id_data;
+	for (int i = 0; i < workers.get().size(); i++)
+		id_data[workers.get()[i].locality.processId()] = workers.get()[i];
+
+	std::vector<std::pair<StorageServerInterface, ProcessClass>> results;
+	for (int i = 0; i < serverList.get().size(); i++) {
+		auto ssi = decodeServerListValue(serverList.get()[i].value);
+		results.emplace_back(ssi, id_data[ssi.locality.processId()].processClass);
+	}
+
+	return results;
+}
+
+} // namespace NativeAPI
