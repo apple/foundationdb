@@ -1,4 +1,4 @@
-find_package(Boost 1.72)
+find_package(Boost 1.78)
 
 if(Boost_FOUND)
   add_library(boost_target INTERFACE)
@@ -6,8 +6,8 @@ if(Boost_FOUND)
 else()
   include(ExternalProject)
   ExternalProject_add(boostProject
-    URL "https://boostorg.jfrog.io/artifactory/main/release/1.72.0/source/boost_1_72_0.tar.bz2"
-    URL_HASH SHA256=59c9b274bc451cf91a9ba1dd2c7fdcaf5d60b1b3aa83f2c9fa143417cc660722
+    URL "https://boostorg.jfrog.io/artifactory/main/release/1.78.0/source/boost_1_78_0.tar.bz2"
+    URL_HASH SHA256=8681f175d4bdb26c52222665793eef08490d7758529330f98d3b29dd0735bccc
     CONFIGURE_COMMAND ""
     BUILD_COMMAND ""
     BUILD_IN_SOURCE ON

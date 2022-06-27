@@ -7,6 +7,14 @@
 #include <rocksdb/slice_transform.h>
 #include <rocksdb/table.h>
 #include <rocksdb/utilities/table_properties_collectors.h>
+#include <rocksdb/rate_limiter.h>
+#if defined __has_include
+#if __has_include(<liburing.h>)
+#include <liburing.h>
+#endif
+#endif
+#include "fdbclient/SystemData.h"
+#include "fdbserver/CoroFlow.h"
 #include "flow/flow.h"
 #include "flow/IThreadPool.h"
 
@@ -16,6 +24,13 @@
 #include "flow/actorcompiler.h" // has to be last include
 
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
+
+// Enforcing rocksdb version to be 6.27.3 or greater.
+static_assert(ROCKSDB_MAJOR >= 6, "Unsupported rocksdb version. Update the rocksdb to 6.27.3 version");
+static_assert(ROCKSDB_MAJOR == 6 ? ROCKSDB_MINOR >= 27 : true,
+              "Unsupported rocksdb version. Update the rocksdb to 6.27.3 version");
+static_assert((ROCKSDB_MAJOR == 6 && ROCKSDB_MINOR == 27) ? ROCKSDB_PATCH >= 3 : true,
+              "Unsupported rocksdb version. Update the rocksdb to 6.27.3 version");
 
 namespace {
 

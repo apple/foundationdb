@@ -509,6 +509,8 @@ ACTOR Future<Void> logRouterPeekMessages(LogRouterData* self, TLogPeekRequest re
 		wait(delay(SERVER_KNOBS->TLOG_PEEK_DELAY, g_network->getCurrentTask()));
 	}
 
+	state double startTime = now();
+
 	Version poppedVer = poppedVersion(self, req.tag);
 
 	if (poppedVer > req.begin || req.begin < self->startVersion) {
@@ -529,8 +531,33 @@ ACTOR Future<Void> logRouterPeekMessages(LogRouterData* self, TLogPeekRequest re
 		return Void();
 	}
 
-	Version endVersion = self->version.get() + 1;
-	peekMessagesFromMemory(self, req, messages, endVersion);
+	state Version endVersion;
+	// Run the peek logic in a loop to account for the case where there is no data to return to the caller, and we may
+	// want to wait a little bit instead of just sending back an empty message. This feature is controlled by a knob.
+	loop {
+		endVersion = self->version.get() + 1;
+		peekMessagesFromMemory(self, req, messages, endVersion);
+
+		// Reply the peek request when
+		//   - Have data return to the caller, or
+		//   - Batching empty peek is disabled, or
+		//   - Batching empty peek interval has been reached.
+		if (messages.getLength() > 0 || !SERVER_KNOBS->PEEK_BATCHING_EMPTY_MSG ||
+		    now() - startTime > SERVER_KNOBS->PEEK_BATCHING_EMPTY_MSG_INTERVAL) {
+			break;
+		}
+
+		state Version waitUntilVersion = self->version.get() + 1;
+
+		// Currently, from `reqBegin` to self->version are all empty peeks. Wait for more version, or the empty batching
+		// interval has expired.
+		wait(self->version.whenAtLeast(waitUntilVersion) ||
+		     delay(SERVER_KNOBS->PEEK_BATCHING_EMPTY_MSG_INTERVAL - (now() - startTime)));
+		if (self->version.get() < waitUntilVersion) {
+			break; // We know that from `reqBegin` to self->version are all empty messages. Skip re-executing the peek
+			       // logic.
+		}
+	}
 
 	TLogPeekReply reply;
 	reply.maxKnownVersion = self->version.get();

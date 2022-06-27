@@ -1,6 +1,6 @@
 # FindRocksDB
 
-find_package(RocksDB)
+find_package(RocksDB 6.27.3)
 
 include(ExternalProject)
 
@@ -22,6 +22,7 @@ if (RocksDB_FOUND)
                -DWITH_SNAPPY=OFF
                -DWITH_ZLIB=OFF
                -DWITH_ZSTD=OFF
+               -DWITH_LIBURING=${WITH_LIBURING}
                -DROCKSDB_BUILD_SHARED=OFF
                -DCMAKE_POSITION_INDEPENDENT_CODE=True
     BUILD_BYPRODUCTS <BINARY_DIR>/librocksdb.a
@@ -33,8 +34,8 @@ if (RocksDB_FOUND)
       ${BINARY_DIR}/librocksdb.a)
 else()
   ExternalProject_Add(rocksdb
-    URL        https://github.com/facebook/rocksdb/archive/v6.10.1.tar.gz
-    URL_HASH   SHA256=d573d2f15cdda883714f7e0bc87b814a8d4a53a82edde558f08f940e905541ee
+    URL        https://github.com/facebook/rocksdb/archive/refs/tags/v6.27.3.tar.gz
+    URL_HASH   SHA256=ee29901749b9132692b26f0a6c1d693f47d1a9ed8e3771e60556afe80282bf58
     CMAKE_ARGS -DUSE_RTTI=1 -DPORTABLE=${PORTABLE_ROCKSDB}
                -DCMAKE_CXX_STANDARD=${CMAKE_CXX_STANDARD}
                -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
@@ -49,6 +50,7 @@ else()
                -DWITH_SNAPPY=OFF
                -DWITH_ZLIB=OFF
                -DWITH_ZSTD=OFF
+               -DWITH_LIBURING=${WITH_LIBURING}
                -DROCKSDB_BUILD_SHARED=OFF
                -DCMAKE_POSITION_INDEPENDENT_CODE=True
     BUILD_BYPRODUCTS <BINARY_DIR>/librocksdb.a

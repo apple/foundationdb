@@ -4,6 +4,12 @@
 Release Notes
 #############
 
+6.3.24
+======
+* Fixed a bug where get key location can overload proxies. `(PR #6453) <https://github.com/apple/foundationdb/pull/6453>`_ 
+* Added a mechanism that can reduce the number of empty peek reply by not always returning empty peek reply immediately. `(PR #6413) <https://github.com/apple/foundationdb/pull/6413>`_
+* Enable TLS support for Windows. `(PR #6193) <https://github.com/apple/foundationdb/pull/6193>`_
+* Fixed a bug where a shard gets merged too soon. `(PR #6115) <https://github.com/apple/foundationdb/pull/6115>`_
 
 6.3.23
 ======

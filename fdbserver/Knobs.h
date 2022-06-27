@@ -106,6 +106,8 @@ public:
 	double PUSH_STATS_SLOW_AMOUNT;
 	double PUSH_STATS_SLOW_RATIO;
 	int TLOG_POP_BATCH_SIZE;
+	bool PEEK_BATCHING_EMPTY_MSG;
+	double PEEK_BATCHING_EMPTY_MSG_INTERVAL;
 
 	// Data distribution queue
 	double HEALTH_POLL_TIME;
