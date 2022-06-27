@@ -23,7 +23,7 @@
 #include <boost/lexical_cast.hpp>
 
 #include "fdbclient/FDBTypes.h"
-#include "fdbrpc/IAsyncFile.h"
+#include "flow/IAsyncFile.h"
 #include "fdbrpc/Locality.h"
 #include "fdbclient/GlobalConfig.actor.h"
 #include "fdbclient/ProcessInterface.h"

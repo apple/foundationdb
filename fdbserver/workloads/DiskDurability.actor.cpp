@@ -21,7 +21,7 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/ActorCollection.h"
 #include "flow/SystemMonitor.h"
-#include "fdbrpc/IAsyncFile.h"
+#include "flow/IAsyncFile.h"
 #include "fdbserver/workloads/AsyncFile.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
