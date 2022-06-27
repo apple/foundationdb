@@ -25,7 +25,7 @@
 #include <vector>
 #include <unordered_map>
 
-#include "contrib/fmt-8.1.1/include/fmt/format.h"
+#include "fmt/format.h"
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbclient/BlobGranuleCommon.h"
 #include "fdbclient/BlobWorkerInterface.h"

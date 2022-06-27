@@ -46,14 +46,8 @@ TLSPolicy::~TLSPolicy() {}
 #include <utility>
 #include <boost/asio/ssl/context.hpp>
 
-// This include breaks module dependencies, but we need to do async file reads.
-// So either we include fdbrpc here, or this file is moved to fdbrpc/, and then
-// Net2, which depends on us, includes fdbrpc/.
-//
-// Either way, the only way to break this dependency cycle is to move all of
-// AsyncFile to flow/
-#include "fdbrpc/IAsyncFile.h"
 #include "flow/Platform.h"
+#include "flow/IAsyncFile.h"
 
 #include "flow/FastRef.h"
 #include "flow/Trace.h"

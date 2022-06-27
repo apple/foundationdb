@@ -35,10 +35,10 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 
-#include "fdbrpc/libeio/eio.h"
+#include "eio.h"
 #include "flow/flow.h"
 #include "flow/ThreadHelper.actor.h"
-#include "fdbrpc/IAsyncFile.h"
+#include "flow/IAsyncFile.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 

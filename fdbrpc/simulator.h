@@ -29,7 +29,7 @@
 #include "flow/Histogram.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/Locality.h"
-#include "fdbrpc/IAsyncFile.h"
+#include "flow/IAsyncFile.h"
 #include "flow/TDMetric.actor.h"
 #include <random>
 #include "fdbrpc/ReplicationPolicy.h"
@@ -419,7 +419,7 @@ public:
 	int listenersPerProcess;
 	std::set<NetworkAddress> protectedAddresses;
 	std::map<NetworkAddress, ProcessInfo*> currentlyRebootingProcesses;
-	std::unique_ptr<class ClusterConnectionString> extraDB;
+	class ClusterConnectionString* extraDB;
 	Reference<IReplicationPolicy> storagePolicy;
 	Reference<IReplicationPolicy> tLogPolicy;
 	int32_t tLogWriteAntiQuorum;

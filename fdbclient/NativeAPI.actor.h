@@ -20,7 +20,7 @@
 
 #pragma once
 #include "flow/IRandom.h"
-#include "flow/Tracing.h"
+#include "fdbclient/Tracing.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_NATIVEAPI_ACTOR_G_H)
 #define FDBCLIENT_NATIVEAPI_ACTOR_G_H
 #include "fdbclient/NativeAPI.actor.g.h"
