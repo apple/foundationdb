@@ -1,21 +1,27 @@
+use crate::flow::{Error, FlowFuture, FlowMessage, Peer, Result};
 use dashmap::DashMap;
-use tower::Service;
-use crate::flow::{Result, Error, FlowMessage, FlowFuture, Peer};
 use std::net::SocketAddr;
-use std::task::{Context, Poll};
 use std::sync::Arc;
+use std::task::{Context, Poll};
+use tokio::sync::oneshot;
+use tower::Service;
 
 // TODO: These should be generic parameters.
-use super::LoopbackHandler;
 use super::ConnectionHandler;
+use super::LoopbackHandler;
 
 pub struct RequestRouter {
     pub remote_endpoints: DashMap<SocketAddr, Arc<ConnectionHandler>>,
     pub local_endpoint: Arc<LoopbackHandler>,
 }
 
-impl RequestRouter
-{
+impl RequestRouter {
+    pub fn new(local_endpoint: Arc<LoopbackHandler>) -> Arc<RequestRouter> {
+        Arc::new(RequestRouter {
+            local_endpoint,
+            remote_endpoints: DashMap::new(),
+        })
+    }
     async fn handle_local(
         handler: Arc<LoopbackHandler>,
         request: FlowMessage,
@@ -32,31 +38,51 @@ impl RequestRouter
     }
     fn handle_req(&self, request: FlowMessage) -> Result<Option<FlowFuture>> {
         request.validate()?;
-        match request.peer {
+        match &request.flow.dst {
             Peer::Local(_) => {
                 // TODO: check completion?
                 Ok(Some(Box::pin(Self::handle_local(
                     self.local_endpoint.clone(),
                     request,
                 ))))
-            },
-            Peer::Remote(addr, _) => { 
-                let remote = self.remote_endpoints.get(&addr).unwrap().clone();
-                Ok(Some(Box::pin(Self::handle_remote(
-                    remote,
-                    request,
-                ))))
+            }
+            Peer::Remote(addr) => {
+                let remote = match self.remote_endpoints.get(addr) {
+                    Some(remote) => remote.clone(),
+                    None => {
+                        return Err(format!("Could not send to unknown endpoint: {}", addr).into())
+                    }
+                };
+                Ok(Some(Box::pin(Self::handle_remote(remote, request))))
             }
         }
     }
-
+    pub async fn rpc(&self, req: FlowMessage) -> Result<FlowMessage> {
+        match &req.flow.src {
+            Peer::Local(Some(uid)) => {
+                let (tx, rx) = oneshot::channel();
+                self.local_endpoint
+                    .in_flight_requests
+                    .insert(uid.clone(), tx);
+                let res = match self.handle_req(req)? {
+                    Some(fut) => fut.await?,
+                    None => None,
+                };
+                Ok(rx.await?)
+            }
+            src => Err(format!(
+                "attempt to dispatch RPC without a completion token. src: {:?}",
+                src
+            )
+            .into()),
+        }
+    }
 }
 
-impl Service<FlowMessage> for &RequestRouter
-{
-    type Response=Option<FlowMessage>;
-    type Error=Error;
-    type Future=FlowFuture;
+impl Service<FlowMessage> for &RequestRouter {
+    type Response = Option<FlowMessage>;
+    type Error = Error;
+    type Future = FlowFuture;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<()>> {
         Poll::Ready(Ok(()))
@@ -69,5 +95,4 @@ impl Service<FlowMessage> for &RequestRouter
             Err(e) => Box::pin(async move { Err(e) }),
         }
     }
-
 }

@@ -1,6 +1,6 @@
 use foundationdb::endpoints::{network_test, ping_request};
 use foundationdb::flow::{uid::WLTOKEN, Result};
-use foundationdb::services::{ConnectionHandler, LoopbackHandler};
+use foundationdb::services::{ConnectionHandler, LoopbackHandler, RequestRouter};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 #[tokio::main]
@@ -10,10 +10,12 @@ async fn main() -> Result<()> {
     loopback_handler.register_well_known_endpoint(WLTOKEN::PingPacket, ping_request::handler);
     loopback_handler
         .register_well_known_endpoint(WLTOKEN::ReservedForTesting, network_test::handler);
-    let svc = ConnectionHandler::new_outgoing_connection(saddr, loopback_handler).await?;
-    ping_request::ping(&svc).await?;
-    println!("got ping response from {:?}", svc.peer);
-    network_test::network_test(&svc, 100, 100).await?;
+    let request_router = RequestRouter::new(loopback_handler);
+    let svc = ConnectionHandler::new_outgoing_connection(saddr, request_router.clone()).await?;
+    request_router.remote_endpoints.insert(saddr, svc);
+    ping_request::ping(saddr, request_router.as_ref()).await?;
+    println!("got ping response from {:?}", saddr);
+    network_test::network_test(saddr, request_router.as_ref(), 100, 100).await?;
     println!("Goodbye, cruel world!");
 
     Ok(())

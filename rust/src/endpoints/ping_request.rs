@@ -9,8 +9,8 @@ mod void;
 
 use crate::flow::file_identifier::{FileIdentifier, IdentifierType, ParsedFileIdentifier};
 use crate::flow::uid::{UID, WLTOKEN};
-use crate::flow::{FlowFuture, FlowMessage, Frame, Result};
-use crate::services::ConnectionHandler;
+use crate::flow::{Flow, FlowFuture, FlowMessage, Frame, Peer, Result};
+use crate::services::RequestRouter;
 use std::net::SocketAddr;
 
 const PING_REQUEST_FILE_IDENTIFIER: ParsedFileIdentifier = ParsedFileIdentifier {
@@ -51,9 +51,11 @@ pub fn serialize_request(peer: SocketAddr) -> Result<FlowMessage> {
     let (mut payload, offset) = builder.collapse();
     FileIdentifier::new(PING_REQUEST_FILE_IDENTIFIER.file_identifier)?
         .rewrite_flatbuf(&mut payload[offset..])?;
-    FlowMessage::new_remote(
-        peer,
-        Some(completion.clone()),
+    FlowMessage::new(
+        Flow {
+            dst: Peer::Remote(peer),
+            src: Peer::Local(Some(completion)),
+        },
         Frame::new(wltoken, payload, offset),
     )
 }
@@ -102,15 +104,15 @@ async fn handle(request: FlowMessage) -> Result<Option<FlowMessage>> {
     };
 
     let frame = serialize_response(uid)?;
-    Ok(Some(FlowMessage::new_response(request.peer, frame)?))
+    Ok(Some(FlowMessage::new_response(request.flow, frame)?))
 }
 
 pub fn handler(msg: FlowMessage) -> FlowFuture {
     Box::pin(handle(msg))
 }
 
-pub async fn ping(svc: &ConnectionHandler) -> Result<()> {
-    let req = serialize_request(svc.peer)?;
+pub async fn ping(peer: SocketAddr, svc: &RequestRouter) -> Result<()> {
+    let req = serialize_request(peer)?;
     let response_frame = svc.rpc(req).await?;
     deserialize_response(response_frame.frame)
 }

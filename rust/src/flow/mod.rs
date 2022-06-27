@@ -17,8 +17,6 @@ use std::future::Future;
 use std::net::SocketAddr;
 use uid::UID;
 
-use tokio::sync::oneshot;
-
 pub type FlowResponse = Option<FlowMessage>;
 // XXX get rid of pin?
 pub type FlowFuture =
@@ -27,54 +25,41 @@ pub type FlowFn = dyn Send + Sync + Fn(FlowMessage) -> FlowFuture;
 
 #[derive(Debug)]
 pub enum Peer {
-    Remote(SocketAddr, Option<UID>),
-    Local(Option<(UID, oneshot::Receiver<FlowMessage>)>),
+    Remote(SocketAddr),
+    Local(Option<UID>),
+}
+
+#[derive(Debug)]
+pub struct Flow {
+    pub src: Peer,
+    pub dst: Peer,
 }
 
 #[derive(Debug)]
 pub struct FlowMessage {
-    pub peer: Peer,
+    pub flow: Flow,
     pub frame: Frame,
 }
 
 impl FlowMessage {
-    pub fn new_remote(peer: SocketAddr, completion: Option<UID>, frame: Frame) -> Result<Self> {
+    pub fn new(flow: Flow, frame: Frame) -> Result<Self> {
         frame.peek_file_identifier()?;
-        Ok(Self {
-            peer: Peer::Remote(peer, completion),
-            frame,
-        })
+        Ok(Self { flow, frame })
     }
-    pub fn new_local(
-        completion: Option<(UID, oneshot::Receiver<FlowMessage>)>,
-        frame: Frame,
-    ) -> Result<Self> {
+    pub fn new_response(flow: Flow, frame: Frame) -> Result<Self> {
         frame.peek_file_identifier()?;
         Ok(Self {
-            peer: Peer::Local(completion),
-            frame,
-        })
-    }
-    pub fn new_response(peer: Peer, frame: Frame) -> Result<Self> {
-        use Peer::*;
-        frame.peek_file_identifier()?;
-        Ok(Self {
-            peer: match peer {
-                Remote(peer, _completion) => Remote(peer, None),
-                Local(_completion) => Local(None),
+            flow: Flow {
+                // SIC; we're revesering the direction of the flow
+                // because this is a response.
+                src: flow.dst,
+                dst: flow.src,
             },
             frame,
         })
     }
     pub fn file_identifier(&self) -> FileIdentifier {
         self.frame.peek_file_identifier().unwrap()
-    }
-    pub fn completion(&self) -> Option<UID> {
-        match &self.peer {
-            Peer::Remote(_, uid) => uid.clone(),
-            Peer::Local(Some((uid, _))) => Some(uid.clone()),
-            Peer::Local(None) => None,
-        }
     }
     pub fn validate(&self) -> Result<()> {
         self.frame.validate()

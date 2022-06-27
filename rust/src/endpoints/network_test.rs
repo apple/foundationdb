@@ -8,8 +8,8 @@ mod network_test_response;
 
 use crate::flow::file_identifier::{FileIdentifier, IdentifierType, ParsedFileIdentifier};
 use crate::flow::uid::{UID, WLTOKEN};
-use crate::flow::{FlowFuture, FlowMessage, Frame, Result};
-use crate::services::ConnectionHandler;
+use crate::flow::{Flow, FlowFuture, FlowMessage, Frame, Peer, Result};
+use crate::services::RequestRouter;
 
 use flatbuffers::{FlatBufferBuilder, FLATBUFFERS_MAX_BUFFER_SIZE};
 
@@ -23,7 +23,7 @@ const NETWORK_TEST_REQUEST_IDENTIFIER: ParsedFileIdentifier = ParsedFileIdentifi
 };
 
 pub fn serialize_request(
-    peer: SocketAddr,
+    dst: SocketAddr,
     request_len: u32,
     reply_size: u32,
 ) -> Result<FlowMessage> {
@@ -67,7 +67,13 @@ pub fn serialize_request(
     let (mut payload, offset) = builder.collapse();
     FileIdentifier::new(4146513)?.rewrite_flatbuf(&mut payload[offset..])?;
     // println!("reply: {:x?}", builder.finished_data());
-    FlowMessage::new_remote(peer, Some(completion), Frame::new(wltoken, payload, offset))
+    FlowMessage::new(
+        Flow {
+            dst: Peer::Remote(dst),
+            src: Peer::Local(Some(completion)),
+        },
+        Frame::new(wltoken, payload, offset),
+    )
 }
 
 fn serialize_response(token: UID, reply_size: usize) -> Result<Frame> {
@@ -136,7 +142,7 @@ async fn handle(request: FlowMessage) -> Result<Option<FlowMessage>> {
     };
 
     let frame = serialize_response(uid, network_test_request.reply_size().try_into()?)?;
-    Ok(Some(FlowMessage::new_response(request.peer, frame)?))
+    Ok(Some(FlowMessage::new_response(request.flow, frame)?))
 }
 
 pub fn handler(msg: FlowMessage) -> FlowFuture {
@@ -144,11 +150,12 @@ pub fn handler(msg: FlowMessage) -> FlowFuture {
 }
 
 pub async fn network_test(
-    svc: &ConnectionHandler,
+    peer: SocketAddr,
+    svc: &RequestRouter,
     request_sz: u32,
     response_sz: u32,
 ) -> Result<()> {
-    let req = serialize_request(svc.peer, request_sz, response_sz)?;
+    let req = serialize_request(peer, request_sz, response_sz)?;
     let response_frame = svc.rpc(req).await?;
     deserialize_response(response_frame.frame)
 }

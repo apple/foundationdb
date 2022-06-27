@@ -1,10 +1,11 @@
 use crate::flow::{
-    connection, file_identifier::FileIdentifierNames, Error, FlowFuture, FlowMessage, Result,
+    connection, file_identifier::FileIdentifierNames, Error, Flow, FlowFuture, FlowMessage, Peer,
+    Result,
 };
-use crate::services::LoopbackHandler;
+use crate::services::RequestRouter;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{mpsc, oneshot, OwnedSemaphorePermit, Semaphore};
+use tokio::sync::{mpsc, OwnedSemaphorePermit, Semaphore};
 use tower::Service;
 
 use std::net::SocketAddr;
@@ -17,7 +18,7 @@ const MAX_REQUESTS: usize = MAX_CONNECTIONS * 2;
 
 /// Takes FlowMessages from multiple threads and writes them to a ConnectionWriter in a single-threaded way
 async fn sender<C: 'static + AsyncWrite + Unpin + Send>(
-    mut response_rx: tokio::sync::mpsc::Receiver<FlowMessage>,
+    mut response_rx: tokio::sync::mpsc::UnboundedReceiver<FlowMessage>,
     mut writer: connection::ConnectionWriter<C>,
 ) -> Result<()> {
     while let Some(message) = response_rx.recv().await {
@@ -40,27 +41,40 @@ async fn sender<C: 'static + AsyncWrite + Unpin + Send>(
 
 /// Takes FlowMessages from a single-threaded connection reader, and runs them in parallel by spawning concurrent tasks.
 async fn receiver<C>(
-    svc: Arc<ConnectionHandler>,
+    peer: SocketAddr,
+    svc: Arc<RequestRouter>,
     mut reader: connection::ConnectionReader<C>,
 ) -> Result<()>
 where
     C: 'static + AsyncRead + Unpin + Send,
 {
-    let mut svc = tower::limit::concurrency::ConcurrencyLimit::new(svc.deref(), MAX_REQUESTS);
+    // XXX conncurrency limit per process or per connection?  This is per connection.
+    let svc_clone = svc.clone();
+    let mut limit_svc =
+        tower::limit::concurrency::ConcurrencyLimit::new(svc_clone.deref(), MAX_REQUESTS);
     while let Some(frame) = reader.read_frame().await? {
-        let request = FlowMessage::new_remote(svc.get_ref().peer, None, frame)?;
-        let response_tx = svc.get_ref().response_tx.clone();
+        let request = FlowMessage::new(
+            Flow {
+                dst: Peer::Local(None),
+                src: Peer::Remote(peer),
+            },
+            frame,
+        )?;
         // poll_ready and call must be invoked atomically
         // we could read this before reading the next frame to prevent the next, throttled request from consuming
         // TCP buffers.  However, keeping one extra frame around (above the limit) is unlikely to matter in terms
         // of memory usage, but it helps interleave network + processing time.
-        futures_util::future::poll_fn(|cx| svc.poll_ready(cx)).await?;
-        let fut = svc.call(request);
+        futures_util::future::poll_fn(|cx| limit_svc.poll_ready(cx)).await?;
+        let fut = limit_svc.call(request);
+        let svc = svc.clone();
         tokio::spawn(async move {
             // the real work happens in await, anyway
             let response = fut.await.unwrap();
             match response {
-                Some(response) => response_tx.send(response).await.unwrap(),
+                Some(response) => {
+                    // println!("Response: {:?}", response);
+                    svc.deref().call(response).await.unwrap();
+                }
                 None => (),
             };
         });
@@ -69,14 +83,15 @@ where
 }
 
 fn spawn_receiver<C>(
-    connection_handler: Arc<ConnectionHandler>,
+    peer: SocketAddr,
+    request_router: Arc<RequestRouter>,
     reader: connection::ConnectionReader<C>,
     permit: OwnedSemaphorePermit,
 ) where
     C: 'static + AsyncRead + Unpin + Send,
 {
     tokio::spawn(async move {
-        match receiver(connection_handler, reader).await {
+        match receiver(peer, request_router, reader).await {
             Ok(_) => {
                 println!("clean shutdown!");
             }
@@ -89,7 +104,7 @@ fn spawn_receiver<C>(
 }
 
 fn spawn_sender<C>(
-    response_rx: mpsc::Receiver<FlowMessage>,
+    response_rx: mpsc::UnboundedReceiver<FlowMessage>,
     writer: connection::ConnectionWriter<C>,
 ) where
     C: 'static + AsyncWrite + Unpin + Send,
@@ -108,8 +123,8 @@ fn spawn_sender<C>(
 pub struct ConnectionHandler {
     pub peer: SocketAddr,
     pub fit: FileIdentifierNames,
-    pub response_tx: mpsc::Sender<FlowMessage>,
-    pub loopback_handler: Arc<LoopbackHandler>,
+    pub response_tx: mpsc::UnboundedSender<FlowMessage>,
+    pub request_router: Arc<RequestRouter>,
 }
 
 impl std::fmt::Debug for ConnectionHandler {
@@ -124,94 +139,69 @@ impl ConnectionHandler {
     async fn new(
         socket: (TcpStream, SocketAddr),
         permit: OwnedSemaphorePermit,
-        loopback_handler: Arc<LoopbackHandler>,
+        request_router: Arc<RequestRouter>,
     ) -> Result<Arc<Self>> {
         let (stream, peer) = socket;
-        // Bound the number of backlogged messages to a given remote endpoint.  This is
-        // set to the process-wide MAX_REQUESTS / 10 so that a few backpressuring receivers
-        // can't consume all the request slots for this process.
-        // TODO: Add flow knobs or something so that multiple packages can share configuration values.
-        let (response_tx, response_rx) = tokio::sync::mpsc::channel::<FlowMessage>(32);
+        // TODO: Backpressure?
+        let (response_tx, response_rx) = tokio::sync::mpsc::unbounded_channel::<FlowMessage>();
         let connection_handler = ConnectionHandler {
             peer,
             fit: FileIdentifierNames::new().unwrap(),
             response_tx,
-            loopback_handler,
+            request_router,
         };
         let (reader, writer, connect_packet) = connection::new(stream).await?;
         // TODO: Check protocol compatibility, create object w/ enough info to allow request routing
         println!("{} {:x?}", peer, connect_packet);
         let connection_handler = Arc::new(connection_handler);
         spawn_sender(response_rx, writer);
-        spawn_receiver(connection_handler.clone(), reader, permit);
+        spawn_receiver(
+            connection_handler.peer,
+            connection_handler.request_router.clone(),
+            reader,
+            permit,
+        );
         Ok(connection_handler)
     }
 
     pub async fn new_outgoing_connection(
         saddr: SocketAddr,
-        loopback_handler: Arc<LoopbackHandler>,
+        request_router: Arc<RequestRouter>,
     ) -> Result<Arc<ConnectionHandler>> {
         let conn = TcpStream::connect(saddr).await?;
         let limit_connections = Arc::new(Semaphore::new(1));
         let permit = limit_connections.clone().acquire_owned().await?;
-        ConnectionHandler::new((conn, saddr), permit, loopback_handler).await
+        ConnectionHandler::new((conn, saddr), permit, request_router).await
     }
 
     async fn listener(
         bind: TcpListener,
         limit_connections: Arc<Semaphore>,
         tx: mpsc::Sender<Arc<ConnectionHandler>>,
-        loopback_handler: Arc<LoopbackHandler>,
+        request_router: Arc<RequestRouter>,
     ) -> Result<()> {
         loop {
             let permit = limit_connections.clone().acquire_owned().await?;
             let socket = bind.accept().await?;
-            tx.send(ConnectionHandler::new(socket, permit, loopback_handler.clone()).await?)
+            tx.send(ConnectionHandler::new(socket, permit, request_router.clone()).await?)
                 .await?; // Send will return error if the Receiver has been close()'ed.
         }
     }
 
     pub async fn new_listener(
         addr: &str,
-        loopback_handler: Arc<LoopbackHandler>,
+        request_router: Arc<RequestRouter>,
     ) -> Result<mpsc::Receiver<Arc<ConnectionHandler>>> {
         let bind = TcpListener::bind(addr).await?;
         let limit_connections = Arc::new(Semaphore::new(MAX_CONNECTIONS));
         let (tx, rx) = mpsc::channel(100);
-        tokio::spawn(Self::listener(
-            bind,
-            limit_connections,
-            tx,
-            loopback_handler,
-        ));
+        tokio::spawn(Self::listener(bind, limit_connections, tx, request_router));
         Ok(rx)
-    }
-
-    pub async fn rpc(&self, req: FlowMessage) -> Result<FlowMessage> {
-        match req.completion() {
-            Some(uid) => {
-                let (tx, rx) = oneshot::channel();
-                self.loopback_handler.in_flight_requests.insert(uid, tx);
-                self.response_tx.send(req).await?;
-                Ok(rx.await?)
-            }
-            None => Err("attempt to dispatch RPC without a completion token".into()),
-        }
-    }
-
-    async fn handle(
-        handler: Arc<LoopbackHandler>,
-        request: FlowMessage,
-    ) -> Result<Option<FlowMessage>> {
-        futures_util::future::poll_fn(|cx| handler.as_ref().poll_ready(cx)).await?;
-        handler.as_ref().call(request).await
     }
     fn handle_req(&self, request: FlowMessage) -> Result<Option<FlowFuture>> {
         request.validate()?;
-        Ok(Some(Box::pin(Self::handle(
-            self.loopback_handler.clone(),
-            request,
-        ))))
+        self.response_tx.send(request)?;
+        Ok(None)
     }
 }
 
@@ -225,7 +215,6 @@ impl Service<FlowMessage> for &ConnectionHandler {
     }
 
     fn call(&mut self, req: FlowMessage) -> Self::Future {
-        // TODO: For RequestRouter to work, this needs to send the message, not process it!
         match self.handle_req(req) {
             Ok(Some(fut)) => fut,
             Ok(None) => Box::pin(async move { Ok(None) }),
