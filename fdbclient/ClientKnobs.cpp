@@ -111,6 +111,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( RANGESTREAM_BUFFERED_FRAGMENTS_LIMIT,     20 );
 	init( QUARANTINE_TSS_ON_MISMATCH,             true ); if( randomize && BUGGIFY ) QUARANTINE_TSS_ON_MISMATCH = false; // if true, a tss mismatch will put the offending tss in quarantine. If false, it will just be killed
 	init( CHANGE_FEED_EMPTY_BATCH_TIME,          0.005 );
+	init( DD_PHYSICAL_SHARD_CORE,                  true ); // SHARD_ENCODE_LOCATION_METADATA must be true
 	init( SHARD_ENCODE_LOCATION_METADATA,          true );
 
 	//KeyRangeMap

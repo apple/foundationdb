@@ -314,6 +314,55 @@ private:
 	void insert(Team team, KeyRange const& range);
 };
 
+class DDTeamCollection;
+
+class PhysicalShardCollection : public ReferenceCounted<PhysicalShardCollection> {
+public:
+	struct PhysicalShard {
+		uint64_t id;
+		StorageMetrics metrics;
+
+		PhysicalShard() : id(0) {}
+		explicit PhysicalShard(uint64_t id) : id(id), metrics(StorageMetrics()) {}
+		explicit PhysicalShard(uint64_t id, StorageMetrics const& metrics) : id(id), metrics(metrics) {}
+		// operator< used for selecting the physicalShard with the minimal bytesOnDisk
+		bool operator<(const struct PhysicalShard& right) const { return id < right.id ? true : false; }
+		std::string toString() const { return std::to_string(id); }
+	};
+
+	// PhysicalShard Core
+	// the mapping from a physicalShardID to its corresponding physicalShard
+	std::map<uint64_t, PhysicalShard> physicalShardCollection;
+	// the mapping from keyRange to physicalShardIDs
+	KeyRangeMap<uint64_t> keyRangePhysicalShardIDMap;
+	// the mapping from a team to physicalShards of the team
+	std::map<ShardsAffectedByTeamFailure::Team, std::set<uint64_t>> teamPhysicalShardIDs;
+
+	// maintain the mapping between teams and physicalShards
+	void updatePhysicalShardToTeams(uint64_t physicalShardID,
+	                                std::vector<ShardsAffectedByTeamFailure::Team> inputTeams,
+	                                int expectedNumServersPerTeam,
+	                                uint64_t debugID);
+	Optional<uint64_t> trySelectPhysicalShardFor(ShardsAffectedByTeamFailure::Team team,
+	                                             StorageMetrics const& metrics,
+	                                             uint64_t debugID);
+	Optional<ShardsAffectedByTeamFailure::Team> tryGetRemoteTeamWith(uint64_t physicalShardID,
+	                                                                 int expectedTeamSize,
+	                                                                 uint64_t debugID);
+	uint64_t generateNewPhysicalShardID(uint64_t debugID);
+
+	// PhysicalShard Metrics
+	void updatePhysicalShardMetricsByKeyRange(KeyRange keys,
+	                                          StorageMetrics const& newMetrics,
+	                                          StorageMetrics const& oldMetrics,
+	                                          bool initWithNewMetrics);
+	void reduceMetricsForMoveOut(uint64_t physicalShardID, StorageMetrics const& metrics);
+	void increaseMetricsForMoveIn(uint64_t physicalShardID, StorageMetrics const& metrics);
+
+	// to remove
+	void printTeamPhysicalShardsMapping(std::string);
+};
+
 // DDShardInfo is so named to avoid link-time name collision with ShardInfo within the StorageServer
 struct DDShardInfo {
 	Key key;
@@ -373,7 +422,8 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
                                            Reference<AsyncVar<bool>> zeroHealthyTeams,
                                            UID distributorId,
                                            KeyRangeMap<ShardTrackedData>* shards,
-                                           bool* trackerCancelled);
+                                           bool* trackerCancelled,
+                                           Reference<PhysicalShardCollection> physicalShardCollection);
 
 ACTOR Future<Void> dataDistributionQueue(Database cx,
                                          Future<Void> readyToStart,
@@ -391,7 +441,8 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
                                          UID distributorId,
                                          int teamSize,
                                          int singleRegionTeamSize,
-                                         const DDEnabledState* ddEnabledState);
+                                         const DDEnabledState* ddEnabledState,
+                                         Reference<PhysicalShardCollection> physicalShardCollection);
 
 // Holds the permitted size and IO Bounds for a shard
 struct ShardSizeBounds {
@@ -409,8 +460,6 @@ ShardSizeBounds getShardSizeBounds(KeyRangeRef shard, int64_t maxShardSize);
 
 // Determines the maximum shard size based on the size of the database
 int64_t getMaxShardSize(double dbSizeEstimate);
-
-class DDTeamCollection;
 
 struct StorageWiggleMetrics {
 	constexpr static FileIdentifier file_identifier = 4728961;
