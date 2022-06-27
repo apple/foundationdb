@@ -558,19 +558,87 @@ struct TenantManagementWorkload : TestWorkload {
 		}
 	}
 
+	ACTOR Future<Void> renameTenant(Database cx, TenantManagementWorkload* self) {
+		if (self->createdTenants.size() == 0) {
+			TraceEvent("RenameTenantNoneExisting");
+			return Void();
+		}
+		// Currently only supporting MANAGEMENT_DATABASE op, so numTenants should always be 1
+		// state OperationType operationType = TenantManagementWorkload::randomOperationType();
+		int numTenants = 1;
+
+		state std::vector<TenantName> oldTenantNames;
+		state std::vector<TenantName> newTenantNames;
+		// For the future in supporting different operation types and number of tenants:
+		// The number of tenants we rename should be min(numTenants, self->createdTenants.size())
+		int i = 0;
+		for (auto existingEntry : self->createdTenants) {
+			oldTenantNames.push_back(existingEntry.first);
+			loop {
+				TenantName newTenant = self->chooseTenantName(false);
+				if (!self->createdTenants.count(newTenant) &&
+				    std::find(newTenantNames.begin(), newTenantNames.end(), newTenant) == newTenantNames.end()) {
+					newTenantNames.push_back(newTenant);
+					break;
+				}
+			}
+			if (++i == numTenants) {
+				break;
+			}
+		}
+
+		loop {
+			try {
+				ASSERT(oldTenantNames.size() == 1);
+				state int tenantIndex = 0;
+				for (; tenantIndex != oldTenantNames.size(); ++tenantIndex) {
+					state TenantName oldTenantName = oldTenantNames[tenantIndex];
+					state TenantName newTenantName = newTenantNames[tenantIndex];
+					wait(ManagementAPI::renameTenant(cx.getReference(), oldTenantName, newTenantName));
+					TenantState tState = self->createdTenants[oldTenantName];
+					self->createdTenants[newTenantName] = tState;
+					self->createdTenants.erase(oldTenantName);
+					if (!tState.empty) {
+						state Transaction insertTr(cx, newTenantName);
+						loop {
+							try {
+								insertTr.set(self->keyName, newTenantName);
+								wait(insertTr.commit());
+								break;
+							} catch (Error& e) {
+								wait(insertTr.onError(e));
+							}
+						}
+					}
+					wait(self->checkTenant(cx, self, newTenantName, self->createdTenants[newTenantName]));
+				}
+				return Void();
+			} catch (Error& e) {
+				ASSERT(oldTenantNames.size() == 1);
+				TraceEvent(SevError, "RenameTenantFailure")
+				    .error(e)
+				    .detail("OldTenantName", oldTenantNames[0])
+				    .detail("NewTenantName", newTenantNames[0]);
+				return Void();
+			}
+		}
+	}
+
 	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 	ACTOR Future<Void> _start(Database cx, TenantManagementWorkload* self) {
 		state double start = now();
 		while (now() < start + self->testDuration) {
-			state int operation = deterministicRandom()->randomInt(0, 4);
+			state int operation = deterministicRandom()->randomInt(0, 5);
 			if (operation == 0) {
 				wait(self->createTenant(cx, self));
 			} else if (operation == 1) {
 				wait(self->deleteTenant(cx, self));
 			} else if (operation == 2) {
 				wait(self->getTenant(cx, self));
-			} else {
+			} else if (operation == 3) {
 				wait(self->listTenants(cx, self));
+			} else {
+				wait(self->renameTenant(cx, self));
 			}
 		}
 
