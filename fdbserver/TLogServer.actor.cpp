@@ -2047,7 +2047,7 @@ ACTOR Future<Void> tLogPeekStream(TLogData* self, TLogPeekStreamRequest req, Ref
 			TraceEvent(SevDebug, "TLogPeekStream", logData->logId).detail("TaskPriority", g_network->getCurrentTask());
 			// FIXME: debug purpose, increase the probability peeking from spilled data
 			if (reply.rep.end > logData->persistentDataDurableVersion) {
-				wait(delay(SERVER_KNOBS->TLOG_PEEK_DELAY, TaskPriority::UpdateStorage));
+				wait(delay(SERVER_KNOBS->TLOG_PEEK_DELAY,  g_network->getCurrentTask()));
 			} else {
 				wait(delay(0, g_network->getCurrentTask()));
 			}
