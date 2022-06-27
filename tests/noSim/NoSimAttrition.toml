@@ -1,0 +1,13 @@
+[[test]]
+testTitle = 'NoSimAttrition'
+timeout = 86400.0
+waitForQuiescenceBegin = false
+waitForQuiescenceEnd = false
+clearAfterTest = false
+
+    [[test.workload]]
+    testName = 'Attrition'
+    killMachine = true
+    targetIds = 'testmachine'
+    testDuration = 86400.0
+    liveDuration = 120.0
