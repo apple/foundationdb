@@ -190,7 +190,7 @@ struct MachineAttritionWorkload : TestWorkload {
 
 	ACTOR static Future<Void> noSimMachineKillWorker(MachineAttritionWorkload* self, Database cx) {
 		ASSERT(!g_network->isSimulated());
-		wait(self->liveDuration);
+		wait(delay(self->liveDuration));
 		state int killedWorkers = 0;
 		state std::vector<WorkerDetails> allWorkers =
 			wait(self->dbInfo->get().clusterInterface.getWorkers.getReply(GetWorkersRequest()));
