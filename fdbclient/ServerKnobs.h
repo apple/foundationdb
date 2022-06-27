@@ -161,6 +161,7 @@ public:
 	int PRIORITY_TEAM_FAILED; // Priority when a server in the team is excluded as failed
 	int PRIORITY_TEAM_0_LEFT;
 	int PRIORITY_SPLIT_SHARD;
+	int PRIORITY_SPLIT_PHYSICAL_SHARD;
 
 	// Data distribution
 	double READ_REBALANCE_CPU_THRESHOLD; // read rebalance only happens if the source servers' CPU > threshold
@@ -234,6 +235,7 @@ public:
 	int DD_STORAGE_WIGGLE_STUCK_THRESHOLD; // How many times bestTeamStuck accumulate will pause storage wiggle
 	bool DD_TENANT_AWARENESS_ENABLED;
 	int TENANT_CACHE_LIST_REFRESH_INTERVAL; // How often the TenantCache is refreshed
+	int TEAM_COUNT_TAKEN_BY_GET_TEAMS; // How many teams are returned by getTeamsAndMetrics. Used for new DD framework
 
 	// TeamRemover to remove redundant teams
 	bool TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER; // disable the machineTeamRemover actor

@@ -482,6 +482,8 @@ struct DDQueueData {
 	std::vector<TeamCollectionInterface> teamCollections;
 	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
 	Reference<PhysicalShardCollection> physicalShardCollection;
+	Reference<DDEventBuffer> ddEventBuffer;
+	PromiseStream<int> triggerDataDistribution;
 	PromiseStream<Promise<int64_t>> getAverageShardBytes;
 
 	FlowLock startMoveKeysParallelismLock;
@@ -586,7 +588,9 @@ struct DDQueueData {
 	            FutureStream<RelocateShard> input,
 	            PromiseStream<GetMetricsRequest> getShardMetrics,
 	            PromiseStream<GetTopKMetricsRequest> getTopKMetrics,
-	            Reference<PhysicalShardCollection> physicalShardCollection)
+	            Reference<PhysicalShardCollection> physicalShardCollection,
+	            Reference<DDEventBuffer> ddEventBuffer,
+	            PromiseStream<int> triggerDataDistribution)
 	  : distributorId(mid), lock(lock), cx(cx), txnProcessor(new DDTxnProcessor(cx)), teamCollections(teamCollections),
 	    shardsAffectedByTeamFailure(sABTF), getAverageShardBytes(getAverageShardBytes),
 	    physicalShardCollection(physicalShardCollection),
@@ -598,7 +602,8 @@ struct DDQueueData {
 	    output(output), input(input), getShardMetrics(getShardMetrics), getTopKMetrics(getTopKMetrics), lastInterval(0),
 	    suppressIntervals(0), rawProcessingUnhealthy(new AsyncVar<bool>(false)),
 	    rawProcessingWiggle(new AsyncVar<bool>(false)), unhealthyRelocations(0),
-	    movedKeyServersEventHolder(makeReference<EventCacheHolder>("MovedKeyServers")) {}
+	    movedKeyServersEventHolder(makeReference<EventCacheHolder>("MovedKeyServers")), ddEventBuffer(ddEventBuffer),
+	    triggerDataDistribution(triggerDataDistribution) {}
 
 	void validate() {
 		if (EXPENSIVE_VALIDATION) {
@@ -1914,6 +1919,10 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
 	for (int i = 0; i < shards.size(); i++) {
 		if (metrics.keys == shards[i]) {
 			self->output.send(RelocateShard(metrics.keys.get(), priority, RelocateReason::REBALANCE_READ));
+			if (CLIENT_KNOBS->DD_FRAMEWORK) {
+				self->ddEventBuffer->append(DDEventBuffer::DDEvent(priority));
+				self->triggerDataDistribution.send(1);
+			}
 			self->updateLastAsSource(sourceTeam->getServerIDs());
 			return true;
 		}
@@ -1986,6 +1995,10 @@ ACTOR static Future<bool> rebalanceTeams(DDQueueData* self,
 	for (int i = 0; i < shards.size(); i++) {
 		if (moveShard == shards[i]) {
 			self->output.send(RelocateShard(moveShard, priority, RelocateReason::REBALANCE_DISK));
+			if (CLIENT_KNOBS->DD_FRAMEWORK) {
+				self->ddEventBuffer->append(DDEventBuffer::DDEvent(priority));
+				self->triggerDataDistribution.send(1);
+			}
 			return true;
 		}
 	}
@@ -2350,7 +2363,9 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
                                          int teamSize,
                                          int singleRegionTeamSize,
                                          const DDEnabledState* ddEnabledState,
-                                         Reference<PhysicalShardCollection> physicalShardCollection) {
+                                         Reference<PhysicalShardCollection> physicalShardCollection,
+                                         Reference<DDEventBuffer> ddEventBuffer,
+                                         PromiseStream<int> triggerDataDistribution) {
 	state DDQueueData self(distributorId,
 	                       lock,
 	                       cx,
@@ -2363,7 +2378,9 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 	                       input,
 	                       getShardMetrics,
 	                       getTopKMetrics,
-	                       physicalShardCollection);
+	                       physicalShardCollection,
+	                       ddEventBuffer,
+	                       triggerDataDistribution);
 	state std::set<UID> serversToLaunchFrom;
 	state KeyRange keysToLaunchFrom;
 	state RelocateData launchData;

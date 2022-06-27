@@ -954,6 +954,10 @@ public:
 							rs.priority = maxPriority;
 
 							self->output.send(rs);
+							if (CLIENT_KNOBS->DD_FRAMEWORK) {
+								self->ddEventBuffer->append(DDEventBuffer::DDEvent(maxPriority));
+								self->triggerDataDistribution.send(1);
+							}
 							TraceEvent("SendRelocateToDDQueue", self->distributorId)
 							    .suppressFor(1.0)
 							    .detail("ServerPrimary", self->primary)
@@ -2731,6 +2735,27 @@ public:
 		}
 	}
 
+	ACTOR static Future<Void> serverGetStorageServerStatusRequest(DDTeamCollection* self, TeamCollectionInterface tci) {
+		loop {
+			GetStorageServerStatusRequest req = waitNext(tci.getStorageServerStatus.getFuture());
+			// TODO
+		}
+	}
+
+	ACTOR static Future<Void> serverGetTeamStatusRequest(DDTeamCollection* self, TeamCollectionInterface tci) {
+		loop {
+			GetTeamStatusRequest req = waitNext(tci.getTeamStatus.getFuture());
+			// TODO
+		}
+	}
+
+	ACTOR static Future<Void> serverGetTeamsAndMetricsRequest(DDTeamCollection* self, TeamCollectionInterface tci) {
+		loop {
+			GetTeamsAndMetricsRequest req = waitNext(tci.getTeamsAndMetrics.getFuture());
+			// TODO
+		}
+	}
+
 	ACTOR static Future<Void> monitorHealthyTeams(DDTeamCollection* self) {
 		TraceEvent("DDMonitorHealthyTeamsStart").detail("ZeroHealthyTeams", self->zeroHealthyTeams->get());
 		loop choose {
@@ -2953,6 +2978,9 @@ public:
 			wait(self->init(initData, *ddEnabledState));
 			initData = Reference<InitialDataDistribution>();
 			self->addActor.send(self->serverGetTeamRequests(tci));
+			self->addActor.send(self->serverGetStorageServerStatusRequest(tci));
+			self->addActor.send(self->serverGetTeamStatusRequest(tci));
+			self->addActor.send(self->serverGetTeamsAndMetricsRequest(tci));
 
 			TraceEvent("DDTeamCollectionBegin", self->distributorId).detail("Primary", self->primary);
 			wait(self->readyToStart || error);
@@ -3526,6 +3554,18 @@ Future<Void> DDTeamCollection::serverGetTeamRequests(TeamCollectionInterface tci
 	return DDTeamCollectionImpl::serverGetTeamRequests(this, tci);
 }
 
+Future<Void> DDTeamCollection::serverGetStorageServerStatusRequest(TeamCollectionInterface tci) {
+	return DDTeamCollectionImpl::serverGetStorageServerStatusRequest(this, tci);
+}
+
+Future<Void> DDTeamCollection::serverGetTeamStatusRequest(TeamCollectionInterface tci) {
+	return DDTeamCollectionImpl::serverGetTeamStatusRequest(this, tci);
+}
+
+Future<Void> DDTeamCollection::serverGetTeamsAndMetricsRequest(TeamCollectionInterface tci) {
+	return DDTeamCollectionImpl::serverGetTeamsAndMetricsRequest(this, tci);
+}
+
 Future<Void> DDTeamCollection::monitorHealthyTeams() {
 	return DDTeamCollectionImpl::monitorHealthyTeams(this);
 }
@@ -3576,6 +3616,8 @@ DDTeamCollection::DDTeamCollection(Database const& cx,
                                    MoveKeysLock const& lock,
                                    PromiseStream<RelocateShard> const& output,
                                    Reference<ShardsAffectedByTeamFailure> const& shardsAffectedByTeamFailure,
+                                   Reference<DDEventBuffer> ddEventBuffer,
+                                   PromiseStream<int> triggerDataDistribution,
                                    DatabaseConfiguration configuration,
                                    std::vector<Optional<Key>> includedDCs,
                                    Optional<std::vector<Optional<Key>>> otherTrackedDCs,
@@ -3589,7 +3631,8 @@ DDTeamCollection::DDTeamCollection(Database const& cx,
                                    PromiseStream<Promise<int>> getUnhealthyRelocationCount)
   : doBuildTeams(true), lastBuildTeamsFailed(false), teamBuilder(Void()), lock(lock), output(output),
     unhealthyServers(0), storageWiggler(makeReference<StorageWiggler>(this)), processingWiggle(processingWiggle),
-    shardsAffectedByTeamFailure(shardsAffectedByTeamFailure),
+    shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), ddEventBuffer(ddEventBuffer),
+    triggerDataDistribution(triggerDataDistribution),
     initialFailureReactionDelay(
         delayed(readyToStart, SERVER_KNOBS->INITIAL_FAILURE_REACTION_DELAY, TaskPriority::DataDistribution)),
     initializationDoneActor(logOnCompletion(readyToStart && initialFailureReactionDelay)), recruitingStream(0),
@@ -5147,6 +5190,8 @@ class DDTeamCollectionUnitTest {
 		                                                           MoveKeysLock(),
 		                                                           PromiseStream<RelocateShard>(),
 		                                                           makeReference<ShardsAffectedByTeamFailure>(),
+		                                                           makeReference<DDEventBuffer>(),
+		                                                           PromiseStream<int>(),
 		                                                           conf,
 		                                                           {},
 		                                                           {},
@@ -5191,6 +5236,8 @@ class DDTeamCollectionUnitTest {
 		                                                           MoveKeysLock(),
 		                                                           PromiseStream<RelocateShard>(),
 		                                                           makeReference<ShardsAffectedByTeamFailure>(),
+		                                                           makeReference<DDEventBuffer>(),
+		                                                           PromiseStream<int>(),
 		                                                           conf,
 		                                                           {},
 		                                                           {},

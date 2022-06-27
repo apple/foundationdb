@@ -208,6 +208,10 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	Reference<AsyncVar<bool>> processingWiggle; // track whether wiggling relocation is being processed
 	PromiseStream<StorageWiggleValue> nextWiggleInfo;
 
+	// dd
+	Reference<DDEventBuffer> ddEventBuffer;
+	PromiseStream<int> triggerDataDistribution;
+
 	std::vector<Reference<TCTeamInfo>> badTeams;
 	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
 	PromiseStream<UID> removedServers;
@@ -489,6 +493,12 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 
 	Future<Void> serverGetTeamRequests(TeamCollectionInterface tci);
 
+	Future<Void> serverGetStorageServerStatusRequest(TeamCollectionInterface tci);
+
+	Future<Void> serverGetTeamStatusRequest(TeamCollectionInterface tci);
+
+	Future<Void> serverGetTeamsAndMetricsRequest(TeamCollectionInterface tci);
+
 	Future<Void> removeBadTeams();
 
 	Future<Void> machineTeamRemover();
@@ -618,6 +628,8 @@ public:
 	                 MoveKeysLock const& lock,
 	                 PromiseStream<RelocateShard> const& output,
 	                 Reference<ShardsAffectedByTeamFailure> const& shardsAffectedByTeamFailure,
+	                 Reference<DDEventBuffer> ddEventBuffer,
+	                 PromiseStream<int> triggerDataDistribution,
 	                 DatabaseConfiguration configuration,
 	                 std::vector<Optional<Key>> includedDCs,
 	                 Optional<std::vector<Optional<Key>>> otherTrackedDCs,

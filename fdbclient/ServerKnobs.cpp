@@ -160,6 +160,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( PRIORITY_TEAM_FAILED,                                  805 );
 	init( PRIORITY_TEAM_0_LEFT,                                  809 );
 	init( PRIORITY_SPLIT_SHARD,                                  950 ); if( randomize && BUGGIFY ) PRIORITY_SPLIT_SHARD = 350;
+	init( PRIORITY_SPLIT_PHYSICAL_SHARD,                         951 ); if( randomize && BUGGIFY ) PRIORITY_SPLIT_PHYSICAL_SHARD = 350;
 
 	// Data distribution
 	init( READ_REBALANCE_CPU_THRESHOLD,                         15.0 );
@@ -288,6 +289,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( DD_STORAGE_WIGGLE_STUCK_THRESHOLD,                      20 );
 	init( DD_TENANT_AWARENESS_ENABLED,                         false );
 	init( TENANT_CACHE_LIST_REFRESH_INTERVAL,                    2.0 );
+	init( TEAM_COUNT_TAKEN_BY_GET_TEAMS,                           5 );
 
 	// TeamRemover
 	init( TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER,                false ); if( randomize && BUGGIFY ) TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER = deterministicRandom()->random01() < 0.1 ? true : false; // false by default. disable the consistency check when it's true

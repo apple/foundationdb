@@ -234,8 +234,79 @@ struct GetMetricsListRequest {
 	GetMetricsListRequest(KeyRange const& keys, const int shardLimit) : keys(keys), shardLimit(shardLimit) {}
 };
 
+struct TeamMetrics {
+	bool isHealthy;
+};
+
+struct StorageServerMetric {
+	StorageMetrics metrics;
+	int64_t bytesLag;
+	int64_t versionLag;
+	double cpuUsage;
+	double diskUsage;
+	double localRateLimit;
+};
+
+struct TeamsAndMetrics {
+	std::vector<std::pair<std::vector<std::pair<UID, StorageServerMetric>>, bool>> teams;
+	/* A list of teams and each team has a list of storage servers with their metrics respectively
+	teams =
+	    [
+	        ( 								// team 1
+	            [
+	                (serverID, metrics), 	// server 1 of team 1
+	                (serverID, metrics), 	// server 2 of team 1
+	                ...
+	                (serverID, metrics), 	// server k of team 1 (k is the replica)
+	            ],
+	            isPrimary,
+	        ),
+	        ( 								// team 2
+	            [
+	                (serverID, metrics), 	// server 1 of team 2
+	                (serverID, metrics), 	// server 2 of team 2
+	                ...
+	                (serverID, metrics), 	// server k of team 2
+	            ],
+	            isPrimary,
+	        ),
+	        ...
+	        ( 								// team n
+	            [
+	                (serverID, metrics), 	// server 1 of team n
+	                (serverID, metrics), 	// server 2 of team n
+	                ...
+	                (serverID, metrics), 	// server k of team n
+	            ],
+	            isPrimary,
+	        )
+	    ]
+	*/
+};
+
+struct GetStorageServerStatusRequest {
+	UID ssid;
+	Promise<StorageServerMetric> reply;
+	GetStorageServerStatusRequest(UID ssid) : ssid(ssid) {}
+};
+
+struct GetTeamStatusRequest {
+	std::vector<UID> servers;
+	Promise<TeamMetrics> reply;
+	GetTeamStatusRequest(std::vector<UID> servers) : servers(servers) {}
+};
+
+struct GetTeamsAndMetricsRequest {
+	int teamCounts;
+	Promise<TeamsAndMetrics> reply;
+	GetTeamsAndMetricsRequest() : teamCounts(SERVER_KNOBS->TEAM_COUNT_TAKEN_BY_GET_TEAMS) {}
+};
+
 struct TeamCollectionInterface {
 	PromiseStream<GetTeamRequest> getTeam;
+	PromiseStream<GetStorageServerStatusRequest> getStorageServerStatus;
+	PromiseStream<GetTeamStatusRequest> getTeamStatus;
+	PromiseStream<GetTeamsAndMetricsRequest> getTeamsAndMetrics;
 };
 
 class ShardsAffectedByTeamFailure : public ReferenceCounted<ShardsAffectedByTeamFailure> {
@@ -352,15 +423,78 @@ public:
 	uint64_t generateNewPhysicalShardID(uint64_t debugID);
 
 	// PhysicalShard Metrics
-	void updatePhysicalShardMetricsByKeyRange(KeyRange keys,
-	                                          StorageMetrics const& newMetrics,
-	                                          StorageMetrics const& oldMetrics,
-	                                          bool initWithNewMetrics);
+	std::vector<uint64_t> updatePhysicalShardMetricsByKeyRange(KeyRange keys,
+	                                                           StorageMetrics const& newMetrics,
+	                                                           StorageMetrics const& oldMetrics,
+	                                                           bool initWithNewMetrics);
 	void reduceMetricsForMoveOut(uint64_t physicalShardID, StorageMetrics const& metrics);
 	void increaseMetricsForMoveIn(uint64_t physicalShardID, StorageMetrics const& metrics);
 
 	// to remove
 	void printTeamPhysicalShardsMapping(std::string);
+};
+
+enum DataMoveType { PHYSICAL_SHARD_MOVE, READ_RANGE_MOVE };
+class DDEventBuffer : public ReferenceCounted<DDEventBuffer> {
+public:
+	DDEventBuffer() {}
+	struct DDEvent {
+		// which event type?
+		int eventType; // equivalent to rs.priority
+		// how to move (suggested)?
+		Optional<DataMoveType> dataMoveType;
+		// who triggers the event
+		Optional<KeyRange> keyRange;
+		Optional<uint64_t> physicalShard;
+		Optional<UID> storageServer;
+		Optional<ShardsAffectedByTeamFailure::Team> team;
+		DDEvent(int eventType) : eventType(eventType) {}
+		DDEvent(int eventType, uint64_t physicalShardID) : eventType(eventType), physicalShard(physicalShardID) {}
+		std::string toString() const { return std::to_string(eventType); }
+	};
+	void append(DDEvent event) { buffer.push_back(event); }
+	std::vector<DDEvent> takeAll() {
+		std::vector<DDEvent> result(buffer);
+		buffer.clear();
+		return result;
+	}
+	bool empty() { return (buffer.size() == 0); }
+
+private:
+	std::vector<DDEvent> buffer;
+};
+
+class DataDistributionRuntimeMonitor : public ReferenceCounted<DataDistributionRuntimeMonitor> {
+public:
+	DataDistributionRuntimeMonitor() {}
+	// DD Algorithm Support: Runtime Metrics
+	TeamMetrics getTeamMetrics(ShardsAffectedByTeamFailure::Team team);
+	StorageServerMetric getStorageServerMetrics(UID serverID);
+	StorageMetrics getPhysicalShardMetrics(uint64_t physicalShardID);
+	StorageMetrics getKeyRangeMetrics(KeyRange keyRange);
+	// DD Algorithm Support: Issue Data Move
+	void issuePhysicalShardMove(uint64_t physicalShardID, Optional<std::vector<KeyRange>> keyRanges);
+	void issueReadRangeMove(KeyRange keyRange);
+	// DD Init
+	void setTeamCollections(std::vector<TeamCollectionInterface> tcs) { teamCollections = tcs; }
+	void setGetShardMetrics(PromiseStream<GetMetricsRequest> getMetrics) { getShardMetrics = getMetrics; }
+	void setPhysicalShardCollection(Reference<PhysicalShardCollection> collection) {
+		physicalShardCollection = collection;
+	}
+	void setRelocateBuffer(PromiseStream<RelocateShard> buffer) { relocateBuffer = buffer; }
+	void setDDEventBuffer(Reference<DDEventBuffer> buffer) { ddEventBuffer = buffer; };
+	void setTriggerDataDistribution(PromiseStream<int> trigger) { triggerDataDistribution = trigger; }
+	// DD Algorithm Support: Trigger Data Relocation
+	PromiseStream<int> triggerDataDistribution;
+	Reference<DDEventBuffer> ddEventBuffer;
+
+private:
+	// DD Algorithm Support: Runtime Metrics
+	std::vector<TeamCollectionInterface> teamCollections; // get team/storageServer metrics
+	Reference<PhysicalShardCollection> physicalShardCollection; // get physicalShard metrics
+	PromiseStream<GetMetricsRequest> getShardMetrics; // get keyRange metrics
+	// DD Algorithm Support: Issue Data Move
+	PromiseStream<RelocateShard> relocateBuffer; // self->output.send(RelocateShard)
 };
 
 // DDShardInfo is so named to avoid link-time name collision with ShardInfo within the StorageServer
@@ -423,7 +557,9 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
                                            UID distributorId,
                                            KeyRangeMap<ShardTrackedData>* shards,
                                            bool* trackerCancelled,
-                                           Reference<PhysicalShardCollection> physicalShardCollection);
+                                           Reference<PhysicalShardCollection> physicalShardCollection,
+                                           Reference<DDEventBuffer> ddEventBuffer,
+                                           PromiseStream<int> triggerDataDistribution);
 
 ACTOR Future<Void> dataDistributionQueue(Database cx,
                                          Future<Void> readyToStart,
@@ -442,7 +578,9 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
                                          int teamSize,
                                          int singleRegionTeamSize,
                                          const DDEnabledState* ddEnabledState,
-                                         Reference<PhysicalShardCollection> physicalShardCollection);
+                                         Reference<PhysicalShardCollection> physicalShardCollection,
+                                         Reference<DDEventBuffer> ddEventBuffer,
+                                         PromiseStream<int> triggerDataDistribution);
 
 // Holds the permitted size and IO Bounds for a shard
 struct ShardSizeBounds {

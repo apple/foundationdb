@@ -742,6 +742,22 @@ ACTOR Future<Void> monitorPhysicalShardStatus(Database cx, Reference<PhysicalSha
 	}
 }
 
+ACTOR Future<Void> dataDistributionCore(Reference<DataDistributionRuntimeMonitor> self) {
+	ASSERT(CLIENT_KNOBS->DD_FRAMEWORK);
+	loop {
+		int priority = waitNext(self->triggerDataDistribution.getFuture());
+		// std::cout << "fetching...\n";
+		if (!self->ddEventBuffer->empty()) {
+			TraceEvent e("DataDistributionTriggered");
+			std::vector<DDEventBuffer::DDEvent> events = self->ddEventBuffer->takeAll();
+			// for (auto event : events) {
+			// std::cout << event.eventType << "\n";
+			// }
+			e.detail("Events", events);
+		}
+	}
+}
+
 // Runs the data distribution algorithm for FDB, including the DD Queue, DD tracker, and DD team collection
 ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
                                     PromiseStream<GetMetricsListRequest> getShardMetricsList,
@@ -909,6 +925,15 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			state Promise<Void> readyToStart;
 			state Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure(new ShardsAffectedByTeamFailure);
 			state Reference<PhysicalShardCollection> physicalShardCollection(new PhysicalShardCollection);
+			state PromiseStream<int> triggerDataDistribution;
+			state Reference<DDEventBuffer> ddEventBuffer(new DDEventBuffer);
+			state Reference<DataDistributionRuntimeMonitor> dataDistributionRuntimeMonitor(
+			    new DataDistributionRuntimeMonitor);
+			dataDistributionRuntimeMonitor->setGetShardMetrics(getShardMetrics);
+			dataDistributionRuntimeMonitor->setPhysicalShardCollection(physicalShardCollection);
+			dataDistributionRuntimeMonitor->setRelocateBuffer(output);
+			dataDistributionRuntimeMonitor->setDDEventBuffer(ddEventBuffer);
+			dataDistributionRuntimeMonitor->setTriggerDataDistribution(triggerDataDistribution);
 
 			state int shard = 0;
 			for (; shard < initData->shards.size() - 1; shard++) {
@@ -968,10 +993,13 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 					if (!unhealthy && configuration.usableRegions > 1) {
 						unhealthy = iShard.remoteSrc.size() != configuration.storageTeamSize;
 					}
-					output.send(RelocateShard(keys,
-					                          unhealthy ? SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY
-					                                    : SERVER_KNOBS->PRIORITY_RECOVER_MOVE,
-					                          RelocateReason::OTHER));
+					int priority =
+					    unhealthy ? SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY : SERVER_KNOBS->PRIORITY_RECOVER_MOVE;
+					output.send(RelocateShard(keys, priority, RelocateReason::OTHER));
+					if (CLIENT_KNOBS->DD_FRAMEWORK) {
+						ddEventBuffer->append(DDEventBuffer::DDEvent(priority));
+						triggerDataDistribution.send(1);
+					}
 				}
 
 				wait(yield(TaskPriority::DataDistribution));
@@ -985,6 +1013,10 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 					rs.dataMoveId = meta.id;
 					rs.cancelled = true;
 					output.send(rs);
+					if (CLIENT_KNOBS->DD_FRAMEWORK) {
+						ddEventBuffer->append(DDEventBuffer::DDEvent(SERVER_KNOBS->PRIORITY_RECOVER_MOVE));
+						triggerDataDistribution.send(1);
+					}
 					TraceEvent("DDInitScheduledCancelDataMove", self->ddId).detail("DataMove", meta.toString());
 				} else if (it.value()->valid) {
 					TraceEvent(SevDebug, "DDInitFoundDataMove", self->ddId).detail("DataMove", meta.toString());
@@ -1007,6 +1039,10 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 					// When restoring a DataMove, the destination team is determined, and hence
 					shardsAffectedByTeamFailure->moveShard(rs.keys, teams);
 					output.send(rs);
+					if (CLIENT_KNOBS->DD_FRAMEWORK) {
+						ddEventBuffer->append(DDEventBuffer::DDEvent(SERVER_KNOBS->PRIORITY_RECOVER_MOVE));
+						triggerDataDistribution.send(1);
+					}
 					wait(yield(TaskPriority::DataDistribution));
 				}
 			}
@@ -1034,6 +1070,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 				actors.push_back(reportErrorsExcept(
 				    ddTenantCache->monitorTenantMap(), "DDTenantCacheMonitor", self->ddId, &normalDDQueueErrors()));
 			}
+			dataDistributionRuntimeMonitor->setTeamCollections(tcis);
 
 			actors.push_back(pollMoveKeysLock(cx, lock, ddEnabledState));
 			actors.push_back(reportErrorsExcept(dataDistributionTracker(initData,
@@ -1049,7 +1086,9 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			                                                            self->ddId,
 			                                                            &shards,
 			                                                            &trackerCancelled,
-			                                                            physicalShardCollection),
+			                                                            physicalShardCollection,
+			                                                            ddEventBuffer,
+			                                                            triggerDataDistribution),
 			                                    "DDTracker",
 			                                    self->ddId,
 			                                    &normalDDQueueErrors()));
@@ -1070,7 +1109,9 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			                                                          storageTeamSize,
 			                                                          configuration.storageTeamSize,
 			                                                          ddEnabledState,
-			                                                          physicalShardCollection),
+			                                                          physicalShardCollection,
+			                                                          ddEventBuffer,
+			                                                          triggerDataDistribution),
 			                                    "DDQueue",
 			                                    self->ddId,
 			                                    &normalDDQueueErrors()));
@@ -1082,6 +1123,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			    lock,
 			    output,
 			    shardsAffectedByTeamFailure,
+			    ddEventBuffer,
+			    triggerDataDistribution,
 			    configuration,
 			    primaryDcId,
 			    configuration.usableRegions > 1 ? remoteDcIds : std::vector<Optional<Key>>(),
@@ -1103,6 +1146,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 				                                    lock,
 				                                    output,
 				                                    shardsAffectedByTeamFailure,
+				                                    ddEventBuffer,
+				                                    triggerDataDistribution,
 				                                    configuration,
 				                                    remoteDcIds,
 				                                    Optional<std::vector<Optional<Key>>>(),
@@ -1135,6 +1180,9 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			actors.push_back(yieldPromiseStream(output.getFuture(), input));
 			if (CLIENT_KNOBS->DD_PHYSICAL_SHARD_CORE) {
 				actors.push_back(monitorPhysicalShardStatus(cx, physicalShardCollection));
+			}
+			if (CLIENT_KNOBS->DD_FRAMEWORK) {
+				actors.push_back(dataDistributionCore(dataDistributionRuntimeMonitor));
 			}
 
 			wait(waitForAll(actors));
