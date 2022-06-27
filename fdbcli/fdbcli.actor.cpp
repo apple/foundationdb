@@ -51,7 +51,7 @@
 
 #include "flow/TLSConfig.actor.h"
 #include "flow/ThreadHelper.actor.h"
-#include "flow/SimpleOpt.h"
+#include "SimpleOpt/SimpleOpt.h"
 
 #include "fdbcli/FlowLineNoise.h"
 #include "fdbcli/fdbcli.actor.h"

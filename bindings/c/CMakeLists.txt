@@ -137,7 +137,6 @@ if(NOT WIN32)
     test/apitester/TesterUtil.h
     test/apitester/TesterWorkload.cpp
     test/apitester/TesterWorkload.h
-    ../../flow/SimpleOpt.h
   )
 
   if(OPEN_FOR_IDE)
@@ -193,7 +192,7 @@ if(NOT WIN32)
   else()
     target_link_libraries(fdb_c_api_tester PRIVATE fdb_c fdb_cpp toml11_target Threads::Threads fmt::fmt boost_target)
   endif()
-  target_include_directories(fdb_c_api_tester PRIVATE "${CMAKE_BINARY_DIR}/flow/include")
+  target_include_directories(fdb_c_api_tester PRIVATE "${CMAKE_BINARY_DIR}/flow/include" SimpleOpt)
 
   # do not set RPATH for mako
   set_property(TARGET mako PROPERTY SKIP_BUILD_RPATH TRUE)

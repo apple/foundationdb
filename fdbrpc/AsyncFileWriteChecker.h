@@ -19,7 +19,7 @@
  */
 
 #include "flow/IAsyncFile.h"
-#include "flow/crc32c.h"
+#include "crc32/crc32c.h"
 
 #if VALGRIND
 #include <memcheck.h>

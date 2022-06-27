@@ -24,7 +24,7 @@
 #include "TesterTransactionExecutor.h"
 #include "TesterTestSpec.h"
 #include "TesterUtil.h"
-#include "flow/SimpleOpt.h"
+#include "SimpleOpt/SimpleOpt.h"
 #include "test/fdb_api.hpp"
 
 #include <memory>
