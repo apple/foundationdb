@@ -21,7 +21,7 @@
 #include "fdbclient/AnnotateActor.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/fdbrpc.h"
-#include "fdbclient/WellKnownEndpoints.h"
+#include "fdbrpc/WellKnownEndpoints.h"
 
 struct ProcessInterface {
 	constexpr static FileIdentifier file_identifier = 985636;

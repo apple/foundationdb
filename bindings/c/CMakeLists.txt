@@ -180,7 +180,7 @@ if(NOT WIN32)
   add_dependencies(disconnected_timeout_unit_tests doctest)
   target_include_directories(fdb_c_setup_tests PUBLIC ${DOCTEST_INCLUDE_DIR})
   target_include_directories(fdb_c_unit_tests PUBLIC ${DOCTEST_INCLUDE_DIR})
-  target_include_directories(fdb_c_unit_tests_version_510 PUBLIC ${DOCTEST_INCLUDE_DIR})
+  target_include_directories(fdb_c_unit_tests_version_510 PUBLIC ${DOCTEST_INCLUDE_DIR} ${CMAKE_BINARY_DIR}/flow/include)
   target_include_directories(disconnected_timeout_unit_tests PUBLIC ${DOCTEST_INCLUDE_DIR})
   target_link_libraries(fdb_c_setup_tests PRIVATE fdb_c Threads::Threads)
   target_link_libraries(fdb_c_unit_tests PRIVATE fdb_c Threads::Threads fdbclient rapidjson)
@@ -188,18 +188,19 @@ if(NOT WIN32)
   target_link_libraries(trace_partial_file_suffix_test PRIVATE fdb_c Threads::Threads flow)
   target_link_libraries(disconnected_timeout_unit_tests PRIVATE fdb_c Threads::Threads)
 
-if(USE_SANITIZER)
-  target_link_libraries(fdb_c_api_tester PRIVATE fdb_c fdb_cpp toml11_target Threads::Threads fmt::fmt boost_asan)
-else()
-  target_link_libraries(fdb_c_api_tester PRIVATE fdb_c fdb_cpp toml11_target Threads::Threads fmt::fmt boost_target)
-endif()
+  if(USE_SANITIZER)
+    target_link_libraries(fdb_c_api_tester PRIVATE fdb_c fdb_cpp toml11_target Threads::Threads fmt::fmt boost_asan)
+  else()
+    target_link_libraries(fdb_c_api_tester PRIVATE fdb_c fdb_cpp toml11_target Threads::Threads fmt::fmt boost_target)
+  endif()
+  target_include_directories(fdb_c_api_tester PRIVATE "${CMAKE_BINARY_DIR}/flow/include")
 
   # do not set RPATH for mako
   set_property(TARGET mako PROPERTY SKIP_BUILD_RPATH TRUE)
   if (USE_SANITIZER)
-	target_link_libraries(mako PRIVATE fdb_c fdbclient fmt::fmt Threads::Threads fdb_cpp boost_asan)
+    target_link_libraries(mako PRIVATE fdb_c fdbclient fmt::fmt Threads::Threads fdb_cpp boost_asan rapidjson)
   else()
-	target_link_libraries(mako PRIVATE fdb_c fdbclient fmt::fmt Threads::Threads fdb_cpp boost_target)
+    target_link_libraries(mako PRIVATE fdb_c fdbclient fmt::fmt Threads::Threads fdb_cpp boost_target rapidjson)
   endif()
 
   if(NOT OPEN_FOR_IDE)
@@ -330,7 +331,7 @@ endif()
       COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
             --build-dir ${CMAKE_BINARY_DIR}
             --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadSingleThr.toml
-            --upgrade-path "6.3.23" "7.0.0" "7.1.5" "7.2.0"
+            --upgrade-path "6.3.23" "7.0.0" "7.1.9" "7.2.0"
             --process-number 1
             )
 
@@ -338,7 +339,7 @@ endif()
       COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
             --build-dir ${CMAKE_BINARY_DIR}
             --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadSingleThr.toml
-            --upgrade-path "7.0.0" "7.1.5" "7.2.0"
+            --upgrade-path "7.0.0" "7.1.9" "7.2.0"
             --process-number 1
             )
 
@@ -346,7 +347,7 @@ endif()
         COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
             --build-dir ${CMAKE_BINARY_DIR}
             --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
-            --upgrade-path "6.3.23" "7.0.0" "7.1.5" "7.2.0" "7.1.5"
+            --upgrade-path "6.3.23" "7.0.0" "7.1.9" "7.2.0" "7.1.9"
             --process-number 3
           )
 
@@ -354,7 +355,7 @@ endif()
         COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
             --build-dir ${CMAKE_BINARY_DIR}
             --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
-            --upgrade-path "7.0.0" "7.1.5" "7.2.0" "7.1.5"
+            --upgrade-path "7.0.0" "7.1.9" "7.2.0" "7.1.9"
             --process-number 3
           )
 
@@ -362,7 +363,7 @@ endif()
         COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
             --build-dir ${CMAKE_BINARY_DIR}
             --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
-            --upgrade-path "7.1.5" "7.2.0" "7.1.5"
+            --upgrade-path "7.1.9" "7.2.0" "7.1.9"
             --process-number 3
           )
 
@@ -376,15 +377,25 @@ endif()
               --redundancy double
             )
 
-    add_test(NAME fdb_c_wiggle_and_upgrade
-          COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
-              --build-dir ${CMAKE_BINARY_DIR}
-              --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
-              --upgrade-path "7.0.0" "wiggle" "7.2.0"
-              --disable-log-dump
-              --process-number 3
-              --redundancy double
-            )
+    add_test(NAME fdb_c_wiggle_and_upgrade_latest
+      COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
+          --build-dir ${CMAKE_BINARY_DIR}
+          --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
+          --upgrade-path "7.1.9" "wiggle" "7.2.0"
+          --disable-log-dump
+          --process-number 3
+          --redundancy double
+        )
+
+      add_test(NAME fdb_c_wiggle_and_upgrade_63
+        COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
+            --build-dir ${CMAKE_BINARY_DIR}
+            --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
+            --upgrade-path "6.3.24" "wiggle" "7.0.0"
+            --disable-log-dump
+            --process-number 3
+            --redundancy double
+          )
 
   endif()
 

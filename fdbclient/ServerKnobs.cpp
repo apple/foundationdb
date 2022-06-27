@@ -286,6 +286,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( DD_TEAM_ZERO_SERVER_LEFT_LOG_DELAY,                    120 ); if( randomize && BUGGIFY ) DD_TEAM_ZERO_SERVER_LEFT_LOG_DELAY = 5;
 	init( DD_STORAGE_WIGGLE_PAUSE_THRESHOLD,                      10 ); if( randomize && BUGGIFY ) DD_STORAGE_WIGGLE_PAUSE_THRESHOLD = 1000;
 	init( DD_STORAGE_WIGGLE_STUCK_THRESHOLD,                      20 );
+	init( DD_TENANT_AWARENESS_ENABLED,                         false );
+	init( TENANT_CACHE_LIST_REFRESH_INTERVAL,                    2.0 );
 
 	// TeamRemover
 	init( TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER,                false ); if( randomize && BUGGIFY ) TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER = deterministicRandom()->random01() < 0.1 ? true : false; // false by default. disable the consistency check when it's true
@@ -305,7 +307,6 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( CLEAR_TIME_ESTIMATE,                                .00005 );
 	init( COMMIT_TIME_ESTIMATE,                                 .005 );
 	init( CHECK_FREE_PAGE_AMOUNT,                                100 ); if( randomize && BUGGIFY ) CHECK_FREE_PAGE_AMOUNT = 5;
-	init( DISK_METRIC_LOGGING_INTERVAL,                          5.0 );
 	init( SOFT_HEAP_LIMIT,                                     300e6 );
 
 	init( SQLITE_PAGE_SCAN_ERROR_LIMIT,                        10000 );
