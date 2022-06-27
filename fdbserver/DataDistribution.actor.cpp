@@ -883,18 +883,21 @@ Future<Void> sendSnapReq(RequestStream<Req> stream, Req req, Error e) {
 
 ACTOR Future<ErrorOr<Void>> trySendSnapReq(RequestStream<WorkerSnapRequest> stream, WorkerSnapRequest req) {
 	state int snapReqRetry = 0;
+	state double snapRetryBackoff = FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY;
 	loop {
 		ErrorOr<REPLY_TYPE(WorkerSnapRequest)> reply = wait(stream.tryGetReply(req));
 		if (reply.isError()) {
 			TraceEvent("SnapDataDistributor_ReqError")
 			    .errorUnsuppressed(reply.getError())
 			    .detail("Peer", stream.getEndpoint().getPrimaryAddress());
-			if (reply.getError().code() != error_code_request_maybe_delivered || snapReqRetry++ > 10)
+			if (reply.getError().code() != error_code_request_maybe_delivered ||
+			    ++snapReqRetry > SERVER_KNOBS->SNAP_NETWORK_FAILURE_RETRY_LIMIT)
 				return ErrorOr<Void>(reply.getError());
 			else {
 				// retry for network failures with same snap UID to avoid snapshot twice
 				req = WorkerSnapRequest(req.snapPayload, req.snapUID, req.role);
-				wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
+				wait(delay(snapRetryBackoff));
+				snapRetryBackoff = snapRetryBackoff * 2;
 			}
 		} else
 			break;
@@ -1420,12 +1423,14 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 			when(DistributorSnapRequest snapReq = waitNext(di.distributorSnapReq.getFuture())) {
 				auto& snapUID = snapReq.snapUID;
 				if (ddSnapReqResultMap.count(snapUID)) {
+					TEST(true); // Data distributor received a duplicate ongoing snap request
 					auto result = ddSnapReqResultMap[snapUID];
 					result.isError() ? snapReq.reply.sendError(result.getError()) : snapReq.reply.send(result.get());
 					TraceEvent("RetryFinishedDistributorSnapRequest")
 					    .detail("SnapUID", snapUID)
 					    .detail("Result", result.isError() ? result.getError().code() : 0);
 				} else if (ddSnapReqMap.count(snapReq.snapUID)) {
+					TEST(true); // Data distributor received a duplicate finished snap request
 					TraceEvent("RetryOngoingDistributorSnapRequest").detail("SnapUID", snapUID);
 					ASSERT(snapReq.snapPayload == ddSnapReqMap[snapUID].snapPayload);
 					ddSnapReqMap[snapUID] = snapReq;
