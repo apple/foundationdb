@@ -5434,7 +5434,7 @@ public:
 			try {
 				// We must get a commit version so add a conflict range that won't likely cause conflicts
 				// but will ensure that the transaction is actually submitted.
-				tr.addWriteConflictRange(backupConfig.snapshotRangeDispatchMap().space.range());
+				tr.addWriteConflictRange(backupConfig.snapshotRangeDispatchMap().subspace);
 				wait(lockDatabase(&tr, randomUid));
 				wait(tr.commit());
 				commitVersion = tr.getCommittedVersion();
