@@ -1,5 +1,5 @@
 /*
- * TenantManagement.actor.cpp
+ * TenantManagementWorkload.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -21,7 +21,7 @@
 #include <cstdint>
 #include <limits>
 #include "fdbclient/FDBOptions.g.h"
-#include "fdbclient/GenericManagementAPI.actor.h"
+#include "fdbclient/TenantManagement.actor.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/Knobs.h"
@@ -163,7 +163,7 @@ struct TenantManagementWorkload : TestWorkload {
 					wait(tr->commit());
 				} else if (operationType == OperationType::MANAGEMENT_DATABASE) {
 					ASSERT(tenantsToCreate.size() == 1);
-					wait(success(ManagementAPI::createTenant(cx.getReference(), *tenantsToCreate.begin())));
+					wait(success(TenantAPI::createTenant(cx.getReference(), *tenantsToCreate.begin())));
 				} else {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
@@ -172,8 +172,7 @@ struct TenantManagementWorkload : TestWorkload {
 
 					std::vector<Future<Void>> createFutures;
 					for (auto tenant : tenantsToCreate) {
-						createFutures.push_back(
-						    success(ManagementAPI::createTenantTransaction(tr, tenant, ++previousId)));
+						createFutures.push_back(success(TenantAPI::createTenantTransaction(tr, tenant, ++previousId)));
 					}
 					tr->set(tenantLastIdKey, TenantMapEntry::idToPrefix(previousId));
 					wait(waitForAll(createFutures));
@@ -192,8 +191,7 @@ struct TenantManagementWorkload : TestWorkload {
 						continue;
 					}
 
-					state Optional<TenantMapEntry> entry =
-					    wait(ManagementAPI::tryGetTenant(cx.getReference(), *tenantItr));
+					state Optional<TenantMapEntry> entry = wait(TenantAPI::tryGetTenant(cx.getReference(), *tenantItr));
 					ASSERT(entry.present());
 					ASSERT(entry.get().id > self->maxId);
 					ASSERT(entry.get().prefix.startsWith(self->tenantSubspace));
@@ -340,13 +338,13 @@ struct TenantManagementWorkload : TestWorkload {
 				} else if (operationType == OperationType::MANAGEMENT_DATABASE) {
 					ASSERT(tenants.size() == 1);
 					for (tenantIndex = 0; tenantIndex != tenants.size(); ++tenantIndex) {
-						wait(ManagementAPI::deleteTenant(cx.getReference(), tenants[tenantIndex]));
+						wait(TenantAPI::deleteTenant(cx.getReference(), tenants[tenantIndex]));
 					}
 				} else {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					std::vector<Future<Void>> deleteFutures;
 					for (tenantIndex = 0; tenantIndex != tenants.size(); ++tenantIndex) {
-						deleteFutures.push_back(ManagementAPI::deleteTenantTransaction(tr, tenants[tenantIndex]));
+						deleteFutures.push_back(TenantAPI::deleteTenantTransaction(tr, tenants[tenantIndex]));
 					}
 
 					wait(waitForAll(deleteFutures));
@@ -452,11 +450,11 @@ struct TenantManagementWorkload : TestWorkload {
 					}
 					entry = TenantManagementWorkload::jsonToTenantMapEntry(value.get());
 				} else if (operationType == OperationType::MANAGEMENT_DATABASE) {
-					TenantMapEntry _entry = wait(ManagementAPI::getTenant(cx.getReference(), tenant));
+					TenantMapEntry _entry = wait(TenantAPI::getTenant(cx.getReference(), tenant));
 					entry = _entry;
 				} else {
 					tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-					TenantMapEntry _entry = wait(ManagementAPI::getTenantTransaction(tr, tenant));
+					TenantMapEntry _entry = wait(TenantAPI::getTenantTransaction(tr, tenant));
 					entry = _entry;
 				}
 				ASSERT(alreadyExists);
@@ -510,12 +508,12 @@ struct TenantManagementWorkload : TestWorkload {
 					}
 				} else if (operationType == OperationType::MANAGEMENT_DATABASE) {
 					std::map<TenantName, TenantMapEntry> _tenants =
-					    wait(ManagementAPI::listTenants(cx.getReference(), beginTenant, endTenant, limit));
+					    wait(TenantAPI::listTenants(cx.getReference(), beginTenant, endTenant, limit));
 					tenants = _tenants;
 				} else {
 					tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 					std::map<TenantName, TenantMapEntry> _tenants =
-					    wait(ManagementAPI::listTenantsTransaction(tr, beginTenant, endTenant, limit));
+					    wait(TenantAPI::listTenantsTransaction(tr, beginTenant, endTenant, limit));
 					tenants = _tenants;
 				}
 
@@ -601,7 +599,7 @@ struct TenantManagementWorkload : TestWorkload {
 
 		loop {
 			std::map<TenantName, TenantMapEntry> tenants =
-			    wait(ManagementAPI::listTenants(cx.getReference(), beginTenant, endTenant, 1000));
+			    wait(TenantAPI::listTenants(cx.getReference(), beginTenant, endTenant, 1000));
 
 			TenantNameRef lastTenant;
 			for (auto tenant : tenants) {

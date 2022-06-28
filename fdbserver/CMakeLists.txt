@@ -307,7 +307,7 @@ set(FDBSERVER_SRCS
   workloads/TagThrottleApi.actor.cpp
   workloads/TargetedKill.actor.cpp
   workloads/TaskBucketCorrectness.actor.cpp
-  workloads/TenantManagement.actor.cpp
+  workloads/TenantManagementWorkload.actor.cpp
   workloads/ThreadSafety.actor.cpp
   workloads/Throttling.actor.cpp
   workloads/Throughput.actor.cpp
@@ -346,7 +346,7 @@ add_library(fdb_sqlite STATIC
   sqlite/sqlite3.amalgamation.c)
 target_include_directories(fdb_sqlite PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/sqlite)
 
-if (WITH_ROCKSDB_EXPERIMENTAL)
+if(WITH_ROCKSDB_EXPERIMENTAL)
   add_definitions(-DSSD_ROCKSDB_EXPERIMENTAL)
 
   include(CompileRocksDB)
@@ -354,7 +354,7 @@ if (WITH_ROCKSDB_EXPERIMENTAL)
   # statically, so find the static library here.
   find_library(lz4_STATIC_LIBRARIES
     NAMES liblz4.a REQUIRED)
-  if (WITH_LIBURING)
+  if(WITH_LIBURING)
     find_package(uring)
   endif()
 endif()
@@ -374,7 +374,7 @@ target_include_directories(fdbserver PRIVATE
   ${CMAKE_BINARY_DIR}/bindings/c
   ${CMAKE_CURRENT_BINARY_DIR}/workloads
   ${CMAKE_CURRENT_SOURCE_DIR}/workloads)
-if (WITH_ROCKSDB_EXPERIMENTAL)
+if(WITH_ROCKSDB_EXPERIMENTAL)
   add_dependencies(fdbserver rocksdb)
   if(WITH_LIBURING)
     target_include_directories(fdbserver PRIVATE ${ROCKSDB_INCLUDE_DIR} ${uring_INCLUDE_DIR})
@@ -392,7 +392,7 @@ endif()
 target_link_libraries(fdbserver PRIVATE toml11_target jemalloc rapidjson)
 # target_compile_definitions(fdbserver PRIVATE -DENABLE_SAMPLING)
 
-if (GPERFTOOLS_FOUND)
+if(GPERFTOOLS_FOUND)
   target_link_libraries(fdbserver PRIVATE gperftools)
 endif()
 
