@@ -53,9 +53,16 @@ function(fdb_find_sources out)
     LIST_DIRECTORIES false
     RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}/include"
     CONFIGURE_DEPENDS "include/*.cpp" "include/*.c" "include/*.h" "include/*.hpp")
+  file(GLOB_RECURSE res_workloads
+    LIST_DIRECTORIES false
+    RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}/workloads"
+    CONFIGURE_DEPENDS "workloads/*.cpp" "workloads/*.c" "workloads/*.h" "workloads/*.hpp")
 
   foreach(f IN LISTS res_includes)
     list(APPEND res "include/${f}")
+  endforeach()
+  foreach(f IN LISTS res_workloads)
+    list(APPEND res "workloads/${f}")
   endforeach()
   set(${out} "${res}" PARENT_SCOPE)
 endfunction()
