@@ -25,7 +25,6 @@
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
-#include "fdbserver/QuietDatabase.h"
 #include "flow/Arena.h"
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
@@ -34,7 +33,6 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct CycleWorkload : TestWorkload {
-	Version maxCommittedVersion = 0;
 	int actorCount, nodeCount;
 	double testDuration, transactionsPerSecond, minExpectedTransactionsPerSecond, traceParentProbability;
 	Key keyPrefix;
@@ -137,7 +135,6 @@ struct CycleWorkload : TestWorkload {
 						// TraceEvent("CyclicTest").detail("Key", self->key(r3).toString()).detail("Value", self->value(r2).toString());
 
 						wait(tr.commit());
-						self->maxCommittedVersion = std::max(self->maxCommittedVersion, tr.getCommittedVersion());
 						// TraceEvent("CycleCommit");
 						break;
 					} catch (Error& e) {
@@ -248,7 +245,6 @@ struct CycleWorkload : TestWorkload {
 			    .detail("TransactionGoal", self->transactionsPerSecond * self->testDuration);
 			ok = false;
 		}
-		TraceEvent(SevDebug, "CycleClient").detail("MaxCommittedVersion", self->maxCommittedVersion);
 		if (!self->clientId) {
 			// One client checks the validity of the cycle
 			state Transaction tr(cx);
@@ -264,6 +260,11 @@ struct CycleWorkload : TestWorkload {
 				} catch (Error& e) {
 					retryCount++;
 					TraceEvent(retryCount > 20 ? SevWarnAlways : SevWarn, "CycleCheckError").error(e);
+//					if (g_network->isSimulated() && retryCount > 50) {
+//						TEST(true); // Cycle check enable speedUpSimulation because too many transaction_too_old()
+//						// try to make the read window back to normal size (5 * version_per_sec)
+//						g_simulator.speedUpSimulation = true;
+//					}
 					wait(tr.onError(e));
 				}
 			}
