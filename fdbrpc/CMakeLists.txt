@@ -63,7 +63,8 @@ target_include_directories(fdbrpc_sampling PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/i
 target_link_libraries(fdbrpc_sampling PUBLIC flow_sampling PRIVATE rapidjson)
 
 if(${COROUTINE_IMPL} STREQUAL libcoro)
-  target_link_libraries(${ft} PUBLIC coro)
+  target_link_libraries(fdbrpc PUBLIC coro)
+  target_link_libraries(fdbrpc_sampling PUBLIC coro)
 endif()
 
 if(COMPILE_EIO)

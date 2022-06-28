@@ -25,6 +25,16 @@
 #define _CRT_SECURE_NO_WARNINGS
 #endif
 
+#if (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
+#define __unixish__ 1
+#endif
+
+#ifdef __unixish__
+#if !defined(__aarch64__) && !defined(__powerpc64__)
+#include <cpuid.h>
+#endif
+#endif
+
 #include "crc32/crc32c.h"
 
 #if !defined(__aarch64__) && !defined(__powerpc64__)
