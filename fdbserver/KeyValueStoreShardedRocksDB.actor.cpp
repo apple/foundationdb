@@ -1434,6 +1434,7 @@ ACTOR Future<Void> rocksDBAggregatedMetricsLogger(std::shared_ptr<RocksDBMetrics
 }
 
 struct ShardedRocksDBKeyValueStore : IKeyValueStore {
+	
 	using CF = rocksdb::ColumnFamilyHandle*;
 
 	struct Writer : IThreadPoolReceiver {

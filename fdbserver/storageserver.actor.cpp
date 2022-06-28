@@ -8074,6 +8074,22 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 			}
 		}
 
+		if (!data->pendingRemoveRanges.empty()) {
+			const Version aVer = data->pendingRemoveRanges.begin()->first;
+			if (aVer <= desiredVersion) {
+				TraceEvent(SevDebug, "AddRangeVersionSatisfied", data->thisServerID)
+				    .detail("DesiredVersion", desiredVersion)
+				    .detail("DurableVersion", data->durableVersion.get())
+				    .detail("AddRangeVersion", aVer);
+				auto it = data->getMutationLog().find(aVer);
+				ASSERT(it != data->getMutationLog().end());
+				if (it == data->getMutationLog().begin()) {
+					desiredVersion = data->storageVersion();
+				} else {
+					desiredVersion = (--it)->first;
+				}
+			}
+		}
 		if (!data->pendingAddRanges.empty()) {
 			auto u = data->getMutationLog().upper_bound(newOldestVersion);
 			ASSERT(u != data->getMutationLog().end());
@@ -8089,6 +8105,9 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 					fAddRanges.push_back(data->storage.addRange(shard.range, shard.shardId));
 				}
 				wait(waitForAll(fAddRanges));
+				for (const auto& shard : data->pendingAddRanges.begin()->second) {
+					data->storage.persistRangeMapping(shard.range, true);
+				}
 				data->pendingAddRanges.erase(data->pendingAddRanges.begin());
 			}
 		}
