@@ -20,9 +20,11 @@
 
 #pragma once
 
-#include "fdbclient/FDBTypes.h"
-#include "fdbrpc/FlowTransport.h"
+#include "flow/network.h"
 #include "flow/IRandom.h"
+#include "flow/Arena.h"
+#include "fdbrpc/FlowTransport.h"
+#include "fdbclient/FDBTypes.h"
 #include <unordered_set>
 #include <atomic>
 
@@ -226,7 +228,9 @@ public:
 	}
 
 	Span& addAttribute(const StringRef& key, const StringRef& value) {
-		attributes.push_back_deep(arena, KeyValueRef(key, value));
+		if (FLOW_KNOBS->TRACING_SPAN_ATTRIBUTES_ENABLED) {
+			attributes.push_back_deep(arena, KeyValueRef(key, value));
+		}
 		return *this;
 	}
 

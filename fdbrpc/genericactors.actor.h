@@ -28,7 +28,7 @@
 
 #include "flow/genericactors.actor.h"
 #include "fdbrpc/fdbrpc.h"
-#include "fdbclient/WellKnownEndpoints.h"
+#include "fdbrpc/WellKnownEndpoints.h"
 #include "flow/Hostname.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -78,11 +78,8 @@ Future<Void> tryInitializeRequestStream(RequestStream<Req>* stream, Hostname hos
 	if (!address.present()) {
 		return Void();
 	}
-	if (stream == nullptr) {
-		stream = new RequestStream<Req>(Endpoint::wellKnown({ address.get() }, token));
-	} else {
-		*stream = RequestStream<Req>(Endpoint::wellKnown({ address.get() }, token));
-	}
+	ASSERT(stream != nullptr);
+	*stream = RequestStream<Req>(Endpoint::wellKnown({ address.get() }, token));
 	return Void();
 }
 

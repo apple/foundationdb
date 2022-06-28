@@ -32,6 +32,8 @@
 #include "flow/IRandom.h"
 #include "flow/network.h"
 
+#include <limits>
+
 struct EncryptKeyProxyInterface {
 	constexpr static FileIdentifier file_identifier = 1303419;
 	struct LocalityData locality;
@@ -101,14 +103,21 @@ struct EKPBaseCipherDetails {
 	int64_t encryptDomainId;
 	uint64_t baseCipherId;
 	StringRef baseCipherKey;
+	int64_t refreshAt;
+	int64_t expireAt;
 
-	EKPBaseCipherDetails() : encryptDomainId(0), baseCipherId(0), baseCipherKey(StringRef()) {}
+	EKPBaseCipherDetails()
+	  : encryptDomainId(0), baseCipherId(0), baseCipherKey(StringRef()), refreshAt(0), expireAt(-1) {}
 	explicit EKPBaseCipherDetails(int64_t dId, uint64_t id, StringRef key, Arena& arena)
-	  : encryptDomainId(dId), baseCipherId(id), baseCipherKey(StringRef(arena, key)) {}
+	  : encryptDomainId(dId), baseCipherId(id), baseCipherKey(StringRef(arena, key)),
+	    refreshAt(std::numeric_limits<int64_t>::max()), expireAt(std::numeric_limits<int64_t>::max()) {}
+	explicit EKPBaseCipherDetails(int64_t dId, uint64_t id, StringRef key, Arena& arena, int64_t refAt, int64_t expAt)
+	  : encryptDomainId(dId), baseCipherId(id), baseCipherKey(StringRef(arena, key)), refreshAt(refAt),
+	    expireAt(expAt) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, encryptDomainId, baseCipherId, baseCipherKey);
+		serializer(ar, encryptDomainId, baseCipherId, baseCipherKey, refreshAt, expireAt);
 	}
 };
 

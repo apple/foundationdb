@@ -180,3 +180,22 @@ TEST_CASE("/flow/genericactors/AsyncListener") {
 	ASSERT(!subscriber2.isReady());
 	return Void();
 }
+
+#if false
+TEST_CASE("/flow/genericactors/generic/storeTuple") {
+	state std::vector<UID> resA;
+	state int resB;
+	state double resC;
+
+	state Promise<std::tuple<std::vector<UID>, int, double>> promise;
+
+	auto future = storeTuple(promise.getFuture(), resA, resB, resC);
+
+	promise.send(std::make_tuple(std::vector<UID>(10), 15, 2.0));
+	wait(ready(future));
+	ASSERT(resA.size() == 10);
+	ASSERT(resB == 15);
+	ASSERT(resC == 2.0);
+	return Void();
+}
+#endif
