@@ -1921,6 +1921,39 @@ Future<T> forward(Future<T> from, Promise<T> to) {
 	}
 }
 
+ACTOR template <class Transaction>
+Future<Void> buggifiedCommit(Transaction tr, bool buggify, int delayDuration = 60.0) {
+	state int buggifyPoint = 0;
+	if (buggify) {
+		buggifyPoint = deterministicRandom()->randomInt(1, 5);
+	}
+
+	// Simulate an unknown result that didn't commit
+	if (buggifyPoint == 1) {
+		throw commit_unknown_result();
+	}
+
+	// Simulate a long delay before commit that could trigger a timeout
+	if (buggifyPoint == 2) {
+		wait(delay(delayDuration));
+	}
+
+	wait(safeThreadFutureToFuture(tr->commit()));
+
+	// Simulate a long delay that could trigger a timeout where the transaction
+	// successfully committed
+	if (buggifyPoint == 3) {
+		wait(delay(delayDuration));
+	}
+
+	// Simulate an unknown result that did commit
+	if (buggifyPoint == 4) {
+		throw commit_unknown_result();
+	}
+
+	return Void();
+}
+
 // Monad
 
 ACTOR template <class Fun, class T>

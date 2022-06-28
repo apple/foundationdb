@@ -160,15 +160,7 @@ Future<TenantMapEntry> createTenant(Reference<DB> db, TenantName name) {
 			tr->set(tenantLastIdKey, TenantMapEntry::idToPrefix(tenantId));
 			state std::pair<TenantMapEntry, bool> newTenant = wait(createTenantTransaction(tr, name, tenantId));
 
-			if (BUGGIFY) {
-				throw commit_unknown_result();
-			}
-
-			wait(safeThreadFutureToFuture(tr->commit()));
-
-			if (BUGGIFY) {
-				throw commit_unknown_result();
-			}
+			wait(buggifiedCommit(tr, BUGGIFY_WITH_PROB(0.1)));
 
 			TraceEvent("CreatedTenant")
 			    .detail("Tenant", name)
@@ -226,16 +218,7 @@ Future<Void> deleteTenant(Reference<DB> db, TenantName name) {
 			}
 
 			wait(deleteTenantTransaction(tr, name));
-
-			if (BUGGIFY) {
-				throw commit_unknown_result();
-			}
-
-			wait(safeThreadFutureToFuture(tr->commit()));
-
-			if (BUGGIFY) {
-				throw commit_unknown_result();
-			}
+			wait(buggifiedCommit(tr, BUGGIFY_WITH_PROB(0.1)));
 
 			TraceEvent("DeletedTenant").detail("Tenant", name).detail("Version", tr->getCommittedVersion());
 			return Void();
