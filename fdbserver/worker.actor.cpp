@@ -1435,7 +1435,7 @@ ACTOR Future<Void> workerSnapCreate(
 		if (err != 0) {
 			throw operation_failed();
 		}
-		if (snapReq.role.toString().find("storage") != std::string::npos) {
+		if (snapReq.role.toString() == "storage") {
 			printStorageVersionInfo();
 		}
 		snapReqMap->at(snapReqKey).reply.send(Void());
@@ -2514,6 +2514,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 			when(state WorkerSnapRequest snapReq = waitNext(interf.workerSnapReq.getFuture())) {
 				std::string snapUID = snapReq.snapUID.toString() + snapReq.role.toString();
 				if (snapReqResultMap.count(snapUID)) {
+					TEST(true); // Worker received a duplicate finished snap request
 					auto result = snapReqResultMap[snapUID];
 					result.isError() ? snapReq.reply.sendError(result.getError()) : snapReq.reply.send(result.get());
 					TraceEvent("RetryFinishedWorkerSnapRequest")
@@ -2521,6 +2522,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					    .detail("Role", snapReq.role)
 					    .detail("Result", result.isError() ? result.getError().code() : 0);
 				} else if (snapReqMap.count(snapUID)) {
+					TEST(true); // Worker received a duplicate ongoing snap request
 					TraceEvent("RetryOngoingWorkerSnapRequest").detail("SnapUID", snapUID).detail("Role", snapReq.role);
 					ASSERT(snapReq.role == snapReqMap[snapUID].role);
 					ASSERT(snapReq.snapPayload == snapReqMap[snapUID].snapPayload);
