@@ -419,7 +419,7 @@ public:
 	int listenersPerProcess;
 	std::set<NetworkAddress> protectedAddresses;
 	std::map<NetworkAddress, ProcessInfo*> currentlyRebootingProcesses;
-	class ClusterConnectionString* extraDB;
+	class ClusterConnectionString* extraDB = nullptr;
 	Reference<IReplicationPolicy> storagePolicy;
 	Reference<IReplicationPolicy> tLogPolicy;
 	int32_t tLogWriteAntiQuorum;

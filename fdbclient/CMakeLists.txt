@@ -64,6 +64,7 @@ set(FDBCLIENT_SRCS
   FluentDSampleIngestor.cpp
   FileBackupAgent.actor.cpp
   GenericManagementAPI.actor.h
+  GenericTransactionHelper.h
   GlobalConfig.h
   GlobalConfig.actor.h
   GlobalConfig.actor.cpp
@@ -153,6 +154,8 @@ set(FDBCLIENT_SRCS
   TaskBucket.h
   Tenant.cpp
   Tenant.h
+  TenantManagement.actor.h
+  TenantSpecialKeys.actor.cpp
   TestKnobCollection.cpp
   TestKnobCollection.h
   ThreadSafeTransaction.cpp
