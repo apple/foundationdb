@@ -867,10 +867,18 @@ private:
 		return result;
 	}
 
-	template <class, class>
-	friend class MakeSerializeSource;
+	friend struct PacketWriterAlloc;
 
 	void init(PacketBuffer* buf, ReliablePacket* reliable);
+};
+
+struct PacketWriterAlloc : ObjectWriterAlloc {
+	explicit PacketWriterAlloc(PacketWriter& w) : w(w) {}
+
+	uint8_t* operator()(size_t size) override { return w.writeBytes(size); }
+
+private:
+	PacketWriter& w;
 };
 
 struct ISerializeSource {
@@ -883,7 +891,8 @@ class MakeSerializeSource : public ISerializeSource {
 public:
 	using value_type = V;
 	void serializePacketWriter(PacketWriter& w) const override {
-		ObjectWriter writer([&](size_t size) { return w.writeBytes(size); }, AssumeVersion(w.protocolVersion()));
+		PacketWriterAlloc packetWriterAlloc{ w };
+		ObjectWriter writer(&packetWriterAlloc, AssumeVersion(w.protocolVersion()));
 		writer.serialize(get()); // Writes directly into buffer supplied by |w|
 	}
 	virtual value_type const& get() const = 0;
