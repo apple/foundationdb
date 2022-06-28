@@ -25,7 +25,17 @@
 #define _CRT_SECURE_NO_WARNINGS
 #endif
 
-#include "flow/crc32c.h"
+#if (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
+#define __unixish__ 1
+#endif
+
+#ifdef __unixish__
+#if !defined(__aarch64__) && !defined(__powerpc64__)
+#include <cpuid.h>
+#endif
+#endif
+
+#include "crc32/crc32c.h"
 
 #if !defined(__aarch64__) && !defined(__powerpc64__)
 #include <nmmintrin.h>
@@ -34,8 +44,39 @@
 #include <stdlib.h>
 #include <random>
 #include <algorithm>
-#include "flow/Platform.h"
 #include "crc32c-generated-constants.cpp"
+
+// CRC32C
+#ifdef __aarch64__
+// aarch64
+#include <inttypes.h>
+static inline uint32_t hwCrc32cU8(unsigned int crc, unsigned char v) {
+	uint32_t ret;
+	asm volatile("crc32cb %w[r], %w[c], %w[v]" : [r] "=r"(ret) : [c] "r"(crc), [v] "r"(v));
+	return ret;
+}
+static inline uint32_t hwCrc32cU32(unsigned int crc, unsigned int v) {
+	uint32_t ret;
+	asm volatile("crc32cw %w[r], %w[c], %w[v]" : [r] "=r"(ret) : [c] "r"(crc), [v] "r"(v));
+	return ret;
+}
+#ifdef _M_X64
+static inline uint64_t hwCrc32cU64(uint64_t crc, uint64_t v) {
+	uint64_t ret;
+	asm volatile("crc32cx %w[r], %w[c], %x[v]" : [r] "=r"(ret) : [c] "r"(crc), [v] "r"(v));
+	return ret;
+}
+#endif
+#else
+#ifndef __powerpc64__
+// Intel
+#define hwCrc32cU8(c, v) _mm_crc32_u8(c, v)
+#define hwCrc32cU32(c, v) _mm_crc32_u32(c, v)
+#ifdef _M_X64
+#define hwCrc32cU64(c, v) _mm_crc32_u64(c, v)
+#endif
+#endif
+#endif
 
 [[maybe_unused]] static uint32_t append_trivial(uint32_t crc, const uint8_t* input, size_t length) {
 	for (size_t i = 0; i < length; ++i) {
@@ -278,7 +319,25 @@ uint32_t ppc_hw(uint32_t crc, const uint8_t* input, size_t length) {
 }
 #endif
 
-static bool hw_available = platform::isHwCrcSupported();
+bool isHwCrcSupported() {
+#if defined(_WIN32)
+	int info[4];
+	__cpuid(info, 1);
+	return (info[2] & (1 << 20)) != 0;
+#elif defined(__aarch64__)
+	return true; /* force to use crc instructions */
+#elif defined(__powerpc64__)
+	return false; /* force not to use crc instructions */
+#elif defined(__unixish__)
+	uint32_t eax, ebx, ecx, edx, level = 1, count = 0;
+	__cpuid_count(level, count, eax, ebx, ecx, edx);
+	return ((ecx >> 20) & 1) != 0;
+#else
+#error Port me!
+#endif
+}
+
+static bool hw_available = isHwCrcSupported();
 
 extern "C" uint32_t crc32c_append(uint32_t crc, const uint8_t* input, size_t length) {
 	if (hw_available) {
