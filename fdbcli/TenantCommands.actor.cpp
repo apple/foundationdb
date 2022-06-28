@@ -25,6 +25,7 @@
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/TenantManagement.actor.h"
 #include "fdbclient/Schemas.h"
 
 #include "flow/Arena.h"
@@ -291,7 +292,7 @@ ACTOR Future<bool> renameTenantCommandActor(Reference<IDatabase> db, std::vector
 		printUsage(tokens[0]);
 		return false;
 	}
-	wait(safeThreadFutureToFuture(ManagementAPI::renameTenant(db, tokens[1], tokens[2])));
+	wait(safeThreadFutureToFuture(TenantAPI::renameTenant(db, tokens[1], tokens[2])));
 
 	printf("The tenant `%s' has been renamed to `%s'\n", printable(tokens[1]).c_str(), printable(tokens[2]).c_str());
 	return true;
