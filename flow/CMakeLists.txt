@@ -1,6 +1,8 @@
 find_package(Threads REQUIRED)
 
-file(GLOB_RECURSE FLOW_SRCS LIST_DIRECTORIES true RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}" CONFIGURE_DEPENDS "*.cpp" "*.h")
+fdb_find_sources(FLOW_SRCS)
+
+message(STATUS "Flow sources: ${FLOW_SRCS}")
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
   list(APPEND FLOW_SRCS aarch64/memcmp.S aarch64/memcpy.S)
@@ -15,6 +17,7 @@ add_flow_target(STATIC_LIBRARY NAME flow_sampling SRCS ${FLOW_SRCS})
 
 foreach(ft flow flow_sampling)
   target_include_directories(${ft} PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include")
+
   target_link_libraries(${ft} PRIVATE stacktrace)
   target_link_libraries(${ft} PUBLIC fmt::fmt SimpleOpt crc32)
   if(UNIX AND NOT APPLE)

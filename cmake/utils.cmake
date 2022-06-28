@@ -43,3 +43,13 @@ function(create_build_dirs)
     make_directory("${CMAKE_CURRENT_BINARY_DIR}/${dir}")
   endforeach()
 endfunction()
+
+function(fdb_find_sources out)
+  file(GLOB res LIST_DIRECTORIES false RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}" CONFIGURE_DEPENDS "*.cpp" "*.c" "*.h")
+  file(GLOB_RECURSE res_includes LIST_DIRECTORIES false RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}/include" CONFIGURE_DEPENDS "include/*.cpp" "include/*.c" "include/*.h")
+
+  foreach(f IN LISTS res_includes)
+    list(APPEND res "include/${f}")
+  endforeach()
+  set(${out} "${res}" PARENT_SCOPE)
+endfunction()
