@@ -24,7 +24,7 @@
 #include "fdbserver/workloads/BulkSetup.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/zipf.h"
-#include "flow/crc32c.h"
+#include "crc32/crc32c.h"
 #include "flow/actorcompiler.h"
 
 enum {

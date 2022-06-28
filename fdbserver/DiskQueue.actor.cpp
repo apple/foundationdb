@@ -22,7 +22,7 @@
 #include "flow/IAsyncFile.h"
 #include "fdbserver/Knobs.h"
 #include "fdbrpc/simulator.h"
-#include "flow/crc32c.h"
+#include "crc32/crc32c.h"
 #include "flow/genericactors.actor.h"
 #include "flow/xxhash.h"
 
