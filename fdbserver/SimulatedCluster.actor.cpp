@@ -41,7 +41,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/versions.h"
-#include "fdbclient/WellKnownEndpoints.h"
+#include "fdbrpc/WellKnownEndpoints.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/network.h"
 #include "flow/TypeTraits.h"
@@ -53,13 +53,6 @@
 
 extern "C" int g_expect_full_pointermap;
 extern const char* getSourceVersion();
-
-ISimulator::ISimulator()
-  : desiredCoordinators(1), physicalDatacenters(1), processesPerMachine(0), listenersPerProcess(1), usableRegions(1),
-    allowLogSetKills(true), tssMode(TSSMode::Disabled), isStopped(false), lastConnectionFailure(0),
-    connectionFailuresDisableDuration(0), speedUpSimulation(false), backupAgents(BackupAgentType::WaitForType),
-    drAgents(BackupAgentType::WaitForType), allSwapsDisabled(false) {}
-ISimulator::~ISimulator() = default;
 
 using namespace std::literals;
 
@@ -482,7 +475,8 @@ ACTOR Future<Void> runDr(Reference<IClusterConnectionRecord> connRecord) {
 		ASSERT(g_simulator.extraDatabases.size() == 1);
 		Database cx = Database::createDatabase(connRecord, -1);
 
-		auto extraFile = makeReference<ClusterConnectionMemoryRecord>(g_simulator.extraDatabases[0]);
+		auto extraFile =
+		    makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(g_simulator.extraDatabases[0]));
 		state Database drDatabase = Database::createDatabase(extraFile, -1);
 
 		TraceEvent("StartingDrAgents")
@@ -1104,7 +1098,7 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 		ClusterConnectionString conn(ini.GetValue("META", "connectionString"));
 		if (testConfig.extraDatabaseMode == ISimulator::ExtraDatabaseMode::Local) {
 			g_simulator.extraDatabases.clear();
-			g_simulator.extraDatabases.push_back(conn);
+			g_simulator.extraDatabases.push_back(conn.toString());
 		}
 		if (!testConfig.disableHostname) {
 			auto mockDNSStr = ini.GetValue("META", "mockDNS");
@@ -2124,9 +2118,9 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	bool useLocalDatabase = (testConfig.extraDatabaseMode == ISimulator::ExtraDatabaseMode::LocalOrSingle && BUGGIFY) ||
 	                        testConfig.extraDatabaseMode == ISimulator::ExtraDatabaseMode::Local;
 	if (useLocalDatabase) {
-		g_simulator.extraDatabases.push_back(useHostname
-		                                         ? ClusterConnectionString(coordinatorHostnames, "TestCluster:0"_sr)
-		                                         : ClusterConnectionString(coordinatorAddresses, "TestCluster:0"_sr));
+		g_simulator.extraDatabases.push_back(
+		    useHostname ? ClusterConnectionString(coordinatorHostnames, "TestCluster:0"_sr).toString()
+		                : ClusterConnectionString(coordinatorAddresses, "TestCluster:0"_sr).toString());
 	} else if (testConfig.extraDatabaseMode != ISimulator::ExtraDatabaseMode::Disabled) {
 		int extraDatabaseCount =
 		    testConfig.extraDatabaseMode == ISimulator::ExtraDatabaseMode::Multiple && testConfig.extraDatabaseCount > 0
@@ -2136,7 +2130,9 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 			g_simulator.extraDatabases.push_back(
 			    useHostname
 			        ? ClusterConnectionString(extraCoordinatorHostnames, StringRef(format("ExtraCluster%04d:0", i)))
-			        : ClusterConnectionString(extraCoordinatorAddresses, StringRef(format("ExtraCluster%04d:0", i))));
+			              .toString()
+			        : ClusterConnectionString(extraCoordinatorAddresses, StringRef(format("ExtraCluster%04d:0", i)))
+			              .toString());
 		}
 	}
 
@@ -2267,7 +2263,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 
 					LocalityData localities(Optional<Standalone<StringRef>>(), newZoneId, newMachineId, dcUID);
 					localities.set("data_hall"_sr, dcUID);
-					systemActors->push_back(reportErrors(simulatedMachine(extraDatabase,
+					systemActors->push_back(reportErrors(simulatedMachine(ClusterConnectionString(extraDatabase),
 					                                                      extraIps,
 					                                                      sslEnabled,
 					                                                      localities,

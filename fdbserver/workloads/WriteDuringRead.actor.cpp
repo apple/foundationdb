@@ -21,6 +21,7 @@
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/TenantManagement.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "flow/ActorCollection.h"
@@ -90,7 +91,8 @@ struct WriteDuringReadWorkload : TestWorkload {
 		useExtraDB = !g_simulator.extraDatabases.empty();
 		if (useExtraDB) {
 			ASSERT(g_simulator.extraDatabases.size() == 1);
-			auto extraFile = makeReference<ClusterConnectionMemoryRecord>(g_simulator.extraDatabases[0]);
+			auto extraFile =
+			    makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(g_simulator.extraDatabases[0]));
 			extraDB = Database::createDatabase(extraFile, -1);
 			useSystemKeys = false;
 		}

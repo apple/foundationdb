@@ -84,7 +84,7 @@ struct ChangeConfigWorkload : TestWorkload {
 		std::vector<Future<Void>> futures;
 		if (g_network->isSimulated()) {
 			for (auto extraDatabase : g_simulator.extraDatabases) {
-				auto extraFile = makeReference<ClusterConnectionMemoryRecord>(extraDatabase);
+				auto extraFile = makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(extraDatabase));
 				Database db = Database::createDatabase(extraFile, -1);
 				futures.push_back(configureExtraDatabase(self, db));
 			}

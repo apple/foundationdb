@@ -37,7 +37,8 @@ struct BackupToDBAbort : TestWorkload {
 		backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
 
 		ASSERT(g_simulator.extraDatabases.size() == 1);
-		auto extraFile = makeReference<ClusterConnectionMemoryRecord>(g_simulator.extraDatabases[0]);
+		auto extraFile =
+		    makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(g_simulator.extraDatabases[0]));
 		extraDB = Database::createDatabase(extraFile, -1);
 
 		lockid = UID(0xbeeffeed, 0xdecaf00d);

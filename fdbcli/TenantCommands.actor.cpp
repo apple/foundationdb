@@ -301,7 +301,6 @@ ACTOR Future<bool> getTenantCommandActor(Reference<IDatabase> db, std::vector<St
 				printf("%s\n",
 				       json_spirit::write_string(json_spirit::mValue(resultObj), json_spirit::pretty_print).c_str());
 			} else {
-
 				JSONDoc doc(jsonObject);
 
 				int64_t id;

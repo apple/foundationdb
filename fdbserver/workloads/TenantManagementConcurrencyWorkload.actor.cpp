@@ -93,7 +93,8 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 
 		if (self->useMetacluster) {
 			ASSERT(g_simulator.extraDatabases.size() == 1);
-			auto extraFile = makeReference<ClusterConnectionMemoryRecord>(g_simulator.extraDatabases[0]);
+			state ClusterConnectionString connectionString(g_simulator.extraDatabases[0]);
+			auto extraFile = makeReference<ClusterConnectionMemoryRecord>(connectionString);
 			self->dataDb = Database::createDatabase(extraFile, -1);
 
 			if (self->clientId == 0) {
@@ -101,7 +102,7 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 
 				DataClusterEntry entry;
 				entry.capacity.numTenantGroups = 1e9;
-				wait(MetaclusterAPI::registerCluster(self->mvDb, "cluster1"_sr, g_simulator.extraDatabases[0], entry));
+				wait(MetaclusterAPI::registerCluster(self->mvDb, "cluster1"_sr, connectionString, entry));
 			}
 		} else {
 			self->dataDb = cx;
@@ -259,9 +260,9 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 
 		state std::map<TenantName, TenantMapEntry> dataClusterMap =
 		    wait(TenantAPI::listTenants(self->dataDb.getReference(),
-		                                    self->tenantNamePrefix,
-		                                    self->tenantNamePrefix.withSuffix("\xff"_sr),
-		                                    self->maxTenants + 1));
+		                                self->tenantNamePrefix,
+		                                self->tenantNamePrefix.withSuffix("\xff"_sr),
+		                                self->maxTenants + 1));
 
 		auto metaclusterItr = metaclusterMap.begin();
 		auto dataItr = dataClusterMap.begin();

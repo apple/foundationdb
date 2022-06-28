@@ -287,6 +287,10 @@ void ClientKnobs::initialize(Randomize randomize) {
 	// Blob granules
 	init( BG_MAX_GRANULE_PARALLELISM,                10 );
 
+	init( CHANGE_QUORUM_BAD_STATE_RETRY_TIMES,        3 );
+	init( CHANGE_QUORUM_BAD_STATE_RETRY_DELAY,      2.0 );
+
+	// Tenants and Metacluster
 	init( MAX_TENANTS_PER_CLUSTER,                  1e6 );
 	init( MAX_DATA_CLUSTERS,                        1e5 );
 	init( REMOVE_CLUSTER_TENANT_BATCH_SIZE,         1e4 ); if ( randomize && BUGGIFY ) REMOVE_CLUSTER_TENANT_BATCH_SIZE = 1;

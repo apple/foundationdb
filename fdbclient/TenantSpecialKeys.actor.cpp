@@ -23,9 +23,9 @@
 #include "fdbclient/Knobs.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/SpecialKeySpace.actor.h"
+#include "fdbclient/TenantManagement.actor.h"
 #include "flow/Arena.h"
 #include "flow/UnitTest.h"
-#include "fdbclient/ManagementAPI.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 const KeyRangeRef TenantRangeImpl::submoduleRange = KeyRangeRef("tenant/"_sr, "tenant0"_sr);

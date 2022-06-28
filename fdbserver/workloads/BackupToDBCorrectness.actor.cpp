@@ -129,7 +129,8 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 		}
 
 		ASSERT(g_simulator.extraDatabases.size() == 1);
-		auto extraFile = makeReference<ClusterConnectionMemoryRecord>(g_simulator.extraDatabases[0]);
+		auto extraFile =
+		    makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(g_simulator.extraDatabases[0]));
 		extraDB = Database::createDatabase(extraFile, -1);
 
 		TraceEvent("BARW_Start").detail("Locked", locked);

@@ -24,12 +24,13 @@
 #include <utility>
 #include <vector>
 
-#include "contrib/fmt-8.1.1/include/fmt/format.h"
+#include "fmt/format.h"
 #include "fdbclient/BlobGranuleReader.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/SystemData.h"
+#include "fdbclient/TenantManagement.actor.h"
 #include "fdbserver/BlobGranuleServerCommon.actor.h"
 #include "fdbserver/BlobGranuleValidation.actor.h"
 #include "fdbserver/Knobs.h"
@@ -841,6 +842,29 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		return delay(testDuration);
 	}
 
+	ACTOR Future<Void> checkTenantRanges(BlobGranuleCorrectnessWorkload* self,
+	                                     Database cx,
+
+	                                     Reference<ThreadData> threadData) {
+		// check that reading ranges with tenant name gives valid result of ranges just for tenant, with no tenant
+		// prefix
+		loop {
+			state Transaction tr(cx, threadData->tenantName);
+			try {
+				Standalone<VectorRef<KeyRangeRef>> ranges = wait(tr.getBlobGranuleRanges(normalKeys));
+				ASSERT(ranges.size() >= 1);
+				ASSERT(ranges.front().begin == normalKeys.begin);
+				ASSERT(ranges.back().end == normalKeys.end);
+				for (int i = 0; i < ranges.size() - 1; i++) {
+					ASSERT(ranges[i].end == ranges[i + 1].begin);
+				}
+				return Void();
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+
 	ACTOR Future<bool> checkDirectory(Database cx,
 	                                  BlobGranuleCorrectnessWorkload* self,
 	                                  Reference<ThreadData> threadData) {
@@ -877,6 +901,11 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 				wait(self->waitFirstSnapshot(self, cx, threadData, false));
 			}
 		}
+		// read granule ranges with tenant and validate
+		if (BGW_DEBUG) {
+			fmt::print("Directory {0} checking tenant ranges\n", threadData->directoryID);
+		}
+		wait(self->checkTenantRanges(self, cx, threadData));
 
 		bool initialCheck = result;
 		result &= threadData->mismatches == 0 && (threadData->timeTravelTooOld == 0);

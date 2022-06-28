@@ -52,7 +52,7 @@
 #include "flow/IRandom.h"
 #include "flow/Knobs.h"
 #include "flow/Trace.h"
-#include "flow/Tracing.h"
+#include "fdbclient/Tracing.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -2314,13 +2314,6 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 
 ACTOR Future<Void> processTransactionStateRequestPart(TransactionStateResolveContext* pContext,
                                                       TxnStateRequest request) {
-	state const TxnStateRequest& req = request;
-	state ProxyCommitData& commitData = *pContext->pCommitData;
-	state PromiseStream<Future<Void>>& addActor = *pContext->pActors;
-	state Sequence& maxSequence = pContext->maxSequence;
-	state ReplyPromise<Void> reply = req.reply;
-	state std::unordered_set<Sequence>& txnSequences = pContext->receivedSequences;
-
 	ASSERT(pContext->pCommitData != nullptr);
 	ASSERT(pContext->pActors != nullptr);
 
@@ -2421,7 +2414,8 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	commitData.logSystem = ILogSystem::fromServerDBInfo(proxy.id(), commitData.db->get(), false, addActor);
 	commitData.logAdapter =
 	    new LogSystemDiskQueueAdapter(commitData.logSystem, Reference<AsyncVar<PeekTxsInfo>>(), 1, false);
-	commitData.txnStateStore = keyValueStoreLogSystem(commitData.logAdapter, proxy.id(), 2e9, true, true, true);
+	commitData.txnStateStore = keyValueStoreLogSystem(
+	    commitData.logAdapter, commitData.db, proxy.id(), 2e9, true, true, true, SERVER_KNOBS->ENABLE_TLOG_ENCRYPTION);
 	createWhitelistBinPathVec(whitelistBinPaths, commitData.whitelistedBinPathVec);
 
 	commitData.updateLatencyBandConfig(commitData.db->get().latencyBandConfig);
