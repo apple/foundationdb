@@ -668,7 +668,7 @@ public:
 		TraceEvent("RocksDB").detail("Info", "DBDestroyed");
 	}
 
-	rocksdb::DB* getDb() { return db; }
+	rocksdb::DB* getDb() const { return db; }
 
 	std::unordered_map<std::string, std::shared_ptr<PhysicalShard>>* getAllShards() { return &physicalShards; }
 
@@ -2092,11 +2092,13 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	}
 
 	StorageBytes getStorageBytes() const override {
-		uint64_t total_live = 0;
-		int64_t total_free = 0;
-		int64_t total_space = 0;
+		uint64_t live = 0;
+		ASSERT(shardManager.getDb()->GetAggregatedIntProperty(rocksdb::DB::Properties::kLiveSstFilesSize, &live));
 
-		return StorageBytes(total_free, total_space, total_live, total_free);
+		int64_t free;
+		int64_t total;
+		g_network->getDiskBytes(path, free, total);
+		return StorageBytes(free, total, live, free);
 	}
 
 	std::vector<std::string> removeRange(KeyRangeRef range) override { return shardManager.removeRange(range); }
@@ -2118,7 +2120,6 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	ShardManager shardManager;
 	std::shared_ptr<RocksDBMetrics> rocksDBMetrics;
 	std::string path;
-	const std::string dataPath;
 	UID id;
 	Reference<IThreadPool> writeThread;
 	Reference<IThreadPool> readThreads;
