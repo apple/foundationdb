@@ -14,7 +14,7 @@ if (WITH_ROCKSDB_EXPERIMENTAL)
   # statically, so find the static library here.
   find_library(lz4_STATIC_LIBRARIES
     NAMES liblz4.a REQUIRED)
-  if (WITH_LIBURING)
+  if(WITH_LIBURING)
     find_package(uring)
   endif()
 endif()
@@ -46,7 +46,7 @@ endif()
 target_link_libraries(fdbserver PRIVATE toml11_target jemalloc rapidjson)
 # target_compile_definitions(fdbserver PRIVATE -DENABLE_SAMPLING)
 
-if (GPERFTOOLS_FOUND)
+if(GPERFTOOLS_FOUND)
   target_link_libraries(fdbserver PRIVATE gperftools)
 endif()
 
