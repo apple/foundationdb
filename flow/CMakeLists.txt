@@ -2,8 +2,6 @@ find_package(Threads REQUIRED)
 
 fdb_find_sources(FLOW_SRCS)
 
-message(STATUS "Flow sources: ${FLOW_SRCS}")
-
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
   list(APPEND FLOW_SRCS aarch64/memcmp.S aarch64/memcpy.S)
 endif()

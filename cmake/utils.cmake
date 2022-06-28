@@ -45,8 +45,14 @@ function(create_build_dirs)
 endfunction()
 
 function(fdb_find_sources out)
-  file(GLOB res LIST_DIRECTORIES false RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}" CONFIGURE_DEPENDS "*.cpp" "*.c" "*.h")
-  file(GLOB_RECURSE res_includes LIST_DIRECTORIES false RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}/include" CONFIGURE_DEPENDS "include/*.cpp" "include/*.c" "include/*.h")
+  file(GLOB res
+    LIST_DIRECTORIES false
+    RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}"
+    CONFIGURE_DEPENDS "*.cpp" "*.c" "*.h" "*.hpp")
+  file(GLOB_RECURSE res_includes
+    LIST_DIRECTORIES false
+    RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    CONFIGURE_DEPENDS "include/*.cpp" "include/*.c" "include/*.h" "include/*.hpp")
 
   foreach(f IN LISTS res_includes)
     list(APPEND res "include/${f}")
