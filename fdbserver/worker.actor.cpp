@@ -21,7 +21,6 @@
 #include <cstdlib>
 #include <tuple>
 #include <boost/lexical_cast.hpp>
-#include "boost/algorithm/string.hpp"
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/IAsyncFile.h"
@@ -1418,22 +1417,13 @@ ACTOR Future<Void> traceRole(Role role, UID roleId) {
 
 ACTOR Future<Void> workerSnapCreate(
     WorkerSnapRequest snapReq,
-    std::string snapDataFolder,
-    std::string snapCoordFolder,
+    std::string snapFolder,
     std::map<std::string, WorkerSnapRequest>* snapReqMap /* ongoing snapshot requests */,
     std::map<std::string, ErrorOr<Void>>*
         snapReqResultMap /* finished snapshot requests, expired in SNAP_MINIMUM_TIME_GAP seconds */) {
 	state ExecCmdValueString snapArg(snapReq.snapPayload);
 	state std::string snapReqKey = snapReq.snapUID.toString() + snapReq.role.toString();
 	try {
-		std::vector<std::string> roles;
-		boost::algorithm::split(roles, snapReq.role.toString(), boost::is_any_of(","));
-		ASSERT(roles.size() >= 1 && roles.size() <= 3);
-		std::vector<std::string> folders;
-		for (const auto& role : roles) {
-			folders.push_back(role == "coord" ? snapCoordFolder : snapDataFolder);
-		}
-		state std::string snapFolder = boost::algorithm::join(folders, ",");
 		int err = wait(execHelper(&snapArg, snapReq.snapUID, snapFolder, snapReq.role.toString()));
 		std::string uidStr = snapReq.snapUID.toString();
 		TraceEvent("ExecTraceWorker")
@@ -2538,10 +2528,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				} else {
 					snapReqMap[snapUID] = snapReq; // set map point to the request
 					if (g_network->isSimulated() && (now() - lastSnapTime) < SERVER_KNOBS->SNAP_MINIMUM_TIME_GAP) {
-						// only allow duplicate snapshots on same process in a short time if it's both storge and tlog
-						auto okay = (lastSnapReq.snapUID == snapReq.snapUID) &&
-						            lastSnapReq.role.toString().find("storage") != std::string::npos &&
-						            snapReq.role.toString().find("tlog") != std::string::npos;
+						// only allow duplicate snapshots on same process in a short time for different roles
+						auto okay = (lastSnapReq.snapUID == snapReq.snapUID) && lastSnapReq.role != snapReq.role;
 						TraceEvent(okay ? SevInfo : SevError, "RapidSnapRequestsOnSameProcess")
 						    .detail("CurrSnapUID", snapUID)
 						    .detail("PrevSnapUID", lastSnapReq.snapUID)
@@ -2549,7 +2537,10 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 						    .detail("PrevRole", lastSnapReq.role)
 						    .detail("GapTime", now() - lastSnapTime);
 					}
-					errorForwarders.add(workerSnapCreate(snapReq, folder, coordFolder, &snapReqMap, &snapReqResultMap));
+					errorForwarders.add(workerSnapCreate(snapReq,
+					                                     snapReq.role.toString() == "coord" ? coordFolder : folder,
+					                                     &snapReqMap,
+					                                     &snapReqResultMap));
 					auto* snapReqResultMapPtr = &snapReqResultMap;
 					errorForwarders.add(fmap(
 					    [snapReqResultMapPtr, snapUID](Void _) {

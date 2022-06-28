@@ -934,12 +934,13 @@ ACTOR Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> 
 	state DatabaseConfiguration configuration;
 	loop {
 		try {
-			// get database configuration
+			// necessary options
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			RangeResult res = wait(tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY));
-			ASSERT(res.size() < CLIENT_KNOBS->TOO_MANY);
-			configuration.fromKeyValues((VectorRef<KeyValueRef>)res);
+
+			// get database configuration
+			DatabaseConfiguration _configuration = wait(getDatabaseConfiguration(&tr));
+			configuration = _configuration;
 
 			// get storages
 			RangeResult serverList = wait(tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
@@ -986,6 +987,7 @@ ACTOR Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> 
 					}
 				}
 			}
+			// calculate fault tolerance
 			*storageFaultTolerance = std::min(static_cast<int>(SERVER_KNOBS->MAX_STORAGE_SNAPSHOT_FAULT_TOLERANCE),
 			                                  configuration.storageTeamSize - 1) -
 			                         storageFailures;
@@ -1077,7 +1079,7 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 		    .detail("SnapUID", snapReq.snapUID);
 
 		state int storageFaultTolerance;
-		// snap local storage and tlog nodes
+		// snap stateful nodes
 		state std::map<NetworkAddress, std::pair<WorkerInterface, std::string>> statefulWorkers =
 		    wait(transformErrors(getStatefulWorkers(cx, db, &tlogs, &storageFaultTolerance), snap_storage_failed()));
 
@@ -1085,24 +1087,13 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 		    .detail("SnapPayload", snapReq.snapPayload)
 		    .detail("SnapUID", snapReq.snapUID);
 
-		state std::vector<Future<ErrorOr<Void>>> storageSnapReqs;
-		state std::vector<Future<ErrorOr<Void>>> coordSnapReqs;
+		// we need to snapshot storage nodes before snapshot any tlogs
+		std::vector<Future<ErrorOr<Void>>> storageSnapReqs;
 		for (const auto& [addr, entry] : statefulWorkers) {
 			auto& [interf, role] = entry;
-			if (role.find("storage") == std::string::npos)
-				continue;
-			// "storage,tlog,coord" will be executed below with "tlog,coord"
-			// here we only execute "storage" or "storage,coord"
-			std::string roleExceptTlog = role.find("coord") == std::string::npos
-			                                 ? "storage"
-			                                 : (role.find("tlog") == std::string::npos ? "storage,coord" : "storage");
-			TraceEvent(SevDebug, "SnapStorageWorker").detail("Address", addr).detail("Role", roleExceptTlog);
-			auto f = trySendSnapReq(
-			    interf.workerSnapReq,
-			    WorkerSnapRequest(snapReq.snapPayload, snapReq.snapUID, StringRef(snapReq.arena, roleExceptTlog)));
-			storageSnapReqs.push_back(f);
-			if (role.find("coord") != std::string::npos)
-				coordSnapReqs.push_back(f);
+			if (role.find("storage") != std::string::npos)
+				storageSnapReqs.push_back(trySendSnapReq(
+				    interf.workerSnapReq, WorkerSnapRequest(snapReq.snapPayload, snapReq.snapUID, "storage"_sr)));
 		}
 		wait(waitForMost(storageSnapReqs, storageFaultTolerance, snap_storage_failed()));
 		TraceEvent("SnapDataDistributor_AfterSnapStorage")
@@ -1110,30 +1101,17 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 		    .detail("SnapPayload", snapReq.snapPayload)
 		    .detail("SnapUID", snapReq.snapUID);
 
-		state std::vector<Future<ErrorOr<Void>>> tLogSnapReqs;
+		std::vector<Future<ErrorOr<Void>>> tLogSnapReqs;
 		tLogSnapReqs.reserve(tlogs.size());
 		for (const auto& [addr, entry] : statefulWorkers) {
 			auto& [interf, role] = entry;
-			// "storage" or "storage,coord" will be skipped as it's already executed above
-			// snapshot requests will be sent to a process twice when it's both a tlog and storage
-			if (role.find("storage") != std::string::npos && role.find("tlog") == std::string::npos)
-				continue;
-			// Igore "storage" and find the remaining choices
-			std::string roleExceptStorage = role.find("coord") == std::string::npos
-			                                    ? "tlog"
-			                                    : (role.find("tlog") == std::string::npos ? "coord" : "coord,tlog");
-			TraceEvent(SevDebug, "SnapNonStorageWorker").detail("Address", addr).detail("Role", roleExceptStorage);
-			auto f = trySendSnapReq(
-			    interf.workerSnapReq,
-			    WorkerSnapRequest(snapReq.snapPayload, snapReq.snapUID, StringRef(snapReq.arena, roleExceptStorage)));
-			if (role.find("coord") != std::string::npos)
-				coordSnapReqs.push_back(f);
 			if (role.find("tlog") != std::string::npos)
-				tLogSnapReqs.push_back(f);
+				tLogSnapReqs.push_back(trySendSnapReq(
+				    interf.workerSnapReq, WorkerSnapRequest(snapReq.snapPayload, snapReq.snapUID, "tlog"_sr)));
 		}
 		wait(waitForMost(tLogSnapReqs, 0, snap_tlog_failed()));
 
-		TraceEvent("SnapDataDistributor_AfterSnapTlog")
+		TraceEvent("SnapDataDistributor_AfterTLogStorage")
 		    .detail("SnapPayload", snapReq.snapPayload)
 		    .detail("SnapUID", snapReq.snapUID);
 
@@ -1150,6 +1128,13 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 		    .detail("SnapPayload", snapReq.snapPayload)
 		    .detail("SnapUID", snapReq.snapUID);
 
+		std::vector<Future<ErrorOr<Void>>> coordSnapReqs;
+		for (const auto& [addr, entry] : statefulWorkers) {
+			auto& [interf, role] = entry;
+			if (role.find("coord") != std::string::npos)
+				coordSnapReqs.push_back(trySendSnapReq(
+				    interf.workerSnapReq, WorkerSnapRequest(snapReq.snapPayload, snapReq.snapUID, "coord"_sr)));
+		}
 		auto const coordFaultTolerance = std::min<int>(std::max<int>(0, coordSnapReqs.size() / 2 - 1),
 		                                               SERVER_KNOBS->MAX_COORDINATOR_SNAPSHOT_FAULT_TOLERANCE);
 		wait(waitForMost(coordSnapReqs, coordFaultTolerance, snap_coord_failed()));
