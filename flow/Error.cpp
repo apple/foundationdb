@@ -184,7 +184,7 @@ ErrorCodeTable::ErrorCodeTable() {
 #define ERROR(name, number, description)                                                                               \
 	addCode(number, #name, description);                                                                               \
 	enum { Duplicate_Error_Code_##number = 0 };
-#include "error_definitions.h"
+#include "flow/error_definitions.h"
 }
 
 void ErrorCodeTable::addCode(int code, const char* name, const char* description) {

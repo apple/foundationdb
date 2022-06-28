@@ -16,7 +16,7 @@ set(SRCS
   fdb_flow.actor.cpp
   fdb_flow.h)
 
-add_flow_target(STATIC_LIBRARY NAME fdb_flow SRCS ${SRCS} NO_COPY_HDR)
+add_flow_target(STATIC_LIBRARY NAME fdb_flow SRCS ${SRCS})
 target_link_libraries(fdb_flow PUBLIC fdb_c)
 target_link_libraries(fdb_flow PUBLIC fdbclient)
 target_include_directories(fdb_flow PUBLIC
