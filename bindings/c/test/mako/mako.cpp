@@ -83,9 +83,7 @@ thread_local Logger logr = Logger(MainProcess{}, VERBOSE_DEFAULT);
 
 Transaction createNewTransaction(Database db, Arguments const& args, int id = -1, Tenant* tenants = nullptr) {
 	// No tenants specified
-	// Also check for total_tenants, because cleanup phase does not
-	// require active tenants, but will want a tenant transaction for clears.
-	if (args.active_tenants <= 0 && args.total_tenants <= 0) {
+	if (args.active_tenants <= 0) {
 		return db.createTransaction();
 	}
 	// Create Tenant Transaction
