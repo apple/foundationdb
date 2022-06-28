@@ -450,16 +450,21 @@ bool isCompleteConfiguration(std::map<std::string, std::string> const& options) 
 	       options.count(p + "storage_engine") == 1;
 }
 
+ACTOR Future<DatabaseConfiguration> getDatabaseConfiguration(Transaction* tr) {
+	tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+	RangeResult res = wait(tr->getRange(configKeys, CLIENT_KNOBS->TOO_MANY));
+	ASSERT(res.size() < CLIENT_KNOBS->TOO_MANY);
+	DatabaseConfiguration config;
+	config.fromKeyValues((VectorRef<KeyValueRef>)res);
+	return config;
+}
+
 ACTOR Future<DatabaseConfiguration> getDatabaseConfiguration(Database cx) {
 	state Transaction tr(cx);
 	loop {
 		try {
-			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			RangeResult res = wait(tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY));
-			ASSERT(res.size() < CLIENT_KNOBS->TOO_MANY);
-			DatabaseConfiguration config;
-			config.fromKeyValues((VectorRef<KeyValueRef>)res);
+			DatabaseConfiguration config = wait(getDatabaseConfiguration(&tr));
 			return config;
 		} catch (Error& e) {
 			wait(tr.onError(e));
