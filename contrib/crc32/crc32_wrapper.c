@@ -15,7 +15,7 @@
 #ifdef CRC32_CONSTANTS_HEADER
 #include CRC32_CONSTANTS_HEADER
 #else
-#include "crc32_constants.h"
+#include "crc32/crc32_constants.h"
 #endif
 
 #define VMX_ALIGN 16

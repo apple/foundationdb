@@ -23,7 +23,7 @@
 #pragma once
 
 #include <cinttypes>
-#include "flow/SimpleOpt.h"
+#include "SimpleOpt/SimpleOpt.h"
 #include "flow/TLSConfig.actor.h"
 
 namespace file_converter {

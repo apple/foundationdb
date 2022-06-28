@@ -420,8 +420,6 @@ std::string format_backtrace(void** addresses, int numAddresses);
 // Avoid in production code: not atomic, not fast, not reliable in all environments
 int eraseDirectoryRecursive(std::string const& directory);
 
-bool isHwCrcSupported();
-
 // Creates a temporary file; file gets destroyed/deleted along with object destruction.
 // If 'tmpDir' is empty, code defaults to 'boost::filesystem::temp_directory_path()'
 // If 'pattern' is empty, code defaults to 'fdbtmp'
@@ -838,34 +836,6 @@ inline void fdb_probe_actor_create(const char* name, unsigned long id) {}
 inline void fdb_probe_actor_destroy(const char* name, unsigned long id) {}
 inline void fdb_probe_actor_enter(const char* name, unsigned long id, int index) {}
 inline void fdb_probe_actor_exit(const char* name, unsigned long id, int index) {}
-#endif
-
-// CRC32C
-#ifdef __aarch64__
-// aarch64
-#include <inttypes.h>
-static inline uint32_t hwCrc32cU8(unsigned int crc, unsigned char v) {
-	uint32_t ret;
-	asm volatile("crc32cb %w[r], %w[c], %w[v]" : [r] "=r"(ret) : [c] "r"(crc), [v] "r"(v));
-	return ret;
-}
-static inline uint32_t hwCrc32cU32(unsigned int crc, unsigned int v) {
-	uint32_t ret;
-	asm volatile("crc32cw %w[r], %w[c], %w[v]" : [r] "=r"(ret) : [c] "r"(crc), [v] "r"(v));
-	return ret;
-}
-static inline uint64_t hwCrc32cU64(uint64_t crc, uint64_t v) {
-	uint64_t ret;
-	asm volatile("crc32cx %w[r], %w[c], %x[v]" : [r] "=r"(ret) : [c] "r"(crc), [v] "r"(v));
-	return ret;
-}
-#else
-#ifndef __powerpc64__
-// Intel
-#define hwCrc32cU8(c, v) _mm_crc32_u8(c, v)
-#define hwCrc32cU32(c, v) _mm_crc32_u32(c, v)
-#define hwCrc32cU64(c, v) _mm_crc32_u64(c, v)
-#endif
 #endif
 
 #if defined(__aarch64__)
