@@ -112,7 +112,7 @@ public:
 				}
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				std::vector<std::pair<StorageServerInterface, ProcessClass>> results =
-				    wait(getServerListAndProcessClasses(&tr));
+				    wait(NativeAPI::getServerListAndProcessClasses(&tr));
 				self->lastSSListFetchedTimestamp = now();
 
 				std::map<UID, StorageServerInterface> newServers;
