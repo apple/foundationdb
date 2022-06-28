@@ -140,9 +140,9 @@ private:
 		ctx->continueAfter(f, [this, ctx, f, end, results]() {
 			auto out = copyKeyValueArray(f.get());
 			results->insert(results->end(), out.first.begin(), out.first.end());
-      const bool more = out.second;
+			const bool more = out.second;
 			if (more) {
-        // Fetch the remaining results.
+				// Fetch the remaining results.
 				getRangeLoop(ctx, fdb::key_select::firstGreaterThan(results->back().key), end, results);
 			} else {
 				ctx->done();
