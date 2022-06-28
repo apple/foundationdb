@@ -359,12 +359,14 @@ public:
 };
 
 template <>
-inline Tuple Codec<FileBackupAgent::ERestoreState>::pack(FileBackupAgent::ERestoreState const& val) {
-	return Tuple().append(val);
+inline Standalone<StringRef> TupleCodec<FileBackupAgent::ERestoreState>::pack(
+    FileBackupAgent::ERestoreState const& val) {
+	return Tuple().append(val).pack();
 }
 template <>
-inline FileBackupAgent::ERestoreState Codec<FileBackupAgent::ERestoreState>::unpack(Tuple const& val) {
-	return (FileBackupAgent::ERestoreState)val.getInt(0);
+inline FileBackupAgent::ERestoreState TupleCodec<FileBackupAgent::ERestoreState>::unpack(
+    Standalone<StringRef> const& val) {
+	return (FileBackupAgent::ERestoreState)Tuple::unpack(val).getInt(0);
 }
 
 class DatabaseBackupAgent : public BackupAgentBase {
@@ -575,12 +577,12 @@ ACTOR Future<Void> cleanupBackup(Database cx, DeleteData deleteData);
 
 using EBackupState = BackupAgentBase::EnumState;
 template <>
-inline Tuple Codec<EBackupState>::pack(EBackupState const& val) {
-	return Tuple().append(static_cast<int>(val));
+inline Standalone<StringRef> TupleCodec<EBackupState>::pack(EBackupState const& val) {
+	return Tuple().append(static_cast<int>(val)).pack();
 }
 template <>
-inline EBackupState Codec<EBackupState>::unpack(Tuple const& val) {
-	return static_cast<EBackupState>(val.getInt(0));
+inline EBackupState TupleCodec<EBackupState>::unpack(Standalone<StringRef> const& val) {
+	return static_cast<EBackupState>(Tuple::unpack(val).getInt(0));
 }
 
 // Key backed tags are a single-key slice of the TagUidMap, defined below.
@@ -678,7 +680,7 @@ public:
 				throw restore_error();
 			// Validation contition is that the uidPair key must be exactly {u, false}
 			TaskBucket::setValidationCondition(
-			    task, KeyBackedTag(tag.get(), p).key, Codec<UidAndAbortedFlagT>::pack({ u, false }).pack());
+			    task, KeyBackedTag(tag.get(), p).key, TupleCodec<UidAndAbortedFlagT>::pack({ u, false }));
 			return Void();
 		});
 	}
@@ -724,7 +726,7 @@ protected:
 };
 
 template <>
-inline Tuple Codec<Reference<IBackupContainer>>::pack(Reference<IBackupContainer> const& bc) {
+inline Standalone<StringRef> TupleCodec<Reference<IBackupContainer>>::pack(Reference<IBackupContainer> const& bc) {
 	Tuple tuple;
 	tuple.append(StringRef(bc->getURL()));
 
@@ -740,21 +742,23 @@ inline Tuple Codec<Reference<IBackupContainer>>::pack(Reference<IBackupContainer
 		tuple.append(StringRef());
 	}
 
-	return tuple;
+	return tuple.pack();
 }
 template <>
-inline Reference<IBackupContainer> Codec<Reference<IBackupContainer>>::unpack(Tuple const& val) {
-	ASSERT(val.size() >= 1);
-	auto url = val.getString(0).toString();
+inline Reference<IBackupContainer> TupleCodec<Reference<IBackupContainer>>::unpack(Standalone<StringRef> const& val) {
+	Tuple t = Tuple::unpack(val);
+	ASSERT(t.size() >= 1);
+
+	auto url = t.getString(0).toString();
 
 	Optional<std::string> encryptionKeyFileName;
-	if (val.size() > 1 && !val.getString(1).empty()) {
-		encryptionKeyFileName = val.getString(1).toString();
+	if (t.size() > 1 && !t.getString(1).empty()) {
+		encryptionKeyFileName = t.getString(1).toString();
 	}
 
 	Optional<std::string> proxy;
-	if (val.size() > 2 && !val.getString(2).empty()) {
-		proxy = val.getString(2).toString();
+	if (t.size() > 2 && !t.getString(2).empty()) {
+		proxy = t.getString(2).toString();
 	}
 
 	return IBackupContainer::openContainer(url, proxy, encryptionKeyFileName);

@@ -1538,7 +1538,7 @@ void seedShardServers(Arena& arena, CommitTransactionRef& tr, std::vector<Storag
 			// THIS SHOULD NEVER BE ENABLED IN ANY NON-TESTING ENVIRONMENT
 			TraceEvent(SevError, "TSSIdentityMappingEnabled").log();
 			// hack key-backed map here since we can't really change CommitTransactionRef to a RYW transaction
-			Key uidRef = Codec<UID>::pack(s.id()).pack();
+			Key uidRef = TupleCodec<UID>::pack(s.id());
 			tr.set(arena, uidRef.withPrefix(tssMappingKeys.begin), uidRef);
 		}
 	}

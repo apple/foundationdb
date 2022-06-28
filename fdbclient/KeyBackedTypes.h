@@ -32,108 +32,110 @@
 #include "flow/genericactors.actor.h"
 #include "flow/serialize.h"
 
-// Codec is a utility struct to convert a type to and from a Tuple.  It is used by the template
-// classes below like KeyBackedProperty and KeyBackedMap to convert key parts and values
-// from various types to Value strings and back.
+// TupleCodec is a utility struct to convert a type to and from a value using Tuple encoding.
+// It is used by the template classes below like KeyBackedProperty and KeyBackedMap to convert
+// key parts and values from various types to Value strings and back.
 // New types can be supported either by writing a new specialization or adding these
 // methods to the type so that the default specialization can be used:
-//   static T T::unpack(Tuple const &t)
-//   Tuple T::pack() const
-// Since Codec is a struct, partial specialization can be used, such as the std::pair
+//   static T T::unpack(Standalone<StringRef> const& val)
+//   Standalone<StringRef> T::pack(T const& val) const
+// Since TupleCodec is a struct, partial specialization can be used, such as the std::pair
 // partial specialization below allowing any std::pair<T1,T2> where T1 and T2 are already
-// supported by Codec.
+// supported by TupleCodec.
 template <typename T>
-struct Codec {
-	static inline Tuple pack(T const& val) { return val.pack(); }
-	static inline T unpack(Tuple const& t) { return T::unpack(t); }
+struct TupleCodec {
+	static inline Standalone<StringRef> pack(T const& val) { return val.pack().pack(); }
+	static inline T unpack(Standalone<StringRef> const& val) { return T::unpack(Tuple::unpack(val)); }
 };
 
 // If T is Tuple then conversion is simple.
 template <>
-inline Tuple Codec<Tuple>::pack(Tuple const& val) {
-	return val;
+inline Standalone<StringRef> TupleCodec<Tuple>::pack(Tuple const& val) {
+	return val.pack();
 }
 template <>
-inline Tuple Codec<Tuple>::unpack(Tuple const& val) {
-	return val;
+inline Tuple TupleCodec<Tuple>::unpack(Standalone<StringRef> const& val) {
+	return Tuple::unpack(val);
 }
 
 template <>
-inline Tuple Codec<int64_t>::pack(int64_t const& val) {
-	return Tuple().append(val);
+inline Standalone<StringRef> TupleCodec<int64_t>::pack(int64_t const& val) {
+	return Tuple().append(val).pack();
 }
 template <>
-inline int64_t Codec<int64_t>::unpack(Tuple const& val) {
-	return val.getInt(0);
+inline int64_t TupleCodec<int64_t>::unpack(Standalone<StringRef> const& val) {
+	return Tuple::unpack(val).getInt(0);
 }
 
 template <>
-inline Tuple Codec<bool>::pack(bool const& val) {
-	return Tuple().append(val ? 1 : 0);
+inline Standalone<StringRef> TupleCodec<bool>::pack(bool const& val) {
+	return Tuple().append(val ? 1 : 0).pack();
 }
 template <>
-inline bool Codec<bool>::unpack(Tuple const& val) {
-	return val.getInt(0) == 1;
+inline bool TupleCodec<bool>::unpack(Standalone<StringRef> const& val) {
+	return Tuple::unpack(val).getInt(0) == 1;
 }
 
 template <>
-inline Tuple Codec<Standalone<StringRef>>::pack(Standalone<StringRef> const& val) {
-	return Tuple().append(val);
+inline Standalone<StringRef> TupleCodec<Standalone<StringRef>>::pack(Standalone<StringRef> const& val) {
+	return Tuple().append(val).pack();
 }
 template <>
-inline Standalone<StringRef> Codec<Standalone<StringRef>>::unpack(Tuple const& val) {
-	return val.getString(0);
+inline Standalone<StringRef> TupleCodec<Standalone<StringRef>>::unpack(Standalone<StringRef> const& val) {
+	return Tuple::unpack(val).getString(0);
 }
 
 template <>
-inline Tuple Codec<UID>::pack(UID const& val) {
-	return Codec<Standalone<StringRef>>::pack(BinaryWriter::toValue<UID>(val, Unversioned()));
+inline Standalone<StringRef> TupleCodec<UID>::pack(UID const& val) {
+	return TupleCodec<Standalone<StringRef>>::pack(BinaryWriter::toValue<UID>(val, Unversioned()));
 }
 template <>
-inline UID Codec<UID>::unpack(Tuple const& val) {
-	return BinaryReader::fromStringRef<UID>(Codec<Standalone<StringRef>>::unpack(val), Unversioned());
+inline UID TupleCodec<UID>::unpack(Standalone<StringRef> const& val) {
+	return BinaryReader::fromStringRef<UID>(TupleCodec<Standalone<StringRef>>::unpack(val), Unversioned());
 }
 
-// This is backward compatible with Codec<Standalone<StringRef>>
+// This is backward compatible with TupleCodec<Standalone<StringRef>>
 template <>
-inline Tuple Codec<std::string>::pack(std::string const& val) {
-	return Tuple().append(StringRef(val));
+inline Standalone<StringRef> TupleCodec<std::string>::pack(std::string const& val) {
+	return Tuple().append(StringRef(val)).pack();
 }
 template <>
-inline std::string Codec<std::string>::unpack(Tuple const& val) {
-	return val.getString(0).toString();
+inline std::string TupleCodec<std::string>::unpack(Standalone<StringRef> const& val) {
+	return Tuple::unpack(val).getString(0).toString();
 }
 
-// Partial specialization to cover all std::pairs as long as the component types are Codec compatible
+// Partial specialization to cover all std::pairs as long as the component types are TupleCodec compatible
 template <typename First, typename Second>
-struct Codec<std::pair<First, Second>> {
-	static Tuple pack(typename std::pair<First, Second> const& val) {
-		return Tuple().append(Codec<First>::pack(val.first)).append(Codec<Second>::pack(val.second));
+struct TupleCodec<std::pair<First, Second>> {
+	static Standalone<StringRef> pack(typename std::pair<First, Second> const& val) {
+		// Packing a concatenated tuple is the same as concatenating two packed tuples
+		return TupleCodec<First>::pack(val.first).withSuffix(TupleCodec<Second>::pack(val.second));
 	}
-	static std::pair<First, Second> unpack(Tuple const& t) {
+	static std::pair<First, Second> unpack(Standalone<StringRef> const& val) {
+		Tuple t = Tuple::unpack(val);
 		ASSERT(t.size() == 2);
-		return { Codec<First>::unpack(t.subTuple(0, 1)), Codec<Second>::unpack(t.subTuple(1, 2)) };
+		return { TupleCodec<First>::unpack(t.subTupleRawString(0)),
+			     TupleCodec<Second>::unpack(t.subTupleRawString(1)) };
 	}
 };
 
 template <typename T>
-struct Codec<std::vector<T>> {
-	static Tuple pack(typename std::vector<T> const& val) {
+struct TupleCodec<std::vector<T>> {
+	static Standalone<StringRef> pack(typename std::vector<T> const& val) {
 		Tuple t;
 		for (T item : val) {
-			Tuple itemTuple = Codec<T>::pack(item);
 			// fdbclient doesn't support nested tuples yet. For now, flatten the tuple into StringRef
-			t.append(itemTuple.pack());
+			t.append(TupleCodec<T>::pack(item));
 		}
-		return t;
+		return t.pack();
 	}
 
-	static std::vector<T> unpack(Tuple const& t) {
+	static std::vector<T> unpack(Standalone<StringRef> const& val) {
+		Tuple t = Tuple::unpack(val);
 		std::vector<T> v;
 
 		for (int i = 0; i < t.size(); i++) {
-			Tuple itemTuple = Tuple::unpack(t.getString(i));
-			v.push_back(Codec<T>::unpack(itemTuple));
+			v.push_back(TupleCodec<T>::unpack(t.getString(i)));
 		}
 
 		return v;
@@ -141,17 +143,18 @@ struct Codec<std::vector<T>> {
 };
 
 template <>
-inline Tuple Codec<KeyRange>::pack(KeyRange const& val) {
-	return Tuple().append(val.begin).append(val.end);
+inline Standalone<StringRef> TupleCodec<KeyRange>::pack(KeyRange const& val) {
+	return Tuple().append(val.begin).append(val.end).pack();
 }
 template <>
-inline KeyRange Codec<KeyRange>::unpack(Tuple const& val) {
-	return KeyRangeRef(val.getString(0), val.getString(1));
+inline KeyRange TupleCodec<KeyRange>::unpack(Standalone<StringRef> const& val) {
+	Tuple t = Tuple::unpack(val);
+	return KeyRangeRef(t.getString(0), t.getString(1));
 }
 
 // Convenient read/write access to a single value of type T stored at key
 // Even though 'this' is not actually mutated, methods that change the db key are not const.
-template <typename T>
+template <typename T, typename Codec = TupleCodec<T>>
 class KeyBackedProperty {
 public:
 	KeyBackedProperty(KeyRef key) : key(key) {}
@@ -162,9 +165,10 @@ public:
 	    Snapshot snapshot = Snapshot::False) const {
 		typename transaction_future_type<Transaction, Optional<Value>>::type getFuture = tr->get(key, snapshot);
 
-		return holdWhile(getFuture, map(safeThreadFutureToFuture(getFuture), [](Optional<Value> const& val) -> Optional<T> {
+		return holdWhile(getFuture,
+		                 map(safeThreadFutureToFuture(getFuture), [](Optional<Value> const& val) -> Optional<T> {
 			                 if (val.present())
-				                 return Codec<T>::unpack(Tuple::unpack(val.get()));
+				                 return Codec::unpack(val.get());
 			                 return {};
 		                 }));
 	}
@@ -227,7 +231,7 @@ public:
 
 	template <class Transaction>
 	typename std::enable_if<!is_transaction_creator<Transaction>, void>::type set(Transaction tr, T const& val) {
-		return tr->set(key, Codec<T>::pack(val).pack());
+		return tr->set(key, Codec::pack(val));
 	}
 
 	template <class DB>
@@ -248,7 +252,7 @@ public:
 	Key key;
 };
 
-// This is just like KeyBackedProperty but instead of using Codec for conversion to/from values it
+// This is just like KeyBackedProperty but instead of using a Codec for conversion to/from values it
 // uses BinaryReader and BinaryWriter.  This enables allows atomic ops with integer types, and also
 // allows reading and writing of existing keys which use BinaryReader/Writer.
 template <typename T>
@@ -260,7 +264,8 @@ public:
 	Future<Optional<T>> get(Transaction tr, Snapshot snapshot = Snapshot::False) const {
 		typename transaction_future_type<Transaction, Optional<Value>>::type getFuture = tr->get(key, snapshot);
 
-		return holdWhile(getFuture, map(safeThreadFutureToFuture(getFuture), [](Optional<Value> const& val) -> Optional<T> {
+		return holdWhile(getFuture,
+		                 map(safeThreadFutureToFuture(getFuture), [](Optional<Value> const& val) -> Optional<T> {
 			                 if (val.present())
 				                 return BinaryReader::fromStringRef<T>(val.get(), Unversioned());
 			                 return {};
@@ -293,10 +298,13 @@ public:
 
 // Convenient read/write access to a sorted map of KeyType to ValueType under prefix
 // Even though 'this' is not actually mutated, methods that change db keys are not const.
-template <typename _KeyType, typename _ValueType>
+template <typename _KeyType,
+          typename _ValueType,
+          typename KeyCodec = TupleCodec<_KeyType>,
+          typename ValueCodec = TupleCodec<_ValueType>>
 class KeyBackedMap {
 public:
-	KeyBackedMap(KeyRef prefix) : space(prefix) {}
+	KeyBackedMap(KeyRef prefix) : subspace(prefixRange(prefix)) {}
 
 	typedef _KeyType KeyType;
 	typedef _ValueType ValueType;
@@ -311,19 +319,20 @@ public:
 	                           int limit,
 	                           Snapshot snapshot = Snapshot::False,
 	                           Reverse reverse = Reverse::False) const {
-		Subspace s = space; // 'this' could be invalid inside lambda
+		Key prefix = subspace.begin; // 'this' could be invalid inside lambda
 
-		Key beginKey = begin.present() ? s.pack(Codec<KeyType>::pack(begin.get())) : s.range().begin;
-		Key endKey = end.present() ? s.pack(Codec<KeyType>::pack(end.get())) : s.range().end;
+		Key beginKey = begin.present() ? prefix.withSuffix(KeyCodec::pack(begin.get())) : subspace.begin;
+		Key endKey = end.present() ? prefix.withSuffix(KeyCodec::pack(end.get())) : subspace.end;
 
 		typename transaction_future_type<Transaction, RangeResult>::type getRangeFuture =
 		    tr->getRange(KeyRangeRef(beginKey, endKey), GetRangeLimits(limit), snapshot, reverse);
 
-		return holdWhile(getRangeFuture, map(safeThreadFutureToFuture(getRangeFuture), [s](RangeResult const& kvs) -> PairsType {
+		return holdWhile(getRangeFuture,
+		                 map(safeThreadFutureToFuture(getRangeFuture), [prefix](RangeResult const& kvs) -> PairsType {
 			                 PairsType results;
 			                 for (int i = 0; i < kvs.size(); ++i) {
-				                 KeyType key = Codec<KeyType>::unpack(s.unpack(kvs[i].key));
-				                 ValueType val = Codec<ValueType>::unpack(Tuple::unpack(kvs[i].value));
+				                 KeyType key = KeyCodec::unpack(kvs[i].key.removePrefix(prefix));
+				                 ValueType val = ValueCodec::unpack(kvs[i].value);
 				                 results.push_back(PairType(key, val));
 			                 }
 			                 return results;
@@ -333,43 +342,47 @@ public:
 	template <class Transaction>
 	Future<Optional<ValueType>> get(Transaction tr, KeyType const& key, Snapshot snapshot = Snapshot::False) const {
 		typename transaction_future_type<Transaction, Optional<Value>>::type getFuture =
-		    tr->get(space.pack(Codec<KeyType>::pack(key)), snapshot);
+		    tr->get(subspace.begin.withSuffix(KeyCodec::pack(key)), snapshot);
 
-		return holdWhile(getFuture, map(safeThreadFutureToFuture(getFuture), [](Optional<Value> const& val) -> Optional<ValueType> {
-			                 if (val.present())
-				                 return Codec<ValueType>::unpack(Tuple::unpack(val.get()));
-			                 return {};
-		                 }));
+		return holdWhile(
+		    getFuture, map(safeThreadFutureToFuture(getFuture), [](Optional<Value> const& val) -> Optional<ValueType> {
+			    if (val.present())
+				    return ValueCodec::unpack(val.get());
+			    return {};
+		    }));
 	}
 
 	// Returns a Property that can be get/set that represents key's entry in this this.
-	KeyBackedProperty<ValueType> getProperty(KeyType const& key) const { return space.pack(Codec<KeyType>::pack(key)); }
+	KeyBackedProperty<ValueType> getProperty(KeyType const& key) const {
+		return subspace.begin.withSuffix(KeyCodec::pack(key));
+	}
 
 	// Returns the expectedSize of the set key
 	template <class Transaction>
 	int set(Transaction tr, KeyType const& key, ValueType const& val) {
-		Key k = space.pack(Codec<KeyType>::pack(key));
-		Value v = Codec<ValueType>::pack(val).pack();
+		Key k = subspace.begin.withSuffix(KeyCodec::pack(key));
+		Value v = ValueCodec::pack(val);
 		tr->set(k, v);
 		return k.expectedSize() + v.expectedSize();
 	}
 
 	template <class Transaction>
 	void erase(Transaction tr, KeyType const& key) {
-		return tr->clear(space.pack(Codec<KeyType>::pack(key)));
+		return tr->clear(subspace.begin.withSuffix(KeyCodec::pack(key)));
 	}
 
 	template <class Transaction>
 	void erase(Transaction tr, KeyType const& begin, KeyType const& end) {
-		return tr->clear(KeyRangeRef(space.pack(Codec<KeyType>::pack(begin)), space.pack(Codec<KeyType>::pack(end))));
+		return tr->clear(KeyRangeRef(subspace.begin.withSuffix(KeyCodec::pack(begin)),
+		                             subspace.begin.withSuffix(KeyCodec::pack(end))));
 	}
 
 	template <class Transaction>
 	void clear(Transaction tr) {
-		return tr->clear(space.range());
+		return tr->clear(subspace);
 	}
 
-	Subspace space;
+	KeyRange subspace;
 };
 
 // Convenient read/write access to a single value of type T stored at key
@@ -385,11 +398,13 @@ public:
 	    Snapshot snapshot = Snapshot::False) const {
 		typename transaction_future_type<Transaction, Optional<Value>>::type getFuture = tr->get(key, snapshot);
 
-		return holdWhile(getFuture, map(safeThreadFutureToFuture(getFuture), [vo = versionOptions](Optional<Value> const& val) -> Optional<T> {
-			                 if (val.present())
-				                 return ObjectReader::fromStringRef<T>(val.get(), vo);
-			                 return {};
-		                 }));
+		return holdWhile(
+		    getFuture,
+		    map(safeThreadFutureToFuture(getFuture), [vo = versionOptions](Optional<Value> const& val) -> Optional<T> {
+			    if (val.present())
+				    return ObjectReader::fromStringRef<T>(val.get(), vo);
+			    return {};
+		    }));
 	}
 
 	// Get property's value or defaultValue if it doesn't exist
@@ -474,10 +489,11 @@ public:
 // Convenient read/write access to a sorted map of KeyType to ValueType under key prefix
 // ValueType is encoded / decoded with ObjectWriter/ObjectReader
 // Even though 'this' is not actually mutated, methods that change db keys are not const.
-template <typename _KeyType, typename _ValueType, typename VersionOptions>
+template <typename _KeyType, typename _ValueType, typename VersionOptions, typename KeyCodec = TupleCodec<_KeyType>>
 class KeyBackedObjectMap {
 public:
-	KeyBackedObjectMap(KeyRef prefix, VersionOptions versionOptions) : space(prefix), versionOptions(versionOptions) {}
+	KeyBackedObjectMap(KeyRef prefix, VersionOptions versionOptions)
+	  : subspace(prefixRange(prefix)), versionOptions(versionOptions) {}
 
 	typedef _KeyType KeyType;
 	typedef _ValueType ValueType;
@@ -491,8 +507,8 @@ public:
 	                           int limit,
 	                           Snapshot snapshot = Snapshot::False,
 	                           Reverse reverse = Reverse::False) const {
-		Key beginKey = begin.present() ? space.pack(Codec<KeyType>::pack(begin.get())) : space.range().begin;
-		Key endKey = end.present() ? space.pack(Codec<KeyType>::pack(end.get())) : space.range().end;
+		Key beginKey = begin.present() ? subspace.begin.withSuffix(KeyCodec::pack(begin.get())) : subspace.begin;
+		Key endKey = end.present() ? subspace.begin.withSuffix(KeyCodec::pack(end.get())) : subspace.end;
 
 		typename transaction_future_type<Transaction, RangeResult>::type getRangeFuture =
 		    tr->getRange(KeyRangeRef(beginKey, endKey), GetRangeLimits(limit), snapshot, reverse);
@@ -502,7 +518,7 @@ public:
 		    map(safeThreadFutureToFuture(getRangeFuture), [self = *this](RangeResult const& kvs) -> PairsType {
 			    PairsType results;
 			    for (int i = 0; i < kvs.size(); ++i) {
-				    KeyType key = Codec<KeyType>::unpack(self.space.unpack(kvs[i].key));
+				    KeyType key = KeyCodec::unpack(kvs[i].key.removePrefix(self.subspace.begin));
 				    ValueType val = ObjectReader::fromStringRef<ValueType>(kvs[i].value, self.versionOptions);
 				    results.push_back(PairType(key, val));
 			    }
@@ -513,7 +529,7 @@ public:
 	template <class Transaction>
 	Future<Optional<ValueType>> get(Transaction tr, KeyType const& key, Snapshot snapshot = Snapshot::False) const {
 		typename transaction_future_type<Transaction, Optional<Value>>::type getFuture =
-		    tr->get(space.pack(Codec<KeyType>::pack(key)), snapshot);
+		    tr->get(subspace.begin.withSuffix(KeyCodec::pack(key)), snapshot);
 
 		return holdWhile(getFuture,
 		                 map(safeThreadFutureToFuture(getFuture),
@@ -526,46 +542,47 @@ public:
 
 	// Returns a Property that can be get/set that represents key's entry in this this.
 	KeyBackedObjectProperty<ValueType, VersionOptions> getProperty(KeyType const& key) const {
-		return KeyBackedObjectProperty<ValueType, VersionOptions>(space.pack(Codec<KeyType>::pack(key)),
+		return KeyBackedObjectProperty<ValueType, VersionOptions>(subspace.begin.withSuffix(KeyCodec::pack(key)),
 		                                                          versionOptions);
 	}
 
 	// Returns the expectedSize of the set key
 	template <class Transaction>
 	int set(Transaction tr, KeyType const& key, ValueType const& val) {
-		Key k = space.pack(Codec<KeyType>::pack(key));
+		Key k = subspace.begin.withSuffix(KeyCodec::pack(key));
 		Value v = ObjectWriter::toValue(val, versionOptions);
 		tr->set(k, v);
 		return k.expectedSize() + v.expectedSize();
 	}
 
-	Key serializeKey(KeyType const& key) { return space.pack(Codec<KeyType>::pack(key)); }
+	Key serializeKey(KeyType const& key) { return subspace.begin.withSuffix(KeyCodec::pack(key)); }
 
 	Value serializeValue(ValueType const& val) { return ObjectWriter::toValue(val, versionOptions); }
 
 	template <class Transaction>
 	void erase(Transaction tr, KeyType const& key) {
-		return tr->clear(space.pack(Codec<KeyType>::pack(key)));
+		return tr->clear(subspace.begin.withSuffix(KeyCodec::pack(key)));
 	}
 
 	template <class Transaction>
 	void erase(Transaction tr, KeyType const& begin, KeyType const& end) {
-		return tr->clear(KeyRangeRef(space.pack(Codec<KeyType>::pack(begin)), space.pack(Codec<KeyType>::pack(end))));
+		return tr->clear(KeyRangeRef(subspace.begin.withSuffix(KeyCodec::pack(begin)),
+		                             subspace.begin.withSuffix(KeyCodec::pack(end))));
 	}
 
 	template <class Transaction>
 	void clear(Transaction tr) {
-		return tr->clear(space.range());
+		return tr->clear(subspace);
 	}
 
-	Subspace space;
+	KeyRange subspace;
 	VersionOptions versionOptions;
 };
 
-template <typename _ValueType>
+template <typename _ValueType, typename Codec = TupleCodec<_ValueType>>
 class KeyBackedSet {
 public:
-	KeyBackedSet(KeyRef key) : space(key) {}
+	KeyBackedSet(KeyRef key) : subspace(prefixRange(key)) {}
 
 	typedef _ValueType ValueType;
 	typedef std::vector<ValueType> Values;
@@ -577,18 +594,18 @@ public:
 	                        int limit,
 	                        Snapshot snapshot = Snapshot::False,
 	                        Reverse reverse = Reverse::False) const {
-		Subspace s = space; // 'this' could be invalid inside lambda
-		Key beginKey = begin.present() ? s.pack(Codec<ValueType>::pack(begin.get())) : space.range().begin;
-		Key endKey = end.present() ? s.pack(Codec<ValueType>::pack(end.get())) : space.range().end;
+		Key prefix = subspace.begin; // 'this' could be invalid inside lambda
+		Key beginKey = begin.present() ? prefix.withSuffix(Codec::pack(begin.get())) : subspace.begin;
+		Key endKey = end.present() ? prefix.withSuffix(Codec::pack(end.get())) : subspace.end;
 
 		typename transaction_future_type<Transaction, RangeResult>::type getRangeFuture =
 		    tr->getRange(KeyRangeRef(beginKey, endKey), GetRangeLimits(limit), snapshot, reverse);
 
 		return holdWhile(getRangeFuture,
-		                 map(safeThreadFutureToFuture(getRangeFuture), [s](RangeResult const& kvs) -> Values {
+		                 map(safeThreadFutureToFuture(getRangeFuture), [prefix](RangeResult const& kvs) -> Values {
 			                 Values results;
 			                 for (int i = 0; i < kvs.size(); ++i) {
-				                 results.push_back(Codec<ValueType>::unpack(s.unpack(kvs[i].key)));
+				                 results.push_back(Codec::unpack(kvs[i].key.removePrefix(prefix)));
 			                 }
 			                 return results;
 		                 }));
@@ -597,7 +614,7 @@ public:
 	template <class Transaction>
 	Future<bool> exists(Transaction tr, ValueType const& val, Snapshot snapshot = Snapshot::False) const {
 		typename transaction_future_type<Transaction, Optional<Value>>::type getFuture =
-		    tr->get(space.pack(Codec<ValueType>::pack(val)), snapshot);
+		    tr->get(subspace.begin.withSuffix(Codec::pack(val)), snapshot);
 
 		return holdWhile(getFuture, map(safeThreadFutureToFuture(getFuture), [](Optional<Value> const& val) -> bool {
 			                 return val.present();
@@ -607,26 +624,26 @@ public:
 	// Returns the expectedSize of the set key
 	template <class Transaction>
 	int insert(Transaction tr, ValueType const& val) {
-		Key k = space.pack(Codec<ValueType>::pack(val));
+		Key k = subspace.begin.withSuffix(Codec::pack(val));
 		tr->set(k, StringRef());
 		return k.expectedSize();
 	}
 
 	template <class Transaction>
 	void erase(Transaction tr, ValueType const& val) {
-		return tr->clear(space.pack(Codec<ValueType>::pack(val)));
+		return tr->clear(subspace.begin.withSuffix(Codec::pack(val)));
 	}
 
 	template <class Transaction>
 	void erase(Transaction tr, ValueType const& begin, ValueType const& end) {
 		return tr->clear(
-		    KeyRangeRef(space.pack(Codec<ValueType>::pack(begin)), space.pack(Codec<ValueType>::pack(end))));
+		    KeyRangeRef(subspace.begin.withSuffix(Codec::pack(begin)), subspace.begin.withSuffix(Codec::pack(end))));
 	}
 
 	template <class Transaction>
 	void clear(Transaction tr) {
-		return tr->clear(space.range());
+		return tr->clear(subspace);
 	}
 
-	Subspace space;
+	KeyRange subspace;
 };
