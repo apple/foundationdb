@@ -724,12 +724,15 @@ public:
 	Reference<TenantState> tenantState;
 };
 
-struct ClusterConnectionRecord {
+class ClusterConnectionRecord {
+private:
 	enum class Type { FILE, CONNECTION_STRING };
+	ClusterConnectionRecord(Type type, std::string recordStr) : type(type), recordStr(recordStr) {}
 
 	Type type;
 	std::string recordStr;
 
+public:
 	static ClusterConnectionRecord fromFile(std::string clusterFilePath) {
 		return ClusterConnectionRecord(Type::FILE, clusterFilePath);
 	}
@@ -738,19 +741,38 @@ struct ClusterConnectionRecord {
 		return ClusterConnectionRecord(Type::CONNECTION_STRING, connectionString);
 	}
 
-	Reference<IDatabase> createDatabase(IClientApi* api) {
-		if (type == Type::FILE) {
+	Reference<IDatabase> createDatabase(IClientApi* api) const {
+		switch (type) {
+		case Type::FILE:
 			return api->createDatabase(recordStr.c_str());
-		} else if (type == Type::CONNECTION_STRING) {
+		case Type::CONNECTION_STRING:
 			return api->createDatabaseFromConnectionString(recordStr.c_str());
+		default:
+			ASSERT(false);
+			throw internal_error();
 		}
-
-		ASSERT(false);
-		throw internal_error();
 	}
 
-private:
-	ClusterConnectionRecord(Type type, std::string recordStr) : type(type), recordStr(recordStr) {}
+	std::string toString() const {
+		switch (type) {
+		case Type::FILE:
+			if (recordStr.empty()) {
+				return "default file";
+			} else {
+				return "file: " + recordStr;
+			}
+		case Type::CONNECTION_STRING:
+			return "connection string: " + recordStr;
+		default:
+			ASSERT(false);
+			throw internal_error();
+		}
+	}
+};
+
+template <>
+struct Traceable<ClusterConnectionRecord> : std::true_type {
+	static std::string toString(ClusterConnectionRecord const& connectionRecord) { return connectionRecord.toString(); }
 };
 
 // An implementation of IDatabase that wraps a database created either locally or through a dynamically loaded
@@ -828,6 +850,7 @@ public:
 		Reference<IDatabase> db;
 		const Reference<ThreadSafeAsyncVar<Reference<IDatabase>>> dbVar;
 		ClusterConnectionRecord connectionRecord;
+		std::string clusterId;
 
 		// Used to monitor the cluster protocol version. Will be the same as db unless we have either not connected
 		// yet or if the client version associated with db does not support protocol monitoring. In those cases,
@@ -839,6 +862,8 @@ public:
 		ThreadFuture<Void> changed;
 		ThreadFuture<Void> dbReady;
 		ThreadFuture<Void> protocolVersionMonitor;
+
+		Future<Void> sharedStateUpdater;
 
 		// Versions older than 6.1 do not benefit from having their database connections closed. Additionally,
 		// there are various issues that result in negative behavior in some cases if the connections are closed.
@@ -920,10 +945,18 @@ public:
 
 	bool callbackOnMainThread;
 	bool localClientDisabled;
-	ThreadFuture<Void> updateClusterSharedStateMap(std::string connectionRecord,
-	                                               ProtocolVersion dbProtocolVersion,
-	                                               Reference<IDatabase> db);
-	void clearClusterSharedStateMapEntry(std::string connectionRecord, ProtocolVersion dbProtocolVersion);
+	Future<Void> updateClusterSharedStateMap(ClusterConnectionRecord connectionRecord,
+	                                         ProtocolVersion dbProtocolVersion,
+	                                         Reference<IDatabase> db);
+	void clearClusterSharedStateMapEntry(std::string clusterId, ProtocolVersion dbProtocolVersion);
+
+	// Map of cluster ID -> DatabaseSharedState pointer Future
+	// Upon cluster version upgrade, clear the map entry for that cluster
+	struct SharedStateInfo {
+		ThreadFuture<DatabaseSharedState*> sharedStateFuture;
+		ProtocolVersion protocolVersion;
+	};
+	std::map<std::string, SharedStateInfo> clusterSharedStateMap;
 
 	static bool apiVersionAtLeast(int minVersion);
 
@@ -947,13 +980,6 @@ private:
 	Reference<ClientInfo> localClient;
 	std::map<std::string, ClientDesc> externalClientDescriptions;
 	std::map<std::string, std::vector<Reference<ClientInfo>>> externalClients;
-	// Map of connection record -> DatabaseSharedState pointer Future
-	// Upon cluster version upgrade, clear the map entry for that cluster
-	struct SharedStateInfo {
-		ThreadFuture<DatabaseSharedState*> sharedStateFuture;
-		ProtocolVersion protocolVersion;
-	};
-	std::map<std::string, SharedStateInfo> clusterSharedStateMap;
 
 	bool networkStartSetup;
 	volatile bool networkSetup;

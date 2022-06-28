@@ -17,18 +17,22 @@ Users will also (by default) see a ``special_keys_cross_module_read`` error if t
 The error is to save the user from the surprise of seeing the behavior of multiple modules in the same read.
 Users may opt out of these restrictions by setting the ``special_key_space_relaxed`` transaction option.
 
-Each special key that existed before api version 630 is its own module. These are
+Each special key that existed before api version 630 is its own module. These are:
 
-#. ``\xff\xff/cluster_file_path`` See :ref:`cluster file client access <cluster-file-client-access>`
-#. ``\xff\xff/status/json`` See :doc:`Machine-readable status <mr-status>`
+#. ``\xff\xff/cluster_file_path`` - See :ref:`cluster file client access <cluster-file-client-access>`
+#. ``\xff\xff/status/json`` - See :doc:`Machine-readable status <mr-status>`
 
-Prior to api version 630, it was also possible to read a range starting at
-``\xff\xff/worker_interfaces``. This is mostly an implementation detail of fdbcli,
+Prior to api version 630, it was also possible to read a range starting at ``\xff\xff/worker_interfaces``. This is mostly an implementation detail of fdbcli,
 but it's available in api version 630 as a module with prefix ``\xff\xff/worker_interfaces/``.
 
-Api version 630 includes two new modules with prefixes
-``\xff\xff/transaction/`` (information about the current transaction), and
-``\xff\xff/metrics/`` (various metrics, not transactional).
+Api version 630 includes two new modules:
+
+#. ``\xff\xff/transaction/`` - information about the current transaction
+#. ``\xff\xff/metrics/`` - various metrics, not transactional
+
+Api version 720 includes one new module:
+
+#. ``\xff\xff/clusterId`` - returns an immutable unique ID for a cluster
 
 Transaction module
 ------------------

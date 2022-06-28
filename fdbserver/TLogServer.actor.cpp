@@ -2663,7 +2663,7 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 			}
 
 			// Persist cluster ID once cluster has recovered.
-			auto ccClusterId = self->dbInfo->get().clusterId;
+			auto ccClusterId = self->dbInfo->get().client.clusterId;
 			if (self->dbInfo->get().recoveryState == RecoveryState::FULLY_RECOVERED &&
 			    !self->durableClusterId.isValid()) {
 				ASSERT(ccClusterId.isValid());

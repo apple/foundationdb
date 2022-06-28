@@ -166,6 +166,7 @@ public:
 		ACTORLINEAGE, // Sampling data
 		ACTOR_PROFILER_CONF, // profiler configuration
 		CLUSTERFILEPATH,
+		CLUSTERID, // An immutable UID for a cluster
 		CONFIGURATION, // Configuration of the cluster
 		CONNECTIONSTRING,
 		ERRORMSG, // A single key space contains a json string which describes the last error in special-key-space

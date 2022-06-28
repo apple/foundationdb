@@ -1411,6 +1411,13 @@ KeyRangeRef toRelativeRange(KeyRangeRef range, KeyRef prefix) {
 	}
 }
 
+ACTOR Future<UID> getClusterId(Database db) {
+	while (!db->clientInfo->get().clusterId.isValid()) {
+		wait(db->clientInfo->onChange());
+	}
+	return db->clientInfo->get().clusterId;
+}
+
 DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnectionRecord>>> connectionRecord,
                                  Reference<AsyncVar<ClientDBInfo>> clientInfo,
                                  Reference<AsyncVar<Optional<ClientLeaderRegInterface>> const> coordinator,
@@ -1491,6 +1498,23 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 	smoothMidShardSize.reset(CLIENT_KNOBS->INIT_MID_SHARD_BYTES);
 	globalConfig = std::make_unique<GlobalConfig>(this);
 
+	if (apiVersionAtLeast(720)) {
+		registerSpecialKeysImpl(
+		    SpecialKeySpace::MODULE::CLUSTERID,
+		    SpecialKeySpace::IMPLTYPE::READONLY,
+		    std::make_unique<SingleSpecialKeyImpl>(
+		        LiteralStringRef("\xff\xff/cluster_id"), [](ReadYourWritesTransaction* ryw) -> Future<Optional<Value>> {
+			        try {
+				        if (ryw->getDatabase().getPtr()) {
+					        return map(getClusterId(ryw->getDatabase()),
+					                   [](UID id) { return Optional<Value>(StringRef(id.toString())); });
+				        }
+			        } catch (Error& e) {
+				        return e;
+			        }
+			        return Optional<Value>();
+		        }));
+	}
 	if (apiVersionAtLeast(710)) {
 		registerSpecialKeysImpl(
 		    SpecialKeySpace::MODULE::MANAGEMENT,
