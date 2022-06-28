@@ -565,8 +565,6 @@ struct TenantManagementWorkload : TestWorkload {
 
 		state std::vector<TenantName> oldTenantNames;
 		state std::vector<TenantName> newTenantNames;
-		// For the future in supporting different operation types and number of tenants:
-		// The number of tenants we rename should be min(numTenants, self->createdTenants.size())
 		state bool tenantExists = false;
 		state bool tenantNotFound = false;
 		for (int i = 0; i < numTenants; ++i) {
@@ -591,6 +589,7 @@ struct TenantManagementWorkload : TestWorkload {
 					state TenantName newTenantName = newTenantNames[tenantIndex];
 					// Perform rename, then check against the DB for the new results
 					wait(ManagementAPI::renameTenant(cx.getReference(), oldTenantName, newTenantName));
+					ASSERT(!tenantNotFound && !tenantExists);
 					state Optional<TenantMapEntry> oldTenantEntry =
 					    wait(ManagementAPI::tryGetTenant(cx.getReference(), oldTenantName));
 					state Optional<TenantMapEntry> newTenantEntry =
