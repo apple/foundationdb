@@ -590,7 +590,6 @@ class Tenant final {
 	std::shared_ptr<native::FDBTenant> tenant;
 
 	static constexpr CharsRef tenantManagementMapPrefix = "\xff\xff/management/tenant_map/";
-	static constexpr CharsRef tenantMapPrefix = "\xff/tenantMap/";
 
 	explicit Tenant(native::FDBTenant* tenant_raw) {
 		if (tenant_raw)
@@ -615,11 +614,11 @@ public:
 		tr.clear(toBytesRef(fmt::format("{}{}", tenantManagementMapPrefix, toCharsRef(name))));
 	}
 
-	static TypedFuture<future_var::KeyRef> getTenant(Transaction tr, BytesRef name) {
+	static TypedFuture<future_var::ValueRef> getTenant(Transaction tr, BytesRef name) {
 		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_READ_SYSTEM_KEYS, BytesRef());
 		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_LOCK_AWARE, BytesRef());
 		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_RAW_ACCESS, BytesRef());
-		return tr.get(toBytesRef(fmt::format("{}{}", tenantMapPrefix, toCharsRef(name))), false);
+		return tr.get(toBytesRef(fmt::format("{}{}", tenantManagementMapPrefix, toCharsRef(name))), false);
 	}
 
 	Transaction createTransaction() {

@@ -118,13 +118,8 @@ int cleanup(Database db, Arguments const& args) {
 
 	auto watch = Stopwatch(StartAtCtor{});
 
-	// Only need to issue range clears to the active tenants
-	int num_iterations = (args.active_tenants > 1) ? args.active_tenants : 1;
-	for (int i = 0; i < num_iterations; ++i) {
-		// If args.total_tenants is zero, this will use a non-tenant txn and perform a single range clear.
-		// If 1, it will use a tenant txn and do a single range clear instead.
-		// If > 1, it will perform a range clear with a different tenant txn per iteration.
-		Transaction tx = createNewTransaction(db, args, i);
+	Transaction tx = db.createTransaction();
+	if (args.total_tenants == 0) {
 		while (true) {
 			tx.clearRange(beginstr, endstr);
 			auto future_commit = tx.commit();
@@ -138,23 +133,66 @@ int cleanup(Database db, Arguments const& args) {
 				return -1;
 			}
 		}
-	}
-
-	// Delete tenants in batches after each keyspace is clean
-	if (args.total_tenants > 0) {
-		Transaction systemTx = db.createTransaction();
+	} else {
 		int batch_size = args.tenant_batch_size;
 		int batches = (args.total_tenants + batch_size - 1) / batch_size;
+		// First loop to clear all tenant key ranges
 		for (int batch = 0; batch < batches; ++batch) {
 			for (int i = batch * batch_size; i < args.total_tenants && i < (batch + 1) * batch_size; ++i) {
 				std::string tenant_name = "tenant" + std::to_string(i);
-				Tenant::deleteTenant(systemTx, toBytesRef(tenant_name));
+				// New transaction to get the tenant metadata
+				Transaction getTx = db.createTransaction();
+				while (true) {
+					auto result = Tenant::getTenant(getTx, toBytesRef(tenant_name));
+					const auto rc = waitAndHandleError(getTx, result, "GET_TENANT");
+					if (rc == FutureRC::OK) {
+						// Read the tenant metadata for the prefix and issue a range clear
+						if (result.get().has_value()) {
+							auto val = result.get().value();
+							const char* metadata = reinterpret_cast<const char*>(val.data());
+							rapidjson::Document doc;
+							doc.Parse(metadata);
+							if (!doc.HasParseError()) {
+								std::string tenantPrefix = (doc["prefix"].GetString());
+								tx.clearRange(toBytesRef(tenantPrefix + "/"), toBytesRef(tenantPrefix + "0"));
+							}
+						}
+						getTx.reset();
+						break;
+					} else if (rc == FutureRC::RETRY) {
+						continue;
+					} else {
+						// Abort
+						return -1;
+					}
+				}
 			}
-			auto future_commit = systemTx.commit();
-			const auto rc = waitAndHandleError(systemTx, future_commit, "DELETE_TENANT");
+			auto future_commit = tx.commit();
+			const auto rc = waitAndHandleError(tx, future_commit, "TENANT_COMMIT_CLEANUP");
 			if (rc == FutureRC::OK) {
 				// Keep going with reset transaction if commit was successful
-				systemTx.reset();
+				tx.reset();
+			} else if (rc == FutureRC::RETRY) {
+				// We want to retry this batch, so decrement the number
+				// and go back through the loop to get the same value
+				// Transaction is already reset
+				--batch;
+			} else {
+				// Abort
+				return -1;
+			}
+		}
+		// Second loop to delete the tenants
+		for (int batch = 0; batch < batches; ++batch) {
+			for (int i = batch * batch_size; i < args.total_tenants && i < (batch + 1) * batch_size; ++i) {
+				std::string tenant_name = "tenant" + std::to_string(i);
+				Tenant::deleteTenant(tx, toBytesRef(tenant_name));
+			}
+			auto future_commit = tx.commit();
+			const auto rc = waitAndHandleError(tx, future_commit, "DELETE_TENANT");
+			if (rc == FutureRC::OK) {
+				// Keep going with reset transaction if commit was successful
+				tx.reset();
 			} else if (rc == FutureRC::RETRY) {
 				// We want to retry this batch, so decrement the number
 				// and go back through the loop to get the same value
@@ -223,7 +261,7 @@ int populate(Database db,
 				const auto rc = waitAndHandleError(systemTx, result, "GET_TENANT");
 				if (rc == FutureRC::OK) {
 					// If we get valid tenant metadata, the main thread has finished
-					if (result.get() != BytesRef()) {
+					if (result.get().has_value()) {
 						break;
 					}
 					systemTx.reset();
