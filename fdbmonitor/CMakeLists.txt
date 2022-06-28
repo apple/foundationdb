@@ -1,7 +1,9 @@
 set(FDBMONITOR_SRCS fdbmonitor.cpp)
 
 add_executable(fdbmonitor ${FDBMONITOR_SRCS})
-target_include_directories(fdbmonitor PUBLIC "${CMAKE_BINARY_DIR}/flow/include" "${CMAKE_BINARY_DIR}/fdbclient/include")
+get_target_property(fdbclient_target_includes fdbclient INCLUDE_DIRECTORIES)
+target_link_libraries(fdbmonitor PUBLIC SimpleOpt)
+target_include_directories(fdbmonitor PUBLIC "${fdbclient_target_includes}")
 strip_debug_symbols(fdbmonitor)
 assert_no_version_h(fdbmonitor)
 if(UNIX AND NOT APPLE)

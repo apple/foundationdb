@@ -74,7 +74,7 @@
 #include "flow/DeterministicRandom.h"
 #include "flow/Platform.h"
 #include "flow/ProtocolVersion.h"
-#include "flow/SimpleOpt.h"
+#include "SimpleOpt/SimpleOpt.h"
 #include "flow/SystemMonitor.h"
 #include "flow/TLSConfig.actor.h"
 #include "fdbclient/Tracing.h"

@@ -20,7 +20,7 @@
 
 #include <cstdint>
 
-#include "fdbclient/GenericManagementAPI.actor.h"
+#include "fdbclient/TenantManagement.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -46,7 +46,7 @@ struct CreateTenantWorkload : TestWorkload {
 
 	ACTOR static Future<Void> _setup(CreateTenantWorkload* self, Database db) {
 		try {
-			TenantMapEntry entry = wait(ManagementAPI::createTenant(db.getReference(), self->tenant));
+			TenantMapEntry entry = wait(TenantAPI::createTenant(db.getReference(), self->tenant));
 		} catch (Error& e) {
 			TraceEvent(SevError, "TenantCreationFailed").error(e);
 			if (e.code() == error_code_actor_cancelled) {
