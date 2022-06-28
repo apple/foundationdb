@@ -32,7 +32,7 @@
 #include <type_traits>
 
 #include "flow/flow.h"
-#include "fdbrpc/IAsyncFile.h"
+#include "flow/IAsyncFile.h"
 #include "flow/Knobs.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/network.h"

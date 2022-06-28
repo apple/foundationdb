@@ -20,7 +20,7 @@
 
 #include <ctime>
 #include <cinttypes>
-#include "contrib/fmt-8.1.1/include/fmt/format.h"
+#include "fmt/format.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "flow/ActorCollection.h"

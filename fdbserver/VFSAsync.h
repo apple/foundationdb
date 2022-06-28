@@ -18,10 +18,10 @@
  * limitations under the License.
  */
 
-#include "sqlite/sqlite3.h"
+#include "sqlite3.h"
 #include <string>
 #include <map>
-#include "fdbrpc/IAsyncFile.h"
+#include "flow/IAsyncFile.h"
 #include "fdbrpc/simulator.h"
 
 /*

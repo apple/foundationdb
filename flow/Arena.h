@@ -625,7 +625,9 @@ public:
 
 	// Copies string contents to dst and returns a pointer to the next byte after
 	uint8_t* copyTo(uint8_t* dst) const {
-		memcpy(dst, data, length);
+		if (length > 0) {
+			memcpy(dst, data, length);
+		}
 		return dst + length;
 	}
 

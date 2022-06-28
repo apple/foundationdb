@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/RESTUtils.h"
+#include "fdbclient/RESTUtils.h"
 
 #include "flow/flat_buffers.h"
 #include "flow/UnitTest.h"

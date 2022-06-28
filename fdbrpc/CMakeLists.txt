@@ -1,4 +1,5 @@
 set(FDBRPC_SRCS
+  ActorFuzz.h
   AsyncFileCached.actor.h
   AsyncFileChaos.h
   AsyncFileEIO.actor.h
@@ -10,46 +11,64 @@ set(FDBRPC_SRCS
   AsyncFileCached.actor.cpp
   AsyncFileEncrypted.actor.cpp
   AsyncFileNonDurable.actor.cpp
+  AsyncFileWriteChecker.h
   AsyncFileWriteChecker.cpp
   Base64UrlDecode.h
   Base64UrlDecode.cpp
   Base64UrlEncode.h
   Base64UrlEncode.cpp
+  ContinuousSample.h
+  FailureMonitor.h
   FailureMonitor.actor.cpp
+  fdbrpc.h
   FlowProcess.actor.h
+  FlowTransport.h
   FlowTransport.actor.cpp
   genericactors.actor.h
   genericactors.actor.cpp
+  HealthMonitor.h
   HealthMonitor.actor.cpp
-  HTTP.actor.cpp
-  IAsyncFile.actor.cpp
+  IPAllowList.h
   IPAllowList.cpp
-  LoadBalance.actor.cpp
+  linux_kaio.h
+  LoadBalance.h
   LoadBalance.actor.h
+  LoadBalance.actor.cpp
+  Locality.h
   Locality.cpp
+  MultiInterface.h
+  Net2FileSystem.h
   Net2FileSystem.cpp
   networksender.actor.h
   PerfMetric.cpp
   PerfMetric.h
+  QueueModel.h
   QueueModel.cpp
+  RangeMap.h
+  Replication.h
+  ReplicationPolicy.h
   ReplicationPolicy.cpp
+  ReplicationTypes.h
   ReplicationTypes.cpp
+  ReplicationUtils.h
   ReplicationUtils.cpp
-  RESTClient.h
-  RESTClient.actor.cpp
-  RESTUtils.h
-  RESTUtils.actor.cpp
   SimExternalConnection.actor.cpp
   SimExternalConnection.h
+  Smoother.h
   Stats.actor.cpp
   Stats.h
+  simulator.h
   sim2.actor.cpp
+  sim_validation.h
   sim_validation.cpp
+  TenantInfo.h
   TimedRequest.h
   TokenSign.h
   TokenSign.cpp
+  TraceFileIO.h
   TraceFileIO.cpp
-  TSSComparison.h)
+  TSSComparison.h
+  WellKnownEndpoints.h)
 
 set(COMPILE_EIO OFF)
 
@@ -105,6 +124,11 @@ if(${COROUTINE_IMPL} STREQUAL libcoro)
     list(APPEND CORO_SRCS libcoroutine/context.c)
   endif()
   add_library(coro STATIC ${CORO_SRCS})
+  target_include_directories(coro PRIVATE ${CMAKE_BINARY_DIR}/flow/include)
+  target_include_directories(coro PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/libcoroutine)
+  # we don't want to link against flow, but we need tob make sure it is built first
+  # since we rely on files being copied because we include Platform.h
+  add_dependencies(coro flow)
   if(WIN32)
     target_compile_definitions(coro PRIVATE USE_FIBERS)
   else()
@@ -114,6 +138,6 @@ if(${COROUTINE_IMPL} STREQUAL libcoro)
   if(USE_VALGRIND)
     target_link_libraries(coro PUBLIC Valgrind)
   endif()
-  target_link_libraries(fdbrpc PRIVATE coro)
-  target_link_libraries(fdbrpc_sampling PRIVATE coro)
+  target_link_libraries(fdbrpc PUBLIC coro)
+  target_link_libraries(fdbrpc_sampling PUBLIC coro)
 endif()

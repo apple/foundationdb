@@ -23,7 +23,7 @@
 #include <boost/lexical_cast.hpp>
 
 #include "fdbclient/FDBTypes.h"
-#include "fdbrpc/IAsyncFile.h"
+#include "flow/IAsyncFile.h"
 #include "fdbrpc/Locality.h"
 #include "fdbclient/GlobalConfig.actor.h"
 #include "fdbclient/ProcessInterface.h"
@@ -3026,7 +3026,7 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderWithDelayedCandidacyImplOneGenerati
 						    .detail("CurrentConnectionString",
 						            info.intermediateConnRecord->getConnectionString().toString());
 					}
-					connRecord->setAndPersistConnectionString(info.intermediateConnRecord->getConnectionString());
+					wait(connRecord->setAndPersistConnectionString(info.intermediateConnRecord->getConnectionString()));
 					info.intermediateConnRecord = connRecord;
 				}
 

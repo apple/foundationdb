@@ -49,6 +49,7 @@
 #include "flow/UnitTest.h"
 
 class TCTeamInfo;
+class TCTenantInfo;
 class TCMachineInfo;
 class TCMachineTeamInfo;
 
