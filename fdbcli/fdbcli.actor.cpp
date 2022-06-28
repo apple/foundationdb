@@ -63,7 +63,7 @@
 
 #ifdef __unixish__
 #include <stdio.h>
-#include "fdbcli/linenoise/linenoise.h"
+#include "linenoise/linenoise.h"
 #endif
 
 #include "fdbclient/versions.h"
