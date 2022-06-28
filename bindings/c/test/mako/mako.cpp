@@ -136,28 +136,31 @@ int cleanup(Database db, Arguments const& args) {
 	} else {
 		int batch_size = args.tenant_batch_size;
 		int batches = (args.total_tenants + batch_size - 1) / batch_size;
+		fdb::TypedFuture<fdb::future_var::ValueRef> tenantResults[batch_size];
+		// Issue all tenant reads first
+		Transaction getTx = db.createTransaction();
+		for (int i = 0; i < args.total_tenants; ++i) {
+			std::string tenant_name = "tenant" + std::to_string(i);
+			tenantResults[i] = Tenant::getTenant(getTx, toBytesRef(tenant_name));
+		}
 		// First loop to clear all tenant key ranges
 		for (int batch = 0; batch < batches; ++batch) {
 			for (int i = batch * batch_size; i < args.total_tenants && i < (batch + 1) * batch_size; ++i) {
 				std::string tenant_name = "tenant" + std::to_string(i);
-				// New transaction to get the tenant metadata
-				Transaction getTx = db.createTransaction();
 				while (true) {
-					auto result = Tenant::getTenant(getTx, toBytesRef(tenant_name));
-					const auto rc = waitAndHandleError(getTx, result, "GET_TENANT");
+					const auto rc = waitAndHandleError(getTx, tenantResults[i], "GET_TENANT");
 					if (rc == FutureRC::OK) {
 						// Read the tenant metadata for the prefix and issue a range clear
-						if (result.get().has_value()) {
-							auto val = result.get().value();
+						if (tenantResults[i].get().has_value()) {
+							auto val = tenantResults[i].get().value();
 							const char* metadata = reinterpret_cast<const char*>(val.data());
 							rapidjson::Document doc;
 							doc.Parse(metadata);
 							if (!doc.HasParseError()) {
 								std::string tenantPrefix = (doc["prefix"].GetString());
-								tx.clearRange(toBytesRef(tenantPrefix + "/"), toBytesRef(tenantPrefix + "0"));
+								tx.clearRange(toBytesRef(tenantPrefix), toBytesRef(strinc(tenantPrefix)));
 							}
 						}
-						getTx.reset();
 						break;
 					} else if (rc == FutureRC::RETRY) {
 						continue;
@@ -183,6 +186,7 @@ int cleanup(Database db, Arguments const& args) {
 			}
 		}
 		// Second loop to delete the tenants
+		tx.reset();
 		for (int batch = 0; batch < batches; ++batch) {
 			for (int i = batch * batch_size; i < args.total_tenants && i < (batch + 1) * batch_size; ++i) {
 				std::string tenant_name = "tenant" + std::to_string(i);

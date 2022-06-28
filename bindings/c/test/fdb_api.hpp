@@ -91,6 +91,22 @@ inline int intSize(BytesRef b) {
 	return static_cast<int>(b.size());
 }
 
+template <template <class...> class StringLike, class Char>
+ByteString strinc(const StringLike<Char>& s) {
+	int index;
+	for (index = s.size() - 1; index >= 0; index--)
+		if (s[index] != 255)
+			break;
+
+	// Must not be called with a string that consists only of zero or more '\xff' bytes.
+	assert(index >= 0);
+
+	auto result = (s.substr(0, index + 1));
+	ByteString byteResult(result.begin(), result.end());
+	byteResult[byteResult.size() - 1]++;
+	return byteResult;
+}
+
 class Error {
 public:
 	using CodeType = native::fdb_error_t;
