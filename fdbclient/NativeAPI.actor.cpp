@@ -3474,10 +3474,12 @@ ACTOR Future<Version> waitForCommittedVersion(Database cx, Version version, Span
 					cx->minAcceptableReadVersion = std::min(cx->minAcceptableReadVersion, v.version);
 					if (v.midShardSize > 0)
 						cx->smoothMidShardSize.setTotal(v.midShardSize);
-					if (cx->isCurrentGrvProxy(v.proxyId)) {
-						cx->ssVersionVectorCache.applyDelta(v.ssVersionVectorDelta);
-					} else {
-						cx->ssVersionVectorCache.clear();
+					if (cx->mayNeedToUpdateVersionVectorCache(v.ssVersionVectorDelta)) {
+						if (cx->isCurrentGrvProxy(v.proxyId)) {
+							cx->ssVersionVectorCache.applyDelta(v.ssVersionVectorDelta);
+						} else {
+							cx->ssVersionVectorCache.clear();
+						}
 					}
 					if (v.version >= version)
 						return v.version;
@@ -3506,10 +3508,12 @@ ACTOR Future<Version> getRawVersion(Reference<TransactionState> trState) {
 			                                                     TransactionPriority::IMMEDIATE,
 			                                                     trState->cx->ssVersionVectorCache.getMaxVersion()),
 			                               trState->cx->taskID))) {
-				if (trState->cx->isCurrentGrvProxy(v.proxyId)) {
-					trState->cx->ssVersionVectorCache.applyDelta(v.ssVersionVectorDelta);
-				} else {
-					trState->cx->ssVersionVectorCache.clear();
+				if (trState->cx->mayNeedToUpdateVersionVectorCache(v.ssVersionVectorDelta)) {
+					if (trState->cx->isCurrentGrvProxy(v.proxyId)) {
+						trState->cx->ssVersionVectorCache.applyDelta(v.ssVersionVectorDelta);
+					} else {
+						trState->cx->ssVersionVectorCache.clear();
+					}
 				}
 				return v.version;
 			}
@@ -6640,10 +6644,12 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion(SpanContext parentSpa
 						    "TransactionDebug", debugID.get().first(), "NativeAPI.getConsistentReadVersion.After");
 					ASSERT(v.version > 0);
 					cx->minAcceptableReadVersion = std::min(cx->minAcceptableReadVersion, v.version);
-					if (cx->isCurrentGrvProxy(v.proxyId)) {
-						cx->ssVersionVectorCache.applyDelta(v.ssVersionVectorDelta);
-					} else {
-						continue; // stale GRV reply, retry
+					if (cx->mayNeedToUpdateVersionVectorCache(v.ssVersionVectorDelta)) {
+						if (cx->isCurrentGrvProxy(v.proxyId)) {
+							cx->ssVersionVectorCache.applyDelta(v.ssVersionVectorDelta);
+						} else {
+							continue; // stale GRV reply, retry
+						}
 					}
 					return v;
 				}
@@ -6830,10 +6836,12 @@ ACTOR Future<Version> extractReadVersion(Reference<TransactionState> trState,
 	}
 
 	metadataVersion.send(rep.metadataVersion);
-	if (trState->cx->isCurrentGrvProxy(rep.proxyId)) {
-		trState->cx->ssVersionVectorCache.applyDelta(rep.ssVersionVectorDelta);
-	} else {
-		trState->cx->ssVersionVectorCache.clear();
+	if (trState->cx->mayNeedToUpdateVersionVectorCache(rep.ssVersionVectorDelta)) {
+		if (trState->cx->isCurrentGrvProxy(rep.proxyId)) {
+			trState->cx->ssVersionVectorCache.applyDelta(rep.ssVersionVectorDelta);
+		} else {
+			trState->cx->ssVersionVectorCache.clear();
+		}
 	}
 	return rep.version;
 }
