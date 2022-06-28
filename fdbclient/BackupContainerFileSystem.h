@@ -22,7 +22,7 @@
 #define FDBCLIENT_BACKUP_CONTAINER_FILESYSTEM_H
 #pragma once
 
-#include "contrib/fmt-8.1.1/include/fmt/format.h"
+#include "fmt/format.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/FDBTypes.h"
 #include "flow/Trace.h"

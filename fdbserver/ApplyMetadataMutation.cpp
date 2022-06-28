@@ -638,7 +638,7 @@ private:
 		if (m.param1.startsWith(tenantMapPrefix)) {
 			if (tenantMap) {
 				ASSERT(version != invalidVersion);
-				Standalone<StringRef> tenantName = m.param1.removePrefix(tenantMapPrefix);
+				TenantName tenantName = m.param1.removePrefix(tenantMapPrefix);
 				TenantMapEntry tenantEntry = decodeTenantEntry(m.param2);
 
 				TraceEvent("CommitProxyInsertTenant", dbgid).detail("Tenant", tenantName).detail("Version", version);

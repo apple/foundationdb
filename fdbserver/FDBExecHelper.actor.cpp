@@ -27,7 +27,7 @@
 #include "fdbrpc/FlowProcess.actor.h"
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/simulator.h"
-#include "fdbclient/WellKnownEndpoints.h"
+#include "fdbrpc/WellKnownEndpoints.h"
 #include "fdbclient/versions.h"
 #include "fdbserver/CoroFlow.h"
 #include "fdbserver/FDBExecHelper.actor.h"

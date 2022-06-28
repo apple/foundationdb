@@ -23,7 +23,7 @@
 #include <string>
 #include <vector>
 #include "fdbrpc/fdbrpc.h"
-#include "fdbrpc/IAsyncFile.h"
+#include "flow/IAsyncFile.h"
 #include "fdbserver/CoroFlow.h"
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/AsyncFileReadAhead.actor.h"

@@ -18,11 +18,11 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/RESTClient.h"
+#include "fdbclient/RESTClient.h"
 
-#include "fdbrpc/HTTP.h"
-#include "fdbrpc/IRateControl.h"
-#include "fdbrpc/RESTUtils.h"
+#include "fdbclient/HTTP.h"
+#include "flow/IRateControl.h"
+#include "fdbclient/RESTUtils.h"
 #include "flow/Arena.h"
 #include "flow/Error.h"
 #include "flow/FastRef.h"

@@ -26,7 +26,7 @@
 #endif
 
 #include <errno.h>
-#include "contrib/fmt-8.1.1/include/fmt/format.h"
+#include "fmt/format.h"
 #include "flow/Platform.h"
 #include "flow/Platform.actor.h"
 #include "flow/Arena.h"
@@ -53,10 +53,6 @@
 #include <fcntl.h>
 #include "flow/UnitTest.h"
 #include "flow/FaultInjection.h"
-
-#include "fdbrpc/IAsyncFile.h"
-
-#include "fdbclient/AnnotateActor.h"
 
 #ifdef _WIN32
 #include <windows.h>

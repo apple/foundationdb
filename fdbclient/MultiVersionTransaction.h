@@ -23,7 +23,7 @@
 #include "flow/ProtocolVersion.h"
 #pragma once
 
-#include "bindings/c/foundationdb/fdb_c_options.g.h"
+#include "fdbclient/fdb_c_options.g.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/IClientApi.h"
@@ -685,7 +685,7 @@ class MultiVersionApi;
 // it connects with a different version.
 class MultiVersionTenant final : public ITenant, ThreadSafeReferenceCounted<MultiVersionTenant> {
 public:
-	MultiVersionTenant(Reference<MultiVersionDatabase> db, StringRef tenantName);
+	MultiVersionTenant(Reference<MultiVersionDatabase> db, TenantNameRef tenantName);
 	~MultiVersionTenant() override;
 
 	Reference<ITransaction> createTransaction() override;
@@ -699,7 +699,7 @@ public:
 	// A struct that manages the current connection state of the MultiVersionDatabase. This wraps the underlying
 	// IDatabase object that is currently interacting with the cluster.
 	struct TenantState : ThreadSafeReferenceCounted<TenantState> {
-		TenantState(Reference<MultiVersionDatabase> db, StringRef tenantName);
+		TenantState(Reference<MultiVersionDatabase> db, TenantNameRef tenantName);
 
 		// Creates a new underlying tenant object whenever the database connection changes. This change is signaled
 		// to open transactions via an AsyncVar.
@@ -709,7 +709,7 @@ public:
 		void close();
 
 		Reference<ThreadSafeAsyncVar<Reference<ITenant>>> tenantVar;
-		const Standalone<StringRef> tenantName;
+		const TenantName tenantName;
 
 		Reference<MultiVersionDatabase> db;
 

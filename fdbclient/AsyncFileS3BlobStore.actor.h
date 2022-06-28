@@ -31,10 +31,10 @@
 #include <sstream>
 #include <time.h>
 
-#include "fdbrpc/IAsyncFile.h"
+#include "flow/IAsyncFile.h"
 #include "flow/serialize.h"
 #include "flow/Net2Packet.h"
-#include "fdbrpc/IRateControl.h"
+#include "flow/IRateControl.h"
 #include "fdbclient/S3BlobStore.h"
 #include "fdbclient/md5/md5.h"
 #include "fdbclient/libb64/encode.h"

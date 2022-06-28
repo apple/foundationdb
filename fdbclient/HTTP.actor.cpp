@@ -18,10 +18,12 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/HTTP.h"
+#include "fdbclient/HTTP.h"
 
 #include "fdbclient/md5/md5.h"
+#include "fdbclient/ClientKnobs.h"
 #include "fdbclient/libb64/encode.h"
+#include "fdbclient/Knobs.h"
 #include <cctype>
 
 #include "flow/actorcompiler.h" // has to be last include
