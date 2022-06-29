@@ -78,9 +78,9 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 		loop {
 			EKPGetLatestBaseCipherKeysRequest req;
 			req.encryptDomainInfos = self->domainInfos;
-			if (deterministicRandom()->randomInt(0, 100) < 50) {
-				req.debugId = deterministicRandom()->randomUniqueID();
-			}
+			// if (deterministicRandom()->randomInt(0, 100) < 50) {
+			req.debugId = deterministicRandom()->randomUniqueID();
+			//}
 			ErrorOr<EKPGetLatestBaseCipherKeysReply> rep = wait(self->ekpInf.getLatestBaseCipherKeys.tryGetReply(req));
 			if (rep.present()) {
 

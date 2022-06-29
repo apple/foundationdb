@@ -54,8 +54,8 @@ const (
 
 // PodClient is a wrapper around the pod API.
 type PodClient struct {
-	// podApi is the raw API
-	podApi typedv1.PodInterface
+	// podAPI is the raw API
+	podAPI typedv1.PodInterface
 
 	// pod is the latest pod configuration
 	pod *corev1.Pod
@@ -79,13 +79,13 @@ func CreatePodClient(logger logr.Logger) (*PodClient, error) {
 		return nil, err
 	}
 
-	podApi := client.CoreV1().Pods(os.Getenv("FDB_POD_NAMESPACE"))
-	pod, err := podApi.Get(context.Background(), os.Getenv("FDB_POD_NAME"), metav1.GetOptions{ResourceVersion: "0"})
+	podAPI := client.CoreV1().Pods(os.Getenv("FDB_POD_NAMESPACE"))
+	pod, err := podAPI.Get(context.Background(), os.Getenv("FDB_POD_NAME"), metav1.GetOptions{ResourceVersion: "0"})
 	if err != nil {
 		return nil, err
 	}
 
-	podClient := &PodClient{podApi: podApi, pod: pod, TimestampFeed: make(chan int64, 10), Logger: logger}
+	podClient := &PodClient{podAPI: podAPI, pod: pod, TimestampFeed: make(chan int64, 10), Logger: logger}
 	err = podClient.watchPod()
 	if err != nil {
 		return nil, err
@@ -129,12 +129,12 @@ func (client *PodClient) UpdateAnnotations(monitor *Monitor) error {
 		},
 	}
 
-	patchJson, err := json.Marshal(patch)
+	patchJSON, err := json.Marshal(patch)
 	if err != nil {
 		return err
 	}
 
-	pod, err := client.podApi.Patch(context.Background(), client.pod.Name, types.MergePatchType, patchJson, metav1.PatchOptions{})
+	pod, err := client.podAPI.Patch(context.Background(), client.pod.Name, types.MergePatchType, patchJSON, metav1.PatchOptions{})
 	if err != nil {
 		return err
 	}
@@ -144,7 +144,7 @@ func (client *PodClient) UpdateAnnotations(monitor *Monitor) error {
 
 // watchPod starts a watch on the pod.
 func (client *PodClient) watchPod() error {
-	podWatch, err := client.podApi.Watch(
+	podWatch, err := client.podAPI.Watch(
 		context.Background(),
 		metav1.ListOptions{
 			Watch:           true,
