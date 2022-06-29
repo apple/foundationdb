@@ -157,7 +157,7 @@ private:
 
 		execTransaction(
 		    [this, begin, end, results](auto ctx) {
-          // Clear the results vector, in case the transaction is retried.
+			    // Clear the results vector, in case the transaction is retried.
 			    results->clear();
 
 			    getRangeLoop(ctx,
