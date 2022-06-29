@@ -8,7 +8,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, OwnedSemaphorePermit, Semaphore};
 use tower::Service;
 
-use std::net::SocketAddr;
+use std::net::{SocketAddr, IpAddr, Ipv4Addr};
 use std::ops::Deref;
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -137,6 +137,7 @@ impl std::fmt::Debug for ConnectionHandler {
 
 impl ConnectionHandler {
     async fn new(
+        listen_addr: Option<SocketAddr>,
         socket: (TcpStream, SocketAddr),
         permit: OwnedSemaphorePermit,
         request_router: Arc<RequestRouter>,
@@ -144,15 +145,23 @@ impl ConnectionHandler {
         let (stream, peer) = socket;
         // TODO: Backpressure?
         let (response_tx, response_rx) = tokio::sync::mpsc::unbounded_channel::<FlowMessage>();
-        let connection_handler = ConnectionHandler {
+        let mut connection_handler = ConnectionHandler {
             peer,
             fit: FileIdentifierNames::new().unwrap(),
             response_tx,
             request_router,
         };
-        let (reader, writer, connect_packet) = connection::new(stream).await?;
+        let (reader, writer, connect_packet) = connection::new(listen_addr, stream).await?;
+        if connect_packet.version != 0xfdb00b072000000 {
+            return Err(format!("Incompatible protocol in connect packet {:x?}", connect_packet).into())
+        }
+        
         // TODO: Check protocol compatibility, create object w/ enough info to allow request routing
         println!("{} {:x?}", peer, connect_packet);
+        if connect_packet.canonical_remote_ip4 != 0 {
+            let octet = connect_packet.canonical_remote_ip4.to_le_bytes();
+            connection_handler.peer = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(octet[0], octet[1], octet[2], octet[3])), connect_packet.canonical_remote_port);
+        }
         let connection_handler = Arc::new(connection_handler);
         spawn_sender(response_rx, writer);
         spawn_receiver(
@@ -165,16 +174,18 @@ impl ConnectionHandler {
     }
 
     pub async fn new_outgoing_connection(
+        listen_addr: Option<SocketAddr>,
         saddr: SocketAddr,
         request_router: Arc<RequestRouter>,
     ) -> Result<Arc<ConnectionHandler>> {
         let conn = TcpStream::connect(saddr).await?;
         let limit_connections = Arc::new(Semaphore::new(1));
         let permit = limit_connections.clone().acquire_owned().await?;
-        ConnectionHandler::new((conn, saddr), permit, request_router).await
+        ConnectionHandler::new(listen_addr, (conn, saddr), permit, request_router).await
     }
 
     async fn listener(
+        listen_addr: SocketAddr,
         bind: TcpListener,
         limit_connections: Arc<Semaphore>,
         tx: mpsc::Sender<Arc<ConnectionHandler>>,
@@ -183,19 +194,19 @@ impl ConnectionHandler {
         loop {
             let permit = limit_connections.clone().acquire_owned().await?;
             let socket = bind.accept().await?;
-            tx.send(ConnectionHandler::new(socket, permit, request_router.clone()).await?)
+            tx.send(ConnectionHandler::new(Some(listen_addr), socket, permit, request_router.clone()).await?)
                 .await?; // Send will return error if the Receiver has been close()'ed.
         }
     }
 
     pub async fn new_listener(
-        addr: &str,
+        addr: SocketAddr,
         request_router: Arc<RequestRouter>,
     ) -> Result<mpsc::Receiver<Arc<ConnectionHandler>>> {
         let bind = TcpListener::bind(addr).await?;
         let limit_connections = Arc::new(Semaphore::new(MAX_CONNECTIONS));
         let (tx, rx) = mpsc::channel(100);
-        tokio::spawn(Self::listener(bind, limit_connections, tx, request_router));
+        tokio::spawn(Self::listener(addr, bind, limit_connections, tx, request_router));
         Ok(rx)
     }
     fn handle_req(&self, request: FlowMessage) -> Result<Option<FlowFuture>> {

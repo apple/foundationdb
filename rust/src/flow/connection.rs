@@ -1,6 +1,7 @@
 use super::frame::{ConnectPacket, Frame, FrameDecoder, FrameEncoder};
 use super::Result;
 use tokio_util::codec::{Decoder, Encoder};
+use std::net::SocketAddr;
 
 use bytes::BytesMut;
 use tokio::io::{
@@ -14,13 +15,14 @@ pub struct ConnectionReader<R: AsyncRead> {
 }
 
 pub struct ConnectionWriter<W: AsyncWrite> {
+    listen_addr: Option<SocketAddr>,
     writer: BufWriter<W>,
     buf: BytesMut,
     frame_encoder: FrameEncoder,
 }
 
 pub async fn new<C: AsyncRead + AsyncWrite + Unpin + Send>(
-    c: C,
+    listen_addr: Option<SocketAddr>, c: C,
 ) -> Result<(
     ConnectionReader<ReadHalf<C>>,
     ConnectionWriter<WriteHalf<C>>,
@@ -33,6 +35,7 @@ pub async fn new<C: AsyncRead + AsyncWrite + Unpin + Send>(
         frame_decoder: FrameDecoder::new(),
     };
     let mut writer = ConnectionWriter {
+        listen_addr,
         writer: BufWriter::new(writer),
         buf: BytesMut::new(),
         frame_encoder: FrameEncoder::new(),
@@ -45,7 +48,7 @@ pub async fn new<C: AsyncRead + AsyncWrite + Unpin + Send>(
 
 impl<W: AsyncWrite + Unpin> ConnectionWriter<W> {
     pub async fn write_connnect_packet(&mut self) -> Result<()> {
-        ConnectPacket::new().serialize(&mut self.buf)?;
+        ConnectPacket::new(self.listen_addr)?.serialize(&mut self.buf)?;
         self.flush().await?;
         Ok(())
     }

@@ -18,6 +18,7 @@ flatbuffers = { version = "2.1" }
 futures-util = { version = "0.3.1", default-features = false }
 num-traits = "0.2"
 num-derive = "0.3"
+pin-project = "1.0"
 tokio = { version = "1.10", features = ["full"] }
 tokio-util = { version = "0.7", features = ["codec"] }
 tower = { version = "0.4.12", features = ["full"] }

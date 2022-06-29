@@ -6,6 +6,7 @@ use num_derive::{FromPrimitive, ToPrimitive};
 use num_traits::{FromPrimitive, ToPrimitive};
 use tokio_util::codec::{Decoder, Encoder};
 use xxhash_rust::xxh3;
+use std::net::SocketAddr;
 
 // TODO:  Figure out what this is set to on the C++ side.
 const MAX_FDB_FRAME_LENGTH: u32 = 1024 * 1024;
@@ -43,25 +44,30 @@ pub enum ConnectPacketFlags {
 #[derive(Debug)]
 pub struct ConnectPacket {
     version_flags: u8, // Really just 4 bits
-    version: u64,      // protocol version bytes.  Human readable in hex.
-    canonical_remote_port: u16,
+    pub version: u64,      // protocol version bytes.  Human readable in hex.
+    pub canonical_remote_port: u16,
     connection_id: u64,
-    canonical_remote_ip4: u32,
+    pub canonical_remote_ip4: u32,
     connect_packet_flags: ConnectPacketFlags, // 16 bits on wire
     canonical_remote_ip6: [u8; 16],
 }
 
 impl ConnectPacket {
-    pub fn new() -> Self {
-        ConnectPacket {
+    pub fn new(listen_addr: Option<SocketAddr>) -> Result<Self> {
+        let (ip4, port) = match listen_addr {
+            None => (0,0),
+            Some(SocketAddr::V4(v4)) => (u32::from_le_bytes(v4.ip().octets()), v4.port()),
+            Some(_) => return Err(format!("Unimplemented SocketAddr type: {:?}", listen_addr).into()),
+        };
+        Ok(ConnectPacket {
             version_flags: 1, // TODO: set these to real values!
             version: 0xfdb00b072000000,
-            canonical_remote_port: 6789,
+            canonical_remote_port: port, // 6789,
             connection_id: 1,
-            canonical_remote_ip4: 0x7f00_0001,
+            canonical_remote_ip4: ip4, // 0x7f00_0001,
             connect_packet_flags: ConnectPacketFlags::IPV4,
             canonical_remote_ip6: [0; 16],
-        }
+        })
     }
     pub fn serialize(&self, buf: &mut BytesMut) -> Result<()> {
         //let len_sz: usize = 4;

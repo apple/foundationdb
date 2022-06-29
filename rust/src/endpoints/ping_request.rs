@@ -10,7 +10,7 @@ mod void;
 use crate::flow::file_identifier::{FileIdentifier, IdentifierType, ParsedFileIdentifier};
 use crate::flow::uid::{UID, WLTOKEN};
 use crate::flow::{Flow, FlowFuture, FlowMessage, Frame, Peer, Result};
-use crate::services::RequestRouter;
+use crate::services::ConnectionKeeper;
 use std::net::SocketAddr;
 
 const PING_REQUEST_FILE_IDENTIFIER: ParsedFileIdentifier = ParsedFileIdentifier {
@@ -111,7 +111,7 @@ pub fn handler(msg: FlowMessage) -> FlowFuture {
     Box::pin(handle(msg))
 }
 
-pub async fn ping(peer: SocketAddr, svc: &RequestRouter) -> Result<()> {
+pub async fn ping(peer: SocketAddr, svc: &ConnectionKeeper) -> Result<()> {
     let req = serialize_request(peer)?;
     let response_frame = svc.rpc(req).await?;
     deserialize_response(response_frame.frame)

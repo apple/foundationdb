@@ -276,6 +276,7 @@ dependencies = [
  "fxhash",
  "num-derive",
  "num-traits",
+ "pin-project",
  "tokio",
  "tokio-util",
  "tower",

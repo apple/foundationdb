@@ -57,6 +57,14 @@ impl RequestRouter {
             }
         }
     }
+    // pub async fn is_routable(&self, req: FlowMessage) -> bool {
+    //     match &req.flow.dst {
+    //         Peer::Local(_) => true,
+    //         Peer::Remote(socket_addr) => {
+    //             self.remote_endpoints.contains_key(socket_addr)
+    //         }
+    //     }
+    // }
     pub async fn rpc(&self, req: FlowMessage) -> Result<FlowMessage> {
         match &req.flow.src {
             Peer::Local(Some(uid)) => {

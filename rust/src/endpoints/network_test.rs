@@ -9,7 +9,7 @@ mod network_test_response;
 use crate::flow::file_identifier::{FileIdentifier, IdentifierType, ParsedFileIdentifier};
 use crate::flow::uid::{UID, WLTOKEN};
 use crate::flow::{Flow, FlowFuture, FlowMessage, Frame, Peer, Result};
-use crate::services::RequestRouter;
+use crate::services::ConnectionKeeper;
 
 use flatbuffers::{FlatBufferBuilder, FLATBUFFERS_MAX_BUFFER_SIZE};
 
@@ -78,8 +78,7 @@ pub fn serialize_request(
 
 fn serialize_response(token: UID, reply_size: usize) -> Result<Frame> {
     use network_test_response::{
-        EnsureTable, EnsureTableArgs, ErrorOr, FakeRoot, FakeRootArgs, NetworkTestResponse,
-        NetworkTestResponseArgs,
+        ErrorOr, FakeRoot, FakeRootArgs, NetworkTestResponse, NetworkTestResponseArgs,
     };
     let mut builder = FlatBufferBuilder::with_capacity(usize::min(
         128 + (reply_size),
@@ -97,17 +96,12 @@ fn serialize_response(token: UID, reply_size: usize) -> Result<Frame> {
             payload: Some(payload),
         },
     );
-    let ensure_table = EnsureTable::create(
-        &mut builder,
-        &EnsureTableArgs {
-            network_test_response: Some(network_test_response),
-        },
-    );
+
     let fake_root = FakeRoot::create(
         &mut builder,
         &FakeRootArgs {
-            error_or_type: ErrorOr::EnsureTable,
-            error_or: Some(ensure_table.as_union_value()),
+            error_or_type: ErrorOr::NetworkTestResponse,
+            error_or: Some(network_test_response.as_union_value()),
         },
     );
     builder.finish(fake_root, Some("myfi"));
@@ -151,7 +145,7 @@ pub fn handler(msg: FlowMessage) -> FlowFuture {
 
 pub async fn network_test(
     peer: SocketAddr,
-    svc: &RequestRouter,
+    svc: &ConnectionKeeper,
     request_sz: u32,
     response_sz: u32,
 ) -> Result<()> {

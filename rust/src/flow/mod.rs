@@ -12,7 +12,6 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub type Frame = frame::Frame;
 
 use file_identifier::FileIdentifier;
-use std::clone::Clone;
 use std::future::Future;
 use std::net::SocketAddr;
 use uid::UID;
