@@ -3274,6 +3274,7 @@ public:
 		}
 
 		state int addedTeams = 0;
+		state int teamsSize = self->teams.size();
 		while (addedTeams < teamsToBuild || self->notEnoughTeamsForAServer()) {
 			// Step 1: Create 1 best machine team
 			std::vector<UID> bestServerTeam;
@@ -3363,12 +3364,13 @@ public:
 			// Step 4: Add the server team
 			self->addTeam(bestServerTeam.begin(), bestServerTeam.end(), IsInitialTeam::False);
 			addedTeams++;
+			teamsSize = self->teams.size();
 
 			// Yield to higher priority tasks; prevents this from becoming a slow task
-			// TODO(akejriwal)
-			if (addedTeams != 0 && (addedTeams % (g_network->isSimulated() ? 10 : 100) == 0)) {
+			if (addedTeams != 0 && (addedTeams % (g_network->isSimulated() ? 2 : 100) == 0)) {
 				wait(yield());
 			}
+			ASSERT_EQ(teamsSize, self->teams.size());
 		}
 
 		int currentHealthyMachineTeamCount = self->getHealthyMachineTeamCount();
