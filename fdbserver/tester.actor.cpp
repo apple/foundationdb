@@ -1038,7 +1038,6 @@ ACTOR Future<Void> checkConsistency(Database cx,
 		if (testResults.ok() || lastRun) {
 			if (g_network->isSimulated()) {
 				g_simulator.connectionFailuresDisableDuration = connectionFailures;
-				g_simulator.speedUpSimulation = false;
 			}
 			return Void();
 		}
