@@ -22,11 +22,11 @@ async fn sender<C: 'static + AsyncWrite + Unpin + Send>(
     mut writer: connection::ConnectionWriter<C>,
 ) -> Result<()> {
     while let Some(message) = response_rx.recv().await {
-        writer.write_frame(message.frame).await?;
+        writer.write_frame(&message.frame).await?;
         loop {
             match response_rx.try_recv() {
                 Ok(message) => {
-                    writer.write_frame(message.frame).await.unwrap();
+                    writer.write_frame(&message.frame).await.unwrap();
                 }
                 Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
                     writer.flush().await.unwrap();

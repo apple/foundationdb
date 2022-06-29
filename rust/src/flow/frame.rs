@@ -332,10 +332,10 @@ impl FrameEncoder {
         FrameEncoder {}
     }
 }
-impl Encoder<Frame> for FrameEncoder {
+impl Encoder<&Frame> for FrameEncoder {
     type Error = super::Error;
 
-    fn encode(&mut self, frame: Frame, dst: &mut BytesMut) -> super::Result<()> {
+    fn encode(&mut self, frame: &Frame, dst: &mut BytesMut) -> super::Result<()> {
         frame.append_to_buf(dst)
     }
 }

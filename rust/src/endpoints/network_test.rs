@@ -8,7 +8,7 @@ mod network_test_response;
 
 use crate::flow::file_identifier::{FileIdentifier, IdentifierType, ParsedFileIdentifier};
 use crate::flow::uid::{UID, WLTOKEN};
-use crate::flow::{Flow, FlowFuture, FlowMessage, Frame, Peer, Result};
+use crate::flow::{Flow, FlowFuture, FlowMessage, FlowResponse, Frame, Peer, Result};
 use crate::services::ConnectionKeeper;
 
 use flatbuffers::{FlatBufferBuilder, FLATBUFFERS_MAX_BUFFER_SIZE};
@@ -118,7 +118,7 @@ pub fn deserialize_response(frame: Frame) -> Result<()> {
     println!("got network test response");
     Ok(())
 }
-async fn handle(request: FlowMessage) -> Result<Option<FlowMessage>> {
+async fn handle(request: FlowMessage) -> Result<FlowResponse> {
     request
         .file_identifier()
         .ensure_expected(NETWORK_TEST_REQUEST_IDENTIFIER)?;

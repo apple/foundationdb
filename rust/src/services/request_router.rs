@@ -37,7 +37,6 @@ impl RequestRouter {
         handler.as_ref().call(request).await
     }
     fn handle_req(&self, request: FlowMessage) -> Result<Option<FlowFuture>> {
-        request.validate()?;
         match &request.flow.dst {
             Peer::Local(_) => {
                 // TODO: check completion?
@@ -68,24 +67,45 @@ impl RequestRouter {
     pub async fn rpc(&self, req: FlowMessage) -> Result<FlowMessage> {
         match &req.flow.src {
             Peer::Local(Some(uid)) => {
-                let (tx, rx) = oneshot::channel();
-                self.local_endpoint
-                    .in_flight_requests
-                    .insert(uid.clone(), tx);
-                let res = match self.handle_req(req)? {
-                    Some(fut) => fut.await?,
-                    None => None,
-                };
-                Ok(rx.await?)
+                match &req.flow.dst {
+                    Peer::Local(_) => {
+                        match self.handle_req(req)? {
+                            Some(fut) => match fut.await? {
+                                Some(res) => Ok(res),
+                                None => Err("Missing response from local RPC handler!".into())
+                            }
+                            None => Err("Missing response from local RPC handler!".into()),
+                        }
+                    },
+                    Peer::Remote(_) => {
+                        let (tx, rx) = oneshot::channel();
+                        self.local_endpoint
+                            .in_flight_requests
+                            .insert(uid.clone(), tx);
+                        let res = match self.handle_req(req)? {
+                            Some(fut) => fut.await?,
+                            None => None,
+                        };
+                        match res {
+                            Some(res) => Err(format!("Unexpected local result generated when sending RPC: {:?}", res).into()),
+                            None => Ok(rx.await?)
+                        }
+                    },
+                }
+            },
+            Peer::Local(None) => {
+                Err("attempt to dispatch RPC without a completion token".into())
             }
-            src => Err(format!(
-                "attempt to dispatch RPC without a completion token. src: {:?}",
-                src
-            )
-            .into()),
+            Peer::Remote(src) => {
+                Err(format!(
+                    "attempt to dispatch RPC from another process. src: {:?}",
+                    src
+                ).into())
+            },
         }
     }
 }
+
 
 impl Service<FlowMessage> for &RequestRouter {
     type Response = Option<FlowMessage>;

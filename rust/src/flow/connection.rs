@@ -53,7 +53,7 @@ impl<W: AsyncWrite + Unpin> ConnectionWriter<W> {
         Ok(())
     }
 
-    pub async fn write_frame(&mut self, frame: Frame) -> Result<()> {
+    pub async fn write_frame(&mut self, frame: &Frame) -> Result<()> {
         self.frame_encoder.encode(frame, &mut self.buf)?;
         if self.buf.len() > 1_000_000 {
             self.writer.write_all(&self.buf).await?;

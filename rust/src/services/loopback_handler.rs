@@ -35,8 +35,6 @@ impl LoopbackHandler {
     }
 
     fn handle_req(&self, request: FlowMessage) -> Result<Option<FlowFuture>> {
-        request.validate()?;
-
         match request.token().get_well_known_endpoint() {
             Some(wltoken) => match self.well_known_endpoints.get(&wltoken) {
                 Some(well_known_endpoint) => Ok(Some((**well_known_endpoint)(request))),
