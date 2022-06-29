@@ -6946,7 +6946,7 @@ void StorageServer::insertTenant(TenantNameRef tenantName,
 		tenantMap.createNewVersion(version);
 		tenantPrefixIndex.createNewVersion(version);
 
-		TenantMapEntry tenantEntry = decodeTenantEntry(value);
+		TenantMapEntry tenantEntry = TenantMapEntry::decode(value);
 
 		tenantMap.insert(tenantName, tenantEntry);
 		tenantPrefixIndex.insert(tenantEntry.prefix, tenantName);
@@ -7789,7 +7789,7 @@ void StorageServerDisk::makeNewStorageServerDurable() {
 
 	auto view = data->tenantMap.atLatest();
 	for (auto itr = view.begin(); itr != view.end(); ++itr) {
-		storage->set(KeyValueRef(itr.key().withPrefix(persistTenantMapKeys.begin), encodeTenantEntry(*itr)));
+		storage->set(KeyValueRef(itr.key().withPrefix(persistTenantMapKeys.begin), itr->encode()));
 	}
 }
 
@@ -8270,7 +8270,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	for (tenantMapLoc = 0; tenantMapLoc < tenantMap.size(); tenantMapLoc++) {
 		auto const& result = tenantMap[tenantMapLoc];
 		TenantName tenantName = result.key.substr(persistTenantMapKeys.begin.size());
-		TenantMapEntry tenantEntry = decodeTenantEntry(result.value);
+		TenantMapEntry tenantEntry = TenantMapEntry::decode(result.value);
 
 		data->tenantMap.insert(tenantName, tenantEntry);
 		data->tenantPrefixIndex.insert(tenantEntry.prefix, tenantName);

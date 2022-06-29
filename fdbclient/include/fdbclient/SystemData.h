@@ -631,9 +631,6 @@ extern const KeyRef tenantMapPrivatePrefix;
 extern const KeyRef tenantLastIdKey;
 extern const KeyRef tenantDataPrefixKey;
 
-Value encodeTenantEntry(TenantMapEntry const& tenantEntry);
-TenantMapEntry decodeTenantEntry(ValueRef const& value);
-
 #pragma clang diagnostic pop
 
 #endif
