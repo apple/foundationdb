@@ -7509,9 +7509,10 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			if (data->otherError.getFuture().isReady())
 				data->otherError.getFuture().get();
 
-			Version maxVersionsInMemory = (g_network->isSimulated() && g_simulator.speedUpSimulation)
-			                                  ? 5 * SERVER_KNOBS->VERSIONS_PER_SECOND
-			                                  : SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS;
+			Version maxVersionsInMemory =
+			    (g_network->isSimulated() && g_simulator.speedUpSimulation)
+			        ? std::max(5 * SERVER_KNOBS->VERSIONS_PER_SECOND, SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS)
+			        : SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS;
 			for (int i = 0; i < data->recoveryVersionSkips.size(); i++) {
 				maxVersionsInMemory += data->recoveryVersionSkips[i].second;
 			}
