@@ -564,6 +564,7 @@ public:
 	int64_t TLOG_RECOVER_MEMORY_LIMIT;
 	double TLOG_IGNORE_POP_AUTO_ENABLE_DELAY;
 
+	// Tag throttling
 	int64_t MAX_MANUAL_THROTTLED_TRANSACTION_TAGS;
 	int64_t MAX_AUTO_THROTTLED_TRANSACTION_TAGS;
 	double MIN_TAG_COST;
@@ -576,6 +577,17 @@ public:
 	double AUTO_TAG_THROTTLE_UPDATE_FREQUENCY;
 	double TAG_THROTTLE_EXPIRED_CLEANUP_INTERVAL;
 	bool AUTO_TAG_THROTTLING_ENABLED;
+	// Limit to the number of throttling tags each storage server
+	// will track and send to the ratekeeper
+	int64_t SS_THROTTLE_TAGS_TRACKED;
+	// Use global tag throttling strategy. i.e. throttle based on the cluster-wide
+	// throughput for tags and their associated quotas.
+	bool GLOBAL_TAG_THROTTLING;
+	// Minimum number of transactions per second that the global tag throttler must allow for each tag
+	double GLOBAL_TAG_THROTTLING_MIN_RATE;
+	// Used by global tag throttling counters
+	double GLOBAL_TAG_THROTTLING_FOLDING_TIME;
+	double GLOBAL_TAG_THROTTLING_TRACE_INTERVAL;
 
 	double MAX_TRANSACTIONS_PER_BYTE;
 
