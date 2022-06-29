@@ -25,6 +25,12 @@
 #include <openssl/evp.h>
 #include "flow/Arena.h"
 
+enum class PKeyAlgorithm {
+	UNSUPPORTED,
+	RSA,
+	EC,
+};
+
 struct PemEncoded {};
 struct DerEncoded {};
 
@@ -53,6 +59,12 @@ public:
 	// i2d_PUBKEY
 	StringRef writeDer(Arena& arena) const;
 
+	// EVP_PKEY_base_id()
+	PKeyAlgorithm algorithm() const;
+
+	// EVP_DigestVerify*
+	bool verify(StringRef data, StringRef signature, const EVP_MD& digest) const;
+
 	EVP_PKEY* nativeHandle() const noexcept { return ptr.get(); }
 
 	explicit operator bool() const noexcept { return static_cast<bool>(ptr); }
@@ -70,9 +82,6 @@ public:
 	// d2i_AutoPrivateKey
 	PrivateKey(DerEncoded, StringRef der);
 
-	// Unsafe. Use when you're sure of unsafePtr's content & lifetime
-	PrivateKey(std::shared_ptr<EVP_PKEY> unsafePtr);
-
 	PrivateKey(const PrivateKey& other) noexcept = default;
 
 	PrivateKey& operator=(const PrivateKey& other) noexcept = default;
@@ -89,11 +98,20 @@ public:
 	// i2d_PUBKEY
 	StringRef writePublicKeyDer(Arena& arena) const;
 
+	// EVP_PKEY_base_id()
+	PKeyAlgorithm algorithm() const;
+
 	EVP_PKEY* nativeHandle() const noexcept { return ptr.get(); }
 
 	explicit operator bool() const noexcept { return static_cast<bool>(ptr); }
 
+	// EVP_DigestSign*
+	StringRef sign(Arena& arena, StringRef data, const EVP_MD& digest) const;
+
+	// EVP_DigestVerify*
+	bool verify(StringRef data, StringRef signature, const EVP_MD& digest) const;
+
 	// Create a PublicKey independent of this key
-	PublicKey toPublicKey() const;
+	PublicKey toPublic() const;
 };
 #endif /*FLOW_PKEY_H*/

@@ -156,7 +156,15 @@ PrivateKey makeEcP256() {
 	OSSL_ASSERT(0 < ::EVP_PKEY_keygen_init(kctx));
 	OSSL_ASSERT(0 < ::EVP_PKEY_keygen(kctx, &key));
 	OSSL_ASSERT(key);
-	return std::shared_ptr<EVP_PKEY>(key, &::EVP_PKEY_free);
+	auto keyGuard = ScopeExit([key]() { ::EVP_PKEY_free(key); });
+	auto len = 0;
+	len = ::i2d_PrivateKey(key, nullptr);
+	ASSERT_LT(0, len);
+	auto tmpArena = Arena();
+	auto buf = new (tmpArena) uint8_t[len];
+	auto out = std::add_pointer_t<uint8_t>(buf);
+	len = ::i2d_PrivateKey(key, &out);
+	return PrivateKey(DerEncoded{}, StringRef(buf, len));
 }
 
 CertAndKeyNative makeCertNative(CertSpecRef spec, CertAndKeyNative issuer) {

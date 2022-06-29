@@ -304,9 +304,10 @@ StringRef signToken(Arena& arena, TokenRef tokenSpec, PrivateKey privateKey) {
 
 bool parseHeaderPart(TokenRef& token, StringRef b64urlHeader) {
 	auto tmpArena = Arena();
-	auto [header, valid] = base64url::decode(tmpArena, b64urlHeader);
-	if (!valid)
+	auto optHeader = base64url::decode(tmpArena, b64urlHeader);
+	if (!optHeader.present())
 		return false;
+	auto header = optHeader.get();
 	auto d = rapidjson::Document();
 	d.Parse(reinterpret_cast<const char*>(header.begin()), header.size());
 	if (d.HasParseError()) {
@@ -317,9 +318,11 @@ bool parseHeaderPart(TokenRef& token, StringRef b64urlHeader) {
 		    .detail("Offset", d.GetErrorOffset());
 		return false;
 	}
-	if (d.IsObject() && d.HasMember("alg") && d.HasMember("typ")) {
-		auto const& alg = d["alg"];
-		auto const& typ = d["typ"];
+	auto algItr = d.FindMember("alg");
+	auto typItr = d.FindMember("typ");
+	if (d.IsObject() && algItr != d.MemberEnd() && typItr != d.MemberEnd()) {
+		auto const& alg = algItr->value;
+		auto const& typ = typItr->value;
 		if (alg.IsString() && typ.IsString()) {
 			auto algValue = StringRef(reinterpret_cast<const uint8_t*>(alg.GetString()), alg.GetStringLength());
 			auto algType = algorithmFromString(algValue);
@@ -337,9 +340,10 @@ bool parseHeaderPart(TokenRef& token, StringRef b64urlHeader) {
 
 template <class FieldType>
 bool parseField(Arena& arena, Optional<FieldType>& out, const rapidjson::Document& d, const char* fieldName) {
-	if (!d.HasMember(fieldName))
+	auto fieldItr = d.FindMember(fieldName);
+	if (fieldItr == d.MemberEnd())
 		return true;
-	auto const& field = d[fieldName];
+	auto const& field = fieldItr->value;
 	static_assert(std::is_same_v<StringRef, FieldType> || std::is_same_v<FieldType, uint64_t> ||
 	              std::is_same_v<FieldType, VectorRef<StringRef>>);
 	if constexpr (std::is_same_v<FieldType, StringRef>) {
@@ -371,7 +375,10 @@ bool parseField(Arena& arena, Optional<FieldType>& out, const rapidjson::Documen
 
 bool parsePayloadPart(Arena& arena, TokenRef& token, StringRef b64urlPayload) {
 	auto tmpArena = Arena();
-	auto [payload, valid] = base64url::decode(tmpArena, b64urlPayload);
+	auto optPayload = base64url::decode(tmpArena, b64urlPayload);
+	if (!optPayload.present())
+		return false;
+	auto payload = optPayload.get();
 	auto d = rapidjson::Document();
 	d.Parse(reinterpret_cast<const char*>(payload.begin()), payload.size());
 	if (d.HasParseError()) {
@@ -406,10 +413,11 @@ bool parsePayloadPart(Arena& arena, TokenRef& token, StringRef b64urlPayload) {
 }
 
 bool parseSignaturePart(Arena& arena, TokenRef& token, StringRef b64urlSignature) {
-	auto [sig, valid] = base64url::decode(arena, b64urlSignature);
-	if (valid)
-		token.signature = sig;
-	return valid;
+	auto optSig = base64url::decode(arena, b64urlSignature);
+	if (!optSig.present())
+		return false;
+	token.signature = optSig.get();
+	return true;
 }
 
 bool parseToken(Arena& arena, TokenRef& token, StringRef signedToken) {
@@ -436,9 +444,10 @@ bool verifyToken(StringRef signedToken, PublicKey publicKey) {
 	if (b64urlHeader.empty() || b64urlPayload.empty() || b64urlSignature.empty())
 		return false;
 	auto b64urlTokenPart = fullToken.substr(0, b64urlHeader.size() + 1 + b64urlPayload.size());
-	auto [sig, valid] = base64url::decode(arena, b64urlSignature);
-	if (!valid)
+	auto optSig = base64url::decode(arena, b64urlSignature);
+	if (!optSig.present())
 		return false;
+	auto sig = optSig.get();
 	auto parsedToken = TokenRef();
 	if (!parseHeaderPart(parsedToken, b64urlHeader))
 		return false;
@@ -485,14 +494,14 @@ TEST_CASE("/fdbrpc/TokenSign/FlatBuffer") {
 		auto tokenSpec = authz::flatbuffers::makeRandomTokenSpec(arena, rng);
 		auto keyName = genRandomAlphanumStringRef(arena, rng, MaxKeyNameLenPlus1);
 		auto signedToken = authz::flatbuffers::signToken(arena, tokenSpec, keyName, privateKey);
-		const auto verifyExpectOk = authz::flatbuffers::verifyToken(signedToken, privateKey.toPublicKey());
+		const auto verifyExpectOk = authz::flatbuffers::verifyToken(signedToken, privateKey.toPublic());
 		ASSERT(verifyExpectOk);
 		// try tampering with signed token by adding one more tenant
 		tokenSpec.tenants.push_back(arena, genRandomAlphanumStringRef(arena, rng, MaxTenantNameLenPlus1));
 		auto writer = ObjectWriter([&arena](size_t len) { return new (arena) uint8_t[len]; }, IncludeVersion());
 		writer.serialize(tokenSpec);
 		signedToken.token = writer.toStringRef();
-		const auto verifyExpectFail = authz::flatbuffers::verifyToken(signedToken, privateKey.toPublicKey());
+		const auto verifyExpectFail = authz::flatbuffers::verifyToken(signedToken, privateKey.toPublic());
 		ASSERT(!verifyExpectFail);
 	}
 	printf("%d runs OK\n", numIters);
@@ -507,7 +516,7 @@ TEST_CASE("/fdbrpc/TokenSign/JWT") {
 		auto& rng = *deterministicRandom();
 		auto tokenSpec = authz::jwt::makeRandomTokenSpec(arena, rng, authz::Algorithm::ES256);
 		auto signedToken = authz::jwt::signToken(arena, tokenSpec, privateKey);
-		const auto verifyExpectOk = authz::jwt::verifyToken(signedToken, privateKey.toPublicKey());
+		const auto verifyExpectOk = authz::jwt::verifyToken(signedToken, privateKey.toPublic());
 		ASSERT(verifyExpectOk);
 		auto signaturePart = signedToken;
 		signaturePart.eat("."_sr);
@@ -527,15 +536,15 @@ TEST_CASE("/fdbrpc/TokenSign/JWT") {
 			ASSERT_EQ(tokenSpec.expiresAtUnixTime.get(), parsedToken.expiresAtUnixTime.get());
 			ASSERT_EQ(tokenSpec.notBeforeUnixTime.get(), parsedToken.notBeforeUnixTime.get());
 			ASSERT(tokenSpec.tenants == parsedToken.tenants);
-			auto [sig, sigValid] = base64url::decode(tmpArena, signaturePart);
-			ASSERT(sigValid);
-			ASSERT(sig == parsedToken.signature);
+			auto optSig = base64url::decode(tmpArena, signaturePart);
+			ASSERT(optSig.present());
+			ASSERT(optSig.get() == parsedToken.signature);
 		}
 		// try tampering with signed token by adding one more tenant
 		tokenSpec.tenants.get().push_back(arena, genRandomAlphanumStringRef(arena, rng, MaxTenantNameLenPlus1));
 		auto tamperedTokenPart = makeTokenPart(arena, tokenSpec);
 		auto tamperedTokenString = fmt::format("{}.{}", tamperedTokenPart.toString(), signaturePart.toString());
-		const auto verifyExpectFail = authz::jwt::verifyToken(StringRef(tamperedTokenString), privateKey.toPublicKey());
+		const auto verifyExpectFail = authz::jwt::verifyToken(StringRef(tamperedTokenString), privateKey.toPublic());
 		ASSERT(!verifyExpectFail);
 	}
 	printf("%d runs OK\n", numIters);
@@ -549,7 +558,7 @@ TEST_CASE("/fdbrpc/TokenSign/bench") {
 	auto pubKeys = std::vector<PublicKey>(numSamples);
 	for (auto i = 0; i < numSamples; i++) {
 		keys[i] = mkcert::makeEcP256();
-		pubKeys[i] = keys[i].toPublicKey();
+		pubKeys[i] = keys[i].toPublic();
 	}
 	fmt::print("{} keys generated\n", numSamples);
 	auto& rng = *deterministicRandom();

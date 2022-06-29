@@ -24,6 +24,8 @@ set(FDBRPC_SRCS
   HTTP.actor.cpp
   IAsyncFile.actor.cpp
   IPAllowList.cpp
+  JsonWebKeySet.h
+  JsonWebKeySet.cpp
   LoadBalance.actor.cpp
   LoadBalance.actor.h
   Locality.cpp
