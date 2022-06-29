@@ -5,7 +5,7 @@ This is part of the libb64 project, and has been placed in the public domain.
 For details, see http://sourceforge.net/projects/libb64
 */
 
-#include "cdecode.h"
+#include "fdbclient/libb64/cdecode.h"
 
 int base64_decode_value(char value_in) {
 	static const char decoding[] = { 62, -1, -1, -1, 63, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, -1, -1, -1, -2, -1,

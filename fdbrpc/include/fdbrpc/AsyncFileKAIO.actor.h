@@ -40,7 +40,7 @@
 #include "flow/Knobs.h"
 #include "flow/Histogram.h"
 #include "flow/UnitTest.h"
-#include "flow/crc32c.h"
+#include "crc32/crc32c.h"
 #include "flow/genericactors.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
