@@ -88,6 +88,10 @@ class DDTxnProcessorImpl {
 
 		return IDDTxnProcessor::SourceServers{ std::vector<UID>(servers.begin(), servers.end()), completeSources };
 	}
+
+	ACTOR static Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses() {
+
+	}
 };
 
 Future<IDDTxnProcessor::SourceServers> DDTxnProcessor::getSourceServersForRange(const KeyRangeRef range) {
@@ -95,6 +99,5 @@ Future<IDDTxnProcessor::SourceServers> DDTxnProcessor::getSourceServersForRange(
 }
 
 Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> DDTxnProcessor::getServerListAndProcessClasses() {
-	Transaction tr(cx);
-	return NativeAPI::getServerListAndProcessClasses(&tr);
+	return DDTxnProcessorImpl::getServerListAndProcessClasses();
 }

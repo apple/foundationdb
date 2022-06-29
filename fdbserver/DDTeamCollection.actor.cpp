@@ -2743,6 +2743,50 @@ public:
 		state bool isFetchingResults = false;
 		state Transaction tr(self->cx);
 		loop {
+			choose {
+				when(wait(checkSignal)) {
+					checkSignal = Never();
+					isFetchingResults = true;
+					serverListAndProcessClasses = self->txnProcessor->getServerListAndProcessClasses();
+				}
+				when(std::vector<std::pair<StorageServerInterface, ProcessClass>> results =
+				         wait(serverListAndProcessClasses)) {
+					serverListAndProcessClasses = Never();
+					isFetchingResults = false;
+
+					for (int i = 0; i < results.size(); i++) {
+						UID serverId = results[i].first.id();
+						StorageServerInterface const& ssi = results[i].first;
+						ProcessClass const& processClass = results[i].second;
+						if (!self->shouldHandleServer(ssi)) {
+							continue;
+						} else if (self->server_and_tss_info.count(serverId)) {
+							auto& serverInfo = self->server_and_tss_info[serverId];
+							if (ssi.getValue.getEndpoint() !=
+							        serverInfo->getLastKnownInterface().getValue.getEndpoint() ||
+							    processClass != serverInfo->getLastKnownClass().classType()) {
+								Promise<std::pair<StorageServerInterface, ProcessClass>> currentInterfaceChanged =
+								    serverInfo->interfaceChanged;
+								serverInfo->interfaceChanged =
+								    Promise<std::pair<StorageServerInterface, ProcessClass>>();
+								serverInfo->onInterfaceChanged =
+								    Future<std::pair<StorageServerInterface, ProcessClass>>(
+								        serverInfo->interfaceChanged.getFuture());
+								currentInterfaceChanged.send(std::make_pair(ssi, processClass));
+							}
+						} else if (!self->recruitingIds.count(ssi.id())) {
+							self->addServer(ssi,
+							                processClass,
+							                self->serverTrackerErrorOut,
+							                tr.getReadVersion().get(),
+							                *ddEnabledState);
+						}
+					}
+
+					tr = Transaction(self->cx);
+					checkSignal = delay(SERVER_KNOBS->SERVER_LIST_DELAY, TaskPriority::DataDistributionLaunch);
+				}
+			}
 			try {
 				choose {
 					when(wait(checkSignal)) {
@@ -3574,7 +3618,7 @@ DDTeamCollection::DDTeamCollection(Database const& cx,
     teamCollectionInfoEventHolder(makeReference<EventCacheHolder>("TeamCollectionInfo")),
     storageServerRecruitmentEventHolder(
         makeReference<EventCacheHolder>("StorageServerRecruitment_" + distributorId.toString())),
-    primary(primary), distributorId(distributorId), cx(cx), configuration(configuration),
+    primary(primary), distributorId(distributorId), cx(cx), txnProcessor(new DDTxnProcessor(cx)), configuration(configuration),
     storageServerSet(new LocalityMap<UID>()) {
 	if (!primary || configuration.usableRegions == 1) {
 		TraceEvent("DDTrackerStarting", distributorId)

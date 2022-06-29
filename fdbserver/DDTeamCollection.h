@@ -33,6 +33,7 @@
 #include "fdbclient/RunTransaction.actor.h"
 #include "fdbrpc/Replication.h"
 #include "fdbserver/DataDistribution.actor.h"
+#include "fdbserver/DDTxnProcessor.h"
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/Knobs.h"
@@ -597,6 +598,7 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 
 public:
 	Database cx;
+	std::shared_ptr<IDDTxnProcessor> txnProcessor;
 
 	DatabaseConfiguration configuration;
 
