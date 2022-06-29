@@ -157,6 +157,9 @@ private:
 
 		execTransaction(
 		    [this, begin, end, results](auto ctx) {
+          // Clear the results vector, in case the transaction is retried.
+			    results->clear();
+
 			    getRangeLoop(ctx,
 			                 fdb::key_select::firstGreaterOrEqual(begin),
 			                 fdb::key_select::firstGreaterOrEqual(end),
