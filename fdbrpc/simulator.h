@@ -107,6 +107,10 @@ public:
 
 		Future<KillType> onShutdown() { return shutdownSignal.getFuture(); }
 
+		bool isSpawnedKVProcess() const {
+			// SOMEDAY: use a separate bool may be better?
+			return name == "remote flow process";
+		}
 		bool isReliable() const {
 			return !failed && fault_injection_p1 == 0 && fault_injection_p2 == 0 && !failedDisk &&
 			       (!machine || (machine->machineProcess->fault_injection_p1 == 0 &&
