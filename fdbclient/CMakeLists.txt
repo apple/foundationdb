@@ -71,7 +71,7 @@ if(WITH_AWS_BACKUP)
 
   set(FDBCLIENT_SRCS
     ${FDBCLIENT_SRCS}
-    FDBAWSCredentialsProvider.h)
+    include/fdbclient/FDBAWSCredentialsProvider.h)
 
   include(awssdk)
 endif()
