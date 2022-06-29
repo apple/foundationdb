@@ -614,7 +614,7 @@ public:
 	// Introduced mainly to optimize out the version vector related code (on the client side)
 	// when the version vector feature is disabled (on the server side).
 	// @param ssVersionVectorDelta version vector changes sent by GRV proxy
-	bool versionVectorCacheActive(const VersionVector& ssVersionVectorDelta) {
+	inline bool versionVectorCacheActive(const VersionVector& ssVersionVectorDelta) {
 		return (ssVersionVectorCache.getMaxVersion() != invalidVersion ||
 		        ssVersionVectorDelta.getMaxVersion() != invalidVersion);
 	}
