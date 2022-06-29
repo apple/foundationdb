@@ -1142,7 +1142,8 @@ ACTOR Future<Void> registerWorker(RegisterWorkerRequest req,
 		    .detail("ZoneId", w.locality.zoneId())
 		    .detail("DataHall", w.locality.dataHallId())
 		    .detail("PClass", req.processClass.toString())
-		    .detail("Workers", self->id_worker.size());
+		    .detail("Workers", self->id_worker.size())
+		    .detail("RecoveredDiskFiles", req.recoveredDiskFiles);
 		self->goodRecruitmentTime = lowPriorityDelay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY);
 		self->goodRemoteRecruitmentTime = lowPriorityDelay(SERVER_KNOBS->WAIT_FOR_GOOD_REMOTE_RECRUITMENT_DELAY);
 	} else {
@@ -1154,7 +1155,8 @@ ACTOR Future<Void> registerWorker(RegisterWorkerRequest req,
 		    .detail("DataHall", w.locality.dataHallId())
 		    .detail("PClass", req.processClass.toString())
 		    .detail("Workers", self->id_worker.size())
-		    .detail("Degraded", req.degraded);
+		    .detail("Degraded", req.degraded)
+		    .detail("RecoveredDiskFiles", req.recoveredDiskFiles);
 	}
 	if (w.address() == g_network->getLocalAddress()) {
 		if (self->changingDcIds.get().first) {
@@ -1207,6 +1209,7 @@ ACTOR Future<Void> registerWorker(RegisterWorkerRequest req,
 		                                                     newProcessClass,
 		                                                     newPriorityInfo,
 		                                                     req.degraded,
+		                                                     req.recoveredDiskFiles,
 		                                                     req.issues);
 		if (!self->masterProcessId.present() &&
 		    w.locality.processId() == self->db.serverInfo->get().master.locality.processId()) {
@@ -1232,6 +1235,7 @@ ACTOR Future<Void> registerWorker(RegisterWorkerRequest req,
 		info->second.priorityInfo = newPriorityInfo;
 		info->second.initialClass = req.initialClass;
 		info->second.details.degraded = req.degraded;
+		info->second.details.recoveredDiskFiles = req.recoveredDiskFiles;
 		info->second.gen = req.generation;
 		info->second.issues = req.issues;
 
