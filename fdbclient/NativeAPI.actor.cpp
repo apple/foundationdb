@@ -7730,6 +7730,10 @@ ACTOR Future<std::vector<std::pair<UID, StorageWiggleValue>>> readStorageWiggleV
 	                                                                                          IncludeVersion());
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	state std::vector<std::pair<UID, StorageWiggleValue>> res;
+
+	if (g_network->isSimulated() && BUGGIFY_WITH_PROB(0.01)) {
+		throw timed_out();
+	}
 	// read the wiggling pairs
 	loop {
 		try {
