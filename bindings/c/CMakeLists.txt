@@ -183,7 +183,7 @@ if(NOT WIN32)
   else()
     target_link_libraries(fdb_c_api_tester_impl PRIVATE fdb_cpp toml11_target Threads::Threads fmt::fmt boost_target)
   endif()
-  target_link_libraries(fdb_c_api_tester PRIVATE SimpleOpt)
+  target_link_libraries(fdb_c_api_tester_impl PRIVATE SimpleOpt)
 
   add_dependencies(fdb_c_setup_tests doctest)
   add_dependencies(fdb_c_unit_tests_impl doctest)
@@ -449,36 +449,11 @@ if (NOT WIN32 AND NOT APPLE AND NOT OPEN_FOR_IDE)
   add_executable(fdb_c_shim_api_tester)
   target_link_libraries(fdb_c_shim_api_tester PRIVATE fdb_c_shim fdb_c_api_tester_impl)
 
-  add_fdbclient_test(
-    NAME fdb_c_shim_unit_tests
-    COMMAND $<TARGET_FILE:fdb_c_shim_unit_tests>
-            @CLUSTER_FILE@
-            fdb)
-
-  add_fdbclient_test(
-    NAME fdb_c_shim_external_client_unit_tests
-    COMMAND $<TARGET_FILE:fdb_c_shim_unit_tests>
-            @CLUSTER_FILE@
-            fdb
-            ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c_external.so)
-
-  add_fdbclient_test(
-    NAME fdb_c_shim_api_tests
-    DISABLE_LOG_DUMP
-    COMMAND ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/run_c_api_tests.py
-            --cluster-file
-            @CLUSTER_FILE@
-            --tester-binary
-            $<TARGET_FILE:fdb_c_shim_api_tester>
-            --external-client-library
-            ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c_external.so
-            --test-dir
-            ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests
-            --tmp-dir
-            @TMP_DIR@
-            --log-dir
-            @LOG_DIR@
-            )
+  add_test(NAME fdb_c_shim_library_tests
+    COMMAND $<TARGET_FILE:Python::Interpreter> ${CMAKE_CURRENT_SOURCE_DIR}/test/fdb_c_shim_tests.py
+          --build-dir ${CMAKE_BINARY_DIR}
+          --source-dir ${CMAKE_SOURCE_DIR}
+          )
 
 endif() # End Linux only
 
