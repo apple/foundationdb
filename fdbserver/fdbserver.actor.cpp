@@ -1778,6 +1778,11 @@ int main(int argc, char* argv[]) {
 			flushAndExit(FDB_EXIT_SUCCESS);
 		}
 #endif
+		// FIXME: remove the ASAN feature test here
+//		auto a = new char[4];
+//		delete[] a;
+//		delete[] a;
+//		std::cout << "here "<< a << std::endl;
 
 		if (role == ServerRole::Simulation)
 			printf("Random seed is %u...\n", opts.randomSeed);
