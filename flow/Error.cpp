@@ -30,7 +30,7 @@ bool g_crashOnError = false;
 #define DEBUG_ERROR 0
 
 #if DEBUG_ERROR
-std::set<int> debugErrorSet = std::set<int>{ error_code_transaction_too_old };
+std::set<int> debugErrorSet = std::set<int>{ error_code_platform_error };
 #define SHOULD_LOG_ERROR(x) (debugErrorSet.count(x) > 0)
 #endif
 
