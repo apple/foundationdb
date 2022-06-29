@@ -3800,6 +3800,37 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 	return Void();
 }
 
+// Issues a secondary query (either range and point read) and fills results into "kvm".
+ACTOR Future<Void> mapSubquery(StorageServer* data,
+                               GetKeyValuesReply input,
+                               GetMappedKeyValuesRequest* pOriginalReq,
+                               Arena* pArena,
+                               int matchIndex,
+                               bool isRangeQuery,
+                               bool isBoundary,
+                               KeyValueRef* it,
+                               MappedKeyValueRef* kvm,
+                               Key mappedKey) {
+	if (isRangeQuery) {
+		// Use the mappedKey as the prefix of the range query.
+		GetRangeReqAndResultRef getRange =
+		    wait(quickGetKeyValues(data, mappedKey, input.version, pArena, pOriginalReq));
+		if ((!getRange.result.empty() && matchIndex == MATCH_INDEX_MATCHED_ONLY) ||
+		    (getRange.result.empty() && matchIndex == MATCH_INDEX_UNMATCHED_ONLY)) {
+			kvm->key = it->key;
+			kvm->value = it->value;
+		}
+
+		kvm->boundaryAndExist = isBoundary && !getRange.result.empty();
+		kvm->reqAndResult = getRange;
+	} else {
+		GetValueReqAndResultRef getValue = wait(quickGetValue(data, mappedKey, input.version, pArena, pOriginalReq));
+		kvm->reqAndResult = getValue;
+		kvm->boundaryAndExist = isBoundary && getValue.result.present();
+	}
+	return Void();
+}
+
 ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
                                                    GetKeyValuesReply input,
                                                    StringRef mapper,
@@ -3830,42 +3861,31 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 
 	state int sz = input.data.size();
 	state int i = 0;
+	state std::vector<MappedKeyValueRef> kvms(sz);
+	state std::vector<Future<Void>> subqueries(sz);
 	for (; i < sz; i++) {
-		state KeyValueRef* it = &input.data[i];
-		state MappedKeyValueRef kvm;
-		state bool isBoundary = i == 0 || i == sz - 1;
+		KeyValueRef* it = &input.data[i];
+		MappedKeyValueRef* kvm = &kvms[i];
+		bool isBoundary = i == 0 || i == sz - 1;
 		// need to keep the boundary, so that caller can use it as a continuation.
 		if (isBoundary || matchIndex == MATCH_INDEX_ALL) {
-			kvm.key = it->key;
-			kvm.value = it->value;
+			kvm->key = it->key;
+			kvm->value = it->value;
 		}
 
-		state Key mappedKey = constructMappedKey(it, vt, mappedKeyTuple, mappedKeyFormatTuple);
+		Key mappedKey = constructMappedKey(it, vt, mappedKeyTuple, mappedKeyFormatTuple);
 		// Make sure the mappedKey is always available, so that it's good even we want to get key asynchronously.
 		result.arena.dependsOn(mappedKey.arena());
 
 		//		std::cout << "key:" << printable(kvm.key) << ", value:" << printable(kvm.value)
 		//		          << ", mappedKey:" << printable(mappedKey) << std::endl;
 
-		if (isRangeQuery) {
-			// Use the mappedKey as the prefix of the range query.
-			GetRangeReqAndResultRef getRange =
-			    wait(quickGetKeyValues(data, mappedKey, input.version, &(result.arena), pOriginalReq));
-			if ((!getRange.result.empty() && matchIndex == MATCH_INDEX_MATCHED_ONLY) ||
-			    (getRange.result.empty() && matchIndex == MATCH_INDEX_UNMATCHED_ONLY)) {
-				kvm.key = it->key;
-				kvm.value = it->value;
-			}
-
-			kvm.boundaryAndExist = isBoundary && !getRange.result.empty();
-			kvm.reqAndResult = getRange;
-		} else {
-			GetValueReqAndResultRef getValue =
-			    wait(quickGetValue(data, mappedKey, input.version, &(result.arena), pOriginalReq));
-			kvm.reqAndResult = getValue;
-			kvm.boundaryAndExist = isBoundary && getValue.result.present();
-		}
-		result.data.push_back(result.arena, kvm);
+		subqueries[i] = mapSubquery(
+		    data, input, pOriginalReq, &result.arena, matchIndex, isRangeQuery, isBoundary, it, kvm, mappedKey);
+	}
+	wait(waitForAll(subqueries));
+	for (i = 0; i < sz; i++) {
+		result.data.push_back(result.arena, kvms[i]);
 	}
 	return result;
 }
