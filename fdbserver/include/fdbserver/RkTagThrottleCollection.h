@@ -42,7 +42,7 @@ class RkTagThrottleCollection : NonCopyable {
 		bool rateSet = false;
 
 		RkTagThrottleData() : clientRate(CLIENT_KNOBS->TAG_THROTTLE_SMOOTHING_WINDOW) {}
-		double getTargetRate(Optional<double> requestRate);
+		double getTargetRate(Optional<double> requestRate) const;
 		Optional<double> updateAndGetClientRate(Optional<double> requestRate);
 	};
 
@@ -83,7 +83,7 @@ public:
 	void addRequests(TransactionTag const& tag, int requests);
 	int64_t autoThrottleCount() const { return autoThrottledTags.size(); }
 	int64_t manualThrottleCount() const;
-	void updateBusyTagCount(TagThrottledReason);
+	void incrementBusyTagCount(TagThrottledReason);
 	auto getBusyReadTagCount() const { return busyReadTagCount; }
 	auto getBusyWriteTagCount() const { return busyWriteTagCount; }
 };

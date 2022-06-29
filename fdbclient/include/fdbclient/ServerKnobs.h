@@ -177,7 +177,7 @@ public:
 	    SHARD_MIN_BYTES_PER_KSEC, // Shards with more than this bandwidth will not be merged
 	    SHARD_SPLIT_BYTES_PER_KSEC; // When splitting a shard, it is split into pieces with less than this bandwidth
 	double SHARD_MAX_READ_DENSITY_RATIO;
-	int64_t SHARD_READ_HOT_BANDWITH_MIN_PER_KSECONDS;
+	int64_t SHARD_READ_HOT_BANDWIDTH_MIN_PER_KSECONDS;
 	double SHARD_MAX_BYTES_READ_PER_KSEC_JITTER;
 	double STORAGE_METRIC_TIMEOUT;
 	double METRIC_DELAY;
@@ -564,6 +564,7 @@ public:
 	int64_t TLOG_RECOVER_MEMORY_LIMIT;
 	double TLOG_IGNORE_POP_AUTO_ENABLE_DELAY;
 
+	// Tag throttling
 	int64_t MAX_MANUAL_THROTTLED_TRANSACTION_TAGS;
 	int64_t MAX_AUTO_THROTTLED_TRANSACTION_TAGS;
 	double MIN_TAG_COST;
@@ -576,6 +577,17 @@ public:
 	double AUTO_TAG_THROTTLE_UPDATE_FREQUENCY;
 	double TAG_THROTTLE_EXPIRED_CLEANUP_INTERVAL;
 	bool AUTO_TAG_THROTTLING_ENABLED;
+	// Limit to the number of throttling tags each storage server
+	// will track and send to the ratekeeper
+	int64_t SS_THROTTLE_TAGS_TRACKED;
+	// Use global tag throttling strategy. i.e. throttle based on the cluster-wide
+	// throughput for tags and their associated quotas.
+	bool GLOBAL_TAG_THROTTLING;
+	// Minimum number of transactions per second that the global tag throttler must allow for each tag
+	double GLOBAL_TAG_THROTTLING_MIN_RATE;
+	// Used by global tag throttling counters
+	double GLOBAL_TAG_THROTTLING_FOLDING_TIME;
+	double GLOBAL_TAG_THROTTLING_TRACE_INTERVAL;
 
 	double MAX_TRANSACTIONS_PER_BYTE;
 
@@ -603,7 +615,12 @@ public:
 
 	// disk snapshot
 	int64_t MAX_FORKED_PROCESS_OUTPUT;
+	// retry limit after network failures
+	int64_t SNAP_NETWORK_FAILURE_RETRY_LIMIT;
+	// time limit for creating snapshot
 	double SNAP_CREATE_MAX_TIMEOUT;
+	// minimum gap time between two snapshot requests for the same process
+	double SNAP_MINIMUM_TIME_GAP;
 	// Maximum number of storage servers a snapshot can fail to
 	// capture while still succeeding
 	int64_t MAX_STORAGE_SNAPSHOT_FAULT_TOLERANCE;

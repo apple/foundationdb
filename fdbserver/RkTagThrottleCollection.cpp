@@ -22,7 +22,7 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/RkTagThrottleCollection.h"
 
-double RkTagThrottleCollection::RkTagThrottleData::getTargetRate(Optional<double> requestRate) {
+double RkTagThrottleCollection::RkTagThrottleData::getTargetRate(Optional<double> requestRate) const {
 	if (limits.tpsRate == 0.0 || !requestRate.present() || requestRate.get() == 0.0 || !rateSet) {
 		return limits.tpsRate;
 	} else {
@@ -347,10 +347,12 @@ int64_t RkTagThrottleCollection::manualThrottleCount() const {
 	return count;
 }
 
-void RkTagThrottleCollection::updateBusyTagCount(TagThrottledReason reason) {
+void RkTagThrottleCollection::incrementBusyTagCount(TagThrottledReason reason) {
 	if (reason == TagThrottledReason::BUSY_READ) {
 		++busyReadTagCount;
 	} else if (reason == TagThrottledReason::BUSY_WRITE) {
 		++busyWriteTagCount;
+	} else {
+		ASSERT(false);
 	}
 }

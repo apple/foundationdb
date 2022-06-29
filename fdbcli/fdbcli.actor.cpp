@@ -509,6 +509,10 @@ void initHelp() {
 	    CommandHelp("getversion",
 	                "Fetch the current read version",
 	                "Displays the current read version of the database or currently running transaction.");
+	helpMap["quota"] =
+	    CommandHelp("quota",
+	                "quota [get <tag> [reserved|total] [read|write]|set <tag> [reserved|total] [read|write] <value>]",
+	                "Get or modify the throughput quota for the specified tag.");
 	helpMap["reset"] =
 	    CommandHelp("reset",
 	                "reset the current transaction",
@@ -1465,6 +1469,14 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						options = &globalOptions;
 					}
 
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "quota")) {
+					bool _result = wait(makeInterruptable(quotaCommandActor(db, tokens)));
+					if (!_result) {
+						is_error = true;
+					}
 					continue;
 				}
 
