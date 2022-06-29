@@ -20,7 +20,7 @@
 
 #include "fdbserver/SimKmsConnector.h"
 
-#include "contrib/fmt-8.1.1/include/fmt/format.h"
+#include "fmt/format.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbserver/KmsConnectorInterface.h"
 #include "fdbserver/Knobs.h"

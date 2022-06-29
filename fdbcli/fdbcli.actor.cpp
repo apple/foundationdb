@@ -19,7 +19,7 @@
  */
 
 #include "boost/lexical_cast.hpp"
-#include "contrib/fmt-8.1.1/include/fmt/format.h"
+#include "fmt/format.h"
 #include "fdbclient/ClusterConnectionFile.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/FDBTypes.h"
@@ -39,6 +39,7 @@
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/TagThrottle.actor.h"
+#include "fdbclient/TenantManagement.actor.h"
 #include "fdbclient/Tuple.h"
 
 #include "fdbclient/ThreadSafeTransaction.h"
@@ -51,7 +52,7 @@
 
 #include "flow/TLSConfig.actor.h"
 #include "flow/ThreadHelper.actor.h"
-#include "flow/SimpleOpt.h"
+#include "SimpleOpt/SimpleOpt.h"
 
 #include "fdbcli/FlowLineNoise.h"
 #include "fdbcli/fdbcli.actor.h"
@@ -63,7 +64,7 @@
 
 #ifdef __unixish__
 #include <stdio.h>
-#include "fdbcli/linenoise/linenoise.h"
+#include "linenoise/linenoise.h"
 #endif
 
 #include "fdbclient/versions.h"
@@ -1049,7 +1050,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 	state Database localDb;
 	state Reference<IDatabase> db;
 	state Reference<ITenant> tenant;
-	state Optional<Standalone<StringRef>> tenantName;
+	state Optional<TenantName> tenantName;
 	state Optional<TenantMapEntry> tenantEntry;
 
 	// This tenant is kept empty for operations that perform management tasks (e.g. killing a process)
@@ -1840,7 +1841,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						}
 					} else {
 						Optional<TenantMapEntry> entry =
-						    wait(makeInterruptable(ManagementAPI::tryGetTenant(db, tokens[1])));
+						    wait(makeInterruptable(TenantAPI::tryGetTenant(db, tokens[1])));
 						if (!entry.present()) {
 							fprintf(stderr, "ERROR: Tenant `%s' does not exist\n", printable(tokens[1]).c_str());
 							is_error = true;

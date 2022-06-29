@@ -637,8 +637,7 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 		parse((&type), value);
 		storageMigrationType = (StorageMigrationType::MigrationType)type;
 	} else if (ck == LiteralStringRef("tenant_mode")) {
-		parse((&type), value);
-		tenantMode = (TenantMode::Mode)type;
+		tenantMode = TenantMode::fromValue(value);
 	} else if (ck == LiteralStringRef("proxies")) {
 		overwriteProxiesCount();
 	} else if (ck == LiteralStringRef("blob_granules_enabled")) {
