@@ -3716,7 +3716,7 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 
 // Issues a secondary query (either range and point read) and fills results into "kvm".
 ACTOR Future<Void> mapSubquery(StorageServer* data,
-                               GetKeyValuesReply input,
+                               Version version,
                                GetMappedKeyValuesRequest* pOriginalReq,
                                Arena* pArena,
                                bool isRangeQuery,
@@ -3725,11 +3725,10 @@ ACTOR Future<Void> mapSubquery(StorageServer* data,
                                Key mappedKey) {
 	if (isRangeQuery) {
 		// Use the mappedKey as the prefix of the range query.
-		GetRangeReqAndResultRef getRange =
-		    wait(quickGetKeyValues(data, mappedKey, input.version, pArena, pOriginalReq));
+		GetRangeReqAndResultRef getRange = wait(quickGetKeyValues(data, mappedKey, version, pArena, pOriginalReq));
 		kvm->reqAndResult = getRange;
 	} else {
-		GetValueReqAndResultRef getValue = wait(quickGetValue(data, mappedKey, input.version, pArena, pOriginalReq));
+		GetValueReqAndResultRef getValue = wait(quickGetValue(data, mappedKey, version, pArena, pOriginalReq));
 		kvm->reqAndResult = getValue;
 	}
 	return Void();
@@ -3779,11 +3778,11 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 			// Make sure the mappedKey is always available, so that it's good even we want to get key asynchronously.
 			result.arena.dependsOn(mappedKey.arena());
 
-			std::cout << "key:" << printable(kvm->key) << ", value:" << printable(kvm->value)
-			          << ", mappedKey:" << printable(mappedKey) << std::endl;
+			// std::cout << "key:" << printable(kvm->key) << ", value:" << printable(kvm->value)
+			//          << ", mappedKey:" << printable(mappedKey) << std::endl;
 
-			subqueries.push_back(mapSubquery(
-			    data, input, pOriginalReq, &result.arena, isRangeQuery, it, kvm, mappedKey));
+			subqueries.push_back(
+			    mapSubquery(data, input.version, pOriginalReq, &result.arena, isRangeQuery, it, kvm, mappedKey));
 		}
 		wait(waitForAll(subqueries));
 		subqueries.clear();
