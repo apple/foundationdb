@@ -42,6 +42,7 @@
 #include "flow/genericactors.actor.h"
 #include "flow/network.h"
 
+#include <boost/functional/hash.hpp>
 #include <boost/mpl/not.hpp>
 #include <limits>
 #include <string>
@@ -342,8 +343,7 @@ ACTOR Future<Void> getCipherKeysByBaseCipherKeyIds(Reference<EncryptKeyProxyData
 		const EncryptBaseCipherDomainIdKeyIdCacheKey cacheKey =
 		    ekpProxyData->getBaseCipherDomainIdKeyIdCacheKey(item.domainId, item.baseCipherId);
 		const auto itr = ekpProxyData->baseCipherDomainIdKeyIdCache.find(cacheKey);
-		if (itr != ekpProxyData->baseCipherDomainIdKeyIdCache.end()) {
-			ASSERT(itr->second.isValid());
+		if (itr != ekpProxyData->baseCipherDomainIdKeyIdCache.end() && itr->second.isValid()) {
 			cachedCipherDetails.emplace_back(
 			    itr->second.domainId, itr->second.baseCipherId, itr->second.baseCipherKey, keyIdsReply.arena);
 
@@ -598,7 +598,7 @@ ACTOR Future<Void> refreshEncryptionKeysCore(Reference<EncryptKeyProxyData> ekpP
 
 			// Garbage collect expired cached CipherKeys
 			if (itr->second.isExpired()) {
-				ekpProxyData->baseCipherDomainIdCache.erase(itr);
+				itr = ekpProxyData->baseCipherDomainIdCache.erase(itr);
 			} else {
 				itr++;
 			}

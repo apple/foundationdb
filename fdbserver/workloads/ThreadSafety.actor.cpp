@@ -194,14 +194,12 @@ struct ThreadSafetyWorkload : TestWorkload {
 		info->self->commitBarrier.decrementNumRequired();
 
 		// Signal completion back to the main thread
-		onMainThreadVoid(
-		    [=]() {
-			    if (error.code() != error_code_success)
-				    info->done.sendError(error);
-			    else
-				    info->done.send(Void());
-		    },
-		    nullptr);
+		onMainThreadVoid([=]() {
+			if (error.code() != error_code_success)
+				info->done.sendError(error);
+			else
+				info->done.send(Void());
+		});
 
 		THREAD_RETURN;
 	}

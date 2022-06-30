@@ -7,7 +7,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include <time.h>
-#include "zipf.h"
+#include "fdbclient/zipf.h"
 
 /* global static */
 static int items;

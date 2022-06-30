@@ -40,6 +40,7 @@
 #include "flow/network.h"
 #include "flow/IThreadPool.h"
 
+#include "flow/IAsyncFile.h"
 #include "flow/ActorCollection.h"
 #include "flow/ThreadSafeQueue.h"
 #include "flow/ThreadHelper.actor.h"
@@ -55,9 +56,6 @@
 #ifdef ADDRESS_SANITIZER
 #include <sanitizer/lsan_interface.h>
 #endif
-
-// See the comment in TLSConfig.actor.h for the explanation of why this module breaking include was done.
-#include "fdbrpc/IAsyncFile.h"
 
 #ifdef WIN32
 #include <mmsystem.h>
@@ -88,10 +86,6 @@ sigset_t sigprof_set;
 void initProfiling() {
 	net2backtraces = new volatile void*[net2backtraces_max];
 	other_backtraces = new volatile void*[net2backtraces_max];
-
-	// According to folk wisdom, calling this once before setting up the signal handler makes
-	// it async signal safe in practice :-/
-	backtrace(const_cast<void**>(other_backtraces), net2backtraces_max);
 
 	sigemptyset(&sigprof_set);
 	sigaddset(&sigprof_set, SIGPROF);
@@ -198,13 +192,13 @@ public:
 		if (thread_network == this)
 			stopImmediately();
 		else
-			onMainThreadVoid([this] { this->stopImmediately(); }, nullptr);
+			onMainThreadVoid([this] { this->stopImmediately(); });
 	}
 	void addStopCallback(std::function<void()> fn) override {
 		if (thread_network == this)
 			stopCallbacks.emplace_back(std::move(fn));
 		else
-			onMainThreadVoid([this, fn] { this->stopCallbacks.emplace_back(std::move(fn)); }, nullptr);
+			onMainThreadVoid([this, fn] { this->stopCallbacks.emplace_back(std::move(fn)); });
 	}
 
 	bool isSimulated() const override { return false; }

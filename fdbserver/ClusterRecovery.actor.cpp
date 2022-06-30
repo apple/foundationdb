@@ -1013,11 +1013,6 @@ ACTOR Future<Void> updateLocalityForDcId(Optional<Key> dcId,
 		if (ver == invalidVersion) {
 			ver = oldLogSystem->getKnownCommittedVersion();
 		}
-		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
-			// Do not try to split peeks between data centers in peekTxns() to recover mem kvstore.
-			// This recovery optimization won't work in UNICAST mode.
-			loc.first = -1;
-		}
 
 		locality->set(PeekTxsInfo(loc.first, loc.second, ver));
 		TraceEvent("UpdatedLocalityForDcId")
@@ -1048,8 +1043,14 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 	if (self->txnStateStore)
 		self->txnStateStore->close();
 	self->txnStateLogAdapter = openDiskQueueAdapter(oldLogSystem, myLocality, txsPoppedVersion);
-	self->txnStateStore =
-	    keyValueStoreLogSystem(self->txnStateLogAdapter, self->dbgid, self->memoryLimit, false, false, true);
+	self->txnStateStore = keyValueStoreLogSystem(self->txnStateLogAdapter,
+	                                             self->dbInfo,
+	                                             self->dbgid,
+	                                             self->memoryLimit,
+	                                             false,
+	                                             false,
+	                                             true,
+	                                             SERVER_KNOBS->ENABLE_TLOG_ENCRYPTION);
 
 	// Version 0 occurs at the version epoch. The version epoch is the number
 	// of microseconds since the Unix epoch. It can be set through fdbcli.
