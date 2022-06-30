@@ -155,7 +155,7 @@ namespace coveragetool
                 .Select( i=>new CoverageCase {
                     File = filename,
                     Line = i+1,
-                    Comment = FindComment(lines[i]),
+                    Comment = Comment = FindComment(lines, i),
                     Condition = regex.Match(lines[i]).Groups[3].Value
                     } )
                 .ToArray();
@@ -180,13 +180,16 @@ namespace coveragetool
             }
             return res;
         }
-        public static string FindComment(string line)
+        public static string FindComment(string[] lines, int i)
         {
-            int comment = line.IndexOf("//");
-            if (comment == -1)
-                return "";
-            else
-                return line.Substring(comment + 2).Trim();
+            var comment = "";
+            while (i < lines.Length && lines[i].IndexOf("//") != -1)
+            {
+                int backslashIndex = lines[i].IndexOf("//");
+                comment += lines[i].Substring(backslashIndex + 3);
+                i++;
+            }
+            return comment;
         }
     }
 }
