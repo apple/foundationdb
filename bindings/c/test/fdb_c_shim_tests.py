@@ -12,6 +12,7 @@ from local_cluster import LocalCluster, random_secret_string
 
 LAST_RELEASE_VERSION = "7.1.5"
 TESTER_STATS_INTERVAL_SEC = 5
+DEFAULT_TEST_FILE = "CApiCorrectnessMultiThr.toml"
 
 
 def version_from_str(ver_str):
@@ -34,7 +35,7 @@ class TestEnv(LocalCluster):
         self,
         build_dir: str,
         downloader: FdbBinaryDownloader,
-        version: str
+        version: str,
     ):
         self.build_dir = Path(build_dir).resolve()
         assert self.build_dir.exists(), "{} does not exist".format(build_dir)
@@ -42,6 +43,7 @@ class TestEnv(LocalCluster):
         self.tmp_dir = self.build_dir.joinpath("tmp", random_secret_string(16))
         self.tmp_dir.mkdir(parents=True)
         self.downloader = downloader
+        self.version = version
         super().__init__(
             self.tmp_dir,
             self.downloader.binary_path(version, "fdbserver"),
@@ -50,12 +52,10 @@ class TestEnv(LocalCluster):
             1
         )
         self.set_env_var("LD_LIBRARY_PATH", self.downloader.lib_dir(version))
-        client_lib = self.downloader.lib_dir(version).joinpath("libfdb_c.so")
+        client_lib = self.downloader.lib_path(version)
         assert client_lib.exists(), "{} does not exist".format(client_lib)
         self.client_lib_external = self.tmp_dir.joinpath("libfdb_c_external.so")
         shutil.copyfile(client_lib, self.client_lib_external)
-        self.env_vars = os.environ.copy()
-        self.env_vars["LD_LIBRARY_PATH"] = self.downloader.lib_dir(version)
 
     def __enter__(self):
         super().__enter__()
@@ -66,15 +66,16 @@ class TestEnv(LocalCluster):
         super().__exit__(xc_type, exc_value, traceback)
         shutil.rmtree(self.tmp_dir)
 
-    def exec_client_command(self, cmd_args):
+    def exec_client_command(self, cmd_args, env_vars=None, expected_ret_code=0):
         print("Executing test command: {}".format(
             " ".join([str(c) for c in cmd_args])
         ))
         tester_proc = subprocess.Popen(
-            cmd_args, stdout=sys.stdout, stderr=sys.stderr, env=self.env_vars
+            cmd_args, stdout=sys.stdout, stderr=sys.stderr, env=env_vars
         )
         tester_retcode = tester_proc.wait()
-        assert tester_retcode == 0, "Tester failed with return code {}".format(tester_retcode)
+        assert tester_retcode == expected_ret_code, "Tester completed return code {}, but {} was expected".format(
+            tester_retcode, expected_ret_code)
 
 
 class FdbCShimTests:
@@ -97,32 +98,37 @@ class FdbCShimTests:
         self.downloader = FdbBinaryDownloader(args.build_dir)
         self.downloader.download_old_binaries(LAST_RELEASE_VERSION)
 
+    def build_c_api_tester_args(self, test_env, test_file):
+        test_file_path = self.api_test_dir.joinpath(test_file)
+        return [
+            self.api_tester_bin,
+            "--cluster-file",
+            test_env.cluster_file,
+            "--test-file",
+            test_file_path,
+            "--external-client-library",
+            test_env.client_lib_external,
+            "--disable-local-client",
+            "--api-version",
+            str(api_version_from_str(test_env.version)),
+            "--log",
+            "--log-dir",
+            test_env.log,
+            "--tmp-dir",
+            test_env.tmp_dir,
+            "--stats-interval",
+            str(TESTER_STATS_INTERVAL_SEC * 1000)
+        ]
+
     def run_c_api_test(self, version, test_file):
         print('-' * 80)
         print("C API Test - version: {}, workload: {}".format(version, test_file))
         print('-' * 80)
         with TestEnv(self.build_dir, self.downloader, version) as test_env:
-            test_file_path = self.api_test_dir.joinpath(test_file)
-            cmd_args = [
-                self.api_tester_bin,
-                "--cluster-file",
-                test_env.cluster_file,
-                "--test-file",
-                test_file_path,
-                "--external-client-library",
-                test_env.client_lib_external,
-                "--disable-local-client",
-                "--api-version",
-                str(api_version_from_str(version)),
-                "--log",
-                "--log-dir",
-                test_env.log,
-                "--tmp-dir",
-                test_env.tmp_dir,
-                "--stats-interval",
-                str(TESTER_STATS_INTERVAL_SEC * 1000)
-            ]
-            test_env.exec_client_command(cmd_args)
+            cmd_args = self.build_c_api_tester_args(test_env, test_file)
+            env_vars = os.environ.copy()
+            env_vars["LD_LIBRARY_PATH"] = self.downloader.lib_dir(version)
+            test_env.exec_client_command(cmd_args, env_vars)
 
     def run_c_unit_tests(self, version):
         print('-' * 80)
@@ -135,12 +141,36 @@ class FdbCShimTests:
                 "fdb",
                 test_env.client_lib_external
             ]
-            test_env.exec_client_command(cmd_args)
+            env_vars = os.environ.copy()
+            env_vars["LD_LIBRARY_PATH"] = self.downloader.lib_dir(version)
+            test_env.exec_client_command(cmd_args, env_vars)
+
+    def test_invalid_c_client_lib_env_var(self, version):
+        print('-' * 80)
+        print("Test invalid FDB_C_CLIENT_LIBRARY_PATH value")
+        print('-' * 80)
+        with TestEnv(self.build_dir, self.downloader, version) as test_env:
+            cmd_args = self.build_c_api_tester_args(test_env, DEFAULT_TEST_FILE)
+            env_vars = os.environ.copy()
+            env_vars["FDB_C_CLIENT_LIBRARY_PATH"] = "dummy"
+            test_env.exec_client_command(cmd_args, env_vars, 1)
+
+    def test_valid_c_client_lib_env_var(self, version):
+        print('-' * 80)
+        print("Test valid FDB_C_CLIENT_LIBRARY_PATH value")
+        print('-' * 80)
+        with TestEnv(self.build_dir, self.downloader, version) as test_env:
+            cmd_args = self.build_c_api_tester_args(test_env, DEFAULT_TEST_FILE)
+            env_vars = os.environ.copy()
+            env_vars["FDB_C_CLIENT_LIBRARY_PATH"] = self.downloader.lib_path(version)
+            test_env.exec_client_command(cmd_args, env_vars)
 
     def run_tests(self):
-        self.run_c_api_test(LAST_RELEASE_VERSION, "CApiCorrectnessMultiThr.toml")
-        self.run_c_api_test(CURRENT_VERSION, "CApiCorrectnessMultiThr.toml")
+        self.run_c_api_test(LAST_RELEASE_VERSION, DEFAULT_TEST_FILE)
+        self.run_c_api_test(CURRENT_VERSION, DEFAULT_TEST_FILE)
         self.run_c_unit_tests(CURRENT_VERSION)
+        self.test_invalid_c_client_lib_env_var(CURRENT_VERSION)
+        self.test_valid_c_client_lib_env_var(CURRENT_VERSION)
 
 
 if __name__ == "__main__":

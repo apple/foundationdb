@@ -130,6 +130,9 @@ class FdbBinaryDownloader:
         else:
             return self.download_dir.joinpath(version)
 
+    def lib_path(self, version):
+        return self.lib_dir(version).joinpath("libfdb_c.so")
+
     # Download an old binary of a given version from a remote repository
     def download_old_binary(
         self, version, target_bin_name, remote_bin_name, make_executable

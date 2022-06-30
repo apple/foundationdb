@@ -25,12 +25,12 @@
 #include <stdlib.h>
 #include <string>
 
-static const char* FDB_SHIM_C_LIBRARY_PATH = "FDB_SHIM_C_LIBRARY_PATH";
+static const char* FDB_C_CLIENT_LIBRARY_PATH = "FDB_C_CLIENT_LIBRARY_PATH";
 
 // Callback that tries different library names
 extern "C" void* fdb_shim_dlopen_callback(const char* libName) {
 	std::string libPath;
-	char* val = getenv(FDB_SHIM_C_LIBRARY_PATH);
+	char* val = getenv(FDB_C_CLIENT_LIBRARY_PATH);
 	if (val) {
 		libPath = val;
 	} else {
