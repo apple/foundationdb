@@ -6917,6 +6917,7 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 				updatedShards.push_back(
 				    StorageServerShard(range, version, desiredId, desiredId, StorageServerShard::ReadWrite));
 				setAvailableStatus(data, range, true);
+				data->pendingAddRanges[cVer].emplace_back(desiredId, range);
 				TraceEvent(SevVerbose, "SSInitialShard", data->thisServerID)
 				    .detail("Range", range)
 				    .detail("NowAssigned", nowAssigned)
@@ -8074,22 +8075,19 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 			}
 		}
 
+		state bool removeKVSRanges = false;
 		if (!data->pendingRemoveRanges.empty()) {
 			const Version aVer = data->pendingRemoveRanges.begin()->first;
 			if (aVer <= desiredVersion) {
-				TraceEvent(SevDebug, "AddRangeVersionSatisfied", data->thisServerID)
+				TraceEvent(SevDebug, "RemoveRangeVersionSatisfied", data->thisServerID)
 				    .detail("DesiredVersion", desiredVersion)
 				    .detail("DurableVersion", data->durableVersion.get())
-				    .detail("AddRangeVersion", aVer);
-				auto it = data->getMutationLog().find(aVer);
-				ASSERT(it != data->getMutationLog().end());
-				if (it == data->getMutationLog().begin()) {
-					desiredVersion = data->storageVersion();
-				} else {
-					desiredVersion = (--it)->first;
-				}
+				    .detail("RemoveRangeVersion", aVer);
+				desiredVersion = aVer;
+				removeKVSRanges = true;
 			}
 		}
+
 		if (!data->pendingAddRanges.empty()) {
 			auto u = data->getMutationLog().upper_bound(newOldestVersion);
 			ASSERT(u != data->getMutationLog().end());
@@ -8249,12 +8247,30 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 			requireCheckpoint = false;
 		}
 
-		while (!data->pendingRemoveRanges.empty() && data->pendingRemoveRanges.begin()->first <= newOldestVersion) {
-			for (const auto& range : data->pendingRemoveRanges.begin()->second) {
-				std::vector<std::string> ignored = data->storage.removeRange(range);
+		if (removeKVSRanges) {
+			TraceEvent(SevDebug, "RemoveKVSRangesVersionDurable", data->thisServerID)
+			    .detail("NewDurableVersion", newOldestVersion)
+			    .detail("DesiredVersion", desiredVersion)
+			    .detail("OldestRemoveKVSRangesVersion", data->pendingRemoveRanges.begin()->first);
+			ASSERT(newOldestVersion <= data->pendingRemoveRanges.begin()->first);
+			if (newOldestVersion == data->pendingRemoveRanges.begin()->first) {
+				for (const auto& range : data->pendingRemoveRanges.begin()->second) {
+					data->storage.removeRange(range);
+				}
+				for (const auto& range : data->pendingRemoveRanges.begin()->second) {
+					data->storage.persistRangeMapping(range, false);
+				}
+				data->pendingRemoveRanges.erase(data->pendingRemoveRanges.begin());
 			}
-			data->pendingRemoveRanges.erase(data->pendingRemoveRanges.begin());
+			removeKVSRanges = false;
 		}
+
+		// while (!data->pendingRemoveRanges.empty() && data->pendingRemoveRanges.begin()->first <= newOldestVersion) {
+		// 	for (const auto& range : data->pendingRemoveRanges.begin()->second) {
+		// 		std::vector<std::string> ignored = data->storage.removeRange(range);
+		// 	}
+		// 	data->pendingRemoveRanges.erase(data->pendingRemoveRanges.begin());
+		// }
 
 		if (newOldestVersion > data->rebootAfterDurableVersion) {
 			TraceEvent("RebootWhenDurableTriggered", data->thisServerID)

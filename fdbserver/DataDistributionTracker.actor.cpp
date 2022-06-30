@@ -949,6 +949,9 @@ ACTOR Future<Void> fetchShardMetrics_impl(DataDistributionTracker* self, GetMetr
 			wait(onChange);
 		}
 	} catch (Error& e) {
+		TraceEvent(SevDebug, "DDFetchShardMetricsImplError", self->distributorId)
+		    .errorUnsuppressed(e)
+		    .detail("Shard", req.keys);
 		if (e.code() != error_code_actor_cancelled && !req.reply.isSet())
 			req.reply.sendError(e);
 		throw;
@@ -956,6 +959,7 @@ ACTOR Future<Void> fetchShardMetrics_impl(DataDistributionTracker* self, GetMetr
 }
 
 ACTOR Future<Void> fetchShardMetrics(DataDistributionTracker* self, GetMetricsRequest req) {
+	TraceEvent(SevDebug, "DDFetchShardMetrics", self->distributorId).detail("Shard", req.keys);
 	choose {
 		when(wait(fetchShardMetrics_impl(self, req))) {}
 		when(wait(delay(SERVER_KNOBS->DD_SHARD_METRICS_TIMEOUT, TaskPriority::DataDistribution))) {

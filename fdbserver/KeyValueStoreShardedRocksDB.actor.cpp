@@ -480,6 +480,8 @@ struct PhysicalShard {
 
 	bool initialized() { return cf != nullptr; }
 
+	std::string toString() const { return "[CF]: " + std::to_string(this->cf->GetID()); }
+
 	~PhysicalShard() {
 		if (!deletePending)
 			return;
@@ -571,7 +573,8 @@ int readRangeInDb(DataShard* shard, const KeyRangeRef& range, int rowLimit, int 
 // Manages physical shards and maintains logical shard mapping.
 class ShardManager {
 public:
-	ShardManager(std::string path) : path(path) {}
+	ShardManager(std::string path) : path(path), dataShardMap(nullptr, specialKeys.end) {}
+
 	rocksdb::Status init() {
 		dataShardMap.insert(allKeys, nullptr);
 		// Open instance.
@@ -631,20 +634,39 @@ public:
 			// TODO: remove unused column families.
 
 		} else {
-			for (auto handle : handles) {
-				TraceEvent(SevInfo, "ShardedRocksDB")
-				    .detail("Action", "Init")
-				    .detail("DroppedShard", handle->GetName());
-				db->DropColumnFamily(handle);
-			}
+			// for (auto handle : handles) {
+			// 	TraceEvent(SevInfo, "ShardedRocksDB")
+			// 	    .detail("Action", "Init")
+			// 	    .detail("DroppedShard", handle->GetName());
+			// 	db->DropColumnFamily(handle);
+			// }
 			metadataShard = std::make_shared<PhysicalShard>(db, "kvs-metadata");
 			metadataShard->init();
 			columnFamilyMap[metadataShard->cf->GetID()] = metadataShard->cf;
+			TraceEvent(SevDebug, "InitializeMetaDataShard").detail("MetadataShardCF", metadataShard->cf->GetID());
 		}
-		physicalShards["kvs-metadata"] = metadataShard;
+
+		ASSERT(metadataShard != nullptr);
+
+		{
+			ASSERT(metadataShard != nullptr);
+			std::unique_ptr<DataShard> dataShard = std::make_unique<DataShard>(specialKeys, metadataShard.get());
+			ASSERT(dataShard != nullptr);
+			TraceEvent(SevDebug, "InsertingDataShard")
+			    .detail("DataShard", dataShard->physicalShard->cf->GetID())
+			    .detail("Range", specialKeys.begin.toString());
+			dataShardMap.insert(specialKeys, dataShard.get());
+			TraceEvent(SevDebug, "InsertedDataShard")
+			    .detail("DataShard", dataShard->physicalShard->cf->GetID())
+			    .detail("Range", specialKeys.begin.toString());
+			std::string name = specialKeys.begin.toString();
+			metadataShard->dataShards[name] = std::move(dataShard);
+			physicalShards["kvs-metadata"] = metadataShard;
+			ASSERT(dataShard == nullptr);
+		}
 
 		writeBatch = std::make_unique<rocksdb::WriteBatch>();
-		dirtyShards = std::make_unique<std::set<PhysicalShard*>>();
+		this->dirtyShards = std::make_unique<std::set<PhysicalShard*>>();
 		return status;
 	}
 
@@ -668,6 +690,11 @@ public:
 	}
 
 	PhysicalShard* addRange(KeyRange range, std::string id) {
+		TraceEvent(SevDebug, "ShardedRocksShardManagement")
+		    .detail("Operation", "AddRange")
+		    .detail("Range", range)
+		    .detail("ShardID", id);
+
 		// Newly added range should not overlap with any existing range.
 		std::shared_ptr<PhysicalShard> shard;
 		auto it = physicalShards.find(id);
@@ -688,6 +715,10 @@ public:
 	}
 
 	std::vector<std::string> removeRange(KeyRange range) {
+		TraceEvent(SevDebug, "ShardedRocksShardManagement")
+		    .detail("Operation", "RemoveRange")
+		    .detail("Range", range);
+
 		std::vector<std::string> shardIds;
 
 		auto ranges = dataShardMap.intersectingRanges(range);
@@ -704,9 +735,19 @@ public:
 			auto existingShard = it.value()->physicalShard;
 			auto shardRange = it.range();
 
+			TraceEvent(SevDebug, "ShardedRocksRemoveRange")
+			    .detail("Range", range)
+			    .detail("IntersectingRange", shardRange)
+			    .detail("DataShardRange", it.value()->range)
+			    .detail("PhysicalShard", existingShard->toString());
+
 			ASSERT(it.value()->range == shardRange); // Ranges should be consistent.
 			if (range.contains(shardRange)) {
 				existingShard->dataShards.erase(shardRange.begin.toString());
+				TraceEvent(SevDebug, "ShardedRocksRemovedRange")
+				    .detail("Range", range)
+				    .detail("RemovedRange", shardRange)
+				    .detail("PhysicalShard", existingShard->toString());
 				if (existingShard->dataShards.size() == 0) {
 					TraceEvent(SevDebug, "ShardedRocksDB").detail("EmptyShardId", existingShard->id);
 					shardIds.push_back(existingShard->id);
@@ -717,14 +758,17 @@ public:
 			// Range modification could result in more than one segments. Remove the original segment key here.
 			existingShard->dataShards.erase(shardRange.begin.toString());
 			if (shardRange.begin < range.begin) {
-				existingShard->dataShards[shardRange.begin.toString()] =
+				auto dataShard =
 				    std::make_unique<DataShard>(KeyRange(KeyRangeRef(shardRange.begin, range.begin)), existingShard);
+				dataShardMap.insert(dataShard->range, dataShard.get());
+				existingShard->dataShards[shardRange.begin.toString()] = std::move(dataShard);
 				logShardEvent(existingShard->id, shardRange, ShardOp::MODIFY_RANGE);
 			}
 
 			if (shardRange.end > range.end) {
-				existingShard->dataShards[range.end.toString()] =
-				    std::make_unique<DataShard>(KeyRange(KeyRangeRef(range.end, shardRange.end)), existingShard);
+				auto dataShard = std::make_unique<DataShard>(KeyRange(KeyRangeRef(range.end, shardRange.end)), existingShard);
+				dataShardMap.insert(dataShard->range, dataShard.get());
+				existingShard->dataShards[range.end.toString()] = std::move(dataShard);
 				logShardEvent(existingShard->id, shardRange, ShardOp::MODIFY_RANGE);
 			}
 		}
@@ -750,6 +794,13 @@ public:
 			TraceEvent(SevError, "ShardedRocksDB").detail("Error", "write to non-exist shard").detail("WriteKey", key);
 			return;
 		}
+
+		if (this->writeBatch == nullptr) {
+			this->writeBatch = std::make_unique<rocksdb::WriteBatch>();
+		}
+		if (this->dirtyShards == nullptr) {
+			this->dirtyShards = std::make_unique<std::set<PhysicalShard*>>();
+		}
 		writeBatch->Put(it.value()->physicalShard->cf, toSlice(key), toSlice(value));
 		dirtyShards->insert(it.value()->physicalShard);
 	}
@@ -759,6 +810,12 @@ public:
 		if (!it.value()) {
 			return;
 		}
+		if (this->writeBatch == nullptr) {
+			this->writeBatch = std::make_unique<rocksdb::WriteBatch>();
+		}
+		if (this->dirtyShards == nullptr) {
+			this->dirtyShards = std::make_unique<std::set<PhysicalShard*>>();
+		}
 		writeBatch->Delete(it.value()->physicalShard->cf, toSlice(key));
 		dirtyShards->insert(it.value()->physicalShard);
 	}
@@ -766,6 +823,12 @@ public:
 	void clearRange(KeyRangeRef range) {
 		auto rangeIterator = dataShardMap.intersectingRanges(range);
 
+		if (this->writeBatch == nullptr) {
+			this->writeBatch = std::make_unique<rocksdb::WriteBatch>();
+		}
+		if (this->dirtyShards == nullptr) {
+			this->dirtyShards = std::make_unique<std::set<PhysicalShard*>>();
+		}
 		for (auto it = rangeIterator.begin(); it != rangeIterator.end(); ++it) {
 			if (it.value() == nullptr) {
 				continue;
@@ -776,6 +839,12 @@ public:
 	}
 
 	void persistRangeMapping(KeyRangeRef range, bool isAdd) {
+		if (this->writeBatch == nullptr) {
+			this->writeBatch = std::make_unique<rocksdb::WriteBatch>();
+		}
+		if (this->dirtyShards == nullptr) {
+			this->dirtyShards = std::make_unique<std::set<PhysicalShard*>>();
+		}
 		TraceEvent(SevDebug, "ShardedRocksDB")
 		    .detail("Info", "RangeToPersist")
 		    .detail("BeginKey", range.begin)
@@ -867,7 +936,7 @@ public:
 		TraceEvent("RocksDB").detail("Info", "DBDestroyed");
 	}
 
-	rocksdb::DB* getDb() { return db; }
+	rocksdb::DB* getDb() const { return db; }
 
 	std::unordered_map<std::string, std::shared_ptr<PhysicalShard>>* getAllShards() { return &physicalShards; }
 
@@ -1434,7 +1503,7 @@ ACTOR Future<Void> rocksDBAggregatedMetricsLogger(std::shared_ptr<RocksDBMetrics
 }
 
 struct ShardedRocksDBKeyValueStore : IKeyValueStore {
-	
+
 	using CF = rocksdb::ColumnFamilyHandle*;
 
 	struct Writer : IThreadPoolReceiver {
@@ -1465,6 +1534,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			ThreadReturnPromise<Void> done;
 			Optional<Future<Void>>& metrics;
 			const FlowLock* readLock;
+
 			const FlowLock* fetchLock;
 			std::shared_ptr<RocksDBErrorListener> errorListener;
 
@@ -2197,11 +2267,12 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	}
 
 	StorageBytes getStorageBytes() const override {
-		uint64_t total_live = 0;
-		int64_t total_free = 0;
-		int64_t total_space = 0;
-
-		return StorageBytes(total_free, total_space, total_live, total_free);
+		uint64_t live = 0;
+		ASSERT(shardManager.getDb()->GetAggregatedIntProperty(rocksdb::DB::Properties::kLiveSstFilesSize, &live));
+		int64_t free;
+		int64_t total;
+		g_network->getDiskBytes(path, free, total);
+		return StorageBytes(free, total, live, free);
 	}
 
 	std::vector<std::string> removeRange(KeyRangeRef range) override { return shardManager.removeRange(range); }

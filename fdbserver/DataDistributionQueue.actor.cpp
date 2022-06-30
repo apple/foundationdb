@@ -1253,8 +1253,12 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 			self->dataMoves.insert(rd.keys, DDQueueData::DDDataMove(rd.dataMoveId));
 		}
 
+		TraceEvent(SevDebug, "RelocatorGettingShardMetrics", distributorId).detail("Range", rd.keys);
+
 		state StorageMetrics metrics =
 		    wait(brokenPromiseToNever(self->getShardMetrics.getReply(GetMetricsRequest(rd.keys))));
+
+		TraceEvent(SevDebug, "RelocatorGotShardMetrics", distributorId).detail("Metrics", metrics.toString());
 
 		state uint64_t physicalShardIDCandidate = UID().first();
 		state bool forceToUseNewPhysicalShard = false;
@@ -1563,8 +1567,13 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 			state std::vector<UID> extraIds;
 			state std::vector<ShardsAffectedByTeamFailure::Team> destinationTeams;
 
+			TraceEvent(SevDebug, "RelocationFoundBestTeam", distributorId).detail("BestTeamSize", bestTeams.size());
+
 			for (int i = 0; i < bestTeams.size(); i++) {
 				auto& serverIds = bestTeams[i].first->getServerIDs();
+
+				TraceEvent(SevDebug, "RelocationBestTeam", distributorId).detail("Team", bestTeams[i].first->getDesc());
+
 				destinationTeams.push_back(ShardsAffectedByTeamFailure::Team(serverIds, i == 0));
 
 				// TODO(psm): Make DataMoveMetaData aware of the two-step data move optimization.
@@ -1605,7 +1614,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 				    .detail("DestTeamSize", totalIds);
 			}
 
-			TraceEvent("ShardsAffectedByTeamFailureMove")
+			TraceEvent(SevVerbose, "ShardsAffectedByTeamFailureMove")
 			    .detail("Range", rd.keys)
 			    .detail("IsRestore", rd.isRestore())
 			    .detail("NewTeamSize", destinationTeams.size())
