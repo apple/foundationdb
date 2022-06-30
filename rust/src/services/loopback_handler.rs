@@ -1,13 +1,31 @@
 use crate::flow::{
     file_identifier::FileIdentifierNames, uid::UID, uid::WLTOKEN, Error, FlowFn, FlowFuture,
-    FlowMessage, Result,
+    FlowMessage, FlowResponse, Result,
 };
 
 use tokio::sync::oneshot;
 use tower::Service;
 
+use pin_project::pin_project;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
+
+#[pin_project]
+pub struct LoopbackFuture {
+    // TODO: Make this an Option<FlowFuture> to avoid allocations on sync paths.
+    #[pin]
+    inner: FlowFuture,
+}
+
+impl Future for LoopbackFuture {
+    type Output = Result<FlowResponse>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        self.project().inner.poll(cx)
+    }
+}
 
 pub struct LoopbackHandler {
     pub fit: FileIdentifierNames,
@@ -67,17 +85,19 @@ impl LoopbackHandler {
 impl Service<FlowMessage> for &LoopbackHandler {
     type Response = Option<FlowMessage>;
     type Error = Error;
-    type Future = FlowFuture;
+    type Future = LoopbackFuture;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<()>> {
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, req: FlowMessage) -> Self::Future {
-        match self.handle_req(req) {
-            Ok(Some(fut)) => fut,
-            Ok(None) => Box::pin(async move { Ok(None) }),
-            Err(e) => Box::pin(async move { Err(e) }),
+    fn call(&mut self, req: FlowMessage) -> LoopbackFuture {
+        LoopbackFuture {
+            inner: match self.handle_req(req) {
+                Ok(Some(inner)) => inner,
+                Ok(None) => Box::pin(async move { Ok(None) }),
+                Err(e) => Box::pin(async move { Err(e) }),
+            },
         }
     }
 }

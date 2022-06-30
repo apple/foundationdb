@@ -1,6 +1,6 @@
 use foundationdb::endpoints::{network_test, ping_request};
 use foundationdb::flow::{uid::WLTOKEN, Result};
-use foundationdb::services::{LoopbackHandler, ConnectionKeeper};
+use foundationdb::services::{ConnectionKeeper, LoopbackHandler};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 #[tokio::main]

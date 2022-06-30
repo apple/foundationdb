@@ -1,7 +1,7 @@
 use super::frame::{ConnectPacket, Frame, FrameDecoder, FrameEncoder};
 use super::Result;
-use tokio_util::codec::{Decoder, Encoder};
 use std::net::SocketAddr;
+use tokio_util::codec::{Decoder, Encoder};
 
 use bytes::BytesMut;
 use tokio::io::{
@@ -22,7 +22,8 @@ pub struct ConnectionWriter<W: AsyncWrite> {
 }
 
 pub async fn new<C: AsyncRead + AsyncWrite + Unpin + Send>(
-    listen_addr: Option<SocketAddr>, c: C,
+    listen_addr: Option<SocketAddr>,
+    c: C,
 ) -> Result<(
     ConnectionReader<ReadHalf<C>>,
     ConnectionWriter<WriteHalf<C>>,

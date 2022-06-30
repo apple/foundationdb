@@ -1,5 +1,5 @@
 use crate::flow::{
-    connection, file_identifier::FileIdentifierNames, Error, Flow, FlowFuture, FlowMessage, Peer,
+    connection, file_identifier::FileIdentifierNames, Error, Flow, FlowMessage, FlowResponse, Peer,
     Result,
 };
 use crate::services::RequestRouter;
@@ -8,8 +8,11 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, OwnedSemaphorePermit, Semaphore};
 use tower::Service;
 
-use std::net::{SocketAddr, IpAddr, Ipv4Addr};
+use pin_project::pin_project;
+use std::future::Future;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::ops::Deref;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
@@ -153,14 +156,21 @@ impl ConnectionHandler {
         };
         let (reader, writer, connect_packet) = connection::new(listen_addr, stream).await?;
         if connect_packet.version != 0xfdb00b072000000 {
-            return Err(format!("Incompatible protocol in connect packet {:x?}", connect_packet).into())
+            return Err(format!(
+                "Incompatible protocol in connect packet {:x?}",
+                connect_packet
+            )
+            .into());
         }
-        
+
         // TODO: Check protocol compatibility, create object w/ enough info to allow request routing
         println!("{} {:x?}", peer, connect_packet);
         if connect_packet.canonical_remote_ip4 != 0 {
             let octet = connect_packet.canonical_remote_ip4.to_le_bytes();
-            connection_handler.peer = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(octet[0], octet[1], octet[2], octet[3])), connect_packet.canonical_remote_port);
+            connection_handler.peer = SocketAddr::new(
+                IpAddr::V4(Ipv4Addr::new(octet[0], octet[1], octet[2], octet[3])),
+                connect_packet.canonical_remote_port,
+            );
         }
         let connection_handler = Arc::new(connection_handler);
         spawn_sender(response_rx, writer);
@@ -194,8 +204,11 @@ impl ConnectionHandler {
         loop {
             let permit = limit_connections.clone().acquire_owned().await?;
             let socket = bind.accept().await?;
-            tx.send(ConnectionHandler::new(Some(listen_addr), socket, permit, request_router.clone()).await?)
-                .await?; // Send will return error if the Receiver has been close()'ed.
+            tx.send(
+                ConnectionHandler::new(Some(listen_addr), socket, permit, request_router.clone())
+                    .await?,
+            )
+            .await?; // Send will return error if the Receiver has been close()'ed.
         }
     }
 
@@ -206,20 +219,43 @@ impl ConnectionHandler {
         let bind = TcpListener::bind(addr).await?;
         let limit_connections = Arc::new(Semaphore::new(MAX_CONNECTIONS));
         let (tx, rx) = mpsc::channel(100);
-        tokio::spawn(Self::listener(addr, bind, limit_connections, tx, request_router));
+        tokio::spawn(Self::listener(
+            addr,
+            bind,
+            limit_connections,
+            tx,
+            request_router,
+        ));
         Ok(rx)
     }
-    fn handle_req(&self, request: FlowMessage) -> Result<Option<FlowFuture>> {
+    fn handle_req(&self, request: FlowMessage) -> Result<()> {
         request.validate()?;
         self.response_tx.send(request)?;
-        Ok(None)
+        Ok(())
+    }
+}
+
+#[pin_project]
+pub struct RemoteFuture {
+    res: Result<()>,
+}
+
+impl Future for RemoteFuture {
+    type Output = Result<FlowResponse>;
+
+    fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
+        Poll::Ready(match self.project().res {
+            Ok(()) => Ok(None),
+            Err(e) => Err(format!("{:?}", e).into()), // TODO: Better way to copy error...
+        })
+        // Poll::Ready(self.project().res.clone())
     }
 }
 
 impl Service<FlowMessage> for &ConnectionHandler {
     type Response = Option<FlowMessage>;
     type Error = Error;
-    type Future = FlowFuture;
+    type Future = RemoteFuture;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<()>> {
         Poll::Ready(Ok(()))
@@ -227,9 +263,8 @@ impl Service<FlowMessage> for &ConnectionHandler {
 
     fn call(&mut self, req: FlowMessage) -> Self::Future {
         match self.handle_req(req) {
-            Ok(Some(fut)) => fut,
-            Ok(None) => Box::pin(async move { Ok(None) }),
-            Err(e) => Box::pin(async move { Err(e) }),
+            Ok(()) => RemoteFuture { res: Ok(()) },
+            Err(e) => RemoteFuture { res: Err(e) },
         }
     }
 }

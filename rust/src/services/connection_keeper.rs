@@ -1,9 +1,9 @@
-use crate::flow::{FlowMessage, FlowFuture, Peer, Result};
+use crate::flow::{FlowFuture, FlowMessage, Peer, Result};
 use crate::services::{ConnectionHandler, LoopbackHandler, RequestRouter};
-use tower::Service;
-use std::task::{Context, Poll};
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::task::{Context, Poll};
+use tower::Service;
 
 pub struct ConnectionKeeper {
     listen_addr: Option<SocketAddr>,
@@ -11,15 +11,27 @@ pub struct ConnectionKeeper {
 }
 
 impl ConnectionKeeper {
-    pub fn new(listen_addr: Option<SocketAddr>, loopback_handler: Arc<LoopbackHandler>) -> ConnectionKeeper {
+    pub fn new(
+        listen_addr: Option<SocketAddr>,
+        loopback_handler: Arc<LoopbackHandler>,
+    ) -> ConnectionKeeper {
         ConnectionKeeper {
             listen_addr,
-            request_router: RequestRouter::new(loopback_handler)
+            request_router: RequestRouter::new(loopback_handler),
         }
     }
-    async fn ensure_endpoint(request_router: &Arc<RequestRouter>, listen_addr: Option<SocketAddr>, saddr: &SocketAddr) -> Result<()> {
+    async fn ensure_endpoint(
+        request_router: &Arc<RequestRouter>,
+        listen_addr: Option<SocketAddr>,
+        saddr: &SocketAddr,
+    ) -> Result<()> {
         if !request_router.remote_endpoints.contains_key(saddr) {
-            let svc = ConnectionHandler::new_outgoing_connection(listen_addr, *saddr, request_router.clone()).await?;
+            let svc = ConnectionHandler::new_outgoing_connection(
+                listen_addr,
+                *saddr,
+                request_router.clone(),
+            )
+            .await?;
             request_router.remote_endpoints.insert(*saddr, svc);
             // todo: remove on connection error.
         }
@@ -27,7 +39,9 @@ impl ConnectionKeeper {
     }
     pub async fn rpc(&self, req: FlowMessage) -> Result<FlowMessage> {
         match &req.flow.dst {
-            Peer::Remote(saddr) => Self::ensure_endpoint(&self.request_router, self.listen_addr, saddr).await?,
+            Peer::Remote(saddr) => {
+                Self::ensure_endpoint(&self.request_router, self.listen_addr, saddr).await?
+            }
             _ => (),
         };
         self.request_router.rpc(req).await
@@ -50,7 +64,7 @@ impl Service<FlowMessage> for ConnectionKeeper {
         Box::pin(async move {
             let dst = &req.flow.dst;
             match dst {
-                Peer::Local(_) => {},
+                Peer::Local(_) => {}
                 Peer::Remote(saddr) => {
                     Self::ensure_endpoint(&request_router, listen_addr, saddr).await?;
                 }

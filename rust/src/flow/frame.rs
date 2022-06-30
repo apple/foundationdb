@@ -4,9 +4,9 @@ use crate::flow::file_identifier::FileIdentifier;
 use bytes::{Buf, BytesMut};
 use num_derive::{FromPrimitive, ToPrimitive};
 use num_traits::{FromPrimitive, ToPrimitive};
+use std::net::SocketAddr;
 use tokio_util::codec::{Decoder, Encoder};
 use xxhash_rust::xxh3;
-use std::net::SocketAddr;
 
 // TODO:  Figure out what this is set to on the C++ side.
 const MAX_FDB_FRAME_LENGTH: u32 = 1024 * 1024;
@@ -44,7 +44,7 @@ pub enum ConnectPacketFlags {
 #[derive(Debug)]
 pub struct ConnectPacket {
     version_flags: u8, // Really just 4 bits
-    pub version: u64,      // protocol version bytes.  Human readable in hex.
+    pub version: u64,  // protocol version bytes.  Human readable in hex.
     pub canonical_remote_port: u16,
     connection_id: u64,
     pub canonical_remote_ip4: u32,
@@ -55,9 +55,11 @@ pub struct ConnectPacket {
 impl ConnectPacket {
     pub fn new(listen_addr: Option<SocketAddr>) -> Result<Self> {
         let (ip4, port) = match listen_addr {
-            None => (0,0),
+            None => (0, 0),
             Some(SocketAddr::V4(v4)) => (u32::from_le_bytes(v4.ip().octets()), v4.port()),
-            Some(_) => return Err(format!("Unimplemented SocketAddr type: {:?}", listen_addr).into()),
+            Some(_) => {
+                return Err(format!("Unimplemented SocketAddr type: {:?}", listen_addr).into())
+            }
         };
         Ok(ConnectPacket {
             version_flags: 1, // TODO: set these to real values!
