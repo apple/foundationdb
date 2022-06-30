@@ -1788,10 +1788,20 @@ void MultiVersionDatabase::DatabaseState::updateDatabase(Reference<IDatabase> ne
 		}
 	}
 	if (db.isValid() && dbProtocolVersion.present() && MultiVersionApi::apiVersionAtLeast(710)) {
-		Future<Void> updateResult =
+		Future<std::string> updateResult =
 		    MultiVersionApi::api->updateClusterSharedStateMap(connectionRecord, dbProtocolVersion.get(), db);
-		sharedStateUpdater = map(errorOr(updateResult), [this](ErrorOr<Void> result) {
-			TraceEvent("ClusterSharedStateUpdated").detail("ConnectionRecord", connectionRecord);
+		sharedStateUpdater = map(errorOr(updateResult), [this](ErrorOr<std::string> result) {
+			if (result.present()) {
+				clusterId = result.get();
+				TraceEvent("ClusterSharedStateUpdated")
+				    .detail("ClusterId", result.get())
+				    .detail("ProtocolVersion", dbProtocolVersion.get());
+			} else {
+				TraceEvent(SevWarnAlways, "ClusterSharedStateUpdateError")
+				    .error(result.getError())
+				    .detail("ConnectionRecord", connectionRecord)
+				    .detail("ProtocolVersion", dbProtocolVersion.get());
+			}
 			dbVar->set(db);
 			return Void();
 		});
@@ -2457,10 +2467,10 @@ void MultiVersionApi::updateSupportedVersions() {
 }
 
 // Must be called from the main thread
-ACTOR Future<Void> updateClusterSharedStateMapImpl(MultiVersionApi* self,
-                                                   ClusterConnectionRecord connectionRecord,
-                                                   ProtocolVersion dbProtocolVersion,
-                                                   Reference<IDatabase> db) {
+ACTOR Future<std::string> updateClusterSharedStateMapImpl(MultiVersionApi* self,
+                                                          ClusterConnectionRecord connectionRecord,
+                                                          ProtocolVersion dbProtocolVersion,
+                                                          Reference<IDatabase> db) {
 	// The cluster ID will be the connection record string (either a filename or the connection string itself)
 	// in API versions before we could read the cluster ID.
 	state std::string clusterId = connectionRecord.toString();
@@ -2494,7 +2504,7 @@ ACTOR Future<Void> updateClusterSharedStateMapImpl(MultiVersionApi* self,
 			    .detail("ClusterId", clusterId)
 			    .detail("ProtocolVersionExpected", dbProtocolVersion)
 			    .detail("ProtocolVersionFound", sharedStateInfo.protocolVersion);
-			return Void();
+			return clusterId;
 		}
 
 		TraceEvent("SettingClusterSharedState")
@@ -2506,13 +2516,13 @@ ACTOR Future<Void> updateClusterSharedStateMapImpl(MultiVersionApi* self,
 		db->setSharedState(sharedState);
 	}
 
-	return Void();
+	return clusterId;
 }
 
 // Must be called from the main thread
-Future<Void> MultiVersionApi::updateClusterSharedStateMap(ClusterConnectionRecord connectionRecord,
-                                                          ProtocolVersion dbProtocolVersion,
-                                                          Reference<IDatabase> db) {
+Future<std::string> MultiVersionApi::updateClusterSharedStateMap(ClusterConnectionRecord connectionRecord,
+                                                                 ProtocolVersion dbProtocolVersion,
+                                                                 Reference<IDatabase> db) {
 	return updateClusterSharedStateMapImpl(this, connectionRecord, dbProtocolVersion, db);
 }
 

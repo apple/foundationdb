@@ -945,9 +945,9 @@ public:
 
 	bool callbackOnMainThread;
 	bool localClientDisabled;
-	Future<Void> updateClusterSharedStateMap(ClusterConnectionRecord connectionRecord,
-	                                         ProtocolVersion dbProtocolVersion,
-	                                         Reference<IDatabase> db);
+	Future<std::string> updateClusterSharedStateMap(ClusterConnectionRecord connectionRecord,
+	                                                ProtocolVersion dbProtocolVersion,
+	                                                Reference<IDatabase> db);
 	void clearClusterSharedStateMapEntry(std::string clusterId, ProtocolVersion dbProtocolVersion);
 
 	// Map of cluster ID -> DatabaseSharedState pointer Future
