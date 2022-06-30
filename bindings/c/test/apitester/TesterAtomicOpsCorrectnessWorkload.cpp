@@ -139,8 +139,6 @@ private:
 		}
 	}
 
-	Key getKeySuffix() { return Key(fdb::toBytesRef(fmt::format("_{}_{}", clientId, atomicOpId++))); }
-
 	void testIntAtomicOp(FDBMutationType opType, IntAtomicOpFunction opFunc, TTaskFct cont) {
 		uint64_t intValue1 = Random::get().randomInt(0, 10000000);
 		uint64_t intValue2 = Random::get().randomInt(0, 10000000);
@@ -158,7 +156,7 @@ private:
 	}
 
 	void testAtomicOp(FDBMutationType opType, Value val1, Value val2, AtomicOpFunction opFunc, TTaskFct cont) {
-		Key key(randomKeyName() + getKeySuffix());
+		Key key(randomKeyName());
 		execTransaction(
 		    // 1. Set the key to val1
 		    [key, val1](auto ctx) {
@@ -216,7 +214,7 @@ private:
 	}
 
 	void testAtomicVersionstampedKeyOp(TTaskFct cont) {
-		Key keyPrefix(randomKeyName() + getKeySuffix());
+		Key keyPrefix(randomKeyName());
 		Key key = keyPrefix + fdb::ByteString(10, '\0') + toByteString((uint32_t)keyPrefix.size());
 		Value val = randomValue();
 
@@ -265,7 +263,7 @@ private:
 	}
 
 	void testAtomicVersionstampedValueOp(TTaskFct cont) {
-		Key key(randomKeyName() + getKeySuffix());
+		Key key(randomKeyName());
 		Value valPrefix = randomValue();
 		Value val = valPrefix + fdb::ByteString(10, '\0') + toByteString((uint32_t)valPrefix.size());
 		auto versionstamp = std::make_shared<Key>();
@@ -314,7 +312,7 @@ private:
 	}
 
 	void testAtomicCompareAndClearOp(TTaskFct cont) {
-		Key key(randomKeyName() + getKeySuffix());
+		Key key(randomKeyName());
 		Value val = randomValue();
 		execTransaction(
 		    // 1. Set the key to initial value
@@ -347,8 +345,6 @@ private:
 			        });
 		    });
 	}
-
-	int atomicOpId = 0;
 };
 
 WorkloadFactory<AtomicOpsCorrectnessWorkload> AtomicOpsCorrectnessWorkloadFactory("AtomicOpsCorrectness");
