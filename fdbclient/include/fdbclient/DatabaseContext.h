@@ -291,10 +291,12 @@ public:
 	Future<Void> splitStorageMetricsStream(PromiseStream<Key> const& resultsStream,
 	                                       KeyRange const& keys,
 	                                       StorageMetrics const& limit,
-	                                       StorageMetrics const& estimated);
+	                                       StorageMetrics const& estimated,
+	                                       Optional<int> const& minSplitBytes = {});
 	Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(KeyRange const& keys,
 	                                                          StorageMetrics const& limit,
-	                                                          StorageMetrics const& estimated);
+	                                                          StorageMetrics const& estimated,
+	                                                          Optional<int> const& minSplitBytes = {});
 
 	Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> getReadHotRanges(KeyRange const& keys);
 
