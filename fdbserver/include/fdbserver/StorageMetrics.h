@@ -532,7 +532,7 @@ struct StorageServerMetrics {
 		auto _ranges = getReadHotRanges(req.keys,
 		                                SERVER_KNOBS->SHARD_MAX_READ_DENSITY_RATIO,
 		                                SERVER_KNOBS->READ_HOT_SUB_RANGE_CHUNK_SIZE,
-		                                SERVER_KNOBS->SHARD_READ_HOT_BANDWITH_MIN_PER_KSECONDS);
+		                                SERVER_KNOBS->SHARD_READ_HOT_BANDWIDTH_MIN_PER_KSECONDS);
 		reply.readHotRanges = VectorRef(_ranges.data(), _ranges.size());
 		req.reply.send(reply);
 	}

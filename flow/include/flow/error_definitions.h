@@ -196,7 +196,7 @@ ERROR( key_not_tuple, 2041, "The key cannot be parsed as a tuple" );
 ERROR( value_not_tuple, 2042, "The value cannot be parsed as a tuple" );
 ERROR( mapper_not_tuple, 2043, "The mapper cannot be parsed as a tuple" );
 ERROR( invalid_checkpoint_format, 2044, "Invalid checkpoint format" )
-
+ERROR( invalid_throttle_quota_value, 2045, "Failed to deserialize or initialize throttle quota value" )
 
 ERROR( incompatible_protocol_version, 2100, "Incompatible protocol version" )
 ERROR( transaction_too_large, 2101, "Transaction exceeds byte limit" )
@@ -315,6 +315,7 @@ ERROR( encrypt_update_cipher, 2705, "Attempt to update encryption cipher key")
 ERROR( encrypt_invalid_id, 2706, "Invalid encryption cipher details")
 ERROR( encrypt_keys_fetch_failed, 2707, "Encryption keys fetch from external KMS failed")
 ERROR( encrypt_invalid_kms_config, 2708, "Invalid encryption/kms configuration: discovery-url, validation-token, endpoint etc.")
+ERROR( encrypt_unsupported, 2709, "Encryption not supported")
 
 // 4xxx Internal errors (those that should be generated only by bugs) are decimal 4xxx
 ERROR( unknown_error, 4000, "An unknown error occurred" )  // C++ exception not of type Error
