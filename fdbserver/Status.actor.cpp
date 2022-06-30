@@ -3044,9 +3044,9 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			if (configuration.get().perpetualStorageWiggleSpeed > 0) {
 				state Future<std::vector<std::pair<UID, StorageWiggleValue>>> primaryWiggleValues;
 				state Future<std::vector<std::pair<UID, StorageWiggleValue>>> remoteWiggleValues;
-				storageWiggler["error"] = "";
-				primaryWiggleValues = timeoutError(readStorageWiggleValues(cx, true, true), 1.0);
-				remoteWiggleValues = timeoutError(readStorageWiggleValues(cx, false, true), 1.0);
+				double timeout = g_network->isSimulated() && BUGGIFY_WITH_PROB(0.01) ? 0.0 : 2.0;
+				primaryWiggleValues = timeoutError(readStorageWiggleValues(cx, true, true), timeout);
+				remoteWiggleValues = timeoutError(readStorageWiggleValues(cx, false, true), timeout);
 				wait(store(
 				         storageWiggler,
 				         storageWigglerStatsFetcher(db->get().distributor, configuration.get(), cx, true, &messages)) &&
