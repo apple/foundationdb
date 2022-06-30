@@ -3763,28 +3763,33 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 	preprocessMappedKey(mappedKeyFormatTuple, vt, isRangeQuery);
 
 	state int sz = input.data.size();
-	state int i = 0;
-	state std::vector<MappedKeyValueRef> kvms(sz);
-	state std::vector<Future<Void>> subqueries(sz);
-	for (; i < sz; i++) {
-		KeyValueRef* it = &input.data[i];
-		MappedKeyValueRef* kvm = &kvms[i];
-		kvm->key = it->key;
-		kvm->value = it->value;
+	int k = std::min(sz, SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE);
+	state std::vector<MappedKeyValueRef> kvms(k);
+	state std::vector<Future<Void>> subqueries;
+	state int offset = 0;
+	for (; offset < sz; offset += SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE) {
+		// Divide into batches of MAX_PARALLEL_QUICK_GET_VALUE subqueries
+		for (int i = 0; i + offset < sz && i < SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE; i++) {
+			KeyValueRef* it = &input.data[i + offset];
+			MappedKeyValueRef* kvm = &kvms[i];
+				kvm->key = it->key;
+				kvm->value = it->value;
 
-		Key mappedKey = constructMappedKey(it, vt, mappedKeyTuple, mappedKeyFormatTuple);
-		// Make sure the mappedKey is always available, so that it's good even we want to get key asynchronously.
-		result.arena.dependsOn(mappedKey.arena());
+			Key mappedKey = constructMappedKey(it, vt, mappedKeyTuple, mappedKeyFormatTuple);
+			// Make sure the mappedKey is always available, so that it's good even we want to get key asynchronously.
+			result.arena.dependsOn(mappedKey.arena());
 
-		//		std::cout << "key:" << printable(kvm.key) << ", value:" << printable(kvm.value)
-		//		          << ", mappedKey:" << printable(mappedKey) << std::endl;
+			std::cout << "key:" << printable(kvm->key) << ", value:" << printable(kvm->value)
+			          << ", mappedKey:" << printable(mappedKey) << std::endl;
 
-		subqueries[i] = mapSubquery(
-		    data, input, pOriginalReq, &result.arena, isRangeQuery, it, kvm, mappedKey);
-	}
-	wait(waitForAll(subqueries));
-	for (i = 0; i < sz; i++) {
-		result.data.push_back(result.arena, kvms[i]);
+			subqueries.push_back(mapSubquery(
+			    data, input, pOriginalReq, &result.arena, isRangeQuery, it, kvm, mappedKey));
+		}
+		wait(waitForAll(subqueries));
+		subqueries.clear();
+		for (int i = 0; i + offset < sz && i < SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE; i++) {
+			result.data.push_back(result.arena, kvms[i]);
+		}
 	}
 	return result;
 }
