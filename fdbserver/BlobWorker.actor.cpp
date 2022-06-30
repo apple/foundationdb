@@ -3198,7 +3198,7 @@ ACTOR Future<Void> monitorTenants(Reference<BlobWorkerData> bwData) {
 				for (auto& it : tenantResults) {
 					// FIXME: handle removing/moving tenants!
 					TenantNameRef tenantName = it.key.removePrefix(tenantMapPrefix);
-					TenantMapEntry entry = decodeTenantEntry(it.value);
+					TenantMapEntry entry = TenantMapEntry::decode(it.value);
 					tenants.push_back(std::pair(tenantName, entry));
 				}
 				bwData->tenantData.addTenants(tenants);
