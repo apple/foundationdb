@@ -307,9 +307,9 @@ std::string TCMachineTeamInfo::getMachineIDsStr() const {
 	return std::move(ss).str();
 }
 
-TCTeamInfo::TCTeamInfo(std::vector<Reference<TCServerInfo>> const& servers)
-  : servers(servers), healthy(true), wrongConfiguration(false), priority(SERVER_KNOBS->PRIORITY_TEAM_HEALTHY),
-    id(deterministicRandom()->randomUniqueID()) {
+TCTeamInfo::TCTeamInfo(std::vector<Reference<TCServerInfo>> const& servers, Optional<Reference<TCTenantInfo>> tenant)
+  : servers(servers), tenant(tenant), healthy(true), wrongConfiguration(false),
+    priority(SERVER_KNOBS->PRIORITY_TEAM_HEALTHY), id(deterministicRandom()->randomUniqueID()) {
 	if (servers.empty()) {
 		TraceEvent(SevInfo, "ConstructTCTeamFromEmptyServers").log();
 	}

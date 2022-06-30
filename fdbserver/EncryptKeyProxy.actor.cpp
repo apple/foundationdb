@@ -42,6 +42,7 @@
 #include "flow/genericactors.actor.h"
 #include "flow/network.h"
 
+#include <boost/functional/hash.hpp>
 #include <boost/mpl/not.hpp>
 #include <limits>
 #include <string>
