@@ -183,11 +183,14 @@ namespace coveragetool
         public static string FindComment(string[] lines, int i)
         {
             var comment = "";
-            while (i < lines.Length && lines[i].IndexOf("//") != -1)
+            var j = i;
+            while (j < lines.Length && lines[j].IndexOf("//") != -1)
             {
-                int backslashIndex = lines[i].IndexOf("//");
-                comment += lines[i].Substring(backslashIndex + 3);
-                i++;
+                int backslashIndexTrim = lines[j].Trim().IndexOf("//");
+                if (i != j && backslashIndexTrim != 0) break;
+                int backslashIndex = lines[j].IndexOf("//");
+                comment += lines[j].Substring(backslashIndex + 3);
+                j++;
             }
             return comment;
         }
