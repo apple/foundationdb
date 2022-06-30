@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from pathlib import Path
+import platform
 import shutil
 import subprocess
 import sys
@@ -94,9 +95,11 @@ class FdbCShimTests:
         self.unit_tests_bin = self.build_dir.joinpath("bin", "fdb_c_shim_unit_tests")
         assert self.unit_tests_bin.exists(), "{} does not exist".format(self.unit_tests_bin)
         self.api_test_dir = self.source_dir.joinpath("bindings", "c", "test", "apitester", "tests")
-
         self.downloader = FdbBinaryDownloader(args.build_dir)
-        self.downloader.download_old_binaries(LAST_RELEASE_VERSION)
+        # binary downloads are currently available only for x86_64
+        self.platform = platform.machine()
+        if (self.platform == "x86_64"):
+            self.downloader.download_old_binaries(LAST_RELEASE_VERSION)
 
     def build_c_api_tester_args(self, test_env, test_file):
         test_file_path = self.api_test_dir.joinpath(test_file)
@@ -166,7 +169,10 @@ class FdbCShimTests:
             test_env.exec_client_command(cmd_args, env_vars)
 
     def run_tests(self):
-        self.run_c_api_test(LAST_RELEASE_VERSION, DEFAULT_TEST_FILE)
+        # binary downloads are currently available only for x86_64
+        if (self.platform == "x86_64"):
+            self.run_c_api_test(LAST_RELEASE_VERSION, DEFAULT_TEST_FILE)
+
         self.run_c_api_test(CURRENT_VERSION, DEFAULT_TEST_FILE)
         self.run_c_unit_tests(CURRENT_VERSION)
         self.test_invalid_c_client_lib_env_var(CURRENT_VERSION)
@@ -198,9 +204,5 @@ if __name__ == "__main__":
         required=True,
     )
     args = parser.parse_args()
-
-    errcode = 1
     test = FdbCShimTests(args)
-    errcode = test.run_tests()
-
-    sys.exit(errcode)
+    test.run_tests()

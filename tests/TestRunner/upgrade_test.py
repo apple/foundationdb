@@ -103,7 +103,7 @@ class UpgradeTest:
         self.external_lib_dir = self.tmp_dir.joinpath("client_libs")
         self.external_lib_dir.mkdir(parents=True)
         for version in self.used_versions:
-            src_file_path = self.downloader.lib_dir(version).joinpath("libfdb_c.so")
+            src_file_path = self.downloader.lib_path(version)
             assert src_file_path.exists(), "{} does not exist".format(src_file_path)
             target_file_path = self.external_lib_dir.joinpath(
                 "libfdb_c.{}.so".format(version)

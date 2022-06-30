@@ -10,7 +10,7 @@ import hashlib
 
 from local_cluster import random_secret_string
 
-SUPPORTED_PLATFORMS = ["x86_64"]
+SUPPORTED_PLATFORMS = ["x86_64", "aarch64"]
 SUPPORTED_VERSIONS = [
     "7.2.0",
     "7.1.9",
