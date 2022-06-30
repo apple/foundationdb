@@ -844,8 +844,8 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 					std::vector<std::pair<TenantName, TenantMapEntry>> tenants;
 					std::vector<Key> prefixes;
 					for (auto& it : tenantResults) {
-						StringRef tenantName = it.key.removePrefix(tenantMapPrefix);
-						TenantMapEntry entry = decodeTenantEntry(it.value);
+						TenantNameRef tenantName = it.key.removePrefix(tenantMapPrefix);
+						TenantMapEntry entry = TenantMapEntry::decode(it.value);
 						tenants.push_back(std::pair(tenantName, entry));
 						prefixes.push_back(entry.prefix);
 					}

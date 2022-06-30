@@ -39,6 +39,7 @@
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/TagThrottle.actor.h"
+#include "fdbclient/TenantManagement.actor.h"
 #include "fdbclient/Tuple.h"
 
 #include "fdbclient/ThreadSafeTransaction.h"
@@ -51,7 +52,7 @@
 
 #include "flow/TLSConfig.actor.h"
 #include "flow/ThreadHelper.actor.h"
-#include "flow/SimpleOpt.h"
+#include "SimpleOpt/SimpleOpt.h"
 
 #include "fdbcli/FlowLineNoise.h"
 #include "fdbcli/fdbcli.actor.h"
@@ -63,7 +64,7 @@
 
 #ifdef __unixish__
 #include <stdio.h>
-#include "fdbcli/linenoise/linenoise.h"
+#include "linenoise/linenoise.h"
 #endif
 
 #include "fdbclient/versions.h"
@@ -508,6 +509,10 @@ void initHelp() {
 	    CommandHelp("getversion",
 	                "Fetch the current read version",
 	                "Displays the current read version of the database or currently running transaction.");
+	helpMap["quota"] =
+	    CommandHelp("quota",
+	                "quota [get <tag> [reserved|total] [read|write]|set <tag> [reserved|total] [read|write] <value>]",
+	                "Get or modify the throughput quota for the specified tag.");
 	helpMap["reset"] =
 	    CommandHelp("reset",
 	                "reset the current transaction",
@@ -1049,7 +1054,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 	state Database localDb;
 	state Reference<IDatabase> db;
 	state Reference<ITenant> tenant;
-	state Optional<Standalone<StringRef>> tenantName;
+	state Optional<TenantName> tenantName;
 	state Optional<TenantMapEntry> tenantEntry;
 
 	// This tenant is kept empty for operations that perform management tasks (e.g. killing a process)
@@ -1467,6 +1472,14 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					continue;
 				}
 
+				if (tokencmp(tokens[0], "quota")) {
+					bool _result = wait(makeInterruptable(quotaCommandActor(db, tokens)));
+					if (!_result) {
+						is_error = true;
+					}
+					continue;
+				}
+
 				if (tokencmp(tokens[0], "reset")) {
 					if (tokens.size() != 1) {
 						printUsage(tokens[0]);
@@ -1840,7 +1853,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						}
 					} else {
 						Optional<TenantMapEntry> entry =
-						    wait(makeInterruptable(ManagementAPI::tryGetTenant(db, tokens[1])));
+						    wait(makeInterruptable(TenantAPI::tryGetTenant(db, tokens[1])));
 						if (!entry.present()) {
 							fprintf(stderr, "ERROR: Tenant `%s' does not exist\n", printable(tokens[1]).c_str());
 							is_error = true;

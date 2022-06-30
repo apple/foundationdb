@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "Arena.h"
+#include "flow/Arena.h"
 
 #include "flow/UnitTest.h"
 

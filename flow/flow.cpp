@@ -22,7 +22,9 @@
 #include "flow/DeterministicRandom.h"
 #include "flow/UnitTest.h"
 #include "flow/rte_memcpy.h"
-#include "flow/folly_memcpy.h"
+#ifdef WITH_FOLLY_MEMCPY
+#include "folly_memcpy.h"
+#endif
 #include <stdarg.h>
 #include <cinttypes>
 

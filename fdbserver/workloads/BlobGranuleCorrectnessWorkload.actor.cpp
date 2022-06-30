@@ -30,6 +30,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/SystemData.h"
+#include "fdbclient/TenantManagement.actor.h"
 #include "fdbserver/BlobGranuleServerCommon.actor.h"
 #include "fdbserver/BlobGranuleValidation.actor.h"
 #include "fdbserver/Knobs.h"
@@ -207,7 +208,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 			fmt::print("Setting up blob granule range for tenant {0}\n", name.printable());
 		}
 
-		TenantMapEntry entry = wait(ManagementAPI::createTenant(cx.getReference(), name));
+		TenantMapEntry entry = wait(TenantAPI::createTenant(cx.getReference(), name));
 
 		if (BGW_DEBUG) {
 			fmt::print("Set up blob granule range for tenant {0}: {1}\n", name.printable(), entry.prefix.printable());
