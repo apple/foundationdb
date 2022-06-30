@@ -55,6 +55,8 @@ var (
 	currentContainerVersion string
 	additionalEnvFile       string
 	processCount            int
+	enablePprof             bool
+	listenAddress           string
 )
 
 type executionMode string
@@ -102,6 +104,8 @@ func main() {
 	pflag.StringVar(&mainContainerVersion, "main-container-version", "", "For sidecar mode, this specifies the version of the main container. If this is equal to the current container version, no files will be copied")
 	pflag.StringVar(&additionalEnvFile, "additional-env-file", "", "A file with additional environment variables to use when interpreting the monitor configuration")
 	pflag.IntVar(&processCount, "process-count", 1, "The number of processes to start")
+	pflag.BoolVar(&enablePprof, "enable-pprof", false, "Enables /debug/pprof endpoints on the listen address")
+	pflag.StringVar(&listenAddress, "listen-address", ":8081", "An address and port to listen on")
 	pflag.Parse()
 
 	logger := zapr.NewLogger(initLogger(logPath))
@@ -126,7 +130,7 @@ func main() {
 			logger.Error(err, "Error loading additional environment")
 			os.Exit(1)
 		}
-		StartMonitor(logger, fmt.Sprintf("%s/%s", inputDir, monitorConfFile), customEnvironment, processCount)
+		StartMonitor(logger, fmt.Sprintf("%s/%s", inputDir, monitorConfFile), customEnvironment, processCount, listenAddress, enablePprof)
 	case executionModeInit:
 		err = CopyFiles(logger, outputDir, copyDetails, requiredCopies)
 		if err != nil {

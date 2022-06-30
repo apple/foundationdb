@@ -30,7 +30,7 @@ public:
 	ApiCorrectnessWorkload(const WorkloadConfig& config) : ApiWorkload(config) {}
 
 private:
-	enum OpType { OP_INSERT, OP_GET, OP_CLEAR, OP_CLEAR_RANGE, OP_COMMIT_READ, OP_LAST = OP_COMMIT_READ };
+	enum OpType { OP_INSERT, OP_GET, OP_CLEAR, OP_GET_RANGE, OP_CLEAR_RANGE, OP_COMMIT_READ, OP_LAST = OP_COMMIT_READ };
 
 	void randomCommitReadOp(TTaskFct cont) {
 		int numKeys = Random::get().randomInt(1, maxKeysPerTransaction);
@@ -125,6 +125,71 @@ private:
 		    });
 	}
 
+	void getRangeLoop(std::shared_ptr<ITransactionContext> ctx,
+	                  fdb::KeySelector begin,
+	                  fdb::KeySelector end,
+	                  std::shared_ptr<std::vector<fdb::KeyValue>> results) {
+		auto f = ctx->tx().getRange(begin,
+		                            end,
+		                            0 /*limit*/,
+		                            0 /*target_bytes*/,
+		                            FDB_STREAMING_MODE_WANT_ALL,
+		                            0 /*iteration*/,
+		                            false /*snapshot*/,
+		                            false /*reverse*/);
+		ctx->continueAfter(f, [this, ctx, f, end, results]() {
+			auto out = copyKeyValueArray(f.get());
+			results->insert(results->end(), out.first.begin(), out.first.end());
+			const bool more = out.second;
+			if (more) {
+				// Fetch the remaining results.
+				getRangeLoop(ctx, fdb::key_select::firstGreaterThan(results->back().key), end, results);
+			} else {
+				ctx->done();
+			}
+		});
+	}
+
+	void randomGetRangeOp(TTaskFct cont) {
+		auto begin = randomKey(readExistingKeysRatio);
+		auto end = randomKey(readExistingKeysRatio);
+		auto results = std::make_shared<std::vector<fdb::KeyValue>>();
+
+		execTransaction(
+		    [this, begin, end, results](auto ctx) {
+			    // Clear the results vector, in case the transaction is retried.
+			    results->clear();
+
+			    getRangeLoop(ctx,
+			                 fdb::key_select::firstGreaterOrEqual(begin),
+			                 fdb::key_select::firstGreaterOrEqual(end),
+			                 results);
+		    },
+		    [this, begin, end, results, cont]() {
+			    auto expected = store.getRange(begin, end, results->size() + 10, false);
+			    if (results->size() != expected.size()) {
+				    error(fmt::format("randomGetRangeOp mismatch. expected {} keys, actual {} keys",
+				                      expected.size(),
+				                      results->size()));
+			    } else {
+				    auto expected_kv = expected.begin();
+				    for (auto actual_kv : *results) {
+					    if (actual_kv.key != expected_kv->key || actual_kv.value != expected_kv->value) {
+						    error(fmt::format(
+						        "randomGetRangeOp mismatch. expected key: {} actual key: {} expected value: "
+						        "{:.80} actual value: {:.80}",
+						        fdb::toCharsRef(expected_kv->key),
+						        fdb::toCharsRef(actual_kv.key),
+						        fdb::toCharsRef(expected_kv->value),
+						        fdb::toCharsRef(actual_kv.value)));
+					    }
+					    expected_kv++;
+				    }
+			    }
+			    schedule(cont);
+		    });
+	}
+
 	void randomOperation(TTaskFct cont) {
 		OpType txType = (store.size() == 0) ? OP_INSERT : (OpType)Random::get().randomInt(0, OP_LAST);
 		switch (txType) {
@@ -136,6 +201,9 @@ private:
 			break;
 		case OP_CLEAR:
 			randomClearOp(cont);
+			break;
+		case OP_GET_RANGE:
+			randomGetRangeOp(cont);
 			break;
 		case OP_CLEAR_RANGE:
 			randomClearRangeOp(cont);
