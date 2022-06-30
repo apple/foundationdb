@@ -3771,8 +3771,8 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 		for (int i = 0; i + offset < sz && i < SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE; i++) {
 			KeyValueRef* it = &input.data[i + offset];
 			MappedKeyValueRef* kvm = &kvms[i];
-				kvm->key = it->key;
-				kvm->value = it->value;
+			kvm->key = it->key;
+			kvm->value = it->value;
 
 			Key mappedKey = constructMappedKey(it, vt, mappedKeyTuple, mappedKeyFormatTuple);
 			// Make sure the mappedKey is always available, so that it's good even we want to get key asynchronously.
