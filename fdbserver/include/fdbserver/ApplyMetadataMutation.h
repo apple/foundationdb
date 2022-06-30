@@ -33,6 +33,7 @@
 #include "fdbserver/LogProtocolMessage.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/ProxyCommitData.actor.h"
+#include "flow/BlobCipher.h"
 #include "flow/FastRef.h"
 
 // Resolver's data for applyMetadataMutations() calls.
@@ -93,6 +94,7 @@ void applyMetadataMutations(SpanContext const& spanContext,
                             Reference<ILogSystem> logSystem,
                             const VectorRef<MutationRef>& mutations,
                             LogPushData* pToCommit,
+                            const std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>* pCipherKeys,
                             bool& confChange,
                             Version version,
                             Version popVersion,
