@@ -61,6 +61,7 @@
 #include "fdbclient/SpecialKeySpace.actor.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/SystemData.h"
+#include "fdbclient/TenantSpecialKeys.actor.h"
 #include "fdbclient/TransactionLineage.h"
 #include "fdbclient/versions.h"
 #include "fdbrpc/WellKnownEndpoints.h"
@@ -1491,11 +1492,17 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 	smoothMidShardSize.reset(CLIENT_KNOBS->INIT_MID_SHARD_BYTES);
 	globalConfig = std::make_unique<GlobalConfig>(this);
 
-	if (apiVersionAtLeast(710)) {
+	if (apiVersionAtLeast(720)) {
 		registerSpecialKeysImpl(
 		    SpecialKeySpace::MODULE::MANAGEMENT,
 		    SpecialKeySpace::IMPLTYPE::READWRITE,
-		    std::make_unique<TenantMapRangeImpl>(SpecialKeySpace::getManagementApiCommandRange("tenantmap")));
+		    std::make_unique<TenantRangeImpl<true>>(SpecialKeySpace::getManagementApiCommandRange("tenant")));
+	}
+	if (apiVersionAtLeast(710) && !apiVersionAtLeast(720)) {
+		registerSpecialKeysImpl(
+		    SpecialKeySpace::MODULE::MANAGEMENT,
+		    SpecialKeySpace::IMPLTYPE::READWRITE,
+		    std::make_unique<TenantRangeImpl<false>>(SpecialKeySpace::getManagementApiCommandRange("tenantmap")));
 	}
 	if (apiVersionAtLeast(700)) {
 		registerSpecialKeysImpl(SpecialKeySpace::MODULE::ERRORMSG,
