@@ -56,20 +56,6 @@ private:
 		OP_LAST = OP_ATOMIC_COMPARE_AND_CLEAR
 	};
 
-	static uint64_t toUint64_t(fdb::BytesRef value) {
-		ASSERT(value.size() == sizeof(uint64_t));
-		uint64_t output;
-		memcpy(&output, value.data(), value.size());
-		return output;
-	}
-
-	template <typename T>
-	static fdb::ByteString toByteString(T value) {
-		fdb::ByteString output(sizeof(T), 0);
-		memcpy(output.data(), (const uint8_t*)&value, sizeof(value));
-		return output;
-	}
-
 	void randomOperation(TTaskFct cont) override {
 		OpType txType = (OpType)Random::get().randomInt(0, OP_LAST);
 
@@ -165,7 +151,9 @@ private:
 		    opType,
 		    val1,
 		    val2,
-		    [opFunc](ValueRef val1, ValueRef val2) { return toByteString(opFunc(toUint64_t(val1), toUint64_t(val2))); },
+		    [opFunc](ValueRef val1, ValueRef val2) {
+			    return toByteString(opFunc(toInteger<uint64_t>(val1), toInteger<uint64_t>(val2)));
+		    },
 		    cont);
 	}
 
@@ -269,7 +257,7 @@ private:
 				        // TODO: Enable the above assert instead of the ones below once versionstamp
 				        // is correctly retrieved.
 				        ASSERT(resultKey->substr(0, keyPrefix.size()) == keyPrefix);
-				        ASSERT(toUint64_t(resultKey->substr(keyPrefix.size(), 8)) > 0);
+				        ASSERT(toInteger<uint64_t>(resultKey->substr(keyPrefix.size(), 8)) > 0);
 				        ASSERT(*resultVal == val);
 				        schedule(cont);
 			        });
@@ -319,7 +307,7 @@ private:
 				        // TODO: Enable the above assert instead of the ones below once versionstamp
 				        // is correctly retrieved.
 				        ASSERT(result->substr(0, valPrefix.size()) == valPrefix);
-				        ASSERT(toUint64_t(result->substr(valPrefix.size(), 8)) > 0);
+				        ASSERT(toInteger<uint64_t>(result->substr(valPrefix.size(), 8)) > 0);
 				        schedule(cont);
 			        });
 		    });
