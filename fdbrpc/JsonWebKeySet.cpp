@@ -355,7 +355,7 @@ Optional<PublicOrPrivateKey> parseRsaKey(StringRef b64n,
 	}
 	auto pkeyGuard = ScopeExit([pkey]() { ::EVP_PKEY_free(pkey); });
 #endif
-	if (d) {
+	if (!isPublic) {
 		auto len = ::i2d_PrivateKey(pkey, nullptr);
 		if (len <= 0) {
 			JWK_PARSE_ERROR_OSSL("i2d_PrivateKey() for RSA");
@@ -440,6 +440,8 @@ void encodeEcKey(rapidjson::Writer<rapidjson::StringBuffer>& writer,
 	writer.String("EC");
 	writer.Key("alg");
 	writer.String("ES256");
+	writer.Key("kid");
+	writer.String(reinterpret_cast<char const*>(keyName.begin()), keyName.size());
 #if OPENSSL_VERSION_NUMBER < 0x20000000l // For version 1.x, we need to use algo-specific APIs
 	auto ecKey = ::EVP_PKEY_get0_EC_KEY(pKey); // get0 == no refcount, no need to free
 	if (!ecKey) {
@@ -548,6 +550,8 @@ void encodeRsaKey(rapidjson::Writer<rapidjson::StringBuffer>& writer,
 	writer.String("RSA");
 	writer.Key("alg");
 	writer.String("RS256");
+	writer.Key("kid");
+	writer.String(reinterpret_cast<char const*>(keyName.begin()), keyName.size());
 #if OPENSSL_MAJOR_VERSION < 0x20000000l // use algorithm-specific API
 #define JWK_WRITE_BN_RSA_PARAM_V1(x)                                                                                   \
 	do {                                                                                                               \
@@ -705,6 +709,7 @@ StringRef JsonWebKeySet::toStringRef(Arena& arena) {
 		encodeKey(writer, keyName, key);
 	}
 	writer.EndArray();
+	writer.EndObject();
 	auto buf = new (arena) uint8_t[buffer.GetSize()];
 	::memcpy(buf, buffer.GetString(), buffer.GetSize());
 	return StringRef(buf, buffer.GetSize());
@@ -712,19 +717,21 @@ StringRef JsonWebKeySet::toStringRef(Arena& arena) {
 
 void forceLinkJsonWebKeySetTests() {}
 
-TEST_CASE("/fdbrpc/JsonWebKeySet/EC") {
+void testPublicKey(PrivateKey (*factory)()) {
+	// stringify-deserialize public key.
+	// sign some data using private key to see whether deserialized public key can verify it.
 	auto& rng = *deterministicRandom();
-	auto privKeyName = Standalone<StringRef>("somePrivateKey"_sr);
 	auto pubKeyName = Standalone<StringRef>("somePublicKey"_sr);
-	auto privKey = mkcert::makeEcP256();
+	auto privKey = factory();
 	auto pubKey = privKey.toPublic();
 	auto jwks = JsonWebKeySet{};
 	jwks.keys.emplace(pubKeyName, pubKey);
 	auto arena = Arena();
 	auto jwksStr = jwks.toStringRef(arena);
+	fmt::print("Test JWKS: {}\n", jwksStr.toString());
 	auto jwksClone = JsonWebKeySet::parse(jwksStr, {});
 	ASSERT(jwksClone.present());
-	auto pubKeyClone = jwksClone.get().keys.find(pubKeyName)->second.getPublic();
+	auto pubKeyClone = jwksClone.get().keys[pubKeyName].getPublic();
 	auto randByteStr = [&rng, &arena](int len) {
 		auto buf = new (arena) uint8_t[len];
 		for (auto i = 0; i < len; i++)
@@ -734,6 +741,56 @@ TEST_CASE("/fdbrpc/JsonWebKeySet/EC") {
 	auto randData = randByteStr(rng.randomUInt32() % 128 + 16);
 	auto signature = privKey.sign(arena, randData, *::EVP_sha256());
 	ASSERT(pubKeyClone.verify(randData, signature, *::EVP_sha256()));
+	const_cast<uint8_t&>(*randData.begin())++;
+	ASSERT(!pubKeyClone.verify(randData, signature, *::EVP_sha256()));
 	fmt::print("TESTED OK FOR OPENSSL V{} API\n", (OPENSSL_VERSION_NUMBER >> 28));
+}
+
+void testPrivateKey(PrivateKey (*factory)()) {
+	// stringify-deserialize private key.
+	// sign some data using deserialized private key to see whether public key can verify it.
+	auto& rng = *deterministicRandom();
+	auto privKeyName = Standalone<StringRef>("somePrivateKey"_sr);
+	auto privKey = factory();
+	auto pubKey = privKey.toPublic();
+	auto jwks = JsonWebKeySet{};
+	jwks.keys.emplace(privKeyName, privKey);
+	auto arena = Arena();
+	auto jwksStr = jwks.toStringRef(arena);
+	fmt::print("Test JWKS: {}\n", jwksStr.toString());
+	auto jwksClone = JsonWebKeySet::parse(jwksStr, {});
+	ASSERT(jwksClone.present());
+	auto privKeyClone = jwksClone.get().keys[privKeyName].getPrivate();
+	auto randByteStr = [&rng, &arena](int len) {
+		auto buf = new (arena) uint8_t[len];
+		for (auto i = 0; i < len; i++)
+			buf[i] = rng.randomUInt32() % 255u;
+		return StringRef(buf, len);
+	};
+	auto randData = randByteStr(rng.randomUInt32() % 128 + 16);
+	auto signature = privKeyClone.sign(arena, randData, *::EVP_sha256());
+	ASSERT(pubKey.verify(randData, signature, *::EVP_sha256()));
+	const_cast<uint8_t&>(*randData.begin())++;
+	ASSERT(!pubKey.verify(randData, signature, *::EVP_sha256()));
+	fmt::print("TESTED OK FOR OPENSSL V{} API\n", (OPENSSL_VERSION_NUMBER >> 28));
+}
+
+TEST_CASE("/fdbrpc/JsonWebKeySet/EC/PublicKey") {
+	testPublicKey(&mkcert::makeEcP256);
+	return Void();
+}
+
+TEST_CASE("/fdbrpc/JsonWebKeySet/EC/PrivateKey") {
+	testPrivateKey(&mkcert::makeEcP256);
+	return Void();
+}
+
+TEST_CASE("/fdbrpc/JsonWebKeySet/RSA/PublicKey") {
+	testPublicKey(&mkcert::makeRsa2048Bit);
+	return Void();
+}
+
+TEST_CASE("/fdbrpc/JsonWebKeySet/RSA/PrivateKey") {
+	testPrivateKey(&mkcert::makeRsa2048Bit);
 	return Void();
 }

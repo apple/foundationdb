@@ -26,6 +26,8 @@
 struct PublicOrPrivateKey {
 	std::variant<PublicKey, PrivateKey> key;
 
+	PublicOrPrivateKey() noexcept = default;
+
 	PublicOrPrivateKey(PublicKey key) noexcept : key(std::in_place_type<PublicKey>, key) {}
 
 	PublicOrPrivateKey(PrivateKey key) noexcept : key(std::in_place_type<PrivateKey>, key) {}

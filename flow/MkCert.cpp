@@ -34,6 +34,7 @@
 #include <openssl/evp.h>
 #include <openssl/objects.h>
 #include <openssl/pem.h>
+#include <openssl/rsa.h>
 #include <openssl/x509.h>
 #include <openssl/x509v3.h>
 
@@ -154,6 +155,26 @@ PrivateKey makeEcP256() {
 	auto kctxGuard = ScopeExit([kctx]() { ::EVP_PKEY_CTX_free(kctx); });
 	auto key = std::add_pointer_t<EVP_PKEY>();
 	OSSL_ASSERT(0 < ::EVP_PKEY_keygen_init(kctx));
+	OSSL_ASSERT(0 < ::EVP_PKEY_keygen(kctx, &key));
+	OSSL_ASSERT(key);
+	auto keyGuard = ScopeExit([key]() { ::EVP_PKEY_free(key); });
+	auto len = 0;
+	len = ::i2d_PrivateKey(key, nullptr);
+	ASSERT_LT(0, len);
+	auto tmpArena = Arena();
+	auto buf = new (tmpArena) uint8_t[len];
+	auto out = std::add_pointer_t<uint8_t>(buf);
+	len = ::i2d_PrivateKey(key, &out);
+	return PrivateKey(DerEncoded{}, StringRef(buf, len));
+}
+
+PrivateKey makeRsa2048Bit() {
+	auto kctx = ::EVP_PKEY_CTX_new_id(EVP_PKEY_RSA, nullptr);
+	OSSL_ASSERT(kctx);
+	auto kctxGuard = ScopeExit([kctx]() { ::EVP_PKEY_CTX_free(kctx); });
+	auto key = std::add_pointer_t<EVP_PKEY>();
+	OSSL_ASSERT(0 < ::EVP_PKEY_keygen_init(kctx));
+	OSSL_ASSERT(0 < ::EVP_PKEY_CTX_set_rsa_keygen_bits(kctx, 2048));
 	OSSL_ASSERT(0 < ::EVP_PKEY_keygen(kctx, &key));
 	OSSL_ASSERT(key);
 	auto keyGuard = ScopeExit([key]() { ::EVP_PKEY_free(key); });

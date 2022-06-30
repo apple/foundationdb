@@ -87,6 +87,7 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkSimKmsConnectorTests();
 		forceLinkIThreadPoolTests();
 		forceLinkTokenSignTests();
+		forceLinkJsonWebKeySetTests();
 		forceLinkVersionVectorTests();
 		forceLinkRESTClientTests();
 		forceLinkRESTUtilsTests();
