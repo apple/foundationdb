@@ -20,25 +20,23 @@
 
 #pragma once
 
+#include "fdbclient/PImpl.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/TagThrottle.actor.h"
-#include "fdbserver/Knobs.h"
 
 class TransactionTagCounter {
-	TransactionTagMap<int64_t> intervalCounts;
-	int64_t intervalTotalSampledCount = 0;
-	TransactionTag busiestTag;
-	int64_t busiestTagCount = 0;
-	double intervalStart = 0;
-
-	std::vector<StorageQueuingMetricsReply::TagInfo> previousBusiestTags;
-	UID thisServerID;
-	Reference<EventCacheHolder> busiestReadTagEventHolder;
+	PImpl<class TransactionTagCounterImpl> impl;
 
 public:
 	TransactionTagCounter(UID thisServerID);
-	static int64_t costFunction(int64_t bytes) { return bytes / SERVER_KNOBS->READ_COST_BYTE_FACTOR + 1; }
+	~TransactionTagCounter();
+
+	// Update counters tracking the busyness of each tag in the current interval
 	void addRequest(Optional<TagSet> const& tags, int64_t bytes);
+
+	// Save current set of busy tags and reset counters for next interval
 	void startNewInterval();
-	std::vector<StorageQueuingMetricsReply::TagInfo> const& getBusiestTags() const { return previousBusiestTags; }
+
+	// Returns the set of busiest tags as of the end of the last interval
+	std::vector<StorageQueuingMetricsReply::TagInfo> const& getBusiestTags() const;
 };

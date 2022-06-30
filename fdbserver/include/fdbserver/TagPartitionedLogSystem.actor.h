@@ -32,7 +32,6 @@
 #include "fdbrpc/simulator.h"
 #include "fdbserver/DBCoreState.h"
 #include "fdbserver/Knobs.h"
-#include "fdbserver/LogProtocolMessage.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/ServerDBInfo.h"

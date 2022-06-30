@@ -4,6 +4,7 @@ target_include_directories(rapidjson INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/rapid
 add_subdirectory(crc32)
 add_subdirectory(stacktrace)
 add_subdirectory(folly_memcpy)
+add_subdirectory(rapidxml)
 add_subdirectory(sqlite)
 add_subdirectory(SimpleOpt)
 add_subdirectory(fmt-8.1.1)
