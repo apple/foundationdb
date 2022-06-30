@@ -23,6 +23,8 @@
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
+#include "fdbserver/EncryptedMutationMessage.h"
+#include "fdbserver/GetEncryptCipherKeys.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbclient/StorageServerInterface.h"
@@ -1874,12 +1876,17 @@ ACTOR Future<Void> pullAsyncData(StorageCacheData* data) {
 
 			state FetchInjectionInfo fii;
 			state Reference<ILogSystem::IPeekCursor> cloneCursor2;
+			state Optional<std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>> cipherKeys;
+			state bool collectingCipherKeys = false;
+			// If encrypted mutation is encountered, we collect cipher details and fetch cipher keys, then start over.
 			loop {
 				state uint64_t changeCounter = data->cacheRangeChangeCounter;
 				bool epochEnd = false;
 				bool hasPrivateData = false;
 				bool firstMutation = true;
 				bool dbgLastMessageWasProtocol = false;
+
+				std::unordered_set<BlobCipherDetails> cipherDetails;
 
 				Reference<ILogSystem::IPeekCursor> cloneCursor1 = cursor->cloneNoMore();
 				cloneCursor2 = cursor->cloneNoMore();
@@ -1904,36 +1911,60 @@ ACTOR Future<Void> pullAsyncData(StorageCacheData* data) {
 					           OTELSpanContextMessage::isNextIn(cloneReader)) {
 						OTELSpanContextMessage scm;
 						cloneReader >> scm;
+					} else if (cloneReader.protocolVersion().hasEncryptionAtRest() &&
+					           EncryptedMutationMessage::isNextIn(cloneReader) && !cipherKeys.present()) {
+						// Encrypted mutation found, but cipher keys haven't been fetch.
+						// Collect cipher details to fetch cipher keys in one batch.
+						EncryptedMutationMessage emm;
+						cloneReader >> emm;
+						cipherDetails.insert(emm.header.cipherTextDetails);
+						cipherDetails.insert(emm.header.cipherHeaderDetails);
+						collectingCipherKeys = true;
 					} else {
 						MutationRef msg;
-						cloneReader >> msg;
-
-						if (firstMutation && msg.param1.startsWith(systemKeys.end))
-							hasPrivateData = true;
-						firstMutation = false;
-
-						if (msg.param1 == lastEpochEndPrivateKey) {
-							epochEnd = true;
-							// ASSERT(firstMutation);
-							ASSERT(dbgLastMessageWasProtocol);
+						if (cloneReader.protocolVersion().hasEncryptionAtRest() &&
+						    EncryptedMutationMessage::isNextIn(cloneReader)) {
+							assert(cipherKeys.present());
+							msg = EncryptedMutationMessage::decrypt(cloneReader, cloneReader.arena(), cipherKeys.get());
+						} else {
+							cloneReader >> msg;
 						}
 
-						dbgLastMessageWasProtocol = false;
+						if (!collectingCipherKeys) {
+							if (firstMutation && msg.param1.startsWith(systemKeys.end))
+								hasPrivateData = true;
+							firstMutation = false;
+
+							if (msg.param1 == lastEpochEndPrivateKey) {
+								epochEnd = true;
+								// ASSERT(firstMutation);
+								ASSERT(dbgLastMessageWasProtocol);
+							}
+
+							dbgLastMessageWasProtocol = false;
+						}
 					}
 				}
 
-				// Any fetchKeys which are ready to transition their cacheRanges to the adding,transferred state do so
-				// now. If there is an epoch end we skip this step, to increase testability and to prevent inserting a
-				// version in the middle of a rolled back version range.
-				while (!hasPrivateData && !epochEnd && !data->readyFetchKeys.empty()) {
-					auto fk = data->readyFetchKeys.back();
-					data->readyFetchKeys.pop_back();
-					fk.send(&fii);
+				if (collectingCipherKeys) {
+					std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> result =
+					    wait(getEncryptCipherKeys(data->db, cipherDetails));
+					cipherKeys = result;
+					collectingCipherKeys = false;
+				} else {
+					// Any fetchKeys which are ready to transition their cacheRanges to the adding,transferred state do
+					// so now. If there is an epoch end we skip this step, to increase testability and to prevent
+					// inserting a version in the middle of a rolled back version range.
+					while (!hasPrivateData && !epochEnd && !data->readyFetchKeys.empty()) {
+						auto fk = data->readyFetchKeys.back();
+						data->readyFetchKeys.pop_back();
+						fk.send(&fii);
+					}
+					if (data->cacheRangeChangeCounter == changeCounter)
+						break;
+					// TEST(true); // A fetchKeys completed while we were doing this, so eager might be outdated.  Read
+					// it again.
 				}
-				if (data->cacheRangeChangeCounter == changeCounter)
-					break;
-				// TEST(true); // A fetchKeys completed while we were doing this, so eager might be outdated.  Read it
-				// again.
 			}
 
 			data->debug_inApplyUpdate = true;
@@ -1988,7 +2019,11 @@ ACTOR Future<Void> pullAsyncData(StorageCacheData* data) {
 					reader >> oscm;
 				} else {
 					MutationRef msg;
-					reader >> msg;
+					if (reader.protocolVersion().hasEncryptionAtRest() && EncryptedMutationMessage::isNextIn(reader)) {
+						msg = EncryptedMutationMessage::decrypt(reader, reader.arena(), cipherKeys.get());
+					} else {
+						reader >> msg;
+					}
 
 					if (ver != invalidVersion) // This change belongs to a version < minVersion
 					{

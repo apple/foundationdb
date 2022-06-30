@@ -21,6 +21,7 @@
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/TenantManagement.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "flow/ActorCollection.h"
@@ -118,7 +119,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 		// If we are operating in the default tenant but enable raw access, we should only write keys
 		// in the tenant's key-space.
 		if (self->useSystemKeys && cx->defaultTenant.present() && self->keyPrefix < systemKeys.begin) {
-			TenantMapEntry entry = wait(ManagementAPI::getTenant(cx.getReference(), cx->defaultTenant.get()));
+			TenantMapEntry entry = wait(TenantAPI::getTenant(cx.getReference(), cx->defaultTenant.get()));
 			self->keyPrefix = entry.prefix.withSuffix(self->keyPrefix).toString();
 		}
 		return Void();
