@@ -25,7 +25,7 @@
 #include "flow/Error.h"
 #include "flow/Knobs.h"
 #include "flow/UnitTest.h"
-#include "flow/crc32c.h"
+#include "crc32/crc32c.h"
 #include "flow/flow.h"
 
 #include <atomic>

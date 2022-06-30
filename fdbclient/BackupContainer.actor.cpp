@@ -22,7 +22,7 @@
 #include <ostream>
 
 // FIXME: Trim this down
-#include "contrib/fmt-8.1.1/include/fmt/format.h"
+#include "fmt/format.h"
 #include "flow/Platform.actor.h"
 #include "fdbclient/AsyncTaskThread.h"
 #include "fdbclient/BackupContainer.h"
@@ -37,7 +37,9 @@
 #include "fdbrpc/simulator.h"
 #include "flow/Platform.h"
 #include "fdbclient/AsyncFileS3BlobStore.actor.h"
+#ifdef BUILD_AZURE_BACKUP
 #include "fdbclient/BackupContainerAzureBlobStore.h"
+#endif
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbclient/BackupContainerLocalDirectory.h"
 #include "fdbclient/BackupContainerS3BlobStore.h"
