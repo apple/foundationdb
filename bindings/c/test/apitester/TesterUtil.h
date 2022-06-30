@@ -29,7 +29,7 @@
 #include <fmt/format.h>
 #include <chrono>
 
-#include "../fdb_api.hpp"
+#include "test/fdb_api.hpp"
 
 #undef ERROR
 #define ERROR(name, number, description) enum { error_code_##name = number };

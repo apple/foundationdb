@@ -19,7 +19,7 @@
  */
 #include "TesterApiWorkload.h"
 #include "TesterUtil.h"
-#include "../fdb_api.hpp"
+#include "test/fdb_api.hpp"
 #include <memory>
 #include <fmt/format.h>
 

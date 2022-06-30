@@ -23,7 +23,7 @@
 #ifndef APITESTER_TRANSACTION_EXECUTOR_H
 #define APITESTER_TRANSACTION_EXECUTOR_H
 
-#include "../fdb_api.hpp"
+#include "test/fdb_api.hpp"
 #include "TesterOptions.h"
 #include "TesterScheduler.h"
 #include <string_view>
