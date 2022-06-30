@@ -218,44 +218,32 @@ private:
 		Key key = keyPrefix + fdb::ByteString(10, '\0') + toByteString((uint32_t)keyPrefix.size());
 		Value val = randomValue();
 
-		auto versionstamp = std::make_shared<Key>();
+		auto versionstamp_f = std::make_shared<fdb::TypedFuture<fdb::future_var::KeyRef>>();
 		execTransaction(
 		    // 1. Perform SetVersionstampedKey operation.
-		    [key, val, versionstamp](auto ctx) {
+		    [key, val, versionstamp_f](auto ctx) {
 			    ctx->tx().atomicOp(key, val, FDBMutationType::FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_KEY);
-			    // TODO: Figure out how to correctly retrieve version timestamps.
-			    // See testAtomicVersionstampedValueOp() for detailed discussion.
+			    *versionstamp_f = ctx->tx().getVersionstamp();
 			    ctx->commit();
 		    },
-		    [this, keyPrefix, val, versionstamp, cont]() {
-			    auto resultKey = std::make_shared<Key>();
+		    [this, keyPrefix, val, versionstamp_f, cont]() {
+			    ASSERT(versionstamp_f->ready());
+			    auto resultKey = keyPrefix + Key(versionstamp_f->get());
 			    auto resultVal = std::make_shared<Value>();
 			    execTransaction(
 			        // 2. Fetch the resulting versionstamped key and value.
 			        [keyPrefix, resultKey, resultVal](auto ctx) {
-				        auto f = ctx->tx().getKey(fdb::key_select::firstGreaterOrEqual(keyPrefix), false);
-				        ctx->continueAfter(
-				            f,
-				            [ctx, f, resultKey, resultVal]() {
-					            *resultKey = f.get();
-					            auto fv = ctx->tx().get(*resultKey, false);
-					            ctx->continueAfter(fv, [ctx, fv, resultVal]() {
-						            auto outputVal = fv.get();
-						            ASSERT(outputVal.has_value());
-						            *resultVal = outputVal.value();
+				        auto fv = ctx->tx().get(resultKey, false);
+				        ctx->continueAfter(fv, [ctx, fv, resultVal]() {
+					        auto outputVal = fv.get();
+					        ASSERT(outputVal.has_value());
+					        *resultVal = outputVal.value();
 
-						            ctx->done();
-					            });
-				            },
-				            true);
+					        ctx->done();
+				        });
 			        },
-			        [this, keyPrefix, val, resultKey, resultVal, versionstamp, cont]() {
+			        [this, keyPrefix, val, resultVal, cont]() {
 				        // 3. Assert expectation.
-				        // ASSERT(*resultKey == keyPrefix + *versionstamp);
-				        // TODO: Enable the above assert instead of the ones below once versionstamp
-				        // is correctly retrieved.
-				        ASSERT(resultKey->substr(0, keyPrefix.size()) == keyPrefix);
-				        ASSERT(toInteger<uint64_t>(resultKey->substr(keyPrefix.size(), 8)) > 0);
 				        ASSERT(*resultVal == val);
 				        schedule(cont);
 			        });
@@ -266,23 +254,17 @@ private:
 		Key key(randomKeyName());
 		Value valPrefix = randomValue();
 		Value val = valPrefix + fdb::ByteString(10, '\0') + toByteString((uint32_t)valPrefix.size());
-		auto versionstamp = std::make_shared<Key>();
+		auto versionstamp_f = std::make_shared<fdb::TypedFuture<fdb::future_var::KeyRef>>();
 		execTransaction(
 		    // 1. Perform SetVersionstampedValue operation.
-		    [key, val, versionstamp](auto ctx) {
+		    [key, val, versionstamp_f](auto ctx) {
 			    ctx->tx().atomicOp(key, val, FDBMutationType::FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_VALUE);
-			    // TODO: Figure out how to correctly retrieve version timestamps. This may require
-			    // changes to TesterTransactionExectutor.
-			    // The following works most of the time, but fails when the transaction returns
-			    // commit_unknown_result, and the TransactionExecutor automatically retries it.
-			    // In that case, future f fails with transaction_invalid_version which in turn
-			    // fails the whole transaction.
-
-			    // auto f = ctx->tx().getVersionstamp();
-			    // ctx->continueAfter(f, [f, versionstamp]() { *versionstamp = Key(f.get()); });
+			    *versionstamp_f = ctx->tx().getVersionstamp();
 			    ctx->commit();
 		    },
-		    [this, key, valPrefix, versionstamp, cont]() {
+		    [this, key, valPrefix, versionstamp_f, cont]() {
+			    versionstamp_f->blockUntilReady();
+			    auto versionstamp = Key(versionstamp_f->get());
 			    auto result = std::make_shared<Value>();
 
 			    execTransaction(
@@ -301,11 +283,7 @@ private:
 			        },
 			        [this, key, valPrefix, result, versionstamp, cont]() {
 				        // 3. Assert expectation.
-				        // ASSERT(*result == valPrefix + *versionstamp);
-				        // TODO: Enable the above assert instead of the ones below once versionstamp
-				        // is correctly retrieved.
-				        ASSERT(result->substr(0, valPrefix.size()) == valPrefix);
-				        ASSERT(toInteger<uint64_t>(result->substr(valPrefix.size(), 8)) > 0);
+				        ASSERT(*result == valPrefix + versionstamp);
 				        schedule(cont);
 			        });
 		    });
