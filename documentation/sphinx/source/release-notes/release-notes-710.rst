@@ -4,6 +4,18 @@
 Release Notes
 #############
 
+7.1.11
+======
+* Same as 7.1.10 release with AVX enabled.
+
+7.1.10
+======
+* Released with AVX disabled.
+* Fixed a sequencer crash when DC ID is a string. `(PR #7393) <https://github.com/apple/foundationdb/pull/7393>`_
+* Fixed a client performance regression by removing unnecessary transaction initialization. `(PR #7365) <https://github.com/apple/foundationdb/pull/7365>`_
+* Safely removed fdb_transaction_get_range_and_flat_map C API. `(PR #7379) <https://github.com/apple/foundationdb/pull/7379>`_
+* Fixed an unknown error bug when hostname resolving fails. `(PR #7380) <https://github.com/apple/foundationdb/pull/7380>`_
+
 7.1.9
 =====
 * Same as 7.1.8 release with AVX enabled.
@@ -15,7 +27,7 @@ Release Notes
 * Added RSS bytes for processes in status json output and corrected available_bytes calculation. `(PR #7348) <https://github.com/apple/foundationdb/pull/7348>`_
 * Added versionstamp support in tuples. `(PR #7313) <https://github.com/apple/foundationdb/pull/7313>`_
 * Fixed some spammy trace events. `(PR #7300) <https://github.com/apple/foundationdb/pull/7300>`_
-* Fixed a memory corruption bug for using streaming peeks. `(PR #7288) <https://github.com/apple/foundationdb/pull/7288>`_
+* Avoided a memory corruption bug by disabling streaming peeks. `(PR #7288) <https://github.com/apple/foundationdb/pull/7288>`_
 * Fixed a hang bug in fdbcli exclude command. `(PR #7268) <https://github.com/apple/foundationdb/pull/7268>`_
 * Fixed an issue that a remote TLog blocks peeks. `(PR #7255) <https://github.com/apple/foundationdb/pull/7255>`_
 * Fixed a connection issue using hostnames. `(PR #7264) <https://github.com/apple/foundationdb/pull/7264>`_
