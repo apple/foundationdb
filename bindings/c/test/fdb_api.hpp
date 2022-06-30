@@ -101,8 +101,7 @@ ByteString strinc(const StringLike<Char>& s) {
 	// Must not be called with a string that consists only of zero or more '\xff' bytes.
 	assert(index >= 0);
 
-	auto result = (s.substr(0, index + 1));
-	ByteString byteResult(result.begin(), result.end());
+	ByteString byteResult(s.substr(0, index + 1));
 	byteResult[byteResult.size() - 1]++;
 	return byteResult;
 }

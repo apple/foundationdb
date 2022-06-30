@@ -98,6 +98,23 @@ Transaction createNewTransaction(Database db, Arguments const& args, int id = -1
 	return t.createTransaction();
 }
 
+uint64_t byteswapHelper(uint64_t input) {
+	uint64_t output = 0;
+	for (int i = 0; i < 8; ++i) {
+		output <<= 8;
+		output += input & 0xFF;
+		input >>= 8;
+	}
+
+	return output;
+}
+
+void computeTenantPrefix(ByteString& s, uint64_t id) {
+	uint64_t swapped = byteswapHelper(id);
+	BytesRef temp = reinterpret_cast<const uint8_t*>(&swapped);
+	memcpy(&s[0], temp.data(), 8);
+}
+
 /* cleanup database */
 int cleanup(Database db, Arguments const& args) {
 	const auto prefix_len = args.prefixpadding ? args.key_length - args.row_digits : intSize(KEY_PREFIX);
@@ -136,29 +153,38 @@ int cleanup(Database db, Arguments const& args) {
 	} else {
 		int batch_size = args.tenant_batch_size;
 		int batches = (args.total_tenants + batch_size - 1) / batch_size;
-		fdb::TypedFuture<fdb::future_var::ValueRef> tenantResults[batch_size];
-		// Issue all tenant reads first
-		Transaction getTx = db.createTransaction();
-		for (int i = 0; i < args.total_tenants; ++i) {
-			std::string tenant_name = "tenant" + std::to_string(i);
-			tenantResults[i] = Tenant::getTenant(getTx, toBytesRef(tenant_name));
-		}
 		// First loop to clear all tenant key ranges
 		for (int batch = 0; batch < batches; ++batch) {
+			fdb::TypedFuture<fdb::future_var::ValueRef> tenantResults[batch_size];
+			// Issue all tenant reads first
+			Transaction getTx = db.createTransaction();
+			for (int i = batch * batch_size; i < args.total_tenants && i < (batch + 1) * batch_size; ++i) {
+				std::string tenant_name = "tenant" + std::to_string(i);
+				tenantResults[i - (batch * batch_size)] = Tenant::getTenant(getTx, toBytesRef(tenant_name));
+			}
 			for (int i = batch * batch_size; i < args.total_tenants && i < (batch + 1) * batch_size; ++i) {
 				std::string tenant_name = "tenant" + std::to_string(i);
 				while (true) {
-					const auto rc = waitAndHandleError(getTx, tenantResults[i], "GET_TENANT");
+					const auto rc = waitAndHandleError(getTx, tenantResults[i - (batch * batch_size)], "GET_TENANT");
 					if (rc == FutureRC::OK) {
 						// Read the tenant metadata for the prefix and issue a range clear
-						if (tenantResults[i].get().has_value()) {
-							auto val = tenantResults[i].get().value();
-							const char* metadata = reinterpret_cast<const char*>(val.data());
+						if (tenantResults[i - (batch * batch_size)].get().has_value()) {
+							ByteString val(tenantResults[i - (batch * batch_size)].get().value());
 							rapidjson::Document doc;
+							const char* metadata = reinterpret_cast<const char*>(val.c_str());
 							doc.Parse(metadata);
 							if (!doc.HasParseError()) {
-								std::string tenantPrefix = (doc["prefix"].GetString());
-								tx.clearRange(toBytesRef(tenantPrefix), toBytesRef(strinc(tenantPrefix)));
+								// rapidjson does not decode the prefix as the same byte string that
+								// was passed as input. For a workaround, we take the id
+								// and compute the prefix on our own
+								rapidjson::Value& docVal = doc["id"];
+								uint64_t id = docVal.GetUint64();
+								tx.setOption(FDBTransactionOption::FDB_TR_OPTION_LOCK_AWARE, BytesRef());
+								tx.setOption(FDBTransactionOption::FDB_TR_OPTION_RAW_ACCESS, BytesRef());
+								ByteString tenantPrefix(8, '\0');
+								computeTenantPrefix(tenantPrefix, id);
+								ByteString tenantPrefixEnd = strinc(tenantPrefix);
+								tx.clearRange(toBytesRef(tenantPrefix), toBytesRef(tenantPrefixEnd));
 							}
 						}
 						break;
