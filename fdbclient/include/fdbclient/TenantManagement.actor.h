@@ -41,7 +41,7 @@ Future<Optional<TenantMapEntry>> tryGetTenantTransaction(Transaction tr, TenantN
 
 	state typename transaction_future_type<Transaction, Optional<Value>>::type tenantFuture = tr->get(tenantMapKey);
 	Optional<Value> val = wait(safeThreadFutureToFuture(tenantFuture));
-	return val.map<TenantMapEntry>([](Optional<Value> v) { return decodeTenantEntry(v.get()); });
+	return val.map<TenantMapEntry>([](Optional<Value> v) { return TenantMapEntry::decode(v.get()); });
 }
 
 ACTOR template <class DB>
@@ -181,7 +181,8 @@ Future<std::pair<Optional<TenantMapEntry>, bool>> createTenantTransaction(
 		tenantEntry.assignedCluster = Optional<ClusterName>();
 	}
 
-	tr->set(tenantMapKey, encodeTenantEntry(tenantEntry));
+	tr->set(tenantMapKey, newTenant.encode());
+
 	if (tenantEntry.tenantGroup.present()) {
 		tr->set(getTenantGroupIndexKey(tenantEntry.tenantGroup.get(), name), ""_sr);
 	}
@@ -355,7 +356,7 @@ Future<std::map<TenantName, TenantMapEntry>> listTenantsTransaction(Transaction 
 
 	std::map<TenantName, TenantMapEntry> tenants;
 	for (auto kv : results) {
-		tenants[kv.key.removePrefix(tenantMapPrefix)] = decodeTenantEntry(kv.value);
+		tenants[kv.key.removePrefix(tenantMapPrefix)] = TenantMapEntry::decode(kv.value);
 	}
 
 	return tenants;

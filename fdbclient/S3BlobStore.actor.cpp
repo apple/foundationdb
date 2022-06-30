@@ -40,7 +40,7 @@
 #include "flow/IAsyncFile.h"
 #include "flow/Hostname.h"
 #include "flow/UnitTest.h"
-#include "fdbclient/rapidxml/rapidxml.hpp"
+#include "rapidxml/rapidxml.hpp"
 #ifdef BUILD_AWS_BACKUP
 #include "fdbclient/FDBAWSCredentialsProvider.h"
 #endif

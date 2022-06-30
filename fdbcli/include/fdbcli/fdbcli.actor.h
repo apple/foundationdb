@@ -222,6 +222,8 @@ ACTOR Future<bool> profileCommandActor(Database db,
                                        Reference<ITransaction> tr,
                                        std::vector<StringRef> tokens,
                                        bool intrans);
+// quota command
+ACTOR Future<bool> quotaCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // setclass command
 ACTOR Future<bool> setClassCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // snapshot command

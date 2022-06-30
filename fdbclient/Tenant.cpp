@@ -96,12 +96,12 @@ bool TenantMapEntry::matchesConfiguration(TenantMapEntry const& other) const {
 TEST_CASE("/fdbclient/TenantMapEntry/Serialization") {
 	TenantMapEntry entry1(1, ""_sr, TenantState::READY);
 	ASSERT(entry1.prefix == "\x00\x00\x00\x00\x00\x00\x00\x01"_sr);
-	TenantMapEntry entry2 = decodeTenantEntry(encodeTenantEntry(entry1));
+	TenantMapEntry entry2 = TenantMapEntry::decode(entry1.encode());
 	ASSERT(entry1.id == entry2.id && entry1.prefix == entry2.prefix);
 
 	TenantMapEntry entry3(std::numeric_limits<int64_t>::max(), "foo"_sr, TenantState::READY);
 	ASSERT(entry3.prefix == "foo\x7f\xff\xff\xff\xff\xff\xff\xff"_sr);
-	TenantMapEntry entry4 = decodeTenantEntry(encodeTenantEntry(entry3));
+	TenantMapEntry entry4 = TenantMapEntry::decode(entry3.encode());
 	ASSERT(entry3.id == entry4.id && entry3.prefix == entry4.prefix);
 
 	for (int i = 0; i < 100; ++i) {
@@ -120,7 +120,7 @@ TEST_CASE("/fdbclient/TenantMapEntry/Serialization") {
 		       entry.prefix.endsWith(StringRef(reinterpret_cast<uint8_t*>(&bigEndianId), 8)) &&
 		       entry.prefix.size() == subspaceLength + 8);
 
-		TenantMapEntry decodedEntry = decodeTenantEntry(encodeTenantEntry(entry));
+		TenantMapEntry decodedEntry = TenantMapEntry::decode(entry.encode());
 		ASSERT(decodedEntry.id == entry.id && decodedEntry.prefix == entry.prefix);
 	}
 

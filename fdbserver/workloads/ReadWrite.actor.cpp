@@ -61,6 +61,7 @@ struct ReadWriteCommonImpl {
 			throw;
 		}
 	}
+
 	ACTOR static Future<Void> tracePeriodically(ReadWriteCommon* self) {
 		state double start = now();
 		state double elapsed = 0.0;
@@ -376,6 +377,9 @@ struct ReadWriteWorkload : ReadWriteCommon {
 	bool adjacentReads; // keys are adjacent within a transaction
 	bool adjacentWrites;
 	int extraReadConflictRangesPerTransaction, extraWriteConflictRangesPerTransaction;
+	Optional<Key> transactionTag;
+
+	int transactionsTagThrottled{ 0 };
 
 	// hot traffic pattern
 	double hotKeyFraction, forceHotProbability = 0; // key based hot traffic setting
@@ -397,6 +401,9 @@ struct ReadWriteWorkload : ReadWriteCommon {
 		rampUpConcurrency = getOption(options, LiteralStringRef("rampUpConcurrency"), false);
 		batchPriority = getOption(options, LiteralStringRef("batchPriority"), false);
 		descriptionString = getOption(options, LiteralStringRef("description"), LiteralStringRef("ReadWrite"));
+		if (hasOption(options, LiteralStringRef("transactionTag"))) {
+			transactionTag = getOption(options, LiteralStringRef("transactionTag"), ""_sr);
+		}
 
 		if (rampUpConcurrency)
 			ASSERT(rampSweepCount == 2); // Implementation is hard coded to ramp up and down
@@ -415,14 +422,17 @@ struct ReadWriteWorkload : ReadWriteCommon {
 		}
 	}
 
-	std::string description() const override { return descriptionString.toString(); }
-
 	template <class Trans>
-	void setupTransaction(Trans* tr) {
+	void setupTransaction(Trans& tr) {
 		if (batchPriority) {
-			tr->setOption(FDBTransactionOptions::PRIORITY_BATCH);
+			tr.setOption(FDBTransactionOptions::PRIORITY_BATCH);
+		}
+		if (transactionTag.present() && tr.getTags().size() == 0) {
+			tr.setOption(FDBTransactionOptions::AUTO_THROTTLE_TAG, transactionTag.get());
 		}
 	}
+
+	std::string description() const override { return descriptionString.toString(); }
 
 	void getMetrics(std::vector<PerfMetric>& m) override {
 		ReadWriteCommon::getMetrics(m);
@@ -449,6 +459,9 @@ struct ReadWriteWorkload : ReadWriteCommon {
 			m.emplace_back("Mean Commit Latency (ms)", 1000 * commitLatencies.mean(), Averaged::True);
 			m.emplace_back("Median Commit Latency (ms, averaged)", 1000 * commitLatencies.median(), Averaged::True);
 			m.emplace_back("Max Commit Latency (ms, averaged)", 1000 * commitLatencies.max(), Averaged::True);
+			if (transactionTag.present()) {
+				m.emplace_back("Transaction Tag Throttled", transactionsTagThrottled, Averaged::False);
+			}
 		}
 	}
 
@@ -494,11 +507,14 @@ struct ReadWriteWorkload : ReadWriteCommon {
 			state Transaction tr(cx);
 
 			try {
-				self->setupTransaction(&tr);
+				self->setupTransaction(tr);
 				wait(self->readOp(&tr, keys, self, false));
 				wait(tr.warmRange(allKeys));
 				break;
 			} catch (Error& e) {
+				if (e.code() == error_code_tag_throttled) {
+					++self->transactionsTagThrottled;
+				}
 				wait(tr.onError(e));
 			}
 		}
@@ -625,7 +641,7 @@ struct ReadWriteWorkload : ReadWriteCommon {
 
 				loop {
 					try {
-						self->setupTransaction(&tr);
+						self->setupTransaction(tr);
 
 						GRVStartTime = now();
 						self->transactionFailureMetric->startLatency = -1;

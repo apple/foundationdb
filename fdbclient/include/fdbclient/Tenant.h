@@ -59,6 +59,15 @@ struct TenantMapEntry {
 	void setSubspace(KeyRef subspace);
 	bool matchesConfiguration(TenantMapEntry const& other) const;
 
+	Value encode() const { return ObjectWriter::toValue(*this, IncludeVersion(ProtocolVersion::withTenants())); }
+
+	static TenantMapEntry decode(ValueRef const& value) {
+		TenantMapEntry entry;
+		ObjectReader reader(value.begin(), IncludeVersion(ProtocolVersion::withTenants()));
+		reader.deserialize(entry);
+		return entry;
+	}
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		KeyRef subspace;

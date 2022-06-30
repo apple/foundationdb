@@ -5158,8 +5158,9 @@ Future<Optional<Value>> Transaction::get(const Key& key, Snapshot snapshot) {
 		if (!ver.isReady() || metadataVersion.isSet()) {
 			return metadataVersion.getFuture();
 		} else {
-			if (ver.isError())
+			if (ver.isError()) {
 				return ver.getError();
+			}
 			if (ver.get() == trState->cx->metadataVersionCache[trState->cx->mvCacheInsertLocation].first) {
 				return trState->cx->metadataVersionCache[trState->cx->mvCacheInsertLocation].second;
 			}
@@ -5761,6 +5762,10 @@ void Transaction::resetImpl(bool generateNewSpan) {
 	commitResult = Promise<Void>();
 	committing = Future<Void>();
 	cancelWatches();
+}
+
+TagSet const& Transaction::getTags() const {
+	return trState->options.tags;
 }
 
 void Transaction::reset() {
@@ -7067,6 +7072,25 @@ Future<ProtocolVersion> DatabaseContext::getClusterProtocol(Optional<ProtocolVer
 	return getClusterProtocolImpl(coordinator, expectedVersion);
 }
 
+double ClientTagThrottleData::throttleDuration() const {
+	if (expiration <= now()) {
+		return 0.0;
+	}
+
+	double capacity =
+	    (smoothRate.smoothTotal() - smoothReleased.smoothRate()) * CLIENT_KNOBS->TAG_THROTTLE_SMOOTHING_WINDOW;
+
+	if (capacity >= 1) {
+		return 0.0;
+	}
+
+	if (tpsRate == 0) {
+		return std::max(0.0, expiration - now());
+	}
+
+	return std::min(expiration - now(), capacity / tpsRate);
+}
+
 uint32_t Transaction::getSize() {
 	auto s = tr.transaction.mutations.expectedSize() + tr.transaction.read_conflict_ranges.expectedSize() +
 	         tr.transaction.write_conflict_ranges.expectedSize();
@@ -7892,7 +7916,8 @@ ACTOR Future<Void> splitStorageMetricsStream(PromiseStream<Key> resultStream,
                                              Database cx,
                                              KeyRange keys,
                                              StorageMetrics limit,
-                                             StorageMetrics estimated) {
+                                             StorageMetrics estimated,
+                                             Optional<int> minSplitBytes) {
 	state Span span("NAPI:SplitStorageMetricsStream"_loc);
 	state Key beginKey = keys.begin;
 	state Key globalLastKey = beginKey;
@@ -7923,7 +7948,8 @@ ACTOR Future<Void> splitStorageMetricsStream(PromiseStream<Key> resultStream,
 				                        limit,
 				                        localUsed,
 				                        estimated,
-				                        i == locations.size() - 1 && keys.end <= locations.back().range.end);
+				                        i == locations.size() - 1 && keys.end <= locations.back().range.end,
+				                        minSplitBytes);
 				SplitMetricsReply res = wait(loadBalance(locations[i].locations->locations(),
 				                                         &StorageServerInterface::splitMetrics,
 				                                         req,
@@ -7986,15 +8012,17 @@ ACTOR Future<Void> splitStorageMetricsStream(PromiseStream<Key> resultStream,
 Future<Void> DatabaseContext::splitStorageMetricsStream(const PromiseStream<Key>& resultStream,
                                                         KeyRange const& keys,
                                                         StorageMetrics const& limit,
-                                                        StorageMetrics const& estimated) {
+                                                        StorageMetrics const& estimated,
+                                                        Optional<int> const& minSplitBytes) {
 	return ::splitStorageMetricsStream(
-	    resultStream, Database(Reference<DatabaseContext>::addRef(this)), keys, limit, estimated);
+	    resultStream, Database(Reference<DatabaseContext>::addRef(this)), keys, limit, estimated, minSplitBytes);
 }
 
 ACTOR Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(Database cx,
                                                                 KeyRange keys,
                                                                 StorageMetrics limit,
-                                                                StorageMetrics estimated) {
+                                                                StorageMetrics estimated,
+                                                                Optional<int> minSplitBytes) {
 	state Span span("NAPI:SplitStorageMetrics"_loc);
 	loop {
 		state std::vector<KeyRangeLocationInfo> locations =
@@ -8023,7 +8051,8 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(Database cx,
 
 				state int i = 0;
 				for (; i < locations.size(); i++) {
-					SplitMetricsRequest req(locations[i].range, limit, used, estimated, i == locations.size() - 1);
+					SplitMetricsRequest req(
+					    locations[i].range, limit, used, estimated, i == locations.size() - 1, minSplitBytes);
 					SplitMetricsReply res = wait(loadBalance(locations[i].locations->locations(),
 					                                         &StorageServerInterface::splitMetrics,
 					                                         req,
@@ -8067,8 +8096,10 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(Database cx,
 
 Future<Standalone<VectorRef<KeyRef>>> DatabaseContext::splitStorageMetrics(KeyRange const& keys,
                                                                            StorageMetrics const& limit,
-                                                                           StorageMetrics const& estimated) {
-	return ::splitStorageMetrics(Database(Reference<DatabaseContext>::addRef(this)), keys, limit, estimated);
+                                                                           StorageMetrics const& estimated,
+                                                                           Optional<int> const& minSplitBytes) {
+	return ::splitStorageMetrics(
+	    Database(Reference<DatabaseContext>::addRef(this)), keys, limit, estimated, minSplitBytes);
 }
 
 void Transaction::checkDeferredError() const {
