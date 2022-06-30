@@ -114,7 +114,7 @@ bool canReplyWith(Error e) {
 		return true;
 	default:
 		return false;
-	};
+	}
 }
 } // namespace
 
@@ -1675,7 +1675,7 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 	}
 
 	return Void();
-};
+}
 
 // Pessimistic estimate the number of overhead bytes used by each
 // watch. Watch key references are stored in an AsyncMap<Key,bool>, and actors
@@ -2937,7 +2937,7 @@ ACTOR Future<GetValueReqAndResultRef> quickGetValue(StorageServer* data,
 	} else {
 		throw quick_get_value_miss();
 	}
-};
+}
 
 // If limit>=0, it returns the first rows in the range (sorted ascending), otherwise the last rows (sorted descending).
 // readRange has O(|result|) + O(log |data|) cost
@@ -3551,7 +3551,7 @@ ACTOR Future<GetRangeReqAndResultRef> quickGetKeyValues(
 	} else {
 		throw quick_get_key_values_miss();
 	}
-};
+}
 
 void unpackKeyTuple(Tuple** referenceTuple, Optional<Tuple>& keyTuple, KeyValueRef* keyValue) {
 	if (!keyTuple.present()) {
@@ -6261,7 +6261,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 	}
 
 	return Void();
-};
+}
 
 AddingShard::AddingShard(StorageServer* server, KeyRangeRef const& keys)
   : keys(keys), server(server), transferredVersion(invalidVersion), fetchVersion(invalidVersion), phase(WaitPrevious) {
