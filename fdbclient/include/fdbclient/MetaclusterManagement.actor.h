@@ -913,7 +913,15 @@ Future<Void> createTenant(Reference<DB> db, TenantName name, TenantMapEntry tena
 		try {
 			assignTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
-			std::pair<ClusterName, DataClusterMetadata> assignment = wait(assignTenant(assignTr, tenantEntry));
+			state Future<std::pair<ClusterName, DataClusterMetadata>> assignmentFuture =
+			    assignTenant(assignTr, tenantEntry);
+
+			ClusterType clusterType = wait(TenantAPI::getClusterType(assignTr));
+			if (clusterType != ClusterType::METACLUSTER_MANAGEMENT) {
+				throw invalid_metacluster_operation();
+			}
+
+			std::pair<ClusterName, DataClusterMetadata> assignment = wait(assignmentFuture);
 			tenantEntry.assignedCluster = assignment.first;
 			clusterMetadata = assignment.second;
 
