@@ -317,7 +317,9 @@ ACTOR Future<Void> trackShardMetrics(DataDistributionTracker::SafeAccessor self,
 							if (CLIENT_KNOBS->DD_FRAMEWORK && CLIENT_KNOBS->PHYSICAL_SHARD_SIZE_CONTROL) {
 								for (auto physicalShardID : oversizePhysicalShards) {
 									self()->dataDistributionRuntimeMonitor->triggerDDEvent(
-										DDEventBuffer::DDEvent(SERVER_KNOBS->PRIORITY_SPLIT_PHYSICAL_SHARD, physicalShardID), true);
+									    DDEventBuffer::DDEvent(SERVER_KNOBS->PRIORITY_SPLIT_PHYSICAL_SHARD,
+									                           physicalShardID),
+									    true);
 								}
 							}
 						}
@@ -550,7 +552,7 @@ ACTOR Future<Void> shardSplitter(DataDistributionTracker* self,
 			// self->output.send(rs);
 			if (CLIENT_KNOBS->DD_FRAMEWORK) {
 				self->dataDistributionRuntimeMonitor->triggerDDEvent(
-					DDEventBuffer::DDEvent(SERVER_KNOBS->PRIORITY_SPLIT_SHARD, rs), true);
+				    DDEventBuffer::DDEvent(SERVER_KNOBS->PRIORITY_SPLIT_SHARD, rs), true);
 			} else {
 				self->output.send(rs);
 			}
@@ -562,7 +564,7 @@ ACTOR Future<Void> shardSplitter(DataDistributionTracker* self,
 			// self->output.send(rs);
 			if (CLIENT_KNOBS->DD_FRAMEWORK) {
 				self->dataDistributionRuntimeMonitor->triggerDDEvent(
-					DDEventBuffer::DDEvent(SERVER_KNOBS->PRIORITY_SPLIT_SHARD, rs), true);
+				    DDEventBuffer::DDEvent(SERVER_KNOBS->PRIORITY_SPLIT_SHARD, rs), true);
 			} else {
 				self->output.send(rs);
 			}
@@ -715,7 +717,7 @@ Future<Void> shardMerger(DataDistributionTracker* self,
 	// self->output.send(rs);
 	if (CLIENT_KNOBS->DD_FRAMEWORK) {
 		self->dataDistributionRuntimeMonitor->triggerDDEvent(
-			DDEventBuffer::DDEvent(SERVER_KNOBS->PRIORITY_MERGE_SHARD, rs), true);
+		    DDEventBuffer::DDEvent(SERVER_KNOBS->PRIORITY_MERGE_SHARD, rs), true);
 	} else {
 		self->output.send(rs);
 	}

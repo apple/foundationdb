@@ -34,7 +34,7 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-enum class RelocateReason { INVALID = -1, OTHER, REBALANCE_DISK, REBALANCE_READ, REBALANCE_ROCKSDB_COLUMN }; 
+enum class RelocateReason { INVALID = -1, OTHER, REBALANCE_DISK, REBALANCE_READ, REBALANCE_ROCKSDB_COLUMN };
 // REBALANCE_ROCKSDB_COLUMN: rebalance size of physicalShard
 
 struct DDShardInfo;
@@ -497,7 +497,7 @@ public:
 		if (!immediate) {
 			return;
 		}
-		
+
 		TraceEvent e("TriggerDataMove");
 		std::vector<DDEventBuffer::DDEvent> events = ddEventBuffer->takeAll();
 		e.detail("Events", events);
@@ -507,13 +507,14 @@ public:
 				continue;
 			}
 			// PhysicalShard is too large or too (small and cold)
-			ASSERT( CLIENT_KNOBS->PHYSICAL_SHARD_SIZE_CONTROL );
-			ASSERT( event.physicalShard.present() );
-			if (event.eventType==SERVER_KNOBS->PRIORITY_SPLIT_PHYSICAL_SHARD) {
+			ASSERT(CLIENT_KNOBS->PHYSICAL_SHARD_SIZE_CONTROL);
+			ASSERT(event.physicalShard.present());
+			if (event.eventType == SERVER_KNOBS->PRIORITY_SPLIT_PHYSICAL_SHARD) {
 				// move out half physicalShards
 				uint64_t physicalShardID = event.physicalShard.get();
 				std::vector<KeyRange> keyRanges;
-				KeyRangeMap<uint64_t>::Ranges keyRangePhysicalShardIDRanges = physicalShardCollection->keyRangePhysicalShardIDMap.ranges();
+				KeyRangeMap<uint64_t>::Ranges keyRangePhysicalShardIDRanges =
+				    physicalShardCollection->keyRangePhysicalShardIDMap.ranges();
 				KeyRangeMap<uint64_t>::iterator it = keyRangePhysicalShardIDRanges.begin();
 				int numKeyRanges = 0;
 				for (; it != keyRangePhysicalShardIDRanges.end(); ++it) {
@@ -524,14 +525,15 @@ public:
 					}
 				}
 				int counter = 0;
-				for (auto & keyRange : keyRanges) {
-					if (counter > numKeyRanges/2) {
+				for (auto& keyRange : keyRanges) {
+					if (counter > numKeyRanges / 2) {
 						break;
 					}
-					relocateBuffer.send(RelocateShard(keyRange, event.eventType, RelocateReason::REBALANCE_ROCKSDB_COLUMN));
+					relocateBuffer.send(
+					    RelocateShard(keyRange, event.eventType, RelocateReason::REBALANCE_ROCKSDB_COLUMN));
 					counter = counter + 1;
 				}
-			} else if (event.eventType==SERVER_KNOBS->PRIORITY_MERGE_PHYSICAL_SHARD) {
+			} else if (event.eventType == SERVER_KNOBS->PRIORITY_MERGE_PHYSICAL_SHARD) {
 				// TODO: at this point we know which physicalShard is too small
 				continue;
 			} else {
@@ -543,6 +545,7 @@ public:
 
 private:
 	// DD Algorithm Support: Issue Data Move
+	// DataDistributionRuntimeMonitor takes ddEventBuffer as input and puts outputs to relocateBuffer
 	Reference<DDEventBuffer> ddEventBuffer;
 	PromiseStream<RelocateShard> relocateBuffer; // self->output.send(RelocateShard)
 

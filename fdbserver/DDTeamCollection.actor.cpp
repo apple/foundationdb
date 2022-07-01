@@ -956,7 +956,7 @@ public:
 							// self->output.send(rs);
 							if (CLIENT_KNOBS->DD_FRAMEWORK) {
 								self->dataDistributionRuntimeMonitor->triggerDDEvent(
-									DDEventBuffer::DDEvent(maxPriority, rs), true);
+								    DDEventBuffer::DDEvent(maxPriority, rs), true);
 							} else {
 								self->output.send(rs);
 							}
@@ -3632,7 +3632,8 @@ DDTeamCollection::DDTeamCollection(Database const& cx,
                                    PromiseStream<Promise<int>> getUnhealthyRelocationCount)
   : doBuildTeams(true), lastBuildTeamsFailed(false), teamBuilder(Void()), lock(lock), output(output),
     unhealthyServers(0), storageWiggler(makeReference<StorageWiggler>(this)), processingWiggle(processingWiggle),
-    shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), dataDistributionRuntimeMonitor(dataDistributionRuntimeMonitor),
+    shardsAffectedByTeamFailure(shardsAffectedByTeamFailure),
+    dataDistributionRuntimeMonitor(dataDistributionRuntimeMonitor),
     initialFailureReactionDelay(
         delayed(readyToStart, SERVER_KNOBS->INITIAL_FAILURE_REACTION_DELAY, TaskPriority::DataDistribution)),
     initializationDoneActor(logOnCompletion(readyToStart && initialFailureReactionDelay)), recruitingStream(0),

@@ -600,7 +600,7 @@ struct DDQueueData {
 	    output(output), input(input), getShardMetrics(getShardMetrics), getTopKMetrics(getTopKMetrics), lastInterval(0),
 	    suppressIntervals(0), rawProcessingUnhealthy(new AsyncVar<bool>(false)),
 	    rawProcessingWiggle(new AsyncVar<bool>(false)), unhealthyRelocations(0),
-	    movedKeyServersEventHolder(makeReference<EventCacheHolder>("MovedKeyServers")), 
+	    movedKeyServersEventHolder(makeReference<EventCacheHolder>("MovedKeyServers")),
 	    dataDistributionRuntimeMonitor(dataDistributionRuntimeMonitor) {}
 
 	void validate() {
@@ -1919,8 +1919,7 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
 			RelocateShard rs(metrics.keys.get(), priority, RelocateReason::REBALANCE_READ);
 			// self->output.send(rs);
 			if (CLIENT_KNOBS->DD_FRAMEWORK) {
-				self->dataDistributionRuntimeMonitor->triggerDDEvent(
-					DDEventBuffer::DDEvent(priority, rs), true);
+				self->dataDistributionRuntimeMonitor->triggerDDEvent(DDEventBuffer::DDEvent(priority, rs), true);
 			} else {
 				self->output.send(rs);
 			}
@@ -1998,8 +1997,7 @@ ACTOR static Future<bool> rebalanceTeams(DDQueueData* self,
 			RelocateShard rs(moveShard, priority, RelocateReason::REBALANCE_DISK);
 			// self->output.send(rs);
 			if (CLIENT_KNOBS->DD_FRAMEWORK) {
-				self->dataDistributionRuntimeMonitor->triggerDDEvent(
-					DDEventBuffer::DDEvent(priority, rs), true);
+				self->dataDistributionRuntimeMonitor->triggerDDEvent(DDEventBuffer::DDEvent(priority, rs), true);
 			} else {
 				self->output.send(rs);
 			}

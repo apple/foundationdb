@@ -590,8 +590,10 @@ struct DataDistributorData : NonCopyable, ReferenceCounted<DataDistributorData> 
 	    totalDataInFlightRemoteEventHolder(makeReference<EventCacheHolder>("TotalDataInFlightRemote")) {}
 };
 
-ACTOR Future<Void> monitorPhysicalShardStatus(Database cx, Reference<PhysicalShardCollection> self,
-                                         Reference<DataDistributionRuntimeMonitor> dataDistributionRuntimeMonitor) {
+ACTOR Future<Void> monitorPhysicalShardStatus(
+    Database cx,
+    Reference<PhysicalShardCollection> self,
+    Reference<DataDistributionRuntimeMonitor> dataDistributionRuntimeMonitor) {
 	ASSERT(CLIENT_KNOBS->DD_PHYSICAL_SHARD_CORE);
 	loop {
 		wait(delay(SERVER_KNOBS->ROCKSDB_METRICS_DELAY * 2));
@@ -749,9 +751,9 @@ ACTOR Future<Void> monitorPhysicalShardStatus(Database cx, Reference<PhysicalSha
 
 		// Issue relocations for cold physicalShard
 		if (CLIENT_KNOBS->PHYSICAL_SHARD_SIZE_CONTROL) {
-			for (auto & physicalShardID : smallPhysicalShards) {
+			for (auto& physicalShardID : smallPhysicalShards) {
 				dataDistributionRuntimeMonitor->triggerDDEvent(
-					DDEventBuffer::DDEvent(SERVER_KNOBS->PRIORITY_MERGE_PHYSICAL_SHARD, physicalShardID), true);
+				    DDEventBuffer::DDEvent(SERVER_KNOBS->PRIORITY_MERGE_PHYSICAL_SHARD, physicalShardID), true);
 			}
 		}
 	}
@@ -1014,7 +1016,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 					// output.send(rs);
 					if (CLIENT_KNOBS->DD_FRAMEWORK) {
 						dataDistributionRuntimeMonitor->triggerDDEvent(
-							DDEventBuffer::DDEvent(SERVER_KNOBS->PRIORITY_RECOVER_MOVE, rs), true);
+						    DDEventBuffer::DDEvent(SERVER_KNOBS->PRIORITY_RECOVER_MOVE, rs), true);
 					} else {
 						output.send(rs);
 					}
@@ -1042,7 +1044,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 					// output.send(rs);
 					if (CLIENT_KNOBS->DD_FRAMEWORK) {
 						dataDistributionRuntimeMonitor->triggerDDEvent(
-							DDEventBuffer::DDEvent(SERVER_KNOBS->PRIORITY_RECOVER_MOVE, rs), true);
+						    DDEventBuffer::DDEvent(SERVER_KNOBS->PRIORITY_RECOVER_MOVE, rs), true);
 					} else {
 						output.send(rs);
 					}
@@ -1178,7 +1180,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			actors.push_back(DDTeamCollection::printSnapshotTeamsInfo(primaryTeamCollection));
 			actors.push_back(yieldPromiseStream(output.getFuture(), input));
 			if (CLIENT_KNOBS->DD_PHYSICAL_SHARD_CORE) {
-				actors.push_back(monitorPhysicalShardStatus(cx, physicalShardCollection, dataDistributionRuntimeMonitor));
+				actors.push_back(
+				    monitorPhysicalShardStatus(cx, physicalShardCollection, dataDistributionRuntimeMonitor));
 			}
 
 			wait(waitForAll(actors));
