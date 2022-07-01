@@ -2127,7 +2127,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 	void close() override { doClose(this, false); }
 
-	KeyValueStoreType getType() const override { return KeyValueStoreType(KeyValueStoreType::SSD_ROCKSDB_V1); }
+	KeyValueStoreType getType() const override { return KeyValueStoreType(KeyValueStoreType::SSD_SHARDED_ROCKSDB); }
 
 	Future<Void> init() override {
 		if (openFuture.isValid()) {
