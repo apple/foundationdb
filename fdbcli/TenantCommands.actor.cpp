@@ -273,6 +273,8 @@ ACTOR Future<bool> getTenantCommandActor(Reference<IDatabase> db, std::vector<St
 				} else {
 					fprintf(stderr, "ERROR: %s\n", errorStr.c_str());
 				}
+
+				return false;
 			}
 		}
 	}

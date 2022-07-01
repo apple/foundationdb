@@ -1340,7 +1340,7 @@ bool MultiVersionTransaction::isValid() {
 }
 
 // MultiVersionTenant
-MultiVersionTenant::MultiVersionTenant(Reference<MultiVersionDatabase> db, StringRef tenantName)
+MultiVersionTenant::MultiVersionTenant(Reference<MultiVersionDatabase> db, TenantNameRef tenantName)
   : tenantState(makeReference<TenantState>(db, tenantName)) {}
 
 MultiVersionTenant::~MultiVersionTenant() {
@@ -1363,7 +1363,7 @@ ThreadFuture<Void> MultiVersionTenant::waitPurgeGranulesComplete(const KeyRef& p
 	return abortableFuture(f, tenantState->db->dbState->dbVar->get().onChange);
 }
 
-MultiVersionTenant::TenantState::TenantState(Reference<MultiVersionDatabase> db, StringRef tenantName)
+MultiVersionTenant::TenantState::TenantState(Reference<MultiVersionDatabase> db, TenantNameRef tenantName)
   : tenantVar(new ThreadSafeAsyncVar<Reference<ITenant>>(Reference<ITenant>(nullptr))), tenantName(tenantName), db(db),
     closed(false) {
 	updateTenant();

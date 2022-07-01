@@ -354,8 +354,9 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitRange(Reference<BlobManagerData
 
 			state PromiseStream<Key> resultStream;
 			state Standalone<VectorRef<KeyRef>> keys;
-			state Future<Void> streamFuture =
-			    bmData->db->splitStorageMetricsStream(resultStream, range, splitMetrics, estimated);
+			// SplitMetrics.bytes / 3 as min split size because of same splitThreshold logic above.
+			state Future<Void> streamFuture = bmData->db->splitStorageMetricsStream(
+			    resultStream, range, splitMetrics, estimated, splitMetrics.bytes / 3);
 			loop {
 				try {
 					Key k = waitNext(resultStream.getFuture());
@@ -844,8 +845,8 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 					std::vector<std::pair<TenantName, TenantMapEntry>> tenants;
 					std::vector<Key> prefixes;
 					for (auto& it : tenantResults) {
-						StringRef tenantName = it.key.removePrefix(tenantMapPrefix);
-						TenantMapEntry entry = decodeTenantEntry(it.value);
+						TenantNameRef tenantName = it.key.removePrefix(tenantMapPrefix);
+						TenantMapEntry entry = TenantMapEntry::decode(it.value);
 						tenants.push_back(std::pair(tenantName, entry));
 						prefixes.push_back(entry.prefix);
 					}
