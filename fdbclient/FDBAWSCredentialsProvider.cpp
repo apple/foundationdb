@@ -19,7 +19,6 @@
  * limitations under the License.
  */
 
-
 #include "fdbclient/FDBAWSCredentialsProvider.h"
 #include "fdbclient/Tracing.h"
 
