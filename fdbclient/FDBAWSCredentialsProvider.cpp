@@ -1,5 +1,6 @@
+
 /*
- * FDBAWSCredentialsProvider.h
+ * FDBAWSCredentialsProvider.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,19 +19,26 @@
  * limitations under the License.
  */
 
-#if (!defined FDB_AWS_CREDENTIALS_PROVIDER_H) && (defined BUILD_AWS_BACKUP)
-#define FDB_AWS_CREDENTIALS_PROVIDER_H
-#pragma once
+#include "fdbclient/FDBAWSCredentialsProvider.h"
+#include "fdbclient/Tracing.h"
 
 #ifdef BUILD_AWS_BACKUP
 
-#include "aws/core/Aws.h"
-#include "aws/core/auth/AWSCredentialsProviderChain.h"
-
+// You're supposed to call AWS::ShutdownAPI(options); once done
+// But we want this to live for the lifetime of the process, so we don't do that
 namespace FDBAWSCredentialsProvider {
-Aws::Auth::AWSCredentials getAwsCredentials();
+Aws::Auth::AWSCredentials getAwsCredentials() {
+	static bool doneInit = false;
+	if (!doneInit) {
+		doneInit = true;
+		Aws::SDKOptions options;
+		Aws::InitAPI(options);
+		TraceEvent("AWSSDKInitSuccessful");
+	}
+	Aws::Auth::DefaultAWSCredentialsProviderChain credProvider;
+	Aws::Auth::AWSCredentials creds = credProvider.GetAWSCredentials();
+	return creds;
 }
-
-#endif
+} // namespace FDBAWSCredentialsProvider
 
 #endif
