@@ -1,5 +1,5 @@
 /*
- * GetCipherKeys.actor.cpp
+ * GetEncryptCipherKeys.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -38,7 +38,7 @@ ACTOR Future<Void> onEncryptKeyProxyChange(Reference<AsyncVar<ServerDBInfo> cons
 			break;
 		}
 	}
-	TraceEvent("GetCipherKeys_EncryptKeyProxyChanged")
+	TraceEvent("GetEncryptCipherKeys_EncryptKeyProxyChanged")
 	    .detail("PreviousProxyId", previousProxyId.orDefault(UID()))
 	    .detail("CurrentProxyId", currentProxyId.orDefault(UID()));
 	return Void();
@@ -50,19 +50,19 @@ ACTOR Future<EKPGetLatestBaseCipherKeysReply> getUncachedLatestEncryptCipherKeys
 	Optional<EncryptKeyProxyInterface> proxy = db->get().encryptKeyProxy;
 	if (!proxy.present()) {
 		// Wait for onEncryptKeyProxyChange.
-		TraceEvent("GetLatestCipherKeys_EncryptKeyProxyNotPresent");
+		TraceEvent("GetLatestEncryptCipherKeys_EncryptKeyProxyNotPresent");
 		return Never();
 	}
 	request.reply.reset();
 	try {
 		EKPGetLatestBaseCipherKeysReply reply = wait(proxy.get().getLatestBaseCipherKeys.getReply(request));
 		if (reply.error.present()) {
-			TraceEvent(SevWarn, "GetLatestCipherKeys_RequestFailed").error(reply.error.get());
+			TraceEvent(SevWarn, "GetLatestEncryptCipherKeys_RequestFailed").error(reply.error.get());
 			throw encrypt_keys_fetch_failed();
 		}
 		return reply;
 	} catch (Error& e) {
-		TraceEvent("GetLatestCipherKeys_CaughtError").error(e);
+		TraceEvent("GetLatestEncryptCipherKeys_CaughtError").error(e);
 		if (e.code() == error_code_broken_promise) {
 			// Wait for onEncryptKeyProxyChange.
 			return Never();
@@ -81,7 +81,7 @@ ACTOR Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>
 	state EKPGetLatestBaseCipherKeysRequest request;
 
 	if (!db.isValid()) {
-		TraceEvent(SevError, "GetLatestCipherKeys_ServerDBInfoNotAvailable");
+		TraceEvent(SevError, "GetLatestEncryptCipherKeys_ServerDBInfoNotAvailable");
 		throw encrypt_ops_error();
 	}
 
@@ -114,7 +114,7 @@ ACTOR Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>
 			// Check for any missing cipher keys.
 			for (auto& domain : request.encryptDomainInfos) {
 				if (cipherKeys.count(domain.domainId) == 0) {
-					TraceEvent(SevWarn, "GetLatestCipherKeys_KeyMissing").detail("DomainId", domain.domainId);
+					TraceEvent(SevWarn, "GetLatestEncryptCipherKeys_KeyMissing").detail("DomainId", domain.domainId);
 					throw encrypt_key_not_found();
 				}
 			}
@@ -133,19 +133,19 @@ ACTOR Future<EKPGetBaseCipherKeysByIdsReply> getUncachedEncryptCipherKeys(Refere
 	Optional<EncryptKeyProxyInterface> proxy = db->get().encryptKeyProxy;
 	if (!proxy.present()) {
 		// Wait for onEncryptKeyProxyChange.
-		TraceEvent("GetCipherKeys_EncryptKeyProxyNotPresent");
+		TraceEvent("GetEncryptCipherKeys_EncryptKeyProxyNotPresent");
 		return Never();
 	}
 	request.reply.reset();
 	try {
 		EKPGetBaseCipherKeysByIdsReply reply = wait(proxy.get().getBaseCipherKeysByIds.getReply(request));
 		if (reply.error.present()) {
-			TraceEvent(SevWarn, "GetCipherKeys_RequestFailed").error(reply.error.get());
+			TraceEvent(SevWarn, "GetEncryptCipherKeys_RequestFailed").error(reply.error.get());
 			throw encrypt_keys_fetch_failed();
 		}
 		return reply;
 	} catch (Error& e) {
-		TraceEvent("GetCipherKeys_CaughtError").error(e);
+		TraceEvent("GetEncryptCipherKeys_CaughtError").error(e);
 		if (e.code() == error_code_broken_promise) {
 			// Wait for onEncryptKeyProxyChange.
 			return Never();
@@ -167,7 +167,7 @@ ACTOR Future<std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>> ge
 	state EKPGetBaseCipherKeysByIdsRequest request;
 
 	if (!db.isValid()) {
-		TraceEvent(SevError, "GetCipherKeys_ServerDBInfoNotAvailable");
+		TraceEvent(SevError, "GetEncryptCipherKeys_ServerDBInfoNotAvailable");
 		throw encrypt_ops_error();
 	}
 
@@ -204,7 +204,7 @@ ACTOR Future<std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>> ge
 				BaseCipherIndex baseIdx = std::make_pair(details.encryptDomainId, details.baseCipherId);
 				const auto& itr = baseCipherKeys.find(baseIdx);
 				if (itr == baseCipherKeys.end()) {
-					TraceEvent(SevError, "GetCipherKeys_KeyMissing")
+					TraceEvent(SevError, "GetEncryptCipherKeys_KeyMissing")
 					    .detail("DomainId", details.encryptDomainId)
 					    .detail("BaseCipherId", details.baseCipherId);
 					throw encrypt_key_not_found();
