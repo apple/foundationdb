@@ -1509,4 +1509,16 @@ struct StorageWiggleValue {
 		serializer(ar, id);
 	}
 };
+
+// Can be used to identify types (e.g. IDatabase) that can be used to create transactions with a `createTransaction`
+// function
+template <typename, typename = void>
+struct transaction_creator_traits : std::false_type {};
+
+template <typename T>
+struct transaction_creator_traits<T, std::void_t<typename T::TransactionT>> : std::true_type {};
+
+template <typename T>
+constexpr bool is_transaction_creator = transaction_creator_traits<T>::value;
+
 #endif

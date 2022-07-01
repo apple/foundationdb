@@ -103,8 +103,8 @@ template <typename T>
 class TaskParam {
 public:
 	TaskParam(StringRef key) : key(key) {}
-	T get(Reference<Task> task) const { return Codec<T>::unpack(Tuple::unpack(task->params[key])); }
-	void set(Reference<Task> task, T const& val) const { task->params[key] = Codec<T>::pack(val).pack(); }
+	T get(Reference<Task> task) const { return TupleCodec<T>::unpack(task->params[key]); }
+	void set(Reference<Task> task, T const& val) const { task->params[key] = TupleCodec<T>::pack(val); }
 	bool exists(Reference<Task> task) const { return task->params.find(key) != task->params.end(); }
 	T getOrDefault(Reference<Task> task, const T defaultValue = T()) const {
 		if (!exists(task))
