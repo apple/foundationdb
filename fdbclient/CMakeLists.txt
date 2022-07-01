@@ -66,11 +66,6 @@ endif()
 
 if(WITH_AWS_BACKUP)
   add_compile_definitions(BUILD_AWS_BACKUP)
-
-  set(FDBCLIENT_SRCS
-    ${FDBCLIENT_SRCS}
-    FDBAWSCredentialsProvider.h)
-
   include(awssdk)
 endif()
 
