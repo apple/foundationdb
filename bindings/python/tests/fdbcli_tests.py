@@ -626,9 +626,10 @@ def tenants(logger):
     assert(len(json_output) == 2)
     assert('tenant' in json_output)
     assert(json_output['type'] == 'success')
-    assert(len(json_output['tenant']) == 2)
+    assert(len(json_output['tenant']) == 3)
     assert('id' in json_output['tenant'])
     assert('prefix' in json_output['tenant'])
+    assert('tenant_state' in json_output['tenant'])
 
     output = run_fdbcli_command('usetenant')
     assert output == 'Using the default tenant'
