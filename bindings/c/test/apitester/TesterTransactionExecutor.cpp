@@ -23,6 +23,7 @@
 #include "foundationdb/fdb_c_types.h"
 #include "test/apitester/TesterScheduler.h"
 #include "test/fdb_api.hpp"
+#include <cstddef>
 #include <memory>
 #include <stdexcept>
 #include <unordered_map>

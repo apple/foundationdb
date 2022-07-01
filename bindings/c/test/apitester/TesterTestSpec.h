@@ -61,6 +61,9 @@ struct TestSpec {
 	// Test tampering the cluster file
 	bool tamperClusterFile = false;
 
+	// Enable multi-tenant database, if true
+	bool multiTenant = false;
+
 	// Size of the FDB client thread pool (a random number in the [min,max] range)
 	int minFdbThreads = 1;
 	int maxFdbThreads = 1;
@@ -77,6 +80,10 @@ struct TestSpec {
 	// Number of workload clients (a random number in the [min,max] range)
 	int minClients = 1;
 	int maxClients = 10;
+
+	// Number of tenants (a random number in the [min,max] range)
+	int minTenants = 0;
+	int maxTenants = 10;
 
 	// List of workloads with their options
 	std::vector<WorkloadSpec> workloads;

@@ -147,6 +147,7 @@ if(NOT WIN32)
     test/apitester/TesterExampleWorkload.cpp
     test/apitester/TesterKeyValueStore.cpp
     test/apitester/TesterKeyValueStore.h
+    test/apitester/TesterMultiTenantWorkload.cpp
     test/apitester/TesterOptions.h
     test/apitester/TesterScheduler.cpp
     test/apitester/TesterScheduler.h
@@ -289,6 +290,24 @@ if(NOT WIN32)
             --log-dir
             @LOG_DIR@
             )
+
+add_fdbclient_test(
+  NAME fdb_c_api_tests_multi_tenant
+  DISABLE_LOG_DUMP
+  COMMAND ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/run_c_api_tests.py
+          --cluster-file
+          @CLUSTER_FILE@
+          --tester-binary
+          $<TARGET_FILE:fdb_c_api_tester>
+          --external-client-library
+          ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c_external.so
+          --test-dir
+          ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/multitenanttests
+          --tmp-dir
+          @TMP_DIR@
+          --log-dir
+          @LOG_DIR@
+          )
 
   add_fdbclient_test(
     NAME fdb_c_api_tests_blob_granule
