@@ -19,11 +19,11 @@
  */
 
 #include "flow/Arena.h"
+#include "flow/AutoCPointer.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
 #include "flow/MkCert.h"
 #include "flow/PKey.h"
-#include "flow/ScopeExit.h"
 #include "flow/UnitTest.h"
 #include "fdbrpc/Base64UrlEncode.h"
 #include "fdbrpc/Base64UrlDecode.h"
@@ -38,6 +38,16 @@
 #include <openssl/opensslv.h>
 #include <openssl/rsa.h>
 #include <openssl/x509.h>
+#if OPENSSL_VERSION_NUMBER >= 0x30000000L
+#define USE_V3_API 1
+#else
+#define USE_V3_API 0
+#endif
+
+#if USE_V3_API
+#include <openssl/core_names.h>
+#include <openssl/param_build.h>
+#endif
 #include <rapidjson/document.h>
 #include <rapidjson/error/en.h>
 #include <rapidjson/writer.h>
@@ -61,14 +71,13 @@
 	    .detail("KeyName", keyName.toString())
 #define JWK_ERROR_OSSL(issue, op)                                                                                      \
 	do {                                                                                                               \
-		auto&& te = JWK_##op##_ERROR(issue);                                                                           \
+		char buf[256]{                                                                                                 \
+			0,                                                                                                         \
+		};                                                                                                             \
 		if (auto err = ::ERR_get_error()) {                                                                            \
-			char buf[256]{                                                                                             \
-				0,                                                                                                     \
-			};                                                                                                         \
 			::ERR_error_string_n(err, buf, sizeof(buf));                                                               \
-			te.detail("OpenSSLError", static_cast<const char*>(buf));                                                  \
 		}                                                                                                              \
+		JWK_##op##_ERROR(issue).detail("OpenSSLError", static_cast<char const*>(buf));                                 \
 	} while (0)
 #define JWK_PARSE_ERROR_OSSL(issue) JWK_ERROR_OSSL(issue, PARSE)
 #define JWK_WRITE_ERROR_OSSL(issue) JWK_ERROR_OSSL(issue, WRITE)
@@ -99,8 +108,8 @@
 #define DECLARE_JWK_OPTIONAL_STRING_MEMBER(valueObj, member) DECL_JWK_STR_MEMBER(valueObj, member, true)
 
 // introduces variable [member] as BIGNUM* with matching cleanup guard, stores nullptr for missing optional member
-#define DECL_DECODED_MEMBER_OPTIONAL(member, algo)                                                                     \
-	auto member = std::add_pointer_t<BIGNUM>();                                                                        \
+#define DECL_DECODED_BN_MEMBER_OPTIONAL(member, algo)                                                                     \
+	auto member = AutoCPointer(nullptr, &::BN_clear_free);                                                     \
 	{                                                                                                                  \
 		if (b64##member.present()) {                                                                                   \
 			auto decoded = base64url::decode(arena, b64##member.get());                                                \
@@ -109,21 +118,17 @@
 				return {};                                                                                             \
 			} else {                                                                                                   \
 				auto member##Buf = decoded.get();                                                                      \
-				member = ::BN_bin2bn(member##Buf.begin(), member##Buf.size(), nullptr);                                \
+				member.reset(::BN_bin2bn(member##Buf.begin(), member##Buf.size(), nullptr));                           \
 				if (!member) {                                                                                         \
 					JWK_PARSE_ERROR_OSSL("BN_bin2bn(" #member ") for " algo);                                          \
 					return {};                                                                                         \
 				}                                                                                                      \
 			}                                                                                                          \
 		}                                                                                                              \
-	}                                                                                                                  \
-	auto member##Guard = ScopeExit([&member]() {                                                                       \
-		if (member)                                                                                                    \
-			::BN_clear_free(member);                                                                                   \
-	})
+	}
 
-#define DECL_DECODED_MEMBER_REQUIRED(member, algo)                                                                     \
-	auto member = std::add_pointer_t<BIGNUM>();                                                                        \
+#define DECL_DECODED_BN_MEMBER_REQUIRED(member, algo)                                                                     \
+	auto member = AutoCPointer(nullptr, &::BN_free);                                                           \
 	{                                                                                                                  \
 		auto decoded = base64url::decode(arena, b64##member);                                                          \
 		if (!decoded.present()) {                                                                                      \
@@ -131,22 +136,16 @@
 			return {};                                                                                                 \
 		} else {                                                                                                       \
 			auto member##Buf = decoded.get();                                                                          \
-			member = ::BN_bin2bn(member##Buf.begin(), member##Buf.size(), nullptr);                                    \
+			member.reset(::BN_bin2bn(member##Buf.begin(), member##Buf.size(), nullptr));                               \
 			if (!member) {                                                                                             \
 				JWK_PARSE_ERROR_OSSL("BN_bin2bn(" #member ") for " algo);                                              \
 				return {};                                                                                             \
 			}                                                                                                          \
 		}                                                                                                              \
-	}                                                                                                                  \
-	auto member##Guard = ScopeExit([&member]() {                                                                       \
-		if (member)                                                                                                    \
-			::BN_free(member);                                                                                         \
-	})
+	}
 
-#define EC_DECLARE_DECODED_REQUIRED_MEMBER(member) DECL_DECODED_MEMBER_REQUIRED(member, "EC")
-#define EC_DECLARE_DECODED_OPTIONAL_MEMBER(member) DECL_DECODED_MEMBER_OPTIONAL(member, "EC")
-#define RSA_DECLARE_DECODED_REQUIRED_MEMBER(member) DECL_DECODED_MEMBER_REQUIRED(member, "RSA")
-#define RSA_DECLARE_DECODED_OPTIONAL_MEMBER(member) DECL_DECODED_MEMBER_OPTIONAL(member, "RSA")
+#define EC_DECLARE_DECODED_REQUIRED_BN_MEMBER(member) DECL_DECODED_BN_MEMBER_REQUIRED(member, "EC")
+#define EC_DECLARE_DECODED_OPTIONAL_BN_MEMBER(member) DECL_DECODED_BN_MEMBER_OPTIONAL(member, "EC")
 
 namespace {
 
@@ -159,11 +158,69 @@ StringRef bigNumToBase64Url(Arena& arena, const BIGNUM* bn) {
 
 Optional<PublicOrPrivateKey> parseEcP256Key(StringRef b64x, StringRef b64y, Optional<StringRef> b64d, int keyIndex) {
 	auto arena = Arena();
-	EC_DECLARE_DECODED_REQUIRED_MEMBER(x);
-	EC_DECLARE_DECODED_REQUIRED_MEMBER(y);
-	EC_DECLARE_DECODED_OPTIONAL_MEMBER(d);
-#if OPENSSL_VERSION_NUMBER < 0x20000000l
-	auto key = ::EC_KEY_new_by_curve_name(NID_X9_62_prime256v1);
+	EC_DECLARE_DECODED_REQUIRED_BN_MEMBER(x);
+	EC_DECLARE_DECODED_REQUIRED_BN_MEMBER(y);
+	EC_DECLARE_DECODED_OPTIONAL_BN_MEMBER(d);
+#if USE_V3_API
+	// avoid deprecated API
+	auto bld = AutoCPointer(::OSSL_PARAM_BLD_new(), &::OSSL_PARAM_BLD_free);
+	if (!bld) {
+		JWK_PARSE_ERROR_OSSL("OSSL_PARAM_BLD_new() for EC");
+		return {};
+	}
+	// since OSSL_PKEY_PARAM_EC_PUB_{X|Y} are not settable params, we'll need to build a EC_GROUP and serialize it
+	auto group = AutoCPointer(::EC_GROUP_new_by_curve_name(NID_X9_62_prime256v1), &::EC_GROUP_free);
+	if (!group) {
+		JWK_PARSE_ERROR_OSSL("EC_GROUP_new_by_curve_name()");
+		return {};
+	}
+	auto point = AutoCPointer(::EC_POINT_new(group), &::EC_POINT_free);
+	if (!point) {
+		JWK_PARSE_ERROR_OSSL("EC_POINT_new()");
+		return {};
+	}
+	if (1 != ::EC_POINT_set_affine_coordinates(group, point, x, y, nullptr)) {
+		JWK_PARSE_ERROR_OSSL("EC_POINT_set_affine_coordinates()");
+		return {};
+	}
+	auto pointBufLen = ::EC_POINT_point2oct(group, point, POINT_CONVERSION_UNCOMPRESSED, nullptr, 0, nullptr);
+	if (!pointBufLen) {
+		JWK_PARSE_ERROR_OSSL("EC_POINT_point2oct() for length");
+		return {};
+	}
+	auto pointBuf = new (arena) uint8_t[pointBufLen];
+	::EC_POINT_point2oct(group, point, POINT_CONVERSION_UNCOMPRESSED, pointBuf, pointBufLen, nullptr);
+	if (!::OSSL_PARAM_BLD_push_utf8_string(bld, OSSL_PKEY_PARAM_GROUP_NAME, "prime256v1", sizeof("prime256v1") - 1) ||
+	    !::OSSL_PARAM_BLD_push_octet_string(bld, OSSL_PKEY_PARAM_PUB_KEY, pointBuf, pointBufLen)) {
+		JWK_PARSE_ERROR_OSSL("OSSL_PARAM_BLD_push_*() for EC (group, point)");
+		return {};
+	}
+	if (d && !::OSSL_PARAM_BLD_push_BN(bld, OSSL_PKEY_PARAM_PRIV_KEY, d)) {
+		JWK_PARSE_ERROR_OSSL("OSSL_PARAM_BLD_push_BN() for EC (d)");
+		return {};
+	}
+	auto params = AutoCPointer(::OSSL_PARAM_BLD_to_param(bld), &OSSL_PARAM_free);
+	if (!params) {
+		JWK_PARSE_ERROR_OSSL("OSSL_PARAM_BLD_to_param() for EC");
+		return {};
+	}
+	auto pctx = AutoCPointer(::EVP_PKEY_CTX_new_from_name(nullptr, "EC", nullptr), &::EVP_PKEY_CTX_free);
+	if (!pctx) {
+		JWK_PARSE_ERROR_OSSL("EVP_PKEY_CTX_new_from_name(EC)");
+		return {};
+	}
+	if (1 != ::EVP_PKEY_fromdata_init(pctx)) {
+		JWK_PARSE_ERROR_OSSL("EVP_PKEY_fromdata_init() for EC");
+		return {};
+	}
+	auto pkey = std::add_pointer_t<EVP_PKEY>();
+	if (1 != ::EVP_PKEY_fromdata(pctx, &pkey, (d ? EVP_PKEY_KEYPAIR : EVP_PKEY_PUBLIC_KEY), params) || !pkey) {
+		JWK_PARSE_ERROR_OSSL("EVP_PKEY_fromdata() for EC");
+		return {};
+	}
+	auto pkeyAutoPtr = AutoCPointer(pkey, &::EVP_PKEY_free);
+#else // USE_V3_API
+	auto key = AutoCPointer(::EC_KEY_new_by_curve_name(NID_X9_62_prime256v1), &::EC_KEY_free);
 	if (!key) {
 		JWK_PARSE_ERROR_OSSL("EC_KEY_new()");
 		return {};
@@ -174,62 +231,20 @@ Optional<PublicOrPrivateKey> parseEcP256Key(StringRef b64x, StringRef b64y, Opti
 			return {};
 		}
 	}
-	auto keyGuard = ScopeExit([key]() { ::EC_KEY_free(key); });
 	if (1 != ::EC_KEY_set_public_key_affine_coordinates(key, x, y)) {
 		JWK_PARSE_ERROR_OSSL("EC_KEY_set_public_key_affine_coordinates(key, x, y)");
 		return {};
 	}
-	auto pkey = ::EVP_PKEY_new();
+	auto pkey = AutoCPointer(::EVP_PKEY_new(), &::EVP_PKEY_free);
 	if (!pkey) {
 		JWK_PARSE_ERROR_OSSL("EVP_PKEY_new() for EC");
 		return {};
 	}
-	auto pkeyGuard = ScopeExit([pkey]() { ::EVP_PKEY_free(pkey); });
 	if (1 != EVP_PKEY_set1_EC_KEY(pkey, key)) {
 		JWK_PARSE_ERROR_OSSL("EVP_PKEY_set1_EC_KEY()");
 		return {};
 	}
-#else // OPENSSL_VERSION_NUMBER < 0x20000000l
-	// avoid deprecated API
-	auto bld = ::OSSL_PARAM_BLD_new();
-	if (!bld) {
-		JWK_PARSE_ERROR_OSSL("OSSL_PARAM_BLD_new() for EC");
-		return {};
-	}
-	auto bldGuard = ScopeExit([bld]() { ::OSSL_PARAM_BLD_free(bld); });
-	if (!::OSSL_PARAM_BLD_push_utf8_string(bld, OSSL_PKEY_PARAM_GROUP_NAME, "prime256v1") ||
-	    !::OSSL_PARAM_BLD_push_BN(bld, OSSL_PKEY_PARAM_EC_PUB_X, x) ||
-	    !::OSSL_PARAM_BLD_push_BN(bld, OSSL_PKEY_PARAM_EC_PUB_Y, y)) {
-		JWK_PARSE_ERROR_OSSL("OSSL_PARAM_BLD_push_BN() for EC (x, y)");
-		return {};
-	}
-	if (d && !::OSSL_PARAM_BLD_push_BN(bld, OSSL_PKEY_PARAM_PRIV_KEY, d)) {
-		JWK_PARSE_ERROR_OSSL("OSSL_PARAM_BLD_push_BN() for EC (d)");
-		return {};
-	}
-	auto params = ::OSSL_PARAM_BLD_to_param(bld);
-	if (!params) {
-		JWK_PARSE_ERROR_OSSL("OSSL_PARAM_BLD_to_param() for EC");
-		return {};
-	}
-	auto paramsGuard = ScopeExit([](params) { ::OSSL_PARAM_free(params); });
-	auto pctx = ::EVP_PKEY_CTX_new_from_name(nullptr, "EC", nullptr);
-	if (!pctx) {
-		JWK_PARSE_ERROR_OSSL("EVP_PKEY_CTX_new_from_name(EC)");
-		return {};
-	}
-	auto pctxGuard = ScopeExit([pctx]() { ::EVP_PKEY_CTX_free(pctx); });
-	if (1 != ::EVP_PKEY_fromdata_init(pctx)) {
-		JWK_PARSE_ERROR_OSSL("EVP_PKEY_fromdata_init() for EC");
-		return {};
-	}
-	auto pkey = std::add_pointer_t<EVP_PKEY>();
-	if (1 != ::EVP_PKEY_fromdata(pctx, &pkey, (d ? EVP_PKEY_KEYPAIR : EVP_PKEY_PUBLIC_KEY), params)) {
-		JWK_PARSE_ERROR_OSSL("EVP_PKEY_fromdata() for EC");
-		return {};
-	}
-	auto pkeyGuard = ScopeExit([pkey]() { ::EVP_PKEY_free(pkey); });
-#endif // OPENSSL_VERSION_NUMBER < 0x20000000l
+#endif // USE_V3_API
 	if (d) {
 		auto len = ::i2d_PrivateKey(pkey, nullptr);
 		if (len <= 0) {
@@ -255,6 +270,9 @@ Optional<PublicOrPrivateKey> parseEcP256Key(StringRef b64x, StringRef b64y, Opti
 	}
 }
 
+#define RSA_DECLARE_DECODED_REQUIRED_BN_MEMBER(member) DECL_DECODED_BN_MEMBER_REQUIRED(member, "RSA")
+#define RSA_DECLARE_DECODED_OPTIONAL_BN_MEMBER(member) DECL_DECODED_BN_MEMBER_OPTIONAL(member, "RSA")
+
 Optional<PublicOrPrivateKey> parseRsaKey(StringRef b64n,
                                          StringRef b64e,
                                          Optional<StringRef> b64d,
@@ -265,57 +283,22 @@ Optional<PublicOrPrivateKey> parseRsaKey(StringRef b64n,
                                          Optional<StringRef> b64qi,
                                          int keyIndex) {
 	auto arena = Arena();
-	RSA_DECLARE_DECODED_REQUIRED_MEMBER(n);
-	RSA_DECLARE_DECODED_REQUIRED_MEMBER(e);
-	RSA_DECLARE_DECODED_OPTIONAL_MEMBER(d);
-	RSA_DECLARE_DECODED_OPTIONAL_MEMBER(p);
-	RSA_DECLARE_DECODED_OPTIONAL_MEMBER(q);
-	RSA_DECLARE_DECODED_OPTIONAL_MEMBER(dp);
-	RSA_DECLARE_DECODED_OPTIONAL_MEMBER(dq);
-	RSA_DECLARE_DECODED_OPTIONAL_MEMBER(qi);
+	RSA_DECLARE_DECODED_REQUIRED_BN_MEMBER(n);
+	RSA_DECLARE_DECODED_REQUIRED_BN_MEMBER(e);
+	RSA_DECLARE_DECODED_OPTIONAL_BN_MEMBER(d);
+	RSA_DECLARE_DECODED_OPTIONAL_BN_MEMBER(p);
+	RSA_DECLARE_DECODED_OPTIONAL_BN_MEMBER(q);
+	RSA_DECLARE_DECODED_OPTIONAL_BN_MEMBER(dp);
+	RSA_DECLARE_DECODED_OPTIONAL_BN_MEMBER(dq);
+	RSA_DECLARE_DECODED_OPTIONAL_BN_MEMBER(qi);
 	auto const isPublic = !d || !p || !q || !dp || !dq || !qi;
-#if OPENSSL_MAJOR_VERSION <= 1
-	auto rsa = RSA_new();
-	if (!rsa) {
-		JWK_PARSE_ERROR_OSSL("RSA_new()");
-		return {};
-	}
-	auto rsaGuard = ScopeExit([rsa]() { ::RSA_free(rsa); });
-	if (1 != ::RSA_set0_key(rsa, n, e, d)) {
-		JWK_PARSE_ERROR_OSSL("RSA_set0_key()");
-		return {};
-	}
-	n = e = d = nullptr; // ownership taken by rsa, no need to free
-	if (!isPublic) {
-		if (1 != ::RSA_set0_factors(rsa, p, q)) {
-			JWK_PARSE_ERROR_OSSL("RSA_set0_factors()");
-			return {};
-		}
-		p = q = nullptr;
-		if (1 != ::RSA_set0_crt_params(rsa, dp, dq, qi)) {
-			JWK_PARSE_ERROR_OSSL("RSA_set0_crt_params()");
-			return {};
-		}
-		dp = dq = qi = nullptr;
-	}
-	auto pkey = ::EVP_PKEY_new();
-	if (!pkey) {
-		JWK_PARSE_ERROR_OSSL("EVP_PKEY_new() for RSA");
-		return {};
-	}
-	auto pkeyGuard = ScopeExit([pkey]() { ::EVP_PKEY_free(pkey); });
-	if (1 != ::EVP_PKEY_set1_RSA(pkey, rsa)) {
-		JWK_PARSE_ERROR_OSSL("EVP_PKEY_set1_RSA()");
-		return {};
-	}
-#else // VERSION >= 3
-	// avoid deprecated API
-	auto bld = ::OSSL_PARAM_BLD_new();
+#if USE_V3_API
+	// avoid deprecated, algo-specific API
+	auto bld = AutoCPointer(::OSSL_PARAM_BLD_new(), &::OSSL_PARAM_BLD_free);
 	if (!bld) {
 		JWK_PARSE_ERROR_OSSL("OSSL_PARAM_BLD_new() for EC");
 		return {};
 	}
-	auto bldGuard = ScopeExit([bld]() { ::OSSL_PARAM_BLD_free(bld); });
 	if (!::OSSL_PARAM_BLD_push_BN(bld, OSSL_PKEY_PARAM_RSA_N, n) ||
 	    !::OSSL_PARAM_BLD_push_BN(bld, OSSL_PKEY_PARAM_RSA_E, e)) {
 		JWK_PARSE_ERROR_OSSL("OSSL_PARAM_BLD_push_BN() for RSA (n, e)");
@@ -332,18 +315,16 @@ Optional<PublicOrPrivateKey> parseRsaKey(StringRef b64n,
 			return {};
 		}
 	}
-	auto params = ::OSSL_PARAM_BLD_to_param(bld);
+	auto params = AutoCPointer(::OSSL_PARAM_BLD_to_param(bld), &::OSSL_PARAM_free);
 	if (!params) {
 		JWK_PARSE_ERROR_OSSL("OSSL_PARAM_BLD_to_param() for RSA");
 		return {};
 	}
-	auto paramsGuard = ScopeExit([](params) { ::OSSL_PARAM_free(params); });
-	auto pctx = ::EVP_PKEY_CTX_new_from_name(nullptr, "RSA", nullptr);
+	auto pctx = AutoCPointer(::EVP_PKEY_CTX_new_from_name(nullptr, "RSA", nullptr), &::EVP_PKEY_CTX_free);
 	if (!pctx) {
 		JWK_PARSE_ERROR_OSSL("EVP_PKEY_CTX_new_from_name(RSA)");
 		return {};
 	}
-	auto pctxGuard = ScopeExit([pctx]() { ::EVP_PKEY_CTX_free(pctx); });
 	if (1 != ::EVP_PKEY_fromdata_init(pctx)) {
 		JWK_PARSE_ERROR_OSSL("EVP_PKEY_fromdata_init() for RSA");
 		return {};
@@ -353,8 +334,46 @@ Optional<PublicOrPrivateKey> parseRsaKey(StringRef b64n,
 		JWK_PARSE_ERROR_OSSL("EVP_PKEY_fromdata() for EC");
 		return {};
 	}
-	auto pkeyGuard = ScopeExit([pkey]() { ::EVP_PKEY_free(pkey); });
-#endif
+	auto pkeyAutoPtr = AutoCPointer(pkey, &::EVP_PKEY_free);
+#else // USE_V3_API
+	auto rsa = AutoCPointer(RSA_new(), &::RSA_free);
+	if (!rsa) {
+		JWK_PARSE_ERROR_OSSL("RSA_new()");
+		return {};
+	}
+	if (1 != ::RSA_set0_key(rsa, n, e, d)) {
+		JWK_PARSE_ERROR_OSSL("RSA_set0_key()");
+		return {};
+	}
+	// set0 == ownership taken by rsa, no need to free
+	n.release();
+	e.release();
+	d.release();
+	if (!isPublic) {
+		if (1 != ::RSA_set0_factors(rsa, p, q)) {
+			JWK_PARSE_ERROR_OSSL("RSA_set0_factors()");
+			return {};
+		}
+		p.release();
+		q.release();
+		if (1 != ::RSA_set0_crt_params(rsa, dp, dq, qi)) {
+			JWK_PARSE_ERROR_OSSL("RSA_set0_crt_params()");
+			return {};
+		}
+		dp.release();
+		dq.release();
+		qi.release();
+	}
+	auto pkey = AutoCPointer(::EVP_PKEY_new(), &::EVP_PKEY_free);
+	if (!pkey) {
+		JWK_PARSE_ERROR_OSSL("EVP_PKEY_new() for RSA");
+		return {};
+	}
+	if (1 != ::EVP_PKEY_set1_RSA(pkey, rsa)) {
+		JWK_PARSE_ERROR_OSSL("EVP_PKEY_set1_RSA()");
+		return {};
+	}
+#endif // USE_V3_API
 	if (!isPublic) {
 		auto len = ::i2d_PrivateKey(pkey, nullptr);
 		if (len <= 0) {
@@ -442,7 +461,42 @@ void encodeEcKey(rapidjson::Writer<rapidjson::StringBuffer>& writer,
 	writer.String("ES256");
 	writer.Key("kid");
 	writer.String(reinterpret_cast<char const*>(keyName.begin()), keyName.size());
-#if OPENSSL_VERSION_NUMBER < 0x20000000l // For version 1.x, we need to use algo-specific APIs
+#if USE_V3_API
+	auto curveNameBuf = std::array<char, 64>{};
+	auto curveNameLen = 0ul;
+	if (1 != EVP_PKEY_get_utf8_string_param(
+	             pKey, OSSL_PKEY_PARAM_GROUP_NAME, curveNameBuf.begin(), sizeof(curveNameBuf), &curveNameLen)) {
+		JWK_WRITE_ERROR_OSSL("Get group name from EC PKey");
+		throw pkey_encode_error();
+	}
+	auto curveName = std::string_view(curveNameBuf.cbegin(), curveNameLen);
+	if (curveName != std::string_view("prime256v1")) {
+		JWK_WRITE_ERROR("Unsupported EC curve").detail("CurveName", curveName);
+		throw pkey_encode_error();
+	}
+	writer.Key("crv");
+	writer.String("P-256");
+#define JWK_WRITE_BN_EC_PARAM(x, param)                                                                                \
+	do {                                                                                                               \
+		auto x = AutoCPointer(nullptr, &::BN_clear_free);                                                      \
+		auto rawX = std::add_pointer_t<BIGNUM>();                                                                      \
+		if (1 != ::EVP_PKEY_get_bn_param(pKey, param, &rawX)) {                                                        \
+			JWK_WRITE_ERROR_OSSL("EVP_PKEY_get_bn_param(" #param ")");                                                 \
+			throw pkey_encode_error();                                                                                 \
+		}                                                                                                              \
+		x.reset(rawX);                                                                                                 \
+		auto b64##x = bigNumToBase64Url(arena, x);                                                                     \
+		writer.Key(#x);                                                                                                \
+		writer.String(reinterpret_cast<char const*>(b64##x.begin()), b64##x.size());                                   \
+	} while (0)
+	// Get and write affine coordinates, X and Y
+	JWK_WRITE_BN_EC_PARAM(x, OSSL_PKEY_PARAM_EC_PUB_X);
+	JWK_WRITE_BN_EC_PARAM(y, OSSL_PKEY_PARAM_EC_PUB_Y);
+	if (!isPublic) {
+		JWK_WRITE_BN_EC_PARAM(d, OSSL_PKEY_PARAM_PRIV_KEY);
+	}
+#undef JWK_WRITE_BN_EC_PARAM
+#else // USE_V3_API
 	auto ecKey = ::EVP_PKEY_get0_EC_KEY(pKey); // get0 == no refcount, no need to free
 	if (!ecKey) {
 		JWK_WRITE_ERROR_OSSL("Could not extract EC_KEY from EVP_PKEY");
@@ -469,18 +523,16 @@ void encodeEcKey(rapidjson::Writer<rapidjson::StringBuffer>& writer,
 		JWK_WRITE_ERROR_OSSL("EC_KEY_get0_public_key() returned null");
 		throw pkey_encode_error();
 	}
-	auto x = ::BN_new();
+	auto x = AutoCPointer(::BN_new(), &::BN_free);
 	if (!x) {
 		JWK_WRITE_ERROR_OSSL("x = BN_new()");
 		throw pkey_encode_error();
 	}
-	auto bnxGuard = ScopeExit([x]() { ::BN_free(x); });
-	auto y = ::BN_new();
+	auto y = AutoCPointer(::BN_new(), &::BN_free);
 	if (!y) {
 		JWK_WRITE_ERROR_OSSL("y = BN_new()");
 		throw pkey_encode_error();
 	}
-	auto bnyGuard = ScopeExit([y]() { ::BN_free(y); });
 	if (1 != ::EC_POINT_get_affine_coordinates(group, point, x, y, nullptr)) {
 		JWK_WRITE_ERROR_OSSL("EC_POINT_get_affine_coordinates()");
 		throw pkey_encode_error();
@@ -501,43 +553,8 @@ void encodeEcKey(rapidjson::Writer<rapidjson::StringBuffer>& writer,
 		writer.Key("d");
 		writer.String(reinterpret_cast<char const*>(b64D.begin()), b64D.size());
 	}
+#endif // USE_V3_API
 	writer.EndObject();
-// TODO: support for adding extra fields: e.g. "use", "key_ops"
-#else // OPENSSL_VERSION_NUMBER < 0x20000000l
-	auto curveNameBuf = std::array<char, 64>{};
-	auto curveNameLen = 0ul;
-	if (1 != EVP_PKEY_get_utf8_string_param(
-	             pKey, OSSL_PKEY_PARAM_GROUP_NAME, curveNameBuf.begin(), sizeof(curveNameBuf), &curveNameLen)) {
-		JWK_WRITE_ERROR_OSSL("Get group name from EC PKey");
-		throw pkey_encode_error();
-	}
-	auto curveName = std::string_view(curveNameBuf.cbegin(), curveNameLen);
-	if (curveName != std::string_view("prime256v1")) {
-		JWK_WRITE_ERROR("Unsupported EC curve").detail("CurveName", curveName);
-		throw pkey_encode_error();
-	}
-	writer.Key("crv");
-	writer.String("P-256");
-#define JWK_WRITE_BN_EC_PARAM(x, param)                                                                                \
-	do {                                                                                                               \
-		auto x = std::add_pointer_t<BIGNUM>();                                                                         \
-		if (1 != ::EVP_PKEY_get_bn_param(pKey, param, &x)) {                                                           \
-			JWK_WRITE_ERROR_OSSL("EVP_PKEY_get_bn_param(" #param ")");                                                 \
-			throw pkey_encode_error();                                                                                 \
-		}                                                                                                              \
-		auto x##Guard = ScopeExit([x]() { ::BN_clear_free(x); });                                                      \
-		auto b64##x = bigNumToBase64Url(arena, x);                                                                     \
-		writer.Key(#x);                                                                                                \
-		writer.String(reinterpret_cast<char const*>(b64##x.begin()), b64##x.size());                                   \
-	} while (0)
-	// Get and write affine coordinates, X and Y
-	WRITE_BN_EC_PARAM(x, OSSL_PKEY_PARAM_EC_PUB_X);
-	WRITE_BN_EC_PARAM(y, OSSL_PKEY_PARAM_EC_PUB_Y);
-	if (!isPublic) {
-		WRITE_BN_EC_PARAM(d, OSSL_PKEY_PARAM_PRIV_KEY);
-	}
-#undef JWK_WRITE_BN_EC_PARAM
-#endif // OPENSSL_VERSION_NUMBER < 0x20000000l
 }
 
 void encodeRsaKey(rapidjson::Writer<rapidjson::StringBuffer>& writer,
@@ -552,7 +569,32 @@ void encodeRsaKey(rapidjson::Writer<rapidjson::StringBuffer>& writer,
 	writer.String("RS256");
 	writer.Key("kid");
 	writer.String(reinterpret_cast<char const*>(keyName.begin()), keyName.size());
-#if OPENSSL_MAJOR_VERSION < 0x20000000l // use algorithm-specific API
+#if USE_V3_API
+#define JWK_WRITE_BN_RSA_PARAM_V3(x, param)                                                                            \
+	do {                                                                                                               \
+		auto x = AutoCPointer(nullptr, &::BN_clear_free);                                                      \
+		auto rawX = std::add_pointer_t<BIGNUM>();                                                                      \
+		if (1 != ::EVP_PKEY_get_bn_param(pKey, param, &rawX)) {                                                        \
+			JWK_WRITE_ERROR_OSSL("EVP_PKEY_get_bn_param(" #x ")");                                                     \
+			throw pkey_encode_error();                                                                                 \
+		}                                                                                                              \
+		x.reset(rawX);                                                                                                 \
+		auto b64##x = bigNumToBase64Url(arena, x);                                                                     \
+		writer.Key(#x);                                                                                                \
+		writer.String(reinterpret_cast<char const*>(b64##x.begin()), b64##x.size());                                   \
+	} while (0)
+	JWK_WRITE_BN_RSA_PARAM_V3(n, OSSL_PKEY_PARAM_RSA_N);
+	JWK_WRITE_BN_RSA_PARAM_V3(e, OSSL_PKEY_PARAM_RSA_E);
+	if (!isPublic) {
+		JWK_WRITE_BN_RSA_PARAM_V3(d, OSSL_PKEY_PARAM_RSA_D);
+		JWK_WRITE_BN_RSA_PARAM_V3(p, OSSL_PKEY_PARAM_RSA_FACTOR1);
+		JWK_WRITE_BN_RSA_PARAM_V3(q, OSSL_PKEY_PARAM_RSA_FACTOR2);
+		JWK_WRITE_BN_RSA_PARAM_V3(dp, OSSL_PKEY_PARAM_RSA_EXPONENT1);
+		JWK_WRITE_BN_RSA_PARAM_V3(dq, OSSL_PKEY_PARAM_RSA_EXPONENT2);
+		JWK_WRITE_BN_RSA_PARAM_V3(qi, OSSL_PKEY_PARAM_RSA_COEFFICIENT1);
+	}
+#undef JWK_WRITE_BN_RSA_PARAM_V3
+#else // USE_V3_API
 #define JWK_WRITE_BN_RSA_PARAM_V1(x)                                                                                   \
 	do {                                                                                                               \
 		if (!x) {                                                                                                      \
@@ -589,32 +631,9 @@ void encodeRsaKey(rapidjson::Writer<rapidjson::StringBuffer>& writer,
 		JWK_WRITE_BN_RSA_PARAM_V1(dq);
 		JWK_WRITE_BN_RSA_PARAM_V1(qi);
 	}
-	writer.EndObject();
 #undef JWK_WRITE_BN_RSA_PARAM_V1
-#else // OPENSSL_MAJOR_VERSION < 0x20000000l use generic EVP_PKEY_get_[type]_param() API
-#define JWK_WRITE_BN_RSA_PARAM_V3(x, param)                                                                            \
-	do {                                                                                                               \
-		auto x = std::add_pointer_t<BIGNUM>();                                                                         \
-		if (1 != ::EVP_PKEY_get_bn_param(pKey, param, &x)) {                                                           \
-			JWK_WRITE_ERROR_OSSL("EVP_PKEY_get_bn_param(" #x ")");                                                     \
-			throw pkey_encode_error();                                                                                 \
-		}                                                                                                              \
-		auto x##Guard = ScopeExit([x]() { ::BN_clear_free(x); });                                                      \
-		writer.Key(#x);                                                                                                \
-		writer.String(reinterpret_cast<char const*>(b64##x.begin()), b64##x.size());                                   \
-	} while (0)
-	JWK_WRITE_BN_RSA_PARAM_V3(n, OSSL_PKEY_PARAM_RSA_N);
-	JWK_WRITE_BN_RSA_PARAM_V3(e, OSSL_PKEY_PARAM_RSA_E);
-	if (!isPublic) {
-		JWK_WRITE_BN_RSA_PARAM_V3(d, OSSL_PKEY_PARAM_RSA_D);
-		JWK_WRITE_BN_RSA_PARAM_V3(p, OSSL_PKEY_PARAM_RSA_FACTOR1);
-		JWK_WRITE_BN_RSA_PARAM_V3(q, OSSL_PKEY_PARAM_RSA_FACTOR2);
-		JWK_WRITE_BN_RSA_PARAM_V3(dp, OSSL_PKEY_PARAM_RSA_EXPONENT1);
-		JWK_WRITE_BN_RSA_PARAM_V3(dq, OSSL_PKEY_PARAM_RSA_EXPONENT2);
-		JWK_WRITE_BN_RSA_PARAM_V3(qi, OSSL_PKEY_PARAM_RSA_COEFFICIENT1);
-	}
-#undef JWK_WRITE_BN_RSA_PARAM_V3
-#endif // OPENSSL_MAJOR_VERSION < 0x20000000l
+#endif // USE_V3_API
+	writer.EndObject();
 }
 
 // Add exactly one object to context of writer. Object shall contain JWK-encoded public or private key

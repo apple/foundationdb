@@ -18,14 +18,15 @@
  * limitations under the License.
  */
 
+#include "flow/AutoCPointer.h"
 #include "flow/Error.h"
 #include "flow/PKey.h"
-#include "flow/ScopeExit.h"
 #include <openssl/bio.h>
 #include <openssl/err.h>
 #include <openssl/evp.h>
 #include <openssl/pem.h>
 #include <openssl/x509.h>
+#include <openssl/objects.h>
 #include <openssl/opensslv.h>
 
 namespace {
@@ -83,10 +84,9 @@ inline PKeyAlgorithm getPKeyAlgorithm(const EVP_PKEY* key) noexcept {
 
 StringRef doWritePublicKeyPem(Arena& arena, EVP_PKEY* key) {
 	ASSERT(key);
-	auto mem = ::BIO_new(::BIO_s_mem());
+	auto mem = AutoCPointer(::BIO_new(::BIO_s_mem()), &::BIO_free);
 	if (!mem)
 		traceAndThrowEncode("PublicKeyPemWriteInitError");
-	auto memGuard = ScopeExit([mem]() { ::BIO_free(mem); });
 	if (1 != ::PEM_write_bio_PUBKEY(mem, key))
 		traceAndThrowEncode("PublicKeyPemWrite");
 	auto bioBuf = std::add_pointer_t<char>{};
@@ -108,11 +108,10 @@ StringRef doWritePublicKeyDer(Arena& arena, EVP_PKEY* key) {
 }
 
 bool doVerifyStringSignature(StringRef data, StringRef signature, const EVP_MD& digest, EVP_PKEY* key) {
-	auto mdctx = ::EVP_MD_CTX_create();
+	auto mdctx = AutoCPointer(::EVP_MD_CTX_create(), &::EVP_MD_CTX_free);
 	if (!mdctx) {
 		traceAndThrowDsa("PKeyVerifyInitFail");
 	}
-	auto mdctxGuard = ScopeExit([mdctx]() { ::EVP_MD_CTX_free(mdctx); });
 	if (1 != ::EVP_DigestVerifyInit(mdctx, nullptr, &digest, nullptr, key)) {
 		traceAndThrowDsa("PKeyVerifyInitFail");
 	}
@@ -127,14 +126,17 @@ bool doVerifyStringSignature(StringRef data, StringRef signature, const EVP_MD& 
 
 PublicKey::PublicKey(PemEncoded, StringRef pem) {
 	ASSERT(!pem.empty());
-	auto mem = ::BIO_new_mem_buf(pem.begin(), pem.size());
+	auto mem = AutoCPointer(::BIO_new_mem_buf(pem.begin(), pem.size()), &::BIO_free);
 	if (!mem)
 		traceAndThrowDecode("PemMemBioInitError");
-	auto bioGuard = ScopeExit([mem]() { ::BIO_free(mem); });
 	auto key = ::PEM_read_bio_PUBKEY(mem, nullptr, nullptr, nullptr);
 	if (!key)
 		traceAndThrowDecode("PemReadPublicKeyError");
 	ptr = std::shared_ptr<EVP_PKEY>(key, &::EVP_PKEY_free);
+	if (algorithm() == PKeyAlgorithm::UNSUPPORTED) {
+		TraceEvent(SevWarnAlways, "UnsupportedPKeyAlgorithm").suppressFor(10).detail("Algorithm", ::OBJ_nid2sn(EVP_PKEY_base_id(ptr.get())));
+		throw pkey_decode_error();
+	}
 }
 
 PublicKey::PublicKey(DerEncoded, StringRef der) {
@@ -144,6 +146,10 @@ PublicKey::PublicKey(DerEncoded, StringRef der) {
 	if (!key)
 		traceAndThrowDecode("DerReadPublicKeyError");
 	ptr = std::shared_ptr<EVP_PKEY>(key, &::EVP_PKEY_free);
+	if (algorithm() == PKeyAlgorithm::UNSUPPORTED) {
+		TraceEvent(SevWarnAlways, "UnsupportedPKeyAlgorithm").suppressFor(10).detail("Algorithm", ::OBJ_nid2sn(EVP_PKEY_base_id(ptr.get())));
+		throw pkey_decode_error();
+	}
 }
 
 StringRef PublicKey::writePem(Arena& arena) const {
@@ -166,14 +172,17 @@ bool PublicKey::verify(StringRef data, StringRef signature, const EVP_MD& digest
 
 PrivateKey::PrivateKey(PemEncoded, StringRef pem) {
 	ASSERT(!pem.empty());
-	auto mem = ::BIO_new_mem_buf(pem.begin(), pem.size());
+	auto mem = AutoCPointer(::BIO_new_mem_buf(pem.begin(), pem.size()), &::BIO_free);
 	if (!mem)
 		traceAndThrowDecode("PrivateKeyDecodeInitError");
-	auto bioGuard = ScopeExit([mem]() { ::BIO_free(mem); });
 	auto key = ::PEM_read_bio_PrivateKey(mem, nullptr, nullptr, nullptr);
 	if (!key)
 		traceAndThrowDecode("PemReadPrivateKeyError");
 	ptr = std::shared_ptr<EVP_PKEY>(key, &::EVP_PKEY_free);
+	if (algorithm() == PKeyAlgorithm::UNSUPPORTED) {
+		TraceEvent(SevWarnAlways, "UnsupportedPKeyAlgorithm").suppressFor(10).detail("Algorithm", ::OBJ_nid2sn(EVP_PKEY_base_id(ptr.get())));
+		throw pkey_decode_error();
+	}
 }
 
 PrivateKey::PrivateKey(DerEncoded, StringRef der) {
@@ -183,14 +192,17 @@ PrivateKey::PrivateKey(DerEncoded, StringRef der) {
 	if (!key)
 		traceAndThrowDecode("DerReadPrivateKeyError");
 	ptr = std::shared_ptr<EVP_PKEY>(key, &::EVP_PKEY_free);
+	if (algorithm() == PKeyAlgorithm::UNSUPPORTED) {
+		TraceEvent(SevWarnAlways, "UnsupportedPKeyAlgorithm").suppressFor(10).detail("Algorithm", ::OBJ_nid2sn(EVP_PKEY_base_id(ptr.get())));
+		throw pkey_decode_error();
+	}
 }
 
 StringRef PrivateKey::writePem(Arena& arena) const {
 	ASSERT(ptr);
-	auto mem = ::BIO_new(::BIO_s_mem());
+	auto mem = AutoCPointer(::BIO_new(::BIO_s_mem()), &::BIO_free);
 	if (!mem)
 		traceAndThrowEncode("PrivateKeyPemWriteInitError");
-	auto memGuard = ScopeExit([mem]() { ::BIO_free(mem); });
 	if (1 != ::PEM_write_bio_PrivateKey(mem, nativeHandle(), nullptr, nullptr, 0, 0, nullptr))
 		traceAndThrowEncode("PrivateKeyDerPemWrite");
 	auto bioBuf = std::add_pointer_t<char>{};
@@ -229,10 +241,9 @@ PKeyAlgorithm PrivateKey::algorithm() const {
 StringRef PrivateKey::sign(Arena& arena, StringRef data, const EVP_MD& digest) const {
 	auto key = nativeHandle();
 	ASSERT(key);
-	auto mdctx = ::EVP_MD_CTX_create();
+	auto mdctx = AutoCPointer(::EVP_MD_CTX_create(), &::EVP_MD_CTX_free);
 	if (!mdctx)
 		traceAndThrowDsa("PKeySignInitError");
-	auto mdctxGuard = ScopeExit([mdctx]() { ::EVP_MD_CTX_free(mdctx); });
 	if (1 != ::EVP_DigestSignInit(mdctx, nullptr, &digest, nullptr, nativeHandle()))
 		traceAndThrowDsa("PKeySignInitError");
 	if (1 != ::EVP_DigestSignUpdate(mdctx, data.begin(), data.size()))

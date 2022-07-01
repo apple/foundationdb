@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#ifndef FDBRPC_JSON_WEB_KEY_SET_H
+#define FDBRPC_JSON_WEB_KEY_SET_H
 #include "flow/Arena.h"
 #include "flow/PKey.h"
 #include <map>
@@ -61,3 +63,5 @@ struct JsonWebKeySet {
 	// Inverse operation of parse(). Only allows keys expected/accepted by parse().
 	StringRef toStringRef(Arena& arena);
 };
+
+#endif // FDBRPC_JSON_WEB_KEY_SET_H
