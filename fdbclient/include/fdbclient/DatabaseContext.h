@@ -597,6 +597,14 @@ public:
 	// Cache of the latest commit versions of storage servers.
 	VersionVector ssVersionVectorCache;
 
+	// Introduced mainly to optimize out the version vector related code (on the client side)
+	// when the version vector feature is disabled (on the server side).
+	// @param ssVersionVectorDelta version vector changes sent by GRV proxy
+	inline bool versionVectorCacheActive(const VersionVector& ssVersionVectorDelta) {
+		return (ssVersionVectorCache.getMaxVersion() != invalidVersion ||
+		        ssVersionVectorDelta.getMaxVersion() != invalidVersion);
+	}
+
 	// Adds or updates the specified (SS, TSS) pair in the TSS mapping (if not already present).
 	// Requests to the storage server will be duplicated to the TSS.
 	void addTssMapping(StorageServerInterface const& ssi, StorageServerInterface const& tssi);
