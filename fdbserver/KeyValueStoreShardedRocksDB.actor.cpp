@@ -704,6 +704,13 @@ public:
 		} else {
 			shard = it->second;
 		}
+
+		auto ranges = dataShardMap.intersectingRanges(range);
+
+		for (auto it = ranges.begin(); it != ranges.end(); ++it) {
+			ASSERT(it.value() == nullptr);
+		}
+
 		auto dataShard = std::make_unique<DataShard>(range, shard.get());
 		dataShardMap.insert(range, dataShard.get());
 		shard->dataShards[range.begin.toString()] = std::move(dataShard);
@@ -715,12 +722,11 @@ public:
 	}
 
 	std::vector<std::string> removeRange(KeyRange range) {
-		TraceEvent(SevDebug, "ShardedRocksShardManagement")
-		    .detail("Operation", "RemoveRange")
-		    .detail("Range", range);
+		TraceEvent(SevDebug, "ShardedRocksShardManagement").detail("Operation", "RemoveRange").detail("Range", range);
 
 		std::vector<std::string> shardIds;
 
+		std::vector<DataShard*> newShards;
 		auto ranges = dataShardMap.intersectingRanges(range);
 
 		for (auto it = ranges.begin(); it != ranges.end(); ++it) {
@@ -760,19 +766,25 @@ public:
 			if (shardRange.begin < range.begin) {
 				auto dataShard =
 				    std::make_unique<DataShard>(KeyRange(KeyRangeRef(shardRange.begin, range.begin)), existingShard);
-				dataShardMap.insert(dataShard->range, dataShard.get());
+				newShards.push_back(dataShard.get());
 				existingShard->dataShards[shardRange.begin.toString()] = std::move(dataShard);
 				logShardEvent(existingShard->id, shardRange, ShardOp::MODIFY_RANGE);
 			}
 
 			if (shardRange.end > range.end) {
-				auto dataShard = std::make_unique<DataShard>(KeyRange(KeyRangeRef(range.end, shardRange.end)), existingShard);
-				dataShardMap.insert(dataShard->range, dataShard.get());
+				auto dataShard =
+				    std::make_unique<DataShard>(KeyRange(KeyRangeRef(range.end, shardRange.end)), existingShard);
+				newShards.push_back(dataShard.get());
 				existingShard->dataShards[range.end.toString()] = std::move(dataShard);
 				logShardEvent(existingShard->id, shardRange, ShardOp::MODIFY_RANGE);
 			}
 		}
+
 		dataShardMap.insert(range, nullptr);
+		for (DataShard* shard : newShards) {
+			dataShardMap.insert(shard->range, shard);
+		}
+
 		return shardIds;
 	}
 
