@@ -30,7 +30,16 @@ public:
 	ApiCorrectnessWorkload(const WorkloadConfig& config) : ApiWorkload(config) {}
 
 private:
-	enum OpType { OP_INSERT, OP_GET, OP_CLEAR, OP_GET_RANGE, OP_CLEAR_RANGE, OP_COMMIT_READ, OP_LAST = OP_COMMIT_READ };
+	enum OpType {
+		OP_INSERT,
+		OP_GET,
+		OP_GET_KEY,
+		OP_CLEAR,
+		OP_GET_RANGE,
+		OP_CLEAR_RANGE,
+		OP_COMMIT_READ,
+		OP_LAST = OP_COMMIT_READ
+	};
 
 	void randomCommitReadOp(TTaskFct cont) {
 		int numKeys = Random::get().randomInt(1, maxKeysPerTransaction);
@@ -125,6 +134,66 @@ private:
 		    });
 	}
 
+	void randomGetKeyOp(TTaskFct cont) {
+		int numKeys = Random::get().randomInt(1, maxKeysPerTransaction);
+		auto keysWithSelectors = std::make_shared<std::vector<std::pair<fdb::Key, fdb::KeySelector>>>();
+		auto selectors = std::make_shared<std::vector<fdb::KeySelector>>();
+		auto results = std::make_shared<std::vector<fdb::Key>>();
+		for (int i = 0; i < numKeys; i++) {
+			auto key = randomKey(readExistingKeysRatio);
+			fdb::KeySelector selector;
+			selector.orEqual = Random::get().randomBool(0.5);
+			selector.offset = Random::get().randomInt(0, 4);
+			keysWithSelectors->push_back({ key, selector });
+		}
+		execTransaction(
+		    [keysWithSelectors, results](auto ctx) {
+			    auto futures = std::make_shared<std::vector<fdb::Future>>();
+			    for (const auto& keyWithSelector : *keysWithSelectors) {
+				    auto key = keyWithSelector.first;
+				    auto selector = keyWithSelector.second;
+				    selector.key = key.data();
+				    selector.keyLength = key.size();
+				    futures->push_back(ctx->tx().getKey(selector, false));
+			    }
+			    ctx->continueAfterAll(*futures, [ctx, futures, results]() {
+				    results->clear();
+				    for (auto& f : *futures) {
+					    results->push_back(fdb::Key(f.get<fdb::future_var::KeyRef>()));
+				    }
+				    ASSERT(results->size() == futures->size());
+				    ctx->done();
+			    });
+		    },
+		    [this, keysWithSelectors, results, cont]() {
+			    ASSERT(results->size() == keysWithSelectors->size());
+			    for (int i = 0; i < keysWithSelectors->size(); i++) {
+				    auto const& key = (*keysWithSelectors)[i].first;
+				    auto const& selector = (*keysWithSelectors)[i].second;
+				    auto expected = store.getKey(key, selector.orEqual, selector.offset);
+				    auto actual = (*results)[i];
+				    // Local store only contains data for the current client, while fdb contains data from multiple
+				    // clients. If getKey returned a key outside of the range for the current client, adjust the result
+				    // to match what would be expected in the local store.
+				    if (actual.substr(0, keyPrefix.size()) < keyPrefix) {
+					    actual = store.startKey();
+				    } else if ((*results)[i].substr(0, keyPrefix.size()) > keyPrefix) {
+					    actual = store.endKey();
+				    }
+				    if (actual != expected) {
+					    error(fmt::format("randomGetKeyOp mismatch. key: {}, orEqual: {}, offset: {}, expected: {:.80} "
+					                      "actual: {:.80}",
+					                      fdb::toCharsRef(key),
+					                      selector.orEqual,
+					                      selector.offset,
+					                      fdb::toCharsRef(expected),
+					                      fdb::toCharsRef(actual)));
+				    }
+			    }
+			    schedule(cont);
+		    });
+	}
+
 	void getRangeLoop(std::shared_ptr<ITransactionContext> ctx,
 	                  fdb::KeySelector begin,
 	                  fdb::KeySelector end,
@@ -198,6 +267,9 @@ private:
 			break;
 		case OP_GET:
 			randomGetOp(cont);
+			break;
+		case OP_GET_KEY:
+			randomGetKeyOp(cont);
 			break;
 		case OP_CLEAR:
 			randomClearOp(cont);
