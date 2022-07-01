@@ -50,9 +50,9 @@ struct TenantManagementWorkload : TestWorkload {
 	const TenantName tenantNamePrefix = "tenant_management_workload_"_sr;
 	TenantName localTenantNamePrefix;
 
-	const Key specialKeysTenantMapPrefix =
-	    TenantRangeImpl<true>::mapSubRange.begin.withPrefix(TenantRangeImpl<true>::submoduleRange.begin.withPrefix(
-	        SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin));
+	const Key specialKeysTenantMapPrefix = SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT)
+	                                           .begin.withSuffix(TenantRangeImpl<true>::submoduleRange.begin)
+	                                           .withSuffix(TenantRangeImpl<true>::mapSubRange.begin);
 
 	int maxTenants;
 	double testDuration;

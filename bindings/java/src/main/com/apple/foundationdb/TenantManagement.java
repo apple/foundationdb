@@ -41,7 +41,7 @@ import com.apple.foundationdb.tuple.Tuple;
  */
 public class TenantManagement {
 	static byte[] TENANT_MAP_PREFIX = ByteArrayUtil.join(new byte[] { (byte)255, (byte)255 },
-														 "/management/tenant/map/".getBytes());
+	                                                     "/management/tenant/map/".getBytes());
 
 	/**
 	 * Creates a new tenant in the cluster. If the tenant already exists, this operation will complete
