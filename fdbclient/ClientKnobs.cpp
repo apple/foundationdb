@@ -114,6 +114,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( SHARD_ENCODE_LOCATION_METADATA,          true );
 	init( DD_PHYSICAL_SHARD_CORE,                  true ); // SHARD_ENCODE_LOCATION_METADATA must be true
 	init( DD_FRAMEWORK,                            true );
+	init( PHYSICAL_SHARD_SIZE_CONTROL,             true ); // DD_FRAMEWORK and DD_PHYSICAL_SHARD_CORE must be true
 
 	//KeyRangeMap
 	init( KRM_GET_RANGE_LIMIT,                     1e5 ); if( randomize && BUGGIFY ) KRM_GET_RANGE_LIMIT = 10;

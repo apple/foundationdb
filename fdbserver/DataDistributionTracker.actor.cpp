@@ -83,8 +83,7 @@ struct DataDistributionTracker {
 	PromiseStream<RelocateShard> output;
 	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
 	Reference<PhysicalShardCollection> physicalShardCollection;
-	Reference<DDEventBuffer> ddEventBuffer;
-	PromiseStream<int> triggerDataDistribution;
+	Reference<DataDistributionRuntimeMonitor> dataDistributionRuntimeMonitor;
 
 	Promise<Void> readyToStart;
 	Reference<AsyncVar<bool>> anyZeroHealthyTeams;
@@ -129,13 +128,12 @@ struct DataDistributionTracker {
 	                        KeyRangeMap<ShardTrackedData>& shards,
 	                        bool& trackerCancelled,
 	                        Reference<PhysicalShardCollection> physicalShardCollection,
-	                        Reference<DDEventBuffer> ddEventBuffer,
-	                        PromiseStream<int> triggerDataDistribution)
+	                        Reference<DataDistributionRuntimeMonitor> dataDistributionRuntimeMonitor)
 	  : cx(cx), distributorId(distributorId), shards(shards), sizeChanges(false), systemSizeEstimate(0),
 	    dbSizeEstimate(new AsyncVar<int64_t>()), maxShardSize(new AsyncVar<Optional<int64_t>>()), output(output),
 	    shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), physicalShardCollection(physicalShardCollection),
 	    readyToStart(readyToStart), anyZeroHealthyTeams(anyZeroHealthyTeams), trackerCancelled(trackerCancelled),
-	    ddEventBuffer(ddEventBuffer), triggerDataDistribution(triggerDataDistribution) {}
+	    dataDistributionRuntimeMonitor(dataDistributionRuntimeMonitor) {}
 
 	~DataDistributionTracker() {
 		trackerCancelled = true;
@@ -316,10 +314,11 @@ ACTOR Future<Void> trackShardMetrics(DataDistributionTracker::SafeAccessor self,
 							std::vector<uint64_t> oversizePhysicalShards =
 							    self()->physicalShardCollection->updatePhysicalShardMetricsByKeyRange(
 							        keys, metrics.first.get(), shardMetrics->get().get().metrics, initWithNewMetrics);
-							for (auto physicalShardID : oversizePhysicalShards) {
-								self()->ddEventBuffer->append(DDEventBuffer::DDEvent(
-								    SERVER_KNOBS->PRIORITY_SPLIT_PHYSICAL_SHARD, physicalShardID));
-								self()->triggerDataDistribution.send(1);
+							if (CLIENT_KNOBS->DD_FRAMEWORK && CLIENT_KNOBS->PHYSICAL_SHARD_SIZE_CONTROL) {
+								for (auto physicalShardID : oversizePhysicalShards) {
+									self()->dataDistributionRuntimeMonitor->triggerDDEvent(
+										DDEventBuffer::DDEvent(SERVER_KNOBS->PRIORITY_SPLIT_PHYSICAL_SHARD, physicalShardID), true);
+								}
 							}
 						}
 						if (initWithNewMetrics) {
@@ -547,19 +546,25 @@ ACTOR Future<Void> shardSplitter(DataDistributionTracker* self,
 		for (int i = 0; i < skipRange; i++) {
 			KeyRangeRef r(splitKeys[i], splitKeys[i + 1]);
 			self->shardsAffectedByTeamFailure->defineShard(r);
-			self->output.send(RelocateShard(r, SERVER_KNOBS->PRIORITY_SPLIT_SHARD, RelocateReason::OTHER));
+			RelocateShard rs(r, SERVER_KNOBS->PRIORITY_SPLIT_SHARD, RelocateReason::OTHER);
+			// self->output.send(rs);
 			if (CLIENT_KNOBS->DD_FRAMEWORK) {
-				self->ddEventBuffer->append(DDEventBuffer::DDEvent(SERVER_KNOBS->PRIORITY_SPLIT_SHARD));
-				self->triggerDataDistribution.send(1);
+				self->dataDistributionRuntimeMonitor->triggerDDEvent(
+					DDEventBuffer::DDEvent(SERVER_KNOBS->PRIORITY_SPLIT_SHARD, rs), true);
+			} else {
+				self->output.send(rs);
 			}
 		}
 		for (int i = numShards - 1; i > skipRange; i--) {
 			KeyRangeRef r(splitKeys[i], splitKeys[i + 1]);
 			self->shardsAffectedByTeamFailure->defineShard(r);
-			self->output.send(RelocateShard(r, SERVER_KNOBS->PRIORITY_SPLIT_SHARD, RelocateReason::OTHER));
+			RelocateShard rs(r, SERVER_KNOBS->PRIORITY_SPLIT_SHARD, RelocateReason::OTHER);
+			// self->output.send(rs);
 			if (CLIENT_KNOBS->DD_FRAMEWORK) {
-				self->ddEventBuffer->append(DDEventBuffer::DDEvent(SERVER_KNOBS->PRIORITY_SPLIT_SHARD));
-				self->triggerDataDistribution.send(1);
+				self->dataDistributionRuntimeMonitor->triggerDDEvent(
+					DDEventBuffer::DDEvent(SERVER_KNOBS->PRIORITY_SPLIT_SHARD, rs), true);
+			} else {
+				self->output.send(rs);
 			}
 		}
 
@@ -706,10 +711,13 @@ Future<Void> shardMerger(DataDistributionTracker* self,
 	}
 	restartShardTrackers(self, mergeRange, ShardMetrics(endingStats, lastLowBandwidthStartTime, shardCount));
 	self->shardsAffectedByTeamFailure->defineShard(mergeRange);
-	self->output.send(RelocateShard(mergeRange, SERVER_KNOBS->PRIORITY_MERGE_SHARD, RelocateReason::OTHER));
+	RelocateShard rs(mergeRange, SERVER_KNOBS->PRIORITY_MERGE_SHARD, RelocateReason::OTHER);
+	// self->output.send(rs);
 	if (CLIENT_KNOBS->DD_FRAMEWORK) {
-		self->ddEventBuffer->append(DDEventBuffer::DDEvent(SERVER_KNOBS->PRIORITY_MERGE_SHARD));
-		self->triggerDataDistribution.send(1);
+		self->dataDistributionRuntimeMonitor->triggerDDEvent(
+			DDEventBuffer::DDEvent(SERVER_KNOBS->PRIORITY_MERGE_SHARD, rs), true);
+	} else {
+		self->output.send(rs);
 	}
 
 	// We are about to be cancelled by the call to restartShardTrackers
@@ -1051,8 +1059,7 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
                                            KeyRangeMap<ShardTrackedData>* shards,
                                            bool* trackerCancelled,
                                            Reference<PhysicalShardCollection> physicalShardCollection,
-                                           Reference<DDEventBuffer> ddEventBuffer,
-                                           PromiseStream<int> triggerDataDistribution) {
+                                           Reference<DataDistributionRuntimeMonitor> dataDistributionRuntimeMonitor) {
 	state DataDistributionTracker self(cx,
 	                                   distributorId,
 	                                   readyToStart,
@@ -1062,8 +1069,7 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
 	                                   *shards,
 	                                   *trackerCancelled,
 	                                   physicalShardCollection,
-	                                   ddEventBuffer,
-	                                   triggerDataDistribution);
+	                                   dataDistributionRuntimeMonitor);
 	state Future<Void> loggingTrigger = Void();
 	state Future<Void> readHotDetect = readHotDetector(&self);
 	state Reference<EventCacheHolder> ddTrackerStatsEventHolder = makeReference<EventCacheHolder>("DDTrackerStats");
@@ -1334,6 +1340,7 @@ void PhysicalShardCollection::updatePhysicalShardToTeams(uint64_t inputPhysicalS
 			teamPhysicalShardIDs[inputTeam].insert(inputPhysicalShardID);
 		}
 	}
+	return;
 }
 
 std::string convertSetOfIDToString(std::set<uint64_t> ids) {
@@ -1428,7 +1435,7 @@ Optional<uint64_t> PhysicalShardCollection::trySelectPhysicalShardFor(ShardsAffe
 	}*/
 	// For test end
 
-	if (minBytes + moveInMetrics.bytes > SERVER_KNOBS->MAX_PHYSICAL_PHYSICAL_SHARD_BYTES) {
+	if (minBytes + moveInMetrics.bytes > SERVER_KNOBS->MAX_PHYSICAL_SHARD_BYTES) {
 		// Case: The physicalShard with the minimal bytes is insufficient to store the new input bytes
 		// if (debugID%20==0) {
 		TraceEvent("TryGetPhysicalShardIDResult")
@@ -1436,7 +1443,7 @@ Optional<uint64_t> PhysicalShardCollection::trySelectPhysicalShardFor(ShardsAffe
 		    .detail("FailedReason", "more than the upper bound of physicalShard")
 		    .detail("MinBytes", minBytes)
 		    .detail("MoveInBytes", moveInMetrics.bytes)
-		    .detail("MaxPhysicalShardBytes", SERVER_KNOBS->MAX_PHYSICAL_PHYSICAL_SHARD_BYTES)
+		    .detail("MaxPhysicalShardBytes", SERVER_KNOBS->MAX_PHYSICAL_SHARD_BYTES)
 		    .detail("DebugID", debugID);
 		// }
 		return Optional<uint64_t>();
@@ -1447,7 +1454,7 @@ Optional<uint64_t> PhysicalShardCollection::trySelectPhysicalShardFor(ShardsAffe
 		    .detail("Result", minPhysicalShardID)
 		    .detail("MinBytes", minBytes)
 		    .detail("MoveInBytes", moveInMetrics.bytes)
-		    .detail("MaxPhysicalShardBytes", SERVER_KNOBS->MAX_PHYSICAL_PHYSICAL_SHARD_BYTES)
+		    .detail("MaxPhysicalShardBytes", SERVER_KNOBS->MAX_PHYSICAL_SHARD_BYTES)
 		    .detail("DebugID", debugID);
 		// }
 		return minPhysicalShardID;
@@ -1489,7 +1496,7 @@ std::vector<uint64_t> PhysicalShardCollection::updatePhysicalShardMetricsByKeyRa
 		    physicalShardCollection[physicalShardID].metrics + (delta * (1.0 / physicalShardIDSet.size()));
 		// std::cout << "Update: " << physicalShardID << ", init=" << oldInit << ": " << oldBytes << " add bytes: " <<
 		// delta << " = " << physicalShardCollection[physicalShardID].bytesOnDisk <<"\n";
-		if (physicalShardCollection[physicalShardID].metrics.bytes > SERVER_KNOBS->MAX_PHYSICAL_PHYSICAL_SHARD_BYTES) {
+		if (physicalShardCollection[physicalShardID].metrics.bytes > SERVER_KNOBS->MAX_PHYSICAL_SHARD_BYTES) {
 			oversizePhysicalShards.push_back(physicalShardID);
 		}
 	}
@@ -1500,11 +1507,13 @@ void PhysicalShardCollection::reduceMetricsForMoveOut(uint64_t physicalShardID, 
 	ASSERT(CLIENT_KNOBS->DD_PHYSICAL_SHARD_CORE);
 	physicalShardCollection[physicalShardID].metrics =
 	    physicalShardCollection[physicalShardID].metrics - moveOutMetrics;
+	return;
 }
 
 void PhysicalShardCollection::increaseMetricsForMoveIn(uint64_t physicalShardID, StorageMetrics const& moveInMetrics) {
 	ASSERT(CLIENT_KNOBS->DD_PHYSICAL_SHARD_CORE);
 	physicalShardCollection[physicalShardID].metrics = physicalShardCollection[physicalShardID].metrics + moveInMetrics;
+	return;
 }
 
 void PhysicalShardCollection::printTeamPhysicalShardsMapping(std::string action) {
@@ -1521,4 +1530,5 @@ void PhysicalShardCollection::printTeamPhysicalShardsMapping(std::string action)
 		}
 		std::cout << "\n";
 	}
+	return;
 }

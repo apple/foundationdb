@@ -34,7 +34,9 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-enum class RelocateReason { INVALID = -1, OTHER, REBALANCE_DISK, REBALANCE_READ };
+enum class RelocateReason { INVALID = -1, OTHER, REBALANCE_DISK, REBALANCE_READ, REBALANCE_ROCKSDB_COLUMN }; 
+// REBALANCE_ROCKSDB_COLUMN: rebalance size of physicalShard
+
 struct DDShardInfo;
 
 struct DataMove {
@@ -448,8 +450,12 @@ public:
 		Optional<uint64_t> physicalShard;
 		Optional<UID> storageServer;
 		Optional<ShardsAffectedByTeamFailure::Team> team;
+		// any RelocateShard suggested?
+		Optional<RelocateShard> rs;
 		DDEvent(int eventType) : eventType(eventType) {}
 		DDEvent(int eventType, uint64_t physicalShardID) : eventType(eventType), physicalShard(physicalShardID) {}
+		DDEvent(int eventType, KeyRange keyRange) : eventType(eventType), keyRange(keyRange) {}
+		DDEvent(int eventType, RelocateShard rs) : eventType(eventType), rs(rs) {}
 		std::string toString() const { return std::to_string(eventType); }
 	};
 	void append(DDEvent event) { buffer.push_back(event); }
@@ -483,18 +489,67 @@ public:
 	}
 	void setRelocateBuffer(PromiseStream<RelocateShard> buffer) { relocateBuffer = buffer; }
 	void setDDEventBuffer(Reference<DDEventBuffer> buffer) { ddEventBuffer = buffer; };
-	void setTriggerDataDistribution(PromiseStream<int> trigger) { triggerDataDistribution = trigger; }
-	// DD Algorithm Support: Trigger Data Relocation
-	PromiseStream<int> triggerDataDistribution;
-	Reference<DDEventBuffer> ddEventBuffer;
+
+	void triggerDDEvent(DDEventBuffer::DDEvent inputEvent, bool immediate) {
+		ASSERT(CLIENT_KNOBS->DD_FRAMEWORK);
+
+		ddEventBuffer->append(inputEvent);
+		if (!immediate) {
+			return;
+		}
+		
+		TraceEvent e("TriggerDataMove");
+		std::vector<DDEventBuffer::DDEvent> events = ddEventBuffer->takeAll();
+		e.detail("Events", events);
+		for (auto event : events) {
+			if (event.rs.present()) {
+				relocateBuffer.send(event.rs.get());
+				continue;
+			}
+			// PhysicalShard is too large or too (small and cold)
+			ASSERT( CLIENT_KNOBS->PHYSICAL_SHARD_SIZE_CONTROL );
+			ASSERT( event.physicalShard.present() );
+			if (event.eventType==SERVER_KNOBS->PRIORITY_SPLIT_PHYSICAL_SHARD) {
+				// move out half physicalShards
+				uint64_t physicalShardID = event.physicalShard.get();
+				std::vector<KeyRange> keyRanges;
+				KeyRangeMap<uint64_t>::Ranges keyRangePhysicalShardIDRanges = physicalShardCollection->keyRangePhysicalShardIDMap.ranges();
+				KeyRangeMap<uint64_t>::iterator it = keyRangePhysicalShardIDRanges.begin();
+				int numKeyRanges = 0;
+				for (; it != keyRangePhysicalShardIDRanges.end(); ++it) {
+					if (physicalShardID == it->value()) {
+						KeyRange keyRange = Standalone(KeyRangeRef(it->range().begin, it->range().end));
+						keyRanges.push_back(keyRange);
+						numKeyRanges = numKeyRanges + 1;
+					}
+				}
+				int counter = 0;
+				for (auto & keyRange : keyRanges) {
+					if (counter > numKeyRanges/2) {
+						break;
+					}
+					relocateBuffer.send(RelocateShard(keyRange, event.eventType, RelocateReason::REBALANCE_ROCKSDB_COLUMN));
+					counter = counter + 1;
+				}
+			} else if (event.eventType==SERVER_KNOBS->PRIORITY_MERGE_PHYSICAL_SHARD) {
+				// TODO: at this point we know which physicalShard is too small
+				continue;
+			} else {
+				UNREACHABLE();
+			}
+		}
+		return;
+	}
 
 private:
+	// DD Algorithm Support: Issue Data Move
+	Reference<DDEventBuffer> ddEventBuffer;
+	PromiseStream<RelocateShard> relocateBuffer; // self->output.send(RelocateShard)
+
 	// DD Algorithm Support: Runtime Metrics
 	std::vector<TeamCollectionInterface> teamCollections; // get team/storageServer metrics
 	Reference<PhysicalShardCollection> physicalShardCollection; // get physicalShard metrics
 	PromiseStream<GetMetricsRequest> getShardMetrics; // get keyRange metrics
-	// DD Algorithm Support: Issue Data Move
-	PromiseStream<RelocateShard> relocateBuffer; // self->output.send(RelocateShard)
 };
 
 // DDShardInfo is so named to avoid link-time name collision with ShardInfo within the StorageServer
@@ -558,8 +613,7 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
                                            KeyRangeMap<ShardTrackedData>* shards,
                                            bool* trackerCancelled,
                                            Reference<PhysicalShardCollection> physicalShardCollection,
-                                           Reference<DDEventBuffer> ddEventBuffer,
-                                           PromiseStream<int> triggerDataDistribution);
+                                           Reference<DataDistributionRuntimeMonitor> dataDistributionRuntimeMonitor);
 
 ACTOR Future<Void> dataDistributionQueue(Database cx,
                                          Future<Void> readyToStart,
@@ -579,8 +633,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
                                          int singleRegionTeamSize,
                                          const DDEnabledState* ddEnabledState,
                                          Reference<PhysicalShardCollection> physicalShardCollection,
-                                         Reference<DDEventBuffer> ddEventBuffer,
-                                         PromiseStream<int> triggerDataDistribution);
+                                         Reference<DataDistributionRuntimeMonitor> dataDistributionRuntimeMonitor);
 
 // Holds the permitted size and IO Bounds for a shard
 struct ShardSizeBounds {

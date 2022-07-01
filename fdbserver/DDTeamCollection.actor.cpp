@@ -953,10 +953,12 @@ public:
 							rs.keys = shards[i];
 							rs.priority = maxPriority;
 
-							self->output.send(rs);
+							// self->output.send(rs);
 							if (CLIENT_KNOBS->DD_FRAMEWORK) {
-								self->ddEventBuffer->append(DDEventBuffer::DDEvent(maxPriority));
-								self->triggerDataDistribution.send(1);
+								self->dataDistributionRuntimeMonitor->triggerDDEvent(
+									DDEventBuffer::DDEvent(maxPriority, rs), true);
+							} else {
+								self->output.send(rs);
 							}
 							TraceEvent("SendRelocateToDDQueue", self->distributorId)
 							    .suppressFor(1.0)
@@ -3616,8 +3618,7 @@ DDTeamCollection::DDTeamCollection(Database const& cx,
                                    MoveKeysLock const& lock,
                                    PromiseStream<RelocateShard> const& output,
                                    Reference<ShardsAffectedByTeamFailure> const& shardsAffectedByTeamFailure,
-                                   Reference<DDEventBuffer> ddEventBuffer,
-                                   PromiseStream<int> triggerDataDistribution,
+                                   Reference<DataDistributionRuntimeMonitor> dataDistributionRuntimeMonitor,
                                    DatabaseConfiguration configuration,
                                    std::vector<Optional<Key>> includedDCs,
                                    Optional<std::vector<Optional<Key>>> otherTrackedDCs,
@@ -3631,8 +3632,7 @@ DDTeamCollection::DDTeamCollection(Database const& cx,
                                    PromiseStream<Promise<int>> getUnhealthyRelocationCount)
   : doBuildTeams(true), lastBuildTeamsFailed(false), teamBuilder(Void()), lock(lock), output(output),
     unhealthyServers(0), storageWiggler(makeReference<StorageWiggler>(this)), processingWiggle(processingWiggle),
-    shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), ddEventBuffer(ddEventBuffer),
-    triggerDataDistribution(triggerDataDistribution),
+    shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), dataDistributionRuntimeMonitor(dataDistributionRuntimeMonitor),
     initialFailureReactionDelay(
         delayed(readyToStart, SERVER_KNOBS->INITIAL_FAILURE_REACTION_DELAY, TaskPriority::DataDistribution)),
     initializationDoneActor(logOnCompletion(readyToStart && initialFailureReactionDelay)), recruitingStream(0),
@@ -5190,8 +5190,7 @@ class DDTeamCollectionUnitTest {
 		                                                           MoveKeysLock(),
 		                                                           PromiseStream<RelocateShard>(),
 		                                                           makeReference<ShardsAffectedByTeamFailure>(),
-		                                                           makeReference<DDEventBuffer>(),
-		                                                           PromiseStream<int>(),
+		                                                           makeReference<DataDistributionRuntimeMonitor>(),
 		                                                           conf,
 		                                                           {},
 		                                                           {},
@@ -5236,8 +5235,7 @@ class DDTeamCollectionUnitTest {
 		                                                           MoveKeysLock(),
 		                                                           PromiseStream<RelocateShard>(),
 		                                                           makeReference<ShardsAffectedByTeamFailure>(),
-		                                                           makeReference<DDEventBuffer>(),
-		                                                           PromiseStream<int>(),
+		                                                           makeReference<DataDistributionRuntimeMonitor>(),
 		                                                           conf,
 		                                                           {},
 		                                                           {},

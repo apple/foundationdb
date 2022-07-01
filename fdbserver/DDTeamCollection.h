@@ -211,6 +211,7 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	// dd
 	Reference<DDEventBuffer> ddEventBuffer;
 	PromiseStream<int> triggerDataDistribution;
+	Reference<DataDistributionRuntimeMonitor> dataDistributionRuntimeMonitor;
 
 	std::vector<Reference<TCTeamInfo>> badTeams;
 	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
@@ -628,8 +629,7 @@ public:
 	                 MoveKeysLock const& lock,
 	                 PromiseStream<RelocateShard> const& output,
 	                 Reference<ShardsAffectedByTeamFailure> const& shardsAffectedByTeamFailure,
-	                 Reference<DDEventBuffer> ddEventBuffer,
-	                 PromiseStream<int> triggerDataDistribution,
+	                 Reference<DataDistributionRuntimeMonitor> dataDistributionRuntimeMonitor,
 	                 DatabaseConfiguration configuration,
 	                 std::vector<Optional<Key>> includedDCs,
 	                 Optional<std::vector<Optional<Key>>> otherTrackedDCs,
