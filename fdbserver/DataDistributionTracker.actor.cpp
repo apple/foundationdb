@@ -45,7 +45,7 @@ BandwidthStatus getBandwidthStatus(StorageMetrics const& metrics) {
 }
 
 ReadBandwidthStatus getReadBandwidthStatus(StorageMetrics const& metrics) {
-	if (metrics.bytesReadPerKSecond <= SERVER_KNOBS->SHARD_READ_HOT_BANDWITH_MIN_PER_KSECONDS ||
+	if (metrics.bytesReadPerKSecond <= SERVER_KNOBS->SHARD_READ_HOT_BANDWIDTH_MIN_PER_KSECONDS ||
 	    metrics.bytesReadPerKSecond <= SERVER_KNOBS->SHARD_MAX_READ_DENSITY_RATIO * metrics.bytes *
 	                                       SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS) {
 		return ReadBandwidthStatusNormal;
@@ -243,7 +243,7 @@ ACTOR Future<Void> trackShardMetrics(DataDistributionTracker::SafeAccessor self,
 					    std::max((int64_t)(SERVER_KNOBS->SHARD_MAX_READ_DENSITY_RATIO * bytes *
 					                       SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS *
 					                       (1.0 + SERVER_KNOBS->SHARD_MAX_BYTES_READ_PER_KSEC_JITTER)),
-					             SERVER_KNOBS->SHARD_READ_HOT_BANDWITH_MIN_PER_KSECONDS);
+					             SERVER_KNOBS->SHARD_READ_HOT_BANDWIDTH_MIN_PER_KSECONDS);
 					bounds.min.bytesReadPerKSecond = 0;
 					bounds.permittedError.bytesReadPerKSecond = bounds.min.bytesReadPerKSecond / 4;
 				} else if (readBandwidthStatus == ReadBandwidthStatusHigh) {
@@ -296,7 +296,7 @@ ACTOR Future<Void> trackShardMetrics(DataDistributionTracker::SafeAccessor self,
 					    .detail("Keys", keys)
 					    .detail("UpdatedSize", metrics.metrics.bytes)
 					    .detail("Bandwidth", metrics.metrics.bytesPerKSecond)
-					    .detail("BandwithStatus", getBandwidthStatus(metrics))
+					    .detail("BandwidthStatus", getBandwidthStatus(metrics))
 					    .detail("BytesLower", bounds.min.bytes)
 					    .detail("BytesUpper", bounds.max.bytes)
 					    .detail("BandwidthLower", bounds.min.bytesPerKSecond)
@@ -385,7 +385,7 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> getSplitKeys(DataDistributionTracker
 		state Transaction tr(self->cx);
 		try {
 			Standalone<VectorRef<KeyRef>> keys =
-			    wait(self->cx->splitStorageMetrics(splitRange, splitMetrics, estimated));
+			    wait(self->cx->splitStorageMetrics(splitRange, splitMetrics, estimated, SERVER_KNOBS->MIN_SHARD_BYTES));
 			return keys;
 		} catch (Error& e) {
 			wait(tr.onError(e));

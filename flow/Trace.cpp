@@ -1413,7 +1413,7 @@ void TraceBatch::dump() {
 		g_traceLog.writeEvent(buggifyBatch[i].fields, "", false);
 	}
 
-	onMainThreadVoid([]() { g_traceLog.flush(); }, nullptr);
+	onMainThreadVoid([]() { g_traceLog.flush(); });
 	eventBatch.clear();
 	attachBatch.clear();
 	buggifyBatch.clear();
