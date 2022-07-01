@@ -23,6 +23,7 @@
 #include "foundationdb/fdb_c_types.h"
 #include "test/apitester/TesterScheduler.h"
 #include "test/fdb_api.hpp"
+#include <cstddef>
 #include <memory>
 #include <stdexcept>
 #include <unordered_map>
@@ -510,10 +511,27 @@ public:
 	}
 
 protected:
+	fdb::Transaction createNewTransaction(fdb::Database db, int id = -1, fdb::Tenant* tenants = nullptr) {
+		// No tenants specified
+		if (options.numTenants <= 0) {
+			return db.createTransaction();
+		}
+		// Create Tenant Transaction
+		int tenant_id = (id == -1) ? Random::get().randomInt(0, options.numTenants - 1) : id;
+		// If provided tenants array (only necessary in runWorkload), use it
+		if (tenants) {
+			return tenants[tenant_id].createTransaction();
+		}
+		std::string tenantStr = "tenant" + std::to_string(tenant_id);
+		fdb::BytesRef tenant_name = fdb::toBytesRef(tenantStr);
+		fdb::Tenant t = db.openTenant(tenant_name);
+		return t.createTransaction();
+	}
+
 	// Execute the transaction on the given database instance
 	void executeOnDatabase(fdb::Database db, std::shared_ptr<ITransactionActor> txActor, TTaskFct cont) {
 		try {
-			fdb::Transaction tx = db.createTransaction();
+			fdb::Transaction tx = createNewTransaction(db, -1);
 			std::shared_ptr<ITransactionContext> ctx;
 			if (options.blockOnFutures) {
 				ctx = std::make_shared<BlockingTransactionContext>(

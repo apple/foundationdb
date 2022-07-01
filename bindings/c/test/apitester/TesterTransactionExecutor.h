@@ -127,6 +127,8 @@ struct TransactionExecutorOptions {
 	// The size of the database instance pool
 	int numDatabases = 1;
 
+	int numTenants = 0;
+
 	// Maximum number of retries per transaction (0 - unlimited)
 	int transactionRetryLimit = 0;
 };

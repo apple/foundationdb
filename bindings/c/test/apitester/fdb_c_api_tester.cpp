@@ -338,6 +338,9 @@ void randomizeOptions(TesterOptions& options) {
 	options.numClientThreads = random.randomInt(options.testSpec.minClientThreads, options.testSpec.maxClientThreads);
 	options.numDatabases = random.randomInt(options.testSpec.minDatabases, options.testSpec.maxDatabases);
 	options.numClients = random.randomInt(options.testSpec.minClients, options.testSpec.maxClients);
+	if (options.testSpec.multiTenant) {
+		options.numTenants = random.randomInt(options.testSpec.minTenants, options.testSpec.maxTenants);
+	}
 }
 
 bool runWorkloads(TesterOptions& options) {
@@ -345,6 +348,7 @@ bool runWorkloads(TesterOptions& options) {
 		TransactionExecutorOptions txExecOptions;
 		txExecOptions.blockOnFutures = options.testSpec.blockOnFutures;
 		txExecOptions.numDatabases = options.numDatabases;
+		txExecOptions.numTenants = options.numTenants;
 		txExecOptions.databasePerTransaction = options.testSpec.databasePerTransaction;
 		txExecOptions.transactionRetryLimit = options.transactionRetryLimit;
 
