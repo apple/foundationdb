@@ -1,6 +1,6 @@
 use crate::flow::{
     file_identifier::FileIdentifierNames, uid::UID, uid::WLTOKEN, Error, FlowFn, FlowFuture,
-    FlowMessage, FlowResponse, Result,
+    FlowHandler, FlowMessage, FlowResponse, Result,
 };
 
 use tokio::sync::oneshot;
@@ -33,7 +33,8 @@ pub struct LoopbackHandler {
     // Should this be a Service<FlowMessage> instead?
     // pub out_tx: mpsc::Sender<FlowMessage>,
     pub in_flight_requests: dashmap::DashMap<UID, oneshot::Sender<FlowMessage>>,
-    pub well_known_endpoints: dashmap::DashMap<WLTOKEN, Box<FlowFn>>,
+    // pub well_known_endpoints: dashmap::DashMap<WLTOKEN, Box<FlowFn>>,
+    pub well_known_endpoints: dashmap::DashMap<WLTOKEN, Box<dyn FlowHandler>>,
 }
 
 impl LoopbackHandler {
@@ -45,17 +46,18 @@ impl LoopbackHandler {
         }))
     }
 
-    pub fn register_well_known_endpoint<F>(&self, wltoken: WLTOKEN, f: F)
-    where
-        F: 'static + Send + Sync + Fn(FlowMessage) -> FlowFuture,
+    pub fn register_well_known_endpoint(&self, wltoken: WLTOKEN, endpoint: Box<dyn FlowHandler>)
+    // where
+    // F: 'static + Send + Sync + Fn(FlowMessage) -> FlowFuture,
     {
-        self.well_known_endpoints.insert(wltoken, Box::new(f));
+        self.well_known_endpoints.insert(wltoken, endpoint);
     }
 
-    fn handle_req(&self, request: FlowMessage) -> Result<Option<FlowFuture>> {
+    fn handle_req<'a>(&'a self, request: FlowMessage) -> Result<Option<FlowFuture>> {
         match request.token().get_well_known_endpoint() {
             Some(wltoken) => match self.well_known_endpoints.get(&wltoken) {
-                Some(well_known_endpoint) => Ok(Some((**well_known_endpoint)(request))),
+                // Some(well_known_endpoint) => Ok(Some((**well_known_endpoint)(request))),
+                Some(well_known_endpoint) => Ok(Some(well_known_endpoint.handle(request))),
                 None => {
                     Err(format!("Unhandled request for well-known endpoint {:?}", wltoken,).into())
                 }

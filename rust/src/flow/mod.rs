@@ -68,6 +68,10 @@ impl FlowMessage {
     }
 }
 
+pub trait FlowHandler: Send + Sync {
+    fn handle(&'_ self, msg: FlowMessage) -> FlowFuture;
+}
+
 // #[test]
 // fn test_uid() -> Result<()> {
 //     let s = "0123456789abcdeffedcba9876543210";

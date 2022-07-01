@@ -9,7 +9,7 @@ mod void;
 
 use crate::flow::file_identifier::{FileIdentifier, IdentifierType, ParsedFileIdentifier};
 use crate::flow::uid::{UID, WLTOKEN};
-use crate::flow::{Flow, FlowFuture, FlowMessage, Frame, Peer, Result};
+use crate::flow::{Flow, FlowFuture, FlowHandler, FlowMessage, Frame, Peer, Result};
 use crate::services::ConnectionKeeper;
 use std::net::SocketAddr;
 
@@ -107,8 +107,18 @@ async fn handle(request: FlowMessage) -> Result<Option<FlowMessage>> {
     Ok(Some(FlowMessage::new_response(request.flow, frame)?))
 }
 
-pub fn handler(msg: FlowMessage) -> FlowFuture {
-    Box::pin(handle(msg))
+pub struct Ping {}
+
+impl Ping {
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
+impl FlowHandler for Ping {
+    fn handle(&self, msg: FlowMessage) -> FlowFuture {
+        Box::pin(handle(msg))
+    }
 }
 
 pub async fn ping(peer: SocketAddr, svc: &ConnectionKeeper) -> Result<()> {
