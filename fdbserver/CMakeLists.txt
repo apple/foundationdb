@@ -1,6 +1,9 @@
 set(FDBSERVER_SRCS
   ApplyMetadataMutation.cpp
   ApplyMetadataMutation.h
+  art.h
+  art_impl.h
+  ArtMutationBuffer.h
   BackupInterface.h
   BackupProgress.actor.cpp
   BackupProgress.actor.h
@@ -19,6 +22,7 @@ set(FDBSERVER_SRCS
   CommitProxyServer.actor.cpp
   ConfigBroadcaster.actor.cpp
   ConfigBroadcaster.h
+  ConfigBroadcastInterface.h
   ConfigDatabaseUnitTests.actor.cpp
   ConfigFollowerInterface.cpp
   ConfigFollowerInterface.h
@@ -38,7 +42,9 @@ set(FDBSERVER_SRCS
   DBCoreState.h
   DDTeamCollection.actor.cpp
   DDTeamCollection.h
+  DDTxnProcessor.h
   DDTxnProcessor.actor.cpp
+  DeltaTree.h
   DiskQueue.actor.cpp
   EncryptKeyProxy.actor.cpp
   EncryptKeyProxyInterface.h
@@ -339,6 +345,7 @@ add_library(fdb_sqlite STATIC
   sqlite/sqliteInt.h
   sqlite/sqliteLimit.h
   sqlite/sqlite3.amalgamation.c)
+target_include_directories(fdb_sqlite PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/sqlite)
 
 if (WITH_ROCKSDB_EXPERIMENTAL)
   add_definitions(-DSSD_ROCKSDB_EXPERIMENTAL)

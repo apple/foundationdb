@@ -22,7 +22,7 @@
 #include <string>
 #include <vector>
 
-#include "contrib/fmt-8.1.1/include/fmt/format.h"
+#include "fmt/format.h"
 #include "fdbclient/Knobs.h"
 #include "flow/Arena.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"

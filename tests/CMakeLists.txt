@@ -191,7 +191,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES noSim/SystemDataTest.toml UNIT)
   if (WITH_ROCKSDB_EXPERIMENTAL)
     add_fdb_test(TEST_FILES noSim/KeyValueStoreRocksDBTest.toml)
-    add_fdb_test(TEST_FILES noSim/ShardedRocksDBTest.toml IGNORE) # TODO: re-enable once storage engine is stable. 
+    add_fdb_test(TEST_FILES noSim/ShardedRocksDBTest.toml UNIT)
     add_fdb_test(TEST_FILES fast/PhysicalShardMove.toml)
     add_fdb_test(TEST_FILES fast/StorageServerCheckpointRestore.toml)
   else()

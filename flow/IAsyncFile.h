@@ -26,7 +26,7 @@
 #include <ctime>
 #include "flow/flow.h"
 #include "flow/WriteOnlySet.h"
-#include "fdbrpc/IRateControl.h"
+#include "flow/IRateControl.h"
 
 // All outstanding operations must be cancelled before the destructor of IAsyncFile is called.
 // The desirability of the above semantic is disputed. Some classes (AsyncFileS3BlobStore,

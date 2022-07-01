@@ -23,7 +23,7 @@
 #pragma once
 
 #include "fdbclient/CoordinationInterface.h"
-#include "fdbclient/WellKnownEndpoints.h"
+#include "fdbrpc/WellKnownEndpoints.h"
 #include "fdbserver/ConfigFollowerInterface.h"
 #include "fdbserver/ConfigBroadcastInterface.h"
 

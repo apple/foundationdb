@@ -100,6 +100,7 @@ std::string getErrorReason(BackgroundErrorReason reason) {
 		return format("%d Unknown", reason);
 	}
 }
+
 // Background error handling is tested with Chaos test.
 // TODO: Test background error in simulation. RocksDB doesn't use flow IO in simulation, which limits our ability to
 // inject IO errors. We could implement rocksdb::FileSystem using flow IO to unblock simulation. Also, trace event is
@@ -142,6 +143,11 @@ public:
 private:
 	ThreadReturnPromise<Void> errorPromise;
 	std::mutex mutex;
+};
+
+// Encapsulation of shared states.
+struct ShardedRocksDBState {
+	bool closing = false;
 };
 
 std::shared_ptr<rocksdb::Cache> rocksdb_block_cache = nullptr;
@@ -337,7 +343,7 @@ public:
 		ASSERT(cf);
 		readRangeOptions.background_purge_on_iterator_cleanup = true;
 		readRangeOptions.auto_prefix_mode = (SERVER_KNOBS->ROCKSDB_PREFIX_LEN > 0);
-		TraceEvent("ReadIteratorPool")
+		TraceEvent(SevDebug, "ReadIteratorPool")
 		    .detail("Path", path)
 		    .detail("KnobRocksDBReadRangeReuseIterators", SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_ITERATORS)
 		    .detail("KnobRocksDBPrefixLen", SERVER_KNOBS->ROCKSDB_PREFIX_LEN);
@@ -416,25 +422,6 @@ private:
 	uint64_t iteratorsReuseCount;
 };
 
-ACTOR Future<Void> refreshReadIteratorPool(
-    std::unordered_map<std::string, std::shared_ptr<PhysicalShard>>* physicalShards) {
-	state Reference<Histogram> histogram = Histogram::getHistogram(
-	    ROCKSDBSTORAGE_HISTOGRAM_GROUP, "TimeSpentRefreshIterators"_sr, Histogram::Unit::microseconds);
-
-	if (SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_ITERATORS) {
-		loop {
-			wait(delay(SERVER_KNOBS->ROCKSDB_READ_RANGE_ITERATOR_REFRESH_TIME));
-
-			double startTime = timer_monotonic();
-			for (auto& [_, shard] : *physicalShards) {
-				shard->readIterPool->refreshIterators();
-			}
-			histogram->sample(timer_monotonic() - startTime);
-		}
-	}
-	return Void();
-}
-
 ACTOR Future<Void> flowLockLogger(const FlowLock* readLock, const FlowLock* fetchLock) {
 	loop {
 		wait(delay(SERVER_KNOBS->ROCKSDB_METRICS_DELAY));
@@ -459,8 +446,9 @@ struct DataShard {
 // PhysicalShard represent a collection of logical shards. A PhysicalShard could have one or more DataShards. A
 // PhysicalShard is stored as a column family in rocksdb. Each PhysicalShard has its own iterator pool.
 struct PhysicalShard {
-	PhysicalShard(rocksdb::DB* db, std::string id) : db(db), id(id) {}
-	PhysicalShard(rocksdb::DB* db, std::string id, rocksdb::ColumnFamilyHandle* handle) : db(db), id(id), cf(handle) {
+	PhysicalShard(rocksdb::DB* db, std::string id) : db(db), id(id), isInitialized(false) {}
+	PhysicalShard(rocksdb::DB* db, std::string id, rocksdb::ColumnFamilyHandle* handle)
+	  : db(db), id(id), cf(handle), isInitialized(false) {
 		ASSERT(cf);
 		readIterPool = std::make_shared<ReadIteratorPool>(db, cf, id);
 	}
@@ -475,10 +463,16 @@ struct PhysicalShard {
 			return status;
 		}
 		readIterPool = std::make_shared<ReadIteratorPool>(db, cf, id);
+		this->isInitialized.store(true);
 		return status;
 	}
 
-	bool initialized() { return cf != nullptr; }
+	bool initialized() { return this->isInitialized.load(); }
+
+	void refreshReadIteratorPool() {
+		ASSERT(this->readIterPool != nullptr);
+		this->readIterPool->refreshIterators();
+	}
 
 	std::string toString() const { return "[CF]: " + std::to_string(this->cf->GetID()); }
 
@@ -502,6 +496,7 @@ struct PhysicalShard {
 	std::unordered_map<std::string, std::unique_ptr<DataShard>> dataShards;
 	std::shared_ptr<ReadIteratorPool> readIterPool;
 	bool deletePending = false;
+	std::atomic<bool> isInitialized;
 };
 
 int readRangeInDb(DataShard* shard, const KeyRangeRef& range, int rowLimit, int byteLimit, RangeResult* result) {
@@ -1518,6 +1513,39 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 	using CF = rocksdb::ColumnFamilyHandle*;
 
+	ACTOR static Future<Void> refreshReadIteratorPools(
+	    std::shared_ptr<ShardedRocksDBState> rState,
+	    Future<Void> readyToStart,
+	    std::unordered_map<std::string, std::shared_ptr<PhysicalShard>>* physicalShards) {
+		state Reference<Histogram> histogram = Histogram::getHistogram(
+		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, "TimeSpentRefreshIterators"_sr, Histogram::Unit::microseconds);
+
+		if (SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_ITERATORS) {
+			try {
+				wait(readyToStart);
+				loop {
+					wait(delay(SERVER_KNOBS->ROCKSDB_READ_RANGE_ITERATOR_REFRESH_TIME));
+					if (rState->closing) {
+						break;
+					}
+					double startTime = timer_monotonic();
+					for (auto& [_, shard] : *physicalShards) {
+						if (shard->initialized()) {
+							shard->refreshReadIteratorPool();
+						}
+					}
+					histogram->sample(timer_monotonic() - startTime);
+				}
+			} catch (Error& e) {
+				if (e.code() != error_code_actor_cancelled) {
+					TraceEvent(SevError, "RefreshReadIteratorPoolError").errorUnsuppressed(e);
+				}
+			}
+		}
+
+		return Void();
+	}
+
 	struct Writer : IThreadPoolReceiver {
 		int threadIndex;
 		std::unordered_map<uint32_t, rocksdb::ColumnFamilyHandle*>* columnFamilyMap;
@@ -1567,15 +1595,6 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				logRocksDBError(status, "Open");
 				a.done.sendError(statusToError(status));
 				return;
-			}
-
-			if (g_network->isSimulated()) {
-				a.metrics = refreshReadIteratorPool(a.shardManager->getAllShards());
-			} else {
-				onMainThread([&] {
-					a.metrics = refreshReadIteratorPool(a.shardManager->getAllShards());
-					return Future<bool>(true);
-				}).blockUntilReady();
 			}
 
 			TraceEvent(SevInfo, "RocksDB").detail("Method", "Open");
@@ -2074,7 +2093,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 	// Persist shard mappinng key range should not be in shardMap.
 	explicit ShardedRocksDBKeyValueStore(const std::string& path, UID id)
-	  : path(path), id(id), readSemaphore(SERVER_KNOBS->ROCKSDB_READ_QUEUE_SOFT_MAX),
+	  : rState(std::make_shared<ShardedRocksDBState>()), path(path), id(id),
+	    readSemaphore(SERVER_KNOBS->ROCKSDB_READ_QUEUE_SOFT_MAX),
 	    fetchSemaphore(SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_SOFT_MAX),
 	    numReadWaiters(SERVER_KNOBS->ROCKSDB_READ_QUEUE_HARD_MAX - SERVER_KNOBS->ROCKSDB_READ_QUEUE_SOFT_MAX),
 	    numFetchWaiters(SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_HARD_MAX - SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_SOFT_MAX),
@@ -2107,8 +2127,10 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	Future<Void> getError() const override { return errorFuture; }
 
 	ACTOR static void doClose(ShardedRocksDBKeyValueStore* self, bool deleteOnClose) {
+		self->rState->closing = true;
 		// The metrics future retains a reference to the DB, so stop it before we delete it.
 		self->metrics.reset();
+		self->refreshHolder.cancel();
 
 		wait(self->readThreads->stop());
 		auto a = new Writer::CloseAction(&self->shardManager, deleteOnClose);
@@ -2139,6 +2161,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			auto a = std::make_unique<Writer::OpenAction>(
 			    &shardManager, metrics, &readSemaphore, &fetchSemaphore, errorListener);
 			openFuture = a->done.getFuture();
+			this->refreshHolder = refreshReadIteratorPools(this->rState, openFuture, shardManager.getAllShards());
 			writeThread->post(a.release());
 			return openFuture;
 		}
@@ -2304,6 +2327,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	// Used for debugging shard mapping issue.
 	std::vector<std::pair<KeyRange, std::string>> getDataMapping() { return shardManager.getDataMapping(); }
 
+	std::shared_ptr<ShardedRocksDBState> rState;
+	ShardManager shardManager;
 	std::shared_ptr<RocksDBMetrics> rocksDBMetrics;
 	std::string path;
 	const std::string dataPath;
@@ -2313,7 +2338,6 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	std::shared_ptr<RocksDBErrorListener> errorListener;
 	Future<Void> errorFuture;
 	Promise<Void> closePromise;
-	ShardManager shardManager;
 	Future<Void> openFuture;
 	Optional<Future<Void>> metrics;
 	FlowLock readSemaphore;
@@ -2321,6 +2345,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	FlowLock fetchSemaphore;
 	int numFetchWaiters;
 	Counters counters;
+	Future<Void> refreshHolder;
 };
 
 } // namespace

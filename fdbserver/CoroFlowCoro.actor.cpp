@@ -20,7 +20,7 @@
 
 #include "fdbserver/CoroFlow.h"
 #include "flow/ActorCollection.h"
-#include "fdbrpc/libcoroutine/Coro.h"
+#include "Coro.h"
 #include "flow/TDMetric.actor.h"
 #include "fdbrpc/simulator.h"
 #include "flow/actorcompiler.h" // has to be last include
