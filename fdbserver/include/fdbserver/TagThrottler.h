@@ -91,4 +91,5 @@ public:
 	// testing only
 public:
 	void setQuota(TransactionTagRef, ThrottleApi::TagQuotaValue const&);
+	void removeQuota(TransactionTagRef);
 };

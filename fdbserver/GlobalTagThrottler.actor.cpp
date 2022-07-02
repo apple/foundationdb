@@ -227,6 +227,8 @@ public:
 	void setQuota(TransactionTagRef tag, ThrottleApi::TagQuotaValue const& tagQuotaValue) {
 		trackedTags[tag].setQuota(tagQuotaValue);
 	}
+
+	void removeQuota(TransactionTagRef tag) { trackedTags.erase(tag); }
 };
 
 GlobalTagThrottler::GlobalTagThrottler(Database db, UID id) : impl(PImpl<GlobalTagThrottlerImpl>::create(db, id)) {}
@@ -266,6 +268,10 @@ Future<Void> GlobalTagThrottler::tryUpdateAutoThrottling(StorageQueueInfo const&
 
 void GlobalTagThrottler::setQuota(TransactionTagRef tag, ThrottleApi::TagQuotaValue const& tagQuotaValue) {
 	return impl->setQuota(tag, tagQuotaValue);
+}
+
+void GlobalTagThrottler::removeQuota(TransactionTagRef tag) {
+	return impl->removeQuota(tag);
 }
 
 namespace GlobalTagThrottlerTesting {
@@ -355,7 +361,7 @@ ACTOR static Future<Void> runClient(GlobalTagThrottler* globalTagThrottler,
 
 ACTOR static Future<Void> monitorClientRates(GlobalTagThrottler* globalTagThrottler,
                                              TransactionTag tag,
-                                             double desiredTPSLimit) {
+                                             Optional<double> desiredTPSLimit) {
 	state int successes = 0;
 	loop {
 		wait(delay(1.0));
@@ -365,7 +371,7 @@ ACTOR static Future<Void> monitorClientRates(GlobalTagThrottler* globalTagThrott
 			    .detail("Tag", tag)
 			    .detail("CurrentTPSRate", currentTPSLimit.get())
 			    .detail("DesiredTPSRate", desiredTPSLimit);
-			if (abs(currentTPSLimit.get() - desiredTPSLimit) < 1.0) {
+			if (desiredTPSLimit.present() && abs(currentTPSLimit.get() - desiredTPSLimit.get()) < 1.0) {
 				if (++successes == 3) {
 					return Void();
 				}
@@ -373,7 +379,17 @@ ACTOR static Future<Void> monitorClientRates(GlobalTagThrottler* globalTagThrott
 				successes = 0;
 			}
 		} else {
-			successes = 0;
+			TraceEvent("GlobalTagThrottling_RateMonitor")
+			    .detail("Tag", tag)
+			    .detail("CurrentTPSRate", currentTPSLimit)
+			    .detail("DesiredTPSRate", desiredTPSLimit);
+			if (desiredTPSLimit.present()) {
+				successes = 0;
+			} else {
+				if (++successes == 3) {
+					return Void();
+				}
+			}
 		}
 	}
 }
@@ -538,5 +554,28 @@ TEST_CASE("/GlobalTagThrottler/UpdateQuota") {
 	globalTagThrottler.setQuota(testTag, tagQuotaValue);
 	monitor = GlobalTagThrottlerTesting::monitorClientRates(&globalTagThrottler, testTag, 50.0 / 6.0);
 	wait(timeoutError(monitor || client || updater, 300.0));
+	return Void();
+}
+
+TEST_CASE("/GlobalTagThrottler/RemoveQuota") {
+	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
+	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10);
+	state ThrottleApi::TagQuotaValue tagQuotaValue;
+	state TransactionTag testTag = "sampleTag1"_sr;
+	tagQuotaValue.totalReadQuota = 100.0;
+	globalTagThrottler.setQuota(testTag, tagQuotaValue);
+	state Future<Void> client =
+	    GlobalTagThrottlerTesting::runClient(&globalTagThrottler, &storageServers, testTag, 5.0, 6.0, false);
+	state Future<Void> monitor =
+	    GlobalTagThrottlerTesting::monitorClientRates(&globalTagThrottler, testTag, 100.0 / 6.0);
+	state Future<Void> updater =
+	    GlobalTagThrottlerTesting::updateGlobalTagThrottler(&globalTagThrottler, &storageServers);
+	wait(timeoutError(monitor || client || updater, 300.0));
+	globalTagThrottler.removeQuota(testTag);
+	monitor = GlobalTagThrottlerTesting::monitorClientRates(&globalTagThrottler, testTag, {});
+	wait(timeoutError(monitor || client || updater, 300.0));
+	return Void();
+}
+
 	return Void();
 }
