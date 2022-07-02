@@ -258,18 +258,6 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 			    .detail("ChangeID", dbInfo.id);
 			db->serverInfo->set(dbInfo);
 
-			if (SERVER_KNOBS->ENABLE_ENCRYPTION && !recoveredDisk) {
-				// EKP singleton recruitment waits for 'Master/Sequencer' recruitment, execute wait for
-				// 'recoveredDiskFiles' optimization once EKP recruitment is unblocked to avoid circular dependencies
-				// with StorageServer initialization. The waiting for recoveredDiskFiles is to make sure the worker
-				// server on the same process has been registered with the new CC before recruitment.
-
-				wait(recoveredDiskFiles);
-				TraceEvent("CCWDB_RecoveredDiskFiles", cluster->id).log();
-				// Need to be done for the first once in the lifetime of ClusterController
-				recoveredDisk = true;
-			}
-
 			state Future<Void> spinDelay = delay(
 			    SERVER_KNOBS
 			        ->MASTER_SPIN_DELAY); // Don't retry cluster recovery more than once per second, but don't delay
