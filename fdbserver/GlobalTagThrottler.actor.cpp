@@ -142,24 +142,37 @@ class GlobalTagThrottlerImpl {
 		}
 	}
 
+	void removeUnseenTags(std::unordered_set<TransactionTag> const& seenTags) {
+		std::map<TransactionTag, QuotaAndCounters>::iterator it = trackedTags.begin();
+		while (it != trackedTags.end()) {
+			auto current = it++;
+			auto const tag = current->first;
+			if (seenTags.find(tag) == seenTags.end()) {
+				trackedTags.erase(current);
+			}
+		}
+	}
+
 	ACTOR static Future<Void> monitorThrottlingChanges(GlobalTagThrottlerImpl* self) {
+		state std::unordered_set<TransactionTag> seenTags;
+
 		loop {
 			state ReadYourWritesTransaction tr(self->db);
-
 			loop {
-				// TODO: Clean up quotas that have been removed
 				try {
 					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
+					seenTags.clear();
 					state RangeResult currentQuotas = wait(tr.getRange(tagQuotaKeys, CLIENT_KNOBS->TOO_MANY));
 					TraceEvent("GlobalTagThrottler_ReadCurrentQuotas").detail("Size", currentQuotas.size());
 					for (auto const kv : currentQuotas) {
 						auto const tag = kv.key.removePrefix(tagQuotaPrefix);
 						auto const quota = ThrottleApi::TagQuotaValue::fromValue(kv.value);
 						self->trackedTags[tag].setQuota(quota);
+						seenTags.insert(tag);
 					}
-
+					self->removeUnseenTags(seenTags);
 					++self->throttledTagChangeId;
 					wait(delay(5.0));
 					TraceEvent("GlobalTagThrottler_ChangeSignaled");
