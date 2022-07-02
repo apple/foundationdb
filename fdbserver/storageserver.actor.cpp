@@ -109,7 +109,7 @@ bool canReplyWith(Error e) {
 		return true;
 	default:
 		return false;
-	};
+	}
 }
 } // namespace
 
@@ -1658,7 +1658,7 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 	}
 
 	return Void();
-};
+}
 
 // Pessimistic estimate the number of overhead bytes used by each
 // watch. Watch key references are stored in an AsyncMap<Key,bool>, and actors
@@ -2851,7 +2851,7 @@ ACTOR Future<GetValueReqAndResultRef> quickGetValue(StorageServer* data,
 	} else {
 		throw quick_get_value_miss();
 	}
-};
+}
 
 // If limit>=0, it returns the first rows in the range (sorted ascending), otherwise the last rows (sorted descending).
 // readRange has O(|result|) + O(log |data|) cost
@@ -3465,7 +3465,7 @@ ACTOR Future<GetRangeReqAndResultRef> quickGetKeyValues(
 	} else {
 		throw quick_get_key_values_miss();
 	}
-};
+}
 
 void unpackKeyTuple(Tuple** referenceTuple, Optional<Tuple>& keyTuple, KeyValueRef* keyValue) {
 	if (!keyTuple.present()) {
@@ -3714,6 +3714,26 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 	return Void();
 }
 
+// Issues a secondary query (either range and point read) and fills results into "kvm".
+ACTOR Future<Void> mapSubquery(StorageServer* data,
+                               Version version,
+                               GetMappedKeyValuesRequest* pOriginalReq,
+                               Arena* pArena,
+                               bool isRangeQuery,
+                               KeyValueRef* it,
+                               MappedKeyValueRef* kvm,
+                               Key mappedKey) {
+	if (isRangeQuery) {
+		// Use the mappedKey as the prefix of the range query.
+		GetRangeReqAndResultRef getRange = wait(quickGetKeyValues(data, mappedKey, version, pArena, pOriginalReq));
+		kvm->reqAndResult = getRange;
+	} else {
+		GetValueReqAndResultRef getValue = wait(quickGetValue(data, mappedKey, version, pArena, pOriginalReq));
+		kvm->reqAndResult = getValue;
+	}
+	return Void();
+}
+
 ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
                                                    GetKeyValuesReply input,
                                                    StringRef mapper,
@@ -3737,34 +3757,38 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 		TraceEvent("MapperNotTuple").error(e).detail("Mapper", mapper.printable());
 		throw mapper_not_tuple();
 	}
-	state KeyValueRef* it = input.data.begin();
 	state std::vector<Optional<Tuple>> vt;
 	state bool isRangeQuery = false;
 	preprocessMappedKey(mappedKeyFormatTuple, vt, isRangeQuery);
 
-	for (; it != input.data.end(); it++) {
-		state MappedKeyValueRef kvm;
-		kvm.key = it->key;
-		kvm.value = it->value;
+	state int sz = input.data.size();
+	const int k = std::min(sz, SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE);
+	state std::vector<MappedKeyValueRef> kvms(k);
+	state std::vector<Future<Void>> subqueries;
+	state int offset = 0;
+	for (; offset < sz; offset += SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE) {
+		// Divide into batches of MAX_PARALLEL_QUICK_GET_VALUE subqueries
+		for (int i = 0; i + offset < sz && i < SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE; i++) {
+			KeyValueRef* it = &input.data[i + offset];
+			MappedKeyValueRef* kvm = &kvms[i];
+			kvm->key = it->key;
+			kvm->value = it->value;
 
-		state Key mappedKey = constructMappedKey(it, vt, mappedKeyTuple, mappedKeyFormatTuple);
-		// Make sure the mappedKey is always available, so that it's good even we want to get key asynchronously.
-		result.arena.dependsOn(mappedKey.arena());
+			Key mappedKey = constructMappedKey(it, vt, mappedKeyTuple, mappedKeyFormatTuple);
+			// Make sure the mappedKey is always available, so that it's good even we want to get key asynchronously.
+			result.arena.dependsOn(mappedKey.arena());
 
-		//		std::cout << "key:" << printable(kvm.key) << ", value:" << printable(kvm.value)
-		//		          << ", mappedKey:" << printable(mappedKey) << std::endl;
+			// std::cout << "key:" << printable(kvm->key) << ", value:" << printable(kvm->value)
+			//          << ", mappedKey:" << printable(mappedKey) << std::endl;
 
-		if (isRangeQuery) {
-			// Use the mappedKey as the prefix of the range query.
-			GetRangeReqAndResultRef getRange =
-			    wait(quickGetKeyValues(data, mappedKey, input.version, &(result.arena), pOriginalReq));
-			kvm.reqAndResult = getRange;
-		} else {
-			GetValueReqAndResultRef getValue =
-			    wait(quickGetValue(data, mappedKey, input.version, &(result.arena), pOriginalReq));
-			kvm.reqAndResult = getValue;
+			subqueries.push_back(
+			    mapSubquery(data, input.version, pOriginalReq, &result.arena, isRangeQuery, it, kvm, mappedKey));
 		}
-		result.data.push_back(result.arena, kvm);
+		wait(waitForAll(subqueries));
+		subqueries.clear();
+		for (int i = 0; i + offset < sz && i < SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE; i++) {
+			result.data.push_back(result.arena, kvms[i]);
+		}
 	}
 	return result;
 }
@@ -6022,7 +6046,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 	}
 
 	return Void();
-};
+}
 
 AddingShard::AddingShard(StorageServer* server, KeyRangeRef const& keys)
   : keys(keys), server(server), transferredVersion(invalidVersion), fetchVersion(invalidVersion), phase(WaitPrevious) {
