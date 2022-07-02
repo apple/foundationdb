@@ -1018,6 +1018,25 @@ void StorageQueueInfo::refreshCommitCost(double elapsed) {
 	totalWriteCosts = 0;
 }
 
+Optional<double> StorageQueueInfo::getWriteQueueSizeLimitRatio(int64_t storageSpringBytes,
+                                                               int64_t storageTargetBytes) const {
+	auto const minFreeSpace =
+	    std::max(SERVER_KNOBS->MIN_AVAILABLE_SPACE,
+	             (int64_t)(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO * smoothTotalSpace.smoothTotal()));
+	auto const storageQueue = getStorageQueueBytes();
+	auto const springBytes = std::max<int64_t>(
+	    1, std::min<int64_t>(storageSpringBytes, (smoothFreeSpace.smoothTotal() - minFreeSpace) * 0.2));
+	auto const targetBytes =
+	    std::max<int64_t>(1, std::min<int64_t>(storageTargetBytes, smoothFreeSpace.smoothTotal() - minFreeSpace));
+	auto const targetRateRatio = std::min((storageQueue - targetBytes + springBytes) / (double)springBytes, 2.0);
+	auto const inputRate = smoothInputBytes.smoothRate();
+	if (targetRateRatio > 0 && inputRate > 0) {
+		return verySmoothDurableBytes.smoothRate() / (inputRate * targetRateRatio);
+	} else {
+		return {};
+	}
+}
+
 TLogQueueInfo::TLogQueueInfo(UID id)
   : valid(false), id(id), smoothDurableBytes(SERVER_KNOBS->SMOOTHING_AMOUNT),
     smoothInputBytes(SERVER_KNOBS->SMOOTHING_AMOUNT), verySmoothDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT),

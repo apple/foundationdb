@@ -73,6 +73,9 @@ public:
 	int64_t getDurabilityLag() const { return smoothLatestVersion.smoothTotal() - smoothDurableVersion.smoothTotal(); }
 	void update(StorageQueuingMetricsReply const&, Smoother& smoothTotalDurableBytes);
 	void addCommitCost(TransactionTagRef tagName, TransactionCommitCostEstimation const& cost);
+
+	// Determine the ratio (limit / current throughput) for throttling based on write queue size
+	Optional<double> getWriteQueueSizeLimitRatio(int64_t storageSpringBytes, int64_t storageTargetBytes) const;
 };
 
 struct TLogQueueInfo {
