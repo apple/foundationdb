@@ -84,72 +84,87 @@
 #define JWK_PARSE_ERROR_OSSL(issue) JWK_ERROR_OSSL(issue, PARSE)
 #define JWK_WRITE_ERROR_OSSL(issue) JWK_ERROR_OSSL(issue, WRITE)
 
-// introduces a new variable [member] to enclosing scope, wrapped in Optional if optional == true
-#define DECL_JWK_STR_MEMBER(valueObj, member, optional)                                                                \
-	auto member = std::conditional_t<optional, Optional<StringRef>, StringRef>{};                                      \
-	do {                                                                                                               \
-		auto member##Itr = valueObj.FindMember(#member);                                                               \
-		if (member##Itr == valueObj.MemberEnd()) {                                                                     \
-			if constexpr (optional) {                                                                                  \
-				break;                                                                                                 \
-			} else {                                                                                                   \
-				JWK_PARSE_ERROR("Missing required member '" #member "'");                                              \
-				return {};                                                                                             \
-			}                                                                                                          \
-		}                                                                                                              \
-		auto const& member##Value = member##Itr->value;                                                                \
-		if (!member##Value.IsString()) {                                                                               \
-			JWK_PARSE_ERROR("String member '" #member "' not a string");                                               \
-			return {};                                                                                                 \
-		}                                                                                                              \
-		member =                                                                                                       \
-		    StringRef(reinterpret_cast<uint8_t const*>(member##Value.GetString()), member##Value.GetStringLength());   \
-	} while (0)
+namespace {
 
-#define DECLARE_JWK_REQUIRED_STRING_MEMBER(valueObj, member) DECL_JWK_STR_MEMBER(valueObj, member, false)
-#define DECLARE_JWK_OPTIONAL_STRING_MEMBER(valueObj, member) DECL_JWK_STR_MEMBER(valueObj, member, true)
-
-// introduces variable [member] as BIGNUM* with matching cleanup guard, stores nullptr for missing optional member
-#define DECL_DECODED_BN_MEMBER_OPTIONAL(member, algo)                                                                  \
-	auto member = AutoCPointer(nullptr, &::BN_clear_free);                                                             \
-	{                                                                                                                  \
-		if (b64##member.present()) {                                                                                   \
-			auto decoded = base64url::decode(arena, b64##member.get());                                                \
-			if (!decoded.present()) {                                                                                  \
-				JWK_PARSE_ERROR("Base64URL decoding for " algo " key parameter '" #member "' failed");                 \
-				return {};                                                                                             \
-			} else {                                                                                                   \
-				auto member##Buf = decoded.get();                                                                      \
-				member.reset(::BN_bin2bn(member##Buf.begin(), member##Buf.size(), nullptr));                           \
-				if (!member) {                                                                                         \
-					JWK_PARSE_ERROR_OSSL("BN_bin2bn(" #member ") for " algo);                                          \
-					return {};                                                                                         \
-				}                                                                                                      \
-			}                                                                                                          \
-		}                                                                                                              \
+template <bool Required, class JsonValue>
+bool getJwkStringMember(JsonValue const& value,
+                        char const* memberName,
+                        std::conditional_t<Required, StringRef, Optional<StringRef>>& out,
+                        int keyIndex) {
+	auto itr = value.FindMember(memberName);
+	if (itr == value.MemberEnd()) {
+		if constexpr (Required) {
+			JWK_PARSE_ERROR("Missing required member").detail("Member", memberName);
+			return false;
+		} else {
+			return true;
+		}
 	}
+	auto const& member = itr->value;
+	if (!member.IsString()) {
+		JWK_PARSE_ERROR("Expected member is not a string").detail("MemberName", memberName);
+		return false;
+	}
+	out = StringRef(reinterpret_cast<uint8_t const*>(member.GetString()), member.GetStringLength());
+	return true;
+}
+
+#define DECLARE_JWK_REQUIRED_STRING_MEMBER(value, member)                                                              \
+	auto member = StringRef();                                                                                         \
+	if (!getJwkStringMember<true>(value, #member, member, keyIndex))                                                   \
+		return {}
+#define DECLARE_JWK_OPTIONAL_STRING_MEMBER(value, member)                                                              \
+	auto member = Optional<StringRef>();                                                                               \
+	if (!getJwkStringMember<false>(value, #member, member, keyIndex))                                                  \
+		return {}
+
+template <bool Required, class AutoPtr>
+bool getJwkBigNumMember(Arena& arena,
+                        std::conditional_t<Required, StringRef, Optional<StringRef>> const& b64Member,
+                        AutoPtr& ptr,
+                        char const* memberName,
+                        char const* algorithm,
+                        int keyIndex) {
+	if constexpr (!Required) {
+		if (!b64Member.present())
+			return true;
+	}
+	auto data = StringRef();
+	if constexpr (Required) {
+		data = b64Member;
+	} else {
+		data = b64Member.get();
+	}
+	auto decoded = base64url::decode(arena, data);
+	if (!decoded.present()) {
+		JWK_PARSE_ERROR("Base64URL decoding for parameter failed")
+		    .detail("Algorithm", algorithm)
+		    .detail("Parameter", memberName);
+		return false;
+	}
+	data = decoded.get();
+	auto bn = ::BN_bin2bn(data.begin(), data.size(), nullptr);
+	if (!bn) {
+		JWK_PARSE_ERROR_OSSL("BN_bin2bn");
+		return false;
+	}
+	ptr.reset(bn);
+	return true;
+}
 
 #define DECL_DECODED_BN_MEMBER_REQUIRED(member, algo)                                                                  \
 	auto member = AutoCPointer(nullptr, &::BN_free);                                                                   \
-	{                                                                                                                  \
-		auto decoded = base64url::decode(arena, b64##member);                                                          \
-		if (!decoded.present()) {                                                                                      \
-			JWK_PARSE_ERROR("Base64URL decoding for " algo " key parameter '" #member "' failed");                     \
-			return {};                                                                                                 \
-		} else {                                                                                                       \
-			auto member##Buf = decoded.get();                                                                          \
-			member.reset(::BN_bin2bn(member##Buf.begin(), member##Buf.size(), nullptr));                               \
-			if (!member) {                                                                                             \
-				JWK_PARSE_ERROR_OSSL("BN_bin2bn(" #member ") for " algo);                                              \
-				return {};                                                                                             \
-			}                                                                                                          \
-		}                                                                                                              \
-	}
+	if (!getJwkBigNumMember<true /*Required*/>(arena, b64##member, member, #member, algo, keyIndex))                   \
+		return {}
+#define DECL_DECODED_BN_MEMBER_OPTIONAL(member, algo)                                                                  \
+	auto member = AutoCPointer(nullptr, &::BN_clear_free);                                                             \
+	if (!getJwkBigNumMember<false /*Required*/>(arena, b64##member, member, #member, algo, keyIndex))                  \
+		return {}
 
 #define EC_DECLARE_DECODED_REQUIRED_BN_MEMBER(member) DECL_DECODED_BN_MEMBER_REQUIRED(member, "EC")
 #define EC_DECLARE_DECODED_OPTIONAL_BN_MEMBER(member) DECL_DECODED_BN_MEMBER_OPTIONAL(member, "EC")
-
-namespace {
+#define RSA_DECLARE_DECODED_REQUIRED_BN_MEMBER(member) DECL_DECODED_BN_MEMBER_REQUIRED(member, "RSA")
+#define RSA_DECLARE_DECODED_OPTIONAL_BN_MEMBER(member) DECL_DECODED_BN_MEMBER_OPTIONAL(member, "RSA")
 
 StringRef bigNumToBase64Url(Arena& arena, const BIGNUM* bn) {
 	auto len = BN_num_bytes(bn);
@@ -271,9 +286,6 @@ Optional<PublicOrPrivateKey> parseEcP256Key(StringRef b64x, StringRef b64y, Opti
 		return PublicKey(DerEncoded{}, StringRef(buf, len));
 	}
 }
-
-#define RSA_DECLARE_DECODED_REQUIRED_BN_MEMBER(member) DECL_DECODED_BN_MEMBER_REQUIRED(member, "RSA")
-#define RSA_DECLARE_DECODED_OPTIONAL_BN_MEMBER(member) DECL_DECODED_BN_MEMBER_OPTIONAL(member, "RSA")
 
 Optional<PublicOrPrivateKey> parseRsaKey(StringRef b64n,
                                          StringRef b64e,
@@ -484,7 +496,7 @@ bool encodeEcKey(rapidjson::Writer<rapidjson::StringBuffer>& writer,
 		auto rawX = std::add_pointer_t<BIGNUM>();                                                                      \
 		if (1 != ::EVP_PKEY_get_bn_param(pKey, param, &rawX)) {                                                        \
 			JWK_WRITE_ERROR_OSSL("EVP_PKEY_get_bn_param(" #param ")");                                                 \
-			throw pkey_encode_error();                                                                                 \
+			return false;                                                                                              \
 		}                                                                                                              \
 		x.reset(rawX);                                                                                                 \
 		auto b64##x = bigNumToBase64Url(arena, x);                                                                     \
@@ -675,6 +687,64 @@ bool encodeKey(rapidjson::Writer<rapidjson::StringBuffer>& writer, StringRef key
 	return true;
 }
 
+void testPublicKey(PrivateKey (*factory)()) {
+	// stringify-deserialize public key.
+	// sign some data using private key to see whether deserialized public key can verify it.
+	auto& rng = *deterministicRandom();
+	auto pubKeyName = Standalone<StringRef>("somePublicKey"_sr);
+	auto privKey = factory();
+	auto pubKey = privKey.toPublic();
+	auto jwks = JsonWebKeySet{};
+	jwks.keys.emplace(pubKeyName, pubKey);
+	auto arena = Arena();
+	auto jwksStr = jwks.toStringRef(arena).get();
+	fmt::print("Test JWKS: {}\n", jwksStr.toString());
+	auto jwksClone = JsonWebKeySet::parse(jwksStr, {});
+	ASSERT(jwksClone.present());
+	auto pubKeyClone = jwksClone.get().keys[pubKeyName].getPublic();
+	auto randByteStr = [&rng, &arena](int len) {
+		auto buf = new (arena) uint8_t[len];
+		for (auto i = 0; i < len; i++)
+			buf[i] = rng.randomUInt32() % 255u;
+		return StringRef(buf, len);
+	};
+	auto randData = randByteStr(rng.randomUInt32() % 128 + 16);
+	auto signature = privKey.sign(arena, randData, *::EVP_sha256());
+	ASSERT(pubKeyClone.verify(randData, signature, *::EVP_sha256()));
+	const_cast<uint8_t&>(*randData.begin())++;
+	ASSERT(!pubKeyClone.verify(randData, signature, *::EVP_sha256()));
+	fmt::print("TESTED OK FOR OPENSSL V{} API\n", (OPENSSL_VERSION_NUMBER >> 28));
+}
+
+void testPrivateKey(PrivateKey (*factory)()) {
+	// stringify-deserialize private key.
+	// sign some data using deserialized private key to see whether public key can verify it.
+	auto& rng = *deterministicRandom();
+	auto privKeyName = Standalone<StringRef>("somePrivateKey"_sr);
+	auto privKey = factory();
+	auto pubKey = privKey.toPublic();
+	auto jwks = JsonWebKeySet{};
+	jwks.keys.emplace(privKeyName, privKey);
+	auto arena = Arena();
+	auto jwksStr = jwks.toStringRef(arena).get();
+	fmt::print("Test JWKS: {}\n", jwksStr.toString());
+	auto jwksClone = JsonWebKeySet::parse(jwksStr, {});
+	ASSERT(jwksClone.present());
+	auto privKeyClone = jwksClone.get().keys[privKeyName].getPrivate();
+	auto randByteStr = [&rng, &arena](int len) {
+		auto buf = new (arena) uint8_t[len];
+		for (auto i = 0; i < len; i++)
+			buf[i] = rng.randomUInt32() % 255u;
+		return StringRef(buf, len);
+	};
+	auto randData = randByteStr(rng.randomUInt32() % 128 + 16);
+	auto signature = privKeyClone.sign(arena, randData, *::EVP_sha256());
+	ASSERT(pubKey.verify(randData, signature, *::EVP_sha256()));
+	const_cast<uint8_t&>(*randData.begin())++;
+	ASSERT(!pubKey.verify(randData, signature, *::EVP_sha256()));
+	fmt::print("TESTED OK FOR OPENSSL V{} API\n", (OPENSSL_VERSION_NUMBER >> 28));
+}
+
 } // anonymous namespace
 
 Optional<JsonWebKeySet> JsonWebKeySet::parse(StringRef jwksString, VectorRef<StringRef> allowedUses) {
@@ -748,64 +818,6 @@ Optional<StringRef> JsonWebKeySet::toStringRef(Arena& arena) {
 }
 
 void forceLinkJsonWebKeySetTests() {}
-
-void testPublicKey(PrivateKey (*factory)()) {
-	// stringify-deserialize public key.
-	// sign some data using private key to see whether deserialized public key can verify it.
-	auto& rng = *deterministicRandom();
-	auto pubKeyName = Standalone<StringRef>("somePublicKey"_sr);
-	auto privKey = factory();
-	auto pubKey = privKey.toPublic();
-	auto jwks = JsonWebKeySet{};
-	jwks.keys.emplace(pubKeyName, pubKey);
-	auto arena = Arena();
-	auto jwksStr = jwks.toStringRef(arena).get();
-	fmt::print("Test JWKS: {}\n", jwksStr.toString());
-	auto jwksClone = JsonWebKeySet::parse(jwksStr, {});
-	ASSERT(jwksClone.present());
-	auto pubKeyClone = jwksClone.get().keys[pubKeyName].getPublic();
-	auto randByteStr = [&rng, &arena](int len) {
-		auto buf = new (arena) uint8_t[len];
-		for (auto i = 0; i < len; i++)
-			buf[i] = rng.randomUInt32() % 255u;
-		return StringRef(buf, len);
-	};
-	auto randData = randByteStr(rng.randomUInt32() % 128 + 16);
-	auto signature = privKey.sign(arena, randData, *::EVP_sha256());
-	ASSERT(pubKeyClone.verify(randData, signature, *::EVP_sha256()));
-	const_cast<uint8_t&>(*randData.begin())++;
-	ASSERT(!pubKeyClone.verify(randData, signature, *::EVP_sha256()));
-	fmt::print("TESTED OK FOR OPENSSL V{} API\n", (OPENSSL_VERSION_NUMBER >> 28));
-}
-
-void testPrivateKey(PrivateKey (*factory)()) {
-	// stringify-deserialize private key.
-	// sign some data using deserialized private key to see whether public key can verify it.
-	auto& rng = *deterministicRandom();
-	auto privKeyName = Standalone<StringRef>("somePrivateKey"_sr);
-	auto privKey = factory();
-	auto pubKey = privKey.toPublic();
-	auto jwks = JsonWebKeySet{};
-	jwks.keys.emplace(privKeyName, privKey);
-	auto arena = Arena();
-	auto jwksStr = jwks.toStringRef(arena).get();
-	fmt::print("Test JWKS: {}\n", jwksStr.toString());
-	auto jwksClone = JsonWebKeySet::parse(jwksStr, {});
-	ASSERT(jwksClone.present());
-	auto privKeyClone = jwksClone.get().keys[privKeyName].getPrivate();
-	auto randByteStr = [&rng, &arena](int len) {
-		auto buf = new (arena) uint8_t[len];
-		for (auto i = 0; i < len; i++)
-			buf[i] = rng.randomUInt32() % 255u;
-		return StringRef(buf, len);
-	};
-	auto randData = randByteStr(rng.randomUInt32() % 128 + 16);
-	auto signature = privKeyClone.sign(arena, randData, *::EVP_sha256());
-	ASSERT(pubKey.verify(randData, signature, *::EVP_sha256()));
-	const_cast<uint8_t&>(*randData.begin())++;
-	ASSERT(!pubKey.verify(randData, signature, *::EVP_sha256()));
-	fmt::print("TESTED OK FOR OPENSSL V{} API\n", (OPENSSL_VERSION_NUMBER >> 28));
-}
 
 TEST_CASE("/fdbrpc/JsonWebKeySet/EC/PublicKey") {
 	testPublicKey(&mkcert::makeEcP256);
