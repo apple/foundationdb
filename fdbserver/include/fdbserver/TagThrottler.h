@@ -88,6 +88,10 @@ public:
 	bool isAutoThrottlingEnabled() const override;
 	Future<Void> tryUpdateAutoThrottling(StorageQueueInfo const&) override;
 
+	// Based on limiting storage queue size, set a ratio by which total throughput needs to be
+	// adjusted
+	void setThrottlingRatio(Optional<double>);
+
 	// testing only
 public:
 	void setQuota(TransactionTagRef, ThrottleApi::TagQuotaValue const&);
