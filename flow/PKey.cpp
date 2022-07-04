@@ -82,6 +82,17 @@ inline PKeyAlgorithm getPKeyAlgorithm(const EVP_PKEY* key) noexcept {
 
 } // anonymous namespace
 
+std::string_view pkeyAlgorithmName(PKeyAlgorithm alg) noexcept {
+	switch (alg) {
+	case PKeyAlgorithm::EC:
+		return "EC";
+	case PKeyAlgorithm::RSA:
+		return "RSA";
+	default:
+		return "UNSUPPORTED";
+	}
+}
+
 StringRef doWritePublicKeyPem(Arena& arena, EVP_PKEY* key) {
 	ASSERT(key);
 	auto mem = AutoCPointer(::BIO_new(::BIO_s_mem()), &::BIO_free);
@@ -166,6 +177,10 @@ PKeyAlgorithm PublicKey::algorithm() const {
 	return getPKeyAlgorithm(key);
 }
 
+std::string_view PublicKey::algorithmName() const {
+	return pkeyAlgorithmName(this->algorithm());
+}
+
 bool PublicKey::verify(StringRef data, StringRef signature, const EVP_MD& digest) const {
 	return doVerifyStringSignature(data, signature, digest, nativeHandle());
 }
@@ -236,6 +251,10 @@ PKeyAlgorithm PrivateKey::algorithm() const {
 	auto key = nativeHandle();
 	ASSERT(key);
 	return getPKeyAlgorithm(key);
+}
+
+std::string_view PrivateKey::algorithmName() const {
+	return pkeyAlgorithmName(this->algorithm());
 }
 
 StringRef PrivateKey::sign(Arena& arena, StringRef data, const EVP_MD& digest) const {

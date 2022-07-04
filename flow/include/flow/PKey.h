@@ -22,6 +22,7 @@
 #define FLOW_PKEY_H
 
 #include <memory>
+#include <string_view>
 #include <openssl/evp.h>
 #include "flow/Arena.h"
 
@@ -30,6 +31,8 @@ enum class PKeyAlgorithm {
 	RSA,
 	EC,
 };
+
+std::string_view pkeyAlgorithmName(PKeyAlgorithm alg) noexcept;
 
 struct PemEncoded {};
 struct DerEncoded {};
@@ -61,6 +64,8 @@ public:
 
 	// EVP_PKEY_base_id()
 	PKeyAlgorithm algorithm() const;
+
+	std::string_view algorithmName() const;
 
 	// EVP_DigestVerify*
 	bool verify(StringRef data, StringRef signature, const EVP_MD& digest) const;
@@ -100,6 +105,8 @@ public:
 
 	// EVP_PKEY_base_id()
 	PKeyAlgorithm algorithm() const;
+
+	std::string_view algorithmName() const;
 
 	EVP_PKEY* nativeHandle() const noexcept { return ptr.get(); }
 
