@@ -65,9 +65,9 @@ StringRef genRandomAlphanumStringRef(Arena& arena, IRandom& rng, int maxLenPlusO
 bool checkVerifyAlgorithm(PKeyAlgorithm algo, PublicKey key) {
 	if (algo != key.algorithm()) {
 		TraceEvent(SevWarnAlways, "TokenVerifyAlgoMismatch")
-			.suppressFor(10)
-			.detail("Expected", pkeyAlgorithmName(algo))
-			.detail("PublicKeyAlgorithm", key.algorithmName());
+		    .suppressFor(10)
+		    .detail("Expected", pkeyAlgorithmName(algo))
+		    .detail("PublicKeyAlgorithm", key.algorithmName());
 		return false;
 	} else {
 		return true;
@@ -77,9 +77,9 @@ bool checkVerifyAlgorithm(PKeyAlgorithm algo, PublicKey key) {
 bool checkSignAlgorithm(PKeyAlgorithm algo, PrivateKey key) {
 	if (algo != key.algorithm()) {
 		TraceEvent(SevWarnAlways, "TokenSignAlgoMismatch")
-			.suppressFor(10)
-			.detail("Expected", pkeyAlgorithmName(algo))
-			.detail("PublicKeyAlgorithm", key.algorithmName());
+		    .suppressFor(10)
+		    .detail("Expected", pkeyAlgorithmName(algo))
+		    .detail("PublicKeyAlgorithm", key.algorithmName());
 		return false;
 	} else {
 		return true;
@@ -530,7 +530,8 @@ TEST_CASE("/fdbrpc/TokenSign/bench") {
 	auto fbBegin = timer_monotonic();
 	for (auto rep = 0; rep < repeat; rep++) {
 		for (auto i = 0; i < numSamples; i++) {
-			auto signedToken = ObjectReader::fromStringRef<Standalone<authz::flatbuffers::SignedTokenRef>>(fbs[i], Unversioned());
+			auto signedToken =
+			    ObjectReader::fromStringRef<Standalone<authz::flatbuffers::SignedTokenRef>>(fbs[i], Unversioned());
 			auto verifyOk = authz::flatbuffers::verifyToken(signedToken, pubKeys[i]);
 			ASSERT(verifyOk);
 		}

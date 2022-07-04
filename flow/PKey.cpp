@@ -145,7 +145,9 @@ PublicKey::PublicKey(PemEncoded, StringRef pem) {
 		traceAndThrowDecode("PemReadPublicKeyError");
 	ptr = std::shared_ptr<EVP_PKEY>(key, &::EVP_PKEY_free);
 	if (algorithm() == PKeyAlgorithm::UNSUPPORTED) {
-		TraceEvent(SevWarnAlways, "UnsupportedPKeyAlgorithm").suppressFor(10).detail("Algorithm", ::OBJ_nid2sn(EVP_PKEY_base_id(ptr.get())));
+		TraceEvent(SevWarnAlways, "UnsupportedPKeyAlgorithm")
+		    .suppressFor(10)
+		    .detail("Algorithm", ::OBJ_nid2sn(EVP_PKEY_base_id(ptr.get())));
 		throw pkey_decode_error();
 	}
 }
@@ -158,7 +160,9 @@ PublicKey::PublicKey(DerEncoded, StringRef der) {
 		traceAndThrowDecode("DerReadPublicKeyError");
 	ptr = std::shared_ptr<EVP_PKEY>(key, &::EVP_PKEY_free);
 	if (algorithm() == PKeyAlgorithm::UNSUPPORTED) {
-		TraceEvent(SevWarnAlways, "UnsupportedPKeyAlgorithm").suppressFor(10).detail("Algorithm", ::OBJ_nid2sn(EVP_PKEY_base_id(ptr.get())));
+		TraceEvent(SevWarnAlways, "UnsupportedPKeyAlgorithm")
+		    .suppressFor(10)
+		    .detail("Algorithm", ::OBJ_nid2sn(EVP_PKEY_base_id(ptr.get())));
 		throw pkey_decode_error();
 	}
 }
@@ -195,7 +199,9 @@ PrivateKey::PrivateKey(PemEncoded, StringRef pem) {
 		traceAndThrowDecode("PemReadPrivateKeyError");
 	ptr = std::shared_ptr<EVP_PKEY>(key, &::EVP_PKEY_free);
 	if (algorithm() == PKeyAlgorithm::UNSUPPORTED) {
-		TraceEvent(SevWarnAlways, "UnsupportedPKeyAlgorithm").suppressFor(10).detail("Algorithm", ::OBJ_nid2sn(EVP_PKEY_base_id(ptr.get())));
+		TraceEvent(SevWarnAlways, "UnsupportedPKeyAlgorithm")
+		    .suppressFor(10)
+		    .detail("Algorithm", ::OBJ_nid2sn(EVP_PKEY_base_id(ptr.get())));
 		throw pkey_decode_error();
 	}
 }
@@ -208,7 +214,9 @@ PrivateKey::PrivateKey(DerEncoded, StringRef der) {
 		traceAndThrowDecode("DerReadPrivateKeyError");
 	ptr = std::shared_ptr<EVP_PKEY>(key, &::EVP_PKEY_free);
 	if (algorithm() == PKeyAlgorithm::UNSUPPORTED) {
-		TraceEvent(SevWarnAlways, "UnsupportedPKeyAlgorithm").suppressFor(10).detail("Algorithm", ::OBJ_nid2sn(EVP_PKEY_base_id(ptr.get())));
+		TraceEvent(SevWarnAlways, "UnsupportedPKeyAlgorithm")
+		    .suppressFor(10)
+		    .detail("Algorithm", ::OBJ_nid2sn(EVP_PKEY_base_id(ptr.get())));
 		throw pkey_decode_error();
 	}
 }

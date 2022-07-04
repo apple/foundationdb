@@ -108,8 +108,8 @@
 #define DECLARE_JWK_OPTIONAL_STRING_MEMBER(valueObj, member) DECL_JWK_STR_MEMBER(valueObj, member, true)
 
 // introduces variable [member] as BIGNUM* with matching cleanup guard, stores nullptr for missing optional member
-#define DECL_DECODED_BN_MEMBER_OPTIONAL(member, algo)                                                                     \
-	auto member = AutoCPointer(nullptr, &::BN_clear_free);                                                     \
+#define DECL_DECODED_BN_MEMBER_OPTIONAL(member, algo)                                                                  \
+	auto member = AutoCPointer(nullptr, &::BN_clear_free);                                                             \
 	{                                                                                                                  \
 		if (b64##member.present()) {                                                                                   \
 			auto decoded = base64url::decode(arena, b64##member.get());                                                \
@@ -127,8 +127,8 @@
 		}                                                                                                              \
 	}
 
-#define DECL_DECODED_BN_MEMBER_REQUIRED(member, algo)                                                                     \
-	auto member = AutoCPointer(nullptr, &::BN_free);                                                           \
+#define DECL_DECODED_BN_MEMBER_REQUIRED(member, algo)                                                                  \
+	auto member = AutoCPointer(nullptr, &::BN_free);                                                                   \
 	{                                                                                                                  \
 		auto decoded = base64url::decode(arena, b64##member);                                                          \
 		if (!decoded.present()) {                                                                                      \
@@ -478,7 +478,7 @@ void encodeEcKey(rapidjson::Writer<rapidjson::StringBuffer>& writer,
 	writer.String("P-256");
 #define JWK_WRITE_BN_EC_PARAM(x, param)                                                                                \
 	do {                                                                                                               \
-		auto x = AutoCPointer(nullptr, &::BN_clear_free);                                                      \
+		auto x = AutoCPointer(nullptr, &::BN_clear_free);                                                              \
 		auto rawX = std::add_pointer_t<BIGNUM>();                                                                      \
 		if (1 != ::EVP_PKEY_get_bn_param(pKey, param, &rawX)) {                                                        \
 			JWK_WRITE_ERROR_OSSL("EVP_PKEY_get_bn_param(" #param ")");                                                 \
@@ -572,7 +572,7 @@ void encodeRsaKey(rapidjson::Writer<rapidjson::StringBuffer>& writer,
 #if USE_V3_API
 #define JWK_WRITE_BN_RSA_PARAM_V3(x, param)                                                                            \
 	do {                                                                                                               \
-		auto x = AutoCPointer(nullptr, &::BN_clear_free);                                                      \
+		auto x = AutoCPointer(nullptr, &::BN_clear_free);                                                              \
 		auto rawX = std::add_pointer_t<BIGNUM>();                                                                      \
 		if (1 != ::EVP_PKEY_get_bn_param(pKey, param, &rawX)) {                                                        \
 			JWK_WRITE_ERROR_OSSL("EVP_PKEY_get_bn_param(" #x ")");                                                     \

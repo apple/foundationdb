@@ -25,31 +25,29 @@
 
 /*
  * Extend std::unique_ptr to apply scope semantics to C-style pointers with matching free functions
- * Also, add implicit conversion to avoid calling get()s when invoking C functions 
+ * Also, add implicit conversion to avoid calling get()s when invoking C functions
  *
  * e.g. EVP_PKEY_new() returns EVP_PKEY*, which needs to be freed by EVP_PKEY_free():
  * AutoCPointer pkey(nullptr, &EVP_PKEY_free); // Null-initialized, won't invoke free
  * pkey.reset(EVP_PKEY_new());           // Initialized. Freed when pkey goes out of scope
  * ASSERT(!EVP_PKEY_is_a(pkey, "RSA"));  // Implicit conversion from AutoCPointer<EVP_PKEY> to EVP_PKEY*
- * pkey.release();                       // Choose not to free (useful e.g. after passing as arg to set0 call, transferring ownership)
+ * pkey.release();                       // Choose not to free (useful e.g. after passing as arg to set0 call,
+ * transferring ownership)
  */
 template <class T, class R>
 class AutoCPointer : protected std::unique_ptr<T, R (*)(T*)> {
 	using ParentType = std::unique_ptr<T, R (*)(T*)>;
+
 public:
 	using DeleterType = R (*)(T*);
 
-	AutoCPointer(T* ptr, R (*deleter)(T*)) noexcept :
-		ParentType(ptr, deleter)
-	{}
+	AutoCPointer(T* ptr, R (*deleter)(T*)) noexcept : ParentType(ptr, deleter) {}
 
-	AutoCPointer(std::nullptr_t, R (*deleter)(T*)) noexcept :
-		ParentType(nullptr, deleter)
-	{}
+	AutoCPointer(std::nullptr_t, R (*deleter)(T*)) noexcept : ParentType(nullptr, deleter) {}
 
 	using ParentType::operator bool;
-	using ParentType::reset;
 	using ParentType::release;
+	using ParentType::reset;
 
 	operator T*() const { return ParentType::get(); }
 };
