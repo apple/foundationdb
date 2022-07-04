@@ -537,9 +537,9 @@ bool encodeEcKey(rapidjson::Writer<rapidjson::StringBuffer>& writer,
 	}
 	if (1 !=
 #ifdef OPENSSL_IS_BORINGSSL
-	    ::EC_POINT_get_affine_coordinates(group, point, x, y, nullptr)
-#else
 	    ::EC_POINT_get_affine_coordinates_GFp(group, point, x, y, nullptr)
+#else
+	    ::EC_POINT_get_affine_coordinates(group, point, x, y, nullptr)
 #endif
 	) {
 		JWK_WRITE_ERROR_OSSL("EC_POINT_get_affine_coordinates()");
