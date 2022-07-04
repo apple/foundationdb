@@ -449,7 +449,7 @@ Optional<PublicOrPrivateKey> parseKey(const Value& key, StringRef kty, int keyIn
 	}
 }
 
-void encodeEcKey(rapidjson::Writer<rapidjson::StringBuffer>& writer,
+bool encodeEcKey(rapidjson::Writer<rapidjson::StringBuffer>& writer,
                  StringRef keyName,
                  EVP_PKEY* pKey,
                  const bool isPublic) {
@@ -467,12 +467,12 @@ void encodeEcKey(rapidjson::Writer<rapidjson::StringBuffer>& writer,
 	if (1 != EVP_PKEY_get_utf8_string_param(
 	             pKey, OSSL_PKEY_PARAM_GROUP_NAME, curveNameBuf.begin(), sizeof(curveNameBuf), &curveNameLen)) {
 		JWK_WRITE_ERROR_OSSL("Get group name from EC PKey");
-		throw pkey_encode_error();
+		return false;
 	}
 	auto curveName = std::string_view(curveNameBuf.cbegin(), curveNameLen);
 	if (curveName != std::string_view("prime256v1")) {
 		JWK_WRITE_ERROR("Unsupported EC curve").detail("CurveName", curveName);
-		throw pkey_encode_error();
+		return false;
 	}
 	writer.Key("crv");
 	writer.String("P-256");
@@ -500,42 +500,48 @@ void encodeEcKey(rapidjson::Writer<rapidjson::StringBuffer>& writer,
 	auto ecKey = ::EVP_PKEY_get0_EC_KEY(pKey); // get0 == no refcount, no need to free
 	if (!ecKey) {
 		JWK_WRITE_ERROR_OSSL("Could not extract EC_KEY from EVP_PKEY");
-		throw pkey_encode_error();
+		return false;
 	}
 	auto group = ::EC_KEY_get0_group(ecKey);
 	if (!group) {
 		JWK_WRITE_ERROR("Could not get EC_GROUP from EVP_PKEY");
-		throw pkey_encode_error();
+		return false;
 	}
 	auto curveName = ::EC_GROUP_get_curve_name(group);
 	if (curveName == NID_undef) {
 		JWK_WRITE_ERROR("Could not match EC_GROUP to known curve");
-		throw pkey_encode_error();
+		return false;
 	}
 	if (curveName != NID_X9_62_prime256v1) {
 		JWK_WRITE_ERROR("Unsupported curve, expected P-256 (prime256v1)").detail("curveName", ::OBJ_nid2sn(curveName));
-		throw pkey_encode_error();
+		return false;
 	}
 	writer.Key("crv");
 	writer.String("P-256");
 	auto point = ::EC_KEY_get0_public_key(ecKey);
 	if (!point) {
 		JWK_WRITE_ERROR_OSSL("EC_KEY_get0_public_key() returned null");
-		throw pkey_encode_error();
+		return false;
 	}
 	auto x = AutoCPointer(::BN_new(), &::BN_free);
 	if (!x) {
 		JWK_WRITE_ERROR_OSSL("x = BN_new()");
-		throw pkey_encode_error();
+		return false;
 	}
 	auto y = AutoCPointer(::BN_new(), &::BN_free);
 	if (!y) {
 		JWK_WRITE_ERROR_OSSL("y = BN_new()");
-		throw pkey_encode_error();
+		return false;
 	}
-	if (1 != ::EC_POINT_get_affine_coordinates(group, point, x, y, nullptr)) {
+	if (1 !=
+#ifdef OPENSSL_IS_BORINGSSL
+	    ::EC_POINT_get_affine_coordinates(group, point, x, y, nullptr)
+#else
+	    ::EC_POINT_get_affine_coordinates_GFp(group, point, x, y, nullptr)
+#endif
+	) {
 		JWK_WRITE_ERROR_OSSL("EC_POINT_get_affine_coordinates()");
-		throw pkey_encode_error();
+		return false;
 	}
 	auto b64X = bigNumToBase64Url(arena, x);
 	auto b64Y = bigNumToBase64Url(arena, y);
@@ -547,7 +553,7 @@ void encodeEcKey(rapidjson::Writer<rapidjson::StringBuffer>& writer,
 		auto d = ::EC_KEY_get0_private_key(ecKey);
 		if (!d) {
 			JWK_WRITE_ERROR("EC_KEY_get0_private_key()");
-			throw pkey_encode_error();
+			return false;
 		}
 		auto b64D = bigNumToBase64Url(arena, d);
 		writer.Key("d");
@@ -555,9 +561,10 @@ void encodeEcKey(rapidjson::Writer<rapidjson::StringBuffer>& writer,
 	}
 #endif // USE_V3_API
 	writer.EndObject();
+	return true;
 }
 
-void encodeRsaKey(rapidjson::Writer<rapidjson::StringBuffer>& writer,
+bool encodeRsaKey(rapidjson::Writer<rapidjson::StringBuffer>& writer,
                   StringRef keyName,
                   EVP_PKEY* pKey,
                   const bool isPublic) {
@@ -576,7 +583,7 @@ void encodeRsaKey(rapidjson::Writer<rapidjson::StringBuffer>& writer,
 		auto rawX = std::add_pointer_t<BIGNUM>();                                                                      \
 		if (1 != ::EVP_PKEY_get_bn_param(pKey, param, &rawX)) {                                                        \
 			JWK_WRITE_ERROR_OSSL("EVP_PKEY_get_bn_param(" #x ")");                                                     \
-			throw pkey_encode_error();                                                                                 \
+			return false;                                                                                              \
 		}                                                                                                              \
 		x.reset(rawX);                                                                                                 \
 		auto b64##x = bigNumToBase64Url(arena, x);                                                                     \
@@ -599,7 +606,7 @@ void encodeRsaKey(rapidjson::Writer<rapidjson::StringBuffer>& writer,
 	do {                                                                                                               \
 		if (!x) {                                                                                                      \
 			JWK_WRITE_ERROR_OSSL("RSA_get0_* returned null " #x);                                                      \
-			throw pkey_encode_error();                                                                                 \
+			return false;                                                                                              \
 		}                                                                                                              \
 		auto b64##x = bigNumToBase64Url(arena, x);                                                                     \
 		writer.Key(#x);                                                                                                \
@@ -608,7 +615,7 @@ void encodeRsaKey(rapidjson::Writer<rapidjson::StringBuffer>& writer,
 	auto rsaKey = ::EVP_PKEY_get0_RSA(pKey); // get0 == no refcount, no need to free
 	if (!rsaKey) {
 		JWK_WRITE_ERROR_OSSL("Could not extract RSA key from EVP_PKEY");
-		throw pkey_encode_error();
+		return false;
 	}
 	auto n = std::add_pointer_t<const BIGNUM>();
 	auto e = std::add_pointer_t<const BIGNUM>();
@@ -634,10 +641,11 @@ void encodeRsaKey(rapidjson::Writer<rapidjson::StringBuffer>& writer,
 #undef JWK_WRITE_BN_RSA_PARAM_V1
 #endif // USE_V3_API
 	writer.EndObject();
+	return true;
 }
 
 // Add exactly one object to context of writer. Object shall contain JWK-encoded public or private key
-void encodeKey(rapidjson::Writer<rapidjson::StringBuffer>& writer, StringRef keyName, const PublicOrPrivateKey& key) {
+bool encodeKey(rapidjson::Writer<rapidjson::StringBuffer>& writer, StringRef keyName, const PublicOrPrivateKey& key) {
 	auto const isPublic = key.isPublic();
 	auto pKey = std::add_pointer_t<EVP_PKEY>();
 	auto alg = PKeyAlgorithm{};
@@ -652,16 +660,17 @@ void encodeKey(rapidjson::Writer<rapidjson::StringBuffer>& writer, StringRef key
 	}
 	if (!pKey) {
 		JWK_WRITE_ERROR("PKey object to encode is null");
-		throw pkey_encode_error();
+		return false;
 	}
 	if (alg == PKeyAlgorithm::EC) {
-		encodeEcKey(writer, keyName, pKey, isPublic);
+		return encodeEcKey(writer, keyName, pKey, isPublic);
 	} else if (alg == PKeyAlgorithm::RSA) {
-		encodeRsaKey(writer, keyName, pKey, isPublic);
+		return encodeRsaKey(writer, keyName, pKey, isPublic);
 	} else {
 		JWK_WRITE_ERROR("Attempted to encode PKey with unsupported algorithm");
-		throw pkey_encode_error();
+		return false;
 	}
+	return true;
 }
 
 } // anonymous namespace
@@ -716,7 +725,7 @@ Optional<JsonWebKeySet> JsonWebKeySet::parse(StringRef jwksString, VectorRef<Str
 	return ret;
 }
 
-StringRef JsonWebKeySet::toStringRef(Arena& arena) {
+Optional<StringRef> JsonWebKeySet::toStringRef(Arena& arena) {
 	using Buffer = rapidjson::StringBuffer;
 	using Writer = rapidjson::Writer<Buffer>;
 	auto buffer = Buffer();
@@ -725,7 +734,9 @@ StringRef JsonWebKeySet::toStringRef(Arena& arena) {
 	writer.Key("keys");
 	writer.StartArray();
 	for (const auto& [keyName, key] : keys) {
-		encodeKey(writer, keyName, key);
+		if (!encodeKey(writer, keyName, key)) {
+			return {};
+		}
 	}
 	writer.EndArray();
 	writer.EndObject();
@@ -746,7 +757,7 @@ void testPublicKey(PrivateKey (*factory)()) {
 	auto jwks = JsonWebKeySet{};
 	jwks.keys.emplace(pubKeyName, pubKey);
 	auto arena = Arena();
-	auto jwksStr = jwks.toStringRef(arena);
+	auto jwksStr = jwks.toStringRef(arena).get();
 	fmt::print("Test JWKS: {}\n", jwksStr.toString());
 	auto jwksClone = JsonWebKeySet::parse(jwksStr, {});
 	ASSERT(jwksClone.present());
@@ -775,7 +786,7 @@ void testPrivateKey(PrivateKey (*factory)()) {
 	auto jwks = JsonWebKeySet{};
 	jwks.keys.emplace(privKeyName, privKey);
 	auto arena = Arena();
-	auto jwksStr = jwks.toStringRef(arena);
+	auto jwksStr = jwks.toStringRef(arena).get();
 	fmt::print("Test JWKS: {}\n", jwksStr.toString());
 	auto jwksClone = JsonWebKeySet::parse(jwksStr, {});
 	ASSERT(jwksClone.present());

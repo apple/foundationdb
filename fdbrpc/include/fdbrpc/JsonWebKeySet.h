@@ -61,7 +61,7 @@ struct JsonWebKeySet {
 
 	// Returns JSON string representing the JSON Web Key Set.
 	// Inverse operation of parse(). Only allows keys expected/accepted by parse().
-	StringRef toStringRef(Arena& arena);
+	Optional<StringRef> toStringRef(Arena& arena);
 };
 
 #endif // FDBRPC_JSON_WEB_KEY_SET_H
