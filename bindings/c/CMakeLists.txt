@@ -136,6 +136,7 @@ if(NOT WIN32)
     test/apitester/TesterTransactionExecutor.h
     test/apitester/TesterUtil.cpp
     test/apitester/TesterUtil.h
+    test/apitester/TesterWatchAndWaitWorkload.cpp
     test/apitester/TesterWorkload.cpp
     test/apitester/TesterWorkload.h
   )

@@ -567,6 +567,10 @@ public:
 		    tr.get(), begin.data(), intSize(begin), end.data(), intSize(end), begin_version, read_version, context));
 	}
 
+	TypedFuture<future_var::None> watch(KeyRef key) {
+		return native::fdb_transaction_watch(tr.get(), key.data(), intSize(key));
+	}
+
 	TypedFuture<future_var::None> commit() { return native::fdb_transaction_commit(tr.get()); }
 
 	TypedFuture<future_var::None> onError(Error err) { return native::fdb_transaction_on_error(tr.get(), err.code()); }

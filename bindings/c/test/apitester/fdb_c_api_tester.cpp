@@ -348,7 +348,7 @@ bool runWorkloads(TesterOptions& options) {
 		txExecOptions.databasePerTransaction = options.testSpec.databasePerTransaction;
 		txExecOptions.transactionRetryLimit = options.transactionRetryLimit;
 
-		std::unique_ptr<IScheduler> scheduler = createScheduler(options.numClientThreads);
+		std::unique_ptr<IScheduler> scheduler = createScheduler(2 * options.numClientThreads);
 		std::unique_ptr<ITransactionExecutor> txExecutor = createTransactionExecutor(txExecOptions);
 		txExecutor->init(scheduler.get(), options.clusterFile.c_str(), options.bgBasePath);
 

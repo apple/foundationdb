@@ -19,3 +19,8 @@ multiThreaded = false
     name = 'AtomicOpsCorrectness'
     initialSize = 0
     numRandomOperations = 100
+
+    [[test.workload]]
+    name = 'WatchAndWait'
+    initialSize = 0
+    numRandomOperations = 10
