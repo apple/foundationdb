@@ -38,7 +38,7 @@
 #include <openssl/opensslv.h>
 #include <openssl/rsa.h>
 #include <openssl/x509.h>
-#if OPENSSL_VERSION_NUMBER >= 0x30000000L
+#if OPENSSL_VERSION_NUMBER >= 0x30000000L && !defined(_WIN32)
 #define USE_V3_API 1
 #else
 #define USE_V3_API 0
@@ -52,6 +52,8 @@
 #include <rapidjson/error/en.h>
 #include <rapidjson/writer.h>
 #include <rapidjson/stringbuffer.h>
+#include <array>
+#include <string_view>
 #include <type_traits>
 
 #define JWKS_ERROR(issue, op)                                                                                          \
