@@ -44,8 +44,9 @@ class GlobalTagThrottlerImpl {
 		Optional<double> getReadTPSLimit(Optional<double> maxDesiredCost) const {
 			if (totalReadCostRate.smoothTotal() > 0) {
 				auto const desiredReadCost = maxDesiredCost.present() ? std::min(maxDesiredCost.get(), quota.get().totalReadQuota) : quota.get().totalReadQuota;
-				auto const averageCostPerTransaction = transactionCounter.smoothRate() / totalReadCostRate.smoothTotal();
-				return desiredReadCost * averageCostPerTransaction;
+				auto const averageCostPerTransaction =
+				    totalReadCostRate.smoothTotal() / transactionCounter.smoothRate();
+				return desiredReadCost / averageCostPerTransaction;
 			} else {
 				return {};
 			}
@@ -413,7 +414,7 @@ public:
 		return result;
 	}
 
-	Optional<double> getMultiplier() const {
+	Optional<double> getThrottlingRatio() const {
 		auto const springCostRate = 0.2 * targetCostRate;
 		auto const currentCostRate = totalReadCost.smoothRate() + totalWriteCost.smoothRate();
 		if (currentCostRate < targetCostRate - springCostRate) {
@@ -455,6 +456,19 @@ public:
 		result.reserve(storageServers.size());
 		for (const auto& storageServer : storageServers) {
 			result.push_back(storageServer.getStorageQueueInfo());
+		}
+		return result;
+	}
+
+	Optional<double> getWorstThrottlingRatio() const {
+		Optional<double> result;
+		for (const auto& storageServer : storageServers) {
+			auto const throttlingRatio = storageServer.getThrottlingRatio();
+			if (result.present() && throttlingRatio.present()) {
+				result = std::max(result.get(), throttlingRatio.get());
+			} else if (throttlingRatio.present()) {
+				result = throttlingRatio.get();
+			}
 		}
 		return result;
 	}
@@ -522,6 +536,7 @@ ACTOR static Future<Void> updateGlobalTagThrottler(GlobalTagThrottler* globalTag
 		for (const auto& sq : storageQueueInfos) {
 			globalTagThrottler->tryUpdateAutoThrottling(sq);
 		}
+		globalTagThrottler->setThrottlingRatio(storageServers->getWorstThrottlingRatio());
 	}
 }
 
@@ -583,7 +598,7 @@ TEST_CASE("/GlobalTagThrottler/MultiTagThrottling") {
 	return Void();
 }
 
-TEST_CASE("/GlobalTagThrottler/ActiveThrottling") {
+TEST_CASE("/GlobalTagThrottler/AttemptWorkloadAboveQuota") {
 	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
 	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10, 100);
 	ThrottleApi::TagQuotaValue tagQuotaValue;
@@ -697,25 +712,18 @@ TEST_CASE("/GlobalTagThrottler/RemoveQuota") {
 	return Void();
 }
 
-// In this test, the throttling ratio remains below 1 indefinitely,
-// so the throughput is eventually throttled down to the minimum possible throughput
-TEST_CASE("/GlobalTagThrottler/ThrottleToZero") {
+TEST_CASE("/GlobalTagThrottler/ActiveThrottling") {
 	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
-	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10, 100);
+	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10, 5);
 	state ThrottleApi::TagQuotaValue tagQuotaValue;
 	state TransactionTag testTag = "sampleTag1"_sr;
 	tagQuotaValue.totalReadQuota = 100.0;
 	globalTagThrottler.setQuota(testTag, tagQuotaValue);
 	state Future<Void> client =
-	    GlobalTagThrottlerTesting::runClient(&globalTagThrottler, &storageServers, testTag, 5.0, 6.0, false);
-	state Future<Void> monitor =
-	    GlobalTagThrottlerTesting::monitorClientRates(&globalTagThrottler, testTag, 100.0 / 6.0);
+	    GlobalTagThrottlerTesting::runClient(&globalTagThrottler, &storageServers, testTag, 10.0, 6.0, false);
+	state Future<Void> monitor = GlobalTagThrottlerTesting::monitorClientRates(&globalTagThrottler, testTag, 50 / 6.0);
 	state Future<Void> updater =
 	    GlobalTagThrottlerTesting::updateGlobalTagThrottler(&globalTagThrottler, &storageServers);
-	wait(timeoutError(monitor || client || updater, 300.0));
-	globalTagThrottler.setThrottlingRatio(0.9);
-	// 1 is the minimum TPS rate guaranteed:
-	monitor = GlobalTagThrottlerTesting::monitorClientRates(&globalTagThrottler, testTag, 1);
 	wait(timeoutError(monitor || client || updater, 300.0));
 	return Void();
 }
