@@ -91,7 +91,7 @@ COPY website /tmp/website/
 # Install FoundationDB Binaries
 RUN for file in fdbserver fdbbackup fdbcli fdbmonitor; do \
         curl --fail -Ls ${FDB_WEBSITE}/${FDB_VERSION}/$file.x86_64 -o $file; \
-        chmod u+x $file; \
+        chmod +x $file; \
         mv $file /usr/bin; \
     done
 
