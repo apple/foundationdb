@@ -516,6 +516,8 @@ public:
 		return out;
 	}
 
+	TypedFuture<future_var::KeyRef> getVersionstamp() { return native::fdb_transaction_get_versionstamp(tr.get()); }
+
 	TypedFuture<future_var::KeyRef> getKey(KeySelector sel, bool snapshot) {
 		return native::fdb_transaction_get_key(tr.get(), sel.key, sel.keyLength, sel.orEqual, sel.offset, snapshot);
 	}
@@ -575,6 +577,11 @@ public:
 
 	void set(KeyRef key, ValueRef value) {
 		native::fdb_transaction_set(tr.get(), key.data(), intSize(key), value.data(), intSize(value));
+	}
+
+	void atomicOp(KeyRef key, ValueRef param, FDBMutationType operationType) {
+		native::fdb_transaction_atomic_op(
+		    tr.get(), key.data(), intSize(key), param.data(), intSize(param), operationType);
 	}
 
 	void clear(KeyRef key) { native::fdb_transaction_clear(tr.get(), key.data(), intSize(key)); }

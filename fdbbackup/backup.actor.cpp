@@ -1920,11 +1920,11 @@ ACTOR Future<Void> submitBackup(Database db,
 
 		if (dryRun) {
 			state KeyBackedTag tag = makeBackupTag(tagName);
-			Optional<UidAndAbortedFlagT> uidFlag = wait(tag.get(db));
+			Optional<UidAndAbortedFlagT> uidFlag = wait(tag.get(db.getReference()));
 
 			if (uidFlag.present()) {
 				BackupConfig config(uidFlag.get().first);
-				EBackupState backupStatus = wait(config.stateEnum().getOrThrow(db));
+				EBackupState backupStatus = wait(config.stateEnum().getOrThrow(db.getReference()));
 
 				// Throw error if a backup is currently running until we support parallel backups
 				if (BackupAgentBase::isRunnable(backupStatus)) {
@@ -2883,7 +2883,7 @@ ACTOR Future<Void> modifyBackup(Database db, std::string tagName, BackupModifyOp
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-			state Optional<UidAndAbortedFlagT> uidFlag = wait(tag.get(db));
+			state Optional<UidAndAbortedFlagT> uidFlag = wait(tag.get(db.getReference()));
 
 			if (!uidFlag.present()) {
 				fprintf(stderr, "No backup exists on tag '%s'\n", tagName.c_str());

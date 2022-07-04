@@ -357,6 +357,7 @@ struct StorageServerMetrics {
 	}
 
 	void splitMetrics(SplitMetricsRequest req) const {
+		int minSplitBytes = req.minSplitBytes.present() ? req.minSplitBytes.get() : SERVER_KNOBS->MIN_SHARD_BYTES;
 		try {
 			SplitMetricsReply reply;
 			KeyRef lastKey = req.keys.begin;
@@ -364,10 +365,10 @@ struct StorageServerMetrics {
 			StorageMetrics estimated = req.estimated;
 			StorageMetrics remaining = getMetrics(req.keys) + used;
 
-			//TraceEvent("SplitMetrics").detail("Begin", req.keys.begin).detail("End", req.keys.end).detail("Remaining", remaining.bytes).detail("Used", used.bytes);
+			//TraceEvent("SplitMetrics").detail("Begin", req.keys.begin).detail("End", req.keys.end).detail("Remaining", remaining.bytes).detail("Used", used.bytes).detail("MinSplitBytes", minSplitBytes);
 
 			while (true) {
-				if (remaining.bytes < 2 * SERVER_KNOBS->MIN_SHARD_BYTES)
+				if (remaining.bytes < 2 * minSplitBytes)
 					break;
 				KeyRef key = req.keys.end;
 				bool hasUsed = used.bytes != 0 || used.bytesPerKSecond != 0 || used.iosPerKSecond != 0;
@@ -382,10 +383,9 @@ struct StorageServerMetrics {
 				                  lastKey,
 				                  key,
 				                  hasUsed);
-				if (used.bytes < SERVER_KNOBS->MIN_SHARD_BYTES)
-					key = std::max(key,
-					               byteSample.splitEstimate(KeyRangeRef(lastKey, req.keys.end),
-					                                        SERVER_KNOBS->MIN_SHARD_BYTES - used.bytes));
+				if (used.bytes < minSplitBytes)
+					key = std::max(
+					    key, byteSample.splitEstimate(KeyRangeRef(lastKey, req.keys.end), minSplitBytes - used.bytes));
 				key = getSplitKey(remaining.iosPerKSecond,
 				                  estimated.iosPerKSecond,
 				                  req.limits.iosPerKSecond,

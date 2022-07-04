@@ -405,8 +405,8 @@ private:
 		}
 
 		// Normally uses key backed map, so have to use same unpacking code here.
-		UID ssId = Codec<UID>::unpack(Tuple::unpack(m.param1.removePrefix(tssMappingKeys.begin)));
-		UID tssId = Codec<UID>::unpack(Tuple::unpack(m.param2));
+		UID ssId = TupleCodec<UID>::unpack(m.param1.removePrefix(tssMappingKeys.begin));
+		UID tssId = TupleCodec<UID>::unpack(m.param2);
 		if (!initialCommit) {
 			txnStateStore->set(KeyValueRef(m.param1, m.param2));
 		}
@@ -654,7 +654,7 @@ private:
 			if (tenantMap) {
 				ASSERT(version != invalidVersion);
 				TenantName tenantName = m.param1.removePrefix(tenantMapPrefix);
-				TenantMapEntry tenantEntry = decodeTenantEntry(m.param2);
+				TenantMapEntry tenantEntry = TenantMapEntry::decode(m.param2);
 
 				TraceEvent("CommitProxyInsertTenant", dbgid).detail("Tenant", tenantName).detail("Version", version);
 				(*tenantMap)[tenantName] = tenantEntry;
@@ -965,7 +965,7 @@ private:
 		ASSERT(rangeToClear.singleKeyRange());
 
 		// Normally uses key backed map, so have to use same unpacking code here.
-		UID ssId = Codec<UID>::unpack(Tuple::unpack(m.param1.removePrefix(tssMappingKeys.begin)));
+		UID ssId = TupleCodec<UID>::unpack(m.param1.removePrefix(tssMappingKeys.begin));
 		if (!initialCommit) {
 			txnStateStore->clear(rangeToClear);
 		}

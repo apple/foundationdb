@@ -356,7 +356,7 @@ ACTOR static Future<Void> monitorClientRates(GlobalTagThrottler* globalTagThrott
 			    .detail("Tag", tag)
 			    .detail("CurrentTPSRate", currentTPSLimit.get())
 			    .detail("DesiredTPSRate", desiredTPSLimit);
-			if (abs(currentTPSLimit.get() - desiredTPSLimit) < 0.1) {
+			if (abs(currentTPSLimit.get() - desiredTPSLimit) < 1.0) {
 				if (++successes == 3) {
 					return Void();
 				}
