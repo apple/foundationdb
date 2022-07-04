@@ -28,6 +28,10 @@
 #include "flow/actorcompiler.h" // must be last include
 
 class GlobalTagThrottlerImpl {
+
+	enum class LimitType { RESERVED, TOTAL };
+	enum class OpType { READ, WRITE };
+
 	class QuotaAndCounters {
 		Optional<ThrottleApi::TagQuotaValue> quota;
 		std::unordered_map<UID, double> ssToReadCostRate;
@@ -148,7 +152,7 @@ class GlobalTagThrottlerImpl {
 	Future<Void> traceActor;
 	Optional<double> throttlingRatio;
 
-	double getQuotaRatio(TransactionTagRef tag, bool read, bool reserved) const {
+	double getQuotaRatio(TransactionTagRef tag, OpType opType, LimitType limitType) const {
 		int64_t sumQuota{ 0 };
 		int64_t tagQuota{ 0 };
 		for (const auto &[tag2, quotaAndCounters] : trackedTags) {
@@ -156,14 +160,14 @@ class GlobalTagThrottlerImpl {
 				continue;
 			}
 			int64_t quota{ 0 };
-			if (read) {
-				if (reserved) {
+			if (opType == OpType::READ) {
+				if (limitType == LimitType::RESERVED) {
 					quota = quotaAndCounters.getQuota().get().reservedReadQuota;
 				} else {
 					quota = quotaAndCounters.getQuota().get().totalReadQuota;
 				}
 			} else {
-				if (reserved) {
+				if (limitType == LimitType::RESERVED) {
 					quota = quotaAndCounters.getQuota().get().reservedWriteQuota;
 				} else {
 					quota = quotaAndCounters.getQuota().get().totalWriteQuota;
@@ -180,10 +184,11 @@ class GlobalTagThrottlerImpl {
 	}
 
 	// Returns the total cost rate (summed across all tags)
-	double getTotalCostRate(bool read) const {
+	double getTotalCostRate(OpType opType) const {
 		double result{ 0 };
 		for (const auto &[tag, quotaAndCounters] : trackedTags) {
-			result += read ? quotaAndCounters.getReadCostRate() : quotaAndCounters.getWriteCostRate();
+			result +=
+			    (opType == OpType::READ) ? quotaAndCounters.getReadCostRate() : quotaAndCounters.getWriteCostRate();
 		}
 		return result;
 	}
@@ -243,10 +248,10 @@ class GlobalTagThrottlerImpl {
 		}
 	}
 
-	Optional<double> getMaxCostRate(TransactionTagRef tag, bool read, bool reserved) const {
+	Optional<double> getMaxCostRate(TransactionTagRef tag, OpType opType, LimitType limitType) const {
 		if (throttlingRatio.present()) {
-			auto const desiredTotalCost = throttlingRatio.get() * getTotalCostRate(read);
-			return desiredTotalCost * getQuotaRatio(tag, read, reserved);
+			auto const desiredTotalCost = throttlingRatio.get() * getTotalCostRate(opType);
+			return desiredTotalCost * getQuotaRatio(tag, opType, limitType);
 		} else {
 			return {};
 		}
@@ -263,7 +268,9 @@ public:
 		PrioritizedTransactionTagMap<ClientTagThrottleLimits> result;
 		for (auto& [tag, quotaAndCounters] : trackedTags) {
 			// Currently there is no differentiation between batch priority and default priority transactions
-			auto const limit = quotaAndCounters.updateAndGetPerClientLimit(getMaxCostRate(tag, true, false), getMaxCostRate(tag, false, false));
+			auto const limit =
+			    quotaAndCounters.updateAndGetPerClientLimit(getMaxCostRate(tag, OpType::READ, LimitType::TOTAL),
+			                                                getMaxCostRate(tag, OpType::WRITE, LimitType::TOTAL));
 			if (limit.present()) {
 				result[TransactionPriority::BATCH][tag] = result[TransactionPriority::DEFAULT][tag] = limit.get();
 			}
