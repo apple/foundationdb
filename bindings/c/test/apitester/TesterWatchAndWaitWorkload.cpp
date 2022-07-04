@@ -74,7 +74,9 @@ private:
 				            [this, key, watch_f, retry](auto ctx) {
 					            // 4. Wait for the watch future to become ready.
 					            // Note that we do this in the context of a dummy transaction. Ideally we would do this
-					            // in the context of the transaction which sets up the watch in the first place, but
+					            // in the context of the transaction which sets up the watch in the first place, but the
+					            // current testing framework API does not support this usecase. This is also why we
+					            // handle the retry logic here.
 					            ctx->continueAfter(
 					                *watch_f,
 					                [this, ctx, watch_f, retry] {
