@@ -137,14 +137,20 @@ private:
 	void randomGetKeyOp(TTaskFct cont) {
 		int numKeys = Random::get().randomInt(1, maxKeysPerTransaction);
 		auto keysWithSelectors = std::make_shared<std::vector<std::pair<fdb::Key, fdb::KeySelector>>>();
-		auto selectors = std::make_shared<std::vector<fdb::KeySelector>>();
 		auto results = std::make_shared<std::vector<fdb::Key>>();
+		keysWithSelectors->reserve(numKeys);
 		for (int i = 0; i < numKeys; i++) {
 			auto key = randomKey(readExistingKeysRatio);
 			fdb::KeySelector selector;
+			selector.keyLength = key.size();
 			selector.orEqual = Random::get().randomBool(0.5);
 			selector.offset = Random::get().randomInt(0, 4);
-			keysWithSelectors->push_back({ key, selector });
+			keysWithSelectors->emplace_back(std::move(key), std::move(selector));
+			// We would ideally do the following above:
+			//   selector.key = key.data();
+			// but key.data() may become invalid after the key is moved to the vector.
+			// So instead, we update the pointer here to the string already in the vector.
+			keysWithSelectors->back().second.key = keysWithSelectors->back().first.data();
 		}
 		execTransaction(
 		    [keysWithSelectors, results](auto ctx) {
@@ -152,8 +158,6 @@ private:
 			    for (const auto& keyWithSelector : *keysWithSelectors) {
 				    auto key = keyWithSelector.first;
 				    auto selector = keyWithSelector.second;
-				    selector.key = key.data();
-				    selector.keyLength = key.size();
 				    futures->push_back(ctx->tx().getKey(selector, false));
 			    }
 			    ctx->continueAfterAll(*futures, [ctx, futures, results]() {
@@ -181,8 +185,8 @@ private:
 					    actual = store.endKey();
 				    }
 				    if (actual != expected) {
-					    error(fmt::format("randomGetKeyOp mismatch. key: {}, orEqual: {}, offset: {}, expected: {:.80} "
-					                      "actual: {:.80}",
+					    error(fmt::format("randomGetKeyOp mismatch. key: {}, orEqual: {}, offset: {}, expected: {} "
+					                      "actual: {}",
 					                      fdb::toCharsRef(key),
 					                      selector.orEqual,
 					                      selector.offset,
