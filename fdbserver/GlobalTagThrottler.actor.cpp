@@ -369,7 +369,7 @@ Optional<double> getTPSLimit(GlobalTagThrottler& globalTagThrottler, Transaction
 	return {};
 }
 
-class StorageServerCollection {
+class MockStorageServer {
 	class Cost {
 		Smoother smoother;
 
@@ -382,40 +382,79 @@ class StorageServerCollection {
 		double smoothRate() const { return smoother.smoothRate(); }
 	};
 
-	std::vector<std::map<TransactionTag, Cost>> readCosts;
-	std::vector<std::map<TransactionTag, Cost>> writeCosts;
+	UID id;
+	double targetCostRate;
+	std::map<TransactionTag, Cost> readCosts, writeCosts;
+	Cost totalReadCost, totalWriteCost;
 
 public:
-	StorageServerCollection(size_t size) : readCosts(size), writeCosts(size) { ASSERT_GT(size, 0); }
+	explicit MockStorageServer(UID id, double targetCostRate) : id(id), targetCostRate(targetCostRate) {
+		ASSERT_GT(targetCostRate, 0);
+	}
+	void addReadCost(TransactionTag tag, double cost) {
+		readCosts[tag] += cost;
+		totalReadCost += cost;
+	}
+	void addWriteCost(TransactionTag tag, double cost) {
+		writeCosts[tag] += cost;
+		totalWriteCost += cost;
+	}
+
+	StorageQueueInfo getStorageQueueInfo() const {
+		StorageQueueInfo result(id, LocalityData{});
+		for (const auto& [tag, readCost] : readCosts) {
+			double fractionalBusyness{ 0.0 }; // unused for global tag throttling
+			result.busiestReadTags.emplace_back(tag, readCost.smoothRate(), fractionalBusyness);
+		}
+		for (const auto& [tag, writeCost] : writeCosts) {
+			double fractionalBusyness{ 0.0 }; // unused for global tag throttling
+			result.busiestWriteTags.emplace_back(tag, writeCost.smoothRate(), fractionalBusyness);
+		}
+		return result;
+	}
+
+	Optional<double> getMultiplier() const {
+		auto const springCostRate = 0.2 * targetCostRate;
+		auto const currentCostRate = totalReadCost.smoothRate() + totalWriteCost.smoothRate();
+		if (currentCostRate < targetCostRate - springCostRate) {
+			return {};
+		} else {
+			return std::max(0.0, ((targetCostRate + springCostRate) - currentCostRate) / springCostRate);
+		}
+	}
+};
+
+class StorageServerCollection {
+	std::vector<MockStorageServer> storageServers;
+
+public:
+	StorageServerCollection(size_t size, double targetCostRate) {
+		ASSERT_GT(size, 0);
+		storageServers.reserve(size);
+		for (int i = 0; i < size; ++i) {
+			storageServers.emplace_back(UID(i, i), targetCostRate);
+		}
+	}
 
 	void addReadCost(TransactionTag tag, double cost) {
-		auto const costPerSS = cost / readCosts.size();
-		for (auto& readCost : readCosts) {
-			readCost[tag] += costPerSS;
+		auto const costPerSS = cost / storageServers.size();
+		for (auto& storageServer : storageServers) {
+			storageServer.addReadCost(tag, costPerSS);
 		}
 	}
 
 	void addWriteCost(TransactionTag tag, double cost) {
-		auto const costPerSS = cost / writeCosts.size();
-		for (auto& writeCost : writeCosts) {
-			writeCost[tag] += costPerSS;
+		auto const costPerSS = cost / storageServers.size();
+		for (auto& storageServer : storageServers) {
+			storageServer.addWriteCost(tag, costPerSS);
 		}
 	}
 
 	std::vector<StorageQueueInfo> getStorageQueueInfos() const {
 		std::vector<StorageQueueInfo> result;
-		result.reserve(readCosts.size());
-		for (int i = 0; i < readCosts.size(); ++i) {
-			StorageQueueInfo sqInfo(UID(i, i), LocalityData{});
-			for (const auto& [tag, readCost] : readCosts[i]) {
-				double fractionalBusyness{ 0.0 }; // unused for global tag throttling
-				sqInfo.busiestReadTags.emplace_back(tag, readCost.smoothRate(), fractionalBusyness);
-			}
-			for (const auto& [tag, writeCost] : writeCosts[i]) {
-				double fractionalBusyness{ 0.0 }; // unused for global tag throttling
-				sqInfo.busiestWriteTags.emplace_back(tag, writeCost.smoothRate(), fractionalBusyness);
-			}
-			result.push_back(sqInfo);
+		result.reserve(storageServers.size());
+		for (const auto& storageServer : storageServers) {
+			result.push_back(storageServer.getStorageQueueInfo());
 		}
 		return result;
 	}
@@ -490,7 +529,7 @@ ACTOR static Future<Void> updateGlobalTagThrottler(GlobalTagThrottler* globalTag
 
 TEST_CASE("/GlobalTagThrottler/Simple") {
 	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
-	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10);
+	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10, 100);
 	ThrottleApi::TagQuotaValue tagQuotaValue;
 	TransactionTag testTag = "sampleTag1"_sr;
 	tagQuotaValue.totalReadQuota = 100.0;
@@ -507,7 +546,7 @@ TEST_CASE("/GlobalTagThrottler/Simple") {
 
 TEST_CASE("/GlobalTagThrottler/WriteThrottling") {
 	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
-	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10);
+	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10, 100);
 	ThrottleApi::TagQuotaValue tagQuotaValue;
 	TransactionTag testTag = "sampleTag1"_sr;
 	tagQuotaValue.totalWriteQuota = 100.0;
@@ -524,7 +563,7 @@ TEST_CASE("/GlobalTagThrottler/WriteThrottling") {
 
 TEST_CASE("/GlobalTagThrottler/MultiTagThrottling") {
 	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
-	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10);
+	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10, 100);
 	ThrottleApi::TagQuotaValue tagQuotaValue;
 	TransactionTag testTag1 = "sampleTag1"_sr;
 	TransactionTag testTag2 = "sampleTag2"_sr;
@@ -546,7 +585,7 @@ TEST_CASE("/GlobalTagThrottler/MultiTagThrottling") {
 
 TEST_CASE("/GlobalTagThrottler/ActiveThrottling") {
 	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
-	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10);
+	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10, 100);
 	ThrottleApi::TagQuotaValue tagQuotaValue;
 	TransactionTag testTag = "sampleTag1"_sr;
 	tagQuotaValue.totalReadQuota = 100.0;
@@ -562,7 +601,7 @@ TEST_CASE("/GlobalTagThrottler/ActiveThrottling") {
 
 TEST_CASE("/GlobalTagThrottler/MultiClientThrottling") {
 	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
-	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10);
+	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10, 100);
 	ThrottleApi::TagQuotaValue tagQuotaValue;
 	TransactionTag testTag = "sampleTag1"_sr;
 	tagQuotaValue.totalReadQuota = 100.0;
@@ -581,7 +620,7 @@ TEST_CASE("/GlobalTagThrottler/MultiClientThrottling") {
 
 TEST_CASE("/GlobalTagThrottler/MultiClientActiveThrottling") {
 	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
-	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10);
+	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10, 100);
 	ThrottleApi::TagQuotaValue tagQuotaValue;
 	TransactionTag testTag = "sampleTag1"_sr;
 	tagQuotaValue.totalReadQuota = 100.0;
@@ -600,7 +639,7 @@ TEST_CASE("/GlobalTagThrottler/MultiClientActiveThrottling") {
 // Global transaction rate should be 20.0, with a distribution of (5, 15) between the 2 clients
 TEST_CASE("/GlobalTagThrottler/SkewedMultiClientActiveThrottling") {
 	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
-	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10);
+	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10, 100);
 	ThrottleApi::TagQuotaValue tagQuotaValue;
 	TransactionTag testTag = "sampleTag1"_sr;
 	tagQuotaValue.totalReadQuota = 100.0;
@@ -619,7 +658,7 @@ TEST_CASE("/GlobalTagThrottler/SkewedMultiClientActiveThrottling") {
 // Test that the tag throttler can reach equilibrium, then adjust to a new equilibrium once the quota is changed
 TEST_CASE("/GlobalTagThrottler/UpdateQuota") {
 	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
-	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10);
+	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10, 100);
 	state ThrottleApi::TagQuotaValue tagQuotaValue;
 	state TransactionTag testTag = "sampleTag1"_sr;
 	tagQuotaValue.totalReadQuota = 100.0;
@@ -640,7 +679,7 @@ TEST_CASE("/GlobalTagThrottler/UpdateQuota") {
 
 TEST_CASE("/GlobalTagThrottler/RemoveQuota") {
 	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
-	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10);
+	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10, 100);
 	state ThrottleApi::TagQuotaValue tagQuotaValue;
 	state TransactionTag testTag = "sampleTag1"_sr;
 	tagQuotaValue.totalReadQuota = 100.0;
@@ -662,7 +701,7 @@ TEST_CASE("/GlobalTagThrottler/RemoveQuota") {
 // so the throughput is eventually throttled down to the minimum possible throughput
 TEST_CASE("/GlobalTagThrottler/ThrottleToZero") {
 	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
-	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10);
+	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10, 100);
 	state ThrottleApi::TagQuotaValue tagQuotaValue;
 	state TransactionTag testTag = "sampleTag1"_sr;
 	tagQuotaValue.totalReadQuota = 100.0;
