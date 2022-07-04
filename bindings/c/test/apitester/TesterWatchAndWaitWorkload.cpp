@@ -25,27 +25,6 @@ namespace FdbApiTester {
 using fdb::Key;
 using fdb::Value;
 
-class Notification {
-public:
-	void notify() {
-		std::unique_lock<std::mutex> lock(mu);
-		notification = true;
-		cv.notify_all();
-	}
-
-	void waitUntilNotify() {
-		std::unique_lock<std::mutex> lock(mu);
-		while (!notification) {
-			cv.wait(lock);
-		}
-	}
-
-private:
-	std::mutex mu;
-	std::condition_variable cv;
-	bool notification = false;
-};
-
 class WatchAndWaitWorkload : public ApiWorkload {
 public:
 	WatchAndWaitWorkload(const WorkloadConfig& config) : ApiWorkload(config) {}
@@ -68,16 +47,15 @@ private:
 			    ctx->commit();
 		    },
 		    [this, key, newVal, cont]() {
-			    auto triggered = std::make_shared<Notification>();
+			    auto watch_f = std::make_shared<fdb::TypedFuture<fdb::future_var::None>>();
 
 			    execTransaction(
 			        // 2. Create a watch for key.
-			        [key, triggered](auto ctx) {
-				        auto f = ctx->tx().watch(key);
-				        ctx->continueAfter(f, [triggered] { triggered->notify(); });
+			        [key, watch_f](auto ctx) {
+				        *watch_f = ctx->tx().watch(key);
 				        ctx->commit();
 			        },
-			        [this, key, newVal, triggered, cont]() {
+			        [this, key, newVal, watch_f, cont]() {
 				        execTransaction(
 				            // 3. Set the key to a newVal which is guaranteed to be different from initialVal, i.e.,
 				            // must trigger the watch.
@@ -85,10 +63,13 @@ private:
 					            ctx->tx().set(key, newVal);
 					            ctx->commit();
 				            },
-				            [this, key, triggered, cont]() {
-					            // 4. Block until the watch callback is called.
-					            triggered->waitUntilNotify();
-					            schedule(cont);
+				            [this, watch_f, cont]() {
+					            execTransaction(
+					                [watch_f](auto ctx) {
+						                // 4. Wait for the watch future to become ready.
+						                ctx->continueAfter(*watch_f, [ctx] { ctx->done(); });
+					                },
+					                [this, cont]() { schedule(cont); });
 				            });
 			        });
 		    });
