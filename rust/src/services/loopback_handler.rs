@@ -1,5 +1,5 @@
 use crate::flow::{
-    file_identifier::FileIdentifierNames, uid::UID, uid::WLTOKEN, Error, FlowFn, FlowFuture,
+    file_identifier::FileIdentifierNames, uid::UID, uid::WLTOKEN, Error, FlowFuture,
     FlowHandler, FlowMessage, FlowResponse, Result,
 };
 
@@ -33,7 +33,6 @@ pub struct LoopbackHandler {
     // Should this be a Service<FlowMessage> instead?
     // pub out_tx: mpsc::Sender<FlowMessage>,
     pub in_flight_requests: dashmap::DashMap<UID, oneshot::Sender<FlowMessage>>,
-    // pub well_known_endpoints: dashmap::DashMap<WLTOKEN, Box<FlowFn>>,
     pub well_known_endpoints: dashmap::DashMap<WLTOKEN, Box<dyn FlowHandler>>,
 }
 

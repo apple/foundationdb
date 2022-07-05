@@ -20,7 +20,6 @@ pub type FlowResponse = Option<FlowMessage>;
 // XXX get rid of pin?
 pub type FlowFuture =
     std::pin::Pin<Box<dyn 'static + Send + Sync + Future<Output = Result<FlowResponse>>>>;
-pub type FlowFn = dyn Send + Sync + Fn(FlowMessage) -> FlowFuture;
 
 #[derive(Debug)]
 pub enum Peer {

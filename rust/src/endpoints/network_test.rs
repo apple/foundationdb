@@ -11,7 +11,7 @@ use crate::flow::uid::{UID, WLTOKEN};
 use crate::flow::{Flow, FlowFuture, FlowHandler, FlowMessage, FlowResponse, Frame, Peer, Result};
 use crate::services::ConnectionKeeper;
 
-use flatbuffers::{FlatBufferBuilder, FLATBUFFERS_MAX_BUFFER_SIZE};
+use flatbuffers::FlatBufferBuilder;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
