@@ -75,8 +75,6 @@ public:
 	void clear() { topTags.clear(); }
 };
 
-} // namespace
-
 class TransactionTagCounterImpl {
 	UID thisServerID;
 	TransactionTagMap<int64_t> intervalCounts;
@@ -150,6 +148,10 @@ void TransactionTagCounter::addRequest(Optional<TagSet> const& tags, int64_t byt
 
 void TransactionTagCounter::startNewInterval() {
 	return impl->startNewInterval();
+}
+
+const std::string& TransactionTagCounter::getBusiestWriteTagTrackingKey() const {
+	return impl->getBusiestWritingTagTrackingKey();
 }
 
 std::vector<StorageQueuingMetricsReply::TagInfo> const& TransactionTagCounter::getBusiestTags() const {
