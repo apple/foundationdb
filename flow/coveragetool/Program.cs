@@ -184,7 +184,8 @@ namespace coveragetool
         {
             var comment = "";
             var j = i;
-            while (j < lines.Length && lines[j].IndexOf("//") != -1)
+            var backslashOffset = lines[j].IndexOf("//");
+            while (j < lines.Length && lines[j].IndexOf("//") == backslashOffset)
             {
                 int backslashIndexTrim = lines[j].Trim().IndexOf("//");
                 if (i != j && backslashIndexTrim != 0) break;
