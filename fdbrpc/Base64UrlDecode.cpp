@@ -108,15 +108,17 @@ int decodedLength(int codeLength) noexcept {
 		return (codeLength / 4) * 3 + (r - 1);
 }
 
-std::pair<StringRef, bool> decode(Arena& arena, StringRef base64UrlStr) {
+Optional<StringRef> decode(Arena& arena, StringRef base64UrlStr) {
 	auto decodedLen = decodedLength(base64UrlStr.size());
 	if (decodedLen <= 0) {
-		return { StringRef(), decodedLen == 0 };
+		if (decodedLen == 0)
+			return StringRef{};
+		return {};
 	}
 	auto out = new (arena) uint8_t[decodedLen];
 	auto actualLen = decode(base64UrlStr.begin(), base64UrlStr.size(), out);
 	ASSERT_EQ(decodedLen, actualLen);
-	return { StringRef(out, decodedLen), true };
+	return StringRef(out, decodedLen);
 }
 
 } // namespace base64url
@@ -237,13 +239,13 @@ TEST_CASE("/fdbrpc/Base64UrlEncode") {
 			           encodeOutput.toHexString());
 			ASSERT(false);
 		}
-		auto [decodeOutput, decodeOk] = base64url::decode(tmpArena, encodeOutputExpected);
-		ASSERT(decodeOk);
-		if (decodeOutput != decodeOutputExpected) {
+		auto decodeOutput = base64url::decode(tmpArena, encodeOutputExpected);
+		ASSERT(decodeOutput.present());
+		if (decodeOutput.get() != decodeOutputExpected) {
 			fmt::print("Fixed case {} (decode): expected '{}' got '{}'\n",
 			           i + 1,
 			           decodeOutputExpected.toHexString(),
-			           decodeOutput.toHexString());
+			           decodeOutput.get().toHexString());
 			ASSERT(false);
 		}
 	}
@@ -259,12 +261,12 @@ TEST_CASE("/fdbrpc/Base64UrlEncode") {
 		// make sure output only contains legal characters
 		for (auto i = 0; i < output.size(); i++)
 			ASSERT_NE(base64url::decodeValue(output[i]), base64url::_X);
-		auto [decodedOutput, decodeOk] = base64url::decode(tmpArena, output);
-		ASSERT(decodeOk);
-		if (input != decodedOutput) {
+		auto decodeOutput = base64url::decode(tmpArena, output);
+		ASSERT(decodeOutput.present());
+		if (input != decodeOutput.get()) {
 			fmt::print("Dynamic case {} (decode) failed, expected '{}', got '{}'\n",
 			           input.toHexString(),
-			           decodedOutput.toHexString());
+			           decodeOutput.get().toHexString());
 			ASSERT(false);
 		}
 	}
