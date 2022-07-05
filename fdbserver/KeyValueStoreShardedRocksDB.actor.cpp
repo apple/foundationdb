@@ -571,9 +571,8 @@ int readRangeInDb(DataShard* shard, const KeyRangeRef& range, int rowLimit, int 
 // Manages physical shards and maintains logical shard mapping.
 class ShardManager {
 public:
-	ShardManager(std::string path) : path(path) {}
+	ShardManager(std::string path) : path(path), dataShardMap(nullptr, specialKeys.end) {}
 	rocksdb::Status init() {
-		dataShardMap.insert(allKeys, nullptr);
 		// Open instance.
 		std::vector<std::string> columnFamilies;
 		rocksdb::Options options = getOptions();
@@ -588,6 +587,8 @@ public:
 			}
 			descriptors.push_back(rocksdb::ColumnFamilyDescriptor{ name, cfOptions });
 		}
+
+		ASSERT(foundMetadata || descriptors.size() == 0);
 
 		// Add default column family if it's a newly opened database.
 		if (descriptors.size() == 0) {
@@ -631,15 +632,29 @@ public:
 			// TODO: remove unused column families.
 
 		} else {
-			for (auto handle : handles) {
-				TraceEvent(SevInfo, "ShardedRocksDB")
-				    .detail("Action", "Init")
-				    .detail("DroppedShard", handle->GetName());
-				db->DropColumnFamily(handle);
-			}
+			// DB is opened with default shard.
+			ASSERT(handles.size() == 1);
+			// Add SpecialKeys range. This range should not be modified.
+			std::shared_ptr<PhysicalShard> defaultShard = std::make_shared<PhysicalShard>(db, "default", handles[0]);
+			columnFamilyMap[defaultShard->cf->GetID()] = defaultShard->cf;
+			std::unique_ptr<DataShard> dataShard = std::make_unique<DataShard>(specialKeys, defaultShard.get());
+			dataShardMap.insert(dataShard->range, dataShard.get());
+			defaultShard->dataShards[specialKeys.begin.toString()] = std::move(dataShard);
+
 			metadataShard = std::make_shared<PhysicalShard>(db, "kvs-metadata");
 			metadataShard->init();
 			columnFamilyMap[metadataShard->cf->GetID()] = metadataShard->cf;
+
+			// Write special key range metadata.
+			writeBatch = std::make_unique<rocksdb::WriteBatch>();
+			dirtyShards = std::make_unique<std::set<PhysicalShard*>>();
+			persistRangeMapping(specialKeys, true);
+			rocksdb::WriteOptions options;
+			status = db->Write(options, writeBatch.get());
+			if (!status.ok()) {
+				return status;
+			}
+			metadataShard->readIterPool->update();
 		}
 		physicalShards["kvs-metadata"] = metadataShard;
 
@@ -2609,12 +2624,12 @@ TEST_CASE("noSim/ShardedRocksDB/Metadata") {
 	ASSERT(val == Optional<Value>("bar"_sr));
 
 	auto mapping = rocksdbStore->getDataMapping();
-	ASSERT(mapping.size() == 2);
+	ASSERT(mapping.size() == 3);
 
 	// Remove all the ranges.
 	kvStore->removeRange(KeyRangeRef("a"_sr, "f"_sr));
 	mapping = rocksdbStore->getDataMapping();
-	ASSERT(mapping.size() == 0);
+	ASSERT(mapping.size() == 1);
 
 	// Restart.
 	Future<Void> closed = kvStore->onClosed();
@@ -2626,14 +2641,14 @@ TEST_CASE("noSim/ShardedRocksDB/Metadata") {
 
 	// Because range metadata was not committed, ranges should be restored.
 	auto mapping = rocksdbStore->getDataMapping();
-	ASSERT(mapping.size() == 2);
+	ASSERT(mapping.size() == 3);
 
 	// Remove ranges again.
 	kvStore->persistRangeMapping(KeyRangeRef("a"_sr, "f"_sr), false);
 	kvStore->removeRange(KeyRangeRef("a"_sr, "f"_sr));
 
 	mapping = rocksdbStore->getDataMapping();
-	ASSERT(mapping.size() == 0);
+	ASSERT(mapping.size() == 1);
 
 	wait(kvStore->commit(false));
 
@@ -2652,7 +2667,7 @@ TEST_CASE("noSim/ShardedRocksDB/Metadata") {
 		std::cout << "Begin " << it->first.begin.toString() << ", End " << it->first.end.toString() << ", id "
 		          << it->second << "\n";
 	}
-	ASSERT(mapping.size() == 0);
+	ASSERT(mapping.size() == 1);
 
 	Future<Void> closed = kvStore->onClosed();
 	kvStore->dispose();
