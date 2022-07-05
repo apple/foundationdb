@@ -18,6 +18,9 @@
  * limitations under the License.
  */
 
+#ifndef FDBSERVER_RATEKEEPER_H
+#define FDBSERVER_RATEKEEPER_H
+
 #pragma once
 
 #include "fdbclient/DatabaseConfiguration.h"
@@ -49,7 +52,6 @@ enum limitReason_t {
 class StorageQueueInfo {
 	uint64_t totalWriteCosts{ 0 };
 	int totalWriteOps{ 0 };
-	Reference<EventCacheHolder> busiestWriteTagEventHolder;
 
 	// refresh periodically
 	TransactionTagMap<TransactionCommitCostEstimation> tagCostEst;
@@ -167,7 +169,6 @@ class Ratekeeper {
 	void updateRate(RatekeeperLimits* limits);
 	Future<Void> refreshStorageServerCommitCosts();
 	Future<Void> monitorServerListChange(PromiseStream<std::pair<UID, Optional<StorageServerInterface>>> serverChanges);
-	Future<Void> trackEachStorageServer(FutureStream<std::pair<UID, Optional<StorageServerInterface>>> serverChanges);
 
 	// SOMEDAY: template trackStorageServerQueueInfo and trackTLogQueueInfo into one function
 	Future<Void> trackStorageServerQueueInfo(StorageServerInterface);
@@ -180,3 +181,5 @@ class Ratekeeper {
 public:
 	static Future<Void> run(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo);
 };
+
+#endif // FDBSERVER_RATEKEEPER_H

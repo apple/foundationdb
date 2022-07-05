@@ -22,6 +22,7 @@
 #include "fdbserver/Ratekeeper.h"
 #include "fdbserver/TagThrottler.h"
 #include "fdbserver/WaitFailure.h"
+#include "flow/OwningResource.h"
 
 #include "flow/actorcompiler.h" // must be last include
 
@@ -147,7 +148,11 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> trackStorageServerQueueInfo(Ratekeeper* self, StorageServerInterface ssi) {
+	ACTOR static Future<Void> trackStorageServerQueueInfo(ResourceWeakRef<Ratekeeper> self,
+	                                                      StorageServerInterface ssi) {
+		if (!self.available()) {
+			return Void();
+		}
 		self->storageQueueInfo.insert(mapPair(ssi.id(), StorageQueueInfo(ssi.id(), ssi.locality)));
 		state Map<UID, StorageQueueInfo>::iterator myQueueInfo = self->storageQueueInfo.find(ssi.id());
 		TraceEvent("RkTracking", self->id)
@@ -157,6 +162,9 @@ public:
 			loop {
 				ErrorOr<StorageQueuingMetricsReply> reply = wait(ssi.getQueuingMetrics.getReplyUnlessFailedFor(
 				    StorageQueuingMetricsRequest(), 0, 0)); // SOMEDAY: or tryGetReply?
+				if (!self.available()) {
+					return Void();
+				}
 				if (reply.present()) {
 					myQueueInfo->value.update(reply.get(), self->smoothTotalDurableBytes);
 					myQueueInfo->value.acceptingRequests = ssi.isAcceptingRequests();
@@ -173,7 +181,10 @@ public:
 			}
 		} catch (...) {
 			// including cancellation
-			self->storageQueueInfo.erase(myQueueInfo);
+			if (self.available()) {
+				self->storageQueueInfo.erase(myQueueInfo);
+				self->storageServerInterfaces.erase(ssi.id());
+			}
 			throw;
 		}
 	}
@@ -207,10 +218,12 @@ public:
 	}
 
 	ACTOR static Future<Void> trackEachStorageServer(
-	    Ratekeeper* self,
+	    ResourceWeakRef<Ratekeeper> self,
 	    FutureStream<std::pair<UID, Optional<StorageServerInterface>>> serverChanges) {
-		state Map<UID, Future<Void>> actors;
+
+		state std::unordered_map<UID, Future<Void>> storageServerTrackers;
 		state Promise<Void> err;
+
 		loop choose {
 			when(state std::pair<UID, Optional<StorageServerInterface>> change = waitNext(serverChanges)) {
 				wait(delay(0)); // prevent storageServerTracker from getting cancelled while on the call stack
@@ -218,15 +231,23 @@ public:
 				const UID& id = change.first;
 				if (change.second.present()) {
 					if (!change.second.get().isTss()) {
-						auto& a = actors[change.first];
+
+						auto& a = storageServerTrackers[change.first];
 						a = Future<Void>();
 						a = splitError(trackStorageServerQueueInfo(self, change.second.get()), err);
 
+						if (!self.available()) {
+							return Void();
+						}
 						self->storageServerInterfaces[id] = change.second.get();
 					}
 				} else {
+					storageServerTrackers.erase(id);
+
+					if (!self.available()) {
+						return Void();
+					}
 					self->storageServerInterfaces.erase(id);
-					actors.erase(id);
 				}
 			}
 			when(wait(err.getFuture())) {}
@@ -234,7 +255,9 @@ public:
 	}
 
 	ACTOR static Future<Void> run(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
-		state Ratekeeper self(rkInterf.id(), openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True));
+		state ResourceOwningRef<Ratekeeper> pSelf(
+		    new Ratekeeper(rkInterf.id(), openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True)));
+		state Ratekeeper& self = *pSelf;
 		state Future<Void> timeout = Void();
 		state std::vector<Future<Void>> tlogTrackers;
 		state std::vector<TLogInterface> tlogInterfs;
@@ -247,7 +270,7 @@ public:
 
 		PromiseStream<std::pair<UID, Optional<StorageServerInterface>>> serverChanges;
 		self.addActor.send(self.monitorServerListChange(serverChanges));
-		self.addActor.send(self.trackEachStorageServer(serverChanges.getFuture()));
+		self.addActor.send(RatekeeperImpl::trackEachStorageServer(pSelf, serverChanges.getFuture()));
 		self.addActor.send(traceRole(Role::RATEKEEPER, rkInterf.id()));
 
 		self.addActor.send(self.monitorThrottlingChanges());
@@ -403,15 +426,6 @@ Future<Void> Ratekeeper::configurationMonitor() {
 Future<Void> Ratekeeper::monitorServerListChange(
     PromiseStream<std::pair<UID, Optional<StorageServerInterface>>> serverChanges) {
 	return RatekeeperImpl::monitorServerListChange(this, serverChanges);
-}
-
-Future<Void> Ratekeeper::trackEachStorageServer(
-    FutureStream<std::pair<UID, Optional<StorageServerInterface>>> serverChanges) {
-	return RatekeeperImpl::trackEachStorageServer(this, serverChanges);
-}
-
-Future<Void> Ratekeeper::trackStorageServerQueueInfo(StorageServerInterface ssi) {
-	return RatekeeperImpl::trackStorageServerQueueInfo(this, ssi);
 }
 
 Future<Void> Ratekeeper::trackTLogQueueInfo(TLogInterface tli) {
@@ -957,12 +971,11 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 }
 
 StorageQueueInfo::StorageQueueInfo(UID id, LocalityData locality)
-  : busiestWriteTagEventHolder(makeReference<EventCacheHolder>(id.toString() + "/BusiestWriteTag")), valid(false),
-    id(id), locality(locality), acceptingRequests(false), smoothDurableBytes(SERVER_KNOBS->SMOOTHING_AMOUNT),
-    smoothInputBytes(SERVER_KNOBS->SMOOTHING_AMOUNT), verySmoothDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT),
-    smoothDurableVersion(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothLatestVersion(SERVER_KNOBS->SMOOTHING_AMOUNT),
-    smoothFreeSpace(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothTotalSpace(SERVER_KNOBS->SMOOTHING_AMOUNT),
-    limitReason(limitReason_t::unlimited) {
+  : valid(false), id(id), locality(locality), acceptingRequests(false),
+    smoothDurableBytes(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothInputBytes(SERVER_KNOBS->SMOOTHING_AMOUNT),
+    verySmoothDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT), smoothDurableVersion(SERVER_KNOBS->SMOOTHING_AMOUNT),
+    smoothLatestVersion(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothFreeSpace(SERVER_KNOBS->SMOOTHING_AMOUNT),
+    smoothTotalSpace(SERVER_KNOBS->SMOOTHING_AMOUNT), limitReason(limitReason_t::unlimited) {
 	// FIXME: this is a tacky workaround for a potential uninitialized use in trackStorageServerQueueInfo
 	lastReply.instanceID = -1;
 }
