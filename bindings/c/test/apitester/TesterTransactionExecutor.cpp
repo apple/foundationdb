@@ -92,8 +92,8 @@ public:
 		doContinueAfter(f, cont, retryOnError);
 	}
 
-	// Complete the transaction with a commit
-	void commit() override {
+	// Commit the transaction.
+	void commit(bool complete) override {
 		std::unique_lock<std::mutex> lock(mutex);
 		if (txState != TxState::IN_PROGRESS) {
 			return;
@@ -103,7 +103,13 @@ public:
 		fdb::Future f = fdbTx.commit();
 		auto thisRef = shared_from_this();
 		doContinueAfter(
-		    f, [thisRef]() { thisRef->done(); }, true);
+		    f,
+		    [thisRef, complete]() {
+			    if (complete) {
+				    thisRef->done();
+			    }
+		    },
+		    true);
 	}
 
 	// Complete the transaction without a commit (for read transactions)

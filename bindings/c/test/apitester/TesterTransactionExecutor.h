@@ -46,13 +46,14 @@ public:
 	// of calling the continuation
 	virtual void continueAfter(fdb::Future f, TTaskFct cont, bool retryOnError = true) = 0;
 
-	// Complete the transaction with a commit
-	virtual void commit() = 0;
+	// Commit the transaction, with optional completion of the transaction context. If complete is false, context must
+	// completed by calling done().
+	virtual void commit(bool complete = true) = 0;
 
 	// retry transaction on error
 	virtual void onError(fdb::Error err) = 0;
 
-	// Mark the transaction as completed without committing it (for read transactions)
+	// Mark the transaction as completed without committing it
 	virtual void done() = 0;
 
 	// Plumbing for blob granule base path

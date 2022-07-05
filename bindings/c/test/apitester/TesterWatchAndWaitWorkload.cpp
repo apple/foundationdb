@@ -31,79 +31,47 @@ public:
 
 private:
 	void randomOperation(TTaskFct cont) override {
-		// This test sets a key to an initial value, sets up a watch and waits for it to be triggered.
+		// This test sets a key to an initial value, sets up a watch for that key, change the key's value to a different
+		// value, and waits for the watch to be triggered.
 		Key key(randomKeyName());
 		Value initialVal = randomValue();
 		execTransaction(
-		    // 1. Set the key to initialVal.
 		    [key, initialVal](auto ctx) {
+			    // 1. Set the key to initialVal.
 			    ctx->tx().set(key, initialVal);
 			    ctx->commit();
 		    },
-		    [this, key, initialVal, cont]() { watch(key, initialVal, cont); });
-	}
-
-	void watch(Key key, Value initialVal, TTaskFct cont) {
-		// Assuming key starts with a value initialVal, set up a watch for that key, change its value to a different
-		// value newVal, and ensure that the watch was triggered. Upon retryable watch failures retries the whole
-		// process again.
-		Value newVal = randomValue();
-		// Ensure that newVal is different from initialVal, otherwise watch may not trigger.
-		while (initialVal == newVal) {
-			newVal = randomValue();
-		}
-
-		auto watch_f = std::make_shared<fdb::TypedFuture<fdb::future_var::None>>();
-		execTransaction(
-		    // 2. Create a watch for key.
-		    [key, watch_f](auto ctx) {
-			    *watch_f = ctx->tx().watch(key);
-			    ctx->commit();
-		    },
-		    [this, key, newVal, watch_f, cont]() {
+		    [this, key, initialVal, cont]() {
 			    execTransaction(
-			        // 3. Set the key to a newVal which is guaranteed to be different from initialVal, i.e.,
-			        // must trigger the watch.
-			        [key, newVal](auto ctx) {
-				        ctx->tx().set(key, newVal);
-				        ctx->commit();
+			        [this, key, initialVal](auto ctx) {
+				        // 2. Create a watch for key.
+
+				        auto f = ctx->tx().watch(key);
+				        ctx->continueAfter(f, [ctx] {
+					        // Complete the transaction context upon watch callback.
+					        ctx->done();
+				        });
+				        // Do not automatically complete the context upon commit. Context will be completed by watch
+				        // callback.
+				        ctx->commit(/*complete=*/false);
+
+				        auto newVal = randomValue();
+				        // Ensure that newVal is different from initialVal, otherwise watch may not trigger.
+				        while (initialVal == newVal) {
+					        newVal = randomValue();
+				        }
+				        schedule([this, key, newVal] {
+					        execTransaction(
+					            // 3. Set the key to a newVal which is guaranteed to be different from initialVal, i.e.,
+					            // must trigger the watch.
+					            [key, newVal](auto ctx) {
+						            ctx->tx().set(key, newVal);
+						            ctx->commit();
+					            },
+					            []() {});
+				        });
 			        },
-			        [this, key, newVal, watch_f, cont]() {
-				        auto retry = std::make_shared<bool>(false);
-				        execTransaction(
-				            [this, key, watch_f, retry](auto ctx) {
-					            // 4. Wait for the watch future to become ready.
-					            // Note that we do this in the context of a dummy transaction. Ideally we would do this
-					            // in the context of the transaction which sets up the watch in the first place, but the
-					            // current testing framework API does not support this usecase. This is also why we
-					            // handle the retry logic here.
-					            ctx->continueAfter(
-					                *watch_f,
-					                [this, ctx, watch_f, retry] {
-						                // If the watch future finished with a failure, see if it can be retried.
-						                if (watch_f->error()) {
-							                auto onErrorFuture = ctx->tx().onError(watch_f->error());
-							                fdb::Error blockError = onErrorFuture.blockUntilReady();
-							                if (blockError) {
-								                error(fmt::format("Block error: {}", blockError.what()));
-							                } else if (onErrorFuture.error()) {
-								                error(fmt::format("Watch error: {}", onErrorFuture.error().what()));
-							                } else {
-								                *retry = true;
-							                }
-						                }
-						                ctx->done();
-					                },
-					                false);
-				            },
-				            [this, retry, key, newVal, cont]() {
-					            if (*retry) {
-						            watch(key, newVal, cont);
-					            } else {
-						            schedule(cont);
-					            }
-				            });
-			        });
+			        [this, cont]() { schedule(cont); });
 		    });
 	}
 };
