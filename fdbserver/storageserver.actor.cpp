@@ -23,9 +23,6 @@
 #include <type_traits>
 #include <unordered_map>
 
-<<<<<<< HEAD
-#include "contrib/fmt-8.1.1/include/fmt/format.h"
-=======
 #include "fmt/format.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/fdbrpc.h"
@@ -42,7 +39,6 @@
 #include "flow/Trace.h"
 #include "fdbclient/Tracing.h"
 #include "flow/Util.h"
->>>>>>> 648a5d4d278bc3e798c1685f41ba635b3e847030
 #include "fdbclient/Atomic.h"
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/DatabaseContext.h"
@@ -92,7 +88,6 @@
 #include "flow/SystemMonitor.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/Trace.h"
-#include "flow/Tracing.h"
 #include "flow/Util.h"
 #include "flow/genericactors.actor.h"
 
@@ -4841,16 +4836,24 @@ Optional<MutationRef> clipMutation(MutationRef const& m, KeyRangeRef range) {
 bool convertAtomicOp(MutationRef& m, StorageServer::VersionedData const& data, UpdateEagerReadInfo* eager, Arena& ar) {
 	// After this function call, m should be copied into an arena immediately (before modifying data, shards, or eager)
 	if (m.type != MutationRef::ClearRange && m.type != MutationRef::SetValue) {
+		TraceEvent e("ConvertAtomicOp");
+		e.detail("Key", m.param1);
 		Optional<StringRef> oldVal;
 		auto it = data.atLatest().lastLessOrEqual(m.param1);
-		if (it != data.atLatest().end() && it->isValue() && it.key() == m.param1)
+		if (it != data.atLatest().end() && it->isValue() && it.key() == m.param1) {
+			e.detail("OldValueSource", "VersionedDataValue");
 			oldVal = it->getValue();
-		else if (it != data.atLatest().end() && it->isClearTo() && it->getEndKey() > m.param1) {
+		} else if (it != data.atLatest().end() && it->isClearTo() && it->getEndKey() > m.param1) {
 			TEST(true); // Atomic op right after a clear.
+			e.detail("OldValueSource", "VersionedDataClear");
 		} else {
 			Optional<Value>& oldThing = eager->getValue(m.param1);
-			if (oldThing.present())
+			if (oldThing.present()) {
 				oldVal = oldThing.get();
+				e.detail("OldValueSource", "EagerReadValue");
+			} else {
+				e.detail("OldValueSource", "EagerReadNotPresent");
+			}
 		}
 
 		switch (m.type) {
@@ -4878,9 +4881,17 @@ bool convertAtomicOp(MutationRef& m, StorageServer::VersionedData const& data, U
 		case MutationRef::ByteMin:
 			m.param2 = doByteMin(oldVal, m.param2, ar);
 			break;
-		case MutationRef::ByteMax:
+		case MutationRef::ByteMax: {
+			e.detail("Operation", "ByteMax");
+			if (oldVal.present()) {
+				e.detail("OldValue", oldVal.get());
+			} else {
+				e.detail("OldValue", "N/A");
+			}
+			e.detail("Value", m.param2);
 			m.param2 = doByteMax(oldVal, m.param2, ar);
 			break;
+		}
 		case MutationRef::MinV2:
 			m.param2 = doMinV2(oldVal, m.param2, ar);
 			break;
@@ -8168,6 +8179,24 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 				break;
 		}
 
+		if (removeKVSRanges) {
+			TraceEvent(SevDebug, "RemoveKVSRangesVersionDurable", data->thisServerID)
+			    .detail("NewDurableVersion", newOldestVersion)
+			    .detail("DesiredVersion", desiredVersion)
+			    .detail("OldestRemoveKVSRangesVersion", data->pendingRemoveRanges.begin()->first);
+			ASSERT(newOldestVersion <= data->pendingRemoveRanges.begin()->first);
+			if (newOldestVersion == data->pendingRemoveRanges.begin()->first) {
+				for (const auto& range : data->pendingRemoveRanges.begin()->second) {
+					data->storage.removeRange(range);
+				}
+				for (const auto& range : data->pendingRemoveRanges.begin()->second) {
+					data->storage.persistRangeMapping(range, false);
+				}
+				data->pendingRemoveRanges.erase(data->pendingRemoveRanges.begin());
+			}
+			removeKVSRanges = false;
+		}
+
 		std::set<Key> modifiedChangeFeeds = data->fetchingChangeFeeds;
 		data->fetchingChangeFeeds.clear();
 		while (!data->changeFeedVersions.empty() && data->changeFeedVersions.front().second <= newOldestVersion) {
@@ -8264,24 +8293,6 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 				data->pendingCheckpoints.erase(data->pendingCheckpoints.begin());
 			}
 			requireCheckpoint = false;
-		}
-
-		if (removeKVSRanges) {
-			TraceEvent(SevDebug, "RemoveKVSRangesVersionDurable", data->thisServerID)
-			    .detail("NewDurableVersion", newOldestVersion)
-			    .detail("DesiredVersion", desiredVersion)
-			    .detail("OldestRemoveKVSRangesVersion", data->pendingRemoveRanges.begin()->first);
-			ASSERT(newOldestVersion <= data->pendingRemoveRanges.begin()->first);
-			if (newOldestVersion == data->pendingRemoveRanges.begin()->first) {
-				for (const auto& range : data->pendingRemoveRanges.begin()->second) {
-					data->storage.removeRange(range);
-				}
-				for (const auto& range : data->pendingRemoveRanges.begin()->second) {
-					data->storage.persistRangeMapping(range, false);
-				}
-				data->pendingRemoveRanges.erase(data->pendingRemoveRanges.begin());
-			}
-			removeKVSRanges = false;
 		}
 
 		// while (!data->pendingRemoveRanges.empty() && data->pendingRemoveRanges.begin()->first <= newOldestVersion) {

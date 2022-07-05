@@ -1622,8 +1622,16 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 				                                                 SERVER_KNOBS->MOVE_SHARD_KRM_ROW_LIMIT,
 				                                                 SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT));
 				ASSERT(!keyServers.empty());
+				KeyRange requestedRange = range;
 				range = KeyRangeRef(range.begin, keyServers.back().key);
-				ASSERT(!range.empty());
+				TraceEvent(SevDebug, "FinishMoveShardsGetKeyServers", relocationIntervalId)
+				    .detail("Range", requestedRange)
+				    .detail("Size", keyServers.size())
+				    .detail("LastKey", keyServers.back().key);
+				if (range.empty()) {
+					throw transaction_too_old();
+				}
+				// ASSERT(!range.empty());
 
 				for (int currentIndex = 0; currentIndex < keyServers.size() - 1; ++currentIndex) {
 					std::vector<UID> src;

@@ -539,8 +539,9 @@ struct RandomSelectorWorkload : TestWorkload {
 					try {
 						state RangeResult finalTest1 = wait(finalTransaction.getRange(
 						    KeyRangeRef(StringRef(clientID + "b/"), StringRef(clientID + "c/")), self->maxKeySpace));
-						RangeResult finalTest2 = wait(finalTransaction.getRange(
+						state RangeResult finalTest2 = wait(finalTransaction.getRange(
 						    KeyRangeRef(StringRef(clientID + "d/"), StringRef(clientID + "e/")), self->maxKeySpace));
+						Version readVer = wait(finalTransaction.getReadVersion());
 
 						if (finalTest1.size() != finalTest2.size()) {
 							TraceEvent(SevError, "RanSelTestFailure")
@@ -551,6 +552,7 @@ struct RandomSelectorWorkload : TestWorkload {
 							if (finalTest1[k].value != finalTest2[k].value) {
 								TraceEvent(SevError, "RanSelTestFailure")
 								    .detail("Reason", "The final results did not match contents")
+								    .detail("ReadVersion", readVer)
 								    .detail("KeyA", printable(finalTest1[k].key))
 								    .detail("ValueA", printable(finalTest1[k].value))
 								    .detail("KeyB", printable(finalTest2[k].key))
