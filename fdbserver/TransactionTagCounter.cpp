@@ -78,7 +78,7 @@ public:
 	void clear() { topTags.clear(); }
 };
 
-}	// namespace
+} // namespace
 
 class TransactionTagCounterImpl {
 	UID thisServerID;
