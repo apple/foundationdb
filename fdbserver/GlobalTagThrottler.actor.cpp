@@ -154,8 +154,8 @@ class GlobalTagThrottlerImpl {
 	Optional<double> throttlingRatio;
 
 	double getQuotaRatio(TransactionTagRef tag, OpType opType, LimitType limitType) const {
-		int64_t sumQuota{ 0 };
-		int64_t tagQuota{ 0 };
+		double sumQuota{ 0.0 };
+		double tagQuota{ 0.0 };
 		for (const auto &[tag2, quotaAndCounters] : trackedTags) {
 			if (!quotaAndCounters.getQuota().present()) {
 				continue;
@@ -175,12 +175,12 @@ class GlobalTagThrottlerImpl {
 				}
 			}
 			sumQuota += quota;
-			if (tag == tag2) {
+			if (tag.compare(tag2) == 0) {
 				tagQuota = quota;
 			}
 		}
 		if (tagQuota == 0) return 0;
-		ASSERT_GT(sumQuota, 0);
+		ASSERT_GT(sumQuota, 0.0);
 		return tagQuota / sumQuota;
 	}
 
@@ -251,8 +251,8 @@ class GlobalTagThrottlerImpl {
 
 	Optional<double> getMaxCostRate(TransactionTagRef tag, OpType opType, LimitType limitType) const {
 		if (throttlingRatio.present()) {
-			auto const desiredTotalCost = throttlingRatio.get() * getTotalCostRate(opType);
-			return desiredTotalCost * getQuotaRatio(tag, opType, limitType);
+			auto const desiredTotalCostRate = throttlingRatio.get() * getTotalCostRate(opType);
+			return desiredTotalCostRate * getQuotaRatio(tag, opType, limitType);
 		} else {
 			return {};
 		}
@@ -725,5 +725,30 @@ TEST_CASE("/GlobalTagThrottler/ActiveThrottling") {
 	state Future<Void> updater =
 	    GlobalTagThrottlerTesting::updateGlobalTagThrottler(&globalTagThrottler, &storageServers);
 	wait(timeoutError(monitor || client || updater, 300.0));
+	return Void();
+}
+
+TEST_CASE("/GlobalTagThrottler/MultiTagActiveThrottling") {
+	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
+	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10, 5);
+	state ThrottleApi::TagQuotaValue tagQuotaValue1;
+	state ThrottleApi::TagQuotaValue tagQuotaValue2;
+	state TransactionTag testTag1 = "sampleTag1"_sr;
+	state TransactionTag testTag2 = "sampleTag2"_sr;
+	tagQuotaValue1.totalReadQuota = 50.0;
+	tagQuotaValue2.totalReadQuota = 100.0;
+	globalTagThrottler.setQuota(testTag1, tagQuotaValue1);
+	globalTagThrottler.setQuota(testTag2, tagQuotaValue2);
+	std::vector<Future<Void>> futures;
+	futures.push_back(
+	    GlobalTagThrottlerTesting::runClient(&globalTagThrottler, &storageServers, testTag1, 10.0, 6.0, false));
+	futures.push_back(
+	    GlobalTagThrottlerTesting::runClient(&globalTagThrottler, &storageServers, testTag2, 10.0, 6.0, false));
+	Future<Void> monitor1 =
+	    GlobalTagThrottlerTesting::monitorClientRates(&globalTagThrottler, testTag1, (50 / 6.0) / 3);
+	Future<Void> monitor2 =
+	    GlobalTagThrottlerTesting::monitorClientRates(&globalTagThrottler, testTag2, 2 * (50 / 6.0) / 3);
+	futures.push_back(GlobalTagThrottlerTesting::updateGlobalTagThrottler(&globalTagThrottler, &storageServers));
+	wait(timeoutError(waitForAny(futures) || (monitor1 && monitor2), 300.0));
 	return Void();
 }
