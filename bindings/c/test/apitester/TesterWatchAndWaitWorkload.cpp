@@ -45,15 +45,13 @@ private:
 			    execTransaction(
 			        [this, key, initialVal](auto ctx) {
 				        // 2. Create a watch for key.
-
-				        auto f = ctx->tx().watch(key);
-				        ctx->continueAfter(f, [ctx] {
-					        // Complete the transaction context upon watch callback.
+				        auto watchF = ctx->tx().watch(key);
+				        auto commitF = ctx->tx().commit();
+				        ctx->continueAfterAll({ commitF, watchF }, [ctx] {
+					        // Complete the transaction context once the transaction is committed and the watch is
+					        // triggered.
 					        ctx->done();
 				        });
-				        // Do not automatically complete the context upon commit. Context will be completed by watch
-				        // callback.
-				        ctx->commit(/*complete=*/false);
 
 				        auto newVal = randomValue();
 				        // Ensure that newVal is different from initialVal, otherwise watch may not trigger.
@@ -71,7 +69,7 @@ private:
 					            []() {});
 				        });
 			        },
-			        [this, cont]() { schedule(cont); });
+			        [this, key, cont]() { schedule(cont); });
 		    });
 	}
 };
