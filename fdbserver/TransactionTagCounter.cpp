@@ -21,6 +21,9 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/TransactionTagCounter.h"
 #include "flow/Trace.h"
+
+namespace {
+
 class TopKTags {
 public:
 	struct TagAndCount {
@@ -74,6 +77,8 @@ public:
 
 	void clear() { topTags.clear(); }
 };
+
+}	// namespace
 
 class TransactionTagCounterImpl {
 	UID thisServerID;

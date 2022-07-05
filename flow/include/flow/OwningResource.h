@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#ifndef FLOW_SAFE_ACCESS_REF_H
-#define FLOW_SAFE_ACCESS_REF_H
+#ifndef FLOW_OWNING_REOSURCE_H
+#define FLOW_OWNING_REOSURCE_H
 
 #include "flow/FastRef.h"
 
@@ -116,4 +116,4 @@ public:
 	ResourceWeakRef(const ResourceWeakRef& ref) : details::ResourceRef<T>(ref.resourceRef) {}
 };
 
-#endif // FLOW_SAFE_ACCESS_REF_H
+#endif // FLOW_OWNING_REOSURCE_H
