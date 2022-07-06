@@ -24,6 +24,7 @@
 #include "fdbclient/GenericManagementAPI.actor.h"
 #include "fdbclient/MetaclusterManagement.actor.h"
 #include "fdbclient/TenantManagement.actor.h"
+#include "fdbclient/TenantSpecialKeys.actor.h"
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/workloads/workloads.actor.h"
@@ -54,12 +55,12 @@ struct TenantManagementWorkload : TestWorkload {
 	const TenantName tenantNamePrefix = "tenant_management_workload_"_sr;
 	TenantName localTenantNamePrefix;
 
-	const Key specialKeysTenantMapPrefix =
-	    TenantRangeImpl::mapSubRange.begin.withPrefix(TenantRangeImpl::submoduleRange.begin.withPrefix(
-	        SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin));
-	const Key specialKeysTenantConfigPrefix =
-	    TenantRangeImpl::configureSubRange.begin.withPrefix(TenantRangeImpl::submoduleRange.begin.withPrefix(
-	        SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin));
+	const Key specialKeysTenantMapPrefix = SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT)
+	                                           .begin.withSuffix(TenantRangeImpl<true>::submoduleRange.begin)
+	                                           .withSuffix(TenantRangeImpl<true>::mapSubRange.begin);
+	const Key specialKeysTenantConfigPrefix = SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT)
+	                                              .begin.withSuffix(TenantRangeImpl<true>::submoduleRange.begin)
+	                                              .withSuffix(TenantRangeImpl<true>::configureSubRange.begin);
 
 	int maxTenants;
 	int maxTenantGroups;

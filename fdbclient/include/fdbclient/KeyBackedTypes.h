@@ -25,7 +25,6 @@
 
 #include "fdbclient/GenericTransactionHelper.h"
 #include "fdbclient/IClientApi.h"
-#include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/Subspace.h"
 #include "flow/ObjectSerializer.h"
@@ -197,7 +196,7 @@ public:
 	typename std::enable_if<is_transaction_creator<DB>, Future<Optional<T>>>::type get(
 	    Reference<DB> db,
 	    Snapshot snapshot = Snapshot::False) const {
-		return runTransaction(db, [=, self = *this](Reference<ReadYourWritesTransaction> tr) {
+		return runTransaction(db, [=, self = *this](Reference<typename DB::TransactionT> tr) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
@@ -209,7 +208,7 @@ public:
 	typename std::enable_if<is_transaction_creator<DB>, Future<T>>::type getD(Reference<DB> db,
 	                                                                          Snapshot snapshot = Snapshot::False,
 	                                                                          T defaultValue = T()) const {
-		return runTransaction(db, [=, self = *this](Reference<ReadYourWritesTransaction> tr) {
+		return runTransaction(db, [=, self = *this](Reference<typename DB::TransactionT> tr) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
@@ -221,7 +220,7 @@ public:
 	typename std::enable_if<is_transaction_creator<DB>, Future<T>>::type getOrThrow(Reference<DB> db,
 	                                                                                Snapshot snapshot = Snapshot::False,
 	                                                                                Error err = key_not_found()) const {
-		return runTransaction(db, [=, self = *this](Reference<ReadYourWritesTransaction> tr) {
+		return runTransaction(db, [=, self = *this](Reference<typename DB::TransactionT> tr) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
@@ -236,7 +235,7 @@ public:
 
 	template <class DB>
 	typename std::enable_if<is_transaction_creator<DB>, Future<Void>>::type set(Reference<DB> db, T const& val) {
-		return runTransaction(db, [=, self = *this](Reference<ReadYourWritesTransaction> tr) {
+		return runTransaction(db, [=, self = *this](Reference<typename DB::TransactionT> tr) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			self->set(tr, val);
@@ -430,7 +429,7 @@ public:
 	typename std::enable_if<is_transaction_creator<DB>, Future<Optional<T>>>::type get(
 	    Reference<DB> db,
 	    Snapshot snapshot = Snapshot::False) const {
-		return runTransaction(db, [=, self = *this](Reference<ReadYourWritesTransaction> tr) {
+		return runTransaction(db, [=, self = *this](Reference<typename DB::TransactionT> tr) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
@@ -442,7 +441,7 @@ public:
 	typename std::enable_if<is_transaction_creator<DB>, Future<T>>::type getD(Reference<DB> db,
 	                                                                          Snapshot snapshot = Snapshot::False,
 	                                                                          T defaultValue = T()) const {
-		return runTransaction(db, [=, self = *this](Reference<ReadYourWritesTransaction> tr) {
+		return runTransaction(db, [=, self = *this](Reference<typename DB::TransactionT> tr) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
@@ -454,7 +453,7 @@ public:
 	typename std::enable_if<is_transaction_creator<DB>, Future<T>>::type getOrThrow(Reference<DB> db,
 	                                                                                Snapshot snapshot = Snapshot::False,
 	                                                                                Error err = key_not_found()) const {
-		return runTransaction(db, [=, self = *this](Reference<ReadYourWritesTransaction> tr) {
+		return runTransaction(db, [=, self = *this](Reference<typename DB::TransactionT> tr) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
@@ -469,7 +468,7 @@ public:
 
 	template <class DB>
 	typename std::enable_if<is_transaction_creator<DB>, Future<Void>>::type set(Reference<DB> db, T const& val) {
-		return runTransaction(db, [=, self = *this](Reference<ReadYourWritesTransaction> tr) {
+		return runTransaction(db, [=, self = *this](Reference<typename DB::TransactionT> tr) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			self.set(tr, val);

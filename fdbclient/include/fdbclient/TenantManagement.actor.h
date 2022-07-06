@@ -181,7 +181,7 @@ Future<std::pair<Optional<TenantMapEntry>, bool>> createTenantTransaction(
 		tenantEntry.assignedCluster = Optional<ClusterName>();
 	}
 
-	tr->set(tenantMapKey, newTenant.encode());
+	tr->set(tenantMapKey, tenantEntry.encode());
 
 	if (tenantEntry.tenantGroup.present()) {
 		tr->set(getTenantGroupIndexKey(tenantEntry.tenantGroup.get(), name), ""_sr);
@@ -338,7 +338,7 @@ Future<Void> deleteTenant(Reference<DB> db,
 template <class Transaction>
 void configureTenantTransaction(Transaction tr, TenantNameRef tenantName, TenantMapEntry tenantEntry) {
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
-	tr->set(tenantName.withPrefix(tenantMapPrefix), encodeTenantEntry(tenantEntry));
+	tr->set(tenantName.withPrefix(tenantMapPrefix), tenantEntry.encode());
 }
 
 ACTOR template <class Transaction>

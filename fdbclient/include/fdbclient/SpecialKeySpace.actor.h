@@ -538,18 +538,5 @@ public:
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
 };
 
-class TenantRangeImpl : public SpecialKeyRangeRWImpl {
-public:
-	const static KeyRangeRef submoduleRange;
-	const static KeyRangeRef mapSubRange;
-	const static KeyRangeRef configureSubRange;
-
-	explicit TenantRangeImpl(KeyRangeRef kr);
-	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
-	                             KeyRangeRef kr,
-	                             GetRangeLimits limitsHint) const override;
-	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
-};
-
 #include "flow/unactorcompiler.h"
 #endif

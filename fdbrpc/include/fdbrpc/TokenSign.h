@@ -100,10 +100,10 @@ struct TokenRef {
 StringRef makeTokenPart(Arena& arena, TokenRef tokenSpec);
 
 // Generate plaintext signature of token part
-StringRef makePlainSignature(Arena& arena, Algorithm alg, StringRef tokenPart, StringRef privateKeyDer);
+StringRef makePlainSignature(Arena& arena, Algorithm alg, StringRef tokenPart, PrivateKey privateKey);
 
 // One-stop function to make JWT from spec
-StringRef signToken(Arena& arena, TokenRef tokenSpec, StringRef privateKeyDer);
+StringRef signToken(Arena& arena, TokenRef tokenSpec, PrivateKey privateKey);
 
 // Parse passed b64url-encoded header part and materialize its contents into tokenOut,
 // using memory allocated from arena
@@ -123,7 +123,7 @@ bool parseSignaturePart(Arena& arena, TokenRef& tokenOut, StringRef b64urlSignat
 bool parseToken(Arena& arena, TokenRef& tokenOut, StringRef signedTokenIn);
 
 // Verify only the signature part of signed token string against its token part, not its content
-bool verifyToken(StringRef signedToken, StringRef publicKeyDer);
+bool verifyToken(StringRef signedToken, PublicKey publicKey);
 
 } // namespace authz::jwt
 

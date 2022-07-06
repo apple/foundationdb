@@ -32,6 +32,7 @@
 static const int InvalidEncodedSize = 0;
 
 struct VersionVector {
+	constexpr static FileIdentifier file_identifier = 5253554;
 	friend struct serializable_traits<VersionVector>;
 	boost::container::flat_map<Tag, Version> versions; // An ordered map. (Note:
 	                                                   // changing this to an unordered

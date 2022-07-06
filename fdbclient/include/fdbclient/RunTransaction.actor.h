@@ -41,7 +41,7 @@ Future<decltype(std::declval<Function>()(Reference<ReadYourWritesTransaction>())
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	loop {
 		try {
-			// func should be idempodent; otherwise, retry will get undefined result
+			// func should be idempotent; otherwise, retry will get undefined result
 			state decltype(std::declval<Function>()(Reference<ReadYourWritesTransaction>()).getValue()) result =
 			    wait(func(tr));
 			wait(tr->commit());
@@ -59,7 +59,7 @@ Future<decltype(std::declval<Function>()(Reference<typename DB::TransactionT>())
 	state Reference<typename DB::TransactionT> tr = db->createTransaction();
 	loop {
 		try {
-			// func should be idempodent; otherwise, retry will get undefined result
+			// func should be idempotent; otherwise, retry will get undefined result
 			state decltype(std::declval<Function>()(Reference<typename DB::TransactionT>()).getValue()) result =
 			    wait(func(tr));
 			wait(safeThreadFutureToFuture(tr->commit()));
