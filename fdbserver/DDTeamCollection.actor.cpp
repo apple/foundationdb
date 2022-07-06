@@ -954,7 +954,7 @@ public:
 							rs.priority = maxPriority;
 
 							// self->output.send(rs);
-							if (CLIENT_KNOBS->DD_FRAMEWORK) {
+							if (CLIENT_KNOBS->PHYSICAL_SHARD_AWARE_DD) {
 								self->dataDistributionRuntimeMonitor->triggerDDEvent(
 								    DDEventBuffer::DDEvent(maxPriority, rs), true);
 							} else {

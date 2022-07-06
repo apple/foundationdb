@@ -491,7 +491,7 @@ public:
 	void setDDEventBuffer(Reference<DDEventBuffer> buffer) { ddEventBuffer = buffer; };
 
 	void triggerDDEvent(DDEventBuffer::DDEvent inputEvent, bool immediate) {
-		ASSERT(CLIENT_KNOBS->DD_FRAMEWORK);
+		ASSERT(CLIENT_KNOBS->PHYSICAL_SHARD_AWARE_DD);
 
 		ddEventBuffer->append(inputEvent);
 		if (!immediate) {

@@ -750,7 +750,7 @@ ACTOR Future<Void> monitorPhysicalShardStatus(
 		}
 
 		// Issue relocations for cold physicalShard
-		if (CLIENT_KNOBS->PHYSICAL_SHARD_SIZE_CONTROL) {
+		if (CLIENT_KNOBS->PHYSICAL_SHARD_AWARE_DD && CLIENT_KNOBS->PHYSICAL_SHARD_SIZE_CONTROL) {
 			for (auto& physicalShardID : smallPhysicalShards) {
 				dataDistributionRuntimeMonitor->triggerDDEvent(
 				    DDEventBuffer::DDEvent(SERVER_KNOBS->PRIORITY_MERGE_PHYSICAL_SHARD, physicalShardID), true);
@@ -996,7 +996,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 					    unhealthy ? SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY : SERVER_KNOBS->PRIORITY_RECOVER_MOVE;
 					RelocateShard rs(keys, priority, RelocateReason::OTHER);
 					// output.send(rs);
-					if (CLIENT_KNOBS->DD_FRAMEWORK) {
+					if (CLIENT_KNOBS->PHYSICAL_SHARD_AWARE_DD) {
 						dataDistributionRuntimeMonitor->triggerDDEvent(DDEventBuffer::DDEvent(priority, rs), true);
 					} else {
 						output.send(rs);
@@ -1014,7 +1014,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 					rs.dataMoveId = meta.id;
 					rs.cancelled = true;
 					// output.send(rs);
-					if (CLIENT_KNOBS->DD_FRAMEWORK) {
+					if (CLIENT_KNOBS->PHYSICAL_SHARD_AWARE_DD) {
 						dataDistributionRuntimeMonitor->triggerDDEvent(
 						    DDEventBuffer::DDEvent(SERVER_KNOBS->PRIORITY_RECOVER_MOVE, rs), true);
 					} else {
@@ -1042,7 +1042,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 					// When restoring a DataMove, the destination team is determined, and hence
 					shardsAffectedByTeamFailure->moveShard(rs.keys, teams);
 					// output.send(rs);
-					if (CLIENT_KNOBS->DD_FRAMEWORK) {
+					if (CLIENT_KNOBS->PHYSICAL_SHARD_AWARE_DD) {
 						dataDistributionRuntimeMonitor->triggerDDEvent(
 						    DDEventBuffer::DDEvent(SERVER_KNOBS->PRIORITY_RECOVER_MOVE, rs), true);
 					} else {

@@ -1918,7 +1918,7 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
 		if (metrics.keys == shards[i]) {
 			RelocateShard rs(metrics.keys.get(), priority, RelocateReason::REBALANCE_READ);
 			// self->output.send(rs);
-			if (CLIENT_KNOBS->DD_FRAMEWORK) {
+			if (CLIENT_KNOBS->PHYSICAL_SHARD_AWARE_DD) {
 				self->dataDistributionRuntimeMonitor->triggerDDEvent(DDEventBuffer::DDEvent(priority, rs), true);
 			} else {
 				self->output.send(rs);
@@ -1996,7 +1996,7 @@ ACTOR static Future<bool> rebalanceTeams(DDQueueData* self,
 		if (moveShard == shards[i]) {
 			RelocateShard rs(moveShard, priority, RelocateReason::REBALANCE_DISK);
 			// self->output.send(rs);
-			if (CLIENT_KNOBS->DD_FRAMEWORK) {
+			if (CLIENT_KNOBS->PHYSICAL_SHARD_AWARE_DD) {
 				self->dataDistributionRuntimeMonitor->triggerDDEvent(DDEventBuffer::DDEvent(priority, rs), true);
 			} else {
 				self->output.send(rs);

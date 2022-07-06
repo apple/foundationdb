@@ -314,7 +314,7 @@ ACTOR Future<Void> trackShardMetrics(DataDistributionTracker::SafeAccessor self,
 							std::vector<uint64_t> oversizePhysicalShards =
 							    self()->physicalShardCollection->updatePhysicalShardMetricsByKeyRange(
 							        keys, metrics.first.get(), shardMetrics->get().get().metrics, initWithNewMetrics);
-							if (CLIENT_KNOBS->DD_FRAMEWORK && CLIENT_KNOBS->PHYSICAL_SHARD_SIZE_CONTROL) {
+							if (CLIENT_KNOBS->PHYSICAL_SHARD_AWARE_DD && CLIENT_KNOBS->PHYSICAL_SHARD_SIZE_CONTROL) {
 								for (auto physicalShardID : oversizePhysicalShards) {
 									self()->dataDistributionRuntimeMonitor->triggerDDEvent(
 									    DDEventBuffer::DDEvent(SERVER_KNOBS->PRIORITY_SPLIT_PHYSICAL_SHARD,
@@ -550,7 +550,7 @@ ACTOR Future<Void> shardSplitter(DataDistributionTracker* self,
 			self->shardsAffectedByTeamFailure->defineShard(r);
 			RelocateShard rs(r, SERVER_KNOBS->PRIORITY_SPLIT_SHARD, RelocateReason::OTHER);
 			// self->output.send(rs);
-			if (CLIENT_KNOBS->DD_FRAMEWORK) {
+			if (CLIENT_KNOBS->PHYSICAL_SHARD_AWARE_DD) {
 				self->dataDistributionRuntimeMonitor->triggerDDEvent(
 				    DDEventBuffer::DDEvent(SERVER_KNOBS->PRIORITY_SPLIT_SHARD, rs), true);
 			} else {
@@ -562,7 +562,7 @@ ACTOR Future<Void> shardSplitter(DataDistributionTracker* self,
 			self->shardsAffectedByTeamFailure->defineShard(r);
 			RelocateShard rs(r, SERVER_KNOBS->PRIORITY_SPLIT_SHARD, RelocateReason::OTHER);
 			// self->output.send(rs);
-			if (CLIENT_KNOBS->DD_FRAMEWORK) {
+			if (CLIENT_KNOBS->PHYSICAL_SHARD_AWARE_DD) {
 				self->dataDistributionRuntimeMonitor->triggerDDEvent(
 				    DDEventBuffer::DDEvent(SERVER_KNOBS->PRIORITY_SPLIT_SHARD, rs), true);
 			} else {
@@ -715,7 +715,7 @@ Future<Void> shardMerger(DataDistributionTracker* self,
 	self->shardsAffectedByTeamFailure->defineShard(mergeRange);
 	RelocateShard rs(mergeRange, SERVER_KNOBS->PRIORITY_MERGE_SHARD, RelocateReason::OTHER);
 	// self->output.send(rs);
-	if (CLIENT_KNOBS->DD_FRAMEWORK) {
+	if (CLIENT_KNOBS->PHYSICAL_SHARD_AWARE_DD) {
 		self->dataDistributionRuntimeMonitor->triggerDDEvent(
 		    DDEventBuffer::DDEvent(SERVER_KNOBS->PRIORITY_MERGE_SHARD, rs), true);
 	} else {
