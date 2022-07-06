@@ -26,6 +26,7 @@
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbclient/GenericManagementAPI.actor.h"
+#include "fdbclient/TenantManagement.actor.h"
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "flow/ActorCollection.h"
 #include "fdbserver/workloads/workloads.actor.h"
@@ -225,7 +226,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 			// The last tenant will not be created
 			if (i < self->numTenants) {
-				tenantFutures.push_back(::success(ManagementAPI::createTenant(cx.getReference(), tenantName)));
+				tenantFutures.push_back(::success(TenantAPI::createTenant(cx.getReference(), tenantName)));
 				self->createdTenants.insert(tenantName);
 			}
 		}

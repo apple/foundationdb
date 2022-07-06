@@ -2773,7 +2773,7 @@ public:
 					when(wait(checkSignal)) {
 						checkSignal = Never();
 						isFetchingResults = true;
-						serverListAndProcessClasses = getServerListAndProcessClasses(&tr);
+						serverListAndProcessClasses = NativeAPI::getServerListAndProcessClasses(&tr);
 					}
 					when(std::vector<std::pair<StorageServerInterface, ProcessClass>> results =
 					         wait(serverListAndProcessClasses)) {
@@ -2815,7 +2815,7 @@ public:
 					when(waitNext(serverRemoved)) {
 						if (isFetchingResults) {
 							tr = Transaction(self->cx);
-							serverListAndProcessClasses = getServerListAndProcessClasses(&tr);
+							serverListAndProcessClasses = NativeAPI::getServerListAndProcessClasses(&tr);
 						}
 					}
 				}

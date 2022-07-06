@@ -18,12 +18,12 @@
  * limitations under the License.
  */
 
-#include "sqlite/sqlite3.h"
+#include "sqlite3.h"
 #include <stdio.h>
 #include <string>
 #include <vector>
 #include "fdbrpc/fdbrpc.h"
-#include "fdbrpc/IAsyncFile.h"
+#include "flow/IAsyncFile.h"
 #include "fdbserver/CoroFlow.h"
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/AsyncFileReadAhead.actor.h"

@@ -19,6 +19,7 @@
  */
 
 #include "fdbserver/DDTxnProcessor.h"
+#include "fdbclient/NativeAPI.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 class DDTxnProcessorImpl {
@@ -91,4 +92,9 @@ class DDTxnProcessorImpl {
 
 Future<IDDTxnProcessor::SourceServers> DDTxnProcessor::getSourceServersForRange(const KeyRangeRef range) {
 	return DDTxnProcessorImpl::getSourceServersForRange(cx, range);
+}
+
+Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> DDTxnProcessor::getServerListAndProcessClasses() {
+	Transaction tr(cx);
+	return NativeAPI::getServerListAndProcessClasses(&tr);
 }
