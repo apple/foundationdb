@@ -8387,6 +8387,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 				for (const auto& range : data->pendingRemoveRanges.begin()->second) {
 					data->storage.removeRange(range);
 				}
+				data->pendingRemoveRanges.erase(data->pendingRemoveRanges.begin());
 			}
 			removeKVSRanges = false;
 		}
