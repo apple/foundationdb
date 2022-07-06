@@ -162,6 +162,8 @@ int cleanup(Database db, Arguments const& args) {
 				std::string tenant_name = "tenant" + std::to_string(i);
 				tenantResults[i - (batch * batch_size)] = Tenant::getTenant(getTx, toBytesRef(tenant_name));
 			}
+			tx.setOption(FDBTransactionOption::FDB_TR_OPTION_LOCK_AWARE, BytesRef());
+			tx.setOption(FDBTransactionOption::FDB_TR_OPTION_RAW_ACCESS, BytesRef());
 			for (int i = batch * batch_size; i < args.total_tenants && i < (batch + 1) * batch_size; ++i) {
 				std::string tenant_name = "tenant" + std::to_string(i);
 				while (true) {
@@ -179,8 +181,6 @@ int cleanup(Database db, Arguments const& args) {
 								// and compute the prefix on our own
 								rapidjson::Value& docVal = doc["id"];
 								uint64_t id = docVal.GetUint64();
-								tx.setOption(FDBTransactionOption::FDB_TR_OPTION_LOCK_AWARE, BytesRef());
-								tx.setOption(FDBTransactionOption::FDB_TR_OPTION_RAW_ACCESS, BytesRef());
 								ByteString tenantPrefix(8, '\0');
 								computeTenantPrefix(tenantPrefix, id);
 								ByteString tenantPrefixEnd = strinc(tenantPrefix);
