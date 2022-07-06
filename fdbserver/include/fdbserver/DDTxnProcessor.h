@@ -35,6 +35,8 @@ public:
 	// get the storage server list and Process class
 	virtual Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses() = 0;
 
+	virtual Database getDatabase() const { return Database(); }
+
 	virtual ~IDDTxnProcessor() = default;
 };
 
@@ -53,6 +55,8 @@ public:
 
 	// Call NativeAPI implementation directly
 	Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses() override;
+
+	Database getDatabase() const override { return cx; }
 };
 
 // run mock transaction

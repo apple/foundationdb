@@ -29,6 +29,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/LogSystem.h"
+#include "fdbserver/DDTxnProcessor.h"
 #include "fdbclient/RunTransaction.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -314,6 +315,34 @@ struct ShardTrackedData {
 	Future<Void> trackShard;
 	Future<Void> trackBytes;
 	Reference<AsyncVar<Optional<ShardMetrics>>> stats;
+};
+
+struct DataDistributorData;
+
+// The static ACTOR wrapper
+class DataDistributorImpl;
+// A wrapper of DataDistribution actor
+class DataDistributor : NonCopyable, ReferenceCounted<DataDistributor> {
+	friend class DataDistributorImpl;
+	std::vector<Optional<Key>> primaryDcId;
+	std::vector<Optional<Key>> remoteDcIds;
+	DatabaseConfiguration configuration;
+	Reference<InitialDataDistribution> initData;
+	MoveKeysLock lock;
+	Reference<DDTeamCollection> primaryTeamCollection;
+	Reference<DDTeamCollection> remoteTeamCollection;
+	bool trackerCancelled;
+	bool ddIsTenantAware = SERVER_KNOBS->DD_TENANT_AWARENESS_ENABLED;
+	PromiseStream<GetMetricsListRequest> getShardMetricsList;
+	std::shared_ptr<DDEnabledState> ddEnabledState;
+	std::shared_ptr<IDDTxnProcessor> txnProcessor;
+	Reference<DataDistributorData> data;
+
+public:
+	DataDistributor() = default;
+	DataDistributor(std::shared_ptr<IDDTxnProcessor> txnProcessor, Reference<DataDistributorData> data, std::shared_ptr<DDEnabledState> enabledState);
+	Future<Void> run();
+
 };
 
 ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> initData,
