@@ -143,8 +143,17 @@ private:
 #endif
 
 public:
-	PriorityMultiLock(int concurrency, int maxPriority, int launchLimit = std::numeric_limits<int>::max())
-	  : concurrency(concurrency), available(concurrency), waiting(0), launchLimit(launchLimit) {
+	PriorityMultiLock(int concurrency, int maxPriority, std::string launchLimit)
+	  : concurrency(concurrency), available(concurrency), waiting(0) {
+		this->launchLimit.resize(maxPriority + 1);
+		std::stringstream launchLimitStream(launchLimit);
+		size_t index = 0;
+		while (launchLimitStream.good()) {
+			std::string limit;
+			getline(launchLimitStream, limit, ',');
+			this->launchLimit[index++] = std::stoi(limit);
+		}
+		ASSERT(index == maxPriority + 1);
 		waiters.resize(maxPriority + 1);
 		fRunner = runner(this);
 	}
@@ -215,6 +224,7 @@ private:
 
 		// Priority to try to run tasks from next
 		state int priority = maxPriority;
+		state int ioLaunchLimit = self->launchLimit[priority];
 		state Queue* pQueue = &self->waiters[maxPriority];
 
 		// Track the number of waiters unlocked at the same priority in a row
@@ -242,7 +252,7 @@ private:
 				                    lastPriorityCount,
 				                    self->toString().c_str());
 
-				while (!pQueue->empty() && ++lastPriorityCount < self->launchLimit) {
+				while (!pQueue->empty() && ++lastPriorityCount < ioLaunchLimit) {
 					Waiter w = pQueue->front();
 					pQueue->pop_front();
 					--self->waiting;
@@ -280,7 +290,7 @@ private:
 				} else {
 					--priority;
 				}
-
+				ioLaunchLimit = self->launchLimit[priority];
 				pQueue = &self->waiters[priority];
 				lastPriorityCount = 0;
 			}
@@ -290,7 +300,7 @@ private:
 	int concurrency;
 	int available;
 	int waiting;
-	int launchLimit;
+	std::vector<int> launchLimit;
 	std::vector<Queue> waiters;
 	Deque<Future<Void>> runners;
 	Future<Void> fRunner;
@@ -417,7 +427,7 @@ std::string toString(const std::pair<F, S>& o) {
 constexpr static int ioMinPriority = 0;
 constexpr static int ioLeafPriority = 1;
 constexpr static int ioMaxPriority = 3;
-
+constexpr static int maxConcurrentReadsLaunchLimit = std::numeric_limits<int>::max();
 // A FIFO queue of T stored as a linked list of pages.
 // Main operations are pop(), pushBack(), pushFront(), and flush().
 //
@@ -2195,7 +2205,8 @@ public:
 	          bool memoryOnly,
 	          std::shared_ptr<IEncryptionKeyProvider> keyProvider,
 	          Promise<Void> errorPromise = {})
-	  : keyProvider(keyProvider), ioLock(FLOW_KNOBS->MAX_OUTSTANDING, ioMaxPriority, FLOW_KNOBS->MAX_OUTSTANDING / 2),
+	  : keyProvider(keyProvider),
+	    ioLock(FLOW_KNOBS->MAX_OUTSTANDING, ioMaxPriority, SERVER_KNOBS->REDWOOD_PRIORITY_LAUNCH_LIMITS),
 	    pageCacheBytes(pageCacheSizeBytes), desiredPageSize(desiredPageSize), desiredExtentSize(desiredExtentSize),
 	    filename(filename), memoryOnly(memoryOnly), errorPromise(errorPromise),
 	    remapCleanupWindowBytes(remapCleanupWindowBytes), concurrentExtentReads(new FlowLock(concurrentExtentReads)) {
@@ -7676,7 +7687,9 @@ RedwoodRecordRef VersionedBTree::dbEnd(LiteralStringRef("\xff\xff\xff\xff\xff"))
 class KeyValueStoreRedwood : public IKeyValueStore {
 public:
 	KeyValueStoreRedwood(std::string filename, UID logID)
-	  : m_filename(filename), m_concurrentReads(SERVER_KNOBS->REDWOOD_KVSTORE_CONCURRENT_READS, 0),
+	  : m_filename(filename), m_concurrentReads(SERVER_KNOBS->REDWOOD_KVSTORE_CONCURRENT_READS,
+	                                            0,
+	                                            std::to_string(maxConcurrentReadsLaunchLimit)),
 	    prefetch(SERVER_KNOBS->REDWOOD_KVSTORE_RANGE_PREFETCH) {
 
 		int pageSize =
