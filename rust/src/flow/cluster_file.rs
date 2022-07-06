@@ -1,21 +1,24 @@
-use super::Result;
+use super::{Error, Result};
 use regex::Regex;
 use std::net::SocketAddr;
+use std::str::FromStr;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-enum ClusterHost {
+pub enum ClusterHost {
     IPAddr(SocketAddr, bool /*tls?*/),
     Hostname(String, u16, bool /*tls?*/),
 }
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-struct ClusterFile {
+pub struct ClusterFile {
     description: String,
     id: String,
     hosts: Vec<ClusterHost>,
 }
 
-impl ClusterFile {
-    fn parse_string(input: &str) -> Result<Self> {
+impl FromStr for ClusterFile {
+    type Err = Error;
+
+    fn from_str(input: &str) -> Result<Self> {
         // expect "key:desc@host:port[,host:port...]"
         let tokens: Vec<&str> = input.split('@').collect();
         if tokens.len() != 2 {
@@ -97,15 +100,15 @@ impl ClusterFile {
 
 #[test]
 fn test_cluster_file() -> Result<()> {
-    ClusterFile::parse_string("45FiQ41H:45FiQ41H@127.0.0.1:4000")?;
-    ClusterFile::parse_string("test:test@127.0.0.1:4501")?;
-    ClusterFile::parse_string(
+    ClusterFile::from_str("45FiQ41H:45FiQ41H@127.0.0.1:4000")?;
+    ClusterFile::from_str("test:test@127.0.0.1:4501")?;
+    ClusterFile::from_str(
         "test:test@127.0.0.1:4501:tls,127.0.0.1:4502:tls,127.0.0.1:4503:tls",
     )?;
-    ClusterFile::parse_string("test:test@127.0.0.1:4501:tls,127.0.0.1:4502:tls,127.0.0.1:4502:tls")
+    ClusterFile::from_str("test:test@127.0.0.1:4501:tls,127.0.0.1:4502:tls,127.0.0.1:4502:tls")
         .expect_err("Expected error!");
-    ClusterFile::parse_string("test:test@localhost:4501")?;
-    ClusterFile::parse_string("test:test@localhost:4501:tls")?;
+    ClusterFile::from_str("test:test@localhost:4501")?;
+    ClusterFile::from_str("test:test@localhost:4501:tls")?;
 
     Ok(())
 }

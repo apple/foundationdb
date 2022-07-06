@@ -37,7 +37,7 @@ pub struct LoopbackHandler {
 }
 
 impl LoopbackHandler {
-    pub fn new(/*out_tx: mpsc::Sender<FlowMessage>*/) -> Result<Arc<Self>> {
+    pub fn new() -> Result<Arc<Self>> {
         Ok(Arc::new(Self {
             fit: FileIdentifierNames::new().unwrap(),
             in_flight_requests: dashmap::DashMap::new(),
@@ -46,8 +46,6 @@ impl LoopbackHandler {
     }
 
     pub fn register_well_known_endpoint(&self, wltoken: WLTOKEN, endpoint: Box<dyn FlowHandler>)
-    // where
-    // F: 'static + Send + Sync + Fn(FlowMessage) -> FlowFuture,
     {
         self.well_known_endpoints.insert(wltoken, endpoint);
     }

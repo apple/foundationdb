@@ -14,7 +14,7 @@ async fn main() -> Result<()> {
     );
     let listen_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 6789);
     let pool = ConnectionKeeper::new(Some(listen_addr), loopback_handler);
-    pool.listen().await?;
+    pool.listen(Some(listen_addr)).await?;
     println!("Goodbye, cruel world!");
     Ok(())
 }
