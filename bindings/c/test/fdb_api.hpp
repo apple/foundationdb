@@ -91,6 +91,21 @@ inline int intSize(BytesRef b) {
 	return static_cast<int>(b.size());
 }
 
+template <template <class...> class StringLike, class Char>
+ByteString strinc(const StringLike<Char>& s) {
+	int index;
+	for (index = s.size() - 1; index >= 0; index--)
+		if (s[index] != 255)
+			break;
+
+	// Must not be called with a string that consists only of zero or more '\xff' bytes.
+	assert(index >= 0);
+
+	ByteString byteResult(s.substr(0, index + 1));
+	byteResult[byteResult.size() - 1]++;
+	return byteResult;
+}
+
 class Error {
 public:
 	using CodeType = native::fdb_error_t;
@@ -387,6 +402,7 @@ template <typename VarTraits>
 class TypedFuture : public Future {
 	friend class Future;
 	friend class Transaction;
+	friend class Tenant;
 	using SelfType = TypedFuture<VarTraits>;
 	using Future::Future;
 	// hide type-unsafe inherited functions
@@ -609,6 +625,13 @@ public:
 		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_RAW_ACCESS, BytesRef());
 		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_LOCK_AWARE, BytesRef());
 		tr.clear(toBytesRef(fmt::format("{}{}", tenantManagementMapPrefix, toCharsRef(name))));
+	}
+
+	static TypedFuture<future_var::ValueRef> getTenant(Transaction tr, BytesRef name) {
+		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_READ_SYSTEM_KEYS, BytesRef());
+		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_LOCK_AWARE, BytesRef());
+		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_RAW_ACCESS, BytesRef());
+		return tr.get(toBytesRef(fmt::format("{}{}", tenantManagementMapPrefix, toCharsRef(name))), false);
 	}
 
 	Transaction createTransaction() {
