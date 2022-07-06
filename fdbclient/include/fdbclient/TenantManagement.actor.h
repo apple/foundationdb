@@ -296,8 +296,8 @@ Future<Void> renameTenant(Reference<DB> db, TenantName oldName, TenantName newNa
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			state<Optional<TenantMapEntry>> oldEntry;
-			state<Optional<TenantMapEntry>> newEntry;
+			state Optional<TenantMapEntry> oldEntry;
+			state Optional<TenantMapEntry> newEntry;
 			wait(store(oldEntry, tryGetTenantTransaction(tr, oldName)) &&
 			     store(newEntry, tryGetTenantTransaction(tr, newName)));
 			if (firstTry) {
