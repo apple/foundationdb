@@ -112,8 +112,8 @@ if(NOT WIN32)
     test/unit/fdb_api.cpp
     test/unit/fdb_api.hpp)
 
-  add_library(fdb_cpp INTERFACE)
-  target_sources(fdb_cpp INTERFACE test/fdb_api.hpp)
+  add_library(fdb_cpp INTERFACE test/fdb_api.hpp)
+  target_sources(fdb_cpp INTERFACE )
   target_include_directories(fdb_cpp INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/test)
   target_link_libraries(fdb_cpp INTERFACE fmt::fmt)
 
@@ -187,19 +187,13 @@ if(NOT WIN32)
   endif()
   target_link_libraries(fdb_c_api_tester_impl PRIVATE SimpleOpt)
 
-  add_dependencies(fdb_c_setup_tests doctest)
-  add_dependencies(fdb_c_unit_tests_impl doctest)
-  add_dependencies(fdb_c_unit_tests_version_510 doctest)
-  add_dependencies(disconnected_timeout_unit_tests doctest)
-  target_include_directories(fdb_c_setup_tests PUBLIC ${DOCTEST_INCLUDE_DIR})
-  target_include_directories(fdb_c_unit_tests_impl PUBLIC ${DOCTEST_INCLUDE_DIR} ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/)
-  target_include_directories(fdb_c_unit_tests_version_510 PUBLIC ${DOCTEST_INCLUDE_DIR} ${CMAKE_BINARY_DIR}/flow/include)
-  target_include_directories(disconnected_timeout_unit_tests PUBLIC ${DOCTEST_INCLUDE_DIR})
-  target_link_libraries(fdb_c_setup_tests PRIVATE fdb_c Threads::Threads)
-  target_link_libraries(fdb_c_unit_tests_impl PRIVATE fdb_c Threads::Threads fdbclient rapidjson)
-  target_link_libraries(fdb_c_unit_tests_version_510 PRIVATE fdb_c Threads::Threads)
-  target_link_libraries(trace_partial_file_suffix_test PRIVATE fdb_c Threads::Threads flow)
-  target_link_libraries(disconnected_timeout_unit_tests PRIVATE fdb_c Threads::Threads)
+  target_include_directories(fdb_c_unit_tests_impl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/)
+  target_include_directories(fdb_c_unit_tests_version_510 PUBLIC ${CMAKE_BINARY_DIR}/flow/include)
+  target_link_libraries(fdb_c_setup_tests PRIVATE fdb_c Threads::Threads doctest)
+  target_link_libraries(fdb_c_unit_tests_impl PRIVATE fdb_c Threads::Threads fdbclient rapidjson doctest)
+  target_link_libraries(fdb_c_unit_tests_version_510 PRIVATE fdb_c Threads::Threads doctest)
+  target_link_libraries(trace_partial_file_suffix_test PRIVATE fdb_c Threads::Threads flow doctest)
+  target_link_libraries(disconnected_timeout_unit_tests PRIVATE fdb_c Threads::Threads doctest)
 
   # do not set RPATH for mako
   set_property(TARGET mako PROPERTY SKIP_BUILD_RPATH TRUE)
@@ -426,7 +420,12 @@ if (NOT WIN32 AND NOT APPLE AND NOT OPEN_FOR_IDE)
 endif()
 
 # Generate shim library in Linux builds
-if (NOT WIN32 AND NOT APPLE AND NOT OPEN_FOR_IDE)
+if (OPEN_FOR_IDE)
+
+  add_library(fdb_c_shim OBJECT fdb_c_shim.cpp)
+  target_link_libraries(fdb_c_shim PUBLIC dl)
+
+elseif(NOT WIN32 AND NOT APPLE AND NOT OPEN_FOR_IDE) # Linux Only
 
   set(SHIM_LIB_OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR})
 
