@@ -389,6 +389,8 @@ extern const KeyRef tagThrottleSignalKey;
 extern const KeyRef tagThrottleAutoEnabledKey;
 extern const KeyRef tagThrottleLimitKey;
 extern const KeyRef tagThrottleCountKey;
+extern const KeyRangeRef tagQuotaKeys;
+extern const KeyRef tagQuotaPrefix;
 
 // Log Range constant variables
 // Used in the backup pipeline to track mutations
@@ -628,9 +630,6 @@ extern const KeyRef tenantMapPrefix;
 extern const KeyRef tenantMapPrivatePrefix;
 extern const KeyRef tenantLastIdKey;
 extern const KeyRef tenantDataPrefixKey;
-
-Value encodeTenantEntry(TenantMapEntry const& tenantEntry);
-TenantMapEntry decodeTenantEntry(ValueRef const& value);
 
 #pragma clang diagnostic pop
 

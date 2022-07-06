@@ -22,6 +22,7 @@
 #include <limits>
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/TenantManagement.actor.h"
+#include "fdbclient/TenantSpecialKeys.actor.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/Knobs.h"
@@ -49,8 +50,9 @@ struct TenantManagementWorkload : TestWorkload {
 	const TenantName tenantNamePrefix = "tenant_management_workload_"_sr;
 	TenantName localTenantNamePrefix;
 
-	const Key specialKeysTenantMapPrefix = TenantMapRangeImpl::submoduleRange.begin.withPrefix(
-	    SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin);
+	const Key specialKeysTenantMapPrefix = SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT)
+	                                           .begin.withSuffix(TenantRangeImpl<true>::submoduleRange.begin)
+	                                           .withSuffix(TenantRangeImpl<true>::mapSubRange.begin);
 
 	int maxTenants;
 	double testDuration;
