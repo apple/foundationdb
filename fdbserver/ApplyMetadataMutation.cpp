@@ -24,6 +24,7 @@
 #include "fdbclient/Notified.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/ApplyMetadataMutation.h"
+#include "fdbserver/EncryptedMutationMessage.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/LogProtocolMessage.h"
 #include "fdbserver/LogSystem.h"
@@ -67,13 +68,14 @@ public:
 	                           ProxyCommitData& proxyCommitData_,
 	                           Reference<ILogSystem> logSystem_,
 	                           LogPushData* toCommit_,
+	                           const std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>* cipherKeys_,
 	                           bool& confChange_,
 	                           Version version,
 	                           Version popVersion_,
 	                           bool initialCommit_)
 	  : spanContext(spanContext_), dbgid(proxyCommitData_.dbgid), arena(arena_), mutations(mutations_),
-	    txnStateStore(proxyCommitData_.txnStateStore), toCommit(toCommit_), confChange(confChange_),
-	    logSystem(logSystem_), version(version), popVersion(popVersion_),
+	    txnStateStore(proxyCommitData_.txnStateStore), toCommit(toCommit_), cipherKeys(cipherKeys_),
+	    confChange(confChange_), logSystem(logSystem_), version(version), popVersion(popVersion_),
 	    vecBackupKeys(&proxyCommitData_.vecBackupKeys), keyInfo(&proxyCommitData_.keyInfo),
 	    cacheInfo(&proxyCommitData_.cacheInfo),
 	    uid_applyMutationsData(proxyCommitData_.firstProxy ? &proxyCommitData_.uid_applyMutationsData : nullptr),
@@ -107,6 +109,9 @@ private:
 
 	// non-null if these mutations were part of a new commit handled by this commit proxy
 	LogPushData* toCommit = nullptr;
+
+	// Cipher keys used to encrypt to be committed mutations
+	const std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>* cipherKeys = nullptr;
 
 	// Flag indicates if the configure is changed
 	bool& confChange;
@@ -152,6 +157,16 @@ private:
 	bool dummyConfChange = false;
 
 private:
+	void writeMutation(const MutationRef& m) {
+		if (forResolver || !SERVER_KNOBS->ENABLE_TLOG_ENCRYPTION) {
+			toCommit->writeTypedMessage(m);
+		} else {
+			ASSERT(cipherKeys != nullptr);
+			Arena arena;
+			toCommit->writeTypedMessage(EncryptedMutationMessage::encryptMetadata(arena, *cipherKeys, m));
+		}
+	}
+
 	void checkSetKeyServersPrefix(MutationRef m) {
 		if (!m.param1.startsWith(keyServersPrefix)) {
 			return;
@@ -221,7 +236,7 @@ private:
 			    .detail("Tag", tag.toString());
 
 			toCommit->addTag(tag);
-			toCommit->writeTypedMessage(privatized);
+			writeMutation(privatized);
 		}
 	}
 
@@ -243,7 +258,7 @@ private:
 			toCommit->writeTypedMessage(LogProtocolMessage(), true);
 			TraceEvent(SevDebug, "SendingPrivatized_ServerTag", dbgid).detail("M", privatized);
 			toCommit->addTag(tag);
-			toCommit->writeTypedMessage(privatized);
+			writeMutation(privatized);
 		}
 		if (!initialCommit) {
 			txnStateStore->set(KeyValueRef(m.param1, m.param2));
@@ -303,7 +318,7 @@ private:
 		privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 		TraceEvent(SevDebug, "SendingPrivatized_CacheTag", dbgid).detail("M", privatized);
 		toCommit->addTag(cacheTag);
-		toCommit->writeTypedMessage(privatized);
+		writeMutation(privatized);
 	}
 
 	void checkSetConfigKeys(MutationRef m) {
@@ -354,7 +369,7 @@ private:
 				toCommit->addTags(allSources);
 			}
 			TraceEvent(SevDebug, "SendingPrivatized_ChangeFeed", dbgid).detail("M", privatized);
-			toCommit->writeTypedMessage(privatized);
+			writeMutation(privatized);
 		}
 	}
 
@@ -390,8 +405,8 @@ private:
 		}
 
 		// Normally uses key backed map, so have to use same unpacking code here.
-		UID ssId = Codec<UID>::unpack(Tuple::unpack(m.param1.removePrefix(tssMappingKeys.begin)));
-		UID tssId = Codec<UID>::unpack(Tuple::unpack(m.param2));
+		UID ssId = TupleCodec<UID>::unpack(m.param1.removePrefix(tssMappingKeys.begin));
+		UID tssId = TupleCodec<UID>::unpack(m.param2);
 		if (!initialCommit) {
 			txnStateStore->set(KeyValueRef(m.param1, m.param2));
 		}
@@ -408,7 +423,7 @@ private:
 			if (tagV.present()) {
 				TraceEvent(SevDebug, "SendingPrivatized_TSSID", dbgid).detail("M", privatized);
 				toCommit->addTag(decodeServerTagValue(tagV.get()));
-				toCommit->writeTypedMessage(privatized);
+				writeMutation(privatized);
 			}
 		}
 	}
@@ -437,7 +452,7 @@ private:
 			privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 			TraceEvent(SevDebug, "SendingPrivatized_TSSQuarantine", dbgid).detail("M", privatized);
 			toCommit->addTag(decodeServerTagValue(tagV.get()));
-			toCommit->writeTypedMessage(privatized);
+			writeMutation(privatized);
 		}
 	}
 
@@ -560,7 +575,7 @@ private:
 		privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 		TraceEvent(SevDebug, "SendingPrivatized_GlobalKeys", dbgid).detail("M", privatized);
 		toCommit->addTags(allTags);
-		toCommit->writeTypedMessage(privatized);
+		writeMutation(privatized);
 	}
 
 	// Generates private mutations for the target storage server, instructing it to create a checkpoint.
@@ -582,7 +597,7 @@ private:
 			    .detail("Checkpoint", checkpoint.toString());
 
 			toCommit->addTag(tag);
-			toCommit->writeTypedMessage(privatized);
+			writeMutation(privatized);
 		}
 	}
 
@@ -638,8 +653,8 @@ private:
 		if (m.param1.startsWith(tenantMapPrefix)) {
 			if (tenantMap) {
 				ASSERT(version != invalidVersion);
-				Standalone<StringRef> tenantName = m.param1.removePrefix(tenantMapPrefix);
-				TenantMapEntry tenantEntry = decodeTenantEntry(m.param2);
+				TenantName tenantName = m.param1.removePrefix(tenantMapPrefix);
+				TenantMapEntry tenantEntry = TenantMapEntry::decode(m.param2);
 
 				TraceEvent("CommitProxyInsertTenant", dbgid).detail("Tenant", tenantName).detail("Version", version);
 				(*tenantMap)[tenantName] = tenantEntry;
@@ -662,7 +677,7 @@ private:
 
 				MutationRef privatized = m;
 				privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
-				toCommit->writeTypedMessage(privatized);
+				writeMutation(privatized);
 			}
 
 			TEST(true); // Tenant added to map
@@ -760,7 +775,7 @@ private:
 					TraceEvent(SevDebug, "SendingPrivatized_ClearServerTag", dbgid).detail("M", privatized);
 
 					toCommit->addTag(decodeServerTagValue(kv.value));
-					toCommit->writeTypedMessage(privatized);
+					writeMutation(privatized);
 				}
 			}
 			// Might be a tss removal, which doesn't store a tag there.
@@ -784,7 +799,7 @@ private:
 								TraceEvent(SevDebug, "SendingPrivatized_TSSClearServerTag", dbgid)
 								    .detail("M", privatized);
 								toCommit->addTag(decodeServerTagValue(tagV.get()));
-								toCommit->writeTypedMessage(privatized);
+								writeMutation(privatized);
 							}
 						}
 					}
@@ -950,7 +965,7 @@ private:
 		ASSERT(rangeToClear.singleKeyRange());
 
 		// Normally uses key backed map, so have to use same unpacking code here.
-		UID ssId = Codec<UID>::unpack(Tuple::unpack(m.param1.removePrefix(tssMappingKeys.begin)));
+		UID ssId = TupleCodec<UID>::unpack(m.param1.removePrefix(tssMappingKeys.begin));
 		if (!initialCommit) {
 			txnStateStore->clear(rangeToClear);
 		}
@@ -969,7 +984,7 @@ private:
 			privatized.param2 = m.param2.withPrefix(systemKeys.begin, arena);
 			TraceEvent(SevDebug, "SendingPrivatized_ClearTSSMapping", dbgid).detail("M", privatized);
 			toCommit->addTag(decodeServerTagValue(tagV.get()));
-			toCommit->writeTypedMessage(privatized);
+			writeMutation(privatized);
 		}
 	}
 
@@ -996,7 +1011,7 @@ private:
 					privatized.param2 = m.param2.withPrefix(systemKeys.begin, arena);
 					TraceEvent(SevDebug, "SendingPrivatized_ClearTSSQuarantine", dbgid).detail("M", privatized);
 					toCommit->addTag(decodeServerTagValue(tagV.get()));
-					toCommit->writeTypedMessage(privatized);
+					writeMutation(privatized);
 				}
 			}
 		}
@@ -1050,7 +1065,7 @@ private:
 				privatized.type = MutationRef::ClearRange;
 				privatized.param1 = range.begin.withPrefix(systemKeys.begin, arena);
 				privatized.param2 = range.end.withPrefix(systemKeys.begin, arena);
-				toCommit->writeTypedMessage(privatized);
+				writeMutation(privatized);
 			}
 
 			TEST(true); // Tenant cleared from map
@@ -1146,9 +1161,9 @@ private:
 			    .detail("MBegin", mutationBegin)
 			    .detail("MEnd", mutationEnd);
 			toCommit->addTags(allTags);
-			toCommit->writeTypedMessage(mutationBegin);
+			writeMutation(mutationBegin);
 			toCommit->addTags(allTags);
-			toCommit->writeTypedMessage(mutationEnd);
+			writeMutation(mutationEnd);
 		}
 	}
 
@@ -1223,6 +1238,7 @@ void applyMetadataMutations(SpanContext const& spanContext,
                             Reference<ILogSystem> logSystem,
                             const VectorRef<MutationRef>& mutations,
                             LogPushData* toCommit,
+                            const std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>* pCipherKeys,
                             bool& confChange,
                             Version version,
                             Version popVersion,
@@ -1234,6 +1250,7 @@ void applyMetadataMutations(SpanContext const& spanContext,
 	                           proxyCommitData,
 	                           logSystem,
 	                           toCommit,
+	                           pCipherKeys,
 	                           confChange,
 	                           version,
 	                           popVersion,

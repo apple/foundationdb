@@ -28,7 +28,7 @@
 #include <stdint.h>
 #include <time.h>
 
-#include "flow/SimpleOpt.h"
+#include "SimpleOpt/SimpleOpt.h"
 #include "fdbclient/SimpleIni.h"
 #include "fdbclient/versions.h"
 

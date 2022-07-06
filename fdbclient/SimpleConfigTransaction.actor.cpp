@@ -24,7 +24,6 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/IKnobCollection.h"
 #include "fdbclient/SimpleConfigTransaction.h"
-#include "fdbserver/Knobs.h"
 #include "flow/Arena.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 

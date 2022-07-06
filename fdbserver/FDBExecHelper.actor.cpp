@@ -27,7 +27,7 @@
 #include "fdbrpc/FlowProcess.actor.h"
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/simulator.h"
-#include "fdbclient/WellKnownEndpoints.h"
+#include "fdbrpc/WellKnownEndpoints.h"
 #include "fdbclient/versions.h"
 #include "fdbserver/CoroFlow.h"
 #include "fdbserver/FDBExecHelper.actor.h"
@@ -426,14 +426,12 @@ ACTOR Future<int> execHelper(ExecCmdValueString* execArg, UID snapUID, std::stri
 	} else {
 		// copy the files
 		state std::string folderFrom = folder + "/.";
-		state std::string folderTo = folder + "-snap-" + uidStr.toString();
-		double maxSimDelayTime = 10.0;
-		folderTo = folder + "-snap-" + uidStr.toString() + "-" + role;
+		state std::string folderTo = folder + "-snap-" + uidStr.toString() + "-" + role;
 		std::vector<std::string> paramList;
 		std::string mkdirBin = "/bin/mkdir";
 		paramList.push_back(mkdirBin);
 		paramList.push_back(folderTo);
-		cmdErr = spawnProcess(mkdirBin, paramList, maxWaitTime, false /*isSync*/, maxSimDelayTime);
+		cmdErr = spawnProcess(mkdirBin, paramList, maxWaitTime, false /*isSync*/, 10.0);
 		wait(success(cmdErr));
 		err = cmdErr.get();
 		if (err == 0) {
