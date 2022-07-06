@@ -448,7 +448,7 @@ struct DataShard {
 struct PhysicalShard {
 	PhysicalShard(rocksdb::DB* db, std::string id) : db(db), id(id), isInitialized(false) {}
 	PhysicalShard(rocksdb::DB* db, std::string id, rocksdb::ColumnFamilyHandle* handle)
-	  : db(db), id(id), cf(handle), isInitialized(false) {
+	  : db(db), id(id), cf(handle), isInitialized(true) {
 		ASSERT(cf);
 		readIterPool = std::make_shared<ReadIteratorPool>(db, cf, id);
 	}
