@@ -296,8 +296,10 @@ Future<Void> renameTenant(Reference<DB> db, TenantName oldName, TenantName newNa
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			state Optional<TenantMapEntry> oldEntry = wait(tryGetTenantTransaction(tr, oldName));
-			state Optional<TenantMapEntry> newEntry = wait(tryGetTenantTransaction(tr, newName));
+			state<Optional<TenantMapEntry>> oldEntry;
+			state<Optional<TenantMapEntry>> newEntry;
+			wait(store(oldEntry, tryGetTenantTransaction(tr, oldName)) &&
+			     store(newEntry, tryGetTenantTransaction(tr, newName)));
 			if (firstTry) {
 				if (!oldEntry.present()) {
 					throw tenant_not_found();
@@ -324,11 +326,9 @@ Future<Void> renameTenant(Reference<DB> db, TenantName oldName, TenantName newNa
 				if (!oldEntry.present()) {
 					throw tenant_not_found();
 				}
-				if (newEntry.present()) {
-					throw tenant_already_exists();
-				}
 				int64_t checkId = oldEntry.get().id;
-				// Assert that the id has not changed since we first read this
+				// If the id has changed since we made our first attempt,
+				// then it's possible we've already moved the tenant. Don't move it again.
 				if (id != checkId) {
 					throw tenant_not_found();
 				}
