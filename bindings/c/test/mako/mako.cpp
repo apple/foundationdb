@@ -177,8 +177,9 @@ int cleanup(Database db, Arguments const& args) {
 							doc.Parse(metadata);
 							if (!doc.HasParseError()) {
 								// rapidjson does not decode the prefix as the same byte string that
-								// was passed as input. For a workaround, we take the id
-								// and compute the prefix on our own
+								// was passed as input. This is because we use a non-standard encoding.
+								// The encoding will likely change in the future.
+								// For a workaround, we take the id and compute the prefix on our own
 								rapidjson::Value& docVal = doc["id"];
 								uint64_t id = docVal.GetUint64();
 								ByteString tenantPrefix(8, '\0');
