@@ -35,8 +35,8 @@
 
 namespace fdb_cli {
 
-const KeyRangeRef tenantSpecialKeyRange(LiteralStringRef("\xff\xff/management/tenant_map/"),
-                                        LiteralStringRef("\xff\xff/management/tenant_map0"));
+const KeyRangeRef tenantSpecialKeyRange(LiteralStringRef("\xff\xff/management/tenant/map/"),
+                                        LiteralStringRef("\xff\xff/management/tenant/map0"));
 
 // createtenant command
 ACTOR Future<bool> createTenantCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {

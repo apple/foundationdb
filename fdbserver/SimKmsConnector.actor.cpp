@@ -139,7 +139,7 @@ ACTOR Future<Void> ekLookupByDomainIds(Reference<SimKmsConnectorContext> ctx,
 	    req.debugId.present() ? TraceEvent("SimKmsGetsByDomIds", interf.id()) : Optional<TraceEvent>();
 
 	if (dbgDIdTrace.present()) {
-		dbgDIdTrace.get().detail("DbgId", req.debugId.get());
+		dbgDIdTrace.get().setMaxEventLength(16384).detail("DbgId", req.debugId.get());
 	}
 
 	// Map encryptionDomainId to corresponding EncryptKeyCtx element using a modulo operation. This

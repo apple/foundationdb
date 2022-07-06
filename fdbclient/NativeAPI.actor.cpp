@@ -61,6 +61,7 @@
 #include "fdbclient/SpecialKeySpace.actor.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/SystemData.h"
+#include "fdbclient/TenantSpecialKeys.actor.h"
 #include "fdbclient/TransactionLineage.h"
 #include "fdbclient/versions.h"
 #include "fdbrpc/WellKnownEndpoints.h"
@@ -234,6 +235,10 @@ void DatabaseContext::getLatestCommitVersions(const Reference<LocationInfo>& loc
 	}
 
 	if (!info->readVersionObtainedFromGrvProxy) {
+		return;
+	}
+
+	if (ssVersionVectorCache.getMaxVersion() == invalidVersion) {
 		return;
 	}
 
@@ -1491,11 +1496,17 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 	smoothMidShardSize.reset(CLIENT_KNOBS->INIT_MID_SHARD_BYTES);
 	globalConfig = std::make_unique<GlobalConfig>(this);
 
-	if (apiVersionAtLeast(710)) {
+	if (apiVersionAtLeast(720)) {
 		registerSpecialKeysImpl(
 		    SpecialKeySpace::MODULE::MANAGEMENT,
 		    SpecialKeySpace::IMPLTYPE::READWRITE,
-		    std::make_unique<TenantMapRangeImpl>(SpecialKeySpace::getManagementApiCommandRange("tenantmap")));
+		    std::make_unique<TenantRangeImpl<true>>(SpecialKeySpace::getManagementApiCommandRange("tenant")));
+	}
+	if (apiVersionAtLeast(710) && !apiVersionAtLeast(720)) {
+		registerSpecialKeysImpl(
+		    SpecialKeySpace::MODULE::MANAGEMENT,
+		    SpecialKeySpace::IMPLTYPE::READWRITE,
+		    std::make_unique<TenantRangeImpl<false>>(SpecialKeySpace::getManagementApiCommandRange("tenantmap")));
 	}
 	if (apiVersionAtLeast(700)) {
 		registerSpecialKeysImpl(SpecialKeySpace::MODULE::ERRORMSG,
@@ -3474,10 +3485,12 @@ ACTOR Future<Version> waitForCommittedVersion(Database cx, Version version, Span
 					cx->minAcceptableReadVersion = std::min(cx->minAcceptableReadVersion, v.version);
 					if (v.midShardSize > 0)
 						cx->smoothMidShardSize.setTotal(v.midShardSize);
-					if (cx->isCurrentGrvProxy(v.proxyId)) {
-						cx->ssVersionVectorCache.applyDelta(v.ssVersionVectorDelta);
-					} else {
-						cx->ssVersionVectorCache.clear();
+					if (cx->versionVectorCacheActive(v.ssVersionVectorDelta)) {
+						if (cx->isCurrentGrvProxy(v.proxyId)) {
+							cx->ssVersionVectorCache.applyDelta(v.ssVersionVectorDelta);
+						} else {
+							cx->ssVersionVectorCache.clear();
+						}
 					}
 					if (v.version >= version)
 						return v.version;
@@ -3506,10 +3519,12 @@ ACTOR Future<Version> getRawVersion(Reference<TransactionState> trState) {
 			                                                     TransactionPriority::IMMEDIATE,
 			                                                     trState->cx->ssVersionVectorCache.getMaxVersion()),
 			                               trState->cx->taskID))) {
-				if (trState->cx->isCurrentGrvProxy(v.proxyId)) {
-					trState->cx->ssVersionVectorCache.applyDelta(v.ssVersionVectorDelta);
-				} else {
-					trState->cx->ssVersionVectorCache.clear();
+				if (trState->cx->versionVectorCacheActive(v.ssVersionVectorDelta)) {
+					if (trState->cx->isCurrentGrvProxy(v.proxyId)) {
+						trState->cx->ssVersionVectorCache.applyDelta(v.ssVersionVectorDelta);
+					} else {
+						trState->cx->ssVersionVectorCache.clear();
+					}
 				}
 				return v.version;
 			}
@@ -6645,10 +6660,12 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion(SpanContext parentSpa
 						    "TransactionDebug", debugID.get().first(), "NativeAPI.getConsistentReadVersion.After");
 					ASSERT(v.version > 0);
 					cx->minAcceptableReadVersion = std::min(cx->minAcceptableReadVersion, v.version);
-					if (cx->isCurrentGrvProxy(v.proxyId)) {
-						cx->ssVersionVectorCache.applyDelta(v.ssVersionVectorDelta);
-					} else {
-						continue; // stale GRV reply, retry
+					if (cx->versionVectorCacheActive(v.ssVersionVectorDelta)) {
+						if (cx->isCurrentGrvProxy(v.proxyId)) {
+							cx->ssVersionVectorCache.applyDelta(v.ssVersionVectorDelta);
+						} else {
+							continue; // stale GRV reply, retry
+						}
 					}
 					return v;
 				}
@@ -6835,10 +6852,12 @@ ACTOR Future<Version> extractReadVersion(Reference<TransactionState> trState,
 	}
 
 	metadataVersion.send(rep.metadataVersion);
-	if (trState->cx->isCurrentGrvProxy(rep.proxyId)) {
-		trState->cx->ssVersionVectorCache.applyDelta(rep.ssVersionVectorDelta);
-	} else {
-		trState->cx->ssVersionVectorCache.clear();
+	if (trState->cx->versionVectorCacheActive(rep.ssVersionVectorDelta)) {
+		if (trState->cx->isCurrentGrvProxy(rep.proxyId)) {
+			trState->cx->ssVersionVectorCache.applyDelta(rep.ssVersionVectorDelta);
+		} else {
+			trState->cx->ssVersionVectorCache.clear();
+		}
 	}
 	return rep.version;
 }
@@ -7909,7 +7928,8 @@ ACTOR Future<Void> splitStorageMetricsStream(PromiseStream<Key> resultStream,
                                              Database cx,
                                              KeyRange keys,
                                              StorageMetrics limit,
-                                             StorageMetrics estimated) {
+                                             StorageMetrics estimated,
+                                             Optional<int> minSplitBytes) {
 	state Span span("NAPI:SplitStorageMetricsStream"_loc);
 	state Key beginKey = keys.begin;
 	state Key globalLastKey = beginKey;
@@ -7940,7 +7960,8 @@ ACTOR Future<Void> splitStorageMetricsStream(PromiseStream<Key> resultStream,
 				                        limit,
 				                        localUsed,
 				                        estimated,
-				                        i == locations.size() - 1 && keys.end <= locations.back().range.end);
+				                        i == locations.size() - 1 && keys.end <= locations.back().range.end,
+				                        minSplitBytes);
 				SplitMetricsReply res = wait(loadBalance(locations[i].locations->locations(),
 				                                         &StorageServerInterface::splitMetrics,
 				                                         req,
@@ -8003,15 +8024,17 @@ ACTOR Future<Void> splitStorageMetricsStream(PromiseStream<Key> resultStream,
 Future<Void> DatabaseContext::splitStorageMetricsStream(const PromiseStream<Key>& resultStream,
                                                         KeyRange const& keys,
                                                         StorageMetrics const& limit,
-                                                        StorageMetrics const& estimated) {
+                                                        StorageMetrics const& estimated,
+                                                        Optional<int> const& minSplitBytes) {
 	return ::splitStorageMetricsStream(
-	    resultStream, Database(Reference<DatabaseContext>::addRef(this)), keys, limit, estimated);
+	    resultStream, Database(Reference<DatabaseContext>::addRef(this)), keys, limit, estimated, minSplitBytes);
 }
 
 ACTOR Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(Database cx,
                                                                 KeyRange keys,
                                                                 StorageMetrics limit,
-                                                                StorageMetrics estimated) {
+                                                                StorageMetrics estimated,
+                                                                Optional<int> minSplitBytes) {
 	state Span span("NAPI:SplitStorageMetrics"_loc);
 	loop {
 		state std::vector<KeyRangeLocationInfo> locations =
@@ -8040,7 +8063,8 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(Database cx,
 
 				state int i = 0;
 				for (; i < locations.size(); i++) {
-					SplitMetricsRequest req(locations[i].range, limit, used, estimated, i == locations.size() - 1);
+					SplitMetricsRequest req(
+					    locations[i].range, limit, used, estimated, i == locations.size() - 1, minSplitBytes);
 					SplitMetricsReply res = wait(loadBalance(locations[i].locations->locations(),
 					                                         &StorageServerInterface::splitMetrics,
 					                                         req,
@@ -8084,8 +8108,10 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(Database cx,
 
 Future<Standalone<VectorRef<KeyRef>>> DatabaseContext::splitStorageMetrics(KeyRange const& keys,
                                                                            StorageMetrics const& limit,
-                                                                           StorageMetrics const& estimated) {
-	return ::splitStorageMetrics(Database(Reference<DatabaseContext>::addRef(this)), keys, limit, estimated);
+                                                                           StorageMetrics const& estimated,
+                                                                           Optional<int> const& minSplitBytes) {
+	return ::splitStorageMetrics(
+	    Database(Reference<DatabaseContext>::addRef(this)), keys, limit, estimated, minSplitBytes);
 }
 
 void Transaction::checkDeferredError() const {
