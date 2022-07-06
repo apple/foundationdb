@@ -447,7 +447,8 @@ struct DataShard {
 // PhysicalShard is stored as a column family in rocksdb. Each PhysicalShard has its own iterator pool.
 struct PhysicalShard {
 	PhysicalShard(rocksdb::DB* db, std::string id) : db(db), id(id), isInitialized(false) {}
-	PhysicalShard(rocksdb::DB* db, std::string id, rocksdb::ColumnFamilyHandle* handle) : db(db), id(id), cf(handle), isInitialized(false) {
+	PhysicalShard(rocksdb::DB* db, std::string id, rocksdb::ColumnFamilyHandle* handle)
+	  : db(db), id(id), cf(handle), isInitialized(false) {
 		ASSERT(cf);
 		readIterPool = std::make_shared<ReadIteratorPool>(db, cf, id);
 	}
