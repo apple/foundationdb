@@ -334,7 +334,7 @@ Future<Void> renameTenant(Reference<DB> db, TenantName oldName, TenantName newNa
 				}
 			}
 			tr->clear(oldNameKey);
-			tr->set(newNameKey, encodeTenantEntry(oldEntry.get()));
+			tr->set(newNameKey, oldEntry.get().encode());
 			wait(safeThreadFutureToFuture(tr->commit()));
 			TraceEvent("RenameTenantSuccess").detail("OldName", oldName).detail("NewName", newName);
 			return Void();
