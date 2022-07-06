@@ -1,5 +1,5 @@
 /*
- * network.cpp
+ * network.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -24,6 +24,7 @@
 #include "flow/network.h"
 #include "flow/flow.h"
 #include "flow/UnitTest.h"
+#include "flow/actorcompiler.h" // has to be last include
 
 bool IPAddress::operator==(const IPAddress& rhs) const {
 	return addr == rhs.addr;
