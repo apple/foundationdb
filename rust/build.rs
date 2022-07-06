@@ -1,8 +1,12 @@
+use clap::CommandFactory;
+use clap_complete::{generate_to, shells::Bash};
 use flatc_rust;
 
 use std::path::Path;
 
-fn main() {
+include!("src/fdb/cli.rs");
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rerun-if-changed=flatbuffers/*.fbs");
 
     let paths = std::fs::read_dir("flatbuffers/").unwrap();
@@ -23,4 +27,16 @@ fn main() {
         ..Default::default()
     })
     .expect("flatc");
+
+    match std::env::var_os("BASH_COMPLETION_DIR") {
+        Some(out) => {
+            // let mut cmd = build_cli();
+            let mut cmd = Cli::command();
+            let path = generate_to(Bash, &mut cmd, "fdb", out)?;
+            println!("cargo:warning=completion file is generated: {:?}", path);
+        }
+        None => (),
+    };
+
+    Ok(())
 }

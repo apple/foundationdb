@@ -4,7 +4,7 @@
 mod ping_request;
 
 #[allow(dead_code, unused_imports)]
-#[path = "../../target/flatbuffers/Void_generated.rs"]
+#[path = "../../target/flatbuffers/ErrorOrVoid_generated.rs"]
 mod void;
 
 use crate::flow::file_identifier::{FileIdentifier, IdentifierType, ParsedFileIdentifier};

@@ -11,6 +11,7 @@ debug = true
 
 [dependencies]
 bytes = {version = "1.1"}
+clap = {version = "3.2", features = ["cargo", "derive"] }
 dashmap = {version = "5.3" }
 fastrand = {version = "1.7" } # would use rand, but it makes it hard to get a non-cryptographically-secure, thread-local RNG, and fastrand makes that easy.
 fxhash = {version = "0.2.1" }
@@ -20,22 +21,28 @@ num-traits = "0.2"
 num-derive = "0.3"
 pin-project = "1.0"
 regex = "1"
-tokio = { version = "1.10", features = ["full"] }
+tokio = { version = "1.19", features = ["full"] }
 tokio-util = { version = "0.7", features = ["codec"] }
 tower = { version = "0.4.12", features = ["full"] }
 xxhash-rust = { version = "0.8.5", features = ["xxh3"] }
 
 [dev-dependencies]
-tokio = { version = "1", features = ["test-util"] }
+tokio = { version = "1.19", features = ["test-util"] }
 criterion = { version = "0.3.5", features = ["html_reports"] }
 
 [build-dependencies]
 flatc-rust = { version = "0.2" }
+clap = {version = "3.2", features = ["cargo", "derive"]}
+clap_complete = "3.2"
 
 [[bin]]
-name = "server"
-path = "src/server/main.rs"
+name = "testserver"
+path = "src/testserver/main.rs"
 
 [[bin]]
-name = "client"
-path = "src/client/main.rs"
+name = "testclient"
+path = "src/testclient/main.rs"
+
+[[bin]]
+name = "fdb"
+path = "src/fdb/main.rs"
