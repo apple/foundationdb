@@ -190,6 +190,7 @@ namespace coveragetool
                 int backslashIndexTrim = lines[j].Trim().IndexOf("//");
                 if (i != j && backslashIndexTrim != 0) break;
                 int backslashIndex = lines[j].IndexOf("//");
+                if (comment != "") comment += " ";
                 comment += lines[j].Substring(backslashIndex + 3);
                 j++;
             }
