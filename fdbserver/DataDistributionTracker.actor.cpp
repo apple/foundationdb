@@ -380,7 +380,7 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> getSplitKeys(DataDistributionTracker
 		state Transaction tr(self->cx);
 		try {
 			Standalone<VectorRef<KeyRef>> keys =
-			    wait(self->cx->splitStorageMetrics(splitRange, splitMetrics, estimated));
+			    wait(self->cx->splitStorageMetrics(splitRange, splitMetrics, estimated, SERVER_KNOBS->MIN_SHARD_BYTES));
 			return keys;
 		} catch (Error& e) {
 			wait(tr.onError(e));
