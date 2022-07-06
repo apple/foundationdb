@@ -1922,32 +1922,40 @@ Future<T> forward(Future<T> from, Promise<T> to) {
 }
 
 ACTOR template <class Transaction>
-Future<Void> buggifiedCommit(Transaction tr, bool buggify, int delayDuration = 60.0) {
-	state int buggifyPoint = 0;
+Future<Void> buggifiedCommit(Transaction tr, bool buggify, int maxDelayDuration = 60.0) {
+	state int buggifyUnknownResultPoint = 0;
+	state int buggifyDelayPoint = 0;
+
 	if (buggify) {
-		buggifyPoint = deterministicRandom()->randomInt(1, 5);
+		int choice = deterministicRandom()->randomInt(1, 9);
+		buggifyUnknownResultPoint = choice / 3;
+		buggifyDelayPoint = choice % 3;
+	}
+
+	// Simulate a delay before commit that could potentially trigger a timeout
+	if (buggifyDelayPoint == 1) {
+		wait(delay(deterministicRandom()->random01() * maxDelayDuration));
 	}
 
 	// Simulate an unknown result that didn't commit
-	if (buggifyPoint == 1) {
-		throw commit_unknown_result();
-	}
+	if (buggifyUnknownResultPoint == 1) {
+		// The delay avoids a no-wait commit.
+		if (!BUGGIFY) {
+			wait(delay(0));
+		}
 
-	// Simulate a long delay before commit that could trigger a timeout
-	if (buggifyPoint == 2) {
-		wait(delay(delayDuration));
+		throw commit_unknown_result();
 	}
 
 	wait(safeThreadFutureToFuture(tr->commit()));
 
-	// Simulate a long delay that could trigger a timeout where the transaction
-	// successfully committed
-	if (buggifyPoint == 3) {
-		wait(delay(delayDuration));
+	// Simulate a long delay after commit that could potentially trigger a timeout
+	if (buggifyDelayPoint == 2) {
+		wait(delay(deterministicRandom()->random01() * maxDelayDuration));
 	}
 
 	// Simulate an unknown result that did commit
-	if (buggifyPoint == 4) {
+	if (buggifyUnknownResultPoint == 2) {
 		throw commit_unknown_result();
 	}
 
