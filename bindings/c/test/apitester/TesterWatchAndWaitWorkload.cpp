@@ -68,7 +68,7 @@ private:
 					        }
 				        });
 			        },
-			        [this, key, cont]() { schedule(cont); });
+			        [this, cont]() { schedule(cont); });
 			    schedule([this, key, newVal] {
 				    execTransaction(
 				        // Set the key to a newVal which is guaranteed to be different from initialVal, i.e.,
