@@ -35,41 +35,50 @@ private:
 		// value, and waits for the watch to be triggered.
 		Key key(randomKeyName());
 		Value initialVal = randomValue();
+		auto newVal = randomValue();
+		// Ensure that newVal is different from initialVal, otherwise watch may not trigger.
+		while (initialVal == newVal) {
+			newVal = randomValue();
+		}
+
 		execTransaction(
 		    [key, initialVal](auto ctx) {
-			    // 1. Set the key to initialVal.
+			    // Set the key to initialVal.
 			    ctx->tx().set(key, initialVal);
 			    ctx->commit();
 		    },
-		    [this, key, initialVal, cont]() {
+		    [this, key, newVal, cont]() {
 			    execTransaction(
-			        [this, key, initialVal](auto ctx) {
-				        // 2. Create a watch for key.
-				        auto watchF = ctx->tx().watch(key);
-				        auto commitF = ctx->tx().commit();
-				        ctx->continueAfterAll({ commitF, watchF }, [ctx] {
-					        // Complete the transaction context once the transaction is committed and the watch is
-					        // triggered.
-					        ctx->done();
-				        });
+			        [key, newVal](auto ctx) {
+				        // Check the value of the key.
+				        auto f = ctx->tx().get(key, false);
+				        ctx->continueAfter(f, [key, f, newVal, ctx] {
+					        if (f.get().has_value() && f.get().value() == newVal) {
+						        // If the key is already at newVal, finish successfully.
+						        ctx->done();
+					        } else {
+						        // Otherwise, create a watch for the key.
+						        auto watchF = ctx->tx().watch(key);
+						        auto commitF = ctx->tx().commit();
 
-				        auto newVal = randomValue();
-				        // Ensure that newVal is different from initialVal, otherwise watch may not trigger.
-				        while (initialVal == newVal) {
-					        newVal = randomValue();
-				        }
-				        schedule([this, key, newVal] {
-					        execTransaction(
-					            // 3. Set the key to a newVal which is guaranteed to be different from initialVal, i.e.,
-					            // must trigger the watch.
-					            [key, newVal](auto ctx) {
-						            ctx->tx().set(key, newVal);
-						            ctx->commit();
-					            },
-					            []() {});
+						        ctx->continueAfterAll({ commitF, watchF }, [ctx] {
+							        // Wait for the watch to report a change (to newVal).
+							        ctx->done();
+						        });
+					        }
 				        });
 			        },
 			        [this, key, cont]() { schedule(cont); });
+			    schedule([this, key, newVal] {
+				    execTransaction(
+				        // Set the key to a newVal which is guaranteed to be different from initialVal, i.e.,
+				        // must trigger the watch.
+				        [key, newVal](auto ctx) {
+					        ctx->tx().set(key, newVal);
+					        ctx->commit();
+				        },
+				        []() {});
+			    });
 		    });
 	}
 };
