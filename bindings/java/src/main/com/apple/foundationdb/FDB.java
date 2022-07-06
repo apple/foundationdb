@@ -27,6 +27,8 @@ import java.util.concurrent.Semaphore;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import com.apple.foundationdb.tuple.ByteArrayUtil;
+
 /**
  * The starting point for accessing FoundationDB.
  *  <br>
@@ -188,6 +190,11 @@ public class FDB {
 
 		Select_API_version(version);
 		singleton = new FDB(version);
+
+		if (version < 720) {
+			TenantManagement.TENANT_MAP_PREFIX = ByteArrayUtil.join(new byte[] { (byte)255, (byte)255 },
+					"/management/tenant_map/".getBytes());
+		}
 
 		return singleton;
 	}
