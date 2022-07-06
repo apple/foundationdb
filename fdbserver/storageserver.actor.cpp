@@ -7021,6 +7021,9 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 				updatedShards.push_back(
 				    StorageServerShard(range, version, desiredId, desiredId, StorageServerShard::ReadWrite));
 				setAvailableStatus(data, range, true);
+				// Note: The initial range is available, however, the shard won't be created in the storage engine
+				// untill version is committed.
+				data->pendingAddRanges[cVer].emplace_back(desiredId, range);
 				TraceEvent(SevVerbose, "SSInitialShard", data->thisServerID)
 				    .detail("Range", range)
 				    .detail("NowAssigned", nowAssigned)
@@ -8216,6 +8219,19 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 			}
 		}
 
+		state bool removeKVSRanges = false;
+		if (!data->pendingRemoveRanges.empty()) {
+			const Version aVer = data->pendingRemoveRanges.begin()->first;
+			if (aVer <= desiredVersion) {
+				TraceEvent(SevDebug, "RemoveRangeVersionSatisfied", data->thisServerID)
+				    .detail("DesiredVersion", desiredVersion)
+				    .detail("DurableVersion", data->durableVersion.get())
+				    .detail("RemoveRangeVersion", aVer);
+				desiredVersion = aVer;
+				removeKVSRanges = true;
+			}
+		}
+
 		if (!data->pendingAddRanges.empty()) {
 			auto u = data->getMutationLog().upper_bound(newOldestVersion);
 			ASSERT(u != data->getMutationLog().end());
@@ -8231,6 +8247,9 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 					fAddRanges.push_back(data->storage.addRange(shard.range, shard.shardId));
 				}
 				wait(waitForAll(fAddRanges));
+				for (const auto& shard : data->pendingAddRanges.begin()->second) {
+					data->storage.persistRangeMapping(shard.range, true);
+				}
 				data->pendingAddRanges.erase(data->pendingAddRanges.begin());
 			}
 		}
@@ -8272,6 +8291,19 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 			wait(yield(TaskPriority::UpdateStorage));
 			if (done)
 				break;
+		}
+
+		if (removeKVSRanges) {
+			TraceEvent(SevDebug, "RemoveKVSRangesVersionDurable", data->thisServerID)
+			    .detail("NewDurableVersion", newOldestVersion)
+			    .detail("DesiredVersion", desiredVersion)
+			    .detail("OldestRemoveKVSRangesVersion", data->pendingRemoveRanges.begin()->first);
+			ASSERT(newOldestVersion <= data->pendingRemoveRanges.begin()->first);
+			if (newOldestVersion == data->pendingRemoveRanges.begin()->first) {
+				for (const auto& range : data->pendingRemoveRanges.begin()->second) {
+					data->storage.persistRangeMapping(range, false);
+				}
+			}
 		}
 
 		std::set<Key> modifiedChangeFeeds = data->fetchingChangeFeeds;
@@ -8345,6 +8377,20 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 
 		debug_advanceMinCommittedVersion(data->thisServerID, newOldestVersion);
 
+		if (removeKVSRanges) {
+			TraceEvent(SevDebug, "RemoveKVSRangesComitted", data->thisServerID)
+			    .detail("NewDurableVersion", newOldestVersion)
+			    .detail("DesiredVersion", desiredVersion)
+			    .detail("OldestRemoveKVSRangesVersion", data->pendingRemoveRanges.begin()->first);
+			ASSERT(newOldestVersion <= data->pendingRemoveRanges.begin()->first);
+			if (newOldestVersion == data->pendingRemoveRanges.begin()->first) {
+				for (const auto& range : data->pendingRemoveRanges.begin()->second) {
+					data->storage.removeRange(range);
+				}
+			}
+			removeKVSRanges = false;
+		}
+
 		if (requireCheckpoint) {
 			// `pendingCheckpoints` is a queue of checkpoint requests ordered by their versoins, and
 			// `newOldestVersion` is chosen such that it is no larger than the smallest pending checkpoing
@@ -8370,13 +8416,6 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 				data->pendingCheckpoints.erase(data->pendingCheckpoints.begin());
 			}
 			requireCheckpoint = false;
-		}
-
-		while (!data->pendingRemoveRanges.empty() && data->pendingRemoveRanges.begin()->first <= newOldestVersion) {
-			for (const auto& range : data->pendingRemoveRanges.begin()->second) {
-				std::vector<std::string> ignored = data->storage.removeRange(range);
-			}
-			data->pendingRemoveRanges.erase(data->pendingRemoveRanges.begin());
 		}
 
 		if (newOldestVersion > data->rebootAfterDurableVersion) {
