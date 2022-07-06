@@ -22,7 +22,7 @@
 #include <memory>
 #include <string>
 
-#include "contrib/fmt-8.1.1/include/fmt/format.h"
+#include "fmt/format.h"
 #include "fdbrpc/simulator.h"
 #include "flow/Arena.h"
 #define BOOST_SYSTEM_NO_LIB
@@ -35,12 +35,12 @@
 #include "flow/ProtocolVersion.h"
 #include "flow/Util.h"
 #include "flow/WriteOnlySet.h"
-#include "fdbrpc/IAsyncFile.h"
+#include "flow/IAsyncFile.h"
 #include "fdbrpc/AsyncFileCached.actor.h"
 #include "fdbrpc/AsyncFileEncrypted.h"
 #include "fdbrpc/AsyncFileNonDurable.actor.h"
 #include "fdbrpc/AsyncFileChaos.h"
-#include "flow/crc32c.h"
+#include "crc32/crc32c.h"
 #include "fdbrpc/TraceFileIO.h"
 #include "flow/FaultInjection.h"
 #include "flow/flow.h"
@@ -53,6 +53,16 @@
 #include "fdbrpc/AsyncFileWriteChecker.h"
 #include "flow/FaultInjection.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
+
+ISimulator* g_pSimulator = nullptr;
+thread_local ISimulator::ProcessInfo* ISimulator::currentProcess = nullptr;
+
+ISimulator::ISimulator()
+  : desiredCoordinators(1), physicalDatacenters(1), processesPerMachine(0), listenersPerProcess(1), usableRegions(1),
+    allowLogSetKills(true), tssMode(TSSMode::Disabled), isStopped(false), lastConnectionFailure(0),
+    connectionFailuresDisableDuration(0), speedUpSimulation(false), backupAgents(BackupAgentType::WaitForType),
+    drAgents(BackupAgentType::WaitForType), allSwapsDisabled(false) {}
+ISimulator::~ISimulator() = default;
 
 bool simulator_should_inject_fault(const char* context, const char* file, int line, int error_code) {
 	if (!g_network->isSimulated() || !faultInjectionActivated)
@@ -1318,7 +1328,8 @@ public:
 		std::vector<LocalityData> primaryLocalitiesDead, primaryLocalitiesLeft;
 
 		for (auto processInfo : getAllProcesses()) {
-			if (processInfo->isAvailableClass() && processInfo->locality.dcId() == dcId) {
+			if (!processInfo->isSpawnedKVProcess() && processInfo->isAvailableClass() &&
+			    processInfo->locality.dcId() == dcId) {
 				if (processInfo->isExcluded() || processInfo->isCleared() || !processInfo->isAvailable()) {
 					primaryProcessesDead.add(processInfo->locality);
 					primaryLocalitiesDead.push_back(processInfo->locality);
@@ -1338,7 +1349,6 @@ public:
 		if (usableRegions > 1 && remoteTLogPolicy && !primaryTLogsDead) {
 			primaryTLogsDead = primaryProcessesDead.validate(remoteTLogPolicy);
 		}
-
 		return primaryTLogsDead || primaryProcessesDead.validate(storagePolicy);
 	}
 
@@ -1592,7 +1602,7 @@ public:
 			    .detail("Protected", protectedAddresses.count(machine->address))
 			    .backtrace();
 			// This will remove all the "tracked" messages that came from the machine being killed
-			if (machine->name != "remote flow process")
+			if (!machine->isSpawnedKVProcess())
 				latestEventCache.clear();
 			machine->failed = true;
 		} else if (kt == InjectFaults) {
@@ -1621,8 +1631,7 @@ public:
 		} else {
 			ASSERT(false);
 		}
-		ASSERT(!protectedAddresses.count(machine->address) || machine->rebooting ||
-		       machine->name == "remote flow process");
+		ASSERT(!protectedAddresses.count(machine->address) || machine->rebooting || machine->isSpawnedKVProcess());
 	}
 	void rebootProcess(ProcessInfo* process, KillType kt) override {
 		if (kt == RebootProcessAndDelete && protectedAddresses.count(process->address)) {
@@ -2488,7 +2497,7 @@ ACTOR void doReboot(ISimulator::ProcessInfo* p, ISimulator::KillType kt) {
 			    .detail("Rebooting", p->rebooting)
 			    .detail("Reliable", p->isReliable());
 			return;
-		} else if (p->name == "remote flow process") {
+		} else if (p->isSpawnedKVProcess()) {
 			TraceEvent(SevDebug, "DoRebootFailed").detail("Name", p->name).detail("Address", p->address);
 			return;
 		} else if (p->getChilds().size()) {

@@ -21,7 +21,7 @@
 #include "flow/ThreadHelper.actor.h"
 #include "flow/Platform.h"
 #include "fdbclient/ThreadSafeTransaction.h"
-#include "bindings/c/foundationdb/ClientWorkload.h"
+#include "foundationdb/ClientWorkload.h"
 #include "fdbserver/workloads/workloads.actor.h"
 
 #include "flow/actorcompiler.h" // has to be last include
@@ -38,12 +38,10 @@ struct FDBPromiseImpl : FDBPromise {
 		if (g_network->isOnMainThread()) {
 			impl.send(*reinterpret_cast<T*>(value));
 		} else {
-			onMainThreadVoid(
-			    [impl = impl, val = *reinterpret_cast<T*>(value)]() -> Future<Void> {
-				    impl.send(val);
-				    return Void();
-			    },
-			    nullptr);
+			onMainThreadVoid([impl = impl, val = *reinterpret_cast<T*>(value)]() -> Future<Void> {
+				impl.send(val);
+				return Void();
+			});
 		}
 	}
 };
@@ -93,13 +91,11 @@ struct FDBLoggerImpl : FDBLogger {
 			traceFun();
 			flushTraceFileVoid();
 		} else {
-			onMainThreadVoid(
-			    [traceFun]() -> Future<Void> {
-				    traceFun();
-				    flushTraceFileVoid();
-				    return Void();
-			    },
-			    nullptr);
+			onMainThreadVoid([traceFun]() -> Future<Void> {
+				traceFun();
+				flushTraceFileVoid();
+				return Void();
+			});
 		}
 	}
 };

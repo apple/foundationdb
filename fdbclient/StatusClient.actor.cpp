@@ -349,13 +349,7 @@ ACTOR Future<Optional<StatusObject>> clientCoordinatorsStatusFetcher(Reference<I
 		int coordinatorsUnavailable = 0;
 		for (int i = 0; i < leaderServers.size(); i++) {
 			StatusObject coordStatus;
-			if (coord.clientLeaderServers[i].hostname.present()) {
-				coordStatus["address"] = coord.clientLeaderServers[i].hostname.get().toString();
-			} else {
-				coordStatus["address"] =
-				    coord.clientLeaderServers[i].getLeader.getEndpoint().getPrimaryAddress().toString();
-			}
-
+			coordStatus["address"] = coord.clientLeaderServers[i].getAddressString();
 			if (leaderServers[i].isReady()) {
 				coordStatus["reachable"] = true;
 			} else {
