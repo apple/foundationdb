@@ -727,17 +727,17 @@ public:
 class ClusterConnectionRecord {
 private:
 	enum class Type { FILE, CONNECTION_STRING };
-	ClusterConnectionRecord(Type type, std::string recordStr) : type(type), recordStr(recordStr) {}
+	ClusterConnectionRecord(Type type, std::string const& recordStr) : type(type), recordStr(recordStr) {}
 
 	Type type;
 	std::string recordStr;
 
 public:
-	static ClusterConnectionRecord fromFile(std::string clusterFilePath) {
+	static ClusterConnectionRecord fromFile(std::string const& clusterFilePath) {
 		return ClusterConnectionRecord(Type::FILE, clusterFilePath);
 	}
 
-	static ClusterConnectionRecord fromConnectionString(std::string connectionString) {
+	static ClusterConnectionRecord fromConnectionString(std::string const& connectionString) {
 		return ClusterConnectionRecord(Type::CONNECTION_STRING, connectionString);
 	}
 
@@ -782,7 +782,7 @@ class MultiVersionDatabase final : public IDatabase, ThreadSafeReferenceCounted<
 public:
 	MultiVersionDatabase(MultiVersionApi* api,
 	                     int threadIdx,
-	                     ClusterConnectionRecord connectionRecord,
+	                     ClusterConnectionRecord const& connectionRecord,
 	                     Reference<IDatabase> db,
 	                     Reference<IDatabase> versionMonitorDb,
 	                     bool openConnectors = true);
@@ -824,7 +824,7 @@ public:
 	// A struct that manages the current connection state of the MultiVersionDatabase. This wraps the underlying
 	// IDatabase object that is currently interacting with the cluster.
 	struct DatabaseState : ThreadSafeReferenceCounted<DatabaseState> {
-		DatabaseState(ClusterConnectionRecord connectionRecord, Reference<IDatabase> versionMonitorDb);
+		DatabaseState(ClusterConnectionRecord const& connectionRecord, Reference<IDatabase> versionMonitorDb);
 
 		// Replaces the active database connection with a new one. Must be called from the main thread.
 		void updateDatabase(Reference<IDatabase> newDb, Reference<ClientInfo> client);
@@ -929,7 +929,7 @@ public:
 	void addNetworkThreadCompletionHook(void (*hook)(void*), void* hookParameter) override;
 
 	// Creates an IDatabase object that represents a connection to the cluster
-	Reference<IDatabase> createDatabase(ClusterConnectionRecord connectionRecord);
+	Reference<IDatabase> createDatabase(ClusterConnectionRecord const& connectionRecord);
 	Reference<IDatabase> createDatabase(const char* clusterFilePath) override;
 	Reference<IDatabase> createDatabaseFromConnectionString(const char* connectionString) override;
 
@@ -945,7 +945,7 @@ public:
 
 	bool callbackOnMainThread;
 	bool localClientDisabled;
-	Future<std::string> updateClusterSharedStateMap(ClusterConnectionRecord connectionRecord,
+	Future<std::string> updateClusterSharedStateMap(ClusterConnectionRecord const& connectionRecord,
 	                                                ProtocolVersion dbProtocolVersion,
 	                                                Reference<IDatabase> db);
 	void clearClusterSharedStateMapEntry(std::string clusterId, ProtocolVersion dbProtocolVersion);

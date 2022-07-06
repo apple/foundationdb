@@ -1421,7 +1421,7 @@ void MultiVersionTenant::TenantState::close() {
 // MultiVersionDatabase
 MultiVersionDatabase::MultiVersionDatabase(MultiVersionApi* api,
                                            int threadIdx,
-                                           ClusterConnectionRecord connectionRecord,
+                                           ClusterConnectionRecord const& connectionRecord,
                                            Reference<IDatabase> db,
                                            Reference<IDatabase> versionMonitorDb,
                                            bool openConnectors)
@@ -1586,7 +1586,7 @@ ThreadFuture<ProtocolVersion> MultiVersionDatabase::getServerProtocol(Optional<P
 	return dbState->versionMonitorDb->getServerProtocol(expectedVersion);
 }
 
-MultiVersionDatabase::DatabaseState::DatabaseState(ClusterConnectionRecord connectionRecord,
+MultiVersionDatabase::DatabaseState::DatabaseState(ClusterConnectionRecord const& connectionRecord,
                                                    Reference<IDatabase> versionMonitorDb)
   : dbVar(new ThreadSafeAsyncVar<Reference<IDatabase>>(Reference<IDatabase>(nullptr))),
     connectionRecord(connectionRecord), versionMonitorDb(versionMonitorDb), closed(false) {}
@@ -2403,7 +2403,7 @@ void MultiVersionApi::addNetworkThreadCompletionHook(void (*hook)(void*), void* 
 }
 
 // Creates an IDatabase object that represents a connection to the cluster
-Reference<IDatabase> MultiVersionApi::createDatabase(ClusterConnectionRecord connectionRecord) {
+Reference<IDatabase> MultiVersionApi::createDatabase(ClusterConnectionRecord const& connectionRecord) {
 	lock.enter();
 	if (!networkSetup) {
 		lock.leave();
@@ -2520,7 +2520,7 @@ ACTOR Future<std::string> updateClusterSharedStateMapImpl(MultiVersionApi* self,
 }
 
 // Must be called from the main thread
-Future<std::string> MultiVersionApi::updateClusterSharedStateMap(ClusterConnectionRecord connectionRecord,
+Future<std::string> MultiVersionApi::updateClusterSharedStateMap(ClusterConnectionRecord const& connectionRecord,
                                                                  ProtocolVersion dbProtocolVersion,
                                                                  Reference<IDatabase> db) {
 	return updateClusterSharedStateMapImpl(this, connectionRecord, dbProtocolVersion, db);
