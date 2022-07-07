@@ -22,6 +22,7 @@
 #include <memory>
 #include <string>
 
+#include "flow/MkCert.h"
 #include "fmt/format.h"
 #include "fdbrpc/simulator.h"
 #include "flow/Arena.h"
@@ -2126,6 +2127,9 @@ public:
 		                    this,
 		                    "",
 		                    "");
+		// create a key pair for AuthZ testing
+		auto key = mkcert::makeEcP256();
+		authKeys.insert(std::make_pair(Standalone<StringRef>("DefaultKey"_sr), key));
 		g_network = net2 = newNet2(TLSConfig(), false, true);
 		g_network->addStopCallback(Net2FileSystem::stop);
 		Net2FileSystem::newFileSystem();
