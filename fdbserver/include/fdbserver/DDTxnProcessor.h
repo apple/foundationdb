@@ -23,6 +23,9 @@
 
 #include "fdbserver/Knobs.h"
 #include "fdbserver/DataDistribution.actor.h"
+#include "DataDistribution.actor.h"
+
+struct InitialDataDistribution;
 
 class IDDTxnProcessor {
 public:
@@ -30,14 +33,30 @@ public:
 		std::vector<UID> srcServers, completeSources; // the same as RelocateData.src, RelocateData.completeSources;
 	};
 	// get the source server list and complete source server list for range
-	virtual Future<SourceServers> getSourceServersForRange(const KeyRangeRef range) = 0;
+	virtual Future<SourceServers> getSourceServersForRange(const KeyRangeRef range) const = 0;
 
 	// get the storage server list and Process class
 	virtual Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses() = 0;
 
-	virtual Database getDatabase() const { return Database(); }
+	virtual Database getDatabase() const { return {}; }
 
 	virtual ~IDDTxnProcessor() = default;
+
+	virtual Future<MoveKeysLock> takeMoveKeysLock(UID ddId) const { return {}; }
+
+	virtual Future<DatabaseConfiguration> getDatabaseConfiguration() const { return {}; }
+
+	virtual Future<Void> updateReplicaKeys(std::vector<Optional<Key>>* primaryIds = nullptr,
+	                                       std::vector<Optional<Key>>* remoteIds = nullptr,
+	                                       DatabaseConfiguration* configuration = nullptr) const {
+		return Void();
+	}
+
+	virtual Future<Reference<InitialDataDistribution>> getInitialDataDistribution(
+	    UID distributorId,
+	    MoveKeysLock moveKeysLock,
+	    std::vector<Optional<Key>> remoteDcIds,
+	    std::shared_ptr<DDEnabledState> ddEnabledState) = 0;
 };
 
 class DDTxnProcessorImpl;
@@ -51,12 +70,28 @@ public:
 	DDTxnProcessor() = default;
 	explicit DDTxnProcessor(Database cx) : cx(cx) {}
 
-	Future<SourceServers> getSourceServersForRange(const KeyRangeRef range) override;
+	Future<SourceServers> getSourceServersForRange(const KeyRangeRef range) const override;
 
 	// Call NativeAPI implementation directly
 	Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses() override;
 
 	Database getDatabase() const override { return cx; }
+
+	Future<MoveKeysLock> takeMoveKeysLock(UID ddId) const override;
+
+	Future<DatabaseConfiguration> getDatabaseConfiguration() const override;
+
+	Future<Void> updateReplicaKeys(std::vector<Optional<Key>>* primaryIds,
+	                               std::vector<Optional<Key>>* remoteIds,
+	                               DatabaseConfiguration* configuration) const override;
+
+	Future<Reference<InitialDataDistribution>> getInitialDataDistribution(
+	    UID distributorId,
+	    MoveKeysLock moveKeysLock,
+	    std::vector<Optional<Key>> remoteDcIds,
+	    std::shared_ptr<DDEnabledState> ddEnabledState) override;
+
+
 };
 
 // run mock transaction
