@@ -20,6 +20,7 @@
 
 #include <cstdint>
 #include <limits>
+#include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/GenericManagementAPI.actor.h"
 #include "fdbclient/MetaclusterManagement.actor.h"
@@ -1017,7 +1018,7 @@ struct TenantManagementWorkload : TestWorkload {
 					ASSERT(newTenantEntry.present());
 
 					// Update Internal Tenant Map and check for correctness
-					TenantState tState = self->createdTenants[oldTenantName];
+					TenantData tState = self->createdTenants[oldTenantName];
 					self->createdTenants[newTenantName] = tState;
 					self->createdTenants.erase(oldTenantName);
 					if (!tState.empty) {
@@ -1032,7 +1033,7 @@ struct TenantManagementWorkload : TestWorkload {
 							}
 						}
 					}
-					wait(self->checkTenant(cx, self, newTenantName, self->createdTenants[newTenantName]));
+					wait(self->checkTenantContents(self, newTenantName, self->createdTenants[newTenantName]));
 				}
 				return Void();
 			} catch (Error& e) {

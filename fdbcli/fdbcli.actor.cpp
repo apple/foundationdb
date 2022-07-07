@@ -1095,7 +1095,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 		if (!opt.exec.present()) {
 			printf("Using cluster file `%s'.\n", ccf->getLocation().c_str());
 		}
-		db = API->createDatabase(ccf);
+		db = API->createDatabase(resolvedClusterFile.first.c_str());
 	} catch (Error& e) {
 		fprintf(stderr, "ERROR: %s (%d)\n", e.what(), e.code());
 		printf("Unable to connect to cluster from `%s'\n", ccf->getLocation().c_str());

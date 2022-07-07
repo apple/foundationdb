@@ -859,35 +859,13 @@ Reference<IDatabase> DLApi::createDatabase609(const char* clusterFilePath) {
 	return makeReference<DLDatabase>(api, dbFuture);
 }
 
-Reference<IDatabase> DLApi::createDatabaseFromFile(std::string filename) {
+Reference<IDatabase> DLApi::createDatabase(const char* clusterFilePath) {
 	if (headerVersion >= 610) {
 		FdbCApi::FDBDatabase* db;
-		throwIfError(api->createDatabase(filename.c_str(), &db));
+		throwIfError(api->createDatabase(clusterFilePath, &db));
 		return Reference<IDatabase>(new DLDatabase(api, db));
 	} else {
-		return DLApi::createDatabase609(filename.c_str());
-	}
-}
-
-Reference<IDatabase> DLApi::createDatabaseFromConnectionString(std::string connectionString) {
-	if (api->createDatabaseFromConnectionString == nullptr) {
-		throw unsupported_operation();
-	}
-
-	FdbCApi::FDBDatabase* db;
-	throwIfError(api->createDatabaseFromConnectionString(connectionString.c_str(), &db));
-	return Reference<IDatabase>(new DLDatabase(api, db));
-}
-
-Reference<IDatabase> DLApi::createDatabase(Reference<IClusterConnectionRecord> connectionRecord) {
-	if (!connectionRecord->supportedExternally()) {
-		throw unsupported_operation();
-	}
-	Optional<std::string> filename = connectionRecord->getFilename();
-	if (filename.present()) {
-		return createDatabaseFromFile(filename.get());
-	} else {
-		return createDatabaseFromConnectionString(connectionRecord->getConnectionString().toString());
+		return DLApi::createDatabase609(clusterFilePath);
 	}
 }
 

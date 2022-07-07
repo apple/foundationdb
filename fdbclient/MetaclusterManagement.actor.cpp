@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/MetaclusterManagement.actor.h"
@@ -27,14 +28,15 @@
 namespace MetaclusterAPI {
 
 ACTOR Future<Reference<IDatabase>> openDatabase(ClusterConnectionString connectionString) {
-	Reference<IClusterConnectionRecord> clusterFile = makeReference<ClusterConnectionMemoryRecord>(connectionString);
 	if (g_network->isSimulated()) {
+		Reference<IClusterConnectionRecord> clusterFile =
+		    makeReference<ClusterConnectionMemoryRecord>(connectionString);
 		Database nativeDb = Database::createDatabase(clusterFile, -1);
 		Reference<IDatabase> threadSafeDb =
 		    wait(unsafeThreadFutureToFuture(ThreadSafeDatabase::createFromExistingDatabase(nativeDb)));
 		return MultiVersionDatabase::debugCreateFromExistingDatabase(threadSafeDb);
 	} else {
-		return MultiVersionApi::api->createDatabase(clusterFile);
+		return MultiVersionApi::api->createDatabaseFromConnectionString(connectionString.toString().c_str());
 	}
 }
 
