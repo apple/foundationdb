@@ -153,6 +153,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER,               150 );
 	init( PRIORITY_TEAM_REDUNDANT,                               200 );
 	init( PRIORITY_MERGE_SHARD,                                  340 );
+	init( PRIORITY_MERGE_PHYSICAL_SHARD,                         340 );
 	init( PRIORITY_POPULATE_REGION,                              600 );
 	init( PRIORITY_TEAM_UNHEALTHY,                               700 );
 	init( PRIORITY_TEAM_2_LEFT,                                  709 );
@@ -160,6 +161,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( PRIORITY_TEAM_FAILED,                                  805 );
 	init( PRIORITY_TEAM_0_LEFT,                                  809 );
 	init( PRIORITY_SPLIT_SHARD,                                  950 ); if( randomize && BUGGIFY ) PRIORITY_SPLIT_SHARD = 350;
+	init( PRIORITY_SPLIT_PHYSICAL_SHARD,                         950 ); if( randomize && BUGGIFY ) PRIORITY_SPLIT_PHYSICAL_SHARD = 350;
 
 	// Data distribution
 	init( READ_REBALANCE_CPU_THRESHOLD,                         15.0 );
@@ -288,6 +290,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( DD_STORAGE_WIGGLE_STUCK_THRESHOLD,                      20 );
 	init( DD_TENANT_AWARENESS_ENABLED,                         false );
 	init( TENANT_CACHE_LIST_REFRESH_INTERVAL,                    2.0 );
+	init( TEAM_COUNT_TAKEN_BY_GET_TEAMS,                           5 );
 
 	// TeamRemover
 	init( TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER,                false ); if( randomize && BUGGIFY ) TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER = deterministicRandom()->random01() < 0.1 ? true : false; // false by default. disable the consistency check when it's true
@@ -407,7 +410,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_COMPACTION_READAHEAD_SIZE,                   32768 ); // 32 KB, performs bigger reads when doing compaction.
 	init( ROCKSDB_BLOCK_SIZE,                                  32768 ); // 32 KB, size of the block in rocksdb cache.
  	init( ENABLE_SHARDED_ROCKSDB,                              false );
- 	init( MAX_PHYSICAL_PHYSICAL_SHARD_BYTES,     		   500000000 );
+ 	init( MAX_PHYSICAL_SHARD_BYTES,                       2000000000 );
+ 	init( MIN_PHYSICAL_SHARD_BYTES,                       1000000000 );
 
 	// Leader election
 	bool longLeaderElection = randomize && BUGGIFY;

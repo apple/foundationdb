@@ -482,6 +482,7 @@ struct DDQueueData {
 	std::vector<TeamCollectionInterface> teamCollections;
 	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
 	Reference<PhysicalShardCollection> physicalShardCollection;
+	Reference<DataDistributionRuntimeMonitor> dataDistributionRuntimeMonitor;
 	PromiseStream<Promise<int64_t>> getAverageShardBytes;
 
 	FlowLock startMoveKeysParallelismLock;
@@ -586,7 +587,8 @@ struct DDQueueData {
 	            FutureStream<RelocateShard> input,
 	            PromiseStream<GetMetricsRequest> getShardMetrics,
 	            PromiseStream<GetTopKMetricsRequest> getTopKMetrics,
-	            Reference<PhysicalShardCollection> physicalShardCollection)
+	            Reference<PhysicalShardCollection> physicalShardCollection,
+	            Reference<DataDistributionRuntimeMonitor> dataDistributionRuntimeMonitor)
 	  : distributorId(mid), lock(lock), cx(cx), txnProcessor(new DDTxnProcessor(cx)), teamCollections(teamCollections),
 	    shardsAffectedByTeamFailure(sABTF), getAverageShardBytes(getAverageShardBytes),
 	    physicalShardCollection(physicalShardCollection),
@@ -598,7 +600,8 @@ struct DDQueueData {
 	    output(output), input(input), getShardMetrics(getShardMetrics), getTopKMetrics(getTopKMetrics), lastInterval(0),
 	    suppressIntervals(0), rawProcessingUnhealthy(new AsyncVar<bool>(false)),
 	    rawProcessingWiggle(new AsyncVar<bool>(false)), unhealthyRelocations(0),
-	    movedKeyServersEventHolder(makeReference<EventCacheHolder>("MovedKeyServers")) {}
+	    movedKeyServersEventHolder(makeReference<EventCacheHolder>("MovedKeyServers")),
+	    dataDistributionRuntimeMonitor(dataDistributionRuntimeMonitor) {}
 
 	void validate() {
 		if (EXPENSIVE_VALIDATION) {
@@ -1913,7 +1916,13 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
 	    ShardsAffectedByTeamFailure::Team(sourceTeam->getServerIDs(), primary));
 	for (int i = 0; i < shards.size(); i++) {
 		if (metrics.keys == shards[i]) {
-			self->output.send(RelocateShard(metrics.keys.get(), priority, RelocateReason::REBALANCE_READ));
+			RelocateShard rs(metrics.keys.get(), priority, RelocateReason::REBALANCE_READ);
+			// self->output.send(rs);
+			if (CLIENT_KNOBS->PHYSICAL_SHARD_AWARE_DD) {
+				self->dataDistributionRuntimeMonitor->triggerDDEvent(DDEventBuffer::DDEvent(priority, rs), true);
+			} else {
+				self->output.send(rs);
+			}
 			self->updateLastAsSource(sourceTeam->getServerIDs());
 			return true;
 		}
@@ -1985,7 +1994,13 @@ ACTOR static Future<bool> rebalanceTeams(DDQueueData* self,
 	    ShardsAffectedByTeamFailure::Team(sourceTeam->getServerIDs(), primary));
 	for (int i = 0; i < shards.size(); i++) {
 		if (moveShard == shards[i]) {
-			self->output.send(RelocateShard(moveShard, priority, RelocateReason::REBALANCE_DISK));
+			RelocateShard rs(moveShard, priority, RelocateReason::REBALANCE_DISK);
+			// self->output.send(rs);
+			if (CLIENT_KNOBS->PHYSICAL_SHARD_AWARE_DD) {
+				self->dataDistributionRuntimeMonitor->triggerDDEvent(DDEventBuffer::DDEvent(priority, rs), true);
+			} else {
+				self->output.send(rs);
+			}
 			return true;
 		}
 	}
@@ -2350,7 +2365,8 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
                                          int teamSize,
                                          int singleRegionTeamSize,
                                          const DDEnabledState* ddEnabledState,
-                                         Reference<PhysicalShardCollection> physicalShardCollection) {
+                                         Reference<PhysicalShardCollection> physicalShardCollection,
+                                         Reference<DataDistributionRuntimeMonitor> dataDistributionRuntimeMonitor) {
 	state DDQueueData self(distributorId,
 	                       lock,
 	                       cx,
@@ -2363,7 +2379,8 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 	                       input,
 	                       getShardMetrics,
 	                       getTopKMetrics,
-	                       physicalShardCollection);
+	                       physicalShardCollection,
+	                       dataDistributionRuntimeMonitor);
 	state std::set<UID> serversToLaunchFrom;
 	state KeyRange keysToLaunchFrom;
 	state RelocateData launchData;

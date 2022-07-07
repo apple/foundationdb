@@ -590,7 +590,10 @@ struct DataDistributorData : NonCopyable, ReferenceCounted<DataDistributorData> 
 	    totalDataInFlightRemoteEventHolder(makeReference<EventCacheHolder>("TotalDataInFlightRemote")) {}
 };
 
-ACTOR Future<Void> monitorPhysicalShardStatus(Database cx, Reference<PhysicalShardCollection> self) {
+ACTOR Future<Void> monitorPhysicalShardStatus(
+    Database cx,
+    Reference<PhysicalShardCollection> self,
+    Reference<DataDistributionRuntimeMonitor> dataDistributionRuntimeMonitor) {
 	ASSERT(CLIENT_KNOBS->DD_PHYSICAL_SHARD_CORE);
 	loop {
 		wait(delay(SERVER_KNOBS->ROCKSDB_METRICS_DELAY * 2));
@@ -640,6 +643,9 @@ ACTOR Future<Void> monitorPhysicalShardStatus(Database cx, Reference<PhysicalSha
 				it++;
 			}
 		}
+
+		std::vector<uint64_t> smallPhysicalShards;
+
 		// Logging TeamPhysicalShardStatus
 		for (auto [team, physicalShardIDs] : self->teamPhysicalShardIDs) {
 			TraceEvent e("TeamPhysicalShardStatus");
@@ -654,6 +660,9 @@ ACTOR Future<Void> monitorPhysicalShardStatus(Database cx, Reference<PhysicalSha
 			for (auto physicalShardID : physicalShardIDs) {
 				uint64_t id = self->physicalShardCollection[physicalShardID].id;
 				int64_t bytes = self->physicalShardCollection[physicalShardID].metrics.bytes;
+				if (bytes < SERVER_KNOBS->MIN_PHYSICAL_SHARD_BYTES) {
+					smallPhysicalShards.push_back(physicalShardID);
+				}
 				if (bytes > maxPhysicalShardBytes) {
 					maxPhysicalShardBytes = bytes;
 					maxPhysicalShardID = id;
@@ -738,6 +747,14 @@ ACTOR Future<Void> monitorPhysicalShardStatus(Database cx, Reference<PhysicalSha
 			         std::to_string(maxPhysicalShardID) + ":" + std::to_string(maxPhysicalShardBytes));
 			e.detail("MinPhysicalShard",
 			         std::to_string(minPhysicalShardID) + ":" + std::to_string(minPhysicalShardBytes));
+		}
+
+		// Issue relocations for cold physicalShard
+		if (CLIENT_KNOBS->PHYSICAL_SHARD_AWARE_DD && CLIENT_KNOBS->PHYSICAL_SHARD_SIZE_CONTROL) {
+			for (auto& physicalShardID : smallPhysicalShards) {
+				dataDistributionRuntimeMonitor->triggerDDEvent(
+				    DDEventBuffer::DDEvent(SERVER_KNOBS->PRIORITY_MERGE_PHYSICAL_SHARD, physicalShardID), true);
+			}
 		}
 	}
 }
@@ -909,6 +926,13 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			state Promise<Void> readyToStart;
 			state Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure(new ShardsAffectedByTeamFailure);
 			state Reference<PhysicalShardCollection> physicalShardCollection(new PhysicalShardCollection);
+			state Reference<DDEventBuffer> ddEventBuffer(new DDEventBuffer);
+			state Reference<DataDistributionRuntimeMonitor> dataDistributionRuntimeMonitor(
+			    new DataDistributionRuntimeMonitor);
+			dataDistributionRuntimeMonitor->setGetShardMetrics(getShardMetrics);
+			dataDistributionRuntimeMonitor->setPhysicalShardCollection(physicalShardCollection);
+			dataDistributionRuntimeMonitor->setRelocateBuffer(output);
+			dataDistributionRuntimeMonitor->setDDEventBuffer(ddEventBuffer);
 
 			state int shard = 0;
 			for (; shard < initData->shards.size() - 1; shard++) {
@@ -968,10 +992,15 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 					if (!unhealthy && configuration.usableRegions > 1) {
 						unhealthy = iShard.remoteSrc.size() != configuration.storageTeamSize;
 					}
-					output.send(RelocateShard(keys,
-					                          unhealthy ? SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY
-					                                    : SERVER_KNOBS->PRIORITY_RECOVER_MOVE,
-					                          RelocateReason::OTHER));
+					int priority =
+					    unhealthy ? SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY : SERVER_KNOBS->PRIORITY_RECOVER_MOVE;
+					RelocateShard rs(keys, priority, RelocateReason::OTHER);
+					// output.send(rs);
+					if (CLIENT_KNOBS->PHYSICAL_SHARD_AWARE_DD) {
+						dataDistributionRuntimeMonitor->triggerDDEvent(DDEventBuffer::DDEvent(priority, rs), true);
+					} else {
+						output.send(rs);
+					}
 				}
 
 				wait(yield(TaskPriority::DataDistribution));
@@ -984,7 +1013,13 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 					RelocateShard rs(meta.range, SERVER_KNOBS->PRIORITY_RECOVER_MOVE, RelocateReason::OTHER);
 					rs.dataMoveId = meta.id;
 					rs.cancelled = true;
-					output.send(rs);
+					// output.send(rs);
+					if (CLIENT_KNOBS->PHYSICAL_SHARD_AWARE_DD) {
+						dataDistributionRuntimeMonitor->triggerDDEvent(
+						    DDEventBuffer::DDEvent(SERVER_KNOBS->PRIORITY_RECOVER_MOVE, rs), true);
+					} else {
+						output.send(rs);
+					}
 					TraceEvent("DDInitScheduledCancelDataMove", self->ddId).detail("DataMove", meta.toString());
 				} else if (it.value()->valid) {
 					TraceEvent(SevDebug, "DDInitFoundDataMove", self->ddId).detail("DataMove", meta.toString());
@@ -1006,7 +1041,13 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 
 					// When restoring a DataMove, the destination team is determined, and hence
 					shardsAffectedByTeamFailure->moveShard(rs.keys, teams);
-					output.send(rs);
+					// output.send(rs);
+					if (CLIENT_KNOBS->PHYSICAL_SHARD_AWARE_DD) {
+						dataDistributionRuntimeMonitor->triggerDDEvent(
+						    DDEventBuffer::DDEvent(SERVER_KNOBS->PRIORITY_RECOVER_MOVE, rs), true);
+					} else {
+						output.send(rs);
+					}
 					wait(yield(TaskPriority::DataDistribution));
 				}
 			}
@@ -1034,6 +1075,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 				actors.push_back(reportErrorsExcept(
 				    ddTenantCache->monitorTenantMap(), "DDTenantCacheMonitor", self->ddId, &normalDDQueueErrors()));
 			}
+			dataDistributionRuntimeMonitor->setTeamCollections(tcis);
 
 			actors.push_back(pollMoveKeysLock(cx, lock, ddEnabledState));
 			actors.push_back(reportErrorsExcept(dataDistributionTracker(initData,
@@ -1049,7 +1091,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			                                                            self->ddId,
 			                                                            &shards,
 			                                                            &trackerCancelled,
-			                                                            physicalShardCollection),
+			                                                            physicalShardCollection,
+			                                                            dataDistributionRuntimeMonitor),
 			                                    "DDTracker",
 			                                    self->ddId,
 			                                    &normalDDQueueErrors()));
@@ -1070,7 +1113,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			                                                          storageTeamSize,
 			                                                          configuration.storageTeamSize,
 			                                                          ddEnabledState,
-			                                                          physicalShardCollection),
+			                                                          physicalShardCollection,
+			                                                          dataDistributionRuntimeMonitor),
 			                                    "DDQueue",
 			                                    self->ddId,
 			                                    &normalDDQueueErrors()));
@@ -1082,6 +1126,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			    lock,
 			    output,
 			    shardsAffectedByTeamFailure,
+			    dataDistributionRuntimeMonitor,
 			    configuration,
 			    primaryDcId,
 			    configuration.usableRegions > 1 ? remoteDcIds : std::vector<Optional<Key>>(),
@@ -1103,6 +1148,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 				                                    lock,
 				                                    output,
 				                                    shardsAffectedByTeamFailure,
+				                                    dataDistributionRuntimeMonitor,
 				                                    configuration,
 				                                    remoteDcIds,
 				                                    Optional<std::vector<Optional<Key>>>(),
@@ -1134,7 +1180,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			actors.push_back(DDTeamCollection::printSnapshotTeamsInfo(primaryTeamCollection));
 			actors.push_back(yieldPromiseStream(output.getFuture(), input));
 			if (CLIENT_KNOBS->DD_PHYSICAL_SHARD_CORE) {
-				actors.push_back(monitorPhysicalShardStatus(cx, physicalShardCollection));
+				actors.push_back(
+				    monitorPhysicalShardStatus(cx, physicalShardCollection, dataDistributionRuntimeMonitor));
 			}
 
 			wait(waitForAll(actors));

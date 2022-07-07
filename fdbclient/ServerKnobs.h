@@ -154,6 +154,7 @@ public:
 	int PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER;
 	int PRIORITY_TEAM_REDUNDANT;
 	int PRIORITY_MERGE_SHARD;
+	int PRIORITY_MERGE_PHYSICAL_SHARD;
 	int PRIORITY_POPULATE_REGION;
 	int PRIORITY_TEAM_UNHEALTHY;
 	int PRIORITY_TEAM_2_LEFT;
@@ -161,6 +162,7 @@ public:
 	int PRIORITY_TEAM_FAILED; // Priority when a server in the team is excluded as failed
 	int PRIORITY_TEAM_0_LEFT;
 	int PRIORITY_SPLIT_SHARD;
+	int PRIORITY_SPLIT_PHYSICAL_SHARD;
 
 	// Data distribution
 	double READ_REBALANCE_CPU_THRESHOLD; // read rebalance only happens if the source servers' CPU > threshold
@@ -234,6 +236,7 @@ public:
 	int DD_STORAGE_WIGGLE_STUCK_THRESHOLD; // How many times bestTeamStuck accumulate will pause storage wiggle
 	bool DD_TENANT_AWARENESS_ENABLED;
 	int TENANT_CACHE_LIST_REFRESH_INTERVAL; // How often the TenantCache is refreshed
+	int TEAM_COUNT_TAKEN_BY_GET_TEAMS; // How many teams are returned by getTeamsAndMetrics. Used for new DD framework
 
 	// TeamRemover to remove redundant teams
 	bool TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER; // disable the machineTeamRemover actor
@@ -336,7 +339,8 @@ public:
 	int64_t ROCKSDB_COMPACTION_READAHEAD_SIZE;
 	int64_t ROCKSDB_BLOCK_SIZE;
 	bool ENABLE_SHARDED_ROCKSDB;
-	int64_t MAX_PHYSICAL_PHYSICAL_SHARD_BYTES;
+	int64_t MAX_PHYSICAL_SHARD_BYTES;
+	int64_t MIN_PHYSICAL_SHARD_BYTES;
 
 	// Leader election
 	int MAX_NOTIFICATIONS;
