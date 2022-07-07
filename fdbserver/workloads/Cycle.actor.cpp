@@ -75,6 +75,7 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 			this->token.issuedAtUnixTime = currentTime;
 			this->token.expiresAtUnixTime = currentTime + uint64_t(std::lround(getCheckTimeout())) + uint64_t(100);
 			this->token.keyId = k->first;
+			this->token.notBeforeUnixTime = currentTime - 10;
 			VectorRef<StringRef> tenants;
 			tenants.push_back_deep(this->arena, this->tenant);
 			this->token.tenants = tenants;

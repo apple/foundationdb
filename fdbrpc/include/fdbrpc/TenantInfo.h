@@ -54,6 +54,7 @@ struct TenantInfo {
 		}
 		if (token.present()) {
 			arena.dependsOn(token.get().arena());
+			this->token = token.get();
 		}
 	}
 };
