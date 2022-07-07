@@ -120,9 +120,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 			forceRecovery = false;
 		}
 		balancer = resolutionBalancer.resolutionBalancing();
-		locality = (SERVER_KNOBS->ENABLE_VERSION_VECTOR_HA_OPTIMIZATION && myInterface.locality.dcId().present())
-		               ? std::stoi(myInterface.locality.dcId().get().toString())
-		               : tagLocalityInvalid;
+		locality = tagLocalityInvalid;
 	}
 	~MasterData() = default;
 };
@@ -327,7 +325,8 @@ ACTOR Future<Void> updateRecoveryData(Reference<MasterData> self) {
 		    .detail("CurrentRecoveryTxnVersion", self->recoveryTransactionVersion)
 		    .detail("CurrentLastEpochEnd", self->lastEpochEnd)
 		    .detail("NumCommitProxies", req.commitProxies.size())
-		    .detail("VersionEpoch", req.versionEpoch);
+		    .detail("VersionEpoch", req.versionEpoch)
+		    .detail("PrimaryLocality", req.primaryLocality);
 
 		self->recoveryTransactionVersion = req.recoveryTransactionVersion;
 		self->lastEpochEnd = req.lastEpochEnd;
@@ -352,6 +351,8 @@ ACTOR Future<Void> updateRecoveryData(Reference<MasterData> self) {
 
 		self->resolutionBalancer.setCommitProxies(req.commitProxies);
 		self->resolutionBalancer.setResolvers(req.resolvers);
+
+		self->locality = req.primaryLocality;
 
 		req.reply.send(Void());
 	}
