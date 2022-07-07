@@ -1426,7 +1426,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 				    .detail("DestTeamSize", totalIds);
 			}
 
-			TraceEvent("ShardsAffectedByTeamFailureMove")
+			TraceEvent(SevVerbose, "ShardsAffectedByTeamFailureMove")
 			    .detail("Range", rd.keys)
 			    .detail("IsRestore", rd.isRestore())
 			    .detail("NewTeamSize", destinationTeams.size())
