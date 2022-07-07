@@ -211,7 +211,8 @@ public:
 	void runNetwork() override;
 	void stopNetwork() override;
 
-	Reference<IDatabase> createDatabase(Reference<IClusterConnectionRecord> connectionRecord) override;
+	Reference<IDatabase> createDatabase(const char* clusterFilePath) override;
+	Reference<IDatabase> createDatabaseFromConnectionString(const char* connectionString) override;
 
 	void addNetworkThreadCompletionHook(void (*hook)(void*), void* hookParameter) override;
 

@@ -999,7 +999,8 @@ ACTOR Future<std::vector<Standalone<CommitTransactionRef>>> recruitEverything(
 	                                                                                self->lastEpochEnd,
 	                                                                                self->commitProxies,
 	                                                                                self->resolvers,
-	                                                                                self->versionEpoch))));
+	                                                                                self->versionEpoch,
+	                                                                                self->primaryLocality))));
 
 	return confChanges;
 }

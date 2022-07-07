@@ -20,6 +20,7 @@
 
 #include "fdbclient/BlobGranuleFiles.h"
 #include "fdbclient/ClusterConnectionFile.h"
+#include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/versions.h"
@@ -629,8 +630,14 @@ void ThreadSafeApi::stopNetwork() {
 	::stopNetwork();
 }
 
-Reference<IDatabase> ThreadSafeApi::createDatabase(Reference<IClusterConnectionRecord> connectionRecord) {
-	return Reference<IDatabase>(new ThreadSafeDatabase(connectionRecord, apiVersion));
+Reference<IDatabase> ThreadSafeApi::createDatabase(const char* clusterFilePath) {
+	return Reference<IDatabase>(
+	    new ThreadSafeDatabase(ClusterConnectionFile::openOrDefault(clusterFilePath), apiVersion));
+}
+
+Reference<IDatabase> ThreadSafeApi::createDatabaseFromConnectionString(const char* connectionString) {
+	return Reference<IDatabase>(new ThreadSafeDatabase(
+	    makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(connectionString)), apiVersion));
 }
 
 void ThreadSafeApi::addNetworkThreadCompletionHook(void (*hook)(void*), void* hookParameter) {

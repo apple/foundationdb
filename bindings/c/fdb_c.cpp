@@ -386,10 +386,8 @@ extern "C" DLLEXPORT fdb_error_t fdb_create_database(const char* cluster_file_pa
 
 extern "C" DLLEXPORT fdb_error_t fdb_create_database_from_connection_string(const char* connection_string,
                                                                             FDBDatabase** out_database) {
-	CATCH_AND_RETURN(*out_database = (FDBDatabase*)API
-	                                     ->createDatabase(makeReference<ClusterConnectionMemoryRecord>(
-	                                         ClusterConnectionString(connection_string)))
-	                                     .extractPtr(););
+	CATCH_AND_RETURN(*out_database =
+	                     (FDBDatabase*)API->createDatabaseFromConnectionString(connection_string).extractPtr(););
 }
 
 extern "C" DLLEXPORT fdb_error_t fdb_database_set_option(FDBDatabase* d,

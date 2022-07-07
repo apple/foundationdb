@@ -251,6 +251,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 			dbInfo.myLocality = db->serverInfo->get().myLocality;
 			dbInfo.client = ClientDBInfo();
 			dbInfo.client.tenantMode = TenantAPI::tenantModeForClusterType(db->clusterType, db->config.tenantMode);
+			dbInfo.client.clusterId = db->serverInfo->get().client.clusterId;
 			dbInfo.client.clusterType = db->clusterType;
 			dbInfo.client.metaclusterName = db->metaclusterName;
 
@@ -1026,6 +1027,7 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 	if (db->clientInfo->get().commitProxies != req.commitProxies ||
 	    db->clientInfo->get().grvProxies != req.grvProxies ||
 	    db->clientInfo->get().tenantMode != db->config.tenantMode ||
+		db->clientInfo->get().clusterId != req.clusterId ||
 	    db->clientInfo->get().clusterType != db->clusterType ||
 	    db->clientInfo->get().metaclusterName != db->metaclusterName) {
 		TraceEvent("PublishNewClientInfo", self->id)
@@ -1036,6 +1038,8 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 		    .detail("ReqCPs", req.commitProxies)
 		    .detail("TenantMode", db->clientInfo->get().tenantMode.toString())
 		    .detail("ReqTenantMode", db->config.tenantMode.toString())
+		    .detail("ClusterId", db->clientInfo->get().clusterId)
+		    .detail("ReqClusterId", req.clusterId)
 		    .detail("ClusterType", db->clientInfo->get().clusterType)
 		    .detail("ReqClusterType", db->clusterType)
 		    .detail("MetaclusterName", db->clientInfo->get().metaclusterName)
@@ -1047,6 +1051,7 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 		clientInfo.commitProxies = req.commitProxies;
 		clientInfo.grvProxies = req.grvProxies;
 		clientInfo.tenantMode = TenantAPI::tenantModeForClusterType(db->clusterType, db->config.tenantMode);
+		clientInfo.clusterId = req.clusterId;
 		clientInfo.clusterType = db->clusterType;
 		clientInfo.metaclusterName = db->metaclusterName;
 		db->clientInfo->set(clientInfo);
@@ -1066,11 +1071,6 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 	if (dbInfo.recoveryCount != req.recoveryCount) {
 		isChanged = true;
 		dbInfo.recoveryCount = req.recoveryCount;
-	}
-
-	if (dbInfo.clusterId != req.clusterId) {
-		isChanged = true;
-		dbInfo.clusterId = req.clusterId;
 	}
 
 	if (isChanged) {

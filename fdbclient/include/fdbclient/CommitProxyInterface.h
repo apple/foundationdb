@@ -116,6 +116,7 @@ struct ClientDBInfo {
 	    firstCommitProxy; // not serialized, used for commitOnFirstProxy when the commit proxies vector has been shrunk
 	Optional<Value> forward;
 	std::vector<VersionHistory> history;
+	UID clusterId;
 
 	TenantMode tenantMode;
 	ClusterType clusterType = ClusterType::STANDALONE;
@@ -131,7 +132,8 @@ struct ClientDBInfo {
 		if constexpr (!is_fb_function<Archive>) {
 			ASSERT(ar.protocolVersion().isValid());
 		}
-		serializer(ar, grvProxies, commitProxies, id, forward, history, tenantMode, clusterType, metaclusterName);
+		serializer(
+		    ar, grvProxies, commitProxies, id, forward, history, tenantMode, clusterId, clusterType, metaclusterName);
 	}
 };
 

@@ -1918,6 +1918,13 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					continue;
 				}
 
+				if (tokencmp(tokens[0], "renametenant")) {
+					bool _result = wait(makeInterruptable(renameTenantCommandActor(db, tokens)));
+					if (!_result)
+						is_error = true;
+					continue;
+				}
+
 				if (tokencmp(tokens[0], "metacluster")) {
 					bool _result = wait(makeInterruptable(metaclusterCommand(db, tokens)));
 					if (!_result)
