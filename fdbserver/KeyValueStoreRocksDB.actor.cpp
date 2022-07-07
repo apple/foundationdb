@@ -741,7 +741,8 @@ ACTOR Future<Void> rocksDBMetricLogger(UID id,
                                        std::shared_ptr<PerfContextMetrics> perfContextMetrics,
                                        rocksdb::DB* db,
                                        std::shared_ptr<ReadIteratorPool> readIterPool,
-                                       Counters* counters) {
+                                       Counters* counters,
+                                       CF cf) {
 	state std::vector<std::tuple<const char*, uint32_t, uint64_t>> tickerStats = {
 		{ "StallMicros", rocksdb::STALL_MICROS, 0 },
 		{ "BytesRead", rocksdb::BYTES_READ, 0 },
@@ -779,7 +780,7 @@ ACTOR Future<Void> rocksDBMetricLogger(UID id,
 		{ "CountIterSkippedKeys", rocksdb::NUMBER_ITER_SKIP, 0 },
 
 	};
-	state std::vector<std::pair<const char*, std::string>> propertyStats = {
+	state std::vector<std::pair<const char*, std::string>> intPropertyStats = {
 		{ "NumImmutableMemtables", rocksdb::DB::Properties::kNumImmutableMemTable },
 		{ "NumImmutableMemtablesFlushed", rocksdb::DB::Properties::kNumImmutableMemTableFlushed },
 		{ "IsMemtableFlushPending", rocksdb::DB::Properties::kMemTableFlushPending },
@@ -807,6 +808,14 @@ ACTOR Future<Void> rocksDBMetricLogger(UID id,
 		{ "LiveSstFilesSize", rocksdb::DB::Properties::kLiveSstFilesSize },
 	};
 
+	state std::vector<std::pair<const char*, std::string>> strPropertyStats = {
+		{ "LevelStats", rocksdb::DB::Properties::kLevelStats },
+	};
+
+	state std::vector<std::pair<const char*, std::string>> levelStrPropertyStats = {
+		{ "CompressionRatioAtLevel", rocksdb::DB::Properties::kCompressionRatioAtLevelPrefix },
+	};
+
 	state std::unordered_map<std::string, uint64_t> readIteratorPoolStats = {
 		{ "NumReadIteratorsCreated", 0 },
 		{ "NumTimesReadIteratorsReused", 0 },
@@ -816,19 +825,38 @@ ACTOR Future<Void> rocksDBMetricLogger(UID id,
 		wait(delay(SERVER_KNOBS->ROCKSDB_METRICS_DELAY));
 		TraceEvent e("RocksDBMetrics", id);
 		uint64_t stat;
-		for (auto& t : tickerStats) {
-			auto& [name, ticker, cum] = t;
+		for (auto& [name, ticker, cum] : tickerStats) {
 			stat = statistics->getTickerCount(ticker);
 			e.detail(name, stat - cum);
 			cum = stat;
 		}
 
-		for (auto& p : propertyStats) {
-			auto& [name, property] = p;
+		for (const auto& [name, property] : intPropertyStats) {
 			stat = 0;
 			// GetAggregatedIntProperty gets the aggregated int property from all column families.
 			ASSERT(db->GetAggregatedIntProperty(property, &stat));
 			e.detail(name, stat);
+		}
+
+		std::string propValue;
+		for (const auto& [name, property] : strPropertyStats) {
+			propValue = "";
+			ASSERT(db->GetProperty(cf, property, &propValue));
+			e.detail(name, propValue);
+		}
+
+		rocksdb::ColumnFamilyMetaData cf_meta_data;
+		db->GetColumnFamilyMetaData(cf, &cf_meta_data);
+		int numLevels = static_cast<int>(cf_meta_data.levels.size());
+		std::string levelProp;
+		for (const auto& [name, property] : levelStrPropertyStats) {
+			levelProp = "";
+			for (int level = 0; level < numLevels; level++) {
+				propValue = "";
+				ASSERT(db->GetProperty(cf, property + std::to_string(level), &propValue));
+				levelProp += std::to_string(level) + ":" + propValue + (level == numLevels - 1 ? "" : ",");
+			}
+			e.detail(name, levelProp);
 		}
 
 		stat = readIterPool->numReadIteratorsCreated();
@@ -1009,13 +1037,13 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				// The current thread and main thread are same when the code runs in simulation.
 				// blockUntilReady() is getting the thread into deadlock state, so directly calling
 				// the metricsLogger.
-				a.metrics =
-				    rocksDBMetricLogger(id, options.statistics, perfContextMetrics, db, readIterPool, &a.counters) &&
-				    flowLockLogger(id, a.readLock, a.fetchLock) && refreshReadIteratorPool(readIterPool);
+				a.metrics = rocksDBMetricLogger(
+				                id, options.statistics, perfContextMetrics, db, readIterPool, &a.counters, cf) &&
+				            flowLockLogger(id, a.readLock, a.fetchLock) && refreshReadIteratorPool(readIterPool);
 			} else {
 				onMainThread([&] {
 					a.metrics = rocksDBMetricLogger(
-					                id, options.statistics, perfContextMetrics, db, readIterPool, &a.counters) &&
+					                id, options.statistics, perfContextMetrics, db, readIterPool, &a.counters, cf) &&
 					            flowLockLogger(id, a.readLock, a.fetchLock) && refreshReadIteratorPool(readIterPool);
 					return Future<bool>(true);
 				}).blockUntilReady();
