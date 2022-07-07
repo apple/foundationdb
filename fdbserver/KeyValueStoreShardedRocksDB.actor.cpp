@@ -2712,12 +2712,23 @@ TEST_CASE("noSim/ShardedRocksDB/ShardOps") {
 
 TEST_CASE("noSim/ShardedRocksDB/Metadata") {
 	state std::string rocksDBTestDir = "sharded-rocksdb-kvs-test-db";
+	state Key testSpecialKey = "\xff\xff/TestKey"_sr;
+	state Value testSpecialValue = "\xff\xff/TestValue"_sr;
 	platform::eraseDirectoryRecursive(rocksDBTestDir);
 
 	state ShardedRocksDBKeyValueStore* rocksdbStore =
 	    new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
 	state IKeyValueStore* kvStore = rocksdbStore;
 	wait(kvStore->init());
+
+	Optional<Value> val = wait(kvStore->readValue(testSpecialKey));
+	ASSERT(!val.present());
+
+	kvStore->set(KeyValueRef(testSpecialKey, testSpecialValue));
+	wait(kvStore->commit(false));
+
+	Optional<Value> val = wait(kvStore->readValue(testSpecialKey));
+	ASSERT(val.get() == testSpecialValue);
 
 	// Add some ranges.
 	std::vector<Future<Void>> addRangeFutures;
@@ -2737,6 +2748,11 @@ TEST_CASE("noSim/ShardedRocksDB/Metadata") {
 	rocksdbStore = new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
 	kvStore = rocksdbStore;
 	wait(kvStore->init());
+
+	{
+		Optional<Value> val = wait(kvStore->readValue(testSpecialKey));
+		ASSERT(val.get() == testSpecialValue);
+	}
 
 	// Read value back.
 	Optional<Value> val = wait(kvStore->readValue("a1"_sr));
