@@ -86,7 +86,7 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 
 	private Tuple(List<Object> elements) {
 		this.elements = elements;
-		incompleteVersionstamp = TupleUtil.hasIncompleteVersionstamp(elements.stream());
+		incompleteVersionstamp = TupleUtil.hasIncompleteVersionstamp(elements);
 	}
 
 	/**
@@ -265,7 +265,7 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	 * @return a newly created {@code Tuple}
 	 */
 	public Tuple add(List<?> l) {
-		return new Tuple(this, l, TupleUtil.hasIncompleteVersionstamp(l.stream()));
+		return new Tuple(this, l, TupleUtil.hasIncompleteVersionstamp(l));
 	}
 
 	/**

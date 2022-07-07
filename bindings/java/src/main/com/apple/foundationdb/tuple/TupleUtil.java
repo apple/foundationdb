@@ -776,24 +776,23 @@ class TupleUtil {
 		return packedSize;
 	}
 
-	static boolean hasIncompleteVersionstamp(Stream<?> items) {
-		return items.anyMatch(item -> {
-			if(item == null) {
-				return false;
+	static boolean hasIncompleteVersionstamp(Collection<?> items){
+		boolean isComplete = true;
+		for(Object itm: items){
+			if(itm instanceof Versionstamp){
+				isComplete = ((Versionstamp)itm).isComplete();
+			}else if(itm instanceof Tuple){
+				isComplete = hasIncompleteVersionstamp(((Tuple)itm).getItems());
+			}else if(itm instanceof Collection<?>){
+				isComplete = hasIncompleteVersionstamp((Collection<?>)itm);
 			}
-			else if(item instanceof Versionstamp) {
-				return !((Versionstamp) item).isComplete();
+
+
+			if(!isComplete){
+				break;
 			}
-			else if(item instanceof Tuple) {
-				return hasIncompleteVersionstamp(((Tuple) item).stream());
-			}
-			else if(item instanceof Collection<?>) {
-				return hasIncompleteVersionstamp(((Collection<?>) item).stream());
-			}
-			else {
-				return false;
-			}
-		});
+		}
+		return !isComplete;
 	}
 
 	public static void main(String[] args) {
