@@ -42,9 +42,9 @@ public:
 
 	virtual ~IDDTxnProcessor() = default;
 
-	virtual Future<MoveKeysLock> takeMoveKeysLock(UID ddId) const { return {}; }
+	virtual Future<MoveKeysLock> takeMoveKeysLock(UID ddId) const { return MoveKeysLock(); }
 
-	virtual Future<DatabaseConfiguration> getDatabaseConfiguration() const { return {}; }
+	virtual Future<DatabaseConfiguration> getDatabaseConfiguration() const { return DatabaseConfiguration(); }
 
 	virtual Future<Void> updateReplicaKeys(std::vector<Optional<Key>>* primaryIds = nullptr,
 	                                       std::vector<Optional<Key>>* remoteIds = nullptr,
@@ -57,6 +57,8 @@ public:
 	    MoveKeysLock moveKeysLock,
 	    std::vector<Optional<Key>> remoteDcIds,
 	    std::shared_ptr<DDEnabledState> ddEnabledState) = 0;
+
+	virtual Future<Void> waitForDataDistributionEnabled(std::shared_ptr<DDEnabledState> ddEnabledState) const = 0;
 };
 
 class DDTxnProcessorImpl;
@@ -91,7 +93,7 @@ public:
 	    std::vector<Optional<Key>> remoteDcIds,
 	    std::shared_ptr<DDEnabledState> ddEnabledState) override;
 
-
+	Future<Void> waitForDataDistributionEnabled(std::shared_ptr<DDEnabledState> ddEnabledState) const override;
 };
 
 // run mock transaction

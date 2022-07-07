@@ -142,37 +142,6 @@ ACTOR Future<Void> remoteRecovered(Reference<AsyncVar<ServerDBInfo> const> db) {
 	return Void();
 }
 
-ACTOR Future<Void> waitForDataDistributionEnabled(Database cx, const DDEnabledState* ddEnabledState) {
-	state Transaction tr(cx);
-	loop {
-		wait(delay(SERVER_KNOBS->DD_ENABLED_CHECK_DELAY, TaskPriority::DataDistribution));
-
-		try {
-			Optional<Value> mode = wait(tr.get(dataDistributionModeKey));
-			if (!mode.present() && ddEnabledState->isDDEnabled()) {
-				TraceEvent("WaitForDDEnabledSucceeded").log();
-				return Void();
-			}
-			if (mode.present()) {
-				BinaryReader rd(mode.get(), Unversioned());
-				int m;
-				rd >> m;
-				TraceEvent(SevDebug, "WaitForDDEnabled")
-				    .detail("Mode", m)
-				    .detail("IsDDEnabled", ddEnabledState->isDDEnabled());
-				if (m && ddEnabledState->isDDEnabled()) {
-					TraceEvent("WaitForDDEnabledSucceeded").log();
-					return Void();
-				}
-			}
-
-			tr.reset();
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-	}
-}
-
 ACTOR Future<bool> isDataDistributionEnabled(Database cx, const DDEnabledState* ddEnabledState) {
 	state Transaction tr(cx);
 	loop {
@@ -863,6 +832,7 @@ class DataDistributorImpl {
 			    .detail("Dest", "[no items]")
 			    .trackLatest(self->data->initialDDEventHolder->trackingKey);
 		}
+		return Void();
 	}
 
 	static ACTOR Future<Void> init(DataDistributor* self) {
@@ -912,8 +882,12 @@ class DataDistributorImpl {
 			    .detail("HighestPriority", self->configuration.usableRegions > 1 ? 0 : -1)
 			    .trackLatest(self->data->totalDataInFlightRemoteEventHolder->trackingKey);
 
-			wait(waitForDataDistributionEnabled(cx, ddEnabledState));
+			wait(self->txnProcessor->waitForDataDistributionEnabled(self->ddEnabledState));
 			TraceEvent("DataDistributionEnabled").log();
+		}
+		if(self->ddIsTenantAware){
+			self->ddTenantCache = makeReference<TenantCache>(self->txnProcessor->getDatabase(), self->data->ddId);
+			wait(self->ddTenantCache->build());
 		}
 		return Void();
 	}
@@ -932,33 +906,13 @@ class DataDistributorImpl {
 		// );
 
 		// wait(debugCheckCoalescing(cx));
-		state std::vector<Optional<Key>> primaryDcId;
-		state std::vector<Optional<Key>> remoteDcIds;
-		state DatabaseConfiguration configuration;
-		state Reference<InitialDataDistribution> initData;
-		state MoveKeysLock lock;
-		state Reference<DDTeamCollection> primaryTeamCollection;
-		state Reference<DDTeamCollection> remoteTeamCollection;
-		state bool trackerCancelled;
-		state bool ddIsTenantAware = SERVER_KNOBS->DD_TENANT_AWARENESS_ENABLED;
 		loop {
-			trackerCancelled = false;
-
-			// Stored outside of data distribution tracker to avoid slow tasks
-			// when tracker is cancelled
-			state KeyRangeMap<ShardTrackedData> shards;
-			state Promise<UID> removeFailedServer;
+			dataDistributor->trackerCancelled = false;
 			try {
 				wait(DataDistributorImpl::init(dataDistributor));
 
-				state Reference<TenantCache> ddTenantCache;
-				if (ddIsTenantAware) {
-					ddTenantCache = makeReference<TenantCache>(cx, self->ddId);
-					wait(ddTenantCache->build(cx));
-				}
-
 				// When/If this assertion fails, Evan owes Ben a pat on the back for his foresight
-				ASSERT(configuration.storageTeamSize > 0);
+				ASSERT(dataDistributor->configuration.storageTeamSize > 0);
 
 				state PromiseStream<RelocateShard> output;
 				state PromiseStream<RelocateShard> input;
@@ -969,8 +923,6 @@ class DataDistributorImpl {
 				state Reference<AsyncVar<bool>> processingUnhealthy(new AsyncVar<bool>(false));
 				state Reference<AsyncVar<bool>> processingWiggle(new AsyncVar<bool>(false));
 				state Promise<Void> readyToStart;
-				state Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure(
-				    new ShardsAffectedByTeamFailure);
 
 				state int shard = 0;
 				for (; shard < initData->shards.size() - 1; shard++) {
@@ -1188,7 +1140,7 @@ class DataDistributorImpl {
 DataDistributor::DataDistributor(std::shared_ptr<IDDTxnProcessor> txnProcessor,
                                  Reference<DataDistributorData> data,
                                  std::shared_ptr<DDEnabledState> enabledState)
-  : txnProcessor(txnProcessor), data(data), ddEnabledState(enabledState) {}
+  : txnProcessor(txnProcessor), data(data), ddEnabledState(enabledState), shardsAffectedByTeamFailure(new ShardsAffectedByTeamFailure) {}
 
 Future<Void> DataDistributor::run() {
 	return DataDistributorImpl::run(this, getShardMetricsList, ddEnabledState.get());

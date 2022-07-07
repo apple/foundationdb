@@ -197,7 +197,7 @@ bool TenantCache::isTenantKey(KeyRef key) const {
 	return true;
 }
 
-Future<Void> TenantCache::build(Database cx) {
+Future<Void> TenantCache::build() {
 	return TenantCacheImpl::build(this);
 }
 

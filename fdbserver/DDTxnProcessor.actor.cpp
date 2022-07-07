@@ -317,7 +317,7 @@ class DDTxnProcessorImpl {
 		return result;
 	}
 
-	ACTOR Future<Void> waitForDataDistributionEnabled(Database cx, std::shared_ptr<DDEnabledState> ddEnabledState) {
+	ACTOR static Future<Void> waitForDataDistributionEnabled(Database cx, std::shared_ptr<DDEnabledState> ddEnabledState) {
 		state Transaction tr(cx);
 		loop {
 			wait(delay(SERVER_KNOBS->DD_ENABLED_CHECK_DELAY, TaskPriority::DataDistribution));
@@ -374,4 +374,8 @@ Future<Reference<InitialDataDistribution>> DDTxnProcessor::getInitialDataDistrib
     std::vector<Optional<Key>> remoteDcIds,
     std::shared_ptr<DDEnabledState> ddEnabledState) {
 	return DDTxnProcessorImpl::getInitialDataDistribution(cx, distributorId, moveKeysLock, remoteDcIds, ddEnabledState);
+}
+
+Future<Void> DDTxnProcessor::waitForDataDistributionEnabled(std::shared_ptr<DDEnabledState> ddEnabledState) const {
+	return DDTxnProcessorImpl::waitForDataDistributionEnabled(cx, ddEnabledState);
 }

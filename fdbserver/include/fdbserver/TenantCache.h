@@ -62,7 +62,7 @@ public:
 		generation = deterministicRandom()->randomUInt32();
 	}
 
-	Future<Void> build(Database cx);
+	Future<Void> build();
 
 	Future<Void> monitorTenantMap();
 

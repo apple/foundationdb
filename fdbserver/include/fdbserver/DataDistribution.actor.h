@@ -319,6 +319,7 @@ struct ShardTrackedData {
 
 struct DataDistributorData;
 
+class DDTeamCollection;
 // The static ACTOR wrapper
 class DataDistributorImpl;
 // A wrapper of DataDistribution actor
@@ -337,6 +338,14 @@ class DataDistributor : NonCopyable, ReferenceCounted<DataDistributor> {
 	std::shared_ptr<DDEnabledState> ddEnabledState;
 	std::shared_ptr<IDDTxnProcessor> txnProcessor;
 	Reference<DataDistributorData> data;
+
+	// Stored outside of data distribution tracker to avoid slow tasks
+	// when tracker is cancelled
+	KeyRangeMap<ShardTrackedData> shards;
+	Promise<UID> removeFailedServer;
+	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
+
+	Reference<TenantCache> ddTenantCache;
 
 public:
 	DataDistributor() = default;
