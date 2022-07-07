@@ -762,7 +762,7 @@ ACTOR static Future<Void> handleApplyToDBRequest(RestoreVersionBatchRequest req,
 
 		ASSERT(batchData->dbApplier.present());
 		ASSERT(!batchData->dbApplier.get().isError()); // writeMutationsToDB actor cannot have error.
-		                                               // We cannot blindly retry because it is not idempodent
+		                                               // We cannot blindly retry because it is not idempotent
 
 		wait(batchData->dbApplier.get());
 

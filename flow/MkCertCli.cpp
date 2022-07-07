@@ -30,7 +30,7 @@
 #include "flow/network.h"
 #include "flow/Platform.h"
 #include "flow/ScopeExit.h"
-#include "flow/SimpleOpt.h"
+#include "SimpleOpt/SimpleOpt.h"
 #include "flow/TLSConfig.actor.h"
 #include "flow/Trace.h"
 
