@@ -1074,7 +1074,8 @@ struct TenantManagementWorkload : TestWorkload {
 				wait(self->getTenant(cx, self));
 			} else if (operation == 3) {
 				wait(self->listTenants(cx, self));
-			} else {
+			} else if (!self->useMetacluster) {
+				// TODO: reenable this for metacluster once it is supported
 				wait(self->renameTenant(cx, self));
 			}
 		}
