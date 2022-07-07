@@ -10992,7 +10992,9 @@ ACTOR Future<Void> randomRangeScans(IKeyValueStore* kvs,
                                     int valueSize,
                                     int recordCountTarget,
                                     bool singlePrefix,
-                                    int rowLimit) {
+                                    int rowLimit,
+									int bitLimit,
+									IKeyValueStore::ReadType readType) {
 	fmt::print("\nstoreType: {}\n", static_cast<int>(kvs->getType()));
 	fmt::print("prefixSource: {}\n", source.toString());
 	fmt::print("suffixSize: {}\n", suffixSize);
@@ -11025,7 +11027,7 @@ ACTOR Future<Void> randomRangeScans(IKeyValueStore* kvs,
 		KeyRangeRef range = source.getKeyRangeRef(singlePrefix, suffixSize);
 		int rowLim = (deterministicRandom()->randomInt(0, 2) != 0) ? rowLimit : -rowLimit;
 
-		RangeResult result = wait(kvs->readRange(range, rowLim));
+		RangeResult result = wait(kvs->readRange(range, rowLim, bitLimit, readType));
 
 		recordsRead += result.size();
 		bytesRead += result.size() * recordSize;
@@ -11048,6 +11050,7 @@ TEST_CASE(":/redwood/performance/randomRangeScans") {
 	state int prefixLen = 30;
 	state int suffixSize = 12;
 	state int valueSize = 100;
+	state IKeyValueStore::ReadType readType = IKeyValueStore::ReadType::FETCH;
 
 	// TODO change to 100e8 after figuring out no-disk redwood mode
 	state int writeRecordCountTarget = 1e6;
@@ -11063,11 +11066,11 @@ TEST_CASE(":/redwood/performance/randomRangeScans") {
 	    redwood, suffixSize, valueSize, source, writeRecordCountTarget, writePrefixesInOrder, false));
 
 	// divide targets for tiny queries by 10 because they are much slower
-	wait(randomRangeScans(redwood, suffixSize, source, valueSize, queryRecordTarget / 10, true, 10));
-	wait(randomRangeScans(redwood, suffixSize, source, valueSize, queryRecordTarget, true, 1000));
-	wait(randomRangeScans(redwood, suffixSize, source, valueSize, queryRecordTarget / 10, false, 100));
-	wait(randomRangeScans(redwood, suffixSize, source, valueSize, queryRecordTarget, false, 10000));
-	wait(randomRangeScans(redwood, suffixSize, source, valueSize, queryRecordTarget, false, 1000000));
+	wait(randomRangeScans(redwood, suffixSize, source, valueSize, queryRecordTarget / 10, true, 10, 500, readType));
+	wait(randomRangeScans(redwood, suffixSize, source, valueSize, queryRecordTarget, true, 1000, 50000, readType));
+	wait(randomRangeScans(redwood, suffixSize, source, valueSize, queryRecordTarget / 10, false, 100, 5000, readType));
+	wait(randomRangeScans(redwood, suffixSize, source, valueSize, queryRecordTarget, false, 10000, 500000, readType));
+	wait(randomRangeScans(redwood, suffixSize, source, valueSize, queryRecordTarget, false, 1000000, 50000000, readType));
 	wait(closeKVS(redwood));
 	printf("\n");
 	return Void();
