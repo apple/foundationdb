@@ -14,3 +14,8 @@ if(NOT WIN32)
   target_compile_definitions(sqlite PRIVATE $<$<CONFIG:Debug>:NDEBUG>)
   target_compile_options(sqlite BEFORE PRIVATE -w) # disable warnings for third party
 endif()
+
+# SQLite won't build with -ffast-math
+if(ICX)
+  target_compile_options(sqlite PRIVATE -fno-fast-math)
+endif()
