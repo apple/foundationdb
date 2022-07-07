@@ -53,7 +53,8 @@ private:
 				        // Check the value of the key.
 				        auto f = ctx->tx().get(key, false);
 				        ctx->continueAfter(f, [key, f, newVal, ctx] {
-					        if (f.get().has_value() && f.get().value() == newVal) {
+					        ASSERT(f.get().has_value());
+					        if (f.get().value() == newVal) {
 						        // If the key is already at newVal, finish successfully.
 						        ctx->done();
 					        } else {
