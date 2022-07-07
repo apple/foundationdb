@@ -72,8 +72,6 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	Counter getCommitVersionRequests;
 	Counter getLiveCommittedVersionRequests;
 	Counter reportLiveCommittedVersionRequests;
-	// This counter gives an estimate of the number of non-empty peeks that storage servers
-	// should do from tlogs (in the worst case, ignoring blocking peek timeouts).
 	LatencySample versionVectorTagUpdates;
 	Counter waitForPrevCommitRequests;
 	Counter nonWaitForPrevCommitRequests;
@@ -100,9 +98,9 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	    getLiveCommittedVersionRequests("GetLiveCommittedVersionRequests", cc),
 	    reportLiveCommittedVersionRequests("ReportLiveCommittedVersionRequests", cc),
 	    versionVectorTagUpdates("VersionVectorTagUpdates",
-                                    dbgid,
-                                    SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-                                    SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+	                            dbgid,
+	                            SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+	                            SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
 	    waitForPrevCommitRequests("WaitForPrevCommitRequests", cc),
 	    nonWaitForPrevCommitRequests("NonWaitForPrevCommitRequests", cc),
 	    versionVectorSizeOnCVReply("VersionVectorSizeOnCVReply",
