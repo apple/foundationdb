@@ -34,13 +34,7 @@
 #include "flow/Arena.h"
 #include "flow/PKey.h"
 
-enum {
-	WLTOKEN_ENDPOINT_NOT_FOUND = 0,
-	WLTOKEN_PING_PACKET,
-	WLTOKEN_AUTH_TENANT,
-	WLTOKEN_UNAUTHORIZED_ENDPOINT,
-	WLTOKEN_FIRST_AVAILABLE
-};
+enum { WLTOKEN_ENDPOINT_NOT_FOUND = 0, WLTOKEN_PING_PACKET, WLTOKEN_UNAUTHORIZED_ENDPOINT, WLTOKEN_FIRST_AVAILABLE };
 
 #pragma pack(push, 4)
 class Endpoint {
@@ -295,7 +289,8 @@ public:
 
 	HealthMonitor* healthMonitor();
 
-	void authorizationTokenAdd(StringRef signedToken);
+	bool currentDeliveryPeerIsTrusted() const;
+	NetworkAddress currentDeliveryPeerAddress() const;
 
 	Optional<StringRef> getPublicKeyByName(StringRef name) const;
 	// Adds or replaces a public key

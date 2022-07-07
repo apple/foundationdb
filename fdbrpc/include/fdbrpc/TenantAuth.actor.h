@@ -31,44 +31,11 @@
 
 #include "fdbrpc/TenantInfo.h"
 #include "fdbrpc/TokenSign.h"
+#include "fdbrpc/TokenCache.h"
+#include "fdbrpc/FlowTransport.h"
 #include "flow/flow.h"
 
 #include "flow/actorcompiler.h" // has to be last include
-
-class AuthorizedTenants : public ReferenceCounted<AuthorizedTenants> {
-	friend class TransportData;
-	bool trusted;
-	std::set<std::pair<double, TenantName>> authorizedTenants;
-
-public:
-	AuthorizedTenants(bool trusted = false) : trusted(trusted) {}
-	bool add(double expire, VectorRef<TenantNameRef> const& tenants) {
-		bool res = false;
-		for (auto tenant : tenants) {
-			bool didAdd = false;
-			std::tie(std::ignore, didAdd) = authorizedTenants.emplace(expire, TenantName(tenant));
-			res = didAdd || res;
-		}
-		return res;
-	}
-
-	void cleanTenants() {
-		while (!authorizedTenants.empty() && authorizedTenants.begin()->first < now()) {
-			authorizedTenants.erase(authorizedTenants.begin());
-		}
-	}
-
-	bool contains(TenantNameRef tenant) const {
-		const_cast<AuthorizedTenants*>(this)->cleanTenants();
-		for (const auto& t : authorizedTenants) {
-			if (t.second == tenant) {
-				return true;
-			}
-		}
-		return false;
-	}
-	bool isTrusted() const { return trusted; }
-};
 
 // TODO: receive and validate token instead
 struct AuthorizationRequest {
@@ -88,17 +55,14 @@ struct serializable_traits<TenantInfo> : std::true_type {
 	template <class Archiver>
 	static void serialize(Archiver& ar, TenantInfo& v) {
 		using namespace std::literals;
-		serializer(ar, v.name, v.tenantId);
+		serializer(ar, v.name, v.tenantId, v.token, v.arena);
 		if constexpr (Archiver::isDeserializing) {
-			try {
-				Reference<AuthorizedTenants>& authorizedTenants =
-				    std::any_cast<Reference<AuthorizedTenants>&>(ar.context().variable("AuthorizedTenants"sv));
-				v.trusted = authorizedTenants->isTrusted();
-				v.verified = v.trusted || !v.name.present() || authorizedTenants->contains(v.name.get());
-			} catch (std::out_of_range& e) {
-				TraceEvent(SevError, "AttemptedReadTenantInfoWithNoAuth").backtrace();
-				ASSERT(false);
+			bool tenantAuthorized = false;
+			if (v.name.present() && v.token.present()) {
+				tenantAuthorized = TokenCache::instance().validate(v.name.get(), v.token.get());
 			}
+			v.trusted = FlowTransport::transport().currentDeliveryPeerIsTrusted();
+			v.verified = v.trusted || !v.name.present() || tenantAuthorized;
 		}
 	}
 };

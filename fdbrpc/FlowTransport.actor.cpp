@@ -30,13 +30,13 @@
 
 #include <boost/unordered_map.hpp>
 
-#include "fdbrpc/TenantAuth.actor.h"
 #include "fdbrpc/TokenSign.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/HealthMonitor.h"
 #include "fdbrpc/genericactors.actor.h"
 #include "fdbrpc/IPAllowList.h"
+#include "fdbrpc/TokenCache.h"
 #include "fdbrpc/simulator.h"
 #include "flow/ActorCollection.h"
 #include "flow/Error.h"
@@ -50,8 +50,13 @@
 #include "flow/xxhash.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-static NetworkAddressList g_currentDeliveryPeerAddress = NetworkAddressList();
-static Future<Void> g_currentDeliveryPeerDisconnect;
+namespace {
+
+NetworkAddressList g_currentDeliveryPeerAddress = NetworkAddressList();
+bool g_currentDeliverPeerAddressTrusted = false;
+Future<Void> g_currentDeliveryPeerDisconnect;
+
+} // namespace
 
 constexpr int PACKET_LEN_WIDTH = sizeof(uint32_t);
 const uint64_t TOKEN_STREAM_FLAG = 1;
@@ -242,15 +247,6 @@ struct PingReceiver final : NetworkMessageReceiver {
 	bool isPublic() const override { return true; }
 };
 
-struct TenantAuthorizer final : NetworkMessageReceiver {
-	TransportData& transportData;
-	TenantAuthorizer(TransportData& transportData, EndpointMap& endpoints) : transportData(transportData) {
-		endpoints.insertWellKnown(this, Endpoint::wellKnownToken(WLTOKEN_AUTH_TENANT), TaskPriority::ReadSocket);
-	}
-	void receive(ArenaObjectReader& reader) override;
-	bool isPublic() const override { return true; }
-};
-
 struct UnauthorizedEndpointReceiver final : NetworkMessageReceiver {
 	UnauthorizedEndpointReceiver(EndpointMap& endpoints) {
 		endpoints.insertWellKnown(
@@ -264,234 +260,6 @@ struct UnauthorizedEndpointReceiver final : NetworkMessageReceiver {
 		IFailureMonitor::failureMonitor().unauthorizedEndpoint(e);
 	}
 	bool isPublic() const override { return true; }
-};
-
-// A priority queue with two additional properties:
-// - All values within the queue are unique
-// - One can iterate over the queue
-template <class T, class Container = std::vector<T>, class Cmp = std::less<T>, class ValEq = std::equal_to<T>>
-class IterableUniquePriorityQueue {
-	Container queue;
-	Cmp cmp;
-	ValEq valCmp;
-	using const_iterator = typename Container::const_iterator;
-
-public:
-	void push(T const& val) {
-		queue.push_back(val);
-		std::push_heap(queue.begin(), queue.end(), cmp);
-	}
-	void push(T&& val) {
-		queue.push_back(std::move(val));
-		std::push_heap(queue.begin(), queue.end(), cmp);
-	}
-	// runs in O(n) -- so this class should only be used if we expect the max size of the queue to be small
-	template <class... Args>
-	bool emplace(Args&&... args) {
-		T el(std::forward<Args>(args)...);
-		for (const auto& element : *this) {
-			if (valCmp(element, el)) {
-				return false;
-			}
-		}
-		queue.emplace_back(std::move(el));
-		std::push_heap(queue.begin(), queue.end(), cmp);
-		return true;
-	}
-	const T& front() const { return queue.begin(); }
-	void pop() {
-		queue.pop_front();
-		std::pop_heap(queue.begin(), queue.end(), cmp);
-	}
-	const_iterator begin() const { return queue.begin(); }
-	const_iterator end() const { return queue.end(); }
-	bool empty() const { return queue.empty(); }
-};
-
-struct SignedAuthTokenTTL {
-	Arena arena;
-	double expirationTime;
-	StringRef serializedToken;
-	authz::jwt::TokenRef token;
-};
-struct SignedAuthTokenTTLCmp {
-	constexpr bool operator()(const SignedAuthTokenTTL& lhs, const SignedAuthTokenTTL& rhs) const {
-		return lhs.expirationTime > rhs.expirationTime;
-	}
-};
-
-struct SignedAuthTokenCmp {
-	bool operator()(const SignedAuthTokenTTL& lhs, const SignedAuthTokenTTL& rhs) const {
-		return lhs.token.signature == rhs.token.signature;
-	}
-};
-
-using TokenQueue = IterableUniquePriorityQueue<SignedAuthTokenTTL,
-                                               std::vector<SignedAuthTokenTTL>,
-                                               SignedAuthTokenTTLCmp,
-                                               SignedAuthTokenCmp>;
-
-class TokenCache : NonCopyable {
-	using QueueMember = std::pair<double, StringRef>;
-	struct QueueCmp {
-		bool operator()(QueueMember const& lhs, QueueMember const& rhs) const { return lhs.first > rhs.first; }
-	};
-	struct CachedToken {
-		Arena arena;
-		double expiresAt;
-		VectorRef<TenantNameRef> tenants;
-	};
-
-	class LRUCache {
-		using ListEntry = StringRef;
-		using List = std::list<ListEntry>;
-		using Map = boost::unordered_map<Standalone<StringRef>, List::iterator>;
-		List list;
-		Map map;
-		const unsigned max_size = FLOW_KNOBS->MAX_CACHED_EXPIRED_TOKENS;
-
-		void deleteOldestIfFull() {
-			while (map.size() > max_size) {
-				auto last = list.rbegin();
-				map.erase(*last);
-				list.pop_back();
-			}
-		}
-
-		void access(Map::iterator iter) {
-			if (iter->second == list.begin()) {
-				return;
-			}
-			auto lIter = iter->second;
-			list.emplace_front(iter->first);
-			iter->second = list.begin();
-			list.erase(lIter);
-		}
-
-	public:
-		void add(Standalone<StringRef> const& signature) {
-			bool didInsert;
-			decltype(map.begin()) iter;
-			std::tie(iter, didInsert) = map.insert(std::make_pair(signature, list.end()));
-			if (didInsert) {
-				list.emplace_front(iter->first);
-				iter->second = list.begin();
-			} else {
-				access(iter);
-			}
-			deleteOldestIfFull();
-		}
-		bool has(StringRef signature) {
-			auto iter = map.find(signature);
-			if (iter == map.end()) {
-				return false;
-			} else {
-				access(iter);
-				return true;
-			}
-		}
-	};
-
-	std::map<StringRef, CachedToken> tokens;
-	std::priority_queue<QueueMember, std::vector<QueueMember>, QueueCmp> priorityQueue;
-	LRUCache expiredTokens;
-	AsyncTrigger insert;
-
-	ACTOR static Future<Void> cleanerJob(TokenCache* self) {
-		state Future<Void> nextExpire = Never();
-		loop {
-			while (!self->priorityQueue.empty() && self->priorityQueue.top().first < now()) {
-				StringRef signature = self->priorityQueue.top().second;
-				auto iter = self->tokens.find(signature);
-				ASSERT(iter != self->tokens.end());
-				self->expiredTokens.add(signature);
-				self->tokens.erase(iter);
-				self->priorityQueue.pop();
-			}
-			nextExpire = self->priorityQueue.empty() ? Never() : delay(self->priorityQueue.top().first - now());
-			wait(nextExpire || self->insert.onTrigger());
-		}
-	}
-	Future<Void> cleaner;
-
-	TokenCache(TokenCache&&) = delete;
-	TokenCache& operator=(TokenCache&&) = delete;
-
-public:
-	explicit TokenCache() { cleaner = cleanerJob(this); }
-
-	bool addToken(Reference<AuthorizedTenants> tenants, StringRef token) {
-		auto sig = authz::jwt::signaturePart(token);
-		auto iter = tokens.find(sig);
-		if (iter != tokens.end()) {
-			return tenants->add(iter->second.expiresAt, iter->second.tenants);
-		} else if (expiredTokens.has(sig)) {
-			TraceEvent(SevWarn, "InvalidToken")
-			    .detail("From", g_currentDeliveryPeerAddress.address)
-			    .detail("Reason", "Expired");
-			throw permission_denied();
-		} else {
-			Arena arena;
-			authz::jwt::TokenRef t;
-			if (!authz::jwt::parseToken(arena, t, token)) {
-				throw permission_denied();
-			}
-			if (!t.keyId.present()) {
-				TraceEvent(SevWarn, "InvalidToken")
-				    .detail("From", g_currentDeliveryPeerAddress.address)
-				    .detail("Reason", "NoKeyID");
-				throw permission_denied();
-			}
-			auto key = FlowTransport::transport().getPublicKeyByName(t.keyId.get());
-			if (key.present() && authz::jwt::verifyToken(token, key.get())) {
-				double currentTime = g_network->timer();
-				if (!t.expiresAtUnixTime.present()) {
-					TraceEvent(SevWarn, "InvalidToken")
-					    .detail("From", g_currentDeliveryPeerAddress.address)
-					    .detail("Reason", "NoExpirationTime");
-					throw permission_denied();
-				} else if (double(t.expiresAtUnixTime.get()) <= currentTime) {
-					TraceEvent(SevWarn, "InvalidToken")
-					    .detail("From", g_currentDeliveryPeerAddress.address)
-					    .detail("Reason", "Expired");
-					throw permission_denied();
-				}
-				if (!t.notBeforeUnixTime.present()) {
-					TraceEvent(SevWarn, "InvalidToken")
-					    .detail("From", g_currentDeliveryPeerAddress.address)
-					    .detail("Reason", "NoNotBefore");
-					throw permission_denied();
-				} else if (double(t.notBeforeUnixTime.get()) > currentTime) {
-					TraceEvent(SevWarn, "InvalidToken")
-					    .detail("From", g_currentDeliveryPeerAddress.address)
-					    .detail("Reason", "TokenNotYetValid");
-					throw permission_denied();
-				}
-				if (!t.tenants.present()) {
-					TraceEvent(SevWarn, "InvalidToken")
-					    .detail("From", g_currentDeliveryPeerAddress.address)
-					    .detail("Reason", "NoTenants");
-					throw permission_denied();
-				}
-				CachedToken c;
-				c.expiresAt = double(t.expiresAtUnixTime.get());
-				for (auto tenant : t.tenants.get()) {
-					c.tenants.push_back_deep(c.arena, tenant);
-				}
-				StringRef signature(c.arena, sig);
-				priorityQueue.emplace(c.expiresAt, signature);
-				tenants->add(c.expiresAt, c.tenants);
-				tokens.emplace(signature, std::move(c));
-				insert.trigger();
-				return true;
-			} else {
-				TraceEvent(SevWarn, "InvalidSignature")
-				    .detail("From", g_currentDeliveryPeerAddress.address)
-				    .detail("Reason", key.present() ? "VerificationFailed" : "KeyNotFound");
-				throw permission_denied();
-			}
-		}
-	}
 };
 
 // NetworkAddressCachedString retains a cached Standalone<StringRef> of
@@ -554,7 +322,6 @@ public:
 	EndpointMap endpoints;
 	EndpointNotFoundReceiver endpointNotFoundReceiver{ endpoints };
 	PingReceiver pingReceiver{ endpoints };
-	TenantAuthorizer tenantReceiver;
 	UnauthorizedEndpointReceiver unauthorizedEndpointReceiver{ endpoints };
 
 	Int64MetricHandle bytesSent;
@@ -571,13 +338,10 @@ public:
 	double lastIncompatibleMessage;
 	uint64_t transportId;
 	IPAllowList allowList;
-	std::shared_ptr<ContextVariableMap> localCVM = std::make_shared<ContextVariableMap>(); // for local delivery
 
 	Future<Void> multiVersionCleanup;
 	Future<Void> pingLogger;
 
-	TokenQueue tokens; // Client side
-	TokenCache tokenCache; // Server side
 	std::unordered_map<Standalone<StringRef>, Standalone<StringRef>> publicKeys;
 };
 
@@ -640,34 +404,10 @@ ACTOR Future<Void> pingLatencyLogger(TransportData* self) {
 
 TransportData::TransportData(uint64_t transportId, int maxWellKnownEndpoints, IPAllowList const* allowList)
   : warnAlwaysForLargePacket(true), endpoints(maxWellKnownEndpoints), endpointNotFoundReceiver(endpoints),
-    pingReceiver(endpoints), tenantReceiver(*this, endpoints), numIncompatibleConnections(0),
-    lastIncompatibleMessage(0), transportId(transportId), allowList(allowList == nullptr ? IPAllowList() : *allowList) {
+    pingReceiver(endpoints), numIncompatibleConnections(0), lastIncompatibleMessage(0), transportId(transportId),
+    allowList(allowList == nullptr ? IPAllowList() : *allowList) {
 	degraded = makeReference<AsyncVar<bool>>(false);
 	pingLogger = pingLatencyLogger(this);
-	auto auth = makeReference<AuthorizedTenants>();
-	auth->trusted = true;
-	(*localCVM)["AuthorizedTenants"] = auth;
-}
-
-void TenantAuthorizer::receive(ArenaObjectReader& reader) {
-	AuthorizationRequest req;
-	reader.deserialize(req);
-	Reference<AuthorizedTenants>& auth =
-	    std::any_cast<Reference<AuthorizedTenants>&>(reader.variable("AuthorizedTenants"));
-	for (const auto& t : req.tokens) {
-		try {
-			bool wasAdded = transportData.tokenCache.addToken(auth, t);
-			TEST(wasAdded); // A token was successfully added
-			TEST(!wasAdded); // Duplicate token for connection
-		} catch (Error& e) {
-			if (e.code() == error_code_permission_denied) {
-				TraceEvent(SevError, "ReceivedInvalidToken").detail("From", g_currentDeliveryPeerAddress.address).log();
-				TEST(true); // Token rejected
-			} else {
-				throw;
-			}
-		}
-	}
 }
 
 #define CONNECT_PACKET_V0 0x0FDB00A444020001LL
@@ -1170,88 +910,9 @@ void Peer::prependConnectPacket() {
 	pkt.connectionId = transport->transportId;
 
 	PacketBuffer *pb_first = PacketBuffer::create(), *pb_end = nullptr;
-	auto checksumPb = pb_first;
 	PacketWriter wr(pb_first, nullptr, Unversioned());
 	pkt.serialize(wr);
-	if (!transport->tokens.empty()) {
-		AuthorizationRequest req;
-		for (auto t : transport->tokens) {
-			req.tokens.push_back(req.arena, t.serializedToken);
-		}
-		++transport->countPacketsGenerated;
-		SplitBuffer packetInfoBuffer;
-		uint32_t len;
-		int packetInfoSize = PACKET_LEN_WIDTH;
-		XXH64_hash_t checksum;
-		XXH3_state_t checksumState;
-		bool checksumStream = false;
-		const bool checksumEnabled = !destination.isTLS();
-
-		if (checksumEnabled) {
-			packetInfoSize += sizeof(checksum);
-		}
-		wr.writeAhead(packetInfoSize, &packetInfoBuffer);
-		wr << Endpoint::wellKnownToken(WLTOKEN_AUTH_TENANT);
-		ObjectWriter writer([&wr](size_t size) { return wr.writeBytes(size); },
-		                    AssumeVersion(g_network->protocolVersion()));
-		writer.serialize(req);
-		// what.serializePacketWriter(wr);
-		pb_end = wr.finish();
-		len = wr.size() - packetInfoSize - pkt.totalPacketSize();
-		if (checksumEnabled) {
-			// Find the correct place to start calculating checksum
-			uint32_t checksumUnprocessedLength = len;
-			int prevBytesWritten = pkt.totalPacketSize();
-			prevBytesWritten += packetInfoSize;
-			if (prevBytesWritten >= checksumPb->bytes_written) {
-				prevBytesWritten -= checksumPb->bytes_written;
-				checksumPb = checksumPb->nextPacketBuffer();
-			}
-
-			// Checksum calculation
-			while (checksumUnprocessedLength > 0) {
-				uint32_t processLength =
-				    std::min(checksumUnprocessedLength, (uint32_t)(checksumPb->bytes_written - prevBytesWritten));
-
-				// If not in checksum stream mode yet
-				if (!checksumStream) {
-					// If there is nothing left to process then calculate checksum directly
-					if (processLength == checksumUnprocessedLength) {
-						checksum = XXH3_64bits(checksumPb->data() + prevBytesWritten, processLength);
-					} else {
-						// Otherwise, initialize checksum state and switch to stream mode
-						if (XXH3_64bits_reset(&checksumState) != XXH_OK) {
-							throw internal_error();
-						}
-						checksumStream = true;
-					}
-				}
-
-				// If in checksum stream mode, update the checksum state
-				if (checksumStream) {
-					if (XXH3_64bits_update(&checksumState, checksumPb->data() + prevBytesWritten, processLength) !=
-					    XXH_OK) {
-						throw internal_error();
-					}
-				}
-
-				checksumUnprocessedLength -= processLength;
-				checksumPb = checksumPb->nextPacketBuffer();
-				prevBytesWritten = 0;
-			}
-
-			// If in checksum stream mode, get the final checksum
-			if (checksumStream) {
-				checksum = XXH3_64bits_digest(&checksumState);
-			}
-		}
-		packetInfoBuffer.write(&len, sizeof(len));
-		if (checksumEnabled) {
-			packetInfoBuffer.write(&checksum, sizeof(checksum), sizeof(len));
-		}
-	} else {
-		pb_end = wr.finish();
-	}
+	pb_end = wr.finish();
 #if VALGRIND
 	SendBuffer* checkbuf = pb_first;
 	while (checkbuf) {
@@ -1345,8 +1006,7 @@ ACTOR static void deliver(TransportData* self,
                           TaskPriority priority,
                           ArenaReader reader,
                           NetworkAddress peerAddress,
-                          Reference<AuthorizedTenants> authorizedTenants,
-                          std::shared_ptr<ContextVariableMap> cvm,
+                          bool isTrustedPeer,
                           InReadSocket inReadSocket,
                           Future<Void> disconnect) {
 	// We want to run the task at the right priority. If the priority is higher than the current priority (which is
@@ -1361,22 +1021,24 @@ ACTOR static void deliver(TransportData* self,
 	}
 
 	auto receiver = self->endpoints.get(destination.token);
-	if (receiver && (authorizedTenants->isTrusted() || receiver->isPublic())) {
+	if (receiver && (isTrustedPeer || receiver->isPublic())) {
 		if (!checkCompatible(receiver->peerCompatibilityPolicy(), reader.protocolVersion())) {
 			return;
 		}
 		try {
 			g_currentDeliveryPeerAddress = destination.addresses;
+			g_currentDeliverPeerAddressTrusted = isTrustedPeer;
 			g_currentDeliveryPeerDisconnect = disconnect;
 			StringRef data = reader.arenaReadAll();
 			ASSERT(data.size() > 8);
 			ArenaObjectReader objReader(reader.arena(), reader.arenaReadAll(), AssumeVersion(reader.protocolVersion()));
-			objReader.setContextVariableMap(cvm);
 			receiver->receive(objReader);
 			g_currentDeliveryPeerAddress = { NetworkAddress() };
+			g_currentDeliverPeerAddressTrusted = false;
 			g_currentDeliveryPeerDisconnect = Future<Void>();
 		} catch (Error& e) {
 			g_currentDeliveryPeerAddress = { NetworkAddress() };
+			g_currentDeliverPeerAddressTrusted = false;
 			g_currentDeliveryPeerDisconnect = Future<Void>();
 			TraceEvent(SevError, "ReceiverError")
 			    .error(e)
@@ -1424,8 +1086,7 @@ static void scanPackets(TransportData* transport,
                         const uint8_t* e,
                         Arena& arena,
                         NetworkAddress const& peerAddress,
-                        Reference<AuthorizedTenants> const& authorizedTenants,
-                        std::shared_ptr<ContextVariableMap> cvm,
+                        bool isTrustedPeer,
                         ProtocolVersion peerProtocolVersion,
                         Future<Void> disconnect,
                         IsStableConnection isStableConnection) {
@@ -1547,8 +1208,7 @@ static void scanPackets(TransportData* transport,
 			        priority,
 			        std::move(reader),
 			        peerAddress,
-			        authorizedTenants,
-			        cvm,
+			        isTrustedPeer,
 			        InReadSocket::True,
 			        disconnect);
 		}
@@ -1595,11 +1255,8 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 	state bool incompatiblePeerCounted = false;
 	state NetworkAddress peerAddress;
 	state ProtocolVersion peerProtocolVersion;
-	state std::shared_ptr<ContextVariableMap> cvm = std::make_shared<ContextVariableMap>();
-	state Reference<AuthorizedTenants> authorizedTenants =
-	    makeReference<AuthorizedTenants>(transport->allowList(conn->getPeerAddress().ip));
+	state bool trusted = transport->allowList(conn->getPeerAddress().ip);
 	peerAddress = conn->getPeerAddress();
-	(*cvm)["AuthorizedTenants"] = authorizedTenants;
 
 	if (!peer) {
 		ASSERT(!peerAddress.isPublic());
@@ -1750,8 +1407,7 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 						            unprocessed_end,
 						            arena,
 						            peerAddress,
-						            authorizedTenants,
-						            cvm,
+						            trusted,
 						            peerProtocolVersion,
 						            peer->disconnect.getFuture(),
 						            IsStableConnection(g_network->isSimulated() && conn->isStableConnection()));
@@ -2054,14 +1710,12 @@ static void sendLocal(TransportData* self, ISerializeSource const& what, const E
 	ASSERT(copy.size() > 0);
 	TaskPriority priority = self->endpoints.getPriority(destination.token);
 	if (priority != TaskPriority::UnknownEndpoint || (destination.token.first() & TOKEN_STREAM_FLAG) != 0) {
-		Reference<AuthorizedTenants> authorizedTenants = makeReference<AuthorizedTenants>(true);
 		deliver(self,
 		        destination,
 		        priority,
 		        ArenaReader(copy.arena(), copy, AssumeVersion(currentProtocolVersion)),
 		        NetworkAddress(),
-		        authorizedTenants,
-		        self->localCVM,
+		        true,
 		        InReadSocket::False,
 		        Never());
 	}
@@ -2272,6 +1926,7 @@ void FlowTransport::createInstance(bool isClient,
                                    uint64_t transportId,
                                    int maxWellKnownEndpoints,
                                    IPAllowList const* allowList) {
+	TokenCache::createInstance();
 	g_network->setGlobal(INetwork::enFlowTransport,
 	                     (flowGlobalType) new FlowTransport(transportId, maxWellKnownEndpoints, allowList));
 	g_network->setGlobal(INetwork::enNetworkAddressFunc, (flowGlobalType)&FlowTransport::getGlobalLocalAddress);
@@ -2284,44 +1939,20 @@ HealthMonitor* FlowTransport::healthMonitor() {
 	return &self->healthMonitor;
 }
 
-void FlowTransport::authorizationTokenAdd(StringRef signedToken) {
-	SignedAuthTokenTTL token;
-	token.serializedToken = StringRef(token.arena, signedToken);
-	if (authz::jwt::parseToken(token.arena, token.token, token.serializedToken)) {
-		TraceEvent(SevWarnAlways, "AddedInvalidToken").detail("Reason", "CanNotParse").log();
-		return;
-	}
-	if (!token.token.expiresAtUnixTime.present()) {
-		TraceEvent(SevWarnAlways, "AddedInvalidToken").detail("Reason", "NoExpirationTime").log();
-	}
-	double expiresAt = double(token.token.expiresAtUnixTime.get());
-	if (expiresAt < timer()) {
-		TraceEvent(SevWarnAlways, "AddedInvalidToken")
-		    .detail("Reason", "Expired")
-		    .detail("ExpirationTime", expiresAt)
-		    .log();
-	}
-	self->tokens.emplace(token);
-	AuthorizationRequest req;
-	req.tokens.push_back(req.arena, signedToken);
-	// send the token to all existing peers
-	for (auto peer : self->peers) {
-		NetworkAddressList addr;
-		addr.address = peer.first;
-		sendPacket(self,
-		           peer.second,
-		           SerializeSource<AuthorizationRequest>(req),
-		           Endpoint::wellKnown(addr, WLTOKEN_AUTH_TENANT),
-		           false);
-	}
-}
-
 Optional<StringRef> FlowTransport::getPublicKeyByName(StringRef name) const {
 	auto iter = self->publicKeys.find(name);
 	if (iter != self->publicKeys.end()) {
 		return iter->second;
 	}
 	return Optional<StringRef>{};
+}
+
+NetworkAddress FlowTransport::currentDeliveryPeerAddress() const {
+	return g_currentDeliveryPeerAddress.address;
+}
+
+bool FlowTransport::currentDeliveryPeerIsTrusted() const {
+	return g_currentDeliverPeerAddressTrusted;
 }
 
 void FlowTransport::addPublicKey(StringRef name, StringRef key) {

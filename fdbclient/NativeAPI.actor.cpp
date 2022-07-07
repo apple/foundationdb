@@ -1774,7 +1774,7 @@ DatabaseContext::~DatabaseContext() {
 	locationCache.insert(allKeys, Reference<LocationInfo>());
 }
 
-Optional<KeyRangeLocationInfo> DatabaseContext::getCachedLocation(const Optional<TenantName>& tenantName,
+Optional<KeyRangeLocationInfo> DatabaseContext::getCachedLocation(const Optional<TenantNameRef>& tenantName,
                                                                   const KeyRef& key,
                                                                   Reverse isBackward) {
 	TenantMapEntry tenantEntry;
@@ -1800,7 +1800,7 @@ Optional<KeyRangeLocationInfo> DatabaseContext::getCachedLocation(const Optional
 	return Optional<KeyRangeLocationInfo>();
 }
 
-bool DatabaseContext::getCachedLocations(const Optional<TenantName>& tenantName,
+bool DatabaseContext::getCachedLocations(const Optional<TenantNameRef>& tenantName,
                                          const KeyRangeRef& range,
                                          std::vector<KeyRangeLocationInfo>& result,
                                          int limit,
@@ -1857,7 +1857,7 @@ void DatabaseContext::cacheTenant(const TenantName& tenant, const TenantMapEntry
 	}
 }
 
-Reference<LocationInfo> DatabaseContext::setCachedLocation(const Optional<TenantName>& tenant,
+Reference<LocationInfo> DatabaseContext::setCachedLocation(const Optional<TenantNameRef>& tenant,
                                                            const TenantMapEntry& tenantEntry,
                                                            const KeyRangeRef& absoluteKeys,
                                                            const std::vector<StorageServerInterface>& servers) {
@@ -2466,10 +2466,6 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 	}
 	case FDBNetworkOptions::EXTERNAL_CLIENT:
 		networkOptions.primaryClient = false;
-		break;
-	case FDBNetworkOptions::AUTHORIZATION_TOKEN_ADD:
-		validateOptionValuePresent(value);
-		FlowTransport::transport().authorizationTokenAdd(value.get());
 		break;
 	default:
 		break;
@@ -3192,7 +3188,7 @@ TenantInfo TransactionState::getTenantInfo(bool allowInvalidId /* = false */) {
 	}
 
 	ASSERT(allowInvalidId || tenantId != TenantInfo::INVALID_TENANT);
-	return TenantInfo(t.get(), tenantId);
+	return TenantInfo(t, authToken_, tenantId);
 }
 
 Optional<TenantName> const& TransactionState::tenant() {
@@ -3652,7 +3648,8 @@ ACTOR Future<Void> watchStorageServerResp(int64_t tenantId, Key key, Database cx
 }
 
 ACTOR Future<Void> sameVersionDiffValue(Database cx, Reference<WatchParameters> parameters) {
-	state ReadYourWritesTransaction tr(cx, parameters->tenant.name);
+	state ReadYourWritesTransaction tr(
+	    cx, parameters->tenant.name.present() ? parameters->tenant.name.get() : Optional<TenantName>());
 	loop {
 		try {
 			if (!parameters->tenant.name.present()) {
@@ -6572,6 +6569,11 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 			throw e;
 		}
 		trState->options.rawAccess = true;
+		break;
+
+	case FDBTransactionOptions::AUTHORIZATION_TOKEN:
+		validateOptionValuePresent(value);
+		trState->setToken(value.get());
 		break;
 
 	default:

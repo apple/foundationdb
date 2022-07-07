@@ -83,6 +83,11 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 		}
 	}
 
+	template <bool MT = MultiTenancy>
+	std::enable_if_t<MT, StringRef> getAuthToken() const {
+		return this->signedToken;
+	}
+
 	std::string description() const override {
 		if constexpr (MultiTenancy) {
 			return "TenantCycleWorkload";
@@ -93,7 +98,6 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 
 	Future<Void> setup(Database const& cx) override {
 		if constexpr (MultiTenancy) {
-			FlowTransport::transport().authorizationTokenAdd(this->signedToken);
 			cx->defaultTenant = this->tenant;
 		}
 		return bulkSetup(cx, this, nodeCount, Promise<double>());
@@ -144,6 +148,14 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 		    .detailf("From", "%016llx", debug_lastLoadBalanceResultEndpointToken);
 	}
 
+	template <bool B = MultiTenancy>
+	std::enable_if_t<B> setAuthToken(Transaction& tr) {
+		tr.setOption(FDBTransactionOptions::AUTHORIZATION_TOKEN, this->signedToken);
+	}
+
+	template <bool B = MultiTenancy>
+	std::enable_if_t<!B> setAuthToken(Transaction& tr) {}
+
 	ACTOR Future<Void> cycleClient(Database cx, CycleWorkload* self, double delay) {
 		state double lastTime = now();
 		try {
@@ -153,6 +165,7 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 				state double tstart = now();
 				state int r = deterministicRandom()->randomInt(0, self->nodeCount);
 				state Transaction tr(cx);
+				self->setAuthToken(tr);
 				if (deterministicRandom()->random01() <= self->traceParentProbability) {
 					state Span span("CycleClient"_loc);
 					TraceEvent("CycleTracingTransaction", span.context.traceID).log();
@@ -299,6 +312,7 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 			// One client checks the validity of the cycle
 			state Transaction tr(cx);
 			state int retryCount = 0;
+			self->setAuthToken(tr);
 			loop {
 				try {
 					state Version v = wait(tr.getReadVersion());

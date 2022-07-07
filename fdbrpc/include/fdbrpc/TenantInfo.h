@@ -29,7 +29,9 @@ typedef Standalone<TenantNameRef> TenantName;
 struct TenantInfo {
 	static const int64_t INVALID_TENANT = -1;
 
-	Optional<TenantName> name;
+	Arena arena;
+	Optional<TenantNameRef> name;
+	Optional<StringRef> token;
 	int64_t tenantId;
 	// this field is not serialized and instead set by FlowTransport during
 	// deserialization. This field indicates whether the client is trusted.
@@ -44,7 +46,16 @@ struct TenantInfo {
 	bool hasAuthorizedTenant() const { return trusted || (name.present() && verified); }
 
 	TenantInfo() : tenantId(INVALID_TENANT) {}
-	TenantInfo(TenantName name, int64_t tenantId) : name(name), tenantId(tenantId) {}
+	TenantInfo(Optional<TenantName> const& tenantName, Optional<Standalone<StringRef>> const& token, int64_t tenantId)
+	  : tenantId(tenantId) {
+		if (tenantName.present()) {
+			arena.dependsOn(tenantName.get().arena());
+			name = tenantName.get();
+		}
+		if (token.present()) {
+			arena.dependsOn(token.get().arena());
+		}
+	}
 };
 
 #endif // FDBRPC_TENANTINFO_H_
