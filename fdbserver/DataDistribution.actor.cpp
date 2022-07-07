@@ -785,7 +785,7 @@ class DataDistributorImpl {
 	friend class DataDistributor;
 
 	// real-cluster only
-	static ACTOR Future<Void> takeMoveKeysLock(DataDistributor* self) {
+	ACTOR static Future<Void> takeMoveKeysLock(DataDistributor* self) {
 		TraceEvent("DDInitTakingMoveKeysLock", self->data->ddId).log();
 		wait(store(self->lock, self->txnProcessor->takeMoveKeysLock(self->data->ddId)));
 		TraceEvent("DDInitTookMoveKeysLock", self->data->ddId).log();
@@ -793,7 +793,7 @@ class DataDistributorImpl {
 	}
 
 	// Mock-supported
-	static ACTOR Future<Void> getDatabaseConfiguration(DataDistributor* self) {
+	ACTOR static Future<Void> getDatabaseConfiguration(DataDistributor* self) {
 		wait(store(self->configuration, self->txnProcessor->getDatabaseConfiguration()));
 		self->primaryDcId.clear();
 		self->remoteDcIds.clear();
@@ -810,7 +810,7 @@ class DataDistributorImpl {
 	}
 
 	// Mock-supported
-	static ACTOR Future<Void> getInitialDataDistribution(DataDistributor* self) {
+	ACTOR static Future<Void> getInitialDataDistribution(DataDistributor* self) {
 		wait(store(self->initData,
 		           self->txnProcessor->getInitialDataDistribution(
 		               self->data->ddId,
@@ -835,7 +835,7 @@ class DataDistributorImpl {
 		return Void();
 	}
 
-	static ACTOR Future<Void> init(DataDistributor* self) {
+	ACTOR static Future<Void> init(DataDistributor* self) {
 		loop {
 			wait(DataDistributorImpl::takeMoveKeysLock(self));
 			wait(DataDistributorImpl::getDatabaseConfiguration(self));
@@ -893,7 +893,7 @@ class DataDistributorImpl {
 	}
 
 	// Runs the data distribution algorithm for FDB, including the DD Queue, DD tracker, and DD team collection
-	static ACTOR Future<Void> run(DataDistributor* dataDistributor,
+	ACTOR static Future<Void> run(DataDistributor* dataDistributor,
 	                              PromiseStream<GetMetricsListRequest> getShardMetricsList,
 	                              const DDEnabledState* ddEnabledState) {
 		state Reference<DataDistributorData> self = dataDistributor->data;
