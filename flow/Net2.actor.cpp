@@ -146,8 +146,8 @@ public:
 	void initMetrics() override;
 
 	// INetworkConnections interface
-	Future<Reference<IConnection>> connect(NetworkAddress toAddr, const std::string& host) override;
-	Future<Reference<IConnection>> connectExternal(NetworkAddress toAddr, const std::string& host) override;
+	Future<Reference<IConnection>> connect(NetworkAddress toAddr, Optional<NetworkAddress> proxy = {}) override;
+	Future<Reference<IConnection>> connectExternal(NetworkAddress toAddr, Optional<NetworkAddress> proxy = {}) override;
 	Future<Reference<IUDPSocket>> createUDPSocket(NetworkAddress toAddr) override;
 	Future<Reference<IUDPSocket>> createUDPSocket(bool isV6) override;
 	// The mock DNS methods should only be used in simulation.
@@ -507,7 +507,7 @@ public:
 
 	UID getDebugID() const override { return id; }
 
-	tcp::socket& getSocket() { return socket; }
+	tcp::socket& getSocket() override { return socket; }
 
 private:
 	UID id;
@@ -842,7 +842,8 @@ public:
 	// This is not part of the IConnection interface, because it is wrapped by INetwork::connect()
 	ACTOR static Future<Reference<IConnection>> connect(boost::asio::io_service* ios,
 	                                                    Reference<ReferencedObject<boost::asio::ssl::context>> context,
-	                                                    NetworkAddress addr) {
+	                                                    NetworkAddress addr,
+	                                                    tcp::socket* existingSocket = nullptr) {
 		std::pair<IPAddress, uint16_t> peerIP = std::make_pair(addr.ip, addr.port);
 		auto iter(g_network->networkInfo.serverTLSConnectionThrottler.find(peerIP));
 		if (iter != g_network->networkInfo.serverTLSConnectionThrottler.end()) {
@@ -859,6 +860,10 @@ public:
 
 		state Reference<SSLConnection> self(new SSLConnection(*ios, context));
 		self->peer_address = addr;
+		if (existingSocket != nullptr) {
+			self->socket = std::move(*existingSocket);
+			return self;
+		}
 
 		try {
 			auto to = tcpEndpoint(self->peer_address);
@@ -1097,7 +1102,7 @@ public:
 
 	UID getDebugID() const override { return id; }
 
-	tcp::socket& getSocket() { return socket; }
+	tcp::socket& getSocket() override { return socket; }
 
 	ssl_socket& getSSLSocket() { return ssl_sock; }
 
@@ -1818,17 +1823,31 @@ THREAD_HANDLE Net2::startThread(THREAD_FUNC_RETURN (*func)(void*), void* arg, in
 	return ::startThread(func, arg, stackSize, name);
 }
 
-Future<Reference<IConnection>> Net2::connect(NetworkAddress toAddr, const std::string& host) {
+ACTOR Future<Reference<IConnection>> connectImpl(Net2* self, NetworkAddress toAddr, Optional<NetworkAddress> proxy) {
+	state tcp::socket* socket = nullptr;
+	if (proxy.present()) {
+		// connect to proxy, recursively
+		Reference<IConnection> connection = wait(self->connect(proxy.get(), {}));
+		*socket = std::move(connection->getSocket());
+		// TODO(renxuan): if toAddr is tls, do CONNECT request.
+	}
 	if (toAddr.isTLS()) {
-		initTLS(ETLSInitState::CONNECT);
-		return SSLConnection::connect(&this->reactor.ios, this->sslContextVar.get(), toAddr);
+		self->initTLS(INetwork::ETLSInitState::CONNECT);
+		Reference<IConnection> connection =
+		    wait(SSLConnection::connect(&self->reactor.ios, self->sslContextVar.get(), toAddr, socket));
+		return connection;
 	}
 
-	return Connection::connect(&this->reactor.ios, toAddr);
+	Reference<IConnection> connection = wait(Connection::connect(&self->reactor.ios, toAddr));
+	return connection;
 }
 
-Future<Reference<IConnection>> Net2::connectExternal(NetworkAddress toAddr, const std::string& host) {
-	return connect(toAddr, host);
+Future<Reference<IConnection>> Net2::connect(NetworkAddress toAddr, Optional<NetworkAddress> proxy) {
+	return connectImpl(this, toAddr, proxy);
+}
+
+Future<Reference<IConnection>> Net2::connectExternal(NetworkAddress toAddr, Optional<NetworkAddress> proxy) {
+	return connect(toAddr, proxy);
 }
 
 Future<Reference<IUDPSocket>> Net2::createUDPSocket(NetworkAddress toAddr) {

@@ -274,27 +274,30 @@ TEST_CASE("/flow/DNSCacheParsing") {
 	return Void();
 }
 
+ACTOR Future<Reference<IConnection>> connectImpl(INetworkConnections* self,
+                                                 std::string host,
+                                                 std::string service,
+                                                 bool isTLS,
+                                                 Optional<NetworkAddress> proxy) {
+	NetworkAddress pickEndpoint = wait(map(INetworkConnections::net()->resolveTCPEndpoint(host, service),
+	                                       [=](std::vector<NetworkAddress> const& addresses) -> NetworkAddress {
+		                                       NetworkAddress addr =
+		                                           addresses[deterministicRandom()->randomInt(0, addresses.size())];
+		                                       addr.fromHostname = true;
+		                                       if (isTLS) {
+			                                       addr.flags = NetworkAddress::FLAG_TLS;
+		                                       }
+		                                       return addr;
+	                                       }));
+	Reference<IConnection> connection = wait(self->connectExternal(pickEndpoint, proxy));
+	return connection;
+}
+
 Future<Reference<IConnection>> INetworkConnections::connect(const std::string& host,
                                                             const std::string& service,
-                                                            bool isTLS) {
-	// Use map to create an actor that returns an endpoint or throws
-	Future<NetworkAddress> pickEndpoint =
-	    map(resolveTCPEndpoint(host, service), [=](std::vector<NetworkAddress> const& addresses) -> NetworkAddress {
-		    NetworkAddress addr = addresses[deterministicRandom()->randomInt(0, addresses.size())];
-		    addr.fromHostname = true;
-		    if (isTLS) {
-			    addr.flags = NetworkAddress::FLAG_TLS;
-		    }
-		    return addr;
-	    });
-
-	// Wait for the endpoint to return, then wait for connect(endpoint) and return it.
-	// Template types are being provided explicitly because they can't be automatically deduced for some reason.
-	return mapAsync<NetworkAddress,
-	                std::function<Future<Reference<IConnection>>(NetworkAddress const&)>,
-	                Reference<IConnection>>(
-	    pickEndpoint,
-	    [=](NetworkAddress const& addr) -> Future<Reference<IConnection>> { return connectExternal(addr, host); });
+                                                            bool isTLS,
+                                                            Optional<NetworkAddress> proxy) {
+	return connectImpl(this, host, service, isTLS, proxy);
 }
 
 IUDPSocket::~IUDPSocket() {}
