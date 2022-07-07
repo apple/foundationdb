@@ -702,6 +702,9 @@ public:
 	}
 
 	PhysicalShard* addRange(KeyRange range, std::string id) {
+		TraceEvent(SevVerbose, "ShardedRocksAddRangeBegin", this->id)
+		    .detail("Range", range)
+		    .detail("PhysicalShardID", id);
 		// Newly added range should not overlap with any existing range.
 		auto ranges = dataShardMap.intersectingRanges(range);
 
@@ -730,16 +733,15 @@ public:
 
 		validate();
 
-		TraceEvent(SevDebug, "ShardedRocksDB")
-		    .detail("Action", "AddRange")
-		    .detail("BeginKey", range.begin)
-		    .detail("EndKey", range.end);
+		TraceEvent(SevVerbose, "ShardedRocksAddRangeEnd", this->id)
+		    .detail("Range", range)
+		    .detail("PhysicalShardID", id);
 
 		return shard.get();
 	}
 
 	std::vector<std::string> removeRange(KeyRange range) {
-		TraceEvent(SevInfo, "ShardedRocksShardManagement").detail("Operation", "RemoveRange").detail("Range", range);
+		TraceEvent(SevVerbose, "ShardedRocksRemoveRangeBegin", this->id).detail("Range", range);
 
 		std::vector<std::string> shardIds;
 
@@ -806,53 +808,10 @@ public:
 
 		validate();
 
+		TraceEvent(SevVerbose, "ShardedRocksRemoveRangeEnd", this->id).detail("Range", range);
+
 		return shardIds;
 	}
-
-	// std::vector<std::string> removeRange(KeyRange range) {
-	// 	std::vector<std::string> shardIds;
-
-	// 	auto ranges = dataShardMap.intersectingRanges(range);
-
-	// 	for (auto it = ranges.begin(); it != ranges.end(); ++it) {
-	// 		if (!it.value()) {
-	// 			TraceEvent(SevDebug, "ShardedRocksDB")
-	// 			    .detail("Info", "RemoveNonExistentRange")
-	// 			    .detail("BeginKey", range.begin)
-	// 			    .detail("EndKey", range.end);
-	// 			continue;
-	// 		}
-
-	// 		auto existingShard = it.value()->physicalShard;
-	// 		auto shardRange = it.range();
-
-	// 		ASSERT(it.value()->range == shardRange); // Ranges should be consistent.
-	// 		if (range.contains(shardRange)) {
-	// 			existingShard->dataShards.erase(shardRange.begin.toString());
-	// 			if (existingShard->dataShards.size() == 0) {
-	// 				TraceEvent(SevDebug, "ShardedRocksDB").detail("EmptyShardId", existingShard->id);
-	// 				shardIds.push_back(existingShard->id);
-	// 			}
-	// 			continue;
-	// 		}
-
-	// 		// Range modification could result in more than one segments. Remove the original segment key here.
-	// 		existingShard->dataShards.erase(shardRange.begin.toString());
-	// 		if (shardRange.begin < range.begin) {
-	// 			existingShard->dataShards[shardRange.begin.toString()] =
-	// 			    std::make_unique<DataShard>(KeyRange(KeyRangeRef(shardRange.begin, range.begin)), existingShard);
-	// 			logShardEvent(existingShard->id, shardRange, ShardOp::MODIFY_RANGE);
-	// 		}
-
-	// 		if (shardRange.end > range.end) {
-	// 			existingShard->dataShards[range.end.toString()] =
-	// 			    std::make_unique<DataShard>(KeyRange(KeyRangeRef(range.end, shardRange.end)), existingShard);
-	// 			logShardEvent(existingShard->id, shardRange, ShardOp::MODIFY_RANGE);
-	// 		}
-	// 	}
-	// 	dataShardMap.insert(range, nullptr);
-	// 	return shardIds;
-	// }
 
 	std::vector<std::shared_ptr<PhysicalShard>> cleanUpShards(const std::vector<std::string>& shardIds) {
 		std::vector<std::shared_ptr<PhysicalShard>> emptyShards;
@@ -872,7 +831,7 @@ public:
 			TraceEvent(SevError, "ShardedRocksDB").detail("Error", "write to non-exist shard").detail("WriteKey", key);
 			return;
 		}
-		TraceEvent(SevDebug, "ShardManagerPut", this->id)
+		TraceEvent(SevVerbose, "ShardManagerPut", this->id)
 		    .detail("WriteKey", key)
 		    .detail("Value", value)
 		    .detail("MapRange", it.range())
@@ -882,7 +841,7 @@ public:
 		ASSERT(dirtyShards != nullptr);
 		writeBatch->Put(it.value()->physicalShard->cf, toSlice(key), toSlice(value));
 		dirtyShards->insert(it.value()->physicalShard);
-		TraceEvent(SevDebug, "ShardManagerPutEnd", this->id).detail("WriteKey", key).detail("Value", value);
+		TraceEvent(SevVerbose, "ShardManagerPutEnd", this->id).detail("WriteKey", key).detail("Value", value);
 	}
 
 	void clear(KeyRef key) {
@@ -1016,9 +975,9 @@ public:
 	}
 
 	void validate() {
-		TraceEvent(SevDebug, "ValidateShardManager", this->id);
+		TraceEvent(SevVerbose, "ValidateShardManager", this->id);
 		for (auto s = dataShardMap.ranges().begin(); s != dataShardMap.ranges().end(); ++s) {
-			TraceEvent e(SevDebug, "ValidateDataShardMap", this->id);
+			TraceEvent e(SevVerbose, "ValidateDataShardMap", this->id);
 			e.detail("Range", s->range());
 			const DataShard* shard = s->value();
 			e.detail("ShardAddress", reinterpret_cast<std::uintptr_t>(shard));
