@@ -20,7 +20,7 @@
 
 // Unit tests that test the timeouts for a disconnected cluster
 
-#define FDB_API_VERSION 710
+#define FDB_API_VERSION 720
 #include <foundationdb/fdb_c.h>
 
 #include <chrono>
@@ -255,7 +255,7 @@ int main(int argc, char** argv) {
 		          << std::endl;
 		return 1;
 	}
-	fdb_check(fdb_select_api_version(710));
+	fdb_check(fdb_select_api_version(720));
 	if (argc >= 3) {
 		std::string externalClientLibrary = argv[2];
 		if (externalClientLibrary.substr(0, 2) != "--") {

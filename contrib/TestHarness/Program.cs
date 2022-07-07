@@ -376,11 +376,13 @@ namespace SummarizeTest
                     bool useNewPlugin = (oldServerName == fdbserverName) || versionGreaterThanOrEqual(oldServerName.Split('-').Last(), "5.2.0");
                     bool useToml = File.Exists(testFile + "-1.toml");
                     string testFile1 = useToml ? testFile + "-1.toml" : testFile + "-1.txt";
-                    result = RunTest(firstServerName, useNewPlugin ? tlsPluginFile : tlsPluginFile_5_1, summaryFileName, errorFileName, seed, buggify, testFile1, runDir, uid, expectedUnseed, out unseed, out retryableError, logOnRetryableError, useValgrind, false, true, oldServerName, traceToStdout, noSim, faultInjectionEnabled);
+                    bool useValgrindRunOne = useValgrind && firstServerName == fdbserverName;
+                    bool useValgrindRunTwo = useValgrind && secondServerName == fdbserverName;
+                    result = RunTest(firstServerName, useNewPlugin ? tlsPluginFile : tlsPluginFile_5_1, summaryFileName, errorFileName, seed, buggify, testFile1, runDir, uid, expectedUnseed, out unseed, out retryableError, logOnRetryableError, useValgrindRunOne, false, true, oldServerName, traceToStdout, noSim, faultInjectionEnabled);
                     if (result == 0)
                     {
                         string testFile2 = useToml ? testFile + "-2.toml" : testFile + "-2.txt";
-                        result = RunTest(secondServerName, tlsPluginFile, summaryFileName, errorFileName, seed+1, buggify, testFile2, runDir, uid, expectedUnseed, out unseed, out retryableError, logOnRetryableError, useValgrind, true, false, oldServerName, traceToStdout, noSim, faultInjectionEnabled);
+                        result = RunTest(secondServerName, tlsPluginFile, summaryFileName, errorFileName, seed+1, buggify, testFile2, runDir, uid, expectedUnseed, out unseed, out retryableError, logOnRetryableError, useValgrindRunTwo, true, false, oldServerName, traceToStdout, noSim, faultInjectionEnabled);
                     }
                 }
                 else
@@ -458,7 +460,7 @@ namespace SummarizeTest
                             role, IsRunningOnMono() ? "" : "-q", seed, testFile, buggify ? "on" : "off", faultInjectionArg, tlsPluginArg);
                     }
                     if (restarting) args = args + " --restarting";
-                    if (useValgrind && !willRestart)
+                    if (useValgrind)
                     {
                         valgrindOutputFile = string.Format("valgrind-{0}.xml", seed);
                         process.StartInfo.FileName = "valgrind";

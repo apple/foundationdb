@@ -19,6 +19,7 @@
  */
 #include "TesterApiWorkload.h"
 #include "TesterUtil.h"
+#include "test/fdb_api.hpp"
 #include <memory>
 #include <fmt/format.h>
 
@@ -26,73 +27,52 @@ namespace FdbApiTester {
 
 class ApiCorrectnessWorkload : public ApiWorkload {
 public:
-	ApiCorrectnessWorkload(const WorkloadConfig& config) : ApiWorkload(config) {
-		numRandomOperations = config.getIntOption("numRandomOperations", 1000);
-		numOpLeft = numRandomOperations;
-	}
-
-	void runTests() override { randomOperations(); }
+	ApiCorrectnessWorkload(const WorkloadConfig& config) : ApiWorkload(config) {}
 
 private:
-	enum OpType { OP_INSERT, OP_GET, OP_CLEAR, OP_CLEAR_RANGE, OP_COMMIT_READ, OP_LAST = OP_COMMIT_READ };
-
-	// The number of operations to be executed
-	int numRandomOperations;
-
-	// Operations counter
-	int numOpLeft;
-
-	void randomInsertOp(TTaskFct cont) {
-		int numKeys = Random::get().randomInt(1, maxKeysPerTransaction);
-		auto kvPairs = std::make_shared<std::vector<KeyValue>>();
-		for (int i = 0; i < numKeys; i++) {
-			kvPairs->push_back(KeyValue{ randomNotExistingKey(), randomValue() });
-		}
-		execTransaction(
-		    [kvPairs](auto ctx) {
-			    for (const KeyValue& kv : *kvPairs) {
-				    ctx->tx()->set(kv.key, kv.value);
-			    }
-			    ctx->commit();
-		    },
-		    [this, kvPairs, cont]() {
-			    for (const KeyValue& kv : *kvPairs) {
-				    store.set(kv.key, kv.value);
-			    }
-			    schedule(cont);
-		    });
-	}
+	enum OpType {
+		OP_INSERT,
+		OP_GET,
+		OP_GET_KEY,
+		OP_CLEAR,
+		OP_GET_RANGE,
+		OP_CLEAR_RANGE,
+		OP_COMMIT_READ,
+		OP_LAST = OP_COMMIT_READ
+	};
 
 	void randomCommitReadOp(TTaskFct cont) {
 		int numKeys = Random::get().randomInt(1, maxKeysPerTransaction);
-		auto kvPairs = std::make_shared<std::vector<KeyValue>>();
+		auto kvPairs = std::make_shared<std::vector<fdb::KeyValue>>();
 		for (int i = 0; i < numKeys; i++) {
-			kvPairs->push_back(KeyValue{ randomKey(readExistingKeysRatio), randomValue() });
+			kvPairs->push_back(fdb::KeyValue{ randomKey(readExistingKeysRatio), randomValue() });
 		}
 		execTransaction(
 		    [kvPairs](auto ctx) {
-			    for (const KeyValue& kv : *kvPairs) {
-				    ctx->tx()->set(kv.key, kv.value);
+			    for (const fdb::KeyValue& kv : *kvPairs) {
+				    ctx->tx().set(kv.key, kv.value);
 			    }
 			    ctx->commit();
 		    },
 		    [this, kvPairs, cont]() {
-			    for (const KeyValue& kv : *kvPairs) {
+			    for (const fdb::KeyValue& kv : *kvPairs) {
 				    store.set(kv.key, kv.value);
 			    }
-			    auto results = std::make_shared<std::vector<std::optional<std::string>>>();
+			    auto results = std::make_shared<std::vector<std::optional<fdb::Value>>>();
 			    execTransaction(
-			        [kvPairs, results](auto ctx) {
-				        // TODO: Enable after merging with GRV caching
-				        // ctx->tx()->setOption(FDB_TR_OPTION_USE_GRV_CACHE);
-				        auto futures = std::make_shared<std::vector<Future>>();
+			        [kvPairs, results, this](auto ctx) {
+				        if (apiVersion >= 710) {
+					        // Test GRV caching in 7.1 and later
+					        ctx->tx().setOption(FDB_TR_OPTION_USE_GRV_CACHE);
+				        }
+				        auto futures = std::make_shared<std::vector<fdb::Future>>();
 				        for (const auto& kv : *kvPairs) {
-					        futures->push_back(ctx->tx()->get(kv.key, false));
+					        futures->push_back(ctx->tx().get(kv.key, false));
 				        }
 				        ctx->continueAfterAll(*futures, [ctx, futures, results]() {
 					        results->clear();
 					        for (auto& f : *futures) {
-						        results->push_back(((ValueFuture&)f).getValue());
+						        results->push_back(copyValueRef(f.get<fdb::future_var::ValueRef>()));
 					        }
 					        ASSERT(results->size() == futures->size());
 					        ctx->done();
@@ -106,9 +86,9 @@ private:
 					        if (actual != expected) {
 						        error(
 						            fmt::format("randomCommitReadOp mismatch. key: {} expected: {:.80} actual: {:.80}",
-						                        (*kvPairs)[i].key,
-						                        expected,
-						                        actual));
+						                        fdb::toCharsRef((*kvPairs)[i].key),
+						                        fdb::toCharsRef(expected.value()),
+						                        fdb::toCharsRef(actual.value())));
 						        ASSERT(false);
 					        }
 				        }
@@ -119,21 +99,21 @@ private:
 
 	void randomGetOp(TTaskFct cont) {
 		int numKeys = Random::get().randomInt(1, maxKeysPerTransaction);
-		auto keys = std::make_shared<std::vector<std::string>>();
-		auto results = std::make_shared<std::vector<std::optional<std::string>>>();
+		auto keys = std::make_shared<std::vector<fdb::Key>>();
+		auto results = std::make_shared<std::vector<std::optional<fdb::Value>>>();
 		for (int i = 0; i < numKeys; i++) {
 			keys->push_back(randomKey(readExistingKeysRatio));
 		}
 		execTransaction(
 		    [keys, results](auto ctx) {
-			    auto futures = std::make_shared<std::vector<Future>>();
+			    auto futures = std::make_shared<std::vector<fdb::Future>>();
 			    for (const auto& key : *keys) {
-				    futures->push_back(ctx->tx()->get(key, false));
+				    futures->push_back(ctx->tx().get(key, false));
 			    }
 			    ctx->continueAfterAll(*futures, [ctx, futures, results]() {
 				    results->clear();
 				    for (auto& f : *futures) {
-					    results->push_back(((ValueFuture&)f).getValue());
+					    results->push_back(copyValueRef(f.get<fdb::future_var::ValueRef>()));
 				    }
 				    ASSERT(results->size() == futures->size());
 				    ctx->done();
@@ -145,49 +125,140 @@ private:
 				    auto expected = store.get((*keys)[i]);
 				    if ((*results)[i] != expected) {
 					    error(fmt::format("randomGetOp mismatch. key: {} expected: {:.80} actual: {:.80}",
-					                      (*keys)[i],
-					                      expected,
-					                      (*results)[i]));
+					                      fdb::toCharsRef((*keys)[i]),
+					                      fdb::toCharsRef(expected.value()),
+					                      fdb::toCharsRef((*results)[i].value())));
 				    }
 			    }
 			    schedule(cont);
 		    });
 	}
 
-	void randomClearOp(TTaskFct cont) {
+	void randomGetKeyOp(TTaskFct cont) {
 		int numKeys = Random::get().randomInt(1, maxKeysPerTransaction);
-		auto keys = std::make_shared<std::vector<std::string>>();
+		auto keysWithSelectors = std::make_shared<std::vector<std::pair<fdb::Key, fdb::KeySelector>>>();
+		auto results = std::make_shared<std::vector<fdb::Key>>();
+		keysWithSelectors->reserve(numKeys);
 		for (int i = 0; i < numKeys; i++) {
-			keys->push_back(randomExistingKey());
+			auto key = randomKey(readExistingKeysRatio);
+			fdb::KeySelector selector;
+			selector.keyLength = key.size();
+			selector.orEqual = Random::get().randomBool(0.5);
+			selector.offset = Random::get().randomInt(0, 4);
+			keysWithSelectors->emplace_back(std::move(key), std::move(selector));
+			// We would ideally do the following above:
+			//   selector.key = key.data();
+			// but key.data() may become invalid after the key is moved to the vector.
+			// So instead, we update the pointer here to the string already in the vector.
+			keysWithSelectors->back().second.key = keysWithSelectors->back().first.data();
 		}
 		execTransaction(
-		    [keys](auto ctx) {
-			    for (const auto& key : *keys) {
-				    ctx->tx()->clear(key);
+		    [keysWithSelectors, results](auto ctx) {
+			    auto futures = std::make_shared<std::vector<fdb::Future>>();
+			    for (const auto& keyWithSelector : *keysWithSelectors) {
+				    auto key = keyWithSelector.first;
+				    auto selector = keyWithSelector.second;
+				    futures->push_back(ctx->tx().getKey(selector, false));
 			    }
-			    ctx->commit();
+			    ctx->continueAfterAll(*futures, [ctx, futures, results]() {
+				    results->clear();
+				    for (auto& f : *futures) {
+					    results->push_back(fdb::Key(f.get<fdb::future_var::KeyRef>()));
+				    }
+				    ASSERT(results->size() == futures->size());
+				    ctx->done();
+			    });
 		    },
-		    [this, keys, cont]() {
-			    for (const auto& key : *keys) {
-				    store.clear(key);
+		    [this, keysWithSelectors, results, cont]() {
+			    ASSERT(results->size() == keysWithSelectors->size());
+			    for (int i = 0; i < keysWithSelectors->size(); i++) {
+				    auto const& key = (*keysWithSelectors)[i].first;
+				    auto const& selector = (*keysWithSelectors)[i].second;
+				    auto expected = store.getKey(key, selector.orEqual, selector.offset);
+				    auto actual = (*results)[i];
+				    // Local store only contains data for the current client, while fdb contains data from multiple
+				    // clients. If getKey returned a key outside of the range for the current client, adjust the result
+				    // to match what would be expected in the local store.
+				    if (actual.substr(0, keyPrefix.size()) < keyPrefix) {
+					    actual = store.startKey();
+				    } else if ((*results)[i].substr(0, keyPrefix.size()) > keyPrefix) {
+					    actual = store.endKey();
+				    }
+				    if (actual != expected) {
+					    error(fmt::format("randomGetKeyOp mismatch. key: {}, orEqual: {}, offset: {}, expected: {} "
+					                      "actual: {}",
+					                      fdb::toCharsRef(key),
+					                      selector.orEqual,
+					                      selector.offset,
+					                      fdb::toCharsRef(expected),
+					                      fdb::toCharsRef(actual)));
+				    }
 			    }
 			    schedule(cont);
 		    });
 	}
 
-	void randomClearRangeOp(TTaskFct cont) {
-		std::string begin = randomKeyName();
-		std::string end = randomKeyName();
-		if (begin > end) {
-			std::swap(begin, end);
-		}
+	void getRangeLoop(std::shared_ptr<ITransactionContext> ctx,
+	                  fdb::KeySelector begin,
+	                  fdb::KeySelector end,
+	                  std::shared_ptr<std::vector<fdb::KeyValue>> results) {
+		auto f = ctx->tx().getRange(begin,
+		                            end,
+		                            0 /*limit*/,
+		                            0 /*target_bytes*/,
+		                            FDB_STREAMING_MODE_WANT_ALL,
+		                            0 /*iteration*/,
+		                            false /*snapshot*/,
+		                            false /*reverse*/);
+		ctx->continueAfter(f, [this, ctx, f, end, results]() {
+			auto out = copyKeyValueArray(f.get());
+			results->insert(results->end(), out.first.begin(), out.first.end());
+			const bool more = out.second;
+			if (more) {
+				// Fetch the remaining results.
+				getRangeLoop(ctx, fdb::key_select::firstGreaterThan(results->back().key), end, results);
+			} else {
+				ctx->done();
+			}
+		});
+	}
+
+	void randomGetRangeOp(TTaskFct cont) {
+		auto begin = randomKey(readExistingKeysRatio);
+		auto end = randomKey(readExistingKeysRatio);
+		auto results = std::make_shared<std::vector<fdb::KeyValue>>();
+
 		execTransaction(
-		    [begin, end](auto ctx) {
-			    ctx->tx()->clearRange(begin, end);
-			    ctx->commit();
+		    [this, begin, end, results](auto ctx) {
+			    // Clear the results vector, in case the transaction is retried.
+			    results->clear();
+
+			    getRangeLoop(ctx,
+			                 fdb::key_select::firstGreaterOrEqual(begin),
+			                 fdb::key_select::firstGreaterOrEqual(end),
+			                 results);
 		    },
-		    [this, begin, end, cont]() {
-			    store.clear(begin, end);
+		    [this, begin, end, results, cont]() {
+			    auto expected = store.getRange(begin, end, results->size() + 10, false);
+			    if (results->size() != expected.size()) {
+				    error(fmt::format("randomGetRangeOp mismatch. expected {} keys, actual {} keys",
+				                      expected.size(),
+				                      results->size()));
+			    } else {
+				    auto expected_kv = expected.begin();
+				    for (auto actual_kv : *results) {
+					    if (actual_kv.key != expected_kv->key || actual_kv.value != expected_kv->value) {
+						    error(fmt::format(
+						        "randomGetRangeOp mismatch. expected key: {} actual key: {} expected value: "
+						        "{:.80} actual value: {:.80}",
+						        fdb::toCharsRef(expected_kv->key),
+						        fdb::toCharsRef(actual_kv.key),
+						        fdb::toCharsRef(expected_kv->value),
+						        fdb::toCharsRef(actual_kv.value)));
+					    }
+					    expected_kv++;
+				    }
+			    }
 			    schedule(cont);
 		    });
 	}
@@ -201,8 +272,14 @@ private:
 		case OP_GET:
 			randomGetOp(cont);
 			break;
+		case OP_GET_KEY:
+			randomGetKeyOp(cont);
+			break;
 		case OP_CLEAR:
 			randomClearOp(cont);
+			break;
+		case OP_GET_RANGE:
+			randomGetRangeOp(cont);
 			break;
 		case OP_CLEAR_RANGE:
 			randomClearRangeOp(cont);
@@ -211,14 +288,6 @@ private:
 			randomCommitReadOp(cont);
 			break;
 		}
-	}
-
-	void randomOperations() {
-		if (numOpLeft == 0)
-			return;
-
-		numOpLeft--;
-		randomOperation([this]() { randomOperations(); });
 	}
 };
 

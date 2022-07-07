@@ -302,7 +302,8 @@ std::pair<std::vector<std::pair<UID, NetworkAddress>>, std::vector<std::pair<UID
 	return std::make_pair(logs, oldLogs);
 }
 
-const KeyRef serverKeysPrefix = "\xff/serverKeys/"_sr;
+const KeyRangeRef serverKeysRange = KeyRangeRef("\xff/serverKeys/"_sr, "\xff/serverKeys0"_sr);
+const KeyRef serverKeysPrefix = serverKeysRange.begin;
 const ValueRef serverKeysTrue = "1"_sr, // compatible with what was serverKeysTrue
     serverKeysTrueEmptyRange = "3"_sr, // the server treats the range as empty.
     serverKeysFalse;
@@ -328,6 +329,18 @@ UID serverKeysDecodeServer(const KeyRef& key) {
 	rd >> server_id;
 	return server_id;
 }
+
+std::pair<UID, Key> serverKeysDecodeServerBegin(const KeyRef& key) {
+	UID server_id;
+	BinaryReader rd(key.removePrefix(serverKeysPrefix), Unversioned());
+	rd >> server_id;
+	rd.readBytes(1); // skip "/"
+	const auto remainingBytes = rd.remainingBytes();
+	KeyRef ref = KeyRef(rd.arenaRead(remainingBytes), remainingBytes);
+	// std::cout << ref.size() << " " << ref.toString() << std::endl;
+	return std::make_pair(server_id, Key(ref));
+}
+
 bool serverHasKey(ValueRef storedValue) {
 	return storedValue == serverKeysTrue || storedValue == serverKeysTrueEmptyRange;
 }
@@ -619,6 +632,19 @@ StorageServerInterface decodeServerListValue(ValueRef const& value) {
 	return decodeServerListValueFB(value);
 }
 
+Value swVersionValue(SWVersion const& swversion) {
+	auto protocolVersion = currentProtocolVersion;
+	protocolVersion.addObjectSerializerFlag();
+	return ObjectWriter::toValue(swversion, IncludeVersion(protocolVersion));
+}
+
+SWVersion decodeSWVersionValue(ValueRef const& value) {
+	SWVersion s;
+	ObjectReader reader(value.begin(), IncludeVersion());
+	reader.deserialize(s);
+	return s;
+}
+
 // processClassKeys.contains(k) iff k.startsWith( processClassKeys.begin ) because '/'+1 == '0'
 const KeyRangeRef processClassKeys(LiteralStringRef("\xff/processClass/"), LiteralStringRef("\xff/processClass0"));
 const KeyRef processClassPrefix = processClassKeys.begin;
@@ -823,6 +849,7 @@ std::vector<std::pair<UID, Version>> decodeBackupStartedValue(const ValueRef& va
 const KeyRef coordinatorsKey = LiteralStringRef("\xff/coordinators");
 const KeyRef logsKey = LiteralStringRef("\xff/logs");
 const KeyRef minRequiredCommitVersionKey = LiteralStringRef("\xff/minRequiredCommitVersion");
+const KeyRef versionEpochKey = LiteralStringRef("\xff/versionEpoch");
 
 const KeyRef globalKeysPrefix = LiteralStringRef("\xff/globals");
 const KeyRef lastEpochEndKey = LiteralStringRef("\xff/globals/lastEpochEnd");
@@ -1155,9 +1182,9 @@ const KeyRangeRef blobGranuleMappingKeys(LiteralStringRef("\xff\x02/bgm/"), Lite
 const KeyRangeRef blobGranuleLockKeys(LiteralStringRef("\xff\x02/bgl/"), LiteralStringRef("\xff\x02/bgl0"));
 const KeyRangeRef blobGranuleSplitKeys(LiteralStringRef("\xff\x02/bgs/"), LiteralStringRef("\xff\x02/bgs0"));
 const KeyRangeRef blobGranuleHistoryKeys(LiteralStringRef("\xff\x02/bgh/"), LiteralStringRef("\xff\x02/bgh0"));
-const KeyRangeRef blobGranulePruneKeys(LiteralStringRef("\xff\x02/bgp/"), LiteralStringRef("\xff\x02/bgp0"));
+const KeyRangeRef blobGranulePurgeKeys(LiteralStringRef("\xff\x02/bgp/"), LiteralStringRef("\xff\x02/bgp0"));
 const KeyRangeRef blobGranuleVersionKeys(LiteralStringRef("\xff\x02/bgv/"), LiteralStringRef("\xff\x02/bgv0"));
-const KeyRef blobGranulePruneChangeKey = LiteralStringRef("\xff\x02/bgpChange");
+const KeyRef blobGranulePurgeChangeKey = LiteralStringRef("\xff\x02/bgpChange");
 
 const uint8_t BG_FILE_TYPE_DELTA = 'D';
 const uint8_t BG_FILE_TYPE_SNAPSHOT = 'S';
@@ -1214,7 +1241,7 @@ std::tuple<Standalone<StringRef>, int64_t, int64_t, int64_t> decodeBlobGranuleFi
 	return std::tuple(filename, offset, length, fullFileLength);
 }
 
-const Value blobGranulePruneValueFor(Version version, KeyRange range, bool force) {
+const Value blobGranulePurgeValueFor(Version version, KeyRange range, bool force) {
 	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBlobGranule()));
 	wr << version;
 	wr << range;
@@ -1222,7 +1249,7 @@ const Value blobGranulePruneValueFor(Version version, KeyRange range, bool force
 	return wr.toValue();
 }
 
-std::tuple<Version, KeyRange, bool> decodeBlobGranulePruneValue(ValueRef const& value) {
+std::tuple<Version, KeyRange, bool> decodeBlobGranulePurgeValue(ValueRef const& value) {
 	Version version;
 	KeyRange range;
 	bool force;
@@ -1375,17 +1402,6 @@ BlobWorkerInterface decodeBlobWorkerListValue(ValueRef const& value) {
 	ObjectReader reader(value.begin(), IncludeVersion());
 	reader.deserialize(interf);
 	return interf;
-}
-
-Value encodeTenantEntry(TenantMapEntry const& tenantEntry) {
-	return ObjectWriter::toValue(tenantEntry, IncludeVersion());
-}
-
-TenantMapEntry decodeTenantEntry(ValueRef const& value) {
-	TenantMapEntry entry;
-	ObjectReader reader(value.begin(), IncludeVersion());
-	reader.deserialize(entry);
-	return entry;
 }
 
 const KeyRangeRef tenantMapKeys("\xff/tenantMap/"_sr, "\xff/tenantMap0"_sr);

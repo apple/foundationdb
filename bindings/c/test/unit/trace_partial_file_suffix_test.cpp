@@ -26,7 +26,7 @@
 
 #include "flow/Platform.h"
 
-#define FDB_API_VERSION 710
+#define FDB_API_VERSION 720
 #include "foundationdb/fdb_c.h"
 
 #undef NDEBUG
@@ -53,7 +53,7 @@ bool file_exists(const char* path) {
 }
 
 int main(int argc, char** argv) {
-	fdb_check(fdb_select_api_version(710));
+	fdb_check(fdb_select_api_version(720));
 
 	std::string file_identifier = "trace_partial_file_suffix_test" + std::to_string(std::random_device{}());
 	std::string trace_partial_file_suffix = ".tmp";

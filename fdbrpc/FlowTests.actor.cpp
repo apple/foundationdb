@@ -20,13 +20,14 @@
 
 // Unit tests for the flow language and libraries
 
+#include "flow/Arena.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/UnitTest.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/IThreadPool.h"
 #include "flow/WriteOnlySet.h"
 #include "fdbrpc/fdbrpc.h"
-#include "fdbrpc/IAsyncFile.h"
+#include "flow/IAsyncFile.h"
 #include "flow/TLSConfig.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 

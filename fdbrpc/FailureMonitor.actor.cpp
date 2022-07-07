@@ -131,8 +131,17 @@ void SimpleFailureMonitor::endpointNotFound(Endpoint const& endpoint) {
 			TraceEvent(SevWarnAlways, "TooManyFailedEndpoints").suppressFor(1.0);
 			failedEndpoints.clear();
 		}
-		failedEndpoints.insert(endpoint);
+		failedEndpoints.emplace(endpoint, FailedReason::NOT_FOUND);
 	}
+	endpointKnownFailed.trigger(endpoint);
+}
+
+void SimpleFailureMonitor::unauthorizedEndpoint(Endpoint const& endpoint) {
+	TraceEvent(g_network->isSimulated() ? SevWarnAlways : SevError, "TriedAccessPrivateEndpoint")
+	    .suppressFor(1.0)
+	    .detail("Address", endpoint.getPrimaryAddress())
+	    .detail("Token", endpoint.token);
+	failedEndpoints.emplace(endpoint, FailedReason::UNAUTHORIZED);
 	endpointKnownFailed.trigger(endpoint);
 }
 
@@ -208,8 +217,13 @@ bool SimpleFailureMonitor::permanentlyFailed(Endpoint const& endpoint) const {
 	return failedEndpoints.count(endpoint);
 }
 
+bool SimpleFailureMonitor::knownUnauthorized(Endpoint const& endpoint) const {
+	auto iter = failedEndpoints.find(endpoint);
+	return iter != failedEndpoints.end() && iter->second == FailedReason::UNAUTHORIZED;
+}
+
 void SimpleFailureMonitor::reset() {
 	addressStatus = std::unordered_map<NetworkAddress, FailureStatus>();
-	failedEndpoints = std::unordered_set<Endpoint>();
+	failedEndpoints = std::unordered_map<Endpoint, FailedReason>();
 	endpointKnownFailed.resetNoWaiting();
 }

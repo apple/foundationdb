@@ -31,6 +31,7 @@
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
+#include "fdbclient/TenantManagement.actor.h"
 #include "fdbserver/KnobProtectiveGroups.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
@@ -48,7 +49,7 @@ WorkloadContext::WorkloadContext() {}
 
 WorkloadContext::WorkloadContext(const WorkloadContext& r)
   : options(r.options), clientId(r.clientId), clientCount(r.clientCount), sharedRandomNumber(r.sharedRandomNumber),
-    dbInfo(r.dbInfo) {}
+    dbInfo(r.dbInfo), ccr(r.ccr) {}
 
 WorkloadContext::~WorkloadContext() {}
 
@@ -99,6 +100,20 @@ Key KVWorkload::keyForIndex(uint64_t index) const {
 	}
 }
 
+int64_t KVWorkload::indexForKey(const KeyRef& key, bool absent) const {
+	int idx = 0;
+	if (nodePrefix > 0) {
+		ASSERT(keyBytes >= 32);
+		idx += 16;
+	}
+	ASSERT(keyBytes >= 16);
+	// extract int64_t index, the reverse process of emplaceIndex()
+	auto end = key.size() - idx - (absent ? 1 : 0);
+	std::string str((char*)key.begin() + idx, end);
+	int64_t res = std::stoll(str, nullptr, 16);
+	return res;
+}
+
 Key KVWorkload::keyForIndex(uint64_t index, bool absent) const {
 	int adjustedKeyBytes = (absent) ? (keyBytes + 1) : keyBytes;
 	Key result = makeString(adjustedKeyBytes);
@@ -112,8 +127,8 @@ Key KVWorkload::keyForIndex(uint64_t index, bool absent) const {
 		idx += 16;
 	}
 	ASSERT(keyBytes >= 16);
-	double d = double(index) / nodeCount;
-	emplaceIndex(data, idx, *(int64_t*)&d);
+	emplaceIndex(data, idx, (int64_t)index);
+	// ASSERT(indexForKey(result) == (int64_t)index); // debug assert
 
 	return result;
 }
@@ -326,34 +341,51 @@ struct CompoundWorkload : TestWorkload {
 		}
 		return allTrue(all);
 	}
-	void getMetrics(std::vector<PerfMetric>& m) override {
-		for (int w = 0; w < workloads.size(); w++) {
+
+	ACTOR static Future<std::vector<PerfMetric>> getMetrics(CompoundWorkload* self) {
+		state std::vector<Future<std::vector<PerfMetric>>> results;
+		for (int w = 0; w < self->workloads.size(); w++) {
 			std::vector<PerfMetric> p;
-			workloads[w]->getMetrics(p);
-			for (int i = 0; i < p.size(); i++)
-				m.push_back(p[i].withPrefix(workloads[w]->description() + "."));
+			results.push_back(self->workloads[w]->getMetrics());
 		}
+		wait(waitForAll(results));
+		std::vector<PerfMetric> res;
+		for (int i = 0; i < results.size(); ++i) {
+			auto const& p = results[i].get();
+			for (auto const& m : p) {
+				res.push_back(m.withPrefix(self->workloads[i]->description() + "."));
+			}
+		}
+		return res;
 	}
+
+	Future<std::vector<PerfMetric>> getMetrics() override { return getMetrics(this); }
 	double getCheckTimeout() const override {
 		double m = 0;
 		for (int w = 0; w < workloads.size(); w++)
 			m = std::max(workloads[w]->getCheckTimeout(), m);
 		return m;
 	}
+
+	void getMetrics(std::vector<PerfMetric>&) override { ASSERT(false); }
 };
 
-Reference<TestWorkload> getWorkloadIface(WorkloadRequest work,
-                                         VectorRef<KeyValueRef> options,
-                                         Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
-	Value testName = getOption(options, LiteralStringRef("testName"), LiteralStringRef("no-test-specified"));
+ACTOR Future<Reference<TestWorkload>> getWorkloadIface(WorkloadRequest work,
+                                                       Reference<IClusterConnectionRecord> ccr,
+                                                       VectorRef<KeyValueRef> options,
+                                                       Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+	state Reference<TestWorkload> workload;
+	state Value testName = getOption(options, LiteralStringRef("testName"), LiteralStringRef("no-test-specified"));
 	WorkloadContext wcx;
 	wcx.clientId = work.clientId;
 	wcx.clientCount = work.clientCount;
+	wcx.ccr = ccr;
 	wcx.dbInfo = dbInfo;
 	wcx.options = options;
 	wcx.sharedRandomNumber = work.sharedRandomNumber;
 
-	auto workload = IWorkloadFactory::create(testName.toString(), wcx);
+	workload = IWorkloadFactory::create(testName.toString(), wcx);
+	wait(workload->initialized());
 
 	auto unconsumedOptions = checkAllOptionsConsumed(workload ? workload->options : VectorRef<KeyValueRef>());
 	if (!workload || unconsumedOptions.size()) {
@@ -378,24 +410,33 @@ Reference<TestWorkload> getWorkloadIface(WorkloadRequest work,
 	return workload;
 }
 
-Reference<TestWorkload> getWorkloadIface(WorkloadRequest work, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+ACTOR Future<Reference<TestWorkload>> getWorkloadIface(WorkloadRequest work,
+                                                       Reference<IClusterConnectionRecord> ccr,
+                                                       Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+	state WorkloadContext wcx;
+	state std::vector<Future<Reference<TestWorkload>>> ifaces;
 	if (work.options.size() < 1) {
 		TraceEvent(SevError, "TestCreationError").detail("Reason", "No options provided");
 		fprintf(stderr, "ERROR: No options were provided for workload.\n");
 		throw test_specification_invalid();
 	}
-	if (work.options.size() == 1)
-		return getWorkloadIface(work, work.options[0], dbInfo);
+	if (work.options.size() == 1) {
+		Reference<TestWorkload> res = wait(getWorkloadIface(work, ccr, work.options[0], dbInfo));
+		return res;
+	}
 
-	WorkloadContext wcx;
 	wcx.clientId = work.clientId;
 	wcx.clientCount = work.clientCount;
 	wcx.sharedRandomNumber = work.sharedRandomNumber;
 	// FIXME: Other stuff not filled in; why isn't this constructed here and passed down to the other
 	// getWorkloadIface()?
+	for (int i = 0; i < work.options.size(); i++) {
+		ifaces.push_back(getWorkloadIface(work, ccr, work.options[i], dbInfo));
+	}
+	wait(waitForAll(ifaces));
 	auto compound = makeReference<CompoundWorkload>(wcx);
 	for (int i = 0; i < work.options.size(); i++) {
-		compound->add(getWorkloadIface(work, work.options[i], dbInfo));
+		compound->add(ifaces[i].getValue());
 	}
 	return compound;
 }
@@ -454,7 +495,7 @@ void printSimulatedTopology() {
 		printf("%sAddress: %s\n", indent.c_str(), p->address.toString().c_str());
 		indent += "  ";
 		printf("%sClass: %s\n", indent.c_str(), p->startingClass.toString().c_str());
-		printf("%sName: %s\n", indent.c_str(), p->name);
+		printf("%sName: %s\n", indent.c_str(), p->name.c_str());
 	}
 }
 
@@ -494,7 +535,7 @@ ACTOR Future<Void> testDatabaseLiveness(Database cx,
 		try {
 			state double start = now();
 			auto traceMsg = "PingingDatabaseLiveness_" + context;
-			TraceEvent(traceMsg.c_str());
+			TraceEvent(traceMsg.c_str()).log();
 			wait(timeoutError(pingDatabase(cx), databasePingDelay));
 			double pingTime = now() - start;
 			ASSERT(pingTime > 0);
@@ -607,10 +648,9 @@ ACTOR Future<Void> runWorkloadAsync(Database cx,
 		when(ReplyPromise<std::vector<PerfMetric>> req = waitNext(workIface.metrics.getFuture())) {
 			state ReplyPromise<std::vector<PerfMetric>> s_req = req;
 			try {
-				std::vector<PerfMetric> m;
-				workload->getMetrics(m);
+				std::vector<PerfMetric> m = wait(workload->getMetrics());
 				TraceEvent("WorkloadSendMetrics", workIface.id()).detail("Count", m.size());
-				req.send(m);
+				s_req.send(m);
 			} catch (Error& e) {
 				if (e.code() == error_code_please_reboot || e.code() == error_code_please_reboot_delete)
 					throw;
@@ -649,7 +689,7 @@ ACTOR Future<Void> testerServerWorkload(WorkloadRequest work,
 
 		// add test for "done" ?
 		TraceEvent("WorkloadReceived", workIface.id()).detail("Title", work.title);
-		auto workload = getWorkloadIface(work, dbInfo);
+		Reference<TestWorkload> workload = wait(getWorkloadIface(work, ccr, dbInfo));
 		if (!workload) {
 			TraceEvent("TestCreationError").detail("Reason", "Workload could not be created");
 			fprintf(stderr, "ERROR: The workload could not be created.\n");
@@ -704,6 +744,9 @@ ACTOR Future<Void> testerServerCore(TesterInterface interf,
 
 ACTOR Future<Void> clearData(Database cx) {
 	state Transaction tr(cx);
+	state UID debugID = debugRandom()->randomUniqueID();
+	TraceEvent("TesterClearingDatabaseStart", debugID).log();
+	tr.debugTransaction(debugID);
 	loop {
 		try {
 			// This transaction needs to be self-conflicting, but not conflict consistently with
@@ -712,10 +755,45 @@ ACTOR Future<Void> clearData(Database cx) {
 			tr.makeSelfConflicting();
 			wait(success(tr.getReadVersion())); // required since we use addReadConflictRange but not get
 			wait(tr.commit());
-			TraceEvent("TesterClearingDatabase").detail("AtVersion", tr.getCommittedVersion());
+			TraceEvent("TesterClearingDatabase", debugID).detail("AtVersion", tr.getCommittedVersion());
 			break;
 		} catch (Error& e) {
-			TraceEvent(SevWarn, "TesterClearingDatabaseError").error(e);
+			TraceEvent(SevWarn, "TesterClearingDatabaseError", debugID).error(e);
+			wait(tr.onError(e));
+		}
+	}
+
+	tr = Transaction(cx);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::RAW_ACCESS);
+			state RangeResult rangeResult = wait(tr.getRange(normalKeys, 1));
+			state Optional<Key> tenantPrefix;
+
+			// If the result is non-empty, it is possible that there is some bad interaction between the test
+			// and the optional simulated default tenant:
+			//
+			// 1. If the test is creating/deleting tenants itself, then it should disable the default tenant.
+			// 2. If the test is opening Database objects itself, then it needs to propagate the default tenant
+			//    value from the existing Database.
+			// 3. If the test is using raw access or system key access and writing to the normal key-space, then
+			//    it should disable the default tenant.
+			if (!rangeResult.empty()) {
+				if (cx->defaultTenant.present()) {
+					TenantMapEntry entry = wait(TenantAPI::getTenant(cx.getReference(), cx->defaultTenant.get()));
+					tenantPrefix = entry.prefix;
+				}
+
+				TraceEvent(SevError, "TesterClearFailure")
+				    .detail("DefaultTenant", cx->defaultTenant)
+				    .detail("TenantPrefix", tenantPrefix)
+				    .detail("FirstKey", rangeResult[0].key);
+
+				ASSERT(false);
+			}
+			break;
+		} catch (Error& e) {
+			TraceEvent(SevWarn, "TesterCheckDatabaseClearedError").error(e);
 			wait(tr.onError(e));
 		}
 	}
@@ -1471,7 +1549,8 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
                             std::vector<TestSpec> tests,
                             StringRef startingConfiguration,
                             LocalityData locality,
-                            Optional<TenantName> defaultTenant) {
+                            Optional<TenantName> defaultTenant,
+                            Standalone<VectorRef<TenantNameRef>> tenantsToCreate) {
 	state Database cx;
 	state Reference<AsyncVar<ServerDBInfo>> dbInfo(new AsyncVar<ServerDBInfo>);
 	state Future<Void> ccMonitor = monitorServerDBInfo(cc, LocalityData(), dbInfo); // FIXME: locality
@@ -1547,9 +1626,14 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 		}
 	}
 
-	if (useDB && defaultTenant.present()) {
-		TraceEvent("CreatingDefaultTenant").detail("Tenant", defaultTenant.get());
-		wait(ManagementAPI::createTenant(cx.getReference(), defaultTenant.get()));
+	if (useDB) {
+		std::vector<Future<Void>> tenantFutures;
+		for (auto tenant : tenantsToCreate) {
+			TraceEvent("CreatingTenant").detail("Tenant", tenant);
+			tenantFutures.push_back(success(TenantAPI::createTenant(cx.getReference(), tenant)));
+		}
+
+		wait(waitForAll(tenantFutures));
 	}
 
 	if (useDB && waitForQuiescenceBegin) {
@@ -1631,7 +1715,8 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
                             int minTestersExpected,
                             StringRef startingConfiguration,
                             LocalityData locality,
-                            Optional<TenantName> defaultTenant) {
+                            Optional<TenantName> defaultTenant,
+                            Standalone<VectorRef<TenantNameRef>> tenantsToCreate) {
 	state int flags = (at == TEST_ON_SERVERS ? 0 : GetWorkersRequest::TESTER_CLASS_ONLY) |
 	                  GetWorkersRequest::NON_EXCLUDED_PROCESSES_ONLY;
 	state Future<Void> testerTimeout = delay(600.0); // wait 600 sec for testers to show up
@@ -1662,7 +1747,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 	for (int i = 0; i < workers.size(); i++)
 		ts.push_back(workers[i].interf.testerInterface);
 
-	wait(runTests(cc, ci, ts, tests, startingConfiguration, locality, defaultTenant));
+	wait(runTests(cc, ci, ts, tests, startingConfiguration, locality, defaultTenant, tenantsToCreate));
 	return Void();
 }
 
@@ -1700,7 +1785,8 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
                             StringRef startingConfiguration,
                             LocalityData locality,
                             UnitTestParameters testOptions,
-                            Optional<TenantName> defaultTenant) {
+                            Optional<TenantName> defaultTenant,
+                            Standalone<VectorRef<TenantNameRef>> tenantsToCreate) {
 	state TestSet testSet;
 	state std::unique_ptr<KnobProtectiveGroup> knobProtectiveGroup(nullptr);
 	auto cc = makeReference<AsyncVar<Optional<ClusterControllerFullInterface>>>();
@@ -1784,11 +1870,19 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
 		actors.push_back(
 		    reportErrors(monitorServerDBInfo(cc, LocalityData(), db), "MonitorServerDBInfo")); // FIXME: Locality
 		actors.push_back(reportErrors(testerServerCore(iTesters[0], connRecord, db, locality), "TesterServerCore"));
-		tests = runTests(cc, ci, iTesters, testSet.testSpecs, startingConfiguration, locality, defaultTenant);
+		tests = runTests(
+		    cc, ci, iTesters, testSet.testSpecs, startingConfiguration, locality, defaultTenant, tenantsToCreate);
 	} else {
-		tests = reportErrors(
-		    runTests(cc, ci, testSet.testSpecs, at, minTestersExpected, startingConfiguration, locality, defaultTenant),
-		    "RunTests");
+		tests = reportErrors(runTests(cc,
+		                              ci,
+		                              testSet.testSpecs,
+		                              at,
+		                              minTestersExpected,
+		                              startingConfiguration,
+		                              locality,
+		                              defaultTenant,
+		                              tenantsToCreate),
+		                     "RunTests");
 	}
 
 	choose {

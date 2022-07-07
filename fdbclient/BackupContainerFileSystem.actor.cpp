@@ -19,7 +19,9 @@
  */
 
 #include "fdbclient/BackupAgent.actor.h"
+#ifdef BUILD_AZURE_BACKUP
 #include "fdbclient/BackupContainerAzureBlobStore.h"
+#endif
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbclient/BackupContainerLocalDirectory.h"
 #include "fdbclient/BackupContainerS3BlobStore.h"
@@ -1128,7 +1130,6 @@ public:
 		return false;
 	}
 
-#if ENCRYPTION_ENABLED
 	ACTOR static Future<Void> createTestEncryptionKeyFile(std::string filename) {
 		state Reference<IAsyncFile> keyFile = wait(IAsyncFileSystem::filesystem()->open(
 		    filename,
@@ -1164,7 +1165,6 @@ public:
 		ASSERT_EQ(bytesRead, cipherKey->size());
 		return Void();
 	}
-#endif // ENCRYPTION_ENABLED
 
 }; // class BackupContainerFileSystemImpl
 
@@ -1481,19 +1481,11 @@ Future<Void> BackupContainerFileSystem::encryptionSetupComplete() const {
 
 void BackupContainerFileSystem::setEncryptionKey(Optional<std::string> const& encryptionKeyFileName) {
 	if (encryptionKeyFileName.present()) {
-#if ENCRYPTION_ENABLED
 		encryptionSetupFuture = BackupContainerFileSystemImpl::readEncryptionKey(encryptionKeyFileName.get());
-#else
-		encryptionSetupFuture = Void();
-#endif
 	}
 }
 Future<Void> BackupContainerFileSystem::createTestEncryptionKeyFile(std::string const& filename) {
-#if ENCRYPTION_ENABLED
 	return BackupContainerFileSystemImpl::createTestEncryptionKeyFile(filename);
-#else
-	return Void();
-#endif
 }
 
 // Get a BackupContainerFileSystem based on a container URL string

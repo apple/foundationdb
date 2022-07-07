@@ -30,6 +30,7 @@ import time
 import random
 import time
 import traceback
+import json
 
 sys.path[:0] = [os.path.join(os.path.dirname(__file__), '..')]
 import fdb
@@ -604,6 +605,19 @@ class Tester:
                     self.tenant = self.db.open_tenant(name)
                 elif inst.op == six.u("TENANT_CLEAR_ACTIVE"):
                     self.tenant = None
+                elif inst.op == six.u("TENANT_LIST"):
+                    begin, end, limit = inst.pop(3)
+                    tenant_list = fdb.tenant_management.list_tenants(self.db, begin, end, limit)
+                    result = []
+                    for tenant in tenant_list:
+                        result += [tenant.key]
+                        try:
+                            metadata = json.loads(tenant.value)
+                            id =  metadata["id"]
+                            prefix = metadata["prefix"]
+                        except (json.decoder.JSONDecodeError, KeyError) as e:
+                            assert False, "Invalid Tenant Metadata"
+                    inst.push(fdb.tuple.pack(tuple(result)))
                 elif inst.op == six.u("UNIT_TESTS"):
                     try:
                         test_db_options(db)

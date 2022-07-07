@@ -29,10 +29,22 @@
 #include <atomic>
 #include <unordered_map>
 #include <mutex>
+#include <thread>
+#include <fstream>
 
 namespace FdbApiTester {
 
 class WorkloadManager;
+
+class IWorkloadControlIfc {
+public:
+	// Stop the workload
+	virtual void stop() = 0;
+
+	// Check if the test is progressing from the point of calling
+	// Progress must be confirmed by calling confirmProgress on the workload manager
+	virtual void checkProgress() = 0;
+};
 
 // Workoad interface
 class IWorkload {
@@ -44,6 +56,15 @@ public:
 
 	// Start executing the workload
 	virtual void start() = 0;
+
+	// Get workload identifier
+	virtual std::string getWorkloadId() = 0;
+
+	// Get workload control interface if supported, nullptr otherwise
+	virtual IWorkloadControlIfc* getControlIfc() = 0;
+
+	// Print workload statistics
+	virtual void printStats() = 0;
 };
 
 // Workload configuration
@@ -57,12 +78,16 @@ struct WorkloadConfig {
 	// Total number of clients
 	int numClients;
 
+	// Selected FDB API version
+	int apiVersion;
+
 	// Workload options: as key-value pairs
 	std::unordered_map<std::string, std::string> options;
 
 	// Get option of a certain type by name. Throws an exception if the values is of a wrong type
 	int getIntOption(const std::string& name, int defaultVal) const;
 	double getFloatOption(const std::string& name, double defaultVal) const;
+	bool getBoolOption(const std::string& name, bool defaultVal) const;
 };
 
 // A base class for test workloads
@@ -73,6 +98,12 @@ public:
 
 	// Initialize the workload
 	void init(WorkloadManager* manager) override;
+
+	IWorkloadControlIfc* getControlIfc() override { return nullptr; }
+
+	std::string getWorkloadId() override { return workloadId; }
+
+	void printStats() override;
 
 protected:
 	// Schedule the a task as a part of the workload
@@ -91,6 +122,9 @@ protected:
 
 	// Log an info message
 	void info(const std::string& msg);
+
+	// Confirm a successfull progress check
+	void confirmProgress();
 
 private:
 	WorkloadManager* manager;
@@ -121,6 +155,9 @@ protected:
 
 	// Workload is failed, no further transactions or continuations will be scheduled by the workload
 	std::atomic<bool> failed;
+
+	// Number of completed transactions
+	std::atomic<int> numTxCompleted;
 };
 
 // Workload manager
@@ -129,6 +166,9 @@ class WorkloadManager {
 public:
 	WorkloadManager(ITransactionExecutor* txExecutor, IScheduler* scheduler)
 	  : txExecutor(txExecutor), scheduler(scheduler), numWorkloadsFailed(0) {}
+
+	// Open named pipes for communication with the test controller
+	void openControlPipes(const std::string& inputPipeName, const std::string& outputPipeName);
 
 	// Add a workload
 	// A continuation is to be specified for subworkloads
@@ -143,6 +183,9 @@ public:
 		return numWorkloadsFailed > 0;
 	}
 
+	// Schedule statistics to be printed in regular timeintervals
+	void schedulePrintStatistics(int timeIntervalMs);
+
 private:
 	friend WorkloadBase;
 
@@ -152,10 +195,29 @@ private:
 		std::shared_ptr<IWorkload> ref;
 		// Continuation to be executed after completing the workload
 		TTaskFct cont;
+		// Control interface of the workload (optional)
+		IWorkloadControlIfc* controlIfc;
+		// Progress check confirmation status
+		bool progressConfirmed;
 	};
 
 	// To be called by a workload to notify that it is done
 	void workloadDone(IWorkload* workload, bool failed);
+
+	// To be called by a workload to confirm a successful progress check
+	void confirmProgress(IWorkload* workload);
+
+	// Receive and handle control commands from the input pipe
+	void readControlInput(std::string pipeName);
+
+	// Handle STOP command received from the test controller
+	void handleStopCommand();
+
+	// Handle CHECK command received from the test controller
+	void handleCheckCommand();
+
+	// A thread-safe operation to return a list of active workloads
+	std::vector<std::shared_ptr<IWorkload>> getActiveWorkloads();
 
 	// Transaction executor to be used by the workloads
 	ITransactionExecutor* txExecutor;
@@ -171,6 +233,15 @@ private:
 
 	// Number of workloads failed
 	int numWorkloadsFailed;
+
+	// Thread for receiving test control commands
+	std::thread ctrlInputThread;
+
+	// Output pipe for emitting test control events
+	std::ofstream outputPipe;
+
+	// Timer for printing statistics in regular intervals
+	std::unique_ptr<ITimer> statsTimer;
 };
 
 // A workload factory

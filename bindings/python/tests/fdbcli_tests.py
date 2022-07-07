@@ -216,6 +216,26 @@ def kill(logger):
 
 
 @enable_logging()
+def killall(logger):
+    # test is designed to make sure 'kill all' sends all requests simultaneously
+    old_generation = get_value_from_status_json(False, 'cluster', 'generation')
+    # This is currently an issue with fdbcli,
+    # where you need to first run 'kill' to initialize processes' list
+    # and then specify the certain process to kill
+    process = subprocess.Popen(command_template[:-1], stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=fdbcli_env)
+    output, error = process.communicate(input='kill; kill all; sleep 1\n'.encode())
+    logger.debug(output)
+    # wait for a second for the cluster recovery
+    time.sleep(1)
+    new_generation = get_value_from_status_json(True, 'cluster', 'generation')
+    logger.debug("Old generation: {}, New generation: {}".format(old_generation, new_generation))
+    # Make sure the kill is not happening sequentially
+    # Pre: each recovery will increase the generated number by 2
+    # Relax the condition to allow one additional recovery happening when we fetched the old generation
+    assert new_generation <= (old_generation + 4)
+
+
+@enable_logging()
 def suspend(logger):
     if not shutil.which("pidof"):
         logger.debug("Skipping suspend test. Pidof not available")
@@ -258,6 +278,33 @@ def suspend(logger):
         duration += 1
     # at most after 60 seconds, the cluster should be available
     assert get_value_from_status_json(False, 'client', 'database_status', 'available')
+
+
+@enable_logging()
+def versionepoch(logger):
+    version1 = run_fdbcli_command('versionepoch')
+    assert version1 == "Version epoch is unset"
+    version2 = run_fdbcli_command('versionepoch get')
+    assert version2 == "Version epoch is unset"
+    version3 = run_fdbcli_command('versionepoch commit')
+    assert version3 == "Must set the version epoch before committing it (see `versionepoch enable`)"
+    version4 = run_fdbcli_command('versionepoch enable')
+    assert version4 == "Version epoch enabled. Run `versionepoch commit` to irreversibly jump to the target version"
+    version5 = run_fdbcli_command('versionepoch get')
+    assert version5 == "Current version epoch is 0"
+    version6 = run_fdbcli_command('versionepoch set 10')
+    assert version6 == "Version epoch enabled. Run `versionepoch commit` to irreversibly jump to the target version"
+    version7 = run_fdbcli_command('versionepoch get')
+    assert version7 == "Current version epoch is 10"
+    run_fdbcli_command('versionepoch disable')
+    version8 = run_fdbcli_command('versionepoch get')
+    assert version8 == "Version epoch is unset"
+    version9 = run_fdbcli_command('versionepoch enable')
+    assert version9 == "Version epoch enabled. Run `versionepoch commit` to irreversibly jump to the target version"
+    version10 = run_fdbcli_command('versionepoch get')
+    assert version10 == "Current version epoch is 0"
+    version11 = run_fdbcli_command('versionepoch commit')
+    assert version11.startswith("Current read version is ")
 
 
 def get_value_from_status_json(retry, *args):
@@ -543,6 +590,7 @@ def triggerddteaminfolog(logger):
     output = run_fdbcli_command('triggerddteaminfolog')
     assert output == 'Triggered team info logging in data distribution.'
 
+
 @enable_logging()
 def tenants(logger):
     output = run_fdbcli_command('listtenants')
@@ -571,7 +619,16 @@ def tenants(logger):
     assert len(lines) == 2
     assert lines[0].strip().startswith('id: ')
     assert lines[1].strip().startswith('prefix: ')
-    
+
+    output = run_fdbcli_command('gettenant tenant JSON')
+    json_output = json.loads(output, strict=False)
+    assert(len(json_output) == 2)
+    assert('tenant' in json_output)
+    assert(json_output['type'] == 'success')
+    assert(len(json_output['tenant']) == 2)
+    assert('id' in json_output['tenant'])
+    assert('prefix' in json_output['tenant'])
+
     output = run_fdbcli_command('usetenant')
     assert output == 'Using the default tenant'
 
@@ -613,7 +670,8 @@ def tenants(logger):
     assert lines[3] == '`tenant_test\' is `default_tenant\''
 
     process = subprocess.Popen(command_template[:-1], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=fdbcli_env)
-    cmd_sequence = ['writemode on', 'usetenant tenant', 'clear tenant_test', 'deletetenant tenant', 'get tenant_test', 'defaulttenant', 'usetenant tenant']
+    cmd_sequence = ['writemode on', 'usetenant tenant', 'clear tenant_test',
+                    'deletetenant tenant', 'get tenant_test', 'defaulttenant', 'usetenant tenant']
     output, error_output = process.communicate(input='\n'.join(cmd_sequence).encode())
 
     lines = output.decode().strip().split('\n')[-7:]
@@ -640,6 +698,7 @@ def tenants(logger):
     assert lines[3] == 'The tenant `tenant2\' has been deleted'
 
     run_fdbcli_command('writemode on; clear tenant_test')
+
 
 if __name__ == '__main__':
     parser = ArgumentParser(formatter_class=RawDescriptionHelpFormatter,
@@ -685,9 +744,11 @@ if __name__ == '__main__':
         throttle()
         triggerddteaminfolog()
         tenants()
+        versionepoch()
     else:
         assert args.process_number > 1, "Process number should be positive"
         coordinators()
         exclude()
+        killall()
         # TODO: fix the failure where one process is not available after setclass call
-        #setclass()
+        # setclass()

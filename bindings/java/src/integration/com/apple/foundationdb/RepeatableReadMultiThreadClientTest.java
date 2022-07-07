@@ -52,7 +52,7 @@ public class RepeatableReadMultiThreadClientTest {
     private static final Map<Thread, OldValueReader> threadToOldValueReaders = new HashMap<>();
 
     public static void main(String[] args) throws Exception {
-        FDB fdb = FDB.selectAPIVersion(710);
+        FDB fdb = FDB.selectAPIVersion(720);
         setupThreads(fdb);
         Collection<Database> dbs = clientHelper.openDatabases(fdb); // the clientHelper will close the databases for us
         System.out.println("Starting tests");

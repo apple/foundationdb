@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#define FDB_API_VERSION 710
+#define FDB_API_VERSION 720
 #include <foundationdb/fdb_c.h>
 
 #include "unit/fdb_api.hpp"
@@ -44,7 +44,7 @@ int main(int argc, char** argv) {
 	if (argc != 2) {
 		printf("Usage: %s <cluster_file>", argv[0]);
 	}
-	fdb_check(fdb_select_api_version(710));
+	fdb_check(fdb_select_api_version(720));
 	fdb_check(fdb_setup_network());
 	std::thread network_thread{ &fdb_run_network };
 

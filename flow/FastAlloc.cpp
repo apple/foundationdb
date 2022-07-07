@@ -25,7 +25,7 @@
 #include "flow/Error.h"
 #include "flow/Knobs.h"
 #include "flow/UnitTest.h"
-#include "flow/crc32c.h"
+#include "crc32/crc32c.h"
 #include "flow/flow.h"
 
 #include <atomic>
@@ -519,7 +519,7 @@ void FastAllocator<Size>::getMagazine() {
 		--g_allocation_tracing_disabled;
 	}
 #endif
-	block = (void**)::allocate(magazine_size * Size, false);
+	block = (void**)::allocate(magazine_size * Size, /*allowLargePages*/ false, /*includeGuardPages*/ true);
 #endif
 
 	// void** block = new void*[ magazine_size * PSize ];

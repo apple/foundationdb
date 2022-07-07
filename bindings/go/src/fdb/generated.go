@@ -285,6 +285,13 @@ func (o NetworkOptions) SetDistributedClientTracer(param string) error {
 	return o.setOpt(90, []byte(param))
 }
 
+// Sets the directory for storing temporary files created by FDB client, such as temporary copies of client libraries. Defaults to /tmp
+//
+// Parameter: Client directory for temporary files. 
+func (o NetworkOptions) SetClientTmpDir(param string) error {
+	return o.setOpt(91, []byte(param))
+}
+
 // Set the size of the client location cache. Raising this value can boost performance in very large databases where clients access data in a near-random pattern. Defaults to 100000.
 //
 // Parameter: Max location cache entries

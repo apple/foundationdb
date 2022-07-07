@@ -291,8 +291,6 @@ struct TLogData : NonCopyable {
 	                          // the set and for callers that unset will
 	                          // be able to match it up
 	std::string dataFolder; // folder where data is stored
-	std::map<Tag, Version> toBePopped; // map of Tag->Version for all the pops
-	                                   // that came when ignorePopRequest was set
 	Reference<AsyncVar<bool>> degraded;
 	std::vector<TagsAndMessage> tempTagMessages;
 
@@ -513,6 +511,9 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	FlowLock execOpLock;
 	bool execOpCommitInProgress;
 	int txsTags;
+
+	std::map<Tag, Version> toBePopped; // map of Tag->Version for all the pops
+	                                   // that came when ignorePopRequest was set
 
 	explicit LogData(TLogData* tLogData,
 	                 TLogInterface interf,
@@ -819,8 +820,8 @@ ACTOR Future<Void> tLogPopCore(TLogData* self, Tag inputTag, Version to, Referen
 	if (self->ignorePopRequest) {
 		TraceEvent(SevDebug, "IgnoringPopRequest").detail("IgnorePopDeadline", self->ignorePopDeadline);
 
-		if (self->toBePopped.find(inputTag) == self->toBePopped.end() || to > self->toBePopped[inputTag]) {
-			self->toBePopped[inputTag] = to;
+		if (logData->toBePopped.find(inputTag) == logData->toBePopped.end() || to > logData->toBePopped[inputTag]) {
+			logData->toBePopped[inputTag] = to;
 		}
 		// add the pop to the toBePopped map
 		TraceEvent(SevDebug, "IgnoringPopRequest")
@@ -882,11 +883,11 @@ ACTOR Future<Void> tLogPop(TLogData* self, TLogPopRequest req, Reference<LogData
 		self->ignorePopRequest = false;
 		self->ignorePopUid = "";
 		self->ignorePopDeadline = 0.0;
-		for (it = self->toBePopped.begin(); it != self->toBePopped.end(); it++) {
+		for (it = logData->toBePopped.begin(); it != logData->toBePopped.end(); it++) {
 			TraceEvent("PlayIgnoredPop").detail("Tag", it->first.toString()).detail("Version", it->second);
 			ignoredPops.push_back(tLogPopCore(self, it->first, it->second, logData));
 		}
-		self->toBePopped.clear();
+		logData->toBePopped.clear();
 		wait(waitForAll(ignoredPops));
 		TraceEvent("ResetIgnorePopRequest")
 		    .detail("Now", g_network->now())
@@ -1937,7 +1938,7 @@ ACTOR Future<Void> tLogEnablePopReq(TLogEnablePopRequest enablePopReq, TLogData*
 	self->ignorePopRequest = false;
 	self->ignorePopDeadline = 0.0;
 	self->ignorePopUid = "";
-	for (it = self->toBePopped.begin(); it != self->toBePopped.end(); it++) {
+	for (it = logData->toBePopped.begin(); it != logData->toBePopped.end(); it++) {
 		TraceEvent("PlayIgnoredPop").detail("Tag", it->first.toString()).detail("Version", it->second);
 		ignoredPops.push_back(tLogPopCore(self, it->first, it->second, logData));
 	}
@@ -1951,7 +1952,7 @@ ACTOR Future<Void> tLogEnablePopReq(TLogEnablePopRequest enablePopReq, TLogData*
 	    .detail("QueueCommittedVersion", logData->queueCommittedVersion.get())
 	    .detail("Version", logData->version.get());
 	wait(waitForAll(ignoredPops));
-	self->toBePopped.clear();
+	logData->toBePopped.clear();
 	enablePopReq.reply.send(Void());
 	return Void();
 }

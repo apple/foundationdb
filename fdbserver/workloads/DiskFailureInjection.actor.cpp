@@ -154,9 +154,13 @@ struct DiskFailureInjectionWorkload : TestWorkload {
 		loop {
 			wait(poisson(&lastTime, 1));
 			try {
-				wait(store(machines, getStorageWorkers(cx, self->dbInfo, false)));
+				std::pair<std::vector<W>, int> m = wait(getStorageWorkers(cx, self->dbInfo, false));
+				if (m.second > 0) {
+					throw operation_failed();
+				}
+				machines = std::move(m.first);
 			} catch (Error& e) {
-				// If we failed to get a list of storage servers, we can't inject failure events
+				// If we failed to get a complete list of storage servers, we can't inject failure events
 				// But don't throw the error in that case
 				continue;
 			}

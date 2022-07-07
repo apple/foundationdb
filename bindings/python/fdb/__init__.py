@@ -52,7 +52,7 @@ def get_api_version():
 
 
 def api_version(ver):
-    header_version = 710
+    header_version = 720
 
     if '_version' in globals():
         if globals()['_version'] != ver:
@@ -102,6 +102,8 @@ def api_version(ver):
 
     if ver >= 710:
         import fdb.tenant_management
+        if ver < 720:
+            fdb.tenant_management._tenant_map_prefix = b'\xff\xff/management/tenant_map/'
 
     if ver < 610:
         globals()["init"] = getattr(fdb.impl, "init")

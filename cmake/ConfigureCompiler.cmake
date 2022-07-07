@@ -64,12 +64,10 @@ add_compile_definitions(BOOST_ERROR_CODE_HEADER_ONLY BOOST_SYSTEM_NO_DEPRECATED)
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 
-include_directories(${CMAKE_SOURCE_DIR})
-include_directories(${CMAKE_BINARY_DIR})
-
 if(WIN32)
   add_definitions(-DBOOST_USE_WINDOWS_H)
   add_definitions(-DWIN32_LEAN_AND_MEAN)
+  add_definitions(-D_ITERATOR_DEBUG_LEVEL=0)
 endif()
 
 if (USE_CCACHE)
@@ -116,11 +114,12 @@ if(WIN32)
 else()
   set(GCC NO)
   set(CLANG NO)
-  set(ICC NO)
-  if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang" OR "${CMAKE_CXX_COMPILER_ID}" STREQUAL "AppleClang")
+  set(ICX NO)
+  # CMAKE_CXX_COMPILER_ID is set to Clang even if CMAKE_CXX_COMPILER points to ICPX, so we have to check the compiler too.
+  if (${CMAKE_CXX_COMPILER} MATCHES ".*icpx")
+    set(ICX YES)
+  elseif("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang" OR "${CMAKE_CXX_COMPILER_ID}" STREQUAL "AppleClang")
     set(CLANG YES)
-  elseif("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Intel")
-    set(ICC YES)
   else()
     # This is not a very good test. However, as we do not really support many architectures
     # this is good enough for now
@@ -275,7 +274,7 @@ else()
   # for more information.
   #add_compile_options(-fno-builtin-memcpy)
 
-  if (CLANG)
+  if (CLANG OR ICX)
     add_compile_options()
     if (APPLE OR USE_LIBCXX)
       add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-stdlib=libc++>)
@@ -330,9 +329,6 @@ else()
     # Otherwise `state [[maybe_unused]] int x;` will issue a warning.
     # https://stackoverflow.com/questions/50646334/maybe-unused-on-member-variable-gcc-warns-incorrectly-that-attribute-is
     add_compile_options(-Wno-attributes)
-  elseif(ICC)
-    add_compile_options(-wd1879 -wd1011)
-    add_link_options(-static-intel)
   endif()
   add_compile_options(-Wno-error=format
     -Wunused-variable
@@ -340,7 +336,7 @@ else()
     -fvisibility=hidden
     -Wreturn-type
     -fPIC)
-  if (CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^x86" AND NOT CLANG)
+  if (CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^x86" AND NOT CLANG AND NOT ICX)
     add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-Wclass-memaccess>)
   endif()
   if (GPERFTOOLS_FOUND AND GCC)
@@ -349,6 +345,15 @@ else()
       -fno-builtin-calloc
       -fno-builtin-realloc
       -fno-builtin-free)
+  endif()
+  
+  if (ICX)
+    find_library(CXX_LIB NAMES c++ PATHS "/usr/local/lib" REQUIRED)
+    find_library(CXX_ABI_LIB NAMES c++abi PATHS "/usr/local/lib" REQUIRED)
+    add_compile_options($<$<COMPILE_LANGUAGE:C>:-ffp-contract=on>)
+    add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-ffp-contract=on>)
+    # No libc++ and libc++abi in Intel LIBRARY_PATH
+    link_libraries(${CXX_LIB} ${CXX_ABI_LIB})
   endif()
 
   if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")

@@ -25,19 +25,14 @@
 // To force typeinfo to only be emitted once.
 TLSPolicy::~TLSPolicy() {}
 
-#ifdef TLS_DISABLED
-
-void LoadedTLSConfig::print(FILE* fp) {
-	fprintf(fp, "Cannot print LoadedTLSConfig.  TLS support is not enabled.\n");
-}
-
-#else // TLS is enabled
-
 #include <algorithm>
 #include <cstring>
 #include <exception>
 #include <map>
 #include <set>
+#if defined(HAVE_WOLFSSL)
+#include <wolfssl/options.h>
+#endif
 #include <openssl/objects.h>
 #include <openssl/bio.h>
 #include <openssl/err.h>
@@ -51,14 +46,8 @@ void LoadedTLSConfig::print(FILE* fp) {
 #include <utility>
 #include <boost/asio/ssl/context.hpp>
 
-// This include breaks module dependencies, but we need to do async file reads.
-// So either we include fdbrpc here, or this file is moved to fdbrpc/, and then
-// Net2, which depends on us, includes fdbrpc/.
-//
-// Either way, the only way to break this dependency cycle is to move all of
-// AsyncFile to flow/
-#include "fdbrpc/IAsyncFile.h"
 #include "flow/Platform.h"
+#include "flow/IAsyncFile.h"
 
 #include "flow/FastRef.h"
 #include "flow/Trace.h"
@@ -834,4 +823,3 @@ bool TLSPolicy::verify_peer(bool preverified, X509_STORE_CTX* store_ctx) {
 	}
 	return rc;
 }
-#endif

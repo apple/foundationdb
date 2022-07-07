@@ -3,6 +3,40 @@
 .. code-block:: javascript
 
    "cluster":{
+        "storage_wiggler": {
+            "wiggle_server_ids":["0ccb4e0feddb55"],
+            "wiggle_server_addresses": ["127.0.0.1"],
+            "primary": { // primary DC storage wiggler stats
+                // One StorageServer wiggle round is considered 'complete', when all StorageServers with creationTime < T are wiggled
+               "last_round_start_datetime": "2022-04-02 00:05:05.123 +0000",
+               "last_round_start_timestamp": 1648857905.123, // when did the latest round start
+               "last_round_finish_datetime": "1970-01-01 00:00:00.000 +0000",
+               "last_round_finish_timestamp": 0, // when did the latest finished round finish
+               "smoothed_round_seconds": 1, // moving average duration of a wiggle round
+               "finished_round": 1,
+               // 1 wiggle step as 1 storage server is wiggled in the current round
+               "last_wiggle_start_datetime": "2022-04-02 00:05:05.123 +0000",
+               "last_wiggle_start_timestamp": 1648857905.123, // when did the latest wiggle step start
+               "last_wiggle_finish_datetime": "1970-01-01 00:00:00.000 +0000",
+               "last_wiggle_finish_timestamp": 0,
+               "smoothed_wiggle_seconds": 1,
+               "finished_wiggle": 1
+            },
+            "remote": { // remote DC storage wiggler stats
+               "last_round_start_datetime": "2022-04-02 00:05:05.123 +0000",
+               "last_round_start_timestamp": 1648857905.123,
+               "last_round_finish_datetime": "1970-01-01 00:00:00.000 +0000",
+               "last_round_finish_timestamp": 0,
+               "smoothed_round_seconds": 1,
+               "finished_round": 1,
+               "last_wiggle_start_datetime": "2022-04-02 00:05:05.123 +0000",
+               "last_wiggle_start_timestamp": 1648857905.123,
+               "last_wiggle_finish_datetime": "1970-01-01 00:00:00.000 +0000",
+               "last_wiggle_finish_timestamp": 0,
+               "smoothed_wiggle_seconds": 1,
+               "finished_wiggle": 1
+            }
+       },
       "layers":{
          "_valid":true,
          "_error":"some error description"
@@ -226,7 +260,8 @@
                "available_bytes":0, // an estimate of the process' fair share of the memory available to fdbservers
                "limit_bytes":0, // memory limit per process
                "unused_allocated_memory":0,
-               "used_bytes":0 // virtual memory size of the process
+               "used_bytes":0, // virtual memory size of the process
+               "rss_bytes":0 // resident memory size of the process
             },
             "messages":[
                {
@@ -702,6 +737,7 @@
              "ssd-2",
              "ssd-redwood-1-experimental",
              "ssd-rocksdb-v1",
+             "ssd-sharded-rocksdb",
              "memory",
              "memory-1",
              "memory-2",
@@ -715,6 +751,7 @@
              "ssd-2",
              "ssd-redwood-1-experimental",
              "ssd-rocksdb-v1",
+             "ssd-sharded-rocksdb",
              "memory",
              "memory-1",
              "memory-2",
@@ -841,6 +878,9 @@
                "logical_core_utilization":0.4 // computed as cpu_seconds / elapsed_seconds; value may be capped at 0.5 due to hyper-threading
             }
          }
+      },
+      "tenants":{
+         "num_tenants":0
       }
    },
    "client":{

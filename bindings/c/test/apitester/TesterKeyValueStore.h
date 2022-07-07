@@ -30,51 +30,48 @@
 #include <vector>
 #include <mutex>
 
-namespace FdbApiTester {
+#include "TesterUtil.h"
 
-struct KeyValue {
-	std::string key;
-	std::string value;
-};
+namespace FdbApiTester {
 
 class KeyValueStore {
 public:
 	// Get the value associated with a key
-	std::optional<std::string> get(std::string_view key) const;
+	std::optional<fdb::Value> get(fdb::KeyRef key) const;
 
 	// Checks if the key exists
-	bool exists(std::string_view key);
+	bool exists(fdb::KeyRef key);
 
 	// Returns the key designated by a key selector
-	std::string getKey(std::string_view keyName, bool orEqual, int offset) const;
+	fdb::Key getKey(fdb::KeyRef keyName, bool orEqual, int offset) const;
 
 	// Gets a range of key-value pairs, returning a maximum of <limit> results
-	std::vector<KeyValue> getRange(std::string_view begin, std::string_view end, int limit, bool reverse) const;
+	std::vector<fdb::KeyValue> getRange(fdb::KeyRef begin, fdb::KeyRef end, int limit, bool reverse) const;
 
 	// Stores a key-value pair in the database
-	void set(std::string_view key, std::string_view value);
+	void set(fdb::KeyRef key, fdb::ValueRef value);
 
 	// Removes a key from the database
-	void clear(std::string_view key);
+	void clear(fdb::KeyRef key);
 
 	// Removes a range of keys from the database
-	void clear(std::string_view begin, std::string_view end);
+	void clear(fdb::KeyRef begin, fdb::KeyRef end);
 
 	// The number of keys in the database
 	uint64_t size() const;
 
 	// The first key in the database; returned by key selectors that choose a key off the front
-	std::string startKey() const;
+	fdb::Key startKey() const;
 
 	// The last key in the database; returned by key selectors that choose a key off the back
-	std::string endKey() const;
+	fdb::Key endKey() const;
 
 	// Debugging function that prints all key-value pairs
 	void printContents() const;
 
 private:
 	// A map holding the key-value pairs
-	std::map<std::string, std::string, std::less<>> store;
+	std::map<fdb::Key, fdb::Value, std::less<>> store;
 	mutable std::mutex mutex;
 };
 

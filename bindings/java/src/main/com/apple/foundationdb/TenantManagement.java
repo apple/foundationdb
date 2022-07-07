@@ -22,6 +22,7 @@ package com.apple.foundationdb;
 
 import java.nio.charset.Charset;
 import java.util.Arrays;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.Executor;
@@ -39,8 +40,8 @@ import com.apple.foundationdb.tuple.Tuple;
  * The FoundationDB API includes function to manage the set of tenants in a cluster.
  */
 public class TenantManagement {
-	static final byte[] TENANT_MAP_PREFIX = ByteArrayUtil.join(new byte[] { (byte)255, (byte)255 },
-	                                                           "/management/tenant_map/".getBytes());
+	static byte[] TENANT_MAP_PREFIX = ByteArrayUtil.join(new byte[] { (byte)255, (byte)255 },
+	                                                     "/management/tenant/map/".getBytes());
 
 	/**
 	 * Creates a new tenant in the cluster. If the tenant already exists, this operation will complete
@@ -208,6 +209,110 @@ public class TenantManagement {
 	 */
 	public static CompletableFuture<Void> deleteTenant(Database db, Tuple tenantName) {
 		return deleteTenant(db, tenantName.pack());
+	}
+
+
+	/**
+	 * Lists all tenants in between the range specified. The number of tenants listed can be restricted.
+	 *
+	 * @param db The database used to create a transaction for listing the tenants.
+	 * @param begin The beginning of the range of tenants to list.
+	 * @param end The end of the range of the tenants to list.
+	 * @param limit The maximum number of tenants to return from this request.
+	 * @return an iterator where each item is a KeyValue object where the key is the tenant name
+	 * and the value is the unprocessed JSON string containing the tenant's metadata
+	 */
+	public static CloseableAsyncIterator<KeyValue> listTenants(Database db, byte[] begin, byte[] end, int limit) {
+		return listTenants_internal(db.createTransaction(), begin, end, limit);
+	}
+
+	/**
+	 * Lists all tenants in between the range specified. The number of tenants listed can be restricted.
+	 * This is a convenience method that generates the begin and end ranges by packing two {@code Tuple}s.
+	 *
+	 * @param db The database used to create a transaction for listing the tenants.
+	 * @param begin The beginning of the range of tenants to list.
+	 * @param end The end of the range of the tenants to list.
+	 * @param limit The maximum number of tenants to return from this request.
+	 * @return an iterator where each item is a KeyValue object where the key is the tenant name
+	 * and the value is the unprocessed JSON string containing the tenant's metadata
+	 */
+	public static CloseableAsyncIterator<KeyValue> listTenants(Database db, Tuple begin, Tuple end, int limit) {
+		return listTenants_internal(db.createTransaction(), begin.pack(), end.pack(), limit);
+	}
+
+	private static CloseableAsyncIterator<KeyValue> listTenants_internal(Transaction tr, byte[] begin, byte[] end,
+	                                                                   int limit) {
+		return new TenantAsyncIterator(tr, begin, end, limit);
+	}
+
+	// Templates taken from BoundaryIterator LocalityUtil.java
+	static class TenantAsyncIterator implements CloseableAsyncIterator<KeyValue> {
+		Transaction tr;
+		final byte[] begin;
+		final byte[] end;
+
+		final AsyncIterable<KeyValue> firstGet;
+		AsyncIterator<KeyValue> iter;
+		private boolean closed;
+
+		TenantAsyncIterator(Transaction tr, byte[] begin, byte[] end, int limit) {
+			this.tr = tr;
+
+			this.begin = ByteArrayUtil.join(TENANT_MAP_PREFIX, begin);
+			this.end = ByteArrayUtil.join(TENANT_MAP_PREFIX, end);
+
+			tr.options().setReadSystemKeys();
+			tr.options().setLockAware();
+
+			firstGet = tr.getRange(this.begin, this.end, limit);
+			iter = firstGet.iterator();
+			closed = false;
+		}
+
+		@Override
+		public CompletableFuture<Boolean> onHasNext() {
+			return iter.onHasNext();
+		}
+
+		@Override
+		public boolean hasNext() {
+			return iter.hasNext();
+		}
+		@Override
+		public KeyValue next() {
+			KeyValue kv = iter.next();
+			byte[] tenant = Arrays.copyOfRange(kv.getKey(), TENANT_MAP_PREFIX.length, kv.getKey().length);
+			byte[] value = kv.getValue();
+
+			KeyValue result = new KeyValue(tenant, value);
+			return result;
+		}
+
+		@Override
+		public void remove() {
+			throw new UnsupportedOperationException("Tenant lists are read-only");
+		}
+
+		@Override
+		public void close() {
+			TenantAsyncIterator.this.tr.close();
+			closed = true;
+		}
+
+		@Override
+		protected void finalize() throws Throwable {
+			try {
+				if (FDB.instance().warnOnUnclosed && !closed) {
+					System.err.println("CloseableAsyncIterator not closed (listTenants)");
+				}
+				if (!closed) {
+					close();
+				}
+			} finally {
+				super.finalize();
+			}
+		}
 	}
 
 	private TenantManagement() {}

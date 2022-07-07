@@ -67,6 +67,13 @@ public class StackUtils {
 		return item;
 	}
 
+	// Without a JSON parsing library, we try to validate that the metadata consists
+	// of a select few properties using simple string comparison
+	static boolean validTenantMetadata(String metadata) {
+		return (metadata.charAt(0) == '{' && metadata.charAt(metadata.length() - 1) == '}' && metadata.contains("id") &&
+		        metadata.contains("prefix"));
+	}
+
 	////////////////////////
 	// Utilities for forcing Objects into various types
 	////////////////////////

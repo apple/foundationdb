@@ -19,6 +19,7 @@
  */
 
 #include <set>
+#include <string>
 
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/FDBOptions.g.h"
@@ -28,6 +29,7 @@
 #include "fdbclient/RunTransaction.actor.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/SystemData.h"
+#include "fdbclient/Tenant.h"
 #include "fdbrpc/Replication.h"
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/DDTeamCollection.h"
@@ -37,11 +39,13 @@
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/TenantCache.h"
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/WaitFailure.h"
 #include "flow/ActorCollection.h"
 #include "flow/Arena.h"
 #include "flow/BooleanParam.h"
+#include "flow/genericactors.actor.h"
 #include "flow/serialize.h"
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
@@ -261,7 +265,7 @@ void StorageWiggler::updateMetadata(const UID& serverId, const StorageMetadataTy
 	//	std::cout << "size: " << pq_handles.size() << " update " << serverId.toString()
 	//	          << " DC: " << teamCollection->isPrimary() << std::endl;
 	auto handle = pq_handles.at(serverId);
-	if ((*handle).first.createdTime == metadata.createdTime) {
+	if ((*handle).first == metadata) {
 		return;
 	}
 	wiggle_pq.update(handle, std::make_pair(metadata, serverId));
@@ -316,26 +320,6 @@ Future<Void> StorageWiggler::finishWiggle() {
 		metrics.smoothed_round_duration.setTotal((double)duration);
 	}
 	return StorageWiggleMetrics::runSetTransaction(teamCollection->cx, teamCollection->isPrimary(), metrics);
-}
-
-ACTOR Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses(
-    Transaction* tr) {
-	state Future<std::vector<ProcessData>> workers = getWorkers(tr);
-	state Future<RangeResult> serverList = tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
-	wait(success(workers) && success(serverList));
-	ASSERT(!serverList.get().more && serverList.get().size() < CLIENT_KNOBS->TOO_MANY);
-
-	std::map<Optional<Standalone<StringRef>>, ProcessData> id_data;
-	for (int i = 0; i < workers.get().size(); i++)
-		id_data[workers.get()[i].locality.processId()] = workers.get()[i];
-
-	std::vector<std::pair<StorageServerInterface, ProcessClass>> results;
-	for (int i = 0; i < serverList.get().size(); i++) {
-		auto ssi = decodeServerListValue(serverList.get()[i].value);
-		results.emplace_back(ssi, id_data[ssi.locality.processId()].processClass);
-	}
-
-	return results;
 }
 
 ACTOR Future<Void> remoteRecovered(Reference<AsyncVar<ServerDBInfo> const> db) {
@@ -491,34 +475,10 @@ struct DataDistributorData : NonCopyable, ReferenceCounted<DataDistributorData> 
 	    totalDataInFlightRemoteEventHolder(makeReference<EventCacheHolder>("TotalDataInFlightRemote")) {}
 };
 
-ACTOR Future<Void> monitorBatchLimitedTime(Reference<AsyncVar<ServerDBInfo> const> db, double* lastLimited) {
-	loop {
-		wait(delay(SERVER_KNOBS->METRIC_UPDATE_RATE));
-
-		state Reference<GrvProxyInfo> grvProxies(new GrvProxyInfo(db->get().client.grvProxies));
-
-		choose {
-			when(wait(db->onChange())) {}
-			when(GetHealthMetricsReply reply =
-			         wait(grvProxies->size() ? basicLoadBalance(grvProxies,
-			                                                    &GrvProxyInterface::getHealthMetrics,
-			                                                    GetHealthMetricsRequest(false))
-			                                 : Never())) {
-				if (reply.healthMetrics.batchLimited) {
-					*lastLimited = now();
-				}
-			}
-		}
-	}
-}
-
 // Runs the data distribution algorithm for FDB, including the DD Queue, DD tracker, and DD team collection
 ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
                                     PromiseStream<GetMetricsListRequest> getShardMetricsList,
                                     const DDEnabledState* ddEnabledState) {
-	state double lastLimited = 0;
-	self->addActor.send(monitorBatchLimitedTime(self->dbInfo, &lastLimited));
-
 	state Database cx = openDBOnServer(self->dbInfo, TaskPriority::DataDistributionLaunch, LockAware::True);
 	cx->locationCacheSize = SERVER_KNOBS->DD_LOCATION_CACHE_SIZE;
 
@@ -536,6 +496,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 	state Reference<DDTeamCollection> primaryTeamCollection;
 	state Reference<DDTeamCollection> remoteTeamCollection;
 	state bool trackerCancelled;
+	state bool ddIsTenantAware = SERVER_KNOBS->DD_TENANT_AWARENESS_ENABLED;
 	loop {
 		trackerCancelled = false;
 
@@ -620,6 +581,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 					// mode may be set true by system operator using fdbcli and isDDEnabled() set to true
 					break;
 				}
+
 				TraceEvent("DataDistributionDisabled", self->ddId).log();
 
 				TraceEvent("MovingData", self->ddId)
@@ -660,6 +622,12 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 				TraceEvent("DataDistributionEnabled").log();
 			}
 
+			state Reference<TenantCache> ddTenantCache;
+			if (ddIsTenantAware) {
+				ddTenantCache = makeReference<TenantCache>(cx, self->ddId);
+				wait(ddTenantCache->build(cx));
+			}
+
 			// When/If this assertion fails, Evan owes Ben a pat on the back for his foresight
 			ASSERT(configuration.storageTeamSize > 0);
 
@@ -668,6 +636,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			state PromiseStream<Promise<int64_t>> getAverageShardBytes;
 			state PromiseStream<Promise<int>> getUnhealthyRelocationCount;
 			state PromiseStream<GetMetricsRequest> getShardMetrics;
+			state PromiseStream<GetTopKMetricsRequest> getTopKShardMetrics;
 			state Reference<AsyncVar<bool>> processingUnhealthy(new AsyncVar<bool>(false));
 			state Reference<AsyncVar<bool>> processingWiggle(new AsyncVar<bool>(false));
 			state Promise<Void> readyToStart;
@@ -700,8 +669,10 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 					if (!unhealthy && configuration.usableRegions > 1) {
 						unhealthy = initData->shards[shard].remoteSrc.size() != configuration.storageTeamSize;
 					}
-					output.send(RelocateShard(
-					    keys, unhealthy ? SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY : SERVER_KNOBS->PRIORITY_RECOVER_MOVE));
+					output.send(RelocateShard(keys,
+					                          unhealthy ? SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY
+					                                    : SERVER_KNOBS->PRIORITY_RECOVER_MOVE,
+					                          RelocateReason::OTHER));
 				}
 				wait(yield(TaskPriority::DataDistribution));
 			}
@@ -725,6 +696,10 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			} else {
 				anyZeroHealthyTeams = zeroHealthyTeams[0];
 			}
+			if (ddIsTenantAware) {
+				actors.push_back(reportErrorsExcept(
+				    ddTenantCache->monitorTenantMap(), "DDTenantCacheMonitor", self->ddId, &normalDDQueueErrors()));
+			}
 
 			actors.push_back(pollMoveKeysLock(cx, lock, ddEnabledState));
 			actors.push_back(reportErrorsExcept(dataDistributionTracker(initData,
@@ -732,6 +707,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			                                                            output,
 			                                                            shardsAffectedByTeamFailure,
 			                                                            getShardMetrics,
+			                                                            getTopKShardMetrics.getFuture(),
 			                                                            getShardMetricsList,
 			                                                            getAverageShardBytes.getFuture(),
 			                                                            readyToStart,
@@ -746,17 +722,17 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			                                                          output,
 			                                                          input.getFuture(),
 			                                                          getShardMetrics,
+			                                                          getTopKShardMetrics,
 			                                                          processingUnhealthy,
 			                                                          processingWiggle,
 			                                                          tcis,
 			                                                          shardsAffectedByTeamFailure,
 			                                                          lock,
 			                                                          getAverageShardBytes,
-			                                                          getUnhealthyRelocationCount,
+			                                                          getUnhealthyRelocationCount.getFuture(),
 			                                                          self->ddId,
 			                                                          storageTeamSize,
 			                                                          configuration.storageTeamSize,
-			                                                          &lastLimited,
 			                                                          ddEnabledState),
 			                                    "DDQueue",
 			                                    self->ddId,
@@ -900,8 +876,169 @@ Future<Void> sendSnapReq(RequestStream<Req> stream, Req req, Error e) {
 	return Void();
 }
 
+ACTOR Future<ErrorOr<Void>> trySendSnapReq(RequestStream<WorkerSnapRequest> stream, WorkerSnapRequest req) {
+	state int snapReqRetry = 0;
+	state double snapRetryBackoff = FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY;
+	loop {
+		ErrorOr<REPLY_TYPE(WorkerSnapRequest)> reply = wait(stream.tryGetReply(req));
+		if (reply.isError()) {
+			TraceEvent("SnapDataDistributor_ReqError")
+			    .errorUnsuppressed(reply.getError())
+			    .detail("Peer", stream.getEndpoint().getPrimaryAddress());
+			if (reply.getError().code() != error_code_request_maybe_delivered ||
+			    ++snapReqRetry > SERVER_KNOBS->SNAP_NETWORK_FAILURE_RETRY_LIMIT)
+				return ErrorOr<Void>(reply.getError());
+			else {
+				// retry for network failures with same snap UID to avoid snapshot twice
+				req = WorkerSnapRequest(req.snapPayload, req.snapUID, req.role);
+				wait(delay(snapRetryBackoff));
+				snapRetryBackoff = snapRetryBackoff * 2;
+			}
+		} else
+			break;
+	}
+	return ErrorOr<Void>(Void());
+}
+
+ACTOR static Future<Void> waitForMost(std::vector<Future<ErrorOr<Void>>> futures,
+                                      int faultTolerance,
+                                      Error e,
+                                      double waitMultiplierForSlowFutures = 1.0) {
+	state std::vector<Future<bool>> successFutures;
+	state double startTime = now();
+	successFutures.reserve(futures.size());
+	for (const auto& future : futures) {
+		successFutures.push_back(fmap([](auto const& result) { return result.present(); }, future));
+	}
+	bool success = wait(quorumEqualsTrue(successFutures, successFutures.size() - faultTolerance));
+	if (!success) {
+		throw e;
+	}
+	wait(delay((now() - startTime) * waitMultiplierForSlowFutures) || waitForAll(successFutures));
+	return Void();
+}
+
+ACTOR Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> getStatefulWorkers(
+    Database cx,
+    Reference<AsyncVar<ServerDBInfo> const> dbInfo,
+    std::vector<TLogInterface>* tlogs,
+    int* storageFaultTolerance) {
+	state std::map<NetworkAddress, std::pair<WorkerInterface, std::string>> result;
+	state std::map<NetworkAddress, WorkerInterface> workersMap;
+	state Transaction tr(cx);
+	state DatabaseConfiguration configuration;
+	loop {
+		try {
+			// necessary options
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+
+			// get database configuration
+			DatabaseConfiguration _configuration = wait(getDatabaseConfiguration(&tr));
+			configuration = _configuration;
+
+			// get storages
+			RangeResult serverList = wait(tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
+			ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
+			state std::vector<StorageServerInterface> storageServers;
+			storageServers.reserve(serverList.size());
+			for (int i = 0; i < serverList.size(); i++)
+				storageServers.push_back(decodeServerListValue(serverList[i].value));
+
+			// get workers
+			state std::vector<WorkerDetails> workers = wait(getWorkers(dbInfo));
+			for (const auto& worker : workers) {
+				workersMap[worker.interf.address()] = worker.interf;
+			}
+
+			Optional<Value> regionsValue =
+			    wait(tr.get(LiteralStringRef("usable_regions").withPrefix(configKeysPrefix)));
+			int usableRegions = 1;
+			if (regionsValue.present()) {
+				usableRegions = atoi(regionsValue.get().toString().c_str());
+			}
+			auto masterDcId = dbInfo->get().master.locality.dcId();
+			int storageFailures = 0;
+			for (const auto& server : storageServers) {
+				TraceEvent(SevDebug, "StorageServerDcIdInfo")
+				    .detail("Address", server.address().toString())
+				    .detail("ServerLocalityID", server.locality.dcId())
+				    .detail("MasterDcID", masterDcId);
+				if (usableRegions == 1 || server.locality.dcId() == masterDcId) {
+					auto itr = workersMap.find(server.address());
+					if (itr == workersMap.end()) {
+						TraceEvent(SevWarn, "GetStorageWorkers")
+						    .detail("Reason", "Could not find worker for storage server")
+						    .detail("SS", server.id());
+						++storageFailures;
+					} else {
+						if (result.count(server.address())) {
+							ASSERT(itr->second.id() == result[server.address()].first.id());
+							if (result[server.address()].second.find("storage") == std::string::npos)
+								result[server.address()].second.append(",storage");
+						} else {
+							result[server.address()] = std::make_pair(itr->second, "storage");
+						}
+					}
+				}
+			}
+			// calculate fault tolerance
+			*storageFaultTolerance = std::min(static_cast<int>(SERVER_KNOBS->MAX_STORAGE_SNAPSHOT_FAULT_TOLERANCE),
+			                                  configuration.storageTeamSize - 1) -
+			                         storageFailures;
+			if (*storageFaultTolerance < 0) {
+				TEST(true); // Too many failed storage servers to complete snapshot
+				throw snap_storage_failed();
+			}
+			// tlogs
+			for (const auto& tlog : *tlogs) {
+				TraceEvent(SevDebug, "GetStatefulWorkersTlog").detail("Addr", tlog.address());
+				if (workersMap.find(tlog.address()) == workersMap.end()) {
+					TraceEvent(SevError, "MissingTlogWorkerInterface").detail("TlogAddress", tlog.address());
+					throw snap_tlog_failed();
+				}
+				if (result.count(tlog.address())) {
+					ASSERT(workersMap[tlog.address()].id() == result[tlog.address()].first.id());
+					result[tlog.address()].second.append(",tlog");
+				} else {
+					result[tlog.address()] = std::make_pair(workersMap[tlog.address()], "tlog");
+				}
+			}
+
+			// get coordinators
+			Optional<Value> coordinators = wait(tr.get(coordinatorsKey));
+			if (!coordinators.present()) {
+				throw operation_failed();
+			}
+			ClusterConnectionString ccs(coordinators.get().toString());
+			std::vector<NetworkAddress> coordinatorsAddr = wait(ccs.tryResolveHostnames());
+			std::set<NetworkAddress> coordinatorsAddrSet(coordinatorsAddr.begin(), coordinatorsAddr.end());
+			for (const auto& worker : workers) {
+				// Note : only considers second address for coordinators,
+				// as we use primary addresses from storage and tlog interfaces above
+				NetworkAddress primary = worker.interf.address();
+				Optional<NetworkAddress> secondary = worker.interf.tLog.getEndpoint().addresses.secondaryAddress;
+				if (coordinatorsAddrSet.find(primary) != coordinatorsAddrSet.end() ||
+				    (secondary.present() && (coordinatorsAddrSet.find(secondary.get()) != coordinatorsAddrSet.end()))) {
+					if (result.count(primary)) {
+						ASSERT(workersMap[primary].id() == result[primary].first.id());
+						result[primary].second.append(",coord");
+					} else {
+						result[primary] = std::make_pair(workersMap[primary], "coord");
+					}
+				}
+			}
+			return result;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+			result.clear();
+		}
+	}
+}
+
 ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<AsyncVar<ServerDBInfo> const> db) {
 	state Database cx = openDBOnServer(db, TaskPriority::DefaultDelay, LockAware::True);
+
 	state ReadYourWritesTransaction tr(cx);
 	loop {
 		try {
@@ -935,37 +1072,44 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 		TraceEvent("SnapDataDistributor_AfterDisableTLogPop")
 		    .detail("SnapPayload", snapReq.snapPayload)
 		    .detail("SnapUID", snapReq.snapUID);
-		// snap local storage nodes
-		std::vector<WorkerInterface> storageWorkers =
-		    wait(transformErrors(getStorageWorkers(cx, db, true /* localOnly */), snap_storage_failed()));
-		TraceEvent("SnapDataDistributor_GotStorageWorkers")
-		    .detail("SnapPayload", snapReq.snapPayload)
-		    .detail("SnapUID", snapReq.snapUID);
-		std::vector<Future<Void>> storageSnapReqs;
-		storageSnapReqs.reserve(storageWorkers.size());
-		for (const auto& worker : storageWorkers) {
-			storageSnapReqs.push_back(sendSnapReq(worker.workerSnapReq,
-			                                      WorkerSnapRequest(snapReq.snapPayload, snapReq.snapUID, "storage"_sr),
-			                                      snap_storage_failed()));
-		}
-		wait(waitForAll(storageSnapReqs));
 
-		TraceEvent("SnapDataDistributor_AfterSnapStorage")
+		state int storageFaultTolerance;
+		// snap stateful nodes
+		state std::map<NetworkAddress, std::pair<WorkerInterface, std::string>> statefulWorkers =
+		    wait(transformErrors(getStatefulWorkers(cx, db, &tlogs, &storageFaultTolerance), snap_storage_failed()));
+
+		TraceEvent("SnapDataDistributor_GotStatefulWorkers")
 		    .detail("SnapPayload", snapReq.snapPayload)
 		    .detail("SnapUID", snapReq.snapUID);
-		// snap local tlog nodes
-		std::vector<Future<Void>> tLogSnapReqs;
-		tLogSnapReqs.reserve(tlogs.size());
-		for (const auto& tlog : tlogs) {
-			tLogSnapReqs.push_back(sendSnapReq(tlog.snapRequest,
-			                                   TLogSnapRequest{ snapReq.snapPayload, snapReq.snapUID, "tlog"_sr },
-			                                   snap_tlog_failed()));
+
+		// we need to snapshot storage nodes before snapshot any tlogs
+		std::vector<Future<ErrorOr<Void>>> storageSnapReqs;
+		for (const auto& [addr, entry] : statefulWorkers) {
+			auto& [interf, role] = entry;
+			if (role.find("storage") != std::string::npos)
+				storageSnapReqs.push_back(trySendSnapReq(
+				    interf.workerSnapReq, WorkerSnapRequest(snapReq.snapPayload, snapReq.snapUID, "storage"_sr)));
 		}
-		wait(waitForAll(tLogSnapReqs));
+		wait(waitForMost(storageSnapReqs, storageFaultTolerance, snap_storage_failed()));
+		TraceEvent("SnapDataDistributor_AfterSnapStorage")
+		    .detail("FaultTolerance", storageFaultTolerance)
+		    .detail("SnapPayload", snapReq.snapPayload)
+		    .detail("SnapUID", snapReq.snapUID);
+
+		std::vector<Future<ErrorOr<Void>>> tLogSnapReqs;
+		tLogSnapReqs.reserve(tlogs.size());
+		for (const auto& [addr, entry] : statefulWorkers) {
+			auto& [interf, role] = entry;
+			if (role.find("tlog") != std::string::npos)
+				tLogSnapReqs.push_back(trySendSnapReq(
+				    interf.workerSnapReq, WorkerSnapRequest(snapReq.snapPayload, snapReq.snapUID, "tlog"_sr)));
+		}
+		wait(waitForMost(tLogSnapReqs, 0, snap_tlog_failed()));
 
 		TraceEvent("SnapDataDistributor_AfterTLogStorage")
 		    .detail("SnapPayload", snapReq.snapPayload)
 		    .detail("SnapUID", snapReq.snapUID);
+
 		// enable tlog pop on local tlog nodes
 		std::vector<Future<Void>> enablePops;
 		enablePops.reserve(tlogs.size());
@@ -978,19 +1122,18 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 		TraceEvent("SnapDataDistributor_AfterEnableTLogPops")
 		    .detail("SnapPayload", snapReq.snapPayload)
 		    .detail("SnapUID", snapReq.snapUID);
-		// snap the coordinators
-		std::vector<WorkerInterface> coordWorkers = wait(getCoordWorkers(cx, db));
-		TraceEvent("SnapDataDistributor_GotCoordWorkers")
-		    .detail("SnapPayload", snapReq.snapPayload)
-		    .detail("SnapUID", snapReq.snapUID);
-		std::vector<Future<Void>> coordSnapReqs;
-		coordSnapReqs.reserve(coordWorkers.size());
-		for (const auto& worker : coordWorkers) {
-			coordSnapReqs.push_back(sendSnapReq(worker.workerSnapReq,
-			                                    WorkerSnapRequest(snapReq.snapPayload, snapReq.snapUID, "coord"_sr),
-			                                    snap_coord_failed()));
+
+		std::vector<Future<ErrorOr<Void>>> coordSnapReqs;
+		for (const auto& [addr, entry] : statefulWorkers) {
+			auto& [interf, role] = entry;
+			if (role.find("coord") != std::string::npos)
+				coordSnapReqs.push_back(trySendSnapReq(
+				    interf.workerSnapReq, WorkerSnapRequest(snapReq.snapPayload, snapReq.snapUID, "coord"_sr)));
 		}
-		wait(waitForAll(coordSnapReqs));
+		auto const coordFaultTolerance = std::min<int>(std::max<int>(0, coordSnapReqs.size() / 2 - 1),
+		                                               SERVER_KNOBS->MAX_COORDINATOR_SNAPSHOT_FAULT_TOLERANCE);
+		wait(waitForMost(coordSnapReqs, coordFaultTolerance, snap_coord_failed()));
+
 		TraceEvent("SnapDataDistributor_AfterSnapCoords")
 		    .detail("SnapPayload", snapReq.snapPayload)
 		    .detail("SnapUID", snapReq.snapUID);
@@ -1038,37 +1181,48 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 	return Void();
 }
 
-ACTOR Future<Void> ddSnapCreate(DistributorSnapRequest snapReq,
-                                Reference<AsyncVar<ServerDBInfo> const> db,
-                                DDEnabledState* ddEnabledState) {
+ACTOR Future<Void> ddSnapCreate(
+    DistributorSnapRequest snapReq,
+    Reference<AsyncVar<ServerDBInfo> const> db,
+    DDEnabledState* ddEnabledState,
+    std::map<UID, DistributorSnapRequest>* ddSnapMap /* ongoing snapshot requests */,
+    std::map<UID, ErrorOr<Void>>*
+        ddSnapResultMap /* finished snapshot requests, expired in SNAP_MINIMUM_TIME_GAP seconds */) {
 	state Future<Void> dbInfoChange = db->onChange();
 	if (!ddEnabledState->setDDEnabled(false, snapReq.snapUID)) {
 		// disable DD before doing snapCreate, if previous snap req has already disabled DD then this operation fails
 		// here
-		TraceEvent("SnapDDSetDDEnabledFailedInMemoryCheck").log();
-		snapReq.reply.sendError(operation_failed());
+		TraceEvent("SnapDDSetDDEnabledFailedInMemoryCheck").detail("SnapUID", snapReq.snapUID);
+		ddSnapMap->at(snapReq.snapUID).reply.sendError(operation_failed());
+		ddSnapMap->erase(snapReq.snapUID);
+		(*ddSnapResultMap)[snapReq.snapUID] = ErrorOr<Void>(operation_failed());
 		return Void();
 	}
-	double delayTime = g_network->isSimulated() ? 70.0 : SERVER_KNOBS->SNAP_CREATE_MAX_TIMEOUT;
 	try {
 		choose {
 			when(wait(dbInfoChange)) {
 				TraceEvent("SnapDDCreateDBInfoChanged")
 				    .detail("SnapPayload", snapReq.snapPayload)
 				    .detail("SnapUID", snapReq.snapUID);
-				snapReq.reply.sendError(snap_with_recovery_unsupported());
+				ddSnapMap->at(snapReq.snapUID).reply.sendError(snap_with_recovery_unsupported());
+				ddSnapMap->erase(snapReq.snapUID);
+				(*ddSnapResultMap)[snapReq.snapUID] = ErrorOr<Void>(snap_with_recovery_unsupported());
 			}
 			when(wait(ddSnapCreateCore(snapReq, db))) {
 				TraceEvent("SnapDDCreateSuccess")
 				    .detail("SnapPayload", snapReq.snapPayload)
 				    .detail("SnapUID", snapReq.snapUID);
-				snapReq.reply.send(Void());
+				ddSnapMap->at(snapReq.snapUID).reply.send(Void());
+				ddSnapMap->erase(snapReq.snapUID);
+				(*ddSnapResultMap)[snapReq.snapUID] = ErrorOr<Void>(Void());
 			}
-			when(wait(delay(delayTime))) {
+			when(wait(delay(SERVER_KNOBS->SNAP_CREATE_MAX_TIMEOUT))) {
 				TraceEvent("SnapDDCreateTimedOut")
 				    .detail("SnapPayload", snapReq.snapPayload)
 				    .detail("SnapUID", snapReq.snapUID);
-				snapReq.reply.sendError(timed_out());
+				ddSnapMap->at(snapReq.snapUID).reply.sendError(timed_out());
+				ddSnapMap->erase(snapReq.snapUID);
+				(*ddSnapResultMap)[snapReq.snapUID] = ErrorOr<Void>(timed_out());
 			}
 		}
 	} catch (Error& e) {
@@ -1077,7 +1231,9 @@ ACTOR Future<Void> ddSnapCreate(DistributorSnapRequest snapReq,
 		    .detail("SnapPayload", snapReq.snapPayload)
 		    .detail("SnapUID", snapReq.snapUID);
 		if (e.code() != error_code_operation_cancelled) {
-			snapReq.reply.sendError(e);
+			ddSnapMap->at(snapReq.snapUID).reply.sendError(e);
+			ddSnapMap->erase(snapReq.snapUID);
+			(*ddSnapResultMap)[snapReq.snapUID] = ErrorOr<Void>(e);
 		} else {
 			// enable DD should always succeed
 			bool success = ddEnabledState->setDDEnabled(true, snapReq.snapUID);
@@ -1184,6 +1340,18 @@ static int64_t getMedianShardSize(VectorRef<DDMetricsRef> metricVec) {
 	return metricVec[metricVec.size() / 2].shardBytes;
 }
 
+GetStorageWigglerStateReply getStorageWigglerStates(Reference<DataDistributorData> self) {
+	GetStorageWigglerStateReply reply;
+	if (self->teamCollection) {
+		std::tie(reply.primary, reply.lastStateChangePrimary) = self->teamCollection->getStorageWigglerState();
+		if (self->teamCollection->teamCollections.size() > 1) {
+			std::tie(reply.remote, reply.lastStateChangeRemote) =
+			    self->teamCollection->teamCollections[1]->getStorageWigglerState();
+		}
+	}
+	return reply;
+}
+
 ACTOR Future<Void> ddGetMetrics(GetDataDistributorMetricsRequest req,
                                 PromiseStream<GetMetricsListRequest> getShardMetricsList) {
 	ErrorOr<Standalone<VectorRef<DDMetricsRef>>> result = wait(
@@ -1216,6 +1384,8 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 	state Database cx = openDBOnServer(db, TaskPriority::DefaultDelay, LockAware::True);
 	state ActorCollection actors(false);
 	state DDEnabledState ddEnabledState;
+	state std::map<UID, DistributorSnapRequest> ddSnapReqMap;
+	state std::map<UID, ErrorOr<Void>> ddSnapReqResultMap;
 	self->addActor.send(actors.getResult());
 	self->addActor.send(traceRole(Role::DATA_DISTRIBUTOR, di.id()));
 
@@ -1243,11 +1413,37 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 				actors.add(ddGetMetrics(req, getShardMetricsList));
 			}
 			when(DistributorSnapRequest snapReq = waitNext(di.distributorSnapReq.getFuture())) {
-				actors.add(ddSnapCreate(snapReq, db, &ddEnabledState));
+				auto& snapUID = snapReq.snapUID;
+				if (ddSnapReqResultMap.count(snapUID)) {
+					TEST(true); // Data distributor received a duplicate finished snap request
+					auto result = ddSnapReqResultMap[snapUID];
+					result.isError() ? snapReq.reply.sendError(result.getError()) : snapReq.reply.send(result.get());
+					TraceEvent("RetryFinishedDistributorSnapRequest")
+					    .detail("SnapUID", snapUID)
+					    .detail("Result", result.isError() ? result.getError().code() : 0);
+				} else if (ddSnapReqMap.count(snapReq.snapUID)) {
+					TEST(true); // Data distributor received a duplicate ongoing snap request
+					TraceEvent("RetryOngoingDistributorSnapRequest").detail("SnapUID", snapUID);
+					ASSERT(snapReq.snapPayload == ddSnapReqMap[snapUID].snapPayload);
+					ddSnapReqMap[snapUID] = snapReq;
+				} else {
+					ddSnapReqMap[snapUID] = snapReq;
+					actors.add(ddSnapCreate(snapReq, db, &ddEnabledState, &ddSnapReqMap, &ddSnapReqResultMap));
+					auto* ddSnapReqResultMapPtr = &ddSnapReqResultMap;
+					actors.add(fmap(
+					    [ddSnapReqResultMapPtr, snapUID](Void _) {
+						    ddSnapReqResultMapPtr->erase(snapUID);
+						    return Void();
+					    },
+					    delay(SERVER_KNOBS->SNAP_MINIMUM_TIME_GAP)));
+				}
 			}
 			when(DistributorExclusionSafetyCheckRequest exclCheckReq =
 			         waitNext(di.distributorExclCheckReq.getFuture())) {
 				actors.add(ddExclusionSafetyCheck(exclCheckReq, self, cx));
+			}
+			when(GetStorageWigglerStateRequest req = waitNext(di.storageWigglerState.getFuture())) {
+				req.reply.send(getStorageWigglerStates(self));
 			}
 		}
 	} catch (Error& err) {
@@ -1258,5 +1454,63 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 		TraceEvent("DataDistributorDied", di.id()).errorUnsuppressed(err);
 	}
 
+	return Void();
+}
+
+static Future<ErrorOr<Void>> goodTestFuture(double duration) {
+	return tag(delay(duration), ErrorOr<Void>(Void()));
+}
+
+static Future<ErrorOr<Void>> badTestFuture(double duration, Error e) {
+	return tag(delay(duration), ErrorOr<Void>(e));
+}
+
+TEST_CASE("/DataDistribution/WaitForMost") {
+	state std::vector<Future<ErrorOr<Void>>> futures;
+	{
+		futures = { goodTestFuture(1), goodTestFuture(2), goodTestFuture(3) };
+		wait(waitForMost(futures, 1, operation_failed(), 0.0)); // Don't wait for slowest future
+		ASSERT(!futures[2].isReady());
+	}
+	{
+		futures = { goodTestFuture(1), goodTestFuture(2), goodTestFuture(3) };
+		wait(waitForMost(futures, 0, operation_failed(), 0.0)); // Wait for all futures
+		ASSERT(futures[2].isReady());
+	}
+	{
+		futures = { goodTestFuture(1), goodTestFuture(2), goodTestFuture(3) };
+		wait(waitForMost(futures, 1, operation_failed(), 1.0)); // Wait for slowest future
+		ASSERT(futures[2].isReady());
+	}
+	{
+		futures = { goodTestFuture(1), goodTestFuture(2), badTestFuture(1, success()) };
+		wait(waitForMost(futures, 1, operation_failed(), 1.0)); // Error ignored
+	}
+	{
+		futures = { goodTestFuture(1), goodTestFuture(2), badTestFuture(1, success()) };
+		try {
+			wait(waitForMost(futures, 0, operation_failed(), 1.0));
+			ASSERT(false);
+		} catch (Error& e) {
+			ASSERT_EQ(e.code(), error_code_operation_failed);
+		}
+	}
+	return Void();
+}
+
+TEST_CASE("/DataDistributor/StorageWiggler/Order") {
+	StorageWiggler wiggler(nullptr);
+	wiggler.addServer(UID(1, 0), StorageMetadataType(1, KeyValueStoreType::SSD_BTREE_V2));
+	wiggler.addServer(UID(2, 0), StorageMetadataType(2, KeyValueStoreType::MEMORY, true));
+	wiggler.addServer(UID(3, 0), StorageMetadataType(3, KeyValueStoreType::SSD_ROCKSDB_V1, true));
+	wiggler.addServer(UID(4, 0), StorageMetadataType(4, KeyValueStoreType::SSD_BTREE_V2));
+
+	std::vector<UID> correctOrder{ UID(2, 0), UID(3, 0), UID(1, 0), UID(4, 0) };
+	for (int i = 0; i < correctOrder.size(); ++i) {
+		auto id = wiggler.getNextServerId();
+		std::cout << "Get " << id.get().shortString() << "\n";
+		ASSERT(id == correctOrder[i]);
+	}
+	ASSERT(!wiggler.getNextServerId().present());
 	return Void();
 }

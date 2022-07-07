@@ -1,42 +1,12 @@
-set(FDBCLI_SRCS
-  fdbcli.actor.cpp
-  fdbcli.actor.h
-  AdvanceVersionCommand.actor.cpp
-  BlobRangeCommand.actor.cpp
-  CacheRangeCommand.actor.cpp
-  ConfigureCommand.actor.cpp
-  ConsistencyCheckCommand.actor.cpp
-  CoordinatorsCommand.actor.cpp
-  DataDistributionCommand.actor.cpp
-  ExcludeCommand.actor.cpp
-  ExpensiveDataCheckCommand.actor.cpp
-  FileConfigureCommand.actor.cpp
-  FlowLineNoise.actor.cpp
-  FlowLineNoise.h
-  ForceRecoveryWithDataLossCommand.actor.cpp
-  IncludeCommand.actor.cpp
-  KillCommand.actor.cpp
-  LockCommand.actor.cpp
-  ChangeFeedCommand.actor.cpp
-  MaintenanceCommand.actor.cpp
-  ProfileCommand.actor.cpp
-  SetClassCommand.actor.cpp
-  SnapshotCommand.actor.cpp
-  StatusCommand.actor.cpp
-  SuspendCommand.actor.cpp
-  TenantCommands.actor.cpp
-  ThrottleCommand.actor.cpp
-  TriggerDDTeamInfoLogCommand.actor.cpp
-  TssqCommand.actor.cpp
-  Util.actor.cpp
-  linenoise/linenoise.h)
-
-if(NOT WIN32)
-  list(APPEND FDBCLI_SRCS linenoise/linenoise.c)
-endif()
+fdb_find_sources(FDBCLI_SRCS)
 
 add_flow_target(EXECUTABLE NAME fdbcli SRCS ${FDBCLI_SRCS})
-target_link_libraries(fdbcli PRIVATE fdbclient)
+target_include_directories(fdbcli PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include")
+target_link_libraries(fdbcli PRIVATE fdbclient SimpleOpt)
+
+if(NOT WIN32)
+  target_link_libraries(fdbcli PRIVATE linenoise)
+endif()
 
 if(NOT OPEN_FOR_IDE)
   if(GENERATE_DEBUG_PACKAGES)

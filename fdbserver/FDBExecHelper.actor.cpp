@@ -27,7 +27,7 @@
 #include "fdbrpc/FlowProcess.actor.h"
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/simulator.h"
-#include "fdbclient/WellKnownEndpoints.h"
+#include "fdbrpc/WellKnownEndpoints.h"
 #include "fdbclient/versions.h"
 #include "fdbserver/CoroFlow.h"
 #include "fdbserver/FDBExecHelper.actor.h"
@@ -160,16 +160,17 @@ ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
 		}
 	}
 	state int result = 0;
-	child = g_pSimulator->newProcess("remote flow process",
-	                                 self->address.ip,
-	                                 0,
-	                                 self->address.isTLS(),
-	                                 self->addresses.secondaryAddress.present() ? 2 : 1,
-	                                 self->locality,
-	                                 ProcessClass(ProcessClass::UnsetClass, ProcessClass::AutoSource),
-	                                 self->dataFolder,
-	                                 self->coordinationFolder, // do we need to customize this coordination folder path?
-	                                 self->protocolVersion);
+	child = g_pSimulator->newProcess(
+	    "remote flow process",
+	    self->address.ip,
+	    0,
+	    self->address.isTLS(),
+	    self->addresses.secondaryAddress.present() ? 2 : 1,
+	    self->locality,
+	    ProcessClass(ProcessClass::UnsetClass, ProcessClass::AutoSource),
+	    self->dataFolder.c_str(),
+	    self->coordinationFolder.c_str(), // do we need to customize this coordination folder path?
+	    self->protocolVersion);
 	wait(g_pSimulator->onProcess(child));
 	state Future<ISimulator::KillType> onShutdown = child->onShutdown();
 	state Future<ISimulator::KillType> parentShutdown = self->onShutdown();
@@ -242,7 +243,9 @@ ACTOR Future<int> spawnProcess(std::string binPath,
 
 static auto fork_child(const std::string& path, std::vector<char*>& paramList) {
 	int pipefd[2];
-	pipe(pipefd);
+	if (pipe(pipefd) != 0) {
+		return std::make_pair(-1, Optional<int>{});
+	}
 	auto readFD = pipefd[0];
 	auto writeFD = pipefd[1];
 	pid_t pid = fork();
@@ -266,7 +269,7 @@ static auto fork_child(const std::string& path, std::vector<char*>& paramList) {
 static void setupTraceWithOutput(TraceEvent& event, size_t bytesRead, char* outputBuffer) {
 	// get some errors printed for spawned process
 	std::cout << "Output bytesRead: " << bytesRead << std::endl;
-	std::cout << "output buffer: " << std::string(outputBuffer) << std::endl;
+	std::cout << "output buffer: " << std::string_view(outputBuffer, bytesRead) << std::endl;
 	if (bytesRead == 0)
 		return;
 	ASSERT(bytesRead <= SERVER_KNOBS->MAX_FORKED_PROCESS_OUTPUT);
@@ -423,14 +426,12 @@ ACTOR Future<int> execHelper(ExecCmdValueString* execArg, UID snapUID, std::stri
 	} else {
 		// copy the files
 		state std::string folderFrom = folder + "/.";
-		state std::string folderTo = folder + "-snap-" + uidStr.toString();
-		double maxSimDelayTime = 10.0;
-		folderTo = folder + "-snap-" + uidStr.toString() + "-" + role;
+		state std::string folderTo = folder + "-snap-" + uidStr.toString() + "-" + role;
 		std::vector<std::string> paramList;
 		std::string mkdirBin = "/bin/mkdir";
 		paramList.push_back(mkdirBin);
 		paramList.push_back(folderTo);
-		cmdErr = spawnProcess(mkdirBin, paramList, maxWaitTime, false /*isSync*/, maxSimDelayTime);
+		cmdErr = spawnProcess(mkdirBin, paramList, maxWaitTime, false /*isSync*/, 10.0);
 		wait(success(cmdErr));
 		err = cmdErr.get();
 		if (err == 0) {

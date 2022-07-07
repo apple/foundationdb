@@ -50,9 +50,10 @@ PROTOCOL_VERSION_6_2 = 0x0FDB00B062010001
 PROTOCOL_VERSION_6_3 = 0x0FDB00B063010001
 PROTOCOL_VERSION_7_0 = 0x0FDB00B070010001
 PROTOCOL_VERSION_7_1 = 0x0FDB00B071010001
+PROTOCOL_VERSION_7_2 = 0x0FDB00B072000000
 supported_protocol_versions = frozenset([PROTOCOL_VERSION_5_2, PROTOCOL_VERSION_6_0, PROTOCOL_VERSION_6_1,
                                          PROTOCOL_VERSION_6_2, PROTOCOL_VERSION_6_3, PROTOCOL_VERSION_7_0,
-                                         PROTOCOL_VERSION_7_1])
+                                         PROTOCOL_VERSION_7_1, PROTOCOL_VERSION_7_2])
 
 
 fdb.api_version(520)
@@ -193,7 +194,8 @@ class BaseInfo(object):
         if protocol_version >= PROTOCOL_VERSION_6_3:
             self.dc_id = bb.get_bytes_with_length()
         if protocol_version >= PROTOCOL_VERSION_7_1:
-            self.tenant = bb.get_bytes_with_length()
+            if bb.get_bytes(1):
+                self.tenant = bb.get_bytes_with_length()
 
 class GetVersionInfo(BaseInfo):
     def __init__(self, bb, protocol_version):

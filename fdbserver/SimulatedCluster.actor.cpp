@@ -26,6 +26,7 @@
 #include <toml.hpp>
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/simulator.h"
+#include "fdbrpc/IPAllowList.h"
 #include "fdbclient/ClusterConnectionFile.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/DatabaseContext.h"
@@ -40,7 +41,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/versions.h"
-#include "fdbclient/WellKnownEndpoints.h"
+#include "fdbrpc/WellKnownEndpoints.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/network.h"
 #include "flow/TypeTraits.h"
@@ -52,13 +53,6 @@
 
 extern "C" int g_expect_full_pointermap;
 extern const char* getSourceVersion();
-
-ISimulator::ISimulator()
-  : desiredCoordinators(1), physicalDatacenters(1), processesPerMachine(0), listenersPerProcess(1), usableRegions(1),
-    allowLogSetKills(true), tssMode(TSSMode::Disabled), isStopped(false), lastConnectionFailure(0),
-    connectionFailuresDisableDuration(0), speedUpSimulation(false), backupAgents(BackupAgentType::WaitForType),
-    drAgents(BackupAgentType::WaitForType), allSwapsDisabled(false) {}
-ISimulator::~ISimulator() = default;
 
 using namespace std::literals;
 
@@ -309,6 +303,7 @@ public:
 	//	2 = "memory-radixtree-beta"
 	//	3 = "ssd-redwood-1-experimental"
 	//	4 = "ssd-rocksdb-v1"
+	//	5 = "ssd-sharded-rocksdb"
 	// Requires a comma-separated list of numbers WITHOUT whitespaces
 	std::vector<int> storageEngineExcludeTypes;
 	// Set the maximum TLog version that can be selected for a test
@@ -520,6 +515,10 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 	state ISimulator::ProcessInfo* simProcess = g_simulator.getCurrentProcess();
 	state UID randomId = nondeterministicRandom()->randomUniqueID();
 	state int cycles = 0;
+	state IPAllowList allowList;
+
+	allowList.addTrustedSubnet("0.0.0.0/2"sv);
+	allowList.addTrustedSubnet("abcd::/16"sv);
 
 	loop {
 		auto waitTime =
@@ -579,7 +578,8 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 				// making progress
 				FlowTransport::createInstance(processClass == ProcessClass::TesterClass || runBackupAgents == AgentOnly,
 				                              1,
-				                              WLTOKEN_RESERVED_COUNT);
+				                              WLTOKEN_RESERVED_COUNT,
+				                              &allowList);
 				Sim2FileSystem::newFileSystem();
 
 				std::vector<Future<Void>> futures;
@@ -629,7 +629,8 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 					printf("SimulatedFDBDTerminated: %s\n", e.what());
 				ASSERT(destructed ||
 				       g_simulator.getCurrentProcess() == process); // simulatedFDBD catch called on different process
-				TraceEvent(e.code() == error_code_actor_cancelled || e.code() == error_code_file_not_found || destructed
+				TraceEvent(e.code() == error_code_actor_cancelled || e.code() == error_code_file_not_found ||
+				                   e.code() == error_code_incompatible_software_version || destructed
 				               ? SevInfo
 				               : SevError,
 				           "SimulatedFDBDTerminated")
@@ -893,7 +894,7 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 				ASSERT(it.second.get().canGet());
 			}
 
-			for (auto it : g_simulator.getMachineById(localities.machineId())->deletingFiles) {
+			for (auto it : g_simulator.getMachineById(localities.machineId())->deletingOrClosingFiles) {
 				filenames.insert(it);
 				closingStr += it + ", ";
 			}
@@ -1082,7 +1083,7 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 		bool enableExtraDB = (testConfig.extraDB == 3);
 		ClusterConnectionString conn(ini.GetValue("META", "connectionString"));
 		if (enableExtraDB) {
-			g_simulator.extraDB = std::make_unique<ClusterConnectionString>(ini.GetValue("META", "connectionString"));
+			g_simulator.extraDB = new ClusterConnectionString(ini.GetValue("META", "connectionString"));
 		}
 		if (!testConfig.disableHostname) {
 			auto mockDNSStr = ini.GetValue("META", "mockDNS");
@@ -1411,6 +1412,16 @@ void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
 		// background threads.
 		TraceEvent(SevWarnAlways, "RocksDBNonDeterminism")
 		    .detail("Explanation", "The RocksDB storage engine is threaded and non-deterministic");
+		noUnseed = true;
+		break;
+	}
+	case 5: {
+		TEST(true); // Simulated cluster using Sharded RocksDB storage engine
+		set_config("ssd-sharded-rocksdb");
+		// Tests using the RocksDB engine are necessarily non-deterministic because of RocksDB
+		// background threads.
+		TraceEvent(SevWarnAlways, "RocksDBNonDeterminism")
+		    .detail("Explanation", "The Sharded RocksDB storage engine is threaded and non-deterministic");
 		noUnseed = true;
 		break;
 	}
@@ -2086,22 +2097,18 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	if (testConfig.extraDB == 1) {
 		// The DR database can be either a new database or itself
 		g_simulator.extraDB =
-		    BUGGIFY
-		        ? (useHostname ? std::make_unique<ClusterConnectionString>(coordinatorHostnames, "TestCluster:0"_sr)
-		                       : std::make_unique<ClusterConnectionString>(coordinatorAddresses, "TestCluster:0"_sr))
-		        : (useHostname
-		               ? std::make_unique<ClusterConnectionString>(extraCoordinatorHostnames, "ExtraCluster:0"_sr)
-		               : std::make_unique<ClusterConnectionString>(extraCoordinatorAddresses, "ExtraCluster:0"_sr));
+		    BUGGIFY ? (useHostname ? new ClusterConnectionString(coordinatorHostnames, "TestCluster:0"_sr)
+		                           : new ClusterConnectionString(coordinatorAddresses, "TestCluster:0"_sr))
+		            : (useHostname ? new ClusterConnectionString(extraCoordinatorHostnames, "ExtraCluster:0"_sr)
+		                           : new ClusterConnectionString(extraCoordinatorAddresses, "ExtraCluster:0"_sr));
 	} else if (testConfig.extraDB == 2) {
 		// The DR database is a new database
-		g_simulator.extraDB =
-		    useHostname ? std::make_unique<ClusterConnectionString>(extraCoordinatorHostnames, "ExtraCluster:0"_sr)
-		                : std::make_unique<ClusterConnectionString>(extraCoordinatorAddresses, "ExtraCluster:0"_sr);
+		g_simulator.extraDB = useHostname ? new ClusterConnectionString(extraCoordinatorHostnames, "ExtraCluster:0"_sr)
+		                                  : new ClusterConnectionString(extraCoordinatorAddresses, "ExtraCluster:0"_sr);
 	} else if (testConfig.extraDB == 3) {
 		// The DR database is the same database
-		g_simulator.extraDB = useHostname
-		                          ? std::make_unique<ClusterConnectionString>(coordinatorHostnames, "TestCluster:0"_sr)
-		                          : std::make_unique<ClusterConnectionString>(coordinatorAddresses, "TestCluster:0"_sr);
+		g_simulator.extraDB = useHostname ? new ClusterConnectionString(coordinatorHostnames, "TestCluster:0"_sr)
+		                                  : new ClusterConnectionString(coordinatorAddresses, "TestCluster:0"_sr);
 	}
 
 	*pConnString = conn;
@@ -2334,12 +2341,17 @@ ACTOR void setupAndRun(std::string dataFolder,
 	state Standalone<StringRef> startingConfiguration;
 	state int testerCount = 1;
 	state TestConfig testConfig;
+	state IPAllowList allowList;
 	testConfig.readFromConfig(testFile);
 	g_simulator.hasDiffProtocolProcess = testConfig.startIncompatibleProcess;
 	g_simulator.setDiffProtocol = false;
 
+	// Build simulator allow list
+	allowList.addTrustedSubnet("0.0.0.0/2"sv);
+	allowList.addTrustedSubnet("abcd::/16"sv);
 	state bool allowDefaultTenant = testConfig.allowDefaultTenant;
 	state bool allowDisablingTenants = testConfig.allowDisablingTenants;
+	state bool allowCreatingTenants = true;
 
 	// The RocksDB storage engine does not support the restarting tests because you cannot consistently get a clean
 	// snapshot of the storage engine without a snapshotting file system.
@@ -2350,6 +2362,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 		// Disable the default tenant in restarting tests for now
 		// TODO: persist the chosen default tenant in the restartInfo.ini file for the second test
 		allowDefaultTenant = false;
+		allowCreatingTenants = false;
 	}
 
 	// TODO: Currently backup and restore related simulation tests are failing when run with rocksDB storage engine
@@ -2362,8 +2375,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 	// Disable the default tenant in backup and DR tests for now. This is because backup does not currently duplicate
 	// the tenant map and related state.
 	// TODO: reenable when backup/DR or BlobGranule supports tenants.
-	if (std::string_view(testFile).find("Backup") != std::string_view::npos ||
-	    std::string_view(testFile).find("BlobGranule") != std::string_view::npos || testConfig.extraDB != 0) {
+	if (std::string_view(testFile).find("Backup") != std::string_view::npos || testConfig.extraDB != 0) {
 		allowDefaultTenant = false;
 	}
 
@@ -2382,7 +2394,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 	}
 
 	// TODO (IPv6) Use IPv6?
-	wait(g_simulator.onProcess(
+	auto testSystem =
 	    g_simulator.newProcess("TestSystem",
 	                           IPAddress(0x01010101),
 	                           1,
@@ -2395,16 +2407,19 @@ ACTOR void setupAndRun(std::string dataFolder,
 	                           ProcessClass(ProcessClass::TesterClass, ProcessClass::CommandLineSource),
 	                           "",
 	                           "",
-	                           currentProtocolVersion),
-	    TaskPriority::DefaultYield));
+	                           currentProtocolVersion);
+	testSystem->excludeFromRestarts = true;
+	wait(g_simulator.onProcess(testSystem, TaskPriority::DefaultYield));
 	Sim2FileSystem::newFileSystem();
-	FlowTransport::createInstance(true, 1, WLTOKEN_RESERVED_COUNT);
+	FlowTransport::createInstance(true, 1, WLTOKEN_RESERVED_COUNT, &allowList);
 	TEST(true); // Simulation start
 
 	state Optional<TenantName> defaultTenant;
+	state Standalone<VectorRef<TenantNameRef>> tenantsToCreate;
 	state TenantMode tenantMode = TenantMode::DISABLED;
 	if (allowDefaultTenant && deterministicRandom()->random01() < 0.5) {
 		defaultTenant = "SimulatedDefaultTenant"_sr;
+		tenantsToCreate.push_back_deep(tenantsToCreate.arena(), defaultTenant.get());
 		if (deterministicRandom()->random01() < 0.9) {
 			tenantMode = TenantMode::REQUIRED;
 		} else {
@@ -2414,9 +2429,18 @@ ACTOR void setupAndRun(std::string dataFolder,
 		tenantMode = TenantMode::OPTIONAL_TENANT;
 	}
 
+	if (allowCreatingTenants && tenantMode != TenantMode::DISABLED && deterministicRandom()->random01() < 0.5) {
+		int numTenants = deterministicRandom()->randomInt(1, 6);
+		for (int i = 0; i < numTenants; ++i) {
+			tenantsToCreate.push_back_deep(tenantsToCreate.arena(),
+			                               TenantNameRef(format("SimulatedExtraTenant%04d", i)));
+		}
+	}
+
 	TraceEvent("SimulatedClusterTenantMode")
 	    .detail("UsingTenant", defaultTenant)
-	    .detail("TenantRequired", tenantMode.toString());
+	    .detail("TenantRequired", tenantMode.toString())
+	    .detail("TotalTenants", tenantsToCreate.size());
 
 	try {
 		// systemActors.push_back( startSystemMonitor(dataFolder) );
@@ -2458,7 +2482,8 @@ ACTOR void setupAndRun(std::string dataFolder,
 		                           startingConfiguration,
 		                           LocalityData(),
 		                           UnitTestParameters(),
-		                           defaultTenant),
+		                           defaultTenant,
+		                           tenantsToCreate),
 		                  isBuggifyEnabled(BuggifyType::General) ? 36000.0 : 5400.0));
 	} catch (Error& e) {
 		TraceEvent(SevError, "SetupAndRunError").error(e);

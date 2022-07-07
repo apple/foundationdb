@@ -134,6 +134,9 @@ description is not currently required but encouraged.
     <Option name="distributed_client_tracer" code="90"
             paramType="String" paramDescription="Distributed tracer type. Choose from none, log_file, or network_lossy"
             description="Set a tracer to run on the client. Should be set to the same value as the tracer set on the server." />
+    <Option name="client_tmp_dir" code="91"
+            paramType="String" paramDescription="Client directory for temporary files. "
+            description="Sets the directory for storing temporary files created by FDB client, such as temporary copies of client libraries. Defaults to /tmp" />
     <Option name="supported_client_versions" code="1000"
             paramType="String" paramDescription="[release version],[source version],[protocol version];..."
             description="This option is set automatically to communicate the list of supported clients to the active client."

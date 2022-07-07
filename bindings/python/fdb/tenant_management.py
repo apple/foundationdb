@@ -25,7 +25,7 @@ https://apple.github.io/foundationdb/api-python.html"""
 
 from fdb import impl as _impl
 
-_tenant_map_prefix = b'\xff\xff/management/tenant_map/'
+_tenant_map_prefix = b'\xff\xff/management/tenant/map/'
 
 # If the existence_check_marker is an empty list, then check whether the tenant exists. 
 # After the check, append an item to the existence_check_marker list so that subsequent
@@ -78,6 +78,39 @@ def _delete_tenant_impl(tr, tenant_name, existence_check_marker, force_existence
 
     del tr[key]
 
+class FDBTenantList(object):
+    """Iterates over the results of list_tenants query. Returns
+    KeyValue objects.
+
+    """
+
+    def __init__(self, rangeresult):
+        self._range = rangeresult
+        self._iter = iter(self._range)
+
+    def to_list(self):
+        return list(self.__iter__())
+
+    def __iter__(self):
+        for next_item in self._iter:
+            tenant_name = _impl.remove_prefix(next_item.key, _tenant_map_prefix)
+            yield _impl.KeyValue(tenant_name, next_item.value)
+
+# Lists the tenants created in the cluster, specified by the begin and end range.
+# Also limited in number of results by the limit parameter.
+# Returns an iterable object that yields KeyValue objects
+# where the keys are the tenant names and the values are the unprocessed
+# JSON strings of the tenant metadata
+@_impl.transactional
+def _list_tenants_impl(tr, begin, end, limit):
+    tr.options.set_read_system_keys()
+    begin_key = b'%s%s' % (_tenant_map_prefix, begin)
+    end_key = b'%s%s' % (_tenant_map_prefix, end)
+
+    rangeresult = tr.get_range(begin_key, end_key, limit)
+
+    return FDBTenantList(rangeresult)
+
 def create_tenant(db_or_tr, tenant_name):
     tenant_name = _impl.process_tenant_name(tenant_name)
 
@@ -93,3 +126,9 @@ def delete_tenant(db_or_tr, tenant_name):
     # Callers using a transaction are expected to check existence themselves if required
     existence_check_marker = [] if not isinstance(db_or_tr, _impl.TransactionRead) else [None]
     _delete_tenant_impl(db_or_tr, tenant_name, existence_check_marker)
+
+def list_tenants(db_or_tr, begin, end, limit):
+    begin = _impl.process_tenant_name(begin)
+    end = _impl.process_tenant_name(end)
+
+    return _list_tenants_impl(db_or_tr, begin, end, limit)

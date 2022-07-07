@@ -55,8 +55,6 @@ static bool isAlphaNumeric(const std::string& key) {
 }
 } // namespace
 
-const KeyRangeRef TenantMapRangeImpl::submoduleRange = KeyRangeRef("tenant_map/"_sr, "tenant_map0"_sr);
-
 std::unordered_map<SpecialKeySpace::MODULE, KeyRange> SpecialKeySpace::moduleToBoundary = {
 	{ SpecialKeySpace::MODULE::TRANSACTION,
 	  KeyRangeRef(LiteralStringRef("\xff\xff/transaction/"), LiteralStringRef("\xff\xff/transaction0")) },
@@ -80,7 +78,8 @@ std::unordered_map<SpecialKeySpace::MODULE, KeyRange> SpecialKeySpace::moduleToB
 	  KeyRangeRef(LiteralStringRef("\xff\xff/actor_lineage/"), LiteralStringRef("\xff\xff/actor_lineage0")) },
 	{ SpecialKeySpace::MODULE::ACTOR_PROFILER_CONF,
 	  KeyRangeRef(LiteralStringRef("\xff\xff/actor_profiler_conf/"),
-	              LiteralStringRef("\xff\xff/actor_profiler_conf0")) }
+	              LiteralStringRef("\xff\xff/actor_profiler_conf0")) },
+	{ SpecialKeySpace::MODULE::CLUSTERID, singleKeyRange(LiteralStringRef("\xff\xff/cluster_id")) },
 };
 
 std::unordered_map<std::string, KeyRange> SpecialKeySpace::managementApiCommandToRange = {
@@ -106,6 +105,8 @@ std::unordered_map<std::string, KeyRange> SpecialKeySpace::managementApiCommandT
 	{ "advanceversion",
 	  singleKeyRange(LiteralStringRef("min_required_commit_version"))
 	      .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
+	{ "versionepoch",
+	  singleKeyRange(LiteralStringRef("version_epoch")).withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
 	{ "profile",
 	  KeyRangeRef(LiteralStringRef("profiling/"), LiteralStringRef("profiling0"))
 	      .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
@@ -115,7 +116,9 @@ std::unordered_map<std::string, KeyRange> SpecialKeySpace::managementApiCommandT
 	{ "datadistribution",
 	  KeyRangeRef(LiteralStringRef("data_distribution/"), LiteralStringRef("data_distribution0"))
 	      .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
-	{ "tenantmap", TenantMapRangeImpl::submoduleRange.withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) }
+	{ "tenant", KeyRangeRef("tenant/"_sr, "tenant0"_sr).withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
+	{ "tenantmap",
+	  KeyRangeRef("tenant_map/"_sr, "tenant_map0"_sr).withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) }
 };
 
 std::unordered_map<std::string, KeyRange> SpecialKeySpace::actorLineageApiCommandToRange = {
@@ -169,7 +172,7 @@ ACTOR Future<Void> moveKeySelectorOverRangeActor(const SpecialKeyRangeReadImpl* 
 	// Note : startKey never equals endKey here
 	ASSERT(startKey < endKey);
 
-	TraceEvent(SevDebug, "NormalizeKeySelector")
+	DisabledTraceEvent(SevDebug, "NormalizeKeySelector")
 	    .detail("OriginalKey", ks->getKey())
 	    .detail("OriginalOffset", ks->offset)
 	    .detail("SpecialKeyRangeStart", skrImpl->getKeyRange().begin)
@@ -209,7 +212,7 @@ ACTOR Future<Void> moveKeySelectorOverRangeActor(const SpecialKeyRangeReadImpl* 
 			ks->offset -= result.size();
 		}
 	}
-	TraceEvent(SevDebug, "NormalizeKeySelector")
+	DisabledTraceEvent(SevDebug, "NormalizeKeySelector")
 	    .detail("NormalizedKey", ks->getKey())
 	    .detail("NormalizedOffset", ks->offset)
 	    .detail("SpecialKeyRangeStart", skrImpl->getKeyRange().begin)
@@ -546,6 +549,8 @@ void SpecialKeySpace::registerKeyRange(SpecialKeySpace::MODULE module,
                                        SpecialKeySpace::IMPLTYPE type,
                                        const KeyRangeRef& kr,
                                        SpecialKeyRangeReadImpl* impl) {
+	// Not allowed to register an empty range
+	ASSERT(!kr.empty());
 	// module boundary check
 	if (module == SpecialKeySpace::MODULE::TESTONLY) {
 		ASSERT(normalKeys.contains(kr));
@@ -1460,11 +1465,9 @@ Future<RangeResult> GlobalConfigImpl::getRange(ReadYourWritesTransaction* ryw,
                                                KeyRangeRef kr,
                                                GetRangeLimits limitsHint) const {
 	RangeResult result;
-
-	auto& globalConfig = GlobalConfig::globalConfig();
 	KeyRangeRef modified =
 	    KeyRangeRef(kr.begin.removePrefix(getKeyRange().begin), kr.end.removePrefix(getKeyRange().begin));
-	std::map<KeyRef, Reference<ConfigValue>> values = globalConfig.get(modified);
+	std::map<KeyRef, Reference<ConfigValue>> values = ryw->getDatabase()->globalConfig->get(modified);
 	for (const auto& [key, config] : values) {
 		Key prefixedKey = key.withPrefix(getKeyRange().begin);
 		if (config.isValid() && config->value.has_value()) {
@@ -1515,7 +1518,8 @@ ACTOR Future<Optional<std::string>> globalConfigCommitActor(GlobalConfigImpl* gl
 		}
 	}
 
-	VersionHistory vh{ 0 };
+	Standalone<VectorRef<KeyValueRef>> insertions;
+	Standalone<VectorRef<KeyRangeRef>> clears;
 
 	// Transform writes from the special-key-space (\xff\xff/global_config/) to
 	// the system key space (\xff/globalConfig/), and writes mutations to
@@ -1528,36 +1532,17 @@ ACTOR Future<Optional<std::string>> globalConfigCommitActor(GlobalConfigImpl* gl
 		if (entry.first) {
 			if (entry.second.present() && iter->begin().startsWith(globalConfig->getKeyRange().begin)) {
 				Key bareKey = iter->begin().removePrefix(globalConfig->getKeyRange().begin);
-				vh.mutations.emplace_back_deep(vh.mutations.arena(),
-				                               MutationRef(MutationRef::SetValue, bareKey, entry.second.get()));
-
-				Key systemKey = bareKey.withPrefix(globalConfigKeysPrefix);
-				tr.set(systemKey, entry.second.get());
+				insertions.push_back_deep(insertions.arena(), KeyValueRef(bareKey, entry.second.get()));
 			} else if (!entry.second.present() && iter->range().begin.startsWith(globalConfig->getKeyRange().begin) &&
 			           iter->range().end.startsWith(globalConfig->getKeyRange().begin)) {
 				KeyRef bareRangeBegin = iter->range().begin.removePrefix(globalConfig->getKeyRange().begin);
 				KeyRef bareRangeEnd = iter->range().end.removePrefix(globalConfig->getKeyRange().begin);
-				vh.mutations.emplace_back_deep(vh.mutations.arena(),
-				                               MutationRef(MutationRef::ClearRange, bareRangeBegin, bareRangeEnd));
-
-				Key systemRangeBegin = bareRangeBegin.withPrefix(globalConfigKeysPrefix);
-				Key systemRangeEnd = bareRangeEnd.withPrefix(globalConfigKeysPrefix);
-				tr.clear(KeyRangeRef(systemRangeBegin, systemRangeEnd));
+				clears.push_back_deep(clears.arena(), KeyRangeRef(bareRangeBegin, bareRangeEnd));
 			}
 		}
 		++iter;
 	}
-
-	// Record the mutations in this commit into the global configuration history.
-	Key historyKey = addVersionStampAtEnd(globalConfigHistoryPrefix);
-	ObjectWriter historyWriter(IncludeVersion());
-	historyWriter.serialize(vh);
-	tr.atomicOp(historyKey, historyWriter.toStringRef(), MutationRef::SetVersionstampedKey);
-
-	// Write version key to trigger update in cluster controller.
-	tr.atomicOp(globalConfigVersionKey,
-	            LiteralStringRef("0123456789\x00\x00\x00\x00"), // versionstamp
-	            MutationRef::SetVersionstampedValue);
+	GlobalConfig::applyChanges(tr, insertions, clears);
 
 	return Optional<std::string>();
 }
@@ -1591,10 +1576,10 @@ Future<RangeResult> TracingOptionsImpl::getRange(ReadYourWritesTransaction* ryw,
 
 		if (key.endsWith(kTracingTransactionIdKey)) {
 			result.push_back_deep(result.arena(),
-			                      KeyValueRef(key, std::to_string(ryw->getTransactionState()->spanID.first())));
+			                      KeyValueRef(key, ryw->getTransactionState()->spanContext.traceID.toString()));
 		} else if (key.endsWith(kTracingTokenKey)) {
 			result.push_back_deep(result.arena(),
-			                      KeyValueRef(key, std::to_string(ryw->getTransactionState()->spanID.second())));
+			                      KeyValueRef(key, std::to_string(ryw->getTransactionState()->spanContext.spanID)));
 		}
 	}
 	return result;
@@ -1608,7 +1593,7 @@ void TracingOptionsImpl::set(ReadYourWritesTransaction* ryw, const KeyRef& key, 
 	}
 
 	if (key.endsWith(kTracingTransactionIdKey)) {
-		ryw->setTransactionID(std::stoul(value.toString()));
+		ryw->setTransactionID(UID::fromString(value.toString()));
 	} else if (key.endsWith(kTracingTokenKey)) {
 		if (value.toString() == "true") {
 			ryw->setToken(deterministicRandom()->randomUInt64());
@@ -1640,13 +1625,10 @@ void TracingOptionsImpl::clear(ReadYourWritesTransaction* ryw, const KeyRef& key
 
 CoordinatorsImpl::CoordinatorsImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
 
-Future<RangeResult> CoordinatorsImpl::getRange(ReadYourWritesTransaction* ryw,
-                                               KeyRangeRef kr,
-                                               GetRangeLimits limitsHint) const {
+ACTOR Future<RangeResult> coordinatorsGetRangeActor(ReadYourWritesTransaction* ryw, KeyRef prefix, KeyRangeRef kr) {
+	state ClusterConnectionString cs = ryw->getDatabase()->getConnectionRecord()->getConnectionString();
+	state std::vector<NetworkAddress> coordinator_processes = wait(cs.tryResolveHostnames());
 	RangeResult result;
-	KeyRef prefix(getKeyRange().begin);
-	auto cs = ryw->getDatabase()->getConnectionRecord()->getConnectionString();
-	auto coordinator_processes = cs.coordinators();
 	Key cluster_decription_key = prefix.withSuffix(LiteralStringRef("cluster_description"));
 	if (kr.contains(cluster_decription_key)) {
 		result.push_back_deep(result.arena(), KeyValueRef(cluster_decription_key, cs.clusterKeyName()));
@@ -1669,10 +1651,15 @@ Future<RangeResult> CoordinatorsImpl::getRange(ReadYourWritesTransaction* ryw,
 	return rywGetRange(ryw, kr, result);
 }
 
+Future<RangeResult> CoordinatorsImpl::getRange(ReadYourWritesTransaction* ryw,
+                                               KeyRangeRef kr,
+                                               GetRangeLimits limitsHint) const {
+	KeyRef prefix(getKeyRange().begin);
+	return coordinatorsGetRangeActor(ryw, prefix, kr);
+}
+
 ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
-	state Reference<IQuorumChange> change;
-	state ClusterConnectionString
-	    conn; // We don't care about the Key here, it will be overrode in changeQuorumChecker().
+	state ClusterConnectionString conn; // We don't care about the Key here.
 	state std::vector<std::string> process_address_or_hostname_strs;
 	state Optional<std::string> msg;
 	state int index;
@@ -1696,7 +1683,6 @@ ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWrite
 			try {
 				if (Hostname::isHostname(process_address_or_hostname_strs[index])) {
 					conn.hostnames.push_back(Hostname::parse(process_address_or_hostname_strs[index]));
-					conn.status = ClusterConnectionString::ConnectionStringStatus::UNRESOLVED;
 				} else {
 					NetworkAddress a = NetworkAddress::parse(process_address_or_hostname_strs[index]);
 					if (!a.isValid()) {
@@ -1713,19 +1699,12 @@ ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWrite
 			if (parse_error) {
 				std::string error = "ERROR: \'" + process_address_or_hostname_strs[index] +
 				                    "\' is not a valid network endpoint address\n";
-				if (process_address_or_hostname_strs[index].find(":tls") != std::string::npos)
-					error += "        Do not include the `:tls' suffix when naming a process\n";
 				return ManagementAPIError::toJsonString(false, "coordinators", error);
 			}
 		}
 	}
 
-	wait(conn.resolveHostnames());
-	if (conn.coordinators().size())
-		change = specifiedQuorumChange(conn.coordinators());
-	else
-		change = noQuorumChange();
-
+	std::string newName;
 	// check update for cluster_description
 	Key cluster_decription_key = LiteralStringRef("cluster_description").withPrefix(kr.begin);
 	auto entry = ryw->getSpecialKeySpaceWriteMap()[cluster_decription_key];
@@ -1733,22 +1712,19 @@ ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWrite
 		// check valid description [a-zA-Z0-9_]+
 		if (entry.second.present() && isAlphaNumeric(entry.second.get().toString())) {
 			// do the name change
-			change = nameQuorumChange(entry.second.get().toString(), change);
+			newName = entry.second.get().toString();
 		} else {
 			// throw the error
-			return Optional<std::string>(ManagementAPIError::toJsonString(
-			    false, "coordinators", "Cluster description must match [A-Za-z0-9_]+"));
+			return ManagementAPIError::toJsonString(
+			    false, "coordinators", "Cluster description must match [A-Za-z0-9_]+");
 		}
 	}
 
-	ASSERT(change.isValid());
-
 	TraceEvent(SevDebug, "SKSChangeCoordinatorsStart")
-	    .detail("NewHostnames", conn.hostnames.size() ? describe(conn.hostnames) : "N/A")
-	    .detail("NewAddresses", describe(conn.coordinators()))
+	    .detail("NewConnectionString", conn.toString())
 	    .detail("Description", entry.first ? entry.second.get().toString() : "");
 
-	Optional<CoordinatorsResult> r = wait(changeQuorumChecker(&ryw->getTransaction(), change, &conn));
+	Optional<CoordinatorsResult> r = wait(changeQuorumChecker(&ryw->getTransaction(), &conn, newName));
 
 	TraceEvent(SevDebug, "SKSChangeCoordinatorsFinish")
 	    .detail("Result", r.present() ? static_cast<int>(r.get()) : -1); // -1 means success
@@ -1800,9 +1776,10 @@ ACTOR static Future<RangeResult> CoordinatorsAutoImplActor(ReadYourWritesTransac
 	state ClusterConnectionString old(currentKey.get().toString());
 	state CoordinatorsResult result = CoordinatorsResult::SUCCESS;
 
+	std::vector<NetworkAddress> oldCoordinators = wait(old.tryResolveHostnames());
 	std::vector<NetworkAddress> _desiredCoordinators = wait(autoQuorumChange()->getDesiredCoordinators(
 	    &tr,
-	    old.coordinators(),
+	    oldCoordinators,
 	    Reference<ClusterConnectionMemoryRecord>(new ClusterConnectionMemoryRecord(old)),
 	    result));
 
@@ -1816,9 +1793,20 @@ ACTOR static Future<RangeResult> CoordinatorsAutoImplActor(ReadYourWritesTransac
 		throw special_keys_api_failure();
 	}
 
-	for (const auto& address : _desiredCoordinators) {
-		autoCoordinatorsKey += autoCoordinatorsKey.size() ? "," : "";
-		autoCoordinatorsKey += address.toString();
+	if (result == CoordinatorsResult::SAME_NETWORK_ADDRESSES) {
+		for (const auto& host : old.hostnames) {
+			autoCoordinatorsKey += autoCoordinatorsKey.size() ? "," : "";
+			autoCoordinatorsKey += host.toString();
+		}
+		for (const auto& coord : old.coords) {
+			autoCoordinatorsKey += autoCoordinatorsKey.size() ? "," : "";
+			autoCoordinatorsKey += coord.toString();
+		}
+	} else {
+		for (const auto& address : _desiredCoordinators) {
+			autoCoordinatorsKey += autoCoordinatorsKey.size() ? "," : "";
+			autoCoordinatorsKey += address.toString();
+		}
 	}
 	res.push_back_deep(res.arena(), KeyValueRef(kr.begin, Value(autoCoordinatorsKey)));
 	return res;
@@ -1866,6 +1854,12 @@ Future<RangeResult> AdvanceVersionImpl::getRange(ReadYourWritesTransaction* ryw,
 }
 
 ACTOR static Future<Optional<std::string>> advanceVersionCommitActor(ReadYourWritesTransaction* ryw, Version v) {
+	Optional<Standalone<StringRef>> versionEpochValue = wait(ryw->getTransaction().get(versionEpochKey));
+	if (versionEpochValue.present()) {
+		return ManagementAPIError::toJsonString(
+		    false, "advanceversion", "Illegal to modify the version while the version epoch is enabled");
+	}
+
 	// Max version we can set for minRequiredCommitVersionKey,
 	// making sure the cluster can still be alive for 1000 years after the recovery
 	static const Version maxAllowedVerion =
@@ -1909,14 +1903,51 @@ Future<Optional<std::string>> AdvanceVersionImpl::commit(ReadYourWritesTransacti
 	return Optional<std::string>();
 }
 
+ACTOR static Future<RangeResult> getVersionEpochActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
+	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
+	ryw->getTransaction().setOption(FDBTransactionOptions::RAW_ACCESS);
+	Optional<Value> val = wait(ryw->getTransaction().get(versionEpochKey));
+	RangeResult result;
+	if (val.present()) {
+		int64_t versionEpoch = BinaryReader::fromStringRef<int64_t>(val.get(), Unversioned());
+		ValueRef version(result.arena(), boost::lexical_cast<std::string>(versionEpoch));
+		result.push_back_deep(result.arena(), KeyValueRef(kr.begin, version));
+	}
+	return result;
+}
+
+VersionEpochImpl::VersionEpochImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
+
+Future<RangeResult> VersionEpochImpl::getRange(ReadYourWritesTransaction* ryw,
+                                               KeyRangeRef kr,
+                                               GetRangeLimits limitsHint) const {
+	ASSERT(kr == getKeyRange());
+	return getVersionEpochActor(ryw, kr);
+}
+
+Future<Optional<std::string>> VersionEpochImpl::commit(ReadYourWritesTransaction* ryw) {
+	auto versionEpoch =
+	    ryw->getSpecialKeySpaceWriteMap()[SpecialKeySpace::getManagementApiCommandPrefix("versionepoch")].second;
+	if (versionEpoch.present()) {
+		int64_t epoch = BinaryReader::fromStringRef<int64_t>(versionEpoch.get(), Unversioned());
+		ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
+		ryw->getTransaction().setOption(FDBTransactionOptions::RAW_ACCESS);
+		ryw->getTransaction().set(versionEpochKey, BinaryWriter::toValue(epoch, Unversioned()));
+	} else {
+		ryw->getTransaction().clear(versionEpochKey);
+	}
+	return Optional<std::string>();
+}
+
 ClientProfilingImpl::ClientProfilingImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
 
-ACTOR static Future<RangeResult> ClientProfilingGetRangeActor(ReadYourWritesTransaction* ryw,
-                                                              KeyRef prefix,
-                                                              KeyRangeRef kr) {
-	state RangeResult result;
+Future<RangeResult> ClientProfilingImpl::getRange(ReadYourWritesTransaction* ryw,
+                                                  KeyRangeRef kr,
+                                                  GetRangeLimits limitsHint) const {
+	KeyRef prefix = getKeyRange().begin;
+	RangeResult result = RangeResult();
 	// client_txn_sample_rate
-	state Key sampleRateKey = LiteralStringRef("client_txn_sample_rate").withPrefix(prefix);
+	Key sampleRateKey = LiteralStringRef("client_txn_sample_rate").withPrefix(prefix);
 
 	ryw->getTransaction().setOption(FDBTransactionOptions::RAW_ACCESS);
 
@@ -1927,19 +1958,17 @@ ACTOR static Future<RangeResult> ClientProfilingGetRangeActor(ReadYourWritesTran
 			ASSERT(entry.second.present());
 			result.push_back_deep(result.arena(), KeyValueRef(sampleRateKey, entry.second.get()));
 		} else {
-			Optional<Value> f = wait(ryw->getTransaction().get(fdbClientInfoTxnSampleRate));
 			std::string sampleRateStr = "default";
-			if (f.present()) {
-				const double sampleRateDbl = BinaryReader::fromStringRef<double>(f.get(), Unversioned());
-				if (!std::isinf(sampleRateDbl)) {
-					sampleRateStr = boost::lexical_cast<std::string>(sampleRateDbl);
-				}
+			const double sampleRateDbl = ryw->getDatabase()->globalConfig->get<double>(
+			    fdbClientInfoTxnSampleRate, std::numeric_limits<double>::infinity());
+			if (!std::isinf(sampleRateDbl)) {
+				sampleRateStr = std::to_string(sampleRateDbl);
 			}
 			result.push_back_deep(result.arena(), KeyValueRef(sampleRateKey, Value(sampleRateStr)));
 		}
 	}
 	// client_txn_size_limit
-	state Key txnSizeLimitKey = LiteralStringRef("client_txn_size_limit").withPrefix(prefix);
+	Key txnSizeLimitKey = LiteralStringRef("client_txn_size_limit").withPrefix(prefix);
 	if (kr.contains(txnSizeLimitKey)) {
 		auto entry = ryw->getSpecialKeySpaceWriteMap()[txnSizeLimitKey];
 		if (!ryw->readYourWritesDisabled() && entry.first) {
@@ -1947,13 +1976,10 @@ ACTOR static Future<RangeResult> ClientProfilingGetRangeActor(ReadYourWritesTran
 			ASSERT(entry.second.present());
 			result.push_back_deep(result.arena(), KeyValueRef(txnSizeLimitKey, entry.second.get()));
 		} else {
-			Optional<Value> f = wait(ryw->getTransaction().get(fdbClientInfoTxnSizeLimit));
 			std::string sizeLimitStr = "default";
-			if (f.present()) {
-				const int64_t sizeLimit = BinaryReader::fromStringRef<int64_t>(f.get(), Unversioned());
-				if (sizeLimit != -1) {
-					sizeLimitStr = boost::lexical_cast<std::string>(sizeLimit);
-				}
+			const int64_t sizeLimit = ryw->getDatabase()->globalConfig->get<int64_t>(fdbClientInfoTxnSizeLimit, -1);
+			if (sizeLimit != -1) {
+				sizeLimitStr = boost::lexical_cast<std::string>(sizeLimit);
 			}
 			result.push_back_deep(result.arena(), KeyValueRef(txnSizeLimitKey, Value(sizeLimitStr)));
 		}
@@ -1961,15 +1987,11 @@ ACTOR static Future<RangeResult> ClientProfilingGetRangeActor(ReadYourWritesTran
 	return result;
 }
 
-// TODO : add limitation on set operation
-Future<RangeResult> ClientProfilingImpl::getRange(ReadYourWritesTransaction* ryw,
-                                                  KeyRangeRef kr,
-                                                  GetRangeLimits limitsHint) const {
-	return ClientProfilingGetRangeActor(ryw, getKeyRange().begin, kr);
-}
-
 Future<Optional<std::string>> ClientProfilingImpl::commit(ReadYourWritesTransaction* ryw) {
 	ryw->getTransaction().setOption(FDBTransactionOptions::RAW_ACCESS);
+
+	Standalone<VectorRef<KeyValueRef>> insertions;
+	Standalone<VectorRef<KeyRangeRef>> clears;
 
 	// client_txn_sample_rate
 	Key sampleRateKey = LiteralStringRef("client_txn_sample_rate").withPrefix(getKeyRange().begin);
@@ -1977,37 +1999,40 @@ Future<Optional<std::string>> ClientProfilingImpl::commit(ReadYourWritesTransact
 
 	if (rateEntry.first && rateEntry.second.present()) {
 		std::string sampleRateStr = rateEntry.second.get().toString();
-		double sampleRate;
-		if (sampleRateStr == "default")
-			sampleRate = std::numeric_limits<double>::infinity();
-		else {
+		if (sampleRateStr == "default") {
+			clears.push_back_deep(clears.arena(),
+			                      KeyRangeRef(fdbClientInfoTxnSampleRate, keyAfter(fdbClientInfoTxnSampleRate)));
+		} else {
 			try {
-				sampleRate = boost::lexical_cast<double>(sampleRateStr);
+				double sampleRate = boost::lexical_cast<double>(sampleRateStr);
+				Tuple rate = Tuple().appendDouble(sampleRate);
+				insertions.push_back_deep(insertions.arena(), KeyValueRef(fdbClientInfoTxnSampleRate, rate.pack()));
 			} catch (boost::bad_lexical_cast& e) {
 				return Optional<std::string>(ManagementAPIError::toJsonString(
 				    false, "profile", "Invalid transaction sample rate(double): " + sampleRateStr));
 			}
 		}
-		ryw->getTransaction().set(fdbClientInfoTxnSampleRate, BinaryWriter::toValue(sampleRate, Unversioned()));
 	}
 	// client_txn_size_limit
 	Key txnSizeLimitKey = LiteralStringRef("client_txn_size_limit").withPrefix(getKeyRange().begin);
 	auto sizeLimitEntry = ryw->getSpecialKeySpaceWriteMap()[txnSizeLimitKey];
 	if (sizeLimitEntry.first && sizeLimitEntry.second.present()) {
 		std::string sizeLimitStr = sizeLimitEntry.second.get().toString();
-		int64_t sizeLimit;
-		if (sizeLimitStr == "default")
-			sizeLimit = -1;
-		else {
+		if (sizeLimitStr == "default") {
+			clears.push_back_deep(clears.arena(),
+			                      KeyRangeRef(fdbClientInfoTxnSizeLimit, keyAfter(fdbClientInfoTxnSizeLimit)));
+		} else {
 			try {
-				sizeLimit = boost::lexical_cast<int64_t>(sizeLimitStr);
+				int64_t sizeLimit = boost::lexical_cast<int64_t>(sizeLimitStr);
+				Tuple size = Tuple().append(sizeLimit);
+				insertions.push_back_deep(insertions.arena(), KeyValueRef(fdbClientInfoTxnSizeLimit, size.pack()));
 			} catch (boost::bad_lexical_cast& e) {
 				return Optional<std::string>(ManagementAPIError::toJsonString(
 				    false, "profile", "Invalid transaction size limit(int64_t): " + sizeLimitStr));
 			}
 		}
-		ryw->getTransaction().set(fdbClientInfoTxnSizeLimit, BinaryWriter::toValue(sizeLimit, Unversioned()));
 	}
+	GlobalConfig::applyChanges(ryw->getTransaction(), insertions, clears);
 	return Optional<std::string>();
 }
 
@@ -2513,14 +2538,18 @@ Future<Optional<std::string>> DataDistributionImpl::commit(ReadYourWritesTransac
 					                                           iter->value().second.get().toString());
 				}
 			} else if (iter->range() == singleKeyRange(rebalanceIgnoredKey)) {
-				if (iter->value().second.get().size())
-					msg =
-					    ManagementAPIError::toJsonString(false,
-					                                     "datadistribution",
-					                                     "Value is unused for the data_distribution/rebalance_ignored "
-					                                     "key, please set it to an empty value");
-				else
-					ryw->getTransaction().set(rebalanceDDIgnoreKey, LiteralStringRef("on"));
+				ValueRef val = iter->value().second.get();
+				try {
+					boost::lexical_cast<int>(iter->value().second.get().toString());
+				} catch (boost::bad_lexical_cast& e) {
+					ManagementAPIError::toJsonString(
+					    false,
+					    "datadistribution",
+					    "Invalid datadistribution rebalance ignore option (int or empty): " +
+					        iter->value().second.get().toString());
+					val = ""_sr;
+				}
+				ryw->getTransaction().set(rebalanceDDIgnoreKey, iter->value().second.get());
 			} else {
 				msg = ManagementAPIError::toJsonString(
 				    false,
@@ -2701,103 +2730,4 @@ Key FailedLocalitiesRangeImpl::encode(const KeyRef& key) const {
 Future<Optional<std::string>> FailedLocalitiesRangeImpl::commit(ReadYourWritesTransaction* ryw) {
 	// exclude locality with failed option as true.
 	return excludeLocalityCommitActor(ryw, true);
-}
-
-ACTOR Future<RangeResult> getTenantList(ReadYourWritesTransaction* ryw, KeyRangeRef kr, GetRangeLimits limitsHint) {
-	state KeyRef managementPrefix =
-	    kr.begin.substr(0,
-	                    SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin.size() +
-	                        TenantMapRangeImpl::submoduleRange.begin.size());
-
-	kr = kr.removePrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin);
-	TenantNameRef beginTenant = kr.begin.removePrefix(TenantMapRangeImpl::submoduleRange.begin);
-
-	TenantNameRef endTenant = kr.end;
-	if (endTenant.startsWith(TenantMapRangeImpl::submoduleRange.begin)) {
-		endTenant = endTenant.removePrefix(TenantMapRangeImpl::submoduleRange.begin);
-	} else {
-		endTenant = "\xff"_sr;
-	}
-
-	std::map<TenantName, TenantMapEntry> tenants =
-	    wait(ManagementAPI::listTenantsTransaction(&ryw->getTransaction(), beginTenant, endTenant, limitsHint.rows));
-
-	RangeResult results;
-	for (auto tenant : tenants) {
-		json_spirit::mObject tenantEntry;
-		tenantEntry["id"] = tenant.second.id;
-		tenantEntry["prefix"] = tenant.second.prefix.toString();
-		std::string tenantEntryString = json_spirit::write_string(json_spirit::mValue(tenantEntry));
-		ValueRef tenantEntryBytes(results.arena(), tenantEntryString);
-		results.push_back(results.arena(),
-		                  KeyValueRef(tenant.first.withPrefix(managementPrefix, results.arena()), tenantEntryBytes));
-	}
-
-	return results;
-}
-
-TenantMapRangeImpl::TenantMapRangeImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
-
-Future<RangeResult> TenantMapRangeImpl::getRange(ReadYourWritesTransaction* ryw,
-                                                 KeyRangeRef kr,
-                                                 GetRangeLimits limitsHint) const {
-	return getTenantList(ryw, kr, limitsHint);
-}
-
-ACTOR Future<Void> deleteTenantRange(ReadYourWritesTransaction* ryw, TenantName beginTenant, TenantName endTenant) {
-	std::map<TenantName, TenantMapEntry> tenants = wait(
-	    ManagementAPI::listTenantsTransaction(&ryw->getTransaction(), beginTenant, endTenant, CLIENT_KNOBS->TOO_MANY));
-
-	if (tenants.size() == CLIENT_KNOBS->TOO_MANY) {
-		TraceEvent(SevWarn, "DeleteTenantRangeTooLange")
-		    .detail("BeginTenant", beginTenant)
-		    .detail("EndTenant", endTenant);
-		ryw->setSpecialKeySpaceErrorMsg("too many tenants to range delete");
-		throw special_keys_api_failure();
-	}
-
-	std::vector<Future<Void>> deleteFutures;
-	for (auto tenant : tenants) {
-		deleteFutures.push_back(ManagementAPI::deleteTenantTransaction(&ryw->getTransaction(), tenant.first));
-	}
-
-	wait(waitForAll(deleteFutures));
-	return Void();
-}
-
-Future<Optional<std::string>> TenantMapRangeImpl::commit(ReadYourWritesTransaction* ryw) {
-	auto ranges = ryw->getSpecialKeySpaceWriteMap().containedRanges(range);
-	std::vector<Future<Void>> tenantManagementFutures;
-	for (auto range : ranges) {
-		if (!range.value().first) {
-			continue;
-		}
-
-		TenantNameRef tenantName =
-		    range.begin()
-		        .removePrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)
-		        .removePrefix(TenantMapRangeImpl::submoduleRange.begin);
-
-		if (range.value().second.present()) {
-			tenantManagementFutures.push_back(
-			    success(ManagementAPI::createTenantTransaction(&ryw->getTransaction(), tenantName)));
-		} else {
-			// For a single key clear, just issue the delete
-			if (KeyRangeRef(range.begin(), range.end()).singleKeyRange()) {
-				tenantManagementFutures.push_back(
-				    ManagementAPI::deleteTenantTransaction(&ryw->getTransaction(), tenantName));
-			} else {
-				TenantNameRef endTenant = range.end().removePrefix(
-				    SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin);
-				if (endTenant.startsWith(submoduleRange.begin)) {
-					endTenant = endTenant.removePrefix(submoduleRange.begin);
-				} else {
-					endTenant = "\xff"_sr;
-				}
-				tenantManagementFutures.push_back(deleteTenantRange(ryw, tenantName, endTenant));
-			}
-		}
-	}
-
-	return tag(waitForAll(tenantManagementFutures), Optional<std::string>());
 }

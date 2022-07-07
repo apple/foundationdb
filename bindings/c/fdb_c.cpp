@@ -19,13 +19,15 @@
  */
 
 #include "fdbclient/FDBTypes.h"
+#include "flow/ProtocolVersion.h"
 #include <cstdint>
-#define FDB_API_VERSION 710
+#define FDB_API_VERSION 720
 #define FDB_INCLUDE_LEGACY_TYPES
 
 #include "fdbclient/MultiVersionTransaction.h"
 #include "fdbclient/MultiVersionAssignmentVars.h"
 #include "foundationdb/fdb_c.h"
+#include "foundationdb/fdb_c_internal.h"
 
 int g_api_version = 0;
 
@@ -293,6 +295,10 @@ extern "C" DLLEXPORT fdb_error_t fdb_future_get_mappedkeyvalue_array(FDBFuture* 
 	                 *out_more = rrr.more;);
 }
 
+extern "C" DLLEXPORT fdb_error_t fdb_future_get_shared_state(FDBFuture* f, DatabaseSharedState** outPtr) {
+	CATCH_AND_RETURN(*outPtr = (DatabaseSharedState*)((TSAV(DatabaseSharedState*, f)->get())););
+}
+
 extern "C" DLLEXPORT fdb_error_t fdb_future_get_string_array(FDBFuture* f, const char*** out_strings, int* out_count) {
 	CATCH_AND_RETURN(Standalone<VectorRef<const char*>> na = TSAV(Standalone<VectorRef<const char*>>, f)->get();
 	                 *out_strings = (const char**)na.begin();
@@ -376,6 +382,12 @@ extern "C" DLLEXPORT fdb_error_t fdb_create_database(const char* cluster_file_pa
 	return fdb_create_database_impl(cluster_file_path, out_database);
 }
 
+extern "C" DLLEXPORT fdb_error_t fdb_create_database_from_connection_string(const char* connection_string,
+                                                                            FDBDatabase** out_database) {
+	CATCH_AND_RETURN(*out_database =
+	                     (FDBDatabase*)API->createDatabaseFromConnectionString(connection_string).extractPtr(););
+}
+
 extern "C" DLLEXPORT fdb_error_t fdb_database_set_option(FDBDatabase* d,
                                                          FDBDatabaseOption option,
                                                          uint8_t const* value,
@@ -426,6 +438,17 @@ extern "C" DLLEXPORT FDBFuture* fdb_database_create_snapshot(FDBDatabase* db,
 	                        .extractPtr());
 }
 
+extern "C" DLLEXPORT FDBFuture* fdb_database_create_shared_state(FDBDatabase* db) {
+	return (FDBFuture*)(DB(db)->createSharedState().extractPtr());
+}
+
+extern "C" DLLEXPORT void fdb_database_set_shared_state(FDBDatabase* db, DatabaseSharedState* p) {
+	try {
+		DB(db)->setSharedState(p);
+	} catch (...) {
+	}
+}
+
 // Get network thread busyness (updated every 1s)
 // A value of 0 indicates that the client is more or less idle
 // A value of 1 (or more) indicates that the client is saturated
@@ -449,8 +472,51 @@ extern "C" DLLEXPORT FDBFuture* fdb_database_get_server_protocol(FDBDatabase* db
 	                }).extractPtr());
 }
 
+extern "C" DLLEXPORT FDBFuture* fdb_database_purge_blob_granules(FDBDatabase* db,
+                                                                 uint8_t const* begin_key_name,
+                                                                 int begin_key_name_length,
+                                                                 uint8_t const* end_key_name,
+                                                                 int end_key_name_length,
+                                                                 int64_t purge_version,
+                                                                 fdb_bool_t force) {
+	return (FDBFuture*)(DB(db)
+	                        ->purgeBlobGranules(KeyRangeRef(StringRef(begin_key_name, begin_key_name_length),
+	                                                        StringRef(end_key_name, end_key_name_length)),
+	                                            purge_version,
+	                                            force)
+	                        .extractPtr());
+}
+extern "C" DLLEXPORT FDBFuture* fdb_database_wait_purge_granules_complete(FDBDatabase* db,
+                                                                          uint8_t const* purge_key_name,
+                                                                          int purge_key_name_length) {
+	return (
+	    FDBFuture*)(DB(db)->waitPurgeGranulesComplete(StringRef(purge_key_name, purge_key_name_length)).extractPtr());
+}
+
 extern "C" DLLEXPORT fdb_error_t fdb_tenant_create_transaction(FDBTenant* tenant, FDBTransaction** out_transaction) {
 	CATCH_AND_RETURN(*out_transaction = (FDBTransaction*)TENANT(tenant)->createTransaction().extractPtr(););
+}
+
+extern "C" DLLEXPORT FDBFuture* fdb_tenant_purge_blob_granules(FDBTenant* tenant,
+                                                               uint8_t const* begin_key_name,
+                                                               int begin_key_name_length,
+                                                               uint8_t const* end_key_name,
+                                                               int end_key_name_length,
+                                                               int64_t purge_version,
+                                                               fdb_bool_t force) {
+	return (FDBFuture*)(TENANT(tenant)
+	                        ->purgeBlobGranules(KeyRangeRef(StringRef(begin_key_name, begin_key_name_length),
+	                                                        StringRef(end_key_name, end_key_name_length)),
+	                                            purge_version,
+	                                            force)
+	                        .extractPtr());
+}
+extern "C" DLLEXPORT FDBFuture* fdb_tenant_wait_purge_granules_complete(FDBTenant* tenant,
+                                                                        uint8_t const* purge_key_name,
+                                                                        int purge_key_name_length) {
+	return (FDBFuture*)(TENANT(tenant)
+	                        ->waitPurgeGranulesComplete(StringRef(purge_key_name, purge_key_name_length))
+	                        .extractPtr());
 }
 
 extern "C" DLLEXPORT void fdb_tenant_destroy(FDBTenant* tenant) {
@@ -602,23 +668,24 @@ FDBFuture* fdb_transaction_get_range_impl(FDBTransaction* tr,
 	                    .extractPtr());
 }
 
-FDBFuture* fdb_transaction_get_mapped_range_impl(FDBTransaction* tr,
-                                                 uint8_t const* begin_key_name,
-                                                 int begin_key_name_length,
-                                                 fdb_bool_t begin_or_equal,
-                                                 int begin_offset,
-                                                 uint8_t const* end_key_name,
-                                                 int end_key_name_length,
-                                                 fdb_bool_t end_or_equal,
-                                                 int end_offset,
-                                                 uint8_t const* mapper_name,
-                                                 int mapper_name_length,
-                                                 int limit,
-                                                 int target_bytes,
-                                                 FDBStreamingMode mode,
-                                                 int iteration,
-                                                 fdb_bool_t snapshot,
-                                                 fdb_bool_t reverse) {
+extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_mapped_range(FDBTransaction* tr,
+                                                                 uint8_t const* begin_key_name,
+                                                                 int begin_key_name_length,
+                                                                 fdb_bool_t begin_or_equal,
+                                                                 int begin_offset,
+                                                                 uint8_t const* end_key_name,
+                                                                 int end_key_name_length,
+                                                                 fdb_bool_t end_or_equal,
+                                                                 int end_offset,
+                                                                 uint8_t const* mapper_name,
+                                                                 int mapper_name_length,
+                                                                 int limit,
+                                                                 int target_bytes,
+                                                                 FDBStreamingMode mode,
+                                                                 int iteration,
+                                                                 int matchIndex,
+                                                                 fdb_bool_t snapshot,
+                                                                 fdb_bool_t reverse) {
 	FDBFuture* r = validate_and_update_parameters(limit, target_bytes, mode, iteration, reverse);
 	if (r != nullptr)
 		return r;
@@ -629,31 +696,10 @@ FDBFuture* fdb_transaction_get_mapped_range_impl(FDBTransaction* tr,
 	                        KeySelectorRef(KeyRef(end_key_name, end_key_name_length), end_or_equal, end_offset),
 	                        StringRef(mapper_name, mapper_name_length),
 	                        GetRangeLimits(limit, target_bytes),
+	                        matchIndex,
 	                        snapshot,
 	                        reverse)
 	                    .extractPtr());
-}
-
-// TODO: Support FDB_API_ADDED in generate_asm.py and then this can be replaced with fdb_api_ptr_unimpl.
-FDBFuture* fdb_transaction_get_mapped_range_v699(FDBTransaction* tr,
-                                                 uint8_t const* begin_key_name,
-                                                 int begin_key_name_length,
-                                                 fdb_bool_t begin_or_equal,
-                                                 int begin_offset,
-                                                 uint8_t const* end_key_name,
-                                                 int end_key_name_length,
-                                                 fdb_bool_t end_or_equal,
-                                                 int end_offset,
-                                                 uint8_t const* mapper_name,
-                                                 int mapper_name_length,
-                                                 int limit,
-                                                 int target_bytes,
-                                                 FDBStreamingMode mode,
-                                                 int iteration,
-                                                 fdb_bool_t snapshot,
-                                                 fdb_bool_t reverse) {
-	fprintf(stderr, "UNIMPLEMENTED FDB API FUNCTION\n");
-	abort();
 }
 
 FDBFuture* fdb_transaction_get_range_selector_v13(FDBTransaction* tr,
@@ -883,13 +929,12 @@ extern "C" DLLEXPORT fdb_error_t fdb_select_api_version_impl(int runtime_version
 
 	// Versioned API changes -- descending order by version (new changes at top)
 	// FDB_API_CHANGED( function, ver ) means there is a new implementation as of ver, and a function function_(ver-1)
-	// is the old implementation FDB_API_REMOVED( function, ver ) means the function was removed as of ver, and
+	// is the old implementation. FDB_API_REMOVED( function, ver ) means the function was removed as of ver, and
 	// function_(ver-1) is the old implementation
 	//
 	// WARNING: use caution when implementing removed functions by calling public API functions. This can lead to
 	// undesired behavior when using the multi-version API. Instead, it is better to have both the removed and public
 	// functions call an internal implementation function. See fdb_create_database_impl for an example.
-	FDB_API_CHANGED(fdb_transaction_get_mapped_range, 700);
 	FDB_API_REMOVED(fdb_future_get_version, 620);
 	FDB_API_REMOVED(fdb_create_cluster, 610);
 	FDB_API_REMOVED(fdb_cluster_create_database, 610);

@@ -40,7 +40,11 @@ FlowKnobs const* FLOW_KNOBS = &bootstrapGlobalFlowKnobs;
 void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( AUTOMATIC_TRACE_DUMP,                                  1 );
 	init( PREVENT_FAST_SPIN_DELAY,                             .01 );
-	init( HOSTNAME_RESOLVE_DELAY,                              .05 );
+	init( HOSTNAME_RESOLVE_INIT_INTERVAL,                      .05 );
+	init( HOSTNAME_RESOLVE_MAX_INTERVAL,                       1.0 );
+	init( HOSTNAME_RECONNECT_INIT_INTERVAL,                    .05 );
+	init( HOSTNAME_RECONNECT_MAX_INTERVAL,                     1.0 );
+	init( ENABLE_COORDINATOR_DNS_CACHE,                      false ); if( randomize && BUGGIFY ) ENABLE_COORDINATOR_DNS_CACHE = true;
 	init( CACHE_REFRESH_INTERVAL_WHEN_ALL_ALTERNATIVES_FAILED, 1.0 );
 
 	init( DELAY_JITTER_OFFSET,                                 0.9 );
@@ -68,12 +72,15 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( HUGE_ARENA_LOGGING_BYTES,                          100e6 );
 	init( HUGE_ARENA_LOGGING_INTERVAL,                         5.0 );
 
+	init( MEMORY_USAGE_CHECK_INTERVAL,                         1.0 );
+
 	// Chaos testing - enabled for simulation by default
 	init( ENABLE_CHAOS_FEATURES,                       isSimulated );
 	init( CHAOS_LOGGING_INTERVAL,                              5.0 );
 
 
 	init( WRITE_TRACING_ENABLED,                              true ); if( randomize && BUGGIFY ) WRITE_TRACING_ENABLED = false;
+	init( TRACING_SPAN_ATTRIBUTES_ENABLED,                   false ); // Additional K/V and tenant data added to Span Attributes
 	init( TRACING_SAMPLE_RATE,                                 0.0 ); // Fraction of distributed traces (not spans) to sample (0 means ignore all traces)
 	init( TRACING_UDP_LISTENER_ADDR,                   "127.0.0.1" ); // Only applicable if TracerType is set to a network option
 	init( TRACING_UDP_LISTENER_PORT,                          8889 ); // Only applicable if TracerType is set to a network option
@@ -147,6 +154,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	//AsyncFileKAIO
 	init( MAX_OUTSTANDING,                                      64 );
 	init( MIN_SUBMIT,                                           10 );
+	init( DISK_METRIC_LOGGING_INTERVAL,                        5.0 );
 
 	init( PAGE_WRITE_CHECKSUM_HISTORY,                           0 ); if( randomize && BUGGIFY ) PAGE_WRITE_CHECKSUM_HISTORY = 10000000;
 	init( DISABLE_POSIX_KERNEL_AIO,                              0 );
@@ -173,7 +181,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( MIN_LOGGED_PRIORITY_BUSY_FRACTION,                  0.05 );
 	init( CERT_FILE_MAX_SIZE,                      5 * 1024 * 1024 );
 	init( READY_QUEUE_RESERVED_SIZE,                          8192 );
-	init( ITERATIONS_PER_REACTOR_CHECK,                        100 );
+	init( TASKS_PER_REACTOR_CHECK,                             100 );
 
 	//Network
 	init( PACKET_LIMIT,                                  100LL<<20 );
@@ -212,6 +220,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( MAX_TRACE_EVENT_LENGTH,                             4000 ); // If the value of this is changed, the corresponding default in Trace.cpp should be changed as well
 	init( ALLOCATION_TRACING_ENABLED,                         true );
 	init( SIM_SPEEDUP_AFTER_SECONDS,                           450 );
+	init( MAX_TRACE_LINES,                               1'000'000 );
 	init( CODE_COV_TRACE_EVENT_SEVERITY,                        10 ); // Code coverage TraceEvent severity level
 
 	//TDMetrics
@@ -264,6 +273,20 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( HEALTH_MONITOR_MARK_FAILED_UNSTABLE_CONNECTIONS,    true );
 	init( HEALTH_MONITOR_CLIENT_REQUEST_INTERVAL_SECS,          30 );
 	init( HEALTH_MONITOR_CONNECTION_MAX_CLOSED,                  5 );
+
+	// Encryption
+	init( ENCRYPT_CIPHER_KEY_CACHE_TTL, isSimulated ? 120 : 10 * 60 );
+	if ( randomize && BUGGIFY) { ENCRYPT_CIPHER_KEY_CACHE_TTL = deterministicRandom()->randomInt(50, 100); }
+	init( ENCRYPT_KEY_REFRESH_INTERVAL,   isSimulated ? 60 : 8 * 60 );
+	if ( randomize && BUGGIFY) { ENCRYPT_KEY_REFRESH_INTERVAL = deterministicRandom()->randomInt(2, 10); }
+
+	// REST Client
+	init( RESTCLIENT_MAX_CONNECTIONPOOL_SIZE,                   10 );
+	init( RESTCLIENT_CONNECT_TRIES,                             10 );
+	init( RESTCLIENT_CONNECT_TIMEOUT,                           10 );
+	init( RESTCLIENT_MAX_CONNECTION_LIFE,                      120 );
+	init( RESTCLIENT_REQUEST_TRIES,                             10 );
+	init( RESTCLIENT_REQUEST_TIMEOUT_SEC,                      120 );
 }
 // clang-format on
 

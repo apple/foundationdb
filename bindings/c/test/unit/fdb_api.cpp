@@ -130,12 +130,50 @@ EmptyFuture Database::create_snapshot(FDBDatabase* db,
 	return EmptyFuture(fdb_database_create_snapshot(db, uid, uid_length, snap_command, snap_command_length));
 }
 
+KeyFuture Database::purge_blob_granules(FDBDatabase* db,
+                                        std::string_view begin_key,
+                                        std::string_view end_key,
+                                        int64_t purge_version,
+                                        fdb_bool_t force) {
+	return KeyFuture(fdb_database_purge_blob_granules(db,
+	                                                  (const uint8_t*)begin_key.data(),
+	                                                  begin_key.size(),
+	                                                  (const uint8_t*)end_key.data(),
+	                                                  end_key.size(),
+	                                                  purge_version,
+	                                                  force));
+}
+
+EmptyFuture Database::wait_purge_granules_complete(FDBDatabase* db, std::string_view purge_key) {
+	return EmptyFuture(
+	    fdb_database_wait_purge_granules_complete(db, (const uint8_t*)purge_key.data(), purge_key.size()));
+}
+
 // Tenant
 Tenant::Tenant(FDBDatabase* db, const uint8_t* name, int name_length) {
 	if (fdb_error_t err = fdb_database_open_tenant(db, name, name_length, &tenant)) {
 		std::cerr << fdb_get_error(err) << std::endl;
 		std::abort();
 	}
+}
+
+KeyFuture Tenant::purge_blob_granules(FDBTenant* tenant,
+                                      std::string_view begin_key,
+                                      std::string_view end_key,
+                                      int64_t purge_version,
+                                      fdb_bool_t force) {
+	return KeyFuture(fdb_tenant_purge_blob_granules(tenant,
+	                                                (const uint8_t*)begin_key.data(),
+	                                                begin_key.size(),
+	                                                (const uint8_t*)end_key.data(),
+	                                                end_key.size(),
+	                                                purge_version,
+	                                                force));
+}
+
+EmptyFuture Tenant::wait_purge_granules_complete(FDBTenant* tenant, std::string_view purge_key) {
+	return EmptyFuture(
+	    fdb_tenant_wait_purge_granules_complete(tenant, (const uint8_t*)purge_key.data(), purge_key.size()));
 }
 
 Tenant::~Tenant() {
@@ -252,6 +290,7 @@ MappedKeyValueArrayFuture Transaction::get_mapped_range(const uint8_t* begin_key
                                                         int target_bytes,
                                                         FDBStreamingMode mode,
                                                         int iteration,
+                                                        int matchIndex,
                                                         fdb_bool_t snapshot,
                                                         fdb_bool_t reverse) {
 	return MappedKeyValueArrayFuture(fdb_transaction_get_mapped_range(tr_,
@@ -269,6 +308,7 @@ MappedKeyValueArrayFuture Transaction::get_mapped_range(const uint8_t* begin_key
 	                                                                  target_bytes,
 	                                                                  mode,
 	                                                                  iteration,
+	                                                                  matchIndex,
 	                                                                  snapshot,
 	                                                                  reverse));
 }

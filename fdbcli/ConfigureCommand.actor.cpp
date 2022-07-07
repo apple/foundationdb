@@ -190,6 +190,17 @@ ACTOR Future<bool> configureCommandActor(Reference<IDatabase> db,
 	case ConfigurationResult::DATABASE_CREATED:
 		printf("Database created\n");
 		break;
+	case ConfigurationResult::DATABASE_CREATED_WARN_ROCKSDB_EXPERIMENTAL:
+		printf("Database created\n");
+		fprintf(stderr,
+		        "WARN: RocksDB storage engine type is still in experimental stage, not yet production tested.\n");
+		break;
+	case ConfigurationResult::DATABASE_CREATED_WARN_SHARDED_ROCKSDB_EXPERIMENTAL:
+		printf("Database created\n");
+		fprintf(
+		    stderr,
+		    "WARN: Sharded RocksDB storage engine type is still in experimental stage, not yet production tested.\n");
+		break;
 	case ConfigurationResult::DATABASE_UNAVAILABLE:
 		fprintf(stderr, "ERROR: The database is unavailable\n");
 		fprintf(stderr, "Type `configure FORCE <TOKEN...>' to configure without this check\n");
@@ -250,11 +261,52 @@ ACTOR Future<bool> configureCommandActor(Reference<IDatabase> db,
 		        "storage_migration_type=gradual' to set the gradual migration type.\n");
 		ret = false;
 		break;
+	case ConfigurationResult::SUCCESS_WARN_ROCKSDB_EXPERIMENTAL:
+		printf("Configuration changed\n");
+		fprintf(stderr,
+		        "WARN: RocksDB storage engine type is still in experimental stage, not yet production tested.\n");
+		break;
+	case ConfigurationResult::SUCCESS_WARN_SHARDED_ROCKSDB_EXPERIMENTAL:
+		printf("Configuration changed\n");
+		fprintf(
+		    stderr,
+		    "WARN: Sharded RocksDB storage engine type is still in experimental stage, not yet production tested.\n");
+		break;
 	default:
 		ASSERT(false);
 		ret = false;
 	};
 	return ret;
+}
+
+void configureGenerator(const char* text,
+                        const char* line,
+                        std::vector<std::string>& lc,
+                        std::vector<StringRef> const& tokens) {
+	const char* opts[] = { "new",
+		                   "single",
+		                   "double",
+		                   "triple",
+		                   "three_data_hall",
+		                   "three_datacenter",
+		                   "ssd",
+		                   "ssd-1",
+		                   "ssd-2",
+		                   "memory",
+		                   "memory-1",
+		                   "memory-2",
+		                   "memory-radixtree-beta",
+		                   "commit_proxies=",
+		                   "grv_proxies=",
+		                   "logs=",
+		                   "resolvers=",
+		                   "perpetual_storage_wiggle=",
+		                   "perpetual_storage_wiggle_locality=",
+		                   "storage_migration_type=",
+		                   "tenant_mode=",
+		                   "blob_granules_enabled=",
+		                   nullptr };
+	arrayGenerator(text, line, opts, lc);
 }
 
 CommandFactory configureFactory(
@@ -300,6 +352,7 @@ CommandFactory configureFactory(
         "optional, then transactions can be run with or without specifying tenants. If required, all data must be "
         "accessed using tenants.\n\n"
 
-        "See the FoundationDB Administration Guide for more information."));
+        "See the FoundationDB Administration Guide for more information."),
+    &configureGenerator);
 
 } // namespace fdb_cli

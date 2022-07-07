@@ -35,6 +35,8 @@
 #include <boost/algorithm/string.hpp>
 #include <boost/interprocess/managed_shared_memory.hpp>
 
+#include <fmt/printf.h>
+
 #include "fdbclient/ActorLineageProfiler.h"
 #include "fdbclient/ClusterConnectionFile.h"
 #include "fdbclient/IKnobCollection.h"
@@ -42,9 +44,10 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/versions.h"
 #include "fdbclient/BuildFlags.h"
-#include "fdbclient/WellKnownEndpoints.h"
+#include "fdbrpc/WellKnownEndpoints.h"
 #include "fdbclient/SimpleIni.h"
 #include "fdbrpc/AsyncFileCached.actor.h"
+#include "fdbrpc/IPAllowList.h"
 #include "fdbrpc/FlowProcess.actor.h"
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/PerfMetric.h"
@@ -71,10 +74,10 @@
 #include "flow/DeterministicRandom.h"
 #include "flow/Platform.h"
 #include "flow/ProtocolVersion.h"
-#include "flow/SimpleOpt.h"
+#include "SimpleOpt/SimpleOpt.h"
 #include "flow/SystemMonitor.h"
 #include "flow/TLSConfig.actor.h"
-#include "flow/Tracing.h"
+#include "fdbclient/Tracing.h"
 #include "flow/WriteOnlySet.h"
 #include "flow/UnitTest.h"
 #include "flow/FaultInjection.h"
@@ -103,11 +106,12 @@ using namespace std::literals;
 // clang-format off
 enum {
 	OPT_CONNFILE, OPT_SEEDCONNFILE, OPT_SEEDCONNSTRING, OPT_ROLE, OPT_LISTEN, OPT_PUBLICADDR, OPT_DATAFOLDER, OPT_LOGFOLDER, OPT_PARENTPID, OPT_TRACER, OPT_NEWCONSOLE,
-	OPT_NOBOX, OPT_TESTFILE, OPT_RESTARTING, OPT_RESTORING, OPT_RANDOMSEED, OPT_KEY, OPT_MEMLIMIT, OPT_STORAGEMEMLIMIT, OPT_CACHEMEMLIMIT, OPT_MACHINEID,
+	OPT_NOBOX, OPT_TESTFILE, OPT_RESTARTING, OPT_RESTORING, OPT_RANDOMSEED, OPT_KEY, OPT_MEMLIMIT, OPT_VMEMLIMIT, OPT_STORAGEMEMLIMIT, OPT_CACHEMEMLIMIT, OPT_MACHINEID,
 	OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_BUILD_FLAGS, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR,
 	OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_UNITTESTPARAM, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE,
 	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE,
-	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIAL_FILE, OPT_CONFIG_PATH, OPT_USE_TEST_CONFIG_DB, OPT_FAULT_INJECTION, OPT_PROFILER, OPT_PRINT_SIMTIME, OPT_FLOW_PROCESS_NAME, OPT_FLOW_PROCESS_ENDPOINT
+	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIAL_FILE, OPT_CONFIG_PATH, OPT_USE_TEST_CONFIG_DB, OPT_FAULT_INJECTION, OPT_PROFILER, OPT_PRINT_SIMTIME,
+	OPT_FLOW_PROCESS_NAME, OPT_FLOW_PROCESS_ENDPOINT, OPT_IP_TRUSTED_MASK, OPT_KMS_CONN_DISCOVERY_URL_FILE, OPT_KMS_CONN_VALIDATION_TOKEN_DETAILS, OPT_KMS_CONN_GET_ENCRYPTION_KEYS_ENDPOINT
 };
 
 CSimpleOpt::SOption g_rgOptions[] = {
@@ -153,6 +157,7 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_KEY,                   "--key",                       SO_REQ_SEP },
 	{ OPT_MEMLIMIT,              "-m",                          SO_REQ_SEP },
 	{ OPT_MEMLIMIT,              "--memory",                    SO_REQ_SEP },
+	{ OPT_VMEMLIMIT,             "--memory-vsize",              SO_REQ_SEP },
 	{ OPT_STORAGEMEMLIMIT,       "-M",                          SO_REQ_SEP },
 	{ OPT_STORAGEMEMLIMIT,       "--storage-memory",            SO_REQ_SEP },
 	{ OPT_CACHEMEMLIMIT,         "--cache-memory",              SO_REQ_SEP },
@@ -198,11 +203,11 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_PRINT_SIMTIME,         "--print-sim-time",             SO_NONE },
 	{ OPT_FLOW_PROCESS_NAME,     "--process-name",              SO_REQ_SEP },
 	{ OPT_FLOW_PROCESS_ENDPOINT, "--process-endpoint",          SO_REQ_SEP },
-
-#ifndef TLS_DISABLED
-	TLS_OPTION_FLAGS
-#endif
-
+	{ OPT_IP_TRUSTED_MASK,       "--trusted-subnet-",           SO_REQ_SEP },
+	{ OPT_KMS_CONN_DISCOVERY_URL_FILE,           "--discover-kms-conn-url-file",            SO_REQ_SEP},
+	{ OPT_KMS_CONN_VALIDATION_TOKEN_DETAILS,     "--kms-conn-validation-token-details",     SO_REQ_SEP},
+	{ OPT_KMS_CONN_GET_ENCRYPTION_KEYS_ENDPOINT, "--kms-conn-get-encryption-keys-endpoint", SO_REQ_SEP},
+	TLS_OPTION_FLAGS,
 	SO_END_OF_OPTIONS
 };
 
@@ -310,7 +315,7 @@ UID getSharedMemoryMachineId() {
 	std::string sharedMemoryIdentifier = "fdbserver_shared_memory_id";
 	loop {
 		try {
-			// "0" is the default parameter "addr"
+			// "0" is the default netPrefix "addr"
 			boost::interprocess::managed_shared_memory segment(
 			    boost::interprocess::open_or_create, sharedMemoryIdentifier.c_str(), 1000, 0, p.permission);
 			machineId = segment.find_or_construct<UID>("machineId")(newUID);
@@ -634,7 +639,10 @@ static void printUsage(const char* name, bool devhelp) {
 	                 " Define a locality key. LOCALITYKEY is case-insensitive though"
 	                 " LOCALITYVALUE is not.");
 	printOptionUsage("-m SIZE, --memory SIZE",
-	                 " Memory limit. The default value is 8GiB. When specified"
+	                 " Resident memory limit. The default value is 8GiB. When specified"
+	                 " without a unit, MiB is assumed.");
+	printOptionUsage("--memory-vsize SIZE",
+	                 " Virtual memory limit. The default value is unlimited. When specified"
 	                 " without a unit, MiB is assumed.");
 	printOptionUsage("-M SIZE, --storage-memory SIZE",
 	                 " Maximum amount of memory used for storage. The default"
@@ -653,9 +661,7 @@ static void printUsage(const char* name, bool devhelp) {
 	                 "  collector -- None or FluentD (FluentD requires collector_endpoint to be set)\n"
 	                 "  collector_endpoint -- IP:PORT of the fluentd server\n"
 	                 "  collector_protocol -- UDP or TCP (default is UDP)");
-#ifndef TLS_DISABLED
-	printf(TLS_HELP);
-#endif
+	printf("%s", TLS_HELP);
 	printOptionUsage("-v, --version", "Print version information and exit.");
 	printOptionUsage("-h, -?, --help", "Display this help and exit.");
 	if (devhelp) {
@@ -850,9 +856,9 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(
 	NetworkAddressList publicNetworkAddresses;
 	NetworkAddressList listenNetworkAddresses;
 
-	connectionRecord.resolveHostnamesBlocking();
-	auto& coordinators = connectionRecord.getConnectionString().coordinators();
-	ASSERT(coordinators.size() > 0);
+	std::vector<Hostname>& hostnames = connectionRecord.getConnectionString().hostnames;
+	const std::vector<NetworkAddress>& coords = connectionRecord.getConnectionString().coords;
+	ASSERT(hostnames.size() + coords.size() > 0);
 
 	for (int ii = 0; ii < publicAddressStrs.size(); ++ii) {
 		const std::string& publicAddressStr = publicAddressStrs[ii];
@@ -921,13 +927,26 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(
 			listenNetworkAddresses.secondaryAddress = currentListenAddress;
 		}
 
-		bool hasSameCoord = std::all_of(coordinators.begin(), coordinators.end(), [&](const NetworkAddress& address) {
+		bool matchCoordinatorsTls = std::all_of(coords.begin(), coords.end(), [&](const NetworkAddress& address) {
 			if (address.ip == currentPublicAddress.ip && address.port == currentPublicAddress.port) {
 				return address.isTLS() == currentPublicAddress.isTLS();
 			}
 			return true;
 		});
-		if (!hasSameCoord) {
+		// If true, further check hostnames.
+		if (matchCoordinatorsTls) {
+			matchCoordinatorsTls = std::all_of(hostnames.begin(), hostnames.end(), [&](Hostname& hostname) {
+				Optional<NetworkAddress> resolvedAddress = hostname.resolveBlocking();
+				if (resolvedAddress.present()) {
+					NetworkAddress address = resolvedAddress.get();
+					if (address.ip == currentPublicAddress.ip && address.port == currentPublicAddress.port) {
+						return address.isTLS() == currentPublicAddress.isTLS();
+					}
+				}
+				return true;
+			});
+		}
+		if (!matchCoordinatorsTls) {
 			fprintf(stderr,
 			        "ERROR: TLS state of public address %s does not match in coordinator list.\n",
 			        publicAddressStr.c_str());
@@ -1002,9 +1021,10 @@ struct CLIOptions {
 	NetworkAddressList publicAddresses, listenAddresses;
 
 	const char* targetKey = nullptr;
-	int64_t memLimit =
+	uint64_t memLimit =
 	    8LL << 30; // Nice to maintain the same default value for memLimit and SERVER_KNOBS->SERVER_MEM_LIMIT and
 	               // SERVER_KNOBS->COMMIT_BATCHES_MEM_BYTES_HARD_LIMIT
+	uint64_t virtualMemLimit = 0; // unlimited
 	uint64_t storageMemLimit = 1LL << 30;
 	bool buggifyEnabled = false, faultInjectionEnabled = true, restarting = false;
 	Optional<Standalone<StringRef>> zoneId;
@@ -1036,6 +1056,7 @@ struct CLIOptions {
 	std::string flowProcessName;
 	Endpoint flowProcessEndpoint;
 	bool printSimTime = false;
+	IPAllowList allowList;
 
 	static CLIOptions parseArgs(int argc, char* argv[]) {
 		CLIOptions opts;
@@ -1160,6 +1181,15 @@ private:
 				Standalone<StringRef> key = StringRef(localityKey.get());
 				std::transform(key.begin(), key.end(), mutateString(key), ::tolower);
 				localities.set(key, Standalone<StringRef>(std::string(args.OptionArg())));
+				break;
+			}
+			case OPT_IP_TRUSTED_MASK: {
+				Optional<std::string> subnetKey = extractPrefixedArgument("--trusted-subnet", args.OptionSyntax());
+				if (!subnetKey.present()) {
+					fprintf(stderr, "ERROR: unable to parse locality key '%s'\n", args.OptionSyntax());
+					flushAndExit(FDB_EXIT_ERROR);
+				}
+				allowList.addTrustedSubnet(args.OptionArg());
 				break;
 			}
 			case OPT_VERSION:
@@ -1434,6 +1464,15 @@ private:
 				}
 				memLimit = ti.get();
 				break;
+			case OPT_VMEMLIMIT:
+				ti = parse_with_suffix(args.OptionArg(), "MiB");
+				if (!ti.present()) {
+					fprintf(stderr, "ERROR: Could not parse virtual memory limit from `%s'\n", args.OptionArg());
+					printHelpTeaser(argv[0]);
+					flushAndExit(FDB_EXIT_ERROR);
+				}
+				virtualMemLimit = ti.get();
+				break;
 			case OPT_STORAGEMEMLIMIT:
 				ti = parse_with_suffix(args.OptionArg(), "MB");
 				if (!ti.present()) {
@@ -1579,7 +1618,6 @@ private:
 				printSimTime = true;
 				break;
 
-#ifndef TLS_DISABLED
 			case TLSConfig::OPT_TLS_PLUGIN:
 				args.OptionArg();
 				break;
@@ -1598,7 +1636,18 @@ private:
 			case TLSConfig::OPT_TLS_VERIFY_PEERS:
 				tlsConfig.addVerifyPeers(args.OptionArg());
 				break;
-#endif
+			case OPT_KMS_CONN_DISCOVERY_URL_FILE: {
+				knobs.emplace_back("rest_kms_connector_kms_discovery_url_file", args.OptionArg());
+				break;
+			}
+			case OPT_KMS_CONN_VALIDATION_TOKEN_DETAILS: {
+				knobs.emplace_back("rest_kms_connector_validation_token_details", args.OptionArg());
+				break;
+			}
+			case OPT_KMS_CONN_GET_ENCRYPTION_KEYS_ENDPOINT: {
+				knobs.emplace_back("rest_kms_connector_get_encryption_keys_endpoint", args.OptionArg());
+				break;
+			}
 			}
 		}
 
@@ -1757,14 +1806,6 @@ int main(int argc, char* argv[]) {
 		auto opts = CLIOptions::parseArgs(argc, argv);
 		const auto role = opts.role;
 
-#ifdef _WIN32
-		// For now, ignore all tests for Windows
-		if (role == ServerRole::Simulation || role == ServerRole::UnitTests || role == ServerRole::Test) {
-			printf("Windows tests are not supported yet\n");
-			flushAndExit(FDB_EXIT_SUCCESS);
-		}
-#endif
-
 		if (role == ServerRole::Simulation)
 			printf("Random seed is %u...\n", opts.randomSeed);
 
@@ -1783,19 +1824,40 @@ int main(int argc, char* argv[]) {
 		auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
 		g_knobs.setKnob("log_directory", KnobValue::create(opts.logFolder));
 		g_knobs.setKnob("conn_file", KnobValue::create(opts.connFile));
-		if (role != ServerRole::Simulation) {
-			g_knobs.setKnob("commit_batches_mem_bytes_hard_limit", KnobValue::create(int64_t{ opts.memLimit }));
+		if (role != ServerRole::Simulation && opts.memLimit > 0) {
+			g_knobs.setKnob("commit_batches_mem_bytes_hard_limit",
+			                KnobValue::create(static_cast<int64_t>(opts.memLimit)));
 		}
 
 		IKnobCollection::setupKnobs(opts.knobs);
-		g_knobs.setKnob("server_mem_limit", KnobValue::create(int64_t{ opts.memLimit }));
+		g_knobs.setKnob("server_mem_limit", KnobValue::create(static_cast<int64_t>(opts.memLimit)));
 		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
 		g_knobs.initialize(Randomize::True, role == ServerRole::Simulation ? IsSimulated::True : IsSimulated::False);
+
+		if (!SERVER_KNOBS->ALLOW_DANGEROUS_KNOBS) {
+			if (SERVER_KNOBS->FETCH_USING_STREAMING) {
+				fprintf(stderr,
+				        "ERROR : explicitly setting FETCH_USING_STREAMING is dangerous! set ALLOW_DANGEROUS_KNOBS to "
+				        "proceed anyways\n");
+				flushAndExit(FDB_EXIT_ERROR);
+			}
+			if (SERVER_KNOBS->PEEK_USING_STREAMING) {
+				fprintf(stderr,
+				        "ERROR : explicitly setting PEEK_USING_STREAMING is dangerous! set ALLOW_DANGEROUS_KNOBS to "
+				        "proceed anyways\n");
+				flushAndExit(FDB_EXIT_ERROR);
+			}
+		}
 
 		// evictionPolicyStringToEnum will throw an exception if the string is not recognized as a valid
 		EvictablePageCache::evictionPolicyStringToEnum(FLOW_KNOBS->CACHE_EVICTION_POLICY);
 
-		if (opts.memLimit <= FLOW_KNOBS->PAGE_CACHE_4K) {
+		if (opts.memLimit > 0 && opts.virtualMemLimit > 0 && opts.memLimit > opts.virtualMemLimit) {
+			fprintf(stderr, "ERROR : --memory-vsize has to be no less than --memory");
+			flushAndExit(FDB_EXIT_ERROR);
+		}
+
+		if (opts.memLimit > 0 && opts.memLimit <= FLOW_KNOBS->PAGE_CACHE_4K) {
 			fprintf(stderr, "ERROR: --memory has to be larger than --cache-memory\n");
 			flushAndExit(FDB_EXIT_ERROR);
 		}
@@ -1833,7 +1895,7 @@ int main(int argc, char* argv[]) {
 		} else {
 			g_network = newNet2(opts.tlsConfig, opts.useThreadPool, true);
 			g_network->addStopCallback(Net2FileSystem::stop);
-			FlowTransport::createInstance(false, 1, WLTOKEN_RESERVED_COUNT);
+			FlowTransport::createInstance(false, 1, WLTOKEN_RESERVED_COUNT, &opts.allowList);
 			opts.buildNetwork(argv[0]);
 
 			const bool expectsPublicAddress = (role == ServerRole::FDBD || role == ServerRole::NetworkTestServer ||
@@ -1912,11 +1974,13 @@ int main(int argc, char* argv[]) {
 		    .detail("BuggifyEnabled", opts.buggifyEnabled)
 		    .detail("FaultInjectionEnabled", opts.faultInjectionEnabled)
 		    .detail("MemoryLimit", opts.memLimit)
+		    .detail("VirtualMemoryLimit", opts.virtualMemLimit)
 		    .trackLatest("ProgramStart");
 
 		Error::init();
 		std::set_new_handler(&platform::outOfMemory);
-		setMemoryQuota(opts.memLimit);
+		Future<Void> memoryUsageMonitor = startMemoryUsageMonitor(opts.memLimit);
+		setMemoryQuota(opts.virtualMemLimit);
 
 		Future<Optional<Void>> f;
 

@@ -39,7 +39,7 @@
 
 #pragma once
 
-#define FDB_API_VERSION 710
+#define FDB_API_VERSION 720
 #include <foundationdb/fdb_c.h>
 
 #include <string>
@@ -97,6 +97,8 @@ public:
 
 private:
 	friend class Transaction;
+	friend class Database;
+	friend class Tenant;
 	KeyFuture(FDBFuture* f) : Future(f) {}
 };
 
@@ -163,6 +165,7 @@ class EmptyFuture : public Future {
 private:
 	friend class Transaction;
 	friend class Database;
+	friend class Tenant;
 	EmptyFuture(FDBFuture* f) : Future(f) {}
 };
 
@@ -201,6 +204,14 @@ public:
 	                                   int uid_length,
 	                                   const uint8_t* snap_command,
 	                                   int snap_command_length);
+
+	static KeyFuture purge_blob_granules(FDBDatabase* db,
+	                                     std::string_view begin_key,
+	                                     std::string_view end_key,
+	                                     int64_t purge_version,
+	                                     fdb_bool_t force);
+
+	static EmptyFuture wait_purge_granules_complete(FDBDatabase* db, std::string_view purge_key);
 };
 
 class Tenant final {
@@ -211,6 +222,14 @@ public:
 	Tenant& operator=(const Tenant&) = delete;
 	Tenant(Tenant&&) = delete;
 	Tenant& operator=(Tenant&&) = delete;
+
+	static KeyFuture purge_blob_granules(FDBTenant* tenant,
+	                                     std::string_view begin_key,
+	                                     std::string_view end_key,
+	                                     int64_t purge_version,
+	                                     fdb_bool_t force);
+
+	static EmptyFuture wait_purge_granules_complete(FDBTenant* tenant, std::string_view purge_key);
 
 private:
 	friend class Transaction;
@@ -295,6 +314,7 @@ public:
 	                                           int target_bytes,
 	                                           FDBStreamingMode mode,
 	                                           int iteration,
+	                                           int matchIndex,
 	                                           fdb_bool_t snapshot,
 	                                           fdb_bool_t reverse);
 

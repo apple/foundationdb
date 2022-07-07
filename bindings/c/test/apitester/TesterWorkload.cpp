@@ -20,11 +20,14 @@
 
 #include "TesterWorkload.h"
 #include "TesterUtil.h"
+#include "fmt/core.h"
 #include "test/apitester/TesterScheduler.h"
 #include <cstdlib>
 #include <memory>
 #include <fmt/format.h>
 #include <vector>
+#include <iostream>
+#include <cstdio>
 
 namespace FdbApiTester {
 
@@ -58,15 +61,36 @@ double WorkloadConfig::getFloatOption(const std::string& name, double defaultVal
 	}
 }
 
+bool WorkloadConfig::getBoolOption(const std::string& name, bool defaultVal) const {
+	auto iter = options.find(name);
+	if (iter == options.end()) {
+		return defaultVal;
+	} else {
+		std::string val(fdb::toCharsRef(lowerCase(fdb::toBytesRef(iter->second))));
+		if (val == "true") {
+			return true;
+		} else if (val == "false") {
+			return false;
+		} else {
+			throw TesterError(
+			    fmt::format("Invalid workload configuration. Invalid value {} for {}", iter->second, name));
+		}
+	}
+}
+
 WorkloadBase::WorkloadBase(const WorkloadConfig& config)
   : manager(nullptr), tasksScheduled(0), numErrors(0), clientId(config.clientId), numClients(config.numClients),
-    failed(false) {
+    failed(false), numTxCompleted(0) {
 	maxErrors = config.getIntOption("maxErrors", 10);
 	workloadId = fmt::format("{}{}", config.name, clientId);
 }
 
 void WorkloadBase::init(WorkloadManager* manager) {
 	this->manager = manager;
+}
+
+void WorkloadBase::printStats() {
+	info(fmt::format("{} transactions completed", numTxCompleted.load()));
 }
 
 void WorkloadBase::schedule(TTaskFct task) {
@@ -86,11 +110,12 @@ void WorkloadBase::execTransaction(std::shared_ptr<ITransactionActor> tx, TTaskF
 	}
 	tasksScheduled++;
 	manager->txExecutor->execute(tx, [this, tx, cont, failOnError]() {
-		fdb_error_t err = tx->getErrorCode();
-		if (tx->getErrorCode() == error_code_success) {
+		numTxCompleted++;
+		fdb::Error err = tx->getError();
+		if (err.code() == error_code_success) {
 			cont();
 		} else {
-			std::string msg = fmt::format("Transaction failed with error: {} ({}})", err, fdb_get_error(err));
+			std::string msg = fmt::format("Transaction failed with error: {} ({})", err.code(), err.what());
 			if (failOnError) {
 				error(msg);
 				failed = true;
@@ -127,9 +152,15 @@ void WorkloadBase::scheduledTaskDone() {
 	}
 }
 
+void WorkloadBase::confirmProgress() {
+	info("Progress confirmed");
+	manager->confirmProgress(this);
+}
+
 void WorkloadManager::add(std::shared_ptr<IWorkload> workload, TTaskFct cont) {
 	std::unique_lock<std::mutex> lock(mutex);
-	workloads[workload.get()] = WorkloadInfo{ workload, cont };
+	workloads[workload.get()] = WorkloadInfo{ workload, cont, workload->getControlIfc(), false };
+	fmt::print(stderr, "Workload {} added\n", workload->getWorkloadId());
 }
 
 void WorkloadManager::run() {
@@ -144,6 +175,13 @@ void WorkloadManager::run() {
 		iter->start();
 	}
 	scheduler->join();
+	if (ctrlInputThread.joinable()) {
+		ctrlInputThread.join();
+	}
+	if (outputPipe.is_open()) {
+		outputPipe << "DONE" << std::endl;
+		outputPipe.close();
+	}
 	if (failed()) {
 		fmt::print(stderr, "{} workloads failed\n", numWorkloadsFailed);
 	} else {
@@ -165,7 +203,112 @@ void WorkloadManager::workloadDone(IWorkload* workload, bool failed) {
 	bool done = workloads.empty();
 	lock.unlock();
 	if (done) {
+		if (statsTimer) {
+			statsTimer->cancel();
+		}
 		scheduler->stop();
+	}
+}
+
+void WorkloadManager::openControlPipes(const std::string& inputPipeName, const std::string& outputPipeName) {
+	if (!inputPipeName.empty()) {
+		ctrlInputThread = std::thread(&WorkloadManager::readControlInput, this, inputPipeName);
+	}
+	if (!outputPipeName.empty()) {
+		fmt::print(stderr, "Opening pipe {} for writing\n", outputPipeName);
+		outputPipe.open(outputPipeName, std::ofstream::out);
+	}
+}
+
+void WorkloadManager::readControlInput(std::string pipeName) {
+	fmt::print(stderr, "Opening pipe {} for reading\n", pipeName);
+	// Open in binary mode and read char-by-char to avoid
+	// any kind of buffering
+	FILE* f = fopen(pipeName.c_str(), "rb");
+	setbuf(f, NULL);
+	std::string line;
+	while (true) {
+		int ch = fgetc(f);
+		if (ch == EOF) {
+			return;
+		}
+		if (ch != '\n') {
+			line += ch;
+			continue;
+		}
+		if (line.empty()) {
+			continue;
+		}
+		fmt::print(stderr, "Received {} command\n", line);
+		if (line == "STOP") {
+			handleStopCommand();
+		} else if (line == "CHECK") {
+			handleCheckCommand();
+		}
+		line.clear();
+	}
+}
+
+void WorkloadManager::schedulePrintStatistics(int timeIntervalMs) {
+	statsTimer = scheduler->scheduleWithDelay(timeIntervalMs, [this, timeIntervalMs]() {
+		for (auto workload : getActiveWorkloads()) {
+			workload->printStats();
+		}
+		this->schedulePrintStatistics(timeIntervalMs);
+	});
+}
+
+std::vector<std::shared_ptr<IWorkload>> WorkloadManager::getActiveWorkloads() {
+	std::unique_lock<std::mutex> lock(mutex);
+	std::vector<std::shared_ptr<IWorkload>> res;
+	for (auto iter : workloads) {
+		res.push_back(iter.second.ref);
+	}
+	return res;
+}
+
+void WorkloadManager::handleStopCommand() {
+	std::unique_lock<std::mutex> lock(mutex);
+	for (auto& iter : workloads) {
+		IWorkloadControlIfc* controlIfc = iter.second.controlIfc;
+		if (controlIfc) {
+			controlIfc->stop();
+		}
+	}
+}
+
+void WorkloadManager::handleCheckCommand() {
+	std::unique_lock<std::mutex> lock(mutex);
+	// Request to confirm progress from all workloads
+	// providing the control interface
+	for (auto& iter : workloads) {
+		IWorkloadControlIfc* controlIfc = iter.second.controlIfc;
+		if (controlIfc) {
+			iter.second.progressConfirmed = false;
+			controlIfc->checkProgress();
+		}
+	}
+}
+
+void WorkloadManager::confirmProgress(IWorkload* workload) {
+	std::unique_lock<std::mutex> lock(mutex);
+	// Save the progress confirmation of the workload
+	auto iter = workloads.find(workload);
+	ASSERT(iter != workloads.end());
+	iter->second.progressConfirmed = true;
+	// Check if all workloads have confirmed progress
+	bool allConfirmed = true;
+	for (auto& iter : workloads) {
+		if (iter.second.controlIfc && !iter.second.progressConfirmed) {
+			allConfirmed = false;
+			break;
+		}
+	}
+	lock.unlock();
+	if (allConfirmed) {
+		// Notify the test controller about the successful progress check
+		ASSERT(outputPipe.is_open());
+		outputPipe << "CHECK_OK" << std::endl;
 	}
 }
 
