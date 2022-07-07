@@ -74,7 +74,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	Counter reportLiveCommittedVersionRequests;
 	// This counter gives an estimate of the number of non-empty peeks that storage servers
 	// should do from tlogs (in the worst case, ignoring blocking peek timeouts).
-	Counter versionVectorTagUpdates;
+	LatencySample versionVectorTagUpdates;
 	Counter waitForPrevCommitRequests;
 	Counter nonWaitForPrevCommitRequests;
 	LatencySample versionVectorSizeOnCVReply;
@@ -99,7 +99,10 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	    getCommitVersionRequests("GetCommitVersionRequests", cc),
 	    getLiveCommittedVersionRequests("GetLiveCommittedVersionRequests", cc),
 	    reportLiveCommittedVersionRequests("ReportLiveCommittedVersionRequests", cc),
-	    versionVectorTagUpdates("VersionVectorTagUpdates", cc),
+	    versionVectorTagUpdates("VersionVectorTagUpdates",
+                                    dbgid,
+                                    SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+                                    SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
 	    waitForPrevCommitRequests("WaitForPrevCommitRequests", cc),
 	    nonWaitForPrevCommitRequests("NonWaitForPrevCommitRequests", cc),
 	    versionVectorSizeOnCVReply("VersionVectorSizeOnCVReply",
@@ -238,7 +241,7 @@ void updateLiveCommittedVersion(Reference<MasterData> self, ReportRawCommittedVe
 			int8_t primaryLocality =
 			    SERVER_KNOBS->ENABLE_VERSION_VECTOR_HA_OPTIMIZATION ? self->locality : tagLocalityInvalid;
 			self->ssVersionVector.setVersion(req.writtenTags.get(), req.version, primaryLocality);
-			self->versionVectorTagUpdates += req.writtenTags.get().size();
+			self->versionVectorTagUpdates.addMeasurement(req.writtenTags.get().size());
 		}
 		auto curTime = now();
 		// add debug here to change liveCommittedVersion to time bound of now()
