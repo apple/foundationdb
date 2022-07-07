@@ -91,10 +91,6 @@ class DDTxnProcessorImpl {
 		return IDDTxnProcessor::SourceServers{ std::vector<UID>(servers.begin(), servers.end()), completeSources };
 	}
 
-	ACTOR static Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses() {
-
-	}
-
 	ACTOR static Future<Void> updateReplicaKeys(Database cx,
 	                                            std::vector<Optional<Key>>* primaryDcId,
 	                                            std::vector<Optional<Key>>* remoteDcIds,
@@ -355,10 +351,6 @@ class DDTxnProcessorImpl {
 
 Future<IDDTxnProcessor::SourceServers> DDTxnProcessor::getSourceServersForRange(const KeyRangeRef range) const {
 	return DDTxnProcessorImpl::getSourceServersForRange(cx, range);
-}
-
-Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> DDTxnProcessor::getServerListAndProcessClasses() {
-	return DDTxnProcessorImpl::getServerListAndProcessClasses();
 }
 
 Future<MoveKeysLock> DDTxnProcessor::takeMoveKeysLock(UID ddId) const {

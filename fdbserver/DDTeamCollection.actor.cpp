@@ -2747,7 +2747,7 @@ public:
 				when(wait(checkSignal)) {
 					checkSignal = Never();
 					isFetchingResults = true;
-					serverListAndProcessClasses = self->txnProcessor->getServerListAndProcessClasses();
+					serverListAndProcessClasses = NativeAPI::getServerListAndProcessClasses(&tr);
 				}
 				when(std::vector<std::pair<StorageServerInterface, ProcessClass>> results =
 				         wait(serverListAndProcessClasses)) {

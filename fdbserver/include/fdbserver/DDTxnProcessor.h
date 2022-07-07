@@ -36,7 +36,7 @@ public:
 	virtual Future<SourceServers> getSourceServersForRange(const KeyRangeRef range) const = 0;
 
 	// get the storage server list and Process class
-	virtual Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses() = 0;
+	// virtual Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses() = 0;
 
 	virtual Database getDatabase() const { return {}; }
 
@@ -73,7 +73,7 @@ public:
 	Future<SourceServers> getSourceServersForRange(const KeyRangeRef range) const override;
 
 	// Call NativeAPI implementation directly
-	Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses() override;
+	// Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses() override;
 
 	Database getDatabase() const override { return cx; }
 
