@@ -19,6 +19,7 @@
  */
 
 #include "flow/Arena.h"
+#include "flow/AutoCPointer.h"
 #include "flow/IRandom.h"
 #include "flow/MkCert.h"
 #include "flow/PKey.h"
@@ -34,6 +35,7 @@
 #include <openssl/evp.h>
 #include <openssl/objects.h>
 #include <openssl/pem.h>
+#include <openssl/rsa.h>
 #include <openssl/x509.h>
 #include <openssl/x509v3.h>
 
@@ -107,26 +109,23 @@ void printCert(FILE* out, StringRef certPem) {
 
 void printPrivateKey(FILE* out, StringRef privateKeyPem) {
 	auto key = PrivateKey(PemEncoded{}, privateKeyPem);
-	auto bio = ::BIO_new_fp(out, BIO_NOCLOSE);
+	auto bio = AutoCPointer(::BIO_new_fp(out, BIO_NOCLOSE), &::BIO_free);
 	OSSL_ASSERT(bio);
-	auto bioGuard = ScopeExit([bio]() { ::BIO_free(bio); });
 	OSSL_ASSERT(0 < ::EVP_PKEY_print_private(bio, key.nativeHandle(), 0, nullptr));
 }
 
 std::shared_ptr<X509> readX509CertPem(StringRef x509CertPem) {
 	ASSERT(!x509CertPem.empty());
-	auto bio_mem = ::BIO_new_mem_buf(x509CertPem.begin(), x509CertPem.size());
+	auto bio_mem = AutoCPointer(::BIO_new_mem_buf(x509CertPem.begin(), x509CertPem.size()), &::BIO_free);
 	OSSL_ASSERT(bio_mem);
-	auto bioGuard = ScopeExit([bio_mem]() { ::BIO_free(bio_mem); });
 	auto ret = ::PEM_read_bio_X509(bio_mem, nullptr, nullptr, nullptr);
 	OSSL_ASSERT(ret);
 	return std::shared_ptr<X509>(ret, &::X509_free);
 }
 
 StringRef writeX509CertPem(Arena& arena, const std::shared_ptr<X509>& nativeCert) {
-	auto mem = ::BIO_new(::BIO_s_mem());
+	auto mem = AutoCPointer(::BIO_new(::BIO_s_mem()), &::BIO_free);
 	OSSL_ASSERT(mem);
-	auto memGuard = ScopeExit([mem]() { ::BIO_free(mem); });
 	OSSL_ASSERT(::PEM_write_bio_X509(mem, nativeCert.get()));
 	auto bioBuf = std::add_pointer_t<char>{};
 	auto const len = ::BIO_get_mem_data(mem, &bioBuf);
@@ -137,26 +136,54 @@ StringRef writeX509CertPem(Arena& arena, const std::shared_ptr<X509>& nativeCert
 }
 
 PrivateKey makeEcP256() {
-	auto params = std::add_pointer_t<EVP_PKEY>();
+	auto params = AutoCPointer(nullptr, &::EVP_PKEY_free);
 	{
-		auto pctx = ::EVP_PKEY_CTX_new_id(EVP_PKEY_EC, nullptr);
+		auto paramsRaw = std::add_pointer_t<EVP_PKEY>();
+		auto pctx = AutoCPointer(::EVP_PKEY_CTX_new_id(EVP_PKEY_EC, nullptr), &::EVP_PKEY_CTX_free);
 		OSSL_ASSERT(pctx);
-		auto ctxGuard = ScopeExit([pctx]() { ::EVP_PKEY_CTX_free(pctx); });
 		OSSL_ASSERT(0 < ::EVP_PKEY_paramgen_init(pctx));
 		OSSL_ASSERT(0 < ::EVP_PKEY_CTX_set_ec_paramgen_curve_nid(pctx, NID_X9_62_prime256v1));
-		OSSL_ASSERT(0 < ::EVP_PKEY_paramgen(pctx, &params));
-		OSSL_ASSERT(params);
+		OSSL_ASSERT(0 < ::EVP_PKEY_paramgen(pctx, &paramsRaw));
+		OSSL_ASSERT(paramsRaw);
+		params.reset(paramsRaw);
 	}
-	auto paramsGuard = ScopeExit([params]() { ::EVP_PKEY_free(params); });
 	// keygen
-	auto kctx = ::EVP_PKEY_CTX_new(params, nullptr);
+	auto kctx = AutoCPointer(::EVP_PKEY_CTX_new(params, nullptr), &::EVP_PKEY_CTX_free);
 	OSSL_ASSERT(kctx);
-	auto kctxGuard = ScopeExit([kctx]() { ::EVP_PKEY_CTX_free(kctx); });
-	auto key = std::add_pointer_t<EVP_PKEY>();
+	auto key = AutoCPointer(nullptr, &::EVP_PKEY_free);
+	auto keyRaw = std::add_pointer_t<EVP_PKEY>();
 	OSSL_ASSERT(0 < ::EVP_PKEY_keygen_init(kctx));
-	OSSL_ASSERT(0 < ::EVP_PKEY_keygen(kctx, &key));
-	OSSL_ASSERT(key);
-	return std::shared_ptr<EVP_PKEY>(key, &::EVP_PKEY_free);
+	OSSL_ASSERT(0 < ::EVP_PKEY_keygen(kctx, &keyRaw));
+	OSSL_ASSERT(keyRaw);
+	key.reset(keyRaw);
+	auto len = 0;
+	len = ::i2d_PrivateKey(key, nullptr);
+	ASSERT_LT(0, len);
+	auto tmpArena = Arena();
+	auto buf = new (tmpArena) uint8_t[len];
+	auto out = std::add_pointer_t<uint8_t>(buf);
+	len = ::i2d_PrivateKey(key, &out);
+	return PrivateKey(DerEncoded{}, StringRef(buf, len));
+}
+
+PrivateKey makeRsa2048Bit() {
+	auto kctx = AutoCPointer(::EVP_PKEY_CTX_new_id(EVP_PKEY_RSA, nullptr), &::EVP_PKEY_CTX_free);
+	OSSL_ASSERT(kctx);
+	auto key = AutoCPointer(nullptr, &::EVP_PKEY_free);
+	auto keyRaw = std::add_pointer_t<EVP_PKEY>();
+	OSSL_ASSERT(0 < ::EVP_PKEY_keygen_init(kctx));
+	OSSL_ASSERT(0 < ::EVP_PKEY_CTX_set_rsa_keygen_bits(kctx, 2048));
+	OSSL_ASSERT(0 < ::EVP_PKEY_keygen(kctx, &keyRaw));
+	OSSL_ASSERT(keyRaw);
+	key.reset(keyRaw);
+	auto len = 0;
+	len = ::i2d_PrivateKey(key, nullptr);
+	ASSERT_LT(0, len);
+	auto tmpArena = Arena();
+	auto buf = new (tmpArena) uint8_t[len];
+	auto out = std::add_pointer_t<uint8_t>(buf);
+	len = ::i2d_PrivateKey(key, &out);
+	return PrivateKey(DerEncoded{}, StringRef(buf, len));
 }
 
 CertAndKeyNative makeCertNative(CertSpecRef spec, CertAndKeyNative issuer) {

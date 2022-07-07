@@ -175,7 +175,7 @@ Reference<ITransaction> ThreadSafeTenant::createTransaction() {
 
 ThreadFuture<Key> ThreadSafeTenant::purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) {
 	DatabaseContext* db = this->db->db;
-	Standalone<StringRef> tenantName = this->name;
+	TenantName tenantName = this->name;
 	KeyRange range = keyRange;
 	return onMainThread([db, range, purgeVersion, tenantName, force]() -> Future<Key> {
 		return db->purgeBlobGranules(range, purgeVersion, tenantName, force);
