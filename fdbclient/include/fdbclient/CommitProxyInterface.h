@@ -552,4 +552,41 @@ struct ExclusionSafetyCheckRequest {
 	}
 };
 
+struct GlobalConfigMigrateRequest {
+	constexpr static FileIdentifier file_identifier = 2728084;
+	ReplyPromise<Void> reply;
+
+	GlobalConfigMigrateRequest() {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply);
+	}
+};
+
+struct GlobalConfigRefreshReply {
+	constexpr static FileIdentifier file_identifier = 12680327;
+	RangeResultRef result;
+
+	GlobalConfigRefreshReply() {}
+	explicit GlobalConfigRefreshReply(RangeResultRef result) : result(result) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, result);
+	}
+};
+
+struct GlobalConfigRefreshRequest {
+	constexpr static FileIdentifier file_identifier = 2828131;
+	ReplyPromise<GlobalConfigRefreshReply> reply;
+
+	GlobalConfigRefreshRequest() {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply);
+	}
+};
+
 #endif

@@ -18,9 +18,11 @@
  * limitations under the License.
  */
 
+#include "fdbclient/DatabaseContext.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/TransactionLineage.h"
+#include "fdbclient/Tuple.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/LogSystemDiskQueueAdapter.h"
 #include "fdbclient/CommitProxyInterface.h"
@@ -297,6 +299,94 @@ ACTOR Future<Void> healthMetricsRequestServer(GrvProxyInterface grvProxy,
 					req.reply.send(*detailedHealthMetricsReply);
 				else
 					req.reply.send(*healthMetricsReply);
+			}
+		}
+	}
+}
+
+ACTOR Future<Void> globalConfigMigrate(GrvProxyData* grvProxyData) {
+	state Key migratedKey("\xff\x02/fdbClientInfo/migrated/"_sr);
+	state Reference<ReadYourWritesTransaction> tr;
+	try {
+		state Backoff backoff;
+		loop {
+			tr = makeReference<ReadYourWritesTransaction>(grvProxyData->cx);
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+
+			try {
+				state Optional<Value> migrated = wait(tr->get(migratedKey));
+				if (migrated.present()) {
+					// Already performed migration.
+					return Void();
+				}
+
+				state Optional<Value> sampleRate =
+				    wait(tr->get(Key("\xff\x02/fdbClientInfo/client_txn_sample_rate/"_sr)));
+				state Optional<Value> sizeLimit =
+				    wait(tr->get(Key("\xff\x02/fdbClientInfo/client_txn_size_limit/"_sr)));
+
+				tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+				// The value doesn't matter too much, as long as the key is set.
+				tr->set(migratedKey.contents(), "1"_sr);
+				if (sampleRate.present()) {
+					const double sampleRateDbl =
+					    BinaryReader::fromStringRef<double>(sampleRate.get().contents(), Unversioned());
+					Tuple rate = Tuple().appendDouble(sampleRateDbl);
+					tr->set(GlobalConfig::prefixedKey(fdbClientInfoTxnSampleRate), rate.pack());
+				}
+				if (sizeLimit.present()) {
+					const int64_t sizeLimitInt =
+					    BinaryReader::fromStringRef<int64_t>(sizeLimit.get().contents(), Unversioned());
+					Tuple size = Tuple().append(sizeLimitInt);
+					tr->set(GlobalConfig::prefixedKey(fdbClientInfoTxnSizeLimit), size.pack());
+				}
+
+				wait(tr->commit());
+				break;
+			} catch (Error& e) {
+				// If multiple fdbserver processes are started at once, they will all
+				// attempt this migration at the same time, sometimes resulting in
+				// aborts due to conflicts. Purposefully avoid retrying, making this
+				// migration best-effort.
+				TraceEvent(SevInfo, "GlobalConfig_RetryableMigrationError").errorUnsuppressed(e).suppressFor(1.0);
+				wait(tr->onError(e));
+				tr.clear();
+				// tr is cleared, so it won't backoff properly. Use custom backoff logic here.
+				wait(backoff.onError());
+			}
+		}
+	} catch (Error& e) {
+		// Catch non-retryable errors (and do nothing).
+		TraceEvent(SevWarnAlways, "GlobalConfig_MigrationError").error(e);
+	}
+	return Void();
+}
+
+ACTOR Future<Void> globalConfigRequestServer(GrvProxyData* grvProxyData, GrvProxyInterface grvProxy) {
+	loop {
+		choose {
+			when(state GlobalConfigMigrateRequest migrate = waitNext(grvProxy.migrateGlobalConfig.getFuture())) {
+				wait(success(globalConfigMigrate(grvProxyData)));
+				migrate.reply.send(Void());
+			}
+			when(state GlobalConfigRefreshRequest refresh = waitNext(grvProxy.refreshGlobalConfig.getFuture())) {
+				state Backoff backoff;
+
+				state Reference<ReadYourWritesTransaction> tr;
+				loop {
+					try {
+						tr = makeReference<ReadYourWritesTransaction>(grvProxyData->cx);
+						tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+						RangeResult result = wait(tr->getRange(globalConfigDataKeys, CLIENT_KNOBS->TOO_MANY));
+						refresh.reply.send(GlobalConfigRefreshReply{ result });
+						break;
+					} catch (Error& e) {
+						wait(tr->onError(e));
+						tr.clear();
+						// tr is cleared, so it won't backoff properly. Use custom backoff logic here.
+						wait(backoff.onError());
+					}
+				}
 			}
 		}
 	}
@@ -1012,6 +1102,7 @@ ACTOR Future<Void> grvProxyServerCore(GrvProxyInterface proxy,
 	addActor.send(transactionStarter(
 	    proxy, grvProxyData.db, addActor, &grvProxyData, &healthMetricsReply, &detailedHealthMetricsReply));
 	addActor.send(healthMetricsRequestServer(proxy, &healthMetricsReply, &detailedHealthMetricsReply));
+	addActor.send(globalConfigRequestServer(&grvProxyData, proxy));
 
 	if (SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION > 0) {
 		addActor.send(lastCommitUpdater(&grvProxyData, addActor));
