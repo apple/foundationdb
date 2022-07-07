@@ -103,16 +103,6 @@ std::string ClusterConnectionFile::toString() const {
 	return "file://" + filename;
 }
 
-// Return the specified path of the cluster file
-Optional<std::string> ClusterConnectionFile::getFilename() const {
-	return filename;
-}
-
-// Returns true because cluster files are supported through the C API
-bool ClusterConnectionFile::supportedExternally() const {
-	return true;
-}
-
 // returns <resolved name, was default file>
 std::pair<std::string, bool> ClusterConnectionFile::lookupClusterFileName(std::string const& filename) {
 	if (filename.length())

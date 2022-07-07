@@ -24,7 +24,6 @@
 #define FDB_API_VERSION 720
 #define FDB_INCLUDE_LEGACY_TYPES
 
-#include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/MultiVersionTransaction.h"
 #include "fdbclient/MultiVersionAssignmentVars.h"
 #include "foundationdb/fdb_c.h"
@@ -361,7 +360,8 @@ void fdb_cluster_destroy_v609(FDBCluster* c) {
 // If it does and this is an external client loaded though the multi-version API, then it may inadvertently call
 // the version of the function in the primary library if it was loaded into the global symbols.
 fdb_error_t fdb_create_database_impl(const char* cluster_file_path, FDBDatabase** out_database) {
-	CATCH_AND_RETURN(*out_database = (FDBDatabase*)API->createDatabase(cluster_file_path).extractPtr(););
+	CATCH_AND_RETURN(*out_database =
+	                     (FDBDatabase*)API->createDatabase(cluster_file_path ? cluster_file_path : "").extractPtr(););
 }
 
 FDBFuture* fdb_cluster_create_database_v609(FDBCluster* c, uint8_t const* db_name, int db_name_length) {

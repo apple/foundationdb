@@ -57,11 +57,6 @@ std::string ClusterConnectionMemoryRecord::toString() const {
 	return "memory://" + id.toString();
 }
 
-// Returns true because memory connection records are supported through the C API
-bool ClusterConnectionMemoryRecord::supportedExternally() const {
-	return true;
-}
-
 // This is a no-op for memory records. Returns true to indicate success.
 Future<bool> ClusterConnectionMemoryRecord::persist() {
 	return true;

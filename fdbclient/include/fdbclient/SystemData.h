@@ -26,7 +26,6 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/BlobWorkerInterface.h" // TODO move the functions that depend on this out of here and into BlobWorkerInterface.h to remove this depdendency
-#include "fdbclient/Metacluster.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "Tenant.h"
 

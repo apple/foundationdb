@@ -22,7 +22,6 @@
 #define FDBCLIENT_ICLIENTAPI_H
 #pragma once
 
-#include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/Tenant.h"

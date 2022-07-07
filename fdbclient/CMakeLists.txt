@@ -23,13 +23,12 @@ vexillographer_compile(TARGET fdboptions_c LANG c OUT ${CMAKE_CURRENT_BINARY_DIR
 add_custom_target(fdboptions DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/include/fdbclient/FDBOptions.g.h)
 add_dependencies(fdboptions fdboptions_c)
 
-# ###############################################################################
+################################################################################
 # Build information
-# ###############################################################################
+################################################################################
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/BuildFlags.h.in ${CMAKE_CURRENT_BINARY_DIR}/include/fdbclient/BuildFlags.h)
 
 set(BUILD_AZURE_BACKUP OFF CACHE BOOL "Build Azure backup client")
-
 if(BUILD_AZURE_BACKUP)
   add_compile_definitions(BUILD_AZURE_BACKUP)
   set(FDBCLIENT_SRCS
@@ -64,6 +63,7 @@ if(BUILD_AZURE_BACKUP)
   )
 endif()
 
+
 if(WITH_AWS_BACKUP)
   add_compile_definitions(BUILD_AWS_BACKUP)
   include(awssdk)
@@ -83,7 +83,6 @@ target_include_directories(fdbclient_sampling PUBLIC "${CMAKE_CURRENT_SOURCE_DIR
 add_dependencies(fdbclient_sampling fdboptions)
 target_link_libraries(fdbclient_sampling PUBLIC fdbrpc_sampling msgpack PRIVATE rapidxml)
 target_compile_definitions(fdbclient_sampling PRIVATE -DENABLE_SAMPLING)
-
 if(WIN32)
   add_dependencies(fdbclient_sampling_actors fdbclient_actors)
 endif()

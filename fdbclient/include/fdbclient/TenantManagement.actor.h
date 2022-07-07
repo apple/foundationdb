@@ -28,6 +28,7 @@
 #include <string>
 #include <map>
 #include "fdbclient/GenericTransactionHelper.h"
+#include "fdbclient/Metacluster.h"
 #include "fdbclient/SystemData.h"
 #include "flow/actorcompiler.h" // has to be last include
 

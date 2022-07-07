@@ -258,7 +258,7 @@ private:
 
 	static std::unordered_map<SpecialKeySpace::MODULE, KeyRange> moduleToBoundary;
 
-	// module command to special keys range
+	// management command to its special keys' range
 	static std::unordered_map<std::string, KeyRange> managementApiCommandToRange;
 	static std::unordered_map<std::string, KeyRange> actorLineageApiCommandToRange;
 

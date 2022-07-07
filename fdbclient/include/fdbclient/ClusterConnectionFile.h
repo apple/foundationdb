@@ -25,9 +25,7 @@
 #include "fdbclient/CoordinationInterface.h"
 
 // An implementation of IClusterConnectionRecord backed by a file.
-class ClusterConnectionFile : public IClusterConnectionRecord,
-                              ThreadSafeReferenceCounted<ClusterConnectionFile>,
-                              NonCopyable {
+class ClusterConnectionFile : public IClusterConnectionRecord, ReferenceCounted<ClusterConnectionFile>, NonCopyable {
 public:
 	// Loads and parses the file at 'filename', throwing errors if the file cannot be read or the format is invalid.
 	explicit ClusterConnectionFile(std::string const& filename);
@@ -61,14 +59,8 @@ public:
 	// filename of the cluster file.
 	std::string toString() const override;
 
-	// Return the specified path of the cluster file
-	virtual Optional<std::string> getFilename() const override;
-
-	// Returns true because cluster files are supported through the C API
-	bool supportedExternally() const override;
-
-	void addref() override { ThreadSafeReferenceCounted<ClusterConnectionFile>::addref(); }
-	void delref() override { ThreadSafeReferenceCounted<ClusterConnectionFile>::delref(); }
+	void addref() override { ReferenceCounted<ClusterConnectionFile>::addref(); }
+	void delref() override { ReferenceCounted<ClusterConnectionFile>::delref(); }
 
 	// returns <resolved name, was default file>
 	static std::pair<std::string, bool> lookupClusterFileName(std::string const& filename);

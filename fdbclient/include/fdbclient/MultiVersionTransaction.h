@@ -522,8 +522,8 @@ class MultiVersionDatabase;
 class MultiVersionTenant;
 
 // An implementation of ITransaction that wraps a transaction created either locally or through a dynamically loaded
-// external client. When needed (e.g on cluster version change), the MultiVersionTransaction can automatically
-// replace its wrapped transaction with one from another client.
+// external client. When needed (e.g on cluster version change), the MultiVersionTransaction can automatically replace
+// its wrapped transaction with one from another client.
 class MultiVersionTransaction : public ITransaction, ThreadSafeReferenceCounted<MultiVersionTransaction> {
 public:
 	MultiVersionTransaction(Reference<MultiVersionDatabase> db,
@@ -625,8 +625,8 @@ private:
 	// A lock that needs to be held if using timeoutTsav or currentTimeout
 	ThreadSpinLock timeoutLock;
 
-	// A single assignment var (i.e. promise) that gets set with an error when the timeout elapses or the
-	// transaction is reset or destroyed.
+	// A single assignment var (i.e. promise) that gets set with an error when the timeout elapses or the transaction
+	// is reset or destroyed.
 	Reference<ThreadSingleAssignmentVar<Void>> timeoutTsav;
 
 	// A reference to the current actor waiting for the timeout. This actor will set the timeoutTsav promise.
@@ -793,8 +793,8 @@ public:
 	double getMainThreadBusyness() override;
 
 	// Returns the protocol version reported by the coordinator this client is connected to
-	// If an expected version is given, the future won't return until the protocol version is different than
-	// expected Note: this will never return if the server is running a protocol from FDB 5.0 or older
+	// If an expected version is given, the future won't return until the protocol version is different than expected
+	// Note: this will never return if the server is running a protocol from FDB 5.0 or older
 	ThreadFuture<ProtocolVersion> getServerProtocol(
 	    Optional<ProtocolVersion> expectedVersion = Optional<ProtocolVersion>()) override;
 
