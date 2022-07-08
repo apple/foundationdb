@@ -994,7 +994,9 @@ ACTOR Future<Void> fetchShardMetricsList_impl(DataDistributionTracker* self, Get
 ACTOR Future<Void> fetchShardMetricsList(DataDistributionTracker* self, GetMetricsListRequest req) {
 	choose {
 		when(wait(fetchShardMetricsList_impl(self, req))) {}
-		when(wait(delay(SERVER_KNOBS->DD_SHARD_METRICS_TIMEOUT))) { req.reply.sendError(timed_out()); }
+		when(wait(delay(SERVER_KNOBS->DD_SHARD_METRICS_TIMEOUT))) {
+			req.reply.sendError(timed_out());
+		}
 	}
 	return Void();
 }
@@ -1219,4 +1221,51 @@ void ShardsAffectedByTeamFailure::check() const {
 			}
 		}
 	}
+}
+
+ACTOR Future<Void> buildShardsAffectedByTeamFailure(ShardsAffectedByTeamFailure* self,
+                                                    Reference<InitialDataDistribution> initData,
+                                                    PromiseStream<RelocateShard> output,
+                                                    DatabaseConfiguration configuration) {
+	state int shard = 0;
+	for (; shard < initData->shards.size() - 1; shard++) {
+		KeyRangeRef keys = KeyRangeRef(initData->shards[shard].key, initData->shards[shard + 1].key);
+		self->defineShard(keys);
+		std::vector<ShardsAffectedByTeamFailure::Team> teams;
+		teams.push_back(ShardsAffectedByTeamFailure::Team(initData->shards[shard].primarySrc, true));
+		if (configuration.usableRegions > 1) {
+			teams.push_back(ShardsAffectedByTeamFailure::Team(initData->shards[shard].remoteSrc, false));
+		}
+		if (g_network->isSimulated()) {
+			TraceEvent("DDInitShard")
+			    .detail("Keys", keys)
+			    .detail("PrimarySrc", describe(initData->shards[shard].primarySrc))
+			    .detail("RemoteSrc", describe(initData->shards[shard].remoteSrc))
+			    .detail("PrimaryDest", describe(initData->shards[shard].primaryDest))
+			    .detail("RemoteDest", describe(initData->shards[shard].remoteDest));
+		}
+
+		self->moveShard(keys, teams);
+		if (initData->shards[shard].hasDest) {
+			// This shard is already in flight.  Ideally we should use dest in ShardsAffectedByTeamFailure
+			// and generate a dataDistributionRelocator directly in DataDistributionQueue to track it, but
+			// it's easier to just (with low priority) schedule it for movement.
+			bool unhealthy = initData->shards[shard].primarySrc.size() != configuration.storageTeamSize;
+			if (!unhealthy && configuration.usableRegions > 1) {
+				unhealthy = initData->shards[shard].remoteSrc.size() != configuration.storageTeamSize;
+			}
+			output.send(
+			    RelocateShard(keys,
+			                  unhealthy ? SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY : SERVER_KNOBS->PRIORITY_RECOVER_MOVE,
+			                  RelocateReason::OTHER));
+		}
+		wait(yield(TaskPriority::DataDistribution));
+	}
+	return Void();
+}
+
+Future<Void> ShardsAffectedByTeamFailure::build(Reference<InitialDataDistribution> initData,
+                                                PromiseStream<RelocateShard> output,
+                                                DatabaseConfiguration& configuration) {
+	return buildShardsAffectedByTeamFailure(this, initData, output, configuration);
 }

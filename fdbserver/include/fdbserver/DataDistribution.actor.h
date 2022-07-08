@@ -33,6 +33,13 @@
 #include "fdbclient/RunTransaction.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+struct InitialDataDistribution;
+struct DataDistributorData;
+class DDTeamCollection;
+class TenantCache;
+// Determines the maximum shard size based on the size of the database
+int64_t getMaxShardSize(double dbSizeEstimate);
+
 enum class RelocateReason { INVALID = -1, OTHER, REBALANCE_DISK, REBALANCE_READ };
 
 struct RelocateShard {
@@ -254,6 +261,7 @@ public:
 	void moveShard(KeyRangeRef keys, std::vector<Team> destinationTeam);
 	void finishMove(KeyRangeRef keys);
 	void check() const;
+	Future<Void> build(Reference<InitialDataDistribution> initData, PromiseStream<RelocateShard>, DatabaseConfiguration&);
 
 private:
 	struct OrderByTeamKey {
@@ -317,9 +325,6 @@ struct ShardTrackedData {
 	Reference<AsyncVar<Optional<ShardMetrics>>> stats;
 };
 
-struct DataDistributorData;
-
-class DDTeamCollection;
 // The static ACTOR wrapper
 class DataDistributorImpl;
 // A wrapper of DataDistribution actor
@@ -343,7 +348,10 @@ class DataDistributor : NonCopyable, ReferenceCounted<DataDistributor> {
 	// when tracker is cancelled
 	KeyRangeMap<ShardTrackedData> shards;
 	Promise<UID> removeFailedServer;
+	// in-memory shard map
 	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
+	// the RelocateShard is pushed into relocateProducer, and fetched from relocateConsumer
+	PromiseStream<RelocateShard> relocateProducer, relocateConsumer;
 
 	Reference<TenantCache> ddTenantCache;
 
@@ -395,14 +403,8 @@ struct ShardSizeBounds {
 		return max == rhs.max && min == rhs.min && permittedError == rhs.permittedError;
 	}
 };
-
 // Gets the permitted size and IO bounds for a shard
 ShardSizeBounds getShardSizeBounds(KeyRangeRef shard, int64_t maxShardSize);
-
-// Determines the maximum shard size based on the size of the database
-int64_t getMaxShardSize(double dbSizeEstimate);
-
-class DDTeamCollection;
 
 struct StorageWiggleMetrics {
 	constexpr static FileIdentifier file_identifier = 4728961;

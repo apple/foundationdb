@@ -19,7 +19,7 @@
  */
 
 #include "fdbserver/DDTxnProcessor.h"
-#include "fdbserver/MoveKeys.actor.h"
+#include "fdbserver/DataDistribution.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -347,6 +347,21 @@ class DDTxnProcessorImpl {
 			}
 		}
 	}
+
+	ACTOR static Future<Void> pollMoveKeysLock(Database cx, MoveKeysLock lock, std::shared_ptr<DDEnabledState> ddEnabledState){
+		loop {
+			wait(delay(SERVER_KNOBS->MOVEKEYS_LOCK_POLLING_DELAY));
+			state Transaction tr(cx);
+			loop {
+				try {
+					wait(checkMoveKeysLockReadOnly(&tr, lock, ddEnabledState.get()));
+					break;
+				} catch (Error& e) {
+					wait(tr.onError(e));
+				}
+			}
+		}
+	}
 };
 
 Future<IDDTxnProcessor::SourceServers> DDTxnProcessor::getSourceServersForRange(const KeyRangeRef range) const {
@@ -355,6 +370,10 @@ Future<IDDTxnProcessor::SourceServers> DDTxnProcessor::getSourceServersForRange(
 
 Future<MoveKeysLock> DDTxnProcessor::takeMoveKeysLock(UID ddId) const {
 	return ::takeMoveKeysLock(cx, ddId);
+}
+
+Future<Void> DDTxnProcessor::pollMoveKeysLock(MoveKeysLock lock, std::shared_ptr<DDEnabledState> ddEnabledState) const {
+	return DDTxnProcessorImpl::pollMoveKeysLock(cx, lock, ddEnabledState);
 }
 
 Future<DatabaseConfiguration> DDTxnProcessor::getDatabaseConfiguration() const {

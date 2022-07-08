@@ -22,8 +22,8 @@
 #define FOUNDATIONDB_DDTXNPROCESSOR_H
 
 #include "fdbserver/Knobs.h"
-#include "fdbserver/DataDistribution.actor.h"
-#include "DataDistribution.actor.h"
+#include "fdbserver/MoveKeys.actor.h"
+#include "fdbclient/DatabaseConfiguration.h"
 
 struct InitialDataDistribution;
 
@@ -36,13 +36,18 @@ public:
 	virtual Future<SourceServers> getSourceServersForRange(const KeyRangeRef range) const = 0;
 
 	// get the storage server list and Process class
-	// virtual Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses() = 0;
+	// virtual Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses() =
+	// 0;
 
 	virtual Database getDatabase() const { return {}; }
 
 	virtual ~IDDTxnProcessor() = default;
 
 	virtual Future<MoveKeysLock> takeMoveKeysLock(UID ddId) const { return MoveKeysLock(); }
+
+	virtual Future<Void> pollMoveKeysLock(MoveKeysLock lock, std::shared_ptr<DDEnabledState> ddEnabledState) const {
+		return Never();
+	}
 
 	virtual Future<DatabaseConfiguration> getDatabaseConfiguration() const { return DatabaseConfiguration(); }
 
@@ -80,6 +85,8 @@ public:
 	Database getDatabase() const override { return cx; }
 
 	Future<MoveKeysLock> takeMoveKeysLock(UID ddId) const override;
+
+	Future<Void> pollMoveKeysLock(MoveKeysLock lock, std::shared_ptr<DDEnabledState> ddEnabledState) const override;
 
 	Future<DatabaseConfiguration> getDatabaseConfiguration() const override;
 
