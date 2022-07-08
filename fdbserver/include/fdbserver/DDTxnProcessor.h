@@ -23,7 +23,13 @@
 
 #include "fdbserver/Knobs.h"
 #include "fdbserver/DataDistribution.actor.h"
+#include "fdbserver/MoveKeys.actor.h"
 
+/* Testability Contract:
+ * a. The DataDistributor has to use this interface to interact with data-plane (aka. run transaction), because the
+ * testability benefits from a mock implementation; b. Other control-plane roles should consider providing its own
+ * TxnProcessor interface to provide testability, for example, Ratekeeper.
+ * */
 class IDDTxnProcessor {
 public:
 	struct SourceServers {
@@ -36,6 +42,8 @@ public:
 	virtual Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses() = 0;
 
 	virtual ~IDDTxnProcessor() = default;
+
+	[[nodiscard]] virtual Future<MoveKeysLock> takeMoveKeysLock(UID ddId) const { return MoveKeysLock(); }
 };
 
 class DDTxnProcessorImpl;
@@ -53,6 +61,8 @@ public:
 
 	// Call NativeAPI implementation directly
 	Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses() override;
+
+	Future<MoveKeysLock> takeMoveKeysLock(UID ddId) const override;
 };
 
 // run mock transaction

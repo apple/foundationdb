@@ -98,3 +98,7 @@ Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> DDTxnProces
 	Transaction tr(cx);
 	return NativeAPI::getServerListAndProcessClasses(&tr);
 }
+
+Future<MoveKeysLock> DDTxnProcessor::takeMoveKeysLock(UID ddId) const {
+	return ::takeMoveKeysLock(cx, ddId);
+}

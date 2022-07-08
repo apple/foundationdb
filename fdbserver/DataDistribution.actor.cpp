@@ -36,7 +36,6 @@
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/Knobs.h"
-#include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/TenantCache.h"
@@ -557,30 +556,38 @@ ACTOR Future<Void> pollMoveKeysLock(Database cx, MoveKeysLock lock, const DDEnab
 	}
 }
 
-struct DataDistributorData : NonCopyable, ReferenceCounted<DataDistributorData> {
+struct DataDistributor : NonCopyable, ReferenceCounted<DataDistributor> {
 	Reference<AsyncVar<ServerDBInfo> const> dbInfo;
 	UID ddId;
 	PromiseStream<Future<Void>> addActor;
+
+	// State initialized when bootstrap
 	DDTeamCollection* teamCollection;
+	std::shared_ptr<IDDTxnProcessor> txnProcessor;
+	MoveKeysLock lock;
+
 	Reference<EventCacheHolder> initialDDEventHolder;
 	Reference<EventCacheHolder> movingDataEventHolder;
 	Reference<EventCacheHolder> totalDataInFlightEventHolder;
 	Reference<EventCacheHolder> totalDataInFlightRemoteEventHolder;
 
-	DataDistributorData(Reference<AsyncVar<ServerDBInfo> const> const& db, UID id)
-	  : dbInfo(db), ddId(id), teamCollection(nullptr),
+	DataDistributor(Reference<AsyncVar<ServerDBInfo> const> const& db, UID id)
+	  : dbInfo(db), ddId(id), teamCollection(nullptr), txnProcessor(nullptr),
 	    initialDDEventHolder(makeReference<EventCacheHolder>("InitialDD")),
 	    movingDataEventHolder(makeReference<EventCacheHolder>("MovingData")),
 	    totalDataInFlightEventHolder(makeReference<EventCacheHolder>("TotalDataInFlight")),
 	    totalDataInFlightRemoteEventHolder(makeReference<EventCacheHolder>("TotalDataInFlightRemote")) {}
+
+	Future<Void> takeMoveKeysLock() { return store(lock, txnProcessor->takeMoveKeysLock(ddId)); }
 };
 
 // Runs the data distribution algorithm for FDB, including the DD Queue, DD tracker, and DD team collection
-ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
+ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
                                     PromiseStream<GetMetricsListRequest> getShardMetricsList,
                                     const DDEnabledState* ddEnabledState) {
 	state Database cx = openDBOnServer(self->dbInfo, TaskPriority::DataDistributionLaunch, LockAware::True);
 	cx->locationCacheSize = SERVER_KNOBS->DD_LOCATION_CACHE_SIZE;
+	self->txnProcessor = std::shared_ptr<IDDTxnProcessor>(new DDTxnProcessor(cx));
 
 	// cx->setOption( FDBDatabaseOptions::LOCATION_CACHE_SIZE, StringRef((uint8_t*)
 	// &SERVER_KNOBS->DD_LOCATION_CACHE_SIZE, 8) ); ASSERT( cx->locationCacheSize ==
@@ -588,11 +595,11 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 	// );
 
 	// wait(debugCheckCoalescing(cx));
+	// FIXME: wrap the bootstrap process into class DataDistributor
 	state std::vector<Optional<Key>> primaryDcId;
 	state std::vector<Optional<Key>> remoteDcIds;
 	state DatabaseConfiguration configuration;
 	state Reference<InitialDataDistribution> initData;
-	state MoveKeysLock lock;
 	state Reference<DDTeamCollection> primaryTeamCollection;
 	state Reference<DDTeamCollection> remoteTeamCollection;
 	state bool trackerCancelled;
@@ -607,8 +614,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 		try {
 			loop {
 				TraceEvent("DDInitTakingMoveKeysLock", self->ddId).log();
-				MoveKeysLock lock_ = wait(takeMoveKeysLock(cx, self->ddId));
-				lock = lock_;
+				wait(self->takeMoveKeysLock());
 				TraceEvent("DDInitTookMoveKeysLock", self->ddId).log();
 
 				DatabaseConfiguration configuration_ = wait(getDatabaseConfiguration(cx));
@@ -657,7 +663,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 				Reference<InitialDataDistribution> initData_ = wait(getInitialDataDistribution(
 				    cx,
 				    self->ddId,
-				    lock,
+				    self->lock,
 				    configuration.usableRegions > 1 ? remoteDcIds : std::vector<Optional<Key>>(),
 				    ddEnabledState));
 				initData = initData_;
@@ -841,7 +847,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 				    ddTenantCache->monitorTenantMap(), "DDTenantCacheMonitor", self->ddId, &normalDDQueueErrors()));
 			}
 
-			actors.push_back(pollMoveKeysLock(cx, lock, ddEnabledState));
+			actors.push_back(pollMoveKeysLock(cx, self->lock, ddEnabledState));
 			actors.push_back(reportErrorsExcept(dataDistributionTracker(initData,
 			                                                            cx,
 			                                                            output,
@@ -867,7 +873,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			                                                          processingWiggle,
 			                                                          tcis,
 			                                                          shardsAffectedByTeamFailure,
-			                                                          lock,
+			                                                          self->lock,
 			                                                          getAverageShardBytes,
 			                                                          getUnhealthyRelocationCount.getFuture(),
 			                                                          self->ddId,
@@ -882,7 +888,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			primaryTeamCollection = makeReference<DDTeamCollection>(
 			    cx,
 			    self->ddId,
-			    lock,
+			    self->lock,
 			    output,
 			    shardsAffectedByTeamFailure,
 			    configuration,
@@ -903,7 +909,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 				remoteTeamCollection =
 				    makeReference<DDTeamCollection>(cx,
 				                                    self->ddId,
-				                                    lock,
+				                                    self->lock,
 				                                    output,
 				                                    shardsAffectedByTeamFailure,
 				                                    configuration,
@@ -973,9 +979,10 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			if (removeFailedServer.getFuture().isReady() && !removeFailedServer.getFuture().isError()) {
 				TraceEvent("RemoveFailedServer", removeFailedServer.getFuture().get()).error(err);
 				wait(removeKeysFromFailedServer(
-				    cx, removeFailedServer.getFuture().get(), teamForDroppedRange, lock, ddEnabledState));
+				    cx, removeFailedServer.getFuture().get(), teamForDroppedRange, self->lock, ddEnabledState));
 				Optional<UID> tssPairID;
-				wait(removeStorageServer(cx, removeFailedServer.getFuture().get(), tssPairID, lock, ddEnabledState));
+				wait(removeStorageServer(
+				    cx, removeFailedServer.getFuture().get(), tssPairID, self->lock, ddEnabledState));
 			} else {
 				if (err.code() != error_code_movekeys_conflict) {
 					throw err;
@@ -1390,7 +1397,7 @@ ACTOR Future<Void> ddSnapCreate(
 }
 
 ACTOR Future<Void> ddExclusionSafetyCheck(DistributorExclusionSafetyCheckRequest req,
-                                          Reference<DataDistributorData> self,
+                                          Reference<DataDistributor> self,
                                           Database cx) {
 	TraceEvent("DDExclusionSafetyCheckBegin", self->ddId).log();
 	std::vector<StorageServerInterface> ssis = wait(getStorageServers(cx));
@@ -1482,7 +1489,7 @@ static int64_t getMedianShardSize(VectorRef<DDMetricsRef> metricVec) {
 	return metricVec[metricVec.size() / 2].shardBytes;
 }
 
-GetStorageWigglerStateReply getStorageWigglerStates(Reference<DataDistributorData> self) {
+GetStorageWigglerStateReply getStorageWigglerStates(Reference<DataDistributor> self) {
 	GetStorageWigglerStateReply reply;
 	if (self->teamCollection) {
 		std::tie(reply.primary, reply.lastStateChangePrimary) = self->teamCollection->getStorageWigglerState();
@@ -1520,7 +1527,7 @@ ACTOR Future<Void> ddGetMetrics(GetDataDistributorMetricsRequest req,
 }
 
 ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncVar<ServerDBInfo> const> db) {
-	state Reference<DataDistributorData> self(new DataDistributorData(db, di.id()));
+	state Reference<DataDistributor> self(new DataDistributor(db, di.id()));
 	state Future<Void> collection = actorCollection(self->addActor.getFuture());
 	state PromiseStream<GetMetricsListRequest> getShardMetricsList;
 	state Database cx = openDBOnServer(db, TaskPriority::DefaultDelay, LockAware::True);
