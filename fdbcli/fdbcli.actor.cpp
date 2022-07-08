@@ -1941,6 +1941,13 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					continue;
 				}
 
+				if (tokencmp(tokens[0], "configuretenant")) {
+					bool _result = wait(makeInterruptable(configureTenantCommandActor(db, tokens)));
+					if (!_result)
+						is_error = true;
+					continue;
+				}
+
 				if (tokencmp(tokens[0], "renametenant")) {
 					bool _result = wait(makeInterruptable(renameTenantCommandActor(db, tokens)));
 					if (!_result)
