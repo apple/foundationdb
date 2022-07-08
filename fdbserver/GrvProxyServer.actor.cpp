@@ -304,7 +304,7 @@ ACTOR Future<Void> healthMetricsRequestServer(GrvProxyInterface grvProxy,
 	}
 }
 
-ACTOR Future<Void> globalConfigMigrate(GrvProxyData* grvProxyData) {
+ACTOR Future<Void> globalConfigMigrate(GrvProxyData* grvProxyData, GlobalConfigMigrateRequest req) {
 	state Key migratedKey("\xff\x02/fdbClientInfo/migrated/"_sr);
 	state Reference<ReadYourWritesTransaction> tr;
 	try {
@@ -317,7 +317,7 @@ ACTOR Future<Void> globalConfigMigrate(GrvProxyData* grvProxyData) {
 				state Optional<Value> migrated = wait(tr->get(migratedKey));
 				if (migrated.present()) {
 					// Already performed migration.
-					return Void();
+					break;
 				}
 
 				state Optional<Value> sampleRate =
@@ -359,35 +359,74 @@ ACTOR Future<Void> globalConfigMigrate(GrvProxyData* grvProxyData) {
 		// Catch non-retryable errors (and do nothing).
 		TraceEvent(SevWarnAlways, "GlobalConfig_MigrationError").error(e);
 	}
+	req.reply.send(Void());
 	return Void();
 }
 
+ACTOR Future<Void> globalConfigHandleRefreshBatch(std::vector<GlobalConfigRefreshRequest> requests,
+                                                  GrvProxyData* grvProxyData) {
+	if (requests.size() == 0) {
+		return Void();
+	}
+
+	state Backoff backoff;
+	state Reference<ReadYourWritesTransaction> tr;
+	loop {
+		try {
+			tr = makeReference<ReadYourWritesTransaction>(grvProxyData->cx);
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			RangeResult result = wait(tr->getRange(globalConfigDataKeys, CLIENT_KNOBS->TOO_MANY));
+			for (const auto& req : requests) {
+				req.reply.send(GlobalConfigRefreshReply{ result });
+			}
+			break;
+		} catch (Error& e) {
+			wait(tr->onError(e));
+			tr.clear();
+			// tr is cleared, so it won't backoff properly. Use custom backoff logic here.
+			wait(backoff.onError());
+		}
+	}
+	return Void();
+}
+
+ACTOR Future<Void> globalConfigRefreshBatcher(GrvProxyData* grvProxyData,
+                                              GrvProxyInterface grvProxy,
+                                              PromiseStream<std::vector<GlobalConfigRefreshRequest>> out) {
+	loop {
+		state Future<Void> timeout = delay(SERVER_KNOBS->GLOBAL_CONFIG_MAX_REFRESH_BATCH_INTERVAL);
+		state std::vector<GlobalConfigRefreshRequest> requests;
+		loop {
+			choose {
+				when(GlobalConfigRefreshRequest refresh = waitNext(grvProxy.refreshGlobalConfig.getFuture())) {
+					requests.push_back(refresh);
+				}
+				when(wait(timeout)) { break; }
+			}
+		}
+		if (requests.size() > 0) {
+			out.send(requests);
+		}
+	}
+}
+
+// Handle common GlobalConfig transactions on the server side, because not all
+// clients are allowed to read system keys. Eventually, this could become its
+// own role.
 ACTOR Future<Void> globalConfigRequestServer(GrvProxyData* grvProxyData, GrvProxyInterface grvProxy) {
+	state ActorCollection actors(false);
+	state PromiseStream<std::vector<GlobalConfigRefreshRequest>> batchedRequests;
+	actors.add(globalConfigRefreshBatcher(grvProxyData, grvProxy, batchedRequests));
+
 	loop {
 		choose {
 			when(state GlobalConfigMigrateRequest migrate = waitNext(grvProxy.migrateGlobalConfig.getFuture())) {
-				wait(success(globalConfigMigrate(grvProxyData)));
-				migrate.reply.send(Void());
+				actors.add(globalConfigMigrate(grvProxyData, migrate));
 			}
-			when(state GlobalConfigRefreshRequest refresh = waitNext(grvProxy.refreshGlobalConfig.getFuture())) {
-				state Backoff backoff;
-
-				state Reference<ReadYourWritesTransaction> tr;
-				loop {
-					try {
-						tr = makeReference<ReadYourWritesTransaction>(grvProxyData->cx);
-						tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-						RangeResult result = wait(tr->getRange(globalConfigDataKeys, CLIENT_KNOBS->TOO_MANY));
-						refresh.reply.send(GlobalConfigRefreshReply{ result });
-						break;
-					} catch (Error& e) {
-						wait(tr->onError(e));
-						tr.clear();
-						// tr is cleared, so it won't backoff properly. Use custom backoff logic here.
-						wait(backoff.onError());
-					}
-				}
+			when(std::vector<GlobalConfigRefreshRequest> requests = waitNext(batchedRequests.getFuture())) {
+				actors.add(globalConfigHandleRefreshBatch(requests, grvProxyData));
 			}
+			when(wait(actors.getResult())) { ASSERT(false); }
 		}
 	}
 }

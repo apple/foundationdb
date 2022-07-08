@@ -399,6 +399,8 @@ public:
 	double RESET_MASTER_DELAY;
 	double RESET_RESOLVER_DELAY;
 
+	double GLOBAL_CONFIG_MAX_REFRESH_BATCH_INTERVAL;
+
 	// Master Server
 	double COMMIT_SLEEP_TIME;
 	double MIN_BALANCE_TIME;
