@@ -107,6 +107,10 @@ Future<std::pair<Optional<TenantMapEntry>, bool>> createTenantTransaction(Transa
 
 	state Future<Optional<TenantMapEntry>> existingEntryFuture = tryGetTenantTransaction(tr, name);
 	wait(checkTenantMode(tr));
+	state Future<Optional<TenantGroupEntry>> existingTenantGroupEntryFuture;
+	if (tenantEntry.tenantGroup.present()) {
+		existingTenantGroupEntryFuture = TenantMetadata::tenantGroupMap.get(tr, tenantEntry.tenantGroup.get());
+	}
 
 	Optional<TenantMapEntry> existingEntry = wait(existingEntryFuture);
 	if (existingEntry.present()) {
@@ -123,6 +127,15 @@ Future<std::pair<Optional<TenantMapEntry>, bool>> createTenantTransaction(Transa
 
 	tenantEntry.tenantState = TenantState::READY;
 	TenantMetadata::tenantMap.set(tr, name, tenantEntry);
+	if (tenantEntry.tenantGroup.present()) {
+		TenantMetadata::tenantGroupTenantIndex.insert(tr, Tuple::makeTuple(tenantEntry.tenantGroup.get(), name));
+
+		// Create the tenant group associated with this tenant if it doesn't already exist
+		Optional<TenantGroupEntry> existingTenantGroup = wait(existingTenantGroupEntryFuture);
+		if (!existingTenantGroup.present()) {
+			TenantMetadata::tenantGroupMap.set(tr, tenantEntry.tenantGroup.get(), TenantGroupEntry());
+		}
+	}
 
 	return std::make_pair(tenantEntry, true);
 }
@@ -182,6 +195,7 @@ Future<Optional<TenantMapEntry>> createTenant(Reference<DB> db,
 				    .detail("Tenant", name)
 				    .detail("TenantId", newTenant.first.get().id)
 				    .detail("Prefix", newTenant.first.get().prefix)
+				    .detail("TenantGroup", tenantEntry.tenantGroup)
 				    .detail("Version", tr->getCommittedVersion());
 			}
 
@@ -212,6 +226,19 @@ Future<Void> deleteTenantTransaction(Transaction tr,
 		}
 
 		TenantMetadata::tenantMap.erase(tr, name);
+		if (tenantEntry.get().tenantGroup.present()) {
+			TenantMetadata::tenantGroupTenantIndex.erase(tr,
+			                                             Tuple::makeTuple(tenantEntry.get().tenantGroup.get(), name));
+			KeyBackedSet<Tuple>::RangeResultType tenantsInGroup = wait(TenantMetadata::tenantGroupTenantIndex.getRange(
+			    tr,
+			    Tuple::makeTuple(tenantEntry.get().tenantGroup.get()),
+			    Tuple::makeTuple(keyAfter(tenantEntry.get().tenantGroup.get())),
+			    2));
+			if (tenantsInGroup.results.empty() ||
+			    (tenantsInGroup.results.size() == 1 && tenantsInGroup.results[0].getString(1) == name)) {
+				TenantMetadata::tenantGroupMap.erase(tr, tenantEntry.get().tenantGroup.get());
+			}
+		}
 	}
 
 	return Void();
@@ -245,6 +272,56 @@ Future<Void> deleteTenant(Reference<DB> db, TenantName name, Optional<int64_t> t
 			wait(safeThreadFutureToFuture(tr->onError(e)));
 		}
 	}
+}
+
+// This should only be called from a transaction that has already confirmed that the tenant entry
+// is present. The tenantEntry should start with the existing entry and modify only those fields that need
+// to be changed. This must only be called on a non-management cluster.
+ACTOR template <class Transaction>
+Future<Void> configureTenantTransaction(Transaction tr,
+                                        TenantNameRef tenantName,
+                                        TenantMapEntry originalEntry,
+                                        TenantMapEntry updatedTenantEntry) {
+	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
+	TenantMetadata::tenantMap.set(tr, tenantName, updatedTenantEntry);
+
+	// If the tenant group was changed, we need to update the tenant group metadata structures
+	if (originalEntry.tenantGroup != updatedTenantEntry.tenantGroup) {
+		if (updatedTenantEntry.tenantGroup.present() && updatedTenantEntry.tenantGroup.get().startsWith("\xff"_sr)) {
+			throw invalid_tenant_group_name();
+		}
+		if (originalEntry.tenantGroup.present()) {
+			// Remove this tenant from the original tenant group index
+			TenantMetadata::tenantGroupTenantIndex.erase(tr,
+			                                             Tuple::makeTuple(originalEntry.tenantGroup.get(), tenantName));
+
+			// Check if the original tenant group is now empty. If so, remove the tenant group.
+			KeyBackedSet<Tuple>::RangeResultType tenants = wait(TenantMetadata::tenantGroupTenantIndex.getRange(
+			    tr,
+			    Tuple::makeTuple(originalEntry.tenantGroup.get()),
+			    Tuple::makeTuple(keyAfter(originalEntry.tenantGroup.get())),
+			    2));
+
+			if (tenants.results.empty() ||
+			    (tenants.results.size() == 1 && tenants.results[0].getString(1) == tenantName)) {
+				TenantMetadata::tenantGroupMap.erase(tr, originalEntry.tenantGroup.get());
+			}
+		}
+		if (updatedTenantEntry.tenantGroup.present()) {
+			// If this is creating a new tenant group, add it to the tenant group map
+			Optional<TenantGroupEntry> entry =
+			    wait(TenantMetadata::tenantGroupMap.get(tr, updatedTenantEntry.tenantGroup.get()));
+			if (!entry.present()) {
+				TenantMetadata::tenantGroupMap.set(tr, updatedTenantEntry.tenantGroup.get(), TenantGroupEntry());
+			}
+
+			// Insert this tenant in the tenant group index
+			TenantMetadata::tenantGroupTenantIndex.insert(
+			    tr, Tuple::makeTuple(updatedTenantEntry.tenantGroup.get(), tenantName));
+		}
+	}
+
+	return Void();
 }
 
 ACTOR template <class Transaction>
@@ -329,6 +406,14 @@ Future<Void> renameTenant(Reference<DB> db, TenantName oldName, TenantName newNa
 
 			TenantMetadata::tenantMap.erase(tr, oldName);
 			TenantMetadata::tenantMap.set(tr, newName, oldEntry.get());
+
+			// Update the tenant group index to reflect the new tenant name
+			if (oldEntry.get().tenantGroup.present()) {
+				TenantMetadata::tenantGroupTenantIndex.erase(
+				    tr, Tuple::makeTuple(oldEntry.get().tenantGroup.get(), oldName));
+				TenantMetadata::tenantGroupTenantIndex.insert(
+				    tr, Tuple::makeTuple(oldEntry.get().tenantGroup.get(), newName));
+			}
 
 			wait(safeThreadFutureToFuture(tr->commit()));
 			TraceEvent("RenameTenantSuccess").detail("OldName", oldName).detail("NewName", newName);

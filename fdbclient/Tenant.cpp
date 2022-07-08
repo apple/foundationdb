@@ -74,6 +74,11 @@ TenantMapEntry::TenantMapEntry() {}
 TenantMapEntry::TenantMapEntry(int64_t id, TenantState tenantState) : tenantState(tenantState) {
 	setId(id);
 }
+TenantMapEntry::TenantMapEntry(int64_t id, TenantState tenantState, Optional<TenantGroupName> tenantGroup)
+  : tenantState(tenantState), tenantGroup(tenantGroup) {
+	setId(id);
+}
+
 void TenantMapEntry::setId(int64_t id) {
 	ASSERT(id >= 0);
 	this->id = id;
@@ -100,7 +105,31 @@ std::string TenantMapEntry::toJson(int apiVersion) const {
 
 	tenantEntry["tenant_state"] = TenantMapEntry::tenantStateToString(tenantState);
 
+	if (tenantGroup.present()) {
+		json_spirit::mObject tenantGroupObject;
+		std::string encodedTenantGroup = base64::encoder::from_string(tenantGroup.get().toString());
+		// Remove trailing newline
+		encodedTenantGroup.resize(encodedTenantGroup.size() - 1);
+
+		tenantGroupObject["base64"] = encodedTenantGroup;
+		tenantGroupObject["printable"] = printable(tenantGroup.get());
+		tenantEntry["tenant_group"] = tenantGroupObject;
+	}
+
 	return json_spirit::write_string(json_spirit::mValue(tenantEntry));
+}
+
+bool TenantMapEntry::matchesConfiguration(TenantMapEntry const& other) const {
+	return tenantGroup == other.tenantGroup;
+}
+
+void TenantMapEntry::configure(Standalone<StringRef> parameter, Optional<Value> value) {
+	if (parameter == "tenant_group"_sr) {
+		tenantGroup = value;
+	} else {
+		TraceEvent(SevWarnAlways, "UnknownTenantConfigurationParameter").detail("Parameter", parameter);
+		throw invalid_tenant_configuration();
+	}
 }
 
 TEST_CASE("/fdbclient/TenantMapEntry/Serialization") {
