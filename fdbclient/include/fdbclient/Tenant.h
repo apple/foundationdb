@@ -28,6 +28,8 @@
 
 typedef StringRef TenantNameRef;
 typedef Standalone<TenantNameRef> TenantName;
+typedef StringRef TenantGroupNameRef;
+typedef Standalone<TenantGroupNameRef> TenantGroupName;
 
 struct TenantMapEntry {
 	constexpr static FileIdentifier file_identifier = 12247338;
@@ -37,21 +39,23 @@ struct TenantMapEntry {
 
 	int64_t id;
 	Key prefix;
+	Optional<TenantGroupName> tenantGroup;
 
 	constexpr static int ROOT_PREFIX_SIZE = sizeof(id);
-
-private:
-	void initPrefix(KeyRef subspace);
 
 public:
 	TenantMapEntry();
 	TenantMapEntry(int64_t id, KeyRef subspace);
+	TenantMapEntry(int64_t id, KeyRef subspace, Optional<TenantGroupName> tenantGroup);
 
-	Value encode() const { return ObjectWriter::toValue(*this, IncludeVersion(ProtocolVersion::withTenants())); }
+	void setSubspace(KeyRef subspace);
+	bool matchesConfiguration(TenantMapEntry const& other) const;
+
+	Value encode() const { return ObjectWriter::toValue(*this, IncludeVersion(ProtocolVersion::withTenantGroups())); }
 
 	static TenantMapEntry decode(ValueRef const& value) {
 		TenantMapEntry entry;
-		ObjectReader reader(value.begin(), IncludeVersion(ProtocolVersion::withTenants()));
+		ObjectReader reader(value.begin(), IncludeVersion());
 		reader.deserialize(entry);
 		return entry;
 	}
@@ -60,16 +64,21 @@ public:
 	void serialize(Ar& ar) {
 		KeyRef subspace;
 		if (ar.isDeserializing) {
-			serializer(ar, id, subspace);
+			if (ar.protocolVersion().hasTenantGroups()) {
+				serializer(ar, id, subspace, tenantGroup);
+			} else {
+				serializer(ar, id, subspace);
+			}
+
 			if (id >= 0) {
-				initPrefix(subspace);
+				setSubspace(subspace);
 			}
 		} else {
 			ASSERT(prefix.size() >= 8 || (prefix.empty() && id == -1));
 			if (!prefix.empty()) {
 				subspace = prefix.substr(0, prefix.size() - 8);
 			}
-			serializer(ar, id, subspace);
+			serializer(ar, id, subspace, tenantGroup);
 		}
 	}
 };

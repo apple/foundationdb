@@ -1625,6 +1625,8 @@ const KeyRef tenantMapPrefix = tenantMapKeys.begin;
 const KeyRef tenantMapPrivatePrefix = "\xff\xff/tenantMap/"_sr;
 const KeyRef tenantLastIdKey = "\xff/tenantLastId/"_sr;
 const KeyRef tenantDataPrefixKey = "\xff/tenantDataPrefix"_sr;
+const KeyRangeRef tenantGroupTenantIndexKeys("\xff/tenant/tenantGroup/tenantMap/"_sr,
+                                             "\xff/tenant/tenantGroup/tenantMap0"_sr);
 
 // for tests
 void testSSISerdes(StorageServerInterface const& ssi) {

@@ -685,6 +685,7 @@ extern const KeyRef tenantMapPrefix;
 extern const KeyRef tenantMapPrivatePrefix;
 extern const KeyRef tenantLastIdKey;
 extern const KeyRef tenantDataPrefixKey;
+extern const KeyRangeRef tenantGroupTenantIndexKeys;
 
 #pragma clang diagnostic pop
 
