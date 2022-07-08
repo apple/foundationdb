@@ -20,21 +20,38 @@
 
 #if (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
 
+#define DLLEXPORT __attribute__((visibility("default")))
+
+#include "foundationdb/fdb_c_shim.h"
+
 #include <dlfcn.h>
-#include <stdio.h>
-#include <stdlib.h>
 #include <string>
 
-static const char* FDB_C_CLIENT_LIBRARY_PATH = "FDB_C_CLIENT_LIBRARY_PATH";
+namespace {
 
-// Callback that tries different library names
+const char* FDB_LOCAL_CLIENT_LIBRARY_PATH_ENVVAR = "FDB_LOCAL_CLIENT_LIBRARY_PATH";
+std::string g_fdbLocalClientLibraryPath;
+
+} // namespace
+
+extern "C" DLLEXPORT void fdb_shim_set_local_client_library_path(const char* filePath) {
+	g_fdbLocalClientLibraryPath = filePath;
+}
+
+/* The callback of the fdb_c_shim layer that determines the path
+   of the fdb_c library to be dynamically loaded
+ */
 extern "C" void* fdb_shim_dlopen_callback(const char* libName) {
 	std::string libPath;
-	char* val = getenv(FDB_C_CLIENT_LIBRARY_PATH);
-	if (val) {
-		libPath = val;
+	if (!g_fdbLocalClientLibraryPath.empty()) {
+		libPath = g_fdbLocalClientLibraryPath;
 	} else {
-		libPath = libName;
+		char* val = getenv(FDB_LOCAL_CLIENT_LIBRARY_PATH_ENVVAR);
+		if (val) {
+			libPath = val;
+		} else {
+			libPath = libName;
+		}
 	}
 	return dlopen(libPath.c_str(), RTLD_LAZY | RTLD_GLOBAL);
 }

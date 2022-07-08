@@ -421,10 +421,15 @@ endif()
 # Generate shim library in Linux builds
 if (OPEN_FOR_IDE)
 
-  add_library(fdb_c_shim OBJECT fdb_c_shim.cpp)
+  add_library(fdb_c_shim OBJECT foundationdb/fdb_c_shim.h fdb_c_shim.cpp)
   target_link_libraries(fdb_c_shim PUBLIC dl)
+  target_include_directories(fdb_c_shim PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/foundationdb/ ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/)
 
-elseif(NOT WIN32 AND NOT APPLE AND NOT OPEN_FOR_IDE) # Linux Only
+  add_library(fdb_c_shim_lib_tester OBJECT test/shim_lib_tester.cpp)
+  target_link_libraries(fdb_c_shim_lib_tester PRIVATE fdb_c_shim SimpleOpt fdb_cpp dl)
+  target_include_directories(fdb_c_shim_lib_tester PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/ ${CMAKE_SOURCE_DIR}/flow/include)
+
+elseif(NOT WIN32 AND NOT APPLE) # Linux Only
 
   set(SHIM_LIB_OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR})
 
@@ -439,15 +444,20 @@ elseif(NOT WIN32 AND NOT APPLE AND NOT OPEN_FOR_IDE) # Linux Only
       --dlopen-callback=fdb_shim_dlopen_callback
       $<TARGET_FILE:fdb_c>)
 
-  add_library(fdb_c_shim SHARED ${SHIM_LIB_GEN_SRC} fdb_c_shim.cpp)
+  add_library(fdb_c_shim SHARED ${SHIM_LIB_GEN_SRC} foundationdb/fdb_c_shim.h fdb_c_shim.cpp)
   target_link_options(fdb_c_shim PRIVATE "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/fdb_c.map,-z,nodelete,-z,noexecstack")
   target_link_libraries(fdb_c_shim PUBLIC dl)
+  target_include_directories(fdb_c_shim PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/foundationdb/ ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/)
 
   add_executable(fdb_c_shim_unit_tests)
   target_link_libraries(fdb_c_shim_unit_tests PRIVATE fdb_c_shim fdb_c_unit_tests_impl)
 
   add_executable(fdb_c_shim_api_tester)
   target_link_libraries(fdb_c_shim_api_tester PRIVATE fdb_c_shim fdb_c_api_tester_impl)
+
+  add_executable(fdb_c_shim_lib_tester test/shim_lib_tester.cpp)
+  target_link_libraries(fdb_c_shim_lib_tester PRIVATE fdb_c_shim SimpleOpt fdb_cpp dl)
+  target_include_directories(fdb_c_shim_lib_tester PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/ ${CMAKE_SOURCE_DIR}/flow/include)
 
   add_test(NAME fdb_c_shim_library_tests
     COMMAND $<TARGET_FILE:Python::Interpreter> ${CMAKE_CURRENT_SOURCE_DIR}/test/fdb_c_shim_tests.py
