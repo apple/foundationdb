@@ -4,12 +4,11 @@
 #include "flow/network.h"
 
 #include <boost/compute/detail/lru_cache.hpp>
-#include <boost/unordered_set.hpp>
 
 struct TokenCacheImpl {
 	struct CacheEntry {
 		Arena arena;
-		boost::unordered_set<TenantNameRef> tenants;
+		VectorRef<TenantNameRef> tenants;
 		double expirationTime = 0.0;
 	};
 
@@ -85,7 +84,7 @@ bool TokenCacheImpl::validateAndAdd(double currentTime,
 		CacheEntry c;
 		c.expirationTime = double(t.expiresAtUnixTime.get());
 		for (auto tenant : t.tenants.get()) {
-			c.tenants.insert(StringRef(c.arena, tenant));
+			c.tenants.push_back_deep(c.arena, tenant);
 		}
 		StringRef signature(c.arena, signature);
 		cache.insert(signature, c);
@@ -115,7 +114,14 @@ bool TokenCacheImpl::validate(TenantNameRef name, StringRef token) {
 		TraceEvent(SevWarn, "InvalidToken").detail("From", peer).detail("Reason", "Expired");
 		return false;
 	}
-	if (entry.tenants.count(name) == 0) {
+	bool tenantFound = false;
+	for (auto const& t : entry.tenants) {
+		if (t == name) {
+			tenantFound = true;
+			break;
+		}
+	}
+	if (tenantFound) {
 		TEST(true); // Valid token doesn't reference tenant
 		TraceEvent(SevWarn, "TenantTokenMismatch").detail("From", peer).detail("Tenant", name.toString());
 		return false;
