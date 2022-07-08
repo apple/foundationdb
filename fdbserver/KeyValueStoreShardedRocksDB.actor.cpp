@@ -2267,11 +2267,17 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 	Future<Optional<Value>> readValue(KeyRef key, IKeyValueStore::ReadType type, Optional<UID> debugID) override {
 		auto* shard = shardManager.getDataShard(key);
-		if (shard == nullptr) {
+		if (shard == nullptr || !shard->physicalShard->initialized()) {
 			// TODO: read non-exist system key range should not cause an error.
-			TraceEvent(SevError, "ShardedRocksDB").detail("Detail", "Read non-exist key range").detail("ReadKey", key);
+			TraceEvent(SevWarnAlways, "ShardedRocksDB")
+			    .detail("Detail", "Read non-exist key range")
+			    .detail("ReadKey", key);
 			return Optional<Value>();
 		}
+
+		TraceEvent(SevVerbose, "ShardedRocksReadValueBegin", this->id)
+		    .detail("Key", key)
+		    .detail("Shard", shard->physicalShard->toString());
 
 		if (!shouldThrottle(type, key)) {
 			auto a = new Reader::ReadValueAction(key, shard->physicalShard, debugID);
