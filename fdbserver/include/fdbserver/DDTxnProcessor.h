@@ -22,7 +22,6 @@
 #define FOUNDATIONDB_DDTXNPROCESSOR_H
 
 #include "fdbserver/Knobs.h"
-#include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/MoveKeys.actor.h"
 
 /* Testability Contract:
@@ -44,6 +43,8 @@ public:
 	virtual ~IDDTxnProcessor() = default;
 
 	[[nodiscard]] virtual Future<MoveKeysLock> takeMoveKeysLock(UID ddId) const { return MoveKeysLock(); }
+
+	virtual Future<DatabaseConfiguration> getDatabaseConfiguration() const { return DatabaseConfiguration(); }
 };
 
 class DDTxnProcessorImpl;
@@ -63,6 +64,8 @@ public:
 	Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses() override;
 
 	Future<MoveKeysLock> takeMoveKeysLock(UID ddId) const override;
+
+	Future<DatabaseConfiguration> getDatabaseConfiguration() const override;
 };
 
 // run mock transaction
