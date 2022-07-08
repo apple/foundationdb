@@ -347,8 +347,6 @@ ACTOR Future<Void> globalConfigMigrate(GrvProxyData* grvProxyData) {
 			} catch (Error& e) {
 				// Multiple GRV proxies may attempt this migration at the same
 				// time, sometimes resulting in aborts due to conflicts.
-				// Purposefully avoid retrying, making this migration
-				// best-effort.
 				TraceEvent(SevInfo, "GlobalConfigRetryableMigrationError").errorUnsuppressed(e).suppressFor(1.0);
 				wait(tr->onError(e));
 			}
@@ -411,7 +409,7 @@ ACTOR Future<Void> globalConfigRequestServer(GrvProxyData* grvProxyData, GrvProx
 	actors.add(globalConfigRefreshBatcher(grvProxyData, grvProxy, batchedRequests));
 
 	// Run one-time migration supporting upgrades.
-	wait(success(globalConfigMigrate(grvProxyData)));
+	wait(success(timeout(globalConfigMigrate(grvProxyData), SERVER_KNOBS->GLOBAL_CONFIG_MIGRATE_TIMEOUT)));
 
 	loop {
 		choose {
