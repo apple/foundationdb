@@ -69,7 +69,6 @@ class ResourceRef {
 protected:
 	Reference<Resource<T>> resourceRef;
 
-public:
 	ResourceRef(const Reference<Resource<T>>& ref) : resourceRef(ref) {}
 	ResourceRef(Reference<Resource<T>>&& ref) : resourceRef(std::move(ref)) {}
 	ResourceRef& operator=(const Reference<Resource<T>>& ref) {
@@ -81,16 +80,23 @@ public:
 		return *this;
 	}
 
-	T* operator->() { return resourceRef->resource; }
-	T& operator*() {
-		if (resourceRef->resource == nullptr) {
+	virtual ~ResourceRef() {}
+
+public:
+	// Retrieves the resource as a pointer
+	T* operator->() const noexcept { return resourceRef->resource; }
+
+	// Retrieves the resource as a reference
+	T& operator*() const {
+		if (!available()) {
 			throw internal_error();
 		} else {
 			return *(resourceRef->resource);
 		}
 	}
 
-	bool available() const { return resourceRef->resource != nullptr; }
+	// Returns true if the resource is available, i.e. not nullptr
+	bool available() const noexcept { return resourceRef->resource != nullptr; }
 };
 
 } // namespace details
@@ -102,18 +108,48 @@ class ResourceOwningRef : public details::ResourceRef<T>, NonCopyable {
 	template <typename U>
 	friend class ResourceWeakRef;
 
+	template <typename U>
+	friend class ActorWeakSelfRef;
+
 public:
 	ResourceOwningRef(T* resource) : details::ResourceRef<T>(makeReference<details::Resource<T>>(resource)) {}
-	~ResourceOwningRef() { details::ResourceRef<T>::resourceRef->reset(nullptr); }
+	virtual ~ResourceOwningRef() { details::ResourceRef<T>::resourceRef->reset(nullptr); }
 };
 
-// The class that weakly holds a Reference tot he etails::Resource. Destroying the reference will have no impact to the
+// The class that weakly holds a Reference to the details::Resource. Destroying the reference will have no impact to the
 // real object. On the other hand, each time accessing the object requires a verification that the object is still alive
 template <typename T>
 class ResourceWeakRef : public details::ResourceRef<T> {
 public:
 	ResourceWeakRef(const ResourceOwningRef<T>& ref) : details::ResourceRef<T>(ref.resourceRef) {}
 	ResourceWeakRef(const ResourceWeakRef& ref) : details::ResourceRef<T>(ref.resourceRef) {}
+};
+
+// A unique reference that takes the ownership of the self object. The self object is widely used as the "global"
+// context of each role.
+template <typename T>
+using ActorOwningSelfRef = ResourceOwningRef<T>;
+
+// A wrapper of ResourceWeakRef, used to forward the widely used `self` pointer from the core ACTOR to other ACTORs. It
+// will check the resource before returning it. If the resource is not available, an operation_cancelled error will be
+// thrown to terminate the current ACTOR.
+template <typename T>
+class ActorWeakSelfRef : public ResourceWeakRef<T> {
+public:
+	ActorWeakSelfRef(const ResourceOwningRef<T>& ref) : ResourceWeakRef<T>(ref) {}
+	ActorWeakSelfRef(const ResourceWeakRef<T>& ref) : ResourceWeakRef<T>(ref) {}
+	ActorWeakSelfRef(const ActorWeakSelfRef<T>& ref)
+	  : ResourceWeakRef<T>(static_cast<const ResourceWeakRef<T>&>(ref)) {}
+
+	// Retrieves the resource as a pointer, throws operation_cancelled if the resource is not available
+	T* operator->() const {
+		if (!ResourceOwningRef<T>::available()) [[unlikely]]
+			throw operation_cancelled();
+		return ResourceOwningRef<T>::resourceRef->resource;
+	}
+
+	// Gets the reference to the resource, Throws operation_cancelled if the resource is not available
+	T& operator*() const { return *(this->operator->()); }
 };
 
 #endif // FLOW_OWNING_REOSURCE_H

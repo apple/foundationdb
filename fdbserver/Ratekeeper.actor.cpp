@@ -148,13 +148,9 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> trackStorageServerQueueInfo(ResourceWeakRef<Ratekeeper> self,
+	ACTOR static Future<Void> trackStorageServerQueueInfo(ActorWeakSelfRef<Ratekeeper> self,
 	                                                      StorageServerInterface ssi) {
-		if (!self.available()) {
-			return Void();
-		}
 		self->storageQueueInfo.insert(mapPair(ssi.id(), StorageQueueInfo(ssi.id(), ssi.locality)));
-		state Map<UID, StorageQueueInfo>::iterator myQueueInfo = self->storageQueueInfo.find(ssi.id());
 		TraceEvent("RkTracking", self->id)
 		    .detail("StorageServer", ssi.id())
 		    .detail("Locality", ssi.locality.toString());
@@ -162,9 +158,7 @@ public:
 			loop {
 				ErrorOr<StorageQueuingMetricsReply> reply = wait(ssi.getQueuingMetrics.getReplyUnlessFailedFor(
 				    StorageQueuingMetricsRequest(), 0, 0)); // SOMEDAY: or tryGetReply?
-				if (!self.available()) {
-					return Void();
-				}
+				Map<UID, StorageQueueInfo>::iterator myQueueInfo = self->storageQueueInfo.find(ssi.id());
 				if (reply.present()) {
 					myQueueInfo->value.update(reply.get(), self->smoothTotalDurableBytes);
 					myQueueInfo->value.acceptingRequests = ssi.isAcceptingRequests();
@@ -181,10 +175,9 @@ public:
 			}
 		} catch (...) {
 			// including cancellation
-			if (self.available()) {
-				self->storageQueueInfo.erase(myQueueInfo);
-				self->storageServerInterfaces.erase(ssi.id());
-			}
+			Map<UID, StorageQueueInfo>::iterator myQueueInfo = self->storageQueueInfo.find(ssi.id());
+			self->storageQueueInfo.erase(myQueueInfo);
+			self->storageServerInterfaces.erase(ssi.id());
 			throw;
 		}
 	}
@@ -218,7 +211,7 @@ public:
 	}
 
 	ACTOR static Future<Void> trackEachStorageServer(
-	    ResourceWeakRef<Ratekeeper> self,
+	    ActorWeakSelfRef<Ratekeeper> self,
 	    FutureStream<std::pair<UID, Optional<StorageServerInterface>>> serverChanges) {
 
 		state std::unordered_map<UID, Future<Void>> storageServerTrackers;
@@ -236,17 +229,11 @@ public:
 						a = Future<Void>();
 						a = splitError(trackStorageServerQueueInfo(self, change.second.get()), err);
 
-						if (!self.available()) {
-							return Void();
-						}
 						self->storageServerInterfaces[id] = change.second.get();
 					}
 				} else {
 					storageServerTrackers.erase(id);
 
-					if (!self.available()) {
-						return Void();
-					}
 					self->storageServerInterfaces.erase(id);
 				}
 			}
@@ -255,7 +242,7 @@ public:
 	}
 
 	ACTOR static Future<Void> run(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
-		state ResourceOwningRef<Ratekeeper> pSelf(
+		state ActorOwningSelfRef<Ratekeeper> pSelf(
 		    new Ratekeeper(rkInterf.id(), openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True)));
 		state Ratekeeper& self = *pSelf;
 		state Future<Void> timeout = Void();
@@ -407,14 +394,10 @@ public:
 			// for each SS, select the busiest commit tag from ssTrTagCommitCost
 			for (auto& [ssId, ssQueueInfo] : self->storageQueueInfo) {
 				// NOTE: In some cases, for unknown reason SS will not respond to the updateCommitCostRequest. Since the
-				// information is not time-sensitive, place a timeout to avoid stucking RK.
-				replies.push_back(timeout(self->storageServerInterfaces[ssId].updateCommitCostRequest.getReply(
-				                              ssQueueInfo.refreshCommitCost(elapsed)),
-				                          SERVER_KNOBS->TAG_MEASUREMENT_INTERVAL,
-				                          Void()));
+				// information is not time-sensitive, we do not wait for the replies.
+				replies.push_back(self->storageServerInterfaces[ssId].updateCommitCostRequest.getReply(
+				    ssQueueInfo.refreshCommitCost(elapsed)));
 			}
-
-			wait(waitForAll(replies));
 		}
 	}
 }; // class RatekeeperImpl
