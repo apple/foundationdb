@@ -40,7 +40,7 @@ bool TokenCacheImpl::validate(TenantNameRef name, StringRef token) {
 	auto sig = authz::jwt::signaturePart(token);
 	auto cachedEntry = cache.get(sig);
 	double currentTime = g_network->timer();
-	NetworkAddress peer = FlowTransport::transport().loadedEndpoint(UID()).getPrimaryAddress();
+	NetworkAddress peer = FlowTransport::transport().currentDeliveryPeerAddress();
 
 	if (cachedEntry.has_value()) {
 		auto& entry = cachedEntry.get();
@@ -49,6 +49,8 @@ bool TokenCacheImpl::validate(TenantNameRef name, StringRef token) {
 			throw permission_denied();
 		}
 		if (entry.tenants.count(name) == 0) {
+		    TraceEvent(SevWarn, "TenantTokenMismatch").detail("From", peer).detail("Tenant", name.toString());
+		    throw permission_denied();
 		}
 		return true;
 	} else {

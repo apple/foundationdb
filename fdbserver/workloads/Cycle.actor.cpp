@@ -69,7 +69,7 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 			ASSERT(g_network->isSimulated());
 			auto k = g_simulator.authKeys.begin();
 			this->tenant = getOption(options, "tenant"_sr, "CycleTenant"_sr);
-			// make it confortably longer than the timeout of the workload
+			// make it comfortably longer than the timeout of the workload
 			auto currentTime = uint64_t(lround(g_network->timer()));
 			this->token.algorithm = authz::Algorithm::ES256;
 			this->token.issuedAtUnixTime = currentTime;
