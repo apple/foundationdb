@@ -841,13 +841,13 @@ struct KeyValueStoreType {
 	// Only add new ones just before END.
 	// SS storeType is END before the storageServerInterface is initialized.
 	enum StoreType {
-		SSD_BTREE_V1,
-		MEMORY,
-		SSD_BTREE_V2,
-		SSD_REDWOOD_V1,
-		MEMORY_RADIXTREE,
-		SSD_ROCKSDB_V1,
-		SSD_SHARDED_ROCKSDB,
+		SSD_BTREE_V1 = 0,
+		MEMORY = 1,
+		SSD_BTREE_V2 = 2,
+		SSD_REDWOOD_V1 = 3,
+		MEMORY_RADIXTREE = 4,
+		SSD_ROCKSDB_V1 = 5,
+		SSD_SHARDED_ROCKSDB = 6,
 		END
 	};
 
@@ -1509,4 +1509,16 @@ struct StorageWiggleValue {
 		serializer(ar, id);
 	}
 };
+
+// Can be used to identify types (e.g. IDatabase) that can be used to create transactions with a `createTransaction`
+// function
+template <typename, typename = void>
+struct transaction_creator_traits : std::false_type {};
+
+template <typename T>
+struct transaction_creator_traits<T, std::void_t<typename T::TransactionT>> : std::true_type {};
+
+template <typename T>
+constexpr bool is_transaction_creator = transaction_creator_traits<T>::value;
+
 #endif

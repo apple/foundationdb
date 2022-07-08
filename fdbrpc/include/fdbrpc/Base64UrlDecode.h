@@ -41,9 +41,9 @@ int decode(const uint8_t* __restrict codeIn, const int lengthIn, uint8_t* __rest
 // Returns -1 for invalid length (4n-3)
 int decodedLength(int codeLength) noexcept;
 
-// return a) decoded valid string and b) whether input string was a valid URL-encoded base64 string
+// return, if base64UrlStr is valid, a StringRef containing a valid decoded string
 // Note: even if decoding fails by bad encoding, StringRef memory still stays allocated from arena
-std::pair<StringRef, bool> decode(Arena& arena, StringRef base64UrlStr);
+Optional<StringRef> decode(Arena& arena, StringRef base64UrlStr);
 
 } // namespace base64url
 

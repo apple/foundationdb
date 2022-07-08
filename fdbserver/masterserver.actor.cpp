@@ -74,7 +74,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	Counter reportLiveCommittedVersionRequests;
 	// This counter gives an estimate of the number of non-empty peeks that storage servers
 	// should do from tlogs (in the worst case, ignoring blocking peek timeouts).
-	Counter versionVectorTagUpdates;
+	LatencySample versionVectorTagUpdates;
 	Counter waitForPrevCommitRequests;
 	Counter nonWaitForPrevCommitRequests;
 	LatencySample versionVectorSizeOnCVReply;
@@ -99,7 +99,10 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	    getCommitVersionRequests("GetCommitVersionRequests", cc),
 	    getLiveCommittedVersionRequests("GetLiveCommittedVersionRequests", cc),
 	    reportLiveCommittedVersionRequests("ReportLiveCommittedVersionRequests", cc),
-	    versionVectorTagUpdates("VersionVectorTagUpdates", cc),
+	    versionVectorTagUpdates("VersionVectorTagUpdates",
+	                            dbgid,
+	                            SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+	                            SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
 	    waitForPrevCommitRequests("WaitForPrevCommitRequests", cc),
 	    nonWaitForPrevCommitRequests("NonWaitForPrevCommitRequests", cc),
 	    versionVectorSizeOnCVReply("VersionVectorSizeOnCVReply",
@@ -117,9 +120,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 			forceRecovery = false;
 		}
 		balancer = resolutionBalancer.resolutionBalancing();
-		locality = (SERVER_KNOBS->ENABLE_VERSION_VECTOR_HA_OPTIMIZATION && myInterface.locality.dcId().present())
-		               ? std::stoi(myInterface.locality.dcId().get().toString())
-		               : tagLocalityInvalid;
+		locality = tagLocalityInvalid;
 	}
 	~MasterData() = default;
 };
@@ -249,7 +250,7 @@ void updateLiveCommittedVersion(Reference<MasterData> self, ReportRawCommittedVe
 			int8_t primaryLocality =
 			    SERVER_KNOBS->ENABLE_VERSION_VECTOR_HA_OPTIMIZATION ? self->locality : tagLocalityInvalid;
 			self->ssVersionVector.setVersion(req.writtenTags.get(), req.version, primaryLocality);
-			self->versionVectorTagUpdates += req.writtenTags.get().size();
+			self->versionVectorTagUpdates.addMeasurement(req.writtenTags.get().size());
 		}
 		auto curTime = now();
 		// add debug here to change liveCommittedVersion to time bound of now()
@@ -324,7 +325,8 @@ ACTOR Future<Void> updateRecoveryData(Reference<MasterData> self) {
 		    .detail("CurrentRecoveryTxnVersion", self->recoveryTransactionVersion)
 		    .detail("CurrentLastEpochEnd", self->lastEpochEnd)
 		    .detail("NumCommitProxies", req.commitProxies.size())
-		    .detail("VersionEpoch", req.versionEpoch);
+		    .detail("VersionEpoch", req.versionEpoch)
+		    .detail("PrimaryLocality", req.primaryLocality);
 
 		self->recoveryTransactionVersion = req.recoveryTransactionVersion;
 		self->lastEpochEnd = req.lastEpochEnd;
@@ -349,6 +351,8 @@ ACTOR Future<Void> updateRecoveryData(Reference<MasterData> self) {
 
 		self->resolutionBalancer.setCommitProxies(req.commitProxies);
 		self->resolutionBalancer.setResolvers(req.resolvers);
+
+		self->locality = req.primaryLocality;
 
 		req.reply.send(Void());
 	}

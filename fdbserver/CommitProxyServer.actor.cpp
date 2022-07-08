@@ -2439,7 +2439,6 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 
 	state PromiseStream<Future<Void>> addActor;
 	state Future<Void> onError = transformError(actorCollection(addActor.getFuture()), broken_promise(), tlog_failed());
-	state double lastCommit = 0;
 
 	state GetHealthMetricsReply healthMetricsReply;
 	state GetHealthMetricsReply detailedHealthMetricsReply;
@@ -2541,9 +2540,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 			//TraceEvent("CommitProxyCTR", proxy.id()).detail("CommitTransactions", trs.size()).detail("TransactionRate", transactionRate).detail("TransactionQueue", transactionQueue.size()).detail("ReleasedTransactionCount", transactionCount);
 			//TraceEvent("CommitProxyCore", commitData.dbgid).detail("TxSize", trs.size()).detail("MasterLifetime", masterLifetime.toString()).detail("DbMasterLifetime", commitData.db->get().masterLifetime.toString()).detail("RecoveryState", commitData.db->get().recoveryState).detail("CCInf", commitData.db->get().clusterInterface.id().toString());
 			if (trs.size() || (commitData.db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS &&
-			                   masterLifetime.isEqual(commitData.db->get().masterLifetime) &&
-			                   now() - lastCommit >= SERVER_KNOBS->MAX_COMMIT_BATCH_INTERVAL)) {
-				lastCommit = now();
+			                   masterLifetime.isEqual(commitData.db->get().masterLifetime))) {
 
 				if (trs.size() || lastCommitComplete.isReady()) {
 					lastCommitComplete = transformError(

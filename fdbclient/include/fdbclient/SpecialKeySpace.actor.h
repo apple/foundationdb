@@ -166,6 +166,7 @@ public:
 		ACTORLINEAGE, // Sampling data
 		ACTOR_PROFILER_CONF, // profiler configuration
 		CLUSTERFILEPATH,
+		CLUSTERID, // An immutable UID for a cluster
 		CONFIGURATION, // Configuration of the cluster
 		CONNECTIONSTRING,
 		ERRORMSG, // A single key space contains a json string which describes the last error in special-key-space
@@ -532,17 +533,6 @@ public:
 class DataDistributionImpl : public SpecialKeyRangeRWImpl {
 public:
 	explicit DataDistributionImpl(KeyRangeRef kr);
-	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
-	                             KeyRangeRef kr,
-	                             GetRangeLimits limitsHint) const override;
-	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
-};
-
-class TenantMapRangeImpl : public SpecialKeyRangeRWImpl {
-public:
-	const static KeyRangeRef submoduleRange;
-
-	explicit TenantMapRangeImpl(KeyRangeRef kr);
 	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
