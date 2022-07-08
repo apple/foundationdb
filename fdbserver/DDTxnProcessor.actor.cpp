@@ -105,5 +105,5 @@ Future<MoveKeysLock> DDTxnProcessor::takeMoveKeysLock(UID ddId) const {
 }
 
 Future<DatabaseConfiguration> DDTxnProcessor::getDatabaseConfiguration() const {
-	    return ::getDatabaseConfiguration(cx);
+	return ::getDatabaseConfiguration(cx);
 }

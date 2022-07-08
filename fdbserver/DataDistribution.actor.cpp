@@ -649,7 +649,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 							auto dcId = decodeDatacenterReplicasKey(kv.key);
 							auto replicas = decodeDatacenterReplicasValue(kv.value);
 							if ((self->primaryDcId.size() && self->primaryDcId[0] == dcId) ||
-							    (self->remoteDcIds.size() && self->remoteDcIds[0] == dcId && self->configuration.usableRegions > 1)) {
+							    (self->remoteDcIds.size() && self->remoteDcIds[0] == dcId &&
+							     self->configuration.usableRegions > 1)) {
 								if (replicas > self->configuration.storageTeamSize) {
 									tr.set(kv.key, datacenterReplicasValue(self->configuration.storageTeamSize));
 								}
