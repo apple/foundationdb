@@ -304,13 +304,14 @@ ACTOR Future<Void> healthMetricsRequestServer(GrvProxyInterface grvProxy,
 	}
 }
 
-ACTOR Future<Void> globalConfigMigrate(GrvProxyData* grvProxyData, GlobalConfigMigrateRequest req) {
+// Older FDB versions used different keys for client profiling data. This
+// function performs a one-time migration of data in these keys to the new
+// global configuration key space.
+ACTOR Future<Void> globalConfigMigrate(GrvProxyData* grvProxyData) {
 	state Key migratedKey("\xff\x02/fdbClientInfo/migrated/"_sr);
-	state Reference<ReadYourWritesTransaction> tr;
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(grvProxyData->cx);
 	try {
-		state Backoff backoff;
 		loop {
-			tr = makeReference<ReadYourWritesTransaction>(grvProxyData->cx);
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
 			try {
@@ -344,22 +345,18 @@ ACTOR Future<Void> globalConfigMigrate(GrvProxyData* grvProxyData, GlobalConfigM
 				wait(tr->commit());
 				break;
 			} catch (Error& e) {
-				// If multiple fdbserver processes are started at once, they will all
-				// attempt this migration at the same time, sometimes resulting in
-				// aborts due to conflicts. Purposefully avoid retrying, making this
-				// migration best-effort.
-				TraceEvent(SevInfo, "GlobalConfig_RetryableMigrationError").errorUnsuppressed(e).suppressFor(1.0);
+				// Multilpe GRV proxies may attempt this migration at the same
+				// time, sometimes resulting in aborts due to conflicts.
+				// Purposefully avoid retrying, making this migration
+				// best-effort.
+				TraceEvent(SevInfo, "GlobalConfigRetryableMigrationError").errorUnsuppressed(e).suppressFor(1.0);
 				wait(tr->onError(e));
-				tr.clear();
-				// tr is cleared, so it won't backoff properly. Use custom backoff logic here.
-				wait(backoff.onError());
 			}
 		}
 	} catch (Error& e) {
 		// Catch non-retryable errors (and do nothing).
-		TraceEvent(SevWarnAlways, "GlobalConfig_MigrationError").error(e);
+		TraceEvent(SevWarnAlways, "GlobalConfigMigrationError").error(e);
 	}
-	req.reply.send(Void());
 	return Void();
 }
 
@@ -369,22 +366,17 @@ ACTOR Future<Void> globalConfigHandleRefreshBatch(std::vector<GlobalConfigRefres
 		return Void();
 	}
 
-	state Backoff backoff;
-	state Reference<ReadYourWritesTransaction> tr;
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(grvProxyData->cx);
 	loop {
 		try {
-			tr = makeReference<ReadYourWritesTransaction>(grvProxyData->cx);
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			RangeResult result = wait(tr->getRange(globalConfigDataKeys, CLIENT_KNOBS->TOO_MANY));
 			for (const auto& req : requests) {
-				req.reply.send(GlobalConfigRefreshReply{ result });
+				req.reply.send(GlobalConfigRefreshReply{ result.arena(), result });
 			}
 			break;
 		} catch (Error& e) {
 			wait(tr->onError(e));
-			tr.clear();
-			// tr is cleared, so it won't backoff properly. Use custom backoff logic here.
-			wait(backoff.onError());
 		}
 	}
 	return Void();
@@ -418,11 +410,11 @@ ACTOR Future<Void> globalConfigRequestServer(GrvProxyData* grvProxyData, GrvProx
 	state PromiseStream<std::vector<GlobalConfigRefreshRequest>> batchedRequests;
 	actors.add(globalConfigRefreshBatcher(grvProxyData, grvProxy, batchedRequests));
 
+	// Run one-time migration supporting upgrades.
+	wait(success(globalConfigMigrate(grvProxyData)));
+
 	loop {
 		choose {
-			when(state GlobalConfigMigrateRequest migrate = waitNext(grvProxy.migrateGlobalConfig.getFuture())) {
-				actors.add(globalConfigMigrate(grvProxyData, migrate));
-			}
 			when(std::vector<GlobalConfigRefreshRequest> requests = waitNext(batchedRequests.getFuture())) {
 				actors.add(globalConfigHandleRefreshBatch(requests, grvProxyData));
 			}

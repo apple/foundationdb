@@ -101,7 +101,7 @@ void GlobalConfig::trigger(KeyRef key, std::function<void(std::optional<std::any
 }
 
 void GlobalConfig::insert(KeyRef key, ValueRef value) {
-	// TraceEvent(SevInfo, "GlobalConfig_Insert").detail("Key", key).detail("Value", value);
+	// TraceEvent(SevInfo, "GlobalConfigInsert").detail("Key", key).detail("Value", value);
 	data.erase(key);
 
 	Arena arena(key.expectedSize() + value.expectedSize());
@@ -139,7 +139,7 @@ void GlobalConfig::erase(Key key) {
 }
 
 void GlobalConfig::erase(KeyRangeRef range) {
-	// TraceEvent(SevInfo, "GlobalConfig_Erase").detail("Range", range);
+	// TraceEvent(SevInfo, "GlobalConfigErase").detail("Range", range);
 	auto it = data.begin();
 	while (it != data.end()) {
 		if (range.contains(it->first)) {
@@ -153,20 +153,10 @@ void GlobalConfig::erase(KeyRangeRef range) {
 	}
 }
 
-// Older FDB versions used different keys for client profiling data. This
-// function performs a one-time migration of data in these keys to the new
-// global configuration key space (proxied through the GrvProxies).
-ACTOR Future<Void> GlobalConfig::migrate(GlobalConfig* self) {
-	wait(basicLoadBalance(self->cx->getGrvProxies(UseProvisionalProxies::False),
-	                      &GrvProxyInterface::migrateGlobalConfig,
-	                      GlobalConfigMigrateRequest{}));
-	return Void();
-}
-
 // Updates local copy of global configuration by reading the entire key-range
 // from storage (proxied through the GrvProxies).
 ACTOR Future<Void> GlobalConfig::refresh(GlobalConfig* self) {
-	// TraceEvent trace(SevInfo, "GlobalConfig_Refresh");
+	// TraceEvent trace(SevInfo, "GlobalConfigRefresh");
 	self->erase(KeyRangeRef(""_sr, "\xff"_sr));
 
 	GlobalConfigRefreshReply reply = wait(basicLoadBalance(self->cx->getGrvProxies(UseProvisionalProxies::False),
@@ -186,7 +176,6 @@ ACTOR Future<Void> GlobalConfig::updater(GlobalConfig* self, const ClientDBInfo*
 		try {
 			if (self->initialized.canBeSet()) {
 				wait(self->cx->onConnected());
-				wait(self->migrate(self));
 
 				wait(self->refresh(self));
 				self->initialized.send(Void());
