@@ -2259,7 +2259,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 	Future<Optional<Value>> readValue(KeyRef key, IKeyValueStore::ReadType type, Optional<UID> debugID) override {
 		auto* shard = shardManager.getDataShard(key);
-		if (shard == nullptr) {
+		if (shard == nullptr || !shard->physicalShard->initialized()) {
 			// TODO: read non-exist system key range should not cause an error.
 			TraceEvent(SevError, "ShardedRocksDB").detail("Detail", "Read non-exist key range").detail("ReadKey", key);
 			return Optional<Value>();
@@ -2285,7 +2285,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	                                        IKeyValueStore::ReadType type,
 	                                        Optional<UID> debugID) override {
 		auto* shard = shardManager.getDataShard(key);
-		if (shard == nullptr) {
+		if (shard == nullptr || !shard->physicalShard->initialized()) {
 			// TODO: read non-exist system key range should not cause an error.
 			TraceEvent(SevWarnAlways, "ShardedRocksDB")
 			    .detail("Detail", "Read non-exist key range")
@@ -2334,6 +2334,12 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	                              IKeyValueStore::ReadType type) override {
 		TraceEvent(SevVerbose, "ShardedRocksReadRangeBegin", this->id).detail("Range", keys);
 		auto shards = shardManager.getDataShardsByRange(keys);
+
+		for (DataShard* shard : shards) {
+			if (shard == nullptr || !shard->physicalShard->initialized()) {
+				return RangeResult();
+			}
+		}
 
 		if (!shouldThrottle(type, keys.begin)) {
 			auto a = new Reader::ReadRangeAction(keys, shards, rowLimit, byteLimit);
