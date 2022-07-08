@@ -141,6 +141,9 @@ if(NOT WIN32)
     test/apitester/TesterWorkload.h
   )
 
+  add_library(fdb_c_unit_tests_impl OBJECT ${UNIT_TEST_SRCS})
+  add_library(fdb_c_api_tester_impl OBJECT ${API_TESTER_SRCS})
+
   if(OPEN_FOR_IDE)
     add_library(fdb_c_performance_test OBJECT test/performance_test.c test/test.h)
     add_library(fdb_c_ryw_benchmark OBJECT test/ryw_benchmark.c test/test.h)
@@ -148,11 +151,9 @@ if(NOT WIN32)
     add_library(fdb_c_client_memory_test OBJECT test/client_memory_test.cpp test/unit/fdb_api.cpp test/unit/fdb_api.hpp)
     add_library(mako OBJECT ${MAKO_SRCS})
     add_library(fdb_c_setup_tests OBJECT test/unit/setup_tests.cpp)
-    add_library(fdb_c_unit_tests OBJECT ${UNIT_TEST_SRCS})
     add_library(fdb_c_unit_tests_version_510 OBJECT ${UNIT_TEST_VERSION_510_SRCS})
     add_library(trace_partial_file_suffix_test OBJECT ${TRACE_PARTIAL_FILE_SUFFIX_TEST_SRCS})
     add_library(disconnected_timeout_unit_tests OBJECT ${DISCONNECTED_TIMEOUT_UNIT_TEST_SRCS})
-    add_library(fdb_c_api_tester OBJECT ${API_TESTER_SRCS})
   else()
     add_executable(fdb_c_performance_test test/performance_test.c test/test.h)
     add_executable(fdb_c_ryw_benchmark test/ryw_benchmark.c test/test.h)
@@ -160,42 +161,45 @@ if(NOT WIN32)
     add_executable(fdb_c_client_memory_test test/client_memory_test.cpp test/unit/fdb_api.cpp test/unit/fdb_api.hpp)
     add_executable(mako ${MAKO_SRCS})
     add_executable(fdb_c_setup_tests test/unit/setup_tests.cpp)
-    add_executable(fdb_c_unit_tests ${UNIT_TEST_SRCS})
+    add_executable(fdb_c_unit_tests)
+    target_link_libraries(fdb_c_unit_tests PRIVATE fdb_c fdb_c_unit_tests_impl)
     add_executable(fdb_c_unit_tests_version_510 ${UNIT_TEST_VERSION_510_SRCS})
     add_executable(trace_partial_file_suffix_test ${TRACE_PARTIAL_FILE_SUFFIX_TEST_SRCS})
     add_executable(disconnected_timeout_unit_tests ${DISCONNECTED_TIMEOUT_UNIT_TEST_SRCS})
-    add_executable(fdb_c_api_tester ${API_TESTER_SRCS})
+    add_executable(fdb_c_api_tester)
+    target_link_libraries(fdb_c_api_tester PRIVATE fdb_c fdb_c_api_tester_impl)
     strip_debug_symbols(fdb_c_performance_test)
     strip_debug_symbols(fdb_c_ryw_benchmark)
     strip_debug_symbols(fdb_c_txn_size_test)
     strip_debug_symbols(fdb_c_client_memory_test)
   endif()
+
   target_link_libraries(fdb_c_performance_test PRIVATE fdb_c Threads::Threads)
   target_link_libraries(fdb_c_ryw_benchmark PRIVATE fdb_c Threads::Threads)
   target_link_libraries(fdb_c_txn_size_test PRIVATE fdb_c Threads::Threads)
   target_link_libraries(fdb_c_client_memory_test PRIVATE fdb_c Threads::Threads)
 
+  target_include_directories(fdb_c_api_tester_impl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/ ${CMAKE_SOURCE_DIR}/flow/include ${CMAKE_BINARY_DIR}/flow/include)
+  if(USE_SANITIZER)
+    target_link_libraries(fdb_c_api_tester_impl PRIVATE fdb_cpp toml11_target Threads::Threads fmt::fmt boost_asan)
+  else()
+    target_link_libraries(fdb_c_api_tester_impl PRIVATE fdb_cpp toml11_target Threads::Threads fmt::fmt boost_target)
+  endif()
+  target_link_libraries(fdb_c_api_tester_impl PRIVATE SimpleOpt)
+
   add_dependencies(fdb_c_setup_tests doctest)
-  add_dependencies(fdb_c_unit_tests doctest)
+  add_dependencies(fdb_c_unit_tests_impl doctest)
   add_dependencies(fdb_c_unit_tests_version_510 doctest)
   add_dependencies(disconnected_timeout_unit_tests doctest)
   target_include_directories(fdb_c_setup_tests PUBLIC ${DOCTEST_INCLUDE_DIR})
-  target_include_directories(fdb_c_unit_tests PUBLIC ${DOCTEST_INCLUDE_DIR})
+  target_include_directories(fdb_c_unit_tests_impl PUBLIC ${DOCTEST_INCLUDE_DIR} ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/)
   target_include_directories(fdb_c_unit_tests_version_510 PUBLIC ${DOCTEST_INCLUDE_DIR} ${CMAKE_BINARY_DIR}/flow/include)
   target_include_directories(disconnected_timeout_unit_tests PUBLIC ${DOCTEST_INCLUDE_DIR})
   target_link_libraries(fdb_c_setup_tests PRIVATE fdb_c Threads::Threads)
-  target_link_libraries(fdb_c_unit_tests PRIVATE fdb_c Threads::Threads fdbclient rapidjson)
+  target_link_libraries(fdb_c_unit_tests_impl PRIVATE fdb_c Threads::Threads fdbclient rapidjson)
   target_link_libraries(fdb_c_unit_tests_version_510 PRIVATE fdb_c Threads::Threads)
   target_link_libraries(trace_partial_file_suffix_test PRIVATE fdb_c Threads::Threads flow)
   target_link_libraries(disconnected_timeout_unit_tests PRIVATE fdb_c Threads::Threads)
-
-  if(USE_SANITIZER)
-    target_link_libraries(fdb_c_api_tester PRIVATE fdb_c fdb_cpp toml11_target Threads::Threads fmt::fmt boost_asan)
-  else()
-    target_link_libraries(fdb_c_api_tester PRIVATE fdb_c fdb_cpp toml11_target Threads::Threads fmt::fmt boost_target)
-  endif()
-  target_include_directories(fdb_c_api_tester PRIVATE "${CMAKE_SOURCE_DIR}/flow/include" "${CMAKE_BINARY_DIR}/flow/include")
-  target_link_libraries(fdb_c_api_tester PRIVATE SimpleOpt)
 
   # do not set RPATH for mako
   set_property(TARGET mako PROPERTY SKIP_BUILD_RPATH TRUE)
@@ -224,9 +228,9 @@ if(NOT WIN32)
     DEPENDS fdb_c
     COMMENT "Copy libfdb_c to use as external client for test")
   add_custom_target(external_client DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c_external.so)
-  add_dependencies(fdb_c_unit_tests external_client)
+  add_dependencies(fdb_c_unit_tests_impl external_client)
   add_dependencies(disconnected_timeout_unit_tests external_client)
-  add_dependencies(fdb_c_api_tester external_client)
+  add_dependencies(fdb_c_api_tester_impl external_client)
 
   add_fdbclient_test(
     NAME fdb_c_setup_tests
@@ -420,6 +424,40 @@ target_link_libraries(c_workloads PUBLIC fdb_c)
 if (NOT WIN32 AND NOT APPLE AND NOT OPEN_FOR_IDE)
   target_link_options(c_workloads PRIVATE "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/external_workload.map,-z,nodelete")
 endif()
+
+# Generate shim library in Linux builds
+if (NOT WIN32 AND NOT APPLE AND NOT OPEN_FOR_IDE)
+
+  set(SHIM_LIB_OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR})
+
+  set(SHIM_LIB_GEN_SRC
+    ${SHIM_LIB_OUTPUT_DIR}/libfdb_c.so.init.c
+    ${SHIM_LIB_OUTPUT_DIR}/libfdb_c.so.tramp.S)
+
+  add_custom_command(OUTPUT ${SHIM_LIB_GEN_SRC}
+  COMMAND $<TARGET_FILE:Python::Interpreter> ${CMAKE_SOURCE_DIR}/contrib/Implib.so/implib-gen.py
+      --target ${CMAKE_SYSTEM_PROCESSOR}
+      --outdir ${SHIM_LIB_OUTPUT_DIR}
+      --dlopen-callback=fdb_shim_dlopen_callback
+      $<TARGET_FILE:fdb_c>)
+
+  add_library(fdb_c_shim SHARED ${SHIM_LIB_GEN_SRC} fdb_c_shim.cpp)
+  target_link_options(fdb_c_shim PRIVATE "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/fdb_c.map,-z,nodelete,-z,noexecstack")
+  target_link_libraries(fdb_c_shim PUBLIC dl)
+
+  add_executable(fdb_c_shim_unit_tests)
+  target_link_libraries(fdb_c_shim_unit_tests PRIVATE fdb_c_shim fdb_c_unit_tests_impl)
+
+  add_executable(fdb_c_shim_api_tester)
+  target_link_libraries(fdb_c_shim_api_tester PRIVATE fdb_c_shim fdb_c_api_tester_impl)
+
+  add_test(NAME fdb_c_shim_library_tests
+    COMMAND $<TARGET_FILE:Python::Interpreter> ${CMAKE_CURRENT_SOURCE_DIR}/test/fdb_c_shim_tests.py
+          --build-dir ${CMAKE_BINARY_DIR}
+          --source-dir ${CMAKE_SOURCE_DIR}
+          )
+
+endif() # End Linux only
 
 # TODO: re-enable once the old vcxproj-based build system is removed.
 #generate_export_header(fdb_c EXPORT_MACRO_NAME "DLLEXPORT"
