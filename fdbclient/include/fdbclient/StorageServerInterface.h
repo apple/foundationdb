@@ -58,6 +58,9 @@ struct VersionReply {
 struct UpdateCommitCostRequest {
 	constexpr static FileIdentifier file_identifier = 4159439;
 
+	// The time the request being posted
+	double postTime;
+
 	double elapsed;
 	TransactionTag busiestTag;
 
@@ -72,7 +75,7 @@ struct UpdateCommitCostRequest {
 
 	template <typename Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, elapsed, busiestTag, opsSum, costSum, totalWriteCosts, reported, reply);
+		serializer(ar, postTime, elapsed, busiestTag, opsSum, costSum, totalWriteCosts, reported, reply);
 	}
 };
 

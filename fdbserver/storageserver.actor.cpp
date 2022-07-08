@@ -620,6 +620,16 @@ public:
 	  : key(key), value(value), version(version), tags(tags), debugID(debugID) {}
 };
 
+struct BusiestWriteTagContext {
+	const std::string busiestWriteTagTrackingKey;
+	Reference<EventCacheHolder> busiestWriteTagEventHolder;
+	double lastUpdateTime;
+
+	BusiestWriteTagContext(const UID& thisServerID)
+	  : busiestWriteTagTrackingKey(thisServerID.toString() + "/BusiestWriteTag"),
+	    busiestWriteTagEventHolder(makeReference<EventCacheHolder>(busiestWriteTagTrackingKey)), lastUpdateTime(0.0) {}
+};
+
 struct StorageServer {
 	typedef VersionedMap<KeyRef, ValueOrClearToRef> VersionedData;
 
@@ -1018,6 +1028,7 @@ public:
 	}
 
 	TransactionTagCounter transactionTagCounter;
+	BusiestWriteTagContext busiestWriteTagContext;
 
 	Optional<LatencyBandConfig> latencyBandConfig;
 
@@ -1226,7 +1237,8 @@ public:
 	    serveFetchCheckpointParallelismLock(SERVER_KNOBS->SERVE_FETCH_CHECKPOINT_PARALLELISM),
 	    instanceID(deterministicRandom()->randomUniqueID().first()), shuttingDown(false), behind(false),
 	    versionBehind(false), debug_inApplyUpdate(false), debug_lastValidateTime(0), lastBytesInputEBrake(0),
-	    lastDurableVersionEBrake(0), maxQueryQueue(0), transactionTagCounter(ssi.id()), counters(this),
+	    lastDurableVersionEBrake(0), maxQueryQueue(0), transactionTagCounter(ssi.id()),
+	    busiestWriteTagContext(ssi.id()), counters(this),
 	    storageServerSourceTLogIDEventHolder(
 	        makeReference<EventCacheHolder>(ssi.id().toString() + "/StorageServerSourceTLogID")) {
 		version.initMetric(LiteralStringRef("StorageServer.Version"), counters.cc.id);
@@ -10067,6 +10079,12 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 				self->actors.add(fetchCheckpointQ(self, req));
 			}
 			when(UpdateCommitCostRequest req = waitNext(ssi.updateCommitCostRequest.getFuture())) {
+				// In case we received an old request/duplicate request, due to, e.g. network problem
+				if (req.postTime < self->busiestWriteTagContext.lastUpdateTime) {
+					continue;
+				}
+
+				self->busiestWriteTagContext.lastUpdateTime = req.postTime;
 				TraceEvent("BusiestWriteTag", self->thisServerID)
 				    .detail("Elapsed", req.elapsed)
 				    .detail("Tag", printable(req.busiestTag))
@@ -10074,7 +10092,7 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 				    .detail("TagCost", req.costSum)
 				    .detail("TotalCost", req.totalWriteCosts)
 				    .detail("Reported", req.reported)
-				    .trackLatest(self->transactionTagCounter.getBusiestWriteTagTrackingKey());
+				    .trackLatest(self->busiestWriteTagContext.busiestWriteTagTrackingKey);
 
 				req.reply.send(Void());
 			}

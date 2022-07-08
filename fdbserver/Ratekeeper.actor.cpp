@@ -1016,6 +1016,7 @@ UpdateCommitCostRequest StorageQueueInfo::refreshCommitCost(double elapsed) {
 	}
 
 	UpdateCommitCostRequest updateCommitCostRequest;
+	updateCommitCostRequest.postTime = now();
 	updateCommitCostRequest.elapsed = elapsed;
 	updateCommitCostRequest.busiestTag = busiestTag;
 	updateCommitCostRequest.opsSum = maxCost.getOpsSum();

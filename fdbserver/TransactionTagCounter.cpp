@@ -90,17 +90,12 @@ class TransactionTagCounterImpl {
 	std::vector<StorageQueuingMetricsReply::TagInfo> previousBusiestTags;
 	Reference<EventCacheHolder> busiestReadTagEventHolder;
 
-	const std::string busiestWriteTagTrackingKey;
-	Reference<EventCacheHolder> busiestWriteTagEventHolder;
-
 	static int64_t costFunction(int64_t bytes) { return bytes / SERVER_KNOBS->READ_COST_BYTE_FACTOR + 1; }
 
 public:
 	TransactionTagCounterImpl(UID thisServerID)
 	  : thisServerID(thisServerID), topTags(SERVER_KNOBS->SS_THROTTLE_TAGS_TRACKED),
-	    busiestReadTagEventHolder(makeReference<EventCacheHolder>(thisServerID.toString() + "/BusiestReadTag")),
-	    busiestWriteTagTrackingKey(thisServerID.toString() + "/BusiestWriteTag"),
-	    busiestWriteTagEventHolder(makeReference<EventCacheHolder>(busiestWriteTagTrackingKey)) {}
+	    busiestReadTagEventHolder(makeReference<EventCacheHolder>(thisServerID.toString() + "/BusiestReadTag")) {}
 
 	void addRequest(Optional<TagSet> const& tags, int64_t bytes) {
 		if (tags.present()) {
@@ -115,8 +110,6 @@ public:
 			intervalTotalSampledCount += cost;
 		}
 	}
-
-	const std::string& getBusiestWritingTagTrackingKey() const { return busiestWriteTagTrackingKey; }
 
 	void startNewInterval() {
 		double elapsed = now() - intervalStart;
@@ -153,10 +146,6 @@ void TransactionTagCounter::addRequest(Optional<TagSet> const& tags, int64_t byt
 
 void TransactionTagCounter::startNewInterval() {
 	return impl->startNewInterval();
-}
-
-const std::string& TransactionTagCounter::getBusiestWriteTagTrackingKey() const {
-	return impl->getBusiestWritingTagTrackingKey();
 }
 
 std::vector<StorageQueuingMetricsReply::TagInfo> const& TransactionTagCounter::getBusiestTags() const {
