@@ -1,0 +1,15 @@
+table Void {
+
+}
+table Error {
+    error: uint;
+}
+
+struct UID {
+    first : ulong;
+    second : ulong;
+}
+
+table ReplyPromise {
+    uid : UID;
+}
