@@ -3146,6 +3146,8 @@ SpanContext generateSpanID(bool transactionTracingSample, SpanContext parentCont
 	    deterministicRandom()->randomUniqueID(), deterministicRandom()->randomUInt64(), TraceFlags::unsampled);
 }
 
+FDB_DEFINE_BOOLEAN_PARAM(AllowInvalidTenantID);
+
 TransactionState::TransactionState(Database cx,
                                    Optional<TenantName> tenant,
                                    TaskPriority taskID,
@@ -3174,7 +3176,7 @@ Reference<TransactionState> TransactionState::cloneAndReset(Reference<Transactio
 	return newState;
 }
 
-TenantInfo TransactionState::getTenantInfo(bool allowInvalidId /* = false */) {
+TenantInfo TransactionState::getTenantInfo(AllowInvalidTenantID allowInvalidId /* = false */) {
 	Optional<TenantName> const& t = tenant();
 
 	if (options.rawAccess) {

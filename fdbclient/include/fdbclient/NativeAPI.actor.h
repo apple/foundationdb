@@ -235,6 +235,8 @@ struct Watch : public ReferenceCounted<Watch>, NonCopyable {
 	void setWatch(Future<Void> watchFuture);
 };
 
+FDB_DECLARE_BOOLEAN_PARAM(AllowInvalidTenantID);
+
 struct TransactionState : ReferenceCounted<TransactionState> {
 	Database cx;
 	int64_t tenantId = TenantInfo::INVALID_TENANT;
@@ -270,7 +272,7 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 	                 Reference<TransactionLogInfo> trLogInfo);
 
 	Reference<TransactionState> cloneAndReset(Reference<TransactionLogInfo> newTrLogInfo, bool generateNewSpan) const;
-	TenantInfo getTenantInfo(bool allowInvalidId = false);
+	TenantInfo getTenantInfo(AllowInvalidTenantID allowInvalidId = AllowInvalidTenantID::False);
 
 	Optional<TenantName> const& tenant();
 	bool hasTenant() const;
