@@ -25,6 +25,11 @@
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/MoveKeys.actor.h"
 
+/* Testability Contract:
+ * a. The DataDistributor has to use this interface to interact with data-plane (aka. run transaction), because the
+ * testability benefits from a mock implementation; b. Other control-plane roles should consider providing its own
+ * TxnProcessor interface to provide testability, for example, Ratekeeper.
+ * */
 class IDDTxnProcessor {
 public:
 	struct SourceServers {
@@ -38,7 +43,7 @@ public:
 
 	virtual ~IDDTxnProcessor() = default;
 
-	virtual Future<MoveKeysLock> takeMoveKeysLock(UID ddId) const { return MoveKeysLock(); }
+	[[nodiscard]] virtual Future<MoveKeysLock> takeMoveKeysLock(UID ddId) const { return MoveKeysLock(); }
 };
 
 class DDTxnProcessorImpl;
