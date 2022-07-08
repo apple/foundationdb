@@ -20,8 +20,8 @@
 
 #include "fdbrpc/HTTP.h"
 
-#include "fdbrpc/md5/md5.h"
-#include "fdbrpc/libb64/encode.h"
+#include "md5/md5.h"
+#include "libb64/encode.h"
 #include "flow/Knobs.h"
 #include <cctype>
 

@@ -20,8 +20,8 @@
 
 #include "fdbclient/S3BlobStore.h"
 
-#include "fdbrpc/md5/md5.h"
-#include "fdbrpc/libb64/encode.h"
+#include "md5/md5.h"
+#include "libb64/encode.h"
 #include "fdbclient/sha1/SHA1.h"
 #include <time.h>
 #include <iomanip>
