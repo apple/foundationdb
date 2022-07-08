@@ -562,7 +562,7 @@ struct GlobalConfigRefreshReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, arena, result);
+		serializer(ar, result, arena);
 	}
 };
 
