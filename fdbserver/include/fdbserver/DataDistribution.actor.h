@@ -26,6 +26,7 @@
 
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/RunTransaction.actor.h"
+#include "fdbserver/DDTxnProcessor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/MoveKeys.actor.h"

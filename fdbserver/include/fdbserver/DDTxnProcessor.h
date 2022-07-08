@@ -23,6 +23,7 @@
 
 #include "fdbserver/Knobs.h"
 #include "fdbserver/DataDistribution.actor.h"
+#include "fdbserver/MoveKeys.actor.h"
 
 class IDDTxnProcessor {
 public:
@@ -36,6 +37,8 @@ public:
 	virtual Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses() = 0;
 
 	virtual ~IDDTxnProcessor() = default;
+
+	virtual Future<MoveKeysLock> takeMoveKeysLock(UID ddId) const { return MoveKeysLock(); }
 };
 
 class DDTxnProcessorImpl;
@@ -53,6 +56,8 @@ public:
 
 	// Call NativeAPI implementation directly
 	Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses() override;
+
+	Future<MoveKeysLock> takeMoveKeysLock(UID ddId) const override;
 };
 
 // run mock transaction
