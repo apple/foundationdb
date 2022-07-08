@@ -498,19 +498,18 @@ ACTOR Future<Void> shardSplitter(DataDistributionTracker* self,
 	//}
 	int numShards = splitKeys.size() - 1;
 
-	if (deterministicRandom()->random01() < 0.01) {
-		TraceEvent("RelocateShardStartSplitx100", self->distributorId)
-		    .detail("Begin", keys.begin)
-		    .detail("End", keys.end)
-		    .detail("MaxBytes", shardBounds.max.bytes)
-		    .detail("MetricsBytes", metrics.bytes)
-		    .detail("Bandwidth",
-		            bandwidthStatus == BandwidthStatusHigh     ? "High"
-		            : bandwidthStatus == BandwidthStatusNormal ? "Normal"
-		                                                       : "Low")
-		    .detail("BytesPerKSec", metrics.bytesPerKSecond)
-		    .detail("NumShards", numShards);
-	}
+	TraceEvent("RelocateShardStartSplit", self->distributorId)
+	    .suppressFor(1.0)
+	    .detail("Begin", keys.begin)
+	    .detail("End", keys.end)
+	    .detail("MaxBytes", shardBounds.max.bytes)
+	    .detail("MetricsBytes", metrics.bytes)
+	    .detail("Bandwidth",
+	            bandwidthStatus == BandwidthStatusHigh     ? "High"
+	            : bandwidthStatus == BandwidthStatusNormal ? "Normal"
+	                                                       : "Low")
+	    .detail("BytesPerKSec", metrics.bytesPerKSecond)
+	    .detail("NumShards", numShards);
 
 	if (numShards > 1) {
 		int skipRange = deterministicRandom()->randomInt(0, numShards);
