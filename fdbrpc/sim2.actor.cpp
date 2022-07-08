@@ -315,6 +315,8 @@ struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 	NetworkAddress getPeerAddress() const override { return peerEndpoint; }
 	UID getDebugID() const override { return dbgid; }
 
+	boost::asio::ip::tcp::socket& getSocket() override { throw operation_failed(); }
+
 	bool opened, closedByCaller, stableConnection;
 
 private:
@@ -939,8 +941,7 @@ public:
 	TaskPriority getCurrentTask() const override { return currentTaskID; }
 	void setCurrentTask(TaskPriority taskID) override { currentTaskID = taskID; }
 	// Sets the taskID/priority of the current task, without yielding
-	Future<Reference<IConnection>> connect(NetworkAddress toAddr, const std::string& host) override {
-		ASSERT(host.empty());
+	Future<Reference<IConnection>> connect(NetworkAddress toAddr) override {
 		if (!addressMap.count(toAddr)) {
 			return waitForProcessAndConnect(toAddr, this);
 		}
@@ -966,7 +967,7 @@ public:
 		return onConnect(::delay(0.5 * deterministicRandom()->random01()), myc);
 	}
 
-	Future<Reference<IConnection>> connectExternal(NetworkAddress toAddr, const std::string& host) override {
+	Future<Reference<IConnection>> connectExternal(NetworkAddress toAddr) override {
 		return SimExternalConnection::connect(toAddr);
 	}
 
