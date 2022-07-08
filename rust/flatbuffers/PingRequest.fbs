@@ -1,11 +1,4 @@
-struct UID {
-    first : ulong;
-    second : ulong;
-}
-
-table ReplyPromise {
-    uid : UID;
-}
+include "common.fbs";
 
 table PingRequest {
     reply_promise : ReplyPromise;

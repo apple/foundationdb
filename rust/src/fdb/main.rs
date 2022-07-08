@@ -25,6 +25,17 @@ async fn main() -> Result<()> {
     loopback_handler
         .register_well_known_endpoint(WLTOKEN::PingPacket, Box::new(ping_request::Ping::new()));
 
+    // Register worker role here
+    // loopback_handler.register_well_known_endpoint(WLTOKEN::Worker???, ...:new(cluster_file));
+
+    match cli.class {
+        Some(cli::FdbRole::Master) | None => { // None => default, which is currently just the GRV master.
+        }
+        Some(class) => {
+            return Err(format!("Unimplemented process class: {:?}", class).into());
+        }
+    }
+
     let pool = ConnectionKeeper::new(Some(cli.public_address), loopback_handler);
     pool.listen(cli.listen_address).await?;
     println!("Goodbye, cruel world!");

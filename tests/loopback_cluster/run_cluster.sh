@@ -33,7 +33,7 @@ for i in `seq 1 $2` ; do
 	echo $CLUSTER_FILE > $CLUSTER
 	echo "Starting Cluster: " $CLUSTER_FILE
 
-	for j in 1 2 3; do
+	for j in 2 ; do
 		LOG=${DIR}/${j}/log
 		DATA=${DIR}/${j}/data
 		mkdir -p ${LOG} ${DATA}

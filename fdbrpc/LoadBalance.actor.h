@@ -95,9 +95,12 @@ Future<Void> tssComparison(Req req,
 	state int srcErrorCode = error_code_success;
 	state int tssErrorCode = error_code_success;
 
+	state ErrorOr<Resp> src;
+	state Optional<ErrorOr<Resp>> tss;
+	
 	loop {
 		choose {
-			when(state ErrorOr<Resp> src = wait(fSource)) {
+			when(src = wait(fSource)) {
 				srcEndTime = now();
 				fSource = Never();
 				finished++;
@@ -105,7 +108,7 @@ Future<Void> tssComparison(Req req,
 					break;
 				}
 			}
-			when(state Optional<ErrorOr<Resp>> tss = wait(fTssWithTimeout)) {
+			when(tss = wait(fTssWithTimeout)) {
 				tssEndTime = now();
 				fTssWithTimeout = Never();
 				finished++;

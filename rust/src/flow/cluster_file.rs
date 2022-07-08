@@ -19,6 +19,7 @@ impl FromStr for ClusterFile {
     type Err = Error;
 
     fn from_str(input: &str) -> Result<Self> {
+        let input = input.trim();
         // expect "key:desc@host:port[,host:port...]"
         let tokens: Vec<&str> = input.split('@').collect();
         if tokens.len() != 2 {
@@ -53,7 +54,7 @@ impl FromStr for ClusterFile {
             return Err(format!("ID should only contain a-z, A-Z, 0-9  Got: {}", id).into());
         }
 
-        let host_port_tokens = tokens[1].split(",");
+        let host_port_tokens = host_list.split(",");
 
         let mut hosts = Vec::<ClusterHost>::new();
         let mut uniq = std::collections::HashSet::<ClusterHost>::new();
@@ -78,7 +79,11 @@ impl FromStr for ClusterFile {
                 Err(_) => {
                     let host_regex = Regex::new(r"^([\w\-]+\.?)+$")?;
                     if host_regex.is_match(tokens[0]) {
-                        ClusterHost::Hostname(tokens[0].to_string(), tokens[1].parse()?, tls_mode)
+                        let port = match tokens[1].parse() {
+                            Ok(port) => port,
+                            Err(e) => { return Err(format!("could not parse port '{}': {:?}", tokens[1], e).into()); }
+                        };
+                        ClusterHost::Hostname(tokens[0].to_string(), port, tls_mode)
                     } else {
                         return Err(format!("Invalid hostname / IP: {}", tokens[0]).into());
                     }
@@ -100,7 +105,7 @@ impl FromStr for ClusterFile {
 
 #[test]
 fn test_cluster_file() -> Result<()> {
-    ClusterFile::from_str("45FiQ41H:45FiQ41H@127.0.0.1:4000")?;
+    ClusterFile::from_str("45FiQ41H:45FiQ41H@127.0.0.1:4000\n")?;
     ClusterFile::from_str("test:test@127.0.0.1:4501")?;
     ClusterFile::from_str(
         "test:test@127.0.0.1:4501:tls,127.0.0.1:4502:tls,127.0.0.1:4503:tls",

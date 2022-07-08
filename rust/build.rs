@@ -28,6 +28,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     })
     .expect("flatc");
 
+    cxx_build::bridge("src/lib.rs")
+        .file("src/ffi.cc")
+        .warnings(false)
+        .extra_warnings(false)
+        // .file("src/blobstore.cc")
+        // .flag("-w")
+        .flag("-std=c++2a")
+        // .flag("-Wno-unused-parameter")
+        .flag("-Wno-attributes")
+        .flag("-L/root/build_output/lib")
+        .flag("-lflow")
+        // .flag("/root/build_output/lib/libflow.a")
+        .flag("-D").flag("FLOW_LOADBALANCE_ACTOR_G_H")
+        .flag("-iquote").flag("/root/src/foundationdb")
+        .flag("-iquote").flag("/root/build_output")
+        .flag("-I").flag("/root/src/foundationdb")
+        .flag("-I").flag("/opt/boost_1_78_0/include")
+        .compile("cxx-demo");
+
+    println!("cargo:rerun-if-changed=src/lib.rs");
+    println!("cargo:rerun-if-changed=src/ffi.cc");
+    println!("cargo:rerun-if-changed=fdbclient");
+    println!("cargo:rustc-link-search=/root/build_output/lib/");
+    println!("cargo:rustc-link-lib=flow");
     match std::env::var_os("BASH_COMPLETION_DIR") {
         Some(out) => {
             // let mut cmd = build_cli();

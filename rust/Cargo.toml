@@ -12,6 +12,7 @@ debug = true
 [dependencies]
 bytes = {version = "1.1"}
 clap = {version = "3.2", features = ["cargo", "derive"] }
+cxx = "1.0"
 dashmap = {version = "5.3" }
 fastrand = {version = "1.7" } # would use rand, but it makes it hard to get a non-cryptographically-secure, thread-local RNG, and fastrand makes that easy.
 fxhash = {version = "0.2.1" }
@@ -34,6 +35,7 @@ criterion = { version = "0.3.5", features = ["html_reports"] }
 flatc-rust = { version = "0.2" }
 clap = {version = "3.2", features = ["cargo", "derive"]}
 clap_complete = "3.2"
+cxx-build = "1.0"
 
 [[bin]]
 name = "testserver"
