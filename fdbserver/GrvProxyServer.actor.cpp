@@ -345,7 +345,7 @@ ACTOR Future<Void> globalConfigMigrate(GrvProxyData* grvProxyData) {
 				wait(tr->commit());
 				break;
 			} catch (Error& e) {
-				// Multilpe GRV proxies may attempt this migration at the same
+				// Multiple GRV proxies may attempt this migration at the same
 				// time, sometimes resulting in aborts due to conflicts.
 				// Purposefully avoid retrying, making this migration
 				// best-effort.
