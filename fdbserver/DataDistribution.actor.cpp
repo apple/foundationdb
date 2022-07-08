@@ -52,6 +52,57 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+void DataMove::validateShard(const DDShardInfo& shard, KeyRangeRef range, int priority) {
+	if (!valid) {
+		if (shard.hasDest && shard.destId != anonymousShardId) {
+			TraceEvent(SevError, "DataMoveValidationError")
+			    .detail("Range", range)
+			    .detail("Reason", "DataMoveMissing")
+			    .detail("ShardPrimaryDest", describe(shard.primaryDest))
+			    .detail("ShardRemoteDest", describe(shard.remoteDest));
+		}
+		return;
+	}
+
+	ASSERT(this->meta.range.contains(range));
+
+	if (!shard.hasDest) {
+		TraceEvent(SevError, "DataMoveValidationError")
+		    .detail("Range", range)
+		    .detail("Reason", "ShardMissingDest")
+		    .detail("DataMoveMetaData", this->meta.toString())
+		    .detail("DataMovePrimaryDest", describe(this->primaryDest))
+		    .detail("DataMoveRemoteDest", describe(this->remoteDest));
+		cancelled = true;
+		return;
+	}
+
+	if (shard.destId != this->meta.id) {
+		TraceEvent(SevError, "DataMoveValidationError")
+		    .detail("Range", range)
+		    .detail("Reason", "DataMoveIDMissMatch")
+		    .detail("DataMoveMetaData", this->meta.toString())
+		    .detail("ShardMoveID", shard.destId);
+		cancelled = true;
+		return;
+	}
+
+	if (!std::includes(
+	        this->primaryDest.begin(), this->primaryDest.end(), shard.primaryDest.begin(), shard.primaryDest.end()) ||
+	    !std::includes(
+	        this->remoteDest.begin(), this->remoteDest.end(), shard.remoteDest.begin(), shard.remoteDest.end())) {
+		TraceEvent(SevError, "DataMoveValidationError")
+		    .detail("Range", range)
+		    .detail("Reason", "DataMoveDestMissMatch")
+		    .detail("DataMoveMetaData", this->meta.toString())
+		    .detail("DataMovePrimaryDest", describe(this->primaryDest))
+		    .detail("DataMoveRemoteDest", describe(this->remoteDest))
+		    .detail("ShardPrimaryDest", describe(shard.primaryDest))
+		    .detail("ShardRemoteDest", describe(shard.remoteDest));
+		cancelled = true;
+	}
+}
+
 // Read keyservers, return unique set of teams
 ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution(Database cx,
                                                                             UID distributorId,
@@ -68,14 +119,18 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution(Data
 	state std::map<UID, Optional<Key>> server_dc;
 	state std::map<std::vector<UID>, std::pair<std::vector<UID>, std::vector<UID>>> team_cache;
 	state std::vector<std::pair<StorageServerInterface, ProcessClass>> tss_servers;
+	state int numDataMoves = 0;
 
 	// Get the server list in its own try/catch block since it modifies result.  We don't want a subsequent failure
 	// causing entries to be duplicated
 	loop {
+		numDataMoves = 0;
 		server_dc.clear();
+		result->allServers.clear();
+		tss_servers.clear();
+		team_cache.clear();
 		succeeded = false;
 		try {
-
 			// Read healthyZone value which is later used to determine on/off of failure triggered DD
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
@@ -113,8 +168,6 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution(Data
 			for (int i = 0; i < workers.get().size(); i++)
 				id_data[workers.get()[i].locality.processId()] = workers.get()[i];
 
-			succeeded = true;
-
 			for (int i = 0; i < serverList.get().size(); i++) {
 				auto ssi = decodeServerListValue(serverList.get()[i].value);
 				if (!ssi.isTss()) {
@@ -124,6 +177,42 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution(Data
 					tss_servers.emplace_back(ssi, id_data[ssi.locality.processId()].processClass);
 				}
 			}
+
+			RangeResult dms = wait(tr.getRange(dataMoveKeys, CLIENT_KNOBS->TOO_MANY));
+			ASSERT(!dms.more && dms.size() < CLIENT_KNOBS->TOO_MANY);
+			for (int i = 0; i < dms.size(); ++i) {
+				auto dataMove = std::make_shared<DataMove>(decodeDataMoveValue(dms[i].value), true);
+				const DataMoveMetaData& meta = dataMove->meta;
+				for (const UID& id : meta.src) {
+					auto& dc = server_dc[id];
+					if (std::find(remoteDcIds.begin(), remoteDcIds.end(), dc) != remoteDcIds.end()) {
+						dataMove->remoteSrc.push_back(id);
+					} else {
+						dataMove->primarySrc.push_back(id);
+					}
+				}
+				for (const UID& id : meta.dest) {
+					auto& dc = server_dc[id];
+					if (std::find(remoteDcIds.begin(), remoteDcIds.end(), dc) != remoteDcIds.end()) {
+						dataMove->remoteDest.push_back(id);
+					} else {
+						dataMove->primaryDest.push_back(id);
+					}
+				}
+				std::sort(dataMove->primarySrc.begin(), dataMove->primarySrc.end());
+				std::sort(dataMove->remoteSrc.begin(), dataMove->remoteSrc.end());
+				std::sort(dataMove->primaryDest.begin(), dataMove->primaryDest.end());
+				std::sort(dataMove->remoteDest.begin(), dataMove->remoteDest.end());
+
+				auto ranges = result->dataMoveMap.intersectingRanges(meta.range);
+				for (auto& r : ranges) {
+					ASSERT(!r.value()->valid);
+				}
+				result->dataMoveMap.insert(meta.range, std::move(dataMove));
+				++numDataMoves;
+			}
+
+			succeeded = true;
 
 			break;
 		} catch (Error& e) {
@@ -153,11 +242,12 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution(Data
 				succeeded = true;
 
 				std::vector<UID> src, dest, last;
+				UID srcId, destId;
 
 				// for each range
 				for (int i = 0; i < keyServers.size() - 1; i++) {
-					DDShardInfo info(keyServers[i].key);
-					decodeKeyServersValue(UIDtoTagMap, keyServers[i].value, src, dest);
+					decodeKeyServersValue(UIDtoTagMap, keyServers[i].value, src, dest, srcId, destId);
+					DDShardInfo info(keyServers[i].key, srcId, destId);
 					if (remoteDcIds.size()) {
 						auto srcIter = team_cache.find(src);
 						if (srcIter == team_cache.end()) {
@@ -232,6 +322,14 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution(Data
 
 	// a dummy shard at the end with no keys or servers makes life easier for trackInitialShards()
 	result->shards.push_back(DDShardInfo(allKeys.end));
+
+	if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA && numDataMoves > 0) {
+		for (int shard = 0; shard < result->shards.size() - 1; ++shard) {
+			const DDShardInfo& iShard = result->shards[shard];
+			KeyRangeRef keys = KeyRangeRef(iShard.key, result->shards[shard + 1].key);
+			result->dataMoveMap[keys.begin]->validateShard(iShard, keys);
+		}
+	}
 
 	// add tss to server list AFTER teams are built
 	for (auto& it : tss_servers) {
@@ -438,6 +536,8 @@ static std::set<int> const& normalDDQueueErrors() {
 	if (s.empty()) {
 		s.insert(error_code_movekeys_conflict);
 		s.insert(error_code_broken_promise);
+		s.insert(error_code_data_move_cancelled);
+		s.insert(error_code_data_move_dest_team_not_found);
 	}
 	return s;
 }
@@ -644,37 +744,77 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 
 			state int shard = 0;
 			for (; shard < initData->shards.size() - 1; shard++) {
-				KeyRangeRef keys = KeyRangeRef(initData->shards[shard].key, initData->shards[shard + 1].key);
+				const DDShardInfo& iShard = initData->shards[shard];
+				KeyRangeRef keys = KeyRangeRef(iShard.key, initData->shards[shard + 1].key);
+
 				shardsAffectedByTeamFailure->defineShard(keys);
 				std::vector<ShardsAffectedByTeamFailure::Team> teams;
-				teams.push_back(ShardsAffectedByTeamFailure::Team(initData->shards[shard].primarySrc, true));
+				teams.push_back(ShardsAffectedByTeamFailure::Team(iShard.primarySrc, true));
 				if (configuration.usableRegions > 1) {
-					teams.push_back(ShardsAffectedByTeamFailure::Team(initData->shards[shard].remoteSrc, false));
+					teams.push_back(ShardsAffectedByTeamFailure::Team(iShard.remoteSrc, false));
 				}
 				if (g_network->isSimulated()) {
 					TraceEvent("DDInitShard")
 					    .detail("Keys", keys)
-					    .detail("PrimarySrc", describe(initData->shards[shard].primarySrc))
-					    .detail("RemoteSrc", describe(initData->shards[shard].remoteSrc))
-					    .detail("PrimaryDest", describe(initData->shards[shard].primaryDest))
-					    .detail("RemoteDest", describe(initData->shards[shard].remoteDest));
+					    .detail("PrimarySrc", describe(iShard.primarySrc))
+					    .detail("RemoteSrc", describe(iShard.remoteSrc))
+					    .detail("PrimaryDest", describe(iShard.primaryDest))
+					    .detail("RemoteDest", describe(iShard.remoteDest))
+					    .detail("SrcID", iShard.srcId)
+					    .detail("DestID", iShard.destId);
 				}
 
 				shardsAffectedByTeamFailure->moveShard(keys, teams);
-				if (initData->shards[shard].hasDest) {
+				if (iShard.hasDest && iShard.destId == anonymousShardId) {
 					// This shard is already in flight.  Ideally we should use dest in ShardsAffectedByTeamFailure and
 					// generate a dataDistributionRelocator directly in DataDistributionQueue to track it, but it's
 					// easier to just (with low priority) schedule it for movement.
-					bool unhealthy = initData->shards[shard].primarySrc.size() != configuration.storageTeamSize;
+					bool unhealthy = iShard.primarySrc.size() != configuration.storageTeamSize;
 					if (!unhealthy && configuration.usableRegions > 1) {
-						unhealthy = initData->shards[shard].remoteSrc.size() != configuration.storageTeamSize;
+						unhealthy = iShard.remoteSrc.size() != configuration.storageTeamSize;
 					}
 					output.send(RelocateShard(keys,
 					                          unhealthy ? SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY
 					                                    : SERVER_KNOBS->PRIORITY_RECOVER_MOVE,
 					                          RelocateReason::OTHER));
 				}
+
 				wait(yield(TaskPriority::DataDistribution));
+			}
+
+			state KeyRangeMap<std::shared_ptr<DataMove>>::iterator it = initData->dataMoveMap.ranges().begin();
+			for (; it != initData->dataMoveMap.ranges().end(); ++it) {
+				const DataMoveMetaData& meta = it.value()->meta;
+				if (it.value()->isCancelled() || (it.value()->valid && !CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA)) {
+					RelocateShard rs(meta.range, SERVER_KNOBS->PRIORITY_RECOVER_MOVE, RelocateReason::OTHER);
+					rs.dataMoveId = meta.id;
+					rs.cancelled = true;
+					output.send(rs);
+					TraceEvent("DDInitScheduledCancelDataMove", self->ddId).detail("DataMove", meta.toString());
+				} else if (it.value()->valid) {
+					TraceEvent(SevDebug, "DDInitFoundDataMove", self->ddId).detail("DataMove", meta.toString());
+					ASSERT(meta.range == it.range());
+					// TODO: Persist priority in DataMoveMetaData.
+					RelocateShard rs(meta.range, SERVER_KNOBS->PRIORITY_RECOVER_MOVE, RelocateReason::OTHER);
+					rs.dataMoveId = meta.id;
+					rs.dataMove = it.value();
+					std::vector<ShardsAffectedByTeamFailure::Team> teams;
+					teams.push_back(ShardsAffectedByTeamFailure::Team(rs.dataMove->primaryDest, true));
+					if (!rs.dataMove->remoteDest.empty()) {
+						teams.push_back(ShardsAffectedByTeamFailure::Team(rs.dataMove->remoteDest, false));
+					}
+
+					// Since a DataMove could cover more than one keyrange, e.g., during merge, we need to define
+					// the target shard and restart the shard tracker.
+					shardsAffectedByTeamFailure->restartShardTracker.send(rs.keys);
+					shardsAffectedByTeamFailure->defineShard(rs.keys);
+
+					// When restoring a DataMove, the destination team is determined, and hence we need to register
+					// the data move now, so that team failures can be captured.
+					shardsAffectedByTeamFailure->moveShard(rs.keys, teams);
+					output.send(rs);
+					wait(yield(TaskPriority::DataDistribution));
+				}
 			}
 
 			std::vector<TeamCollectionInterface> tcis;
@@ -859,6 +999,8 @@ static std::set<int> const& normalDataDistributorErrors() {
 		s.insert(error_code_actor_cancelled);
 		s.insert(error_code_please_reboot);
 		s.insert(error_code_movekeys_conflict);
+		s.insert(error_code_data_move_cancelled);
+		s.insert(error_code_data_move_dest_team_not_found);
 	}
 	return s;
 }

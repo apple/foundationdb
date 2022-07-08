@@ -33,6 +33,9 @@
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wunused-variable"
 
+FDB_DECLARE_BOOLEAN_PARAM(AssignEmptyRange);
+FDB_DECLARE_BOOLEAN_PARAM(UnassignShard);
+
 struct RestoreLoaderInterface;
 struct RestoreApplierInterface;
 struct RestoreMasterInterface;
@@ -49,14 +52,27 @@ extern const KeyRef afterAllKeys;
 //	An internal mapping of where shards are located in the database. [[begin]] is the start of the shard range
 //	and the result is a list of serverIDs or Tags where these shards are located. These values can be changed
 //	as data movement occurs.
+// With ShardEncodeLocationMetaData, the encoding format is:
+//    "\xff/keyServers/[[begin]]" := "[[std::vector<serverID>, std::vector<serverID>], srcID, destID]", where srcID
+//  and destID are the source and destination `shard id`, respectively.
 extern const KeyRangeRef keyServersKeys, keyServersKeyServersKeys;
 extern const KeyRef keyServersPrefix, keyServersEnd, keyServersKeyServersKey;
+
+// Used during the transition to the new location metadata format with shard IDs.
+// If `SHARD_ENCODE_LOCATION_METADATA` is enabled, any shard that doesn't have a shard ID will be assigned this
+// temporary ID, until a permanent ID is assigned to it.
+extern const UID anonymousShardId;
+extern const uint64_t assignedEmptyShardId;
 const Key keyServersKey(const KeyRef& k);
 const KeyRef keyServersKey(const KeyRef& k, Arena& arena);
 const Value keyServersValue(RangeResult result,
                             const std::vector<UID>& src,
                             const std::vector<UID>& dest = std::vector<UID>());
 const Value keyServersValue(const std::vector<Tag>& srcTag, const std::vector<Tag>& destTag = std::vector<Tag>());
+const Value keyServersValue(const std::vector<UID>& src,
+                            const std::vector<UID>& dest,
+                            const UID& srcID,
+                            const UID& destID);
 // `result` must be the full result of getting serverTagKeys
 void decodeKeyServersValue(RangeResult result,
                            const ValueRef& value,
@@ -67,6 +83,13 @@ void decodeKeyServersValue(std::map<Tag, UID> const& tag_uid,
                            const ValueRef& value,
                            std::vector<UID>& src,
                            std::vector<UID>& dest);
+void decodeKeyServersValue(RangeResult result,
+                           const ValueRef& value,
+                           std::vector<UID>& src,
+                           std::vector<UID>& dest,
+                           UID& srcID,
+                           UID& destID,
+                           bool missingIsError = true);
 
 extern const KeyRef clusterIdKey;
 
@@ -76,6 +99,13 @@ const Key checkpointKeyFor(UID checkpointID);
 const Value checkpointValue(const CheckpointMetaData& checkpoint);
 UID decodeCheckpointKey(const KeyRef& key);
 CheckpointMetaData decodeCheckpointValue(const ValueRef& value);
+
+// "\xff/dataMoves/[[UID]] := [[DataMoveMetaData]]"
+extern const KeyRangeRef dataMoveKeys;
+const Key dataMoveKeyFor(UID dataMoveId);
+const Value dataMoveValue(const DataMoveMetaData& dataMove);
+UID decodeDataMoveKey(const KeyRef& key);
+DataMoveMetaData decodeDataMoveValue(const ValueRef& value);
 
 // "\xff/storageCacheServer/[[UID]] := StorageServerInterface"
 // This will be added by the cache server on initialization and removed by DD
@@ -102,11 +132,16 @@ void decodeStorageCacheValue(const ValueRef& value, std::vector<uint16_t>& serve
 extern const KeyRangeRef serverKeysRange;
 extern const KeyRef serverKeysPrefix;
 extern const ValueRef serverKeysTrue, serverKeysTrueEmptyRange, serverKeysFalse;
+const UID newShardId(const uint64_t physicalShardId,
+                     AssignEmptyRange assignEmptyRange,
+                     UnassignShard unassignShard = UnassignShard::False);
 const Key serverKeysKey(UID serverID, const KeyRef& keys);
 const Key serverKeysPrefixFor(UID serverID);
 UID serverKeysDecodeServer(const KeyRef& key);
 std::pair<UID, Key> serverKeysDecodeServerBegin(const KeyRef& key);
 bool serverHasKey(ValueRef storedValue);
+const Value serverKeysValue(const UID& id);
+void decodeServerKeysValue(const ValueRef& value, bool& assigned, bool& emptyRange, UID& id);
 
 extern const KeyRangeRef conflictingKeysRange;
 extern const ValueRef conflictingKeysTrue, conflictingKeysFalse;
