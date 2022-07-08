@@ -162,10 +162,10 @@ extern IKeyValueStore* keyValueStoreRocksDB(std::string const& path,
                                             bool checkChecksums = false,
                                             bool checkIntegrity = false);
 extern IKeyValueStore* keyValueStoreShardedRocksDB(std::string const& path,
-                                                    UID logID,
-                                                    KeyValueStoreType storeType,
-                                                    bool checkChecksums = false,
-                                                    bool checkIntegrity = false);
+                                                   UID logID,
+                                                   KeyValueStoreType storeType,
+                                                   bool checkChecksums = false,
+                                                   bool checkIntegrity = false);
 extern IKeyValueStore* keyValueStoreMemory(std::string const& basename,
                                            UID logID,
                                            int64_t memoryLimit,
