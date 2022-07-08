@@ -143,9 +143,9 @@ public:
 
 	// Retrieves the resource as a pointer, throws operation_cancelled if the resource is not available
 	T* operator->() const {
-		if (!ResourceOwningRef<T>::available())
+		if (!ResourceWeakRef<T>::available())
 			throw operation_cancelled();
-		return ResourceOwningRef<T>::resourceRef->resource;
+		return ResourceWeakRef<T>::resourceRef->resource;
 	}
 
 	// Gets the reference to the resource, Throws operation_cancelled if the resource is not available
