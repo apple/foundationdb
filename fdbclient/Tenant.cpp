@@ -35,7 +35,7 @@ int64_t TenantMapEntry::prefixToId(KeyRef prefix) {
 	return id;
 }
 
-void TenantMapEntry::initPrefix(KeyRef subspace) {
+void TenantMapEntry::setSubspace(KeyRef subspace) {
 	ASSERT(id >= 0);
 	prefix = makeString(8 + subspace.size());
 	uint8_t* data = mutateString(prefix);
@@ -48,7 +48,16 @@ void TenantMapEntry::initPrefix(KeyRef subspace) {
 
 TenantMapEntry::TenantMapEntry() : id(-1) {}
 TenantMapEntry::TenantMapEntry(int64_t id, KeyRef subspace) : id(id) {
-	initPrefix(subspace);
+	setSubspace(subspace);
+}
+
+TenantMapEntry::TenantMapEntry(int64_t id, KeyRef subspace, Optional<TenantGroupName> tenantGroup)
+  : id(id), tenantGroup(tenantGroup) {
+	setSubspace(subspace);
+}
+
+bool TenantMapEntry::matchesConfiguration(TenantMapEntry const& other) const {
+	return tenantGroup == other.tenantGroup;
 }
 
 TEST_CASE("/fdbclient/TenantMapEntry/Serialization") {
