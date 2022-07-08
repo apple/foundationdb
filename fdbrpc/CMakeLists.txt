@@ -1,4 +1,7 @@
 fdb_find_sources(FDBRPC_SRCS)
+list(APPEND FDBRPC_SRCS
+  libb64/cdecode.c
+  libb64/cencode.c)
 
 set(COMPILE_EIO OFF)
 
