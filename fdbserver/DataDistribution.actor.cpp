@@ -1170,6 +1170,24 @@ ACTOR Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> 
 					}
 				}
 			}
+			if (SERVER_KNOBS->SNAPSHOT_ALL_STATEFUL_PROCESSES) {
+				for (const auto& worker : workers) {
+					const auto& processAddress = worker.interf.address();
+					// skip processes that are already included
+					if (result.count(processAddress))
+						continue;
+					const auto& processClassType = worker.processClass.classType();
+					// coordinators are always configured to be recruited
+					if (processClassType == ProcessClass::StorageClass) {
+						result[processAddress] = std::make_pair(worker.interf, "storage");
+						TraceEvent(SevInfo, "SnapUnRecruitedStorageProcess").detail("ProcessAddress", processAddress);
+					} else if (processClassType == ProcessClass::TransactionClass ||
+					           processClassType == ProcessClass::LogClass) {
+						result[processAddress] = std::make_pair(worker.interf, "tlog");
+						TraceEvent(SevInfo, "SnapUnRecruitedLogProcess").detail("ProcessAddress", processAddress);
+					}
+				}
+			}
 			return result;
 		} catch (Error& e) {
 			wait(tr.onError(e));
