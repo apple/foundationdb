@@ -629,6 +629,9 @@ public:
 	// Maximum number of coordinators a snapshot can fail to
 	// capture while still succeeding
 	int64_t MAX_COORDINATOR_SNAPSHOT_FAULT_TOLERANCE;
+	// if true, all processes with class "storage", "transaction" and "log" will be snapshotted even not recruited as
+	// the role
+	bool SNAPSHOT_ALL_STATEFUL_PROCESSES;
 
 	// Storage Metrics
 	double STORAGE_METRICS_AVERAGE_INTERVAL;

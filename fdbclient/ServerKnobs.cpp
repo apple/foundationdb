@@ -124,6 +124,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( SNAP_NETWORK_FAILURE_RETRY_LIMIT,                       10 );
 	init( MAX_STORAGE_SNAPSHOT_FAULT_TOLERANCE,                    1 );
 	init( MAX_COORDINATOR_SNAPSHOT_FAULT_TOLERANCE,                1 );
+	init( SNAPSHOT_ALL_STATEFUL_PROCESSES,                     false ); if ( randomize && BUGGIFY ) SNAPSHOT_ALL_STATEFUL_PROCESSES = true;
 
 	// Data distribution queue
 	init( HEALTH_POLL_TIME,                                      1.0 );
