@@ -561,6 +561,7 @@ def profile(logger):
     assert output2 == default_profile_client_get_output
     # set rate and size limit
     run_fdbcli_command('profile', 'client', 'set', '0.5', '1GB')
+    time.sleep(1) # global config can take some time to sync
     output3 = run_fdbcli_command('profile', 'client', 'get')
     logger.debug(output3)
     output3_list = output3.split(' ')
@@ -569,6 +570,7 @@ def profile(logger):
     assert output3_list[-1] == '1000000000.'
     # change back to default value and check
     run_fdbcli_command('profile', 'client', 'set', 'default', 'default')
+    time.sleep(1) # global config can take some time to sync
     assert run_fdbcli_command('profile', 'client', 'get') == default_profile_client_get_output
 
 
