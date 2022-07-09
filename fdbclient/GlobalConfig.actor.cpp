@@ -155,18 +155,27 @@ void GlobalConfig::erase(KeyRangeRef range) {
 
 // Updates local copy of global configuration by reading the entire key-range
 // from storage (proxied through the GrvProxies).
-ACTOR Future<Void> GlobalConfig::refresh(GlobalConfig* self) {
+ACTOR Future<Void> GlobalConfig::refresh(GlobalConfig* self, Version lastKnown) {
 	// TraceEvent trace(SevInfo, "GlobalConfigRefresh");
 	self->erase(KeyRangeRef(""_sr, "\xff"_sr));
 
-	GlobalConfigRefreshReply reply = wait(basicLoadBalance(self->cx->getGrvProxies(UseProvisionalProxies::False),
-	                                                       &GrvProxyInterface::refreshGlobalConfig,
-	                                                       GlobalConfigRefreshRequest{}));
-	for (const auto& kv : reply.result) {
-		KeyRef systemKey = kv.key.removePrefix(globalConfigKeysPrefix);
-		self->insert(systemKey, kv.value);
+	state Backoff backoff;
+	loop {
+		try {
+			GlobalConfigRefreshReply reply =
+			    wait(timeoutError(basicLoadBalance(self->cx->getGrvProxies(UseProvisionalProxies::False),
+			                                       &GrvProxyInterface::refreshGlobalConfig,
+			                                       GlobalConfigRefreshRequest{ lastKnown }),
+			                      CLIENT_KNOBS->GLOBAL_CONFIG_REFRESH_TIMEOUT));
+			for (const auto& kv : reply.result) {
+				KeyRef systemKey = kv.key.removePrefix(globalConfigKeysPrefix);
+				self->insert(systemKey, kv.value);
+			}
+			return Void();
+		} catch (Error& e) {
+			wait(backoff.onError());
+		}
 	}
-	return Void();
 }
 
 // Applies updates to the local copy of the global configuration when this
@@ -177,7 +186,7 @@ ACTOR Future<Void> GlobalConfig::updater(GlobalConfig* self, const ClientDBInfo*
 			if (self->initialized.canBeSet()) {
 				wait(self->cx->onConnected());
 
-				wait(self->refresh(self));
+				wait(self->refresh(self, -1));
 				self->initialized.send(Void());
 			}
 
@@ -194,7 +203,7 @@ ACTOR Future<Void> GlobalConfig::updater(GlobalConfig* self, const ClientDBInfo*
 						// This process missed too many global configuration
 						// history updates or the protocol version changed, so it
 						// must re-read the entire configuration range.
-						wait(self->refresh(self));
+						wait(self->refresh(self, history.back().version));
 						if (dbInfo->history.size() > 0) {
 							self->lastUpdate = dbInfo->history.back().version;
 						}

@@ -358,44 +358,23 @@ ACTOR Future<Void> globalConfigMigrate(GrvProxyData* grvProxyData) {
 	return Void();
 }
 
-ACTOR Future<Void> globalConfigHandleRefreshBatch(std::vector<GlobalConfigRefreshRequest> requests,
-                                                  GrvProxyData* grvProxyData) {
-	if (requests.size() == 0) {
-		return Void();
-	}
-
+// Periodically refresh local copy of global configuration.
+ACTOR Future<Void> globalConfigRefresh(GrvProxyData* grvProxyData, Version* cachedVersion, RangeResult* cachedData) {
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(grvProxyData->cx);
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			RangeResult result = wait(tr->getRange(globalConfigDataKeys, CLIENT_KNOBS->TOO_MANY));
-			for (const auto& req : requests) {
-				req.reply.send(GlobalConfigRefreshReply{ result.arena(), result });
+			state Optional<Value> globalConfigVersion = wait(tr->get(globalConfigVersionKey));
+			RangeResult tmpCachedData = wait(tr->getRange(globalConfigDataKeys, CLIENT_KNOBS->TOO_MANY));
+			*cachedData = tmpCachedData;
+			if (globalConfigVersion.present()) {
+				Version parsedVersion;
+				memcpy(&parsedVersion, globalConfigVersion.get().begin(), sizeof(Version));
+				*cachedVersion = bigEndian64(parsedVersion);
 			}
-			break;
+			return Void();
 		} catch (Error& e) {
 			wait(tr->onError(e));
-		}
-	}
-	return Void();
-}
-
-ACTOR Future<Void> globalConfigRefreshBatcher(GrvProxyData* grvProxyData,
-                                              GrvProxyInterface grvProxy,
-                                              PromiseStream<std::vector<GlobalConfigRefreshRequest>> out) {
-	loop {
-		state Future<Void> timeout = delay(SERVER_KNOBS->GLOBAL_CONFIG_MAX_REFRESH_BATCH_INTERVAL);
-		state std::vector<GlobalConfigRefreshRequest> requests;
-		loop {
-			choose {
-				when(GlobalConfigRefreshRequest refresh = waitNext(grvProxy.refreshGlobalConfig.getFuture())) {
-					requests.push_back(refresh);
-				}
-				when(wait(timeout)) { break; }
-			}
-		}
-		if (requests.size() > 0) {
-			out.send(requests);
 		}
 	}
 }
@@ -405,16 +384,30 @@ ACTOR Future<Void> globalConfigRefreshBatcher(GrvProxyData* grvProxyData,
 // own role.
 ACTOR Future<Void> globalConfigRequestServer(GrvProxyData* grvProxyData, GrvProxyInterface grvProxy) {
 	state ActorCollection actors(false);
-	state PromiseStream<std::vector<GlobalConfigRefreshRequest>> batchedRequests;
-	actors.add(globalConfigRefreshBatcher(grvProxyData, grvProxy, batchedRequests));
+	state Future<Void> refreshFuture; // so there is only one running attempt
+	state Version cachedVersion = 0;
+	state RangeResult cachedData;
+	state Future<Void> refreshTimeout = delay(SERVER_KNOBS->GLOBAL_CONFIG_REFRESH_INTERVAL);
 
-	// Run one-time migration supporting upgrades.
+	// Run one-time migration to support upgrades.
 	wait(success(timeout(globalConfigMigrate(grvProxyData), SERVER_KNOBS->GLOBAL_CONFIG_MIGRATE_TIMEOUT)));
 
 	loop {
 		choose {
-			when(std::vector<GlobalConfigRefreshRequest> requests = waitNext(batchedRequests.getFuture())) {
-				actors.add(globalConfigHandleRefreshBatch(requests, grvProxyData));
+			when(GlobalConfigRefreshRequest refresh = waitNext(grvProxy.refreshGlobalConfig.getFuture())) {
+				// Must have an up to date copy of global configuration in
+				// order to serve it to the client (up to date from the clients
+				// point of view. The client learns the version through a
+				// ClientDBInfo update).
+				if (refresh.lastKnown <= cachedVersion) {
+					refresh.reply.send(GlobalConfigRefreshReply{ cachedData.arena(), cachedData });
+				} else {
+					refresh.reply.sendError(timed_out());
+				}
+			}
+			when(wait(refreshTimeout)) {
+				refreshFuture = globalConfigRefresh(grvProxyData, &cachedVersion, &cachedData);
+				refreshTimeout = delay(SERVER_KNOBS->GLOBAL_CONFIG_REFRESH_INTERVAL);
 			}
 			when(wait(actors.getResult())) { ASSERT(false); }
 		}

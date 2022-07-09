@@ -483,7 +483,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( RESET_RESOLVER_DELAY,                                 300.0 );
 
 	init( GLOBAL_CONFIG_MIGRATE_TIMEOUT,                          1.0 );
-	init( GLOBAL_CONFIG_MAX_REFRESH_BATCH_INTERVAL,               1.0 ); if ( randomize && BUGGIFY ) GLOBAL_CONFIG_MAX_REFRESH_BATCH_INTERVAL = 0.1;
+	init( GLOBAL_CONFIG_REFRESH_INTERVAL,                         1.0 ); if ( randomize && BUGGIFY ) GLOBAL_CONFIG_REFRESH_INTERVAL = 0.1;
 
 	// Master Server
 	// masterCommitter() in the master server will allow lower priority tasks (e.g. DataDistibution)
