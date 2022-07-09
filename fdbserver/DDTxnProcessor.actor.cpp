@@ -20,6 +20,7 @@
 
 #include "fdbserver/DDTxnProcessor.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/ManagementAPI.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 class DDTxnProcessorImpl {
@@ -101,4 +102,8 @@ Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> DDTxnProces
 
 Future<MoveKeysLock> DDTxnProcessor::takeMoveKeysLock(UID ddId) const {
 	return ::takeMoveKeysLock(cx, ddId);
+}
+
+Future<DatabaseConfiguration> DDTxnProcessor::getDatabaseConfiguration() const {
+	return ::getDatabaseConfiguration(cx);
 }
