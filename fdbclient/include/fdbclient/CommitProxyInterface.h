@@ -568,13 +568,15 @@ struct GlobalConfigRefreshReply {
 
 struct GlobalConfigRefreshRequest {
 	constexpr static FileIdentifier file_identifier = 2828131;
+	Version lastKnown;
 	ReplyPromise<GlobalConfigRefreshReply> reply;
 
 	GlobalConfigRefreshRequest() {}
+	explicit GlobalConfigRefreshRequest(Version lastKnown) : lastKnown(lastKnown) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, reply);
+		serializer(ar, lastKnown, reply);
 	}
 };
 
