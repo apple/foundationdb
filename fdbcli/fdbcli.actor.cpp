@@ -49,6 +49,7 @@
 #include "flow/FastRef.h"
 #include "flow/Platform.h"
 #include "flow/SystemMonitor.h"
+#include "flow/TestProbe.h"
 
 #include "flow/TLSConfig.actor.h"
 #include "flow/ThreadHelper.actor.h"
@@ -667,6 +668,7 @@ ACTOR Future<Void> commitTransaction(Reference<ITransaction> tr) {
 ACTOR Future<bool> createSnapshot(Database db, std::vector<StringRef> tokens) {
 	state Standalone<StringRef> snapCmd;
 	state UID snapUID = deterministicRandom()->randomUniqueID();
+	CODE_PROBE(true, "Test");
 	for (int i = 1; i < tokens.size(); i++) {
 		snapCmd = snapCmd.withSuffix(tokens[i]);
 		if (i != tokens.size() - 1) {
