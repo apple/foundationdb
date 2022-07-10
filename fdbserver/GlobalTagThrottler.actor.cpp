@@ -748,7 +748,7 @@ TEST_CASE("/GlobalTagThrottler/MultiTagActiveThrottling") {
 	return Void();
 }
 
-TEST_CASE("/GlobalTagThrottler/ReservedQuota") {
+TEST_CASE("/GlobalTagThrottler/ReservedReadQuota") {
 	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
 	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10, 5);
 	state ThrottleApi::TagQuotaValue tagQuotaValue;
@@ -758,6 +758,23 @@ TEST_CASE("/GlobalTagThrottler/ReservedQuota") {
 	globalTagThrottler.setQuota(testTag, tagQuotaValue);
 	state Future<Void> client =
 	    GlobalTagThrottlerTesting::runClient(&globalTagThrottler, &storageServers, testTag, 10.0, 6.0, false);
+	state Future<Void> monitor = GlobalTagThrottlerTesting::monitorClientRates(&globalTagThrottler, testTag, 70 / 6.0);
+	state Future<Void> updater =
+	    GlobalTagThrottlerTesting::updateGlobalTagThrottler(&globalTagThrottler, &storageServers);
+	wait(timeoutError(monitor || client || updater, 300.0));
+	return Void();
+}
+
+TEST_CASE("/GlobalTagThrottler/ReservedWriteQuota") {
+	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
+	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10, 5);
+	state ThrottleApi::TagQuotaValue tagQuotaValue;
+	state TransactionTag testTag = "sampleTag1"_sr;
+	tagQuotaValue.totalWriteQuota = 100.0;
+	tagQuotaValue.reservedWriteQuota = 70.0;
+	globalTagThrottler.setQuota(testTag, tagQuotaValue);
+	state Future<Void> client =
+	    GlobalTagThrottlerTesting::runClient(&globalTagThrottler, &storageServers, testTag, 10.0, 6.0, true);
 	state Future<Void> monitor = GlobalTagThrottlerTesting::monitorClientRates(&globalTagThrottler, testTag, 70 / 6.0);
 	state Future<Void> updater =
 	    GlobalTagThrottlerTesting::updateGlobalTagThrottler(&globalTagThrottler, &storageServers);
