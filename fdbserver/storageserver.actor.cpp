@@ -655,12 +655,11 @@ private:
 
 public:
 	struct PendingNewShard {
-		PendingNewShard(StorageServer* data, uint64_t shardId, KeyRangeRef range)
-		  : data(data), shardId(std::to_string(shardId)), range(range) {
-			// this->shardReady = data->storage.addShard(std::to_string(shardId));
-		}
+		// PendingNewShard(StorageServer* data, uint64_t shardId, KeyRangeRef range)
+		//   : data(data), shardId(format("%016llx", shardId)), range(range) {
+		// }
 
-		PendingNewShard(uint64_t shardId, KeyRangeRef range) : shardId(std::to_string(shardId)), range(range) {}
+		PendingNewShard(uint64_t shardId, KeyRangeRef range) : shardId(format("%016llx", shardId)), range(range) {}
 
 		std::string toString() const {
 			return format("PendingNewShard: [ShardID]: %s [Range]: %s",
@@ -668,9 +667,8 @@ public:
 			              Traceable<KeyRangeRef>::toString(this->range));
 		}
 
-		StorageServer* data;
-		std::string shardId;
-		KeyRange range;
+		const std::string shardId;
+		const KeyRange range;
 		Future<Void> shardReady;
 	};
 
@@ -8232,28 +8230,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 			}
 		}
 
-		if (!data->pendingAddRanges.empty()) {
-			auto u = data->getMutationLog().upper_bound(newOldestVersion);
-			ASSERT(u != data->getMutationLog().end());
-			ASSERT(u->first <= data->pendingAddRanges.begin()->first);
-			if (u->first == data->pendingAddRanges.begin()->first) {
-				ASSERT(!data->pendingAddRanges.begin()->second.empty());
-				TraceEvent(SevDebug, "AddingRangesReady", data->thisServerID)
-				    .detail("Version", data->pendingAddRanges.begin()->first)
-				    .detail("DurableVersion", data->durableVersion.get())
-				    .detail("NewRanges", describe(data->pendingAddRanges.begin()->second));
-				state std::vector<Future<Void>> fAddRanges;
-				for (const auto& shard : data->pendingAddRanges.begin()->second) {
-					fAddRanges.push_back(data->storage.addRange(shard.range, shard.shardId));
-				}
-				wait(waitForAll(fAddRanges));
-				for (const auto& shard : data->pendingAddRanges.begin()->second) {
-					data->storage.persistRangeMapping(shard.range, true);
-				}
-				data->pendingAddRanges.erase(data->pendingAddRanges.begin());
-			}
-		}
-
+		state bool addedRanges = false;
 		if (!data->pendingAddRanges.empty()) {
 			const Version aVer = data->pendingAddRanges.begin()->first;
 			if (aVer <= desiredVersion) {
@@ -8261,13 +8238,25 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 				    .detail("DesiredVersion", desiredVersion)
 				    .detail("DurableVersion", data->durableVersion.get())
 				    .detail("AddRangeVersion", aVer);
-				auto it = data->getMutationLog().find(aVer);
-				ASSERT(it != data->getMutationLog().end());
-				if (it == data->getMutationLog().begin()) {
-					desiredVersion = data->storageVersion();
-				} else {
-					desiredVersion = (--it)->first;
+				desiredVersion = aVer;
+				ASSERT(!data->pendingAddRanges.begin()->second.empty());
+				TraceEvent(SevVerbose, "SSAddKVSRangeBegin", data->thisServerID)
+				    .detail("Version", data->pendingAddRanges.begin()->first)
+				    .detail("DurableVersion", data->durableVersion.get())
+				    .detail("NewRanges", describe(data->pendingAddRanges.begin()->second));
+				state std::vector<Future<Void>> fAddRanges;
+				for (const auto& shard : data->pendingAddRanges.begin()->second) {
+					TraceEvent(SevInfo, "SSAddKVSRange", data->thisServerID)
+					    .detail("Range", shard.range)
+					    .detail("PhysicalShardID", shard.shardId);
+					fAddRanges.push_back(data->storage.addRange(shard.range, shard.shardId));
 				}
+				wait(waitForAll(fAddRanges));
+				TraceEvent(SevVerbose, "SSAddKVSRangeEnd", data->thisServerID)
+				    .detail("Version", data->pendingAddRanges.begin()->first)
+				    .detail("DurableVersion", data->durableVersion.get());
+				addedRanges = true;
+				bytesLeft = SERVER_KNOBS->STORAGE_COMMIT_BYTES_UNLIMITED;
 			}
 		}
 
@@ -8293,18 +8282,31 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 				break;
 		}
 
-		if (removeKVSRanges) {
-			TraceEvent(SevDebug, "RemoveKVSRangesVersionDurable", data->thisServerID)
+		if (addedRanges) {
+			TraceEvent(SevVerbose, "SSAddKVSRangeMetaData", data->thisServerID)
 			    .detail("NewDurableVersion", newOldestVersion)
 			    .detail("DesiredVersion", desiredVersion)
-			    .detail("OldestRemoveKVSRangesVersion", data->pendingRemoveRanges.begin()->first);
-			ASSERT(newOldestVersion <= data->pendingRemoveRanges.begin()->first);
-			if (newOldestVersion == data->pendingRemoveRanges.begin()->first) {
-				for (const auto& range : data->pendingRemoveRanges.begin()->second) {
-					data->storage.persistRangeMapping(range, false);
-				}
+			    .detail("OldestRemoveKVSRangesVersion", data->pendingAddRanges.begin()->first);
+			ASSERT(newOldestVersion == data->pendingAddRanges.begin()->first);
+			ASSERT(newOldestVersion == desiredVersion);
+			for (const auto& shard : data->pendingAddRanges.begin()->second) {
+				data->storage.persistRangeMapping(shard.range, true);
 			}
+			data->pendingAddRanges.erase(data->pendingAddRanges.begin());
 		}
+
+		if (removeKVSRanges) {
+ 			TraceEvent(SevDebug, "RemoveKVSRangesVersionDurable", data->thisServerID)
+ 			    .detail("NewDurableVersion", newOldestVersion)
+ 			    .detail("DesiredVersion", desiredVersion)
+ 			    .detail("OldestRemoveKVSRangesVersion", data->pendingRemoveRanges.begin()->first);
+ 			ASSERT(newOldestVersion <= data->pendingRemoveRanges.begin()->first);
+ 			if (newOldestVersion == data->pendingRemoveRanges.begin()->first) {
+ 				for (const auto& range : data->pendingRemoveRanges.begin()->second) {
+ 					data->storage.persistRangeMapping(range, false);
+ 				}
+ 			}
+ 		}
 
 		std::set<Key> modifiedChangeFeeds = data->fetchingChangeFeeds;
 		data->fetchingChangeFeeds.clear();
@@ -8386,6 +8388,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 			if (newOldestVersion == data->pendingRemoveRanges.begin()->first) {
 				for (const auto& range : data->pendingRemoveRanges.begin()->second) {
 					data->storage.removeRange(range);
+					TraceEvent(SevVerbose, "RemoveKVSRange", data->thisServerID).detail("Range", range);
 				}
 				data->pendingRemoveRanges.erase(data->pendingRemoveRanges.begin());
 			}
