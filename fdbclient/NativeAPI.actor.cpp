@@ -3650,8 +3650,7 @@ ACTOR Future<Void> watchStorageServerResp(int64_t tenantId, Key key, Database cx
 }
 
 ACTOR Future<Void> sameVersionDiffValue(Database cx, Reference<WatchParameters> parameters) {
-	state ReadYourWritesTransaction tr(
-	    cx, parameters->tenant.name.castTo<TenantName>());
+	state ReadYourWritesTransaction tr(cx, parameters->tenant.name.castTo<TenantName>());
 	loop {
 		try {
 			if (!parameters->tenant.name.present()) {
