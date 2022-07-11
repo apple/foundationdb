@@ -1210,7 +1210,7 @@ public:
 
 		newestAvailableVersion.insert(allKeys, invalidVersion);
 		newestDirtyVersion.insert(allKeys, invalidVersion);
-		if (SERVER_KNOBS->STORAGE_SERVER_SHARD_AWARE) {
+		if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->STORAGE_SERVER_SHARD_AWARE) {
 			addShard(ShardInfo::newShard(this, StorageServerShard::notAssigned(allKeys)));
 		} else {
 			addShard(ShardInfo::newNotAssigned(allKeys));
@@ -8296,17 +8296,17 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		}
 
 		if (removeKVSRanges) {
- 			TraceEvent(SevDebug, "RemoveKVSRangesVersionDurable", data->thisServerID)
- 			    .detail("NewDurableVersion", newOldestVersion)
- 			    .detail("DesiredVersion", desiredVersion)
- 			    .detail("OldestRemoveKVSRangesVersion", data->pendingRemoveRanges.begin()->first);
- 			ASSERT(newOldestVersion <= data->pendingRemoveRanges.begin()->first);
- 			if (newOldestVersion == data->pendingRemoveRanges.begin()->first) {
- 				for (const auto& range : data->pendingRemoveRanges.begin()->second) {
- 					data->storage.persistRangeMapping(range, false);
- 				}
- 			}
- 		}
+			TraceEvent(SevDebug, "RemoveKVSRangesVersionDurable", data->thisServerID)
+			    .detail("NewDurableVersion", newOldestVersion)
+			    .detail("DesiredVersion", desiredVersion)
+			    .detail("OldestRemoveKVSRangesVersion", data->pendingRemoveRanges.begin()->first);
+			ASSERT(newOldestVersion <= data->pendingRemoveRanges.begin()->first);
+			if (newOldestVersion == data->pendingRemoveRanges.begin()->first) {
+				for (const auto& range : data->pendingRemoveRanges.begin()->second) {
+					data->storage.persistRangeMapping(range, false);
+				}
+			}
+		}
 
 		std::set<Key> modifiedChangeFeeds = data->fetchingChangeFeeds;
 		data->fetchingChangeFeeds.clear();
@@ -8540,7 +8540,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 #endif
 
 void StorageServerDisk::makeNewStorageServerDurable() {
-	if (SERVER_KNOBS->STORAGE_SERVER_SHARD_AWARE) {
+	if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->STORAGE_SERVER_SHARD_AWARE) {
 		storage->set(persistFormat1_5);
 	} else {
 		storage->set(persistFormat);
@@ -8554,7 +8554,7 @@ void StorageServerDisk::makeNewStorageServerDurable() {
 	    KeyValueRef(persistClusterIdKey, BinaryWriter::toValue(data->clusterId.getFuture().get(), Unversioned())));
 	storage->set(KeyValueRef(persistVersion, BinaryWriter::toValue(data->version.get(), Unversioned())));
 
-	if (SERVER_KNOBS->STORAGE_SERVER_SHARD_AWARE) {
+	if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->STORAGE_SERVER_SHARD_AWARE) {
 		storage->set(KeyValueRef(persistStorageServerShardKeys.begin.toString(),
 		                         ObjectWriter::toValue(StorageServerShard::notAssigned(allKeys, 0), IncludeVersion())));
 	} else {
@@ -10116,7 +10116,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  Reference<AsyncVar<ServerDBInfo> const> db,
                                  std::string folder) {
 	state StorageServer self(persistentData, db, ssi);
-	self.sharded = SERVER_KNOBS->STORAGE_SERVER_SHARD_AWARE;
+	self.sharded = CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->STORAGE_SERVER_SHARD_AWARE;
 	state Future<Void> ssCore;
 	self.clusterId.send(clusterId);
 	self.initialClusterVersion = startVersion;

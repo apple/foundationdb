@@ -303,6 +303,8 @@ rocksdb::Options getOptions() {
 
 	// TODO: enable rocksdb metrics.
 	options.db_log_dir = SERVER_KNOBS->LOG_DIRECTORY;
+	options.db_write_buffer_size = SERVER_KNOBS->ROCKSDB_DB_WRITE_BUFFER_SIZE;
+	options.write_buffer_size = SERVER_KNOBS->ROCKSDB_WRITE_BUFFER_SIZE;
 	return options;
 }
 
@@ -462,6 +464,9 @@ struct PhysicalShard {
 			logRocksDBError(status, "AddCF");
 			return status;
 		}
+
+		TraceEvent(SevInfo, "ShardedRocksCreatedPhysicalShard").detail("PhysicalShardID", id);
+
 		readIterPool = std::make_shared<ReadIteratorPool>(db, cf, id);
 		this->isInitialized.store(true);
 		return status;
@@ -576,7 +581,8 @@ int readRangeInDb(PhysicalShard* shard, const KeyRangeRef& range, int rowLimit, 
 // Manages physical shards and maintains logical shard mapping.
 class ShardManager {
 public:
-	ShardManager(std::string path, UID id) : path(path), id(id), dataShardMap(nullptr, specialKeys.end) {}
+	ShardManager(std::string path, UID id, Counter* numShardsCounter)
+	  : path(path), id(id), dataShardMap(nullptr, specialKeys.end), numShardsCounter(numShardsCounter) {}
 
 	rocksdb::Status init() {
 		// Open instance.
@@ -719,14 +725,12 @@ public:
 		}
 
 		auto [it, inserted] = physicalShards.emplace(id, std::make_shared<PhysicalShard>(db, id));
-		// physicalShards.emplace(std::piecewise_construct, std::forward_as_tuple(id), std::forward_as_tuple(db, id));
-		// if (it == physicalShards.end()) {
-		// 	shard = std::make_shared<PhysicalShard>(db, id);
-		// 	physicalShards[id] = shard;
-		// } else {
-		// 	shard = it->second;
-		// }
 		std::shared_ptr<PhysicalShard>& shard = it->second;
+		TraceEvent(SevInfo, "ShardedRocksShardManagement", this->id)
+		    .detail("Action", "AddRange")
+		    .detail("Range", range)
+		    .detail("PhysicalShardID", id)
+		    .detail("NumShards", this->getNumShards());
 
 		auto dataShard = std::make_unique<DataShard>(range, shard.get());
 		dataShardMap.insert(range, dataShard.get());
@@ -810,6 +814,12 @@ public:
 		validate();
 
 		TraceEvent(SevVerbose, "ShardedRocksRemoveRangeEnd", this->id).detail("Range", range);
+
+		TraceEvent(SevInfo, "ShardedRocksShardManagement", this->id)
+		    .detail("Action", "RemoveRange")
+		    .detail("Range", range)
+		    .detail("EmptyPhysicalShards", describe(shardIds))
+		    .detail("NumShards", this->getNumShards());
 
 		return shardIds;
 	}
@@ -998,10 +1008,21 @@ public:
 		}
 	}
 
+	int getNumShards() const {
+		int res = 0;
+		for (const auto& [name, shard] : physicalShards) {
+			if (shard->dataShards.size() > 0) {
+				++res;
+			}
+		}
+		return res;
+	}
+
 private:
 	const std::string path;
 	const UID id;
 	rocksdb::DB* db = nullptr;
+	Counter* numShardsCounter;
 	std::unordered_map<std::string, std::shared_ptr<PhysicalShard>> physicalShards;
 	// Stores mapping between cf id and cf handle, used during compaction.
 	std::unordered_map<uint32_t, rocksdb::ColumnFamilyHandle*> columnFamilyMap;
@@ -2106,9 +2127,10 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				}
 			}
 
-			Histogram::getHistogram(
-			    ROCKSDBSTORAGE_HISTOGRAM_GROUP, "ShardedRocksDBNumShardsInRangeRead"_sr, Histogram::Unit::countLinear)
-			    ->sample(numShards);
+			// Histogram::getHistogram(
+			//     ROCKSDBSTORAGE_HISTOGRAM_GROUP, "ShardedRocksDBNumShardsInRangeRead"_sr,
+			//     Histogram::Unit::countLinear)
+			//     ->sample(numShards);
 
 			result.more =
 			    (result.size() == a.rowLimit) || (result.size() == -a.rowLimit) || (accumulatedBytes >= a.byteLimit);
@@ -2131,9 +2153,11 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		CounterCollection cc;
 		Counter immediateThrottle;
 		Counter failedToAcquire;
+		Counter numShards;
 
 		Counters()
-		  : cc("RocksDBThrottle"), immediateThrottle("ImmediateThrottle", cc), failedToAcquire("failedToAcquire", cc) {}
+		  : cc("RocksDBThrottle"), immediateThrottle("ImmediateThrottle", cc), failedToAcquire("FailedToAcquire", cc),
+		    numShards("NumberPhysicalShards", cc) {}
 	};
 
 	// Persist shard mappinng key range should not be in shardMap.
@@ -2144,7 +2168,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	    numReadWaiters(SERVER_KNOBS->ROCKSDB_READ_QUEUE_HARD_MAX - SERVER_KNOBS->ROCKSDB_READ_QUEUE_SOFT_MAX),
 	    numFetchWaiters(SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_HARD_MAX - SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_SOFT_MAX),
 	    errorListener(std::make_shared<RocksDBErrorListener>()), errorFuture(errorListener->getFuture()),
-	    shardManager(path, id), rocksDBMetrics(new RocksDBMetrics()) {
+	    shardManager(path, id, &(this->counters.numShards)), rocksDBMetrics(new RocksDBMetrics()) {
 		// In simluation, run the reader/writer threads as Coro threads (i.e. in the network thread. The storage engine
 		// is still multi-threaded as background compaction threads are still present. Reads/writes to disk will also
 		// block the network thread in a way that would be unacceptable in production but is a necessary evil here. When
@@ -2407,6 +2431,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	// Used for debugging shard mapping issue.
 	std::vector<std::pair<KeyRange, std::string>> getDataMapping() { return shardManager.getDataMapping(); }
 
+	Counters counters;
 	std::shared_ptr<ShardedRocksDBState> rState;
 	ShardManager shardManager;
 	std::shared_ptr<RocksDBMetrics> rocksDBMetrics;
@@ -2423,7 +2448,6 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	int numReadWaiters;
 	FlowLock fetchSemaphore;
 	int numFetchWaiters;
-	Counters counters;
 	Future<Void> refreshHolder;
 };
 
@@ -2503,8 +2527,9 @@ TEST_CASE("noSim/ShardedRocksDB/RangeOps") {
 	addRangeFutures.push_back(kvStore->addRange(KeyRangeRef("0"_sr, "3"_sr), "shard-1"));
 	addRangeFutures.push_back(kvStore->addRange(KeyRangeRef("4"_sr, "7"_sr), "shard-2"));
 
-	kvStore->persistRangeMapping(KeyRangeRef("0"_sr, "7"_sr), true);
 	wait(waitForAll(addRangeFutures));
+
+	kvStore->persistRangeMapping(KeyRangeRef("0"_sr, "7"_sr), true);
 
 	// write to shard 1
 	state RangeResult expectedRows;
