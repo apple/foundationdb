@@ -587,6 +587,9 @@ struct DataDistributor : NonCopyable, ReferenceCounted<DataDistributor> {
 
 	Future<Void> loadDatabaseConfiguration() { return store(configuration, txnProcessor->getDatabaseConfiguration()); }
 
+	Future<Void> updateReplicaKeys() {
+		return txnProcessor->updateReplicaKeys(primaryDcId, remoteDcIds, configuration);
+	}
 	void initDcInfo() {
 		primaryDcId.clear();
 		remoteDcIds.clear();
@@ -637,36 +640,9 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 				self->initDcInfo();
 				TraceEvent("DDInitGotConfiguration", self->ddId).detail("Conf", self->configuration.toString());
 
-				state Transaction tr(cx);
-				loop {
-					try {
-						tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-						tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-
-						RangeResult replicaKeys = wait(tr.getRange(datacenterReplicasKeys, CLIENT_KNOBS->TOO_MANY));
-
-						for (auto& kv : replicaKeys) {
-							auto dcId = decodeDatacenterReplicasKey(kv.key);
-							auto replicas = decodeDatacenterReplicasValue(kv.value);
-							if ((self->primaryDcId.size() && self->primaryDcId[0] == dcId) ||
-							    (self->remoteDcIds.size() && self->remoteDcIds[0] == dcId &&
-							     self->configuration.usableRegions > 1)) {
-								if (replicas > self->configuration.storageTeamSize) {
-									tr.set(kv.key, datacenterReplicasValue(self->configuration.storageTeamSize));
-								}
-							} else {
-								tr.clear(kv.key);
-							}
-						}
-
-						wait(tr.commit());
-						break;
-					} catch (Error& e) {
-						wait(tr.onError(e));
-					}
-				}
-
+				wait(self->updateReplicaKeys());
 				TraceEvent("DDInitUpdatedReplicaKeys", self->ddId).log();
+
 				Reference<InitialDataDistribution> initData_ = wait(getInitialDataDistribution(
 				    cx,
 				    self->ddId,
