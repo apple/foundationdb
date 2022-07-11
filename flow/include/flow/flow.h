@@ -46,6 +46,7 @@
 #include <memory>
 #include <mutex>
 
+#include "flow/TestProbe.h"
 #include "flow/Platform.h"
 #include "flow/FastAlloc.h"
 #include "flow/IRandom.h"

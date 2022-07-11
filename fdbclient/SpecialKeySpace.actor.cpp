@@ -364,12 +364,12 @@ ACTOR Future<RangeResult> SpecialKeySpace::getRangeAggregationActor(SpecialKeySp
 	// Handle all corner cases like what RYW does
 	// return if range inverted
 	if (actualBeginOffset >= actualEndOffset && begin.getKey() >= end.getKey()) {
-		TEST(true); // inverted range
+		CODE_PROBE(true, "inverted range");
 		return RangeResultRef(false, false);
 	}
 	// If touches begin or end, return with readToBegin and readThroughEnd flags
 	if (begin.getKey() == moduleBoundary.end || end.getKey() == moduleBoundary.begin) {
-		TEST(true); // query touches begin or end
+		CODE_PROBE(true, "query touches begin or end");
 		return result;
 	}
 	state RangeMap<Key, SpecialKeyRangeReadImpl*, KeyRangeRef>::Ranges ranges =
@@ -453,7 +453,7 @@ Future<RangeResult> SpecialKeySpace::getRange(ReadYourWritesTransaction* ryw,
 	if (!limits.isValid())
 		return range_limits_invalid();
 	if (limits.isReached()) {
-		TEST(true); // read limit 0
+		CODE_PROBE(true, "read limit 0");
 		return RangeResult();
 	}
 	// make sure orEqual == false
@@ -461,7 +461,7 @@ Future<RangeResult> SpecialKeySpace::getRange(ReadYourWritesTransaction* ryw,
 	end.removeOrEqual(end.arena());
 
 	if (begin.offset >= end.offset && begin.getKey() >= end.getKey()) {
-		TEST(true); // range inverted
+		CODE_PROBE(true, "range inverted");
 		return RangeResult();
 	}
 

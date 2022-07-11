@@ -39,7 +39,6 @@ ACTOR Future<bool> killCommandActor(Reference<IDatabase> db,
                                     std::vector<StringRef> tokens,
                                     std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface) {
 	ASSERT(tokens.size() >= 1);
-	CODE_PROBE(tokens.size() == 3, "three tokens");
 	state bool result = true;
 	state std::string addressesStr;
 	if (tokens.size() == 1) {

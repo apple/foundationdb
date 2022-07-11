@@ -668,7 +668,6 @@ ACTOR Future<Void> commitTransaction(Reference<ITransaction> tr) {
 ACTOR Future<bool> createSnapshot(Database db, std::vector<StringRef> tokens) {
 	state Standalone<StringRef> snapCmd;
 	state UID snapUID = deterministicRandom()->randomUniqueID();
-	CODE_PROBE(true, "Test");
 	for (int i = 1; i < tokens.size(); i++) {
 		snapCmd = snapCmd.withSuffix(tokens[i]);
 		if (i != tokens.size() - 1) {

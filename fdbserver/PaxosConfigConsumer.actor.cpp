@@ -449,7 +449,7 @@ class PaxosConfigConsumerImpl {
 				if (e.code() == error_code_version_already_compacted || e.code() == error_code_timed_out ||
 				    e.code() == error_code_failed_to_reach_quorum || e.code() == error_code_version_already_compacted ||
 				    e.code() == error_code_process_behind) {
-					TEST(true); // PaxosConfigConsumer get version_already_compacted error
+					CODE_PROBE(true, "PaxosConfigConsumer get version_already_compacted error");
 					if (e.code() == error_code_failed_to_reach_quorum) {
 						try {
 							wait(self->getCommittedVersionQuorum.complete());

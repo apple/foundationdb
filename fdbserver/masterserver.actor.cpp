@@ -160,15 +160,16 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 		return Void();
 	}
 
-	TEST(proxyItr->second.latestRequestNum.get() < req.requestNum - 1); // Commit version request queued up
+	CODE_PROBE(proxyItr->second.latestRequestNum.get() < req.requestNum - 1, "Commit version request queued up");
 	wait(proxyItr->second.latestRequestNum.whenAtLeast(req.requestNum - 1));
 
 	auto itr = proxyItr->second.replies.find(req.requestNum);
 	if (itr != proxyItr->second.replies.end()) {
-		TEST(true); // Duplicate request for sequence
+		CODE_PROBE(true, "Duplicate request for sequence");
 		req.reply.send(itr->second);
 	} else if (req.requestNum <= proxyItr->second.latestRequestNum.get()) {
-		TEST(true); // Old request for previously acknowledged sequence - may be impossible with current FlowTransport
+		CODE_PROBE(true,
+		           "Old request for previously acknowledged sequence - may be impossible with current FlowTransport");
 		ASSERT(req.requestNum <
 		       proxyItr->second.latestRequestNum.get()); // The latest request can never be acknowledged
 		req.reply.send(Never());
@@ -204,10 +205,10 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 				self->version = self->version + toAdd;
 			}
 
-			TEST(self->version - rep.prevVersion == 1); // Minimum possible version gap
+			CODE_PROBE(self->version - rep.prevVersion == 1, "Minimum possible version gap");
 
 			bool maxVersionGap = self->version - rep.prevVersion == SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS;
-			TEST(maxVersionGap); // Maximum possible version gap
+			CODE_PROBE(maxVersionGap, "Maximum possible version gap");
 			self->lastVersionTime = t1;
 
 			self->resolutionBalancer.setChangesInReply(req.requestingProxy, rep);
@@ -408,7 +409,8 @@ ACTOR Future<Void> masterServer(MasterInterface mi,
 	addActor.send(serveLiveCommittedVersion(self));
 	addActor.send(updateRecoveryData(self));
 
-	TEST(!lifetime.isStillValid(db->get().masterLifetime, mi.id() == db->get().master.id())); // Master born doomed
+	CODE_PROBE(!lifetime.isStillValid(db->get().masterLifetime, mi.id() == db->get().master.id()),
+	           "Master born doomed");
 	TraceEvent("MasterLifetime", self->dbgid).detail("LifetimeToken", lifetime.toString());
 
 	try {
@@ -420,7 +422,7 @@ ACTOR Future<Void> masterServer(MasterInterface mi,
 					    .detail("Reason", "LifetimeToken")
 					    .detail("MyToken", lifetime.toString())
 					    .detail("CurrentToken", db->get().masterLifetime.toString());
-					TEST(true); // Master replaced, dying
+					CODE_PROBE(true, "Master replaced, dying");
 					if (BUGGIFY)
 						wait(delay(5));
 					throw worker_removed();
@@ -440,11 +442,11 @@ ACTOR Future<Void> masterServer(MasterInterface mi,
 			addActor.getFuture().pop();
 		}
 
-		TEST(err.code() == error_code_tlog_failed); // Master: terminated due to tLog failure
-		TEST(err.code() == error_code_commit_proxy_failed); // Master: terminated due to commit proxy failure
-		TEST(err.code() == error_code_grv_proxy_failed); // Master: terminated due to GRV proxy failure
-		TEST(err.code() == error_code_resolver_failed); // Master: terminated due to resolver failure
-		TEST(err.code() == error_code_backup_worker_failed); // Master: terminated due to backup worker failure
+		CODE_PROBE(err.code() == error_code_tlog_failed, "Master: terminated due to tLog failure");
+		CODE_PROBE(err.code() == error_code_commit_proxy_failed, "Master: terminated due to commit proxy failure");
+		CODE_PROBE(err.code() == error_code_grv_proxy_failed, "Master: terminated due to GRV proxy failure");
+		CODE_PROBE(err.code() == error_code_resolver_failed, "Master: terminated due to resolver failure");
+		CODE_PROBE(err.code() == error_code_backup_worker_failed, "Master: terminated due to backup worker failure");
 
 		if (normalMasterErrors().count(err.code())) {
 			TraceEvent("MasterTerminated", mi.id()).error(err);

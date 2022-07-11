@@ -226,7 +226,7 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution(Data
 	// If keyServers is too large to read in a single transaction, then we will have to break this process up into
 	// multiple transactions. In that case, each iteration should begin where the previous left off
 	while (beginKey < allKeys.end) {
-		TEST(beginKey > allKeys.begin); // Multi-transactional getInitialDataDistribution
+		CODE_PROBE(beginKey > allKeys.begin, "Multi-transactional getInitialDataDistribution");
 		loop {
 			succeeded = false;
 			try {
@@ -1129,7 +1129,7 @@ ACTOR Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> 
 			                                  configuration.storageTeamSize - 1) -
 			                         storageFailures;
 			if (*storageFaultTolerance < 0) {
-				TEST(true); // Too many failed storage servers to complete snapshot
+				CODE_PROBE(true, "Too many failed storage servers to complete snapshot");
 				throw snap_storage_failed();
 			}
 			// tlogs
@@ -1557,14 +1557,14 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 			when(DistributorSnapRequest snapReq = waitNext(di.distributorSnapReq.getFuture())) {
 				auto& snapUID = snapReq.snapUID;
 				if (ddSnapReqResultMap.count(snapUID)) {
-					TEST(true); // Data distributor received a duplicate finished snap request
+					CODE_PROBE(true, "Data distributor received a duplicate finished snap request");
 					auto result = ddSnapReqResultMap[snapUID];
 					result.isError() ? snapReq.reply.sendError(result.getError()) : snapReq.reply.send(result.get());
 					TraceEvent("RetryFinishedDistributorSnapRequest")
 					    .detail("SnapUID", snapUID)
 					    .detail("Result", result.isError() ? result.getError().code() : 0);
 				} else if (ddSnapReqMap.count(snapReq.snapUID)) {
-					TEST(true); // Data distributor received a duplicate ongoing snap request
+					CODE_PROBE(true, "Data distributor received a duplicate ongoing snap request");
 					TraceEvent("RetryOngoingDistributorSnapRequest").detail("SnapUID", snapUID);
 					ASSERT(snapReq.snapPayload == ddSnapReqMap[snapUID].snapPayload);
 					ddSnapReqMap[snapUID] = snapReq;

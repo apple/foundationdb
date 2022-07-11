@@ -1002,8 +1002,8 @@ ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChan
 			TraceEvent("AttemptingQuorumChange")
 			    .detail("FromCS", oldClusterConnectionString.toString())
 			    .detail("ToCS", newClusterConnectionString.toString());
-			TEST(oldClusterKeyName != newClusterKeyName); // Quorum change with new name
-			TEST(oldClusterKeyName == newClusterKeyName); // Quorum change with unchanged name
+			CODE_PROBE(oldClusterKeyName != newClusterKeyName, "Quorum change with new name");
+			CODE_PROBE(oldClusterKeyName == newClusterKeyName, "Quorum change with unchanged name");
 
 			state std::vector<Future<Optional<LeaderInfo>>> leaderServers;
 			state ClientCoordinators coord(Reference<ClusterConnectionMemoryRecord>(
