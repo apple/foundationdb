@@ -75,7 +75,7 @@
 #include <pwd.h>
 #include <grp.h>
 
-#include "flow/SimpleOpt.h"
+#include "SimpleOpt/SimpleOpt.h"
 
 #include "fdbclient/SimpleIni.h"
 #include "fdbclient/versions.h"

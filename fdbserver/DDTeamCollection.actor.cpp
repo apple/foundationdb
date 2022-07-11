@@ -46,6 +46,7 @@ FDB_DEFINE_BOOLEAN_PARAM(PreferLowerDiskUtil);
 FDB_DEFINE_BOOLEAN_PARAM(TeamMustHaveShards);
 FDB_DEFINE_BOOLEAN_PARAM(ForReadBalance);
 FDB_DEFINE_BOOLEAN_PARAM(PreferLowerReadUtil);
+FDB_DEFINE_BOOLEAN_PARAM(FindTeamByServers);
 
 class DDTeamCollectionImpl {
 	ACTOR static Future<Void> checkAndRemoveInvalidLocalityAddr(DDTeamCollection* self) {
@@ -880,12 +881,10 @@ public:
 						std::vector<KeyRange> shards = self->shardsAffectedByTeamFailure->getShardsFor(
 						    ShardsAffectedByTeamFailure::Team(team->getServerIDs(), self->primary));
 
-						if (SERVER_KNOBS->DD_ENABLE_VERBOSE_TRACING) {
-							TraceEvent(SevDebug, "ServerTeamRelocatingShards", self->distributorId)
-							    .detail("Info", team->getDesc())
-							    .detail("TeamID", team->getTeamID())
-							    .detail("Shards", shards.size());
-						}
+						TraceEvent(SevVerbose, "ServerTeamRelocatingShards", self->distributorId)
+						    .detail("Info", team->getDesc())
+						    .detail("TeamID", team->getTeamID())
+						    .detail("Shards", shards.size());
 
 						for (int i = 0; i < shards.size(); i++) {
 							// Make it high priority to move keys off failed server or else RelocateShards may never be
@@ -2773,7 +2772,7 @@ public:
 					when(wait(checkSignal)) {
 						checkSignal = Never();
 						isFetchingResults = true;
-						serverListAndProcessClasses = getServerListAndProcessClasses(&tr);
+						serverListAndProcessClasses = NativeAPI::getServerListAndProcessClasses(&tr);
 					}
 					when(std::vector<std::pair<StorageServerInterface, ProcessClass>> results =
 					         wait(serverListAndProcessClasses)) {
@@ -2815,7 +2814,7 @@ public:
 					when(waitNext(serverRemoved)) {
 						if (isFetchingResults) {
 							tr = Transaction(self->cx);
-							serverListAndProcessClasses = getServerListAndProcessClasses(&tr);
+							serverListAndProcessClasses = NativeAPI::getServerListAndProcessClasses(&tr);
 						}
 					}
 				}
@@ -3030,8 +3029,8 @@ public:
 					    .trackLatest(self->primary ? "TotalDataInFlight"
 					                               : "TotalDataInFlightRemote"); // This trace event's trackLatest
 					                                                             // lifetime is controlled by
-					// DataDistributorData::totalDataInFlightEventHolder or
-					// DataDistributorData::totalDataInFlightRemoteEventHolder.
+					// DataDistributor::totalDataInFlightEventHolder or
+					// DataDistributor::totalDataInFlightRemoteEventHolder.
 					// The track latest key we use here must match the key used in
 					// the holder.
 
@@ -3160,9 +3159,6 @@ public:
 				for (i = 0; i < teams.size(); i++) {
 					const auto& team = teams[i];
 
-					std::vector<KeyRange> shards = self->shardsAffectedByTeamFailure->getShardsFor(
-					    ShardsAffectedByTeamFailure::Team(team->getServerIDs(), self->primary));
-
 					TraceEvent("ServerTeamInfo", self->getDistributorId())
 					    .detail("TeamIndex", i)
 					    .detail("Healthy", team->isHealthy())
@@ -3170,7 +3166,11 @@ public:
 					    .detail("MemberIDs", team->getServerIDsStr())
 					    .detail("Primary", self->isPrimary())
 					    .detail("TeamID", team->getTeamID())
-					    .detail("Shards", shards.size());
+					    .detail(
+					        "Shards",
+					        self->shardsAffectedByTeamFailure
+					            ->getShardsFor(ShardsAffectedByTeamFailure::Team(team->getServerIDs(), self->primary))
+					            .size());
 					if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
 						wait(yield());
 					}

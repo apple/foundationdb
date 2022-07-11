@@ -116,16 +116,6 @@ const Value keyServersValue(const std::vector<Tag>& srcTag, const std::vector<Ta
 	return wr.toValue();
 }
 
-const Value keyServersValue(const std::vector<Tag>& srcTag,
-                            const std::vector<Tag>& destTag,
-                            const UID& srcId,
-                            const UID& destId) {
-	// src and dest are expected to be sorted
-	BinaryWriter wr(IncludeVersion(ProtocolVersion::withKeyServerValueV2()));
-	wr << srcTag << destTag << srcId << destId;
-	return wr.toValue();
-}
-
 void decodeKeyServersValue(RangeResult result,
                            const ValueRef& value,
                            std::vector<UID>& src,
@@ -477,7 +467,6 @@ const Value serverKeysValue(const UID& id) {
 		return serverKeysFalse;
 	}
 
-	// ASSERT(CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
 	BinaryWriter wr(IncludeVersion(ProtocolVersion::withShardEncodeLocationMetaData()));
 	wr << id;
 	return wr.toValue();
@@ -1563,17 +1552,6 @@ BlobWorkerInterface decodeBlobWorkerListValue(ValueRef const& value) {
 	ObjectReader reader(value.begin(), IncludeVersion());
 	reader.deserialize(interf);
 	return interf;
-}
-
-Value encodeTenantEntry(TenantMapEntry const& tenantEntry) {
-	return ObjectWriter::toValue(tenantEntry, IncludeVersion());
-}
-
-TenantMapEntry decodeTenantEntry(ValueRef const& value) {
-	TenantMapEntry entry;
-	ObjectReader reader(value.begin(), IncludeVersion());
-	reader.deserialize(entry);
-	return entry;
 }
 
 const KeyRangeRef tenantMapKeys("\xff/tenantMap/"_sr, "\xff/tenantMap0"_sr);

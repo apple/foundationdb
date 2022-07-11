@@ -71,14 +71,12 @@ struct SaveAndKillWorkload : TestWorkload {
 		std::map<NetworkAddress, ISimulator::ProcessInfo*> rebootingProcesses = g_simulator.currentlyRebootingProcesses;
 		std::map<std::string, ISimulator::ProcessInfo*> allProcessesMap;
 		for (const auto& [_, process] : rebootingProcesses) {
-			if (allProcessesMap.find(process->dataFolder) == allProcessesMap.end() &&
-			    process->name != "remote flow process") {
+			if (allProcessesMap.find(process->dataFolder) == allProcessesMap.end() && !process->isSpawnedKVProcess()) {
 				allProcessesMap[process->dataFolder] = process;
 			}
 		}
 		for (const auto& process : processes) {
-			if (allProcessesMap.find(process->dataFolder) == allProcessesMap.end() &&
-			    process->name != "remote flow process") {
+			if (allProcessesMap.find(process->dataFolder) == allProcessesMap.end() && !process->isSpawnedKVProcess()) {
 				allProcessesMap[process->dataFolder] = process;
 			}
 		}

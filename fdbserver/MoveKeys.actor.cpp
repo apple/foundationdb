@@ -1525,6 +1525,7 @@ ACTOR static Future<Void> checkDataMoveComplete(Database occ, UID dataMoveId, Ke
 						    .detail("DestID", destId)
 						    .detail("Dest", describe(dest));
 						if (!dest.empty() || srcId != dataMoveId) {
+							// There is ongoing data move, or the data move is complete, but moved to a different shard.
 							throw data_move_cancelled();
 						}
 					}
@@ -2295,7 +2296,7 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
                                    FlowLock* cleanUpDataMoveParallelismLock,
                                    KeyRange keys,
                                    const DDEnabledState* ddEnabledState) {
-	TraceEvent(SevVerbose, "CleanUpDataMoveBegin", dataMoveId).detail("DataMoveID", dataMoveId);
+	TraceEvent(SevVerbose, "CleanUpDataMoveBegin", dataMoveId).detail("DataMoveID", dataMoveId).detail("Range", keys);
 	state bool complete = false;
 
 	wait(cleanUpDataMoveParallelismLock->take(TaskPriority::DataDistributionLaunch));
@@ -2544,7 +2545,7 @@ void seedShardServers(Arena& arena, CommitTransactionRef& tr, std::vector<Storag
 			// THIS SHOULD NEVER BE ENABLED IN ANY NON-TESTING ENVIRONMENT
 			TraceEvent(SevError, "TSSIdentityMappingEnabled").log();
 			// hack key-backed map here since we can't really change CommitTransactionRef to a RYW transaction
-			Key uidRef = Codec<UID>::pack(s.id()).pack();
+			Key uidRef = TupleCodec<UID>::pack(s.id());
 			tr.set(arena, uidRef.withPrefix(tssMappingKeys.begin), uidRef);
 		}
 	}

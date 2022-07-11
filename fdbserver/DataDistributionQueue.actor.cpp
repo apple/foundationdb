@@ -76,7 +76,8 @@ struct RelocateData {
 
 	RelocateData()
 	  : priority(-1), boundaryPriority(-1), healthPriority(-1), reason(RelocateReason::INVALID), startTime(-1),
-	    dataMoveId(UID()), workFactor(0), wantsNewServers(false), cancellable(false), interval("QueuedRelocation") {}
+	    dataMoveId(anonymousShardId), workFactor(0), wantsNewServers(false), cancellable(false),
+	    interval("QueuedRelocation") {}
 	explicit RelocateData(RelocateShard const& rs)
 	  : keys(rs.keys), priority(rs.priority), boundaryPriority(isBoundaryPriority(rs.priority) ? rs.priority : -1),
 	    healthPriority(isHealthPriority(rs.priority) ? rs.priority : -1), reason(rs.reason), startTime(now()),
@@ -1048,17 +1049,22 @@ struct DDQueueData {
 				rrs.keys = ranges[r];
 				if (rd.keys == ranges[r] && rd.isRestore()) {
 					ASSERT(rd.dataMove != nullptr);
+					ASSERT(CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
 					rrs.dataMoveId = rd.dataMove->meta.id;
 				} else {
 					ASSERT_WE_THINK(!rd.isRestore()); // Restored data move should not overlap.
 					// TODO(psm): The shard id is determined by DD.
 					rrs.dataMove.reset();
-					rrs.dataMoveId = deterministicRandom()->randomUniqueID();
+					if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+						rrs.dataMoveId = deterministicRandom()->randomUniqueID();
+					} else {
+						rrs.dataMoveId = anonymousShardId;
+					}
 				}
 
 				launch(rrs, busymap, singleRegionTeamSize);
 				activeRelocations++;
-				TraceEvent(SevDebug, "InFlightRelocationChange")
+				TraceEvent(SevVerbose, "InFlightRelocationChange")
 				    .detail("Launch", rrs.dataMoveId)
 				    .detail("Total", activeRelocations);
 				startRelocation(rrs.priority, rrs.healthPriority);
@@ -1126,7 +1132,7 @@ struct DDQueueData {
 		dataMove.cancel = cleanUpDataMove(
 		    this->cx, dataMoveId, this->lock, &this->cleanUpDataMoveParallelismLock, range, ddEnabledState);
 		this->dataMoves.insert(range, dataMove);
-		TraceEvent(SevDebug, "DDEnqueuedCancelledDataMove", this->distributorId)
+		TraceEvent(SevInfo, "DDEnqueuedCancelledDataMove", this->distributorId)
 		    .detail("DataMoveID", dataMoveId)
 		    .detail("Range", range);
 	}
@@ -1140,7 +1146,7 @@ ACTOR Future<Void> cancelDataMove(struct DDQueueData* self, KeyRange range, cons
 			continue;
 		}
 		KeyRange keys = KeyRangeRef(it->range().begin, it->range().end);
-		TraceEvent(SevDebug, "DDQueueCancelDataMove", self->distributorId)
+		TraceEvent(SevInfo, "DDQueueCancelDataMove", self->distributorId)
 		    .detail("DataMoveID", it->value().id)
 		    .detail("DataMoveRange", keys)
 		    .detail("Range", range);
@@ -1426,12 +1432,6 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 				    .detail("DestTeamSize", totalIds);
 			}
 
-			TraceEvent("ShardsAffectedByTeamFailureMove")
-			    .detail("Range", rd.keys)
-			    .detail("IsRestore", rd.isRestore())
-			    .detail("NewTeamSize", destinationTeams.size())
-			    .detail("NewTeam", describe(destinationTeams));
-
 			if (!rd.isRestore()) {
 				self->shardsAffectedByTeamFailure->moveShard(rd.keys, destinationTeams);
 			}
@@ -1512,7 +1512,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 									if (ranges.size() == 1 && static_cast<KeyRange>(ranges[0]) == rd.keys &&
 									    ranges[0].value.id == rd.dataMoveId && !ranges[0].value.cancel.isValid()) {
 										self->dataMoves.insert(rd.keys, DDQueueData::DDDataMove());
-										TraceEvent(SevInfo, "DequeueDataMoveOnSuccess", self->distributorId)
+										TraceEvent(SevVerbose, "DequeueDataMoveOnSuccess", self->distributorId)
 										    .detail("DataMoveID", rd.dataMoveId)
 										    .detail("DataMoveRange", rd.keys);
 									}
@@ -2155,7 +2155,6 @@ ACTOR Future<Void> BgDDValleyFiller(DDQueueData* self, int teamCollectionIndex) 
 }
 
 ACTOR Future<Void> dataDistributionQueue(Database cx,
-                                         Future<Void> readyToStart,
                                          PromiseStream<RelocateShard> output,
                                          FutureStream<RelocateShard> input,
                                          PromiseStream<GetMetricsRequest> getShardMetrics,
@@ -2192,8 +2191,6 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 
 	state PromiseStream<KeyRange> rangesComplete;
 	state Future<Void> launchQueuedWorkTimeout = Never();
-
-	// wait(readyToStart);
 
 	for (int i = 0; i < teamCollections.size(); i++) {
 		// FIXME: Use BgDDLoadBalance for disk rebalance too after DD simulation test proof.
@@ -2318,7 +2315,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 					    .detail("PriorityTeam0Left", self.priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_0_LEFT])
 					    .detail("PrioritySplitShard", self.priority_relocations[SERVER_KNOBS->PRIORITY_SPLIT_SHARD])
 					    .trackLatest("MovingData"); // This trace event's trackLatest lifetime is controlled by
-					                                // DataDistributorData::movingDataEventHolder. The track latest
+					                                // DataDistributor::movingDataEventHolder. The track latest
 					                                // key we use here must match the key used in the holder.
 				}
 				when(wait(self.error.getFuture())) {} // Propagate errors from dataDistributionRelocator

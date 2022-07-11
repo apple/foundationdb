@@ -23,7 +23,23 @@
 #include <type_traits>
 #include <unordered_map>
 
-#include "contrib/fmt-8.1.1/include/fmt/format.h"
+#include "fmt/format.h"
+#include "fdbclient/CommitTransaction.h"
+#include "fdbclient/FDBTypes.h"
+#include "fdbrpc/fdbrpc.h"
+#include "fdbrpc/LoadBalance.h"
+#include "fdbserver/OTELSpanContextMessage.h"
+#include "flow/ActorCollection.h"
+#include "flow/Arena.h"
+#include "flow/Error.h"
+#include "flow/Hash3.h"
+#include "flow/Histogram.h"
+#include "flow/IRandom.h"
+#include "flow/IndexedSet.h"
+#include "flow/SystemMonitor.h"
+#include "flow/Trace.h"
+#include "fdbclient/Tracing.h"
+#include "flow/Util.h"
 #include "fdbclient/Atomic.h"
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/DatabaseContext.h"
@@ -39,12 +55,12 @@
 #include "fdbclient/TransactionLineage.h"
 #include "fdbclient/Tuple.h"
 #include "fdbclient/VersionedMap.h"
-#include "fdbrpc/LoadBalance.h"
+#include "fdbrpc/sim_validation.h"
 #include "fdbrpc/Smoother.h"
 #include "fdbrpc/Stats.h"
-#include "fdbrpc/fdbrpc.h"
-#include "fdbrpc/sim_validation.h"
+#include "fdbserver/EncryptedMutationMessage.h"
 #include "fdbserver/FDBExecHelper.actor.h"
+#include "fdbserver/GetEncryptCipherKeys.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LatencyBandConfig.h"
@@ -113,7 +129,7 @@ bool canReplyWith(Error e) {
 		return true;
 	default:
 		return false;
-	};
+	}
 }
 } // namespace
 
@@ -1829,7 +1845,7 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 	}
 
 	return Void();
-};
+}
 
 // Pessimistic estimate the number of overhead bytes used by each
 // watch. Watch key references are stored in an AsyncMap<Key,bool>, and actors
@@ -2326,6 +2342,58 @@ MutationsAndVersionRef filterMutations(Arena& arena,
 	        DEBUG_CF_MISSING_CF&& keyRange.contains(DEBUG_CF_MISSING_KEY) &&                                           \
 	    beginVersion <= DEBUG_CF_MISSING_VERSION&& lastVersion >= DEBUG_CF_MISSING_VERSION
 
+// efficiently searches for the change feed mutation start point at begin version
+static std::deque<Standalone<MutationsAndVersionRef>>::const_iterator searchChangeFeedStart(
+    std::deque<Standalone<MutationsAndVersionRef>> const& mutations,
+    Version beginVersion,
+    bool atLatest) {
+
+	if (mutations.empty() || beginVersion > mutations.back().version) {
+		return mutations.end();
+	} else if (beginVersion <= mutations.front().version) {
+		return mutations.begin();
+	}
+
+	MutationsAndVersionRef searchKey;
+	searchKey.version = beginVersion;
+	if (atLatest) {
+		int jump = 1;
+		// exponential search backwards, because atLatest means the new mutations are likely only at the very end
+		auto lastEnd = mutations.end();
+		auto currentEnd = mutations.end() - 1;
+		while (currentEnd > mutations.begin()) {
+			if (beginVersion >= currentEnd->version) {
+				break;
+			}
+			lastEnd = currentEnd + 1;
+			currentEnd -= jump;
+			jump <<= 1;
+		}
+		if (currentEnd < mutations.begin()) {
+			currentEnd = mutations.begin();
+		}
+		auto ret = std::lower_bound(currentEnd, lastEnd, searchKey, MutationsAndVersionRef::OrderByVersion());
+		// TODO REMOVE: for validation
+		if (ret != mutations.end()) {
+			if (ret->version < beginVersion) {
+				fmt::print("ERROR: {0}) {1} < {2}\n", ret - mutations.begin(), ret->version, beginVersion);
+			}
+			ASSERT(ret->version >= beginVersion);
+		}
+		if (ret != mutations.begin()) {
+			if ((ret - 1)->version >= beginVersion) {
+				fmt::print("ERROR: {0}) {1} >= {2}\n", (ret - mutations.begin()) - 1, (ret - 1)->version, beginVersion);
+			}
+			ASSERT((ret - 1)->version < beginVersion);
+		}
+		return ret;
+	} else {
+		// binary search
+		return std::lower_bound(
+		    mutations.begin(), mutations.end(), searchKey, MutationsAndVersionRef::OrderByVersion());
+	}
+}
+
 ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(StorageServer* data,
                                                                             ChangeFeedStreamRequest req,
                                                                             bool inverted,
@@ -2391,19 +2459,18 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 	}
 
 	if (req.end > emptyVersion + 1) {
-		// FIXME: do exponential backwards search from end to find beginVersion if atLatest to reduce cpu
-		for (auto& it : feedInfo->mutations) {
-			if (it.version >= req.end || it.version > dequeVersion || remainingLimitBytes <= 0) {
+		auto it = searchChangeFeedStart(feedInfo->mutations, req.begin, atLatest);
+		while (it != feedInfo->mutations.end()) {
+			if (it->version >= req.end || it->version > dequeVersion || remainingLimitBytes <= 0) {
 				break;
 			}
-			if (it.version >= req.begin) {
-				auto m = filterMutations(memoryReply.arena, it, req.range, inverted);
-				if (m.mutations.size()) {
-					memoryReply.arena.dependsOn(it.arena());
-					memoryReply.mutations.push_back(memoryReply.arena, m);
-					remainingLimitBytes -= sizeof(MutationsAndVersionRef) + m.expectedSize();
-				}
+			auto m = filterMutations(memoryReply.arena, *it, req.range, inverted);
+			if (m.mutations.size()) {
+				memoryReply.arena.dependsOn(it->arena());
+				memoryReply.mutations.push_back(memoryReply.arena, m);
+				remainingLimitBytes -= sizeof(MutationsAndVersionRef) + m.expectedSize();
 			}
+			it++;
 		}
 	}
 
@@ -3095,7 +3162,7 @@ ACTOR Future<GetValueReqAndResultRef> quickGetValue(StorageServer* data,
 	} else {
 		throw quick_get_value_miss();
 	}
-};
+}
 
 // If limit>=0, it returns the first rows in the range (sorted ascending), otherwise the last rows (sorted descending).
 // readRange has O(|result|) + O(log |data|) cost
@@ -3727,7 +3794,7 @@ ACTOR Future<GetRangeReqAndResultRef> quickGetKeyValues(
 	} else {
 		throw quick_get_key_values_miss();
 	}
-};
+}
 
 void unpackKeyTuple(Tuple** referenceTuple, Optional<Tuple>& keyTuple, KeyValueRef* keyValue) {
 	if (!keyTuple.present()) {
@@ -3976,6 +4043,36 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 	return Void();
 }
 
+// Issues a secondary query (either range and point read) and fills results into "kvm".
+ACTOR Future<Void> mapSubquery(StorageServer* data,
+                               Version version,
+                               GetMappedKeyValuesRequest* pOriginalReq,
+                               Arena* pArena,
+                               int matchIndex,
+                               bool isRangeQuery,
+                               bool isBoundary,
+                               KeyValueRef* it,
+                               MappedKeyValueRef* kvm,
+                               Key mappedKey) {
+	if (isRangeQuery) {
+		// Use the mappedKey as the prefix of the range query.
+		GetRangeReqAndResultRef getRange = wait(quickGetKeyValues(data, mappedKey, version, pArena, pOriginalReq));
+		if ((!getRange.result.empty() && matchIndex == MATCH_INDEX_MATCHED_ONLY) ||
+		    (getRange.result.empty() && matchIndex == MATCH_INDEX_UNMATCHED_ONLY)) {
+			kvm->key = it->key;
+			kvm->value = it->value;
+		}
+
+		kvm->boundaryAndExist = isBoundary && !getRange.result.empty();
+		kvm->reqAndResult = getRange;
+	} else {
+		GetValueReqAndResultRef getValue = wait(quickGetValue(data, mappedKey, version, pArena, pOriginalReq));
+		kvm->reqAndResult = getValue;
+		kvm->boundaryAndExist = isBoundary && getValue.result.present();
+	}
+	return Void();
+}
+
 ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
                                                    GetKeyValuesReply input,
                                                    StringRef mapper,
@@ -4005,43 +4102,49 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 	preprocessMappedKey(mappedKeyFormatTuple, vt, isRangeQuery);
 
 	state int sz = input.data.size();
-	state int i = 0;
-	for (; i < sz; i++) {
-		state KeyValueRef* it = &input.data[i];
-		state MappedKeyValueRef kvm;
-		state bool isBoundary = i == 0 || i == sz - 1;
-		// need to keep the boundary, so that caller can use it as a continuation.
-		if (isBoundary || matchIndex == MATCH_INDEX_ALL) {
-			kvm.key = it->key;
-			kvm.value = it->value;
-		}
-
-		state Key mappedKey = constructMappedKey(it, vt, mappedKeyTuple, mappedKeyFormatTuple);
-		// Make sure the mappedKey is always available, so that it's good even we want to get key asynchronously.
-		result.arena.dependsOn(mappedKey.arena());
-
-		//		std::cout << "key:" << printable(kvm.key) << ", value:" << printable(kvm.value)
-		//		          << ", mappedKey:" << printable(mappedKey) << std::endl;
-
-		if (isRangeQuery) {
-			// Use the mappedKey as the prefix of the range query.
-			GetRangeReqAndResultRef getRange =
-			    wait(quickGetKeyValues(data, mappedKey, input.version, &(result.arena), pOriginalReq));
-			if ((!getRange.result.empty() && matchIndex == MATCH_INDEX_MATCHED_ONLY) ||
-			    (getRange.result.empty() && matchIndex == MATCH_INDEX_UNMATCHED_ONLY)) {
-				kvm.key = it->key;
-				kvm.value = it->value;
+	const int k = std::min(sz, SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE);
+	state std::vector<MappedKeyValueRef> kvms(k);
+	state std::vector<Future<Void>> subqueries;
+	state int offset = 0;
+	for (; offset < sz; offset += SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE) {
+		// Divide into batches of MAX_PARALLEL_QUICK_GET_VALUE subqueries
+		for (int i = 0; i + offset < sz && i < SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE; i++) {
+			KeyValueRef* it = &input.data[i + offset];
+			MappedKeyValueRef* kvm = &kvms[i];
+			bool isBoundary = (i + offset) == 0 || (i + offset) == sz - 1;
+			// need to keep the boundary, so that caller can use it as a continuation.
+			if (isBoundary || matchIndex == MATCH_INDEX_ALL) {
+				kvm->key = it->key;
+				kvm->value = it->value;
+			} else {
+				// Clear key value to the default.
+				kvm->key = ""_sr;
+				kvm->value = ""_sr;
 			}
 
-			kvm.boundaryAndExist = isBoundary && !getRange.result.empty();
-			kvm.reqAndResult = getRange;
-		} else {
-			GetValueReqAndResultRef getValue =
-			    wait(quickGetValue(data, mappedKey, input.version, &(result.arena), pOriginalReq));
-			kvm.reqAndResult = getValue;
-			kvm.boundaryAndExist = isBoundary && getValue.result.present();
+			Key mappedKey = constructMappedKey(it, vt, mappedKeyTuple, mappedKeyFormatTuple);
+			// Make sure the mappedKey is always available, so that it's good even we want to get key asynchronously.
+			result.arena.dependsOn(mappedKey.arena());
+
+			// std::cout << "key:" << printable(kvm->key) << ", value:" << printable(kvm->value)
+			//          << ", mappedKey:" << printable(mappedKey) << std::endl;
+
+			subqueries.push_back(mapSubquery(data,
+			                                 input.version,
+			                                 pOriginalReq,
+			                                 &result.arena,
+			                                 matchIndex,
+			                                 isRangeQuery,
+			                                 isBoundary,
+			                                 it,
+			                                 kvm,
+			                                 mappedKey));
 		}
-		result.data.push_back(result.arena, kvm);
+		wait(waitForAll(subqueries));
+		subqueries.clear();
+		for (int i = 0; i + offset < sz && i < SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE; i++) {
+			result.data.push_back(result.arena, kvms[i]);
+		}
 	}
 	return result;
 }
@@ -6449,7 +6552,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 	}
 
 	return Void();
-};
+}
 
 AddingShard::AddingShard(StorageServer* server, KeyRangeRef const& keys)
   : keys(keys), server(server), transferredVersion(invalidVersion), fetchVersion(invalidVersion), phase(WaitPrevious) {
@@ -7385,12 +7488,12 @@ private:
 		} else if (m.param1.substr(1).startsWith(tssMappingKeys.begin) &&
 		           (m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange)) {
 			if (!data->isTss()) {
-				UID ssId = Codec<UID>::unpack(Tuple::unpack(m.param1.substr(1).removePrefix(tssMappingKeys.begin)));
+				UID ssId = TupleCodec<UID>::unpack(m.param1.substr(1).removePrefix(tssMappingKeys.begin));
 				ASSERT(ssId == data->thisServerID);
 				// Add ss pair id change to mutation log to make durable
 				auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
 				if (m.type == MutationRef::SetValue) {
-					UID tssId = Codec<UID>::unpack(Tuple::unpack(m.param2));
+					UID tssId = TupleCodec<UID>::unpack(m.param2);
 					data->setSSWithTssPair(tssId);
 					data->addMutationToMutationLog(mLV,
 					                               MutationRef(MutationRef::SetValue,
@@ -7482,7 +7585,7 @@ void StorageServer::insertTenant(TenantNameRef tenantName,
 		tenantMap.createNewVersion(version);
 		tenantPrefixIndex.createNewVersion(version);
 
-		TenantMapEntry tenantEntry = decodeTenantEntry(value);
+		TenantMapEntry tenantEntry = TenantMapEntry::decode(value);
 
 		tenantMap.insert(tenantName, tenantEntry);
 		tenantPrefixIndex.insert(tenantEntry.prefix, tenantName);
@@ -7628,13 +7731,19 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 		state UpdateEagerReadInfo eager;
 		state FetchInjectionInfo fii;
 		state Reference<ILogSystem::IPeekCursor> cloneCursor2;
+		state Optional<std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>> cipherKeys;
+		state bool collectingCipherKeys = false;
 
+		// Collect eager read keys.
+		// If encrypted mutation is encountered, we collect cipher details and fetch cipher keys, then start over.
 		loop {
 			state uint64_t changeCounter = data->shardChangeCounter;
 			bool epochEnd = false;
 			bool hasPrivateData = false;
 			bool firstMutation = true;
 			bool dbgLastMessageWasProtocol = false;
+
+			std::unordered_set<BlobCipherDetails> cipherDetails;
 
 			Reference<ILogSystem::IPeekCursor> cloneCursor1 = cursor->cloneNoMore();
 			cloneCursor2 = cursor->cloneNoMore();
@@ -7658,47 +7767,72 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				           OTELSpanContextMessage::isNextIn(cloneReader)) {
 					OTELSpanContextMessage scm;
 					cloneReader >> scm;
+				} else if (cloneReader.protocolVersion().hasEncryptionAtRest() &&
+				           EncryptedMutationMessage::isNextIn(cloneReader) && !cipherKeys.present()) {
+					// Encrypted mutation found, but cipher keys haven't been fetch.
+					// Collect cipher details to fetch cipher keys in one batch.
+					EncryptedMutationMessage emm;
+					cloneReader >> emm;
+					cipherDetails.insert(emm.header.cipherTextDetails);
+					cipherDetails.insert(emm.header.cipherHeaderDetails);
+					collectingCipherKeys = true;
 				} else {
 					MutationRef msg;
-					cloneReader >> msg;
+					if (cloneReader.protocolVersion().hasEncryptionAtRest() &&
+					    EncryptedMutationMessage::isNextIn(cloneReader)) {
+						assert(cipherKeys.present());
+						msg = EncryptedMutationMessage::decrypt(cloneReader, eager.arena, cipherKeys.get());
+					} else {
+						cloneReader >> msg;
+					}
 					// TraceEvent(SevDebug, "SSReadingLog", data->thisServerID).detail("Mutation", msg);
 
-					if (firstMutation && msg.param1.startsWith(systemKeys.end))
-						hasPrivateData = true;
-					firstMutation = false;
+					if (!collectingCipherKeys) {
+						if (firstMutation && msg.param1.startsWith(systemKeys.end))
+							hasPrivateData = true;
+						firstMutation = false;
 
-					if (msg.param1 == lastEpochEndPrivateKey) {
-						epochEnd = true;
-						ASSERT(dbgLastMessageWasProtocol);
+						if (msg.param1 == lastEpochEndPrivateKey) {
+							epochEnd = true;
+							ASSERT(dbgLastMessageWasProtocol);
+						}
+
+						eager.addMutation(msg);
+						dbgLastMessageWasProtocol = false;
 					}
-
-					eager.addMutation(msg);
-					dbgLastMessageWasProtocol = false;
 				}
 			}
 
-			// Any fetchKeys which are ready to transition their shards to the adding,transferred state do so now.
-			// If there is an epoch end we skip this step, to increase testability and to prevent inserting a
-			// version in the middle of a rolled back version range.
-			while (!hasPrivateData && !epochEnd && !data->readyFetchKeys.empty()) {
-				auto fk = data->readyFetchKeys.back();
-				data->readyFetchKeys.pop_back();
-				fk.send(&fii);
-				// fetchKeys() would put the data it fetched into the fii. The thread will not return back to this
-				// actor until it was completed.
+			if (collectingCipherKeys) {
+				std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> getCipherKeysResult =
+				    wait(getEncryptCipherKeys(data->db, cipherDetails));
+				cipherKeys = getCipherKeysResult;
+				collectingCipherKeys = false;
+				eager = UpdateEagerReadInfo();
+			} else {
+				// Any fetchKeys which are ready to transition their shards to the adding,transferred state do so now.
+				// If there is an epoch end we skip this step, to increase testability and to prevent inserting a
+				// version in the middle of a rolled back version range.
+				while (!hasPrivateData && !epochEnd && !data->readyFetchKeys.empty()) {
+					auto fk = data->readyFetchKeys.back();
+					data->readyFetchKeys.pop_back();
+					fk.send(&fii);
+					// fetchKeys() would put the data it fetched into the fii. The thread will not return back to this
+					// actor until it was completed.
+				}
+
+				for (auto& c : fii.changes)
+					eager.addMutations(c.mutations);
+
+				wait(doEagerReads(data, &eager));
+				if (data->shardChangeCounter == changeCounter)
+					break;
+				TEST(true); // A fetchKeys completed while we were doing this, so eager might be outdated.  Read it
+				            // again.
+				// SOMEDAY: Theoretically we could check the change counters of individual shards and retry the reads
+				// only selectively
+				eager = UpdateEagerReadInfo();
 			}
-
-			for (auto& c : fii.changes)
-				eager.addMutations(c.mutations);
-
-			wait(doEagerReads(data, &eager));
-			if (data->shardChangeCounter == changeCounter)
-				break;
-			TEST(true); // A fetchKeys completed while we were doing this, so eager might be outdated.  Read it
-			            // again.
-			// SOMEDAY: Theoretically we could check the change counters of individual shards and retry the reads
-			// only selectively
-			eager = UpdateEagerReadInfo();
 		}
 		data->eagerReadsLatencyHistogram->sampleSeconds(now() - start);
 
@@ -7791,7 +7925,12 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				spanContext = scm.spanContext;
 			} else {
 				MutationRef msg;
-				rd >> msg;
+				if (rd.protocolVersion().hasEncryptionAtRest() && EncryptedMutationMessage::isNextIn(rd)) {
+					ASSERT(cipherKeys.present());
+					msg = EncryptedMutationMessage::decrypt(rd, rd.arena(), cipherKeys.get());
+				} else {
+					rd >> msg;
+				}
 
 				Span span("SS:update"_loc, spanContext);
 				span.addAttribute("key"_sr, msg.param1);
@@ -7971,7 +8110,9 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 		return Void(); // update will get called again ASAP
 	} catch (Error& err) {
 		state Error e = err;
-		if (e.code() != error_code_worker_removed && e.code() != error_code_please_reboot) {
+		if (e.code() == error_code_encrypt_keys_fetch_failed) {
+			TraceEvent(SevWarn, "SSUpdateError", data->thisServerID).error(e).backtrace();
+		} else if (e.code() != error_code_worker_removed && e.code() != error_code_please_reboot) {
 			TraceEvent(SevError, "SSUpdateError", data->thisServerID).error(e).backtrace();
 		} else if (e.code() == error_code_please_reboot) {
 			wait(data->durableInProgress);
@@ -8379,7 +8520,7 @@ void StorageServerDisk::makeNewStorageServerDurable() {
 
 	auto view = data->tenantMap.atLatest();
 	for (auto itr = view.begin(); itr != view.end(); ++itr) {
-		storage->set(KeyValueRef(itr.key().withPrefix(persistTenantMapKeys.begin), encodeTenantEntry(*itr)));
+		storage->set(KeyValueRef(itr.key().withPrefix(persistTenantMapKeys.begin), itr->encode()));
 	}
 }
 
@@ -8907,7 +9048,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	for (tenantMapLoc = 0; tenantMapLoc < tenantMap.size(); tenantMapLoc++) {
 		auto const& result = tenantMap[tenantMapLoc];
 		TenantName tenantName = result.key.substr(persistTenantMapKeys.begin.size());
-		TenantMapEntry tenantEntry = decodeTenantEntry(result.value);
+		TenantMapEntry tenantEntry = TenantMapEntry::decode(result.value);
 
 		data->tenantMap.insert(tenantName, tenantEntry);
 		data->tenantPrefixIndex.insert(tenantEntry.prefix, tenantName);
@@ -9180,6 +9321,7 @@ ACTOR Future<Void> metricsCore(StorageServer* self, StorageServerInterface ssi) 
 	                               &self->counters.cc,
 	                               self->thisServerID.toString() + "/StorageMetrics",
 	                               [self = self](TraceEvent& te) {
+		                               te.detail("StorageEngine", self->storage.getKeyValueStoreType().toString());
 		                               te.detail("Tag", self->tag.toString());
 		                               StorageBytes sb = self->storage.getStorageBytes();
 		                               te.detail("KvstoreBytesUsed", sb.used);

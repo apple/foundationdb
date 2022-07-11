@@ -21,7 +21,7 @@
 #include "flow/ThreadHelper.actor.h"
 #include "flow/Platform.h"
 #include "fdbclient/ThreadSafeTransaction.h"
-#include "bindings/c/foundationdb/ClientWorkload.h"
+#include "foundationdb/ClientWorkload.h"
 #include "fdbserver/workloads/workloads.actor.h"
 
 #include "flow/actorcompiler.h" // has to be last include
