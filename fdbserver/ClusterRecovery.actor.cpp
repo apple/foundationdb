@@ -999,7 +999,8 @@ ACTOR Future<std::vector<Standalone<CommitTransactionRef>>> recruitEverything(
 	                                                                                self->lastEpochEnd,
 	                                                                                self->commitProxies,
 	                                                                                self->resolvers,
-	                                                                                self->versionEpoch))));
+	                                                                                self->versionEpoch,
+	                                                                                self->primaryLocality))));
 
 	return confChanges;
 }
@@ -1012,11 +1013,6 @@ ACTOR Future<Void> updateLocalityForDcId(Optional<Key> dcId,
 		Version ver = locality->get().knownCommittedVersion;
 		if (ver == invalidVersion) {
 			ver = oldLogSystem->getKnownCommittedVersion();
-		}
-		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
-			// Do not try to split peeks between data centers in peekTxns() to recover mem kvstore.
-			// This recovery optimization won't work in UNICAST mode.
-			loc.first = -1;
 		}
 
 		locality->set(PeekTxsInfo(loc.first, loc.second, ver));

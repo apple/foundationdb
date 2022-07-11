@@ -27,6 +27,9 @@
 #include "flow/serialize.h"
 #include "flow/UnitTest.h"
 
+FDB_DEFINE_BOOLEAN_PARAM(AssignEmptyRange);
+FDB_DEFINE_BOOLEAN_PARAM(UnassignShard);
+
 const KeyRef systemKeysPrefix = LiteralStringRef("\xff");
 const KeyRangeRef normalKeys(KeyRef(), systemKeysPrefix);
 const KeyRangeRef systemKeys(systemKeysPrefix, LiteralStringRef("\xff\xff"));
@@ -42,6 +45,10 @@ const KeyRef keyServersEnd = keyServersKeys.end;
 const KeyRangeRef keyServersKeyServersKeys(LiteralStringRef("\xff/keyServers/\xff/keyServers/"),
                                            LiteralStringRef("\xff/keyServers/\xff/keyServers0"));
 const KeyRef keyServersKeyServersKey = keyServersKeyServersKeys.begin;
+
+// These constants are selected to be easily recognized during debugging.
+const UID anonymousShardId = UID(0x666666, 0x88888888);
+const uint64_t emptyShardId = 0x7777777;
 
 const Key keyServersKey(const KeyRef& k) {
 	return k.withPrefix(keyServersPrefix);
@@ -87,6 +94,21 @@ const Value keyServersValue(RangeResult result, const std::vector<UID>& src, con
 
 	return keyServersValue(srcTag, destTag);
 }
+
+const Value keyServersValue(const std::vector<UID>& src,
+                            const std::vector<UID>& dest,
+                            const UID& srcID,
+                            const UID& destID) {
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withShardEncodeLocationMetaData()));
+	if (dest.empty()) {
+		ASSERT(!destID.isValid());
+		wr << src << dest << srcID;
+	} else {
+		wr << src << dest << srcID << destID;
+	}
+	return wr.toValue();
+}
+
 const Value keyServersValue(const std::vector<Tag>& srcTag, const std::vector<Tag>& destTag) {
 	// src and dest are expected to be sorted
 	BinaryWriter wr(IncludeVersion(ProtocolVersion::withKeyServerValueV2()));
@@ -106,6 +128,11 @@ void decodeKeyServersValue(RangeResult result,
 	}
 
 	BinaryReader rd(value, IncludeVersion());
+	if (rd.protocolVersion().hasShardEncodeLocationMetaData()) {
+		UID srcId, destId;
+		decodeKeyServersValue(result, value, src, dest, srcId, destId);
+		return;
+	}
 	if (!rd.protocolVersion().hasKeyServerValueV2()) {
 		rd >> src >> dest;
 		return;
@@ -145,6 +172,42 @@ void decodeKeyServersValue(RangeResult result,
 	}
 }
 
+void decodeKeyServersValue(RangeResult result,
+                           const ValueRef& value,
+                           std::vector<UID>& src,
+                           std::vector<UID>& dest,
+                           UID& srcID,
+                           UID& destID,
+                           bool missingIsError) {
+	src.clear();
+	dest.clear();
+	srcID = UID();
+	destID = UID();
+
+	if (value.size() == 0) {
+		return;
+	}
+
+	BinaryReader rd(value, IncludeVersion());
+	if (rd.protocolVersion().hasShardEncodeLocationMetaData()) {
+		rd >> src >> dest >> srcID;
+		if (rd.empty()) {
+			ASSERT(dest.empty());
+		} else {
+			rd >> destID;
+			rd.assertEnd();
+		}
+	} else {
+		decodeKeyServersValue(result, value, src, dest, missingIsError);
+		if (!src.empty()) {
+			srcID = anonymousShardId;
+		}
+		if (!dest.empty()) {
+			destID = anonymousShardId;
+		}
+	}
+}
+
 void decodeKeyServersValue(std::map<Tag, UID> const& tag_uid,
                            const ValueRef& value,
                            std::vector<UID>& src,
@@ -167,6 +230,16 @@ void decodeKeyServersValue(std::map<Tag, UID> const& tag_uid,
 	if (value.size() !=
 	    sizeof(ProtocolVersion) + sizeof(int) + srcLen * sizeof(Tag) + sizeof(int) + destLen * sizeof(Tag)) {
 		rd >> src >> dest;
+		if (rd.protocolVersion().hasShardEncodeLocationMetaData()) {
+			UID srcId, destId;
+			rd >> srcId;
+			if (rd.empty()) {
+				ASSERT(dest.empty());
+				destId = UID();
+			} else {
+				rd >> destId;
+			}
+		}
 		rd.assertEnd();
 		return;
 	}
@@ -242,6 +315,33 @@ CheckpointMetaData decodeCheckpointValue(const ValueRef& value) {
 	return checkpoint;
 }
 
+// "\xff/dataMoves/[[UID]] := [[DataMoveMetaData]]"
+const KeyRangeRef dataMoveKeys("\xff/dataMoves/"_sr, "\xff/dataMoves0"_sr);
+const Key dataMoveKeyFor(UID dataMoveId) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(dataMoveKeys.begin);
+	wr << dataMoveId;
+	return wr.toValue();
+}
+
+const Value dataMoveValue(const DataMoveMetaData& dataMoveMetaData) {
+	return ObjectWriter::toValue(dataMoveMetaData, IncludeVersion());
+}
+
+UID decodeDataMoveKey(const KeyRef& key) {
+	UID id;
+	BinaryReader rd(key.removePrefix(dataMoveKeys.begin), Unversioned());
+	rd >> id;
+	return id;
+}
+
+DataMoveMetaData decodeDataMoveValue(const ValueRef& value) {
+	DataMoveMetaData dataMove;
+	ObjectReader reader(value.begin(), IncludeVersion());
+	reader.deserialize(dataMove);
+	return dataMove;
+}
+
 // "\xff/cacheServer/[[UID]] := StorageServerInterface"
 const KeyRangeRef storageCacheServerKeys(LiteralStringRef("\xff/cacheServer/"), LiteralStringRef("\xff/cacheServer0"));
 const KeyRef storageCacheServersPrefix = storageCacheServerKeys.begin;
@@ -308,6 +408,20 @@ const ValueRef serverKeysTrue = "1"_sr, // compatible with what was serverKeysTr
     serverKeysTrueEmptyRange = "3"_sr, // the server treats the range as empty.
     serverKeysFalse;
 
+const UID newShardId(const uint64_t physicalShardId, AssignEmptyRange assignEmptyRange, UnassignShard unassignShard) {
+	uint64_t split = 0;
+	if (assignEmptyRange) {
+		split = emptyShardId;
+	} else if (unassignShard) {
+		split = 0;
+	} else {
+		do {
+			split = deterministicRandom()->randomUInt64();
+		} while (split == anonymousShardId.second() || split == 0 || split == emptyShardId);
+	}
+	return UID(physicalShardId, split);
+}
+
 const Key serverKeysKey(UID serverID, const KeyRef& key) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(serverKeysPrefix);
@@ -342,7 +456,43 @@ std::pair<UID, Key> serverKeysDecodeServerBegin(const KeyRef& key) {
 }
 
 bool serverHasKey(ValueRef storedValue) {
-	return storedValue == serverKeysTrue || storedValue == serverKeysTrueEmptyRange;
+	UID teamId;
+	bool assigned, emptyRange;
+	decodeServerKeysValue(storedValue, assigned, emptyRange, teamId);
+	return assigned;
+}
+
+const Value serverKeysValue(const UID& id) {
+	if (!id.isValid()) {
+		return serverKeysFalse;
+	}
+
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withShardEncodeLocationMetaData()));
+	wr << id;
+	return wr.toValue();
+}
+
+void decodeServerKeysValue(const ValueRef& value, bool& assigned, bool& emptyRange, UID& id) {
+	if (value.size() == 0) {
+		id = UID();
+		assigned = false;
+		emptyRange = false;
+	} else if (value == serverKeysTrue) {
+		assigned = true;
+		emptyRange = false;
+	} else if (value == serverKeysTrueEmptyRange) {
+		assigned = true;
+		emptyRange = true;
+	} else if (value == serverKeysFalse) {
+		assigned = false;
+		emptyRange = false;
+	} else {
+		BinaryReader rd(value, IncludeVersion());
+		ASSERT(rd.protocolVersion().hasShardEncodeLocationMetaData());
+		rd >> id;
+		assigned = id.second() != 0;
+		emptyRange = id.second() == emptyShardId;
+	}
 }
 
 const KeyRef cacheKeysPrefix = LiteralStringRef("\xff\x02/cacheKeys/");
@@ -1404,17 +1554,6 @@ BlobWorkerInterface decodeBlobWorkerListValue(ValueRef const& value) {
 	return interf;
 }
 
-Value encodeTenantEntry(TenantMapEntry const& tenantEntry) {
-	return ObjectWriter::toValue(tenantEntry, IncludeVersion());
-}
-
-TenantMapEntry decodeTenantEntry(ValueRef const& value) {
-	TenantMapEntry entry;
-	ObjectReader reader(value.begin(), IncludeVersion());
-	reader.deserialize(entry);
-	return entry;
-}
-
 const KeyRangeRef tenantMapKeys("\xff/tenantMap/"_sr, "\xff/tenantMap0"_sr);
 const KeyRef tenantMapPrefix = tenantMapKeys.begin;
 const KeyRef tenantMapPrivatePrefix = "\xff\xff/tenantMap/"_sr;
@@ -1473,6 +1612,94 @@ TEST_CASE("/SystemData/SerDes/SSI") {
 	ssi.tssPairID = UID(0x2345234523452345, 0x1238123812381238);
 
 	testSSISerdes(ssi);
+	printf("ssi serdes test complete\n");
+
+	return Void();
+}
+
+// Tests compatibility of different keyServersValue() and decodeKeyServersValue().
+TEST_CASE("noSim/SystemData/compat/KeyServers") {
+	printf("testing keyServers serdes\n");
+	std::vector<UID> src, dest;
+	std::map<Tag, UID> tag_uid;
+	std::map<UID, Tag> uid_tag;
+	std::vector<Tag> srcTag, destTag;
+	const int n = 3;
+	int8_t locality = 1;
+	uint16_t id = 1;
+	UID srcId = deterministicRandom()->randomUniqueID(), destId = deterministicRandom()->randomUniqueID();
+	for (int i = 0; i < n; ++i) {
+		src.push_back(deterministicRandom()->randomUniqueID());
+		tag_uid.emplace(Tag(locality, id), src.back());
+		uid_tag.emplace(src.back(), Tag(locality, id++));
+		dest.push_back(deterministicRandom()->randomUniqueID());
+		tag_uid.emplace(Tag(locality, id), dest.back());
+		uid_tag.emplace(dest.back(), Tag(locality, id++));
+	}
+	std::sort(src.begin(), src.end());
+	std::sort(dest.begin(), dest.end());
+	RangeResult idTag;
+	for (int i = 0; i < src.size(); ++i) {
+		idTag.push_back_deep(idTag.arena(), KeyValueRef(serverTagKeyFor(src[i]), serverTagValue(uid_tag[src[i]])));
+	}
+	for (int i = 0; i < dest.size(); ++i) {
+		idTag.push_back_deep(idTag.arena(), KeyValueRef(serverTagKeyFor(dest[i]), serverTagValue(uid_tag[dest[i]])));
+	}
+
+	auto decodeAndVerify =
+	    [&src, &dest, &tag_uid, &idTag](ValueRef v, const UID expectedSrcId, const UID expectedDestId) {
+		    std::vector<UID> resSrc, resDest;
+		    UID resSrcId, resDestId;
+
+		    decodeKeyServersValue(idTag, v, resSrc, resDest, resSrcId, resDestId);
+		    TraceEvent("VerifyKeyServersSerDes")
+		        .detail("ExpectedSrc", describe(src))
+		        .detail("ActualSrc", describe(resSrc))
+		        .detail("ExpectedDest", describe(dest))
+		        .detail("ActualDest", describe(resDest))
+		        .detail("ExpectedDestID", expectedDestId)
+		        .detail("ActualDestID", resDestId)
+		        .detail("ExpectedSrcID", expectedSrcId)
+		        .detail("ActualSrcID", resSrcId);
+		    ASSERT(std::equal(src.begin(), src.end(), resSrc.begin()));
+		    ASSERT(std::equal(dest.begin(), dest.end(), resDest.begin()));
+		    ASSERT(resSrcId == expectedSrcId);
+		    ASSERT(resDestId == expectedDestId);
+
+		    resSrc.clear();
+		    resDest.clear();
+		    decodeKeyServersValue(idTag, v, resSrc, resDest);
+		    ASSERT(std::equal(src.begin(), src.end(), resSrc.begin()));
+		    ASSERT(std::equal(dest.begin(), dest.end(), resDest.begin()));
+
+		    resSrc.clear();
+		    resDest.clear();
+		    decodeKeyServersValue(tag_uid, v, resSrc, resDest);
+		    ASSERT(std::equal(src.begin(), src.end(), resSrc.begin()));
+		    ASSERT(std::equal(dest.begin(), dest.end(), resDest.begin()));
+	    };
+
+	Value v = keyServersValue(src, dest, srcId, destId);
+	decodeAndVerify(v, srcId, destId);
+
+	printf("ssi serdes test part.1 complete\n");
+
+	v = keyServersValue(idTag, src, dest);
+	decodeAndVerify(v, anonymousShardId, anonymousShardId);
+
+	printf("ssi serdes test part.2 complete\n");
+
+	dest.clear();
+	destId = UID();
+
+	v = keyServersValue(src, dest, srcId, destId);
+	decodeAndVerify(v, srcId, destId);
+
+	printf("ssi serdes test part.3 complete\n");
+
+	v = keyServersValue(idTag, src, dest);
+	decodeAndVerify(v, anonymousShardId, UID());
+
 	printf("ssi serdes test complete\n");
 
 	return Void();
