@@ -699,6 +699,15 @@ def tenants(logger):
 
     run_fdbcli_command('writemode on; clear tenant_test')
 
+def integer_options():
+    process = subprocess.Popen(command_template[:-1], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=fdbcli_env)
+    cmd_sequence = ['option on TIMEOUT 1000', 'writemode on', 'clear foo']
+    output, error_output = process.communicate(input='\n'.join(cmd_sequence).encode())
+
+    lines = output.decode().strip().split('\n')[-2:]
+    assert lines[0] == 'Option enabled for all transactions'
+    assert lines[1].startswith('Committed')
+    assert error_output == b''
 
 if __name__ == '__main__':
     parser = ArgumentParser(formatter_class=RawDescriptionHelpFormatter,
@@ -745,6 +754,7 @@ if __name__ == '__main__':
         triggerddteaminfolog()
         tenants()
         versionepoch()
+        integer_options()
     else:
         assert args.process_number > 1, "Process number should be positive"
         coordinators()
