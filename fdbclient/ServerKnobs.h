@@ -826,6 +826,7 @@ public:
 	bool REDWOOD_EVICT_UPDATED_PAGES; // Whether to prioritize eviction of updated pages from cache.
 	int REDWOOD_DECODECACHE_REUSE_MIN_HEIGHT; // Minimum height for which to keep and reuse page decode caches
 
+	int REDWOOD_IO_MAX_PRIORITY;
 	std::string REDWOOD_PRIORITY_LAUNCH_LIMITS;
 
 	// Server request latency measurement

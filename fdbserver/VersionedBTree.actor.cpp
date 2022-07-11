@@ -145,15 +145,8 @@ private:
 public:
 	PriorityMultiLock(int concurrency, int maxPriority, std::string launchLimit)
 	  : concurrency(concurrency), available(concurrency), waiting(0) {
-		this->launchLimit.resize(maxPriority + 1);
-		std::stringstream launchLimitStream(launchLimit);
-		size_t index = 0;
-		while (launchLimitStream.good()) {
-			std::string limit;
-			getline(launchLimitStream, limit, ',');
-			this->launchLimit[index++] = std::stoi(limit);
-		}
-		ASSERT(index == maxPriority + 1);
+		this->launchLimit = parseStringToVector<int>(launchLimit, ',');
+		ASSERT(this->launchLimit.size() == maxPriority + 1);
 		waiters.resize(maxPriority + 1);
 		fRunner = runner(this);
 	}
@@ -426,7 +419,8 @@ std::string toString(const std::pair<F, S>& o) {
 
 constexpr static int ioMinPriority = 0;
 constexpr static int ioLeafPriority = 1;
-constexpr static int ioMaxPriority = 3;
+// constexpr static int ioMaxPriority = 3;
+static int ioMaxPriority = SERVER_KNOBS->REDWOOD_IO_MAX_PRIORITY;
 constexpr static int maxConcurrentReadsLaunchLimit = std::numeric_limits<int>::max();
 // A FIFO queue of T stored as a linked list of pages.
 // Main operations are pop(), pushBack(), pushFront(), and flush().
@@ -2205,8 +2199,9 @@ public:
 	          bool memoryOnly,
 	          std::shared_ptr<IEncryptionKeyProvider> keyProvider,
 	          Promise<Void> errorPromise = {})
-	  : keyProvider(keyProvider),
-	    ioLock(FLOW_KNOBS->MAX_OUTSTANDING, ioMaxPriority, SERVER_KNOBS->REDWOOD_PRIORITY_LAUNCH_LIMITS),
+	  : keyProvider(keyProvider), ioLock(FLOW_KNOBS->MAX_OUTSTANDING,
+	                                     SERVER_KNOBS->REDWOOD_IO_MAX_PRIORITY,
+	                                     SERVER_KNOBS->REDWOOD_PRIORITY_LAUNCH_LIMITS),
 	    pageCacheBytes(pageCacheSizeBytes), desiredPageSize(desiredPageSize), desiredExtentSize(desiredExtentSize),
 	    filename(filename), memoryOnly(memoryOnly), errorPromise(errorPromise),
 	    remapCleanupWindowBytes(remapCleanupWindowBytes), concurrentExtentReads(new FlowLock(concurrentExtentReads)) {
