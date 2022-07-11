@@ -215,7 +215,6 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 	state Reference<ClusterRecoveryData> recoveryData;
 	state PromiseStream<Future<Void>> addActor;
 	state Future<Void> recoveryCore;
-	state bool recoveredDisk = false;
 
 	// SOMEDAY: If there is already a non-failed master referenced by zkMasterInfo, use that one until it fails
 	// When this someday is implemented, make sure forced failures still cause the master to be recruited again

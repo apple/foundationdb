@@ -1869,8 +1869,11 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 		//   (2) a slow recovering worker server wouldn't been recruited as TLog and make recovery slow.
 		// However, the worker server can still serve stateless roles, and if encryption is on, it is crucial to have
 		// some worker available to serve the EncryptKeyProxy role, before opening encrypted storage files.
-		// Here we allow the worker to first register with cluster controller before local file recovery, but indicates
-		// it cannot serve as storage or TLog, then a second normal register request after local file recovery.
+		//
+		// When encryption-at-rest is enabled, the follow code allows a worker to first register with the
+		// cluster controller to be recruited only as a stateless process i.e. it can't be recruited as a SS or TLog
+		// process; once the local disk recovery is complete (if applicable), the process re-registers with cluster
+		// controller as a stateful process role.
 		//
 		// TODO(yiwu): Unify behavior for encryption and non-encryption once the change is stable.
 		Future<Void> recoverDiskFiles = trigger(
