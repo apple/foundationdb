@@ -418,7 +418,6 @@ std::string toString(const std::pair<F, S>& o) {
 
 constexpr static int ioMinPriority = 0;
 constexpr static int ioLeafPriority = 1;
-// constexpr static int ioMaxPriority = 3;
 static int ioMaxPriority = SERVER_KNOBS->REDWOOD_IO_MAX_PRIORITY;
 constexpr static int maxConcurrentReadsLaunchLimit = std::numeric_limits<int>::max();
 // A FIFO queue of T stored as a linked list of pages.
@@ -2200,7 +2199,7 @@ public:
 	          Promise<Void> errorPromise = {})
 	  : keyProvider(keyProvider), ioLock(FLOW_KNOBS->MAX_OUTSTANDING,
 	                                     SERVER_KNOBS->REDWOOD_IO_MAX_PRIORITY,
-	                                     SERVER_KNOBS->REDWOOD_PRIORITY_LAUNCH_LIMITS),
+	                                     SERVER_KNOBS->REDWOOD_PRIORITY_LAUNCHS),
 	    pageCacheBytes(pageCacheSizeBytes), desiredPageSize(desiredPageSize), desiredExtentSize(desiredExtentSize),
 	    filename(filename), memoryOnly(memoryOnly), errorPromise(errorPromise),
 	    remapCleanupWindowBytes(remapCleanupWindowBytes), concurrentExtentReads(new FlowLock(concurrentExtentReads)) {

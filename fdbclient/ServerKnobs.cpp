@@ -873,8 +873,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( REDWOOD_HISTOGRAM_INTERVAL,                           30.0 );
 	init( REDWOOD_EVICT_UPDATED_PAGES,                          true ); if( randomize && BUGGIFY ) { REDWOOD_EVICT_UPDATED_PAGES = false; }
 	init( REDWOOD_DECODECACHE_REUSE_MIN_HEIGHT,                    2 ); if( randomize && BUGGIFY ) { REDWOOD_DECODECACHE_REUSE_MIN_HEIGHT = deterministicRandom()->randomInt(1, 7); }
-	init( REDWOOD_IO_MAX_PRIORITY,           3);
-	init( REDWOOD_PRIORITY_LAUNCH_LIMITS,           "32,32,32,32");
+	init( REDWOOD_IO_MAX_PRIORITY,                                 3 );
+	init( REDWOOD_PRIORITY_LAUNCHS,              "32,32,32,32" );
 
 	// Server request latency measurement
 	init( LATENCY_SAMPLE_SIZE,                                100000 );
