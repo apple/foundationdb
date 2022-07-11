@@ -35,9 +35,9 @@ pub fn serialize_request(
 ) -> Result<FlowMessage> {
     let completion = UID::random_token();
     let wltoken = UID::well_known_token(WLTOKEN::ReservedForTesting);
+    use crate::common_generated::{ReplyPromise, ReplyPromiseArgs};
     use network_test_request::{
-        FakeRoot, FakeRootArgs, NetworkTestRequest, NetworkTestRequestArgs, ReplyPromise,
-        ReplyPromiseArgs,
+        FakeRoot, FakeRootArgs, NetworkTestRequest, NetworkTestRequestArgs
     };
     // let mut builder = FlatBufferBuilder::with_capacity(usize::min(
     //     128 + (request_len as usize),
@@ -49,7 +49,7 @@ pub fn serialize_request(
         builder.push('.' as u8);
     }
     let payload = Some(builder.end_vector(request_len));
-    let uid = network_test_request::UID::new(completion.uid[0], completion.uid[1]);
+    let uid = crate::common_generated::UID::new(completion.uid[0], completion.uid[1]);
     let uid = Some(&uid);
     let reply_promise = Some(ReplyPromise::create(builder, &ReplyPromiseArgs { uid }));
     let network_test_request = Some(NetworkTestRequest::create(

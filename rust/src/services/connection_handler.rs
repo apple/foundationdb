@@ -72,13 +72,16 @@ where
         let svc = svc.clone();
         tokio::spawn(async move {
             // the real work happens in await, anyway
-            let response = fut.await.unwrap();
-            match response {
-                Some(response) => {
+            // let response = fut.await.unwrap();
+            match fut.await {
+                Ok(Some(response)) => {
                     // println!("Response: {:?}", response);
                     svc.deref().call(response).await.unwrap();
                 }
-                None => (),
+                Ok(None) => (),
+                Err(err) => {
+                    println!("Error handling request: {:?}", err);
+                }
             };
         });
     }

@@ -1,9 +1,9 @@
+include "common.fbs";
+
 table NetworkTestResponse {
     payload: [ubyte];
 }
-table Error {
-    error: uint;
-}
+
 union ErrorOr { Error, NetworkTestResponse }
 
 table FakeRoot {

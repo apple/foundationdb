@@ -1,0 +1,17 @@
+include "common.fbs";
+
+struct ProtocolVersion {
+    version: ulong; // uint64_t
+}
+
+table ProtocolInfoReply {
+    version: ProtocolVersion;
+}
+
+union ErrorOr { Error, ProtocolInfoReply }
+
+table FakeRoot {
+    error_or: ErrorOr;
+}
+
+root_type FakeRoot;

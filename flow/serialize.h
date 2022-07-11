@@ -383,6 +383,22 @@ inline _Unversioned Unversioned() {
 	return _Unversioned();
 }
 
+template <class T>
+void test_only_write_to_stdout(T & t) {
+	Standalone<StringRef> value = ObjectWriter::toValue(t, Unversioned());
+	printf("let buffer_%s = vec![", typeid(T).name());
+	bool first = true;
+	for (uint8_t c :  value) {
+		if (first) {
+			printf("0x%02x", (int)c);
+			first = false;
+		} else {
+			printf(", 0x%02x", (int)c);
+		}
+	}
+	printf("];\n");
+}
+
 // static uint64_t size_limits[] = { 0ULL, 255ULL, 65535ULL, 16777215ULL, 4294967295ULL, 1099511627775ULL,
 // 281474976710655ULL, 72057594037927935ULL, 18446744073709551615ULL };
 

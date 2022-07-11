@@ -1,0 +1,23 @@
+include "common.fbs";
+
+// GetLeaderRequest returns an ErrorOr<Optional<LeaderInfo>>.
+// Not sure how Optional is encoded on the wire.  Since the root type
+// is a table, it may just be down to the file identifier.
+
+// See field documentation in CoordinationInterface.h
+table LeaderInfo {
+    change_id: UID;
+    serialized_info: [ubyte];
+    forward: bool;
+}
+
+// table EnsureTable {
+//     leader_info: LeaderInfo;
+// }
+
+union ErrorOr { Error, LeaderInfo }
+
+table FakeRoot {
+    error_or: ErrorOr;
+}
+root_type FakeRoot;

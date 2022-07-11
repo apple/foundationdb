@@ -1,0 +1,11 @@
+include "common.fbs";
+
+table ProtocolInfoRequest {
+    reply_promise : ReplyPromise;
+}
+
+table FakeRoot {
+    request : ProtocolInfoRequest;
+}
+
+root_type FakeRoot;

@@ -4,4 +4,4 @@ useDB=false
 
     testName=UnitTests
     maxTestCases=0
-    testsMatching=/status/json/builder
+    testsMatching=/flatbuffer/samples/ProtocolInfoRequest

@@ -3127,6 +3127,20 @@ ACTOR Future<Void> serveProtocolInfo() {
 	}
 }
 
+UID test_pattern_uid() {
+	return UID(0xaaaabbbbccccdddd, 0xeeeeffff00001111);
+}
+
+TEST_CASE("/flatbuffer/samples/ProtocolInfo") {
+	ProtocolInfoRequest req;
+	test_only_write_to_stdout(req);
+	ProtocolInfoReply rep { g_network->protocolVersion() };
+	ErrorOr<ProtocolInfoReply> err_rep = errorOr(rep);
+	test_only_write_to_stdout(err_rep);
+	return Void();
+
+}
+
 // Handles requests from ProcessInterface, an interface meant for direct
 // communication between the client and FDB processes.
 ACTOR Future<Void> serveProcess() {

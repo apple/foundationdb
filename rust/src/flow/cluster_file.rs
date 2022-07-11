@@ -10,15 +10,16 @@ pub enum ClusterHost {
 }
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct ClusterFile {
-    description: String,
-    id: String,
-    hosts: Vec<ClusterHost>,
+    pub description: String,
+    pub id: String,
+    pub hosts: Vec<ClusterHost>,
 }
 
 impl FromStr for ClusterFile {
     type Err = Error;
 
     fn from_str(input: &str) -> Result<Self> {
+        let input = input.trim();
         // expect "key:desc@host:port[,host:port...]"
         let tokens: Vec<&str> = input.split('@').collect();
         if tokens.len() != 2 {

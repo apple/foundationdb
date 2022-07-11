@@ -13,3 +13,38 @@ struct UID {
 table ReplyPromise {
     uid : UID;
 }
+
+table Hostname {
+    host: [ubyte];
+	service: [ubyte]; // decimal port number
+	is_tls: bool;
+}
+
+
+table IPv4 {
+    ip: uint;
+}
+
+table IPv6 { // std::array<uint8_t, 16>
+    ip0: ubyte;
+    ip1: ubyte;
+    ip2: ubyte;
+    ip3: ubyte;
+    ip4: ubyte;
+    ip5: ubyte;
+    ip6: ubyte;
+    ip7: ubyte;
+}
+
+union IPAddress {
+    IPv4, IPv6
+}
+
+table NetworkAddress {
+	// A NetworkAddress identifies a particular running server (i.e. a TCP endpoint).
+	// IPAddress ip; // aka: 	std::variant<uint32_t, IPAddressStore> addr;
+    ip: IPAddress;
+    port: ushort;
+    flags: ushort;
+    from_hostname: bool;
+}

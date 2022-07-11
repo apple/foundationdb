@@ -1,0 +1,13 @@
+include "common.fbs";
+// see CoordinationInterface.h and MonitorLeader.actor.cpp
+table GetLeaderRequest {
+    key: [ubyte];
+    known_leader: UID;
+    reply_promise: ReplyPromise;
+}
+
+table FakeRoot {
+    request : GetLeaderRequest;
+}
+
+root_type FakeRoot;

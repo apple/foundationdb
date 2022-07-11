@@ -28,15 +28,16 @@ const PING_RESPONSE_FILE_IDENTIFIER: ParsedFileIdentifier = ParsedFileIdentifier
 };
 
 pub fn serialize_request(peer: SocketAddr) -> Result<FlowMessage> {
+    use crate::common_generated::{ReplyPromise, ReplyPromiseArgs};
     use ping_request::{
-        FakeRoot, FakeRootArgs, PingRequest, PingRequestArgs, ReplyPromise, ReplyPromiseArgs,
+        FakeRoot, FakeRootArgs, PingRequest, PingRequestArgs
     };
 
     let completion = UID::random_token();
     let wltoken = UID::well_known_token(WLTOKEN::PingPacket);
 
     let mut builder = flatbuffers::FlatBufferBuilder::with_capacity(1024);
-    let response_token = ping_request::UID::new(completion.uid[0], completion.uid[1]);
+    let response_token : crate::common_generated::UID = (&completion).into(); //crate::common_generated::UID::new(completion.uid[0], completion.uid[1]);
     let uid = Some(&response_token);
     let reply_promise = Some(ReplyPromise::create(
         &mut builder,
@@ -62,7 +63,8 @@ pub fn serialize_request(peer: SocketAddr) -> Result<FlowMessage> {
 
 fn serialize_response(token: UID) -> Result<Frame> {
     let mut builder = flatbuffers::FlatBufferBuilder::with_capacity(1024);
-    let void = void::Void::create(&mut builder, &void::VoidArgs {});
+    use crate::common_generated::{Void, VoidArgs};
+    let void = Void::create(&mut builder, &VoidArgs {});
     let ensure_table =
         void::EnsureTable::create(&mut builder, &void::EnsureTableArgs { void: Some(void) });
     let fake_root = void::FakeRoot::create(
@@ -99,9 +101,7 @@ async fn handle(request: FlowMessage) -> Result<Option<FlowMessage>> {
     let reply_promise = ping_request.reply_promise().unwrap();
 
     let uid = reply_promise.uid().unwrap();
-    let uid = UID {
-        uid: [uid.first(), uid.second()],
-    };
+    let uid : UID = uid.into();
 
     let frame = serialize_response(uid)?;
     Ok(Some(FlowMessage::new_response(request.flow, frame)?))
