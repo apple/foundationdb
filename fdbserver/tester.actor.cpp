@@ -31,6 +31,7 @@
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
+#include "fdbclient/TenantManagement.actor.h"
 #include "fdbserver/KnobProtectiveGroups.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
@@ -779,7 +780,7 @@ ACTOR Future<Void> clearData(Database cx) {
 			//    it should disable the default tenant.
 			if (!rangeResult.empty()) {
 				if (cx->defaultTenant.present()) {
-					TenantMapEntry entry = wait(ManagementAPI::getTenant(cx.getReference(), cx->defaultTenant.get()));
+					TenantMapEntry entry = wait(TenantAPI::getTenant(cx.getReference(), cx->defaultTenant.get()));
 					tenantPrefix = entry.prefix;
 				}
 
@@ -1629,7 +1630,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 		std::vector<Future<Void>> tenantFutures;
 		for (auto tenant : tenantsToCreate) {
 			TraceEvent("CreatingTenant").detail("Tenant", tenant);
-			tenantFutures.push_back(success(ManagementAPI::createTenant(cx.getReference(), tenant)));
+			tenantFutures.push_back(success(TenantAPI::createTenant(cx.getReference(), tenant)));
 		}
 
 		wait(waitForAll(tenantFutures));
@@ -1651,7 +1652,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 
 		if (perpetualWiggleEnabled) { // restore the enabled perpetual storage wiggle setting
 			printf("Set perpetual_storage_wiggle=1 ...\n");
-			wait(setPerpetualStorageWiggle(cx, true, LockAware::True));
+			Version cVer = wait(setPerpetualStorageWiggle(cx, true, LockAware::True));
 			printf("Set perpetual_storage_wiggle=1 Done.\n");
 		}
 	}

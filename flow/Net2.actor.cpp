@@ -40,6 +40,7 @@
 #include "flow/network.h"
 #include "flow/IThreadPool.h"
 
+#include "flow/IAsyncFile.h"
 #include "flow/ActorCollection.h"
 #include "flow/ThreadSafeQueue.h"
 #include "flow/ThreadHelper.actor.h"
@@ -55,9 +56,6 @@
 #ifdef ADDRESS_SANITIZER
 #include <sanitizer/lsan_interface.h>
 #endif
-
-// See the comment in TLSConfig.actor.h for the explanation of why this module breaking include was done.
-#include "fdbrpc/IAsyncFile.h"
 
 #ifdef WIN32
 #include <mmsystem.h>
@@ -194,13 +192,13 @@ public:
 		if (thread_network == this)
 			stopImmediately();
 		else
-			onMainThreadVoid([this] { this->stopImmediately(); }, nullptr);
+			onMainThreadVoid([this] { this->stopImmediately(); });
 	}
 	void addStopCallback(std::function<void()> fn) override {
 		if (thread_network == this)
 			stopCallbacks.emplace_back(std::move(fn));
 		else
-			onMainThreadVoid([this, fn] { this->stopCallbacks.emplace_back(std::move(fn)); }, nullptr);
+			onMainThreadVoid([this, fn] { this->stopCallbacks.emplace_back(std::move(fn)); });
 	}
 
 	bool isSimulated() const override { return false; }
