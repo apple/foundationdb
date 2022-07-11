@@ -348,9 +348,10 @@ bool runWorkloads(TesterOptions& options) {
 		TransactionExecutorOptions txExecOptions;
 		txExecOptions.blockOnFutures = options.testSpec.blockOnFutures;
 		txExecOptions.numDatabases = options.numDatabases;
-		txExecOptions.numTenants = options.numTenants;
 		txExecOptions.databasePerTransaction = options.testSpec.databasePerTransaction;
 		txExecOptions.transactionRetryLimit = options.transactionRetryLimit;
+		txExecOptions.multiTenant = options.testSpec.multiTenant;
+		txExecOptions.numTenants = options.numTenants;
 
 		std::vector<std::shared_ptr<IWorkload>> workloads;
 		workloads.reserve(options.testSpec.workloads.size() * options.numClients);

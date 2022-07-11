@@ -511,27 +511,21 @@ public:
 	}
 
 protected:
-	fdb::Transaction createNewTransaction(fdb::Database db, int id = -1, fdb::Tenant* tenants = nullptr) {
-		// No tenants specified
-		if (options.numTenants <= 0) {
-			return db.createTransaction();
+	fdb::Transaction createNewTransaction(fdb::Database db, fdb::Tenant* tenant = nullptr) {
+		if (tenant) {
+			return tenant->createTransaction();
 		}
-		// Create Tenant Transaction
-		int tenant_id = (id == -1) ? Random::get().randomInt(0, options.numTenants - 1) : id;
-		// If provided tenants array (only necessary in runWorkload), use it
-		if (tenants) {
-			return tenants[tenant_id].createTransaction();
-		}
-		std::string tenantStr = "tenant" + std::to_string(tenant_id);
-		fdb::BytesRef tenant_name = fdb::toBytesRef(tenantStr);
-		fdb::Tenant t = db.openTenant(tenant_name);
-		return t.createTransaction();
+
+		return db.createTransaction();
 	}
 
 	// Execute the transaction on the given database instance
-	void executeOnDatabase(fdb::Database db, std::shared_ptr<ITransactionActor> txActor, TTaskFct cont) {
+	void executeOnDatabase(fdb::Database db,
+	                       std::shared_ptr<ITransactionActor> txActor,
+	                       TTaskFct cont,
+	                       fdb::Tenant* tenant = nullptr) {
 		try {
-			fdb::Transaction tx = createNewTransaction(db, -1);
+			fdb::Transaction tx = createNewTransaction(db, tenant);
 			std::shared_ptr<ITransactionContext> ctx;
 			if (options.blockOnFutures) {
 				ctx = std::make_shared<BlockingTransactionContext>(
@@ -564,23 +558,50 @@ public:
 
 	~DBPoolTransactionExecutor() override { release(); }
 
+	// TODO: Make it available to DBPerTransactionExecutor as well.
+	void setupTenants(fdb::Database db, int dbid, int numTenants) {
+		std::string tenant_name_prefix = "tenant_" + std::to_string(dbid) + "_";
+
+		auto systemTx = createNewTransaction(db);
+		for (int i = 0; i < numTenants; i++) {
+			fdb::Tenant::createTenant(systemTx, fdb::toBytesRef(tenant_name_prefix + std::to_string(i)));
+		}
+		systemTx.commit();
+
+		std::vector<fdb::Tenant> tenants_;
+		for (int i = 0; i < numTenants; i++) {
+			tenants_.push_back(db.openTenant(fdb::toBytesRef(tenant_name_prefix + std::to_string(i))));
+		}
+		tenants.push_back(tenants_);
+	}
+
 	void init(IScheduler* scheduler, const char* clusterFile, const std::string& bgBasePath) override {
 		TransactionExecutorBase::init(scheduler, clusterFile, bgBasePath);
 		for (int i = 0; i < options.numDatabases; i++) {
 			fdb::Database db(clusterFile);
 			databases.push_back(db);
+
+			if (options.multiTenant) {
+				setupTenants(db, i, options.numTenants);
+			}
 		}
 	}
 
-	void execute(std::shared_ptr<ITransactionActor> txActor, TTaskFct cont) override {
+	void execute(std::shared_ptr<ITransactionActor> txActor, TTaskFct cont, int tenantId = -1) override {
 		int idx = Random::get().randomInt(0, options.numDatabases - 1);
-		executeOnDatabase(databases[idx], txActor, cont);
+		if (options.multiTenant && tenantId >= 0) {
+			// int tidx = Random::get().randomInt(0, options.numTenants - 1);
+			executeOnDatabase(databases[idx], txActor, cont, &tenants[idx][tenantId]);
+		} else {
+			executeOnDatabase(databases[idx], txActor, cont);
+		}
 	}
 
 	void release() { databases.clear(); }
 
 private:
 	std::vector<fdb::Database> databases;
+	std::vector<std::vector<fdb::Tenant>> tenants;
 };
 
 /**
@@ -590,9 +611,9 @@ class DBPerTransactionExecutor : public TransactionExecutorBase {
 public:
 	DBPerTransactionExecutor(const TransactionExecutorOptions& options) : TransactionExecutorBase(options) {}
 
-	void execute(std::shared_ptr<ITransactionActor> txActor, TTaskFct cont) override {
+	void execute(std::shared_ptr<ITransactionActor> txActor, TTaskFct cont, int tenanatId = -1) override {
 		fdb::Database db(clusterFile.c_str());
-		executeOnDatabase(db, txActor, cont);
+		executeOnDatabase(db, txActor, cont, nullptr);
 	}
 };
 

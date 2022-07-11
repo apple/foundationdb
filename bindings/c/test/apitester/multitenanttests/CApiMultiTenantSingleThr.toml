@@ -3,7 +3,9 @@ title = 'Multi-tenant API Correctness Single Threaded'
 minClients = 1
 maxClients = 3
 multiThreaded = false
-multiTenant = false
+multiTenant = true
+minTenants = 2
+maxTenants = 5
 
     [[test.workload]]
     name = 'MultiTenant'
@@ -12,6 +14,6 @@ multiTenant = false
 	minValueLength = 1
 	maxValueLength = 1000
 	maxKeysPerTransaction = 50
-	initialSize = 100
+	initialSize = 0
 	numRandomOperations = 100
 	readExistingKeysRatio = 0.9

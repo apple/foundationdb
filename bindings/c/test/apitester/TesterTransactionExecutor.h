@@ -124,6 +124,9 @@ struct TransactionExecutorOptions {
 	// Create each transaction in a separate database instance
 	bool databasePerTransaction = false;
 
+	// Create tenant-aware transactions
+	bool multiTenant = false;
+
 	// The size of the database instance pool
 	int numDatabases = 1;
 
@@ -142,7 +145,7 @@ class ITransactionExecutor {
 public:
 	virtual ~ITransactionExecutor() {}
 	virtual void init(IScheduler* sched, const char* clusterFile, const std::string& bgBasePath) = 0;
-	virtual void execute(std::shared_ptr<ITransactionActor> tx, TTaskFct cont) = 0;
+	virtual void execute(std::shared_ptr<ITransactionActor> tx, TTaskFct cont, int tenantId = -1) = 0;
 };
 
 // Create a transaction executor for the given options
