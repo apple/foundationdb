@@ -1,11 +1,13 @@
 #include "fdbrpc/FlowTransport.h"
 #include "fdbrpc/TokenCache.h"
 #include "fdbrpc/TokenSign.h"
+#include "flow/MkCert.h"
 #include "flow/UnitTest.h"
 #include "flow/network.h"
 
 #include <boost/unordered_map.hpp>
 
+#include <fmt/format.h>
 #include <list>
 #include <deque>
 
@@ -238,4 +240,63 @@ bool TokenCacheImpl::validate(TenantNameRef name, StringRef token) {
 		return false;
 	}
 	return true;
+}
+
+namespace authz::jwt {
+extern TokenRef makeRandomTokenSpec(Arena&, IRandom&, authz::Algorithm);
+}
+
+TEST_CASE("/fdbrpc/authz/TokenCache") {
+	std::pair<void (*)(Arena&, IRandom&, authz::jwt::TokenRef&), char const*> badMutations[]{
+		{
+		    [](Arena&, IRandom&, authz::jwt::TokenRef& token) { token.expiresAtUnixTime.reset(); },
+		    "NoExpirationTime",
+		},
+		{
+		    [](Arena&, IRandom& rng, authz::jwt::TokenRef& token) {
+		        token.expiresAtUnixTime = uint64_t(g_network->timer() - 10 - rng.random01() * 50);
+		    },
+		    "ExpiredToken",
+		},
+		{
+		    [](Arena&, IRandom&, authz::jwt::TokenRef& token) { token.notBeforeUnixTime.reset(); },
+		    "NoNotBefore",
+		},
+		{
+		    [](Arena&, IRandom& rng, authz::jwt::TokenRef& token) {
+		        token.notBeforeUnixTime = uint64_t(g_network->timer() + 10 + rng.random01() * 50);
+		    },
+		    "TokenNotYetValid",
+		},
+		{
+		    [](Arena& arena, IRandom&, authz::jwt::TokenRef& token) { token.keyId.reset(); },
+		    "UnknownKey",
+		},
+		{
+		    [](Arena& arena, IRandom&, authz::jwt::TokenRef& token) { token.tenants.reset(); },
+		    "NoTenants",
+		},
+	};
+	auto const numBadMutations = sizeof(badMutations) / sizeof(badMutations[0]);
+	for (auto repeat = 0; repeat < 50; repeat++) {
+		auto arena = Arena();
+		auto privateKey = mkcert::makeEcP256();
+		auto& rng = *deterministicRandom();
+		auto validTokenSpec = authz::jwt::makeRandomTokenSpec(arena, rng, authz::Algorithm::ES256);
+		for (auto i = 0; i < numBadMutations; i++) {
+			auto [mutationFn, mutationDesc] = badMutations[i];
+			auto tmpArena = Arena();
+			auto mutatedTokenSpec = validTokenSpec;
+			mutationFn(tmpArena, rng, mutatedTokenSpec);
+			auto signedToken = authz::jwt::signToken(tmpArena, mutatedTokenSpec, privateKey);
+			if (TokenCache::instance().validate(validTokenSpec.tenants.get()[0], signedToken)) {
+				fmt::print("Unexpected successful validation at mutation {}, token spec: {}\n",
+				           mutationDesc,
+				           mutatedTokenSpec.toStringRef(tmpArena).toStringView());
+				ASSERT(false);
+			}
+		}
+	}
+	fmt::print("TEST OK\n");
+	return Void();
 }

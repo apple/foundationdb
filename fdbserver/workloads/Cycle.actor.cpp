@@ -80,7 +80,7 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 			tenants.push_back_deep(this->arena, this->tenant);
 			this->token.tenants = tenants;
 			// we currently don't support this workload to be run outside of simulation
-			this->signedToken = authz::jwt::signToken(this->arena, this->token, k->second.writeDer(this->arena));
+			this->signedToken = authz::jwt::signToken(this->arena, this->token, k->second);
 		}
 	}
 

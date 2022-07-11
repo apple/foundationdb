@@ -97,6 +97,9 @@ struct TokenRef {
 	Optional<VectorRef<StringRef>> tenants; // tenants
 	// signature part
 	StringRef signature;
+
+	// print each non-signature field in non-JSON, human-readable format e.g. for trace
+	StringRef toStringRef(Arena& arena);
 };
 
 // Make plain JSON token string with fields (except signature) from passed spec
@@ -106,7 +109,7 @@ StringRef makeTokenPart(Arena& arena, TokenRef tokenSpec);
 StringRef makePlainSignature(Arena& arena, Algorithm alg, StringRef tokenPart, StringRef privateKeyDer);
 
 // One-stop function to make JWT from spec
-StringRef signToken(Arena& arena, TokenRef tokenSpec, StringRef privateKeyDer);
+StringRef signToken(Arena& arena, TokenRef tokenSpec, PrivateKey privateKey);
 
 // Parse passed b64url-encoded header part and materialize its contents into tokenOut,
 // using memory allocated from arena

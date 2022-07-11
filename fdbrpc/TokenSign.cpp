@@ -30,6 +30,7 @@
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
 #include <fmt/format.h>
+#include <iterator>
 #include <string_view>
 #include <type_traits>
 #include <utility>
@@ -222,6 +223,44 @@ TokenRef makeRandomTokenSpec(Arena& arena, IRandom& rng) {
 
 namespace authz::jwt {
 
+template <class FieldType, size_t NameLen>
+void appendField(fmt::memory_buffer& b, char const (&name)[NameLen], Optional<FieldType> const& field) {
+	if (!field.present())
+		return;
+	auto const& f = field.get();
+	auto bi = std::back_inserter(b);
+	if constexpr (std::is_same_v<FieldType, VectorRef<StringRef>>) {
+		fmt::format_to(bi, " {}=[", name);
+		for (auto i = 0; i < f.size(); i++) {
+			if (i)
+				fmt::format_to(bi, ",");
+			fmt::format_to(bi, f[i].toStringView());
+		}
+		fmt::format_to(bi, "]");
+	} else if constexpr (std::is_same_v<FieldType, StringRef>) {
+		fmt::format_to(bi, " {}={}", name, f.toStringView());
+	} else {
+		fmt::format_to(bi, " {}={}", name, f);
+	}
+}
+
+StringRef TokenRef::toStringRef(Arena& arena) {
+	auto buf = fmt::memory_buffer();
+	fmt::format_to(std::back_inserter(buf), "alg={}", getAlgorithmName(algorithm));
+	appendField(buf, "iss", issuer);
+	appendField(buf, "sub", subject);
+	appendField(buf, "aud", audience);
+	appendField(buf, "iat", issuedAtUnixTime);
+	appendField(buf, "exp", expiresAtUnixTime);
+	appendField(buf, "nbf", notBeforeUnixTime);
+	appendField(buf, "kid", keyId);
+	appendField(buf, "jti", tokenId);
+	appendField(buf, "tenants", tenants);
+	auto str = new (arena) uint8_t[buf.size()];
+	memcpy(str, buf.data(), buf.size());
+	return StringRef(str, buf.size());
+}
+
 template <class FieldType, class Writer>
 void putField(Optional<FieldType> const& field, Writer& wr, const char* fieldName) {
 	if (!field.present())
@@ -300,10 +339,6 @@ StringRef signToken(Arena& arena, TokenRef tokenSpec, PrivateKey privateKey) {
 	cur += base64url::encode(plainSig.begin(), plainSig.size(), cur);
 	ASSERT_EQ(cur - out, totalLen);
 	return StringRef(out, totalLen);
-}
-
-StringRef signToken(Arena& arena, TokenRef tokenSpec, StringRef privateKeyDer) {
-	return signToken(arena, tokenSpec, PrivateKey(DerEncoded{}, privateKeyDer));
 }
 
 bool parseHeaderPart(TokenRef& token, StringRef b64urlHeader) {
@@ -473,7 +508,7 @@ TokenRef makeRandomTokenSpec(Arena& arena, IRandom& rng, Algorithm alg) {
 		aud[i] = genRandomAlphanumStringRef(arena, rng, MaxTenantNameLenPlus1);
 	ret.audience = VectorRef<StringRef>(aud, numAudience);
 	ret.issuedAtUnixTime = timer_int() / 1'000'000'000ul;
-	ret.notBeforeUnixTime = timer_int() / 1'000'000'000ul;
+	ret.notBeforeUnixTime = ret.issuedAtUnixTime.get();
 	ret.expiresAtUnixTime = ret.issuedAtUnixTime.get() + rng.randomInt(360, 1080 + 1);
 	ret.keyId = genRandomAlphanumStringRef(arena, rng, MaxKeyNameLenPlus1);
 	auto numTenants = rng.randomInt(1, 3);
@@ -551,6 +586,33 @@ TEST_CASE("/fdbrpc/TokenSign/JWT") {
 		ASSERT(!verifyExpectFail);
 	}
 	printf("%d runs OK\n", numIters);
+	return Void();
+}
+
+TEST_CASE("/fdbrpc/TokenSign/JWT/ToStringRef") {
+	auto t = authz::jwt::TokenRef();
+	t.algorithm = authz::Algorithm::ES256;
+	t.issuer = "issuer"_sr;
+	t.subject = "subject"_sr;
+	StringRef aud[3]{ "aud1"_sr, "aud2"_sr, "aud3"_sr };
+	t.audience = VectorRef<StringRef>(aud, 3);
+	t.issuedAtUnixTime = 123ul;
+	t.expiresAtUnixTime = 456ul;
+	t.notBeforeUnixTime = 789ul;
+	t.keyId = "keyId"_sr;
+	t.tokenId = "tokenId"_sr;
+	StringRef tenants[2]{ "tenant1"_sr, "tenant2"_sr };
+	t.tenants = VectorRef<StringRef>(tenants, 2);
+	auto arena = Arena();
+	auto tokenStr = t.toStringRef(arena);
+	auto tokenStrExpected =
+	    "alg=ES256 iss=issuer sub=subject aud=[aud1,aud2,aud3] iat=123 exp=456 nbf=789 kid=keyId jti=tokenId tenants=[tenant1,tenant2]"_sr;
+	if (tokenStr != tokenStrExpected) {
+		fmt::print("Expected: {}\nGot     : {}\n", tokenStrExpected.toStringView(), tokenStr.toStringView());
+		ASSERT(false);
+	} else {
+		fmt::print("TEST OK\n");
+	}
 	return Void();
 }
 

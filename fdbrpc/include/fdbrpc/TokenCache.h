@@ -23,7 +23,7 @@
 #include "flow/Arena.h"
 #include "fdbrpc/TenantInfo.h"
 
-class TokenCache {
+class TokenCache : NonCopyable {
 	struct TokenCacheImpl* impl;
 	TokenCache();
 

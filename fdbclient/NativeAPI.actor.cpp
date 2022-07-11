@@ -2927,7 +2927,7 @@ Future<KeyRangeLocationInfo> getKeyLocation(Reference<TransactionState> trState,
                                             UseTenant useTenant,
                                             Version version) {
 	auto f = getKeyLocation(trState->cx,
-	                        useTenant ? trState->getTenantInfo(true) : TenantInfo(),
+	                        useTenant ? trState->getTenantInfo(AllowInvalidTenantID::True) : TenantInfo(),
 	                        key,
 	                        member,
 	                        trState->spanContext,
@@ -3066,7 +3066,7 @@ Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations(Reference<Transac
                                                                UseTenant useTenant,
                                                                Version version) {
 	auto f = getKeyRangeLocations(trState->cx,
-	                              useTenant ? trState->getTenantInfo(true) : TenantInfo(),
+	                              useTenant ? trState->getTenantInfo(AllowInvalidTenantID::True) : TenantInfo(),
 	                              keys,
 	                              limit,
 	                              reverse,
@@ -7482,7 +7482,7 @@ ACTOR Future<TenantMapEntry> blobGranuleGetTenantEntry(Transaction* self, Key ra
 	    self->trState->cx->getCachedLocation(self->getTenant().get(), rangeStartKey, Reverse::False);
 	if (!cachedLocationInfo.present()) {
 		KeyRangeLocationInfo l = wait(getKeyLocation_internal(self->trState->cx,
-		                                                      self->trState->getTenantInfo(true),
+		                                                      self->trState->getTenantInfo(AllowInvalidTenantID::True),
 		                                                      rangeStartKey,
 		                                                      self->trState->spanContext,
 		                                                      self->trState->debugID,
