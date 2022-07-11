@@ -39,15 +39,24 @@
 namespace internal_thread_helper {
 
 ACTOR template <class F>
-void doOnMainThreadVoid(Future<Void> signal, F f, Error* err) {
+void doOnMainThreadVoid(Future<Void> signal, F f) {
 	wait(signal);
-	if (err && err->code() != invalid_error_code)
+	try {
+		f();
+	} catch (Error& e) {
+	}
+}
+
+ACTOR template <class F, class T>
+void doOnMainThreadVoid(Future<Void> signal, F f, T* t, Error T::*member) {
+	wait(signal);
+	if (t && (t->*member).code() != invalid_error_code)
 		return;
 	try {
 		f();
 	} catch (Error& e) {
-		if (err)
-			*err = e;
+		if (t)
+			t->*member = e;
 	}
 }
 
@@ -63,11 +72,21 @@ void doOnMainThreadVoid(Future<Void> signal, F f, Error* err) {
 // WARNING: The error returned in `err` can only be read on the FDB network thread because there is no way to
 // order the write to `err` with actions on other threads.
 //
+// WARNING: The Error member of `T` is accepted as a pointer to a data member so the caller can avoid dereferencing
+// `T` until it is initialized on the main thread.
+//
 // `onMainThreadVoid` is defined here because of the dependency in `ThreadSingleAssignmentVarBase`.
-template <class F>
-void onMainThreadVoid(F f, Error* err = nullptr, TaskPriority taskID = TaskPriority::DefaultOnMainThread) {
+template <class F, class T>
+void onMainThreadVoid(F f, T* t, Error T::*member, TaskPriority taskID = TaskPriority::DefaultOnMainThread) {
 	Promise<Void> signal;
-	internal_thread_helper::doOnMainThreadVoid(signal.getFuture(), f, err);
+	internal_thread_helper::doOnMainThreadVoid(signal.getFuture(), f, t, member);
+	g_network->onMainThread(std::move(signal), taskID);
+}
+
+template <class F>
+void onMainThreadVoid(F f, TaskPriority taskID = TaskPriority::DefaultOnMainThread) {
+	Promise<Void> signal;
+	internal_thread_helper::doOnMainThreadVoid(signal.getFuture(), f);
 	g_network->onMainThread(std::move(signal), taskID);
 }
 
