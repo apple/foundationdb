@@ -51,10 +51,9 @@ public:
 			_map.erase(*i);
 			_list.erase(i);
 		}
+		_list.push_front(std::forward<K>(key));
 		std::tie(iter, std::ignore) =
-		    _map.insert(std::make_pair(std::forward<K>(key), std::make_pair(std::forward<V>(value), _list.begin())));
-		_list.push_back(iter->first);
-		iter->second.second = _list.begin();
+		    _map.insert(std::make_pair(*_list.begin(), std::make_pair(std::forward<V>(value), _list.begin())));
 		return &iter->second.first;
 	}
 
@@ -65,26 +64,29 @@ private:
 };
 
 TEST_CASE("/fdbrpc/authz/LRUCache") {
+	auto& rng = *deterministicRandom();
 	{
 		// test very small LRU cache
-		LRUCache<int, StringRef> cache(2);
+		LRUCache<int, StringRef> cache(rng.randomInt(2, 10));
 		for (int i = 0; i < 200; ++i) {
 			cache.insert(i, "val"_sr);
-			if (i > cache.capacity()) {
-				ASSERT(cache.get(i - cache.capacity() + 1).present());
-				ASSERT(!cache.get(i - cache.capacity()).present());
+			if (i >= cache.capacity()) {
+				for (auto j = 0; j <= i - cache.capacity(); j++)
+					ASSERT(!cache.get(j).present());
+				// ordering is important so as not to disrupt the LRU order
+				for (auto j = i - cache.capacity() + 1; j <= i; j++)
+					ASSERT(cache.get(j).present());
 			}
 		}
 	}
 	{
 		// Test larger cache
 		LRUCache<int, StringRef> cache(1000);
-		int last = 0;
-		for (; last < 1000; ++last) {
-			cache.insert(last, "value"_sr);
+		for (auto i = 0; i < 1000; ++i) {
+			cache.insert(i, "value"_sr);
 		}
-		cache.insert(0, "value"); // should evict 1
-		ASSERT(!cache.get(1).present());
+		cache.insert(1000, "value"_sr); // should evict 0
+		ASSERT(!cache.get(0).present());
 	}
 	{
 		// memory test -- this is what the boost implementation didn't do correctly
@@ -92,7 +94,7 @@ TEST_CASE("/fdbrpc/authz/LRUCache") {
 		std::deque<std::string> cachedStrings;
 		std::deque<std::string> evictedStrings;
 		for (int i = 0; i < 10; ++i) {
-			auto str = deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(100, 1024));
+			auto str = rng.randomAlphaNumeric(rng.randomInt(100, 1024));
 			Standalone<StringRef> sref(str);
 			cache.insert(sref, sref);
 			cachedStrings.push_back(str);
@@ -103,11 +105,10 @@ TEST_CASE("/fdbrpc/authz/LRUCache") {
 			ASSERT(cachedStr.present());
 			ASSERT(*cachedStr.get() == existingStr);
 			if (!evictedStrings.empty()) {
-				Standalone<StringRef> nonexisting(
-				    evictedStrings.at(deterministicRandom()->randomInt(0, evictedStrings.size())));
+				Standalone<StringRef> nonexisting(evictedStrings.at(rng.randomInt(0, evictedStrings.size())));
 				ASSERT(!cache.get(nonexisting).present());
 			}
-			auto str = deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(100, 1024));
+			auto str = rng.randomAlphaNumeric(rng.randomInt(100, 1024));
 			Standalone<StringRef> sref(str);
 			evictedStrings.push_back(cachedStrings.front());
 			cachedStrings.pop_front();
