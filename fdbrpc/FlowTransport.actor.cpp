@@ -342,7 +342,7 @@ public:
 	Future<Void> multiVersionCleanup;
 	Future<Void> pingLogger;
 
-	std::unordered_map<Standalone<StringRef>, Standalone<StringRef>> publicKeys;
+	std::unordered_map<Standalone<StringRef>, PublicKey> publicKeys;
 };
 
 ACTOR Future<Void> pingLatencyLogger(TransportData* self) {
@@ -1560,9 +1560,7 @@ FlowTransport::FlowTransport(uint64_t transportId, int maxWellKnownEndpoints, IP
 	self->multiVersionCleanup = multiVersionCleanupWorker(self);
 	if (g_network->isSimulated()) {
 		for (auto const& p : g_simulator.authKeys) {
-			Standalone<StringRef> pk;
-			pk = p.second.toPublicKey().writeDer(pk.arena());
-			self->publicKeys.emplace(p.first, pk);
+			self->publicKeys.emplace(p.first, p.second.toPublicKey());
 		}
 	}
 }
@@ -1939,12 +1937,12 @@ HealthMonitor* FlowTransport::healthMonitor() {
 	return &self->healthMonitor;
 }
 
-Optional<StringRef> FlowTransport::getPublicKeyByName(StringRef name) const {
+Optional<PublicKey> FlowTransport::getPublicKeyByName(StringRef name) const {
 	auto iter = self->publicKeys.find(name);
 	if (iter != self->publicKeys.end()) {
 		return iter->second;
 	}
-	return Optional<StringRef>{};
+	return {};
 }
 
 NetworkAddress FlowTransport::currentDeliveryPeerAddress() const {
@@ -1955,11 +1953,14 @@ bool FlowTransport::currentDeliveryPeerIsTrusted() const {
 	return g_currentDeliverPeerAddressTrusted;
 }
 
-void FlowTransport::addPublicKey(StringRef name, StringRef key) {
-	Standalone<StringRef>& pk = self->publicKeys[name];
-	pk = StringRef(pk.arena(), key);
+void FlowTransport::addPublicKey(StringRef name, PublicKey key) {
+	self->publicKeys[name] = key;
 }
 
 void FlowTransport::removePublicKey(StringRef name) {
 	self->publicKeys.erase(name);
+}
+
+void FlowTransport::removeAllPublicKeys() {
+	self->publicKeys.clear();
 }

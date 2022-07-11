@@ -132,7 +132,7 @@ StringRef signaturePart(StringRef token);
 bool parseToken(Arena& arena, TokenRef& tokenOut, StringRef signedTokenIn);
 
 // Verify only the signature part of signed token string against its token part, not its content
-bool verifyToken(StringRef signedToken, StringRef publicKeyDer);
+bool verifyToken(StringRef signedToken, PublicKey publicKey);
 
 } // namespace authz::jwt
 

@@ -2,6 +2,7 @@
 #include "fdbrpc/TokenCache.h"
 #include "fdbrpc/TokenSign.h"
 #include "flow/MkCert.h"
+#include "flow/ScopeExit.h"
 #include "flow/UnitTest.h"
 #include "flow/network.h"
 
@@ -200,14 +201,18 @@ bool TokenCacheImpl::validateAndAdd(double currentTime,
 		for (auto tenant : t.tenants.get()) {
 			c.tenants.push_back_deep(c.arena, tenant);
 		}
-		StringRef signature(c.arena, signature);
-		cache.insert(signature, c);
+		StringRef sig(c.arena, signature);
+		cache.insert(sig, c);
 		return true;
 	}
 }
 
 bool TokenCacheImpl::validate(TenantNameRef name, StringRef token) {
 	auto sig = authz::jwt::signaturePart(token);
+	if (sig.empty()) {
+		TEST(true); // Token is ill-formed
+		return false;
+	}
 	auto cachedEntry = cache.get(sig);
 	double currentTime = g_network->timer();
 	NetworkAddress peer = FlowTransport::transport().currentDeliveryPeerAddress();
@@ -225,7 +230,7 @@ bool TokenCacheImpl::validate(TenantNameRef name, StringRef token) {
 	auto& entry = cachedEntry.get();
 	if (entry->expirationTime < currentTime) {
 		TEST(true); // Read expired token from cache
-		TraceEvent(SevWarn, "InvalidToken").detail("From", peer).detail("Reason", "Expired");
+		TraceEvent(SevWarn, "InvalidToken").detail("From", peer).detail("Reason", "ExpiredInCache");
 		return false;
 	}
 	bool tenantFound = false;
@@ -235,7 +240,7 @@ bool TokenCacheImpl::validate(TenantNameRef name, StringRef token) {
 			break;
 		}
 	}
-	if (tenantFound) {
+	if (!tenantFound) {
 		TEST(true); // Valid token doesn't reference tenant
 		TraceEvent(SevWarn, "TenantTokenMismatch").detail("From", peer).detail("Tenant", name.toString());
 		return false;
@@ -247,8 +252,16 @@ namespace authz::jwt {
 extern TokenRef makeRandomTokenSpec(Arena&, IRandom&, authz::Algorithm);
 }
 
-TEST_CASE("/fdbrpc/authz/TokenCache") {
+TEST_CASE("/fdbrpc/authz/TokenCache/BadTokens") {
 	std::pair<void (*)(Arena&, IRandom&, authz::jwt::TokenRef&), char const*> badMutations[]{
+		{
+		    [](Arena&, IRandom&, authz::jwt::TokenRef&) { FlowTransport::transport().removeAllPublicKeys(); },
+		    "NoKeyWithSuchName",
+		},
+		{
+		    [](Arena&, IRandom&, authz::jwt::TokenRef& token) { token.keyId.reset(); },
+		    "NoKeyId",
+		},
 		{
 		    [](Arena&, IRandom&, authz::jwt::TokenRef& token) { token.expiresAtUnixTime.reset(); },
 		    "NoExpirationTime",
@@ -278,13 +291,18 @@ TEST_CASE("/fdbrpc/authz/TokenCache") {
 		    "NoTenants",
 		},
 	};
+	auto const pubKeyName = "somePublicKey"_sr;
+	auto privateKey = mkcert::makeEcP256();
 	auto const numBadMutations = sizeof(badMutations) / sizeof(badMutations[0]);
 	for (auto repeat = 0; repeat < 50; repeat++) {
 		auto arena = Arena();
-		auto privateKey = mkcert::makeEcP256();
 		auto& rng = *deterministicRandom();
 		auto validTokenSpec = authz::jwt::makeRandomTokenSpec(arena, rng, authz::Algorithm::ES256);
+		validTokenSpec.keyId = pubKeyName;
 		for (auto i = 0; i < numBadMutations; i++) {
+			FlowTransport::transport().addPublicKey(pubKeyName, privateKey.toPublicKey());
+			auto publicKeyClearGuard =
+			    ScopeExit([pubKeyName]() { FlowTransport::transport().removePublicKey(pubKeyName); });
 			auto [mutationFn, mutationDesc] = badMutations[i];
 			auto tmpArena = Arena();
 			auto mutatedTokenSpec = validTokenSpec;
@@ -297,6 +315,48 @@ TEST_CASE("/fdbrpc/authz/TokenCache") {
 				ASSERT(false);
 			}
 		}
+	}
+	if (TokenCache::instance().validate("TenantNameDontMatterHere"_sr, StringRef())) {
+		fmt::print("Unexpected successful validation of ill-formed token (no signature part)\n");
+		ASSERT(false);
+	}
+	if (TokenCache::instance().validate("TenantNameDontMatterHere"_sr, "1111.22"_sr)) {
+		fmt::print("Unexpected successful validation of ill-formed token (no signature part)\n");
+		ASSERT(false);
+	}
+	if (TokenCache::instance().validate("TenantNameDontMatterHere2"_sr, "////.////.////"_sr)) {
+		fmt::print("Unexpected successful validation of unparseable token\n");
+		ASSERT(false);
+	}
+	fmt::print("TEST OK\n");
+	return Void();
+}
+
+TEST_CASE("/fdbrpc/authz/TokenCache/GoodTokens") {
+	// Don't repeat because token expiry is at seconds granularity and sleeps are costly in unit tests
+	auto arena = Arena();
+	auto privateKey = mkcert::makeEcP256();
+	auto const pubKeyName = "somePublicKey"_sr;
+	FlowTransport::transport().addPublicKey(pubKeyName, privateKey.toPublicKey());
+	auto publicKeyClearGuard = ScopeExit([pubKeyName]() { FlowTransport::transport().removePublicKey(pubKeyName); });
+	auto& rng = *deterministicRandom();
+	auto tokenSpec = authz::jwt::makeRandomTokenSpec(arena, rng, authz::Algorithm::ES256);
+	tokenSpec.expiresAtUnixTime = static_cast<uint64_t>(g_network->timer() + 2.0);
+	tokenSpec.keyId = pubKeyName;
+	auto signedToken = authz::jwt::signToken(arena, tokenSpec, privateKey);
+	if (!TokenCache::instance().validate(tokenSpec.tenants.get()[0], signedToken)) {
+		fmt::print("Unexpected failed token validation, token spec: {}, now: {}\n",
+		           tokenSpec.toStringRef(arena).toStringView(),
+		           g_network->timer());
+		ASSERT(false);
+	}
+	threadSleep(3.5);
+	if (TokenCache::instance().validate(tokenSpec.tenants.get()[0], signedToken)) {
+		fmt::print(
+		    "Unexpected successful token validation after supposedly expiring in cache, token spec: {}, now: {}\n",
+		    tokenSpec.toStringRef(arena).toStringView(),
+		    g_network->timer());
+		ASSERT(false);
 	}
 	fmt::print("TEST OK\n");
 	return Void();

@@ -292,10 +292,11 @@ public:
 	bool currentDeliveryPeerIsTrusted() const;
 	NetworkAddress currentDeliveryPeerAddress() const;
 
-	Optional<StringRef> getPublicKeyByName(StringRef name) const;
+	Optional<PublicKey> getPublicKeyByName(StringRef name) const;
 	// Adds or replaces a public key
-	void addPublicKey(StringRef name, StringRef key);
+	void addPublicKey(StringRef name, PublicKey key);
 	void removePublicKey(StringRef name);
+	void removeAllPublicKeys();
 
 private:
 	class TransportData* self;

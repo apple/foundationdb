@@ -582,8 +582,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 				                              WLTOKEN_RESERVED_COUNT,
 				                              &allowList);
 				for (const auto& p : g_simulator.authKeys) {
-					Arena tmp;
-					FlowTransport::transport().addPublicKey(p.first, p.second.toPublicKey().writeDer(tmp));
+					FlowTransport::transport().addPublicKey(p.first, p.second.toPublicKey());
 				}
 				Sim2FileSystem::newFileSystem();
 

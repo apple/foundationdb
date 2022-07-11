@@ -489,10 +489,6 @@ bool verifyToken(StringRef signedToken, PublicKey publicKey) {
 	return verifyStringSignature(b64urlTokenPart, sig, publicKey, keyAlgNid, digest);
 }
 
-bool verifyToken(StringRef signedToken, StringRef publicKeyDer) {
-	return verifyToken(signedToken, PublicKey(DerEncoded{}, publicKeyDer));
-}
-
 TokenRef makeRandomTokenSpec(Arena& arena, IRandom& rng, Algorithm alg) {
 	if (alg != Algorithm::ES256) {
 		throw unsupported_operation();
