@@ -78,7 +78,9 @@ public:
 	                               const DatabaseConfiguration& configuration) const override;
 };
 
-// run mock transaction
+// A mock transaction implementation for test usage.
+// Contract: every function involving mock transaction should return immediately to mimic the ACI property of real
+// transaction.
 class DDMockTxnProcessor : public IDDTxnProcessor {};
 
 #endif // FOUNDATIONDB_DDTXNPROCESSOR_H
