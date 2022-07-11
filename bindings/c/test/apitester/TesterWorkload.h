@@ -116,11 +116,14 @@ protected:
 	void schedule(TTaskFct task);
 
 	// Execute a transaction within the workload
-	void execTransaction(std::shared_ptr<ITransactionActor> tx, TTaskFct cont, bool failOnError = true);
+	void execTransaction(std::shared_ptr<ITransactionActor> tx,
+	                     TTaskFct cont,
+	                     int tenantId = -1,
+	                     bool failOnError = true);
 
 	// Execute a transaction within the workload, a convenience method for a tranasaction defined by a lambda function
-	void execTransaction(TTxStartFct start, TTaskFct cont, bool failOnError = true) {
-		execTransaction(std::make_shared<TransactionFct>(start), cont, failOnError);
+	void execTransaction(TTxStartFct start, TTaskFct cont, int tenantId = -1, bool failOnError = true) {
+		execTransaction(std::make_shared<TransactionFct>(start), cont, tenantId, failOnError);
 	}
 
 	// Log an error message, increase error counter

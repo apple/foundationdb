@@ -630,7 +630,7 @@ public:
 
 	const TransactionExecutorOptions& getOptions() override { return options; }
 
-	void execute(std::shared_ptr<ITransactionActor> txActor, TTaskFct cont) override {
+	void execute(std::shared_ptr<ITransactionActor> txActor, TTaskFct cont, int tenantId) override {
 		try {
 			std::shared_ptr<ITransactionContext> ctx;
 			if (options.blockOnFutures) {
@@ -683,11 +683,32 @@ public:
 
 	~DBPoolTransactionExecutor() override { release(); }
 
+	// TODO: Make it available to DBPerTransactionExecutor as well.
+	void setupTenants(fdb::Database db, int dbid, int numTenants) {
+		std::string tenant_name_prefix = "tenant_" + std::to_string(dbid) + "_";
+
+		auto systemTx = createNewTransaction(db);
+		for (int i = 0; i < numTenants; i++) {
+			fdb::Tenant::createTenant(systemTx, fdb::toBytesRef(tenant_name_prefix + std::to_string(i)));
+		}
+		systemTx.commit();
+
+		std::vector<fdb::Tenant> tenants_;
+		for (int i = 0; i < numTenants; i++) {
+			tenants_.push_back(db.openTenant(fdb::toBytesRef(tenant_name_prefix + std::to_string(i))));
+		}
+		tenants.push_back(tenants_);
+	}
+
 	void init(IScheduler* scheduler, const char* clusterFile, const std::string& bgBasePath) override {
 		TransactionExecutorBase::init(scheduler, clusterFile, bgBasePath);
 		for (int i = 0; i < options.numDatabases; i++) {
 			fdb::Database db(this->clusterFile);
 			databases.push_back(db);
+
+			if (options.multiTenant) {
+				setupTenants(db, i, options.numTenants);
+			}
 		}
 	}
 
@@ -700,6 +721,7 @@ private:
 	void release() { databases.clear(); }
 
 	std::vector<fdb::Database> databases;
+	std::vector<std::vector<fdb::Tenant>> tenants;
 };
 
 /**

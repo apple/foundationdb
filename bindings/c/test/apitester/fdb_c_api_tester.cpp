@@ -360,13 +360,14 @@ bool runWorkloads(TesterOptions& options) {
 		TransactionExecutorOptions txExecOptions;
 		txExecOptions.blockOnFutures = options.testSpec.blockOnFutures;
 		txExecOptions.numDatabases = options.numDatabases;
-		txExecOptions.numTenants = options.numTenants;
 		txExecOptions.databasePerTransaction = options.testSpec.databasePerTransaction;
 		// 7.1 and older releases crash on database create errors
 		txExecOptions.injectDatabaseCreateErrors = options.testSpec.buggify && options.apiVersion > 710;
 		txExecOptions.transactionRetryLimit = options.transactionRetryLimit;
 		txExecOptions.tmpDir = options.tmpDir.empty() ? std::string("/tmp") : options.tmpDir;
 		txExecOptions.tamperClusterFile = options.testSpec.tamperClusterFile;
+		txExecOptions.multiTenant = options.testSpec.multiTenant;
+		txExecOptions.numTenants = options.numTenants;
 
 		std::vector<std::shared_ptr<IWorkload>> workloads;
 		workloads.reserve(options.testSpec.workloads.size() * options.numClients);
