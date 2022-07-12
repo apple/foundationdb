@@ -212,7 +212,7 @@ class GlobalTagThrottlerImpl {
 		if (transactionRate == 0.0) {
 			return {};
 		} else {
-			return cost / transactionRate;
+			return std::max(1.0, cost / transactionRate);
 		}
 	}
 
@@ -319,20 +319,11 @@ class GlobalTagThrottlerImpl {
 
 	Optional<double> getDesiredTps(TransactionTag tag, OpType opType) const {
 		auto const averageTransactionCost = getAverageTransactionCost(tag, opType);
-		if (!averageTransactionCost.present() || averageTransactionCost.get() == 0) {
+		auto const quota = getQuota(tag, opType, LimitType::TOTAL);
+		if (!averageTransactionCost.present() || !quota.present()) {
 			return {};
 		}
-
-		auto const stats = get(tagStatistics, tag);
-		if (!stats.present()) {
-			return {};
-		}
-		auto const quota = stats.get().getQuota();
-		if (!quota.present()) {
-			return {};
-		}
-		auto const desiredCost = (opType == OpType::READ) ? quota.get().totalReadQuota : quota.get().totalWriteQuota;
-		return desiredCost / averageTransactionCost.get();
+		return quota.get() / averageTransactionCost.get();
 	}
 
 	Optional<double> getDesiredTps(TransactionTag tag) const {
@@ -706,7 +697,7 @@ TEST_CASE("/GlobalTagThrottler/Simple") {
 	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10, 100);
 	ThrottleApi::TagQuotaValue tagQuotaValue;
 	TransactionTag testTag = "sampleTag1"_sr;
-	tagQuotaValue.totalReadQuota = 100.0;
+	tagQuotaValue.totalReadQuota = tagQuotaValue.totalWriteQuota = 100.0;
 	globalTagThrottler.setQuota(testTag, tagQuotaValue);
 	state Future<Void> client =
 	    GlobalTagThrottlerTesting::runClient(&globalTagThrottler, &storageServers, testTag, 5.0, 6.0, false);
@@ -723,7 +714,7 @@ TEST_CASE("/GlobalTagThrottler/WriteThrottling") {
 	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10, 100);
 	ThrottleApi::TagQuotaValue tagQuotaValue;
 	TransactionTag testTag = "sampleTag1"_sr;
-	tagQuotaValue.totalWriteQuota = 100.0;
+	tagQuotaValue.totalReadQuota = tagQuotaValue.totalWriteQuota = 100.0;
 	globalTagThrottler.setQuota(testTag, tagQuotaValue);
 	state Future<Void> client =
 	    GlobalTagThrottlerTesting::runClient(&globalTagThrottler, &storageServers, testTag, 5.0, 6.0, true);
@@ -741,7 +732,7 @@ TEST_CASE("/GlobalTagThrottler/MultiTagThrottling") {
 	ThrottleApi::TagQuotaValue tagQuotaValue;
 	TransactionTag testTag1 = "sampleTag1"_sr;
 	TransactionTag testTag2 = "sampleTag2"_sr;
-	tagQuotaValue.totalReadQuota = 100.0;
+	tagQuotaValue.totalReadQuota = tagQuotaValue.totalWriteQuota = 100.0;
 	globalTagThrottler.setQuota(testTag1, tagQuotaValue);
 	globalTagThrottler.setQuota(testTag2, tagQuotaValue);
 	state std::vector<Future<Void>> futures;
@@ -762,7 +753,7 @@ TEST_CASE("/GlobalTagThrottler/AttemptWorkloadAboveQuota") {
 	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10, 100);
 	ThrottleApi::TagQuotaValue tagQuotaValue;
 	TransactionTag testTag = "sampleTag1"_sr;
-	tagQuotaValue.totalReadQuota = 100.0;
+	tagQuotaValue.totalReadQuota = tagQuotaValue.totalWriteQuota = 100.0;
 	globalTagThrottler.setQuota(testTag, tagQuotaValue);
 	state Future<Void> client =
 	    GlobalTagThrottlerTesting::runClient(&globalTagThrottler, &storageServers, testTag, 20.0, 10.0, false);
@@ -778,7 +769,7 @@ TEST_CASE("/GlobalTagThrottler/MultiClientThrottling") {
 	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10, 100);
 	ThrottleApi::TagQuotaValue tagQuotaValue;
 	TransactionTag testTag = "sampleTag1"_sr;
-	tagQuotaValue.totalReadQuota = 100.0;
+	tagQuotaValue.totalReadQuota = tagQuotaValue.totalWriteQuota = 100.0;
 	globalTagThrottler.setQuota(testTag, tagQuotaValue);
 	state Future<Void> client =
 	    GlobalTagThrottlerTesting::runClient(&globalTagThrottler, &storageServers, testTag, 5.0, 6.0, false);
@@ -797,7 +788,7 @@ TEST_CASE("/GlobalTagThrottler/MultiClientActiveThrottling") {
 	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10, 100);
 	ThrottleApi::TagQuotaValue tagQuotaValue;
 	TransactionTag testTag = "sampleTag1"_sr;
-	tagQuotaValue.totalReadQuota = 100.0;
+	tagQuotaValue.totalReadQuota = tagQuotaValue.totalWriteQuota = 100.0;
 	globalTagThrottler.setQuota(testTag, tagQuotaValue);
 	state Future<Void> client =
 	    GlobalTagThrottlerTesting::runClient(&globalTagThrottler, &storageServers, testTag, 20.0, 10.0, false);
@@ -816,7 +807,7 @@ TEST_CASE("/GlobalTagThrottler/SkewedMultiClientActiveThrottling") {
 	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10, 100);
 	ThrottleApi::TagQuotaValue tagQuotaValue;
 	TransactionTag testTag = "sampleTag1"_sr;
-	tagQuotaValue.totalReadQuota = 100.0;
+	tagQuotaValue.totalReadQuota = tagQuotaValue.totalWriteQuota = 100.0;
 	globalTagThrottler.setQuota(testTag, tagQuotaValue);
 	state Future<Void> client =
 	    GlobalTagThrottlerTesting::runClient(&globalTagThrottler, &storageServers, testTag, 5.0, 5.0, false);
@@ -835,7 +826,7 @@ TEST_CASE("/GlobalTagThrottler/UpdateQuota") {
 	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10, 100);
 	state ThrottleApi::TagQuotaValue tagQuotaValue;
 	state TransactionTag testTag = "sampleTag1"_sr;
-	tagQuotaValue.totalReadQuota = 100.0;
+	tagQuotaValue.totalReadQuota = tagQuotaValue.totalWriteQuota = 100.0;
 	globalTagThrottler.setQuota(testTag, tagQuotaValue);
 	state Future<Void> client =
 	    GlobalTagThrottlerTesting::runClient(&globalTagThrottler, &storageServers, testTag, 5.0, 6.0, false);
@@ -856,7 +847,7 @@ TEST_CASE("/GlobalTagThrottler/RemoveQuota") {
 	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10, 100);
 	state ThrottleApi::TagQuotaValue tagQuotaValue;
 	state TransactionTag testTag = "sampleTag1"_sr;
-	tagQuotaValue.totalReadQuota = 100.0;
+	tagQuotaValue.totalReadQuota = tagQuotaValue.totalWriteQuota = 100.0;
 	globalTagThrottler.setQuota(testTag, tagQuotaValue);
 	state Future<Void> client =
 	    GlobalTagThrottlerTesting::runClient(&globalTagThrottler, &storageServers, testTag, 5.0, 6.0, false);
@@ -876,7 +867,7 @@ TEST_CASE("/GlobalTagThrottler/ActiveThrottling") {
 	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10, 5);
 	state ThrottleApi::TagQuotaValue tagQuotaValue;
 	state TransactionTag testTag = "sampleTag1"_sr;
-	tagQuotaValue.totalReadQuota = 100.0;
+	tagQuotaValue.totalReadQuota = tagQuotaValue.totalWriteQuota = 100.0;
 	globalTagThrottler.setQuota(testTag, tagQuotaValue);
 	state Future<Void> client =
 	    GlobalTagThrottlerTesting::runClient(&globalTagThrottler, &storageServers, testTag, 10.0, 6.0, false);
@@ -894,8 +885,8 @@ TEST_CASE("/GlobalTagThrottler/MultiTagActiveThrottling") {
 	state ThrottleApi::TagQuotaValue tagQuotaValue2;
 	state TransactionTag testTag1 = "sampleTag1"_sr;
 	state TransactionTag testTag2 = "sampleTag2"_sr;
-	tagQuotaValue1.totalReadQuota = 50.0;
-	tagQuotaValue2.totalReadQuota = 100.0;
+	tagQuotaValue1.totalReadQuota = tagQuotaValue1.totalWriteQuota = 50.0;
+	tagQuotaValue2.totalReadQuota = tagQuotaValue2.totalWriteQuota = 100.0;
 	globalTagThrottler.setQuota(testTag1, tagQuotaValue1);
 	globalTagThrottler.setQuota(testTag2, tagQuotaValue2);
 	std::vector<Future<Void>> futures;
@@ -917,7 +908,7 @@ TEST_CASE("/GlobalTagThrottler/ReservedReadQuota") {
 	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10, 5);
 	state ThrottleApi::TagQuotaValue tagQuotaValue;
 	state TransactionTag testTag = "sampleTag1"_sr;
-	tagQuotaValue.totalReadQuota = 100.0;
+	tagQuotaValue.totalReadQuota = tagQuotaValue.totalWriteQuota = 100.0;
 	tagQuotaValue.reservedReadQuota = 70.0;
 	globalTagThrottler.setQuota(testTag, tagQuotaValue);
 	state Future<Void> client =
@@ -934,7 +925,7 @@ TEST_CASE("/GlobalTagThrottler/ReservedWriteQuota") {
 	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10, 5);
 	state ThrottleApi::TagQuotaValue tagQuotaValue;
 	state TransactionTag testTag = "sampleTag1"_sr;
-	tagQuotaValue.totalWriteQuota = 100.0;
+	tagQuotaValue.totalReadQuota = tagQuotaValue.totalWriteQuota = 100.0;
 	tagQuotaValue.reservedWriteQuota = 70.0;
 	globalTagThrottler.setQuota(testTag, tagQuotaValue);
 	state Future<Void> client =
