@@ -169,7 +169,8 @@ struct MutationRef {
 	}
 
 	MutationRef decrypt(const std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>& cipherKeys,
-	                    Arena& arena, StringRef* buf = nullptr) const {
+	                    Arena& arena,
+	                    StringRef* buf = nullptr) const {
 		const BlobCipherEncryptHeader* header = encryptionHeader();
 		auto textCipherItr = cipherKeys.find(header->cipherTextDetails);
 		auto headerCipherItr = cipherKeys.find(header->cipherHeaderDetails);

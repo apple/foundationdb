@@ -1916,7 +1916,7 @@ ACTOR Future<Void> pullAsyncData(StorageCacheData* data) {
 								const BlobCipherEncryptHeader* header = msg.encryptionHeader();
 								cipherDetails.insert(header->cipherTextDetails);
 								cipherDetails.insert(header->cipherHeaderDetails);
-								collectingCipherKeys = true;								
+								collectingCipherKeys = true;
 							} else {
 								msg = msg.decrypt(cipherKeys.get(), cloneReader.arena());
 							}

@@ -8008,7 +8008,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 							const BlobCipherEncryptHeader* header = msg.encryptionHeader();
 							cipherDetails.insert(header->cipherTextDetails);
 							cipherDetails.insert(header->cipherHeaderDetails);
-							collectingCipherKeys = true;							
+							collectingCipherKeys = true;
 						} else {
 							msg = msg.decrypt(cipherKeys.get(), eager.arena);
 						}
