@@ -159,7 +159,7 @@ ACTOR Future<Void> GlobalConfig::refresh(GlobalConfig* self, Version lastKnown) 
 	// TraceEvent trace(SevInfo, "GlobalConfigRefresh");
 	self->erase(KeyRangeRef(""_sr, "\xff"_sr));
 
-	state Backoff backoff;
+	state Backoff backoff(CLIENT_KNOBS->GLOBAL_CONFIG_REFRESH_BACKOFF, CLIENT_KNOBS->GLOBAL_CONFIG_REFRESH_MAX_BACKOFF);
 	loop {
 		try {
 			GlobalConfigRefreshReply reply =

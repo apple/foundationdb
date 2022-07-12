@@ -364,8 +364,10 @@ ACTOR Future<Void> globalConfigRefresh(GrvProxyData* grvProxyData, Version* cach
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			state Optional<Value> globalConfigVersion = wait(tr->get(globalConfigVersionKey));
-			RangeResult tmpCachedData = wait(tr->getRange(globalConfigDataKeys, CLIENT_KNOBS->TOO_MANY));
+			state Future<Optional<Value>> globalConfigVersionFuture = tr->get(globalConfigVersionKey);
+			state Future<RangeResult> tmpCachedDataFuture = tr->getRange(globalConfigDataKeys, CLIENT_KNOBS->TOO_MANY);
+			state Optional<Value> globalConfigVersion = wait(globalConfigVersionFuture);
+			RangeResult tmpCachedData = wait(tmpCachedDataFuture);
 			*cachedData = tmpCachedData;
 			if (globalConfigVersion.present()) {
 				Version parsedVersion;
@@ -389,6 +391,13 @@ ACTOR Future<Void> globalConfigRequestServer(GrvProxyData* grvProxyData, GrvProx
 	state RangeResult cachedData;
 	state Future<Void> refreshTimeout = delay(SERVER_KNOBS->GLOBAL_CONFIG_REFRESH_INTERVAL);
 
+	// Attempt to refresh the configuration database while the migration is
+	// ongoing. This is a small optimization to avoid waiting for the migration
+	// actor to complete.
+	refreshFuture = timeout(globalConfigRefresh(grvProxyData, &cachedVersion, &cachedData),
+	                        SERVER_KNOBS->GLOBAL_CONFIG_REFRESH_TIMEOUT,
+	                        Void());
+
 	// Run one-time migration to support upgrades.
 	wait(success(timeout(globalConfigMigrate(grvProxyData), SERVER_KNOBS->GLOBAL_CONFIG_MIGRATE_TIMEOUT)));
 
@@ -402,11 +411,13 @@ ACTOR Future<Void> globalConfigRequestServer(GrvProxyData* grvProxyData, GrvProx
 				if (refresh.lastKnown <= cachedVersion) {
 					refresh.reply.send(GlobalConfigRefreshReply{ cachedData.arena(), cachedData });
 				} else {
-					refresh.reply.sendError(timed_out());
+					refresh.reply.sendError(future_version());
 				}
 			}
-			when(wait(refreshTimeout)) {
-				refreshFuture = globalConfigRefresh(grvProxyData, &cachedVersion, &cachedData);
+			when(wait(waitForAll<Void>({ refreshFuture, refreshTimeout }))) {
+				refreshFuture = timeout(globalConfigRefresh(grvProxyData, &cachedVersion, &cachedData),
+				                        SERVER_KNOBS->GLOBAL_CONFIG_REFRESH_TIMEOUT,
+				                        Void());
 				refreshTimeout = delay(SERVER_KNOBS->GLOBAL_CONFIG_REFRESH_INTERVAL);
 			}
 			when(wait(actors.getResult())) { ASSERT(false); }
