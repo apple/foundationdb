@@ -20,9 +20,13 @@
 
 #include <limits>
 #include <numeric>
+#include <set>
 #include <vector>
 
+#include "fdbclient/StorageServerInterface.h"
+#include "fdbserver/LogSystem.h"
 #include "flow/ActorCollection.h"
+#include "flow/Error.h"
 #include "flow/FastRef.h"
 #include "flow/Trace.h"
 #include "flow/Util.h"
@@ -517,6 +521,31 @@ ACTOR Future<Void> dataDistributionRelocator(struct DDQueue* self,
                                              Future<Void> prevCleanup,
                                              const DDEnabledState* ddEnabledState);
 
+ACTOR Future<Void> getSrcTeam(DDQueue* self,
+                              RelocateData* rd,
+                              double inflightPenalty,
+                              int tciIndex,
+                              std::vector<std::pair<Reference<IDataDistributionTeam>, bool>>* srcTeams);
+
+void addSrcTeamsToDestTeams(const std::vector<std::pair<Reference<IDataDistributionTeam>, bool>>& srcTeams,
+                            std::vector<ShardsAffectedByTeamFailure::Team>& destinationTeams,
+                            std::vector<UID>& healthyIds,
+                            std::vector<UID>& destIds);
+
+ACTOR Future<bool> rebalanceByReduceShard(DDQueue* self,
+                                          Optional<Reference<IDataDistributionTeam>> _randomTeam,
+                                          DataMovementReason moveReason,
+                                          bool primary);
+
+RelocateReason selectRelocateReason(DDQueue* self,
+                                    TraceEvent* traceEvent,
+                                    DataMovementReason moveReason,
+                                    double minReadLoad,
+                                    double maxReadLoad,
+                                    int64_t shardReadLoad,
+                                    double srcLoad,
+                                    KeyRange& shard);
+
 struct DDQueue : public IDDRelocationQueue {
 	struct DDDataMove {
 		DDDataMove() = default;
@@ -839,9 +868,9 @@ struct DDQueue : public IDDRelocationQueue {
 					// the key range in the inFlight map matches the key range in the RelocateData message
 					if (it->value().keys != it->range())
 						TraceEvent(SevError, "DDQueueValidateError12")
-						    .detail(
-						        "Problem",
-						        "the key range in the inFlight map matches the key range in the RelocateData message");
+						    .detail("Problem",
+						            "the key range in the inFlight map matches the key range in the RelocateData "
+						            "message");
 				} else if (it->value().cancellable) {
 					TraceEvent(SevError, "DDQueueValidateError13")
 					    .detail("Problem", "key range is cancellable but not in flight!")
@@ -1379,6 +1408,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 	state std::vector<std::pair<Reference<IDataDistributionTeam>, bool>> bestTeams;
 	state double startTime = now();
 	state std::vector<UID> destIds;
+	state std::vector<std::pair<Reference<IDataDistributionTeam>, bool>> srcTeams;
 
 	try {
 		if (now() - self->lastInterval < 1.0) {
@@ -1463,7 +1493,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						anyHealthy = true;
 						bestTeams.emplace_back(bestTeam.first.get(), bestTeam.second);
 					} else {
-						double inflightPenalty = SERVER_KNOBS->INFLIGHT_PENALTY_HEALTHY;
+						state double inflightPenalty = SERVER_KNOBS->INFLIGHT_PENALTY_HEALTHY;
 						if (rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY ||
 						    rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_2_LEFT)
 							inflightPenalty = SERVER_KNOBS->INFLIGHT_PENALTY_UNHEALTHY;
@@ -1476,7 +1506,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						                          WantTrueBest(isValleyFillerPriority(rd.priority)),
 						                          PreferLowerDiskUtil::True,
 						                          TeamMustHaveShards::False,
-						                          ForReadBalance(rd.reason == RelocateReason::REBALANCE_READ),
+						                          ForReadBalance(rd.reason.isReadRebalance()),
 						                          PreferLowerReadUtil::True,
 						                          inflightPenalty);
 
@@ -1515,6 +1545,10 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						}
 
 						bestTeams.emplace_back(bestTeam.first.get(), bestTeam.second);
+
+						if (rd.reason == RelocateReason::MULTIPLY_SHARD) {
+							wait(getSrcTeam(self, &rd, inflightPenalty, tciIndex, &srcTeams));
+						}
 					}
 					tciIndex++;
 				}
@@ -1611,6 +1645,26 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 				    .detail("DestTeamSize", totalIds);
 			}
 
+
+            if (rd.reason == RelocateReason::MULTIPLY_SHARD) {
+                addSrcTeamsToDestTeams(srcTeams, destinationTeams, healthyIds, destIds);
+                TraceEvent("RelocateByMultplyShard")
+                    .detail("Source", rd.src)
+                    .detail("CompleteSrc", rd.completeSources)
+                    .detail("BestTeam", destServersString(bestTeams))
+                    .detail("SrcTeam", destServersString(srcTeams))
+                    .detail("DestinationTeam", destinationTeams)
+                    .detail("HealthIds", healthyIds)
+                    .detail("DestIds", destIds);
+            } else if (rd.reason == RelocateReason::REDUCE_SHARD) {
+                // Looks like don't have to do anything in particular?
+                TraceEvent("RelocateByReduceShard")
+                    .detail("Source", rd.src)
+                    .detail("CompleteSrc", rd.completeSources)
+                    .detail("Server", destServersString(bestTeams))
+                    .detail("DestIds", destIds);
+            }
+            
 			if (!rd.isRestore()) {
 				self->shardsAffectedByTeamFailure->moveShard(rd.keys, destinationTeams);
 			}
@@ -1825,6 +1879,85 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 	}
 }
 
+// TODO@ZZX: check healthyTeams
+ACTOR Future<Void> getSrcTeam(DDQueue* self,
+                              RelocateData* rd,
+                              double inflightPenalty,
+                              int tciIndex,
+                              std::vector<std::pair<Reference<IDataDistributionTeam>, bool>>* srcTeams) {
+	state bool bestTeamReady;
+
+	auto req = GetTeamRequest(WantNewServers::False,
+	                          WantTrueBest::False,
+	                          PreferLowerDiskUtil::True,
+	                          TeamMustHaveShards::False,
+	                          ForReadBalance(rd->reason.isReadRebalance()),
+	                          PreferLowerReadUtil::True,
+	                          inflightPenalty);
+
+	req.src = rd->src;
+	req.completeSources = rd->completeSources;
+
+	// bestTeam.second = false if the bestTeam in the teamCollection (in the DC)
+	// does not have any server that hosts the relocateData. This is possible, for
+	// example, in a fearless configuration when the remote DC is just brought up.
+	Future<std::pair<Optional<Reference<IDataDistributionTeam>>, bool>> fbestTeam =
+	    brokenPromiseToNever(self->teamCollections[tciIndex].getTeam.getReply(req));
+	bestTeamReady = fbestTeam.isReady();
+	std::pair<Optional<Reference<IDataDistributionTeam>>, bool> bestTeam = wait(fbestTeam);
+	if (tciIndex > 0 && !bestTeamReady) {
+		// self->shardsAffectedByTeamFailure->moveShard must be called without any
+		// waits after getting the destination team or we could miss failure
+		// notifications for the storage servers in the destination team
+		TraceEvent("BestTeamNotReady");
+	} else if (!bestTeam.first.present()) {
+		// If a DC has no healthy team, we stop checking the other DCs until
+		// the unhealthy DC is healthy again or is excluded.
+		TraceEvent("NoHealthyTeam");
+	} else {
+		srcTeams->emplace_back(bestTeam.first.get(), bestTeam.second);
+	}
+	return Void();
+}
+
+void addSrcTeamsToDestTeams(const std::vector<std::pair<Reference<IDataDistributionTeam>, bool>>& srcTeams,
+                            std::vector<ShardsAffectedByTeamFailure::Team>& destinationTeams,
+                            std::vector<UID>& healthyIds,
+                            std::vector<UID>& destIds) {
+	// Sometimes srcTeam may intersect with destTeams, we need to use SET to eliminate repeated members.
+	std::set<UID> uniqueHealthyIds(healthyIds.begin(), healthyIds.end());
+	std::set<UID> uniqueDestIds(destIds.begin(), destIds.end());
+
+	std::set<std::vector<UID>> uniqueDestTeams;
+
+	for (auto& it : destinationTeams) {
+		uniqueDestTeams.insert(it.servers);
+	}
+
+	for (int i = 0; i < srcTeams.size(); i++) {
+		Reference<IDataDistributionTeam> team = srcTeams[i].first;
+		const std::vector<UID>& serverIds = team->getServerIDs();
+
+		if (!uniqueDestTeams.count(serverIds)) {
+			destinationTeams.push_back(ShardsAffectedByTeamFailure::Team(serverIds, i == 0));
+			uniqueDestTeams.insert(serverIds);
+		}
+
+		for (int i = 0; i < serverIds.size(); i++) {
+			UID serverId = serverIds[i];
+			if (!uniqueDestIds.count(serverId)) {
+				destIds.push_back(serverId);
+				uniqueDestIds.insert(serverId);
+			}
+
+			if (team->isHealthy() && !uniqueHealthyIds.count(serverId)) {
+				healthyIds.push_back(serverId);
+				uniqueHealthyIds.insert(serverId);
+			}
+		}
+	}
+}
+
 inline double getWorstCpu(const HealthMetrics& metrics, const std::vector<UID>& ids) {
 	double cpu = 0;
 	for (auto& id : ids) {
@@ -1845,6 +1978,7 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueue* self,
                                      DataMovementReason moveReason,
                                      Reference<IDataDistributionTeam> sourceTeam,
                                      Reference<IDataDistributionTeam> destTeam,
+                                     Optional<Reference<IDataDistributionTeam>> randomTeam,
                                      bool primary,
                                      TraceEvent* traceEvent) {
 	if (g_network->isSimulated() && g_simulator.speedUpSimulation) {
@@ -1852,13 +1986,16 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueue* self,
 		return false;
 	}
 
+	state Future<bool> reduceShards = rebalanceByReduceShard(self, randomTeam, moveReason, primary);
+    wait(ready(reduceShards));
+	
 	state std::vector<KeyRange> shards = self->shardsAffectedByTeamFailure->getShardsFor(
 	    ShardsAffectedByTeamFailure::Team(sourceTeam->getServerIDs(), primary));
 	traceEvent->detail("ShardsInSource", shards.size());
 	// For read rebalance if there is just 1 hot shard remained, move this shard to another server won't solve the
 	// problem.
-	// TODO: This situation should be solved by split and merge
-	if (shards.size() <= 1) {
+	// UPDATE: This problem can be solved by dynamic replication & split,merge
+	if (shards.size() < 1) {
 		traceEvent->detail("SkipReason", "NoShardOnSource");
 		return false;
 	}
@@ -1872,7 +2009,8 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueue* self,
 		return false;
 	}
 	// check team difference
-	auto srcLoad = sourceTeam->getLoadReadBandwidth(false), destLoad = destTeam->getLoadReadBandwidth();
+	state double srcLoad = sourceTeam->getLoadReadBandwidth(false);
+	state double destLoad = destTeam->getLoadReadBandwidth();
 	traceEvent->detail("SrcReadBandwidth", srcLoad).detail("DestReadBandwidth", destLoad);
 
 	// read bandwidth difference is less than 30% of src load
@@ -1880,11 +2018,14 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueue* self,
 		traceEvent->detail("SkipReason", "TeamTooSimilar");
 		return false;
 	}
+
 	// randomly choose topK shards
-	int topK = std::min(int(0.1 * shards.size()), SERVER_KNOBS->READ_REBALANCE_SHARD_TOPK);
+    int topK = std::min(int(0.1 * shards.size()), SERVER_KNOBS->READ_REBALANCE_SHARD_TOPK);
 	state Future<HealthMetrics> healthMetrics = self->cx->getHealthMetrics(true);
 	state GetTopKMetricsRequest req(
-	    shards, topK, (srcLoad - destLoad) * SERVER_KNOBS->READ_REBALANCE_MAX_SHARD_FRAC, srcLoad / shards.size());
+        // TODO@ZZX: revert
+	    // shards, topK, (srcLoad - destLoad) * SERVER_KNOBS->READ_REBALANCE_MAX_SHARD_FRAC, srcLoad / shards.size());
+        shards, topK, srcLoad - destLoad, 0);
 	state GetTopKMetricsReply reply = wait(brokenPromiseToNever(self->getTopKMetrics.getReply(req)));
 	wait(ready(healthMetrics));
 	auto cpu = getWorstCpu(healthMetrics.get(), sourceTeam->getServerIDs());
@@ -1896,34 +2037,174 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueue* self,
 	auto& metricsList = reply.shardMetrics;
 	// NOTE: randomize is important here since we don't want to always push the same shard into the queue
 	deterministicRandom()->randomShuffle(metricsList);
-	traceEvent->detail("MinReadLoad", reply.minReadLoad).detail("MaxReadLoad", reply.maxReadLoad);
+	traceEvent->detail("MinReadLoad", reply.minReadLoad)
+	    .detail("MaxReadLoad", reply.maxReadLoad)
+	    .detail("MetricListSize", metricsList.size());
 
 	if (metricsList.empty()) {
 		traceEvent->detail("SkipReason", "NoEligibleShards");
 		return false;
 	}
-
 	auto& [shard, metrics] = metricsList[0];
 	traceEvent->detail("ShardReadBandwidth", metrics.bytesReadPerKSecond);
 	//  Verify the shard is still in ShardsAffectedByTeamFailure
 	shards = self->shardsAffectedByTeamFailure->getShardsFor(
 	    ShardsAffectedByTeamFailure::Team(sourceTeam->getServerIDs(), primary));
-	for (int i = 0; i < shards.size(); i++) {
-		if (shard == shards[i]) {
-			UID traceId = deterministicRandom()->randomUniqueID();
-			self->output.send(RelocateShard(shard, moveReason, RelocateReason::REBALANCE_READ, traceId));
-			traceEvent->detail("TraceId", traceId);
 
-			auto serverIds = sourceTeam->getServerIDs();
-			self->updateLastAsSource(serverIds);
+	RelocateReason relocateReason = selectRelocateReason(
+	    self, traceEvent, moveReason, reply.minReadLoad, reply.maxReadLoad, metrics.bytesReadPerKSecond, srcLoad, shard);
 
-			self->serverCounter.increaseForTeam(
-			    serverIds, RelocateReason::REBALANCE_READ, DDQueue::ServerCounter::ProposedSource);
-			return true;
+    
+	if (relocateReason == RelocateReason::OTHER) {
+		// do nothing
+		traceEvent->detail("SkipReason", "NotMoveAuxTeam");
+		return false;
+	} else {
+		traceEvent->detail("RelocateReason", relocateReason.toString()).detail("ServerSize", sourceTeam->size());
+
+		for (int i = 0; i < shards.size(); i++) {
+			if (shard == shards[i]) {
+				UID traceId = deterministicRandom()->randomUniqueID();
+				self->output.send(RelocateShard(shard, moveReason, relocateReason, traceId));
+				traceEvent->detail("TraceId", traceId);
+
+				auto serverIds = sourceTeam->getServerIDs();
+				self->updateLastAsSource(serverIds);
+
+				self->serverCounter.increaseForTeam(serverIds, relocateReason, DDQueue::ServerCounter::ProposedSource);
+				return true;
+			}
 		}
+		traceEvent->detail("SkipReason", "ShardNotPresent");
+		return false;
 	}
-	traceEvent->detail("SkipReason", "ShardNotPresent");
-	return false;
+}
+
+ACTOR Future<bool> rebalanceByReduceShard(DDQueue* self,
+                                          Optional<Reference<IDataDistributionTeam>> _randomTeam,
+                                          DataMovementReason moveReason,
+                                          bool primary) {
+	if (!SERVER_KNOBS->DYNAMIC_REPLICATION_ENABLED) {
+        return false;
+    } else if (!_randomTeam.present()) {
+		return false;
+	} else {
+        state Reference<IDataDistributionTeam> randomTeam = _randomTeam.get();
+
+	    state std::vector<KeyRange> shards = self->shardsAffectedByTeamFailure->getShardsFor(
+	        ShardsAffectedByTeamFailure::Team(randomTeam->getServerIDs(), primary));
+        state TraceEvent traceEvent("RebalanceByReduceShard");
+
+        if (shards.size() < 1) {
+            traceEvent.detail("SkipReason", "NoShardOnSource");
+		    return false;
+        }
+
+        int bottomK = std::min(int(0.1 * shards.size()), SERVER_KNOBS->READ_REBALANCE_SHARD_TOPK);
+        if (self->timeThrottle(randomTeam->getServerIDs())) {
+            traceEvent.detail("SkipReason", "SourceTeamThrottle");
+            return false;
+        }
+        
+        state double srcLoad = randomTeam->getLoadReadBandwidth(false);
+        traceEvent.detail("SrcReadBandwidth", srcLoad);
+
+        // randomly choose bottomK shards
+        GetTopKMetricsRequest req(shards, bottomK, srcLoad / shards.size(), 0, false);
+        state GetTopKMetricsReply bottomKReply = wait(brokenPromiseToNever(self->getTopKMetrics.getReply(req)));
+        
+        TraceEvent("ZZXDEBUG4").detail("Back", 0);
+
+        auto& metricsList = bottomKReply.shardMetrics;
+        deterministicRandom()->randomShuffle(metricsList);
+        traceEvent.detail("MinReadLoad", bottomKReply.minReadLoad)
+            .detail("MaxReadLoad", bottomKReply.maxReadLoad)
+            .detail("MetricListSize", metricsList.size());
+
+        if (metricsList.empty()) {
+            traceEvent.detail("SkipReason", "NoEligibleShards");
+            return false;
+        }
+
+        auto& [shard, metrics] = metricsList[0];
+        traceEvent.detail("ShardReadBandwidth", metrics.bytesReadPerKSecond);
+        // Check if the shard is already in an auxliary team
+        std::pair<std::vector<ShardsAffectedByTeamFailure::Team>,
+            std::vector<ShardsAffectedByTeamFailure::Team>>
+        teams = self->shardsAffectedByTeamFailure->getTeamsFor(shard);
+        size_t srcTeamSize = teams.first.size();
+        if (srcTeamSize > self->teamSize && 
+            metrics.bytesReadPerKSecond < srcLoad * SERVER_KNOBS->DYNAMIC_REPLICATION_SHARD_BANDWIDTH_FRAC * 0.5) {
+            // The chosen shard already has auxiliary team and it is quite cold now.
+
+            shards = self->shardsAffectedByTeamFailure->getShardsFor(
+                ShardsAffectedByTeamFailure::Team(randomTeam->getServerIDs(), primary));
+            //  Verify the shard is still in ShardsAffectedByTeamFailure
+            for (int i = 0; i < shards.size(); i++) {
+                if (shard == shards[i]) {
+                    UID traceId = deterministicRandom()->randomUniqueID();
+                    self->output.send(RelocateShard(shard, moveReason, RelocateReason::REDUCE_SHARD, traceId));
+                    traceEvent.detail("TraceId", traceId);
+
+                    auto serverIds = randomTeam->getServerIDs();
+                    self->updateLastAsSource(serverIds);
+
+                    self->serverCounter.increaseForTeam(serverIds, RelocateReason::REDUCE_SHARD, DDQueue::ServerCounter::ProposedSource);
+                    return true;
+                }
+            }
+            traceEvent.detail("SkipReason", "ShardNotPresent");
+            return false;
+        } else {
+            return false;
+        }
+    }
+}
+
+// TODO@ZZX: reduce replicas case
+RelocateReason selectRelocateReason(DDQueue* self,
+                                    TraceEvent* traceEvent,
+                                    DataMovementReason moveReason,
+                                    double minReadLoad,
+                                    double maxReadLoad,
+                                    int64_t shardReadLoad,
+                                    double srcLoad,
+                                    KeyRange& shard) {
+	RelocateReason relocateReason = RelocateReason::OTHER;
+	double epsilon = 0.0001;
+
+	std::pair<std::vector<ShardsAffectedByTeamFailure::Team>, std::vector<ShardsAffectedByTeamFailure::Team>> teams =
+	    self->shardsAffectedByTeamFailure->getTeamsFor(shard);
+	int srcTeamSize = teams.first.size();
+
+	if (!(SERVER_KNOBS->DYNAMIC_REPLICATION_ENABLED)) {
+		// If the button was turned off, we directly use old ways, i.e, move shards to dest team
+		relocateReason = RelocateReason::MOVE_SHARD;
+	} else if (isDataMovementForMountainChopper(moveReason)) {
+		if (srcTeamSize > self->teamSize) {
+			// Already have an auxiliary team
+			relocateReason = RelocateReason::OTHER;
+		} else if (fabs(minReadLoad - maxReadLoad) < epsilon && fabs(minReadLoad - shardReadLoad) < epsilon) {
+			// If three of them are equal, it means we only have one shard whose readLoad > 0 in sourceTeam. In this
+			// case, moving shard to another team won't solve the problem, so we would use MULTIPLY_SHARD here.
+			relocateReason = RelocateReason::MULTIPLY_SHARD;
+        // TODO@ZZX: delete *0.5
+		} else if (shardReadLoad >= srcLoad * SERVER_KNOBS->DYNAMIC_REPLICATION_SHARD_BANDWIDTH_FRAC * 0.5) {
+			// If one team has a very hot shard, we will try to multiply replicas.
+			relocateReason = RelocateReason::MULTIPLY_SHARD;
+		} else {
+			relocateReason = RelocateReason::MOVE_SHARD;
+		}
+	} else {
+        if (srcTeamSize > self->teamSize) {
+			// Already have an auxiliary team
+			relocateReason = RelocateReason::OTHER;
+		} else {
+            relocateReason = RelocateReason::MOVE_SHARD;
+        }
+	}
+
+	return relocateReason;
 }
 
 // Move a random shard from sourceTeam if sourceTeam has much more data than provided destTeam
@@ -2109,7 +2390,14 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueue* self, int teamCollectionIndex, Dat
 				// clang-format off
 				if (sourceTeam.isValid() && destTeam.isValid()) {
 					if (readRebalance) {
-						wait(store(moved,rebalanceReadLoad(self, reason, sourceTeam, destTeam, teamCollectionIndex == 0, &traceEvent)));
+                        std::pair<Optional<Reference<IDataDistributionTeam>>, bool> randomTeam =
+                            wait(brokenPromiseToNever(self->teamCollections[teamCollectionIndex].getTeam.getReply(
+                                GetTeamRequest(WantNewServers::True,
+                                            WantTrueBest::False,
+                                            PreferLowerDiskUtil::True,
+                                            TeamMustHaveShards::True))));
+
+						wait(store(moved,rebalanceReadLoad(self, reason, sourceTeam, destTeam, randomTeam.first, teamCollectionIndex == 0, &traceEvent)));
 					} else {
 						wait(store(moved,rebalanceTeams(self, reason, sourceTeam, destTeam, teamCollectionIndex == 0, &traceEvent)));
 					}

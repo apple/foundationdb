@@ -28,6 +28,7 @@
 #include "flow/FastRef.h"
 #include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
+#include <string>
 
 // The used bandwidth of a shard. The higher the value is, the busier the shard is.
 enum BandwidthStatus { BandwidthStatusLow, BandwidthStatusNormal, BandwidthStatusHigh };
@@ -876,15 +877,27 @@ ACTOR Future<Void> fetchTopKShardMetrics_impl(DataDistributionTracker* self, Get
 
 				wait(yield());
 			}
+
 			// FIXME(xwang): Do we need to track slow task here?
 			if (!onChange.isValid()) {
 				if (req.topK >= returnMetrics.size())
 					req.reply.send(GetTopKMetricsReply(returnMetrics, minReadLoad, maxReadLoad));
 				else {
+                    TraceEvent("ZZXDEBUG1").detail("Size", returnMetrics.size());
 					std::nth_element(returnMetrics.begin(),
 					                 returnMetrics.begin() + req.topK - 1,
 					                 returnMetrics.end(),
-					                 GetTopKMetricsRequest::compare);
+                                     req.isTop ? GetTopKMetricsRequest::topkCompare: GetTopKMetricsRequest::bottomkCompare);
+
+                    TraceEvent("ZZXDEBUG2")
+                    .detail("Size", returnMetrics.size())
+                    .detail("K", req.topK).detail("Min", minReadLoad).detail("Max", maxReadLoad);
+
+                    TraceEvent traceEvent("ZZXDEBUG3");
+                    for (int i = 0; i < returnMetrics.size(); i++) {
+                        traceEvent.detail("Range" + std::to_string(i), returnMetrics[i].range).detail("Value" + std::to_string(i), returnMetrics[i].metrics.bytesReadPerKSecond);
+                    }
+
 					req.reply.send(GetTopKMetricsReply(std::vector<GetTopKMetricsReply::KeyRangeStorageMetrics>(
 					                                       returnMetrics.begin(), returnMetrics.begin() + req.topK),
 					                                   minReadLoad,

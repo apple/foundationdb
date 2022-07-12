@@ -701,7 +701,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( READ_HOT_SUB_RANGE_CHUNK_SIZE,                        10000000); // 10MB
 	init( EMPTY_READ_PENALTY,                                   20 ); // 20 bytes
 	init( DD_SHARD_COMPARE_LIMIT,                               1000 );
-	init( READ_SAMPLING_ENABLED,                                false ); if ( randomize && BUGGIFY ) READ_SAMPLING_ENABLED = true;// enable/disable read sampling
+	init( READ_SAMPLING_ENABLED,                                true ); if ( randomize && BUGGIFY ) READ_SAMPLING_ENABLED = true;// enable/disable read sampling
 
 	//Storage Server
 	init( STORAGE_LOGGING_DELAY,                                 5.0 );
@@ -964,6 +964,9 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// acceptable format: "<token_name1>#<absolute_file_path1>,<token_name2>#<absolute_file_path2>,.."
 	// NOTE: 'token-name" can NOT contain '#' character
 	init( REST_KMS_CONNECTOR_VALIDATION_TOKEN_DETAILS,             "");
+
+	init( DYNAMIC_REPLICATION_ENABLED,                           false);
+	init( DYNAMIC_REPLICATION_SHARD_BANDWIDTH_FRAC,               0.2);
 
 	// clang-format on
 

@@ -3315,6 +3315,11 @@ ACTOR Future<Optional<Value>> getValue(Reference<TransactionState> trState,
 			startTimeD = now();
 			++trState->cx->transactionPhysicalReads;
 
+            // TODO@ZZX: delete
+            // if (locationInfo.locations->locations()) {
+            //     TraceEvent("GetValueAlternatives").suppressFor(0.5).detail("NumberOfReplicas", locationInfo.locations->locations()->size());
+            // }
+
 			state GetValueReply reply;
 			try {
 				if (CLIENT_BUGGIFY_WITH_PROB(.01)) {
