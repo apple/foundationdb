@@ -326,7 +326,12 @@ struct DataDistributor : NonCopyable, ReferenceCounted<DataDistributor> {
 	}
 
 	Future<Void> loadInitialDataDistribution(const DDEnabledState* ddEnabledState) {
-		return store(initData, txnProcessor->getInitialDataDistribution(ddId, lock, remoteDcIds, ddEnabledState));
+		return store(initData,
+		             txnProcessor->getInitialDataDistribution(
+		                 ddId,
+		                 lock,
+		                 configuration.usableRegions > 1 ? remoteDcIds : std::vector<Optional<Key>>(),
+		                 ddEnabledState));
 	}
 
 	void initDcInfo() {
