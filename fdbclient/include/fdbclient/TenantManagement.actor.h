@@ -40,7 +40,7 @@ Future<Optional<TenantMapEntry>> tryGetTenantTransaction(Transaction tr, TenantN
 
 	state typename transaction_future_type<Transaction, Optional<Value>>::type tenantFuture = tr->get(tenantMapKey);
 	Optional<Value> val = wait(safeThreadFutureToFuture(tenantFuture));
-	return val.map<TenantMapEntry>([](Optional<Value> v) { return decodeTenantEntry(v.get()); });
+	return val.map<TenantMapEntry>([](Optional<Value> v) { return TenantMapEntry::decode(v.get()); });
 }
 
 ACTOR template <class DB>
@@ -130,7 +130,7 @@ Future<std::pair<TenantMapEntry, bool>> createTenantTransaction(Transaction tr, 
 		throw tenant_prefix_allocator_conflict();
 	}
 
-	tr->set(tenantMapKey, encodeTenantEntry(newTenant));
+	tr->set(tenantMapKey, newTenant.encode());
 
 	return std::make_pair(newTenant, true);
 }
@@ -160,15 +160,7 @@ Future<TenantMapEntry> createTenant(Reference<DB> db, TenantName name) {
 			tr->set(tenantLastIdKey, TenantMapEntry::idToPrefix(tenantId));
 			state std::pair<TenantMapEntry, bool> newTenant = wait(createTenantTransaction(tr, name, tenantId));
 
-			if (BUGGIFY) {
-				throw commit_unknown_result();
-			}
-
-			wait(safeThreadFutureToFuture(tr->commit()));
-
-			if (BUGGIFY) {
-				throw commit_unknown_result();
-			}
+			wait(buggifiedCommit(tr, BUGGIFY_WITH_PROB(0.1)));
 
 			TraceEvent("CreatedTenant")
 			    .detail("Tenant", name)
@@ -226,16 +218,7 @@ Future<Void> deleteTenant(Reference<DB> db, TenantName name) {
 			}
 
 			wait(deleteTenantTransaction(tr, name));
-
-			if (BUGGIFY) {
-				throw commit_unknown_result();
-			}
-
-			wait(safeThreadFutureToFuture(tr->commit()));
-
-			if (BUGGIFY) {
-				throw commit_unknown_result();
-			}
+			wait(buggifiedCommit(tr, BUGGIFY_WITH_PROB(0.1)));
 
 			TraceEvent("DeletedTenant").detail("Tenant", name).detail("Version", tr->getCommittedVersion());
 			return Void();
@@ -260,7 +243,7 @@ Future<std::map<TenantName, TenantMapEntry>> listTenantsTransaction(Transaction 
 
 	std::map<TenantName, TenantMapEntry> tenants;
 	for (auto kv : results) {
-		tenants[kv.key.removePrefix(tenantMapPrefix)] = decodeTenantEntry(kv.value);
+		tenants[kv.key.removePrefix(tenantMapPrefix)] = TenantMapEntry::decode(kv.value);
 	}
 
 	return tenants;
@@ -279,6 +262,65 @@ Future<std::map<TenantName, TenantMapEntry>> listTenants(Reference<DB> db,
 			tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			std::map<TenantName, TenantMapEntry> tenants = wait(listTenantsTransaction(tr, begin, end, limit));
 			return tenants;
+		} catch (Error& e) {
+			wait(safeThreadFutureToFuture(tr->onError(e)));
+		}
+	}
+}
+
+ACTOR template <class DB>
+Future<Void> renameTenant(Reference<DB> db, TenantName oldName, TenantName newName) {
+	state Reference<typename DB::TransactionT> tr = db->createTransaction();
+
+	state Key oldNameKey = oldName.withPrefix(tenantMapPrefix);
+	state Key newNameKey = newName.withPrefix(tenantMapPrefix);
+	state bool firstTry = true;
+	state int64_t id;
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			state Optional<TenantMapEntry> oldEntry;
+			state Optional<TenantMapEntry> newEntry;
+			wait(store(oldEntry, tryGetTenantTransaction(tr, oldName)) &&
+			     store(newEntry, tryGetTenantTransaction(tr, newName)));
+			if (firstTry) {
+				if (!oldEntry.present()) {
+					throw tenant_not_found();
+				}
+				if (newEntry.present()) {
+					throw tenant_already_exists();
+				}
+				// Store the id we see when first reading this key
+				id = oldEntry.get().id;
+
+				firstTry = false;
+			} else {
+				// If we got commit_unknown_result, the rename may have already occurred.
+				if (newEntry.present()) {
+					int64_t checkId = newEntry.get().id;
+					if (id == checkId) {
+						ASSERT(!oldEntry.present() || oldEntry.get().id != id);
+						return Void();
+					}
+					// If the new entry is present but does not match, then
+					// the rename should fail, so we throw an error.
+					throw tenant_already_exists();
+				}
+				if (!oldEntry.present()) {
+					throw tenant_not_found();
+				}
+				int64_t checkId = oldEntry.get().id;
+				// If the id has changed since we made our first attempt,
+				// then it's possible we've already moved the tenant. Don't move it again.
+				if (id != checkId) {
+					throw tenant_not_found();
+				}
+			}
+			tr->clear(oldNameKey);
+			tr->set(newNameKey, oldEntry.get().encode());
+			wait(safeThreadFutureToFuture(tr->commit()));
+			TraceEvent("RenameTenantSuccess").detail("OldName", oldName).detail("NewName", newName);
+			return Void();
 		} catch (Error& e) {
 			wait(safeThreadFutureToFuture(tr->onError(e)));
 		}

@@ -1415,10 +1415,16 @@ ACTOR Future<Void> traceRole(Role role, UID roleId) {
 	}
 }
 
-ACTOR Future<Void> workerSnapCreate(WorkerSnapRequest snapReq, Standalone<StringRef> snapFolder) {
+ACTOR Future<Void> workerSnapCreate(
+    WorkerSnapRequest snapReq,
+    std::string snapFolder,
+    std::map<std::string, WorkerSnapRequest>* snapReqMap /* ongoing snapshot requests */,
+    std::map<std::string, ErrorOr<Void>>*
+        snapReqResultMap /* finished snapshot requests, expired in SNAP_MINIMUM_TIME_GAP seconds */) {
 	state ExecCmdValueString snapArg(snapReq.snapPayload);
+	state std::string snapReqKey = snapReq.snapUID.toString() + snapReq.role.toString();
 	try {
-		int err = wait(execHelper(&snapArg, snapReq.snapUID, snapFolder.toString(), snapReq.role.toString()));
+		int err = wait(execHelper(&snapArg, snapReq.snapUID, snapFolder, snapReq.role.toString()));
 		std::string uidStr = snapReq.snapUID.toString();
 		TraceEvent("ExecTraceWorker")
 		    .detail("Uid", uidStr)
@@ -1432,11 +1438,15 @@ ACTOR Future<Void> workerSnapCreate(WorkerSnapRequest snapReq, Standalone<String
 		if (snapReq.role.toString() == "storage") {
 			printStorageVersionInfo();
 		}
-		snapReq.reply.send(Void());
+		snapReqMap->at(snapReqKey).reply.send(Void());
+		snapReqMap->erase(snapReqKey);
+		(*snapReqResultMap)[snapReqKey] = ErrorOr<Void>(Void());
 	} catch (Error& e) {
 		TraceEvent("ExecHelperError").errorUnsuppressed(e);
 		if (e.code() != error_code_operation_cancelled) {
-			snapReq.reply.sendError(e);
+			snapReqMap->at(snapReqKey).reply.sendError(e);
+			snapReqMap->erase(snapReqKey);
+			(*snapReqResultMap)[snapReqKey] = ErrorOr<Void>(e);
 		} else {
 			throw e;
 		}
@@ -1579,11 +1589,16 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	// As (store type, spill type) can map to the same TLogFn across multiple TLogVersions, we need to
 	// decide if we should collapse them into the same SharedTLog instance as well.  The answer
 	// here is no, so that when running with log_version==3, all files should say V=3.
-	state std::map<SharedLogsKey, SharedLogsValue> sharedLogs;
+	state std::map<SharedLogsKey, std::vector<SharedLogsValue>> sharedLogs;
 	state Reference<AsyncVar<UID>> activeSharedTLog(new AsyncVar<UID>());
 	state WorkerCache<InitializeBackupReply> backupWorkerCache;
 	state WorkerCache<InitializeBlobWorkerReply> blobWorkerCache;
 
+	state WorkerSnapRequest lastSnapReq;
+	// Here the key is UID+role, as we still send duplicate requests to a process which is both storage and tlog
+	state std::map<std::string, WorkerSnapRequest> snapReqMap;
+	state std::map<std::string, ErrorOr<Void>> snapReqResultMap;
+	state double lastSnapTime = -SERVER_KNOBS->SNAP_MINIMUM_TIME_GAP; // always successful for the first Snap Request
 	state std::string coordFolder = abspath(_coordFolder);
 
 	state WorkerInterface interf(locality);
@@ -1772,32 +1787,29 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				Promise<Void> recovery;
 				TLogFn tLogFn = tLogFnForOptions(s.tLogOptions);
 				auto& logData = sharedLogs[SharedLogsKey(s.tLogOptions, s.storeType)];
+				logData.push_back(SharedLogsValue());
 				// FIXME: Shouldn't if logData.first isValid && !isReady, shouldn't we
 				// be sending a fake InitializeTLogRequest rather than calling tLog() ?
-				Future<Void> tl =
-				    tLogFn(kv,
-				           queue,
-				           dbInfo,
-				           locality,
-				           !logData.actor.isValid() || logData.actor.isReady() ? logData.requests
-				                                                               : PromiseStream<InitializeTLogRequest>(),
-				           s.storeID,
-				           interf.id(),
-				           true,
-				           oldLog,
-				           recovery,
-				           folder,
-				           degraded,
-				           activeSharedTLog);
+				Future<Void> tl = tLogFn(kv,
+				                         queue,
+				                         dbInfo,
+				                         locality,
+				                         logData.back().requests,
+				                         s.storeID,
+				                         interf.id(),
+				                         true,
+				                         oldLog,
+				                         recovery,
+				                         folder,
+				                         degraded,
+				                         activeSharedTLog);
 				recoveries.push_back(recovery.getFuture());
 				activeSharedTLog->set(s.storeID);
 
 				tl = handleIOErrors(tl, kv, s.storeID);
 				tl = handleIOErrors(tl, queue, s.storeID);
-				if (!logData.actor.isValid() || logData.actor.isReady()) {
-					logData.actor = oldLog.getFuture() || tl;
-					logData.uid = s.storeID;
-				}
+				logData.back().actor = oldLog.getFuture() || tl;
+				logData.back().uid = s.storeID;
 				errorForwarders.add(forwardError(errors, Role::SHARED_TRANSACTION_LOG, s.storeID, tl));
 			}
 		}
@@ -2141,8 +2153,10 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				TLogOptions tLogOptions(req.logVersion, req.spillType);
 				TLogFn tLogFn = tLogFnForOptions(tLogOptions);
 				auto& logData = sharedLogs[SharedLogsKey(tLogOptions, req.storeType)];
-				logData.requests.send(req);
-				if (!logData.actor.isValid() || logData.actor.isReady()) {
+				while (!logData.empty() && (!logData.back().actor.isValid() || logData.back().actor.isReady())) {
+					logData.pop_back();
+				}
+				if (logData.empty()) {
 					UID logId = deterministicRandom()->randomUniqueID();
 					std::map<std::string, std::string> details;
 					details["ForMaster"] = req.recruitmentID.shortString();
@@ -2168,11 +2182,12 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					filesClosed.add(data->onClosed());
 					filesClosed.add(queue->onClosed());
 
+					logData.push_back(SharedLogsValue());
 					Future<Void> tLogCore = tLogFn(data,
 					                               queue,
 					                               dbInfo,
 					                               locality,
-					                               logData.requests,
+					                               logData.back().requests,
 					                               logId,
 					                               interf.id(),
 					                               false,
@@ -2184,10 +2199,11 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					tLogCore = handleIOErrors(tLogCore, data, logId);
 					tLogCore = handleIOErrors(tLogCore, queue, logId);
 					errorForwarders.add(forwardError(errors, Role::SHARED_TRANSACTION_LOG, logId, tLogCore));
-					logData.actor = tLogCore;
-					logData.uid = logId;
+					logData.back().actor = tLogCore;
+					logData.back().uid = logId;
 				}
-				activeSharedTLog->set(logData.uid);
+				logData.back().requests.send(req);
+				activeSharedTLog->set(logData.back().uid);
 			}
 			when(InitializeStorageRequest req = waitNext(interf.storage.getFuture())) {
 				// We want to prevent double recruiting on a worker unless we try to recruit something
@@ -2497,11 +2513,49 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				loggingTrigger = delay(loggingDelay, TaskPriority::FlushTrace);
 			}
 			when(state WorkerSnapRequest snapReq = waitNext(interf.workerSnapReq.getFuture())) {
-				Standalone<StringRef> snapFolder = StringRef(folder);
-				if (snapReq.role.toString() == "coord") {
-					snapFolder = coordFolder;
+				std::string snapUID = snapReq.snapUID.toString() + snapReq.role.toString();
+				if (snapReqResultMap.count(snapUID)) {
+					TEST(true); // Worker received a duplicate finished snap request
+					auto result = snapReqResultMap[snapUID];
+					result.isError() ? snapReq.reply.sendError(result.getError()) : snapReq.reply.send(result.get());
+					TraceEvent("RetryFinishedWorkerSnapRequest")
+					    .detail("SnapUID", snapUID)
+					    .detail("Role", snapReq.role)
+					    .detail("Result", result.isError() ? result.getError().code() : 0);
+				} else if (snapReqMap.count(snapUID)) {
+					TEST(true); // Worker received a duplicate ongoing snap request
+					TraceEvent("RetryOngoingWorkerSnapRequest").detail("SnapUID", snapUID).detail("Role", snapReq.role);
+					ASSERT(snapReq.role == snapReqMap[snapUID].role);
+					ASSERT(snapReq.snapPayload == snapReqMap[snapUID].snapPayload);
+					snapReqMap[snapUID] = snapReq;
+				} else {
+					snapReqMap[snapUID] = snapReq; // set map point to the request
+					if (g_network->isSimulated() && (now() - lastSnapTime) < SERVER_KNOBS->SNAP_MINIMUM_TIME_GAP) {
+						// only allow duplicate snapshots on same process in a short time for different roles
+						auto okay = (lastSnapReq.snapUID == snapReq.snapUID) && lastSnapReq.role != snapReq.role;
+						TraceEvent(okay ? SevInfo : SevError, "RapidSnapRequestsOnSameProcess")
+						    .detail("CurrSnapUID", snapUID)
+						    .detail("PrevSnapUID", lastSnapReq.snapUID)
+						    .detail("CurrRole", snapReq.role)
+						    .detail("PrevRole", lastSnapReq.role)
+						    .detail("GapTime", now() - lastSnapTime);
+					}
+					errorForwarders.add(workerSnapCreate(snapReq,
+					                                     snapReq.role.toString() == "coord" ? coordFolder : folder,
+					                                     &snapReqMap,
+					                                     &snapReqResultMap));
+					auto* snapReqResultMapPtr = &snapReqResultMap;
+					errorForwarders.add(fmap(
+					    [snapReqResultMapPtr, snapUID](Void _) {
+						    snapReqResultMapPtr->erase(snapUID);
+						    return Void();
+					    },
+					    delay(SERVER_KNOBS->SNAP_MINIMUM_TIME_GAP)));
+					if (g_network->isSimulated()) {
+						lastSnapReq = snapReq;
+						lastSnapTime = now();
+					}
 				}
-				errorForwarders.add(workerSnapCreate(snapReq, snapFolder));
 			}
 			when(wait(errorForwarders.getResult())) {}
 			when(wait(handleErrors)) {}

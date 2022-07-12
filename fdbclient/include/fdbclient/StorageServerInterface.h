@@ -714,18 +714,21 @@ struct SplitMetricsRequest {
 	StorageMetrics estimated;
 	bool isLastShard;
 	ReplyPromise<SplitMetricsReply> reply;
+	Optional<int> minSplitBytes;
 
 	SplitMetricsRequest() {}
 	SplitMetricsRequest(KeyRangeRef const& keys,
 	                    StorageMetrics const& limits,
 	                    StorageMetrics const& used,
 	                    StorageMetrics const& estimated,
-	                    bool isLastShard)
-	  : keys(arena, keys), limits(limits), used(used), estimated(estimated), isLastShard(isLastShard) {}
+	                    bool isLastShard,
+	                    Optional<int> minSplitBytes)
+	  : keys(arena, keys), limits(limits), used(used), estimated(estimated), isLastShard(isLastShard),
+	    minSplitBytes(minSplitBytes) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keys, limits, used, estimated, isLastShard, reply, arena);
+		serializer(ar, keys, limits, used, estimated, isLastShard, reply, arena, minSplitBytes);
 	}
 };
 

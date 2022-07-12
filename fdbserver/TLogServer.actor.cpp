@@ -28,7 +28,6 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
-#include "fdbserver/LogProtocolMessage.h"
 #include "fdbserver/SpanContextMessage.h"
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/Knobs.h"
@@ -366,9 +365,9 @@ struct TLogData : NonCopyable {
 	                          // the set and for callers that unset will
 	                          // be able to match it up
 	std::string dataFolder; // folder where data is stored
-	Reference<AsyncVar<bool>> degraded;
 	// End of fields used by snapshot based backup and restore
 
+	Reference<AsyncVar<bool>> degraded;
 	std::vector<TagsAndMessage> tempTagMessages;
 
 	Reference<Histogram> commitLatencyDist;
@@ -2222,6 +2221,10 @@ ACTOR Future<Void> commitQueue(TLogData* self) {
 				break;
 			}
 
+			if (logData->queueCommittedVersion.get() == std::numeric_limits<Version>::max()) {
+				break;
+			}
+
 			choose {
 				when(wait(logData->version.whenAtLeast(
 				    std::max(logData->queueCommittingVersion, logData->queueCommittedVersion.get()) + 1))) {
@@ -2569,42 +2572,6 @@ void getQueuingMetrics(TLogData* self, Reference<LogData> logData, TLogQueuingMe
 	req.reply.send(reply);
 }
 
-ACTOR Future<Void> tLogSnapCreate(TLogSnapRequest snapReq, TLogData* self, Reference<LogData> logData) {
-	if (self->ignorePopUid != snapReq.snapUID.toString()) {
-		snapReq.reply.sendError(operation_failed());
-		return Void();
-	}
-	ExecCmdValueString snapArg(snapReq.snapPayload);
-	try {
-		int err = wait(execHelper(&snapArg, snapReq.snapUID, self->dataFolder, snapReq.role.toString()));
-
-		std::string uidStr = snapReq.snapUID.toString();
-		TraceEvent("ExecTraceTLog")
-		    .detail("Uid", uidStr)
-		    .detail("Status", err)
-		    .detail("Role", snapReq.role)
-		    .detail("Value", self->dataFolder)
-		    .detail("ExecPayload", snapReq.snapPayload)
-		    .detail("PersistentDataVersion", logData->persistentDataVersion)
-		    .detail("PersistentDatadurableVersion", logData->persistentDataDurableVersion)
-		    .detail("QueueCommittedVersion", logData->queueCommittedVersion.get())
-		    .detail("Version", logData->version.get());
-
-		if (err != 0) {
-			throw operation_failed();
-		}
-		snapReq.reply.send(Void());
-	} catch (Error& e) {
-		TraceEvent("TLogExecHelperError").errorUnsuppressed(e);
-		if (e.code() != error_code_operation_cancelled) {
-			snapReq.reply.sendError(e);
-		} else {
-			throw e;
-		}
-	}
-	return Void();
-}
-
 ACTOR Future<Void> tLogEnablePopReq(TLogEnablePopRequest enablePopReq, TLogData* self, Reference<LogData> logData) {
 	if (self->ignorePopUid != enablePopReq.snapUID.toString()) {
 		TraceEvent(SevWarn, "TLogPopDisableEnableUidMismatch")
@@ -2663,7 +2630,7 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 			}
 
 			// Persist cluster ID once cluster has recovered.
-			auto ccClusterId = self->dbInfo->get().clusterId;
+			auto ccClusterId = self->dbInfo->get().client.clusterId;
 			if (self->dbInfo->get().recoveryState == RecoveryState::FULLY_RECOVERED &&
 			    !self->durableClusterId.isValid()) {
 				ASSERT(ccClusterId.isValid());
@@ -2730,9 +2697,6 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 		}
 		when(TLogEnablePopRequest enablePopReq = waitNext(tli.enablePopRequest.getFuture())) {
 			logData->addActor.send(tLogEnablePopReq(enablePopReq, self, logData));
-		}
-		when(TLogSnapRequest snapReq = waitNext(tli.snapRequest.getFuture())) {
-			logData->addActor.send(tLogSnapCreate(snapReq, self, logData));
 		}
 	}
 }

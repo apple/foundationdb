@@ -116,23 +116,7 @@ public:
 
 	bool canRecheck() const { return lastCheck < now() - CLIENT_KNOBS->TAG_THROTTLE_RECHECK_INTERVAL; }
 
-	double throttleDuration() const {
-		if (expiration <= now()) {
-			return 0.0;
-		}
-
-		double capacity =
-		    (smoothRate.smoothTotal() - smoothReleased.smoothRate()) * CLIENT_KNOBS->TAG_THROTTLE_SMOOTHING_WINDOW;
-		if (capacity >= 1) {
-			return 0.0;
-		}
-
-		if (tpsRate == 0) {
-			return std::max(0.0, expiration - now());
-		}
-
-		return std::min(expiration - now(), capacity / tpsRate);
-	}
+	double throttleDuration() const;
 };
 
 struct WatchParameters : public ReferenceCounted<WatchParameters> {
@@ -307,10 +291,12 @@ public:
 	Future<Void> splitStorageMetricsStream(PromiseStream<Key> const& resultsStream,
 	                                       KeyRange const& keys,
 	                                       StorageMetrics const& limit,
-	                                       StorageMetrics const& estimated);
+	                                       StorageMetrics const& estimated,
+	                                       Optional<int> const& minSplitBytes = {});
 	Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(KeyRange const& keys,
 	                                                          StorageMetrics const& limit,
-	                                                          StorageMetrics const& estimated);
+	                                                          StorageMetrics const& estimated,
+	                                                          Optional<int> const& minSplitBytes = {});
 
 	Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> getReadHotRanges(KeyRange const& keys);
 
@@ -610,6 +596,14 @@ public:
 
 	// Cache of the latest commit versions of storage servers.
 	VersionVector ssVersionVectorCache;
+
+	// Introduced mainly to optimize out the version vector related code (on the client side)
+	// when the version vector feature is disabled (on the server side).
+	// @param ssVersionVectorDelta version vector changes sent by GRV proxy
+	inline bool versionVectorCacheActive(const VersionVector& ssVersionVectorDelta) {
+		return (ssVersionVectorCache.getMaxVersion() != invalidVersion ||
+		        ssVersionVectorDelta.getMaxVersion() != invalidVersion);
+	}
 
 	// Adds or updates the specified (SS, TSS) pair in the TSS mapping (if not already present).
 	// Requests to the storage server will be duplicated to the TSS.

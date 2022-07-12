@@ -470,6 +470,7 @@ public:
 
 	Reference<TransactionState> trState;
 	std::vector<Reference<Watch>> watches;
+	TagSet const& getTags() const;
 	Span span;
 
 	// used in template functions as returned Future type
@@ -541,7 +542,8 @@ inline uint64_t getWriteOperationCost(uint64_t bytes) {
 
 // Create a transaction to set the value of system key \xff/conf/perpetual_storage_wiggle. If enable == true, the value
 // will be 1. Otherwise, the value will be 0.
-ACTOR Future<Void> setPerpetualStorageWiggle(Database cx, bool enable, LockAware lockAware = LockAware::False);
+// Returns the FDB version at which the transaction was committed.
+ACTOR Future<Version> setPerpetualStorageWiggle(Database cx, bool enable, LockAware lockAware = LockAware::False);
 
 ACTOR Future<std::vector<std::pair<UID, StorageWiggleValue>>> readStorageWiggleValues(Database cx,
                                                                                       bool primary,

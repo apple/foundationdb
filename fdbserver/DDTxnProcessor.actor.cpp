@@ -20,6 +20,7 @@
 
 #include "fdbserver/DDTxnProcessor.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/ManagementAPI.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 class DDTxnProcessorImpl {
@@ -88,6 +89,41 @@ class DDTxnProcessorImpl {
 
 		return IDDTxnProcessor::SourceServers{ std::vector<UID>(servers.begin(), servers.end()), completeSources };
 	}
+
+	// set the system key space
+	ACTOR static Future<Void> updateReplicaKeys(Database cx,
+	                                            std::vector<Optional<Key>> primaryDcId,
+	                                            std::vector<Optional<Key>> remoteDcIds,
+	                                            DatabaseConfiguration configuration) {
+		state Transaction tr(cx);
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
+				RangeResult replicaKeys = wait(tr.getRange(datacenterReplicasKeys, CLIENT_KNOBS->TOO_MANY));
+
+				for (auto& kv : replicaKeys) {
+					auto dcId = decodeDatacenterReplicasKey(kv.key);
+					auto replicas = decodeDatacenterReplicasValue(kv.value);
+					if ((primaryDcId.size() && primaryDcId.at(0) == dcId) ||
+					    (remoteDcIds.size() && remoteDcIds.at(0) == dcId && configuration.usableRegions > 1)) {
+						if (replicas > configuration.storageTeamSize) {
+							tr.set(kv.key, datacenterReplicasValue(configuration.storageTeamSize));
+						}
+					} else {
+						tr.clear(kv.key);
+					}
+				}
+
+				wait(tr.commit());
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+		return Void();
+	}
 };
 
 Future<IDDTxnProcessor::SourceServers> DDTxnProcessor::getSourceServersForRange(const KeyRangeRef range) {
@@ -97,4 +133,18 @@ Future<IDDTxnProcessor::SourceServers> DDTxnProcessor::getSourceServersForRange(
 Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> DDTxnProcessor::getServerListAndProcessClasses() {
 	Transaction tr(cx);
 	return NativeAPI::getServerListAndProcessClasses(&tr);
+}
+
+Future<MoveKeysLock> DDTxnProcessor::takeMoveKeysLock(UID ddId) const {
+	return ::takeMoveKeysLock(cx, ddId);
+}
+
+Future<DatabaseConfiguration> DDTxnProcessor::getDatabaseConfiguration() const {
+	return ::getDatabaseConfiguration(cx);
+}
+
+Future<Void> DDTxnProcessor::updateReplicaKeys(const std::vector<Optional<Key>>& primaryIds,
+                                               const std::vector<Optional<Key>>& remoteIds,
+                                               const DatabaseConfiguration& configuration) const {
+	return DDTxnProcessorImpl::updateReplicaKeys(cx, primaryIds, remoteIds, configuration);
 }

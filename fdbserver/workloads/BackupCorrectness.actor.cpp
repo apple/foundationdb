@@ -513,11 +513,11 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			    .detail("AbortAndRestartAfter", self->abortAndRestartAfter);
 
 			state KeyBackedTag keyBackedTag = makeBackupTag(self->backupTag.toString());
-			UidAndAbortedFlagT uidFlag = wait(keyBackedTag.getOrThrow(cx));
+			UidAndAbortedFlagT uidFlag = wait(keyBackedTag.getOrThrow(cx.getReference()));
 			state UID logUid = uidFlag.first;
-			state Key destUidValue = wait(BackupConfig(logUid).destUidValue().getD(cx));
+			state Key destUidValue = wait(BackupConfig(logUid).destUidValue().getD(cx.getReference()));
 			state Reference<IBackupContainer> lastBackupContainer =
-			    wait(BackupConfig(logUid).backupContainer().getD(cx));
+			    wait(BackupConfig(logUid).backupContainer().getD(cx.getReference()));
 
 			// Occasionally start yet another backup that might still be running when we restore
 			if (!self->locked && BUGGIFY) {

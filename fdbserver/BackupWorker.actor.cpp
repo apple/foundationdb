@@ -25,6 +25,8 @@
 #include "fdbclient/SystemData.h"
 #include "fdbserver/BackupInterface.h"
 #include "fdbserver/BackupProgress.actor.h"
+#include "fdbserver/EncryptedMutationMessage.h"
+#include "fdbserver/GetEncryptCipherKeys.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LogProtocolMessage.h"
 #include "fdbserver/LogSystem.h"
@@ -44,6 +46,7 @@ struct VersionedMessage {
 	StringRef message;
 	VectorRef<Tag> tags;
 	Arena arena; // Keep a reference to the memory containing the message
+	Arena decryptArena; // Arena used for decrypt buffer.
 	size_t bytes; // arena's size when inserted, which can grow afterwards
 
 	VersionedMessage(LogMessageVersion v, StringRef m, const VectorRef<Tag>& t, const Arena& a)
@@ -53,7 +56,8 @@ struct VersionedMessage {
 
 	// Returns true if the message is a mutation that should be backuped, i.e.,
 	// either key is not in system key space or is not a metadataVersionKey.
-	bool isBackupMessage(MutationRef* m) const {
+	bool isBackupMessage(MutationRef* m,
+	                     const std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>& cipherKeys) {
 		for (Tag tag : tags) {
 			if (tag.locality == tagLocalitySpecial || tag.locality == tagLocalityTxs) {
 				return false; // skip Txs mutations
@@ -71,9 +75,25 @@ struct VersionedMessage {
 			TEST(true); // Returning false for OTELSpanContextMessage
 			return false;
 		}
-
-		reader >> *m;
+		if (EncryptedMutationMessage::isNextIn(reader)) {
+			// In case the mutation is encrypted, get the decrypted mutation and also update message to point to
+			// the decrypted mutation.
+			// We use dedicated arena for decrypt buffer, as the other arena is used to count towards backup lock bytes.
+			*m = EncryptedMutationMessage::decrypt(reader, decryptArena, cipherKeys, &message);
+		} else {
+			reader >> *m;
+		}
 		return normalKeys.contains(m->param1) || m->param1 == metadataVersionKey;
+	}
+
+	void collectCipherDetailIfEncrypted(std::unordered_set<BlobCipherDetails>& cipherDetails) {
+		ArenaReader reader(arena, message, AssumeVersion(g_network->protocolVersion()));
+		if (EncryptedMutationMessage::isNextIn(reader)) {
+			EncryptedMutationMessage emm;
+			reader >> emm;
+			cipherDetails.insert(emm.header.cipherTextDetails);
+			cipherDetails.insert(emm.header.cipherHeaderDetails);
+		}
 	}
 };
 
@@ -89,6 +109,7 @@ struct BackupData {
 	Version minKnownCommittedVersion;
 	Version savedVersion; // Largest version saved to blob storage
 	Version popVersion; // Largest version popped in NOOP mode, can be larger than savedVersion.
+	Reference<AsyncVar<ServerDBInfo> const> db;
 	AsyncVar<Reference<ILogSystem>> logSystem;
 	Database cx;
 	std::vector<VersionedMessage> messages;
@@ -104,8 +125,8 @@ struct BackupData {
 		PerBackupInfo(BackupData* data, UID uid, Version v) : self(data), startVersion(v) {
 			// Open the container and get key ranges
 			BackupConfig config(uid);
-			container = config.backupContainer().get(data->cx);
-			ranges = config.backupRanges().get(data->cx);
+			container = config.backupContainer().get(data->cx.getReference());
+			ranges = config.backupRanges().get(data->cx.getReference());
 			if (self->backupEpoch == self->recruitedEpoch) {
 				// Only current epoch's worker update the number of backup workers.
 				updateWorker = _updateStartedWorkers(this, data, uid);
@@ -245,7 +266,7 @@ struct BackupData {
 	  : myId(id), tag(req.routerTag), totalTags(req.totalTags), startVersion(req.startVersion),
 	    endVersion(req.endVersion), recruitedEpoch(req.recruitedEpoch), backupEpoch(req.backupEpoch),
 	    minKnownCommittedVersion(invalidVersion), savedVersion(req.startVersion - 1), popVersion(req.startVersion - 1),
-	    pulledVersion(0), paused(false), lock(new FlowLock(SERVER_KNOBS->BACKUP_LOCK_BYTES)),
+	    db(db), pulledVersion(0), paused(false), lock(new FlowLock(SERVER_KNOBS->BACKUP_LOCK_BYTES)),
 	    cc("BackupWorker", myId.toString()) {
 		cx = openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::True);
 
@@ -682,7 +703,10 @@ ACTOR static Future<Void> updateLogBytesWritten(BackupData* self,
 // Saves messages in the range of [0, numMsg) to a file and then remove these
 // messages. The file content format is a sequence of (Version, sub#, msgSize, message).
 // Note only ready backups are saved.
-ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int numMsg) {
+ACTOR Future<Void> saveMutationsToFile(BackupData* self,
+                                       Version popVersion,
+                                       int numMsg,
+                                       std::unordered_set<BlobCipherDetails> cipherDetails) {
 	state int blockSize = SERVER_KNOBS->BACKUP_FILE_BLOCK_BYTES;
 	state std::vector<Future<Reference<IBackupFile>>> logFileFutures;
 	state std::vector<Reference<IBackupFile>> logFiles;
@@ -691,6 +715,7 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 	state std::vector<Version> beginVersions; // logFiles' begin versions
 	state KeyRangeMap<std::set<int>> keyRangeMap; // range to index in logFileFutures, logFiles, & blockEnds
 	state std::vector<Standalone<StringRef>> mutations;
+	state std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> cipherKeys;
 	state int idx;
 
 	// Make sure all backups are ready, otherwise mutations will be lost.
@@ -742,11 +767,18 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 		    .detail("File", logFiles[i]->getFileName());
 	}
 
+	// Fetch cipher keys if any of the messages are encrypted.
+	if (!cipherDetails.empty()) {
+		std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> getCipherKeysResult =
+		    wait(getEncryptCipherKeys(self->db, cipherDetails));
+		cipherKeys = getCipherKeysResult;
+	}
+
 	blockEnds = std::vector<int64_t>(logFiles.size(), 0);
 	for (idx = 0; idx < numMsg; idx++) {
-		const auto& message = self->messages[idx];
+		auto& message = self->messages[idx];
 		MutationRef m;
-		if (!message.isBackupMessage(&m))
+		if (!message.isBackupMessage(&m, cipherKeys))
 			continue;
 
 		DEBUG_MUTATION("addMutation", message.version.version, m)
@@ -815,6 +847,7 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 		state Future<Void> uploadDelay = delay(SERVER_KNOBS->BACKUP_UPLOAD_DELAY);
 
 		state int numMsg = 0;
+		state std::unordered_set<BlobCipherDetails> cipherDetails;
 		Version lastPopVersion = popVersion;
 		// index of last version's end position in self->messages
 		int lastVersionIndex = 0;
@@ -826,7 +859,7 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 				popVersion = std::max(popVersion, self->minKnownCommittedVersion);
 			}
 		} else {
-			for (const auto& message : self->messages) {
+			for (auto& message : self->messages) {
 				// message may be prefetched in peek; uncommitted message should not be uploaded.
 				const Version version = message.getVersion();
 				if (version > self->maxPopVersion())
@@ -836,6 +869,7 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 					lastVersion = popVersion;
 					popVersion = version;
 				}
+				message.collectCipherDetailIfEncrypted(cipherDetails);
 				numMsg++;
 			}
 		}
@@ -859,7 +893,7 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 			    .detail("NumMsg", numMsg)
 			    .detail("MsgQ", self->messages.size());
 			// save an empty file for old epochs so that log file versions are continuous
-			wait(saveMutationsToFile(self, popVersion, numMsg));
+			wait(saveMutationsToFile(self, popVersion, numMsg, cipherDetails));
 			self->eraseMessages(numMsg);
 		}
 

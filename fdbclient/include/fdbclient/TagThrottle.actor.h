@@ -207,6 +207,8 @@ struct ClientTagThrottleLimits {
 	double tpsRate;
 	double expiration;
 
+	static double const NO_EXPIRATION;
+
 	ClientTagThrottleLimits() : tpsRate(0), expiration(0) {}
 	ClientTagThrottleLimits(double tpsRate, double expiration) : tpsRate(tpsRate), expiration(expiration) {}
 
@@ -593,6 +595,38 @@ Future<Void> enableAuto(Reference<DB> db, bool enabled) {
 			wait(safeThreadFutureToFuture(tr->onError(e)));
 		}
 	}
+}
+
+class TagQuotaValue {
+public:
+	double reservedReadQuota{ 0.0 };
+	double totalReadQuota{ 0.0 };
+	double reservedWriteQuota{ 0.0 };
+	double totalWriteQuota{ 0.0 };
+	bool isValid() const;
+	Value toValue() const;
+	static TagQuotaValue fromValue(ValueRef);
+};
+
+Key getTagQuotaKey(TransactionTagRef);
+
+template <class Tr>
+void setTagQuota(Reference<Tr> tr,
+                 TransactionTagRef tag,
+                 double reservedReadQuota,
+                 double totalReadQuota,
+                 double reservedWriteQuota,
+                 double totalWriteQuota) {
+	TagQuotaValue tagQuotaValue;
+	tagQuotaValue.reservedReadQuota = reservedReadQuota;
+	tagQuotaValue.totalReadQuota = totalReadQuota;
+	tagQuotaValue.reservedWriteQuota = reservedWriteQuota;
+	tagQuotaValue.totalWriteQuota = totalWriteQuota;
+	if (!tagQuotaValue.isValid()) {
+		throw invalid_throttle_quota_value();
+	}
+	tr->set(getTagQuotaKey(tag), tagQuotaValue.toValue());
+	signalThrottleChange(tr);
 }
 
 }; // namespace ThrottleApi

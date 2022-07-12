@@ -24,6 +24,7 @@
 #include "flow/IRandom.h"
 #include "fdbclient/Tracing.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/IRateControl.h"
@@ -273,7 +274,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 					// Check that nothing is in the storage server queues
 					try {
-						int64_t maxStorageServerQueueSize = wait(getMaxStorageServerQueueSize(cx, self->dbInfo));
+						int64_t maxStorageServerQueueSize =
+						    wait(getMaxStorageServerQueueSize(cx, self->dbInfo, invalidVersion));
 						if (maxStorageServerQueueSize > 0) {
 							TraceEvent("ConsistencyCheck_ExceedStorageServerQueueLimit")
 							    .detail("MaxQueueSize", maxStorageServerQueueSize);

@@ -106,7 +106,7 @@ struct TokenRef {
 StringRef makeTokenPart(Arena& arena, TokenRef tokenSpec);
 
 // Generate plaintext signature of token part
-StringRef makePlainSignature(Arena& arena, Algorithm alg, StringRef tokenPart, StringRef privateKeyDer);
+StringRef makePlainSignature(Arena& arena, Algorithm alg, StringRef tokenPart, PrivateKey privateKey);
 
 // One-stop function to make JWT from spec
 StringRef signToken(Arena& arena, TokenRef tokenSpec, PrivateKey privateKey);
