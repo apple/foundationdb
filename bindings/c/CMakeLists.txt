@@ -53,6 +53,15 @@ add_dependencies(fdb_c fdb_c_generated fdb_c_options)
 add_dependencies(fdbclient fdb_c_options)
 add_dependencies(fdbclient_sampling fdb_c_options)
 target_link_libraries(fdb_c PRIVATE $<BUILD_INTERFACE:fdbclient>)
+if(USE_UBSAN)
+  # The intent of this hack is to force c targets that depend on fdb_c to use
+  # c++ as their linker language. Otherwise you see undefined references to c++
+  # specific ubsan symbols.
+  add_library(force_cxx_linker STATIC IMPORTED)
+  set_property(TARGET force_cxx_linker PROPERTY IMPORTED_LOCATION /dev/null)
+  set_target_properties(force_cxx_linker PROPERTIES IMPORTED_LINK_INTERFACE_LANGUAGES CXX)
+  target_link_libraries(fdb_c PUBLIC $<BUILD_INTERFACE:force_cxx_linker>)
+endif()
 if(APPLE)
   set(symbols ${CMAKE_CURRENT_BINARY_DIR}/fdb_c.symbols)
   add_custom_command(OUTPUT ${symbols}
@@ -67,7 +76,12 @@ if(APPLE)
   target_link_options(fdb_c PRIVATE "LINKER:-no_weak_exports,-exported_symbols_list,${symbols}")
 elseif(WIN32)
 else()
-  target_link_options(fdb_c PRIVATE "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/fdb_c.map,-z,nodelete,-z,noexecstack")
+  if (NOT USE_UBSAN)
+    # For ubsan we need to export type information for the vptr check to work.
+    # Otherwise we only want to export fdb symbols in the fdb c api.
+    target_link_options(fdb_c PRIVATE "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/fdb_c.map")
+  endif()
+  target_link_options(fdb_c PRIVATE "LINKER:-z,nodelete,-z,noexecstack")
 endif()
 target_include_directories(fdb_c PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>

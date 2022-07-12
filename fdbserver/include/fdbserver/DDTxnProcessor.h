@@ -45,6 +45,12 @@ public:
 	[[nodiscard]] virtual Future<MoveKeysLock> takeMoveKeysLock(UID ddId) const { return MoveKeysLock(); }
 
 	virtual Future<DatabaseConfiguration> getDatabaseConfiguration() const { return DatabaseConfiguration(); }
+
+	virtual Future<Void> updateReplicaKeys(const std::vector<Optional<Key>>& primaryIds,
+	                                       const std::vector<Optional<Key>>& remoteIds,
+	                                       const DatabaseConfiguration& configuration) const {
+		return Void();
+	}
 };
 
 class DDTxnProcessorImpl;
@@ -66,9 +72,15 @@ public:
 	Future<MoveKeysLock> takeMoveKeysLock(UID ddId) const override;
 
 	Future<DatabaseConfiguration> getDatabaseConfiguration() const override;
+
+	Future<Void> updateReplicaKeys(const std::vector<Optional<Key>>& primaryIds,
+	                               const std::vector<Optional<Key>>& remoteIds,
+	                               const DatabaseConfiguration& configuration) const override;
 };
 
-// run mock transaction
+// A mock transaction implementation for test usage.
+// Contract: every function involving mock transaction should return immediately to mimic the ACI property of real
+// transaction.
 class DDMockTxnProcessor : public IDDTxnProcessor {};
 
 #endif // FOUNDATIONDB_DDTXNPROCESSOR_H
