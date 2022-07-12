@@ -69,7 +69,7 @@ type Argument struct {
 	Offset int `json:"offset,omitempty"`
 
 	// IPFamily provides the family to use for IPList type arguments.
-	IPFamily int `json:"ipFamily,omitEmpty"`
+	IPFamily int `json:"ipFamily,omitempty"`
 }
 
 // ArgumentType defines the types for arguments.
@@ -121,9 +121,9 @@ func (argument Argument) GenerateArgument(processNumber int, env map[string]stri
 		number = number + argument.Offset
 		return strconv.Itoa(number), nil
 	case EnvironmentArgumentType:
-		return argument.lookupEnv(env)
+		return argument.LookupEnv(env)
 	case IPListArgumentType:
-		envValue, err := argument.lookupEnv(env)
+		envValue, err := argument.LookupEnv(env)
 		if err != nil {
 			return "", err
 		}
@@ -153,7 +153,7 @@ func (argument Argument) GenerateArgument(processNumber int, env map[string]stri
 }
 
 // lookupEnv looks up the value for an argument from the environment.
-func (argument Argument) lookupEnv(env map[string]string) (string, error) {
+func (argument Argument) LookupEnv(env map[string]string) (string, error) {
 	var value string
 	var present bool
 	if env != nil {
