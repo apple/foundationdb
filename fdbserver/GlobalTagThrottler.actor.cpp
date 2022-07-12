@@ -201,16 +201,17 @@ class GlobalTagThrottlerImpl {
 		}
 	}
 
-	// For transactions with the provided tag, returns the average cost
-	Optional<double> getAverageTransactionCost(TransactionTag tag, OpType opType) const {
+	// For transactions with the provided tag, returns the average cost of all transactions
+	// accross the cluster. The minimum cost is 1.
+	double getAverageTransactionCost(TransactionTag tag, OpType opType) const {
 		auto const cost = getCurrentCost(tag, opType);
 		auto const stats = get(tagStatistics, tag);
 		if (!stats.present()) {
-			return {};
+			return 1.0;
 		}
 		auto const transactionRate = stats.get().getTransactionRate();
 		if (transactionRate == 0.0) {
-			return {};
+			return 1.0;
 		} else {
 			return std::max(1.0, cost / transactionRate);
 		}
@@ -317,18 +318,19 @@ class GlobalTagThrottlerImpl {
 		}
 	}
 
-	Optional<double> getDesiredTps(TransactionTag tag, OpType opType) const {
-		auto const averageTransactionCost = getAverageTransactionCost(tag, opType);
+	Optional<double> getDesiredTps(TransactionTag tag, OpType opType, double averageTransactionCost) const {
 		auto const quota = getQuota(tag, opType, LimitType::TOTAL);
-		if (!averageTransactionCost.present() || !quota.present()) {
+		if (!quota.present()) {
 			return {};
 		}
-		return quota.get() / averageTransactionCost.get();
+		return quota.get() / averageTransactionCost;
 	}
 
-	Optional<double> getDesiredTps(TransactionTag tag) const {
-		auto const readDesiredTps = getDesiredTps(tag, OpType::READ);
-		auto const writeDesiredTps = getDesiredTps(tag, OpType::WRITE);
+	Optional<double> getDesiredTps(TransactionTag tag,
+	                               double averageTransactionReadCost,
+	                               double averageTransactionWriteCost) const {
+		auto const readDesiredTps = getDesiredTps(tag, OpType::READ, averageTransactionReadCost);
+		auto const writeDesiredTps = getDesiredTps(tag, OpType::WRITE, averageTransactionWriteCost);
 		if (readDesiredTps.present() && writeDesiredTps.present()) {
 			return std::min(readDesiredTps.get(), writeDesiredTps.get());
 		} else if (readDesiredTps.present()) {
@@ -338,19 +340,20 @@ class GlobalTagThrottlerImpl {
 		}
 	}
 
-	Optional<double> getReservedTps(TransactionTag tag, OpType opType) const {
+	Optional<double> getReservedTps(TransactionTag tag, OpType opType, double averageTransactionCost) const {
 		auto const reservedCost = getQuota(tag, opType, LimitType::RESERVED);
-		auto const averageTransactionCost = getAverageTransactionCost(tag, opType);
-		if (!reservedCost.present() || !averageTransactionCost.present() || averageTransactionCost.get() == 0) {
+		if (!reservedCost.present()) {
 			return {};
 		} else {
-			return reservedCost.get() / averageTransactionCost.get();
+			return reservedCost.get() / averageTransactionCost;
 		}
 	}
 
-	Optional<double> getReservedTps(TransactionTag tag) const {
-		auto const readReservedTps = getReservedTps(tag, OpType::READ);
-		auto const writeReservedTps = getReservedTps(tag, OpType::WRITE);
+	Optional<double> getReservedTps(TransactionTag tag,
+	                                double averageTransactionReadCost,
+	                                double averageTransactionWriteCost) const {
+		auto const readReservedTps = getReservedTps(tag, OpType::READ, averageTransactionReadCost);
+		auto const writeReservedTps = getReservedTps(tag, OpType::WRITE, averageTransactionWriteCost);
 		if (readReservedTps.present() && writeReservedTps.present()) {
 			return std::max(readReservedTps.get(), writeReservedTps.get());
 		} else if (readReservedTps.present()) {
@@ -411,8 +414,11 @@ public:
 		for (auto& [tag, stats] : tagStatistics) {
 			// Currently there is no differentiation between batch priority and default priority transactions
 			auto const limitingTps = getLimitingTps(tag);
-			auto const desiredTps = getDesiredTps(tag);
-			auto const reservedTps = getReservedTps(tag);
+
+			auto const averageTransactionReadCost = getAverageTransactionCost(tag, OpType::READ);
+			auto const averageTransactionWriteCost = getAverageTransactionCost(tag, OpType::WRITE);
+			auto const desiredTps = getDesiredTps(tag, averageTransactionReadCost, averageTransactionWriteCost);
+			auto const reservedTps = getReservedTps(tag, averageTransactionReadCost, averageTransactionWriteCost);
 
 			if (!desiredTps.present()) {
 				continue;
