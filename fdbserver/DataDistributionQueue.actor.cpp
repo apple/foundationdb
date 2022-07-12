@@ -52,6 +52,11 @@ inline bool isDataMovementForDiskBalancing(DataMovementReason reason) {
 	       reason == DataMovementReason::REBALANCE_OVERUTILIZED_TEAM;
 }
 
+inline bool isDataMovementForReadBalancing(DataMovementReason reason) {
+	return reason == DataMovementReason::REBALANCE_READ_OVERUTIL_TEAM ||
+	       reason == DataMovementReason::REBALANCE_READ_UNDERUTIL_TEAM;
+}
+
 inline bool isMountainChopperPriority(int priority) {
 	return priority == SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM ||
 	       priority == SERVER_KNOBS->PRIORITY_REBALANCE_READ_OVERUTIL_TEAM;
@@ -1923,7 +1928,7 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueueData* self, int teamCollectionIndex,
 	state double lastRead = 0;
 	state bool skipCurrentLoop = false;
 	state Future<Void> delayF = Never();
-	state const bool readRebalance = !isDataMovementForDiskBalancing(reason);
+	state const bool readRebalance = isDataMovementForReadBalancing(reason);
 	state const char* eventName =
 	    isDataMovementForMountainChopper(reason) ? "BgDDMountainChopper_New" : "BgDDValleyFiller_New";
 	state int ddPriority = dataMovementPriority(reason);
