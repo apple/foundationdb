@@ -56,7 +56,7 @@ impl ConnectPacket {
     pub fn new(listen_addr: Option<SocketAddr>) -> Result<Self> {
         let (ip4, port) = match listen_addr {
             None => (0, 0),
-            Some(SocketAddr::V4(v4)) => (u32::from_le_bytes(v4.ip().octets()), v4.port()),
+            Some(SocketAddr::V4(v4)) => (u32::from_be_bytes(v4.ip().octets()), v4.port()),
             Some(_) => {
                 return Err(format!("Unimplemented SocketAddr type: {:?}", listen_addr).into())
             }
@@ -135,7 +135,7 @@ impl ConnectPacket {
         let src = &src[connection_id_sz..];
 
         let canonical_remote_ip4_sz = 4;
-        let canonical_remote_ip4 = u32::from_le_bytes(src[0..canonical_remote_ip4_sz].try_into()?);
+        let canonical_remote_ip4 = u32::from_be_bytes(src[0..canonical_remote_ip4_sz].try_into()?);
         let src = &src[canonical_remote_ip4_sz..];
 
         let connect_packet_flags_sz = 2;
@@ -282,8 +282,8 @@ impl Frame {
         if rel_offset % 2 != 0 {
             return Err(format!("Misaligned offset into table: {}", table_offset).into());
         }
-        let off : usize = (table_offset + rel_offset).try_into()?;
-        Ok(u64::from_le_bytes(self.payload()[off..off+8].try_into()?))
+        let off: usize = (table_offset + rel_offset).try_into()?;
+        Ok(u64::from_le_bytes(self.payload()[off..off + 8].try_into()?))
     }
 
     fn get_u32(&self, table_offset: i32, rel_offset: i32) -> Result<u32> {
@@ -293,8 +293,8 @@ impl Frame {
         if rel_offset % 4 != 0 {
             return Err(format!("Misaligned offset into table: {}", table_offset).into());
         }
-        let off : usize = (table_offset + rel_offset).try_into()?;
-        Ok(u32::from_le_bytes(self.payload()[off..off+4].try_into()?))
+        let off: usize = (table_offset + rel_offset).try_into()?;
+        Ok(u32::from_le_bytes(self.payload()[off..off + 4].try_into()?))
     }
 
     fn get_i32(&self, table_offset: i32, rel_offset: i32) -> Result<i32> {
@@ -304,8 +304,8 @@ impl Frame {
         if rel_offset % 4 != 0 {
             return Err(format!("Misaligned offset into table: {}", table_offset).into());
         }
-        let off : usize = (table_offset + rel_offset).try_into()?;
-        Ok(i32::from_le_bytes(self.payload()[off..off+4].try_into()?))
+        let off: usize = (table_offset + rel_offset).try_into()?;
+        Ok(i32::from_le_bytes(self.payload()[off..off + 4].try_into()?))
     }
 
     fn get_i16(&self, table_offset: i32, rel_offset: i32) -> Result<i16> {
@@ -315,8 +315,8 @@ impl Frame {
         if rel_offset % 2 != 0 {
             return Err(format!("Misaligned offset into table: {}", table_offset).into());
         }
-        let off : usize = (table_offset + rel_offset).try_into()?;
-        Ok(i16::from_le_bytes(self.payload()[off..off+2].try_into()?))
+        let off: usize = (table_offset + rel_offset).try_into()?;
+        Ok(i16::from_le_bytes(self.payload()[off..off + 2].try_into()?))
     }
 
     pub fn reverse_engineer_flatbuffer(&self) -> Result<()> {
@@ -324,33 +324,57 @@ impl Frame {
         if self.payload().len() < 8 {
             return Err("Too short to be flatbuffer".into());
         }
-        let root_table_offset : i32 = self.get_u32(0, 0)?.try_into()?;
+        let root_table_offset: i32 = self.get_u32(0, 0)?.try_into()?;
         println!("0\t{:x}\t// root table offset", root_table_offset);
         let file_identifier_table = FileIdentifierNames::new()?;
         match file_identifier_table.from_id(&self.peek_file_identifier()?) {
-            Ok(id) => { println!("4\t{:?}", id); }
-            Err(_) => { println!("4\t{:?} (unknown file identifier)", self.peek_file_identifier()?); }
+            Ok(id) => {
+                println!("4\t{:?}", id);
+            }
+            Err(_) => {
+                println!(
+                    "4\t{:?} (unknown file identifier)",
+                    self.peek_file_identifier()?
+                );
+            }
         };
-        
-        println!("\tTABLE");
-        let vtable_soffset = 0-self.get_i32(root_table_offset, 0)?;
-        println!("{:x}\t{:x} // Offset to vtable start", root_table_offset, vtable_soffset);
-        let vtable_offset : i32 = root_table_offset + vtable_soffset;
 
-        let vtable_len  = self.get_i16(vtable_offset, 0)?;
+        println!("\tTABLE");
+        let vtable_soffset = 0 - self.get_i32(root_table_offset, 0)?;
+        println!(
+            "{:x}\t{:x} // Offset to vtable start",
+            root_table_offset, vtable_soffset
+        );
+        let vtable_offset: i32 = root_table_offset + vtable_soffset;
+
+        let vtable_len = self.get_i16(vtable_offset, 0)?;
         println!("{:x}\t{:x} // vtable len", vtable_offset, vtable_len);
-        let table_len  = self.get_i16(vtable_offset, 2)?;
+        let table_len = self.get_i16(vtable_offset, 2)?;
         println!("{:x}\t{:x} // table len", vtable_offset + 2, table_len);
-        for i in 2..(vtable_len/2) {
-            let i : i32 = i.into();
-            let offset = self.get_i16(vtable_offset, i*2)?;
+        for i in 2..(vtable_len / 2) {
+            let i: i32 = i.into();
+            let offset = self.get_i16(vtable_offset, i * 2)?;
             if offset == 0 {
-                println!("{:x}\t0 // field {} is missing", vtable_offset + (i*2), i-1);
+                println!(
+                    "{:x}\t0 // field {} is missing",
+                    vtable_offset + (i * 2),
+                    i - 1
+                );
             } else {
-                println!("{:x}\t{:x} // field {} offset", vtable_offset + (i*2), offset, i-1);
-                let offset : i32 = offset.into();
+                println!(
+                    "{:x}\t{:x} // field {} offset",
+                    vtable_offset + (i * 2),
+                    offset,
+                    i - 1
+                );
+                let offset: i32 = offset.into();
                 let val = self.get_u64(root_table_offset, offset)?;
-                println!("{:x}\t{:x} // 64-bits at start of field {}", root_table_offset+offset, val, i-2);
+                println!(
+                    "{:x}\t{:x} // 64-bits at start of field {}",
+                    root_table_offset + offset,
+                    val,
+                    i - 2
+                );
             }
         }
 

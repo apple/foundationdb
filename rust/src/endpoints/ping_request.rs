@@ -12,6 +12,7 @@ use crate::flow::uid::{UID, WLTOKEN};
 use crate::flow::{Flow, FlowFuture, FlowHandler, FlowMessage, Frame, Peer, Result};
 use crate::services::ConnectionKeeper;
 use std::net::SocketAddr;
+use std::sync::Arc;
 
 const PING_REQUEST_FILE_IDENTIFIER: ParsedFileIdentifier = ParsedFileIdentifier {
     file_identifier: 0x47d2c7,
@@ -29,15 +30,13 @@ const PING_RESPONSE_FILE_IDENTIFIER: ParsedFileIdentifier = ParsedFileIdentifier
 
 pub fn serialize_request(peer: SocketAddr) -> Result<FlowMessage> {
     use crate::common_generated::{ReplyPromise, ReplyPromiseArgs};
-    use ping_request::{
-        FakeRoot, FakeRootArgs, PingRequest, PingRequestArgs
-    };
+    use ping_request::{FakeRoot, FakeRootArgs, PingRequest, PingRequestArgs};
 
     let completion = UID::random_token();
     let wltoken = UID::well_known_token(WLTOKEN::PingPacket);
 
     let mut builder = flatbuffers::FlatBufferBuilder::with_capacity(1024);
-    let response_token : crate::common_generated::UID = (&completion).into(); //crate::common_generated::UID::new(completion.uid[0], completion.uid[1]);
+    let response_token: crate::common_generated::UID = (&completion).into(); //crate::common_generated::UID::new(completion.uid[0], completion.uid[1]);
     let uid = Some(&response_token);
     let reply_promise = Some(ReplyPromise::create(
         &mut builder,
@@ -101,7 +100,7 @@ async fn handle(request: FlowMessage) -> Result<Option<FlowMessage>> {
     let reply_promise = ping_request.reply_promise().unwrap();
 
     let uid = reply_promise.uid().unwrap();
-    let uid : UID = uid.into();
+    let uid: UID = uid.into();
 
     let frame = serialize_response(uid)?;
     Ok(Some(FlowMessage::new_response(request.flow, frame)?))
@@ -121,7 +120,8 @@ impl FlowHandler for Ping {
     }
 }
 
-pub async fn ping(peer: SocketAddr, svc: &ConnectionKeeper) -> Result<()> {
+pub async fn ping(peer: SocketAddr, svc: &Arc<ConnectionKeeper>) -> Result<()> {
+    // println!("ping {:?}", peer);
     let req = serialize_request(peer)?;
     let response_frame = svc.rpc(req).await?;
     deserialize_response(response_frame.frame)

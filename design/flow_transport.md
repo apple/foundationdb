@@ -145,3 +145,13 @@ getOrOpenPeer maintains a hashmap of NetworkAddress -> peer, and (on this path)
 starts a ConnectionKeeper for the peer.
 
 ConnectionKeeper retries connections, handles connection timeouts, performs failure monitoring, and sends the connect packet at connection startup.
+
+### Obtaining sample flatbuffers for a given message type
+
+There are a number of TEST_CASE blocks with names that start with
+`/flatbuffer/samples`.  These output a serialized flatbuffer to stdout
+in Rust language syntax.  Like any other unit test, they can be invoked with:
+
+```
+fdbserver -r unittests -f /flatbuffer/samples
+```

@@ -526,6 +526,18 @@ ACTOR Future<Void> monitorNominee(Key key,
 	}
 }
 
+TEST_CASE("/flatbuffer/samples/GetLeader") {
+	GetLeaderRequest req(LiteralStringRef("testKey"), UID());
+	test_only_write_to_stdout(req);
+	LeaderInfo li(deterministicRandom()->randomUniqueID());
+	li.serializedInfo = LiteralStringRef("XXXXYYYYZZZZ");
+	ErrorOr<LeaderInfo> eoli = errorOr(li);
+	// Optional<ErrorOr<LeaderInfo>> oli = errorOr(li);
+	// test_only_write_to_stdout(oli);
+	test_only_write_to_stdout(eoli);
+	return Void();
+}
+
 // Also used in fdbserver/LeaderElection.actor.cpp!
 // bool represents if the LeaderInfo is a majority answer or not.
 // This function also masks the first 7 bits of changeId of the nominees and returns the Leader with masked changeId

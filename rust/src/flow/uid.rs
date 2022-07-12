@@ -1,4 +1,4 @@
-use super::{Error, Result};
+use super::Result;
 
 use num_derive::{FromPrimitive, ToPrimitive};
 use num_traits::{FromPrimitive, ToPrimitive};
@@ -90,14 +90,16 @@ impl UID {
 }
 
 impl From<&crate::common_generated::UID> for UID {
-    fn from(uid : &crate::common_generated::UID) -> UID {
-        UID{ uid: [uid.first(), uid.second() ]}
+    fn from(uid: &crate::common_generated::UID) -> UID {
+        UID {
+            uid: [uid.first(), uid.second()],
+        }
     }
 }
 
 impl From<&UID> for crate::common_generated::UID {
-    fn from(uid : &UID) -> crate::common_generated::UID {
-        let mut arry = [0u8;16];
+    fn from(uid: &UID) -> crate::common_generated::UID {
+        let mut arry = [0u8; 16];
         arry[0..8].copy_from_slice(&uid.uid[0].to_le_bytes());
         arry[8..16].copy_from_slice(&uid.uid[1].to_le_bytes());
         crate::common_generated::UID(arry)

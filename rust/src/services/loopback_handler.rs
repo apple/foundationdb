@@ -45,8 +45,7 @@ impl LoopbackHandler {
         }))
     }
 
-    pub fn register_well_known_endpoint(&self, wltoken: WLTOKEN, endpoint: Box<dyn FlowHandler>)
-    {
+    pub fn register_well_known_endpoint(&self, wltoken: WLTOKEN, endpoint: Box<dyn FlowHandler>) {
         self.well_known_endpoints.insert(wltoken, endpoint);
     }
 

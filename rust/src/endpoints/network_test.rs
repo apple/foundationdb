@@ -37,7 +37,7 @@ pub fn serialize_request(
     let wltoken = UID::well_known_token(WLTOKEN::ReservedForTesting);
     use crate::common_generated::{ReplyPromise, ReplyPromiseArgs};
     use network_test_request::{
-        FakeRoot, FakeRootArgs, NetworkTestRequest, NetworkTestRequestArgs
+        FakeRoot, FakeRootArgs, NetworkTestRequest, NetworkTestRequestArgs,
     };
     // let mut builder = FlatBufferBuilder::with_capacity(usize::min(
     //     128 + (request_len as usize),
@@ -185,7 +185,7 @@ impl FlowHandler for NetworkTest {
 
 pub async fn network_test(
     peer: SocketAddr,
-    svc: &ConnectionKeeper,
+    svc: &Arc<ConnectionKeeper>,
     request_sz: u32,
     response_sz: u32,
 ) -> Result<()> {

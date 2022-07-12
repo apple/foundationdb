@@ -54,7 +54,7 @@ impl FromStr for ClusterFile {
             return Err(format!("ID should only contain a-z, A-Z, 0-9  Got: {}", id).into());
         }
 
-        let host_port_tokens = tokens[1].split(",");
+        let host_port_tokens = host_list.split(",");
 
         let mut hosts = Vec::<ClusterHost>::new();
         let mut uniq = std::collections::HashSet::<ClusterHost>::new();
@@ -103,9 +103,7 @@ impl FromStr for ClusterFile {
 fn test_cluster_file() -> Result<()> {
     ClusterFile::from_str("45FiQ41H:45FiQ41H@127.0.0.1:4000")?;
     ClusterFile::from_str("test:test@127.0.0.1:4501")?;
-    ClusterFile::from_str(
-        "test:test@127.0.0.1:4501:tls,127.0.0.1:4502:tls,127.0.0.1:4503:tls",
-    )?;
+    ClusterFile::from_str("test:test@127.0.0.1:4501:tls,127.0.0.1:4502:tls,127.0.0.1:4503:tls")?;
     ClusterFile::from_str("test:test@127.0.0.1:4501:tls,127.0.0.1:4502:tls,127.0.0.1:4502:tls")
         .expect_err("Expected error!");
     ClusterFile::from_str("test:test@localhost:4501")?;
