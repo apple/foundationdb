@@ -175,8 +175,7 @@ public:
 			}
 		} catch (...) {
 			// including cancellation
-			Map<UID, StorageQueueInfo>::iterator myQueueInfo = self->storageQueueInfo.find(ssi.id());
-			self->storageQueueInfo.erase(myQueueInfo);
+			self->storageQueueInfo.erase(ssi.id());
 			self->storageServerInterfaces.erase(ssi.id());
 			throw;
 		}
