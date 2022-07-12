@@ -124,6 +124,37 @@ class DDTxnProcessorImpl {
 		}
 		return Void();
 	}
+
+	ACTOR static Future<Void> waitForDataDistributionEnabled(Database cx, const DDEnabledState* ddEnabledState) {
+		state Transaction tr(cx);
+		loop {
+			wait(delay(SERVER_KNOBS->DD_ENABLED_CHECK_DELAY, TaskPriority::DataDistribution));
+
+			try {
+				Optional<Value> mode = wait(tr.get(dataDistributionModeKey));
+				if (!mode.present() && ddEnabledState->isDDEnabled()) {
+					TraceEvent("WaitForDDEnabledSucceeded").log();
+					return Void();
+				}
+				if (mode.present()) {
+					BinaryReader rd(mode.get(), Unversioned());
+					int m;
+					rd >> m;
+					TraceEvent(SevDebug, "WaitForDDEnabled")
+					    .detail("Mode", m)
+					    .detail("IsDDEnabled", ddEnabledState->isDDEnabled());
+					if (m && ddEnabledState->isDDEnabled()) {
+						TraceEvent("WaitForDDEnabledSucceeded").log();
+						return Void();
+					}
+				}
+
+				tr.reset();
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
 };
 
 Future<IDDTxnProcessor::SourceServers> DDTxnProcessor::getSourceServersForRange(const KeyRangeRef range) {
@@ -147,4 +178,8 @@ Future<Void> DDTxnProcessor::updateReplicaKeys(const std::vector<Optional<Key>>&
                                                const std::vector<Optional<Key>>& remoteIds,
                                                const DatabaseConfiguration& configuration) const {
 	return DDTxnProcessorImpl::updateReplicaKeys(cx, primaryIds, remoteIds, configuration);
+}
+
+Future<Void> DDTxnProcessor::waitForDataDistributionEnabled(const DDEnabledState* ddEnabledState) const {
+	return DDTxnProcessorImpl::waitForDataDistributionEnabled(cx, ddEnabledState);
 }
