@@ -409,7 +409,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 			TEST(true); // Deleting old state transactions
 			int64_t erasedBytes = self->recentStateTransactionsInfo.eraseUpTo(oldestProxyVersion);
 			self->debugMinRecentStateVersion = oldestProxyVersion + 1;
-			anyPopped = erasedBytes = 0;
+			anyPopped = erasedBytes > 0;
 			stateBytes -= erasedBytes;
 		}
 

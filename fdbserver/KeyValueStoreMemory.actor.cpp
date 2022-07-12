@@ -479,8 +479,12 @@ private:
 
 			uint8_t* plaintext = new uint8_t[sizeof(int) + v1.size() + v2.size()];
 			*(int*)plaintext = op;
-			memcpy(plaintext + sizeof(int), v1.begin(), v1.size());
-			memcpy(plaintext + sizeof(int) + v1.size(), v2.begin(), v2.size());
+			if (v1.size()) {
+				memcpy(plaintext + sizeof(int), v1.begin(), v1.size());
+			}
+			if (v2.size()) {
+				memcpy(plaintext + sizeof(int) + v1.size(), v2.begin(), v2.size());
+			}
 
 			ASSERT(cipherKeys.cipherTextKey.isValid());
 			ASSERT(cipherKeys.cipherHeaderKey.isValid());

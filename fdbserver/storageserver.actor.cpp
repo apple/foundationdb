@@ -6678,6 +6678,7 @@ private:
 	KeyRef startKey;
 	bool nowAssigned;
 	bool emptyRange;
+	UID dataMoveId;
 	bool processedStartKey;
 
 	KeyRef cacheStartKey;
@@ -6712,8 +6713,7 @@ private:
 			// We can also ignore clearRanges, because they are always accompanied by such a pair of sets with the same
 			// keys
 			startKey = m.param1;
-			nowAssigned = m.param2 != serverKeysFalse;
-			emptyRange = m.param2 == serverKeysTrueEmptyRange;
+			decodeServerKeysValue(m.param2, nowAssigned, emptyRange, dataMoveId);
 			processedStartKey = true;
 		} else if (m.type == MutationRef::SetValue && m.param1 == lastEpochEndPrivateKey) {
 			// lastEpochEnd transactions are guaranteed by the master to be alone in their own batch (version)
@@ -8671,6 +8671,7 @@ ACTOR Future<Void> metricsCore(StorageServer* self, StorageServerInterface ssi) 
 	                               &self->counters.cc,
 	                               self->thisServerID.toString() + "/StorageMetrics",
 	                               [self = self](TraceEvent& te) {
+		                               te.detail("StorageEngine", self->storage.getKeyValueStoreType().toString());
 		                               te.detail("Tag", self->tag.toString());
 		                               StorageBytes sb = self->storage.getStorageBytes();
 		                               te.detail("KvstoreBytesUsed", sb.used);

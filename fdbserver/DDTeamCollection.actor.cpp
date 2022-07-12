@@ -46,6 +46,7 @@ FDB_DEFINE_BOOLEAN_PARAM(PreferLowerDiskUtil);
 FDB_DEFINE_BOOLEAN_PARAM(TeamMustHaveShards);
 FDB_DEFINE_BOOLEAN_PARAM(ForReadBalance);
 FDB_DEFINE_BOOLEAN_PARAM(PreferLowerReadUtil);
+FDB_DEFINE_BOOLEAN_PARAM(FindTeamByServers);
 
 class DDTeamCollectionImpl {
 	ACTOR static Future<Void> checkAndRemoveInvalidLocalityAddr(DDTeamCollection* self) {
@@ -152,6 +153,19 @@ public:
 		}
 
 		return Void();
+	}
+
+	// Find the team with the exact storage servers as req.src.
+	static void getTeamByServers(DDTeamCollection* self, GetTeamRequest req) {
+		const std::string servers = TCTeamInfo::serversToString(req.src);
+		Optional<Reference<IDataDistributionTeam>> res;
+		for (const auto& team : self->teams) {
+			if (team->getServerIDsStr() == servers) {
+				res = team;
+				break;
+			}
+		}
+		req.reply.send(std::make_pair(res, false));
 	}
 
 	// SOMEDAY: Make bestTeam better about deciding to leave a shard where it is (e.g. in PRIORITY_TEAM_HEALTHY case)
@@ -721,19 +735,19 @@ public:
 				bool recheck = !healthy && (lastReady != self->initialFailureReactionDelay.isReady() ||
 				                            (lastZeroHealthy && !self->zeroHealthyTeams->get()) || containsFailed);
 
-				//TraceEvent("TeamHealthChangeDetected", self->distributorId)
-				//    .detail("Team", team->getDesc())
-				//    .detail("ServersLeft", serversLeft)
-				//    .detail("LastServersLeft", lastServersLeft)
-				//    .detail("AnyUndesired", anyUndesired)
-				//    .detail("LastAnyUndesired", lastAnyUndesired)
-				//    .detail("AnyWrongConfiguration", anyWrongConfiguration)
-				//    .detail("LastWrongConfiguration", lastWrongConfiguration)
-				//    .detail("ContainsWigglingServer", anyWigglingServer)
-				//    .detail("Recheck", recheck)
-				//    .detail("BadTeam", badTeam)
-				//    .detail("LastZeroHealthy", lastZeroHealthy)
-				//    .detail("ZeroHealthyTeam", self->zeroHealthyTeams->get());
+				TraceEvent(SevVerbose, "TeamHealthChangeDetected", self->distributorId)
+				    .detail("Team", team->getDesc())
+				    .detail("ServersLeft", serversLeft)
+				    .detail("LastServersLeft", lastServersLeft)
+				    .detail("AnyUndesired", anyUndesired)
+				    .detail("LastAnyUndesired", lastAnyUndesired)
+				    .detail("AnyWrongConfiguration", anyWrongConfiguration)
+				    .detail("LastWrongConfiguration", lastWrongConfiguration)
+				    .detail("ContainsWigglingServer", anyWigglingServer)
+				    .detail("Recheck", recheck)
+				    .detail("BadTeam", badTeam)
+				    .detail("LastZeroHealthy", lastZeroHealthy)
+				    .detail("ZeroHealthyTeam", self->zeroHealthyTeams->get());
 
 				lastReady = self->initialFailureReactionDelay.isReady();
 				lastZeroHealthy = self->zeroHealthyTeams->get();
@@ -867,6 +881,11 @@ public:
 						std::vector<KeyRange> shards = self->shardsAffectedByTeamFailure->getShardsFor(
 						    ShardsAffectedByTeamFailure::Team(team->getServerIDs(), self->primary));
 
+						TraceEvent(SevVerbose, "ServerTeamRelocatingShards", self->distributorId)
+						    .detail("Info", team->getDesc())
+						    .detail("TeamID", team->getTeamID())
+						    .detail("Shards", shards.size());
+
 						for (int i = 0; i < shards.size(); i++) {
 							// Make it high priority to move keys off failed server or else RelocateShards may never be
 							// addressed
@@ -960,6 +979,7 @@ public:
 		} catch (Error& e) {
 			if (logTeamEvents) {
 				TraceEvent("TeamTrackerStopping", self->distributorId)
+				    .errorUnsuppressed(e)
 				    .detail("ServerPrimary", self->primary)
 				    .detail("Team", team->getDesc())
 				    .detail("Priority", team->getPriority());
@@ -1608,10 +1628,10 @@ public:
 				// could cause us to not store the mutations sent to the short lived storage server.
 				if (ver > addedVersion + SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) {
 					bool canRemove = wait(canRemoveStorageServer(tr, serverID));
-					// TraceEvent("WaitForAllDataRemoved")
-					//     .detail("Server", serverID)
-					//     .detail("CanRemove", canRemove)
-					//     .detail("Shards", teams->shardsAffectedByTeamFailure->getNumberOfShards(serverID));
+					TraceEvent(SevVerbose, "WaitForAllDataRemoved")
+					    .detail("Server", serverID)
+					    .detail("CanRemove", canRemove)
+					    .detail("Shards", teams->shardsAffectedByTeamFailure->getNumberOfShards(serverID));
 					ASSERT_GE(teams->shardsAffectedByTeamFailure->getNumberOfShards(serverID), 0);
 					if (canRemove && teams->shardsAffectedByTeamFailure->getNumberOfShards(serverID) == 0) {
 						return Void();
@@ -2702,7 +2722,11 @@ public:
 	ACTOR static Future<Void> serverGetTeamRequests(DDTeamCollection* self, TeamCollectionInterface tci) {
 		loop {
 			GetTeamRequest req = waitNext(tci.getTeam.getFuture());
-			self->addActor.send(self->getTeam(req));
+			if (req.findTeamByServers) {
+				getTeamByServers(self, req);
+			} else {
+				self->addActor.send(self->getTeam(req));
+			}
 		}
 	}
 
@@ -3005,8 +3029,8 @@ public:
 					    .trackLatest(self->primary ? "TotalDataInFlight"
 					                               : "TotalDataInFlightRemote"); // This trace event's trackLatest
 					                                                             // lifetime is controlled by
-					// DataDistributorData::totalDataInFlightEventHolder or
-					// DataDistributorData::totalDataInFlightRemoteEventHolder.
+					// DataDistributor::totalDataInFlightEventHolder or
+					// DataDistributor::totalDataInFlightRemoteEventHolder.
 					// The track latest key we use here must match the key used in
 					// the holder.
 
@@ -3134,12 +3158,19 @@ public:
 				    .detail("Primary", self->isPrimary());
 				for (i = 0; i < teams.size(); i++) {
 					const auto& team = teams[i];
+
 					TraceEvent("ServerTeamInfo", self->getDistributorId())
 					    .detail("TeamIndex", i)
 					    .detail("Healthy", team->isHealthy())
 					    .detail("TeamSize", team->size())
 					    .detail("MemberIDs", team->getServerIDsStr())
-					    .detail("Primary", self->isPrimary());
+					    .detail("Primary", self->isPrimary())
+					    .detail("TeamID", team->getTeamID())
+					    .detail(
+					        "Shards",
+					        self->shardsAffectedByTeamFailure
+					            ->getShardsFor(ShardsAffectedByTeamFailure::Team(team->getServerIDs(), self->primary))
+					            .size());
 					if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
 						wait(yield());
 					}
