@@ -666,24 +666,40 @@ ACTOR Future<Void> brokenPromiseToReady(Future<Void> f) {
 	return Void();
 }
 
-bool shardForwardMergeFeasible(DataDistributionTracker* self, KeyRange const& keys, KeyRangeRef nextRange) {
+static bool shardForwardMergeFeasible(DataDistributionTracker* self, KeyRange const& keys, KeyRangeRef nextRange) {
 	bool honorTenantKeyspaceBoundaries = self->ddTenantCache.present();
 
+	Optional<Reference<TCTenantInfo>> tenantOwningBegin = {};
+	Optional<Reference<TCTenantInfo>> tenantOwningNext = {};
+
+	if (honorTenantKeyspaceBoundaries) {
+		tenantOwningBegin = self->ddTenantCache.get()->tenantOwning(keys.begin);
+		tenantOwningNext = self->ddTenantCache.get()->tenantOwning(nextRange.begin);
+	}
+
 	if (keys.end == allKeys.end ||
-	    (honorTenantKeyspaceBoundaries && self->ddTenantCache.get()->tenantOwning(keys.begin) !=
-	                                          self->ddTenantCache.get()->tenantOwning(nextRange.begin))) {
+	    (honorTenantKeyspaceBoundaries && ((tenantOwningBegin.present() != tenantOwningNext.present()) ||
+	                                       (tenantOwningBegin.present() && (tenantOwningBegin != tenantOwningNext))))) {
 		return false;
 	}
 
 	return true;
 }
 
-bool shardBackwardMergeFeasible(DataDistributionTracker* self, KeyRange const& keys, KeyRangeRef prevRange) {
+static bool shardBackwardMergeFeasible(DataDistributionTracker* self, KeyRange const& keys, KeyRangeRef prevRange) {
 	bool honorTenantKeyspaceBoundaries = self->ddTenantCache.present();
 
+	Optional<Reference<TCTenantInfo>> tenantOwningBegin = {};
+	Optional<Reference<TCTenantInfo>> tenantOwningPrev = {};
+
+	if (honorTenantKeyspaceBoundaries) {
+		tenantOwningBegin = self->ddTenantCache.get()->tenantOwning(keys.begin);
+		tenantOwningPrev = self->ddTenantCache.get()->tenantOwning(prevRange.begin);
+	}
+
 	if (keys.begin == allKeys.begin ||
-	    (honorTenantKeyspaceBoundaries && self->ddTenantCache.get()->tenantOwning(keys.begin) !=
-	                                          self->ddTenantCache.get()->tenantOwning(prevRange.begin))) {
+	    (honorTenantKeyspaceBoundaries && ((tenantOwningBegin.present() != tenantOwningPrev.present()) ||
+	                                       (tenantOwningBegin.present() && (tenantOwningBegin != tenantOwningPrev))))) {
 		return false;
 	}
 
@@ -700,21 +716,13 @@ Future<Void> shardMerger(DataDistributionTracker* self,
 
 	TEST(true); // shard to be merged
 
-	auto tenantOwningBegin = self->ddTenantCache.get()->tenantOwning(keys.begin);
-	auto tenantOwningEnd = self->ddTenantCache.get()->tenantOwning(keys.end);
-	TraceEvent(SevInfo, "ShardMerger")
-	    .detail("Begin", keys.begin)
-	    .detail("End", keys.end)
-	    .detail("IsTenantKey", self->ddTenantCache.get()->isTenantKey(keys.begin))
-	    .detail("TenantOwningBegin", tenantOwningBegin.present() ? tenantOwningBegin.get()->prefixDesc() : "{}")
-	    .detail("TenantOwningEnd", tenantOwningEnd.present() ? tenantOwningEnd.get()->prefixDesc() : "{}");
-
 	ASSERT(keys.begin > allKeys.begin);
 
 	// This will merge shards both before and after "this" shard in keyspace.
 	int shardsMerged = 1;
 	bool forwardComplete = false;
 	KeyRangeRef merged;
+
 	StorageMetrics endingStats = shardSize->get().get().metrics;
 	int shardCount = shardSize->get().get().shardCount;
 	double lastLowBandwidthStartTime = shardSize->get().get().lastLowBandwidthStartTime;
@@ -730,13 +738,8 @@ Future<Void> shardMerger(DataDistributionTracker* self,
 
 	loop {
 		Optional<ShardMetrics> newMetrics;
-		bool honorTenantKeyspaceBoundaries = self->ddTenantCache.present();
-
 		if (!forwardComplete) {
-			if (nextIter->range().end == allKeys.end ||
-			    (honorTenantKeyspaceBoundaries &&
-			     self->ddTenantCache.get()->tenantOwning(keys.begin) !=
-			         self->ddTenantCache.get()->tenantOwning(nextIter->range().begin))) {
+			if (nextIter->range().end == allKeys.end || !shardForwardMergeFeasible(self, keys, nextIter->range())) {
 				forwardComplete = true;
 				continue;
 			}
@@ -753,9 +756,7 @@ Future<Void> shardMerger(DataDistributionTracker* self,
 			--prevIter;
 			newMetrics = prevIter->value().stats->get();
 
-			if (honorTenantKeyspaceBoundaries && self->ddTenantCache.get()->tenantOwning(keys.begin) !=
-			                                         self->ddTenantCache.get()->tenantOwning(prevIter->range().begin)) {
-
+			if (!shardBackwardMergeFeasible(self, keys, prevIter->range())) {
 				++prevIter;
 				break;
 			}
