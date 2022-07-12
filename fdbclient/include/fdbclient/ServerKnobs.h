@@ -914,6 +914,7 @@ public:
 	bool REST_KMS_CONNECTOR_REFRESH_KMS_URLS;
 	double REST_KMS_CONNECTOR_REFRESH_KMS_URLS_INTERVAL_SEC;
 	std::string REST_KMS_CONNECTOR_GET_ENCRYPTION_KEYS_ENDPOINT;
+	bool DYNAMIC_REPLICATION_ENABLED;
 
 	ServerKnobs(Randomize, ClientKnobs*, IsSimulated);
 	void initialize(Randomize, ClientKnobs*, IsSimulated);

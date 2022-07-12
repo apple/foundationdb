@@ -39,6 +39,7 @@ enum class RelocateReason { INVALID = -1, OTHER, REBALANCE_DISK, REBALANCE_READ 
 
 // One-to-one relationship to the priority knobs
 enum class DataMovementReason {
+	INVALID = -1,
 	RECOVER_MOVE,
 	REBALANCE_UNDERUTILIZED_TEAM,
 	REBALANCE_OVERUTILIZED_TEAM,
@@ -55,7 +56,8 @@ enum class DataMovementReason {
 	TEAM_1_LEFT,
 	TEAM_FAILED,
 	TEAM_0_LEFT,
-	SPLIT_SHARD
+	SPLIT_SHARD,
+	DYNAMIC_REPLICATION
 };
 
 struct DDShardInfo;
@@ -89,9 +91,17 @@ struct RelocateShard {
 	std::shared_ptr<DataMove> dataMove; // Not null if this is a restored data move.
 	UID dataMoveId;
 	RelocateReason reason;
-	RelocateShard() : priority(0), cancelled(false), dataMoveId(anonymousShardId), reason(RelocateReason::INVALID) {}
+	DataMovementReason moveReason_;
+
+	RelocateShard()
+	  : priority(0), cancelled(false), dataMoveId(anonymousShardId), reason(RelocateReason::INVALID),
+	    moveReason_(DataMovementReason::INVALID) {}
 	RelocateShard(KeyRange const& keys, int priority, RelocateReason reason)
-	  : keys(keys), priority(priority), cancelled(false), dataMoveId(anonymousShardId), reason(reason) {}
+	  : keys(keys), priority(priority), cancelled(false), dataMoveId(anonymousShardId), reason(reason),
+	    moveReason_(DataMovementReason::INVALID) {}
+	RelocateShard(KeyRange const& keys, int priority, RelocateReason reason, DataMovementReason moveReason)
+	  : keys(keys), priority(priority), cancelled(false), dataMoveId(anonymousShardId), reason(reason),
+	    moveReason_(moveReason) {}
 
 	bool isRestore() const { return this->dataMove != nullptr; }
 };
@@ -331,6 +341,7 @@ private:
 		}
 	};
 
+	// key = keyRange, pair stands for <src, dest>
 	KeyRangeMap<std::pair<std::vector<Team>, std::vector<Team>>>
 	    shard_teams; // A shard can be affected by the failure of multiple teams if it is a queued merge, or when
 	                 // usable_regions > 1

@@ -20,8 +20,10 @@
 
 #include <limits>
 #include <numeric>
+#include <set>
 #include <vector>
 
+#include "fdbserver/LogSystem.h"
 #include "flow/ActorCollection.h"
 #include "flow/FastRef.h"
 #include "flow/Trace.h"
@@ -77,9 +79,12 @@ inline bool isDataMovementForValleyFiller(DataMovementReason reason) {
 	       reason == DataMovementReason::REBALANCE_READ_UNDERUTIL_TEAM;
 }
 
-int dataMovementPriority(DataMovementReason reason) {
-	int priority;
+int mapDataMovementToPriority(DataMovementReason reason) {
+	int priority = -1;
 	switch (reason) {
+	case DataMovementReason::INVALID:
+		ASSERT(false);
+		break;
 	case DataMovementReason::RECOVER_MOVE:
 		priority = SERVER_KNOBS->PRIORITY_RECOVER_MOVE;
 		break;
@@ -131,6 +136,9 @@ int dataMovementPriority(DataMovementReason reason) {
 	case DataMovementReason::SPLIT_SHARD:
 		priority = SERVER_KNOBS->PRIORITY_SPLIT_SHARD;
 		break;
+	case DataMovementReason::DYNAMIC_REPLICATION:
+		ASSERT(false);
+		break;
 	}
 	return priority;
 }
@@ -153,11 +161,12 @@ struct RelocateData {
 	bool cancellable;
 	TraceInterval interval;
 	std::shared_ptr<DataMove> dataMove;
+	DataMovementReason moveReason_;
 
 	RelocateData()
 	  : priority(-1), boundaryPriority(-1), healthPriority(-1), reason(RelocateReason::INVALID), startTime(-1),
 	    dataMoveId(anonymousShardId), workFactor(0), wantsNewServers(false), cancellable(false),
-	    interval("QueuedRelocation") {}
+	    interval("QueuedRelocation"), moveReason_(DataMovementReason::INVALID) {}
 	explicit RelocateData(RelocateShard const& rs)
 	  : keys(rs.keys), priority(rs.priority), boundaryPriority(isBoundaryPriority(rs.priority) ? rs.priority : -1),
 	    healthPriority(isHealthPriority(rs.priority) ? rs.priority : -1), reason(rs.reason), startTime(now()),
@@ -165,7 +174,7 @@ struct RelocateData {
 	    wantsNewServers(isMountainChopperPriority(rs.priority) || isValleyFillerPriority(rs.priority) ||
 	                    rs.priority == SERVER_KNOBS->PRIORITY_SPLIT_SHARD ||
 	                    rs.priority == SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT),
-	    cancellable(true), interval("QueuedRelocation"), dataMove(rs.dataMove) {
+	    cancellable(true), interval("QueuedRelocation"), dataMove(rs.dataMove), moveReason_(rs.moveReason_) {
 		if (dataMove != nullptr) {
 			this->src.insert(this->src.end(), dataMove->meta.src.begin(), dataMove->meta.src.end());
 		}
@@ -532,6 +541,18 @@ ACTOR Future<Void> dataDistributionRelocator(struct DDQueueData* self,
                                              RelocateData rd,
                                              Future<Void> prevCleanup,
                                              const DDEnabledState* ddEnabledState);
+
+ACTOR Future<Void> getSrcTeam(RelocateData* rd,
+                              DDQueueData* self,
+                              double inflightPenalty,
+                              int tciIndex,
+                              std::vector<std::pair<Reference<IDataDistributionTeam>, bool>>* srcTeams);
+
+void addSrcTeamsToDestinationTeams(const std::vector<std::pair<Reference<IDataDistributionTeam>, bool>>& srcTeams,
+                                   std::vector<ShardsAffectedByTeamFailure::Team>& destinationTeams,
+                                   ParallelTCInfo& healthyDestinations,
+                                   std::vector<UID>& healthyIds,
+                                   std::vector<UID>& destIds);
 
 struct DDQueueData {
 	struct DDDataMove {
@@ -1279,6 +1300,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 	state std::vector<std::pair<Reference<IDataDistributionTeam>, bool>> bestTeams;
 	state double startTime = now();
 	state std::vector<UID> destIds;
+	state std::vector<std::pair<Reference<IDataDistributionTeam>, bool>> srcTeams;
 
 	try {
 		if (now() - self->lastInterval < 1.0) {
@@ -1364,7 +1386,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 						anyHealthy = true;
 						bestTeams.emplace_back(bestTeam.first.get(), bestTeam.second);
 					} else {
-						double inflightPenalty = SERVER_KNOBS->INFLIGHT_PENALTY_HEALTHY;
+						state double inflightPenalty = SERVER_KNOBS->INFLIGHT_PENALTY_HEALTHY;
 						if (rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY ||
 						    rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_2_LEFT)
 							inflightPenalty = SERVER_KNOBS->INFLIGHT_PENALTY_UNHEALTHY;
@@ -1416,6 +1438,11 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 						}
 
 						bestTeams.emplace_back(bestTeam.first.get(), bestTeam.second);
+
+						if (rd.moveReason_ == DataMovementReason::DYNAMIC_REPLICATION &&
+						    SERVER_KNOBS->DYNAMIC_REPLICATION_ENABLED) {
+							wait(getSrcTeam(&rd, self, inflightPenalty, tciIndex, &srcTeams));
+						}
 					}
 					tciIndex++;
 				}
@@ -1510,6 +1537,12 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 				    .suppressFor(1.0)
 				    .detail("ExpectedTeamSize", self->teamSize)
 				    .detail("DestTeamSize", totalIds);
+			}
+
+			// TODO@ZZX, decide what to deal with healthyDestinations
+			if (rd.moveReason_ == DataMovementReason::DYNAMIC_REPLICATION &&
+			    SERVER_KNOBS->DYNAMIC_REPLICATION_ENABLED) {
+				addSrcTeamsToDestinationTeams(srcTeams, destinationTeams, healthyDestinations, healthyIds, destIds);
 			}
 
 			if (!rd.isRestore()) {
@@ -1718,6 +1751,74 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 	}
 }
 
+// TODO@ZZX: check healthyTeams
+ACTOR Future<Void> getSrcTeam(RelocateData* rd,
+                              DDQueueData* self,
+                              double inflightPenalty,
+                              int tciIndex,
+                              std::vector<std::pair<Reference<IDataDistributionTeam>, bool>>* srcTeams) {
+	state bool bestTeamReady;
+
+	auto req = GetTeamRequest(WantNewServers::False,
+	                          WantTrueBest::False,
+	                          PreferLowerDiskUtil::True,
+	                          TeamMustHaveShards::False,
+	                          ForReadBalance(rd->reason == RelocateReason::REBALANCE_READ),
+	                          PreferLowerReadUtil::True,
+	                          inflightPenalty);
+
+	req.src = rd->src;
+	req.completeSources = rd->completeSources;
+
+	// bestTeam.second = false if the bestTeam in the teamCollection (in the DC)
+	// does not have any server that hosts the relocateData. This is possible, for
+	// example, in a fearless configuration when the remote DC is just brought up.
+	Future<std::pair<Optional<Reference<IDataDistributionTeam>>, bool>> fbestTeam =
+	    brokenPromiseToNever(self->teamCollections[tciIndex].getTeam.getReply(req));
+	bestTeamReady = fbestTeam.isReady();
+	std::pair<Optional<Reference<IDataDistributionTeam>>, bool> bestTeam = wait(fbestTeam);
+	if (tciIndex > 0 && !bestTeamReady) {
+		// self->shardsAffectedByTeamFailure->moveShard must be called without any
+		// waits after getting the destination team or we could miss failure
+		// notifications for the storage servers in the destination team
+		TraceEvent("BestTeamNotReady");
+	} else if (!bestTeam.first.present()) {
+		// If a DC has no healthy team, we stop checking the other DCs until
+		// the unhealthy DC is healthy again or is excluded.
+		TraceEvent("NoHealthyTeam");
+	} else {
+		srcTeams->emplace_back(bestTeam.first.get(), bestTeam.second);
+	}
+	return Void();
+}
+
+void addSrcTeamsToDestinationTeams(const std::vector<std::pair<Reference<IDataDistributionTeam>, bool>>& srcTeams,
+                                   std::vector<ShardsAffectedByTeamFailure::Team>& destinationTeams,
+                                   ParallelTCInfo& healthyDestinations,
+                                   std::vector<UID>& healthyIds,
+                                   std::vector<UID>& destIds) {
+	// Sometimes srcTeam may intersect with destTeams, we need to use SET to eliminate repeated members.
+	std::set<ShardsAffectedByTeamFailure::Team> tmpDestTeams(destinationTeams.begin(), destinationTeams.end());
+	std::set<UID> tmpHealthyIds(healthyIds.begin(), healthyIds.end());
+	std::set<UID> tmpDestIds(destIds.begin(), destIds.end());
+
+	for (auto& [team, _] : srcTeams) {
+		const std::vector<UID>& serverIds = team->getServerIDs();
+		tmpDestTeams.insert(ShardsAffectedByTeamFailure::Team(serverIds, false));
+		healthyDestinations.addTeam(team);
+		tmpDestIds.insert(serverIds.begin(), serverIds.end());
+		if (team->isHealthy()) {
+			tmpHealthyIds.insert(serverIds.begin(), serverIds.end());
+		}
+	}
+	destinationTeams.clear();
+	destinationTeams.assign(tmpDestTeams.begin(), tmpDestTeams.end());
+	healthyIds.clear();
+	healthyIds.assign(tmpHealthyIds.begin(), tmpHealthyIds.end());
+	destIds.clear();
+	destIds.assign(tmpDestIds.begin(), tmpDestIds.end());
+}
+
 inline double getWorstCpu(const HealthMetrics& metrics, const std::vector<UID>& ids) {
 	double cpu = 0;
 	for (auto& id : ids) {
@@ -1734,8 +1835,9 @@ inline double getWorstCpu(const HealthMetrics& metrics, const std::vector<UID>& 
 
 // Move the shard with the top K highest read density of sourceTeam's to destTeam if sourceTeam has much more read load
 // than destTeam
+// TODO@ZZX: choose between rebalanceTeam OR rebalanceMultiplyTeam. Remember to use Knob
 ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
-                                     int priority,
+                                     DataMovementReason reason,
                                      Reference<IDataDistributionTeam> sourceTeam,
                                      Reference<IDataDistributionTeam> destTeam,
                                      bool primary,
@@ -1807,14 +1909,23 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
 		return false;
 	}
 
+	int priority = mapDataMovementToPriority(reason);
 	auto& metrics = metricsList[chosenIdx];
 	traceEvent->detail("ShardReadBandwidth", metrics.bytesReadPerKSecond);
 	//  Verify the shard is still in ShardsAffectedByTeamFailure
 	shards = self->shardsAffectedByTeamFailure->getShardsFor(
 	    ShardsAffectedByTeamFailure::Team(sourceTeam->getServerIDs(), primary));
+
 	for (int i = 0; i < shards.size(); i++) {
 		if (metrics.keys == shards[i]) {
-			self->output.send(RelocateShard(metrics.keys.get(), priority, RelocateReason::REBALANCE_READ));
+			if (SERVER_KNOBS->DYNAMIC_REPLICATION_ENABLED && isDataMovementForMountainChopper(reason)) {
+				self->output.send(RelocateShard(metrics.keys.get(),
+				                                priority,
+				                                RelocateReason::REBALANCE_READ,
+				                                DataMovementReason::DYNAMIC_REPLICATION));
+			} else {
+				self->output.send(RelocateShard(metrics.keys.get(), priority, RelocateReason::REBALANCE_READ));
+			}
 			self->updateLastAsSource(sourceTeam->getServerIDs());
 			return true;
 		}
@@ -1931,7 +2042,7 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueueData* self, int teamCollectionIndex,
 	state const bool readRebalance = isDataMovementForReadBalancing(reason);
 	state const char* eventName =
 	    isDataMovementForMountainChopper(reason) ? "BgDDMountainChopper_New" : "BgDDValleyFiller_New";
-	state int ddPriority = dataMovementPriority(reason);
+	state int ddPriority = mapDataMovementToPriority(reason);
 	loop {
 		state bool moved = false;
 		state Reference<IDataDistributionTeam> sourceTeam;
@@ -2015,7 +2126,7 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueueData* self, int teamCollectionIndex,
 				// clang-format off
 				if (sourceTeam.isValid() && destTeam.isValid()) {
 					if (readRebalance) {
-						wait(store(moved,rebalanceReadLoad(self, ddPriority, sourceTeam, destTeam, teamCollectionIndex == 0, &traceEvent)));
+						wait(store(moved,rebalanceReadLoad(self, reason, sourceTeam, destTeam, teamCollectionIndex == 0, &traceEvent)));
 					} else {
 						wait(store(moved,rebalanceTeams(self, ddPriority, sourceTeam, destTeam, teamCollectionIndex == 0, &traceEvent)));
 					}
@@ -2037,6 +2148,7 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueueData* self, int teamCollectionIndex,
 	}
 }
 
+// Only used for disk rebalance
 ACTOR Future<Void> BgDDMountainChopper(DDQueueData* self, int teamCollectionIndex) {
 	state double rebalancePollingInterval = SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL;
 	state Transaction tr(self->cx);

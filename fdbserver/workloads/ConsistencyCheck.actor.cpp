@@ -1227,8 +1227,10 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			}*/
 
 			// In a quiescent database, check that the team size is the same as the desired team size
+			// TODO@ZZX: Make sure this(Knobs) make sense, and add comments?
 			if (self->firstClient && self->performQuiescentChecks &&
-			    sourceStorageServers.size() != configuration.usableRegions * configuration.storageTeamSize) {
+			    (sourceStorageServers.size() != configuration.usableRegions * configuration.storageTeamSize &&
+			     !SERVER_KNOBS->DYNAMIC_REPLICATION_ENABLED)) {
 				TraceEvent("ConsistencyCheck_InvalidTeamSize")
 				    .detail("ShardBegin", printable(range.begin))
 				    .detail("ShardEnd", printable(range.end))
