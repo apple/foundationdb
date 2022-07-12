@@ -192,37 +192,6 @@ ACTOR Future<Void> remoteRecovered(Reference<AsyncVar<ServerDBInfo> const> db) {
 	return Void();
 }
 
-ACTOR Future<Void> waitForDataDistributionEnabled(Database cx, const DDEnabledState* ddEnabledState) {
-	state Transaction tr(cx);
-	loop {
-		wait(delay(SERVER_KNOBS->DD_ENABLED_CHECK_DELAY, TaskPriority::DataDistribution));
-
-		try {
-			Optional<Value> mode = wait(tr.get(dataDistributionModeKey));
-			if (!mode.present() && ddEnabledState->isDDEnabled()) {
-				TraceEvent("WaitForDDEnabledSucceeded").log();
-				return Void();
-			}
-			if (mode.present()) {
-				BinaryReader rd(mode.get(), Unversioned());
-				int m;
-				rd >> m;
-				TraceEvent(SevDebug, "WaitForDDEnabled")
-				    .detail("Mode", m)
-				    .detail("IsDDEnabled", ddEnabledState->isDDEnabled());
-				if (m && ddEnabledState->isDDEnabled()) {
-					TraceEvent("WaitForDDEnabledSucceeded").log();
-					return Void();
-				}
-			}
-
-			tr.reset();
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-	}
-}
-
 ACTOR Future<bool> isDataDistributionEnabled(Database cx, const DDEnabledState* ddEnabledState) {
 	state Transaction tr(cx);
 	loop {
@@ -371,6 +340,10 @@ struct DataDistributor : NonCopyable, ReferenceCounted<DataDistributor> {
 			remoteDcIds.push_back(regions[1].dcId);
 		}
 	}
+
+	Future<Void> waitDataDistributorEnabled(const DDEnabledState* ddEnabledState) const {
+		return txnProcessor->waitForDataDistributionEnabled(ddEnabledState);
+	}
 };
 
 // Runs the data distribution algorithm for FDB, including the DD Queue, DD tracker, and DD team collection
@@ -471,7 +444,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 				    .detail("HighestPriority", self->configuration.usableRegions > 1 ? 0 : -1)
 				    .trackLatest(self->totalDataInFlightRemoteEventHolder->trackingKey);
 
-				wait(waitForDataDistributionEnabled(cx, ddEnabledState));
+				wait(self->waitDataDistributorEnabled(ddEnabledState));
 				TraceEvent("DataDistributionEnabled").log();
 			}
 
@@ -922,6 +895,24 @@ ACTOR Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> 
 						result[primary].second.append(",coord");
 					} else {
 						result[primary] = std::make_pair(workersMap[primary], "coord");
+					}
+				}
+			}
+			if (SERVER_KNOBS->SNAPSHOT_ALL_STATEFUL_PROCESSES) {
+				for (const auto& worker : workers) {
+					const auto& processAddress = worker.interf.address();
+					// skip processes that are already included
+					if (result.count(processAddress))
+						continue;
+					const auto& processClassType = worker.processClass.classType();
+					// coordinators are always configured to be recruited
+					if (processClassType == ProcessClass::StorageClass) {
+						result[processAddress] = std::make_pair(worker.interf, "storage");
+						TraceEvent(SevInfo, "SnapUnRecruitedStorageProcess").detail("ProcessAddress", processAddress);
+					} else if (processClassType == ProcessClass::TransactionClass ||
+					           processClassType == ProcessClass::LogClass) {
+						result[processAddress] = std::make_pair(worker.interf, "tlog");
+						TraceEvent(SevInfo, "SnapUnRecruitedLogProcess").detail("ProcessAddress", processAddress);
 					}
 				}
 			}
