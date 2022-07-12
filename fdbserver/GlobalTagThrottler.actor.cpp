@@ -369,19 +369,16 @@ class GlobalTagThrottlerImpl {
 		}
 	}
 
-	void removeUnseenTags(std::unordered_set<TransactionTag> const& seenTags) {
-		std::unordered_map<TransactionTag, PerTagStatistics>::iterator it = tagStatistics.begin();
-		while (it != tagStatistics.end()) {
-			auto current = it++;
-			auto const tag = current->first;
-			if (tagStatistics.find(tag) == tagStatistics.end()) {
-				tagStatistics.erase(current);
+	void removeUnseenQuotas(std::unordered_set<TransactionTag> const& tagsWithQuota) {
+		for (auto& [tag, stats] : tagStatistics) {
+			if (!tagsWithQuota.count(tag)) {
+				stats.clearQuota();
 			}
 		}
 	}
 
 	ACTOR static Future<Void> monitorThrottlingChanges(GlobalTagThrottlerImpl* self) {
-		state std::unordered_set<TransactionTag> seenTags;
+		state std::unordered_set<TransactionTag> tagsWithQuota;
 
 		loop {
 			state ReadYourWritesTransaction tr(self->db);
@@ -390,16 +387,16 @@ class GlobalTagThrottlerImpl {
 					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
-					seenTags.clear();
+					tagsWithQuota.clear();
 					state RangeResult currentQuotas = wait(tr.getRange(tagQuotaKeys, CLIENT_KNOBS->TOO_MANY));
 					TraceEvent("GlobalTagThrottler_ReadCurrentQuotas").detail("Size", currentQuotas.size());
 					for (auto const kv : currentQuotas) {
 						auto const tag = kv.key.removePrefix(tagQuotaPrefix);
 						auto const quota = ThrottleApi::TagQuotaValue::fromValue(kv.value);
 						self->tagStatistics[tag].setQuota(quota);
-						seenTags.insert(tag);
+						tagsWithQuota.insert(tag);
 					}
-					self->removeUnseenTags(seenTags);
+					self->removeUnseenQuotas(tagsWithQuota);
 					++self->throttledTagChangeId;
 					wait(delay(5.0));
 					TraceEvent("GlobalTagThrottler_ChangeSignaled");
@@ -441,8 +438,15 @@ public:
 		}
 		return result;
 	}
-	// FIXME: Only count tags that have quota set
-	int64_t autoThrottleCount() const { return tagStatistics.size(); }
+	int64_t autoThrottleCount() const {
+		int64_t result{ 0 };
+		for (const auto& [tag, stats] : tagStatistics) {
+			if (stats.getQuota().present()) {
+				++result;
+			}
+		}
+		return result;
+	}
 	uint32_t busyReadTagCount() const {
 		// TODO: Implement
 		return 0;
