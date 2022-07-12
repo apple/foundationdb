@@ -22,6 +22,7 @@
 #include <string>
 #include <vector>
 
+#include "fdbclient/GenericManagementAPI.actor.h"
 #include "fmt/format.h"
 #include "fdbclient/Knobs.h"
 #include "flow/Arena.h"
@@ -2457,6 +2458,19 @@ bool schemaMatch(json_spirit::mValue const& schemaValue,
 		    .detail("SchemaPath", schemaPath);
 		throw unknown_error();
 	}
+}
+
+void setStorageQuota(Transaction& tr, StringRef tenantName, size_t quota) {
+	auto key = storageQuotaKey(tenantName);
+	tr.set(key, BinaryWriter::toValue<size_t>(quota, Unversioned()));
+}
+
+ACTOR Future<Optional<size_t>> getStorageQuota(Transaction* tr, StringRef tenantName) {
+	state Optional<Value> v = wait(tr->get(storageQuotaKey(tenantName)));
+	if (!v.present()) {
+		return Optional<size_t>();
+	}
+	return BinaryReader::fromStringRef<size_t>(v.get(), Unversioned());
 }
 
 std::string ManagementAPI::generateErrorMessage(const CoordinatorsResult& res) {

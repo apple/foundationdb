@@ -1410,6 +1410,16 @@ const KeyRef tenantMapPrivatePrefix = "\xff\xff/tenantMap/"_sr;
 const KeyRef tenantLastIdKey = "\xff/tenantLastId/"_sr;
 const KeyRef tenantDataPrefixKey = "\xff/tenantDataPrefix"_sr;
 
+const KeyRangeRef storageQuotaKeys(LiteralStringRef("\xff/storageQuota/"), LiteralStringRef("\xff/storageQuota0"));
+const KeyRef storageQuotaPrefix = storageQuotaKeys.begin;
+
+Key storageQuotaKey(StringRef tenantName) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(storageQuotaPrefix);
+	wr << tenantName;
+	return wr.toValue();
+}
+
 // for tests
 void testSSISerdes(StorageServerInterface const& ssi) {
 	printf("ssi=\nid=%s\nlocality=%s\nisTss=%s\ntssId=%s\nacceptingRequests=%s\naddress=%s\ngetValue=%s\n\n\n",
