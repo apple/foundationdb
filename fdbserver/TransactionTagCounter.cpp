@@ -118,12 +118,16 @@ public:
 			previousBusiestTags = topTags.getBusiestTags(elapsed, intervalTotalSampledCount);
 
 			TraceEvent("BusiestReadTag", thisServerID)
-			    .detail("Elapsed", elapsed)
-			    //.detail("Tag", printable(busiestTag))
-			    //.detail("TagCost", busiestTagCount)
 			    .detail("TotalSampledCost", intervalTotalSampledCount)
 			    .detail("Reported", previousBusiestTags.size())
 			    .trackLatest(busiestReadTagEventHolder->trackingKey);
+
+			for (const auto& tagInfo : previousBusiestTags) {
+				TraceEvent("BusyReadTag", thisServerID)
+				    .detail("Tag", printable(tagInfo.tag))
+				    .detail("Rate", tagInfo.rate)
+				    .detail("FractionalBusyness", tagInfo.fractionalBusyness);
+			}
 		}
 
 		intervalCounts.clear();
