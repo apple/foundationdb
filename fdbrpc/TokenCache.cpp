@@ -300,7 +300,7 @@ TEST_CASE("/fdbrpc/authz/TokenCache/BadTokens") {
 		auto validTokenSpec = authz::jwt::makeRandomTokenSpec(arena, rng, authz::Algorithm::ES256);
 		validTokenSpec.keyId = pubKeyName;
 		for (auto i = 0; i < numBadMutations; i++) {
-			FlowTransport::transport().addPublicKey(pubKeyName, privateKey.toPublicKey());
+			FlowTransport::transport().addPublicKey(pubKeyName, privateKey.toPublic());
 			auto publicKeyClearGuard =
 			    ScopeExit([pubKeyName]() { FlowTransport::transport().removePublicKey(pubKeyName); });
 			auto [mutationFn, mutationDesc] = badMutations[i];
@@ -337,7 +337,7 @@ TEST_CASE("/fdbrpc/authz/TokenCache/GoodTokens") {
 	auto arena = Arena();
 	auto privateKey = mkcert::makeEcP256();
 	auto const pubKeyName = "somePublicKey"_sr;
-	FlowTransport::transport().addPublicKey(pubKeyName, privateKey.toPublicKey());
+	FlowTransport::transport().addPublicKey(pubKeyName, privateKey.toPublic());
 	auto publicKeyClearGuard = ScopeExit([pubKeyName]() { FlowTransport::transport().removePublicKey(pubKeyName); });
 	auto& rng = *deterministicRandom();
 	auto tokenSpec = authz::jwt::makeRandomTokenSpec(arena, rng, authz::Algorithm::ES256);

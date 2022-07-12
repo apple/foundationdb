@@ -913,8 +913,9 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 		};
 		std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> encryptDomains = defaultDomains;
 		for (int t = 0; t < trs.size(); t++) {
-			int64_t tenantId = trs[t].tenantInfo.tenantId;
-			Optional<TenantName> tenantName = trs[t].tenantInfo.name;
+			TenantInfo const& tenantInfo = trs[t].tenantInfo;
+			int64_t tenantId = tenantInfo.tenantId;
+			Optional<TenantNameRef> const& tenantName = tenantInfo.name;
 			// TODO(yiwu): In raw access mode, use tenant prefix to figure out tenant id for user data
 			if (tenantId != TenantInfo::INVALID_TENANT) {
 				ASSERT(tenantName.present());

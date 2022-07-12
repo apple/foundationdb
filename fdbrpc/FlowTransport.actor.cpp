@@ -1560,7 +1560,7 @@ FlowTransport::FlowTransport(uint64_t transportId, int maxWellKnownEndpoints, IP
 	self->multiVersionCleanup = multiVersionCleanupWorker(self);
 	if (g_network->isSimulated()) {
 		for (auto const& p : g_simulator.authKeys) {
-			self->publicKeys.emplace(p.first, p.second.toPublicKey());
+			self->publicKeys.emplace(p.first, p.second.toPublic());
 		}
 	}
 }
