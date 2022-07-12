@@ -197,7 +197,7 @@ class GlobalTagThrottlerImpl {
 		if (transactionRate == 0.0) {
 			return {};
 		} else {
-			return cost.get() / transactionRate;
+			return std::max(1.0, cost.get() / transactionRate);
 		}
 	}
 
@@ -272,7 +272,7 @@ class GlobalTagThrottlerImpl {
 	Optional<double> getLimitingCost(UID storageServerId, OpType opType) const {
 		auto const throttlingRatio = get(throttlingRatios, storageServerId);
 		auto const currentCost = getCurrentCost(storageServerId, opType);
-		if (!throttlingRatio.present() || currentCost.present() || !throttlingRatio.get().present()) {
+		if (!throttlingRatio.present() || !currentCost.present() || !throttlingRatio.get().present()) {
 			return {};
 		}
 		return throttlingRatio.get().get() * currentCost.get();
@@ -547,14 +547,12 @@ class MockStorageServer {
 	};
 
 	UID id;
-	double targetCostRate;
+	double targetCost;
 	std::map<TransactionTag, Cost> readCosts, writeCosts;
 	Cost totalReadCost, totalWriteCost;
 
 public:
-	explicit MockStorageServer(UID id, double targetCostRate) : id(id), targetCostRate(targetCostRate) {
-		ASSERT_GT(targetCostRate, 0);
-	}
+	explicit MockStorageServer(UID id, double targetCost) : id(id), targetCost(targetCost) { ASSERT_GT(targetCost, 0); }
 	void addReadCost(TransactionTag tag, double cost) {
 		readCosts[tag] += cost;
 		totalReadCost += cost;
@@ -578,12 +576,12 @@ public:
 	}
 
 	Optional<double> getThrottlingRatio() const {
-		auto const springCostRate = 0.2 * targetCostRate;
-		auto const currentCostRate = totalReadCost.smoothRate() + totalWriteCost.smoothRate();
-		if (currentCostRate < targetCostRate - springCostRate) {
+		auto const springCost = 0.2 * targetCost;
+		auto const currentCost = totalReadCost.smoothRate() + totalWriteCost.smoothRate();
+		if (currentCost < targetCost - springCost) {
 			return {};
 		} else {
-			return std::max(0.0, ((targetCostRate + springCostRate) - currentCostRate) / springCostRate);
+			return std::max(0.0, ((targetCost + springCost) - currentCost) / springCost);
 		}
 	}
 };
@@ -592,11 +590,11 @@ class StorageServerCollection {
 	std::vector<MockStorageServer> storageServers;
 
 public:
-	StorageServerCollection(size_t size, double targetCostRate) {
+	StorageServerCollection(size_t size, double targetCost) {
 		ASSERT_GT(size, 0);
 		storageServers.reserve(size);
 		for (int i = 0; i < size; ++i) {
-			storageServers.emplace_back(UID(i, i), targetCostRate);
+			storageServers.emplace_back(UID(i, i), targetCost);
 		}
 	}
 
