@@ -418,7 +418,7 @@ std::string toString(const std::pair<F, S>& o) {
 
 constexpr static int ioMinPriority = 0;
 constexpr static int ioLeafPriority = 1;
-static int ioMaxPriority = SERVER_KNOBS->REDWOOD_IO_MAX_PRIORITY;
+constexpr static int ioMaxPriority = 3;
 constexpr static int maxConcurrentReadsLaunchLimit = std::numeric_limits<int>::max();
 // A FIFO queue of T stored as a linked list of pages.
 // Main operations are pop(), pushBack(), pushFront(), and flush().
