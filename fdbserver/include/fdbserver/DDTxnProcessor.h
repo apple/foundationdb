@@ -22,8 +22,13 @@
 #define FOUNDATIONDB_DDTXNPROCESSOR_H
 
 #include "fdbserver/Knobs.h"
-#include "fdbserver/DataDistribution.actor.h"
+#include "fdbserver/MoveKeys.actor.h"
 
+/* Testability Contract:
+ * a. The DataDistributor has to use this interface to interact with data-plane (aka. run transaction), because the
+ * testability benefits from a mock implementation; b. Other control-plane roles should consider providing its own
+ * TxnProcessor interface to provide testability, for example, Ratekeeper.
+ * */
 class IDDTxnProcessor {
 public:
 	struct SourceServers {
@@ -36,6 +41,16 @@ public:
 	virtual Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses() = 0;
 
 	virtual ~IDDTxnProcessor() = default;
+
+	[[nodiscard]] virtual Future<MoveKeysLock> takeMoveKeysLock(UID ddId) const { return MoveKeysLock(); }
+
+	virtual Future<DatabaseConfiguration> getDatabaseConfiguration() const { return DatabaseConfiguration(); }
+
+	virtual Future<Void> updateReplicaKeys(const std::vector<Optional<Key>>& primaryIds,
+	                                       const std::vector<Optional<Key>>& remoteIds,
+	                                       const DatabaseConfiguration& configuration) const {
+		return Void();
+	}
 };
 
 class DDTxnProcessorImpl;
@@ -53,9 +68,19 @@ public:
 
 	// Call NativeAPI implementation directly
 	Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses() override;
+
+	Future<MoveKeysLock> takeMoveKeysLock(UID ddId) const override;
+
+	Future<DatabaseConfiguration> getDatabaseConfiguration() const override;
+
+	Future<Void> updateReplicaKeys(const std::vector<Optional<Key>>& primaryIds,
+	                               const std::vector<Optional<Key>>& remoteIds,
+	                               const DatabaseConfiguration& configuration) const override;
 };
 
-// run mock transaction
+// A mock transaction implementation for test usage.
+// Contract: every function involving mock transaction should return immediately to mimic the ACI property of real
+// transaction.
 class DDMockTxnProcessor : public IDDTxnProcessor {};
 
 #endif // FOUNDATIONDB_DDTXNPROCESSOR_H
