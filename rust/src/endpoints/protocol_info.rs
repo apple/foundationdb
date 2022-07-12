@@ -8,10 +8,12 @@ mod protocol_info_reply;
 
 use crate::flow::file_identifier::{FileIdentifier, IdentifierType, ParsedFileIdentifier};
 use crate::flow::uid::{UID, WLTOKEN};
-use crate::flow::{Flow, FlowFuture, FlowHandler, FlowMessage, Frame, Peer, Result};
+use crate::flow::{FlowFuture, FlowHandler, FlowMessage, Frame, Result};
 use crate::services::ConnectionKeeper;
 use std::net::SocketAddr;
 use std::sync::Arc;
+
+use flatbuffers::FlatBufferBuilder;
 
 use protocol_info_reply::{ProtocolInfoReply, ProtocolInfoReplyArgs};
 use protocol_info_request::{ProtocolInfoRequest, ProtocolInfoRequestArgs};
@@ -30,49 +32,60 @@ const PROTOCOL_INFO_REPLY_FILE_IDENTIFIER: ParsedFileIdentifier = ParsedFileIden
     file_identifier_name: Some("ProtocolInfoReply"),
 };
 
-fn serialize_request(peer: SocketAddr) -> Result<FlowMessage> {
+thread_local! {
+    static REQUEST_BUILDER : std::cell::RefCell<FlatBufferBuilder<'static>> = std::cell::RefCell::new(FlatBufferBuilder::with_capacity(1024));
+}
+
+thread_local! {
+    static REPLY_BUILDER : std::cell::RefCell<FlatBufferBuilder<'static>> = std::cell::RefCell::new(FlatBufferBuilder::with_capacity(1024));
+}
+
+fn serialize_request(
+    builder: &mut FlatBufferBuilder<'static>,
+    peer: SocketAddr,
+) -> Result<FlowMessage> {
     use protocol_info_request::{FakeRoot, FakeRootArgs};
 
-    let builder = flatbuffers::FlatBufferBuilder::with_capacity(1024);
-    let (flow, reply_promise, mut builder) = super::create_rpc_headers(builder, peer);
+    let (flow, reply_promise) = super::create_request_headers(builder, peer);
 
-    let protocol_info_request = Some(ProtocolInfoRequest::create(
-        &mut builder,
+    let request = Some(ProtocolInfoRequest::create(
+        builder,
         &ProtocolInfoRequestArgs { reply_promise },
     ));
 
-    let fake_root = FakeRoot::create(
-        &mut builder,
-        &FakeRootArgs {
-            request: protocol_info_request,
-        },
-    );
+    let fake_root = FakeRoot::create(builder, &FakeRootArgs { request });
+
     builder.finish(fake_root, Some("myfi"));
-    let wltoken = UID::well_known_token(WLTOKEN::ProtocolInfo);
-    super::finalize_request(builder, flow, wltoken, PROTOCOL_INFO_REQUEST_FILE_IDENTIFIER)
+
+    super::finalize_request(
+        builder,
+        flow,
+        UID::well_known_token(WLTOKEN::ProtocolInfo),
+        PROTOCOL_INFO_REQUEST_FILE_IDENTIFIER,
+    )
 }
 
-fn serialize_reply(token: UID) -> Result<Frame> {
+fn serialize_reply(builder: &mut FlatBufferBuilder<'static>,
+                    token: UID) -> Result<Frame> {
     use protocol_info_reply::{FakeRoot, FakeRootArgs, ProtocolVersion};
-    let mut builder = flatbuffers::FlatBufferBuilder::with_capacity(1024);
+
     let protocol_version = ProtocolVersion::new(0xfdb00b072000000);
     let version = Some(&protocol_version);
     let protocol_info_reply =
-        ProtocolInfoReply::create(&mut builder, &ProtocolInfoReplyArgs { version });
-    // let ensure_table = EnsureTable::create(&mut builder, &EnsureTableArgs { reply: Some(protocol_info_reply) });
+        ProtocolInfoReply::create(builder, &ProtocolInfoReplyArgs { version });
     let fake_root = FakeRoot::create(
-        &mut builder,
+        builder,
         &FakeRootArgs {
             error_or_type: protocol_info_reply::ErrorOr::ProtocolInfoReply,
             error_or: Some(protocol_info_reply.as_union_value()),
         },
     );
     builder.finish(fake_root, Some("myfi"));
-    let (mut payload, offset) = builder.collapse();
+    let mut payload : Vec<u8> = builder.finished_data().into();
     FileIdentifier::new(PROTOCOL_INFO_REPLY_FILE_IDENTIFIER.file_identifier)?
         .to_error_or()?
-        .rewrite_flatbuf(&mut payload[offset..])?;
-    Ok(Frame::new(token, payload, offset))
+        .rewrite_flatbuf(&mut payload)?;
+    Ok(Frame::new(token, payload, 0))
 }
 
 fn deserialize_request(buf: &[u8]) -> Result<ProtocolInfoRequest> {
@@ -111,7 +124,7 @@ async fn handle(request: FlowMessage) -> Result<Option<FlowMessage>> {
     let reply_promise = protocol_info_request.reply_promise().unwrap();
     let uid = reply_promise.uid().unwrap();
     let uid: UID = uid.into();
-    let frame = serialize_reply(uid)?;
+    let frame = REPLY_BUILDER.with(|builder| { serialize_reply(&mut builder.borrow_mut(), uid) })?;
     Ok(Some(FlowMessage::new_response(request.flow, frame)?))
 }
 
@@ -122,7 +135,7 @@ impl FlowHandler for ProtocolInfo {
 }
 
 pub async fn protocol_info(peer: SocketAddr, svc: &Arc<ConnectionKeeper>) -> Result<u64> {
-    let req = serialize_request(peer)?;
+    let req = REQUEST_BUILDER.with(|builder| serialize_request(&mut builder.borrow_mut(), peer))?;
     let response_frame = svc.rpc(req).await?;
     let reply = deserialize_reply(response_frame.frame.payload())?;
     Ok(reply?.version().unwrap().version())

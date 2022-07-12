@@ -105,3 +105,12 @@ impl From<&UID> for crate::common_generated::UID {
         crate::common_generated::UID(arry)
     }
 }
+
+impl From<UID> for crate::common_generated::UID {
+    fn from(uid: UID) -> crate::common_generated::UID {
+        let mut arry = [0u8; 16];
+        arry[0..8].copy_from_slice(&uid.uid[0].to_le_bytes());
+        arry[8..16].copy_from_slice(&uid.uid[1].to_le_bytes());
+        crate::common_generated::UID(arry)
+    }
+}

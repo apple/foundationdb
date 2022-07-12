@@ -6,9 +6,9 @@ mod network_test_request;
 #[path = "../../target/flatbuffers/NetworkTestResponse_generated.rs"]
 mod network_test_response;
 
-use crate::flow::file_identifier::{FileIdentifier, IdentifierType, ParsedFileIdentifier};
+use crate::flow::file_identifier::{IdentifierType, ParsedFileIdentifier};
 use crate::flow::uid::{UID, WLTOKEN};
-use crate::flow::{Flow, FlowFuture, FlowHandler, FlowMessage, FlowResponse, Frame, Peer, Result};
+use crate::flow::{FlowFuture, FlowHandler, FlowMessage, FlowResponse, Frame, Result};
 use crate::services::ConnectionKeeper;
 
 use flatbuffers::FlatBufferBuilder;
@@ -18,40 +18,43 @@ use std::sync::Arc;
 use std::thread_local;
 
 const NETWORK_TEST_REQUEST_IDENTIFIER: ParsedFileIdentifier = ParsedFileIdentifier {
-    file_identifier: 0x3f4551,
+    file_identifier: 4146513,
     inner_wrapper: IdentifierType::None,
     outer_wrapper: IdentifierType::None,
     file_identifier_name: Some("NetworkTestRequest"),
 };
 
+const NETWORK_TEST_REPLY_IDENTIFIER: ParsedFileIdentifier = ParsedFileIdentifier {
+    file_identifier: 14465374,
+    inner_wrapper: IdentifierType::ErrorOr,
+    outer_wrapper: IdentifierType::None,
+    file_identifier_name: Some("NetworkTestReply"),
+};
+
 thread_local! {
     static REQUEST_BUILDER : std::cell::RefCell<FlatBufferBuilder<'static>> = std::cell::RefCell::new(FlatBufferBuilder::with_capacity(1024));
 }
+
+thread_local! {
+    static RESPONSE_BUILDER : std::cell::RefCell<FlatBufferBuilder<'static>> = std::cell::RefCell::new(FlatBufferBuilder::with_capacity(1024));
+}
+
 pub fn serialize_request(
     builder: &mut FlatBufferBuilder<'static>,
     dst: SocketAddr,
     request_len: u32,
     reply_size: u32,
 ) -> Result<FlowMessage> {
-    let completion = UID::random_token();
-    let wltoken = UID::well_known_token(WLTOKEN::ReservedForTesting);
-    use crate::common_generated::{ReplyPromise, ReplyPromiseArgs};
     use network_test_request::{
         FakeRoot, FakeRootArgs, NetworkTestRequest, NetworkTestRequestArgs,
     };
-    // let mut builder = FlatBufferBuilder::with_capacity(usize::min(
-    //     128 + (request_len as usize),
-    //     FLATBUFFERS_MAX_BUFFER_SIZE,
-    // ));
+    let (flow, reply_promise) = super::create_request_headers(builder, dst);
     let request_len: usize = request_len.try_into()?;
     builder.start_vector::<u8>(request_len);
     for _i in 0..request_len {
         builder.push('.' as u8);
     }
     let payload = Some(builder.end_vector(request_len));
-    let uid = crate::common_generated::UID::new(completion.uid[0], completion.uid[1]);
-    let uid = Some(&uid);
-    let reply_promise = Some(ReplyPromise::create(builder, &ReplyPromiseArgs { uid }));
     let network_test_request = Some(NetworkTestRequest::create(
         builder,
         &NetworkTestRequestArgs {
@@ -67,19 +70,10 @@ pub fn serialize_request(
         },
     );
     builder.finish(fake_root, Some("myfi"));
-    let mut payload: Vec<u8> = builder.finished_data().into();
-    FileIdentifier::new(4146513)?.rewrite_flatbuf(&mut payload)?;
-    // println!("reply: {:x?}", builder.finished_data());
-    FlowMessage::new(
-        Flow {
-            dst: Peer::Remote(dst),
-            src: Peer::Local(Some(completion)),
-        },
-        Frame::new(wltoken, payload, 0),
-    )
+    super::finalize_request(builder, flow, UID::well_known_token(WLTOKEN::ReservedForTesting), NETWORK_TEST_REQUEST_IDENTIFIER)
 }
 
-pub fn deserialize_response(frame: Frame) -> Result<()> {
+pub fn deserialize_reply(frame: Frame) -> Result<()> {
     let _fake_root = network_test_response::root_as_fake_root(frame.payload())?;
     println!("got network test response");
     Ok(())
@@ -109,10 +103,7 @@ impl NetworkTest {
     }
 }
 
-thread_local! {
-    static RESPONSE_BUILDER : std::cell::RefCell<FlatBufferBuilder<'static>> = std::cell::RefCell::new(FlatBufferBuilder::with_capacity(1024));
-}
-fn serialize_response(
+fn serialize_reply(
     builder: &mut FlatBufferBuilder<'static>,
     token: UID,
     reply_size: usize,
@@ -120,7 +111,6 @@ fn serialize_response(
     use network_test_response::{
         ErrorOr, FakeRoot, FakeRootArgs, NetworkTestResponse, NetworkTestResponseArgs,
     };
-    builder.reset();
     builder.start_vector::<u8>(reply_size);
     for _i in 0..reply_size {
         builder.push('.' as u8);
@@ -142,12 +132,7 @@ fn serialize_response(
         },
     );
     builder.finish(fake_root, Some("myfi"));
-    let mut payload: Vec<u8> = builder.finished_data().into();
-    FileIdentifier::new(14465374)?
-        .to_error_or()?
-        .rewrite_flatbuf(&mut payload)?;
-    // println!("reply: {:x?}", builder.finished_data());
-    Ok(Frame::new(token, payload, 0))
+    super::finalize_reply(builder, token, NETWORK_TEST_REPLY_IDENTIFIER)
 }
 
 async fn handle(request: FlowMessage) -> Result<FlowResponse> {
@@ -166,7 +151,7 @@ async fn handle(request: FlowMessage) -> Result<FlowResponse> {
     };
 
     let frame = RESPONSE_BUILDER.with(|builder| {
-        serialize_response(
+        serialize_reply(
             &mut builder.borrow_mut(),
             uid,
             network_test_request.reply_size().try_into()?,
@@ -193,5 +178,5 @@ pub async fn network_test(
         serialize_request(&mut builder.borrow_mut(), peer, request_sz, response_sz)
     })?;
     let response_frame = svc.rpc(req).await?;
-    deserialize_response(response_frame.frame)
+    deserialize_reply(response_frame.frame)
 }

@@ -6,10 +6,12 @@ mod get_leader_request;
 #[path = "../../target/flatbuffers/GetLeaderReply_generated.rs"]
 mod get_leader_reply;
 
-use crate::flow::file_identifier::{FileIdentifier, IdentifierType, ParsedFileIdentifier};
+use crate::flow::file_identifier::{IdentifierType, ParsedFileIdentifier};
 use crate::flow::uid::{UID, WLTOKEN};
-use crate::flow::{Flow, FlowFuture, FlowHandler, FlowMessage, Frame, Peer, Result};
-use crate::services::ConnectionKeeper;
+use crate::flow::{FlowMessage, Frame, Result};
+
+use flatbuffers::FlatBufferBuilder;
+
 use std::net::SocketAddr;
 
 use get_leader_reply::{LeaderInfo, LeaderInfoArgs};
@@ -29,20 +31,61 @@ const GET_LEADER_REPLY_FILE_IDENTIFIER: ParsedFileIdentifier = ParsedFileIdentif
     file_identifier_name: Some("LeaderInfo"),
 };
 
-// fn serialize_request(peer: SocketAddr, cluster_key: &str, known_leader: UID) -> Result<FlowMessage> {
-//     // key, known_leader, reply_promise, directly in fake_root
-//     use crate::common_generated::{ReplyPromise, ReplyPromiseArgs};
-//     use get_leader_request::{FakeRoot, FakeRootArgs};
+thread_local! {
+    static REQUEST_BUILDER : std::cell::RefCell<FlatBufferBuilder<'static>> = std::cell::RefCell::new(FlatBufferBuilder::with_capacity(1024));
+}
 
-//     let completion = UID::random_token();
-//     let wltoken = UID::well_known_token(WLTOKEN::ClientLeaderRegGetLeader);
+thread_local! {
+    static REPLY_BUILDER : std::cell::RefCell<FlatBufferBuilder<'static>> = std::cell::RefCell::new(FlatBufferBuilder::with_capacity(1024));
+}
 
-//     let mut builder = flatbuffers::FlatBufferBuilder::with_capacity(1024);
-//     let response_token: crate::common_generatedUID = (&completion).into();
-//     let uid = Some(&response_token);
-//     let reply_promise = Some(ReplyPromise::create())
+// TODO: Is known_leader optional?
+fn serialize_request(builder: &mut FlatBufferBuilder<'static>, peer: SocketAddr, cluster_key: &str, known_leader: UID) -> Result<FlowMessage> {
+    // key, known_leader, reply_promise, directly in fake_root
+    use get_leader_request::{FakeRoot, FakeRootArgs};
 
-// }
+    let (flow, reply_promise) = super::create_request_headers(builder, peer);
+    let key = Some(builder.create_vector(cluster_key.as_bytes()));
+
+    let known_leader_val : crate::common_generated::UID = (&known_leader).into();
+    let known_leader = Some(&known_leader_val);
+
+    let request = Some(GetLeaderRequest::create(builder, &GetLeaderRequestArgs {
+        key, known_leader, reply_promise
+    }));
+    let fake_root = FakeRoot::create(builder, &FakeRootArgs { request });
+    builder.finish(fake_root, Some("myfi"));
+    super::finalize_request(builder, flow, UID::well_known_token(WLTOKEN::ClientLeaderRegGetLeader), GET_LEADER_REQUEST_FILE_IDENTIFIER)
+}
+
+fn serialize_reply(builder: &mut FlatBufferBuilder<'static>, token: UID, change_id: UID, forward: bool, serialized_info: &[u8]) -> Result<Frame> {
+    use get_leader_reply::{FakeRoot, FakeRootArgs, ErrorOr};
+    // change_id, forward, serailized_info
+
+    let change_id : crate::common_generated::UID = change_id.into();
+    let change_id = Some(&change_id);
+
+    let serialized_info = Some(builder.create_vector(serialized_info));
+
+    let leader_info = LeaderInfo::create(
+        builder,
+        &LeaderInfoArgs {
+            serialized_info,
+            change_id,
+            forward,
+        }
+    );
+
+    let fake_root = FakeRoot::create(
+        builder,
+        &FakeRootArgs {
+            error_or_type: ErrorOr::LeaderInfo,
+            error_or: Some(leader_info.as_union_value()),
+        }
+    );
+    builder.finish(fake_root, Some("myfi"));
+    super::finalize_reply(builder, token, GET_LEADER_REPLY_FILE_IDENTIFIER)
+}
 
 fn deserialize_request(buf: &[u8]) -> Result<GetLeaderRequest> {
     let fake_root = get_leader_request::root_as_fake_root(buf)?;

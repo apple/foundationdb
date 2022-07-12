@@ -7,10 +7,13 @@ mod ping_request;
 #[path = "../../target/flatbuffers/ErrorOrVoid_generated.rs"]
 mod void;
 
-use crate::flow::file_identifier::{FileIdentifier, IdentifierType, ParsedFileIdentifier};
+use crate::flow::file_identifier::{IdentifierType, ParsedFileIdentifier};
 use crate::flow::uid::{UID, WLTOKEN};
-use crate::flow::{Flow, FlowFuture, FlowHandler, FlowMessage, Frame, Peer, Result};
+use crate::flow::{FlowFuture, FlowHandler, FlowMessage, Frame, Result};
 use crate::services::ConnectionKeeper;
+
+use flatbuffers::FlatBufferBuilder;
+
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -21,68 +24,54 @@ const PING_REQUEST_FILE_IDENTIFIER: ParsedFileIdentifier = ParsedFileIdentifier 
     file_identifier_name: Some("PingRequest"),
 };
 
-const PING_RESPONSE_FILE_IDENTIFIER: ParsedFileIdentifier = ParsedFileIdentifier {
+const PING_REPLY_FILE_IDENTIFIER: ParsedFileIdentifier = ParsedFileIdentifier {
     file_identifier: 0x1ead4a,
     inner_wrapper: IdentifierType::ErrorOr,
     outer_wrapper: IdentifierType::None,
-    file_identifier_name: Some("PingResponse"),
+    file_identifier_name: Some("PingReply"),
 };
 
-pub fn serialize_request(peer: SocketAddr) -> Result<FlowMessage> {
-    use crate::common_generated::{ReplyPromise, ReplyPromiseArgs};
-    use ping_request::{FakeRoot, FakeRootArgs, PingRequest, PingRequestArgs};
-
-    let completion = UID::random_token();
-    let wltoken = UID::well_known_token(WLTOKEN::PingPacket);
-
-    let mut builder = flatbuffers::FlatBufferBuilder::with_capacity(1024);
-    let response_token: crate::common_generated::UID = (&completion).into(); //crate::common_generated::UID::new(completion.uid[0], completion.uid[1]);
-    let uid = Some(&response_token);
-    let reply_promise = Some(ReplyPromise::create(
-        &mut builder,
-        &ReplyPromiseArgs { uid },
-    ));
-    let ping_request = Some(PingRequest::create(
-        &mut builder,
-        &PingRequestArgs { reply_promise },
-    ));
-    let fake_root = FakeRoot::create(&mut builder, &FakeRootArgs { ping_request });
-    builder.finish(fake_root, Some("myfi"));
-    let (mut payload, offset) = builder.collapse();
-    FileIdentifier::new(PING_REQUEST_FILE_IDENTIFIER.file_identifier)?
-        .rewrite_flatbuf(&mut payload[offset..])?;
-    FlowMessage::new(
-        Flow {
-            dst: Peer::Remote(peer),
-            src: Peer::Local(Some(completion)),
-        },
-        Frame::new(wltoken, payload, offset),
-    )
+thread_local! {
+    static REQUEST_BUILDER : std::cell::RefCell<FlatBufferBuilder<'static>> = std::cell::RefCell::new(FlatBufferBuilder::with_capacity(1024));
 }
 
-fn serialize_response(token: UID) -> Result<Frame> {
-    let mut builder = flatbuffers::FlatBufferBuilder::with_capacity(1024);
+thread_local! {
+    static REPLY_BUILDER : std::cell::RefCell<FlatBufferBuilder<'static>> = std::cell::RefCell::new(FlatBufferBuilder::with_capacity(1024));
+}
+
+pub fn serialize_request(
+    builder: &mut FlatBufferBuilder<'static>,
+    peer: SocketAddr,
+) -> Result<FlowMessage> {
+    use ping_request::{FakeRoot, FakeRootArgs, PingRequest, PingRequestArgs};
+
+    let (flow, reply_promise) = super::create_request_headers(builder, peer);
+    let ping_request = Some(PingRequest::create(
+        builder,
+        &PingRequestArgs { reply_promise },
+    ));
+    let fake_root = FakeRoot::create(builder, &FakeRootArgs { ping_request });
+    builder.finish(fake_root, Some("myfi"));
+    super::finalize_request(builder, flow, UID::well_known_token(WLTOKEN::PingPacket), PING_REQUEST_FILE_IDENTIFIER)
+}
+
+fn serialize_reply(builder: &mut FlatBufferBuilder<'static>, token: UID) -> Result<Frame> {
     use crate::common_generated::{Void, VoidArgs};
-    let void = Void::create(&mut builder, &VoidArgs {});
+    let void = Void::create(builder, &VoidArgs {});
     let ensure_table =
-        void::EnsureTable::create(&mut builder, &void::EnsureTableArgs { void: Some(void) });
+        void::EnsureTable::create(builder, &void::EnsureTableArgs { void: Some(void) });
     let fake_root = void::FakeRoot::create(
-        &mut builder,
+        builder,
         &void::FakeRootArgs {
             error_or_type: void::ErrorOr::EnsureTable,
             error_or: Some(ensure_table.as_union_value()),
         },
     );
     builder.finish(fake_root, Some("myfi"));
-    let (mut payload, offset) = builder.collapse();
-    // See also: flow/README.md ### Flatbuffers/ObjectSerializer
-    FileIdentifier::new(PING_RESPONSE_FILE_IDENTIFIER.file_identifier)?
-        .to_error_or()?
-        .rewrite_flatbuf(&mut payload[offset..])?;
-    Ok(Frame::new(token, payload, offset))
+    super::finalize_reply(builder, token, PING_REPLY_FILE_IDENTIFIER)
 }
 
-pub fn deserialize_response(frame: Frame) -> Result<()> {
+pub fn deserialize_reply(frame: Frame) -> Result<()> {
     let fake_root = void::root_as_fake_root(frame.payload())?;
     if fake_root.error_or_type() == void::ErrorOr::Error {
         Err(format!("ping returned error: {:?}", fake_root.error_or()).into())
@@ -102,7 +91,8 @@ async fn handle(request: FlowMessage) -> Result<Option<FlowMessage>> {
     let uid = reply_promise.uid().unwrap();
     let uid: UID = uid.into();
 
-    let frame = serialize_response(uid)?;
+    let frame =
+        REPLY_BUILDER.with(|builder| serialize_reply(&mut builder.borrow_mut(), uid))?;
     Ok(Some(FlowMessage::new_response(request.flow, frame)?))
 }
 
@@ -121,8 +111,7 @@ impl FlowHandler for Ping {
 }
 
 pub async fn ping(peer: SocketAddr, svc: &Arc<ConnectionKeeper>) -> Result<()> {
-    // println!("ping {:?}", peer);
-    let req = serialize_request(peer)?;
+    let req = REQUEST_BUILDER.with(|builder| serialize_request(&mut builder.borrow_mut(), peer))?;
     let response_frame = svc.rpc(req).await?;
-    deserialize_response(response_frame.frame)
+    deserialize_reply(response_frame.frame)
 }
