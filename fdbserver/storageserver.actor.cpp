@@ -236,7 +236,6 @@ class ShardInfo : public ReferenceCounted<ShardInfo>, NonCopyable {
 public:
 	// A shard has 3 mutual exclusive states: adding, readWrite and notAssigned.
 	std::unique_ptr<AddingShard> adding;
-	std::unique_ptr<AddingShard> moveInShard;
 	struct StorageServer* readWrite;
 	KeyRange keys;
 	uint64_t changeCounter;
@@ -323,21 +322,12 @@ public:
 	}
 
 	bool isReadable() const { return readWrite != nullptr; }
-	bool notAssigned() const { return !readWrite && !adding && !moveInShard; }
-	bool assigned() const { return readWrite || adding || moveInShard; }
-	bool isInVersionedData() const {
-		return readWrite || (adding && adding->isDataTransferred()) ||
-		       (moveInShard && moveInShard->isDataTransferred());
-	}
-	bool isCFInVersionedData() const {
-		return readWrite || (adding && adding->isDataAndCFTransferred()) ||
-		       (moveInShard && moveInShard->isDataAndCFTransferred());
-	}
+	bool notAssigned() const { return !readWrite && !adding; }
+	bool assigned() const { return readWrite || adding; }
+	bool isInVersionedData() const { return readWrite || (adding && adding->isDataTransferred()); }
+	bool isCFInVersionedData() const { return readWrite || (adding && adding->isDataAndCFTransferred()); }
 	void addMutation(Version version, bool fromFetch, MutationRef const& mutation);
-	bool isFetched() const {
-		return readWrite || (adding && adding->fetchComplete.isSet()) ||
-		       (moveInShard && moveInShard->fetchComplete.isSet());
-	}
+	bool isFetched() const { return readWrite || (adding && adding->fetchComplete.isSet()); }
 
 	const char* debugDescribeState() const {
 		if (notAssigned())
@@ -348,8 +338,6 @@ public:
 			return "AddingFetching";
 		else if (adding)
 			return "AddingTransferred";
-		else if (moveInShard)
-			return "MovingIn";
 		else
 			return "ReadWrite";
 	}
@@ -655,10 +643,10 @@ public:
 	struct PendingNewShard {
 		PendingNewShard(uint64_t shardId, KeyRangeRef range) : shardId(format("%016llx", shardId)), range(range) {}
 
- 		std::string toString() const {
- 			return format("PendingNewShard: [ShardID]: %s [Range]: %s",
- 			              this->shardId,
- 			              Traceable<KeyRangeRef>::toString(this->range));
+		std::string toString() const {
+			return format("PendingNewShard: [ShardID]: %s [Range]: %s",
+			              this->shardId,
+			              Traceable<KeyRangeRef>::toString(this->range));
 		}
 
 		std::string shardId;
@@ -1204,7 +1192,7 @@ public:
 
 		newestAvailableVersion.insert(allKeys, invalidVersion);
 		newestDirtyVersion.insert(allKeys, invalidVersion);
-		if (SERVER_KNOBS->STORAGE_SERVER_SHARD_AWARE) {
+		if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->STORAGE_SERVER_SHARD_AWARE) {
 			addShard(ShardInfo::newShard(this, StorageServerShard::notAssigned(allKeys)));
 		} else {
 			addShard(ShardInfo::newNotAssigned(allKeys));
@@ -6593,8 +6581,6 @@ void ShardInfo::addMutation(Version version, bool fromFetch, MutationRef const& 
 		adding->addMutation(version, fromFetch, mutation);
 	else if (readWrite)
 		readWrite->addMutation(version, fromFetch, mutation, this->keys, readWrite->updateEagerReads);
-	else if (moveInShard)
-		moveInShard->addMutation(version, fromFetch, mutation);
 	else if (mutation.type != MutationRef::ClearRange) {
 		TraceEvent(SevError, "DeliveredToNotAssigned").detail("Version", version).detail("Mutation", mutation);
 		ASSERT(false); // Mutation delivered to notAssigned shard!
@@ -7014,8 +7000,8 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 				    StorageServerShard(range, version, desiredId, desiredId, StorageServerShard::ReadWrite));
 				setAvailableStatus(data, range, true);
 				// Note: The initial range is available, however, the shard won't be created in the storage engine
- 				// untill version is committed.
- 				data->pendingAddRanges[cVer].emplace_back(desiredId, range);
+				// untill version is committed.
+				data->pendingAddRanges[cVer].emplace_back(desiredId, range);
 				TraceEvent(SevVerbose, "SSInitialShard", data->thisServerID)
 				    .detail("Range", range)
 				    .detail("NowAssigned", nowAssigned)
@@ -8212,47 +8198,47 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		}
 
 		state bool removeKVSRanges = false;
- 		if (!data->pendingRemoveRanges.empty()) {
- 			const Version aVer = data->pendingRemoveRanges.begin()->first;
- 			if (aVer <= desiredVersion) {
- 				TraceEvent(SevDebug, "RemoveRangeVersionSatisfied", data->thisServerID)
- 				    .detail("DesiredVersion", desiredVersion)
- 				    .detail("DurableVersion", data->durableVersion.get())
- 				    .detail("RemoveRangeVersion", aVer);
- 				desiredVersion = aVer;
- 				removeKVSRanges = true;
- 			}
- 		}
+		if (!data->pendingRemoveRanges.empty()) {
+			const Version aVer = data->pendingRemoveRanges.begin()->first;
+			if (aVer <= desiredVersion) {
+				TraceEvent(SevDebug, "RemoveRangeVersionSatisfied", data->thisServerID)
+				    .detail("DesiredVersion", desiredVersion)
+				    .detail("DurableVersion", data->durableVersion.get())
+				    .detail("RemoveRangeVersion", aVer);
+				desiredVersion = aVer;
+				removeKVSRanges = true;
+			}
+		}
 
- 		state bool addedRanges = false;
- 		if (!data->pendingAddRanges.empty()) {
- 			const Version aVer = data->pendingAddRanges.begin()->first;
- 			if (aVer <= desiredVersion) {
- 				TraceEvent(SevDebug, "AddRangeVersionSatisfied", data->thisServerID)
- 				    .detail("DesiredVersion", desiredVersion)
- 				    .detail("DurableVersion", data->durableVersion.get())
- 				    .detail("AddRangeVersion", aVer);
- 				desiredVersion = aVer;
- 				ASSERT(!data->pendingAddRanges.begin()->second.empty());
- 				TraceEvent(SevVerbose, "SSAddKVSRangeBegin", data->thisServerID)
- 				    .detail("Version", data->pendingAddRanges.begin()->first)
- 				    .detail("DurableVersion", data->durableVersion.get())
- 				    .detail("NewRanges", describe(data->pendingAddRanges.begin()->second));
- 				state std::vector<Future<Void>> fAddRanges;
- 				for (const auto& shard : data->pendingAddRanges.begin()->second) {
- 					TraceEvent(SevInfo, "SSAddKVSRange", data->thisServerID)
- 					    .detail("Range", shard.range)
- 					    .detail("PhysicalShardID", shard.shardId);
- 					fAddRanges.push_back(data->storage.addRange(shard.range, shard.shardId));
- 				}
- 				wait(waitForAll(fAddRanges));
- 				TraceEvent(SevVerbose, "SSAddKVSRangeEnd", data->thisServerID)
- 				    .detail("Version", data->pendingAddRanges.begin()->first)
- 				    .detail("DurableVersion", data->durableVersion.get());
- 				addedRanges = true;
- 				bytesLeft = SERVER_KNOBS->STORAGE_COMMIT_BYTES_UNLIMITED;
- 			}
- 		}
+		state bool addedRanges = false;
+		if (!data->pendingAddRanges.empty()) {
+			const Version aVer = data->pendingAddRanges.begin()->first;
+			if (aVer <= desiredVersion) {
+				TraceEvent(SevDebug, "AddRangeVersionSatisfied", data->thisServerID)
+				    .detail("DesiredVersion", desiredVersion)
+				    .detail("DurableVersion", data->durableVersion.get())
+				    .detail("AddRangeVersion", aVer);
+				desiredVersion = aVer;
+				ASSERT(!data->pendingAddRanges.begin()->second.empty());
+				TraceEvent(SevVerbose, "SSAddKVSRangeBegin", data->thisServerID)
+				    .detail("Version", data->pendingAddRanges.begin()->first)
+				    .detail("DurableVersion", data->durableVersion.get())
+				    .detail("NewRanges", describe(data->pendingAddRanges.begin()->second));
+				state std::vector<Future<Void>> fAddRanges;
+				for (const auto& shard : data->pendingAddRanges.begin()->second) {
+					TraceEvent(SevInfo, "SSAddKVSRange", data->thisServerID)
+					    .detail("Range", shard.range)
+					    .detail("PhysicalShardID", shard.shardId);
+					fAddRanges.push_back(data->storage.addRange(shard.range, shard.shardId));
+				}
+				wait(waitForAll(fAddRanges));
+				TraceEvent(SevVerbose, "SSAddKVSRangeEnd", data->thisServerID)
+				    .detail("Version", data->pendingAddRanges.begin()->first)
+				    .detail("DurableVersion", data->durableVersion.get());
+				addedRanges = true;
+				bytesLeft = SERVER_KNOBS->STORAGE_COMMIT_BYTES_UNLIMITED;
+			}
+		}
 
 		// Write mutations to storage until we reach the desiredVersion or have written too much (bytesleft)
 		state double beforeStorageUpdates = now();
@@ -8277,30 +8263,30 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		}
 
 		if (addedRanges) {
- 			TraceEvent(SevVerbose, "SSAddKVSRangeMetaData", data->thisServerID)
- 			    .detail("NewDurableVersion", newOldestVersion)
- 			    .detail("DesiredVersion", desiredVersion)
- 			    .detail("OldestRemoveKVSRangesVersion", data->pendingAddRanges.begin()->first);
- 			ASSERT(newOldestVersion == data->pendingAddRanges.begin()->first);
- 			ASSERT(newOldestVersion == desiredVersion);
- 			for (const auto& shard : data->pendingAddRanges.begin()->second) {
- 				data->storage.persistRangeMapping(shard.range, true);
- 			}
- 			data->pendingAddRanges.erase(data->pendingAddRanges.begin());
- 		}
+			TraceEvent(SevVerbose, "SSAddKVSRangeMetaData", data->thisServerID)
+			    .detail("NewDurableVersion", newOldestVersion)
+			    .detail("DesiredVersion", desiredVersion)
+			    .detail("OldestRemoveKVSRangesVersion", data->pendingAddRanges.begin()->first);
+			ASSERT(newOldestVersion == data->pendingAddRanges.begin()->first);
+			ASSERT(newOldestVersion == desiredVersion);
+			for (const auto& shard : data->pendingAddRanges.begin()->second) {
+				data->storage.persistRangeMapping(shard.range, true);
+			}
+			data->pendingAddRanges.erase(data->pendingAddRanges.begin());
+		}
 
- 		if (removeKVSRanges) {
-  			TraceEvent(SevDebug, "RemoveKVSRangesVersionDurable", data->thisServerID)
-  			    .detail("NewDurableVersion", newOldestVersion)
-  			    .detail("DesiredVersion", desiredVersion)
-  			    .detail("OldestRemoveKVSRangesVersion", data->pendingRemoveRanges.begin()->first);
-  			ASSERT(newOldestVersion <= data->pendingRemoveRanges.begin()->first);
-  			if (newOldestVersion == data->pendingRemoveRanges.begin()->first) {
-  				for (const auto& range : data->pendingRemoveRanges.begin()->second) {
-  					data->storage.persistRangeMapping(range, false);
-  				}
-  			}
-  		}
+		if (removeKVSRanges) {
+			TraceEvent(SevDebug, "RemoveKVSRangesVersionDurable", data->thisServerID)
+			    .detail("NewDurableVersion", newOldestVersion)
+			    .detail("DesiredVersion", desiredVersion)
+			    .detail("OldestRemoveKVSRangesVersion", data->pendingRemoveRanges.begin()->first);
+			ASSERT(newOldestVersion <= data->pendingRemoveRanges.begin()->first);
+			if (newOldestVersion == data->pendingRemoveRanges.begin()->first) {
+				for (const auto& range : data->pendingRemoveRanges.begin()->second) {
+					data->storage.persistRangeMapping(range, false);
+				}
+			}
+		}
 
 		std::set<Key> modifiedChangeFeeds = data->fetchingChangeFeeds;
 		data->fetchingChangeFeeds.clear();
@@ -8374,20 +8360,20 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		debug_advanceMinCommittedVersion(data->thisServerID, newOldestVersion);
 
 		if (removeKVSRanges) {
- 			TraceEvent(SevDebug, "RemoveKVSRangesComitted", data->thisServerID)
- 			    .detail("NewDurableVersion", newOldestVersion)
- 			    .detail("DesiredVersion", desiredVersion)
- 			    .detail("OldestRemoveKVSRangesVersion", data->pendingRemoveRanges.begin()->first);
- 			ASSERT(newOldestVersion <= data->pendingRemoveRanges.begin()->first);
- 			if (newOldestVersion == data->pendingRemoveRanges.begin()->first) {
- 				for (const auto& range : data->pendingRemoveRanges.begin()->second) {
- 					data->storage.removeRange(range);
- 					TraceEvent(SevVerbose, "RemoveKVSRange", data->thisServerID).detail("Range", range);
- 				}
- 				data->pendingRemoveRanges.erase(data->pendingRemoveRanges.begin());
- 			}
- 			removeKVSRanges = false;
- 		}
+			TraceEvent(SevDebug, "RemoveKVSRangesComitted", data->thisServerID)
+			    .detail("NewDurableVersion", newOldestVersion)
+			    .detail("DesiredVersion", desiredVersion)
+			    .detail("OldestRemoveKVSRangesVersion", data->pendingRemoveRanges.begin()->first);
+			ASSERT(newOldestVersion <= data->pendingRemoveRanges.begin()->first);
+			if (newOldestVersion == data->pendingRemoveRanges.begin()->first) {
+				for (const auto& range : data->pendingRemoveRanges.begin()->second) {
+					data->storage.removeRange(range);
+					TraceEvent(SevVerbose, "RemoveKVSRange", data->thisServerID).detail("Range", range);
+				}
+				data->pendingRemoveRanges.erase(data->pendingRemoveRanges.begin());
+			}
+			removeKVSRanges = false;
+		}
 
 		if (requireCheckpoint) {
 			// `pendingCheckpoints` is a queue of checkpoint requests ordered by their versoins, and
@@ -8534,7 +8520,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 #endif
 
 void StorageServerDisk::makeNewStorageServerDurable() {
-	if (SERVER_KNOBS->STORAGE_SERVER_SHARD_AWARE) {
+	if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->STORAGE_SERVER_SHARD_AWARE) {
 		storage->set(persistFormat1_5);
 	} else {
 		storage->set(persistFormat);
@@ -8548,7 +8534,7 @@ void StorageServerDisk::makeNewStorageServerDurable() {
 	    KeyValueRef(persistClusterIdKey, BinaryWriter::toValue(data->clusterId.getFuture().get(), Unversioned())));
 	storage->set(KeyValueRef(persistVersion, BinaryWriter::toValue(data->version.get(), Unversioned())));
 
-	if (SERVER_KNOBS->STORAGE_SERVER_SHARD_AWARE) {
+	if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->STORAGE_SERVER_SHARD_AWARE) {
 		storage->set(KeyValueRef(persistStorageServerShardKeys.begin.toString(),
 		                         ObjectWriter::toValue(StorageServerShard::notAssigned(allKeys, 0), IncludeVersion())));
 	} else {
@@ -10111,7 +10097,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  Reference<AsyncVar<ServerDBInfo> const> db,
                                  std::string folder) {
 	state StorageServer self(persistentData, db, ssi);
-	self.sharded = SERVER_KNOBS->STORAGE_SERVER_SHARD_AWARE;
+	self.sharded = CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->STORAGE_SERVER_SHARD_AWARE;
 	state Future<Void> ssCore;
 	self.clusterId.send(clusterId);
 	self.initialClusterVersion = startVersion;
