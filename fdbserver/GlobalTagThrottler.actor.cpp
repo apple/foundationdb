@@ -127,17 +127,15 @@ class GlobalTagThrottlerImpl {
 
 		double getTransactionRate() const { return transactionCounter.smoothRate(); }
 
-		Optional<ClientTagThrottleLimits> updateAndGetPerClientLimit(Optional<double> targetCost) {
-			if (targetCost.present() && transactionCounter.smoothRate() > 0) {
-				auto newPerClientRate = std::max(
-				    SERVER_KNOBS->GLOBAL_TAG_THROTTLING_MIN_RATE,
-				    std::min(targetCost.get(),
-				             (targetCost.get() / transactionCounter.smoothRate()) * perClientRate.smoothTotal()));
-				perClientRate.setTotal(newPerClientRate);
-				return ClientTagThrottleLimits(perClientRate.getTotal(), ClientTagThrottleLimits::NO_EXPIRATION);
-			} else {
-				return {};
-			}
+		ClientTagThrottleLimits updateAndGetPerClientLimit(Optional<double> targetTps) {
+			auto newPerClientRate =
+			    std::max(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_MIN_RATE,
+			             std::min(targetTps.get(),
+			                      (targetTps.get() / transactionCounter.smoothRate()) * perClientRate.smoothTotal()));
+			perClientRate.setTotal(newPerClientRate);
+			return ClientTagThrottleLimits(
+			    std::max(perClientRate.smoothTotal(), SERVER_KNOBS->GLOBAL_TAG_THROTTLING_MIN_RATE),
+			    ClientTagThrottleLimits::NO_EXPIRATION);
 		}
 	};
 
@@ -427,14 +425,19 @@ public:
 			auto const limitingTps = getLimitingTps(tag);
 			auto const desiredTps = getDesiredTps(tag);
 			auto const reservedTps = getReservedTps(tag);
-			if (!limitingTps.present() || !desiredTps.present() || !reservedTps.present()) {
-				return {};
-			} else {
-				auto const targetCost = std::max(reservedTps.get(), std::min(limitingTps.get(), desiredTps.get()));
-				auto const perClientLimit = stats.updateAndGetPerClientLimit(targetCost);
-				result[TransactionPriority::BATCH][tag] = result[TransactionPriority::DEFAULT][tag] =
-				    perClientLimit.get();
+
+			if (!desiredTps.present()) {
+				continue;
 			}
+			auto targetTps = desiredTps.get();
+			if (limitingTps.present()) {
+				targetTps = std::min(targetTps, limitingTps.get());
+			}
+			if (reservedTps.present()) {
+				targetTps = std::max(targetTps, reservedTps.get());
+			}
+			result[TransactionPriority::BATCH][tag] = result[TransactionPriority::DEFAULT][tag] =
+			    stats.updateAndGetPerClientLimit(targetTps);
 		}
 		return result;
 	}
@@ -655,11 +658,11 @@ ACTOR static Future<Void> monitorClientRates(GlobalTagThrottler* globalTagThrott
 	loop {
 		wait(delay(1.0));
 		auto currentTPSLimit = getTPSLimit(*globalTagThrottler, tag);
+		TraceEvent("GlobalTagThrottling_RateMonitor")
+		    .detail("Tag", tag)
+		    .detail("CurrentTPSRate", currentTPSLimit)
+		    .detail("DesiredTPSRate", desiredTPSLimit);
 		if (currentTPSLimit.present()) {
-			TraceEvent("GlobalTagThrottling_RateMonitor")
-			    .detail("Tag", tag)
-			    .detail("CurrentTPSRate", currentTPSLimit.get())
-			    .detail("DesiredTPSRate", desiredTPSLimit);
 			if (desiredTPSLimit.present() && abs(currentTPSLimit.get() - desiredTPSLimit.get()) < 1.0) {
 				if (++successes == 3) {
 					return Void();
@@ -668,10 +671,6 @@ ACTOR static Future<Void> monitorClientRates(GlobalTagThrottler* globalTagThrott
 				successes = 0;
 			}
 		} else {
-			TraceEvent("GlobalTagThrottling_RateMonitor")
-			    .detail("Tag", tag)
-			    .detail("CurrentTPSRate", currentTPSLimit)
-			    .detail("DesiredTPSRate", desiredTPSLimit);
 			if (desiredTPSLimit.present()) {
 				successes = 0;
 			} else {
