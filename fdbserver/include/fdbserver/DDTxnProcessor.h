@@ -51,6 +51,8 @@ public:
 	                                       const DatabaseConfiguration& configuration) const {
 		return Void();
 	}
+
+	virtual Future<Void> waitForDataDistributionEnabled(const DDEnabledState* ddEnabledState) const = 0;
 };
 
 class DDTxnProcessorImpl;
@@ -76,6 +78,8 @@ public:
 	Future<Void> updateReplicaKeys(const std::vector<Optional<Key>>& primaryIds,
 	                               const std::vector<Optional<Key>>& remoteIds,
 	                               const DatabaseConfiguration& configuration) const override;
+
+	Future<Void> waitForDataDistributionEnabled(const DDEnabledState* ddEnabledState) const override;
 };
 
 // A mock transaction implementation for test usage.
