@@ -20,7 +20,7 @@
 
 #include <vector>
 
-#include "contrib/fmt-8.1.1/include/fmt/format.h"
+#include "fmt/format.h"
 #include "flow/serialize.h"
 #include "fdbclient/BlobGranuleFiles.h"
 #include "fdbclient/Knobs.h"

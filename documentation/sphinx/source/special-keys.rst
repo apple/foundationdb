@@ -17,18 +17,22 @@ Users will also (by default) see a ``special_keys_cross_module_read`` error if t
 The error is to save the user from the surprise of seeing the behavior of multiple modules in the same read.
 Users may opt out of these restrictions by setting the ``special_key_space_relaxed`` transaction option.
 
-Each special key that existed before api version 630 is its own module. These are
+Each special key that existed before api version 630 is its own module. These are:
 
-#. ``\xff\xff/cluster_file_path`` See :ref:`cluster file client access <cluster-file-client-access>`
-#. ``\xff\xff/status/json`` See :doc:`Machine-readable status <mr-status>`
+#. ``\xff\xff/cluster_file_path`` - See :ref:`cluster file client access <cluster-file-client-access>`
+#. ``\xff\xff/status/json`` - See :doc:`Machine-readable status <mr-status>`
 
-Prior to api version 630, it was also possible to read a range starting at
-``\xff\xff/worker_interfaces``. This is mostly an implementation detail of fdbcli,
+Prior to api version 630, it was also possible to read a range starting at ``\xff\xff/worker_interfaces``. This is mostly an implementation detail of fdbcli,
 but it's available in api version 630 as a module with prefix ``\xff\xff/worker_interfaces/``.
 
-Api version 630 includes two new modules with prefixes
-``\xff\xff/transaction/`` (information about the current transaction), and
-``\xff\xff/metrics/`` (various metrics, not transactional).
+Api version 630 includes two new modules:
+
+#. ``\xff\xff/transaction/`` - information about the current transaction
+#. ``\xff\xff/metrics/`` - various metrics, not transactional
+
+Api version 720 includes one new module:
+
+#. ``\xff\xff/clusterId`` - returns an immutable unique ID for a cluster
 
 Transaction module
 ------------------
@@ -204,7 +208,7 @@ that process, and wait for necessary data to be moved away.
 #. ``\xff\xff/management/failed_locality/<locality>`` Read/write. Indicates that the cluster should consider matching processes as permanently failed. This allows the cluster to avoid maintaining extra state and doing extra work in the hope that these processes come back. See :ref:`removing machines from a cluster <removing-machines-from-a-cluster>` for documentation for the corresponding fdbcli command.
 #. ``\xff\xff/management/options/excluded_locality/force`` Read/write. Setting this key disables safety checks for writes to ``\xff\xff/management/excluded_locality/<locality>``. Setting this key only has an effect in the current transaction and is not persisted on commit.
 #. ``\xff\xff/management/options/failed_locality/force`` Read/write. Setting this key disables safety checks for writes to ``\xff\xff/management/failed_locality/<locality>``. Setting this key only has an effect in the current transaction and is not persisted on commit.
-#. ``\xff\xff/management/tenant_map/<tenant>`` Read/write. Setting a key in this range to any value will result in a tenant being created with name ``<tenant>``. Clearing a key in this range will delete the tenant with name ``<tenant>``. Reading all or a portion of this range will return the list of tenants currently present in the cluster, excluding any changes in this transaction. Values read in this range will be JSON objects containing the metadata for the associated tenants.
+#. ``\xff\xff/management/tenant/map/<tenant>`` Read/write. Setting a key in this range to any value will result in a tenant being created with name ``<tenant>``. Clearing a key in this range will delete the tenant with name ``<tenant>``. Reading all or a portion of this range will return the list of tenants currently present in the cluster, excluding any changes in this transaction. Values read in this range will be JSON objects containing the metadata for the associated tenants.
 
 An exclusion is syntactically either an ip address (e.g. ``127.0.0.1``), or
 an ip address and port (e.g. ``127.0.0.1:4500``) or any locality (e.g ``locality_dcid:primary-satellite`` or
@@ -270,7 +274,8 @@ Deprecated Keys
 
 Listed below are the special keys that have been deprecated. Special key(s) will no longer be accessible when the client specifies an API version equal to or larger than the version where they were deprecated. Clients specifying older API versions will be able to continue using the deprecated key(s).
 
-#. ``\xff\xff/management/profiling/<client_txn_sample_rate|client_txn_size_limit>`` Deprecated as of API version 7.2. The corresponding functionalities are now covered by the global configuration module. For details, see :doc:`global-configuration`. Read/write. Changing these two keys will change the corresponding system keys ``\xff\x02/fdbClientInfo/<client_txn_sample_rate|client_txn_size_limit>``, respectively. The value of ``\xff\xff/management/client_txn_sample_rate`` is a literal text of ``double``, and the value of ``\xff\xff/management/client_txn_size_limit`` is a literal text of ``int64_t``. A special value ``default`` can be set to or read from these two keys, representing the client profiling is disabled. In addition, ``clear`` in this range is not allowed. For more details, see help text of ``fdbcli`` command ``profile client``.
+#. ``\xff\xff/management/profiling/<client_txn_sample_rate|client_txn_size_limit>`` Deprecated as of API version 720. The corresponding functionalities are now covered by the global configuration module. For details, see :doc:`global-configuration`. Read/write. Changing these two keys will change the corresponding system keys ``\xff\x02/fdbClientInfo/<client_txn_sample_rate|client_txn_size_limit>``, respectively. The value of ``\xff\xff/management/client_txn_sample_rate`` is a literal text of ``double``, and the value of ``\xff\xff/management/client_txn_size_limit`` is a literal text of ``int64_t``. A special value ``default`` can be set to or read from these two keys, representing the client profiling is disabled. In addition, ``clear`` in this range is not allowed. For more details, see help text of ``fdbcli`` command ``profile client``.
+#. ``\xff\xff/management/tenant_map/<tenant>`` Removed as of API version 720 and renamed to ``\xff\xff/management/tenant/map/<tenant>``.
 
 Versioning
 ==========

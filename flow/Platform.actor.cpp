@@ -26,7 +26,7 @@
 #endif
 
 #include <errno.h>
-#include "contrib/fmt-8.1.1/include/fmt/format.h"
+#include "fmt/format.h"
 #include "flow/Platform.h"
 #include "flow/Platform.actor.h"
 #include "flow/Arena.h"
@@ -53,10 +53,6 @@
 #include <fcntl.h>
 #include "flow/UnitTest.h"
 #include "flow/FaultInjection.h"
-
-#include "fdbrpc/IAsyncFile.h"
-
-#include "fdbclient/AnnotateActor.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -100,7 +96,7 @@
 #include <ifaddrs.h>
 #include <arpa/inet.h>
 
-#include "flow/stacktrace.h"
+#include "stacktrace/stacktrace.h"
 
 #ifdef __linux__
 /* Needed for memory allocation */
@@ -3248,24 +3244,6 @@ int eraseDirectoryRecursive(std::string const& dir) {
 	return __eraseDirectoryRecurseiveCount;
 }
 
-bool isHwCrcSupported() {
-#if defined(_WIN32)
-	int info[4];
-	__cpuid(info, 1);
-	return (info[2] & (1 << 20)) != 0;
-#elif defined(__aarch64__)
-	return true; /* force to use crc instructions */
-#elif defined(__powerpc64__)
-	return false; /* force not to use crc instructions */
-#elif defined(__unixish__)
-	uint32_t eax, ebx, ecx, edx, level = 1, count = 0;
-	__cpuid_count(level, count, eax, ebx, ecx, edx);
-	return ((ecx >> 20) & 1) != 0;
-#else
-#error Port me!
-#endif
-}
-
 TmpFile::TmpFile() : filename("") {
 	createTmpFile(boost::filesystem::temp_directory_path().string(), TmpFile::defaultPrefix);
 }
@@ -3738,7 +3716,7 @@ void profileHandler(int sig) {
 	ps->timestamp = checkThreadTime.is_lock_free() ? checkThreadTime.load() : 0;
 
 	// SOMEDAY: should we limit the maximum number of frames from backtrace beyond just available space?
-	size_t size = backtrace(ps->frames, net2backtraces_max - net2backtraces_offset - 2);
+	size_t size = platform::raw_backtrace(ps->frames, net2backtraces_max - net2backtraces_offset - 2);
 
 	ps->length = size;
 

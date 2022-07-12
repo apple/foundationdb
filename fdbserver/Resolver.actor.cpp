@@ -409,7 +409,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 			TEST(true); // Deleting old state transactions
 			int64_t erasedBytes = self->recentStateTransactionsInfo.eraseUpTo(oldestProxyVersion);
 			self->debugMinRecentStateVersion = oldestProxyVersion + 1;
-			anyPopped = erasedBytes = 0;
+			anyPopped = erasedBytes > 0;
 			stateBytes -= erasedBytes;
 		}
 
@@ -584,13 +584,6 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 
 ACTOR Future<Void> processTransactionStateRequestPart(TransactionStateResolveContext* pContext,
                                                       TxnStateRequest request) {
-	state const TxnStateRequest& req = request;
-	state Resolver& resolverData = *pContext->pResolverData;
-	state PromiseStream<Future<Void>>& addActor = *pContext->pActors;
-	state Sequence& maxSequence = pContext->maxSequence;
-	state ReplyPromise<Void> reply = req.reply;
-	state std::unordered_set<Sequence>& txnSequences = pContext->receivedSequences;
-
 	ASSERT(pContext->pResolverData.getPtr() != nullptr);
 	ASSERT(pContext->pActors != nullptr);
 
@@ -655,7 +648,8 @@ ACTOR Future<Void> resolverCore(ResolverInterface resolver,
 	state TransactionStateResolveContext transactionStateResolveContext;
 	if (SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS) {
 		self->logAdapter = new LogSystemDiskQueueAdapter(self->logSystem, Reference<AsyncVar<PeekTxsInfo>>(), 1, false);
-		self->txnStateStore = keyValueStoreLogSystem(self->logAdapter, resolver.id(), 2e9, true, true, true);
+		self->txnStateStore = keyValueStoreLogSystem(
+		    self->logAdapter, db, resolver.id(), 2e9, true, true, true, SERVER_KNOBS->ENABLE_TLOG_ENCRYPTION);
 
 		// wait for txnStateStore recovery
 		wait(success(self->txnStateStore->readValue(StringRef())));

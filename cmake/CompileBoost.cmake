@@ -12,7 +12,14 @@ function(compile_boost)
   set(BOOTSTRAP_LIBRARIES "context,filesystem")
 
   set(BOOST_CXX_COMPILER "${CMAKE_CXX_COMPILER}")
-  if(CLANG)
+  # Can't build Boost with Intel compiler, use clang instead.
+  if(ICX)
+    execute_process (
+      COMMAND bash -c "which clang++ | tr -d '\n'"
+      OUTPUT_VARIABLE BOOST_CXX_COMPILER
+    )
+    set(BOOST_TOOLSET "clang")
+  elseif(CLANG)
     set(BOOST_TOOLSET "clang")
     if(APPLE)
       # this is to fix a weird macOS issue -- by default
@@ -29,7 +36,7 @@ function(compile_boost)
   set(B2_COMMAND "./b2")
   set(BOOST_COMPILER_FLAGS -fvisibility=hidden -fPIC -std=c++17 -w)
   set(BOOST_LINK_FLAGS "")
-  if(APPLE OR CLANG OR USE_LIBCXX)
+  if(APPLE OR CLANG OR ICX OR USE_LIBCXX)
     list(APPEND BOOST_COMPILER_FLAGS -stdlib=libc++ -nostdlib++)
     list(APPEND BOOST_LINK_FLAGS -static-libgcc -lc++ -lc++abi)
   endif()

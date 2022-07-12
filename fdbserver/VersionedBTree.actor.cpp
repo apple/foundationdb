@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "contrib/fmt-8.1.1/include/fmt/format.h"
+#include "fmt/format.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/Knobs.h"
 #include "flow/Error.h"
@@ -37,8 +37,7 @@
 #include "flow/serialize.h"
 #include "flow/genericactors.actor.h"
 #include "flow/UnitTest.h"
-#include "fdbserver/IPager.h"
-#include "fdbrpc/IAsyncFile.h"
+#include "flow/IAsyncFile.h"
 #include "flow/ActorCollection.h"
 #include <map>
 #include <string>
