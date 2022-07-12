@@ -89,7 +89,6 @@
 #include "flow/SystemMonitor.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/Trace.h"
-#include "flow/Tracing.h"
 #include "flow/Util.h"
 #include "flow/genericactors.actor.h"
 
@@ -654,20 +653,14 @@ private:
 
 public:
 	struct PendingNewShard {
-		PendingNewShard(StorageServer* data, uint64_t shardId, KeyRangeRef range)
-		  : data(data), shardId(std::to_string(shardId)), range(range) {
-			// this->shardReady = data->storage.addShard(std::to_string(shardId));
+		PendingNewShard(uint64_t shardId, KeyRangeRef range) : shardId(format("%016llx", shardId)), range(range) {}
+
+ 		std::string toString() const {
+ 			return format("PendingNewShard: [ShardID]: %s [Range]: %s",
+ 			              this->shardId,
+ 			              Traceable<KeyRangeRef>::toString(this->range));
 		}
 
-		PendingNewShard(uint64_t shardId, KeyRangeRef range) : shardId(std::to_string(shardId)), range(range) {}
-
-		std::string toString() const {
-			return format("PendingNewShard: [ShardID]: %s [Range]: %s",
-			              this->shardId,
-			              Traceable<KeyRangeRef>::toString(this->range));
-		}
-
-		StorageServer* data;
 		std::string shardId;
 		KeyRange range;
 		Future<Void> shardReady;
@@ -7020,6 +7013,9 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 				updatedShards.push_back(
 				    StorageServerShard(range, version, desiredId, desiredId, StorageServerShard::ReadWrite));
 				setAvailableStatus(data, range, true);
+				// Note: The initial range is available, however, the shard won't be created in the storage engine
+ 				// untill version is committed.
+ 				data->pendingAddRanges[cVer].emplace_back(desiredId, range);
 				TraceEvent(SevVerbose, "SSInitialShard", data->thisServerID)
 				    .detail("Range", range)
 				    .detail("NowAssigned", nowAssigned)
@@ -8215,41 +8211,48 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 			}
 		}
 
-		if (!data->pendingAddRanges.empty()) {
-			auto u = data->getMutationLog().upper_bound(newOldestVersion);
-			ASSERT(u != data->getMutationLog().end());
-			ASSERT(u->first <= data->pendingAddRanges.begin()->first);
-			if (u->first == data->pendingAddRanges.begin()->first) {
-				ASSERT(!data->pendingAddRanges.begin()->second.empty());
-				TraceEvent(SevDebug, "AddingRangesReady", data->thisServerID)
-				    .detail("Version", data->pendingAddRanges.begin()->first)
-				    .detail("DurableVersion", data->durableVersion.get())
-				    .detail("NewRanges", describe(data->pendingAddRanges.begin()->second));
-				state std::vector<Future<Void>> fAddRanges;
-				for (const auto& shard : data->pendingAddRanges.begin()->second) {
-					fAddRanges.push_back(data->storage.addRange(shard.range, shard.shardId));
-				}
-				wait(waitForAll(fAddRanges));
-				data->pendingAddRanges.erase(data->pendingAddRanges.begin());
-			}
-		}
+		state bool removeKVSRanges = false;
+ 		if (!data->pendingRemoveRanges.empty()) {
+ 			const Version aVer = data->pendingRemoveRanges.begin()->first;
+ 			if (aVer <= desiredVersion) {
+ 				TraceEvent(SevDebug, "RemoveRangeVersionSatisfied", data->thisServerID)
+ 				    .detail("DesiredVersion", desiredVersion)
+ 				    .detail("DurableVersion", data->durableVersion.get())
+ 				    .detail("RemoveRangeVersion", aVer);
+ 				desiredVersion = aVer;
+ 				removeKVSRanges = true;
+ 			}
+ 		}
 
-		if (!data->pendingAddRanges.empty()) {
-			const Version aVer = data->pendingAddRanges.begin()->first;
-			if (aVer <= desiredVersion) {
-				TraceEvent(SevDebug, "AddRangeVersionSatisfied", data->thisServerID)
-				    .detail("DesiredVersion", desiredVersion)
-				    .detail("DurableVersion", data->durableVersion.get())
-				    .detail("AddRangeVersion", aVer);
-				auto it = data->getMutationLog().find(aVer);
-				ASSERT(it != data->getMutationLog().end());
-				if (it == data->getMutationLog().begin()) {
-					desiredVersion = data->storageVersion();
-				} else {
-					desiredVersion = (--it)->first;
-				}
-			}
-		}
+ 		state bool addedRanges = false;
+ 		if (!data->pendingAddRanges.empty()) {
+ 			const Version aVer = data->pendingAddRanges.begin()->first;
+ 			if (aVer <= desiredVersion) {
+ 				TraceEvent(SevDebug, "AddRangeVersionSatisfied", data->thisServerID)
+ 				    .detail("DesiredVersion", desiredVersion)
+ 				    .detail("DurableVersion", data->durableVersion.get())
+ 				    .detail("AddRangeVersion", aVer);
+ 				desiredVersion = aVer;
+ 				ASSERT(!data->pendingAddRanges.begin()->second.empty());
+ 				TraceEvent(SevVerbose, "SSAddKVSRangeBegin", data->thisServerID)
+ 				    .detail("Version", data->pendingAddRanges.begin()->first)
+ 				    .detail("DurableVersion", data->durableVersion.get())
+ 				    .detail("NewRanges", describe(data->pendingAddRanges.begin()->second));
+ 				state std::vector<Future<Void>> fAddRanges;
+ 				for (const auto& shard : data->pendingAddRanges.begin()->second) {
+ 					TraceEvent(SevInfo, "SSAddKVSRange", data->thisServerID)
+ 					    .detail("Range", shard.range)
+ 					    .detail("PhysicalShardID", shard.shardId);
+ 					fAddRanges.push_back(data->storage.addRange(shard.range, shard.shardId));
+ 				}
+ 				wait(waitForAll(fAddRanges));
+ 				TraceEvent(SevVerbose, "SSAddKVSRangeEnd", data->thisServerID)
+ 				    .detail("Version", data->pendingAddRanges.begin()->first)
+ 				    .detail("DurableVersion", data->durableVersion.get());
+ 				addedRanges = true;
+ 				bytesLeft = SERVER_KNOBS->STORAGE_COMMIT_BYTES_UNLIMITED;
+ 			}
+ 		}
 
 		// Write mutations to storage until we reach the desiredVersion or have written too much (bytesleft)
 		state double beforeStorageUpdates = now();
@@ -8272,6 +8275,32 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 			if (done)
 				break;
 		}
+
+		if (addedRanges) {
+ 			TraceEvent(SevVerbose, "SSAddKVSRangeMetaData", data->thisServerID)
+ 			    .detail("NewDurableVersion", newOldestVersion)
+ 			    .detail("DesiredVersion", desiredVersion)
+ 			    .detail("OldestRemoveKVSRangesVersion", data->pendingAddRanges.begin()->first);
+ 			ASSERT(newOldestVersion == data->pendingAddRanges.begin()->first);
+ 			ASSERT(newOldestVersion == desiredVersion);
+ 			for (const auto& shard : data->pendingAddRanges.begin()->second) {
+ 				data->storage.persistRangeMapping(shard.range, true);
+ 			}
+ 			data->pendingAddRanges.erase(data->pendingAddRanges.begin());
+ 		}
+
+ 		if (removeKVSRanges) {
+  			TraceEvent(SevDebug, "RemoveKVSRangesVersionDurable", data->thisServerID)
+  			    .detail("NewDurableVersion", newOldestVersion)
+  			    .detail("DesiredVersion", desiredVersion)
+  			    .detail("OldestRemoveKVSRangesVersion", data->pendingRemoveRanges.begin()->first);
+  			ASSERT(newOldestVersion <= data->pendingRemoveRanges.begin()->first);
+  			if (newOldestVersion == data->pendingRemoveRanges.begin()->first) {
+  				for (const auto& range : data->pendingRemoveRanges.begin()->second) {
+  					data->storage.persistRangeMapping(range, false);
+  				}
+  			}
+  		}
 
 		std::set<Key> modifiedChangeFeeds = data->fetchingChangeFeeds;
 		data->fetchingChangeFeeds.clear();
@@ -8344,6 +8373,22 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 
 		debug_advanceMinCommittedVersion(data->thisServerID, newOldestVersion);
 
+		if (removeKVSRanges) {
+ 			TraceEvent(SevDebug, "RemoveKVSRangesComitted", data->thisServerID)
+ 			    .detail("NewDurableVersion", newOldestVersion)
+ 			    .detail("DesiredVersion", desiredVersion)
+ 			    .detail("OldestRemoveKVSRangesVersion", data->pendingRemoveRanges.begin()->first);
+ 			ASSERT(newOldestVersion <= data->pendingRemoveRanges.begin()->first);
+ 			if (newOldestVersion == data->pendingRemoveRanges.begin()->first) {
+ 				for (const auto& range : data->pendingRemoveRanges.begin()->second) {
+ 					data->storage.removeRange(range);
+ 					TraceEvent(SevVerbose, "RemoveKVSRange", data->thisServerID).detail("Range", range);
+ 				}
+ 				data->pendingRemoveRanges.erase(data->pendingRemoveRanges.begin());
+ 			}
+ 			removeKVSRanges = false;
+ 		}
+
 		if (requireCheckpoint) {
 			// `pendingCheckpoints` is a queue of checkpoint requests ordered by their versoins, and
 			// `newOldestVersion` is chosen such that it is no larger than the smallest pending checkpoing
@@ -8369,13 +8414,6 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 				data->pendingCheckpoints.erase(data->pendingCheckpoints.begin());
 			}
 			requireCheckpoint = false;
-		}
-
-		while (!data->pendingRemoveRanges.empty() && data->pendingRemoveRanges.begin()->first <= newOldestVersion) {
-			for (const auto& range : data->pendingRemoveRanges.begin()->second) {
-				std::vector<std::string> ignored = data->storage.removeRange(range);
-			}
-			data->pendingRemoveRanges.erase(data->pendingRemoveRanges.begin());
 		}
 
 		if (newOldestVersion > data->rebootAfterDurableVersion) {
