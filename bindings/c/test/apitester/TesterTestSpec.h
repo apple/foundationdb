@@ -42,9 +42,6 @@ struct TestSpec {
 	// Title of the test
 	std::string title;
 
-	// FDB API version, using the latest version by default
-	int apiVersion = FDB_API_VERSION;
-
 	// Use blocking waits on futures instead of scheduling callbacks
 	bool blockOnFutures = false;
 

@@ -32,7 +32,33 @@ ApiWorkload::ApiWorkload(const WorkloadConfig& config) : WorkloadBase(config) {
 	maxKeysPerTransaction = config.getIntOption("maxKeysPerTransaction", 50);
 	initialSize = config.getIntOption("initialSize", 1000);
 	readExistingKeysRatio = config.getFloatOption("readExistingKeysRatio", 0.9);
+	runUntilStop = config.getBoolOption("runUntilStop", false);
+	numRandomOperations = config.getIntOption("numRandomOperations", 1000);
+	numOperationsForProgressCheck = config.getIntOption("numOperationsForProgressCheck", 10);
 	keyPrefix = fmt::format("{}/", workloadId);
+	numRandomOpLeft = 0;
+	stopReceived = false;
+	checkingProgress = false;
+	apiVersion = config.apiVersion;
+}
+
+IWorkloadControlIfc* ApiWorkload::getControlIfc() {
+	if (runUntilStop) {
+		return this;
+	} else {
+		return nullptr;
+	}
+}
+
+void ApiWorkload::stop() {
+	ASSERT(runUntilStop);
+	stopReceived = true;
+}
+
+void ApiWorkload::checkProgress() {
+	ASSERT(runUntilStop);
+	numRandomOpLeft = numOperationsForProgressCheck;
+	checkingProgress = true;
 }
 
 void ApiWorkload::start() {
@@ -46,6 +72,37 @@ void ApiWorkload::start() {
 			});
 		});
 	});
+}
+
+void ApiWorkload::runTests() {
+	if (!runUntilStop) {
+		numRandomOpLeft = numRandomOperations;
+	}
+	randomOperations();
+}
+
+void ApiWorkload::randomOperations() {
+	if (runUntilStop) {
+		if (stopReceived)
+			return;
+		if (checkingProgress) {
+			int numLeft = numRandomOpLeft--;
+			if (numLeft == 0) {
+				checkingProgress = false;
+				confirmProgress();
+			}
+		}
+	} else {
+		int numLeft = numRandomOpLeft--;
+		if (numLeft == 0)
+			return;
+	}
+	randomOperation([this]() { randomOperations(); });
+}
+
+void ApiWorkload::randomOperation(TTaskFct cont) {
+	// Must be overridden if used
+	ASSERT(false);
 }
 
 std::string ApiWorkload::randomKeyName() {
@@ -124,6 +181,65 @@ void ApiWorkload::populateData(TTaskFct cont) {
 		info("Data population completed");
 		schedule(cont);
 	}
+}
+
+void ApiWorkload::randomInsertOp(TTaskFct cont) {
+	int numKeys = Random::get().randomInt(1, maxKeysPerTransaction);
+	auto kvPairs = std::make_shared<std::vector<KeyValue>>();
+	for (int i = 0; i < numKeys; i++) {
+		kvPairs->push_back(KeyValue{ randomNotExistingKey(), randomValue() });
+	}
+	execTransaction(
+	    [kvPairs](auto ctx) {
+		    for (const KeyValue& kv : *kvPairs) {
+			    ctx->tx()->set(kv.key, kv.value);
+		    }
+		    ctx->commit();
+	    },
+	    [this, kvPairs, cont]() {
+		    for (const KeyValue& kv : *kvPairs) {
+			    store.set(kv.key, kv.value);
+		    }
+		    schedule(cont);
+	    });
+}
+
+void ApiWorkload::randomClearOp(TTaskFct cont) {
+	int numKeys = Random::get().randomInt(1, maxKeysPerTransaction);
+	auto keys = std::make_shared<std::vector<std::string>>();
+	for (int i = 0; i < numKeys; i++) {
+		keys->push_back(randomExistingKey());
+	}
+	execTransaction(
+	    [keys](auto ctx) {
+		    for (const auto& key : *keys) {
+			    ctx->tx()->clear(key);
+		    }
+		    ctx->commit();
+	    },
+	    [this, keys, cont]() {
+		    for (const auto& key : *keys) {
+			    store.clear(key);
+		    }
+		    schedule(cont);
+	    });
+}
+
+void ApiWorkload::randomClearRangeOp(TTaskFct cont) {
+	std::string begin = randomKeyName();
+	std::string end = randomKeyName();
+	if (begin > end) {
+		std::swap(begin, end);
+	}
+	execTransaction(
+	    [begin, end](auto ctx) {
+		    ctx->tx()->clearRange(begin, end);
+		    ctx->commit();
+	    },
+	    [this, begin, end, cont]() {
+		    store.clear(begin, end);
+		    schedule(cont);
+	    });
 }
 
 } // namespace FdbApiTester

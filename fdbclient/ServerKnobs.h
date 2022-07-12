@@ -31,6 +31,7 @@ static constexpr int _PAGE_SIZE = 4096;
 
 class ServerKnobs : public KnobsImpl<ServerKnobs> {
 public:
+	bool ALLOW_DANGEROUS_KNOBS;
 	// Versions
 	int64_t VERSIONS_PER_SECOND;
 	int64_t MAX_VERSIONS_IN_FLIGHT;

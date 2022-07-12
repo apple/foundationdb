@@ -399,6 +399,7 @@ struct ConnectPacket {
 		serializer(ar, connectPacketLength);
 		if (connectPacketLength > sizeof(ConnectPacket) - sizeof(connectPacketLength)) {
 			ASSERT(!g_network->isSimulated());
+			TraceEvent("SerializationFailed").backtrace();
 			throw serialization_failed();
 		}
 
@@ -736,6 +737,9 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 				    .errorUnsuppressed(e)
 				    .suppressFor(1.0)
 				    .detail("PeerAddr", self->destination);
+
+				// Since the connection has closed, we need to check the protocol version the next time we connect
+				self->incompatibleProtocolVersionNewer = false;
 			}
 
 			if (self->destination.isPublic() &&

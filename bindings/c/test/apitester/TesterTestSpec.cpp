@@ -45,10 +45,6 @@ std::unordered_map<std::string, std::function<void(const std::string& value, Tes
 	  [](const std::string& value, TestSpec* spec) { //
 	      spec->title = value;
 	  } },
-	{ "apiVersion",
-	  [](const std::string& value, TestSpec* spec) { //
-	      processIntOption(value, "apiVersion", spec->apiVersion, 700, 710);
-	  } },
 	{ "blockOnFutures",
 	  [](const std::string& value, TestSpec* spec) { //
 	      spec->blockOnFutures = (value == "true");

@@ -193,13 +193,13 @@ public:
 		if (thread_network == this)
 			stopImmediately();
 		else
-			onMainThreadVoid([this] { this->stopImmediately(); }, nullptr);
+			onMainThreadVoid([this] { this->stopImmediately(); });
 	}
 	void addStopCallback(std::function<void()> fn) override {
 		if (thread_network == this)
 			stopCallbacks.emplace_back(std::move(fn));
 		else
-			onMainThreadVoid([this, fn] { this->stopCallbacks.emplace_back(std::move(fn)); }, nullptr);
+			onMainThreadVoid([this, fn] { this->stopCallbacks.emplace_back(std::move(fn)); });
 	}
 
 	bool isSimulated() const override { return false; }
@@ -1432,6 +1432,8 @@ void Net2::run() {
 
 	thread_network = this;
 
+	unsigned int tasksSinceReact = 0;
+
 #ifdef WIN32
 	if (timeBeginPeriod(1) != TIMERR_NOERROR)
 		TraceEvent(SevError, "TimeBeginPeriodError").log();
@@ -1500,6 +1502,7 @@ void Net2::run() {
 		taskBegin = timer_monotonic();
 		trackAtPriority(TaskPriority::ASIOReactor, taskBegin);
 		reactor.react();
+		tasksSinceReact = 0;
 
 		updateNow();
 		double now = this->currentTime;
@@ -1541,6 +1544,7 @@ void Net2::run() {
 			ready.pop();
 
 			try {
+				++tasksSinceReact;
 				(*task)();
 			} catch (Error& e) {
 				TraceEvent(SevError, "TaskError").error(e);
@@ -1554,11 +1558,12 @@ void Net2::run() {
 			}
 
 			// attempt to empty out the IO backlog
-			if (ready.size() % FLOW_KNOBS->ITERATIONS_PER_REACTOR_CHECK == 1) {
+			if (tasksSinceReact >= FLOW_KNOBS->TASKS_PER_REACTOR_CHECK) {
 				if (runFunc) {
 					runFunc();
 				}
 				reactor.react();
+				tasksSinceReact = 0;
 			}
 
 			double tscNow = timestampCounter();

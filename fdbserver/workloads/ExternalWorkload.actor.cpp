@@ -38,12 +38,10 @@ struct FDBPromiseImpl : FDBPromise {
 		if (g_network->isOnMainThread()) {
 			impl.send(*reinterpret_cast<T*>(value));
 		} else {
-			onMainThreadVoid(
-			    [impl = impl, val = *reinterpret_cast<T*>(value)]() -> Future<Void> {
-				    impl.send(val);
-				    return Void();
-			    },
-			    nullptr);
+			onMainThreadVoid([impl = impl, val = *reinterpret_cast<T*>(value)]() -> Future<Void> {
+				impl.send(val);
+				return Void();
+			});
 		}
 	}
 };
@@ -93,13 +91,11 @@ struct FDBLoggerImpl : FDBLogger {
 			traceFun();
 			flushTraceFileVoid();
 		} else {
-			onMainThreadVoid(
-			    [traceFun]() -> Future<Void> {
-				    traceFun();
-				    flushTraceFileVoid();
-				    return Void();
-			    },
-			    nullptr);
+			onMainThreadVoid([traceFun]() -> Future<Void> {
+				traceFun();
+				flushTraceFileVoid();
+				return Void();
+			});
 		}
 	}
 };
