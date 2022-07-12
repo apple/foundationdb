@@ -389,14 +389,14 @@ ACTOR Future<Void> globalConfigRequestServer(GrvProxyData* grvProxyData, GrvProx
 	state Future<Void> refreshFuture; // so there is only one running attempt
 	state Version cachedVersion = 0;
 	state RangeResult cachedData;
-	state Future<Void> refreshTimeout = delay(SERVER_KNOBS->GLOBAL_CONFIG_REFRESH_INTERVAL);
 
 	// Attempt to refresh the configuration database while the migration is
 	// ongoing. This is a small optimization to avoid waiting for the migration
 	// actor to complete.
 	refreshFuture = timeout(globalConfigRefresh(grvProxyData, &cachedVersion, &cachedData),
 	                        SERVER_KNOBS->GLOBAL_CONFIG_REFRESH_TIMEOUT,
-	                        Void());
+	                        Void()) &&
+	                delay(SERVER_KNOBS->GLOBAL_CONFIG_REFRESH_INTERVAL);
 
 	// Run one-time migration to support upgrades.
 	wait(success(timeout(globalConfigMigrate(grvProxyData), SERVER_KNOBS->GLOBAL_CONFIG_MIGRATE_TIMEOUT)));
@@ -414,11 +414,11 @@ ACTOR Future<Void> globalConfigRequestServer(GrvProxyData* grvProxyData, GrvProx
 					refresh.reply.sendError(future_version());
 				}
 			}
-			when(wait(waitForAll<Void>({ refreshFuture, refreshTimeout }))) {
+			when(wait(refreshFuture)) {
 				refreshFuture = timeout(globalConfigRefresh(grvProxyData, &cachedVersion, &cachedData),
 				                        SERVER_KNOBS->GLOBAL_CONFIG_REFRESH_TIMEOUT,
-				                        Void());
-				refreshTimeout = delay(SERVER_KNOBS->GLOBAL_CONFIG_REFRESH_INTERVAL);
+				                        Void()) &&
+				                delay(SERVER_KNOBS->GLOBAL_CONFIG_REFRESH_INTERVAL);
 			}
 			when(wait(actors.getResult())) { ASSERT(false); }
 		}
