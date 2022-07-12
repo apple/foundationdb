@@ -54,7 +54,7 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
-#define BW_DEBUG true
+#define BW_DEBUG false
 #define BW_HISTORY_DEBUG false
 #define BW_REQUEST_DEBUG false
 
@@ -1051,14 +1051,6 @@ ACTOR Future<Void> granuleCheckMergeCandidate(Reference<BlobWorkerData> bwData,
 		}
 
 		TEST(true); // Blob Worker identified merge candidate granule
-		// TODO REMOVE
-		if (BW_DEBUG) {
-			fmt::print("Granule [{0} - {1}) is a merge candidate on BW {2}: {3} bytes\n",
-			           metadata->keyRange.begin.printable(),
-			           metadata->keyRange.end.printable(),
-			           bwData->id.toString().substr(0, 5),
-			           granuleBytes);
-		}
 
 		// if we are a merge candidate, send a message to the BM. Once successful, this actor is complete
 		while (!bwData->statusStreamInitialized) {
@@ -2182,7 +2174,6 @@ struct ForwardHistoryValue {
 	Reference<GranuleHistoryEntry> entry;
 };
 
-// TODO REMOVE
 static int64_t nextHistoryLoadId = 0;
 
 // walk graph back to previous known version
@@ -2536,16 +2527,15 @@ struct sort_result_chunks {
 	}
 };
 
-// TODO: doesn't need to be actor
 static int64_t nextHistoryQueryId = 0;
-ACTOR Future<std::vector<std::pair<KeyRange, Future<GranuleFiles>>>> loadHistoryChunks(Reference<BlobWorkerData> bwData,
-                                                                                       Version expectedEndVersion,
-                                                                                       KeyRange keyRange,
-                                                                                       Version readVersion) {
-	state std::unordered_set<UID> visited;
-	state std::deque<Reference<GranuleHistoryEntry>> queue;
-	state std::vector<std::pair<KeyRange, Future<GranuleFiles>>> resultChunks;
-	state int64_t hqId = nextHistoryQueryId++;
+static std::vector<std::pair<KeyRange, Future<GranuleFiles>>> loadHistoryChunks(Reference<BlobWorkerData> bwData,
+                                                                                Version expectedEndVersion,
+                                                                                KeyRange keyRange,
+                                                                                Version readVersion) {
+	std::unordered_set<UID> visited;
+	std::deque<Reference<GranuleHistoryEntry>> queue;
+	std::vector<std::pair<KeyRange, Future<GranuleFiles>>> resultChunks;
+	int64_t hqId = nextHistoryQueryId++;
 
 	if (BW_HISTORY_DEBUG) {
 		fmt::print("HQ {0} {1}) [{2} - {3}) @ {4}: Starting Query\n",
@@ -2870,8 +2860,6 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 		for (auto m : granules) {
 			if (readThrough >= m->keyRange.end) {
 				// previous read did time travel that already included this granule
-				// FIXME: this will get more complicated with merges where this could potentially
-				// include partial boundaries. For now with only splits we can skip the whole range
 				continue;
 			}
 			state Reference<GranuleMetadata> metadata = m;
@@ -2898,15 +2886,8 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 					}
 				}
 
-				state std::vector<std::pair<KeyRange, Future<GranuleFiles>>> finalChunks;
-				choose {
-					when(std::vector<std::pair<KeyRange, Future<GranuleFiles>>> _finalChunks = wait(loadHistoryChunks(
-					         bwData, metadata->historyVersion, req.keyRange & metadata->keyRange, req.readVersion))) {
-						finalChunks = _finalChunks;
-					}
-					when(wait(metadata->cancelled.getFuture())) { throw wrong_shard_server(); }
-				}
-
+				state std::vector<std::pair<KeyRange, Future<GranuleFiles>>> finalChunks = loadHistoryChunks(
+				    bwData, metadata->historyVersion, req.keyRange & metadata->keyRange, req.readVersion);
 				state int chunkIdx;
 				for (chunkIdx = 0; chunkIdx < finalChunks.size(); chunkIdx++) {
 					choose {

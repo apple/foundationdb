@@ -50,7 +50,7 @@
  * The Blob Manager is responsible for managing range granules, and recruiting and monitoring Blob Workers.
  */
 
-#define BM_DEBUG true
+#define BM_DEBUG false
 
 void handleClientBlobRange(KeyRangeMap<bool>* knownBlobRanges,
                            Arena& ar,
@@ -253,8 +253,6 @@ struct BoundaryEvaluation {
 
 struct BlobManagerStats {
 	CounterCollection cc;
-
-	// FIXME: purging stats
 
 	Counter granuleSplits;
 	Counter granuleWriteHotSplits;
@@ -1093,13 +1091,6 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 		// set updated boundary evaluation to avoid racing calls getting unblocked after here
 		// We need to only revoke based on non-continue seqno, but ignore duplicate calls based on continue seqno
 		if (reassignSuccess) {
-			// TODO  REMOVE
-			fmt::print("BM {0} updating boundary eval [{1} - {2}) to ({3}, {4}) after reassign\n",
-			           bmData->epoch,
-			           granuleRange.begin.printable(),
-			           granuleRange.end.printable(),
-			           bmData->epoch,
-			           seqnoForEval);
 			bmData->boundaryEvaluations.insert(
 			    granuleRange,
 			    BoundaryEvaluation(bmData->epoch, seqnoForEval, BoundaryEvalType::SPLIT, originalEpoch, originalSeqno));
@@ -1470,10 +1461,6 @@ ACTOR Future<Void> forceGranuleFlush(Reference<BlobManagerData> bmData, KeyRange
 				break;
 			}
 		} catch (Error& e) {
-			if (BM_DEBUG) {
-				// TODO REMOVE
-				fmt::print("Flushing Granules got error {}!\n", e.name());
-			}
 			wait(tr.onError(e));
 		}
 	}
@@ -1536,10 +1523,6 @@ ACTOR Future<std::pair<UID, Version>> persistMergeGranulesStart(Reference<BlobMa
 
 			return std::pair(mergeGranuleID, mergeVersion);
 		} catch (Error& e) {
-			if (BM_DEBUG) {
-				// TODO REMOVE
-				fmt::print("Persist Merge Granules Start got error {}!\n", e.name());
-			}
 			wait(tr->onError(e));
 		}
 	}
@@ -1637,10 +1620,6 @@ ACTOR Future<Void> persistMergeGranulesDone(Reference<BlobManagerData> bmData,
 			TEST(true); // Granule merge complete
 			return Void();
 		} catch (Error& e) {
-			if (BM_DEBUG) {
-				// TODO REMOVE
-				fmt::print("Persist Merge Granules End got error {}!\n", e.name());
-			}
 			wait(tr->onError(e));
 		}
 	}
@@ -1690,14 +1669,12 @@ ACTOR Future<Void> finishMergeGranules(Reference<BlobManagerData> bmData,
 	bmData->activeGranuleMerges.insert(mergeRange, invalidVersion);
 	bmData->activeGranuleMerges.coalesce(mergeRange.begin);
 
-	// TODO does blank original epoch/seqno work here?..
 	bmData->boundaryEvaluations.insert(mergeRange,
 	                                   BoundaryEvaluation(bmData->epoch, seqnoForEval, BoundaryEvalType::MERGE, 0, 0));
 
 	return Void();
 }
 
-// FIXME: need to handle racing maybeMergeRanges that have different source granules but overlap in merge range
 ACTOR Future<Void> maybeMergeRange(Reference<BlobManagerData> bmData,
                                    UID granuleID,
                                    KeyRange granuleRange,
@@ -1787,13 +1764,6 @@ ACTOR Future<Void> maybeMergeRange(Reference<BlobManagerData> bmData,
 	if (targetGranuleMetrics.bytesPerKSecond >= SERVER_KNOBS->SHARD_MIN_BYTES_PER_KSEC ||
 	    targetGranuleMetrics.bytes >= SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES) {
 		TEST(true); // granule merge candidate no longer mergeable
-		// TODO REMOVE debug
-		if (BM_DEBUG) {
-			fmt::print("BM {0} maybe merge [{1} - {2}): No longer mergeable\n",
-			           bmData->epoch,
-			           granuleRange.begin.printable(),
-			           granuleRange.end.printable());
-		}
 		return Void();
 	}
 
@@ -2258,13 +2228,15 @@ ACTOR Future<Void> monitorBlobWorkerStatus(Reference<BlobManagerData> bmData, Bl
 					if (inProgressMergeVersion != invalidVersion) {
 						if (rep.blockedVersion < inProgressMergeVersion) {
 							TEST(true); // merge blocking re-snapshot
-							fmt::print("DBG: BM {0} MERGE @ {1} blocking re-snapshot [{2} - {3}) @ {4}, "
-							           "continuing snapshot\n",
-							           bmData->epoch,
-							           inProgressMergeVersion,
-							           rep.granuleRange.begin.printable(),
-							           rep.granuleRange.end.printable(),
-							           rep.blockedVersion);
+							if (BM_DEBUG) {
+								fmt::print("DBG: BM {0} MERGE @ {1} blocking re-snapshot [{2} - {3}) @ {4}, "
+								           "continuing snapshot\n",
+								           bmData->epoch,
+								           inProgressMergeVersion,
+								           rep.granuleRange.begin.printable(),
+								           rep.granuleRange.end.printable(),
+								           rep.blockedVersion);
+							}
 							RangeAssignment raContinue;
 							raContinue.isAssign = true;
 							raContinue.worker = bwInterf.id();
@@ -2620,10 +2592,6 @@ ACTOR Future<Void> resumeActiveMerges(Reference<BlobManagerData> bmData) {
 				return Void();
 			}
 		} catch (Error& e) {
-			if (BM_DEBUG) {
-				// TODO REMOVE
-				fmt::print("BM {0} got error reading granule merges during recovery: {1}\n", bmData->epoch, e.name());
-			}
 			wait(tr->onError(e));
 		}
 	}
@@ -3145,8 +3113,6 @@ ACTOR Future<GranuleFiles> loadHistoryFiles(Reference<BlobManagerData> bmData, U
 		}
 	}
 }
-
-// FIXME: trace events for purging
 
 ACTOR Future<Void> canDeleteFullGranule(Reference<BlobManagerData> self, UID granuleId) {
 	state Transaction tr(self->db);
