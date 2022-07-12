@@ -31,23 +31,16 @@ const PROTOCOL_INFO_REPLY_FILE_IDENTIFIER: ParsedFileIdentifier = ParsedFileIden
 };
 
 fn serialize_request(peer: SocketAddr) -> Result<FlowMessage> {
-    use crate::common_generated::{ReplyPromise, ReplyPromiseArgs};
     use protocol_info_request::{FakeRoot, FakeRootArgs};
 
-    let completion = UID::random_token();
-    let wltoken = UID::well_known_token(WLTOKEN::ProtocolInfo);
+    let builder = flatbuffers::FlatBufferBuilder::with_capacity(1024);
+    let (flow, reply_promise, mut builder) = super::create_rpc_headers(builder, peer);
 
-    let mut builder = flatbuffers::FlatBufferBuilder::with_capacity(1024);
-    let response_token: crate::common_generated::UID = (&completion).into();
-    let uid = Some(&response_token);
-    let reply_promise = Some(ReplyPromise::create(
-        &mut builder,
-        &ReplyPromiseArgs { uid },
-    ));
     let protocol_info_request = Some(ProtocolInfoRequest::create(
         &mut builder,
         &ProtocolInfoRequestArgs { reply_promise },
     ));
+
     let fake_root = FakeRoot::create(
         &mut builder,
         &FakeRootArgs {
@@ -55,16 +48,8 @@ fn serialize_request(peer: SocketAddr) -> Result<FlowMessage> {
         },
     );
     builder.finish(fake_root, Some("myfi"));
-    let (mut payload, offset) = builder.collapse();
-    FileIdentifier::new(PROTOCOL_INFO_REQUEST_FILE_IDENTIFIER.file_identifier)?
-        .rewrite_flatbuf(&mut payload[offset..])?;
-    FlowMessage::new(
-        Flow {
-            dst: Peer::Remote(peer),
-            src: Peer::Local(Some(completion)),
-        },
-        Frame::new(wltoken, payload, offset),
-    )
+    let wltoken = UID::well_known_token(WLTOKEN::ProtocolInfo);
+    super::finalize_request(builder, flow, wltoken, PROTOCOL_INFO_REQUEST_FILE_IDENTIFIER)
 }
 
 fn serialize_reply(token: UID) -> Result<Frame> {
