@@ -7948,7 +7948,8 @@ ACTOR Future<std::vector<std::pair<UID, StorageWiggleValue>>> readStorageWiggleV
 	state KeyBackedObjectMap<UID, StorageWiggleValue, decltype(IncludeVersion())> metadataMap(readKey,
 	                                                                                          IncludeVersion());
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
-	state std::vector<std::pair<UID, StorageWiggleValue>> res;
+	state KeyBackedRangeResult<std::pair<UID, StorageWiggleValue>> res;
+
 	// read the wiggling pairs
 	loop {
 		try {
@@ -7964,7 +7965,7 @@ ACTOR Future<std::vector<std::pair<UID, StorageWiggleValue>>> readStorageWiggleV
 			wait(tr->onError(e));
 		}
 	}
-	return res;
+	return res.results;
 }
 
 ACTOR Future<Void> splitStorageMetricsStream(PromiseStream<Key> resultStream,

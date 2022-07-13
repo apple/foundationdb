@@ -106,7 +106,7 @@ struct MetricsConfig {
 
 	typedef KeyBackedMap<int64_t, MetricsRule> RuleMapT;
 	RuleMapT ruleMap;
-	RuleMapT::PairsType rules;
+	RuleMapT::RangeResultType rules;
 
 	KeyBackedMap<Key, int64_t> addressMap;
 	KeyBackedMap<std::pair<Key, Key>, int64_t> nameAndTypeMap;
@@ -152,11 +152,11 @@ ACTOR Future<Void> metricRuleUpdater(Database cx, MetricsConfig* config, TDMetri
 		state Future<Void> newMetric = collection->metricAdded.onTrigger();
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			MetricsConfig::RuleMapT::PairsType rules = wait(config->ruleMap.getRange(tr, 0, {}, 1e6));
+			MetricsConfig::RuleMapT::RangeResultType rules = wait(config->ruleMap.getRange(tr, 0, {}, 1e6));
 
 			for (auto& it : collection->metricMap) {
 				it.value->setConfig(false);
-				for (auto i = rules.rbegin(); !(i == rules.rend()); ++i)
+				for (auto i = rules.results.rbegin(); !(i == rules.results.rend()); ++i)
 					if (i->second.applyTo(it.value.getPtr(), collection->address))
 						break;
 			}
