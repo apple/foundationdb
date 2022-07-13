@@ -64,9 +64,10 @@ struct WorkerInfo : NonCopyable {
 	           ProcessClass processClass,
 	           ClusterControllerPriorityInfo priorityInfo,
 	           bool degraded,
+	           bool recoveredDiskFiles,
 	           Standalone<VectorRef<StringRef>> issues)
 	  : watcher(watcher), reply(reply), gen(gen), reboots(0), initialClass(initialClass), priorityInfo(priorityInfo),
-	    details(interf, processClass, degraded), issues(issues) {}
+	    details(interf, processClass, degraded, recoveredDiskFiles), issues(issues) {}
 
 	WorkerInfo(WorkerInfo&& r) noexcept
 	  : watcher(std::move(r.watcher)), reply(std::move(r.reply)), gen(r.gen), reboots(r.reboots),
@@ -303,7 +304,7 @@ public:
 		std::set<AddressExclusion> excludedAddresses(req.excludeAddresses.begin(), req.excludeAddresses.end());
 
 		for (auto& it : id_worker)
-			if (workerAvailable(it.second, false) &&
+			if (workerAvailable(it.second, false) && it.second.details.recoveredDiskFiles &&
 			    !excludedMachines.count(it.second.details.interf.locality.zoneId()) &&
 			    (includeDCs.size() == 0 || includeDCs.count(it.second.details.interf.locality.dcId())) &&
 			    !addressExcluded(excludedAddresses, it.second.details.interf.address()) &&
@@ -318,7 +319,7 @@ public:
 			Optional<WorkerDetails> bestInfo;
 			for (auto& it : id_worker) {
 				ProcessClass::Fitness fit = it.second.details.processClass.machineClassFitness(ProcessClass::Storage);
-				if (workerAvailable(it.second, false) &&
+				if (workerAvailable(it.second, false) && it.second.details.recoveredDiskFiles &&
 				    !excludedMachines.count(it.second.details.interf.locality.zoneId()) &&
 				    (includeDCs.size() == 0 || includeDCs.count(it.second.details.interf.locality.dcId())) &&
 				    !addressExcluded(excludedAddresses, it.second.details.interf.address()) && fit < bestFit) {
@@ -367,7 +368,8 @@ public:
 
 		for (auto& it : id_worker) {
 			auto fitness = it.second.details.processClass.machineClassFitness(ProcessClass::Storage);
-			if (workerAvailable(it.second, false) && !conf.isExcludedServer(it.second.details.interf.addresses()) &&
+			if (workerAvailable(it.second, false) && it.second.details.recoveredDiskFiles &&
+			    !conf.isExcludedServer(it.second.details.interf.addresses()) &&
 			    !isExcludedDegradedServer(it.second.details.interf.addresses()) &&
 			    fitness != ProcessClass::NeverAssign &&
 			    (!dcId.present() || it.second.details.interf.locality.dcId() == dcId.get())) {
@@ -597,6 +599,11 @@ public:
 			}
 			if (!workerAvailable(worker_info, checkStable)) {
 				logWorkerUnavailable(SevInfo, id, "complex", "Worker is not available", worker_details, fitness, dcIds);
+				continue;
+			}
+			if (!worker_details.recoveredDiskFiles) {
+				logWorkerUnavailable(
+				    SevInfo, id, "complex", "Worker disk file recovery unfinished", worker_details, fitness, dcIds);
 				continue;
 			}
 			if (conf.isExcludedServer(worker_details.interf.addresses())) {
@@ -844,6 +851,11 @@ public:
 				logWorkerUnavailable(SevInfo, id, "simple", "Worker is not available", worker_details, fitness, dcIds);
 				continue;
 			}
+			if (!worker_details.recoveredDiskFiles) {
+				logWorkerUnavailable(
+				    SevInfo, id, "simple", "Worker disk file recovery unfinished", worker_details, fitness, dcIds);
+				continue;
+			}
 			if (conf.isExcludedServer(worker_details.interf.addresses())) {
 				logWorkerUnavailable(SevInfo,
 				                     id,
@@ -989,6 +1001,11 @@ public:
 			if (!workerAvailable(worker_info, checkStable)) {
 				logWorkerUnavailable(
 				    SevInfo, id, "deprecated", "Worker is not available", worker_details, fitness, dcIds);
+				continue;
+			}
+			if (!worker_details.recoveredDiskFiles) {
+				logWorkerUnavailable(
+				    SevInfo, id, "deprecated", "Worker disk file recovery unfinished", worker_details, fitness, dcIds);
 				continue;
 			}
 			if (conf.isExcludedServer(worker_details.interf.addresses())) {

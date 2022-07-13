@@ -4721,6 +4721,9 @@ ACTOR Future<Void> getRangeStreamFragment(Reference<TransactionState> trState,
 			req.spanContext = spanContext;
 			req.limit = reverse ? -CLIENT_KNOBS->REPLY_BYTE_LIMIT : CLIENT_KNOBS->REPLY_BYTE_LIMIT;
 			req.limitBytes = std::numeric_limits<int>::max();
+			// leaving the flag off for now to prevent data fetches stall under heavy load
+			// it is used to inform the storage that the rangeRead is for Fetch
+			// req.isFetchKeys = (trState->taskID == TaskPriority::FetchKeys);
 			trState->cx->getLatestCommitVersions(
 			    locations[shard].locations, req.version, trState, req.ssLatestCommitVersions);
 
@@ -7819,7 +7822,7 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 						           granuleEndKey.printable(),
 						           begin,
 						           rv,
-						           workerId.toString());
+						           workerId.toString().substr(0, 5));
 					}
 					ASSERT(!rep.chunks.empty());
 					results.arena().dependsOn(rep.arena);
@@ -7851,6 +7854,17 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 							ASSERT(chunk.tenantPrefix.get() == tenantPrefix.get());
 						}
 
+						if (!results.empty() && results.back().keyRange.end != chunk.keyRange.begin) {
+							ASSERT(results.back().keyRange.end > chunk.keyRange.begin);
+							ASSERT(results.back().keyRange.end <= chunk.keyRange.end);
+							TEST(true); // Merge while reading granule range
+							while (!results.empty() && results.back().keyRange.begin >= chunk.keyRange.begin) {
+								// TODO: we can't easily un-depend the arenas for these guys, but that's ok as this
+								// should be rare
+								results.pop_back();
+							}
+							ASSERT(results.empty() || results.back().keyRange.end == chunk.keyRange.begin);
+						}
 						results.push_back(results.arena(), chunk);
 						StringRef chunkEndKey = chunk.keyRange.end;
 						if (tenantPrefix.present()) {
@@ -7873,7 +7887,13 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 			}
 		} catch (Error& e) {
 			if (BG_REQUEST_DEBUG) {
-				fmt::print("BGReq got error {}\n", e.name());
+				fmt::print("Blob granule request for [{0} - {1}) @ {2} - {3} got error from {4}: {5}\n",
+				           granuleStartKey.printable(),
+				           granuleEndKey.printable(),
+				           begin,
+				           rv,
+				           workerId.toString().substr(0, 5),
+				           e.name());
 			}
 			// worker is up but didn't actually have granule, or connection failed
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_connection_failed ||
@@ -7902,8 +7922,9 @@ Future<Standalone<VectorRef<BlobGranuleChunkRef>>> Transaction::readBlobGranules
 	return readBlobGranulesActor(this, range, begin, readVersion, readVersionOut);
 }
 
-ACTOR Future<Void> setPerpetualStorageWiggle(Database cx, bool enable, LockAware lockAware) {
+ACTOR Future<Version> setPerpetualStorageWiggle(Database cx, bool enable, LockAware lockAware) {
 	state ReadYourWritesTransaction tr(cx);
+	state Version version = invalidVersion;
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -7913,12 +7934,13 @@ ACTOR Future<Void> setPerpetualStorageWiggle(Database cx, bool enable, LockAware
 
 			tr.set(perpetualStorageWiggleKey, enable ? "1"_sr : "0"_sr);
 			wait(tr.commit());
+			version = tr.getCommittedVersion();
 			break;
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}
 	}
-	return Void();
+	return version;
 }
 
 ACTOR Future<std::vector<std::pair<UID, StorageWiggleValue>>> readStorageWiggleValues(Database cx,

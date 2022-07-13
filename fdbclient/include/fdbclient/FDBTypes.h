@@ -841,13 +841,13 @@ struct KeyValueStoreType {
 	// Only add new ones just before END.
 	// SS storeType is END before the storageServerInterface is initialized.
 	enum StoreType {
-		SSD_BTREE_V1,
-		MEMORY,
-		SSD_BTREE_V2,
-		SSD_REDWOOD_V1,
-		MEMORY_RADIXTREE,
-		SSD_ROCKSDB_V1,
-		SSD_SHARDED_ROCKSDB,
+		SSD_BTREE_V1 = 0,
+		MEMORY = 1,
+		SSD_BTREE_V2 = 2,
+		SSD_REDWOOD_V1 = 3,
+		MEMORY_RADIXTREE = 4,
+		SSD_ROCKSDB_V1 = 5,
+		SSD_SHARDED_ROCKSDB = 6,
 		END
 	};
 

@@ -45,6 +45,7 @@ static unsigned int crc32_align(unsigned int crc, unsigned char* p, unsigned lon
 unsigned int CRC32_FUNCTION_ASM(unsigned int crc, unsigned char* p, unsigned long len);
 
 unsigned int CRC32_FUNCTION(unsigned int crc, unsigned char* p, unsigned long len) {
+#ifdef __powerpc64 // avoid link failures on systems without CRC32_FUNCTION_ASM declared
 	unsigned int prealign;
 	unsigned int tail;
 
@@ -76,6 +77,6 @@ out:
 #ifdef CRC_XOR
 	crc ^= 0xffffffff;
 #endif
-
+#endif
 	return crc;
 }

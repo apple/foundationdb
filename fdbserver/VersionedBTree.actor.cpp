@@ -37,7 +37,6 @@
 #include "flow/serialize.h"
 #include "flow/genericactors.actor.h"
 #include "flow/UnitTest.h"
-#include "fdbserver/IPager.h"
 #include "flow/IAsyncFile.h"
 #include "flow/ActorCollection.h"
 #include <map>

@@ -229,7 +229,7 @@ Future<Optional<TenantMapEntry>> createTenant(Reference<DB> db,
 
 			if (newTenant.second) {
 				ASSERT(newTenant.first.present());
-				wait(buggifiedCommit(tr, BUGGIFY));
+				wait(buggifiedCommit(tr, BUGGIFY_WITH_PROB(0.1)));
 
 				TraceEvent("CreatedTenant")
 				    .detail("Tenant", name)
@@ -323,7 +323,7 @@ Future<Void> deleteTenant(Reference<DB> db,
 			}
 
 			wait(deleteTenantTransaction(tr, name, clusterType, tenantId));
-			wait(buggifiedCommit(tr, BUGGIFY));
+			wait(buggifiedCommit(tr, BUGGIFY_WITH_PROB(0.1)));
 
 			TraceEvent("DeletedTenant").detail("Tenant", name).detail("Version", tr->getCommittedVersion());
 			return Void();
