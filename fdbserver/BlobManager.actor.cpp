@@ -674,106 +674,114 @@ ACTOR Future<Void> doRangeAssignment(Reference<BlobManagerData> bmData,
 	return Void();
 }
 
+static bool handleRangeIsAssign(Reference<BlobManagerData> bmData, RangeAssignment assignment, int64_t seqNo) {
+	// Ensure range isn't currently assigned anywhere, and there is only 1 intersecting range
+	auto currentAssignments = bmData->workerAssignments.intersectingRanges(assignment.keyRange);
+	int count = 0;
+	UID workerId;
+	for (auto i = currentAssignments.begin(); i != currentAssignments.end(); ++i) {
+		if (assignment.assign.get().type == AssignRequestType::Continue) {
+			ASSERT(assignment.worker.present());
+			if (i.range() != assignment.keyRange || i.cvalue() != assignment.worker.get()) {
+				TEST(true); // BM assignment out of date
+				if (BM_DEBUG) {
+					fmt::print("Out of date re-assign for ({0}, {1}). Assignment must have changed while "
+					           "checking split.\n  Reassign: [{2} - {3}): {4}\n  Existing: [{5} - {6}): {7}\n",
+					           bmData->epoch,
+					           seqNo,
+					           assignment.keyRange.begin.printable(),
+					           assignment.keyRange.end.printable(),
+					           assignment.worker.get().toString().substr(0, 5),
+					           i.begin().printable(),
+					           i.end().printable(),
+					           i.cvalue().toString().substr(0, 5));
+				}
+				return false;
+			}
+		}
+		count++;
+	}
+	ASSERT(count == 1);
+
+	if (assignment.worker.present() && assignment.worker.get().isValid()) {
+		if (BM_DEBUG) {
+			fmt::print("BW {0} already chosen for seqno {1} in BM {2}\n",
+			           assignment.worker.get().toString(),
+			           seqNo,
+			           bmData->id.toString());
+		}
+		workerId = assignment.worker.get();
+
+		bmData->workerAssignments.insert(assignment.keyRange, workerId);
+
+		// If we know about the worker and this is not a continue, then this is a new range for the worker
+		if (assignment.assign.get().type == AssignRequestType::Continue) {
+			// if it is a continue, don't cancel an in-flight re-assignment. Send to actor collection instead of
+			// assignsInProgress
+			bmData->addActor.send(doRangeAssignment(bmData, assignment, workerId, bmData->epoch, seqNo));
+		} else {
+			bmData->assignsInProgress.insert(assignment.keyRange,
+			                                 doRangeAssignment(bmData, assignment, workerId, bmData->epoch, seqNo));
+			if (bmData->workerStats.count(workerId)) {
+				bmData->workerStats[workerId].numGranulesAssigned += 1;
+			}
+		}
+	} else {
+		// Ensure the key boundaries are updated before we pick a worker
+		bmData->workerAssignments.insert(assignment.keyRange, UID());
+		ASSERT(assignment.assign.get().type != AssignRequestType::Continue);
+		bmData->assignsInProgress.insert(assignment.keyRange,
+		                                 doRangeAssignment(bmData, assignment, Optional<UID>(), bmData->epoch, seqNo));
+	}
+	return true;
+}
+
+static bool handleRangeIsRevoke(Reference<BlobManagerData> bmData, RangeAssignment assignment, int64_t seqNo) {
+	if (assignment.worker.present()) {
+		// revoke this specific range from this specific worker. Either part of recovery or failing a worker
+		if (bmData->workerStats.count(assignment.worker.get())) {
+			bmData->workerStats[assignment.worker.get()].numGranulesAssigned -= 1;
+		}
+		// if this revoke matches the worker assignment state, mark the range as unassigned
+		auto existingRange = bmData->workerAssignments.rangeContaining(assignment.keyRange.begin);
+		if (existingRange.range() == assignment.keyRange && existingRange.cvalue() == assignment.worker.get()) {
+			bmData->workerAssignments.insert(assignment.keyRange, UID());
+		}
+		bmData->addActor.send(doRangeAssignment(bmData, assignment, assignment.worker.get(), bmData->epoch, seqNo));
+	} else {
+		auto currentAssignments = bmData->workerAssignments.intersectingRanges(assignment.keyRange);
+		for (auto& it : currentAssignments) {
+			// ensure range doesn't truncate existing ranges
+			ASSERT(it.begin() >= assignment.keyRange.begin);
+			ASSERT(it.end() <= assignment.keyRange.end);
+
+			// It is fine for multiple disjoint sub-ranges to have the same sequence number since they were part
+			// of the same logical change
+
+			if (bmData->workerStats.count(it.value())) {
+				bmData->workerStats[it.value()].numGranulesAssigned -= 1;
+			}
+
+			// revoke the range for the worker that owns it, not the worker specified in the revoke
+			bmData->addActor.send(doRangeAssignment(bmData, assignment, it.value(), bmData->epoch, seqNo));
+		}
+		bmData->workerAssignments.insert(assignment.keyRange, UID());
+	}
+
+	bmData->assignsInProgress.cancel(assignment.keyRange);
+	return true;
+}
+
 static bool handleRangeAssign(Reference<BlobManagerData> bmData, RangeAssignment assignment) {
 	int64_t seqNo = bmData->seqNo;
 	bmData->seqNo++;
 
 	// modify the in-memory assignment data structures, and send request off to worker
-	UID workerId;
 	if (assignment.isAssign) {
-		// Ensure range isn't currently assigned anywhere, and there is only 1 intersecting range
-		auto currentAssignments = bmData->workerAssignments.intersectingRanges(assignment.keyRange);
-		int count = 0;
-		for (auto i = currentAssignments.begin(); i != currentAssignments.end(); ++i) {
-			if (assignment.assign.get().type == AssignRequestType::Continue) {
-				ASSERT(assignment.worker.present());
-				if (i.range() != assignment.keyRange || i.cvalue() != assignment.worker.get()) {
-					TEST(true); // BM assignment out of date
-					if (BM_DEBUG) {
-						fmt::print("Out of date re-assign for ({0}, {1}). Assignment must have changed while "
-						           "checking split.\n  Reassign: [{2} - {3}): {4}\n  Existing: [{5} - {6}): {7}\n",
-						           bmData->epoch,
-						           seqNo,
-						           assignment.keyRange.begin.printable(),
-						           assignment.keyRange.end.printable(),
-						           assignment.worker.get().toString().substr(0, 5),
-						           i.begin().printable(),
-						           i.end().printable(),
-						           i.cvalue().toString().substr(0, 5));
-					}
-					return false;
-				}
-			}
-			count++;
-		}
-		ASSERT(count == 1);
-
-		if (assignment.worker.present() && assignment.worker.get().isValid()) {
-			if (BM_DEBUG) {
-				fmt::print("BW {0} already chosen for seqno {1} in BM {2}\n",
-				           assignment.worker.get().toString(),
-				           seqNo,
-				           bmData->id.toString());
-			}
-			workerId = assignment.worker.get();
-
-			bmData->workerAssignments.insert(assignment.keyRange, workerId);
-
-			// If we know about the worker and this is not a continue, then this is a new range for the worker
-			if (assignment.assign.get().type == AssignRequestType::Continue) {
-				// if it is a continue, don't cancel an in-flight re-assignment. Send to actor collection instead of
-				// assignsInProgress
-				bmData->addActor.send(doRangeAssignment(bmData, assignment, workerId, bmData->epoch, seqNo));
-			} else {
-				bmData->assignsInProgress.insert(assignment.keyRange,
-				                                 doRangeAssignment(bmData, assignment, workerId, bmData->epoch, seqNo));
-				if (bmData->workerStats.count(workerId)) {
-					bmData->workerStats[workerId].numGranulesAssigned += 1;
-				}
-			}
-		} else {
-			// Ensure the key boundaries are updated before we pick a worker
-			bmData->workerAssignments.insert(assignment.keyRange, UID());
-			ASSERT(assignment.assign.get().type != AssignRequestType::Continue);
-			bmData->assignsInProgress.insert(
-			    assignment.keyRange, doRangeAssignment(bmData, assignment, Optional<UID>(), bmData->epoch, seqNo));
-		}
-
+		return handleRangeIsAssign(bmData, assignment, seqNo);
 	} else {
-		if (assignment.worker.present()) {
-			// revoke this specific range from this specific worker. Either part of recovery or failing a worker
-			if (bmData->workerStats.count(assignment.worker.get())) {
-				bmData->workerStats[assignment.worker.get()].numGranulesAssigned -= 1;
-			}
-			// if this revoke matches the worker assignment state, mark the range as unassigned
-			auto existingRange = bmData->workerAssignments.rangeContaining(assignment.keyRange.begin);
-			if (existingRange.range() == assignment.keyRange && existingRange.cvalue() == assignment.worker.get()) {
-				bmData->workerAssignments.insert(assignment.keyRange, UID());
-			}
-			bmData->addActor.send(doRangeAssignment(bmData, assignment, assignment.worker.get(), bmData->epoch, seqNo));
-		} else {
-			auto currentAssignments = bmData->workerAssignments.intersectingRanges(assignment.keyRange);
-			for (auto& it : currentAssignments) {
-				// ensure range doesn't truncate existing ranges
-				ASSERT(it.begin() >= assignment.keyRange.begin);
-				ASSERT(it.end() <= assignment.keyRange.end);
-
-				// It is fine for multiple disjoint sub-ranges to have the same sequence number since they were part
-				// of the same logical change
-
-				if (bmData->workerStats.count(it.value())) {
-					bmData->workerStats[it.value()].numGranulesAssigned -= 1;
-				}
-
-				// revoke the range for the worker that owns it, not the worker specified in the revoke
-				bmData->addActor.send(doRangeAssignment(bmData, assignment, it.value(), bmData->epoch, seqNo));
-			}
-			bmData->workerAssignments.insert(assignment.keyRange, UID());
-		}
-
-		bmData->assignsInProgress.cancel(assignment.keyRange);
+		return handleRangeIsRevoke(bmData, assignment, seqNo);
 	}
-	return true;
 }
 
 ACTOR Future<Void> checkManagerLock(Reference<ReadYourWritesTransaction> tr, Reference<BlobManagerData> bmData) {
