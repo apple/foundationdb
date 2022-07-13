@@ -398,7 +398,9 @@ bool parseSignaturePart(Arena& arena, TokenRef& token, StringRef b64urlSignature
 }
 
 StringRef signaturePart(StringRef token) {
-	return token.eat("."_sr).eat("."_sr);
+	token.eat("."_sr);
+	token.eat("."_sr);
+	return token;
 }
 
 bool parseToken(Arena& arena, TokenRef& token, StringRef signedToken) {
