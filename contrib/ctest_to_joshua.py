@@ -119,6 +119,7 @@ Unknown arguments are forwarded to ctest, so you may use -R to filter tests e.g.
     joshua_builder.add_arg(os.path.join(args.build_dir, "bin/fdbcli"))
     joshua_builder.add_arg(os.path.join(args.build_dir, "bin/fdbmonitor"))
     joshua_builder.add_arg(os.path.join(args.build_dir, "bin/fdbserver"))
+    joshua_builder.add_arg(os.path.join(args.build_dir, "bin/mkcert"))
     if platform.system() == "Darwin":
         joshua_builder.add_arg(os.path.join(args.build_dir, "lib/libfdb_c.dylib"))
     else:
