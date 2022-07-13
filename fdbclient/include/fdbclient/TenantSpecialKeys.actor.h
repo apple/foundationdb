@@ -207,10 +207,18 @@ private:
 		return Void();
 	}
 
+	ACTOR static Future<Void> renameTenant(ReadYourWritesTransaction* ryw,
+	                                       TenantNameRef oldName,
+	                                       TenantNameRef newName) {
+		wait(TenantAPI::renameTenantTransaction(&ryw->getTransaction(), oldName, newName));
+		return Void();
+	}
+
 public:
 	// These ranges vary based on the template parameter
 	const static KeyRangeRef submoduleRange;
 	const static KeyRangeRef mapSubRange;
+	const static KeyRangeRef renameSubRange;
 
 	// These sub-ranges should only be used if HasSubRanges=true
 	const inline static KeyRangeRef configureSubRange = KeyRangeRef("configure/"_sr, "configure0"_sr);
@@ -229,6 +237,8 @@ public:
 
 		std::vector<std::pair<KeyRangeRef, Optional<Value>>> mapMutations;
 		std::map<TenantName, std::vector<std::pair<Standalone<StringRef>, Optional<Value>>>> configMutations;
+		std::set<TenantName> renameSet;
+		std::vector<std::pair<TenantName, TenantName>> renameMutations;
 
 		for (auto range : ranges) {
 			if (!range.value().first) {
@@ -259,12 +269,35 @@ public:
 					    false, "configure tenant", "invalid tenant configuration key"));
 					throw special_keys_api_failure();
 				}
+			} else if (subRangeIntersects(renameSubRange, adjustedRange)) {
+				try {
+					StringRef oldName = adjustedRange.begin.removePrefix(renameSubRange.begin);
+					StringRef newName = range.value().second.get();
+					// Do not allow overlapping renames in the same commit
+					// e.g. A->B, B->C
+					if (renameSet.count(oldName) || renameSet.count(newName)) {
+						throw tenant_already_exists();
+					}
+					renameSet.insert(oldName);
+					renameSet.insert(newName);
+					renameMutations.push_back(std::make_pair(oldName, newName));
+				} catch (Error& e) {
+					ryw->setSpecialKeySpaceErrorMsg(
+					    ManagementAPIError::toJsonString(false, "rename tenant", "tenant rename conflict"));
+					throw special_keys_api_failure();
+				}
 			}
 		}
 
 		std::map<TenantName, Optional<std::vector<std::pair<Standalone<StringRef>, Optional<Value>>>>> tenantsToCreate;
 		for (auto mapMutation : mapMutations) {
 			TenantNameRef tenantName = mapMutation.first.begin;
+			auto set_iter = renameSet.lower_bound(tenantName);
+			if (set_iter != renameSet.end() && mapMutation.first.contains(*set_iter)) {
+				ryw->setSpecialKeySpaceErrorMsg(
+				    ManagementAPIError::toJsonString(false, "rename tenant", "tenant rename conflict"));
+				throw special_keys_api_failure();
+			}
 			if (mapMutation.second.present()) {
 				Optional<std::vector<std::pair<Standalone<StringRef>, Optional<Value>>>> createMutations;
 				auto itr = configMutations.find(tenantName);
@@ -295,7 +328,16 @@ public:
 			tenantManagementFutures.push_back(createTenants(ryw, tenantsToCreate));
 		}
 		for (auto configMutation : configMutations) {
+			if (renameSet.count(configMutation.first)) {
+				ryw->setSpecialKeySpaceErrorMsg(
+				    ManagementAPIError::toJsonString(false, "rename tenant", "tenant rename conflict"));
+				throw special_keys_api_failure();
+			}
 			tenantManagementFutures.push_back(changeTenantConfig(ryw, configMutation.first, configMutation.second));
+		}
+
+		for (auto renameMutation : renameMutations) {
+			tenantManagementFutures.push_back(renameTenant(ryw, renameMutation.first, renameMutation.second));
 		}
 
 		return tag(waitForAll(tenantManagementFutures), Optional<std::string>());

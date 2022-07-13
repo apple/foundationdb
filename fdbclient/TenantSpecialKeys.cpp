@@ -27,10 +27,16 @@ template <>
 const KeyRangeRef TenantRangeImpl<true>::mapSubRange = KeyRangeRef("map/"_sr, "map0"_sr);
 
 template <>
+const KeyRangeRef TenantRangeImpl<true>::renameSubRange = KeyRangeRef("rename/"_sr, "rename0"_sr);
+
+template <>
 const KeyRangeRef TenantRangeImpl<false>::submoduleRange = KeyRangeRef(""_sr, "\xff"_sr);
 
 template <>
 const KeyRangeRef TenantRangeImpl<false>::mapSubRange = KeyRangeRef("tenant_map/"_sr, "tenant_map0"_sr);
+
+template <>
+const KeyRangeRef TenantRangeImpl<false>::renameSubRange = KeyRangeRef("tenant_rename/"_sr, "tenant_rename0"_sr);
 
 template <>
 bool TenantRangeImpl<true>::subRangeIntersects(KeyRangeRef subRange, KeyRangeRef range) {

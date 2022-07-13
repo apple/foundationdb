@@ -301,6 +301,18 @@ Future<std::map<TenantName, TenantMapEntry>> listTenants(Reference<DB> db,
 	}
 }
 
+ACTOR template <class Transaction>
+Future<Void> renameTenantTransaction(Transaction tr, TenantNameRef oldName, TenantNameRef newName) {
+	state Key oldNameKey = oldName.withPrefix(tenantMapPrefix);
+	state Key newNameKey = newName.withPrefix(tenantMapPrefix);
+	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	state Optional<TenantMapEntry> oldEntry = wait(tryGetTenantTransaction(tr, oldName));
+	tr->clear(oldNameKey);
+	tr->set(newNameKey, oldEntry.get().encode());
+
+	return Void();
+}
+
 ACTOR template <class DB>
 Future<Void> renameTenant(Reference<DB> db, TenantName oldName, TenantName newName) {
 	state Reference<typename DB::TransactionT> tr = db->createTransaction();
@@ -349,8 +361,7 @@ Future<Void> renameTenant(Reference<DB> db, TenantName oldName, TenantName newNa
 					throw tenant_not_found();
 				}
 			}
-			tr->clear(oldNameKey);
-			tr->set(newNameKey, oldEntry.get().encode());
+			wait(renameTenantTransaction(tr, oldName, newName));
 			wait(safeThreadFutureToFuture(tr->commit()));
 			TraceEvent("RenameTenantSuccess").detail("OldName", oldName).detail("NewName", newName);
 			return Void();
