@@ -262,7 +262,6 @@ class TestConfig {
 			}
 			if (attrib == "disableEncryption") {
 				disableEncryption = strcmp(value.c_str(), "true") == 0;
-				
 			}
 			if (attrib == "restartInfoLocation") {
 				isFirstTestInRestart = true;
@@ -364,7 +363,7 @@ public:
 		    .add("disableTss", &disableTss)
 		    .add("disableHostname", &disableHostname)
 		    .add("disableRemoteKVS", &disableRemoteKVS)
-			.add("disableEncryption", &disableEncryption)
+		    .add("disableEncryption", &disableEncryption)
 		    .add("simpleConfig", &simpleConfig)
 		    .add("generateFearless", &generateFearless)
 		    .add("datacenters", &datacenters)
@@ -1106,7 +1105,7 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 		if (testConfig.disableEncryption) {
 			g_knobs.setKnob("enable_encryption", KnobValueRef::create(bool{ false }));
 			g_knobs.setKnob("enable_tlog_encryption", KnobValueRef::create(bool{ false }));
-			TraceEvent(SevDebug, "DisaableRemoteKVS");		
+			TraceEvent(SevDebug, "DisaableEncryption");
 		}
 		*pConnString = conn;
 		*pTesterCount = testerCount;
