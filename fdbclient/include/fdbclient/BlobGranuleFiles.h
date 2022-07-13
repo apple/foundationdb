@@ -25,6 +25,10 @@
 
 #include "fdbclient/BlobGranuleCommon.h"
 
+Value serializeChunkedSnapshot(Standalone<GranuleSnapshot> snapshot, int chunks);
+
+// FIXME: support sorted and chunked delta files
+
 ErrorOr<RangeResult> loadAndMaterializeBlobGranules(const Standalone<VectorRef<BlobGranuleChunkRef>>& files,
                                                     const KeyRangeRef& keyRange,
                                                     Version beginVersion,
