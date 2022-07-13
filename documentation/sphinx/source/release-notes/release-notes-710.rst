@@ -1,8 +1,18 @@
-.. _release-notes:
-
 #############
 Release Notes
 #############
+
+7.1.15
+======
+* Same as 7.1.14 release with AVX enabled.
+
+7.1.14
+======
+* Released with AVX disabled.
+* Fixed a high commit latency bug when there are data movement. `(PR #7548) <https://github.com/apple/foundationdb/pull/7548>`_
+* Fixed the primary locality on the sequencer by obtaining it from cluster controller. `(PR #7535) <https://github.com/apple/foundationdb/pull/7535>`_
+* Added StorageEngine type to StorageMetrics trace events. `(PR #7546) <https://github.com/apple/foundationdb/pull/7546>`_
+* Improved hasIncompleteVersionstamp performance in Java binding to use iteration rather than stream processing. `(PR #7559) <https://github.com/apple/foundationdb/pull/7559>`_
 
 7.1.13
 ======
