@@ -997,6 +997,7 @@ ACTOR Future<Void> checkConsistency(Database cx,
 
 	state double connectionFailures;
 	if (g_network->isSimulated()) {
+		// NOTE: the value will be reset after consistency check
 		connectionFailures = g_simulator.connectionFailuresDisableDuration;
 		g_simulator.connectionFailuresDisableDuration = 1e6;
 		g_simulator.speedUpSimulation = true;

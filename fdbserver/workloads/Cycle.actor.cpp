@@ -260,6 +260,11 @@ struct CycleWorkload : TestWorkload {
 				} catch (Error& e) {
 					retryCount++;
 					TraceEvent(retryCount > 20 ? SevWarnAlways : SevWarn, "CycleCheckError").error(e);
+					if (g_network->isSimulated() && retryCount > 50) {
+						TEST(true); // Cycle check enable speedUpSimulation because too many transaction_too_old()
+						// try to make the read window back to normal size (5 * version_per_sec)
+						g_simulator.speedUpSimulation = true;
+					}
 					wait(tr.onError(e));
 				}
 			}

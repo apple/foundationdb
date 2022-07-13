@@ -7820,7 +7820,7 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 						           granuleEndKey.printable(),
 						           begin,
 						           rv,
-						           workerId.toString());
+						           workerId.toString().substr(0, 5));
 					}
 					ASSERT(!rep.chunks.empty());
 					results.arena().dependsOn(rep.arena);
@@ -7852,6 +7852,17 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 							ASSERT(chunk.tenantPrefix.get() == tenantPrefix.get());
 						}
 
+						if (!results.empty() && results.back().keyRange.end != chunk.keyRange.begin) {
+							ASSERT(results.back().keyRange.end > chunk.keyRange.begin);
+							ASSERT(results.back().keyRange.end <= chunk.keyRange.end);
+							TEST(true); // Merge while reading granule range
+							while (!results.empty() && results.back().keyRange.begin >= chunk.keyRange.begin) {
+								// TODO: we can't easily un-depend the arenas for these guys, but that's ok as this
+								// should be rare
+								results.pop_back();
+							}
+							ASSERT(results.empty() || results.back().keyRange.end == chunk.keyRange.begin);
+						}
 						results.push_back(results.arena(), chunk);
 						StringRef chunkEndKey = chunk.keyRange.end;
 						if (tenantPrefix.present()) {
@@ -7874,7 +7885,13 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 			}
 		} catch (Error& e) {
 			if (BG_REQUEST_DEBUG) {
-				fmt::print("BGReq got error {}\n", e.name());
+				fmt::print("Blob granule request for [{0} - {1}) @ {2} - {3} got error from {4}: {5}\n",
+				           granuleStartKey.printable(),
+				           granuleEndKey.printable(),
+				           begin,
+				           rv,
+				           workerId.toString().substr(0, 5),
+				           e.name());
 			}
 			// worker is up but didn't actually have granule, or connection failed
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_connection_failed ||
