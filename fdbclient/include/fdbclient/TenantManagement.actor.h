@@ -305,7 +305,7 @@ ACTOR template <class Transaction>
 Future<Void> renameTenantTransaction(Transaction tr, TenantNameRef oldName, TenantNameRef newName) {
 	state Key oldNameKey = oldName.withPrefix(tenantMapPrefix);
 	state Key newNameKey = newName.withPrefix(tenantMapPrefix);
-	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 	state Optional<TenantMapEntry> oldEntry = wait(tryGetTenantTransaction(tr, oldName));
 	tr->clear(oldNameKey);
 	tr->set(newNameKey, oldEntry.get().encode());

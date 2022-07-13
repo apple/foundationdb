@@ -207,21 +207,14 @@ private:
 		return Void();
 	}
 
-	ACTOR static Future<Void> renameTenant(ReadYourWritesTransaction* ryw,
-	                                       TenantNameRef oldName,
-	                                       TenantNameRef newName) {
-		wait(TenantAPI::renameTenantTransaction(&ryw->getTransaction(), oldName, newName));
-		return Void();
-	}
-
 public:
 	// These ranges vary based on the template parameter
 	const static KeyRangeRef submoduleRange;
 	const static KeyRangeRef mapSubRange;
-	const static KeyRangeRef renameSubRange;
 
 	// These sub-ranges should only be used if HasSubRanges=true
 	const inline static KeyRangeRef configureSubRange = KeyRangeRef("configure/"_sr, "configure0"_sr);
+	const inline static KeyRangeRef renameSubRange = KeyRangeRef("rename/"_sr, "rename0"_sr);
 
 	explicit TenantRangeImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
 
@@ -337,7 +330,8 @@ public:
 		}
 
 		for (auto renameMutation : renameMutations) {
-			tenantManagementFutures.push_back(renameTenant(ryw, renameMutation.first, renameMutation.second));
+			tenantManagementFutures.push_back(TenantAPI::renameTenantTransaction(
+			    &ryw->getTransaction(), renameMutation.first, renameMutation.second));
 		}
 
 		return tag(waitForAll(tenantManagementFutures), Optional<std::string>());
