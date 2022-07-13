@@ -667,19 +667,25 @@ ACTOR Future<Void> brokenPromiseToReady(Future<Void> f) {
 }
 
 static bool shardForwardMergeFeasible(DataDistributionTracker* self, KeyRange const& keys, KeyRangeRef nextRange) {
+
+	if (keys.end == allKeys.end) {
+		return false;
+	}
+
 	bool honorTenantKeyspaceBoundaries = self->ddTenantCache.present();
+
+	if (!honorTenantKeyspaceBoundaries) {
+		return true;
+	}
 
 	Optional<Reference<TCTenantInfo>> tenantOwningBegin = {};
 	Optional<Reference<TCTenantInfo>> tenantOwningNext = {};
 
-	if (honorTenantKeyspaceBoundaries) {
-		tenantOwningBegin = self->ddTenantCache.get()->tenantOwning(keys.begin);
-		tenantOwningNext = self->ddTenantCache.get()->tenantOwning(nextRange.begin);
-	}
+	tenantOwningBegin = self->ddTenantCache.get()->tenantOwning(keys.begin);
+	tenantOwningNext = self->ddTenantCache.get()->tenantOwning(nextRange.begin);
 
-	if (keys.end == allKeys.end ||
-	    (honorTenantKeyspaceBoundaries && ((tenantOwningBegin.present() != tenantOwningNext.present()) ||
-	                                       (tenantOwningBegin.present() && (tenantOwningBegin != tenantOwningNext))))) {
+	if ((tenantOwningBegin.present() != tenantOwningNext.present()) ||
+	    (tenantOwningBegin.present() && (tenantOwningBegin != tenantOwningNext))) {
 		return false;
 	}
 
@@ -687,19 +693,24 @@ static bool shardForwardMergeFeasible(DataDistributionTracker* self, KeyRange co
 }
 
 static bool shardBackwardMergeFeasible(DataDistributionTracker* self, KeyRange const& keys, KeyRangeRef prevRange) {
+	if (keys.begin == allKeys.begin) {
+		return false;
+	}
+
 	bool honorTenantKeyspaceBoundaries = self->ddTenantCache.present();
+
+	if (!honorTenantKeyspaceBoundaries) {
+		return true;
+	}
 
 	Optional<Reference<TCTenantInfo>> tenantOwningBegin = {};
 	Optional<Reference<TCTenantInfo>> tenantOwningPrev = {};
 
-	if (honorTenantKeyspaceBoundaries) {
-		tenantOwningBegin = self->ddTenantCache.get()->tenantOwning(keys.begin);
-		tenantOwningPrev = self->ddTenantCache.get()->tenantOwning(prevRange.begin);
-	}
+	tenantOwningBegin = self->ddTenantCache.get()->tenantOwning(keys.begin);
+	tenantOwningPrev = self->ddTenantCache.get()->tenantOwning(prevRange.begin);
 
-	if (keys.begin == allKeys.begin ||
-	    (honorTenantKeyspaceBoundaries && ((tenantOwningBegin.present() != tenantOwningPrev.present()) ||
-	                                       (tenantOwningBegin.present() && (tenantOwningBegin != tenantOwningPrev))))) {
+	if ((tenantOwningBegin.present() != tenantOwningPrev.present()) ||
+	    (tenantOwningBegin.present() && (tenantOwningBegin != tenantOwningPrev))) {
 		return false;
 	}
 
@@ -739,11 +750,17 @@ Future<Void> shardMerger(DataDistributionTracker* self,
 	loop {
 		Optional<ShardMetrics> newMetrics;
 		if (!forwardComplete) {
-			if (nextIter->range().end == allKeys.end || !shardForwardMergeFeasible(self, keys, nextIter->range())) {
+			if (nextIter->range().end == allKeys.end) {
 				forwardComplete = true;
 				continue;
 			}
+
 			++nextIter;
+			if (!shardForwardMergeFeasible(self, keys, nextIter->range())) {
+				forwardComplete = true;
+				continue;
+			}
+
 			newMetrics = nextIter->value().stats->get();
 
 			// If going forward, give up when the next shard's stats are not yet present.
@@ -811,6 +828,19 @@ Future<Void> shardMerger(DataDistributionTracker* self,
 			merged = KeyRangeRef(prevIter->range().begin, nextIter->range().end);
 			forwardComplete = true;
 		}
+	}
+
+	if (shardsMerged == 1) {
+		// auto tenantOwningBegin = self->ddTenantCache.get()->tenantOwning(keys.begin);
+		// auto tenantOwningEnd = self->ddTenantCache.get()->tenantOwning(keys.end);
+		// TraceEvent(SevInfo, "ShardMergerFoundNothingToMerge")
+		//     .detail("Begin", keys.begin)
+		//     .detail("End", keys.end)
+		//     .detail("IsTenantKey", self->ddTenantCache.get()->isTenantKey(keys.begin))
+		//     .detail("TenantOwningBegin", tenantOwningBegin.present() ? tenantOwningBegin.get()->prefixDesc() : "{}")
+		//     .detail("TenantOwningEnd", tenantOwningEnd.present() ? tenantOwningEnd.get()->prefixDesc() : "{}");
+
+		return Void();
 	}
 
 	// restarting shard tracker will derefenced values in the shard map, so make a copy
