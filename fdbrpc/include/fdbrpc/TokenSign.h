@@ -85,6 +85,7 @@ namespace authz::jwt {
 struct TokenRef {
 	// header part ("typ": "JWT" implicitly enforced)
 	Algorithm algorithm; // alg
+	StringRef keyId; // kid
 	// payload part
 	Optional<StringRef> issuer; // iss
 	Optional<StringRef> subject; // sub
@@ -92,7 +93,6 @@ struct TokenRef {
 	Optional<uint64_t> issuedAtUnixTime; // iat
 	Optional<uint64_t> expiresAtUnixTime; // exp
 	Optional<uint64_t> notBeforeUnixTime; // nbf
-	Optional<StringRef> keyId; // kid
 	Optional<StringRef> tokenId; // jti
 	Optional<VectorRef<StringRef>> tenants; // tenants
 	// signature part
@@ -113,7 +113,7 @@ StringRef signToken(Arena& arena, TokenRef tokenSpec, PrivateKey privateKey);
 
 // Parse passed b64url-encoded header part and materialize its contents into tokenOut,
 // using memory allocated from arena
-bool parseHeaderPart(TokenRef& tokenOut, StringRef b64urlHeaderIn);
+bool parseHeaderPart(Arena& arena, TokenRef& tokenOut, StringRef b64urlHeaderIn);
 
 // Parse passed b64url-encoded payload part and materialize its contents into tokenOut,
 // using memory allocated from arena

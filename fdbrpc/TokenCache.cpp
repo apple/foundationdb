@@ -161,12 +161,7 @@ bool TokenCacheImpl::validateAndAdd(double currentTime,
 		TEST(true); // Token can't be parsed
 		return false;
 	}
-	if (!t.keyId.present()) {
-		TEST(true); // Token with no key id
-		TraceEvent(SevWarn, "InvalidToken").detail("From", peer).detail("Reason", "NoKeyID");
-		return false;
-	}
-	auto key = FlowTransport::transport().getPublicKeyByName(t.keyId.get());
+	auto key = FlowTransport::transport().getPublicKeyByName(t.keyId);
 	if (!key.present()) {
 		TEST(true); // Token referencing non-existing key
 		TraceEvent(SevWarn, "InvalidToken").detail("From", peer).detail("Reason", "UnknownKey");
@@ -259,10 +254,6 @@ TEST_CASE("/fdbrpc/authz/TokenCache/BadTokens") {
 		    "NoKeyWithSuchName",
 		},
 		{
-		    [](Arena&, IRandom&, authz::jwt::TokenRef& token) { token.keyId.reset(); },
-		    "NoKeyId",
-		},
-		{
 		    [](Arena&, IRandom&, authz::jwt::TokenRef& token) { token.expiresAtUnixTime.reset(); },
 		    "NoExpirationTime",
 		},
@@ -281,10 +272,6 @@ TEST_CASE("/fdbrpc/authz/TokenCache/BadTokens") {
 		        token.notBeforeUnixTime = uint64_t(g_network->timer() + 10 + rng.random01() * 50);
 		    },
 		    "TokenNotYetValid",
-		},
-		{
-		    [](Arena& arena, IRandom&, authz::jwt::TokenRef& token) { token.keyId.reset(); },
-		    "UnknownKey",
 		},
 		{
 		    [](Arena& arena, IRandom&, authz::jwt::TokenRef& token) { token.tenants.reset(); },
