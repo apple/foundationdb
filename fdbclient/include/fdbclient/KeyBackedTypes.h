@@ -151,6 +151,12 @@ inline KeyRange TupleCodec<KeyRange>::unpack(Standalone<StringRef> const& val) {
 	return KeyRangeRef(t.getString(0), t.getString(1));
 }
 
+template <typename ResultType>
+struct KeyBackedRangeResult {
+	std::vector<ResultType> results;
+	bool more;
+};
+
 // Convenient read/write access to a single value of type T stored at key
 // Even though 'this' is not actually mutated, methods that change the db key are not const.
 template <typename T, typename Codec = TupleCodec<T>>
@@ -308,16 +314,16 @@ public:
 	typedef _KeyType KeyType;
 	typedef _ValueType ValueType;
 	typedef std::pair<KeyType, ValueType> PairType;
-	typedef std::vector<PairType> PairsType;
+	typedef KeyBackedRangeResult<PairType> RangeResultType;
 
 	// If end is not present one key past the end of the map is used.
 	template <class Transaction>
-	Future<PairsType> getRange(Transaction tr,
-	                           Optional<KeyType> const& begin,
-	                           Optional<KeyType> const& end,
-	                           int limit,
-	                           Snapshot snapshot = Snapshot::False,
-	                           Reverse reverse = Reverse::False) const {
+	Future<RangeResultType> getRange(Transaction tr,
+	                                 Optional<KeyType> const& begin,
+	                                 Optional<KeyType> const& end,
+	                                 int limit,
+	                                 Snapshot snapshot = Snapshot::False,
+	                                 Reverse reverse = Reverse::False) const {
 		Key prefix = subspace.begin; // 'this' could be invalid inside lambda
 
 		Key beginKey = begin.present() ? prefix.withSuffix(KeyCodec::pack(begin.get())) : subspace.begin;
@@ -326,16 +332,18 @@ public:
 		typename transaction_future_type<Transaction, RangeResult>::type getRangeFuture =
 		    tr->getRange(KeyRangeRef(beginKey, endKey), GetRangeLimits(limit), snapshot, reverse);
 
-		return holdWhile(getRangeFuture,
-		                 map(safeThreadFutureToFuture(getRangeFuture), [prefix](RangeResult const& kvs) -> PairsType {
-			                 PairsType results;
-			                 for (int i = 0; i < kvs.size(); ++i) {
-				                 KeyType key = KeyCodec::unpack(kvs[i].key.removePrefix(prefix));
-				                 ValueType val = ValueCodec::unpack(kvs[i].value);
-				                 results.push_back(PairType(key, val));
-			                 }
-			                 return results;
-		                 }));
+		return holdWhile(
+		    getRangeFuture,
+		    map(safeThreadFutureToFuture(getRangeFuture), [prefix](RangeResult const& kvs) -> RangeResultType {
+			    RangeResultType rangeResult;
+			    for (int i = 0; i < kvs.size(); ++i) {
+				    KeyType key = KeyCodec::unpack(kvs[i].key.removePrefix(prefix));
+				    ValueType val = ValueCodec::unpack(kvs[i].value);
+				    rangeResult.results.push_back(PairType(key, val));
+			    }
+			    rangeResult.more = kvs.more;
+			    return rangeResult;
+		    }));
 	}
 
 	template <class Transaction>
@@ -497,15 +505,15 @@ public:
 	typedef _KeyType KeyType;
 	typedef _ValueType ValueType;
 	typedef std::pair<KeyType, ValueType> PairType;
-	typedef std::vector<PairType> PairsType;
+	typedef KeyBackedRangeResult<PairType> RangeResultType;
 
 	template <class Transaction>
-	Future<PairsType> getRange(Transaction tr,
-	                           Optional<KeyType> const& begin,
-	                           Optional<KeyType> const& end,
-	                           int limit,
-	                           Snapshot snapshot = Snapshot::False,
-	                           Reverse reverse = Reverse::False) const {
+	Future<RangeResultType> getRange(Transaction tr,
+	                                 Optional<KeyType> const& begin,
+	                                 Optional<KeyType> const& end,
+	                                 int limit,
+	                                 Snapshot snapshot = Snapshot::False,
+	                                 Reverse reverse = Reverse::False) const {
 		Key beginKey = begin.present() ? subspace.begin.withSuffix(KeyCodec::pack(begin.get())) : subspace.begin;
 		Key endKey = end.present() ? subspace.begin.withSuffix(KeyCodec::pack(end.get())) : subspace.end;
 
@@ -514,14 +522,15 @@ public:
 
 		return holdWhile(
 		    getRangeFuture,
-		    map(safeThreadFutureToFuture(getRangeFuture), [self = *this](RangeResult const& kvs) -> PairsType {
-			    PairsType results;
+		    map(safeThreadFutureToFuture(getRangeFuture), [self = *this](RangeResult const& kvs) -> RangeResultType {
+			    RangeResultType rangeResult;
 			    for (int i = 0; i < kvs.size(); ++i) {
 				    KeyType key = KeyCodec::unpack(kvs[i].key.removePrefix(self.subspace.begin));
 				    ValueType val = ObjectReader::fromStringRef<ValueType>(kvs[i].value, self.versionOptions);
-				    results.push_back(PairType(key, val));
+				    rangeResult.results.push_back(PairType(key, val));
 			    }
-			    return results;
+			    rangeResult.more = kvs.more;
+			    return rangeResult;
 		    }));
 	}
 
@@ -584,15 +593,15 @@ public:
 	KeyBackedSet(KeyRef key) : subspace(prefixRange(key)) {}
 
 	typedef _ValueType ValueType;
-	typedef std::vector<ValueType> Values;
+	typedef KeyBackedRangeResult<ValueType> RangeResultType;
 
 	template <class Transaction>
-	Future<Values> getRange(Transaction tr,
-	                        Optional<ValueType> const& begin,
-	                        Optional<ValueType> const& end,
-	                        int limit,
-	                        Snapshot snapshot = Snapshot::False,
-	                        Reverse reverse = Reverse::False) const {
+	Future<RangeResultType> getRange(Transaction tr,
+	                                 Optional<ValueType> const& begin,
+	                                 Optional<ValueType> const& end,
+	                                 int limit,
+	                                 Snapshot snapshot = Snapshot::False,
+	                                 Reverse reverse = Reverse::False) const {
 		Key prefix = subspace.begin; // 'this' could be invalid inside lambda
 		Key beginKey = begin.present() ? prefix.withSuffix(Codec::pack(begin.get())) : subspace.begin;
 		Key endKey = end.present() ? prefix.withSuffix(Codec::pack(end.get())) : subspace.end;
@@ -600,14 +609,16 @@ public:
 		typename transaction_future_type<Transaction, RangeResult>::type getRangeFuture =
 		    tr->getRange(KeyRangeRef(beginKey, endKey), GetRangeLimits(limit), snapshot, reverse);
 
-		return holdWhile(getRangeFuture,
-		                 map(safeThreadFutureToFuture(getRangeFuture), [prefix](RangeResult const& kvs) -> Values {
-			                 Values results;
-			                 for (int i = 0; i < kvs.size(); ++i) {
-				                 results.push_back(Codec::unpack(kvs[i].key.removePrefix(prefix)));
-			                 }
-			                 return results;
-		                 }));
+		return holdWhile(
+		    getRangeFuture,
+		    map(safeThreadFutureToFuture(getRangeFuture), [prefix](RangeResult const& kvs) -> RangeResultType {
+			    RangeResultType rangeResult;
+			    for (int i = 0; i < kvs.size(); ++i) {
+				    rangeResult.results.push_back(Codec::unpack(kvs[i].key.removePrefix(prefix)));
+			    }
+			    rangeResult.more = kvs.more;
+			    return rangeResult;
+		    }));
 	}
 
 	template <class Transaction>
