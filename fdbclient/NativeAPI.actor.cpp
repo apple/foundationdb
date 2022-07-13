@@ -3194,6 +3194,8 @@ Reference<TransactionState> TransactionState::cloneAndReset(Reference<Transactio
 	SpanContext newSpanContext = generateNewSpan ? generateSpanID(cx->transactionTracingSample) : spanContext;
 	Reference<TransactionState> newState =
 	    makeReference<TransactionState>(cx, tenant_, cx->taskID, newSpanContext, newTrLogInfo);
+	if (authToken_.present())
+		newState->setToken(authToken_.get());
 
 	if (!cx->apiVersionAtLeast(16)) {
 		newState->options = options;
