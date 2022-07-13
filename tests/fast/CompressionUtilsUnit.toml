@@ -1,0 +1,8 @@
+[[test]]
+testTitle = 'CompressionUtilsTest'
+startDelay = 0
+useDB = false
+
+    [[test.workload]]
+    testName = 'UnitTests'
+    testsMatching = '/CompressionUtils'

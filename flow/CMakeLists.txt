@@ -24,6 +24,14 @@ add_flow_target(STATIC_LIBRARY NAME flow_sampling SRCS ${FLOW_SRCS})
 add_flow_target(LINK_TEST NAME flowlinktest SRCS ${FLOW_SRCS} LinkTest.cpp)
 target_link_libraries(flowlinktest PRIVATE flow stacktrace)
 
+find_package(ZLIB)
+if(ZLIB_FOUND)
+  add_compile_definitions(ZLIB_LIB_SUPPORTED)
+  target_link_libraries(flow PRIVATE ZLIB::ZLIB)
+else()
+  message(STATUS "ZLIB package not found")
+endif()
+
 foreach(ft flow flow_sampling flowlinktest)
   target_include_directories(${ft} PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include")
 

@@ -2125,6 +2125,10 @@ int main(int argc, char* argv[]) {
 				                KnobValue::create(ini.GetBoolValue("META", "enableEncryption", false)));
 				g_knobs.setKnob("enable_tlog_encryption",
 				                KnobValue::create(ini.GetBoolValue("META", "enableTLogEncryption", false)));
+				g_knobs.setKnob("enable_blob_file_encryption",
+				                KnobValue::create(ini.GetBoolValue("META", "enableBlobFileEncryption", false)));
+				g_knobs.setKnob("enable_blob_file_compression",
+				                KnobValue::create(ini.GetBoolValue("META", "enableBlobFileEncryption", false)));
 			}
 			setupAndRun(dataFolder, opts.testFile, opts.restarting, (isRestoring >= 1), opts.whitelistBinPaths);
 			g_simulator.run();

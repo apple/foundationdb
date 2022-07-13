@@ -409,6 +409,7 @@ public:
 	void* getData() { return data; }
 	int getLength() const { return size; }
 	Standalone<StringRef> toValue() const { return Standalone<StringRef>(StringRef(data, size), arena); }
+	StringRef toValue(Arena& arena) const { return StringRef(arena, StringRef(data, size)); }
 	template <class VersionOptions>
 	explicit BinaryWriter(VersionOptions vo) : data(nullptr), size(0), allocated(0) {
 		vo.write(*this);

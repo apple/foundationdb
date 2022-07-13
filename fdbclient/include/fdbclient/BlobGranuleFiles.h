@@ -24,8 +24,12 @@
 // This file contains functions for readers who want to materialize blob granules from the underlying files
 
 #include "fdbclient/BlobGranuleCommon.h"
+#include "flow/CompressionUtils.h"
 
-Value serializeChunkedSnapshot(Standalone<GranuleSnapshot> snapshot, int chunks);
+Value serializeChunkedSnapshot(Standalone<GranuleSnapshot> snapshot,
+                               int chunks,
+                               Optional<CompressionFilter> compressFilter,
+                               Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx = Optional<BlobGranuleCipherKeysCtx>());
 
 // FIXME: support sorted and chunked delta files
 
