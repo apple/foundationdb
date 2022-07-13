@@ -106,9 +106,7 @@ TraceEvent debugTagsAndMessageEnabled(const char* context, Version version, Stri
 			MutationRef m;
 			BinaryReader br(mutationData, AssumeVersion(rdr.protocolVersion()));
 			br >> m;
-			if (m.isEncrypted()) {
-				throw encrypt_unsupported();
-			}
+			ASSERT(!m.isEncrypted());
 			TraceEvent event = debugMutation(context, version, m, id);
 			if (event.isEnabled()) {
 				event.detail("MessageTags", msg.tags);

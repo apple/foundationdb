@@ -150,7 +150,7 @@ struct MutationRef {
 		uint8_t iv[AES_256_IV_LENGTH];
 		deterministicRandom()->randomBytes(iv, AES_256_IV_LENGTH);
 		BinaryWriter bw(AssumeVersion(g_network->protocolVersion()));
-		const_cast<MutationRef*>(this)->serialize(bw);
+		bw << *this;
 		EncryptBlobCipherAes265Ctr cipher(textCipherItr->second,
 		                                  headerCipherItr->second,
 		                                  iv,
@@ -183,7 +183,7 @@ struct MutationRef {
 		}
 		ArenaReader reader(arena, plaintext, AssumeVersion(g_network->protocolVersion()));
 		MutationRef mutation;
-		mutation.serialize(reader);
+		reader >> mutation;
 		return mutation;
 	}
 
