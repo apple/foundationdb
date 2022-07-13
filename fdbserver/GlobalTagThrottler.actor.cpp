@@ -383,7 +383,7 @@ class GlobalTagThrottlerImpl {
 
 					tagsWithQuota.clear();
 					state RangeResult currentQuotas = wait(tr.getRange(tagQuotaKeys, CLIENT_KNOBS->TOO_MANY));
-					TraceEvent("GlobalTagThrottler_ReadCurrentQuotas").detail("Size", currentQuotas.size());
+					TraceEvent("GlobalTagThrottler_ReadCurrentQuotas", self->id).detail("Size", currentQuotas.size());
 					for (auto const kv : currentQuotas) {
 						auto const tag = kv.key.removePrefix(tagQuotaPrefix);
 						auto const quota = ThrottleApi::TagQuotaValue::fromValue(kv.value);
@@ -397,7 +397,7 @@ class GlobalTagThrottlerImpl {
 					CODE_PROBE(true, "Global tag throttler detected quota changes");
 					break;
 				} catch (Error& e) {
-					TraceEvent("GlobalTagThrottlerMonitoringChangesError", self->id).error(e);
+					TraceEvent("GlobalTagThrottler_MonitoringChangesError", self->id).error(e);
 					wait(tr.onError(e));
 				}
 			}
@@ -424,14 +424,26 @@ public:
 				continue;
 			}
 			auto targetTps = desiredTps.get();
+
 			if (limitingTps.present()) {
 				targetTps = std::min(targetTps, limitingTps.get());
 			}
 			if (reservedTps.present()) {
 				targetTps = std::max(targetTps, reservedTps.get());
 			}
-			result[TransactionPriority::BATCH][tag] = result[TransactionPriority::DEFAULT][tag] =
-			    stats.updateAndGetPerClientLimit(targetTps);
+			auto const clientRate = stats.updateAndGetPerClientLimit(targetTps);
+			result[TransactionPriority::BATCH][tag] = result[TransactionPriority::DEFAULT][tag] = clientRate;
+
+			TraceEvent("GlobalTagThrottler_GotClientRate", id)
+			    .detail("Tag", printable(tag))
+			    .detail("TargetTps", targetTps)
+			    .detail("AverageTransactionReadCost", averageTransactionReadCost)
+			    .detail("AverageTransactionWriteCost", averageTransactionWriteCost)
+			    .detail("ClientTps", clientRate.tpsRate)
+			    .detail("LimitingTps", limitingTps)
+			    .detail("ReservedTps", reservedTps)
+			    .detail("DesiredTps", desiredTps)
+			    .detail("NumStorageServers", throughput.size());
 		}
 		return result;
 	}
