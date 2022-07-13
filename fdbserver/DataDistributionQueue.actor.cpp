@@ -80,6 +80,9 @@ inline bool isDataMovementForValleyFiller(DataMovementReason reason) {
 int dataMovementPriority(DataMovementReason reason) {
 	int priority;
 	switch (reason) {
+	case DataMovementReason::INVALID:
+		priority = -1;
+		break;
 	case DataMovementReason::RECOVER_MOVE:
 		priority = SERVER_KNOBS->PRIORITY_RECOVER_MOVE;
 		break;
@@ -1735,7 +1738,7 @@ inline double getWorstCpu(const HealthMetrics& metrics, const std::vector<UID>& 
 // Move the shard with the top K highest read density of sourceTeam's to destTeam if sourceTeam has much more read load
 // than destTeam
 ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
-                                     int priority,
+                                     DataMovementReason moveReason,
                                      Reference<IDataDistributionTeam> sourceTeam,
                                      Reference<IDataDistributionTeam> destTeam,
                                      bool primary,
@@ -1814,7 +1817,7 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
 	    ShardsAffectedByTeamFailure::Team(sourceTeam->getServerIDs(), primary));
 	for (int i = 0; i < shards.size(); i++) {
 		if (metrics.keys == shards[i]) {
-			self->output.send(RelocateShard(metrics.keys.get(), priority, RelocateReason::REBALANCE_READ));
+			self->output.send(RelocateShard(metrics.keys.get(), moveReason, RelocateReason::REBALANCE_READ));
 			self->updateLastAsSource(sourceTeam->getServerIDs());
 			return true;
 		}
@@ -1825,7 +1828,7 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
 
 // Move a random shard from sourceTeam if sourceTeam has much more data than provided destTeam
 ACTOR static Future<bool> rebalanceTeams(DDQueueData* self,
-                                         int priority,
+                                         DataMovementReason moveReason,
                                          Reference<IDataDistributionTeam const> sourceTeam,
                                          Reference<IDataDistributionTeam const> destTeam,
                                          bool primary,
@@ -1886,7 +1889,7 @@ ACTOR static Future<bool> rebalanceTeams(DDQueueData* self,
 	    ShardsAffectedByTeamFailure::Team(sourceTeam->getServerIDs(), primary));
 	for (int i = 0; i < shards.size(); i++) {
 		if (moveShard == shards[i]) {
-			self->output.send(RelocateShard(moveShard, priority, RelocateReason::REBALANCE_DISK));
+			self->output.send(RelocateShard(moveShard, moveReason, RelocateReason::REBALANCE_DISK));
 			return true;
 		}
 	}
@@ -2015,9 +2018,9 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueueData* self, int teamCollectionIndex,
 				// clang-format off
 				if (sourceTeam.isValid() && destTeam.isValid()) {
 					if (readRebalance) {
-						wait(store(moved,rebalanceReadLoad(self, ddPriority, sourceTeam, destTeam, teamCollectionIndex == 0, &traceEvent)));
+						wait(store(moved,rebalanceReadLoad(self, reason, sourceTeam, destTeam, teamCollectionIndex == 0, &traceEvent)));
 					} else {
-						wait(store(moved,rebalanceTeams(self, ddPriority, sourceTeam, destTeam, teamCollectionIndex == 0, &traceEvent)));
+						wait(store(moved,rebalanceTeams(self, reason, sourceTeam, destTeam, teamCollectionIndex == 0, &traceEvent)));
 					}
 				}
 				// clang-format on
@@ -2113,7 +2116,7 @@ ACTOR Future<Void> BgDDMountainChopper(DDQueueData* self, int teamCollectionInde
 
 					if (loadedTeam.first.present()) {
 						bool _moved = wait(rebalanceTeams(self,
-						                                  SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM,
+						                                  DataMovementReason::REBALANCE_OVERUTILIZED_TEAM,
 						                                  loadedTeam.first.get(),
 						                                  randomTeam.first.get(),
 						                                  teamCollectionIndex == 0,
@@ -2212,7 +2215,7 @@ ACTOR Future<Void> BgDDValleyFiller(DDQueueData* self, int teamCollectionIndex) 
 
 					if (unloadedTeam.first.present()) {
 						bool _moved = wait(rebalanceTeams(self,
-						                                  SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM,
+						                                  DataMovementReason::REBALANCE_UNDERUTILIZED_TEAM,
 						                                  randomTeam.first.get(),
 						                                  unloadedTeam.first.get(),
 						                                  teamCollectionIndex == 0,
@@ -2274,8 +2277,8 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 
 	for (int i = 0; i < teamCollections.size(); i++) {
 		// FIXME: Use BgDDLoadBalance for disk rebalance too after DD simulation test proof.
-		// balancingFutures.push_back(BgDDLoadRebalance(&self, i, SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM));
-		// balancingFutures.push_back(BgDDLoadRebalance(&self, i, SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM));
+		// balancingFutures.push_back(BgDDLoadRebalance(&self, i, DataMovementReason::REBALANCE_OVERUTILIZED_TEAM));
+		// balancingFutures.push_back(BgDDLoadRebalance(&self, i, DataMovementReason::REBALANCE_UNDERUTILIZED_TEAM));
 		if (SERVER_KNOBS->READ_SAMPLING_ENABLED) {
 			balancingFutures.push_back(BgDDLoadRebalance(&self, i, DataMovementReason::REBALANCE_READ_OVERUTIL_TEAM));
 			balancingFutures.push_back(BgDDLoadRebalance(&self, i, DataMovementReason::REBALANCE_READ_UNDERUTIL_TEAM));

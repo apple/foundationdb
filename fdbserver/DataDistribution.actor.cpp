@@ -504,10 +504,10 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 					if (!unhealthy && self->configuration.usableRegions > 1) {
 						unhealthy = iShard.remoteSrc.size() != self->configuration.storageTeamSize;
 					}
-					output.send(RelocateShard(keys,
-					                          unhealthy ? SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY
-					                                    : SERVER_KNOBS->PRIORITY_RECOVER_MOVE,
-					                          RelocateReason::OTHER));
+					output.send(
+					    RelocateShard(keys,
+					                  unhealthy ? DataMovementReason::TEAM_UNHEALTHY : DataMovementReason::RECOVER_MOVE,
+					                  RelocateReason::OTHER));
 				}
 
 				wait(yield(TaskPriority::DataDistribution));
@@ -517,7 +517,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			for (; it != self->initData->dataMoveMap.ranges().end(); ++it) {
 				const DataMoveMetaData& meta = it.value()->meta;
 				if (it.value()->isCancelled() || (it.value()->valid && !CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA)) {
-					RelocateShard rs(meta.range, SERVER_KNOBS->PRIORITY_RECOVER_MOVE, RelocateReason::OTHER);
+					RelocateShard rs(meta.range, DataMovementReason::RECOVER_MOVE, RelocateReason::OTHER);
 					rs.dataMoveId = meta.id;
 					rs.cancelled = true;
 					output.send(rs);
@@ -526,7 +526,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 					TraceEvent(SevDebug, "DDInitFoundDataMove", self->ddId).detail("DataMove", meta.toString());
 					ASSERT(meta.range == it.range());
 					// TODO: Persist priority in DataMoveMetaData.
-					RelocateShard rs(meta.range, SERVER_KNOBS->PRIORITY_RECOVER_MOVE, RelocateReason::OTHER);
+					RelocateShard rs(meta.range, DataMovementReason::RECOVER_MOVE, RelocateReason::OTHER);
 					rs.dataMoveId = meta.id;
 					rs.dataMove = it.value();
 					std::vector<ShardsAffectedByTeamFailure::Team> teams;
