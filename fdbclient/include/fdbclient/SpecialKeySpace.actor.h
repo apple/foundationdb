@@ -242,12 +242,19 @@ private:
 	                                               KeySelector end,
 	                                               GetRangeLimits limits,
 	                                               Reverse reverse);
+	ACTOR static Future<RangeResult> getRangeAndValidate(SpecialKeySpace* sks,
+	                                                     ReadYourWritesTransaction* ryw,
+	                                                     KeySelector begin,
+	                                                     KeySelector end,
+	                                                     GetRangeLimits limits,
+	                                                     Reverse reverse);
 	ACTOR static Future<RangeResult> getRangeAggregationActor(SpecialKeySpace* sks,
 	                                                          ReadYourWritesTransaction* ryw,
 	                                                          KeySelector begin,
 	                                                          KeySelector end,
 	                                                          GetRangeLimits limits,
-	                                                          Reverse reverse);
+	                                                          Reverse reverse,
+	                                                          Optional<RangeResult>* cache = nullptr);
 
 	KeyRangeMap<SpecialKeyRangeReadImpl*> readImpls;
 	KeyRangeMap<SpecialKeySpace::MODULE> modules;
