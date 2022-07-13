@@ -30,19 +30,37 @@ public:
 	MultiTenantWorkload(const WorkloadConfig& config) : ApiWorkload(config) {}
 
 private:
-	enum OpType { OP_INSERT, OP_CLEAR, OP_CLEAR_RANGE, OP_LAST = OP_CLEAR_RANGE };
+	enum OpType { OP_INSERT, OP_LAST = OP_INSERT };
 
-	void randomOperation(TTaskFct cont) {
+	void start() override { runTests(); }
+
+	void randomInsertOp(TTaskFct cont) {
+		int numKeys = Random::get().randomInt(1, maxKeysPerTransaction);
+		auto kvPairs = std::make_shared<std::vector<fdb::KeyValue>>();
+		for (int i = 0; i < numKeys; i++) {
+			kvPairs->push_back(fdb::KeyValue{ randomNotExistingKey(), randomValue() });
+		}
+		execTransaction(
+		    [kvPairs](auto ctx) {
+			    for (const fdb::KeyValue& kv : *kvPairs) {
+				    ctx->tx().set(kv.key, kv.value);
+			    }
+			    ctx->commit();
+		    },
+		    [this, kvPairs, cont]() {
+			    for (const fdb::KeyValue& kv : *kvPairs) {
+				    store.set(kv.key, kv.value);
+			    }
+			    schedule(cont);
+		    },
+		    0);
+	}
+
+	void randomOperation(TTaskFct cont) override {
 		OpType txType = (store.size() == 0) ? OP_INSERT : (OpType)Random::get().randomInt(0, OP_LAST);
 		switch (txType) {
 		case OP_INSERT:
 			randomInsertOp(cont);
-			break;
-		case OP_CLEAR:
-			randomClearOp(cont);
-			break;
-		case OP_CLEAR_RANGE:
-			randomClearRangeOp(cont);
 			break;
 		}
 	}

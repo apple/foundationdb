@@ -158,7 +158,7 @@ class ITransactionExecutor {
 public:
 	virtual ~ITransactionExecutor() {}
 	virtual void init(IScheduler* sched, const char* clusterFile, const std::string& bgBasePath) = 0;
-	virtual void execute(std::shared_ptr<ITransactionActor> tx, TTaskFct cont, int tenantId = -1) = 0;
+	virtual void execute(std::shared_ptr<ITransactionActor> tx, TTaskFct cont, fdb::Tenant* tenant = nullptr) = 0;
 	virtual fdb::Database selectDatabase() = 0;
 	virtual std::string getClusterFileForErrorInjection() = 0;
 	virtual const TransactionExecutorOptions& getOptions() = 0;
