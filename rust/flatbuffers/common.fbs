@@ -20,8 +20,17 @@ table Hostname {
 	is_tls: bool;
 }
 
+struct IPv4 {
+    tag_hack: ubyte; // always set to one; working around flatcc's lack of support for struct s {int} ; union {s, ..} 
+    ip: uint;
+}
 
-table IPv4 {
+table IPAddress {
+    ip4: IPv4;
+}
+
+/*
+struct IPv4 { // not supported in rust flatcc. :-(
     ip: uint;
 }
 
@@ -34,11 +43,24 @@ table IPv6 { // std::array<uint8_t, 16>
     ip5: ubyte;
     ip6: ubyte;
     ip7: ubyte;
+    ip8: ubyte;
+    ip9: ubyte;
+    ip10: ubyte;
+    ip11: ubyte;
+    ip12: ubyte;
+    ip13: ubyte;
+    ip14: ubyte;
+    ip15: ubyte;
 }
 
-union IPAddress {
+union IPAddressUnion {
     IPv4, IPv6
 }
+
+table IPAddress {
+    ensure_table: IPAddressUnion;
+}
+*/
 
 table NetworkAddress {
 	// A NetworkAddress identifies a particular running server (i.e. a TCP endpoint).
@@ -48,3 +70,26 @@ table NetworkAddress {
     flags: ushort;
     from_hostname: bool;
 }
+
+table NetworkAddressFakeRoot {
+    network_address: NetworkAddress;
+}
+
+union OptionalNetworkAddress {
+    NetworkAddress, Void
+}
+
+table NetworkAddressList {
+    address: NetworkAddress;
+    secondary_address: OptionalNetworkAddress;
+}
+
+table Endpoint {
+    addresses: NetworkAddressList;
+    token: UID;
+}
+table EndpointFakeRoot {
+    endpoint: Endpoint;
+}
+root_type EndpointFakeRoot;
+// root_type NetworkAddressFakeRoot;

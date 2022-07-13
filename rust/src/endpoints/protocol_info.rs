@@ -65,8 +65,7 @@ fn serialize_request(
     )
 }
 
-fn serialize_reply(builder: &mut FlatBufferBuilder<'static>,
-                    token: UID) -> Result<Frame> {
+fn serialize_reply(builder: &mut FlatBufferBuilder<'static>, token: UID) -> Result<Frame> {
     use protocol_info_reply::{FakeRoot, FakeRootArgs, ProtocolVersion};
 
     let protocol_version = ProtocolVersion::new(0xfdb00b072000000);
@@ -81,7 +80,7 @@ fn serialize_reply(builder: &mut FlatBufferBuilder<'static>,
         },
     );
     builder.finish(fake_root, Some("myfi"));
-    let mut payload : Vec<u8> = builder.finished_data().into();
+    let mut payload: Vec<u8> = builder.finished_data().into();
     FileIdentifier::new(PROTOCOL_INFO_REPLY_FILE_IDENTIFIER.file_identifier)?
         .to_error_or()?
         .rewrite_flatbuf(&mut payload)?;
@@ -124,7 +123,7 @@ async fn handle(request: FlowMessage) -> Result<Option<FlowMessage>> {
     let reply_promise = protocol_info_request.reply_promise().unwrap();
     let uid = reply_promise.uid().unwrap();
     let uid: UID = uid.into();
-    let frame = REPLY_BUILDER.with(|builder| { serialize_reply(&mut builder.borrow_mut(), uid) })?;
+    let frame = REPLY_BUILDER.with(|builder| serialize_reply(&mut builder.borrow_mut(), uid))?;
     Ok(Some(FlowMessage::new_response(request.flow, frame)?))
 }
 

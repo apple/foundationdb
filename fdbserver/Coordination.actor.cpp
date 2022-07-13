@@ -341,8 +341,13 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 		}
 		when(GetLeaderRequest req = waitNext(interf.getLeader.getFuture())) {
 			if (currentNominee.present() && currentNominee.get().changeID != req.knownLeader) {
+				TraceEvent(SevWarn, "LeaderInfo1")
+					.detail("ChangeID", currentNominee.get().changeID)
+					.detail("Forward", currentNominee.get().forward)
+					.detail("SerailizedInfo", currentNominee.get().serializedInfo);
 				req.reply.send(currentNominee.get());
 			} else {
+				TraceEvent(SevWarn, "LeaderInfo2");
 				notify.push_back(req.reply);
 				if (notify.size() > SERVER_KNOBS->MAX_NOTIFICATIONS) {
 					TraceEvent(SevWarnAlways, "TooManyNotifications").detail("Amount", notify.size());
@@ -671,9 +676,15 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf,
 		}
 		when(GetLeaderRequest req = waitNext(interf.getLeader.getFuture())) {
 			Optional<LeaderInfo> forward = regs.getForward(req.key);
-			if (forward.present())
+			if (forward.present()) {
+				TraceEvent(SevWarn, "LeaderInfo3")
+					.detail("ChangeID", forward.get().changeID)
+					.detail("Forward", forward.get().forward)
+					.detail("SerailizedInfo", forward.get().serializedInfo);
+					
 				req.reply.send(forward.get());
-			else {
+			} else {
+				TraceEvent(SevWarn, "LeaderInfo4");
 				StringRef clusterName = ccr->getConnectionString().clusterKeyName();
 				if (!SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT && getClusterDescriptor(req.key).compare(clusterName)) {
 					TraceEvent(SevWarn, "CCRMismatch")
@@ -683,6 +694,9 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf,
 					    .detail("ClusterKey", ccr->getConnectionString().clusterKey());
 					req.reply.sendError(wrong_connection_file());
 				} else {
+					TraceEvent(SevWarn, "LeaderInfo4a")
+						.detail("IncomingClusterKey", req.key)
+						.detail("ClusterKey", ccr->getConnectionString().clusterKey());
 					regs.getInterface(req.key, id).getLeader.send(req);
 				}
 			}

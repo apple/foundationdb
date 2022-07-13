@@ -3131,6 +3131,27 @@ UID test_pattern_uid() {
 	return UID(0xaaaabbbbccccdddd, 0xeeeeffff00001111);
 }
 
+TEST_CASE("/flatbuffer/samples/NetworkAddress") {
+	NetworkAddress address = NetworkAddress(0xdeadbeef, 0xcafe);
+	test_only_write_to_stdout(address);
+	return Void();
+}
+TEST_CASE("/flatbuffer/samples/Endpoint") {
+	FlowTransport::transport().setLocalAddress(NetworkAddress(0xdeadbeef, 0xcafe));
+	RequestStream<Void> test;
+	Endpoint e = test.getEndpoint();
+	test_only_write_to_stdout(e);
+	return Void();
+}
+
+TEST_CASE("/flatbuffer/samples/ClusterControllerFullInterface") {
+	FlowTransport::transport().setLocalAddress(NetworkAddress(0xdeadbeef, 0xcafe));
+	ClusterControllerFullInterface c;
+	c.initEndpoints();
+	test_only_write_to_stdout(c);
+	return Void();
+}
+
 TEST_CASE("/flatbuffer/samples/ProtocolInfo") {
 	ProtocolInfoRequest req;
 	test_only_write_to_stdout(req);

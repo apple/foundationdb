@@ -1,7 +1,9 @@
 use clap::Parser;
 use foundationdb::endpoints::{ping_request, protocol_info};
-use foundationdb::flow::{cluster_file::ClusterFile, uid::WLTOKEN, Result};
+use foundationdb::flow::{cluster_file::ClusterFile, uid::UID, uid::WLTOKEN, Result};
 use foundationdb::services::{ConnectionKeeper, LoopbackHandler};
+
+use std::sync::Arc;
 
 mod cli;
 
@@ -36,6 +38,27 @@ async fn main() -> Result<()> {
     {
         let p = pool.clone();
         tokio::spawn(async move { p.listen(cli.listen_address).await.unwrap() });
+    }
+
+    {
+        // TODO: Put this somehwere where it can be updated...
+        let cluster_file = cluster_file.clone();
+        let known_leader = UID::default();
+        let svc = pool.clone();
+        let serialized_info = Vec::new();
+        tokio::spawn(async move {
+            use foundationdb::endpoints::get_leader::MonitorLeader;
+            let mut monitor = MonitorLeader {
+                cluster_file,
+                known_leader,
+                svc,
+                serialized_info,
+            };
+            loop {
+                let res = monitor.monitor_leader().await;
+                println!("monitor_leader returns {:?}.  Respwaning.", res);
+            }
+        });
     }
 
     println!(

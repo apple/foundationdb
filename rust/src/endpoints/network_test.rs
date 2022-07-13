@@ -70,7 +70,12 @@ pub fn serialize_request(
         },
     );
     builder.finish(fake_root, Some("myfi"));
-    super::finalize_request(builder, flow, UID::well_known_token(WLTOKEN::ReservedForTesting), NETWORK_TEST_REQUEST_IDENTIFIER)
+    super::finalize_request(
+        builder,
+        flow,
+        UID::well_known_token(WLTOKEN::ReservedForTesting),
+        NETWORK_TEST_REQUEST_IDENTIFIER,
+    )
 }
 
 pub fn deserialize_reply(frame: Frame) -> Result<()> {

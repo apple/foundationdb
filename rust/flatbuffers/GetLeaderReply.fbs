@@ -7,7 +7,15 @@ table LeaderInfo {
     forward: bool;
 }
 
-union ErrorOr { Error, LeaderInfo }
+union Optional {
+    LeaderInfo, Void
+}
+
+table EnsureTable {
+    optional: Optional;
+}
+
+union ErrorOr { Error, EnsureTable }
 
 table FakeRoot {
     error_or: ErrorOr;

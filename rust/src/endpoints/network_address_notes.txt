@@ -1,0 +1,37 @@
+let buffer_14NetworkAddress = vec![
+0    0x28, 0x00, 0x00, 0x00,  ; bytes 1-2: root table is at offset 0x28 -> 40
+                              ; bytes 3-4 : padding
+4    0xcf, 0xff, 0xd7, 0x00,  ; file identifier: 0x00d7ffcf -> 14155727 (no flags)
+8    0x00, 0x00, 0x00, 0x00,
+12   0x00, 0x00, 0x06, 0x00,  ; bytes 1-2 padding?
+                              ; bytes 3-4 == vtable start
+                              ;           vtable len = 6
+16   0x08, 0x00, 0x04, 0x00,  ; bytes 1-2 table len = 8
+                              ; bytes 3-4 table entry #0: offset = 4; end of vtable.
+20   0x08, 0x00, 0x09, 0x00,  ; bytes 1-2 start of IPAddres vtable; vtable len = 8
+                              ; bytes 3-4 table len = 9
+24   0x08, 0x00, 0x04, 0x00,  ; bytes 1-2 table entry #0: offset = 8;
+                              ; bytes 3-4 table entry #1: offset = 4; end of vtable
+28   0x0c, 0x00, 0x0d, 0x00,  ; bytes 1-2 == NetworkAddress vtable start
+                                             vtable len = 0xc -> 12
+                              ; bytes 3-4    table len = 0xd -> 13 
+32   0x04, 0x00, 0x08, 0x00,  ; bytes 1-2 table entry #0 (ip) 0x4
+                              ; bytes 3-4 table entry #1 (port) 0x8
+36   0x0a, 0x00, 0x0c, 0x00,  ; bytes 1-2 table entry #2 (flags) 0xa -> 10 
+                              ; bytes 3-4 table entry #3 (from hostname) 0xc -> 12
+                              ;           end of NetworkAddress vtable
+40   0x1a, 0x00, 0x00, 0x00,  ; == start of root table
+                              ; byte 1: negative offset to vtable start: 0x1a -> -26; 40 - 26 =  
+44   0x04, 0x00, 0x00, 0x00,  ; root table entry #0: NetworkAddress table offset = 4.
+48   0x14, 0x00, 0x00, 0x00,  ; NetworkAddress table
+                              ; byte 1-2: negative offfset to vtable start: 0x14 -> -20; 48 - 20 = 28
+52   0x0c, 0x00, 0x00, 0x00,  ; byte 1-2: 12 (0xc) IpAddress uoffset field: find IPAddress 12 bytes from here - being read as enum type
+56   0xfe, 0xca, 0x01, 0x00,  ; bytes 1-2: port (from poison pattern); table offset is 8
+                              ; bytes 3-4: flags (1); table offset is 10
+60   0x00, 0x00, 0x00, 0x00,  ; bytes 1-2: from_hostname (zero); table offset is 12
+                              ; bytes 3-4: padding.
+64   0x2c, 0x00, 0x00, 0x00,  ; bytes 1-2: start of IpAddress table; vtable offset = - 0x2c = -44
+68   0x08, 0x00, 0x00, 0x00,  ; bytes 1-2; offset = 4; table field 1 uoffset = 8 -> IPv4 address @ 76.
+72   0x01, 0x00, 0x00, 0x00,  ; bytes 1-2; offset = 8: table field 0 (enum discriminant?), end of NetworkAddress table
+76   0xef, 0xbe, 0xad, 0xde,
+];

@@ -531,9 +531,23 @@ TEST_CASE("/flatbuffer/samples/GetLeader") {
 	test_only_write_to_stdout(req);
 	LeaderInfo li(deterministicRandom()->randomUniqueID());
 	li.serializedInfo = LiteralStringRef("XXXXYYYYZZZZ");
-	ErrorOr<LeaderInfo> eoli = errorOr(li);
-	// Optional<ErrorOr<LeaderInfo>> oli = errorOr(li);
-	// test_only_write_to_stdout(oli);
+	ErrorOr<EnsureTable<Optional<LeaderInfo>>> eoli(li);
+	// Optional<LeaderInfo> oli = li;
+	// ErrorOr<Optional<LeaderInfo>> eoli = errorOr(oli);
+
+	// Standalone<StringRef> value = ObjectWriter::toValue(eoli, Unversioned());
+	// printf("let buffer_%s = vec![", typeid(eoli).name());
+	// bool first = true;
+	// for (uint8_t c :  value) {
+	// 	if (first) {
+	// 		printf("0x%02x", (int)c);
+	// 		first = false;
+	// 	} else {
+	// 		printf(", 0x%02x", (int)c);
+	// 	}
+	// }
+	// printf("];\n");
+
 	test_only_write_to_stdout(eoli);
 	return Void();
 }

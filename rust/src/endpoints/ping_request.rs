@@ -52,7 +52,12 @@ pub fn serialize_request(
     ));
     let fake_root = FakeRoot::create(builder, &FakeRootArgs { ping_request });
     builder.finish(fake_root, Some("myfi"));
-    super::finalize_request(builder, flow, UID::well_known_token(WLTOKEN::PingPacket), PING_REQUEST_FILE_IDENTIFIER)
+    super::finalize_request(
+        builder,
+        flow,
+        UID::well_known_token(WLTOKEN::PingPacket),
+        PING_REQUEST_FILE_IDENTIFIER,
+    )
 }
 
 fn serialize_reply(builder: &mut FlatBufferBuilder<'static>, token: UID) -> Result<Frame> {
@@ -91,8 +96,7 @@ async fn handle(request: FlowMessage) -> Result<Option<FlowMessage>> {
     let uid = reply_promise.uid().unwrap();
     let uid: UID = uid.into();
 
-    let frame =
-        REPLY_BUILDER.with(|builder| serialize_reply(&mut builder.borrow_mut(), uid))?;
+    let frame = REPLY_BUILDER.with(|builder| serialize_reply(&mut builder.borrow_mut(), uid))?;
     Ok(Some(FlowMessage::new_response(request.flow, frame)?))
 }
 

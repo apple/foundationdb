@@ -113,6 +113,20 @@ impl FileIdentifier {
         })
     }
 }
+
+pub fn peek_file_identifier(payload: &[u8]) -> Result<FileIdentifier> {
+    if payload.len() < 8 {
+        Err(format!(
+            "Payload too short to contain file identifier: {:x?}",
+            payload
+        )
+        .into())
+    } else {
+        let file_identifier = u32::from_le_bytes(payload[4..8].try_into()?);
+        FileIdentifier::new_from_wire(file_identifier)
+    }
+}
+
 #[derive(Debug, FromPrimitive, ToPrimitive, PartialEq)]
 pub enum IdentifierType {
     None = 0,
