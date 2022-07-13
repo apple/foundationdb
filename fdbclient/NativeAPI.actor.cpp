@@ -3714,6 +3714,9 @@ ACTOR Future<Void> sameVersionDiffValue(Database cx, Reference<WatchParameters> 
 				metadata->watchFutureSS.cancel();
 			}
 
+			if (true) {}
+			else {}
+
 			// val_3 == val_2 (storage server value matches value passed into the function -> new watch)
 			if (valSS == parameters->value && tr.getTransactionState()->tenantId == parameters->tenant.tenantId) {
 				metadata = makeReference<WatchMetadata>(parameters);
