@@ -3144,6 +3144,14 @@ TEST_CASE("/flatbuffer/samples/Endpoint") {
 	return Void();
 }
 
+TEST_CASE("/flatbuffer/samples/ClusterInterface") {
+	FlowTransport::transport().setLocalAddress(NetworkAddress(0xdeadbeef, 0xcafe));
+	ClusterInterface c;
+	c.initEndpoints();
+	test_only_write_to_stdout(c);
+	return Void();
+}
+
 TEST_CASE("/flatbuffer/samples/ClusterControllerFullInterface") {
 	FlowTransport::transport().setLocalAddress(NetworkAddress(0xdeadbeef, 0xcafe));
 	ClusterControllerFullInterface c;

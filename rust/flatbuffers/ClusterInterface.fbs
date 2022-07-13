@@ -1,0 +1,7 @@
+include "common.fbs";
+
+table FakeRoot {
+    cluster_interface: ClusterInterface;
+}
+
+root_type FakeRoot;

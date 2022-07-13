@@ -88,6 +88,36 @@ table Endpoint {
     addresses: NetworkAddressList;
     token: UID;
 }
+
+table RequestStream {
+    /*
+    SERIALIZED 13RequestStreamI19OpenDatabaseRequestLb0EE
+    SERIALIZED 8Endpoint
+    SERIALIZED 18NetworkAddressList
+    SERIALIZED 14NetworkAddress
+    SERIALIZED 9IPAddress
+    UNION 17union_like_traitsISt7variantIJjSt5arrayIhLm16EEEEE
+    UNION 17union_like_traitsI8OptionalI14NetworkAddressEE
+    SERIALIZED 14NetworkAddress
+    SERIALIZED 9IPAddress
+    UNION 17union_like_traitsISt7variantIJjSt5arrayIhLm16EEEEE
+    */
+    endpoint: Endpoint;
+}
+
+table ClusterInterface {
+    open_database: RequestStream;
+    failure_monitoring: RequestStream;
+    database_status: RequestStream;
+    ping: RequestStream;
+    get_client_workers: RequestStream;
+    force_recovery: RequestStream;
+    move_shard: RequestStream;
+    repair_system_data: RequestStream;
+    split_shard: RequestStream;
+}
+
+// TODO: Move to Endpoint.fbs
 table EndpointFakeRoot {
     endpoint: Endpoint;
 }

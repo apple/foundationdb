@@ -1,0 +1,23 @@
+include "common.fbs";
+
+table ClusterControllerFullInterface {
+    cluster_interface: ClusterInterface;
+    recruit_from_configuration: RequestStream;
+    recruit_remote_from_configuration: RequestStream;
+    recruit_storage: RequestStream;
+    recruit_blob_worker: RequestStream;
+    register_worker: RequestStream;
+    get_workers: RequestStream;
+    register_master: RequestStream;
+    get_server_db_info: RequestStream;
+    update_worker_health: RequestStream;
+    tlog_rejion: RequestStream;
+    notify_backup_worker_done: RequestStream;
+    change_coordinators: RequestStream;
+}
+
+table FakeRoot {
+    cluster_controller_full_interface: ClusterControllerFullInterface;
+}
+
+root_type FakeRoot;
