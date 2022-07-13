@@ -1086,7 +1086,13 @@ ACTOR Future<Void> granuleCheckMergeCandidate(Reference<BlobWorkerData> bwData,
 				                                                                 true,
 				                                                                 metadata->originalEpoch,
 				                                                                 metadata->originalSeqno));
-				return Void();
+				// if a new manager appears, also tell it about this granule being mergeable
+				state int64_t lastSendEpoch = bwData->currentManagerEpoch;
+				while (lastSendEpoch == bwData->currentManagerEpoch) {
+					wait(bwData->currentManagerStatusStream.onChange());
+					wait(delay(0));
+				}
+				TEST(true); // Blob worker re-sending merge candidate to new manager
 			} catch (Error& e) {
 				if (e.code() == error_code_operation_cancelled) {
 					throw e;
