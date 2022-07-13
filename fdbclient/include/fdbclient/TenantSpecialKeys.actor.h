@@ -263,22 +263,18 @@ public:
 					throw special_keys_api_failure();
 				}
 			} else if (subRangeIntersects(renameSubRange, adjustedRange)) {
-				try {
-					StringRef oldName = adjustedRange.begin.removePrefix(renameSubRange.begin);
-					StringRef newName = range.value().second.get();
-					// Do not allow overlapping renames in the same commit
-					// e.g. A->B, B->C
-					if (renameSet.count(oldName) || renameSet.count(newName)) {
-						throw tenant_already_exists();
-					}
-					renameSet.insert(oldName);
-					renameSet.insert(newName);
-					renameMutations.push_back(std::make_pair(oldName, newName));
-				} catch (Error& e) {
+				StringRef oldName = adjustedRange.begin.removePrefix(renameSubRange.begin);
+				StringRef newName = range.value().second.get();
+				// Do not allow overlapping renames in the same commit
+				// e.g. A->B, B->C
+				if (renameSet.count(oldName) || renameSet.count(newName)) {
 					ryw->setSpecialKeySpaceErrorMsg(
 					    ManagementAPIError::toJsonString(false, "rename tenant", "tenant rename conflict"));
 					throw special_keys_api_failure();
 				}
+				renameSet.insert(oldName);
+				renameSet.insert(newName);
+				renameMutations.push_back(std::make_pair(oldName, newName));
 			}
 		}
 
