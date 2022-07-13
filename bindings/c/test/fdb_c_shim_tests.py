@@ -87,11 +87,11 @@ class FdbCShimTests:
         self.build_dir = Path(args.build_dir).resolve()
         assert self.build_dir.exists(), "{} does not exist".format(args.build_dir)
         assert self.build_dir.is_dir(), "{} is not a directory".format(args.build_dir)
-        self.unit_tests_bin = args.unit_tests_bin
+        self.unit_tests_bin = Path(args.unit_tests_bin).resolve()
         assert self.unit_tests_bin.exists(), "{} does not exist".format(self.unit_tests_bin)
-        self.api_tester_bin = args.api_tester_bin
+        self.api_tester_bin = Path(args.api_tester_bin).resolve()
         assert self.api_tester_bin.exists(), "{} does not exist".format(self.api_tests_bin)
-        self.api_test_dir = args.api_test_dir
+        self.api_test_dir = Path(args.api_test_dir).resolve()
         assert self.api_test_dir.exists(), "{} does not exist".format(self.api_test_dir)
         self.downloader = FdbBinaryDownloader(args.build_dir)
         # binary downloads are currently available only for x86_64
