@@ -295,7 +295,6 @@ struct DataDistributor : NonCopyable, ReferenceCounted<DataDistributor> {
 	PromiseStream<Future<Void>> addActor;
 
 	// State initialized when bootstrap
-	DDTeamCollection* teamCollection;
 	std::shared_ptr<IDDTxnProcessor> txnProcessor;
 	MoveKeysLock lock;
 	DatabaseConfiguration configuration;
@@ -308,12 +307,16 @@ struct DataDistributor : NonCopyable, ReferenceCounted<DataDistributor> {
 	Reference<EventCacheHolder> totalDataInFlightEventHolder;
 	Reference<EventCacheHolder> totalDataInFlightRemoteEventHolder;
 
+	// Optional components that can be set after ::init(). They're optional when test, but required for DD being
+	// fully-functional.
+	DDTeamCollection* teamCollection;
+
 	DataDistributor(Reference<AsyncVar<ServerDBInfo> const> const& db, UID id)
-	  : dbInfo(db), ddId(id), teamCollection(nullptr), txnProcessor(nullptr),
-	    initialDDEventHolder(makeReference<EventCacheHolder>("InitialDD")),
+	  : dbInfo(db), ddId(id), txnProcessor(nullptr), initialDDEventHolder(makeReference<EventCacheHolder>("InitialDD")),
 	    movingDataEventHolder(makeReference<EventCacheHolder>("MovingData")),
 	    totalDataInFlightEventHolder(makeReference<EventCacheHolder>("TotalDataInFlight")),
-	    totalDataInFlightRemoteEventHolder(makeReference<EventCacheHolder>("TotalDataInFlightRemote")) {}
+	    totalDataInFlightRemoteEventHolder(makeReference<EventCacheHolder>("TotalDataInFlightRemote")),
+	    teamCollection(nullptr) {}
 
 	// bootstrap steps
 
@@ -349,6 +352,87 @@ struct DataDistributor : NonCopyable, ReferenceCounted<DataDistributor> {
 	Future<Void> waitDataDistributorEnabled(const DDEnabledState* ddEnabledState) const {
 		return txnProcessor->waitForDataDistributionEnabled(ddEnabledState);
 	}
+
+	// Initialize the required internal states of DataDistributor. It's necessary before DataDistributor start working.
+	// Doesn't include initialization of optional components, like TenantCache, DDQueue, Tracker, TeamCollection. The
+	// components should call its own ::init methods.
+	ACTOR static Future<Void> init(Reference<DataDistributor> self, const DDEnabledState* ddEnabledState) {
+		loop {
+			TraceEvent("DDInitTakingMoveKeysLock", self->ddId).log();
+			wait(self->takeMoveKeysLock());
+			TraceEvent("DDInitTookMoveKeysLock", self->ddId).log();
+
+			wait(self->loadDatabaseConfiguration());
+			self->initDcInfo();
+			TraceEvent("DDInitGotConfiguration", self->ddId).detail("Conf", self->configuration.toString());
+
+			wait(self->updateReplicaKeys());
+			TraceEvent("DDInitUpdatedReplicaKeys", self->ddId).log();
+
+			wait(self->loadInitialDataDistribution(ddEnabledState));
+
+			if (self->initData->shards.size() > 1) {
+				TraceEvent("DDInitGotInitialDD", self->ddId)
+				    .detail("B", self->initData->shards.end()[-2].key)
+				    .detail("E", self->initData->shards.end()[-1].key)
+				    .detail("Src", describe(self->initData->shards.end()[-2].primarySrc))
+				    .detail("Dest", describe(self->initData->shards.end()[-2].primaryDest))
+				    .trackLatest(self->initialDDEventHolder->trackingKey);
+			} else {
+				TraceEvent("DDInitGotInitialDD", self->ddId)
+				    .detail("B", "")
+				    .detail("E", "")
+				    .detail("Src", "[no items]")
+				    .detail("Dest", "[no items]")
+				    .trackLatest(self->initialDDEventHolder->trackingKey);
+			}
+
+			if (self->initData->mode && ddEnabledState->isDDEnabled()) {
+				// mode may be set true by system operator using fdbcli and isDDEnabled() set to true
+				break;
+			}
+
+			TraceEvent("DataDistributionDisabled", self->ddId).log();
+
+			TraceEvent("MovingData", self->ddId)
+			    .detail("InFlight", 0)
+			    .detail("InQueue", 0)
+			    .detail("AverageShardSize", -1)
+			    .detail("UnhealthyRelocations", 0)
+			    .detail("HighestPriority", 0)
+			    .detail("BytesWritten", 0)
+			    .detail("PriorityRecoverMove", 0)
+			    .detail("PriorityRebalanceUnderutilizedTeam", 0)
+			    .detail("PriorityRebalannceOverutilizedTeam", 0)
+			    .detail("PriorityTeamHealthy", 0)
+			    .detail("PriorityTeamContainsUndesiredServer", 0)
+			    .detail("PriorityTeamRedundant", 0)
+			    .detail("PriorityMergeShard", 0)
+			    .detail("PriorityTeamUnhealthy", 0)
+			    .detail("PriorityTeam2Left", 0)
+			    .detail("PriorityTeam1Left", 0)
+			    .detail("PriorityTeam0Left", 0)
+			    .detail("PrioritySplitShard", 0)
+			    .trackLatest(self->movingDataEventHolder->trackingKey);
+
+			TraceEvent("TotalDataInFlight", self->ddId)
+			    .detail("Primary", true)
+			    .detail("TotalBytes", 0)
+			    .detail("UnhealthyServers", 0)
+			    .detail("HighestPriority", 0)
+			    .trackLatest(self->totalDataInFlightEventHolder->trackingKey);
+			TraceEvent("TotalDataInFlight", self->ddId)
+			    .detail("Primary", false)
+			    .detail("TotalBytes", 0)
+			    .detail("UnhealthyServers", 0)
+			    .detail("HighestPriority", self->configuration.usableRegions > 1 ? 0 : -1)
+			    .trackLatest(self->totalDataInFlightRemoteEventHolder->trackingKey);
+
+			wait(self->waitDataDistributorEnabled(ddEnabledState));
+			TraceEvent("DataDistributionEnabled").log();
+		}
+		return Void();
+	}
 };
 
 // Runs the data distribution algorithm for FDB, including the DD Queue, DD tracker, and DD team collection
@@ -378,80 +462,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 		state KeyRangeMap<ShardTrackedData> shards;
 		state Promise<UID> removeFailedServer;
 		try {
-			loop {
-				TraceEvent("DDInitTakingMoveKeysLock", self->ddId).log();
-				wait(self->takeMoveKeysLock());
-				TraceEvent("DDInitTookMoveKeysLock", self->ddId).log();
-
-				wait(self->loadDatabaseConfiguration());
-				self->initDcInfo();
-				TraceEvent("DDInitGotConfiguration", self->ddId).detail("Conf", self->configuration.toString());
-
-				wait(self->updateReplicaKeys());
-				TraceEvent("DDInitUpdatedReplicaKeys", self->ddId).log();
-
-				wait(self->loadInitialDataDistribution(ddEnabledState));
-
-				if (self->initData->shards.size() > 1) {
-					TraceEvent("DDInitGotInitialDD", self->ddId)
-					    .detail("B", self->initData->shards.end()[-2].key)
-					    .detail("E", self->initData->shards.end()[-1].key)
-					    .detail("Src", describe(self->initData->shards.end()[-2].primarySrc))
-					    .detail("Dest", describe(self->initData->shards.end()[-2].primaryDest))
-					    .trackLatest(self->initialDDEventHolder->trackingKey);
-				} else {
-					TraceEvent("DDInitGotInitialDD", self->ddId)
-					    .detail("B", "")
-					    .detail("E", "")
-					    .detail("Src", "[no items]")
-					    .detail("Dest", "[no items]")
-					    .trackLatest(self->initialDDEventHolder->trackingKey);
-				}
-
-				if (self->initData->mode && ddEnabledState->isDDEnabled()) {
-					// mode may be set true by system operator using fdbcli and isDDEnabled() set to true
-					break;
-				}
-
-				TraceEvent("DataDistributionDisabled", self->ddId).log();
-
-				TraceEvent("MovingData", self->ddId)
-				    .detail("InFlight", 0)
-				    .detail("InQueue", 0)
-				    .detail("AverageShardSize", -1)
-				    .detail("UnhealthyRelocations", 0)
-				    .detail("HighestPriority", 0)
-				    .detail("BytesWritten", 0)
-				    .detail("PriorityRecoverMove", 0)
-				    .detail("PriorityRebalanceUnderutilizedTeam", 0)
-				    .detail("PriorityRebalannceOverutilizedTeam", 0)
-				    .detail("PriorityTeamHealthy", 0)
-				    .detail("PriorityTeamContainsUndesiredServer", 0)
-				    .detail("PriorityTeamRedundant", 0)
-				    .detail("PriorityMergeShard", 0)
-				    .detail("PriorityTeamUnhealthy", 0)
-				    .detail("PriorityTeam2Left", 0)
-				    .detail("PriorityTeam1Left", 0)
-				    .detail("PriorityTeam0Left", 0)
-				    .detail("PrioritySplitShard", 0)
-				    .trackLatest(self->movingDataEventHolder->trackingKey);
-
-				TraceEvent("TotalDataInFlight", self->ddId)
-				    .detail("Primary", true)
-				    .detail("TotalBytes", 0)
-				    .detail("UnhealthyServers", 0)
-				    .detail("HighestPriority", 0)
-				    .trackLatest(self->totalDataInFlightEventHolder->trackingKey);
-				TraceEvent("TotalDataInFlight", self->ddId)
-				    .detail("Primary", false)
-				    .detail("TotalBytes", 0)
-				    .detail("UnhealthyServers", 0)
-				    .detail("HighestPriority", self->configuration.usableRegions > 1 ? 0 : -1)
-				    .trackLatest(self->totalDataInFlightRemoteEventHolder->trackingKey);
-
-				wait(self->waitDataDistributorEnabled(ddEnabledState));
-				TraceEvent("DataDistributionEnabled").log();
-			}
+			wait(DataDistributor::init(self, ddEnabledState));
 
 			state Reference<TenantCache> ddTenantCache;
 			if (ddIsTenantAware) {
