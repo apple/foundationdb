@@ -2197,11 +2197,9 @@ static std::deque<Standalone<MutationsAndVersionRef>>::const_iterator searchChan
 				break;
 			}
 			lastEnd = currentEnd + 1;
+			jump = std::min((int)(currentEnd - mutations.begin()), jump);
 			currentEnd -= jump;
 			jump <<= 1;
-		}
-		if (currentEnd < mutations.begin()) {
-			currentEnd = mutations.begin();
 		}
 		auto ret = std::lower_bound(currentEnd, lastEnd, searchKey, MutationsAndVersionRef::OrderByVersion());
 		// TODO REMOVE: for validation
