@@ -29,6 +29,18 @@ table IPAddress {
     ip4: IPv4;
 }
 
+// We don't use IDL strings, so we need to roll our own vector of
+// string type.  [ubyte] is an FDB string.
+table StringVectorEntry {
+    string: [ubyte];
+}
+
+// We can't have nice things like this.
+// You need to write [StringVectorEntry] instead.
+// table StringVector {
+//     vector: [StringVectorEntry];
+// }
+
 /*
 struct IPv4 { // not supported in rust flatcc. :-(
     ip: uint;
@@ -167,6 +179,17 @@ table LocalityData {
     data: [LocalityDataPair];
 }
 
+struct ProcessClass {
+    class: short;
+    source: short;
+}
+
+struct ClusterControllerPriortyInfo {
+    process_class_fitness: ubyte;
+    is_excluded: bool;
+    dc_fitness: ubyte;
+}
+
 // table EnsureTableLocalityData {
 //     ensure_table: LocalityData;
 // }
@@ -202,4 +225,65 @@ table WorkerInterface {
     encrypt_key_proxy: RequestStream;
     update_server_db_info: RequestStream;
     config_broadcast_interface: ConfigBroadcastInterface;
+}
+
+table DataDistributorInterface {
+    wait_failure: RequestStream;
+    halt_data_distributor: RequestStream;
+    locality: LocalityData;
+    my_id: UID;
+    distributor_snap_req: RequestStream;
+    distributor_excl_check_req: RequestStream;
+    data_distributor_metrics: RequestStream;
+    distributor_split_range: RequestStream;
+}
+
+union OptionalDataDistributorInterface {
+    DataDistributorInterface, Void // TODO: Order may be flipped.
+}
+
+table RatekeeperInterface {
+    wait_failure: RequestStream;
+    get_rate_info: RequestStream;
+    halt_ratekeeer: RequestStream;
+    report_commit_cost_estimation: RequestStream;
+    locality: LocalityData;
+    my_id: UID;
+}
+
+union OptionalRatekeeperInterface {
+    RatekeeperInterface, Void // TODO: Order may be flipped.
+}
+
+table BlobManagerInterface {
+    wait_failure: RequestStream;
+    halt_blob_manager: RequestStream;
+    halt_blob_granules: RequestStream;
+    blob_manager_excl_check_req: RequestStream;
+    locality: LocalityData;
+    my_id: UID;
+}
+
+union OptionalBlobManagerInterface {
+    BlobManagerInterface, Void // TODO: Order may be flipped.
+}
+
+// BEWARE: As an optimization, the C++ serializer for this interface
+// elites three request streams.  You'll need to use getAdjustedEndpoint to
+// infer those endpoints and manually register those endpoints after
+// deserializing this.  (Similarly, you'll need to use getAdjustedEndpoint
+// if you implement this interface; otherwise, you won't be able to tell peers
+// about the endpoints you exposed...)
+table EncryptKeyProxyInterface {
+    locality: LocalityData;
+    my_id: UID;
+    wait_failure: RequestStream;
+}
+
+union OptionalEncryptKeyProxyInterface {
+    EncryptKeyProxyInterface, Void
+}
+
+table ConfigClassSet {
+    keys: [StringVectorEntry];
 }

@@ -1,20 +1,20 @@
 include "common.fbs";
 
-// table RegisterWorkerRequest {
-//     worker_interface: WorkerInterface;
-//     initial_class: ProcessClass;
-//     process_class: ProcessClass;
-//     priority_info: ClusterControllerPriortyInfo;
-//     generation: Generation;
-//     distributor_interface: OptionalDataDistributionInterface;
-//     ratekeeper_interface: OptionalRatekeeperInterface;
-//     blob_manager_interface: OptionalBlobManagerInterface;
-//     encrypt_key_proxy: OptionalEncryptKeyProxyInterface;
-//     issues: Vector<[ubyte]>;
-//     incompatible_peers: [NetworkAddress];
-//     reply: ReplyPromise;
-//     degraded: bool;
-//     last_seen_knob_version: Version;
-//     knob_config_class_set: ConfigClassSet;
-//     request_db_info: bool;
-// }
+table RegisterWorkerRequest {
+    worker_interface: WorkerInterface;
+    initial_class: ProcessClass;
+    process_class: ProcessClass;
+    priority_info: ClusterControllerPriortyInfo;
+    generation: long; // FDBTypes.h: typedef int64_t Generation;
+    distributor_interface: OptionalDataDistributorInterface;
+    ratekeeper_interface: OptionalRatekeeperInterface;
+    blob_manager_interface: OptionalBlobManagerInterface;
+    encrypt_key_proxy: OptionalEncryptKeyProxyInterface;
+    issues: [StringVectorEntry];
+    incompatible_peers: [NetworkAddress];
+    reply: ReplyPromise;
+    degraded: bool;
+    last_seen_knob_version: long; // FDBTypes.h: typedef int64_t Version;
+    knob_config_class_set: ConfigClassSet;
+    request_db_info: bool;
+}
