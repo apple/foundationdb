@@ -19,6 +19,7 @@
  */
 
 #include "fdbserver/DDTeamCollection.h"
+#include "fdbserver/TCInfo.h"
 #include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -47,6 +48,41 @@ FDB_DEFINE_BOOLEAN_PARAM(TeamMustHaveShards);
 FDB_DEFINE_BOOLEAN_PARAM(ForReadBalance);
 FDB_DEFINE_BOOLEAN_PARAM(PreferLowerReadUtil);
 FDB_DEFINE_BOOLEAN_PARAM(FindTeamByServers);
+
+static int teamHealthPriority(TeamHealth health) {
+	int priority;
+	switch (health) {
+	case TeamHealth::REGION_UNPOPULATED:
+		priority = SERVER_KNOBS->PRIORITY_POPULATE_REGION;
+		break;
+	case TeamHealth::ZERO_SERVERS_LEFT:
+		priority = SERVER_KNOBS->PRIORITY_TEAM_0_LEFT;
+		break;
+	case TeamHealth::ONE_SERVER_LEFT:
+		priority = SERVER_KNOBS->PRIORITY_TEAM_1_LEFT;
+		break;
+	case TeamHealth::TWO_SERVERS_LEFT:
+		priority = SERVER_KNOBS->PRIORITY_TEAM_2_LEFT;
+		break;
+	case TeamHealth::UNHEALTHY:
+		priority = SERVER_KNOBS->PRIORITY_TEAM_HEALTHY;
+		break;
+	case TeamHealth::PERPETUAL_STORAGE_WIGGLING:
+		priority = SERVER_KNOBS->PRIORITY_PERPETUAL_STORAGE_WIGGLE;
+		break;
+	case TeamHealth::HAS_UNDESIRED_SERVER:
+		priority = SERVER_KNOBS->PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER;
+		break;
+	case TeamHealth::REDUNDANT:
+		priority = SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT;
+		break;
+	case TeamHealth::HEALTHY:
+		priority = SERVER_KNOBS->PRIORITY_TEAM_HEALTHY;
+		break;
+	}
+
+	return priority;
+}
 
 class DDTeamCollectionImpl {
 	ACTOR static Future<Void> checkAndRemoveInvalidLocalityAddr(DDTeamCollection* self) {
@@ -823,30 +859,41 @@ public:
 					state int lastPriority = team->getPriority();
 					if (team->size() == 0) {
 						team->setPriority(SERVER_KNOBS->PRIORITY_POPULATE_REGION);
+						team->setHealth(TeamHealth::REGION_UNPOPULATED);
 					} else if (serversLeft < self->configuration.storageTeamSize) {
-						if (serversLeft == 0)
+						if (serversLeft == 0) {
 							team->setPriority(SERVER_KNOBS->PRIORITY_TEAM_0_LEFT);
-						else if (serversLeft == 1)
+							team->setHealth(TeamHealth::ZERO_SERVERS_LEFT);
+						} else if (serversLeft == 1) {
 							team->setPriority(SERVER_KNOBS->PRIORITY_TEAM_1_LEFT);
-						else if (serversLeft == 2)
+							team->setHealth(TeamHealth::ONE_SERVER_LEFT);
+						} else if (serversLeft == 2) {
 							team->setPriority(SERVER_KNOBS->PRIORITY_TEAM_2_LEFT);
-						else
+							team->setHealth(TeamHealth::TWO_SERVERS_LEFT);
+						} else {
 							team->setPriority(SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY);
+							team->setHealth(TeamHealth::UNHEALTHY);
+						}
 					} else if (!badTeam && anyWigglingServer && serverWiggling == serverWrongConf &&
 					           serverWiggling == serverUndesired) {
 						// the wrong configured and undesired server is the wiggling server
 						team->setPriority(SERVER_KNOBS->PRIORITY_PERPETUAL_STORAGE_WIGGLE);
+						team->setHealth(TeamHealth::PERPETUAL_STORAGE_WIGGLING);
 
 					} else if (badTeam || anyWrongConfiguration) {
 						if (redundantTeam) {
 							team->setPriority(SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT);
+							team->setHealth(TeamHealth::REDUNDANT);
 						} else {
 							team->setPriority(SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY);
+							team->setHealth(TeamHealth::UNHEALTHY);
 						}
 					} else if (anyUndesired) {
 						team->setPriority(SERVER_KNOBS->PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER);
+						team->setHealth(TeamHealth::HAS_UNDESIRED_SERVER);
 					} else {
 						team->setPriority(SERVER_KNOBS->PRIORITY_TEAM_HEALTHY);
+						team->setHealth(TeamHealth::HEALTHY);
 					}
 
 					if (lastPriority != team->getPriority()) {

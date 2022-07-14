@@ -30,6 +30,18 @@ class TCTenantInfo;
 class TCMachineInfo;
 class TCMachineTeamInfo;
 
+enum class TeamHealth {
+	REGION_UNPOPULATED,
+	ZERO_SERVERS_LEFT,
+	ONE_SERVER_LEFT,
+	TWO_SERVERS_LEFT,
+	UNHEALTHY,
+	PERPETUAL_STORAGE_WIGGLING,
+	HAS_UNDESIRED_SERVER,
+	REDUNDANT,
+	HEALTHY
+};
+
 class TCServerInfo : public ReferenceCounted<TCServerInfo> {
 	friend class TCServerInfoImpl;
 	friend class DDTeamCollectionUnitTest;
@@ -175,6 +187,7 @@ class TCTeamInfo final : public ReferenceCounted<TCTeamInfo>, public IDataDistri
 	bool wrongConfiguration; // True if any of the servers in the team have the wrong configuration
 	int priority;
 	UID id;
+	TeamHealth health;
 
 public:
 	Reference<TCMachineTeamInfo> machineTeam;
@@ -229,6 +242,9 @@ public:
 	void setHealthy(bool h) override { healthy = h; }
 	int getPriority() const override { return priority; }
 	void setPriority(int p) override { priority = p; }
+	TeamHealth getHealth() const { return health; }
+	void setHealth(TeamHealth h) { health = h; }
+
 	void addref() const override { ReferenceCounted<TCTeamInfo>::addref(); }
 	void delref() const override { ReferenceCounted<TCTeamInfo>::delref(); }
 
