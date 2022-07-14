@@ -38,7 +38,7 @@ In `basicLoadBalance`, a *best* alternative is picked up and used at the beginni
 
 ## `loadBalance`
 
-`loadBalance` provides a more sophisticated implementation of load balancing. In addition of the basic load balancing, it also provides a variety of features, such like
+`loadBalance` provides a more sophisticated implementation of load balancing. In addition to the basic load balancing, it also provides a variety of features, such as
 
 * Support for Test Storage Server ([TSS](https://github.com/apple/foundationdb/blob/main/documentation/sphinx/source/tss.rst))
 * Distance-based candidate election
