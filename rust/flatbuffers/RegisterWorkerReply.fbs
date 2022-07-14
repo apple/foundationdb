@@ -1,0 +1,12 @@
+include "common.fbs";
+
+table RegisterWorkerReply {
+    process_class: ProcessClass;
+    priority_info: ClusterControllerPriorityInfo;
+}
+
+table fake_root {
+    register_worker_reply: RegisterWorkerReply;
+}
+
+root_type fake_root;

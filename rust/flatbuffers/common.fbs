@@ -184,7 +184,7 @@ struct ProcessClass {
     source: short;
 }
 
-struct ClusterControllerPriortyInfo {
+struct ClusterControllerPriorityInfo {
     process_class_fitness: ubyte;
     is_excluded: bool;
     dc_fitness: ubyte;

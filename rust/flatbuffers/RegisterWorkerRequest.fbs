@@ -4,7 +4,7 @@ table RegisterWorkerRequest {
     worker_interface: WorkerInterface;
     initial_class: ProcessClass;
     process_class: ProcessClass;
-    priority_info: ClusterControllerPriortyInfo;
+    priority_info: ClusterControllerPriorityInfo;
     generation: long; // FDBTypes.h: typedef int64_t Generation;
     distributor_interface: OptionalDataDistributorInterface;
     ratekeeper_interface: OptionalRatekeeperInterface;
