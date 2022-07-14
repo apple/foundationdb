@@ -27,6 +27,7 @@
 #include "fdbclient/TenantManagement.actor.h"
 #include "fdbclient/TenantSpecialKeys.actor.h"
 #include "fdbclient/ThreadSafeTransaction.h"
+#include "fdbclient/libb64/decode.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/Knobs.h"
@@ -271,15 +272,15 @@ struct TenantManagementWorkload : TestWorkload {
 			    self->dataDb.getReference(), tenantsToCreate.begin()->first, tenantsToCreate.begin()->second));
 		} else if (operationType == OperationType::MANAGEMENT_TRANSACTION) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			Optional<Value> lastIdVal = wait(tr->get(tenantLastIdKey));
-			int64_t previousId = lastIdVal.present() ? TenantMapEntry::prefixToId(lastIdVal.get()) : -1;
+			int64_t _nextId = wait(TenantAPI::getNextTenantId(tr));
+			int64_t nextId = _nextId;
 
 			std::vector<Future<Void>> createFutures;
 			for (auto [tenant, entry] : tenantsToCreate) {
-				entry.id = ++previousId;
+				entry.id = nextId++;
 				createFutures.push_back(success(TenantAPI::createTenantTransaction(tr, tenant, entry)));
 			}
-			tr->set(tenantLastIdKey, TenantMapEntry::idToPrefix(previousId));
+			tr->set(tenantLastIdKey, TenantMapEntry::idToPrefix(nextId - 1));
 			wait(waitForAll(createFutures));
 			wait(tr->commit());
 		} else {
@@ -777,11 +778,17 @@ struct TenantManagementWorkload : TestWorkload {
 
 		int64_t id;
 		std::string prefix;
+		std::string base64Prefix;
+		std::string printablePrefix;
 		std::string tenantStateStr;
 		std::string assignedClusterStr;
 		std::string tenantGroupStr;
 		jsonDoc.get("id", id);
-		jsonDoc.get("prefix", prefix);
+		jsonDoc.get("id", id);
+		jsonDoc.get("prefix.base64", base64Prefix);
+		jsonDoc.get("prefix.printable", printablePrefix);
+
+		prefix = base64::decoder::from_string(base64Prefix);
 		jsonDoc.get("tenant_state", tenantStateStr);
 
 		Optional<ClusterName> assignedCluster;
@@ -793,6 +800,8 @@ struct TenantManagementWorkload : TestWorkload {
 		if (jsonDoc.tryGet("tenant_group", tenantGroupStr)) {
 			tenantGroup = TenantGroupNameRef(tenantGroupStr);
 		}
+
+		ASSERT(prefix == unprintable(printablePrefix));
 
 		Key prefixKey = KeyRef(prefix);
 		TenantMapEntry entry(id,

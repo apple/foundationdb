@@ -628,7 +628,9 @@ def tenants(logger):
     assert(json_output['type'] == 'success')
     assert(len(json_output['tenant']) == 3)
     assert('id' in json_output['tenant'])
-    assert('prefix' in json_output['tenant'])
+    assert(len(json_output['tenant']['prefix']) == 2)
+    assert('base64' in json_output['tenant']['prefix'])
+    assert('printable' in json_output['tenant']['prefix'])
     assert('tenant_state' in json_output['tenant'])
 
     output = run_fdbcli_command('usetenant')

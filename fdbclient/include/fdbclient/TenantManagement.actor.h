@@ -19,6 +19,7 @@
  */
 
 #pragma once
+#include "flow/IRandom.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_TENANT_MANAGEMENT_ACTOR_G_H)
 #define FDBCLIENT_TENANT_MANAGEMENT_ACTOR_G_H
 #include "fdbclient/TenantManagement.actor.g.h"
@@ -186,6 +187,17 @@ Future<std::pair<Optional<TenantMapEntry>, bool>> createTenantTransaction(
 	return std::make_pair(tenantEntry, true);
 }
 
+ACTOR template <class Transaction>
+Future<int64_t> getNextTenantId(Transaction tr) {
+	state typename transaction_future_type<Transaction, Optional<Value>>::type lastIdFuture = tr->get(tenantLastIdKey);
+	Optional<Value> lastIdVal = wait(safeThreadFutureToFuture(lastIdFuture));
+	int64_t tenantId = lastIdVal.present() ? TenantMapEntry::prefixToId(lastIdVal.get()) + 1 : 0;
+	if (BUGGIFY) {
+		tenantId += deterministicRandom()->randomSkewedUInt32(1, 1e9);
+	}
+	return tenantId;
+}
+
 ACTOR template <class DB>
 Future<Optional<TenantMapEntry>> createTenant(Reference<DB> db,
                                               TenantName name,
@@ -199,6 +211,8 @@ Future<Optional<TenantMapEntry>> createTenant(Reference<DB> db,
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+			state Future<int64_t> tenantIdFuture = getNextTenantId(tr);
 
 			state typename DB::TransactionT::template FutureT<Optional<Value>> lastIdFuture;
 			if (generateTenantId) {
@@ -215,8 +229,8 @@ Future<Optional<TenantMapEntry>> createTenant(Reference<DB> db,
 			}
 
 			if (generateTenantId) {
-				Optional<Value> lastIdVal = wait(safeThreadFutureToFuture(lastIdFuture));
-				tenantEntry.id = lastIdVal.present() ? TenantMapEntry::prefixToId(lastIdVal.get()) + 1 : 0;
+				int64_t tenantId = wait(tenantIdFuture);
+				tenantEntry.id = tenantId;
 				tr->set(tenantLastIdKey, TenantMapEntry::idToPrefix(tenantEntry.id));
 			}
 
