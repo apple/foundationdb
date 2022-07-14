@@ -56,7 +56,7 @@ struct KeyValueStoreCompressTestData final : IKeyValueStore {
 	void clear(KeyRangeRef range, const Arena* arena = nullptr) override { store->clear(range, arena); }
 	Future<Void> commit(bool sequential = false) override { return store->commit(sequential); }
 
-	Future<Optional<Value>> readValue(KeyRef key, IKeyValueStore::ReadType, Optional<UID> debugID) override {
+	Future<Optional<Value>> readValue(KeyRef key, ReadType, Optional<UID> debugID) override {
 		return doReadValue(store, key, debugID);
 	}
 
@@ -64,22 +64,19 @@ struct KeyValueStoreCompressTestData final : IKeyValueStore {
 	// problem is still present if you are using this storage interface, but this storage interface is not used by
 	// customers ever. However, if you want to try to test malicious atomic op workloads with compressed values for some
 	// reason, you will need to fix this.
-	Future<Optional<Value>> readValuePrefix(KeyRef key,
-	                                        int maxLength,
-	                                        IKeyValueStore::ReadType,
-	                                        Optional<UID> debugID) override {
+	Future<Optional<Value>> readValuePrefix(KeyRef key, int maxLength, ReadType, Optional<UID> debugID) override {
 		return doReadValuePrefix(store, key, maxLength, debugID);
 	}
 
 	// If rowLimit>=0, reads first rows sorted ascending, otherwise reads last rows sorted descending
 	// The total size of the returned value (less the last entry) will be less than byteLimit
-	Future<RangeResult> readRange(KeyRangeRef keys, int rowLimit, int byteLimit, IKeyValueStore::ReadType) override {
+	Future<RangeResult> readRange(KeyRangeRef keys, int rowLimit, int byteLimit, ReadType) override {
 		return doReadRange(store, keys, rowLimit, byteLimit);
 	}
 
 private:
 	ACTOR static Future<Optional<Value>> doReadValue(IKeyValueStore* store, Key key, Optional<UID> debugID) {
-		Optional<Value> v = wait(store->readValue(key, IKeyValueStore::ReadType::NORMAL, debugID));
+		Optional<Value> v = wait(store->readValue(key, ReadType::NORMAL, debugID));
 		if (!v.present())
 			return v;
 		return unpack(v.get());

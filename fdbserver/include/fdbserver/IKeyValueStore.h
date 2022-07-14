@@ -67,14 +67,6 @@ public:
 	virtual Future<Void> commit(
 	    bool sequential = false) = 0; // returns when prior sets and clears are (atomically) durable
 
-	enum class ReadType {
-		EAGER,
-		FETCH,
-		LOW,
-		NORMAL,
-		HIGH,
-	};
-
 	virtual Future<Optional<Value>> readValue(KeyRef key,
 	                                          ReadType type = ReadType::NORMAL,
 	                                          Optional<UID> debugID = Optional<UID>()) = 0;

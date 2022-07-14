@@ -437,7 +437,7 @@ private:
 	}
 
 	ACTOR static Future<Void> doClose(RocksDBCFCheckpointReader* self) {
-		wait(delay(0, TaskPriority::FetchKeys));
+		wait(delay(0, TaskPriority::CheckPoint));
 		delete self;
 		return Void();
 	}
@@ -791,7 +791,7 @@ ACTOR Future<Void> deleteRocksCheckpoint(CheckpointMetaData checkpoint) {
 		TraceEvent(SevInfo, "DeleteCheckpointRemovedDir", checkpoint.checkpointID)
 		    .detail("CheckpointID", checkpoint.checkpointID)
 		    .detail("Dir", dir);
-		wait(delay(0, TaskPriority::FetchKeys));
+		wait(delay(0, TaskPriority::CheckPoint));
 	}
 
 	return Void();

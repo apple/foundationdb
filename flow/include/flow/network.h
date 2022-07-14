@@ -104,7 +104,7 @@ enum class TaskPriority {
 	BlobWorkerReadChangeFeed = 2720,
 	BlobWorkerUpdateFDB = 2710,
 	BlobWorkerUpdateStorage = 2700,
-	FetchKeys = 2500,
+	CheckPoint = 2500,
 	RestoreApplierWriteDB = 2310,
 	RestoreApplierReceiveMutations = 2300,
 	RestoreLoaderFinishVersionBatch = 2220,

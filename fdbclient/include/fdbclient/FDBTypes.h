@@ -1283,6 +1283,14 @@ struct WorkerBackupStatus {
 
 enum class TransactionPriority : uint8_t { BATCH, DEFAULT, IMMEDIATE, MIN = BATCH, MAX = IMMEDIATE };
 
+enum class ReadType {
+	EAGER = 0,
+	FETCH = 1,
+	LOW = 2,
+	NORMAL = 3,
+	HIGH = 4,
+};
+
 const std::array<TransactionPriority, (int)TransactionPriority::MAX + 1> allTransactionPriorities = {
 	TransactionPriority::BATCH,
 	TransactionPriority::DEFAULT,

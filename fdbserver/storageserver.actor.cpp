@@ -278,19 +278,19 @@ struct StorageServerDisk {
 	//  - "a", if key "a" exist
 	//  - "b", if key "a" doesn't exist, and "b" is the next existing key in total order
 	//  - allKeys.end, if keyrange [a, allKeys.end) is empty
-	Future<Key> readNextKeyInclusive(KeyRef key, IKeyValueStore::ReadType type = IKeyValueStore::ReadType::NORMAL) {
+	Future<Key> readNextKeyInclusive(KeyRef key, ReadType type = ReadType::NORMAL) {
 		++(*kvScans);
 		return readFirstKey(storage, KeyRangeRef(key, allKeys.end), type);
 	}
 	Future<Optional<Value>> readValue(KeyRef key,
-	                                  IKeyValueStore::ReadType type = IKeyValueStore::ReadType::NORMAL,
+	                                  ReadType type = ReadType::NORMAL,
 	                                  Optional<UID> debugID = Optional<UID>()) {
 		++(*kvGets);
 		return storage->readValue(key, type, debugID);
 	}
 	Future<Optional<Value>> readValuePrefix(KeyRef key,
 	                                        int maxLength,
-	                                        IKeyValueStore::ReadType type = IKeyValueStore::ReadType::NORMAL,
+	                                        ReadType type = ReadType::NORMAL,
 	                                        Optional<UID> debugID = Optional<UID>()) {
 		++(*kvGets);
 		return storage->readValuePrefix(key, maxLength, type, debugID);
@@ -298,7 +298,7 @@ struct StorageServerDisk {
 	Future<RangeResult> readRange(KeyRangeRef keys,
 	                              int rowLimit = 1 << 30,
 	                              int byteLimit = 1 << 30,
-	                              IKeyValueStore::ReadType type = IKeyValueStore::ReadType::NORMAL) {
+	                              ReadType type = ReadType::NORMAL) {
 		++(*kvScans);
 		return storage->readRange(keys, rowLimit, byteLimit, type);
 	}
@@ -327,7 +327,7 @@ private:
 	IKeyValueStore* storage;
 	void writeMutations(const VectorRef<MutationRef>& mutations, Version debugVersion, const char* debugContext);
 
-	ACTOR static Future<Key> readFirstKey(IKeyValueStore* storage, KeyRangeRef range, IKeyValueStore::ReadType type) {
+	ACTOR static Future<Key> readFirstKey(IKeyValueStore* storage, KeyRangeRef range, ReadType type) {
 		RangeResult r = wait(storage->readRange(range, 1, 1 << 30, type));
 		if (r.size())
 			return r[0].key;
@@ -852,6 +852,8 @@ public:
 
 	FlowLock serveFetchCheckpointParallelismLock;
 
+	PriorityMultiLock reqSSLock;
+
 	int64_t instanceID;
 
 	Promise<Void> otherError;
@@ -1059,6 +1061,7 @@ public:
 	    fetchChangeFeedParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM),
 	    fetchKeysBytesBudget(SERVER_KNOBS->STORAGE_FETCH_BYTES), fetchKeysBudgetUsed(false),
 	    serveFetchCheckpointParallelismLock(SERVER_KNOBS->SERVE_FETCH_CHECKPOINT_PARALLELISM),
+	    reqSSLock(1, (int)ReadType::HIGH, SERVER_KNOBS->STORAGESERVER_READ_PRIORITIES),
 	    instanceID(deterministicRandom()->randomUniqueID().first()), shuttingDown(false), behind(false),
 	    versionBehind(false), debug_inApplyUpdate(false), debug_lastValidateTime(0), lastBytesInputEBrake(0),
 	    lastDurableVersionEBrake(0), maxQueryQueue(0), transactionTagCounter(ssi.id()), counters(this),
@@ -1596,7 +1599,7 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 			path = 1;
 		} else if (!i || !i->isClearTo() || i->getEndKey() <= req.key) {
 			path = 2;
-			Optional<Value> vv = wait(data->storage.readValue(req.key, IKeyValueStore::ReadType::NORMAL, req.debugID));
+			Optional<Value> vv = wait(data->storage.readValue(req.key, ReadType::NORMAL, req.debugID));
 			data->counters.kvGetBytes += vv.expectedSize();
 			// Validate that while we were reading the data we didn't lose the version or shard
 			if (version < data->storageVersion()) {
@@ -2999,7 +3002,7 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
                                           int limit,
                                           int* pLimitBytes,
                                           SpanContext parentSpan,
-                                          IKeyValueStore::ReadType type,
+                                          ReadType type,
                                           Optional<Key> tenantPrefix) {
 	state GetKeyValuesReply result;
 	state StorageServer::VersionedData::ViewAtVersion view = data->data().at(version);
@@ -3238,7 +3241,7 @@ ACTOR Future<Key> findKey(StorageServer* data,
                           KeyRange range,
                           int* pOffset,
                           SpanContext parentSpan,
-                          IKeyValueStore::ReadType type)
+                          ReadType type)
 // Attempts to find the key indicated by sel in the data at version, within range.
 // Precondition: selectorInRange(sel, range)
 // If it is found, offset is set to 0 and a key is returned which falls inside range.
@@ -3358,8 +3361,9 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 {
 	state Span span("SS:getKeyValues"_loc, req.spanContext);
 	state int64_t resultSize = 0;
-	state IKeyValueStore::ReadType type =
-	    req.isFetchKeys ? IKeyValueStore::ReadType::FETCH : IKeyValueStore::ReadType::NORMAL;
+	state ReadType type = req.isFetchKeys ? ReadType::FETCH : ReadType::NORMAL;
+	state int readPriority =
+	    (req.isFetchKeys && SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY) ? (int)ReadType::FETCH : (int)ReadType::NORMAL;
 
 	if (req.tenantInfo.name.present()) {
 		span.addAttribute("tenant"_sr, req.tenantInfo.name.get());
@@ -3375,11 +3379,8 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 
 	// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 	// so we need to downgrade here
-	if (SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY && req.isFetchKeys) {
-		wait(delay(0, TaskPriority::FetchKeys));
-	} else {
-		wait(data->getQueryDelay());
-	}
+	wait(data->getQueryDelay());
+	state PriorityMultiLock::Lock lock = wait(data->reqSSLock.lock(readPriority));
 
 	try {
 		if (req.debugID.present())
@@ -4078,8 +4079,9 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 {
 	state Span span("SS:getMappedKeyValues"_loc, req.spanContext);
 	state int64_t resultSize = 0;
-	state IKeyValueStore::ReadType type =
-	    req.isFetchKeys ? IKeyValueStore::ReadType::FETCH : IKeyValueStore::ReadType::NORMAL;
+	state ReadType type = req.isFetchKeys ? ReadType::FETCH : ReadType::NORMAL;
+	state int readPriority =
+	    (req.isFetchKeys && SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY) ? (int)ReadType::FETCH : (int)ReadType::NORMAL;
 
 	if (req.tenantInfo.name.present()) {
 		span.addAttribute("tenant"_sr, req.tenantInfo.name.get());
@@ -4095,11 +4097,8 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 
 	// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 	// so we need to downgrade here
-	if (SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY && req.isFetchKeys) {
-		wait(delay(0, TaskPriority::FetchKeys));
-	} else {
-		wait(data->getQueryDelay());
-	}
+	wait(data->getQueryDelay());
+	state PriorityMultiLock::Lock lock = wait(data->reqSSLock.lock(readPriority));
 
 	try {
 		if (req.debugID.present())
@@ -4286,8 +4285,9 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 {
 	state Span span("SS:getKeyValuesStream"_loc, req.spanContext);
 	state int64_t resultSize = 0;
-	state IKeyValueStore::ReadType type =
-	    req.isFetchKeys ? IKeyValueStore::ReadType::FETCH : IKeyValueStore::ReadType::NORMAL;
+	state ReadType type = req.isFetchKeys ? ReadType::FETCH : ReadType::NORMAL;
+	state int readPriority =
+	    (req.isFetchKeys && SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY) ? (int)ReadType::FETCH : (int)ReadType::NORMAL;
 
 	if (req.tenantInfo.name.present()) {
 		span.addAttribute("tenant"_sr, req.tenantInfo.name.get());
@@ -4302,11 +4302,7 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 
 	// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 	// so we need to downgrade here
-	if (SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY && req.isFetchKeys) {
-		wait(delay(0, TaskPriority::FetchKeys));
-	} else {
-		wait(delay(0, TaskPriority::DefaultEndpoint));
-	}
+	state PriorityMultiLock::Lock lock = wait(data->reqSSLock.lock(readPriority));
 
 	try {
 		if (req.debugID.present())
@@ -4463,11 +4459,11 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 					end = lastKey;
 				}
 
-				if (SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY && req.isFetchKeys) {
-					wait(delay(0, TaskPriority::FetchKeys));
+				/*if (SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY && req.isFetchKeys) {
+				    wait(store(lock, data->reqSSLock.lock((int)ReadType::FETCH)));
 				} else {
-					wait(delay(0, TaskPriority::DefaultEndpoint));
-				}
+				    wait(store(lock, data->reqSSLock.lock((int)ReadType::NORMAL)));
+				}*/
 
 				data->transactionTagCounter.addRequest(req.tags, resultSize);
 			}
@@ -4519,8 +4515,8 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 		KeyRangeRef searchRange = data->clampRangeToTenant(shard, tenantEntry, req.arena);
 
 		state int offset;
-		Key absoluteKey = wait(
-		    findKey(data, req.sel, version, searchRange, &offset, req.spanContext, IKeyValueStore::ReadType::NORMAL));
+		Key absoluteKey =
+		    wait(findKey(data, req.sel, version, searchRange, &offset, req.spanContext, ReadType::NORMAL));
 
 		data->checkChangeCounter(changeCounter,
 		                         KeyRangeRef(std::min<KeyRef>(req.sel.getKey(), absoluteKey),
@@ -4620,7 +4616,7 @@ ACTOR Future<Void> doEagerReads(StorageServer* data, UpdateEagerReadInfo* eager)
 	if (SERVER_KNOBS->ENABLE_CLEAR_RANGE_EAGER_READS) {
 		std::vector<Future<Key>> keyEnd(eager->keyBegin.size());
 		for (int i = 0; i < keyEnd.size(); i++)
-			keyEnd[i] = data->storage.readNextKeyInclusive(eager->keyBegin[i], IKeyValueStore::ReadType::EAGER);
+			keyEnd[i] = data->storage.readNextKeyInclusive(eager->keyBegin[i], ReadType::EAGER);
 		data->counters.eagerReadsKeys += keyEnd.size();
 
 		state Future<std::vector<Key>> futureKeyEnds = getAll(keyEnd);
@@ -4633,8 +4629,7 @@ ACTOR Future<Void> doEagerReads(StorageServer* data, UpdateEagerReadInfo* eager)
 
 	std::vector<Future<Optional<Value>>> value(eager->keys.size());
 	for (int i = 0; i < value.size(); i++)
-		value[i] =
-		    data->storage.readValuePrefix(eager->keys[i].first, eager->keys[i].second, IKeyValueStore::ReadType::EAGER);
+		value[i] = data->storage.readValuePrefix(eager->keys[i].first, eager->keys[i].second, ReadType::EAGER);
 
 	state Future<std::vector<Optional<Value>>> futureValues = getAll(value);
 	std::vector<Optional<Value>> optionalValues = wait(futureValues);
@@ -5984,7 +5979,8 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			while (!shard->updates.empty() && shard->updates[0].version <= fetchVersion)
 				shard->updates.pop_front();
 			tr.setVersion(fetchVersion);
-			tr.trState->taskID = TaskPriority::FetchKeys;
+			tr.trState->readType = ReadType::FETCH;
+
 			state PromiseStream<RangeResult> results;
 			state Future<Void> hold = SERVER_KNOBS->FETCH_USING_STREAMING
 			                              ? tr.getRangeStream(results, keys, GetRangeLimits(), Snapshot::True)

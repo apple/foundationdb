@@ -155,7 +155,7 @@ struct OpenKVStoreRequest {
 struct IKVSGetValueRequest {
 	constexpr static FileIdentifier file_identifier = 1029439;
 	KeyRef key;
-	IKeyValueStore::ReadType type;
+	ReadType type;
 	Optional<UID> debugID = Optional<UID>();
 	ReplyPromise<Optional<Value>> reply;
 
@@ -202,7 +202,7 @@ struct IKVSReadValuePrefixRequest {
 	constexpr static FileIdentifier file_identifier = 1928374;
 	KeyRef key;
 	int maxLength;
-	IKeyValueStore::ReadType type;
+	ReadType type;
 	Optional<UID> debugID = Optional<UID>();
 	ReplyPromise<Optional<Value>> reply;
 
@@ -246,7 +246,7 @@ struct IKVSReadRangeRequest {
 	KeyRangeRef keys;
 	int rowLimit;
 	int byteLimit;
-	IKeyValueStore::ReadType type;
+	ReadType type;
 	ReplyPromise<IKVSReadRangeReply> reply;
 
 	template <class Ar>

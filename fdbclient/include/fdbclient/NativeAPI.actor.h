@@ -243,6 +243,7 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 
 	Optional<UID> debugID;
 	TaskPriority taskID;
+	ReadType readType = ReadType::NORMAL;
 	SpanContext spanContext;
 	UseProvisionalProxies useProvisionalProxies = UseProvisionalProxies::False;
 	bool readVersionObtainedFromGrvProxy;

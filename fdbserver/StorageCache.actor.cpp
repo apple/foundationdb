@@ -736,7 +736,7 @@ ACTOR Future<Void> getKeyValues(StorageCacheData* data, GetKeyValuesRequest req)
 	// so we need to downgrade here
 	TaskPriority taskType = TaskPriority::DefaultEndpoint;
 	if (SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY && req.isFetchKeys) {
-		taskType = TaskPriority::FetchKeys;
+		taskType = TaskPriority::LowPriorityRead;
 		// } else if (false) {
 		// 	// Placeholder for up-prioritizing fetches for important requests
 		// 	taskType = TaskPriority::DefaultDelay;
@@ -1192,7 +1192,8 @@ ACTOR Future<RangeResult> tryFetchRange(Database cx,
 
 	ASSERT(!cx->switchable);
 	tr.setVersion(version);
-	tr.trState->taskID = TaskPriority::FetchKeys;
+	// tr.trState->taskID = TaskPriority::FetchKeys;
+	tr.trState->readType = ReadType::FETCH;
 	limits.minRows = 0;
 
 	try {
