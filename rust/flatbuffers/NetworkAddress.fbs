@@ -1,0 +1,7 @@
+include "common.fbs";
+
+table FakeRoot {
+    network_address: NetworkAddress;
+}
+
+root_type FakeRoot;

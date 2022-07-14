@@ -1,6 +1,6 @@
 use clap::Parser;
 use foundationdb::endpoints::{ping_request, protocol_info};
-use foundationdb::flow::{cluster_file::ClusterFile, uid::UID, uid::WLTOKEN, Result};
+use foundationdb::flow::{cluster_file::ClusterFile, uid::WLTOKEN, Result};
 use foundationdb::services::{ConnectionKeeper, LoopbackHandler};
 
 mod cli;
@@ -33,45 +33,22 @@ async fn main() -> Result<()> {
         Box::new(protocol_info::ProtocolInfo::new()),
     );
     let pool = ConnectionKeeper::new(Some(cli.public_address), loopback_handler);
+
+    // --------- Open socket for incoming connections
     {
         let p = pool.clone();
         tokio::spawn(async move { p.listen(cli.listen_address).await.unwrap() });
     }
 
-    {
-        // TODO: Put this somehwere where it can be updated...
-        let cluster_file = cluster_file.clone();
-        let svc = pool.clone();
-        use foundationdb::endpoints::get_leader::MonitorLeader;
-        let (mut monitor, mut cluster_controller_full_interface) = MonitorLeader::new(svc, cluster_file);
-        tokio::spawn(async move {
-            loop {
-                let res = cluster_controller_full_interface.register_worker_worker().await;
-                println!("register_worker returns {:?}.  Respwaning.", res);
-                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-            }
-        });
-        tokio::spawn(async move {
-            loop {
-                let res = monitor.monitor_leader().await;
-                println!("monitor_leader returns {:?}.  Respwaning.", res);
-                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-            }
-        });
-    }
+    // --------- Send some messages to well-known endpoints (to prove we can)
 
-    println!(
-        "Attempting to connect to FDB cluster id={} description={}",
-        cluster_file.description, cluster_file.id
-    );
-
-    for server in cluster_file.hosts {
+    for server in &cluster_file.hosts {
         println!("Sending protocol info to {:?}", server);
         match server {
             foundationdb::flow::cluster_file::ClusterHost::IPAddr(socket_addr, false) => {
                 println!(
                     "Got: {:x?}",
-                    protocol_info::protocol_info(socket_addr, &pool).await
+                    protocol_info::protocol_info(*socket_addr, &pool).await
                 );
             }
             x => {
@@ -79,6 +56,38 @@ async fn main() -> Result<()> {
             }
         }
     }
+
+    // --------- Register with the cluster
+
+    println!(
+        "Connecting to FDB cluster {}:{}",
+        cluster_file.description, cluster_file.id
+    );
+
+    {
+        let pool = pool.clone();
+        // TODO: Store fdb.cluster somewhere where it can be updated; MonitorLeader
+        //       sometimes gets a new version of it from the cluster.
+        let cluster_file = cluster_file.clone();
+
+        use foundationdb::endpoints::get_leader::MonitorLeader;
+        let (mut monitor, mut cluster_controller_full_interface) = MonitorLeader::new(pool, cluster_file);
+        tokio::spawn(async move {
+            loop {
+                let res = cluster_controller_full_interface.register_worker_worker().await;
+                println!("register_worker returned {:?}.  Respwaning.", res);
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            }
+        });
+        tokio::spawn(async move {
+            loop {
+                let res = monitor.monitor_leader().await;
+                println!("monitor_leader returned {:?}.  Respwaning.", res);
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            }
+        });
+    }
+
     tokio::time::sleep(std::time::Duration::from_secs(1000000)).await;
     println!("Goodbye, cruel world!");
     Ok(())

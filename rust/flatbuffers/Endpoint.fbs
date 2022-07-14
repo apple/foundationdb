@@ -1,0 +1,7 @@
+include "common.fbs";
+
+table FakeRoot {
+    endpoint: Endpoint;
+}
+root_type FakeRoot;
+

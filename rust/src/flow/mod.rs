@@ -21,7 +21,7 @@ pub type FlowResponse = Option<FlowMessage>;
 pub type FlowFuture =
     std::pin::Pin<Box<dyn 'static + Send + Sync + Future<Output = Result<FlowResponse>>>>;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum Peer {
     Remote(SocketAddr),
     Local(Option<UID>),
@@ -36,7 +36,7 @@ impl From<crate::common_generated::NetworkAddress<'_>> for Peer {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Endpoint {
     peer: Peer,
     secondary_address: Option<Peer>,

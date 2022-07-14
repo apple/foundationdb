@@ -1,4 +1,3 @@
-// #[allow(non_snake_case)]
 #[allow(dead_code, unused_imports)]
 #[path = "../../target/flatbuffers/PingRequest_generated.rs"]
 mod ping_request;

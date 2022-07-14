@@ -1,0 +1,56 @@
+include "common.fbs";
+
+table Dummy {
+    i: ulong;
+}
+
+// table WorkerInterface {
+//     client_worker_interface: ClientWorkerInterface;
+//     locality_data: LocalityData;
+//     t_log: RequestStream;
+//     master: RequestStream;
+//     commit_proxy: RequestStream;
+//     grv_proxy: RequestStream;
+//     data_distributor: RequestStream;
+//     ratekeeper: RequestStream;
+//     blob_manager: RequestStream;
+//     blob_worker: RequestStream;
+//     resolver: RequestStream;
+//     storage: RequestStream;
+//     log_router: RequestStream;
+//     backup: RequestStream;
+//     encrypt_key_proxy: RequestStream;
+
+//     debug_ping: RequestStream;
+//     coordination_ping: RequestStream;
+//     wait_failure: RequestStream;
+//     set_metrics_rate: RequestStream;
+//     event_log_request: RequestStream;
+//     trace_batch_dump_request: RequestStream;
+//     disk_store_request: RequestStream;
+//     exec_req: RequestStream;
+//     worker_snap_req: RequestStream;
+//     update_server_db_info: RequestStream;
+
+//     config_broadcast_interface: RequestStream;
+//     tester_interface: RequestStream;
+// }
+
+// table RegisterWorkerRequest {
+//     worker_interface: WorkerInterface;
+//     initial_class: ProcessClass;
+//     process_class: ProcessClass;
+//     priority_info: ClusterControllerPriortyInfo;
+//     generation: Generation;
+//     distributor_interface: OptionalDataDistributionInterface;
+//     ratekeeper_interface: OptionalRatekeeperInterface;
+//     blob_manager_interface: OptionalBlobManagerInterface;
+//     encrypt_key_proxy: OptionalEncryptKeyProxyInterface;
+//     issues: Vector<[ubyte]>;
+//     incompatible_peers: [NetworkAddress];
+//     reply: ReplyPromise;
+//     degraded: bool;
+//     last_seen_knob_version: Version;
+//     knob_config_class_set: ConfigClassSet;
+//     request_db_info: bool;
+// }

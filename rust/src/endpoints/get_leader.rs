@@ -7,12 +7,22 @@ mod get_leader_request;
 mod get_leader_reply;
 
 #[allow(dead_code, unused_imports)]
+#[path = "../../target/flatbuffers/ClusterControllerFullInterface_generated.rs"]
+mod cluster_controller_full_interface;
+
+// TODO: Move these three to a testing package; they're not used in forward operation
+#[allow(dead_code, unused_imports)]
 #[path = "../../target/flatbuffers/ClusterInterface_generated.rs"]
 mod cluster_interface;
 
 #[allow(dead_code, unused_imports)]
-#[path = "../../target/flatbuffers/ClusterControllerFullInterface_generated.rs"]
-mod cluster_controller_full_interface;
+#[path = "../../target/flatbuffers/Endpoint_generated.rs"]
+mod endpoint;
+
+#[allow(dead_code, unused_imports)]
+#[path = "../../target/flatbuffers/NetworkAddress_generated.rs"]
+mod network_address;
+
 
 use crate::flow::file_identifier::{peek_file_identifier, IdentifierType, ParsedFileIdentifier};
 use crate::flow::uid::{UID, WLTOKEN};
@@ -176,6 +186,7 @@ fn deserialize_reply(buf: &[u8]) -> Result<Option<LeaderInfo>> {
     }
 }
 
+#[allow(dead_code)]
 fn deserialize_network_address(buf: &[u8]) -> Result<()> {
     //crate::common_generated::NetworkAddress> {
     let file_identifier = peek_file_identifier(buf)?;
@@ -186,10 +197,12 @@ fn deserialize_network_address(buf: &[u8]) -> Result<()> {
         file_identifier_name: Some("NetworkAddress"),
     })?;
     crate::flow::Frame::reverse_engineer_flatbuffer(buf)?;
-    // let network_address = crate::common_generated::root_as_network_address_fake_root(buf)?;
-    // println!("{:?}", network_address.network_address().unwrap());
+    let network_address = network_address::root_as_fake_root(buf)?;
+    println!("{:?}", network_address.network_address().unwrap());
     Ok(())
 }
+
+#[allow(dead_code)]
 fn deserialize_endpoint(buf: &[u8]) -> Result<()> {
     let file_identifier = peek_file_identifier(buf)?;
     println!("File identifier: {:?}", file_identifier);
@@ -200,11 +213,12 @@ fn deserialize_endpoint(buf: &[u8]) -> Result<()> {
         file_identifier_name: Some("Endpoint"),
     })?;
 
-    let endpoint = crate::common_generated::root_as_endpoint_fake_root(buf)?;
+    let endpoint = endpoint::root_as_fake_root(buf)?;
     println!("{:x?}", endpoint);
 
     Ok(())
 }
+#[allow(dead_code)]
 fn deserialize_cluster_interface(buf: &[u8]) -> Result<()> {
     let cluster_interface = cluster_interface::root_as_fake_root(buf)?;
     println!("{:x?}", cluster_interface);
@@ -412,20 +426,6 @@ fn test_leader_info() -> Result<()> {
     Ok(())
 }
 
-pub struct ClusterControllerFullInterface {
-    // TODO: add more watches.
-    pub register_worker: watch::Receiver<Option<Endpoint>>,
-}
-
-impl ClusterControllerFullInterface {
-    pub async fn register_worker_worker(self: &mut Self) -> Result<()> {
-        loop {
-            self.register_worker.changed().await?;
-            println!("time to call register worker on {:?}", self.register_worker.borrow_and_update())
-        }
-    }
-}
-
 pub struct MonitorLeader {
     svc: Arc<ConnectionKeeper>,
     cluster_file: ClusterFile,
@@ -435,15 +435,16 @@ pub struct MonitorLeader {
 
 impl MonitorLeader {
     pub fn new(svc: Arc<ConnectionKeeper>, cluster_file: ClusterFile) -> (Self, ClusterControllerFullInterface) {
-        let (register_worker_tx, mut register_worker) = watch::channel::<Option<Endpoint>>(None);
+        let (register_worker_tx, register_worker) = watch::channel::<Option<Endpoint>>(None);
         (
             MonitorLeader {
-                svc,
+                svc: svc.clone(),
                 cluster_file,
                 known_leader: UID::default(),
                 register_worker_tx,
             },
             ClusterControllerFullInterface {
+                svc,
                 register_worker,
             }
         )
@@ -522,3 +523,32 @@ impl MonitorLeader {
         }
     }
 }
+
+pub struct ClusterControllerFullInterface {
+    svc: Arc<ConnectionKeeper>,
+    // TODO: add more watches.
+    register_worker: watch::Receiver<Option<Endpoint>>,
+}
+
+impl ClusterControllerFullInterface {
+    pub async fn register_worker_worker(self: &mut Self) -> Result<()> {
+        use crate::endpoints::register_worker::register_worker;
+        loop {
+            self.register_worker.changed().await?;
+            // borrow_and_update returns read lock handle on register_worker.
+            // Holding the read lock is deadlock-prone, so immediately clone the
+            // inner value and drop the lock.
+            let register_worker_endpoint : Option<Endpoint> = self.register_worker.borrow_and_update().clone();
+            match register_worker_endpoint {
+                Some(register_worker_endpoint) => {
+                    println!("time to call register worker on {:?}", register_worker_endpoint);
+                    let res = register_worker(&self.svc, register_worker_endpoint).await?;
+                },
+                None => {
+                    println!("No register_worker endpoint.  Unhealthy cluster?");
+                }
+            }
+        }
+    }
+}
+

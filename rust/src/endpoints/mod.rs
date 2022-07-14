@@ -2,6 +2,7 @@ pub mod get_leader;
 pub mod network_test;
 pub mod ping_request;
 pub mod protocol_info;
+pub mod register_worker;
 
 use crate::flow::file_identifier::{FileIdentifier, ParsedFileIdentifier};
 use crate::flow::{uid::UID, Flow, FlowMessage, Frame, Peer, Result};

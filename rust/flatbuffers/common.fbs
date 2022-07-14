@@ -71,10 +71,6 @@ table NetworkAddress {
     from_hostname: bool;
 }
 
-table NetworkAddressFakeRoot {
-    network_address: NetworkAddress;
-}
-
 union OptionalNetworkAddress {
     NetworkAddress, Void
 }
@@ -117,9 +113,9 @@ table ClusterInterface {
     split_shard: RequestStream;
 }
 
-// TODO: Move to Endpoint.fbs
-table EndpointFakeRoot {
-    endpoint: Endpoint;
+table ClientWorkerInterface {
+    reboot: RequestStream;
+    profiler: RequestStream;
+    set_failure_injection: RequestStream;
 }
-root_type EndpointFakeRoot;
-// root_type NetworkAddressFakeRoot;
+
