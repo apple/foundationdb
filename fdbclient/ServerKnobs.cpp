@@ -891,7 +891,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 
 	// encrypt key proxy
 	init( ENABLE_BLOB_FILE_COMPRESSION,                        false ); if ( randomize && BUGGIFY ) { ENABLE_BLOB_FILE_COMPRESSION = deterministicRandom()->coinflip(); }
-	init( BLOB_FILE_COMPRESSION_FILTER,                       "NONE" );
+	init( BLOB_FILE_COMPRESSION_FILTER,                       "GZIP" );
 
     // KMS connector type
 	init( KMS_CONNECTOR_TYPE,                     "RESTKmsConnector" );

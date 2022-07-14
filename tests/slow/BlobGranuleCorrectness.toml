@@ -9,8 +9,6 @@ storageEngineExcludeTypes = [4]
 bg_range_source = "tenant"
 bg_metadata_source = "tenant"
 enable_encryption = true
-enable_blob_file_encryption = true
-enable_blob_file_compression = true
 
 [[test]]
 testTitle = 'BlobGranuleCorrectness'

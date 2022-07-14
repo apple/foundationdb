@@ -40,7 +40,6 @@
 #include <vector>
 
 #define BG_READ_DEBUG false
-#define BG_ENCRYPT_COMPRESS_DEBUG true
 
 // FIXME: implement actual proper file format for this
 
@@ -105,29 +104,35 @@ BlobGranuleFileEncryptionKeys getEncryptBlobCipherKey(const BlobGranuleCipherKey
 void validateEncryptionHeaderDetails(const BlobGranuleFileEncryptionKeys& eKeys,
                                      const BlobCipherEncryptHeader& header,
                                      const StringRef& ivRef) {
-	if ( // Validate encryption header 'cipherHeader' details sanity
-	    !(header.cipherHeaderDetails.baseCipherId == eKeys.headerCipherKey->getBaseCipherId() ||
-	      header.cipherHeaderDetails.encryptDomainId == eKeys.headerCipherKey->getDomainId() ||
-	      header.cipherHeaderDetails.salt == eKeys.headerCipherKey->getSalt()) ||
-	    // Validate encryption header 'cipherText' details sanity
-	    !(header.cipherTextDetails.baseCipherId == eKeys.textCipherKey->getBaseCipherId() ||
-	      header.cipherTextDetails.encryptDomainId == eKeys.textCipherKey->getDomainId() ||
-	      header.cipherTextDetails.salt == eKeys.textCipherKey->getSalt()) ||
-	    // Validate 'Initialization Vector' sanity
-	    (memcmp(ivRef.begin(), &header.iv[0], AES_256_IV_LENGTH) != 0)) {
-		TraceEvent(SevError, "EncryptionHeader_Mismatch")
-		    .detail("HeaderBaseCipherId", eKeys.headerCipherKey->getBaseCipherId())
-		    .detail("ExpectedHeaderBaseCipherId", header.cipherHeaderDetails.baseCipherId)
+	// Validate encryption header 'cipherHeader' details sanity
+	if (!(header.cipherHeaderDetails.baseCipherId == eKeys.headerCipherKey->getBaseCipherId() &&
+	      header.cipherHeaderDetails.encryptDomainId == eKeys.headerCipherKey->getDomainId() &&
+	      header.cipherHeaderDetails.salt == eKeys.headerCipherKey->getSalt())) {
+		TraceEvent(SevError, "EncryptionHeader_CipherHeaderMismatch")
 		    .detail("HeaderDomainId", eKeys.headerCipherKey->getDomainId())
 		    .detail("ExpectedHeaderDomainId", header.cipherHeaderDetails.encryptDomainId)
+		    .detail("HeaderBaseCipherId", eKeys.headerCipherKey->getBaseCipherId())
+		    .detail("ExpectedHeaderBaseCipherId", header.cipherHeaderDetails.baseCipherId)
 		    .detail("HeaderSalt", eKeys.headerCipherKey->getSalt())
-		    .detail("ExpectedHeaderSalt", header.cipherHeaderDetails.salt)
-		    .detail("TextBaseCipherId", eKeys.textCipherKey->getBaseCipherId())
-		    .detail("ExpectedTextBaseCipherId", header.cipherTextDetails.baseCipherId)
+		    .detail("ExpectedHeaderSalt", header.cipherHeaderDetails.salt);
+		throw encrypt_header_metadata_mismatch();
+	}
+	// Validate encryption header 'cipherHeader' details sanity
+	if (!(header.cipherHeaderDetails.baseCipherId == eKeys.headerCipherKey->getBaseCipherId() &&
+	      header.cipherHeaderDetails.encryptDomainId == eKeys.headerCipherKey->getDomainId() &&
+	      header.cipherHeaderDetails.salt == eKeys.headerCipherKey->getSalt())) {
+		TraceEvent(SevError, "EncryptionHeader_CipherTextMismatch")
 		    .detail("TextDomainId", eKeys.textCipherKey->getDomainId())
 		    .detail("ExpectedTextDomainId", header.cipherTextDetails.encryptDomainId)
+		    .detail("TextBaseCipherId", eKeys.textCipherKey->getBaseCipherId())
+		    .detail("ExpectedTextBaseCipherId", header.cipherTextDetails.baseCipherId)
 		    .detail("TextSalt", eKeys.textCipherKey->getSalt())
-		    .detail("ExpectedTextSalt", header.cipherTextDetails.salt)
+		    .detail("ExpectedTextSalt", header.cipherTextDetails.salt);
+		throw encrypt_header_metadata_mismatch();
+	}
+	// Validate 'Initialization Vector' sanity
+	if (memcmp(ivRef.begin(), &header.iv[0], AES_256_IV_LENGTH) != 0) {
+		TraceEvent(SevError, "EncryptionHeader_IVMismatch")
 		    .detail("IVChecksum", XXH3_64bits(ivRef.begin(), ivRef.size()))
 		    .detail("ExpectedIVChecksum", XXH3_64bits(&header.iv[0], AES_256_IV_LENGTH));
 		throw encrypt_header_metadata_mismatch();
@@ -249,13 +254,21 @@ struct IndexBlockRef {
 	}
 };
 
+// On-disk and/or in-memory representation of a IndexBlobGranuleFile 'chunk'.
+//
+// Encryption: A 'chunk' gets encrypted before getting persisted if enabled. Encryption header is persisted along with
+// the chunk data to assist decryption on reads.
+//
+// Compression: A 'chunk' gets compressed before getting persisted if enabled. Compression filter (algoritm) infomration
+// is persisted as part of 'chunk metadata' to assist decompression on reads.
+
 struct IndexBlobGranuleFileChunkRef {
 	constexpr static FileIdentifier file_identifier = 2814019;
 
 	// Serialized fields
 	Optional<CompressionFilter> compressionFilter;
 	Optional<StringRef> encryptHeaderRef;
-	// encypted and/or compressed chunk;
+	// encrypted and/or compressed chunk;
 	StringRef buffer;
 
 	// Non-serialized
@@ -414,7 +427,6 @@ struct IndexBlobGranuleFileChunkRef {
 
 /*
  * A file header for a key-ordered file that is chunked on disk, where each chunk is a disjoint key range of data.
- * FIXME: encryption and compression support
  */
 struct IndexedBlobGranuleFile {
 	constexpr static FileIdentifier file_identifier = 3828201;

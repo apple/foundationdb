@@ -235,7 +235,9 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 
 namespace {
 bool isBlobFileEncryptionSupported() {
-	return SERVER_KNOBS->ENABLE_BLOB_FILE_ENCRYPTION && SERVER_KNOBS->BG_RANGE_SOURCE == "tenant";
+	bool supported = SERVER_KNOBS->ENABLE_BLOB_FILE_ENCRYPTION && SERVER_KNOBS->BG_RANGE_SOURCE == "tenant";
+	ASSERT((supported && SERVER_KNOBS->ENABLE_ENCRYPTION) || !supported);
+	return supported;
 }
 
 Optional<CompressionFilter> getBlobFileCompressFilter() {
@@ -245,10 +247,9 @@ Optional<CompressionFilter> getBlobFileCompressFilter() {
 	}
 	return compFilter;
 }
-} // namespace
 
 // returns true if we can acquire it
-static void acquireGranuleLock(int64_t epoch, int64_t seqno, int64_t prevOwnerEpoch, int64_t prevOwnerSeqno) {
+void acquireGranuleLock(int64_t epoch, int64_t seqno, int64_t prevOwnerEpoch, int64_t prevOwnerSeqno) {
 	// returns true if our lock (E, S) >= (Eprev, Sprev)
 	if (epoch < prevOwnerEpoch || (epoch == prevOwnerEpoch && seqno < prevOwnerSeqno)) {
 		if (BW_DEBUG) {
@@ -262,7 +263,7 @@ static void acquireGranuleLock(int64_t epoch, int64_t seqno, int64_t prevOwnerEp
 	}
 }
 
-static void checkGranuleLock(int64_t epoch, int64_t seqno, int64_t ownerEpoch, int64_t ownerSeqno) {
+void checkGranuleLock(int64_t epoch, int64_t seqno, int64_t ownerEpoch, int64_t ownerSeqno) {
 	// sanity check - lock value should never go backwards because of acquireGranuleLock
 	ASSERT(epoch <= ownerEpoch);
 	ASSERT(epoch < ownerEpoch || (epoch == ownerEpoch && seqno <= ownerSeqno));
@@ -279,6 +280,18 @@ static void checkGranuleLock(int64_t epoch, int64_t seqno, int64_t ownerEpoch, i
 		throw granule_assignment_conflict();
 	}
 }
+} // namespace
+
+// Below actors asssit in fetching/lookup desired encryption keys. Following steps are done for an encryption key
+// lookup:
+// 1. Lookup proccess local in-memory cache `BlobCipherKeyCache` to check if desired EK is 'present' and 'valid'. Given
+//    FDB supports 'revocable' & 'non-revocable' EKs; a cached EK can also be 'invalid'.
+// 2. Local cache miss will follow with a RPC call to EncryptKeyProxy process (EKP), EKP maintain an in-memory cache of
+//    KMS BaseCipher details with KMS defined TTL if applicable. The lookup call can either to serviced by EKP or would
+//    lead to desired KMS endpoint invocation.
+//
+// In most of the cases, the EK lookup should be satisfied by process local in-memory cache and/or EKP in-memory cache,
+// unless cluster and/or a process crash/restart.
 
 ACTOR Future<BlobGranuleCipherKeysCtx> getLatestGranuleCipherKeys(Reference<BlobWorkerData> bwData,
                                                                   KeyRange keyRange,
@@ -303,8 +316,16 @@ ACTOR Future<BlobGranuleCipherKeysCtx> getLatestGranuleCipherKeys(Reference<Blob
 	cipherKeysCtx.ivRef = makeString(AES_256_IV_LENGTH, *arena);
 	generateRandomData(mutateString(cipherKeysCtx.ivRef), AES_256_IV_LENGTH);
 
-	TraceEvent("GetLatestGranuleCipherKey")
-	    .detail("IVChksum", XXH3_64bits(cipherKeysCtx.ivRef.begin(), cipherKeysCtx.ivRef.size()));
+	if (BG_ENCRYPT_COMPRESS_DEBUG) {
+		TraceEvent(SevDebug, "GetLatestGranuleCipherKey")
+		    .detail("TextDomainId", cipherKeysCtx.textCipherKey.encryptDomainId)
+		    .detail("TextBaseCipherId", cipherKeysCtx.textCipherKey.baseCipherId)
+		    .detail("TextSalt", cipherKeysCtx.textCipherKey.salt)
+		    .detail("HeaderDomainId", cipherKeysCtx.textCipherKey.encryptDomainId)
+		    .detail("HeaderBaseCipherId", cipherKeysCtx.textCipherKey.baseCipherId)
+		    .detail("HeaderSalt", cipherKeysCtx.textCipherKey.salt)
+		    .detail("IVChksum", XXH3_64bits(cipherKeysCtx.ivRef.begin(), cipherKeysCtx.ivRef.size()));
+	}
 
 	return cipherKeysCtx;
 }
@@ -351,8 +372,17 @@ ACTOR Future<BlobGranuleCipherKeysCtx> getGranuleCipherKeys(Reference<BlobWorker
 	// Populate 'Intialization Vector'
 	ASSERT_EQ(cipherKeysMetaRef.ivRef.size(), AES_256_IV_LENGTH);
 	cipherKeysCtx.ivRef = StringRef(*arena, cipherKeysMetaRef.ivRef);
-	TraceEvent("GetGranuleCipherKey")
-	    .detail("IVChksum", XXH3_64bits(cipherKeysCtx.ivRef.begin(), cipherKeysCtx.ivRef.size()));
+
+	if (BG_ENCRYPT_COMPRESS_DEBUG) {
+		TraceEvent("GetGranuleCipherKey")
+		    .detail("TextDomainId", cipherKeysCtx.textCipherKey.encryptDomainId)
+		    .detail("TextBaseCipherId", cipherKeysCtx.textCipherKey.baseCipherId)
+		    .detail("TextSalt", cipherKeysCtx.textCipherKey.salt)
+		    .detail("HeaderDomainId", cipherKeysCtx.textCipherKey.encryptDomainId)
+		    .detail("HeaderBaseCipherId", cipherKeysCtx.textCipherKey.baseCipherId)
+		    .detail("HeaderSalt", cipherKeysCtx.textCipherKey.salt)
+		    .detail("IVChksum", XXH3_64bits(cipherKeysCtx.ivRef.begin(), cipherKeysCtx.ivRef.size()));
+	}
 
 	return cipherKeysCtx;
 }
@@ -944,7 +974,6 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 			BlobGranuleCipherKeysCtx cipherKeysCtx =
 			    wait(getGranuleCipherKeys(bwData, chunk.snapshotFile.get().cipherKeysMetaRef.get(), &filenameArena));
 			chunk.cipherKeysCtx = cipherKeysCtx;
-			TraceEvent("CompactFromBlob").log();
 		}
 
 		compactBytesRead += snapshotF.length;
@@ -1247,13 +1276,14 @@ ACTOR Future<Void> granuleCheckMergeCandidate(Reference<BlobWorkerData> bwData,
 	}
 }
 
-static void handleCompletedDeltaFile(Reference<BlobWorkerData> bwData,
-                                     Reference<GranuleMetadata> metadata,
-                                     BlobFileIndex completedDeltaFile,
-                                     Key cfKey,
-                                     Version cfStartVersion,
-                                     std::deque<std::pair<Version, Version>>* rollbacksCompleted,
-                                     std::deque<Future<Void>>& inFlightPops) {
+namespace {
+void handleCompletedDeltaFile(Reference<BlobWorkerData> bwData,
+                              Reference<GranuleMetadata> metadata,
+                              BlobFileIndex completedDeltaFile,
+                              Key cfKey,
+                              Version cfStartVersion,
+                              std::deque<std::pair<Version, Version>>* rollbacksCompleted,
+                              std::deque<Future<Void>>& inFlightPops) {
 	metadata->files.deltaFiles.push_back(completedDeltaFile);
 	ASSERT(metadata->durableDeltaVersion.get() < completedDeltaFile.version);
 	metadata->durableDeltaVersion.set(completedDeltaFile.version);
@@ -1289,7 +1319,7 @@ static void handleCompletedDeltaFile(Reference<BlobWorkerData> bwData,
 }
 
 // if we get an i/o error updating files, or a rollback, reassign the granule to ourselves and start fresh
-static bool granuleCanRetry(const Error& e) {
+bool granuleCanRetry(const Error& e) {
 	switch (e.code()) {
 	case error_code_io_error:
 	case error_code_io_timeout:
@@ -1304,6 +1334,7 @@ static bool granuleCanRetry(const Error& e) {
 		return false;
 	};
 }
+} // namespace
 
 struct InFlightFile {
 	Future<BlobFileIndex> future;
@@ -1315,12 +1346,13 @@ struct InFlightFile {
 	  : future(future), version(version), bytes(bytes), snapshot(snapshot) {}
 };
 
-static Version doGranuleRollback(Reference<GranuleMetadata> metadata,
-                                 Version mutationVersion,
-                                 Version rollbackVersion,
-                                 std::deque<InFlightFile>& inFlightFiles,
-                                 std::deque<std::pair<Version, Version>>& rollbacksInProgress,
-                                 std::deque<std::pair<Version, Version>>& rollbacksCompleted) {
+namespace {
+Version doGranuleRollback(Reference<GranuleMetadata> metadata,
+                          Version mutationVersion,
+                          Version rollbackVersion,
+                          std::deque<InFlightFile>& inFlightFiles,
+                          std::deque<std::pair<Version, Version>>& rollbacksInProgress,
+                          std::deque<std::pair<Version, Version>>& rollbacksCompleted) {
 	Version cfRollbackVersion;
 	if (metadata->pendingDeltaVersion > rollbackVersion) {
 		// if we already started writing mutations to a delta or snapshot file with version > rollbackVersion,
@@ -1471,6 +1503,7 @@ static Version doGranuleRollback(Reference<GranuleMetadata> metadata,
 
 	return cfRollbackVersion;
 }
+} // namespace
 
 ACTOR Future<Void> waitOnCFVersion(Reference<GranuleMetadata> metadata, Version waitVersion) {
 	loop {
@@ -2670,11 +2703,12 @@ struct sort_result_chunks {
 	}
 };
 
-static int64_t nextHistoryQueryId = 0;
-static std::vector<std::pair<KeyRange, Future<GranuleFiles>>> loadHistoryChunks(Reference<BlobWorkerData> bwData,
-                                                                                Version expectedEndVersion,
-                                                                                KeyRange keyRange,
-                                                                                Version readVersion) {
+namespace {
+int64_t nextHistoryQueryId = 0;
+std::vector<std::pair<KeyRange, Future<GranuleFiles>>> loadHistoryChunks(Reference<BlobWorkerData> bwData,
+                                                                         Version expectedEndVersion,
+                                                                         KeyRange keyRange,
+                                                                         Version readVersion) {
 	std::unordered_set<UID> visited;
 	std::deque<Reference<GranuleHistoryEntry>> queue;
 	std::vector<std::pair<KeyRange, Future<GranuleFiles>>> resultChunks;
@@ -2835,7 +2869,6 @@ static std::vector<std::pair<KeyRange, Future<GranuleFiles>>> loadHistoryChunks(
 
 // TODO might want to separate this out for valid values for range assignments vs read requests. Assignment
 // conflict isn't valid for read requests but is for assignments
-namespace {
 bool canReplyWith(Error e) {
 	switch (e.code()) {
 	case error_code_blob_granule_transaction_too_old:
@@ -3008,7 +3041,6 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 			}
 			state Reference<GranuleMetadata> metadata = m;
 			state Version granuleBeginVersion = req.beginVersion;
-			state Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx;
 
 			choose {
 				when(wait(metadata->readable.getFuture())) {}
@@ -3022,7 +3054,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 				throw wrong_shard_server();
 			}
 
-			state std::vector<std::pair<KeyRange, GranuleFiles>> chunks;
+			state std::vector<std::pair<KeyRange, GranuleFiles>> rangeGranulePair;
 
 			if (req.readVersion < metadata->historyVersion) {
 				TEST(true); // Granule Time Travel Read
@@ -3042,21 +3074,21 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 				for (chunkIdx = 0; chunkIdx < finalChunks.size(); chunkIdx++) {
 					choose {
 						when(GranuleFiles f = wait(finalChunks[chunkIdx].second)) {
-							chunks.push_back(std::pair(finalChunks[chunkIdx].first, f));
+							rangeGranulePair.push_back(std::pair(finalChunks[chunkIdx].first, f));
 						}
 						when(wait(metadata->cancelled.getFuture())) {
 							throw wrong_shard_server();
 						}
 					}
 
-					if (chunks.back().second.snapshotFiles.empty()) {
+					if (rangeGranulePair.back().second.snapshotFiles.empty()) {
 						// a snapshot file must have been purged
 						throw blob_granule_transaction_too_old();
 					}
 
-					ASSERT(!chunks.back().second.deltaFiles.empty());
-					ASSERT(chunks.back().second.deltaFiles.back().version > req.readVersion);
-					if (chunks.back().second.snapshotFiles.front().version > req.readVersion) {
+					ASSERT(!rangeGranulePair.back().second.deltaFiles.empty());
+					ASSERT(rangeGranulePair.back().second.deltaFiles.back().version > req.readVersion);
+					if (rangeGranulePair.back().second.snapshotFiles.front().version > req.readVersion) {
 						// a snapshot file must have been purged
 						throw blob_granule_transaction_too_old();
 					}
@@ -3112,7 +3144,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 						           req.readVersion);
 					}
 				}
-				chunks.push_back(std::pair(metadata->keyRange, metadata->files));
+				rangeGranulePair.push_back(std::pair(metadata->keyRange, metadata->files));
 			}
 
 			if (!metadata->cancelled.canBeSet()) {
@@ -3128,10 +3160,10 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 			// granule is up to date, do read
 			ASSERT(metadata->cancelled.canBeSet());
 
-			for (auto& c : chunks) {
+			for (auto& item : rangeGranulePair) {
 				Version granuleBeginVersion = req.beginVersion;
 				// Right now we force a collapse if the version range crosses granule boundaries, for simplicity
-				if (granuleBeginVersion > 0 && granuleBeginVersion <= c.second.snapshotFiles.front().version) {
+				if (granuleBeginVersion > 0 && granuleBeginVersion <= item.second.snapshotFiles.front().version) {
 					TEST(true); // collapsed begin version request because of boundaries
 					didCollapse = true;
 					granuleBeginVersion = 0;
@@ -3139,18 +3171,26 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 				state BlobGranuleChunkRef chunk;
 				// TODO change with early reply
 				chunk.includedVersion = req.readVersion;
-				chunk.keyRange = KeyRangeRef(StringRef(rep.arena, c.first.begin), StringRef(rep.arena, c.first.end));
+				chunk.keyRange =
+				    KeyRangeRef(StringRef(rep.arena, item.first.begin), StringRef(rep.arena, item.first.end));
 				if (tenantPrefix.present()) {
 					chunk.tenantPrefix = Optional<StringRef>(tenantPrefix.get());
 				}
 
 				int64_t deltaBytes = 0;
-				c.second.getFiles(
+				item.second.getFiles(
 				    granuleBeginVersion, req.readVersion, req.canCollapseBegin, chunk, rep.arena, deltaBytes);
 				bwData->stats.readReqDeltaBytesReturned += deltaBytes;
 				if (granuleBeginVersion > 0 && chunk.snapshotFile.present()) {
 					TEST(true); // collapsed begin version request for efficiency
 					didCollapse = true;
+				}
+
+				state Future<BlobGranuleCipherKeysCtx> cipherKeysCtx;
+				if (chunk.snapshotFile.present() && chunk.snapshotFile.get().cipherKeysMetaRef.present()) {
+					ASSERT(isBlobFileEncryptionSupported());
+					cipherKeysCtx =
+					    getGranuleCipherKeys(bwData, chunk.snapshotFile.get().cipherKeysMetaRef.get(), &rep.arena);
 				}
 
 				// new deltas (if version is larger than version of last delta file)
@@ -3196,11 +3236,8 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 				}
 
 				if (chunk.snapshotFile.present() && chunk.snapshotFile.get().cipherKeysMetaRef.present()) {
-					ASSERT(isBlobFileEncryptionSupported());
-					BlobGranuleCipherKeysCtx cipherKeysCtx = wait(
-					    getGranuleCipherKeys(bwData, chunk.snapshotFile.get().cipherKeysMetaRef.get(), &rep.arena));
-					chunk.cipherKeysCtx = cipherKeysCtx;
-					TraceEvent("DoBlobGranuleFileRequest").log();
+					BlobGranuleCipherKeysCtx ctx = wait(cipherKeysCtx);
+					chunk.cipherKeysCtx = std::move(ctx);
 				}
 
 				rep.chunks.push_back(rep.arena, chunk);
@@ -3543,10 +3580,11 @@ ACTOR Future<Void> start(Reference<BlobWorkerData> bwData, GranuleRangeMetadata*
 	return Void();
 }
 
-static GranuleRangeMetadata constructActiveBlobRange(Reference<BlobWorkerData> bwData,
-                                                     KeyRange keyRange,
-                                                     int64_t epoch,
-                                                     int64_t seqno) {
+namespace {
+GranuleRangeMetadata constructActiveBlobRange(Reference<BlobWorkerData> bwData,
+                                              KeyRange keyRange,
+                                              int64_t epoch,
+                                              int64_t seqno) {
 
 	Reference<GranuleMetadata> newMetadata = makeReference<GranuleMetadata>();
 	newMetadata->keyRange = keyRange;
@@ -3559,12 +3597,12 @@ static GranuleRangeMetadata constructActiveBlobRange(Reference<BlobWorkerData> b
 	return GranuleRangeMetadata(epoch, seqno, newMetadata);
 }
 
-static GranuleRangeMetadata constructInactiveBlobRange(int64_t epoch, int64_t seqno) {
+GranuleRangeMetadata constructInactiveBlobRange(int64_t epoch, int64_t seqno) {
 	return GranuleRangeMetadata(epoch, seqno, Reference<GranuleMetadata>());
 }
 
 // ignore stale assignments and make repeating the same one idempotent
-static bool newerRangeAssignment(GranuleRangeMetadata oldMetadata, int64_t epoch, int64_t seqno) {
+bool newerRangeAssignment(GranuleRangeMetadata oldMetadata, int64_t epoch, int64_t seqno) {
 	return epoch > oldMetadata.lastEpoch || (epoch == oldMetadata.lastEpoch && seqno > oldMetadata.lastSeqno);
 }
 
@@ -3589,15 +3627,15 @@ static bool newerRangeAssignment(GranuleRangeMetadata oldMetadata, int64_t epoch
 // state.
 
 // Not an actor because we need to guarantee it changes the synchronously as part of the request
-static bool changeBlobRange(Reference<BlobWorkerData> bwData,
-                            KeyRange keyRange,
-                            int64_t epoch,
-                            int64_t seqno,
-                            bool active,
-                            bool disposeOnCleanup,
-                            bool selfReassign,
-                            std::vector<Future<Void>>& toWaitOut,
-                            Optional<AssignRequestType> assignType = Optional<AssignRequestType>()) {
+bool changeBlobRange(Reference<BlobWorkerData> bwData,
+                     KeyRange keyRange,
+                     int64_t epoch,
+                     int64_t seqno,
+                     bool active,
+                     bool disposeOnCleanup,
+                     bool selfReassign,
+                     std::vector<Future<Void>>& toWaitOut,
+                     Optional<AssignRequestType> assignType = Optional<AssignRequestType>()) {
 	ASSERT(active == assignType.present());
 
 	if (BW_DEBUG) {
@@ -3702,7 +3740,7 @@ static bool changeBlobRange(Reference<BlobWorkerData> bwData,
 	return newerRanges.size() == 0;
 }
 
-static bool resumeBlobRange(Reference<BlobWorkerData> bwData, KeyRange keyRange, int64_t epoch, int64_t seqno) {
+bool resumeBlobRange(Reference<BlobWorkerData> bwData, KeyRange keyRange, int64_t epoch, int64_t seqno) {
 	auto existingRange = bwData->granuleMetadata.rangeContaining(keyRange.begin);
 	// if range boundaries don't match, or this (epoch, seqno) is old or the granule is inactive, ignore
 	if (keyRange.begin != existingRange.begin() || keyRange.end != existingRange.end() ||
@@ -3739,6 +3777,7 @@ static bool resumeBlobRange(Reference<BlobWorkerData> bwData, KeyRange keyRange,
 	// else we already processed this continue, do nothing
 	return true;
 }
+} // namespace
 
 // the contract of handleRangeAssign and handleRangeRevoke is that they change the mapping before doing any
 // waiting. This ensures GetGranuleAssignment returns an up-to-date set of ranges
@@ -3977,8 +4016,8 @@ ACTOR Future<Void> monitorTenants(Reference<BlobWorkerData> bwData) {
 	}
 }
 
-static void handleGetGranuleAssignmentsRequest(Reference<BlobWorkerData> self,
-                                               const GetGranuleAssignmentsRequest& req) {
+namespace {
+void handleGetGranuleAssignmentsRequest(Reference<BlobWorkerData> self, const GetGranuleAssignmentsRequest& req) {
 	GetGranuleAssignmentsReply reply;
 	auto allRanges = self->granuleMetadata.intersectingRanges(normalKeys);
 	for (auto& it : allRanges) {
@@ -3999,6 +4038,7 @@ static void handleGetGranuleAssignmentsRequest(Reference<BlobWorkerData> self,
 	}
 	req.reply.send(reply);
 }
+} // namespace
 
 ACTOR Future<Void> handleFlushGranuleReq(Reference<BlobWorkerData> self, FlushGranuleRequest req) {
 	++self->stats.flushGranuleReqs;

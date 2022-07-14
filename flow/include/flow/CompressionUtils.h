@@ -36,7 +36,6 @@ struct CompressionUtils {
 	static StringRef compress(const CompressionFilter filter, const StringRef& data, Arena& arena);
 	static StringRef compress(const CompressionFilter filter, const StringRef& data, int level, Arena& arena);
 	static StringRef decompress(const CompressionFilter filter, const StringRef& data, Arena& arena);
-	static StringRef decompress(const CompressionFilter filter, const StringRef& data, int level, Arena& arena);
 
 	static CompressionFilter fromFilterString(const std::string& filter) {
 		if (filter == "NONE") {

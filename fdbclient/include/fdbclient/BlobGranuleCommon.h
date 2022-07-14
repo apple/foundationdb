@@ -22,16 +22,17 @@
 #define FDBCLIENT_BLOBGRANULECOMMON_H
 #pragma once
 
-#include <sstream>
-
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
+
 #include "flow/BlobCipher.h"
 #include "flow/EncryptUtils.h"
 #include "flow/IRandom.h"
 #include "flow/serialize.h"
 
 #include <sstream>
+
+#define BG_ENCRYPT_COMPRESS_DEBUG false
 
 // file format of actual blob files
 // FIXME: use VecSerStrategy::String serialization for this
