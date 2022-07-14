@@ -1100,12 +1100,12 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 		auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
 		if (testConfig.disableRemoteKVS) {
 			g_knobs.setKnob("remote_kv_store", KnobValueRef::create(bool{ false }));
-			TraceEvent(SevDebug, "DisaableRemoteKVS");
+			TraceEvent(SevDebug, "DisableRemoteKVS");
 		}
 		if (testConfig.disableEncryption) {
 			g_knobs.setKnob("enable_encryption", KnobValueRef::create(bool{ false }));
 			g_knobs.setKnob("enable_tlog_encryption", KnobValueRef::create(bool{ false }));
-			TraceEvent(SevDebug, "DisaableEncryption");
+			TraceEvent(SevDebug, "DisableEncryption");
 		}
 		*pConnString = conn;
 		*pTesterCount = testerCount;
@@ -1872,7 +1872,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
 	if (testConfig.disableRemoteKVS) {
 		g_knobs.setKnob("remote_kv_store", KnobValueRef::create(bool{ false }));
-		TraceEvent(SevDebug, "DisaableRemoteKVS");
+		TraceEvent(SevDebug, "DisableRemoteKVS");
 	}
 	if (testConfig.disableEncryption) {
 		g_knobs.setKnob("enable_encryption", KnobValueRef::create(bool{ false }));
