@@ -119,6 +119,18 @@ table ClientWorkerInterface {
     set_failure_injection: RequestStream;
 }
 
+table TesterInterface {
+    recruitments: RequestStream;
+}
+
+table ConfigBroadcastInterface {
+    id: UID;
+    snapshot: RequestStream;
+    changes: RequestStream;
+    registered: RequestStream;
+    ready: RequestStream;
+}
+
 // The following block is rejected by flatc for multiple reasons, but it's my
 // best guess of what FDB emits for the _data field for LocalityData.
 /*
@@ -153,4 +165,41 @@ table LocalityDataPair {
 table LocalityData {
     // C++ type: std::map<Standalone<StringRef>, Optional<Standalone<StringRef>>> _data;
     data: [LocalityDataPair];
+}
+
+// table EnsureTableLocalityData {
+//     ensure_table: LocalityData;
+// }
+
+// N.B. These fields are defined in one order in the struct definition
+// and in another order in C++ call to serializer.  The serializer
+// call is what matters.
+table WorkerInterface {
+    client_worker_interface: ClientWorkerInterface;
+    locality_data: LocalityData;
+    t_log: RequestStream;
+    master: RequestStream;
+    commit_proxy: RequestStream;
+    grv_proxy: RequestStream;
+    data_distributor: RequestStream;
+    ratekeeper: RequestStream;
+    blob_manager: RequestStream;
+    blob_worker: RequestStream;
+    resolver: RequestStream;
+    storage: RequestStream;
+    log_router: RequestStream;
+    debug_ping: RequestStream;
+    coordination_ping: RequestStream;
+    wait_failure: RequestStream;
+    set_metrics_rate: RequestStream;
+    event_log_request: RequestStream;
+    trace_batch_dump_request: RequestStream;
+    tester_interface: TesterInterface;
+    disk_store_request: RequestStream;
+    exec_req: RequestStream;
+    worker_snap_req: RequestStream;
+    backup: RequestStream;
+    encrypt_key_proxy: RequestStream;
+    update_server_db_info: RequestStream;
+    config_broadcast_interface: ConfigBroadcastInterface;
 }

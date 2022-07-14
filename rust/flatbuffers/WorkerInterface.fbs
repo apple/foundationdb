@@ -1,0 +1,11 @@
+include "common.fbs";
+
+// table EnsureTable {
+//     worker_interface: WorkerInterface;
+// }
+
+table FakeRoot {
+    ensure_table: WorkerInterface;
+}
+
+root_type FakeRoot;

@@ -3170,7 +3170,6 @@ TEST_CASE("/flatbuffer/samples/ProtocolInfo") {
 
 }
 
-
 TEST_CASE("/flatbuffer/samples/LocalityData") {
 	Optional<Standalone<StringRef>> processID = LiteralStringRef("proc");
 	Optional<Standalone<StringRef>> zoneID; // None
@@ -3180,6 +3179,20 @@ TEST_CASE("/flatbuffer/samples/LocalityData") {
 	LocalityData l(processID, zoneID, machineID, dcID);
 	EnsureTable<LocalityData> el = l;
 	test_only_write_to_stdout(el);
+	return Void();
+}
+
+TEST_CASE("/flatbuffer/samples/ClientWorkerInterface") {
+	FlowTransport::transport().setLocalAddress(NetworkAddress(0xdeadbeef, 0xcafe));
+	ClientWorkerInterface cwi;
+	test_only_write_to_stdout(cwi);
+	return Void();
+}
+
+TEST_CASE("/flatbuffer/samples/WorkerInterface") {
+	FlowTransport::transport().setLocalAddress(NetworkAddress(0xdeadbeef, 0xcafe));
+	WorkerInterface wi;
+	test_only_write_to_stdout(wi);
 	return Void();
 }
 
