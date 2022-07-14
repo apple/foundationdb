@@ -333,12 +333,24 @@ you are holding the corresponding future.
     }
     ```
     - Unions
+    Note that, when A, B, C are tables, this is generally compatible with other languages.  If A, B, C are scalars, strings or structs, the corresponding IDL contains things like `struct S { .. }; union T { S, ... }`, which is only partially supported by flatcc (and, in particular, does not work in Rust).  See:  https://github.com/google/flatbuffers/issues/7220
+    
+    The .fbs files we've checked in work around this by hardcoding one of the variant types; as in the workaround below.
+
+    As luck would have it, `union U { [ubyte], ... }` is invalid .fbs syntax, as vectors cannot be directly embedded into union types.  Fortunately, we do not use IDL strings in FDB, and vectors of bytes cannot be embedded in structs.  This forces unions involving StringRefs to be unions of tables, which are supported in Rust.  See the `OptionalString` definition in `common.fbs` for an example.
     ```
-    // Flow type
     using T = std::variant<A, B, C>;
 
     // IDL equivalent
     union T { A, B, C}
+
+    // IDL workaround for Rust, etc -- will fail to parse if it encounters anything structurally incompatible with A.
+    // Only needed if A is *not* a table; unions of tables work normally in Rust.
+    struct T {
+        tag_hack: ubyte;  // Must be 1 (or 2 if hardcoding B, 3 for C, etc...)
+        a: A;
+    }
+
     ```
     - Strings (there's a string type in the idl that guarantees null termination, but flow does not, so it's comparable to a vector of bytes)
     ```
@@ -355,6 +367,25 @@ you are holding the corresponding future.
 
     // IDL equivalent
     [T]
+    ```
+    - Optional
+    (Only tested when T is a table; not sure whether Void will be a struct or table in other circumstances)
+    ```
+    // Flow type
+    Optional<T>
+
+    // IDL equivalent
+    table Void {}
+    union U { T, Void }
+    ```
+    - Maps
+    ```
+    // Flow type
+    std::map<T, U>
+
+    // IDL equivalent
+    table PairTU { t: T, u: U, }
+    [PairTU]
     ```
 Note that fields inherited from superclasses appear last in the IDL definition.
 

@@ -119,3 +119,38 @@ table ClientWorkerInterface {
     set_failure_injection: RequestStream;
 }
 
+// The following block is rejected by flatc for multiple reasons, but it's my
+// best guess of what FDB emits for the _data field for LocalityData.
+/*
+struct Empty { // Error: empty structs are not allowed.  Maybe a Void table would work instead?
+
+}
+struct StringStruct { // Error: struct's can't contain vectors.
+    string: [ubyte];
+}
+
+union OptionalString {
+    Empty, StringStruct
+}
+
+union OptionalString {
+    Empty, [ubyte] // Parse error at '['
+}
+
+*/
+table LocalityDataPair {
+    key: [ubyte];
+    
+    // I think the next two fields are actualy a "union { [ubyte], struct {} }", but that's not supported by flatc.
+    // In other words, I think tag and val should be replaced with this:
+    // val: OptionalString;
+
+    // tag = 0 means not present.  tag = 1 means present.
+    tag: ubyte;
+    val: [ubyte];
+}
+
+table LocalityData {
+    // C++ type: std::map<Standalone<StringRef>, Optional<Standalone<StringRef>>> _data;
+    data: [LocalityDataPair];
+}

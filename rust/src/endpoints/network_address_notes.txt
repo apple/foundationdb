@@ -21,7 +21,7 @@ let buffer_14NetworkAddress = vec![
                               ; bytes 3-4 table entry #3 (from hostname) 0xc -> 12
                               ;           end of NetworkAddress vtable
 40   0x1a, 0x00, 0x00, 0x00,  ; == start of root table
-                              ; byte 1: negative offset to vtable start: 0x1a -> -26; 40 - 26 =  
+                              ; byte 1: negative offset to vtable start: 0x1a -> -26; 40 - 26 = 14 
 44   0x04, 0x00, 0x00, 0x00,  ; root table entry #0: NetworkAddress table offset = 4.
 48   0x14, 0x00, 0x00, 0x00,  ; NetworkAddress table
                               ; byte 1-2: negative offfset to vtable start: 0x14 -> -20; 48 - 20 = 28

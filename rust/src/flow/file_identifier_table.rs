@@ -366,6 +366,7 @@ pub fn file_identifier_table() -> std::collections::HashMap<&'static str, u32> {
         ("Int", 12345),
         ("Void", 2010442),
         ("NetworkAddress", 14155727),
+        ("LocalityData", 3456234),
         ("_Struct", 2340487),
     ]
     .into_iter()

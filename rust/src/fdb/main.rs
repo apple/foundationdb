@@ -71,10 +71,13 @@ async fn main() -> Result<()> {
         let cluster_file = cluster_file.clone();
 
         use foundationdb::endpoints::get_leader::MonitorLeader;
-        let (mut monitor, mut cluster_controller_full_interface) = MonitorLeader::new(pool, cluster_file);
+        let (mut monitor, mut cluster_controller_full_interface) =
+            MonitorLeader::new(pool, cluster_file);
         tokio::spawn(async move {
             loop {
-                let res = cluster_controller_full_interface.register_worker_worker().await;
+                let res = cluster_controller_full_interface
+                    .register_worker_worker()
+                    .await;
                 println!("register_worker returned {:?}.  Respwaning.", res);
                 tokio::time::sleep(std::time::Duration::from_secs(1)).await;
             }

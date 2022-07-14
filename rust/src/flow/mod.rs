@@ -13,7 +13,7 @@ pub type Frame = frame::Frame;
 
 use file_identifier::FileIdentifier;
 use std::future::Future;
-use std::net::{SocketAddr, SocketAddrV4, Ipv4Addr};
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use uid::UID;
 
 pub type FlowResponse = Option<FlowMessage>;
@@ -29,9 +29,18 @@ pub enum Peer {
 
 impl From<crate::common_generated::NetworkAddress<'_>> for Peer {
     fn from(network_address: crate::common_generated::NetworkAddress) -> Peer {
-        let ip : [u8; 4] = network_address.ip().unwrap().ip4().unwrap().ip().to_be_bytes();
-        let port : u16= network_address.port();
-        let socket_addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(ip[0],ip[1],ip[2],ip[3]), port));
+        let ip: [u8; 4] = network_address
+            .ip()
+            .unwrap()
+            .ip4()
+            .unwrap()
+            .ip()
+            .to_be_bytes();
+        let port: u16 = network_address.port();
+        let socket_addr = SocketAddr::V4(SocketAddrV4::new(
+            Ipv4Addr::new(ip[0], ip[1], ip[2], ip[3]),
+            port,
+        ));
         Peer::Remote(socket_addr)
     }
 }
@@ -46,19 +55,22 @@ pub struct Endpoint {
 impl From<crate::common_generated::Endpoint<'_>> for Endpoint {
     fn from(endpoint: crate::common_generated::Endpoint) -> Self {
         let addresses = endpoint.addresses().unwrap();
-        let peer : Peer = addresses.address().unwrap().into();
+        let peer: Peer = addresses.address().unwrap().into();
         use crate::common_generated::OptionalNetworkAddress;
-        let secondary_address : Option<Peer> = match addresses.secondary_address_type() {
-            OptionalNetworkAddress::NetworkAddress => {
-                Some(addresses.secondary_address_as_network_address().unwrap().into())
-            },
-            OptionalNetworkAddress::Void | _ => {
-                None
-            },
+        let secondary_address: Option<Peer> = match addresses.secondary_address_type() {
+            OptionalNetworkAddress::NetworkAddress => Some(
+                addresses
+                    .secondary_address_as_network_address()
+                    .unwrap()
+                    .into(),
+            ),
+            OptionalNetworkAddress::Void | _ => None,
         };
         let token = endpoint.token().unwrap().into();
         Endpoint {
-            peer, secondary_address, token
+            peer,
+            secondary_address,
+            token,
         }
     }
 }

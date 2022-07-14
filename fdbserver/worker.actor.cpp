@@ -3170,6 +3170,19 @@ TEST_CASE("/flatbuffer/samples/ProtocolInfo") {
 
 }
 
+
+TEST_CASE("/flatbuffer/samples/LocalityData") {
+	Optional<Standalone<StringRef>> processID = LiteralStringRef("proc");
+	Optional<Standalone<StringRef>> zoneID; // None
+	Optional<Standalone<StringRef>> machineID = LiteralStringRef("machine");
+	Optional<Standalone<StringRef>> dcID; // None
+	
+	LocalityData l(processID, zoneID, machineID, dcID);
+	EnsureTable<LocalityData> el = l;
+	test_only_write_to_stdout(el);
+	return Void();
+}
+
 // Handles requests from ProcessInterface, an interface meant for direct
 // communication between the client and FDB processes.
 ACTOR Future<Void> serveProcess() {

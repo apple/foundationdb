@@ -1,0 +1,7 @@
+include "common.fbs";
+
+table FakeRoot {
+    client_worker_interface: ClientWorkerInterface;
+}
+
+root_type FakeRoot;

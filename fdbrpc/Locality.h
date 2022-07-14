@@ -214,6 +214,7 @@ public:
 };
 
 struct LocalityData {
+	constexpr static FileIdentifier file_identifier = 3456234;
 	std::map<Standalone<StringRef>, Optional<Standalone<StringRef>>> _data;
 
 	static const StringRef keyProcessId;
