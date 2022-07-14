@@ -46,7 +46,7 @@ std::string TenantMapEntry::tenantStateToString(TenantState tenantState) {
 	case TenantState::ERROR:
 		return "error";
 	default:
-		ASSERT(false);
+		UNREACHABLE();
 	}
 }
 
@@ -61,8 +61,7 @@ TenantState TenantMapEntry::stringToTenantState(std::string stateStr) {
 		return TenantState::ERROR;
 	}
 
-	ASSERT(false);
-	throw internal_error();
+	UNREACHABLE();
 }
 
 void TenantMapEntry::setSubspace(KeyRef subspace) {

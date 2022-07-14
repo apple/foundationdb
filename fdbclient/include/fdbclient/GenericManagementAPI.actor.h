@@ -39,6 +39,7 @@ the contents of the system key space.
 #include "fdbclient/Status.h"
 #include "fdbclient/Subspace.h"
 #include "fdbclient/DatabaseConfiguration.h"
+#include "fdbclient/Metacluster.h"
 #include "fdbclient/Status.h"
 #include "fdbclient/SystemData.h"
 #include "flow/actorcompiler.h" // has to be last include
@@ -478,11 +479,8 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 					}
 
 					if (newConfig.tenantMode != oldConfig.tenantMode) {
-						state typename DB::TransactionT::template FutureT<Optional<Value>>
-						    metaclusterRegistrationFuture = tr->get(metaclusterRegistrationKey);
-
-						Optional<Value> metaclusterRegistration =
-						    wait(safeThreadFutureToFuture(metaclusterRegistrationFuture));
+						Optional<MetaclusterRegistrationEntry> metaclusterRegistration =
+						    wait(MetaclusterMetadata::metaclusterRegistration.get(tr));
 						if (metaclusterRegistration.present()) {
 							return ConfigurationResult::DATABASE_IS_REGISTERED;
 						}

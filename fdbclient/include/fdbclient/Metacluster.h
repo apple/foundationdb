@@ -25,7 +25,7 @@
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/VersionedMap.h"
+#include "fdbclient/KeyBackedTypes.h"
 #include "flow/flat_buffers.h"
 
 struct ClusterUsage {
@@ -136,6 +136,11 @@ struct MetaclusterRegistrationEntry {
 	void serialize(Ar& ar) {
 		serializer(ar, clusterType, metaclusterName, name, metaclusterId, id);
 	}
+};
+
+struct MetaclusterMetadata {
+	// Registration information for a metacluster, stored on both management and data clusters
+	static KeyBackedObjectProperty<MetaclusterRegistrationEntry, decltype(IncludeVersion())> metaclusterRegistration;
 };
 
 struct TenantGroupEntry {

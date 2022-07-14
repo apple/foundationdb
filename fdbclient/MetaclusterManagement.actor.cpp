@@ -40,28 +40,36 @@ ACTOR Future<Reference<IDatabase>> openDatabase(ClusterConnectionString connecti
 	}
 }
 
-Key getDataClusterTenantIndexKey(ClusterNameRef cluster, Optional<TenantNameRef> tenant) {
-	Tuple tuple;
-	tuple.append(cluster);
-	if (tenant.present()) {
-		tuple.append(tenant.get());
-	}
-	return dataClusterTenantIndexKeys.begin.withSuffix(tuple.pack());
-}
+KeyBackedObjectMap<ClusterName, DataClusterEntry, decltype(IncludeVersion())> ManagementClusterMetadata::dataClusters(
+    "metacluster/dataCluster/metadata/"_sr,
+    IncludeVersion(ProtocolVersion::withMetacluster()));
 
-Key getDataClusterTenantGroupIndexKey(ClusterNameRef cluster, Optional<TenantGroupNameRef> tenantGroup) {
-	Tuple tuple;
-	tuple.append(cluster);
-	if (tenantGroup.present()) {
-		tuple.append(tenantGroup.get());
-	}
-	return dataClusterTenantGroupIndexKeys.begin.withSuffix(tuple.pack());
-}
+KeyBackedMap<ClusterName,
+             ClusterConnectionString,
+             TupleCodec<ClusterName>,
+             ManagementClusterMetadata::ConnectionStringCodec>
+    ManagementClusterMetadata::dataClusterConnectionRecords("metacluster/dataCluster/connectionString/"_sr);
 
 KeyBackedSet<Tuple> ManagementClusterMetadata::clusterCapacityIndex("metacluster/clusterCapacityIndex/"_sr);
 Tuple ManagementClusterMetadata::getClusterCapacityTuple(ClusterNameRef const& clusterName,
                                                          DataClusterEntry const& entry) {
 	return Tuple().append(entry.allocated.numTenantGroups).append(clusterName);
+}
+
+KeyBackedSet<Tuple> ManagementClusterMetadata::clusterTenantIndex("metacluster/dataCluster/tenantMap/"_sr);
+Tuple ManagementClusterMetadata::getClusterTenantIndexTuple(ClusterNameRef const& clusterName,
+                                                            TenantNameRef const& tenantName) {
+	return Tuple().append(clusterName).append(tenantName);
+}
+
+KeyBackedSet<Tuple> ManagementClusterMetadata::clusterTenantGroupIndex("metacluster/dataCluster/tenantGroupMap/"_sr);
+Tuple ManagementClusterMetadata::getClusterTenantGroupIndexTuple(ClusterNameRef const& clusterName,
+                                                                 TenantGroupNameRef const& tenantGroupName) {
+	return Tuple().append(clusterName).append(tenantGroupName);
+}
+
+std::pair<Tuple, Tuple> ManagementClusterMetadata::getClusterTupleRange(ClusterNameRef const& clusterName) {
+	return std::make_pair(Tuple().append(clusterName), Tuple().append(keyAfter(clusterName)));
 }
 
 }; // namespace MetaclusterAPI

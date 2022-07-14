@@ -83,12 +83,8 @@ Future<TenantMapEntry> getTenant(Reference<DB> db, TenantName name) {
 
 ACTOR template <class Transaction>
 Future<ClusterType> getClusterType(Transaction tr) {
-	state typename transaction_future_type<Transaction, Optional<Value>>::type metaclusterRegistrationFuture =
-	    tr->get(metaclusterRegistrationKey);
-
-	Optional<Value> metaclusterRegistrationVal = wait(safeThreadFutureToFuture(metaclusterRegistrationFuture));
 	Optional<MetaclusterRegistrationEntry> metaclusterRegistration =
-	    MetaclusterRegistrationEntry::decode(metaclusterRegistrationVal);
+	    wait(MetaclusterMetadata::metaclusterRegistration.get(tr));
 
 	return metaclusterRegistration.present() ? metaclusterRegistration.get().clusterType : ClusterType::STANDALONE;
 }
