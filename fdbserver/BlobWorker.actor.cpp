@@ -235,15 +235,15 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 
 namespace {
 bool isBlobFileEncryptionSupported() {
-	bool supported = SERVER_KNOBS->ENABLE_BLOB_FILE_ENCRYPTION && SERVER_KNOBS->BG_RANGE_SOURCE == "tenant";
+	bool supported = SERVER_KNOBS->ENABLE_BLOB_GRANULE_ENCRYPTION && SERVER_KNOBS->BG_RANGE_SOURCE == "tenant";
 	ASSERT((supported && SERVER_KNOBS->ENABLE_ENCRYPTION) || !supported);
 	return supported;
 }
 
 Optional<CompressionFilter> getBlobFileCompressFilter() {
 	Optional<CompressionFilter> compFilter;
-	if (SERVER_KNOBS->ENABLE_BLOB_FILE_COMPRESSION) {
-		compFilter = CompressionUtils::fromFilterString(SERVER_KNOBS->BLOB_FILE_COMPRESSION_FILTER);
+	if (SERVER_KNOBS->ENABLE_BLOB_GRANULE_COMPRESSION) {
+		compFilter = CompressionUtils::fromFilterString(SERVER_KNOBS->BLOB_GRANULE_COMPRESSION_FILTER);
 	}
 	return compFilter;
 }
@@ -969,6 +969,7 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 		                                        snapshotF.fullFileLength,
 		                                        snapshotF.cipherKeysMeta);
 
+		// TODO: optimization - batch 'encryption-key' lookup given the GranuleFile set is known
 		if (chunk.snapshotFile.get().cipherKeysMetaRef.present()) {
 			ASSERT(isBlobFileEncryptionSupported());
 			BlobGranuleCipherKeysCtx cipherKeysCtx =
@@ -3186,6 +3187,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 					didCollapse = true;
 				}
 
+				// TODO: optimization - batch 'encryption-key' lookup given the GranuleFile set is known
 				state Future<BlobGranuleCipherKeysCtx> cipherKeysCtx;
 				if (chunk.snapshotFile.present() && chunk.snapshotFile.get().cipherKeysMetaRef.present()) {
 					ASSERT(isBlobFileEncryptionSupported());
