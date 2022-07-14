@@ -3,31 +3,72 @@
 
 #include <map>
 #include <fmt/format.h>
+#include <boost/core/demangle.hpp>
+#include <typeinfo>
 
 namespace probe {
 
 namespace {
 
-struct CodeProbes {
-	using LineMap = std::map<unsigned, ICodeProbe*>;
-	std::map<StringRef, LineMap> codeProbes;
+StringRef normalizePath(const char* path) {
+	auto srcBase = LiteralStringRef(FDB_SOURCE_DIR);
+	auto binBase = LiteralStringRef(FDB_SOURCE_DIR);
+	StringRef filename(reinterpret_cast<uint8_t const*>(path), strlen(path));
+	if (filename.startsWith(srcBase)) {
+		filename = filename.removePrefix(srcBase);
+	} else if (filename.startsWith(binBase)) {
+		filename = filename.removePrefix(binBase);
+	}
+	if (filename[0] == '/') {
+		filename = filename.removePrefix("/"_sr);
+	} else if (filename[0] == '\\') {
+		filename = filename.removePrefix("/"_sr);
+	}
+	return filename;
+}
 
-	void add(const char* file, unsigned line, ICodeProbe* probe) {
-		auto srcBase = LiteralStringRef(FDB_SOURCE_DIR);
-		auto binBase = LiteralStringRef(FDB_SOURCE_DIR);
-		StringRef filename(reinterpret_cast<uint8_t const*>(file), strlen(file));
-		StringRef f = filename;
-		if (filename.startsWith(srcBase)) {
-			f = filename.removePrefix(srcBase);
-		} else if (filename.startsWith(binBase)) {
-			f = filename.removePrefix(binBase);
+struct CodeProbes {
+	struct Location {
+		StringRef file;
+		unsigned line;
+		Location(StringRef file, unsigned line) : file(file), line(line) {}
+		bool operator==(Location const& rhs) const { return line == rhs.line && file == rhs.file; }
+		bool operator!=(Location const& rhs) const { return line != rhs.line && file != rhs.file; }
+		bool operator<(Location const& rhs) const {
+			if (file < rhs.file) {
+				return true;
+			} else if (file == rhs.file) {
+				return line < rhs.line;
+			} else {
+				return false;
+			}
 		}
-		if (f[0] == '/') {
-			f = f.removePrefix("/"_sr);
-		} else if (f[0] == '\\') {
-			f = f.removePrefix("/"_sr);
+		bool operator<=(Location const& rhs) const {
+			if (file < rhs.file) {
+				return true;
+			} else if (file == rhs.file) {
+				return line <= rhs.line;
+			} else {
+				return false;
+			}
 		}
-		codeProbes[f][line] = probe;
+		bool operator>(Location const& rhs) const { return rhs < *this; }
+		bool operator>=(Location const& rhs) const { return rhs <= *this; }
+	};
+
+	std::multimap<Location, ICodeProbe const*> codeProbes;
+
+	void add(ICodeProbe const* probe) {
+		const char* file = probe->filename();
+		unsigned line = probe->line();
+		Location loc(normalizePath(file), line);
+		bool duplicate = false;
+		for (auto iter = codeProbes.find(loc); iter != codeProbes.end() && iter->first == loc; ++iter) {
+			duplicate = duplicate || strcmp(iter->second->comment(), probe->comment()) == 0;
+		}
+		if (!duplicate) {
+			codeProbes.emplace(loc, probe);
+		}
 	}
 
 	static CodeProbes& instance() {
@@ -36,21 +77,35 @@ struct CodeProbes {
 	}
 
 	void verify() const {
-		std::map<StringRef, ICodeProbe*> comments;
-		for (auto const& files : codeProbes) {
-			for (auto const& probe : files.second) {
-				auto cmt = probe.second->comment();
-				auto res =
-				    comments.emplace(StringRef(reinterpret_cast<uint8_t const*>(cmt), strlen(cmt)), probe.second);
-				if (!res.second) {
-					fmt::print(stderr,
-					           "ERROR ({}:{}): Comment \"{}\" is a duplicate. First appeared here: {}:{}\n",
-					           probe.second->filename(),
-					           probe.second->line(),
-					           probe.second->comment(),
-					           res.first->second->filename(),
-					           res.first->second->line());
-				}
+		std::map<std::pair<StringRef, StringRef>, ICodeProbe const*> comments;
+		for (auto probe : codeProbes) {
+			auto file = probe.first.file;
+			auto comment = probe.second->comment();
+			auto commentEntry =
+			    std::make_pair(file, StringRef(reinterpret_cast<uint8_t const*>(comment), strlen(comment)));
+			ASSERT(file == normalizePath(probe.second->filename()));
+			auto iter = comments.find(commentEntry);
+			if (iter != comments.end()) {
+				fmt::print("ERROR ({}:{}): {} isn't unique in file {}. Previously seen here: {}:{}\n",
+				           probe.first.file,
+				           probe.first.line,
+				           iter->first.second,
+				           probe.second->filename(),
+				           iter->second->filename(),
+				           iter->second->line());
+				ICodeProbe const& fst = *iter->second;
+				ICodeProbe const& snd = *probe.second;
+				fmt::print("\t1st Type: {}\n", boost::core::demangle(typeid(fst).name()));
+				fmt::print("\t2nd Type: {}\n", boost::core::demangle(typeid(snd).name()));
+				fmt::print("\n");
+				fmt::print("\t1st Comment: {}\n", fst.comment());
+				fmt::print("\t2nd Comment: {}\n", snd.comment());
+				fmt::print("\n");
+				fmt::print("\t1st CompUnit: {}\n", fst.compilationUnit());
+				fmt::print("\t2nd CompUnit: {}\n", snd.compilationUnit());
+				fmt::print("\n");
+			} else {
+				comments.emplace(commentEntry, probe.second);
 			}
 		}
 	}
@@ -65,15 +120,13 @@ struct CodeProbes {
 		} else {
 			std::vector<StringRef> files;
 			fmt::print("\t<CoverageCases>\n");
-			for (auto const& fileMap : codeProbes) {
-				files.push_back(fileMap.first);
-				for (auto const& probe : fileMap.second) {
-					fmt::print("\t\t<Case File=\"{}\" Line=\"{}\" Comment=\"{}\" Condition=\"{}\"/>\n",
-					           fileMap.first,
-					           probe.first,
-					           probe.second->comment(),
-					           probe.second->condition());
-				}
+			for (auto probe : codeProbes) {
+				files.push_back(probe.first.file);
+				fmt::print("\t\t<Case File=\"{}\" Line=\"{}\" Comment=\"{}\" Condition=\"{}\"/>\n",
+				           probe.first.file,
+				           probe.first.line,
+				           probe.second->comment(),
+				           probe.second->condition());
 			}
 			fmt::print("\t</CoverageCases>\n");
 			fmt::print("\t<Inputs>\n");
@@ -87,37 +140,24 @@ struct CodeProbes {
 
 	void printJSON() const {
 		verify();
-		fmt::print("{{\n");
-		bool first = true;
-		for (auto const& lineMap : codeProbes) {
-			auto file = lineMap.first;
-			for (auto const& probe : lineMap.second) {
-				auto p = probe.second;
-				if (!first) {
-					fmt::print(",\n");
-				}
-				first = false;
-				fmt::print("\t{{ File: \"{}\", Line: {}, Comment: \"{}\", Condition: \"{}\" }}",
-				           file,
-				           p->line(),
-				           p->comment(),
-				           p->condition());
-			}
+		for (auto probe : codeProbes) {
+			auto p = probe.second;
+			fmt::print("\t{{ File: \"{}\", Line: {}, Comment: \"{}\", Condition: \"{}\" }}\n",
+			           probe.first.file,
+			           p->line(),
+			           p->comment(),
+			           p->condition());
 		}
-		if (!first) {
-			fmt::print("\n");
-		}
-		fmt::print("}}\n");
 	}
 };
 
 } // namespace
 
-ICodeProbe::~ICodeProbe() {}
-
-ICodeProbe::ICodeProbe(const char* file, unsigned line) {
-	CodeProbes::instance().add(file, line, this);
+void registerProbe(const ICodeProbe& probe) {
+	CodeProbes::instance().add(&probe);
 }
+
+ICodeProbe::~ICodeProbe() {}
 
 void ICodeProbe::printProbesXML() {
 	CodeProbes::instance().printXML();

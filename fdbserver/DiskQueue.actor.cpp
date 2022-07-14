@@ -1628,8 +1628,9 @@ public:
 			                // totally finished
 			pop(popLocation);
 			commitFuture = commitFuture && queue->commit();
-		} else
+		} else {
 			CODE_PROBE(true, "No uncommitted data was popped");
+		}
 
 		return commitFuture;
 	}

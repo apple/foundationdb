@@ -14,18 +14,20 @@ struct CodeProbeAnnotations;
 
 struct ICodeProbe {
 	virtual ~ICodeProbe();
-	ICodeProbe(const char* file, unsigned line);
 
 	virtual const char* filename() const = 0;
 	virtual unsigned line() const = 0;
 	virtual const char* comment() const = 0;
 	virtual const char* condition() const = 0;
+	virtual const char* compilationUnit() const = 0;
 
 	static void printProbesXML();
 	static void printProbesJSON();
 };
 
-template <class FileName, class Condition, class Comment, unsigned Line>
+void registerProbe(ICodeProbe const& probe);
+
+template <class FileName, class Condition, class Comment, class CompUnit, unsigned Line>
 struct CodeProbeImpl : ICodeProbe {
 	static constexpr CodeProbeImpl* instancePtr() { return &instance; }
 	void hit() {
@@ -39,16 +41,25 @@ struct CodeProbeImpl : ICodeProbe {
 	unsigned line() const override { return Line; }
 	const char* comment() const override { return Comment::value(); }
 	const char* condition() const override { return Condition::value(); }
+	const char* compilationUnit() const override { return CompUnit::value(); }
 
 private:
-	CodeProbeImpl() : ICodeProbe(FileName::value(), Line) {}
+	CodeProbeImpl() { registerProbe(*this); }
 	inline static CodeProbeImpl instance;
 	bool didHit = false;
 };
 
 } // namespace probe
 
-#define _CODE_PROBE_IMPL(file, line, condition, comment, fileType, condType, commentType)                              \
+#ifdef COMPILATION_UNIT
+#define CODE_PROBE_QUOTE(x) #x
+#define CODE_PROBE_EXPAND_AND_QUOTE(x) CODE_PROBE_QUOTE(x)
+#define CODE_PROBE_COMPILATION_UNIT CODE_PROBE_EXPAND_AND_QUOTE(COMPILATION_UNIT)
+#else
+#define CODE_PROBE_COMPILATION_UNIT "COMPILATION_UNIT not set"
+#endif
+
+#define _CODE_PROBE_IMPL(file, line, condition, comment, compUnit, fileType, condType, commentType, compUnitType)      \
 	struct fileType {                                                                                                  \
 		constexpr static const char* value() { return file; }                                                          \
 	};                                                                                                                 \
@@ -58,21 +69,27 @@ private:
 	struct commentType {                                                                                               \
 		constexpr static const char* value() { return comment; }                                                       \
 	};                                                                                                                 \
-	static_assert(probe::CodeProbeImpl<fileType, condType, commentType, line>::instancePtr() != nullptr);              \
+	struct compUnitType {                                                                                              \
+		constexpr static const char* value() { return compUnit; }                                                      \
+	};                                                                                                                 \
 	if (condition) {                                                                                                   \
-		probe::CodeProbeImpl<fileType, condType, commentType, line>::instancePtr()->hit();                             \
+		probe::CodeProbeImpl<fileType, condType, commentType, compUnitType, line>::instancePtr()->hit();               \
 	}
 
 #define _CODE_PROBE_T2(type, counter) type##counter
 #define _CODE_PROBE_T(type, counter) _CODE_PROBE_T2(type, counter)
 
 #define CODE_PROBE(condition, comment)                                                                                 \
-	_CODE_PROBE_IMPL(__FILE__,                                                                                         \
-	                 __LINE__,                                                                                         \
-	                 condition,                                                                                        \
-	                 comment,                                                                                          \
-	                 _CODE_PROBE_T(fileType, __COUNTER__),                                                             \
-	                 _CODE_PROBE_T(condType, __COUNTER__),                                                             \
-	                 _CODE_PROBE_T(commentType, __COUNTER__))
+	do {                                                                                                               \
+		_CODE_PROBE_IMPL(__FILE__,                                                                                     \
+		                 __LINE__,                                                                                     \
+		                 condition,                                                                                    \
+		                 comment,                                                                                      \
+		                 CODE_PROBE_COMPILATION_UNIT,                                                                  \
+		                 _CODE_PROBE_T(FileType, __COUNTER__),                                                         \
+		                 _CODE_PROBE_T(CondType, __COUNTER__),                                                         \
+		                 _CODE_PROBE_T(CommentType, __COUNTER__),                                                      \
+		                 _CODE_PROBE_T(CompilationUnitType, __COUNTER__))                                              \
+	} while (false);
 
 #endif // TESTPROBE_H_
