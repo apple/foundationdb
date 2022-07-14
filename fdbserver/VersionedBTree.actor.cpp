@@ -7667,91 +7667,6 @@ public:
 	}
 };
 
-class EncryptionKeyProvider : public IEncryptionKeyProvider {
-public:
-	EncryptionKeyProvider(Reference<AsyncVar<ServerDBInfo> const> db) : db(db) {}
-
-	virtual ~EncryptionKeyProvider() = default;
-
-	ACTOR static Future<EncryptionKey> getSecrets(EncryptionKeyProvider* self, EncryptionKeyRef key) {
-		if (!key.cipherHeader.present()) {
-			TraceEvent("EncryptionKeyProvider_CipherHeaderMissing");
-			throw encrypt_ops_error();
-		}
-		TextAndHeaderCipherKeys cipherKeys = wait(getEncryptCipherKeys(self->db, key.cipherHeader.get()));
-		EncryptionKey s = key;
-		s.cipherKeys = cipherKeys;
-		return s;
-	}
-
-	virtual Future<EncryptionKey> getSecrets(const EncryptionKeyRef& key) override { return getSecrets(this, key); }
-
-	ACTOR static Future<EncryptionKey> getByRange(EncryptionKeyProvider* self, KeyRef begin, KeyRef end) {
-		EncryptCipherDomainName domainName;
-		EncryptCipherDomainId domainId = self->getEncryptionDomainId(begin, end, &domainName);
-		TextAndHeaderCipherKeys cipherKeys = wait(getLatestEncryptCipherKeysForDomain(self->db, domainId, domainName));
-		EncryptionKey s;
-		s.cipherKeys = cipherKeys;
-		return s;
-	}
-
-	virtual Future<EncryptionKey> getByRange(const KeyRef& begin, const KeyRef& end) override {
-		return getByRange(this, begin, end);
-	}
-
-	virtual void setTenantPrefixIndex(Reference<TenantPrefixIndex> tenantPrefixIndex) override {
-		this->tenantPrefixIndex = tenantPrefixIndex;
-	}
-
-private:
-	EncryptCipherDomainId getEncryptionDomainId(const KeyRef& begin,
-	                                            const KeyRef& end,
-	                                            EncryptCipherDomainName* domainName) {
-		int64_t domainId = SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID;
-		int64_t beginTenantId = getTenant(begin, true /*inclusive*/);
-		int64_t endTenantId = getTenant(end, false /*inclusive*/);
-		if (beginTenantId == endTenantId && beginTenantId != SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID) {
-			ASSERT(tenantPrefixIndex.isValid());
-			Key tenantPrefix = TenantMapEntry::idToPrefix(beginTenantId);
-			auto view = tenantPrefixIndex->atLatest();
-			auto itr = view.find(tenantPrefix);
-			if (itr != view.end()) {
-				*domainName = *itr;
-				domainId = beginTenantId;
-			} else {
-				// TODO(yiwu): assert this couldn't happen, after we change to only allow encryption when tenant
-				// mode is in required mode.
-				TraceEvent(SevWarn, "EncryptionKeyProvider_TenantNameMissing").detail("TenantID", beginTenantId);
-			}
-		}
-		if (domainId == SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID) {
-			*domainName = FDB_DEFAULT_ENCRYPT_DOMAIN_NAME;
-		}
-		return domainId;
-	}
-
-	int64_t getTenant(const KeyRef& key, bool inclusive) {
-		// A valid tenant id is always a valid encrypt domain id.
-		static_assert(ENCRYPT_INVALID_DOMAIN_ID < 0);
-		if (key.size() < TENANT_PREFIX_SIZE || key >= systemKeys.begin) {
-			return SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID;
-		}
-		// TODO(yiwu): Use TenantMapEntry::prefixToId() instead.
-		int64_t tenantId = bigEndian64(*reinterpret_cast<const int64_t*>(key.begin()));
-		if (tenantId < 0) {
-			return SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID;
-		}
-		if (!inclusive && key.size() == TENANT_PREFIX_SIZE) {
-			tenantId = tenantId - 1;
-		}
-		ASSERT(tenantId >= 0);
-		return tenantId;
-	}
-
-	Reference<AsyncVar<ServerDBInfo> const> db;
-	Reference<TenantPrefixIndex> tenantPrefixIndex;
-};
-
 #include "fdbserver/art_impl.h"
 
 RedwoodRecordRef VersionedBTree::dbBegin(LiteralStringRef(""));
@@ -7786,7 +7701,7 @@ public:
 		if (SERVER_KNOBS->ENABLE_STORAGE_SERVER_ENCRYPTION) {
 			ASSERT(db.isValid());
 			encodingType = EncodingType::AESEncryptionV1;
-			m_keyProvider = std::make_shared<EncryptionKeyProvider>(db);
+			m_keyProvider = std::make_shared<TenantAwareEncryptionKeyProvider>(db);
 		} else if (g_network->isSimulated() && logID.hash() % 2 == 0) {
 			// Deterministically enable encryption based on uid
 			encodingType = EncodingType::XOREncryption_TestOnly;
@@ -9815,60 +9730,6 @@ TEST_CASE(":/redwood/pager/ArenaPage") {
 	printf("Pointer should be freed\n");
 	return Void();
 }
-
-namespace {
-class RandomEncryptionKeyProvider : public IEncryptionKeyProvider {
-public:
-	RandomEncryptionKeyProvider() {
-		for (unsigned i = 0; i < NUM_CIPHER; i++) {
-			BlobCipherDetails cipherDetails;
-			cipherDetails.encryptDomainId = i;
-			cipherDetails.baseCipherId = deterministicRandom()->randomUInt64();
-			cipherDetails.salt = deterministicRandom()->randomUInt64();
-			cipherKeys[i] = generateCipherKey(cipherDetails);
-		}
-	}
-	virtual ~RandomEncryptionKeyProvider() = default;
-
-	virtual Future<EncryptionKey> getSecrets(const EncryptionKeyRef& key) override {
-		ASSERT(key.cipherHeader.present());
-		EncryptionKey s = key;
-		s.cipherKeys.cipherTextKey = cipherKeys[key.cipherHeader.get().cipherTextDetails.encryptDomainId];
-		s.cipherKeys.cipherHeaderKey = cipherKeys[key.cipherHeader.get().cipherHeaderDetails.encryptDomainId];
-		return s;
-	}
-
-	virtual Future<EncryptionKey> getByRange(const KeyRef& /*begin*/, const KeyRef& /*end*/) override {
-		EncryptionKey s;
-		s.cipherKeys.cipherTextKey = getRandomCipherKey();
-		s.cipherKeys.cipherHeaderKey = getRandomCipherKey();
-		return s;
-	}
-
-private:
-	Reference<BlobCipherKey> generateCipherKey(const BlobCipherDetails& cipherDetails) {
-		static unsigned char SHA_KEY[] = "3ab9570b44b8315fdb261da6b1b6c13b";
-		Arena arena;
-		StringRef digest = computeAuthToken(reinterpret_cast<const unsigned char*>(&cipherDetails.baseCipherId),
-		                                    sizeof(EncryptCipherBaseKeyId),
-		                                    SHA_KEY,
-		                                    AES_256_KEY_LENGTH,
-		                                    arena);
-		return makeReference<BlobCipherKey>(cipherDetails.encryptDomainId,
-		                                    cipherDetails.baseCipherId,
-		                                    digest.begin(),
-		                                    AES_256_KEY_LENGTH,
-		                                    cipherDetails.salt);
-	}
-
-	Reference<BlobCipherKey> getRandomCipherKey() {
-		return cipherKeys[deterministicRandom()->randomInt(0, NUM_CIPHER)];
-	}
-
-	static constexpr int NUM_CIPHER = 1000;
-	Reference<BlobCipherKey> cipherKeys[NUM_CIPHER];
-};
-} // anonymous namespace
 
 TEST_CASE("Lredwood/correctness/btree") {
 	g_redwoodMetricsActor = Void(); // Prevent trace event metrics from starting
