@@ -282,7 +282,6 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 	state bool warnChangeStorageNoMigrate = false;
 	state bool warnRocksDBIsExperimental = false;
 	state bool warnShardedRocksDBIsExperimental = false;
-
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -515,6 +514,8 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 
 			tr->addReadConflictRange(singleKeyRange(moveKeysLockOwnerKey));
 			tr->set(moveKeysLockOwnerKey, versionKey);
+
+			wait(safeThreadFutureToFuture(tr->commit()));
 			break;
 		} catch (Error& e) {
 			state Error e1(e);
@@ -622,6 +623,7 @@ Future<ConfigurationResult> autoConfig(Reference<DB> db, ConfigureAutoResult con
 			tr->addReadConflictRange(singleKeyRange(moveKeysLockOwnerKey));
 			tr->set(moveKeysLockOwnerKey, versionKey);
 
+			wait(safeThreadFutureToFuture(tr->commit()));
 			return ConfigurationResult::SUCCESS;
 		} catch (Error& e) {
 			wait(safeThreadFutureToFuture(tr->onError(e)));

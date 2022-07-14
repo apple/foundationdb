@@ -871,13 +871,14 @@ Future<std::pair<ClusterName, DataClusterMetadata>> assignTenant(Transaction tr,
 		}
 	}
 
-	state KeyBackedSet<Tuple>::Values availableClusters = wait(ManagementClusterMetadata::clusterCapacityIndex.getRange(
-	    tr, Optional<Tuple>(), Optional<Tuple>(), 1, Snapshot::False, Reverse::True));
+	state KeyBackedSet<Tuple>::RangeResultType availableClusters =
+	    wait(ManagementClusterMetadata::clusterCapacityIndex.getRange(
+	        tr, Optional<Tuple>(), Optional<Tuple>(), 1, Snapshot::False, Reverse::True));
 
 	state Optional<ClusterName> chosenCluster;
-	if (!availableClusters.empty()) {
+	if (!availableClusters.results.empty()) {
 		// TODO: check that the chosen cluster is available, otherwise we can try another
-		chosenCluster = availableClusters[0].getString(1);
+		chosenCluster = availableClusters.results[0].getString(1);
 	}
 
 	if (chosenCluster.present()) {
