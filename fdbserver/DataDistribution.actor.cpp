@@ -1442,5 +1442,3 @@ TEST_CASE("/DataDistributor/StorageWiggler/Order") {
 	ASSERT(!wiggler.getNextServerId().present());
 	return Void();
 }
-
-#pragma clang diagnostic pop
