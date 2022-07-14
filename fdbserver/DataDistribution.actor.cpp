@@ -1371,6 +1371,8 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 	return Void();
 }
 
+namespace data_distribution_test {
+
 static Future<ErrorOr<Void>> goodTestFuture(double duration) {
 	return tag(delay(duration), ErrorOr<Void>(Void()));
 }
@@ -1379,29 +1381,41 @@ static Future<ErrorOr<Void>> badTestFuture(double duration, Error e) {
 	return tag(delay(duration), ErrorOr<Void>(e));
 }
 
+} // namespace data_distribution_test
+
 TEST_CASE("/DataDistribution/WaitForMost") {
 	state std::vector<Future<ErrorOr<Void>>> futures;
 	{
-		futures = { goodTestFuture(1), goodTestFuture(2), goodTestFuture(3) };
+		futures = { data_distribution_test::goodTestFuture(1),
+			        data_distribution_test::goodTestFuture(2),
+			        data_distribution_test::goodTestFuture(3) };
 		wait(waitForMost(futures, 1, operation_failed(), 0.0)); // Don't wait for slowest future
 		ASSERT(!futures[2].isReady());
 	}
 	{
-		futures = { goodTestFuture(1), goodTestFuture(2), goodTestFuture(3) };
+		futures = { data_distribution_test::goodTestFuture(1),
+			        data_distribution_test::goodTestFuture(2),
+			        data_distribution_test::goodTestFuture(3) };
 		wait(waitForMost(futures, 0, operation_failed(), 0.0)); // Wait for all futures
 		ASSERT(futures[2].isReady());
 	}
 	{
-		futures = { goodTestFuture(1), goodTestFuture(2), goodTestFuture(3) };
+		futures = { data_distribution_test::goodTestFuture(1),
+			        data_distribution_test::goodTestFuture(2),
+			        data_distribution_test::goodTestFuture(3) };
 		wait(waitForMost(futures, 1, operation_failed(), 1.0)); // Wait for slowest future
 		ASSERT(futures[2].isReady());
 	}
 	{
-		futures = { goodTestFuture(1), goodTestFuture(2), badTestFuture(1, success()) };
+		futures = { data_distribution_test::goodTestFuture(1),
+			        data_distribution_test::goodTestFuture(2),
+			        data_distribution_test::badTestFuture(1, success()) };
 		wait(waitForMost(futures, 1, operation_failed(), 1.0)); // Error ignored
 	}
 	{
-		futures = { goodTestFuture(1), goodTestFuture(2), badTestFuture(1, success()) };
+		futures = { data_distribution_test::goodTestFuture(1),
+			        data_distribution_test::goodTestFuture(2),
+			        data_distribution_test::badTestFuture(1, success()) };
 		try {
 			wait(waitForMost(futures, 0, operation_failed(), 1.0));
 			ASSERT(false);
