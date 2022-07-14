@@ -134,6 +134,7 @@ struct RelocateData {
 	int boundaryPriority;
 	int healthPriority;
 	RelocateReason reason;
+	DataMovementReason moveReason;
 
 	double startTime;
 	UID randomId;
@@ -148,17 +149,18 @@ struct RelocateData {
 	std::shared_ptr<DataMove> dataMove;
 
 	RelocateData()
-	  : priority(-1), boundaryPriority(-1), healthPriority(-1), reason(RelocateReason::INVALID), startTime(-1),
-	    dataMoveId(anonymousShardId), workFactor(0), wantsNewServers(false), cancellable(false),
-	    interval("QueuedRelocation") {}
+	  : priority(-1), boundaryPriority(-1), healthPriority(-1), reason(RelocateReason::INVALID),
+	    moveReason(DataMovementReason::INVALID), startTime(-1), dataMoveId(anonymousShardId), workFactor(0),
+	    wantsNewServers(false), cancellable(false), interval("QueuedRelocation") {}
 	explicit RelocateData(RelocateShard const& rs)
 	  : keys(rs.keys), priority(rs.priority), boundaryPriority(isBoundaryPriority(rs.priority) ? rs.priority : -1),
-	    healthPriority(isHealthPriority(rs.priority) ? rs.priority : -1), reason(rs.reason), startTime(now()),
-	    randomId(deterministicRandom()->randomUniqueID()), dataMoveId(rs.dataMoveId), workFactor(0),
+	    healthPriority(isHealthPriority(rs.priority) ? rs.priority : -1), reason(rs.reason), moveReason(rs.moveReason),
+	    startTime(now()), randomId(deterministicRandom()->randomUniqueID()), dataMoveId(rs.dataMoveId), workFactor(0),
 	    wantsNewServers(
 	        isDataMovementForMountainChopper(rs.moveReason) || isDataMovementForValleyFiller(rs.moveReason) ||
 	        rs.moveReason == DataMovementReason::SPLIT_SHARD || rs.moveReason == DataMovementReason::TEAM_REDUNDANT),
 	    cancellable(true), interval("QueuedRelocation"), dataMove(rs.dataMove) {
+		ASSERT(moveReason != DataMovementReason::INVALID);
 		if (dataMove != nullptr) {
 			this->src.insert(this->src.end(), dataMove->meta.src.begin(), dataMove->meta.src.end());
 		}
@@ -187,8 +189,8 @@ struct RelocateData {
 
 	bool operator==(const RelocateData& rhs) const {
 		return priority == rhs.priority && boundaryPriority == rhs.boundaryPriority &&
-		       healthPriority == rhs.healthPriority && reason == rhs.reason && keys == rhs.keys &&
-		       startTime == rhs.startTime && workFactor == rhs.workFactor && src == rhs.src &&
+		       healthPriority == rhs.healthPriority && reason == rhs.reason && moveReason == rhs.moveReason &&
+		       keys == rhs.keys && startTime == rhs.startTime && workFactor == rhs.workFactor && src == rhs.src &&
 		       completeSources == rhs.completeSources && wantsNewServers == rhs.wantsNewServers &&
 		       randomId == rhs.randomId;
 	}
@@ -1366,6 +1368,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 						    rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT)
 							inflightPenalty = SERVER_KNOBS->INFLIGHT_PENALTY_ONE_LEFT;
 
+						ASSERT(rd.moveReason != DataMovementReason::INVALID);
 						auto req = GetTeamRequest(WantNewServers(rd.wantsNewServers),
 						                          WantTrueBest(isValleyFillerPriority(rd.priority)),
 						                          PreferLowerDiskUtil::True,
