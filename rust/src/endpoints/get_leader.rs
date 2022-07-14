@@ -468,6 +468,8 @@ impl MonitorLeader {
                         let serialized_info = &serialized_info[8..];
                         crate::flow::file_identifier::peek_file_identifier(serialized_info)?
                             .ensure_expected(CLUSTER_CONTROLLER_CLIENT_INTERFACE_FILE_IDENTIFIER)?;
+                        let cluster_controller_full_interface = deserialize_cluster_controller_full_interface(serialized_info)?;
+                        println!("{:?}", cluster_controller_full_interface);
                         // println!("File identifier: {:?}", file_identifier);
                         // let parsed_file_identifier = crate::flow::file_identifier::FileIdentifierNames::new()?.from_id(&file_identifier);
                         // println!("Parsed file identifier: {:?}", parsed_file_identifier);
