@@ -506,6 +506,12 @@ private:
 	                                                      OpHeader* h,
 	                                                      bool* isZeroFilled,
 	                                                      int* zeroFillSize) {
+		// Metadata op types to be excluded from encryption.
+		static std::unordered_set<OpType> metaOps = { OpSnapshotEnd, OpSnapshotAbort, OpCommit, OpRollback };
+		if (metaOps.count((OpType)h->op) == 0) {
+			// It is not supported to open an encrypted store as unencrypted, or vice-versa.
+			ASSERT_EQ(h->op == OpEncrypted, self->enableEncryption);
+		}
 		state int remainingBytes = h->len1 + h->len2 + 1;
 		if (h->op == OpEncrypted) {
 			// encryption header, plus the real (encrypted) op type
