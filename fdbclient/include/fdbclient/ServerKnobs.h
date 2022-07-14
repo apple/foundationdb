@@ -629,6 +629,9 @@ public:
 	// Maximum number of coordinators a snapshot can fail to
 	// capture while still succeeding
 	int64_t MAX_COORDINATOR_SNAPSHOT_FAULT_TOLERANCE;
+	// if true, all processes with class "storage", "transaction" and "log" will be snapshotted even not recruited as
+	// the role
+	bool SNAPSHOT_ALL_STATEFUL_PROCESSES;
 
 	// Storage Metrics
 	double STORAGE_METRICS_AVERAGE_INTERVAL;
@@ -874,12 +877,16 @@ public:
 	std::string BG_METADATA_SOURCE;
 
 	int BG_SNAPSHOT_FILE_TARGET_BYTES;
+	int BG_SNAPSHOT_FILE_TARGET_CHUNKS;
 	int BG_DELTA_FILE_TARGET_BYTES;
 	int BG_DELTA_BYTES_BEFORE_COMPACT;
 	int BG_MAX_SPLIT_FANOUT;
+	int BG_MAX_MERGE_FANIN;
 	int BG_HOT_SNAPSHOT_VERSIONS;
 	int BG_CONSISTENCY_CHECK_ENABLED;
 	int BG_CONSISTENCY_CHECK_TARGET_SPEED_KB;
+	bool BG_ENABLE_MERGING;
+	int BG_MERGE_CANDIDATE_THRESHOLD_SECONDS;
 
 	int BLOB_WORKER_INITIAL_SNAPSHOT_PARALLELISM;
 	double BLOB_WORKER_TIMEOUT; // Blob Manager's reaction time to a blob worker failure

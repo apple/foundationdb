@@ -1852,6 +1852,12 @@ int main(int argc, char* argv[]) {
 				        "proceed anyways\n");
 				flushAndExit(FDB_EXIT_ERROR);
 			}
+			if (SERVER_KNOBS->REMOTE_KV_STORE) {
+				fprintf(stderr,
+				        "ERROR : explicitly setting REMOTE_KV_STORE is dangerous! set ALLOW_DANGEROUS_KNOBS to "
+				        "proceed anyways\n");
+				flushAndExit(FDB_EXIT_ERROR);
+			}
 		}
 
 		// evictionPolicyStringToEnum will throw an exception if the string is not recognized as a valid
@@ -2120,6 +2126,10 @@ int main(int argc, char* argv[]) {
 						}
 					}
 				}
+				g_knobs.setKnob("enable_encryption",
+				                KnobValue::create(ini.GetBoolValue("META", "enableEncryption", false)));
+				g_knobs.setKnob("enable_tlog_encryption",
+				                KnobValue::create(ini.GetBoolValue("META", "enableTLogEncryption", false)));
 			}
 			setupAndRun(dataFolder, opts.testFile, opts.restarting, (isRestoring >= 1), opts.whitelistBinPaths);
 			g_simulator.run();

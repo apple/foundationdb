@@ -26,6 +26,7 @@
 
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/RunTransaction.actor.h"
+#include "fdbserver/DDTxnProcessor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/MoveKeys.actor.h"
@@ -35,6 +36,27 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 enum class RelocateReason { INVALID = -1, OTHER, REBALANCE_DISK, REBALANCE_READ };
+
+// One-to-one relationship to the priority knobs
+enum class DataMovementReason {
+	RECOVER_MOVE,
+	REBALANCE_UNDERUTILIZED_TEAM,
+	REBALANCE_OVERUTILIZED_TEAM,
+	REBALANCE_READ_OVERUTIL_TEAM,
+	REBALANCE_READ_UNDERUTIL_TEAM,
+	PERPETUAL_STORAGE_WIGGLE,
+	TEAM_HEALTHY,
+	TEAM_CONTAINS_UNDESIRED_SERVER,
+	TEAM_REDUNDANT,
+	MERGE_SHARD,
+	POPULATE_REGION,
+	TEAM_UNHEALTHY,
+	TEAM_2_LEFT,
+	TEAM_1_LEFT,
+	TEAM_FAILED,
+	TEAM_0_LEFT,
+	SPLIT_SHARD
+};
 
 struct DDShardInfo;
 
@@ -337,12 +359,14 @@ struct DDShardInfo {
 struct InitialDataDistribution : ReferenceCounted<InitialDataDistribution> {
 	InitialDataDistribution() : dataMoveMap(std::make_shared<DataMove>()) {}
 
+	// Read from dataDistributionModeKey. Whether DD is disabled. DD can be disabled persistently (mode = 0). Set mode
+	// to 1 will enable all disabled parts
 	int mode;
 	std::vector<std::pair<StorageServerInterface, ProcessClass>> allServers;
 	std::set<std::vector<UID>> primaryTeams;
 	std::set<std::vector<UID>> remoteTeams;
 	std::vector<DDShardInfo> shards;
-	Optional<Key> initHealthyZoneValue;
+	Optional<Key> initHealthyZoneValue; // set for maintenance mode
 	KeyRangeMap<std::shared_ptr<DataMove>> dataMoveMap;
 };
 

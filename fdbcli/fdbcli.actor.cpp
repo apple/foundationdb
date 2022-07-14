@@ -202,9 +202,31 @@ private:
 	                          bool enabled,
 	                          Optional<StringRef> arg,
 	                          bool intrans) {
-		if (enabled && arg.present() != FDBTransactionOptions::optionInfo.getMustExist(option).hasParameter) {
-			fprintf(stderr, "ERROR: option %s a parameter\n", arg.present() ? "did not expect" : "expected");
-			throw invalid_option_value();
+		// If the parameter type is an int, we will extract into this variable and reference its memory with a StringRef
+		int64_t parsedInt = 0;
+
+		if (enabled) {
+			auto optionInfo = FDBTransactionOptions::optionInfo.getMustExist(option);
+			if (arg.present() != optionInfo.hasParameter) {
+				fprintf(stderr, "ERROR: option %s a parameter\n", arg.present() ? "did not expect" : "expected");
+				throw invalid_option_value();
+			}
+			if (arg.present() && optionInfo.paramType == FDBOptionInfo::ParamType::Int) {
+				try {
+					size_t nextIdx;
+					std::string value = arg.get().toString();
+					parsedInt = std::stoll(value, &nextIdx);
+					if (nextIdx != value.length()) {
+						fprintf(
+						    stderr, "ERROR: could not parse value `%s' as an integer\n", arg.get().toString().c_str());
+						throw invalid_option_value();
+					}
+					arg = StringRef(reinterpret_cast<uint8_t*>(&parsedInt), 8);
+				} catch (std::exception e) {
+					fprintf(stderr, "ERROR: could not parse value `%s' as an integer\n", arg.get().toString().c_str());
+					throw invalid_option_value();
+				}
+			}
 		}
 
 		if (intrans) {

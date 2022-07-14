@@ -24,6 +24,7 @@
 #pragma once
 
 #include "fdbclient/CommitTransaction.h"
+#include "fdbserver/Knobs.h"
 #include "flow/BlobCipher.h"
 
 struct EncryptedMutationMessage {
@@ -96,6 +97,7 @@ struct EncryptedMutationMessage {
 	                           Arena& arena,
 	                           const std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>& cipherKeys,
 	                           StringRef* buf = nullptr) {
+		ASSERT(SERVER_KNOBS->ENABLE_ENCRYPTION);
 		EncryptedMutationMessage msg;
 		ar >> msg;
 		auto textCipherItr = cipherKeys.find(msg.header.cipherTextDetails);

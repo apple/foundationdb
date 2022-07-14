@@ -608,20 +608,25 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 				auto endKeyIt = threadData->keyData.find(startKey);
 				ASSERT(endKeyIt != threadData->keyData.end());
 
-				int targetQueryBytes = (deterministicRandom()->randomInt(1, 20) * targetBytesReadPerQuery) / 10;
-				int estimatedQueryBytes = 0;
-				for (int i = 0; estimatedQueryBytes < targetQueryBytes && endKeyIt != threadData->keyData.end();
-				     i++, endKeyIt++) {
-					// iterate forward until end or target keys have passed
-					estimatedQueryBytes += (1 + endKeyIt->second.writes.size() - endKeyIt->second.nextClearIdx) *
-					                       threadData->targetValLength;
-				}
-
+				// sometimes force single key read, for edge case
 				state uint32_t endKey;
-				if (endKeyIt == threadData->keyData.end()) {
-					endKey = std::numeric_limits<uint32_t>::max();
+				if (deterministicRandom()->random01() < 0.01) {
+					endKey = startKey + 1;
 				} else {
-					endKey = endKeyIt->first;
+					int targetQueryBytes = (deterministicRandom()->randomInt(1, 20) * targetBytesReadPerQuery) / 10;
+					int estimatedQueryBytes = 0;
+					for (int i = 0; estimatedQueryBytes < targetQueryBytes && endKeyIt != threadData->keyData.end();
+					     i++, endKeyIt++) {
+						// iterate forward until end or target keys have passed
+						estimatedQueryBytes += (1 + endKeyIt->second.writes.size() - endKeyIt->second.nextClearIdx) *
+						                       threadData->targetValLength;
+					}
+
+					if (endKeyIt == threadData->keyData.end()) {
+						endKey = std::numeric_limits<uint32_t>::max();
+					} else {
+						endKey = endKeyIt->first;
+					}
 				}
 
 				range = KeyRangeRef(threadData->getKey(startKey, 0), threadData->getKey(endKey, 0));

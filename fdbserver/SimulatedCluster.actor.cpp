@@ -260,6 +260,9 @@ class TestConfig {
 			if (attrib == "disableRemoteKVS") {
 				disableRemoteKVS = strcmp(value.c_str(), "true") == 0;
 			}
+			if (attrib == "disableEncryption") {
+				disableEncryption = strcmp(value.c_str(), "true") == 0;
+			}
 			if (attrib == "restartInfoLocation") {
 				isFirstTestInRestart = true;
 			}
@@ -297,6 +300,8 @@ public:
 	bool disableHostname = false;
 	// remote key value store is a child process spawned by the SS process to run the storage engine
 	bool disableRemoteKVS = false;
+	// 7.2 cannot be downgraded to 7.1 or below after enabling encryption-at-rest.
+	bool disableEncryption = false;
 	// Storage Engine Types: Verify match with SimulationConfig::generateNormalConfig
 	//	0 = "ssd"
 	//	1 = "memory"
@@ -358,6 +363,7 @@ public:
 		    .add("disableTss", &disableTss)
 		    .add("disableHostname", &disableHostname)
 		    .add("disableRemoteKVS", &disableRemoteKVS)
+		    .add("disableEncryption", &disableEncryption)
 		    .add("simpleConfig", &simpleConfig)
 		    .add("generateFearless", &generateFearless)
 		    .add("datacenters", &datacenters)
@@ -1091,10 +1097,15 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 				INetworkConnections::net()->parseMockDNSFromString(mockDNSStr);
 			}
 		}
+		auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
 		if (testConfig.disableRemoteKVS) {
-			IKnobCollection::getMutableGlobalKnobCollection().setKnob("remote_kv_store",
-			                                                          KnobValueRef::create(bool{ false }));
-			TraceEvent(SevDebug, "DisaableRemoteKVS").log();
+			g_knobs.setKnob("remote_kv_store", KnobValueRef::create(bool{ false }));
+			TraceEvent(SevDebug, "DisableRemoteKVS");
+		}
+		if (testConfig.disableEncryption) {
+			g_knobs.setKnob("enable_encryption", KnobValueRef::create(bool{ false }));
+			g_knobs.setKnob("enable_tlog_encryption", KnobValueRef::create(bool{ false }));
+			TraceEvent(SevDebug, "DisableEncryption");
 		}
 		*pConnString = conn;
 		*pTesterCount = testerCount;
@@ -1860,10 +1871,15 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	if (testConfig.configureLocked) {
 		startingConfigString += " locked";
 	}
+	auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
 	if (testConfig.disableRemoteKVS) {
-		IKnobCollection::getMutableGlobalKnobCollection().setKnob("remote_kv_store",
-		                                                          KnobValueRef::create(bool{ false }));
-		TraceEvent(SevDebug, "DisaableRemoteKVS").log();
+		g_knobs.setKnob("remote_kv_store", KnobValueRef::create(bool{ false }));
+		TraceEvent(SevDebug, "DisableRemoteKVS");
+	}
+	if (testConfig.disableEncryption) {
+		g_knobs.setKnob("enable_encryption", KnobValueRef::create(bool{ false }));
+		g_knobs.setKnob("enable_tlog_encryption", KnobValueRef::create(bool{ false }));
+		TraceEvent(SevDebug, "DisableEncryption");
 	}
 	auto configDBType = testConfig.getConfigDBType();
 	for (auto kv : startingConfigJSON) {

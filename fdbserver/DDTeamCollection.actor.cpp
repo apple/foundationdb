@@ -3029,8 +3029,8 @@ public:
 					    .trackLatest(self->primary ? "TotalDataInFlight"
 					                               : "TotalDataInFlightRemote"); // This trace event's trackLatest
 					                                                             // lifetime is controlled by
-					// DataDistributorData::totalDataInFlightEventHolder or
-					// DataDistributorData::totalDataInFlightRemoteEventHolder.
+					// DataDistributor::totalDataInFlightEventHolder or
+					// DataDistributor::totalDataInFlightRemoteEventHolder.
 					// The track latest key we use here must match the key used in
 					// the holder.
 
