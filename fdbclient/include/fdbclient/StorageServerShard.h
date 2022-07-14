@@ -25,6 +25,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "flow/flow.h"
 
+// Represents a data shard on a storage server hosting a continuous keyrange.
 struct StorageServerShard {
 	constexpr static FileIdentifier file_identifier = 4028358;
 
@@ -78,9 +79,9 @@ struct StorageServerShard {
 	}
 
 	KeyRange range;
-	Version version;
-	uint64_t id;
-	uint64_t desiredId;
+	Version version; // Shard creation version.
+	uint64_t id; // The actual shard ID.
+	uint64_t desiredId; // The intended shard ID.
 	int8_t shardState;
 };
 
