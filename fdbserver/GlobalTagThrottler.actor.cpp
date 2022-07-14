@@ -179,6 +179,11 @@ class GlobalTagThrottlerImpl {
 		for (const auto& [id, _] : throughput) {
 			result += getCurrentCost(id, tag, opType).orDefault(0);
 		}
+		TraceEvent("GlobalTagThrottler_GetCurrentCost")
+		    .detail("Tag", printable(tag))
+		    .detail("Op", (opType == OpType::READ) ? "Read" : "Write")
+		    .detail("Cost", result);
+
 		return result;
 	}
 
@@ -210,6 +215,11 @@ class GlobalTagThrottlerImpl {
 			return 1.0;
 		}
 		auto const transactionRate = stats.get().getTransactionRate();
+		TraceEvent("GlobalTagThrottler_GetAverageTransactionCost")
+		    .detail("Tag", tag)
+		    .detail("OpType", (opType == OpType::READ) ? "Read" : "Write")
+		    .detail("TransactionRate", transactionRate)
+		    .detail("Cost", cost);
 		if (transactionRate == 0.0) {
 			return 1.0;
 		} else {
