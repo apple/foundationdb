@@ -23,9 +23,10 @@
 #include <utility>
 #include <vector>
 
+#include "fdbclient/ClientBooleanParams.h"
+#include "fdbclient/CommitTransaction.h"
 #include "fdbclient/GenericTransactionHelper.h"
 #include "fdbclient/IClientApi.h"
-#include "fdbclient/DatabaseContext.h"
 #include "fdbclient/Subspace.h"
 #include "flow/ObjectSerializer.h"
 #include "flow/genericactors.actor.h"
@@ -285,17 +286,17 @@ public:
 
 	template <class Transaction>
 	void set(Transaction tr, T const& val) {
-		return tr->set(key, BinaryWriter::toValue<T>(val, Unversioned()));
+		tr->set(key, BinaryWriter::toValue<T>(val, Unversioned()));
 	}
 
 	template <class Transaction>
 	void atomicOp(Transaction tr, T const& val, MutationRef::Type type) {
-		return tr->atomicOp(key, BinaryWriter::toValue<T>(val, Unversioned()), type);
+		tr->atomicOp(key, BinaryWriter::toValue<T>(val, Unversioned()), type);
 	}
 
 	template <class Transaction>
 	void clear(Transaction tr) {
-		return tr->clear(key);
+		tr->clear(key);
 	}
 
 	Key key;
@@ -375,18 +376,18 @@ public:
 
 	template <class Transaction>
 	void erase(Transaction tr, KeyType const& key) {
-		return tr->clear(subspace.begin.withSuffix(KeyCodec::pack(key)));
+		tr->clear(subspace.begin.withSuffix(KeyCodec::pack(key)));
 	}
 
 	template <class Transaction>
 	void erase(Transaction tr, KeyType const& begin, KeyType const& end) {
-		return tr->clear(KeyRangeRef(subspace.begin.withSuffix(KeyCodec::pack(begin)),
-		                             subspace.begin.withSuffix(KeyCodec::pack(end))));
+		tr->clear(KeyRangeRef(subspace.begin.withSuffix(KeyCodec::pack(begin)),
+		                      subspace.begin.withSuffix(KeyCodec::pack(end))));
 	}
 
 	template <class Transaction>
 	void clear(Transaction tr) {
-		return tr->clear(subspace);
+		tr->clear(subspace);
 	}
 
 	KeyRange subspace;
@@ -471,7 +472,7 @@ public:
 
 	template <class Transaction>
 	typename std::enable_if<!is_transaction_creator<Transaction>, void>::type set(Transaction tr, T const& val) {
-		return tr->set(key, ObjectWriter::toValue(val, versionOptions));
+		tr->set(key, ObjectWriter::toValue(val, versionOptions));
 	}
 
 	template <class DB>
@@ -486,7 +487,7 @@ public:
 
 	template <class Transaction>
 	typename std::enable_if<!is_transaction_creator<Transaction>, void>::type clear(Transaction tr) {
-		return tr->clear(key);
+		tr->clear(key);
 	}
 
 	Key key;
@@ -569,18 +570,18 @@ public:
 
 	template <class Transaction>
 	void erase(Transaction tr, KeyType const& key) {
-		return tr->clear(subspace.begin.withSuffix(KeyCodec::pack(key)));
+		tr->clear(subspace.begin.withSuffix(KeyCodec::pack(key)));
 	}
 
 	template <class Transaction>
 	void erase(Transaction tr, KeyType const& begin, KeyType const& end) {
-		return tr->clear(KeyRangeRef(subspace.begin.withSuffix(KeyCodec::pack(begin)),
-		                             subspace.begin.withSuffix(KeyCodec::pack(end))));
+		tr->clear(KeyRangeRef(subspace.begin.withSuffix(KeyCodec::pack(begin)),
+		                      subspace.begin.withSuffix(KeyCodec::pack(end))));
 	}
 
 	template <class Transaction>
 	void clear(Transaction tr) {
-		return tr->clear(subspace);
+		tr->clear(subspace);
 	}
 
 	KeyRange subspace;
@@ -641,18 +642,18 @@ public:
 
 	template <class Transaction>
 	void erase(Transaction tr, ValueType const& val) {
-		return tr->clear(subspace.begin.withSuffix(Codec::pack(val)));
+		tr->clear(subspace.begin.withSuffix(Codec::pack(val)));
 	}
 
 	template <class Transaction>
 	void erase(Transaction tr, ValueType const& begin, ValueType const& end) {
-		return tr->clear(
+		tr->clear(
 		    KeyRangeRef(subspace.begin.withSuffix(Codec::pack(begin)), subspace.begin.withSuffix(Codec::pack(end))));
 	}
 
 	template <class Transaction>
 	void clear(Transaction tr) {
-		return tr->clear(subspace);
+		tr->clear(subspace);
 	}
 
 	KeyRange subspace;
