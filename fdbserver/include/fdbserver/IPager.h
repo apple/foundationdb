@@ -80,7 +80,7 @@ static const std::vector<std::pair<PagerEvents, PagerEventReasons>> L0PossibleEv
 	{ PagerEvents::PageWrite, PagerEventReasons::MetaData },
 };
 
-enum EncodingType : uint8_t { XXHash64 = 0, XOREncryption_TestOnly = 1, Encryption = 2, MAX_ENCODING_TYPE = 3 };
+enum EncodingType : uint8_t { XXHash64 = 0, XOREncryption_TestOnly = 1, AESEncryptionV1 = 2, MAX_ENCODING_TYPE = 3 };
 
 enum PageType : uint8_t {
 	HeaderPage = 0,
@@ -369,7 +369,7 @@ public:
 		}
 	};
 
-	struct EncryptionEncodingHeader {
+	struct AESEncryptionV1EncodingHeader {
 		BlobCipherEncryptHeader header;
 
 		void encode(const TextAndHeaderCipherKeys& cipherKeys, uint8_t* payload, int len) {
@@ -399,8 +399,8 @@ public:
 			return sizeof(XXHashEncodingHeader);
 		} else if (t == EncodingType::XOREncryption_TestOnly) {
 			return sizeof(XOREncryptionEncodingHeader);
-		} else if (t == EncodingType::Encryption) {
-			return sizeof(EncryptionEncodingHeader);
+		} else if (t == EncodingType::AESEncryptionV1) {
+			return sizeof(AESEncryptionV1EncodingHeader);
 		} else {
 			throw page_encoding_not_supported();
 		}
@@ -510,8 +510,8 @@ public:
 			XOREncryptionEncodingHeader* xh = page->getEncodingHeader<XOREncryptionEncodingHeader>();
 			xh->keyID = encryptionKey.id.orDefault(0);
 			xh->encode(encryptionKey.secret[0], pPayload, payloadSize, pageID);
-		} else if (page->encodingType == EncodingType::Encryption) {
-			EncryptionEncodingHeader* eh = page->getEncodingHeader<EncryptionEncodingHeader>();
+		} else if (page->encodingType == EncodingType::AESEncryptionV1) {
+			AESEncryptionV1EncodingHeader* eh = page->getEncodingHeader<AESEncryptionV1EncodingHeader>();
 			eh->encode(encryptionKey.cipherKeys, pPayload, payloadSize);
 		} else {
 			throw page_encoding_not_supported();
@@ -538,8 +538,8 @@ public:
 		// Populate encryption key with relevant fields from page
 		if (page->encodingType == EncodingType::XOREncryption_TestOnly) {
 			encryptionKey.id = page->getEncodingHeader<XOREncryptionEncodingHeader>()->keyID;
-		} else if (page->encodingType == EncodingType::Encryption) {
-			EncryptionEncodingHeader* eh = page->getEncodingHeader<EncryptionEncodingHeader>();
+		} else if (page->encodingType == EncodingType::AESEncryptionV1) {
+			AESEncryptionV1EncodingHeader* eh = page->getEncodingHeader<AESEncryptionV1EncodingHeader>();
 			encryptionKey.cipherHeader = eh->header;
 		}
 
@@ -565,8 +565,8 @@ public:
 			ASSERT(encryptionKey.secret.size() == 1);
 			page->getEncodingHeader<XOREncryptionEncodingHeader>()->decode(
 			    encryptionKey.secret[0], pPayload, payloadSize, pageID);
-		} else if (page->encodingType == EncodingType::Encryption) {
-			page->getEncodingHeader<EncryptionEncodingHeader>()->decode(
+		} else if (page->encodingType == EncodingType::AESEncryptionV1) {
+			page->getEncodingHeader<AESEncryptionV1EncodingHeader>()->decode(
 			    encryptionKey.cipherKeys, pPayload, payloadSize);
 		} else {
 			throw page_encoding_not_supported();
@@ -576,7 +576,7 @@ public:
 	const Arena& getArena() const { return arena; }
 
 	static bool isEncodingTypeEncrypted(EncodingType t) {
-		return t == EncodingType::Encryption || t == EncodingType::XOREncryption_TestOnly;
+		return t == EncodingType::AESEncryptionV1 || t == EncodingType::XOREncryption_TestOnly;
 	}
 
 	// Returns true if the page's encoding type employs encryption

@@ -7785,7 +7785,7 @@ public:
 		// storage engine instance is reopen on worker server start, the tenant mode is unknown.
 		if (SERVER_KNOBS->ENABLE_STORAGE_SERVER_ENCRYPTION) {
 			ASSERT(db.isValid());
-			encodingType = EncodingType::Encryption;
+			encodingType = EncodingType::AESEncryptionV1;
 			m_keyProvider = std::make_shared<EncryptionKeyProvider>(db);
 		} else if (g_network->isSimulated() && logID.hash() % 2 == 0) {
 			// Deterministically enable encryption based on uid
@@ -9931,7 +9931,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 	state EncodingType encodingType =
 	    static_cast<EncodingType>(deterministicRandom()->randomInt(0, EncodingType::MAX_ENCODING_TYPE));
 	state std::shared_ptr<IEncryptionKeyProvider> keyProvider;
-	if (encodingType == EncodingType::Encryption) {
+	if (encodingType == EncodingType::AESEncryptionV1) {
 		keyProvider = std::make_shared<RandomEncryptionKeyProvider>();
 	} else if (encodingType == EncodingType::XOREncryption_TestOnly) {
 		keyProvider = std::make_shared<XOREncryptionKeyProvider_TestOnly>(file);
