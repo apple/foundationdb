@@ -41,12 +41,6 @@
 typedef Reference<IDataDistributionTeam> ITeamRef;
 typedef std::pair<ITeamRef, ITeamRef> SrcDestTeamPair;
 
-// FIXME: Always use DataMovementReason to invoke these functions.
-inline bool isDiskRebalancePriority(int priority) {
-	return priority == SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM ||
-	       priority == SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM;
-}
-
 inline bool isDataMovementForDiskBalancing(DataMovementReason reason) {
 	return reason == DataMovementReason::REBALANCE_UNDERUTILIZED_TEAM ||
 	       reason == DataMovementReason::REBALANCE_OVERUTILIZED_TEAM;
@@ -62,6 +56,7 @@ inline bool isDataMovementForMountainChopper(DataMovementReason reason) {
 	       reason == DataMovementReason::REBALANCE_READ_OVERUTIL_TEAM;
 }
 
+// FIXME: Always use DataMovementReason to invoke these functions.
 inline bool isValleyFillerPriority(int priority) {
 	return priority == SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM ||
 	       priority == SERVER_KNOBS->PRIORITY_REBALANCE_READ_UNDERUTIL_TEAM;
