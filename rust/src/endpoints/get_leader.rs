@@ -16,8 +16,10 @@ mod cluster_controller_full_interface;
 
 use crate::flow::file_identifier::{peek_file_identifier, IdentifierType, ParsedFileIdentifier};
 use crate::flow::uid::{UID, WLTOKEN};
-use crate::flow::{cluster_file::ClusterFile, FlowMessage, Frame, Result};
+use crate::flow::{cluster_file::ClusterFile, Endpoint, FlowMessage, Frame, Result};
 use crate::services::ConnectionKeeper;
+
+use tokio::sync::watch;
 
 use flatbuffers::FlatBufferBuilder;
 
@@ -211,7 +213,6 @@ fn deserialize_cluster_interface(buf: &[u8]) -> Result<()> {
 
 fn deserialize_cluster_controller_full_interface(buf: &[u8]) -> Result<cluster_controller_full_interface::ClusterControllerFullInterface> {
     let cluster_controller_full_interface = cluster_controller_full_interface::root_as_fake_root(buf)?;
-    println!("{:x?}", cluster_controller_full_interface);
     Ok(cluster_controller_full_interface.cluster_controller_full_interface().unwrap())
 }
 
@@ -404,18 +405,49 @@ fn test_leader_info() -> Result<()> {
     println!("{:x?}", deserialize_endpoint(&buffer_8Endpoint)?);
 
     deserialize_cluster_interface(&buffer_16ClusterInterface)?;
-    deserialize_cluster_controller_full_interface(&buffer_30ClusterControllerFullInterface)?;
+    println!(
+            "{:x?}",
+            deserialize_cluster_controller_full_interface(&buffer_30ClusterControllerFullInterface)?
+    );
     Ok(())
 }
 
+pub struct ClusterControllerFullInterface {
+    // TODO: add more watches.
+    pub register_worker: watch::Receiver<Option<Endpoint>>,
+}
+
+impl ClusterControllerFullInterface {
+    pub async fn register_worker_worker(self: &mut Self) -> Result<()> {
+        loop {
+            self.register_worker.changed().await?;
+            println!("time to call register worker on {:?}", self.register_worker.borrow_and_update())
+        }
+    }
+}
+
 pub struct MonitorLeader {
-    pub svc: Arc<ConnectionKeeper>,
-    pub cluster_file: ClusterFile,
-    pub known_leader: UID,
-    pub serialized_info: Vec<u8>,
+    svc: Arc<ConnectionKeeper>,
+    cluster_file: ClusterFile,
+    known_leader: UID,
+    register_worker_tx: watch::Sender<Option<Endpoint>>,
 }
 
 impl MonitorLeader {
+    pub fn new(svc: Arc<ConnectionKeeper>, cluster_file: ClusterFile) -> (Self, ClusterControllerFullInterface) {
+        let (register_worker_tx, mut register_worker) = watch::channel::<Option<Endpoint>>(None);
+        (
+            MonitorLeader {
+                svc,
+                cluster_file,
+                known_leader: UID::default(),
+                register_worker_tx,
+            },
+            ClusterControllerFullInterface {
+                register_worker,
+            }
+        )
+    }
     pub async fn monitor_leader(self: &mut Self) -> Result<()> {
         use crate::flow::cluster_file::ClusterHost;
         loop {
@@ -469,7 +501,9 @@ impl MonitorLeader {
                         crate::flow::file_identifier::peek_file_identifier(serialized_info)?
                             .ensure_expected(CLUSTER_CONTROLLER_CLIENT_INTERFACE_FILE_IDENTIFIER)?;
                         let cluster_controller_full_interface = deserialize_cluster_controller_full_interface(serialized_info)?;
-                        println!("{:?}", cluster_controller_full_interface);
+                        // println!("{:?}", cluster_controller_full_interface);
+                        self.register_worker_tx.send(Some(cluster_controller_full_interface.register_worker().unwrap().endpoint().unwrap().into()))?;
+
                         // println!("File identifier: {:?}", file_identifier);
                         // let parsed_file_identifier = crate::flow::file_identifier::FileIdentifierNames::new()?.from_id(&file_identifier);
                         // println!("Parsed file identifier: {:?}", parsed_file_identifier);
