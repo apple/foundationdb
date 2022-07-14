@@ -28,6 +28,7 @@
 #include "fdbclient/FDBTypes.h"
 
 // file format of actual blob files
+// FIXME: use VecSerStrategy::String serialization for this
 struct GranuleSnapshot : VectorRef<KeyValueRef> {
 
 	constexpr static FileIdentifier file_identifier = 1300395;
