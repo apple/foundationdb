@@ -322,8 +322,6 @@ struct IndexBlobGranuleFileChunkRef {
 	                     const Value& chunk,
 	                     const CompressionFilter compFilter,
 	                     Arena& arena) {
-		ASSERT(compFilter != CompressionFilter::NONE);
-
 		chunkRef.compressionFilter = compFilter;
 		chunkRef.buffer = CompressionUtils::compress(chunkRef.compressionFilter.get(), chunk.contents(), arena);
 

@@ -61,26 +61,22 @@ struct BlobGranuleCipherKeysMeta {
 	EncryptCipherDomainId headerDomainId;
 	EncryptCipherBaseKeyId headerBaseCipherId;
 	EncryptCipherRandomSalt headerSalt;
-	StringRef ivRef;
+	std::string ivStr;
 
-	void setTextCipherDetails(const EncryptCipherDomainId& domainId,
-	                          const EncryptCipherBaseKeyId& baseCipherId,
-	                          const EncryptCipherRandomSalt& salt) {
-		textDomainId = domainId;
-		textBaseCipherId = baseCipherId;
-		textSalt = salt;
-	}
+	BlobGranuleCipherKeysMeta() {}
+	BlobGranuleCipherKeysMeta(const EncryptCipherDomainId tDomainId,
+	                          const EncryptCipherBaseKeyId tBaseCipherId,
+	                          const EncryptCipherRandomSalt tSalt,
+	                          const EncryptCipherDomainId hDomainId,
+	                          const EncryptCipherBaseKeyId hBaseCipherId,
+	                          const EncryptCipherRandomSalt hSalt,
+	                          const std::string& iv)
+	  : textDomainId(tDomainId), textBaseCipherId(tBaseCipherId), textSalt(tSalt), headerDomainId(hDomainId),
+	    headerBaseCipherId(hBaseCipherId), headerSalt(hSalt), ivStr(iv) {}
 
-	void setHeaderCipherDetails(const EncryptCipherDomainId& domainId,
-	                            const EncryptCipherBaseKeyId& baseCipherId,
-	                            const EncryptCipherRandomSalt& salt) {
-		headerDomainId = domainId;
-		headerBaseCipherId = baseCipherId;
-		headerSalt = salt;
-	}
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, textDomainId, textBaseCipherId, textSalt, headerDomainId, headerBaseCipherId, headerSalt, ivRef);
+		serializer(ar, textDomainId, textBaseCipherId, textSalt, headerDomainId, headerBaseCipherId, headerSalt, ivStr);
 	}
 };
 
@@ -114,19 +110,14 @@ struct BlobGranuleCipherKeysCtx {
 	BlobGranuleCipherKey headerCipherKey;
 	StringRef ivRef;
 
-	static BlobGranuleCipherKeysMeta toCipherKeysMeta(const BlobGranuleCipherKeysCtx& ctx, Arena& arena) {
-		BlobGranuleCipherKeysMeta cipherKeysMeta;
-		// Populate 'textCipherKey'
-		cipherKeysMeta.setTextCipherDetails(
-		    ctx.textCipherKey.encryptDomainId, ctx.textCipherKey.baseCipherId, ctx.textCipherKey.salt);
-		// Populate 'headerCipherKey'
-		cipherKeysMeta.setHeaderCipherDetails(
-		    ctx.headerCipherKey.encryptDomainId, ctx.headerCipherKey.baseCipherId, ctx.headerCipherKey.salt);
-		// Populate 'Initialization Vector'
-		cipherKeysMeta.ivRef = makeString(AES_256_IV_LENGTH, arena);
-		generateRandomData(mutateString(cipherKeysMeta.ivRef), AES_256_IV_LENGTH);
-
-		return cipherKeysMeta;
+	static BlobGranuleCipherKeysMeta toCipherKeysMeta(const BlobGranuleCipherKeysCtx& ctx) {
+		return BlobGranuleCipherKeysMeta(ctx.textCipherKey.encryptDomainId,
+		                                 ctx.textCipherKey.baseCipherId,
+		                                 ctx.textCipherKey.salt,
+		                                 ctx.headerCipherKey.encryptDomainId,
+		                                 ctx.headerCipherKey.baseCipherId,
+		                                 ctx.headerCipherKey.salt,
+		                                 ctx.ivRef.toString());
 	}
 
 	template <class Ar>
@@ -140,13 +131,40 @@ struct BlobGranuleFileEncryptionKeys {
 	Reference<BlobCipherKey> headerCipherKey;
 };
 
+struct BlobGranuleCipherKeysMetaRef {
+	EncryptCipherDomainId textDomainId;
+	EncryptCipherBaseKeyId textBaseCipherId;
+	EncryptCipherRandomSalt textSalt;
+	EncryptCipherDomainId headerDomainId;
+	EncryptCipherBaseKeyId headerBaseCipherId;
+	EncryptCipherRandomSalt headerSalt;
+	StringRef ivRef;
+
+	BlobGranuleCipherKeysMetaRef() {}
+	BlobGranuleCipherKeysMetaRef(Arena& to,
+	                             const EncryptCipherDomainId tDomainId,
+	                             const EncryptCipherBaseKeyId tBaseCipherId,
+	                             const EncryptCipherRandomSalt tSalt,
+	                             const EncryptCipherDomainId hDomainId,
+	                             const EncryptCipherBaseKeyId hBaseCipherId,
+	                             const EncryptCipherRandomSalt hSalt,
+	                             const std::string& ivStr)
+	  : textDomainId(tDomainId), textBaseCipherId(tBaseCipherId), textSalt(tSalt), headerDomainId(hDomainId),
+	    headerBaseCipherId(hBaseCipherId), headerSalt(hSalt), ivRef(StringRef(to, ivStr)) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, textDomainId, textBaseCipherId, textSalt, headerDomainId, headerBaseCipherId, headerSalt, ivRef);
+	}
+};
+
 struct BlobFilePointerRef {
 	constexpr static FileIdentifier file_identifier = 5253554;
 	StringRef filename;
 	int64_t offset;
 	int64_t length;
 	int64_t fullFileLength;
-	Optional<BlobGranuleCipherKeysMeta> cipherKeysMeta;
+	Optional<BlobGranuleCipherKeysMetaRef> cipherKeysMetaRef;
 
 	BlobFilePointerRef() {}
 	BlobFilePointerRef(Arena& to, const std::string& filename, int64_t offset, int64_t length, int64_t fullFileLength)
@@ -158,22 +176,32 @@ struct BlobFilePointerRef {
 	                   int64_t length,
 	                   int64_t fullFileLength,
 	                   Optional<BlobGranuleCipherKeysMeta> ciphKeysMeta)
-	  : filename(to, filename), offset(offset), length(length), fullFileLength(fullFileLength),
-	    cipherKeysMeta(ciphKeysMeta) {}
+	  : filename(to, filename), offset(offset), length(length), fullFileLength(fullFileLength) {
+		if (ciphKeysMeta.present()) {
+			cipherKeysMetaRef = BlobGranuleCipherKeysMetaRef(to,
+			                                                 ciphKeysMeta.get().textDomainId,
+			                                                 ciphKeysMeta.get().textBaseCipherId,
+			                                                 ciphKeysMeta.get().textSalt,
+			                                                 ciphKeysMeta.get().headerDomainId,
+			                                                 ciphKeysMeta.get().headerBaseCipherId,
+			                                                 ciphKeysMeta.get().headerSalt,
+			                                                 ciphKeysMeta.get().ivStr);
+		}
+	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, filename, offset, length, fullFileLength, cipherKeysMeta);
+		serializer(ar, filename, offset, length, fullFileLength, cipherKeysMetaRef);
 	}
 
 	std::string toString() const {
 		std::stringstream ss;
 		ss << filename.toString() << ":" << offset << ":" << length << ":" << fullFileLength;
-		if (cipherKeysMeta.present()) {
-			ss << ":CipherKeysMeta:TextCipher:" << cipherKeysMeta.get().textDomainId << ":"
-			   << cipherKeysMeta.get().textBaseCipherId << ":" << cipherKeysMeta.get().textSalt
-			   << ":HeaderCipher:" << cipherKeysMeta.get().headerDomainId << ":"
-			   << cipherKeysMeta.get().headerBaseCipherId << ":" << cipherKeysMeta.get().headerSalt;
+		if (cipherKeysMetaRef.present()) {
+			ss << ":CipherKeysMeta:TextCipher:" << cipherKeysMetaRef.get().textDomainId << ":"
+			   << cipherKeysMetaRef.get().textBaseCipherId << ":" << cipherKeysMetaRef.get().textSalt
+			   << ":HeaderCipher:" << cipherKeysMetaRef.get().headerDomainId << ":"
+			   << cipherKeysMetaRef.get().headerBaseCipherId << ":" << cipherKeysMetaRef.get().headerSalt;
 		}
 		return std::move(ss).str();
 	}

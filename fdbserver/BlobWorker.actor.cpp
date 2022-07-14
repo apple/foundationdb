@@ -332,26 +332,25 @@ ACTOR Future<BlobGranuleCipherKey> lookupCipherKey(Reference<BlobWorkerData> bwD
 }
 
 ACTOR Future<BlobGranuleCipherKeysCtx> getGranuleCipherKeys(Reference<BlobWorkerData> bwData,
-                                                            BlobGranuleCipherKeysMeta cipherKeysMeta,
+                                                            BlobGranuleCipherKeysMetaRef cipherKeysMetaRef,
                                                             Arena* arena) {
 	state BlobGranuleCipherKeysCtx cipherKeysCtx;
 
 	// Fetch 'textCipher' key
 	state BlobCipherDetails textCipherDetails(
-	    cipherKeysMeta.textDomainId, cipherKeysMeta.textBaseCipherId, cipherKeysMeta.textSalt);
+	    cipherKeysMetaRef.textDomainId, cipherKeysMetaRef.textBaseCipherId, cipherKeysMetaRef.textSalt);
 	BlobGranuleCipherKey textCipherKey = wait(lookupCipherKey(bwData, textCipherDetails, arena));
 	cipherKeysCtx.textCipherKey = textCipherKey;
 
 	// Fetch 'headerCipher' key
 	state BlobCipherDetails headerCipherDetails(
-	    cipherKeysMeta.headerDomainId, cipherKeysMeta.headerBaseCipherId, cipherKeysMeta.headerSalt);
+	    cipherKeysMetaRef.headerDomainId, cipherKeysMetaRef.headerBaseCipherId, cipherKeysMetaRef.headerSalt);
 	BlobGranuleCipherKey headerCipherKey = wait(lookupCipherKey(bwData, headerCipherDetails, arena));
 	cipherKeysCtx.headerCipherKey = headerCipherKey;
 
 	// Populate 'Intialization Vector'
-	ASSERT_EQ(cipherKeysMeta.ivRef.size(), AES_256_IV_LENGTH);
-	cipherKeysCtx.ivRef = makeString(AES_256_IV_LENGTH, *arena);
-	memcpy(mutateString(cipherKeysCtx.ivRef), cipherKeysMeta.ivRef.begin(), AES_256_IV_LENGTH);
+	ASSERT_EQ(cipherKeysMetaRef.ivRef.size(), AES_256_IV_LENGTH);
+	cipherKeysCtx.ivRef = StringRef(*arena, cipherKeysMetaRef.ivRef);
 	TraceEvent("GetGranuleCipherKey")
 	    .detail("IVChksum", XXH3_64bits(cipherKeysCtx.ivRef.begin(), cipherKeysCtx.ivRef.size()));
 
@@ -720,8 +719,7 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 	if (isBlobFileEncryptionSupported()) {
 		BlobGranuleCipherKeysCtx ciphKeysCtx = wait(getLatestGranuleCipherKeys(bwData, keyRange, &arena));
 		cipherKeysCtx = ciphKeysCtx;
-		cipherKeysMeta = BlobGranuleCipherKeysCtx::toCipherKeysMeta(cipherKeysCtx.get(), arena);
-		TraceEvent("WriteSnapshot").log();
+		cipherKeysMeta = BlobGranuleCipherKeysCtx::toCipherKeysMeta(cipherKeysCtx.get());
 	}
 
 	Optional<CompressionFilter> compressFilter = getBlobFileCompressFilter();
@@ -808,7 +806,7 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 	}
 
 	// FIXME: change when we implement multiplexing
-	return BlobFileIndex(version, fname, 0, serializedSize, serializedSize);
+	return BlobFileIndex(version, fname, 0, serializedSize, serializedSize, cipherKeysMeta);
 }
 
 ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(Reference<BlobWorkerData> bwData,
@@ -941,10 +939,10 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 		                                        snapshotF.fullFileLength,
 		                                        snapshotF.cipherKeysMeta);
 
-		if (snapshotF.cipherKeysMeta.present()) {
+		if (chunk.snapshotFile.get().cipherKeysMetaRef.present()) {
 			ASSERT(isBlobFileEncryptionSupported());
 			BlobGranuleCipherKeysCtx cipherKeysCtx =
-			    wait(getGranuleCipherKeys(bwData, snapshotF.cipherKeysMeta.get(), &filenameArena));
+			    wait(getGranuleCipherKeys(bwData, chunk.snapshotFile.get().cipherKeysMetaRef.get(), &filenameArena));
 			chunk.cipherKeysCtx = cipherKeysCtx;
 			TraceEvent("CompactFromBlob").log();
 		}
@@ -3197,10 +3195,10 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 					}
 				}
 
-				if (chunk.snapshotFile.present() && chunk.snapshotFile.get().cipherKeysMeta.present()) {
+				if (chunk.snapshotFile.present() && chunk.snapshotFile.get().cipherKeysMetaRef.present()) {
 					ASSERT(isBlobFileEncryptionSupported());
-					BlobGranuleCipherKeysCtx cipherKeysCtx =
-					    wait(getGranuleCipherKeys(bwData, chunk.snapshotFile.get().cipherKeysMeta.get(), &rep.arena));
+					BlobGranuleCipherKeysCtx cipherKeysCtx = wait(
+					    getGranuleCipherKeys(bwData, chunk.snapshotFile.get().cipherKeysMetaRef.get(), &rep.arena));
 					chunk.cipherKeysCtx = cipherKeysCtx;
 					TraceEvent("DoBlobGranuleFileRequest").log();
 				}
