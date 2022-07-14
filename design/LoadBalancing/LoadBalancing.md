@@ -104,7 +104,7 @@ If all alternatives failed, a flag is set, so if the next request fails with `pr
 
 ### Send requests to workers
 
-Here it is assumed that there are at least one alternative available.
+Here it is assumed that there is at least one alternative available.
 
 ```mermaid
 graph LR
