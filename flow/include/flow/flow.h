@@ -60,15 +60,9 @@
 #include <boost/version.hpp>
 
 #define TEST(condition)                                                                                                \
-	if (!(condition)) {                                                                                                \
-	} else {                                                                                                           \
-		static BaseTraceEvent* __test =                                                                                \
-		    &(TraceEvent(intToSeverity(FLOW_KNOBS->CODE_COV_TRACE_EVENT_SEVERITY), "CodeCoverage")                     \
-		          .detail("File", __FILE__)                                                                            \
-		          .detail("Line", __LINE__)                                                                            \
-		          .detail("Condition", #condition));                                                                   \
-		(void)__test;                                                                                                  \
-	}
+	do {                                                                                                               \
+		static_assert(false, "TEST macros are deprecated, please use CODE_PROBE instead");                             \
+	} while (false)
 
 /*
 usage:

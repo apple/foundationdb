@@ -1,5 +1,6 @@
 #include "flow/TestProbe.h"
 #include "flow/Arena.h"
+#include "flow/network.h"
 
 #include <map>
 #include <fmt/format.h>
@@ -57,6 +58,14 @@ struct CodeProbes {
 	};
 
 	std::multimap<Location, ICodeProbe const*> codeProbes;
+
+	void printNotHit() const {
+		for (auto probe : codeProbes) {
+			if (!probe.second->wasHit()) {
+				probe.second->trace(false);
+			}
+		}
+	}
 
 	void add(ICodeProbe const* probe) {
 		const char* file = probe->filename();
@@ -157,6 +166,10 @@ void registerProbe(const ICodeProbe& probe) {
 	CodeProbes::instance().add(&probe);
 }
 
+void printMissedProbes() {
+	CodeProbes::instance().printNotHit();
+}
+
 ICodeProbe::~ICodeProbe() {}
 
 void ICodeProbe::printProbesXML() {
@@ -166,4 +179,18 @@ void ICodeProbe::printProbesXML() {
 void ICodeProbe::printProbesJSON() {
 	CodeProbes::instance().printJSON();
 }
+
+// annotations
+namespace assert {
+
+bool NoSim::operator()(ICodeProbe* self) const {
+	return !g_network->isSimulated();
+}
+
+bool SimOnly::operator()(ICodeProbe* self) const {
+	return g_network->isSimulated();
+}
+
+} // namespace assert
+
 } // namespace probe

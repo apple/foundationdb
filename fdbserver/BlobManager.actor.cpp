@@ -683,7 +683,7 @@ static bool handleRangeIsAssign(Reference<BlobManagerData> bmData, RangeAssignme
 		if (assignment.assign.get().type == AssignRequestType::Continue) {
 			ASSERT(assignment.worker.present());
 			if (i.range() != assignment.keyRange || i.cvalue() != assignment.worker.get()) {
-				TEST(true); // BM assignment out of date
+				CODE_PROBE(true, "BM assignment out of date");
 				if (BM_DEBUG) {
 					fmt::print("Out of date re-assign for ({0}, {1}). Assignment must have changed while "
 					           "checking split.\n  Reassign: [{2} - {3}): {4}\n  Existing: [{5} - {6}): {7}\n",
@@ -1561,7 +1561,7 @@ ACTOR Future<Void> persistMergeGranulesDone(Reference<BlobManagerData> bmData,
 		}
 	}
 	if (tmpWorkerId == UID()) {
-		TEST(true); // All workers dead right now
+		CODE_PROBE(true, "All workers dead right now");
 		while (bmData->workersById.empty()) {
 			wait(bmData->recruitingStream.onChange() || bmData->foundBlobWorkers.getFuture());
 		}
@@ -1631,7 +1631,7 @@ ACTOR Future<Void> persistMergeGranulesDone(Reference<BlobManagerData> bmData,
 				           mergeVersion,
 				           tr->getCommittedVersion());
 			}
-			TEST(true); // Granule merge complete
+			CODE_PROBE(true, "Granule merge complete");
 			return Void();
 		} catch (Error& e) {
 			wait(tr->onError(e));
@@ -1753,7 +1753,7 @@ ACTOR Future<Void> maybeMergeRange(Reference<BlobManagerData> bmData,
 	}
 
 	if (beforeCandidates.empty() && afterCandidates.empty()) {
-		TEST(true); // no consecutive merge candidates
+		CODE_PROBE(true, "no consecutive merge candidates");
 		if (BM_DEBUG) {
 			fmt::print("BM {0} maybe merge [{1} - {2}): No merge candidates\n",
 			           bmData->epoch,
@@ -1763,7 +1763,7 @@ ACTOR Future<Void> maybeMergeRange(Reference<BlobManagerData> bmData,
 		return Void();
 	}
 
-	TEST(true); // consecutive granule merge candidates
+	CODE_PROBE(true, "consecutive granule merge candidates");
 
 	if (BM_DEBUG) {
 		fmt::print("BM {0} maybe merge [{1} - {2}): Checking metrics for {3} candidates ({4} - {5})\n",
@@ -1779,7 +1779,7 @@ ACTOR Future<Void> maybeMergeRange(Reference<BlobManagerData> bmData,
 	StorageMetrics targetGranuleMetrics = wait(bmData->db->getStorageMetrics(granuleRange, CLIENT_KNOBS->TOO_MANY));
 	if (targetGranuleMetrics.bytesPerKSecond >= SERVER_KNOBS->SHARD_MIN_BYTES_PER_KSEC ||
 	    targetGranuleMetrics.bytes >= SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES) {
-		TEST(true); // granule merge candidate no longer mergeable
+		CODE_PROBE(true, "granule merge candidate no longer mergeable");
 		return Void();
 	}
 
@@ -1924,8 +1924,8 @@ ACTOR Future<Void> maybeMergeRange(Reference<BlobManagerData> bmData,
 		}
 	}
 
-	TEST(bestGranuleIDs.size() == 1); // Cannot combine merge candidates into mergeable granule
-	TEST(bestGranuleIDs.size() > 1); // Granule ready for merge!
+	CODE_PROBE(bestGranuleIDs.size(,"1); // Cannot combine merge candidates into mergeable granule");
+	CODE_PROBE(bestGranuleIDs.size(,); "// Granule ready for merge!");
 
 	if (bestGranuleIDs.size() > 1) {
 		if (BM_DEBUG) {
@@ -1945,7 +1945,7 @@ ACTOR Future<Void> maybeMergeRange(Reference<BlobManagerData> bmData,
 			bool mergeStillOk = true;
 			for (auto it : reCheckMergeCandidates) {
 				if (!it->cvalue().present()) {
-					TEST(true); // granule no longer merge candidate after checking metrics, because of split eval
+					CODE_PROBE(true, "granule no longer merge candidate after checking metrics, because of split eval");
 					mergeStillOk = false;
 					break;
 				}
@@ -1959,7 +1959,7 @@ ACTOR Future<Void> maybeMergeRange(Reference<BlobManagerData> bmData,
 				           bestGranuleRange.begin.printable(),
 				           bestGranuleRange.end.printable(),
 				           bestGranuleIDs.size());
-				TEST(true); // Doing granule merge!
+				CODE_PROBE(true, "Doing granule merge!");
 				bmData->activeGranuleMerges.insert(bestGranuleRange, 0);
 				bmData->mergeCandidates.insert(bestGranuleRange, Optional<std::pair<UID, Version>>());
 				state std::pair<UID, Version> persistMerge = wait(persistMergeGranulesStart(
@@ -2173,7 +2173,7 @@ ACTOR Future<Void> monitorBlobWorkerStatus(Reference<BlobManagerData> bmData, Bl
 						}
 						ignore = true;
 					} else if (newEval < lastBoundaryEval.cvalue()) {
-						TEST(true); // BM got out-of-date split request
+						CODE_PROBE(true, "BM got out-of-date split request");
 						if (BM_DEBUG) {
 							fmt::print("BM {0} ignoring status from BW {1} for granule [{2} - {3}) {4} since it "
 							           "already processed [{5} - {6}) {7}.\n",
@@ -2249,7 +2249,7 @@ ACTOR Future<Void> monitorBlobWorkerStatus(Reference<BlobManagerData> bmData, Bl
 					// suddenly gets a burst of writes after a decision to merge is made
 					if (inProgressMergeVersion != invalidVersion) {
 						if (rep.blockedVersion < inProgressMergeVersion) {
-							TEST(true); // merge blocking re-snapshot
+							CODE_PROBE(true, "merge blocking re-snapshot");
 							if (BM_DEBUG) {
 								fmt::print("DBG: BM {0} MERGE @ {1} blocking re-snapshot [{2} - {3}) @ {4}, "
 								           "continuing snapshot\n",
@@ -2328,7 +2328,7 @@ ACTOR Future<Void> monitorBlobWorkerStatus(Reference<BlobManagerData> bmData, Bl
 						}
 						if (!bmData->isMergeActive(rep.granuleRange)) {
 							ASSERT(rep.mergeCandidate);
-							TEST(true); // Granule merge candidate
+							CODE_PROBE(true, "Granule merge candidate");
 							bmData->mergeCandidates.insert(rep.granuleRange,
 							                               std::pair(rep.granuleID, rep.startVersion));
 							newEval.inProgress =
@@ -2575,7 +2575,7 @@ ACTOR Future<Void> resumeActiveMerges(Reference<BlobManagerData> bmData) {
 
 			RangeResult result = wait(tr->getRange(currentRange, rowLimit));
 			for (auto& it : result) {
-				TEST(true); // Blob Manager Recovery found merging granule
+				CODE_PROBE(true, "Blob Manager Recovery found merging granule");
 				UID mergeGranuleID = decodeBlobGranuleMergeKey(it.key);
 				KeyRange mergeRange;
 				std::vector<UID> parentGranuleIDs;
@@ -2641,7 +2641,7 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 
 	state Future<Void> resumeMergesFuture = resumeActiveMerges(bmData);
 
-	TEST(true); // BM doing recovery
+	CODE_PROBE(true, "BM doing recovery");
 
 	wait(delay(0));
 
@@ -3000,7 +3000,7 @@ ACTOR Future<Void> initializeBlobWorker(Reference<BlobManagerData> self, Recruit
 		// if it failed in an expected way, add some delay before we try to recruit again
 		// on this worker
 		if (newBlobWorker.isError()) {
-			TEST(true); // BM got error recruiting BW
+			CODE_PROBE(true, "BM got error recruiting BW");
 			TraceEvent(SevWarn, "BMRecruitmentError", self->id)
 			    .error(newBlobWorker.getError())
 			    .detail("Epoch", self->epoch);

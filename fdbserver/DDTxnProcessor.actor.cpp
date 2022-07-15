@@ -250,7 +250,7 @@ class DDTxnProcessorImpl {
 		// If keyServers is too large to read in a single transaction, then we will have to break this process up into
 		// multiple transactions. In that case, each iteration should begin where the previous left off
 		while (beginKey < allKeys.end) {
-			TEST(beginKey > allKeys.begin); // Multi-transactional getInitialDataDistribution
+			CODE_PROBE(beginKey > allKeys.begin, "Multi-transactional getInitialDataDistribution");
 			loop {
 				succeeded = false;
 				try {

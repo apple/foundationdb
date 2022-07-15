@@ -5610,7 +5610,7 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 				    .detail("StopVersion", cfInfo->stopVersion)
 				    .detail("FKID", fetchKeysID);
 			} else if (cfInfo->refreshInProgress) {
-				TEST(true); // Racing refreshes for same change feed in fetch
+				CODE_PROBE(true, "Racing refreshes for same change feed in fetch");
 				destroyedFeedIds.insert(cfInfo->id);
 			}
 		}
@@ -5723,7 +5723,7 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 		auto existingEntry = data->uidChangeFeed.find(feedId);
 		if (existingEntry == data->uidChangeFeed.end() || existingEntry->second->destroyed ||
 		    !existingEntry->second->refreshInProgress) {
-			TEST(true); // feed refreshed
+			CODE_PROBE(true, "feed refreshed");
 			continue;
 		}
 
