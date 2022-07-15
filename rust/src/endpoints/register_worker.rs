@@ -39,7 +39,7 @@ const REGISTER_WORKER_REQUEST_FILE_IDENTIFIER: ParsedFileIdentifier = ParsedFile
     file_identifier_name: Some("RegisterWorkerRequest"),
 };
 
-const REGISTER_WORKER_RESPONSE_FILE_IDENTIFIER: ParsedFileIdentifier = ParsedFileIdentifier {
+const REGISTER_WORKER_REPLY_FILE_IDENTIFIER: ParsedFileIdentifier = ParsedFileIdentifier {
     file_identifier: 16475696,
     inner_wrapper: IdentifierType::Optional,
     outer_wrapper: IdentifierType::ErrorOr,
@@ -62,8 +62,8 @@ fn serialize_request(
     use crate::common_generated::{
         ClientWorkerInterface, ClientWorkerInterfaceArgs, ClusterControllerPriorityInfo,
         ClusterControllerPriorityInfoArgs, ConfigBroadcastInterface, ConfigBroadcastInterfaceArgs,
-        ConfigClassSet, ConfigClassSetArgs, ConfigClassSetBuilder, LocalityData, LocalityDataArgs,
-        LocalityDataBuilder, LocalityDataPair, LocalityDataPairArgs, NetworkAddress,
+        ConfigClassSet, ConfigClassSetArgs, LocalityData, LocalityDataArgs,
+        LocalityDataPair, LocalityDataPairArgs, NetworkAddress,
         OptionalBlobManagerInterface, OptionalDataDistributorInterface,
         OptionalEncryptKeyProxyInterface, OptionalRatekeeperInterface, ProcessClass,
         ProcessClassArgs, StringVectorEntry, TesterInterface, TesterInterfaceArgs, Void, VoidArgs,
@@ -218,7 +218,6 @@ fn serialize_request(
     ));
 
     let master_class = 6;
-    let best_fit = 0;
     let class_source_command_line = 0;
     let initial_class = Some(ProcessClass::create(
         builder,
@@ -247,35 +246,10 @@ fn serialize_request(
     let issues = Some(builder.create_vector(b));
     let incompatible_peers =
         Some(builder.create_vector::<flatbuffers::WIPOffset<NetworkAddress>>(&[]));
-    // let keys = Some(builder.create_vector::<flatbuffers::WIPOffset<StringVectorEntry>>(&[]));
-    let knob_config_class_set = Some(ConfigClassSetBuilder::new(builder).finish());
-    // let knob_config_class_set = Some(ConfigClassSet::create(builder, &ConfigClassSetArgs {
-    //     keys,
-    // }));
-    // let knob_config_class_set = None;
-
-    // let register_worker_request = Some(RegisterWorkerRequest::create(builder, &RegisterWorkerRequestArgs {
-    //     worker_interface: worker_interface,
-    //     initial_class: initial_class.as_ref(),
-    //     process_class: process_class.as_ref(),
-    //     priority_info: priority_info.as_ref(),
-    //     generation: 0,
-    //     distributor_interface_type: OptionalDataDistributorInterface::Void,
-    //     distributor_interface: Some(void.as_union_value()),
-    //     blob_manager_interface_type: OptionalBlobManagerInterface::Void,
-    //     blob_manager_interface: Some(void.as_union_value()),
-    //     encrypt_key_proxy_type: OptionalEncryptKeyProxyInterface::Void,
-    //     encrypt_key_proxy: Some(void.as_union_value()),
-    //     ratekeeper_interface_type: OptionalRatekeeperInterface::Void,
-    //     ratekeeper_interface: Some(void.as_union_value()),
-    //     issues,
-    //     incompatible_peers,
-    //     reply: reply_promise,
-    //     degraded: false,
-    //     last_seen_knob_version: 0,
-    //     knob_config_class_set,
-    //     request_db_info: true,
-    // }));
+    let keys = Some(builder.create_vector::<flatbuffers::WIPOffset<StringVectorEntry>>(&[]));
+    let knob_config_class_set = Some(ConfigClassSet::create(builder, &ConfigClassSetArgs {
+        keys,
+    }));
 
     let register_worker_request = Some(RegisterWorkerRequest::create(
         builder,
@@ -321,15 +295,26 @@ fn serialize_request(
 fn deserialize_response(buf: &[u8]) -> Result<register_worker_reply::RegisterWorkerReply> {
     let res = register_worker_reply::root_as_fake_root(buf)?;
     println!("{:?}", res);
-    Ok(res.register_worker_reply().unwrap())
+    use register_worker_reply::ErrorOr;
+    match res.error_or_type() {
+        ErrorOr::RegisterWorkerReply => Ok(res.error_or_as_register_worker_reply().unwrap()),
+        ErrorOr::Error => Err(format!(
+            "RegisterWorkerReply: {:?}",
+            res.error_or_as_error().unwrap()
+        )
+        .into()),
+        _ => Err(format!("problem deserializing response: {:?}", res).into()),
+    }
 }
 
+#[allow(dead_code)]
 fn deserialize_locality_data(buf: &[u8]) -> Result<()> {
     let locality_data = locality_data::root_as_fake_root(&buf)?;
     println!("{:?}", locality_data);
     Ok(())
 }
 
+#[allow(dead_code)]
 fn deserialize_worker_interface(buf: &[u8]) -> Result<()> {
     let worker_interface = worker_interface::root_as_fake_root(&buf)?;
     println!("{:x?}", worker_interface);
@@ -596,12 +581,16 @@ pub async fn register_worker(svc: &Arc<ConnectionKeeper>, endpoint: Endpoint) ->
             let req = REQUEST_BUILDER.with(|builder| {
                 serialize_request(
                     &mut builder.borrow_mut(),
-                    svc.public_addr.unwrap(),
+                    public_addr,
                     endpoint,
                 )
             })?;
-            let res = svc.rpc(req).await?;
-            println!("{:x?}", deserialize_response(res.frame.payload())?);
+            let reply = svc.rpc(req).await?;
+            reply
+            .file_identifier()
+            .ensure_expected(REGISTER_WORKER_REPLY_FILE_IDENTIFIER)?;
+
+            println!("{:x?}", deserialize_response(reply.frame.payload())?);
             Ok(())
         }
         None => Err("Can't register as worker; I'm not listening on a port!".into()),

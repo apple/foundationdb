@@ -5,8 +5,12 @@ table RegisterWorkerReply {
     priority_info: ClusterControllerPriorityInfo;
 }
 
+union ErrorOr {
+    Error, RegisterWorkerReply
+}
+
 table FakeRoot {
-    register_worker_reply: RegisterWorkerReply;
+    error_or: ErrorOr;
 }
 
 root_type FakeRoot;
