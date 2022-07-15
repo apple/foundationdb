@@ -31,6 +31,28 @@ namespace probe {
 
 namespace {
 
+std::vector<ExecutionContext> fromStrings(std::vector<std::string> const& ctxs) {
+	std::vector<ExecutionContext> res;
+	for (auto const& ctx : ctxs) {
+		std::string c;
+		c.reserve(ctx.size());
+		std::transform(ctx.begin(), ctx.end(), std::back_inserter(c), [](char c) { return std::tolower(c); });
+		if (c == "all") {
+			res.push_back(ExecutionContext::Net2);
+			res.push_back(ExecutionContext::Simulation);
+		} else if (c == "simulation") {
+			res.push_back(ExecutionContext::Simulation);
+		} else if (c == "net2") {
+			res.push_back(ExecutionContext::Net2);
+		} else {
+			throw invalid_option_value();
+		}
+	}
+	std::sort(res.begin(), res.end());
+	res.erase(std::unique(res.begin(), res.end()), res.end());
+	return res;
+}
+
 StringRef normalizePath(const char* path) {
 	auto srcBase = LiteralStringRef(FDB_SOURCE_DIR);
 	auto binBase = LiteralStringRef(FDB_SOURCE_DIR);
@@ -80,8 +102,9 @@ struct CodeProbes {
 	std::multimap<Location, ICodeProbe const*> codeProbes;
 
 	void printNotHit() const {
+		const ICodeProbe* prev = nullptr;
 		for (auto probe : codeProbes) {
-			if (!probe.second->wasHit()) {
+			if (!probe.second->wasHit() && *prev != *probe.second) {
 				probe.second->trace(false);
 			}
 		}
@@ -91,13 +114,7 @@ struct CodeProbes {
 		const char* file = probe->filename();
 		unsigned line = probe->line();
 		Location loc(normalizePath(file), line);
-		bool duplicate = false;
-		for (auto iter = codeProbes.find(loc); iter != codeProbes.end() && iter->first == loc; ++iter) {
-			duplicate = duplicate || strcmp(iter->second->comment(), probe->comment()) == 0;
-		}
-		if (!duplicate) {
-			codeProbes.emplace(loc, probe);
-		}
+		codeProbes.emplace(loc, probe);
 	}
 
 	static CodeProbes& instance() {
@@ -114,7 +131,7 @@ struct CodeProbes {
 			    std::make_pair(file, StringRef(reinterpret_cast<uint8_t const*>(comment), strlen(comment)));
 			ASSERT(file == normalizePath(probe.second->filename()));
 			auto iter = comments.find(commentEntry);
-			if (iter != comments.end()) {
+			if (iter != comments.end() && probe.second->line() != iter->second->line()) {
 				fmt::print("ERROR ({}:{}): {} isn't unique in file {}. Previously seen here: {}:{}\n",
 				           probe.first.file,
 				           probe.first.line,
@@ -122,17 +139,17 @@ struct CodeProbes {
 				           probe.second->filename(),
 				           iter->second->filename(),
 				           iter->second->line());
-				ICodeProbe const& fst = *iter->second;
-				ICodeProbe const& snd = *probe.second;
-				fmt::print("\t1st Type: {}\n", boost::core::demangle(typeid(fst).name()));
-				fmt::print("\t2nd Type: {}\n", boost::core::demangle(typeid(snd).name()));
-				fmt::print("\n");
-				fmt::print("\t1st Comment: {}\n", fst.comment());
-				fmt::print("\t2nd Comment: {}\n", snd.comment());
-				fmt::print("\n");
-				fmt::print("\t1st CompUnit: {}\n", fst.compilationUnit());
-				fmt::print("\t2nd CompUnit: {}\n", snd.compilationUnit());
-				fmt::print("\n");
+				// ICodeProbe const& fst = *iter->second;
+				// ICodeProbe const& snd = *probe.second;
+				// fmt::print("\t1st Type: {}\n", boost::core::demangle(typeid(fst).name()));
+				// fmt::print("\t2nd Type: {}\n", boost::core::demangle(typeid(snd).name()));
+				// fmt::print("\n");
+				// fmt::print("\t1st Comment: {}\n", fst.comment());
+				// fmt::print("\t2nd Comment: {}\n", snd.comment());
+				// fmt::print("\n");
+				// fmt::print("\t1st CompUnit: {}\n", fst.compilationUnit());
+				// fmt::print("\t2nd CompUnit: {}\n", snd.compilationUnit());
+				// fmt::print("\n");
 			} else {
 				comments.emplace(commentEntry, probe.second);
 			}
@@ -167,20 +184,54 @@ struct CodeProbes {
 		fmt::print("</CoverageTool>\n");
 	}
 
-	void printJSON() const {
+	void printJSON(std::vector<std::string> const& context = std::vector<std::string>()) const {
 		verify();
+		do {
+			struct foo {};
+			foo f;
+			fmt::print("{}\n", boost::core::demangle(typeid(f).name()));
+		} while (false);
+		do {
+			struct foo {};
+			foo f;
+			fmt::print("{}\n", boost::core::demangle(typeid(f).name()));
+		} while (false);
+		auto contexts = fromStrings(context);
+		const ICodeProbe* prev = nullptr;
 		for (auto probe : codeProbes) {
 			auto p = probe.second;
-			fmt::print("\t{{ File: \"{}\", Line: {}, Comment: \"{}\", Condition: \"{}\" }}\n",
-			           probe.first.file,
-			           p->line(),
-			           p->comment(),
-			           p->condition());
+			if (!contexts.empty()) {
+				bool print = false;
+				for (auto c : contexts) {
+					print = print || p->expectInContext(c);
+				}
+				if (!print) {
+					continue;
+				}
+			}
+			if (prev == nullptr || *prev != *probe.second) {
+				fmt::print(
+				    "{{ \"File\": \"{}\", \"Line\": {}, \"Comment\": \"{}\", \"Condition\": \"{}\", \"Function\": "
+				    "\"{}\" }}\n",
+				    probe.first.file,
+				    p->line(),
+				    p->comment(),
+				    p->condition(),
+				    p->function());
+			}
+			prev = probe.second;
 		}
 	}
 };
 
 } // namespace
+
+std::string functionNameFromInnerType(const char* name) {
+	auto res = boost::core::demangle(name);
+	auto pos = res.find_last_of(':');
+	ASSERT(pos != res.npos);
+	return res.substr(0, pos - 1);
+}
 
 void registerProbe(const ICodeProbe& probe) {
 	CodeProbes::instance().add(&probe);
@@ -192,12 +243,20 @@ void printMissedProbes() {
 
 ICodeProbe::~ICodeProbe() {}
 
+bool ICodeProbe::operator==(const ICodeProbe& other) const {
+	return strcmp(filename(), other.filename()) == 0 && line() == other.line();
+}
+
+bool ICodeProbe::operator!=(const ICodeProbe& other) const {
+	return !(*this == other);
+}
+
 void ICodeProbe::printProbesXML() {
 	CodeProbes::instance().printXML();
 }
 
-void ICodeProbe::printProbesJSON() {
-	CodeProbes::instance().printJSON();
+void ICodeProbe::printProbesJSON(std::vector<std::string> const& ctxs) {
+	CodeProbes::instance().printJSON(ctxs);
 }
 
 // annotations

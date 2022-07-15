@@ -183,7 +183,7 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_HELP,                  "-h",                          SO_NONE },
 	{ OPT_HELP,                  "--help",                      SO_NONE },
 	{ OPT_DEVHELP,               "--dev-help",                  SO_NONE },
-	{ OPT_PRINT_CODE_PROBES,     "--code-probes",               SO_NONE },
+	{ OPT_PRINT_CODE_PROBES,     "--code-probes",               SO_REQ_SEP },
 	{ OPT_KNOB,                  "--knob-",                     SO_REQ_SEP },
 	{ OPT_UNITTESTPARAM,         "--test-",                     SO_REQ_SEP },
 	{ OPT_LOCALITY,              "--locality-",                 SO_REQ_SEP },
@@ -1146,7 +1146,7 @@ private:
 				flushAndExit(FDB_EXIT_SUCCESS);
 				break;
 			case OPT_PRINT_CODE_PROBES:
-				probe::ICodeProbe::printProbesJSON();
+				probe::ICodeProbe::printProbesJSON({ std::string(args.OptionArg()) });
 				flushAndExit(FDB_EXIT_SUCCESS);
 				break;
 			case OPT_KNOB: {

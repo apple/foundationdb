@@ -28,17 +28,17 @@ namespace probe {
 
 struct ICodeProbe;
 
-enum class AnnotationType { Decoration, Assertion, Context };
+enum class AnnotationType { Decoration, Assertion, Context, Functional };
 enum class ExecutionContext { Simulation, Net2 };
 
 namespace context {
 struct Net2 {
 	constexpr static AnnotationType type = AnnotationType::Context;
-	constexpr bool operator()(ExecutionContext context) const { return context == ExecutionContext::Net2; }
+	constexpr static ExecutionContext value = ExecutionContext::Net2;
 };
 struct Sim2 {
 	constexpr static AnnotationType type = AnnotationType::Context;
-	constexpr bool operator()(ExecutionContext context) const { return context == ExecutionContext::Net2; }
+	constexpr static ExecutionContext value = ExecutionContext::Simulation;
 };
 
 constexpr Net2 net2;
@@ -114,6 +114,16 @@ constexpr auto noSim = !simOnly;
 
 } // namespace assert
 
+namespace func {
+
+struct Deduplicate {
+	constexpr static AnnotationType type = AnnotationType::Functional;
+};
+
+constexpr Deduplicate deduplicate;
+
+} // namespace func
+
 template <class... Args>
 struct CodeProbeAnnotations;
 
@@ -125,6 +135,7 @@ struct CodeProbeAnnotations<> {
 	constexpr bool expectContext(ExecutionContext context, bool prevHadSomeContext = false) const {
 		return !prevHadSomeContext;
 	}
+	constexpr bool deduplicate() const { return false; }
 };
 
 template <class Head, class... Tail>
@@ -156,19 +167,30 @@ struct CodeProbeAnnotations<Head, Tail...> {
 	// 2. Otherwise we will return true iff the execution context we're looking for has been passed to the probe
 	constexpr bool expectContext(ExecutionContext context, bool prevHadSomeContext = false) const {
 		if constexpr (HeadType::type == AnnotationType::Context) {
-			if constexpr (head(context)) {
+			if (HeadType::value == context) {
 				return true;
 			} else {
-				tail.expectContext(context, true);
+				return tail.expectContext(context, true);
 			}
 		} else {
-			tail.expectContext(context, prevHadSomeContext);
+			return tail.expectContext(context, prevHadSomeContext);
+		}
+	}
+
+	constexpr bool deduplicate() const {
+		if constexpr (std::is_same_v<HeadType, func::Deduplicate>) {
+			return true;
+		} else {
+			return tail.deduplicate();
 		}
 	}
 };
 
 struct ICodeProbe {
 	virtual ~ICodeProbe();
+
+	bool operator==(ICodeProbe const& other) const;
+	bool operator!=(ICodeProbe const& other) const;
 
 	virtual const char* filename() const = 0;
 	virtual unsigned line() const = 0;
@@ -178,13 +200,17 @@ struct ICodeProbe {
 	virtual void trace(bool) const = 0;
 	virtual bool wasHit() const = 0;
 	virtual unsigned hitCount() const = 0;
+	virtual bool expectInContext(ExecutionContext context) const = 0;
+	virtual std::string function() const = 0;
+	virtual bool deduplicate() const = 0;
 
 	static void printProbesXML();
-	static void printProbesJSON();
+	static void printProbesJSON(std::vector<std::string> const& ctxs = std::vector<std::string>());
 };
 
 void registerProbe(ICodeProbe const& probe);
 void printMissedProbes();
+std::string functionNameFromInnerType(const char* name);
 
 template <class FileName, class Condition, class Comment, class CompUnit, unsigned Line, class Annotations>
 struct CodeProbeImpl : ICodeProbe {
@@ -214,6 +240,9 @@ struct CodeProbeImpl : ICodeProbe {
 	const char* comment() const override { return Comment::value(); }
 	const char* condition() const override { return Condition::value(); }
 	const char* compilationUnit() const override { return CompUnit::value(); }
+	bool expectInContext(ExecutionContext context) const override { return annotations.expectContext(context); }
+	std::string function() const override { return functionNameFromInnerType(typeid(FileName).name()); }
+	bool deduplicate() const override { return annotations.deduplicate(); }
 
 private:
 	CodeProbeImpl() { registerProbe(*this); }
@@ -266,10 +295,10 @@ CodeProbeImpl<FileName, Condition, Comment, CompUnit, Line, CodeProbeAnnotations
 		                 condition,                                                                                    \
 		                 comment,                                                                                      \
 		                 CODE_PROBE_COMPILATION_UNIT,                                                                  \
-		                 _CODE_PROBE_T(FileType, __COUNTER__),                                                         \
-		                 _CODE_PROBE_T(CondType, __COUNTER__),                                                         \
-		                 _CODE_PROBE_T(CommentType, __COUNTER__),                                                      \
-		                 _CODE_PROBE_T(CompilationUnitType, __COUNTER__),                                              \
+		                 _CODE_PROBE_T(FileType, __LINE__),                                                            \
+		                 _CODE_PROBE_T(CondType, __LINE__),                                                            \
+		                 _CODE_PROBE_T(CommentType, __LINE__),                                                         \
+		                 _CODE_PROBE_T(CompilationUnitType, __LINE__),                                                 \
 		                 __VA_ARGS__)                                                                                  \
 	} while (false)
 
