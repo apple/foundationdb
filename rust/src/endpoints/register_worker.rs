@@ -59,62 +59,80 @@ fn serialize_request(
     public_address: SocketAddr,
     endpoint: Endpoint,
 ) -> Result<FlowMessage> {
-    use crate::common_generated::{LocalityDataPair, LocalityDataPairArgs, ConfigClassSetBuilder, NetworkAddress, StringVectorEntry, LocalityDataBuilder, ClientWorkerInterface, ClientWorkerInterfaceArgs, TesterInterface, TesterInterfaceArgs, ConfigBroadcastInterface, ConfigBroadcastInterfaceArgs, LocalityData, LocalityDataArgs, ProcessClass, ClusterControllerPriorityInfo, Void, VoidArgs, OptionalDataDistributorInterface, OptionalBlobManagerInterface, OptionalEncryptKeyProxyInterface, ConfigClassSet, ConfigClassSetArgs, WorkerInterface, WorkerInterfaceArgs, OptionalRatekeeperInterface};
-    use register_worker_request::{FakeRoot, FakeRootArgs, RegisterWorkerRequest, RegisterWorkerRequestArgs};
+    use crate::common_generated::{
+        ClientWorkerInterface, ClientWorkerInterfaceArgs, ClusterControllerPriorityInfo,
+        ClusterControllerPriorityInfoArgs, ConfigBroadcastInterface, ConfigBroadcastInterfaceArgs,
+        ConfigClassSet, ConfigClassSetArgs, ConfigClassSetBuilder, LocalityData, LocalityDataArgs,
+        LocalityDataBuilder, LocalityDataPair, LocalityDataPairArgs, NetworkAddress,
+        OptionalBlobManagerInterface, OptionalDataDistributorInterface,
+        OptionalEncryptKeyProxyInterface, OptionalRatekeeperInterface, ProcessClass,
+        ProcessClassArgs, StringVectorEntry, TesterInterface, TesterInterfaceArgs, Void, VoidArgs,
+        WorkerInterface, WorkerInterfaceArgs,
+    };
+    use register_worker_request::{
+        FakeRoot, FakeRootArgs, RegisterWorkerRequest, RegisterWorkerRequestArgs,
+    };
     let peer = match endpoint.peer {
-        Peer::Remote(socket_addr) => {
-            socket_addr
-        },
+        Peer::Remote(socket_addr) => socket_addr,
         Peer::Local(_) => {
             return Err("rust-language cluster controllers not supported yet. :-)".into());
         }
     };
     let (flow, reply_promise) = super::create_request_headers(builder, peer);
 
-    let client_worker_interface = { 
+    let client_worker_interface = {
         let (_, profiler) = create_request_stream(builder, &public_address)?;
         let (_, reboot) = create_request_stream(builder, &public_address)?;
         let (_, set_failure_injection) = create_request_stream(builder, &public_address)?;
-    
-        Some(ClientWorkerInterface::create(builder, &ClientWorkerInterfaceArgs {
-            profiler,
-            reboot,
-            set_failure_injection,
-        }))
+
+        Some(ClientWorkerInterface::create(
+            builder,
+            &ClientWorkerInterfaceArgs {
+                profiler,
+                reboot,
+                set_failure_injection,
+            },
+        ))
     };
 
     let machine_id_key = builder.create_vector("machineid".as_bytes());
     let machine_id_value = builder.create_vector("b8cf6032bb16cadd14cf674383dbc55d".as_bytes());
     // "machineid" : "b8cf6032bb16cadd14cf674383dbc55d",
-    let machine_id = LocalityDataPair::create(builder, &LocalityDataPairArgs {
-        key: Some(machine_id_key),
-        tag: 1,
-        val: Some(machine_id_value),
-    });
+    let machine_id = LocalityDataPair::create(
+        builder,
+        &LocalityDataPairArgs {
+            key: Some(machine_id_key),
+            tag: 1,
+            val: Some(machine_id_value),
+        },
+    );
     // "processid" : "a2b1b4f422382245aeeb11705cfd2df2",
     //               "cafef00ddeadbeefcafef00ddeadbeef"
     let process_id_key = builder.create_vector("processid".as_bytes());
     let process_id_value = builder.create_vector("cafef00ddeadbeefcafef00ddeadbeef".as_bytes());
-    let process_id = LocalityDataPair::create(builder, &LocalityDataPairArgs {
-        key: Some(process_id_key),
-        tag: 1,
-        val: Some(process_id_value),
-    });
+    let process_id = LocalityDataPair::create(
+        builder,
+        &LocalityDataPairArgs {
+            key: Some(process_id_key),
+            tag: 1,
+            val: Some(process_id_value),
+        },
+    );
     // "zoneid" : "b8cf6032bb16cadd14cf674383dbc55d"
     let zone_id_key = builder.create_vector("zoneid".as_bytes());
     let zone_id_value = builder.create_vector("b8cf6032bb16cadd14cf674383dbc55d".as_bytes());
-    let zone_id = LocalityDataPair::create(builder, &LocalityDataPairArgs {
-        key: Some(zone_id_key),
-        tag: 1,
-        val: Some(zone_id_value),
-
-    });
+    let zone_id = LocalityDataPair::create(
+        builder,
+        &LocalityDataPairArgs {
+            key: Some(zone_id_key),
+            tag: 1,
+            val: Some(zone_id_value),
+        },
+    );
 
     let data = Some(builder.create_vector(&[machine_id, process_id, zone_id]));
 
-    let locality_data = Some(LocalityData::create(builder, &LocalityDataArgs {
-        data,
-    }));
+    let locality_data = Some(LocalityData::create(builder, &LocalityDataArgs { data }));
 
     use super::create_request_stream;
     let (_, t_log) = create_request_stream(builder, &public_address)?;
@@ -141,12 +159,12 @@ fn serialize_request(
     let (_, encrypt_key_proxy) = create_request_stream(builder, &public_address)?;
     let (_, update_server_db_info) = create_request_stream(builder, &public_address)?;
 
-
     let tester_interface = {
         let (_, recruitments) = create_request_stream(builder, &public_address)?;
-        Some(TesterInterface::create(builder, &TesterInterfaceArgs {
-            recruitments
-        }))
+        Some(TesterInterface::create(
+            builder,
+            &TesterInterfaceArgs { recruitments },
+        ))
     };
     let config_broadcast_interface = {
         let (_, changes) = create_request_stream(builder, &public_address)?;
@@ -154,55 +172,81 @@ fn serialize_request(
         let (_, ready) = create_request_stream(builder, &public_address)?;
         let (_, registered) = create_request_stream(builder, &public_address)?;
         let (_, snapshot) = create_request_stream(builder, &public_address)?;
-        Some(ConfigBroadcastInterface::create(builder, &ConfigBroadcastInterfaceArgs {
-            changes,
-            id: id.as_ref(),
-            ready,
-            registered,
-            snapshot,
-        }))
+        Some(ConfigBroadcastInterface::create(
+            builder,
+            &ConfigBroadcastInterfaceArgs {
+                changes,
+                id: id.as_ref(),
+                ready,
+                registered,
+                snapshot,
+            },
+        ))
     };
 
-    let worker_interface = Some(WorkerInterface::create(builder, &WorkerInterfaceArgs{
-        client_worker_interface,
-        locality_data,
-        t_log,
-        master,
-        commit_proxy,
-        grv_proxy,
-        data_distributor,
-        ratekeeper,
-        blob_manager,
-        blob_worker,
-        resolver,
-        storage,
-        log_router,
-        debug_ping,
-        coordination_ping,
-        wait_failure,
-        set_metrics_rate,
-        event_log_request,
-        trace_batch_dump_request,
-        tester_interface,
-        disk_store_request,
-        exec_req,
-        worker_snap_req,
-        backup,
-        encrypt_key_proxy,
-        update_server_db_info,
-        config_broadcast_interface,
-    }));
+    let worker_interface = Some(WorkerInterface::create(
+        builder,
+        &WorkerInterfaceArgs {
+            client_worker_interface,
+            locality_data,
+            t_log,
+            master,
+            commit_proxy,
+            grv_proxy,
+            data_distributor,
+            ratekeeper,
+            blob_manager,
+            blob_worker,
+            resolver,
+            storage,
+            log_router,
+            debug_ping,
+            coordination_ping,
+            wait_failure,
+            set_metrics_rate,
+            event_log_request,
+            trace_batch_dump_request,
+            tester_interface,
+            disk_store_request,
+            exec_req,
+            worker_snap_req,
+            backup,
+            encrypt_key_proxy,
+            update_server_db_info,
+            config_broadcast_interface,
+        },
+    ));
 
     let master_class = 6;
     let best_fit = 0;
     let class_source_command_line = 0;
-    let initial_class = Some(ProcessClass::new(master_class, class_source_command_line));
-    let process_class = Some(ProcessClass::new(master_class, class_source_command_line));
-    let priority_info = Some(ClusterControllerPriorityInfo::new(best_fit, false, 0 /*fitness primary*/));
+    let initial_class = Some(ProcessClass::create(
+        builder,
+        &ProcessClassArgs {
+            class: master_class,
+            source: class_source_command_line,
+        },
+    ));
+    let process_class = Some(ProcessClass::create(
+        builder,
+        &ProcessClassArgs {
+            class: master_class,
+            source: class_source_command_line,
+        },
+    ));
+    let priority_info = Some(ClusterControllerPriorityInfo::create(
+        builder,
+        &ClusterControllerPriorityInfoArgs {
+            process_class_fitness: 6, /* never assign */
+            is_excluded: false,
+            dc_fitness: 0, /*fitness primary*/
+        },
+    ));
     let void = Void::create(builder, &VoidArgs {});
-    let b : &[flatbuffers::WIPOffset<StringVectorEntry>] = &[];
+    let b: &[flatbuffers::WIPOffset<StringVectorEntry>] = &[];
     let issues = Some(builder.create_vector(b));
-    let incompatible_peers = Some(builder.create_vector::<flatbuffers::WIPOffset<NetworkAddress>>(&[]));
+    let incompatible_peers =
+        Some(builder.create_vector::<flatbuffers::WIPOffset<NetworkAddress>>(&[]));
     // let keys = Some(builder.create_vector::<flatbuffers::WIPOffset<StringVectorEntry>>(&[]));
     let knob_config_class_set = Some(ConfigClassSetBuilder::new(builder).finish());
     // let knob_config_class_set = Some(ConfigClassSet::create(builder, &ConfigClassSetArgs {
@@ -233,30 +277,38 @@ fn serialize_request(
     //     request_db_info: true,
     // }));
 
-    let register_worker_request = Some(RegisterWorkerRequest::create(builder, &RegisterWorkerRequestArgs {
-        worker_interface: worker_interface,
-        initial_class: initial_class.as_ref(),
-        process_class: process_class.as_ref(),
-        priority_info: None,
-        generation: 0,
-        distributor_interface_type: OptionalDataDistributorInterface::Void,
-        distributor_interface: Some(void.as_union_value()),
-        blob_manager_interface_type: OptionalBlobManagerInterface::Void,
-        blob_manager_interface: Some(void.as_union_value()),
-        encrypt_key_proxy_type: OptionalEncryptKeyProxyInterface::Void,
-        encrypt_key_proxy: Some(void.as_union_value()),
-        ratekeeper_interface_type: OptionalRatekeeperInterface::Void,
-        ratekeeper_interface: Some(void.as_union_value()),
-        issues,
-        incompatible_peers,
-        reply: reply_promise,
-        degraded: false,
-        last_seen_knob_version: 0,
-        knob_config_class_set,
-        request_db_info: true,
-}));
+    let register_worker_request = Some(RegisterWorkerRequest::create(
+        builder,
+        &RegisterWorkerRequestArgs {
+            worker_interface: worker_interface,
+            initial_class: initial_class,
+            process_class: process_class,
+            priority_info: priority_info,
+            generation: 0,
+            distributor_interface_type: OptionalDataDistributorInterface::Void,
+            distributor_interface: Some(void.as_union_value()),
+            blob_manager_interface_type: OptionalBlobManagerInterface::Void,
+            blob_manager_interface: Some(void.as_union_value()),
+            encrypt_key_proxy_type: OptionalEncryptKeyProxyInterface::Void,
+            encrypt_key_proxy: Some(void.as_union_value()),
+            ratekeeper_interface_type: OptionalRatekeeperInterface::Void,
+            ratekeeper_interface: Some(void.as_union_value()),
+            issues,
+            incompatible_peers,
+            reply: reply_promise,
+            degraded: false,
+            last_seen_knob_version: 0,
+            knob_config_class_set,
+            request_db_info: true,
+        },
+    ));
 
-    let fake_root = FakeRoot::create(builder, &FakeRootArgs { register_worker_request });
+    let fake_root = FakeRoot::create(
+        builder,
+        &FakeRootArgs {
+            register_worker_request,
+        },
+    );
     builder.finish(fake_root, Some("myfi"));
     super::finalize_request(
         builder,
@@ -266,9 +318,7 @@ fn serialize_request(
     )
 }
 
-fn deserialize_response(
-    buf: &[u8]
-) -> Result<register_worker_reply::RegisterWorkerReply> {
+fn deserialize_response(buf: &[u8]) -> Result<register_worker_reply::RegisterWorkerReply> {
     let res = register_worker_reply::root_as_fake_root(buf)?;
     println!("{:?}", res);
     Ok(res.register_worker_reply().unwrap())
@@ -543,14 +593,17 @@ fn test_worker_interface_serializer() -> Result<()> {
 pub async fn register_worker(svc: &Arc<ConnectionKeeper>, endpoint: Endpoint) -> Result<()> {
     match svc.public_addr {
         Some(public_addr) => {
-            let req =
-                REQUEST_BUILDER.with(|builder| serialize_request(&mut builder.borrow_mut(), svc.public_addr.unwrap(), endpoint))?;
+            let req = REQUEST_BUILDER.with(|builder| {
+                serialize_request(
+                    &mut builder.borrow_mut(),
+                    svc.public_addr.unwrap(),
+                    endpoint,
+                )
+            })?;
             let res = svc.rpc(req).await?;
             println!("{:x?}", deserialize_response(res.frame.payload())?);
-            Ok(())    
+            Ok(())
         }
-        None => {
-            Err("Can't register as worker; I'm not listening on a port!".into())
-        }
+        None => Err("Can't register as worker; I'm not listening on a port!".into()),
     }
 }

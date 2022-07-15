@@ -618,7 +618,11 @@ impl ClusterControllerFullInterface {
                         "time to call register worker on {:?}",
                         register_worker_endpoint
                     );
-                    let res = crate::endpoints::register_worker::register_worker(&self.svc, register_worker_endpoint).await?;
+                    let res = crate::endpoints::register_worker::register_worker(
+                        &self.svc,
+                        register_worker_endpoint,
+                    )
+                    .await?;
                 }
                 None => {
                     println!("No register_worker endpoint.  Unhealthy cluster?");

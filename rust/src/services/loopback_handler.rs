@@ -72,10 +72,24 @@ impl LoopbackHandler {
                     let file_identifier = request.file_identifier();
                     let frame = request.frame;
                     // crate::flow::Frame::reverse_engineer_flatbuffer(frame.payload())?;
-                    Err(format!("Message not destined for well-known endpoint and not a known response: {:?} {:04x?} {:04x?}",
-                        frame.token,
-                        file_identifier,
-                        self.fit.from_id(&file_identifier)).into())
+                    match self.fit.from_id(&file_identifier) {
+                        Ok(parsed) => match parsed.file_identifier_name {
+                            Some(name) => {
+                                Err(format!("unhandled message: {:x?} {}", frame.token, name)
+                                    .into())
+                            }
+                            None => Err(format!(
+                                "unhandled message: {:x?} {:04x?}",
+                                frame.token, parsed
+                            )
+                            .into()),
+                        },
+                        Err(_) => Err(format!(
+                            "unhandled message: {:x?} {:04x?}",
+                            frame.token, file_identifier
+                        )
+                        .into()),
+                    }
                 }
             },
         }

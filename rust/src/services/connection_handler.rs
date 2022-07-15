@@ -42,7 +42,8 @@ async fn sender<C: 'static + AsyncWrite + Unpin + Send>(
     Ok(())
 }
 
-/// Takes FlowMessages from a single-threaded connection reader, and runs them in parallel by spawning concurrent tasks.
+// Takes FlowMessages from a single-threaded connection reader, and runs them in parallel by spawning concurrent tasks.
+// TODO: This should take a loopback_handler, since it always routes the messages to one.
 async fn receiver<C>(
     peer: SocketAddr,
     svc: Arc<RequestRouter>,
@@ -51,7 +52,7 @@ async fn receiver<C>(
 where
     C: 'static + AsyncRead + Unpin + Send,
 {
-    // XXX conncurrency limit per process or per connection?  This is per connection.
+    // XXX concurrency limit per process or per connection?  This is per connection.
     let svc_clone = svc.clone();
     let mut limit_svc =
         tower::limit::concurrency::ConcurrencyLimit::new(svc_clone.deref(), MAX_REQUESTS);
@@ -69,7 +70,7 @@ where
         // of memory usage, but it helps interleave network + processing time.
         futures_util::future::poll_fn(|cx| limit_svc.poll_ready(cx)).await?;
         let fut = limit_svc.call(request);
-        let svc = svc.clone();
+        let svc = svc.clone(); // XXX synchronization bottleneck!
         tokio::spawn(async move {
             // the real work happens in await, anyway
             // let response = fut.await.unwrap();
@@ -80,7 +81,7 @@ where
                 }
                 Ok(None) => (),
                 Err(err) => {
-                    println!("Error handling request: {:?}", err);
+                    println!("{:?}", err);
                 }
             };
         });

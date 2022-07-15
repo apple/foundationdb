@@ -7,7 +7,7 @@ pub mod register_worker;
 use crate::flow::file_identifier::{FileIdentifier, ParsedFileIdentifier};
 use crate::flow::{uid::UID, Flow, FlowMessage, Frame, Peer, Result};
 
-use std::net::{SocketAddr};
+use std::net::SocketAddr;
 
 fn create_request_headers(
     builder: &mut flatbuffers::FlatBufferBuilder<'static>,
@@ -30,30 +30,63 @@ fn create_request_headers(
     )
 }
 
-fn create_request_stream(builder: &mut flatbuffers::FlatBufferBuilder<'static>, public_address: &SocketAddr) -> Result<(
+fn create_request_stream(
+    builder: &mut flatbuffers::FlatBufferBuilder<'static>,
+    public_address: &SocketAddr,
+) -> Result<(
     UID,
-    Option<flatbuffers::WIPOffset<crate::common_generated::RequestStream<'static>>>
-)>
-{
-    use crate::common_generated::{IPv4, IPAddress, IPAddressArgs, NetworkAddressList, NetworkAddressListArgs, NetworkAddress, NetworkAddressArgs, OptionalNetworkAddress, Void, VoidArgs, Endpoint, EndpointArgs, RequestStream, RequestStreamArgs};
+    Option<flatbuffers::WIPOffset<crate::common_generated::RequestStream<'static>>>,
+)> {
+    use crate::common_generated::{
+        Endpoint, EndpointArgs, IPAddress, IPAddressArgs, IPv4, NetworkAddress, NetworkAddressArgs,
+        NetworkAddressList, NetworkAddressListArgs, OptionalNetworkAddress, RequestStream,
+        RequestStreamArgs, Void, VoidArgs,
+    };
     let uid = UID::random_token();
     let token = Some(uid.clone().into());
     let (ip4, port) = match public_address {
-        SocketAddr::V4(socket) => { (Some(IPv4::new(1, (*socket.ip()).into())), socket.port()) }, // TODO: Check endian-ness.
-        x => { return Err(format!("unsupported transport: {:?}", x).into()); }
+        SocketAddr::V4(socket) => (Some(IPv4::new(1, (*socket.ip()).into())), socket.port()), // TODO: Check endian-ness.
+        x => {
+            return Err(format!("unsupported transport: {:?}", x).into());
+        }
     };
-    let ip = Some(IPAddress::create(builder, &IPAddressArgs { ip4: ip4.as_ref() }));
-    let address = Some(NetworkAddress::create(builder, &NetworkAddressArgs{
-        ip,
-        port,
-        flags: 0,
-        from_hostname: false,
-    }));
+    let ip = Some(IPAddress::create(
+        builder,
+        &IPAddressArgs { ip4: ip4.as_ref() },
+    ));
+    let address = Some(NetworkAddress::create(
+        builder,
+        &NetworkAddressArgs {
+            ip,
+            port,
+            flags: 0,
+            from_hostname: false,
+        },
+    ));
     let secondary_address_type = OptionalNetworkAddress::Void;
-    let secondary_address = Void::create(builder, &VoidArgs{});
-    let addresses = Some(NetworkAddressList::create(builder, &NetworkAddressListArgs { address, secondary_address_type, secondary_address : Some(secondary_address.as_union_value()) }));
-    let endpoint = Some(Endpoint::create(builder, &EndpointArgs { addresses, token: token.as_ref() }));
-    Ok((uid, Some(RequestStream::create(builder, &RequestStreamArgs { endpoint }))))
+    let secondary_address = Void::create(builder, &VoidArgs {});
+    let addresses = Some(NetworkAddressList::create(
+        builder,
+        &NetworkAddressListArgs {
+            address,
+            secondary_address_type,
+            secondary_address: Some(secondary_address.as_union_value()),
+        },
+    ));
+    let endpoint = Some(Endpoint::create(
+        builder,
+        &EndpointArgs {
+            addresses,
+            token: token.as_ref(),
+        },
+    ));
+    Ok((
+        uid,
+        Some(RequestStream::create(
+            builder,
+            &RequestStreamArgs { endpoint },
+        )),
+    ))
 }
 
 fn finalize_request(
