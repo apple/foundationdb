@@ -58,6 +58,9 @@ struct TenantManagementWorkload : TestWorkload {
 	const Key specialKeysTenantConfigPrefix = SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT)
 	                                              .begin.withSuffix(TenantRangeImpl<true>::submoduleRange.begin)
 	                                              .withSuffix(TenantRangeImpl<true>::configureSubRange.begin);
+	const Key specialKeysTenantRenamePrefix = SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT)
+	                                              .begin.withSuffix(TenantRangeImpl<true>::submoduleRange.begin)
+	                                              .withSuffix(TenantRangeImpl<true>::renameSubRange.begin);
 
 	int maxTenants;
 	int maxTenantGroups;
@@ -597,20 +600,56 @@ struct TenantManagementWorkload : TestWorkload {
 		}
 	}
 
+	// Helper function that checks tenant keyspace and updates internal Tenant Map after a rename operation
+	ACTOR Future<Void> verifyTenantRename(Database cx,
+	                                      TenantManagementWorkload* self,
+	                                      TenantName oldTenantName,
+	                                      TenantName newTenantName) {
+		state Optional<TenantMapEntry> oldTenantEntry = wait(TenantAPI::tryGetTenant(cx.getReference(), oldTenantName));
+		state Optional<TenantMapEntry> newTenantEntry = wait(TenantAPI::tryGetTenant(cx.getReference(), newTenantName));
+		ASSERT(!oldTenantEntry.present());
+		ASSERT(newTenantEntry.present());
+		TenantData tData = self->createdTenants[oldTenantName];
+		self->createdTenants[newTenantName] = tData;
+		self->createdTenants.erase(oldTenantName);
+		if (!tData.empty) {
+			state Transaction insertTr(cx, newTenantName);
+			loop {
+				try {
+					insertTr.set(self->keyName, newTenantName);
+					wait(insertTr.commit());
+					break;
+				} catch (Error& e) {
+					wait(insertTr.onError(e));
+				}
+			}
+		}
+		return Void();
+	}
+
 	ACTOR Future<Void> renameTenant(Database cx, TenantManagementWorkload* self) {
-		// Currently only supporting MANAGEMENT_DATABASE op, so numTenants should always be 1
-		// state OperationType operationType = TenantManagementWorkload::randomOperationType();
-		int numTenants = 1;
+		state OperationType operationType = TenantManagementWorkload::randomOperationType();
+		state int numTenants = 1;
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+
+		if (operationType == OperationType::SPECIAL_KEYS || operationType == OperationType::MANAGEMENT_TRANSACTION) {
+			numTenants = deterministicRandom()->randomInt(1, 5);
+		}
 
 		state std::vector<TenantName> oldTenantNames;
 		state std::vector<TenantName> newTenantNames;
+		state std::set<TenantName> allTenantNames;
 		state bool tenantExists = false;
 		state bool tenantNotFound = false;
+		state bool tenantOverlap = false;
 		for (int i = 0; i < numTenants; ++i) {
 			TenantName oldTenant = self->chooseTenantName(false);
 			TenantName newTenant = self->chooseTenantName(false);
-			newTenantNames.push_back(newTenant);
+			tenantOverlap = tenantOverlap || allTenantNames.count(oldTenant) || allTenantNames.count(newTenant);
 			oldTenantNames.push_back(oldTenant);
+			newTenantNames.push_back(newTenant);
+			allTenantNames.insert(oldTenant);
+			allTenantNames.insert(newTenant);
 			if (!self->createdTenants.count(oldTenant)) {
 				tenantNotFound = true;
 			}
@@ -621,59 +660,63 @@ struct TenantManagementWorkload : TestWorkload {
 
 		loop {
 			try {
-				ASSERT(oldTenantNames.size() == 1);
-				state int tenantIndex = 0;
-				for (; tenantIndex != oldTenantNames.size(); ++tenantIndex) {
-					state TenantName oldTenantName = oldTenantNames[tenantIndex];
-					state TenantName newTenantName = newTenantNames[tenantIndex];
-					// Perform rename, then check against the DB for the new results
-					wait(TenantAPI::renameTenant(cx.getReference(), oldTenantName, newTenantName));
-					ASSERT(!tenantNotFound && !tenantExists);
-					state Optional<TenantMapEntry> oldTenantEntry =
-					    wait(TenantAPI::tryGetTenant(cx.getReference(), oldTenantName));
-					state Optional<TenantMapEntry> newTenantEntry =
-					    wait(TenantAPI::tryGetTenant(cx.getReference(), newTenantName));
-					ASSERT(!oldTenantEntry.present());
-					ASSERT(newTenantEntry.present());
-
-					// Update Internal Tenant Map and check for correctness
-					TenantData tData = self->createdTenants[oldTenantName];
-					self->createdTenants[newTenantName] = tData;
-					self->createdTenants.erase(oldTenantName);
-					if (!tData.empty) {
-						state Transaction insertTr(cx, newTenantName);
-						loop {
-							try {
-								insertTr.set(self->keyName, newTenantName);
-								wait(insertTr.commit());
-								break;
-							} catch (Error& e) {
-								wait(insertTr.onError(e));
-							}
-						}
+				if (operationType == OperationType::SPECIAL_KEYS) {
+					tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+					for (int i = 0; i != numTenants; ++i) {
+						tr->set(self->specialKeysTenantRenamePrefix.withSuffix(oldTenantNames[i]), newTenantNames[i]);
 					}
+					wait(tr->commit());
+					ASSERT(!tenantNotFound && !tenantExists && !tenantOverlap);
+				} else if (operationType == OperationType::MANAGEMENT_DATABASE) {
+					ASSERT(oldTenantNames.size() == 1 && newTenantNames.size() == 1);
+					wait(TenantAPI::renameTenant(cx.getReference(), oldTenantNames[0], newTenantNames[0]));
+					// Perform rename, then check against the DB for the new results
+					ASSERT(!tenantNotFound && !tenantExists);
+				} else { // operationType == OperationType::MANAGEMENT_TRANSACTION
+					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					std::vector<Future<Void>> renameFutures;
+					for (int i = 0; i != numTenants; ++i) {
+						renameFutures.push_back(
+						    success(TenantAPI::renameTenantTransaction(tr, oldTenantNames[i], newTenantNames[i])));
+					}
+					wait(waitForAll(renameFutures));
+					wait(tr->commit());
+					ASSERT(!tenantNotFound && !tenantExists);
+				}
+				state int tIndex = 0;
+				for (; tIndex != numTenants; ++tIndex) {
+					wait(self->verifyTenantRename(cx, self, oldTenantNames[tIndex], newTenantNames[tIndex]));
+					state TenantName newTenantName = newTenantNames[tIndex];
 					wait(self->checkTenant(cx, self, newTenantName, self->createdTenants[newTenantName]));
 				}
 				return Void();
 			} catch (Error& e) {
-				ASSERT(oldTenantNames.size() == 1);
+				if (operationType == OperationType::MANAGEMENT_DATABASE) {
+					ASSERT(oldTenantNames.size() == 1 && newTenantNames.size() == 1);
+				}
 				if (e.code() == error_code_tenant_not_found) {
 					TraceEvent("RenameTenantOldTenantNotFound")
-					    .detail("OldTenantName", oldTenantNames[0])
-					    .detail("NewTenantName", newTenantNames[0]);
+					    .detail("OldTenantNames", describe(oldTenantNames))
+					    .detail("NewTenantNames", describe(newTenantNames));
 					ASSERT(tenantNotFound);
+					return Void();
 				} else if (e.code() == error_code_tenant_already_exists) {
 					TraceEvent("RenameTenantNewTenantAlreadyExists")
-					    .detail("OldTenantName", oldTenantNames[0])
-					    .detail("NewTenantName", newTenantNames[0]);
+					    .detail("OldTenantNames", describe(oldTenantNames))
+					    .detail("NewTenantNames", describe(newTenantNames));
 					ASSERT(tenantExists);
+					return Void();
 				} else {
-					TraceEvent(SevError, "RenameTenantFailure")
-					    .error(e)
-					    .detail("OldTenantName", oldTenantNames[0])
-					    .detail("NewTenantName", newTenantNames[0]);
+					try {
+						wait(tr->onError(e));
+					} catch (Error& e) {
+						TraceEvent(SevError, "RenameTenantFailure")
+						    .error(e)
+						    .detail("OldTenantNames", describe(oldTenantNames))
+						    .detail("NewTenantNames", describe(newTenantNames));
+						return Void();
+					}
 				}
-				return Void();
 			}
 		}
 	}

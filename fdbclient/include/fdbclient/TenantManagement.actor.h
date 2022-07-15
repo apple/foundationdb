@@ -306,7 +306,16 @@ Future<Void> renameTenantTransaction(Transaction tr, TenantNameRef oldName, Tena
 	state Key oldNameKey = oldName.withPrefix(tenantMapPrefix);
 	state Key newNameKey = newName.withPrefix(tenantMapPrefix);
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
-	state Optional<TenantMapEntry> oldEntry = wait(tryGetTenantTransaction(tr, oldName));
+	state Optional<TenantMapEntry> oldEntry;
+	state Optional<TenantMapEntry> newEntry;
+	wait(store(oldEntry, tryGetTenantTransaction(tr, oldName)) &&
+	     store(newEntry, tryGetTenantTransaction(tr, newName)));
+	if (!oldEntry.present()) {
+		throw tenant_not_found();
+	}
+	if (newEntry.present()) {
+		throw tenant_already_exists();
+	}
 	tr->clear(oldNameKey);
 	tr->set(newNameKey, oldEntry.get().encode());
 
