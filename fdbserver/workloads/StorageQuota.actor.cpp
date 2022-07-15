@@ -21,6 +21,7 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 
+#include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct StorageQuotaWorkload : TestWorkload {
@@ -28,7 +29,7 @@ struct StorageQuotaWorkload : TestWorkload {
 
 	std::string description() const override { return "StorageQuotaWorkload"; }
 	Future<Void> setup(Database const& cx) override { return Void(); }
-	Future<Void> start(Database const& cx) override { return _start(cx); }
+	Future<Void> start(Database const& cx) override { return (clientId == 0) ? _start(cx) : Void(); }
 	Future<bool> check(Database const& cx) override { return true; }
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
@@ -53,12 +54,11 @@ struct StorageQuotaWorkload : TestWorkload {
 			try {
 				setStorageQuota(tr, tenantName, quota);
 				wait(tr.commit());
-				break;
+				return Void();
 			} catch (Error& e) {
 				wait(tr.onError(e));
 			}
 		}
-		return Void();
 	}
 
 	ACTOR static Future<Optional<uint64_t>> getStorageQuotaHelper(Database cx, StringRef tenantName) {
