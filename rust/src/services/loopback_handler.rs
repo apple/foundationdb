@@ -55,7 +55,7 @@ impl LoopbackHandler {
                 // Some(well_known_endpoint) => Ok(Some((**well_known_endpoint)(request))),
                 Some(well_known_endpoint) => Ok(Some(well_known_endpoint.handle(request))),
                 None => {
-                    crate::flow::Frame::reverse_engineer_flatbuffer(request.frame.payload())?;
+                    // crate::flow::Frame::reverse_engineer_flatbuffer(request.frame.payload())?;
                     Err(format!("Unhandled request for well-known endpoint {:?}", wltoken,).into())
                 }
             },
@@ -71,7 +71,7 @@ impl LoopbackHandler {
                 None => {
                     let file_identifier = request.file_identifier();
                     let frame = request.frame;
-                    crate::flow::Frame::reverse_engineer_flatbuffer(frame.payload())?;
+                    // crate::flow::Frame::reverse_engineer_flatbuffer(frame.payload())?;
                     Err(format!("Message not destined for well-known endpoint and not a known response: {:?} {:04x?} {:04x?}",
                         frame.token,
                         file_identifier,

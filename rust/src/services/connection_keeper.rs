@@ -7,7 +7,7 @@ use std::task::{Context, Poll};
 use tower::Service;
 
 pub struct ConnectionKeeper {
-    public_addr: Option<SocketAddr>,
+    pub public_addr: Option<SocketAddr>,
     request_router: Arc<RequestRouter>,
 }
 

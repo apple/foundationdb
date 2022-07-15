@@ -1,5 +1,24 @@
 include "common.fbs";
 
+/* void detail::LoadSaveHelper<
+RegisterWorkerRequest, LoadContext<ArenaObjectReader> >::SerializeFun::operator()<
+
+WorkerInterface,
+ProcessClass,
+ProcessClass,
+ClusterControllerPriorityInfo,
+long,
+Optional<DataDistributorInterface>,
+Optional<RatekeeperInterface>,
+Optional<BlobManagerInterface>,
+Optional<EncryptKeyProxyInterface>,
+Standalone<VectorRef<StringRef, (VecSerStrategy)0> >,
+std::vector<NetworkAddress, std::allocator<NetworkAddress> >,
+ReplyPromise<RegisterWorkerReply>,
+bool,
+long,
+ConfigClassSet,
+bool>(WorkerInterface&, ProcessClass&, ProcessClass&, ClusterControllerPriorityInfo&, long&, Optional<DataDistributorInterface>&, Optional<RatekeeperInterface>&, Optional<BlobManagerInterface>&, Optional<EncryptKeyProxyInterface>&, Standalone<VectorRef<StringRef, (VecSerStrategy)0> >&, std::vector<NetworkAddress, std::allocator<NetworkAddress> >&, ReplyPromise<RegisterWorkerReply>&, bool&, long&, ConfigClassSet&, bool&) at /root/src/foundationdb/flow/flat_buffers.h:1116 */
 table RegisterWorkerRequest {
     worker_interface: WorkerInterface;
     initial_class: ProcessClass;

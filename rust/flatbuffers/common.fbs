@@ -190,10 +190,6 @@ struct ClusterControllerPriorityInfo {
     dc_fitness: ubyte;
 }
 
-// table EnsureTableLocalityData {
-//     ensure_table: LocalityData;
-// }
-
 // N.B. These fields are defined in one order in the struct definition
 // and in another order in C++ call to serializer.  The serializer
 // call is what matters.
