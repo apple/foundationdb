@@ -149,6 +149,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 
 	// parameters global across all clients
 	int64_t targetByteRate;
+	bool doMergeCheckAtEnd;
 
 	std::vector<Reference<ThreadData>> directories;
 	std::vector<Future<Void>> clients;
@@ -161,6 +162,9 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		// randomize global test settings based on shared parameter to get similar workload across tests, but then vary
 		// different parameters within those constraints
 		int64_t randomness = sharedRandomNumber;
+
+		doMergeCheckAtEnd = randomness % 10 == 0;
+		randomness /= 10;
 
 		// randomize between low and high directory count
 		int64_t targetDirectories = 1 + (randomness % 8);
@@ -910,7 +914,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		}
 		wait(self->checkTenantRanges(self, cx, threadData));
 
-		bool initialCheck = result;
+		state bool initialCheck = result;
 		result &= threadData->mismatches == 0 && (threadData->timeTravelTooOld == 0);
 
 		fmt::print("Blob Granule Workload Directory {0} {1}:\n", threadData->directoryID, result ? "passed" : "failed");
@@ -932,6 +936,11 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 
 		// For some reason simulation is still passing when this fails?.. so assert for now
 		ASSERT(result);
+
+		if (self->clientId == 0 && SERVER_KNOBS->BG_ENABLE_MERGING && self->doMergeCheckAtEnd) {
+			TEST(true); // BGCorrectness clearing database and awaiting merge
+			wait(clearAndAwaitMerge(cx, threadData->directoryRange));
+		}
 
 		return result;
 	}

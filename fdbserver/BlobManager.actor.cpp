@@ -1939,7 +1939,7 @@ ACTOR Future<Void> maybeMergeRange(Reference<BlobManagerData> bmData,
 		}
 		// This code block must execute withou a wait for the lock checks (isMergeActive, mergeCandidates) to not
 		// deadlock and to avoid merge-merge races.
-		if ((!g_network->isSimulated() || !g_simulator.speedUpSimulation) && !bmData->isMergeActive(bestGranuleRange)) {
+		if (!bmData->isMergeActive(bestGranuleRange)) {
 			// check to avoid races where a split eval came in while merge was evaluating
 			auto reCheckMergeCandidates = bmData->mergeCandidates.intersectingRanges(bestGranuleRange);
 			bool mergeStillOk = true;
