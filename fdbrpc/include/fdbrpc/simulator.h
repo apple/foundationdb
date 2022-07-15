@@ -262,6 +262,7 @@ public:
 	virtual void killProcess(ProcessInfo* machine, KillType) = 0;
 	virtual void rebootProcess(Optional<Standalone<StringRef>> zoneId, bool allProcesses) = 0;
 	virtual void rebootProcess(ProcessInfo* process, KillType kt) = 0;
+	virtual void delayProcess(ProcessInfo* process) = 0;
 	virtual void killInterface(NetworkAddress address, KillType) = 0;
 	virtual bool killMachine(Optional<Standalone<StringRef>> machineId,
 	                         KillType kt,
