@@ -1646,6 +1646,28 @@ public:
 				doReboot(deterministicRandom()->randomChoice(processes), RebootProcess);
 		}
 	}
+
+	int delayCount = 3;
+	void delayProcess(ProcessInfo* process) override {
+		if (process->startingClass != ProcessClass::TesterClass && process == currentProcess &&
+		    BUGGIFY_WITH_PROB(0.15) && delayCount > 0) {
+			MutexHolder holder(mutex);
+			decltype(tasks) newTasks;
+			double delaySec = deterministicRandom()->random01() * FLOW_KNOBS->MAX_BUGGIFIED_DELAY;
+			while (!tasks.empty()) {
+				Task t = tasks.top();
+				tasks.pop();
+				if (t.machine == process) {
+					t.time += delaySec;
+				}
+				newTasks.push(std::move(t));
+			}
+			std::swap(tasks, newTasks);
+			delayCount --;
+			TraceEvent("ProcessDelayed").detail("ProcessInfo", process->toString()).detail("DelayFor", delaySec).detail("DelayCount", delayCount);
+		}
+	}
+
 	void killProcess(ProcessInfo* machine, KillType kt) override {
 		TraceEvent("AttemptingKillProcess").detail("ProcessInfo", machine->toString());
 		if (kt < RebootAndDelete) {
@@ -2152,6 +2174,7 @@ public:
 
 			this->currentProcess = t.machine;
 			try {
+				delayProcess(t.machine);
 				t.action.send(Void());
 				ASSERT(this->currentProcess == t.machine);
 			} catch (Error& e) {
