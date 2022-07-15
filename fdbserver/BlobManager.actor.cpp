@@ -1924,8 +1924,8 @@ ACTOR Future<Void> maybeMergeRange(Reference<BlobManagerData> bmData,
 		}
 	}
 
-	CODE_PROBE(bestGranuleIDs.size(,"1); // Cannot combine merge candidates into mergeable granule");
-	CODE_PROBE(bestGranuleIDs.size(,); "// Granule ready for merge!");
+	CODE_PROBE(bestGranuleIDs.size() == 1, "Cannot combine merge candidates into mergeable granule");
+	CODE_PROBE(bestGranuleIDs.size() > 1, "Granule ready for merge!");
 
 	if (bestGranuleIDs.size() > 1) {
 		if (BM_DEBUG) {
