@@ -81,6 +81,9 @@ impl ConnectionKeeper {
         }
         Ok(())
     }
+    pub fn loopback_handler<'a>(self: &'a Arc<Self>) -> &'a Arc<LoopbackHandler> {
+        &self.request_router.local_endpoint
+    }
     pub async fn rpc(self: &Arc<Self>, req: FlowMessage) -> Result<FlowMessage> {
         match &req.flow.dst {
             Peer::Remote(saddr) => self.ensure_endpoint(self.public_addr, saddr).await?,

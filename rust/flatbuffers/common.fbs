@@ -283,3 +283,8 @@ union OptionalEncryptKeyProxyInterface {
 table ConfigClassSet {
     keys: [StringVectorEntry];
 }
+
+table LifetimeToken {
+    cc_id: UID;
+    count: long;
+}

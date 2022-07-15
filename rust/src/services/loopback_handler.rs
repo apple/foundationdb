@@ -34,6 +34,7 @@ pub struct LoopbackHandler {
     // pub out_tx: mpsc::Sender<FlowMessage>,
     pub in_flight_requests: dashmap::DashMap<UID, oneshot::Sender<FlowMessage>>,
     pub well_known_endpoints: dashmap::DashMap<WLTOKEN, Box<dyn FlowHandler>>,
+    pub dynamic_endpoints: dashmap::DashMap<UID, Box<dyn FlowHandler>>,
 }
 
 impl LoopbackHandler {
@@ -42,11 +43,15 @@ impl LoopbackHandler {
             fit: FileIdentifierNames::new().unwrap(),
             in_flight_requests: dashmap::DashMap::new(),
             well_known_endpoints: dashmap::DashMap::new(),
+            dynamic_endpoints: dashmap::DashMap::new(),
         }))
     }
 
     pub fn register_well_known_endpoint(&self, wltoken: WLTOKEN, endpoint: Box<dyn FlowHandler>) {
         self.well_known_endpoints.insert(wltoken, endpoint);
+    }
+    pub fn register_dynamic_endpoint(&self, token: UID, endpoint: Box<dyn FlowHandler>) {
+        self.dynamic_endpoints.insert(token, endpoint);
     }
 
     fn handle_req<'a>(&'a self, request: FlowMessage) -> Result<Option<FlowFuture>> {
@@ -69,26 +74,31 @@ impl LoopbackHandler {
                     .into()),
                 },
                 None => {
-                    let file_identifier = request.file_identifier();
-                    let frame = request.frame;
-                    // crate::flow::Frame::reverse_engineer_flatbuffer(frame.payload())?;
-                    match self.fit.from_id(&file_identifier) {
-                        Ok(parsed) => match parsed.file_identifier_name {
-                            Some(name) => {
-                                Err(format!("unhandled message: {:x?} {}", frame.token, name)
-                                    .into())
+                    match self.dynamic_endpoints.get(&request.token()) {
+                        Some(dynamic_endpoint) => Ok(Some(dynamic_endpoint.handle(request))),
+                        None => {
+                            let file_identifier = request.file_identifier();
+                            let frame = request.frame;
+                            // crate::flow::Frame::reverse_engineer_flatbuffer(frame.payload())?;
+                            match self.fit.from_id(&file_identifier) {
+                                Ok(parsed) => match parsed.file_identifier_name {
+                                    Some(name) => {
+                                        Err(format!("unhandled message: {:x?} {}", frame.token, name)
+                                            .into())
+                                    }
+                                    None => Err(format!(
+                                        "unhandled message: {:x?} {:04x?}",
+                                        frame.token, parsed
+                                    )
+                                    .into()),
+                                },
+                                Err(_) => Err(format!(
+                                    "unhandled message: {:x?} {:04x?}",
+                                    frame.token, file_identifier
+                                )
+                                .into()),
                             }
-                            None => Err(format!(
-                                "unhandled message: {:x?} {:04x?}",
-                                frame.token, parsed
-                            )
-                            .into()),
-                        },
-                        Err(_) => Err(format!(
-                            "unhandled message: {:x?} {:04x?}",
-                            frame.token, file_identifier
-                        )
-                        .into()),
+                        }
                     }
                 }
             },

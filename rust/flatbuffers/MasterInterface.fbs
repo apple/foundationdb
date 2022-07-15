@@ -1,0 +1,21 @@
+include "common.fbs";
+
+table MasterInterface {
+    locality: LocalityData;
+    wait_failure: RequestStream;
+    // The rest are implicit; they're derived via get_adjusted_endpoint:
+    // get_commit_version: RequestStream;
+    // get_live_committed_version: RequestStream;
+    // report_live_committed_version: RequestStream;
+    // update_recovery_data: RequestStream;
+}
+
+union ErrorOr {
+    Error, MasterInterface
+}
+
+table FakeRoot {
+    error_or: ErrorOr;
+}
+
+root_type FakeRoot;

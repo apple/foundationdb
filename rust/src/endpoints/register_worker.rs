@@ -24,7 +24,8 @@ use crate::flow::{
     file_identifier::{IdentifierType, ParsedFileIdentifier},
     Endpoint, FlowMessage, Peer, Result,
 };
-use crate::services::ConnectionKeeper;
+use crate::services::{LoopbackHandler, ConnectionKeeper};
+use crate::endpoints::master::RecruitMaster;
 
 use flatbuffers::FlatBufferBuilder;
 
@@ -56,14 +57,15 @@ thread_local! {
 
 fn serialize_request(
     builder: &mut FlatBufferBuilder<'static>,
+    svc: Arc<ConnectionKeeper>,
+    loopback_handler: &Arc<LoopbackHandler>,
     public_address: SocketAddr,
     endpoint: Endpoint,
 ) -> Result<FlowMessage> {
     use crate::common_generated::{
         ClientWorkerInterface, ClientWorkerInterfaceArgs, ClusterControllerPriorityInfo,
         ClusterControllerPriorityInfoArgs, ConfigBroadcastInterface, ConfigBroadcastInterfaceArgs,
-        ConfigClassSet, ConfigClassSetArgs, LocalityData, LocalityDataArgs,
-        LocalityDataPair, LocalityDataPairArgs, NetworkAddress,
+        ConfigClassSet, ConfigClassSetArgs, NetworkAddress,
         OptionalBlobManagerInterface, OptionalDataDistributorInterface,
         OptionalEncryptKeyProxyInterface, OptionalRatekeeperInterface, ProcessClass,
         ProcessClassArgs, StringVectorEntry, TesterInterface, TesterInterfaceArgs, Void, VoidArgs,
@@ -95,44 +97,7 @@ fn serialize_request(
         ))
     };
 
-    let machine_id_key = builder.create_vector("machineid".as_bytes());
-    let machine_id_value = builder.create_vector("b8cf6032bb16cadd14cf674383dbc55d".as_bytes());
-    // "machineid" : "b8cf6032bb16cadd14cf674383dbc55d",
-    let machine_id = LocalityDataPair::create(
-        builder,
-        &LocalityDataPairArgs {
-            key: Some(machine_id_key),
-            tag: 1,
-            val: Some(machine_id_value),
-        },
-    );
-    // "processid" : "a2b1b4f422382245aeeb11705cfd2df2",
-    //               "cafef00ddeadbeefcafef00ddeadbeef"
-    let process_id_key = builder.create_vector("processid".as_bytes());
-    let process_id_value = builder.create_vector("cafef00ddeadbeefcafef00ddeadbeef".as_bytes());
-    let process_id = LocalityDataPair::create(
-        builder,
-        &LocalityDataPairArgs {
-            key: Some(process_id_key),
-            tag: 1,
-            val: Some(process_id_value),
-        },
-    );
-    // "zoneid" : "b8cf6032bb16cadd14cf674383dbc55d"
-    let zone_id_key = builder.create_vector("zoneid".as_bytes());
-    let zone_id_value = builder.create_vector("b8cf6032bb16cadd14cf674383dbc55d".as_bytes());
-    let zone_id = LocalityDataPair::create(
-        builder,
-        &LocalityDataPairArgs {
-            key: Some(zone_id_key),
-            tag: 1,
-            val: Some(zone_id_value),
-        },
-    );
-
-    let data = Some(builder.create_vector(&[machine_id, process_id, zone_id]));
-
-    let locality_data = Some(LocalityData::create(builder, &LocalityDataArgs { data }));
+    let locality_data = super::create_locality_data(builder);
 
     use super::create_request_stream;
     let (_, t_log) = create_request_stream(builder, &public_address)?;
@@ -158,6 +123,9 @@ fn serialize_request(
     let (_, backup) = create_request_stream(builder, &public_address)?;
     let (_, encrypt_key_proxy) = create_request_stream(builder, &public_address)?;
     let (_, update_server_db_info) = create_request_stream(builder, &public_address)?;
+
+    let recruit_master_handler = RecruitMaster::new(svc);
+    loopback_handler.register_dynamic_endpoint(master_token, Box::new(recruit_master_handler));
 
     let tester_interface = {
         let (_, recruitments) = create_request_stream(builder, &public_address)?;
@@ -322,6 +290,7 @@ fn deserialize_worker_interface(buf: &[u8]) -> Result<()> {
 }
 #[test]
 fn test_client_worker_interface_serializer() -> Result<()> {
+    #[allow(non_snake_case)]
     let buffer_21ClientWorkerInterface = vec![
         0x44, 0x00, 0x00, 0x00, 0x68, 0x7c, 0xbd, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0a,
         0x00, 0x10, 0x00, 0x04, 0x00, 0x08, 0x00, 0x0c, 0x00, 0x0a, 0x00, 0x0d, 0x00, 0x04, 0x00,
@@ -579,8 +548,11 @@ pub async fn register_worker(svc: &Arc<ConnectionKeeper>, endpoint: Endpoint) ->
     match svc.public_addr {
         Some(public_addr) => {
             let req = REQUEST_BUILDER.with(|builder| {
+                // TODO: Clean up arguments.
                 serialize_request(
                     &mut builder.borrow_mut(),
+                    svc.clone(),
+                    svc.loopback_handler(),
                     public_addr,
                     endpoint,
                 )

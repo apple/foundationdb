@@ -1,0 +1,13 @@
+include "common.fbs";
+
+table RecruitMasterRequest {
+    lifetime: LifetimeToken;
+    force_recovery: bool;
+    reply: ReplyPromise;
+}
+
+table FakeRoot {
+    recruit_master_request: RecruitMasterRequest;
+}
+
+root_type FakeRoot;

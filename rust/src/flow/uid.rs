@@ -70,7 +70,6 @@ impl UID {
         UID { uid: [0, 0] }
     }
 
-    #[allow(dead_code)]
     pub fn get_adjusted_token(&self, index: u32) -> UID {
         let new_index = self.uid[1] + (index as u64);
         UID {
