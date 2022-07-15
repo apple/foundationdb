@@ -697,6 +697,19 @@ public:
 	Reference<Histogram> storageCommitLatencyHistogram;
 	Reference<Histogram> ssDurableVersionUpdateLatencyHistogram;
 
+	struct PhysicalShardHistograms {
+		const Reference<Histogram> cleanUpLatency;
+		const Reference<Histogram> numShardsToCleanUp;
+
+		PhysicalShardHistograms()
+		  : cleanUpLatency(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
+		                                           "TimeSpentCleanUpEmptyShards"_sr,
+		                                           Histogram::Unit::microseconds)),
+		    numShardsToCleanUp(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
+		                                               "NumShardsToCleanUp"_sr,
+		                                               Histogram::Unit::countLinear)) {}
+	} physicalShardHistograms;
+
 	// watch map operations
 	Reference<ServerWatchMetadata> getWatchMetadata(KeyRef key) const;
 	KeyRef setWatchMetadata(Reference<ServerWatchMetadata> metadata);
@@ -8442,9 +8455,18 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 			    .detail("OldestRemoveKVSRangesVersion", data->pendingRemoveRanges.begin()->first);
 			ASSERT(newOldestVersion <= data->pendingRemoveRanges.begin()->first);
 			if (newOldestVersion == data->pendingRemoveRanges.begin()->first) {
+				state std::vector<std::string> emptyShardIds;
 				for (const auto& range : data->pendingRemoveRanges.begin()->second) {
-					data->storage.removeRange(range);
+					auto ids = data->storage.removeRange(range);
+					emptyShardIds.insert(emptyShardIds.end(), ids.begin(), ids.end());
 					TraceEvent(SevVerbose, "RemoveKVSRange", data->thisServerID).detail("Range", range);
+				}
+				if (emptyShardIds.size() > 0) {
+					state double start = now();
+					TraceEvent("RemoveEmptyPhysicalShards").detail("NumShards", emptyShardIds.size());
+					wait(data->storage.cleanUpShardsIfNeeded(emptyShardIds));
+					data->physicalShardHistograms.cleanUpLatency->sample(now() - start);
+					data->physicalShardHistograms.numShardsToCleanUp->sampleRecordCounter(emptyShardIds.size());
 				}
 				data->pendingRemoveRanges.erase(data->pendingRemoveRanges.begin());
 			}
