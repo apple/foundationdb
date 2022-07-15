@@ -1055,12 +1055,20 @@ public:
 	bool checkRunnable() override { return net2->checkRunnable(); }
 
 #ifdef ENABLE_SAMPLING
-	ActorLineageSet& getActorLineageSet() override { return actorLineageSet; }
+	ActorLineageSet& getActorLineageSet() override {
+		return actorLineageSet;
+	}
 #endif
 
-	void stop() override { isStopped = true; }
-	void addStopCallback(std::function<void()> fn) override { stopCallbacks.emplace_back(std::move(fn)); }
-	bool isSimulated() const override { return true; }
+	void stop() override {
+		isStopped = true;
+	}
+	void addStopCallback(std::function<void()> fn) override {
+		stopCallbacks.emplace_back(std::move(fn));
+	}
+	bool isSimulated() const override {
+		return true;
+	}
 
 	struct SimThreadArgs {
 		THREAD_FUNC_RETURN (*func)(void*);
@@ -1205,7 +1213,9 @@ public:
 	}
 
 	// Implement ISimulator interface
-	void run() override { runLoop(this); }
+	void run() override {
+		runLoop(this);
+	}
 	ProcessInfo* newProcess(const char* name,
 	                        IPAddress ip,
 	                        uint16_t port,
@@ -1647,24 +1657,29 @@ public:
 		}
 	}
 
-	int delayCount = 3;
 	void delayProcess(ProcessInfo* process) override {
 		if (process->startingClass != ProcessClass::TesterClass && process == currentProcess &&
-		    BUGGIFY_WITH_PROB(0.15) && delayCount > 0) {
-			MutexHolder holder(mutex);
-			decltype(tasks) newTasks;
+		    BUGGIFY_WITH_PROB(0.15) && process->buggifyDelayCount < 3) {
 			double delaySec = deterministicRandom()->random01() * FLOW_KNOBS->MAX_BUGGIFIED_DELAY;
-			while (!tasks.empty()) {
-				Task t = tasks.top();
-				tasks.pop();
-				if (t.machine == process) {
-					t.time += delaySec;
+			TraceEvent("ProcessDelayed")
+			    .detail("ProcessInfo", process->toString())
+			    .detail("DelayFor", delaySec)
+			    .detail("DelayCount", process->buggifyDelayCount);
+
+			{
+				MutexHolder holder(mutex);
+				decltype(tasks) newTasks;
+				while (!tasks.empty()) {
+					Task t = tasks.top();
+					tasks.pop();
+					if (t.machine == process) {
+						t.time += delaySec;
+					}
+					newTasks.push(std::move(t));
 				}
-				newTasks.push(std::move(t));
+				std::swap(tasks, newTasks);
+				process->buggifyDelayCount++;
 			}
-			std::swap(tasks, newTasks);
-			delayCount --;
-			TraceEvent("ProcessDelayed").detail("ProcessInfo", process->toString()).detail("DelayFor", delaySec).detail("DelayCount", delayCount);
 		}
 	}
 
@@ -2202,7 +2217,9 @@ public:
 		tasks.push(Task(time, taskID, taskCount++, getCurrentProcess(), std::move(signal)));
 		mutex.leave();
 	}
-	bool isOnMainThread() const override { return net2->isOnMainThread(); }
+	bool isOnMainThread() const override {
+		return net2->isOnMainThread();
+	}
 	Future<Void> onProcess(ISimulator::ProcessInfo* process, TaskPriority taskID) override {
 		return delay(0, taskID, process);
 	}
@@ -2212,7 +2229,9 @@ public:
 		return delay(0, taskID, process->machine->machineProcess);
 	}
 
-	ProtocolVersion protocolVersion() const override { return getCurrentProcess()->protocolVersion; }
+	ProtocolVersion protocolVersion() const override {
+		return getCurrentProcess()->protocolVersion;
+	}
 
 	// time is guarded by ISimulator::mutex. It is not necessary to guard reads on the main thread because
 	// time should only be modified from the main thread.
