@@ -83,6 +83,8 @@ public:
 		bool rebooting;
 		std::vector<flowGlobalType> globals;
 
+		int buggifyDelayCount = 0;
+
 		INetworkConnections* network;
 
 		uint64_t fault_injection_r;
