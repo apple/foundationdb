@@ -147,7 +147,7 @@ struct MutationRef {
 		auto headerCipherItr = cipherKeys.find(ENCRYPT_HEADER_DOMAIN_ID);
 		ASSERT(textCipherItr != cipherKeys.end() && textCipherItr->second.isValid());
 		ASSERT(headerCipherItr != cipherKeys.end() && headerCipherItr->second.isValid());
-		uint8_t iv[AES_256_IV_LENGTH] = {0};
+		uint8_t iv[AES_256_IV_LENGTH] = { 0 };
 		deterministicRandom()->randomBytes(iv, AES_256_IV_LENGTH);
 		BinaryWriter bw(AssumeVersion(g_network->protocolVersion()));
 		bw << *this;
