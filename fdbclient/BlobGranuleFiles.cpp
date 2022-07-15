@@ -783,6 +783,8 @@ TEST_CASE("/blobgranule/files/snapshotFormatUnitTest") {
 	std::unordered_set<std::string> usedKeys;
 	Standalone<GranuleSnapshot> data;
 	int totalDataBytes = 0;
+	const int maxKeyGenAttempts = 1000;
+	int nAttempts = 0;
 	while (totalDataBytes < targetDataBytes) {
 		int keySize = deterministicRandom()->randomInt(targetKeyLength / 2, targetKeyLength * 3 / 2);
 		keySize = std::min(keySize, uidSize);
@@ -799,6 +801,13 @@ TEST_CASE("/blobgranule/files/snapshotFormatUnitTest") {
 
 			data.push_back_deep(data.arena(), KeyValueRef(KeyRef(key), ValueRef(value)));
 			totalDataBytes += key.size() + value.size();
+			nAttempts = 0;
+		} else if (nAttempts > maxKeyGenAttempts) {
+			// KeySpace exhausted, avoid infinite loop
+			break;
+		} else {
+			// Keep exploring the KeySpace
+			nAttempts++;
 		}
 	}
 
