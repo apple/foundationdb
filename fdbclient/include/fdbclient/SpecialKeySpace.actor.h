@@ -467,7 +467,7 @@ public:
 	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key) override;
 };
 
-class CoordinatorsAutoImpl : public SpecialKeyRangeReadImpl {
+class CoordinatorsAutoImpl : public SpecialKeyRangeAsyncImpl {
 public:
 	explicit CoordinatorsAutoImpl(KeyRangeRef kr);
 	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,

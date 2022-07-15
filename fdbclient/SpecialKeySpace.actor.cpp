@@ -781,12 +781,12 @@ Future<RangeResult> ConflictingKeysImpl::getRange(ReadYourWritesTransaction* ryw
 		auto beginIter = krMapPtr->rangeContaining(kr.begin);
 		auto endIter = krMapPtr->rangeContaining(kr.end);
 
-		if (beginIter->begin() != kr.begin)
+		if (!kr.contains(beginIter->begin()) && beginIter != endIter)
 			++beginIter;
 		for (auto it = beginIter; it != endIter; ++it) {
 			result.push_back_deep(result.arena(), KeyValueRef(it->begin(), it->value()));
 		}
-		if (endIter->begin() != kr.end)
+		if (kr.contains(endIter->begin()))
 			result.push_back_deep(result.arena(), KeyValueRef(endIter->begin(), endIter->value()));
 	}
 	return result;
@@ -1856,7 +1856,7 @@ void CoordinatorsImpl::clear(ReadYourWritesTransaction* ryw, const KeyRef& key) 
 	    ryw, "coordinators", "Clear operation is meaningless thus forbidden for coordinators");
 }
 
-CoordinatorsAutoImpl::CoordinatorsAutoImpl(KeyRangeRef kr) : SpecialKeyRangeReadImpl(kr) {}
+CoordinatorsAutoImpl::CoordinatorsAutoImpl(KeyRangeRef kr) : SpecialKeyRangeAsyncImpl(kr) {}
 
 ACTOR static Future<RangeResult> CoordinatorsAutoImplActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
 	state RangeResult res;
