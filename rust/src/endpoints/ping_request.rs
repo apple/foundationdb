@@ -35,7 +35,7 @@ thread_local! {
 }
 
 thread_local! {
-    static REPLY_BUILDER : std::cell::RefCell<FlatBufferBuilder<'static>> = std::cell::RefCell::new(FlatBufferBuilder::with_capacity(1024));
+    pub static REPLY_BUILDER : std::cell::RefCell<FlatBufferBuilder<'static>> = std::cell::RefCell::new(FlatBufferBuilder::with_capacity(1024));
 }
 
 pub fn serialize_request(
@@ -59,7 +59,7 @@ pub fn serialize_request(
     )
 }
 
-fn serialize_reply(builder: &mut FlatBufferBuilder<'static>, token: UID) -> Result<Frame> {
+pub fn serialize_reply(builder: &mut FlatBufferBuilder<'static>, token: UID) -> Result<Frame> {
     use crate::common_generated::{Void, VoidArgs};
     let void = Void::create(builder, &VoidArgs {});
     let ensure_table =

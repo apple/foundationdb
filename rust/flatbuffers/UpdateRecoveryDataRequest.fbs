@@ -1,0 +1,17 @@
+include "common.fbs";
+
+table UpdateRecoveryDataRequest {
+    recovery_transaction_version: long;
+    last_epoch_end: long;
+    commit_proxies: [CommitProxyInterface];
+    resolvers: [ResolverInterface];
+    version_epoch_tag_hack: ubyte;
+    version_epoch: long;
+    reply: ReplyPromise; // <Void>
+}
+
+table FakeRoot {
+    update_recovery_data_request: UpdateRecoveryDataRequest;
+}
+
+root_type FakeRoot;

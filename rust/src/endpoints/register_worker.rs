@@ -42,8 +42,8 @@ const REGISTER_WORKER_REQUEST_FILE_IDENTIFIER: ParsedFileIdentifier = ParsedFile
 
 const REGISTER_WORKER_REPLY_FILE_IDENTIFIER: ParsedFileIdentifier = ParsedFileIdentifier {
     file_identifier: 16475696,
-    inner_wrapper: IdentifierType::Optional,
-    outer_wrapper: IdentifierType::ErrorOr,
+    inner_wrapper: IdentifierType::ErrorOr,
+    outer_wrapper: IdentifierType::None,
     file_identifier_name: Some("RegisterWorkerReply"),
 };
 
@@ -262,7 +262,7 @@ fn serialize_request(
 
 fn deserialize_response(buf: &[u8]) -> Result<register_worker_reply::RegisterWorkerReply> {
     let res = register_worker_reply::root_as_fake_root(buf)?;
-    println!("{:?}", res);
+    // println!("{:?}", res);
     use register_worker_reply::ErrorOr;
     match res.error_or_type() {
         ErrorOr::RegisterWorkerReply => Ok(res.error_or_as_register_worker_reply().unwrap()),

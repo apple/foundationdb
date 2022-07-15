@@ -1,0 +1,15 @@
+include "common.fbs";
+
+table GetCommitVersionRequest {
+    request_num: ulong;
+    most_recent_processed_request_num: ulong;
+    requesting_proxy: UID;
+    reply: ReplyPromise;
+    span_context: SpanContext;
+}
+
+table FakeRoot {
+    get_commit_version_request: GetCommitVersionRequest;
+}
+
+root_type FakeRoot;

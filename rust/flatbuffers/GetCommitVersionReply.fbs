@@ -1,0 +1,26 @@
+include "common.fbs";
+
+table KeyRange {
+    begin: [ubyte];
+    end: [ubyte];
+}
+table ResolverMoveRef {
+    range: KeyRange;
+    dest: int;
+}
+
+table GetCommitVersionReply {
+    resolver_changes: [ResolverMoveRef];
+    resolver_changes_version: long;
+    version: long;
+    prev_version: long;
+    request_num: ulong;
+}
+
+union ErrorOr { Error, GetCommitVersionReply }
+
+table FakeRoot {
+    error_or: ErrorOr;
+}
+
+root_type FakeRoot;

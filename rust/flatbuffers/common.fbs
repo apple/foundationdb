@@ -25,6 +25,13 @@ struct IPv4 {
     ip: uint;
 }
 
+// Note:  Can't actually use this, since the thing FDB emits is
+// in-lined...  copy the fields out instead.
+// struct OptionalLong {
+//     tag_hack: ubyte; // always set to one (implies value present)
+//     long: long;
+// }
+
 table IPAddress {
     ip4: IPv4;
 }
@@ -287,4 +294,33 @@ table ConfigClassSet {
 table LifetimeToken {
     cc_id: UID;
     count: long;
+}
+
+table CommitProxyInterface {
+    // processId: Optional<Key> // ha ha.  you wish.
+    tag: ubyte;  // 1 implies present.  no idea what happens if it is missing.
+    val: [ubyte];
+    provisional: bool;
+    commit: RequestStream;
+    // 9 more implicit endpoints after this...
+}
+
+table ResolverInterface {
+    locality: ubyte; // uggh; can't parse this field for some reason.  try for the rest.
+	// locality: LocalityData;
+	unique_id: UID;
+	resolve: RequestStream; // <struct ResolveTransactionBatchRequest>
+	metrics: RequestStream; // <struct ResolutionMetricsRequest>
+	split: RequestStream; // <struct ResolutionSplitRequest>
+
+	wait_failure: RequestStream; // <ReplyPromise<Void>>
+	// // For receiving initial transaction state store broadcast from the master
+	txn_state: RequestStream; // <TxnStateRequest> txnState;
+}
+
+table SpanContext {
+    trace_id: UID;
+    span_id: ulong;
+    m_flags: ushort;
+    // TODO
 }
