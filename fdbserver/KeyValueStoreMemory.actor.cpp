@@ -479,8 +479,12 @@ private:
 
 			uint8_t* plaintext = new uint8_t[sizeof(int) + v1.size() + v2.size()];
 			*(int*)plaintext = op;
-			memcpy(plaintext + sizeof(int), v1.begin(), v1.size());
-			memcpy(plaintext + sizeof(int) + v1.size(), v2.begin(), v2.size());
+			if (v1.size()) {
+				memcpy(plaintext + sizeof(int), v1.begin(), v1.size());
+			}
+			if (v2.size()) {
+				memcpy(plaintext + sizeof(int) + v1.size(), v2.begin(), v2.size());
+			}
 
 			ASSERT(cipherKeys.cipherTextKey.isValid());
 			ASSERT(cipherKeys.cipherHeaderKey.isValid());
@@ -502,6 +506,12 @@ private:
 	                                                      OpHeader* h,
 	                                                      bool* isZeroFilled,
 	                                                      int* zeroFillSize) {
+		// Metadata op types to be excluded from encryption.
+		static std::unordered_set<OpType> metaOps = { OpSnapshotEnd, OpSnapshotAbort, OpCommit, OpRollback };
+		if (metaOps.count((OpType)h->op) == 0) {
+			// It is not supported to open an encrypted store as unencrypted, or vice-versa.
+			ASSERT_EQ(h->op == OpEncrypted, self->enableEncryption);
+		}
 		state int remainingBytes = h->len1 + h->len2 + 1;
 		if (h->op == OpEncrypted) {
 			// encryption header, plus the real (encrypted) op type

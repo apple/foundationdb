@@ -40,6 +40,7 @@ struct BlobWorkerStats {
 	Counter granuleRequestTimeouts;
 	Counter readRequestsWithBegin;
 	Counter readRequestsCollapsed;
+	Counter flushGranuleReqs;
 
 	int numRangesAssigned;
 	int mutationBytesBuffered;
@@ -63,7 +64,8 @@ struct BlobWorkerStats {
 	    readReqDeltaBytesReturned("ReadReqDeltaBytesReturned", cc), commitVersionChecks("CommitVersionChecks", cc),
 	    granuleUpdateErrors("GranuleUpdateErrors", cc), granuleRequestTimeouts("GranuleRequestTimeouts", cc),
 	    readRequestsWithBegin("ReadRequestsWithBegin", cc), readRequestsCollapsed("ReadRequestsCollapsed", cc),
-	    numRangesAssigned(0), mutationBytesBuffered(0), activeReadRequests(0), granulesPendingSplitCheck(0) {
+	    flushGranuleReqs("FlushGranuleReqs", cc), numRangesAssigned(0), mutationBytesBuffered(0), activeReadRequests(0),
+	    granulesPendingSplitCheck(0) {
 		specialCounter(cc, "NumRangesAssigned", [this]() { return this->numRangesAssigned; });
 		specialCounter(cc, "MutationBytesBuffered", [this]() { return this->mutationBytesBuffered; });
 		specialCounter(cc, "ActiveReadRequests", [this]() { return this->activeReadRequests; });

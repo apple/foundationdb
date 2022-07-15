@@ -600,7 +600,6 @@ extern const uint8_t BG_FILE_TYPE_SNAPSHOT;
 // FIXME: flip order of {filetype, version}
 // \xff\x02/bgf/(granuleUID, {snapshot|delta}, fileVersion) = [[filename]]
 extern const KeyRangeRef blobGranuleFileKeys;
-
 // \xff\x02/bgm/[[beginKey]] = [[BlobWorkerUID]]
 extern const KeyRangeRef blobGranuleMappingKeys;
 
@@ -609,6 +608,9 @@ extern const KeyRangeRef blobGranuleLockKeys;
 
 // \xff\x02/bgs/(parentGranuleUID, granuleUID) = [[BlobGranuleSplitState]]
 extern const KeyRangeRef blobGranuleSplitKeys;
+
+// \xff\x02/bgmerge/mergeGranuleId = [[BlobGranuleMergeState]]
+extern const KeyRangeRef blobGranuleMergeKeys;
 
 // \xff\x02/bgh/(beginKey,endKey,startVersion) = { granuleUID, [parentGranuleHistoryKeys] }
 extern const KeyRangeRef blobGranuleHistoryKeys;
@@ -640,9 +642,20 @@ const Key blobGranuleSplitKeyFor(UID const& parentGranuleID, UID const& granuleI
 std::pair<UID, UID> decodeBlobGranuleSplitKey(KeyRef const& key);
 const KeyRange blobGranuleSplitKeyRangeFor(UID const& parentGranuleID);
 
+const Key blobGranuleMergeKeyFor(UID const& mergeGranuleID);
+UID decodeBlobGranuleMergeKey(KeyRef const& key);
+
 // these are versionstamped
 const Value blobGranuleSplitValueFor(BlobGranuleSplitState st);
 std::pair<BlobGranuleSplitState, Version> decodeBlobGranuleSplitValue(ValueRef const& value);
+
+const Value blobGranuleMergeValueFor(KeyRange mergeKeyRange,
+                                     std::vector<UID> parentGranuleIDs,
+                                     std::vector<KeyRange> parentGranuleRanges,
+                                     std::vector<Version> parentGranuleStartVersions);
+// FIXME: probably just define object type for this?
+std::tuple<KeyRange, Version, std::vector<UID>, std::vector<KeyRange>, std::vector<Version>>
+decodeBlobGranuleMergeValue(ValueRef const& value);
 
 const Key blobGranuleHistoryKeyFor(KeyRangeRef const& range, Version version);
 std::pair<KeyRange, Version> decodeBlobGranuleHistoryKey(KeyRef const& key);

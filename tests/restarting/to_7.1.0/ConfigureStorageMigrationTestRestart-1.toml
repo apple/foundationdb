@@ -2,6 +2,7 @@
 extraMachineCountDC = 2
 maxTLogVersion=6
 disableHostname=true
+disableEncryption=true
 storageEngineExcludeTypes=[4]
 
 [[test]]

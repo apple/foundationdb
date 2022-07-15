@@ -1334,6 +1334,7 @@ const KeyRangeRef blobGranuleFileKeys(LiteralStringRef("\xff\x02/bgf/"), Literal
 const KeyRangeRef blobGranuleMappingKeys(LiteralStringRef("\xff\x02/bgm/"), LiteralStringRef("\xff\x02/bgm0"));
 const KeyRangeRef blobGranuleLockKeys(LiteralStringRef("\xff\x02/bgl/"), LiteralStringRef("\xff\x02/bgl0"));
 const KeyRangeRef blobGranuleSplitKeys(LiteralStringRef("\xff\x02/bgs/"), LiteralStringRef("\xff\x02/bgs0"));
+const KeyRangeRef blobGranuleMergeKeys(LiteralStringRef("\xff\x02/bgmerge/"), LiteralStringRef("\xff\x02/bgmerge0"));
 const KeyRangeRef blobGranuleHistoryKeys(LiteralStringRef("\xff\x02/bgh/"), LiteralStringRef("\xff\x02/bgh0"));
 const KeyRangeRef blobGranulePurgeKeys(LiteralStringRef("\xff\x02/bgp/"), LiteralStringRef("\xff\x02/bgp0"));
 const KeyRangeRef blobGranuleVersionKeys(LiteralStringRef("\xff\x02/bgv/"), LiteralStringRef("\xff\x02/bgv0"));
@@ -1479,6 +1480,25 @@ const KeyRange blobGranuleSplitKeyRangeFor(UID const& parentGranuleID) {
 	return KeyRangeRef(startKey, strinc(startKey));
 }
 
+const Key blobGranuleMergeKeyFor(UID const& mergeGranuleID) {
+	// TODO should we bump this assumed version to 7.2 as blob granule merging is not in 7.1? 7.1 won't try to read this
+	// data though since it didn't exist before
+	BinaryWriter wr(AssumeVersion(ProtocolVersion::withBlobGranule()));
+	wr.serializeBytes(blobGranuleMergeKeys.begin);
+	wr << mergeGranuleID;
+
+	return wr.toValue();
+}
+
+UID decodeBlobGranuleMergeKey(KeyRef const& key) {
+	UID mergeGranuleID;
+	BinaryReader reader(key.removePrefix(blobGranuleMergeKeys.begin),
+	                    AssumeVersion(ProtocolVersion::withBlobGranule()));
+
+	reader >> mergeGranuleID;
+	return mergeGranuleID;
+}
+
 const Value blobGranuleSplitValueFor(BlobGranuleSplitState st) {
 	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBlobGranule()));
 	wr << st;
@@ -1493,6 +1513,42 @@ std::pair<BlobGranuleSplitState, Version> decodeBlobGranuleSplitValue(const Valu
 	reader >> v;
 
 	return std::pair(st, bigEndian64(v));
+}
+
+const Value blobGranuleMergeValueFor(KeyRange mergeKeyRange,
+                                     std::vector<UID> parentGranuleIDs,
+                                     std::vector<KeyRange> parentGranuleRanges,
+                                     std::vector<Version> parentGranuleStartVersions) {
+	ASSERT(parentGranuleIDs.size() == parentGranuleRanges.size());
+	ASSERT(parentGranuleIDs.size() == parentGranuleStartVersions.size());
+
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBlobGranule()));
+	wr << mergeKeyRange;
+	wr << parentGranuleIDs;
+	wr << parentGranuleRanges;
+	wr << parentGranuleStartVersions;
+	return addVersionStampAtEnd(wr.toValue());
+}
+std::tuple<KeyRange, Version, std::vector<UID>, std::vector<KeyRange>, std::vector<Version>>
+decodeBlobGranuleMergeValue(ValueRef const& value) {
+	KeyRange range;
+	Version v;
+	std::vector<UID> parentGranuleIDs;
+	std::vector<KeyRange> parentGranuleRanges;
+	std::vector<Version> parentGranuleStartVersions;
+
+	BinaryReader reader(value, IncludeVersion());
+	reader >> range;
+	reader >> parentGranuleIDs;
+	reader >> parentGranuleRanges;
+	reader >> parentGranuleStartVersions;
+	reader >> v;
+
+	ASSERT(parentGranuleIDs.size() == parentGranuleRanges.size());
+	ASSERT(parentGranuleIDs.size() == parentGranuleStartVersions.size());
+	ASSERT(bigEndian64(v) >= 0);
+
+	return std::tuple(range, bigEndian64(v), parentGranuleIDs, parentGranuleRanges, parentGranuleStartVersions);
 }
 
 const Key blobGranuleHistoryKeyFor(KeyRangeRef const& range, Version version) {

@@ -547,6 +547,7 @@ struct ChangeFeedInfo : ReferenceCounted<ChangeFeedInfo> {
 	bool removing = false;
 	bool destroyed = false;
 	bool possiblyDestroyed = false;
+	bool refreshInProgress = false;
 
 	KeyRangeMap<std::unordered_map<UID, Promise<Void>>> moveTriggers;
 
@@ -583,6 +584,7 @@ struct ChangeFeedInfo : ReferenceCounted<ChangeFeedInfo> {
 	void destroy(Version destroyVersion) {
 		removing = true;
 		destroyed = true;
+		refreshInProgress = false;
 		moved(range);
 		newMutations.trigger();
 	}
@@ -1594,6 +1596,7 @@ Future<Version> waitForVersion(StorageServer* data, Version version, SpanContext
 	}
 
 	if (version < data->oldestVersion.get() || version <= 0) {
+		// TraceEvent(SevDebug, "WFVThrow", data->thisServerID).detail("Version", version).detail("OldestVersion", data->oldestVersion.get());
 		return transaction_too_old();
 	} else if (version <= data->version.get()) {
 		return version;
@@ -2607,6 +2610,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		}
 	}
 
+	// FIXME: clean all of this up, and just rely on client-side check
 	// This check is done just before returning, after all waits in this function
 	// Check if pop happened concurently
 	if (!req.canReadPopped && req.begin <= feedInfo->emptyVersion) {
@@ -2628,7 +2632,8 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 			    .detail("EmptyVersion", feedInfo->emptyVersion)
 			    .detail("AtLatest", atLatest)
 			    .detail("MinVersionSent", minVersion);
-			throw change_feed_popped();
+			// Disabling this check because it returns false positives when forcing a delta file flush at an empty
+			// version that was not a mutation version throw change_feed_popped();
 		}
 	}
 
@@ -3231,8 +3236,10 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 			data->counters.kvScanBytes += atStorageVersion.logicalSize();
 
 			ASSERT(atStorageVersion.size() <= limit);
-			if (data->storageVersion() > version)
+			if (data->storageVersion() > version) {
+				// TraceEvent(SevDebug, "ReadRangeThrow", data->thisServerID).detail("Version", version).detail("StorageVersion", data->storageVersion());
 				throw transaction_too_old();
+			}
 
 			// merge the sets in resultCache with the sets on disk, stopping at the last key from disk if there is
 			// 'more'
@@ -5332,9 +5339,6 @@ ACTOR Future<Void> tryGetRange(PromiseStream<RangeResult> results, Transaction* 
 	}
 }
 
-// global validation that missing refreshed feeds were previously destroyed
-static std::unordered_set<Key> allDestroyedChangeFeeds;
-
 // We have to store the version the change feed was stopped at in the SS instead of just the stopped status
 // In addition to simplifying stopping logic, it enables communicating stopped status when fetching change feeds
 // from other SS correctly
@@ -5721,8 +5725,9 @@ ACTOR Future<Version> fetchChangeFeed(StorageServer* data,
 			    .detail("Range", changeFeedInfo->range.toString())
 			    .detail("Version", cleanupVersion);
 
-			// FIXME: do simulated validation that feed was destroyed, but needs to be added when client starts
-			// destroying a change feed instead of when server recieves private mutation for it
+			if (g_network->isSimulated()) {
+				ASSERT(g_simulator.validationData.allDestroyedChangeFeedIDs.count(changeFeedInfo->id.toString()));
+			}
 
 			Key beginClearKey = changeFeedInfo->id.withPrefix(persistChangeFeedKeys.begin);
 
@@ -5787,8 +5792,12 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 				cfInfo->removing = false;
 				// because we now have a gap in the metadata, it's possible this feed was destroyed
 				cfInfo->possiblyDestroyed = true;
+				// Set refreshInProgress, so that if this actor is replaced by an expanded move actor, the new actor
+				// picks up the refresh
+				cfInfo->refreshInProgress = true;
 				// reset fetch versions because everything previously fetched was cleaned up
 				cfInfo->fetchVersion = invalidVersion;
+
 				cfInfo->durableFetchVersion = NotifiedVersion();
 
 				TraceEvent(SevDebug, "ResetChangeFeedInfo", data->thisServerID)
@@ -5798,6 +5807,9 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 				    .detail("EmptyVersion", cfInfo->emptyVersion)
 				    .detail("StopVersion", cfInfo->stopVersion)
 				    .detail("FKID", fetchKeysID);
+			} else if (cfInfo->refreshInProgress) {
+				TEST(true); // Racing refreshes for same change feed in fetch
+				destroyedFeedIds.insert(cfInfo->id);
 			}
 		}
 	}
@@ -5906,7 +5918,8 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 	TEST(!destroyedFeedIds.empty()); // Feed destroyed between move away and move back
 	for (auto& feedId : refreshedFeedIds) {
 		auto existingEntry = data->uidChangeFeed.find(feedId);
-		if (existingEntry == data->uidChangeFeed.end() || existingEntry->second->destroyed) {
+		if (existingEntry == data->uidChangeFeed.end() || existingEntry->second->destroyed ||
+		    !existingEntry->second->refreshInProgress) {
 			TEST(true); // feed refreshed
 			continue;
 		}
@@ -5935,6 +5948,7 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 		    .detail("StopVersion", existingEntry->second->stopVersion)
 		    .detail("FKID", fetchKeysID)
 		    .detail("MetadataVersion", metadataVersion);
+		existingEntry->second->refreshInProgress = false;
 	}
 	for (auto& feedId : destroyedFeedIds) {
 		auto existingEntry = data->uidChangeFeed.find(feedId);
@@ -5955,7 +5969,7 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 		    .detail("FKID", fetchKeysID);
 
 		if (g_network->isSimulated()) {
-			ASSERT(allDestroyedChangeFeeds.count(feedId));
+			ASSERT(g_simulator.validationData.allDestroyedChangeFeedIDs.count(feedId.toString()));
 		}
 
 		Key beginClearKey = feedId.withPrefix(persistChangeFeedKeys.begin);
@@ -6756,6 +6770,7 @@ void cleanUpChangeFeeds(StorageServer* data, const KeyRangeRef& keys, Version ve
 			auto feed = data->uidChangeFeed.find(f.first);
 			if (feed != data->uidChangeFeed.end()) {
 				feed->second->removing = true;
+				feed->second->refreshInProgress = false;
 				feed->second->moved(feed->second->range);
 				feed->second->newMutations.trigger();
 			}
@@ -7470,10 +7485,6 @@ private:
 
 				feed->second->destroy(currentVersion);
 				data->changeFeedCleanupDurable[feed->first] = cleanupVersion;
-
-				if (g_network->isSimulated()) {
-					allDestroyedChangeFeeds.insert(changeFeedId);
-				}
 			}
 
 			if (status == ChangeFeedStatus::CHANGE_FEED_DESTROY) {
@@ -8077,7 +8088,10 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			if (data->otherError.getFuture().isReady())
 				data->otherError.getFuture().get();
 
-			Version maxVersionsInMemory = SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS;
+			Version maxVersionsInMemory =
+			    (g_network->isSimulated() && g_simulator.speedUpSimulation)
+			        ? std::max(5 * SERVER_KNOBS->VERSIONS_PER_SECOND, SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS)
+			        : SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS;
 			for (int i = 0; i < data->recoveryVersionSkips.size(); i++) {
 				maxVersionsInMemory += data->recoveryVersionSkips[i].second;
 			}
