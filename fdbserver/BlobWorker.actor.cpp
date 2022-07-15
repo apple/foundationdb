@@ -1035,13 +1035,13 @@ ACTOR Future<Void> granuleCheckMergeCandidate(Reference<BlobWorkerData> bwData,
 	}
 	// wait for the last snapshot to finish, so that the delay is from the last snapshot
 	wait(waitStart);
-	wait(delayJittered(SERVER_KNOBS->BG_MERGE_CANDIDATE_THRESHOLD_SECONDS));
+	double jitter = deterministicRandom()->random01() * 0.8 * SERVER_KNOBS->BG_MERGE_CANDIDATE_DELAY_SECONDS;
+	wait(delay(SERVER_KNOBS->BG_MERGE_CANDIDATE_THRESHOLD_SECONDS + jitter));
 	loop {
 		// this actor will be cancelled if a split check happened, or if the granule was moved away, so this
 		// being here means that granule is cold enough during that period. Now we just need to check if it is
 		// also small enough to be a merge candidate.
 		StorageMetrics currentMetrics = wait(bwData->db->getStorageMetrics(metadata->keyRange, CLIENT_KNOBS->TOO_MANY));
-		state int64_t granuleBytes = currentMetrics.bytes;
 
 		// FIXME: maybe separate knob and/or value for write rate?
 		if (currentMetrics.bytes >= SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES / 2 ||
