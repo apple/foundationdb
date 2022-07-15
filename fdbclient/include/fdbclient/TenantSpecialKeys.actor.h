@@ -72,7 +72,7 @@ private:
 	                                        KeyRangeRef kr,
 	                                        RangeResult* results,
 	                                        GetRangeLimits limitsHint) {
-		std::map<TenantName, TenantMapEntry> tenants =
+		std::vector<std::pair<TenantName, TenantMapEntry>> tenants =
 		    wait(TenantAPI::listTenantsTransaction(&ryw->getTransaction(), kr.begin, kr.end, limitsHint.rows));
 
 		for (auto tenant : tenants) {
@@ -217,7 +217,7 @@ private:
 			createFutures.push_back(createTenant(ryw, tenant, config, nextId++));
 		}
 
-		ryw->getTransaction().set(tenantLastIdKey, TenantMapEntry::idToPrefix(nextId - 1));
+		TenantMetadata::lastTenantId.set(&ryw->getTransaction(), nextId - 1);
 		wait(waitForAll(createFutures));
 		return Void();
 	}
@@ -245,19 +245,12 @@ private:
 	ACTOR static Future<Void> deleteTenantRange(ReadYourWritesTransaction* ryw,
 	                                            TenantName beginTenant,
 	                                            TenantName endTenant) {
-		state Future<Optional<Value>> tenantModeFuture =
-		    ryw->getTransaction().get(configKeysPrefix.withSuffix("tenant_mode"_sr));
-		state Future<ClusterType> clusterTypeFuture = TenantAPI::getClusterType(&ryw->getTransaction());
-
-		state std::map<TenantName, TenantMapEntry> tenants = wait(TenantAPI::listTenantsTransaction(
+		state Future<Void> tenantModeCheck =
+		    TenantAPI::checkTenantMode(&ryw->getTransaction(), ClusterType::STANDALONE);
+		state std::vector<std::pair<TenantName, TenantMapEntry>> tenants = wait(TenantAPI::listTenantsTransaction(
 		    &ryw->getTransaction(), beginTenant, endTenant, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1));
 
-		state Optional<Value> tenantMode = wait(safeThreadFutureToFuture(tenantModeFuture));
-		ClusterType clusterType = wait(clusterTypeFuture);
-
-		if (!TenantAPI::checkTenantMode(tenantMode, clusterType, ClusterType::STANDALONE)) {
-			throw tenants_disabled();
-		}
+		wait(tenantModeCheck);
 
 		if (tenants.size() > CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER) {
 			TraceEvent(SevWarn, "DeleteTenantRangeTooLange")

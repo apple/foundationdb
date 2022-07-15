@@ -673,13 +673,7 @@ const Value blobWorkerListValue(BlobWorkerInterface const& interface);
 BlobWorkerInterface decodeBlobWorkerListValue(ValueRef const& value);
 
 // State for the tenant map
-extern const KeyRangeRef tenantMapKeys;
-extern const KeyRef tenantMapPrefix;
-extern const KeyRef tenantMapPrivatePrefix;
-extern const KeyRef tenantLastIdKey;
-extern const KeyRef tenantDataPrefixKey;
-extern const KeyRangeRef tenantGroupTenantIndexKeys;
-extern const KeyRangeRef tenantTombstoneKeys;
+extern const KeyRef tenantDataPrefixKey; // TODO: remove?
 
 // Metacluster keys
 extern const KeyRangeRef tenantGroupMetadataKeys;

@@ -580,7 +580,8 @@ public:
 	void clearWatchMetadata();
 
 	// tenant map operations
-	void insertTenant(TenantNameRef tenantName, ValueRef value, Version version, bool insertIntoMutationLog);
+	bool insertTenant(TenantNameRef tenantName, TenantMapEntry tenantEntry, Version version);
+	void insertTenant(TenantNameRef tenantName, ValueRef value, Version version);
 	void clearTenants(TenantNameRef startTenant, TenantNameRef endTenant, Version version);
 
 	Optional<TenantMapEntry> getTenantEntry(Version version, TenantInfo tenant);
@@ -6941,12 +6942,13 @@ private:
 				}
 			}
 		} else if ((m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange) &&
-		           m.param1.startsWith(tenantMapPrivatePrefix)) {
+		           m.param1.startsWith(TenantMetadata::tenantMapPrivatePrefix)) {
 			if (m.type == MutationRef::SetValue) {
-				data->insertTenant(m.param1.removePrefix(tenantMapPrivatePrefix), m.param2, currentVersion, true);
+				data->insertTenant(
+				    m.param1.removePrefix(TenantMetadata::tenantMapPrivatePrefix), m.param2, currentVersion);
 			} else if (m.type == MutationRef::ClearRange) {
-				data->clearTenants(m.param1.removePrefix(tenantMapPrivatePrefix),
-				                   m.param2.removePrefix(tenantMapPrivatePrefix),
+				data->clearTenants(m.param1.removePrefix(TenantMetadata::tenantMapPrivatePrefix),
+				                   m.param2.removePrefix(TenantMetadata::tenantMapPrivatePrefix),
 				                   currentVersion);
 			}
 		} else if (m.param1.substr(1).startsWith(tssMappingKeys.begin) &&
@@ -7041,26 +7043,26 @@ private:
 	}
 };
 
-void StorageServer::insertTenant(TenantNameRef tenantName,
-                                 ValueRef value,
-                                 Version version,
-                                 bool insertIntoMutationLog) {
+bool StorageServer::insertTenant(TenantNameRef tenantName, TenantMapEntry tenantEntry, Version version) {
 	if (version >= tenantMap.getLatestVersion()) {
 		tenantMap.createNewVersion(version);
 		tenantPrefixIndex.createNewVersion(version);
 
-		TenantMapEntry tenantEntry = TenantMapEntry::decode(value);
-
 		tenantMap.insert(tenantName, tenantEntry);
 		tenantPrefixIndex.insert(tenantEntry.prefix, tenantName);
 
-		if (insertIntoMutationLog) {
-			auto& mLV = addVersionToMutationLog(version);
-			addMutationToMutationLog(
-			    mLV, MutationRef(MutationRef::SetValue, tenantName.withPrefix(persistTenantMapKeys.begin), value));
-		}
-
 		TraceEvent("InsertTenant", thisServerID).detail("Tenant", tenantName).detail("Version", version);
+		return true;
+	} else {
+		return false;
+	}
+}
+
+void StorageServer::insertTenant(TenantNameRef tenantName, ValueRef value, Version version) {
+	if (insertTenant(tenantName, TenantMapEntry::decode(value), version)) {
+		auto& mLV = addVersionToMutationLog(version);
+		addMutationToMutationLog(
+		    mLV, MutationRef(MutationRef::SetValue, tenantName.withPrefix(persistTenantMapKeys.begin), value));
 	}
 }
 
@@ -9251,14 +9253,16 @@ ACTOR Future<Void> initTenantMap(StorageServer* self) {
 			state Version version = wait(tr->getReadVersion());
 			// This limits the number of tenants, but eventually we shouldn't need to do this at all
 			// when SSs store only the local tenants
-			RangeResult entries = wait(tr->getRange(tenantMapKeys, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER));
+			KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>> entries =
+			    wait(TenantMetadata::tenantMap.getRange(
+			        tr, Optional<TenantName>(), Optional<TenantName>(), CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER));
 
 			TraceEvent("InitTenantMap", self->thisServerID)
 			    .detail("Version", version)
-			    .detail("NumTenants", entries.size());
+			    .detail("NumTenants", entries.results.size());
 
-			for (auto kv : entries) {
-				self->insertTenant(kv.key.removePrefix(tenantMapPrefix), kv.value, version, false);
+			for (auto entry : entries.results) {
+				self->insertTenant(entry.first, entry.second, version);
 			}
 			break;
 		} catch (Error& e) {

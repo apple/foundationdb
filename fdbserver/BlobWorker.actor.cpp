@@ -3787,12 +3787,17 @@ ACTOR Future<Void> monitorTenants(Reference<BlobWorkerData> bwData) {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				state RangeResult tenantResults;
-				wait(store(tenantResults, tr->getRange(tenantMapKeys, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1)));
-				ASSERT_WE_THINK(!tenantResults.more && tenantResults.size() <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER);
-				if (tenantResults.more || tenantResults.size() > CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER) {
+				state KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>> tenantResults;
+				wait(store(tenantResults,
+				           TenantMetadata::tenantMap.getRange(tr,
+				                                              Optional<TenantName>(),
+				                                              Optional<TenantName>(),
+				                                              CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1)));
+				ASSERT_WE_THINK(!tenantResults.more &&
+				                tenantResults.results.size() <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER);
+				if (tenantResults.more || tenantResults.results.size() > CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER) {
 					TraceEvent(SevError, "BlobWorkerTooManyTenants", bwData->id)
-					    .detail("TenantCount", tenantResults.size());
+					    .detail("TenantCount", tenantResults.results.size());
 					wait(delay(600));
 					if (bwData->fatalError.canBeSet()) {
 						bwData->fatalError.sendError(internal_error());
@@ -3801,15 +3806,13 @@ ACTOR Future<Void> monitorTenants(Reference<BlobWorkerData> bwData) {
 				}
 
 				std::vector<std::pair<TenantName, TenantMapEntry>> tenants;
-				for (auto& it : tenantResults) {
+				for (auto& it : tenantResults.results) {
 					// FIXME: handle removing/moving tenants!
-					TenantNameRef tenantName = it.key.removePrefix(tenantMapPrefix);
-					TenantMapEntry entry = TenantMapEntry::decode(it.value);
-					tenants.push_back(std::pair(tenantName, entry));
+					tenants.push_back(std::pair(it.first, it.second));
 				}
 				bwData->tenantData.addTenants(tenants);
 
-				state Future<Void> watchChange = tr->watch(tenantLastIdKey);
+				state Future<Void> watchChange = tr->watch(TenantMetadata::lastTenantId.key);
 				wait(tr->commit());
 				wait(watchChange);
 				tr->reset();

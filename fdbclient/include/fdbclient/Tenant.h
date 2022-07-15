@@ -24,6 +24,7 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/VersionedMap.h"
+#include "fdbclient/KeyBackedTypes.h"
 #include "flow/flat_buffers.h"
 
 typedef StringRef TenantNameRef;
@@ -86,6 +87,41 @@ struct TenantMapEntry {
 			serializer(ar, id, subspace, tenantGroup, tenantState, assignedCluster);
 		}
 	}
+};
+
+struct TenantMetadataSpecification {
+	static KeyRef subspace;
+
+	// TODO: can we break compatibility and use the tuple codec?
+	struct TenantIdCodec {
+		static Standalone<StringRef> pack(int64_t id) { return TenantMapEntry::idToPrefix(id); }
+		static int64_t unpack(Standalone<StringRef> val) { return TenantMapEntry::prefixToId(val); }
+	};
+
+	KeyBackedObjectMap<TenantName, TenantMapEntry, decltype(IncludeVersion()), NullCodec> tenantMap;
+	KeyBackedProperty<int64_t, TenantIdCodec> lastTenantId;
+	KeyBackedSet<Tuple> tenantGroupTenantIndex;
+	KeyBackedSet<int64_t> tenantTombstones;
+
+	// TODO: unify tenant subspace
+	TenantMetadataSpecification(KeyRef subspace)
+	  : tenantMap(subspace.withSuffix("tenantMap/"_sr), IncludeVersion(ProtocolVersion::withTenantGroups())),
+	    lastTenantId(subspace.withSuffix("tenantLastId"_sr)),
+	    tenantGroupTenantIndex(subspace.withSuffix("tenant/tenantGroup/tenantMap/"_sr)),
+	    tenantTombstones(subspace.withSuffix("/tenant/tombstones/"_sr)) {}
+};
+
+struct TenantMetadata {
+private:
+	static inline TenantMetadataSpecification instance = TenantMetadataSpecification("\xff/"_sr);
+
+public:
+	static inline auto& tenantMap = instance.tenantMap;
+	static inline auto& lastTenantId = instance.lastTenantId;
+	static inline auto& tenantGroupTenantIndex = instance.tenantGroupTenantIndex;
+	static inline auto& tenantTombstones = instance.tenantTombstones;
+
+	static inline Key tenantMapPrivatePrefix = "\xff"_sr.withSuffix(tenantMap.subspace.begin);
 };
 
 typedef VersionedMap<TenantName, TenantMapEntry> TenantMap;

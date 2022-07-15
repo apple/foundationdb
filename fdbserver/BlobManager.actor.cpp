@@ -850,7 +850,7 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 	state std::unordered_map<int64_t, TenantMapEntry> knownTenantCache;
 
 	if (SERVER_KNOBS->BG_RANGE_SOURCE == "tenant") {
-		changeKey = tenantLastIdKey;
+		changeKey = TenantMetadata::lastTenantId.key;
 	} else if (SERVER_KNOBS->BG_RANGE_SOURCE == "blobRangeKeys") {
 		changeKey = blobRangeChangeKey;
 	} else {
@@ -898,14 +898,18 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 
 					ar.dependsOn(results.arena());
 				} else {
-					state RangeResult tenantResults;
-					wait(store(tenantResults, tr->getRange(tenantMapKeys, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1)));
+					state KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>> tenantResults;
+					wait(store(tenantResults,
+					           TenantMetadata::tenantMap.getRange(tr,
+					                                              Optional<TenantName>(),
+					                                              Optional<TenantName>(),
+					                                              CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1)));
 					ASSERT_WE_THINK(!tenantResults.more &&
-					                tenantResults.size() <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER);
-					if (tenantResults.more || tenantResults.size() > CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER) {
+					                tenantResults.results.size() <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER);
+					if (tenantResults.more || tenantResults.results.size() > CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER) {
 						TraceEvent(SevError, "BlobManagerTooManyTenants", bmData->id)
 						    .detail("Epoch", bmData->epoch)
-						    .detail("TenantCount", tenantResults.size());
+						    .detail("TenantCount", tenantResults.results.size());
 						wait(delay(600));
 						if (bmData->iAmReplaced.canBeSet()) {
 							bmData->iAmReplaced.sendError(internal_error());
@@ -913,15 +917,11 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 						throw internal_error();
 					}
 
-					std::vector<std::pair<TenantName, TenantMapEntry>> tenants;
 					std::vector<Key> prefixes;
-					for (auto& it : tenantResults) {
-						TenantNameRef tenantName = it.key.removePrefix(tenantMapPrefix);
-						TenantMapEntry entry = TenantMapEntry::decode(it.value);
-						tenants.push_back(std::pair(tenantName, entry));
-						prefixes.push_back(entry.prefix);
+					for (auto& it : tenantResults.results) {
+						prefixes.push_back(it.second.prefix);
 					}
-					bmData->tenantData.addTenants(tenants);
+					bmData->tenantData.addTenants(tenantResults.results);
 
 					// make this look like knownBlobRanges
 					std::sort(prefixes.begin(), prefixes.end());

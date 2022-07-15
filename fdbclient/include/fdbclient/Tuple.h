@@ -84,6 +84,13 @@ struct Tuple {
 	Standalone<VectorRef<uint8_t>> getData() { return data; }
 	Standalone<StringRef> getDataAsStandalone() { return Standalone<StringRef>(pack(), data.arena()); }
 
+	template <class... Types>
+	static Tuple makeTuple(Types&&... args) {
+		Tuple t;
+		(t << ... << args);
+		return t;
+	}
+
 private:
 	Tuple(const StringRef& data, bool exclude_incomplete = false);
 	Standalone<VectorRef<uint8_t>> data;

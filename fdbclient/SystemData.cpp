@@ -1610,23 +1610,11 @@ BlobWorkerInterface decodeBlobWorkerListValue(ValueRef const& value) {
 	return interf;
 }
 
-const KeyRangeRef tenantMapKeys("\xff/tenantMap/"_sr, "\xff/tenantMap0"_sr);
-const KeyRef tenantMapPrefix = tenantMapKeys.begin;
-const KeyRef tenantMapPrivatePrefix = "\xff\xff/tenantMap/"_sr;
-const KeyRef tenantLastIdKey = "\xff/tenantLastId/"_sr;
 const KeyRef tenantDataPrefixKey = "\xff/tenantDataPrefix"_sr;
-const KeyRangeRef tenantGroupTenantIndexKeys("\xff/tenant/tenantGroup/tenantMap/"_sr,
-                                             "\xff/tenant/tenantGroup/tenantMap0"_sr);
-const KeyRangeRef tenantTombstoneKeys("\xff/tenant/tombstones/"_sr, "\xff/tenant/tombstones0"_sr);
 
 // Metacluster management cluster keys
 const KeyRangeRef tenantGroupMetadataKeys("metacluster/tenantGroup/metadata/"_sr,
                                           "metacluster/tenantGroup/metadata0"_sr);
-
-const KeyRangeRef dataClusterTenantIndexKeys("metacluster/dataCluster/tenantMap/"_sr,
-                                             "metacluster/dataCluster/tenantMap0"_sr);
-const KeyRangeRef dataClusterTenantGroupIndexKeys("metacluster/dataCluster/tenantGroupMap/"_sr,
-                                                  "metacluster/dataCluster/tenantGroupMap0"_sr);
 
 // for tests
 void testSSISerdes(StorageServerInterface const& ssi) {

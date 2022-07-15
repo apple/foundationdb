@@ -250,6 +250,14 @@ struct TenantManagementWorkload : TestWorkload {
 		return tenantGroup;
 	}
 
+	Future<Optional<TenantMapEntry>> tryGetTenant(TenantName tenantName, OperationType operationType) {
+		if (operationType == OperationType::METACLUSTER) {
+			return MetaclusterAPI::tryGetTenant(mvDb, tenantName);
+		} else {
+			return TenantAPI::tryGetTenant(dataDb.getReference(), tenantName);
+		}
+	}
+
 	// Creates tenant(s) using the specified operation type
 	ACTOR Future<Void> createImpl(Database cx,
 	                              Reference<ReadYourWritesTransaction> tr,
@@ -280,7 +288,7 @@ struct TenantManagementWorkload : TestWorkload {
 				entry.id = nextId++;
 				createFutures.push_back(success(TenantAPI::createTenantTransaction(tr, tenant, entry)));
 			}
-			tr->set(tenantLastIdKey, TenantMapEntry::idToPrefix(nextId - 1));
+			TenantMetadata::lastTenantId.set(tr, nextId - 1);
 			wait(waitForAll(createFutures));
 			wait(tr->commit());
 		} else {
@@ -360,7 +368,7 @@ struct TenantManagementWorkload : TestWorkload {
 
 					// Check the state of the first created tenant
 					Optional<TenantMapEntry> resultEntry =
-					    wait(TenantAPI::tryGetTenant(cx.getReference(), tenantsToCreate.begin()->first));
+					    wait(self->tryGetTenant(tenantsToCreate.begin()->first, operationType));
 
 					if (resultEntry.present()) {
 						if (resultEntry.get().tenantState == TenantState::READY) {
@@ -395,8 +403,7 @@ struct TenantManagementWorkload : TestWorkload {
 					}
 
 					// Read the created tenant object and verify that its state is correct
-					state Optional<TenantMapEntry> entry =
-					    wait(TenantAPI::tryGetTenant(cx.getReference(), tenantItr->first));
+					state Optional<TenantMapEntry> entry = wait(self->tryGetTenant(tenantItr->first, operationType));
 
 					ASSERT(entry.present());
 					ASSERT(entry.get().id > self->maxId);
@@ -652,7 +659,7 @@ struct TenantManagementWorkload : TestWorkload {
 					if (!tenants.empty()) {
 						// Check the state of the first deleted tenant
 						Optional<TenantMapEntry> resultEntry =
-						    wait(TenantAPI::tryGetTenant(cx.getReference(), *tenants.begin()));
+						    wait(self->tryGetTenant(*tenants.begin(), operationType));
 
 						if (!resultEntry.present()) {
 							alreadyExists = false;
@@ -835,7 +842,7 @@ struct TenantManagementWorkload : TestWorkload {
 			TenantMapEntry _entry = wait(TenantAPI::getTenantTransaction(tr, tenant));
 			entry = _entry;
 		} else {
-			TenantMapEntry _entry = wait(TenantAPI::getTenant(self->mvDb, tenant));
+			TenantMapEntry _entry = wait(MetaclusterAPI::getTenant(self->mvDb, tenant));
 			entry = _entry;
 		}
 
@@ -849,7 +856,8 @@ struct TenantManagementWorkload : TestWorkload {
 
 		// True if the tenant should should exist and return a result
 		auto itr = self->createdTenants.find(tenant);
-		state bool alreadyExists = itr != self->createdTenants.end();
+		state bool alreadyExists = itr != self->createdTenants.end() &&
+		                           !(operationType == OperationType::METACLUSTER && !self->useMetacluster);
 
 		state TenantData tenantData;
 		if (alreadyExists) {
@@ -866,7 +874,7 @@ struct TenantManagementWorkload : TestWorkload {
 				wait(self->checkTenantContents(self, tenant, tenantData));
 				return Void();
 			} catch (Error& e) {
-				state bool retry = true;
+				state bool retry = false;
 				state Error error = e;
 
 				if (e.code() == error_code_tenant_not_found) {
@@ -878,6 +886,7 @@ struct TenantManagementWorkload : TestWorkload {
 				else if (operationType == OperationType::MANAGEMENT_TRANSACTION ||
 				         operationType == OperationType::SPECIAL_KEYS) {
 					try {
+						retry = true;
 						wait(tr->onError(e));
 					} catch (Error& e) {
 						error = e;
@@ -921,7 +930,7 @@ struct TenantManagementWorkload : TestWorkload {
 			tenants = _tenants;
 		} else {
 			std::map<TenantName, TenantMapEntry> _tenants =
-			    wait(TenantAPI::listTenants(self->mvDb, beginTenant, endTenant, limit));
+			    wait(MetaclusterAPI::listTenants(self->mvDb, beginTenant, endTenant, limit));
 			tenants = _tenants;
 		}
 
@@ -946,6 +955,13 @@ struct TenantManagementWorkload : TestWorkload {
 				state std::map<TenantName, TenantMapEntry> tenants =
 				    wait(self->listImpl(cx, tr, beginTenant, endTenant, limit, operationType, self));
 
+				// Attempting to read the list of tenants using the metacluster API in a non-metacluster should
+				// return nothing in this test
+				if (operationType == OperationType::METACLUSTER && !self->useMetacluster) {
+					ASSERT(tenants.size() == 0);
+					return Void();
+				}
+
 				ASSERT(tenants.size() <= limit);
 
 				// Compare the resulting tenant list to the list we expected to get
@@ -961,13 +977,14 @@ struct TenantManagementWorkload : TestWorkload {
 				       localItr->first >= endTenant);
 				return Void();
 			} catch (Error& e) {
-				state bool retry = true;
+				state bool retry = false;
 				state Error error = e;
 
 				// Transaction-based operations need to be retried
 				if (operationType == OperationType::MANAGEMENT_TRANSACTION ||
 				    operationType == OperationType::SPECIAL_KEYS) {
 					try {
+						retry = true;
 						wait(tr->onError(e));
 					} catch (Error& e) {
 						error = e;
@@ -1020,9 +1037,9 @@ struct TenantManagementWorkload : TestWorkload {
 					wait(TenantAPI::renameTenant(cx.getReference(), oldTenantName, newTenantName));
 					ASSERT(!tenantNotFound && !tenantExists);
 					state Optional<TenantMapEntry> oldTenantEntry =
-					    wait(TenantAPI::tryGetTenant(cx.getReference(), oldTenantName));
+					    wait(self->tryGetTenant(oldTenantName, OperationType::SPECIAL_KEYS));
 					state Optional<TenantMapEntry> newTenantEntry =
-					    wait(TenantAPI::tryGetTenant(cx.getReference(), newTenantName));
+					    wait(self->tryGetTenant(newTenantName, OperationType::SPECIAL_KEYS));
 					ASSERT(!oldTenantEntry.present());
 					ASSERT(newTenantEntry.present());
 
@@ -1117,21 +1134,26 @@ struct TenantManagementWorkload : TestWorkload {
 		state TenantName endTenant = "\xff\xff"_sr.withPrefix(self->localTenantNamePrefix);
 
 		loop {
-			// Read the tenant map from the primary cluster (either management cluster in a metacluster, or just the
-			// cluster otherwise).
-			state std::map<TenantName, TenantMapEntry> tenants =
-			    wait(TenantAPI::listTenants(cx.getReference(), beginTenant, endTenant, 1000));
-
-			// Read the tenant map from the data cluster. If this is not a metacluster it will read from the same
-			// database as above, making it superfluous but still correct.
-			std::map<TenantName, TenantMapEntry> dataClusterTenants =
+			// Read the tenant map from the data cluster.
+			state std::map<TenantName, TenantMapEntry> dataClusterTenants =
 			    wait(TenantAPI::listTenants(self->dataDb.getReference(), beginTenant, endTenant, 1000));
 
-			auto managementItr = tenants.begin();
+			// Read the tenant map from the management cluster. If there is no management cluster, this is
+			// just a duplicate of the data cluster tenants
+			state std::map<TenantName, TenantMapEntry> managementClusterTenants;
+			if (self->useMetacluster) {
+				std::map<TenantName, TenantMapEntry> _managementClusterTenants =
+				    wait(MetaclusterAPI::listTenants(cx.getReference(), beginTenant, endTenant, 1000));
+				managementClusterTenants = _managementClusterTenants;
+			} else {
+				managementClusterTenants = dataClusterTenants;
+			}
+
+			auto managementItr = managementClusterTenants.begin();
 			auto dataItr = dataClusterTenants.begin();
 
 			TenantNameRef lastTenant;
-			while (managementItr != tenants.end()) {
+			while (managementItr != managementClusterTenants.end()) {
 				ASSERT(localItr != self->createdTenants.end());
 				ASSERT(dataItr != dataClusterTenants.end());
 				ASSERT(managementItr->first == localItr->first);
@@ -1147,7 +1169,7 @@ struct TenantManagementWorkload : TestWorkload {
 
 			ASSERT(dataItr == dataClusterTenants.end());
 
-			if (tenants.size() < 1000) {
+			if (dataClusterTenants.size() < 1000) {
 				break;
 			} else {
 				beginTenant = keyAfter(lastTenant);

@@ -24,6 +24,7 @@
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/GenericManagementAPI.actor.h"
 #include "fdbclient/MetaclusterManagement.actor.h"
+#include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/TenantManagement.actor.h"
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "fdbrpc/simulator.h"
@@ -86,27 +87,19 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 
 	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
 	ACTOR Future<Void> _setup(Database cx, TenantManagementConcurrencyWorkload* self) {
+		state ClusterConnectionString connectionString(g_simulator.extraDatabases[0]);
 		Reference<IDatabase> threadSafeHandle =
 		    wait(unsafeThreadFutureToFuture(ThreadSafeDatabase::createFromExistingDatabase(cx)));
 
 		MultiVersionApi::api->selectApiVersion(cx->apiVersion);
 		self->mvDb = MultiVersionDatabase::debugCreateFromExistingDatabase(threadSafeHandle);
 
-		if (self->useMetacluster) {
-			ASSERT(g_simulator.extraDatabases.size() == 1);
-			state ClusterConnectionString connectionString(g_simulator.extraDatabases[0]);
-			auto extraFile = makeReference<ClusterConnectionMemoryRecord>(connectionString);
-			self->dataDb = Database::createDatabase(extraFile, -1);
+		if (self->useMetacluster && self->clientId == 0) {
+			wait(success(MetaclusterAPI::createMetacluster(cx.getReference(), "management_cluster"_sr)));
 
-			if (self->clientId == 0) {
-				wait(success(MetaclusterAPI::createMetacluster(cx.getReference(), "management_cluster"_sr)));
-
-				DataClusterEntry entry;
-				entry.capacity.numTenantGroups = 1e9;
-				wait(MetaclusterAPI::registerCluster(self->mvDb, "cluster1"_sr, connectionString, entry));
-			}
-		} else {
-			self->dataDb = cx;
+			DataClusterEntry entry;
+			entry.capacity.numTenantGroups = 1e9;
+			wait(MetaclusterAPI::registerCluster(self->mvDb, "cluster1"_sr, connectionString, entry));
 		}
 
 		state Transaction tr(cx);
@@ -140,6 +133,14 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 					wait(tr.onError(e));
 				}
 			}
+		}
+
+		if (self->useMetacluster) {
+			ASSERT(g_simulator.extraDatabases.size() == 1);
+			auto extraFile = makeReference<ClusterConnectionMemoryRecord>(connectionString);
+			self->dataDb = Database::createDatabase(extraFile, -1);
+		} else {
+			self->dataDb = cx;
 		}
 
 		return Void();
@@ -256,14 +257,25 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 
 	Future<bool> check(Database const& cx) override { return _check(cx, this); }
 	ACTOR Future<bool> _check(Database cx, TenantManagementConcurrencyWorkload* self) {
-		state std::map<TenantName, TenantMapEntry> metaclusterMap = wait(TenantAPI::listTenants(
-		    self->mvDb, self->tenantNamePrefix, self->tenantNamePrefix.withSuffix("\xff"_sr), self->maxTenants + 1));
-
-		state std::map<TenantName, TenantMapEntry> dataClusterMap =
+		state std::vector<std::pair<TenantName, TenantMapEntry>> dataClusterMap =
 		    wait(TenantAPI::listTenants(self->dataDb.getReference(),
 		                                self->tenantNamePrefix,
 		                                self->tenantNamePrefix.withSuffix("\xff"_sr),
 		                                self->maxTenants + 1));
+
+
+		state std::vector<std::pair<TenantName, TenantMapEntry>> metaclusterMap;
+
+		if (self->useMetacluster) {
+			std::vector<std::pair<TenantName, TenantMapEntry>> _metaclusterMap =
+			    wait(MetaclusterAPI::listTenants(self->mvDb,
+			                                     self->tenantNamePrefix,
+			                                     self->tenantNamePrefix.withSuffix("\xff"_sr),
+			                                     self->maxTenants + 1));
+			metaclusterMap = _metaclusterMap;
+		} else {
+			metaclusterMap = dataClusterMap;
+		}
 
 		auto metaclusterItr = metaclusterMap.begin();
 		auto dataItr = dataClusterMap.begin();

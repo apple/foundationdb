@@ -27,17 +27,6 @@
 
 namespace TenantAPI {
 
-bool checkTenantMode(Optional<Value> tenantModeValue, ClusterType actualClusterType, ClusterType expectedClusterType) {
-	TenantMode tenantMode = TenantMode::fromValue(tenantModeValue.castTo<ValueRef>());
-	if (actualClusterType != expectedClusterType) {
-		return false;
-	} else if (actualClusterType == ClusterType::STANDALONE && tenantMode == TenantMode::DISABLED) {
-		return false;
-	}
-
-	return true;
-}
-
 TenantMode tenantModeForClusterType(ClusterType clusterType, TenantMode tenantMode) {
 	if (clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
 		return TenantMode::DISABLED;
@@ -46,15 +35,6 @@ TenantMode tenantModeForClusterType(ClusterType clusterType, TenantMode tenantMo
 	} else {
 		return tenantMode;
 	}
-}
-
-Key getTenantGroupIndexKey(TenantGroupNameRef tenantGroup, Optional<TenantNameRef> tenant) {
-	Tuple tuple;
-	tuple.append(tenantGroup);
-	if (tenant.present()) {
-		tuple.append(tenant.get());
-	}
-	return tenantGroupTenantIndexKeys.begin.withSuffix(tuple.pack());
 }
 
 } // namespace TenantAPI

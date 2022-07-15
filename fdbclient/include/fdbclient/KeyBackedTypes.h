@@ -26,7 +26,6 @@
 #include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/GenericTransactionHelper.h"
-#include "fdbclient/IClientApi.h"
 #include "fdbclient/Subspace.h"
 #include "flow/ObjectSerializer.h"
 #include "flow/genericactors.actor.h"
@@ -152,6 +151,11 @@ inline KeyRange TupleCodec<KeyRange>::unpack(Standalone<StringRef> const& val) {
 	return KeyRangeRef(t.getString(0), t.getString(1));
 }
 
+struct NullCodec {
+	static Standalone<StringRef> pack(Standalone<StringRef> val) { return val; }
+	static Standalone<StringRef> unpack(Standalone<StringRef> val) { return val; }
+};
+
 template <typename ResultType>
 struct KeyBackedRangeResult {
 	std::vector<ResultType> results;
@@ -237,7 +241,7 @@ public:
 
 	template <class Transaction>
 	typename std::enable_if<!is_transaction_creator<Transaction>, void>::type set(Transaction tr, T const& val) {
-		return tr->set(key, Codec::pack(val));
+		tr->set(key, Codec::pack(val));
 	}
 
 	template <class DB>
@@ -252,7 +256,7 @@ public:
 
 	template <class Transaction>
 	typename std::enable_if<!is_transaction_creator<Transaction>, void>::type clear(Transaction tr) {
-		return tr->clear(key);
+		tr->clear(key);
 	}
 
 	Key key;
