@@ -26,6 +26,7 @@
 #include "fdbclient/StorageCheckpoint.h"
 #include "fdbclient/Tenant.h"
 #include "fdbserver/Knobs.h"
+#include "fdbserver/IEncryptionKeyProvider.actor.h"
 #include "fdbserver/ServerDBInfo.h"
 
 struct CheckpointRequest {
@@ -150,9 +151,6 @@ public:
 	// of a rollback.
 	virtual Future<Void> init() { return Void(); }
 
-	// Provide a tenant id to tenant name map to support per-tenant data encryption. Currently only used by Redwood.
-	virtual void setTenantPrefixIndex(Reference<TenantPrefixIndex> tenantPrefixIndex) {}
-
 protected:
 	virtual ~IKeyValueStore() {}
 };
@@ -164,7 +162,7 @@ extern IKeyValueStore* keyValueStoreSQLite(std::string const& filename,
                                            bool checkIntegrity = false);
 extern IKeyValueStore* keyValueStoreRedwoodV1(std::string const& filename,
                                               UID logID,
-                                              Reference<AsyncVar<ServerDBInfo> const> dbInfo = {});
+                                              Reference<IEncryptionKeyProvider> encryptionKeyProvider = {});
 extern IKeyValueStore* keyValueStoreRocksDB(std::string const& path,
                                             UID logID,
                                             KeyValueStoreType storeType,
@@ -203,7 +201,7 @@ inline IKeyValueStore* openKVStore(KeyValueStoreType storeType,
                                    bool checkChecksums = false,
                                    bool checkIntegrity = false,
                                    bool openRemotely = false,
-                                   Reference<AsyncVar<ServerDBInfo> const> dbInfo = {}) {
+                                   Reference<IEncryptionKeyProvider> encryptionKeyProvider = {}) {
 	if (openRemotely) {
 		return openRemoteKVStore(storeType, filename, logID, memoryLimit, checkChecksums, checkIntegrity);
 	}
@@ -215,7 +213,7 @@ inline IKeyValueStore* openKVStore(KeyValueStoreType storeType,
 	case KeyValueStoreType::MEMORY:
 		return keyValueStoreMemory(filename, logID, memoryLimit);
 	case KeyValueStoreType::SSD_REDWOOD_V1:
-		return keyValueStoreRedwoodV1(filename, logID, dbInfo);
+		return keyValueStoreRedwoodV1(filename, logID, encryptionKeyProvider);
 	case KeyValueStoreType::SSD_ROCKSDB_V1:
 		return keyValueStoreRocksDB(filename, logID, storeType);
 	case KeyValueStoreType::SSD_SHARDED_ROCKSDB:

@@ -7674,7 +7674,7 @@ RedwoodRecordRef VersionedBTree::dbEnd(LiteralStringRef("\xff\xff\xff\xff\xff"))
 
 class KeyValueStoreRedwood : public IKeyValueStore {
 public:
-	KeyValueStoreRedwood(std::string filename, UID logID, Reference<AsyncVar<ServerDBInfo> const> db)
+	KeyValueStoreRedwood(std::string filename, UID logID, Reference<IEncryptionKeyProvider> encryptionKeyProvider)
 	  : m_filename(filename), m_concurrentReads(SERVER_KNOBS->REDWOOD_KVSTORE_CONCURRENT_READS, 0),
 	    prefetch(SERVER_KNOBS->REDWOOD_KVSTORE_RANGE_PREFETCH) {
 
@@ -7699,9 +7699,9 @@ public:
 		// TODO(yiwu): We should enable encryption only when tenant is in required mode, but currently when existing
 		// storage engine instance is reopen on worker server start, the tenant mode is unknown.
 		if (SERVER_KNOBS->ENABLE_STORAGE_SERVER_ENCRYPTION) {
-			ASSERT(db.isValid());
 			encodingType = EncodingType::AESEncryptionV1;
-			m_keyProvider = makeReference<TenantAwareEncryptionKeyProvider>(db);
+			ASSERT(encryptionKeyProvider.isValid());
+			m_keyProvider = encryptionKeyProvider;
 		} else if (g_network->isSimulated() && logID.hash() % 2 == 0) {
 			// Deterministically enable encryption based on uid
 			encodingType = EncodingType::XOREncryption_TestOnly;
@@ -7982,12 +7982,6 @@ public:
 		}));
 	}
 
-	void setTenantPrefixIndex(Reference<TenantPrefixIndex> tenantPrefixIndex) override {
-		if (m_keyProvider) {
-			m_keyProvider->setTenantPrefixIndex(tenantPrefixIndex);
-		}
-	}
-
 	~KeyValueStoreRedwood() override{};
 
 private:
@@ -8010,8 +8004,8 @@ private:
 
 IKeyValueStore* keyValueStoreRedwoodV1(std::string const& filename,
                                        UID logID,
-                                       Reference<AsyncVar<ServerDBInfo> const> db) {
-	return new KeyValueStoreRedwood(filename, logID, db);
+                                       Reference<IEncryptionKeyProvider> encryptionKeyProvider) {
+	return new KeyValueStoreRedwood(filename, logID, encryptionKeyProvider);
 }
 
 int randomSize(int max) {

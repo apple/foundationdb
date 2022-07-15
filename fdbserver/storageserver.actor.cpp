@@ -61,6 +61,7 @@
 #include "fdbserver/EncryptedMutationMessage.h"
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "fdbserver/GetEncryptCipherKeys.h"
+#include "fdbserver/IEncryptionKeyProvider.actor.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LatencyBandConfig.h"
@@ -436,10 +437,6 @@ struct StorageServerDisk {
 	StorageBytes getStorageBytes() const { return storage->getStorageBytes(); }
 	std::tuple<size_t, size_t, size_t> getSize() const { return storage->getSize(); }
 
-	void setTenantPrefixIndex(Reference<TenantPrefixIndex> tenantPrefixIndex) {
-		storage->setTenantPrefixIndex(tenantPrefixIndex);
-	}
-
 	// The following are pointers to the Counters in StorageServer::counters of the same names.
 	Counter* kvCommitLogicalBytes;
 	Counter* kvClearRanges;
@@ -708,6 +705,8 @@ public:
 	    pendingAddRanges; // Pending requests to add ranges to physical shards
 	std::map<Version, std::vector<KeyRange>>
 	    pendingRemoveRanges; // Pending requests to remove ranges from physical shards
+
+	Reference<IEncryptionKeyProvider> encryptionKeyProvider;
 
 	bool shardAware; // True if the storage server is aware of the physical shards.
 
@@ -1220,10 +1219,10 @@ public:
 	StorageServer(IKeyValueStore* storage,
 	              Reference<AsyncVar<ServerDBInfo> const> const& db,
 	              StorageServerInterface const& ssi)
-	  : tenantPrefixIndex(makeReference<TenantPrefixIndex>()), shardAware(false),
-	    tlogCursorReadsLatencyHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
-	                                                            TLOG_CURSOR_READS_LATENCY_HISTOGRAM,
-	                                                            Histogram::Unit::microseconds)),
+	  : tenantPrefixIndex(makeReference<TenantPrefixIndex>()), encryptionKeyProvider(encryptionKeyProvider),
+	    shardAware(false), tlogCursorReadsLatencyHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
+	                                                                               TLOG_CURSOR_READS_LATENCY_HISTOGRAM,
+	                                                                               Histogram::Unit::microseconds)),
 	    ssVersionLockLatencyHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
 	                                                          SS_VERSION_LOCK_LATENCY_HISTOGRAM,
 	                                                          Histogram::Unit::microseconds)),
@@ -10414,8 +10413,9 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  Version tssSeedVersion,
                                  ReplyPromise<InitializeStorageReply> recruitReply,
                                  Reference<AsyncVar<ServerDBInfo> const> db,
-                                 std::string folder) {
-	state StorageServer self(persistentData, db, ssi);
+                                 std::string folder,
+                                 Reference<IEncryptionKeyProvider> encryptionKeyProvider) {
+	state StorageServer self(persistentData, db, ssi, encryptionKeyProvider);
 	self.shardAware = SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA &&
 	                  (SERVER_KNOBS->STORAGE_SERVER_SHARD_AWARE || persistentData->shardAware());
 	state Future<Void> ssCore;
@@ -10454,7 +10454,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 			self.tag = seedTag;
 		}
 
-		self.storage.setTenantPrefixIndex(self.tenantPrefixIndex);
+		self.encryptionKeyProvider->setTenantPrefixIndex(self.tenantPrefixIndex);
 		self.storage.makeNewStorageServerDurable(self.shardAware);
 		wait(self.storage.commit());
 		++self.counters.kvCommits;
@@ -10505,8 +10505,9 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  Reference<AsyncVar<ServerDBInfo> const> db,
                                  std::string folder,
                                  Promise<Void> recovered,
-                                 Reference<IClusterConnectionRecord> connRecord) {
-	state StorageServer self(persistentData, db, ssi);
+                                 Reference<IClusterConnectionRecord> connRecord,
+                                 Reference<IEncryptionKeyProvider> encryptionKeyProvider) {
+	state StorageServer self(persistentData, db, ssi, encryptionKeyProvider);
 	state Future<Void> ssCore;
 	self.folder = folder;
 
@@ -10537,7 +10538,9 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		// after the tenant map is recovered in restoreDurableState. In case of a storage server reboot,
 		// it is possible that the storage engine is still holding a pre-reboot tenantPrefixIndex, and use that
 		// for its own recovery, before we set the tenantPrefixIndex here.
-		self.storage.setTenantPrefixIndex(self.tenantPrefixIndex);
+		if (self.encryptionKeyProvider.isValid()) {
+			self.encryptionKeyProvider->setTenantPrefixIndex(self.tenantPrefixIndex);
+		}
 		TraceEvent("SSTimeRestoreDurableState", self.thisServerID).detail("TimeTaken", now() - start);
 
 		// if this is a tss storage file, use that as source of truth for this server being a tss instead of the
