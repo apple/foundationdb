@@ -8156,6 +8156,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				MutationRef msg;
 				rd >> msg;
 				if (msg.isEncrypted()) {
+					ASSERT(cipherKeys.present());
 					msg = msg.decrypt(cipherKeys.get(), rd.arena());
 				}
 
