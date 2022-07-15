@@ -2192,15 +2192,15 @@ public:
 	          int64_t remapCleanupWindowBytes,
 	          int concurrentExtentReads,
 	          bool memoryOnly,
-	          std::shared_ptr<IEncryptionKeyProvider> keyProvider,
+	          Reference<IEncryptionKeyProvider> keyProvider,
 	          Promise<Void> errorPromise = {})
 	  : keyProvider(keyProvider), ioLock(FLOW_KNOBS->MAX_OUTSTANDING, ioMaxPriority, FLOW_KNOBS->MAX_OUTSTANDING / 2),
 	    pageCacheBytes(pageCacheSizeBytes), desiredPageSize(desiredPageSize), desiredExtentSize(desiredExtentSize),
 	    filename(filename), memoryOnly(memoryOnly), errorPromise(errorPromise),
 	    remapCleanupWindowBytes(remapCleanupWindowBytes), concurrentExtentReads(new FlowLock(concurrentExtentReads)) {
 
-		if (keyProvider == nullptr) {
-			keyProvider = std::make_shared<NullKeyProvider>();
+		if (!keyProvider) {
+			keyProvider = makeReference<NullKeyProvider>();
 		}
 
 		// This sets the page cache size for all PageCacheT instances using the same evictor
@@ -3958,7 +3958,7 @@ private:
 	int physicalExtentSize;
 	int pagesPerExtent;
 
-	std::shared_ptr<IEncryptionKeyProvider> keyProvider;
+	Reference<IEncryptionKeyProvider> keyProvider;
 
 	PriorityMultiLock ioLock;
 
@@ -5036,7 +5036,7 @@ public:
 	VersionedBTree(IPager2* pager,
 	               std::string name,
 	               EncodingType defaultEncodingType,
-	               std::shared_ptr<IEncryptionKeyProvider> keyProvider)
+	               Reference<IEncryptionKeyProvider> keyProvider)
 	  : m_pager(pager), m_encodingType(defaultEncodingType), m_enforceEncodingType(false), m_keyProvider(keyProvider),
 	    m_pBuffer(nullptr), m_mutationCount(0), m_name(name) {
 
@@ -5044,13 +5044,13 @@ public:
 		// This prevents an attack where an encrypted page is replaced by an attacker with an unencrypted page
 		// or an encrypted page fabricated using a compromised scheme.
 		if (ArenaPage::isEncodingTypeEncrypted(m_encodingType)) {
-			ASSERT(keyProvider != nullptr);
+			ASSERT(keyProvider.isValid());
 			m_enforceEncodingType = true;
 		}
 
 		// If key provider isn't given, instantiate the null provider
-		if (m_keyProvider == nullptr) {
-			m_keyProvider = std::make_shared<NullKeyProvider>();
+		if (!m_keyProvider) {
+			m_keyProvider = makeReference<NullKeyProvider>();
 		}
 
 		m_pBoundaryVerifier = DecodeBoundaryVerifier::getVerifier(name);
@@ -5532,7 +5532,7 @@ private:
 	IPager2* m_pager;
 	EncodingType m_encodingType;
 	bool m_enforceEncodingType;
-	std::shared_ptr<IEncryptionKeyProvider> m_keyProvider;
+	Reference<IEncryptionKeyProvider> m_keyProvider;
 
 	// Counter to update with DecodeCache memory usage
 	int64_t* m_pDecodeCacheMemory = nullptr;
@@ -7701,11 +7701,11 @@ public:
 		if (SERVER_KNOBS->ENABLE_STORAGE_SERVER_ENCRYPTION) {
 			ASSERT(db.isValid());
 			encodingType = EncodingType::AESEncryptionV1;
-			m_keyProvider = std::make_shared<TenantAwareEncryptionKeyProvider>(db);
+			m_keyProvider = makeReference<TenantAwareEncryptionKeyProvider>(db);
 		} else if (g_network->isSimulated() && logID.hash() % 2 == 0) {
 			// Deterministically enable encryption based on uid
 			encodingType = EncodingType::XOREncryption_TestOnly;
-			m_keyProvider = std::make_shared<XOREncryptionKeyProvider_TestOnly>(filename);
+			m_keyProvider = makeReference<XOREncryptionKeyProvider_TestOnly>(filename);
 		}
 
 		IPager2* pager = new DWALPager(pageSize,
@@ -7999,7 +7999,7 @@ private:
 	PriorityMultiLock m_concurrentReads;
 	bool prefetch;
 	Version m_nextCommitVersion;
-	std::shared_ptr<IEncryptionKeyProvider> m_keyProvider;
+	Reference<IEncryptionKeyProvider> m_keyProvider;
 	Future<Void> m_lastCommit = Void();
 
 	template <typename T>
@@ -9791,11 +9791,11 @@ TEST_CASE("Lredwood/correctness/btree") {
 
 	state EncodingType encodingType =
 	    static_cast<EncodingType>(deterministicRandom()->randomInt(0, EncodingType::MAX_ENCODING_TYPE));
-	state std::shared_ptr<IEncryptionKeyProvider> keyProvider;
+	state Reference<IEncryptionKeyProvider> keyProvider;
 	if (encodingType == EncodingType::AESEncryptionV1) {
-		keyProvider = std::make_shared<RandomEncryptionKeyProvider>();
+		keyProvider = makeReference<RandomEncryptionKeyProvider>();
 	} else if (encodingType == EncodingType::XOREncryption_TestOnly) {
-		keyProvider = std::make_shared<XOREncryptionKeyProvider_TestOnly>(file);
+		keyProvider = makeReference<XOREncryptionKeyProvider_TestOnly>(file);
 	}
 
 	printf("\n");
@@ -10277,7 +10277,7 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 		                      remapCleanupWindowBytes,
 		                      concurrentExtentReads,
 		                      false,
-		                      nullptr);
+		                      Reference<IEncryptionKeyProvider>());
 
 		wait(success(pager->init()));
 
@@ -10328,8 +10328,14 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 	}
 
 	printf("Reopening pager file from disk.\n");
-	pager = new DWALPager(
-	    pageSize, extentSize, fileName, cacheSizeBytes, remapCleanupWindowBytes, concurrentExtentReads, false, nullptr);
+	pager = new DWALPager(pageSize,
+	                      extentSize,
+	                      fileName,
+	                      cacheSizeBytes,
+	                      remapCleanupWindowBytes,
+	                      concurrentExtentReads,
+	                      false,
+	                      Reference<IEncryptionKeyProvider>());
 	wait(success(pager->init()));
 
 	printf("Starting ExtentQueue FastPath Recovery from Disk.\n");
@@ -10474,8 +10480,9 @@ TEST_CASE(":/redwood/performance/set") {
 	                                 remapCleanupWindowBytes,
 	                                 concurrentExtentReads,
 	                                 pagerMemoryOnly,
-	                                 nullptr);
-	state VersionedBTree* btree = new VersionedBTree(pager, file, EncodingType::XXHash64, nullptr);
+	                                 Reference<IEncryptionKeyProvider>());
+	state VersionedBTree* btree =
+	    new VersionedBTree(pager, file, EncodingType::XXHash64, Reference<IEncryptionKeyProvider>());
 	wait(btree->init());
 	printf("Initialized.  StorageBytes=%s\n", btree->getStorageBytes().toString().c_str());
 

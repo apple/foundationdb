@@ -25,6 +25,7 @@
 #define FDBSERVER_IENCRYPTIONKEYPROVIDER_ACTOR_H
 
 #include "fdbserver/GetEncryptCipherKeys.h"
+#include "flow/Arena.h"
 
 #define XXH_INLINE_ALL
 #include "flow/xxhash.h"
@@ -57,7 +58,7 @@ typedef Standalone<EncryptionKeyRef> EncryptionKey;
 
 // Interface used by pager to get encryption keys reading pages from disk
 // and by the BTree to get encryption keys to use for new pages
-class IEncryptionKeyProvider {
+class IEncryptionKeyProvider : public ReferenceCounted<IEncryptionKeyProvider> {
 public:
 	virtual ~IEncryptionKeyProvider() {}
 
