@@ -1327,8 +1327,9 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 
 				Standalone<BlobGranuleHistoryValue> historyValue;
 				historyValue.granuleID = newGranuleIDs[i];
-				historyValue.parentGranules.push_back(historyValue.arena(),
-				                                      std::pair(granuleRange, granuleStartVersion));
+				historyValue.parentBoundaries.push_back(historyValue.arena(), granuleRange.begin);
+				historyValue.parentBoundaries.push_back(historyValue.arena(), granuleRange.end);
+				historyValue.parentVersions.push_back(historyValue.arena(), granuleStartVersion);
 
 				tr->set(historyKey, blobGranuleHistoryValueFor(historyValue));
 
@@ -1545,7 +1546,7 @@ ACTOR Future<Void> forceGranuleFlush(Reference<BlobManagerData> bmData, KeyRange
 ACTOR Future<std::pair<UID, Version>> persistMergeGranulesStart(Reference<BlobManagerData> bmData,
                                                                 KeyRange mergeRange,
                                                                 std::vector<UID> parentGranuleIDs,
-                                                                std::vector<KeyRange> parentGranuleRanges,
+                                                                std::vector<Key> parentGranuleRanges,
                                                                 std::vector<Version> parentGranuleStartVersions) {
 	state UID mergeGranuleID = deterministicRandom()->randomUniqueID();
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
@@ -1603,7 +1604,7 @@ ACTOR Future<Void> persistMergeGranulesDone(Reference<BlobManagerData> bmData,
                                             KeyRange mergeRange,
                                             Version mergeVersion,
                                             std::vector<UID> parentGranuleIDs,
-                                            std::vector<KeyRange> parentGranuleRanges,
+                                            std::vector<Key> parentGranuleRanges,
                                             std::vector<Version> parentGranuleStartVersions) {
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
 	// pick worker that has part of old range, it will soon get overridden anyway
@@ -1634,13 +1635,14 @@ ACTOR Future<Void> persistMergeGranulesDone(Reference<BlobManagerData> bmData,
 			state int parentIdx;
 			// TODO: could parallelize these
 			for (parentIdx = 0; parentIdx < parentGranuleIDs.size(); parentIdx++) {
-				state Key lockKey = blobGranuleLockKeyFor(parentGranuleRanges[parentIdx]);
+				KeyRange parentRange(KeyRangeRef(parentGranuleRanges[parentIdx], parentGranuleRanges[parentIdx + 1]));
+				state Key lockKey = blobGranuleLockKeyFor(parentRange);
 				state Future<Optional<Value>> oldLockFuture = tr->get(lockKey);
 
 				wait(updateChangeFeed(tr,
 				                      granuleIDToCFKey(parentGranuleIDs[parentIdx]),
 				                      ChangeFeedStatus::CHANGE_FEED_DESTROY,
-				                      parentGranuleRanges[parentIdx]));
+				                      parentRange));
 				if (BM_DEBUG) {
 					fmt::print("Granule merge destroying CF {0} ({1})!\n",
 					           parentGranuleIDs[parentIdx].shortString().substr(0, 6),
@@ -1669,10 +1671,10 @@ ACTOR Future<Void> persistMergeGranulesDone(Reference<BlobManagerData> bmData,
 			Standalone<BlobGranuleHistoryValue> historyValue;
 			historyValue.granuleID = mergeGranuleID;
 			for (parentIdx = 0; parentIdx < parentGranuleIDs.size(); parentIdx++) {
-				historyValue.parentGranules.push_back(
-				    historyValue.arena(),
-				    std::pair(parentGranuleRanges[parentIdx], parentGranuleStartVersions[parentIdx]));
+				historyValue.parentBoundaries.push_back(historyValue.arena(), parentGranuleRanges[parentIdx]);
+				historyValue.parentVersions.push_back(historyValue.arena(), parentGranuleStartVersions[parentIdx]);
 			}
+			historyValue.parentBoundaries.push_back(historyValue.arena(), parentGranuleRanges.back());
 
 			tr->set(historyKey, blobGranuleHistoryValueFor(historyValue));
 
@@ -1700,7 +1702,7 @@ ACTOR Future<Void> finishMergeGranules(Reference<BlobManagerData> bmData,
                                        KeyRange mergeRange,
                                        Version mergeVersion,
                                        std::vector<UID> parentGranuleIDs,
-                                       std::vector<KeyRange> parentGranuleRanges,
+                                       std::vector<Key> parentGranuleRanges,
                                        std::vector<Version> parentGranuleStartVersions) {
 
 	// wait for BM to be fully recovered before starting actual merges
@@ -1749,13 +1751,14 @@ ACTOR Future<Void> doMerge(Reference<BlobManagerData> bmData,
                            std::vector<std::tuple<UID, KeyRange, Version>> toMerge) {
 	// switch to format persist merge wants
 	state std::vector<UID> ids;
-	state std::vector<KeyRange> ranges;
+	state std::vector<Key> ranges;
 	state std::vector<Version> startVersions;
 	for (auto& it : toMerge) {
 		ids.push_back(std::get<0>(it));
-		ranges.push_back(std::get<1>(it));
+		ranges.push_back(std::get<1>(it).begin);
 		startVersions.push_back(std::get<2>(it));
 	}
+	ranges.push_back(std::get<1>(toMerge.back()).end);
 
 	try {
 		std::pair<UID, Version> persistMerge =
@@ -1779,6 +1782,10 @@ static void attemptStartMerge(Reference<BlobManagerData> bmData,
                               const std::vector<std::tuple<UID, KeyRange, Version>>& toMerge) {
 	if (toMerge.size() < 2) {
 		return;
+	}
+	// TODO REMOVE validation eventually
+	for (int i = 0; i < toMerge.size() - 1; i++) {
+		ASSERT(std::get<1>(toMerge[i]).end == std::get<1>(toMerge[i + 1]).begin);
 	}
 	KeyRange mergeRange(KeyRangeRef(std::get<1>(toMerge.front()).begin, std::get<1>(toMerge.back()).end));
 	// merge/merge races should not be possible because granuleMergeChecker should only start attemptMerges() for
@@ -1826,6 +1833,8 @@ ACTOR Future<Void> attemptMerges(Reference<BlobManagerData> bmData,
 	state int64_t currentBytes = 0;
 	state std::vector<std::tuple<UID, KeyRange, Version>> currentCandidates;
 	state int i;
+	// FIXME: may also want to limit number of granules so the sum of their keys fits in a single fdb value for the
+	// merge intent
 	for (i = 0; i < candidates.size(); i++) {
 		StorageMetrics metrics =
 		    wait(bmData->db->getStorageMetrics(std::get<1>(candidates[i]), CLIENT_KNOBS->TOO_MANY));
@@ -2507,7 +2516,7 @@ ACTOR Future<Void> resumeActiveMerges(Reference<BlobManagerData> bmData) {
 				UID mergeGranuleID = decodeBlobGranuleMergeKey(it.key);
 				KeyRange mergeRange;
 				std::vector<UID> parentGranuleIDs;
-				std::vector<KeyRange> parentGranuleRanges;
+				std::vector<Key> parentGranuleRanges;
 				std::vector<Version> parentGranuleStartVersions;
 				Version mergeVersion;
 				std::tie(mergeRange, mergeVersion, parentGranuleIDs, parentGranuleRanges, parentGranuleStartVersions) =
@@ -3492,27 +3501,30 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 		}
 
 		// add all of the node's parents to the queue
-		for (auto& parent : currHistoryNode.parentGranules) {
+		for (int i = 0; i < currHistoryNode.parentVersions.size(); i++) {
+			// for (auto& parent : currHistoryNode.parentVersions.size()) {
 			// if we already added this node to queue, skip it; otherwise, mark it as visited
-			if (visited.count({ parent.first.begin.begin(), parent.second })) {
+			KeyRangeRef parentRange(currHistoryNode.parentBoundaries[i], currHistoryNode.parentBoundaries[i + 1]);
+			Version parentVersion = currHistoryNode.parentVersions[i];
+			if (visited.count({ parentRange.begin.begin(), parentVersion })) {
 				if (BM_DEBUG) {
 					fmt::print("Already added {0} to queue, so skipping it\n", currHistoryNode.granuleID.toString());
 				}
 				continue;
 			}
-			visited.insert({ parent.first.begin.begin(), parent.second });
+			visited.insert({ parentRange.begin.begin(), parentVersion });
 
 			if (BM_DEBUG) {
 				fmt::print("Adding parent [{0} - {1}) with versions [{2} - {3}) to queue\n",
-				           parent.first.begin.printable(),
-				           parent.first.end.printable(),
-				           parent.second,
+				           parentRange.begin.printable(),
+				           parentRange.end.printable(),
+				           parentVersion,
 				           startVersion);
 			}
 
 			// the parent's end version is this node's startVersion,
 			// since this node must have started where it's parent finished
-			historyEntryQueue.push({ parent.first, parent.second, startVersion });
+			historyEntryQueue.push({ parentRange, parentVersion, startVersion });
 		}
 	}
 
