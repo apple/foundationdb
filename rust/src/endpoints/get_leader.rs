@@ -605,7 +605,6 @@ pub struct ClusterControllerFullInterface {
 
 impl ClusterControllerFullInterface {
     pub async fn register_worker_worker(self: &mut Self) -> Result<()> {
-        use crate::endpoints::register_worker::register_worker;
         loop {
             self.register_worker.changed().await?;
             // borrow_and_update returns read lock handle on register_worker.
@@ -619,7 +618,7 @@ impl ClusterControllerFullInterface {
                         "time to call register worker on {:?}",
                         register_worker_endpoint
                     );
-                    let res = register_worker(&self.svc, register_worker_endpoint).await?;
+                    let res = crate::endpoints::register_worker::register_worker(&self.svc, register_worker_endpoint).await?;
                 }
                 None => {
                     println!("No register_worker endpoint.  Unhealthy cluster?");

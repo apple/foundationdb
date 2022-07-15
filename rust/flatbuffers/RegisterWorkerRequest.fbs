@@ -18,3 +18,9 @@ table RegisterWorkerRequest {
     knob_config_class_set: ConfigClassSet;
     request_db_info: bool;
 }
+
+table FakeRoot {
+    register_worker_request: RegisterWorkerRequest;
+}
+
+root_type FakeRoot;

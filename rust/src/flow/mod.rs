@@ -47,9 +47,9 @@ impl From<crate::common_generated::NetworkAddress<'_>> for Peer {
 
 #[derive(Clone, Debug)]
 pub struct Endpoint {
-    peer: Peer,
-    secondary_address: Option<Peer>,
-    token: UID,
+    pub peer: Peer,
+    pub secondary_address: Option<Peer>,
+    pub token: UID,
 }
 
 impl From<crate::common_generated::Endpoint<'_>> for Endpoint {

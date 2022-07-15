@@ -5,8 +5,8 @@ table RegisterWorkerReply {
     priority_info: ClusterControllerPriorityInfo;
 }
 
-table fake_root {
+table FakeRoot {
     register_worker_reply: RegisterWorkerReply;
 }
 
-root_type fake_root;
+root_type FakeRoot;

@@ -2,9 +2,9 @@
 #[path = "../../target/flatbuffers/RegisterWorkerRequest_generated.rs"]
 mod register_worker_request;
 
-// #[allow(dead_code, unused_imports)]
-// #[path = "../../target/flatbuffers/RegisterWorkerReply_generated.rs"]
-// mod register_worker_reply;
+#[allow(dead_code, unused_imports)]
+#[path = "../../target/flatbuffers/RegisterWorkerReply_generated.rs"]
+mod register_worker_reply;
 
 // TODO: Move the rest of these includes into test-only packages:
 
@@ -22,7 +22,7 @@ mod worker_interface;
 
 use crate::flow::{
     file_identifier::{IdentifierType, ParsedFileIdentifier},
-    Endpoint, FlowMessage, Result,
+    Endpoint, FlowMessage, Peer, Result,
 };
 use crate::services::ConnectionKeeper;
 
@@ -56,7 +56,32 @@ fn serialize_request(
     builder: &mut FlatBufferBuilder<'static>,
     endpoint: Endpoint,
 ) -> Result<FlowMessage> {
-    // use register_worker_request::{FakeRoot, FakeRootArgs, RegisterWorkerRequest, RegisterWorkerRequestArgs};
+    use register_worker_request::{FakeRoot, FakeRootArgs, RegisterWorkerRequest, RegisterWorkerRequestArgs};
+    let peer = match endpoint.peer {
+        Peer::Remote(socketAddr) => {
+            socketAddr
+        },
+        Peer::Local(_) => {
+            return Err("rust-language cluster controllers not supported yet. :-)".into());
+        }
+    };
+    let (flow, reply_promise) = super::create_request_headers(builder, peer);
+    let register_worker_request = Some(RegisterWorkerRequest::create(builder, &RegisterWorkerRequestArgs {
+
+    }));
+    let fake_root = FakeRoot::create(builder, &FakeRootArgs { register_worker_request });
+    builder.finish(fake_root, Some("myfi"));
+    super::finalize_request(
+        builder,
+        flow,
+        endpoint.token,
+        REGISTER_WORKER_REQUEST_FILE_IDENTIFIER,
+    )
+}
+
+fn deserialize_response(
+    flow_message: FlowMessage
+) -> Result<register_worker_reply::RegisterWorkerReply<'static>> {
     unimplemented!();
 }
 
@@ -330,6 +355,6 @@ pub async fn register_worker(svc: &Arc<ConnectionKeeper>, endpoint: Endpoint) ->
     let req =
         REQUEST_BUILDER.with(|builder| serialize_request(&mut builder.borrow_mut(), endpoint))?;
     let res = svc.rpc(req).await?;
-
+    println!("{:x?}", deserialize_response(res)?);
     Ok(())
 }
