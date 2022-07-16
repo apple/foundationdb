@@ -62,7 +62,7 @@ Here’s a simple implementation of the basic table pattern:
         private static final Subspace colIndex;
 
         static {
-            fdb = FDB.selectAPIVersion(710);
+            fdb = FDB.selectAPIVersion(720);
             db = fdb.open();
             table = new Subspace(Tuple.from("T"));
             rowIndex = table.subspace(Tuple.from("R"));

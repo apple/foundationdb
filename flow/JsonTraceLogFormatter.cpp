@@ -80,6 +80,6 @@ std::string JsonTraceLogFormatter::formatEvent(const TraceEventFields& fields) c
 		escapeString(oss, iter->second);
 		oss << "\"";
 	}
-	oss << " }\r\n";
+	oss << " }\n";
 	return std::move(oss).str();
 }

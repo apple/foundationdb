@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2021 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -38,6 +38,16 @@ ClusterConnectionFile::ClusterConnectionFile(std::string const& filename, Cluste
   : IClusterConnectionRecord(ConnectionStringNeedsPersisted::True) {
 	this->filename = filename;
 	cs = contents;
+}
+
+// Creates a cluster file from the given filename. If the filename is empty, attempts to load the default
+// cluster file instead.
+Reference<ClusterConnectionFile> ClusterConnectionFile::openOrDefault(std::string const& filename) {
+	return makeReference<ClusterConnectionFile>(lookupClusterFileName(filename).first);
+}
+
+Reference<ClusterConnectionFile> ClusterConnectionFile::openOrDefault(const char* filename) {
+	return openOrDefault(std::string(filename == nullptr ? "" : filename));
 }
 
 // Sets the connections string held by this object and persists it.

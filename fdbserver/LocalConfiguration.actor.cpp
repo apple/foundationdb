@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -127,18 +127,9 @@ class LocalConfigurationImpl {
 				} catch (Error& e) {
 					if (e.code() == error_code_invalid_option) {
 						TEST(true); // Attempted to manually set invalid knob option
-						if (!g_network->isSimulated()) {
-							fprintf(stderr, "WARNING: Unrecognized knob option '%s'\n", knobName.c_str());
-						}
 						TraceEvent(SevWarnAlways, "UnrecognizedKnobOption").detail("Knob", printable(knobName));
 					} else if (e.code() == error_code_invalid_option_value) {
 						TEST(true); // Invalid manually set knob value
-						if (!g_network->isSimulated()) {
-							fprintf(stderr,
-							        "WARNING: Invalid value '%s' for knob option '%s'\n",
-							        knobValueString.c_str(),
-							        knobName.c_str());
-						}
 						TraceEvent(SevWarnAlways, "InvalidKnobValue")
 						    .detail("Knob", printable(knobName))
 						    .detail("Value", printable(knobValueString));

@@ -118,7 +118,7 @@ func (prty Priority) Peek(trtr fdb.Transactor, max bool) interface{} {
 }
 
 func main() {
-	fdb.MustAPIVersion(710)
+	fdb.MustAPIVersion(720)
 
 	db := fdb.MustOpenDefault()
 

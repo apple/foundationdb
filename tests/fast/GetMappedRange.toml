@@ -1,0 +1,6 @@
+[[test]]
+testTitle = 'GetMappedRange'
+useDB = true
+
+    [[test.workload]]
+    testName = 'GetMappedRange'

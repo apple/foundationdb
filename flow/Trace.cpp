@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -53,6 +53,8 @@
 // 2. To avoid a historically documented but unknown crash that occurs when logging allocations
 //    during an open trace event
 thread_local int g_allocation_tracing_disabled = 1;
+unsigned tracedLines = 0;
+thread_local int failedLineOverflow = 0;
 
 ITraceLogIssuesReporter::~ITraceLogIssuesReporter() {}
 
@@ -252,7 +254,7 @@ public:
 			double getTimeEstimate() const override { return .001; }
 		};
 		void action(WriteBuffer& a) {
-			for (auto event : a.events) {
+			for (const auto& event : a.events) {
 				event.validateFormat();
 				logWriter->write(formatter->formatEvent(event));
 			}
@@ -394,17 +396,22 @@ public:
 		eventBuffer.push_back(fields);
 		bufferLength += fields.sizeBytes();
 
-		// If we have queued up a large number of events in simulation, then throw an error. This makes it easier to
-		// diagnose cases where we get stuck in a loop logging trace events that eventually runs out of memory.
-		// Without this we would never see any trace events from that loop, and it would be more difficult to identify
-		// where the process is actually stuck.
-		if (g_network && g_network->isSimulated() && bufferLength > 1e8) {
-			fprintf(stderr, "Trace log buffer overflow\n");
-			fprintf(stderr, "Last event: %s\n", fields.toString().c_str());
-			// Setting this to 0 avoids a recurse from the assertion trace event and also prevents a situation where
-			// we roll the trace log only to log the single assertion event when using --crash.
-			bufferLength = 0;
-			ASSERT(false);
+		if (g_network && g_network->isSimulated()) {
+			// Throw an error if we have queued up a large number of events in simulation. This makes it easier to
+			// diagnose cases where we get stuck in a loop logging trace events that eventually runs out of memory.
+			// Without this we would never see any trace events from that loop, and it would be more difficult to
+			// identify where the process is actually stuck.
+			if (bufferLength > 1e8) {
+				fprintf(stderr, "Trace log buffer overflow\n");
+				fprintf(stderr, "Last event: %s\n", fields.toString().c_str());
+				// Setting this to 0 avoids a recurse from the assertion trace event and also prevents a situation where
+				// we roll the trace log only to log the single assertion event when using --crash.
+				bufferLength = 0;
+				ASSERT(false);
+			}
+			if (++tracedLines > FLOW_KNOBS->MAX_TRACE_LINES && failedLineOverflow == 0) {
+				failedLineOverflow = 1; // we only want to do this once
+			}
 		}
 
 		if (trackError) {
@@ -447,7 +454,9 @@ public:
 	}
 
 	ThreadFuture<Void> flush() {
-		traceEventThrottlerCache->poll();
+		if (TraceEvent::isNetworkThread()) {
+			traceEventThrottlerCache->poll();
+		}
 
 		MutexHolder hold(mutex);
 		bool roll = false;
@@ -1022,7 +1031,7 @@ BaseTraceEvent& BaseTraceEvent::detailImpl(std::string&& key, std::string&& valu
 		if (maxEventLength >= 0 && fields.sizeBytes() > maxEventLength) {
 			TraceEvent(g_network && g_network->isSimulated() ? SevError : SevWarnAlways, "TraceEventOverflow")
 			    .setMaxEventLength(1000)
-			    .detail("TraceFirstBytes", fields.toString().substr(300));
+			    .detail("TraceFirstBytes", fields.toString().substr(0, 300));
 			enabled = false;
 		}
 		--g_allocation_tracing_disabled;
@@ -1265,6 +1274,11 @@ void BaseTraceEvent::log() {
 
 BaseTraceEvent::~BaseTraceEvent() {
 	log();
+	if (failedLineOverflow == 1) {
+		failedLineOverflow = 2;
+		TraceEvent(SevError, "TracedTooManyLines").log();
+		crashAndDie();
+	}
 }
 
 thread_local bool BaseTraceEvent::networkThread = false;
@@ -1399,7 +1413,7 @@ void TraceBatch::dump() {
 		g_traceLog.writeEvent(buggifyBatch[i].fields, "", false);
 	}
 
-	onMainThreadVoid([]() { g_traceLog.flush(); }, nullptr);
+	onMainThreadVoid([]() { g_traceLog.flush(); });
 	eventBatch.clear();
 	attachBatch.clear();
 	buggifyBatch.clear();

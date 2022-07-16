@@ -25,6 +25,7 @@ import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.CompletableFuture;
@@ -35,6 +36,7 @@ import com.apple.foundationdb.FDBException;
 import com.apple.foundationdb.KeySelector;
 import com.apple.foundationdb.Range;
 import com.apple.foundationdb.StreamingMode;
+import com.apple.foundationdb.Tenant;
 import com.apple.foundationdb.Transaction;
 import com.apple.foundationdb.tuple.ByteArrayUtil;
 import com.apple.foundationdb.tuple.Tuple;
@@ -42,15 +44,27 @@ import com.apple.foundationdb.tuple.Tuple;
 abstract class Context implements Runnable, AutoCloseable {
 	final Stack stack = new Stack();
 	final Database db;
+	Optional<Tenant> tenant = Optional.empty();
 	final String preStr;
 	int instructionIndex = 0;
 	KeySelector nextKey, endKey;
 	Long lastVersion = null;
 
+	private static class TransactionState {
+		public Transaction transaction;
+		public Optional<Tenant> tenant;
+
+		public TransactionState(Transaction transaction, Optional<Tenant> tenant) {
+			this.transaction = transaction;
+			this.tenant = tenant;
+		}
+	}
+
 	private String trName;
 	private List<Thread> children = new LinkedList<>();
-	private static Map<String, Transaction> transactionMap = new HashMap<>();
+	private static Map<String, TransactionState> transactionMap = new HashMap<>();
 	private static Map<Transaction, AtomicInteger> transactionRefCounts = new HashMap<>();
+	private static Map<byte[], Tenant> tenantMap = new HashMap<>();
 
 	Context(Database db, byte[] prefix) {
 		this.db = db;
@@ -86,15 +100,24 @@ abstract class Context implements Runnable, AutoCloseable {
 		}
 	}
 
+	public synchronized void setTenant(Optional<byte[]> tenantName) {
+		if (tenantName.isPresent()) {
+			tenant = Optional.of(tenantMap.computeIfAbsent(tenantName.get(), tn -> db.openTenant(tenantName.get())));
+		}
+		else {
+			tenant = Optional.empty();
+		}
+	}
+
 	public static synchronized void addTransactionReference(Transaction tr) {
 		transactionRefCounts.computeIfAbsent(tr, x -> new AtomicInteger(0)).incrementAndGet();
 	}
 
 	private static synchronized Transaction getTransaction(String trName) {
-		Transaction tr = transactionMap.get(trName);
-		assert tr != null : "Null transaction";
-		addTransactionReference(tr);
-		return tr;
+		TransactionState state = transactionMap.get(trName);
+		assert state != null : "Null transaction";
+		addTransactionReference(state.transaction);
+		return state.transaction;
 	}
 
 	public Transaction getCurrentTransaction() {
@@ -105,59 +128,78 @@ abstract class Context implements Runnable, AutoCloseable {
 		if(tr != null) {
 			AtomicInteger count = transactionRefCounts.get(tr);
 			if(count.decrementAndGet() == 0) {
-				assert !transactionMap.containsValue(tr);
 				transactionRefCounts.remove(tr);
 				tr.close();
 			}
 		}
 	}
 
-	private static synchronized void updateTransaction(String trName, Transaction tr) {
-		releaseTransaction(transactionMap.put(trName, tr));
-		addTransactionReference(tr);
-	}
-
-	private static synchronized boolean updateTransaction(String trName, Transaction oldTr, Transaction newTr) {
-		boolean added;
-		if(oldTr == null) {
-			added = (transactionMap.putIfAbsent(trName, newTr) == null);
+	private static Transaction createTransaction(Database db, Optional<Tenant> creatingTenant) {
+		if (creatingTenant.isPresent()) {
+			return creatingTenant.get().createTransaction();
 		}
 		else {
-			added = transactionMap.replace(trName, oldTr, newTr);
+			return db.createTransaction();
+		}
+	}
+
+	private static synchronized boolean newTransaction(Database db, Optional<Tenant> tenant, String trName, boolean allowReplace) {
+		TransactionState oldState = transactionMap.get(trName);
+		if (oldState != null) {
+			releaseTransaction(oldState.transaction);
+		}
+		else if (!allowReplace) {
+			return false;
 		}
 
-		if(added) {
+		TransactionState newState = new TransactionState(createTransaction(db, tenant), tenant);
+
+		transactionMap.put(trName, newState);
+		addTransactionReference(newState.transaction);
+
+		return true;
+	}
+
+	private static synchronized boolean replaceTransaction(Database db, String trName, Transaction oldTr, Transaction newTr) {
+		TransactionState trState = transactionMap.get(trName);
+		assert trState != null : "Null transaction";
+
+		if(oldTr == null || trState.transaction == oldTr) {
+			if(newTr == null) {
+				newTr = createTransaction(db, trState.tenant);
+			}
+			releaseTransaction(trState.transaction);
 			addTransactionReference(newTr);
-			releaseTransaction(oldTr);
+			trState.transaction = newTr;
 			return true;
 		}
 
 		return false;
 	}
 
-	public void updateCurrentTransaction(Transaction tr) {
-		updateTransaction(trName, tr);
-	}
-
-	public boolean updateCurrentTransaction(Transaction oldTr, Transaction newTr) {
-		return updateTransaction(trName, oldTr, newTr);
-	}
-
 	public void newTransaction() {
-		Transaction tr = db.createTransaction();
-		updateCurrentTransaction(tr);
+		newTransaction(db, tenant, trName, true);
 	}
 
-	public void newTransaction(Transaction oldTr) {
-		Transaction newTr = db.createTransaction();
-		if(!updateCurrentTransaction(oldTr, newTr)) {
-			newTr.close();
-		}
+	public void replaceTransaction(Transaction tr) {
+		replaceTransaction(db, trName, null, tr);
+	}
+
+	public boolean replaceTransaction(Transaction oldTr, Transaction newTr) {
+		return replaceTransaction(db, trName, oldTr, newTr);
+	}
+
+	public void resetTransaction() {
+		replaceTransaction(db, trName, null, null);
+	}
+
+	public boolean resetTransaction(Transaction oldTr) {
+		return replaceTransaction(db, trName, oldTr, null);
 	}
 
 	public void switchTransaction(byte[] rawTrName) {
 		trName = ByteArrayUtil.printable(rawTrName);
-		newTransaction(null);
+		newTransaction(db, tenant, trName, false);
 	}
 
 	abstract void executeOperations() throws Throwable;
@@ -224,8 +266,12 @@ abstract class Context implements Runnable, AutoCloseable {
 
 	@Override
 	public void close() {
-		for(Transaction tr : transactionMap.values()) {
-			tr.close();
+		for(TransactionState tr : transactionMap.values()) {
+			tr.transaction.close();
+		}
+
+		for(Tenant tenant : tenantMap.values()) {
+			tenant.close();
 		}
 	}
 }

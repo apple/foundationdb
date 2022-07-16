@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,7 +31,7 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/MutationList.h"
 #include "fdbclient/BackupContainer.h"
-#include "fdbrpc/IAsyncFile.h"
+#include "flow/IAsyncFile.h"
 #include "fdbrpc/simulator.h"
 #include "flow/genericactors.actor.h"
 #include "flow/Hash3.h"

@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,13 +20,14 @@
 
 // Unit tests for the flow language and libraries
 
+#include "flow/Arena.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/UnitTest.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/IThreadPool.h"
 #include "flow/WriteOnlySet.h"
 #include "fdbrpc/fdbrpc.h"
-#include "fdbrpc/IAsyncFile.h"
+#include "flow/IAsyncFile.h"
 #include "flow/TLSConfig.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 

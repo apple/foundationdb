@@ -4,6 +4,7 @@ minimumReplication = 3
 minimumRegions = 3
 logAntiQuorum = 0
 storageEngineExcludeTypes = [4]
+disableRemoteKVS = true
 
 [[test]]
 testTitle = 'DiskFailureCycle'

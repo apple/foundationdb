@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2020 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@
  */
 
 #include "benchmark/benchmark.h"
-#include "flow/crc32c.h"
+#include "crc32/crc32c.h"
 #include "flow/Hash3.h"
 #include "flow/xxhash.h"
 #include "flowbench/GlobalData.h"

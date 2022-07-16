@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -495,7 +495,7 @@ class ConfigNodeImpl {
 	}
 
 	ACTOR static Future<Void> rollforward(ConfigNodeImpl* self, ConfigFollowerRollforwardRequest req) {
-		Version lastCompactedVersion = wait(getLastCompactedVersion(self));
+		state Version lastCompactedVersion = wait(getLastCompactedVersion(self));
 		if (req.lastKnownCommitted < lastCompactedVersion) {
 			req.reply.sendError(version_already_compacted());
 			return Void();
@@ -529,6 +529,10 @@ class ConfigNodeImpl {
 			                                 versionedAnnotationKey(currentGeneration.committedVersion + 1)));
 
 			currentGeneration.committedVersion = req.rollback.get();
+			if (req.rollback.get() < lastCompactedVersion) {
+				self->kvStore->set(
+				    KeyValueRef(lastCompactedVersionKey, BinaryWriter::toValue(req.rollback.get(), IncludeVersion())));
+			}
 			// The mutation commit loop below should persist the new generation
 			// to disk, so we don't need to do it here.
 		}
@@ -536,13 +540,15 @@ class ConfigNodeImpl {
 		// committed version and rollforward version.
 		ASSERT_GT(req.mutations[0].version, currentGeneration.committedVersion);
 		wait(commitMutations(self, req.mutations, req.annotations, req.target));
+
 		req.reply.send(Void());
 		return Void();
 	}
 
 	ACTOR static Future<Void> getCommittedVersion(ConfigNodeImpl* self, ConfigFollowerGetCommittedVersionRequest req) {
+		state Version lastCompacted = wait(getLastCompactedVersion(self));
 		ConfigGeneration generation = wait(getGeneration(self));
-		req.reply.send(ConfigFollowerGetCommittedVersionReply{ generation.committedVersion });
+		req.reply.send(ConfigFollowerGetCommittedVersionReply{ lastCompacted, generation.committedVersion });
 		return Void();
 	}
 

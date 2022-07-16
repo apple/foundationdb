@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@
 #include "boost/asio/buffer.hpp"
 #include "boost/asio/ip/address.hpp"
 #include "boost/system/system_error.hpp"
+#include "flow/Arena.h"
 #include "flow/Platform.h"
 #include "flow/Trace.h"
 #include <algorithm>
@@ -29,12 +30,17 @@
 #define BOOST_DATE_TIME_NO_LIB
 #define BOOST_REGEX_NO_LIB
 #include <boost/asio.hpp>
+#if defined(HAVE_WOLFSSL)
+#include <wolfssl/options.h>
+#endif
+#include "boost/asio/ssl.hpp"
 #include <boost/date_time/posix_time/posix_time_types.hpp>
 #include <boost/range.hpp>
 #include <boost/algorithm/string/join.hpp>
 #include "flow/network.h"
 #include "flow/IThreadPool.h"
 
+#include "flow/IAsyncFile.h"
 #include "flow/ActorCollection.h"
 #include "flow/ThreadSafeQueue.h"
 #include "flow/ThreadHelper.actor.h"
@@ -50,9 +56,6 @@
 #ifdef ADDRESS_SANITIZER
 #include <sanitizer/lsan_interface.h>
 #endif
-
-// See the comment in TLSConfig.actor.h for the explanation of why this module breaking include was done.
-#include "fdbrpc/IAsyncFile.h"
 
 #ifdef WIN32
 #include <mmsystem.h>
@@ -83,10 +86,6 @@ sigset_t sigprof_set;
 void initProfiling() {
 	net2backtraces = new volatile void*[net2backtraces_max];
 	other_backtraces = new volatile void*[net2backtraces_max];
-
-	// According to folk wisdom, calling this once before setting up the signal handler makes
-	// it async signal safe in practice :-/
-	backtrace(const_cast<void**>(other_backtraces), net2backtraces_max);
 
 	sigemptyset(&sigprof_set);
 	sigaddset(&sigprof_set, SIGPROF);
@@ -166,8 +165,12 @@ public:
 
 	Future<std::vector<NetworkAddress>> resolveTCPEndpoint(const std::string& host,
 	                                                       const std::string& service) override;
+	Future<std::vector<NetworkAddress>> resolveTCPEndpointWithDNSCache(const std::string& host,
+	                                                                   const std::string& service) override;
 	std::vector<NetworkAddress> resolveTCPEndpointBlocking(const std::string& host,
 	                                                       const std::string& service) override;
+	std::vector<NetworkAddress> resolveTCPEndpointBlockingWithDNSCache(const std::string& host,
+	                                                                   const std::string& service) override;
 	Reference<IListener> listen(NetworkAddress localAddr) override;
 
 	// INetwork interface
@@ -189,13 +192,13 @@ public:
 		if (thread_network == this)
 			stopImmediately();
 		else
-			onMainThreadVoid([this] { this->stopImmediately(); }, nullptr);
+			onMainThreadVoid([this] { this->stopImmediately(); });
 	}
 	void addStopCallback(std::function<void()> fn) override {
 		if (thread_network == this)
 			stopCallbacks.emplace_back(std::move(fn));
 		else
-			onMainThreadVoid([this, fn] { this->stopCallbacks.emplace_back(std::move(fn)); }, nullptr);
+			onMainThreadVoid([this, fn] { this->stopCallbacks.emplace_back(std::move(fn)); });
 	}
 
 	bool isSimulated() const override { return false; }
@@ -228,12 +231,10 @@ public:
 	// private:
 
 	ASIOReactor reactor;
-#ifndef TLS_DISABLED
 	AsyncVar<Reference<ReferencedObject<boost::asio::ssl::context>>> sslContextVar;
 	Reference<IThreadPool> sslHandshakerPool;
 	int sslHandshakerThreadsStarted;
 	int sslPoolHandshakesInProgress;
-#endif
 	TLSConfig tlsConfig;
 	Future<Void> backgroundCertRefresh;
 	ETLSInitState tlsInitializedState;
@@ -368,14 +369,12 @@ public:
 				{
 					TraceEvent evt(SevWarn, errContext, errID);
 					evt.suppressFor(1.0).detail("ErrorCode", error.value()).detail("Message", error.message());
-#ifndef TLS_DISABLED
 					// There is no function in OpenSSL to use to check if an error code is from OpenSSL,
 					// but all OpenSSL errors have a non-zero "library" code set in bits 24-32, and linux
 					// error codes should never go that high.
 					if (error.value() >= (1 << 24L)) {
 						evt.detail("WhichMeans", TLSPolicy::ErrorString(error));
 					}
-#endif
 				}
 
 				p.sendError(connection_failed());
@@ -743,6 +742,13 @@ class Listener final : public IListener, ReferenceCounted<Listener> {
 public:
 	Listener(boost::asio::io_context& io_service, NetworkAddress listenAddress)
 	  : io_service(io_service), listenAddress(listenAddress), acceptor(io_service, tcpEndpoint(listenAddress)) {
+		// when port 0 is passed in, a random port will be opened
+		// set listenAddress as the address with the actual port opened instead of port 0
+		if (listenAddress.port == 0) {
+			this->listenAddress =
+			    NetworkAddress::parse(acceptor.local_endpoint().address().to_string().append(":").append(
+			        std::to_string(acceptor.local_endpoint().port())));
+		}
 		platform::setCloseOnExec(acceptor.native_handle());
 	}
 
@@ -775,7 +781,6 @@ private:
 	}
 };
 
-#ifndef TLS_DISABLED
 typedef boost::asio::ssl::stream<boost::asio::ip::tcp::socket&> ssl_socket;
 
 struct SSLHandshakerThread final : IThreadPoolReceiver {
@@ -1179,7 +1184,6 @@ private:
 		}
 	}
 };
-#endif
 
 struct PromiseTask final : public Task, public FastAllocated<PromiseTask> {
 	Promise<Void> promise;
@@ -1196,12 +1200,10 @@ struct PromiseTask final : public Task, public FastAllocated<PromiseTask> {
 
 Net2::Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics)
   : globals(enumGlobal::COUNT), useThreadPool(useThreadPool), reactor(this),
-#ifndef TLS_DISABLED
     sslContextVar({ ReferencedObject<boost::asio::ssl::context>::from(
         boost::asio::ssl::context(boost::asio::ssl::context::tls)) }),
-    sslHandshakerThreadsStarted(0), sslPoolHandshakesInProgress(0),
-#endif
-    tlsConfig(tlsConfig), tlsInitializedState(ETLSInitState::NONE), network(this), tscBegin(0), tscEnd(0), taskBegin(0),
+    sslHandshakerThreadsStarted(0), sslPoolHandshakesInProgress(0), tlsConfig(tlsConfig),
+    tlsInitializedState(ETLSInitState::NONE), network(this), tscBegin(0), tscEnd(0), taskBegin(0),
     currentTaskID(TaskPriority::DefaultYield), tasksIssued(0), stopped(false), started(false), numYields(0),
     lastPriorityStats(nullptr), ready(FLOW_KNOBS->READY_QUEUE_RESERVED_SIZE) {
 	// Until run() is called, yield() will always yield
@@ -1225,7 +1227,6 @@ Net2::Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics)
 	updateNow();
 }
 
-#ifndef TLS_DISABLED
 ACTOR static Future<Void> watchFileForChanges(std::string filename, AsyncTrigger* fileChanged) {
 	if (filename == "") {
 		return Never();
@@ -1302,13 +1303,11 @@ ACTOR static Future<Void> reloadCertificatesOnChange(
 		}
 	}
 }
-#endif
 
 void Net2::initTLS(ETLSInitState targetState) {
 	if (tlsInitializedState >= targetState) {
 		return;
 	}
-#ifndef TLS_DISABLED
 	// Any target state must be higher than NONE so if the current state is NONE
 	// then initialize the TLS config
 	if (tlsInitializedState == ETLSInitState::NONE) {
@@ -1362,7 +1361,6 @@ void Net2::initTLS(ETLSInitState targetState) {
 			}
 		}
 	}
-#endif
 
 	tlsInitializedState = targetState;
 }
@@ -1420,6 +1418,8 @@ void Net2::run() {
 	TraceEvent("Net2Running").log();
 
 	thread_network = this;
+
+	unsigned int tasksSinceReact = 0;
 
 #ifdef WIN32
 	if (timeBeginPeriod(1) != TIMERR_NOERROR)
@@ -1489,6 +1489,7 @@ void Net2::run() {
 		taskBegin = timer_monotonic();
 		trackAtPriority(TaskPriority::ASIOReactor, taskBegin);
 		reactor.react();
+		tasksSinceReact = 0;
 
 		updateNow();
 		double now = this->currentTime;
@@ -1530,6 +1531,7 @@ void Net2::run() {
 			ready.pop();
 
 			try {
+				++tasksSinceReact;
 				(*task)();
 			} catch (Error& e) {
 				TraceEvent(SevError, "TaskError").error(e);
@@ -1543,11 +1545,12 @@ void Net2::run() {
 			}
 
 			// attempt to empty out the IO backlog
-			if (ready.size() % FLOW_KNOBS->ITERATIONS_PER_REACTOR_CHECK == 1) {
+			if (tasksSinceReact >= FLOW_KNOBS->TASKS_PER_REACTOR_CHECK) {
 				if (runFunc) {
 					runFunc();
 				}
 				reactor.react();
+				tasksSinceReact = 0;
 			}
 
 			double tscNow = timestampCounter();
@@ -1816,59 +1819,16 @@ THREAD_HANDLE Net2::startThread(THREAD_FUNC_RETURN (*func)(void*), void* arg, in
 }
 
 Future<Reference<IConnection>> Net2::connect(NetworkAddress toAddr, const std::string& host) {
-#ifndef TLS_DISABLED
 	if (toAddr.isTLS()) {
 		initTLS(ETLSInitState::CONNECT);
 		return SSLConnection::connect(&this->reactor.ios, this->sslContextVar.get(), toAddr);
 	}
-#endif
 
 	return Connection::connect(&this->reactor.ios, toAddr);
 }
 
 Future<Reference<IConnection>> Net2::connectExternal(NetworkAddress toAddr, const std::string& host) {
 	return connect(toAddr, host);
-}
-
-ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpoint_impl(Net2* self,
-                                                                         std::string host,
-                                                                         std::string service) {
-	state tcp::resolver tcpResolver(self->reactor.ios);
-	Promise<std::vector<NetworkAddress>> promise;
-	state Future<std::vector<NetworkAddress>> result = promise.getFuture();
-
-	tcpResolver.async_resolve(tcp::resolver::query(host, service),
-	                          [=](const boost::system::error_code& ec, tcp::resolver::iterator iter) {
-		                          if (ec) {
-			                          promise.sendError(lookup_failed());
-			                          return;
-		                          }
-
-		                          std::vector<NetworkAddress> addrs;
-
-		                          tcp::resolver::iterator end;
-		                          while (iter != end) {
-			                          auto endpoint = iter->endpoint();
-			                          auto addr = endpoint.address();
-			                          if (addr.is_v6()) {
-				                          addrs.emplace_back(IPAddress(addr.to_v6().to_bytes()), endpoint.port());
-			                          } else {
-				                          addrs.emplace_back(addr.to_v4().to_ulong(), endpoint.port());
-			                          }
-			                          ++iter;
-		                          }
-
-		                          if (addrs.empty()) {
-			                          promise.sendError(lookup_failed());
-		                          } else {
-			                          promise.send(addrs);
-		                          }
-	                          });
-
-	wait(ready(result));
-	tcpResolver.cancel();
-
-	return result.get();
 }
 
 Future<Reference<IUDPSocket>> Net2::createUDPSocket(NetworkAddress toAddr) {
@@ -1879,27 +1839,106 @@ Future<Reference<IUDPSocket>> Net2::createUDPSocket(bool isV6) {
 	return UDPSocket::connect(&reactor.ios, Optional<NetworkAddress>(), isV6);
 }
 
+ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpoint_impl(Net2* self,
+                                                                         std::string host,
+                                                                         std::string service) {
+	state tcp::resolver tcpResolver(self->reactor.ios);
+	Promise<std::vector<NetworkAddress>> promise;
+	state Future<std::vector<NetworkAddress>> result = promise.getFuture();
+
+	tcpResolver.async_resolve(
+	    host, service, [promise](const boost::system::error_code& ec, tcp::resolver::iterator iter) {
+		    if (ec) {
+			    promise.sendError(lookup_failed());
+			    return;
+		    }
+
+		    std::vector<NetworkAddress> addrs;
+
+		    tcp::resolver::iterator end;
+		    while (iter != end) {
+			    auto endpoint = iter->endpoint();
+			    auto addr = endpoint.address();
+			    if (addr.is_v6()) {
+				    addrs.emplace_back(IPAddress(addr.to_v6().to_bytes()), endpoint.port());
+			    } else {
+				    addrs.emplace_back(addr.to_v4().to_ulong(), endpoint.port());
+			    }
+			    ++iter;
+		    }
+
+		    if (addrs.empty()) {
+			    promise.sendError(lookup_failed());
+		    } else {
+			    promise.send(addrs);
+		    }
+	    });
+
+	try {
+		wait(ready(result));
+	} catch (Error& e) {
+		if (e.code() == error_code_lookup_failed) {
+			self->dnsCache.remove(host, service);
+		}
+		throw e;
+	}
+	tcpResolver.cancel();
+	std::vector<NetworkAddress> ret = result.get();
+	self->dnsCache.add(host, service, ret);
+
+	return ret;
+}
+
 Future<std::vector<NetworkAddress>> Net2::resolveTCPEndpoint(const std::string& host, const std::string& service) {
+	return resolveTCPEndpoint_impl(this, host, service);
+}
+
+Future<std::vector<NetworkAddress>> Net2::resolveTCPEndpointWithDNSCache(const std::string& host,
+                                                                         const std::string& service) {
+	if (FLOW_KNOBS->ENABLE_COORDINATOR_DNS_CACHE) {
+		Optional<std::vector<NetworkAddress>> cache = dnsCache.find(host, service);
+		if (cache.present()) {
+			return cache.get();
+		}
+	}
 	return resolveTCPEndpoint_impl(this, host, service);
 }
 
 std::vector<NetworkAddress> Net2::resolveTCPEndpointBlocking(const std::string& host, const std::string& service) {
 	tcp::resolver tcpResolver(reactor.ios);
-	tcp::resolver::query query(host, service);
-	auto iter = tcpResolver.resolve(query);
-	decltype(iter) end;
-	std::vector<NetworkAddress> addrs;
-	while (iter != end) {
-		auto endpoint = iter->endpoint();
-		auto addr = endpoint.address();
-		if (addr.is_v6()) {
-			addrs.emplace_back(IPAddress(addr.to_v6().to_bytes()), endpoint.port());
-		} else {
-			addrs.emplace_back(addr.to_v4().to_ulong(), endpoint.port());
+	try {
+		auto iter = tcpResolver.resolve(host, service);
+		decltype(iter) end;
+		std::vector<NetworkAddress> addrs;
+		while (iter != end) {
+			auto endpoint = iter->endpoint();
+			auto addr = endpoint.address();
+			if (addr.is_v6()) {
+				addrs.emplace_back(IPAddress(addr.to_v6().to_bytes()), endpoint.port());
+			} else {
+				addrs.emplace_back(addr.to_v4().to_ulong(), endpoint.port());
+			}
+			++iter;
 		}
-		++iter;
+		if (addrs.empty()) {
+			throw lookup_failed();
+		}
+		return addrs;
+	} catch (...) {
+		dnsCache.remove(host, service);
+		throw lookup_failed();
 	}
-	return addrs;
+}
+
+std::vector<NetworkAddress> Net2::resolveTCPEndpointBlockingWithDNSCache(const std::string& host,
+                                                                         const std::string& service) {
+	if (FLOW_KNOBS->ENABLE_COORDINATOR_DNS_CACHE) {
+		Optional<std::vector<NetworkAddress>> cache = dnsCache.find(host, service);
+		if (cache.present()) {
+			return cache.get();
+		}
+	}
+	return resolveTCPEndpointBlocking(host, service);
 }
 
 bool Net2::isAddressOnThisHost(NetworkAddress const& addr) const {
@@ -1932,12 +1971,10 @@ bool Net2::isAddressOnThisHost(NetworkAddress const& addr) const {
 
 Reference<IListener> Net2::listen(NetworkAddress localAddr) {
 	try {
-#ifndef TLS_DISABLED
 		if (localAddr.isTLS()) {
 			initTLS(ETLSInitState::LISTEN);
 			return Reference<IListener>(new SSLListener(reactor.ios, &this->sslContextVar, localAddr));
 		}
-#endif
 		return Reference<IListener>(new Listener(reactor.ios, localAddr));
 	} catch (boost::system::system_error const& e) {
 		Error x;

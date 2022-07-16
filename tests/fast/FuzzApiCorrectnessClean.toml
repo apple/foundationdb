@@ -1,5 +1,7 @@
 [configuration]
 StderrSeverity = 30
+allowDisablingTenants = false
+allowDefaultTenant = false
 
 [[test]]
 testTitle = 'FuzzApiCorrectness'

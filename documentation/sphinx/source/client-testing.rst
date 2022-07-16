@@ -11,7 +11,7 @@ Testing Error Handling with Buggify
 
 FoundationDB clients need to handle errors correctly. Wrong error handling can lead to many bugs - in the worst case it can
 lead to a corrupted database. Because of this it is important that an application or layer author tests properly their
-application during failure scenarios. But this is non-trivial. In a developement environment cluster failures are very
+application during failure scenarios. But this is non-trivial. In a development environment cluster failures are very
 unlikely and it is therefore possible that certain types of exceptions are never tested in a controlled environment.
 
 The simplest way of testing for these kind of errors is a simple mechanism called ``Buggify``. If this option is enabled
@@ -113,8 +113,8 @@ Implementing a C++ Workload
 ===========================
 
 In order to implement a workload, one has to build a shared library that links against the fdb client library. This library has to
-exppse a function (with C linkage) called workloadFactory which needs to return a pointer to an object of type ``FDBWorkloadFactory``.
-This mechanism allows the other to implement as many workloads within one library as she wants. To do this the pure virtual classes
+expose a function (with C linkage) called workloadFactory which needs to return a pointer to an object of type ``FDBWorkloadFactory``.
+This mechanism allows the author to implement as many workloads within one library as she wants. To do this the pure virtual classes
 ``FDBWorkloadFactory`` and ``FDBWorkload`` have to be implemented.
 
 .. function:: FDBWorkloadFactory* workloadFactory(FDBLogger*)
@@ -327,7 +327,7 @@ processes with the class test. So above 2-step process becomes a bit more comple
 
 1. Write the test (same as above).
 2. Set up a cluster with as many test clients as you want.
-3. Run the orchestor to actually execute the test.
+3. Run the orchestrator to actually execute the test.
 
 Step 1. is explained further up. For step 2., please refer to the general FoundationDB
 configuration. The main difference to a normal FoundationDB cluster is that some processes

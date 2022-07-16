@@ -94,7 +94,7 @@ func (wrkspc Workspace) Session(foo func(directory.DirectorySubspace)) (err erro
 }
 
 func main() {
-	fdb.MustAPIVersion(710)
+	fdb.MustAPIVersion(720)
 
 	db := fdb.MustOpenDefault()
 

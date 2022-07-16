@@ -13,7 +13,7 @@ This document covers the operation and architecture of the Testing Storage Serve
 Summary
 ============
 
-The TSS feature allows FoundationDB to run an "untrusted" storage engine (the *testing storage engine*) directly in a QA or production envronment with identical workload to the current storage engine, with zero impact on durability or correctness, and minimal impact on performance.
+The TSS feature allows FoundationDB to run an "untrusted" storage engine (the *testing storage engine*) directly in a QA or production environment with identical workload to the current storage engine, with zero impact on durability or correctness, and minimal impact on performance.
 
 This allows a FoundationDB cluster operator to validate the correctness and performance of a different storage engine on the exact cluster workload before migrating data to the different storage engine.
 
@@ -44,10 +44,10 @@ The ``status`` command in the FDB :ref:`command line interface <command-line-int
 
 Trace Events
 ----------------------
-Whenever a client detects a *TSS Mismatch*, or when the SS and TSS response differ, and the difference can only be explained by different storage engine contents, it will emit an error-level trace event with a type starting with ``TSSMismatch``, with a different type for each read request. This trace event will include all of the information necessary to investgate the mismatch, such as the TSS storage ID, the full request data, and the summarized replies (full keys and checksummed values) from both the SS and TSS.
+Whenever a client detects a *TSS Mismatch*, or when the SS and TSS response differ, and the difference can only be explained by different storage engine contents, it will emit an error-level trace event with a type starting with ``TSSMismatch``, with a different type for each read request. This trace event will include all of the information necessary to investigate the mismatch, such as the TSS storage ID, the full request data, and the summarized replies (full keys and checksummed values) from both the SS and TSS.
 
 Each client emits a ``TSSClientMetrics`` trace event for each TSS pair in the cluster that it has sent requests to recently, similar to the ``TransactionMetrics`` trace event.
-It contains the TSS storage ID, and latency statistics for each type of read request. It also includes a count of any mismatches, and a histogram of error codes recieved by the SS and TSS to ensure the storage engines have similar error rates and types.
+It contains the TSS storage ID, and latency statistics for each type of read request. It also includes a count of any mismatches, and a histogram of error codes received by the SS and TSS to ensure the storage engines have similar error rates and types.
 
 The ``StorageMetrics`` trace event emitted by storage servers includes the storage ID of its pair if part of a TSS pairing, and includes a ``TSSJointID`` detail with a unique id for the SS/TSS pair that enables correlating the separate StorageMetrics events from the SS and TSS.
 
@@ -101,7 +101,7 @@ The pair recruitment logic is as follows:
 
 * Once DD gets a candidate worker from the Cluster Controller, hold that worker as a desired TSS process.
 * Once DD gets a second candidate worker from the Cluster Controller, initialize that worker as a normal SS.
-* Once the second candidate worker is successfully initialized, initialize the first candidate worker as a TSS, passing it the storage ID, starting tag + version, and other information from its SS pair. Because the TSS reads from the same tag starting at the same version, it is guaranteed to recieve the same mutations and data movements as its pair.
+* Once the second candidate worker is successfully initialized, initialize the first candidate worker as a TSS, passing it the storage ID, starting tag + version, and other information from its SS pair. Because the TSS reads from the same tag starting at the same version, it is guaranteed to receive the same mutations and data movements as its pair.
 
 One implication of this is, during TSS recruitment, the cluster is effectively down one storage process until a second storage process becomes available.
 While clusters should be able to handle being down a single storage process anyway to tolerate machine failure, an active TSS recruitment will be cancelled if the lack of that single storage process is causing the cluster to be unhealthy. Similarly, if the cluster is unhealthy and unable to find new teams to replicate data to, any existing TSS processes may be killed to make room for new storage servers.

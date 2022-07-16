@@ -1,9 +1,9 @@
 /*
- * workloads.h
+ * SimpleWorkload.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2019 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#define FDB_API_VERSION 710
+#define FDB_API_VERSION 720
 #include "foundationdb/fdb_c.h"
 #undef DLLEXPORT
 #include "workloads.h"
@@ -266,7 +266,7 @@ struct SimpleWorkload final : FDBWorkload {
 		insertsPerTx = context->getOption("insertsPerTx", 100ul);
 		opsPerTx = context->getOption("opsPerTx", 100ul);
 		runFor = context->getOption("runFor", 10.0);
-		auto err = fdb_select_api_version(710);
+		auto err = fdb_select_api_version(720);
 		if (err) {
 			context->trace(
 			    FDBSeverity::Info, "SelectAPIVersionFailed", { { "Error", std::string(fdb_get_error(err)) } });

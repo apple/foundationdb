@@ -10,6 +10,7 @@ waitForQuiescenceBegin=false
     testName = 'ConfigureDatabase'
     testDuration = 300.0
     waitStoreTypeCheck = true
+    storageMigrationCompatibleConf = true
 
     [[test.workload]]
     testName = 'RandomClogging'

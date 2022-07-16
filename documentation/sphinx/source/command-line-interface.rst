@@ -64,7 +64,7 @@ The ``commit`` command commits the current transaction. Any sets or clears execu
 configure
 ---------
 
-The ``configure`` command changes the database configuration. Its syntax is ``configure [new|tss] [single|double|triple|three_data_hall|three_datacenter] [ssd|memory] [grv_proxies=<N>] [commit_proxies=<N>] [resolvers=<N>] [logs=<N>] [count=<TSS_COUNT>] [perpetual_storage_wiggle=<WIGGLE_SPEED>] [perpetual_storage_wiggle_locality=<<LOCALITY_KEY>:<LOCALITY_VALUE>|0>] [storage_migration_type={disabled|aggressive|gradual}]``.
+The ``configure`` command changes the database configuration. Its syntax is ``configure [new|tss] [single|double|triple|three_data_hall|three_datacenter] [ssd|memory] [grv_proxies=<N>] [commit_proxies=<N>] [resolvers=<N>] [logs=<N>] [count=<TSS_COUNT>] [perpetual_storage_wiggle=<WIGGLE_SPEED>] [perpetual_storage_wiggle_locality=<<LOCALITY_KEY>:<LOCALITY_VALUE>|0>] [storage_migration_type={disabled|aggressive|gradual}] [tenant_mode={disabled|optional_experimental|required_experimental}]``.
 
 The ``new`` option, if present, initializes a new database with the given configuration rather than changing the configuration of an existing one. When ``new`` is used, both a redundancy mode and a storage engine must be specified.
 
@@ -153,6 +153,27 @@ If ``description=<DESC>`` is specified, the description field in the cluster fil
 
 For more information on setting the cluster description, see :ref:`configuration-setting-cluster-description`.
 
+createtenant
+------------
+
+The ``createtenant`` command is used to create new tenants in the cluster. Its syntax is ``createtenant <TENANT_NAME>``.
+
+The tenant name can be any byte string that does not begin with the ``\xff`` byte. If the tenant already exists, ``fdbcli`` will report an error.
+
+defaulttenant
+-------------
+
+The ``defaulttenant`` command configures ``fdbcli`` to run its commands without a tenant. This is the default behavior.
+
+The active tenant cannot be changed while a transaction (using ``begin``) is open.
+
+deletetenant
+------------
+
+The ``deletetenant`` command is used to delete tenants from the cluster. Its syntax is ``deletetenant <TENANT_NAME>``.
+
+In order to delete a tenant, it must be empty. To delete a tenant with data, first clear that data using the ``clear`` command. If the tenant does not exist, ``fdbcli`` will report an error.
+
 exclude
 -------
 
@@ -210,8 +231,33 @@ The ``getrangekeys`` command fetches keys in a range. Its syntax is ``getrangeke
 
 Note that :ref:`characters can be escaped <cli-escaping>` when specifying keys (or values) in ``fdbcli``.
 
-getversion
-----------
+gettenant
+---------
+
+The ``gettenant`` command fetches metadata for a given tenant and displays it. Its syntax is ``gettenant <TENANT_NAME> [JSON]``.
+
+Included in the output of this command are the ``id`` and ``prefix`` assigned to the tenant. If the tenant does not exist, ``fdbcli`` will report an error. If ``JSON`` is specified, then the output will be written as a JSON document::
+
+    {
+        "tenant": {
+            "id": 0,
+            "prefix": {
+              "base64": "AAAAAAAAAAU=",
+              "printable": "\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x05",
+            }
+        },
+        "type": "success"
+    }
+
+In the event of an error, the output will include an error message::
+
+    {
+        "error": "...",
+        "type": "error"
+    }
+
+    getversion
+    ----------
 
 The ``getversion`` command fetches the current read version of the cluster or currently running transaction.
 
@@ -300,6 +346,13 @@ Attempts to kill all specified processes. Each address should include the IP and
 
 Attempts to kill all known processes in the cluster.
 
+listtenants
+-----------
+
+The ``listtenants`` command prints the names of tenants in the cluster. Its syntax is ``listtenants [BEGIN] [END] [LIMIT]``.
+
+By default, the ``listtenants`` command will print up to 100 entries from the entire range of tenants. A narrower sub-range can be printed using the optional ``[BEGIN]`` and ``[END]`` parameters, and the limit can be changed by specifying an integer ``[LIMIT]`` parameter.
+
 lock
 ----
 
@@ -363,6 +416,13 @@ heap
 ``profile heap <PROCESS>``
 
 Enables heap profiling for the specified process.
+
+renametenant
+------------
+
+The ``renametenant`` command can rename an existing tenant to a new name. Its syntax is ``renametenant <OLD_NAME> <NEW_NAME>``.
+
+This command requires that ``OLD_NAME`` is a tenant that already exists on the cluster, and that ``NEW_NAME`` is not already a name of a tenant in the cluster.
 
 reset
 -----
@@ -511,6 +571,17 @@ unlock
 ------
 
 The ``unlock`` command unlocks the database with the specified lock UID. Because this is a potentially dangerous operation, users must copy a passphrase before the unlock command is executed.
+
+usetenant
+---------
+
+The ``usetenant`` command configures ``fdbcli`` to run transactions within the specified tenant. Its syntax is ``usetenant <TENANT_NAME>``.
+
+When configured, transactions will read and write keys from the key-space associated with the specified tenant. By default, ``fdbcli`` runs without a tenant. Management operations that modify keys (e.g. ``exclude``) will not operate within the tenant.
+
+If the tenant chosen does not exist, ``fdbcli`` will report an error.
+
+The active tenant cannot be changed while a transaction (using ``begin``) is open.
 
 writemode
 ---------

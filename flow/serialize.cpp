@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2019 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,6 +25,7 @@
 _AssumeVersion::_AssumeVersion(ProtocolVersion version) : v(version) {
 	if (!version.isValid()) {
 		ASSERT(!g_network->isSimulated());
+		TraceEvent("SerializationFailed").backtrace();
 		throw serialization_failed();
 	}
 }
@@ -34,6 +35,7 @@ const void* BinaryReader::readBytes(int bytes) {
 	const char* e = b + bytes;
 	if (e > end) {
 		ASSERT(!g_network->isSimulated());
+		TraceEvent("SerializationFailed").backtrace();
 		throw serialization_failed();
 	}
 	begin = e;

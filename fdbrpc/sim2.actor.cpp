@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,9 +20,11 @@
 
 #include <cinttypes>
 #include <memory>
+#include <string>
 
-#include "contrib/fmt-8.0.1/include/fmt/format.h"
+#include "fmt/format.h"
 #include "fdbrpc/simulator.h"
+#include "flow/Arena.h"
 #define BOOST_SYSTEM_NO_LIB
 #define BOOST_DATE_TIME_NO_LIB
 #define BOOST_REGEX_NO_LIB
@@ -33,12 +35,12 @@
 #include "flow/ProtocolVersion.h"
 #include "flow/Util.h"
 #include "flow/WriteOnlySet.h"
-#include "fdbrpc/IAsyncFile.h"
+#include "flow/IAsyncFile.h"
 #include "fdbrpc/AsyncFileCached.actor.h"
 #include "fdbrpc/AsyncFileEncrypted.h"
 #include "fdbrpc/AsyncFileNonDurable.actor.h"
-#include "fdbrpc/AsyncFileChaos.actor.h"
-#include "flow/crc32c.h"
+#include "fdbrpc/AsyncFileChaos.h"
+#include "crc32/crc32c.h"
 #include "fdbrpc/TraceFileIO.h"
 #include "flow/FaultInjection.h"
 #include "flow/flow.h"
@@ -51,6 +53,16 @@
 #include "fdbrpc/AsyncFileWriteChecker.h"
 #include "flow/FaultInjection.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
+
+ISimulator* g_pSimulator = nullptr;
+thread_local ISimulator::ProcessInfo* ISimulator::currentProcess = nullptr;
+
+ISimulator::ISimulator()
+  : desiredCoordinators(1), physicalDatacenters(1), processesPerMachine(0), listenersPerProcess(1), usableRegions(1),
+    allowLogSetKills(true), tssMode(TSSMode::Disabled), isStopped(false), lastConnectionFailure(0),
+    connectionFailuresDisableDuration(0), speedUpSimulation(false), backupAgents(BackupAgentType::WaitForType),
+    drAgents(BackupAgentType::WaitForType), allSwapsDisabled(false) {}
+ISimulator::~ISimulator() = default;
 
 bool simulator_should_inject_fault(const char* context, const char* file, int line, int error_code) {
 	if (!g_network->isSimulated() || !faultInjectionActivated)
@@ -104,14 +116,14 @@ void ISimulator::displayWorkers() const {
 		for (auto& processInfo : machineRecord.second) {
 			printf("                  %9s %-10s%-13s%-8s %-6s %-9s %-8s %-48s %-40s\n",
 			       processInfo->address.toString().c_str(),
-			       processInfo->name,
+			       processInfo->name.c_str(),
 			       processInfo->startingClass.toString().c_str(),
 			       (processInfo->isExcluded() ? "True" : "False"),
 			       (processInfo->failed ? "True" : "False"),
 			       (processInfo->rebooting ? "True" : "False"),
 			       (processInfo->isCleared() ? "True" : "False"),
 			       getRoles(processInfo->address).c_str(),
-			       processInfo->dataFolder);
+			       processInfo->dataFolder.c_str());
 		}
 	}
 
@@ -121,20 +133,24 @@ void ISimulator::displayWorkers() const {
 int openCount = 0;
 
 struct SimClogging {
-	double getSendDelay(NetworkAddress from, NetworkAddress to) const { return halfLatency(); }
+	double getSendDelay(NetworkAddress from, NetworkAddress to, bool stableConnection = false) const {
+		// stable connection here means it's a local connection between processes on the same machine
+		// we expect it to have much lower latency
+		return (stableConnection ? 0.1 : 1.0) * halfLatency();
+	}
 
-	double getRecvDelay(NetworkAddress from, NetworkAddress to) {
+	double getRecvDelay(NetworkAddress from, NetworkAddress to, bool stableConnection = false) {
 		auto pair = std::make_pair(from.ip, to.ip);
 
 		double tnow = now();
-		double t = tnow + halfLatency();
-		if (!g_simulator.speedUpSimulation)
+		double t = tnow + (stableConnection ? 0.1 : 1.0) * halfLatency();
+		if (!g_simulator.speedUpSimulation && !stableConnection)
 			t += clogPairLatency[pair];
 
-		if (!g_simulator.speedUpSimulation && clogPairUntil.count(pair))
+		if (!g_simulator.speedUpSimulation && !stableConnection && clogPairUntil.count(pair))
 			t = std::max(t, clogPairUntil[pair]);
 
-		if (!g_simulator.speedUpSimulation && clogRecvUntil.count(to.ip))
+		if (!g_simulator.speedUpSimulation && !stableConnection && clogRecvUntil.count(to.ip))
 			t = std::max(t, clogRecvUntil[to.ip]);
 
 		return t - tnow;
@@ -166,7 +182,7 @@ private:
 	double halfLatency() const {
 		double a = deterministicRandom()->random01();
 		const double pFast = 0.999;
-		if (a <= pFast) {
+		if (a <= pFast || g_simulator.speedUpSimulation) {
 			a = a / pFast;
 			return 0.5 * (FLOW_KNOBS->MIN_NETWORK_LATENCY * (1 - a) +
 			              FLOW_KNOBS->FAST_NETWORK_LATENCY / pFast * a); // 0.5ms average
@@ -182,8 +198,8 @@ SimClogging g_clogging;
 
 struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 	Sim2Conn(ISimulator::ProcessInfo* process)
-	  : opened(false), closedByCaller(false), process(process), dbgid(deterministicRandom()->randomUniqueID()),
-	    stopReceive(Never()) {
+	  : opened(false), closedByCaller(false), stableConnection(false), process(process),
+	    dbgid(deterministicRandom()->randomUniqueID()), stopReceive(Never()) {
 		pipes = sender(this) && receiver(this);
 	}
 
@@ -202,7 +218,18 @@ struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 		                                      process->address.ip,
 		                                      FLOW_KNOBS->MAX_CLOGGING_LATENCY * deterministicRandom()->random01());
 		sendBufSize = std::max<double>(deterministicRandom()->randomInt(0, 5000000), 25e6 * (latency + .002));
-		TraceEvent("Sim2Connection").detail("SendBufSize", sendBufSize).detail("Latency", latency);
+		// options like clogging or bitsflip are disabled for stable connections
+		stableConnection = std::any_of(process->childs.begin(),
+		                               process->childs.end(),
+		                               [&](ISimulator::ProcessInfo* child) { return child && child == peerProcess; }) ||
+		                   std::any_of(peerProcess->childs.begin(),
+		                               peerProcess->childs.end(),
+		                               [&](ISimulator::ProcessInfo* child) { return child && child == process; });
+
+		TraceEvent("Sim2Connection")
+		    .detail("SendBufSize", sendBufSize)
+		    .detail("Latency", latency)
+		    .detail("StableConnection", stableConnection);
 	}
 
 	~Sim2Conn() { ASSERT_ABORT(!opened || closedByCaller); }
@@ -221,6 +248,8 @@ struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 	Future<Void> onReadable() override { return whenReadable(this); }
 
 	bool isPeerGone() const { return !peer || peerProcess->failed; }
+
+	bool isStableConnection() const override { return stableConnection; }
 
 	void peerClosed() {
 		leakedConnectionTracker = trackLeakedConnection(this);
@@ -249,7 +278,7 @@ struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 		ASSERT(limit > 0);
 
 		int toSend = 0;
-		if (BUGGIFY) {
+		if (BUGGIFY && !stableConnection) {
 			toSend = std::min(limit, buffer->bytes_written - buffer->bytes_sent);
 		} else {
 			for (auto p = buffer; p; p = p->next) {
@@ -262,7 +291,7 @@ struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 			}
 		}
 		ASSERT(toSend);
-		if (BUGGIFY)
+		if (BUGGIFY && !stableConnection)
 			toSend = std::min(toSend, deterministicRandom()->randomInt(0, 1000));
 
 		if (!peer)
@@ -286,7 +315,7 @@ struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 	NetworkAddress getPeerAddress() const override { return peerEndpoint; }
 	UID getDebugID() const override { return dbgid; }
 
-	bool opened, closedByCaller;
+	bool opened, closedByCaller, stableConnection;
 
 private:
 	ISimulator::ProcessInfo *process, *peerProcess;
@@ -336,10 +365,12 @@ private:
 			    deterministicRandom()->random01() < .5
 			        ? self->sentBytes.get()
 			        : deterministicRandom()->randomInt64(self->receivedBytes.get(), self->sentBytes.get() + 1);
-			wait(delay(g_clogging.getSendDelay(self->process->address, self->peerProcess->address)));
+			wait(delay(g_clogging.getSendDelay(
+			    self->process->address, self->peerProcess->address, self->isStableConnection())));
 			wait(g_simulator.onProcess(self->process));
 			ASSERT(g_simulator.getCurrentProcess() == self->process);
-			wait(delay(g_clogging.getRecvDelay(self->process->address, self->peerProcess->address)));
+			wait(delay(g_clogging.getRecvDelay(
+			    self->process->address, self->peerProcess->address, self->isStableConnection())));
 			ASSERT(g_simulator.getCurrentProcess() == self->process);
 			if (self->stopReceive.isReady()) {
 				wait(Future<Void>(Never()));
@@ -389,7 +420,9 @@ private:
 	}
 
 	void rollRandomClose() {
-		if (now() - g_simulator.lastConnectionFailure > g_simulator.connectionFailuresDisableDuration &&
+		// make sure connections between parenta and their childs are not closed
+		if (!stableConnection &&
+		    now() - g_simulator.lastConnectionFailure > g_simulator.connectionFailuresDisableDuration &&
 		    deterministicRandom()->random01() < .00001) {
 			g_simulator.lastConnectionFailure = now();
 			double a = deterministicRandom()->random01(), b = deterministicRandom()->random01();
@@ -423,6 +456,7 @@ private:
 		TraceEvent(SevError, "LeakedConnection", self->dbgid)
 		    .error(connection_leaked())
 		    .detail("MyAddr", self->process->address)
+		    .detail("IsPublic", self->process->address.isPublic())
 		    .detail("PeerAddr", self->peerEndpoint)
 		    .detail("PeerId", self->peerId)
 		    .detail("Opened", self->opened);
@@ -865,7 +899,7 @@ public:
 
 		if (!ordered && !currentProcess->rebooting && machine == currentProcess &&
 		    !currentProcess->shutdownSignal.isSet() && FLOW_KNOBS->MAX_BUGGIFIED_DELAY > 0 &&
-		    deterministicRandom()->random01() < 0.25) { // FIXME: why doesnt this work when we are changing machines?
+		    deterministicRandom()->random01() < 0.25) { // FIXME: why doesn't this work when we are changing machines?
 			seconds += FLOW_KNOBS->MAX_BUGGIFIED_DELAY * pow(deterministicRandom()->random01(), 1000.0);
 		}
 
@@ -943,30 +977,62 @@ public:
 	void addMockTCPEndpoint(const std::string& host,
 	                        const std::string& service,
 	                        const std::vector<NetworkAddress>& addresses) override {
-		mockDNS.addMockTCPEndpoint(host, service, addresses);
+		mockDNS.add(host, service, addresses);
 	}
 	void removeMockTCPEndpoint(const std::string& host, const std::string& service) override {
-		mockDNS.removeMockTCPEndpoint(host, service);
+		mockDNS.remove(host, service);
 	}
 	// Convert hostnameToAddresses from/to string. The format is:
 	// hostname1,host1Address1,host1Address2;hostname2,host2Address1,host2Address2...
-	void parseMockDNSFromString(const std::string& s) override { mockDNS = MockDNS::parseFromString(s); }
+	void parseMockDNSFromString(const std::string& s) override { mockDNS = DNSCache::parseFromString(s); }
 	std::string convertMockDNSToString() override { return mockDNS.toString(); }
 	Future<std::vector<NetworkAddress>> resolveTCPEndpoint(const std::string& host,
 	                                                       const std::string& service) override {
 		// If a <hostname, vector<NetworkAddress>> pair was injected to mock DNS, use it.
-		if (mockDNS.findMockTCPEndpoint(host, service)) {
-			return mockDNS.getTCPEndpoint(host, service);
+		Optional<std::vector<NetworkAddress>> mock = mockDNS.find(host, service);
+		if (mock.present()) {
+			return mock.get();
 		}
-		return SimExternalConnection::resolveTCPEndpoint(host, service);
+		return SimExternalConnection::resolveTCPEndpoint(host, service, &dnsCache);
+	}
+	Future<std::vector<NetworkAddress>> resolveTCPEndpointWithDNSCache(const std::string& host,
+	                                                                   const std::string& service) override {
+		// If a <hostname, vector<NetworkAddress>> pair was injected to mock DNS, use it.
+		Optional<std::vector<NetworkAddress>> mock = mockDNS.find(host, service);
+		if (mock.present()) {
+			return mock.get();
+		}
+		if (FLOW_KNOBS->ENABLE_COORDINATOR_DNS_CACHE) {
+			Optional<std::vector<NetworkAddress>> cache = dnsCache.find(host, service);
+			if (cache.present()) {
+				return cache.get();
+			}
+		}
+		return SimExternalConnection::resolveTCPEndpoint(host, service, &dnsCache);
 	}
 	std::vector<NetworkAddress> resolveTCPEndpointBlocking(const std::string& host,
 	                                                       const std::string& service) override {
 		// If a <hostname, vector<NetworkAddress>> pair was injected to mock DNS, use it.
-		if (mockDNS.findMockTCPEndpoint(host, service)) {
-			return mockDNS.getTCPEndpoint(host, service);
+		Optional<std::vector<NetworkAddress>> mock = mockDNS.find(host, service);
+		if (mock.present()) {
+			return mock.get();
 		}
-		return SimExternalConnection::resolveTCPEndpointBlocking(host, service);
+		return SimExternalConnection::resolveTCPEndpointBlocking(host, service, &dnsCache);
+	}
+	std::vector<NetworkAddress> resolveTCPEndpointBlockingWithDNSCache(const std::string& host,
+	                                                                   const std::string& service) override {
+		// If a <hostname, vector<NetworkAddress>> pair was injected to mock DNS, use it.
+		Optional<std::vector<NetworkAddress>> mock = mockDNS.find(host, service);
+		if (mock.present()) {
+			return mock.get();
+		}
+		if (FLOW_KNOBS->ENABLE_COORDINATOR_DNS_CACHE) {
+			Optional<std::vector<NetworkAddress>> cache = dnsCache.find(host, service);
+			if (cache.present()) {
+				return cache.get();
+			}
+		}
+		return SimExternalConnection::resolveTCPEndpointBlocking(host, service, &dnsCache);
 	}
 	ACTOR static Future<Reference<IConnection>> onConnect(Future<Void> ready, Reference<Sim2Conn> conn) {
 		wait(ready);
@@ -1096,11 +1162,15 @@ public:
 		// for the existence of a non-durably deleted file BEFORE a reboot will show that it apparently doesn't exist.
 		if (g_simulator.getCurrentProcess()->machine->openFiles.count(filename)) {
 			g_simulator.getCurrentProcess()->machine->openFiles.erase(filename);
-			g_simulator.getCurrentProcess()->machine->deletingFiles.insert(filename);
+			g_simulator.getCurrentProcess()->machine->deletingOrClosingFiles.insert(filename);
 		}
 		if (mustBeDurable || deterministicRandom()->random01() < 0.5) {
 			state ISimulator::ProcessInfo* currentProcess = g_simulator.getCurrentProcess();
 			state TaskPriority currentTaskID = g_network->getCurrentTask();
+			TraceEvent(SevDebug, "Sim2DeleteFileImpl")
+			    .detail("CurrentProcess", currentProcess->toString())
+			    .detail("Filename", filename)
+			    .detail("Durable", mustBeDurable);
 			wait(g_simulator.onMachine(currentProcess));
 			try {
 				wait(::delay(0.05 * deterministicRandom()->random01()));
@@ -1118,6 +1188,9 @@ public:
 				throw err;
 			}
 		} else {
+			TraceEvent(SevDebug, "Sim2DeleteFileImplNonDurable")
+			    .detail("Filename", filename)
+			    .detail("Durable", mustBeDurable);
 			TEST(true); // Simulated non-durable delete
 			return Void();
 		}
@@ -1163,6 +1236,9 @@ public:
 		MachineInfo& machine = machines[locality.machineId().get()];
 		if (!machine.machineId.present())
 			machine.machineId = locality.machineId();
+		if (port == 0 && std::string(name) == "remote flow process") {
+			port = machine.getRandomPort();
+		}
 		for (int i = 0; i < machine.processes.size(); i++) {
 			if (machine.processes[i]->locality.machineId() !=
 			    locality.machineId()) { // SOMEDAY: compute ip from locality to avoid this check
@@ -1220,6 +1296,11 @@ public:
 		    .detail("Excluded", m->excluded)
 		    .detail("Cleared", m->cleared);
 
+		if (std::string(name) == "remote flow process") {
+			protectedAddresses.insert(m->address);
+			TraceEvent(SevDebug, "NewFlowProcessProtected").detail("Address", m->address);
+		}
+
 		// FIXME: Sometimes, connections to/from this process will explicitly close
 
 		return m;
@@ -1247,7 +1328,8 @@ public:
 		std::vector<LocalityData> primaryLocalitiesDead, primaryLocalitiesLeft;
 
 		for (auto processInfo : getAllProcesses()) {
-			if (processInfo->isAvailableClass() && processInfo->locality.dcId() == dcId) {
+			if (!processInfo->isSpawnedKVProcess() && processInfo->isAvailableClass() &&
+			    processInfo->locality.dcId() == dcId) {
 				if (processInfo->isExcluded() || processInfo->isCleared() || !processInfo->isAvailable()) {
 					primaryProcessesDead.add(processInfo->locality);
 					primaryLocalitiesDead.push_back(processInfo->locality);
@@ -1267,7 +1349,6 @@ public:
 		if (usableRegions > 1 && remoteTLogPolicy && !primaryTLogsDead) {
 			primaryTLogsDead = primaryProcessesDead.validate(remoteTLogPolicy);
 		}
-
 		return primaryTLogsDead || primaryProcessesDead.validate(storagePolicy);
 	}
 
@@ -1497,6 +1578,7 @@ public:
 		    .detail("MachineId", p->locality.machineId());
 		currentlyRebootingProcesses.insert(std::pair<NetworkAddress, ProcessInfo*>(p->address, p));
 		std::vector<ProcessInfo*>& processes = machines[p->locality.machineId().get()].processes;
+		machines[p->locality.machineId().get()].removeRemotePort(p->address.port);
 		if (p != processes.back()) {
 			auto it = std::find(processes.begin(), processes.end(), p);
 			std::swap(*it, processes.back());
@@ -1520,7 +1602,8 @@ public:
 			    .detail("Protected", protectedAddresses.count(machine->address))
 			    .backtrace();
 			// This will remove all the "tracked" messages that came from the machine being killed
-			latestEventCache.clear();
+			if (!machine->isSpawnedKVProcess())
+				latestEventCache.clear();
 			machine->failed = true;
 		} else if (kt == InjectFaults) {
 			TraceEvent(SevWarn, "FaultMachine")
@@ -1548,7 +1631,7 @@ public:
 		} else {
 			ASSERT(false);
 		}
-		ASSERT(!protectedAddresses.count(machine->address) || machine->rebooting);
+		ASSERT(!protectedAddresses.count(machine->address) || machine->rebooting || machine->isSpawnedKVProcess());
 	}
 	void rebootProcess(ProcessInfo* process, KillType kt) override {
 		if (kt == RebootProcessAndDelete && protectedAddresses.count(process->address)) {
@@ -1601,6 +1684,25 @@ public:
 		}
 		bool result = false;
 		for (auto& machineId : zoneMachines) {
+			if (killMachine(machineId, kt, forceKill, ktFinal)) {
+				result = true;
+			}
+		}
+		return result;
+	}
+	bool killDataHall(Optional<Standalone<StringRef>> dataHallId,
+	                  KillType kt,
+	                  bool forceKill,
+	                  KillType* ktFinal) override {
+		auto processes = getAllProcesses();
+		std::set<Optional<Standalone<StringRef>>> dataHallMachines;
+		for (auto& process : processes) {
+			if (process->locality.dataHallId() == dataHallId) {
+				dataHallMachines.insert(process->locality.machineId());
+			}
+		}
+		bool result = false;
+		for (auto& machineId : dataHallMachines) {
 			if (killMachine(machineId, kt, forceKill, ktFinal)) {
 				result = true;
 			}
@@ -2153,7 +2255,7 @@ public:
 	bool printSimTime;
 
 private:
-	MockDNS mockDNS;
+	DNSCache mockDNS;
 
 #ifdef ENABLE_SAMPLING
 	ActorLineageSet actorLineageSet;
@@ -2390,8 +2492,19 @@ ACTOR void doReboot(ISimulator::ProcessInfo* p, ISimulator::KillType kt) {
 		    kt ==
 		    ISimulator::RebootProcessAndDelete); // Simulated process rebooted with data and coordination state deletion
 
-		if (p->rebooting || !p->isReliable())
+		if (p->rebooting || !p->isReliable()) {
+			TraceEvent(SevDebug, "DoRebootFailed")
+			    .detail("Rebooting", p->rebooting)
+			    .detail("Reliable", p->isReliable());
 			return;
+		} else if (p->isSpawnedKVProcess()) {
+			TraceEvent(SevDebug, "DoRebootFailed").detail("Name", p->name).detail("Address", p->address);
+			return;
+		} else if (p->getChilds().size()) {
+			TraceEvent(SevDebug, "DoRebootFailedOnParentProcess").detail("Address", p->address);
+			return;
+		}
+
 		TraceEvent("RebootingProcess")
 		    .detail("KillType", kt)
 		    .detail("Address", p->address)
@@ -2513,14 +2626,12 @@ Future<Reference<class IAsyncFile>> Sim2FileSystem::open(const std::string& file
 			f = map(f, [=](Reference<IAsyncFile> r) { return Reference<IAsyncFile>(new AsyncFileWriteChecker(r)); });
 		if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES)
 			f = map(f, [=](Reference<IAsyncFile> r) { return Reference<IAsyncFile>(new AsyncFileChaos(r)); });
-#if ENCRYPTION_ENABLED
 		if (flags & IAsyncFile::OPEN_ENCRYPTED)
 			f = map(f, [flags](Reference<IAsyncFile> r) {
 				auto mode = flags & IAsyncFile::OPEN_READWRITE ? AsyncFileEncrypted::Mode::APPEND_ONLY
 				                                               : AsyncFileEncrypted::Mode::READ_ONLY;
 				return Reference<IAsyncFile>(new AsyncFileEncrypted(r, mode));
 			});
-#endif // ENCRYPTION_ENABLED
 		return f;
 	} else
 		return AsyncFileCached::open(filename, flags, mode);

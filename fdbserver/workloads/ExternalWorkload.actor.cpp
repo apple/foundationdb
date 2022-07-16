@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2019 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@
 #include "flow/ThreadHelper.actor.h"
 #include "flow/Platform.h"
 #include "fdbclient/ThreadSafeTransaction.h"
-#include "bindings/c/foundationdb/ClientWorkload.h"
+#include "foundationdb/ClientWorkload.h"
 #include "fdbserver/workloads/workloads.actor.h"
 
 #include "flow/actorcompiler.h" // has to be last include
@@ -38,12 +38,10 @@ struct FDBPromiseImpl : FDBPromise {
 		if (g_network->isOnMainThread()) {
 			impl.send(*reinterpret_cast<T*>(value));
 		} else {
-			onMainThreadVoid(
-			    [impl = impl, val = *reinterpret_cast<T*>(value)]() -> Future<Void> {
-				    impl.send(val);
-				    return Void();
-			    },
-			    nullptr);
+			onMainThreadVoid([impl = impl, val = *reinterpret_cast<T*>(value)]() -> Future<Void> {
+				impl.send(val);
+				return Void();
+			});
 		}
 	}
 };
@@ -93,13 +91,11 @@ struct FDBLoggerImpl : FDBLogger {
 			traceFun();
 			flushTraceFileVoid();
 		} else {
-			onMainThreadVoid(
-			    [traceFun]() -> Future<Void> {
-				    traceFun();
-				    flushTraceFileVoid();
-				    return Void();
-			    },
-			    nullptr);
+			onMainThreadVoid([traceFun]() -> Future<Void> {
+				traceFun();
+				flushTraceFileVoid();
+				return Void();
+			});
 		}
 	}
 };

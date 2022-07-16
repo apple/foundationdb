@@ -39,7 +39,7 @@
 
 #pragma once
 
-#define FDB_API_VERSION 710
+#define FDB_API_VERSION 720
 #include <foundationdb/fdb_c.h>
 
 #include <string>
@@ -97,6 +97,8 @@ public:
 
 private:
 	friend class Transaction;
+	friend class Database;
+	friend class Tenant;
 	KeyFuture(FDBFuture* f) : Future(f) {}
 };
 
@@ -135,6 +137,18 @@ private:
 	KeyValueArrayFuture(FDBFuture* f) : Future(f) {}
 };
 
+class MappedKeyValueArrayFuture : public Future {
+public:
+	// Call this function instead of fdb_future_get_mappedkeyvalue_array when using
+	// the MappedKeyValueArrayFuture type. Its behavior is identical to
+	// fdb_future_get_mappedkeyvalue_array.
+	fdb_error_t get(const FDBMappedKeyValue** out_kv, int* out_count, fdb_bool_t* out_more);
+
+private:
+	friend class Transaction;
+	MappedKeyValueArrayFuture(FDBFuture* f) : Future(f) {}
+};
+
 class KeyRangeArrayFuture : public Future {
 public:
 	// Call this function instead of fdb_future_get_keyrange_array when using
@@ -151,6 +165,7 @@ class EmptyFuture : public Future {
 private:
 	friend class Transaction;
 	friend class Database;
+	friend class Tenant;
 	EmptyFuture(FDBFuture* f) : Future(f) {}
 };
 
@@ -189,6 +204,36 @@ public:
 	                                   int uid_length,
 	                                   const uint8_t* snap_command,
 	                                   int snap_command_length);
+
+	static KeyFuture purge_blob_granules(FDBDatabase* db,
+	                                     std::string_view begin_key,
+	                                     std::string_view end_key,
+	                                     int64_t purge_version,
+	                                     fdb_bool_t force);
+
+	static EmptyFuture wait_purge_granules_complete(FDBDatabase* db, std::string_view purge_key);
+};
+
+class Tenant final {
+public:
+	Tenant(FDBDatabase* db, const uint8_t* name, int name_length);
+	~Tenant();
+	Tenant(const Tenant&) = delete;
+	Tenant& operator=(const Tenant&) = delete;
+	Tenant(Tenant&&) = delete;
+	Tenant& operator=(Tenant&&) = delete;
+
+	static KeyFuture purge_blob_granules(FDBTenant* tenant,
+	                                     std::string_view begin_key,
+	                                     std::string_view end_key,
+	                                     int64_t purge_version,
+	                                     fdb_bool_t force);
+
+	static EmptyFuture wait_purge_granules_complete(FDBTenant* tenant, std::string_view purge_key);
+
+private:
+	friend class Transaction;
+	FDBTenant* tenant;
 };
 
 // Wrapper around FDBTransaction, providing the same set of calls as the C API.
@@ -198,6 +243,7 @@ class Transaction final {
 public:
 	// Given an FDBDatabase, initializes a new transaction.
 	Transaction(FDBDatabase* db);
+	Transaction(Tenant& tenant);
 	~Transaction();
 
 	// Wrapper around fdb_transaction_reset.
@@ -254,7 +300,7 @@ public:
 
 	// WARNING: This feature is considered experimental at this time. It is only allowed when using snapshot isolation
 	// AND disabling read-your-writes. Returns a future which will be set to an FDBKeyValue array.
-	KeyValueArrayFuture get_range_and_flat_map(const uint8_t* begin_key_name,
+	MappedKeyValueArrayFuture get_mapped_range(const uint8_t* begin_key_name,
 	                                           int begin_key_name_length,
 	                                           fdb_bool_t begin_or_equal,
 	                                           int begin_offset,
@@ -268,6 +314,7 @@ public:
 	                                           int target_bytes,
 	                                           FDBStreamingMode mode,
 	                                           int iteration,
+	                                           int matchIndex,
 	                                           fdb_bool_t snapshot,
 	                                           fdb_bool_t reverse);
 

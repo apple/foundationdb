@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,7 +22,9 @@
 #include "flow/DeterministicRandom.h"
 #include "flow/UnitTest.h"
 #include "flow/rte_memcpy.h"
-#include "flow/folly_memcpy.h"
+#ifdef WITH_FOLLY_MEMCPY
+#include "folly_memcpy.h"
+#endif
 #include <stdarg.h>
 #include <cinttypes>
 
@@ -127,6 +129,19 @@ UID UID::fromString(std::string const& s) {
 	uint64_t a = 0, b = 0;
 	int r = sscanf(s.c_str(), "%16" SCNx64 "%16" SCNx64, &a, &b);
 	ASSERT(r == 2);
+	return UID(a, b);
+}
+
+UID UID::fromStringThrowsOnFailure(std::string const& s) {
+	if (s.size() != 32) {
+		// invalid string size
+		throw operation_failed();
+	}
+	uint64_t a = 0, b = 0;
+	int r = sscanf(s.c_str(), "%16" SCNx64 "%16" SCNx64, &a, &b);
+	if (r != 2) {
+		throw operation_failed();
+	}
 	return UID(a, b);
 }
 

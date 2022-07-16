@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -96,12 +96,19 @@ public:
 				    .detail("HasMessage", self->cursor->hasMessage())
 				    .detail("Version", self->cursor->version().version);
 
-				if (self->cursor->popped() != 0 || (!self->hasDiscardedData && BUGGIFY_WITH_PROB(0.01))) {
+				bool buggify = !self->hasDiscardedData && BUGGIFY_WITH_PROB(0.01);
+				if (self->cursor->popped() != 0 || buggify) {
+					TraceEvent(SevWarnAlways, "DiskQueueAdapterReset")
+					    .detail("Version", self->cursor->popped())
+					    .detail("PeekTypeSwitch", self->peekTypeSwitches % 3);
 					TEST(true); // disk adapter reset
-					TraceEvent(SevWarnAlways, "DiskQueueAdapterReset").detail("Version", self->cursor->popped());
+					if (self->cursor->popped() != 0) {
+						self->recoveryLoc = self->cursor->popped();
+					} else {
+						self->recoveryLoc = self->startLoc;
+					}
 					self->recoveryQueue.clear();
 					self->recoveryQueueDataSize = 0;
-					self->recoveryLoc = self->cursor->popped();
 					self->recoveryQueueLoc = self->recoveryLoc;
 					self->totalRecoveredBytes = 0;
 					if (self->peekTypeSwitches % 3 == 1) {

@@ -39,7 +39,7 @@ public class SnapshotTransactionTest {
 	private static final Subspace SUBSPACE = new Subspace(Tuple.from("test", "conflict_ranges"));
 
 	public static void main(String[] args) {
-		FDB fdb = FDB.selectAPIVersion(710);
+		FDB fdb = FDB.selectAPIVersion(720);
 		try(Database db = fdb.open()) {
 			snapshotReadShouldNotConflict(db);
 			snapshotShouldNotAddConflictRange(db);

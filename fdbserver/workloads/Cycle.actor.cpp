@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include <cstring>
+
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
@@ -26,9 +28,9 @@
 #include "flow/Arena.h"
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 #include "flow/serialize.h"
-#include <cstring>
+
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct CycleWorkload : TestWorkload {
 	int actorCount, nodeCount;
@@ -47,7 +49,7 @@ struct CycleWorkload : TestWorkload {
 		actorCount = getOption(options, "actorsPerClient"_sr, transactionsPerSecond / 5);
 		nodeCount = getOption(options, "nodeCount"_sr, transactionsPerSecond * clientCount);
 		keyPrefix = unprintable(getOption(options, "keyPrefix"_sr, LiteralStringRef("")).toString());
-		traceParentProbability = getOption(options, "traceParentProbability "_sr, 0.01);
+		traceParentProbability = getOption(options, "traceParentProbability"_sr, 0.01);
 		minExpectedTransactionsPerSecond = transactionsPerSecond * getOption(options, "expectedRate"_sr, 0.7);
 	}
 
@@ -102,11 +104,11 @@ struct CycleWorkload : TestWorkload {
 				state double tstart = now();
 				state int r = deterministicRandom()->randomInt(0, self->nodeCount);
 				state Transaction tr(cx);
-				if (deterministicRandom()->random01() >= self->traceParentProbability) {
+				if (deterministicRandom()->random01() <= self->traceParentProbability) {
 					state Span span("CycleClient"_loc);
-					TraceEvent("CycleTracingTransaction", span.context).log();
+					TraceEvent("CycleTracingTransaction", span.context.traceID).log();
 					tr.setOption(FDBTransactionOptions::SPAN_PARENT,
-					             BinaryWriter::toValue(span.context, Unversioned()));
+					             BinaryWriter::toValue(span.context, IncludeVersion()));
 				}
 				while (true) {
 					try {
@@ -258,6 +260,11 @@ struct CycleWorkload : TestWorkload {
 				} catch (Error& e) {
 					retryCount++;
 					TraceEvent(retryCount > 20 ? SevWarnAlways : SevWarn, "CycleCheckError").error(e);
+					if (g_network->isSimulated() && retryCount > 50) {
+						TEST(true); // Cycle check enable speedUpSimulation because too many transaction_too_old()
+						// try to make the read window back to normal size (5 * version_per_sec)
+						g_simulator.speedUpSimulation = true;
+					}
 					wait(tr.onError(e));
 				}
 			}
@@ -266,4 +273,4 @@ struct CycleWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<CycleWorkload> CycleWorkloadFactory("Cycle");
+WorkloadFactory<CycleWorkload> CycleWorkloadFactory("Cycle", true);

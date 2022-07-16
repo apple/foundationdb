@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "contrib/fmt-8.0.1/include/fmt/format.h"
+#include "fmt/format.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/DatabaseContext.h"
@@ -33,7 +33,7 @@
 #include <cinttypes>
 #include <ctime>
 #include <climits>
-#include "fdbrpc/IAsyncFile.h"
+#include "flow/IAsyncFile.h"
 #include "flow/genericactors.actor.h"
 #include "flow/Hash3.h"
 #include <numeric>
@@ -1221,7 +1221,7 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 
 		// Don't need to check keepRunning(task) here because we will do that while finishing each output file, but if
 		// bc is false then clearly the backup is no longer in progress
-		state Reference<IBackupContainer> bc = wait(backup.backupContainer().getD(cx));
+		state Reference<IBackupContainer> bc = wait(backup.backupContainer().getD(cx.getReference()));
 		if (!bc) {
 			return Void();
 		}
@@ -3617,8 +3617,8 @@ struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 		// Get a batch of files.  We're targeting batchSize blocks being dispatched so query for batchSize files (each
 		// of which is 0 or more blocks).
 		state int taskBatchSize = BUGGIFY ? 1 : CLIENT_KNOBS->RESTORE_DISPATCH_ADDTASK_SIZE;
-		state RestoreConfig::FileSetT::Values files =
-		    wait(restore.fileSet().getRange(tr, { beginVersion, beginFile }, {}, taskBatchSize));
+		state RestoreConfig::FileSetT::Values files = wait(restore.fileSet().getRange(
+		    tr, Optional<RestoreConfig::RestoreFile>({ beginVersion, beginFile }), {}, taskBatchSize));
 
 		// allPartsDone will be set once all block tasks in the current batch are finished.
 		state Reference<TaskFuture> allPartsDone;
@@ -4363,13 +4363,14 @@ public:
 	                                                Key backupTag,
 	                                                Standalone<VectorRef<KeyRangeRef>> backupRanges,
 	                                                Key bcUrl,
+	                                                Optional<std::string> proxy,
 	                                                Version targetVersion,
 	                                                LockDB lockDB,
 	                                                UID randomUID,
 	                                                Key addPrefix,
 	                                                Key removePrefix) {
 		// Sanity check backup is valid
-		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(bcUrl.toString());
+		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(bcUrl.toString(), proxy, {});
 		state BackupDescription desc = wait(bc->describeBackup());
 		wait(desc.resolveVersionTimes(cx));
 
@@ -4430,6 +4431,7 @@ public:
 					struct RestoreRequest restoreRequest(restoreIndex,
 					                                     restoreTag,
 					                                     bcUrl,
+					                                     proxy,
 					                                     targetVersion,
 					                                     range,
 					                                     deterministicRandom()->randomUniqueID(),
@@ -4510,6 +4512,7 @@ public:
 	ACTOR static Future<Void> submitBackup(FileBackupAgent* backupAgent,
 	                                       Reference<ReadYourWritesTransaction> tr,
 	                                       Key outContainer,
+	                                       Optional<std::string> proxy,
 	                                       int initialSnapshotIntervalSeconds,
 	                                       int snapshotIntervalSeconds,
 	                                       std::string tagName,
@@ -4555,7 +4558,8 @@ public:
 			backupContainer = joinPath(backupContainer, std::string("backup-") + nowStr.toString());
 		}
 
-		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(backupContainer, encryptionKeyFileName);
+		state Reference<IBackupContainer> bc =
+		    IBackupContainer::openContainer(backupContainer, proxy, encryptionKeyFileName);
 		try {
 			wait(timeoutError(bc->create(), 30));
 		} catch (Error& e) {
@@ -4642,6 +4646,7 @@ public:
 	                                        Reference<ReadYourWritesTransaction> tr,
 	                                        Key tagName,
 	                                        Key backupURL,
+	                                        Optional<std::string> proxy,
 	                                        Standalone<VectorRef<KeyRangeRef>> ranges,
 	                                        Version restoreVersion,
 	                                        Key addPrefix,
@@ -4710,7 +4715,7 @@ public:
 		// Point the tag to the new uid
 		tag.set(tr, { uid, false });
 
-		Reference<IBackupContainer> bc = IBackupContainer::openContainer(backupURL.toString());
+		Reference<IBackupContainer> bc = IBackupContainer::openContainer(backupURL.toString(), proxy, {});
 
 		// Configure the new restore
 		restore.tag().set(tr, tagName.toString());
@@ -5303,6 +5308,7 @@ public:
 	                                     Optional<Database> cxOrig,
 	                                     Key tagName,
 	                                     Key url,
+	                                     Optional<std::string> proxy,
 	                                     Standalone<VectorRef<KeyRangeRef>> ranges,
 	                                     WaitForComplete waitForComplete,
 	                                     Version targetVersion,
@@ -5320,7 +5326,7 @@ public:
 			throw restore_error();
 		}
 
-		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(url.toString());
+		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(url.toString(), proxy, {});
 
 		state BackupDescription desc = wait(bc->describeBackup(true));
 		if (cxOrig.present()) {
@@ -5360,6 +5366,7 @@ public:
 				                   tr,
 				                   tagName,
 				                   url,
+				                   proxy,
 				                   ranges,
 				                   targetVersion,
 				                   addPrefix,
@@ -5427,7 +5434,7 @@ public:
 			try {
 				// We must get a commit version so add a conflict range that won't likely cause conflicts
 				// but will ensure that the transaction is actually submitted.
-				tr.addWriteConflictRange(backupConfig.snapshotRangeDispatchMap().space.range());
+				tr.addWriteConflictRange(backupConfig.snapshotRangeDispatchMap().subspace);
 				wait(lockDatabase(&tr, randomUid));
 				wait(tr.commit());
 				commitVersion = tr.getCommittedVersion();
@@ -5490,7 +5497,7 @@ public:
 			}
 		}
 
-		Reference<IBackupContainer> bc = wait(backupConfig.backupContainer().getOrThrow(cx));
+		Reference<IBackupContainer> bc = wait(backupConfig.backupContainer().getOrThrow(cx.getReference()));
 
 		if (fastRestore) {
 			TraceEvent("AtomicParallelRestoreStartRestore").log();
@@ -5499,6 +5506,7 @@ public:
 			                           tagName,
 			                           ranges,
 			                           KeyRef(bc->getURL()),
+			                           bc->getProxy(),
 			                           targetVersion,
 			                           LockDB::True,
 			                           randomUid,
@@ -5520,6 +5528,7 @@ public:
 			                           cx,
 			                           tagName,
 			                           KeyRef(bc->getURL()),
+			                           bc->getProxy(),
 			                           ranges,
 			                           WaitForComplete::True,
 			                           ::invalidVersion,
@@ -5561,13 +5570,14 @@ Future<Void> FileBackupAgent::submitParallelRestore(Database cx,
                                                     Key backupTag,
                                                     Standalone<VectorRef<KeyRangeRef>> backupRanges,
                                                     Key bcUrl,
+                                                    Optional<std::string> proxy,
                                                     Version targetVersion,
                                                     LockDB lockDB,
                                                     UID randomUID,
                                                     Key addPrefix,
                                                     Key removePrefix) {
 	return FileBackupAgentImpl::submitParallelRestore(
-	    cx, backupTag, backupRanges, bcUrl, targetVersion, lockDB, randomUID, addPrefix, removePrefix);
+	    cx, backupTag, backupRanges, bcUrl, proxy, targetVersion, lockDB, randomUID, addPrefix, removePrefix);
 }
 
 Future<Void> FileBackupAgent::atomicParallelRestore(Database cx,
@@ -5582,6 +5592,7 @@ Future<Version> FileBackupAgent::restore(Database cx,
                                          Optional<Database> cxOrig,
                                          Key tagName,
                                          Key url,
+                                         Optional<std::string> proxy,
                                          Standalone<VectorRef<KeyRangeRef>> ranges,
                                          WaitForComplete waitForComplete,
                                          Version targetVersion,
@@ -5598,6 +5609,7 @@ Future<Version> FileBackupAgent::restore(Database cx,
 	                                    cxOrig,
 	                                    tagName,
 	                                    url,
+	                                    proxy,
 	                                    ranges,
 	                                    waitForComplete,
 	                                    targetVersion,
@@ -5639,6 +5651,7 @@ Future<ERestoreState> FileBackupAgent::waitRestore(Database cx, Key tagName, Ver
 
 Future<Void> FileBackupAgent::submitBackup(Reference<ReadYourWritesTransaction> tr,
                                            Key outContainer,
+                                           Optional<std::string> proxy,
                                            int initialSnapshotIntervalSeconds,
                                            int snapshotIntervalSeconds,
                                            std::string const& tagName,
@@ -5650,6 +5663,7 @@ Future<Void> FileBackupAgent::submitBackup(Reference<ReadYourWritesTransaction> 
 	return FileBackupAgentImpl::submitBackup(this,
 	                                         tr,
 	                                         outContainer,
+	                                         proxy,
 	                                         initialSnapshotIntervalSeconds,
 	                                         snapshotIntervalSeconds,
 	                                         tagName,

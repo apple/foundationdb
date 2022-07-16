@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2021 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -810,6 +810,28 @@ void printStatus(StatusObjectReader statusObj,
 				outputString = outputStringCache;
 				outputString += "\n  Unable to retrieve data status";
 			}
+			// Storage Wiggle section
+			StatusObjectReader storageWigglerObj;
+			std::string storageWigglerString;
+			try {
+				if (statusObjCluster.get("storage_wiggler", storageWigglerObj)) {
+					int size = 0;
+					if (storageWigglerObj.has("wiggle_server_addresses")) {
+						storageWigglerString += "\n  Wiggle server addresses-";
+						for (auto& v : storageWigglerObj.obj().at("wiggle_server_addresses").get_array()) {
+							storageWigglerString += " " + v.get_str();
+							size += 1;
+						}
+					}
+					storageWigglerString += "\n  Wiggle server count    - " + std::to_string(size);
+				}
+			} catch (std::runtime_error&) {
+				storageWigglerString += "\n  Unable to retrieve storage wiggler status";
+			}
+			if (storageWigglerString.size()) {
+				outputString += "\n\nStorage wiggle:";
+				outputString += storageWigglerString;
+			}
 
 			// Operating space section
 			outputString += "\n\nOperating space:";
@@ -1106,8 +1128,12 @@ void printStatus(StatusObjectReader statusObj,
 					                "storage server failures.";
 				}
 				if (statusObjCluster.has("data_distribution_disabled_for_rebalance")) {
-					outputString += "\n\nWARNING: Data distribution is currently turned on but shard size balancing is "
-					                "currently disabled.";
+					outputString += "\n\nWARNING: Data distribution is currently turned on but one or both of shard "
+					                "size and read-load based balancing are disabled.";
+					// data_distribution_disabled_hex
+					if (statusObjCluster.has("data_distribution_disabled_hex")) {
+						outputString += " Ignore code: " + statusObjCluster["data_distribution_disabled_hex"].get_str();
+					}
 				}
 			}
 
@@ -1179,7 +1205,7 @@ void printStatus(StatusObjectReader statusObj,
 
 // "db" is the handler to the multiversion database
 // localDb is the native Database object
-// localDb is rarely needed except the "db" has not establised a connection to the cluster where the operation will
+// localDb is rarely needed except the "db" has not established a connection to the cluster where the operation will
 // return Never as we expect status command to always return, we use "localDb" to return the default result
 ACTOR Future<bool> statusCommandActor(Reference<IDatabase> db,
                                       Database localDb,
@@ -1224,6 +1250,16 @@ ACTOR Future<bool> statusCommandActor(Reference<IDatabase> db,
 	return true;
 }
 
+void statusGenerator(const char* text,
+                     const char* line,
+                     std::vector<std::string>& lc,
+                     std::vector<StringRef> const& tokens) {
+	if (tokens.size() == 1) {
+		const char* opts[] = { "minimal", "details", "json", nullptr };
+		arrayGenerator(text, line, opts, lc);
+	}
+}
+
 CommandFactory statusFactory(
     "status",
     CommandHelp("status [minimal|details|json]",
@@ -1232,5 +1268,6 @@ CommandFactory statusFactory(
                 "what is wrong. If the cluster is running, this command will print cluster "
                 "statistics.\n\nSpecifying `minimal' will provide a minimal description of the status of your "
                 "database.\n\nSpecifying `details' will provide load information for individual "
-                "workers.\n\nSpecifying `json' will provide status information in a machine readable JSON format."));
+                "workers.\n\nSpecifying `json' will provide status information in a machine readable JSON format."),
+    &statusGenerator);
 } // namespace fdb_cli

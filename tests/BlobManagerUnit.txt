@@ -1,7 +1,0 @@
-testTitle=UnitTests
-startDelay=0
-useDB=false
-
-    testName=UnitTests
-    maxTestCases=0
-    testsMatching=/blobmanager/

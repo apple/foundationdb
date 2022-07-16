@@ -27,6 +27,8 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 
 import com.apple.foundationdb.async.AsyncUtil;
+import com.apple.foundationdb.tuple.ByteArrayUtil;
+import com.apple.foundationdb.tuple.Tuple;
 
 class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsumer {
 	private DatabaseOptions options;
@@ -117,6 +119,44 @@ class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsume
 	}
 
 	@Override
+	public Tenant openTenant(byte[] tenantName, Executor e) {
+		return openTenant(tenantName, e, eventKeeper);
+	}
+
+	@Override
+	public Tenant openTenant(Tuple tenantName) {
+		return openTenant(tenantName.pack());
+	}
+
+	@Override
+	public Tenant openTenant(Tuple tenantName, Executor e) {
+		return openTenant(tenantName.pack(), e);
+	}
+
+	@Override
+	public Tenant openTenant(byte[] tenantName, Executor e, EventKeeper eventKeeper) {
+		pointerReadLock.lock();
+		Tenant tenant = null;
+		try {
+			tenant = new FDBTenant(Database_openTenant(getPtr(), tenantName), this, tenantName, e, eventKeeper);
+			return tenant;
+		} catch (RuntimeException err) {
+			if (tenant != null) {
+				tenant.close();
+			}
+
+			throw err;
+		} finally {
+			pointerReadLock.unlock();
+		}
+	}
+
+	@Override
+	public Tenant openTenant(Tuple tenantName, Executor e, EventKeeper eventKeeper) {
+		return openTenant(tenantName.pack(), e, eventKeeper);
+	}
+
+	@Override
 	public Transaction createTransaction(Executor e) {
 		return createTransaction(e, eventKeeper);
 	}
@@ -170,6 +210,7 @@ class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsume
 		Database_dispose(cPtr);
 	}
 
+	private native long Database_openTenant(long cPtr, byte[] tenantName);
 	private native long Database_createTransaction(long cPtr);
 	private native void Database_dispose(long cPtr);
 	private native void Database_setOption(long cPtr, int code, byte[] value) throws FDBException;

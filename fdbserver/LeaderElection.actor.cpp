@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,28 +25,41 @@
 #include "fdbclient/MonitorLeader.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+// Keep trying to become a leader by submitting itself to all coordinators.
+// Monitor the health of all coordinators at the same time.
 ACTOR Future<Void> submitCandidacy(Key key,
                                    LeaderElectionRegInterface coord,
                                    LeaderInfo myInfo,
                                    UID prevChangeID,
-                                   Reference<AsyncVar<std::vector<Optional<LeaderInfo>>>> nominees,
-                                   int index) {
+                                   AsyncTrigger* nomineeChange,
+                                   Optional<LeaderInfo>* nominee) {
 	loop {
-		auto const& nom = nominees->get()[index];
-		Optional<LeaderInfo> li = wait(
-		    retryBrokenPromise(coord.candidacy,
-		                       CandidacyRequest(key, myInfo, nom.present() ? nom.get().changeID : UID(), prevChangeID),
-		                       TaskPriority::CoordinationReply));
+		state Optional<LeaderInfo> li;
+		if (coord.hostname.present()) {
+			wait(store(
+			    li,
+			    retryGetReplyFromHostname(
+			        CandidacyRequest(key, myInfo, nominee->present() ? nominee->get().changeID : UID(), prevChangeID),
+			        coord.hostname.get(),
+			        WLTOKEN_LEADERELECTIONREG_CANDIDACY,
+			        TaskPriority::CoordinationReply)));
+		} else {
+			wait(store(
+			    li,
+			    retryBrokenPromise(
+			        coord.candidacy,
+			        CandidacyRequest(key, myInfo, nominee->present() ? nominee->get().changeID : UID(), prevChangeID),
+			        TaskPriority::CoordinationReply)));
+		}
 
-		if (li != nominees->get()[index]) {
-			std::vector<Optional<LeaderInfo>> v = nominees->get();
-			v[index] = li;
-			nominees->set(v);
+		wait(Future<Void>(Void())); // Make sure we weren't cancelled
+
+		if (li != *nominee) {
+			*nominee = li;
+			nomineeChange->trigger();
 
 			if (li.present() && li.get().forward)
 				wait(Future<Void>(Never()));
-
-			wait(Future<Void>(Void())); // Make sure we weren't cancelled
 		}
 	}
 }
@@ -76,9 +89,16 @@ Future<Void> buggifyDelayedAsyncVar(Reference<AsyncVar<T>>& var) {
 ACTOR Future<Void> changeLeaderCoordinators(ServerCoordinators coordinators, Value forwardingInfo) {
 	std::vector<Future<Void>> forwardRequests;
 	forwardRequests.reserve(coordinators.leaderElectionServers.size());
-	for (int i = 0; i < coordinators.leaderElectionServers.size(); i++)
-		forwardRequests.push_back(retryBrokenPromise(coordinators.leaderElectionServers[i].forward,
-		                                             ForwardRequest(coordinators.clusterKey, forwardingInfo)));
+	for (int i = 0; i < coordinators.leaderElectionServers.size(); i++) {
+		if (coordinators.leaderElectionServers[i].hostname.present()) {
+			forwardRequests.push_back(retryGetReplyFromHostname(ForwardRequest(coordinators.clusterKey, forwardingInfo),
+			                                                    coordinators.leaderElectionServers[i].hostname.get(),
+			                                                    WLTOKEN_LEADERELECTIONREG_FORWARD));
+		} else {
+			forwardRequests.push_back(retryBrokenPromise(coordinators.leaderElectionServers[i].forward,
+			                                             ForwardRequest(coordinators.clusterKey, forwardingInfo)));
+		}
+	}
 	int quorum_size = forwardRequests.size() / 2 + 1;
 	wait(quorum(forwardRequests, quorum_size));
 	return Void();
@@ -89,8 +109,8 @@ ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators,
                                            Reference<AsyncVar<Value>> outSerializedLeader,
                                            bool hasConnected,
                                            Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo) {
-	state Reference<AsyncVar<std::vector<Optional<LeaderInfo>>>> nominees(
-	    new AsyncVar<std::vector<Optional<LeaderInfo>>>());
+	state AsyncTrigger nomineeChange;
+	state std::vector<Optional<LeaderInfo>> nominees;
 	state LeaderInfo myInfo;
 	state Future<Void> candidacies;
 	state bool iAmLeader = false;
@@ -105,7 +125,7 @@ ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators,
 		wait(delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY));
 	}
 
-	nominees->set(std::vector<Optional<LeaderInfo>>(coordinators.clientLeaderServers.size()));
+	nominees.resize(coordinators.leaderElectionServers.size());
 
 	myInfo.serializedInfo = proposedSerializedInterface;
 	outSerializedLeader->set(Value());
@@ -122,13 +142,18 @@ ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators,
 
 		std::vector<Future<Void>> cand;
 		cand.reserve(coordinators.leaderElectionServers.size());
-		for (int i = 0; i < coordinators.leaderElectionServers.size(); i++)
-			cand.push_back(submitCandidacy(
-			    coordinators.clusterKey, coordinators.leaderElectionServers[i], myInfo, prevChangeID, nominees, i));
+		for (int i = 0; i < coordinators.leaderElectionServers.size(); i++) {
+			cand.push_back(submitCandidacy(coordinators.clusterKey,
+			                               coordinators.leaderElectionServers[i],
+			                               myInfo,
+			                               prevChangeID,
+			                               &nomineeChange,
+			                               &nominees[i]));
+		}
 		candidacies = waitForAll(cand);
 
 		loop {
-			state Optional<std::pair<LeaderInfo, bool>> leader = getLeader(nominees->get());
+			state Optional<std::pair<LeaderInfo, bool>> leader = getLeader(nominees);
 			if (leader.present() && leader.get().first.forward) {
 				// These coordinators are forwarded to another set.  But before we change our own cluster file, we need
 				// to make sure that a majority of coordinators know that. SOMEDAY: Wait briefly to see if other
@@ -141,8 +166,8 @@ ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators,
 					    .detail("StoredConnectionString", coordinators.ccr->getConnectionString().toString())
 					    .detail("CurrentConnectionString", leader.get().first.serializedInfo.toString());
 				}
-				coordinators.ccr->setAndPersistConnectionString(
-				    ClusterConnectionString(leader.get().first.serializedInfo.toString()));
+				wait(coordinators.ccr->setAndPersistConnectionString(
+				    ClusterConnectionString(leader.get().first.serializedInfo.toString())));
 				TraceEvent("LeaderForwarding")
 				    .detail("ConnStr", coordinators.ccr->getConnectionString().toString())
 				    .trackLatest("LeaderForwarding");
@@ -172,15 +197,14 @@ ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators,
 			// If more than 2*SERVER_KNOBS->POLLING_FREQUENCY elapses while we are nominated by some coordinator but
 			// there is no leader, we might be breaking the leader election process for someone with better
 			// communications but lower ID, so change IDs.
-			if ((!leader.present() || !leader.get().second) &&
-			    std::count(nominees->get().begin(), nominees->get().end(), myInfo)) {
+			if ((!leader.present() || !leader.get().second) && std::count(nominees.begin(), nominees.end(), myInfo)) {
 				if (!badCandidateTimeout.isValid())
 					badCandidateTimeout = delay(SERVER_KNOBS->POLLING_FREQUENCY * 2, TaskPriority::CoordinationReply);
 			} else
 				badCandidateTimeout = Future<Void>();
 
 			choose {
-				when(wait(nominees->onChange())) {}
+				when(wait(nomineeChange.onTrigger())) {}
 				when(wait(badCandidateTimeout.isValid() ? badCandidateTimeout : Never())) {
 					TEST(true); // Bad candidate timeout
 					TraceEvent("LeaderBadCandidateTimeout", myInfo.changeID).log();
@@ -208,10 +232,17 @@ ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators,
 		state std::vector<Future<Void>> true_heartbeats;
 		state std::vector<Future<Void>> false_heartbeats;
 		for (int i = 0; i < coordinators.leaderElectionServers.size(); i++) {
-			Future<LeaderHeartbeatReply> hb =
-			    retryBrokenPromise(coordinators.leaderElectionServers[i].leaderHeartbeat,
-			                       LeaderHeartbeatRequest(coordinators.clusterKey, myInfo, prevChangeID),
-			                       TaskPriority::CoordinationReply);
+			Future<LeaderHeartbeatReply> hb;
+			if (coordinators.leaderElectionServers[i].hostname.present()) {
+				hb = retryGetReplyFromHostname(LeaderHeartbeatRequest(coordinators.clusterKey, myInfo, prevChangeID),
+				                               coordinators.leaderElectionServers[i].hostname.get(),
+				                               WLTOKEN_LEADERELECTIONREG_LEADERHEARTBEAT,
+				                               TaskPriority::CoordinationReply);
+			} else {
+				hb = retryBrokenPromise(coordinators.leaderElectionServers[i].leaderHeartbeat,
+				                        LeaderHeartbeatRequest(coordinators.clusterKey, myInfo, prevChangeID),
+				                        TaskPriority::CoordinationReply);
+			}
 			true_heartbeats.push_back(onEqual(hb, LeaderHeartbeatReply{ true }));
 			false_heartbeats.push_back(onEqual(hb, LeaderHeartbeatReply{ false }));
 		}

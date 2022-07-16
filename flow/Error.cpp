@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -184,7 +184,7 @@ ErrorCodeTable::ErrorCodeTable() {
 #define ERROR(name, number, description)                                                                               \
 	addCode(number, #name, description);                                                                               \
 	enum { Duplicate_Error_Code_##number = 0 };
-#include "error_definitions.h"
+#include "flow/error_definitions.h"
 }
 
 void ErrorCodeTable::addCode(int code, const char* name, const char* description) {

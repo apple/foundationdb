@@ -285,6 +285,13 @@ func (o NetworkOptions) SetDistributedClientTracer(param string) error {
 	return o.setOpt(90, []byte(param))
 }
 
+// Sets the directory for storing temporary files created by FDB client, such as temporary copies of client libraries. Defaults to /tmp
+//
+// Parameter: Client directory for temporary files. 
+func (o NetworkOptions) SetClientTmpDir(param string) error {
+	return o.setOpt(91, []byte(param))
+}
+
 // Set the size of the client location cache. Raising this value can boost performance in very large databases where clients access data in a near-random pattern. Defaults to 100000.
 //
 // Parameter: Max location cache entries
@@ -448,14 +455,19 @@ func (o TransactionOptions) SetInitializeNewDatabase() error {
 	return o.setOpt(300, nil)
 }
 
-// Allows this transaction to read and modify system keys (those that start with the byte 0xFF)
+// Allows this transaction to read and modify system keys (those that start with the byte 0xFF). Implies raw_access.
 func (o TransactionOptions) SetAccessSystemKeys() error {
 	return o.setOpt(301, nil)
 }
 
-// Allows this transaction to read system keys (those that start with the byte 0xFF)
+// Allows this transaction to read system keys (those that start with the byte 0xFF). Implies raw_access.
 func (o TransactionOptions) SetReadSystemKeys() error {
 	return o.setOpt(302, nil)
+}
+
+// Allows this transaction to access the raw key-space when tenant mode is on.
+func (o TransactionOptions) SetRawAccess() error {
+	return o.setOpt(303, nil)
 }
 
 // Not yet implemented.
@@ -596,6 +608,11 @@ func (o TransactionOptions) SetExpensiveClearCostEstimationEnable() error {
 // Allows ``get`` operations to read from sections of keyspace that have become unreadable because of versionstamp operations. These reads will view versionstamp operations as if they were set operations that did not fill in the versionstamp.
 func (o TransactionOptions) SetBypassUnreadable() error {
 	return o.setOpt(1100, nil)
+}
+
+// Allows this transaction to use cached GRV from the database context. Defaults to off. Upon first usage, starts a background updater to periodically update the cache to avoid stale read versions.
+func (o TransactionOptions) SetUseGrvCache() error {
+	return o.setOpt(1101, nil)
 }
 
 type StreamingMode int

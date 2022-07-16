@@ -28,4 +28,5 @@
 # endif
 # cmakedefine DTRACE_PROBES
 # cmakedefine HAS_ALIGNED_ALLOC
+# cmakedefine USE_JEMALLOC
 #endif // WIN32

@@ -38,6 +38,8 @@ The latest changes are detailed in :ref:`release-notes`. The documentation has t
 
 * :doc:`administration` contains documentation on administering FoundationDB.
 
+* :doc:`monitored-metrics` contains documentation on monitoring and alerting for FoundationDB.
+
 * :doc:`redwood` contains documentation on Redwood Storage Engine.
 
 * :doc:`visibility` contains documentation related to Visibility into FoundationDB.
@@ -55,6 +57,7 @@ The latest changes are detailed in :ref:`release-notes`. The documentation has t
    api-reference
    tutorials
    administration
+   monitored-metrics
    redwood
    visibility
    earlier-release-notes

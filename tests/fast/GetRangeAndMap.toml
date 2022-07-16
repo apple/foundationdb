@@ -1,6 +1,0 @@
-[[test]]
-testTitle = 'GetRangeAndMap'
-useDB = true
-
-    [[test.workload]]
-    testName = 'GetRangeAndMap'

@@ -216,6 +216,26 @@ def kill(logger):
 
 
 @enable_logging()
+def killall(logger):
+    # test is designed to make sure 'kill all' sends all requests simultaneously
+    old_generation = get_value_from_status_json(False, 'cluster', 'generation')
+    # This is currently an issue with fdbcli,
+    # where you need to first run 'kill' to initialize processes' list
+    # and then specify the certain process to kill
+    process = subprocess.Popen(command_template[:-1], stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=fdbcli_env)
+    output, error = process.communicate(input='kill; kill all; sleep 1\n'.encode())
+    logger.debug(output)
+    # wait for a second for the cluster recovery
+    time.sleep(1)
+    new_generation = get_value_from_status_json(True, 'cluster', 'generation')
+    logger.debug("Old generation: {}, New generation: {}".format(old_generation, new_generation))
+    # Make sure the kill is not happening sequentially
+    # Pre: each recovery will increase the generated number by 2
+    # Relax the condition to allow one additional recovery happening when we fetched the old generation
+    assert new_generation <= (old_generation + 4)
+
+
+@enable_logging()
 def suspend(logger):
     if not shutil.which("pidof"):
         logger.debug("Skipping suspend test. Pidof not available")
@@ -233,7 +253,8 @@ def suspend(logger):
     port = address.split(':')[1]
     logger.debug("Port: {}".format(port))
     # use the port number to find the exact fdb process we are connecting to
-    pinfo = list(filter(lambda x: port in x, pinfos))
+    # child process like fdbserver -r flowprocess does not provide `datadir` in the command line
+    pinfo = list(filter(lambda x: port in x and 'datadir' in x, pinfos))
     assert len(pinfo) == 1
     pid = pinfo[0].split(' ')[0]
     logger.debug("Pid: {}".format(pid))
@@ -257,6 +278,33 @@ def suspend(logger):
         duration += 1
     # at most after 60 seconds, the cluster should be available
     assert get_value_from_status_json(False, 'client', 'database_status', 'available')
+
+
+@enable_logging()
+def versionepoch(logger):
+    version1 = run_fdbcli_command('versionepoch')
+    assert version1 == "Version epoch is unset"
+    version2 = run_fdbcli_command('versionepoch get')
+    assert version2 == "Version epoch is unset"
+    version3 = run_fdbcli_command('versionepoch commit')
+    assert version3 == "Must set the version epoch before committing it (see `versionepoch enable`)"
+    version4 = run_fdbcli_command('versionepoch enable')
+    assert version4 == "Version epoch enabled. Run `versionepoch commit` to irreversibly jump to the target version"
+    version5 = run_fdbcli_command('versionepoch get')
+    assert version5 == "Current version epoch is 0"
+    version6 = run_fdbcli_command('versionepoch set 10')
+    assert version6 == "Version epoch enabled. Run `versionepoch commit` to irreversibly jump to the target version"
+    version7 = run_fdbcli_command('versionepoch get')
+    assert version7 == "Current version epoch is 10"
+    run_fdbcli_command('versionepoch disable')
+    version8 = run_fdbcli_command('versionepoch get')
+    assert version8 == "Version epoch is unset"
+    version9 = run_fdbcli_command('versionepoch enable')
+    assert version9 == "Version epoch enabled. Run `versionepoch commit` to irreversibly jump to the target version"
+    version10 = run_fdbcli_command('versionepoch get')
+    assert version10 == "Current version epoch is 0"
+    version11 = run_fdbcli_command('versionepoch commit')
+    assert version11.startswith("Current read version is ")
 
 
 def get_value_from_status_json(retry, *args):
@@ -543,6 +591,127 @@ def triggerddteaminfolog(logger):
     assert output == 'Triggered team info logging in data distribution.'
 
 
+@enable_logging()
+def tenants(logger):
+    output = run_fdbcli_command('listtenants')
+    assert output == 'The cluster has no tenants'
+
+    output = run_fdbcli_command('createtenant tenant')
+    assert output == 'The tenant `tenant\' has been created'
+
+    output = run_fdbcli_command('createtenant tenant2')
+    assert output == 'The tenant `tenant2\' has been created'
+
+    output = run_fdbcli_command('listtenants')
+    assert output == '1. tenant\n  2. tenant2'
+
+    output = run_fdbcli_command('listtenants a z 1')
+    assert output == '1. tenant'
+
+    output = run_fdbcli_command('listtenants a tenant2')
+    assert output == '1. tenant'
+
+    output = run_fdbcli_command('listtenants tenant2 z')
+    assert output == '1. tenant2'
+
+    output = run_fdbcli_command('gettenant tenant')
+    lines = output.split('\n')
+    assert len(lines) == 2
+    assert lines[0].strip().startswith('id: ')
+    assert lines[1].strip().startswith('prefix: ')
+
+    output = run_fdbcli_command('gettenant tenant JSON')
+    json_output = json.loads(output, strict=False)
+    assert(len(json_output) == 2)
+    assert('tenant' in json_output)
+    assert(json_output['type'] == 'success')
+    assert(len(json_output['tenant']) == 2)
+    assert('id' in json_output['tenant'])
+    assert('prefix' in json_output['tenant'])
+    assert(len(json_output['tenant']['prefix']) == 2)
+    assert('base64' in json_output['tenant']['prefix'])
+    assert('printable' in json_output['tenant']['prefix'])
+
+    output = run_fdbcli_command('usetenant')
+    assert output == 'Using the default tenant'
+
+    output = run_fdbcli_command_and_get_error('usetenant tenant3')
+    assert output == 'ERROR: Tenant `tenant3\' does not exist'
+
+    # Test writing keys to different tenants and make sure they all work correctly
+    run_fdbcli_command('writemode on; set tenant_test default_tenant')
+    output = run_fdbcli_command('get tenant_test')
+    assert output == '`tenant_test\' is `default_tenant\''
+
+    process = subprocess.Popen(command_template[:-1], stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=fdbcli_env)
+    cmd_sequence = ['writemode on', 'usetenant tenant', 'get tenant_test', 'set tenant_test tenant']
+    output, _ = process.communicate(input='\n'.join(cmd_sequence).encode())
+
+    lines = output.decode().strip().split('\n')[-3:]
+    assert lines[0] == 'Using tenant `tenant\''
+    assert lines[1] == '`tenant_test\': not found'
+    assert lines[2].startswith('Committed')
+
+    process = subprocess.Popen(command_template[:-1], stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=fdbcli_env)
+    cmd_sequence = ['writemode on', 'usetenant tenant2', 'get tenant_test', 'set tenant_test tenant2', 'get tenant_test']
+    output, _ = process.communicate(input='\n'.join(cmd_sequence).encode())
+
+    lines = output.decode().strip().split('\n')[-4:]
+    assert lines[0] == 'Using tenant `tenant2\''
+    assert lines[1] == '`tenant_test\': not found'
+    assert lines[2].startswith('Committed')
+    assert lines[3] == '`tenant_test\' is `tenant2\''
+
+    process = subprocess.Popen(command_template[:-1], stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=fdbcli_env)
+    cmd_sequence = ['usetenant tenant', 'get tenant_test', 'defaulttenant', 'get tenant_test']
+    output, _ = process.communicate(input='\n'.join(cmd_sequence).encode())
+
+    lines = output.decode().strip().split('\n')[-4:]
+    assert lines[0] == 'Using tenant `tenant\''
+    assert lines[1] == '`tenant_test\' is `tenant\''
+    assert lines[2] == 'Using the default tenant'
+    assert lines[3] == '`tenant_test\' is `default_tenant\''
+
+    process = subprocess.Popen(command_template[:-1], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=fdbcli_env)
+    cmd_sequence = ['writemode on', 'usetenant tenant', 'clear tenant_test',
+                    'deletetenant tenant', 'get tenant_test', 'defaulttenant', 'usetenant tenant']
+    output, error_output = process.communicate(input='\n'.join(cmd_sequence).encode())
+
+    lines = output.decode().strip().split('\n')[-7:]
+    error_lines = error_output.decode().strip().split('\n')[-2:]
+    assert lines[0] == 'Using tenant `tenant\''
+    assert lines[1].startswith('Committed')
+    assert lines[2] == 'The tenant `tenant\' has been deleted'
+    assert lines[3] == 'WARNING: the active tenant was deleted. Use the `usetenant\' or `defaulttenant\''
+    assert lines[4] == 'command to choose a new tenant.'
+    assert error_lines[0] == 'ERROR: Tenant does not exist (2131)'
+    assert lines[6] == 'Using the default tenant'
+    assert error_lines[1] == 'ERROR: Tenant `tenant\' does not exist'
+
+    process = subprocess.Popen(command_template[:-1], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=fdbcli_env)
+    cmd_sequence = ['writemode on', 'deletetenant tenant2', 'usetenant tenant2', 'clear tenant_test', 'defaulttenant', 'deletetenant tenant2']
+    output, error_output = process.communicate(input='\n'.join(cmd_sequence).encode())
+
+    lines = output.decode().strip().split('\n')[-4:]
+    error_lines = error_output.decode().strip().split('\n')[-1:]
+    assert error_lines[0] == 'ERROR: Cannot delete a non-empty tenant (2133)'
+    assert lines[0] == 'Using tenant `tenant2\''
+    assert lines[1].startswith('Committed')
+    assert lines[2] == 'Using the default tenant'
+    assert lines[3] == 'The tenant `tenant2\' has been deleted'
+
+    run_fdbcli_command('writemode on; clear tenant_test')
+
+def integer_options():
+    process = subprocess.Popen(command_template[:-1], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=fdbcli_env)
+    cmd_sequence = ['option on TIMEOUT 1000', 'writemode on', 'clear foo']
+    output, error_output = process.communicate(input='\n'.join(cmd_sequence).encode())
+
+    lines = output.decode().strip().split('\n')[-2:]
+    assert lines[0] == 'Option enabled for all transactions'
+    assert lines[1].startswith('Committed')
+    assert error_output == b''
+
 if __name__ == '__main__':
     parser = ArgumentParser(formatter_class=RawDescriptionHelpFormatter,
                             description="""
@@ -586,9 +755,13 @@ if __name__ == '__main__':
         transaction()
         throttle()
         triggerddteaminfolog()
+        tenants()
+        versionepoch()
+        integer_options()
     else:
         assert args.process_number > 1, "Process number should be positive"
         coordinators()
         exclude()
+        killall()
         # TODO: fix the failure where one process is not available after setclass call
-        #setclass()
+        # setclass()

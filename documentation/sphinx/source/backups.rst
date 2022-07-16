@@ -83,7 +83,7 @@ For blob store backup locations, the Backup URL format is
 
 ::
 
-    blobstore://[<api_key>][:<secret>[:<security_token>]]@<hostname>[:<port>]/<name>?bucket=<bucket_name>[&<param>=<value>]...]
+    blobstore://[<api_key>][:<secret>[:<security_token>]]@<hostname>[:<port>]/<name>?bucket=<bucket_name>[&region=<region_name>][&<param>=<value>]...]
 
       <api_key> - API key to use for authentication. Optional.
       <secret> - API key's secret.  Optional.
@@ -92,6 +92,7 @@ For blob store backup locations, the Backup URL format is
       <port> - Remote port to connect to.  Optional.  Default is 80.
       <name> - Name of the backup within the backup bucket.  It can contain '/' characters in order to organize backups into a folder-like structure.
       <bucket_name> - Name of the bucket to use for backup data.
+      <region_name> - If <hostname> is not in s3 compatible form (s3.region-name.example.com) and aws v4 signature is enabled, region name is required.
       
       <param>=<value> - Optional URL parameters.  See below for details.
 
@@ -115,7 +116,7 @@ Here is a complete list of valid parameters:
 
  *request_timeout_min* (or *rtom*) - Minimum number of seconds to wait for a request to succeed after a connection is established.
 
- *request_tries* (or *rt*) - Number of times to try each request until a parseable HTTP response other than 429 is received.
+ *request_tries* (or *rt*) - Number of times to try each request until a parsable HTTP response other than 429 is received.
 
  *requests_per_second* (or *rps*) - Max number of requests to start per second.
 
@@ -152,8 +153,16 @@ Here is a complete list of valid parameters:
  *max_recv_bytes_per_second* (or *rbps*) - Max receive bytes per second for all requests combined.
 
  *header* - Add an additional HTTP header to each blob store REST API request.  Can be specified multiple times.  Format is *header=<FieldName>:<FieldValue>* where both strings are non-empty.
+
+ *sdk_auth* (or *sa*) - Use the AWS SDK to do credentials and authentication. This supports all aws authentication types, including credential-less iam role-based authentication in aws. Experimental, and only works if FDB was compiled with BUILD_AWS_BACKUP=ON. When this parameter is set, all other credential parts of the backup url can be ignored.
  
   **Example**: The URL parameter *header=x-amz-storage-class:REDUCED_REDUNDANCY* would send the HTTP header required to use the reduced redundancy storage option in the S3 API.
+
+Signing Protocol
+=================
+
+AWS signature version 4 is the default signing protocol choice. This boolean knob ``--knob_http_request_aws_v4_header`` can be used to select between v4 style and v2 style signatures.
+If the knob is set to ``true`` then v4 signature will be used and if set to ``false`` then v2 signature will be used.
 
 .. _blob-credential-files:
 

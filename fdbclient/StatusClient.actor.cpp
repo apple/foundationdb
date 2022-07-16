@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,8 +27,9 @@
 #include "fdbclient/json_spirit/json_spirit_writer_template.h"
 #include "fdbclient/json_spirit/json_spirit_reader_template.h"
 #include "fdbrpc/genericactors.actor.h"
-#include "flow/actorcompiler.h" // has to be last include
 #include <cstdint>
+
+#include "flow/actorcompiler.h" // has to be last include
 
 json_spirit::mValue readJSONStrictly(const std::string& s) {
 	json_spirit::mValue val;
@@ -306,23 +307,35 @@ ACTOR Future<Optional<StatusObject>> clientCoordinatorsStatusFetcher(Reference<I
                                                                      bool* quorum_reachable,
                                                                      int* coordinatorsFaultTolerance) {
 	try {
-		wait(connRecord->resolveHostnames());
 		state ClientCoordinators coord(connRecord);
 		state StatusObject statusObj;
 
 		state std::vector<Future<Optional<LeaderInfo>>> leaderServers;
 		leaderServers.reserve(coord.clientLeaderServers.size());
-		for (int i = 0; i < coord.clientLeaderServers.size(); i++)
-			leaderServers.push_back(retryBrokenPromise(coord.clientLeaderServers[i].getLeader,
-			                                           GetLeaderRequest(coord.clusterKey, UID()),
-			                                           TaskPriority::CoordinationReply));
+		for (int i = 0; i < coord.clientLeaderServers.size(); i++) {
+			if (coord.clientLeaderServers[i].hostname.present()) {
+				leaderServers.push_back(retryGetReplyFromHostname(GetLeaderRequest(coord.clusterKey, UID()),
+				                                                  coord.clientLeaderServers[i].hostname.get(),
+				                                                  WLTOKEN_CLIENTLEADERREG_GETLEADER,
+				                                                  TaskPriority::CoordinationReply));
+			} else {
+				leaderServers.push_back(retryBrokenPromise(coord.clientLeaderServers[i].getLeader,
+				                                           GetLeaderRequest(coord.clusterKey, UID()),
+				                                           TaskPriority::CoordinationReply));
+			}
+		}
 
 		state std::vector<Future<ProtocolInfoReply>> coordProtocols;
 		coordProtocols.reserve(coord.clientLeaderServers.size());
 		for (int i = 0; i < coord.clientLeaderServers.size(); i++) {
-			RequestStream<ProtocolInfoRequest> requestStream{ Endpoint::wellKnown(
-				{ coord.clientLeaderServers[i].getLeader.getEndpoint().addresses }, WLTOKEN_PROTOCOL_INFO) };
-			coordProtocols.push_back(retryBrokenPromise(requestStream, ProtocolInfoRequest{}));
+			if (coord.clientLeaderServers[i].hostname.present()) {
+				coordProtocols.push_back(retryGetReplyFromHostname(
+				    ProtocolInfoRequest{}, coord.clientLeaderServers[i].hostname.get(), WLTOKEN_PROTOCOL_INFO));
+			} else {
+				RequestStream<ProtocolInfoRequest> requestStream{ Endpoint::wellKnown(
+					{ coord.clientLeaderServers[i].getLeader.getEndpoint().addresses }, WLTOKEN_PROTOCOL_INFO) };
+				coordProtocols.push_back(retryBrokenPromise(requestStream, ProtocolInfoRequest{}));
+			}
 		}
 
 		wait(smartQuorum(leaderServers, leaderServers.size() / 2 + 1, 1.5) &&
@@ -336,9 +349,7 @@ ACTOR Future<Optional<StatusObject>> clientCoordinatorsStatusFetcher(Reference<I
 		int coordinatorsUnavailable = 0;
 		for (int i = 0; i < leaderServers.size(); i++) {
 			StatusObject coordStatus;
-			coordStatus["address"] =
-			    coord.clientLeaderServers[i].getLeader.getEndpoint().getPrimaryAddress().toString();
-
+			coordStatus["address"] = coord.clientLeaderServers[i].getAddressString();
 			if (leaderServers[i].isReady()) {
 				coordStatus["reachable"] = true;
 			} else {

@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2019 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -101,6 +101,7 @@ std::vector<LogFile> getRelevantLogFiles(const std::vector<LogFile>& files, Vers
 
 struct ConvertParams {
 	std::string container_url;
+	Optional<std::string> proxy;
 	Version begin = invalidVersion;
 	Version end = invalidVersion;
 	bool log_enabled = false;
@@ -112,6 +113,10 @@ struct ConvertParams {
 		std::string s;
 		s.append("ContainerURL:");
 		s.append(container_url);
+		if (proxy.present()) {
+			s.append(" Proxy:");
+			s.append(proxy.get());
+		}
 		s.append(" Begin:");
 		s.append(format("%" PRId64, begin));
 		s.append(" End:");
@@ -448,7 +453,8 @@ private:
 };
 
 ACTOR Future<Void> convert(ConvertParams params) {
-	state Reference<IBackupContainer> container = IBackupContainer::openContainer(params.container_url);
+	state Reference<IBackupContainer> container =
+	    IBackupContainer::openContainer(params.container_url, params.proxy, {});
 	state BackupFileList listing = wait(container->dumpFileList());
 	std::sort(listing.logs.begin(), listing.logs.end());
 	TraceEvent("Container").detail("URL", params.container_url).detail("Logs", listing.logs.size());

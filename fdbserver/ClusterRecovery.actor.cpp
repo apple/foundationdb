@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2019 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,6 +25,7 @@
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/WaitFailure.h"
 
+#include "flow/ProtocolVersion.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 static std::set<int> const& normalClusterRecoveryErrors() {
@@ -188,7 +189,7 @@ ACTOR Future<Void> newCommitProxies(Reference<ClusterRecoveryData> self, Recruit
 		req.firstProxy = i == 0;
 		TraceEvent("CommitProxyReplies", self->dbgid)
 		    .detail("WorkerID", recr.commitProxies[i].id())
-		    .detail("ReocoveryTxnVersion", self->recoveryTransactionVersion)
+		    .detail("RecoveryTxnVersion", self->recoveryTransactionVersion)
 		    .detail("FirstProxy", req.firstProxy ? "True" : "False");
 		initializationReplies.push_back(
 		    transformErrors(throwErrorOr(recr.commitProxies[i].commitProxy.getReplyUnlessFailedFor(
@@ -226,6 +227,7 @@ ACTOR Future<Void> newResolvers(Reference<ClusterRecoveryData> self, RecruitFrom
 	std::vector<Future<ResolverInterface>> initializationReplies;
 	for (int i = 0; i < recr.resolvers.size(); i++) {
 		InitializeResolverRequest req;
+		req.masterLifetime = self->masterLifetime;
 		req.recoveryCount = self->cstate.myDBState.recoveryCount + 1;
 		req.commitProxyCount = recr.commitProxies.size();
 		req.resolverCount = recr.resolvers.size();
@@ -296,6 +298,7 @@ ACTOR Future<Void> newTLogServers(Reference<ClusterRecoveryData> self,
 		                                                                 self->clusterId,
 		                                                                 self->configuration,
 		                                                                 self->cstate.myDBState.recoveryCount + 1,
+		                                                                 self->recoveryTransactionVersion,
 		                                                                 self->primaryLocality,
 		                                                                 self->dcId_locality[remoteDcId],
 		                                                                 self->allTags,
@@ -309,6 +312,7 @@ ACTOR Future<Void> newTLogServers(Reference<ClusterRecoveryData> self,
 		                                                                 self->clusterId,
 		                                                                 self->configuration,
 		                                                                 self->cstate.myDBState.recoveryCount + 1,
+		                                                                 self->recoveryTransactionVersion,
 		                                                                 self->primaryLocality,
 		                                                                 tagLocalitySpecial,
 		                                                                 self->allTags,
@@ -342,6 +346,7 @@ ACTOR Future<Void> newSeedServers(Reference<ClusterRecoveryData> self,
 		isr.reqId = deterministicRandom()->randomUniqueID();
 		isr.interfaceId = deterministicRandom()->randomUniqueID();
 		isr.clusterId = self->clusterId;
+		isr.initialClusterVersion = self->recoveryTransactionVersion;
 
 		ErrorOr<InitializeStorageReply> newServer = wait(recruits.storageServers[idx].storage.tryGetReply(isr));
 
@@ -470,7 +475,6 @@ ACTOR Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
 			           self->dbgid)
 			    .detail("StatusCode", RecoveryStatus::fully_recovered)
 			    .detail("Status", RecoveryStatus::names[RecoveryStatus::fully_recovered])
-			    .detail("FullyRecoveredAtVersion", self->version)
 			    .detail("ClusterId", self->clusterId)
 			    .trackLatest(self->clusterRecoveryStateEventHolder->trackingKey);
 
@@ -511,144 +515,6 @@ ACTOR Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
 	}
 }
 
-std::pair<KeyRangeRef, bool> findRange(CoalescedKeyRangeMap<int>& key_resolver,
-                                       Standalone<VectorRef<ResolverMoveRef>>& movedRanges,
-                                       int src,
-                                       int dest) {
-	auto ranges = key_resolver.ranges();
-	auto prev = ranges.begin();
-	auto it = ranges.begin();
-	++it;
-	if (it == ranges.end()) {
-		if (ranges.begin().value() != src ||
-		    std::find(movedRanges.begin(), movedRanges.end(), ResolverMoveRef(ranges.begin()->range(), dest)) !=
-		        movedRanges.end())
-			throw operation_failed();
-		return std::make_pair(ranges.begin().range(), true);
-	}
-
-	std::set<int> borders;
-	// If possible expand an existing boundary between the two resolvers
-	for (; it != ranges.end(); ++it) {
-		if (it->value() == src && prev->value() == dest &&
-		    std::find(movedRanges.begin(), movedRanges.end(), ResolverMoveRef(it->range(), dest)) ==
-		        movedRanges.end()) {
-			return std::make_pair(it->range(), true);
-		}
-		if (it->value() == dest && prev->value() == src &&
-		    std::find(movedRanges.begin(), movedRanges.end(), ResolverMoveRef(prev->range(), dest)) ==
-		        movedRanges.end()) {
-			return std::make_pair(prev->range(), false);
-		}
-		if (it->value() == dest)
-			borders.insert(prev->value());
-		if (prev->value() == dest)
-			borders.insert(it->value());
-		++prev;
-	}
-
-	prev = ranges.begin();
-	it = ranges.begin();
-	++it;
-	// If possible create a new boundry which doesn't exist yet
-	for (; it != ranges.end(); ++it) {
-		if (it->value() == src && !borders.count(prev->value()) &&
-		    std::find(movedRanges.begin(), movedRanges.end(), ResolverMoveRef(it->range(), dest)) ==
-		        movedRanges.end()) {
-			return std::make_pair(it->range(), true);
-		}
-		if (prev->value() == src && !borders.count(it->value()) &&
-		    std::find(movedRanges.begin(), movedRanges.end(), ResolverMoveRef(prev->range(), dest)) ==
-		        movedRanges.end()) {
-			return std::make_pair(prev->range(), false);
-		}
-		++prev;
-	}
-
-	it = ranges.begin();
-	for (; it != ranges.end(); ++it) {
-		if (it->value() == src &&
-		    std::find(movedRanges.begin(), movedRanges.end(), ResolverMoveRef(it->range(), dest)) ==
-		        movedRanges.end()) {
-			return std::make_pair(it->range(), true);
-		}
-	}
-	throw operation_failed(); // we are already attempting to move all of the data one resolver is assigned, so do not
-	                          // move anything
-}
-
-ACTOR Future<Void> resolutionBalancing(Reference<ClusterRecoveryData> self) {
-	state CoalescedKeyRangeMap<int> key_resolver;
-	key_resolver.insert(allKeys, 0);
-	loop {
-		wait(delay(SERVER_KNOBS->MIN_BALANCE_TIME, TaskPriority::ResolutionMetrics));
-		while (self->resolverChanges.get().size())
-			wait(self->resolverChanges.onChange());
-		state std::vector<Future<ResolutionMetricsReply>> futures;
-		for (auto& p : self->resolvers)
-			futures.push_back(
-			    brokenPromiseToNever(p.metrics.getReply(ResolutionMetricsRequest(), TaskPriority::ResolutionMetrics)));
-		wait(waitForAll(futures));
-		state IndexedSet<std::pair<int64_t, int>, NoMetric> metrics;
-
-		int64_t total = 0;
-		for (int i = 0; i < futures.size(); i++) {
-			total += futures[i].get().value;
-			metrics.insert(std::make_pair(futures[i].get().value, i), NoMetric());
-			//TraceEvent("ResolverMetric").detail("I", i).detail("Metric", futures[i].get());
-		}
-		if (metrics.lastItem()->first - metrics.begin()->first > SERVER_KNOBS->MIN_BALANCE_DIFFERENCE) {
-			try {
-				state int src = metrics.lastItem()->second;
-				state int dest = metrics.begin()->second;
-				state int64_t amount = std::min(metrics.lastItem()->first - total / self->resolvers.size(),
-				                                total / self->resolvers.size() - metrics.begin()->first) /
-				                       2;
-				state Standalone<VectorRef<ResolverMoveRef>> movedRanges;
-
-				loop {
-					state std::pair<KeyRangeRef, bool> range = findRange(key_resolver, movedRanges, src, dest);
-
-					ResolutionSplitRequest req;
-					req.front = range.second;
-					req.offset = amount;
-					req.range = range.first;
-
-					ResolutionSplitReply split =
-					    wait(brokenPromiseToNever(self->resolvers[metrics.lastItem()->second].split.getReply(
-					        req, TaskPriority::ResolutionMetrics)));
-					KeyRangeRef moveRange = range.second ? KeyRangeRef(range.first.begin, split.key)
-					                                     : KeyRangeRef(split.key, range.first.end);
-					movedRanges.push_back_deep(movedRanges.arena(), ResolverMoveRef(moveRange, dest));
-					TraceEvent("MovingResolutionRange")
-					    .detail("Src", src)
-					    .detail("Dest", dest)
-					    .detail("Amount", amount)
-					    .detail("StartRange", range.first)
-					    .detail("MoveRange", moveRange)
-					    .detail("Used", split.used)
-					    .detail("KeyResolverRanges", key_resolver.size());
-					amount -= split.used;
-					if (moveRange != range.first || amount <= 0)
-						break;
-				}
-				for (auto& it : movedRanges)
-					key_resolver.insert(it.range, it.dest);
-				// for(auto& it : key_resolver.ranges())
-				//	TraceEvent("KeyResolver").detail("Range", it.range()).detail("Value", it.value());
-
-				self->resolverChangesVersion = self->version + 1;
-				for (auto& p : self->commitProxies)
-					self->resolverNeedingChanges.insert(p.id());
-				self->resolverChanges.set(movedRanges);
-			} catch (Error& e) {
-				if (e.code() != error_code_operation_failed)
-					throw;
-			}
-		}
-	}
-}
-
 ACTOR Future<Void> changeCoordinators(Reference<ClusterRecoveryData> self) {
 	loop {
 		ChangeCoordinatorsRequest req = waitNext(self->clusterController.changeCoordinators.getFuture());
@@ -673,8 +539,7 @@ ACTOR Future<Void> changeCoordinators(Reference<ClusterRecoveryData> self) {
 		}
 
 		try {
-			state ClusterConnectionString conn(changeCoordinatorsRequest.newConnectionString.toString());
-			wait(conn.resolveHostnames());
+			ClusterConnectionString conn(changeCoordinatorsRequest.newConnectionString.toString());
 			wait(self->cstate.move(conn));
 		} catch (Error& e) {
 			if (e.code() != error_code_actor_cancelled)
@@ -988,6 +853,7 @@ ACTOR Future<Standalone<CommitTransactionRef>> provisionalMaster(Reference<Clust
 				rep.version = parent->lastEpochEnd;
 				rep.locked = locked;
 				rep.metadataVersion = metadataVersion;
+				rep.proxyId = parent->provisionalGrvProxies[0].id();
 				req.reply.send(rep);
 			} else
 				req.reply.send(Never()); // We can't perform causally consistent reads without recovering
@@ -1008,7 +874,8 @@ ACTOR Future<Standalone<CommitTransactionRef>> provisionalMaster(Reference<Clust
 					    .detail("MType", m->type)
 					    .detail("Param1", m->param1)
 					    .detail("Param2", m->param2);
-					if (isMetadataMutation(*m)) {
+					// emergency transaction only mean to do configuration change
+					if (parent->configuration.involveMutation(*m)) {
 						// We keep the mutations and write conflict ranges from this transaction, but not its read
 						// conflict ranges
 						Standalone<CommitTransactionRef> out;
@@ -1127,8 +994,13 @@ ACTOR Future<std::vector<Standalone<CommitTransactionRef>>> recruitEverything(
 	     newTLogServers(self, recruits, oldLogSystem, &confChanges));
 
 	// Update recovery related information to the newly elected sequencer (master) process.
-	wait(brokenPromiseToNever(self->masterInterface.updateRecoveryData.getReply(
-	    UpdateRecoveryDataRequest(self->recoveryTransactionVersion, self->lastEpochEnd, self->commitProxies))));
+	wait(brokenPromiseToNever(
+	    self->masterInterface.updateRecoveryData.getReply(UpdateRecoveryDataRequest(self->recoveryTransactionVersion,
+	                                                                                self->lastEpochEnd,
+	                                                                                self->commitProxies,
+	                                                                                self->resolvers,
+	                                                                                self->versionEpoch,
+	                                                                                self->primaryLocality))));
 
 	return confChanges;
 }
@@ -1142,6 +1014,7 @@ ACTOR Future<Void> updateLocalityForDcId(Optional<Key> dcId,
 		if (ver == invalidVersion) {
 			ver = oldLogSystem->getKnownCommittedVersion();
 		}
+
 		locality->set(PeekTxsInfo(loc.first, loc.second, ver));
 		TraceEvent("UpdatedLocalityForDcId")
 		    .detail("DcId", dcId)
@@ -1171,8 +1044,22 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 	if (self->txnStateStore)
 		self->txnStateStore->close();
 	self->txnStateLogAdapter = openDiskQueueAdapter(oldLogSystem, myLocality, txsPoppedVersion);
-	self->txnStateStore =
-	    keyValueStoreLogSystem(self->txnStateLogAdapter, self->dbgid, self->memoryLimit, false, false, true);
+	self->txnStateStore = keyValueStoreLogSystem(self->txnStateLogAdapter,
+	                                             self->dbInfo,
+	                                             self->dbgid,
+	                                             self->memoryLimit,
+	                                             false,
+	                                             false,
+	                                             true,
+	                                             SERVER_KNOBS->ENABLE_TLOG_ENCRYPTION);
+
+	// Version 0 occurs at the version epoch. The version epoch is the number
+	// of microseconds since the Unix epoch. It can be set through fdbcli.
+	self->versionEpoch.reset();
+	Optional<Standalone<StringRef>> versionEpochValue = wait(self->txnStateStore->readValue(versionEpochKey));
+	if (versionEpochValue.present()) {
+		self->versionEpoch = BinaryReader::fromStringRef<int64_t>(versionEpochValue.get(), Unversioned());
+	}
 
 	// Versionstamped operations (particularly those applied from DR) define a minimum commit version
 	// that we may recover to, as they embed the version in user-readable data and require that no
@@ -1183,6 +1070,11 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 	Version minRequiredCommitVersion = -1;
 	if (requiredCommitVersion.present()) {
 		minRequiredCommitVersion = BinaryReader::fromStringRef<Version>(requiredCommitVersion.get(), Unversioned());
+	}
+	if (g_network->isSimulated() && self->versionEpoch.present()) {
+		minRequiredCommitVersion = std::max(
+		    minRequiredCommitVersion,
+		    static_cast<Version>(g_network->timer() * SERVER_KNOBS->VERSIONS_PER_SECOND - self->versionEpoch.get()));
 	}
 
 	// Recover version info
@@ -1196,12 +1088,12 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 			self->recoveryTransactionVersion = self->lastEpochEnd + SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT;
 		}
 
-		if (BUGGIFY) {
-			self->recoveryTransactionVersion +=
-			    deterministicRandom()->randomInt64(0, SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT);
-		}
 		if (self->recoveryTransactionVersion < minRequiredCommitVersion)
 			self->recoveryTransactionVersion = minRequiredCommitVersion;
+	}
+
+	if (BUGGIFY) {
+		self->recoveryTransactionVersion += deterministicRandom()->randomInt64(0, 10000000);
 	}
 
 	TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_RECOVERED_EVENT_NAME).c_str(),
@@ -1284,7 +1176,12 @@ ACTOR Future<Void> sendInitialCommitToResolvers(Reference<ClusterRecoveryData> s
 	for (auto& it : self->commitProxies) {
 		endpoints.push_back(it.txnState.getEndpoint());
 	}
-
+	if (SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS) {
+		// Broadcasts transaction state store to resolvers.
+		for (auto& it : self->resolvers) {
+			endpoints.push_back(it.txnState.getEndpoint());
+		}
+	}
 	loop {
 		if (!data.size())
 			break;
@@ -1514,6 +1411,11 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 
 	wait(self->cstate.read());
 
+	if (self->cstate.prevDBState.lowestCompatibleProtocolVersion > currentProtocolVersion) {
+		TraceEvent(SevWarnAlways, "IncompatibleProtocolVersion", self->dbgid).log();
+		throw internal_error();
+	}
+
 	self->recoveryState = RecoveryState::LOCKING_CSTATE;
 	TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_STATE_EVENT_NAME).c_str(), self->dbgid)
 	    .detail("StatusCode", RecoveryStatus::locking_coordinated_state)
@@ -1569,7 +1471,19 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 
 	DBCoreState newState = self->cstate.myDBState;
 	newState.recoveryCount++;
+	if (self->cstate.prevDBState.newestProtocolVersion.isInvalid() ||
+	    self->cstate.prevDBState.newestProtocolVersion < currentProtocolVersion) {
+		ASSERT(self->cstate.myDBState.lowestCompatibleProtocolVersion.isInvalid() ||
+		       !self->cstate.myDBState.newestProtocolVersion.isInvalid());
+		newState.newestProtocolVersion = currentProtocolVersion;
+		newState.lowestCompatibleProtocolVersion = minCompatibleProtocolVersion;
+	}
 	wait(self->cstate.write(newState) || recoverAndEndEpoch);
+
+	TraceEvent("ProtocolVersionCompatibilityChecked", self->dbgid)
+	    .detail("NewestProtocolVersion", self->cstate.myDBState.newestProtocolVersion)
+	    .detail("LowestCompatibleProtocolVersion", self->cstate.myDBState.lowestCompatibleProtocolVersion)
+	    .trackLatest(self->swVersionCheckedEventHolder->trackingKey);
 
 	self->recoveryState = RecoveryState::RECRUITING;
 
@@ -1616,12 +1530,12 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 
 	recoverAndEndEpoch.cancel();
 
-	ASSERT(self->commitProxies.size() <= self->configuration.getDesiredCommitProxies());
-	ASSERT(self->commitProxies.size() >= 1);
-	ASSERT(self->grvProxies.size() <= self->configuration.getDesiredGrvProxies());
-	ASSERT(self->grvProxies.size() >= 1);
-	ASSERT(self->resolvers.size() <= self->configuration.getDesiredResolvers());
-	ASSERT(self->resolvers.size() >= 1);
+	ASSERT_LE(self->commitProxies.size(), self->configuration.getDesiredCommitProxies());
+	ASSERT_GE(self->commitProxies.size(), 1);
+	ASSERT_LE(self->grvProxies.size(), self->configuration.getDesiredGrvProxies());
+	ASSERT_GE(self->grvProxies.size(), 1);
+	ASSERT_LE(self->resolvers.size(), self->configuration.getDesiredResolvers());
+	ASSERT_GE(self->resolvers.size(), 1);
 
 	self->recoveryState = RecoveryState::RECOVERY_TRANSACTION;
 	TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_STATE_EVENT_NAME).c_str(), self->dbgid)
@@ -1718,7 +1632,7 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 		tr.set(recoveryCommitRequest.arena, clusterIdKey, BinaryWriter::toValue(self->clusterId, Unversioned()));
 	}
 
-	applyMetadataMutations(SpanID(),
+	applyMetadataMutations(SpanContext(),
 	                       self->dbgid,
 	                       recoveryCommitRequest.arena,
 	                       tr.mutations.slice(mmApplied, tr.mutations.size()),
@@ -1801,14 +1715,6 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	    .detail("StoreType", self->configuration.storageServerStoreType)
 	    .detail("RecoveryDuration", recoveryDuration)
 	    .trackLatest(self->clusterRecoveryStateEventHolder->trackingKey);
-
-	TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_AVAILABLE_EVENT_NAME).c_str(),
-	           self->dbgid)
-	    .detail("AvailableAtVersion", self->version)
-	    .trackLatest(self->clusterRecoveryAvailableEventHolder->trackingKey);
-
-	if (self->resolvers.size() > 1)
-		self->addActor.send(resolutionBalancing(self));
 
 	self->addActor.send(changeCoordinators(self));
 	Database cx = openDBOnServer(self->dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);

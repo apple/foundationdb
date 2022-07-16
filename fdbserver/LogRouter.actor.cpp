@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,21 +18,18 @@
  * limitations under the License.
  */
 
-#include "flow/ActorCollection.h"
-#include "fdbclient/NativeAPI.actor.h"
-#include "fdbrpc/Stats.h"
-#include "fdbserver/WorkerInterface.actor.h"
-#include "fdbserver/WaitFailure.h"
-#include "fdbserver/Knobs.h"
-#include "fdbserver/ServerDBInfo.h"
-#include "fdbserver/LogSystem.h"
-#include "fdbclient/SystemData.h"
-#include "fdbserver/ApplyMetadataMutation.h"
-#include "fdbserver/RecoveryState.h"
 #include "fdbclient/Atomic.h"
+#include "fdbrpc/Stats.h"
+#include "fdbserver/Knobs.h"
+#include "fdbserver/LogSystem.h"
+#include "fdbserver/WorkerInterface.actor.h"
+#include "fdbserver/RecoveryState.h"
+#include "fdbserver/TLogInterface.h"
+#include "flow/ActorCollection.h"
 #include "flow/Arena.h"
 #include "flow/Histogram.h"
-#include "flow/TDMetric.actor.h"
+#include "flow/network.h"
+#include "flow/DebugTrace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct LogRouterData {
@@ -496,9 +493,13 @@ Future<Void> logRouterPeekMessages(PromiseType replyPromise,
 		}
 	}
 
-	//TraceEvent("LogRouterPeek1", self->dbgid).detail("From", replyPromise.getEndpoint().getPrimaryAddress()).detail("Ver", self->version.get()).detail("Begin", reqBegin);
+	DebugLogTraceEvent("LogRouterPeek0", self->dbgid)
+	    .detail("ReturnIfBlocked", reqReturnIfBlocked)
+	    .detail("Tag", reqTag.toString())
+	    .detail("Ver", self->version.get())
+	    .detail("Begin", reqBegin);
+
 	if (reqReturnIfBlocked && self->version.get() < reqBegin) {
-		//TraceEvent("LogRouterPeek2", self->dbgid);
 		replyPromise.sendError(end_of_stream());
 		if (reqSequence.present()) {
 			auto& trackerData = self->peekTracker[peekId];
@@ -526,6 +527,10 @@ Future<Void> logRouterPeekMessages(PromiseType replyPromise,
 		    .detail("Begin", reqBegin)
 		    .detail("Popped", poppedVer)
 		    .detail("Start", self->startVersion);
+		if (std::is_same<PromiseType, Promise<TLogPeekReply>>::value) {
+			// kills logRouterPeekStream actor, otherwise that actor becomes stuck
+			throw operation_obsolete();
+		}
 		replyPromise.send(Never());
 		if (reqSequence.present()) {
 			auto& trackerData = self->peekTracker[peekId];
@@ -568,7 +573,9 @@ Future<Void> logRouterPeekMessages(PromiseType replyPromise,
 	TLogPeekReply reply;
 	reply.maxKnownVersion = self->version.get();
 	reply.minKnownCommittedVersion = self->poppedVersion;
-	reply.messages = StringRef(reply.arena, messages.toValue());
+	auto messagesValue = messages.toValue();
+	reply.arena.dependsOn(messagesValue.arena());
+	reply.messages = messagesValue;
 	reply.popped = self->minPopped.get() >= self->startVersion ? self->minPopped.get() : 0;
 	reply.end = endVersion;
 	reply.onlySpilled = false;
@@ -596,7 +603,12 @@ Future<Void> logRouterPeekMessages(PromiseType replyPromise,
 	}
 
 	replyPromise.send(reply);
-	//TraceEvent("LogRouterPeek4", self->dbgid);
+	DebugLogTraceEvent("LogRouterPeek4", self->dbgid)
+	    .detail("Tag", reqTag.toString())
+	    .detail("ReqBegin", reqBegin)
+	    .detail("End", reply.end)
+	    .detail("MessageSize", reply.messages.size())
+	    .detail("PoppedVersion", self->poppedVersion);
 	return Void();
 }
 
@@ -626,8 +638,9 @@ ACTOR Future<Void> logRouterPeekStream(LogRouterData* self, TLogPeekStreamReques
 			}
 		} catch (Error& e) {
 			self->activePeekStreams--;
-			TraceEvent(SevDebug, "TLogPeekStreamEnd", self->dbgid)
+			TraceEvent(SevDebug, "LogRouterPeekStreamEnd", self->dbgid)
 			    .errorUnsuppressed(e)
+			    .detail("Tag", req.tag)
 			    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress());
 
 			if (e.code() == error_code_end_of_stream || e.code() == error_code_operation_obsolete) {
@@ -722,6 +735,7 @@ ACTOR Future<Void> logRouterCore(TLogInterface interf,
 		}
 		when(TLogPeekStreamRequest req = waitNext(interf.peekStreamMessages.getFuture())) {
 			TraceEvent(SevDebug, "LogRouterPeekStream", logRouterData.dbgid)
+			    .detail("Tag", req.tag)
 			    .detail("Token", interf.peekStreamMessages.getEndpoint().token);
 			addActor.send(logRouterPeekStream(&logRouterData, req));
 		}
