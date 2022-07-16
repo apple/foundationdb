@@ -903,33 +903,33 @@ struct TenantManagementWorkload : TestWorkload {
 	}
 
 	// Gets a list of tenants using the specified operation type
-	ACTOR Future<std::map<TenantName, TenantMapEntry>> listImpl(Database cx,
-	                                                            Reference<ReadYourWritesTransaction> tr,
-	                                                            TenantName beginTenant,
-	                                                            TenantName endTenant,
-	                                                            int limit,
-	                                                            OperationType operationType,
-	                                                            TenantManagementWorkload* self) {
-		state std::map<TenantName, TenantMapEntry> tenants;
+	ACTOR Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listImpl(Database cx,
+	                                                                          Reference<ReadYourWritesTransaction> tr,
+	                                                                          TenantName beginTenant,
+	                                                                          TenantName endTenant,
+	                                                                          int limit,
+	                                                                          OperationType operationType,
+	                                                                          TenantManagementWorkload* self) {
+		state std::vector<std::pair<TenantName, TenantMapEntry>> tenants;
 
 		if (operationType == OperationType::SPECIAL_KEYS) {
 			KeyRange range = KeyRangeRef(beginTenant, endTenant).withPrefix(self->specialKeysTenantMapPrefix);
 			RangeResult results = wait(tr->getRange(range, limit));
 			for (auto result : results) {
-				tenants[result.key.removePrefix(self->specialKeysTenantMapPrefix)] =
-				    TenantManagementWorkload::jsonToTenantMapEntry(result.value);
+				tenants.push_back(std::make_pair(result.key.removePrefix(self->specialKeysTenantMapPrefix),
+				                                 TenantManagementWorkload::jsonToTenantMapEntry(result.value)));
 			}
 		} else if (operationType == OperationType::MANAGEMENT_DATABASE) {
-			std::map<TenantName, TenantMapEntry> _tenants =
+			std::vector<std::pair<TenantName, TenantMapEntry>> _tenants =
 			    wait(TenantAPI::listTenants(self->dataDb.getReference(), beginTenant, endTenant, limit));
 			tenants = _tenants;
 		} else if (operationType == OperationType::MANAGEMENT_TRANSACTION) {
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			std::map<TenantName, TenantMapEntry> _tenants =
+			std::vector<std::pair<TenantName, TenantMapEntry>> _tenants =
 			    wait(TenantAPI::listTenantsTransaction(tr, beginTenant, endTenant, limit));
 			tenants = _tenants;
 		} else {
-			std::map<TenantName, TenantMapEntry> _tenants =
+			std::vector<std::pair<TenantName, TenantMapEntry>> _tenants =
 			    wait(MetaclusterAPI::listTenants(self->mvDb, beginTenant, endTenant, limit));
 			tenants = _tenants;
 		}
@@ -952,7 +952,7 @@ struct TenantManagementWorkload : TestWorkload {
 		loop {
 			try {
 				// Attempt to read the chosen list of tenants
-				state std::map<TenantName, TenantMapEntry> tenants =
+				state std::vector<std::pair<TenantName, TenantMapEntry>> tenants =
 				    wait(self->listImpl(cx, tr, beginTenant, endTenant, limit, operationType, self));
 
 				// Attempting to read the list of tenants using the metacluster API in a non-metacluster should
@@ -1134,15 +1134,15 @@ struct TenantManagementWorkload : TestWorkload {
 		state TenantName endTenant = "\xff\xff"_sr.withPrefix(self->localTenantNamePrefix);
 
 		loop {
-			// Read the tenant map from the data cluster.
-			state std::map<TenantName, TenantMapEntry> dataClusterTenants =
+			// Read the tenant list from the data cluster.
+			state std::vector<std::pair<TenantName, TenantMapEntry>> dataClusterTenants =
 			    wait(TenantAPI::listTenants(self->dataDb.getReference(), beginTenant, endTenant, 1000));
 
-			// Read the tenant map from the management cluster. If there is no management cluster, this is
+			// Read the tenant list from the management cluster. If there is no management cluster, this is
 			// just a duplicate of the data cluster tenants
-			state std::map<TenantName, TenantMapEntry> managementClusterTenants;
+			state std::vector<std::pair<TenantName, TenantMapEntry>> managementClusterTenants;
 			if (self->useMetacluster) {
-				std::map<TenantName, TenantMapEntry> _managementClusterTenants =
+				std::vector<std::pair<TenantName, TenantMapEntry>> _managementClusterTenants =
 				    wait(MetaclusterAPI::listTenants(cx.getReference(), beginTenant, endTenant, 1000));
 				managementClusterTenants = _managementClusterTenants;
 			} else {

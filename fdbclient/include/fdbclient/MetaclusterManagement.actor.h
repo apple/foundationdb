@@ -111,6 +111,8 @@ struct ManagementClusterMetadata {
 
 	// A set of cluster/tenant group pairings ordered by cluster
 	static KeyBackedSet<Tuple> clusterTenantGroupIndex;
+
+	static KeyBackedObjectMap<TenantGroupName, TenantGroupEntry, decltype(IncludeVersion())> tenantGroupMap;
 };
 
 ACTOR Future<Reference<IDatabase>> openDatabase(ClusterConnectionString connectionString);
@@ -667,7 +669,7 @@ Future<Void> managementClusterPurgeDataCluster(Reference<DB> db, ClusterNameRef 
 				TenantGroupName tenantGroup = entry.getString(1);
 				ManagementClusterMetadata::tenantMetadata.tenantGroupTenantIndex.erase(
 				    tr, Tuple::makeTuple(tenantGroup), Tuple::makeTuple(keyAfter(tenantGroup)));
-				tr->clear(tenantGroupMetadataKeys.begin.withSuffix(tenantGroup));
+				ManagementClusterMetadata::tenantGroupMap.erase(tr, tenantGroup);
 			}
 
 			if (!tenantGroupEntries.results.empty()) {
@@ -865,21 +867,22 @@ Future<std::map<ClusterName, DataClusterMetadata>> listClusters(Reference<DB> db
 
 ACTOR template <class Transaction>
 Future<std::pair<ClusterName, DataClusterMetadata>> assignTenant(Transaction tr, TenantMapEntry tenantEntry) {
-	state typename transaction_future_type<Transaction, Optional<Value>>::type groupMetadataFuture;
+	state Optional<TenantGroupEntry> groupEntry;
 	if (tenantEntry.tenantGroup.present()) {
 		if (tenantEntry.tenantGroup.get().startsWith("\xff"_sr)) {
 			throw invalid_tenant_group_name();
 		}
 
-		groupMetadataFuture = tr->get(tenantGroupMetadataKeys.begin.withSuffix(tenantEntry.tenantGroup.get()));
-		Optional<Value> groupMetadata = wait(safeThreadFutureToFuture(groupMetadataFuture));
-		if (groupMetadata.present()) {
-			state TenantGroupEntry groupEntry = TenantGroupEntry::decode(groupMetadata.get());
+		Optional<TenantGroupEntry> _groupEntry =
+		    wait(ManagementClusterMetadata::tenantGroupMap.get(tr, tenantEntry.tenantGroup.get()));
+		groupEntry = _groupEntry;
+
+		if (groupEntry.present()) {
 			Optional<DataClusterMetadata> clusterMetadata =
-			    wait(tryGetClusterTransaction(tr, groupEntry.assignedCluster));
+			    wait(tryGetClusterTransaction(tr, groupEntry.get().assignedCluster));
 
 			ASSERT(clusterMetadata.present());
-			return std::make_pair(groupEntry.assignedCluster, clusterMetadata.get());
+			return std::make_pair(groupEntry.get().assignedCluster, clusterMetadata.get());
 		}
 	}
 
@@ -904,8 +907,8 @@ Future<std::pair<ClusterName, DataClusterMetadata>> assignTenant(Transaction tr,
 		updateClusterMetadata(
 		    tr, chosenCluster.get(), clusterMetadata.get(), Optional<ClusterConnectionString>(), clusterEntry);
 		if (tenantEntry.tenantGroup.present()) {
-			tr->set(tenantGroupMetadataKeys.begin.withSuffix(tenantEntry.tenantGroup.get()),
-			        TenantGroupEntry(chosenCluster.get()).encode());
+			ManagementClusterMetadata::tenantGroupMap.set(
+			    tr, tenantEntry.tenantGroup.get(), TenantGroupEntry(chosenCluster.get()));
 		}
 
 		return std::make_pair(chosenCluster.get(), clusterMetadata.get());
@@ -1200,7 +1203,7 @@ Future<Void> deleteTenant(Reference<DB> db, TenantName name) {
 						    Tuple::makeTuple(tenantEntry3.get().assignedCluster.get(), tenantGroup.get()));
 						KeyBackedSet<Tuple>::RangeResultType result = wait(tenantGroupIndexFuture);
 						if (result.results.size() == 0) {
-							managementTr->clear(tenantGroupMetadataKeys.begin.withSuffix(tenantGroup.get()));
+							ManagementClusterMetadata::tenantGroupMap.erase(managementTr, tenantGroup.get());
 							decrementTenantGroupCount = true;
 						}
 					}

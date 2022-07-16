@@ -1612,10 +1612,6 @@ BlobWorkerInterface decodeBlobWorkerListValue(ValueRef const& value) {
 
 const KeyRef tenantDataPrefixKey = "\xff/tenantDataPrefix"_sr;
 
-// Metacluster management cluster keys
-const KeyRangeRef tenantGroupMetadataKeys("metacluster/tenantGroup/metadata/"_sr,
-                                          "metacluster/tenantGroup/metadata0"_sr);
-
 // for tests
 void testSSISerdes(StorageServerInterface const& ssi) {
 	printf("ssi=\nid=%s\nlocality=%s\nisTss=%s\ntssId=%s\nacceptingRequests=%s\naddress=%s\ngetValue=%s\n\n\n",

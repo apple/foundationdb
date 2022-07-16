@@ -675,9 +675,6 @@ BlobWorkerInterface decodeBlobWorkerListValue(ValueRef const& value);
 // State for the tenant map
 extern const KeyRef tenantDataPrefixKey; // TODO: remove?
 
-// Metacluster keys
-extern const KeyRangeRef tenantGroupMetadataKeys;
-
 #pragma clang diagnostic pop
 
 #endif
