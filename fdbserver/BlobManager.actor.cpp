@@ -1831,6 +1831,8 @@ ACTOR Future<Void> attemptMerges(Reference<BlobManagerData> bmData,
 
 	// start merging any set of 2+ consecutive granules that can be merged
 	state int64_t currentBytes = 0;
+	// large keys can cause a large number of granules in the merge to exceed the maximum value size
+	state int currentKeySumBytes = 0;
 	state std::vector<std::tuple<UID, KeyRange, Version>> currentCandidates;
 	state int i;
 	// FIXME: may also want to limit number of granules so the sum of their keys fits in a single fdb value for the
@@ -1846,6 +1848,7 @@ ACTOR Future<Void> attemptMerges(Reference<BlobManagerData> bmData,
 			attemptStartMerge(bmData, currentCandidates);
 			currentCandidates.clear();
 			currentBytes = 0;
+			currentKeySumBytes = 0;
 			continue;
 		}
 
@@ -1853,14 +1856,21 @@ ACTOR Future<Void> attemptMerges(Reference<BlobManagerData> bmData,
 		// the edge, merge the existing candidates if possible
 		ASSERT(currentCandidates.size() <= SERVER_KNOBS->BG_MAX_MERGE_FANIN);
 		if (currentCandidates.size() == SERVER_KNOBS->BG_MAX_MERGE_FANIN ||
-		    currentBytes + metrics.bytes > SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES) {
+		    currentBytes + metrics.bytes > SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES ||
+		    currentKeySumBytes >= CLIENT_KNOBS->VALUE_SIZE_LIMIT / 2) {
 			ASSERT(currentBytes <= SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES);
+			TEST(currentKeySumBytes >= CLIENT_KNOBS->VALUE_SIZE_LIMIT / 2); // merge early because of key size
 			attemptStartMerge(bmData, currentCandidates);
 			currentCandidates.clear();
 			currentBytes = 0;
+			currentKeySumBytes = 0;
 		}
 
 		// add this granule to the window
+		if (currentCandidates.empty()) {
+			currentKeySumBytes += std::get<1>(candidates[i]).begin.size();
+		}
+		currentKeySumBytes += std::get<1>(candidates[i]).end.size();
 		currentCandidates.push_back(candidates[i]);
 	}
 
