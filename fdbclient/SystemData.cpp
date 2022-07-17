@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/SystemData.h"
+#include "fdbclient/BlobGranuleCommon.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/StorageServerInterface.h"
@@ -1370,26 +1371,35 @@ const KeyRange blobGranuleFileKeyRangeFor(UID granuleID) {
 	return KeyRangeRef(startKey, strinc(startKey));
 }
 
-const Value blobGranuleFileValueFor(StringRef const& filename, int64_t offset, int64_t length, int64_t fullFileLength) {
+const Value blobGranuleFileValueFor(StringRef const& filename,
+                                    int64_t offset,
+                                    int64_t length,
+                                    int64_t fullFileLength,
+                                    Optional<BlobGranuleCipherKeysMeta> cipherKeysMeta) {
 	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBlobGranule()));
 	wr << filename;
 	wr << offset;
 	wr << length;
 	wr << fullFileLength;
+	wr << cipherKeysMeta;
 	return wr.toValue();
 }
 
-std::tuple<Standalone<StringRef>, int64_t, int64_t, int64_t> decodeBlobGranuleFileValue(ValueRef const& value) {
+std::tuple<Standalone<StringRef>, int64_t, int64_t, int64_t, Optional<BlobGranuleCipherKeysMeta>>
+decodeBlobGranuleFileValue(ValueRef const& value) {
 	StringRef filename;
 	int64_t offset;
 	int64_t length;
 	int64_t fullFileLength;
+	Optional<BlobGranuleCipherKeysMeta> cipherKeysMeta;
+
 	BinaryReader reader(value, IncludeVersion());
 	reader >> filename;
 	reader >> offset;
 	reader >> length;
 	reader >> fullFileLength;
-	return std::tuple(filename, offset, length, fullFileLength);
+	reader >> cipherKeysMeta;
+	return std::tuple(filename, offset, length, fullFileLength, cipherKeysMeta);
 }
 
 const Value blobGranulePurgeValueFor(Version version, KeyRange range, bool force) {
@@ -1611,6 +1621,8 @@ BlobWorkerInterface decodeBlobWorkerListValue(ValueRef const& value) {
 }
 
 const KeyRef tenantDataPrefixKey = "\xff/tenantDataPrefix"_sr;
+const KeyRangeRef tenantGroupTenantIndexKeys("\xff/tenant/tenantGroup/tenantMap/"_sr,
+                                             "\xff/tenant/tenantGroup/tenantMap0"_sr);
 
 // for tests
 void testSSISerdes(StorageServerInterface const& ssi) {

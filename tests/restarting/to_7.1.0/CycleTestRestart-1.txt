@@ -2,6 +2,7 @@ storageEngineExcludeTypes=-1,-2,3
 maxTLogVersion=6
 disableTss=true
 disableHostname=true
+disableEncryption=true
 
 testTitle=Clogged
     clearAfterTest=false

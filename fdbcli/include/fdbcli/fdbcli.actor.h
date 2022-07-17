@@ -157,6 +157,8 @@ ACTOR Future<bool> configureCommandActor(Reference<IDatabase> db,
                                          std::vector<StringRef> tokens,
                                          LineNoise* linenoise,
                                          Future<Void> warn);
+// configuretenant command
+ACTOR Future<bool> configureTenantCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // consistency command
 ACTOR Future<bool> consistencyCheckCommandActor(Reference<ITransaction> tr,
                                                 std::vector<StringRef> tokens,

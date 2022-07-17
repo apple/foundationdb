@@ -118,6 +118,8 @@ Future<std::pair<Optional<TenantMapEntry>, bool>> createTenantTransaction(
 	ASSERT(clusterType != ClusterType::METACLUSTER_MANAGEMENT);
 	ASSERT(tenantEntry.id >= 0);
 
+	ASSERT(tenantEntry.id >= 0);
+
 	if (name.startsWith("\xff"_sr)) {
 		throw invalid_tenant_name();
 	}
@@ -207,7 +209,10 @@ Future<Optional<TenantMapEntry>> createTenant(Reference<DB> db,
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-			state Future<int64_t> tenantIdFuture = getNextTenantId(tr);
+			state Future<int64_t> tenantIdFuture;
+			if (generateTenantId) {
+				tenantIdFuture = getNextTenantId(tr);
+			}
 
 			if (checkExistence) {
 				Optional<TenantMapEntry> entry = wait(tryGetTenantTransaction(tr, name));
@@ -274,12 +279,12 @@ Future<Void> deleteTenantTransaction(Transaction tr,
 			TenantMetadata::tenantGroupTenantIndex.erase(tr,
 			                                             Tuple::makeTuple(tenantEntry.get().tenantGroup.get(), name));
 		}
-	}
 
-	if (clusterType == ClusterType::METACLUSTER_DATA) {
-		// In data clusters, we store a tombstone
-		// TODO: periodically clean up tombstones
-		TenantMetadata::tenantTombstones.insert(tr, tenantId.get());
+		if (clusterType == ClusterType::METACLUSTER_DATA) {
+			// In data clusters, we store a tombstone
+			// TODO: periodically clean up tombstones
+			TenantMetadata::tenantTombstones.insert(tr, tenantId.get());
+		}
 	}
 
 	return Void();

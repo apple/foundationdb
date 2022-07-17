@@ -42,37 +42,66 @@ const KeyRangeRef tenantMapSpecialKeyRange(LiteralStringRef("\xff\xff/management
 const KeyRangeRef tenantConfigSpecialKeyRange(LiteralStringRef("\xff\xff/management/tenant/configure/"),
                                               LiteralStringRef("\xff\xff/management/tenant/configure0"));
 
-std::pair<bool, TenantMapEntry> parseTenantConfiguration(std::vector<StringRef> const& tokens,
-                                                         TenantMapEntry const& defaults,
-                                                         int startIndex) {
-	TenantMapEntry entry;
-
+Optional<std::map<Standalone<StringRef>, Optional<Value>>>
+parseTenantConfiguration(std::vector<StringRef> const& tokens, int startIndex, bool allowUnset) {
+	std::map<Standalone<StringRef>, Optional<Value>> configParams;
 	for (int tokenNum = startIndex; tokenNum < tokens.size(); ++tokenNum) {
+		Optional<Value> value;
+
 		StringRef token = tokens[tokenNum];
-		StringRef param = token.eat("=");
-		std::string value = token.toString();
-		if (tokencmp(param, "tenant_group")) {
-			entry = defaults;
-			entry.tenantGroup = value;
+		StringRef param;
+		if (allowUnset && token == "unset"_sr) {
+			if (++tokenNum == tokens.size()) {
+				fmt::print(stderr, "ERROR: `unset' specified without a configuration parameter.\n");
+				return {};
+			}
+			param = tokens[tokenNum];
 		} else {
-			fprintf(stderr, "ERROR: unrecognized configuration parameter %s\n", param.toString().c_str());
-			return std::make_pair(false, defaults);
+			bool foundEquals;
+			param = token.eat("=", &foundEquals);
+			if (!foundEquals) {
+				fmt::print(stderr,
+				           "ERROR: invalid configuration string `{}'. String must specify a value using `='.\n",
+				           param.toString().c_str());
+				return {};
+			}
+			value = token;
+		}
+
+		if (tokencmp(param, "tenant_group")) {
+			configParams[param] = value;
+		} else {
+			fmt::print(stderr, "ERROR: unrecognized configuration parameter `{}'\n", param.toString().c_str());
+			return {};
 		}
 	}
 
-	return std::make_pair(true, entry);
+	return configParams;
 }
 
-Key makeConfigKey(StringRef configName, TenantNameRef tenantName) {
-	Key configKey = makeString(tenantConfigSpecialKeyRange.begin.size() + configName.size() + 1 + tenantName.size());
+Key makeConfigKey(TenantNameRef tenantName, StringRef configName) {
+	return tenantConfigSpecialKeyRange.begin.withSuffix(Tuple().append(tenantName).append(configName).pack());
+}
 
-	uint8_t* mutableKey = mutateString(configKey);
-	mutableKey = tenantConfigSpecialKeyRange.begin.copyTo(mutableKey);
-	mutableKey = configName.copyTo(mutableKey);
-	*(mutableKey++) = '/';
-	tenantName.copyTo(mutableKey);
+void applyConfigurationToSpecialKeys(Reference<ITransaction> tr,
+                                     TenantNameRef tenantName,
+                                     std::map<Standalone<StringRef>, Optional<Value>> configuration) {
+	for (auto [configName, value] : configuration) {
+		if (value.present()) {
+			tr->set(makeConfigKey(tenantName, configName), value.get());
+		} else {
+			tr->clear(makeConfigKey(tenantName, configName));
+		}
+	}
+}
 
-	return configKey;
+void applyConfigurationToTenantMapEntry(std::map<Standalone<StringRef>, Optional<Value>> configuration,
+                                        TenantMapEntry& entry) {
+	for (auto [configName, value] : configuration) {
+		if (configName == "tenant_group"_sr) {
+			entry.tenantGroup = value;
+		}
+	}
 }
 
 // createtenant command
@@ -86,8 +115,10 @@ ACTOR Future<bool> createTenantCommandActor(Reference<IDatabase> db, std::vector
 	state Reference<ITransaction> tr = db->createTransaction();
 	state bool doneExistenceCheck = false;
 
-	state std::pair<bool, TenantMapEntry> configuration = parseTenantConfiguration(tokens, TenantMapEntry(), 2);
-	if (!configuration.first) {
+	state Optional<std::map<Standalone<StringRef>, Optional<Value>>> configuration =
+	    parseTenantConfiguration(tokens, 2, false);
+
+	if (!configuration.present()) {
 		return false;
 	}
 
@@ -110,12 +141,12 @@ ACTOR Future<bool> createTenantCommandActor(Reference<IDatabase> db, std::vector
 
 			ClusterType clusterType = wait(clusterTypeFuture);
 			if (clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
-				wait(MetaclusterAPI::createTenant(db, tokens[1], configuration.second));
+				TenantMapEntry tenantEntry;
+				applyConfigurationToTenantMapEntry(configuration.get(), tenantEntry);
+				wait(MetaclusterAPI::createTenant(db, tokens[1], tenantEntry));
 			} else {
 				tr->set(tenantNameKey, ValueRef());
-				if (configuration.second.tenantGroup.present()) {
-					tr->set(makeConfigKey("tenant_group"_sr, tokens[1]), configuration.second.tenantGroup.get());
-				}
+				applyConfigurationToSpecialKeys(tr, tokens[1], configuration.get());
 				wait(safeThreadFutureToFuture(tr->commit()));
 			}
 
@@ -124,14 +155,14 @@ ACTOR Future<bool> createTenantCommandActor(Reference<IDatabase> db, std::vector
 			state Error err(e);
 			if (e.code() == error_code_special_keys_api_failure) {
 				std::string errorMsgStr = wait(getSpecialKeysFailureErrorMessage(tr));
-				fprintf(stderr, "ERROR: %s\n", errorMsgStr.c_str());
+				fmt::print(stderr, "ERROR: {}\n", errorMsgStr.c_str());
 				return false;
 			}
 			wait(safeThreadFutureToFuture(tr->onError(err)));
 		}
 	}
 
-	printf("The tenant `%s' has been created\n", printable(tokens[1]).c_str());
+	fmt::print("The tenant `{}' has been created\n", printable(tokens[1]).c_str());
 	return true;
 }
 
@@ -181,14 +212,14 @@ ACTOR Future<bool> deleteTenantCommandActor(Reference<IDatabase> db, std::vector
 			state Error err(e);
 			if (e.code() == error_code_special_keys_api_failure) {
 				std::string errorMsgStr = wait(getSpecialKeysFailureErrorMessage(tr));
-				fprintf(stderr, "ERROR: %s\n", errorMsgStr.c_str());
+				fmt::print(stderr, "ERROR: {}\n", errorMsgStr.c_str());
 				return false;
 			}
 			wait(safeThreadFutureToFuture(tr->onError(err)));
 		}
 	}
 
-	printf("The tenant `%s' has been deleted\n", printable(tokens[1]).c_str());
+	fmt::print("The tenant `{}' has been deleted\n", printable(tokens[1]).c_str());
 	return true;
 }
 
@@ -216,14 +247,14 @@ ACTOR Future<bool> listTenantsCommandActor(Reference<IDatabase> db, std::vector<
 	if (tokens.size() >= 3) {
 		endTenant = tokens[2];
 		if (endTenant <= beginTenant) {
-			fprintf(stderr, "ERROR: end must be larger than begin");
+			fmt::print(stderr, "ERROR: end must be larger than begin");
 			return false;
 		}
 	}
 	if (tokens.size() == 4) {
 		int n = 0;
-		if (sscanf(tokens[3].toString().c_str(), "%d%n", &limit, &n) != 1 || n != tokens[3].size() || limit < 0) {
-			fprintf(stderr, "ERROR: invalid limit %s\n", tokens[3].toString().c_str());
+		if (sscanf(tokens[3].toString().c_str(), "%d%n", &limit, &n) != 1 || n != tokens[3].size() || limit <= 0) {
+			fmt::print(stderr, "ERROR: invalid limit `{}'\n", tokens[3].toString().c_str());
 			return false;
 		}
 	}
@@ -241,16 +272,16 @@ ACTOR Future<bool> listTenantsCommandActor(Reference<IDatabase> db, std::vector<
 
 			if (tenants.empty()) {
 				if (tokens.size() == 1) {
-					printf("The cluster has no tenants\n");
+					fmt::print("The cluster has no tenants\n");
 				} else {
-					printf("The cluster has no tenants in the specified range\n");
+					fmt::print("The cluster has no tenants in the specified range\n");
 				}
 			}
 
 			int index = 0;
 			for (auto tenant : tenants) {
-				printf(
-				    "  %d. %s\n", ++index, printable(tenant.key.removePrefix(tenantMapSpecialKeyRange.begin)).c_str());
+				fmt::print(
+				    "  {}. {}\n", ++index, printable(tenant.key.removePrefix(tenantMapSpecialKeyRange.begin)).c_str());
 			}
 
 			return true;
@@ -258,7 +289,7 @@ ACTOR Future<bool> listTenantsCommandActor(Reference<IDatabase> db, std::vector<
 			state Error err(e);
 			if (e.code() == error_code_special_keys_api_failure) {
 				std::string errorMsgStr = wait(getSpecialKeysFailureErrorMessage(tr));
-				fprintf(stderr, "ERROR: %s\n", errorMsgStr.c_str());
+				fmt::print(stderr, "ERROR: {}\n", errorMsgStr.c_str());
 				return false;
 			}
 			wait(safeThreadFutureToFuture(tr->onError(err)));
@@ -300,16 +331,17 @@ ACTOR Future<bool> getTenantCommandActor(Reference<IDatabase> db, std::vector<St
 				json_spirit::mObject resultObj;
 				resultObj["tenant"] = jsonObject;
 				resultObj["type"] = "success";
-				printf("%s\n",
-				       json_spirit::write_string(json_spirit::mValue(resultObj), json_spirit::pretty_print).c_str());
+				fmt::print(
+				    "{}\n",
+				    json_spirit::write_string(json_spirit::mValue(resultObj), json_spirit::pretty_print).c_str());
 			} else {
 				JSONDoc doc(jsonObject);
 
 				int64_t id;
 				std::string prefix;
+				std::string tenantGroup;
 				std::string tenantState;
 				std::string assignedCluster;
-				std::string tenantGroup;
 
 				doc.get("id", id);
 
@@ -321,16 +353,16 @@ ACTOR Future<bool> getTenantCommandActor(Reference<IDatabase> db, std::vector<St
 
 				doc.get("tenant_state", tenantState);
 				bool hasAssignedCluster = doc.tryGet("assigned_cluster", assignedCluster);
-				bool hasTenantGroup = doc.tryGet("tenant_group", tenantGroup);
+				bool hasTenantGroup = doc.tryGet("tenant_group.printable", tenantGroup);
 
-				printf("  id: %" PRId64 "\n", id);
-				printf("  prefix: %s\n", printable(prefix).c_str());
-				printf("  tenant state: %s\n", printable(tenantState).c_str());
+				fmt::print("  id: {}\n", id);
+				fmt::print("  prefix: {}\n", printable(prefix).c_str());
+				fmt::print("  tenant state: {}\n", printable(tenantState).c_str());
 				if (hasAssignedCluster) {
-					printf("  assigned cluster: %s\n", printable(assignedCluster).c_str());
+					fmt::print("  assigned cluster: {}\n", printable(assignedCluster).c_str());
 				}
 				if (hasTenantGroup) {
-					printf("  tenant group: %s\n", printable(tenantGroup).c_str());
+					fmt::print("  tenant group: {}\n", tenantGroup.c_str());
 				}
 			}
 			return true;
@@ -352,11 +384,11 @@ ACTOR Future<bool> getTenantCommandActor(Reference<IDatabase> db, std::vector<St
 					json_spirit::mObject resultObj;
 					resultObj["type"] = "error";
 					resultObj["error"] = errorStr;
-					printf(
-					    "%s\n",
+					fmt::print(
+					    "{}\n",
 					    json_spirit::write_string(json_spirit::mValue(resultObj), json_spirit::pretty_print).c_str());
 				} else {
-					fprintf(stderr, "ERROR: %s\n", errorStr.c_str());
+					fmt::print(stderr, "ERROR: {}\n", errorStr.c_str());
 				}
 
 				return false;
@@ -371,6 +403,50 @@ CommandFactory getTenantFactory(
                 "prints the metadata for a tenant",
                 "Prints the metadata for a tenant. If JSON is specified, then the output will be in JSON format."));
 
+// configuretenant command
+ACTOR Future<bool> configureTenantCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
+	if (tokens.size() < 3) {
+		printUsage(tokens[0]);
+		return false;
+	}
+
+	state Optional<std::map<Standalone<StringRef>, Optional<Value>>> configuration =
+	    parseTenantConfiguration(tokens, 2, true);
+
+	if (!configuration.present()) {
+		return false;
+	}
+
+	state Reference<ITransaction> tr = db->createTransaction();
+
+	loop {
+		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+		try {
+			applyConfigurationToSpecialKeys(tr, tokens[1], configuration.get());
+			wait(safeThreadFutureToFuture(tr->commit()));
+			break;
+		} catch (Error& e) {
+			state Error err(e);
+			if (e.code() == error_code_special_keys_api_failure) {
+				std::string errorMsgStr = wait(getSpecialKeysFailureErrorMessage(tr));
+				fmt::print(stderr, "ERROR: {}\n", errorMsgStr.c_str());
+				return false;
+			}
+			wait(safeThreadFutureToFuture(tr->onError(err)));
+		}
+	}
+
+	fmt::print("The configuration for tenant `{}' has been updated\n", printable(tokens[1]).c_str());
+	return true;
+}
+
+CommandFactory configureTenantFactory(
+    "configuretenant",
+    CommandHelp("configuretenant <TENANT_NAME> <[unset] tenant_group[=<GROUP_NAME>]> ...",
+                "updates the configuration for a tenant",
+                "Updates the configuration for a tenant. Use `tenant_group=<GROUP_NAME>' to change the tenant group "
+                "that a tenant is assigned to or `unset tenant_group' to remove a tenant from its tenant group."));
+
 // renametenant command
 ACTOR Future<bool> renameTenantCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	if (tokens.size() != 3) {
@@ -379,7 +455,8 @@ ACTOR Future<bool> renameTenantCommandActor(Reference<IDatabase> db, std::vector
 	}
 	wait(safeThreadFutureToFuture(TenantAPI::renameTenant(db, tokens[1], tokens[2])));
 
-	printf("The tenant `%s' has been renamed to `%s'\n", printable(tokens[1]).c_str(), printable(tokens[2]).c_str());
+	fmt::print(
+	    "The tenant `{}' has been renamed to `{}'\n", printable(tokens[1]).c_str(), printable(tokens[2]).c_str());
 	return true;
 }
 
@@ -387,6 +464,6 @@ CommandFactory renameTenantFactory(
     "renametenant",
     CommandHelp(
         "renametenant <OLD_NAME> <NEW_NAME>",
-        "renames a tenant in the cluster.",
+        "renames a tenant in the cluster",
         "Renames a tenant in the cluster. The old name must exist and the new name must not exist in the cluster."));
 } // namespace fdb_cli

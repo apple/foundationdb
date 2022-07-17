@@ -60,11 +60,11 @@ struct TenantMapEntry {
 	void setSubspace(KeyRef subspace);
 	bool matchesConfiguration(TenantMapEntry const& other) const;
 
-	Value encode() const { return ObjectWriter::toValue(*this, IncludeVersion(ProtocolVersion::withTenants())); }
+	Value encode() const { return ObjectWriter::toValue(*this, IncludeVersion(ProtocolVersion::withTenantGroups())); }
 
 	static TenantMapEntry decode(ValueRef const& value) {
 		TenantMapEntry entry;
-		ObjectReader reader(value.begin(), IncludeVersion(ProtocolVersion::withTenants()));
+		ObjectReader reader(value.begin(), IncludeVersion());
 		reader.deserialize(entry);
 		return entry;
 	}
@@ -73,8 +73,13 @@ struct TenantMapEntry {
 	void serialize(Ar& ar) {
 		KeyRef subspace;
 		if (ar.isDeserializing) {
-			serializer(ar, id, subspace, tenantGroup, tenantState, assignedCluster);
-			ASSERT(tenantState >= TenantState::REGISTERING && tenantState <= TenantState::ERROR);
+			if (ar.protocolVersion().hasTenantGroups()) {
+				serializer(ar, id, subspace, tenantGroup, tenantState, assignedCluster);
+				ASSERT(tenantState >= TenantState::REGISTERING && tenantState <= TenantState::ERROR);
+			} else {
+				serializer(ar, id, subspace);
+			}
+
 			if (id >= 0) {
 				setSubspace(subspace);
 			}

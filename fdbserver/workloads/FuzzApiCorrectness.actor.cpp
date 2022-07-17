@@ -231,7 +231,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		Reference<IDatabase> db = wait(unsafeThreadFutureToFuture(ThreadSafeDatabase::createFromExistingDatabase(cx)));
 		self->db = db;
 
-		std::vector<Future<Optional<TenantMapEntry>>> tenantFutures;
+		std::vector<Future<Void>> tenantFutures;
 		for (int i = 0; i < self->numTenants + 1; ++i) {
 			TenantName tenantName = getTenant(i);
 			self->tenants.push_back(self->db->openTenant(tenantName));
@@ -240,7 +240,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			if (i < self->numTenants) {
 				TenantMapEntry entry;
 				entry.tenantGroup = self->getTenantGroup(i);
-				tenantFutures.push_back(TenantAPI::createTenant(cx.getReference(), tenantName, entry));
+				tenantFutures.push_back(::success(TenantAPI::createTenant(cx.getReference(), tenantName, entry)));
 				self->createdTenants.insert(tenantName);
 			}
 		}

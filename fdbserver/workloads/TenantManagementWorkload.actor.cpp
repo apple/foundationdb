@@ -784,18 +784,22 @@ struct TenantManagementWorkload : TestWorkload {
 		JSONDoc jsonDoc(jsonObject);
 
 		int64_t id;
+
 		std::string prefix;
 		std::string base64Prefix;
 		std::string printablePrefix;
 		std::string tenantStateStr;
 		std::string assignedClusterStr;
-		std::string tenantGroupStr;
-		jsonDoc.get("id", id);
+		std::string base64TenantGroup;
+		std::string printableTenantGroup;
+
 		jsonDoc.get("id", id);
 		jsonDoc.get("prefix.base64", base64Prefix);
 		jsonDoc.get("prefix.printable", printablePrefix);
 
 		prefix = base64::decoder::from_string(base64Prefix);
+		ASSERT(prefix == unprintable(printablePrefix));
+
 		jsonDoc.get("tenant_state", tenantStateStr);
 
 		Optional<ClusterName> assignedCluster;
@@ -804,11 +808,12 @@ struct TenantManagementWorkload : TestWorkload {
 		}
 
 		Optional<TenantGroupName> tenantGroup;
-		if (jsonDoc.tryGet("tenant_group", tenantGroupStr)) {
+		if (jsonDoc.tryGet("tenant_group.base64", base64TenantGroup)) {
+			jsonDoc.get("tenant_group.printable", printableTenantGroup);
+			std::string tenantGroupStr = base64::decoder::from_string(base64TenantGroup);
+			ASSERT(tenantGroupStr == unprintable(printableTenantGroup));
 			tenantGroup = TenantGroupNameRef(tenantGroupStr);
 		}
-
-		ASSERT(prefix == unprintable(printablePrefix));
 
 		Key prefixKey = KeyRef(prefix);
 		TenantMapEntry entry(id,
@@ -858,11 +863,7 @@ struct TenantManagementWorkload : TestWorkload {
 		auto itr = self->createdTenants.find(tenant);
 		state bool alreadyExists = itr != self->createdTenants.end() &&
 		                           !(operationType == OperationType::METACLUSTER && !self->useMetacluster);
-
-		state TenantData tenantData;
-		if (alreadyExists) {
-			tenantData = itr->second;
-		}
+		state TenantData tenantData = alreadyExists ? itr->second : TenantData();
 
 		loop {
 			try {
@@ -1044,10 +1045,10 @@ struct TenantManagementWorkload : TestWorkload {
 					ASSERT(newTenantEntry.present());
 
 					// Update Internal Tenant Map and check for correctness
-					TenantData tState = self->createdTenants[oldTenantName];
-					self->createdTenants[newTenantName] = tState;
+					TenantData tData = self->createdTenants[oldTenantName];
+					self->createdTenants[newTenantName] = tData;
 					self->createdTenants.erase(oldTenantName);
-					if (!tState.empty) {
+					if (!tData.empty) {
 						state Transaction insertTr(cx, newTenantName);
 						loop {
 							try {
@@ -1085,13 +1086,96 @@ struct TenantManagementWorkload : TestWorkload {
 		}
 	}
 
+	ACTOR Future<Void> configureTenant(Database cx, TenantManagementWorkload* self) {
+		state TenantName tenant = self->chooseTenantName(true);
+		auto itr = self->createdTenants.find(tenant);
+		state bool exists = itr != self->createdTenants.end();
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+
+		state std::map<Standalone<StringRef>, Optional<Value>> configuration;
+		state Optional<TenantGroupName> newTenantGroup;
+		state bool hasInvalidOption = deterministicRandom()->random01() < 0.1;
+
+		if (!hasInvalidOption || deterministicRandom()->coinflip()) {
+			newTenantGroup = self->chooseTenantGroup();
+			configuration["tenant_group"_sr] = newTenantGroup;
+		}
+		if (hasInvalidOption) {
+			configuration["invalid_option"_sr] = ""_sr;
+			hasInvalidOption = true;
+		}
+
+		state bool hasInvalidSpecialKeyTuple = deterministicRandom()->random01() < 0.05;
+
+		loop {
+			try {
+				tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+				for (auto [config, value] : configuration) {
+					Tuple t;
+					if (hasInvalidSpecialKeyTuple) {
+						// Wrong number of items
+						if (deterministicRandom()->coinflip()) {
+							int numItems = deterministicRandom()->randomInt(0, 3);
+							if (numItems > 0) {
+								t.append(tenant);
+							}
+							if (numItems > 1) {
+								t.append(config).append(""_sr);
+							}
+						}
+						// Wrong data types
+						else {
+							if (deterministicRandom()->coinflip()) {
+								t.append(0).append(config);
+							} else {
+								t.append(tenant).append(0);
+							}
+						}
+					} else {
+						t.append(tenant).append(config);
+					}
+					if (value.present()) {
+						tr->set(self->specialKeysTenantConfigPrefix.withSuffix(t.pack()), value.get());
+					} else {
+						tr->clear(self->specialKeysTenantConfigPrefix.withSuffix(t.pack()));
+					}
+				}
+
+				wait(tr->commit());
+
+				ASSERT(exists);
+				ASSERT(!hasInvalidOption);
+				ASSERT(!hasInvalidSpecialKeyTuple);
+
+				self->createdTenants[tenant].tenantGroup = newTenantGroup;
+				return Void();
+			} catch (Error& e) {
+				state Error error = e;
+				if (e.code() == error_code_tenant_not_found) {
+					ASSERT(!exists);
+					return Void();
+				} else if (e.code() == error_code_special_keys_api_failure) {
+					ASSERT(hasInvalidSpecialKeyTuple || hasInvalidOption);
+					return Void();
+				}
+
+				try {
+					wait(tr->onError(e));
+				} catch (Error&) {
+					TraceEvent(SevError, "ConfigureTenantFailure").error(error).detail("TenantName", tenant);
+					return Void();
+				}
+			}
+		}
+	}
+
 	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 	ACTOR Future<Void> _start(Database cx, TenantManagementWorkload* self) {
 		state double start = now();
 
 		// Run a random sequence of tenant management operations for the duration of the test
 		while (now() < start + self->testDuration) {
-			state int operation = deterministicRandom()->randomInt(0, 5);
+			state int operation = deterministicRandom()->randomInt(0, 6);
 			if (operation == 0) {
 				wait(self->createTenant(cx, self));
 			} else if (operation == 1) {
@@ -1100,9 +1184,11 @@ struct TenantManagementWorkload : TestWorkload {
 				wait(self->getTenant(cx, self));
 			} else if (operation == 3) {
 				wait(self->listTenants(cx, self));
-			} else if (!self->useMetacluster) {
+			} else if (operation == 4 && !self->useMetacluster) {
 				// TODO: reenable this for metacluster once it is supported
 				wait(self->renameTenant(cx, self));
+			} else if (operation == 5) {
+				wait(self->configureTenant(cx, self));
 			}
 		}
 
@@ -1158,6 +1244,8 @@ struct TenantManagementWorkload : TestWorkload {
 				ASSERT(dataItr != dataClusterTenants.end());
 				ASSERT(managementItr->first == localItr->first);
 				ASSERT(managementItr->first == dataItr->first);
+				ASSERT(managementItr->second.tenantGroup == localItr->second.tenantGroup);
+				ASSERT(managementItr->second.matchesConfiguration(dataItr->second));
 
 				checkTenants.push_back(self->checkTenantContents(self, managementItr->first, localItr->second));
 				lastTenant = managementItr->first;

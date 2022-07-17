@@ -1175,7 +1175,10 @@ std::map<std::string, std::function<void(const std::string&)>> testSpecGlobalKey
 	{ "disableTss", [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedDisableTSS", ""); } },
 	{ "disableHostname",
 	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedDisableHostname", ""); } },
-	{ "disableRemoteKVS", [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedRemoteKVS", ""); } }
+	{ "disableRemoteKVS",
+	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedRemoteKVS", ""); } },
+	{ "disableEncryption",
+	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedRemoteKVS", ""); } }
 };
 
 std::map<std::string, std::function<void(const std::string& value, TestSpec* spec)>> testSpecTestKeys = {
@@ -1631,14 +1634,14 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 	}
 
 	if (useDB) {
-		std::vector<Future<Optional<TenantMapEntry>>> tenantFutures;
+		std::vector<Future<Void>> tenantFutures;
 		for (auto tenant : tenantsToCreate) {
 			TenantMapEntry entry;
 			if (deterministicRandom()->coinflip()) {
 				entry.tenantGroup = "TestTenantGroup"_sr;
 			}
 			TraceEvent("CreatingTenant").detail("Tenant", tenant).detail("TenantGroup", entry.tenantGroup);
-			tenantFutures.push_back(TenantAPI::createTenant(cx.getReference(), tenant, entry));
+			tenantFutures.push_back(success(TenantAPI::createTenant(cx.getReference(), tenant, entry)));
 		}
 
 		wait(waitForAll(tenantFutures));
