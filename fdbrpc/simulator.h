@@ -78,7 +78,7 @@ public:
 		bool rebooting;
 		std::vector<flowGlobalType> globals;
 
-		int buggifyDelayCount = 0;
+		uint8_t buggifyDelayCount = 0;
 
 		INetworkConnections* network;
 
