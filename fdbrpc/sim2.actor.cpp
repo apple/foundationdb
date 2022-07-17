@@ -1651,11 +1651,11 @@ public:
 		if (process->startingClass == ProcessClass::TesterClass || process != currentProcess ||
 		    process->buggifyDelayCount > 7)
 			return;
-		static double poissonProbs[8] = { 0.3679, 0.3679, 0.1839, 0.0613, 0.0153, 0.0031, 0.0005, 0.0001 };
+		static constexpr double poissonProbs[8] = { 0.3679, 0.3679, 0.1839, 0.0613, 0.0153, 0.0031, 0.0005, 0.0001 };
 		double prob = poissonProbs[process->buggifyDelayCount];
 
 		if (deterministicRandom()->random01() < prob) {
-			double delaySec = deterministicRandom()->random01() * 10.0;
+			double delaySec = deterministicRandom()->random01() * 1.0;
 			TraceEvent("ProcessDelayed")
 			    .detail("ProcessInfo", process->toString())
 			    .detail("DelayFor", delaySec)
