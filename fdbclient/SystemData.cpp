@@ -1414,10 +1414,7 @@ const KeyRangeRef storageQuotaKeys(LiteralStringRef("\xff/storageQuota/"), Liter
 const KeyRef storageQuotaPrefix = storageQuotaKeys.begin;
 
 Key storageQuotaKey(StringRef tenantName) {
-	BinaryWriter wr(Unversioned());
-	wr.serializeBytes(storageQuotaPrefix);
-	wr << tenantName;
-	return wr.toValue();
+	return tenantName.withPrefix(storageQuotaPrefix);
 }
 
 // for tests
