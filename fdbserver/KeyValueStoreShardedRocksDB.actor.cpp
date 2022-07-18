@@ -842,7 +842,7 @@ public:
 			TraceEvent(SevError, "ShardedRocksDB").detail("Error", "write to non-exist shard").detail("WriteKey", key);
 			return;
 		}
-		TraceEvent(SevVerbose, "ShardManagerPut", this->id)
+		TraceEvent(SevDebug, "ShardManagerPut", this->id)
 		    .detail("WriteKey", key)
 		    .detail("Value", value)
 		    .detail("MapRange", it.range())
@@ -860,6 +860,7 @@ public:
 		if (!it.value()) {
 			return;
 		}
+		TraceEvent(SevDebug, "ShardManagerClear", this->id).detail("Key", key);
 		writeBatch->Delete(it.value()->physicalShard->cf, toSlice(key));
 		dirtyShards->insert(it.value()->physicalShard);
 	}
@@ -867,6 +868,7 @@ public:
 	void clearRange(KeyRangeRef range) {
 		auto rangeIterator = dataShardMap.intersectingRanges(range);
 
+		TraceEvent(SevDebug, "ShardManagerClearRange", this->id).detail("Range", range);
 		for (auto it = rangeIterator.begin(); it != rangeIterator.end(); ++it) {
 			if (it.value() == nullptr) {
 				continue;
@@ -2379,7 +2381,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	                              int rowLimit,
 	                              int byteLimit,
 	                              IKeyValueStore::ReadType type) override {
-		TraceEvent(SevVerbose, "ShardedRocksReadRangeBegin", this->id).detail("Range", keys);
+		TraceEvent(SevDebug, "ShardedRocksReadRangeBegin", this->id).detail("Range", keys);
 		auto shards = shardManager.getDataShardsByRange(keys);
 
 		for (DataShard* shard : shards) {

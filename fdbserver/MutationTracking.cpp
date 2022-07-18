@@ -36,8 +36,11 @@
 // Each entry is a pair of (label, keyOrRange) and the Label will be attached to the
 // MutationTracking TraceEvent for easier searching/recognition.
 std::vector<std::pair<const char*, KeyRef>> debugKeys = {};
-// std::vector<std::pair<const char*, KeyRef>> debugKeys = { { "SomeKey", "0000000001a"_sr } };
-std::vector<std::pair<const char*, KeyRangeRef>> debugRanges = { { "Everything", { ""_sr, "\xff\xff\xff\xff"_sr } } };
+// std::vector<std::pair<const char*, KeyRef>> debugKeys = { { "SomeKey", "0000000002xbw"_sr } };
+std::vector<std::pair<const char*, KeyRangeRef>> debugRanges = {
+	// { "SomeRange", { "0000000002xbw"_sr, "0000000002ybw"_sr } },
+	{ "1ac", { "0000000001a"_sr, "0000000001ad"_sr } },
+};
 // std::vector<std::pair<const char*, KeyRangeRef>> debugRanges = {};
 
 TraceEvent debugMutationEnabled(const char* context, Version version, MutationRef const& mutation, UID id) {
