@@ -3469,7 +3469,12 @@ void* loadLibrary(const char* lib_path) {
 	void* dlobj = nullptr;
 
 #if defined(__unixish__)
-	dlobj = dlopen(lib_path, RTLD_LAZY | RTLD_LOCAL);
+	dlobj = dlopen(lib_path,
+	               RTLD_LAZY | RTLD_LOCAL
+#ifdef USE_SANITIZER // Keep alive dlopen()-ed libs for symbolized XSAN backtrace
+	                   | RTLD_NODELETE
+#endif
+	);
 	if (dlobj == nullptr) {
 		TraceEvent(SevWarn, "LoadLibraryFailed").detail("Library", lib_path).detail("Error", dlerror());
 	}
