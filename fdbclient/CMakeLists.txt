@@ -68,12 +68,14 @@ endif()
 
 if(WITH_AWS_BACKUP)
   add_compile_definitions(BUILD_AWS_BACKUP)
-
-  set(FDBCLIENT_SRCS
-    ${FDBCLIENT_SRCS}
-    FDBAWSCredentialsProvider.h)
-
   include(awssdk)
+endif()
+
+find_package(ZLIB)
+if(ZLIB_FOUND)
+  add_compile_definitions(ZLIB_LIB_SUPPORTED)
+else()
+  message(STATUS "ZLIB package not found")
 endif()
 
 add_flow_target(STATIC_LIBRARY NAME fdbclient SRCS ${FDBCLIENT_SRCS} ADDL_SRCS ${options_srcs})
@@ -94,6 +96,9 @@ if(WIN32)
   add_dependencies(fdbclient_sampling_actors fdbclient_actors)
 endif()
 
+add_flow_target(LINK_TEST NAME fdbclientlinktest SRCS LinkTest.cpp)
+target_link_libraries(fdbclientlinktest PRIVATE fdbclient rapidxml) # re-link rapidxml due to private link interface
+
 if(BUILD_AZURE_BACKUP)
   target_link_libraries(fdbclient PRIVATE curl uuid azure-storage-lite)
   target_link_libraries(fdbclient_sampling PRIVATE curl uuid azure-storage-lite)
@@ -103,3 +108,4 @@ if(BUILD_AWS_BACKUP)
   target_link_libraries(fdbclient PUBLIC awssdk_target)
   target_link_libraries(fdbclient_sampling PUBLIC awssdk_target)
 endif()
+

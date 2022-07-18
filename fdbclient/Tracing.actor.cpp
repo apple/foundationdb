@@ -441,7 +441,7 @@ void openTracer(TracerType type) {
 ITracer::~ITracer() {}
 
 Span& Span::operator=(Span&& o) {
-	if (begin > 0.0 && o.context.isSampled() > 0) {
+	if (begin > 0.0 && context.isSampled()) {
 		end = g_network->now();
 		g_tracer->trace(*this);
 	}

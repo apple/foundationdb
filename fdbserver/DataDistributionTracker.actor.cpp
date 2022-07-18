@@ -632,19 +632,18 @@ ACTOR Future<Void> shardSplitter(DataDistributionTracker* self,
 	//}
 	int numShards = splitKeys.size() - 1;
 
-	if (deterministicRandom()->random01() < 0.01) {
-		TraceEvent("RelocateShardStartSplitx100", self->distributorId)
-		    .detail("Begin", keys.begin)
-		    .detail("End", keys.end)
-		    .detail("MaxBytes", shardBounds.max.bytes)
-		    .detail("MetricsBytes", metrics.bytes)
-		    .detail("Bandwidth",
-		            bandwidthStatus == BandwidthStatusHigh     ? "High"
-		            : bandwidthStatus == BandwidthStatusNormal ? "Normal"
-		                                                       : "Low")
-		    .detail("BytesPerKSec", metrics.bytesPerKSecond)
-		    .detail("NumShards", numShards);
-	}
+	TraceEvent("RelocateShardStartSplit", self->distributorId)
+	    .suppressFor(1.0)
+	    .detail("Begin", keys.begin)
+	    .detail("End", keys.end)
+	    .detail("MaxBytes", shardBounds.max.bytes)
+	    .detail("MetricsBytes", metrics.bytes)
+	    .detail("Bandwidth",
+	            bandwidthStatus == BandwidthStatusHigh     ? "High"
+	            : bandwidthStatus == BandwidthStatusNormal ? "Normal"
+	                                                       : "Low")
+	    .detail("BytesPerKSec", metrics.bytesPerKSecond)
+	    .detail("NumShards", numShards);
 
 	if (numShards > 1) {
 		executeShardSplit(self, keys, splitKeys, shardSize, true);
@@ -916,19 +915,18 @@ ACTOR Future<Void> shardEvaluator(DataDistributionTracker* self,
 		}
 	}
 
-	/*TraceEvent("EdgeCaseTraceShardEvaluator", self->distributorId)
-	    // .detail("TrackerId", trackerID)
-	    .detail("BeginKey", keys.begin.printableNonNull())
-	    .detail("EndKey", keys.end.printableNonNull())
-	    .detail("ShouldSplit", shouldSplit)
-	    .detail("ShouldMerge", shouldMerge)
-	    .detail("HasBeenTrueLongEnough", wantsToMerge->hasBeenTrueForLongEnough())
-	    .detail("CurrentMetrics", stats.toString())
-	    .detail("ShardBoundsMaxBytes", shardBounds.max.bytes)
-	    .detail("ShardBoundsMinBytes", shardBounds.min.bytes)
-	    .detail("WriteBandwitdhStatus", bandwidthStatus)
-	    .detail("SplitBecauseHighWriteBandWidth", ( bandwidthStatus == BandwidthStatusHigh && keys.begin <
-	   keyServersKeys.begin ) ? "Yes" :"No");*/
+	// TraceEvent("EdgeCaseTraceShardEvaluator", self->distributorId)
+	//     .detail("BeginKey", keys.begin.printable())
+	//     .detail("EndKey", keys.end.printable())
+	//     .detail("ShouldSplit", shouldSplit)
+	//     .detail("ShouldMerge", shouldMerge)
+	//     .detail("HasBeenTrueLongEnough", wantsToMerge->hasBeenTrueForLongEnough())
+	//     .detail("CurrentMetrics", stats.toString())
+	//     .detail("ShardBoundsMaxBytes", shardBounds.max.bytes)
+	//     .detail("ShardBoundsMinBytes", shardBounds.min.bytes)
+	//     .detail("WriteBandwitdhStatus", bandwidthStatus)
+	//     .detail("SplitBecauseHighWriteBandWidth",
+	//             (bandwidthStatus == BandwidthStatusHigh && keys.begin < keyServersKeys.begin) ? "Yes" : "No");
 
 	if (!self->anyZeroHealthyTeams->get() && wantsToMerge->hasBeenTrueForLongEnough()) {
 		onChange = onChange || shardMerger(self, keys, shardSize);
@@ -1257,12 +1255,17 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
 				self.sizeChanges.add(fetchShardMetricsList(&self, req));
 			}
 			when(wait(self.sizeChanges.getResult())) {}
+
 			when(TenantCacheTenantCreated newTenant = waitNext(tenantCreationSignal.getFuture())) {
 				TraceEvent(SevInfo, "TenantCacheTenantCreated")
 				    .detail("Begin", newTenant.keys.begin.printable())
 				    .detail("End", newTenant.keys.end.printable());
 				self.sizeChanges.add(tenantShardSplitter(&self, newTenant.keys));
 				newTenant.reply.send(true);
+
+			when(KeyRange req = waitNext(self.shardsAffectedByTeamFailure->restartShardTracker.getFuture())) {
+				restartShardTrackers(&self, req);
+
 			}
 		}
 	} catch (Error& e) {

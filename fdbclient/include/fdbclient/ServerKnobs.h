@@ -520,6 +520,8 @@ public:
 	int MOVE_KEYS_KRM_LIMIT_BYTES; // This must be sufficiently larger than CLIENT_KNOBS->KEY_SIZE_LIMIT
 	                               // (fdbclient/Knobs.h) to ensure that at least two entries will be returned from an
 	                               // attempt to read a key range map
+	int MOVE_SHARD_KRM_ROW_LIMIT;
+	int MOVE_SHARD_KRM_BYTE_LIMIT;
 	int MAX_SKIP_TAGS;
 	double MAX_ADDED_SOURCES_MULTIPLIER;
 
@@ -627,6 +629,9 @@ public:
 	// Maximum number of coordinators a snapshot can fail to
 	// capture while still succeeding
 	int64_t MAX_COORDINATOR_SNAPSHOT_FAULT_TOLERANCE;
+	// if true, all processes with class "storage", "transaction" and "log" will be snapshotted even not recruited as
+	// the role
+	bool SNAPSHOT_ALL_STATEFUL_PROCESSES;
 
 	// Storage Metrics
 	double STORAGE_METRICS_AVERAGE_INTERVAL;
@@ -858,6 +863,11 @@ public:
 	int SIM_KMS_MAX_KEYS;
 	int ENCRYPT_PROXY_MAX_DBG_TRACE_LENGTH;
 	bool ENABLE_TLOG_ENCRYPTION;
+	bool ENABLE_BLOB_GRANULE_ENCRYPTION;
+
+	// Compression
+	bool ENABLE_BLOB_GRANULE_COMPRESSION;
+	std::string BLOB_GRANULE_COMPRESSION_FILTER;
 
 	// Key Management Service (KMS) Connector
 	std::string KMS_CONNECTOR_TYPE;
@@ -872,12 +882,16 @@ public:
 	std::string BG_METADATA_SOURCE;
 
 	int BG_SNAPSHOT_FILE_TARGET_BYTES;
+	int BG_SNAPSHOT_FILE_TARGET_CHUNKS;
 	int BG_DELTA_FILE_TARGET_BYTES;
 	int BG_DELTA_BYTES_BEFORE_COMPACT;
 	int BG_MAX_SPLIT_FANOUT;
+	int BG_MAX_MERGE_FANIN;
 	int BG_HOT_SNAPSHOT_VERSIONS;
 	int BG_CONSISTENCY_CHECK_ENABLED;
 	int BG_CONSISTENCY_CHECK_TARGET_SPEED_KB;
+	bool BG_ENABLE_MERGING;
+	int BG_MERGE_CANDIDATE_THRESHOLD_SECONDS;
 
 	int BLOB_WORKER_INITIAL_SNAPSHOT_PARALLELISM;
 	double BLOB_WORKER_TIMEOUT; // Blob Manager's reaction time to a blob worker failure

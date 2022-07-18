@@ -188,6 +188,8 @@ public:
 
 	Optional<Reference<TCTenantInfo>>& getTenant() { return tenant; }
 
+	static std::string serversToString(std::vector<UID> servers);
+
 	std::string getTeamID() const override { return id.shortString(); }
 
 	std::vector<StorageServerInterface> getLastKnownServerInterfaces() const override;

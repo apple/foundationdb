@@ -185,7 +185,7 @@ ACTOR Future<bool> fileConfigureCommandActor(Reference<IDatabase> db,
 // force_recovery_with_data_loss command
 ACTOR Future<bool> forceRecoveryWithDataLossCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // gettenant command
-ACTOR Future<bool> getTenantCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
+ACTOR Future<bool> getTenantCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens, int apiVersion);
 // include command
 ACTOR Future<bool> includeCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // kill command
@@ -218,6 +218,8 @@ ACTOR Future<bool> profileCommandActor(Database db,
                                        Reference<ITransaction> tr,
                                        std::vector<StringRef> tokens,
                                        bool intrans);
+// renametenant command
+ACTOR Future<bool> renameTenantCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // quota command
 ACTOR Future<bool> quotaCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // setclass command
