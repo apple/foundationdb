@@ -311,7 +311,12 @@ struct DataDistributor : NonCopyable, ReferenceCounted<DataDistributor> {
 	// fully-functional.
 	DDTeamCollection* teamCollection;
 	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
-	PromiseStream<RelocateShard> relocationProducer, relocationConsumer; // comsumer is a yield stream from producer
+	// consumer is a yield stream from producer. The RelocateShard is pushed into relocationProducer and popped from
+	// relocationConsumer (by DDQueue)
+	PromiseStream<RelocateShard> relocationProducer, relocationConsumer;
+	std::vector<TeamCollectionInterface> tcis; // primary and remote region interface
+	Reference<AsyncVar<bool>> anyZeroHealthyTeams; // true if primary or remote has zero healthy team
+	std::vector<Reference<AsyncVar<bool>>> zeroHealthyTeams; // primary and remote
 
 	DataDistributor(Reference<AsyncVar<ServerDBInfo> const> const& db, UID id)
 	  : dbInfo(db), ddId(id), txnProcessor(nullptr), initialDDEventHolder(makeReference<EventCacheHolder>("InitialDD")),
@@ -436,11 +441,7 @@ struct DataDistributor : NonCopyable, ReferenceCounted<DataDistributor> {
 		return Void();
 	}
 
-	// Resume inflight relocations from the previous DD
-	// TODO: add a test to verify the inflight relocation correctness and measure the memory usage with 4 million shards
-	ACTOR static Future<Void> resumeRelocations(Reference<DataDistributor> self) {
-		ASSERT(self->shardsAffectedByTeamFailure); // has to be allocated
-
+	ACTOR static Future<Void> resumeFromInitShards(Reference<DataDistributor> self) {
 		state int shard = 0;
 		for (; shard < self->initData->shards.size() - 1; shard++) {
 			const DDShardInfo& iShard = self->initData->shards[shard];
@@ -480,7 +481,10 @@ struct DataDistributor : NonCopyable, ReferenceCounted<DataDistributor> {
 
 			wait(yield(TaskPriority::DataDistribution));
 		}
+		return Void();
+	}
 
+	ACTOR static Future<Void> resumeFromInitDataMoveMap(Reference<DataDistributor> self) {
 		state KeyRangeMap<std::shared_ptr<DataMove>>::iterator it = self->initData->dataMoveMap.ranges().begin();
 		for (; it != self->initData->dataMoveMap.ranges().end(); ++it) {
 			const DataMoveMetaData& meta = it.value()->meta;
@@ -516,6 +520,14 @@ struct DataDistributor : NonCopyable, ReferenceCounted<DataDistributor> {
 			}
 		}
 		return Void();
+	}
+
+	// Resume inflight relocations from the previous DD
+	// TODO: add a test to verify the inflight relocation correctness and measure the memory usage with 4 million shards
+	Future<Void> resumeRelocations() {
+		ASSERT(shardsAffectedByTeamFailure); // has to be allocated
+		return runAfter(resumeFromInitShards(Reference<DataDistributor>::addRef(this)),
+		                resumeFromInitDataMoveMap(Reference<DataDistributor>::addRef(this)));
 	}
 };
 
@@ -565,7 +577,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			state Reference<AsyncVar<bool>> processingWiggle(new AsyncVar<bool>(false));
 			state Promise<Void> readyToStart;
 			self->shardsAffectedByTeamFailure = makeReference<ShardsAffectedByTeamFailure>();
-			wait(DataDistributor::resumeRelocations(self));
+			wait(self->resumeRelocations());
 
 			std::vector<TeamCollectionInterface> tcis;
 
@@ -575,7 +587,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			zeroHealthyTeams.push_back(makeReference<AsyncVar<bool>>(true));
 			int storageTeamSize = self->configuration.storageTeamSize;
 
-			std::vector<Future<Void>> actors;
+			std::vector<Future<Void>> actors; // the container of ACTORs
 			if (self->configuration.usableRegions > 1) {
 				tcis.push_back(TeamCollectionInterface());
 				storageTeamSize = 2 * self->configuration.storageTeamSize;
