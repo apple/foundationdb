@@ -19,6 +19,7 @@
  */
 
 #pragma once
+#include "flow/IRandom.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_TENANT_MANAGEMENT_ACTOR_G_H)
 #define FDBCLIENT_TENANT_MANAGEMENT_ACTOR_G_H
 #include "fdbclient/TenantManagement.actor.g.h"
@@ -135,6 +136,17 @@ Future<std::pair<TenantMapEntry, bool>> createTenantTransaction(Transaction tr, 
 	return std::make_pair(newTenant, true);
 }
 
+ACTOR template <class Transaction>
+Future<int64_t> getNextTenantId(Transaction tr) {
+	state typename transaction_future_type<Transaction, Optional<Value>>::type lastIdFuture = tr->get(tenantLastIdKey);
+	Optional<Value> lastIdVal = wait(safeThreadFutureToFuture(lastIdFuture));
+	int64_t tenantId = lastIdVal.present() ? TenantMapEntry::prefixToId(lastIdVal.get()) + 1 : 0;
+	if (BUGGIFY) {
+		tenantId += deterministicRandom()->randomSkewedUInt32(1, 1e9);
+	}
+	return tenantId;
+}
+
 ACTOR template <class DB>
 Future<TenantMapEntry> createTenant(Reference<DB> db, TenantName name) {
 	state Reference<typename DB::TransactionT> tr = db->createTransaction();
@@ -144,7 +156,8 @@ Future<TenantMapEntry> createTenant(Reference<DB> db, TenantName name) {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			state typename DB::TransactionT::template FutureT<Optional<Value>> lastIdFuture = tr->get(tenantLastIdKey);
+
+			state Future<int64_t> tenantIdFuture = getNextTenantId(tr);
 
 			if (firstTry) {
 				Optional<TenantMapEntry> entry = wait(tryGetTenantTransaction(tr, name));
@@ -155,8 +168,7 @@ Future<TenantMapEntry> createTenant(Reference<DB> db, TenantName name) {
 				firstTry = false;
 			}
 
-			Optional<Value> lastIdVal = wait(safeThreadFutureToFuture(lastIdFuture));
-			int64_t tenantId = lastIdVal.present() ? TenantMapEntry::prefixToId(lastIdVal.get()) + 1 : 0;
+			int64_t tenantId = wait(tenantIdFuture);
 			tr->set(tenantLastIdKey, TenantMapEntry::idToPrefix(tenantId));
 			state std::pair<TenantMapEntry, bool> newTenant = wait(createTenantTransaction(tr, name, tenantId));
 

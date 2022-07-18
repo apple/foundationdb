@@ -7116,11 +7116,13 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 
 	// Update newestAvailableVersion when a shard becomes (un)available (in a separate loop to avoid invalidating vr
 	// above)
-	for (auto r = changeNewestAvailable.begin(); r != changeNewestAvailable.end(); ++r)
+	for (auto r = changeNewestAvailable.begin(); r != changeNewestAvailable.end(); ++r) {
 		data->newestAvailableVersion.insert(r->first, r->second);
+	}
 
-	if (!nowAssigned)
+	if (!nowAssigned) {
 		data->metrics.notifyNotReadable(keys);
+	}
 
 	coalescePhysicalShards(data, KeyRangeRef(ranges[0].begin, ranges[ranges.size() - 1].end));
 

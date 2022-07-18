@@ -17,30 +17,33 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#ifndef FLOW_BLOB_CIPHER_H
+#define FLOW_BLOB_CIPHER_H
+#include "flow/ProtocolVersion.h"
+#include "flow/serialize.h"
 #pragma once
-
-#include "flow/network.h"
-#include <cinttypes>
-#include <memory>
-#include <string>
-#include <unordered_map>
-#include <vector>
-#include <boost/functional/hash.hpp>
 
 #include "flow/Arena.h"
 #include "flow/EncryptUtils.h"
 #include "flow/FastRef.h"
 #include "flow/flow.h"
 #include "flow/genericactors.actor.h"
+#include "flow/network.h"
 
-#if defined(HAVE_WOLFSSL)
-#include <wolfssl/options.h>
-#endif
+#include <boost/functional/hash.hpp>
+#include <cinttypes>
+#include <memory>
 #include <openssl/aes.h>
 #include <openssl/engine.h>
 #include <openssl/evp.h>
 #include <openssl/hmac.h>
 #include <openssl/sha.h>
+#include <string>
+#include <unordered_map>
+#include <vector>
+#if defined(HAVE_WOLFSSL)
+#include <wolfssl/options.h>
+#endif
 
 #define AES_256_KEY_LENGTH 32
 #define AES_256_IV_LENGTH 16
@@ -86,8 +89,19 @@ struct BlobCipherDetails {
 	// Random salt
 	EncryptCipherRandomSalt salt{};
 
+	BlobCipherDetails() {}
+	BlobCipherDetails(const EncryptCipherDomainId& dId,
+	                  const EncryptCipherBaseKeyId& bId,
+	                  const EncryptCipherRandomSalt& random)
+	  : encryptDomainId(dId), baseCipherId(bId), salt(random) {}
+
 	bool operator==(const BlobCipherDetails& o) const {
 		return encryptDomainId == o.encryptDomainId && baseCipherId == o.baseCipherId && salt == o.salt;
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		ar.serializeBytes(this, sizeof(BlobCipherDetails));
 	}
 };
 #pragma pack(pop)
@@ -113,7 +127,7 @@ struct hash<BlobCipherDetails> {
 
 #pragma pack(push, 1) // exact fit - no padding
 typedef struct BlobCipherEncryptHeader {
-	static constexpr int headerSize = 104;
+	static constexpr int headerSize = 136;
 	union {
 		struct {
 			uint8_t size; // reading first byte is sufficient to determine header
@@ -163,6 +177,19 @@ typedef struct BlobCipherEncryptHeader {
 
 	BlobCipherEncryptHeader() {}
 
+	static BlobCipherEncryptHeader fromStringRef(StringRef headerRef) {
+		BlobCipherEncryptHeader header;
+		BinaryReader rd(headerRef, AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
+		rd >> header;
+		return header;
+	}
+
+	static StringRef toStringRef(BlobCipherEncryptHeader& header, Arena& arena) {
+		BinaryWriter wr(AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
+		wr.serializeBytes(&header, header.flags.size);
+		return wr.toValue(arena);
+	}
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		ar.serializeBytes(this, headerSize);
@@ -210,6 +237,12 @@ public:
 		       memcmp(cipher.get(), toCompare->rawCipher(), AES_256_KEY_LENGTH) == 0 &&
 		       memcmp(baseCipher.get(), toCompare->rawBaseCipher(), baseCipherLen) == 0;
 	}
+
+	bool isCipherDetailMatches(const BlobCipherDetails& details) {
+		return encryptDomainId == details.encryptDomainId && baseCipherId == details.baseCipherId &&
+		       randomSalt == details.salt;
+	}
+
 	void reset();
 
 private:
@@ -427,6 +460,7 @@ public:
 	                              const int plaintextLen,
 	                              BlobCipherEncryptHeader* header,
 	                              Arena&);
+	Standalone<StringRef> encryptBlobGranuleChunk(const uint8_t* plaintext, const int plaintextLen);
 
 private:
 	EVP_CIPHER_CTX* ctx;
@@ -499,3 +533,5 @@ StringRef computeAuthToken(const uint8_t* payload,
                            const uint8_t* key,
                            const int keyLen,
                            Arena& arena);
+
+#endif // FLOW_BLOB_CIPHER_H
