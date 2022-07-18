@@ -32,7 +32,7 @@ typedef Standalone<TenantNameRef> TenantName;
 typedef StringRef TenantGroupNameRef;
 typedef Standalone<TenantGroupNameRef> TenantGroupName;
 
-enum class TenantState { REGISTERING, READY, REMOVING, ERROR };
+enum class TenantState { REGISTERING, READY, REMOVING, UPDATING_CONFIGURATION, ERROR };
 
 struct TenantMapEntry {
 	constexpr static FileIdentifier file_identifier = 12247338;
@@ -50,6 +50,7 @@ struct TenantMapEntry {
 	TenantState tenantState = TenantState::READY;
 	// TODO: fix this type
 	Optional<Standalone<StringRef>> assignedCluster;
+	int64_t configurationSequenceNum = 0;
 
 	constexpr static int ROOT_PREFIX_SIZE = sizeof(id);
 
@@ -59,6 +60,10 @@ struct TenantMapEntry {
 
 	void setSubspace(KeyRef subspace);
 	bool matchesConfiguration(TenantMapEntry const& other) const;
+
+	void configure(Standalone<StringRef> parameter, Optional<Value> value);
+
+	std::string toJson(int apiVersion) const;
 
 	Value encode() const { return ObjectWriter::toValue(*this, IncludeVersion(ProtocolVersion::withTenantGroups())); }
 
@@ -74,7 +79,7 @@ struct TenantMapEntry {
 		KeyRef subspace;
 		if (ar.isDeserializing) {
 			if (ar.protocolVersion().hasTenantGroups()) {
-				serializer(ar, id, subspace, tenantGroup, tenantState, assignedCluster);
+				serializer(ar, id, subspace, tenantGroup, tenantState, assignedCluster, configurationSequenceNum);
 				ASSERT(tenantState >= TenantState::REGISTERING && tenantState <= TenantState::ERROR);
 			} else {
 				serializer(ar, id, subspace);
@@ -89,7 +94,7 @@ struct TenantMapEntry {
 				subspace = prefix.substr(0, prefix.size() - 8);
 			}
 			ASSERT(tenantState >= TenantState::REGISTERING && tenantState <= TenantState::ERROR);
-			serializer(ar, id, subspace, tenantGroup, tenantState, assignedCluster);
+			serializer(ar, id, subspace, tenantGroup, tenantState, assignedCluster, configurationSequenceNum);
 		}
 	}
 };

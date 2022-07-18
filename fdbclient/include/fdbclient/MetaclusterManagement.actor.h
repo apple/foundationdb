@@ -1071,17 +1071,20 @@ Future<Void> deleteTenant(Reference<DB> db, TenantName name) {
 	state int64_t tenantId;
 	state DataClusterMetadata clusterMetadata;
 	state bool alreadyRemoving = false;
-	state Future<Void> tenantModeCheck;
+	state Future<ClusterType> clusterTypeFuture;
 
 	// Step 1: get the assigned location of the tenant
 	state Reference<typename DB::TransactionT> managementTr = db->createTransaction();
 	loop {
 		try {
 			managementTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tenantModeCheck = TenantAPI::checkTenantMode(managementTr, ClusterType::METACLUSTER_MANAGEMENT);
+			clusterTypeFuture = TenantAPI::getClusterType(managementTr);
 
 			state Optional<TenantMapEntry> tenantEntry1 = wait(tryGetTenantTransaction(managementTr, name));
-			wait(tenantModeCheck);
+			ClusterType clusterType = wait(clusterTypeFuture);
+			if (clusterType != ClusterType::METACLUSTER_MANAGEMENT) {
+				throw invalid_metacluster_operation();
+			}
 
 			if (!tenantEntry1.present()) {
 				throw tenant_not_found();
@@ -1166,9 +1169,12 @@ Future<Void> deleteTenant(Reference<DB> db, TenantName name) {
 	loop {
 		try {
 			managementTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tenantModeCheck = TenantAPI::checkTenantMode(managementTr, ClusterType::METACLUSTER_MANAGEMENT);
+			clusterTypeFuture = TenantAPI::getClusterType(managementTr);
 			state Optional<TenantMapEntry> tenantEntry3 = wait(tryGetTenantTransaction(managementTr, name));
-			wait(tenantModeCheck);
+			ClusterType clusterType = wait(clusterTypeFuture);
+			if (clusterType != ClusterType::METACLUSTER_MANAGEMENT) {
+				throw invalid_metacluster_operation();
+			}
 
 			if (!tenantEntry3.present() || tenantEntry3.get().id != tenantId) {
 				return Void();
@@ -1261,6 +1267,189 @@ Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listTenants(Reference
 		}
 	}
 }
+
+template <class DB>
+struct ConfigureTenantImpl {
+	// Initialization parameters
+	Reference<DB> managementDb;
+	TenantName tenantName;
+	std::map<Standalone<StringRef>, Optional<Value>> configurationParameters;
+
+	// Parameters set in updateManagementCluster
+	TenantMapEntry updatedEntry;
+	DataClusterMetadata clusterMetadata;
+
+	ConfigureTenantImpl(Reference<DB> managementDb,
+	                    TenantName tenantName,
+	                    std::map<Standalone<StringRef>, Optional<Value>> configurationParameters)
+	  : managementDb(managementDb), tenantName(tenantName), configurationParameters(configurationParameters) {}
+
+	ACTOR static Future<bool> checkTenantGroup(Optional<TenantGroupName> currentGroup,
+	                                           Optional<TenantGroupName> desiredGroup) {
+		if (!desiredGroup.present() || currentGroup == desiredGroup) {
+			return true;
+		}
+
+		// TODO: check where desired group is assigned and allow if the cluster is the same
+		// SOMEDAY: It should also be possible to change the tenant group when we support tenant movement.
+		wait(delay(0));
+
+		return false;
+	}
+
+	// Updates the configuration in the management cluster and marks it as being in the UPDATING_CONFIGURATION state
+	// Returns true if the update is complete and false if it needs to proceed to the next stage
+	ACTOR static Future<bool> updateManagementCluster(ConfigureTenantImpl* self) {
+		state Reference<typename DB::TransactionT> tr = self->managementDb->createTransaction();
+		loop {
+			try {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				state Future<ClusterType> clusterTypeFuture = TenantAPI::getClusterType(tr);
+
+				state Optional<TenantMapEntry> tenantEntry = wait(tryGetTenantTransaction(tr, self->tenantName));
+				ClusterType clusterType = wait(clusterTypeFuture);
+				if (clusterType != ClusterType::METACLUSTER_MANAGEMENT) {
+					throw invalid_metacluster_operation();
+				}
+
+				if (!tenantEntry.present()) {
+					throw tenant_not_found();
+				}
+
+				if (tenantEntry.get().tenantState != TenantState::READY &&
+				    tenantEntry.get().tenantState != TenantState::UPDATING_CONFIGURATION) {
+					throw invalid_tenant_state();
+				}
+
+				self->updatedEntry = tenantEntry.get();
+				state std::map<Standalone<StringRef>, Optional<Value>>::iterator configItr;
+				for (configItr = self->configurationParameters.begin();
+				     configItr != self->configurationParameters.end();
+				     ++configItr) {
+					if (configItr->first == "tenant_group"_sr) {
+						bool canChangeTenantGroup =
+						    wait(checkTenantGroup(self->updatedEntry.tenantGroup, configItr->second));
+						if (!canChangeTenantGroup) {
+							TraceEvent(SevWarnAlways, "InvalidTenantGroupChange")
+							    .detail("Tenant", self->tenantName)
+							    .detail("CurrentTenantGroup", self->updatedEntry.tenantGroup)
+							    .detail("DesiredTenantGroup", configItr->second);
+							// TODO: surface better error to fdbcli?
+							throw invalid_tenant_configuration();
+						}
+					}
+					self->updatedEntry.configure(configItr->first, configItr->second);
+				}
+
+				if (tenantEntry.get().assignedCluster.present()) {
+					Optional<DataClusterMetadata> _clusterMetadata =
+					    wait(tryGetClusterTransaction(tr, tenantEntry.get().assignedCluster.get()));
+
+					// A cluster cannot be removed through these APIs unless it has no tenants assigned to it.
+					ASSERT(_clusterMetadata.present());
+
+					self->clusterMetadata = _clusterMetadata.get();
+					self->updatedEntry.tenantState = TenantState::UPDATING_CONFIGURATION;
+				}
+
+				++self->updatedEntry.configurationSequenceNum;
+				ManagementClusterMetadata::tenantMetadata.tenantMap.set(tr, self->tenantName, self->updatedEntry);
+				wait(buggifiedCommit(tr, BUGGIFY));
+
+				// If there is no assigned cluster, then we can terminate early
+				return !tenantEntry.get().assignedCluster.present();
+			} catch (Error& e) {
+				wait(safeThreadFutureToFuture(tr->onError(e)));
+			}
+		}
+	}
+
+	// Updates the configuration in the data cluster
+	ACTOR static Future<Void> updateDataCluster(ConfigureTenantImpl* self) {
+		state Reference<IDatabase> dataClusterDb = wait(openDatabase(self->clusterMetadata.connectionString));
+		state Reference<typename DB::TransactionT> tr = dataClusterDb->createTransaction();
+
+		loop {
+			try {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+
+				state Future<Optional<MetaclusterRegistrationEntry>> metaclusterRegistrationFuture =
+				    MetaclusterMetadata::metaclusterRegistration.get(tr);
+
+				state Optional<TenantMapEntry> tenantEntry =
+				    wait(TenantAPI::tryGetTenantTransaction(tr, self->tenantName));
+				state Optional<MetaclusterRegistrationEntry> metaclusterRegistration =
+				    wait(metaclusterRegistrationFuture);
+
+				if (!tenantEntry.present() || tenantEntry.get().id != self->updatedEntry.id ||
+				    tenantEntry.get().configurationSequenceNum >= self->updatedEntry.configurationSequenceNum ||
+				    !metaclusterRegistration.present() ||
+				    metaclusterRegistration.get().clusterType != ClusterType::METACLUSTER_DATA) {
+					// If the tenant or cluster isn't in the metacluster, it must have been concurrently removed
+					return Void();
+				}
+
+				self->updatedEntry.tenantState = TenantState::READY;
+				TenantAPI::configureTenantTransaction(tr, self->tenantName, self->updatedEntry);
+				wait(buggifiedCommit(tr, BUGGIFY));
+				return Void();
+			} catch (Error& e) {
+				wait(safeThreadFutureToFuture(tr->onError(e)));
+			}
+		}
+	}
+
+	// Updates the tenant state in the management cluster to READY
+	ACTOR static Future<Void> markManagementTenantAsReady(ConfigureTenantImpl* self) {
+		state Reference<typename DB::TransactionT> tr = self->managementDb->createTransaction();
+		loop {
+			try {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				state Future<ClusterType> clusterTypeFuture = TenantAPI::getClusterType(tr);
+
+				state Optional<TenantMapEntry> tenantEntry = wait(tryGetTenantTransaction(tr, self->tenantName));
+				ClusterType clusterType = wait(clusterTypeFuture);
+				if (clusterType != ClusterType::METACLUSTER_MANAGEMENT) {
+					throw invalid_metacluster_operation();
+				}
+
+				if (!tenantEntry.present() || tenantEntry.get().id != self->updatedEntry.id ||
+				    tenantEntry.get().tenantState != TenantState::UPDATING_CONFIGURATION ||
+				    tenantEntry.get().configurationSequenceNum > self->updatedEntry.configurationSequenceNum) {
+					return Void();
+				}
+
+				tenantEntry.get().tenantState = TenantState::READY;
+				ManagementClusterMetadata::tenantMetadata.tenantMap.set(tr, self->tenantName, self->updatedEntry);
+				wait(buggifiedCommit(tr, BUGGIFY));
+				return Void();
+			} catch (Error& e) {
+				wait(safeThreadFutureToFuture(tr->onError(e)));
+			}
+		}
+	}
+
+	ACTOR static Future<Void> run(ConfigureTenantImpl* self) {
+		bool updateIsComplete = wait(updateManagementCluster(self));
+		if (!updateIsComplete) {
+			wait(updateDataCluster(self));
+			wait(markManagementTenantAsReady(self));
+		}
+
+		return Void();
+	}
+	Future<Void> run() { return run(this); }
+};
+
+ACTOR template <class DB>
+Future<Void> configureTenant(Reference<DB> db,
+                             TenantName name,
+                             std::map<Standalone<StringRef>, Optional<Value>> configurationParameters) {
+	state ConfigureTenantImpl<DB> impl(db, name, configurationParameters);
+	wait(impl.run());
+	return Void();
+}
+
 }; // namespace MetaclusterAPI
 
 #include "flow/unactorcompiler.h"

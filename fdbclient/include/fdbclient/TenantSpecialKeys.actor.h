@@ -32,7 +32,6 @@
 #include "fdbclient/SpecialKeySpace.actor.h"
 #include "fdbclient/TenantManagement.actor.h"
 #include "fdbclient/Tuple.h"
-#include "fdbclient/libb64/encode.h"
 #include "flow/Arena.h"
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -77,41 +76,8 @@ private:
 		    wait(TenantAPI::listTenantsTransaction(&ryw->getTransaction(), kr.begin, kr.end, limitsHint.rows));
 
 		for (auto tenant : tenants) {
-			json_spirit::mObject tenantEntry;
-			tenantEntry["id"] = tenant.second.id;
-
-			if (ryw->getDatabase()->apiVersionAtLeast(720)) {
-				json_spirit::mObject prefixObject;
-				std::string encodedPrefix = base64::encoder::from_string(tenant.second.prefix.toString());
-				// Remove trailing newline
-				encodedPrefix.resize(encodedPrefix.size() - 1);
-
-				prefixObject["base64"] = encodedPrefix;
-				prefixObject["printable"] = printable(tenant.second.prefix);
-				tenantEntry["prefix"] = prefixObject;
-			} else {
-				// This is not a standard encoding in JSON, and some libraries may not be able to easily decode it
-				tenantEntry["prefix"] = tenant.second.prefix.toString();
-			}
-
-			tenantEntry["tenant_state"] = TenantMapEntry::tenantStateToString(tenant.second.tenantState);
-			if (tenant.second.assignedCluster.present()) {
-				tenantEntry["assigned_cluster"] = tenant.second.assignedCluster.get().toString();
-			}
-			if (tenant.second.tenantGroup.present()) {
-				json_spirit::mObject tenantGroupObject;
-				std::string encodedTenantGroup =
-				    base64::encoder::from_string(tenant.second.tenantGroup.get().toString());
-				// Remove trailing newline
-				encodedTenantGroup.resize(encodedTenantGroup.size() - 1);
-
-				tenantGroupObject["base64"] = encodedTenantGroup;
-				tenantGroupObject["printable"] = printable(tenant.second.tenantGroup.get());
-				tenantEntry["tenant_group"] = tenantGroupObject;
-			}
-
-			std::string tenantEntryString = json_spirit::write_string(json_spirit::mValue(tenantEntry));
-			ValueRef tenantEntryBytes(results->arena(), tenantEntryString);
+			std::string jsonString = tenant.second.toJson(ryw->getDatabase()->apiVersion);
+			ValueRef tenantEntryBytes(results->arena(), jsonString);
 			results->push_back(results->arena(),
 			                   KeyValueRef(withTenantMapPrefix(tenant.first, results->arena()), tenantEntryBytes));
 		}
@@ -141,75 +107,16 @@ private:
 		return results;
 	}
 
-	ACTOR static Future<bool> checkTenantGroup(ReadYourWritesTransaction* ryw,
-	                                           Optional<TenantGroupName> currentGroup,
-	                                           Optional<TenantGroupName> desiredGroup) {
-		if (!desiredGroup.present() || currentGroup == desiredGroup) {
-			return true;
-		}
-
-		// TODO: check where desired group is assigned and allow if the cluster is the same
-		// SOMEDAY: It should also be possible to change the tenant group when we support tenant movement.
-		wait(delay(0));
-
-		return false;
-	}
-
-	ACTOR static Future<Void> applyTenantConfig(
-	    ReadYourWritesTransaction* ryw,
-	    TenantNameRef tenantName,
-	    std::vector<std::pair<Standalone<StringRef>, Optional<Value>>> configEntries,
-	    TenantMapEntry* tenantEntry,
-	    bool creatingTenant) {
-
-		state std::vector<std::pair<Standalone<StringRef>, Optional<Value>>>::iterator configItr;
-		for (configItr = configEntries.begin(); configItr != configEntries.end(); ++configItr) {
-			if (configItr->first == "tenant_group"_sr) {
-				state bool isValidTenantGroup = true;
-				if (!creatingTenant) {
-					bool result = wait(checkTenantGroup(ryw, tenantEntry->tenantGroup, configItr->second));
-					isValidTenantGroup = result;
-				}
-				if (isValidTenantGroup) {
-					tenantEntry->tenantGroup = configItr->second;
-				} else {
-					TraceEvent(SevWarn, "CannotChangeTenantGroup")
-					    .detail("TenantName", tenantName)
-					    .detail("CurrentTenantGroup", tenantEntry->tenantGroup)
-					    .detail("DesiredTenantGroup", configItr->second);
-					ryw->setSpecialKeySpaceErrorMsg(ManagementAPIError::toJsonString(
-					    false,
-					    "set tenant configuration",
-					    format("cannot change tenant group for tenant `%s'", tenantName.toString().c_str())));
-					throw special_keys_api_failure();
-				}
-			} else {
-				TraceEvent(SevWarn, "InvalidTenantConfig")
-				    .detail("TenantName", tenantName)
-				    .detail("ConfigName", configItr->first);
-				ryw->setSpecialKeySpaceErrorMsg(
-				    ManagementAPIError::toJsonString(false,
-				                                     "set tenant configuration",
-				                                     format("invalid tenant configuration option `%s' for tenant `%s'",
-				                                            configItr->first.toString().c_str(),
-				                                            tenantName.toString().c_str())));
-				throw special_keys_api_failure();
-			}
-		}
-
-		return Void();
-	}
-
 	ACTOR static Future<Void> createTenant(
 	    ReadYourWritesTransaction* ryw,
 	    TenantNameRef tenantName,
-	    Optional<std::vector<std::pair<Standalone<StringRef>, Optional<Value>>>> configMutations,
+	    std::vector<std::pair<Standalone<StringRef>, Optional<Value>>> configMutations,
 	    int64_t tenantId) {
 		state TenantMapEntry tenantEntry;
 		tenantEntry.id = tenantId;
 
-		if (configMutations.present()) {
-			wait(applyTenantConfig(ryw, tenantName, configMutations.get(), &tenantEntry, true));
+		for (auto const& [name, value] : configMutations) {
+			tenantEntry.configure(name, value);
 		}
 
 		std::pair<Optional<TenantMapEntry>, bool> entry =
@@ -220,7 +127,7 @@ private:
 
 	ACTOR static Future<Void> createTenants(
 	    ReadYourWritesTransaction* ryw,
-	    std::map<TenantName, Optional<std::vector<std::pair<Standalone<StringRef>, Optional<Value>>>>> tenants) {
+	    std::map<TenantName, std::vector<std::pair<Standalone<StringRef>, Optional<Value>>>> tenants) {
 		int64_t _nextId = wait(TenantAPI::getNextTenantId(&ryw->getTransaction()));
 		int64_t nextId = _nextId;
 
@@ -236,10 +143,12 @@ private:
 
 	ACTOR static Future<Void> changeTenantConfig(
 	    ReadYourWritesTransaction* ryw,
-	    TenantNameRef tenantName,
+	    TenantName tenantName,
 	    std::vector<std::pair<Standalone<StringRef>, Optional<Value>>> configEntries) {
-		state TenantMapEntry tenantEntry = wait(TenantAPI::getTenantTransaction(ryw, tenantName));
-		wait(applyTenantConfig(ryw, tenantName, configEntries, &tenantEntry, false));
+		state TenantMapEntry tenantEntry = wait(TenantAPI::getTenantTransaction(&ryw->getTransaction(), tenantName));
+		for (auto const& [name, value] : configEntries) {
+			tenantEntry.configure(name, value);
+		}
 		TenantAPI::configureTenantTransaction(&ryw->getTransaction(), tenantName, tenantEntry);
 
 		return Void();
@@ -248,12 +157,8 @@ private:
 	ACTOR static Future<Void> deleteTenantRange(ReadYourWritesTransaction* ryw,
 	                                            TenantName beginTenant,
 	                                            TenantName endTenant) {
-		state Future<Void> tenantModeCheck =
-		    TenantAPI::checkTenantMode(&ryw->getTransaction(), ClusterType::STANDALONE);
 		state std::vector<std::pair<TenantName, TenantMapEntry>> tenants = wait(TenantAPI::listTenantsTransaction(
 		    &ryw->getTransaction(), beginTenant, endTenant, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1));
-
-		wait(tenantModeCheck);
 
 		if (tenants.size() > CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER) {
 			TraceEvent(SevWarn, "DeleteTenantRangeTooLange")
@@ -296,6 +201,8 @@ public:
 		std::vector<std::pair<KeyRangeRef, Optional<Value>>> mapMutations;
 		std::map<TenantName, std::vector<std::pair<Standalone<StringRef>, Optional<Value>>>> configMutations;
 
+		tenantManagementFutures.push_back(TenantAPI::checkTenantMode(&ryw->getTransaction(), ClusterType::STANDALONE));
+
 		for (auto range : ranges) {
 			if (!range.value().first) {
 				continue;
@@ -328,11 +235,11 @@ public:
 			}
 		}
 
-		std::map<TenantName, Optional<std::vector<std::pair<Standalone<StringRef>, Optional<Value>>>>> tenantsToCreate;
+		std::map<TenantName, std::vector<std::pair<Standalone<StringRef>, Optional<Value>>>> tenantsToCreate;
 		for (auto mapMutation : mapMutations) {
 			TenantNameRef tenantName = mapMutation.first.begin;
 			if (mapMutation.second.present()) {
-				Optional<std::vector<std::pair<Standalone<StringRef>, Optional<Value>>>> createMutations;
+				std::vector<std::pair<Standalone<StringRef>, Optional<Value>>> createMutations;
 				auto itr = configMutations.find(tenantName);
 				if (itr != configMutations.end()) {
 					createMutations = itr->second;

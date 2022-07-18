@@ -235,6 +235,8 @@ ERROR( unknown_tenant, 2137, "Tenant is not available from this server" )
 ERROR( illegal_tenant_access, 2138, "Illegal tenant access" )
 ERROR( invalid_tenant_group_name, 2139, "Tenant group name cannot begin with \\xff" )
 ERROR( tenant_removed, 2140, "The tenant was removed" )
+ERROR( invalid_tenant_configuration, 2141, "Tenant configuration is invalid" )
+ERROR( invalid_tenant_state, 2142, "Operation cannot be applied to tenant in its current state" )
 
 ERROR( invalid_cluster_name, 2150, "Data cluster name cannot begin with \\xff" )
 ERROR( invalid_metacluster_operation, 2151, "Metacluster operation performed on non-metacluster" )

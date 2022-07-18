@@ -323,9 +323,9 @@ Future<Void> deleteTenant(Reference<DB> db,
 	}
 }
 
-// This should only be called from a transaction that has already confirmed that the cluster entry
-// is present. The updatedEntry should use the existing entry and modify only those fields that need
-// to be changed.
+// This should only be called from a transaction that has already confirmed that the tenant entry
+// is present. The tenantEntry should start with the existing entry and modify only those fields that need
+// to be changed. This must only be called on a non-management cluster.
 template <class Transaction>
 void configureTenantTransaction(Transaction tr, TenantNameRef tenantName, TenantMapEntry tenantEntry) {
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);

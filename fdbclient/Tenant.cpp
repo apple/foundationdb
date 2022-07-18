@@ -18,8 +18,10 @@
  * limitations under the License.
  */
 
+#include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/Tenant.h"
+#include "fdbclient/libb64/encode.h"
 #include "flow/UnitTest.h"
 
 Key TenantMapEntry::idToPrefix(int64_t id) {
@@ -43,6 +45,8 @@ std::string TenantMapEntry::tenantStateToString(TenantState tenantState) {
 		return "ready";
 	case TenantState::REMOVING:
 		return "removing";
+	case TenantState::UPDATING_CONFIGURATION:
+		return "updating configuration";
 	case TenantState::ERROR:
 		return "error";
 	default:
@@ -57,6 +61,8 @@ TenantState TenantMapEntry::stringToTenantState(std::string stateStr) {
 		return TenantState::READY;
 	} else if (stateStr == "removing") {
 		return TenantState::REMOVING;
+	} else if (stateStr == "updating configuration") {
+		return TenantState::UPDATING_CONFIGURATION;
 	} else if (stateStr == "error") {
 		return TenantState::ERROR;
 	}
@@ -90,6 +96,51 @@ TenantMapEntry::TenantMapEntry(int64_t id,
 
 bool TenantMapEntry::matchesConfiguration(TenantMapEntry const& other) const {
 	return tenantGroup == other.tenantGroup;
+}
+
+void TenantMapEntry::configure(Standalone<StringRef> parameter, Optional<Value> value) {
+	if (parameter == "tenant_group"_sr) {
+		tenantGroup = value;
+	} else {
+		TraceEvent(SevWarnAlways, "UnknownTenantConfigurationParameter").detail("Parameter", parameter);
+		throw invalid_tenant_configuration();
+	}
+}
+
+std::string TenantMapEntry::toJson(int apiVersion) const {
+	json_spirit::mObject tenantEntry;
+	tenantEntry["id"] = id;
+
+	if (apiVersion >= 720 || apiVersion == Database::API_VERSION_LATEST) {
+		json_spirit::mObject prefixObject;
+		std::string encodedPrefix = base64::encoder::from_string(prefix.toString());
+		// Remove trailing newline
+		encodedPrefix.resize(encodedPrefix.size() - 1);
+
+		prefixObject["base64"] = encodedPrefix;
+		prefixObject["printable"] = printable(prefix);
+		tenantEntry["prefix"] = prefixObject;
+	} else {
+		// This is not a standard encoding in JSON, and some libraries may not be able to easily decode it
+		tenantEntry["prefix"] = prefix.toString();
+	}
+
+	tenantEntry["tenant_state"] = TenantMapEntry::tenantStateToString(tenantState);
+	if (assignedCluster.present()) {
+		tenantEntry["assigned_cluster"] = assignedCluster.get().toString();
+	}
+	if (tenantGroup.present()) {
+		json_spirit::mObject tenantGroupObject;
+		std::string encodedTenantGroup = base64::encoder::from_string(tenantGroup.get().toString());
+		// Remove trailing newline
+		encodedTenantGroup.resize(encodedTenantGroup.size() - 1);
+
+		tenantGroupObject["base64"] = encodedTenantGroup;
+		tenantGroupObject["printable"] = printable(tenantGroup.get());
+		tenantEntry["tenant_group"] = tenantGroupObject;
+	}
+
+	return json_spirit::write_string(json_spirit::mValue(tenantEntry));
 }
 
 TEST_CASE("/fdbclient/TenantMapEntry/Serialization") {

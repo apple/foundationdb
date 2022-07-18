@@ -95,15 +95,6 @@ void applyConfigurationToSpecialKeys(Reference<ITransaction> tr,
 	}
 }
 
-void applyConfigurationToTenantMapEntry(std::map<Standalone<StringRef>, Optional<Value>> configuration,
-                                        TenantMapEntry& entry) {
-	for (auto [configName, value] : configuration) {
-		if (configName == "tenant_group"_sr) {
-			entry.tenantGroup = value;
-		}
-	}
-}
-
 // createtenant command
 ACTOR Future<bool> createTenantCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	if (tokens.size() < 2 || tokens.size() > 3) {
@@ -123,28 +114,27 @@ ACTOR Future<bool> createTenantCommandActor(Reference<IDatabase> db, std::vector
 	}
 
 	loop {
-		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-
 		try {
-			state Future<ClusterType> clusterTypeFuture = TenantAPI::getClusterType(tr);
-
-			if (!doneExistenceCheck) {
-				// Hold the reference to the standalone's memory
-				state ThreadFuture<Optional<Value>> existingTenantFuture = tr->get(tenantNameKey);
-				Optional<Value> existingTenant = wait(safeThreadFutureToFuture(existingTenantFuture));
-				if (existingTenant.present()) {
-					throw tenant_already_exists();
-				}
-				doneExistenceCheck = true;
-			}
-
-			ClusterType clusterType = wait(clusterTypeFuture);
+			tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			state ClusterType clusterType = wait(TenantAPI::getClusterType(tr));
 			if (clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
 				TenantMapEntry tenantEntry;
-				applyConfigurationToTenantMapEntry(configuration.get(), tenantEntry);
+				for (auto const& [name, value] : configuration.get()) {
+					tenantEntry.configure(name, value);
+				}
 				wait(MetaclusterAPI::createTenant(db, tokens[1], tenantEntry));
 			} else {
+				if (!doneExistenceCheck) {
+					// Hold the reference to the standalone's memory
+					state ThreadFuture<Optional<Value>> existingTenantFuture = tr->get(tenantNameKey);
+					Optional<Value> existingTenant = wait(safeThreadFutureToFuture(existingTenantFuture));
+					if (existingTenant.present()) {
+						throw tenant_already_exists();
+					}
+					doneExistenceCheck = true;
+				}
+
 				tr->set(tenantNameKey, ValueRef());
 				applyConfigurationToSpecialKeys(tr, tokens[1], configuration.get());
 				wait(safeThreadFutureToFuture(tr->commit()));
@@ -185,28 +175,27 @@ ACTOR Future<bool> deleteTenantCommandActor(Reference<IDatabase> db, std::vector
 	state bool doneExistenceCheck = false;
 
 	loop {
-		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		try {
-			state Future<ClusterType> clusterTypeFuture = TenantAPI::getClusterType(tr);
-
-			if (!doneExistenceCheck) {
-				// Hold the reference to the standalone's memory
-				state ThreadFuture<Optional<Value>> existingTenantFuture = tr->get(tenantNameKey);
-				Optional<Value> existingTenant = wait(safeThreadFutureToFuture(existingTenantFuture));
-				if (!existingTenant.present()) {
-					throw tenant_not_found();
-				}
-				doneExistenceCheck = true;
-			}
-
-			ClusterType clusterType = wait(clusterTypeFuture);
+			tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			state ClusterType clusterType = wait(TenantAPI::getClusterType(tr));
 			if (clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
 				wait(MetaclusterAPI::deleteTenant(db, tokens[1]));
 			} else {
+				if (!doneExistenceCheck) {
+					// Hold the reference to the standalone's memory
+					state ThreadFuture<Optional<Value>> existingTenantFuture = tr->get(tenantNameKey);
+					Optional<Value> existingTenant = wait(safeThreadFutureToFuture(existingTenantFuture));
+					if (!existingTenant.present()) {
+						throw tenant_not_found();
+					}
+					doneExistenceCheck = true;
+				}
+
 				tr->clear(tenantNameKey);
 				wait(safeThreadFutureToFuture(tr->commit()));
 			}
+
 			break;
 		} catch (Error& e) {
 			state Error err(e);
@@ -237,8 +226,8 @@ ACTOR Future<bool> listTenantsCommandActor(Reference<IDatabase> db, std::vector<
 		return false;
 	}
 
-	StringRef beginTenant = ""_sr;
-	StringRef endTenant = "\xff\xff"_sr;
+	state StringRef beginTenant = ""_sr;
+	state StringRef endTenant = "\xff\xff"_sr;
 	state int limit = 100;
 
 	if (tokens.size() >= 2) {
@@ -265,12 +254,26 @@ ACTOR Future<bool> listTenantsCommandActor(Reference<IDatabase> db, std::vector<
 
 	loop {
 		try {
-			// Hold the reference to the standalone's memory
-			state ThreadFuture<RangeResult> kvsFuture =
-			    tr->getRange(firstGreaterOrEqual(beginTenantKey), firstGreaterOrEqual(endTenantKey), limit);
-			RangeResult tenants = wait(safeThreadFutureToFuture(kvsFuture));
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			state ClusterType clusterType = wait(TenantAPI::getClusterType(tr));
+			state std::vector<TenantNameRef> tenantNames;
+			if (clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
+				std::vector<std::pair<TenantName, TenantMapEntry>> tenants =
+				    wait(MetaclusterAPI::listTenantsTransaction(tr, beginTenant, endTenant, limit));
+				for (auto tenant : tenants) {
+					tenantNames.push_back(tenant.first);
+				}
+			} else {
+				// Hold the reference to the standalone's memory
+				state ThreadFuture<RangeResult> kvsFuture =
+				    tr->getRange(firstGreaterOrEqual(beginTenantKey), firstGreaterOrEqual(endTenantKey), limit);
+				RangeResult tenants = wait(safeThreadFutureToFuture(kvsFuture));
+				for (auto tenant : tenants) {
+					tenantNames.push_back(tenant.key.removePrefix(tenantMapSpecialKeyRange.begin));
+				}
+			}
 
-			if (tenants.empty()) {
+			if (tenantNames.empty()) {
 				if (tokens.size() == 1) {
 					fmt::print("The cluster has no tenants\n");
 				} else {
@@ -279,9 +282,8 @@ ACTOR Future<bool> listTenantsCommandActor(Reference<IDatabase> db, std::vector<
 			}
 
 			int index = 0;
-			for (auto tenant : tenants) {
-				fmt::print(
-				    "  {}. {}\n", ++index, printable(tenant.key.removePrefix(tenantMapSpecialKeyRange.begin)).c_str());
+			for (auto tenantName : tenantNames) {
+				fmt::print("  {}. {}\n", ++index, printable(tenantName).c_str());
 			}
 
 			return true;
@@ -317,15 +319,24 @@ ACTOR Future<bool> getTenantCommandActor(Reference<IDatabase> db, std::vector<St
 
 	loop {
 		try {
-			// Hold the reference to the standalone's memory
-			state ThreadFuture<Optional<Value>> tenantFuture = tr->get(tenantNameKey);
-			Optional<Value> tenant = wait(safeThreadFutureToFuture(tenantFuture));
-			if (!tenant.present()) {
-				throw tenant_not_found();
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			state ClusterType clusterType = wait(TenantAPI::getClusterType(tr));
+			state std::string tenantJson;
+			if (clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
+				TenantMapEntry entry = wait(MetaclusterAPI::getTenantTransaction(tr, tokens[1]));
+				tenantJson = entry.toJson(apiVersion);
+			} else {
+				// Hold the reference to the standalone's memory
+				state ThreadFuture<Optional<Value>> tenantFuture = tr->get(tenantNameKey);
+				Optional<Value> tenant = wait(safeThreadFutureToFuture(tenantFuture));
+				if (!tenant.present()) {
+					throw tenant_not_found();
+				}
+				tenantJson = tenant.get().toString();
 			}
 
 			json_spirit::mValue jsonObject;
-			json_spirit::read_string(tenant.get().toString(), jsonObject);
+			json_spirit::read_string(tenantJson, jsonObject);
 
 			if (useJson) {
 				json_spirit::mObject resultObj;
@@ -420,10 +431,17 @@ ACTOR Future<bool> configureTenantCommandActor(Reference<IDatabase> db, std::vec
 	state Reference<ITransaction> tr = db->createTransaction();
 
 	loop {
-		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		try {
-			applyConfigurationToSpecialKeys(tr, tokens[1], configuration.get());
-			wait(safeThreadFutureToFuture(tr->commit()));
+			tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			ClusterType clusterType = wait(TenantAPI::getClusterType(tr));
+			if (clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
+				TenantMapEntry tenantEntry;
+				wait(MetaclusterAPI::configureTenant(db, tokens[1], configuration.get()));
+			} else {
+				applyConfigurationToSpecialKeys(tr, tokens[1], configuration.get());
+				wait(safeThreadFutureToFuture(tr->commit()));
+			}
 			break;
 		} catch (Error& e) {
 			state Error err(e);
