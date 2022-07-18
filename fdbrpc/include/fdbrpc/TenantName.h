@@ -1,5 +1,5 @@
 /*
- * TokenCache.h
+ * TenantName.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,20 +18,10 @@
  * limitations under the License.
  */
 
-#ifndef TOKENCACHE_H_
-#define TOKENCACHE_H_
-#include "fdbrpc/TenantName.h"
+#pragma once
+#ifndef FDBRPC_TENANTNAME_H
+#define FDBRPC_TENANTNAME_H
 #include "flow/Arena.h"
-
-class TokenCache : NonCopyable {
-	struct TokenCacheImpl* impl;
-	TokenCache();
-
-public:
-	~TokenCache();
-	static void createInstance();
-	static TokenCache& instance();
-	bool validate(TenantNameRef tenant, StringRef token);
-};
-
-#endif // TOKENCACHE_H_
+typedef StringRef TenantNameRef;
+typedef Standalone<TenantNameRef> TenantName;
+#endif // FDBRPC_TENANTNAME_H

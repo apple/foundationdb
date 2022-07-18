@@ -1,6 +1,7 @@
 #include "fdbrpc/FlowTransport.h"
 #include "fdbrpc/TokenCache.h"
 #include "fdbrpc/TokenSign.h"
+#include "fdbrpc/TenantInfo.h"
 #include "flow/MkCert.h"
 #include "flow/ScopeExit.h"
 #include "flow/UnitTest.h"

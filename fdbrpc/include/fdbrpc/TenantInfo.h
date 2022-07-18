@@ -21,10 +21,11 @@
 #pragma once
 #ifndef FDBRPC_TENANTINFO_H_
 #define FDBRPC_TENANTINFO_H_
+#include "fdbrpc/TenantName.h"
+#include "fdbrpc/TokenSign.h"
+#include "fdbrpc/TokenCache.h"
+#include "fdbrpc/FlowTransport.h"
 #include "flow/Arena.h"
-
-typedef StringRef TenantNameRef;
-typedef Standalone<TenantNameRef> TenantName;
 
 struct TenantInfo {
 	static const int64_t INVALID_TENANT = -1;
@@ -57,6 +58,22 @@ struct TenantInfo {
 		if (token.present()) {
 			arena.dependsOn(token.get().arena());
 			this->token = token.get();
+		}
+	}
+};
+
+template <>
+struct serializable_traits<TenantInfo> : std::true_type {
+	template <class Archiver>
+	static void serialize(Archiver& ar, TenantInfo& v) {
+		serializer(ar, v.name, v.tenantId, v.token, v.arena);
+		if constexpr (Archiver::isDeserializing) {
+			bool tenantAuthorized = false;
+			if (v.name.present() && v.token.present()) {
+				tenantAuthorized = TokenCache::instance().validate(v.name.get(), v.token.get());
+			}
+			v.trusted = FlowTransport::transport().currentDeliveryPeerIsTrusted();
+			v.verified = v.trusted || !v.name.present() || tenantAuthorized;
 		}
 	}
 };
