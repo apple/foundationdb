@@ -26,7 +26,7 @@
 #include <map>
 #include <fmt/format.h>
 #include <boost/core/demangle.hpp>
-#include <boost/unordered_set.hpp>
+#include <boost/unordered_map.hpp>
 #include <typeinfo>
 
 namespace probe {
@@ -227,13 +227,17 @@ size_t hash_value(CodeProbes::Location const& location) {
 }
 
 void CodeProbes::traceMissedProbes(Optional<ExecutionContext> context) const {
-	boost::unordered_set<Location> tracedLocations;
+	boost::unordered_map<Location, bool> locations;
 	for (auto probe : codeProbes) {
-		if (tracedLocations.count(probe.first) > 0) {
-			continue;
-		}
-		tracedLocations.insert(probe.first);
-		if (!probe.second->wasHit()) {
+		decltype(locations.begin()) iter;
+		std::tie(iter, std::ignore) = locations.emplace(probe.first, false);
+		iter->second = iter->second || probe.second->wasHit();
+	}
+	for (auto probe : codeProbes) {
+		auto iter = locations.find(probe.first);
+		ASSERT(iter != locations.end());
+		if (!iter->second) {
+			iter->second = true;
 			probe.second->trace(false);
 		}
 	}
