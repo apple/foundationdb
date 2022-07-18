@@ -327,7 +327,8 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 
 		// Stop the differential backup, if enabled
 		if (stopDifferentialDelay) {
-			CODE_PROBE(!stopDifferentialFuture.isReady(), "Restore starts at specified time - stopDifferential not ready");
+			CODE_PROBE(!stopDifferentialFuture.isReady(),
+			           "Restore starts at specified time - stopDifferential not ready");
 			wait(stopDifferentialFuture);
 			TraceEvent("BARW_DoBackupWaitToDiscontinue", randomID)
 			    .detail("Tag", printable(tag))

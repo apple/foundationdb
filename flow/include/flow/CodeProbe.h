@@ -209,7 +209,6 @@ struct ICodeProbe {
 };
 
 void registerProbe(ICodeProbe const& probe);
-void printMissedProbes();
 std::string functionNameFromInnerType(const char* name);
 
 template <class FileName, class Condition, class Comment, class CompUnit, unsigned Line, class Annotations>

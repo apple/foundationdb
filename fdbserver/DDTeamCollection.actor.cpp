@@ -943,7 +943,7 @@ public:
 										}
 									} else {
 										CODE_PROBE(true, "A removed server is still associated with a team in");
-										            // ShardsAffectedByTeamFailure
+										// ShardsAffectedByTeamFailure
 									}
 								}
 							}
@@ -2596,8 +2596,9 @@ public:
 								// successfully started recruitment of pair, reset tss recruitment state
 								tssState = makeReference<TSSPairState>();
 							} else {
-								CODE_PROBE(tssState->active, "TSS recruitment skipped potential pair because it's in a");
-								                        // different dc/datahall
+								CODE_PROBE(tssState->active,
+								           "TSS recruitment skipped potential pair because it's in a");
+								// different dc/datahall
 								self->addActor.send(initializeStorage(
 								    self, candidateWorker, ddEnabledState, false, makeReference<TSSPairState>()));
 							}
@@ -2618,7 +2619,8 @@ public:
 						                         std::max(-tssToRecruit, self->zeroHealthyTeams->get() ? 1 : 0));
 						if (cancelTss) {
 							CODE_PROBE(tssToRecruit < 0, "tss recruitment cancelled due to too many TSS");
-							CODE_PROBE(self->zeroHealthyTeams->get(), "tss recruitment cancelled due zero healthy teams");
+							CODE_PROBE(self->zeroHealthyTeams->get(),
+							           "tss recruitment cancelled due zero healthy teams");
 
 							TraceEvent(SevWarn, "TSS_RecruitCancelled", self->distributorId)
 							    .detail("Reason", tssToRecruit <= 0 ? "TooMany" : "ZeroHealthyTeams");

@@ -1617,7 +1617,8 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 	// client may get a commit version that the master is not aware of, and next GRV request may get a version less than
 	// self->committedVersion.
 
-	CODE_PROBE(pProxyCommitData->committedVersion.get() > self->commitVersion, "later version was reported committed first");
+	CODE_PROBE(pProxyCommitData->committedVersion.get() > self->commitVersion,
+	           "later version was reported committed first");
 
 	if (self->commitVersion >= pProxyCommitData->committedVersion.get()) {
 		state Optional<std::set<Tag>> writtenTags;

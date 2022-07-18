@@ -196,8 +196,9 @@ Future<Void> tssComparison(Req req,
 					TSS_traceMismatch(mismatchEvent, req, src.get(), tss.get().get());
 
 					CODE_PROBE(FLOW_KNOBS->LOAD_BALANCE_TSS_MISMATCH_TRACE_FULL, "Tracing Full TSS Mismatch");
-					CODE_PROBE(!FLOW_KNOBS->LOAD_BALANCE_TSS_MISMATCH_TRACE_FULL, "Tracing Partial TSS Mismatch and storing");
-					                                                         // the rest in FDB
+					CODE_PROBE(!FLOW_KNOBS->LOAD_BALANCE_TSS_MISMATCH_TRACE_FULL,
+					           "Tracing Partial TSS Mismatch and storing");
+					// the rest in FDB
 
 					if (!FLOW_KNOBS->LOAD_BALANCE_TSS_MISMATCH_TRACE_FULL) {
 						mismatchEvent.disable();

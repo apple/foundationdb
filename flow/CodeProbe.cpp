@@ -19,6 +19,7 @@
  */
 
 #include "flow/CodeProbe.h"
+#include "flow/CodeProbeUtils.h"
 #include "flow/Arena.h"
 #include "flow/network.h"
 
@@ -101,10 +102,11 @@ struct CodeProbes {
 
 	std::multimap<Location, ICodeProbe const*> codeProbes;
 
-	void printNotHit() const {
+	void traceMissedProbes(Optional<ExecutionContext> context) const {
 		const ICodeProbe* prev = nullptr;
 		for (auto probe : codeProbes) {
-			if (!probe.second->wasHit() && *prev != *probe.second) {
+			if (!probe.second->wasHit() && (!context.present() || probe.second->expectInContext(context.get())) &&
+			    *prev != *probe.second) {
 				probe.second->trace(false);
 			}
 		}
@@ -237,8 +239,8 @@ void registerProbe(const ICodeProbe& probe) {
 	CodeProbes::instance().add(&probe);
 }
 
-void printMissedProbes() {
-	CodeProbes::instance().printNotHit();
+void traceMissedProbes(Optional<ExecutionContext> context) {
+	CodeProbes::instance().traceMissedProbes(context);
 }
 
 ICodeProbe::~ICodeProbe() {}

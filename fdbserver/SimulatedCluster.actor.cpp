@@ -46,6 +46,7 @@
 #include "flow/network.h"
 #include "flow/TypeTraits.h"
 #include "flow/FaultInjection.h"
+#include "flow/CodeProbeUtils.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 #undef max
@@ -2507,6 +2508,8 @@ ACTOR void setupAndRun(std::string dataFolder,
 		TraceEvent(SevError, "SetupAndRunError").error(e);
 	}
 
+	TraceEvent("TracingMissingCodeProbes").log();
+	probe::traceMissedProbes(probe::ExecutionContext::Simulation);
 	TraceEvent("SimulatedSystemDestruct").log();
 	g_simulator.stop();
 	destructed = true;
