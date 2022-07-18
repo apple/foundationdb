@@ -939,7 +939,8 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 
 		if (self->clientId == 0 && SERVER_KNOBS->BG_ENABLE_MERGING && self->doMergeCheckAtEnd) {
 			TEST(true); // BGCorrectness clearing database and awaiting merge
-			wait(clearAndAwaitMerge(cx, threadData->directoryRange));
+			// TODO: Enable check
+			// wait(clearAndAwaitMerge(cx, threadData->directoryRange));
 		}
 
 		return result;

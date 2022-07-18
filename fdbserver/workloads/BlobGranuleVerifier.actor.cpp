@@ -473,7 +473,8 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 
 		if (self->clientId == 0 && SERVER_KNOBS->BG_ENABLE_MERGING && deterministicRandom()->random01() < 0.1) {
 			TEST(true); // BGV clearing database and awaiting merge
-			wait(clearAndAwaitMerge(cx, normalKeys));
+			// TODO: Enable check
+			// wait(clearAndAwaitMerge(cx, normalKeys));
 		}
 
 		return result;
