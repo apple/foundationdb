@@ -51,7 +51,7 @@
  * The Blob Manager is responsible for managing range granules, and recruiting and monitoring Blob Workers.
  */
 
-#define BM_DEBUG true
+#define BM_DEBUG false
 
 void handleClientBlobRange(KeyRangeMap<bool>* knownBlobRanges,
                            Arena& ar,
@@ -1835,8 +1835,6 @@ ACTOR Future<Void> attemptMerges(Reference<BlobManagerData> bmData,
 	state int currentKeySumBytes = 0;
 	state std::vector<std::tuple<UID, KeyRange, Version>> currentCandidates;
 	state int i;
-	// FIXME: may also want to limit number of granules so the sum of their keys fits in a single fdb value for the
-	// merge intent
 	for (i = 0; i < candidates.size(); i++) {
 		StorageMetrics metrics =
 		    wait(bmData->db->getStorageMetrics(std::get<1>(candidates[i]), CLIENT_KNOBS->TOO_MANY));
