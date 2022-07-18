@@ -95,7 +95,7 @@ Future<Void> checkTenantMode(Transaction tr, ClusterType expectedClusterType) {
 
 	TenantMode tenantMode = TenantMode::fromValue(tenantModeValue.castTo<ValueRef>());
 	if (actualClusterType != expectedClusterType) {
-		throw tenants_disabled();
+		throw invalid_metacluster_operation();
 	} else if (actualClusterType == ClusterType::STANDALONE && tenantMode == TenantMode::DISABLED) {
 		throw tenants_disabled();
 	}

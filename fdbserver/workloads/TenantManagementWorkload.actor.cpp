@@ -468,11 +468,8 @@ struct TenantManagementWorkload : TestWorkload {
 				if (e.code() == error_code_invalid_tenant_name) {
 					ASSERT(hasSystemTenant);
 					return Void();
-				} else if (e.code() == error_code_tenants_disabled) {
-					ASSERT((operationType == OperationType::METACLUSTER) != self->useMetacluster);
-					return Void();
 				} else if (e.code() == error_code_invalid_metacluster_operation) {
-					ASSERT(operationType == OperationType::METACLUSTER && !self->useMetacluster);
+					ASSERT(operationType == OperationType::METACLUSTER != self->useMetacluster);
 					return Void();
 				}
 
@@ -707,11 +704,8 @@ struct TenantManagementWorkload : TestWorkload {
 				if (e.code() == error_code_tenant_not_empty) {
 					ASSERT(!isEmpty);
 					return Void();
-				} else if (e.code() == error_code_tenants_disabled) {
-					ASSERT((operationType == OperationType::METACLUSTER) != self->useMetacluster);
-					return Void();
 				} else if (e.code() == error_code_invalid_metacluster_operation) {
-					ASSERT(operationType == OperationType::METACLUSTER && !self->useMetacluster);
+					ASSERT(operationType == OperationType::METACLUSTER != self->useMetacluster);
 					return Void();
 				}
 
@@ -1198,11 +1192,8 @@ struct TenantManagementWorkload : TestWorkload {
 				} else if (e.code() == error_code_invalid_tenant_configuration) {
 					ASSERT(hasInvalidOption || hasInvalidTenantGroupChange);
 					return Void();
-				} else if (e.code() == error_code_tenants_disabled) {
-					ASSERT((operationType == OperationType::METACLUSTER) != self->useMetacluster);
-					return Void();
 				} else if (e.code() == error_code_invalid_metacluster_operation) {
-					ASSERT(operationType == OperationType::METACLUSTER && !self->useMetacluster);
+					ASSERT(operationType == OperationType::METACLUSTER != self->useMetacluster);
 					return Void();
 				}
 

@@ -115,8 +115,6 @@ struct ManagementClusterMetadata {
 	static KeyBackedObjectMap<TenantGroupName, TenantGroupEntry, decltype(IncludeVersion())> tenantGroupMap;
 };
 
-ACTOR Future<Reference<IDatabase>> openDatabase(ClusterConnectionString connectionString);
-
 template <class Transaction>
 Future<Optional<TenantMapEntry>> tryGetTenantTransaction(Transaction tr, TenantName name) {
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
@@ -160,22 +158,12 @@ Future<TenantMapEntry> getTenant(Reference<DB> db, TenantName name) {
 }
 
 ACTOR template <class Transaction>
-Future<MetaclusterRegistrationEntry> getManagementMetaclusterRegistration(Transaction tr) {
-	state Optional<MetaclusterRegistrationEntry> metaclusterRegistration =
-	    wait(MetaclusterMetadata::metaclusterRegistration.get(tr));
-	if (!metaclusterRegistration.present() ||
-	    metaclusterRegistration.get().clusterType != ClusterType::METACLUSTER_MANAGEMENT) {
-		throw invalid_metacluster_operation();
-	}
-
-	return metaclusterRegistration.get();
-}
-
-ACTOR template <class Transaction>
 Future<Optional<DataClusterMetadata>> tryGetClusterTransaction(Transaction tr, ClusterName name) {
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 
-	state Future<Void> metaclusterRegistrationCheck = success(getManagementMetaclusterRegistration(tr));
+	state Future<Void> metaclusterRegistrationCheck =
+	    TenantAPI::checkTenantMode(tr, ClusterType::METACLUSTER_MANAGEMENT);
+
 	state Future<Optional<DataClusterEntry>> clusterEntryFuture = ManagementClusterMetadata::dataClusters.get(tr, name);
 	state Future<Optional<ClusterConnectionString>> connectionRecordFuture =
 	    ManagementClusterMetadata::dataClusterConnectionRecords.get(tr, name);
@@ -226,6 +214,15 @@ Future<DataClusterMetadata> getCluster(Reference<DB> db, ClusterName name) {
 	}
 
 	return metadata.get();
+}
+
+ACTOR Future<Reference<IDatabase>> openDatabase(ClusterConnectionString connectionString);
+
+ACTOR template <class Transaction>
+Future<Reference<IDatabase>> getAndOpenDatabase(Transaction managementTr, ClusterName clusterName) {
+	DataClusterMetadata clusterMetadata = wait(getClusterTransaction(managementTr, clusterName));
+	Reference<IDatabase> db = wait(openDatabase(clusterMetadata.connectionString));
+	return db;
 }
 
 ACTOR template <class Transaction>
@@ -372,14 +369,21 @@ Future<std::pair<MetaclusterRegistrationEntry, bool>>
 managementClusterRegisterPrecheck(Transaction tr, ClusterNameRef name, Optional<DataClusterMetadata> metadata) {
 	state Future<Optional<DataClusterMetadata>> dataClusterMetadataFuture = tryGetClusterTransaction(tr, name);
 
-	state MetaclusterRegistrationEntry metaclusterRegistration = wait(getManagementMetaclusterRegistration(tr));
+	state Optional<MetaclusterRegistrationEntry> metaclusterRegistration =
+	    wait(MetaclusterMetadata::metaclusterRegistration.get(tr));
+
+	if (!metaclusterRegistration.present() ||
+	    metaclusterRegistration.get().clusterType != ClusterType::METACLUSTER_MANAGEMENT) {
+		throw invalid_metacluster_operation();
+	}
+
 	state Optional<DataClusterMetadata> dataClusterMetadata = wait(dataClusterMetadataFuture);
 	if (dataClusterMetadata.present() &&
 	    (!metadata.present() || !metadata.get().matchesConfiguration(dataClusterMetadata.get()))) {
 		throw cluster_already_exists();
 	}
 
-	return std::make_pair(metaclusterRegistration, dataClusterMetadata.present());
+	return std::make_pair(metaclusterRegistration.get(), dataClusterMetadata.present());
 }
 
 ACTOR template <class Transaction>
@@ -819,14 +823,14 @@ Future<std::map<ClusterName, DataClusterMetadata>> listClustersTransaction(Trans
                                                                            int limit) {
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 
-	state Future<Void> metaclusterRegistrationCheck = success(getManagementMetaclusterRegistration(tr));
+	state Future<Void> tenantModeCheck = TenantAPI::checkTenantMode(tr, ClusterType::METACLUSTER_MANAGEMENT);
 
 	state Future<KeyBackedRangeResult<std::pair<ClusterName, DataClusterEntry>>> clusterEntriesFuture =
 	    ManagementClusterMetadata::dataClusters.getRange(tr, begin, end, limit);
 	state Future<KeyBackedRangeResult<std::pair<ClusterName, ClusterConnectionString>>> connectionStringFuture =
 	    ManagementClusterMetadata::dataClusterConnectionRecords.getRange(tr, begin, end, limit);
 
-	wait(metaclusterRegistrationCheck);
+	wait(tenantModeCheck);
 
 	state KeyBackedRangeResult<std::pair<ClusterName, DataClusterEntry>> clusterEntries =
 	    wait(safeThreadFutureToFuture(clusterEntriesFuture));
@@ -877,6 +881,22 @@ struct CreateTenantImpl {
 	CreateTenantImpl(Reference<DB> managementDb, TenantName tenantName, TenantMapEntry tenantEntry)
 	  : managementDb(managementDb), tenantName(tenantName), tenantEntry(tenantEntry) {}
 
+	ACTOR static Future<ClusterName> checkClusterAvailability(Reference<IDatabase> dataClusterDb,
+	                                                          ClusterName clusterName) {
+		state Reference<ITransaction> tr = dataClusterDb->createTransaction();
+		loop {
+			try {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->addWriteConflictRange(KeyRangeRef("\xff/metacluster/availability_check"_sr,
+				                                      "\xff/metacluster/availability_check\x00"_sr));
+				wait(safeThreadFutureToFuture(tr->commit()));
+				return clusterName;
+			} catch (Error& e) {
+				wait(safeThreadFutureToFuture(tr->onError(e)));
+			}
+		}
+	}
+
 	ACTOR static Future<std::pair<ClusterName, DataClusterMetadata>> assignTenant(
 	    CreateTenantImpl* self,
 	    Reference<typename DB::TransactionT> tr) {
@@ -899,35 +919,63 @@ struct CreateTenantImpl {
 			}
 		}
 
-		state KeyBackedSet<Tuple>::RangeResultType availableClusters = wait(
-		    ManagementClusterMetadata::clusterCapacityIndex.getRange(tr, {}, {}, 1, Snapshot::False, Reverse::True));
+		state KeyBackedSet<Tuple>::RangeResultType availableClusters =
+		    wait(ManagementClusterMetadata::clusterCapacityIndex.getRange(
+		        tr, {}, {}, CLIENT_KNOBS->METACLUSTER_ASSIGNMENT_CLUSTERS_TO_CHECK, Snapshot::False, Reverse::True));
+
+		if (availableClusters.results.empty()) {
+			throw metacluster_no_capacity();
+		}
+
+		state std::vector<Future<Reference<IDatabase>>> dataClusterDbs;
+		for (auto clusterTuple : availableClusters.results) {
+			dataClusterDbs.push_back(getAndOpenDatabase(tr, clusterTuple.getString(1)));
+		}
+
+		wait(waitForAll(dataClusterDbs));
+
+		state std::vector<Future<ClusterName>> clusterAvailabilityChecks;
+		for (int i = 0; i < availableClusters.results.size(); ++i) {
+			clusterAvailabilityChecks.push_back(
+			    checkClusterAvailability(dataClusterDbs[i].get(), availableClusters.results[i].getString(1)));
+		}
+
+		Optional<Void> clusterAvailabilityCheck = wait(timeout(
+		    success(clusterAvailabilityChecks[0]) || (delay(CLIENT_KNOBS->METACLUSTER_ASSIGNMENT_FIRST_CHOICE_DELAY) &&
+		                                              waitForAny(clusterAvailabilityChecks)),
+		    CLIENT_KNOBS->METACLUSTER_ASSIGNMENT_AVAILABILITY_TIMEOUT));
+
+		if (!clusterAvailabilityCheck.present()) {
+			// If no clusters were available for long enough, then we throw an error and try again
+			throw transaction_too_old();
+		}
 
 		state Optional<ClusterName> chosenCluster;
-		if (!availableClusters.results.empty()) {
-			// TODO: check that the chosen cluster is available, otherwise we can try another
-			chosenCluster = availableClusters.results[0].getString(1);
-		}
-
-		if (chosenCluster.present()) {
-			Optional<DataClusterMetadata> clusterMetadata = wait(tryGetClusterTransaction(tr, chosenCluster.get()));
-			ASSERT(clusterMetadata.present());
-
-			DataClusterEntry clusterEntry = clusterMetadata.get().entry;
-			ASSERT(clusterEntry.hasCapacity());
-
-			++clusterEntry.allocated.numTenantGroups;
-
-			updateClusterMetadata(
-			    tr, chosenCluster.get(), clusterMetadata.get(), Optional<ClusterConnectionString>(), clusterEntry);
-			if (self->tenantEntry.tenantGroup.present()) {
-				ManagementClusterMetadata::tenantGroupMap.set(
-				    tr, self->tenantEntry.tenantGroup.get(), TenantGroupEntry(chosenCluster.get()));
+		for (auto f : clusterAvailabilityChecks) {
+			if (f.isReady()) {
+				chosenCluster = f.get();
+				break;
 			}
-
-			return std::make_pair(chosenCluster.get(), clusterMetadata.get());
 		}
 
-		throw metacluster_no_capacity();
+		ASSERT(chosenCluster.present());
+
+		Optional<DataClusterMetadata> clusterMetadata = wait(tryGetClusterTransaction(tr, chosenCluster.get()));
+		ASSERT(clusterMetadata.present());
+
+		DataClusterEntry clusterEntry = clusterMetadata.get().entry;
+		ASSERT(clusterEntry.hasCapacity());
+
+		++clusterEntry.allocated.numTenantGroups;
+
+		updateClusterMetadata(
+		    tr, chosenCluster.get(), clusterMetadata.get(), Optional<ClusterConnectionString>(), clusterEntry);
+		if (self->tenantEntry.tenantGroup.present()) {
+			ManagementClusterMetadata::tenantGroupMap.set(
+			    tr, self->tenantEntry.tenantGroup.get(), TenantGroupEntry(chosenCluster.get()));
+		}
+
+		return std::make_pair(chosenCluster.get(), clusterMetadata.get());
 	}
 
 	ACTOR static Future<std::pair<TenantMapEntry, bool>> managementClusterCreateTenant(
@@ -966,7 +1014,7 @@ struct CreateTenantImpl {
 
 				state Future<std::pair<ClusterName, DataClusterMetadata>> assignmentFuture = assignTenant(self, tr);
 
-				wait(success(getManagementMetaclusterRegistration(tr)));
+				wait(success(TenantAPI::checkTenantMode(tr, ClusterType::METACLUSTER_MANAGEMENT)));
 
 				std::pair<ClusterName, DataClusterMetadata> assignment = wait(assignmentFuture);
 				self->tenantEntry.assignedCluster = assignment.first;
@@ -1031,9 +1079,10 @@ struct CreateTenantImpl {
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				state Future<Void> metaclusterRegistrationCheck = success(getManagementMetaclusterRegistration(tr));
+				state Future<Void> tenantModeCheck =
+				    TenantAPI::checkTenantMode(tr, ClusterType::METACLUSTER_MANAGEMENT);
 				state Optional<TenantMapEntry> managementEntry = wait(tryGetTenantTransaction(tr, self->tenantName));
-				wait(metaclusterRegistrationCheck);
+				wait(tenantModeCheck);
 				if (!managementEntry.present()) {
 					throw tenant_removed();
 				} else if (managementEntry.get().id != self->tenantEntry.id) {
@@ -1160,10 +1209,11 @@ struct DeleteTenantImpl {
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				state Future<Void> managementRegistrationCheck = success(getManagementMetaclusterRegistration(tr));
+				state Future<Void> tenantModeCheck =
+				    TenantAPI::checkTenantMode(tr, ClusterType::METACLUSTER_MANAGEMENT);
 
 				state Optional<TenantMapEntry> tenantEntry = wait(tryGetTenantTransaction(tr, self->tenantName));
-				wait(managementRegistrationCheck);
+				wait(tenantModeCheck);
 
 				if (!tenantEntry.present()) {
 					throw tenant_not_found();
@@ -1220,9 +1270,10 @@ struct DeleteTenantImpl {
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				state Future<Void> managementRegistrationCheck = success(getManagementMetaclusterRegistration(tr));
+				state Future<Void> tenantModeCheck =
+				    TenantAPI::checkTenantMode(tr, ClusterType::METACLUSTER_MANAGEMENT);
 				state Optional<TenantMapEntry> tenantEntry = wait(tryGetTenantTransaction(tr, self->tenantName));
-				wait(managementRegistrationCheck);
+				wait(tenantModeCheck);
 
 				if (!tenantEntry.present() || tenantEntry.get().id != self->tenantId) {
 					// The tenant must have been removed simultaneously
@@ -1248,9 +1299,10 @@ struct DeleteTenantImpl {
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				state Future<Void> metaclusterRegistrationCheck = success(getManagementMetaclusterRegistration(tr));
+				state Future<Void> tenantModeCheck =
+				    TenantAPI::checkTenantMode(tr, ClusterType::METACLUSTER_MANAGEMENT);
 				state Optional<TenantMapEntry> tenantEntry = wait(tryGetTenantTransaction(tr, self->tenantName));
-				wait(metaclusterRegistrationCheck);
+				wait(tenantModeCheck);
 
 				if (!tenantEntry.present() || tenantEntry.get().id != self->tenantId) {
 					return Void();
@@ -1365,10 +1417,11 @@ struct ConfigureTenantImpl {
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				state Future<Void> metaclusterRegistrationCheck = success(getManagementMetaclusterRegistration(tr));
+				state Future<Void> tenantModeCheck =
+				    TenantAPI::checkTenantMode(tr, ClusterType::METACLUSTER_MANAGEMENT);
 
 				state Optional<TenantMapEntry> tenantEntry = wait(tryGetTenantTransaction(tr, self->tenantName));
-				wait(metaclusterRegistrationCheck);
+				wait(tenantModeCheck);
 
 				if (!tenantEntry.present()) {
 					throw tenant_not_found();
@@ -1463,10 +1516,11 @@ struct ConfigureTenantImpl {
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				state Future<Void> metaclusterRegistrationCheck = success(getManagementMetaclusterRegistration(tr));
+				state Future<Void> tenantModeCheck =
+				    TenantAPI::checkTenantMode(tr, ClusterType::METACLUSTER_MANAGEMENT);
 
 				state Optional<TenantMapEntry> tenantEntry = wait(tryGetTenantTransaction(tr, self->tenantName));
-				wait(metaclusterRegistrationCheck);
+				wait(tenantModeCheck);
 
 				if (!tenantEntry.present() || tenantEntry.get().id != self->updatedEntry.id ||
 				    tenantEntry.get().tenantState != TenantState::UPDATING_CONFIGURATION ||
