@@ -1129,8 +1129,7 @@ ACTOR Future<BlobFileIndex> checkSplitAndReSnapshot(Reference<BlobWorkerData> bw
 				if (e.code() == error_code_operation_cancelled) {
 					throw e;
 				}
-				CODE_PROBE(true, "Blob worker re-sending split evaluation to manager after not error/not hearing");
-				// back
+				CODE_PROBE(true, "Blob worker re-sending split evaluation to manager after not error/not hearing back");
 				// if we got broken promise while waiting, the old stream was killed, so we don't need to wait
 				// on change, just retry
 				if (e.code() == error_code_broken_promise) {

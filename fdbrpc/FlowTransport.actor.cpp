@@ -615,8 +615,8 @@ ACTOR Future<Void> connectionWriter(Reference<Peer> self, Reference<IConnection>
 				break;
 			}
 
-			CODE_PROBE(true, "We didn't write everything, so apparently the write buffer is full.  Wait for it to be");
-			// nonfull.
+			CODE_PROBE(
+			    true, "We didn't write everything, so apparently the write buffer is full.  Wait for it to be nonfull");
 			wait(conn->onWritable());
 			wait(yield(TaskPriority::WriteSocket));
 		}

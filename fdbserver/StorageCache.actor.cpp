@@ -1963,8 +1963,7 @@ ACTOR Future<Void> pullAsyncData(StorageCacheData* data) {
 					}
 					if (data->cacheRangeChangeCounter == changeCounter)
 						break;
-					// CODE_PROBE(true, "A fetchKeys completed while we were doing this, so eager might be outdated.
-					// Read"); it again.
+					// CODE_PROBE(true, "A fetchKeys completed while we were doing this, so eager might be outdated.");
 				}
 			}
 

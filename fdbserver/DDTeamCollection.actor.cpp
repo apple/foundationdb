@@ -942,8 +942,9 @@ public:
 											                                : SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY);
 										}
 									} else {
-										CODE_PROBE(true, "A removed server is still associated with a team in");
-										// ShardsAffectedByTeamFailure
+										CODE_PROBE(true,
+										           "A removed server is still associated with a team in "
+										           "ShardsAffectedByTeamFailure");
 									}
 								}
 							}
