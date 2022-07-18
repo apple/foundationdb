@@ -35,6 +35,7 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/SystemData.h"
+#include "fdbclient/Tuple.h"
 #include "fdbserver/BlobManagerInterface.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/BlobGranuleValidation.actor.h"
@@ -424,6 +425,83 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 	}
 };
 
+// Helper function for alignKeys().
+// This attempts to do truncation and compares with the last key in alignedKeys.
+static void alignKeyBoundary(Reference<GranuleTenantData> tenantData,
+                             KeyRef key,
+                             int offset,
+                             Standalone<VectorRef<KeyRef>>& alignedKeys) {
+	KeyRef alignedKey = key;
+	Tuple t, t2;
+
+	if (!offset) {
+		alignedKeys.push_back_deep(alignedKeys.arena(), alignedKey);
+		return;
+	}
+
+	// If this is tenant aware code.
+	if (tenantData.isValid()) {
+		alignedKey = alignedKey.removePrefix(tenantData->entry.prefix);
+	}
+	try {
+		t = Tuple::unpack(alignedKey, true);
+		if (t.size() > offset) {
+			t2 = t.subTuple(0, t.size() - offset);
+			alignedKey = t2.pack();
+		}
+	} catch (Error& e) {
+		if (e.code() != error_code_invalid_tuple_data_type) {
+			throw;
+		}
+	}
+	if (tenantData.isValid()) {
+		alignedKey = alignedKey.withPrefix(tenantData->entry.prefix, alignedKeys.arena());
+	}
+
+	// Only add the alignedKey if it's larger than the last key. If it's the same, drop the split.
+	if (alignedKey > alignedKeys.back()) {
+		alignedKeys.push_back_deep(alignedKeys.arena(), alignedKey);
+	}
+}
+
+ACTOR Future<Standalone<VectorRef<KeyRef>>> alignKeys(Reference<BlobManagerData> bmData,
+                                                      KeyRange granuleRange,
+                                                      Standalone<VectorRef<KeyRef>> splits) {
+	state Standalone<VectorRef<KeyRef>> alignedKeys;
+	alignedKeys.push_back_deep(alignedKeys.arena(), splits.front());
+
+	state int offset = SERVER_KNOBS->BG_KEY_TUPLE_TRUNCATE_OFFSET;
+	if (offset <= 0) {
+		return splits;
+	}
+
+	state Transaction tr = Transaction(bmData->db);
+	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+	state int idx = 1;
+	for (; idx < splits.size() - 1; idx++) {
+		loop {
+			try {
+				// Get the next full key in the granule.
+				RangeResult nextKeyRes = wait(
+				    tr.getRange(firstGreaterOrEqual(splits[idx]), lastLessThan(splits[idx + 1]), GetRangeLimits(1)));
+				if (nextKeyRes.size() == 0) {
+					break;
+				}
+
+				Reference<GranuleTenantData> tenantData = bmData->tenantData.getDataForGranule(granuleRange);
+				alignKeyBoundary(tenantData, nextKeyRes[0].key, offset, alignedKeys);
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+
+	alignedKeys.push_back_deep(alignedKeys.arena(), splits.back());
+
+	return alignedKeys;
+}
+
 ACTOR Future<Standalone<VectorRef<KeyRef>>> splitRange(Reference<BlobManagerData> bmData,
                                                        KeyRange range,
                                                        bool writeHot,
@@ -489,6 +567,12 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitRange(Reference<BlobManagerData
 					}
 					break;
 				}
+			}
+
+			// We only need to align the keys if there is a proposed split.
+			if (keys.size() > 2) {
+				Standalone<VectorRef<KeyRef>> _keys = wait(alignKeys(bmData, range, keys));
+				keys = _keys;
 			}
 
 			ASSERT(keys.size() >= 2);
@@ -1131,9 +1215,9 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
                                    int64_t originalEpoch,
                                    int64_t originalSeqno) {
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
-	state Standalone<VectorRef<KeyRef>> newRanges;
 
 	// first get ranges to split
+	state Standalone<VectorRef<KeyRef>> newRanges;
 	Standalone<VectorRef<KeyRef>> _newRanges = wait(splitRange(bmData, granuleRange, writeHot, false));
 	newRanges = _newRanges;
 
