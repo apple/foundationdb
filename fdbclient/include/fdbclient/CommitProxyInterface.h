@@ -176,7 +176,7 @@ struct CommitTransactionRequest : TimedRequest {
 	CommitTransactionRequest() : CommitTransactionRequest(SpanContext()) {}
 	CommitTransactionRequest(SpanContext const& context) : spanContext(context), flags(0) {}
 
-	bool verify() const { return tenantInfo.hasAuthorizedTenant(); }
+	bool verify() const { return tenantInfo.empty() || tenantInfo.hasAuthorizedTenant(); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -356,7 +356,7 @@ struct GetKeyServerLocationsRequest {
 	  : arena(arena), spanContext(spanContext), tenant(tenant), begin(begin), end(end), limit(limit), reverse(reverse),
 	    minTenantVersion(minTenantVersion) {}
 
-	bool verify() const { return tenant.hasAuthorizedTenant(); }
+	bool verify() const { return tenant.empty() || tenant.hasAuthorizedTenant(); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {

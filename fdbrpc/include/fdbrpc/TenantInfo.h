@@ -45,6 +45,8 @@ struct TenantInfo {
 	// the client is trying to access data of a tenant it is authorized to use.
 	bool hasAuthorizedTenant() const { return trusted || (name.present() && verified); }
 
+	bool empty() const { return !name.present() && tenantId == INVALID_TENANT; }
+
 	TenantInfo() : tenantId(INVALID_TENANT) {}
 	TenantInfo(Optional<TenantName> const& tenantName, Optional<Standalone<StringRef>> const& token, int64_t tenantId)
 	  : tenantId(tenantId) {

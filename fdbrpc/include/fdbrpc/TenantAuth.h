@@ -37,19 +37,6 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
-// TODO: receive and validate token instead
-struct AuthorizationRequest {
-	constexpr static FileIdentifier file_identifier = 11499331;
-
-	Arena arena;
-	VectorRef<StringRef> tokens;
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, tokens, arena);
-	}
-};
-
 template <>
 struct serializable_traits<TenantInfo> : std::true_type {
 	template <class Archiver>

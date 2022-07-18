@@ -6117,7 +6117,6 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 		}
 
 		req.tenantInfo = trState->getTenantInfo();
-
 		startTime = now();
 		state Optional<UID> commitID = Optional<UID>();
 
@@ -6619,8 +6618,10 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 		break;
 
 	case FDBTransactionOptions::AUTHORIZATION_TOKEN:
-		validateOptionValuePresent(value);
-		trState->setToken(value.get());
+		if (value.present())
+			trState->setToken(value.get());
+		else
+			trState->clearToken();
 		break;
 
 	default:

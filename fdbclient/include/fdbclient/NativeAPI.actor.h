@@ -278,6 +278,7 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 	bool hasTenant() const;
 
 	void setToken(Standalone<StringRef> token) { authToken_ = token; }
+	void clearToken() { authToken_.reset(); }
 
 private:
 	Optional<TenantName> tenant_;

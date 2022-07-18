@@ -31,7 +31,7 @@
 #include "fdbrpc/LoadBalance.actor.h"
 #include "fdbrpc/Stats.h"
 #include "fdbrpc/TimedRequest.h"
-#include "fdbrpc/TenantAuth.actor.h"
+#include "fdbrpc/TenantAuth.h"
 #include "fdbrpc/TSSComparison.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/TagThrottle.actor.h"
@@ -268,7 +268,7 @@ struct GetValueRequest : TimedRequest {
 	                                      // to this client, of all storage replicas that
 	                                      // serve the given key
 
-	bool verify() const { return tenantInfo.hasAuthorizedTenant(); }
+	bool verify() const { return tenantInfo.empty() || tenantInfo.hasAuthorizedTenant(); }
 
 	GetValueRequest() {}
 	GetValueRequest(SpanContext spanContext,
@@ -324,7 +324,7 @@ struct WatchValueRequest {
 	  : spanContext(spanContext), tenantInfo(tenantInfo), key(key), value(value), version(ver), tags(tags),
 	    debugID(debugID) {}
 
-	bool verify() const { return tenantInfo.hasAuthorizedTenant(); }
+	bool verify() const { return tenantInfo.empty() || tenantInfo.hasAuthorizedTenant(); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -369,7 +369,7 @@ struct GetKeyValuesRequest : TimedRequest {
 
 	GetKeyValuesRequest() : isFetchKeys(false) {}
 
-	bool verify() const { return tenantInfo.hasAuthorizedTenant(); }
+	bool verify() const { return tenantInfo.empty() || tenantInfo.hasAuthorizedTenant(); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -428,7 +428,7 @@ struct GetMappedKeyValuesRequest : TimedRequest {
 
 	GetMappedKeyValuesRequest() : isFetchKeys(false) {}
 
-	bool verify() const { return tenantInfo.hasAuthorizedTenant(); }
+	bool verify() const { return tenantInfo.empty() || tenantInfo.hasAuthorizedTenant(); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -496,7 +496,7 @@ struct GetKeyValuesStreamRequest {
 
 	GetKeyValuesStreamRequest() : isFetchKeys(false) {}
 
-	bool verify() const { return tenantInfo.hasAuthorizedTenant(); }
+	bool verify() const { return tenantInfo.empty() || tenantInfo.hasAuthorizedTenant(); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -545,7 +545,7 @@ struct GetKeyRequest : TimedRequest {
 	                                      // to this client, of all storage replicas that
 	                                      // serve the given key
 
-	bool verify() const { return tenantInfo.hasAuthorizedTenant(); }
+	bool verify() const { return tenantInfo.empty() || tenantInfo.hasAuthorizedTenant(); }
 
 	GetKeyRequest() {}
 
