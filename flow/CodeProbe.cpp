@@ -26,6 +26,7 @@
 #include <map>
 #include <fmt/format.h>
 #include <boost/core/demangle.hpp>
+#include <boost/unordered_set.hpp>
 #include <typeinfo>
 
 namespace probe {
@@ -102,15 +103,7 @@ struct CodeProbes {
 
 	std::multimap<Location, ICodeProbe const*> codeProbes;
 
-	void traceMissedProbes(Optional<ExecutionContext> context) const {
-		const ICodeProbe* prev = nullptr;
-		for (auto probe : codeProbes) {
-			if (!probe.second->wasHit() && (!context.present() || probe.second->expectInContext(context.get())) &&
-			    *prev != *probe.second) {
-				probe.second->trace(false);
-			}
-		}
-	}
+	void traceMissedProbes(Optional<ExecutionContext> context) const;
 
 	void add(ICodeProbe const* probe) {
 		const char* file = probe->filename();
@@ -225,6 +218,26 @@ struct CodeProbes {
 		}
 	}
 };
+
+size_t hash_value(CodeProbes::Location const& location) {
+	size_t seed = 0;
+	boost::hash_combine(seed, location.file);
+	boost::hash_combine(seed, location.line);
+	return seed;
+}
+
+void CodeProbes::traceMissedProbes(Optional<ExecutionContext> context) const {
+	boost::unordered_set<Location> tracedLocations;
+	for (auto probe : codeProbes) {
+		if (tracedLocations.count(probe.first) > 0) {
+			continue;
+		}
+		tracedLocations.insert(probe.first);
+		if (!probe.second->wasHit()) {
+			probe.second->trace(false);
+		}
+	}
+}
 
 } // namespace
 
