@@ -90,7 +90,7 @@ public:
 
 		ProtocolVersion protocolVersion;
 
-		std::vector<ProcessInfo*> childs;
+		std::vector<ProcessInfo*> children;
 
 		ProcessInfo(const char* name,
 		            LocalityData locality,
@@ -122,7 +122,7 @@ public:
 			   << " fault_injection_p2:" << fault_injection_p2;
 			return ss.str();
 		}
-		std::vector<ProcessInfo*> const& getChilds() const { return childs; }
+		std::vector<ProcessInfo*> const& getChildren() const { return children; }
 
 		// Return true if the class type is suitable for stateful roles, such as tLog and StorageServer.
 		bool isAvailableClass() const {
@@ -167,6 +167,7 @@ public:
 				return false;
 			}
 		}
+		bool isMachineProcess() const { return strcmp(name, "Machine") == 0; }
 
 		Reference<IListener> getListener(const NetworkAddress& addr) const {
 			auto listener = listenerMap.find(addr);
