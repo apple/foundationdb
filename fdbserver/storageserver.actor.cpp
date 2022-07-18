@@ -1541,7 +1541,7 @@ Optional<TenantMapEntry> StorageServer::getTenantEntry(Version version, TenantIn
 			throw unknown_tenant();
 		}
 
-		return *itr;
+		return itr->second;
 	}
 
 	return Optional<TenantMapEntry>();
