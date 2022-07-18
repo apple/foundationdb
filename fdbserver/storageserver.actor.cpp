@@ -544,6 +544,7 @@ public:
 	std::map<Version, std::vector<CheckpointMetaData>> pendingCheckpoints; // Pending checkpoint requests
 	std::unordered_map<UID, CheckpointMetaData> checkpoints; // Existing and deleting checkpoints
 	TenantMap tenantMap;
+	std::unordered_map<TenantName, TenantMapEntry> tenantMap2;
 	TenantPrefixIndex tenantPrefixIndex;
 
 	// Histograms
@@ -1527,16 +1528,15 @@ ACTOR Future<Version> waitForVersionNoTooOld(StorageServer* data, Version versio
 
 Optional<TenantMapEntry> StorageServer::getTenantEntry(Version version, TenantInfo tenantInfo) {
 	if (tenantInfo.name.present()) {
-		auto view = tenantMap.at(version);
-		auto itr = view.find(tenantInfo.name.get());
-		if (itr == view.end()) {
+		auto itr = tenantMap2.find(tenantInfo.name.get());
+		if (itr == tenantMap2.end()) {
 			TraceEvent(SevWarn, "StorageUnknownTenant", thisServerID).detail("Tenant", tenantInfo.name).backtrace();
 			throw unknown_tenant();
-		} else if (itr->id != tenantInfo.tenantId) {
+		} else if (itr->second.id != tenantInfo.tenantId) {
 			TraceEvent(SevWarn, "StorageTenantIdMismatch", thisServerID)
 			    .detail("Tenant", tenantInfo.name)
 			    .detail("TenantId", tenantInfo.tenantId)
-			    .detail("ExistingId", itr->id)
+			    .detail("ExistingId", itr->second.id)
 			    .backtrace();
 			throw unknown_tenant();
 		}
@@ -7054,6 +7054,7 @@ void StorageServer::insertTenant(TenantNameRef tenantName,
 		TenantMapEntry tenantEntry = TenantMapEntry::decode(value);
 
 		tenantMap.insert(tenantName, tenantEntry);
+		tenantMap2.insert({ tenantName, tenantEntry });
 		tenantPrefixIndex.insert(tenantEntry.prefix, tenantName);
 
 		if (insertIntoMutationLog) {
@@ -7080,6 +7081,7 @@ void StorageServer::clearTenants(TenantNameRef startTenant, TenantNameRef endTen
 		}
 
 		tenantMap.erase(startTenant, endTenant);
+		tenantMap2.erase(tenantMap2.find(startTenant), tenantMap2.find(endTenant));
 
 		auto& mLV = addVersionToMutationLog(version);
 		addMutationToMutationLog(mLV,
