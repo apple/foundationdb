@@ -474,7 +474,7 @@ struct DataDistributor : NonCopyable, ReferenceCounted<DataDistributor> {
 				}
 				self->relocationProducer.send(
 				    RelocateShard(keys,
-				                  unhealthy ? DataMovementReason::UNHEALTHY : DataMovementReason::RECOVER_MOVE,
+				                  unhealthy ? DataMovementReason::TEAM_UNHEALTHY : DataMovementReason::RECOVER_MOVE,
 				                  RelocateReason::OTHER));
 			}
 
