@@ -1262,10 +1262,10 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
 				    .detail("End", newTenant.keys.end.printable());
 				self.sizeChanges.add(tenantShardSplitter(&self, newTenant.keys));
 				newTenant.reply.send(true);
+			}
 
 			when(KeyRange req = waitNext(self.shardsAffectedByTeamFailure->restartShardTracker.getFuture())) {
 				restartShardTrackers(&self, req);
-
 			}
 		}
 	} catch (Error& e) {

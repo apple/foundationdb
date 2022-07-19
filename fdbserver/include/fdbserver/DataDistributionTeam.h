@@ -67,6 +67,7 @@ FDB_DECLARE_BOOLEAN_PARAM(PreferLowerDiskUtil);
 FDB_DECLARE_BOOLEAN_PARAM(TeamMustHaveShards);
 FDB_DECLARE_BOOLEAN_PARAM(ForReadBalance);
 FDB_DECLARE_BOOLEAN_PARAM(PreferLowerReadUtil);
+FDB_DECLARE_BOOLEAN_PARAM(FindTeamByServers);
 
 struct GetTeamRequest {
 	bool wantsNewServers; // In additional to servers in completeSources, try to find teams with new server
@@ -76,6 +77,7 @@ struct GetTeamRequest {
 	bool forReadBalance;
 	bool preferLowerReadUtil; // only make sense when forReadBalance is true
 	double inflightPenalty;
+	bool findTeamByServers;
 	std::vector<UID> completeSources;
 	std::vector<UID> src;
 	Promise<std::pair<Optional<Reference<IDataDistributionTeam>>, bool>> reply;
@@ -92,7 +94,13 @@ struct GetTeamRequest {
 	               double inflightPenalty = 1.0)
 	  : wantsNewServers(wantsNewServers), wantsTrueBest(wantsTrueBest), preferLowerDiskUtil(preferLowerDiskUtil),
 	    teamMustHaveShards(teamMustHaveShards), forReadBalance(forReadBalance),
-	    preferLowerReadUtil(preferLowerReadUtil), inflightPenalty(inflightPenalty) {}
+	    preferLowerReadUtil(preferLowerReadUtil), inflightPenalty(inflightPenalty),
+	    findTeamByServers(FindTeamByServers::False) {}
+	GetTeamRequest(std::vector<UID> servers)
+	  : wantsNewServers(WantNewServers::False), wantsTrueBest(WantTrueBest::False),
+	    preferLowerDiskUtil(PreferLowerDiskUtil::False), teamMustHaveShards(TeamMustHaveShards::False),
+	    forReadBalance(ForReadBalance::False), preferLowerReadUtil(PreferLowerReadUtil::False), inflightPenalty(1.0),
+	    findTeamByServers(FindTeamByServers::True), src(std::move(servers)) {}
 
 	// return true if a.score < b.score
 	[[nodiscard]] bool lessCompare(TeamRef a, TeamRef b, int64_t aLoadBytes, int64_t bLoadBytes) const {
@@ -108,7 +116,8 @@ struct GetTeamRequest {
 
 		ss << "WantsNewServers:" << wantsNewServers << " WantsTrueBest:" << wantsTrueBest
 		   << " PreferLowerDiskUtil:" << preferLowerDiskUtil << " teamMustHaveShards:" << teamMustHaveShards
-		   << "forReadBalance" << forReadBalance << " inflightPenalty:" << inflightPenalty << ";";
+		   << "forReadBalance" << forReadBalance << " inflightPenalty:" << inflightPenalty
+		   << " findTeamByServers:" << findTeamByServers << ";";
 		ss << "CompleteSources:";
 		for (const auto& cs : completeSources) {
 			ss << cs.toString() << ",";
