@@ -193,7 +193,7 @@ Error checkIOTimeout(Error const& e) {
 		timeoutOccurred = g_pSimulator->getCurrentProcess()->machine->machineProcess->global(INetwork::enASIOTimedOut);
 
 	if (timeoutOccurred) {
-		TEST(true); // Timeout occurred
+		CODE_PROBE(true, "Timeout occurred");
 		Error timeout = io_timeout();
 		// Preserve injectedness of error
 		if (e.isInjectedFault())
@@ -244,7 +244,7 @@ ACTOR Future<Void> handleIOErrors(Future<Void> actor, IClosable* store, UID id, 
 			// file_not_found can occur due to attempting to open a partially deleted DiskQueue, which should not be
 			// reported SevError.
 			if (e.isError() && e.getError().code() == error_code_file_not_found) {
-				TEST(true); // Worker terminated with file_not_found error
+				CODE_PROBE(true, "Worker terminated with file_not_found error");
 				return Void();
 			}
 			throw e.isError() ? e.getError() : actor_cancelled();
@@ -2044,7 +2044,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 
 				if (ddInterf->get().present()) {
 					recruited = ddInterf->get().get();
-					TEST(true); // Recruited while already a data distributor.
+					CODE_PROBE(true, "Recruited while already a data distributor.");
 				} else {
 					startRole(Role::DATA_DISTRIBUTOR, recruited.id(), interf.id());
 					DUMPTOKEN(recruited.waitFailure);
@@ -2068,7 +2068,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 
 				if (rkInterf->get().present()) {
 					recruited = rkInterf->get().get();
-					TEST(true); // Recruited while already a ratekeeper.
+					CODE_PROBE(true, "Recruited while already a ratekeeper.");
 				} else {
 					startRole(Role::RATEKEEPER, recruited.id(), interf.id());
 					DUMPTOKEN(recruited.waitFailure);
@@ -2096,7 +2096,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				if (bmEpochAndInterf->get().present() && bmEpochAndInterf->get().get().first == req.epoch) {
 					recruited = bmEpochAndInterf->get().get().second;
 
-					TEST(true); // Recruited while already a blob manager.
+					CODE_PROBE(true, "Recruited while already a blob manager.");
 				} else {
 					// TODO: it'd be more optimal to halt the last manager if present here, but it will figure it out
 					// via the epoch check
@@ -2151,7 +2151,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 
 				if (ekpInterf->get().present()) {
 					recruited = ekpInterf->get().get();
-					TEST(true); // Recruited while already a encryptKeyProxy server.
+					CODE_PROBE(true, "Recruited while already a encryptKeyProxy server.");
 				} else {
 					startRole(Role::ENCRYPT_KEY_PROXY, recruited.id(), interf.id());
 					DUMPTOKEN(recruited.waitFailure);
@@ -2545,7 +2545,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 			when(state WorkerSnapRequest snapReq = waitNext(interf.workerSnapReq.getFuture())) {
 				std::string snapUID = snapReq.snapUID.toString() + snapReq.role.toString();
 				if (snapReqResultMap.count(snapUID)) {
-					TEST(true); // Worker received a duplicate finished snap request
+					CODE_PROBE(true, "Worker received a duplicate finished snap request");
 					auto result = snapReqResultMap[snapUID];
 					result.isError() ? snapReq.reply.sendError(result.getError()) : snapReq.reply.send(result.get());
 					TraceEvent("RetryFinishedWorkerSnapRequest")
@@ -2553,7 +2553,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					    .detail("Role", snapReq.role)
 					    .detail("Result", result.isError() ? result.getError().code() : 0);
 				} else if (snapReqMap.count(snapUID)) {
-					TEST(true); // Worker received a duplicate ongoing snap request
+					CODE_PROBE(true, "Worker received a duplicate ongoing snap request");
 					TraceEvent("RetryOngoingWorkerSnapRequest").detail("SnapUID", snapUID).detail("Role", snapReq.role);
 					ASSERT(snapReq.role == snapReqMap[snapUID].role);
 					ASSERT(snapReq.snapPayload == snapReqMap[snapUID].snapPayload);

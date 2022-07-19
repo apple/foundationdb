@@ -661,14 +661,14 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture,
 				if (tagItr != priorityThrottledTags.end()) {
 					if (tagItr->second.expiration > now()) {
 						if (tagItr->second.tpsRate == std::numeric_limits<double>::max()) {
-							TEST(true); // Auto TPS rate is unlimited
+							CODE_PROBE(true, "Auto TPS rate is unlimited");
 						} else {
-							TEST(true); // GRV proxy returning tag throttle
+							CODE_PROBE(true, "GRV proxy returning tag throttle");
 							reply.tagThrottleInfo[tag.first] = tagItr->second;
 						}
 					} else {
 						// This isn't required, but we might as well
-						TEST(true); // GRV proxy expiring tag throttle
+						CODE_PROBE(true, "GRV proxy expiring tag throttle");
 						priorityThrottledTags.erase(tagItr);
 					}
 				}

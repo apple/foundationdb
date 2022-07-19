@@ -1420,7 +1420,8 @@ private:
 			}
 			return Void();
 		} catch (...) {
-			TEST(true); // If we get cancelled here, we are holding the lock but the caller doesn't know, so release it
+			CODE_PROBE(true,
+			           "If we get cancelled here, we are holding the lock but the caller doesn't know, so release it");
 			lock->release(amount);
 			throw;
 		}

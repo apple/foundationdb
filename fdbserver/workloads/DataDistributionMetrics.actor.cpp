@@ -151,7 +151,7 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 				ASSERT(result[i].key.startsWith(ddStatsRange.begin));
 				std::string errorStr;
 				auto valueObj = readJSONStrictly(result[i].value.toString()).get_obj();
-				TEST(true); // data_distribution_stats schema validation
+				CODE_PROBE(true, "data_distribution_stats schema validation");
 				if (!schemaMatch(schema, valueObj, errorStr, SevError, true)) {
 					TraceEvent(SevError, "DataDistributionStatsSchemaValidationFailed")
 					    .detail("ErrorStr", errorStr.c_str())

@@ -131,7 +131,7 @@ struct TransientStorageMetricSample : StorageMetricSample {
 			StorageMetrics deltaM = m * delta;
 			auto v = waitMap[key];
 			for (int i = 0; i < v.size(); i++) {
-				TEST(true); // TransientStorageMetricSample poll update
+				CODE_PROBE(true, "TransientStorageMetricSample poll update");
 				v[i].send(deltaM);
 			}
 
@@ -208,9 +208,9 @@ struct StorageServerMetrics {
 	void notify(KeyRef key, StorageMetrics& metrics) {
 		ASSERT(metrics.bytes == 0); // ShardNotifyMetrics
 		if (g_network->isSimulated()) {
-			TEST(metrics.bytesPerKSecond != 0); // ShardNotifyMetrics bytes
-			TEST(metrics.iosPerKSecond != 0); // ShardNotifyMetrics ios
-			TEST(metrics.bytesReadPerKSecond != 0); // ShardNotifyMetrics bytesRead
+			CODE_PROBE(metrics.bytesPerKSecond != 0, "ShardNotifyMetrics bytes");
+			CODE_PROBE(metrics.iosPerKSecond != 0, "ShardNotifyMetrics ios");
+			CODE_PROBE(metrics.bytesReadPerKSecond != 0, "ShardNotifyMetrics bytesRead");
 		}
 
 		double expire = now() + SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL;
@@ -230,7 +230,7 @@ struct StorageServerMetrics {
 			auto& v = waitMetricsMap[key];
 			for (int i = 0; i < v.size(); i++) {
 				if (g_network->isSimulated()) {
-					TEST(true); // shard notify metrics
+					CODE_PROBE(true, "shard notify metrics");
 				}
 				// ShardNotifyMetrics
 				v[i].send(notifyMetrics);
@@ -249,7 +249,7 @@ struct StorageServerMetrics {
 			notifyMetrics.bytesReadPerKSecond = bytesReadPerKSecond;
 			auto& v = waitMetricsMap[key];
 			for (int i = 0; i < v.size(); i++) {
-				TEST(true); // ShardNotifyMetrics
+				CODE_PROBE(true, "ShardNotifyMetrics");
 				v[i].send(notifyMetrics);
 			}
 		}
@@ -264,7 +264,7 @@ struct StorageServerMetrics {
 		StorageMetrics notifyMetrics;
 		notifyMetrics.bytes = bytes;
 		for (int i = 0; i < shard.value().size(); i++) {
-			TEST(true); // notifyBytes
+			CODE_PROBE(true, "notifyBytes");
 			shard.value()[i].send(notifyMetrics);
 		}
 	}
@@ -284,7 +284,7 @@ struct StorageServerMetrics {
 		auto rs = waitMetricsMap.intersectingRanges(keys);
 		for (auto r = rs.begin(); r != rs.end(); ++r) {
 			auto& v = r->value();
-			TEST(v.size()); // notifyNotReadable() sending errors to intersecting ranges
+			CODE_PROBE(v.size(), "notifyNotReadable() sending errors to intersecting ranges");
 			for (int n = 0; n < v.size(); n++)
 				v[n].sendError(wrong_shard_server());
 		}
