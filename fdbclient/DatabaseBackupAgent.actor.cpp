@@ -26,7 +26,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include <ctime>
 #include <climits>
-#include "fdbrpc/IAsyncFile.h"
+#include "flow/IAsyncFile.h"
 #include "flow/genericactors.actor.h"
 #include "flow/Hash3.h"
 #include <numeric>
@@ -363,7 +363,7 @@ struct BackupRangeTaskFunc : TaskFuncBase {
 					if ((!prevAdjacent || !nextAdjacent) &&
 					    rangeCount > ((prevAdjacent || nextAdjacent) ? CLIENT_KNOBS->BACKUP_MAP_KEY_UPPER_LIMIT
 					                                                 : CLIENT_KNOBS->BACKUP_MAP_KEY_LOWER_LIMIT)) {
-						TEST(true); // range insert delayed because too versionMap is too large
+						CODE_PROBE(true, "range insert delayed because too versionMap is too large");
 
 						if (rangeCount > CLIENT_KNOBS->BACKUP_MAP_KEY_UPPER_LIMIT)
 							TraceEvent(SevWarnAlways, "DBA_KeyRangeMapTooLarge").log();
@@ -2780,7 +2780,7 @@ public:
 				Version destVersion = wait(tr3.getReadVersion());
 				TraceEvent("DBA_SwitchoverVersionUpgrade").detail("Src", commitVersion).detail("Dest", destVersion);
 				if (destVersion <= commitVersion) {
-					TEST(true); // Forcing dest backup cluster to higher version
+					CODE_PROBE(true, "Forcing dest backup cluster to higher version");
 					tr3.set(minRequiredCommitVersionKey, BinaryWriter::toValue(commitVersion + 1, Unversioned()));
 					wait(tr3.commit());
 				} else {
@@ -2933,7 +2933,7 @@ public:
 					Version applied = BinaryReader::fromStringRef<Version>(lastApplied.get(), Unversioned());
 					TraceEvent("DBA_AbortVersionUpgrade").detail("Src", applied).detail("Dest", current);
 					if (current <= applied) {
-						TEST(true); // Upgrading version of local database.
+						CODE_PROBE(true, "Upgrading version of local database.");
 						// The +1 is because we want to make sure that a versionstamped operation can't reuse
 						// the same version as an already-applied transaction.
 						tr->set(minRequiredCommitVersionKey, BinaryWriter::toValue(applied + 1, Unversioned()));

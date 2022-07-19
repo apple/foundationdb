@@ -44,7 +44,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/versions.h"
 #include "fdbclient/BuildFlags.h"
-#include "fdbclient/WellKnownEndpoints.h"
+#include "fdbrpc/WellKnownEndpoints.h"
 #include "fdbclient/SimpleIni.h"
 #include "fdbrpc/AsyncFileCached.actor.h"
 #include "fdbrpc/IPAllowList.h"
@@ -74,10 +74,10 @@
 #include "flow/DeterministicRandom.h"
 #include "flow/Platform.h"
 #include "flow/ProtocolVersion.h"
-#include "flow/SimpleOpt.h"
+#include "SimpleOpt/SimpleOpt.h"
 #include "flow/SystemMonitor.h"
 #include "flow/TLSConfig.actor.h"
-#include "flow/Tracing.h"
+#include "fdbclient/Tracing.h"
 #include "flow/WriteOnlySet.h"
 #include "flow/UnitTest.h"
 #include "flow/FaultInjection.h"
@@ -108,7 +108,7 @@ enum {
 	OPT_CONNFILE, OPT_SEEDCONNFILE, OPT_SEEDCONNSTRING, OPT_ROLE, OPT_LISTEN, OPT_PUBLICADDR, OPT_DATAFOLDER, OPT_LOGFOLDER, OPT_PARENTPID, OPT_TRACER, OPT_NEWCONSOLE,
 	OPT_NOBOX, OPT_TESTFILE, OPT_RESTARTING, OPT_RESTORING, OPT_RANDOMSEED, OPT_KEY, OPT_MEMLIMIT, OPT_VMEMLIMIT, OPT_STORAGEMEMLIMIT, OPT_CACHEMEMLIMIT, OPT_MACHINEID,
 	OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_BUILD_FLAGS, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR,
-	OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_UNITTESTPARAM, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE,
+	OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_PRINT_CODE_PROBES, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_UNITTESTPARAM, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE,
 	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE,
 	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIAL_FILE, OPT_CONFIG_PATH, OPT_USE_TEST_CONFIG_DB, OPT_FAULT_INJECTION, OPT_PROFILER, OPT_PRINT_SIMTIME,
 	OPT_FLOW_PROCESS_NAME, OPT_FLOW_PROCESS_ENDPOINT, OPT_IP_TRUSTED_MASK, OPT_KMS_CONN_DISCOVERY_URL_FILE, OPT_KMS_CONN_VALIDATION_TOKEN_DETAILS, OPT_KMS_CONN_GET_ENCRYPTION_KEYS_ENDPOINT
@@ -183,6 +183,7 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_HELP,                  "-h",                          SO_NONE },
 	{ OPT_HELP,                  "--help",                      SO_NONE },
 	{ OPT_DEVHELP,               "--dev-help",                  SO_NONE },
+	{ OPT_PRINT_CODE_PROBES,     "--code-probes",               SO_REQ_SEP },
 	{ OPT_KNOB,                  "--knob-",                     SO_REQ_SEP },
 	{ OPT_UNITTESTPARAM,         "--test-",                     SO_REQ_SEP },
 	{ OPT_LOCALITY,              "--locality-",                 SO_REQ_SEP },
@@ -1144,6 +1145,10 @@ private:
 				printUsage(argv[0], true);
 				flushAndExit(FDB_EXIT_SUCCESS);
 				break;
+			case OPT_PRINT_CODE_PROBES:
+				probe::ICodeProbe::printProbesJSON({ std::string(args.OptionArg()) });
+				flushAndExit(FDB_EXIT_SUCCESS);
+				break;
 			case OPT_KNOB: {
 				Optional<std::string> knobName = extractPrefixedArgument("--knob", args.OptionSyntax());
 				if (!knobName.present()) {
@@ -1847,6 +1852,12 @@ int main(int argc, char* argv[]) {
 				        "proceed anyways\n");
 				flushAndExit(FDB_EXIT_ERROR);
 			}
+			if (SERVER_KNOBS->REMOTE_KV_STORE) {
+				fprintf(stderr,
+				        "ERROR : explicitly setting REMOTE_KV_STORE is dangerous! set ALLOW_DANGEROUS_KNOBS to "
+				        "proceed anyways\n");
+				flushAndExit(FDB_EXIT_ERROR);
+			}
 		}
 
 		// evictionPolicyStringToEnum will throw an exception if the string is not recognized as a valid
@@ -2115,6 +2126,14 @@ int main(int argc, char* argv[]) {
 						}
 					}
 				}
+				g_knobs.setKnob("enable_encryption",
+				                KnobValue::create(ini.GetBoolValue("META", "enableEncryption", false)));
+				g_knobs.setKnob("enable_tlog_encryption",
+				                KnobValue::create(ini.GetBoolValue("META", "enableTLogEncryption", false)));
+				g_knobs.setKnob("enable_blob_granule_encryption",
+				                KnobValue::create(ini.GetBoolValue("META", "enableBlobGranuleEncryption", false)));
+				g_knobs.setKnob("enable_blob_granule_compression",
+				                KnobValue::create(ini.GetBoolValue("META", "enableBlobGranuleEncryption", false)));
 			}
 			setupAndRun(dataFolder, opts.testFile, opts.restarting, (isRestoring >= 1), opts.whitelistBinPaths);
 			g_simulator.run();

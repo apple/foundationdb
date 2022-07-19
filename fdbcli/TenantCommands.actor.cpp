@@ -21,9 +21,11 @@
 #include "fdbcli/fdbcli.actor.h"
 
 #include "fdbclient/FDBOptions.g.h"
+#include "fdbclient/GenericManagementAPI.actor.h"
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/TenantManagement.actor.h"
 #include "fdbclient/Schemas.h"
 
 #include "flow/Arena.h"
@@ -33,8 +35,8 @@
 
 namespace fdb_cli {
 
-const KeyRangeRef tenantSpecialKeyRange(LiteralStringRef("\xff\xff/management/tenant_map/"),
-                                        LiteralStringRef("\xff\xff/management/tenant_map0"));
+const KeyRangeRef tenantSpecialKeyRange(LiteralStringRef("\xff\xff/management/tenant/map/"),
+                                        LiteralStringRef("\xff\xff/management/tenant/map0"));
 
 // createtenant command
 ACTOR Future<bool> createTenantCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
@@ -208,12 +210,13 @@ CommandFactory listTenantsFactory(
                 "The number of tenants to print can be specified using the [LIMIT] parameter, which defaults to 100."));
 
 // gettenant command
-ACTOR Future<bool> getTenantCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
-	if (tokens.size() != 2) {
+ACTOR Future<bool> getTenantCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens, int apiVersion) {
+	if (tokens.size() < 2 || tokens.size() > 3 || (tokens.size() == 3 && tokens[2] != "JSON"_sr)) {
 		printUsage(tokens[0]);
 		return false;
 	}
 
+	state bool useJson = tokens.size() == 3;
 	state Key tenantNameKey = fdb_cli::tenantSpecialKeyRange.begin.withSuffix(tokens[1]);
 	state Reference<ITransaction> tr = db->createTransaction();
 
@@ -228,30 +231,84 @@ ACTOR Future<bool> getTenantCommandActor(Reference<IDatabase> db, std::vector<St
 
 			json_spirit::mValue jsonObject;
 			json_spirit::read_string(tenant.get().toString(), jsonObject);
-			JSONDoc doc(jsonObject);
 
-			int64_t id;
-			std::string prefix;
-			doc.get("id", id);
-			doc.get("prefix", prefix);
+			if (useJson) {
+				json_spirit::mObject resultObj;
+				resultObj["tenant"] = jsonObject;
+				resultObj["type"] = "success";
+				printf("%s\n",
+				       json_spirit::write_string(json_spirit::mValue(resultObj), json_spirit::pretty_print).c_str());
+			} else {
+				JSONDoc doc(jsonObject);
 
-			printf("  id: %" PRId64 "\n", id);
-			printf("  prefix: %s\n", printable(prefix).c_str());
+				int64_t id;
+				std::string prefix;
+
+				doc.get("id", id);
+				if (apiVersion >= 720) {
+					doc.get("prefix.printable", prefix);
+				} else {
+					doc.get("prefix", prefix);
+				}
+
+				printf("  id: %" PRId64 "\n", id);
+				printf("  prefix: %s\n", prefix.c_str());
+			}
+
 			return true;
 		} catch (Error& e) {
-			state Error err(e);
-			if (e.code() == error_code_special_keys_api_failure) {
-				std::string errorMsgStr = wait(fdb_cli::getSpecialKeysFailureErrorMessage(tr));
-				fprintf(stderr, "ERROR: %s\n", errorMsgStr.c_str());
+			try {
+				wait(safeThreadFutureToFuture(tr->onError(e)));
+			} catch (Error& finalErr) {
+				state std::string errorStr;
+				if (finalErr.code() == error_code_special_keys_api_failure) {
+					std::string str = wait(getSpecialKeysFailureErrorMessage(tr));
+					errorStr = str;
+				} else if (useJson) {
+					errorStr = finalErr.what();
+				} else {
+					throw finalErr;
+				}
+
+				if (useJson) {
+					json_spirit::mObject resultObj;
+					resultObj["type"] = "error";
+					resultObj["error"] = errorStr;
+					printf(
+					    "%s\n",
+					    json_spirit::write_string(json_spirit::mValue(resultObj), json_spirit::pretty_print).c_str());
+				} else {
+					fprintf(stderr, "ERROR: %s\n", errorStr.c_str());
+				}
+
 				return false;
 			}
-			wait(safeThreadFutureToFuture(tr->onError(err)));
 		}
 	}
 }
 
-CommandFactory getTenantFactory("gettenant",
-                                CommandHelp("gettenant <TENANT_NAME>",
-                                            "prints the metadata for a tenant",
-                                            "Prints the metadata for a tenant."));
+CommandFactory getTenantFactory(
+    "gettenant",
+    CommandHelp("gettenant <TENANT_NAME> [JSON]",
+                "prints the metadata for a tenant",
+                "Prints the metadata for a tenant. If JSON is specified, then the output will be in JSON format."));
+
+// renametenant command
+ACTOR Future<bool> renameTenantCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
+	if (tokens.size() != 3) {
+		printUsage(tokens[0]);
+		return false;
+	}
+	wait(safeThreadFutureToFuture(TenantAPI::renameTenant(db, tokens[1], tokens[2])));
+
+	printf("The tenant `%s' has been renamed to `%s'\n", printable(tokens[1]).c_str(), printable(tokens[2]).c_str());
+	return true;
+}
+
+CommandFactory renameTenantFactory(
+    "renametenant",
+    CommandHelp(
+        "renametenant <OLD_NAME> <NEW_NAME>",
+        "renames a tenant in the cluster.",
+        "Renames a tenant in the cluster. The old name must exist and the new name must not exist in the cluster."));
 } // namespace fdb_cli

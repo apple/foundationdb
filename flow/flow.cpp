@@ -22,7 +22,9 @@
 #include "flow/DeterministicRandom.h"
 #include "flow/UnitTest.h"
 #include "flow/rte_memcpy.h"
-#include "flow/folly_memcpy.h"
+#ifdef WITH_FOLLY_MEMCPY
+#include "folly_memcpy.h"
+#endif
 #include <stdarg.h>
 #include <cinttypes>
 
@@ -259,7 +261,7 @@ int vsformat(std::string& outputString, const char* form, va_list args) {
 		return -1;
 	}
 
-	TEST(true); // large format result
+	CODE_PROBE(true, "large format result");
 
 	outputString.resize(size + 1);
 	size = vsnprintf(&outputString[0], outputString.size(), form, args);

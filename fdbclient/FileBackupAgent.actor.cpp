@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "contrib/fmt-8.1.1/include/fmt/format.h"
+#include "fmt/format.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/DatabaseContext.h"
@@ -33,7 +33,7 @@
 #include <cinttypes>
 #include <ctime>
 #include <climits>
-#include "fdbrpc/IAsyncFile.h"
+#include "flow/IAsyncFile.h"
 #include "flow/genericactors.actor.h"
 #include "flow/Hash3.h"
 #include <numeric>
@@ -822,7 +822,7 @@ struct AbortFiveZeroBackupTask : TaskFuncBase {
 		state FileBackupAgent backupAgent;
 		state std::string tagName = task->params[BackupAgentBase::keyConfigBackupTag].toString();
 
-		TEST(true); // Canceling old backup task
+		CODE_PROBE(true, "Canceling old backup task");
 
 		TraceEvent(SevInfo, "FileBackupCancelOldTask")
 		    .detail("Task", task->params[Task::reservedTaskParamKeyType])
@@ -908,7 +908,7 @@ struct AbortFiveOneBackupTask : TaskFuncBase {
 		state BackupConfig config(task);
 		state std::string tagName = wait(config.tag().getOrThrow(tr));
 
-		TEST(true); // Canceling 5.1 backup task
+		CODE_PROBE(true, "Canceling 5.1 backup task");
 
 		TraceEvent(SevInfo, "FileBackupCancelFiveOneTask")
 		    .detail("Task", task->params[Task::reservedTaskParamKeyType])
@@ -1221,7 +1221,7 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 
 		// Don't need to check keepRunning(task) here because we will do that while finishing each output file, but if
 		// bc is false then clearly the backup is no longer in progress
-		state Reference<IBackupContainer> bc = wait(backup.backupContainer().getD(cx));
+		state Reference<IBackupContainer> bc = wait(backup.backupContainer().getD(cx.getReference()));
 		if (!bc) {
 			return Void();
 		}
@@ -1245,7 +1245,7 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 			// If we've seen a new read version OR hit the end of the stream, then if we were writing a file finish it.
 			if (values.second != outVersion || done) {
 				if (outFile) {
-					TEST(outVersion != invalidVersion); // Backup range task wrote multiple versions
+					CODE_PROBE(outVersion != invalidVersion, "Backup range task wrote multiple versions");
 					state Key nextKey = done ? endKey : keyAfter(lastKey);
 					wait(rangeFile.writeKey(nextKey));
 
@@ -3617,8 +3617,8 @@ struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 		// Get a batch of files.  We're targeting batchSize blocks being dispatched so query for batchSize files (each
 		// of which is 0 or more blocks).
 		state int taskBatchSize = BUGGIFY ? 1 : CLIENT_KNOBS->RESTORE_DISPATCH_ADDTASK_SIZE;
-		state RestoreConfig::FileSetT::Values files =
-		    wait(restore.fileSet().getRange(tr, { beginVersion, beginFile }, {}, taskBatchSize));
+		state RestoreConfig::FileSetT::Values files = wait(restore.fileSet().getRange(
+		    tr, Optional<RestoreConfig::RestoreFile>({ beginVersion, beginFile }), {}, taskBatchSize));
 
 		// allPartsDone will be set once all block tasks in the current batch are finished.
 		state Reference<TaskFuture> allPartsDone;
@@ -4098,7 +4098,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 				    .detail("RestoreVersion", restoreVersion)
 				    .detail("Dest", destVersion);
 				if (destVersion <= restoreVersion) {
-					TEST(true); // Forcing restored cluster to higher version
+					CODE_PROBE(true, "Forcing restored cluster to higher version");
 					tr->set(minRequiredCommitVersionKey, BinaryWriter::toValue(restoreVersion + 1, Unversioned()));
 					wait(tr->commit());
 				} else {
@@ -5434,7 +5434,7 @@ public:
 			try {
 				// We must get a commit version so add a conflict range that won't likely cause conflicts
 				// but will ensure that the transaction is actually submitted.
-				tr.addWriteConflictRange(backupConfig.snapshotRangeDispatchMap().space.range());
+				tr.addWriteConflictRange(backupConfig.snapshotRangeDispatchMap().subspace);
 				wait(lockDatabase(&tr, randomUid));
 				wait(tr.commit());
 				commitVersion = tr.getCommittedVersion();
@@ -5497,7 +5497,7 @@ public:
 			}
 		}
 
-		Reference<IBackupContainer> bc = wait(backupConfig.backupContainer().getOrThrow(cx));
+		Reference<IBackupContainer> bc = wait(backupConfig.backupContainer().getOrThrow(cx.getReference()));
 
 		if (fastRestore) {
 			TraceEvent("AtomicParallelRestoreStartRestore").log();

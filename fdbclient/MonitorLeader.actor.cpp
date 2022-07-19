@@ -987,8 +987,9 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 			successIndex = index;
 			allConnectionsFailed = false;
 		} else {
-			TEST(rep.getError().code() == error_code_failed_to_progress); // Coordinator cant talk to cluster controller
-			TEST(rep.getError().code() == error_code_lookup_failed); // Coordinator hostname resolving failure
+			CODE_PROBE(rep.getError().code() == error_code_failed_to_progress,
+			           "Coordinator cant talk to cluster controller");
+			CODE_PROBE(rep.getError().code() == error_code_lookup_failed, "Coordinator hostname resolving failure");
 			TraceEvent("MonitorProxiesConnectFailed")
 			    .detail("Error", rep.getError().name())
 			    .detail("Coordinator", clientLeaderServer.getAddressString());
