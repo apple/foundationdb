@@ -1251,6 +1251,17 @@ public:
 			req.reply.sendError(e);
 		}
 	}
+
+	void maybeInjectTargetedRestart(Version v) {
+		// inject an SS restart at most once per test
+		if (g_network->isSimulated() && now() > g_simulator.injectTargetedSSRestartTime &&
+		    rebootAfterDurableVersion == std::numeric_limits<Version>::max()) {
+			TEST(true); // Injecting SS targeted restart
+			TraceEvent("SSInjectTargetedRestart", thisServerID).detail("Version", v);
+			rebootAfterDurableVersion = v;
+			g_simulator.injectTargetedSSRestartTime = std::numeric_limits<double>::max();
+		}
+	}
 };
 
 const StringRef StorageServer::CurrentRunningFetchKeys::emptyString = LiteralStringRef("");
@@ -5711,7 +5722,8 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 		changeFeedInfo->updateMetadataVersion(cfEntry.metadataVersion);
 		if (addMutationToLog) {
 			ASSERT(changeFeedInfo.isValid());
-			auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
+			Version logV = data->data().getLatestVersion();
+			auto& mLV = data->addVersionToMutationLog(logV);
 			data->addMutationToMutationLog(
 			    mLV,
 			    MutationRef(
@@ -5722,6 +5734,9 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 			while (!changeFeedInfo->mutations.empty() &&
 			       changeFeedInfo->mutations.front().version <= changeFeedInfo->emptyVersion) {
 				changeFeedInfo->mutations.pop_front();
+			}
+			if (BUGGIFY) {
+				data->maybeInjectTargetedRestart(logV);
 			}
 		}
 	}
@@ -5774,6 +5789,9 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 
 		for (auto& it : data->changeFeedDestroys) {
 			it.second.send(feed.first);
+		}
+		if (BUGGIFY) {
+			data->maybeInjectTargetedRestart(cleanupVersion);
 		}
 	}
 	return feedIds;
@@ -6433,6 +6451,10 @@ void cleanUpChangeFeeds(StorageServer* data, const KeyRangeRef& keys, Version ve
 				feed->second->moved(feed->second->range);
 				feed->second->newMutations.trigger();
 			}
+
+			if (BUGGIFY) {
+				data->maybeInjectTargetedRestart(durableVersion);
+			}
 		} else {
 			// if just part of feed's range is moved away
 			auto feed = data->uidChangeFeed.find(f.first);
@@ -6921,6 +6943,10 @@ private:
 
 				feed->second->destroy(currentVersion);
 				data->changeFeedCleanupDurable[feed->first] = cleanupVersion;
+
+				if (BUGGIFY) {
+					data->maybeInjectTargetedRestart(cleanupVersion);
+				}
 			}
 
 			if (status == ChangeFeedStatus::CHANGE_FEED_DESTROY) {
@@ -6930,7 +6956,8 @@ private:
 			}
 
 			if (addMutationToLog) {
-				auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
+				Version logV = data->data().getLatestVersion();
+				auto& mLV = data->addVersionToMutationLog(logV);
 				data->addMutationToMutationLog(
 				    mLV,
 				    MutationRef(MutationRef::SetValue,
@@ -6943,6 +6970,9 @@ private:
 					                               MutationRef(MutationRef::ClearRange,
 					                                           changeFeedDurableKey(feed->second->id, 0),
 					                                           changeFeedDurableKey(feed->second->id, popVersion)));
+				}
+				if (BUGGIFY) {
+					data->maybeInjectTargetedRestart(logV);
 				}
 			}
 		} else if ((m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange) &&
@@ -7946,7 +7976,8 @@ void setAvailableStatus(StorageServer* self, KeyRangeRef keys, bool available) {
 	// ASSERT( self->debug_inApplyUpdate );
 	ASSERT(!keys.empty());
 
-	auto& mLV = self->addVersionToMutationLog(self->data().getLatestVersion());
+	Version logV = self->data().getLatestVersion();
+	auto& mLV = self->addVersionToMutationLog(logV);
 
 	KeyRange availableKeys = KeyRangeRef(persistShardAvailableKeys.begin.toString() + keys.begin.toString(),
 	                                     persistShardAvailableKeys.begin.toString() + keys.end.toString());
@@ -7982,11 +8013,16 @@ void setAvailableStatus(StorageServer* self, KeyRangeRef keys, bool available) {
 			    .detail("DeleteVersion", mLV.version + 1);
 		}
 	}
+
+	if (BUGGIFY) {
+		self->maybeInjectTargetedRestart(logV);
+	}
 }
 
 void setAssignedStatus(StorageServer* self, KeyRangeRef keys, bool nowAssigned) {
 	ASSERT(!keys.empty());
-	auto& mLV = self->addVersionToMutationLog(self->data().getLatestVersion());
+	Version logV = self->data().getLatestVersion();
+	auto& mLV = self->addVersionToMutationLog(logV);
 	KeyRange assignedKeys = KeyRangeRef(persistShardAssignedKeys.begin.toString() + keys.begin.toString(),
 	                                    persistShardAssignedKeys.begin.toString() + keys.end.toString());
 	//TraceEvent("SetAssignedStatus", self->thisServerID).detail("Version", mLV.version).detail("RangeBegin", assignedKeys.begin).detail("RangeEnd", assignedKeys.end);
@@ -8002,6 +8038,10 @@ void setAssignedStatus(StorageServer* self, KeyRangeRef keys, bool nowAssigned) 
 		                               MutationRef(MutationRef::SetValue,
 		                                           assignedKeys.end,
 		                                           endAssigned ? LiteralStringRef("1") : LiteralStringRef("0")));
+	}
+
+	if (BUGGIFY) {
+		self->maybeInjectTargetedRestart(logV);
 	}
 }
 

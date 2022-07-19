@@ -1,6 +1,7 @@
 [configuration]
 blobGranulesEnabled = true 
 allowDefaultTenant = false
+injectTargetedSSRestart = true
 # FIXME: re-enable rocks at some point
 storageEngineExcludeTypes = [4]
 
