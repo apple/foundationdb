@@ -1259,11 +1259,7 @@ TEST_CASE("/blobgranule/files/snapshotFormatUnitTest") {
 
 	Optional<CompressionFilter> compressFilter;
 	if (deterministicRandom()->coinflip()) {
-#ifdef ZLIB_LIB_SUPPORTED
 		compressFilter = CompressionFilter::GZIP;
-#else
-		compressFilter = CompressionFilter::NONE;
-#endif
 	}
 	Value serialized = serializeChunkedSnapshot(data, targetChunks, compressFilter, cipherKeysCtx);
 

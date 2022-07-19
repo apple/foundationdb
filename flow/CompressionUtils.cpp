@@ -25,9 +25,7 @@
 #include "flow/UnitTest.h"
 
 #include <boost/iostreams/copy.hpp>
-#ifdef ZLIB_LIB_SUPPORTED
 #include <boost/iostreams/filter/gzip.hpp>
-#endif
 #include <boost/iostreams/filtering_streambuf.hpp>
 #include <sstream>
 
@@ -37,11 +35,9 @@ StringRef CompressionUtils::compress(const CompressionFilter filter, const Strin
 	}
 
 	namespace bio = boost::iostreams;
-#ifdef ZLIB_LIB_SUPPORTED
 	if (filter == CompressionFilter::GZIP) {
 		return CompressionUtils::compress(filter, data, bio::gzip::default_compression, arena);
 	}
-#endif
 	throw not_implemented();
 }
 
@@ -57,11 +53,9 @@ StringRef CompressionUtils::compress(const CompressionFilter filter, const Strin
 	std::stringstream decomStream(data.toString());
 
 	bio::filtering_streambuf<bio::input> out;
-#ifdef ZLIB_LIB_SUPPORTED
 	if (filter == CompressionFilter::GZIP) {
 		out.push(bio::gzip_compressor(bio::gzip_params(level)));
 	}
-#endif
 	out.push(decomStream);
 	bio::copy(out, compStream);
 
@@ -80,11 +74,9 @@ StringRef CompressionUtils::decompress(const CompressionFilter filter, const Str
 	std::stringstream decompStream;
 
 	bio::filtering_streambuf<bio::input> out;
-#ifdef ZLIB_LIB_SUPPORTED
 	if (filter == CompressionFilter::GZIP) {
 		out.push(bio::gzip_decompressor());
 	}
-#endif
 	out.push(compStream);
 	bio::copy(out, decompStream);
 
@@ -111,7 +103,6 @@ TEST_CASE("/CompressionUtils/noCompression") {
 	return Void();
 }
 
-#ifdef ZLIB_LIB_SUPPORTED
 TEST_CASE("/CompressionUtils/gzipCompression") {
 	Arena arena;
 	const int size = deterministicRandom()->randomInt(512, 1024);
@@ -128,4 +119,3 @@ TEST_CASE("/CompressionUtils/gzipCompression") {
 
 	return Void();
 }
-#endif
