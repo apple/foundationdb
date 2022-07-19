@@ -2374,13 +2374,11 @@ ACTOR void setupAndRun(std::string dataFolder,
 	testConfig.readFromConfig(testFile);
 	g_simulator.hasDiffProtocolProcess = testConfig.startIncompatibleProcess;
 	g_simulator.setDiffProtocol = false;
-	// TODO UNCOMMENT!!
-	if (testConfig.injectTargetedSSRestart /* && deterministicRandom()->random01() < 0.25*/) {
+	if (testConfig.injectTargetedSSRestart && deterministicRandom()->random01() < 0.25) {
 		g_simulator.injectTargetedSSRestartTime = 60.0 + 340.0 * deterministicRandom()->random01();
 	}
 
-	// TODO UNCOMMENT!!
-	if (testConfig.injectSSDelay /* && deterministicRandom()->random01() < 0.25*/) {
+	if (testConfig.injectSSDelay && deterministicRandom()->random01() < 0.25) {
 		g_simulator.injectSSDelayTime = 60.0 + 240.0 * deterministicRandom()->random01();
 	}
 
