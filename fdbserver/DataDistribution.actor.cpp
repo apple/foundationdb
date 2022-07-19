@@ -1461,7 +1461,6 @@ TEST_CASE("/DataDistributor/StorageWiggler/Order") {
 	ASSERT(!wiggler.getNextServerId().present());
 	return Void();
 }
-<<<<<<< HEAD
 
 TEST_CASE("/DataDistributor/Initialization/ResumeFromShard") {
 	state Reference<AsyncVar<ServerDBInfo> const> dbInfo;
@@ -1499,5 +1498,3 @@ TEST_CASE("/DataDistributor/Initialization/ResumeFromShard") {
 	}
 	return Void();
 }
-=======
->>>>>>> dea775ad0d18c745b09cb81425471ec29f701b4a
