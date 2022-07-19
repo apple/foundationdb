@@ -9736,7 +9736,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 	state bool shortTest = params.getInt("shortTest").orDefault(deterministicRandom()->random01() < 0.25);
 
 	state int pageSize =
-	    shortTest ? 200 : (deterministicRandom()->coinflip() ? 4096 : deterministicRandom()->randomInt(200, 400));
+	    shortTest ? 250 : (deterministicRandom()->coinflip() ? 4096 : deterministicRandom()->randomInt(250, 400));
 	state int extentSize =
 	    params.getInt("extentSize")
 	        .orDefault(deterministicRandom()->coinflip() ? SERVER_KNOBS->REDWOOD_DEFAULT_EXTENT_SIZE
