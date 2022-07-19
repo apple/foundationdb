@@ -5625,7 +5625,6 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 	for (auto& cfEntry : feedMetadata.feeds) {
 		auto cleanupEntry = data->changeFeedCleanupDurable.find(cfEntry.feedId);
 		bool cleanupPending = cleanupEntry != data->changeFeedCleanupDurable.end();
-		feedIds.push_back(cfEntry.feedId);
 		auto existingEntry = data->uidChangeFeed.find(cfEntry.feedId);
 		bool existing = existingEntry != data->uidChangeFeed.end();
 
@@ -5678,8 +5677,8 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 				    .detail("FKID", fetchKeysID);
 
 				missingFeeds.erase(fid);
-				ASSERT(changeFeedInfo->removing);
 				ASSERT(!changeFeedInfo->destroyed);
+				ASSERT(changeFeedInfo->removing);
 				TEST(true); // re-fetching feed scheduled for deletion! Un-mark it as removing
 
 				changeFeedInfo->removing = false;
@@ -5690,10 +5689,13 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 				addMutationToLog = true;
 			}
 
+			if (changeFeedInfo->destroyed) {
+				continue;
+			}
+
 			// we checked all feeds we already owned in this range at the start to reset them if they were removing, and
 			// this actor would have been cancelled if a later remove happened
 			ASSERT(!changeFeedInfo->removing);
-			ASSERT(!changeFeedInfo->destroyed);
 			if (cfEntry.stopVersion < changeFeedInfo->stopVersion) {
 				TEST(true); // Change feed updated stop version from fetch metadata
 				changeFeedInfo->stopVersion = cfEntry.stopVersion;
@@ -5707,6 +5709,7 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 				addMutationToLog = true;
 			}
 		}
+		feedIds.push_back(cfEntry.feedId);
 		changeFeedInfo->updateMetadataVersion(cfEntry.metadataVersion);
 		if (addMutationToLog) {
 			ASSERT(changeFeedInfo.isValid());
