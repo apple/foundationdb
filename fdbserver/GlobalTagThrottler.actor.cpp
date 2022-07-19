@@ -527,6 +527,8 @@ public:
 	int64_t manualThrottleCount() const { return 0; }
 
 	Future<Void> tryUpdateAutoThrottling(StorageQueueInfo const& ss) {
+		throttlingRatios[ss.id] = ss.getThrottlingRatio(SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER,
+		                                                SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER);
 		for (const auto& busyReadTag : ss.busiestReadTags) {
 			throughput[ss.id][busyReadTag.tag].updateCost(busyReadTag.rate, OpType::READ);
 		}
@@ -535,8 +537,6 @@ public:
 		}
 		return Void();
 	}
-
-	void setThrottlingRatio(UID storageServerId, Optional<double> ratio) { throttlingRatios[storageServerId] = ratio; }
 
 	void setQuota(TransactionTagRef tag, ThrottleApi::TagQuotaValue const& tagQuotaValue) {
 		tagStatistics[tag].setQuota(tagQuotaValue);
@@ -578,10 +578,6 @@ bool GlobalTagThrottler::isAutoThrottlingEnabled() const {
 }
 Future<Void> GlobalTagThrottler::tryUpdateAutoThrottling(StorageQueueInfo const& ss) {
 	return impl->tryUpdateAutoThrottling(ss);
-}
-
-void GlobalTagThrottler::setThrottlingRatio(UID storageServerId, Optional<double> ratio) {
-	return impl->setThrottlingRatio(storageServerId, ratio);
 }
 
 void GlobalTagThrottler::setQuota(TransactionTagRef tag, ThrottleApi::TagQuotaValue const& tagQuotaValue) {
@@ -645,17 +641,9 @@ public:
 			double fractionalBusyness{ 0.0 }; // unused for global tag throttling
 			result.busiestWriteTags.emplace_back(tag, writeCost.smoothRate(), fractionalBusyness);
 		}
+		result.lastReply.bytesInput = ((totalReadCost.smoothRate() + totalWriteCost.smoothRate()) / targetCost) *
+		                              SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER;
 		return result;
-	}
-
-	Optional<double> getThrottlingRatio() const {
-		auto const springCost = 0.2 * targetCost;
-		auto const currentCost = totalReadCost.smoothRate() + totalWriteCost.smoothRate();
-		if (currentCost < targetCost - springCost) {
-			return {};
-		} else {
-			return std::max(0.0, ((targetCost + springCost) - currentCost) / springCost);
-		}
 	}
 };
 
@@ -690,14 +678,6 @@ public:
 		result.reserve(storageServers.size());
 		for (const auto& storageServer : storageServers) {
 			result.push_back(storageServer.getStorageQueueInfo());
-		}
-		return result;
-	}
-
-	std::map<UID, Optional<double>> getThrottlingRatios() const {
-		std::map<UID, Optional<double>> result;
-		for (int i = 0; i < storageServers.size(); ++i) {
-			result[UID(i, i)] = storageServers[i].getThrottlingRatio();
 		}
 		return result;
 	}
@@ -765,10 +745,6 @@ ACTOR static Future<Void> updateGlobalTagThrottler(GlobalTagThrottler* globalTag
 		auto const storageQueueInfos = storageServers->getStorageQueueInfos();
 		for (const auto& sq : storageQueueInfos) {
 			globalTagThrottler->tryUpdateAutoThrottling(sq);
-		}
-		auto const throttlingRatios = storageServers->getThrottlingRatios();
-		for (const auto& [id, ratio] : throttlingRatios) {
-			globalTagThrottler->setThrottlingRatio(id, ratio);
 		}
 	}
 }

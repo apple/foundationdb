@@ -75,7 +75,7 @@ public:
 	void addCommitCost(TransactionTagRef tagName, TransactionCommitCostEstimation const& cost);
 
 	// Determine the ratio (limit / current throughput) for throttling based on write queue size
-	Optional<double> getWriteQueueSizeLimitRatio(int64_t storageSpringBytes, int64_t storageTargetBytes) const;
+	Optional<double> getThrottlingRatio(int64_t storageTargetBytes, int64_t storageSpringBytes) const;
 };
 
 struct TLogQueueInfo {

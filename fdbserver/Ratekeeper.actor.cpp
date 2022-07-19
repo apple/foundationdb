@@ -1018,22 +1018,13 @@ void StorageQueueInfo::refreshCommitCost(double elapsed) {
 	totalWriteCosts = 0;
 }
 
-Optional<double> StorageQueueInfo::getWriteQueueSizeLimitRatio(int64_t storageSpringBytes,
-                                                               int64_t storageTargetBytes) const {
-	auto const minFreeSpace =
-	    std::max(SERVER_KNOBS->MIN_AVAILABLE_SPACE,
-	             (int64_t)(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO * smoothTotalSpace.smoothTotal()));
+Optional<double> StorageQueueInfo::getThrottlingRatio(int64_t storageTargetBytes, int64_t storageSpringBytes) const {
 	auto const storageQueue = getStorageQueueBytes();
-	auto const springBytes = std::max<int64_t>(
-	    1, std::min<int64_t>(storageSpringBytes, (smoothFreeSpace.smoothTotal() - minFreeSpace) * 0.2));
-	auto const targetBytes =
-	    std::max<int64_t>(1, std::min<int64_t>(storageTargetBytes, smoothFreeSpace.smoothTotal() - minFreeSpace));
-	auto const targetRateRatio = std::min((storageQueue - targetBytes + springBytes) / (double)springBytes, 2.0);
-	auto const inputRate = smoothInputBytes.smoothRate();
-	if (targetRateRatio > 0 && inputRate > 0) {
-		return verySmoothDurableBytes.smoothRate() / (inputRate * targetRateRatio);
-	} else {
+	if (storageQueue < storageTargetBytes - storageSpringBytes) {
 		return {};
+	} else {
+		return std::max(
+		    0.0, static_cast<double>((storageTargetBytes + storageSpringBytes) - storageQueue) / storageSpringBytes);
 	}
 }
 

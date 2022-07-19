@@ -90,10 +90,6 @@ public:
 	Future<Void> tryUpdateAutoThrottling(StorageQueueInfo const&) override;
 	PrioritizedTransactionTagMap<ClientTagThrottleLimits> getClientRates() override;
 
-	// Based on limiting storage queue size, set a ratio by which total throughput on the storage server needs to be
-	// adjusted
-	void setThrottlingRatio(UID storageServerId, Optional<double> ratio);
-
 	// Testing only:
 public:
 	void setQuota(TransactionTagRef, ThrottleApi::TagQuotaValue const&);
