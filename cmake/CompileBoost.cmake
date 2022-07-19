@@ -53,6 +53,7 @@ function(compile_boost)
   set(USER_CONFIG_FLAG --user-config=${CMAKE_BINARY_DIR}/user-config.jam)
 
   # Download zlib
+  include(ExternalProject)
   set(ZLIB_SOURCE_DIR "${CMAKE_BINARY_DIR}/zlib")
   ExternalProject_add("${COMPILE_BOOST_TARGET}_zlib"
     URL "https://zlib.net/zlib-1.2.12.tar.gz"
@@ -64,7 +65,6 @@ function(compile_boost)
     LOG_DOWNLOAD ON)
 
   # Build boost
-  include(ExternalProject)
   set(BOOST_INSTALL_DIR "${CMAKE_BINARY_DIR}/boost_install")
   ExternalProject_add("${COMPILE_BOOST_TARGET}Project"
     URL "https://boostorg.jfrog.io/artifactory/main/release/1.78.0/source/boost_1_78_0.tar.bz2"
