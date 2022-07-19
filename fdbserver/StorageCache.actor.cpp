@@ -1410,8 +1410,8 @@ ACTOR Future<Void> fetchKeys(StorageCacheData* data, AddingCacheRange* cacheRang
 					}
 				} else if (e.code() == error_code_future_version || e.code() == error_code_process_behind) {
 					CODE_PROBE(true,
-					           "fetchKeys got future_version or process_behind, so there must be a huge storage lag");
-					// somewhere.  Keep trying.
+					           "fetchKeys got future_version or process_behind, so there must be a huge storage lag "
+					           "somewhere.  Keep trying.");
 				} else {
 					throw;
 				}
@@ -1963,7 +1963,10 @@ ACTOR Future<Void> pullAsyncData(StorageCacheData* data) {
 					}
 					if (data->cacheRangeChangeCounter == changeCounter)
 						break;
-					// CODE_PROBE(true, "A fetchKeys completed while we were doing this, so eager might be outdated.");
+					// CODE_PROBE(
+					//     true,
+					//     "A fetchKeys completed while we were doing this, so eager might be outdated. Read it
+					//     again.");
 				}
 			}
 

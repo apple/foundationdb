@@ -2597,9 +2597,9 @@ public:
 								// successfully started recruitment of pair, reset tss recruitment state
 								tssState = makeReference<TSSPairState>();
 							} else {
-								CODE_PROBE(tssState->active,
-								           "TSS recruitment skipped potential pair because it's in a");
-								// different dc/datahall
+								CODE_PROBE(
+								    tssState->active,
+								    "TSS recruitment skipped potential pair because it's in a different dc/datahall");
 								self->addActor.send(initializeStorage(
 								    self, candidateWorker, ddEnabledState, false, makeReference<TSSPairState>()));
 							}

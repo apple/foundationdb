@@ -5658,8 +5658,8 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 
 		if (!existing) {
 			CODE_PROBE(cleanupPending,
-			           "Fetch change feed which is cleanup pending. This means there was a move away and a");
-			// move back, this will remake the metadata
+			           "Fetch change feed which is cleanup pending. This means there was a move away and a move back, "
+			           "this will remake the metadata");
 
 			changeFeedInfo = Reference<ChangeFeedInfo>(new ChangeFeedInfo());
 			changeFeedInfo->range = cfEntry.range;
@@ -7294,9 +7294,9 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				wait(doEagerReads(data, &eager));
 				if (data->shardChangeCounter == changeCounter)
 					break;
-				CODE_PROBE(true,
-				           "A fetchKeys completed while we were doing this, so eager might be outdated.  Read it");
-				// again.
+				CODE_PROBE(
+				    true,
+				    "A fetchKeys completed while we were doing this, so eager might be outdated.  Read it again.");
 				// SOMEDAY: Theoretically we could check the change counters of individual shards and retry the reads
 				// only selectively
 				eager = UpdateEagerReadInfo();
@@ -9227,8 +9227,9 @@ ACTOR Future<Void> memoryStoreRecover(IKeyValueStore* store, Reference<IClusterC
 
 			state bool canRemove = wait(canRemoveStorageServer(tr, id));
 			if (!canRemove) {
-				CODE_PROBE(true, "it's possible that the caller had a transaction in flight that assigned keys to the");
-				// server. Wait for it to reverse its mistake.
+				CODE_PROBE(true,
+				           "it's possible that the caller had a transaction in flight that assigned keys to the "
+				           "server. Wait for it to reverse its mistake.");
 				wait(delayJittered(SERVER_KNOBS->REMOVE_RETRY_DELAY, TaskPriority::UpdateStorage));
 				tr->reset();
 				TraceEvent("RemoveStorageServerRetrying")

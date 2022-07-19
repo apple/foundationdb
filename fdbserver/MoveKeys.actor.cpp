@@ -1031,8 +1031,8 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 					}
 					if (!dest.size()) {
 						CODE_PROBE(true,
-						           "A previous finishMoveKeys for this range committed just as it was cancelled to");
-						// start this one?
+						           "A previous finishMoveKeys for this range committed just as it was cancelled to "
+						           "start this one?");
 						TraceEvent("FinishMoveKeysNothingToDo", relocationIntervalId)
 						    .detail("KeyBegin", keys.begin)
 						    .detail("KeyEnd", keys.end)
@@ -2024,8 +2024,8 @@ ACTOR Future<Void> removeStorageServer(Database cx,
 			state bool canRemove = wait(canRemoveStorageServer(tr, serverID));
 			if (!canRemove) {
 				CODE_PROBE(true,
-				           "The caller had a transaction in flight that assigned keys to the server.  Wait for it to");
-				// reverse its mistake.
+				           "The caller had a transaction in flight that assigned keys to the server.  Wait for it to "
+				           "reverse its mistake.");
 				TraceEvent(SevWarn, "NoCanRemove").detail("Count", noCanRemoveCount++).detail("ServerID", serverID);
 				wait(delayJittered(SERVER_KNOBS->REMOVE_RETRY_DELAY, TaskPriority::DataDistributionLaunch));
 				tr->reset();

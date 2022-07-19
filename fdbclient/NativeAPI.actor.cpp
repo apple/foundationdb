@@ -4635,8 +4635,7 @@ static Future<Void> tssStreamComparison(Request request,
 					CODE_PROBE(FLOW_KNOBS->LOAD_BALANCE_TSS_MISMATCH_TRACE_FULL,
 					           "Tracing Full TSS Mismatch in stream comparison");
 					CODE_PROBE(!FLOW_KNOBS->LOAD_BALANCE_TSS_MISMATCH_TRACE_FULL,
-					           "Tracing Partial TSS Mismatch in stream");
-					// comparison and storing the rest in FDB
+					           "Tracing Partial TSS Mismatch in stream comparison and storing the rest in FDB");
 
 					if (!FLOW_KNOBS->LOAD_BALANCE_TSS_MISMATCH_TRACE_FULL) {
 						mismatchEvent.disable();
