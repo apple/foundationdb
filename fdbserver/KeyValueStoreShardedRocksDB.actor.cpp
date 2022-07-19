@@ -2386,7 +2386,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 		for (DataShard* shard : shards) {
 			if (shard == nullptr || !shard->physicalShard->initialized()) {
-				TraceEvent(SevVerbose, "ShardedRocksRangeRangeShardNotReady").detail("ReadKey", keys);
+				TraceEvent(SevDebug, "ShardedRocksRangeRangeShardNotReady").detail("ReadKey", keys);
 				return RangeResult();
 			}
 		}

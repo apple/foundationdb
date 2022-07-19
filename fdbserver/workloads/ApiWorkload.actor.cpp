@@ -173,6 +173,12 @@ ACTOR Future<bool> compareDatabaseToMemory(ApiWorkload* self) {
 
 		state Reference<TransactionWrapper> transaction = self->createTransaction();
 		state KeyRangeRef range(startKey, endKey);
+		// KeyRangeRef debugRange("0000000000bb"_sr, "0000000000be"_sr);
+		// if (range.intersects(debugRange)) {
+		const UID debugId = deterministicRandom()->randomUniqueID();
+		transaction->debugTransaction(debugId);
+		TraceEvent(SevDebug, "CompareDatabaseToMemory").detail("Range", range).detail("DebugID", debugId);
+		// }
 
 		loop {
 			try {

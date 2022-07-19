@@ -3173,6 +3173,8 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
                                           SpanContext parentSpan,
                                           IKeyValueStore::ReadType type,
                                           Optional<Key> tenantPrefix) {
+	// DEBUG_KEY_RANGE("SSReadRange", version, range, data->thisServerID);
+	//     .detail("Fetch", (type == IKeyValueStore::ReadType::FETCH));
 	state GetKeyValuesReply result;
 	state StorageServer::VersionedData::ViewAtVersion view = data->data().at(version);
 	state StorageServer::VersionedData::iterator vCurrent = view.end();
@@ -3181,6 +3183,7 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 	state Key readBeginTemp;
 	state int vCount = 0;
 	state Span span("SS:readRange"_loc, parentSpan);
+	// DEBUG_KEY_RANGE("SSReadRangeImpl", version, range, data->thisServerID);
 
 	// for caching the storage queue results during the first PTree traversal
 	state VectorRef<KeyValueRef> resultCache;
@@ -3663,10 +3666,19 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 			                                      tenantPrefix));
 			GetKeyValuesReply r = _r;
 
-			if (req.debugID.present())
+			if (req.debugID.present()) {
+				TraceEvent te("DebugSSGetRange", data->thisServerID);
+				te.detail("DebugID", req.debugID.get());
+				te.detail("Range", KeyRangeRef(begin, end));
+				if (!r.data.empty()) {
+					te.detail("ResultBegin", r.data.front().key);
+					te.detail("ResultEnd", r.data.back().key);
+				}
+				te.log();
 				g_traceBatch.addEvent(
 				    "TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValues.AfterReadRange");
 			//.detail("Begin",begin).detail("End",end).detail("SizeOf",r.data.size());
+			}
 			data->checkChangeCounter(
 			    changeCounter,
 			    KeyRangeRef(std::min<KeyRef>(begin, std::min<KeyRef>(req.begin.getKey(), req.end.getKey())),
