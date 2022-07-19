@@ -432,6 +432,7 @@ struct ChangeFeedInfo : ReferenceCounted<ChangeFeedInfo> {
 	Version storageVersion = invalidVersion; // The version between the storage version and the durable version are
 	                                         // being written to disk as part of the current commit in updateStorage.
 	Version durableVersion = invalidVersion; // All versions before the durable version are durable on disk
+	// FIXME: this needs to get persisted to disk to still fix same races across restart!
 	Version metadataVersion = invalidVersion; // Last update to the change feed metadata. Used for reasoning about
 	                                          // fetched metadata vs local metadata
 	Version emptyVersion = 0; // The change feed does not have any mutations before emptyVersion
@@ -5565,12 +5566,6 @@ ACTOR Future<Version> fetchChangeFeed(StorageServer* data,
 			return invalidVersion;
 		}
 
-		fmt::print("DBG: SS {} Feed {} possibly destroyed, retrying. SS version {}, DesiredOldest {}\n",
-		           data->thisServerID.toString().substr(0, 4),
-		           changeFeedInfo->id.printable(),
-		           data->version.get(),
-		           data->desiredOldestVersion.get());
-
 		// otherwise assume the feed just hasn't been created on the SS we tried to read it from yet, wait for it to
 		// definitely be committed and retry
 		seenNotRegistered = true;
@@ -5664,6 +5659,8 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 		} else {
 			changeFeedInfo = existingEntry->second;
 
+			TEST(cfEntry.metadataVersion > data->version.get()); // Change Feed fetched future metadata version
+
 			auto fid = missingFeeds.find(cfEntry.feedId);
 			if (fid != missingFeeds.end()) {
 				TraceEvent(SevDebug, "ResetChangeFeedInfo", data->thisServerID)
@@ -5690,6 +5687,7 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 			}
 
 			if (changeFeedInfo->destroyed) {
+				TEST(true); // Change feed fetched and destroyed by other fetch while fetching metadata
 				continue;
 			}
 
@@ -5741,14 +5739,13 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 		// isn't in the fetched response. In that case, the feed must have been destroyed between lastMetadataVersion
 		// and fetchedMetadataVersion
 		if (lastMetadataVersion >= fetchedMetadataVersion) {
+			TEST(true); // Change Feed fetched higher metadata version before moved away
 			continue;
 		}
 
-		/*fmt::print("DBG: SS {} fetching feed {} was refreshed but not present!! assuming destroyed\n",
-		           data->thisServerID.toString().substr(0, 4),
-		           feedId.printable());*/
 		Version cleanupVersion = data->data().getLatestVersion();
 
+		TEST(true); // Destroying change feed from fetch metadata
 		TraceEvent(SevDebug, "DestroyingChangeFeedFromFetchMetadata", data->thisServerID)
 		    .detail("RangeID", feed.first.printable())
 		    .detail("Range", existingEntry->second->range)

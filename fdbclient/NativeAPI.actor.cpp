@@ -9456,9 +9456,6 @@ ACTOR Future<OverlappingChangeFeedsInfo> getOverlappingChangeFeedsActor(Referenc
 				for (auto& it : allOverlappingRequests[i].get().feeds) {
 					auto res = latestFeedMetadata.insert({ it.feedId, it });
 					if (!res.second) {
-						// TODO REMOVE ASSERT
-						ASSERT(res.first != latestFeedMetadata.end());
-
 						TEST(true); // deduping fetched overlapping feed by higher metadata version
 						if (res.first->second.metadataVersion < it.metadataVersion) {
 							res.first->second = it;
