@@ -1254,13 +1254,24 @@ public:
 
 	void maybeInjectTargetedRestart(Version v) {
 		// inject an SS restart at most once per test
-		if (g_network->isSimulated() && now() > g_simulator.injectTargetedSSRestartTime &&
+		if (g_network->isSimulated() && !g_simulator.speedUpSimulation &&
+		    now() > g_simulator.injectTargetedSSRestartTime &&
 		    rebootAfterDurableVersion == std::numeric_limits<Version>::max()) {
 			TEST(true); // Injecting SS targeted restart
-			TraceEvent("SSInjectTargetedRestart", thisServerID).detail("Version", v);
+			TraceEvent("SimSSInjectTargetedRestart", thisServerID).detail("Version", v);
 			rebootAfterDurableVersion = v;
 			g_simulator.injectTargetedSSRestartTime = std::numeric_limits<double>::max();
 		}
+	}
+
+	bool maybeInjectDelay() {
+		if (g_network->isSimulated() && !g_simulator.speedUpSimulation && now() > g_simulator.injectSSDelayTime) {
+			TEST(true); // Injecting SS targeted delay
+			TraceEvent("SimSSInjectDelay", thisServerID);
+			g_simulator.injectSSDelayTime = std::numeric_limits<double>::max();
+			return true;
+		}
+		return false;
 	}
 };
 
@@ -7185,6 +7196,10 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			}
 		}
 
+		if (data->maybeInjectDelay()) {
+			wait(delay(deterministicRandom()->random01() * 10.0));
+		}
+
 		while (data->byteSampleClearsTooLarge.get()) {
 			wait(data->byteSampleClearsTooLarge.onChange());
 		}
@@ -7841,6 +7856,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 			TraceEvent("RebootWhenDurableTriggered", data->thisServerID)
 			    .detail("NewOldestVersion", newOldestVersion)
 			    .detail("RebootAfterDurableVersion", data->rebootAfterDurableVersion);
+			TEST(true); // SS rebooting after durable
 			// To avoid brokenPromise error, which is caused by the sender of the durableInProgress (i.e., this
 			// process) never sets durableInProgress, we should set durableInProgress before send the
 			// please_reboot() error. Otherwise, in the race situation when storage server receives both reboot and
