@@ -48,6 +48,14 @@ struct decoder {
 		delete[] code;
 		delete[] plaintext;
 	}
+
+	static std::string from_string(std::string s) {
+		std::stringstream in(s);
+		std::stringstream out;
+		decoder dec;
+		dec.decode(in, out);
+		return out.str();
+	}
 };
 
 } // namespace base64
