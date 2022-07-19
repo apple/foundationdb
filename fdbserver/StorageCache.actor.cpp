@@ -472,7 +472,6 @@ ACTOR Future<Void> getValueQ(StorageCacheData* data, GetValueRequest req) {
 	try {
 		++data->counters.getValueQueries;
 		++data->counters.allQueries;
-		//++data->readQueueSizeMetric;
 		// TODO later
 		// data->maxQueryQueue = std::max<int>( data->maxQueryQueue, data->counters.allQueries.getValue() -
 		// data->counters.finishedQueries.getValue());
@@ -544,7 +543,6 @@ ACTOR Future<Void> getValueQ(StorageCacheData* data, GetValueRequest req) {
 	}
 
 	++data->counters.finishedQueries;
-	//--data->readQueueSizeMetric;
 	// if(data->latencyBandConfig.present()) {
 	//	int maxReadBytes =
 	// data->latencyBandConfig.get().readConfig.maxReadBytes.orDefault(std::numeric_limits<int>::max());
@@ -728,7 +726,6 @@ ACTOR Future<Void> getKeyValues(StorageCacheData* data, GetKeyValuesRequest req)
 	++data->counters.getRangeQueries;
 	++data->counters.allQueries;
 	// printf("\nSCGetKeyValues\n");
-	//++data->readQueueSizeMetric;
 	// data->maxQueryQueue = std::max<int>( data->maxQueryQueue, data->counters.allQueries.getValue() -
 	// data->counters.finishedQueries.getValue());
 
