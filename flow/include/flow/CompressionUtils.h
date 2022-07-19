@@ -38,11 +38,9 @@ struct CompressionUtils {
 	static CompressionFilter fromFilterString(const std::string& filter) {
 		if (filter == "NONE") {
 			return CompressionFilter::NONE;
-		}
-		else if (filter == "GZIP") {
+		} else if (filter == "GZIP") {
 			return CompressionFilter::GZIP;
-		}
-		else {
+		} else {
 			throw not_implemented();
 		}
 	}
@@ -50,11 +48,9 @@ struct CompressionUtils {
 	static std::string toString(const CompressionFilter filter) {
 		if (filter == CompressionFilter::NONE) {
 			return "NONE";
-		}
-		else if (filter == CompressionFilter::GZIP) {
+		} else if (filter == CompressionFilter::GZIP) {
 			return "GZP";
-		}
-		else {
+		} else {
 			throw not_implemented();
 		}
 	}
