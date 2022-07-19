@@ -115,7 +115,7 @@ public:
 			return Tuple()
 			    .append(version)
 			    .append(StringRef(fileName))
-			    .append(isRange)
+			    .append((int)isRange)
 			    .append(fileSize)
 			    .append(blockSize)
 			    .append(endVersion);
@@ -193,7 +193,7 @@ struct RestoreFileFR {
 		return Tuple()
 		    .append(version)
 		    .append(StringRef(fileName))
-		    .append(isRange)
+		    .append((int)isRange)
 		    .append(fileSize)
 		    .append(blockSize)
 		    .append(endVersion)

@@ -97,7 +97,7 @@ ACTOR Future<bool> profileCommandActor(Database db,
 				}
 			}
 
-			Tuple rate = Tuple().appendDouble(sampleRate);
+			Tuple rate = Tuple().append(sampleRate);
 			Tuple size = Tuple().append(sizeLimit);
 			tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 			tr->set(GlobalConfig::prefixedKey(fdbClientInfoTxnSampleRate), rate.pack());

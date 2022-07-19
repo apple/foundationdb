@@ -361,7 +361,7 @@ public:
 template <>
 inline Standalone<StringRef> TupleCodec<FileBackupAgent::ERestoreState>::pack(
     FileBackupAgent::ERestoreState const& val) {
-	return Tuple().append(val).pack();
+	return Tuple().append(static_cast<int>(val)).pack();
 }
 template <>
 inline FileBackupAgent::ERestoreState TupleCodec<FileBackupAgent::ERestoreState>::unpack(

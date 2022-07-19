@@ -1037,7 +1037,7 @@ TEST_CASE("tuple_support_versionstamp") {
 	// a random 12 bytes long StringRef as a versionstamp
 	StringRef str = "\x01\x02\x03\x04\x05\x06\x07\x08\x09\x10\x11\x12"_sr;
 	Versionstamp vs(str);
-	const Tuple t = Tuple().append(prefix).append(RECORD).appendVersionstamp(vs).append("{K[3]}"_sr).append("{...}"_sr);
+	const Tuple t = Tuple().append(prefix).append(RECORD).append(vs).append("{K[3]}"_sr).append("{...}"_sr);
 	ASSERT(t.getVersionstamp(2) == vs);
 
 	// verify the round-way pack-unpack path for a Tuple containing a versionstamp

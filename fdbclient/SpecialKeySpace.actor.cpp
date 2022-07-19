@@ -2005,7 +2005,7 @@ Future<Optional<std::string>> ClientProfilingImpl::commit(ReadYourWritesTransact
 		} else {
 			try {
 				double sampleRate = boost::lexical_cast<double>(sampleRateStr);
-				Tuple rate = Tuple().appendDouble(sampleRate);
+				Tuple rate = Tuple().append(sampleRate);
 				insertions.push_back_deep(insertions.arena(), KeyValueRef(fdbClientInfoTxnSampleRate, rate.pack()));
 			} catch (boost::bad_lexical_cast& e) {
 				return Optional<std::string>(ManagementAPIError::toJsonString(

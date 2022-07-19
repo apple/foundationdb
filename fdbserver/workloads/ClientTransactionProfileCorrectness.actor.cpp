@@ -294,7 +294,7 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 		wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
 			tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			Tuple rate = Tuple().appendDouble(sampleProbability);
+			Tuple rate = Tuple().append(sampleProbability);
 			Tuple size = Tuple().append(sizeLimit);
 			tr->set(GlobalConfig::prefixedKey(fdbClientInfoTxnSampleRate), rate.pack());
 			tr->set(GlobalConfig::prefixedKey(fdbClientInfoTxnSizeLimit), size.pack());
