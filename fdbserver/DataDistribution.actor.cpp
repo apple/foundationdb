@@ -41,6 +41,7 @@
 #include "fdbserver/TenantCache.h"
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/WaitFailure.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include "flow/ActorCollection.h"
 #include "flow/Arena.h"
 #include "flow/BooleanParam.h"
@@ -290,6 +291,7 @@ ACTOR Future<Void> pollMoveKeysLock(Database cx, MoveKeysLock lock, const DDEnab
 }
 
 struct DataDistributor : NonCopyable, ReferenceCounted<DataDistributor> {
+public:
 	Reference<AsyncVar<ServerDBInfo> const> dbInfo;
 	UID ddId;
 	PromiseStream<Future<Void>> addActor;
@@ -314,9 +316,6 @@ struct DataDistributor : NonCopyable, ReferenceCounted<DataDistributor> {
 	// consumer is a yield stream from producer. The RelocateShard is pushed into relocationProducer and popped from
 	// relocationConsumer (by DDQueue)
 	PromiseStream<RelocateShard> relocationProducer, relocationConsumer;
-	std::vector<TeamCollectionInterface> tcis; // primary and remote region interface
-	Reference<AsyncVar<bool>> anyZeroHealthyTeams; // true if primary or remote has zero healthy team
-	std::vector<Reference<AsyncVar<bool>>> zeroHealthyTeams; // primary and remote
 
 	DataDistributor(Reference<AsyncVar<ServerDBInfo> const> const& db, UID id)
 	  : dbInfo(db), ddId(id), txnProcessor(nullptr), initialDDEventHolder(makeReference<EventCacheHolder>("InitialDD")),
@@ -579,10 +578,10 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			self->shardsAffectedByTeamFailure = makeReference<ShardsAffectedByTeamFailure>();
 			wait(self->resumeRelocations());
 
-			std::vector<TeamCollectionInterface> tcis;
+			std::vector<TeamCollectionInterface> tcis; // primary and remote region interface
+			Reference<AsyncVar<bool>> anyZeroHealthyTeams; // true if primary or remote has zero healthy team
+			std::vector<Reference<AsyncVar<bool>>> zeroHealthyTeams; // primary and remote
 
-			Reference<AsyncVar<bool>> anyZeroHealthyTeams;
-			std::vector<Reference<AsyncVar<bool>>> zeroHealthyTeams;
 			tcis.push_back(TeamCollectionInterface());
 			zeroHealthyTeams.push_back(makeReference<AsyncVar<bool>>(true));
 			int storageTeamSize = self->configuration.storageTeamSize;
@@ -1391,6 +1390,16 @@ static Future<ErrorOr<Void>> badTestFuture(double duration, Error e) {
 	return tag(delay(duration), ErrorOr<Void>(e));
 }
 
+inline DDShardInfo doubleToNoLocationShardInfo(double d, bool hasDest) {
+	DDShardInfo res(doubleToTestKey(d), anonymousShardId, anonymousShardId);
+	res.primarySrc.emplace_back((uint64_t)d, 0);
+	if (hasDest) {
+		res.primaryDest.emplace_back((uint64_t)d + 1, 0);
+		res.hasDest = true;
+	}
+	return res;
+}
+
 } // namespace data_distribution_test
 
 TEST_CASE("/DataDistribution/WaitForMost") {
@@ -1450,5 +1459,42 @@ TEST_CASE("/DataDistributor/StorageWiggler/Order") {
 		ASSERT(id == correctOrder[i]);
 	}
 	ASSERT(!wiggler.getNextServerId().present());
+	return Void();
+}
+
+TEST_CASE("/DataDistributor/Initialization/ResumeFromShard") {
+	state Reference<AsyncVar<ServerDBInfo> const> dbInfo;
+	state Reference<DataDistributor> self(new DataDistributor(dbInfo, UID()));
+
+	self->shardsAffectedByTeamFailure = makeReference<ShardsAffectedByTeamFailure>();
+	self->initData = makeReference<InitialDataDistribution>();
+	self->configuration.usableRegions = 1;
+	self->configuration.storageTeamSize = 1;
+
+	// add DDShardInfo
+	int shardNum = 1000000; // 2000000000; OOM
+	std::cout << "generating " << shardNum << "shards...\n";
+	for (int i = 1; i <= SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM; ++i) {
+		self->initData->shards.emplace_back(data_distribution_test::doubleToNoLocationShardInfo(i, true));
+	}
+	for (int i = SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM + 1; i <= shardNum; ++i) {
+		self->initData->shards.emplace_back(data_distribution_test::doubleToNoLocationShardInfo(i, false));
+	}
+	self->initData->shards.emplace_back(DDShardInfo(allKeys.end));
+	std::cout << "Start resuming...\n";
+	wait(DataDistributor::resumeFromInitShards(self));
+	std::cout << "Start validation...\n";
+	auto relocateFuture = self->relocationProducer.getFuture();
+	for (int i = 0; i < SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM; ++i) {
+		ASSERT(relocateFuture.isReady());
+		auto rs = relocateFuture.pop();
+		ASSERT(rs.isRestore() == false);
+		ASSERT(rs.cancelled == false);
+		ASSERT(rs.dataMoveId == anonymousShardId);
+		ASSERT(rs.priority == SERVER_KNOBS->PRIORITY_RECOVER_MOVE);
+		// std::cout << rs.keys.begin.toString() << " " << self->initData->shards[i].key.toString() << " \n";
+		ASSERT(rs.keys.begin.compare(self->initData->shards[i].key) == 0);
+		ASSERT(rs.keys.end == self->initData->shards[i + 1].key);
+	}
 	return Void();
 }
