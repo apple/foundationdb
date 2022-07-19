@@ -1132,10 +1132,9 @@ ACTOR static Future<Void> handleTssMismatches(DatabaseContext* cx) {
 
 					for (const DetailedTSSMismatch& d : data.second) {
 						// <tssid, time, mismatchid> -> mismatch data
-						tssMismatchDB.set(
-						    tr,
-						    Tuple().append(data.first.toString()).append(d.timestamp).append(d.mismatchId.toString()),
-						    d.traceString);
+						tssMismatchDB.set(tr,
+						                  Tuple::makeTuple(data.first.toString(), d.timestamp, d.mismatchId.toString()),
+						                  d.traceString);
 					}
 
 					wait(tr->commit());

@@ -40,13 +40,7 @@ struct MetricsRule {
 	int minLevel;
 
 	Tuple pack() const {
-		return Tuple()
-		    .append(namePattern)
-		    .append(typePattern)
-		    .append(addressPattern)
-		    .append(idPattern)
-		    .append(enabled ? 1 : 0)
-		    .append(minLevel);
+		return Tuple::makeTuple(namePattern, typePattern, addressPattern, idPattern, enabled ? 1 : 0, minLevel);
 	}
 
 	static inline MetricsRule unpack(Tuple const& t) {

@@ -59,7 +59,7 @@ inline Tuple TupleCodec<Tuple>::unpack(Standalone<StringRef> const& val) {
 
 template <>
 inline Standalone<StringRef> TupleCodec<int64_t>::pack(int64_t const& val) {
-	return Tuple().append(val).pack();
+	return Tuple::makeTuple(val).pack();
 }
 template <>
 inline int64_t TupleCodec<int64_t>::unpack(Standalone<StringRef> const& val) {
@@ -68,7 +68,7 @@ inline int64_t TupleCodec<int64_t>::unpack(Standalone<StringRef> const& val) {
 
 template <>
 inline Standalone<StringRef> TupleCodec<bool>::pack(bool const& val) {
-	return Tuple().append(val ? 1 : 0).pack();
+	return Tuple::makeTuple(val ? 1 : 0).pack();
 }
 template <>
 inline bool TupleCodec<bool>::unpack(Standalone<StringRef> const& val) {
@@ -77,7 +77,7 @@ inline bool TupleCodec<bool>::unpack(Standalone<StringRef> const& val) {
 
 template <>
 inline Standalone<StringRef> TupleCodec<Standalone<StringRef>>::pack(Standalone<StringRef> const& val) {
-	return Tuple().append(val).pack();
+	return Tuple::makeTuple(val).pack();
 }
 template <>
 inline Standalone<StringRef> TupleCodec<Standalone<StringRef>>::unpack(Standalone<StringRef> const& val) {
@@ -96,7 +96,7 @@ inline UID TupleCodec<UID>::unpack(Standalone<StringRef> const& val) {
 // This is backward compatible with TupleCodec<Standalone<StringRef>>
 template <>
 inline Standalone<StringRef> TupleCodec<std::string>::pack(std::string const& val) {
-	return Tuple().append(StringRef(val)).pack();
+	return Tuple::makeTuple(val).pack();
 }
 template <>
 inline std::string TupleCodec<std::string>::unpack(Standalone<StringRef> const& val) {
@@ -143,7 +143,7 @@ struct TupleCodec<std::vector<T>> {
 
 template <>
 inline Standalone<StringRef> TupleCodec<KeyRange>::pack(KeyRange const& val) {
-	return Tuple().append(val.begin).append(val.end).pack();
+	return Tuple::makeTuple(val.begin, val.end).pack();
 }
 template <>
 inline KeyRange TupleCodec<KeyRange>::unpack(Standalone<StringRef> const& val) {

@@ -141,12 +141,7 @@ bool ThrottleApi::TagQuotaValue::isValid() const {
 }
 
 Value ThrottleApi::TagQuotaValue::toValue() const {
-	Tuple tuple;
-	tuple.append(reservedReadQuota);
-	tuple.append(totalReadQuota);
-	tuple.append(reservedWriteQuota);
-	tuple.append(totalWriteQuota);
-	return tuple.pack();
+	return Tuple::makeTuple(reservedReadQuota, totalReadQuota, reservedWriteQuota, totalWriteQuota).pack();
 }
 
 ThrottleApi::TagQuotaValue ThrottleApi::TagQuotaValue::fromValue(ValueRef value) {
