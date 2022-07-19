@@ -491,11 +491,13 @@ struct ChangeFeedInfo : ReferenceCounted<ChangeFeedInfo> {
 		newMutations.trigger();
 	}
 
-	void updateMetadataVersion(Version version) {
+	bool updateMetadataVersion(Version version) {
 		// don't update metadata version if removing, so that metadata version remains the moved away version
 		if (!removing && version > metadataVersion) {
 			metadataVersion = version;
+			return true;
 		}
+		return false;
 	}
 };
 
@@ -5198,22 +5200,27 @@ ACTOR Future<Void> tryGetRange(PromiseStream<RangeResult> results, Transaction* 
 // We have to store the version the change feed was stopped at in the SS instead of just the stopped status
 // In addition to simplifying stopping logic, it enables communicating stopped status when fetching change feeds
 // from other SS correctly
-const Value changeFeedSSValue(KeyRangeRef const& range, Version popVersion, Version stopVersion) {
+const Value changeFeedSSValue(KeyRangeRef const& range,
+                              Version popVersion,
+                              Version stopVersion,
+                              Version metadataVersion) {
 	BinaryWriter wr(IncludeVersion(ProtocolVersion::withChangeFeed()));
 	wr << range;
 	wr << popVersion;
 	wr << stopVersion;
+	wr << metadataVersion;
 	return wr.toValue();
 }
 
-std::tuple<KeyRange, Version, Version> decodeChangeFeedSSValue(ValueRef const& value) {
+std::tuple<KeyRange, Version, Version, Version> decodeChangeFeedSSValue(ValueRef const& value) {
 	KeyRange range;
-	Version popVersion, stopVersion;
+	Version popVersion, stopVersion, metadataVersion;
 	BinaryReader reader(value, IncludeVersion());
 	reader >> range;
 	reader >> popVersion;
 	reader >> stopVersion;
-	return std::make_tuple(range, popVersion, stopVersion);
+	reader >> metadataVersion;
+	return std::make_tuple(range, popVersion, stopVersion, metadataVersion);
 }
 
 ACTOR Future<Void> changeFeedPopQ(StorageServer* self, ChangeFeedPopRequest req) {
@@ -5247,10 +5254,12 @@ ACTOR Future<Void> changeFeedPopQ(StorageServer* self, ChangeFeedPopRequest req)
 			auto& mLV = self->addVersionToMutationLog(durableVersion);
 			self->addMutationToMutationLog(
 			    mLV,
-			    MutationRef(
-			        MutationRef::SetValue,
-			        persistChangeFeedKeys.begin.toString() + feed->second->id.toString(),
-			        changeFeedSSValue(feed->second->range, feed->second->emptyVersion + 1, feed->second->stopVersion)));
+			    MutationRef(MutationRef::SetValue,
+			                persistChangeFeedKeys.begin.toString() + feed->second->id.toString(),
+			                changeFeedSSValue(feed->second->range,
+			                                  feed->second->emptyVersion + 1,
+			                                  feed->second->stopVersion,
+			                                  feed->second->metadataVersion)));
 			if (feed->second->storageVersion != invalidVersion) {
 				++self->counters.kvSystemClearRanges;
 				self->addMutationToMutationLog(mLV,
@@ -5342,7 +5351,8 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
 					                persistChangeFeedKeys.begin.toString() + changeFeedInfo->id.toString(),
 					                changeFeedSSValue(changeFeedInfo->range,
 					                                  changeFeedInfo->emptyVersion + 1,
-					                                  changeFeedInfo->stopVersion)));
+					                                  changeFeedInfo->stopVersion,
+					                                  changeFeedInfo->metadataVersion)));
 					data->addMutationToMutationLog(
 					    mLV,
 					    MutationRef(MutationRef::ClearRange,
@@ -5461,8 +5471,10 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
 		    mLV,
 		    MutationRef(MutationRef::SetValue,
 		                persistChangeFeedKeys.begin.toString() + changeFeedInfo->id.toString(),
-		                changeFeedSSValue(
-		                    changeFeedInfo->range, changeFeedInfo->emptyVersion + 1, changeFeedInfo->stopVersion)));
+		                changeFeedSSValue(changeFeedInfo->range,
+		                                  changeFeedInfo->emptyVersion + 1,
+		                                  changeFeedInfo->stopVersion,
+		                                  changeFeedInfo->metadataVersion)));
 		data->addMutationToMutationLog(mLV,
 		                               MutationRef(MutationRef::ClearRange,
 		                                           changeFeedDurableKey(changeFeedInfo->id, 0),
@@ -5746,17 +5758,19 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 			}
 		}
 		feedIds.push_back(cfEntry.feedId);
-		changeFeedInfo->updateMetadataVersion(cfEntry.metadataVersion);
+		addMutationToLog |= changeFeedInfo->updateMetadataVersion(cfEntry.metadataVersion);
 		if (addMutationToLog) {
 			ASSERT(changeFeedInfo.isValid());
 			Version logV = data->data().getLatestVersion();
 			auto& mLV = data->addVersionToMutationLog(logV);
 			data->addMutationToMutationLog(
 			    mLV,
-			    MutationRef(
-			        MutationRef::SetValue,
-			        persistChangeFeedKeys.begin.toString() + cfEntry.feedId.toString(),
-			        changeFeedSSValue(cfEntry.range, changeFeedInfo->emptyVersion + 1, changeFeedInfo->stopVersion)));
+			    MutationRef(MutationRef::SetValue,
+			                persistChangeFeedKeys.begin.toString() + cfEntry.feedId.toString(),
+			                changeFeedSSValue(cfEntry.range,
+			                                  changeFeedInfo->emptyVersion + 1,
+			                                  changeFeedInfo->stopVersion,
+			                                  changeFeedInfo->metadataVersion)));
 			// if we updated pop version, remove mutations
 			while (!changeFeedInfo->mutations.empty() &&
 			       changeFeedInfo->mutations.front().version <= changeFeedInfo->emptyVersion) {
@@ -6989,8 +7003,10 @@ private:
 				    mLV,
 				    MutationRef(MutationRef::SetValue,
 				                persistChangeFeedKeys.begin.toString() + changeFeedId.toString(),
-				                changeFeedSSValue(
-				                    feed->second->range, feed->second->emptyVersion + 1, feed->second->stopVersion)));
+				                changeFeedSSValue(feed->second->range,
+				                                  feed->second->emptyVersion + 1,
+				                                  feed->second->stopVersion,
+				                                  feed->second->metadataVersion)));
 				if (popMutationLog) {
 					++data->counters.kvSystemClearRanges;
 					data->addMutationToMutationLog(mLV,
@@ -8463,13 +8479,15 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	for (feedLoc = 0; feedLoc < changeFeeds.size(); feedLoc++) {
 		Key changeFeedId = changeFeeds[feedLoc].key.removePrefix(persistChangeFeedKeys.begin);
 		KeyRange changeFeedRange;
-		Version popVersion, stopVersion;
-		std::tie(changeFeedRange, popVersion, stopVersion) = decodeChangeFeedSSValue(changeFeeds[feedLoc].value);
+		Version popVersion, stopVersion, metadataVersion;
+		std::tie(changeFeedRange, popVersion, stopVersion, metadataVersion) =
+		    decodeChangeFeedSSValue(changeFeeds[feedLoc].value);
 		TraceEvent(SevDebug, "RestoringChangeFeed", data->thisServerID)
 		    .detail("RangeID", changeFeedId.printable())
 		    .detail("Range", changeFeedRange.toString())
 		    .detail("StopVersion", stopVersion)
-		    .detail("PopVer", popVersion);
+		    .detail("PopVer", popVersion)
+		    .detail("MetadataVersion", metadataVersion);
 		Reference<ChangeFeedInfo> changeFeedInfo(new ChangeFeedInfo());
 		changeFeedInfo->range = changeFeedRange;
 		changeFeedInfo->id = changeFeedId;
@@ -8477,6 +8495,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 		changeFeedInfo->storageVersion = version;
 		changeFeedInfo->emptyVersion = popVersion - 1;
 		changeFeedInfo->stopVersion = stopVersion;
+		changeFeedInfo->metadataVersion = metadataVersion;
 		data->uidChangeFeed[changeFeedId] = changeFeedInfo;
 		auto rs = data->keyChangeFeed.modify(changeFeedRange);
 		for (auto r = rs.begin(); r != rs.end(); ++r) {
