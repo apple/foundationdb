@@ -2875,6 +2875,7 @@ ACTOR Future<KeyRangeLocationInfo> getKeyLocation_internal(Database cx,
 					auto locationInfo =
 					    cx->setCachedLocation(tenant, rep.tenantEntry, rep.results[0].first, rep.results[0].second);
 					updateTssMappings(cx, rep);
+					updateTagMappings(cx, rep);
 
 					return KeyRangeLocationInfo(
 					    rep.tenantEntry,

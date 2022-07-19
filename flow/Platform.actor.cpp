@@ -1731,15 +1731,10 @@ SystemStatistics getSystemStatistics(std::string const& dataFolder,
 			    0,
 			    returnStats.elapsed -
 			        std::min<double>(returnStats.elapsed, (nowIOMilliSecs - (*statState)->lastIOMilliSecs) / 1000.0));
-			returnStats.processDiskReadSeconds = std::max<double>(
-			    0,
-			    returnStats.elapsed - std::min<double>(returnStats.elapsed,
-			                                           (nowReadMilliSecs - (*statState)->lastReadMilliSecs) / 1000.0));
+			returnStats.processDiskReadSeconds =
+			    std::min<double>(returnStats.elapsed, (nowReadMilliSecs - (*statState)->lastReadMilliSecs) / 1000.0);
 			returnStats.processDiskWriteSeconds =
-			    std::max<double>(0,
-			                     returnStats.elapsed -
-			                         std::min<double>(returnStats.elapsed,
-			                                          (nowWriteMilliSecs - (*statState)->lastWriteMilliSecs) / 1000.0));
+			    std::min<double>(returnStats.elapsed, (nowWriteMilliSecs - (*statState)->lastWriteMilliSecs) / 1000.0);
 			returnStats.processDiskRead = (nowReads - (*statState)->lastReads);
 			returnStats.processDiskWrite = (nowWrites - (*statState)->lastWrites);
 			returnStats.processDiskWriteSectors = (nowWriteSectors - (*statState)->lastWriteSectors);
@@ -3469,7 +3464,12 @@ void* loadLibrary(const char* lib_path) {
 	void* dlobj = nullptr;
 
 #if defined(__unixish__)
-	dlobj = dlopen(lib_path, RTLD_LAZY | RTLD_LOCAL);
+	dlobj = dlopen(lib_path,
+	               RTLD_LAZY | RTLD_LOCAL
+#ifdef USE_SANITIZER // Keep alive dlopen()-ed libs for symbolized XSAN backtrace
+	                   | RTLD_NODELETE
+#endif
+	);
 	if (dlobj == nullptr) {
 		TraceEvent(SevWarn, "LoadLibraryFailed").detail("Library", lib_path).detail("Error", dlerror());
 	}

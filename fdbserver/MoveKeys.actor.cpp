@@ -1395,7 +1395,6 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 							physicalShardMap[ssId].emplace_back(rangeIntersectKeys, srcId);
 						}
 
-						const UID checkpontId = deterministicRandom()->randomUniqueID();
 						for (const UID& ssId : src) {
 							dataMove.src.insert(ssId);
 							// TODO(psm): Create checkpoint for the range.

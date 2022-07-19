@@ -1622,6 +1622,13 @@ BlobWorkerInterface decodeBlobWorkerListValue(ValueRef const& value) {
 
 const KeyRef tenantDataPrefixKey = "\xff/tenantDataPrefix"_sr;
 
+const KeyRangeRef storageQuotaKeys(LiteralStringRef("\xff/storageQuota/"), LiteralStringRef("\xff/storageQuota0"));
+const KeyRef storageQuotaPrefix = storageQuotaKeys.begin;
+
+Key storageQuotaKey(StringRef tenantName) {
+	return tenantName.withPrefix(storageQuotaPrefix);
+}
+
 // for tests
 void testSSISerdes(StorageServerInterface const& ssi) {
 	printf("ssi=\nid=%s\nlocality=%s\nisTss=%s\ntssId=%s\nacceptingRequests=%s\naddress=%s\ngetValue=%s\n\n\n",

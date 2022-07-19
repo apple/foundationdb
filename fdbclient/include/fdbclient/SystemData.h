@@ -681,6 +681,12 @@ BlobWorkerInterface decodeBlobWorkerListValue(ValueRef const& value);
 
 extern const KeyRef tenantDataPrefixKey; // TODO: remove?
 
+// Storage quota per tenant
+// "\xff/storageQuota/[[tenantName]]" := "[[quota]]"
+extern const KeyRangeRef storageQuotaKeys;
+extern const KeyRef storageQuotaPrefix;
+Key storageQuotaKey(StringRef tenantName);
+
 #pragma clang diagnostic pop
 
 #endif
