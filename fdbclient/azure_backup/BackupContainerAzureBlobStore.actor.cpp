@@ -335,7 +335,7 @@ Future<Void> BackupContainerAzureBlobStore::create() {
 	    asyncTaskThread.execAsync([containerName = this->containerName, client = this->client] {
 		    auto outcome = client->get_container_properties(containerName).get();
 		    if (!outcome.success()) {
-				waitAzureFuture(client->create_container(containerName), "create_container");
+			    waitAzureFuture(client->create_container(containerName), "create_container");
 		    }
 		    return Void();
 	    });
