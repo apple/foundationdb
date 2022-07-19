@@ -84,7 +84,6 @@ class GlobalTagThrottlerImpl {
 			auto readLimit = getReadTPSLimit();
 			auto writeLimit = getWriteTPSLimit();
 
-			// TODO: Implement expiration logic
 			if (!readLimit.present() && !writeLimit.present()) {
 				return {};
 			} else {
@@ -162,8 +161,6 @@ class GlobalTagThrottlerImpl {
 					}
 
 					++self->throttledTagChangeId;
-					// FIXME: Should wait on watch instead
-					// wait(tr.watch(tagThrottleSignalKey));
 					wait(delay(5.0));
 					TraceEvent("GlobalTagThrottler_ChangeSignaled");
 					CODE_PROBE(true, "Global tag throttler detected quota changes");
@@ -211,7 +208,6 @@ public:
 		for (const auto& busyWriteTag : ss.busiestWriteTags) {
 			trackedTags[busyWriteTag.tag].updateWriteCostRate(ss.id, busyWriteTag.rate);
 		}
-		// TODO: Call ThrottleApi::throttleTags
 		return Void();
 	}
 
