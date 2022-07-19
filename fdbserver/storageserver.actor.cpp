@@ -940,6 +940,9 @@ public:
 
 		LatencySample readLatencySample;
 		LatencyBands readLatencyBands;
+		LatencySample mappedRangeSample; // Samples getMappedRange latency
+		LatencySample mappedRangeRemoteSample; // Samples getMappedRange remote subquery latency
+		LatencySample mappedRangeLocalSample; // Samples getMappedRange local subquery latency
 
 		Counters(StorageServer* self)
 		  : cc("StorageServer", self->thisServerID.toString()), allQueries("QueryQueue", cc),
@@ -971,7 +974,19 @@ public:
 		                      self->thisServerID,
 		                      SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
 		                      SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
-		    readLatencyBands("ReadLatencyBands", self->thisServerID, SERVER_KNOBS->STORAGE_LOGGING_DELAY) {
+		    readLatencyBands("ReadLatencyBands", self->thisServerID, SERVER_KNOBS->STORAGE_LOGGING_DELAY),
+		    mappedRangeSample("GetMappedRangeMetrics",
+		                      self->thisServerID,
+		                      SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                      SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+		    mappedRangeRemoteSample("GetMappedRangeRemoteMetrics",
+		                            self->thisServerID,
+		                            SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                            SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+		    mappedRangeLocalSample("GetMappedRangeLocalMetrics",
+		                           self->thisServerID,
+		                           SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                           SERVER_KNOBS->LATENCY_SAMPLE_SIZE) {
 			specialCounter(cc, "LastTLogVersion", [self]() { return self->lastTLogVersion; });
 			specialCounter(cc, "Version", [self]() { return self->version.get(); });
 			specialCounter(cc, "StorageVersion", [self]() { return self->storageVersion(); });
@@ -2808,6 +2823,7 @@ ACTOR Future<GetValueReqAndResultRef> quickGetValue(StorageServer* data,
                                                     // To provide span context, tags, debug ID to underlying lookups.
                                                     GetMappedKeyValuesRequest* pOriginalReq) {
 	state GetValueReqAndResultRef getValue;
+	state double getValueStart = g_network->timer();
 	getValue.key = key;
 
 	if (data->shards[key]->isReadable()) {
@@ -2828,6 +2844,8 @@ ACTOR Future<GetValueReqAndResultRef> quickGetValue(StorageServer* data,
 			if (!reply.error.present()) {
 				++data->counters.quickGetValueHit;
 				copyOptionalValue(a, getValue, reply.value);
+				const double duration = g_network->timer() - getValueStart;
+				data->counters.mappedRangeLocalSample.addMeasurement(duration);
 				return getValue;
 			}
 			// Otherwise fallback.
@@ -2847,6 +2865,8 @@ ACTOR Future<GetValueReqAndResultRef> quickGetValue(StorageServer* data,
 		// TODO: async in case it needs to read from other servers.
 		Optional<Value> valueOption = wait(valueFuture);
 		copyOptionalValue(a, getValue, valueOption);
+		const double duration = g_network->timer() - getValueStart;
+		data->counters.mappedRangeRemoteSample.addMeasurement(duration);
 		return getValue;
 	} else {
 		throw quick_get_value_miss();
@@ -3412,6 +3432,7 @@ ACTOR Future<GetRangeReqAndResultRef> quickGetKeyValues(
     // To provide span context, tags, debug ID to underlying lookups.
     GetMappedKeyValuesRequest* pOriginalReq) {
 	state GetRangeReqAndResultRef getRange;
+	state double getValuesStart = g_network->timer();
 	getRange.begin = firstGreaterOrEqual(KeyRef(*a, prefix));
 	getRange.end = firstGreaterOrEqual(strinc(prefix, *a));
 	try {
@@ -3442,6 +3463,8 @@ ACTOR Future<GetRangeReqAndResultRef> quickGetKeyValues(
 			// Convert GetKeyValuesReply to RangeResult.
 			a->dependsOn(reply.arena);
 			getRange.result = RangeResultRef(reply.data, reply.more);
+			const double duration = g_network->timer() - getValuesStart;
+			data->counters.mappedRangeLocalSample.addMeasurement(duration);
 			return getRange;
 		}
 		// Otherwise fallback.
@@ -3461,6 +3484,8 @@ ACTOR Future<GetRangeReqAndResultRef> quickGetKeyValues(
 		RangeResult rangeResult = wait(rangeResultFuture);
 		a->dependsOn(rangeResult.arena());
 		getRange.result = rangeResult;
+		const double duration = g_network->timer() - getValuesStart;
+		data->counters.mappedRangeRemoteSample.addMeasurement(duration);
 		return getRange;
 	} else {
 		throw quick_get_key_values_miss();
@@ -3995,6 +4020,7 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 
 	double duration = g_network->timer() - req.requestTime();
 	data->counters.readLatencySample.addMeasurement(duration);
+	data->counters.mappedRangeSample.addMeasurement(duration);
 	if (data->latencyBandConfig.present()) {
 		int maxReadBytes =
 		    data->latencyBandConfig.get().readConfig.maxReadBytes.orDefault(std::numeric_limits<int>::max());
