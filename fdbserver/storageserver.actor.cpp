@@ -2441,21 +2441,37 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 				}
 			} else if (memoryVerifyIdx < memoryReply.mutations.size() &&
 			           version == memoryReply.mutations[memoryVerifyIdx].version) {
-				fmt::print("ERROR: SS {0} CF {1} SQ {2} has mutation at {3} in memory but all filtered out on disk!\n",
-				           data->thisServerID.toString().substr(0, 4),
-				           req.rangeID.printable().substr(0, 6),
-				           streamUID.toString().substr(0, 8),
-				           version);
+				if (version > feedInfo->storageVersion && version > feedInfo->fetchVersion) {
+					// Another validation case - feed was popped, data was fetched, fetched data was persisted but pop
+					// wasn't yet, then SS restarted. Now SS has the data without the popped version. This looks wrong
+					// here but is fine.
+					memoryVerifyIdx++;
+				} else {
+					fmt::print(
+					    "ERROR: SS {0} CF {1} SQ {2} has mutation at {3} in memory but all filtered out on disk!\n",
+					    data->thisServerID.toString().substr(0, 4),
+					    req.rangeID.printable().substr(0, 6),
+					    streamUID.toString().substr(0, 8),
+					    version);
 
-				fmt::print("  Memory: ({})\n", memoryReply.mutations[memoryVerifyIdx].mutations.size());
-				for (auto& it : memoryReply.mutations[memoryVerifyIdx].mutations) {
-					if (it.type == MutationRef::SetValue) {
-						fmt::print("    {}=\n", it.param1.printable().c_str());
-					} else {
-						fmt::print("    {} - {}\n", it.param1.printable().c_str(), it.param2.printable().c_str());
+					fmt::print("  Memory: ({})\n", memoryReply.mutations[memoryVerifyIdx].mutations.size());
+					for (auto& it : memoryReply.mutations[memoryVerifyIdx].mutations) {
+						if (it.type == MutationRef::SetValue) {
+							fmt::print("    {}=\n", it.param1.printable().c_str());
+						} else {
+							fmt::print("    {} - {}\n", it.param1.printable().c_str(), it.param2.printable().c_str());
+						}
 					}
+					fmt::print("  Disk(pre-filter): ({})\n", mutations.size());
+					for (auto& it : mutations) {
+						if (it.type == MutationRef::SetValue) {
+							fmt::print("    {}=\n", it.param1.printable().c_str());
+						} else {
+							fmt::print("    {} - {}\n", it.param1.printable().c_str(), it.param2.printable().c_str());
+						}
+					}
+					ASSERT(false);
 				}
-				ASSERT(false);
 			}
 			remainingDurableBytes -=
 			    sizeof(KeyValueRef) +
