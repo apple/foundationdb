@@ -52,6 +52,17 @@ function(compile_boost)
   configure_file(${CMAKE_SOURCE_DIR}/cmake/user-config.jam.cmake ${CMAKE_BINARY_DIR}/user-config.jam)
   set(USER_CONFIG_FLAG --user-config=${CMAKE_BINARY_DIR}/user-config.jam)
 
+  # Download zlib
+  set(ZLIB_SOURCE_DIR "${CMAKE_BINARY_DIR}/zlib")
+  ExternalProject_add("${COMPILE_BOOST_TARGET}_zlib"
+    URL "https://zlib.net/zlib-1.2.12.tar.gz"
+    URL_HASH SHA256=91844808532e5ce316b3c010929493c0244f3d37593afd6de04f71821d5136d9
+    SOURCE_DIR ${ZLIB_SOURCE_DIR}
+    CONFIGURE_COMMAND ""
+    BUILD_COMMAND ""
+    INSTALL_COMMAND ""
+    LOG_DOWNLOAD ON)
+
   # Build boost
   include(ExternalProject)
   set(BOOST_INSTALL_DIR "${CMAKE_BINARY_DIR}/boost_install")
@@ -59,7 +70,7 @@ function(compile_boost)
     URL "https://boostorg.jfrog.io/artifactory/main/release/1.78.0/source/boost_1_78_0.tar.bz2"
     URL_HASH SHA256=8681f175d4bdb26c52222665793eef08490d7758529330f98d3b29dd0735bccc
     CONFIGURE_COMMAND ${BOOTSTRAP_COMMAND} ${BOOTSTRAP_ARGS} --with-libraries=${BOOTSTRAP_LIBRARIES} --with-toolset=${BOOST_TOOLSET}
-    BUILD_COMMAND ${B2_COMMAND} link=static ${COMPILE_BOOST_BUILD_ARGS} --prefix=${BOOST_INSTALL_DIR} ${USER_CONFIG_FLAG} install
+    BUILD_COMMAND ${B2_COMMAND} link=static ${COMPILE_BOOST_BUILD_ARGS} --prefix=${BOOST_INSTALL_DIR} -sZLIB_SOURCE=${ZLIB_SOURCE_DIR} ${USER_CONFIG_FLAG} install
     BUILD_IN_SOURCE ON
     INSTALL_COMMAND ""
     UPDATE_COMMAND ""
