@@ -55,28 +55,26 @@ std::vector<ExecutionContext> fromStrings(std::vector<std::string> const& ctxs) 
 	return res;
 }
 
-StringRef normalizePath(const char* path) {
-	auto srcBase = LiteralStringRef(FDB_SOURCE_DIR);
-	auto binBase = LiteralStringRef(FDB_SOURCE_DIR);
-	StringRef filename(reinterpret_cast<uint8_t const*>(path), strlen(path));
-	if (filename.startsWith(srcBase)) {
-		filename = filename.removePrefix(srcBase);
-	} else if (filename.startsWith(binBase)) {
-		filename = filename.removePrefix(binBase);
+std::string_view normalizePath(const char* path) {
+	std::string_view srcBase(FDB_SOURCE_DIR);
+	std::string_view binBase(FDB_SOURCE_DIR);
+	std::string_view filename(path);
+	if (srcBase.size() < filename.size() && filename.substr(0, srcBase.size()) == srcBase) {
+		filename.remove_prefix(srcBase.size());
+	} else if (binBase.size() < filename.size() && filename.substr(0, binBase.size()) == binBase) {
+		filename.remove_prefix(binBase.size());
 	}
 	if (filename[0] == '/') {
-		filename = filename.removePrefix("/"_sr);
-	} else if (filename[0] == '\\') {
-		filename = filename.removePrefix("/"_sr);
+		filename.remove_prefix(1);
 	}
 	return filename;
 }
 
 struct CodeProbes {
 	struct Location {
-		StringRef file;
+		std::string_view file;
 		unsigned line;
-		Location(StringRef file, unsigned line) : file(file), line(line) {}
+		Location(std::string_view file, unsigned line) : file(file), line(line) {}
 		bool operator==(Location const& rhs) const { return line == rhs.line && file == rhs.file; }
 		bool operator!=(Location const& rhs) const { return line != rhs.line && file != rhs.file; }
 		bool operator<(Location const& rhs) const {
@@ -106,9 +104,7 @@ struct CodeProbes {
 	void traceMissedProbes(Optional<ExecutionContext> context) const;
 
 	void add(ICodeProbe const* probe) {
-		const char* file = probe->filename();
-		unsigned line = probe->line();
-		Location loc(normalizePath(file), line);
+		Location loc(probe->filename(), probe->line());
 		codeProbes.emplace(loc, probe);
 	}
 
@@ -118,13 +114,12 @@ struct CodeProbes {
 	}
 
 	void verify() const {
-		std::map<std::pair<StringRef, StringRef>, ICodeProbe const*> comments;
+		std::map<std::pair<std::string_view, std::string_view>, ICodeProbe const*> comments;
 		for (auto probe : codeProbes) {
 			auto file = probe.first.file;
 			auto comment = probe.second->comment();
-			auto commentEntry =
-			    std::make_pair(file, StringRef(reinterpret_cast<uint8_t const*>(comment), strlen(comment)));
-			ASSERT(file == normalizePath(probe.second->filename()));
+			auto commentEntry = std::make_pair(file, std::string_view(comment));
+			ASSERT(file == probe.second->filename());
 			auto iter = comments.find(commentEntry);
 			if (iter != comments.end() && probe.second->line() != iter->second->line()) {
 				fmt::print("ERROR ({}:{}): {} isn't unique in file {}. Previously seen here: {}:{}\n",
@@ -159,7 +154,7 @@ struct CodeProbes {
 			fmt::print("\t<CoverageCases/>\n");
 			fmt::print("\t<Inputs/>\n");
 		} else {
-			std::vector<StringRef> files;
+			std::vector<std::string_view> files;
 			fmt::print("\t<CoverageCases>\n");
 			for (auto probe : codeProbes) {
 				files.push_back(probe.first.file);
@@ -263,11 +258,15 @@ void traceMissedProbes(Optional<ExecutionContext> context) {
 ICodeProbe::~ICodeProbe() {}
 
 bool ICodeProbe::operator==(const ICodeProbe& other) const {
-	return strcmp(filename(), other.filename()) == 0 && line() == other.line();
+	return filename() == other.filename() && line() == other.line();
 }
 
 bool ICodeProbe::operator!=(const ICodeProbe& other) const {
 	return !(*this == other);
+}
+
+std::string_view ICodeProbe::filename() const {
+	return normalizePath(filePath());
 }
 
 void ICodeProbe::printProbesXML() {

@@ -192,7 +192,8 @@ struct ICodeProbe {
 	bool operator==(ICodeProbe const& other) const;
 	bool operator!=(ICodeProbe const& other) const;
 
-	virtual const char* filename() const = 0;
+	std::string_view filename() const;
+	virtual const char* filePath() const = 0;
 	virtual unsigned line() const = 0;
 	virtual const char* comment() const = 0;
 	virtual const char* condition() const = 0;
@@ -224,7 +225,7 @@ struct CodeProbeImpl : ICodeProbe {
 
 	void trace(bool condition) const override {
 		TraceEvent evt(intToSeverity(FLOW_KNOBS->CODE_COV_TRACE_EVENT_SEVERITY), "CodeCoverage");
-		evt.detail("File", FileName::value())
+		evt.detail("File", filename())
 		    .detail("Line", Line)
 		    .detail("Condition", Condition::value())
 		    .detail("ProbeHit", condition)
@@ -234,7 +235,7 @@ struct CodeProbeImpl : ICodeProbe {
 	bool wasHit() const override { return _hitCount > 0; }
 	unsigned hitCount() const override { return _hitCount; }
 
-	const char* filename() const override { return FileName::value(); }
+	const char* filePath() const override { return FileName::value(); }
 	unsigned line() const override { return Line; }
 	const char* comment() const override { return Comment::value(); }
 	const char* condition() const override { return Condition::value(); }
