@@ -273,7 +273,7 @@ struct MovableCoordinatedStateImpl {
 		// SOMEDAY: If moveState.mode == MovingFrom, read (without locking) old state and assert that it corresponds
 		// with our state and is ReallyTo(coordinators)
 		if (moveState.mode == MovableValue::MaybeTo) {
-			TEST(true); // Maybe moveto state
+			CODE_PROBE(true, "Maybe moveto state");
 			ASSERT(moveState.other.present());
 			wait(self->moveTo(
 			    self, &self->cs, ClusterConnectionString(moveState.other.get().toString()), moveState.value));
@@ -322,7 +322,7 @@ struct MovableCoordinatedStateImpl {
 
 		Value oldQuorumState = wait(cs.read());
 		if (oldQuorumState != self->lastCSValue.get()) {
-			TEST(true); // Quorum change aborted by concurrent write to old coordination state
+			CODE_PROBE(true, "Quorum change aborted by concurrent write to old coordination state");
 			TraceEvent("QuorumChangeAbortedByConcurrency").log();
 			throw coordinated_state_conflict();
 		}

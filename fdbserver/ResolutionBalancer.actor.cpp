@@ -39,7 +39,7 @@ void ResolutionBalancer::setChangesInReply(UID requestingProxy, GetCommitVersion
 		rep.resolverChangesVersion = resolverChangesVersion;
 		resolverNeedingChanges.erase(requestingProxy);
 
-		TEST(!rep.resolverChanges.empty()); // resolution balancing moves keyranges
+		CODE_PROBE(!rep.resolverChanges.empty(), "resolution balancing moves keyranges");
 		if (resolverNeedingChanges.empty())
 			resolverChanges.set(Standalone<VectorRef<ResolverMoveRef>>());
 	}

@@ -1428,7 +1428,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 				}
 
 				if (anyDestOverloaded) {
-					TEST(true); // Destination overloaded throttled move
+					CODE_PROBE(true, "Destination overloaded throttled move");
 					destOverloadedCount++;
 					TraceEvent(destOverloadedCount > 50 ? SevInfo : SevDebug, "DestSSBusy", distributorId)
 					    .suppressFor(1.0)
@@ -1440,7 +1440,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 					    .detail("Servers", destServersString(bestTeams));
 					wait(delay(SERVER_KNOBS->DEST_OVERLOADED_DELAY, TaskPriority::DataDistributionLaunch));
 				} else {
-					TEST(true); // did not find a healthy destination team on the first attempt
+					CODE_PROBE(true, "did not find a healthy destination team on the first attempt");
 					stuckCount++;
 					TraceEvent(stuckCount > 50 ? SevWarnAlways : SevWarn, "BestTeamStuck", distributorId)
 					    .suppressFor(1.0)
@@ -1673,7 +1673,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 					throw error;
 				}
 			} else {
-				TEST(true); // move to removed server
+				CODE_PROBE(true, "move to removed server");
 				healthyDestinations.addDataInFlightToTeam(-metrics.bytes);
 				auto readLoad = metrics.bytesReadPerKSecond;
 				auto& destinationRef = healthyDestinations;

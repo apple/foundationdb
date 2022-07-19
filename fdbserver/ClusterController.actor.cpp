@@ -316,7 +316,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 
 			wait(spinDelay);
 
-			TEST(true); // clusterWatchDatabase() master failed
+			CODE_PROBE(true, "clusterWatchDatabase() master failed");
 			TraceEvent(SevWarn, "DetectedFailedRecovery", cluster->id).detail("OldMaster", iMaster.id());
 		} catch (Error& e) {
 			state Error err = e;
@@ -328,13 +328,14 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 			wait(cleanupRecoveryActorCollection(recoveryData, true /* exThrown */));
 			ASSERT(addActor.isEmpty());
 
-			TEST(err.code() == error_code_tlog_failed); // Terminated due to tLog failure
-			TEST(err.code() == error_code_commit_proxy_failed); // Terminated due to commit proxy failure
-			TEST(err.code() == error_code_grv_proxy_failed); // Terminated due to GRV proxy failure
-			TEST(err.code() == error_code_resolver_failed); // Terminated due to resolver failure
-			TEST(err.code() == error_code_backup_worker_failed); // Terminated due to backup worker failure
-			TEST(err.code() == error_code_operation_failed); // Terminated due to failed operation
-			TEST(err.code() == error_code_restart_cluster_controller); // Terminated due to cluster-controller restart.
+			CODE_PROBE(err.code() == error_code_tlog_failed, "Terminated due to tLog failure");
+			CODE_PROBE(err.code() == error_code_commit_proxy_failed, "Terminated due to commit proxy failure");
+			CODE_PROBE(err.code() == error_code_grv_proxy_failed, "Terminated due to GRV proxy failure");
+			CODE_PROBE(err.code() == error_code_resolver_failed, "Terminated due to resolver failure");
+			CODE_PROBE(err.code() == error_code_backup_worker_failed, "Terminated due to backup worker failure");
+			CODE_PROBE(err.code() == error_code_operation_failed, "Terminated due to failed operation");
+			CODE_PROBE(err.code() == error_code_restart_cluster_controller,
+			           "Terminated due to cluster-controller restart.");
 
 			if (cluster->shouldCommitSuicide || err.code() == error_code_coordinators_changed) {
 				TraceEvent("ClusterControllerTerminate", cluster->id).errorUnsuppressed(err);
@@ -1244,7 +1245,7 @@ ACTOR Future<Void> registerWorker(RegisterWorkerRequest req,
 		}
 		checkOutstandingRequests(self);
 	} else {
-		TEST(true); // Received an old worker registration request.
+		CODE_PROBE(true, "Received an old worker registration request.");
 	}
 
 	// For each singleton
