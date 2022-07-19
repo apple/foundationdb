@@ -1088,11 +1088,9 @@ ACTOR Future<Void> granuleCheckMergeCandidate(Reference<BlobWorkerData> bwData,
 				                                                                 metadata->originalEpoch,
 				                                                                 metadata->originalSeqno));
 				// if a new manager appears, also tell it about this granule being mergeable
-				state int64_t lastSendEpoch = bwData->currentManagerEpoch;
-				while (lastSendEpoch == bwData->currentManagerEpoch) {
-					wait(bwData->currentManagerStatusStream.onChange());
-					wait(delay(0));
-				}
+				// or if a new stream from the existing manager, it may have missed the message due to a network issue
+				wait(bwData->currentManagerStatusStream.onChange());
+				wait(delay(0));
 				TEST(true); // Blob worker re-sending merge candidate to new manager
 			} catch (Error& e) {
 				if (e.code() == error_code_operation_cancelled) {
@@ -1769,12 +1767,25 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 										    .detail("RollbackVersion", rollbackVersion);
 									}
 
+									Version oldPendingSnapshot = metadata->pendingSnapshotVersion;
 									Version cfRollbackVersion = doGranuleRollback(metadata,
 									                                              deltas.version,
 									                                              rollbackVersion,
 									                                              inFlightFiles,
 									                                              rollbacksInProgress,
 									                                              rollbacksCompleted);
+
+									if (oldPendingSnapshot > metadata->pendingSnapshotVersion) {
+										// If rollback cancelled in-flight snapshot, merge candidate checker also got
+										// cancelled. Restart it
+										TEST(true); // Restarting merge candidate checker after rolling back snapshot
+										checkMergeCandidate = granuleCheckMergeCandidate(
+										    bwData,
+										    metadata,
+										    startState.granuleID,
+										    inFlightFiles.empty() ? Future<Void>(Void())
+										                          : success(inFlightFiles.back().future));
+									}
 
 									Reference<ChangeFeedData> cfData = makeReference<ChangeFeedData>();
 
