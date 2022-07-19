@@ -17,7 +17,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 #pragma once
+
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
 // version.
 #if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_CLUSTERCONNECTIONKEY_ACTOR_G_H)
@@ -85,5 +87,6 @@ private:
 	Key connectionStringKey;
 	Optional<Value> lastPersistedConnectionString;
 };
+
 #include "flow/unactorcompiler.h"
 #endif

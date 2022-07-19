@@ -1621,8 +1621,6 @@ BlobWorkerInterface decodeBlobWorkerListValue(ValueRef const& value) {
 }
 
 const KeyRef tenantDataPrefixKey = "\xff/tenantDataPrefix"_sr;
-const KeyRangeRef tenantGroupTenantIndexKeys("\xff/tenant/tenantGroup/tenantMap/"_sr,
-                                             "\xff/tenant/tenantGroup/tenantMap0"_sr);
 
 // for tests
 void testSSISerdes(StorageServerInterface const& ssi) {

@@ -842,8 +842,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
          "tenant_mode": {
              "$enum":[
              "disabled",
-             "optional",
-             "required"
+             "optional_experimental",
+             "required_experimental"
          ]}
       },
       "data":{

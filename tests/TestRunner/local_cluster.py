@@ -296,7 +296,7 @@ logdir = {logdir}
     def create_database(self, storage="ssd", enable_tenants=True):
         db_config = "configure new {} {}".format(self.redundancy, storage)
         if enable_tenants:
-            db_config += " tenant_mode=optional"
+            db_config += " tenant_mode=optional_experimental"
         if self.blob_granules_enabled:
             db_config += " blob_granules_enabled:=1"
         self.fdbcli_exec(db_config)
