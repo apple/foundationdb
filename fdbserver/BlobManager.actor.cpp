@@ -50,7 +50,7 @@
  * The Blob Manager is responsible for managing range granules, and recruiting and monitoring Blob Workers.
  */
 
-#define BM_DEBUG false
+#define BM_DEBUG true
 
 void handleClientBlobRange(KeyRangeMap<bool>* knownBlobRanges,
                            Arena& ar,
@@ -1582,7 +1582,9 @@ ACTOR Future<Void> persistMergeGranulesDone(Reference<BlobManagerData> bmData,
 				state Key lockKey = blobGranuleLockKeyFor(parentGranuleRanges[parentIdx]);
 				state Future<Optional<Value>> oldLockFuture = tr->get(lockKey);
 
-				wait(updateChangeFeed(tr,
+				// This has to be
+				// TODO: fix this better! (privatize change feed key clear)
+				wait(updateChangeFeed(&tr->getTransaction(),
 				                      granuleIDToCFKey(parentGranuleIDs[parentIdx]),
 				                      ChangeFeedStatus::CHANGE_FEED_DESTROY,
 				                      parentGranuleRanges[parentIdx]));
