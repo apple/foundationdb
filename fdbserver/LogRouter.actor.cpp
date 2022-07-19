@@ -624,8 +624,9 @@ ACTOR Future<Void> logRouterPeekStream(LogRouterData* self, TLogPeekStreamReques
 		state Promise<TLogPeekReply> promise;
 		state Future<TLogPeekReply> future(promise.getFuture());
 		try {
-			wait(req.reply.onReady() && store(reply.rep, future) &&
-			     logRouterPeekMessages(promise, self, begin, req.tag, req.returnIfBlocked, onlySpilled));
+			wait(req.reply.onReady());
+			wait(logRouterPeekMessages(promise, self, begin, req.tag, req.returnIfBlocked, onlySpilled));
+			wait(store(reply.rep, future));
 
 			reply.rep.begin = begin;
 			req.reply.send(reply);
