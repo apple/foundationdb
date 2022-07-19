@@ -21,8 +21,16 @@ add_flow_target(STATIC_LIBRARY NAME flow_sampling SRCS ${FLOW_SRCS})
 # Since we want to ensure no symbols from other modules are used, create an
 # executable so the linker will throw errors if it can't find the declaration
 # of a symbol.
-add_flow_target(LINK_TEST NAME flowlinktest SRCS ${FLOW_SRCS} LinkTest.cpp)
+add_flow_target(LINK_TEST NAME flowlinktest SRCS LinkTest.cpp)
 target_link_libraries(flowlinktest PRIVATE flow stacktrace)
+
+find_package(ZLIB)
+if(ZLIB_FOUND)
+  add_compile_definitions(ZLIB_LIB_SUPPORTED)
+  target_link_libraries(flow PRIVATE ZLIB::ZLIB)
+else()
+  message(STATUS "ZLIB package not found")
+endif()
 
 foreach(ft flow flow_sampling flowlinktest)
   target_include_directories(${ft} PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include")

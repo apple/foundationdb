@@ -467,7 +467,9 @@ elseif(NOT WIN32 AND NOT APPLE AND NOT OPEN_FOR_IDE) # Linux Only
   add_test(NAME fdb_c_shim_library_tests
     COMMAND $<TARGET_FILE:Python::Interpreter> ${CMAKE_CURRENT_SOURCE_DIR}/test/fdb_c_shim_tests.py
           --build-dir ${CMAKE_BINARY_DIR}
-          --source-dir ${CMAKE_SOURCE_DIR}
+          --unit-tests-bin $<TARGET_FILE:fdb_c_shim_unit_tests>
+          --api-tester-bin $<TARGET_FILE:fdb_c_shim_api_tester>
+          --api-test-dir ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests
           )
 
 endif() # End Linux only

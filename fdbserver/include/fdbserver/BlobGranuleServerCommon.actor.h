@@ -26,14 +26,14 @@
 
 #pragma once
 
-#include "flow/flow.h"
-#include "fdbclient/CommitTransaction.h"
-#include "fdbclient/FDBTypes.h"
 #include "fdbclient/BlobConnectionProvider.h"
 #include "fdbclient/BlobGranuleCommon.h"
+#include "fdbclient/CommitTransaction.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/Tenant.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "flow/actorcompiler.h" // has to be last include
+#include "flow/flow.h"
 
 struct GranuleHistory {
 	KeyRange range;
@@ -53,18 +53,28 @@ struct BlobFileIndex {
 	int64_t offset;
 	int64_t length;
 	int64_t fullFileLength;
+	Optional<BlobGranuleCipherKeysMeta> cipherKeysMeta;
 
 	BlobFileIndex() {}
 
 	BlobFileIndex(Version version, std::string filename, int64_t offset, int64_t length, int64_t fullFileLength)
 	  : version(version), filename(filename), offset(offset), length(length), fullFileLength(fullFileLength) {}
 
+	BlobFileIndex(Version version,
+	              std::string filename,
+	              int64_t offset,
+	              int64_t length,
+	              int64_t fullFileLength,
+	              Optional<BlobGranuleCipherKeysMeta> ciphKeysMeta)
+	  : version(version), filename(filename), offset(offset), length(length), fullFileLength(fullFileLength),
+	    cipherKeysMeta(ciphKeysMeta) {}
+
 	// compare on version
 	bool operator<(const BlobFileIndex& r) const { return version < r.version; }
 };
 
-// FIXME: initialize these to smaller default sizes to save a bit of memory, particularly snapshotFiles
-// Stores the files that comprise a blob granule
+// FIXME: initialize these to smaller default sizes to save a bit of memory,
+// particularly snapshotFiles Stores the files that comprise a blob granule
 struct GranuleFiles {
 	std::vector<BlobFileIndex> snapshotFiles;
 	std::vector<BlobFileIndex> deltaFiles;
