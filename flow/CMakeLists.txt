@@ -21,7 +21,7 @@ add_flow_target(STATIC_LIBRARY NAME flow_sampling SRCS ${FLOW_SRCS})
 # Since we want to ensure no symbols from other modules are used, create an
 # executable so the linker will throw errors if it can't find the declaration
 # of a symbol.
-add_flow_target(LINK_TEST NAME flowlinktest SRCS ${FLOW_SRCS} LinkTest.cpp)
+add_flow_target(LINK_TEST NAME flowlinktest SRCS LinkTest.cpp)
 target_link_libraries(flowlinktest PRIVATE flow stacktrace)
 
 find_package(ZLIB)

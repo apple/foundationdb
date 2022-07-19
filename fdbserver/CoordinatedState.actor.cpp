@@ -79,13 +79,13 @@ struct CoordinatedStateImpl {
 
 	CoordinatedStateImpl(ServerCoordinators const& c)
 	  : coordinators(c), stage(0), conflictGen(0), doomed(false), ac(false), initial(false) {}
-	uint64_t getConflict() { return conflictGen; }
+	uint64_t getConflict() const { return conflictGen; }
 
-	bool isDoomed(GenerationRegReadReply const& rep) {
-		return rep.gen > gen // setExclusive is doomed, because there was a write at least started at a higher
-		                     // generation, which means a read completed at that higher generation
-		                     // || rep.rgen > gen // setExclusive isn't absolutely doomed, but it may/probably will fail
-		    ;
+	bool isDoomed(GenerationRegReadReply const& rep) const {
+		return rep.gen > gen;
+		// setExclusive is doomed, because there was a write at least started at a higher
+		// generation, which means a read completed at that higher generation
+		// || rep.rgen > gen // setExclusive isn't absolutely doomed, but it may/probably will fail
 	}
 
 	ACTOR static Future<Value> read(CoordinatedStateImpl* self) {
@@ -216,7 +216,7 @@ struct CoordinatedStateImpl {
 };
 
 CoordinatedState::CoordinatedState(ServerCoordinators const& coord)
-  : impl(std::make_unique<CoordinatedStateImpl>(coord)) {}
+  : impl(PImpl<CoordinatedStateImpl>::create(coord)) {}
 CoordinatedState::~CoordinatedState() = default;
 Future<Value> CoordinatedState::read() {
 	return CoordinatedStateImpl::read(impl.get());
@@ -227,7 +227,7 @@ Future<Void> CoordinatedState::onConflict() {
 Future<Void> CoordinatedState::setExclusive(Value v) {
 	return CoordinatedStateImpl::setExclusive(impl.get(), v);
 }
-uint64_t CoordinatedState::getConflict() {
+uint64_t CoordinatedState::getConflict() const {
 	return impl->getConflict();
 }
 
@@ -354,7 +354,7 @@ struct MovableCoordinatedStateImpl {
 
 MovableCoordinatedState& MovableCoordinatedState::operator=(MovableCoordinatedState&&) = default;
 MovableCoordinatedState::MovableCoordinatedState(class ServerCoordinators const& coord)
-  : impl(std::make_unique<MovableCoordinatedStateImpl>(coord)) {}
+  : impl(PImpl<MovableCoordinatedStateImpl>::create(coord)) {}
 MovableCoordinatedState::~MovableCoordinatedState() = default;
 Future<Value> MovableCoordinatedState::read() {
 	return MovableCoordinatedStateImpl::read(impl.get());

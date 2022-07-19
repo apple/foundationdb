@@ -2608,9 +2608,7 @@ ACTOR Future<Void> localChangeFeedStream(StorageServer* data,
 			// would mean the stream would have finished without error
 			results.send(MutationsAndVersionRef(end, invalidVersion));
 		} else {
-			TraceEvent(SevError, "LocalChangeFeedError", data->thisServerID)
-			    .error(e)
-			    .detail("CFID", rangeID.printable());
+			TraceEvent(SevError, "LocalChangeFeedError", data->thisServerID).error(e).detail("CFID", rangeID);
 		}
 		throw;
 	}
@@ -3910,7 +3908,7 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 	try {
 		mappedKeyFormatTuple = Tuple::unpack(mapper);
 	} catch (Error& e) {
-		TraceEvent("MapperNotTuple").error(e).detail("Mapper", mapper.printable());
+		TraceEvent("MapperNotTuple").error(e).detail("Mapper", mapper);
 		throw mapper_not_tuple();
 	}
 	state std::vector<Optional<Tuple>> vt;
@@ -4557,7 +4555,7 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 		auto cached = data->cachedRangeMap[absoluteKey];
 		// if (cached)
 		//	TraceEvent(SevDebug, "SSGetKeyCached").detail("Key", k).detail("Begin",
-		// shard.begin.printable()).detail("End", shard.end.printable());
+		// shard.begin).detail("End", shard.end);
 
 		GetKeyReply reply(updated, cached);
 		reply.penalty = data->getPenalty();
@@ -5056,8 +5054,8 @@ ACTOR Future<Void> logFetchKeysWarning(AddingShard* shard) {
 		TraceEvent(traceEventLevel, "FetchKeysTooLong")
 		    .detail("Duration", now() - startTime)
 		    .detail("Phase", shard->phase)
-		    .detail("Begin", shard->keys.begin.printable())
-		    .detail("End", shard->keys.end.printable());
+		    .detail("Begin", shard->keys.begin)
+		    .detail("End", shard->keys.end);
 	}
 }
 
@@ -5178,7 +5176,7 @@ ACTOR Future<Void> changeFeedPopQ(StorageServer* self, ChangeFeedPopRequest req)
 	}
 
 	TraceEvent(SevDebug, "ChangeFeedPopQuery", self->thisServerID)
-	    .detail("RangeID", req.rangeID.printable())
+	    .detail("RangeID", req.rangeID)
 	    .detail("Version", req.version)
 	    .detail("SSVersion", self->version.get())
 	    .detail("Range", req.range);
@@ -5235,8 +5233,8 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
 	if (startVersion >= endVersion || (changeFeedInfo->removing)) {
 		TEST(true); // Change Feed popped before fetch
 		TraceEvent(SevDebug, "FetchChangeFeedNoOp", data->thisServerID)
-		    .detail("RangeID", rangeId.printable())
-		    .detail("Range", range.toString())
+		    .detail("RangeID", rangeId)
+		    .detail("Range", range)
 		    .detail("StartVersion", startVersion)
 		    .detail("EndVersion", endVersion)
 		    .detail("Removing", changeFeedInfo->removing);
@@ -5386,8 +5384,8 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
 		if (e.code() != error_code_end_of_stream) {
 			TraceEvent(SevDebug, "FetchChangeFeedError", data->thisServerID)
 			    .errorUnsuppressed(e)
-			    .detail("RangeID", rangeId.printable())
-			    .detail("Range", range.toString())
+			    .detail("RangeID", rangeId)
+			    .detail("Range", range)
 			    .detail("EndVersion", endVersion)
 			    .detail("Removing", changeFeedInfo->removing)
 			    .detail("Destroyed", changeFeedInfo->destroyed);
@@ -5433,8 +5431,8 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
 	}
 
 	TraceEvent(SevDebug, "FetchChangeFeedDone", data->thisServerID)
-	    .detail("RangeID", rangeId.printable())
-	    .detail("Range", range.toString())
+	    .detail("RangeID", rangeId)
+	    .detail("Range", range)
 	    .detail("StartVersion", startVersion)
 	    .detail("EndVersion", endVersion)
 	    .detail("EmptyVersion", changeFeedInfo->emptyVersion)
@@ -5457,8 +5455,8 @@ ACTOR Future<Version> fetchChangeFeed(StorageServer* data,
 	state FlowLock::Releaser holdingFCFPL(data->fetchChangeFeedParallelismLock);
 
 	TraceEvent(SevDebug, "FetchChangeFeed", data->thisServerID)
-	    .detail("RangeID", changeFeedInfo->id.printable())
-	    .detail("Range", changeFeedInfo->range.toString())
+	    .detail("RangeID", changeFeedInfo->id)
+	    .detail("Range", changeFeedInfo->range)
 	    .detail("BeginVersion", beginVersion)
 	    .detail("EndVersion", endVersion);
 
@@ -5466,8 +5464,8 @@ ACTOR Future<Version> fetchChangeFeed(StorageServer* data,
 	if (cleanupPending != data->changeFeedCleanupDurable.end()) {
 		TEST(true); // Change feed waiting for dirty previous move to finish
 		TraceEvent(SevDebug, "FetchChangeFeedWaitCleanup", data->thisServerID)
-		    .detail("RangeID", changeFeedInfo->id.printable())
-		    .detail("Range", changeFeedInfo->range.toString())
+		    .detail("RangeID", changeFeedInfo->id)
+		    .detail("Range", changeFeedInfo->range)
 		    .detail("CleanupVersion", cleanupPending->second)
 		    .detail("EmptyVersion", changeFeedInfo->emptyVersion)
 		    .detail("BeginVersion", beginVersion)
@@ -5479,8 +5477,8 @@ ACTOR Future<Version> fetchChangeFeed(StorageServer* data,
 		if (cleanupPendingAfter != data->changeFeedCleanupDurable.end()) {
 			ASSERT(cleanupPendingAfter->second >= endVersion);
 			TraceEvent(SevDebug, "FetchChangeFeedCancelledByCleanup", data->thisServerID)
-			    .detail("RangeID", changeFeedInfo->id.printable())
-			    .detail("Range", changeFeedInfo->range.toString())
+			    .detail("RangeID", changeFeedInfo->id)
+			    .detail("Range", changeFeedInfo->range)
 			    .detail("BeginVersion", beginVersion)
 			    .detail("EndVersion", endVersion);
 			return invalidVersion;
@@ -5523,8 +5521,8 @@ ACTOR Future<Version> fetchChangeFeed(StorageServer* data,
 			Version cleanupVersion = data->data().getLatestVersion();
 
 			TraceEvent(SevDebug, "DestroyingChangeFeedFromFetch", data->thisServerID)
-			    .detail("RangeID", changeFeedInfo->id.printable())
-			    .detail("Range", changeFeedInfo->range.toString())
+			    .detail("RangeID", changeFeedInfo->id)
+			    .detail("Range", changeFeedInfo->range)
 			    .detail("Version", cleanupVersion);
 
 			if (g_network->isSimulated()) {
@@ -5603,7 +5601,7 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 				cfInfo->durableFetchVersion = NotifiedVersion();
 
 				TraceEvent(SevDebug, "ResetChangeFeedInfo", data->thisServerID)
-				    .detail("RangeID", cfInfo->id.printable())
+				    .detail("RangeID", cfInfo->id)
 				    .detail("Range", cfInfo->range)
 				    .detail("FetchVersion", fetchVersion)
 				    .detail("EmptyVersion", cfInfo->emptyVersion)
@@ -5638,7 +5636,7 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 		bool existing = existingEntry != data->uidChangeFeed.end();
 
 		TraceEvent(SevDebug, "FetchedChangeFeedInfo", data->thisServerID)
-		    .detail("RangeID", cfEntry.rangeId.printable())
+		    .detail("RangeID", cfEntry.rangeId)
 		    .detail("Range", cfEntry.range)
 		    .detail("FetchVersion", fetchVersion)
 		    .detail("EmptyVersion", cfEntry.emptyVersion)
@@ -5743,7 +5741,7 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 		                                  existingEntry->second->emptyVersion + 1,
 		                                  existingEntry->second->stopVersion)));
 		TraceEvent(SevDebug, "PersistingResetChangeFeedInfo", data->thisServerID)
-		    .detail("RangeID", existingEntry->second->id.printable())
+		    .detail("RangeID", existingEntry->second->id)
 		    .detail("Range", existingEntry->second->range)
 		    .detail("FetchVersion", fetchVersion)
 		    .detail("EmptyVersion", existingEntry->second->emptyVersion)
@@ -5765,7 +5763,7 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 		Version cleanupVersion = data->data().getLatestVersion();
 
 		TraceEvent(SevDebug, "DestroyingChangeFeedFromFetchMetadata", data->thisServerID)
-		    .detail("RangeID", feedId.printable())
+		    .detail("RangeID", feedId)
 		    .detail("Range", existingEntry->second->range)
 		    .detail("Version", cleanupVersion)
 		    .detail("FKID", fetchKeysID);
@@ -6818,8 +6816,8 @@ private:
 			auto feed = data->uidChangeFeed.find(changeFeedId);
 
 			TraceEvent(SevDebug, "ChangeFeedPrivateMutation", data->thisServerID)
-			    .detail("RangeID", changeFeedId.printable())
-			    .detail("Range", changeFeedRange.toString())
+			    .detail("RangeID", changeFeedId)
+			    .detail("Range", changeFeedRange)
 			    .detail("Version", currentVersion)
 			    .detail("PopVersion", popVersion)
 			    .detail("Status", status);
@@ -6847,8 +6845,8 @@ private:
 				ASSERT(feed != data->uidChangeFeed.end());
 
 				TraceEvent(SevDebug, "AddingChangeFeed", data->thisServerID)
-				    .detail("RangeID", changeFeedId.printable())
-				    .detail("Range", changeFeedRange.toString())
+				    .detail("RangeID", changeFeedId)
+				    .detail("Range", changeFeedRange)
 				    .detail("EmptyVersion", feed->second->emptyVersion);
 
 				auto rs = data->keyChangeFeed.modify(changeFeedRange);
@@ -6885,24 +6883,24 @@ private:
 
 			} else if (status == ChangeFeedStatus::CHANGE_FEED_CREATE && createdFeed) {
 				TraceEvent(SevDebug, "CreatingChangeFeed", data->thisServerID)
-				    .detail("RangeID", changeFeedId.printable())
-				    .detail("Range", changeFeedRange.toString())
+				    .detail("RangeID", changeFeedId)
+				    .detail("Range", changeFeedRange)
 				    .detail("Version", currentVersion);
 				// no-op, already created metadata
 				addMutationToLog = true;
 			}
 			if (status == ChangeFeedStatus::CHANGE_FEED_STOP && currentVersion < feed->second->stopVersion) {
 				TraceEvent(SevDebug, "StoppingChangeFeed", data->thisServerID)
-				    .detail("RangeID", changeFeedId.printable())
-				    .detail("Range", changeFeedRange.toString())
+				    .detail("RangeID", changeFeedId)
+				    .detail("Range", changeFeedRange)
 				    .detail("Version", currentVersion);
 				feed->second->stopVersion = currentVersion;
 				addMutationToLog = true;
 			}
 			if (status == ChangeFeedStatus::CHANGE_FEED_DESTROY && !createdFeed && feed != data->uidChangeFeed.end()) {
 				TraceEvent(SevDebug, "DestroyingChangeFeed", data->thisServerID)
-				    .detail("RangeID", changeFeedId.printable())
-				    .detail("Range", changeFeedRange.toString())
+				    .detail("RangeID", changeFeedId)
+				    .detail("Range", changeFeedRange)
 				    .detail("Version", currentVersion);
 				Key beginClearKey = changeFeedId.withPrefix(persistChangeFeedKeys.begin);
 				Version cleanupVersion = data->data().getLatestVersion();
@@ -8391,8 +8389,8 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 		Version popVersion, stopVersion;
 		std::tie(changeFeedRange, popVersion, stopVersion) = decodeChangeFeedSSValue(changeFeeds[feedLoc].value);
 		TraceEvent(SevDebug, "RestoringChangeFeed", data->thisServerID)
-		    .detail("RangeID", changeFeedId.printable())
-		    .detail("Range", changeFeedRange.toString())
+		    .detail("RangeID", changeFeedId)
+		    .detail("Range", changeFeedRange)
 		    .detail("StopVersion", stopVersion)
 		    .detail("PopVer", popVersion);
 		Reference<ChangeFeedInfo> changeFeedInfo(new ChangeFeedInfo());
