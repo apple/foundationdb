@@ -132,7 +132,7 @@ Basically, the MountainChopper will handle read-hot shards distribution with fol
     b. `LOAD(shard) > AVG(SourceShardLoad)`; 
     c. with the highest top-K `MOVE_SCORE`; 
 
-    We use 3.a and 3.b to set a eligible shard bandwidth for read rebalance moving. If the upper bound is too large, it’ll just make the hot shard shift to another team but not even the read load. If the upper bound is small, we’ll just move some cold shards to other servers, which is also not helpful. The default value of READ_REBALANCE_MAX_SHARD_FRAC, of which the value is up to 0.5, is 0.2 which is decided based on skewed workload test.
+    We use 3.a and 3.b to set a eligible shard bandwidth for read rebalance moving. If the upper bound is too large, it’ll just make the hot shard shift to another team but not even the read load. If the upper bound is small, we’ll just move some cold shards to other servers, which is also not helpful. The default value of READ_REBALANCE_MAX_SHARD_FRAC is 0.2 (up to 0.5) which is decided based on skewed workload test.
 4. Issue relocation request to move a random shard in the top k set. If the maximum limit of read-balance movement is reached, give up this relocation.
 
 Note: The ValleyFiller chooses a source team from a random set with the largest LOAD, and a destination team with the least LOAD.
@@ -141,10 +141,10 @@ Note: The ValleyFiller chooses a source team from a random set with the largest 
 ### Metrics to measure
 1. StorageMetrics trace event report “FinishedQueries” which means the current storage server finishes how many read operations. The rate of FinishedQueries is what we measure first. The better the load balance is, the more similar the FinishedQueries rate across all storage servers.
 CPU utilization. This metric is in a positive relationship with “FinishedQueries rate”. A even “FinishedQueries” generally means even CPU utilization in the read-only scenario.
-2. Data movement size. We want to achieve load balance with the movement as little as possible;
+2. Data movement size. We want to achieve load balance with as little movement as possible;
 3. StandardDeviation(FinishedQueries). It indicates how much difference read load each storage server has.
 
-### Typical test case
+### Typical Test Setup
 120GB data, key=32B, value=200B; Single replica; 8 SS (20%) serves 80% read; 8 SS servers 60% write; 4 servers are both read and write hot;  TPS=100000, 7 read/txn + 1 write/txn; 
 
 ### Test Result Summary and Recommendation 
