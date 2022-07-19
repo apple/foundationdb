@@ -4720,7 +4720,8 @@ ACTOR Future<Void> getRangeStreamFragment(Reference<TransactionState> trState,
 			req.limit = reverse ? -CLIENT_KNOBS->REPLY_BYTE_LIMIT : CLIENT_KNOBS->REPLY_BYTE_LIMIT;
 			req.limitBytes = std::numeric_limits<int>::max();
 			// it is used to inform the storage that the rangeRead is for Fetch
-			req.isFetchKeys = (trState->readType == ReadType::FETCH);
+			// req.isFetchKeys = (trState->readType == ReadType::FETCH);
+			req.isFetchKeys = false;
 			trState->cx->getLatestCommitVersions(
 			    locations[shard].locations, req.version, trState, req.ssLatestCommitVersions);
 

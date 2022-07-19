@@ -2196,6 +2196,18 @@ public:
 		return w.lockPromise.getFuture();
 	}
 
+	void kill() {
+		for (int i = 0; i < runners.size(); ++i) {
+			if (!runners[i].isReady()) {
+				runners[i].cancel();
+			}
+		}
+		runners.clear();
+		brokenOnDestruct.sendError(broken_promise());
+		waiting = 0;
+		waiters.clear();
+	}
+
 	std::string toString() const {
 		int runnersDone = 0;
 		for (int i = 0; i < runners.size(); ++i) {
