@@ -472,10 +472,10 @@ struct DataDistributor : NonCopyable, ReferenceCounted<DataDistributor> {
 				if (!unhealthy && self->configuration.usableRegions > 1) {
 					unhealthy = iShard.remoteSrc.size() != self->configuration.storageTeamSize;
 				}
-				self->relocationProducer.send(RelocateShard(keys,
-				                                            unhealthy ? DataMovementReason::UNHEALTHY
-				                                                      : DataMovementReason::RECOVER_MOVE,
-				                                            RelocateReason::OTHER));
+				self->relocationProducer.send(
+				    RelocateShard(keys,
+				                  unhealthy ? DataMovementReason::UNHEALTHY : DataMovementReason::RECOVER_MOVE,
+				                  RelocateReason::OTHER));
 			}
 
 			wait(yield(TaskPriority::DataDistribution));
@@ -564,7 +564,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			state Reference<AsyncVar<bool>> processingUnhealthy(new AsyncVar<bool>(false));
 			state Reference<AsyncVar<bool>> processingWiggle(new AsyncVar<bool>(false));
 			state Promise<Void> readyToStart;
-			
+
 			self->shardsAffectedByTeamFailure = makeReference<ShardsAffectedByTeamFailure>();
 			wait(DataDistributor::resumeRelocations(self));
 
