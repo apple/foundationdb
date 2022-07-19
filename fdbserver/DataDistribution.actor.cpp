@@ -39,6 +39,7 @@
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/StorageQuota.actor.h"
 #include "fdbserver/TenantCache.h"
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/WaitFailure.h"
@@ -737,6 +738,9 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			                                    "DDQueue",
 			                                    self->ddId,
 			                                    &normalDDQueueErrors()));
+
+			actors.push_back(
+			    reportErrorsExcept(storageQuotaTracker(cx), "StorageQuotaTracker", self->ddId, &normalDDQueueErrors()));
 
 			std::vector<DDTeamCollection*> teamCollectionsPtrs;
 			primaryTeamCollection = makeReference<DDTeamCollection>(
