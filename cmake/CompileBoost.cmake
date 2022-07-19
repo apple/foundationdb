@@ -55,7 +55,7 @@ function(compile_boost)
   # Download zlib
   include(ExternalProject)
   set(ZLIB_SOURCE_DIR "${CMAKE_BINARY_DIR}/zlib")
-  ExternalProject_add("${COMPILE_BOOST_TARGET}_zlib"
+  ExternalProject_add("${COMPILE_BOOST_TARGET}_zlib_source"
     URL "https://zlib.net/zlib-1.2.12.tar.gz"
     URL_HASH SHA256=91844808532e5ce316b3c010929493c0244f3d37593afd6de04f71821d5136d9
     SOURCE_DIR ${ZLIB_SOURCE_DIR}
@@ -77,7 +77,8 @@ function(compile_boost)
     BUILD_BYPRODUCTS "${BOOST_INSTALL_DIR}/boost/config.hpp"
                      "${BOOST_INSTALL_DIR}/lib/libboost_context.a"
                      "${BOOST_INSTALL_DIR}/lib/libboost_filesystem.a"
-                     "${BOOST_INSTALL_DIR}/lib/libboost_iostreams.a")
+                     "${BOOST_INSTALL_DIR}/lib/libboost_iostreams.a"
+                     "${BOOST_INSTALL_DIR}/lib/libboost_zlib.a")
 
   add_library(${COMPILE_BOOST_TARGET}_context STATIC IMPORTED)
   add_dependencies(${COMPILE_BOOST_TARGET}_context ${COMPILE_BOOST_TARGET}Project)
@@ -91,9 +92,13 @@ function(compile_boost)
   add_dependencies(${COMPILE_BOOST_TARGET}_iostreams ${COMPILE_BOOST_TARGET}Project)
   set_target_properties(${COMPILE_BOOST_TARGET}_iostreams PROPERTIES IMPORTED_LOCATION "${BOOST_INSTALL_DIR}/lib/libboost_iostreams.a")
 
+  add_library(${COMPILE_BOOST_TARGET}_zlib STATIC IMPORTED)
+  add_dependencies(${COMPILE_BOOST_TARGET}_zlib ${COMPILE_BOOST_TARGET}Project)
+  set_target_properties(${COMPILE_BOOST_TARGET}_zlib PROPERTIES IMPORTED_LOCATION "${BOOST_INSTALL_DIR}/lib/libboost_zlib.a")
+
   add_library(${COMPILE_BOOST_TARGET} INTERFACE)
   target_include_directories(${COMPILE_BOOST_TARGET} SYSTEM INTERFACE ${BOOST_INSTALL_DIR}/include)
-  target_link_libraries(${COMPILE_BOOST_TARGET} INTERFACE ${COMPILE_BOOST_TARGET}_context ${COMPILE_BOOST_TARGET}_filesystem ${COMPILE_BOOST_TARGET}_iostreams)
+  target_link_libraries(${COMPILE_BOOST_TARGET} INTERFACE ${COMPILE_BOOST_TARGET}_context ${COMPILE_BOOST_TARGET}_filesystem ${COMPILE_BOOST_TARGET}_iostreams ${COMPILE_BOOST_TARGET}_zlib)
 
 endfunction(compile_boost)
 
