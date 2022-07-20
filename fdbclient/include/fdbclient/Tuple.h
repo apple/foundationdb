@@ -90,10 +90,15 @@ struct Tuple {
 	Standalone<VectorRef<uint8_t>> getData() { return data; }
 	Standalone<StringRef> getDataAsStandalone() { return Standalone<StringRef>(pack(), data.arena()); }
 
+	// Create a tuple from a parameter pack
 	template <class... Types>
 	static Tuple makeTuple(Types&&... args) {
 		Tuple t;
+
+		// Use a fold expression to append each argument using the << operator.
+		// https://en.cppreference.com/w/cpp/language/fold
 		(t << ... << args);
+
 		return t;
 	}
 
