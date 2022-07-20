@@ -137,8 +137,8 @@ bool canReplyWith(Error e) {
 // Immutable
 static const KeyValueRef persistFormat(LiteralStringRef(PERSIST_PREFIX "Format"),
                                        LiteralStringRef("FoundationDB/StorageServer/1/4"));
-static const KeyValueRef persistFormat1_5(LiteralStringRef(PERSIST_PREFIX "Format"),
-                                          LiteralStringRef("FoundationDB/StorageServer/1/5"));
+static const KeyValueRef persistShardAwareFormat(LiteralStringRef(PERSIST_PREFIX "Format"),
+                                                 LiteralStringRef("FoundationDB/StorageServer/1/5"));
 static const KeyRangeRef persistFormatReadableRange(LiteralStringRef("FoundationDB/StorageServer/1/2"),
                                                     LiteralStringRef("FoundationDB/StorageServer/1/6"));
 static const KeyRef persistID = LiteralStringRef(PERSIST_PREFIX "ID");
@@ -657,8 +657,10 @@ public:
 	std::unordered_map<UID, CheckpointMetaData> checkpoints; // Existing and deleting checkpoints
 	TenantMap tenantMap;
 	TenantPrefixIndex tenantPrefixIndex;
-	std::map<Version, std::vector<PendingNewShard>> pendingAddRanges; // Pending checkpoint requests
-	std::map<Version, std::vector<KeyRange>> pendingRemoveRanges; // Pending checkpoint requests
+	std::map<Version, std::vector<PendingNewShard>>
+	    pendingAddRanges; // Pending requests to add ranges to physical shards
+	std::map<Version, std::vector<KeyRange>>
+	    pendingRemoveRanges; // Pending requests to remove ranges from physical shards
 
 	bool shardAware; // True if the storage server is aware of the physical shards.
 
@@ -6607,7 +6609,7 @@ ACTOR Future<Void> restoreShards(StorageServer* data,
                                  RangeResult storageShards,
                                  RangeResult assignedShards,
                                  RangeResult availableShards) {
-	TraceEvent(SevDebug, "StorageServerRestoreShardsBegin", data->thisServerID)
+	TraceEvent(SevInfo, "StorageServerRestoreShardsBegin", data->thisServerID)
 	    .detail("StorageShard", storageShards.size())
 	    .detail("Version", version);
 
@@ -6719,7 +6721,7 @@ ACTOR Future<Void> restoreShards(StorageServer* data,
 	coalescePhysicalShards(data, allKeys);
 	TraceEvent(SevVerbose, "StorageServerRestoreShardsValidate", data->thisServerID).detail("Version", version);
 	validate(data, /*force=*/true);
-	TraceEvent(SevVerbose, "StorageServerRestoreShardsEnd", data->thisServerID).detail("Version", version);
+	TraceEvent(SevInfo, "StorageServerRestoreShardsEnd", data->thisServerID).detail("Version", version);
 
 	return Void();
 }
@@ -8292,6 +8294,8 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 				    .detail("Version", data->pendingAddRanges.begin()->first)
 				    .detail("DurableVersion", data->durableVersion.get());
 				addedRanges = true;
+				// Remove commit byte limit to make sure the private mutaiton(s) associated with the
+				// `addRange` are committed.
 				bytesLeft = SERVER_KNOBS->STORAGE_COMMIT_BYTES_UNLIMITED;
 			}
 		}
@@ -8577,7 +8581,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 
 void StorageServerDisk::makeNewStorageServerDurable(const bool shardAware) {
 	if (shardAware) {
-		storage->set(persistFormat1_5);
+		storage->set(persistShardAwareFormat);
 	} else {
 		storage->set(persistFormat);
 	}
@@ -8977,7 +8981,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 		return false;
 	} else {
 		TraceEvent(SevVerbose, "RestoringStorageServerWithPhysicalShards", data->thisServerID).log();
-		data->shardAware = fFormat.get().get() == persistFormat1_5.value;
+		data->shardAware = fFormat.get().get() == persistShardAwareFormat.value;
 	}
 	data->bytesRestored += fFormat.get().expectedSize();
 	if (!persistFormatReadableRange.contains(fFormat.get().get())) {

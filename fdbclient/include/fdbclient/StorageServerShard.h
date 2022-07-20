@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#ifndef FDBSERVER_STORAGESERVERDATA_H
-#define FDBSERVER_STORAGESERVERDATA_H
+#ifndef FDBCLIENT_STORAGESERVERSHARD_H
+#define FDBCLIENT_STORAGESERVERSHARD_H
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
