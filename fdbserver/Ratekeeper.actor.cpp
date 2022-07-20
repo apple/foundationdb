@@ -150,7 +150,7 @@ public:
 
 	ACTOR static Future<Void> trackStorageServerQueueInfo(ActorWeakSelfRef<Ratekeeper> self,
 	                                                      StorageServerInterface ssi) {
-		self->storageQueueInfo.insert(mapPair(ssi.id(), StorageQueueInfo(ssi.id(), ssi.locality)));
+		self->storageQueueInfo.insert(mapPair(ssi.id(), StorageQueueInfo(self->id, ssi.id(), ssi.locality)));
 		TraceEvent("RkTracking", self->id)
 		    .detail("StorageServer", ssi.id())
 		    .detail("Locality", ssi.locality.toString());
@@ -952,8 +952,8 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 	return Void();
 }
 
-StorageQueueInfo::StorageQueueInfo(UID id, LocalityData locality)
-  : valid(false), id(id), locality(locality), acceptingRequests(false),
+StorageQueueInfo::StorageQueueInfo(const UID& ratekeeperID_, const UID& id_, const LocalityData& locality_)
+  : valid(false), ratekeeperID(ratekeeperID_), id(id_), locality(locality_), acceptingRequests(false),
     smoothDurableBytes(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothInputBytes(SERVER_KNOBS->SMOOTHING_AMOUNT),
     verySmoothDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT), smoothDurableVersion(SERVER_KNOBS->SMOOTHING_AMOUNT),
     smoothLatestVersion(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothFreeSpace(SERVER_KNOBS->SMOOTHING_AMOUNT),
@@ -961,6 +961,9 @@ StorageQueueInfo::StorageQueueInfo(UID id, LocalityData locality)
 	// FIXME: this is a tacky workaround for a potential uninitialized use in trackStorageServerQueueInfo
 	lastReply.instanceID = -1;
 }
+
+StorageQueueInfo::StorageQueueInfo(const UID& id_, const LocalityData& locality_)
+  : StorageQueueInfo(UID(), id_, locality_) {}
 
 void StorageQueueInfo::addCommitCost(TransactionTagRef tagName, TransactionCommitCostEstimation const& cost) {
 	tagCostEst[tagName] += cost;
@@ -1014,14 +1017,15 @@ UpdateCommitCostRequest StorageQueueInfo::refreshCommitCost(double elapsed) {
 		busiestWriteTags.emplace_back(busiestTag, maxRate, maxBusyness);
 	}
 
-	UpdateCommitCostRequest updateCommitCostRequest;
-	updateCommitCostRequest.postTime = now();
-	updateCommitCostRequest.elapsed = elapsed;
-	updateCommitCostRequest.busiestTag = busiestTag;
-	updateCommitCostRequest.opsSum = maxCost.getOpsSum();
-	updateCommitCostRequest.costSum = maxCost.getCostSum();
-	updateCommitCostRequest.totalWriteCosts = totalWriteCosts;
-	updateCommitCostRequest.reported = !busiestWriteTags.empty();
+	UpdateCommitCostRequest updateCommitCostRequest{ ratekeeperID,
+		                                             now(),
+		                                             elapsed,
+		                                             busiestTag,
+		                                             maxCost.getOpsSum(),
+		                                             maxCost.getCostSum(),
+		                                             totalWriteCosts,
+		                                             !busiestWriteTags.empty(),
+													 ReplyPromise<Void>() };
 
 	// reset statistics
 	tagCostEst.clear();

@@ -58,6 +58,7 @@ class StorageQueueInfo {
 
 public:
 	bool valid;
+	UID ratekeeperID;
 	UID id;
 	LocalityData locality;
 	StorageQueuingMetricsReply lastReply;
@@ -69,7 +70,8 @@ public:
 	limitReason_t limitReason;
 	std::vector<StorageQueuingMetricsReply::TagInfo> busiestReadTags, busiestWriteTags;
 
-	StorageQueueInfo(UID id, LocalityData locality);
+	StorageQueueInfo(const UID& id, const LocalityData& locality);
+	StorageQueueInfo(const UID& rateKeeperID, const UID& id, const LocalityData& locality);
 	// Summarizes up the commit cost per storage server. Returns the UpdateCommitCostRequest for corresponding SS.
 	UpdateCommitCostRequest refreshCommitCost(double elapsed);
 	int64_t getStorageQueueBytes() const { return lastReply.bytesInput - smoothDurableBytes.smoothTotal(); }

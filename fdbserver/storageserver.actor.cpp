@@ -622,12 +622,13 @@ public:
 
 struct BusiestWriteTagContext {
 	const std::string busiestWriteTagTrackingKey;
+	UID ratekeeperID;
 	Reference<EventCacheHolder> busiestWriteTagEventHolder;
 	double lastUpdateTime;
 
 	BusiestWriteTagContext(const UID& thisServerID)
-	  : busiestWriteTagTrackingKey(thisServerID.toString() + "/BusiestWriteTag"),
-	    busiestWriteTagEventHolder(makeReference<EventCacheHolder>(busiestWriteTagTrackingKey)), lastUpdateTime(0.0) {}
+	  : busiestWriteTagTrackingKey(thisServerID.toString() + "/BusiestWriteTag"), ratekeeperID(UID()),
+	    busiestWriteTagEventHolder(makeReference<EventCacheHolder>(busiestWriteTagTrackingKey)), lastUpdateTime(-1) {}
 };
 
 struct StorageServer {
@@ -1732,7 +1733,9 @@ ACTOR Future<Version> waitForVersionNoTooOld(StorageServer* data, Version versio
 	if (version <= data->version.get())
 		return version;
 	choose {
-		when(wait(data->version.whenAtLeast(version))) { return version; }
+		when(wait(data->version.whenAtLeast(version))) {
+			return version;
+		}
 		when(wait(delay(SERVER_KNOBS->FUTURE_VERSION_DELAY))) {
 			if (deterministicRandom()->random01() < 0.001)
 				TraceEvent(SevWarn, "ShardServerFutureVersion1000x", data->thisServerID)
@@ -9519,7 +9522,9 @@ ACTOR Future<Void> waitMetrics(StorageServerMetrics* self, WaitMetricsRequest re
 
 						  }*/
 					}
-					when(wait(timeout)) { timedout = true; }
+					when(wait(timeout)) {
+						timedout = true;
+					}
 				}
 			} catch (Error& e) {
 				if (e.code() == error_code_actor_cancelled)
@@ -10079,7 +10084,18 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 				self->actors.add(fetchCheckpointQ(self, req));
 			}
 			when(UpdateCommitCostRequest req = waitNext(ssi.updateCommitCostRequest.getFuture())) {
+				// Ratekeeper might change with a new ID. In this case, always accept the data.
+				if (req.ratekeeperID != self->busiestWriteTagContext.ratekeeperID) {
+					TraceEvent("RatekeeperIDChange")
+					    .detail("OldID", self->busiestWriteTagContext.ratekeeperID)
+					    .detail("OldLastUpdateTime", self->busiestWriteTagContext.lastUpdateTime)
+					    .detail("NewID", req.ratekeeperID)
+					    .detail("LastUpdateTime", req.postTime);
+					self->busiestWriteTagContext.ratekeeperID = req.ratekeeperID;
+					self->busiestWriteTagContext.lastUpdateTime = -1;
+				}
 				// In case we received an old request/duplicate request, due to, e.g. network problem
+				ASSERT(req.postTime > 0);
 				if (req.postTime < self->busiestWriteTagContext.lastUpdateTime) {
 					continue;
 				}

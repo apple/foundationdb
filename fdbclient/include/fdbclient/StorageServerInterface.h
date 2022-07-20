@@ -58,6 +58,9 @@ struct VersionReply {
 struct UpdateCommitCostRequest {
 	constexpr static FileIdentifier file_identifier = 4159439;
 
+	// Ratekeeper ID, it is only reasonable to compare postTime from the same Ratekeeper
+	UID ratekeeperID;
+
 	// The time the request being posted
 	double postTime;
 
@@ -75,7 +78,7 @@ struct UpdateCommitCostRequest {
 
 	template <typename Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, postTime, elapsed, busiestTag, opsSum, costSum, totalWriteCosts, reported, reply);
+		serializer(ar, ratekeeperID, postTime, elapsed, busiestTag, opsSum, costSum, totalWriteCosts, reported, reply);
 	}
 };
 
