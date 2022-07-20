@@ -29,6 +29,9 @@
 #include "fdbrpc/fdbrpc.h"
 #include "flow/IAsyncFile.h"
 #include "flow/TLSConfig.actor.h"
+
+#include "fdb_rust.h"
+
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 void forceLinkFlowTests() {}
@@ -49,6 +52,12 @@ TEST_CASE("/flow/actorcompiler/lineNumbers") {
 		break;
 	}
 	ASSERT(LiteralStringRef(__FILE__).endsWith(LiteralStringRef("FlowTests.actor.cpp")));
+	return Void();
+}
+
+TEST_CASE("/flow/rust/hello_world") {
+	shared::Foo f = fdb_rust::new_foo();
+	fdb_rust::print_foo(f);
 	return Void();
 }
 
