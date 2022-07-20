@@ -105,11 +105,11 @@ Reference<IRandom> debugRandom() {
 	return seededDebugRandom;
 }
 
-Reference<IRandom> deterministicRandom() {
+IRandom* deterministicRandom() {
 	if (!seededRandom) {
 		seededRandom = Reference<IRandom>(new DeterministicRandom(platform::getRandomSeed(), true));
 	}
-	return seededRandom;
+	return seededRandom.getPtr();
 }
 
 Reference<IRandom> nondeterministicRandom() {

@@ -184,7 +184,7 @@ void setThreadLocalDeterministicRandomSeed(uint32_t seed);
 // be used in contexts where the choice to call it is deterministic.
 //
 // This generator is only deterministic if given a seed using setThreadLocalDeterministicRandomSeed
-Reference<IRandom> deterministicRandom();
+IRandom* deterministicRandom();
 
 // A random number generator that cannot be manually seeded and may be called in
 // non-deterministic contexts.
