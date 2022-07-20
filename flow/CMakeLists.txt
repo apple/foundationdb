@@ -26,7 +26,7 @@ target_link_libraries(flowlinktest PRIVATE flow stacktrace)
 
 find_package(ZLIB)
 if(ZLIB_FOUND)
-  add_compile_definitions(ZLIB_LIB_SUPPORTED)
+  target_compile_definitions(flow PUBLIC ZLIB_LIB_SUPPORTED)
   target_link_libraries(flow PUBLIC ZLIB::ZLIB)
 else()
   message(STATUS "ZLIB package not found")
