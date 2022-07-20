@@ -359,8 +359,8 @@ public:
 			loadIniFile(testFile);
 			return;
 		}
-		ConfigBuilder builder;
 		std::string extraDatabaseModeStr;
+		ConfigBuilder builder;
 		builder.add("extraDatabaseMode", &extraDatabaseModeStr)
 		    .add("extraDatabaseCount", &extraDatabaseCount)
 		    .add("minimumReplication", &minimumReplication)

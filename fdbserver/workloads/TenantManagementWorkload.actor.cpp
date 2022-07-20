@@ -264,7 +264,7 @@ struct TenantManagementWorkload : TestWorkload {
 
 			std::vector<Future<Void>> createFutures;
 			for (auto [tenant, entry] : tenantsToCreate) {
-				entry.id = nextId++;
+				entry.setId(nextId++);
 				createFutures.push_back(success(TenantAPI::createTenantTransaction(tr, tenant, entry)));
 			}
 			TenantMetadata::lastTenantId.set(tr, nextId - 1);

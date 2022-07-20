@@ -994,7 +994,6 @@ struct CreateTenantImpl {
 			return std::make_pair(existingEntry.get(), false);
 		}
 
-		self->tenantEntry.setSubspace(""_sr);
 		self->tenantEntry.tenantState = TenantState::REGISTERING;
 		ManagementClusterMetadata::tenantMetadata.tenantMap.set(tr, self->tenantName, self->tenantEntry);
 
@@ -1021,7 +1020,7 @@ struct CreateTenantImpl {
 				self->clusterMetadata = assignment.second;
 
 				Optional<int64_t> lastId = wait(ManagementClusterMetadata::tenantMetadata.lastTenantId.get(tr));
-				self->tenantEntry.id = lastId.orDefault(-1) + 1;
+				self->tenantEntry.setId(lastId.orDefault(-1) + 1);
 
 				std::pair<TenantMapEntry, bool> result = wait(managementClusterCreateTenant(self, tr));
 				state TenantMapEntry createdEntry = result.first;

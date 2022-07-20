@@ -113,7 +113,7 @@ private:
 	    std::vector<std::pair<Standalone<StringRef>, Optional<Value>>> configMutations,
 	    int64_t tenantId) {
 		state TenantMapEntry tenantEntry;
-		tenantEntry.id = tenantId;
+		tenantEntry.setId(tenantId);
 
 		for (auto const& [name, value] : configMutations) {
 			tenantEntry.configure(name, value);

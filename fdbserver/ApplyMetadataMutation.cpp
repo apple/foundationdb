@@ -702,7 +702,7 @@ private:
 			}
 
 			confChange = true;
-			TEST(true); // Metacluster registration set
+			CODE_PROBE(true, "Metacluster registration set");
 		}
 	}
 
@@ -1104,7 +1104,7 @@ private:
 			}
 
 			confChange = true;
-			TEST(true); // Metacluster registration cleared
+			CODE_PROBE(true, "Metacluster registration cleared");
 		}
 	}
 

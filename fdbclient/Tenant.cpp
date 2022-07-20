@@ -71,13 +71,19 @@ TenantState TenantMapEntry::stringToTenantState(std::string stateStr) {
 }
 
 TenantMapEntry::TenantMapEntry() {}
-TenantMapEntry::TenantMapEntry(int64_t id, TenantState tenantState)
-  : id(id), idToPrefix(id), tenantState(tenantState) {}
-TenantMapEntry::TenantMapEntry(int64_t id,
-                               KeyRef subspace,
-                               Optional<TenantGroupName> tenantGroup,
-                               TenantState tenantState)
-  : id(id), prefix(idToPrefix(id)) tenantGroup(tenantGroup), tenantState(tenantState) {}
+TenantMapEntry::TenantMapEntry(int64_t id, TenantState tenantState) : tenantState(tenantState) {
+	setId(id);
+}
+TenantMapEntry::TenantMapEntry(int64_t id, Optional<TenantGroupName> tenantGroup, TenantState tenantState)
+  : tenantGroup(tenantGroup), tenantState(tenantState) {
+	setId(id);
+}
+
+void TenantMapEntry::setId(int64_t id) {
+	ASSERT(id >= 0);
+	this->id = id;
+	prefix = idToPrefix(id);
+}
 
 bool TenantMapEntry::matchesConfiguration(TenantMapEntry const& other) const {
 	return tenantGroup == other.tenantGroup;

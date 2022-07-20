@@ -116,8 +116,6 @@ Future<std::pair<Optional<TenantMapEntry>, bool>> createTenantTransaction(
 	ASSERT(clusterType != ClusterType::METACLUSTER_MANAGEMENT);
 	ASSERT(tenantEntry.id >= 0);
 
-	ASSERT(tenantEntry.id >= 0);
-
 	if (name.startsWith("\xff"_sr)) {
 		throw invalid_tenant_name();
 	}
@@ -201,8 +199,8 @@ Future<Optional<TenantMapEntry>> createTenant(Reference<DB> db,
 
 			if (generateTenantId) {
 				int64_t tenantId = wait(tenantIdFuture);
-				tenantEntry.id = tenantId;
-				TenantMetadata::lastTenantId.set(tr, tenantEntry.id);
+				tenantEntry.setId(tenantId);
+				TenantMetadata::lastTenantId.set(tr, tenantId);
 			}
 
 			state std::pair<Optional<TenantMapEntry>, bool> newTenant =

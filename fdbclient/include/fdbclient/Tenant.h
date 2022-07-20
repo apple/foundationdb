@@ -43,7 +43,6 @@ struct TenantMapEntry {
 	static std::string tenantStateToString(TenantState tenantState);
 	static TenantState stringToTenantState(std::string stateStr);
 
-	Arena arena;
 	int64_t id = -1;
 	Key prefix;
 	Optional<TenantGroupName> tenantGroup;
@@ -57,6 +56,8 @@ struct TenantMapEntry {
 	TenantMapEntry();
 	TenantMapEntry(int64_t id, TenantState tenantState);
 	TenantMapEntry(int64_t id, Optional<TenantGroupName> tenantGroup, TenantState tenantState);
+
+	void setId(int64_t id);
 
 	bool matchesConfiguration(TenantMapEntry const& other) const;
 	void configure(Standalone<StringRef> parameter, Optional<Value> value);
@@ -75,8 +76,10 @@ struct TenantMapEntry {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, id, tenantGroup, tenantState, assignedCluster, configurationSequenceNum);
-		if (ar.isDeserializing) {
-			prefix = idToPrefix(id);
+		if constexpr (Ar::isDeserializing) {
+			if (id >= 0) {
+				prefix = idToPrefix(id);
+			}
 			ASSERT(tenantState >= TenantState::REGISTERING && tenantState <= TenantState::ERROR);
 		}
 	}
