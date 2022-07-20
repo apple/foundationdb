@@ -164,8 +164,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		int64_t randomness = sharedRandomNumber;
 
 		// TODO CHANGE BACK
-		// doMergeCheckAtEnd = randomness % 10 == 0;
-		doMergeCheckAtEnd = true;
+		doMergeCheckAtEnd = randomness % 10 == 0;
 		randomness /= 10;
 
 		// randomize between low and high directory count

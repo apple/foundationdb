@@ -1906,8 +1906,6 @@ ACTOR Future<Void> granuleMergeChecker(Reference<BlobManagerData> bmData) {
 		auto allRanges = bmData->mergeCandidates.ranges();
 		std::vector<std::tuple<UID, KeyRange, Version>> currentCandidates;
 
-		fmt::print("BM {0} merge checking\n", bmData->epoch, mergeChecks.size());
-
 		for (auto& it : allRanges) {
 			if (!it->cvalue().canMergeNow() || currentCandidates.size() == maxRangeSize) {
 				if (currentCandidates.size() >= 2) {
@@ -1915,7 +1913,6 @@ ACTOR Future<Void> granuleMergeChecker(Reference<BlobManagerData> bmData) {
 				}
 				currentCandidates.clear();
 			}
-			fmt::print("    [{0} - {1}): {2}\n", it.begin().printable(), it.end().printable(), it.cvalue().st);
 
 			if (it->cvalue().canMergeNow()) {
 				currentCandidates.push_back(std::tuple(it->cvalue().granuleID, it->range(), it->cvalue().startVersion));
