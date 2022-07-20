@@ -38,7 +38,10 @@ function(compile_boost)
   set(BOOST_LINK_FLAGS "")
   if(APPLE OR CLANG OR ICX OR USE_LIBCXX)
     list(APPEND BOOST_COMPILER_FLAGS -stdlib=libc++ -nostdlib++)
-    list(APPEND BOOST_LINK_FLAGS -static-libgcc -lc++ -lc++abi)
+    list(APPEND BOOST_LINK_FLAGS -lc++ -lc++abi)
+    if (NOT APPLE)
+      list(APPEND BOOST_LINK_FLAGS -static-libgcc)
+    endif()
   endif()
 
   # Update the user-config.jam
