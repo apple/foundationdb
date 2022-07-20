@@ -18,12 +18,16 @@
  * limitations under the License.
  */
 
+#include "fdbclient/KeyRangeMap.h"
+#include "fdbclient/Knobs.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
+#include "flow/FastRef.h"
+#include "flow/IRandom.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // For this test to report properly buggify must be disabled (flow.h) , and failConnection must be disabled in
@@ -134,6 +138,26 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 		ASSERT(!result.more && result.size() == 0);
 	}
 
+	// after validating the overall conflicting keys are correct,
+	// randomly read part of the range to make sure the get range code path is correct
+	void validateRandomGetRangeResults(KeyRangeMap<Value>& conflictingKeys, Reference<ReadYourWritesTransaction> tr) {
+		int loopTime = 10 * conflictingKeys.size();
+		for (int i = 0; i < loopTime; i++) {
+			// TODO: randomly choose the conflicting keys as the boundary to test
+			Key startKey =
+			    Key(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(1, keyBytes)));
+			Key endKey = Key(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(1, keyBytes)));
+			KeyRangeRef kr = startKey <= endKey ? KeyRangeRef(startKey, endKey) : KeyRangeRef(endKey, startKey);
+			Future<RangeResult> res = tr->getRange(kr.withPrefix(conflictingKeysRange.begin), CLIENT_KNOBS->TOO_MANY);
+			ASSERT(res.isReady());
+			ASSERT(!res.get().more);
+			for (const auto& [key, value] : res.get()) {
+				auto gtVal = conflictingKeys[key];
+				ASSERT(gtVal == value);
+			}
+		}
+	}
+
 	ACTOR Future<Void> conflictingClient(Database cx, ReportConflictingKeysWorkload* self) {
 
 		state Reference<ReadYourWritesTransaction> tr1(new ReadYourWritesTransaction(cx));
@@ -195,13 +219,12 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 					Future<RangeResult> conflictingKeyRangesFuture = tr2->getRange(ckr, CLIENT_KNOBS->TOO_MANY);
 					ASSERT(conflictingKeyRangesFuture.isReady());
 
-					tr2 = makeReference<ReadYourWritesTransaction>(cx);
-
 					const RangeResult conflictingKeyRanges = conflictingKeyRangesFuture.get();
 					ASSERT(conflictingKeyRanges.size() &&
 					       (conflictingKeyRanges.size() <= readConflictRanges.size() * 2));
 					ASSERT(conflictingKeyRanges.size() % 2 == 0);
 					ASSERT(!conflictingKeyRanges.more);
+					KeyRangeMap<Value> debugConflictingKeys(conflictingKeysFalse, specialKeys.end);
 					for (int i = 0; i < conflictingKeyRanges.size(); i += 2) {
 						KeyValueRef startKeyWithPrefix = conflictingKeyRanges[i];
 						ASSERT(startKeyWithPrefix.key.startsWith(conflictingKeysRange.begin));
@@ -248,7 +271,11 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 							    .detail("ConflictingKeyRange", kr.toString())
 							    .detail("WriteConflictRanges", allWriteConflictRanges);
 						}
+						debugConflictingKeys.insert(
+						    KeyRangeRef(conflictingKeyRanges[i].key, conflictingKeyRanges[i + 1].key),
+						    conflictingKeysTrue);
 					}
+					self->validateRandomGetRangeResults(debugConflictingKeys, tr2);
 				} else {
 					// make sure no conflicts between tr2's readConflictRange and tr1's writeConflictRange
 					for (const KeyRange& rCR : readConflictRanges) {
