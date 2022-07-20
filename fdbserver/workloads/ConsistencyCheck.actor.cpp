@@ -206,8 +206,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> runCheck(Database cx, ConsistencyCheckWorkload* self) {
-		TEST(self->performQuiescentChecks); // Quiescent consistency check
-		TEST(!self->performQuiescentChecks); // Non-quiescent consistency check
+		CODE_PROBE(self->performQuiescentChecks, "Quiescent consistency check");
+		CODE_PROBE(!self->performQuiescentChecks, "Non-quiescent consistency check");
 
 		if (self->firstClient || self->distributed) {
 			try {
@@ -1275,7 +1275,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				for (int i = 0; i < initialSize; i++) {
 					auto tssPair = tssMapping.find(storageServers[i]);
 					if (tssPair != tssMapping.end()) {
-						TEST(true); // TSS checked in consistency check
+						CODE_PROBE(true, "TSS checked in consistency check");
 						storageServers.push_back(tssPair->second.id());
 						storageServerInterfaces.push_back(tssPair->second);
 					}

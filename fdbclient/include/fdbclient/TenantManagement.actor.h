@@ -113,8 +113,6 @@ Future<std::pair<Optional<TenantMapEntry>, bool>> createTenantTransaction(
     TenantMapEntry tenantEntry,
     ClusterType clusterType = ClusterType::STANDALONE) {
 
-	state bool allowSubspace = clusterType == ClusterType::STANDALONE;
-
 	ASSERT(clusterType != ClusterType::METACLUSTER_MANAGEMENT);
 	ASSERT(tenantEntry.id >= 0);
 
@@ -127,11 +125,6 @@ Future<std::pair<Optional<TenantMapEntry>, bool>> createTenantTransaction(
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 
 	state Future<Optional<TenantMapEntry>> existingEntryFuture = tryGetTenantTransaction(tr, name);
-	state typename transaction_future_type<Transaction, Optional<Value>>::type tenantDataPrefixFuture;
-	if (allowSubspace) {
-		tenantDataPrefixFuture = tr->get(tenantDataPrefixKey);
-	}
-
 	state Future<Void> tenantModeCheck = checkTenantMode(tr, clusterType);
 	state Future<bool> tombstoneFuture = TenantMetadata::tenantTombstones.exists(tr, tenantEntry.id);
 
@@ -144,23 +137,6 @@ Future<std::pair<Optional<TenantMapEntry>, bool>> createTenantTransaction(
 	state bool hasTombstone = wait(tombstoneFuture);
 	if (hasTombstone) {
 		return std::make_pair(Optional<TenantMapEntry>(), false);
-	}
-
-	if (allowSubspace) {
-		Optional<Value> tenantDataPrefix = wait(safeThreadFutureToFuture(tenantDataPrefixFuture));
-		if (tenantDataPrefix.present() &&
-		    tenantDataPrefix.get().size() + TenantMapEntry::ROOT_PREFIX_SIZE > CLIENT_KNOBS->TENANT_PREFIX_SIZE_LIMIT) {
-			TraceEvent(SevWarnAlways, "TenantPrefixTooLarge")
-			    .detail("TenantSubspace", tenantDataPrefix.get())
-			    .detail("TenantSubspaceLength", tenantDataPrefix.get().size())
-			    .detail("RootPrefixLength", TenantMapEntry::ROOT_PREFIX_SIZE)
-			    .detail("MaxTenantPrefixSize", CLIENT_KNOBS->TENANT_PREFIX_SIZE_LIMIT);
-
-			throw client_invalid_operation();
-		}
-		tenantEntry.setSubspace(tenantDataPrefix.present() ? (KeyRef)tenantDataPrefix.get() : ""_sr);
-	} else {
-		tenantEntry.setSubspace(""_sr);
 	}
 
 	state typename transaction_future_type<Transaction, RangeResult>::type prefixRangeFuture =

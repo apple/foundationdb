@@ -679,8 +679,6 @@ UID decodeBlobWorkerListKey(KeyRef const& key);
 const Value blobWorkerListValue(BlobWorkerInterface const& interface);
 BlobWorkerInterface decodeBlobWorkerListValue(ValueRef const& value);
 
-extern const KeyRef tenantDataPrefixKey; // TODO: remove?
-
 // Storage quota per tenant
 // "\xff/storageQuota/[[tenantName]]" := "[[quota]]"
 extern const KeyRangeRef storageQuotaKeys;

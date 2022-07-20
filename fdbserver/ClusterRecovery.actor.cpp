@@ -59,7 +59,7 @@ ACTOR Future<Void> recoveryTerminateOnConflict(UID dbgid,
 		when(wait(onConflict)) {
 			if (!fullyRecovered.isSet()) {
 				TraceEvent("RecoveryTerminated", dbgid).detail("Reason", "Conflict");
-				TEST(true); // Coordinated state conflict, recovery terminating
+				CODE_PROBE(true, "Coordinated state conflict, recovery terminating");
 				throw worker_removed();
 			}
 			return Void();
@@ -111,7 +111,7 @@ ACTOR Future<Void> recruitNewMaster(ClusterControllerData* cluster,
 
 			return Void();
 		} else {
-			TEST(true); // clusterWatchDatabase() !newMaster.present()
+			CODE_PROBE(true, "clusterWatchDatabase() !newMaster.present()");
 			wait(delay(SERVER_KNOBS->MASTER_SPIN_DELAY));
 		}
 	}
@@ -119,7 +119,7 @@ ACTOR Future<Void> recruitNewMaster(ClusterControllerData* cluster,
 
 ACTOR Future<Void> clusterRecruitFromConfiguration(ClusterControllerData* self, Reference<RecruitWorkersInfo> req) {
 	// At the moment this doesn't really need to be an actor (it always completes immediately)
-	TEST(true); // ClusterController RecruitTLogsRequest
+	CODE_PROBE(true, "ClusterController RecruitTLogsRequest");
 	loop {
 		try {
 			req->rep = self->findWorkersForConfiguration(req->req);
@@ -151,7 +151,7 @@ ACTOR Future<RecruitRemoteFromConfigurationReply> clusterRecruitRemoteFromConfig
     ClusterControllerData* self,
     Reference<RecruitRemoteWorkersInfo> req) {
 	// At the moment this doesn't really need to be an actor (it always completes immediately)
-	TEST(true); // ClusterController RecruitTLogsRequest Remote
+	CODE_PROBE(true, "ClusterController RecruitTLogsRequest Remote");
 	loop {
 		try {
 			auto rep = self->findRemoteWorkersForConfiguration(req->req);
@@ -356,7 +356,7 @@ ACTOR Future<Void> newSeedServers(Reference<ClusterRecoveryData> self,
 			    !newServer.isError(error_code_request_maybe_delivered))
 				throw newServer.getError();
 
-			TEST(true); // initial storage recuitment loop failed to get new server
+			CODE_PROBE(true, "initial storage recuitment loop failed to get new server");
 			wait(delay(SERVER_KNOBS->STORAGE_RECRUITMENT_DELAY));
 		} else {
 			if (!dcId_tags.count(recruits.storageServers[idx].locality.dcId())) {
@@ -737,7 +737,7 @@ ACTOR Future<Void> updateLogsValue(Reference<ClusterRecoveryData> self, Database
 			}
 
 			if (!found) {
-				TEST(true); // old master attempted to change logsKey
+				CODE_PROBE(true, "old master attempted to change logsKey");
 				return Void();
 			}
 
@@ -816,7 +816,7 @@ ACTOR Future<Void> updateRegistration(Reference<ClusterRecoveryData> self, Refer
 			                            std::vector<UID>()));
 		} else {
 			// The cluster should enter the accepting commits phase soon, and then we will register again
-			TEST(true); // cstate is updated but we aren't accepting commits yet
+			CODE_PROBE(true, "cstate is updated but we aren't accepting commits yet");
 		}
 	}
 }
@@ -1369,7 +1369,7 @@ ACTOR Future<Void> recoverFrom(Reference<ClusterRecoveryData> self,
 			}
 			when(Standalone<CommitTransactionRef> _req = wait(provisional)) {
 				state Standalone<CommitTransactionRef> req = _req; // mutable
-				TEST(true); // Emergency transaction processing during recovery
+				CODE_PROBE(true, "Emergency transaction processing during recovery");
 				TraceEvent("EmergencyTransaction", self->dbgid).log();
 				for (auto m = req.mutations.begin(); m != req.mutations.end(); ++m)
 					TraceEvent("EmergencyTransactionMutation", self->dbgid)
@@ -1571,7 +1571,7 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 		    .detail("SnapRecoveryFlag", snapRecoveryFlag.present() ? snapRecoveryFlag.get().toString() : "N/A")
 		    .detail("LastEpochEnd", self->lastEpochEnd);
 		if (snapRecoveryFlag.present()) {
-			TEST(true); // Recovering from snapshot, writing to snapShotEndVersionKey
+			CODE_PROBE(true, "Recovering from snapshot, writing to snapShotEndVersionKey");
 			BinaryWriter bw(Unversioned());
 			tr.set(recoveryCommitRequest.arena, snapshotEndVersionKey, (bw << self->lastEpochEnd).toValue());
 			// Pause the backups that got restored in this snapshot to avoid data corruption
@@ -1671,7 +1671,7 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	// unless we want to change TLogs
 	wait((success(recoveryCommit) && sendInitialCommitToResolvers(self)));
 	if (recoveryCommit.isReady() && recoveryCommit.get().isError()) {
-		TEST(true); // Cluster recovery failed because of the initial commit failed
+		CODE_PROBE(true, "Cluster recovery failed because of the initial commit failed");
 		throw cluster_recovery_failed();
 	}
 

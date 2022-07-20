@@ -2167,7 +2167,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 		}
 	}
 
-	TEST(true); // Master recovery from pre-existing database
+	CODE_PROBE(true, "Master recovery from pre-existing database");
 
 	// trackRejoins listens for rejoin requests from the tLogs that we are recovering from, to learn their
 	// TLogInterfaces
@@ -2228,7 +2228,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 			}
 			if (!lockedLocalities.count(log->locality)) {
 				TraceEvent("EpochEndLockExtra").detail("Locality", log->locality);
-				TEST(true); // locking old generations for version information
+				CODE_PROBE(true, "locking old generations for version information");
 				lockedLocalities.insert(log->locality);
 				LogLockInfo lockResult;
 				lockResult.epochEnd = old.epochEnd;
@@ -2312,7 +2312,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 			changes.push_back(TagPartitionedLogSystem::getDurableVersionChanged(lockResults[log], logFailed[log]));
 		}
 		if (maxEnd > 0 && (!lastEnd.present() || maxEnd < lastEnd.get())) {
-			TEST(lastEnd.present()); // Restarting recovery at an earlier point
+			CODE_PROBE(lastEnd.present(), "Restarting recovery at an earlier point");
 
 			auto logSystem = makeReference<TagPartitionedLogSystem>(dbgid, locality, prevState.recoveryCount);
 

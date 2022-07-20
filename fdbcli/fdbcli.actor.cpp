@@ -49,6 +49,7 @@
 #include "flow/FastRef.h"
 #include "flow/Platform.h"
 #include "flow/SystemMonitor.h"
+#include "flow/CodeProbe.h"
 
 #include "flow/TLSConfig.actor.h"
 #include "flow/ThreadHelper.actor.h"

@@ -49,7 +49,6 @@ struct TenantManagementWorkload : TestWorkload {
 
 	std::map<TenantName, TenantData> createdTenants;
 	int64_t maxId = -1;
-	Key tenantSubspace;
 
 	const Key keyName = "key"_sr;
 	const Key testParametersKey = "test_parameters"_sr;
@@ -115,16 +114,14 @@ struct TenantManagementWorkload : TestWorkload {
 	struct TestParameters {
 		constexpr static FileIdentifier file_identifier = 1527576;
 
-		Key tenantSubspace;
 		bool useMetacluster = false;
 
 		TestParameters() {}
-		TestParameters(Key tenantSubspace, bool useMetacluster)
-		  : tenantSubspace(tenantSubspace), useMetacluster(useMetacluster) {}
+		TestParameters(bool useMetacluster) : useMetacluster(useMetacluster) {}
 
 		template <class Ar>
 		void serialize(Ar& ar) {
-			serializer(ar, tenantSubspace, useMetacluster);
+			serializer(ar, useMetacluster);
 		}
 
 		Value encode() const { return ObjectWriter::toValue(*this, Unversioned()); }
@@ -155,43 +152,25 @@ struct TenantManagementWorkload : TestWorkload {
 
 		state Transaction tr(cx);
 		if (self->clientId == 0) {
-			// Configure the tenant subspace prefix that is applied to all tenants
-			// This feature isn't supported in a metacluster, so we skip it if doing a metacluster test.
-			if (self->useMetacluster) {
-				self->tenantSubspace = ""_sr;
-			} else {
-				self->tenantSubspace = makeString(deterministicRandom()->randomInt(0, 10));
-				loop {
-					generateRandomData(mutateString(self->tenantSubspace), self->tenantSubspace.size());
-					if (!self->tenantSubspace.startsWith(systemKeys.begin)) {
-						break;
-					}
-				}
-			}
-
 			// Communicates test parameters to all other clients by storing it in a key
 			loop {
 				try {
 					tr.setOption(FDBTransactionOptions::RAW_ACCESS);
-					tr.set(self->testParametersKey,
-					       TestParameters(self->tenantSubspace, self->useMetacluster).encode());
-					tr.set(tenantDataPrefixKey, self->tenantSubspace);
+					tr.set(self->testParametersKey, TestParameters(self->useMetacluster).encode());
 					wait(tr.commit());
 					break;
 				} catch (Error& e) {
 					wait(tr.onError(e));
 				}
 			}
-
 		} else {
-			// Read the tenant subspace chosen and saved by client 0
+			// Read the parameters chosen and saved by client 0
 			loop {
 				try {
 					tr.setOption(FDBTransactionOptions::RAW_ACCESS);
 					Optional<Value> val = wait(tr.get(self->testParametersKey));
 					if (val.present()) {
 						TestParameters params = TestParameters::decode(val.get());
-						self->tenantSubspace = params.tenantSubspace;
 						self->useMetacluster = params.useMetacluster;
 						break;
 					}
@@ -406,7 +385,6 @@ struct TenantManagementWorkload : TestWorkload {
 
 					ASSERT(entry.present());
 					ASSERT(entry.get().id > self->maxId);
-					ASSERT(entry.get().prefix.startsWith(self->tenantSubspace));
 					ASSERT(entry.get().tenantGroup == tenantItr->second.tenantGroup);
 					ASSERT(entry.get().tenantState == TenantState::READY);
 
@@ -416,7 +394,6 @@ struct TenantManagementWorkload : TestWorkload {
 						    wait(TenantAPI::tryGetTenant(self->dataDb.getReference(), tenantItr->first));
 						ASSERT(dataEntry.present());
 						ASSERT(dataEntry.get().id == entry.get().id);
-						ASSERT(dataEntry.get().prefix.size() == 8);
 						ASSERT(dataEntry.get().tenantGroup == entry.get().tenantGroup);
 						ASSERT(dataEntry.get().tenantState == TenantState::READY);
 					}
@@ -810,11 +787,7 @@ struct TenantManagementWorkload : TestWorkload {
 		}
 
 		Key prefixKey = KeyRef(prefix);
-		TenantMapEntry entry(id,
-		                     prefixKey.substr(0, prefixKey.size() - 8),
-		                     tenantGroup,
-		                     TenantMapEntry::stringToTenantState(tenantStateStr));
-
+		TenantMapEntry entry(id, tenantGroup, TenantMapEntry::stringToTenantState(tenantStateStr));
 		ASSERT(entry.prefix == prefixKey);
 		return entry;
 	}

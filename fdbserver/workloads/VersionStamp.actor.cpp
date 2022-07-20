@@ -207,7 +207,7 @@ struct VersionStampWorkload : TestWorkload {
 				if (self->failIfDataLost) {
 					ASSERT(result.size() == self->key_commit.size());
 				} else {
-					TEST(result.size() > 0); // Not all data should always be lost.
+					CODE_PROBE(result.size() > 0, "Not all data should always be lost.");
 				}
 
 				//TraceEvent("VST_Check0").detail("Size", result.size()).detail("NodeCount", self->nodeCount).detail("KeyCommit", self->key_commit.size()).detail("ReadVersion", readVersion);
@@ -262,7 +262,7 @@ struct VersionStampWorkload : TestWorkload {
 				if (self->failIfDataLost) {
 					ASSERT(result.size() == self->versionStampKey_commit.size());
 				} else {
-					TEST(result.size() > 0); // Not all data should always be lost (2)
+					CODE_PROBE(result.size() > 0, "Not all data should always be lost (2)");
 				}
 
 				//TraceEvent("VST_Check1").detail("Size", result.size()).detail("VsKeyCommitSize", self->versionStampKey_commit.size());

@@ -41,6 +41,8 @@
 #include <set>
 #include <type_traits>
 #include <sstream>
+#include <string_view>
+#include <fmt/format.h>
 
 // TrackIt is a zero-size class for tracking constructions, destructions, and assignments of instances
 // of a class.  Just inherit TrackIt<T> from T to enable tracking of construction and destruction of
@@ -732,6 +734,15 @@ StringRef LiteralStringRefHelper(const char* str) {
 }
 } // namespace literal_string_ref
 #define LiteralStringRef(str) literal_string_ref::LiteralStringRefHelper<decltype(str), sizeof(str)>(str)
+
+template <>
+struct fmt::formatter<StringRef> : formatter<std::string_view> {
+	template <typename FormatContext>
+	auto format(const StringRef& str, FormatContext& ctx) -> decltype(ctx.out()) {
+		std::string_view view(reinterpret_cast<const char*>(str.begin()), str.size());
+		return formatter<string_view>::format(view, ctx);
+	}
+};
 
 inline StringRef operator"" _sr(const char* str, size_t size) {
 	return StringRef(reinterpret_cast<const uint8_t*>(str), size);

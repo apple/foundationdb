@@ -166,7 +166,7 @@ class GlobalTagThrottlerImpl {
 					// wait(tr.watch(tagThrottleSignalKey));
 					wait(delay(5.0));
 					TraceEvent("GlobalTagThrottler_ChangeSignaled");
-					TEST(true); // Global tag throttler detected quota changes
+					CODE_PROBE(true, "Global tag throttler detected quota changes");
 					break;
 				} catch (Error& e) {
 					TraceEvent("GlobalTagThrottlerMonitoringChangesError", self->id).error(e);

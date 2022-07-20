@@ -52,15 +52,13 @@ struct TenantMapEntry {
 	Optional<Standalone<StringRef>> assignedCluster;
 	int64_t configurationSequenceNum = 0;
 
-	constexpr static int ROOT_PREFIX_SIZE = sizeof(id);
+	constexpr static int PREFIX_SIZE = sizeof(id);
 
 	TenantMapEntry();
-	TenantMapEntry(int64_t id, KeyRef subspace, TenantState tenantState);
-	TenantMapEntry(int64_t id, KeyRef subspace, Optional<TenantGroupName> tenantGroup, TenantState tenantState);
+	TenantMapEntry(int64_t id, TenantState tenantState);
+	TenantMapEntry(int64_t id, Optional<TenantGroupName> tenantGroup, TenantState tenantState);
 
-	void setSubspace(KeyRef subspace);
 	bool matchesConfiguration(TenantMapEntry const& other) const;
-
 	void configure(Standalone<StringRef> parameter, Optional<Value> value);
 
 	std::string toJson(int apiVersion) const;
@@ -76,25 +74,10 @@ struct TenantMapEntry {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		KeyRef subspace;
+		serializer(ar, id, tenantGroup, tenantState, assignedCluster, configurationSequenceNum);
 		if (ar.isDeserializing) {
-			if (ar.protocolVersion().hasTenantGroups()) {
-				serializer(ar, id, subspace, tenantGroup, tenantState, assignedCluster, configurationSequenceNum);
-				ASSERT(tenantState >= TenantState::REGISTERING && tenantState <= TenantState::ERROR);
-			} else {
-				serializer(ar, id, subspace);
-			}
-
-			if (id >= 0) {
-				setSubspace(subspace);
-			}
-		} else {
-			ASSERT(prefix.size() >= 8 || (prefix.empty() && id == -1));
-			if (!prefix.empty()) {
-				subspace = prefix.substr(0, prefix.size() - 8);
-			}
+			prefix = idToPrefix(id);
 			ASSERT(tenantState >= TenantState::REGISTERING && tenantState <= TenantState::ERROR);
-			serializer(ar, id, subspace, tenantGroup, tenantState, assignedCluster, configurationSequenceNum);
 		}
 	}
 };
@@ -110,15 +93,14 @@ struct TenantMetadataSpecification {
 
 	KeyBackedObjectMap<TenantName, TenantMapEntry, decltype(IncludeVersion()), NullCodec> tenantMap;
 	KeyBackedProperty<int64_t, TenantIdCodec> lastTenantId;
-	KeyBackedSet<Tuple> tenantGroupTenantIndex;
 	KeyBackedSet<int64_t> tenantTombstones;
+	KeyBackedSet<Tuple> tenantGroupTenantIndex;
 
-	// TODO: unify tenant subspace
 	TenantMetadataSpecification(KeyRef subspace)
-	  : tenantMap(subspace.withSuffix("tenantMap/"_sr), IncludeVersion(ProtocolVersion::withTenantGroups())),
-	    lastTenantId(subspace.withSuffix("tenantLastId"_sr)),
-	    tenantGroupTenantIndex(subspace.withSuffix("tenant/tenantGroup/tenantIndex/"_sr)),
-	    tenantTombstones(subspace.withSuffix("/tenant/tombstones/"_sr)) {}
+	  : tenantMap(subspace.withSuffix("tenant/map/"_sr), IncludeVersion(ProtocolVersion::withTenantGroups())),
+	    lastTenantId(subspace.withSuffix("tenant/lastId"_sr)),
+	    tenantTombstones(subspace.withSuffix("tenant/tombstones/"_sr)),
+	    tenantGroupTenantIndex(subspace.withSuffix("tenant/tenantGroup/tenantIndex/"_sr)) {}
 };
 
 struct TenantMetadata {
@@ -128,8 +110,8 @@ private:
 public:
 	static inline auto& tenantMap = instance.tenantMap;
 	static inline auto& lastTenantId = instance.lastTenantId;
-	static inline auto& tenantGroupTenantIndex = instance.tenantGroupTenantIndex;
 	static inline auto& tenantTombstones = instance.tenantTombstones;
+	static inline auto& tenantGroupTenantIndex = instance.tenantGroupTenantIndex;
 
 	static inline Key tenantMapPrivatePrefix = "\xff"_sr.withSuffix(tenantMap.subspace.begin);
 };
