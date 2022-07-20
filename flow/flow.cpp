@@ -20,6 +20,7 @@
 
 #include "flow/flow.h"
 #include "flow/DeterministicRandom.h"
+#include "flow/Error.h"
 #include "flow/UnitTest.h"
 #include "flow/rte_memcpy.h"
 #ifdef WITH_FOLLY_MEMCPY
@@ -27,6 +28,8 @@
 #endif
 #include <stdarg.h>
 #include <cinttypes>
+#include <openssl/err.h>
+#include <openssl/rand.h>
 
 std::atomic<bool> startSampling = false;
 LineageReference rootLineage;
@@ -372,6 +375,45 @@ bool isBuggifyEnabled(BuggifyType type) {
 
 void enableBuggify(bool enabled, BuggifyType type) {
 	buggifyActivated[int(type)] = enabled;
+}
+
+void bindDeterministicRandomToOpenssl() {
+	// TODO: implement ifdef branch for 3.x using provider API
+	static const RAND_METHOD method = {
+		// replacement for RAND_seed(), which reseeds OpenSSL RNG
+		[](const void*, int) -> int { return 1; },
+		// replacement for RAND_bytes(), which fills given buffer with random byte sequence
+		[](unsigned char* buf, int length) -> int {
+		    deterministicRandom()->randomBytes(buf, length);
+		    return 1;
+		},
+		// replacement for RAND_cleanup(), a no-op for simulation
+		[]() -> void {},
+		// replacement for RAND_add(), which reseeds OpenSSL RNG with randomness hint
+		[](const void*, int, double) -> int { return 1; },
+		// replacement for default pseudobytes getter (same as RAND_bytes by default)
+		[](unsigned char* buf, int length) -> int {
+		    deterministicRandom()->randomBytes(buf, length);
+		    return 1;
+		},
+		// status function for PRNG readiness check
+		[]() -> int { return 1; },
+	};
+	if (1 != ::RAND_set_rand_method(&method)) {
+		auto ec = ::ERR_get_error();
+		char msg[256]{
+			0,
+		};
+		if (ec) {
+			::ERR_error_string_n(ec, msg, sizeof(msg));
+		}
+		printf("ERROR: Failed to bind DeterministicRandom to OpenSSL RNG\n"
+		       "       OpenSSL error message: '%s'\n",
+		       msg);
+		throw internal_error();
+	} else {
+		printf("DeterministicRandom successfully bound to OpenSSL RNG\n");
+	}
 }
 
 namespace {

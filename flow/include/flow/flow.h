@@ -1370,5 +1370,7 @@ inline bool check_yield(TaskPriority taskID = TaskPriority::DefaultYield) {
 	return g_network->check_yield(taskID);
 }
 
+void bindDeterministicRandomToOpenssl();
+
 #include "flow/genericactors.actor.h"
 #endif
