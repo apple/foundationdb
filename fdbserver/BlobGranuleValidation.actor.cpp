@@ -105,7 +105,7 @@ bool compareFDBAndBlob(RangeResult fdb,
 		    .detail("BlobSize", blob.first.size());
 
 		if (debug) {
-			fmt::print("\nMismatch for [{0} - {1}) @ {2} ({3}). F({4}) B({5}):\n",
+			fmt::print("\nMismatch for [{0} - {1}) @ {2}. F({3}) B({4}):\n",
 			           range.begin.printable(),
 			           range.end.printable(),
 			           v,

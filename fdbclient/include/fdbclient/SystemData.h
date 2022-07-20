@@ -25,6 +25,7 @@
 // Functions and constants documenting the organization of the reserved keyspace in the database beginning with "\xFF"
 
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/BlobGranuleCommon.h"
 #include "fdbclient/BlobWorkerInterface.h" // TODO move the functions that depend on this out of here and into BlobWorkerInterface.h to remove this depdendency
 #include "fdbclient/StorageServerInterface.h"
 #include "Tenant.h"
@@ -600,7 +601,6 @@ extern const uint8_t BG_FILE_TYPE_SNAPSHOT;
 // FIXME: flip order of {filetype, version}
 // \xff\x02/bgf/(granuleUID, {snapshot|delta}, fileVersion) = [[filename]]
 extern const KeyRangeRef blobGranuleFileKeys;
-
 // \xff\x02/bgm/[[beginKey]] = [[BlobWorkerUID]]
 extern const KeyRangeRef blobGranuleMappingKeys;
 
@@ -609,6 +609,9 @@ extern const KeyRangeRef blobGranuleLockKeys;
 
 // \xff\x02/bgs/(parentGranuleUID, granuleUID) = [[BlobGranuleSplitState]]
 extern const KeyRangeRef blobGranuleSplitKeys;
+
+// \xff\x02/bgmerge/mergeGranuleId = [[BlobGranuleMergeState]]
+extern const KeyRangeRef blobGranuleMergeKeys;
 
 // \xff\x02/bgh/(beginKey,endKey,startVersion) = { granuleUID, [parentGranuleHistoryKeys] }
 extern const KeyRangeRef blobGranuleHistoryKeys;
@@ -622,8 +625,14 @@ const Key blobGranuleFileKeyFor(UID granuleID, Version fileVersion, uint8_t file
 std::tuple<UID, Version, uint8_t> decodeBlobGranuleFileKey(KeyRef const& key);
 const KeyRange blobGranuleFileKeyRangeFor(UID granuleID);
 
-const Value blobGranuleFileValueFor(StringRef const& filename, int64_t offset, int64_t length, int64_t fullFileLength);
-std::tuple<Standalone<StringRef>, int64_t, int64_t, int64_t> decodeBlobGranuleFileValue(ValueRef const& value);
+const Value blobGranuleFileValueFor(
+    StringRef const& filename,
+    int64_t offset,
+    int64_t length,
+    int64_t fullFileLength,
+    Optional<BlobGranuleCipherKeysMeta> cipherKeysMeta = Optional<BlobGranuleCipherKeysMeta>());
+std::tuple<Standalone<StringRef>, int64_t, int64_t, int64_t, Optional<BlobGranuleCipherKeysMeta>>
+decodeBlobGranuleFileValue(ValueRef const& value);
 
 const Value blobGranulePurgeValueFor(Version version, KeyRange range, bool force);
 std::tuple<Version, KeyRange, bool> decodeBlobGranulePurgeValue(ValueRef const& value);
@@ -640,9 +649,20 @@ const Key blobGranuleSplitKeyFor(UID const& parentGranuleID, UID const& granuleI
 std::pair<UID, UID> decodeBlobGranuleSplitKey(KeyRef const& key);
 const KeyRange blobGranuleSplitKeyRangeFor(UID const& parentGranuleID);
 
+const Key blobGranuleMergeKeyFor(UID const& mergeGranuleID);
+UID decodeBlobGranuleMergeKey(KeyRef const& key);
+
 // these are versionstamped
 const Value blobGranuleSplitValueFor(BlobGranuleSplitState st);
 std::pair<BlobGranuleSplitState, Version> decodeBlobGranuleSplitValue(ValueRef const& value);
+
+const Value blobGranuleMergeValueFor(KeyRange mergeKeyRange,
+                                     std::vector<UID> parentGranuleIDs,
+                                     std::vector<KeyRange> parentGranuleRanges,
+                                     std::vector<Version> parentGranuleStartVersions);
+// FIXME: probably just define object type for this?
+std::tuple<KeyRange, Version, std::vector<UID>, std::vector<KeyRange>, std::vector<Version>>
+decodeBlobGranuleMergeValue(ValueRef const& value);
 
 const Key blobGranuleHistoryKeyFor(KeyRangeRef const& range, Version version);
 std::pair<KeyRange, Version> decodeBlobGranuleHistoryKey(KeyRef const& key);
@@ -665,6 +685,12 @@ extern const KeyRef tenantMapPrefix;
 extern const KeyRef tenantMapPrivatePrefix;
 extern const KeyRef tenantLastIdKey;
 extern const KeyRef tenantDataPrefixKey;
+
+// Storage quota per tenant
+// "\xff/storageQuota/[[tenantName]]" := "[[quota]]"
+extern const KeyRangeRef storageQuotaKeys;
+extern const KeyRef storageQuotaPrefix;
+Key storageQuotaKey(StringRef tenantName);
 
 #pragma clang diagnostic pop
 

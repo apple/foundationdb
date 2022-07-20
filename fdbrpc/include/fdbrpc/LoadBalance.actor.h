@@ -140,7 +140,7 @@ Future<Void> tssComparison(Req req,
 			tssData.metrics->recordLatency(req, srcEndTime - startTime, tssEndTime - startTime);
 
 			if (!TSS_doCompare(src.get(), tss.get().get())) {
-				TEST(true); // TSS Mismatch
+				CODE_PROBE(true, "TSS Mismatch");
 				state TraceEvent mismatchEvent(
 				    (g_network->isSimulated() && g_simulator.tssMode == ISimulator::TSSMode::EnabledDropMutations)
 				        ? SevWarnAlways
@@ -150,7 +150,7 @@ Future<Void> tssComparison(Req req,
 				mismatchEvent.detail("TSSID", tssData.tssId);
 
 				if (FLOW_KNOBS->LOAD_BALANCE_TSS_MISMATCH_VERIFY_SS && ssTeam->size() > 1) {
-					TEST(true); // checking TSS mismatch against rest of storage team
+					CODE_PROBE(true, "checking TSS mismatch against rest of storage team");
 
 					// if there is more than 1 SS in the team, attempt to verify that the other SS servers have the same
 					// data
@@ -195,9 +195,9 @@ Future<Void> tssComparison(Req req,
 				if (tssData.metrics->shouldRecordDetailedMismatch()) {
 					TSS_traceMismatch(mismatchEvent, req, src.get(), tss.get().get());
 
-					TEST(FLOW_KNOBS->LOAD_BALANCE_TSS_MISMATCH_TRACE_FULL); // Tracing Full TSS Mismatch
-					TEST(!FLOW_KNOBS->LOAD_BALANCE_TSS_MISMATCH_TRACE_FULL); // Tracing Partial TSS Mismatch and storing
-					                                                         // the rest in FDB
+					CODE_PROBE(FLOW_KNOBS->LOAD_BALANCE_TSS_MISMATCH_TRACE_FULL, "Tracing Full TSS Mismatch");
+					CODE_PROBE(!FLOW_KNOBS->LOAD_BALANCE_TSS_MISMATCH_TRACE_FULL,
+					           "Tracing Partial TSS Mismatch and storing the rest in FDB");
 
 					if (!FLOW_KNOBS->LOAD_BALANCE_TSS_MISMATCH_TRACE_FULL) {
 						mismatchEvent.disable();
@@ -268,7 +268,7 @@ struct RequestData : NonCopyable {
 			Optional<TSSEndpointData> tssData = model->getTssData(stream->getEndpoint().token.first());
 
 			if (tssData.present()) {
-				TEST(true); // duplicating request to TSS
+				CODE_PROBE(true, "duplicating request to TSS");
 				resetReply(request);
 				// FIXME: optimize to avoid creating new netNotifiedQueue for each message
 				RequestStream<Request, P> tssRequestStream(tssData.get().endpoint);

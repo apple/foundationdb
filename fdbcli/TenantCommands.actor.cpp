@@ -210,7 +210,7 @@ CommandFactory listTenantsFactory(
                 "The number of tenants to print can be specified using the [LIMIT] parameter, which defaults to 100."));
 
 // gettenant command
-ACTOR Future<bool> getTenantCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
+ACTOR Future<bool> getTenantCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens, int apiVersion) {
 	if (tokens.size() < 2 || tokens.size() > 3 || (tokens.size() == 3 && tokens[2] != "JSON"_sr)) {
 		printUsage(tokens[0]);
 		return false;
@@ -243,11 +243,16 @@ ACTOR Future<bool> getTenantCommandActor(Reference<IDatabase> db, std::vector<St
 
 				int64_t id;
 				std::string prefix;
+
 				doc.get("id", id);
-				doc.get("prefix", prefix);
+				if (apiVersion >= 720) {
+					doc.get("prefix.printable", prefix);
+				} else {
+					doc.get("prefix", prefix);
+				}
 
 				printf("  id: %" PRId64 "\n", id);
-				printf("  prefix: %s\n", printable(prefix).c_str());
+				printf("  prefix: %s\n", prefix.c_str());
 			}
 
 			return true;

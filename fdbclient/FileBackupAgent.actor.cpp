@@ -822,7 +822,7 @@ struct AbortFiveZeroBackupTask : TaskFuncBase {
 		state FileBackupAgent backupAgent;
 		state std::string tagName = task->params[BackupAgentBase::keyConfigBackupTag].toString();
 
-		TEST(true); // Canceling old backup task
+		CODE_PROBE(true, "Canceling old backup task");
 
 		TraceEvent(SevInfo, "FileBackupCancelOldTask")
 		    .detail("Task", task->params[Task::reservedTaskParamKeyType])
@@ -908,7 +908,7 @@ struct AbortFiveOneBackupTask : TaskFuncBase {
 		state BackupConfig config(task);
 		state std::string tagName = wait(config.tag().getOrThrow(tr));
 
-		TEST(true); // Canceling 5.1 backup task
+		CODE_PROBE(true, "Canceling 5.1 backup task");
 
 		TraceEvent(SevInfo, "FileBackupCancelFiveOneTask")
 		    .detail("Task", task->params[Task::reservedTaskParamKeyType])
@@ -1245,7 +1245,7 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 			// If we've seen a new read version OR hit the end of the stream, then if we were writing a file finish it.
 			if (values.second != outVersion || done) {
 				if (outFile) {
-					TEST(outVersion != invalidVersion); // Backup range task wrote multiple versions
+					CODE_PROBE(outVersion != invalidVersion, "Backup range task wrote multiple versions");
 					state Key nextKey = done ? endKey : keyAfter(lastKey);
 					wait(rangeFile.writeKey(nextKey));
 
@@ -4098,7 +4098,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 				    .detail("RestoreVersion", restoreVersion)
 				    .detail("Dest", destVersion);
 				if (destVersion <= restoreVersion) {
-					TEST(true); // Forcing restored cluster to higher version
+					CODE_PROBE(true, "Forcing restored cluster to higher version");
 					tr->set(minRequiredCommitVersionKey, BinaryWriter::toValue(restoreVersion + 1, Unversioned()));
 					wait(tr->commit());
 				} else {
