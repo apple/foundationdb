@@ -377,7 +377,7 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload {
 			}
 		} else if (info.operation == WRITE) {
 			info.data = self->allocateBuffer(info.length);
-			generateRandomData(reinterpret_cast<uint8_t*>(info.data->buffer), info.length);
+			deterministicRandom()->randomBytes(reinterpret_cast<uint8_t*>(info.data->buffer), info.length);
 			memcpy(&self->memoryFile->buffer[info.offset], info.data->buffer, info.length);
 			memset(&self->fileValidityMask[info.offset], 0xFF, info.length);
 

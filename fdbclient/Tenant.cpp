@@ -70,7 +70,7 @@ TEST_CASE("/fdbclient/TenantMapEntry/Serialization") {
 
 		int subspaceLength = deterministicRandom()->randomInt(0, 20);
 		Standalone<StringRef> subspace = makeString(subspaceLength);
-		generateRandomData(mutateString(subspace), subspaceLength);
+		deterministicRandom()->randomBytes(mutateString(subspace), subspaceLength);
 
 		TenantMapEntry entry(id, subspace);
 		int64_t bigEndianId = bigEndian64(id);

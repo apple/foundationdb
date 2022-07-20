@@ -10273,7 +10273,7 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 
 		state int v;
 		state ExtentQueueEntry<16> e;
-		generateRandomData(e.entry, 16);
+		deterministicRandom()->randomBytes(e.entry, 16);
 		state int sinceYield = 0;
 		for (v = 1; v <= numEntries; ++v) {
 			// Sometimes do a commit
