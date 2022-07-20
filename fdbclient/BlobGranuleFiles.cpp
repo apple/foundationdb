@@ -1201,47 +1201,149 @@ void checkRead(const Standalone<GranuleSnapshot>& snapshot,
 	}
 }
 
+namespace {
+
+size_t uidSize = 32;
+
+struct KeyValueGen {
+	Arena ar;
+	std::string sharedPrefix;
+	int targetKeyLength;
+	int targetValueLength;
+	std::set<std::string> usedKeys;
+	std::vector<StringRef> usedKeysList;
+	double clearFrequency;
+	double clearUnsetFrequency;
+	double updateExistingKeyFrequency;
+
+	KeyValueGen() {
+		sharedPrefix = deterministicRandom()->randomUniqueID().toString();
+		ASSERT(sharedPrefix.size() == uidSize);
+		int sharedPrefixLen = deterministicRandom()->randomInt(0, uidSize);
+		targetKeyLength = deterministicRandom()->randomInt(4, uidSize);
+		sharedPrefix = sharedPrefix.substr(0, sharedPrefixLen) + "_";
+		targetValueLength = randomExp(0, 12);
+
+		if (deterministicRandom()->coinflip()) {
+			clearFrequency = 0.0;
+			clearUnsetFrequency = 0.0;
+		} else {
+			clearFrequency = deterministicRandom()->random01() / 2;
+			// clearing an unset value has no effect on the results, we mostly just want to make sure the format doesn't
+			// barf
+			clearUnsetFrequency = deterministicRandom()->random01() / 10;
+		}
+		if (deterministicRandom()->random01() < 0.2) {
+			// no updates, only new writes
+			updateExistingKeyFrequency = 0.0;
+		} else {
+			updateExistingKeyFrequency = deterministicRandom()->random01();
+		}
+	}
+
+	Optional<StringRef> newKey() {
+		for (int nAttempt = 0; nAttempt < 1000; nAttempt++) {
+			size_t keySize = deterministicRandom()->randomInt(targetKeyLength / 2, targetKeyLength * 3 / 2);
+			keySize = std::min(keySize, uidSize);
+			std::string key = sharedPrefix + deterministicRandom()->randomUniqueID().toString().substr(0, keySize);
+			if (usedKeys.insert(key).second) {
+				usedKeysList.push_back(key);
+				return StringRef(ar, key);
+			}
+		}
+		return {};
+	}
+
+	StringRef keyForUpdate(double probUseExisting) {
+		if (!usedKeysList.empty() && deterministicRandom()->random01() < probUseExisting) {
+			return usedKeysList[deterministicRandom()->randomInt(0, usedKeysList.size())];
+		} else {
+			auto k = newKey();
+			if (k.present()) {
+				return k.get();
+			} else {
+				// use existing key instead
+				ASSERT(!usedKeysList.empty());
+				return usedKeysList[deterministicRandom()->randomInt(0, usedKeysList.size())];
+			}
+		}
+	}
+
+	MutationRef newMutation() {
+		if (deterministicRandom()->random01() < clearFrequency) {
+			// The algorithm for generating clears of varying sizes is, to generate clear sizes based on an exponential
+			// distribution, such that the expected value of the clear size is 2.
+			int clearWidth = 1;
+			while (clearWidth < usedKeys.size() && deterministicRandom()->coinflip()) {
+				clearWidth *= 2;
+			}
+			bool clearPastEnd = deterministicRandom()->coinflip();
+			if (clearPastEnd) {
+				clearWidth--;
+			}
+			StringRef clearStartKey = keyForUpdate(1.0 - clearUnsetFrequency);
+			auto it = usedKeys.find(clearStartKey.toString());
+			ASSERT(it != usedKeys.end());
+			while (it != usedKeys.end() && clearWidth > 0) {
+				it++;
+				clearWidth--;
+			}
+			if (it == usedKeys.end()) {
+				it--;
+				clearPastEnd = true;
+			}
+			StringRef begin(clearStartKey);
+			std::string endKey = *it;
+			if (clearPastEnd) {
+				Key end = keyAfter(StringRef(endKey));
+				ar.dependsOn(end.arena());
+				return MutationRef(MutationRef::ClearRange, begin, end);
+			} else {
+				// clear up to end
+				return MutationRef(MutationRef::ClearRange, begin, StringRef(endKey));
+			}
+
+		} else {
+			return MutationRef(MutationRef::SetValue, keyForUpdate(updateExistingKeyFrequency), value());
+		}
+	}
+
+	StringRef value() {
+		int valueSize = deterministicRandom()->randomInt(targetValueLength / 2, targetValueLength * 3 / 2);
+		std::string value = deterministicRandom()->randomUniqueID().toString();
+		if (value.size() > valueSize) {
+			value = value.substr(0, valueSize);
+		}
+		if (value.size() < valueSize) {
+			// repeated string so it's compressible
+			value += std::string(valueSize - value.size(), 'x');
+		}
+		return StringRef(ar, value);
+	}
+};
+
+} // namespace
+
 TEST_CASE("/blobgranule/files/snapshotFormatUnitTest") {
 	// snapshot files are likely to have a non-trivial shared prefix since they're for a small contiguous key range
-	std::string sharedPrefix = deterministicRandom()->randomUniqueID().toString();
-	int uidSize = sharedPrefix.size();
-	int sharedPrefixLen = deterministicRandom()->randomInt(0, uidSize);
-	int targetKeyLength = deterministicRandom()->randomInt(4, uidSize);
-	sharedPrefix = sharedPrefix.substr(0, sharedPrefixLen) + "_";
+	KeyValueGen kvGen;
 
-	int targetValueLen = randomExp(0, 12);
 	int targetChunks = randomExp(0, 9);
 	int targetDataBytes = randomExp(0, 25);
 
 	std::unordered_set<std::string> usedKeys;
 	Standalone<GranuleSnapshot> data;
 	int totalDataBytes = 0;
-	const int maxKeyGenAttempts = 1000;
-	int nAttempts = 0;
 	while (totalDataBytes < targetDataBytes) {
-		int keySize = deterministicRandom()->randomInt(targetKeyLength / 2, targetKeyLength * 3 / 2);
-		keySize = std::min(keySize, uidSize);
-		std::string key = sharedPrefix + deterministicRandom()->randomUniqueID().toString().substr(0, keySize);
-		if (usedKeys.insert(key).second) {
-			int valueSize = deterministicRandom()->randomInt(targetValueLen / 2, targetValueLen * 3 / 2);
-			std::string value = deterministicRandom()->randomUniqueID().toString();
-			if (value.size() > valueSize) {
-				value = value.substr(0, valueSize);
-			}
-			if (value.size() < valueSize) {
-				value += std::string(valueSize - value.size(), 'x');
-			}
-
-			data.push_back_deep(data.arena(), KeyValueRef(KeyRef(key), ValueRef(value)));
-			totalDataBytes += key.size() + value.size();
-			nAttempts = 0;
-		} else if (nAttempts > maxKeyGenAttempts) {
-			// KeySpace exhausted, avoid infinite loop
+		Optional<StringRef> key = kvGen.newKey();
+		if (!key.present()) {
+			CODE_PROBE(true, "snapshot unit test keyspace full");
 			break;
-		} else {
-			// Keep exploring the KeySpace
-			nAttempts++;
 		}
+		StringRef value = kvGen.value();
+
+		data.push_back_deep(data.arena(), KeyValueRef(KeyRef(key.get()), ValueRef(value)));
+		totalDataBytes += key.get().size() + value.size();
 	}
 
 	std::sort(data.begin(), data.end(), KeyValueRef::OrderByKey());
