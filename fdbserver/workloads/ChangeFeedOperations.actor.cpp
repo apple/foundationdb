@@ -40,21 +40,6 @@
 
 #define DEBUG_CF(feedKey) (feedKey.printable() == DEBUG_KEY)
 
-// TODO refactor this to deterministicRandom() from here and BlobGranuleFiles
-// picks a number between 2^minExp and 2^maxExp, but uniformly distributed over exponential buckets 2^n an 2^n+1
-// For example, randomExp(0, 4) would have a 25% chance of returning 1, a 25% chance of returning 2-3, a 25% chance of
-// returning 4-7, and a 25% chance of returning 8-15
-int randomExp(int minExp, int maxExp) {
-	ASSERT(minExp <= maxExp);
-	ASSERT(minExp >= 0);
-	if (minExp == maxExp) { // N=2, case
-		return 1 << minExp;
-	}
-	int val = 1 << deterministicRandom()->randomInt(minExp, maxExp);
-	ASSERT(val > 0);
-	return deterministicRandom()->randomInt(val, val * 2);
-}
-
 ACTOR Future<Void> doPop(Database cx, Key key, Key feedID, Version version, Version* doneOut) {
 	wait(cx->popChangeFeedMutations(feedID, version));
 	if (*doneOut < version) {
@@ -97,8 +82,8 @@ struct FeedTestData : ReferenceCounted<FeedTestData>, NonCopyable {
 	    lastCleared(false), poppingVersion(0), poppedVersion(0), destroying(false), destroyed(false), complete(false),
 	    checkVersion(0) {
 		if (doPops) {
-			popWindow = randomExp(1, 8);
-			popDelayWindow = deterministicRandom()->randomInt(0, 2) * randomExp(1, 4);
+			popWindow = deterministicRandom()->randomExp(1, 8);
+			popDelayWindow = deterministicRandom()->randomInt(0, 2) * deterministicRandom()->randomExp(1, 4);
 		} else {
 			popWindow = -1;
 			popDelayWindow = -1;
@@ -436,7 +421,7 @@ struct ChangeFeedOperationsWorkload : TestWorkload {
 		testDuration = getOption(options, "testDuration"_sr, 60.0);
 		operationsPerSecond = getOption(options, "opsPerSecond"_sr, 100.0);
 		int64_t rand = wcx.sharedRandomNumber;
-		targetFeeds = randomExp(1, 1 + rand % 10);
+		targetFeeds = deterministicRandom()->randomExp(1, 1 + rand % 10);
 		targetFeeds *= (0.8 + (deterministicRandom()->random01() * 0.4));
 		targetFeeds = std::max(1, targetFeeds / clientCount);
 		rand /= 10;
@@ -458,7 +443,7 @@ struct ChangeFeedOperationsWorkload : TestWorkload {
 		clearFrequency = deterministicRandom()->random01();
 
 		for (int i = 0; i < Op::OP_COUNT; i++) {
-			int randWeight = randomExp(0, 5);
+			int randWeight = deterministicRandom()->randomExp(0, 5);
 			ASSERT(randWeight > 0);
 			opWeights[i] = randWeight;
 		}
@@ -796,7 +781,7 @@ struct ChangeFeedOperationsWorkload : TestWorkload {
 				}
 			} else if (op == Op::READ) {
 				// relatively small random read
-				wait(self->doRead(cx, self->data[feedIdx], randomExp(2, 8)));
+				wait(self->doRead(cx, self->data[feedIdx], deterministicRandom()->randomExp(2, 8)));
 			} else if (op == Op::UPDATE_CLEAR) {
 				wait(self->doUpdateClear(cx, self, self->data[feedIdx]));
 			} else if (op == Op::STOP) {

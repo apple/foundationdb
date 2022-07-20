@@ -1150,16 +1150,6 @@ TEST_CASE("/blobgranule/files/applyDelta") {
 	return Void();
 }
 
-// picks a number between 2^minExp and 2^maxExp, but uniformly distributed over exponential buckets 2^n an 2^n+1
-int randomExp(int minExp, int maxExp) {
-	if (minExp == maxExp) { // N=2, case
-		return 1 << minExp;
-	}
-	int val = 1 << deterministicRandom()->randomInt(minExp, maxExp);
-	ASSERT(val > 0);
-	return deterministicRandom()->randomInt(val, val * 2);
-}
-
 void checkEmpty(const Value& serialized, Key begin, Key end, Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx) {
 	std::map<KeyRef, ValueRef> result;
 	Arena ar = loadSnapshotFile(serialized, KeyRangeRef(begin, end), result, cipherKeysCtx);
@@ -1209,9 +1199,9 @@ TEST_CASE("/blobgranule/files/snapshotFormatUnitTest") {
 	int targetKeyLength = deterministicRandom()->randomInt(4, uidSize);
 	sharedPrefix = sharedPrefix.substr(0, sharedPrefixLen) + "_";
 
-	int targetValueLen = randomExp(0, 12);
-	int targetChunks = randomExp(0, 9);
-	int targetDataBytes = randomExp(0, 25);
+	int targetValueLen = deterministicRandom()->randomExp(0, 12);
+	int targetChunks = deterministicRandom()->randomExp(0, 9);
+	int targetDataBytes = deterministicRandom()->randomExp(0, 25);
 
 	std::unordered_set<std::string> usedKeys;
 	Standalone<GranuleSnapshot> data;
@@ -1282,7 +1272,7 @@ TEST_CASE("/blobgranule/files/snapshotFormatUnitTest") {
 
 	if (data.size() > 1) {
 		for (int i = 0; i < std::min(100, data.size() * 2); i++) {
-			int width = randomExp(0, maxExp);
+			int width = deterministicRandom()->randomExp(0, maxExp);
 			ASSERT(width <= data.size());
 			int start = deterministicRandom()->randomInt(0, data.size() - width);
 			checkRead(data, serialized, start, start + width, cipherKeysCtx);
