@@ -289,6 +289,17 @@ enum MergeCandidateState {
 	MergeCandidateMerging
 };
 
+// The current merge algorithm, skipping just granules that will be merge-eligible on the next pass, but not
+// their neighbors, is optimal for guaranteeing merges to make progress where possible, with decently
+// optimal but not globally optimal merge behavior.
+// Alternative algorithms include not doing a two-pass consideration at all and immediately considering
+// all merge candidates, which guarantees the most progress but pretty much guarantees undesirably
+// suboptimal merge decisions, because of the time variance of granules becoming merge candidates. Or,
+// also skipping adjacent eligible granules in addition to the one that will be eligible next pass,
+// which ensures optimally large merges in a future pass, but adds decent delay to doing the merge. Or,
+// smarter considering of merge candidates adjacent to the one that will be eligible next pass
+// (depending on whether potential future merges with adjacent ones could include this candidate), which
+// would be the best of both worlds, but would add a decent amount of code complexity.
 struct MergeCandidateInfo {
 	MergeCandidateState st;
 	UID granuleID;
@@ -1916,18 +1927,6 @@ ACTOR Future<Void> granuleMergeChecker(Reference<BlobManagerData> bmData) {
 			if (it->cvalue().canMergeNow()) {
 				currentCandidates.push_back(std::tuple(it->cvalue().granuleID, it->range(), it->cvalue().startVersion));
 			} else if (it->cvalue().canMerge()) {
-				// The current algorithm, skipping just granules that will be merge-eligible on the next pass, but not
-				// their neighbors, is optimal for guaranteeing merges to make progress where possible, with decently
-				// optimal but not globally optimal merge behavior.
-				// Alternative algorithms include not doing a two-pass consideration at all and immediately considering
-				// all merge candidates, which guarantees the most progress but pretty much guarantees undesirably
-				// suboptimal merge decisions, because of the time variance of granules becoming merge candidates. Or,
-				// also skipping adjacent eligible granules in addition to the one that will be eligible next pass,
-				// which ensures optimally large merges in a future pass, but adds decent delay to doing the merge. Or,
-				// smarter considering of merge candidates adjacent to the one that will be eligible next pass
-				// (depending on whether potential future merges with adjacent ones could include this candidate), which
-				// would be the best of both worlds, but would add a decent amount of code complexity.
-
 				// set flag so this can get merged on the next pass
 				it->value().mergeNow = true;
 			}
