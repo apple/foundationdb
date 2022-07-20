@@ -1091,7 +1091,10 @@ ACTOR Future<Void> updatePersistentData(TLogData* self, Reference<LogData> logDa
 	    BinaryWriter::toValue(logData->knownCommittedVersion, Unversioned())));
 	logData->persistentDataVersion = newPersistentDataVersion;
 
-	wait(self->persistentData->commit()); // SOMEDAY: This seems to be running pretty often, should we slow it down???
+	// SOMEDAY: This seems to be running pretty often, should we slow it down???
+	// This needs a timeout since nothing prevents I/O operations from hanging indefinitely.
+	wait(ioTimeoutError(self->persistentData->commit(), SERVER_KNOBS->TLOG_MAX_CREATE_DURATION));
+
 	wait(delay(0, TaskPriority::UpdateStorage));
 
 	// Now that the changes we made to persistentData are durable, erase the data we moved from memory and the queue,
@@ -2349,7 +2352,7 @@ ACTOR Future<Void> initPersistentState(TLogData* self, Reference<LogData> logDat
 
 	// PERSIST: Initial setup of persistentData for a brand new tLog for a new database
 	state IKeyValueStore* storage = self->persistentData;
-	wait(ioTimeoutError(storage->init(), SERVER_KNOBS->TLOG_MAX_CREATE_DURATION));
+	wait(storage->init());
 	storage->set(persistFormat);
 	storage->set(
 	    KeyValueRef(BinaryWriter::toValue(logData->logId, Unversioned()).withPrefix(persistCurrentVersionKeys.begin),
@@ -2381,7 +2384,7 @@ ACTOR Future<Void> initPersistentState(TLogData* self, Reference<LogData> logDat
 	}
 
 	TraceEvent("TLogInitCommit", logData->logId).log();
-	wait(ioTimeoutError(self->persistentData->commit(), SERVER_KNOBS->TLOG_MAX_CREATE_DURATION));
+	wait(self->persistentData->commit());
 	return Void();
 }
 
@@ -3409,7 +3412,8 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 			logData->version.set(logData->unrecoveredBefore - 1);
 
 			logData->unpoppedRecoveredTags = req.allTags.size();
-			wait(initPersistentState(self, logData) || logData->removed);
+			wait(ioTimeoutError(initPersistentState(self, logData) || logData->removed,
+			                    SERVER_KNOBS->TLOG_MAX_CREATE_DURATION));
 
 			TraceEvent("TLogRecover", self->dbgid)
 			    .detail("LogId", logData->logId)
@@ -3473,7 +3477,8 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 			logData->addActor.send(respondToRecovered(recruited, logData->recoveryComplete));
 		} else {
 			// Brand new tlog, initialization has already been done by caller
-			wait(initPersistentState(self, logData) || logData->removed);
+			wait(ioTimeoutError(initPersistentState(self, logData) || logData->removed,
+			                    SERVER_KNOBS->TLOG_MAX_CREATE_DURATION));
 
 			if (logData->recoveryComplete.isSet()) {
 				throw worker_removed();
