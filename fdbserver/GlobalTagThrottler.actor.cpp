@@ -670,13 +670,13 @@ public:
 	}
 };
 
-ACTOR static Future<Void> runClient(GlobalTagThrottler* globalTagThrottler,
-                                    StorageServerCollection* storageServers,
-                                    TransactionTag tag,
-                                    double tpsRate,
-                                    double costPerTransaction,
-                                    OpType opType,
-                                    std::vector<int> storageServerIndices = std::vector<int>()) {
+ACTOR Future<Void> runClient(GlobalTagThrottler* globalTagThrottler,
+                             StorageServerCollection* storageServers,
+                             TransactionTag tag,
+                             double tpsRate,
+                             double costPerTransaction,
+                             OpType opType,
+                             std::vector<int> storageServerIndices = std::vector<int>()) {
 	loop {
 		auto tpsLimit = getTPSLimit(*globalTagThrottler, tag);
 		state double enforcedRate = tpsLimit.present() ? std::min<double>(tpsRate, tpsLimit.get()) : tpsRate;
@@ -726,8 +726,8 @@ bool rateIsNear(GlobalTagThrottler& globalTagThrottler, TransactionTag tag, Opti
 	}
 }
 
-ACTOR static Future<Void> updateGlobalTagThrottler(GlobalTagThrottler* globalTagThrottler,
-                                                   StorageServerCollection const* storageServers) {
+ACTOR Future<Void> updateGlobalTagThrottler(GlobalTagThrottler* globalTagThrottler,
+                                            StorageServerCollection const* storageServers) {
 	loop {
 		wait(delay(1.0));
 		auto const storageQueueInfos = storageServers->getStorageQueueInfos();
