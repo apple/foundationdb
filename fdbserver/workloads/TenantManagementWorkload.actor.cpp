@@ -706,6 +706,12 @@ struct TenantManagementWorkload : TestWorkload {
 					    .detail("NewTenantNames", describe(newTenantNames));
 					ASSERT(tenantExists);
 					return Void();
+				} else if (e.code() == error_code_special_keys_api_failure) {
+					TraceEvent("RenameTenantNameConflict")
+					    .detail("OldTenantNames", describe(oldTenantNames))
+					    .detail("NewTenantNames", describe(newTenantNames));
+					ASSERT(tenantOverlap);
+					return Void();
 				} else {
 					try {
 						wait(tr->onError(e));
