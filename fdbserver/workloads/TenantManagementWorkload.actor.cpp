@@ -43,10 +43,8 @@ struct TenantManagementWorkload : TestWorkload {
 
 	std::map<TenantName, TenantState> createdTenants;
 	int64_t maxId = -1;
-	Key tenantSubspace;
 
 	const Key keyName = "key"_sr;
-	const Key tenantSubspaceKey = "tenant_subspace"_sr;
 	const Value noTenantValue = "no_tenant"_sr;
 	const TenantName tenantNamePrefix = "tenant_management_workload_"_sr;
 	TenantName localTenantNamePrefix;
@@ -84,36 +82,12 @@ struct TenantManagementWorkload : TestWorkload {
 	ACTOR Future<Void> _setup(Database cx, TenantManagementWorkload* self) {
 		state Transaction tr(cx);
 		if (self->clientId == 0) {
-			self->tenantSubspace = makeString(deterministicRandom()->randomInt(0, 10));
-			loop {
-				generateRandomData(mutateString(self->tenantSubspace), self->tenantSubspace.size());
-				if (!self->tenantSubspace.startsWith(systemKeys.begin)) {
-					break;
-				}
-			}
 			loop {
 				try {
 					tr.setOption(FDBTransactionOptions::RAW_ACCESS);
 					tr.set(self->keyName, self->noTenantValue);
-					tr.set(self->tenantSubspaceKey, self->tenantSubspace);
-					tr.set(tenantDataPrefixKey, self->tenantSubspace);
 					wait(tr.commit());
 					break;
-				} catch (Error& e) {
-					wait(tr.onError(e));
-				}
-			}
-		} else {
-			loop {
-				try {
-					tr.setOption(FDBTransactionOptions::RAW_ACCESS);
-					Optional<Value> val = wait(tr.get(self->tenantSubspaceKey));
-					if (val.present()) {
-						self->tenantSubspace = val.get();
-						break;
-					}
-
-					wait(delay(1.0));
 				} catch (Error& e) {
 					wait(tr.onError(e));
 				}
@@ -197,7 +171,6 @@ struct TenantManagementWorkload : TestWorkload {
 					state Optional<TenantMapEntry> entry = wait(TenantAPI::tryGetTenant(cx.getReference(), *tenantItr));
 					ASSERT(entry.present());
 					ASSERT(entry.get().id > self->maxId);
-					ASSERT(entry.get().prefix.startsWith(self->tenantSubspace));
 
 					self->maxId = entry.get().id;
 					self->createdTenants[*tenantItr] = TenantState(entry.get().id, true);
@@ -434,7 +407,7 @@ struct TenantManagementWorkload : TestWorkload {
 		ASSERT(prefix == unprintable(printablePrefix));
 
 		Key prefixKey = KeyRef(prefix);
-		TenantMapEntry entry(id, prefixKey.substr(0, prefixKey.size() - 8));
+		TenantMapEntry entry(id);
 
 		ASSERT(entry.prefix == prefixKey);
 		return entry;

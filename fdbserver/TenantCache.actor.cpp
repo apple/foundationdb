@@ -220,7 +220,7 @@ public:
 
 		for (uint16_t i = 0; i < tenantCount; i++) {
 			TenantName tenantName(format("%s_%08d", "ddtc_test_tenant", tenantNumber + i));
-			TenantMapEntry tenant(tenantNumber + i, KeyRef());
+			TenantMapEntry tenant(tenantNumber + i);
 
 			tenantCache.insert(tenantName, tenant);
 		}
@@ -248,7 +248,7 @@ public:
 
 		for (uint16_t i = 0; i < tenantCount; i++) {
 			TenantName tenantName(format("%s_%08d", "ddtc_test_tenant", tenantNumber + i));
-			TenantMapEntry tenant(tenantNumber + i, KeyRef());
+			TenantMapEntry tenant(tenantNumber + i);
 
 			tenantCache.insert(tenantName, tenant);
 		}
@@ -262,7 +262,7 @@ public:
 
 			if (tenantOrdinal % staleTenantFraction != 0) {
 				TenantName tenantName(format("%s_%08d", "ddtc_test_tenant", tenantOrdinal));
-				TenantMapEntry tenant(tenantOrdinal, KeyRef());
+				TenantMapEntry tenant(tenantOrdinal);
 				bool newTenant = tenantCache.update(tenantName, tenant);
 				ASSERT(!newTenant);
 				keepCount++;
