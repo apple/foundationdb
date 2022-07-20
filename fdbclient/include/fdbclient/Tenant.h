@@ -56,8 +56,10 @@ public:
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, id);
-		if (ar.isDeserializing && id >= 0) {
-			prefix = idToPrefix(id);
+		if constexpr (Ar::isDeserializing) {
+			if (id >= 0) {
+				prefix = idToPrefix(id);
+			}
 		}
 	}
 };
