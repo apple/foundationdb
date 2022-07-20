@@ -242,19 +242,12 @@ private:
 	                                               KeySelector end,
 	                                               GetRangeLimits limits,
 	                                               Reverse reverse);
-	ACTOR static Future<RangeResult> getRangeAndValidate(SpecialKeySpace* sks,
-	                                                     ReadYourWritesTransaction* ryw,
-	                                                     KeySelector begin,
-	                                                     KeySelector end,
-	                                                     GetRangeLimits limits,
-	                                                     Reverse reverse);
 	ACTOR static Future<RangeResult> getRangeAggregationActor(SpecialKeySpace* sks,
 	                                                          ReadYourWritesTransaction* ryw,
 	                                                          KeySelector begin,
 	                                                          KeySelector end,
 	                                                          GetRangeLimits limits,
-	                                                          Reverse reverse,
-	                                                          Optional<RangeResult>* cache = nullptr);
+	                                                          Reverse reverse);
 
 	KeyRangeMap<SpecialKeyRangeReadImpl*> readImpls;
 	KeyRangeMap<SpecialKeySpace::MODULE> modules;
@@ -467,7 +460,7 @@ public:
 	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key) override;
 };
 
-class CoordinatorsAutoImpl : public SpecialKeyRangeAsyncImpl {
+class CoordinatorsAutoImpl : public SpecialKeyRangeReadImpl {
 public:
 	explicit CoordinatorsAutoImpl(KeyRangeRef kr);
 	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
@@ -545,6 +538,13 @@ public:
 	                             GetRangeLimits limitsHint) const override;
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
 };
+
+ACTOR Future<Void> validateSpecialSubrangeRead(ReadYourWritesTransaction* ryw,
+                                               KeySelector begin,
+                                               KeySelector end,
+                                               GetRangeLimits limits,
+                                               Reverse reverse,
+                                               RangeResult result);
 
 #include "flow/unactorcompiler.h"
 #endif
