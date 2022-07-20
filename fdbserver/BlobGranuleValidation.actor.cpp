@@ -166,3 +166,24 @@ bool compareFDBAndBlob(RangeResult fdb,
 	}
 	return correct;
 }
+
+ACTOR Future<Void> clearAndAwaitMerge(Database cx, KeyRange range) {
+	// clear key range and check whether it is merged or not, repeatedly
+	state Transaction tr(cx);
+	loop {
+		try {
+			Standalone<VectorRef<KeyRangeRef>> ranges = wait(tr.getBlobGranuleRanges(range));
+			if (ranges.size() == 1) {
+				return Void();
+			}
+			CODE_PROBE(true, "ClearAndAwaitMerge doing clear");
+			tr.clear(range);
+			wait(tr.commit());
+
+			wait(delay(30.0)); // sleep a bit before checking on merge again
+			tr.reset();
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
