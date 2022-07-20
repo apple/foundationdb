@@ -30,7 +30,7 @@
 struct Tuple {
 	struct UnicodeStr {
 		StringRef str;
-		UnicodeStr(StringRef str) : str(str) {}
+		explicit UnicodeStr(StringRef str) : str(str) {}
 	};
 
 	Tuple() {}
@@ -97,7 +97,7 @@ struct Tuple {
 
 		// Use a fold expression to append each argument using the << operator.
 		// https://en.cppreference.com/w/cpp/language/fold
-		(t << ... << args);
+		(t << ... << std::forward<Types>(args));
 
 		return t;
 	}

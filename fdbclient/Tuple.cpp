@@ -462,6 +462,7 @@ TEST_CASE("fdbclient/Tuple/makeTuple") {
 	ASSERT(t1.getType(5) == Tuple::UTF8);
 	ASSERT(t1.getType(6) == Tuple::NULL_TYPE);
 	ASSERT(t1.getType(7) == Tuple::VERSIONSTAMP);
+	ASSERT(t1.size() == 8);
 
 	return Void();
 }
