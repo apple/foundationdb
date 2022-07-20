@@ -1025,7 +1025,7 @@ UpdateCommitCostRequest StorageQueueInfo::refreshCommitCost(double elapsed) {
 		                                             maxCost.getCostSum(),
 		                                             totalWriteCosts,
 		                                             !busiestWriteTags.empty(),
-													 ReplyPromise<Void>() };
+		                                             ReplyPromise<Void>() };
 
 	// reset statistics
 	tagCostEst.clear();
