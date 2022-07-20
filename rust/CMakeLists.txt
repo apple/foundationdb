@@ -14,13 +14,13 @@ set(FDB_RUST_LIB "${CMAKE_CURRENT_BINARY_DIR}/${RUST_TARGET_DIR}/libfdb_rust.a")
 set(FDB_RUST_CXX "${CMAKE_CURRENT_BINARY_DIR}/fdb_rust.cpp")
 
 add_library(fdb_rust2 STATIC ${FDB_RUST_CXX})
-add_custom_command(
-    OUTPUT ${FDB_RUST_CXX}
+add_custom_target(
+    run_cargo
     COMMAND CARGO_TARGET_DIR=${CMAKE_CURRENT_BINARY_DIR} RUSTFLAGS="${RUST_FLAGS}" ${CARGO_CMD}
     COMMAND cp ${CMAKE_CURRENT_BINARY_DIR}/cxxbridge/fdb_rust/src/lib.rs.cc ${FDB_RUST_CXX}
     COMMAND cp ${CMAKE_CURRENT_BINARY_DIR}/cxxbridge/fdb_rust/src/lib.rs.h ${CMAKE_CURRENT_BINARY_DIR}/fdb_rust.h
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-    BYPRODUCTS ${FDB_RUST_LIB}
+    BYPRODUCTS ${FDB_RUST_LIB} ${FDB_RUST_CXX}
 )
 
 target_include_directories(fdb_rust2 PRIVATE ${CMAKE_BINARY_DIR}/flow/include)

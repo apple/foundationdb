@@ -10,13 +10,13 @@ mod ffi {
     unsafe extern "C++" {
         include!("flow/SourceVersion.h");
         //const char* getSourceVersion()
-        fn getSourceVersion() -> * const c_char;
+        fn getSourceVersion() -> *const c_char;
     }
     #[namespace = "fdb_rust"]
     extern "Rust" {
         fn new_foo() -> Foo;
         fn print_foo(foo: &Foo);
-    }   
+    }
 }
 
 pub fn new_foo() -> ffi::Foo {
