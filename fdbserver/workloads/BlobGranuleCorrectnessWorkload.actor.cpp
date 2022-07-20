@@ -163,7 +163,9 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		// different parameters within those constraints
 		int64_t randomness = sharedRandomNumber;
 
-		doMergeCheckAtEnd = randomness % 10 == 0;
+		// TODO CHANGE BACK
+		// doMergeCheckAtEnd = randomness % 10 == 0;
+		doMergeCheckAtEnd = true;
 		randomness /= 10;
 
 		// randomize between low and high directory count
@@ -939,8 +941,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 
 		if (self->clientId == 0 && SERVER_KNOBS->BG_ENABLE_MERGING && self->doMergeCheckAtEnd) {
 			TEST(true); // BGCorrectness clearing database and awaiting merge
-			// TODO: Enable check
-			// wait(clearAndAwaitMerge(cx, threadData->directoryRange));
+			wait(clearAndAwaitMerge(cx, threadData->directoryRange));
 		}
 
 		return result;

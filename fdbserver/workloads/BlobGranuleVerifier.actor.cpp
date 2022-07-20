@@ -471,10 +471,10 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		// For some reason simulation is still passing when this fails?.. so assert for now
 		ASSERT(result);
 
-		if (self->clientId == 0 && SERVER_KNOBS->BG_ENABLE_MERGING && deterministicRandom()->random01() < 0.1) {
+		// TODO UNCOMMENT!
+		if (self->clientId == 0 && SERVER_KNOBS->BG_ENABLE_MERGING /*&& deterministicRandom()->random01() < 0.1*/) {
 			TEST(true); // BGV clearing database and awaiting merge
-			// TODO: Enable check
-			// wait(clearAndAwaitMerge(cx, normalKeys));
+			wait(clearAndAwaitMerge(cx, normalKeys));
 		}
 
 		return result;
