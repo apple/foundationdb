@@ -608,8 +608,8 @@ struct ChangeFeedOperationsWorkload : TestWorkload {
 				fmt::print(
 				    "Final check {0} waiting on read popped check\n", feedData->key.printable(), feedData->pops.size());
 			}
-			// TODO need to make this not ignore popped, otherwise this is a no-op
-			wait(historicReader(cx, feedData, 0, feedData->poppedVersion, false));
+			// FIXME: re-enable checking for popped data by changing skipPopped back to false!
+			wait(historicReader(cx, feedData, 0, feedData->poppedVersion, true));
 		}
 
 		return Void();
