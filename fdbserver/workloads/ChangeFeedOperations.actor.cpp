@@ -271,11 +271,11 @@ ACTOR Future<Void> liveReader(Database cx, Reference<FeedTestData> data, Version
 						// pendingCheck wasn't empty before whenAtLeast, and nextCheckVersion = the front version, so if
 						// either of these are true, the data was popped concurrently and we can move on to checking the
 						// next value
-						TEST(true); // popped while waiting for whenAtLeast to check next value
+						CODE_PROBE(true, "popped while waiting for whenAtLeast to check next value");
 						continue;
 					}
 					while (!buffered.empty() && buffered.front().version < data->poppingVersion) {
-						TEST(true); // live reader ignoring data that is being popped
+						CODE_PROBE(true, "live reader ignoring data that is being popped");
 						buffered.pop_front();
 					}
 					if (buffered.empty()) {
