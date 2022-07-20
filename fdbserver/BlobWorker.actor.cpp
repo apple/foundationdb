@@ -1241,11 +1241,9 @@ ACTOR Future<Void> granuleCheckMergeCandidate(Reference<BlobWorkerData> bwData,
 				                                                                 metadata->originalEpoch,
 				                                                                 metadata->originalSeqno));
 				// if a new manager appears, also tell it about this granule being mergeable
-				state int64_t lastSendEpoch = bwData->currentManagerEpoch;
-				while (lastSendEpoch == bwData->currentManagerEpoch) {
-					wait(bwData->currentManagerStatusStream.onChange());
-					wait(delay(0));
-				}
+				// or if a new stream from the existing manager, it may have missed the message due to a network issue
+				wait(bwData->currentManagerStatusStream.onChange());
+				wait(delay(0));
 				CODE_PROBE(true, "Blob worker re-sending merge candidate to new manager");
 			} catch (Error& e) {
 				if (e.code() == error_code_operation_cancelled) {
@@ -1926,12 +1924,30 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 										    .detail("RollbackVersion", rollbackVersion);
 									}
 
+									Version oldPendingSnapshot = metadata->pendingSnapshotVersion;
 									Version cfRollbackVersion = doGranuleRollback(metadata,
 									                                              deltas.version,
 									                                              rollbackVersion,
 									                                              inFlightFiles,
 									                                              rollbacksInProgress,
 									                                              rollbacksCompleted);
+
+									if (oldPendingSnapshot > metadata->pendingSnapshotVersion) {
+										// If rollback cancelled in-flight snapshot, merge candidate checker also got
+										// cancelled. Restart it
+										CODE_PROBE(true,
+										           "Restarting merge candidate checker after rolling back snapshot");
+										checkMergeCandidate = granuleCheckMergeCandidate(
+										    bwData,
+										    metadata,
+										    startState.granuleID,
+										    inFlightFiles.empty() ? Future<Void>(Void())
+										                          : success(inFlightFiles.back().future));
+									}
+									// reset force flush state, requests should retry and add it back once feed is ready
+									forceFlushVersions.clear();
+									lastForceFlushVersion = 0;
+									metadata->forceFlushVersion = NotifiedVersion();
 
 									Reference<ChangeFeedData> cfData = makeReference<ChangeFeedData>();
 
@@ -4062,93 +4078,102 @@ ACTOR Future<Void> handleFlushGranuleReq(Reference<BlobWorkerData> self, FlushGr
 				}
 			}
 
-			// force granule to flush at this version, and wait
-			if (req.flushVersion > metadata->pendingDeltaVersion) {
-				// first, wait for granule active
+			loop {
+				// force granule to flush at this version, and wait
+				if (req.flushVersion > metadata->pendingDeltaVersion) {
+					// first, wait for granule active
 
-				// wait for change feed version to catch up to ensure we have all data
-				if (metadata->activeCFData.get()->getVersion() < req.flushVersion) {
-					if (BW_DEBUG) {
-						fmt::print("BW {0} flushing granule [{1} - {2}) @ {3}: waiting for CF version "
-						           "(currently {4})\n",
-						           self->id.toString().substr(0, 5),
-						           req.granuleRange.begin.printable(),
-						           req.granuleRange.end.printable(),
-						           req.flushVersion,
-						           metadata->activeCFData.get()->getVersion());
-					}
+					// wait for change feed version to catch up to ensure we have all data
+					if (metadata->activeCFData.get()->getVersion() < req.flushVersion) {
+						if (BW_DEBUG) {
+							fmt::print("BW {0} flushing granule [{1} - {2}) @ {3}: waiting for CF version "
+							           "(currently {4})\n",
+							           self->id.toString().substr(0, 5),
+							           req.granuleRange.begin.printable(),
+							           req.granuleRange.end.printable(),
+							           req.flushVersion,
+							           metadata->activeCFData.get()->getVersion());
+						}
 
-					loop {
-						choose {
-							when(wait(metadata->activeCFData.get().isValid()
-							              ? metadata->activeCFData.get()->whenAtLeast(req.flushVersion)
-							              : Never())) {
-								break;
-							}
-							when(wait(metadata->activeCFData.onChange())) {}
-							when(wait(granuleCancelled.getFuture())) {
-								if (BW_DEBUG) {
-									fmt::print("BW {0} flush granule [{1} - {2}) cancelled 2\n",
-									           self->id.toString().substr(0, 5),
-									           req.granuleRange.begin.printable(),
-									           req.granuleRange.end.printable());
+						loop {
+							choose {
+								when(wait(metadata->activeCFData.get().isValid()
+								              ? metadata->activeCFData.get()->whenAtLeast(req.flushVersion)
+								              : Never())) {
+									break;
 								}
-								req.reply.sendError(wrong_shard_server());
-								return Void();
+								when(wait(metadata->activeCFData.onChange())) {}
+								when(wait(granuleCancelled.getFuture())) {
+									if (BW_DEBUG) {
+										fmt::print("BW {0} flush granule [{1} - {2}) cancelled 2\n",
+										           self->id.toString().substr(0, 5),
+										           req.granuleRange.begin.printable(),
+										           req.granuleRange.end.printable());
+									}
+									req.reply.sendError(wrong_shard_server());
+									return Void();
+								}
 							}
+						}
+
+						ASSERT(metadata->activeCFData.get()->getVersion() >= req.flushVersion);
+						if (BW_DEBUG) {
+							fmt::print("BW {0} flushing granule [{1} - {2}) @ {3}: got CF version\n",
+							           self->id.toString().substr(0, 5),
+							           req.granuleRange.begin.printable(),
+							           req.granuleRange.end.printable(),
+							           req.flushVersion);
 						}
 					}
 
-					ASSERT(metadata->activeCFData.get()->getVersion() >= req.flushVersion);
-					if (BW_DEBUG) {
-						fmt::print("BW {0} flushing granule [{1} - {2}) @ {3}: got CF version\n",
-						           self->id.toString().substr(0, 5),
-						           req.granuleRange.begin.printable(),
-						           req.granuleRange.end.printable(),
-						           req.flushVersion);
+					if (req.flushVersion > metadata->pendingDeltaVersion) {
+						if (BW_DEBUG) {
+							fmt::print("BW {0} flushing granule [{1} - {2}) @ {3}: setting force flush version\n",
+							           self->id.toString().substr(0, 5),
+							           req.granuleRange.begin.printable(),
+							           req.granuleRange.end.printable(),
+							           req.flushVersion);
+						}
+						// if after waiting for CF version, flushVersion still higher than pendingDeltaVersion,
+						// set forceFlushVersion
+						metadata->forceFlushVersion.set(req.flushVersion);
 					}
 				}
 
-				if (req.flushVersion > metadata->pendingDeltaVersion) {
-					if (BW_DEBUG) {
-						fmt::print("BW {0} flushing granule [{1} - {2}) @ {3}: setting force flush version\n",
-						           self->id.toString().substr(0, 5),
-						           req.granuleRange.begin.printable(),
-						           req.granuleRange.end.printable(),
-						           req.flushVersion);
-					}
-					// if after waiting for CF version, flushVersion still higher than pendingDeltaVersion,
-					// set forceFlushVersion
-					metadata->forceFlushVersion.set(req.flushVersion);
+				if (BW_DEBUG) {
+					fmt::print("BW {0} flushing granule [{1} - {2}) @ {3}: waiting durable\n",
+					           self->id.toString().substr(0, 5),
+					           req.granuleRange.begin.printable(),
+					           req.granuleRange.end.printable(),
+					           req.flushVersion);
 				}
-			}
+				choose {
+					when(wait(metadata->durableDeltaVersion.whenAtLeast(req.flushVersion))) {
+						if (BW_DEBUG) {
+							fmt::print("BW {0} flushing granule [{1} - {2}) @ {3}: got durable\n",
+							           self->id.toString().substr(0, 5),
+							           req.granuleRange.begin.printable(),
+							           req.granuleRange.end.printable(),
+							           req.flushVersion);
+						}
 
-			if (BW_DEBUG) {
-				fmt::print("BW {0} flushing granule [{1} - {2}) @ {3}: waiting durable\n",
-				           self->id.toString().substr(0, 5),
-				           req.granuleRange.begin.printable(),
-				           req.granuleRange.end.printable(),
-				           req.flushVersion);
-			}
-			choose {
-				when(wait(metadata->durableDeltaVersion.whenAtLeast(req.flushVersion))) {}
-				when(wait(granuleCancelled.getFuture())) {
-					if (BW_DEBUG) {
-						fmt::print("BW {0} flush granule [{1} - {2}) cancelled 3\n",
-						           self->id.toString().substr(0, 5),
-						           req.granuleRange.begin.printable(),
-						           req.granuleRange.end.printable());
+						req.reply.send(Void());
+						return Void();
 					}
-					req.reply.sendError(wrong_shard_server());
-					return Void();
+					when(wait(metadata->activeCFData.onChange())) {
+						// if a rollback happens, need to restart flush process
+					}
+					when(wait(granuleCancelled.getFuture())) {
+						if (BW_DEBUG) {
+							fmt::print("BW {0} flush granule [{1} - {2}) cancelled 3\n",
+							           self->id.toString().substr(0, 5),
+							           req.granuleRange.begin.printable(),
+							           req.granuleRange.end.printable());
+						}
+						req.reply.sendError(wrong_shard_server());
+						return Void();
+					}
 				}
-			}
-			if (BW_DEBUG) {
-				fmt::print("BW {0} flushing granule [{1} - {2}) @ {3}: got durable\n",
-				           self->id.toString().substr(0, 5),
-				           req.granuleRange.begin.printable(),
-				           req.granuleRange.end.printable(),
-				           req.flushVersion);
 			}
 		} catch (Error& e) {
 			if (BW_DEBUG) {
@@ -4169,10 +4194,10 @@ ACTOR Future<Void> handleFlushGranuleReq(Reference<BlobWorkerData> self, FlushGr
 			           req.granuleRange.end.printable(),
 			           req.flushVersion);
 		}
-	}
 
-	req.reply.send(Void());
-	return Void();
+		req.reply.send(Void());
+		return Void();
+	}
 }
 
 ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,

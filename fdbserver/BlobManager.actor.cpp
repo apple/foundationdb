@@ -1518,7 +1518,8 @@ ACTOR Future<Void> forceGranuleFlush(Reference<BlobManagerData> bmData, KeyRange
 						break;
 					} else {
 						if (BM_DEBUG) {
-							fmt::print("ERROR: Error flushing range [{0} - {1}): {2}!\n",
+							fmt::print("ERROR: BM {0} Error flushing range [{1} - {2}): {3}!\n",
+							           bmData->epoch,
 							           blobGranuleMapping[j].key.printable(),
 							           blobGranuleMapping[j + 1].key.printable(),
 							           e.name());
