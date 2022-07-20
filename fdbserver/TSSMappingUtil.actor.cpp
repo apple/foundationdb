@@ -44,8 +44,8 @@ ACTOR Future<Void> readTSSMapping(Transaction* tr, std::map<UID, StorageServerIn
 	ASSERT(!mappingList.more && mappingList.size() < CLIENT_KNOBS->TOO_MANY);
 
 	for (auto& it : mappingList) {
-		state UID ssId = Codec<UID>::unpack(Tuple::unpack(it.key.removePrefix(tssMappingKeys.begin)));
-		UID tssId = Codec<UID>::unpack(Tuple::unpack(it.value));
+		state UID ssId = TupleCodec<UID>::unpack(it.key.removePrefix(tssMappingKeys.begin));
+		UID tssId = TupleCodec<UID>::unpack(it.value);
 		Optional<Value> v = wait(tr->get(serverListKeyFor(tssId)));
 		(*tssMapping)[ssId] = decodeServerListValue(v.get());
 	}

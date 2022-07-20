@@ -91,6 +91,21 @@ inline int intSize(BytesRef b) {
 	return static_cast<int>(b.size());
 }
 
+template <template <class...> class StringLike, class Char>
+ByteString strinc(const StringLike<Char>& s) {
+	int index;
+	for (index = s.size() - 1; index >= 0; index--)
+		if (s[index] != 255)
+			break;
+
+	// Must not be called with a string that consists only of zero or more '\xff' bytes.
+	assert(index >= 0);
+
+	ByteString byteResult(s.substr(0, index + 1));
+	byteResult[byteResult.size() - 1]++;
+	return byteResult;
+}
+
 class Error {
 public:
 	using CodeType = native::fdb_error_t;
@@ -195,16 +210,6 @@ struct KeyRangeRefArray {
 
 inline int maxApiVersion() {
 	return native::fdb_get_max_api_version();
-}
-
-inline Error selectApiVersionNothrow(int version) {
-	return Error(native::fdb_select_api_version(version));
-}
-
-inline void selectApiVersion(int version) {
-	if (auto err = selectApiVersionNothrow(version)) {
-		throwError(fmt::format("ERROR: fdb_select_api_version({}): ", version), err);
-	}
 }
 
 namespace network {
@@ -397,6 +402,7 @@ template <typename VarTraits>
 class TypedFuture : public Future {
 	friend class Future;
 	friend class Transaction;
+	friend class Tenant;
 	using SelfType = TypedFuture<VarTraits>;
 	using Future::Future;
 	// hide type-unsafe inherited functions
@@ -516,6 +522,8 @@ public:
 		return out;
 	}
 
+	TypedFuture<future_var::KeyRef> getVersionstamp() { return native::fdb_transaction_get_versionstamp(tr.get()); }
+
 	TypedFuture<future_var::KeyRef> getKey(KeySelector sel, bool snapshot) {
 		return native::fdb_transaction_get_key(tr.get(), sel.key, sel.keyLength, sel.orEqual, sel.offset, snapshot);
 	}
@@ -565,6 +573,10 @@ public:
 		    tr.get(), begin.data(), intSize(begin), end.data(), intSize(end), begin_version, read_version, context));
 	}
 
+	TypedFuture<future_var::None> watch(KeyRef key) {
+		return native::fdb_transaction_watch(tr.get(), key.data(), intSize(key));
+	}
+
 	TypedFuture<future_var::None> commit() { return native::fdb_transaction_commit(tr.get()); }
 
 	TypedFuture<future_var::None> onError(Error err) { return native::fdb_transaction_on_error(tr.get(), err.code()); }
@@ -575,6 +587,11 @@ public:
 
 	void set(KeyRef key, ValueRef value) {
 		native::fdb_transaction_set(tr.get(), key.data(), intSize(key), value.data(), intSize(value));
+	}
+
+	void atomicOp(KeyRef key, ValueRef param, FDBMutationType operationType) {
+		native::fdb_transaction_atomic_op(
+		    tr.get(), key.data(), intSize(key), param.data(), intSize(param), operationType);
 	}
 
 	void clear(KeyRef key) { native::fdb_transaction_clear(tr.get(), key.data(), intSize(key)); }
@@ -588,14 +605,15 @@ class Tenant final {
 	friend class Database;
 	std::shared_ptr<native::FDBTenant> tenant;
 
-	static constexpr CharsRef tenantManagementMapPrefix = "\xff\xff/management/tenant_map/";
-
 	explicit Tenant(native::FDBTenant* tenant_raw) {
 		if (tenant_raw)
 			tenant = std::shared_ptr<native::FDBTenant>(tenant_raw, &native::fdb_tenant_destroy);
 	}
 
 public:
+	// This should only be mutated by API versioning
+	static inline CharsRef tenantManagementMapPrefix = "\xff\xff/management/tenant/map/";
+
 	Tenant(const Tenant&) noexcept = default;
 	Tenant& operator=(const Tenant&) noexcept = default;
 	Tenant() noexcept : tenant(nullptr) {}
@@ -611,6 +629,13 @@ public:
 		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_RAW_ACCESS, BytesRef());
 		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_LOCK_AWARE, BytesRef());
 		tr.clear(toBytesRef(fmt::format("{}{}", tenantManagementMapPrefix, toCharsRef(name))));
+	}
+
+	static TypedFuture<future_var::ValueRef> getTenant(Transaction tr, BytesRef name) {
+		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_READ_SYSTEM_KEYS, BytesRef());
+		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_LOCK_AWARE, BytesRef());
+		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_RAW_ACCESS, BytesRef());
+		return tr.get(toBytesRef(fmt::format("{}{}", tenantManagementMapPrefix, toCharsRef(name))), false);
 	}
 
 	Transaction createTransaction() {
@@ -683,6 +708,19 @@ public:
 		return Transaction(tx_native);
 	}
 };
+
+inline Error selectApiVersionNothrow(int version) {
+	if (version < 720) {
+		Tenant::tenantManagementMapPrefix = "\xff\xff/management/tenant_map/";
+	}
+	return Error(native::fdb_select_api_version(version));
+}
+
+inline void selectApiVersion(int version) {
+	if (auto err = selectApiVersionNothrow(version)) {
+		throwError(fmt::format("ERROR: fdb_select_api_version({}): ", version), err);
+	}
+}
 
 } // namespace fdb
 

@@ -55,8 +55,6 @@ static bool isAlphaNumeric(const std::string& key) {
 }
 } // namespace
 
-const KeyRangeRef TenantMapRangeImpl::submoduleRange = KeyRangeRef("tenant_map/"_sr, "tenant_map0"_sr);
-
 std::unordered_map<SpecialKeySpace::MODULE, KeyRange> SpecialKeySpace::moduleToBoundary = {
 	{ SpecialKeySpace::MODULE::TRANSACTION,
 	  KeyRangeRef(LiteralStringRef("\xff\xff/transaction/"), LiteralStringRef("\xff\xff/transaction0")) },
@@ -80,7 +78,8 @@ std::unordered_map<SpecialKeySpace::MODULE, KeyRange> SpecialKeySpace::moduleToB
 	  KeyRangeRef(LiteralStringRef("\xff\xff/actor_lineage/"), LiteralStringRef("\xff\xff/actor_lineage0")) },
 	{ SpecialKeySpace::MODULE::ACTOR_PROFILER_CONF,
 	  KeyRangeRef(LiteralStringRef("\xff\xff/actor_profiler_conf/"),
-	              LiteralStringRef("\xff\xff/actor_profiler_conf0")) }
+	              LiteralStringRef("\xff\xff/actor_profiler_conf0")) },
+	{ SpecialKeySpace::MODULE::CLUSTERID, singleKeyRange(LiteralStringRef("\xff\xff/cluster_id")) },
 };
 
 std::unordered_map<std::string, KeyRange> SpecialKeySpace::managementApiCommandToRange = {
@@ -117,7 +116,9 @@ std::unordered_map<std::string, KeyRange> SpecialKeySpace::managementApiCommandT
 	{ "datadistribution",
 	  KeyRangeRef(LiteralStringRef("data_distribution/"), LiteralStringRef("data_distribution0"))
 	      .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
-	{ "tenantmap", TenantMapRangeImpl::submoduleRange.withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) }
+	{ "tenant", KeyRangeRef("tenant/"_sr, "tenant0"_sr).withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
+	{ "tenantmap",
+	  KeyRangeRef("tenant_map/"_sr, "tenant_map0"_sr).withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) }
 };
 
 std::unordered_map<std::string, KeyRange> SpecialKeySpace::actorLineageApiCommandToRange = {
@@ -363,12 +364,12 @@ ACTOR Future<RangeResult> SpecialKeySpace::getRangeAggregationActor(SpecialKeySp
 	// Handle all corner cases like what RYW does
 	// return if range inverted
 	if (actualBeginOffset >= actualEndOffset && begin.getKey() >= end.getKey()) {
-		TEST(true); // inverted range
+		CODE_PROBE(true, "inverted range");
 		return RangeResultRef(false, false);
 	}
 	// If touches begin or end, return with readToBegin and readThroughEnd flags
 	if (begin.getKey() == moduleBoundary.end || end.getKey() == moduleBoundary.begin) {
-		TEST(true); // query touches begin or end
+		CODE_PROBE(true, "query touches begin or end");
 		return result;
 	}
 	state RangeMap<Key, SpecialKeyRangeReadImpl*, KeyRangeRef>::Ranges ranges =
@@ -452,7 +453,7 @@ Future<RangeResult> SpecialKeySpace::getRange(ReadYourWritesTransaction* ryw,
 	if (!limits.isValid())
 		return range_limits_invalid();
 	if (limits.isReached()) {
-		TEST(true); // read limit 0
+		CODE_PROBE(true, "read limit 0");
 		return RangeResult();
 	}
 	// make sure orEqual == false
@@ -460,7 +461,7 @@ Future<RangeResult> SpecialKeySpace::getRange(ReadYourWritesTransaction* ryw,
 	end.removeOrEqual(end.arena());
 
 	if (begin.offset >= end.offset && begin.getKey() >= end.getKey()) {
-		TEST(true); // range inverted
+		CODE_PROBE(true, "range inverted");
 		return RangeResult();
 	}
 

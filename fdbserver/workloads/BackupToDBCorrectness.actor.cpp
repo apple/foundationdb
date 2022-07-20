@@ -327,7 +327,8 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 
 		// Stop the differential backup, if enabled
 		if (stopDifferentialDelay) {
-			TEST(!stopDifferentialFuture.isReady()); // Restore starts at specified time - stopDifferential not ready
+			CODE_PROBE(!stopDifferentialFuture.isReady(),
+			           "Restore starts at specified time - stopDifferential not ready");
 			wait(stopDifferentialFuture);
 			TraceEvent("BARW_DoBackupWaitToDiscontinue", randomID)
 			    .detail("Tag", printable(tag))
@@ -632,7 +633,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 				}
 			}
 
-			TEST(!startRestore.isReady()); // Restore starts at specified time
+			CODE_PROBE(!startRestore.isReady(), "Restore starts at specified time");
 			wait(startRestore);
 
 			if (self->performRestore) {

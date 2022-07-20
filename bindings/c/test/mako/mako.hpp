@@ -50,7 +50,9 @@ constexpr const int MODE_REPORT = 3;
 enum ArgKind {
 	ARG_KEYLEN,
 	ARG_VALLEN,
-	ARG_TENANTS,
+	ARG_ACTIVE_TENANTS,
+	ARG_TOTAL_TENANTS,
+	ARG_TENANT_BATCH_SIZE,
 	ARG_TPS,
 	ARG_ASYNC,
 	ARG_COMMITGET,
@@ -145,7 +147,9 @@ struct Arguments {
 	int sampling;
 	int key_length;
 	int value_length;
-	int tenants;
+	int active_tenants;
+	int total_tenants;
+	int tenant_batch_size;
 	int zipf;
 	int commit_get;
 	int verbose;

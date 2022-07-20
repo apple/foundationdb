@@ -24,23 +24,76 @@
 #elif !defined(FDBSERVER_DATA_DISTRIBUTION_ACTOR_H)
 #define FDBSERVER_DATA_DISTRIBUTION_ACTOR_H
 
-#include <boost/heap/skew_heap.hpp>
-#include <boost/heap/policies.hpp>
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/MoveKeys.actor.h"
-#include "fdbserver/LogSystem.h"
 #include "fdbclient/RunTransaction.actor.h"
+#include "fdbserver/DDTxnProcessor.h"
+#include "fdbserver/Knobs.h"
+#include "fdbserver/LogSystem.h"
+#include "fdbserver/MoveKeys.actor.h"
+#include <boost/heap/policies.hpp>
+#include <boost/heap/skew_heap.hpp>
+
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 enum class RelocateReason { INVALID = -1, OTHER, REBALANCE_DISK, REBALANCE_READ };
 
+// One-to-one relationship to the priority knobs
+enum class DataMovementReason {
+	RECOVER_MOVE,
+	REBALANCE_UNDERUTILIZED_TEAM,
+	REBALANCE_OVERUTILIZED_TEAM,
+	REBALANCE_READ_OVERUTIL_TEAM,
+	REBALANCE_READ_UNDERUTIL_TEAM,
+	PERPETUAL_STORAGE_WIGGLE,
+	TEAM_HEALTHY,
+	TEAM_CONTAINS_UNDESIRED_SERVER,
+	TEAM_REDUNDANT,
+	MERGE_SHARD,
+	POPULATE_REGION,
+	TEAM_UNHEALTHY,
+	TEAM_2_LEFT,
+	TEAM_1_LEFT,
+	TEAM_FAILED,
+	TEAM_0_LEFT,
+	SPLIT_SHARD
+};
+
+struct DDShardInfo;
+
+// Represents a data move in DD.
+struct DataMove {
+	DataMove() : meta(DataMoveMetaData()), restore(false), valid(false), cancelled(false) {}
+	explicit DataMove(DataMoveMetaData meta, bool restore)
+	  : meta(std::move(meta)), restore(restore), valid(true), cancelled(meta.getPhase() == DataMoveMetaData::Deleting) {
+	}
+
+	// Checks if the DataMove is consistent with the shard.
+	void validateShard(const DDShardInfo& shard, KeyRangeRef range, int priority = SERVER_KNOBS->PRIORITY_RECOVER_MOVE);
+
+	bool isCancelled() const { return this->cancelled; }
+
+	const DataMoveMetaData meta;
+	bool restore; // The data move is scheduled by a previous DD, and is being recovered now.
+	bool valid; // The data move data is integral.
+	bool cancelled; // The data move has been cancelled.
+	std::vector<UID> primarySrc;
+	std::vector<UID> remoteSrc;
+	std::vector<UID> primaryDest;
+	std::vector<UID> remoteDest;
+};
+
 struct RelocateShard {
 	KeyRange keys;
 	int priority;
+	bool cancelled; // The data move should be cancelled.
+	std::shared_ptr<DataMove> dataMove; // Not null if this is a restored data move.
+	UID dataMoveId;
 	RelocateReason reason;
-	RelocateShard() : priority(0), reason(RelocateReason::INVALID) {}
+	RelocateShard() : priority(0), cancelled(false), dataMoveId(anonymousShardId), reason(RelocateReason::INVALID) {}
 	RelocateShard(KeyRange const& keys, int priority, RelocateReason reason)
-	  : keys(keys), priority(priority), reason(reason) {}
+	  : keys(keys), priority(priority), cancelled(false), dataMoveId(anonymousShardId), reason(reason) {}
+
+	bool isRestore() const { return this->dataMove != nullptr; }
 };
 
 struct IDataDistributionTeam {
@@ -88,6 +141,7 @@ FDB_DECLARE_BOOLEAN_PARAM(PreferLowerDiskUtil);
 FDB_DECLARE_BOOLEAN_PARAM(TeamMustHaveShards);
 FDB_DECLARE_BOOLEAN_PARAM(ForReadBalance);
 FDB_DECLARE_BOOLEAN_PARAM(PreferLowerReadUtil);
+FDB_DECLARE_BOOLEAN_PARAM(FindTeamByServers);
 
 struct GetTeamRequest {
 	bool wantsNewServers; // In additional to servers in completeSources, try to find teams with new server
@@ -97,6 +151,7 @@ struct GetTeamRequest {
 	bool forReadBalance;
 	bool preferLowerReadUtil; // only make sense when forReadBalance is true
 	double inflightPenalty;
+	bool findTeamByServers;
 	std::vector<UID> completeSources;
 	std::vector<UID> src;
 	Promise<std::pair<Optional<Reference<IDataDistributionTeam>>, bool>> reply;
@@ -113,7 +168,13 @@ struct GetTeamRequest {
 	               double inflightPenalty = 1.0)
 	  : wantsNewServers(wantsNewServers), wantsTrueBest(wantsTrueBest), preferLowerDiskUtil(preferLowerDiskUtil),
 	    teamMustHaveShards(teamMustHaveShards), forReadBalance(forReadBalance),
-	    preferLowerReadUtil(preferLowerReadUtil), inflightPenalty(inflightPenalty) {}
+	    preferLowerReadUtil(preferLowerReadUtil), inflightPenalty(inflightPenalty),
+	    findTeamByServers(FindTeamByServers::False) {}
+	GetTeamRequest(std::vector<UID> servers)
+	  : wantsNewServers(WantNewServers::False), wantsTrueBest(WantTrueBest::False),
+	    preferLowerDiskUtil(PreferLowerDiskUtil::False), teamMustHaveShards(TeamMustHaveShards::False),
+	    forReadBalance(ForReadBalance::False), preferLowerReadUtil(PreferLowerReadUtil::False), inflightPenalty(1.0),
+	    findTeamByServers(FindTeamByServers::True), src(std::move(servers)) {}
 
 	// return true if a.score < b.score
 	[[nodiscard]] bool lessCompare(TeamRef a, TeamRef b, int64_t aLoadBytes, int64_t bLoadBytes) const {
@@ -129,7 +190,8 @@ struct GetTeamRequest {
 
 		ss << "WantsNewServers:" << wantsNewServers << " WantsTrueBest:" << wantsTrueBest
 		   << " PreferLowerDiskUtil:" << preferLowerDiskUtil << " teamMustHaveShards:" << teamMustHaveShards
-		   << "forReadBalance" << forReadBalance << " inflightPenalty:" << inflightPenalty << ";";
+		   << "forReadBalance" << forReadBalance << " inflightPenalty:" << inflightPenalty
+		   << " findTeamByServers:" << findTeamByServers << ";";
 		ss << "CompleteSources:";
 		for (const auto& cs : completeSources) {
 			ss << cs.toString() << ",";
@@ -224,6 +286,8 @@ public:
 		bool operator>=(const Team& r) const { return !(*this < r); }
 		bool operator==(const Team& r) const { return servers == r.servers && primary == r.primary; }
 		bool operator!=(const Team& r) const { return !(*this == r); }
+
+		std::string toString() const { return describe(servers); };
 	};
 
 	// This tracks the data distribution on the data distribution server so that teamTrackers can
@@ -254,6 +318,8 @@ public:
 	void finishMove(KeyRangeRef keys);
 	void check() const;
 
+	PromiseStream<KeyRange> restartShardTracker;
+
 private:
 	struct OrderByTeamKey {
 		bool operator()(const std::pair<Team, KeyRange>& lhs, const std::pair<Team, KeyRange>& rhs) const {
@@ -283,17 +349,25 @@ struct DDShardInfo {
 	std::vector<UID> primaryDest;
 	std::vector<UID> remoteDest;
 	bool hasDest;
+	UID srcId;
+	UID destId;
 
 	explicit DDShardInfo(Key key) : key(key), hasDest(false) {}
+	DDShardInfo(Key key, UID srcId, UID destId) : key(key), hasDest(false), srcId(srcId), destId(destId) {}
 };
 
 struct InitialDataDistribution : ReferenceCounted<InitialDataDistribution> {
+	InitialDataDistribution() : dataMoveMap(std::make_shared<DataMove>()) {}
+
+	// Read from dataDistributionModeKey. Whether DD is disabled. DD can be disabled persistently (mode = 0). Set mode
+	// to 1 will enable all disabled parts
 	int mode;
 	std::vector<std::pair<StorageServerInterface, ProcessClass>> allServers;
 	std::set<std::vector<UID>> primaryTeams;
 	std::set<std::vector<UID>> remoteTeams;
 	std::vector<DDShardInfo> shards;
-	Optional<Key> initHealthyZoneValue;
+	Optional<Key> initHealthyZoneValue; // set for maintenance mode
+	KeyRangeMap<std::shared_ptr<DataMove>> dataMoveMap;
 };
 
 struct ShardMetrics {

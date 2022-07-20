@@ -22,26 +22,15 @@
 #define FDB_AWS_CREDENTIALS_PROVIDER_H
 #pragma once
 
+#ifdef BUILD_AWS_BACKUP
+
 #include "aws/core/Aws.h"
 #include "aws/core/auth/AWSCredentialsProviderChain.h"
 
-// Singleton
 namespace FDBAWSCredentialsProvider {
-bool doneInit = false;
-
-// You're supposed to call AWS::ShutdownAPI(options); once done
-// But we want this to live for the lifetime of the process, so we don't do that
-static Aws::Auth::AWSCredentials getAwsCredentials() {
-	if (!doneInit) {
-		doneInit = true;
-		Aws::SDKOptions options;
-		Aws::InitAPI(options);
-		TraceEvent("AWSSDKInitSuccessful");
-	}
-	Aws::Auth::DefaultAWSCredentialsProviderChain credProvider;
-	Aws::Auth::AWSCredentials creds = credProvider.GetAWSCredentials();
-	return creds;
+Aws::Auth::AWSCredentials getAwsCredentials();
 }
-} // namespace FDBAWSCredentialsProvider
+
+#endif
 
 #endif

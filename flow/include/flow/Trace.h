@@ -26,6 +26,7 @@
 #include <stdarg.h>
 #include <stdint.h>
 #include <string>
+#include <string_view>
 #include <map>
 #include <set>
 #include <type_traits>
@@ -290,6 +291,15 @@ struct TraceableString<std::string> {
 };
 
 template <>
+struct TraceableString<std::string_view> {
+	static auto begin(const std::string_view& value) -> decltype(value.begin()) { return value.begin(); }
+
+	static bool atEnd(const std::string_view& value, decltype(value.begin()) iter) { return iter == value.end(); }
+
+	static std::string toString(const std::string_view& value) { return std::string(value); }
+};
+
+template <>
 struct TraceableString<const char*> {
 	static const char* begin(const char* value) { return value; }
 
@@ -387,6 +397,8 @@ template <size_t S>
 struct Traceable<char[S]> : TraceableStringImpl<char[S]> {};
 template <>
 struct Traceable<std::string> : TraceableStringImpl<std::string> {};
+template <>
+struct Traceable<std::string_view> : TraceableStringImpl<std::string_view> {};
 
 template <class T>
 struct SpecialTraceMetricType

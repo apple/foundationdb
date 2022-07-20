@@ -865,7 +865,7 @@ void LogPushData::writeTypedMessage(T const& item, bool metadataMessage, bool al
 		// subsequence wasn't actually used and can be decremented.
 		if (!updatedLocation) {
 			this->subsequence--;
-			TEST(true); // No new SpanContextMessage written to transaction logs
+			CODE_PROBE(true, "No new SpanContextMessage written to transaction logs");
 			ASSERT(this->subsequence > 0);
 		}
 	} else {

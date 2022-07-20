@@ -193,10 +193,9 @@ endif()
 find_package(toml11 QUIET)
 if(toml11_FOUND)
   add_library(toml11_target INTERFACE)
-  add_dependencies(toml11_target INTERFACE toml11::toml11)
+  target_link_libraries(toml11_target INTERFACE toml11::toml11)
 else()
-  include(ExternalProject)
-
+  include(ExternalProject)  
   ExternalProject_add(toml11Project
     URL "https://github.com/ToruNiina/toml11/archive/v3.4.0.tar.gz"
     URL_HASH SHA256=bc6d733efd9216af8c119d8ac64a805578c79cc82b813e4d1d880ca128bd154d

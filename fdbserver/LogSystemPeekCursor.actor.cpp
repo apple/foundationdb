@@ -317,7 +317,7 @@ ACTOR Future<Void> serverPeekParallelGetMore(ILogSystem::ServerPeekCursor* self,
 				//
 				// A cursor for a log router can be delayed indefinitely during a network partition, so only fail
 				// simulation tests sufficiently far after we finish simulating network partitions.
-				TEST(e.code() == error_code_timed_out); // peek cursor timed out
+				CODE_PROBE(e.code() == error_code_timed_out, "peek cursor timed out");
 				if (now() >= FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS + SERVER_KNOBS->PEEK_TRACKER_EXPIRATION_TIME) {
 					ASSERT_WE_THINK(e.code() == error_code_operation_obsolete ||
 					                SERVER_KNOBS->PEEK_TRACKER_EXPIRATION_TIME < 10);
@@ -653,7 +653,7 @@ void ILogSystem::MergedPeekCursor::updateMessage(bool usePolicy) {
 			c->advanceTo(messageVersion);
 			if (start <= messageVersion && messageVersion < c->version()) {
 				advancedPast = true;
-				TEST(true); // Merge peek cursor advanced past desired sequence
+				CODE_PROBE(true, "Merge peek cursor advanced past desired sequence");
 			}
 		}
 
@@ -965,7 +965,7 @@ void ILogSystem::SetPeekCursor::updateMessage(int logIdx, bool usePolicy) {
 				c->advanceTo(messageVersion);
 				if (start <= messageVersion && messageVersion < c->version()) {
 					advancedPast = true;
-					TEST(true); // Merge peek cursor with logIdx advanced past desired sequence
+					CODE_PROBE(true, "Merge peek cursor with logIdx advanced past desired sequence");
 				}
 			}
 		}

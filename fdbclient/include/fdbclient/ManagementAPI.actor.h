@@ -41,6 +41,7 @@ standard API and some knowledge of the contents of the system key space.
 #include "fdbclient/MonitorLeader.h"
 #include "flow/actorcompiler.h" // has to be last include
 
+ACTOR Future<DatabaseConfiguration> getDatabaseConfiguration(Transaction* tr);
 ACTOR Future<DatabaseConfiguration> getDatabaseConfiguration(Database cx);
 ACTOR Future<Void> waitForFullReplication(Database cx);
 
@@ -157,6 +158,10 @@ bool schemaMatch(json_spirit::mValue const& schema,
 // execute payload in 'snapCmd' on all the coordinators, TLogs and
 // storage nodes
 ACTOR Future<Void> mgmtSnapCreate(Database cx, Standalone<StringRef> snapCmd, UID snapUID);
+
+// Set and get the storage quota per tenant
+void setStorageQuota(Transaction& tr, StringRef tenantName, uint64_t quota);
+ACTOR Future<Optional<uint64_t>> getStorageQuota(Transaction* tr, StringRef tenantName);
 
 #include "flow/unactorcompiler.h"
 #endif

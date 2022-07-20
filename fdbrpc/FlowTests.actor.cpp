@@ -69,7 +69,7 @@ TEST_CASE("/flow/buggifiedDelay") {
 		});
 		wait(f1 && f2);
 		if (last == 1) {
-			TEST(true); // Delays can become ready out of order
+			CODE_PROBE(true, "Delays can become ready out of order");
 			return Void();
 		}
 	}

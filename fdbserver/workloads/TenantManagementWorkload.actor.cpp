@@ -22,6 +22,8 @@
 #include <limits>
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/TenantManagement.actor.h"
+#include "fdbclient/TenantSpecialKeys.actor.h"
+#include "fdbclient/libb64/decode.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/Knobs.h"
@@ -49,8 +51,9 @@ struct TenantManagementWorkload : TestWorkload {
 	const TenantName tenantNamePrefix = "tenant_management_workload_"_sr;
 	TenantName localTenantNamePrefix;
 
-	const Key specialKeysTenantMapPrefix = TenantMapRangeImpl::submoduleRange.begin.withPrefix(
-	    SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin);
+	const Key specialKeysTenantMapPrefix = SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT)
+	                                           .begin.withSuffix(TenantRangeImpl<true>::submoduleRange.begin)
+	                                           .withSuffix(TenantRangeImpl<true>::mapSubRange.begin);
 
 	int maxTenants;
 	double testDuration;
@@ -167,14 +170,14 @@ struct TenantManagementWorkload : TestWorkload {
 				} else {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
-					Optional<Value> lastIdVal = wait(tr->get(tenantLastIdKey));
-					int64_t previousId = lastIdVal.present() ? TenantMapEntry::prefixToId(lastIdVal.get()) : -1;
+					int64_t _nextId = wait(TenantAPI::getNextTenantId(tr));
+					int64_t nextId = _nextId;
 
 					std::vector<Future<Void>> createFutures;
 					for (auto tenant : tenantsToCreate) {
-						createFutures.push_back(success(TenantAPI::createTenantTransaction(tr, tenant, ++previousId)));
+						createFutures.push_back(success(TenantAPI::createTenantTransaction(tr, tenant, nextId++)));
 					}
-					tr->set(tenantLastIdKey, TenantMapEntry::idToPrefix(previousId));
+					tr->set(tenantLastIdKey, TenantMapEntry::idToPrefix(nextId - 1));
 					wait(waitForAll(createFutures));
 					wait(tr->commit());
 				}
@@ -421,8 +424,14 @@ struct TenantManagementWorkload : TestWorkload {
 
 		int64_t id;
 		std::string prefix;
+		std::string base64Prefix;
+		std::string printablePrefix;
 		jsonDoc.get("id", id);
-		jsonDoc.get("prefix", prefix);
+		jsonDoc.get("prefix.base64", base64Prefix);
+		jsonDoc.get("prefix.printable", printablePrefix);
+
+		prefix = base64::decoder::from_string(base64Prefix);
+		ASSERT(prefix == unprintable(printablePrefix));
 
 		Key prefixKey = KeyRef(prefix);
 		TenantMapEntry entry(id, prefixKey.substr(0, prefixKey.size() - 8));
@@ -558,19 +567,102 @@ struct TenantManagementWorkload : TestWorkload {
 		}
 	}
 
+	ACTOR Future<Void> renameTenant(Database cx, TenantManagementWorkload* self) {
+		// Currently only supporting MANAGEMENT_DATABASE op, so numTenants should always be 1
+		// state OperationType operationType = TenantManagementWorkload::randomOperationType();
+		int numTenants = 1;
+
+		state std::vector<TenantName> oldTenantNames;
+		state std::vector<TenantName> newTenantNames;
+		state bool tenantExists = false;
+		state bool tenantNotFound = false;
+		for (int i = 0; i < numTenants; ++i) {
+			TenantName oldTenant = self->chooseTenantName(false);
+			TenantName newTenant = self->chooseTenantName(false);
+			newTenantNames.push_back(newTenant);
+			oldTenantNames.push_back(oldTenant);
+			if (!self->createdTenants.count(oldTenant)) {
+				tenantNotFound = true;
+			}
+			if (self->createdTenants.count(newTenant)) {
+				tenantExists = true;
+			}
+		}
+
+		loop {
+			try {
+				ASSERT(oldTenantNames.size() == 1);
+				state int tenantIndex = 0;
+				for (; tenantIndex != oldTenantNames.size(); ++tenantIndex) {
+					state TenantName oldTenantName = oldTenantNames[tenantIndex];
+					state TenantName newTenantName = newTenantNames[tenantIndex];
+					// Perform rename, then check against the DB for the new results
+					wait(TenantAPI::renameTenant(cx.getReference(), oldTenantName, newTenantName));
+					ASSERT(!tenantNotFound && !tenantExists);
+					state Optional<TenantMapEntry> oldTenantEntry =
+					    wait(TenantAPI::tryGetTenant(cx.getReference(), oldTenantName));
+					state Optional<TenantMapEntry> newTenantEntry =
+					    wait(TenantAPI::tryGetTenant(cx.getReference(), newTenantName));
+					ASSERT(!oldTenantEntry.present());
+					ASSERT(newTenantEntry.present());
+
+					// Update Internal Tenant Map and check for correctness
+					TenantState tState = self->createdTenants[oldTenantName];
+					self->createdTenants[newTenantName] = tState;
+					self->createdTenants.erase(oldTenantName);
+					if (!tState.empty) {
+						state Transaction insertTr(cx, newTenantName);
+						loop {
+							try {
+								insertTr.set(self->keyName, newTenantName);
+								wait(insertTr.commit());
+								break;
+							} catch (Error& e) {
+								wait(insertTr.onError(e));
+							}
+						}
+					}
+					wait(self->checkTenant(cx, self, newTenantName, self->createdTenants[newTenantName]));
+				}
+				return Void();
+			} catch (Error& e) {
+				ASSERT(oldTenantNames.size() == 1);
+				if (e.code() == error_code_tenant_not_found) {
+					TraceEvent("RenameTenantOldTenantNotFound")
+					    .detail("OldTenantName", oldTenantNames[0])
+					    .detail("NewTenantName", newTenantNames[0]);
+					ASSERT(tenantNotFound);
+				} else if (e.code() == error_code_tenant_already_exists) {
+					TraceEvent("RenameTenantNewTenantAlreadyExists")
+					    .detail("OldTenantName", oldTenantNames[0])
+					    .detail("NewTenantName", newTenantNames[0]);
+					ASSERT(tenantExists);
+				} else {
+					TraceEvent(SevError, "RenameTenantFailure")
+					    .error(e)
+					    .detail("OldTenantName", oldTenantNames[0])
+					    .detail("NewTenantName", newTenantNames[0]);
+				}
+				return Void();
+			}
+		}
+	}
+
 	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 	ACTOR Future<Void> _start(Database cx, TenantManagementWorkload* self) {
 		state double start = now();
 		while (now() < start + self->testDuration) {
-			state int operation = deterministicRandom()->randomInt(0, 4);
+			state int operation = deterministicRandom()->randomInt(0, 5);
 			if (operation == 0) {
 				wait(self->createTenant(cx, self));
 			} else if (operation == 1) {
 				wait(self->deleteTenant(cx, self));
 			} else if (operation == 2) {
 				wait(self->getTenant(cx, self));
-			} else {
+			} else if (operation == 3) {
 				wait(self->listTenants(cx, self));
+			} else {
+				wait(self->renameTenant(cx, self));
 			}
 		}
 

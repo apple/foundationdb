@@ -48,7 +48,7 @@ public:
 
 			for (int i = 0; i < tenantList.size(); i++) {
 				TenantName tname = tenantList[i].key.removePrefix(tenantMapPrefix);
-				TenantMapEntry t = decodeTenantEntry(tenantList[i].value);
+				TenantMapEntry t = TenantMapEntry::decode(tenantList[i].value);
 
 				tenantCache->insert(tname, t);
 
@@ -86,7 +86,7 @@ public:
 
 				for (int i = 0; i < tenantList.size(); i++) {
 					TenantName tname = tenantList[i].key.removePrefix(tenantMapPrefix);
-					TenantMapEntry t = decodeTenantEntry(tenantList[i].value);
+					TenantMapEntry t = TenantMapEntry::decode(tenantList[i].value);
 
 					if (tenantCache->update(tname, t)) {
 						tenantListUpdated = true;
