@@ -440,7 +440,7 @@ public:
 		return Void();
 	}
 
-	ACTOR static Future<Void> resumeFromInitShards(Reference<DataDistributor> self) {
+	ACTOR static Future<Void> resumeFromInitShards(Reference<DataDistributor> self, bool traceShard) {
 		state int shard = 0;
 		for (; shard < self->initData->shards.size() - 1; shard++) {
 			const DDShardInfo& iShard = self->initData->shards[shard];
@@ -452,8 +452,8 @@ public:
 			if (self->configuration.usableRegions > 1) {
 				teams.push_back(ShardsAffectedByTeamFailure::Team(iShard.remoteSrc, false));
 			}
-			if (g_network->isSimulated()) {
-				TraceEvent("DDInitShard")
+			if (traceShard) {
+				TraceEvent(SevDebug, "DDInitShard")
 				    .detail("Keys", keys)
 				    .detail("PrimarySrc", describe(iShard.primarySrc))
 				    .detail("RemoteSrc", describe(iShard.remoteSrc))
@@ -525,7 +525,7 @@ public:
 	// TODO: add a test to verify the inflight relocation correctness and measure the memory usage with 4 million shards
 	Future<Void> resumeRelocations() {
 		ASSERT(shardsAffectedByTeamFailure); // has to be allocated
-		return runAfter(resumeFromInitShards(Reference<DataDistributor>::addRef(this)),
+		return runAfter(resumeFromInitShards(Reference<DataDistributor>::addRef(this), g_network->isSimulated()),
 		                resumeFromInitDataMoveMap(Reference<DataDistributor>::addRef(this)));
 	}
 };
@@ -1472,8 +1472,10 @@ TEST_CASE("/DataDistributor/Initialization/ResumeFromShard") {
 	self->configuration.storageTeamSize = 1;
 
 	// add DDShardInfo
-	int shardNum = 1000000; // 2000000000; OOM
-	std::cout << "generating " << shardNum << "shards...\n";
+	self->shardsAffectedByTeamFailure->setCheckMode(
+	    ShardsAffectedByTeamFailure::CheckMode::ForceNoCheck); // skip check when build
+	int shardNum = deterministicRandom()->randomInt(1000, CLIENT_KNOBS->TOO_MANY * 5); // 2000000000; OOM
+	std::cout << "generating " << shardNum << " shards...\n";
 	for (int i = 1; i <= SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM; ++i) {
 		self->initData->shards.emplace_back(data_distribution_test::doubleToNoLocationShardInfo(i, true));
 	}
@@ -1482,7 +1484,7 @@ TEST_CASE("/DataDistributor/Initialization/ResumeFromShard") {
 	}
 	self->initData->shards.emplace_back(DDShardInfo(allKeys.end));
 	std::cout << "Start resuming...\n";
-	wait(DataDistributor::resumeFromInitShards(self));
+	wait(DataDistributor::resumeFromInitShards(self, false));
 	std::cout << "Start validation...\n";
 	auto relocateFuture = self->relocationProducer.getFuture();
 	for (int i = 0; i < SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM; ++i) {
@@ -1496,5 +1498,7 @@ TEST_CASE("/DataDistributor/Initialization/ResumeFromShard") {
 		ASSERT(rs.keys.begin.compare(self->initData->shards[i].key) == 0);
 		ASSERT(rs.keys.end == self->initData->shards[i + 1].key);
 	}
+	self->shardsAffectedByTeamFailure->setCheckMode(ShardsAffectedByTeamFailure::CheckMode::ForceCheck);
+	self->shardsAffectedByTeamFailure->check();
 	return Void();
 }
