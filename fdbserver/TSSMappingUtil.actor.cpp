@@ -26,14 +26,15 @@
 ACTOR Future<Void> readTSSMappingRYW(Reference<ReadYourWritesTransaction> tr,
                                      std::map<UID, StorageServerInterface>* tssMapping) {
 	KeyBackedMap<UID, UID> tssMapDB = KeyBackedMap<UID, UID>(tssMappingKeys.begin);
-	state std::vector<std::pair<UID, UID>> uidMapping =
+	state KeyBackedMap<UID, UID>::RangeResultType uidMapping =
 	    wait(tssMapDB.getRange(tr, UID(), Optional<UID>(), CLIENT_KNOBS->TOO_MANY));
-	ASSERT(uidMapping.size() < CLIENT_KNOBS->TOO_MANY);
+	ASSERT(uidMapping.results.size() < CLIENT_KNOBS->TOO_MANY);
 
 	state std::map<UID, StorageServerInterface> mapping;
-	for (auto& it : uidMapping) {
-		state UID ssId = it.first;
-		Optional<Value> v = wait(tr->get(serverListKeyFor(it.second)));
+	state std::vector<std::pair<UID, UID>>::iterator mapItr;
+	for (mapItr = uidMapping.results.begin(); mapItr != uidMapping.results.end(); ++mapItr) {
+		state UID ssId = mapItr->first;
+		Optional<Value> v = wait(tr->get(serverListKeyFor(mapItr->second)));
 		(*tssMapping)[ssId] = decodeServerListValue(v.get());
 	}
 	return Void();
