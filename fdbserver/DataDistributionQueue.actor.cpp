@@ -1795,17 +1795,12 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
 	deterministicRandom()->randomShuffle(metricsList);
 	traceEvent->detail("MinReadLoad", reply.minReadLoad).detail("MaxReadLoad", reply.maxReadLoad);
 
-	int chosenIdx = -1;
-	for (int i = 0; i < metricsList.size(); ++i) {
-		chosenIdx = i;
-		break;
-	}
-	if (chosenIdx == -1) {
+	if (metricsList.empty()) {
 		traceEvent->detail("SkipReason", "NoEligibleShards");
 		return false;
 	}
 
-	auto& [shard, metrics] = metricsList[chosenIdx];
+	auto& [shard, metrics] = metricsList[0];
 	traceEvent->detail("ShardReadBandwidth", metrics.bytesReadPerKSecond);
 	//  Verify the shard is still in ShardsAffectedByTeamFailure
 	shards = self->shardsAffectedByTeamFailure->getShardsFor(

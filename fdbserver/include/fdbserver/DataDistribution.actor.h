@@ -231,6 +231,8 @@ struct GetTopKMetricsReply {
 	struct KeyRangeStorageMetrics {
 		KeyRange range;
 		StorageMetrics metrics;
+		KeyRangeStorageMetrics() = default;
+		KeyRangeStorageMetrics(const KeyRange& range, const StorageMetrics& s) : range(range), metrics(s) {}
 	};
 	std::vector<KeyRangeStorageMetrics> shardMetrics;
 	double minReadLoad = -1, maxReadLoad = -1;
@@ -239,7 +241,7 @@ struct GetTopKMetricsReply {
 	  : shardMetrics(m), minReadLoad(minReadLoad), maxReadLoad(maxReadLoad) {}
 };
 struct GetTopKMetricsRequest {
-	int topK = 1; // default only return the top 1 shard based on the comparator
+	int topK = 1; // default only return the top 1 shard based on the GetTopKMetricsRequest::compare function
 	std::vector<KeyRange> keys;
 	Promise<GetTopKMetricsReply> reply; // topK storage metrics
 	double maxBytesReadPerKSecond = 0, minBytesReadPerKSecond = 0; // all returned shards won't exceed this read load

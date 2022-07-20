@@ -866,7 +866,7 @@ ACTOR Future<Void> fetchTopKShardMetrics_impl(DataDistributionTracker* self, Get
 					maxReadLoad = std::max(metrics.bytesReadPerKSecond, maxReadLoad);
 					if (req.minBytesReadPerKSecond <= metrics.bytesReadPerKSecond &&
 					    metrics.bytesReadPerKSecond <= req.maxBytesReadPerKSecond) {
-						returnMetrics.push_back({ range, metrics });
+						returnMetrics.emplace_back(range, metrics);
 					}
 				}
 
@@ -877,8 +877,10 @@ ACTOR Future<Void> fetchTopKShardMetrics_impl(DataDistributionTracker* self, Get
 				if (req.topK >= returnMetrics.size())
 					req.reply.send(GetTopKMetricsReply(returnMetrics, minReadLoad, maxReadLoad));
 				else {
-					std::nth_element(
-					    returnMetrics.begin(), returnMetrics.begin() + req.topK - 1, returnMetrics.end(), req.compare);
+					std::nth_element(returnMetrics.begin(),
+					                 returnMetrics.begin() + req.topK - 1,
+					                 returnMetrics.end(),
+					                 GetTopKMetricsRequest::compare);
 					req.reply.send(GetTopKMetricsReply(std::vector<GetTopKMetricsReply::KeyRangeStorageMetrics>(
 					                                       returnMetrics.begin(), returnMetrics.begin() + req.topK),
 					                                   minReadLoad,
