@@ -39,7 +39,12 @@ std::vector<std::pair<const char*, KeyRef>> debugKeys = {};
 // std::vector<std::pair<const char*, KeyRef>> debugKeys = { { "SomeKey", "0000000002xbw"_sr } };
 std::vector<std::pair<const char*, KeyRangeRef>> debugRanges = {
 	// { "SomeRange", { "0000000002xbw"_sr, "0000000002ybw"_sr } },
-	{ "Debug0ck", { "0000000000ca"_sr, "0000000000ck"_sr } },
+	{ "Debug0ck", { "0000000000c"_sr, "0000000000cl"_sr } },
+	{ "Debug0ckTenant",
+	  { LiteralStringRef("\x00\x00\x00\x00\x00\x00\x00\x01"
+	                     "0000000000c"),
+	    LiteralStringRef("\x00\x00\x00\x00\x00\x00\x00\x01"
+	                     "0000000000cl") } },
 };
 // std::vector<std::pair<const char*, KeyRangeRef>> debugRanges = {};
 

@@ -102,6 +102,9 @@
 
 #define SHORT_CIRCUT_ACTUAL_STORAGE 0
 
+FDB_DECLARE_BOOLEAN_PARAM(UnlimitedCommitBytes);
+FDB_DEFINE_BOOLEAN_PARAM(UnlimitedCommitBytes);
+
 namespace {
 bool canReplyWith(Error e) {
 	switch (e.code()) {
@@ -361,7 +364,10 @@ struct StorageServerDisk {
 	explicit StorageServerDisk(struct StorageServer* data, IKeyValueStore* storage) : data(data), storage(storage) {}
 
 	void makeNewStorageServerDurable();
-	bool makeVersionMutationsDurable(Version& prevStorageVersion, Version newStorageVersion, int64_t& bytesLeft);
+	bool makeVersionMutationsDurable(Version& prevStorageVersion,
+	                                 Version newStorageVersion,
+	                                 int64_t& bytesLeft,
+	                                 UnlimitedCommitBytes unlimitedBytes);
 	void makeVersionDurable(Version version);
 	void makeTssQuarantineDurable();
 	Future<bool> restoreDurableState();
@@ -3173,8 +3179,6 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
                                           SpanContext parentSpan,
                                           IKeyValueStore::ReadType type,
                                           Optional<Key> tenantPrefix) {
-	// DEBUG_KEY_RANGE("SSReadRange", version, range, data->thisServerID);
-	//     .detail("Fetch", (type == IKeyValueStore::ReadType::FETCH));
 	state GetKeyValuesReply result;
 	state StorageServer::VersionedData::ViewAtVersion view = data->data().at(version);
 	state StorageServer::VersionedData::iterator vCurrent = view.end();
@@ -3183,7 +3187,7 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 	state Key readBeginTemp;
 	state int vCount = 0;
 	state Span span("SS:readRange"_loc, parentSpan);
-	// DEBUG_KEY_RANGE("SSReadRangeImpl", version, range, data->thisServerID);
+	DEBUG_KEY_RANGE("SSReadRangeImpl", version, range, data->thisServerID);
 
 	// for caching the storage queue results during the first PTree traversal
 	state VectorRef<KeyValueRef> resultCache;
@@ -3205,10 +3209,13 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 		// We might care about a clear beginning before start that
 		//  runs into range
 		vCurrent = view.lastLessOrEqual(range.begin);
-		if (vCurrent && vCurrent->isClearTo() && vCurrent->getEndKey() > range.begin)
+		if (vCurrent && vCurrent->isClearTo() && vCurrent->getEndKey() > range.begin) {
 			readBegin = vCurrent->getEndKey();
-		else
+			DEBUG_KEY_RANGE("SSReadRangeImplGetRangeBegin", version, range, data->thisServerID)
+			    .detail("NewBegin", readBegin);
+		} else {
 			readBegin = range.begin;
+		}
 
 		if (vCurrent) {
 			// We can get first greater or equal from the result of lastLessOrEqual
@@ -3677,7 +3684,7 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 				te.log();
 				g_traceBatch.addEvent(
 				    "TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValues.AfterReadRange");
-			//.detail("Begin",begin).detail("End",end).detail("SizeOf",r.data.size());
+				//.detail("Begin",begin).detail("End",end).detail("SizeOf",r.data.size());
 			}
 			data->checkChangeCounter(
 			    changeCounter,
@@ -5139,6 +5146,7 @@ void removeDataRange(StorageServer* ss,
 
 	MutationRef clearRange(MutationRef::ClearRange, range.begin, range.end);
 	clearRange = ss->addMutationToMutationLog(mLV, clearRange);
+	DEBUG_KEY_RANGE("SSRemoveDataRange", mLV.version, range, ss->thisServerID);
 
 	auto& data = ss->mutableData();
 
@@ -5261,6 +5269,7 @@ void splitMutation(StorageServer* data, KeyRangeMap<T>& map, MutationRef const& 
 			auto r = map.intersectingRanges(mKeys);
 			for (auto i = r.begin(); i != r.end(); ++i) {
 				KeyRangeRef k = mKeys & i->range();
+				DEBUG_KEY_RANGE("SplitCleanRange", ver, mKeys, data->thisServerID).detail("NewRange", k);
 				addMutation(i->value(), ver, fromFetch, MutationRef((MutationRef::Type)m.type, k.begin, k.end));
 			}
 		}
@@ -7151,10 +7160,16 @@ void StorageServer::addMutation(Version version,
 	MutationRef
 	    nonExpanded; // need to keep non-expanded but atomic converted version of clear mutations for change feeds
 	auto& mLog = addVersionToMutationLog(version);
+	DEBUG_MUTATION("applyMutationOrigin", version, mutation, thisServerID)
+	    .detail("ShardBegin", shard.begin)
+	    .detail("ShardEnd", shard.end);
 
 	if (!convertAtomicOp(expanded, data(), eagerReads, mLog.arena())) {
 		return;
 	}
+	DEBUG_MUTATION("applyMutationAtomic", version, expanded, thisServerID)
+	    .detail("ShardBegin", shard.begin)
+	    .detail("ShardEnd", shard.end);
 	if (expanded.type == MutationRef::ClearRange) {
 		nonExpanded = expanded;
 		expandClear(expanded, data(), eagerReads, shard.end);
@@ -8181,6 +8196,7 @@ ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData meta
 }
 
 ACTOR Future<Void> updateStorage(StorageServer* data) {
+	state UnlimitedCommitBytes unlimitedBytes = UnlimitedCommitBytes::False;
 	loop {
 		ASSERT(data->durableVersion.get() == data->storageVersion());
 		if (g_network->isSimulated()) {
@@ -8268,14 +8284,14 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 				    .detail("Version", data->pendingAddRanges.begin()->first)
 				    .detail("DurableVersion", data->durableVersion.get());
 				addedRanges = true;
-				bytesLeft = SERVER_KNOBS->STORAGE_COMMIT_BYTES_UNLIMITED;
+				unlimitedBytes = UnlimitedCommitBytes::True;
 			}
 		}
 
 		// Write mutations to storage until we reach the desiredVersion or have written too much (bytesleft)
 		state double beforeStorageUpdates = now();
 		loop {
-			state bool done = data->storage.makeVersionMutationsDurable(newOldestVersion, desiredVersion, bytesLeft);
+			state bool done = data->storage.makeVersionMutationsDurable(newOldestVersion, desiredVersion, bytesLeft, unlimitedBytes);
 			if (data->tenantMap.getLatestVersion() < newOldestVersion) {
 				data->tenantMap.createNewVersion(newOldestVersion);
 				data->tenantPrefixIndex.createNewVersion(newOldestVersion);
@@ -8295,7 +8311,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		}
 
 		if (addedRanges) {
-			TraceEvent(SevVerbose, "SSAddKVSRangeMetaData", data->thisServerID)
+			TraceEvent(SevDebug, "SSAddKVSRangeMetaData", data->thisServerID)
 			    .detail("NewDurableVersion", newOldestVersion)
 			    .detail("DesiredVersion", desiredVersion)
 			    .detail("OldestRemoveKVSRangesVersion", data->pendingAddRanges.begin()->first);
@@ -8716,8 +8732,8 @@ void StorageServerDisk::writeMutations(const VectorRef<MutationRef>& mutations,
 
 bool StorageServerDisk::makeVersionMutationsDurable(Version& prevStorageVersion,
                                                     Version newStorageVersion,
-                                                    int64_t& bytesLeft) {
-	if (bytesLeft <= 0)
+                                                    int64_t& bytesLeft, UnlimitedCommitBytes unlimitedBytes) {
+	if (!unlimitedBytes && bytesLeft <= 0)
 		return true;
 
 	// Apply mutations from the mutationLog

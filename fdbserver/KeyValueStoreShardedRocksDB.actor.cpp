@@ -708,7 +708,7 @@ public:
 	}
 
 	PhysicalShard* addRange(KeyRange range, std::string id) {
-		TraceEvent(SevVerbose, "ShardedRocksAddRangeBegin", this->id)
+		DisabledTraceEvent(SevVerbose, "ShardedRocksAddRangeBegin", this->id)
 		    .detail("Range", range)
 		    .detail("PhysicalShardID", id);
 		// Newly added range should not overlap with any existing range.
@@ -842,7 +842,7 @@ public:
 			TraceEvent(SevError, "ShardedRocksDB").detail("Error", "write to non-exist shard").detail("WriteKey", key);
 			return;
 		}
-		TraceEvent(SevDebug, "ShardManagerPut", this->id)
+		DisabledTraceEvent(SevDebug, "ShardManagerPut", this->id)
 		    .detail("WriteKey", key)
 		    .detail("Value", value)
 		    .detail("MapRange", it.range())
@@ -852,7 +852,7 @@ public:
 		ASSERT(dirtyShards != nullptr);
 		writeBatch->Put(it.value()->physicalShard->cf, toSlice(key), toSlice(value));
 		dirtyShards->insert(it.value()->physicalShard);
-		TraceEvent(SevVerbose, "ShardManagerPutEnd", this->id).detail("WriteKey", key).detail("Value", value);
+		DisabledTraceEvent(SevVerbose, "ShardManagerPutEnd", this->id).detail("WriteKey", key).detail("Value", value);
 	}
 
 	void clear(KeyRef key) {
@@ -860,7 +860,7 @@ public:
 		if (!it.value()) {
 			return;
 		}
-		TraceEvent(SevDebug, "ShardManagerClear", this->id).detail("Key", key);
+		DisabledTraceEvent(SevDebug, "ShardManagerClear", this->id).detail("Key", key);
 		writeBatch->Delete(it.value()->physicalShard->cf, toSlice(key));
 		dirtyShards->insert(it.value()->physicalShard);
 	}
@@ -868,7 +868,7 @@ public:
 	void clearRange(KeyRangeRef range) {
 		auto rangeIterator = dataShardMap.intersectingRanges(range);
 
-		TraceEvent(SevDebug, "ShardManagerClearRange", this->id).detail("Range", range);
+		DisabledTraceEvent(SevDebug, "ShardManagerClearRange", this->id).detail("Range", range);
 		for (auto it = rangeIterator.begin(); it != rangeIterator.end(); ++it) {
 			if (it.value() == nullptr) {
 				continue;
@@ -879,7 +879,7 @@ public:
 	}
 
 	void persistRangeMapping(KeyRangeRef range, bool isAdd) {
-		TraceEvent(SevVerbose, "ShardedRocksPersistRangeMapping", this->id)
+		DisabledTraceEvent(SevVerbose, "ShardedRocksPersistRangeMapping", this->id)
 		    .detail("Range", range)
 		    .detail("IsAdd", isAdd);
 		writeBatch->DeleteRange(metadataShard->cf,
@@ -895,7 +895,7 @@ public:
 				writeBatch->Put(metadataShard->cf,
 				                getShardMappingKey(it.range().begin, shardMappingPrefix),
 				                it.value()->physicalShard->id);
-				TraceEvent(SevVerbose, "ShardedRocksDB")
+				DisabledTraceEvent(SevVerbose, "ShardedRocksDB")
 				    .detail("Action", "PersistRangeMapping")
 				    .detail("BeginKey", it.range().begin)
 				    .detail("EndKey", it.range().end)
@@ -924,7 +924,7 @@ public:
 			}
 		} else {
 			writeBatch->Put(metadataShard->cf, getShardMappingKey(range.begin, shardMappingPrefix), "");
-			TraceEvent(SevVerbose, "ShardedRocksDB")
+			DisabledTraceEvent(SevVerbose, "ShardedRocksDB")
 			    .detail("Action", "PersistRangeMapping")
 			    .detail("RemoveRange", "True")
 			    .detail("BeginKey", range.begin)
@@ -2114,7 +2114,12 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			int accumulatedBytes = 0;
 			int numShards = 0;
 			for (auto& [shard, range] : a.shardRanges) {
-				ASSERT(shard != nullptr && shard->initialized());
+				if (shard == nullptr || !shard->initialized()) {
+					TraceEvent(SevWarn, "ShardedRocksReadRangeShardNotReady", id)
+					    .detail("Range", range)
+					    .detail("Reason", shard == nullptr ? "Not Exist" : "Not Initialized");
+					continue;
+				}
 				auto bytesRead = readRangeInDb(shard, range, rowLimit, byteLimit, &result);
 				if (bytesRead < 0) {
 					// Error reading an instance.
@@ -2304,9 +2309,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		auto* shard = shardManager.getDataShard(key);
 		if (shard == nullptr || !shard->physicalShard->initialized()) {
 			// TODO: read non-exist system key range should not cause an error.
-			TraceEvent(SevVerbose, "ShardedRocksDB")
-			    .detail("Detail", "Read non-exist key range")
-			    .detail("ReadKey", key);
+			TraceEvent(SevDebug, "ShardedRocksDB").detail("Detail", "Read non-exist key range").detail("ReadKey", key);
 			return Optional<Value>();
 		}
 
@@ -2336,9 +2339,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		auto* shard = shardManager.getDataShard(key);
 		if (shard == nullptr || !shard->physicalShard->initialized()) {
 			// TODO: read non-exist system key range should not cause an error.
-			TraceEvent(SevVerbose, "ShardedRocksDB")
-			    .detail("Detail", "Read non-exist key range")
-			    .detail("ReadKey", key);
+			TraceEvent(SevDebug, "ShardedRocksReadValuePresNotExist").detail("ReadKey", key);
 			return Optional<Value>();
 		}
 
@@ -2381,15 +2382,16 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	                              int rowLimit,
 	                              int byteLimit,
 	                              IKeyValueStore::ReadType type) override {
+		// DEBUG_KEY_RANGE("ShardedRocksReadRange", version, range, data->thisServerID);
 		TraceEvent(SevDebug, "ShardedRocksReadRangeBegin", this->id).detail("Range", keys);
 		auto shards = shardManager.getDataShardsByRange(keys);
 
-		for (DataShard* shard : shards) {
-			if (shard == nullptr || !shard->physicalShard->initialized()) {
-				TraceEvent(SevDebug, "ShardedRocksRangeRangeShardNotReady").detail("ReadKey", keys);
-				return RangeResult();
-			}
-		}
+		// for (DataShard* shard : shards) {
+		// 	if (shard == nullptr || !shard->physicalShard->initialized()) {
+		// 		TraceEvent(SevDebug, "ShardedRocksRangeRangeShardNotReady").detail("ReadKey", keys);
+		// 		return RangeResult();
+		// 	}
+		// }
 
 		if (!shouldThrottle(type, keys.begin)) {
 			auto a = new Reader::ReadRangeAction(keys, shards, rowLimit, byteLimit);
