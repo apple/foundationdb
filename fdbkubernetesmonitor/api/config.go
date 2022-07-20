@@ -120,14 +120,29 @@ func (argument Argument) GenerateArgument(processNumber int, env map[string]stri
 		}
 		number = number + argument.Offset
 		return strconv.Itoa(number), nil
-	case EnvironmentArgumentType:
+	case EnvironmentArgumentType, IPListArgumentType:
 		return argument.LookupEnv(env)
-	case IPListArgumentType:
-		envValue, err := argument.LookupEnv(env)
-		if err != nil {
-			return "", err
-		}
-		ips := strings.Split(envValue, ",")
+	default:
+		return "", fmt.Errorf("unsupported argument type %s", argument.ArgumentType)
+	}
+}
+
+// LookupEnv looks up the value for an argument from the environment.
+func (argument Argument) LookupEnv(env map[string]string) (string, error) {
+	var value string
+	var present bool
+	if env != nil {
+		value, present = env[argument.Source]
+	}
+	if !present {
+		value, present = os.LookupEnv(argument.Source)
+	}
+	if !present {
+		return "", fmt.Errorf("missing environment variable %s", argument.Source)
+	}
+
+	if argument.ArgumentType == IPListArgumentType {
+		ips := strings.Split(value, ",")
 		for _, ipString := range ips {
 			ip := net.ParseIP(ipString)
 			if ip == nil {
@@ -147,23 +162,6 @@ func (argument Argument) GenerateArgument(processNumber int, env map[string]stri
 			}
 		}
 		return "", fmt.Errorf("could not find IP with family %d", argument.IPFamily)
-	default:
-		return "", fmt.Errorf("unsupported argument type %s", argument.ArgumentType)
-	}
-}
-
-// lookupEnv looks up the value for an argument from the environment.
-func (argument Argument) LookupEnv(env map[string]string) (string, error) {
-	var value string
-	var present bool
-	if env != nil {
-		value, present = env[argument.Source]
-	}
-	if !present {
-		value, present = os.LookupEnv(argument.Source)
-	}
-	if !present {
-		return "", fmt.Errorf("missing environment variable %s", argument.Source)
 	}
 	return value, nil
 }
