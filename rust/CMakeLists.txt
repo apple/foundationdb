@@ -23,6 +23,8 @@ add_custom_command(
     BYPRODUCTS ${FDB_RUST_LIB}
 )
 
+target_include_directories(fdb_rust2 PRIVATE ${CMAKE_BINARY_DIR}/flow/include)
+target_include_directories(fdb_rust2 PRIVATE ${CMAKE_SOURCE_DIR}/flow/include)
 target_link_libraries(fdb_rust2 PUBLIC pthread dl ${FDB_RUST_LIB})
 
 add_test(NAME fdb_rust_test 
