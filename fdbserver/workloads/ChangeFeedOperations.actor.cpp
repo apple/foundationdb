@@ -296,7 +296,6 @@ ACTOR Future<Void> liveReader(Database cx, Reference<FeedTestData> data, Version
 			}
 		}
 	} catch (Error& e) {
-		// TODO when feed is destroyed, this should trigger something
 		throw e;
 	}
 }
@@ -708,7 +707,7 @@ struct ChangeFeedOperationsWorkload : TestWorkload {
 		}
 
 		// FIXME: this sometimes reads popped data!
-		// wait(historicReader(cx, feedData, beginVersion, endVersion, true));
+		wait(historicReader(cx, feedData, beginVersion, endVersion, true));
 
 		if (DEBUG_CF(feedData->key)) {
 			fmt::print("DBG) {0} Read complete\n", feedData->key.printable());
@@ -757,10 +756,6 @@ struct ChangeFeedOperationsWorkload : TestWorkload {
 				feedData->update(writtenVersion, updateValue);
 				return Void();
 			} catch (Error& e) {
-				// TODO REMOVE
-				if (DEBUG_CF(feedData->key)) {
-					fmt::print("DBG) {0} Error updating/clearing: {1}\n", feedData->key.printable(), e.name());
-				}
 				wait(tr.onError(e));
 			}
 		}
@@ -789,7 +784,6 @@ struct ChangeFeedOperationsWorkload : TestWorkload {
 			} else if (op == Op::POP) {
 				self->popFeed(cx, self->data[feedIdx]);
 			} else {
-				fmt::print("Invalid Op {0}\n", op);
 				ASSERT(false);
 			}
 
