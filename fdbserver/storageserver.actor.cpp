@@ -134,6 +134,9 @@ bool canReplyWith(Error e) {
 
 #define PERSIST_PREFIX "\xff\xff"
 
+FDB_DECLARE_BOOLEAN_PARAM(UnlimitedCommitBytes);
+FDB_DEFINE_BOOLEAN_PARAM(UnlimitedCommitBytes);
+
 // Immutable
 static const KeyValueRef persistFormat(LiteralStringRef(PERSIST_PREFIX "Format"),
                                        LiteralStringRef("FoundationDB/StorageServer/1/4"));
@@ -345,7 +348,10 @@ struct StorageServerDisk {
 	explicit StorageServerDisk(struct StorageServer* data, IKeyValueStore* storage) : data(data), storage(storage) {}
 
 	void makeNewStorageServerDurable(const bool shardAware);
-	bool makeVersionMutationsDurable(Version& prevStorageVersion, Version newStorageVersion, int64_t& bytesLeft);
+	bool makeVersionMutationsDurable(Version& prevStorageVersion,
+	                                 Version newStorageVersion,
+	                                 int64_t& bytesLeft,
+	                                 UnlimitedCommitBytes unlimitedCommitBytes);
 	void makeVersionDurable(Version version);
 	void makeTssQuarantineDurable();
 	Future<bool> restoreDurableState();
@@ -8207,7 +8213,9 @@ ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData meta
 }
 
 ACTOR Future<Void> updateStorage(StorageServer* data) {
+	state UnlimitedCommitBytes unlimitedCommitBytes = UnlimitedCommitBytes::False;
 	loop {
+		unlimitedCommitBytes = UnlimitedCommitBytes::False;
 		ASSERT(data->durableVersion.get() == data->storageVersion());
 		if (g_network->isSimulated()) {
 			double endTime =
@@ -8296,14 +8304,15 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 				addedRanges = true;
 				// Remove commit byte limit to make sure the private mutaiton(s) associated with the
 				// `addRange` are committed.
-				bytesLeft = SERVER_KNOBS->STORAGE_COMMIT_BYTES_UNLIMITED;
+				unlimitedCommitBytes = UnlimitedCommitBytes::True;
 			}
 		}
 
 		// Write mutations to storage until we reach the desiredVersion or have written too much (bytesleft)
 		state double beforeStorageUpdates = now();
 		loop {
-			state bool done = data->storage.makeVersionMutationsDurable(newOldestVersion, desiredVersion, bytesLeft);
+			state bool done = data->storage.makeVersionMutationsDurable(
+			    newOldestVersion, desiredVersion, bytesLeft, unlimitedCommitBytes);
 			if (data->tenantMap.getLatestVersion() < newOldestVersion) {
 				data->tenantMap.createNewVersion(newOldestVersion);
 				data->tenantPrefixIndex.createNewVersion(newOldestVersion);
@@ -8741,8 +8750,9 @@ void StorageServerDisk::writeMutations(const VectorRef<MutationRef>& mutations,
 
 bool StorageServerDisk::makeVersionMutationsDurable(Version& prevStorageVersion,
                                                     Version newStorageVersion,
-                                                    int64_t& bytesLeft) {
-	if (bytesLeft <= 0)
+                                                    int64_t& bytesLeft,
+                                                    UnlimitedCommitBytes unlimitedCommitBytes) {
+	if (!unlimitedCommitBytes && bytesLeft <= 0)
 		return true;
 
 	// Apply mutations from the mutationLog
