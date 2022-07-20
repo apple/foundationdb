@@ -177,7 +177,7 @@ public:
 				return false;
 			}
 		}
-		bool isMachineProcess() const { return strcmp(name, "Machine") == 0; }
+		bool isMachineProcess() const { return name == "Machine"; }
 
 		Reference<IListener> getListener(const NetworkAddress& addr) const {
 			auto listener = listenerMap.find(addr);
