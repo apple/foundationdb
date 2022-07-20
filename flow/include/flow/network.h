@@ -690,7 +690,7 @@ public:
 
 	// Make an outgoing connection to the given address.  May return an error or block indefinitely in case of
 	// connection problems!
-	virtual Future<Reference<IConnection>> connect(NetworkAddress toAddr) = 0;
+	virtual Future<Reference<IConnection>> connect(NetworkAddress toAddr, boost::asio::ip::tcp::socket* existingSocket = nullptr) = 0;
 
 	virtual Future<Reference<IConnection>> connectExternal(NetworkAddress toAddr) = 0;
 

@@ -146,7 +146,7 @@ public:
 	void initMetrics() override;
 
 	// INetworkConnections interface
-	Future<Reference<IConnection>> connect(NetworkAddress toAddr) override;
+	Future<Reference<IConnection>> connect(NetworkAddress toAddr, tcp::socket* existingSocket = nullptr) override;
 	Future<Reference<IConnection>> connectExternal(NetworkAddress toAddr) override;
 	Future<Reference<IUDPSocket>> createUDPSocket(NetworkAddress toAddr) override;
 	Future<Reference<IUDPSocket>> createUDPSocket(bool isV6) override;
@@ -839,6 +839,11 @@ public:
 	  : id(nondeterministicRandom()->randomUniqueID()), socket(io_service), ssl_sock(socket, context->mutate()),
 	    sslContext(context) {}
 
+	explicit SSLConnection(Reference<ReferencedObject<boost::asio::ssl::context>> context,
+						   tcp::socket* existingSocket)
+	  : id(nondeterministicRandom()->randomUniqueID()), socket(std::move(*existingSocket)), ssl_sock(socket, context->mutate()),
+	    sslContext(context) {}
+
 	// This is not part of the IConnection interface, because it is wrapped by INetwork::connect()
 	ACTOR static Future<Reference<IConnection>> connect(boost::asio::io_service* ios,
 	                                                    Reference<ReferencedObject<boost::asio::ssl::context>> context,
@@ -858,13 +863,15 @@ public:
 			}
 		}
 
-		state Reference<SSLConnection> self(new SSLConnection(*ios, context));
-		self->peer_address = addr;
 		if (existingSocket != nullptr) {
-			self->socket = std::move(*existingSocket);
+			Reference<SSLConnection> self(new SSLConnection(context, existingSocket));
+			self->peer_address = addr;
+			self->init();
 			return self;
 		}
 
+		state Reference<SSLConnection> self(new SSLConnection(*ios, context));
+		self->peer_address = addr;
 		try {
 			auto to = tcpEndpoint(self->peer_address);
 			BindPromise p("N2_ConnectError", self->id);
@@ -980,28 +987,43 @@ public:
 				onHandshook = p.getFuture();
 				self->ssl_sock.async_handshake(boost::asio::ssl::stream_base::client, std::move(p));
 			}
+			std::cerr << "RenxuanHandshake2" << std::endl;
 			wait(onHandshook);
+			std::cerr << "RenxuanHandshake3" << std::endl;
 			wait(delay(0, TaskPriority::Handshake));
+			std::cerr << "RenxuanHandshake4" << std::endl;
 			connected.send(Void());
+			std::cerr << "RenxuanHandshake5" << std::endl;
 		} catch (...) {
+			std::cerr << "RenxuanHandshakeError" << std::endl;
 			self->closeSocket();
 			connected.sendError(connection_failed());
 		}
 	}
 
 	ACTOR static Future<Void> connectHandshakeWrapper(Reference<SSLConnection> self) {
+		std::cerr << "RenxuanHandshake" << std::endl;
 		wait(g_network->networkInfo.handshakeLock->take());
+		std::cerr << "RenxuanHandshake0" << std::endl;
 		state FlowLock::Releaser releaser(*g_network->networkInfo.handshakeLock);
 
 		Promise<Void> connected;
+		std::cerr << "RenxuanHandshake1" << std::endl;
 		doConnectHandshake(self, connected);
 		try {
 			choose {
-				when(wait(connected.getFuture())) { return Void(); }
-				when(wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT))) { throw connection_failed(); }
+				when(wait(connected.getFuture())) {
+					std::cerr << "RenxuanHandshake6" << std::endl;
+					return Void();
+				}
+				when(wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT))) {
+					std::cerr << "RenxuanHandshakeFailed" << std::endl;
+					throw connection_failed();
+				}
 			}
 		} catch (Error& e) {
 			// Either the connection failed, or was cancelled by the caller
+			std::cerr << "RenxuanHandshakeError2" << std::endl;
 			if (e.code() != error_code_actor_cancelled) {
 				std::pair<IPAddress, uint16_t> peerIP = std::make_pair(self->peer_address.ip, self->peer_address.port);
 				auto iter(g_network->networkInfo.serverTLSConnectionThrottler.find(peerIP));
@@ -1823,10 +1845,10 @@ THREAD_HANDLE Net2::startThread(THREAD_FUNC_RETURN (*func)(void*), void* arg, in
 	return ::startThread(func, arg, stackSize, name);
 }
 
-Future<Reference<IConnection>> Net2::connect(NetworkAddress toAddr) {
+Future<Reference<IConnection>> Net2::connect(NetworkAddress toAddr, tcp::socket* existingSocket) {
 	if (toAddr.isTLS()) {
 		initTLS(ETLSInitState::CONNECT);
-		return SSLConnection::connect(&this->reactor.ios, this->sslContextVar.get(), toAddr);
+		return SSLConnection::connect(&this->reactor.ios, this->sslContextVar.get(), toAddr, existingSocket);
 	}
 
 	return Connection::connect(&this->reactor.ios, toAddr);
