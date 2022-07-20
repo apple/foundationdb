@@ -85,8 +85,8 @@ struct WriteDuringReadWorkload : TestWorkload {
 		minNode = std::max(minNode, nodes - newNodes);
 		nodes = newNodes;
 
-		TEST(adjacentKeys &&
-		     (nodes + minNode) > CLIENT_KNOBS->KEY_SIZE_LIMIT); // WriteDuringReadWorkload testing large keys
+		CODE_PROBE(adjacentKeys && (nodes + minNode) > CLIENT_KNOBS->KEY_SIZE_LIMIT,
+		           "WriteDuringReadWorkload testing large keys");
 
 		useExtraDB = g_simulator.extraDB != nullptr;
 		if (useExtraDB) {

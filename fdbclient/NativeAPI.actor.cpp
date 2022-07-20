@@ -170,7 +170,7 @@ void DatabaseContext::addTssMapping(StorageServerInterface const& ssi, StorageSe
 			if (result->second.id() == tssi.id()) {
 				metrics = tssMetrics[tssi.id()];
 			} else {
-				TEST(true); // SS now maps to new TSS! This will probably never happen in practice
+				CODE_PROBE(true, "SS now maps to new TSS! This will probably never happen in practice");
 				tssMetrics.erase(result->second.id());
 				metrics = makeReference<TSSMetrics>();
 				tssMetrics[tssi.id()] = metrics;
@@ -444,7 +444,7 @@ void DatabaseContext::validateVersion(Version version) const {
 		throw client_invalid_operation();
 	}
 	if (switchable && version < minAcceptableReadVersion) {
-		TEST(true); // Attempted to read a version lower than any this client has seen from the current cluster
+		CODE_PROBE(true, "Attempted to read a version lower than any this client has seen from the current cluster");
 		throw transaction_too_old();
 	}
 
@@ -1114,8 +1114,8 @@ ACTOR static Future<Void> handleTssMismatches(DatabaseContext* cx) {
 			state bool quarantine = CLIENT_KNOBS->QUARANTINE_TSS_ON_MISMATCH;
 			TraceEvent(SevWarnAlways, quarantine ? "TSS_QuarantineMismatch" : "TSS_KillMismatch")
 			    .detail("TSSID", data.first.toString());
-			TEST(quarantine); // Quarantining TSS because it got mismatch
-			TEST(!quarantine); // Killing TSS because it got mismatch
+			CODE_PROBE(quarantine, "Quarantining TSS because it got mismatch");
+			CODE_PROBE(!quarantine, "Killing TSS because it got mismatch");
 
 			tr = makeReference<ReadYourWritesTransaction>(Database(Reference<DatabaseContext>::addRef(cx)));
 			state int tries = 0;
@@ -1154,7 +1154,7 @@ ACTOR static Future<Void> handleTssMismatches(DatabaseContext* cx) {
 			// clear out txn so that the extra DatabaseContext ref gets decref'd and we can free cx
 			tr = makeReference<ReadYourWritesTransaction>();
 		} else {
-			TEST(true); // Not handling TSS with mismatch because it's already gone
+			CODE_PROBE(true, "Not handling TSS with mismatch because it's already gone");
 		}
 	}
 }
@@ -1860,7 +1860,7 @@ bool DatabaseContext::getCachedLocations(const Optional<TenantName>& tenantName,
 	loop {
 		auto r = reverse ? end : begin;
 		if (!r->value()) {
-			TEST(result.size()); // had some but not all cached locations
+			CODE_PROBE(result.size(), "had some but not all cached locations");
 			result.clear();
 			return false;
 		}
@@ -1907,7 +1907,7 @@ Reference<LocationInfo> DatabaseContext::setCachedLocation(const Optional<Tenant
 	int maxEvictionAttempts = 100, attempts = 0;
 	auto loc = makeReference<LocationInfo>(serverRefs);
 	while (locationCache.size() > locationCacheSize && attempts < maxEvictionAttempts) {
-		TEST(true); // NativeAPI storage server locationCache entry evicted
+		CODE_PROBE(true, "NativeAPI storage server locationCache entry evicted");
 		attempts++;
 		auto r = locationCache.randomRange();
 		Key begin = r.begin(), end = r.end(); // insert invalidates r, so can't be passed a mere reference into it
@@ -2091,7 +2091,7 @@ Future<Void> DatabaseContext::onConnected() {
 
 ACTOR static Future<Void> switchConnectionRecordImpl(Reference<IClusterConnectionRecord> connRecord,
                                                      DatabaseContext* self) {
-	TEST(true); // Switch connection file
+	CODE_PROBE(true, "Switch connection file");
 	TraceEvent("SwitchConnectionRecord")
 	    .detail("ClusterFile", connRecord->toString())
 	    .detail("ConnectionString", connRecord->getConnectionString().toString());
@@ -2152,7 +2152,7 @@ void DatabaseContext::expireThrottles() {
 	for (auto& priorityItr : throttledTags) {
 		for (auto tagItr = priorityItr.second.begin(); tagItr != priorityItr.second.end();) {
 			if (tagItr->second.expired()) {
-				TEST(true); // Expiring client throttle
+				CODE_PROBE(true, "Expiring client throttle");
 				tagItr = priorityItr.second.erase(tagItr);
 			} else {
 				++tagItr;
@@ -2638,7 +2638,7 @@ bool DatabaseContext::isCurrentGrvProxy(UID proxyId) const {
 		if (proxy.id() == proxyId)
 			return true;
 	}
-	TEST(true); // stale GRV proxy detected
+	CODE_PROBE(true, "stale GRV proxy detected");
 	return false;
 }
 
@@ -2875,6 +2875,7 @@ ACTOR Future<KeyRangeLocationInfo> getKeyLocation_internal(Database cx,
 					auto locationInfo =
 					    cx->setCachedLocation(tenant, rep.tenantEntry, rep.results[0].first, rep.results[0].second);
 					updateTssMappings(cx, rep);
+					updateTagMappings(cx, rep);
 
 					return KeyRangeLocationInfo(
 					    rep.tenantEntry,
@@ -3629,13 +3630,13 @@ ACTOR Future<Version> watchValue(Database cx, Reference<const WatchParameters> p
 				wait(delay(CLIENT_KNOBS->UNKNOWN_TENANT_RETRY_DELAY, parameters->taskID));
 			} else if (e.code() == error_code_watch_cancelled || e.code() == error_code_process_behind) {
 				// clang-format off
-				TEST(e.code() == error_code_watch_cancelled); // Too many watches on the storage server, poll for changes instead
-				TEST(e.code() == error_code_process_behind); // The storage servers are all behind
+				CODE_PROBE(e.code() == error_code_watch_cancelled, "Too many watches on the storage server, poll for changes instead");
+				CODE_PROBE(e.code() == error_code_process_behind, "The storage servers are all behind");
 				// clang-format on
 				wait(delay(CLIENT_KNOBS->WATCH_POLLING_TIME, parameters->taskID));
 			} else if (e.code() == error_code_timed_out) { // The storage server occasionally times out watches in case
 				                                           // it was cancelled
-				TEST(true); // A watch timed out
+				CODE_PROBE(true, "A watch timed out");
 				wait(delay(CLIENT_KNOBS->FUTURE_VERSION_RETRY_DELAY, parameters->taskID));
 			} else {
 				state Error err = e;
@@ -3667,7 +3668,8 @@ ACTOR Future<Void> watchStorageServerResp(int64_t tenantId, Key key, Database cx
 			}
 			// ABA happens
 			else {
-				TEST(true); // ABA issue where the version returned from the server is less than the version in the map
+				CODE_PROBE(true,
+				           "ABA issue where the version returned from the server is less than the version in the map");
 
 				// case 2: version_1 < version_2 and future_count == 1
 				if (metadata->watchPromise.getFutureReferenceCount() == 1) {
@@ -3758,7 +3760,8 @@ Future<Void> getWatchFuture(Database cx, Reference<WatchParameters> parameters) 
 	// case 3: val_1 != val_2 && version_2 > version_1 (received watch with different value and a higher version so
 	// recreate in SS)
 	else if (parameters->version > metadata->parameters->version) {
-		TEST(true); // Setting a watch that has a different value than the one in the map but a higher version (newer)
+		CODE_PROBE(true,
+		           "Setting a watch that has a different value than the one in the map but a higher version (newer)");
 		cx->deleteWatchMetadata(parameters->tenant.tenantId, parameters->key);
 
 		metadata->watchPromise.send(parameters->version);
@@ -3773,10 +3776,10 @@ Future<Void> getWatchFuture(Database cx, Reference<WatchParameters> parameters) 
 	}
 	// case 5: val_1 != val_2 && version_1 == version_2 (received watch with different value but same version)
 	else if (metadata->parameters->version == parameters->version) {
-		TEST(true); // Setting a watch which has a different value than the one in the map but the same version
+		CODE_PROBE(true, "Setting a watch which has a different value than the one in the map but the same version");
 		return sameVersionDiffValue(cx, parameters);
 	}
-	TEST(true); // Setting a watch which has a different value than the one in the map but a lower version (older)
+	CODE_PROBE(true, "Setting a watch which has a different value than the one in the map but a lower version (older)");
 
 	// case 4: val_1 != val_2 && version_2 < version_1
 	return Void();
@@ -3970,7 +3973,7 @@ Future<RangeResultFamily> getExactRange(Reference<TransactionState> trState,
 						    .detail("BlockBytes", rep.data.expectedSize());
 						ASSERT(false);
 					}
-					TEST(true); // GetKeyValuesFamilyReply.more in getExactRange
+					CODE_PROBE(true, "GetKeyValuesFamilyReply.more in getExactRange");
 					// Make next request to the same shard with a beginning key just after the last key returned
 					if (reverse)
 						locations[shard].range =
@@ -3981,7 +3984,7 @@ Future<RangeResultFamily> getExactRange(Reference<TransactionState> trState,
 				}
 
 				if (!more || locations[shard].range.empty()) {
-					TEST(true); // getExactrange (!more || locations[shard].first.empty())
+					CODE_PROBE(true, "getExactrange (!more || locations[shard].first.empty())");
 					if (shard == locations.size() - 1) {
 						const KeyRangeRef& range = locations[shard].range;
 						KeyRef begin = reverse ? keys.begin : range.end;
@@ -3991,7 +3994,7 @@ Future<RangeResultFamily> getExactRange(Reference<TransactionState> trState,
 							output.more = false;
 							return output;
 						}
-						TEST(true); // Multiple requests of key locations
+						CODE_PROBE(true, "Multiple requests of key locations");
 
 						keys = KeyRangeRef(begin, end);
 						break;
@@ -4431,7 +4434,7 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 
 				if (!rep.more) {
 					ASSERT(modifiedSelectors);
-					TEST(true); // !GetKeyValuesFamilyReply.more and modifiedSelectors in getRange
+					CODE_PROBE(true, "!GetKeyValuesFamilyReply.more and modifiedSelectors in getRange");
 
 					if (!rep.data.size()) {
 						RangeResultFamily result = wait(
@@ -4455,7 +4458,7 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 					else
 						begin = firstGreaterOrEqual(shard.end);
 				} else {
-					TEST(true); // GetKeyValuesFamilyReply.more in getRange
+					CODE_PROBE(true, "GetKeyValuesFamilyReply.more in getRange");
 					if (reverse)
 						end = firstGreaterOrEqual(output[output.size() - 1].key);
 					else
@@ -4574,7 +4577,7 @@ static Future<Void> tssStreamComparison(Request request,
 			} else {
 				tssData.metrics->ssError(e.code());
 			}
-			TEST(e.code() != error_code_end_of_stream); // SS got error in TSS stream comparison
+			CODE_PROBE(e.code() != error_code_end_of_stream, "SS got error in TSS stream comparison");
 		}
 
 		state double sleepTime = std::max(startTime + FLOW_KNOBS->LOAD_BALANCE_TSS_TIMEOUT - now(), 0.0);
@@ -4586,7 +4589,7 @@ static Future<Void> tssStreamComparison(Request request,
 				}
 				when(wait(delay(sleepTime))) {
 					++tssData.metrics->tssTimeouts;
-					TEST(true); // Got TSS timeout in stream comparison
+					CODE_PROBE(true, "Got TSS timeout in stream comparison");
 				}
 			}
 		} catch (Error& e) {
@@ -4601,7 +4604,7 @@ static Future<Void> tssStreamComparison(Request request,
 			} else {
 				tssData.metrics->tssError(e.code());
 			}
-			TEST(e.code() != error_code_end_of_stream); // TSS got error in TSS stream comparison
+			CODE_PROBE(e.code() != error_code_end_of_stream, "TSS got error in TSS stream comparison");
 		}
 
 		if (!ssEndOfStream || !tssEndOfStream) {
@@ -4614,11 +4617,11 @@ static Future<Void> tssStreamComparison(Request request,
 			// FIXME: this code is pretty much identical to LoadBalance.h
 			// TODO could add team check logic in if we added synchronous way to turn this into a fixed getRange request
 			// and send it to the whole team and compare? I think it's fine to skip that for streaming though
-			TEST(ssEndOfStream != tssEndOfStream); // SS or TSS stream finished early!
+			CODE_PROBE(ssEndOfStream != tssEndOfStream, "SS or TSS stream finished early!");
 
 			// skip tss comparison if both are end of stream
 			if ((!ssEndOfStream || !tssEndOfStream) && !TSS_doCompare(ssReply.get(), tssReply.get())) {
-				TEST(true); // TSS mismatch in stream comparison
+				CODE_PROBE(true, "TSS mismatch in stream comparison");
 				TraceEvent mismatchEvent(
 				    (g_network->isSimulated() && g_simulator.tssMode == ISimulator::TSSMode::EnabledDropMutations)
 				        ? SevWarnAlways
@@ -4630,10 +4633,10 @@ static Future<Void> tssStreamComparison(Request request,
 				if (tssData.metrics->shouldRecordDetailedMismatch()) {
 					TSS_traceMismatch(mismatchEvent, request, ssReply.get(), tssReply.get());
 
-					TEST(FLOW_KNOBS
-					         ->LOAD_BALANCE_TSS_MISMATCH_TRACE_FULL); // Tracing Full TSS Mismatch in stream comparison
-					TEST(!FLOW_KNOBS->LOAD_BALANCE_TSS_MISMATCH_TRACE_FULL); // Tracing Partial TSS Mismatch in stream
-					                                                         // comparison and storing the rest in FDB
+					CODE_PROBE(FLOW_KNOBS->LOAD_BALANCE_TSS_MISMATCH_TRACE_FULL,
+					           "Tracing Full TSS Mismatch in stream comparison");
+					CODE_PROBE(!FLOW_KNOBS->LOAD_BALANCE_TSS_MISMATCH_TRACE_FULL,
+					           "Tracing Partial TSS Mismatch in stream comparison and storing the rest in FDB");
 
 					if (!FLOW_KNOBS->LOAD_BALANCE_TSS_MISMATCH_TRACE_FULL) {
 						mismatchEvent.disable();
@@ -4673,7 +4676,7 @@ maybeDuplicateTSSStreamFragment(Request& req, QueueModel* model, RequestStream<R
 		Optional<TSSEndpointData> tssData = model->getTssData(ssStream->getEndpoint().token.first());
 
 		if (tssData.present()) {
-			TEST(true); // duplicating stream to TSS
+			CODE_PROBE(true, "duplicating stream to TSS");
 			resetReply(req);
 			// FIXME: optimize to avoid creating new netNotifiedQueueWithAcknowledgements for each stream duplication
 			RequestStream<Request> tssRequestStream(tssData.get().endpoint);
@@ -4719,6 +4722,9 @@ ACTOR Future<Void> getRangeStreamFragment(Reference<TransactionState> trState,
 			req.spanContext = spanContext;
 			req.limit = reverse ? -CLIENT_KNOBS->REPLY_BYTE_LIMIT : CLIENT_KNOBS->REPLY_BYTE_LIMIT;
 			req.limitBytes = std::numeric_limits<int>::max();
+			// leaving the flag off for now to prevent data fetches stall under heavy load
+			// it is used to inform the storage that the rangeRead is for Fetch
+			// req.isFetchKeys = (trState->taskID == TaskPriority::FetchKeys);
 			trState->cx->getLatestCommitVersions(
 			    locations[shard].locations, req.version, trState, req.ssLatestCommitVersions);
 
@@ -4870,7 +4876,7 @@ ACTOR Future<Void> getRangeStreamFragment(Reference<TransactionState> trState,
 							    .detail("BlockBytes", rep.data.expectedSize());
 							ASSERT(false);
 						}
-						TEST(true); // GetKeyValuesStreamReply.more in getRangeStream
+						CODE_PROBE(true, "GetKeyValuesStreamReply.more in getRangeStream");
 						// Make next request to the same shard with a beginning key just after the last key returned
 						if (reverse)
 							locations[shard].range =
@@ -5268,7 +5274,7 @@ ACTOR Future<Void> watch(Reference<Watch> watch,
 						when(wait(watch->watchFuture)) { break; }
 
 						when(wait(cx->connectionFileChanged())) {
-							TEST(true); // Recreated a watch after switch
+							CODE_PROBE(true, "Recreated a watch after switch");
 							cx->clearWatchMetadata();
 							watch->watchFuture = watchValueMap(cx->minAcceptableReadVersion,
 							                                   tenantInfo,
@@ -5441,18 +5447,18 @@ Future<RangeResultFamily> Transaction::getRangeInternal(const KeySelector& begin
 
 	KeySelector b = begin;
 	if (b.orEqual) {
-		TEST(true); // Native begin orEqual==true
+		CODE_PROBE(true, "Native begin orEqual==true");
 		b.removeOrEqual(b.arena());
 	}
 
 	KeySelector e = end;
 	if (e.orEqual) {
-		TEST(true); // Native end orEqual==true
+		CODE_PROBE(true, "Native end orEqual==true");
 		e.removeOrEqual(e.arena());
 	}
 
 	if (b.offset >= e.offset && b.getKey() >= e.getKey()) {
-		TEST(true); // Native range inverted
+		CODE_PROBE(true, "Native range inverted");
 		return RangeResultFamily();
 	}
 
@@ -5515,18 +5521,18 @@ Future<Void> Transaction::getRangeStream(const PromiseStream<RangeResult>& resul
 
 	KeySelector b = begin;
 	if (b.orEqual) {
-		TEST(true); // Native stream begin orEqual==true
+		CODE_PROBE(true, "Native stream begin orEqual==true");
 		b.removeOrEqual(b.arena());
 	}
 
 	KeySelector e = end;
 	if (e.orEqual) {
-		TEST(true); // Native stream end orEqual==true
+		CODE_PROBE(true, "Native stream end orEqual==true");
 		e.removeOrEqual(e.arena());
 	}
 
 	if (b.offset >= e.offset && b.getKey() >= e.getKey()) {
-		TEST(true); // Native stream range inverted
+		CODE_PROBE(true, "Native stream range inverted");
 		results.sendError(end_of_stream());
 		return Void();
 	}
@@ -5629,7 +5635,7 @@ void Transaction::atomicOp(const KeyRef& key,
 	if (addConflictRange && operationType != MutationRef::SetVersionstampedKey)
 		t.write_conflict_ranges.push_back(req.arena, r);
 
-	TEST(true); // NativeAPI atomic operation
+	CODE_PROBE(true, "NativeAPI atomic operation");
 }
 
 void Transaction::clear(const KeyRangeRef& range, AddConflictRange addConflictRange) {
@@ -5715,7 +5721,7 @@ double Transaction::getBackoff(int errCode) {
 			if (priorityItr != trState->cx->throttledTags.end()) {
 				auto tagItr = priorityItr->second.find(tag);
 				if (tagItr != priorityItr->second.end()) {
-					TEST(true); // Returning throttle backoff
+					CODE_PROBE(true, "Returning throttle backoff");
 					returnedBackoff = std::max(
 					    returnedBackoff,
 					    std::min(CLIENT_KNOBS->TAG_THROTTLE_RECHECK_INTERVAL, tagItr->second.throttleDuration()));
@@ -6246,7 +6252,7 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 				KeyRangeRef selfConflictingRange =
 				    intersects(req.transaction.write_conflict_ranges, req.transaction.read_conflict_ranges).get();
 
-				TEST(true); // Waiting for dummy transaction to report commit_unknown_result
+				CODE_PROBE(true, "Waiting for dummy transaction to report commit_unknown_result");
 
 				wait(commitDummyTransaction(trState, singleKeyRange(selfConflictingRange.begin)));
 			}
@@ -6584,7 +6590,7 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 		if (value.get().size() != 33) {
 			throw invalid_option_value();
 		}
-		TEST(true); // Adding link in FDBTransactionOptions::SPAN_PARENT
+		CODE_PROBE(true, "Adding link in FDBTransactionOptions::SPAN_PARENT");
 		span.setParent(BinaryReader::fromStringRef<SpanContext>(value.get(), IncludeVersion()));
 		break;
 
@@ -6664,10 +6670,10 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion(SpanContext parentSpa
 						for (auto& tag : tags) {
 							auto itr = v.tagThrottleInfo.find(tag.first);
 							if (itr == v.tagThrottleInfo.end()) {
-								TEST(true); // Removing client throttle
+								CODE_PROBE(true, "Removing client throttle");
 								priorityThrottledTags.erase(tag.first);
 							} else {
-								TEST(true); // Setting client throttle
+								CODE_PROBE(true, "Setting client throttle");
 								auto result = priorityThrottledTags.try_emplace(tag.first, itr->second);
 								if (!result.second) {
 									result.first->second.update(itr->second);
@@ -6850,7 +6856,7 @@ ACTOR Future<Version> extractReadVersion(Reference<TransactionState> trState,
 				if (itr->second.expired()) {
 					priorityThrottledTags.erase(itr);
 				} else if (itr->second.throttleDuration() > 0) {
-					TEST(true); // throttling transaction after getting read version
+					CODE_PROBE(true, "throttling transaction after getting read version");
 					++trState->cx->transactionReadVersionsThrottled;
 					throw tag_throttled();
 				}
@@ -6956,12 +6962,12 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 			}
 
 			if (maxThrottleDelay > 0.0 && !canRecheck) { // TODO: allow delaying?
-				TEST(true); // Throttling tag before GRV request
+				CODE_PROBE(true, "Throttling tag before GRV request");
 				++trState->cx->transactionReadVersionsThrottled;
 				readVersion = tag_throttled();
 				return readVersion;
 			} else {
-				TEST(maxThrottleDelay > 0.0); // Rechecking throttle
+				CODE_PROBE(maxThrottleDelay > 0.0, "Rechecking throttle");
 			}
 
 			for (auto& tag : trState->options.tags) {
@@ -7340,10 +7346,10 @@ ACTOR Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> getReadHotRanges(Da
 			wait(waitForAll(fReplies));
 
 			if (nLocs == 1) {
-				TEST(true); // Single-shard read hot range request
+				CODE_PROBE(true, "Single-shard read hot range request");
 				return fReplies[0].get().readHotRanges;
 			} else {
-				TEST(true); // Multi-shard read hot range request
+				CODE_PROBE(true, "Multi-shard read hot range request");
 				Standalone<VectorRef<ReadHotRangeWithMetrics>> results;
 				for (int i = 0; i < nLocs; i++) {
 					results.append(results.arena(),
@@ -7817,7 +7823,7 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 						           granuleEndKey.printable(),
 						           begin,
 						           rv,
-						           workerId.toString());
+						           workerId.toString().substr(0, 5));
 					}
 					ASSERT(!rep.chunks.empty());
 					results.arena().dependsOn(rep.arena);
@@ -7849,6 +7855,17 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 							ASSERT(chunk.tenantPrefix.get() == tenantPrefix.get());
 						}
 
+						if (!results.empty() && results.back().keyRange.end != chunk.keyRange.begin) {
+							ASSERT(results.back().keyRange.end > chunk.keyRange.begin);
+							ASSERT(results.back().keyRange.end <= chunk.keyRange.end);
+							CODE_PROBE(true, "Merge while reading granule range");
+							while (!results.empty() && results.back().keyRange.begin >= chunk.keyRange.begin) {
+								// TODO: we can't easily un-depend the arenas for these guys, but that's ok as this
+								// should be rare
+								results.pop_back();
+							}
+							ASSERT(results.empty() || results.back().keyRange.end == chunk.keyRange.begin);
+						}
 						results.push_back(results.arena(), chunk);
 						StringRef chunkEndKey = chunk.keyRange.end;
 						if (tenantPrefix.present()) {
@@ -7871,7 +7888,13 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 			}
 		} catch (Error& e) {
 			if (BG_REQUEST_DEBUG) {
-				fmt::print("BGReq got error {}\n", e.name());
+				fmt::print("Blob granule request for [{0} - {1}) @ {2} - {3} got error from {4}: {5}\n",
+				           granuleStartKey.printable(),
+				           granuleEndKey.printable(),
+				           begin,
+				           rv,
+				           workerId.toString().substr(0, 5),
+				           e.name());
 			}
 			// worker is up but didn't actually have granule, or connection failed
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_connection_failed ||
@@ -8960,8 +8983,8 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
 	state std::vector<Future<Void>> onErrors(interfs.size());
 	state std::vector<MutationAndVersionStream> streams(interfs.size());
 
-	TEST(interfs.size() > 10); // Large change feed merge cursor
-	TEST(interfs.size() > 100); // Very large change feed merge cursor
+	CODE_PROBE(interfs.size() > 10, "Large change feed merge cursor");
+	CODE_PROBE(interfs.size() > 100, "Very large change feed merge cursor");
 
 	state UID mergeCursorUID = UID();
 	state std::vector<UID> debugUIDs;
@@ -9285,13 +9308,13 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 					interfs.emplace_back(locations[i].locations->getInterface(chosenLocations[i]),
 					                     locations[i].range & range);
 				}
-				TEST(true); // Change feed merge cursor
+				CODE_PROBE(true, "Change feed merge cursor");
 				// TODO (jslocum): validate connectionFileChanged behavior
 				wait(
 				    mergeChangeFeedStream(db, interfs, results, rangeID, &begin, end, replyBufferSize, canReadPopped) ||
 				    cx->connectionFileChanged());
 			} else {
-				TEST(true); // Change feed single cursor
+				CODE_PROBE(true, "Change feed single cursor");
 				StorageServerInterface interf = locations[0].locations->getInterface(chosenLocations[0]);
 				wait(singleChangeFeedStream(
 				         db, interf, range, results, rangeID, &begin, end, replyBufferSize, canReadPopped) ||
@@ -9307,7 +9330,7 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 				results->streams.clear();
 				results->storageData.clear();
 				if (e.code() == error_code_change_feed_popped) {
-					TEST(true); // getChangeFeedStreamActor got popped
+					CODE_PROBE(true, "getChangeFeedStreamActor got popped");
 					results->mutations.sendError(e);
 					results->refresh.sendError(e);
 				} else {

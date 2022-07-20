@@ -2,6 +2,10 @@ find_package(Threads REQUIRED)
 
 fdb_find_sources(FLOW_SRCS)
 
+# Remove files with `main` defined so we can create a link test executable.
+list(REMOVE_ITEM FLOW_SRCS TLSTest.cpp)
+list(REMOVE_ITEM FLOW_SRCS MkCertCli.cpp)
+
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
   list(APPEND FLOW_SRCS aarch64/memcmp.S aarch64/memcpy.S)
 endif()
@@ -13,7 +17,22 @@ configure_file(${CMAKE_CURRENT_SOURCE_DIR}/config.h.cmake ${CMAKE_CURRENT_BINARY
 add_flow_target(STATIC_LIBRARY NAME flow SRCS ${FLOW_SRCS})
 add_flow_target(STATIC_LIBRARY NAME flow_sampling SRCS ${FLOW_SRCS})
 
-foreach(ft flow flow_sampling)
+# When creating a static or shared library, undefined symbols will be ignored.
+# Since we want to ensure no symbols from other modules are used, create an
+# executable so the linker will throw errors if it can't find the declaration
+# of a symbol.
+add_flow_target(LINK_TEST NAME flowlinktest SRCS LinkTest.cpp)
+target_link_libraries(flowlinktest PRIVATE flow stacktrace)
+
+find_package(ZLIB)
+if(ZLIB_FOUND)
+  add_compile_definitions(ZLIB_LIB_SUPPORTED)
+  target_link_libraries(flow PRIVATE ZLIB::ZLIB)
+else()
+  message(STATUS "ZLIB package not found")
+endif()
+
+foreach(ft flow flow_sampling flowlinktest)
   target_include_directories(${ft} PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include")
 
   target_link_libraries(${ft} PRIVATE stacktrace)
@@ -67,7 +86,6 @@ target_compile_definitions(flow_sampling PRIVATE -DENABLE_SAMPLING)
 if(WIN32)
   add_dependencies(flow_sampling_actors flow_actors)
 endif()
-
 
 add_executable(mkcert MkCertCli.cpp)
 target_link_libraries(mkcert PUBLIC flow)

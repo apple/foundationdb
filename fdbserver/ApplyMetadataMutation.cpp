@@ -624,7 +624,7 @@ private:
 		if (!initialCommit)
 			txnStateStore->set(KeyValueRef(m.param1, m.param2));
 		confChange = true;
-		TEST(true); // Recovering at a higher version.
+		CODE_PROBE(true, "Recovering at a higher version.");
 	}
 
 	void checkSetVersionEpochKey(MutationRef m) {
@@ -636,7 +636,7 @@ private:
 		if (!initialCommit)
 			txnStateStore->set(KeyValueRef(m.param1, m.param2));
 		confChange = true;
-		TEST(true); // Setting version epoch
+		CODE_PROBE(true, "Setting version epoch");
 	}
 
 	void checkSetWriteRecoverKey(MutationRef m) {
@@ -646,7 +646,7 @@ private:
 		TraceEvent("WriteRecoveryKeySet", dbgid).log();
 		if (!initialCommit)
 			txnStateStore->set(KeyValueRef(m.param1, m.param2));
-		TEST(true); // Snapshot created, setting writeRecoveryKey in txnStateStore
+		CODE_PROBE(true, "Snapshot created, setting writeRecoveryKey in txnStateStore");
 	}
 
 	void checkSetTenantMapPrefix(MutationRef m) {
@@ -680,7 +680,7 @@ private:
 				writeMutation(privatized);
 			}
 
-			TEST(true); // Tenant added to map
+			CODE_PROBE(true, "Tenant added to map");
 		}
 	}
 
@@ -1068,7 +1068,7 @@ private:
 				writeMutation(privatized);
 			}
 
-			TEST(true); // Tenant cleared from map
+			CODE_PROBE(true, "Tenant cleared from map");
 		}
 	}
 

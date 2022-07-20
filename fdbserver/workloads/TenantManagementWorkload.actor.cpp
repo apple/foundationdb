@@ -23,6 +23,7 @@
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/TenantManagement.actor.h"
 #include "fdbclient/TenantSpecialKeys.actor.h"
+#include "fdbclient/libb64/decode.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/Knobs.h"
@@ -169,14 +170,14 @@ struct TenantManagementWorkload : TestWorkload {
 				} else {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
-					Optional<Value> lastIdVal = wait(tr->get(tenantLastIdKey));
-					int64_t previousId = lastIdVal.present() ? TenantMapEntry::prefixToId(lastIdVal.get()) : -1;
+					int64_t _nextId = wait(TenantAPI::getNextTenantId(tr));
+					int64_t nextId = _nextId;
 
 					std::vector<Future<Void>> createFutures;
 					for (auto tenant : tenantsToCreate) {
-						createFutures.push_back(success(TenantAPI::createTenantTransaction(tr, tenant, ++previousId)));
+						createFutures.push_back(success(TenantAPI::createTenantTransaction(tr, tenant, nextId++)));
 					}
-					tr->set(tenantLastIdKey, TenantMapEntry::idToPrefix(previousId));
+					tr->set(tenantLastIdKey, TenantMapEntry::idToPrefix(nextId - 1));
 					wait(waitForAll(createFutures));
 					wait(tr->commit());
 				}
@@ -423,8 +424,14 @@ struct TenantManagementWorkload : TestWorkload {
 
 		int64_t id;
 		std::string prefix;
+		std::string base64Prefix;
+		std::string printablePrefix;
 		jsonDoc.get("id", id);
-		jsonDoc.get("prefix", prefix);
+		jsonDoc.get("prefix.base64", base64Prefix);
+		jsonDoc.get("prefix.printable", printablePrefix);
+
+		prefix = base64::decoder::from_string(base64Prefix);
+		ASSERT(prefix == unprintable(printablePrefix));
 
 		Key prefixKey = KeyRef(prefix);
 		TenantMapEntry entry(id, prefixKey.substr(0, prefixKey.size() - 8));

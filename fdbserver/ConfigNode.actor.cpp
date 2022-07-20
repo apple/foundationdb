@@ -206,7 +206,7 @@ class ConfigNodeImpl {
 			// Handle a very rare case where a ConfigNode loses data between
 			// responding with a committed version and responding to the
 			// subsequent get changes request.
-			TEST(true); // ConfigNode data loss occurred on a minority of coordinators
+			CODE_PROBE(true, "ConfigNode data loss occurred on a minority of coordinators");
 			req.reply.sendError(process_behind()); // Reuse the process_behind error
 			return Void();
 		}
@@ -230,7 +230,8 @@ class ConfigNodeImpl {
 		state ConfigGeneration generation = wait(getGeneration(self));
 		++generation.liveVersion;
 		if (req.lastSeenLiveVersion.present()) {
-			TEST(req.lastSeenLiveVersion.get() >= generation.liveVersion); // Node is lagging behind some other node
+			CODE_PROBE(req.lastSeenLiveVersion.get() >= generation.liveVersion,
+			           "Node is lagging behind some other node");
 			generation.liveVersion = std::max(generation.liveVersion, req.lastSeenLiveVersion.get() + 1);
 		}
 		self->kvStore->set(KeyValueRef(currentGenerationKey, BinaryWriter::toValue(generation, IncludeVersion())));
