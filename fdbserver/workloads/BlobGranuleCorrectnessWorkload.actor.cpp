@@ -163,7 +163,6 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		// different parameters within those constraints
 		int64_t randomness = sharedRandomNumber;
 
-		// TODO CHANGE BACK
 		doMergeCheckAtEnd = randomness % 10 == 0;
 		randomness /= 10;
 
