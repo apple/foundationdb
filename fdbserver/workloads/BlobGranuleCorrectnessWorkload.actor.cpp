@@ -149,6 +149,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 
 	// parameters global across all clients
 	int64_t targetByteRate;
+	bool doMergeCheckAtEnd;
 
 	std::vector<Reference<ThreadData>> directories;
 	std::vector<Future<Void>> clients;
@@ -161,6 +162,9 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		// randomize global test settings based on shared parameter to get similar workload across tests, but then vary
 		// different parameters within those constraints
 		int64_t randomness = sharedRandomNumber;
+
+		doMergeCheckAtEnd = randomness % 10 == 0;
+		randomness /= 10;
 
 		// randomize between low and high directory count
 		int64_t targetDirectories = 1 + (randomness % 8);
@@ -452,10 +456,10 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 				}
 			}
 		}
-		TEST(beginCollapsed > 0); // BGCorrectness got collapsed request with beginVersion > 0
-		TEST(beginNotCollapsed > 0); // BGCorrectness got un-collapsed request with beginVersion > 0
-		TEST(beginCollapsed > 0 &&
-		     beginNotCollapsed > 0); // BGCorrectness got both collapsed and uncollapsed in the same request!
+		CODE_PROBE(beginCollapsed > 0, "BGCorrectness got collapsed request with beginVersion > 0");
+		CODE_PROBE(beginNotCollapsed > 0, "BGCorrectness got un-collapsed request with beginVersion > 0");
+		CODE_PROBE(beginCollapsed > 0 && beginNotCollapsed > 0,
+		           "BGCorrectness got both collapsed and uncollapsed in the same request!");
 
 		while (checkIt != threadData->keyData.end() && checkIt->first < endKeyExclusive) {
 			uint32_t key = checkIt->first;
@@ -608,20 +612,25 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 				auto endKeyIt = threadData->keyData.find(startKey);
 				ASSERT(endKeyIt != threadData->keyData.end());
 
-				int targetQueryBytes = (deterministicRandom()->randomInt(1, 20) * targetBytesReadPerQuery) / 10;
-				int estimatedQueryBytes = 0;
-				for (int i = 0; estimatedQueryBytes < targetQueryBytes && endKeyIt != threadData->keyData.end();
-				     i++, endKeyIt++) {
-					// iterate forward until end or target keys have passed
-					estimatedQueryBytes += (1 + endKeyIt->second.writes.size() - endKeyIt->second.nextClearIdx) *
-					                       threadData->targetValLength;
-				}
-
+				// sometimes force single key read, for edge case
 				state uint32_t endKey;
-				if (endKeyIt == threadData->keyData.end()) {
-					endKey = std::numeric_limits<uint32_t>::max();
+				if (deterministicRandom()->random01() < 0.01) {
+					endKey = startKey + 1;
 				} else {
-					endKey = endKeyIt->first;
+					int targetQueryBytes = (deterministicRandom()->randomInt(1, 20) * targetBytesReadPerQuery) / 10;
+					int estimatedQueryBytes = 0;
+					for (int i = 0; estimatedQueryBytes < targetQueryBytes && endKeyIt != threadData->keyData.end();
+					     i++, endKeyIt++) {
+						// iterate forward until end or target keys have passed
+						estimatedQueryBytes += (1 + endKeyIt->second.writes.size() - endKeyIt->second.nextClearIdx) *
+						                       threadData->targetValLength;
+					}
+
+					if (endKeyIt == threadData->keyData.end()) {
+						endKey = std::numeric_limits<uint32_t>::max();
+					} else {
+						endKey = endKeyIt->first;
+					}
 				}
 
 				range = KeyRangeRef(threadData->getKey(startKey, 0), threadData->getKey(endKey, 0));
@@ -905,7 +914,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		}
 		wait(self->checkTenantRanges(self, cx, threadData));
 
-		bool initialCheck = result;
+		state bool initialCheck = result;
 		result &= threadData->mismatches == 0 && (threadData->timeTravelTooOld == 0);
 
 		fmt::print("Blob Granule Workload Directory {0} {1}:\n", threadData->directoryID, result ? "passed" : "failed");
@@ -927,6 +936,12 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 
 		// For some reason simulation is still passing when this fails?.. so assert for now
 		ASSERT(result);
+
+		if (self->clientId == 0 && SERVER_KNOBS->BG_ENABLE_MERGING && self->doMergeCheckAtEnd) {
+			CODE_PROBE(true, "BGCorrectness clearing database and awaiting merge");
+			// TODO: Enable check
+			// wait(clearAndAwaitMerge(cx, threadData->directoryRange));
+		}
 
 		return result;
 	}

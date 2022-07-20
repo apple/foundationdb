@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbrpc/simulator.h"
@@ -67,18 +68,19 @@ struct SaveAndKillWorkload : TestWorkload {
 		ini.SetValue("META", "tssMode", format("%d", g_simulator.tssMode).c_str());
 		ini.SetValue("META", "mockDNS", INetworkConnections::net()->convertMockDNSToString().c_str());
 
+		ini.SetBoolValue("META", "enableEncryption", SERVER_KNOBS->ENABLE_ENCRYPTION);
+		ini.SetBoolValue("META", "enableTLogEncryption", SERVER_KNOBS->ENABLE_TLOG_ENCRYPTION);
+
 		std::vector<ISimulator::ProcessInfo*> processes = g_simulator.getAllProcesses();
 		std::map<NetworkAddress, ISimulator::ProcessInfo*> rebootingProcesses = g_simulator.currentlyRebootingProcesses;
 		std::map<std::string, ISimulator::ProcessInfo*> allProcessesMap;
 		for (const auto& [_, process] : rebootingProcesses) {
-			if (allProcessesMap.find(process->dataFolder) == allProcessesMap.end() &&
-			    process->name != "remote flow process") {
+			if (allProcessesMap.find(process->dataFolder) == allProcessesMap.end() && !process->isSpawnedKVProcess()) {
 				allProcessesMap[process->dataFolder] = process;
 			}
 		}
 		for (const auto& process : processes) {
-			if (allProcessesMap.find(process->dataFolder) == allProcessesMap.end() &&
-			    process->name != "remote flow process") {
+			if (allProcessesMap.find(process->dataFolder) == allProcessesMap.end() && !process->isSpawnedKVProcess()) {
 				allProcessesMap[process->dataFolder] = process;
 			}
 		}

@@ -199,7 +199,7 @@ class GetGenerationQuorum {
 				}
 			} catch (Error& e) {
 				if (e.code() == error_code_failed_to_reach_quorum) {
-					TEST(true); // Failed to reach quorum getting generation
+					CODE_PROBE(true, "Failed to reach quorum getting generation");
 					wait(delayJittered(
 					    std::clamp(0.005 * (1 << retries), 0.0, CLIENT_KNOBS->TIMEOUT_RETRY_UPPER_BOUND)));
 					++retries;

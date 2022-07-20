@@ -29,14 +29,14 @@
 #include <string>
 #include <string_view>
 
-#define ENCRYPT_INVALID_DOMAIN_ID 0
+#define ENCRYPT_INVALID_DOMAIN_ID -1
 #define ENCRYPT_INVALID_CIPHER_KEY_ID 0
 #define ENCRYPT_INVALID_RANDOM_SALT 0
 
-#define AUTH_TOKEN_SIZE 16
+#define AUTH_TOKEN_SIZE 32
 
-#define SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID -1
-#define ENCRYPT_HEADER_DOMAIN_ID -2
+#define SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID -2
+#define ENCRYPT_HEADER_DOMAIN_ID -3
 
 const std::string FDB_DEFAULT_ENCRYPT_DOMAIN_NAME = "FdbDefaultEncryptDomain";
 
@@ -53,6 +53,8 @@ typedef enum {
 
 static_assert(EncryptCipherMode::ENCRYPT_CIPHER_MODE_LAST <= std::numeric_limits<uint8_t>::max(),
               "EncryptCipherMode value overflow");
+
+EncryptCipherMode encryptModeFromString(const std::string& modeStr);
 
 // EncryptionHeader authentication modes
 // 1. NONE - No 'authentication token' generation needed for EncryptionHeader i.e. no protection against header OR

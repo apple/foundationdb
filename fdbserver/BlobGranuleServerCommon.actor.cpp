@@ -30,6 +30,18 @@
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // has to be last include
 
+// serialize change feed key as UID bytes, to use 16 bytes on disk
+Key granuleIDToCFKey(UID granuleID) {
+	BinaryWriter wr(Unversioned());
+	wr << granuleID;
+	return wr.toValue();
+}
+
+// parse change feed key back to UID, to be human-readable
+UID cfKeyToGranuleID(Key cfKey) {
+	return BinaryReader::fromStringRef<UID>(cfKey, Unversioned());
+}
+
 // Gets the latest granule history node for range that was persisted
 ACTOR Future<Optional<GranuleHistory>> getLatestGranuleHistory(Transaction* tr, KeyRange range) {
 	state KeyRange historyRange = blobGranuleHistoryKeyRangeFor(range);
@@ -62,13 +74,14 @@ ACTOR Future<Void> readGranuleFiles(Transaction* tr, Key* startKey, Key endKey, 
 			int64_t offset;
 			int64_t length;
 			int64_t fullFileLength;
+			Optional<BlobGranuleCipherKeysMeta> cipherKeysMeta;
 
 			std::tie(gid, version, fileType) = decodeBlobGranuleFileKey(it.key);
 			ASSERT(gid == granuleID);
 
-			std::tie(filename, offset, length, fullFileLength) = decodeBlobGranuleFileValue(it.value);
+			std::tie(filename, offset, length, fullFileLength, cipherKeysMeta) = decodeBlobGranuleFileValue(it.value);
 
-			BlobFileIndex idx(version, filename.toString(), offset, length, fullFileLength);
+			BlobFileIndex idx(version, filename.toString(), offset, length, fullFileLength, cipherKeysMeta);
 			if (fileType == 'S') {
 				ASSERT(files->snapshotFiles.empty() || files->snapshotFiles.back().version < idx.version);
 				files->snapshotFiles.push_back(idx);
@@ -170,8 +183,12 @@ void GranuleFiles::getFiles(Version beginVersion,
 	Version lastIncluded = invalidVersion;
 	if (snapshotF != snapshotFiles.end()) {
 		chunk.snapshotVersion = snapshotF->version;
-		chunk.snapshotFile = BlobFilePointerRef(
-		    replyArena, snapshotF->filename, snapshotF->offset, snapshotF->length, snapshotF->fullFileLength);
+		chunk.snapshotFile = BlobFilePointerRef(replyArena,
+		                                        snapshotF->filename,
+		                                        snapshotF->offset,
+		                                        snapshotF->length,
+		                                        snapshotF->fullFileLength,
+		                                        snapshotF->cipherKeysMeta);
 		lastIncluded = chunk.snapshotVersion;
 	} else {
 		chunk.snapshotVersion = invalidVersion;

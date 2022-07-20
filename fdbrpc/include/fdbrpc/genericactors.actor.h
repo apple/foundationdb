@@ -47,7 +47,7 @@ Future<REPLY_TYPE(Req)> retryBrokenPromise(RequestStream<Req, P> to, Req request
 				throw;
 			resetReply(request);
 			wait(delayJittered(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
-			TEST(true); // retryBrokenPromise
+			CODE_PROBE(true, "retryBrokenPromise");
 		}
 	}
 }
@@ -67,7 +67,7 @@ Future<REPLY_TYPE(Req)> retryBrokenPromise(RequestStream<Req, P> to, Req request
 				throw;
 			resetReply(request);
 			wait(delayJittered(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY, taskID));
-			TEST(true); // retryBrokenPromise with taskID
+			CODE_PROBE(true, "retryBrokenPromise with taskID");
 		}
 	}
 }

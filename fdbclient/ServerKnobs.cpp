@@ -20,6 +20,7 @@
 
 #include "fdbclient/ServerKnobs.h"
 #include "flow/IRandom.h"
+#include "flow/flow.h"
 
 #define init(...) KNOB_FN(__VA_ARGS__, INIT_ATOMIC_KNOB, INIT_KNOB)(__VA_ARGS__)
 
@@ -35,12 +36,13 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( MAX_VERSIONS_IN_FLIGHT,                100 * VERSIONS_PER_SECOND );
 	init( MAX_VERSIONS_IN_FLIGHT_FORCED,         6e5 * VERSIONS_PER_SECOND ); //one week of versions
 	init( ENABLE_VERSION_VECTOR,                               false );
+	init( ENABLE_VERSION_VECTOR_TLOG_UNICAST,                  false );
+
         bool buggifyShortReadWindow = randomize && BUGGIFY && !ENABLE_VERSION_VECTOR;
 	init( MAX_READ_TRANSACTION_LIFE_VERSIONS,      5 * VERSIONS_PER_SECOND ); if (randomize && BUGGIFY) MAX_READ_TRANSACTION_LIFE_VERSIONS = VERSIONS_PER_SECOND; else if (buggifyShortReadWindow) MAX_READ_TRANSACTION_LIFE_VERSIONS = std::max<int>(1, 0.1 * VERSIONS_PER_SECOND); else if( randomize && BUGGIFY ) MAX_READ_TRANSACTION_LIFE_VERSIONS = 10 * VERSIONS_PER_SECOND;
 	init( MAX_WRITE_TRANSACTION_LIFE_VERSIONS,     5 * VERSIONS_PER_SECOND ); if (randomize && BUGGIFY) MAX_WRITE_TRANSACTION_LIFE_VERSIONS=std::max<int>(1, 1 * VERSIONS_PER_SECOND);
 	init( MAX_COMMIT_BATCH_INTERVAL,                             2.0 ); if( randomize && BUGGIFY ) MAX_COMMIT_BATCH_INTERVAL = 0.5; // Each commit proxy generates a CommitTransactionBatchRequest at least this often, so that versions always advance smoothly
 	MAX_COMMIT_BATCH_INTERVAL = std::min(MAX_COMMIT_BATCH_INTERVAL, MAX_READ_TRANSACTION_LIFE_VERSIONS/double(2*VERSIONS_PER_SECOND)); // Ensure that the proxy commits 2 times every MAX_READ_TRANSACTION_LIFE_VERSIONS, otherwise the master will not give out versions fast enough
-	init( ENABLE_VERSION_VECTOR_TLOG_UNICAST,                  false );
 	init( MAX_VERSION_RATE_MODIFIER,                             0.1 );
 	init( MAX_VERSION_RATE_OFFSET,               VERSIONS_PER_SECOND ); // If the calculated version is more than this amount away from the expected version, it will be clamped to this value. This prevents huge version jumps.
 	init( ENABLE_VERSION_VECTOR_HA_OPTIMIZATION,               false );
@@ -117,9 +119,12 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 
 	// disk snapshot max timeout, to be put in TLog, storage and coordinator nodes
 	init( MAX_FORKED_PROCESS_OUTPUT,                            1024 );
-	init( SNAP_CREATE_MAX_TIMEOUT,                             300.0 );
+	init( SNAP_CREATE_MAX_TIMEOUT,        isSimulated ? 70.0 : 300.0 );
+	init( SNAP_MINIMUM_TIME_GAP,                                 5.0 );
+	init( SNAP_NETWORK_FAILURE_RETRY_LIMIT,                       10 );
 	init( MAX_STORAGE_SNAPSHOT_FAULT_TOLERANCE,                    1 );
 	init( MAX_COORDINATOR_SNAPSHOT_FAULT_TOLERANCE,                1 );
+	init( SNAPSHOT_ALL_STATEFUL_PROCESSES,                     false ); if ( randomize && BUGGIFY ) SNAPSHOT_ALL_STATEFUL_PROCESSES = true;
 
 	// Data distribution queue
 	init( HEALTH_POLL_TIME,                                      1.0 );
@@ -181,7 +186,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	/*
 		The bytesRead/byteSize radio. Will be declared as read hot when larger than this. 8.0 was chosen to avoid reporting table scan as read hot.
 	*/
-	init ( SHARD_READ_HOT_BANDWITH_MIN_PER_KSECONDS,      1666667 * 1000);
+	init ( SHARD_READ_HOT_BANDWIDTH_MIN_PER_KSECONDS,      1666667 * 1000);
 	/*
 		The read bandwidth of a given shard needs to be larger than this value in order to be evaluated if it's read hot. The roughly 1.67MB per second is calculated as following:
 			- Heuristic data suggests that each storage process can do max 500K read operations per second
@@ -269,7 +274,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( DEBOUNCE_RECRUITING_DELAY,                             5.0 );
 	init( DD_FAILURE_TIME,                                       1.0 ); if( randomize && BUGGIFY ) DD_FAILURE_TIME = 10.0;
 	init( DD_ZERO_HEALTHY_TEAM_DELAY,                            1.0 );
-	init( REMOTE_KV_STORE,                                     false ); if( randomize && BUGGIFY ) REMOTE_KV_STORE = true;
+	init( REMOTE_KV_STORE,                                     false );
 	init( REMOTE_KV_STORE_INIT_DELAY,                            0.1 );
 	init( REMOTE_KV_STORE_MAX_INIT_DURATION,                    10.0 );
 	init( REBALANCE_MAX_RETRIES,                                 100 );
@@ -580,6 +585,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( REMOVE_RETRY_DELAY,                                    1.0 );
 	init( MOVE_KEYS_KRM_LIMIT,                                  2000 ); if( randomize && BUGGIFY ) MOVE_KEYS_KRM_LIMIT = 2;
 	init( MOVE_KEYS_KRM_LIMIT_BYTES,                             1e5 ); if( randomize && BUGGIFY ) MOVE_KEYS_KRM_LIMIT_BYTES = 5e4; //This must be sufficiently larger than CLIENT_KNOBS->KEY_SIZE_LIMIT (fdbclient/Knobs.h) to ensure that at least two entries will be returned from an attempt to read a key range map
+	init( MOVE_SHARD_KRM_ROW_LIMIT,                            20000 );
+ 	init( MOVE_SHARD_KRM_BYTE_LIMIT,                             1e6 );
 	init( MAX_SKIP_TAGS,                                           1 ); //The TLogs require tags to be densely packed to be memory efficient, so be careful increasing this knob
 	init( MAX_ADDED_SOURCES_MULTIPLIER,                          2.0 );
 
@@ -662,6 +669,11 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( AUTO_TAG_THROTTLE_UPDATE_FREQUENCY,                   10.0 ); if(randomize && BUGGIFY) AUTO_TAG_THROTTLE_UPDATE_FREQUENCY = 0.5;
 	init( TAG_THROTTLE_EXPIRED_CLEANUP_INTERVAL,                30.0 ); if(randomize && BUGGIFY) TAG_THROTTLE_EXPIRED_CLEANUP_INTERVAL = 1.0;
 	init( AUTO_TAG_THROTTLING_ENABLED,                          true ); if(randomize && BUGGIFY) AUTO_TAG_THROTTLING_ENABLED = false;
+	init( SS_THROTTLE_TAGS_TRACKED,                                1 ); if(randomize && BUGGIFY) SS_THROTTLE_TAGS_TRACKED = deterministicRandom()->randomInt(1, 10);
+	init( GLOBAL_TAG_THROTTLING,                               false );
+	init( GLOBAL_TAG_THROTTLING_MIN_RATE,                        1.0 );
+	init( GLOBAL_TAG_THROTTLING_FOLDING_TIME,                   10.0 );
+	init( GLOBAL_TAG_THROTTLING_TRACE_INTERVAL,                  5.0 );
 
 	//Storage Metrics
 	init( STORAGE_METRICS_AVERAGE_INTERVAL,                    120.0 );
@@ -725,6 +737,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( CHECKPOINT_TRANSFER_BLOCK_BYTES,                      40e6 );
 	init( QUICK_GET_VALUE_FALLBACK,                             true );
 	init( QUICK_GET_KEY_VALUES_FALLBACK,                        true );
+	init( MAX_PARALLEL_QUICK_GET_VALUE,                           50 ); if ( randomize && BUGGIFY ) MAX_PARALLEL_QUICK_GET_VALUE = deterministicRandom()->randomInt(1, 100);
 	init( QUICK_GET_KEY_VALUES_LIMIT,                           2000 );
 	init( QUICK_GET_KEY_VALUES_LIMIT_BYTES,                      1e7 );
 
@@ -868,12 +881,18 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// Cluster recovery
 	init ( CLUSTER_RECOVERY_EVENT_NAME_PREFIX,              "Master" );
 
-	// encrypt key proxy
+	// Encryption
 	init( ENABLE_ENCRYPTION,                                   false ); if ( randomize && BUGGIFY ) { ENABLE_ENCRYPTION = deterministicRandom()->coinflip(); }
 	init( ENCRYPTION_MODE,                             "AES-256-CTR" );
 	init( SIM_KMS_MAX_KEYS,                                     4096 );
 	init( ENCRYPT_PROXY_MAX_DBG_TRACE_LENGTH,                 100000 );
-	init( ENABLE_TLOG_ENCRYPTION,                  ENABLE_ENCRYPTION ); if ( randomize && BUGGIFY) { ENABLE_TLOG_ENCRYPTION = (ENABLE_ENCRYPTION && !PROXY_USE_RESOLVER_PRIVATE_MUTATIONS && deterministicRandom()->coinflip()); }
+	init( ENABLE_TLOG_ENCRYPTION,                  ENABLE_ENCRYPTION ); if ( randomize && BUGGIFY ) { ENABLE_TLOG_ENCRYPTION = (ENABLE_ENCRYPTION && !PROXY_USE_RESOLVER_PRIVATE_MUTATIONS && deterministicRandom()->coinflip()); }
+	init( ENABLE_BLOB_GRANULE_ENCRYPTION,          ENABLE_ENCRYPTION ); if ( randomize && BUGGIFY ) { ENABLE_BLOB_GRANULE_ENCRYPTION = (ENABLE_ENCRYPTION && deterministicRandom()->coinflip()); }
+
+	// encrypt key proxy
+	init( ENABLE_BLOB_GRANULE_COMPRESSION,                     false ); if ( randomize && BUGGIFY ) { ENABLE_BLOB_GRANULE_COMPRESSION = deterministicRandom()->coinflip(); }
+	init( BLOB_GRANULE_COMPRESSION_FILTER,                    "GZIP" ); if ( randomize && BUGGIFY ) { BLOB_GRANULE_COMPRESSION_FILTER = "NONE"; }
+
 
     // KMS connector type
 	init( KMS_CONNECTOR_TYPE,                     "RESTKmsConnector" );
@@ -885,13 +904,19 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// BlobGranuleVerify* simulation tests use "knobs", BlobGranuleCorrectness* use "tenant", default in real clusters is "knobs"
 	init( BG_METADATA_SOURCE,                                "knobs" );
 	init( BG_SNAPSHOT_FILE_TARGET_BYTES,                    10000000 ); if( buggifySmallShards ) BG_SNAPSHOT_FILE_TARGET_BYTES = 100000; else if (simulationMediumShards || (randomize && BUGGIFY) ) BG_SNAPSHOT_FILE_TARGET_BYTES = 1000000; 
+	init( BG_SNAPSHOT_FILE_TARGET_CHUNKS,                        100 ); if ( randomize && BUGGIFY ) BG_SNAPSHOT_FILE_TARGET_CHUNKS = 1 << deterministicRandom()->randomInt(0, 8);
 	init( BG_DELTA_BYTES_BEFORE_COMPACT, BG_SNAPSHOT_FILE_TARGET_BYTES/2 );
 	init( BG_DELTA_FILE_TARGET_BYTES,   BG_DELTA_BYTES_BEFORE_COMPACT/10 );
 	init( BG_MAX_SPLIT_FANOUT,                                    10 ); if( randomize && BUGGIFY ) BG_MAX_SPLIT_FANOUT = deterministicRandom()->randomInt(5, 15);
+	init( BG_MAX_MERGE_FANIN,                                     10 ); if( randomize && BUGGIFY ) BG_MAX_MERGE_FANIN = deterministicRandom()->randomInt(2, 15);
 	init( BG_HOT_SNAPSHOT_VERSIONS,                          5000000 );
 
 	init( BG_CONSISTENCY_CHECK_ENABLED,                         true ); if (randomize && BUGGIFY) BG_CONSISTENCY_CHECK_ENABLED = false;
 	init( BG_CONSISTENCY_CHECK_TARGET_SPEED_KB,                 1000 ); if (randomize && BUGGIFY) BG_CONSISTENCY_CHECK_TARGET_SPEED_KB *= (deterministicRandom()->randomInt(2, 50) / 10);
+
+	init( BG_ENABLE_MERGING,                                    true ); if (randomize && BUGGIFY) BG_ENABLE_MERGING = false;
+	init( BG_MERGE_CANDIDATE_THRESHOLD_SECONDS, isSimulated ? 20.0 : 30 * 60 ); if (randomize && BUGGIFY) BG_MERGE_CANDIDATE_THRESHOLD_SECONDS = 5.0;
+	init( BG_MERGE_CANDIDATE_DELAY_SECONDS, BG_MERGE_CANDIDATE_THRESHOLD_SECONDS / 10.0 );
 
 	init( BLOB_WORKER_INITIAL_SNAPSHOT_PARALLELISM,                8 ); if( randomize && BUGGIFY ) BLOB_WORKER_INITIAL_SNAPSHOT_PARALLELISM = 1;
 	init( BLOB_WORKER_TIMEOUT,                                  10.0 ); if( randomize && BUGGIFY ) BLOB_WORKER_TIMEOUT = 1.0;
@@ -903,6 +928,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( BLOB_MANAGER_STATUS_EXP_BACKOFF_MIN,                   0.1 );
 	init( BLOB_MANAGER_STATUS_EXP_BACKOFF_MAX,                   5.0 );
 	init( BLOB_MANAGER_STATUS_EXP_BACKOFF_EXPONENT,              1.5 );
+	init( BLOB_MANAGER_CONCURRENT_MERGE_CHECKS,                   64 ); if( randomize && BUGGIFY ) BLOB_MANAGER_CONCURRENT_MERGE_CHECKS = 1 << deterministicRandom()->randomInt(0, 7);
 
 	init( BGCC_TIMEOUT,                   isSimulated ? 10.0 : 120.0 );
 	init( BGCC_MIN_INTERVAL,                isSimulated ? 1.0 : 10.0 );

@@ -68,19 +68,21 @@ endif()
 
 if(WITH_AWS_BACKUP)
   add_compile_definitions(BUILD_AWS_BACKUP)
-
-  set(FDBCLIENT_SRCS
-    ${FDBCLIENT_SRCS}
-    FDBAWSCredentialsProvider.h)
-
   include(awssdk)
+endif()
+
+find_package(ZLIB)
+if(ZLIB_FOUND)
+  add_compile_definitions(ZLIB_LIB_SUPPORTED)
+else()
+  message(STATUS "ZLIB package not found")
 endif()
 
 add_flow_target(STATIC_LIBRARY NAME fdbclient SRCS ${FDBCLIENT_SRCS} ADDL_SRCS ${options_srcs})
 target_include_directories(fdbclient PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include")
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/versions.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/include/fdbclient/versions.h)
 add_dependencies(fdbclient fdboptions)
-target_link_libraries(fdbclient PUBLIC fdbrpc msgpack)
+target_link_libraries(fdbclient PUBLIC fdbrpc msgpack PRIVATE rapidxml)
 
 # Create a separate fdbclient library with sampling enabled. This lets
 # fdbserver retain sampling functionality in client code while disabling
@@ -88,11 +90,14 @@ target_link_libraries(fdbclient PUBLIC fdbrpc msgpack)
 add_flow_target(STATIC_LIBRARY NAME fdbclient_sampling SRCS ${FDBCLIENT_SRCS} ADDL_SRCS ${options_srcs})
 target_include_directories(fdbclient_sampling PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include")
 add_dependencies(fdbclient_sampling fdboptions)
-target_link_libraries(fdbclient_sampling PUBLIC fdbrpc_sampling msgpack)
+target_link_libraries(fdbclient_sampling PUBLIC fdbrpc_sampling msgpack PRIVATE rapidxml)
 target_compile_definitions(fdbclient_sampling PRIVATE -DENABLE_SAMPLING)
 if(WIN32)
   add_dependencies(fdbclient_sampling_actors fdbclient_actors)
 endif()
+
+add_flow_target(LINK_TEST NAME fdbclientlinktest SRCS LinkTest.cpp)
+target_link_libraries(fdbclientlinktest PRIVATE fdbclient rapidxml) # re-link rapidxml due to private link interface
 
 if(BUILD_AZURE_BACKUP)
   target_link_libraries(fdbclient PRIVATE curl uuid azure-storage-lite)
@@ -103,3 +108,4 @@ if(BUILD_AWS_BACKUP)
   target_link_libraries(fdbclient PUBLIC awssdk_target)
   target_link_libraries(fdbclient_sampling PUBLIC awssdk_target)
 endif()
+

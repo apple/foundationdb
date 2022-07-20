@@ -329,7 +329,7 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 	}
 
 	Future<Void> start(Database const& cx) override {
-		TEST(true); // Testing
+		CODE_PROBE(true, "Testing");
 		if (!enableTest) {
 			return Void();
 		}

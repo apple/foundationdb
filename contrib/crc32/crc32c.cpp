@@ -35,6 +35,10 @@
 #endif
 #endif
 
+#ifdef _WIN32
+#include <intrin.h>
+#endif
+
 #include "crc32/crc32c.h"
 
 #if !defined(__aarch64__) && !defined(__powerpc64__)

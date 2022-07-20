@@ -409,7 +409,7 @@ Reference<EncryptBuf> EncryptBlobCipherAes265Ctr::encrypt(const uint8_t* plainte
                                                           const int plaintextLen,
                                                           BlobCipherEncryptHeader* header,
                                                           Arena& arena) {
-	TEST(true); // Encrypting data with BlobCipher
+	CODE_PROBE(true, "Encrypting data with BlobCipher");
 
 	memset(reinterpret_cast<uint8_t*>(header), 0, sizeof(BlobCipherEncryptHeader));
 
@@ -499,6 +499,34 @@ Reference<EncryptBuf> EncryptBlobCipherAes265Ctr::encrypt(const uint8_t* plainte
 
 	encryptBuf->setLogicalSize(plaintextLen);
 	return encryptBuf;
+}
+
+Standalone<StringRef> EncryptBlobCipherAes265Ctr::encryptBlobGranuleChunk(const uint8_t* plaintext,
+                                                                          const int plaintextLen) {
+	Standalone<StringRef> encrypted = makeString(plaintextLen);
+	uint8_t* ciphertext = mutateString(encrypted);
+	int bytes{ 0 };
+
+	if (EVP_EncryptUpdate(ctx, ciphertext, &bytes, plaintext, plaintextLen) != 1) {
+		TraceEvent("Encrypt_UpdateFailed")
+		    .detail("BaseCipherId", textCipherKey->getBaseCipherId())
+		    .detail("EncryptDomainId", textCipherKey->getDomainId());
+		throw encrypt_ops_error();
+	}
+	int finalBytes{ 0 };
+	if (EVP_EncryptFinal_ex(ctx, ciphertext + bytes, &finalBytes) != 1) {
+		TraceEvent("Encrypt_FinalFailed")
+		    .detail("BaseCipherId", textCipherKey->getBaseCipherId())
+		    .detail("EncryptDomainId", textCipherKey->getDomainId());
+		throw encrypt_ops_error();
+	}
+	if ((bytes + finalBytes) != plaintextLen) {
+		TraceEvent("Encrypt_UnexpectedCipherLen")
+		    .detail("PlaintextLen", plaintextLen)
+		    .detail("EncryptedBufLen", bytes + finalBytes);
+		throw encrypt_ops_error();
+	}
+	return encrypted;
 }
 
 EncryptBlobCipherAes265Ctr::~EncryptBlobCipherAes265Ctr() {
@@ -645,7 +673,7 @@ Reference<EncryptBuf> DecryptBlobCipherAes256Ctr::decrypt(const uint8_t* ciphert
                                                           const int ciphertextLen,
                                                           const BlobCipherEncryptHeader& header,
                                                           Arena& arena) {
-	TEST(true); // Decrypting data with BlobCipher
+	CODE_PROBE(true, "Decrypting data with BlobCipher");
 
 	verifyEncryptHeaderMetadata(header);
 
@@ -713,7 +741,7 @@ HmacSha256DigestGen::~HmacSha256DigestGen() {
 }
 
 StringRef HmacSha256DigestGen::digest(const unsigned char* data, size_t len, Arena& arena) {
-	TEST(true); // Digest generation
+	CODE_PROBE(true, "Digest generation");
 	unsigned int digestLen = HMAC_size(ctx);
 	auto digest = new (arena) unsigned char[digestLen];
 	if (HMAC_Update(ctx, data, len) != 1) {
@@ -723,7 +751,8 @@ StringRef HmacSha256DigestGen::digest(const unsigned char* data, size_t len, Are
 	if (HMAC_Final(ctx, digest, &digestLen) != 1) {
 		throw encrypt_ops_error();
 	}
-	return StringRef(digest, digestLen);
+
+	return StringRef(arena, digest, digestLen);
 }
 
 StringRef computeAuthToken(const uint8_t* payload,

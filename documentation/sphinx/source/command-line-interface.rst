@@ -241,7 +241,10 @@ Included in the output of this command are the ``id`` and ``prefix`` assigned to
     {
         "tenant": {
             "id": 0,
-            "prefix": "\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000"
+            "prefix": {
+              "base64": "AAAAAAAAAAU=",
+              "printable": "\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x05",
+            }
         },
         "type": "success"
     }
@@ -413,6 +416,13 @@ heap
 ``profile heap <PROCESS>``
 
 Enables heap profiling for the specified process.
+
+renametenant
+------------
+
+The ``renametenant`` command can rename an existing tenant to a new name. Its syntax is ``renametenant <OLD_NAME> <NEW_NAME>``.
+
+This command requires that ``OLD_NAME`` is a tenant that already exists on the cluster, and that ``NEW_NAME`` is not already a name of a tenant in the cluster.
 
 reset
 -----

@@ -138,7 +138,7 @@ struct ThrottlingWorkload : KVWorkload {
 					ASSERT(k.startsWith(LiteralStringRef("\xff\xff/metrics/health/")));
 					auto valueObj = readJSONStrictly(v.toString()).get_obj();
 					if (k.removePrefix(LiteralStringRef("\xff\xff/metrics/health/")) == LiteralStringRef("aggregate")) {
-						TEST(true); // Test aggregate health metrics schema
+						CODE_PROBE(true, "Test aggregate health metrics schema");
 						std::string errorStr;
 						if (!schemaMatch(aggregateSchema, valueObj, errorStr, SevError, true)) {
 							TraceEvent(SevError, "AggregateHealthSchemaValidationFailed")
@@ -150,7 +150,7 @@ struct ThrottlingWorkload : KVWorkload {
 						self->tokenBucket.transactionRate = tpsLimit * self->throttlingMultiplier / self->clientCount;
 					} else if (k.removePrefix(LiteralStringRef("\xff\xff/metrics/health/"))
 					               .startsWith(LiteralStringRef("storage/"))) {
-						TEST(true); // Test storage health metrics schema
+						CODE_PROBE(true, "Test storage health metrics schema");
 						UID::fromString(k.removePrefix(LiteralStringRef("\xff\xff/metrics/health/storage/"))
 						                    .toString()); // Will throw if it's not a valid uid
 						std::string errorStr;
@@ -162,7 +162,7 @@ struct ThrottlingWorkload : KVWorkload {
 						}
 					} else if (k.removePrefix(LiteralStringRef("\xff\xff/metrics/health/"))
 					               .startsWith(LiteralStringRef("log/"))) {
-						TEST(true); // Test log health metrics schema
+						CODE_PROBE(true, "Test log health metrics schema");
 						UID::fromString(k.removePrefix(LiteralStringRef("\xff\xff/metrics/health/log/"))
 						                    .toString()); // Will throw if it's not a valid uid
 						std::string errorStr;

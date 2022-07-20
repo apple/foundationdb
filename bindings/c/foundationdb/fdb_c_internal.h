@@ -46,6 +46,9 @@ DLLEXPORT void fdb_database_set_shared_state(FDBDatabase* db, DatabaseSharedStat
 
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_shared_state(FDBFuture* f, DatabaseSharedState** outPtr);
 
+DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_create_database_from_connection_string(const char* connection_string,
+                                                                                    FDBDatabase** out_database);
+
 #ifdef __cplusplus
 }
 #endif

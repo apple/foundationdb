@@ -148,7 +148,7 @@ class Ratekeeper {
 	double lastWarning;
 	double lastSSListFetchedTimestamp;
 
-	std::unique_ptr<class TagThrottler> tagThrottler;
+	std::unique_ptr<class ITagThrottler> tagThrottler;
 
 	RatekeeperLimits normalLimits;
 	RatekeeperLimits batchLimits;

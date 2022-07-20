@@ -131,7 +131,7 @@ struct TransientStorageMetricSample : StorageMetricSample {
 			StorageMetrics deltaM = m * delta;
 			auto v = waitMap[key];
 			for (int i = 0; i < v.size(); i++) {
-				TEST(true); // TransientStorageMetricSample poll update
+				CODE_PROBE(true, "TransientStorageMetricSample poll update");
 				v[i].send(deltaM);
 			}
 
@@ -208,9 +208,9 @@ struct StorageServerMetrics {
 	void notify(KeyRef key, StorageMetrics& metrics) {
 		ASSERT(metrics.bytes == 0); // ShardNotifyMetrics
 		if (g_network->isSimulated()) {
-			TEST(metrics.bytesPerKSecond != 0); // ShardNotifyMetrics bytes
-			TEST(metrics.iosPerKSecond != 0); // ShardNotifyMetrics ios
-			TEST(metrics.bytesReadPerKSecond != 0); // ShardNotifyMetrics bytesRead
+			CODE_PROBE(metrics.bytesPerKSecond != 0, "ShardNotifyMetrics bytes");
+			CODE_PROBE(metrics.iosPerKSecond != 0, "ShardNotifyMetrics ios");
+			CODE_PROBE(metrics.bytesReadPerKSecond != 0, "ShardNotifyMetrics bytesRead");
 		}
 
 		double expire = now() + SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL;
@@ -230,7 +230,7 @@ struct StorageServerMetrics {
 			auto& v = waitMetricsMap[key];
 			for (int i = 0; i < v.size(); i++) {
 				if (g_network->isSimulated()) {
-					TEST(true); // shard notify metrics
+					CODE_PROBE(true, "shard notify metrics");
 				}
 				// ShardNotifyMetrics
 				v[i].send(notifyMetrics);
@@ -249,7 +249,7 @@ struct StorageServerMetrics {
 			notifyMetrics.bytesReadPerKSecond = bytesReadPerKSecond;
 			auto& v = waitMetricsMap[key];
 			for (int i = 0; i < v.size(); i++) {
-				TEST(true); // ShardNotifyMetrics
+				CODE_PROBE(true, "ShardNotifyMetrics");
 				v[i].send(notifyMetrics);
 			}
 		}
@@ -264,7 +264,7 @@ struct StorageServerMetrics {
 		StorageMetrics notifyMetrics;
 		notifyMetrics.bytes = bytes;
 		for (int i = 0; i < shard.value().size(); i++) {
-			TEST(true); // notifyBytes
+			CODE_PROBE(true, "notifyBytes");
 			shard.value()[i].send(notifyMetrics);
 		}
 	}
@@ -284,7 +284,7 @@ struct StorageServerMetrics {
 		auto rs = waitMetricsMap.intersectingRanges(keys);
 		for (auto r = rs.begin(); r != rs.end(); ++r) {
 			auto& v = r->value();
-			TEST(v.size()); // notifyNotReadable() sending errors to intersecting ranges
+			CODE_PROBE(v.size(), "notifyNotReadable() sending errors to intersecting ranges");
 			for (int n = 0; n < v.size(); n++)
 				v[n].sendError(wrong_shard_server());
 		}
@@ -357,6 +357,7 @@ struct StorageServerMetrics {
 	}
 
 	void splitMetrics(SplitMetricsRequest req) const {
+		int minSplitBytes = req.minSplitBytes.present() ? req.minSplitBytes.get() : SERVER_KNOBS->MIN_SHARD_BYTES;
 		try {
 			SplitMetricsReply reply;
 			KeyRef lastKey = req.keys.begin;
@@ -364,10 +365,10 @@ struct StorageServerMetrics {
 			StorageMetrics estimated = req.estimated;
 			StorageMetrics remaining = getMetrics(req.keys) + used;
 
-			//TraceEvent("SplitMetrics").detail("Begin", req.keys.begin).detail("End", req.keys.end).detail("Remaining", remaining.bytes).detail("Used", used.bytes);
+			//TraceEvent("SplitMetrics").detail("Begin", req.keys.begin).detail("End", req.keys.end).detail("Remaining", remaining.bytes).detail("Used", used.bytes).detail("MinSplitBytes", minSplitBytes);
 
 			while (true) {
-				if (remaining.bytes < 2 * SERVER_KNOBS->MIN_SHARD_BYTES)
+				if (remaining.bytes < 2 * minSplitBytes)
 					break;
 				KeyRef key = req.keys.end;
 				bool hasUsed = used.bytes != 0 || used.bytesPerKSecond != 0 || used.iosPerKSecond != 0;
@@ -382,10 +383,9 @@ struct StorageServerMetrics {
 				                  lastKey,
 				                  key,
 				                  hasUsed);
-				if (used.bytes < SERVER_KNOBS->MIN_SHARD_BYTES)
-					key = std::max(key,
-					               byteSample.splitEstimate(KeyRangeRef(lastKey, req.keys.end),
-					                                        SERVER_KNOBS->MIN_SHARD_BYTES - used.bytes));
+				if (used.bytes < minSplitBytes)
+					key = std::max(
+					    key, byteSample.splitEstimate(KeyRangeRef(lastKey, req.keys.end), minSplitBytes - used.bytes));
 				key = getSplitKey(remaining.iosPerKSecond,
 				                  estimated.iosPerKSecond,
 				                  req.limits.iosPerKSecond,
@@ -532,7 +532,7 @@ struct StorageServerMetrics {
 		auto _ranges = getReadHotRanges(req.keys,
 		                                SERVER_KNOBS->SHARD_MAX_READ_DENSITY_RATIO,
 		                                SERVER_KNOBS->READ_HOT_SUB_RANGE_CHUNK_SIZE,
-		                                SERVER_KNOBS->SHARD_READ_HOT_BANDWITH_MIN_PER_KSECONDS);
+		                                SERVER_KNOBS->SHARD_READ_HOT_BANDWIDTH_MIN_PER_KSECONDS);
 		reply.readHotRanges = VectorRef(_ranges.data(), _ranges.size());
 		req.reply.send(reply);
 	}
