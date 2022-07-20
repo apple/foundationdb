@@ -49,7 +49,7 @@ struct CommitBugWorkload : TestWorkload {
 					break;
 				} catch (Error& e) {
 					TraceEvent("CommitBugSetVal1Error").error(e);
-					TEST(e.code() == error_code_commit_unknown_result); // Commit unknown result
+					CODE_PROBE(e.code() == error_code_commit_unknown_result, "Commit unknown result");
 					wait(tr.onError(e));
 				}
 			}
@@ -140,7 +140,7 @@ struct CommitBugWorkload : TestWorkload {
 
 						break;
 					} else {
-						TEST(true); // Commit conflict
+						CODE_PROBE(true, "Commit conflict");
 
 						TraceEvent("CommitBug2Error").error(e).detail("AttemptedNum", i + 1);
 						wait(tr.onError(e));

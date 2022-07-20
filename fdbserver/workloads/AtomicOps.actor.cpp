@@ -58,47 +58,47 @@ struct AtomicOpsWorkload : TestWorkload {
 
 		switch (opType) {
 		case 0:
-			TEST(true); // Testing atomic AddValue
+			CODE_PROBE(true, "Testing atomic AddValue");
 			opType = MutationRef::AddValue;
 			break;
 		case 1:
-			TEST(true); // Testing atomic And
+			CODE_PROBE(true, "Testing atomic And");
 			opType = MutationRef::And;
 			break;
 		case 2:
-			TEST(true); // Testing atomic Or
+			CODE_PROBE(true, "Testing atomic Or");
 			opType = MutationRef::Or;
 			break;
 		case 3:
-			TEST(true); // Testing atomic Xor
+			CODE_PROBE(true, "Testing atomic Xor");
 			opType = MutationRef::Xor;
 			break;
 		case 4:
-			TEST(true); // Testing atomic Max
+			CODE_PROBE(true, "Testing atomic Max");
 			opType = MutationRef::Max;
 			break;
 		case 5:
-			TEST(true); // Testing atomic Min
+			CODE_PROBE(true, "Testing atomic Min");
 			opType = MutationRef::Min;
 			break;
 		case 6:
-			TEST(true); // Testing atomic ByteMin
+			CODE_PROBE(true, "Testing atomic ByteMin");
 			opType = MutationRef::ByteMin;
 			break;
 		case 7:
-			TEST(true); // Testing atomic ByteMax
+			CODE_PROBE(true, "Testing atomic ByteMax");
 			opType = MutationRef::ByteMax;
 			break;
 		case 8:
-			TEST(true); // Testing atomic MinV2
+			CODE_PROBE(true, "Testing atomic MinV2");
 			opType = MutationRef::MinV2;
 			break;
 		case 9:
-			TEST(true); // Testing atomic AndV2
+			CODE_PROBE(true, "Testing atomic AndV2");
 			opType = MutationRef::AndV2;
 			break;
 		// case 10:
-		// 	TEST(true); // Testing atomic CompareAndClear Not supported yet
+		// 	CODE_PROBE(true, "Testing atomic CompareAndClear Not supported yet");
 		// 	opType = MutationRef::CompareAndClear
 		//  break;
 		default:

@@ -31,6 +31,7 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/SpecialKeySpace.actor.h"
 #include "fdbclient/TenantManagement.actor.h"
+#include "fdbclient/libb64/encode.h"
 #include "flow/Arena.h"
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -76,7 +77,19 @@ private:
 		for (auto tenant : tenants) {
 			json_spirit::mObject tenantEntry;
 			tenantEntry["id"] = tenant.second.id;
-			tenantEntry["prefix"] = tenant.second.prefix.toString();
+			if (ryw->getDatabase()->apiVersionAtLeast(720)) {
+				json_spirit::mObject prefixObject;
+				std::string encodedPrefix = base64::encoder::from_string(tenant.second.prefix.toString());
+				// Remove trailing newline
+				encodedPrefix.resize(encodedPrefix.size() - 1);
+
+				prefixObject["base64"] = encodedPrefix;
+				prefixObject["printable"] = printable(tenant.second.prefix);
+				tenantEntry["prefix"] = prefixObject;
+			} else {
+				// This is not a standard encoding in JSON, and some libraries may not be able to easily decode it
+				tenantEntry["prefix"] = tenant.second.prefix.toString();
+			}
 			std::string tenantEntryString = json_spirit::write_string(json_spirit::mValue(tenantEntry));
 			ValueRef tenantEntryBytes(results->arena(), tenantEntryString);
 			results->push_back(results->arena(),
@@ -108,16 +121,16 @@ private:
 	}
 
 	ACTOR static Future<Void> createTenants(ReadYourWritesTransaction* ryw, std::vector<TenantNameRef> tenants) {
-		Optional<Value> lastIdVal = wait(ryw->getTransaction().get(tenantLastIdKey));
-		int64_t previousId = lastIdVal.present() ? TenantMapEntry::prefixToId(lastIdVal.get()) : -1;
+		int64_t _nextId = wait(TenantAPI::getNextTenantId(&ryw->getTransaction()));
+		int64_t nextId = _nextId;
 
 		std::vector<Future<Void>> createFutures;
 		for (auto tenant : tenants) {
 			createFutures.push_back(
-			    success(TenantAPI::createTenantTransaction(&ryw->getTransaction(), tenant, ++previousId)));
+			    success(TenantAPI::createTenantTransaction(&ryw->getTransaction(), tenant, nextId++)));
 		}
 
-		ryw->getTransaction().set(tenantLastIdKey, TenantMapEntry::idToPrefix(previousId));
+		ryw->getTransaction().set(tenantLastIdKey, TenantMapEntry::idToPrefix(nextId - 1));
 		wait(waitForAll(createFutures));
 		return Void();
 	}

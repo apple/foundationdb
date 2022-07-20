@@ -456,10 +456,10 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 				}
 			}
 		}
-		TEST(beginCollapsed > 0); // BGCorrectness got collapsed request with beginVersion > 0
-		TEST(beginNotCollapsed > 0); // BGCorrectness got un-collapsed request with beginVersion > 0
-		TEST(beginCollapsed > 0 &&
-		     beginNotCollapsed > 0); // BGCorrectness got both collapsed and uncollapsed in the same request!
+		CODE_PROBE(beginCollapsed > 0, "BGCorrectness got collapsed request with beginVersion > 0");
+		CODE_PROBE(beginNotCollapsed > 0, "BGCorrectness got un-collapsed request with beginVersion > 0");
+		CODE_PROBE(beginCollapsed > 0 && beginNotCollapsed > 0,
+		           "BGCorrectness got both collapsed and uncollapsed in the same request!");
 
 		while (checkIt != threadData->keyData.end() && checkIt->first < endKeyExclusive) {
 			uint32_t key = checkIt->first;
@@ -938,7 +938,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		ASSERT(result);
 
 		if (self->clientId == 0 && SERVER_KNOBS->BG_ENABLE_MERGING && self->doMergeCheckAtEnd) {
-			TEST(true); // BGCorrectness clearing database and awaiting merge
+			CORE_PROBE(true, "BGCorrectness clearing database and awaiting merge");
 			// TODO: Enable check
 			// wait(clearAndAwaitMerge(cx, threadData->directoryRange));
 		}

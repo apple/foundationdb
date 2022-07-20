@@ -176,7 +176,7 @@ ACTOR Future<Void> clearAndAwaitMerge(Database cx, KeyRange range) {
 			if (ranges.size() == 1) {
 				return Void();
 			}
-			TEST(true); // clearAndAwaitMerge doing clear
+			CODE_PROBE(true, "ClearAndAwaitMerge doing clear");
 			tr.clear(range);
 			wait(tr.commit());
 
