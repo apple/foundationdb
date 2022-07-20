@@ -25,6 +25,7 @@
 // Functions and constants documenting the organization of the reserved keyspace in the database beginning with "\xFF"
 
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/BlobGranuleCommon.h"
 #include "fdbclient/BlobWorkerInterface.h" // TODO move the functions that depend on this out of here and into BlobWorkerInterface.h to remove this depdendency
 #include "fdbclient/StorageServerInterface.h"
 #include "Tenant.h"
@@ -624,8 +625,14 @@ const Key blobGranuleFileKeyFor(UID granuleID, Version fileVersion, uint8_t file
 std::tuple<UID, Version, uint8_t> decodeBlobGranuleFileKey(KeyRef const& key);
 const KeyRange blobGranuleFileKeyRangeFor(UID granuleID);
 
-const Value blobGranuleFileValueFor(StringRef const& filename, int64_t offset, int64_t length, int64_t fullFileLength);
-std::tuple<Standalone<StringRef>, int64_t, int64_t, int64_t> decodeBlobGranuleFileValue(ValueRef const& value);
+const Value blobGranuleFileValueFor(
+    StringRef const& filename,
+    int64_t offset,
+    int64_t length,
+    int64_t fullFileLength,
+    Optional<BlobGranuleCipherKeysMeta> cipherKeysMeta = Optional<BlobGranuleCipherKeysMeta>());
+std::tuple<Standalone<StringRef>, int64_t, int64_t, int64_t, Optional<BlobGranuleCipherKeysMeta>>
+decodeBlobGranuleFileValue(ValueRef const& value);
 
 const Value blobGranulePurgeValueFor(Version version, KeyRange range, bool force);
 std::tuple<Version, KeyRange, bool> decodeBlobGranulePurgeValue(ValueRef const& value);
@@ -678,6 +685,12 @@ extern const KeyRef tenantMapPrefix;
 extern const KeyRef tenantMapPrivatePrefix;
 extern const KeyRef tenantLastIdKey;
 extern const KeyRef tenantDataPrefixKey;
+
+// Storage quota per tenant
+// "\xff/storageQuota/[[tenantName]]" := "[[quota]]"
+extern const KeyRangeRef storageQuotaKeys;
+extern const KeyRef storageQuotaPrefix;
+Key storageQuotaKey(StringRef tenantName);
 
 #pragma clang diagnostic pop
 

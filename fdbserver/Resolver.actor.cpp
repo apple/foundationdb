@@ -350,7 +350,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 
 				applyMetadataMutations(spanContext, *resolverData, req.transactions[t].mutations);
 			}
-			TEST(self->forceRecovery); // Resolver detects forced recovery
+			CODE_PROBE(self->forceRecovery, "Resolver detects forced recovery");
 		}
 
 		self->resolvedStateTransactions += req.txnStateTransactions.size();
@@ -362,7 +362,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 		ASSERT(req.version >= firstUnseenVersion);
 		ASSERT(firstUnseenVersion >= self->debugMinRecentStateVersion);
 
-		TEST(firstUnseenVersion == req.version); // Resolver first unseen version is current version
+		CODE_PROBE(firstUnseenVersion == req.version, "Resolver first unseen version is current version");
 
 		// If shardChanged at or before this commit version, the proxy may have computed
 		// the wrong set of groups. Then we need to broadcast to all groups below.
@@ -400,13 +400,14 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 			}
 		}
 
-		TEST(oldestProxyVersion == req.version); // The proxy that sent this request has the oldest current version
-		TEST(oldestProxyVersion !=
-		     req.version); // The proxy that sent this request does not have the oldest current version
+		CODE_PROBE(oldestProxyVersion == req.version,
+		           "The proxy that sent this request has the oldest current version");
+		CODE_PROBE(oldestProxyVersion != req.version,
+		           "The proxy that sent this request does not have the oldest current version");
 
 		bool anyPopped = false;
 		if (firstUnseenVersion <= oldestProxyVersion && self->proxyInfoMap.size() == self->commitProxyCount + 1) {
-			TEST(true); // Deleting old state transactions
+			CODE_PROBE(true, "Deleting old state transactions");
 			int64_t erasedBytes = self->recentStateTransactionsInfo.eraseUpTo(oldestProxyVersion);
 			self->debugMinRecentStateVersion = oldestProxyVersion + 1;
 			anyPopped = erasedBytes > 0;
@@ -445,7 +446,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 		if (req.debugID.present())
 			g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "Resolver.resolveBatch.After");
 	} else {
-		TEST(true); // Duplicate resolve batch request
+		CODE_PROBE(true, "Duplicate resolve batch request");
 		//TraceEvent("DupResolveBatchReq", self->dbgid).detail("From", proxyAddress);
 	}
 
@@ -456,13 +457,13 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 		if (batchItr != proxyInfoItr->second.outstandingBatches.end()) {
 			req.reply.send(batchItr->second);
 		} else {
-			TEST(true); // No outstanding batches for version on proxy
+			CODE_PROBE(true, "No outstanding batches for version on proxy");
 			req.reply.send(Never());
 		}
 	} else {
 		ASSERT_WE_THINK(false); // The first non-duplicate request with this proxyAddress, including this one, should
 		                        // have inserted this item in the map!
-		// TEST(true); // No prior proxy requests
+		// CODE_PROBE(true, "No prior proxy requests");
 		req.reply.send(Never());
 	}
 

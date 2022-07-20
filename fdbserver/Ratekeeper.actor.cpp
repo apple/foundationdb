@@ -325,7 +325,7 @@ public:
 						reply.throttledTags = self.tagThrottler->getClientRates();
 						bool returningTagsToProxy =
 						    reply.throttledTags.present() && reply.throttledTags.get().size() > 0;
-						TEST(returningTagsToProxy); // Returning tag throttles to a proxy
+						CODE_PROBE(returningTagsToProxy, "Returning tag throttles to a proxy");
 					}
 
 					reply.healthMetrics.update(self.healthMetrics, true, req.detailed);

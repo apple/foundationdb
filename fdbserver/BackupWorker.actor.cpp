@@ -72,7 +72,7 @@ struct VersionedMessage {
 		if (reader.protocolVersion().hasSpanContext() && SpanContextMessage::isNextIn(reader))
 			return false;
 		if (reader.protocolVersion().hasOTELSpanContext() && OTELSpanContextMessage::isNextIn(reader)) {
-			TEST(true); // Returning false for OTELSpanContextMessage
+			CODE_PROBE(true, "Returning false for OTELSpanContextMessage");
 			return false;
 		}
 		if (EncryptedMutationMessage::isNextIn(reader)) {
