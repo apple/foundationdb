@@ -1,5 +1,5 @@
 /*
- * PImpl.h
+ * CodeProbeUtils.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,27 +18,15 @@
  * limitations under the License.
  */
 
-#pragma once
+#ifndef FLOW_CODE_PROBE_UTILS_H
+#define FLOW_CODE_PROBE_UTILS_H
+#include "flow/CodeProbe.h"
+#include "flow/Arena.h"
 
-#include <memory>
+namespace probe {
 
-template <class T>
-class PImpl {
-	std::unique_ptr<T> impl;
-	struct ConstructorTag {};
-	template <class... Args>
-	PImpl(ConstructorTag, Args&&... args) : impl(std::make_unique<T>(std::forward<Args>(args)...)) {}
+void traceMissedProbes(Optional<ExecutionContext> context);
 
-public:
-	PImpl() = default;
-	template <class... Args>
-	static PImpl create(Args&&... args) {
-		return PImpl(ConstructorTag{}, std::forward<Args>(args)...);
-	}
-	T& operator*() { return *impl; }
-	T const& operator*() const { return *impl; }
-	T* operator->() { return impl.get(); }
-	T const* operator->() const { return impl.get(); }
-	T* get() { return impl.get(); }
-	T const* get() const { return impl.get(); }
-};
+}
+
+#endif // FLOW_CODE_PROBE_UTILS_H

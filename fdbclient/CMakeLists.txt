@@ -96,7 +96,7 @@ if(WIN32)
   add_dependencies(fdbclient_sampling_actors fdbclient_actors)
 endif()
 
-add_flow_target(LINK_TEST NAME fdbclientlinktest SRCS ${FDBCLIENT_SRCS} LinkTest.cpp ADDL_SRCS ${options_srcs})
+add_flow_target(LINK_TEST NAME fdbclientlinktest SRCS LinkTest.cpp)
 target_link_libraries(fdbclientlinktest PRIVATE fdbclient rapidxml) # re-link rapidxml due to private link interface
 
 if(BUILD_AZURE_BACKUP)

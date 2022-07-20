@@ -290,7 +290,7 @@ void LogPushData::addTxsTag() {
 }
 
 void LogPushData::addTransactionInfo(SpanContext const& context) {
-	TEST(!spanContext.isValid()); // addTransactionInfo with invalid SpanContext
+	CODE_PROBE(!spanContext.isValid(), "addTransactionInfo with invalid SpanContext");
 	spanContext = context;
 	writtenLocations.clear();
 }
@@ -352,7 +352,7 @@ bool LogPushData::writeTransactionInfo(int location, uint32_t subseq) {
 		return false;
 	}
 
-	TEST(true); // Wrote SpanContextMessage to a transaction log
+	CODE_PROBE(true, "Wrote SpanContextMessage to a transaction log");
 	writtenLocations.insert(location);
 
 	BinaryWriter& wr = messagesWriter[location];
@@ -375,10 +375,10 @@ bool LogPushData::writeTransactionInfo(int location, uint32_t subseq) {
 		// parent->child.
 		SpanContextMessage contextMessage;
 		if (spanContext.isSampled()) {
-			TEST(true); // Converting OTELSpanContextMessage to traced SpanContextMessage
+			CODE_PROBE(true, "Converting OTELSpanContextMessage to traced SpanContextMessage");
 			contextMessage = SpanContextMessage(UID(spanContext.traceID.first(), spanContext.traceID.second()));
 		} else {
-			TEST(true); // Converting OTELSpanContextMessage to untraced SpanContextMessage
+			CODE_PROBE(true, "Converting OTELSpanContextMessage to untraced SpanContextMessage");
 			contextMessage = SpanContextMessage(UID(0, 0));
 		}
 		wr << contextMessage;

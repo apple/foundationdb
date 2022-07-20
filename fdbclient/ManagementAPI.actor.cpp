@@ -22,6 +22,7 @@
 #include <string>
 #include <vector>
 
+#include "fdbclient/GenericManagementAPI.actor.h"
 #include "fmt/format.h"
 #include "fdbclient/Knobs.h"
 #include "flow/Arena.h"
@@ -1002,8 +1003,8 @@ ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChan
 			TraceEvent("AttemptingQuorumChange")
 			    .detail("FromCS", oldClusterConnectionString.toString())
 			    .detail("ToCS", newClusterConnectionString.toString());
-			TEST(oldClusterKeyName != newClusterKeyName); // Quorum change with new name
-			TEST(oldClusterKeyName == newClusterKeyName); // Quorum change with unchanged name
+			CODE_PROBE(oldClusterKeyName != newClusterKeyName, "Quorum change with new name");
+			CODE_PROBE(oldClusterKeyName == newClusterKeyName, "Quorum change with unchanged name");
 
 			state std::vector<Future<Optional<LeaderInfo>>> leaderServers;
 			state ClientCoordinators coord(Reference<ClusterConnectionMemoryRecord>(
@@ -2459,6 +2460,21 @@ bool schemaMatch(json_spirit::mValue const& schemaValue,
 		    .detail("SchemaPath", schemaPath);
 		throw unknown_error();
 	}
+}
+
+void setStorageQuota(Transaction& tr, StringRef tenantName, uint64_t quota) {
+	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	auto key = storageQuotaKey(tenantName);
+	tr.set(key, BinaryWriter::toValue<uint64_t>(quota, Unversioned()));
+}
+
+ACTOR Future<Optional<uint64_t>> getStorageQuota(Transaction* tr, StringRef tenantName) {
+	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+	state Optional<Value> v = wait(tr->get(storageQuotaKey(tenantName)));
+	if (!v.present()) {
+		return Optional<uint64_t>();
+	}
+	return BinaryReader::fromStringRef<uint64_t>(v.get(), Unversioned());
 }
 
 std::string ManagementAPI::generateErrorMessage(const CoordinatorsResult& res) {

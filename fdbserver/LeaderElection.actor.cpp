@@ -206,7 +206,7 @@ ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators,
 			choose {
 				when(wait(nomineeChange.onTrigger())) {}
 				when(wait(badCandidateTimeout.isValid() ? badCandidateTimeout : Never())) {
-					TEST(true); // Bad candidate timeout
+					CODE_PROBE(true, "Bad candidate timeout");
 					TraceEvent("LeaderBadCandidateTimeout", myInfo.changeID).log();
 					break;
 				}

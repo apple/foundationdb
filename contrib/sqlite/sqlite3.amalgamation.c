@@ -87009,7 +87009,7 @@ SQLITE_PRIVATE WhereInfo *sqlite3WhereBegin(
   }
   sqlite3_query_plan[nQPlan] = 0;
   nQPlan = 0;
-#endif /* SQLITE_TEST // Testing and debugging use only */
+#endif /* SQLITE_TEST // Testing and debugging use only */");
 
   /* Record the continuation address in the WhereInfo structure.  Then
   ** clean up and return.
