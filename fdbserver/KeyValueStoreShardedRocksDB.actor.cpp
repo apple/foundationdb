@@ -688,7 +688,7 @@ public:
 				return status;
 			}
 			metadataShard->readIterPool->update();
-			TraceEvent(SevVerbose, "InitializeMetaDataShard", this->logId)
+			TraceEvent(SevInfo, "InitializeMetaDataShard", this->logId)
 			    .detail("MetadataShardCF", metadataShard->cf->GetID());
 		}
 		physicalShards["kvs-metadata"] = metadataShard;
@@ -2063,7 +2063,9 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			            ? true
 			            : false) {
 				for (const DataShard* shard : shards) {
-					shardRanges.emplace_back(shard->physicalShard, keys & shard->range);
+					if (shard != nullptr) {
+						shardRanges.emplace_back(shard->physicalShard, keys & shard->range);
+					}
 				}
 			}
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_RANGE_TIME_ESTIMATE; }
@@ -2105,7 +2107,12 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			int accumulatedBytes = 0;
 			int numShards = 0;
 			for (auto& [shard, range] : a.shardRanges) {
-				ASSERT(shard != nullptr && shard->initialized());
+				if (shard == nullptr || !shard->initialized()) {
+					TraceEvent(SevWarn, "ShardedRocksReadRangeShardNotReady", logId)
+					    .detail("Range", range)
+					    .detail("Reason", shard == nullptr ? "Not Exist" : "Not Initialized");
+					continue;
+				}
 				auto bytesRead = readRangeInDb(shard, range, rowLimit, byteLimit, &result);
 				if (bytesRead < 0) {
 					// Error reading an instance.
@@ -2293,7 +2300,9 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		auto* shard = shardManager.getDataShard(key);
 		if (shard == nullptr || !shard->physicalShard->initialized()) {
 			// TODO: read non-exist system key range should not cause an error.
-			TraceEvent(SevError, "ShardedRocksDB").detail("Detail", "Read non-exist key range").detail("ReadKey", key);
+			TraceEvent(SevWarnAlways, "ShardedRocksDB")
+			    .detail("Detail", "Read non-exist key range")
+			    .detail("ReadKey", key);
 			return Optional<Value>();
 		}
 
@@ -2366,12 +2375,6 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	                              IKeyValueStore::ReadType type) override {
 		TraceEvent(SevVerbose, "ShardedRocksReadRangeBegin", this->id).detail("Range", keys);
 		auto shards = shardManager.getDataShardsByRange(keys);
-
-		for (DataShard* shard : shards) {
-			if (shard == nullptr || !shard->physicalShard->initialized()) {
-				return RangeResult();
-			}
-		}
 
 		if (!shouldThrottle(type, keys.begin)) {
 			auto a = new Reader::ReadRangeAction(keys, shards, rowLimit, byteLimit);
@@ -2511,8 +2514,9 @@ TEST_CASE("noSim/ShardedRocksDB/RangeOps") {
 	addRangeFutures.push_back(kvStore->addRange(KeyRangeRef("0"_sr, "3"_sr), "shard-1"));
 	addRangeFutures.push_back(kvStore->addRange(KeyRangeRef("4"_sr, "7"_sr), "shard-2"));
 
-	kvStore->persistRangeMapping(KeyRangeRef("0"_sr, "7"_sr), true);
 	wait(waitForAll(addRangeFutures));
+
+	kvStore->persistRangeMapping(KeyRangeRef("0"_sr, "7"_sr), true);
 
 	// write to shard 1
 	state RangeResult expectedRows;
@@ -2701,6 +2705,7 @@ TEST_CASE("noSim/ShardedRocksDB/ShardOps") {
 	mapping.push_back(std::make_pair(KeyRange(KeyRangeRef("m"_sr, "n"_sr)), "shard-3"));
 	mapping.push_back(std::make_pair(KeyRange(KeyRangeRef("u"_sr, "v"_sr)), "shard-3"));
 	mapping.push_back(std::make_pair(KeyRange(KeyRangeRef("x"_sr, "z"_sr)), "shard-1"));
+	mapping.push_back(std::make_pair(specialKeys, "default"));
 
 	for (auto it = dataMap.begin(); it != dataMap.end(); ++it) {
 		std::cout << "Begin " << it->first.begin.toString() << ", End " << it->first.end.toString() << ", id "
@@ -2738,7 +2743,7 @@ TEST_CASE("noSim/ShardedRocksDB/ShardOps") {
 	wait(kvStore->cleanUpShardsIfNeeded(shardsToCleanUp));
 
 	auto dataMap = rocksdbStore->getDataMapping();
-	ASSERT_EQ(dataMap.size(), 1);
+	ASSERT_EQ(dataMap.size(), 2);
 	ASSERT(dataMap[0].second == "shard-2");
 
 	Future<Void> closed = kvStore->onClosed();
