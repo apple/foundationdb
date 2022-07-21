@@ -3693,9 +3693,7 @@ void preprocessMappedKey(Tuple& mappedKeyFormatTuple, std::vector<Optional<Tuple
 			bool escaped = unescapeLiterals(s, "{{", "{");
 			escaped = unescapeLiterals(s, "}}", "}") || escaped;
 			if (escaped) {
-				Tuple escapedTuple;
-				escapedTuple.append(s);
-				vt.emplace_back(escapedTuple);
+				vt.emplace_back(Tuple::makeTuple(s));
 			} else if (singleKeyOrValue(s, sz)) {
 				// when it is SingleKeyOrValue, insert an empty Tuple to vector as placeholder
 				vt.emplace_back(Tuple());
@@ -3767,16 +3765,12 @@ Key constructMappedKey(KeyValueRef* keyValue,
 }
 
 TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
-	Key key = Tuple().append("key-0"_sr).append("key-1"_sr).append("key-2"_sr).getDataAsStandalone();
-	Value value = Tuple().append("value-0"_sr).append("value-1"_sr).append("value-2"_sr).getDataAsStandalone();
+	Key key = Tuple::makeTuple("key-0"_sr, "key-1"_sr, "key-2"_sr).getDataAsStandalone();
+	Value value = Tuple::makeTuple("value-0"_sr, "value-1"_sr, "value-2"_sr).getDataAsStandalone();
 	state KeyValueRef kvr(key, value);
 	{
-		Tuple mappedKeyFormatTuple = Tuple()
-		                                 .append("normal"_sr)
-		                                 .append("{{escaped}}"_sr)
-		                                 .append("{K[2]}"_sr)
-		                                 .append("{V[0]}"_sr)
-		                                 .append("{...}"_sr);
+		Tuple mappedKeyFormatTuple =
+		    Tuple::makeTuple("normal"_sr, "{{escaped}}"_sr, "{K[2]}"_sr, "{V[0]}"_sr, "{...}"_sr);
 
 		Tuple mappedKeyTuple;
 		std::vector<Optional<Tuple>> vt;
@@ -3785,19 +3779,15 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 
 		Key mappedKey = constructMappedKey(&kvr, vt, mappedKeyTuple, mappedKeyFormatTuple);
 
-		Key expectedMappedKey = Tuple()
-		                            .append("normal"_sr)
-		                            .append("{escaped}"_sr)
-		                            .append("key-2"_sr)
-		                            .append("value-0"_sr)
-		                            .getDataAsStandalone();
+		Key expectedMappedKey =
+		    Tuple::makeTuple("normal"_sr, "{escaped}"_sr, "key-2"_sr, "value-0"_sr).getDataAsStandalone();
 		//		std::cout << printable(mappedKey) << " == " << printable(expectedMappedKey) << std::endl;
 		ASSERT(mappedKey.compare(expectedMappedKey) == 0);
 		ASSERT(isRangeQuery == true);
 	}
 
 	{
-		Tuple mappedKeyFormatTuple = Tuple().append("{{{{}}"_sr).append("}}"_sr);
+		Tuple mappedKeyFormatTuple = Tuple::makeTuple("{{{{}}"_sr, "}}"_sr);
 
 		Tuple mappedKeyTuple;
 		std::vector<Optional<Tuple>> vt;
@@ -3805,13 +3795,13 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 		preprocessMappedKey(mappedKeyFormatTuple, vt, isRangeQuery);
 		Key mappedKey = constructMappedKey(&kvr, vt, mappedKeyTuple, mappedKeyFormatTuple);
 
-		Key expectedMappedKey = Tuple().append("{{}"_sr).append("}"_sr).getDataAsStandalone();
+		Key expectedMappedKey = Tuple::makeTuple("{{}"_sr, "}"_sr).getDataAsStandalone();
 		//		std::cout << printable(mappedKey) << " == " << printable(expectedMappedKey) << std::endl;
 		ASSERT(mappedKey.compare(expectedMappedKey) == 0);
 		ASSERT(isRangeQuery == false);
 	}
 	{
-		Tuple mappedKeyFormatTuple = Tuple().append("{{{{}}"_sr).append("}}"_sr);
+		Tuple mappedKeyFormatTuple = Tuple::makeTuple("{{{{}}"_sr, "}}"_sr);
 
 		Tuple mappedKeyTuple;
 		std::vector<Optional<Tuple>> vt;
@@ -3819,13 +3809,13 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 		preprocessMappedKey(mappedKeyFormatTuple, vt, isRangeQuery);
 		Key mappedKey = constructMappedKey(&kvr, vt, mappedKeyTuple, mappedKeyFormatTuple);
 
-		Key expectedMappedKey = Tuple().append("{{}"_sr).append("}"_sr).getDataAsStandalone();
+		Key expectedMappedKey = Tuple::makeTuple("{{}"_sr, "}"_sr).getDataAsStandalone();
 		//		std::cout << printable(mappedKey) << " == " << printable(expectedMappedKey) << std::endl;
 		ASSERT(mappedKey.compare(expectedMappedKey) == 0);
 		ASSERT(isRangeQuery == false);
 	}
 	{
-		Tuple mappedKeyFormatTuple = Tuple().append("{K[100]}"_sr);
+		Tuple mappedKeyFormatTuple = Tuple::makeTuple("{K[100]}"_sr);
 		state bool throwException = false;
 		try {
 			Tuple mappedKeyTuple;
@@ -3841,7 +3831,7 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 		ASSERT(throwException);
 	}
 	{
-		Tuple mappedKeyFormatTuple = Tuple().append("{...}"_sr).append("last-element"_sr);
+		Tuple mappedKeyFormatTuple = Tuple::makeTuple("{...}"_sr, "last-element"_sr);
 		state bool throwException2 = false;
 		try {
 			Tuple mappedKeyTuple;
@@ -3857,7 +3847,7 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 		ASSERT(throwException2);
 	}
 	{
-		Tuple mappedKeyFormatTuple = Tuple().append("{K[not-a-number]}"_sr);
+		Tuple mappedKeyFormatTuple = Tuple::makeTuple("{K[not-a-number]}"_sr);
 		state bool throwException3 = false;
 		try {
 			Tuple mappedKeyTuple;

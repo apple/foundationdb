@@ -134,7 +134,7 @@ private:
 
 				if (!candidateValueFuture.get().present()) {
 					tr->addWriteConflictRange(singleKeyRange(self->recent.get(candidate).key()));
-					return Tuple().append(candidate).pack();
+					return Tuple::makeTuple(candidate).pack();
 				}
 			}
 		}

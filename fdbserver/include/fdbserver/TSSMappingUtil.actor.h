@@ -28,6 +28,7 @@
 #elif !defined(TSS_MAPPING_UTIL_SERVER_H)
 #define TSS_MAPPING_UTIL_SERVER_H
 
+#include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
