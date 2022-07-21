@@ -255,22 +255,23 @@ void DatabaseContext::getLatestCommitVersions(const Reference<LocationInfo>& loc
 
 	std::map<Version, std::set<Tag>> versionMap; // order the versions to be returned
 	for (int i = 0; i < locationInfo->locations()->size(); i++) {
-		int updatedVersionMap = 0;
+		bool updatedVersionMap = false;
 		Version commitVersion = invalidVersion;
 		Tag tag = invalidTag;
-		UID uid = locationInfo->locations()->getId(i);
-		if (ssidTagMapping.find(uid) != ssidTagMapping.end()) {
-			tag = ssidTagMapping[uid];
+		auto iter = ssidTagMapping.find(locationInfo->locations()->getId(i));
+		if (iter != ssidTagMapping.end()) {
+			tag = iter->second;
 			if (ssVersionVectorCache.hasVersion(tag)) {
 				commitVersion = ssVersionVectorCache.getVersion(tag); // latest commit version
 				if (commitVersion < readVersion) {
+					updatedVersionMap = true;
 					versionMap[commitVersion].insert(tag);
 				}
 			}
 		}
 		if (!updatedVersionMap) {
 			TraceEvent(SevDebug, "CommitVersionNotFoundForSS")
-			    .detail("InSSIDMap", ssidTagMapping.find(uid) != ssidTagMapping.end() ? 1 : 0)
+			    .detail("InSSIDMap", iter != ssidTagMapping.end() ? 1 : 0)
 			    .detail("Tag", tag)
 			    .detail("CommitVersion", commitVersion)
 			    .detail("ReadVersion", readVersion);
