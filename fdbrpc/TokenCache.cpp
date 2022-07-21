@@ -158,9 +158,7 @@ bool TokenCache::validate(TenantNameRef name, StringRef token) {
 	    .detail("Reason", reason)                                                                                      \
 	    .detail("Token", token.toStringRef(arena).toStringView())
 
-bool TokenCacheImpl::validateAndAdd(double currentTime,
-                                    StringRef token,
-                                    NetworkAddress const& peer) {
+bool TokenCacheImpl::validateAndAdd(double currentTime, StringRef token, NetworkAddress const& peer) {
 	Arena arena;
 	authz::jwt::TokenRef t;
 	if (!authz::jwt::parseToken(arena, t, token)) {
