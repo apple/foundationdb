@@ -532,79 +532,68 @@ void executeShardSplit(DataDistributionTracker* self,
 }
 
 ACTOR Future<Void> tenantShardSplitter(DataDistributionTracker* self, KeyRange tenantKeys) {
-	wait(Future<Void>(Void()));
-
 	auto shardContainingTenantStart = self->shards.rangeContaining(tenantKeys.begin);
 	auto shardContainingTenantEnd = self->shards.rangeContainingKeyBefore(tenantKeys.end);
 
-	loop {
-		if (shardContainingTenantStart == shardContainingTenantEnd) {
-			if (shardContainingTenantStart.begin() != tenantKeys.begin ||
-			    shardContainingTenantStart.end() != tenantKeys.end) {
+	if (shardContainingTenantStart == shardContainingTenantEnd) {
+		if (shardContainingTenantStart.begin() != tenantKeys.begin ||
+		    shardContainingTenantStart.end() != tenantKeys.end) {
 
-				auto startShardSize = shardContainingTenantStart->value().stats;
-
-				Future<Void> onChange;
-				if (!startShardSize->get().present()) {
-					// onChange = startShardSize->onChange();
-					return Void();
-				} else {
-					Standalone<VectorRef<KeyRef>> faultLines;
-
-					faultLines.push_back(faultLines.arena(), shardContainingTenantStart->begin());
-					if (shardContainingTenantStart->begin() != tenantKeys.begin) {
-						faultLines.push_back(faultLines.arena(), tenantKeys.begin);
-					}
-					if (shardContainingTenantStart->end() != tenantKeys.end) {
-						faultLines.push_back(faultLines.arena(), tenantKeys.end);
-					}
-					faultLines.push_back(faultLines.arena(), shardContainingTenantStart->end());
-
-					KeyRangeRef startKeys =
-					    KeyRangeRef(shardContainingTenantStart->begin(), shardContainingTenantStart->end());
-
-					auto s = describeSplit(startKeys, faultLines);
-					TraceEvent(SevInfo, "ExecutingShardSplit").detail("SplttingAroundStartAndEndKeys", s);
-
-					executeShardSplit(self, startKeys, faultLines, startShardSize, true);
-
-					return Void();
-				}
-
-				// wait(onChange);
-			}
-		} else {
 			auto startShardSize = shardContainingTenantStart->value().stats;
-			auto endShardSize = shardContainingTenantEnd->value().stats;
-			Standalone<VectorRef<KeyRef>> startShardFaultLines;
-			Standalone<VectorRef<KeyRef>> endShardFaultLines;
 
-			if (shardContainingTenantStart->begin() != tenantKeys.begin) {
-				startShardFaultLines.push_back(startShardFaultLines.arena(), shardContainingTenantStart->begin());
-				startShardFaultLines.push_back(startShardFaultLines.arena(), tenantKeys.begin);
-				startShardFaultLines.push_back(startShardFaultLines.arena(), shardContainingTenantStart->end());
+			if (startShardSize->get().present()) {
+				Standalone<VectorRef<KeyRef>> faultLines;
+
+				faultLines.push_back(faultLines.arena(), shardContainingTenantStart->begin());
+				if (shardContainingTenantStart->begin() != tenantKeys.begin) {
+					faultLines.push_back(faultLines.arena(), tenantKeys.begin);
+				}
+				if (shardContainingTenantStart->end() != tenantKeys.end) {
+					faultLines.push_back(faultLines.arena(), tenantKeys.end);
+				}
+				faultLines.push_back(faultLines.arena(), shardContainingTenantStart->end());
+
+				KeyRangeRef startKeys =
+				    KeyRangeRef(shardContainingTenantStart->begin(), shardContainingTenantStart->end());
+
+				auto s = describeSplit(startKeys, faultLines);
+				TraceEvent(SevInfo, "ExecutingShardSplit").detail("SplttingAroundStartAndEndKeys", s);
+
+				executeShardSplit(self, startKeys, faultLines, startShardSize, true);
 			}
-
-			if (shardContainingTenantStart->end() != tenantKeys.end) {
-				endShardFaultLines.push_back(endShardFaultLines.arena(), shardContainingTenantEnd->begin());
-				endShardFaultLines.push_back(endShardFaultLines.arena(), tenantKeys.end);
-				endShardFaultLines.push_back(endShardFaultLines.arena(), shardContainingTenantEnd->end());
-			}
-
-			KeyRangeRef startKeys = KeyRangeRef(shardContainingTenantStart->begin(), shardContainingTenantStart->end());
-			KeyRangeRef endKeys = KeyRangeRef(shardContainingTenantEnd->begin(), shardContainingTenantEnd->end());
-
-			auto s = describeSplit(startKeys, startShardFaultLines);
-			TraceEvent(SevInfo, "ExecutingShardSplit").detail("SplttingAroundStartKey", s);
-
-			s = describeSplit(endKeys, endShardFaultLines);
-			TraceEvent(SevInfo, "ExecutingShardSplit").detail("SplttingAroundEndKey", s);
-
-			executeShardSplit(self, startKeys, startShardFaultLines, startShardSize, true);
-			executeShardSplit(self, endKeys, endShardFaultLines, endShardSize, true);
-
-			return Void();
 		}
+		return Void();
+	} else {
+		auto startShardSize = shardContainingTenantStart->value().stats;
+		auto endShardSize = shardContainingTenantEnd->value().stats;
+		Standalone<VectorRef<KeyRef>> startShardFaultLines;
+		Standalone<VectorRef<KeyRef>> endShardFaultLines;
+
+		if (shardContainingTenantStart->begin() != tenantKeys.begin) {
+			startShardFaultLines.push_back(startShardFaultLines.arena(), shardContainingTenantStart->begin());
+			startShardFaultLines.push_back(startShardFaultLines.arena(), tenantKeys.begin);
+			startShardFaultLines.push_back(startShardFaultLines.arena(), shardContainingTenantStart->end());
+		}
+
+		if (shardContainingTenantStart->end() != tenantKeys.end) {
+			endShardFaultLines.push_back(endShardFaultLines.arena(), shardContainingTenantEnd->begin());
+			endShardFaultLines.push_back(endShardFaultLines.arena(), tenantKeys.end);
+			endShardFaultLines.push_back(endShardFaultLines.arena(), shardContainingTenantEnd->end());
+		}
+
+		KeyRangeRef startKeys = KeyRangeRef(shardContainingTenantStart->begin(), shardContainingTenantStart->end());
+		KeyRangeRef endKeys = KeyRangeRef(shardContainingTenantEnd->begin(), shardContainingTenantEnd->end());
+
+		auto s = describeSplit(startKeys, startShardFaultLines);
+		TraceEvent(SevInfo, "ExecutingShardSplit").detail("SplttingAroundStartKey", s);
+
+		s = describeSplit(endKeys, endShardFaultLines);
+		TraceEvent(SevInfo, "ExecutingShardSplit").detail("SplttingAroundEndKey", s);
+
+		executeShardSplit(self, startKeys, startShardFaultLines, startShardSize, true);
+		executeShardSplit(self, endKeys, endShardFaultLines, endShardSize, true);
+
+		return Void();
 	}
 }
 
@@ -756,6 +745,7 @@ Future<Void> shardMerger(DataDistributionTracker* self,
 
 			++nextIter;
 			if (!shardForwardMergeFeasible(self, keys, nextIter->range())) {
+				--nextIter;
 				forwardComplete = true;
 				continue;
 			}
@@ -830,16 +820,7 @@ Future<Void> shardMerger(DataDistributionTracker* self,
 	}
 
 	if (shardsMerged == 1) {
-		// auto tenantOwningBegin = self->ddTenantCache.get()->tenantOwning(keys.begin);
-		// auto tenantOwningEnd = self->ddTenantCache.get()->tenantOwning(keys.end);
-		// TraceEvent(SevInfo, "ShardMergerFoundNothingToMerge")
-		//     .detail("Begin", keys.begin)
-		//     .detail("End", keys.end)
-		//     .detail("IsTenantKey", self->ddTenantCache.get()->isTenantKey(keys.begin))
-		//     .detail("TenantOwningBegin", tenantOwningBegin.present() ? tenantOwningBegin.get()->prefixDesc() : "{}")
-		//     .detail("TenantOwningEnd", tenantOwningEnd.present() ? tenantOwningEnd.get()->prefixDesc() : "{}");
-
-		return Void();
+		return brokenPromiseToReady(nextIter->value().stats->onChange());
 	}
 
 	// restarting shard tracker will derefenced values in the shard map, so make a copy
