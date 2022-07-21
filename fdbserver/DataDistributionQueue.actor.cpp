@@ -1639,6 +1639,10 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 
 				healthyDestinations.addDataInFlightToTeam(-metrics.bytes);
 				auto readLoad = metrics.bytesReadPerKSecond;
+				// Note: It’s equal to trigger([healthyDestinations, readLoad], which is a value capture of
+				// healthyDestinations. Have to create a reference to healthyDestinations because in ACTOR the state
+				// variable is actually a member variable, I can’t write trigger([healthyDestinations, readLoad]
+				// directly.
 				auto& destinationRef = healthyDestinations;
 				self->noErrorActors.add(
 				    trigger([destinationRef, readLoad]() mutable { destinationRef.addReadInFlightToTeam(-readLoad); },
@@ -1778,10 +1782,6 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
 	state Future<HealthMetrics> healthMetrics = self->cx->getHealthMetrics(true);
 	state GetTopKMetricsRequest req(
 	    shards, topK, (srcLoad - destLoad) * SERVER_KNOBS->READ_REBALANCE_MAX_SHARD_FRAC, srcLoad / shards.size());
-	req.comparator = [](const StorageMetrics& a, const StorageMetrics& b) {
-		return a.bytesReadPerKSecond / std::max(a.bytes * 1.0, 1.0) >
-		       b.bytesReadPerKSecond / std::max(b.bytes * 1.0, 1.0);
-	};
 	state GetTopKMetricsReply reply = wait(brokenPromiseToNever(self->getTopKMetrics.getReply(req)));
 	wait(ready(healthMetrics));
 	auto cpu = getWorstCpu(healthMetrics.get(), sourceTeam->getServerIDs());
@@ -1790,31 +1790,24 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
 		return false;
 	}
 
-	auto& metricsList = reply.metrics;
+	auto& metricsList = reply.shardMetrics;
 	// NOTE: randomize is important here since we don't want to always push the same shard into the queue
 	deterministicRandom()->randomShuffle(metricsList);
 	traceEvent->detail("MinReadLoad", reply.minReadLoad).detail("MaxReadLoad", reply.maxReadLoad);
 
-	int chosenIdx = -1;
-	for (int i = 0; i < metricsList.size(); ++i) {
-		if (metricsList[i].keys.present()) {
-			chosenIdx = i;
-			break;
-		}
-	}
-	if (chosenIdx == -1) {
+	if (metricsList.empty()) {
 		traceEvent->detail("SkipReason", "NoEligibleShards");
 		return false;
 	}
 
-	auto& metrics = metricsList[chosenIdx];
+	auto& [shard, metrics] = metricsList[0];
 	traceEvent->detail("ShardReadBandwidth", metrics.bytesReadPerKSecond);
 	//  Verify the shard is still in ShardsAffectedByTeamFailure
 	shards = self->shardsAffectedByTeamFailure->getShardsFor(
 	    ShardsAffectedByTeamFailure::Team(sourceTeam->getServerIDs(), primary));
 	for (int i = 0; i < shards.size(); i++) {
-		if (metrics.keys == shards[i]) {
-			self->output.send(RelocateShard(metrics.keys.get(), priority, RelocateReason::REBALANCE_READ));
+		if (shard == shards[i]) {
+			self->output.send(RelocateShard(shard, priority, RelocateReason::REBALANCE_READ));
 			self->updateLastAsSource(sourceTeam->getServerIDs());
 			return true;
 		}

@@ -834,9 +834,8 @@ ACTOR Future<Void> trackInitialShards(DataDistributionTracker* self, Reference<I
 }
 
 ACTOR Future<Void> fetchTopKShardMetrics_impl(DataDistributionTracker* self, GetTopKMetricsRequest req) {
-	ASSERT(req.comparator);
 	state Future<Void> onChange;
-	state std::vector<StorageMetrics> returnMetrics;
+	state std::vector<GetTopKMetricsReply::KeyRangeStorageMetrics> returnMetrics;
 	// random pick a portion of shard
 	if (req.keys.size() > SERVER_KNOBS->DD_SHARD_COMPARE_LIMIT) {
 		deterministicRandom()->randomShuffle(req.keys, SERVER_KNOBS->DD_SHARD_COMPARE_LIMIT);
@@ -870,8 +869,7 @@ ACTOR Future<Void> fetchTopKShardMetrics_impl(DataDistributionTracker* self, Get
 					maxReadLoad = std::max(metrics.bytesReadPerKSecond, maxReadLoad);
 					if (req.minBytesReadPerKSecond <= metrics.bytesReadPerKSecond &&
 					    metrics.bytesReadPerKSecond <= req.maxBytesReadPerKSecond) {
-						metrics.keys = range;
-						returnMetrics.push_back(metrics);
+						returnMetrics.emplace_back(range, metrics);
 					}
 				}
 
@@ -885,11 +883,11 @@ ACTOR Future<Void> fetchTopKShardMetrics_impl(DataDistributionTracker* self, Get
 					std::nth_element(returnMetrics.begin(),
 					                 returnMetrics.begin() + req.topK - 1,
 					                 returnMetrics.end(),
-					                 req.comparator);
-					req.reply.send(GetTopKMetricsReply(
-					    std::vector<StorageMetrics>(returnMetrics.begin(), returnMetrics.begin() + req.topK),
-					    minReadLoad,
-					    maxReadLoad));
+					                 GetTopKMetricsRequest::compare);
+					req.reply.send(GetTopKMetricsReply(std::vector<GetTopKMetricsReply::KeyRangeStorageMetrics>(
+					                                       returnMetrics.begin(), returnMetrics.begin() + req.topK),
+					                                   minReadLoad,
+					                                   maxReadLoad));
 				}
 				return Void();
 			}
