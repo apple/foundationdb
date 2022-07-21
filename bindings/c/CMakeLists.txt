@@ -439,7 +439,7 @@ if (OPEN_FOR_IDE)
   add_library(fdb_c_shim OBJECT fdb_c_shim.cpp)
   target_link_libraries(fdb_c_shim PUBLIC dl)
 
-elseif(NOT WIN32 AND NOT APPLE AND NOT OPEN_FOR_IDE) # Linux Only
+elseif(NOT WIN32 AND NOT APPLE AND NOT OPEN_FOR_IDE AND NOT USE_UBSAN) # Linux, non-ubsan only
 
   set(SHIM_LIB_OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR})
 
@@ -472,7 +472,7 @@ elseif(NOT WIN32 AND NOT APPLE AND NOT OPEN_FOR_IDE) # Linux Only
           --api-test-dir ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests
           )
 
-endif() # End Linux only
+endif() # End Linux, non-ubsan only
 
 # TODO: re-enable once the old vcxproj-based build system is removed.
 #generate_export_header(fdb_c EXPORT_MACRO_NAME "DLLEXPORT"
