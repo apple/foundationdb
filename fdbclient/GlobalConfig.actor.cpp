@@ -183,13 +183,13 @@ ACTOR Future<Void> GlobalConfig::migrate(GlobalConfig* self) {
 				if (sampleRate.present()) {
 					const double sampleRateDbl =
 					    BinaryReader::fromStringRef<double>(sampleRate.get().contents(), Unversioned());
-					Tuple rate = Tuple().appendDouble(sampleRateDbl);
+					Tuple rate = Tuple::makeTuple(sampleRateDbl);
 					tr->set(GlobalConfig::prefixedKey(fdbClientInfoTxnSampleRate), rate.pack());
 				}
 				if (sizeLimit.present()) {
 					const int64_t sizeLimitInt =
 					    BinaryReader::fromStringRef<int64_t>(sizeLimit.get().contents(), Unversioned());
-					Tuple size = Tuple().append(sizeLimitInt);
+					Tuple size = Tuple::makeTuple(sizeLimitInt);
 					tr->set(GlobalConfig::prefixedKey(fdbClientInfoTxnSizeLimit), size.pack());
 				}
 

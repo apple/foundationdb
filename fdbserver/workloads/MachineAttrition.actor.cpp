@@ -322,7 +322,7 @@ struct MachineAttritionWorkload : TestWorkload {
 				    .detail("MachinesToKill", self->machinesToKill)
 				    .detail("MachinesToLeave", self->machinesToLeave)
 				    .detail("Machines", self->machines.size());
-				TEST(true); // Killing a machine
+				CODE_PROBE(true, "Killing a machine");
 
 				delayBeforeKill = deterministicRandom()->random01() * meanDelay;
 				wait(delay(delayBeforeKill));
@@ -345,11 +345,11 @@ struct MachineAttritionWorkload : TestWorkload {
 				// decide on a machine to kill
 				state LocalityData targetMachine = self->machines.back();
 				if (BUGGIFY_WITH_PROB(0.01)) {
-					TEST(true); // Marked a zone for maintenance before killing it
+					CODE_PROBE(true, "Marked a zone for maintenance before killing it");
 					wait(success(
 					    setHealthyZone(cx, targetMachine.zoneId().get(), deterministicRandom()->random01() * 20)));
 				} else if (BUGGIFY_WITH_PROB(0.005)) {
-					TEST(true); // Disable DD for all storage server failures
+					CODE_PROBE(true, "Disable DD for all storage server failures");
 					self->ignoreSSFailures =
 					    uncancellable(ignoreSSFailuresForDuration(cx, deterministicRandom()->random01() * 5));
 				}

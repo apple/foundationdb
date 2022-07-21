@@ -38,14 +38,11 @@ struct TenantMapEntry {
 	int64_t id;
 	Key prefix;
 
-	constexpr static int ROOT_PREFIX_SIZE = sizeof(id);
-
-private:
-	void initPrefix(KeyRef subspace);
+	constexpr static int PREFIX_SIZE = sizeof(id);
 
 public:
 	TenantMapEntry();
-	TenantMapEntry(int64_t id, KeyRef subspace);
+	TenantMapEntry(int64_t id);
 
 	Value encode() const { return ObjectWriter::toValue(*this, IncludeVersion(ProtocolVersion::withTenants())); }
 
@@ -58,18 +55,11 @@ public:
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		KeyRef subspace;
-		if (ar.isDeserializing) {
-			serializer(ar, id, subspace);
+		serializer(ar, id);
+		if constexpr (Ar::isDeserializing) {
 			if (id >= 0) {
-				initPrefix(subspace);
+				prefix = idToPrefix(id);
 			}
-		} else {
-			ASSERT(prefix.size() >= 8 || (prefix.empty() && id == -1));
-			if (!prefix.empty()) {
-				subspace = prefix.substr(0, prefix.size() - 8);
-			}
-			serializer(ar, id, subspace);
 		}
 	}
 };

@@ -94,8 +94,6 @@ Future<std::pair<TenantMapEntry, bool>> createTenantTransaction(Transaction tr, 
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 
 	state Future<Optional<TenantMapEntry>> tenantEntryFuture = tryGetTenantTransaction(tr, name);
-	state typename transaction_future_type<Transaction, Optional<Value>>::type tenantDataPrefixFuture =
-	    tr->get(tenantDataPrefixKey);
 	state typename transaction_future_type<Transaction, Optional<Value>>::type tenantModeFuture =
 	    tr->get(configKeysPrefix.withSuffix("tenant_mode"_sr));
 
@@ -110,19 +108,7 @@ Future<std::pair<TenantMapEntry, bool>> createTenantTransaction(Transaction tr, 
 		return std::make_pair(tenantEntry.get(), false);
 	}
 
-	Optional<Value> tenantDataPrefix = wait(safeThreadFutureToFuture(tenantDataPrefixFuture));
-	if (tenantDataPrefix.present() &&
-	    tenantDataPrefix.get().size() + TenantMapEntry::ROOT_PREFIX_SIZE > CLIENT_KNOBS->TENANT_PREFIX_SIZE_LIMIT) {
-		TraceEvent(SevWarnAlways, "TenantPrefixTooLarge")
-		    .detail("TenantSubspace", tenantDataPrefix.get())
-		    .detail("TenantSubspaceLength", tenantDataPrefix.get().size())
-		    .detail("RootPrefixLength", TenantMapEntry::ROOT_PREFIX_SIZE)
-		    .detail("MaxTenantPrefixSize", CLIENT_KNOBS->TENANT_PREFIX_SIZE_LIMIT);
-
-		throw client_invalid_operation();
-	}
-
-	state TenantMapEntry newTenant(tenantId, tenantDataPrefix.present() ? (KeyRef)tenantDataPrefix.get() : ""_sr);
+	state TenantMapEntry newTenant(tenantId);
 
 	state typename transaction_future_type<Transaction, RangeResult>::type prefixRangeFuture =
 	    tr->getRange(prefixRange(newTenant.prefix), 1);

@@ -1213,7 +1213,7 @@ public:
 		// isolation support. But it is not default and is rarely used. So we disallow it until we have thorough test
 		// coverage for it.)
 		if (snapshot) {
-			TEST(true); // getMappedRange not supported for snapshot.
+			CODE_PROBE(true, "getMappedRange not supported for snapshot.");
 			throw unsupported_operation();
 		}
 		// For now, getMappedRange requires read-your-writes being NOT disabled. But the support of RYW is limited
@@ -1222,7 +1222,7 @@ public:
 		// which returns the written value transparently. In another word, it makes sure not break RYW semantics without
 		// actually implementing reading from the writes.
 		if (ryw->options.readYourWritesDisabled) {
-			TEST(true); // getMappedRange not supported for read-your-writes disabled.
+			CODE_PROBE(true, "getMappedRange not supported for read-your-writes disabled.");
 			throw unsupported_operation();
 		}
 
@@ -1242,7 +1242,7 @@ public:
 			++it;
 
 			ASSERT(itCopy->value.size());
-			TEST(itCopy->value.size() > 1); // Multiple watches on the same key triggered by RYOW
+			CODE_PROBE(itCopy->value.size() > 1, "Multiple watches on the same key triggered by RYOW");
 
 			for (int i = 0; i < itCopy->value.size(); i++) {
 				if (itCopy->value[i]->onChangeTrigger.isSet()) {
@@ -1535,11 +1535,11 @@ ACTOR Future<RangeResult> getWorkerInterfaces(Reference<IClusterConnectionRecord
 }
 
 Future<Optional<Value>> ReadYourWritesTransaction::get(const Key& key, Snapshot snapshot) {
-	TEST(true); // ReadYourWritesTransaction::get
+	CODE_PROBE(true, "ReadYourWritesTransaction::get");
 
 	if (getDatabase()->apiVersionAtLeast(630)) {
 		if (specialKeys.contains(key)) {
-			TEST(true); // Special keys get
+			CODE_PROBE(true, "Special keys get");
 			return getDatabase()->specialKeySpace->get(this, key);
 		}
 	} else {
@@ -1622,7 +1622,7 @@ Future<RangeResult> ReadYourWritesTransaction::getRange(KeySelector begin,
 	if (getDatabase()->apiVersionAtLeast(630)) {
 		if (specialKeys.contains(begin.getKey()) && specialKeys.begin <= end.getKey() &&
 		    end.getKey() <= specialKeys.end) {
-			TEST(true); // Special key space get range
+			CODE_PROBE(true, "Special key space get range");
 			return getDatabase()->specialKeySpace->getRange(this, begin, end, limits, reverse);
 		}
 	} else {
@@ -1648,7 +1648,7 @@ Future<RangeResult> ReadYourWritesTransaction::getRange(KeySelector begin,
 
 	// This optimization prevents nullptr operations from being added to the conflict range
 	if (limits.isReached()) {
-		TEST(true); // RYW range read limit 0
+		CODE_PROBE(true, "RYW range read limit 0");
 		return RangeResult();
 	}
 
@@ -1662,7 +1662,7 @@ Future<RangeResult> ReadYourWritesTransaction::getRange(KeySelector begin,
 		end.removeOrEqual(end.arena());
 
 	if (begin.offset >= end.offset && begin.getKey() >= end.getKey()) {
-		TEST(true); // RYW range inverted
+		CODE_PROBE(true, "RYW range inverted");
 		return RangeResult();
 	}
 
@@ -1692,7 +1692,7 @@ Future<MappedRangeResult> ReadYourWritesTransaction::getMappedRange(KeySelector 
 	if (getDatabase()->apiVersionAtLeast(630)) {
 		if (specialKeys.contains(begin.getKey()) && specialKeys.begin <= end.getKey() &&
 		    end.getKey() <= specialKeys.end) {
-			TEST(true); // Special key space get range (getMappedRange)
+			CODE_PROBE(true, "Special key space get range (getMappedRange)");
 			throw client_invalid_operation(); // Not support special keys.
 		}
 	} else {
@@ -1714,7 +1714,7 @@ Future<MappedRangeResult> ReadYourWritesTransaction::getMappedRange(KeySelector 
 
 	// This optimization prevents nullptr operations from being added to the conflict range
 	if (limits.isReached()) {
-		TEST(true); // RYW range read limit 0 (getMappedRange)
+		CODE_PROBE(true, "RYW range read limit 0 (getMappedRange)");
 		return MappedRangeResult();
 	}
 
@@ -1728,7 +1728,7 @@ Future<MappedRangeResult> ReadYourWritesTransaction::getMappedRange(KeySelector 
 		end.removeOrEqual(end.arena());
 
 	if (begin.offset >= end.offset && begin.getKey() >= end.getKey()) {
-		TEST(true); // RYW range inverted (getMappedRange)
+		CODE_PROBE(true, "RYW range inverted (getMappedRange)");
 		return MappedRangeResult();
 	}
 
@@ -1998,7 +1998,7 @@ void ReadYourWritesTransaction::setToken(uint64_t token) {
 }
 
 RangeResult ReadYourWritesTransaction::getReadConflictRangeIntersecting(KeyRangeRef kr) {
-	TEST(true); // Special keys read conflict range
+	CODE_PROBE(true, "Special keys read conflict range");
 	ASSERT(readConflictRangeKeysRange.contains(kr));
 	ASSERT(!tr.trState->options.checkWritesEnabled);
 	RangeResult result;
@@ -2040,7 +2040,7 @@ RangeResult ReadYourWritesTransaction::getReadConflictRangeIntersecting(KeyRange
 }
 
 RangeResult ReadYourWritesTransaction::getWriteConflictRangeIntersecting(KeyRangeRef kr) {
-	TEST(true); // Special keys write conflict range
+	CODE_PROBE(true, "Special keys write conflict range");
 	ASSERT(writeConflictRangeKeysRange.contains(kr));
 	RangeResult result;
 
@@ -2145,7 +2145,7 @@ void ReadYourWritesTransaction::atomicOp(const KeyRef& key, const ValueRef& oper
 	}
 
 	if (operationType == MutationRef::SetVersionstampedKey) {
-		TEST(options.readYourWritesDisabled); // SetVersionstampedKey without ryw enabled
+		CODE_PROBE(options.readYourWritesDisabled, "SetVersionstampedKey without ryw enabled");
 		// this does validation of the key and needs to be performed before the readYourWritesDisabled path
 		KeyRangeRef range = getVersionstampKeyRange(arena, k, tr.getCachedReadVersion().orDefault(0), getMaxReadKey());
 		versionStampKeys.push_back(arena, k);
