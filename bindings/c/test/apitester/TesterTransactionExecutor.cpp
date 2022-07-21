@@ -26,6 +26,7 @@
 #include <cstddef>
 #include <memory>
 #include <stdexcept>
+#include <string>
 #include <unordered_map>
 #include <mutex>
 #include <atomic>
@@ -708,23 +709,6 @@ public:
 
 	~MultiTenantDBTransactionExecutor() override { release(); }
 
-	// TODO: Make it available to DBPerTransactionExecutor as well.
-	void setupTenants(fdb::Database db, int dbid, int numTenants) {
-		std::string tenant_name_prefix = "tenant_" + std::to_string(dbid) + "_";
-
-		auto systemTx = createNewTransaction(db);
-		for (int i = 0; i < numTenants; i++) {
-			fdb::Tenant::createTenant(systemTx, fdb::toBytesRef(tenant_name_prefix + std::to_string(i)));
-		}
-		systemTx.commit().blockUntilReady();
-
-		std::vector<fdb::Tenant> tenants_;
-		for (int i = 0; i < numTenants; i++) {
-			tenants_.push_back(db.openTenant(fdb::toBytesRef(tenant_name_prefix + std::to_string(i))));
-		}
-		tenants.push_back(tenants_);
-	}
-
 	void init(IScheduler* scheduler, const char* clusterFile, const std::string& bgBasePath) override {
 		ASSERT(options.multiTenant == true);
 		ASSERT(options.numTenants >= 1);
@@ -733,8 +717,6 @@ public:
 		for (int i = 0; i < options.numDatabases; i++) {
 			fdb::Database db(this->clusterFile);
 			databases.push_back(db);
-
-			setupTenants(db, i, 1);
 		}
 	}
 
@@ -778,7 +760,6 @@ private:
 	void release() { databases.clear(); }
 
 	std::vector<fdb::Database> databases;
-	std::vector<std::vector<fdb::Tenant>> tenants;
 };
 
 /**

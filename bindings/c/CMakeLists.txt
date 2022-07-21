@@ -147,7 +147,7 @@ if(NOT WIN32)
     test/apitester/TesterExampleWorkload.cpp
     test/apitester/TesterKeyValueStore.cpp
     test/apitester/TesterKeyValueStore.h
-    test/apitester/TesterMultiTenantWorkload.cpp
+    test/apitester/TesterMultiTenantCorrectnessWorkload.cpp
     test/apitester/TesterOptions.h
     test/apitester/TesterScheduler.cpp
     test/apitester/TesterScheduler.h

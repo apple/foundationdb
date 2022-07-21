@@ -82,6 +82,9 @@ struct WorkloadConfig {
 	// Total number of clients
 	int numClients;
 
+	// Number of Tenants
+	int numTenants;
+
 	// Selected FDB API version
 	int apiVersion;
 
