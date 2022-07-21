@@ -31,6 +31,8 @@ Value serializeChunkedSnapshot(Standalone<GranuleSnapshot> snapshot,
                                Optional<CompressionFilter> compressFilter,
                                Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx = Optional<BlobGranuleCipherKeysCtx>());
 
+Value serializeDeltaFile(Standalone<GranuleDeltas> deltas);
+
 // FIXME: support sorted and chunked delta files
 
 ErrorOr<RangeResult> loadAndMaterializeBlobGranules(const Standalone<VectorRef<BlobGranuleChunkRef>>& files,

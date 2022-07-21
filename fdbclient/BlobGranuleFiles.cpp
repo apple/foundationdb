@@ -22,6 +22,7 @@
 
 #include "fdbclient/BlobGranuleCommon.h"
 #include "fdbclient/ClientKnobs.h"
+#include "fdbclient/CommitTransaction.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/SystemData.h" // for allKeys unit test - could remove
 
@@ -40,8 +41,6 @@
 #include <vector>
 
 #define BG_READ_DEBUG false
-
-// FIXME: implement actual proper file format for this
 
 // Implements granule file parsing and materialization with normal c++ functions (non-actors) so that this can be used
 // outside the FDB network thread.
@@ -641,6 +640,11 @@ Value serializeChunkedSnapshot(Standalone<GranuleSnapshot> snapshot,
 	return Standalone<StringRef>(StringRef(buffer, size), ret);
 }
 
+Value serializeDeltaFile(Standalone<GranuleDeltas> deltas) {
+	// FIXME: better format
+	return ObjectWriter::toValue(deltas, Unversioned());
+}
+
 // TODO: use redwood prefix trick to optimize cpu comparison
 static Arena loadSnapshotFile(const StringRef& snapshotData,
                               KeyRangeRef keyRange,
@@ -691,7 +695,7 @@ static Arena loadSnapshotFile(const StringRef& snapshotData,
 	return rootArena;
 }
 
-static void applyDelta(KeyRangeRef keyRange, MutationRef m, std::map<KeyRef, ValueRef>& dataMap) {
+static void applyDelta(const KeyRangeRef& keyRange, const MutationRef& m, std::map<KeyRef, ValueRef>& dataMap) {
 	if (m.type == MutationRef::ClearRange) {
 		if (m.param2 <= keyRange.begin || m.param1 >= keyRange.end) {
 			return;
@@ -729,7 +733,7 @@ static void applyDelta(KeyRangeRef keyRange, MutationRef m, std::map<KeyRef, Val
 }
 
 static void applyDeltas(const GranuleDeltas& deltas,
-                        KeyRangeRef keyRange,
+                        const KeyRangeRef& keyRange,
                         Version beginVersion,
                         Version readVersion,
                         Version& lastFileEndVersion,
@@ -1160,18 +1164,18 @@ int randomExp(int minExp, int maxExp) {
 	return deterministicRandom()->randomInt(val, val * 2);
 }
 
-void checkEmpty(const Value& serialized, Key begin, Key end, Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx) {
+void checkSnapshotEmpty(const Value& serialized, Key begin, Key end, Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx) {
 	std::map<KeyRef, ValueRef> result;
 	Arena ar = loadSnapshotFile(serialized, KeyRangeRef(begin, end), result, cipherKeysCtx);
 	ASSERT(result.empty());
 }
 
 // endIdx is exclusive
-void checkRead(const Standalone<GranuleSnapshot>& snapshot,
-               const Value& serialized,
-               int beginIdx,
-               int endIdx,
-               Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx) {
+void checkSnapshotRead(const Standalone<GranuleSnapshot>& snapshot,
+                       const Value& serialized,
+                       int beginIdx,
+                       int endIdx,
+                       Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx) {
 	ASSERT(beginIdx < endIdx);
 	ASSERT(endIdx <= snapshot.size());
 	std::map<KeyRef, ValueRef> result;
@@ -1215,6 +1219,15 @@ struct KeyValueGen {
 	double clearFrequency;
 	double clearUnsetFrequency;
 	double updateExistingKeyFrequency;
+	int minVersionIncrease;
+	int maxVersionIncrease;
+	int targetMutationsPerDelta;
+
+	Version version = 0;
+
+	// encryption/compression settings
+	Optional<BlobGranuleCipherKeysCtx> cipherKeys;
+	Optional<CompressionFilter> compressFilter;
 
 	KeyValueGen() {
 		sharedPrefix = deterministicRandom()->randomUniqueID().toString();
@@ -1239,6 +1252,30 @@ struct KeyValueGen {
 		} else {
 			updateExistingKeyFrequency = deterministicRandom()->random01();
 		}
+		if (deterministicRandom()->coinflip()) {
+			// sequential versions
+			minVersionIncrease = 1;
+			maxVersionIncrease = 2;
+		} else {
+			minVersionIncrease = randomExp(0, 25);
+			maxVersionIncrease = minVersionIncrease + randomExp(0, 25);
+		}
+		if (deterministicRandom()->coinflip()) {
+			targetMutationsPerDelta = 1;
+		} else {
+			targetMutationsPerDelta = randomExp(1, 5);
+		}
+
+		if (deterministicRandom()->coinflip()) {
+			cipherKeys = getCipherKeysCtx(ar);
+		}
+		if (deterministicRandom()->coinflip()) {
+#ifdef ZLIB_LIB_SUPPORTED
+			compressFilter = CompressionFilter::GZIP;
+#else
+			compressFilter = CompressionFilter::NONE;
+#endif
+		}
 	}
 
 	Optional<StringRef> newKey() {
@@ -1247,11 +1284,25 @@ struct KeyValueGen {
 			keySize = std::min(keySize, uidSize);
 			std::string key = sharedPrefix + deterministicRandom()->randomUniqueID().toString().substr(0, keySize);
 			if (usedKeys.insert(key).second) {
-				usedKeysList.push_back(key);
-				return StringRef(ar, key);
+				StringRef k(ar, key);
+				usedKeysList.push_back(k);
+				return k;
 			}
 		}
 		return {};
+	}
+
+	StringRef value() {
+		int valueSize = deterministicRandom()->randomInt(targetValueLength / 2, targetValueLength * 3 / 2);
+		std::string value = deterministicRandom()->randomUniqueID().toString();
+		if (value.size() > valueSize) {
+			value = value.substr(0, valueSize);
+		}
+		if (value.size() < valueSize) {
+			// repeated string so it's compressible
+			value += std::string(valueSize - value.size(), 'x');
+		}
+		return StringRef(ar, value);
 	}
 
 	StringRef keyForUpdate(double probUseExisting) {
@@ -1269,6 +1320,12 @@ struct KeyValueGen {
 		}
 	}
 
+	Version nextVersion() {
+		Version jump = deterministicRandom()->randomInt(minVersionIncrease, maxVersionIncrease);
+		version += jump;
+		return version;
+	}
+
 	MutationRef newMutation() {
 		if (deterministicRandom()->random01() < clearFrequency) {
 			// The algorithm for generating clears of varying sizes is, to generate clear sizes based on an exponential
@@ -1281,8 +1338,9 @@ struct KeyValueGen {
 			if (clearPastEnd) {
 				clearWidth--;
 			}
-			StringRef clearStartKey = keyForUpdate(1.0 - clearUnsetFrequency);
-			auto it = usedKeys.find(clearStartKey.toString());
+			StringRef begin = keyForUpdate(1.0 - clearUnsetFrequency);
+			std::string beginStr = begin.toString();
+			auto it = usedKeys.find(beginStr);
 			ASSERT(it != usedKeys.end());
 			while (it != usedKeys.end() && clearWidth > 0) {
 				it++;
@@ -1292,15 +1350,14 @@ struct KeyValueGen {
 				it--;
 				clearPastEnd = true;
 			}
-			StringRef begin(clearStartKey);
 			std::string endKey = *it;
 			if (clearPastEnd) {
-				Key end = keyAfter(StringRef(endKey));
+				Key end = keyAfter(StringRef(ar, endKey));
 				ar.dependsOn(end.arena());
 				return MutationRef(MutationRef::ClearRange, begin, end);
 			} else {
 				// clear up to end
-				return MutationRef(MutationRef::ClearRange, begin, StringRef(endKey));
+				return MutationRef(MutationRef::ClearRange, begin, StringRef(ar, endKey));
 			}
 
 		} else {
@@ -1308,17 +1365,14 @@ struct KeyValueGen {
 		}
 	}
 
-	StringRef value() {
-		int valueSize = deterministicRandom()->randomInt(targetValueLength / 2, targetValueLength * 3 / 2);
-		std::string value = deterministicRandom()->randomUniqueID().toString();
-		if (value.size() > valueSize) {
-			value = value.substr(0, valueSize);
+	MutationsAndVersionRef newDelta() {
+		Version v = nextVersion();
+		int mutationCount = deterministicRandom()->randomInt(1, targetMutationsPerDelta * 2);
+		MutationsAndVersionRef ret(v, v);
+		for (int i = 0; i < mutationCount; i++) {
+			ret.mutations.push_back(ar, newMutation());
 		}
-		if (value.size() < valueSize) {
-			// repeated string so it's compressible
-			value += std::string(valueSize - value.size(), 'x');
-		}
-		return StringRef(ar, value);
+		return ret;
 	}
 };
 
@@ -1331,7 +1385,6 @@ TEST_CASE("/blobgranule/files/snapshotFormatUnitTest") {
 	int targetChunks = randomExp(0, 9);
 	int targetDataBytes = randomExp(0, 25);
 
-	std::unordered_set<std::string> usedKeys;
 	Standalone<GranuleSnapshot> data;
 	int totalDataBytes = 0;
 	while (totalDataBytes < targetDataBytes) {
@@ -1362,21 +1415,7 @@ TEST_CASE("/blobgranule/files/snapshotFormatUnitTest") {
 	fmt::print(
 	    "Constructing snapshot with {0} rows, {1} bytes, and {2} chunks\n", data.size(), totalDataBytes, targetChunks);
 
-	Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx = Optional<BlobGranuleCipherKeysCtx>();
-	Arena arena;
-	if (deterministicRandom()->coinflip()) {
-		cipherKeysCtx = getCipherKeysCtx(arena);
-	}
-
-	Optional<CompressionFilter> compressFilter;
-	if (deterministicRandom()->coinflip()) {
-#ifdef ZLIB_LIB_SUPPORTED
-		compressFilter = CompressionFilter::GZIP;
-#else
-		compressFilter = CompressionFilter::NONE;
-#endif
-	}
-	Value serialized = serializeChunkedSnapshot(data, targetChunks, compressFilter, cipherKeysCtx);
+	Value serialized = serializeChunkedSnapshot(data, targetChunks, kvGen.compressFilter, kvGen.cipherKeys);
 
 	fmt::print("Snapshot serialized! {0} bytes\n", serialized.size());
 
@@ -1387,7 +1426,7 @@ TEST_CASE("/blobgranule/files/snapshotFormatUnitTest") {
 
 	fmt::print("Initial read starting\n");
 
-	checkRead(data, serialized, 0, data.size(), cipherKeysCtx);
+	checkSnapshotRead(data, serialized, 0, data.size(), kvGen.cipherKeys);
 
 	fmt::print("Initial read complete\n");
 
@@ -1396,22 +1435,80 @@ TEST_CASE("/blobgranule/files/snapshotFormatUnitTest") {
 			int width = randomExp(0, maxExp);
 			ASSERT(width <= data.size());
 			int start = deterministicRandom()->randomInt(0, data.size() - width);
-			checkRead(data, serialized, start, start + width, cipherKeysCtx);
+			checkSnapshotRead(data, serialized, start, start + width, kvGen.cipherKeys);
 		}
 
 		fmt::print("Doing empty checks\n");
 		int randomIdx = deterministicRandom()->randomInt(0, data.size() - 1);
-		checkEmpty(serialized, keyAfter(data[randomIdx].key), data[randomIdx + 1].key, cipherKeysCtx);
+		checkSnapshotEmpty(serialized, keyAfter(data[randomIdx].key), data[randomIdx + 1].key, kvGen.cipherKeys);
 	} else {
 		fmt::print("Doing empty checks\n");
 	}
 
-	checkEmpty(serialized, normalKeys.begin, data.front().key, cipherKeysCtx);
-	checkEmpty(serialized, normalKeys.begin, LiteralStringRef("\x00"), cipherKeysCtx);
-	checkEmpty(serialized, keyAfter(data.back().key), normalKeys.end, cipherKeysCtx);
-	checkEmpty(serialized, LiteralStringRef("\xfe"), normalKeys.end, cipherKeysCtx);
+	checkSnapshotEmpty(serialized, normalKeys.begin, data.front().key, kvGen.cipherKeys);
+	checkSnapshotEmpty(serialized, normalKeys.begin, LiteralStringRef("\x00"), kvGen.cipherKeys);
+	checkSnapshotEmpty(serialized, keyAfter(data.back().key), normalKeys.end, kvGen.cipherKeys);
+	checkSnapshotEmpty(serialized, LiteralStringRef("\xfe"), normalKeys.end, kvGen.cipherKeys);
 
 	fmt::print("Snapshot format test done!\n");
+
+	return Void();
+}
+
+TEST_CASE("/blobgranule/files/deltaFormatUnitTest") {
+	KeyValueGen kvGen;
+
+	int targetDataBytes = randomExp(0, 21);
+	// int targetDataBytes = 1000;
+
+	Standalone<GranuleDeltas> data;
+	int totalDataBytes = 0;
+	while (totalDataBytes < targetDataBytes) {
+		data.push_back(kvGen.ar, kvGen.newDelta());
+		totalDataBytes += data.back().expectedSize();
+	}
+
+	Value serialized = serializeDeltaFile(data);
+
+	std::string rangeEnd = "\xff";
+	KeyRange range(KeyRangeRef(StringRef(kvGen.sharedPrefix), StringRef(rangeEnd)));
+
+	// expected answer
+	std::map<KeyRef, ValueRef> expectedData;
+	Version lastFileEndVersion = 0;
+	Version readVersion = data.back().version;
+
+	// FIXME: do randomized key range and version range!
+	// FIXME: refactor this into checkDeltaRead function!
+
+	applyDeltas(data, range, 0, readVersion, lastFileEndVersion, expectedData);
+
+	// actual answer
+	std::string filename = randomBGFilename(
+	    deterministicRandom()->randomUniqueID(), deterministicRandom()->randomUniqueID(), readVersion, ".delta");
+	BlobGranuleChunkRef chunk;
+	// TODO need to add cipher keys meta
+	chunk.deltaFiles.emplace_back_deep(kvGen.ar, filename, 0, serialized.size(), serialized.size());
+	chunk.cipherKeysCtx = kvGen.cipherKeys;
+	chunk.keyRange = range;
+	chunk.includedVersion = readVersion;
+	chunk.snapshotVersion = invalidVersion;
+
+	RangeResult actualData = materializeBlobGranule(chunk, range, 0, readVersion, {}, &serialized);
+
+	ASSERT(expectedData.size() == actualData.size());
+	int i = 0;
+	for (auto& it : expectedData) {
+		if (it.first != actualData[i].key) {
+			fmt::print("{0})", i);
+			fmt::print("actual {0} ({1})", actualData[i].key.toString(), actualData[i].key.size());
+			fmt::print("expected {0} ({1}) ", it.first.toString(), it.first.size());
+			fmt::print("\n");
+		}
+		ASSERT(it.first == actualData[i].key);
+		ASSERT(it.second == actualData[i].value);
+		i++;
+	}
 
 	return Void();
 }

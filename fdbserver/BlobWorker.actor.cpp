@@ -602,7 +602,7 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 
 	state std::string fileName = randomBGFilename(bwData->id, granuleID, currentDeltaVersion, ".delta");
 
-	state Value serialized = ObjectWriter::toValue(deltasToWrite, Unversioned());
+	state Value serialized = serializeDeltaFile(deltasToWrite);
 	state size_t serializedSize = serialized.size();
 
 	// Free up deltasToWrite here to reduce memory
