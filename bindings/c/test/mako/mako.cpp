@@ -1011,6 +1011,7 @@ int initArguments(Arguments& args) {
 	args.bg_materialize_files = false;
 	args.bg_file_path[0] = '\0';
 	args.distributed_tracer_client = 0;
+	args.txn_name[0] = '\0';
 	return 0;
 }
 
@@ -1297,6 +1298,7 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			args.iteration = atoi(optarg);
 			break;
 		case 'x':
+			strcpy(args.txn_name, optarg);
 			rc = parseTransaction(args, optarg);
 			if (rc < 0)
 				return -1;

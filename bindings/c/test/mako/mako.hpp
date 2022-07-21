@@ -121,6 +121,7 @@ struct WorkloadSpec {
 
 constexpr const int LOGGROUP_MAX = 256;
 constexpr const int KNOB_MAX = 256;
+constexpr const int TXN_NAME_MAX = 64;
 constexpr const int TAGPREFIXLENGTH_MAX = 8;
 constexpr const int NUM_CLUSTERS_MAX = 3;
 constexpr const int NUM_DATABASES_MAX = 10;
@@ -177,6 +178,7 @@ struct Arguments {
 	char report_files[MAX_REPORT_FILES][PATH_MAX];
 	int num_report_files;
 	int distributed_tracer_client;
+	char txn_name[TXN_NAME_MAX];
 };
 
 } // namespace mako
