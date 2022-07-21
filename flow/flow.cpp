@@ -377,6 +377,7 @@ void enableBuggify(bool enabled, BuggifyType type) {
 	buggifyActivated[int(type)] = enabled;
 }
 
+// Make OpenSSL use DeterministicRandom as RNG source such that simulation runs stay deterministic w/ e.g. signature ops
 void bindDeterministicRandomToOpenssl() {
 	// TODO: implement ifdef branch for 3.x using provider API
 	static const RAND_METHOD method = {
@@ -384,6 +385,7 @@ void bindDeterministicRandomToOpenssl() {
 		[](const void*, int) -> int { return 1; },
 		// replacement for RAND_bytes(), which fills given buffer with random byte sequence
 		[](unsigned char* buf, int length) -> int {
+			ASSERT_ABORT(g_network && g_network->isSimulated());
 		    deterministicRandom()->randomBytes(buf, length);
 		    return 1;
 		},
@@ -393,6 +395,7 @@ void bindDeterministicRandomToOpenssl() {
 		[](const void*, int, double) -> int { return 1; },
 		// replacement for default pseudobytes getter (same as RAND_bytes by default)
 		[](unsigned char* buf, int length) -> int {
+			ASSERT_ABORT(g_network && g_network->isSimulated());
 		    deterministicRandom()->randomBytes(buf, length);
 		    return 1;
 		},

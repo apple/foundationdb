@@ -219,7 +219,7 @@ bool TokenCacheImpl::validate(TenantNameRef name, StringRef token) {
 
 	if (!cachedEntry.present()) {
 		if (validateAndAdd(currentTime, token, peer)) {
-			cachedEntry = cache.get(sig);
+			cachedEntry = cache.get(token);
 		} else {
 			return false;
 		}
