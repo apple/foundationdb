@@ -440,7 +440,7 @@ public:
 		return Void();
 	}
 
-	ACTOR static Future<Void> resumeFromInitShards(Reference<DataDistributor> self, bool traceShard) {
+	ACTOR static Future<Void> resumeFromShards(Reference<DataDistributor> self, bool traceShard) {
 		state int shard = 0;
 		for (; shard < self->initData->shards.size() - 1; shard++) {
 			const DDShardInfo& iShard = self->initData->shards[shard];
@@ -483,7 +483,7 @@ public:
 		return Void();
 	}
 
-	ACTOR static Future<Void> resumeFromInitDataMoveMap(Reference<DataDistributor> self) {
+	ACTOR static Future<Void> resumeFromDataMoves(Reference<DataDistributor> self) {
 		state KeyRangeMap<std::shared_ptr<DataMove>>::iterator it = self->initData->dataMoveMap.ranges().begin();
 		for (; it != self->initData->dataMoveMap.ranges().end(); ++it) {
 			const DataMoveMetaData& meta = it.value()->meta;
@@ -525,8 +525,8 @@ public:
 	// TODO: add a test to verify the inflight relocation correctness and measure the memory usage with 4 million shards
 	Future<Void> resumeRelocations() {
 		ASSERT(shardsAffectedByTeamFailure); // has to be allocated
-		return runAfter(resumeFromInitShards(Reference<DataDistributor>::addRef(this), g_network->isSimulated()),
-		                resumeFromInitDataMoveMap(Reference<DataDistributor>::addRef(this)));
+		return runAfter(resumeFromShards(Reference<DataDistributor>::addRef(this), g_network->isSimulated()),
+		                resumeFromDataMoves(Reference<DataDistributor>::addRef(this)));
 	}
 };
 
@@ -1484,7 +1484,7 @@ TEST_CASE("/DataDistributor/Initialization/ResumeFromShard") {
 	}
 	self->initData->shards.emplace_back(DDShardInfo(allKeys.end));
 	std::cout << "Start resuming...\n";
-	wait(DataDistributor::resumeFromInitShards(self, false));
+	wait(DataDistributor::resumeFromShards(self, false));
 	std::cout << "Start validation...\n";
 	auto relocateFuture = self->relocationProducer.getFuture();
 	for (int i = 0; i < SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM; ++i) {
