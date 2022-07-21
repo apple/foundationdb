@@ -231,8 +231,7 @@ private:
 			} else {
 				// TODO(yiwu): assert this couldn't happen, after we change to only allow encryption when tenant
 				// mode is in required mode.
-				TraceEvent(SevWarn, "TenantAwareEncryptionKeyProvider_TenantNameMissing")
-				    .detail("TenantID", beginTenantId);
+				// ASSERT(false);
 			}
 		}
 		if (domainId == SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID) {
