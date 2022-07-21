@@ -536,14 +536,14 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 	// FIXME: wrap the bootstrap process into class DataDistributor
 	state Reference<DDTeamCollection> primaryTeamCollection;
 	state Reference<DDTeamCollection> remoteTeamCollection;
-	state bool trackerCancelled;
+	state std::shared_ptr<bool> trackerCancelled(new bool(false));
 	state bool ddIsTenantAware = SERVER_KNOBS->DD_TENANT_AWARENESS_ENABLED;
 	loop {
-		trackerCancelled = false;
+		*trackerCancelled = false;
 
 		// Stored outside of data distribution tracker to avoid slow tasks
 		// when tracker is cancelled
-		state KeyRangeMap<ShardTrackedData> shards;
+		state std::shared_ptr<KeyRangeMap<ShardTrackedData>> shards(new KeyRangeMap<ShardTrackedData>);
 		state Promise<UID> removeFailedServer;
 		try {
 			wait(DataDistributor::init(self, ddEnabledState));
@@ -603,8 +603,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			                                                            readyToStart,
 			                                                            anyZeroHealthyTeams,
 			                                                            self->ddId,
-			                                                            &shards,
-			                                                            &trackerCancelled),
+			                                                            shards,
+			                                                            trackerCancelled),
 			                                    "DDTracker",
 			                                    self->ddId,
 			                                    &normalDDQueueErrors()));
@@ -691,7 +691,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			wait(waitForAll(actors));
 			return Void();
 		} catch (Error& e) {
-			trackerCancelled = true;
+			*trackerCancelled = true;
 			state Error err = e;
 			TraceEvent("DataDistributorDestroyTeamCollections").error(e);
 			state std::vector<UID> teamForDroppedRange;
@@ -715,10 +715,10 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 				if (!g_network->isSimulated()) {
 					TraceEvent(SevWarnAlways, "DataDistributorCancelled");
 				}
-				shards.clear();
+				shards->clear();
 				throw e;
 			} else {
-				wait(shards.clearAsync());
+				wait(shards->clearAsync());
 			}
 			TraceEvent("DataDistributorTeamCollectionsDestroyed").error(err);
 			if (removeFailedServer.getFuture().isReady() && !removeFailedServer.getFuture().isError()) {
