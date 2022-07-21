@@ -23,7 +23,6 @@
 #include <memory>
 #include <map>
 #include <fmt/format.h>
-#include <iostream>
 
 namespace FdbApiTester {
 
