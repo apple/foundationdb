@@ -51,6 +51,8 @@ bool compareFDBAndBlob(RangeResult fdb,
                        Version v,
                        bool debug);
 
+ACTOR Future<Void> clearAndAwaitMerge(Database cx, KeyRange range);
+
 #include "flow/unactorcompiler.h"
 
 #endif

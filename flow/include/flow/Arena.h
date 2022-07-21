@@ -41,6 +41,8 @@
 #include <set>
 #include <type_traits>
 #include <sstream>
+#include <string_view>
+#include <fmt/format.h>
 
 // TrackIt is a zero-size class for tracking constructions, destructions, and assignments of instances
 // of a class.  Just inherit TrackIt<T> from T to enable tracking of construction and destruction of
@@ -587,13 +589,19 @@ public:
 	}
 
 	// Removes bytes from begin up to and including the sep string, returns StringRef of the part before sep
-	StringRef eat(StringRef sep) {
+	StringRef eat(StringRef sep, bool* foundSep = nullptr) {
 		for (int i = 0, iend = size() - sep.size(); i <= iend; ++i) {
 			if (sep.compare(substr(i, sep.size())) == 0) {
+				if (foundSep) {
+					*foundSep = true;
+				}
 				StringRef token = substr(0, i);
 				*this = substr(i + sep.size());
 				return token;
 			}
+		}
+		if (foundSep) {
+			*foundSep = false;
 		}
 		return eat();
 	}
@@ -602,7 +610,9 @@ public:
 		*this = StringRef();
 		return r;
 	}
-	StringRef eat(const char* sep) { return eat(StringRef((const uint8_t*)sep, (int)strlen(sep))); }
+	StringRef eat(const char* sep, bool* foundSep = nullptr) {
+		return eat(StringRef((const uint8_t*)sep, (int)strlen(sep)), foundSep);
+	}
 	// Return StringRef of bytes from begin() up to but not including the first byte matching any byte in sep,
 	// and remove that sequence (including the sep byte) from *this
 	// Returns and removes all bytes from *this if no bytes within sep were found
@@ -724,6 +734,15 @@ StringRef LiteralStringRefHelper(const char* str) {
 }
 } // namespace literal_string_ref
 #define LiteralStringRef(str) literal_string_ref::LiteralStringRefHelper<decltype(str), sizeof(str)>(str)
+
+template <>
+struct fmt::formatter<StringRef> : formatter<std::string_view> {
+	template <typename FormatContext>
+	auto format(const StringRef& str, FormatContext& ctx) -> decltype(ctx.out()) {
+		std::string_view view(reinterpret_cast<const char*>(str.begin()), str.size());
+		return formatter<string_view>::format(view, ctx);
+	}
+};
 
 inline StringRef operator"" _sr(const char* str, size_t size) {
 	return StringRef(reinterpret_cast<const uint8_t*>(str), size);

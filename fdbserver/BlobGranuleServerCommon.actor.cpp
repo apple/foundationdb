@@ -30,6 +30,18 @@
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // has to be last include
 
+// serialize change feed key as UID bytes, to use 16 bytes on disk
+Key granuleIDToCFKey(UID granuleID) {
+	BinaryWriter wr(Unversioned());
+	wr << granuleID;
+	return wr.toValue();
+}
+
+// parse change feed key back to UID, to be human-readable
+UID cfKeyToGranuleID(Key cfKey) {
+	return BinaryReader::fromStringRef<UID>(cfKey, Unversioned());
+}
+
 // Gets the latest granule history node for range that was persisted
 ACTOR Future<Optional<GranuleHistory>> getLatestGranuleHistory(Transaction* tr, KeyRange range) {
 	state KeyRange historyRange = blobGranuleHistoryKeyRangeFor(range);

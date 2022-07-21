@@ -65,7 +65,7 @@ class LocalConfigurationImpl {
 					configClassToKnobToValue[configPath.back()] = {};
 				}
 			} else {
-				TEST(true); // Invalid configuration path
+				CODE_PROBE(true, "Invalid configuration path");
 				if (!g_network->isSimulated()) {
 					fprintf(stderr, "WARNING: Invalid configuration path: `%s'\n", paramString.c_str());
 				}
@@ -88,7 +88,7 @@ class LocalConfigurationImpl {
 					knobCollection.setKnob(knobName.toString(), knobValue);
 				} catch (Error& e) {
 					if (e.code() == error_code_invalid_option_value) {
-						TEST(true); // invalid knob in configuration database
+						CODE_PROBE(true, "invalid knob in configuration database");
 						TraceEvent(SevWarnAlways, "InvalidKnobOptionValue")
 						    .detail("KnobName", knobName)
 						    .detail("KnobValue", knobValue.toString());
@@ -126,10 +126,10 @@ class LocalConfigurationImpl {
 					this->overrides[stringToKeyRef(knobName)] = knobValue;
 				} catch (Error& e) {
 					if (e.code() == error_code_invalid_option) {
-						TEST(true); // Attempted to manually set invalid knob option
+						CODE_PROBE(true, "Attempted to manually set invalid knob option");
 						TraceEvent(SevWarnAlways, "UnrecognizedKnobOption").detail("Knob", printable(knobName));
 					} else if (e.code() == error_code_invalid_option_value) {
-						TEST(true); // Invalid manually set knob value
+						CODE_PROBE(true, "Invalid manually set knob value");
 						TraceEvent(SevWarnAlways, "InvalidKnobValue")
 						    .detail("Knob", printable(knobName))
 						    .detail("Value", printable(knobValueString));
@@ -198,7 +198,7 @@ class LocalConfigurationImpl {
 		state ConfigKnobOverrides storedConfigPath =
 		    BinaryReader::fromStringRef<ConfigKnobOverrides>(storedConfigPathValue.get(), IncludeVersion());
 		if (!storedConfigPath.hasSameConfigPath(self->configKnobOverrides)) {
-			TEST(true); // All local information is outdated
+			CODE_PROBE(true, "All local information is outdated");
 			wait(clearKVStore(self));
 			wait(saveConfigPath(self));
 			self->updateInMemoryState(lastSeenVersion);

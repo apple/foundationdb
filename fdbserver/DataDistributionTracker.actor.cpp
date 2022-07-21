@@ -113,7 +113,7 @@ struct DataDistributionTracker {
 
 		DataDistributionTracker* operator()() {
 			if (trackerCancelled) {
-				TEST(true); // Trying to access DataDistributionTracker after tracker has been cancelled
+				CODE_PROBE(true, "Trying to access DataDistributionTracker after tracker has been cancelled");
 				throw dd_tracker_cancelled();
 			}
 			return &tracker;
@@ -605,7 +605,7 @@ ACTOR Future<Void> shardSplitter(DataDistributionTracker* self,
 	state BandwidthStatus bandwidthStatus = getBandwidthStatus(metrics);
 
 	// Split
-	TEST(true); // shard to be split
+	CODE_PROBE(true, "shard to be split");
 
 	StorageMetrics splitMetrics;
 	splitMetrics.bytes = shardBounds.max.bytes / 2;
@@ -713,8 +713,7 @@ Future<Void> shardMerger(DataDistributionTracker* self,
 	auto prevIter = self->shards.rangeContaining(keys.begin);
 	auto nextIter = self->shards.rangeContaining(keys.begin);
 
-	TEST(true); // shard to be merged
-
+	CODE_PROBE(true, "shard to be merged");
 	ASSERT(keys.begin > allKeys.begin);
 
 	// This will merge shards both before and after "this" shard in keyspace.
@@ -772,7 +771,7 @@ Future<Void> shardMerger(DataDistributionTracker* self,
 			//  on the previous shard changing "size".
 			if (!newMetrics.present() || shardCount + newMetrics.get().shardCount >= CLIENT_KNOBS->SHARD_COUNT_LIMIT) {
 				if (shardsMerged == 1) {
-					TEST(true); // shardMerger cannot merge anything
+					CODE_PROBE(true, "shardMerger cannot merge anything");
 					return brokenPromiseToReady(prevIter->value().stats->onChange());
 				}
 
@@ -982,7 +981,7 @@ void restartShardTrackers(DataDistributionTracker* self, KeyRangeRef keys, Optio
 			    .detail("Keys", keys)
 			    .detail("Size", startingMetrics.get().metrics.bytes)
 			    .detail("Merges", startingMetrics.get().merges);*/
-			TEST(true); // shardTracker started with trackedBytes already set
+			CODE_PROBE(true, "shardTracker started with trackedBytes already set");
 			shardMetrics->set(startingMetrics);
 		}
 
@@ -1088,7 +1087,7 @@ ACTOR Future<Void> fetchTopKShardMetrics(DataDistributionTracker* self, GetTopKM
 	choose {
 		when(wait(fetchTopKShardMetrics_impl(self, req))) {}
 		when(wait(delay(SERVER_KNOBS->DD_SHARD_METRICS_TIMEOUT))) {
-			TEST(true); // TopK DD_SHARD_METRICS_TIMEOUT
+			CODE_PROBE(true, "TopK DD_SHARD_METRICS_TIMEOUT");
 			req.reply.send(GetTopKMetricsReply());
 		}
 	}
@@ -1127,7 +1126,7 @@ ACTOR Future<Void> fetchShardMetrics(DataDistributionTracker* self, GetMetricsRe
 	choose {
 		when(wait(fetchShardMetrics_impl(self, req))) {}
 		when(wait(delay(SERVER_KNOBS->DD_SHARD_METRICS_TIMEOUT, TaskPriority::DataDistribution))) {
-			TEST(true); // DD_SHARD_METRICS_TIMEOUT
+			CODE_PROBE(true, "DD_SHARD_METRICS_TIMEOUT");
 			StorageMetrics largeMetrics;
 			largeMetrics.bytes = getMaxShardSize(self->dbSizeEstimate->get());
 			req.reply.send(largeMetrics);
