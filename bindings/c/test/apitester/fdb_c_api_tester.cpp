@@ -363,6 +363,7 @@ bool runWorkloads(TesterOptions& options) {
 				config.options = workloadSpec.options;
 				config.clientId = i;
 				config.numClients = options.numClients;
+				config.numTenants = options.numTenants;
 				config.apiVersion = options.apiVersion;
 				std::shared_ptr<IWorkload> workload = IWorkloadFactory::create(workloadSpec.name, config);
 				if (!workload) {

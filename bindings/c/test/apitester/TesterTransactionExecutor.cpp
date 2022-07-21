@@ -26,6 +26,7 @@
 #include <cstddef>
 #include <memory>
 #include <stdexcept>
+#include <string>
 #include <unordered_map>
 #include <mutex>
 #include <atomic>
@@ -575,39 +576,17 @@ public:
 
 	~MultiTenantDBTransactionExecutor() override { release(); }
 
-	// TODO: Make it available to DBPerTransactionExecutor as well.
-	void setupTenants(fdb::Database db, int dbid, int numTenants) {
-		std::string tenant_name_prefix = "tenant_" + std::to_string(dbid) + "_";
-
-		auto systemTx = createNewTransaction(db);
-		for (int i = 0; i < numTenants; i++) {
-			fdb::Tenant::createTenant(systemTx, fdb::toBytesRef(tenant_name_prefix + std::to_string(i)));
-		}
-		systemTx.commit().blockUntilReady();
-
-		std::vector<fdb::Tenant> tenants_;
-		for (int i = 0; i < numTenants; i++) {
-			tenants_.push_back(db.openTenant(fdb::toBytesRef(tenant_name_prefix + std::to_string(i))));
-		}
-		tenants.push_back(tenants_);
-	}
-
 	void init(IScheduler* scheduler, const char* clusterFile, const std::string& bgBasePath) override {
 		ASSERT(options.multiTenant == true);
 		ASSERT(options.numTenants >= 1);
 
 		TransactionExecutorBase::init(scheduler, clusterFile, bgBasePath);
 
-		// Ignore: setting numDatabases and numTenants to be 1 for testing.
-		// disregard options.numDatabases. Assume always only 1 database
+		// Todo: Use a single database for now. Support can be expanded later.
 		int numDatabases = 1;
-		// disregard options.numTenants. Assume always only 1 tenants
-		int numTenants = 1;
 		for (int i = 0; i < numDatabases; i++) {
 			fdb::Database db(clusterFile);
 			databases.push_back(db);
-
-			setupTenants(db, i, numTenants);
 		}
 	}
 
@@ -645,15 +624,19 @@ public:
 	void execute(std::shared_ptr<ITransactionActor> txActor, TTaskFct cont, int tenantId = -1) override {
 		int dbIdx = 0;
 		ASSERT(options.multiTenant == true);
-		ASSERT(tenantId >= 0);
-		executeOnDatabase(databases[dbIdx], txActor, cont, &tenants[0][0]);
+		if (tenantId >= 0) {
+			std::string tenant_name = "tenant" + std::to_string(tenantId);
+			fdb::Tenant tenant = databases[dbIdx].openTenant(fdb::toBytesRef(tenant_name));
+			executeOnDatabase(databases[dbIdx], txActor, cont, &tenant);
+		} else {
+			executeOnDatabase(databases[dbIdx], txActor, cont);
+		}
 	}
 
 	void release() { databases.clear(); }
 
 private:
 	std::vector<fdb::Database> databases;
-	std::vector<std::vector<fdb::Tenant>> tenants;
 };
 
 /**

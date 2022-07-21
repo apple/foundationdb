@@ -126,11 +126,11 @@ fdb::Key ApiWorkload::randomNotExistingKey() {
 fdb::Key ApiWorkload::randomExistingKey() {
 	fdb::Key genKey = randomKeyName();
 	fdb::Key key = store.getKey(genKey, true, 1);
-	if (key != store.endKey()) {
+	if (key != store.endKey() && key.compare(0, keyPrefix.size(), keyPrefix) == 0) {
 		return key;
 	}
 	key = store.getKey(genKey, true, 0);
-	if (key != store.startKey()) {
+	if (key != store.startKey() && key.compare(0, keyPrefix.size(), keyPrefix) == 0) {
 		return key;
 	}
 	info("No existing key found, using a new random key.");

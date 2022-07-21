@@ -1,19 +1,22 @@
 [[test]]
 title = 'Multi-tenant API Correctness Single Threaded'
-minClients = 1
-maxClients = 3
-multiThreaded = false
+multiThreaded = true
+buggify = true
+minFdbThreads = 2
+maxFdbThreads = 8
+minClients = 2
+maxClients = 8
 multiTenant = true
 minTenants = 2
 maxTenants = 5
 
     [[test.workload]]
-    name = 'MultiTenant'
+    name = 'MultiTenantCorrectness'
     minKeyLength = 1
 	maxKeyLength = 64
 	minValueLength = 1
 	maxValueLength = 1000
-	maxKeysPerTransaction = 50
-	initialSize = 0
-	numRandomOperations = 100
+	maxKeysPerTransaction = 5
+	initialSize = 100
+	numRandomOperations = 200
 	readExistingKeysRatio = 0.9
