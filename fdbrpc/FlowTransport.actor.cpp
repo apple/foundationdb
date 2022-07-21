@@ -615,8 +615,8 @@ ACTOR Future<Void> connectionWriter(Reference<Peer> self, Reference<IConnection>
 				break;
 			}
 
-			TEST(true); // We didn't write everything, so apparently the write buffer is full.  Wait for it to be
-			            // nonfull.
+			CODE_PROBE(
+			    true, "We didn't write everything, so apparently the write buffer is full.  Wait for it to be nonfull");
 			wait(conn->onWritable());
 			wait(yield(TaskPriority::WriteSocket));
 		}
@@ -1462,7 +1462,7 @@ ACTOR static Future<Void> connectionIncoming(TransportData* self, Reference<ICon
 			}
 			when(Reference<Peer> p = wait(onConnected.getFuture())) { p->onIncomingConnection(p, conn, reader); }
 			when(wait(delayJittered(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT))) {
-				TEST(true); // Incoming connection timed out
+				CODE_PROBE(true, "Incoming connection timed out");
 				throw timed_out();
 			}
 		}
@@ -1703,7 +1703,7 @@ void FlowTransport::addWellKnownEndpoint(Endpoint& endpoint, NetworkMessageRecei
 }
 
 static void sendLocal(TransportData* self, ISerializeSource const& what, const Endpoint& destination) {
-	TEST(true); // "Loopback" delivery
+	CODE_PROBE(true, "\"Loopback\" delivery");
 	// SOMEDAY: Would it be better to avoid (de)serialization by doing this check in flow?
 
 	Standalone<StringRef> copy;
@@ -1742,7 +1742,7 @@ static ReliablePacket* sendPacket(TransportData* self,
 	// If there isn't an open connection, a public address, or the peer isn't compatible, we can't send
 	if (!peer || (peer->outgoingConnectionIdle && !destination.getPrimaryAddress().isPublic()) ||
 	    (!peer->compatible && destination.token != Endpoint::wellKnownToken(WLTOKEN_PING_PACKET))) {
-		TEST(true); // Can't send to private address without a compatible open connection
+		CODE_PROBE(true, "Can't send to private address without a compatible open connection");
 		return nullptr;
 	}
 

@@ -88,16 +88,10 @@ struct GranuleFiles {
 };
 
 // serialize change feed key as UID bytes, to use 16 bytes on disk
-static Key granuleIDToCFKey(UID granuleID) {
-	BinaryWriter wr(Unversioned());
-	wr << granuleID;
-	return wr.toValue();
-}
+Key granuleIDToCFKey(UID granuleID);
 
 // parse change feed key back to UID, to be human-readable
-static UID cfKeyToGranuleID(Key cfKey) {
-	return BinaryReader::fromStringRef<UID>(cfKey, Unversioned());
-}
+UID cfKeyToGranuleID(Key cfKey);
 
 class Transaction;
 ACTOR Future<Optional<GranuleHistory>> getLatestGranuleHistory(Transaction* tr, KeyRange range);

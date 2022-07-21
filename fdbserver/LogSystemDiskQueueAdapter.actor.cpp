@@ -101,7 +101,7 @@ public:
 					TraceEvent(SevWarnAlways, "DiskQueueAdapterReset")
 					    .detail("Version", self->cursor->popped())
 					    .detail("PeekTypeSwitch", self->peekTypeSwitches % 3);
-					TEST(true); // disk adapter reset
+					CODE_PROBE(true, "disk adapter reset");
 					if (self->cursor->popped() != 0) {
 						self->recoveryLoc = self->cursor->popped();
 					} else {

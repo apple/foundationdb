@@ -119,7 +119,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				return;
 			}
 			f = success(ryw.get(LiteralStringRef("\xff\xff/status/json")));
-			TEST(!f.isReady()); // status json not ready
+			CODE_PROBE(!f.isReady(), "status json not ready");
 		}
 		ASSERT(f.isError());
 		ASSERT(f.getError().code() == error_code_transaction_cancelled);
@@ -233,7 +233,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				    .detail("TestValue", printable(res2[i].value));
 				return false;
 			}
-			TEST(true); // Special key space keys equal
+			CODE_PROBE(true, "Special key space keys equal");
 		}
 		return true;
 	}
@@ -335,7 +335,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			wait(success(tx->getRange(
 			    KeyRangeRef(LiteralStringRef("\xff\xff/transaction/"), LiteralStringRef("\xff\xff/transaction0")),
 			    CLIENT_KNOBS->TOO_MANY)));
-			TEST(true); // read transaction special keyrange
+			CODE_PROBE(true, "read transaction special keyrange");
 			tx->reset();
 		} catch (Error& e) {
 			throw;
@@ -361,7 +361,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			KeySelector begin = KeySelectorRef(readConflictRangeKeysRange.begin, false, 1);
 			KeySelector end = KeySelectorRef(LiteralStringRef("\xff\xff/transaction0"), false, 0);
 			wait(success(tx->getRange(begin, end, GetRangeLimits(CLIENT_KNOBS->TOO_MANY))));
-			TEST(true); // end key selector inside module range
+			CODE_PROBE(true, "end key selector inside module range");
 			tx->reset();
 		} catch (Error& e) {
 			throw;
@@ -489,8 +489,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 
 	ACTOR static Future<Void> testConflictRanges(Database cx_, bool read, SpecialKeySpaceCorrectnessWorkload* self) {
 		state StringRef prefix = read ? readConflictRangeKeysRange.begin : writeConflictRangeKeysRange.begin;
-		TEST(read); // test read conflict range special key implementation
-		TEST(!read); // test write conflict range special key implementation
+		CODE_PROBE(read, "test read conflict range special key implementation");
+		CODE_PROBE(!read, "test write conflict range special key implementation");
 		// Get a default special key range instance
 		Database cx = cx_->clone();
 		state Reference<ReadYourWritesTransaction> tx = makeReference<ReadYourWritesTransaction>(cx);
@@ -545,7 +545,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					throw;
 				return Void();
 			}
-			TEST(true); // Read write conflict range of committed transaction
+			CODE_PROBE(true, "Read write conflict range of committed transaction");
 		}
 		try {
 			wait(success(tx->get(LiteralStringRef("\xff\xff/1314109/i_hope_this_isn't_registered"))));

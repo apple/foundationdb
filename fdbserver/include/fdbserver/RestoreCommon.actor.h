@@ -112,13 +112,7 @@ public:
 
 		Tuple pack() const {
 			// fprintf(stderr, "Filename:%s\n", fileName.c_str());
-			return Tuple()
-			    .append(version)
-			    .append(StringRef(fileName))
-			    .append(isRange)
-			    .append(fileSize)
-			    .append(blockSize)
-			    .append(endVersion);
+			return Tuple::makeTuple(version, fileName, (int)isRange, fileSize, blockSize, endVersion);
 		}
 		static RestoreFile unpack(Tuple const& t) {
 			RestoreFile r;
@@ -190,17 +184,16 @@ struct RestoreFileFR {
 	int partitionId = -1; // Partition ID (Log Router Tag ID) for mutation files.
 
 	Tuple pack() const {
-		return Tuple()
-		    .append(version)
-		    .append(StringRef(fileName))
-		    .append(isRange)
-		    .append(fileSize)
-		    .append(blockSize)
-		    .append(endVersion)
-		    .append(beginVersion)
-		    .append(cursor)
-		    .append(fileIndex)
-		    .append(partitionId);
+		return Tuple::makeTuple(version,
+		                        fileName,
+		                        (int)isRange,
+		                        fileSize,
+		                        blockSize,
+		                        endVersion,
+		                        beginVersion,
+		                        cursor,
+		                        fileIndex,
+		                        partitionId);
 	}
 	static RestoreFileFR unpack(Tuple const& t) {
 		RestoreFileFR r;

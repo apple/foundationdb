@@ -567,7 +567,7 @@ void WriteMap::clearNoConflict(KeyRangeRef keys) {
 	bool end_conflict = it.is_conflict_range();
 	bool end_unreadable = it.is_unreadable();
 
-	TEST(it.is_conflict_range() != lastConflicted); // not last conflicted
+	CODE_PROBE(it.is_conflict_range() != lastConflicted, "not last conflicted");
 
 	it.tree.clear();
 

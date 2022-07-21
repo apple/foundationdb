@@ -539,7 +539,7 @@ ACTOR Future<Void> updateGranuleSplitState(Transaction* tr,
 
 			// tr->clear(singleKeyRange(oldGranuleLockKey));
 			tr->clear(currentRange);
-			TEST(true); // Granule split cleanup on last delta file persisted
+			CODE_PROBE(true, "Granule split cleanup on last delta file persisted");
 		} else {
 			tr->atomicOp(myStateKey, blobGranuleSplitValueFor(newState), MutationRef::SetVersionstampedValue);
 			if (newState == BlobGranuleSplitState::Assigned && currentState == BlobGranuleSplitState::Initialized &&
@@ -554,10 +554,10 @@ ACTOR Future<Void> updateGranuleSplitState(Transaction* tr,
 				wait(updateChangeFeed(
 				    tr, KeyRef(granuleIDToCFKey(parentGranuleID)), ChangeFeedStatus::CHANGE_FEED_STOP));
 			}
-			TEST(true); // Granule split stopping change feed
+			CODE_PROBE(true, "Granule split stopping change feed");
 		}
 	} else if (BW_DEBUG) {
-		TEST(true); // Out of order granule split state updates ignored
+		CODE_PROBE(true, "Out of order granule split state updates ignored");
 		fmt::print("Ignoring granule {0} split state from {1} {2} -> {3}\n",
 		           currentGranuleID.toString(),
 		           parentGranuleID.toString(),
@@ -678,13 +678,13 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 		// commit a transaction, we can and want to safely delete the file we wrote. Otherwise, we may have updated FDB
 		// with file and cannot safely delete it.
 		if (numIterations > 0) {
-			TEST(true); // Granule potentially leaving orphaned delta file
+			CODE_PROBE(true, "Granule potentially leaving orphaned delta file");
 			throw e;
 		}
 		if (BW_DEBUG) {
 			fmt::print("deleting delta file {0} after error {1}\n", fname, e.name());
 		}
-		TEST(true); // Granule cleaning up delta file after error
+		CODE_PROBE(true, "Granule cleaning up delta file after error");
 		++bwData->stats.s3DeleteReqs;
 		bwData->addActor.send(writeBStore->deleteFile(fname));
 		throw e;
@@ -811,13 +811,13 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 		// commit a transaction, we can and want to safely delete the file we wrote. Otherwise, we may have updated FDB
 		// with file and cannot safely delete it.
 		if (numIterations > 0) {
-			TEST(true); // Granule potentially leaving orphaned snapshot file
+			CODE_PROBE(true, "Granule potentially leaving orphaned snapshot file");
 			throw e;
 		}
 		if (BW_DEBUG) {
 			fmt::print("deleting snapshot file {0} after error {1}\n", fname, e.name());
 		}
-		TEST(true); // Granule deleting snapshot file after error
+		CODE_PROBE(true, "Granule deleting snapshot file after error");
 		++bwData->stats.s3DeleteReqs;
 		bwData->addActor.send(writeBStore->deleteFile(fname));
 		throw e;
@@ -907,7 +907,7 @@ ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(Reference<BlobWorkerData>
 				wait(tr->onError(e));
 			}
 			retries++;
-			TEST(true); // Granule initial snapshot failed
+			CODE_PROBE(true, "Granule initial snapshot failed");
 			// FIXME: why can't we supress error event?
 			TraceEvent(retries < 10 ? SevDebug : SevWarn, "BlobGranuleInitialSnapshotRetry", bwData->id)
 			    .error(err)
@@ -1129,8 +1129,7 @@ ACTOR Future<BlobFileIndex> checkSplitAndReSnapshot(Reference<BlobWorkerData> bw
 				if (e.code() == error_code_operation_cancelled) {
 					throw e;
 				}
-				TEST(true); // Blob worker re-sending split evaluation to manager after not error/not hearing
-				            // back
+				CODE_PROBE(true, "Blob worker re-sending split evaluation to manager after not error/not hearing back");
 				// if we got broken promise while waiting, the old stream was killed, so we don't need to wait
 				// on change, just retry
 				if (e.code() == error_code_broken_promise) {
@@ -1189,23 +1188,23 @@ ACTOR Future<Void> granuleCheckMergeCandidate(Reference<BlobWorkerData> bwData,
 	}
 	// wait for the last snapshot to finish, so that the delay is from the last snapshot
 	wait(waitStart);
-	wait(delayJittered(SERVER_KNOBS->BG_MERGE_CANDIDATE_THRESHOLD_SECONDS));
+	double jitter = deterministicRandom()->random01() * 0.8 * SERVER_KNOBS->BG_MERGE_CANDIDATE_DELAY_SECONDS;
+	wait(delay(SERVER_KNOBS->BG_MERGE_CANDIDATE_THRESHOLD_SECONDS + jitter));
 	loop {
 		// this actor will be cancelled if a split check happened, or if the granule was moved away, so this
 		// being here means that granule is cold enough during that period. Now we just need to check if it is
 		// also small enough to be a merge candidate.
 		StorageMetrics currentMetrics = wait(bwData->db->getStorageMetrics(metadata->keyRange, CLIENT_KNOBS->TOO_MANY));
-		state int64_t granuleBytes = currentMetrics.bytes;
 
 		// FIXME: maybe separate knob and/or value for write rate?
 		if (currentMetrics.bytes >= SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES / 2 ||
 		    currentMetrics.bytesPerKSecond >= SERVER_KNOBS->SHARD_MIN_BYTES_PER_KSEC) {
 			wait(delayJittered(SERVER_KNOBS->BG_MERGE_CANDIDATE_THRESHOLD_SECONDS / 2.0));
-			TEST(true); // wait and check later to see if granule got smaller or colder
+			CODE_PROBE(true, "wait and check later to see if granule got smaller or colder");
 			continue;
 		}
 
-		TEST(true); // Blob Worker identified merge candidate granule
+		CODE_PROBE(true, "Blob Worker identified merge candidate granule");
 
 		// if we are a merge candidate, send a message to the BM. Once successful, this actor is complete
 		while (!bwData->statusStreamInitialized) {
@@ -1226,7 +1225,7 @@ ACTOR Future<Void> granuleCheckMergeCandidate(Reference<BlobWorkerData> bwData,
 				}
 
 				if (now() >= sendTimeGiveUp) {
-					TEST(true); // Blob worker could not send merge candidate in time, re-checking status
+					CODE_PROBE(true, "Blob worker could not send merge candidate in time, re-checking status");
 					break;
 				}
 
@@ -1242,18 +1241,16 @@ ACTOR Future<Void> granuleCheckMergeCandidate(Reference<BlobWorkerData> bwData,
 				                                                                 metadata->originalEpoch,
 				                                                                 metadata->originalSeqno));
 				// if a new manager appears, also tell it about this granule being mergeable
-				state int64_t lastSendEpoch = bwData->currentManagerEpoch;
-				while (lastSendEpoch == bwData->currentManagerEpoch) {
-					wait(bwData->currentManagerStatusStream.onChange());
-					wait(delay(0));
-				}
-				TEST(true); // Blob worker re-sending merge candidate to new manager
+				// or if a new stream from the existing manager, it may have missed the message due to a network issue
+				wait(bwData->currentManagerStatusStream.onChange());
+				wait(delay(0));
+				CODE_PROBE(true, "Blob worker re-sending merge candidate to new manager");
 			} catch (Error& e) {
 				if (e.code() == error_code_operation_cancelled) {
 					throw e;
 				}
 
-				TEST(true); // Blob worker re-sending merge candidate to manager after not error/not hearing back
+				CODE_PROBE(true, "Blob worker re-sending merge candidate to manager after not error/not hearing back");
 
 				// if we got broken promise while waiting, the old stream was killed, so we don't need to wait
 				// on change, just retry
@@ -1356,7 +1353,7 @@ Version doGranuleRollback(Reference<GranuleMetadata> metadata,
 		for (auto& f : inFlightFiles) {
 			if (f.snapshot) {
 				if (f.version > rollbackVersion) {
-					TEST(true); // Granule rollback cancelling snapshot file
+					CODE_PROBE(true, "Granule rollback cancelling snapshot file");
 					if (BW_DEBUG) {
 						fmt::print("[{0} - {1}) rollback cancelling snapshot file @ {2}\n",
 						           metadata->keyRange.begin.printable(),
@@ -1377,7 +1374,7 @@ Version doGranuleRollback(Reference<GranuleMetadata> metadata,
 						metadata->bytesInNewDeltaFiles -= f.bytes;
 					}
 					toPop++;
-					TEST(true); // Granule rollback cancelling delta file
+					CODE_PROBE(true, "Granule rollback cancelling delta file");
 					if (BW_DEBUG) {
 						fmt::print("[{0} - {1}) rollback cancelling delta file @ {2}\n",
 						           metadata->keyRange.begin.printable(),
@@ -1432,7 +1429,7 @@ Version doGranuleRollback(Reference<GranuleMetadata> metadata,
 
 	} else {
 		// No pending delta files to discard, just in-memory mutations
-		TEST(true); // Granule rollback discarding in memory mutations
+		CODE_PROBE(true, "Granule rollback discarding in memory mutations");
 
 		// FIXME: could binary search?
 		int mIdx = metadata->currentDeltas.size() - 1;
@@ -1637,7 +1634,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 		}
 
 		if (!startState.doSnapshot) {
-			TEST(true); // Granule moved without split
+			CODE_PROBE(true, "Granule moved without split");
 			startVersion = startState.previousDurableVersion;
 			ASSERT(!metadata->files.snapshotFiles.empty());
 			metadata->pendingSnapshotVersion = metadata->files.snapshotFiles.back().version;
@@ -1798,7 +1795,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 						// popped up to V+1 is ok. Or in other words, if the last delta @ V, we only missed data
 						// at V+1 onward if popVersion >= V+2
 						if (metadata->bufferedDeltaVersion < metadata->activeCFData.get()->popVersion - 1) {
-							TEST(true); // Blob Worker detected popped
+							CODE_PROBE(true, "Blob Worker detected popped");
 							TraceEvent("BlobWorkerChangeFeedPopped", bwData->id)
 							    .detail("Granule", metadata->keyRange)
 							    .detail("GranuleID", startState.granuleID)
@@ -1896,7 +1893,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 								if (metadata->pendingDeltaVersion <= rollbackVersion &&
 								    (metadata->currentDeltas.empty() ||
 								     metadata->currentDeltas.back().version <= rollbackVersion)) {
-									TEST(true); // Granule ignoring rollback
+									CODE_PROBE(true, "Granule ignoring rollback");
 
 									if (BW_DEBUG) {
 										fmt::print("Granule [{0} - {1}) on BW {2} skipping rollback {3} -> {4} "
@@ -1913,7 +1910,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 									// rollbackInProgress when we restart the stream.
 									rollbacksCompleted.push_back(std::pair(rollbackVersion, deltas.version));
 								} else {
-									TEST(true); // Granule processing rollback
+									CODE_PROBE(true, "Granule processing rollback");
 									if (BW_DEBUG) {
 										fmt::print("[{0} - {1}) on BW {2} ROLLBACK @ {3} -> {4}\n",
 										           metadata->keyRange.begin.printable(),
@@ -1927,12 +1924,30 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 										    .detail("RollbackVersion", rollbackVersion);
 									}
 
+									Version oldPendingSnapshot = metadata->pendingSnapshotVersion;
 									Version cfRollbackVersion = doGranuleRollback(metadata,
 									                                              deltas.version,
 									                                              rollbackVersion,
 									                                              inFlightFiles,
 									                                              rollbacksInProgress,
 									                                              rollbacksCompleted);
+
+									if (oldPendingSnapshot > metadata->pendingSnapshotVersion) {
+										// If rollback cancelled in-flight snapshot, merge candidate checker also got
+										// cancelled. Restart it
+										CODE_PROBE(true,
+										           "Restarting merge candidate checker after rolling back snapshot");
+										checkMergeCandidate = granuleCheckMergeCandidate(
+										    bwData,
+										    metadata,
+										    startState.granuleID,
+										    inFlightFiles.empty() ? Future<Void>(Void())
+										                          : success(inFlightFiles.back().future));
+									}
+									// reset force flush state, requests should retry and add it back once feed is ready
+									forceFlushVersions.clear();
+									lastForceFlushVersion = 0;
+									metadata->forceFlushVersion = NotifiedVersion();
 
 									Reference<ChangeFeedData> cfData = makeReference<ChangeFeedData>();
 
@@ -1944,7 +1959,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 										// change feed
 										ASSERT(cfRollbackVersion >= startState.previousDurableVersion);
 										ASSERT(cfRollbackVersion >= metadata->durableDeltaVersion.get());
-										TEST(true); // rollback crossed change feed boundaries
+										CODE_PROBE(true, "rollback crossed change feed boundaries");
 										readOldChangeFeed = true;
 										oldChangeFeedDataComplete.reset();
 									}
@@ -1990,7 +2005,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 							}
 						} else if (!rollbacksInProgress.empty() && rollbacksInProgress.front().first < deltas.version &&
 						           rollbacksInProgress.front().second > deltas.version) {
-							TEST(true); // Granule skipping mutations b/c prior rollback
+							CODE_PROBE(true, "Granule skipping mutations b/c prior rollback");
 							if (BW_DEBUG) {
 								fmt::print("Skipping mutations @ {} b/c prior rollback\n", deltas.version);
 							}
@@ -2033,7 +2048,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 			// The force flush contract is a version cannot be put in forceFlushVersion unless the change feed
 			// is already whenAtLeast that version
 			bool forceFlush = !forceFlushVersions.empty() && forceFlushVersions.back() > metadata->pendingDeltaVersion;
-			TEST(forceFlush); // Force flushing granule
+			CODE_PROBE(forceFlush, "Force flushing granule");
 			if (metadata->bufferedDeltaBytes >= SERVER_KNOBS->BG_DELTA_FILE_TARGET_BYTES || forceFlush) {
 				TraceEvent(SevDebug, "BlobGranuleDeltaFile", bwData->id)
 				    .detail("Granule", metadata->keyRange)
@@ -2072,7 +2087,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 					// write/read a bunch of empty blob files
 					ASSERT(forceFlush);
 					ASSERT(!forceFlushVersions.empty());
-					TEST(true); // Force flushing empty delta file!
+					CODE_PROBE(true, "Force flushing empty delta file!");
 				}
 
 				if (BW_DEBUG) {
@@ -2200,7 +2215,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 						idx++;
 					}
 					while (waitIdx > 0) {
-						TEST(true); // Granule blocking on previous snapshot
+						CODE_PROBE(true, "Granule blocking on previous snapshot");
 						// TODO don't duplicate code
 						BlobFileIndex completedFile = wait(inFlightFiles.front().future);
 						if (inFlightFiles.front().snapshot) {
@@ -2241,7 +2256,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				// queue too many files in parallel, and slow down change feed consuming to let file writing
 				// catch up
 
-				TEST(true); // Granule processing long tail of old change feed
+				CODE_PROBE(true, "Granule processing long tail of old change feed");
 				if (inFlightFiles.size() > 10 && inFlightFiles.front().version <= metadata->knownCommittedVersion) {
 					if (BW_DEBUG) {
 						fmt::print("[{0} - {1}) Waiting on delta file b/c old change feed\n",
@@ -2295,7 +2310,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 		++bwData->stats.granuleUpdateErrors;
 
 		if (granuleCanRetry(e)) {
-			TEST(true); // Granule close and re-open on error
+			CODE_PROBE(true, "Granule close and re-open on error");
 			TraceEvent("GranuleFileUpdaterRetriableError", bwData->id)
 			    .error(e)
 			    .detail("Granule", metadata->keyRange)
@@ -2353,7 +2368,7 @@ ACTOR Future<Void> blobGranuleLoadHistory(Reference<BlobWorkerData> bwData,
 		GranuleStartState startState = wait(assignFuture);
 		state Optional<GranuleHistory> activeHistory = startState.history;
 
-		if (activeHistory.present() && activeHistory.get().value.parentGranules.size() > 0) {
+		if (activeHistory.present() && activeHistory.get().value.parentVersions.size() > 0) {
 			state int64_t loadId = nextHistoryLoadId++;
 			if (BW_HISTORY_DEBUG) {
 				fmt::print("HL {0} {1}) Loading history data for [{2} - {3})\n",
@@ -2369,7 +2384,7 @@ ACTOR Future<Void> blobGranuleLoadHistory(Reference<BlobWorkerData> bwData,
 			    std::priority_queue<OrderedHistoryKey, std::vector<OrderedHistoryKey>, std::greater<OrderedHistoryKey>>
 			        rootGranules;
 			state Transaction tr(bwData->db);
-			if (!activeHistory.get().value.parentGranules.empty()) {
+			if (!activeHistory.get().value.parentVersions.empty()) {
 				if (BW_HISTORY_DEBUG) {
 					fmt::print("HL {0} {1}) Starting history [{2} - {3}) @ {4}\n",
 					           bwData->id.shortString().substr(0, 5),
@@ -2438,17 +2453,16 @@ ACTOR Future<Void> blobGranuleLoadHistory(Reference<BlobWorkerData> bwData,
 				state bool noParentsPresent = true;
 				// FIXME: parallelize this for all parents/all entries in queue?
 				loop {
-					if (pIdx >= curHistory.value.parentGranules.size()) {
+					if (pIdx >= curHistory.value.parentVersions.size()) {
 						break;
 					}
 					try {
-						Optional<Value> v =
-						    wait(tr.get(blobGranuleHistoryKeyFor(curHistory.value.parentGranules[pIdx].first,
-						                                         curHistory.value.parentGranules[pIdx].second)));
+						state KeyRangeRef parentRange(curHistory.value.parentBoundaries[pIdx],
+						                              curHistory.value.parentBoundaries[pIdx + 1]);
+						state Version parentVersion = curHistory.value.parentVersions[pIdx];
+						Optional<Value> v = wait(tr.get(blobGranuleHistoryKeyFor(parentRange, parentVersion)));
 						if (v.present()) {
-							next = GranuleHistory(curHistory.value.parentGranules[pIdx].first,
-							                      curHistory.value.parentGranules[pIdx].second,
-							                      decodeBlobGranuleHistoryValue(v.get()));
+							next = GranuleHistory(parentRange, parentVersion, decodeBlobGranuleHistoryValue(v.get()));
 							ASSERT(next.version != invalidVersion);
 
 							auto inserted = forwardHistory.insert({ next.value.granuleID, ForwardHistoryValue() });
@@ -2472,7 +2486,7 @@ ACTOR Future<Void> blobGranuleLoadHistory(Reference<BlobWorkerData> bwData,
 									           next.version);
 								}
 							} else {
-								TEST(true); // duplicate parent in granule history (split then merge)
+								CODE_PROBE(true, "duplicate parent in granule history (split then merge)");
 								if (BW_HISTORY_DEBUG) {
 									fmt::print("HL {0} {1}) [{2} - {3}) @ {4}: duplicate parent [{5} - "
 									           "{6}) @ {7}\n",
@@ -2820,7 +2834,7 @@ std::vector<std::pair<KeyRange, Future<GranuleFiles>>> loadHistoryChunks(Referen
 
 	ASSERT(!resultChunks.empty());
 	if (resultChunks.size() >= 2) {
-		TEST(true); // Multiple history chunks for time travel query
+		CODE_PROBE(true, "Multiple history chunks for time travel query");
 		std::sort(resultChunks.begin(), resultChunks.end(), sort_result_chunks());
 		// Assert contiguous
 		for (int i = 0; i < resultChunks.size() - 1; i++) {
@@ -2894,7 +2908,7 @@ ACTOR Future<Void> waitForVersion(Reference<GranuleMetadata> metadata, Version v
 	     metadata->durableDeltaVersion.get() == metadata->pendingDeltaVersion) &&
 	    (v <= metadata->durableSnapshotVersion.get() ||
 	     metadata->durableSnapshotVersion.get() == metadata->pendingSnapshotVersion)) {
-		TEST(true); // Granule read not waiting
+		CODE_PROBE(true, "Granule read not waiting");
 		return Void();
 	}
 
@@ -2911,7 +2925,7 @@ ACTOR Future<Void> waitForVersion(Reference<GranuleMetadata> metadata, Version v
 	// If there are mutations that are no longer buffered but have not been
 	// persisted to a delta file that are necessary for the query, wait for them
 	if (pendingDeltaV > metadata->durableDeltaVersion.get() && v > metadata->durableDeltaVersion.get()) {
-		TEST(true); // Granule read waiting for pending delta
+		CODE_PROBE(true, "Granule read waiting for pending delta");
 		wait(metadata->durableDeltaVersion.whenAtLeast(pendingDeltaV));
 		ASSERT(metadata->durableDeltaVersion.get() >= pendingDeltaV);
 	}
@@ -2919,7 +2933,7 @@ ACTOR Future<Void> waitForVersion(Reference<GranuleMetadata> metadata, Version v
 	// This isn't strictly needed, but if we're in the process of re-snapshotting, we'd likely rather
 	// return that snapshot file than the previous snapshot file and all its delta files.
 	if (pendingSnapshotV > metadata->durableSnapshotVersion.get() && v > metadata->durableSnapshotVersion.get()) {
-		TEST(true); // Granule read waiting for pending snapshot
+		CODE_PROBE(true, "Granule read waiting for pending snapshot");
 		wait(metadata->durableSnapshotVersion.whenAtLeast(pendingSnapshotV));
 		ASSERT(metadata->durableSnapshotVersion.get() >= pendingSnapshotV);
 	}
@@ -2929,7 +2943,7 @@ ACTOR Future<Void> waitForVersion(Reference<GranuleMetadata> metadata, Version v
 	// file instead of in memory mutations, so we wait for that delta file to complete
 
 	while (v > metadata->durableDeltaVersion.get() && metadata->pendingDeltaVersion > pendingDeltaV) {
-		TEST(true); // Granule mutations flushed while waiting for files to complete
+		CODE_PROBE(true, "Granule mutations flushed while waiting for files to complete");
 		Version waitVersion = std::min(v, metadata->pendingDeltaVersion);
 		pendingDeltaV = metadata->pendingDeltaVersion;
 		wait(metadata->durableDeltaVersion.whenAtLeast(waitVersion));
@@ -2960,7 +2974,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 			ASSERT(tenantEntry.get().id == req.tenantInfo.tenantId);
 			tenantPrefix = tenantEntry.get().prefix;
 		} else {
-			TEST(true); // Blob worker unknown tenant
+			CODE_PROBE(true, "Blob worker unknown tenant");
 			// FIXME - better way. Wait on retry here, or just have better model for tenant metadata?
 			// Just throw wrong_shard_server and make the client retry and assume we load it later
 			TraceEvent(SevDebug, "BlobWorkerRequestUnknownTenant", bwData->id)
@@ -3044,7 +3058,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 			state std::vector<std::pair<KeyRange, GranuleFiles>> rangeGranulePair;
 
 			if (req.readVersion < metadata->historyVersion) {
-				TEST(true); // Granule Time Travel Read
+				CODE_PROBE(true, "Granule Time Travel Read");
 				// this is a time travel query, find previous granule
 				if (metadata->historyLoaded.canBeSet()) {
 					choose {
@@ -3083,7 +3097,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 					throw blob_granule_transaction_too_old();
 				}
 
-				TEST(true); // Granule Active Read
+				CODE_PROBE(true, "Granule Active Read");
 				// this is an active granule query
 				loop {
 					if (!metadata->activeCFData.get().isValid() || !metadata->cancelled.canBeSet()) {
@@ -3106,13 +3120,13 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 						// We can get change feed cancelled from whenAtLeast. This means the change feed may
 						// retry, or may be cancelled. Wait a bit and try again to see
 						if (e.code() == error_code_change_feed_popped) {
-							TEST(true); // Change feed popped while read waiting
+							CODE_PROBE(true, "Change feed popped while read waiting");
 							throw wrong_shard_server();
 						}
 						if (e.code() != error_code_change_feed_cancelled) {
 							throw e;
 						}
-						TEST(true); // Change feed switched while read waiting
+						CODE_PROBE(true, "Change feed switched while read waiting");
 						// wait 1ms and try again
 						wait(delay(0.001));
 					}
@@ -3143,7 +3157,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 				Version granuleBeginVersion = req.beginVersion;
 				// Right now we force a collapse if the version range crosses granule boundaries, for simplicity
 				if (granuleBeginVersion > 0 && granuleBeginVersion <= item.second.snapshotFiles.front().version) {
-					TEST(true); // collapsed begin version request because of boundaries
+					CODE_PROBE(true, "collapsed begin version request because of boundaries");
 					didCollapse = true;
 					granuleBeginVersion = 0;
 				}
@@ -3161,7 +3175,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 				    granuleBeginVersion, req.readVersion, req.canCollapseBegin, chunk, rep.arena, deltaBytes);
 				bwData->stats.readReqDeltaBytesReturned += deltaBytes;
 				if (granuleBeginVersion > 0 && chunk.snapshotFile.present()) {
-					TEST(true); // collapsed begin version request for efficiency
+					CODE_PROBE(true, "collapsed begin version request for efficiency");
 					didCollapse = true;
 				}
 
@@ -3193,11 +3207,11 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 					rep.arena.dependsOn(metadata->currentDeltas.arena());
 					MutationsAndVersionRef* mutationIt = metadata->currentDeltas.begin();
 					if (granuleBeginVersion > metadata->currentDeltas.back().version) {
-						TEST(true); // beginVersion pruning all in-memory mutations
+						CODE_PROBE(true, "beginVersion pruning all in-memory mutations");
 						mutationIt = metadata->currentDeltas.end();
 					} else if (granuleBeginVersion > metadata->currentDeltas.front().version) {
 						// binary search for beginVersion
-						TEST(true); // beginVersion pruning some in-memory mutations
+						CODE_PROBE(true, "beginVersion pruning some in-memory mutations");
 						mutationIt = std::lower_bound(metadata->currentDeltas.begin(),
 						                              metadata->currentDeltas.end(),
 						                              MutationsAndVersionRef(granuleBeginVersion, 0),
@@ -3207,7 +3221,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 					// add mutations to response
 					while (mutationIt != metadata->currentDeltas.end()) {
 						if (mutationIt->version > req.readVersion) {
-							TEST(true); // readVersion pruning some in-memory mutations
+							CODE_PROBE(true, "readVersion pruning some in-memory mutations");
 							break;
 						}
 						chunk.newDeltas.push_back_deep(rep.arena, *mutationIt);
@@ -3262,7 +3276,7 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 		when(wait(doBlobGranuleFileRequest(bwData, req))) {}
 		when(wait(delay(SERVER_KNOBS->BLOB_WORKER_REQUEST_TIMEOUT))) {
 			if (!req.reply.isSet()) {
-				TEST(true); // Blob Worker request timeout hit
+				CODE_PROBE(true, "Blob Worker request timeout hit");
 				if (BW_DEBUG) {
 					fmt::print("BW {0} request [{1} - {2}) @ {3} timed out, sending WSS\n",
 					           bwData->id.toString().substr(0, 5),
@@ -3326,7 +3340,7 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 			state bool hasPrevOwner = prevLockValue.present();
 			state bool createChangeFeed = false;
 			if (hasPrevOwner) {
-				TEST(true); // Granule open found previous owner
+				CODE_PROBE(true, "Granule open found previous owner");
 				std::tuple<int64_t, int64_t, UID> prevOwner = decodeBlobGranuleLockValue(prevLockValue.get());
 
 				info.granuleID = std::get<2>(prevOwner);
@@ -3335,7 +3349,7 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 				// if it's the first snapshot of a new granule, history won't be present
 				if (info.history.present()) {
 					if (info.granuleID != info.history.get().value.granuleID) {
-						TEST(true); // Blob Worker re-opening granule after merge+resplit
+						CODE_PROBE(true, "Blob Worker re-opening granule after merge+resplit");
 						// The only case this can happen is when a granule was merged into a larger granule,
 						// then split back out to the same one. Validate that this is a new granule that was
 						// split previously. Just check lock based on epoch, since seqno is intentionally
@@ -3411,12 +3425,13 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 			// If anything in previousGranules, need to do the handoff logic and set
 			// ret.previousChangeFeedId, and the previous durable version will come from the previous
 			// granules
-			if (info.history.present() && info.history.get().value.parentGranules.size() > 0) {
-				TEST(true); // Granule open found parent
-				if (info.history.get().value.parentGranules.size() == 1) { // split
-					state Key parentHistoryKey =
-					    blobGranuleHistoryKeyFor(info.history.get().value.parentGranules[0].first,
-					                             info.history.get().value.parentGranules[0].second);
+			if (info.history.present() && info.history.get().value.parentVersions.size() > 0) {
+				CODE_PROBE(true, "Granule open found parent");
+				if (info.history.get().value.parentVersions.size() == 1) { // split
+					state KeyRangeRef parentRange(info.history.get().value.parentBoundaries[0],
+					                              info.history.get().value.parentBoundaries[1]);
+					state Version parentVersion = info.history.get().value.parentVersions[0];
+					state Key parentHistoryKey = blobGranuleHistoryKeyFor(parentRange, parentVersion);
 
 					Optional<Value> historyParentValue = wait(tr.get(parentHistoryKey));
 
@@ -3425,8 +3440,7 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 						    decodeBlobGranuleHistoryValue(historyParentValue.get());
 						UID parentGranuleID = val.granuleID;
 
-						info.splitParentGranule =
-						    std::pair(info.history.get().value.parentGranules[0].first, parentGranuleID);
+						info.splitParentGranule = std::pair(parentRange, parentGranuleID);
 
 						state std::pair<BlobGranuleSplitState, Version> granuleSplitState =
 						    std::pair(BlobGranuleSplitState::Initialized, invalidVersion);
@@ -3437,12 +3451,12 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 						}
 
 						if (granuleSplitState.first == BlobGranuleSplitState::Assigned) {
-							TEST(true); // Granule open found granule in assign state
+							CODE_PROBE(true, "Granule open found granule in assign state");
 							// was already assigned, use change feed start version
 							ASSERT(granuleSplitState.second > 0);
 							info.changeFeedStartVersion = granuleSplitState.second;
 						} else if (granuleSplitState.first == BlobGranuleSplitState::Initialized) {
-							TEST(true); // Granule open found granule in initialized state
+							CODE_PROBE(true, "Granule open found granule in initialized state");
 							wait(updateGranuleSplitState(&tr,
 							                             info.splitParentGranule.get().first,
 							                             info.splitParentGranule.get().second,
@@ -3451,7 +3465,7 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 							// change feed was created as part of this transaction, changeFeedStartVersion
 							// will be set later
 						} else {
-							TEST(true); // Granule open found granule in done state
+							CODE_PROBE(true, "Granule open found granule in done state");
 							// this sub-granule is done splitting, no need for split logic.
 							info.splitParentGranule.reset();
 						}
@@ -3470,7 +3484,7 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 						                                  : info.blobFilesToSnapshot[0].deltaFiles.back().version;
 					}
 				} else if (info.doSnapshot) {
-					TEST(true); // merge needs to snapshot at start
+					CODE_PROBE(true, "merge needs to snapshot at start");
 					state std::vector<Future<GranuleFiles>> parentGranulesToSnapshot;
 					ASSERT(info.previousDurableVersion == invalidVersion);
 					// need first snapshot to be at history version so this granule can serve the full range
@@ -3480,8 +3494,12 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 					// Can't roll back past re-snapshot version
 					info.changeFeedStartVersion = info.history.get().version;
 
-					for (auto& it : info.history.get().value.parentGranules) {
-						parentGranulesToSnapshot.push_back(loadParentGranuleForMergeSnapshot(&tr, it.first, it.second));
+					for (int i = 0; i < info.history.get().value.parentVersions.size(); i++) {
+						KeyRangeRef parentRange(info.history.get().value.parentBoundaries[i],
+						                        info.history.get().value.parentBoundaries[i + 1]);
+						Version parentVersion = info.history.get().value.parentVersions[i];
+						parentGranulesToSnapshot.push_back(
+						    loadParentGranuleForMergeSnapshot(&tr, parentRange, parentVersion));
 					}
 
 					state int pIdx;
@@ -3530,7 +3548,7 @@ ACTOR Future<Reference<BlobConnectionProvider>> loadBStoreForTenant(Reference<Bl
 			wait(delay(0));
 			return data->bstore;
 		} else {
-			TEST(true); // bstore for unknown tenant
+			CODE_PROBE(true, "bstore for unknown tenant");
 			// Assume not loaded yet, just wait a bit. Could do sophisticated mechanism but will redo tenant
 			// loading to be versioned anyway. 10 retries means it's likely not a transient race with
 			// loading tenants, and instead a persistent issue.
@@ -3909,7 +3927,7 @@ ACTOR Future<Void> monitorRemoval(Reference<BlobWorkerData> bwData) {
 
 				Optional<Value> val = wait(tr.get(blobWorkerListKey));
 				if (!val.present()) {
-					TEST(true); // Blob worker found out BM killed it from reading DB
+					CODE_PROBE(true, "Blob worker found out BM killed it from reading DB");
 					return Void();
 				}
 
@@ -4060,93 +4078,102 @@ ACTOR Future<Void> handleFlushGranuleReq(Reference<BlobWorkerData> self, FlushGr
 				}
 			}
 
-			// force granule to flush at this version, and wait
-			if (req.flushVersion > metadata->pendingDeltaVersion) {
-				// first, wait for granule active
+			loop {
+				// force granule to flush at this version, and wait
+				if (req.flushVersion > metadata->pendingDeltaVersion) {
+					// first, wait for granule active
 
-				// wait for change feed version to catch up to ensure we have all data
-				if (metadata->activeCFData.get()->getVersion() < req.flushVersion) {
-					if (BW_DEBUG) {
-						fmt::print("BW {0} flushing granule [{1} - {2}) @ {3}: waiting for CF version "
-						           "(currently {4})\n",
-						           self->id.toString().substr(0, 5),
-						           req.granuleRange.begin.printable(),
-						           req.granuleRange.end.printable(),
-						           req.flushVersion,
-						           metadata->activeCFData.get()->getVersion());
-					}
+					// wait for change feed version to catch up to ensure we have all data
+					if (metadata->activeCFData.get()->getVersion() < req.flushVersion) {
+						if (BW_DEBUG) {
+							fmt::print("BW {0} flushing granule [{1} - {2}) @ {3}: waiting for CF version "
+							           "(currently {4})\n",
+							           self->id.toString().substr(0, 5),
+							           req.granuleRange.begin.printable(),
+							           req.granuleRange.end.printable(),
+							           req.flushVersion,
+							           metadata->activeCFData.get()->getVersion());
+						}
 
-					loop {
-						choose {
-							when(wait(metadata->activeCFData.get().isValid()
-							              ? metadata->activeCFData.get()->whenAtLeast(req.flushVersion)
-							              : Never())) {
-								break;
-							}
-							when(wait(metadata->activeCFData.onChange())) {}
-							when(wait(granuleCancelled.getFuture())) {
-								if (BW_DEBUG) {
-									fmt::print("BW {0} flush granule [{1} - {2}) cancelled 2\n",
-									           self->id.toString().substr(0, 5),
-									           req.granuleRange.begin.printable(),
-									           req.granuleRange.end.printable());
+						loop {
+							choose {
+								when(wait(metadata->activeCFData.get().isValid()
+								              ? metadata->activeCFData.get()->whenAtLeast(req.flushVersion)
+								              : Never())) {
+									break;
 								}
-								req.reply.sendError(wrong_shard_server());
-								return Void();
+								when(wait(metadata->activeCFData.onChange())) {}
+								when(wait(granuleCancelled.getFuture())) {
+									if (BW_DEBUG) {
+										fmt::print("BW {0} flush granule [{1} - {2}) cancelled 2\n",
+										           self->id.toString().substr(0, 5),
+										           req.granuleRange.begin.printable(),
+										           req.granuleRange.end.printable());
+									}
+									req.reply.sendError(wrong_shard_server());
+									return Void();
+								}
 							}
+						}
+
+						ASSERT(metadata->activeCFData.get()->getVersion() >= req.flushVersion);
+						if (BW_DEBUG) {
+							fmt::print("BW {0} flushing granule [{1} - {2}) @ {3}: got CF version\n",
+							           self->id.toString().substr(0, 5),
+							           req.granuleRange.begin.printable(),
+							           req.granuleRange.end.printable(),
+							           req.flushVersion);
 						}
 					}
 
-					ASSERT(metadata->activeCFData.get()->getVersion() >= req.flushVersion);
-					if (BW_DEBUG) {
-						fmt::print("BW {0} flushing granule [{1} - {2}) @ {3}: got CF version\n",
-						           self->id.toString().substr(0, 5),
-						           req.granuleRange.begin.printable(),
-						           req.granuleRange.end.printable(),
-						           req.flushVersion);
+					if (req.flushVersion > metadata->pendingDeltaVersion) {
+						if (BW_DEBUG) {
+							fmt::print("BW {0} flushing granule [{1} - {2}) @ {3}: setting force flush version\n",
+							           self->id.toString().substr(0, 5),
+							           req.granuleRange.begin.printable(),
+							           req.granuleRange.end.printable(),
+							           req.flushVersion);
+						}
+						// if after waiting for CF version, flushVersion still higher than pendingDeltaVersion,
+						// set forceFlushVersion
+						metadata->forceFlushVersion.set(req.flushVersion);
 					}
 				}
 
-				if (req.flushVersion > metadata->pendingDeltaVersion) {
-					if (BW_DEBUG) {
-						fmt::print("BW {0} flushing granule [{1} - {2}) @ {3}: setting force flush version\n",
-						           self->id.toString().substr(0, 5),
-						           req.granuleRange.begin.printable(),
-						           req.granuleRange.end.printable(),
-						           req.flushVersion);
-					}
-					// if after waiting for CF version, flushVersion still higher than pendingDeltaVersion,
-					// set forceFlushVersion
-					metadata->forceFlushVersion.set(req.flushVersion);
+				if (BW_DEBUG) {
+					fmt::print("BW {0} flushing granule [{1} - {2}) @ {3}: waiting durable\n",
+					           self->id.toString().substr(0, 5),
+					           req.granuleRange.begin.printable(),
+					           req.granuleRange.end.printable(),
+					           req.flushVersion);
 				}
-			}
+				choose {
+					when(wait(metadata->durableDeltaVersion.whenAtLeast(req.flushVersion))) {
+						if (BW_DEBUG) {
+							fmt::print("BW {0} flushing granule [{1} - {2}) @ {3}: got durable\n",
+							           self->id.toString().substr(0, 5),
+							           req.granuleRange.begin.printable(),
+							           req.granuleRange.end.printable(),
+							           req.flushVersion);
+						}
 
-			if (BW_DEBUG) {
-				fmt::print("BW {0} flushing granule [{1} - {2}) @ {3}: waiting durable\n",
-				           self->id.toString().substr(0, 5),
-				           req.granuleRange.begin.printable(),
-				           req.granuleRange.end.printable(),
-				           req.flushVersion);
-			}
-			choose {
-				when(wait(metadata->durableDeltaVersion.whenAtLeast(req.flushVersion))) {}
-				when(wait(granuleCancelled.getFuture())) {
-					if (BW_DEBUG) {
-						fmt::print("BW {0} flush granule [{1} - {2}) cancelled 3\n",
-						           self->id.toString().substr(0, 5),
-						           req.granuleRange.begin.printable(),
-						           req.granuleRange.end.printable());
+						req.reply.send(Void());
+						return Void();
 					}
-					req.reply.sendError(wrong_shard_server());
-					return Void();
+					when(wait(metadata->activeCFData.onChange())) {
+						// if a rollback happens, need to restart flush process
+					}
+					when(wait(granuleCancelled.getFuture())) {
+						if (BW_DEBUG) {
+							fmt::print("BW {0} flush granule [{1} - {2}) cancelled 3\n",
+							           self->id.toString().substr(0, 5),
+							           req.granuleRange.begin.printable(),
+							           req.granuleRange.end.printable());
+						}
+						req.reply.sendError(wrong_shard_server());
+						return Void();
+					}
 				}
-			}
-			if (BW_DEBUG) {
-				fmt::print("BW {0} flushing granule [{1} - {2}) @ {3}: got durable\n",
-				           self->id.toString().substr(0, 5),
-				           req.granuleRange.begin.printable(),
-				           req.granuleRange.end.printable(),
-				           req.flushVersion);
 			}
 		} catch (Error& e) {
 			if (BW_DEBUG) {
@@ -4167,10 +4194,10 @@ ACTOR Future<Void> handleFlushGranuleReq(Reference<BlobWorkerData> self, FlushGr
 			           req.granuleRange.end.printable(),
 			           req.flushVersion);
 		}
-	}
 
-	req.reply.send(Void());
-	return Void();
+		req.reply.send(Void());
+		return Void();
+	}
 }
 
 ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
