@@ -16,8 +16,7 @@ mod ffi {
 
     unsafe extern "C++" {
         include!("flow/IRandom.h");
-        include!("flow/SourceVersion.h");
-
+        
         type UID;
 
         // fn toString(self: &UID) -> CxxString;
@@ -34,7 +33,15 @@ mod ffi {
         fn randomUniqueID(self: Pin<&mut IRandom>) -> UID;
         fn deterministicRandom() -> *mut IRandom;
 
+        include!("flow/SourceVersion.h");
         fn getSourceVersion() -> *const c_char;
+
+        // Breaks C++ build; fdbclient isn't available from the fdbrpc cmake subdirectory.
+        // include!("fdbclient/Notified.h");
+        // type NotifiedVersion;
+        // fn set(self: Pin<&mut NotifiedVersion>, val: &i64);
+
+
     }
     #[namespace = "fdb_rust"]
     extern "Rust" {
@@ -42,6 +49,11 @@ mod ffi {
         fn print_foo(foo: &Foo);
     }
 }
+
+fn unchecked_pin<T>(t : *mut T) -> Pin<&'static mut T> {
+    unsafe { Pin::new_unchecked(&mut *t) }
+}
+
 pub fn new_foo() -> ffi::Foo {
     ffi::Foo { i: 42 }
 }
@@ -55,7 +67,9 @@ pub fn print_foo(foo: &ffi::Foo) {
     println!("Foo: {};", foo.i);
 
     let rand = ffi::deterministicRandom();
-    let uid = unsafe { Pin::new_unchecked(&mut *rand) }.randomUniqueID();
+    let uid = unchecked_pin(rand).randomUniqueID();
+    let uid2 = unchecked_pin(rand).randomUniqueID();
+    // let uid = unsafe { Pin::new_unchecked(&mut *rand) }.randomUniqueID();
 
-    println!("Got UID: {:x} {:x} ({:x?})", uid.first(), uid.second(), uid);
+    println!("Got UID: {:x} {:x} ({:x?}) ({:x?})", uid.first(), uid.second(), uid, uid2);
 }

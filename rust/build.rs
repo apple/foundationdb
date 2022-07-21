@@ -28,17 +28,24 @@ fn main() {
 
     let mut builder = cxx_build::bridge("src/lib.rs");
     builder
+        .extra_warnings(false)
         .flag_if_supported("-std=c++17")
+        // .flag_if_supported("-Wno-unknown-pragmas")
+        // .flag_if_supported("-Wno-comment")
+        // .flag_if_supported("-Wno-unused-parameter")
+        // .flag_if_supported("-Wno-attributes")
+        // .flag_if_supported("-Wno-sign-compare")
+        // .flag_if_supported("-Wno-delete-non-virtual-dtor")
         .flag_if_supported("-fPIC");
 
     for dir in [
+        "flow",
         "fdbbackup",
         "fdbclient",
         "fdbcli",
         "fdbrpc",
         "fdbserver",
         "flowbench",
-        "flow",
     ] {
         push_src_include(&mut builder, dir);
         push_build_include(&mut builder, dir);
