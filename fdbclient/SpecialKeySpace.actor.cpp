@@ -2784,6 +2784,8 @@ ACTOR Future<Void> validateSpecialSubrangeRead(ReadYourWritesTransaction* ryw,
 	// Generate expected result. Linear time is ok here since we're in simulation, and there's a benefit to keeping this
 	// simple (as we're using it as an test oracle)
 	state RangeResult expectedResult;
+	// The reverse parameter should be the same as for the original read, so if
+	// reverse is true then the results are _already_ in reverse order.
 	for (const auto& kr : result) {
 		if (kr.key >= keys[0] && kr.key < keys[1]) {
 			expectedResult.push_back(expectedResult.arena(), kr);
