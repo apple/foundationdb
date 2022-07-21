@@ -37,7 +37,7 @@ struct TenantMapEntry {
 
 	int64_t id;
 	Key prefix;
-	// indicates whether the current tenant entry is encrypted
+	// indicates whether the tenant is encrypted
 	bool encrypted;
 
 	constexpr static int PREFIX_SIZE = sizeof(id);

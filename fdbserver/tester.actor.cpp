@@ -1634,7 +1634,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 		std::vector<Future<Void>> tenantFutures;
 		for (auto tenant : tenantsToCreate) {
 			TraceEvent("CreatingTenant").detail("Tenant", tenant);
-			tenantFutures.push_back(success(TenantAPI::createTenant(cx.getReference(), tenant)));
+			tenantFutures.push_back(success(TenantAPI::createTenant(cx.getReference(), tenant, false)));
 		}
 
 		wait(waitForAll(tenantFutures));

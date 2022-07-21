@@ -35,10 +35,10 @@
 struct TenantManagementWorkload : TestWorkload {
 	struct TenantState {
 		int64_t id;
-		bool empty;
+		bool empty, encrypted;
 
 		TenantState() : id(-1), empty(true) {}
-		TenantState(int64_t id, bool empty) : id(id), empty(empty) {}
+		TenantState(int64_t id, bool empty, bool encrypted) : id(id), empty(empty), encrypted(encrypted) {}
 	};
 
 	std::map<TenantName, TenantState> createdTenants;
@@ -140,7 +140,8 @@ struct TenantManagementWorkload : TestWorkload {
 					wait(tr->commit());
 				} else if (operationType == OperationType::MANAGEMENT_DATABASE) {
 					ASSERT(tenantsToCreate.size() == 1);
-					wait(success(TenantAPI::createTenant(cx.getReference(), *tenantsToCreate.begin())));
+					wait(success(TenantAPI::createTenant(
+					    cx.getReference(), *tenantsToCreate.begin(), deterministicRandom()->coinflip())));
 				} else {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
@@ -149,7 +150,8 @@ struct TenantManagementWorkload : TestWorkload {
 
 					std::vector<Future<Void>> createFutures;
 					for (auto tenant : tenantsToCreate) {
-						createFutures.push_back(success(TenantAPI::createTenantTransaction(tr, tenant, nextId++)));
+						createFutures.push_back(success(TenantAPI::createTenantTransaction(
+						    tr, tenant, nextId++, deterministicRandom()->coinflip())));
 					}
 					tr->set(tenantLastIdKey, TenantMapEntry::idToPrefix(nextId - 1));
 					wait(waitForAll(createFutures));
@@ -173,7 +175,7 @@ struct TenantManagementWorkload : TestWorkload {
 					ASSERT(entry.get().id > self->maxId);
 
 					self->maxId = entry.get().id;
-					self->createdTenants[*tenantItr] = TenantState(entry.get().id, true);
+					self->createdTenants[*tenantItr] = TenantState(entry.get().id, true, entry.get().encrypted);
 
 					state bool insertData = deterministicRandom()->random01() < 0.5;
 					if (insertData) {
@@ -443,6 +445,7 @@ struct TenantManagementWorkload : TestWorkload {
 				}
 				ASSERT(alreadyExists);
 				ASSERT(entry.id == tenantState.id);
+				ASSERT(entry.encrypted == tenantState.encrypted);
 				wait(self->checkTenant(cx, self, tenant, tenantState));
 				return Void();
 			} catch (Error& e) {

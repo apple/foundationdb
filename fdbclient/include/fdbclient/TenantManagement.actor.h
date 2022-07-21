@@ -84,7 +84,10 @@ Future<TenantMapEntry> getTenant(Reference<DB> db, TenantName name) {
 // The caller must enforce that the tenant ID be unique from all current and past tenants, and it must also be unique
 // from all other tenants created in the same transaction.
 ACTOR template <class Transaction>
-Future<std::pair<TenantMapEntry, bool>> createTenantTransaction(Transaction tr, TenantNameRef name, int64_t tenantId) {
+Future<std::pair<TenantMapEntry, bool>> createTenantTransaction(Transaction tr,
+                                                                TenantNameRef name,
+                                                                int64_t tenantId,
+                                                                bool encrypted) {
 	state Key tenantMapKey = name.withPrefix(tenantMapPrefix);
 
 	if (name.startsWith("\xff"_sr)) {
@@ -108,8 +111,7 @@ Future<std::pair<TenantMapEntry, bool>> createTenantTransaction(Transaction tr, 
 		return std::make_pair(tenantEntry.get(), false);
 	}
 
-	// TODO: Pass in the actual encrypted value here once implemented in the client
-	state TenantMapEntry newTenant(tenantId, false);
+	state TenantMapEntry newTenant(tenantId, encrypted);
 
 	state typename transaction_future_type<Transaction, RangeResult>::type prefixRangeFuture =
 	    tr->getRange(prefixRange(newTenant.prefix), 1);
@@ -135,7 +137,7 @@ Future<int64_t> getNextTenantId(Transaction tr) {
 }
 
 ACTOR template <class DB>
-Future<TenantMapEntry> createTenant(Reference<DB> db, TenantName name) {
+Future<TenantMapEntry> createTenant(Reference<DB> db, TenantName name, bool encrypted) {
 	state Reference<typename DB::TransactionT> tr = db->createTransaction();
 
 	state bool firstTry = true;
@@ -157,7 +159,8 @@ Future<TenantMapEntry> createTenant(Reference<DB> db, TenantName name) {
 
 			int64_t tenantId = wait(tenantIdFuture);
 			tr->set(tenantLastIdKey, TenantMapEntry::idToPrefix(tenantId));
-			state std::pair<TenantMapEntry, bool> newTenant = wait(createTenantTransaction(tr, name, tenantId));
+			state std::pair<TenantMapEntry, bool> newTenant =
+			    wait(createTenantTransaction(tr, name, tenantId, encrypted));
 
 			wait(buggifiedCommit(tr, BUGGIFY_WITH_PROB(0.1)));
 

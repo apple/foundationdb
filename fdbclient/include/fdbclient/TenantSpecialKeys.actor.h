@@ -126,8 +126,9 @@ private:
 
 		std::vector<Future<Void>> createFutures;
 		for (auto tenant : tenants) {
+			// TODO: need to pass actual value of encrypted here
 			createFutures.push_back(
-			    success(TenantAPI::createTenantTransaction(&ryw->getTransaction(), tenant, nextId++)));
+			    success(TenantAPI::createTenantTransaction(&ryw->getTransaction(), tenant, nextId++, false)));
 		}
 
 		ryw->getTransaction().set(tenantLastIdKey, TenantMapEntry::idToPrefix(nextId - 1));
