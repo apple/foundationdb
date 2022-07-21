@@ -573,25 +573,26 @@ ACTOR Future<Void> tenantShardSplitter(DataDistributionTracker* self, KeyRange t
 			startShardFaultLines.push_back(startShardFaultLines.arena(), shardContainingTenantStart->begin());
 			startShardFaultLines.push_back(startShardFaultLines.arena(), tenantKeys.begin);
 			startShardFaultLines.push_back(startShardFaultLines.arena(), shardContainingTenantStart->end());
+
+			KeyRangeRef startKeys = KeyRangeRef(shardContainingTenantStart->begin(), shardContainingTenantStart->end());
+
+			auto s = describeSplit(startKeys, startShardFaultLines);
+			TraceEvent(SevInfo, "ExecutingShardSplit").detail("SplttingAroundStartKey", s);
+
+			executeShardSplit(self, startKeys, startShardFaultLines, startShardSize, true);
 		}
 
 		if (shardContainingTenantStart->end() != tenantKeys.end) {
 			endShardFaultLines.push_back(endShardFaultLines.arena(), shardContainingTenantEnd->begin());
 			endShardFaultLines.push_back(endShardFaultLines.arena(), tenantKeys.end);
 			endShardFaultLines.push_back(endShardFaultLines.arena(), shardContainingTenantEnd->end());
+
+			KeyRangeRef endKeys = KeyRangeRef(shardContainingTenantEnd->begin(), shardContainingTenantEnd->end());
+			auto s = describeSplit(endKeys, endShardFaultLines);
+			TraceEvent(SevInfo, "ExecutingShardSplit").detail("SplttingAroundEndKey", s);
+
+			executeShardSplit(self, endKeys, endShardFaultLines, endShardSize, true);
 		}
-
-		KeyRangeRef startKeys = KeyRangeRef(shardContainingTenantStart->begin(), shardContainingTenantStart->end());
-		KeyRangeRef endKeys = KeyRangeRef(shardContainingTenantEnd->begin(), shardContainingTenantEnd->end());
-
-		auto s = describeSplit(startKeys, startShardFaultLines);
-		TraceEvent(SevInfo, "ExecutingShardSplit").detail("SplttingAroundStartKey", s);
-
-		s = describeSplit(endKeys, endShardFaultLines);
-		TraceEvent(SevInfo, "ExecutingShardSplit").detail("SplttingAroundEndKey", s);
-
-		executeShardSplit(self, startKeys, startShardFaultLines, startShardSize, true);
-		executeShardSplit(self, endKeys, endShardFaultLines, endShardSize, true);
 
 		return Void();
 	}
