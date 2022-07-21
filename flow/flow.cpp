@@ -385,7 +385,8 @@ void bindDeterministicRandomToOpenssl() {
 		[](const void*, int) -> int { return 1; },
 		// replacement for RAND_bytes(), which fills given buffer with random byte sequence
 		[](unsigned char* buf, int length) -> int {
-		    ASSERT_ABORT(g_network && g_network->isSimulated());
+		    if (g_network)
+			    ASSERT_ABORT(g_network->isSimulated());
 		    deterministicRandom()->randomBytes(buf, length);
 		    return 1;
 		},
@@ -395,7 +396,8 @@ void bindDeterministicRandomToOpenssl() {
 		[](const void*, int, double) -> int { return 1; },
 		// replacement for default pseudobytes getter (same as RAND_bytes by default)
 		[](unsigned char* buf, int length) -> int {
-		    ASSERT_ABORT(g_network && g_network->isSimulated());
+		    if (g_network)
+			    ASSERT_ABORT(g_network->isSimulated());
 		    deterministicRandom()->randomBytes(buf, length);
 		    return 1;
 		},
