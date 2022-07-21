@@ -839,8 +839,6 @@ public:
 	AsyncVar<bool> noRecentUpdates;
 	double lastUpdate;
 
-	Int64MetricHandle readQueueSizeMetric;
-
 	std::string folder;
 
 	// defined only during splitMutations()/addMutation()
@@ -951,6 +949,9 @@ public:
 
 		LatencySample readLatencySample;
 		LatencyBands readLatencyBands;
+		LatencySample mappedRangeSample; // Samples getMappedRange latency
+		LatencySample mappedRangeRemoteSample; // Samples getMappedRange remote subquery latency
+		LatencySample mappedRangeLocalSample; // Samples getMappedRange local subquery latency
 
 		Counters(StorageServer* self)
 		  : cc("StorageServer", self->thisServerID.toString()), allQueries("QueryQueue", cc),
@@ -982,7 +983,19 @@ public:
 		                      self->thisServerID,
 		                      SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
 		                      SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
-		    readLatencyBands("ReadLatencyBands", self->thisServerID, SERVER_KNOBS->STORAGE_LOGGING_DELAY) {
+		    readLatencyBands("ReadLatencyBands", self->thisServerID, SERVER_KNOBS->STORAGE_LOGGING_DELAY),
+		    mappedRangeSample("GetMappedRangeMetrics",
+		                      self->thisServerID,
+		                      SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                      SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+		    mappedRangeRemoteSample("GetMappedRangeRemoteMetrics",
+		                            self->thisServerID,
+		                            SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                            SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+		    mappedRangeLocalSample("GetMappedRangeLocalMetrics",
+		                           self->thisServerID,
+		                           SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                           SERVER_KNOBS->LATENCY_SAMPLE_SIZE) {
 			specialCounter(cc, "LastTLogVersion", [self]() { return self->lastTLogVersion; });
 			specialCounter(cc, "Version", [self]() { return self->version.get(); });
 			specialCounter(cc, "StorageVersion", [self]() { return self->storageVersion(); });
@@ -1056,8 +1069,7 @@ public:
 	    primaryLocality(tagLocalityInvalid), knownCommittedVersion(0), versionLag(0), logProtocol(0),
 	    thisServerID(ssi.id()), tssInQuarantine(false), db(db), actors(false),
 	    byteSampleClears(false, LiteralStringRef("\xff\xff\xff")), durableInProgress(Void()), watchBytes(0),
-	    numWatches(0), noRecentUpdates(false), lastUpdate(now()),
-	    readQueueSizeMetric(LiteralStringRef("StorageServer.ReadQueueSize")), updateEagerReads(nullptr),
+	    numWatches(0), noRecentUpdates(false), lastUpdate(now()), updateEagerReads(nullptr),
 	    fetchKeysParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM),
 	    fetchChangeFeedParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM),
 	    fetchKeysBytesBudget(SERVER_KNOBS->STORAGE_FETCH_BYTES), fetchKeysBudgetUsed(false),
@@ -1561,7 +1573,6 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 	try {
 		++data->counters.getValueQueries;
 		++data->counters.allQueries;
-		++data->readQueueSizeMetric;
 		data->maxQueryQueue = std::max<int>(
 		    data->maxQueryQueue, data->counters.allQueries.getValue() - data->counters.finishedQueries.getValue());
 
@@ -1669,7 +1680,6 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 	data->transactionTagCounter.addRequest(req.tags, resultSize);
 
 	++data->counters.finishedQueries;
-	--data->readQueueSizeMetric;
 
 	double duration = g_network->timer() - req.requestTime();
 	data->counters.readLatencySample.addMeasurement(duration);
@@ -2950,6 +2960,7 @@ ACTOR Future<GetValueReqAndResultRef> quickGetValue(StorageServer* data,
                                                     // To provide span context, tags, debug ID to underlying lookups.
                                                     GetMappedKeyValuesRequest* pOriginalReq) {
 	state GetValueReqAndResultRef getValue;
+	state double getValueStart = g_network->timer();
 	getValue.key = key;
 
 	if (data->shards[key]->isReadable()) {
@@ -2970,6 +2981,8 @@ ACTOR Future<GetValueReqAndResultRef> quickGetValue(StorageServer* data,
 			if (!reply.error.present()) {
 				++data->counters.quickGetValueHit;
 				copyOptionalValue(a, getValue, reply.value);
+				const double duration = g_network->timer() - getValueStart;
+				data->counters.mappedRangeLocalSample.addMeasurement(duration);
 				return getValue;
 			}
 			// Otherwise fallback.
@@ -2989,6 +3002,8 @@ ACTOR Future<GetValueReqAndResultRef> quickGetValue(StorageServer* data,
 		// TODO: async in case it needs to read from other servers.
 		Optional<Value> valueOption = wait(valueFuture);
 		copyOptionalValue(a, getValue, valueOption);
+		double duration = g_network->timer() - getValueStart;
+		data->counters.mappedRangeRemoteSample.addMeasurement(duration);
 		return getValue;
 	} else {
 		throw quick_get_value_miss();
@@ -3375,7 +3390,6 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 
 	++data->counters.getRangeQueries;
 	++data->counters.allQueries;
-	++data->readQueueSizeMetric;
 	data->maxQueryQueue = std::max<int>(
 	    data->maxQueryQueue, data->counters.allQueries.getValue() - data->counters.finishedQueries.getValue());
 
@@ -3530,7 +3544,6 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 
 	data->transactionTagCounter.addRequest(req.tags, resultSize);
 	++data->counters.finishedQueries;
-	--data->readQueueSizeMetric;
 
 	double duration = g_network->timer() - req.requestTime();
 	data->counters.readLatencySample.addMeasurement(duration);
@@ -3556,6 +3569,7 @@ ACTOR Future<GetRangeReqAndResultRef> quickGetKeyValues(
     // To provide span context, tags, debug ID to underlying lookups.
     GetMappedKeyValuesRequest* pOriginalReq) {
 	state GetRangeReqAndResultRef getRange;
+	state double getValuesStart = g_network->timer();
 	getRange.begin = firstGreaterOrEqual(KeyRef(*a, prefix));
 	getRange.end = firstGreaterOrEqual(strinc(prefix, *a));
 	try {
@@ -3586,6 +3600,8 @@ ACTOR Future<GetRangeReqAndResultRef> quickGetKeyValues(
 			// Convert GetKeyValuesReply to RangeResult.
 			a->dependsOn(reply.arena);
 			getRange.result = RangeResultRef(reply.data, reply.more);
+			const double duration = g_network->timer() - getValuesStart;
+			data->counters.mappedRangeLocalSample.addMeasurement(duration);
 			return getRange;
 		}
 		// Otherwise fallback.
@@ -3605,6 +3621,8 @@ ACTOR Future<GetRangeReqAndResultRef> quickGetKeyValues(
 		RangeResult rangeResult = wait(rangeResultFuture);
 		a->dependsOn(rangeResult.arena());
 		getRange.result = rangeResult;
+		const double duration = g_network->timer() - getValuesStart;
+		data->counters.mappedRangeRemoteSample.addMeasurement(duration);
 		return getRange;
 	} else {
 		throw quick_get_key_values_miss();
@@ -3676,9 +3694,7 @@ void preprocessMappedKey(Tuple& mappedKeyFormatTuple, std::vector<Optional<Tuple
 			bool escaped = unescapeLiterals(s, "{{", "{");
 			escaped = unescapeLiterals(s, "}}", "}") || escaped;
 			if (escaped) {
-				Tuple escapedTuple;
-				escapedTuple.append(s);
-				vt.emplace_back(escapedTuple);
+				vt.emplace_back(Tuple::makeTuple(s));
 			} else if (singleKeyOrValue(s, sz)) {
 				// when it is SingleKeyOrValue, insert an empty Tuple to vector as placeholder
 				vt.emplace_back(Tuple());
@@ -3750,16 +3766,12 @@ Key constructMappedKey(KeyValueRef* keyValue,
 }
 
 TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
-	Key key = Tuple().append("key-0"_sr).append("key-1"_sr).append("key-2"_sr).getDataAsStandalone();
-	Value value = Tuple().append("value-0"_sr).append("value-1"_sr).append("value-2"_sr).getDataAsStandalone();
+	Key key = Tuple::makeTuple("key-0"_sr, "key-1"_sr, "key-2"_sr).getDataAsStandalone();
+	Value value = Tuple::makeTuple("value-0"_sr, "value-1"_sr, "value-2"_sr).getDataAsStandalone();
 	state KeyValueRef kvr(key, value);
 	{
-		Tuple mappedKeyFormatTuple = Tuple()
-		                                 .append("normal"_sr)
-		                                 .append("{{escaped}}"_sr)
-		                                 .append("{K[2]}"_sr)
-		                                 .append("{V[0]}"_sr)
-		                                 .append("{...}"_sr);
+		Tuple mappedKeyFormatTuple =
+		    Tuple::makeTuple("normal"_sr, "{{escaped}}"_sr, "{K[2]}"_sr, "{V[0]}"_sr, "{...}"_sr);
 
 		Tuple mappedKeyTuple;
 		std::vector<Optional<Tuple>> vt;
@@ -3768,19 +3780,15 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 
 		Key mappedKey = constructMappedKey(&kvr, vt, mappedKeyTuple, mappedKeyFormatTuple);
 
-		Key expectedMappedKey = Tuple()
-		                            .append("normal"_sr)
-		                            .append("{escaped}"_sr)
-		                            .append("key-2"_sr)
-		                            .append("value-0"_sr)
-		                            .getDataAsStandalone();
+		Key expectedMappedKey =
+		    Tuple::makeTuple("normal"_sr, "{escaped}"_sr, "key-2"_sr, "value-0"_sr).getDataAsStandalone();
 		//		std::cout << printable(mappedKey) << " == " << printable(expectedMappedKey) << std::endl;
 		ASSERT(mappedKey.compare(expectedMappedKey) == 0);
 		ASSERT(isRangeQuery == true);
 	}
 
 	{
-		Tuple mappedKeyFormatTuple = Tuple().append("{{{{}}"_sr).append("}}"_sr);
+		Tuple mappedKeyFormatTuple = Tuple::makeTuple("{{{{}}"_sr, "}}"_sr);
 
 		Tuple mappedKeyTuple;
 		std::vector<Optional<Tuple>> vt;
@@ -3788,13 +3796,13 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 		preprocessMappedKey(mappedKeyFormatTuple, vt, isRangeQuery);
 		Key mappedKey = constructMappedKey(&kvr, vt, mappedKeyTuple, mappedKeyFormatTuple);
 
-		Key expectedMappedKey = Tuple().append("{{}"_sr).append("}"_sr).getDataAsStandalone();
+		Key expectedMappedKey = Tuple::makeTuple("{{}"_sr, "}"_sr).getDataAsStandalone();
 		//		std::cout << printable(mappedKey) << " == " << printable(expectedMappedKey) << std::endl;
 		ASSERT(mappedKey.compare(expectedMappedKey) == 0);
 		ASSERT(isRangeQuery == false);
 	}
 	{
-		Tuple mappedKeyFormatTuple = Tuple().append("{{{{}}"_sr).append("}}"_sr);
+		Tuple mappedKeyFormatTuple = Tuple::makeTuple("{{{{}}"_sr, "}}"_sr);
 
 		Tuple mappedKeyTuple;
 		std::vector<Optional<Tuple>> vt;
@@ -3802,13 +3810,13 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 		preprocessMappedKey(mappedKeyFormatTuple, vt, isRangeQuery);
 		Key mappedKey = constructMappedKey(&kvr, vt, mappedKeyTuple, mappedKeyFormatTuple);
 
-		Key expectedMappedKey = Tuple().append("{{}"_sr).append("}"_sr).getDataAsStandalone();
+		Key expectedMappedKey = Tuple::makeTuple("{{}"_sr, "}"_sr).getDataAsStandalone();
 		//		std::cout << printable(mappedKey) << " == " << printable(expectedMappedKey) << std::endl;
 		ASSERT(mappedKey.compare(expectedMappedKey) == 0);
 		ASSERT(isRangeQuery == false);
 	}
 	{
-		Tuple mappedKeyFormatTuple = Tuple().append("{K[100]}"_sr);
+		Tuple mappedKeyFormatTuple = Tuple::makeTuple("{K[100]}"_sr);
 		state bool throwException = false;
 		try {
 			Tuple mappedKeyTuple;
@@ -3824,7 +3832,7 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 		ASSERT(throwException);
 	}
 	{
-		Tuple mappedKeyFormatTuple = Tuple().append("{...}"_sr).append("last-element"_sr);
+		Tuple mappedKeyFormatTuple = Tuple::makeTuple("{...}"_sr, "last-element"_sr);
 		state bool throwException2 = false;
 		try {
 			Tuple mappedKeyTuple;
@@ -3840,7 +3848,7 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 		ASSERT(throwException2);
 	}
 	{
-		Tuple mappedKeyFormatTuple = Tuple().append("{K[not-a-number]}"_sr);
+		Tuple mappedKeyFormatTuple = Tuple::makeTuple("{K[not-a-number]}"_sr);
 		state bool throwException3 = false;
 		try {
 			Tuple mappedKeyTuple;
@@ -4097,7 +4105,6 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 
 	++data->counters.getMappedRangeQueries;
 	++data->counters.allQueries;
-	++data->readQueueSizeMetric;
 	data->maxQueryQueue = std::max<int>(
 	    data->maxQueryQueue, data->counters.allQueries.getValue() - data->counters.finishedQueries.getValue());
 
@@ -4270,10 +4277,10 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 
 	data->transactionTagCounter.addRequest(req.tags, resultSize);
 	++data->counters.finishedQueries;
-	--data->readQueueSizeMetric;
 
 	double duration = g_network->timer() - req.requestTime();
 	data->counters.readLatencySample.addMeasurement(duration);
+	data->counters.mappedRangeSample.addMeasurement(duration);
 	if (data->latencyBandConfig.present()) {
 		int maxReadBytes =
 		    data->latencyBandConfig.get().readConfig.maxReadBytes.orDefault(std::numeric_limits<int>::max());
@@ -4304,7 +4311,6 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 	req.reply.setByteLimit(SERVER_KNOBS->RANGESTREAM_LIMIT_BYTES);
 	++data->counters.getRangeStreamQueries;
 	++data->counters.allQueries;
-	++data->readQueueSizeMetric;
 	data->maxQueryQueue = std::max<int>(
 	    data->maxQueryQueue, data->counters.allQueries.getValue() - data->counters.finishedQueries.getValue());
 
@@ -4490,7 +4496,6 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 
 	data->transactionTagCounter.addRequest(req.tags, resultSize);
 	++data->counters.finishedQueries;
-	--data->readQueueSizeMetric;
 
 	return Void();
 }
@@ -4505,7 +4510,6 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 
 	++data->counters.getKeyQueries;
 	++data->counters.allQueries;
-	++data->readQueueSizeMetric;
 	data->maxQueryQueue = std::max<int>(
 	    data->maxQueryQueue, data->counters.allQueries.getValue() - data->counters.finishedQueries.getValue());
 
@@ -4577,7 +4581,6 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 	data->transactionTagCounter.addRequest(req.tags, resultSize);
 
 	++data->counters.finishedQueries;
-	--data->readQueueSizeMetric;
 
 	double duration = g_network->timer() - req.requestTime();
 	data->counters.readLatencySample.addMeasurement(duration);

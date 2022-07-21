@@ -36,12 +36,7 @@ class ConfigIncrementWorkload : public TestWorkload {
 
 	PerfIntCounter transactions, retries, commitUnknownResult;
 
-	static Key getConfigKey() {
-		Tuple tuple;
-		tuple.appendNull(); // config class
-		tuple << testKnobName;
-		return tuple.pack();
-	}
+	static Key getConfigKey() { return Tuple::makeTuple(/* config class */ nullptr, testKnobName).pack(); }
 
 	ACTOR static Future<int> get(Reference<ISingleThreadTransaction> tr) {
 		TraceEvent(SevDebug, "ConfigIncrementGet");
