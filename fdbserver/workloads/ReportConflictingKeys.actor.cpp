@@ -143,10 +143,14 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 	void validateRandomGetRangeResults(KeyRangeMap<Value>& conflictingKeys, Reference<ReadYourWritesTransaction> tr) {
 		int loopTime = 10 * conflictingKeys.size();
 		for (int i = 0; i < loopTime; i++) {
-			// TODO: randomly choose the conflicting keys as the boundary to test
 			Key startKey =
 			    Key(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(1, keyBytes)));
 			Key endKey = Key(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(1, keyBytes)));
+			// randomly choose the underlying conflicting keys as the boundary to test
+			if (deterministicRandom()->random01() < 0.1)
+				startKey = conflictingKeys.rangeContaining(startKey).begin();
+			if (deterministicRandom()->random01() < 0.1)
+				endKey = conflictingKeys.rangeContaining(endKey).begin();
 			KeyRangeRef kr = startKey <= endKey ? KeyRangeRef(startKey, endKey) : KeyRangeRef(endKey, startKey);
 			Future<RangeResult> res = tr->getRange(kr.withPrefix(conflictingKeysRange.begin), CLIENT_KNOBS->TOO_MANY);
 			ASSERT(res.isReady());
