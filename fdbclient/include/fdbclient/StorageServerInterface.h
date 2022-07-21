@@ -268,7 +268,7 @@ struct GetValueRequest : TimedRequest {
 	                                      // to this client, of all storage replicas that
 	                                      // serve the given key
 
-	bool verify() const { return tenantInfo.empty() || tenantInfo.hasAuthorizedTenant(); }
+	bool verify() const { return tenantInfo.isAuthorized(); }
 
 	GetValueRequest() {}
 	GetValueRequest(SpanContext spanContext,
@@ -324,7 +324,7 @@ struct WatchValueRequest {
 	  : spanContext(spanContext), tenantInfo(tenantInfo), key(key), value(value), version(ver), tags(tags),
 	    debugID(debugID) {}
 
-	bool verify() const { return tenantInfo.empty() || tenantInfo.hasAuthorizedTenant(); }
+	bool verify() const { return tenantInfo.isAuthorized(); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -369,7 +369,7 @@ struct GetKeyValuesRequest : TimedRequest {
 
 	GetKeyValuesRequest() : isFetchKeys(false) {}
 
-	bool verify() const { return tenantInfo.empty() || tenantInfo.hasAuthorizedTenant(); }
+	bool verify() const { return tenantInfo.isAuthorized(); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -428,7 +428,7 @@ struct GetMappedKeyValuesRequest : TimedRequest {
 
 	GetMappedKeyValuesRequest() : isFetchKeys(false) {}
 
-	bool verify() const { return tenantInfo.empty() || tenantInfo.hasAuthorizedTenant(); }
+	bool verify() const { return tenantInfo.isAuthorized(); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -496,7 +496,7 @@ struct GetKeyValuesStreamRequest {
 
 	GetKeyValuesStreamRequest() : isFetchKeys(false) {}
 
-	bool verify() const { return tenantInfo.empty() || tenantInfo.hasAuthorizedTenant(); }
+	bool verify() const { return tenantInfo.isAuthorized(); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -545,7 +545,7 @@ struct GetKeyRequest : TimedRequest {
 	                                      // to this client, of all storage replicas that
 	                                      // serve the given key
 
-	bool verify() const { return tenantInfo.empty() || tenantInfo.hasAuthorizedTenant(); }
+	bool verify() const { return tenantInfo.isAuthorized(); }
 
 	GetKeyRequest() {}
 

@@ -28,7 +28,7 @@
 #include "flow/Arena.h"
 
 struct TenantInfo {
-	static const int64_t INVALID_TENANT = -1;
+	static constexpr const int64_t INVALID_TENANT = -1;
 
 	Arena arena;
 	Optional<TenantNameRef> name;
@@ -40,13 +40,14 @@ struct TenantInfo {
 	bool trusted = false;
 	// Is set during deserialization. It will be set to true if the tenant
 	// name is set and the client is authorized to use this tenant.
-	bool verified = false;
+	bool tenantAuthorized = false;
 
 	// Helper function for most endpoints that read/write data. This returns true iff
-	// the client is trying to access data of a tenant it is authorized to use.
-	bool hasAuthorizedTenant() const { return trusted || (name.present() && verified); }
-
-	bool empty() const { return !name.present() && tenantId == INVALID_TENANT; }
+	// the client is either a) a trusted peer or b) is accessing keyspace belonging to a tenant,
+	// for which it has a valid authorization token.
+	// NOTE: In a cluster where TenantMode is OPTIONAL or DISABLED, tenant name may be unset.
+	//       In such case, the request containing such TenantInfo is valid iff the requesting peer is trusted.
+	bool isAuthorized() const { return trusted || tenantAuthorized; }
 
 	TenantInfo() : tenantId(INVALID_TENANT) {}
 	TenantInfo(Optional<TenantName> const& tenantName, Optional<Standalone<StringRef>> const& token, int64_t tenantId)
@@ -73,7 +74,7 @@ struct serializable_traits<TenantInfo> : std::true_type {
 				tenantAuthorized = TokenCache::instance().validate(v.name.get(), v.token.get());
 			}
 			v.trusted = FlowTransport::transport().currentDeliveryPeerIsTrusted();
-			v.verified = v.trusted || !v.name.present() || tenantAuthorized;
+			v.tenantAuthorized = tenantAuthorized;
 		}
 	}
 };
