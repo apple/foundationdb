@@ -200,13 +200,7 @@ public:
 		Version endVersion{ ::invalidVersion }; // not meaningful for range files
 
 		Tuple pack() const {
-			return Tuple()
-			    .append(version)
-			    .append(StringRef(fileName))
-			    .append(isRange)
-			    .append(fileSize)
-			    .append(blockSize)
-			    .append(endVersion);
+			return Tuple::makeTuple(version, fileName, (int)isRange, fileSize, blockSize, endVersion);
 		}
 		static RestoreFile unpack(Tuple const& t) {
 			RestoreFile r;
