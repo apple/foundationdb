@@ -3992,11 +3992,11 @@ bool rangeIntersectsAnyTenant(TenantPrefixIndex& prefixIndex, KeyRangeRef range,
 }
 
 TEST_CASE("/fdbserver/storageserver/rangeIntersectsAnyTenant") {
-	std::map<TenantName, TenantMapEntry> entries = { std::make_pair("tenant0"_sr, TenantMapEntry(0)),
-		                                             std::make_pair("tenant2"_sr, TenantMapEntry(2)),
-		                                             std::make_pair("tenant3"_sr, TenantMapEntry(3)),
-		                                             std::make_pair("tenant4"_sr, TenantMapEntry(4)),
-		                                             std::make_pair("tenant6"_sr, TenantMapEntry(6)) };
+	std::map<TenantName, TenantMapEntry> entries = { std::make_pair("tenant0"_sr, TenantMapEntry(0, false)),
+		                                             std::make_pair("tenant2"_sr, TenantMapEntry(2, false)),
+		                                             std::make_pair("tenant3"_sr, TenantMapEntry(3, false)),
+		                                             std::make_pair("tenant4"_sr, TenantMapEntry(4, true)),
+		                                             std::make_pair("tenant6"_sr, TenantMapEntry(6, true)) };
 	TenantPrefixIndex index;
 	index.createNewVersion(1);
 	for (auto entry : entries) {

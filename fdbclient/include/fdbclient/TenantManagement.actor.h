@@ -108,7 +108,8 @@ Future<std::pair<TenantMapEntry, bool>> createTenantTransaction(Transaction tr, 
 		return std::make_pair(tenantEntry.get(), false);
 	}
 
-	state TenantMapEntry newTenant(tenantId);
+	// TODO: Pass in the actual encrypted value here once implemented in the client
+	state TenantMapEntry newTenant(tenantId, false);
 
 	state typename transaction_future_type<Transaction, RangeResult>::type prefixRangeFuture =
 	    tr->getRange(prefixRange(newTenant.prefix), 1);

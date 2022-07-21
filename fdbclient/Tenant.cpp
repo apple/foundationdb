@@ -36,18 +36,18 @@ int64_t TenantMapEntry::prefixToId(KeyRef prefix) {
 }
 
 TenantMapEntry::TenantMapEntry() : id(-1) {}
-TenantMapEntry::TenantMapEntry(int64_t id) : id(id), prefix(idToPrefix(id)) {}
+TenantMapEntry::TenantMapEntry(int64_t id, bool encrypted) : id(id), prefix(idToPrefix(id)), encrypted(encrypted) {}
 
 TEST_CASE("/fdbclient/TenantMapEntry/Serialization") {
-	TenantMapEntry entry1(1);
-	ASSERT(entry1.prefix == "\x00\x00\x00\x00\x00\x00\x00\x01"_sr);
+	TenantMapEntry entry1(1, false);
+	ASSERT(entry1.prefix == "\x00\x00\x00\x00\x00\x00\x00\x01"_sr && entry1.encrypted == false);
 	TenantMapEntry entry2 = TenantMapEntry::decode(entry1.encode());
-	ASSERT(entry1.id == entry2.id && entry1.prefix == entry2.prefix);
+	ASSERT(entry1.id == entry2.id && entry1.prefix == entry2.prefix && entry1.encrypted == entry2.encrypted);
 
-	TenantMapEntry entry3(std::numeric_limits<int64_t>::max());
-	ASSERT(entry3.prefix == "\x7f\xff\xff\xff\xff\xff\xff\xff"_sr);
+	TenantMapEntry entry3(std::numeric_limits<int64_t>::max(), true);
+	ASSERT(entry3.prefix == "\x7f\xff\xff\xff\xff\xff\xff\xff"_sr && entry3.encrypted == true);
 	TenantMapEntry entry4 = TenantMapEntry::decode(entry3.encode());
-	ASSERT(entry3.id == entry4.id && entry3.prefix == entry4.prefix);
+	ASSERT(entry3.id == entry4.id && entry3.prefix == entry4.prefix && entry3.encrypted == entry4.encrypted);
 
 	for (int i = 0; i < 100; ++i) {
 		int bits = deterministicRandom()->randomInt(1, 64);
@@ -55,7 +55,7 @@ TEST_CASE("/fdbclient/TenantMapEntry/Serialization") {
 		int64_t maxPlusOne = std::min<uint64_t>(UINT64_C(1) << bits, std::numeric_limits<int64_t>::max());
 		int64_t id = deterministicRandom()->randomInt64(min, maxPlusOne);
 
-		TenantMapEntry entry(id);
+		TenantMapEntry entry(id, false);
 		int64_t bigEndianId = bigEndian64(id);
 		ASSERT(entry.id == id && entry.prefix == StringRef(reinterpret_cast<uint8_t*>(&bigEndianId), 8));
 

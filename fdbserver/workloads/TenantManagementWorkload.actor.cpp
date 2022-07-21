@@ -399,7 +399,9 @@ struct TenantManagementWorkload : TestWorkload {
 		std::string prefix;
 		std::string base64Prefix;
 		std::string printablePrefix;
+		bool encrypted;
 		jsonDoc.get("id", id);
+		jsonDoc.get("encrypted", encrypted);
 		jsonDoc.get("prefix.base64", base64Prefix);
 		jsonDoc.get("prefix.printable", printablePrefix);
 
@@ -407,7 +409,7 @@ struct TenantManagementWorkload : TestWorkload {
 		ASSERT(prefix == unprintable(printablePrefix));
 
 		Key prefixKey = KeyRef(prefix);
-		TenantMapEntry entry(id);
+		TenantMapEntry entry(id, encrypted);
 
 		ASSERT(entry.prefix == prefixKey);
 		return entry;

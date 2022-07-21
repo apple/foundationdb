@@ -37,12 +37,13 @@ struct TenantMapEntry {
 
 	int64_t id;
 	Key prefix;
+	bool encrypted;
 
 	constexpr static int PREFIX_SIZE = sizeof(id);
 
 public:
 	TenantMapEntry();
-	TenantMapEntry(int64_t id);
+	TenantMapEntry(int64_t id, bool encrypted);
 
 	Value encode() const { return ObjectWriter::toValue(*this, IncludeVersion(ProtocolVersion::withTenants())); }
 
@@ -55,7 +56,7 @@ public:
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, id);
+		serializer(ar, id, encrypted);
 		if constexpr (Ar::isDeserializing) {
 			if (id >= 0) {
 				prefix = idToPrefix(id);
