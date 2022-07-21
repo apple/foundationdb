@@ -132,7 +132,7 @@ struct TokenCacheImpl {
 	TokenCacheImpl() : cache(FLOW_KNOBS->TOKEN_CACHE_SIZE) {}
 
 	bool validate(TenantNameRef tenant, StringRef token);
-	bool validateAndAdd(double currentTime, StringRef signature, StringRef token, NetworkAddress const& peer);
+	bool validateAndAdd(double currentTime, StringRef token, NetworkAddress const& peer);
 };
 
 TokenCache::TokenCache() : impl(new TokenCacheImpl()) {}
@@ -159,7 +159,6 @@ bool TokenCache::validate(TenantNameRef name, StringRef token) {
 	    .detail("Token", token.toStringRef(arena).toStringView())
 
 bool TokenCacheImpl::validateAndAdd(double currentTime,
-                                    StringRef signature,
                                     StringRef token,
                                     NetworkAddress const& peer) {
 	Arena arena;
@@ -208,28 +207,18 @@ bool TokenCacheImpl::validateAndAdd(double currentTime,
 		for (auto tenant : t.tenants.get()) {
 			c.tenants.push_back_deep(c.arena, tenant);
 		}
-		StringRef sig(c.arena, signature);
-		cache.insert(sig, c);
+		cache.insert(StringRef(c.arena, token), c);
 		return true;
 	}
 }
 
 bool TokenCacheImpl::validate(TenantNameRef name, StringRef token) {
 	NetworkAddress peer = FlowTransport::transport().currentDeliveryPeerAddress();
-	auto sig = authz::jwt::signaturePart(token);
-	if (sig.empty()) {
-		TEST(true); // Token is ill-formed
-		TraceEvent(SevWarn, "InvalidToken")
-		    .detail("From", peer)
-		    .detail("Reason", "NoSignaturePart")
-		    .detail("BadToken", token.toString());
-		return false;
-	}
-	auto cachedEntry = cache.get(sig);
+	auto cachedEntry = cache.get(token);
 	double currentTime = g_network->timer();
 
 	if (!cachedEntry.present()) {
-		if (validateAndAdd(currentTime, sig, token, peer)) {
+		if (validateAndAdd(currentTime, token, peer)) {
 			cachedEntry = cache.get(sig);
 		} else {
 			return false;
