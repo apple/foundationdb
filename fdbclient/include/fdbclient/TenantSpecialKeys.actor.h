@@ -145,12 +145,13 @@ private:
 	    ReadYourWritesTransaction* ryw,
 	    TenantName tenantName,
 	    std::vector<std::pair<Standalone<StringRef>, Optional<Value>>> configEntries) {
-		state TenantMapEntry tenantEntry = wait(TenantAPI::getTenantTransaction(&ryw->getTransaction(), tenantName));
+		TenantMapEntry originalEntry = wait(TenantAPI::getTenantTransaction(&ryw->getTransaction(), tenantName));
+		TenantMapEntry updatedEntry = originalEntry;
 		for (auto const& [name, value] : configEntries) {
-			tenantEntry.configure(name, value);
+			updatedEntry.configure(name, value);
 		}
-		TenantAPI::configureTenantTransaction(&ryw->getTransaction(), tenantName, tenantEntry);
 
+		wait(TenantAPI::configureTenantTransaction(&ryw->getTransaction(), tenantName, originalEntry, updatedEntry));
 		return Void();
 	}
 

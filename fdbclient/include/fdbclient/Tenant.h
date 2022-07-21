@@ -47,8 +47,7 @@ struct TenantMapEntry {
 	Key prefix;
 	Optional<TenantGroupName> tenantGroup;
 	TenantState tenantState = TenantState::READY;
-	// TODO: fix this type
-	Optional<Standalone<StringRef>> assignedCluster;
+	Optional<ClusterName> assignedCluster;
 	int64_t configurationSequenceNum = 0;
 
 	constexpr static int PREFIX_SIZE = sizeof(id);
@@ -85,25 +84,44 @@ struct TenantMapEntry {
 	}
 };
 
+struct TenantGroupEntry {
+	constexpr static FileIdentifier file_identifier = 10764222;
+
+	Optional<ClusterName> assignedCluster;
+
+	TenantGroupEntry() = default;
+	TenantGroupEntry(Optional<ClusterName> assignedCluster) : assignedCluster(assignedCluster) {}
+
+	Value encode() { return ObjectWriter::toValue(*this, IncludeVersion(ProtocolVersion::withMetacluster())); }
+	static TenantGroupEntry decode(ValueRef const& value) {
+		TenantGroupEntry entry;
+		ObjectReader reader(value.begin(), IncludeVersion());
+		reader.deserialize(entry);
+		return entry;
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, assignedCluster);
+	}
+};
+
 struct TenantMetadataSpecification {
 	static KeyRef subspace;
 
-	// TODO: can we break compatibility and use the tuple codec?
-	struct TenantIdCodec {
-		static Standalone<StringRef> pack(int64_t id) { return TenantMapEntry::idToPrefix(id); }
-		static int64_t unpack(Standalone<StringRef> val) { return TenantMapEntry::prefixToId(val); }
-	};
-
 	KeyBackedObjectMap<TenantName, TenantMapEntry, decltype(IncludeVersion()), NullCodec> tenantMap;
-	KeyBackedProperty<int64_t, TenantIdCodec> lastTenantId;
+	KeyBackedProperty<int64_t> lastTenantId;
 	KeyBackedSet<int64_t> tenantTombstones;
 	KeyBackedSet<Tuple> tenantGroupTenantIndex;
+	KeyBackedObjectMap<TenantGroupName, TenantGroupEntry, decltype(IncludeVersion()), NullCodec> tenantGroupMap;
 
 	TenantMetadataSpecification(KeyRef subspace)
 	  : tenantMap(subspace.withSuffix("tenant/map/"_sr), IncludeVersion(ProtocolVersion::withTenantGroups())),
 	    lastTenantId(subspace.withSuffix("tenant/lastId"_sr)),
 	    tenantTombstones(subspace.withSuffix("tenant/tombstones/"_sr)),
-	    tenantGroupTenantIndex(subspace.withSuffix("tenant/tenantGroup/tenantIndex/"_sr)) {}
+	    tenantGroupTenantIndex(subspace.withSuffix("tenant/tenantGroup/tenantIndex/"_sr)),
+	    tenantGroupMap(subspace.withSuffix("tenant/tenantGroup/map/"_sr),
+	                   IncludeVersion(ProtocolVersion::withTenantGroups())) {}
 };
 
 struct TenantMetadata {
@@ -115,6 +133,7 @@ public:
 	static inline auto& lastTenantId = instance.lastTenantId;
 	static inline auto& tenantTombstones = instance.tenantTombstones;
 	static inline auto& tenantGroupTenantIndex = instance.tenantGroupTenantIndex;
+	static inline auto& tenantGroupMap = instance.tenantGroupMap;
 
 	static inline Key tenantMapPrivatePrefix = "\xff"_sr.withSuffix(tenantMap.subspace.begin);
 };

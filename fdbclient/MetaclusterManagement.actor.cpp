@@ -54,9 +54,4 @@ KeyBackedSet<Tuple> ManagementClusterMetadata::clusterCapacityIndex("metacluster
 KeyBackedSet<Tuple> ManagementClusterMetadata::clusterTenantIndex("metacluster/dataCluster/tenantMap/"_sr);
 KeyBackedSet<Tuple> ManagementClusterMetadata::clusterTenantGroupIndex("metacluster/dataCluster/tenantGroupMap/"_sr);
 
-// TODO: should this be stored in the tenant subspace?
-KeyBackedObjectMap<TenantGroupName, TenantGroupEntry, decltype(IncludeVersion())>
-    ManagementClusterMetadata::tenantGroupMap("metacluster/tenantGroup/map/"_sr,
-                                              IncludeVersion(ProtocolVersion::withTenantGroups()));
-
 }; // namespace MetaclusterAPI

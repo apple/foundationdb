@@ -111,8 +111,6 @@ struct ManagementClusterMetadata {
 
 	// A set of cluster/tenant group pairings ordered by cluster
 	static KeyBackedSet<Tuple> clusterTenantGroupIndex;
-
-	static KeyBackedObjectMap<TenantGroupName, TenantGroupEntry, decltype(IncludeVersion())> tenantGroupMap;
 };
 
 template <class Transaction>
@@ -285,7 +283,7 @@ Future<Optional<std::string>> createMetacluster(Reference<DB> db, ClusterName na
 			MetaclusterMetadata::metaclusterRegistration.set(tr,
 			                                                 MetaclusterRegistrationEntry(name, metaclusterUid.get()));
 
-			wait(safeThreadFutureToFuture(tr->commit()));
+			wait(buggifiedCommit(tr, BUGGIFY));
 			break;
 		} catch (Error& e) {
 			wait(safeThreadFutureToFuture(tr->onError(e)));
@@ -319,7 +317,7 @@ Future<Void> decommissionMetacluster(Reference<DB> db) {
 			MetaclusterMetadata::metaclusterRegistration.clear(tr);
 
 			firstTry = false;
-			wait(safeThreadFutureToFuture(tr->commit()));
+			wait(buggifiedCommit(tr, BUGGIFY));
 			break;
 		} catch (Error& e) {
 			wait(safeThreadFutureToFuture(tr->onError(e)));
@@ -675,7 +673,7 @@ Future<Void> managementClusterPurgeDataCluster(Reference<DB> db, ClusterNameRef 
 				TenantGroupName tenantGroup = entry.getString(1);
 				ManagementClusterMetadata::tenantMetadata.tenantGroupTenantIndex.erase(
 				    tr, Tuple::makeTuple(tenantGroup), Tuple::makeTuple(keyAfter(tenantGroup)));
-				ManagementClusterMetadata::tenantGroupMap.erase(tr, tenantGroup);
+				ManagementClusterMetadata::tenantMetadata.tenantGroupMap.erase(tr, tenantGroup);
 			}
 
 			if (!tenantGroupEntries.results.empty()) {
@@ -868,6 +866,82 @@ Future<std::map<ClusterName, DataClusterMetadata>> listClusters(Reference<DB> db
 	}
 }
 
+template <class Transaction>
+void managementClusterAddTenantToGroup(Transaction tr,
+                                       TenantName tenantName,
+                                       TenantMapEntry tenantEntry,
+                                       DataClusterMetadata clusterMetadata,
+                                       bool groupAlreadyExists) {
+	if (tenantEntry.tenantGroup.present()) {
+		if (tenantEntry.tenantGroup.get().startsWith("\xff"_sr)) {
+			throw invalid_tenant_group_name();
+		}
+
+		if (!groupAlreadyExists) {
+			ManagementClusterMetadata::tenantMetadata.tenantGroupMap.set(
+			    tr, tenantEntry.tenantGroup.get(), TenantGroupEntry(tenantEntry.assignedCluster));
+			ManagementClusterMetadata::clusterTenantGroupIndex.insert(
+			    tr, Tuple::makeTuple(tenantEntry.assignedCluster.get(), tenantEntry.tenantGroup.get()));
+		}
+		ManagementClusterMetadata::tenantMetadata.tenantGroupTenantIndex.insert(
+		    tr, Tuple::makeTuple(tenantEntry.tenantGroup.get(), tenantName));
+	}
+
+	if (!groupAlreadyExists) {
+		DataClusterEntry updatedClusterEntry = clusterMetadata.entry;
+		ASSERT(updatedClusterEntry.hasCapacity());
+
+		++updatedClusterEntry.allocated.numTenantGroups;
+
+		updateClusterMetadata(tr,
+		                      tenantEntry.assignedCluster.get(),
+		                      clusterMetadata,
+		                      Optional<ClusterConnectionString>(),
+		                      updatedClusterEntry);
+	}
+}
+
+ACTOR template <class Transaction>
+Future<Void> managementClusterRemoveTenantFromGroup(Transaction tr,
+                                                    TenantName tenantName,
+                                                    TenantMapEntry tenantEntry,
+                                                    DataClusterMetadata clusterMetadata) {
+	state bool updateClusterCapacity = !tenantEntry.tenantGroup.present();
+	if (tenantEntry.tenantGroup.present()) {
+		ManagementClusterMetadata::tenantMetadata.tenantGroupTenantIndex.erase(
+		    tr, Tuple::makeTuple(tenantEntry.tenantGroup.get(), tenantName));
+
+		state KeyBackedSet<Tuple>::RangeResultType result =
+		    wait(ManagementClusterMetadata::tenantMetadata.tenantGroupTenantIndex.getRange(
+		        tr,
+		        Tuple::makeTuple(tenantEntry.tenantGroup.get()),
+		        Tuple::makeTuple(keyAfter(tenantEntry.tenantGroup.get())),
+		        1));
+
+		if (result.results.size() == 0) {
+			ManagementClusterMetadata::clusterTenantGroupIndex.erase(
+			    tr, Tuple::makeTuple(tenantEntry.assignedCluster.get(), tenantEntry.tenantGroup.get()));
+
+			ManagementClusterMetadata::tenantMetadata.tenantGroupMap.erase(tr, tenantEntry.tenantGroup.get());
+			updateClusterCapacity = true;
+		}
+	}
+
+	// Update the tenant group count information for the assigned cluster if this tenant group was erased so we
+	// can use the freed capacity
+	if (updateClusterCapacity) {
+		state DataClusterEntry updatedClusterEntry = clusterMetadata.entry;
+		--updatedClusterEntry.allocated.numTenantGroups;
+		updateClusterMetadata(tr,
+		                      tenantEntry.assignedCluster.get(),
+		                      clusterMetadata,
+		                      Optional<ClusterConnectionString>(),
+		                      updatedClusterEntry);
+	}
+
+	return Void();
+}
+
 template <class DB>
 struct CreateTenantImpl {
 	// Initialization parameters
@@ -897,25 +971,18 @@ struct CreateTenantImpl {
 		}
 	}
 
-	ACTOR static Future<std::pair<ClusterName, DataClusterMetadata>> assignTenant(
-	    CreateTenantImpl* self,
-	    Reference<typename DB::TransactionT> tr) {
+	// Returns a pair with the name of the assigned cluster and whether the group was already assigned
+	ACTOR static Future<std::pair<ClusterName, bool>> assignTenant(CreateTenantImpl* self,
+	                                                               Reference<typename DB::TransactionT> tr) {
 		state Optional<TenantGroupEntry> groupEntry;
 		if (self->tenantEntry.tenantGroup.present()) {
-			if (self->tenantEntry.tenantGroup.get().startsWith("\xff"_sr)) {
-				throw invalid_tenant_group_name();
-			}
-
-			Optional<TenantGroupEntry> _groupEntry =
-			    wait(ManagementClusterMetadata::tenantGroupMap.get(tr, self->tenantEntry.tenantGroup.get()));
+			Optional<TenantGroupEntry> _groupEntry = wait(
+			    ManagementClusterMetadata::tenantMetadata.tenantGroupMap.get(tr, self->tenantEntry.tenantGroup.get()));
 			groupEntry = _groupEntry;
 
 			if (groupEntry.present()) {
-				Optional<DataClusterMetadata> clusterMetadata =
-				    wait(tryGetClusterTransaction(tr, groupEntry.get().assignedCluster));
-
-				ASSERT(clusterMetadata.present());
-				return std::make_pair(groupEntry.get().assignedCluster, clusterMetadata.get());
+				ASSERT(groupEntry.get().assignedCluster.present());
+				return std::make_pair(groupEntry.get().assignedCluster.get(), true);
 			}
 		}
 
@@ -959,23 +1026,7 @@ struct CreateTenantImpl {
 		}
 
 		ASSERT(chosenCluster.present());
-
-		Optional<DataClusterMetadata> clusterMetadata = wait(tryGetClusterTransaction(tr, chosenCluster.get()));
-		ASSERT(clusterMetadata.present());
-
-		DataClusterEntry clusterEntry = clusterMetadata.get().entry;
-		ASSERT(clusterEntry.hasCapacity());
-
-		++clusterEntry.allocated.numTenantGroups;
-
-		updateClusterMetadata(
-		    tr, chosenCluster.get(), clusterMetadata.get(), Optional<ClusterConnectionString>(), clusterEntry);
-		if (self->tenantEntry.tenantGroup.present()) {
-			ManagementClusterMetadata::tenantGroupMap.set(
-			    tr, self->tenantEntry.tenantGroup.get(), TenantGroupEntry(chosenCluster.get()));
-		}
-
-		return std::make_pair(chosenCluster.get(), clusterMetadata.get());
+		return std::make_pair(chosenCluster.get(), false);
 	}
 
 	ACTOR static Future<std::pair<TenantMapEntry, bool>> managementClusterCreateTenant(
@@ -997,11 +1048,6 @@ struct CreateTenantImpl {
 		self->tenantEntry.tenantState = TenantState::REGISTERING;
 		ManagementClusterMetadata::tenantMetadata.tenantMap.set(tr, self->tenantName, self->tenantEntry);
 
-		if (self->tenantEntry.tenantGroup.present()) {
-			ManagementClusterMetadata::tenantMetadata.tenantGroupTenantIndex.insert(
-			    tr, Tuple::makeTuple(self->tenantEntry.tenantGroup.get(), self->tenantName));
-		}
-
 		return std::make_pair(self->tenantEntry, true);
 	}
 
@@ -1011,46 +1057,42 @@ struct CreateTenantImpl {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
-				state Future<std::pair<ClusterName, DataClusterMetadata>> assignmentFuture = assignTenant(self, tr);
+				state Future<std::pair<ClusterName, bool>> assignmentFuture = assignTenant(self, tr);
 
 				wait(success(TenantAPI::checkTenantMode(tr, ClusterType::METACLUSTER_MANAGEMENT)));
 
-				std::pair<ClusterName, DataClusterMetadata> assignment = wait(assignmentFuture);
+				state std::pair<ClusterName, bool> assignment = wait(assignmentFuture);
 				self->tenantEntry.assignedCluster = assignment.first;
-				self->clusterMetadata = assignment.second;
+				state Future<DataClusterMetadata> dataClusterMetadataFuture =
+				    getClusterTransaction(tr, assignment.first);
 
 				Optional<int64_t> lastId = wait(ManagementClusterMetadata::tenantMetadata.lastTenantId.get(tr));
 				self->tenantEntry.setId(lastId.orDefault(-1) + 1);
 
-				std::pair<TenantMapEntry, bool> result = wait(managementClusterCreateTenant(self, tr));
-				state TenantMapEntry createdEntry = result.first;
+				state std::pair<TenantMapEntry, bool> createResult = wait(managementClusterCreateTenant(self, tr));
+				state TenantMapEntry createdEntry = createResult.first;
 
-				if (!result.second) {
+				DataClusterMetadata _clusterMetadata = wait(dataClusterMetadataFuture);
+				self->clusterMetadata = _clusterMetadata;
+
+				if (!createResult.second) {
 					if (!createdEntry.matchesConfiguration(self->tenantEntry) ||
 					    createdEntry.tenantState != TenantState::REGISTERING) {
 						throw tenant_already_exists();
 					} else if (self->tenantEntry.assignedCluster != createdEntry.assignedCluster) {
-						if (!createdEntry.assignedCluster.present()) {
-							// This is an unexpected state in a metacluster, but if it happens then it wasn't created
-							// here
-							throw tenant_already_exists();
-						}
+						ASSERT(createdEntry.assignedCluster.present());
 
-						Optional<DataClusterMetadata> actualMetadata =
-						    wait(tryGetClusterTransaction(tr, createdEntry.assignedCluster.get()));
+						DataClusterMetadata actualMetadata =
+						    wait(getClusterTransaction(tr, createdEntry.assignedCluster.get()));
 
-						// A cluster cannot be removed through these APIs unless it has no tenants assigned to it.
-						ASSERT(actualMetadata.present());
-						self->clusterMetadata = actualMetadata.get();
+						self->clusterMetadata = actualMetadata;
 					}
 				} else {
 					ManagementClusterMetadata::clusterTenantIndex.insert(
 					    tr, Tuple::makeTuple(createdEntry.assignedCluster.get(), self->tenantName));
 
-					if (createdEntry.tenantGroup.present()) {
-						ManagementClusterMetadata::clusterTenantGroupIndex.insert(
-						    tr, Tuple::makeTuple(createdEntry.assignedCluster.get(), createdEntry.tenantGroup.get()));
-					}
+					managementClusterAddTenantToGroup(
+					    tr, self->tenantName, createdEntry, self->clusterMetadata, assignment.second);
 
 					ManagementClusterMetadata::tenantMetadata.lastTenantId.set(tr, createdEntry.id);
 					wait(buggifiedCommit(tr, BUGGIFY));
@@ -1123,7 +1165,7 @@ Future<Void> createTenant(Reference<DB> db, TenantName name, TenantMapEntry tena
 }
 
 ACTOR template <class Transaction>
-Future<Void> managementClusterDeleteTenant(Transaction tr, TenantNameRef name, int64_t tenantId) {
+Future<Void> managementClusterDeleteTenant(Transaction tr, TenantName name, int64_t tenantId) {
 	state Optional<TenantMapEntry> tenantEntry = wait(tryGetTenantTransaction(tr, name));
 
 	return Void();
@@ -1142,68 +1184,27 @@ struct DeleteTenantImpl {
 	DeleteTenantImpl(Reference<DB> managementDb, TenantName tenantName)
 	  : managementDb(managementDb), tenantName(tenantName) {}
 
-	enum class DeletionState { UNSTARTED, IN_PROGRESS, COMPLETED };
-
 	ACTOR static Future<Void> managementClusterEraseTenantEntry(Reference<typename DB::TransactionT> tr,
 	                                                            TenantName tenantName,
 	                                                            TenantMapEntry tenantEntry) {
 		// Erase the tenant entry itself
 		ManagementClusterMetadata::tenantMetadata.tenantMap.erase(tr, tenantName);
 
-		// Remove the tenant from its tenant group's tenant index
-		if (tenantEntry.tenantGroup.present()) {
-			ManagementClusterMetadata::tenantMetadata.tenantGroupTenantIndex.erase(
-			    tr, Tuple::makeTuple(tenantEntry.tenantGroup.get(), tenantName));
-		}
-
 		// Clean up cluster based tenant indices and remove the tenant group if it is empty
-		if (tenantEntry.assignedCluster.present()) {
-			state Future<KeyBackedSet<Tuple>::RangeResultType> tenantGroupIndexFuture;
-			state Optional<TenantGroupName> tenantGroup = tenantEntry.tenantGroup;
-			if (tenantGroup.present()) {
-				tenantGroupIndexFuture = ManagementClusterMetadata::tenantMetadata.tenantGroupTenantIndex.getRange(
-				    tr, Tuple::makeTuple(tenantGroup.get()), Tuple::makeTuple(keyAfter(tenantGroup.get())), 1);
-			}
+		state DataClusterMetadata clusterMetadata = wait(getClusterTransaction(tr, tenantEntry.assignedCluster.get()));
 
-			state Optional<DataClusterMetadata> clusterMetadata =
-			    wait(tryGetClusterTransaction(tr, tenantEntry.assignedCluster.get()));
+		// Remove the tenant from the cluster -> tenant index
+		ManagementClusterMetadata::clusterTenantIndex.erase(
+		    tr, Tuple::makeTuple(tenantEntry.assignedCluster.get(), tenantName));
 
-			state DataClusterEntry updatedEntry = clusterMetadata.get().entry;
-			state bool decrementTenantGroupCount = clusterMetadata.present() && !tenantGroup.present();
-
-			if (clusterMetadata.present()) {
-				// Remove the tenant from the cluster -> tenant index
-				ManagementClusterMetadata::clusterTenantIndex.erase(
-				    tr, Tuple::makeTuple(tenantEntry.assignedCluster.get(), tenantName));
-
-				// If the tenant group is empty, remove it from the tenant group map and the cluster -> tenant group
-				// index
-				if (tenantGroup.present()) {
-					KeyBackedSet<Tuple>::RangeResultType result = wait(tenantGroupIndexFuture);
-					if (result.results.size() == 0) {
-						ManagementClusterMetadata::clusterTenantGroupIndex.erase(
-						    tr, Tuple::makeTuple(tenantEntry.assignedCluster.get(), tenantGroup.get()));
-						ManagementClusterMetadata::tenantGroupMap.erase(tr, tenantGroup.get());
-						decrementTenantGroupCount = true;
-					}
-				}
-			}
-			// Update the tenant group count information for the assigned cluster if this tenant group was erased so we
-			// can use the freed capacity
-			if (decrementTenantGroupCount) {
-				--updatedEntry.allocated.numTenantGroups;
-				updateClusterMetadata(tr,
-				                      tenantEntry.assignedCluster.get(),
-				                      clusterMetadata.get(),
-				                      Optional<ClusterConnectionString>(),
-				                      updatedEntry);
-			}
-		}
+		// Remove the tenant from its tenant group
+		wait(managementClusterRemoveTenantFromGroup(tr, tenantName, tenantEntry, clusterMetadata));
 
 		return Void();
 	}
 
-	ACTOR static Future<DeletionState> getAssignedLocation(DeleteTenantImpl* self) {
+	// Returns true if the deletion is already in progress
+	ACTOR static Future<bool> getAssignedLocation(DeleteTenantImpl* self) {
 		state Reference<typename DB::TransactionT> tr = self->managementDb->createTransaction();
 		loop {
 			try {
@@ -1220,27 +1221,13 @@ struct DeleteTenantImpl {
 
 				self->tenantId = tenantEntry.get().id;
 
-				if (tenantEntry.get().assignedCluster.present()) {
-					Optional<DataClusterMetadata> clusterMetadata =
-					    wait(tryGetClusterTransaction(tr, tenantEntry.get().assignedCluster.get()));
+				DataClusterMetadata clusterMetadata =
+				    wait(getClusterTransaction(tr, tenantEntry.get().assignedCluster.get()));
 
-					// A cluster cannot be removed through these APIs unless it has no tenants assigned to it.
-					ASSERT(clusterMetadata.present());
+				Reference<IDatabase> dataClusterDb = wait(openDatabase(clusterMetadata.connectionString));
+				self->dataClusterDb = dataClusterDb;
 
-					Reference<IDatabase> dataClusterDb = wait(openDatabase(clusterMetadata.get().connectionString));
-					self->dataClusterDb = dataClusterDb;
-
-					if (tenantEntry.get().tenantState == TenantState::REMOVING) {
-						return DeletionState::IN_PROGRESS;
-					} else {
-						return DeletionState::UNSTARTED;
-					}
-				} else {
-					// The record only exists on the management cluster, so we can just delete it.
-					wait(managementClusterEraseTenantEntry(tr, self->tenantName, tenantEntry.get()));
-					wait(buggifiedCommit(tr, BUGGIFY));
-					return DeletionState::COMPLETED;
-				}
+				return tenantEntry.get().tenantState == TenantState::REMOVING;
 			} catch (Error& e) {
 				wait(safeThreadFutureToFuture(tr->onError(e)));
 			}
@@ -1321,10 +1308,8 @@ struct DeleteTenantImpl {
 
 	ACTOR static Future<Void> run(DeleteTenantImpl* self) {
 		// Get information about the tenant and where it is assigned
-		DeletionState deletionState = wait(getAssignedLocation(self));
-		if (deletionState == DeletionState::COMPLETED) {
-			return Void();
-		} else if (deletionState == DeletionState::UNSTARTED) {
+		bool deletionInProgress = wait(getAssignedLocation(self));
+		if (!deletionInProgress) {
 			wait(checkTenantEmpty(self));
 			wait(markTenantInRemovingState(self));
 		}
@@ -1396,22 +1381,63 @@ struct ConfigureTenantImpl {
 	                    std::map<Standalone<StringRef>, Optional<Value>> configurationParameters)
 	  : managementDb(managementDb), tenantName(tenantName), configurationParameters(configurationParameters) {}
 
-	ACTOR static Future<bool> checkTenantGroup(Optional<TenantGroupName> currentGroup,
-	                                           Optional<TenantGroupName> desiredGroup) {
-		if (!desiredGroup.present() || currentGroup == desiredGroup) {
-			return true;
+	// This verifies that the tenant group can be changed, and if so it updates all of the tenant group data
+	// structures. It does not update the TenantMapEntry stored in the tenant map.
+	ACTOR static Future<Void> updateTenantGroup(ConfigureTenantImpl* self,
+	                                            Reference<typename DB::TransactionT> tr,
+	                                            TenantMapEntry tenantEntry,
+	                                            Optional<TenantGroupName> desiredGroup) {
+
+		state TenantMapEntry entryWithUpdatedGroup = tenantEntry;
+		entryWithUpdatedGroup.tenantGroup = desiredGroup;
+
+		if (tenantEntry.tenantGroup == desiredGroup) {
+			return Void();
 		}
 
-		// TODO: check where desired group is assigned and allow if the cluster is the same
-		// SOMEDAY: It should also be possible to change the tenant group when we support tenant movement.
-		wait(delay(0));
+		// Removing a tenant group is only possible if we have capacity for more groups on the current cluster
+		else if (!desiredGroup.present()) {
+			if (!self->clusterMetadata.entry.hasCapacity()) {
+				throw metacluster_no_capacity();
+			}
 
-		return false;
+			wait(managementClusterRemoveTenantFromGroup(tr, self->tenantName, tenantEntry, self->clusterMetadata));
+			managementClusterAddTenantToGroup(
+			    tr, self->tenantName, entryWithUpdatedGroup, self->clusterMetadata, false);
+			return Void();
+		}
+
+		Optional<TenantGroupEntry> tenantGroupEntry =
+		    wait(ManagementClusterMetadata::tenantMetadata.tenantGroupMap.get(tr, desiredGroup.get()));
+
+		// If we are creating a new tenant group, we need to have capacity on the current cluster
+		if (!tenantGroupEntry.present()) {
+			if (!self->clusterMetadata.entry.hasCapacity()) {
+				throw metacluster_no_capacity();
+			} else if (tenantEntry.tenantGroup.present()) {
+				wait(managementClusterRemoveTenantFromGroup(tr, self->tenantName, tenantEntry, self->clusterMetadata));
+			}
+			managementClusterAddTenantToGroup(
+			    tr, self->tenantName, entryWithUpdatedGroup, self->clusterMetadata, false);
+			return Void();
+		}
+
+		// Moves between groups in the same cluster are freely allowed
+		else if (tenantGroupEntry.get().assignedCluster == tenantEntry.assignedCluster) {
+			wait(managementClusterRemoveTenantFromGroup(tr, self->tenantName, tenantEntry, self->clusterMetadata));
+			managementClusterAddTenantToGroup(tr, self->tenantName, entryWithUpdatedGroup, self->clusterMetadata, true);
+			return Void();
+		}
+
+		// We don't currently support movement between groups on different clusters
+		else {
+			// TODO: surface better error to fdbcli?
+			throw invalid_tenant_configuration();
+		}
 	}
 
 	// Updates the configuration in the management cluster and marks it as being in the UPDATING_CONFIGURATION state
-	// Returns true if the update is complete and false if it needs to proceed to the next stage
-	ACTOR static Future<bool> updateManagementCluster(ConfigureTenantImpl* self) {
+	ACTOR static Future<Void> updateManagementCluster(ConfigureTenantImpl* self) {
 		state Reference<typename DB::TransactionT> tr = self->managementDb->createTransaction();
 		loop {
 			try {
@@ -1432,34 +1458,20 @@ struct ConfigureTenantImpl {
 				}
 
 				self->updatedEntry = tenantEntry.get();
+				DataClusterMetadata _clusterMetadata =
+				    wait(getClusterTransaction(tr, tenantEntry.get().assignedCluster.get()));
+
+				self->clusterMetadata = _clusterMetadata;
+				self->updatedEntry.tenantState = TenantState::UPDATING_CONFIGURATION;
+
 				state std::map<Standalone<StringRef>, Optional<Value>>::iterator configItr;
 				for (configItr = self->configurationParameters.begin();
 				     configItr != self->configurationParameters.end();
 				     ++configItr) {
 					if (configItr->first == "tenant_group"_sr) {
-						bool canChangeTenantGroup =
-						    wait(checkTenantGroup(self->updatedEntry.tenantGroup, configItr->second));
-						if (!canChangeTenantGroup) {
-							TraceEvent(SevWarnAlways, "InvalidTenantGroupChange")
-							    .detail("Tenant", self->tenantName)
-							    .detail("CurrentTenantGroup", self->updatedEntry.tenantGroup)
-							    .detail("DesiredTenantGroup", configItr->second);
-							// TODO: surface better error to fdbcli?
-							throw invalid_tenant_configuration();
-						}
+						wait(updateTenantGroup(self, tr, self->updatedEntry, configItr->second));
 					}
 					self->updatedEntry.configure(configItr->first, configItr->second);
-				}
-
-				if (tenantEntry.get().assignedCluster.present()) {
-					Optional<DataClusterMetadata> _clusterMetadata =
-					    wait(tryGetClusterTransaction(tr, tenantEntry.get().assignedCluster.get()));
-
-					// A cluster cannot be removed through these APIs unless it has no tenants assigned to it.
-					ASSERT(_clusterMetadata.present());
-
-					self->clusterMetadata = _clusterMetadata.get();
-					self->updatedEntry.tenantState = TenantState::UPDATING_CONFIGURATION;
 				}
 
 				++self->updatedEntry.configurationSequenceNum;
@@ -1467,7 +1479,7 @@ struct ConfigureTenantImpl {
 				wait(buggifiedCommit(tr, BUGGIFY));
 
 				// If there is no assigned cluster, then we can terminate early
-				return !tenantEntry.get().assignedCluster.present();
+				return Void();
 			} catch (Error& e) {
 				wait(safeThreadFutureToFuture(tr->onError(e)));
 			}
@@ -1500,7 +1512,8 @@ struct ConfigureTenantImpl {
 				}
 
 				self->updatedEntry.tenantState = TenantState::READY;
-				TenantAPI::configureTenantTransaction(tr, self->tenantName, self->updatedEntry);
+				wait(
+				    TenantAPI::configureTenantTransaction(tr, self->tenantName, tenantEntry.get(), self->updatedEntry));
 				wait(buggifiedCommit(tr, BUGGIFY));
 				return Void();
 			} catch (Error& e) {
@@ -1538,11 +1551,9 @@ struct ConfigureTenantImpl {
 	}
 
 	ACTOR static Future<Void> run(ConfigureTenantImpl* self) {
-		bool updateIsComplete = wait(updateManagementCluster(self));
-		if (!updateIsComplete) {
-			wait(updateDataCluster(self));
-			wait(markManagementTenantAsReady(self));
-		}
+		wait(updateManagementCluster(self));
+		wait(updateDataCluster(self));
+		wait(markManagementTenantAsReady(self));
 
 		return Void();
 	}
@@ -1557,7 +1568,6 @@ Future<Void> configureTenant(Reference<DB> db,
 	wait(impl.run());
 	return Void();
 }
-
 }; // namespace MetaclusterAPI
 
 #include "flow/unactorcompiler.h"
