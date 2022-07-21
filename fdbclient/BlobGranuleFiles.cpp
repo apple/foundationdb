@@ -1400,13 +1400,7 @@ struct KeyValueGen {
 
 } // namespace
 
-TEST_CASE("/blobgranule/files/snapshotFormatUnitTest") {
-	// snapshot files are likely to have a non-trivial shared prefix since they're for a small contiguous key range
-	KeyValueGen kvGen;
-
-	int targetChunks = randomExp(0, 9);
-	int targetDataBytes = randomExp(0, 25);
-
+Standalone<GranuleSnapshot> genSnapshot(KeyValueGen& kvGen, int targetDataBytes) {
 	Standalone<GranuleSnapshot> data;
 	int totalDataBytes = 0;
 	while (totalDataBytes < targetDataBytes) {
@@ -1422,6 +1416,17 @@ TEST_CASE("/blobgranule/files/snapshotFormatUnitTest") {
 	}
 
 	std::sort(data.begin(), data.end(), KeyValueRef::OrderByKey());
+	return data;
+}
+
+TEST_CASE("/blobgranule/files/snapshotFormatUnitTest") {
+	// snapshot files are likely to have a non-trivial shared prefix since they're for a small contiguous key range
+	KeyValueGen kvGen;
+
+	int targetChunks = randomExp(0, 9);
+	int targetDataBytes = randomExp(0, 25);
+
+	Standalone<GranuleSnapshot> data = genSnapshot(kvGen, targetDataBytes);
 
 	int maxExp = 0;
 	while (1 << maxExp < data.size()) {
@@ -1434,8 +1439,7 @@ TEST_CASE("/blobgranule/files/snapshotFormatUnitTest") {
 		ASSERT(data[i].key < data[i + 1].key);
 	}
 
-	fmt::print(
-	    "Constructing snapshot with {0} rows, {1} bytes, and {2} chunks\n", data.size(), totalDataBytes, targetChunks);
+	fmt::print("Constructing snapshot with {0} rows, {1} chunks\n", data.size(), targetChunks);
 
 	Value serialized = serializeChunkedSnapshot(data, targetChunks, kvGen.compressFilter, kvGen.cipherKeys);
 
@@ -1546,18 +1550,22 @@ static std::tuple<KeyRange, Version, Version> randomizeKeyAndVersions(const KeyV
 	return { readRange, beginVersion, readVersion };
 }
 
+Standalone<GranuleDeltas> genDeltas(KeyValueGen& kvGen, int targetBytes) {
+	Standalone<GranuleDeltas> data;
+	int totalDataBytes = 0;
+	while (totalDataBytes < targetBytes) {
+		data.push_back(data.arena(), kvGen.newDelta());
+		totalDataBytes += data.back().expectedSize();
+	}
+	return data;
+}
+
 TEST_CASE("/blobgranule/files/deltaFormatUnitTest") {
 	KeyValueGen kvGen;
 
 	int targetDataBytes = randomExp(0, 21);
 
-	Standalone<GranuleDeltas> data;
-	int totalDataBytes = 0;
-	while (totalDataBytes < targetDataBytes) {
-		data.push_back(kvGen.ar, kvGen.newDelta());
-		totalDataBytes += data.back().expectedSize();
-	}
-
+	Standalone<GranuleDeltas> data = genDeltas(kvGen, targetDataBytes);
 	Value serialized = serializeDeltaFile(data);
 
 	// check whole file
@@ -1566,6 +1574,147 @@ TEST_CASE("/blobgranule/files/deltaFormatUnitTest") {
 	for (int i = 0; i < std::min((size_t)100, kvGen.usedKeysList.size() * data.size()); i++) {
 		auto params = randomizeKeyAndVersions(kvGen, data);
 		checkDeltaRead(kvGen, std::get<0>(params), std::get<1>(params), std::get<2>(params), data, &serialized);
+	}
+
+	return Void();
+}
+
+void checkGranuleRead(const KeyValueGen& kvGen,
+                      const KeyRangeRef& range,
+                      Version beginVersion,
+                      Version readVersion,
+                      const Standalone<GranuleSnapshot>& snapshotData,
+                      const Standalone<GranuleDeltas>& deltaData,
+                      const Value& serializedSnapshot,
+                      const std::vector<std::pair<Version, Value>>& serializedDeltas) {
+	// expected answer
+	std::map<KeyRef, ValueRef> expectedData;
+	if (beginVersion == 0) {
+		for (auto& it : snapshotData) {
+			if (range.contains(it.key)) {
+				expectedData.insert({ it.key, it.value });
+			}
+		}
+	}
+	Version lastFileEndVersion = 0;
+	applyDeltas(deltaData, range, beginVersion, readVersion, lastFileEndVersion, expectedData);
+
+	// actual answer
+	Standalone<BlobGranuleChunkRef> chunk;
+	if (beginVersion == 0) {
+		std::string snapshotFilename = randomBGFilename(
+		    deterministicRandom()->randomUniqueID(), deterministicRandom()->randomUniqueID(), 0, ".snapshot");
+		chunk.snapshotFile = BlobFilePointerRef(
+		    chunk.arena(), snapshotFilename, 0, serializedSnapshot.size(), serializedSnapshot.size());
+	}
+	int deltaIdx = 0;
+	while (deltaIdx < serializedDeltas.size() && serializedDeltas[deltaIdx].first < beginVersion) {
+		deltaIdx++;
+	}
+	std::vector<StringRef> deltaPtrsVector;
+	while (deltaIdx < serializedDeltas.size()) {
+		std::string deltaFilename = randomBGFilename(
+		    deterministicRandom()->randomUniqueID(), deterministicRandom()->randomUniqueID(), readVersion, ".delta");
+		size_t fsize = serializedDeltas[deltaIdx].second.size();
+		chunk.deltaFiles.emplace_back_deep(chunk.arena(), deltaFilename, 0, fsize, fsize);
+		deltaPtrsVector.push_back(serializedDeltas[deltaIdx].second);
+
+		if (serializedDeltas[deltaIdx].first >= readVersion) {
+			break;
+		}
+		deltaIdx++;
+	}
+	StringRef deltaPtrs[deltaPtrsVector.size()];
+	for (int i = 0; i < deltaPtrsVector.size(); i++) {
+		deltaPtrs[i] = deltaPtrsVector[i];
+	}
+
+	// TODO need to add cipher keys meta
+	chunk.cipherKeysCtx = kvGen.cipherKeys;
+	chunk.keyRange = kvGen.allRange;
+	chunk.includedVersion = readVersion;
+	chunk.snapshotVersion = (beginVersion == 0) ? 0 : invalidVersion;
+
+	Optional<StringRef> snapshotPtr;
+	if (beginVersion == 0) {
+		snapshotPtr = serializedSnapshot;
+	}
+	RangeResult actualData = materializeBlobGranule(chunk, range, beginVersion, readVersion, snapshotPtr, deltaPtrs);
+
+	if (expectedData.size() != actualData.size()) {
+		fmt::print("Expected ({0}) != Actual ({1})\n", expectedData.size(), actualData.size());
+	}
+	ASSERT(expectedData.size() == actualData.size());
+	int i = 0;
+	for (auto& it : expectedData) {
+		if (it.first != actualData[i].key) {
+			fmt::print("{0})", i);
+			fmt::print("actual {0} ({1})", actualData[i].key.toString(), actualData[i].key.size());
+			fmt::print("expected {0} ({1}) ", it.first.toString(), it.first.size());
+			fmt::print("\n");
+		}
+		ASSERT(it.first == actualData[i].key);
+		ASSERT(it.second == actualData[i].value);
+		i++;
+	}
+}
+
+TEST_CASE("/blobgranule/files/granuleReadUnitTest") {
+	KeyValueGen kvGen;
+
+	int targetSnapshotChunks = randomExp(0, 9);
+	int targetDataBytes = randomExp(12, 25);
+	int targetSnapshotBytes = (int)(deterministicRandom()->randomInt(0, targetDataBytes));
+	int targetDeltaBytes = targetDataBytes - targetSnapshotBytes;
+
+	Standalone<GranuleSnapshot> snapshotData = genSnapshot(kvGen, targetSnapshotBytes);
+	Standalone<GranuleDeltas> deltaData = genDeltas(kvGen, targetDeltaBytes);
+
+	Value serializedSnapshot =
+	    serializeChunkedSnapshot(snapshotData, targetSnapshotChunks, kvGen.compressFilter, kvGen.cipherKeys);
+
+	// split deltas up across multiple files
+	int deltaFiles = std::min(deltaData.size(), deterministicRandom()->randomInt(1, 21));
+	int deltasPerFile = deltaData.size() / deltaFiles + 1;
+	std::vector<std::pair<Version, Value>> serializedDeltaFiles;
+	serializedDeltaFiles.reserve(deltaFiles);
+	for (int i = 0; i < deltaFiles; i++) {
+		Standalone<GranuleDeltas> fileData;
+		for (int j = i * deltasPerFile; j < (i + 1) * deltasPerFile && j < deltaData.size(); j++) {
+			fileData.push_back_deep(fileData.arena(), deltaData[j]);
+		}
+		if (!fileData.empty()) {
+			Value serializedDelta = serializeDeltaFile(fileData);
+			serializedDeltaFiles.emplace_back(fileData.back().version, serializedDelta);
+		}
+	}
+
+	fmt::print("Full test\n");
+	checkGranuleRead(kvGen,
+	                 kvGen.allRange,
+	                 0,
+	                 deltaData.back().version,
+	                 snapshotData,
+	                 deltaData,
+	                 serializedSnapshot,
+	                 serializedDeltaFiles);
+
+	for (int i = 0; i < std::min(100, 5 + snapshotData.size() * deltaData.size()); i++) {
+		auto params = randomizeKeyAndVersions(kvGen, deltaData);
+		fmt::print("Partial test {0}: [{1} - {2}) @ {3} - {4}\n",
+		           i,
+		           std::get<0>(params).begin.printable(),
+		           std::get<0>(params).end.printable(),
+		           std::get<1>(params),
+		           std::get<2>(params));
+		checkGranuleRead(kvGen,
+		                 std::get<0>(params),
+		                 std::get<1>(params),
+		                 std::get<2>(params),
+		                 snapshotData,
+		                 deltaData,
+		                 serializedSnapshot,
+		                 serializedDeltaFiles);
 	}
 
 	return Void();
