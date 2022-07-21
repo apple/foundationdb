@@ -483,6 +483,7 @@ public:
 		return Void();
 	}
 
+	// TODO: unit test needed
 	ACTOR static Future<Void> resumeFromDataMoves(Reference<DataDistributor> self) {
 		state KeyRangeMap<std::shared_ptr<DataMove>>::iterator it = self->initData->dataMoveMap.ranges().begin();
 		for (; it != self->initData->dataMoveMap.ranges().end(); ++it) {
@@ -522,7 +523,9 @@ public:
 	}
 
 	// Resume inflight relocations from the previous DD
-	// TODO: add a test to verify the inflight relocation correctness and measure the memory usage with 4 million shards
+	// TODO: The initialDataDistribution is unused once resumeRelocations and
+	// DataDistributionTracker::trackInitialShards are done. In the future, we can release the object to save memory
+	// usage if it turns out to be a problem.
 	Future<Void> resumeRelocations() {
 		ASSERT(shardsAffectedByTeamFailure); // has to be allocated
 		return runAfter(resumeFromShards(Reference<DataDistributor>::addRef(this), g_network->isSimulated()),
