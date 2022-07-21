@@ -380,6 +380,7 @@ void enableBuggify(bool enabled, BuggifyType type) {
 // Make OpenSSL use DeterministicRandom as RNG source such that simulation runs stay deterministic w/ e.g. signature ops
 void bindDeterministicRandomToOpenssl() {
 	// TODO: implement ifdef branch for 3.x using provider API
+#ifndef OPENSSL_IS_BORINGSSL
 	static const RAND_METHOD method = {
 		// replacement for RAND_seed(), which reseeds OpenSSL RNG
 		[](const void*, int) -> int { return 1; },
@@ -404,6 +405,7 @@ void bindDeterministicRandomToOpenssl() {
 		// status function for PRNG readiness check
 		[]() -> int { return 1; },
 	};
+
 	if (1 != ::RAND_set_rand_method(&method)) {
 		auto ec = ::ERR_get_error();
 		char msg[256]{
@@ -419,6 +421,26 @@ void bindDeterministicRandomToOpenssl() {
 	} else {
 		printf("DeterministicRandom successfully bound to OpenSSL RNG\n");
 	}
+#else // OPENSSL_IS_BORINGSSL
+	static const RAND_METHOD method = {
+		[](const void*, int) -> void {},
+		[](unsigned char* buf, int length) -> void {
+		    if (g_network)
+			    ASSERT_ABORT(g_network->isSimulated());
+		    deterministicRandom()->randomBytes(buf, length);
+		},
+		[]() -> void {},
+		[](const void*, int, double) -> void {},
+		[](unsigned char* buf, int length) -> void {
+		    if (g_network)
+			    ASSERT_ABORT(g_network->isSimulated());
+		    deterministicRandom()->randomBytes(buf, length);
+		},
+		[]() -> int { return 1; },
+	};
+	::RAND_set_rand_method(&method);
+	printf("DeterministicRandom successfully bound to OpenSSL RNG\n");
+#endif // OPENSSL_IS_BORINGSSL
 }
 
 namespace {
