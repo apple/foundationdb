@@ -146,27 +146,12 @@ static void rollbackFeed(Key key,
 static void checkNextResult(Key key,
                             std::deque<Standalone<MutationsAndVersionRef>>& buffered,
                             std::deque<std::pair<Version, Optional<Value>>>& checkData) {
-	// TODO: may need to handle case where update transaction was retried. Should see same value at a
-	// lower version and then the correct value at the desired version. Just change version assert to
-	// read data <= check data, and only pop pendingCheck if versions are equal
-	if (buffered.empty()) {
-		fmt::print("{0}) Buffered Empty!! Check Version {1}\n",
-		           key.printable(),
-		           checkData.empty() ? -1 : checkData.front().first);
-	}
+	// First asserts are checking data is in the form the test is supposed to produce
 	ASSERT(!buffered.empty());
-	// FIXME: why some empty mutations?
-	if (buffered.front().mutations.size() != 1) {
-		fmt::print("{0}) Mutations size @ {1}: {2}\n",
-		           key.printable(),
-		           buffered.front().version,
-		           buffered.front().mutations.size());
-	}
 	ASSERT(buffered.front().mutations.size() == 1);
 	ASSERT(buffered.front().mutations[0].param1 == key);
 
-	// these asserts are correctness of change feed invariants. TODO add trace events for when they fail
-	// to debug
+	// Below asserts are correctness of change feed invariants.
 
 	// Handle case where txn retried and wrote same value twice. checkData's version is the committed one, so the same
 	// update may appear at an earlier version. This is fine, as long as it then actually appears at the committed
@@ -210,7 +195,6 @@ ACTOR Future<Void> liveReader(Database cx, Reference<FeedTestData> data, Version
 	try {
 		loop {
 			if (data->complete && data->pendingCheck.empty()) {
-				// done
 				return Void();
 			}
 			nextCheckVersion = data->pendingCheck.empty() ? invalidVersion : data->pendingCheck.front().first;
@@ -365,19 +349,6 @@ ACTOR Future<Void> historicReader(Database cx,
 	}
 	// Change feed missing data it should have
 	ASSERT(checkData.empty());
-	if (!buffered.empty()) {
-		fmt::print("ERROR {0}: buffered still has {1} for historic read {2} - {3}!\n",
-		           data->key.printable(),
-		           buffered.size(),
-		           begin,
-		           end);
-		for (int i = 0; i < buffered.size(); i++) {
-			fmt::print("  {0}): {1} ({2})\n",
-			           buffered[i].version,
-			           buffered[i].mutations[0].param2.printable(),
-			           buffered[i].mutations.size());
-		}
-	}
 	// Change feed read extra data it shouldn't have
 	ASSERT(buffered.empty());
 
@@ -614,7 +585,7 @@ struct ChangeFeedOperationsWorkload : TestWorkload {
 			feedChecks.push_back(self->checkFeed(cx, self, self->data[i]));
 		}
 		wait(waitForAll(feedChecks));
-		// TODO maybe check that all destroyed feeds are actually destroyed?
+		// FIXME: check that all destroyed feeds are actually destroyed?
 		TraceEvent("ChangeFeedOperationsCheckComplete");
 		return true;
 	}
