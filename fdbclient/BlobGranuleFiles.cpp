@@ -1222,6 +1222,7 @@ struct KeyValueGen {
 	int minVersionIncrease;
 	int maxVersionIncrease;
 	int targetMutationsPerDelta;
+	KeyRange allRange;
 
 	Version version = 0;
 
@@ -1236,6 +1237,7 @@ struct KeyValueGen {
 		targetKeyLength = deterministicRandom()->randomInt(4, uidSize);
 		sharedPrefix = sharedPrefix.substr(0, sharedPrefixLen) + "_";
 		targetValueLength = randomExp(0, 12);
+		allRange = KeyRangeRef(StringRef(sharedPrefix), LiteralStringRef("\xff"));
 
 		if (deterministicRandom()->coinflip()) {
 			clearFrequency = 0.0;
@@ -1305,9 +1307,29 @@ struct KeyValueGen {
 		return StringRef(ar, value);
 	}
 
+	KeyRef randomUsedKey() const { return usedKeysList[deterministicRandom()->randomInt(0, usedKeysList.size())]; }
+
+	KeyRange randomKeyRange() const {
+		ASSERT(!usedKeysList.empty());
+		KeyRef begin = randomUsedKey();
+		if (usedKeysList.size() == 1) {
+			return KeyRange(KeyRangeRef(begin, keyAfter(begin)));
+		} else {
+			KeyRef end = begin;
+			while (end == begin) {
+				end = randomUsedKey();
+			}
+			if (begin < end) {
+				return KeyRangeRef(begin, end);
+			} else {
+				return KeyRangeRef(end, begin);
+			}
+		}
+	}
+
 	StringRef keyForUpdate(double probUseExisting) {
 		if (!usedKeysList.empty() && deterministicRandom()->random01() < probUseExisting) {
-			return usedKeysList[deterministicRandom()->randomInt(0, usedKeysList.size())];
+			return randomUsedKey();
 		} else {
 			auto k = newKey();
 			if (k.present()) {
@@ -1315,7 +1337,7 @@ struct KeyValueGen {
 			} else {
 				// use existing key instead
 				ASSERT(!usedKeysList.empty());
-				return usedKeysList[deterministicRandom()->randomInt(0, usedKeysList.size())];
+				return randomUsedKey();
 			}
 		}
 	}
@@ -1455,46 +1477,30 @@ TEST_CASE("/blobgranule/files/snapshotFormatUnitTest") {
 	return Void();
 }
 
-TEST_CASE("/blobgranule/files/deltaFormatUnitTest") {
-	KeyValueGen kvGen;
-
-	int targetDataBytes = randomExp(0, 21);
-	// int targetDataBytes = 1000;
-
-	Standalone<GranuleDeltas> data;
-	int totalDataBytes = 0;
-	while (totalDataBytes < targetDataBytes) {
-		data.push_back(kvGen.ar, kvGen.newDelta());
-		totalDataBytes += data.back().expectedSize();
-	}
-
-	Value serialized = serializeDeltaFile(data);
-
-	std::string rangeEnd = "\xff";
-	KeyRange range(KeyRangeRef(StringRef(kvGen.sharedPrefix), StringRef(rangeEnd)));
-
+void checkDeltaRead(const KeyValueGen& kvGen,
+                    const KeyRangeRef& range,
+                    Version beginVersion,
+                    Version readVersion,
+                    const Standalone<GranuleDeltas>& data,
+                    StringRef* serialized) {
 	// expected answer
 	std::map<KeyRef, ValueRef> expectedData;
 	Version lastFileEndVersion = 0;
-	Version readVersion = data.back().version;
 
-	// FIXME: do randomized key range and version range!
-	// FIXME: refactor this into checkDeltaRead function!
-
-	applyDeltas(data, range, 0, readVersion, lastFileEndVersion, expectedData);
+	applyDeltas(data, range, beginVersion, readVersion, lastFileEndVersion, expectedData);
 
 	// actual answer
 	std::string filename = randomBGFilename(
 	    deterministicRandom()->randomUniqueID(), deterministicRandom()->randomUniqueID(), readVersion, ".delta");
-	BlobGranuleChunkRef chunk;
+	Standalone<BlobGranuleChunkRef> chunk;
 	// TODO need to add cipher keys meta
-	chunk.deltaFiles.emplace_back_deep(kvGen.ar, filename, 0, serialized.size(), serialized.size());
+	chunk.deltaFiles.emplace_back_deep(chunk.arena(), filename, 0, serialized->size(), serialized->size());
 	chunk.cipherKeysCtx = kvGen.cipherKeys;
-	chunk.keyRange = range;
+	chunk.keyRange = kvGen.allRange;
 	chunk.includedVersion = readVersion;
 	chunk.snapshotVersion = invalidVersion;
 
-	RangeResult actualData = materializeBlobGranule(chunk, range, 0, readVersion, {}, &serialized);
+	RangeResult actualData = materializeBlobGranule(chunk, range, beginVersion, readVersion, {}, serialized);
 
 	ASSERT(expectedData.size() == actualData.size());
 	int i = 0;
@@ -1508,6 +1514,58 @@ TEST_CASE("/blobgranule/files/deltaFormatUnitTest") {
 		ASSERT(it.first == actualData[i].key);
 		ASSERT(it.second == actualData[i].value);
 		i++;
+	}
+}
+
+static std::tuple<KeyRange, Version, Version> randomizeKeyAndVersions(const KeyValueGen& kvGen,
+                                                                      const Standalone<GranuleDeltas> data) {
+	// either randomize just keyrange, just version range, or both
+	double rand = deterministicRandom()->randomInt(0, 3);
+	bool randomizeKeyRange = rand == 0 || rand == 2;
+	bool randomizeVersionRange = rand == 1 || rand == 2;
+	KeyRange readRange = kvGen.allRange;
+	Version beginVersion = 0;
+	Version readVersion = data.back().version;
+
+	if (randomizeKeyRange) {
+		readRange = kvGen.randomKeyRange();
+	}
+
+	if (randomizeVersionRange) {
+		if (deterministicRandom()->coinflip()) {
+			beginVersion = 0;
+		} else {
+			beginVersion = data[deterministicRandom()->randomInt(0, data.size())].version;
+		}
+		readVersion = data[deterministicRandom()->randomInt(0, data.size())].version;
+		if (readVersion < beginVersion) {
+			std::swap(beginVersion, readVersion);
+		}
+	}
+
+	return { readRange, beginVersion, readVersion };
+}
+
+TEST_CASE("/blobgranule/files/deltaFormatUnitTest") {
+	KeyValueGen kvGen;
+
+	int targetDataBytes = randomExp(0, 21);
+
+	Standalone<GranuleDeltas> data;
+	int totalDataBytes = 0;
+	while (totalDataBytes < targetDataBytes) {
+		data.push_back(kvGen.ar, kvGen.newDelta());
+		totalDataBytes += data.back().expectedSize();
+	}
+
+	Value serialized = serializeDeltaFile(data);
+
+	// check whole file
+	checkDeltaRead(kvGen, kvGen.allRange, 0, data.back().version, data, &serialized);
+
+	for (int i = 0; i < std::min((size_t)100, kvGen.usedKeysList.size() * data.size()); i++) {
+		auto params = randomizeKeyAndVersions(kvGen, data);
+		checkDeltaRead(kvGen, std::get<0>(params), std::get<1>(params), std::get<2>(params), data, &serialized);
 	}
 
 	return Void();
