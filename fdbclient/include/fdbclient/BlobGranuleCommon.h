@@ -78,8 +78,8 @@ struct ValueAndVersionRef {
 	ValueAndVersionRef(Arena& arena, const ValueAndVersionRef& copyFrom)
 	  : version(copyFrom.version), op(copyFrom.op), value(arena, copyFrom.value) {}
 
-	bool isSet() { return op == MutationRef::SetValue; }
-	bool isClear() { return op == MutationRef::ClearRange; }
+	bool isSet() const { return op == MutationRef::SetValue; }
+	bool isClear() const { return op == MutationRef::ClearRange; }
 
 	int totalSize() const { return sizeof(ValueAndVersionRef) + value.size(); }
 	int expectedSize() const { return value.size(); }

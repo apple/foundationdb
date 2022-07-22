@@ -602,7 +602,6 @@ Value serializeChunkedSnapshot(Standalone<GranuleSnapshot> snapshot,
 	chunks.push_back(Value()); // dummy value for index block
 	Standalone<GranuleSnapshot> currentChunk;
 
-	// fmt::print("Chunk index:\n");
 	for (int i = 0; i < snapshot.size(); i++) {
 		// TODO REMOVE sanity check
 		if (i > 0) {
@@ -725,6 +724,35 @@ MutationBufferT::iterator insertMutationBoundary(MutationBufferT& deltasByKey, c
 	return it;
 }
 
+void updateMutationBoundary(Standalone<DeltaBoundaryRef>& boundary, const ValueAndVersionRef& update) {
+	if (update.isSet()) {
+		if (boundary.values.empty() || boundary.values.back().version < update.version) {
+			// duplicate same set even if it's the same as the last one, so beginVersion reads still get updates
+			boundary.values.push_back(boundary.arena(), update);
+		} else {
+			// preserve inter-mutation order by replacing this one
+			boundary.values.back() = update;
+		}
+	} else {
+		if (boundary.values.empty() ||
+		    (boundary.values.back().isSet() && boundary.values.back().version < update.version)) {
+			// don't duplicate single-key clears in order if previous was also a clear, since it's a no-op when starting
+			// with beginVersion
+			boundary.values.push_back(boundary.arena(), update);
+		} else if (!boundary.values.empty() && boundary.values.back().version == update.version) {
+			if (boundary.values.back().isSet()) {
+				// if the last 2 updates were clear @ v1 and set @ v2, and we now have a clear at v2, just pop off the
+				// set and leave the previous clear. Otherwise, just set the last set to a clear
+				if (boundary.values.size() >= 2 && boundary.values[boundary.values.size() - 2].isClear()) {
+					boundary.values.pop_back();
+				} else {
+					boundary.values.back() = update;
+				}
+			} // else we have 2 consecutive clears at this version, no-op
+		}
+	}
+}
+
 void sortDeltasByKey(const Standalone<GranuleDeltas>& deltasByVersion,
                      const KeyRangeRef& fileRange,
                      MutationBufferT& deltasByKey) {
@@ -744,10 +772,7 @@ void sortDeltasByKey(const Standalone<GranuleDeltas>& deltasByVersion,
 				// handle single key clear more efficiently
 				if (equalsKeyAfter(m.param1, m.param2)) {
 					MutationBufferT::iterator key = insertMutationBoundary(deltasByKey, m.param1);
-					// Add a clear to values if it's empty or the last item is not a clear
-					if (key->second.values.empty() || key->second.values.back().isSet()) {
-						key->second.values.push_back(key->second.arena(), ValueAndVersionRef(it.version));
-					}
+					updateMutationBoundary(key->second, ValueAndVersionRef(it.version));
 				} else {
 					// Update each boundary in the cleared range
 					MutationBufferT::iterator begin = insertMutationBoundary(deltasByKey, m.param1);
@@ -760,41 +785,20 @@ void sortDeltasByKey(const Standalone<GranuleDeltas>& deltasByVersion,
 
 						// Add a clear to values if it's empty or the last item is not a clear
 						if (begin->second.values.empty() || begin->second.values.back().isSet()) {
-							begin->second.values.push_back(begin->second.arena(), ValueAndVersionRef(it.version));
+							updateMutationBoundary(begin->second, ValueAndVersionRef(it.version));
 						}
 						++begin;
 					}
 				}
 			} else {
 				Standalone<DeltaBoundaryRef>& bound = insertMutationBoundary(deltasByKey, m.param1)->second;
-				// Add the set if values is empty or the last entry isn't set to exactly the same value
-				if (bound.values.empty() || bound.values.back().isClear() || bound.values.back().value != m.param2) {
-					bound.values.push_back(bound.arena(), ValueAndVersionRef(it.version, m.param2));
-				}
+				updateMutationBoundary(bound, ValueAndVersionRef(it.version, m.param2));
 			}
 		}
 	}
 
 	// TODO: could do a scan through map and coalesce clears (if any boundaries with exactly 1 mutation (clear) and same
 	// clearVersion as previous guy)
-
-	// TODO REMOVE: print at end
-	/*fmt::print("Sorted Deltas ({0}):\n", deltasByKey.size());
-	for (auto& it : deltasByKey) {
-	    fmt::print("    {0}) ({1})\n", it.first.printable(), it.second.values.size());
-	    for (auto& it2 : it.second.values) {
-	        if (it2.isSet()) {
-	            fmt::print("        {0}) =\n", it2.version);
-	        } else if (it2.isClear()) {
-	            fmt::print("        {0}) X\n", it2.version);
-	        } else {
-	            fmt::print("        {0})\n", it2.version);
-	        }
-	    }
-	    if (it.second.clearVersion.present()) {
-	        fmt::print("        Clear+ {0}\n", it.second.clearVersion.get());
-	    }
-	}*/
 }
 
 // FIXME: Could maybe reduce duplicated code between this and chunkedSnapshot for chunking
@@ -1039,26 +1043,8 @@ Arena loadChunkedDeltaFile(const StringRef& deltaData,
 		}
 		currentBlock++;
 	}
-	// TODO REMOVE
-	/*fmt::print("Parsing deltas [{0} - {1}) @ {2} - {3}\n",
-	           keyRange.begin.printable(),
-	           keyRange.end.printable(),
-	           beginVersion,
-	           readVersion);
-	fmt::print("Parsed Deltas ({0}):\n", deltas.size());
-	if (startClear) {
-	    fmt::print("    StartClear+\n");
-	}
-	for (auto& it : deltas) {
-	    fmt::print("    {0}) {1}", it.key.printable(), it.isSet() ? " =" : (it.isClear() ? " X" : ""));
-	    if (it.clearAfter) {
-	        fmt::print(" (Clear+)");
-	    }
-	    fmt::print("\n");
-	}*/
 
-	// TODO REMOVE
-	// order sanity check for parsed deltas
+	// TODO REMOVE eventually? order sanity check for parsed deltas
 	for (int i = 0; i < deltas.size() - 1; i++) {
 		ASSERT(deltas[i].key < deltas[i + 1].key);
 	}
@@ -1504,12 +1490,8 @@ void checkDeltaAtVersion(const ParsedDeltaBoundaryRef& expected,
                          const DeltaBoundaryRef& boundary,
                          Version beginVersion,
                          Version readVersion) {
-	fmt::print("Checking {0} - {1}\n", beginVersion, readVersion);
 	ParsedDeltaBoundaryRef actual = deltaAtVersion(boundary, beginVersion, readVersion);
 	ASSERT(expected.clearAfter == actual.clearAfter);
-	if (expected.op != actual.op) {
-		fmt::print("Expected op {0} != actual {1}\n", expected.op, actual.op);
-	}
 	ASSERT(expected.op == actual.op);
 	if (expected.isSet()) {
 		ASSERT(expected.value == actual.value);
@@ -1935,12 +1917,6 @@ void checkDeltaRead(const KeyValueGen& kvGen,
 	ASSERT(expectedData.size() == actualData.size());
 	int i = 0;
 	for (auto& it : expectedData) {
-		if (it.first != actualData[i].key) {
-			fmt::print("{0})", i);
-			fmt::print("actual {0} ({1})", actualData[i].key.toString(), actualData[i].key.size());
-			fmt::print("expected {0} ({1}) ", it.first.toString(), it.first.size());
-			fmt::print("\n");
-		}
 		ASSERT(it.first == actualData[i].key);
 		ASSERT(it.second == actualData[i].value);
 		i++;
@@ -1996,18 +1972,8 @@ TEST_CASE("/blobgranule/files/deltaFormatUnitTest") {
 	int targetChunkSize = targetDataBytes / targetChunks;
 
 	Standalone<GranuleDeltas> data = genDeltas(kvGen, targetDataBytes);
-	// TODO REMOVE
-	/*fmt::print("Deltas ({0})\n", data.size());
-	for (auto& it : data) {
-	    fmt::print("  {0}) ({1})\n", it.version, it.mutations.size());
-	    for (auto& it2 : it.mutations) {
-	        if (it2.type == MutationRef::Type::SetValue) {
-	            fmt::print("    {0}=\n", it2.param1.printable());
-	        } else {
-	            fmt::print("    {0} - {1}\n", it2.param1.printable(), it2.param2.printable());
-	        }
-	    }
-	}*/
+
+	fmt::print("Deltas ({0})\n", data.size());
 	Value serialized =
 	    serializeChunkedDeltaFile(data, kvGen.allRange, targetChunkSize, kvGen.compressFilter, kvGen.cipherKeys);
 
@@ -2084,18 +2050,9 @@ void checkGranuleRead(const KeyValueGen& kvGen,
 	}
 	RangeResult actualData = materializeBlobGranule(chunk, range, beginVersion, readVersion, snapshotPtr, deltaPtrs);
 
-	if (expectedData.size() != actualData.size()) {
-		fmt::print("Expected ({0}) != Actual ({1})\n", expectedData.size(), actualData.size());
-	}
 	ASSERT(expectedData.size() == actualData.size());
 	int i = 0;
 	for (auto& it : expectedData) {
-		if (it.first != actualData[i].key) {
-			fmt::print("{0})", i);
-			fmt::print("actual {0} ({1})", actualData[i].key.toString(), actualData[i].key.size());
-			fmt::print("expected {0} ({1}) ", it.first.toString(), it.first.size());
-			fmt::print("\n");
-		}
 		ASSERT(it.first == actualData[i].key);
 		ASSERT(it.second == actualData[i].value);
 		i++;
@@ -2114,6 +2071,7 @@ TEST_CASE("/blobgranule/files/granuleReadUnitTest") {
 
 	Standalone<GranuleSnapshot> snapshotData = genSnapshot(kvGen, targetSnapshotBytes);
 	Standalone<GranuleDeltas> deltaData = genDeltas(kvGen, targetDeltaBytes);
+	fmt::print("{0} snapshot rows and {1} deltas\n", snapshotData.size(), deltaData.size());
 
 	Value serializedSnapshot =
 	    serializeChunkedSnapshot(snapshotData, targetSnapshotChunks, kvGen.compressFilter, kvGen.cipherKeys);
