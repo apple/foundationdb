@@ -23,6 +23,7 @@
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/VersionedMap.h"
 #include "fdbclient/KeyBackedTypes.h"
 #include "flow/flat_buffers.h"

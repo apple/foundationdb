@@ -619,7 +619,11 @@ def tenants(logger):
     assert len(lines) == 3
     assert lines[0].strip().startswith('id: ')
     assert lines[1].strip().startswith('prefix: ')
+<<<<<<< HEAD
     assert lines[2].strip().startswith('tenant state: ready')
+=======
+    assert lines[2].strip() == 'tenant state: ready'
+>>>>>>> tenant-metadata-key-backed-types
 
     output = run_fdbcli_command('gettenant tenant JSON')
     json_output = json.loads(output, strict=False)
@@ -631,6 +635,7 @@ def tenants(logger):
     assert(len(json_output['tenant']['prefix']) == 2)
     assert('base64' in json_output['tenant']['prefix'])
     assert('printable' in json_output['tenant']['prefix'])
+<<<<<<< HEAD
     assert('tenant_state' in json_output['tenant'])
 
     output = run_fdbcli_command('gettenant tenant2')
@@ -687,6 +692,9 @@ def tenants(logger):
 
     output = run_fdbcli_command_and_get_error('configuretenant tenant3 tenant_group=tenant_group1')
     assert output == 'ERROR: Tenant does not exist (2131)'
+=======
+    assert(json_output['tenant']['tenant_state'] == 'ready')
+>>>>>>> tenant-metadata-key-backed-types
 
     output = run_fdbcli_command('usetenant')
     assert output == 'Using the default tenant'
