@@ -30,6 +30,7 @@
 #include <list>
 #include <new>
 #include <ostream>
+#include <string>
 #include <unordered_map>
 #include <utility>
 #include "mako/mako.hpp"
@@ -89,6 +90,15 @@ public:
 	}
 };
 
+inline void populateArray(std::array<uint64_t, MAX_OP>& arr,
+                          rapidjson::GenericArray<true, rapidjson::GenericValue<rapidjson::UTF8<>>>& json) {
+	uint64_t idx = 0;
+	for (auto it = json.Begin(); it != json.End(); it++) {
+		arr[idx] = it->GetUint64();
+		idx++;
+	}
+}
+
 class alignas(64) ThreadStatistics {
 	uint64_t conflicts;
 	uint64_t total_errors;
@@ -96,17 +106,21 @@ class alignas(64) ThreadStatistics {
 	std::array<uint64_t, MAX_OP> errors;
 	std::array<uint64_t, MAX_OP> latency_samples;
 	std::array<uint64_t, MAX_OP> latency_us_total;
-	// std::vector<DDSketchMako> sketches;
 	std::unordered_map<int, DDSketchMako> sketches;
+	std::string txn_name;
 
 public:
 	ThreadStatistics() noexcept {
 		memset(this, 0, sizeof(ThreadStatistics));
 		sketches = std::unordered_map<int, DDSketchMako>{};
+		txn_name = std::string{};
 	}
+
+	ThreadStatistics(const std::string& test_name) : txn_name{ test_name } {}
 
 	ThreadStatistics(const Arguments& args) noexcept {
 		memset(this, 0, sizeof(ThreadStatistics));
+		txn_name = args.txn_name;
 		sketches = std::unordered_map<int, DDSketchMako>{};
 		for (int op = 0; op < MAX_OP; op++) {
 			if (args.txnspec.ops[op][OP_COUNT] > 0) {
@@ -121,6 +135,8 @@ public:
 
 	ThreadStatistics(const ThreadStatistics& other) = default;
 	ThreadStatistics& operator=(const ThreadStatistics& other) = default;
+
+	const std::string& getTestName() const noexcept { return txn_name; }
 
 	uint64_t getConflictCount() const noexcept { return conflicts; }
 
@@ -210,94 +226,155 @@ public:
 		sketches = std::move(other_sketches);
 	}
 
+	void serializeFields(rapidjson::Writer<rapidjson::StringBuffer>& writer) {
+		writer.String(txn_name.c_str());
+		writer.StartObject();
+		writer.String("conflicts");
+		writer.Uint64(conflicts);
+		writer.String("total_errors");
+		writer.Uint64(total_errors);
+
+		writer.String("ops");
+		writer.StartArray();
+		for (auto op = 0; op < MAX_OP; op++) {
+			writer.Uint64(ops[op]);
+		}
+		writer.EndArray();
+
+		writer.String("errors");
+		writer.StartArray();
+		for (auto op = 0; op < MAX_OP; op++) {
+			writer.Uint64(errors[op]);
+		}
+		writer.EndArray();
+
+		writer.String("latency_samples");
+		writer.StartArray();
+		for (auto op = 0; op < MAX_OP; op++) {
+			writer.Uint64(latency_samples[op]);
+		}
+		writer.EndArray();
+
+		writer.String("latency_us_total");
+		writer.StartArray();
+		for (auto op = 0; op < MAX_OP; op++) {
+			writer.Uint64(latency_us_total[op]);
+		}
+		writer.EndArray();
+
+		for (auto op = 0; op < MAX_OP; op++) {
+			if (sketches.find(op) != sketches.end()) {
+				std::string op_name = getOpName(op);
+				writer.String(op_name.c_str());
+				sketches[op].serialize(writer);
+			}
+		}
+		writer.EndObject();
+	}
+
+	void serialize(rapidjson::Writer<rapidjson::StringBuffer>& writer) {
+		writer.StartObject();
+		serializeFields(writer);
+		writer.EndObject();
+	}
+
+	void deserialize(const rapidjson::Value& obj, const std::string& test_name) {
+		txn_name = test_name;
+		conflicts = obj["conflicts"].GetUint64();
+		total_errors = obj["total_errors"].GetUint64();
+
+		auto jsonOps = obj["ops"].GetArray();
+		auto jsonErrors = obj["errors"].GetArray();
+		auto jsonLatencySamples = obj["latency_samples"].GetArray();
+		auto jsonLatencyUsTotal = obj["latency_us_total"].GetArray();
+
+		populateArray(ops, jsonOps);
+		populateArray(errors, jsonErrors);
+		populateArray(latency_samples, jsonLatencySamples);
+		populateArray(latency_us_total, jsonLatencyUsTotal);
+		for (int op = 0; op < MAX_OP; op++) {
+			if (latency_samples[op] > 0) {
+				const std::string op_name = getOpName(op);
+				sketches[op].deserialize(obj[op_name.c_str()]);
+			}
+		}
+	}
 	friend std::ofstream& operator<<(std::ofstream& os, ThreadStatistics& stats);
-	friend std::ifstream& operator>>(std::ifstream& is, ThreadStatistics& stats);
 };
 
 inline std::ofstream& operator<<(std::ofstream& os, ThreadStatistics& stats) {
 	rapidjson::StringBuffer ss;
 	rapidjson::Writer<rapidjson::StringBuffer> writer(ss);
-	writer.StartObject();
-	writer.String("conflicts");
-	writer.Uint64(stats.conflicts);
-	writer.String("total_errors");
-	writer.Uint64(stats.total_errors);
+	stats.serialize(writer);
+	os << ss.GetString();
+	return os;
+}
 
-	writer.String("ops");
-	writer.StartArray();
-	for (auto op = 0; op < MAX_OP; op++) {
-		writer.Uint64(stats.ops[op]);
-	}
-	writer.EndArray();
+/*
+    This class will hold all of the statistics information of mako runs in
+    in a map. The map is of the form:
+        "transaction name" -> stats data
+    where "transaction name" is the argument to --transaction when mako was ran.
 
-	writer.String("errors");
-	writer.StartArray();
-	for (auto op = 0; op < MAX_OP; op++) {
-		writer.Uint64(stats.errors[op]);
-	}
-	writer.EndArray();
+    For example: grvgr16:1024, g8iu, etc...
+*/
+class TestStatisticsCollection {
+	std::unordered_map<std::string, ThreadStatistics> sketches;
 
-	writer.String("latency_samples");
-	writer.StartArray();
-	for (auto op = 0; op < MAX_OP; op++) {
-		writer.Uint64(stats.latency_samples[op]);
-	}
-	writer.EndArray();
+public:
+	TestStatisticsCollection() {}
+	void add(const ThreadStatistics& stats) { sketches[stats.getTestName()] = stats; }
 
-	writer.String("latency_us_total");
-	writer.StartArray();
-	for (auto op = 0; op < MAX_OP; op++) {
-		writer.Uint64(stats.latency_us_total[op]);
-	}
-	writer.EndArray();
-
-	for (auto op = 0; op < MAX_OP; op++) {
-		if (stats.sketches.find(op) != stats.sketches.end()) {
-			std::string op_name = getOpName(op);
-			writer.String(op_name.c_str());
-			stats.sketches[op].serialize(writer);
+	void combine(const TestStatisticsCollection& other) {
+		for (auto& p : other.sketches) {
+			auto it = sketches.find(p.first);
+			if (it != sketches.end()) {
+				sketches[p.first].combine(p.second);
+			} else {
+				sketches[p.first] = p.second;
+			}
 		}
+	}
+
+	// These two methods allow us to use ranged based for loops
+	std::unordered_map<std::string, ThreadStatistics>::iterator begin() { return sketches.begin(); }
+	std::unordered_map<std::string, ThreadStatistics>::iterator end() { return sketches.end(); }
+
+	// Same as above, but for const
+	std::unordered_map<std::string, ThreadStatistics>::const_iterator cbegin() { return sketches.cbegin(); }
+	std::unordered_map<std::string, ThreadStatistics>::const_iterator cend() { return sketches.cend(); }
+
+	// These are necessary to make I/O with streams work nicely
+	friend std::ofstream& operator<<(std::ofstream& os, TestStatisticsCollection& collection);
+	friend std::ifstream& operator>>(std::ifstream& is, TestStatisticsCollection& collection);
+};
+
+inline std::ifstream& operator>>(std::ifstream& is, TestStatisticsCollection& collection) {
+	std::stringstream buffer;
+	buffer << is.rdbuf();
+	rapidjson::Document doc;
+	doc.Parse(buffer.str().c_str());
+
+	for (auto& m : doc.GetObject()) {
+		ThreadStatistics tmp;
+		tmp.deserialize(m.value, m.name.GetString());
+		collection.sketches[m.name.GetString()] = std::move(tmp);
+	}
+	return is;
+}
+
+inline std::ofstream& operator<<(std::ofstream& os, TestStatisticsCollection& collection) {
+	rapidjson::StringBuffer ss;
+	rapidjson::Writer<rapidjson::StringBuffer> writer(ss);
+	writer.StartObject();
+	for (auto& p : collection.sketches) {
+		p.second.serializeFields(writer);
 	}
 	writer.EndObject();
 	os << ss.GetString();
 	return os;
 }
 
-inline void populateArray(std::array<uint64_t, MAX_OP>& arr,
-                          rapidjson::GenericArray<false, rapidjson::GenericValue<rapidjson::UTF8<>>>& json) {
-	uint64_t idx = 0;
-	for (auto it = json.Begin(); it != json.End(); it++) {
-		arr[idx] = it->GetUint64();
-		idx++;
-	}
-}
-
-inline std::ifstream& operator>>(std::ifstream& is, ThreadStatistics& stats) {
-	std::stringstream buffer;
-	buffer << is.rdbuf();
-	rapidjson::Document doc;
-	doc.Parse(buffer.str().c_str());
-	stats.conflicts = doc["conflicts"].GetUint64();
-	stats.total_errors = doc["total_errors"].GetUint64();
-
-	auto jsonOps = doc["ops"].GetArray();
-	auto jsonErrors = doc["errors"].GetArray();
-	auto jsonLatencySamples = doc["latency_samples"].GetArray();
-	auto jsonLatencyUsTotal = doc["latency_us_total"].GetArray();
-
-	populateArray(stats.ops, jsonOps);
-	populateArray(stats.errors, jsonErrors);
-	populateArray(stats.latency_samples, jsonLatencySamples);
-	populateArray(stats.latency_us_total, jsonLatencyUsTotal);
-	for (int op = 0; op < MAX_OP; op++) {
-		if (stats.latency_samples[op] > 0) {
-			const std::string op_name = getOpName(op);
-			stats.sketches[op].deserialize(doc[op_name.c_str()]);
-		}
-	}
-
-	return is;
-}
 } // namespace mako
 
 #endif /* MAKO_STATS_HPP */

@@ -1696,6 +1696,8 @@ void printThreadStats(ThreadStatistics& final_stats, Arguments args, FILE* fp, b
 		}
 	}
 
+	fmt::print("Results for {}", final_stats.getTestName());
+	fmt::print("\n");
 	fmt::print("Latency (us)");
 	printStatsHeader(args, true, false, true);
 
@@ -1907,6 +1909,7 @@ void printThreadStats(ThreadStatistics& final_stats, Arguments args, FILE* fp, b
 	if (fp) {
 		fmt::fprintf(fp, "}}");
 	}
+	fmt::print("\n");
 }
 
 void loadSample(int pid_main,
@@ -1938,7 +1941,7 @@ void printReport(Arguments const& args,
                  pid_t pid_main,
                  FILE* fp) {
 
-	auto final_stats = ThreadStatistics{};
+	auto final_stats = ThreadStatistics{ args.txn_name };
 	const auto num_effective_threads = args.async_xacts > 0 ? args.async_xacts : args.num_threads;
 	for (auto i = 0; i < args.num_processes; i++) {
 		for (auto j = 0; j < num_effective_threads; j++) {
@@ -2214,16 +2217,15 @@ int statsProcessMain(Arguments const& args,
 	return 0;
 }
 
-ThreadStatistics mergeSketchReport(Arguments& args) {
-
-	ThreadStatistics stats;
+TestStatisticsCollection mergeSketchReport(Arguments& args) {
+	TestStatisticsCollection collection;
 	for (int i = 0; i < args.num_report_files; i++) {
 		std::ifstream f{ args.report_files[i] };
-		ThreadStatistics tmp;
+		TestStatisticsCollection tmp;
 		f >> tmp;
-		stats.combine(tmp);
+		collection.combine(tmp);
 	}
-	return stats;
+	return collection;
 }
 
 int main(int argc, char* argv[]) {
@@ -2269,8 +2271,15 @@ int main(int argc, char* argv[]) {
 	}
 
 	if (args.mode == MODE_REPORT) {
-		ThreadStatistics stats = mergeSketchReport(args);
-		printThreadStats(stats, args, NULL, true);
+		TestStatisticsCollection collection = mergeSketchReport(args);
+		for (auto& p : collection) {
+			printThreadStats(p.second, args, NULL, true);
+		}
+		// export the combined sketches if the flag was set
+		if (args.stats_export_path[0] != 0) {
+			std::ofstream f(args.stats_export_path);
+			f << collection;
+		}
 		return 0;
 	}
 
