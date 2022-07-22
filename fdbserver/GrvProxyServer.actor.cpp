@@ -338,7 +338,7 @@ ACTOR Future<Void> globalConfigMigrate(GrvProxyData* grvProxyData) {
 				if (sizeLimit.present()) {
 					const int64_t sizeLimitInt =
 					    BinaryReader::fromStringRef<int64_t>(sizeLimit.get().contents(), Unversioned());
-					Tuple size = Tuple().append(sizeLimitInt);
+					Tuple size = Tuple::makeTuple(sizeLimitInt);
 					tr->set(GlobalConfig::prefixedKey(fdbClientInfoTxnSizeLimit), size.pack());
 				}
 
