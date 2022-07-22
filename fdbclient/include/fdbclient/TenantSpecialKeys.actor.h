@@ -266,8 +266,8 @@ public:
 				StringRef oldName = adjustedRange.begin.removePrefix(renameSubRange.begin);
 				StringRef newName = range.value().second.get();
 				// Do not allow overlapping renames in the same commit
-				// e.g. A->B, B->C
-				if (renameSet.count(oldName) || renameSet.count(newName)) {
+				// e.g. A->B + B->C, D->D
+				if (renameSet.count(oldName) || renameSet.count(newName) || oldName == newName) {
 					ryw->setSpecialKeySpaceErrorMsg(
 					    ManagementAPIError::toJsonString(false, "rename tenant", "tenant rename conflict"));
 					throw special_keys_api_failure();
