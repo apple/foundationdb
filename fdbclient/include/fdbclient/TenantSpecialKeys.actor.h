@@ -107,30 +107,6 @@ private:
 		return results;
 	}
 
-	static void applyTenantConfig(ReadYourWritesTransaction* ryw,
-	                              TenantNameRef tenantName,
-	                              std::vector<std::pair<Standalone<StringRef>, Optional<Value>>> configEntries,
-	                              TenantMapEntry* tenantEntry) {
-
-		std::vector<std::pair<Standalone<StringRef>, Optional<Value>>>::iterator configItr;
-		for (configItr = configEntries.begin(); configItr != configEntries.end(); ++configItr) {
-			if (configItr->first == "tenant_group"_sr) {
-				tenantEntry->tenantGroup = configItr->second;
-			} else {
-				TraceEvent(SevWarn, "InvalidTenantConfig")
-				    .detail("TenantName", tenantName)
-				    .detail("ConfigName", configItr->first);
-				ryw->setSpecialKeySpaceErrorMsg(
-				    ManagementAPIError::toJsonString(false,
-				                                     "set tenant configuration",
-				                                     format("invalid tenant configuration option `%s' for tenant `%s'",
-				                                            configItr->first.toString().c_str(),
-				                                            tenantName.toString().c_str())));
-				throw special_keys_api_failure();
-			}
-		}
-	}
-
 	ACTOR static Future<Void> createTenant(
 	    ReadYourWritesTransaction* ryw,
 	    TenantNameRef tenantName,
