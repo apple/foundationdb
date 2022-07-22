@@ -921,6 +921,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 		DB& db;
 		CF& cf;
+		std::unordered_set<rocksdb::ColumnFamilyHandle*> cfHandles;
+
 		UID id;
 		std::shared_ptr<rocksdb::RateLimiter> rateLimiter;
 		std::shared_ptr<ReadIteratorPool> readIterPool;
@@ -951,12 +953,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				// Enable perf context on the same thread with the db thread
 				rocksdb::SetPerfLevel(rocksdb::PerfLevel::kEnableTimeExceptForMutex);
 				perfContextMetrics->reset();
-			}
-		}
-
-		~Writer() override {
-			if (db) {
-				delete db;
 			}
 		}
 
@@ -1004,6 +1000,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 			std::vector<rocksdb::ColumnFamilyHandle*> handles;
 			status = rocksdb::DB::Open(options, a.path, descriptors, &handles, &db);
+			cfHandles.insert(handles.begin(), handles.end());
 
 			if (!status.ok()) {
 				logRocksDBError(id, status, "Open");
@@ -1020,6 +1017,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 			if (cf == nullptr) {
 				status = db->CreateColumnFamily(cfOptions, SERVER_KNOBS->DEFAULT_FDB_ROCKSDB_COLUMN_FAMILY, &cf);
+				cfHandles.insert(cf);
 				if (!status.ok()) {
 					logRocksDBError(id, status, "Open");
 					a.done.sendError(statusToError(status));
@@ -1182,6 +1180,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				a.done.send(Void());
 				return;
 			}
+			for (rocksdb::ColumnFamilyHandle* handle : cfHandles) {
+				if (handle != nullptr) {
+					db->DestroyColumnFamilyHandle(handle);
+				}
+			}
+			cfHandles.clear();
 			auto s = db->Close();
 			if (!s.ok()) {
 				logRocksDBError(id, s, "Close");
@@ -1740,8 +1744,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		self->writeThread->post(a);
 		wait(f);
 		wait(self->writeThread->stop());
-		if (self->closePromise.canBeSet())
+		if (self->closePromise.canBeSet()) {
 			self->closePromise.send(Void());
+		}
+		if (self->db != nullptr) {
+			delete self->db;
+		}
 		delete self;
 	}
 
@@ -1987,7 +1995,7 @@ void RocksDBKeyValueStore::Writer::action(CheckpointAction& a) {
 	    .detail("Format", static_cast<int>(a.request.format))
 	    .detail("CheckpointDir", a.request.checkpointDir);
 
-	rocksdb::Checkpoint* checkpoint;
+	rocksdb::Checkpoint* checkpoint = nullptr;
 	rocksdb::Status s = rocksdb::Checkpoint::Create(db, &checkpoint);
 	if (!s.ok()) {
 		logRocksDBError(id, s, "Checkpoint");
@@ -2051,9 +2059,15 @@ void RocksDBKeyValueStore::Writer::action(CheckpointAction& a) {
 		    .detail("RocksSequenceNumber", debugCheckpointSeq)
 		    .detail("CheckpointDir", checkpointDir);
 	} else {
+		if (checkpoint != nullptr) {
+			delete checkpoint;
+		}
 		throw not_implemented();
 	}
 
+	if (checkpoint != nullptr) {
+		delete checkpoint;
+	}
 	res.setState(CheckpointMetaData::Complete);
 	a.reply.send(res);
 }
@@ -2081,6 +2095,8 @@ void RocksDBKeyValueStore::Writer::action(RestoreAction& a) {
 
 		if (cf != nullptr) {
 			ASSERT(db->DropColumnFamily(cf).ok());
+			db->DestroyColumnFamilyHandle(cf);
+			cfHandles.erase(cf);
 		}
 
 		rocksdb::ExportImportFilesMetaData metaData = getMetaData(a.checkpoints[0]);
@@ -2088,6 +2104,7 @@ void RocksDBKeyValueStore::Writer::action(RestoreAction& a) {
 		importOptions.move_files = true;
 		status = db->CreateColumnFamilyWithImport(
 		    getCFOptions(), SERVER_KNOBS->DEFAULT_FDB_ROCKSDB_COLUMN_FAMILY, importOptions, metaData, &cf);
+		cfHandles.insert(cf);
 
 		if (!status.ok()) {
 			logRocksDBError(id, status, "Restore");
@@ -2101,6 +2118,7 @@ void RocksDBKeyValueStore::Writer::action(RestoreAction& a) {
 	} else if (format == RocksDB) {
 		if (cf == nullptr) {
 			status = db->CreateColumnFamily(getCFOptions(), SERVER_KNOBS->DEFAULT_FDB_ROCKSDB_COLUMN_FAMILY, &cf);
+			cfHandles.insert(cf);
 			TraceEvent("RocksDBServeRestoreRange", id)
 			    .detail("Path", a.path)
 			    .detail("Checkpoint", describe(a.checkpoints));
