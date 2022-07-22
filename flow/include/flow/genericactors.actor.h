@@ -39,7 +39,6 @@
 #include "flow/Knobs.h"
 #include "flow/Util.h"
 #include "flow/IndexedSet.h"
-#include "flow/ThreadHelper.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 #ifdef _MSC_VER

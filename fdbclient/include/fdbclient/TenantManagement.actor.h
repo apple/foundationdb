@@ -105,7 +105,8 @@ Future<Void> checkTenantMode(Transaction tr, ClusterType expectedClusterType) {
 
 TenantMode tenantModeForClusterType(ClusterType clusterType, TenantMode tenantMode);
 
-// Creates a tenant with the given name. If the tenant already exists, an empty optional will be returned.
+// Creates a tenant with the given name. If the tenant already exists, the boolean return parameter will be false
+// and the existing entry will be returned. If the tenant cannot be created, then the optional will be empty.
 ACTOR template <class Transaction>
 Future<std::pair<Optional<TenantMapEntry>, bool>> createTenantTransaction(
     Transaction tr,

@@ -58,11 +58,10 @@ struct TenantMapEntry {
 	TenantMapEntry(int64_t id, TenantState tenantState, Optional<TenantGroupName> tenantGroup);
 
 	void setId(int64_t id);
+	std::string toJson(int apiVersion) const;
 
 	bool matchesConfiguration(TenantMapEntry const& other) const;
 	void configure(Standalone<StringRef> parameter, Optional<Value> value);
-
-	std::string toJson(int apiVersion) const;
 
 	Value encode() const { return ObjectWriter::toValue(*this, IncludeVersion(ProtocolVersion::withTenants())); }
 
@@ -117,12 +116,12 @@ struct TenantMetadataSpecification {
 	KeyBackedObjectMap<TenantGroupName, TenantGroupEntry, decltype(IncludeVersion()), NullCodec> tenantGroupMap;
 
 	TenantMetadataSpecification(KeyRef subspace)
-	  : tenantMap(subspace.withSuffix("tenant/map/"_sr), IncludeVersion(ProtocolVersion::withTenantGroups())),
+	  : tenantMap(subspace.withSuffix("tenant/map/"_sr), IncludeVersion(ProtocolVersion::withTenants())),
 	    lastTenantId(subspace.withSuffix("tenant/lastId"_sr)),
 	    tenantTombstones(subspace.withSuffix("tenant/tombstones/"_sr)),
 	    tenantGroupTenantIndex(subspace.withSuffix("tenant/tenantGroup/tenantIndex/"_sr)),
 	    tenantGroupMap(subspace.withSuffix("tenant/tenantGroup/map/"_sr),
-	                   IncludeVersion(ProtocolVersion::withTenantGroups())) {}
+	                   IncludeVersion(ProtocolVersion::withTenants())) {}
 };
 
 struct TenantMetadata {
