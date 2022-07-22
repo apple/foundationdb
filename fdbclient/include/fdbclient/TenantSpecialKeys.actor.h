@@ -358,10 +358,6 @@ public:
 			tenantManagementFutures.push_back(createTenants(ryw, tenantsToCreate, &tenantGroupNetTenantDelta));
 		}
 		for (auto configMutation : configMutations) {
-			tenantManagementFutures.push_back(
-			    changeTenantConfig(ryw, configMutation.first, configMutation.second, &tenantGroupNetTenantDelta));
-		}
-		for (auto configMutation : configMutations) {
 			if (renameSet.count(configMutation.first)) {
 				ryw->setSpecialKeySpaceErrorMsg(
 				    ManagementAPIError::toJsonString(false, "rename tenant", "tenant rename conflict"));
