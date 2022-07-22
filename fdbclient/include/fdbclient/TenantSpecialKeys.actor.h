@@ -367,7 +367,8 @@ public:
 				    ManagementAPIError::toJsonString(false, "rename tenant", "tenant rename conflict"));
 				throw special_keys_api_failure();
 			}
-			tenantManagementFutures.push_back(changeTenantConfig(ryw, configMutation.first, configMutation.second));
+			tenantManagementFutures.push_back(
+			    changeTenantConfig(ryw, configMutation.first, configMutation.second, &tenantGroupNetTenantDelta));
 		}
 
 		for (auto renameMutation : renameMutations) {

@@ -791,7 +791,7 @@ struct TenantManagementWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR Future<Void> renameTenant(Database cx, TenantManagementWorkload* self) {
+	ACTOR static Future<Void> renameTenant(Database cx, TenantManagementWorkload* self) {
 		state OperationType operationType = TenantManagementWorkload::randomOperationType();
 		state int numTenants = 1;
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
@@ -923,89 +923,6 @@ struct TenantManagementWorkload : TestWorkload {
 						    .detail("NewTenantNames", describe(newTenantNames));
 						return Void();
 					}
-				}
-			}
-		}
-	}
-
-	ACTOR Future<Void> configureTenant(Database cx, TenantManagementWorkload* self) {
-		state TenantName tenant = self->chooseTenantName(true);
-		auto itr = self->createdTenants.find(tenant);
-		state bool exists = itr != self->createdTenants.end();
-		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
-
-		state std::map<Standalone<StringRef>, Optional<Value>> configuration;
-		state Optional<TenantGroupName> newTenantGroup;
-		state bool hasInvalidOption = deterministicRandom()->random01() < 0.1;
-
-		if (!hasInvalidOption || deterministicRandom()->coinflip()) {
-			newTenantGroup = self->chooseTenantGroup();
-			configuration["tenant_group"_sr] = newTenantGroup;
-		}
-		if (hasInvalidOption) {
-			configuration["invalid_option"_sr] = ""_sr;
-			hasInvalidOption = true;
-		}
-
-		state bool hasInvalidSpecialKeyTuple = deterministicRandom()->random01() < 0.05;
-
-		loop {
-			try {
-				tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-				for (auto [config, value] : configuration) {
-					Tuple t;
-					if (hasInvalidSpecialKeyTuple) {
-						// Wrong number of items
-						if (deterministicRandom()->coinflip()) {
-							int numItems = deterministicRandom()->randomInt(0, 3);
-							if (numItems > 0) {
-								t.append(tenant);
-							}
-							if (numItems > 1) {
-								t.append(config).append(""_sr);
-							}
-						}
-						// Wrong data types
-						else {
-							if (deterministicRandom()->coinflip()) {
-								t.append(0).append(config);
-							} else {
-								t.append(tenant).append(0);
-							}
-						}
-					} else {
-						t.append(tenant).append(config);
-					}
-					if (value.present()) {
-						tr->set(self->specialKeysTenantConfigPrefix.withSuffix(t.pack()), value.get());
-					} else {
-						tr->clear(self->specialKeysTenantConfigPrefix.withSuffix(t.pack()));
-					}
-				}
-
-				wait(tr->commit());
-
-				ASSERT(exists);
-				ASSERT(!hasInvalidOption);
-				ASSERT(!hasInvalidSpecialKeyTuple);
-
-				self->createdTenants[tenant].tenantGroup = newTenantGroup;
-				return Void();
-			} catch (Error& e) {
-				state Error error = e;
-				if (e.code() == error_code_tenant_not_found) {
-					ASSERT(!exists);
-					return Void();
-				} else if (e.code() == error_code_special_keys_api_failure) {
-					ASSERT(hasInvalidSpecialKeyTuple || hasInvalidOption);
-					return Void();
-				}
-
-				try {
-					wait(tr->onError(e));
-				} catch (Error&) {
-					TraceEvent(SevError, "ConfigureTenantFailure").error(error).detail("TenantName", tenant);
-					return Void();
 				}
 			}
 		}

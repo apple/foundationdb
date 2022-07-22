@@ -371,8 +371,6 @@ Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listTenants(Reference
 
 ACTOR template <class Transaction>
 Future<Void> renameTenantTransaction(Transaction tr, TenantNameRef oldName, TenantNameRef newName) {
-	state Key oldNameKey = oldName.withPrefix(tenantMapPrefix);
-	state Key newNameKey = newName.withPrefix(tenantMapPrefix);
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 	state Optional<TenantMapEntry> oldEntry;
 	state Optional<TenantMapEntry> newEntry;
