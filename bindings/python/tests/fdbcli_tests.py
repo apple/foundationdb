@@ -618,21 +618,23 @@ def tenants(logger):
 
     output = run_fdbcli_command('gettenant tenant')
     lines = output.split('\n')
-    assert len(lines) == 2
+    assert len(lines) == 3
     assert lines[0].strip().startswith('id: ')
     assert lines[1].strip().startswith('prefix: ')
+    assert lines[2].strip() == 'tenant state: ready'
 
     output = run_fdbcli_command('gettenant tenant JSON')
     json_output = json.loads(output, strict=False)
     assert(len(json_output) == 2)
     assert('tenant' in json_output)
     assert(json_output['type'] == 'success')
-    assert(len(json_output['tenant']) == 2)
+    assert(len(json_output['tenant']) == 3)
     assert('id' in json_output['tenant'])
     assert('prefix' in json_output['tenant'])
     assert(len(json_output['tenant']['prefix']) == 2)
     assert('base64' in json_output['tenant']['prefix'])
     assert('printable' in json_output['tenant']['prefix'])
+    assert(json_output['tenant']['tenant_state'] == 'ready')
 
     output = run_fdbcli_command('usetenant')
     assert output == 'Using the default tenant'

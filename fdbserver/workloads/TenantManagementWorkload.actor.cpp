@@ -33,15 +33,15 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct TenantManagementWorkload : TestWorkload {
-	struct TenantState {
+	struct TenantData {
 		int64_t id;
 		bool empty;
 
-		TenantState() : id(-1), empty(true) {}
-		TenantState(int64_t id, bool empty) : id(id), empty(empty) {}
+		TenantData() : id(-1), empty(true) {}
+		TenantData(int64_t id, bool empty) : id(id), empty(empty) {}
 	};
 
-	std::map<TenantName, TenantState> createdTenants;
+	std::map<TenantName, TenantData> createdTenants;
 	int64_t maxId = -1;
 
 	const Key keyName = "key"_sr;
@@ -149,9 +149,10 @@ struct TenantManagementWorkload : TestWorkload {
 
 					std::vector<Future<Void>> createFutures;
 					for (auto tenant : tenantsToCreate) {
-						createFutures.push_back(success(TenantAPI::createTenantTransaction(tr, tenant, nextId++)));
+						TenantMapEntry tenantEntry(nextId++, TenantState::READY);
+						createFutures.push_back(success(TenantAPI::createTenantTransaction(tr, tenant, tenantEntry)));
 					}
-					tr->set(tenantLastIdKey, TenantMapEntry::idToPrefix(nextId - 1));
+					TenantMetadata::lastTenantId.set(tr, nextId - 1);
 					wait(waitForAll(createFutures));
 					wait(tr->commit());
 				}
@@ -173,7 +174,7 @@ struct TenantManagementWorkload : TestWorkload {
 					ASSERT(entry.get().id > self->maxId);
 
 					self->maxId = entry.get().id;
-					self->createdTenants[*tenantItr] = TenantState(entry.get().id, true);
+					self->createdTenants[*tenantItr] = TenantData(entry.get().id, true);
 
 					state bool insertData = deterministicRandom()->random01() < 0.5;
 					if (insertData) {
@@ -369,12 +370,12 @@ struct TenantManagementWorkload : TestWorkload {
 	ACTOR Future<Void> checkTenant(Database cx,
 	                               TenantManagementWorkload* self,
 	                               TenantName tenant,
-	                               TenantState tenantState) {
+	                               TenantData tenantData) {
 		state Transaction tr(cx, tenant);
 		loop {
 			try {
 				state RangeResult result = wait(tr.getRange(KeyRangeRef(""_sr, "\xff"_sr), 2));
-				if (tenantState.empty) {
+				if (tenantData.empty) {
 					ASSERT(result.size() == 0);
 				} else {
 					ASSERT(result.size() == 1);
@@ -407,7 +408,7 @@ struct TenantManagementWorkload : TestWorkload {
 		ASSERT(prefix == unprintable(printablePrefix));
 
 		Key prefixKey = KeyRef(prefix);
-		TenantMapEntry entry(id);
+		TenantMapEntry entry(id, TenantState::READY);
 
 		ASSERT(entry.prefix == prefixKey);
 		return entry;
@@ -417,7 +418,7 @@ struct TenantManagementWorkload : TestWorkload {
 		state TenantName tenant = self->chooseTenantName(true);
 		auto itr = self->createdTenants.find(tenant);
 		state bool alreadyExists = itr != self->createdTenants.end();
-		state TenantState tenantState = itr->second;
+		state TenantData tenantData = itr->second;
 		state OperationType operationType = TenantManagementWorkload::randomOperationType();
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 
@@ -440,8 +441,8 @@ struct TenantManagementWorkload : TestWorkload {
 					entry = _entry;
 				}
 				ASSERT(alreadyExists);
-				ASSERT(entry.id == tenantState.id);
-				wait(self->checkTenant(cx, self, tenant, tenantState));
+				ASSERT(entry.id == tenantData.id);
+				wait(self->checkTenant(cx, self, tenant, tenantData));
 				return Void();
 			} catch (Error& e) {
 				state bool retry = true;
@@ -480,21 +481,21 @@ struct TenantManagementWorkload : TestWorkload {
 
 		loop {
 			try {
-				state std::map<TenantName, TenantMapEntry> tenants;
+				state std::vector<std::pair<TenantName, TenantMapEntry>> tenants;
 				if (operationType == OperationType::SPECIAL_KEYS) {
 					KeyRange range = KeyRangeRef(beginTenant, endTenant).withPrefix(self->specialKeysTenantMapPrefix);
 					RangeResult results = wait(tr->getRange(range, limit));
 					for (auto result : results) {
-						tenants[result.key.removePrefix(self->specialKeysTenantMapPrefix)] =
-						    TenantManagementWorkload::jsonToTenantMapEntry(result.value);
+						tenants.push_back(std::make_pair(result.key.removePrefix(self->specialKeysTenantMapPrefix),
+						                                 TenantManagementWorkload::jsonToTenantMapEntry(result.value)));
 					}
 				} else if (operationType == OperationType::MANAGEMENT_DATABASE) {
-					std::map<TenantName, TenantMapEntry> _tenants =
+					std::vector<std::pair<TenantName, TenantMapEntry>> _tenants =
 					    wait(TenantAPI::listTenants(cx.getReference(), beginTenant, endTenant, limit));
 					tenants = _tenants;
 				} else {
 					tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-					std::map<TenantName, TenantMapEntry> _tenants =
+					std::vector<std::pair<TenantName, TenantMapEntry>> _tenants =
 					    wait(TenantAPI::listTenantsTransaction(tr, beginTenant, endTenant, limit));
 					tenants = _tenants;
 				}
@@ -580,10 +581,10 @@ struct TenantManagementWorkload : TestWorkload {
 					ASSERT(newTenantEntry.present());
 
 					// Update Internal Tenant Map and check for correctness
-					TenantState tState = self->createdTenants[oldTenantName];
-					self->createdTenants[newTenantName] = tState;
+					TenantData tData = self->createdTenants[oldTenantName];
+					self->createdTenants[newTenantName] = tData;
 					self->createdTenants.erase(oldTenantName);
-					if (!tState.empty) {
+					if (!tData.empty) {
 						state Transaction insertTr(cx, newTenantName);
 						loop {
 							try {
@@ -657,13 +658,13 @@ struct TenantManagementWorkload : TestWorkload {
 			}
 		}
 
-		state std::map<TenantName, TenantState>::iterator itr = self->createdTenants.begin();
+		state std::map<TenantName, TenantData>::iterator itr = self->createdTenants.begin();
 		state std::vector<Future<Void>> checkTenants;
 		state TenantName beginTenant = ""_sr.withPrefix(self->localTenantNamePrefix);
 		state TenantName endTenant = "\xff\xff"_sr.withPrefix(self->localTenantNamePrefix);
 
 		loop {
-			std::map<TenantName, TenantMapEntry> tenants =
+			std::vector<std::pair<TenantName, TenantMapEntry>> tenants =
 			    wait(TenantAPI::listTenants(cx.getReference(), beginTenant, endTenant, 1000));
 
 			TenantNameRef lastTenant;

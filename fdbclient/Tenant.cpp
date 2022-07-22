@@ -18,8 +18,10 @@
  * limitations under the License.
  */
 
+#include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/Tenant.h"
+#include "fdbclient/libb64/encode.h"
 #include "flow/UnitTest.h"
 
 Key TenantMapEntry::idToPrefix(int64_t id) {
@@ -35,16 +37,79 @@ int64_t TenantMapEntry::prefixToId(KeyRef prefix) {
 	return id;
 }
 
-TenantMapEntry::TenantMapEntry() : id(-1) {}
-TenantMapEntry::TenantMapEntry(int64_t id) : id(id), prefix(idToPrefix(id)) {}
+std::string TenantMapEntry::tenantStateToString(TenantState tenantState) {
+	switch (tenantState) {
+	case TenantState::REGISTERING:
+		return "registering";
+	case TenantState::READY:
+		return "ready";
+	case TenantState::REMOVING:
+		return "removing";
+	case TenantState::UPDATING_CONFIGURATION:
+		return "updating configuration";
+	case TenantState::ERROR:
+		return "error";
+	default:
+		UNREACHABLE();
+	}
+}
+
+TenantState TenantMapEntry::stringToTenantState(std::string stateStr) {
+	if (stateStr == "registering") {
+		return TenantState::REGISTERING;
+	} else if (stateStr == "ready") {
+		return TenantState::READY;
+	} else if (stateStr == "removing") {
+		return TenantState::REMOVING;
+	} else if (stateStr == "updating configuration") {
+		return TenantState::UPDATING_CONFIGURATION;
+	} else if (stateStr == "error") {
+		return TenantState::ERROR;
+	}
+
+	UNREACHABLE();
+}
+
+TenantMapEntry::TenantMapEntry() {}
+TenantMapEntry::TenantMapEntry(int64_t id, TenantState tenantState) : tenantState(tenantState) {
+	setId(id);
+}
+void TenantMapEntry::setId(int64_t id) {
+	ASSERT(id >= 0);
+	this->id = id;
+	prefix = idToPrefix(id);
+}
+
+std::string TenantMapEntry::toJson(int apiVersion) const {
+	json_spirit::mObject tenantEntry;
+	tenantEntry["id"] = id;
+
+	if (apiVersion >= 720 || apiVersion == Database::API_VERSION_LATEST) {
+		json_spirit::mObject prefixObject;
+		std::string encodedPrefix = base64::encoder::from_string(prefix.toString());
+		// Remove trailing newline
+		encodedPrefix.resize(encodedPrefix.size() - 1);
+
+		prefixObject["base64"] = encodedPrefix;
+		prefixObject["printable"] = printable(prefix);
+		tenantEntry["prefix"] = prefixObject;
+	} else {
+		// This is not a standard encoding in JSON, and some libraries may not be able to easily decode it
+		tenantEntry["prefix"] = prefix.toString();
+	}
+
+	tenantEntry["tenant_state"] = TenantMapEntry::tenantStateToString(tenantState);
+
+	return json_spirit::write_string(json_spirit::mValue(tenantEntry));
+}
 
 TEST_CASE("/fdbclient/TenantMapEntry/Serialization") {
-	TenantMapEntry entry1(1);
+	TenantMapEntry entry1(1, TenantState::READY);
 	ASSERT(entry1.prefix == "\x00\x00\x00\x00\x00\x00\x00\x01"_sr);
 	TenantMapEntry entry2 = TenantMapEntry::decode(entry1.encode());
 	ASSERT(entry1.id == entry2.id && entry1.prefix == entry2.prefix);
 
-	TenantMapEntry entry3(std::numeric_limits<int64_t>::max());
+	TenantMapEntry entry3(std::numeric_limits<int64_t>::max(), TenantState::READY);
 	ASSERT(entry3.prefix == "\x7f\xff\xff\xff\xff\xff\xff\xff"_sr);
 	TenantMapEntry entry4 = TenantMapEntry::decode(entry3.encode());
 	ASSERT(entry3.id == entry4.id && entry3.prefix == entry4.prefix);
@@ -55,7 +120,7 @@ TEST_CASE("/fdbclient/TenantMapEntry/Serialization") {
 		int64_t maxPlusOne = std::min<uint64_t>(UINT64_C(1) << bits, std::numeric_limits<int64_t>::max());
 		int64_t id = deterministicRandom()->randomInt64(min, maxPlusOne);
 
-		TenantMapEntry entry(id);
+		TenantMapEntry entry(id, TenantState::READY);
 		int64_t bigEndianId = bigEndian64(id);
 		ASSERT(entry.id == id && entry.prefix == StringRef(reinterpret_cast<uint8_t*>(&bigEndianId), 8));
 

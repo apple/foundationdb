@@ -704,7 +704,8 @@ public:
 	void clearWatchMetadata();
 
 	// tenant map operations
-	void insertTenant(TenantNameRef tenantName, ValueRef value, Version version, bool insertIntoMutationLog);
+	bool insertTenant(TenantNameRef tenantName, TenantMapEntry tenantEntry, Version version);
+	void insertTenant(TenantNameRef tenantName, ValueRef value, Version version);
 	void clearTenants(TenantNameRef startTenant, TenantNameRef endTenant, Version version);
 
 	Optional<TenantMapEntry> getTenantEntry(Version version, TenantInfo tenant);
@@ -4170,11 +4171,13 @@ bool rangeIntersectsAnyTenant(TenantPrefixIndex& prefixIndex, KeyRangeRef range,
 }
 
 TEST_CASE("/fdbserver/storageserver/rangeIntersectsAnyTenant") {
-	std::map<TenantName, TenantMapEntry> entries = { std::make_pair("tenant0"_sr, TenantMapEntry(0)),
-		                                             std::make_pair("tenant2"_sr, TenantMapEntry(2)),
-		                                             std::make_pair("tenant3"_sr, TenantMapEntry(3)),
-		                                             std::make_pair("tenant4"_sr, TenantMapEntry(4)),
-		                                             std::make_pair("tenant6"_sr, TenantMapEntry(6)) };
+	std::map<TenantName, TenantMapEntry> entries = {
+		std::make_pair("tenant0"_sr, TenantMapEntry(0, TenantState::READY)),
+		std::make_pair("tenant2"_sr, TenantMapEntry(2, TenantState::READY)),
+		std::make_pair("tenant3"_sr, TenantMapEntry(3, TenantState::READY)),
+		std::make_pair("tenant4"_sr, TenantMapEntry(4, TenantState::READY)),
+		std::make_pair("tenant6"_sr, TenantMapEntry(6, TenantState::READY))
+	};
 	TenantPrefixIndex index;
 	index.createNewVersion(1);
 	for (auto entry : entries) {
@@ -7522,12 +7525,13 @@ private:
 				}
 			}
 		} else if ((m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange) &&
-		           m.param1.startsWith(tenantMapPrivatePrefix)) {
+		           m.param1.startsWith(TenantMetadata::tenantMapPrivatePrefix)) {
 			if (m.type == MutationRef::SetValue) {
-				data->insertTenant(m.param1.removePrefix(tenantMapPrivatePrefix), m.param2, currentVersion, true);
+				data->insertTenant(
+				    m.param1.removePrefix(TenantMetadata::tenantMapPrivatePrefix), m.param2, currentVersion);
 			} else if (m.type == MutationRef::ClearRange) {
-				data->clearTenants(m.param1.removePrefix(tenantMapPrivatePrefix),
-				                   m.param2.removePrefix(tenantMapPrivatePrefix),
+				data->clearTenants(m.param1.removePrefix(TenantMetadata::tenantMapPrivatePrefix),
+				                   m.param2.removePrefix(TenantMetadata::tenantMapPrivatePrefix),
 				                   currentVersion);
 			}
 		} else if (m.param1.substr(1).startsWith(tssMappingKeys.begin) &&
@@ -7622,26 +7626,26 @@ private:
 	}
 };
 
-void StorageServer::insertTenant(TenantNameRef tenantName,
-                                 ValueRef value,
-                                 Version version,
-                                 bool insertIntoMutationLog) {
+bool StorageServer::insertTenant(TenantNameRef tenantName, TenantMapEntry tenantEntry, Version version) {
 	if (version >= tenantMap.getLatestVersion()) {
 		tenantMap.createNewVersion(version);
 		tenantPrefixIndex.createNewVersion(version);
 
-		TenantMapEntry tenantEntry = TenantMapEntry::decode(value);
-
 		tenantMap.insert(tenantName, tenantEntry);
 		tenantPrefixIndex.insert(tenantEntry.prefix, tenantName);
 
-		if (insertIntoMutationLog) {
-			auto& mLV = addVersionToMutationLog(version);
-			addMutationToMutationLog(
-			    mLV, MutationRef(MutationRef::SetValue, tenantName.withPrefix(persistTenantMapKeys.begin), value));
-		}
-
 		TraceEvent("InsertTenant", thisServerID).detail("Tenant", tenantName).detail("Version", version);
+		return true;
+	} else {
+		return false;
+	}
+}
+
+void StorageServer::insertTenant(TenantNameRef tenantName, ValueRef value, Version version) {
+	if (insertTenant(tenantName, TenantMapEntry::decode(value), version)) {
+		auto& mLV = addVersionToMutationLog(version);
+		addMutationToMutationLog(
+		    mLV, MutationRef(MutationRef::SetValue, tenantName.withPrefix(persistTenantMapKeys.begin), value));
 	}
 }
 
@@ -9982,14 +9986,16 @@ ACTOR Future<Void> initTenantMap(StorageServer* self) {
 			state Version version = wait(tr->getReadVersion());
 			// This limits the number of tenants, but eventually we shouldn't need to do this at all
 			// when SSs store only the local tenants
-			RangeResult entries = wait(tr->getRange(tenantMapKeys, CLIENT_KNOBS->TOO_MANY));
+			KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>> entries =
+			    wait(TenantMetadata::tenantMap.getRange(
+			        tr, Optional<TenantName>(), Optional<TenantName>(), CLIENT_KNOBS->TOO_MANY));
 
 			TraceEvent("InitTenantMap", self->thisServerID)
 			    .detail("Version", version)
-			    .detail("NumTenants", entries.size());
+			    .detail("NumTenants", entries.results.size());
 
-			for (auto kv : entries) {
-				self->insertTenant(kv.key.removePrefix(tenantMapPrefix), kv.value, version, false);
+			for (auto entry : entries.results) {
+				self->insertTenant(entry.first, entry.second, version);
 			}
 			break;
 		} catch (Error& e) {
