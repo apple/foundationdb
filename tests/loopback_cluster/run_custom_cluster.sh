@@ -7,6 +7,7 @@ PORT_PREFIX=1500
 
 # default cluster settings, override with options
 STATELESS_COUNT=4
+REPLICATION_COUNT=1
 LOGS_COUNT=8
 STORAGE_COUNT=16
 KNOBS=""
@@ -25,6 +26,7 @@ function usage {
 	printf "\t--logs_taskset BITMASK\n\r\t\tbitmask of CPUs to pin logs to. Default is all CPUs.\n\r"
 	printf "\t--storage_count COUNT\n\r\t\tnumber of storage daemons to start.  Default ${STORAGE_COUNT}\n\r"
 	printf "\t--storage_taskset BITMASK\n\r\t\tBitmask of CPUs to pin storage to. Default is all CPUs.\n\r"
+	printf "\t--replication_count COUNT\n\r\t\tReplication count may be 1,2 or 3. Default is 1.\n\r"
 	echo "Example"
 	printf "\t${0} . --knobs '--knob_proxy_use_resolver_private_mutations=1' --stateless_count 4 --stateless_taskset 0xf --logs_count 8 --logs_taskset 0xff0 --storage_taskset 0xffff000\n\r"
 	exit 1
@@ -36,7 +38,8 @@ function start_servers {
 		DATA=${DIR}/${SERVER_COUNT}/data
 		mkdir -p ${LOG} ${DATA}
 		PORT=$(( $PORT_PREFIX + $SERVER_COUNT ))
-		$2 ${FDB} -p auto:${PORT} "$KNOBS" -c $3 -d $DATA -L $LOG -C $CLUSTER &
+		ZONE=$(( $j % $REPLICATION_COUNT ))
+		$2 ${FDB} -p auto:${PORT} "$KNOBS" -c $3 -d $DATA -L $LOG -C $CLUSTER --locality-zoneid Z-$ZONE --locality-machineid M-$SERVER_COUNT &
 		SERVER_COUNT=$(( $SERVER_COUNT + 1 ))
 	done
 }
@@ -76,6 +79,9 @@ while [[ $# -gt 0 ]]; do
 		--storage_count)
 			STORAGE_COUNT=$2
 			;;	
+		--replication_count)
+			REPLICATION_COUNT=$2
+			;;
 	esac
 	shift; shift
 done
@@ -86,6 +92,15 @@ if [ ! -f ${FDB} ]; then
 	usage
 fi
 
+if [ $REPLICATION_COUNT -eq 1 ]; then
+	replication="single"
+elif [ $REPLICATION_COUNT -eq 2 ]; then
+	replication="double"
+elif [ $REPLICATION_COUNT -eq 3 ]; then
+	replication="triple"
+else
+	usage
+fi
 
 DIR=./loopback-cluster
 rm -rf $DIR
@@ -102,7 +117,7 @@ start_servers $LOGS_COUNT "$LOGS_TASKSET" log
 start_servers $STORAGE_COUNT "$STORAGE_TASKSET" storage
 
 CLI="$BUILD/bin/fdbcli -C ${CLUSTER} --exec"
-echo "configure new ssd single - stand by"
+echo "configure new ssd $replication - stand by"
 
-# sleep 2 seconds to wait for workers to join cluster, then configure database
-( sleep 2 ; $CLI "configure new ssd single" )
+# sleep 2 seconds to wait for workers to join cluster, then configure database and coordinators
+( sleep 2 ; $CLI "configure new ssd $replication" ; $CLI "coordinators auto")

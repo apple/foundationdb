@@ -35,30 +35,17 @@ int64_t TenantMapEntry::prefixToId(KeyRef prefix) {
 	return id;
 }
 
-void TenantMapEntry::initPrefix(KeyRef subspace) {
-	ASSERT(id >= 0);
-	prefix = makeString(8 + subspace.size());
-	uint8_t* data = mutateString(prefix);
-	if (subspace.size() > 0) {
-		memcpy(data, subspace.begin(), subspace.size());
-	}
-	int64_t swapped = bigEndian64(id);
-	memcpy(data + subspace.size(), &swapped, 8);
-}
-
 TenantMapEntry::TenantMapEntry() : id(-1) {}
-TenantMapEntry::TenantMapEntry(int64_t id, KeyRef subspace) : id(id) {
-	initPrefix(subspace);
-}
+TenantMapEntry::TenantMapEntry(int64_t id) : id(id), prefix(idToPrefix(id)) {}
 
 TEST_CASE("/fdbclient/TenantMapEntry/Serialization") {
-	TenantMapEntry entry1(1, ""_sr);
+	TenantMapEntry entry1(1);
 	ASSERT(entry1.prefix == "\x00\x00\x00\x00\x00\x00\x00\x01"_sr);
 	TenantMapEntry entry2 = TenantMapEntry::decode(entry1.encode());
 	ASSERT(entry1.id == entry2.id && entry1.prefix == entry2.prefix);
 
-	TenantMapEntry entry3(std::numeric_limits<int64_t>::max(), "foo"_sr);
-	ASSERT(entry3.prefix == "foo\x7f\xff\xff\xff\xff\xff\xff\xff"_sr);
+	TenantMapEntry entry3(std::numeric_limits<int64_t>::max());
+	ASSERT(entry3.prefix == "\x7f\xff\xff\xff\xff\xff\xff\xff"_sr);
 	TenantMapEntry entry4 = TenantMapEntry::decode(entry3.encode());
 	ASSERT(entry3.id == entry4.id && entry3.prefix == entry4.prefix);
 
@@ -68,15 +55,9 @@ TEST_CASE("/fdbclient/TenantMapEntry/Serialization") {
 		int64_t maxPlusOne = std::min<uint64_t>(UINT64_C(1) << bits, std::numeric_limits<int64_t>::max());
 		int64_t id = deterministicRandom()->randomInt64(min, maxPlusOne);
 
-		int subspaceLength = deterministicRandom()->randomInt(0, 20);
-		Standalone<StringRef> subspace = makeString(subspaceLength);
-		generateRandomData(mutateString(subspace), subspaceLength);
-
-		TenantMapEntry entry(id, subspace);
+		TenantMapEntry entry(id);
 		int64_t bigEndianId = bigEndian64(id);
-		ASSERT(entry.id == id && entry.prefix.startsWith(subspace) &&
-		       entry.prefix.endsWith(StringRef(reinterpret_cast<uint8_t*>(&bigEndianId), 8)) &&
-		       entry.prefix.size() == subspaceLength + 8);
+		ASSERT(entry.id == id && entry.prefix == StringRef(reinterpret_cast<uint8_t*>(&bigEndianId), 8));
 
 		TenantMapEntry decodedEntry = TenantMapEntry::decode(entry.encode());
 		ASSERT(decodedEntry.id == entry.id && decodedEntry.prefix == entry.prefix);

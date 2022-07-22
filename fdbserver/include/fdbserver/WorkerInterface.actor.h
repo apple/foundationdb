@@ -1242,7 +1242,7 @@ Future<T> ioDegradedOrTimeoutError(Future<T> what,
 		choose {
 			when(T t = wait(what)) { return t; }
 			when(wait(degradedEnd)) {
-				TEST(true); // TLog degraded
+				CODE_PROBE(true, "TLog degraded", probe::func::deduplicate);
 				TraceEvent(SevWarnAlways, "IoDegraded").log();
 				degraded->set(true);
 			}

@@ -99,7 +99,7 @@ TraceEvent debugTagsAndMessageEnabled(const char* context, Version version, Stri
 			SpanContextMessage scm;
 			br >> scm;
 		} else if (OTELSpanContextMessage::startsOTELSpanContextMessage(mutationType)) {
-			TEST(true); // MutationTracking reading OTELSpanContextMessage
+			CODE_PROBE(true, "MutationTracking reading OTELSpanContextMessage");
 			BinaryReader br(mutationData, AssumeVersion(rdr.protocolVersion()));
 			OTELSpanContextMessage scm;
 			br >> scm;
