@@ -22,6 +22,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/Knobs.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include "fdbclient/DatabaseContext.h"
 #include "flow/ActorCollection.h"
 #include "flow/FastRef.h"
@@ -844,8 +845,8 @@ ACTOR Future<Void> fetchTopKShardMetrics_impl(DataDistributionTracker* self, Get
 		loop {
 			onChange = Future<Void>();
 			returnMetrics.clear();
-			state int64_t minReadLoad = std::numeric_limits<int64_t>::max();
-			state int64_t maxReadLoad = std::numeric_limits<int64_t>::min();
+			state int64_t minReadLoad = -1;
+			state int64_t maxReadLoad = -1;
 			state int i;
 			for (i = 0; i < SERVER_KNOBS->DD_SHARD_COMPARE_LIMIT && i < req.keys.size(); ++i) {
 				auto range = req.keys[i];
@@ -865,7 +866,7 @@ ACTOR Future<Void> fetchTopKShardMetrics_impl(DataDistributionTracker* self, Get
 				}
 
 				if (metrics.bytesReadPerKSecond > 0) {
-					minReadLoad = std::min(metrics.bytesReadPerKSecond, minReadLoad);
+					minReadLoad = std::min(metrics.bytesReadPerKSecond, std::max((decltype(minReadLoad))0, minReadLoad));
 					maxReadLoad = std::max(metrics.bytesReadPerKSecond, maxReadLoad);
 					if (req.minBytesReadPerKSecond <= metrics.bytesReadPerKSecond &&
 					    metrics.bytesReadPerKSecond <= req.maxBytesReadPerKSecond) {
@@ -1224,9 +1225,29 @@ void ShardsAffectedByTeamFailure::check() const {
 }
 
 namespace data_distribution_test {
-DataDistributionTracker createDDTrackerForUnitTest() {}
 } // namespace data_distribution_test
 TEST_CASE("/DataDistributor/Tracker/FetchTopK") {
-	// state DataDistributionTracker self;
+	state DataDistributionTracker self;
+	state GetTopKMetricsRequest req;
+	req.topK = 3;
+	for(int i = 1; i <= 10; i += 2) {
+		KeyRange keys(KeyRangeRef(doubleToTestKey(i), doubleToTestKey(i+2)));
+		req.keys.push_back(keys);
+		// std::cout << "here: " << req.keys.back().begin.toString() << "\n";
+	}
+	req.minBytesReadPerKSecond = 1000;
+	req.minBytesReadPerKSecond = 10000;
+
+	self.shards = std::make_shared<KeyRangeMap<ShardTrackedData>>();
+	double targetDensities[10] = {2, 1, 3, 5, 4, 10, 6, 8, 7, 0};
+	for(int i = 0; i <= 5; ++ i) {
+
+	}
+	wait(fetchTopKShardMetrics_impl(&self, req));
+	auto& reply = req.reply.getFuture().get();
+	ASSERT(reply.shardMetrics.empty());
+	ASSERT(reply.maxReadLoad == -1);
+	ASSERT(reply.minReadLoad == -1);
+
 	return Void();
 }
