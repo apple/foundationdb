@@ -46,12 +46,87 @@ struct GranuleSnapshot : VectorRef<KeyValueRef> {
 	}
 };
 
+// Deltas in version order
 struct GranuleDeltas : VectorRef<MutationsAndVersionRef> {
 	constexpr static FileIdentifier file_identifier = 8563013;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, ((VectorRef<MutationsAndVersionRef>&)*this));
+	}
+};
+
+// Deltas in key order
+
+// For key-ordered delta files, the format for both sets and range clears is that you store boundaries ordered by key.
+// Each boundary has a corresponding key, zero or more versioned updates (ValueAndVersionRef), and optionally a clear
+// from keyAfter(key) to the next boundary, at a version.
+// In this form, one or more streams of delta boundaries can be merged with a snapshot to efficiently reconstruct the
+// rows at a desired version.
+// The concept of this versioned mutation boundaries is repurposed directly from a prior version of redwood, back when
+// it supported versioned data.
+struct ValueAndVersionRef {
+	Version version;
+	MutationRef::Type op; // only set/clear
+	ValueRef value; // only present for set
+
+	// clear constructor
+	ValueAndVersionRef() {}
+	explicit ValueAndVersionRef(Version version) : version(version), op(MutationRef::Type::ClearRange) {}
+	explicit ValueAndVersionRef(Version version, ValueRef value)
+	  : version(version), op(MutationRef::Type::SetValue), value(value) {}
+	ValueAndVersionRef(Arena& arena, const ValueAndVersionRef& copyFrom)
+	  : version(copyFrom.version), op(copyFrom.op), value(arena, copyFrom.value) {}
+
+	bool isSet() { return op == MutationRef::SetValue; }
+	bool isClear() { return op == MutationRef::ClearRange; }
+
+	int totalSize() const { return sizeof(ValueAndVersionRef) + value.size(); }
+	int expectedSize() const { return value.size(); }
+
+	struct OrderByVersion {
+		bool operator()(ValueAndVersionRef const& a, ValueAndVersionRef const& b) const {
+			return a.version < b.version;
+		}
+	};
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, version, op, value);
+	}
+};
+
+// TODO: might be better to hide these struct implementations in the cpp instead of header if they're only internal to
+// the file format and not referenced elsewhere?
+struct DeltaBoundaryRef {
+	// key
+	KeyRef key;
+	// updates to exactly this key
+	VectorRef<ValueAndVersionRef> values;
+	// clear version from keyAfter(key) up to the next boundary
+	Optional<Version> clearVersion;
+
+	DeltaBoundaryRef() {}
+	DeltaBoundaryRef(Arena& ar, const DeltaBoundaryRef& copyFrom)
+	  : key(ar, copyFrom.key), values(ar, copyFrom.values), clearVersion(copyFrom.clearVersion) {}
+
+	int totalSize() { return sizeof(DeltaBoundaryRef) + key.expectedSize() + values.expectedSize(); }
+	int expectedSize() const { return key.expectedSize() + values.expectedSize(); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, key, values, clearVersion);
+	}
+};
+
+struct GranuleSortedDeltas {
+	constexpr static FileIdentifier file_identifier = 8183903;
+
+	VectorRef<DeltaBoundaryRef> boundaries;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, boundaries);
 	}
 };
 

@@ -602,7 +602,21 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 
 	state std::string fileName = randomBGFilename(bwData->id, granuleID, currentDeltaVersion, ".delta");
 
-	state Value serialized = serializeDeltaFile(deltasToWrite);
+	state Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx;
+	state Optional<BlobGranuleCipherKeysMeta> cipherKeysMeta;
+	state Arena arena;
+	// TODO support encryption, figure out proper state stuff
+	/*if (isBlobFileEncryptionSupported()) {
+	    BlobGranuleCipherKeysCtx ciphKeysCtx = wait(getLatestGranuleCipherKeys(bwData, keyRange, &arena));
+	    cipherKeysCtx = ciphKeysCtx;
+	    cipherKeysMeta = BlobGranuleCipherKeysCtx::toCipherKeysMeta(cipherKeysCtx.get());
+	}*/
+
+	Optional<CompressionFilter> compressFilter = getBlobFileCompressFilter();
+
+	// TODO KNOB
+	state Value serialized =
+	    serializeChunkedDeltaFile(deltasToWrite, keyRange, 16 * 1024, compressFilter, cipherKeysCtx);
 	state size_t serializedSize = serialized.size();
 
 	// Free up deltasToWrite here to reduce memory
@@ -640,7 +654,7 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 
 				Key dfKey = blobGranuleFileKeyFor(granuleID, currentDeltaVersion, 'D');
 				// TODO change once we support file multiplexing
-				Value dfValue = blobGranuleFileValueFor(fname, 0, serializedSize, serializedSize);
+				Value dfValue = blobGranuleFileValueFor(fname, 0, serializedSize, serializedSize, cipherKeysMeta);
 				tr->set(dfKey, dfValue);
 
 				if (oldGranuleComplete.present()) {
@@ -668,7 +682,7 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 					wait(delay(deterministicRandom()->random01()));
 				}
 				// FIXME: change when we implement multiplexing
-				return BlobFileIndex(currentDeltaVersion, fname, 0, serializedSize, serializedSize);
+				return BlobFileIndex(currentDeltaVersion, fname, 0, serializedSize, serializedSize, cipherKeysMeta);
 			} catch (Error& e) {
 				wait(tr->onError(e));
 			}
@@ -970,6 +984,7 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 		                                        snapshotF.cipherKeysMeta);
 
 		// TODO: optimization - batch 'encryption-key' lookup given the GranuleFile set is known
+		// FIXME: get cipher keys for delta as well!
 		if (chunk.snapshotFile.get().cipherKeysMetaRef.present()) {
 			ASSERT(isBlobFileEncryptionSupported());
 			BlobGranuleCipherKeysCtx cipherKeysCtx =
@@ -3186,6 +3201,8 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 					cipherKeysCtx =
 					    getGranuleCipherKeys(bwData, chunk.snapshotFile.get().cipherKeysMetaRef.get(), &rep.arena);
 				}
+
+				// FIXME: get cipher keys for delta files too!
 
 				// new deltas (if version is larger than version of last delta file)
 				// FIXME: do trivial key bounds here if key range is not fully contained in request key
