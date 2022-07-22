@@ -176,7 +176,7 @@ struct IndexBlockRef {
 		                                     cipherKeysCtx.ivRef.begin(),
 		                                     AES_256_IV_LENGTH,
 		                                     ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE);
-		Value serializedBuff = ObjectWriter::toValue(block, Unversioned());
+		Value serializedBuff = ObjectWriter::toValue(block, IncludeVersion(ProtocolVersion::withBlobGranuleFile()));
 		BlobCipherEncryptHeader header;
 		buffer = encryptor.encrypt(serializedBuff.contents().begin(), serializedBuff.contents().size(), &header, arena)
 		             ->toStringRef();
@@ -213,19 +213,20 @@ struct IndexBlockRef {
 		}
 
 		// TODO: Add version?
-		ObjectReader dataReader(decrypted.begin(), Unversioned());
+		ObjectReader dataReader(decrypted.begin(), IncludeVersion());
 		dataReader.deserialize(FileIdentifierFor<IndexBlock>::value, idxRef.block, arena);
 	}
 
 	void init(Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx, Arena& arena) {
 		if (encryptHeaderRef.present()) {
+			CODE_PROBE(true, "reading encrypted chunked file");
 			ASSERT(cipherKeysCtx.present());
 			decrypt(cipherKeysCtx.get(), *this, arena);
 		} else {
 			TraceEvent("IndexBlockSize").detail("Sz", buffer.size());
 
 			// TODO: Add version?
-			ObjectReader dataReader(buffer.begin(), Unversioned());
+			ObjectReader dataReader(buffer.begin(), IncludeVersion());
 			dataReader.deserialize(FileIdentifierFor<IndexBlock>::value, block, arena);
 		}
 	}
@@ -241,7 +242,8 @@ struct IndexBlockRef {
 			encrypt(cipherKeysCtx.get(), arena);
 		} else {
 			encryptHeaderRef.reset();
-			buffer = StringRef(arena, ObjectWriter::toValue(block, Unversioned()).contents());
+			buffer = StringRef(
+			    arena, ObjectWriter::toValue(block, IncludeVersion(ProtocolVersion::withBlobGranuleFile())).contents());
 		}
 
 		TraceEvent(SevDebug, "IndexBlockSize").detail("Sz", buffer.size()).detail("Encrypted", cipherKeysCtx.present());
@@ -258,8 +260,8 @@ struct IndexBlockRef {
 // Encryption: A 'chunk' gets encrypted before getting persisted if enabled. Encryption header is persisted along with
 // the chunk data to assist decryption on reads.
 //
-// Compression: A 'chunk' gets compressed before getting persisted if enabled. Compression filter (algoritm) infomration
-// is persisted as part of 'chunk metadata' to assist decompression on reads.
+// Compression: A 'chunk' gets compressed before getting persisted if enabled. Compression filter (algorithm)
+// information is persisted as part of 'chunk metadata' to assist decompression on reads.
 
 struct IndexBlobGranuleFileChunkRef {
 	constexpr static FileIdentifier file_identifier = 2814019;
@@ -377,19 +379,18 @@ struct IndexBlobGranuleFileChunkRef {
 			                                 : CompressionUtils::toString(CompressionFilter::NONE));
 		}
 
-		// TODO: Add version?
-		return ObjectWriter::toValue(chunkRef, Unversioned());
+		return ObjectWriter::toValue(chunkRef, IncludeVersion(ProtocolVersion::withBlobGranuleFile()));
 	}
 
 	static IndexBlobGranuleFileChunkRef fromBytes(Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx,
 	                                              StringRef buffer,
 	                                              Arena& arena) {
 		IndexBlobGranuleFileChunkRef chunkRef;
-		// TODO: Add version?
-		ObjectReader dataReader(buffer.begin(), Unversioned());
+		ObjectReader dataReader(buffer.begin(), IncludeVersion());
 		dataReader.deserialize(FileIdentifierFor<IndexBlobGranuleFileChunkRef>::value, chunkRef, arena);
 
 		if (chunkRef.encryptHeaderRef.present()) {
+			CODE_PROBE(true, "reading encrypted file chunk");
 			ASSERT(cipherKeysCtx.present());
 			chunkRef.chunkBytes = IndexBlobGranuleFileChunkRef::decrypt(cipherKeysCtx.get(), chunkRef, arena);
 		} else {
@@ -397,6 +398,7 @@ struct IndexBlobGranuleFileChunkRef {
 		}
 
 		if (chunkRef.compressionFilter.present()) {
+			CODE_PROBE(true, "reading encrypted file chunk");
 			chunkRef.chunkBytes = IndexBlobGranuleFileChunkRef::decompress(chunkRef, arena);
 		} else if (!chunkRef.chunkBytes.present()) {
 			// 'Encryption' & 'Compression' aren't enabled.
@@ -458,8 +460,7 @@ struct IndexedBlobGranuleFile {
 		// parse index block at head of file
 		Arena arena;
 		IndexedBlobGranuleFile file;
-		// TODO: version?
-		ObjectReader dataReader(fileBytes.begin(), Unversioned());
+		ObjectReader dataReader(fileBytes.begin(), IncludeVersion());
 		dataReader.deserialize(FileIdentifierFor<IndexedBlobGranuleFile>::value, file, arena);
 
 		file.init(fileBytes, arena, cipherKeysCtx);
@@ -520,8 +521,7 @@ struct IndexedBlobGranuleFile {
 		    IndexBlobGranuleFileChunkRef::fromBytes(cipherKeysCtx, childData, childArena);
 
 		ChildType child;
-		// TODO: version?
-		ObjectReader dataReader(chunkRef.chunkBytes.get().begin(), Unversioned());
+		ObjectReader dataReader(chunkRef.chunkBytes.get().begin(), IncludeVersion());
 		dataReader.deserialize(FileIdentifierFor<ChildType>::value, child, childArena);
 
 		// TODO implement some sort of decrypted+decompressed+deserialized cache, if this object gets reused?
@@ -541,15 +541,14 @@ struct IndexedBlobGranuleFile {
 Value serializeIndexBlock(Standalone<IndexedBlobGranuleFile>& file, Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx) {
 	file.indexBlockRef.finalize(cipherKeysCtx, file.arena());
 
-	// TODO: version?
-	Value serialized = ObjectWriter::toValue(file, Unversioned());
+	Value serialized = ObjectWriter::toValue(file, IncludeVersion(ProtocolVersion::withBlobGranuleFile()));
 	file.chunkStartOffset = serialized.contents().size();
 
 	if (BG_ENCRYPT_COMPRESS_DEBUG) {
 		TraceEvent(SevDebug, "SerializeIndexBlock").detail("StartOffset", file.chunkStartOffset);
 	}
 
-	return ObjectWriter::toValue(file, Unversioned());
+	return ObjectWriter::toValue(file, IncludeVersion(ProtocolVersion::withBlobGranuleFile()));
 }
 
 Value serializeFileFromChunks(Standalone<IndexedBlobGranuleFile>& file,
@@ -585,16 +584,16 @@ Value serializeFileFromChunks(Standalone<IndexedBlobGranuleFile>& file,
 // TODO: this should probably be in actor file with yields? - move writing logic to separate actor file in server?
 // TODO: optimize memory copying
 // TODO: sanity check no oversized files
-// TODO: change to chunk size instead of target chunk count
 Value serializeChunkedSnapshot(Standalone<GranuleSnapshot> snapshot,
-                               int chunkCount,
+                               int targetChunkBytes,
                                Optional<CompressionFilter> compressFilter,
                                Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx) {
+	CODE_PROBE(compressFilter.present(), "serializing compressed snapshot file");
+	CODE_PROBE(cipherKeysCtx.present(), "serializing encrypted snapshot file");
 	Standalone<IndexedBlobGranuleFile> file;
 
 	file.init(SNAPSHOT_FILE_TYPE, cipherKeysCtx);
 
-	size_t targetChunkBytes = snapshot.expectedSize() / chunkCount;
 	size_t currentChunkBytesEstimate = 0;
 	size_t previousChunkBytes = 0;
 
@@ -612,8 +611,8 @@ Value serializeChunkedSnapshot(Standalone<GranuleSnapshot> snapshot,
 		currentChunkBytesEstimate += snapshot[i].expectedSize();
 
 		if (currentChunkBytesEstimate >= targetChunkBytes || i == snapshot.size() - 1) {
-			// TODO: protocol version
-			Value serialized = ObjectWriter::toValue(currentChunk, Unversioned());
+			Value serialized =
+			    ObjectWriter::toValue(currentChunk, IncludeVersion(ProtocolVersion::withBlobGranuleFile()));
 			Value chunkBytes =
 			    IndexBlobGranuleFileChunkRef::toBytes(cipherKeysCtx, compressFilter, serialized, file.arena());
 			chunks.push_back(chunkBytes);
@@ -730,6 +729,7 @@ void updateMutationBoundary(Standalone<DeltaBoundaryRef>& boundary, const ValueA
 			// duplicate same set even if it's the same as the last one, so beginVersion reads still get updates
 			boundary.values.push_back(boundary.arena(), update);
 		} else {
+			CODE_PROBE(true, "multiple boundary updates at same version (set)");
 			// preserve inter-mutation order by replacing this one
 			boundary.values.back() = update;
 		}
@@ -740,10 +740,12 @@ void updateMutationBoundary(Standalone<DeltaBoundaryRef>& boundary, const ValueA
 			// with beginVersion
 			boundary.values.push_back(boundary.arena(), update);
 		} else if (!boundary.values.empty() && boundary.values.back().version == update.version) {
+			CODE_PROBE(true, "multiple boundary updates at same version (clear)");
 			if (boundary.values.back().isSet()) {
 				// if the last 2 updates were clear @ v1 and set @ v2, and we now have a clear at v2, just pop off the
 				// set and leave the previous clear. Otherwise, just set the last set to a clear
 				if (boundary.values.size() >= 2 && boundary.values[boundary.values.size() - 2].isClear()) {
+					CODE_PROBE(true, "clear then set/clear at same version optimization");
 					boundary.values.pop_back();
 				} else {
 					boundary.values.back() = update;
@@ -807,6 +809,8 @@ Value serializeChunkedDeltaFile(Standalone<GranuleDeltas> deltas,
                                 int chunkSize,
                                 Optional<CompressionFilter> compressFilter,
                                 Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx) {
+	CODE_PROBE(compressFilter.present(), "serializing compressed delta file");
+	CODE_PROBE(cipherKeysCtx.present(), "serializing encrypted delta file");
 	Standalone<IndexedBlobGranuleFile> file;
 
 	file.init(DELTA_FILE_TYPE, cipherKeysCtx);
@@ -837,8 +841,8 @@ Value serializeChunkedDeltaFile(Standalone<GranuleDeltas> deltas,
 		currentChunkBytesEstimate += it.second.totalSize();
 
 		if (currentChunkBytesEstimate >= chunkSize || i == boundaries.size() - 1) {
-			// TODO: protocol version
-			Value serialized = ObjectWriter::toValue(currentChunk, Unversioned());
+			Value serialized =
+			    ObjectWriter::toValue(currentChunk, IncludeVersion(ProtocolVersion::withBlobGranuleFile()));
 			Value chunkBytes =
 			    IndexBlobGranuleFileChunkRef::toBytes(cipherKeysCtx, compressFilter, serialized, file.arena());
 			chunks.push_back(chunkBytes);
@@ -972,11 +976,13 @@ void applyDeltasSorted(const Standalone<VectorRef<ParsedDeltaBoundaryRef>>& sort
 	// Either we are out of deltas or out of snapshots.
 	// if snapshot remaining and prevClear last delta set, clear the rest of the map
 	if (prevClear && snapshotIt != dataMap.end()) {
+		CODE_PROBE(true, "last delta range cleared end of snapshot");
 		dataMap.erase(snapshotIt, dataMap.end());
 	}
 	// Apply remaining sets from delta, with no remaining snapshot
 	while (deltaIt != sortedDeltas.end()) {
 		if (deltaIt->isSet()) {
+			CODE_PROBE(true, "deltas past end of snapshot");
 			snapshotIt = dataMap.insert(snapshotIt, { deltaIt->key, deltaIt->value });
 		}
 		deltaIt++;
@@ -1719,13 +1725,19 @@ struct KeyValueGen {
 
 	KeyRange randomKeyRange() const {
 		ASSERT(!usedKeysList.empty());
-		KeyRef begin = randomUsedKey();
+		Key begin = randomUsedKey();
+		if (deterministicRandom()->coinflip()) {
+			begin = keyAfter(begin);
+		}
 		if (usedKeysList.size() == 1) {
 			return KeyRange(KeyRangeRef(begin, keyAfter(begin)));
 		} else {
-			KeyRef end = begin;
+			Key end = begin;
 			while (end == begin) {
 				end = randomUsedKey();
+			}
+			if (deterministicRandom()->coinflip()) {
+				end = keyAfter(end);
 			}
 			if (begin < end) {
 				return KeyRangeRef(begin, end);
@@ -1833,6 +1845,7 @@ TEST_CASE("/blobgranule/files/snapshotFormatUnitTest") {
 
 	int targetChunks = randomExp(0, 9);
 	int targetDataBytes = randomExp(0, 25);
+	int targetChunkSize = targetDataBytes / targetChunks;
 
 	Standalone<GranuleSnapshot> data = genSnapshot(kvGen, targetDataBytes);
 
@@ -1849,7 +1862,7 @@ TEST_CASE("/blobgranule/files/snapshotFormatUnitTest") {
 
 	fmt::print("Constructing snapshot with {0} rows, {1} chunks\n", data.size(), targetChunks);
 
-	Value serialized = serializeChunkedSnapshot(data, targetChunks, kvGen.compressFilter, kvGen.cipherKeys);
+	Value serialized = serializeChunkedSnapshot(data, targetChunkSize, kvGen.compressFilter, kvGen.cipherKeys);
 
 	fmt::print("Snapshot serialized! {0} bytes\n", serialized.size());
 
@@ -1942,8 +1955,10 @@ static std::tuple<KeyRange, Version, Version> randomizeKeyAndVersions(const KeyV
 			beginVersion = 0;
 		} else {
 			beginVersion = data[deterministicRandom()->randomInt(0, data.size())].version;
+			beginVersion += deterministicRandom()->randomInt(0, 3) - 1; // randomize between -1, 0, and +1
 		}
 		readVersion = data[deterministicRandom()->randomInt(0, data.size())].version;
+		readVersion += deterministicRandom()->randomInt(0, 3) - 1; // randomize between -1, 0, and +1
 		if (readVersion < beginVersion) {
 			std::swap(beginVersion, readVersion);
 		}
@@ -1995,7 +2010,8 @@ void checkGranuleRead(const KeyValueGen& kvGen,
                       const Standalone<GranuleSnapshot>& snapshotData,
                       const Standalone<GranuleDeltas>& deltaData,
                       const Value& serializedSnapshot,
-                      const std::vector<std::pair<Version, Value>>& serializedDeltas) {
+                      const std::vector<std::pair<Version, Value>>& serializedDeltas,
+                      const Standalone<GranuleDeltas>& inMemoryDeltas) {
 	// expected answer
 	std::map<KeyRef, ValueRef> expectedData;
 	if (beginVersion == 0) {
@@ -2038,6 +2054,14 @@ void checkGranuleRead(const KeyValueGen& kvGen,
 		deltaPtrs[i] = deltaPtrsVector[i];
 	}
 
+	// add in memory deltas
+	chunk.arena().dependsOn(inMemoryDeltas.arena());
+	for (auto& it : inMemoryDeltas) {
+		if (beginVersion <= it.version && it.version <= readVersion) {
+			chunk.newDeltas.push_back(chunk.arena(), it);
+		}
+	}
+
 	// TODO need to add cipher keys meta
 	chunk.cipherKeysCtx = kvGen.cipherKeys;
 	chunk.keyRange = kvGen.allRange;
@@ -2067,6 +2091,8 @@ TEST_CASE("/blobgranule/files/granuleReadUnitTest") {
 	int targetDataBytes = randomExp(12, 25);
 	int targetSnapshotBytes = (int)(deterministicRandom()->randomInt(0, targetDataBytes));
 	int targetDeltaBytes = targetDataBytes - targetSnapshotBytes;
+
+	int targetSnapshotChunkSize = targetSnapshotBytes / targetSnapshotChunks;
 	int targetDeltaChunkSize = targetDeltaBytes / targetDeltaChunks;
 
 	Standalone<GranuleSnapshot> snapshotData = genSnapshot(kvGen, targetSnapshotBytes);
@@ -2074,23 +2100,29 @@ TEST_CASE("/blobgranule/files/granuleReadUnitTest") {
 	fmt::print("{0} snapshot rows and {1} deltas\n", snapshotData.size(), deltaData.size());
 
 	Value serializedSnapshot =
-	    serializeChunkedSnapshot(snapshotData, targetSnapshotChunks, kvGen.compressFilter, kvGen.cipherKeys);
+	    serializeChunkedSnapshot(snapshotData, targetSnapshotChunkSize, kvGen.compressFilter, kvGen.cipherKeys);
 
 	// split deltas up across multiple files
 	int deltaFiles = std::min(deltaData.size(), deterministicRandom()->randomInt(1, 21));
 	int deltasPerFile = deltaData.size() / deltaFiles + 1;
 	std::vector<std::pair<Version, Value>> serializedDeltaFiles;
+	Standalone<GranuleDeltas> inMemoryDeltas;
 	serializedDeltaFiles.reserve(deltaFiles);
 	for (int i = 0; i < deltaFiles; i++) {
 		Standalone<GranuleDeltas> fileData;
-		for (int j = i * deltasPerFile; j < (i + 1) * deltasPerFile && j < deltaData.size(); j++) {
+		int j;
+		for (j = i * deltasPerFile; j < (i + 1) * deltasPerFile && j < deltaData.size(); j++) {
 			fileData.push_back_deep(fileData.arena(), deltaData[j]);
 		}
 		if (!fileData.empty()) {
-			// TODO: randomly make the last file just the in memory deltas sometimes
-			Value serializedDelta = serializeChunkedDeltaFile(
-			    fileData, kvGen.allRange, targetDeltaChunkSize, kvGen.compressFilter, kvGen.cipherKeys);
-			serializedDeltaFiles.emplace_back(fileData.back().version, serializedDelta);
+			if (j == deltaData.size() && deterministicRandom()->coinflip()) {
+				// if it's the last set of deltas, sometimes make them the memory deltas instead
+				inMemoryDeltas = fileData;
+			} else {
+				Value serializedDelta = serializeChunkedDeltaFile(
+				    fileData, kvGen.allRange, targetDeltaChunkSize, kvGen.compressFilter, kvGen.cipherKeys);
+				serializedDeltaFiles.emplace_back(fileData.back().version, serializedDelta);
+			}
 		}
 	}
 
@@ -2102,7 +2134,8 @@ TEST_CASE("/blobgranule/files/granuleReadUnitTest") {
 	                 snapshotData,
 	                 deltaData,
 	                 serializedSnapshot,
-	                 serializedDeltaFiles);
+	                 serializedDeltaFiles,
+	                 inMemoryDeltas);
 
 	for (int i = 0; i < std::min(100, 5 + snapshotData.size() * deltaData.size()); i++) {
 		auto params = randomizeKeyAndVersions(kvGen, deltaData);
@@ -2119,7 +2152,8 @@ TEST_CASE("/blobgranule/files/granuleReadUnitTest") {
 		                 snapshotData,
 		                 deltaData,
 		                 serializedSnapshot,
-		                 serializedDeltaFiles);
+		                 serializedDeltaFiles,
+		                 inMemoryDeltas);
 	}
 
 	return Void();

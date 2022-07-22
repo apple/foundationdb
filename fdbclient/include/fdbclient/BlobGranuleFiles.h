@@ -27,7 +27,7 @@
 #include "flow/CompressionUtils.h"
 
 Value serializeChunkedSnapshot(Standalone<GranuleSnapshot> snapshot,
-                               int chunks,
+                               int chunkSize,
                                Optional<CompressionFilter> compressFilter,
                                Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx = {});
 
