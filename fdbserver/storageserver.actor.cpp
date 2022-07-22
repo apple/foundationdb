@@ -650,9 +650,9 @@ public:
 		PendingNewShard(uint64_t shardId, KeyRangeRef range) : shardId(format("%016llx", shardId)), range(range) {}
 
 		std::string toString() const {
-			return format("PendingNewShard: [ShardID]: %s [Range]: %s",
-			              this->shardId,
-			              Traceable<KeyRangeRef>::toString(this->range));
+			return fmt::format("PendingNewShard: [ShardID]: {} [Range]: {}",
+			                   this->shardId,
+			                   Traceable<KeyRangeRef>::toString(this->range));
 		}
 
 		std::string shardId;
