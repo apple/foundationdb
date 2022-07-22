@@ -102,6 +102,9 @@ Future<std::pair<Optional<TenantMapEntry>, bool>> createTenantTransaction(Transa
 	if (name.startsWith("\xff"_sr)) {
 		throw invalid_tenant_name();
 	}
+	if (tenantEntry.tenantGroup.present() && tenantEntry.tenantGroup.get().startsWith("\xff"_sr)) {
+		throw invalid_tenant_group_name();
+	}
 
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 
