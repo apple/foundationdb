@@ -899,8 +899,6 @@ struct TenantManagementWorkload : TestWorkload {
 			configuration["invalid_option"_sr] = ""_sr;
 		}
 
-		state bool hasInvalidSpecialKeyTuple = deterministicRandom()->random01() < 0.05;
-
 		loop {
 			try {
 				wait(configureImpl(tr, tenant, configuration, operationType, specialKeysUseInvalidTuple, self));
@@ -908,7 +906,7 @@ struct TenantManagementWorkload : TestWorkload {
 				ASSERT(exists);
 				ASSERT(!hasInvalidOption);
 				ASSERT(!hasSystemTenantGroup);
-				ASSERT(!hasInvalidSpecialKeyTuple);
+				ASSERT(!specialKeysUseInvalidTuple);
 
 				auto itr = self->createdTenants.find(tenant);
 				if (itr->second.tenantGroup.present()) {
@@ -929,7 +927,7 @@ struct TenantManagementWorkload : TestWorkload {
 					ASSERT(!exists);
 					return Void();
 				} else if (e.code() == error_code_special_keys_api_failure) {
-					ASSERT(hasInvalidSpecialKeyTuple || hasInvalidOption);
+					ASSERT(hasInvalidOption || specialKeysUseInvalidTuple);
 					return Void();
 				} else if (e.code() == error_code_invalid_tenant_configuration) {
 					ASSERT(hasInvalidOption);
@@ -974,25 +972,6 @@ struct TenantManagementWorkload : TestWorkload {
 		return Void();
 	}
 
-	// Check that the given tenant group has the expected number of tenants
-	ACTOR template <class DB>
-	static Future<Void> checkTenantGroupTenantCount(Reference<DB> db, TenantGroupName tenantGroup, int expectedCount) {
-		TenantGroupName const& tenantGroupRef = tenantGroup;
-		int const& expectedCountRef = expectedCount;
-
-		KeyBackedSet<Tuple>::RangeResultType tenants =
-		    wait(runTransaction(db, [tenantGroupRef, expectedCountRef](Reference<typename DB::TransactionT> tr) {
-			    tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			    return TenantMetadata::tenantGroupTenantIndex.getRange(tr,
-			                                                           Tuple::makeTuple(tenantGroupRef),
-			                                                           Tuple::makeTuple(keyAfter(tenantGroupRef)),
-			                                                           expectedCountRef + 1);
-		    }));
-
-		ASSERT(tenants.results.size() == expectedCount && !tenants.more);
-		return Void();
-	}
-
 	// Verify that the set of tenants in the database matches our local state
 	ACTOR static Future<Void> compareTenants(Database cx, TenantManagementWorkload* self) {
 		state std::map<TenantName, TenantData>::iterator localItr = self->createdTenants.begin();
@@ -1029,6 +1008,25 @@ struct TenantManagementWorkload : TestWorkload {
 
 		ASSERT(localItr == self->createdTenants.end());
 		wait(waitForAll(checkTenants));
+		return Void();
+	}
+
+	// Check that the given tenant group has the expected number of tenants
+	ACTOR template <class DB>
+	static Future<Void> checkTenantGroupTenantCount(Reference<DB> db, TenantGroupName tenantGroup, int expectedCount) {
+		TenantGroupName const& tenantGroupRef = tenantGroup;
+		int const& expectedCountRef = expectedCount;
+
+		KeyBackedSet<Tuple>::RangeResultType tenants =
+		    wait(runTransaction(db, [tenantGroupRef, expectedCountRef](Reference<typename DB::TransactionT> tr) {
+			    tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			    return TenantMetadata::tenantGroupTenantIndex.getRange(tr,
+			                                                           Tuple::makeTuple(tenantGroupRef),
+			                                                           Tuple::makeTuple(keyAfter(tenantGroupRef)),
+			                                                           expectedCountRef + 1);
+		    }));
+
+		ASSERT(tenants.results.size() == expectedCount && !tenants.more);
 		return Void();
 	}
 
