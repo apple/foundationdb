@@ -319,9 +319,7 @@ ACTOR Future<RangeResult> SpecialKeySpace::checkRYWValid(SpecialKeySpace* sks,
 		         wait(SpecialKeySpace::getRangeAggregationActor(sks, ryw, begin, end, limits, reverse))) {
 			return result;
 		}
-		when(wait(ryw->resetFuture())) {
-			throw internal_error();
-		}
+		when(wait(ryw->resetFuture())) { throw internal_error(); }
 	}
 }
 
