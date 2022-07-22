@@ -268,8 +268,8 @@ struct TenantManagementWorkload : TestWorkload {
 			wait(tr->commit());
 		} else if (operationType == OperationType::MANAGEMENT_DATABASE) {
 			ASSERT(tenantsToCreate.size() == 1);
-			Optional<TenantMapEntry> result = wait(TenantAPI::createTenant(
-			    self->dataDb.getReference(), tenantsToCreate.begin()->first, tenantsToCreate.begin()->second));
+			wait(success(TenantAPI::createTenant(
+			    self->dataDb.getReference(), tenantsToCreate.begin()->first, tenantsToCreate.begin()->second)));
 		} else if (operationType == OperationType::MANAGEMENT_TRANSACTION) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			int64_t _nextId = wait(TenantAPI::getNextTenantId(tr));
@@ -802,9 +802,9 @@ struct TenantManagementWorkload : TestWorkload {
 		std::string base64Prefix;
 		std::string printablePrefix;
 		std::string tenantStateStr;
-		std::string assignedClusterStr;
 		std::string base64TenantGroup;
 		std::string printableTenantGroup;
+		std::string assignedClusterStr;
 
 		jsonDoc.get("id", id);
 		jsonDoc.get("prefix.base64", base64Prefix);
@@ -815,11 +815,6 @@ struct TenantManagementWorkload : TestWorkload {
 
 		jsonDoc.get("tenant_state", tenantStateStr);
 
-		Optional<ClusterName> assignedCluster;
-		if (jsonDoc.tryGet("assigned_cluster", assignedClusterStr)) {
-			assignedCluster = ClusterNameRef(assignedClusterStr);
-		}
-
 		Optional<TenantGroupName> tenantGroup;
 		if (jsonDoc.tryGet("tenant_group.base64", base64TenantGroup)) {
 			jsonDoc.get("tenant_group.printable", printableTenantGroup);
@@ -828,7 +823,12 @@ struct TenantManagementWorkload : TestWorkload {
 			tenantGroup = TenantGroupNameRef(tenantGroupStr);
 		}
 
-		TenantMapEntry entry(id, tenantGroup, TenantMapEntry::stringToTenantState(tenantStateStr));
+		Optional<ClusterName> assignedCluster;
+		if (jsonDoc.tryGet("assigned_cluster", assignedClusterStr)) {
+			assignedCluster = ClusterNameRef(assignedClusterStr);
+		}
+
+		TenantMapEntry entry(id, TenantMapEntry::stringToTenantState(tenantStateStr), tenantGroup);
 		ASSERT(entry.prefix == prefix);
 		return entry;
 	}
@@ -896,6 +896,7 @@ struct TenantManagementWorkload : TestWorkload {
 					try {
 						retry = true;
 						wait(tr->onError(e));
+						retry = true;
 					} catch (Error& e) {
 						error = e;
 						retry = false;
@@ -1185,8 +1186,8 @@ struct TenantManagementWorkload : TestWorkload {
 				ASSERT(!hasInvalidOption);
 				ASSERT(!hasSystemTenantGroup);
 				ASSERT(!specialKeysUseInvalidTuple);
-				auto itr = self->createdTenants.find(tenant);
 
+				auto itr = self->createdTenants.find(tenant);
 				if (itr->second.tenantGroup.present()) {
 					auto tenantGroupItr = self->createdTenantGroups.find(itr->second.tenantGroup.get());
 					ASSERT(tenantGroupItr != self->createdTenantGroups.end());

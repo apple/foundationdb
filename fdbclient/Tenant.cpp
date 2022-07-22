@@ -74,8 +74,8 @@ TenantMapEntry::TenantMapEntry() {}
 TenantMapEntry::TenantMapEntry(int64_t id, TenantState tenantState) : tenantState(tenantState) {
 	setId(id);
 }
-TenantMapEntry::TenantMapEntry(int64_t id, Optional<TenantGroupName> tenantGroup, TenantState tenantState)
-  : tenantGroup(tenantGroup), tenantState(tenantState) {
+TenantMapEntry::TenantMapEntry(int64_t id, TenantState tenantState, Optional<TenantGroupName> tenantGroup)
+  : tenantState(tenantState), tenantGroup(tenantGroup) {
 	setId(id);
 }
 
@@ -120,6 +120,17 @@ std::string TenantMapEntry::toJson(int apiVersion) const {
 	if (assignedCluster.present()) {
 		tenantEntry["assigned_cluster"] = assignedCluster.get().toString();
 	}
+	if (tenantGroup.present()) {
+		json_spirit::mObject tenantGroupObject;
+		std::string encodedTenantGroup = base64::encoder::from_string(tenantGroup.get().toString());
+		// Remove trailing newline
+		encodedTenantGroup.resize(encodedTenantGroup.size() - 1);
+
+		tenantGroupObject["base64"] = encodedTenantGroup;
+		tenantGroupObject["printable"] = printable(tenantGroup.get());
+		tenantEntry["tenant_group"] = tenantGroupObject;
+	}
+
 	if (tenantGroup.present()) {
 		json_spirit::mObject tenantGroupObject;
 		std::string encodedTenantGroup = base64::encoder::from_string(tenantGroup.get().toString());

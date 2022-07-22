@@ -46,8 +46,8 @@ struct TenantMapEntry {
 
 	int64_t id = -1;
 	Key prefix;
-	Optional<TenantGroupName> tenantGroup;
 	TenantState tenantState = TenantState::READY;
+	Optional<TenantGroupName> tenantGroup;
 	Optional<ClusterName> assignedCluster;
 	int64_t configurationSequenceNum = 0;
 
@@ -55,7 +55,7 @@ struct TenantMapEntry {
 
 	TenantMapEntry();
 	TenantMapEntry(int64_t id, TenantState tenantState);
-	TenantMapEntry(int64_t id, Optional<TenantGroupName> tenantGroup, TenantState tenantState);
+	TenantMapEntry(int64_t id, TenantState tenantState, Optional<TenantGroupName> tenantGroup);
 
 	void setId(int64_t id);
 
@@ -64,7 +64,7 @@ struct TenantMapEntry {
 
 	std::string toJson(int apiVersion) const;
 
-	Value encode() const { return ObjectWriter::toValue(*this, IncludeVersion(ProtocolVersion::withTenantGroups())); }
+	Value encode() const { return ObjectWriter::toValue(*this, IncludeVersion(ProtocolVersion::withTenants())); }
 
 	static TenantMapEntry decode(ValueRef const& value) {
 		TenantMapEntry entry;
@@ -75,7 +75,7 @@ struct TenantMapEntry {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, id, tenantGroup, tenantState, assignedCluster, configurationSequenceNum);
+		serializer(ar, id, tenantState, tenantGroup, assignedCluster, configurationSequenceNum);
 		if constexpr (Ar::isDeserializing) {
 			if (id >= 0) {
 				prefix = idToPrefix(id);
@@ -93,7 +93,7 @@ struct TenantGroupEntry {
 	TenantGroupEntry() = default;
 	TenantGroupEntry(Optional<ClusterName> assignedCluster) : assignedCluster(assignedCluster) {}
 
-	Value encode() { return ObjectWriter::toValue(*this, IncludeVersion(ProtocolVersion::withMetacluster())); }
+	Value encode() { return ObjectWriter::toValue(*this, IncludeVersion(ProtocolVersion::withTenants())); }
 	static TenantGroupEntry decode(ValueRef const& value) {
 		TenantGroupEntry entry;
 		ObjectReader reader(value.begin(), IncludeVersion());

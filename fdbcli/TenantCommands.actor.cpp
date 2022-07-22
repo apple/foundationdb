@@ -350,8 +350,8 @@ ACTOR Future<bool> getTenantCommandActor(Reference<IDatabase> db, std::vector<St
 
 				int64_t id;
 				std::string prefix;
-				std::string tenantGroup;
 				std::string tenantState;
+				std::string tenantGroup;
 				std::string assignedCluster;
 
 				doc.get("id", id);
@@ -363,17 +363,17 @@ ACTOR Future<bool> getTenantCommandActor(Reference<IDatabase> db, std::vector<St
 				}
 
 				doc.get("tenant_state", tenantState);
-				bool hasAssignedCluster = doc.tryGet("assigned_cluster", assignedCluster);
 				bool hasTenantGroup = doc.tryGet("tenant_group.printable", tenantGroup);
+				bool hasAssignedCluster = doc.tryGet("assigned_cluster", assignedCluster);
 
 				fmt::print("  id: {}\n", id);
 				fmt::print("  prefix: {}\n", printable(prefix).c_str());
 				fmt::print("  tenant state: {}\n", printable(tenantState).c_str());
-				if (hasAssignedCluster) {
-					fmt::print("  assigned cluster: {}\n", printable(assignedCluster).c_str());
-				}
 				if (hasTenantGroup) {
 					fmt::print("  tenant group: {}\n", tenantGroup.c_str());
+				}
+				if (hasAssignedCluster) {
+					fmt::print("  assigned cluster: {}\n", printable(assignedCluster).c_str());
 				}
 			}
 			return true;
