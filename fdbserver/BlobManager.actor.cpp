@@ -909,6 +909,18 @@ ACTOR Future<Void> writeInitialGranuleMapping(Reference<BlobManagerData> bmData,
 	return Void();
 }
 
+ACTOR Future<Void> loadTenantMap(Reference<ReadYourWritesTransaction> tr, Reference<BlobManagerData> bmData) {
+	state KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>> tenantResults;
+	wait(store(tenantResults,
+	           TenantMetadata::tenantMap.getRange(
+	               tr, Optional<TenantName>(), Optional<TenantName>(), CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1)));
+	ASSERT(tenantResults.results.size() <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER && !tenantResults.more);
+
+	bmData->tenantData.addTenants(tenantResults.results);
+
+	return Void();
+}
+
 // FIXME: better way to load tenant mapping?
 ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 	state Optional<Value> lastChangeKeyValue;
@@ -965,20 +977,12 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 
 					ar.dependsOn(results.arena());
 				} else {
-					state KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>> tenantResults;
-					wait(store(tenantResults,
-					           TenantMetadata::tenantMap.getRange(tr,
-					                                              Optional<TenantName>(),
-					                                              Optional<TenantName>(),
-					                                              CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1)));
-					ASSERT(tenantResults.results.size() <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER &&
-					       !tenantResults.more);
+					wait(loadTenantMap(tr, bmData));
 
 					std::vector<Key> prefixes;
-					for (auto& it : tenantResults.results) {
+					for (auto& it : bmData->tenantData.tenantInfoById) {
 						prefixes.push_back(it.second.prefix);
 					}
-					bmData->tenantData.addTenants(tenantResults.results);
 
 					// make this look like knownBlobRanges
 					std::sort(prefixes.begin(), prefixes.end());
@@ -2788,7 +2792,7 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 		fmt::print("BM {0} final ranges:\n", bmData->epoch);
 	}
 
-	int explicitAssignments = 0;
+	state int explicitAssignments = 0;
 	for (auto& range : workerAssignments.intersectingRanges(normalKeys)) {
 		int64_t epoch = std::get<1>(range.value());
 		int64_t seqno = std::get<2>(range.value());
@@ -2816,6 +2820,19 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 			raAssign.assign = RangeAssignmentData(AssignRequestType::Normal);
 			handleRangeAssign(bmData, raAssign);
 			explicitAssignments++;
+		}
+	}
+
+	// Load tenant data before letting blob granule operations continue.
+	tr->reset();
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			wait(loadTenantMap(tr, bmData));
+			break;
+		} catch (Error& e) {
+			wait(tr->onError(e));
 		}
 	}
 
