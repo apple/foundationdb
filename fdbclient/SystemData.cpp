@@ -475,18 +475,21 @@ const Value serverKeysValue(const UID& id) {
 
 void decodeServerKeysValue(const ValueRef& value, bool& assigned, bool& emptyRange, UID& id) {
 	if (value.size() == 0) {
-		id = UID();
 		assigned = false;
 		emptyRange = false;
+		id = UID();
 	} else if (value == serverKeysTrue) {
 		assigned = true;
 		emptyRange = false;
+		id = anonymousShardId;
 	} else if (value == serverKeysTrueEmptyRange) {
 		assigned = true;
 		emptyRange = true;
+		id = anonymousShardId;
 	} else if (value == serverKeysFalse) {
 		assigned = false;
 		emptyRange = false;
+		id = UID();
 	} else {
 		BinaryReader rd(value, IncludeVersion());
 		ASSERT(rd.protocolVersion().hasShardEncodeLocationMetaData());
