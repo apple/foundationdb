@@ -605,6 +605,9 @@ ACTOR Future<Void> monitorPhysicalShardStatus(
 		// Get the mapping between PhysicalShardID and KeyRanges based on self->keyRangePhysicalShardIDMap
 		for (; it != keyRangePhysicalShardIDRanges.end(); ++it) {
 			uint64_t physicalShardID = it->value();
+			if (physicalShardID == anonymousShardId.first()) {
+				continue;
+			}
 			KeyRange keyRange = Standalone(KeyRangeRef(it->range().begin, it->range().end));
 			if (physicalShardKeyRanges.count(physicalShardID) == 0) {
 				std::vector<KeyRange> initKeyRangeList;
@@ -618,18 +621,9 @@ ACTOR Future<Void> monitorPhysicalShardStatus(
 			TraceEvent e("PhysicalShardStatus");
 			e.detail("PhysicalShardID", physicalShardID);
 			e.detail("NumKeyRanges", keyRanges.size());
+			ASSERT(self->physicalShardCollection.count(physicalShardID));
 			e.detail("TotalBytes", self->physicalShardCollection[physicalShardID].metrics.bytes);
 		}
-		// Get metrics for each physicalShard
-		/*it = keyRangePhysicalShardIDRanges.begin();
-		for (; it != keyRangePhysicalShardIDRanges.end(); ++it) {
-		    StorageMetrics metrics = wait(brokenPromiseToNever(
-		        cx->getStorageMetrics(Standalone(KeyRangeRef(it->range().begin, it->range().end)),
-		CLIENT_KNOBS->TOO_MANY))); uint64_t physicalShardID = it->value(); if (metricsReplies.count(physicalShardID)==0)
-		{ metricsReplies.insert(std::make_pair(physicalShardID, metrics)); } else { metricsReplies[physicalShardID] =
-		metricsReplies[physicalShardID] + metrics;
-		    }
-		}*/
 		// Set metrics and clear unused physicalShard in self->physicalShardCollection based on
 		// self->keyRangePhysicalShardIDMap
 		for (auto it = self->physicalShardCollection.begin(); it != self->physicalShardCollection.end();) {
@@ -658,6 +652,9 @@ ACTOR Future<Void> monitorPhysicalShardStatus(
 			uint64_t maxPhysicalShardID = 0;
 			uint64_t minPhysicalShardID = 0;
 			for (auto physicalShardID : physicalShardIDs) {
+				if (self->physicalShardCollection.count(physicalShardID) == 0) {
+					continue;
+				}
 				uint64_t id = self->physicalShardCollection[physicalShardID].id;
 				int64_t bytes = self->physicalShardCollection[physicalShardID].metrics.bytes;
 				if (bytes < SERVER_KNOBS->MIN_PHYSICAL_SHARD_BYTES) {
@@ -687,6 +684,7 @@ ACTOR Future<Void> monitorPhysicalShardStatus(
 			         std::to_string(minPhysicalShardID) + ":" + std::to_string(minPhysicalShardBytes));
 		}
 		// Logging ServerPhysicalShardStatus and update self->teamPhysicalShardIDs
+		std::set<ShardsAffectedByTeamFailure::Team> toRemoveTeams;
 		std::map<UID, std::map<uint64_t, int64_t>> storageServerPhysicalShardStatus;
 		for (auto [team, physicalShardIDs] : self->teamPhysicalShardIDs) {
 			for (auto ssid : team.servers) {
@@ -696,15 +694,20 @@ ACTOR Future<Void> monitorPhysicalShardStatus(
 					if (self->physicalShardCollection.count(physicalShardID) == 0) {
 						it =
 						    self->teamPhysicalShardIDs[team].erase(it); // This physicalShard is empty now, so remove it
+						if (self->teamPhysicalShardIDs[team].size() == 0) {
+							toRemoveTeams.insert(team);
+						}
 					} else {
 						if (storageServerPhysicalShardStatus.count(ssid) != 0) {
 							if (storageServerPhysicalShardStatus[ssid].count(physicalShardID) == 0) {
+								ASSERT(self->physicalShardCollection.count(physicalShardID));
 								storageServerPhysicalShardStatus[ssid].insert(std::make_pair(
 								    physicalShardID, self->physicalShardCollection[physicalShardID].metrics.bytes));
 							} else {
 								ASSERT(false);
 							}
 						} else {
+							ASSERT(self->physicalShardCollection.count(physicalShardID));
 							std::map<uint64_t, int64_t> tmp;
 							tmp.insert(std::make_pair(physicalShardID,
 							                          self->physicalShardCollection[physicalShardID].metrics.bytes));
@@ -714,6 +717,9 @@ ACTOR Future<Void> monitorPhysicalShardStatus(
 					}
 				}
 			}
+		}
+		for (auto team : toRemoveTeams) {
+			self->teamPhysicalShardIDs.erase(team);
 		}
 		for (auto [serverID, physicalShardMetrics] : storageServerPhysicalShardStatus) {
 			TraceEvent e("ServerPhysicalShardStatus");
@@ -951,6 +957,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 					if (configuration.usableRegions > 1) {
 						destTeams.push_back(ShardsAffectedByTeamFailure::Team(iShard.remoteDest, false));
 					}
+					ASSERT(iShard.srcId.first() != 0);
 					if (iShard.srcId != anonymousShardId) {
 						physicalShardCollection->updatePhysicalShardToTeams(
 						    iShard.srcId.first(), teams, configuration.storageTeamSize, 0);
@@ -960,6 +967,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 						}
 					}
 					if (iShard.hasDest && iShard.destId != anonymousShardId) {
+						ASSERT(iShard.destId.first() != 0);
 						physicalShardCollection->updatePhysicalShardToTeams(
 						    iShard.destId.first(), destTeams, configuration.storageTeamSize, 1);
 						if (physicalShardCollection->physicalShardCollection.count(iShard.destId.first()) == 0) {
@@ -968,6 +976,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 						}
 					}
 					// Assigning keyRange to destId is delayed to restoring key move in relocation
+					// anonymousShardId exists in keyRangePhysicalShardIDMap but not in PhysicalShardCollection nor
+					// teamPhysicalShardIDs
 					physicalShardCollection->keyRangePhysicalShardIDMap.insert(Standalone(keys), iShard.srcId.first());
 					// Metrics of physicalShardCollection is inited by trackShardMetrics (see: forDDRestore in
 					// updatePhysicalShardMetrics())

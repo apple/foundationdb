@@ -236,10 +236,7 @@ struct GetMetricsListRequest {
 	GetMetricsListRequest(KeyRange const& keys, const int shardLimit) : keys(keys), shardLimit(shardLimit) {}
 };
 
-struct TeamMetrics {
-	bool isHealthy;
-};
-
+class ShardsAffectedByTeamFailure;
 struct StorageServerMetric {
 	StorageMetrics metrics;
 	int64_t bytesLag;
@@ -249,41 +246,25 @@ struct StorageServerMetric {
 	double localRateLimit;
 };
 
+struct TeamMetrics {
+	std::vector<std::pair<UID, Optional<GetStorageMetricsReply>>> ssMetricsList;
+	std::string toString() const {
+		std::string result = "";
+		for (auto& ssMetrics : ssMetricsList) {
+			if (ssMetrics.second.present()) {
+				result = result + ssMetrics.first.toString() + "/" + std::to_string(ssMetrics.second.get().versionLag) +
+				         "/" + std::to_string(ssMetrics.second.get().bytesInputRate) + ";";
+			} else {
+				result = result + ssMetrics.first.toString() + "-NONE;";
+			}
+		}
+		return result;
+	}
+};
+
+using TeamAndMetricTuple = std::tuple<Reference<IDataDistributionTeam>, bool, TeamMetrics>;
 struct TeamsAndMetrics {
-	std::vector<std::pair<std::vector<std::pair<UID, StorageServerMetric>>, bool>> teams;
-	/* A list of teams and each team has a list of storage servers with their metrics respectively
-	teams =
-	    [
-	        ( 								// team 1
-	            [
-	                (serverID, metrics), 	// server 1 of team 1
-	                (serverID, metrics), 	// server 2 of team 1
-	                ...
-	                (serverID, metrics), 	// server k of team 1 (k is the replica)
-	            ],
-	            isPrimary,
-	        ),
-	        ( 								// team 2
-	            [
-	                (serverID, metrics), 	// server 1 of team 2
-	                (serverID, metrics), 	// server 2 of team 2
-	                ...
-	                (serverID, metrics), 	// server k of team 2
-	            ],
-	            isPrimary,
-	        ),
-	        ...
-	        ( 								// team n
-	            [
-	                (serverID, metrics), 	// server 1 of team n
-	                (serverID, metrics), 	// server 2 of team n
-	                ...
-	                (serverID, metrics), 	// server k of team n
-	            ],
-	            isPrimary,
-	        )
-	    ]
-	*/
+	std::vector<TeamAndMetricTuple> teams;
 };
 
 struct GetStorageServerStatusRequest {
@@ -301,7 +282,11 @@ struct GetTeamStatusRequest {
 struct GetTeamsAndMetricsRequest {
 	int teamCounts;
 	Promise<TeamsAndMetrics> reply;
-	GetTeamsAndMetricsRequest() : teamCounts(SERVER_KNOBS->TEAM_COUNT_TAKEN_BY_GET_TEAMS) {}
+	std::vector<std::vector<UID>> teams;
+	bool findTeamByServers;
+
+	GetTeamsAndMetricsRequest() : teamCounts(SERVER_KNOBS->TEAM_COUNT_TAKEN_BY_GET_TEAMS), findTeamByServers(false) {}
+	GetTeamsAndMetricsRequest(std::vector<std::vector<UID>> teams) : findTeamByServers(true), teams(teams) {}
 };
 
 struct TeamCollectionInterface {
@@ -396,8 +381,14 @@ public:
 		StorageMetrics metrics;
 
 		PhysicalShard() : id(0) {}
-		explicit PhysicalShard(uint64_t id) : id(id), metrics(StorageMetrics()) {}
-		explicit PhysicalShard(uint64_t id, StorageMetrics const& metrics) : id(id), metrics(metrics) {}
+		explicit PhysicalShard(uint64_t id) : id(id), metrics(StorageMetrics()) {
+			ASSERT(id != UID().first());
+			ASSERT(id != anonymousShardId.first());
+		}
+		explicit PhysicalShard(uint64_t id, StorageMetrics const& metrics) : id(id), metrics(metrics) {
+			ASSERT(id != UID().first());
+			ASSERT(id != anonymousShardId.first());
+		}
 		// operator< used for selecting the physicalShard with the minimal bytesOnDisk
 		bool operator<(const struct PhysicalShard& right) const { return id < right.id ? true : false; }
 		std::string toString() const { return std::to_string(id); }
@@ -419,9 +410,18 @@ public:
 	Optional<uint64_t> trySelectPhysicalShardFor(ShardsAffectedByTeamFailure::Team team,
 	                                             StorageMetrics const& metrics,
 	                                             uint64_t debugID);
-	Optional<ShardsAffectedByTeamFailure::Team> tryGetRemoteTeamWith(uint64_t physicalShardID,
-	                                                                 int expectedTeamSize,
-	                                                                 uint64_t debugID);
+	bool checkPhysicalShardValid(uint64_t physicalShardID, StorageMetrics const& moveInMetrics);
+	Optional<ShardsAffectedByTeamFailure::Team> tryGetValidRemoteTeamWith(uint64_t physicalShardID,
+	                                                                      StorageMetrics const& moveInMetrics,
+	                                                                      int expectedTeamSize,
+	                                                                      uint64_t debugID);
+	std::vector<PhysicalShard> getValidPhysicalShardsOf(ShardsAffectedByTeamFailure::Team team,
+	                                                    StorageMetrics const& moveInMetrics,
+	                                                    uint64_t debugID);
+	std::vector<ShardsAffectedByTeamFailure::Team> getValidPairedRemoteTeamsOf(ShardsAffectedByTeamFailure::Team team,
+	                                                                           StorageMetrics const& moveInMetrics,
+	                                                                           int expectedTeamSize,
+	                                                                           uint64_t debugID);
 	uint64_t generateNewPhysicalShardID(uint64_t debugID);
 
 	// PhysicalShard Metrics
@@ -543,6 +543,116 @@ public:
 		return;
 	}
 
+	struct PhysicalShardAwareBestTeams {
+		uint64_t physicalShardID;
+		std::vector<std::pair<Reference<IDataDistributionTeam>, bool>> bestTeams;
+	};
+
+	using PhysicalShardAwareTeamStats =
+	    std::map<uint64_t, std::pair<PhysicalShardCollection::PhysicalShard, std::vector<TeamAndMetricTuple>>>;
+
+	Optional<PhysicalShardAwareBestTeams> selectTeamsAndPhysicalShard(PhysicalShardAwareTeamStats teamStats,
+	                                                                  int numDC,
+	                                                                  uint64_t debugID) {
+		ASSERT(CLIENT_KNOBS->PHYSICAL_SHARD_AWARE_GET_TEAM);
+		ASSERT(teamStats.size() > 0);
+
+		int64_t maxPhysicalShardBytes = 0;
+		int64_t minPhysicalShardBytes = StorageMetrics::infinity;
+		int64_t maxMaxLag = 0;
+		int64_t minMaxLag = StorageMetrics::infinity;
+
+		// std::cout << "SelectCandidates\n";
+		TraceEvent e("SelectCandidates");
+		e.detail("DebugID", debugID);
+		for (auto& [physicalShardID, stats] : teamStats) {
+			ASSERT(stats.second.size() == numDC);
+			int64_t physicalShardBytes = stats.first.metrics.bytes;
+			// std::cout << "PhysicalShard: " << physicalShardID << physicalShardBytes << "\n";
+			for (auto& teamAndMetric : stats.second) {
+				// std::cout << "Team: " <<  serversToString(std::get<0>(teamAndMetric)->getServerIDs()) << "\n";
+				// std::cout << "Metric: " << describe(std::get<2>(teamAndMetric)) << "\n";
+				int64_t maxLag = getMaxVerLag(std::get<2>(teamAndMetric));
+				if (maxLag == -1) {
+					continue;
+				}
+				maxMaxLag = std::max(maxMaxLag, maxLag);
+				minMaxLag = std::min(minMaxLag, maxLag);
+			}
+			// std::cout << "--------------------------------------------------------------\n";
+			maxPhysicalShardBytes = std::max(maxPhysicalShardBytes, physicalShardBytes);
+			minPhysicalShardBytes = std::min(minPhysicalShardBytes, physicalShardBytes);
+		}
+		e.detail("MaxPhysicalShardBytes", maxPhysicalShardBytes);
+		e.detail("MinPhysicalShardBytes", minPhysicalShardBytes);
+		e.detail("MaxMaxLag", maxMaxLag);
+		e.detail("MinMaxLag", minMaxLag);
+
+		// std::cout << "PHBytes: " << minPhysicalShardBytes << "~" << maxPhysicalShardBytes << "; Lag: " << minMaxLag
+		// << "~" << maxMaxLag << "\n";
+
+		if (maxPhysicalShardBytes == 0 || minPhysicalShardBytes == StorageMetrics::infinity || maxMaxLag == 0 ||
+		    minMaxLag == StorageMetrics::infinity) {
+			// std::cout << "return 1\n";
+			return Optional<PhysicalShardAwareBestTeams>();
+		}
+
+		double bestScore = 0;
+		uint64_t bestPhysicalShardID = UID().first();
+		int64_t bestLag = 0;
+		int64_t bestPHBytes = 0;
+		for (auto& [physicalShardID, stats] : teamStats) {
+			int64_t physicalShardBytes = stats.first.metrics.bytes;
+			double score = 0;
+			score = score + (maxPhysicalShardBytes - physicalShardBytes + 1) * 1.0 /
+			                    (maxPhysicalShardBytes - minPhysicalShardBytes + 1);
+			// std::cout << "(" << maxPhysicalShardBytes << "-" << physicalShardBytes << ")" << "/" << "(" <<
+			// maxPhysicalShardBytes << "-" << minPhysicalShardBytes << ")\n";
+			int64_t maxLag = 0;
+			bool missSSMetric = false;
+			for (auto& teamAndMetric : stats.second) {
+				int64_t tmp = getMaxVerLag(std::get<2>(teamAndMetric));
+				if (tmp == -1) {
+					// std::cout << "missSSMetric? tmp=" << tmp << "\n";
+					missSSMetric = true;
+					break;
+				}
+				maxLag = std::max(maxLag, tmp);
+			}
+			if (missSSMetric) {
+				continue;
+			}
+			score = score + (maxMaxLag - maxLag + 1) * 1.0 / (maxMaxLag - minMaxLag + 1);
+			// std::cout << "(" << maxMaxLag << "-" << maxLag << ")" << "/" << "(" << maxMaxLag << "-" << minMaxLag <<
+			// ")\n"; std::cout << "Score: " << score << "\n";
+			if (score > bestScore) {
+				bestPhysicalShardID = physicalShardID;
+				bestScore = score;
+				bestLag = maxLag;
+				bestPHBytes = physicalShardBytes;
+			}
+		}
+
+		if (bestPhysicalShardID == UID().first()) {
+			// std::cout << "return 2? size=" << teamStats.size() << "\n";
+			return Optional<PhysicalShardAwareBestTeams>();
+		}
+		ASSERT(bestPhysicalShardID != anonymousShardId.first());
+		PhysicalShardAwareBestTeams res;
+		res.physicalShardID = bestPhysicalShardID;
+		e.detail("BestPhysicalShardID", bestPhysicalShardID);
+		e.detail("MaxLag", bestLag);
+		e.detail("PhysicalShardBytes", bestPHBytes);
+		ASSERT(teamStats[bestPhysicalShardID].second.size() == 1 || teamStats[bestPhysicalShardID].second.size() == 2);
+		for (auto& teamAndMetric : teamStats[bestPhysicalShardID].second) {
+			res.bestTeams.push_back(std::make_pair(std::get<0>(teamAndMetric), std::get<1>(teamAndMetric)));
+		}
+		std::cout << "BestPhysicalShardID: " << bestPhysicalShardID << "\n";
+		std::cout << "MaxLag: " << bestLag << "\n";
+		std::cout << "PhysicalShardBytes: " << bestPHBytes << "\n\n\n\n\n\n";
+		return res;
+	}
+
 private:
 	// DD Algorithm Support: Issue Data Move
 	// DataDistributionRuntimeMonitor takes ddEventBuffer as input and puts outputs to relocateBuffer
@@ -553,6 +663,28 @@ private:
 	std::vector<TeamCollectionInterface> teamCollections; // get team/storageServer metrics
 	Reference<PhysicalShardCollection> physicalShardCollection; // get physicalShard metrics
 	PromiseStream<GetMetricsRequest> getShardMetrics; // get keyRange metrics
+
+	std::string serversToString(std::vector<UID> servers) {
+		ASSERT(CLIENT_KNOBS->PHYSICAL_SHARD_AWARE_GET_TEAM);
+
+		ASSERT(!servers.empty());
+		std::sort(servers.begin(), servers.end());
+		std::stringstream ss;
+		for (const auto& id : servers) {
+			ss << id.toString() << " ";
+		}
+		return ss.str();
+	}
+
+	int64_t getMaxVerLag(TeamMetrics teamMetrics) {
+		int64_t maxLag = -1;
+		for (auto& ssMetrics : teamMetrics.ssMetricsList) {
+			if (ssMetrics.second.present()) {
+				maxLag = std::max(maxLag, ssMetrics.second.get().versionLag);
+			}
+		}
+		return maxLag;
+	}
 };
 
 // DDShardInfo is so named to avoid link-time name collision with ShardInfo within the StorageServer

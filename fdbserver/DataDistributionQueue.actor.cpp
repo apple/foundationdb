@@ -1204,6 +1204,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 	state UID distributorId = self->distributorId;
 	state ParallelTCInfo healthyDestinations;
 
+	state bool foundTeams = true;
 	state bool anyHealthy = false;
 	state bool allHealthy = true;
 	state bool anyWithSource = false;
@@ -1214,6 +1215,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 	state double startTime = now();
 	state std::vector<UID> destIds;
 	state uint64_t debugID = deterministicRandom()->randomUInt64();
+	state DataDistributionRuntimeMonitor::PhysicalShardAwareTeamStats physicalShardTeamStatTable;
+	state bool usePhysicalShardAwareGetTeam = true;
 
 	try {
 		if (now() - self->lastInterval < 1.0) {
@@ -1267,158 +1270,346 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 			stuckCount = 0;
 			// state int bestTeamStuckThreshold = 50;
 			loop {
-				state int tciIndex = 0;
-				state bool foundTeams = true;
-				state bool bestTeamReady = false;
 				anyHealthy = false;
 				allHealthy = true;
 				anyWithSource = false;
 				anyDestOverloaded = false;
+				foundTeams = true;
 				bestTeams.clear();
-				// Get team from teamCollections in different DCs and find the best one
-				while (tciIndex < self->teamCollections.size()) {
-					if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA && rd.isRestore()) {
-						auto req = GetTeamRequest(tciIndex == 0 ? rd.dataMove->primaryDest : rd.dataMove->remoteDest);
-						Future<std::pair<Optional<Reference<IDataDistributionTeam>>, bool>> fbestTeam =
-						    brokenPromiseToNever(self->teamCollections[tciIndex].getTeam.getReply(req));
-						bestTeamReady = fbestTeam.isReady();
-						std::pair<Optional<Reference<IDataDistributionTeam>>, bool> bestTeam = wait(fbestTeam);
-						if (tciIndex > 0 && !bestTeamReady) {
-							// self->shardsAffectedByTeamFailure->moveShard must be called without any waits after
-							// getting the destination team or we could miss failure notifications for the storage
-							// servers in the destination team
-							TraceEvent("BestRemoteTeamNotReadyWhenRestore")
-							    .detail("TeamCollectionIndex", tciIndex)
-							    .detail("RestoreDataMoveForDest",
-							            describe(tciIndex == 0 ? rd.dataMove->primaryDest : rd.dataMove->remoteDest))
-							    .detail("RdMoveIDFirst", rd.dataMoveId.first())
-							    .detail("RdMoveIDSecond", rd.dataMoveId.second())
-							    .detail("RdMoveID", rd.dataMoveId)
-							    .detail("DebugID", debugID);
-							foundTeams = false;
-							break;
-						}
-						if (!bestTeam.first.present() || !bestTeam.first.get()->isHealthy()) {
-							TraceEvent("BestTeamNotAppearWhenRestore")
-							    .detail("TeamCollectionIndex", tciIndex)
-							    .detail("RestoreDataMoveForDest",
-							            describe(tciIndex == 0 ? rd.dataMove->primaryDest : rd.dataMove->remoteDest))
-							    .detail("RdMoveIDFirst", rd.dataMoveId.first())
-							    .detail("RdMoveIDSecond", rd.dataMoveId.second())
-							    .detail("RdMoveID", rd.dataMoveId)
-							    .detail("DebugID", debugID);
-							foundTeams = false;
-							break;
-						}
-						anyHealthy = true;
-						bestTeams.emplace_back(bestTeam.first.get(), bestTeam.second);
-					} else {
-						double inflightPenalty = SERVER_KNOBS->INFLIGHT_PENALTY_HEALTHY;
-						if (rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY ||
-						    rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_2_LEFT)
-							inflightPenalty = SERVER_KNOBS->INFLIGHT_PENALTY_UNHEALTHY;
-						if (rd.healthPriority == SERVER_KNOBS->PRIORITY_POPULATE_REGION ||
-						    rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_1_LEFT ||
-						    rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT)
-							inflightPenalty = SERVER_KNOBS->INFLIGHT_PENALTY_ONE_LEFT;
+				state int tciIndex = 0;
 
-						auto req = GetTeamRequest(WantNewServers(rd.wantsNewServers),
-						                          WantTrueBest(isValleyFillerPriority(rd.priority)),
-						                          PreferLowerDiskUtil::True,
-						                          TeamMustHaveShards::False,
-						                          ForReadBalance(rd.reason == RelocateReason::REBALANCE_READ),
-						                          PreferLowerReadUtil::True,
-						                          inflightPenalty);
+				if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA && CLIENT_KNOBS->PHYSICAL_SHARD_AWARE_GET_TEAM &&
+				    !rd.isRestore() && usePhysicalShardAwareGetTeam) {
+					state bool teamsAndMetricsReady = false;
+					state TeamsAndMetrics primaryTeamsAndMetrics;
+					physicalShardTeamStatTable.clear();
 
-						req.src = rd.src;
-						req.completeSources = rd.completeSources;
-
-						if (CLIENT_KNOBS->DD_PHYSICAL_SHARD_CORE && tciIndex == 1) {
-							ASSERT(physicalShardIDCandidate != UID().first());
-							Optional<ShardsAffectedByTeamFailure::Team> remoteTeamWithPhysicalShard =
-							    self->physicalShardCollection->tryGetRemoteTeamWith(
-							        physicalShardIDCandidate, self->singleRegionTeamSize, debugID);
-							// TODO: use getRemoteTeamFor()
-							if (remoteTeamWithPhysicalShard.present()) {
-								// Case: exists a remoteTeam in the mapping that has the physicalShardIDCandidate
-								// use the remoteTeam with the physicalShard as the bestTeam
-								req = GetTeamRequest(remoteTeamWithPhysicalShard.get().servers);
-								TraceEvent("GetRemoteTeamWithPhysicalShard")
-								    .detail("SelectedServers", remoteTeamWithPhysicalShard.get().servers)
-								    .detail("PhysicalShardIDCandidate", physicalShardIDCandidate)
-								    .detail("DebugID", debugID);
+					// std::cout << "Use new getTeam logic\n";
+					while (tciIndex < self->teamCollections.size()) {
+						if (tciIndex == 0) {
+							// 1. make request to get a set of primary teams
+							auto req = GetTeamsAndMetricsRequest();
+							Future<TeamsAndMetrics> fTeamsAndMetrics =
+							    brokenPromiseToNever(self->teamCollections[tciIndex].getTeamsAndMetrics.getReply(req));
+							teamsAndMetricsReady = fTeamsAndMetrics.isReady();
+							TeamsAndMetrics teamsAndMetrics = wait(fTeamsAndMetrics);
+							if (teamsAndMetrics.teams.size() == 0) {
+								// std::cout << "teamsAndMetrics not found\n";
+								usePhysicalShardAwareGetTeam = false; // back to original logic
+								break;
 							}
-						}
-
-						// bestTeam.second = false if the bestTeam in the teamCollection (in the DC) does not have any
-						// server that hosts the relocateData. This is possible, for example, in a fearless
-						// configuration when the remote DC is just brought up.
-						Future<std::pair<Optional<Reference<IDataDistributionTeam>>, bool>> fbestTeam =
-						    brokenPromiseToNever(self->teamCollections[tciIndex].getTeam.getReply(req));
-						bestTeamReady = fbestTeam.isReady();
-						std::pair<Optional<Reference<IDataDistributionTeam>>, bool> bestTeam = wait(fbestTeam);
-						if (tciIndex > 0 && !bestTeamReady) {
-							// self->shardsAffectedByTeamFailure->moveShard must be called without any waits after
-							// getting the destination team or we could miss failure notifications for the storage
-							// servers in the destination team
-							TraceEvent("BestRemoteTeamNotReady")
-							    .detail("TeamCollectionIndex", tciIndex)
-							    .detail("DebugID", debugID);
-							if (CLIENT_KNOBS->DD_PHYSICAL_SHARD_CORE && tciIndex == 1) {
-								forceToUseNewPhysicalShard = true;
-							}
-							foundTeams = false;
-							break;
-						}
-						// If a DC has no healthy team, we stop checking the other DCs until
-						// the unhealthy DC is healthy again or is excluded.
-						if (!bestTeam.first.present()) {
-							TraceEvent("BestTeamNotAppear")
-							    .detail("TeamCollectionIndex", tciIndex)
-							    .detail("DebugID", debugID);
-							if (CLIENT_KNOBS->DD_PHYSICAL_SHARD_CORE && tciIndex == 1) {
-								forceToUseNewPhysicalShard = true;
-							}
-							foundTeams = false;
-							break;
-						}
-						if (!bestTeam.first.get()->isHealthy()) {
-							allHealthy = false;
-						} else {
-							anyHealthy = true;
-						}
-
-						if (bestTeam.second) {
-							anyWithSource = true;
-						}
-
-						bestTeams.emplace_back(bestTeam.first.get(), bestTeam.second);
-
-						// find physicalShardIDCandidate
-						if (CLIENT_KNOBS->DD_PHYSICAL_SHARD_CORE && tciIndex == 0) {
-							ASSERT(foundTeams);
-							ShardsAffectedByTeamFailure::Team primaryTeam =
-							    ShardsAffectedByTeamFailure::Team(bestTeams[0].first->getServerIDs(), true);
-							if (forceToUseNewPhysicalShard) {
-								physicalShardIDCandidate =
-								    self->physicalShardCollection->generateNewPhysicalShardID(debugID);
-							} else {
-								Optional<uint64_t> physicalShardIDFetch =
-								    self->physicalShardCollection->trySelectPhysicalShardFor(
+							// 2. now, we have the primary team set, then we build physicalShardTeamStatTable
+							// std::cout << "build physicalShardTeamStatTable\n";
+							std::set<uint64_t> physicalShardIDSet_test;
+							std::vector<uint64_t> physicalShardIDVec_test;
+							primaryTeamsAndMetrics = std::move(teamsAndMetrics);
+							for (auto primaryTeamCandidate : primaryTeamsAndMetrics.teams) {
+								std::vector<UID> primaryServerIDs = std::get<0>(primaryTeamCandidate)->getServerIDs();
+								ShardsAffectedByTeamFailure::Team primaryTeam =
+								    ShardsAffectedByTeamFailure::Team(primaryServerIDs, true);
+								std::vector<PhysicalShardCollection::PhysicalShard> physicalShards =
+								    self->physicalShardCollection->getValidPhysicalShardsOf(
 								        primaryTeam, metrics, debugID);
-								if (physicalShardIDFetch.present()) {
-									physicalShardIDCandidate = physicalShardIDFetch.get();
-								} else { // if failed to find an available physicalShard
+								for (auto physicalShard : physicalShards) {
+									std::cout << physicalShard.id << ": " << describe(primaryServerIDs) << "\n";
+									std::vector<TeamAndMetricTuple> teamsAndMetricTupleVec;
+									teamsAndMetricTupleVec.push_back(primaryTeamCandidate);
+									physicalShardTeamStatTable.insert(std::make_pair(
+									    physicalShard.id, std::make_pair(physicalShard, teamsAndMetricTupleVec)));
+									physicalShardIDSet_test.insert(physicalShard.id);
+									physicalShardIDVec_test.push_back(physicalShard.id);
+								}
+							}
+							ASSERT(physicalShardIDSet_test.size() == physicalShardIDVec_test.size());
+							if (physicalShardTeamStatTable.size() == 0 || primaryTeamsAndMetrics.teams.size() == 0) {
+								// std::cout << "no physicalShard matched\n";
+								usePhysicalShardAwareGetTeam = false; // back to original logic
+								break;
+							}
+							// check
+							for (auto& [physicalShardID, stats] : physicalShardTeamStatTable) {
+								// std::cout << physicalShardID << " stats.second.size(): " << stats.second.size() <<
+								// "\n";
+								ASSERT(stats.second.size() == 1);
+							}
+
+						} else if (tciIndex == 1) {
+							// 3. now we build remote team requests by primaryTeamsAndMetrics
+							// 		we simply find the remote team which shares physicalShard with primary teams in
+							// primaryTeamsAndMetrics
+							std::set<std::vector<UID>> validRemoteTeamsToReqSet;
+							for (auto primaryTeamCandidate : primaryTeamsAndMetrics.teams) {
+								std::vector<UID> primaryServerIDs = std::get<0>(primaryTeamCandidate)->getServerIDs();
+								ShardsAffectedByTeamFailure::Team primaryTeam =
+								    ShardsAffectedByTeamFailure::Team(primaryServerIDs, true);
+								std::vector<ShardsAffectedByTeamFailure::Team> validRemoteTeams =
+								    self->physicalShardCollection->getValidPairedRemoteTeamsOf(
+								        primaryTeam, metrics, self->singleRegionTeamSize, debugID);
+								for (auto validRemoteTeam : validRemoteTeams) {
+									validRemoteTeamsToReqSet.insert(validRemoteTeam.servers);
+								}
+							}
+							if (validRemoteTeamsToReqSet.size() == 0) {
+								// std::cout << "no remote team matched by the primary team\n";
+								usePhysicalShardAwareGetTeam = false; // back to original logic
+								break;
+							}
+
+							// 4. now we have a request for getting remote teams
+							ASSERT(validRemoteTeamsToReqSet.size() > 0);
+							std::vector<std::vector<UID>> validRemoteTeamsToReqVec;
+							for (auto team : validRemoteTeamsToReqSet) {
+								validRemoteTeamsToReqVec.push_back(team);
+							}
+							auto req = GetTeamsAndMetricsRequest(validRemoteTeamsToReqVec);
+							Future<TeamsAndMetrics> fTeamsAndMetrics =
+							    brokenPromiseToNever(self->teamCollections[tciIndex].getTeamsAndMetrics.getReply(req));
+							teamsAndMetricsReady = fTeamsAndMetrics.isReady();
+							TeamsAndMetrics remoteTeamsAndMetrics = wait(fTeamsAndMetrics);
+							if (!teamsAndMetricsReady) {
+								// std::cout << "not remoteTeamsAndMetricsReady (we have to make getTeam atomic)\n";
+								usePhysicalShardAwareGetTeam = false; // back to original logic
+								break;
+							}
+							if (remoteTeamsAndMetrics.teams.size() == 0) {
+								// std::cout << "remoteTeamsAndMetrics not found\n";
+								usePhysicalShardAwareGetTeam = false; // back to original logic
+								break;
+							}
+
+							// 5. now, we have the remote team set, then we build physicalShardTeamStatTable
+							bool anyMatch = false;
+							std::set<uint64_t> physicalShardIDSet_test;
+							std::vector<uint64_t> physicalShardIDVec_test;
+							for (auto remoteTeamCandidate : remoteTeamsAndMetrics.teams) {
+								std::vector<UID> remoteServerIDs = std::get<0>(remoteTeamCandidate)->getServerIDs();
+								// std::cout << describe(remoteServerIDs) << "\n";
+								ShardsAffectedByTeamFailure::Team remoteTeam =
+								    ShardsAffectedByTeamFailure::Team(remoteServerIDs, false);
+								std::vector<PhysicalShardCollection::PhysicalShard> physicalShards =
+								    self->physicalShardCollection->getValidPhysicalShardsOf(
+								        remoteTeam, metrics, debugID);
+
+								for (auto physicalShard : physicalShards) {
+									ASSERT(physicalShardTeamStatTable.count(physicalShard.id) <= 1);
+									if (physicalShardTeamStatTable.count(physicalShard.id) == 1) {
+										physicalShardTeamStatTable[physicalShard.id].second.push_back(
+										    remoteTeamCandidate);
+										anyMatch = true;
+										physicalShardIDSet_test.insert(physicalShard.id);
+										physicalShardIDVec_test.push_back(physicalShard.id);
+									}
+								}
+							}
+							ASSERT(physicalShardIDSet_test.size() == physicalShardIDVec_test.size());
+							if (!anyMatch) {
+								// std::cout << "no primary and remote matched\n";
+								usePhysicalShardAwareGetTeam = false; // back to original logic
+								break;
+							}
+						}
+						tciIndex++;
+					}
+					if (!usePhysicalShardAwareGetTeam) {
+						// std::cout << "New logic failed and back to old logic\n";
+						continue;
+					}
+					if (physicalShardTeamStatTable.size() == 0) {
+						usePhysicalShardAwareGetTeam = false; // back to original logic
+						// std::cout << "physicalShardTeamStatTable.size()==0 and back to old logic\n";
+						continue;
+					}
+					// 6. clean up input
+					int numDC = self->teamCollections.size();
+					std::vector<uint64_t> toRemovePhysicalShardIDs;
+					for (auto& [physicalShardID, stats] : physicalShardTeamStatTable) {
+						// std::cout << physicalShardID << " stats.second.size(): " << stats.second.size() << "\n";
+						ASSERT(stats.second.size() == 1 || stats.second.size() == 2);
+						if (stats.second.size() != numDC) {
+							toRemovePhysicalShardIDs.push_back(physicalShardID);
+						}
+					}
+					for (auto& physicalShardID : toRemovePhysicalShardIDs) {
+						physicalShardTeamStatTable.erase(physicalShardID);
+					}
+					// 7. get the best team pair
+					Optional<DataDistributionRuntimeMonitor::PhysicalShardAwareBestTeams> physicalShardAwareBestTeams =
+					    self->dataDistributionRuntimeMonitor->selectTeamsAndPhysicalShard(
+					        physicalShardTeamStatTable, numDC, debugID);
+					if (!physicalShardAwareBestTeams.present()) {
+						usePhysicalShardAwareGetTeam = false; // back to original logic
+						// std::cout << "!physicalShardAwareBestTeams.present() and back to old logic\n";
+						continue;
+					} else {
+						// set bestTeams by physicalShardAwareBestTeams
+						ASSERT(physicalShardAwareBestTeams.get().bestTeams.size() == 1 ||
+						       physicalShardAwareBestTeams.get().bestTeams.size() == 2);
+						bestTeams = physicalShardAwareBestTeams.get().bestTeams;
+						ASSERT(bestTeams.size() == 1 || bestTeams.size() == 2);
+						physicalShardIDCandidate = physicalShardAwareBestTeams.get().physicalShardID;
+						for (auto& bestTeam : bestTeams) {
+							if (!bestTeam.first->isHealthy()) {
+								allHealthy = false;
+							} else {
+								anyHealthy = true;
+							}
+						}
+						anyWithSource = false;
+						// std::cout << "getBestTeam done\n";
+					}
+				} else {
+					state bool bestTeamReady = false;
+					bestTeams.clear();
+					// std::cout << "Using old getTeam logic\n";
+					// Get team from teamCollections in different DCs and find the best one
+					while (tciIndex < self->teamCollections.size()) {
+						if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA && rd.isRestore()) {
+							auto req =
+							    GetTeamRequest(tciIndex == 0 ? rd.dataMove->primaryDest : rd.dataMove->remoteDest);
+							Future<std::pair<Optional<Reference<IDataDistributionTeam>>, bool>> fbestTeam =
+							    brokenPromiseToNever(self->teamCollections[tciIndex].getTeam.getReply(req));
+							bestTeamReady = fbestTeam.isReady();
+							std::pair<Optional<Reference<IDataDistributionTeam>>, bool> bestTeam = wait(fbestTeam);
+							if (tciIndex > 0 && !bestTeamReady) {
+								// self->shardsAffectedByTeamFailure->moveShard must be called without any waits after
+								// getting the destination team or we could miss failure notifications for the storage
+								// servers in the destination team
+								TraceEvent("BestRemoteTeamNotReadyWhenRestore")
+								    .detail("TeamCollectionIndex", tciIndex)
+								    .detail(
+								        "RestoreDataMoveForDest",
+								        describe(tciIndex == 0 ? rd.dataMove->primaryDest : rd.dataMove->remoteDest))
+								    .detail("RdMoveIDFirst", rd.dataMoveId.first())
+								    .detail("RdMoveIDSecond", rd.dataMoveId.second())
+								    .detail("RdMoveID", rd.dataMoveId)
+								    .detail("DebugID", debugID);
+								foundTeams = false;
+								break;
+							}
+							if (!bestTeam.first.present() || !bestTeam.first.get()->isHealthy()) {
+								TraceEvent("BestTeamNotAppearWhenRestore")
+								    .detail("TeamCollectionIndex", tciIndex)
+								    .detail(
+								        "RestoreDataMoveForDest",
+								        describe(tciIndex == 0 ? rd.dataMove->primaryDest : rd.dataMove->remoteDest))
+								    .detail("RdMoveIDFirst", rd.dataMoveId.first())
+								    .detail("RdMoveIDSecond", rd.dataMoveId.second())
+								    .detail("RdMoveID", rd.dataMoveId)
+								    .detail("DebugID", debugID);
+								foundTeams = false;
+								break;
+							}
+							anyHealthy = true;
+							bestTeams.emplace_back(bestTeam.first.get(), bestTeam.second);
+						} else {
+							double inflightPenalty = SERVER_KNOBS->INFLIGHT_PENALTY_HEALTHY;
+							if (rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY ||
+							    rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_2_LEFT)
+								inflightPenalty = SERVER_KNOBS->INFLIGHT_PENALTY_UNHEALTHY;
+							if (rd.healthPriority == SERVER_KNOBS->PRIORITY_POPULATE_REGION ||
+							    rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_1_LEFT ||
+							    rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT)
+								inflightPenalty = SERVER_KNOBS->INFLIGHT_PENALTY_ONE_LEFT;
+
+							auto req = GetTeamRequest(WantNewServers(rd.wantsNewServers),
+							                          WantTrueBest(isValleyFillerPriority(rd.priority)),
+							                          PreferLowerDiskUtil::True,
+							                          TeamMustHaveShards::False,
+							                          ForReadBalance(rd.reason == RelocateReason::REBALANCE_READ),
+							                          PreferLowerReadUtil::True,
+							                          inflightPenalty);
+
+							req.src = rd.src;
+							req.completeSources = rd.completeSources;
+
+							if (CLIENT_KNOBS->DD_PHYSICAL_SHARD_CORE && tciIndex == 1) {
+								ASSERT(physicalShardIDCandidate != UID().first());
+								Optional<ShardsAffectedByTeamFailure::Team> remoteTeamWithPhysicalShard =
+								    self->physicalShardCollection->tryGetValidRemoteTeamWith(
+								        physicalShardIDCandidate, metrics, self->singleRegionTeamSize, debugID);
+								if (remoteTeamWithPhysicalShard.present()) {
+									// Case: exists a remoteTeam in the mapping that has the physicalShardIDCandidate
+									// use the remoteTeam with the physicalShard as the bestTeam
+									req = GetTeamRequest(remoteTeamWithPhysicalShard.get().servers);
+									TraceEvent("GetRemoteTeamWithPhysicalShard")
+									    .detail("SelectedServers", remoteTeamWithPhysicalShard.get().servers)
+									    .detail("PhysicalShardIDCandidate", physicalShardIDCandidate)
+									    .detail("DebugID", debugID);
+								}
+							}
+
+							// bestTeam.second = false if the bestTeam in the teamCollection (in the DC) does not have
+							// any server that hosts the relocateData. This is possible, for example, in a fearless
+							// configuration when the remote DC is just brought up.
+							Future<std::pair<Optional<Reference<IDataDistributionTeam>>, bool>> fbestTeam =
+							    brokenPromiseToNever(self->teamCollections[tciIndex].getTeam.getReply(req));
+							bestTeamReady = fbestTeam.isReady();
+							std::pair<Optional<Reference<IDataDistributionTeam>>, bool> bestTeam = wait(fbestTeam);
+							if (tciIndex > 0 && !bestTeamReady) {
+								// self->shardsAffectedByTeamFailure->moveShard must be called without any waits after
+								// getting the destination team or we could miss failure notifications for the storage
+								// servers in the destination team
+								TraceEvent("BestRemoteTeamNotReady")
+								    .detail("TeamCollectionIndex", tciIndex)
+								    .detail("DebugID", debugID);
+								if (CLIENT_KNOBS->DD_PHYSICAL_SHARD_CORE && tciIndex == 1) {
+									forceToUseNewPhysicalShard = true;
+								}
+								foundTeams = false;
+								break;
+							}
+							// If a DC has no healthy team, we stop checking the other DCs until
+							// the unhealthy DC is healthy again or is excluded.
+							if (!bestTeam.first.present()) {
+								TraceEvent("BestTeamNotAppear")
+								    .detail("TeamCollectionIndex", tciIndex)
+								    .detail("DebugID", debugID);
+								if (CLIENT_KNOBS->DD_PHYSICAL_SHARD_CORE && tciIndex == 1) {
+									forceToUseNewPhysicalShard = true;
+								}
+								foundTeams = false;
+								break;
+							}
+							if (!bestTeam.first.get()->isHealthy()) {
+								allHealthy = false;
+							} else {
+								anyHealthy = true;
+							}
+
+							if (bestTeam.second) {
+								anyWithSource = true;
+							}
+
+							bestTeams.emplace_back(bestTeam.first.get(), bestTeam.second);
+
+							// find physicalShardIDCandidate
+							if (CLIENT_KNOBS->DD_PHYSICAL_SHARD_CORE && tciIndex == 0) {
+								ASSERT(foundTeams);
+								ShardsAffectedByTeamFailure::Team primaryTeam =
+								    ShardsAffectedByTeamFailure::Team(bestTeams[0].first->getServerIDs(), true);
+								if (forceToUseNewPhysicalShard) {
 									physicalShardIDCandidate =
 									    self->physicalShardCollection->generateNewPhysicalShardID(debugID);
+								} else {
+									Optional<uint64_t> physicalShardIDFetch =
+									    self->physicalShardCollection->trySelectPhysicalShardFor(
+									        primaryTeam, metrics, debugID);
+									if (physicalShardIDFetch.present()) {
+										physicalShardIDCandidate = physicalShardIDFetch.get();
+									} else { // if failed to find an available physicalShard
+										physicalShardIDCandidate =
+										    self->physicalShardCollection->generateNewPhysicalShardID(debugID);
+									}
 								}
 							}
 						}
+						tciIndex++;
 					}
-					tciIndex++;
 				}
+
 				// once we've found healthy candidate teams, make sure they're not overloaded with outstanding moves
 				// already
+				// std::cout << "check healthy\n";
 				int busyTeamIndex = -1;
 				anyDestOverloaded = !canLaunchDest(bestTeams, rd.priority, self->destBusymap, &busyTeamIndex, debugID);
 				if (anyDestOverloaded) {
@@ -1433,13 +1624,22 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 					// Thus, we must check whether this is the case
 					// If yes, we must redo the selection and enforce to use a brand new physicalShard
 					// such that the remote team is always selected by getTeam()
+					// std::cout << "check healthy or overload\n";
 					if (!bestTeams[1].first->isHealthy() || busyTeamIndex == 1) {
+						if (!bestTeams[1].first->isHealthy()) {
+							// std::cout << "remote team unhealthy\n";
+						}
+						if (busyTeamIndex == 1) {
+							// std::cout << "remote team busy\n";
+						}
 						foundTeams = false;
 						forceToUseNewPhysicalShard = true;
+						usePhysicalShardAwareGetTeam = false;
 					}
 				}
 
 				if (foundTeams && anyHealthy && !anyDestOverloaded) { // why there is not allHealthy?
+					// std::cout << "foundTeams && anyHealthy && !anyDestOverloaded\n";
 					ASSERT(rd.completeDests.empty());
 					if (CLIENT_KNOBS->DD_PHYSICAL_SHARD_CORE) {
 						if (!rd.isRestore()) {
@@ -1458,6 +1658,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 								auto& serverIds = bestTeams[i].first->getServerIDs();
 								selectedTeams.push_back(ShardsAffectedByTeamFailure::Team(serverIds, i == 0));
 							}
+							// std::cout << "selectedTeams: " << selectedTeams.size() << "\n";
 							self->physicalShardCollection->updatePhysicalShardToTeams(
 							    rd.dataMoveId.first(), selectedTeams, self->singleRegionTeamSize, debugID);
 						}
@@ -1471,6 +1672,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 						if (self->physicalShardCollection->physicalShardCollection.count(rd.dataMoveId.first()) == 0) {
 							e.detail("Op", "Insert");
 							ASSERT(!rd.isRestore());
+							ASSERT(rd.dataMoveId.first() != 0);
 							self->physicalShardCollection->physicalShardCollection.insert(
 							    std::make_pair(rd.dataMoveId.first(),
 							                   PhysicalShardCollection::PhysicalShard(rd.dataMoveId.first(), metrics)));
