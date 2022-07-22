@@ -154,6 +154,92 @@ public:
 		return Void();
 	}
 
+	// Find the teams with the exact storage servers
+	static void getTeamsByServers(DDTeamCollection* self, GetTeamsAndMetricsRequest req) {
+		ASSERT(CLIENT_KNOBS->PHYSICAL_SHARD_AWARE_GET_TEAM);
+		TeamsAndMetrics res;
+		ASSERT(req.findTeamByServers);
+		for (auto& team : req.teams) {
+			const std::string servers = TCTeamInfo::serversToString(team);
+			for (const auto& team : self->teams) {
+				if (team->getServerIDsStr() == servers) {
+					TeamMetrics teamMetrics;
+					for (auto& ss : team->getServers()) {
+						if (ss->metricsPresent()) {
+							teamMetrics.ssMetricsList.push_back(std::make_pair(ss->getId(), ss->getMetrics()));
+						} else {
+							teamMetrics.ssMetricsList.push_back(
+							    std::make_pair(ss->getId(), Optional<GetStorageMetricsReply>()));
+						}
+					}
+					res.teams.push_back(std::make_tuple(team, false, teamMetrics));
+					break;
+				}
+			}
+		}
+		req.reply.send(res);
+	}
+
+	struct TeamIdxAndLoad {
+		int idx;
+		int64_t bytes;
+		std::string toString() const { return std::to_string(idx) + "-" + std::to_string(bytes); };
+		TeamIdxAndLoad(int idx, int64_t bytes) : idx(idx), bytes(bytes) {}
+	};
+
+	ACTOR static Future<Void> getTeamsAndMetrics(DDTeamCollection* self, GetTeamsAndMetricsRequest req) {
+		ASSERT(CLIENT_KNOBS->PHYSICAL_SHARD_AWARE_GET_TEAM);
+		try {
+			wait(self->checkBuildTeams());
+			TeamsAndMetrics res;
+			if (!self->teams.size()) {
+				req.reply.send(res);
+				return Void();
+			}
+			std::vector<TeamIdxAndLoad> teamCandicatesTrace;
+			std::priority_queue<std::pair<int, int64_t>,
+			                    std::vector<std::pair<int64_t, int>>,
+			                    std::greater<std::pair<int64_t, int>>>
+			    selectedServerIdxHeap;
+			for (int i = 0; i < self->teams.size(); i++) {
+				if (self->teams[i]->isHealthy()) {
+					int64_t loadBytes = self->teams[i]->getLoadBytes(false);
+					selectedServerIdxHeap.push(std::make_pair(loadBytes, i));
+					teamCandicatesTrace.push_back(TeamIdxAndLoad(i, loadBytes));
+				}
+			}
+			std::vector<TeamIdxAndLoad> selectedTeamTrace;
+			std::vector<int> selectedServerIdxList;
+			int numSelectedServerIdx =
+			    std::min(static_cast<int>(selectedServerIdxHeap.size()), SERVER_KNOBS->TEAM_COUNT_TAKEN_BY_GET_TEAMS);
+			for (int i = 0; i < numSelectedServerIdx; i++) {
+				auto p = selectedServerIdxHeap.top();
+				selectedServerIdxHeap.pop();
+				selectedTeamTrace.push_back(TeamIdxAndLoad(p.second, p.first));
+				selectedServerIdxList.push_back(p.second);
+			}
+			// make res
+			for (auto& idx : selectedServerIdxList) {
+				TeamMetrics teamMetrics;
+				for (auto& ss : self->teams[idx]->getServers()) {
+					if (ss->metricsPresent()) {
+						teamMetrics.ssMetricsList.push_back(std::make_pair(ss->getId(), ss->getMetrics()));
+					} else {
+						teamMetrics.ssMetricsList.push_back(
+						    std::make_pair(ss->getId(), Optional<GetStorageMetricsReply>()));
+					}
+				}
+				res.teams.push_back(std::make_tuple(self->teams[idx], false, teamMetrics));
+			}
+			req.reply.send(res);
+			return Void();
+		} catch (Error& e) {
+			if (e.code() != error_code_actor_cancelled)
+				req.reply.sendError(e);
+			throw;
+		}
+	}
+
 	// Find the team with the exact storage servers as req.src.
 	static void getTeamByServers(DDTeamCollection* self, GetTeamRequest req) {
 		const std::string servers = TCTeamInfo::serversToString(req.src);
@@ -2754,7 +2840,11 @@ public:
 	ACTOR static Future<Void> serverGetTeamsAndMetricsRequest(DDTeamCollection* self, TeamCollectionInterface tci) {
 		loop {
 			GetTeamsAndMetricsRequest req = waitNext(tci.getTeamsAndMetrics.getFuture());
-			// TODO
+			if (req.findTeamByServers) {
+				getTeamsByServers(self, req);
+			} else {
+				self->addActor.send(self->getTeamsAndMetrics(req));
+			}
 		}
 	}
 
@@ -3428,6 +3518,10 @@ Future<Void> DDTeamCollection::checkBuildTeams() {
 
 Future<Void> DDTeamCollection::getTeam(GetTeamRequest req) {
 	return DDTeamCollectionImpl::getTeam(this, req);
+}
+
+Future<Void> DDTeamCollection::getTeamsAndMetrics(GetTeamsAndMetricsRequest req) {
+	return DDTeamCollectionImpl::getTeamsAndMetrics(this, req);
 }
 
 Future<Void> DDTeamCollection::addSubsetOfEmergencyTeams() {

@@ -656,6 +656,8 @@ public:
 
 	Future<Void> getTeam(GetTeamRequest);
 
+	Future<Void> getTeamsAndMetrics(GetTeamsAndMetricsRequest);
+
 	Future<Void> init(Reference<InitialDataDistribution> initTeams, DDEnabledState const& ddEnabledState);
 
 	void addServer(StorageServerInterface newServer,
