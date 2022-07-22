@@ -199,7 +199,7 @@ public:
 		// many other new tasks get added so that the timed out tasks never get chances to re-run
 		if (deterministicRandom()->random01() < CLIENT_KNOBS->TASKBUCKET_CHECK_TIMEOUT_CHANCE) {
 			bool anyTimeouts = wait(requeueTimedOutTasks(tr, taskBucket));
-			TEST(anyTimeouts); // Found a task that timed out
+			CODE_PROBE(anyTimeouts, "Found a task that timed out");
 		}
 
 		state std::vector<Future<Optional<Key>>> taskKeyFutures(CLIENT_KNOBS->TASKBUCKET_MAX_PRIORITY + 1);
@@ -233,7 +233,7 @@ public:
 			bool anyTimeouts = wait(requeueTimedOutTasks(tr, taskBucket));
 			// If there were timeouts, try to get a task since there should now be one in one of the available spaces.
 			if (anyTimeouts) {
-				TEST(true); // Try to get one task from timeouts subspace
+				CODE_PROBE(true, "Try to get one task from timeouts subspace");
 				Reference<Task> task = wait(getOne(tr, taskBucket));
 				return task;
 			}
@@ -651,10 +651,7 @@ public:
 	                                     Reference<Task> task) {
 		taskBucket->setOptions(tr);
 
-		Tuple t;
-		t.append(task->timeoutVersion);
-		t.append(task->key);
-
+		Tuple t = Tuple::makeTuple(task->timeoutVersion, task->key);
 		RangeResult values = wait(tr->getRange(taskBucket->timeouts.range(t), 1));
 		if (values.size() > 0)
 			return false;
@@ -707,7 +704,7 @@ public:
 					wait(delay(CLIENT_KNOBS->TASKBUCKET_CHECK_ACTIVE_DELAY));
 					bool isActiveKey = wait(getActiveKey(tr, taskBucket, startingValue));
 					if (isActiveKey) {
-						TEST(true); // checkActive return true
+						CODE_PROBE(true, "checkActive return true");
 						return true;
 					}
 					break;
@@ -717,7 +714,7 @@ public:
 			}
 		}
 
-		TEST(true); // checkActive return false
+		CODE_PROBE(true, "checkActive return false");
 		return false;
 	}
 
@@ -742,7 +739,7 @@ public:
 	// Returns True if any tasks were affected.
 	ACTOR static Future<bool> requeueTimedOutTasks(Reference<ReadYourWritesTransaction> tr,
 	                                               Reference<TaskBucket> taskBucket) {
-		TEST(true); // Looks for tasks that have timed out and returns them to be available tasks.
+		CODE_PROBE(true, "Looks for tasks that have timed out and returns them to be available tasks.");
 		Version end = wait(tr->getReadVersion());
 		state KeyRange range(
 		    KeyRangeRef(taskBucket->timeouts.get(0).range().begin, taskBucket->timeouts.get(end).range().end));
@@ -849,12 +846,12 @@ public:
 
 		// If we're updating the task params the clear the old space and write params to the new space
 		if (updateParams) {
-			TEST(true); // Extended a task while updating parameters
+			CODE_PROBE(true, "Extended a task while updating parameters");
 			for (auto& p : task->params) {
 				tr->set(newTimeoutSpace.pack(p.key), p.value);
 			}
 		} else {
-			TEST(true); // Extended a task without updating parameters
+			CODE_PROBE(true, "Extended a task without updating parameters");
 			// Otherwise, read and transplant the params from the old to new timeout spaces
 			RangeResult params = wait(tr->getRange(oldTimeoutSpace.range(), CLIENT_KNOBS->TOO_MANY));
 			for (auto& kv : params) {
@@ -996,9 +993,7 @@ Future<bool> TaskBucket::isEmpty(Reference<ReadYourWritesTransaction> tr) {
 Future<Void> TaskBucket::finish(Reference<ReadYourWritesTransaction> tr, Reference<Task> task) {
 	setOptions(tr);
 
-	Tuple t;
-	t.append(task->timeoutVersion);
-	t.append(task->key);
+	Tuple t = Tuple::makeTuple(task->timeoutVersion, task->key);
 
 	tr->atomicOp(prefix.pack(LiteralStringRef("task_count")),
 	             LiteralStringRef("\xff\xff\xff\xff\xff\xff\xff\xff"),
@@ -1138,10 +1133,10 @@ public:
 		bool is_set = wait(isSet(tr, taskFuture));
 
 		if (is_set) {
-			TEST(true); // is_set == true
+			CODE_PROBE(true, "is_set == true");
 			wait(performAction(tr, taskBucket, taskFuture, task));
 		} else {
-			TEST(true); // is_set == false
+			CODE_PROBE(true, "is_set == false");
 			Subspace callbackSpace =
 			    taskFuture->callbacks.get(StringRef(deterministicRandom()->randomUniqueID().toString()));
 			for (auto& v : task->params) {

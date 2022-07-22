@@ -274,7 +274,7 @@ CommandFactory listTenantsFactory(
                 "The number of tenants to print can be specified using the [LIMIT] parameter, which defaults to 100."));
 
 // gettenant command
-ACTOR Future<bool> getTenantCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
+ACTOR Future<bool> getTenantCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens, int apiVersion) {
 	if (tokens.size() < 2 || tokens.size() > 3 || (tokens.size() == 3 && tokens[2] != "JSON"_sr)) {
 		printUsage(tokens[0]);
 		return false;
@@ -308,15 +308,25 @@ ACTOR Future<bool> getTenantCommandActor(Reference<IDatabase> db, std::vector<St
 
 				int64_t id;
 				std::string prefix;
+				std::string tenantState;
 				std::string tenantGroup;
+
 				doc.get("id", id);
-				doc.get("prefix", prefix);
-				bool hasTenantGroup = doc.tryGet("tenant_group", tenantGroup);
+
+				if (apiVersion >= 720) {
+					doc.get("prefix.printable", prefix);
+				} else {
+					doc.get("prefix", prefix);
+				}
+
+				doc.get("tenant_state", tenantState);
+				bool hasTenantGroup = doc.tryGet("tenant_group.printable", tenantGroup);
 
 				fmt::print("  id: {}\n", id);
 				fmt::print("  prefix: {}\n", printable(prefix).c_str());
+				fmt::print("  tenant state: {}\n", printable(tenantState).c_str());
 				if (hasTenantGroup) {
-					fmt::print("  tenant group: {}\n", printable(tenantGroup).c_str());
+					fmt::print("  tenant group: {}\n", tenantGroup.c_str());
 				}
 			}
 

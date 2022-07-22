@@ -83,15 +83,11 @@ struct GetMappedRangeWorkload : ApiWorkload {
 	static Value dataOfRecord(int i) { return Key(format("data-of-record-%08d", i)); }
 	static Value dataOfRecord(int i, int split) { return Key(format("data-of-record-%08d-split-%08d", i, split)); }
 
-	static Key indexEntryKey(int i) {
-		return Tuple().append(prefix).append(INDEX).append(indexKey(i)).append(primaryKey(i)).pack();
-	}
-	static Key recordKey(int i) { return Tuple().append(prefix).append(RECORD).append(primaryKey(i)).pack(); }
-	static Key recordKey(int i, int split) {
-		return Tuple().append(prefix).append(RECORD).append(primaryKey(i)).append(split).pack();
-	}
-	static Value recordValue(int i) { return Tuple().append(dataOfRecord(i)).pack(); }
-	static Value recordValue(int i, int split) { return Tuple().append(dataOfRecord(i, split)).pack(); }
+	static Key indexEntryKey(int i) { return Tuple::makeTuple(prefix, INDEX, indexKey(i), primaryKey(i)).pack(); }
+	static Key recordKey(int i) { return Tuple::makeTuple(prefix, RECORD, primaryKey(i)).pack(); }
+	static Key recordKey(int i, int split) { return Tuple::makeTuple(prefix, RECORD, primaryKey(i), split).pack(); }
+	static Value recordValue(int i) { return Tuple::makeTuple(dataOfRecord(i)).pack(); }
+	static Value recordValue(int i, int split) { return Tuple::makeTuple(dataOfRecord(i, split)).pack(); }
 
 	ACTOR Future<Void> fillInRecords(Database cx, int n, GetMappedRangeWorkload* self) {
 		state Transaction tr(cx);
@@ -270,9 +266,9 @@ struct GetMappedRangeWorkload : ApiWorkload {
 	                                   GetMappedRangeWorkload* self,
 	                                   int matchIndex,
 	                                   bool allMissing = false) {
-		Key beginTuple = Tuple().append(prefix).append(INDEX).append(indexKey(beginId)).getDataAsStandalone();
+		Key beginTuple = Tuple::makeTuple(prefix, INDEX, indexKey(beginId)).getDataAsStandalone();
 		state KeySelector beginSelector = KeySelector(firstGreaterOrEqual(beginTuple));
-		Key endTuple = Tuple().append(prefix).append(INDEX).append(indexKey(endId)).getDataAsStandalone();
+		Key endTuple = Tuple::makeTuple(prefix, INDEX, indexKey(endId)).getDataAsStandalone();
 		state KeySelector endSelector = KeySelector(firstGreaterOrEqual(endTuple));
 		state int limit = 100;
 		state int expectedBeginId = beginId;
@@ -322,9 +318,9 @@ struct GetMappedRangeWorkload : ApiWorkload {
 	                                                   Reference<TransactionWrapper>& tr,
 	                                                   GetMappedRangeWorkload* self) {
 		Key mapper = getMapper(self, false);
-		Key beginTuple = Tuple().append(prefix).append(INDEX).append(indexKey(beginId)).getDataAsStandalone();
+		Key beginTuple = Tuple::makeTuple(prefix, INDEX, indexKey(beginId)).getDataAsStandalone();
 		KeySelector beginSelector = KeySelector(firstGreaterOrEqual(beginTuple));
-		Key endTuple = Tuple().append(prefix).append(INDEX).append(indexKey(endId)).getDataAsStandalone();
+		Key endTuple = Tuple::makeTuple(prefix, INDEX, indexKey(endId)).getDataAsStandalone();
 		KeySelector endSelector = KeySelector(firstGreaterOrEqual(endTuple));
 		return tr->getMappedRange(beginSelector,
 		                          endSelector,

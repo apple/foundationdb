@@ -6,9 +6,13 @@ coordinators = 3
 machineCount = 15
 allowDefaultTenant = false
 
+[[knobs]]
+shard_encode_location_metadata = true
+storage_server_shard_aware = true
+
 [[test]]
 testTitle = 'PhysicalShardMove'
 useDB = true
 
     [[test.workload]]
-    testName = 'SSCheckpointWorkload'
+    testName = 'PhysicalShardMove'

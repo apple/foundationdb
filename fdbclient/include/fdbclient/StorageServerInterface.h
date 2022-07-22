@@ -25,6 +25,7 @@
 #include <ostream>
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/StorageCheckpoint.h"
+#include "fdbclient/StorageServerShard.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/QueueModel.h"
 #include "fdbrpc/fdbrpc.h"
@@ -572,12 +573,13 @@ struct GetShardStateReply {
 
 	Version first;
 	Version second;
+	std::vector<StorageServerShard> shards;
 	GetShardStateReply() = default;
 	GetShardStateReply(Version first, Version second) : first(first), second(second) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, first, second);
+		serializer(ar, first, second, shards);
 	}
 };
 
@@ -587,13 +589,16 @@ struct GetShardStateRequest {
 
 	KeyRange keys;
 	int32_t mode;
+	bool includePhysicalShard;
 	ReplyPromise<GetShardStateReply> reply;
-	GetShardStateRequest() {}
-	GetShardStateRequest(KeyRange const& keys, waitMode mode) : keys(keys), mode(mode) {}
+	GetShardStateRequest() = default;
+	GetShardStateRequest(KeyRange const& keys, waitMode mode, bool includePhysicalShard)
+	  : keys(keys), mode(mode), includePhysicalShard(includePhysicalShard) {}
+	GetShardStateRequest(KeyRange const& keys, waitMode mode) : keys(keys), mode(mode), includePhysicalShard(false) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keys, mode, reply);
+		serializer(ar, keys, mode, reply, includePhysicalShard);
 	}
 };
 
@@ -605,7 +610,6 @@ struct StorageMetrics {
 	int64_t bytesPerKSecond = 0; // network bandwidth (average over 10s)
 	int64_t iosPerKSecond = 0;
 	int64_t bytesReadPerKSecond = 0;
-	Optional<KeyRange> keys; // this metric belongs to which range
 
 	static const int64_t infinity = 1LL << 60;
 

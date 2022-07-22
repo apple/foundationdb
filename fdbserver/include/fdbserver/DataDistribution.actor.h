@@ -37,6 +37,27 @@
 
 enum class RelocateReason { INVALID = -1, OTHER, REBALANCE_DISK, REBALANCE_READ };
 
+// One-to-one relationship to the priority knobs
+enum class DataMovementReason {
+	RECOVER_MOVE,
+	REBALANCE_UNDERUTILIZED_TEAM,
+	REBALANCE_OVERUTILIZED_TEAM,
+	REBALANCE_READ_OVERUTIL_TEAM,
+	REBALANCE_READ_UNDERUTIL_TEAM,
+	PERPETUAL_STORAGE_WIGGLE,
+	TEAM_HEALTHY,
+	TEAM_CONTAINS_UNDESIRED_SERVER,
+	TEAM_REDUNDANT,
+	MERGE_SHARD,
+	POPULATE_REGION,
+	TEAM_UNHEALTHY,
+	TEAM_2_LEFT,
+	TEAM_1_LEFT,
+	TEAM_FAILED,
+	TEAM_0_LEFT,
+	SPLIT_SHARD
+};
+
 struct DDShardInfo;
 
 // Represents a data move in DD.
@@ -207,17 +228,20 @@ struct GetMetricsRequest {
 };
 
 struct GetTopKMetricsReply {
-	std::vector<StorageMetrics> metrics;
+	struct KeyRangeStorageMetrics {
+		KeyRange range;
+		StorageMetrics metrics;
+		KeyRangeStorageMetrics() = default;
+		KeyRangeStorageMetrics(const KeyRange& range, const StorageMetrics& s) : range(range), metrics(s) {}
+	};
+	std::vector<KeyRangeStorageMetrics> shardMetrics;
 	double minReadLoad = -1, maxReadLoad = -1;
 	GetTopKMetricsReply() {}
-	GetTopKMetricsReply(std::vector<StorageMetrics> const& m, double minReadLoad, double maxReadLoad)
-	  : metrics(m), minReadLoad(minReadLoad), maxReadLoad(maxReadLoad) {}
+	GetTopKMetricsReply(std::vector<KeyRangeStorageMetrics> const& m, double minReadLoad, double maxReadLoad)
+	  : shardMetrics(m), minReadLoad(minReadLoad), maxReadLoad(maxReadLoad) {}
 };
 struct GetTopKMetricsRequest {
-	// whether a > b
-	typedef std::function<bool(const StorageMetrics& a, const StorageMetrics& b)> MetricsComparator;
-	int topK = 1; // default only return the top 1 shard based on the comparator
-	MetricsComparator comparator; // Return true if a.score > b.score, return the largest topK in keys
+	int topK = 1; // default only return the top 1 shard based on the GetTopKMetricsRequest::compare function
 	std::vector<KeyRange> keys;
 	Promise<GetTopKMetricsReply> reply; // topK storage metrics
 	double maxBytesReadPerKSecond = 0, minBytesReadPerKSecond = 0; // all returned shards won't exceed this read load
@@ -229,6 +253,20 @@ struct GetTopKMetricsRequest {
 	                      double minBytesReadPerKSecond = 0)
 	  : topK(topK), keys(keys), maxBytesReadPerKSecond(maxBytesReadPerKSecond),
 	    minBytesReadPerKSecond(minBytesReadPerKSecond) {}
+
+	// Return true if a.score > b.score, return the largest topK in keys
+	static bool compare(const GetTopKMetricsReply::KeyRangeStorageMetrics& a,
+	                    const GetTopKMetricsReply::KeyRangeStorageMetrics& b) {
+		return compareByReadDensity(a, b);
+	}
+
+private:
+	// larger read density means higher score
+	static bool compareByReadDensity(const GetTopKMetricsReply::KeyRangeStorageMetrics& a,
+	                                 const GetTopKMetricsReply::KeyRangeStorageMetrics& b) {
+		return a.metrics.bytesReadPerKSecond / std::max(a.metrics.bytes * 1.0, 1.0) >
+		       b.metrics.bytesReadPerKSecond / std::max(b.metrics.bytes * 1.0, 1.0);
+	}
 };
 
 struct GetMetricsListRequest {
@@ -338,12 +376,14 @@ struct DDShardInfo {
 struct InitialDataDistribution : ReferenceCounted<InitialDataDistribution> {
 	InitialDataDistribution() : dataMoveMap(std::make_shared<DataMove>()) {}
 
+	// Read from dataDistributionModeKey. Whether DD is disabled. DD can be disabled persistently (mode = 0). Set mode
+	// to 1 will enable all disabled parts
 	int mode;
 	std::vector<std::pair<StorageServerInterface, ProcessClass>> allServers;
 	std::set<std::vector<UID>> primaryTeams;
 	std::set<std::vector<UID>> remoteTeams;
 	std::vector<DDShardInfo> shards;
-	Optional<Key> initHealthyZoneValue;
+	Optional<Key> initHealthyZoneValue; // set for maintenance mode
 	KeyRangeMap<std::shared_ptr<DataMove>> dataMoveMap;
 };
 

@@ -53,6 +53,15 @@ add_dependencies(fdb_c fdb_c_generated fdb_c_options)
 add_dependencies(fdbclient fdb_c_options)
 add_dependencies(fdbclient_sampling fdb_c_options)
 target_link_libraries(fdb_c PRIVATE $<BUILD_INTERFACE:fdbclient>)
+if(USE_UBSAN)
+  # The intent of this hack is to force c targets that depend on fdb_c to use
+  # c++ as their linker language. Otherwise you see undefined references to c++
+  # specific ubsan symbols.
+  add_library(force_cxx_linker STATIC IMPORTED)
+  set_property(TARGET force_cxx_linker PROPERTY IMPORTED_LOCATION /dev/null)
+  set_target_properties(force_cxx_linker PROPERTIES IMPORTED_LINK_INTERFACE_LANGUAGES CXX)
+  target_link_libraries(fdb_c PUBLIC $<BUILD_INTERFACE:force_cxx_linker>)
+endif()
 if(APPLE)
   set(symbols ${CMAKE_CURRENT_BINARY_DIR}/fdb_c.symbols)
   add_custom_command(OUTPUT ${symbols}
@@ -67,7 +76,12 @@ if(APPLE)
   target_link_options(fdb_c PRIVATE "LINKER:-no_weak_exports,-exported_symbols_list,${symbols}")
 elseif(WIN32)
 else()
-  target_link_options(fdb_c PRIVATE "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/fdb_c.map,-z,nodelete,-z,noexecstack")
+  if (NOT USE_UBSAN)
+    # For ubsan we need to export type information for the vptr check to work.
+    # Otherwise we only want to export fdb symbols in the fdb c api.
+    target_link_options(fdb_c PRIVATE "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/fdb_c.map")
+  endif()
+  target_link_options(fdb_c PRIVATE "LINKER:-z,nodelete,-z,noexecstack")
 endif()
 target_include_directories(fdb_c PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
@@ -112,8 +126,8 @@ if(NOT WIN32)
     test/unit/fdb_api.cpp
     test/unit/fdb_api.hpp)
 
-  add_library(fdb_cpp INTERFACE)
-  target_sources(fdb_cpp INTERFACE test/fdb_api.hpp)
+  add_library(fdb_cpp INTERFACE test/fdb_api.hpp)
+  target_sources(fdb_cpp INTERFACE )
   target_include_directories(fdb_cpp INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/test)
   target_link_libraries(fdb_cpp INTERFACE fmt::fmt)
 
@@ -180,34 +194,20 @@ if(NOT WIN32)
   target_link_libraries(fdb_c_client_memory_test PRIVATE fdb_c Threads::Threads)
 
   target_include_directories(fdb_c_api_tester_impl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/ ${CMAKE_SOURCE_DIR}/flow/include ${CMAKE_BINARY_DIR}/flow/include)
-  if(USE_SANITIZER)
-    target_link_libraries(fdb_c_api_tester_impl PRIVATE fdb_cpp toml11_target Threads::Threads fmt::fmt boost_asan)
-  else()
-    target_link_libraries(fdb_c_api_tester_impl PRIVATE fdb_cpp toml11_target Threads::Threads fmt::fmt boost_target)
-  endif()
+  target_link_libraries(fdb_c_api_tester_impl PRIVATE fdb_cpp toml11_target Threads::Threads fmt::fmt boost_target)
   target_link_libraries(fdb_c_api_tester_impl PRIVATE SimpleOpt)
 
-  add_dependencies(fdb_c_setup_tests doctest)
-  add_dependencies(fdb_c_unit_tests_impl doctest)
-  add_dependencies(fdb_c_unit_tests_version_510 doctest)
-  add_dependencies(disconnected_timeout_unit_tests doctest)
-  target_include_directories(fdb_c_setup_tests PUBLIC ${DOCTEST_INCLUDE_DIR})
-  target_include_directories(fdb_c_unit_tests_impl PUBLIC ${DOCTEST_INCLUDE_DIR} ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/)
-  target_include_directories(fdb_c_unit_tests_version_510 PUBLIC ${DOCTEST_INCLUDE_DIR} ${CMAKE_BINARY_DIR}/flow/include)
-  target_include_directories(disconnected_timeout_unit_tests PUBLIC ${DOCTEST_INCLUDE_DIR})
-  target_link_libraries(fdb_c_setup_tests PRIVATE fdb_c Threads::Threads)
-  target_link_libraries(fdb_c_unit_tests_impl PRIVATE fdb_c Threads::Threads fdbclient rapidjson)
-  target_link_libraries(fdb_c_unit_tests_version_510 PRIVATE fdb_c Threads::Threads)
-  target_link_libraries(trace_partial_file_suffix_test PRIVATE fdb_c Threads::Threads flow)
-  target_link_libraries(disconnected_timeout_unit_tests PRIVATE fdb_c Threads::Threads)
+  target_include_directories(fdb_c_unit_tests_impl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/)
+  target_include_directories(fdb_c_unit_tests_version_510 PUBLIC ${CMAKE_BINARY_DIR}/flow/include)
+  target_link_libraries(fdb_c_setup_tests PRIVATE fdb_c Threads::Threads doctest)
+  target_link_libraries(fdb_c_unit_tests_impl PRIVATE fdb_c Threads::Threads fdbclient rapidjson doctest)
+  target_link_libraries(fdb_c_unit_tests_version_510 PRIVATE fdb_c Threads::Threads doctest)
+  target_link_libraries(trace_partial_file_suffix_test PRIVATE fdb_c Threads::Threads flow doctest)
+  target_link_libraries(disconnected_timeout_unit_tests PRIVATE fdb_c Threads::Threads doctest)
 
   # do not set RPATH for mako
   set_property(TARGET mako PROPERTY SKIP_BUILD_RPATH TRUE)
-  if (USE_SANITIZER)
-    target_link_libraries(mako PRIVATE fdb_c fdbclient fmt::fmt Threads::Threads fdb_cpp boost_asan rapidjson)
-  else()
-    target_link_libraries(mako PRIVATE fdb_c fdbclient fmt::fmt Threads::Threads fdb_cpp boost_target rapidjson)
-  endif()
+  target_link_libraries(mako PRIVATE fdb_c fdbclient fmt::fmt Threads::Threads fdb_cpp boost_target rapidjson)
 
   if(NOT OPEN_FOR_IDE)
     # Make sure that fdb_c.h is compatible with c90
@@ -426,7 +426,12 @@ if (NOT WIN32 AND NOT APPLE AND NOT OPEN_FOR_IDE)
 endif()
 
 # Generate shim library in Linux builds
-if (NOT WIN32 AND NOT APPLE AND NOT OPEN_FOR_IDE)
+if (OPEN_FOR_IDE)
+
+  add_library(fdb_c_shim OBJECT fdb_c_shim.cpp)
+  target_link_libraries(fdb_c_shim PUBLIC dl)
+
+elseif(NOT WIN32 AND NOT APPLE AND NOT OPEN_FOR_IDE AND NOT USE_UBSAN) # Linux, non-ubsan only
 
   set(SHIM_LIB_OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR})
 
@@ -454,10 +459,12 @@ if (NOT WIN32 AND NOT APPLE AND NOT OPEN_FOR_IDE)
   add_test(NAME fdb_c_shim_library_tests
     COMMAND $<TARGET_FILE:Python::Interpreter> ${CMAKE_CURRENT_SOURCE_DIR}/test/fdb_c_shim_tests.py
           --build-dir ${CMAKE_BINARY_DIR}
-          --source-dir ${CMAKE_SOURCE_DIR}
+          --unit-tests-bin $<TARGET_FILE:fdb_c_shim_unit_tests>
+          --api-tester-bin $<TARGET_FILE:fdb_c_shim_api_tester>
+          --api-test-dir ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests
           )
 
-endif() # End Linux only
+endif() # End Linux, non-ubsan only
 
 # TODO: re-enable once the old vcxproj-based build system is removed.
 #generate_export_header(fdb_c EXPORT_MACRO_NAME "DLLEXPORT"

@@ -24,6 +24,17 @@
 #include <boost/algorithm/string.hpp>
 #include <boost/format.hpp>
 
+EncryptCipherMode encryptModeFromString(const std::string& modeStr) {
+	if (modeStr == "NONE") {
+		return ENCRYPT_CIPHER_MODE_NONE;
+	} else if (modeStr == "AES-256-CTR") {
+		return ENCRYPT_CIPHER_MODE_AES_256_CTR;
+	} else {
+		TraceEvent("EncryptModeFromString").log();
+		throw not_implemented();
+	}
+}
+
 std::string getEncryptDbgTraceKey(std::string_view prefix,
                                   EncryptCipherDomainId domainId,
                                   StringRef domainName,

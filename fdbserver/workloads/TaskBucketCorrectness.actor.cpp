@@ -359,8 +359,7 @@ TEST_CASE("/fdbclient/TaskBucket/Subspace") {
 	print_subspace_key(subspace_test1, 1);
 	ASSERT(subspace_test1.key() == LiteralStringRef("abc"));
 
-	Tuple t;
-	t.append(LiteralStringRef("user"));
+	Tuple t = Tuple::makeTuple("user"_sr);
 	Subspace subspace_test2(t);
 	print_subspace_key(subspace_test2, 2);
 	ASSERT(subspace_test2.key() == LiteralStringRef("\x01user\x00"));
@@ -369,8 +368,7 @@ TEST_CASE("/fdbclient/TaskBucket/Subspace") {
 	print_subspace_key(subspace_test3, 3);
 	ASSERT(subspace_test3.key() == LiteralStringRef("abc\x01user\x00"));
 
-	Tuple t1;
-	t1.append(1);
+	Tuple t1 = Tuple::makeTuple(1);
 	Subspace subspace_test4(t1);
 	print_subspace_key(subspace_test4, 4);
 	ASSERT(subspace_test4.key() == LiteralStringRef("\x15\x01"));
@@ -400,8 +398,7 @@ TEST_CASE("/fdbclient/TaskBucket/Subspace") {
 	ASSERT(subspace_test8.key() == LiteralStringRef("\x01subitem\x00"));
 
 	// pack
-	Tuple t3;
-	t3.append(StringRef());
+	Tuple t3 = Tuple::makeTuple(""_sr);
 	printf("%d==========%s===%d\n", 10, printable(subspace_test5.pack(t3)).c_str(), subspace_test5.pack(t3).size());
 	ASSERT(subspace_test5.pack(t3) == subspace_test5.pack(StringRef()));
 	ASSERT(subspace_test5.pack(t3) == LiteralStringRef("abc\x01user\x00\x15\x7b\x01\x00"));
