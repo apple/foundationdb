@@ -274,7 +274,8 @@ void DatabaseContext::getLatestCommitVersions(const Reference<LocationInfo>& loc
 			    .detail("InSSIDMap", iter != ssidTagMapping.end() ? 1 : 0)
 			    .detail("Tag", tag)
 			    .detail("CommitVersion", commitVersion)
-			    .detail("ReadVersion", readVersion);
+			    .detail("ReadVersion", readVersion)
+			    .detail("VersionVector", ssVersionVectorCache.toString());
 			++transactionCommitVersionNotFoundForSS;
 		}
 	}
