@@ -209,6 +209,10 @@ Future<Optional<TenantMapEntry>> createTenant(Reference<DB> db,
 	}
 }
 
+// Deletes the tenant with the given name. If tenantId is specified, the tenant being deleted must also have the same
+// ID. If no matching tenant is found, this function returns without deleting anything. This behavior allows the
+// function to be used idempotently: if the transaction is retried after having succeeded, it will see that the tenant
+// is absent (or optionally created with a new ID) and do nothing.
 ACTOR template <class Transaction>
 Future<Void> deleteTenantTransaction(Transaction tr,
                                      TenantNameRef name,
@@ -247,6 +251,8 @@ Future<Void> deleteTenantTransaction(Transaction tr,
 	return Void();
 }
 
+// Deletes the tenant with the given name. If tenantId is specified, the tenant being deleted must also have the same
+// ID.
 ACTOR template <class DB>
 Future<Void> deleteTenant(Reference<DB> db, TenantName name, Optional<int64_t> tenantId = Optional<int64_t>()) {
 	state Reference<typename DB::TransactionT> tr = db->createTransaction();
@@ -258,9 +264,12 @@ Future<Void> deleteTenant(Reference<DB> db, TenantName name, Optional<int64_t> t
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 			if (checkExistence) {
-				Optional<TenantMapEntry> entry = wait(tryGetTenantTransaction(tr, name));
-				if (!entry.present()) {
-					throw tenant_not_found();
+				TenantMapEntry entry = wait(getTenantTransaction(tr, name));
+
+				// If an ID wasn't specified, use the current ID. This way we cannot inadvertently delete
+				// multiple tenants if this transaction retries.
+				if (!tenantId.present()) {
+					tenantId = entry.id;
 				}
 
 				checkExistence = false;
