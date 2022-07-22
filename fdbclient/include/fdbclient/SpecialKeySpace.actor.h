@@ -271,13 +271,21 @@ private:
 };
 
 // Used for SpecialKeySpaceCorrectnessWorkload
-class SKSCTestImpl : public SpecialKeyRangeRWImpl {
+class SKSCTestRWImpl : public SpecialKeyRangeRWImpl {
 public:
-	explicit SKSCTestImpl(KeyRangeRef kr);
+	explicit SKSCTestRWImpl(KeyRangeRef kr);
 	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
+};
+
+class SKSCTestAsyncReadImpl : public SpecialKeyRangeAsyncImpl {
+public:
+	explicit SKSCTestAsyncReadImpl(KeyRangeRef kr);
+	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
+	                             KeyRangeRef kr,
+	                             GetRangeLimits limitsHint) const override;
 };
 
 // Use special key prefix "\xff\xff/transaction/conflicting_keys/<some_key>",

@@ -629,12 +629,8 @@ Future<Void> SpecialKeySpace::commit(ReadYourWritesTransaction* ryw) {
 	return commitActor(this, ryw);
 }
 
-SKSCTestImpl::SKSCTestImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
-
-Future<RangeResult> SKSCTestImpl::getRange(ReadYourWritesTransaction* ryw,
-                                           KeyRangeRef kr,
-                                           GetRangeLimits limitsHint) const {
-	ASSERT(range.contains(kr));
+// For SKSCTestRWImpl and SKSCTestAsyncReadImpl
+Future<RangeResult> SKSCTestGetRangeBase(ReadYourWritesTransaction* ryw, KeyRangeRef kr, GetRangeLimits limitsHint) {
 	auto resultFuture = ryw->getRange(kr, CLIENT_KNOBS->TOO_MANY);
 	// all keys are written to RYW, since GRV is set, the read should happen locally
 	ASSERT(resultFuture.isReady());
@@ -644,9 +640,27 @@ Future<RangeResult> SKSCTestImpl::getRange(ReadYourWritesTransaction* ryw,
 	return rywGetRange(ryw, kr, kvs);
 }
 
-Future<Optional<std::string>> SKSCTestImpl::commit(ReadYourWritesTransaction* ryw) {
+SKSCTestRWImpl::SKSCTestRWImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
+
+Future<RangeResult> SKSCTestRWImpl::getRange(ReadYourWritesTransaction* ryw,
+                                             KeyRangeRef kr,
+                                             GetRangeLimits limitsHint) const {
+	ASSERT(range.contains(kr));
+	return SKSCTestGetRangeBase(ryw, kr, limitsHint);
+}
+
+Future<Optional<std::string>> SKSCTestRWImpl::commit(ReadYourWritesTransaction* ryw) {
 	ASSERT(false);
 	return Optional<std::string>();
+}
+
+SKSCTestAsyncReadImpl::SKSCTestAsyncReadImpl(KeyRangeRef kr) : SpecialKeyRangeAsyncImpl(kr) {}
+
+Future<RangeResult> SKSCTestAsyncReadImpl::getRange(ReadYourWritesTransaction* ryw,
+                                                    KeyRangeRef kr,
+                                                    GetRangeLimits limitsHint) const {
+	ASSERT(range.contains(kr));
+	return SKSCTestGetRangeBase(ryw, kr, limitsHint);
 }
 
 ReadConflictRangeImpl::ReadConflictRangeImpl(KeyRangeRef kr) : SpecialKeyRangeReadImpl(kr) {}
