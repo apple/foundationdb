@@ -619,11 +619,7 @@ def tenants(logger):
     assert len(lines) == 3
     assert lines[0].strip().startswith('id: ')
     assert lines[1].strip().startswith('prefix: ')
-<<<<<<< HEAD
-    assert lines[2].strip().startswith('tenant state: ready')
-=======
     assert lines[2].strip() == 'tenant state: ready'
->>>>>>> tenant-metadata-key-backed-types
 
     output = run_fdbcli_command('gettenant tenant JSON')
     json_output = json.loads(output, strict=False)
@@ -635,24 +631,25 @@ def tenants(logger):
     assert(len(json_output['tenant']['prefix']) == 2)
     assert('base64' in json_output['tenant']['prefix'])
     assert('printable' in json_output['tenant']['prefix'])
-<<<<<<< HEAD
-    assert('tenant_state' in json_output['tenant'])
+    assert(json_output['tenant']['tenant_state'] == 'ready')
 
     output = run_fdbcli_command('gettenant tenant2')
     lines = output.split('\n')
-    assert len(lines) == 3
+    assert len(lines) == 4
     assert lines[0].strip().startswith('id: ')
     assert lines[1].strip().startswith('prefix: ')
-    assert lines[2].strip() == 'tenant group: tenant_group2'
+    assert lines[2].strip() == 'tenant state: ready'
+    assert lines[3].strip() == 'tenant group: tenant_group2'
 
     output = run_fdbcli_command('gettenant tenant2 JSON')
     json_output = json.loads(output, strict=False)
     assert(len(json_output) == 2)
     assert('tenant' in json_output)
     assert(json_output['type'] == 'success')
-    assert(len(json_output['tenant']) == 3)
+    assert(len(json_output['tenant']) == 4)
     assert('id' in json_output['tenant'])
     assert('prefix' in json_output['tenant'])
+    assert(json_output['tenant']['tenant_state'] == 'ready')
     assert('tenant_group' in json_output['tenant'])
     assert(len(json_output['tenant']['tenant_group']) == 2)
     assert('base64' in json_output['tenant']['tenant_group'])
@@ -663,23 +660,23 @@ def tenants(logger):
 
     output = run_fdbcli_command('gettenant tenant')
     lines = output.split('\n')
-    assert len(lines) == 3
-    assert lines[2].strip() == 'tenant group: tenant_group1'
+    assert len(lines) == 4
+    assert lines[3].strip() == 'tenant group: tenant_group1'
 
     output = run_fdbcli_command('configuretenant tenant tenant_group=tenant_group1 tenant_group=tenant_group2')
     assert output == 'The configuration for tenant `tenant\' has been updated'
 
     output = run_fdbcli_command('gettenant tenant')
     lines = output.split('\n')
-    assert len(lines) == 3
-    assert lines[2].strip() == 'tenant group: tenant_group2'
+    assert len(lines) == 4
+    assert lines[3].strip() == 'tenant group: tenant_group2'
 
     output = run_fdbcli_command('configuretenant tenant unset tenant_group')
     assert output == 'The configuration for tenant `tenant\' has been updated'
 
     output = run_fdbcli_command('gettenant tenant')
     lines = output.split('\n')
-    assert len(lines) == 2
+    assert len(lines) == 3
 
     output = run_fdbcli_command_and_get_error('configuretenant tenant unset')
     assert output == 'ERROR: `unset\' specified without a configuration parameter.'
@@ -692,9 +689,6 @@ def tenants(logger):
 
     output = run_fdbcli_command_and_get_error('configuretenant tenant3 tenant_group=tenant_group1')
     assert output == 'ERROR: Tenant does not exist (2131)'
-=======
-    assert(json_output['tenant']['tenant_state'] == 'ready')
->>>>>>> tenant-metadata-key-backed-types
 
     output = run_fdbcli_command('usetenant')
     assert output == 'Using the default tenant'
