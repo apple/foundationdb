@@ -314,6 +314,10 @@ struct TenantManagementWorkload : TestWorkload {
 		state std::map<TenantName, TenantMapEntry> tenantsToCreate;
 		for (int i = 0; i < numTenants; ++i) {
 			TenantName tenant = self->chooseTenantName(true);
+			while (tenantsToCreate.count(tenant)) {
+				tenant = self->chooseTenantName(true);
+			}
+
 			TenantMapEntry entry;
 			entry.tenantGroup = self->chooseTenantGroup(true);
 			tenantsToCreate[tenant] = entry;

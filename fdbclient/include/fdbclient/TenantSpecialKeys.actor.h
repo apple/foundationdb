@@ -111,12 +111,17 @@ private:
 	    ReadYourWritesTransaction* ryw,
 	    TenantNameRef tenantName,
 	    std::vector<std::pair<Standalone<StringRef>, Optional<Value>>> configMutations,
-	    int64_t tenantId) {
+	    int64_t tenantId,
+	    std::map<TenantGroupName, int>* tenantGroupNetTenantDelta) {
 		state TenantMapEntry tenantEntry;
 		tenantEntry.setId(tenantId);
 
 		for (auto const& [name, value] : configMutations) {
 			tenantEntry.configure(name, value);
+		}
+
+		if (tenantEntry.tenantGroup.present()) {
+			(*tenantGroupNetTenantDelta)[tenantEntry.tenantGroup.get()]++;
 		}
 
 		std::pair<Optional<TenantMapEntry>, bool> entry =
@@ -127,13 +132,14 @@ private:
 
 	ACTOR static Future<Void> createTenants(
 	    ReadYourWritesTransaction* ryw,
-	    std::map<TenantName, std::vector<std::pair<Standalone<StringRef>, Optional<Value>>>> tenants) {
+	    std::map<TenantName, std::vector<std::pair<Standalone<StringRef>, Optional<Value>>>> tenants,
+	    std::map<TenantGroupName, int>* tenantGroupNetTenantDelta) {
 		int64_t _nextId = wait(TenantAPI::getNextTenantId(&ryw->getTransaction()));
 		int64_t nextId = _nextId;
 
 		std::vector<Future<Void>> createFutures;
 		for (auto const& [tenant, config] : tenants) {
-			createFutures.push_back(createTenant(ryw, tenant, config, nextId++));
+			createFutures.push_back(createTenant(ryw, tenant, config, nextId++, tenantGroupNetTenantDelta));
 		}
 
 		TenantMetadata::lastTenantId.set(&ryw->getTransaction(), nextId - 1);
@@ -144,20 +150,46 @@ private:
 	ACTOR static Future<Void> changeTenantConfig(
 	    ReadYourWritesTransaction* ryw,
 	    TenantName tenantName,
-	    std::vector<std::pair<Standalone<StringRef>, Optional<Value>>> configEntries) {
+	    std::vector<std::pair<Standalone<StringRef>, Optional<Value>>> configEntries,
+	    std::map<TenantGroupName, int>* tenantGroupNetTenantDelta) {
 		TenantMapEntry originalEntry = wait(TenantAPI::getTenantTransaction(&ryw->getTransaction(), tenantName));
 		TenantMapEntry updatedEntry = originalEntry;
 		for (auto const& [name, value] : configEntries) {
 			updatedEntry.configure(name, value);
 		}
 
+		if (originalEntry.tenantGroup != updatedEntry.tenantGroup) {
+			if (originalEntry.tenantGroup.present()) {
+				(*tenantGroupNetTenantDelta)[originalEntry.tenantGroup.get()]--;
+			}
+			if (updatedEntry.tenantGroup.present()) {
+				(*tenantGroupNetTenantDelta)[updatedEntry.tenantGroup.get()]++;
+			}
+		}
+
 		wait(TenantAPI::configureTenantTransaction(&ryw->getTransaction(), tenantName, originalEntry, updatedEntry));
+		return Void();
+	}
+
+	ACTOR static Future<Void> deleteSingleTenant(ReadYourWritesTransaction* ryw,
+	                                             TenantName tenantName,
+	                                             std::map<TenantGroupName, int>* tenantGroupNetTenantDelta) {
+		state Optional<TenantMapEntry> tenantEntry =
+		    wait(TenantAPI::tryGetTenantTransaction(&ryw->getTransaction(), tenantName));
+		if (tenantEntry.present()) {
+			wait(TenantAPI::deleteTenantTransaction(&ryw->getTransaction(), tenantName));
+			if (tenantEntry.get().tenantGroup.present()) {
+				(*tenantGroupNetTenantDelta)[tenantEntry.get().tenantGroup.get()]--;
+			}
+		}
+
 		return Void();
 	}
 
 	ACTOR static Future<Void> deleteTenantRange(ReadYourWritesTransaction* ryw,
 	                                            TenantName beginTenant,
-	                                            TenantName endTenant) {
+	                                            TenantName endTenant,
+	                                            std::map<TenantGroupName, int>* tenantGroupNetTenantDelta) {
 		state std::vector<std::pair<TenantName, TenantMapEntry>> tenants = wait(TenantAPI::listTenantsTransaction(
 		    &ryw->getTransaction(), beginTenant, endTenant, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1));
 
@@ -173,9 +205,33 @@ private:
 		std::vector<Future<Void>> deleteFutures;
 		for (auto tenant : tenants) {
 			deleteFutures.push_back(TenantAPI::deleteTenantTransaction(&ryw->getTransaction(), tenant.first));
+			if (tenant.second.tenantGroup.present()) {
+				(*tenantGroupNetTenantDelta)[tenant.second.tenantGroup.get()]--;
+			}
 		}
 
 		wait(waitForAll(deleteFutures));
+		return Void();
+	}
+
+	// Check if the number of tenants in the tenant group is equal to the net reduction in the number of tenants.
+	// If it is, then we can delete the tenant group.
+	ACTOR static Future<Void> checkAndRemoveTenantGroup(ReadYourWritesTransaction* ryw,
+	                                                    TenantGroupName tenantGroup,
+	                                                    int tenantDelta) {
+		ASSERT(tenantDelta < 0);
+		state int removedTenants = -tenantDelta;
+		KeyBackedSet<Tuple>::RangeResultType tenantsInGroup =
+		    wait(TenantMetadata::tenantGroupTenantIndex.getRange(&ryw->getTransaction(),
+		                                                         Tuple::makeTuple(tenantGroup),
+		                                                         Tuple::makeTuple(keyAfter(tenantGroup)),
+		                                                         removedTenants + 1));
+
+		ASSERT(tenantsInGroup.results.size() >= removedTenants);
+		if (tenantsInGroup.results.size() == removedTenants) {
+			TenantMetadata::tenantGroupMap.erase(&ryw->getTransaction(), tenantGroup);
+		}
+
 		return Void();
 	}
 
@@ -195,12 +251,22 @@ public:
 		return getTenantRange<HasSubRanges>(ryw, kr, limitsHint);
 	}
 
-	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override {
-		auto ranges = ryw->getSpecialKeySpaceWriteMap().containedRanges(range);
-		std::vector<Future<Void>> tenantManagementFutures;
+	ACTOR static Future<Optional<std::string>> commitImpl(TenantRangeImpl* self, ReadYourWritesTransaction* ryw) {
+		state std::vector<Future<Void>> tenantManagementFutures;
 
-		std::vector<std::pair<KeyRangeRef, Optional<Value>>> mapMutations;
-		std::map<TenantName, std::vector<std::pair<Standalone<StringRef>, Optional<Value>>>> configMutations;
+		// This map is an ugly workaround to the fact that we cannot use RYW in these transactions.
+		// It tracks the net change to the number of tenants in a tenant group, and at the end we can compare
+		// that with how many tenants the tenant group started with. If we removed all of the tenants, then we
+		// delete the tenant group.
+		//
+		// SOMEDAY: enable RYW support in special keys and remove this complexity.
+		state std::map<TenantGroupName, int> tenantGroupNetTenantDelta;
+
+		state KeyRangeMap<std::pair<bool, Optional<Value>>>::Ranges ranges =
+		    ryw->getSpecialKeySpaceWriteMap().containedRanges(self->range);
+
+		state std::vector<std::pair<KeyRangeRef, Optional<Value>>> mapMutations;
+		state std::map<TenantName, std::vector<std::pair<Standalone<StringRef>, Optional<Value>>>> configMutations;
 
 		tenantManagementFutures.push_back(TenantAPI::checkTenantMode(&ryw->getTransaction(), ClusterType::STANDALONE));
 
@@ -209,7 +275,7 @@ public:
 				continue;
 			}
 
-			KeyRangeRef adjustedRange =
+			state KeyRangeRef adjustedRange =
 			    range.range()
 			        .removePrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)
 			        .removePrefix(submoduleRange.begin);
@@ -250,13 +316,13 @@ public:
 			} else {
 				// For a single key clear, just issue the delete
 				if (mapMutation.first.singleKeyRange()) {
-					tenantManagementFutures.push_back(
-					    TenantAPI::deleteTenantTransaction(&ryw->getTransaction(), tenantName));
+					tenantManagementFutures.push_back(deleteSingleTenant(ryw, tenantName, &tenantGroupNetTenantDelta));
 
 					// Configuration changes made to a deleted tenant are discarded
 					configMutations.erase(tenantName);
 				} else {
-					tenantManagementFutures.push_back(deleteTenantRange(ryw, tenantName, mapMutation.first.end));
+					tenantManagementFutures.push_back(
+					    deleteTenantRange(ryw, tenantName, mapMutation.first.end, &tenantGroupNetTenantDelta));
 
 					// Configuration changes made to a deleted tenant are discarded
 					configMutations.erase(configMutations.lower_bound(tenantName),
@@ -266,14 +332,27 @@ public:
 		}
 
 		if (!tenantsToCreate.empty()) {
-			tenantManagementFutures.push_back(createTenants(ryw, tenantsToCreate));
+			tenantManagementFutures.push_back(createTenants(ryw, tenantsToCreate, &tenantGroupNetTenantDelta));
 		}
 		for (auto configMutation : configMutations) {
-			tenantManagementFutures.push_back(changeTenantConfig(ryw, configMutation.first, configMutation.second));
+			tenantManagementFutures.push_back(
+			    changeTenantConfig(ryw, configMutation.first, configMutation.second, &tenantGroupNetTenantDelta));
 		}
 
-		return tag(waitForAll(tenantManagementFutures), Optional<std::string>());
+		wait(waitForAll(tenantManagementFutures));
+
+		state std::vector<Future<Void>> tenantGroupUpdateFutures;
+		for (auto [tenantGroup, count] : tenantGroupNetTenantDelta) {
+			if (count < 0) {
+				tenantGroupUpdateFutures.push_back(checkAndRemoveTenantGroup(ryw, tenantGroup, count));
+			}
+		}
+
+		wait(waitForAll(tenantGroupUpdateFutures));
+		return Optional<std::string>();
 	}
+
+	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override { return commitImpl(this, ryw); }
 };
 
 #include "flow/unactorcompiler.h"
