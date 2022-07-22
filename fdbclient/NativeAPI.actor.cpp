@@ -1476,9 +1476,10 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
     specialKeySpace(std::make_unique<SpecialKeySpace>(specialKeys.begin, specialKeys.end, /* test */ false)),
     connectToDatabaseEventCacheHolder(format("ConnectToDatabase/%s", dbId.toString().c_str())) {
 
-	TraceEvent("DatabaseContextCreated").backtrace();
-
 	dbId = deterministicRandom()->randomUniqueID();
+
+	TraceEvent("DatabaseContextCreated", dbId).backtrace();
+
 	connected = (clientInfo->get().commitProxies.size() && clientInfo->get().grvProxies.size())
 	                ? Void()
 	                : clientInfo->onChange();
@@ -1808,7 +1809,7 @@ DatabaseContext::~DatabaseContext() {
 	ASSERT_ABORT(server_interf.empty());
 	locationCache.insert(allKeys, Reference<LocationInfo>());
 
-	TraceEvent("DatabaseContextDestructed").backtrace();
+	TraceEvent("DatabaseContextDestructed", dbId).backtrace();
 }
 
 Optional<KeyRangeLocationInfo> DatabaseContext::getCachedLocation(const Optional<TenantName>& tenantName,
