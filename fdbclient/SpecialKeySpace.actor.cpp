@@ -148,7 +148,7 @@ RangeResult rywGetRange(ReadYourWritesTransaction* ryw, const KeyRangeRef& kr, c
 ACTOR Future<Void> moveKeySelectorOverRangeActor(const SpecialKeyRangeReadImpl* skrImpl,
                                                  ReadYourWritesTransaction* ryw,
                                                  KeySelector* ks,
-                                                 Optional<RangeResult>* cache) {
+                                                 KeyRangeMap<Optional<RangeResult>>* cache) {
 	// should be removed before calling
 	ASSERT(!ks->orEqual);
 
@@ -234,7 +234,7 @@ ACTOR Future<Void> normalizeKeySelectorActor(SpecialKeySpace* sks,
                                              KeyRangeRef boundary,
                                              int* actualOffset,
                                              RangeResult* result,
-                                             Optional<RangeResult>* cache) {
+                                             KeyRangeMap<Optional<RangeResult>>* cache) {
 	// If offset < 1, where we need to move left, iter points to the range containing at least one smaller key
 	// (It's a wasting of time to walk through the range whose begin key is same as ks->key)
 	// (rangeContainingKeyBefore itself handles the case where ks->key == Key())
@@ -319,7 +319,9 @@ ACTOR Future<RangeResult> SpecialKeySpace::checkRYWValid(SpecialKeySpace* sks,
 		         wait(SpecialKeySpace::getRangeAggregationActor(sks, ryw, begin, end, limits, reverse))) {
 			return result;
 		}
-		when(wait(ryw->resetFuture())) { throw internal_error(); }
+		when(wait(ryw->resetFuture())) {
+			throw internal_error();
+		}
 	}
 }
 
@@ -337,8 +339,9 @@ ACTOR Future<RangeResult> SpecialKeySpace::getRangeAggregationActor(SpecialKeySp
 	state int actualBeginOffset;
 	state int actualEndOffset;
 	state KeyRangeRef moduleBoundary;
-	// used to cache result from potential first read
-	state Optional<RangeResult> cache;
+	// used to cache results from potential first async read
+	// the current implementation will read the whole range result to save in the cache
+	state KeyRangeMap<Optional<RangeResult>> cache;
 
 	if (ryw->specialKeySpaceRelaxed()) {
 		moduleBoundary = sks->range;
@@ -385,7 +388,7 @@ ACTOR Future<RangeResult> SpecialKeySpace::getRangeAggregationActor(SpecialKeySp
 			KeyRangeRef kr = iter->range();
 			KeyRef keyStart = kr.contains(begin.getKey()) ? begin.getKey() : kr.begin;
 			KeyRef keyEnd = kr.contains(end.getKey()) ? end.getKey() : kr.end;
-			if (iter->value()->isAsync() && cache.present()) {
+			if (iter->value()->isAsync() && cache.rangeContaining(keyStart).value().present()) {
 				const SpecialKeyRangeAsyncImpl* ptr = dynamic_cast<const SpecialKeyRangeAsyncImpl*>(iter->value());
 				RangeResult pairs_ = wait(ptr->getRange(ryw, KeyRangeRef(keyStart, keyEnd), limits, &cache));
 				pairs = pairs_;
@@ -416,7 +419,7 @@ ACTOR Future<RangeResult> SpecialKeySpace::getRangeAggregationActor(SpecialKeySp
 			KeyRangeRef kr = iter->range();
 			KeyRef keyStart = kr.contains(begin.getKey()) ? begin.getKey() : kr.begin;
 			KeyRef keyEnd = kr.contains(end.getKey()) ? end.getKey() : kr.end;
-			if (iter->value()->isAsync() && cache.present()) {
+			if (iter->value()->isAsync() && cache.rangeContaining(keyStart).value().present()) {
 				const SpecialKeyRangeAsyncImpl* ptr = dynamic_cast<const SpecialKeyRangeAsyncImpl*>(iter->value());
 				RangeResult pairs_ = wait(ptr->getRange(ryw, KeyRangeRef(keyStart, keyEnd), limits, &cache));
 				pairs = pairs_;
