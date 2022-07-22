@@ -1431,8 +1431,7 @@ struct ConfigureTenantImpl {
 
 		// We don't currently support movement between groups on different clusters
 		else {
-			// TODO: surface better error to fdbcli?
-			throw invalid_tenant_configuration();
+			throw tenant_cannot_be_moved();
 		}
 	}
 
