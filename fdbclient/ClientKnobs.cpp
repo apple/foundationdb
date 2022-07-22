@@ -203,6 +203,10 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( DEFAULT_COMMIT_GRV_PROXIES_RATIO,          3 );
 	init( DEFAULT_MAX_GRV_PROXIES,                   4 );
 
+	init( GLOBAL_CONFIG_REFRESH_BACKOFF,           0.5 );
+	init( GLOBAL_CONFIG_REFRESH_MAX_BACKOFF,      60.0 );
+	init( GLOBAL_CONFIG_REFRESH_TIMEOUT,          10.0 );
+
 	init( IS_ACCEPTABLE_DELAY,                     1.5 );
 
 	init( HTTP_READ_SIZE,                     128*1024 );
