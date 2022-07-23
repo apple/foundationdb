@@ -561,6 +561,7 @@ def profile(logger):
     assert output2 == default_profile_client_get_output
     # set rate and size limit
     run_fdbcli_command('profile', 'client', 'set', '0.5', '1GB')
+    time.sleep(1) # global config can take some time to sync
     output3 = run_fdbcli_command('profile', 'client', 'get')
     logger.debug(output3)
     output3_list = output3.split(' ')
@@ -569,6 +570,7 @@ def profile(logger):
     assert output3_list[-1] == '1000000000.'
     # change back to default value and check
     run_fdbcli_command('profile', 'client', 'set', 'default', 'default')
+    time.sleep(1) # global config can take some time to sync
     assert run_fdbcli_command('profile', 'client', 'get') == default_profile_client_get_output
 
 
@@ -616,21 +618,23 @@ def tenants(logger):
 
     output = run_fdbcli_command('gettenant tenant')
     lines = output.split('\n')
-    assert len(lines) == 2
+    assert len(lines) == 3
     assert lines[0].strip().startswith('id: ')
     assert lines[1].strip().startswith('prefix: ')
+    assert lines[2].strip() == 'tenant state: ready'
 
     output = run_fdbcli_command('gettenant tenant JSON')
     json_output = json.loads(output, strict=False)
     assert(len(json_output) == 2)
     assert('tenant' in json_output)
     assert(json_output['type'] == 'success')
-    assert(len(json_output['tenant']) == 2)
+    assert(len(json_output['tenant']) == 3)
     assert('id' in json_output['tenant'])
     assert('prefix' in json_output['tenant'])
     assert(len(json_output['tenant']['prefix']) == 2)
     assert('base64' in json_output['tenant']['prefix'])
     assert('printable' in json_output['tenant']['prefix'])
+    assert(json_output['tenant']['tenant_state'] == 'ready')
 
     output = run_fdbcli_command('usetenant')
     assert output == 'Using the default tenant'
