@@ -237,57 +237,64 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 				while (timeTravelIt != timeTravelChecks.end() && currentTime >= timeTravelIt->first) {
 					state OldRead oldRead = timeTravelIt->second;
 					timeTravelChecksMemory -= oldRead.oldResult.expectedSize();
+					// advance iterator before doing read, so if it gets error we don't retry it
 					timeTravelIt = timeTravelChecks.erase(timeTravelIt);
 					if (prevPurgeVersion == -1) {
 						prevPurgeVersion = oldRead.v;
 					}
-					// advance iterator before doing read, so if it gets error we don't retry it
 
-					try {
-						state Version newPurgeVersion = 0;
-						state bool doPurging = allowPurging && deterministicRandom()->random01() < 0.5;
-						if (doPurging) {
-							Version maxPurgeVersion = oldRead.v;
-							for (auto& it : timeTravelChecks) {
-								maxPurgeVersion = std::min(it.second.v, maxPurgeVersion);
-							}
-							if (prevPurgeVersion < maxPurgeVersion) {
-								newPurgeVersion = deterministicRandom()->randomInt64(prevPurgeVersion, maxPurgeVersion);
-								prevPurgeVersion = std::max(prevPurgeVersion, newPurgeVersion);
-								Key purgeKey = wait(cx->purgeBlobGranules(normalKeys, newPurgeVersion, {}, false));
-								wait(cx->waitPurgeGranulesComplete(purgeKey));
-								self->purges++;
-							} else {
-								doPurging = false;
-							}
+					// before doing read, purge just before read version
+					state Version newPurgeVersion = 0;
+					state bool doPurging = allowPurging && deterministicRandom()->random01() < 0.5;
+					if (doPurging) {
+						CODE_PROBE(true, "BGV considering purge");
+						Version maxPurgeVersion = oldRead.v;
+						for (auto& it : timeTravelChecks) {
+							maxPurgeVersion = std::min(it.second.v, maxPurgeVersion);
 						}
+						if (prevPurgeVersion < maxPurgeVersion) {
+							CODE_PROBE(true, "BGV doing purge");
+							newPurgeVersion = deterministicRandom()->randomInt64(prevPurgeVersion, maxPurgeVersion);
+							prevPurgeVersion = std::max(prevPurgeVersion, newPurgeVersion);
+							if (BGV_DEBUG) {
+								fmt::print("BGV Purging @ {0}\n", newPurgeVersion);
+							}
+							try {
+								Key purgeKey = wait(cx->purgeBlobGranules(normalKeys, newPurgeVersion, {}, false));
+								if (BGV_DEBUG) {
+									fmt::print("BGV Purged @ {0}, waiting\n", newPurgeVersion);
+								}
+								wait(cx->waitPurgeGranulesComplete(purgeKey));
+							} catch (Error& e) {
+								if (e.code() == error_code_operation_cancelled) {
+									throw e;
+								}
+								// purging shouldn't error, it should retry.
+								if (BGV_DEBUG) {
+									fmt::print("Unexpected error {0} purging @ {1}!\n", e.name(), newPurgeVersion);
+								}
+								ASSERT(false);
+							}
+							CODE_PROBE(true, "BGV purge complete");
+							if (BGV_DEBUG) {
+								fmt::print("BGV Purge complete @ {0}\n", newPurgeVersion);
+							}
+							self->purges++;
+						} else {
+							doPurging = false;
+						}
+					}
+
+					// do time travel read
+					try {
 						std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> reReadResult =
 						    wait(readFromBlob(cx, self->bstore, oldRead.range, 0, oldRead.v));
 						if (!compareFDBAndBlob(oldRead.oldResult, reReadResult, oldRead.range, oldRead.v, BGV_DEBUG)) {
 							self->mismatches++;
 						}
 						self->timeTravelReads++;
-
-						if (doPurging) {
-							wait(self->killBlobWorkers(cx, self));
-							std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> versionRead =
-							    wait(readFromBlob(cx, self->bstore, oldRead.range, 0, prevPurgeVersion));
-							try {
-								Version minSnapshotVersion = newPurgeVersion;
-								for (auto& it : versionRead.second) {
-									minSnapshotVersion = std::min(minSnapshotVersion, it.snapshotVersion);
-								}
-								std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> versionRead =
-								    wait(readFromBlob(cx, self->bstore, oldRead.range, 0, minSnapshotVersion - 1));
-								ASSERT(false);
-							} catch (Error& e) {
-								if (e.code() == error_code_actor_cancelled) {
-									throw;
-								}
-								ASSERT(e.code() == error_code_blob_granule_transaction_too_old);
-							}
-						}
 					} catch (Error& e) {
+						fmt::print("Error TT: {0}\n", e.name());
 						if (e.code() == error_code_blob_granule_transaction_too_old) {
 							self->timeTravelTooOld++;
 							// TODO: add debugging info for when this is a failure
@@ -295,6 +302,35 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 							           oldRead.range.begin.printable(),
 							           oldRead.range.end.printable(),
 							           oldRead.v);
+						}
+					}
+
+					// if purged just before read, verify that purge cleaned up data by restarting blob workers and
+					// reading older than the purge version
+					if (doPurging) {
+						wait(self->killBlobWorkers(cx, self));
+						std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> versionRead =
+						    wait(readFromBlob(cx, self->bstore, oldRead.range, 0, prevPurgeVersion));
+						try {
+							Version minSnapshotVersion = newPurgeVersion;
+							for (auto& it : versionRead.second) {
+								minSnapshotVersion = std::min(minSnapshotVersion, it.snapshotVersion);
+							}
+							if (BGV_DEBUG) {
+								fmt::print("Reading post-purge @ {0}\n", minSnapshotVersion - 1);
+							}
+							std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> versionRead =
+							    wait(readFromBlob(cx, self->bstore, oldRead.range, 0, minSnapshotVersion - 1));
+							if (BGV_DEBUG) {
+								fmt::print("ERROR: data not purged! Read successful!!\n");
+							}
+							ASSERT(false);
+						} catch (Error& e) {
+							if (e.code() == error_code_actor_cancelled) {
+								throw;
+							}
+							ASSERT(e.code() == error_code_blob_granule_transaction_too_old);
+							CODE_PROBE(true, "BGV verified too old after purge");
 						}
 					}
 				}

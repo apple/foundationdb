@@ -3242,6 +3242,8 @@ ACTOR Future<Void> fullyDeleteGranule(Reference<BlobManagerData> self,
 	++self->stats.granulesFullyPurged;
 	self->stats.filesPurged += filesToDelete.size();
 
+	CODE_PROBE(true, "full granule purged");
+
 	return Void();
 }
 
@@ -3356,6 +3358,8 @@ ACTOR Future<Void> partiallyDeleteGranule(Reference<BlobManagerData> self,
 
 	++self->stats.granulesPartiallyPurged;
 	self->stats.filesPurged += filesToDelete.size();
+
+	CODE_PROBE(true, " partial granule purged");
 
 	return Void();
 }
@@ -3601,6 +3605,8 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 	    .detail("PurgeVersion", purgeVersion)
 	    .detail("Force", force);
 
+	CODE_PROBE(true, "range purge complete");
+
 	++self->stats.purgesProcessed;
 	return Void();
 }
@@ -3651,6 +3657,7 @@ ACTOR Future<Void> monitorPurgeKeys(Reference<BlobManagerData> self) {
 				// TODO: replace 10000 with a knob
 				state RangeResult purgeIntents = wait(tr->getRange(blobGranulePurgeKeys, BUGGIFY ? 1 : 10000));
 				if (purgeIntents.size()) {
+					CODE_PROBE(true, "BM found purges to process");
 					int rangeIdx = 0;
 					for (; rangeIdx < purgeIntents.size(); ++rangeIdx) {
 						Version purgeVersion;
@@ -3728,6 +3735,8 @@ ACTOR Future<Void> monitorPurgeKeys(Reference<BlobManagerData> self) {
 		if (BM_DEBUG) {
 			printf("Done clearing current set of purge intents.\n");
 		}
+
+		CODE_PROBE(true, "BM finished processing purge intents");
 	}
 }
 
