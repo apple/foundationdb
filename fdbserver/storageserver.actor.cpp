@@ -1525,7 +1525,9 @@ ACTOR Future<Version> waitForVersionNoTooOld(StorageServer* data, Version versio
 	if (version <= data->version.get())
 		return version;
 	choose {
-		when(wait(data->version.whenAtLeast(version))) { return version; }
+		when(wait(data->version.whenAtLeast(version))) {
+			return version;
+		}
 		when(wait(delay(SERVER_KNOBS->FUTURE_VERSION_DELAY))) {
 			if (deterministicRandom()->random01() < 0.001)
 				TraceEvent(SevWarn, "ShardServerFutureVersion1000x", data->thisServerID)
@@ -5875,6 +5877,23 @@ ACTOR Future<std::unordered_map<Key, Version>> dispatchChangeFeeds(StorageServer
 	}
 }
 
+namespace {
+ACTOR Future<Version> getRawReadVersion(Transaction* pTransaction) {
+	loop {
+		try {
+			Version readVersion = wait(pTransaction->getRawReadVersion());
+			return readVersion;
+		} catch (Error& err) {
+			if (err.code() != error_code_proxy_memory_limit_exceeded &&
+			    err.code() != error_code_batch_transaction_throttled) {
+				throw err;
+			}
+			wait(delay(SERVER_KNOBS->PROXY_READ_VERSION_BACKOFF));
+		}
+	}
+}
+} // namespace
+
 ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 	state const UID fetchKeysID = deterministicRandom()->randomUniqueID();
 	state TraceInterval interval("FetchKeys");
@@ -5889,6 +5908,8 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 	                                             data->currentRunningFetchKeys,
 	                                             data->counters.bytesFetched,
 	                                             data->counters.kvFetched);
+
+	std::cout << now() << "\tfetchKeysStart" << std::endl;
 
 	// delay(0) to force a return to the run loop before the work of fetchKeys is started.
 	//  This allows adding->start() to be called inline with CSK.
@@ -5986,7 +6007,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			// Then dest SS waits its version catch up with this GRV version and write the data to disk.
 			// Note that dest SS waits outside the fetchKeysParallelismLock.
 			if (lastError.code() == error_code_transaction_too_old) {
-				Version grvVersion = wait(tr.getRawReadVersion());
+				Version grvVersion = wait(getRawReadVersion(&tr));
 				fetchVersion = std::max(grvVersion, data->version.get());
 			} else {
 				fetchVersion = std::max(shard->fetchVersion, data->version.get());
@@ -8612,7 +8633,9 @@ ACTOR Future<Void> waitMetrics(StorageServerMetrics* self, WaitMetricsRequest re
 
 						  }*/
 					}
-					when(wait(timeout)) { timedout = true; }
+					when(wait(timeout)) {
+						timedout = true;
+					}
 				}
 			} catch (Error& e) {
 				if (e.code() == error_code_actor_cancelled)
