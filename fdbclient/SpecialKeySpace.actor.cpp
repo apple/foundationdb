@@ -339,7 +339,7 @@ ACTOR Future<RangeResult> SpecialKeySpace::getRangeAggregationActor(SpecialKeySp
 	state KeyRangeRef moduleBoundary;
 	// used to cache results from potential first async read
 	// the current implementation will read the whole range result to save in the cache
-	state KeyRangeMap<Optional<RangeResult>> cache;
+	state KeyRangeMap<Optional<RangeResult>> cache(Optional<RangeResult>(), specialKeys.end);
 
 	if (ryw->specialKeySpaceRelaxed()) {
 		moduleBoundary = sks->range;
