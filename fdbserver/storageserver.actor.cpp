@@ -5884,11 +5884,8 @@ ACTOR Future<Version> getRawReadVersion(Transaction* pTransaction) {
 			Version readVersion = wait(pTransaction->getRawReadVersion());
 			return readVersion;
 		} catch (Error& err) {
-			if (err.code() != error_code_proxy_memory_limit_exceeded &&
-			    err.code() != error_code_batch_transaction_throttled) {
-				throw err;
-			}
-			wait(delay(SERVER_KNOBS->PROXY_READ_VERSION_BACKOFF));
+			TraceEvent(SevWarn, "TransactionGetRawReadVersionFailed").detail("Code", err.code());
+			wait(pTransaction->onError(err));
 		}
 	}
 }
