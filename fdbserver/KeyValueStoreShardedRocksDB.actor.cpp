@@ -343,7 +343,7 @@ public:
 		ASSERT(cf);
 		readRangeOptions.background_purge_on_iterator_cleanup = true;
 		readRangeOptions.auto_prefix_mode = (SERVER_KNOBS->ROCKSDB_PREFIX_LEN > 0);
-		TraceEvent(SevDebug, "ReadIteratorPool")
+		TraceEvent(SevVerbose, "ReadIteratorPool")
 		    .detail("Path", path)
 		    .detail("KnobRocksDBReadRangeReuseIterators", SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_ITERATORS)
 		    .detail("KnobRocksDBPrefixLen", SERVER_KNOBS->ROCKSDB_PREFIX_LEN);
@@ -602,7 +602,7 @@ public:
 
 	rocksdb::Status init() {
 		// Open instance.
-		TraceEvent(SevVerbose, "ShardManagerInitBegin", this->logId).detail("DataPath", path);
+		TraceEvent(SevInfo, "ShardManagerInitBegin", this->logId).detail("DataPath", path);
 		std::vector<std::string> columnFamilies;
 		rocksdb::Options options = getOptions();
 		rocksdb::Status status = rocksdb::DB::ListColumnFamilies(options, path, &columnFamilies);
@@ -632,6 +632,8 @@ public:
 		}
 
 		if (foundMetadata) {
+			TraceEvent(SevInfo, "ShardedRocksInitLoadPhysicalShards", this->logId)
+			    .detail("PhysicalShardCount", handles.size());
 			for (auto handle : handles) {
 				if (handle->GetName() == "kvs-metadata") {
 					metadataShard = std::make_shared<PhysicalShard>(db, "kvs-metadata", handle);
@@ -639,7 +641,8 @@ public:
 					physicalShards[handle->GetName()] = std::make_shared<PhysicalShard>(db, handle->GetName(), handle);
 				}
 				columnFamilyMap[handle->GetID()] = handle;
-				TraceEvent(SevInfo, "ShardedRocskDB").detail("FoundShard", handle->GetName()).detail("Action", "Init");
+				TraceEvent(SevVerbose, "ShardedRocksInitPhysicalShard", this->logId)
+				    .detail("PhysicalShard", handle->GetName());
 			}
 			RangeResult metadata;
 			readRangeInDb(metadataShard.get(), prefixRange(shardMappingPrefix), UINT16_MAX, UINT16_MAX, &metadata);
@@ -647,7 +650,7 @@ public:
 			std::vector<std::pair<KeyRange, std::string>> mapping = decodeShardMapping(metadata, shardMappingPrefix);
 
 			for (const auto& [range, name] : mapping) {
-				TraceEvent(SevDebug, "ShardedRocksLoadPhysicalShard", this->logId)
+				TraceEvent(SevVerbose, "ShardedRocksLoadRange", this->logId)
 				    .detail("Range", range)
 				    .detail("PhysicalShard", name);
 				auto it = physicalShards.find(name);
@@ -662,10 +665,10 @@ public:
 				activePhysicalShardIds.emplace(name);
 			}
 			// TODO: remove unused column families.
-
 		} else {
 			// DB is opened with default shard.
 			ASSERT(handles.size() == 1);
+
 			// Add SpecialKeys range. This range should not be modified.
 			std::shared_ptr<PhysicalShard> defaultShard = std::make_shared<PhysicalShard>(db, "default", handles[0]);
 			columnFamilyMap[defaultShard->cf->GetID()] = defaultShard->cf;
@@ -696,7 +699,7 @@ public:
 		writeBatch = std::make_unique<rocksdb::WriteBatch>();
 		dirtyShards = std::make_unique<std::set<PhysicalShard*>>();
 
-		TraceEvent(SevDebug, "ShardManagerInitEnd", this->logId).detail("DataPath", path);
+		TraceEvent(SevInfo, "ShardManagerInitEnd", this->logId).detail("DataPath", path);
 		return status;
 	}
 
@@ -712,7 +715,7 @@ public:
 
 		for (auto it = rangeIterator.begin(); it != rangeIterator.end(); ++it) {
 			if (it.value() == nullptr) {
-				TraceEvent(SevDebug, "ShardedRocksDB")
+				TraceEvent(SevVerbose, "ShardedRocksDB")
 				    .detail("Info", "ShardNotFound")
 				    .detail("BeginKey", range.begin)
 				    .detail("EndKey", range.end);
@@ -724,9 +727,10 @@ public:
 	}
 
 	PhysicalShard* addRange(KeyRange range, std::string id) {
-		TraceEvent(SevVerbose, "ShardedRocksAddRangeBegin", this->logId)
+		TraceEvent(SevInfo, "ShardedRocksAddRangeBegin", this->logId)
 		    .detail("Range", range)
 		    .detail("PhysicalShardID", id);
+
 		// Newly added range should not overlap with any existing range.
 		auto ranges = dataShardMap.intersectingRanges(range);
 
@@ -750,7 +754,7 @@ public:
 
 		validate();
 
-		TraceEvent(SevVerbose, "ShardedRocksAddRangeEnd", this->logId)
+		TraceEvent(SevInfo, "ShardedRocksAddRangeEnd", this->logId)
 		    .detail("Range", range)
 		    .detail("PhysicalShardID", id);
 
@@ -758,7 +762,7 @@ public:
 	}
 
 	std::vector<std::string> removeRange(KeyRange range) {
-		TraceEvent(SevVerbose, "ShardedRocksRemoveRangeBegin", this->logId).detail("Range", range);
+		TraceEvent(SevInfo, "ShardedRocksRemoveRangeBegin", this->logId).detail("Range", range);
 
 		std::vector<std::string> shardIds;
 
@@ -796,6 +800,7 @@ public:
 				}
 				continue;
 			}
+
 			// Range modification could result in more than one segments. Remove the original segment key here.
 			existingShard->dataShards.erase(shardRange.begin.toString());
 			if (shardRange.begin < range.begin) {
@@ -826,7 +831,7 @@ public:
 
 		validate();
 
-		TraceEvent(SevVerbose, "ShardedRocksRemoveRangeEnd", this->logId).detail("Range", range);
+		TraceEvent(SevInfo, "ShardedRocksRemoveRangeEnd", this->logId).detail("Range", range);
 
 		return shardIds;
 	}
@@ -884,7 +889,7 @@ public:
 	}
 
 	void persistRangeMapping(KeyRangeRef range, bool isAdd) {
-		TraceEvent(SevDebug, "ShardedRocksDB")
+		TraceEvent(SevDebug, "ShardedRocksDB", this->logId)
 		    .detail("Info", "RangeToPersist")
 		    .detail("BeginKey", range.begin)
 		    .detail("EndKey", range.end);
@@ -902,7 +907,7 @@ public:
 					writeBatch->Put(metadataShard->cf,
 					                getShardMappingKey(it.range().begin, shardMappingPrefix),
 					                it.value()->physicalShard->id);
-					TraceEvent(SevDebug, "ShardedRocksDB")
+					TraceEvent(SevDebug, "ShardedRocksDB", this->logId)
 					    .detail("Action", "PersistRangeMapping")
 					    .detail("BeginKey", it.range().begin)
 					    .detail("EndKey", it.range().end)
@@ -911,7 +916,7 @@ public:
 				} else {
 					// Empty range.
 					writeBatch->Put(metadataShard->cf, getShardMappingKey(it.range().begin, shardMappingPrefix), "");
-					TraceEvent(SevDebug, "ShardedRocksDB")
+					TraceEvent(SevDebug, "ShardedRocksDB", this->logId)
 					    .detail("Action", "PersistRangeMapping")
 					    .detail("BeginKey", it.range().begin)
 					    .detail("EndKey", it.range().end)
@@ -921,7 +926,7 @@ public:
 			}
 		} else {
 			writeBatch->Put(metadataShard->cf, getShardMappingKey(range.begin, shardMappingPrefix), "");
-			TraceEvent(SevDebug, "ShardedRocksDB")
+			TraceEvent(SevDebug, "ShardedRocksDB", this->logId)
 			    .detail("Action", "PersistRangeMapping")
 			    .detail("RemoveRange", "True")
 			    .detail("BeginKey", range.begin)
@@ -972,7 +977,7 @@ public:
 		if (!s.ok()) {
 			logRocksDBError(s, "DestroyDB");
 		}
-		TraceEvent("RocksDB").detail("Info", "DBDestroyed");
+		TraceEvent("RocksDB", this->logId).detail("Info", "DBDestroyed");
 	}
 
 	rocksdb::DB* getDb() const { return db; }
@@ -1007,6 +1012,13 @@ public:
 				e.detail("PhysicalShard", shard->physicalShard->id);
 			} else {
 				e.detail("Shard", "Empty");
+			}
+			if (shard != nullptr) {
+				ASSERT(shard->range == static_cast<KeyRangeRef>(s->range()));
+				ASSERT(shard->physicalShard != nullptr);
+				auto it = shard->physicalShard->dataShards.find(shard->range.begin.toString());
+				ASSERT(it != shard->physicalShard->dataShards.end());
+				ASSERT(it->second.get() == shard);
 			}
 		}
 	}
@@ -2127,10 +2139,6 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				}
 			}
 
-			Histogram::getHistogram(
-			    ROCKSDBSTORAGE_HISTOGRAM_GROUP, "ShardedRocksDBNumShardsInRangeRead"_sr, Histogram::Unit::countLinear)
-			    ->sample(numShards);
-
 			result.more =
 			    (result.size() == a.rowLimit) || (result.size() == -a.rowLimit) || (accumulatedBytes >= a.byteLimit);
 			if (result.more) {
@@ -2184,7 +2192,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			readThreads = createGenericThreadPool();
 		}
 		writeThread->addThread(new Writer(id, 0, shardManager.getColumnFamilyMap(), rocksDBMetrics), "fdb-rocksdb-wr");
-		TraceEvent("RocksDBReadThreads").detail("KnobRocksDBReadParallelism", SERVER_KNOBS->ROCKSDB_READ_PARALLELISM);
+		TraceEvent("RocksDBReadThreads", id)
+		    .detail("KnobRocksDBReadParallelism", SERVER_KNOBS->ROCKSDB_READ_PARALLELISM);
 		for (unsigned i = 0; i < SERVER_KNOBS->ROCKSDB_READ_PARALLELISM; ++i) {
 			readThreads->addThread(new Reader(id, i, rocksDBMetrics), "fdb-rocksdb-re");
 		}
@@ -2302,7 +2311,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		auto* shard = shardManager.getDataShard(key);
 		if (shard == nullptr || !shard->physicalShard->initialized()) {
 			// TODO: read non-exist system key range should not cause an error.
-			TraceEvent(SevWarnAlways, "ShardedRocksDB")
+			TraceEvent(SevWarnAlways, "ShardedRocksDB", this->id)
 			    .detail("Detail", "Read non-exist key range")
 			    .detail("ReadKey", key);
 			return Optional<Value>();
@@ -2330,7 +2339,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		auto* shard = shardManager.getDataShard(key);
 		if (shard == nullptr || !shard->physicalShard->initialized()) {
 			// TODO: read non-exist system key range should not cause an error.
-			TraceEvent(SevWarnAlways, "ShardedRocksDB")
+			TraceEvent(SevWarnAlways, "ShardedRocksDB", this->id)
 			    .detail("Detail", "Read non-exist key range")
 			    .detail("ReadKey", key);
 			return Optional<Value>();
