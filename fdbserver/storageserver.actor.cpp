@@ -6194,11 +6194,18 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			// At iteration 1, dest SS selects GRV as fetchVersion and (suppose) can read the data from src SS.
 			// Then dest SS waits its version catch up with this GRV version and write the data to disk.
 			// Note that dest SS waits outside the fetchKeysParallelismLock.
+			fetchVersion = std::max(shard->fetchVersion, data->version.get());
 			if (lastError.code() == error_code_transaction_too_old) {
-				Version grvVersion = wait(tr.getRawReadVersion());
-				fetchVersion = std::max(grvVersion, data->version.get());
-			} else {
-				fetchVersion = std::max(shard->fetchVersion, data->version.get());
+				try {
+					Version grvVersion = wait(tr.getRawReadVersion());
+					fetchVersion = std::max(grvVersion, fetchVersion);
+				} catch (Error& e) {
+					// Note that error in getting GRV doesn't affect any storage server state. Therefore, we catch all
+					// errors here without failing the storage server. When error happens, fetchVersion fall back to
+					// the above computed fetchVersion.
+					TraceEvent(SevWarn, "FetchKeyGRVError", data->thisServerID).error(e);
+					lastError = e;
+				}
 			}
 			ASSERT(fetchVersion >= shard->fetchVersion); // at this point, shard->fetchVersion is the last fetchVersion
 			shard->fetchVersion = fetchVersion;
