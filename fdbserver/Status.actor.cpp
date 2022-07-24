@@ -832,7 +832,8 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 		}
 	}
 
-	std::vector<NetworkAddress> addressVec = wait(coordinators.ccr->getConnectionString().tryResolveHostnames());
+	std::vector<NetworkAddress> addressVec =
+	    wait(timeoutError(coordinators.ccr->getConnectionString().tryResolveHostnames(), 5.0));
 	for (const auto& coordinator : addressVec) {
 		roles.addCoordinatorRole(coordinator);
 	}
@@ -1928,7 +1929,7 @@ ACTOR static Future<std::vector<std::pair<StorageServerInterface, EventMap>>> ge
 	                            std::vector<std::string>{
 	                                "StorageMetrics", "ReadLatencyMetrics", "ReadLatencyBands", "BusiestReadTag" })) &&
 	     store(busiestWriteTags, getServerBusiestWriteTags(servers, address_workers, rkWorker)) &&
-	     store(metadata, getServerMetadata(servers, cx, true)));
+	     store(metadata, timeoutError(getServerMetadata(servers, cx, true), 5.0)));
 
 	ASSERT(busiestWriteTags.size() == results.size() && metadata.size() == results.size());
 	for (int i = 0; i < results.size(); ++i) {
@@ -2757,18 +2758,29 @@ ACTOR Future<JsonBuilderObject> storageWigglerStatsFetcher(DatabaseConfiguration
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	state Optional<Value> primaryV;
 	state Optional<Value> remoteV;
-	loop {
-		try {
-			if (use_system_priority) {
-				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+	state Future<Void> readTimeout = delay(5); // avoid looping forever
+	try {
+		loop {
+			try {
+				if (readTimeout.isReady()) {
+					throw timed_out();
+				}
+
+				if (use_system_priority) {
+					tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				}
+				int64_t timeout_ms = 5000;
+				tr->setOption(FDBTransactionOptions::TIMEOUT, StringRef((uint8_t*)&timeout_ms, sizeof(int64_t)));
+				wait(store(primaryV, StorageWiggleMetrics::runGetTransaction(tr, true)) &&
+				     store(remoteV, StorageWiggleMetrics::runGetTransaction(tr, false)));
+				wait(tr->commit());
+				break;
+			} catch (Error& e) {
+				wait(tr->onError(e));
 			}
-			wait(store(primaryV, StorageWiggleMetrics::runGetTransaction(tr, true)) &&
-			     store(remoteV, StorageWiggleMetrics::runGetTransaction(tr, false)));
-			wait(tr->commit());
-			break;
-		} catch (Error& e) {
-			wait(tr->onError(e));
 		}
+	} catch (Error& e) {
+		TraceEvent(SevWarn, "StorageWigglerStatsError").error(e);
 	}
 
 	JsonBuilderObject res;
@@ -3009,9 +3021,10 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			if (configuration.get().perpetualStorageWiggleSpeed > 0) {
 				state Future<std::vector<std::pair<UID, StorageWiggleValue>>> primaryWiggleValues;
 				state Future<std::vector<std::pair<UID, StorageWiggleValue>>> remoteWiggleValues;
+				double timeout = g_network->isSimulated() && BUGGIFY_WITH_PROB(0.01) ? 0.0 : 2.0;
 
-				primaryWiggleValues = readStorageWiggleValues(cx, true, true);
-				remoteWiggleValues = readStorageWiggleValues(cx, false, true);
+				primaryWiggleValues = timeoutError(readStorageWiggleValues(cx, true, true), timeout);
+				remoteWiggleValues = timeoutError(readStorageWiggleValues(cx, false, true), timeout);
 				wait(store(storageWiggler, storageWigglerStatsFetcher(configuration.get(), cx, true)) &&
 				     success(primaryWiggleValues) && success(remoteWiggleValues));
 
@@ -3025,7 +3038,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			wait(success(primaryDCFO));
 
 			std::vector<NetworkAddress> coordinatorAddresses =
-			    wait(coordinators.ccr->getConnectionString().tryResolveHostnames());
+			    wait(timeoutError(coordinators.ccr->getConnectionString().tryResolveHostnames(), 5.0));
 
 			int logFaultTolerance = 100;
 			if (db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
