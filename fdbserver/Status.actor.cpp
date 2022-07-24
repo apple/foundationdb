@@ -839,7 +839,8 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 		}
 	}
 
-	std::vector<NetworkAddress> addressVec = wait(coordinators.ccr->getConnectionString().tryResolveHostnames());
+	std::vector<NetworkAddress> addressVec =
+	    wait(timeoutError(coordinators.ccr->getConnectionString().tryResolveHostnames(), 5.0));
 	for (const auto& coordinator : addressVec) {
 		roles.addCoordinatorRole(coordinator);
 	}
@@ -3134,7 +3135,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			wait(success(primaryDCFO));
 
 			std::vector<NetworkAddress> coordinatorAddresses =
-			    wait(coordinators.ccr->getConnectionString().tryResolveHostnames());
+			    wait(timeoutError(coordinators.ccr->getConnectionString().tryResolveHostnames(), 5.0));
 
 			int logFaultTolerance = 100;
 			if (db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
