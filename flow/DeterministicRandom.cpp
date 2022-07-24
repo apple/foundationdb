@@ -92,9 +92,12 @@ uint64_t DeterministicRandom::randomUInt64() {
 }
 
 uint32_t DeterministicRandom::randomSkewedUInt32(uint32_t min, uint32_t maxPlusOne) {
-	std::uniform_real_distribution<double> distribution(std::log(min), std::log(maxPlusOne - 1));
+	// prevent log(0) error
+	double lhs = min == 0 ? 1e-15 : static_cast<double>(min);
+	double rhs = maxPlusOne <= 1 ? 1e-15 : static_cast<double>(maxPlusOne - 1);
+	std::uniform_real_distribution<double> distribution(std::log(lhs), std::log(rhs));
 	double logpower = distribution(random);
-	uint32_t loguniform = static_cast<uint32_t>(std::pow(10, logpower));
+	uint32_t loguniform = static_cast<uint32_t>(std::pow(M_E, logpower));
 	// doubles can be imprecise, so let's make sure we don't violate an edge case.
 	return std::max(std::min(loguniform, maxPlusOne - 1), min);
 }
