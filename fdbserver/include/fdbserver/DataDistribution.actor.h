@@ -286,6 +286,7 @@ class ShardsAffectedByTeamFailure : public ReferenceCounted<ShardsAffectedByTeam
 public:
 	ShardsAffectedByTeamFailure() {}
 
+	enum class CheckMode { Normal = 0, ForceCheck, ForceNoCheck };
 	struct Team {
 		std::vector<UID> servers; // sorted
 		bool primary;
@@ -335,6 +336,8 @@ public:
 	void finishMove(KeyRangeRef keys);
 	void check() const;
 
+	void setCheckMode(CheckMode);
+
 	PromiseStream<KeyRange> restartShardTracker;
 
 private:
@@ -348,6 +351,7 @@ private:
 		}
 	};
 
+	CheckMode checkMode = CheckMode::Normal;
 	KeyRangeMap<std::pair<std::vector<Team>, std::vector<Team>>>
 	    shard_teams; // A shard can be affected by the failure of multiple teams if it is a queued merge, or when
 	                 // usable_regions > 1

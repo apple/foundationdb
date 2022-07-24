@@ -1189,8 +1189,14 @@ void ShardsAffectedByTeamFailure::finishMove(KeyRangeRef keys) {
 	}
 }
 
+void ShardsAffectedByTeamFailure::setCheckMode(CheckMode mode) {
+	checkMode = mode;
+}
+
 void ShardsAffectedByTeamFailure::check() const {
-	if (EXPENSIVE_VALIDATION) {
+	if (checkMode == CheckMode::ForceNoCheck)
+		return;
+	if (EXPENSIVE_VALIDATION || checkMode == CheckMode::ForceCheck) {
 		for (auto t = team_shards.begin(); t != team_shards.end(); ++t) {
 			auto i = shard_teams.rangeContaining(t->second.begin);
 			if (i->range() != t->second || !std::count(i->value().first.begin(), i->value().first.end(), t->first)) {

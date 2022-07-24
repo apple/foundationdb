@@ -813,7 +813,6 @@ struct DDQueueData {
 	}
 
 	ACTOR static Future<Void> getSourceServersForRange(DDQueueData* self,
-	                                                   Database cx,
 	                                                   RelocateData input,
 	                                                   PromiseStream<RelocateData> output,
 	                                                   Reference<FlowLock> fetchLock) {
@@ -929,7 +928,7 @@ struct DDQueueData {
 
 				fetchingSourcesQueue.insert(rrs);
 				getSourceActors.insert(
-				    rrs.keys, getSourceServersForRange(this, cx, rrs, fetchSourceServersComplete, fetchSourceLock));
+				    rrs.keys, getSourceServersForRange(this, rrs, fetchSourceServersComplete, fetchSourceLock));
 			} else {
 				RelocateData newData(rrs);
 				newData.keys = affectedQueuedItems[r];
