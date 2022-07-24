@@ -8629,9 +8629,7 @@ ACTOR Future<Void> waitMetrics(StorageServerMetrics* self, WaitMetricsRequest re
 
 						  }*/
 					}
-					when(wait(timeout)) {
-						timedout = true;
-					}
+					when(wait(timeout)) { timedout = true; }
 				}
 			} catch (Error& e) {
 				if (e.code() == error_code_actor_cancelled)
