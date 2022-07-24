@@ -3023,15 +3023,26 @@ ACTOR Future<StatusReply> clusterGetStatus(
 				state Future<std::vector<std::pair<UID, StorageWiggleValue>>> remoteWiggleValues;
 				double timeout = g_network->isSimulated() && BUGGIFY_WITH_PROB(0.01) ? 0.0 : 2.0;
 
-				primaryWiggleValues = timeoutError(readStorageWiggleValues(cx, true, true), timeout);
-				remoteWiggleValues = timeoutError(readStorageWiggleValues(cx, false, true), timeout);
-				wait(store(storageWiggler, storageWigglerStatsFetcher(configuration.get(), cx, true)) &&
-				     success(primaryWiggleValues) && success(remoteWiggleValues));
+				try {
+					primaryWiggleValues = timeoutError(readStorageWiggleValues(cx, true, true), timeout);
+					remoteWiggleValues = timeoutError(readStorageWiggleValues(cx, false, true), timeout);
+					wait(store(storageWiggler, storageWigglerStatsFetcher(configuration.get(), cx, true)) &&
+					     success(primaryWiggleValues) && success(remoteWiggleValues));
 
-				for (auto& p : primaryWiggleValues.get())
-					wiggleServers.insert(p.first);
-				for (auto& p : remoteWiggleValues.get())
-					wiggleServers.insert(p.first);
+					for (auto& p : primaryWiggleValues.get())
+						wiggleServers.insert(p.first);
+					for (auto& p : remoteWiggleValues.get())
+						wiggleServers.insert(p.first);
+				} catch (Error& e) {
+					if (!primaryWiggleValues.canGet())
+						messages.push_back(
+						    JsonString::makeMessage("fetch_storage_wiggler_stats_timeout",
+						                            "Fetching wiggling servers in the primary region timed out."));
+					if (!remoteWiggleValues.canGet())
+						messages.push_back(
+						    JsonString::makeMessage("fetch_storage_wiggler_stats_timeout",
+						                            "Fetching wiggling servers in the remote region timed out."));
+				}
 			}
 
 			state std::vector<JsonBuilderObject> workerStatuses = wait(getAll(futures2));
