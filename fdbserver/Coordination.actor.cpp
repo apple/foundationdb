@@ -781,29 +781,7 @@ ACTOR Future<Void> coordinationServer(std::string dataFolder,
 	}
 }
 
-ACTOR Future<Void> printAllKVsActor(std::string datafolder) {
-	state UID myID = deterministicRandom()->randomUniqueID();
-	state OnDemandStore store(datafolder, myID, "coordination-");
-	printf("Store exists: %s\n", store.exists() ? "True" : "False");
-	RangeResult res = wait(store->readRange(allKeys));
-	printf("Number of kvs: %d\n", res.size());
-	for (auto& [key, value] : res) {
-		printf(
-		    "Key(%d): %s, Value(%d): %s\n", key.size(), key.toString().c_str(), value.size(), value.toString().c_str());
-		if (!key.startsWith("\xff"_sr)) {
-			GenerationRegVal regVal = BinaryReader::fromStringRef<GenerationRegVal>(value, IncludeVersion());
-			if (regVal.val.present()) {
-				Optional<Value> ccs = readCCS(regVal.val.get());
-				if (ccs.present()) {
-					printf("Value contains ccs: %s\n", ccs.get().toString().c_str());
-				}
-			}
-		}
-	}
-	return Void();
-}
-
-ACTOR Future<Void> changeClusterDescription(std::string datafolder, Key newClusterKey, Key oldClusterKey) {
+ACTOR Future<Void> changeClusterDescription(std::string datafolder, KeyRef newClusterKey, KeyRef oldClusterKey) {
 	state UID myID = deterministicRandom()->randomUniqueID();
 	state OnDemandStore store(datafolder, myID, "coordination-");
 	RangeResult res = wait(store->readRange(allKeys));
@@ -844,36 +822,33 @@ ACTOR Future<Void> changeClusterDescription(std::string datafolder, Key newClust
 				}
 			}
 		}
-		// check description existence
-		// auto iter = std::search(key.begin(), key.end(), oldClusterKey.begin(), oldClusterKey.end());
-		// auto iter2 = std::search(value.begin(), value.end(), oldClusterKey.begin(), oldClusterKey.end());
-		// // now it contains the old cluster key
-		// if (iter != key.end()) {
-		// 	printf(
-		// 	    "Key has the old cluster key; Key: %s, Value:%s\n", key.toString().c_str(), value.toString().c_str());
-		// 	if (key == oldClusterKey) {
-		// 		store->set(KeyValueRef(newClusterKey, value));
-		// 	} else if (key.startsWith(fwdKeys.begin)) {
-		// 		ASSERT(key.removePrefix(fwdKeys.begin) == oldClusterKey);
-		// 		store->set(KeyValueRef(newClusterKey.withPrefix(fwdKeys.begin), value));
-		// 	} else if (key.startsWith(fwdTimeKeys.begin)) {
-		// 		ASSERT(key.removePrefix(fwdTimeKeys.begin) == oldClusterKey);
-		// 		store->set(KeyValueRef(newClusterKey.withPrefix(fwdTimeKeys.begin), value));
-		// 	} else {
-		// 		ASSERT(false);
-		// 	}
-		// 	store->clear(singleKeyRange(key));
-		// }
-		// if (iter2 != value.end() && key.startsWith(fwdKeys.begin)) {
-		// 	printf("Value(%d) has the old cluster key; Key: %s, Value:%s\n",
-		// 	       value.size(),
-		// 	       key.toString().c_str(),
-		// 	       value.toString().c_str());
-		// 	ASSERT(value.startsWith(oldClusterKey));
-		// 	Value new_val = value.removePrefix(oldClusterKey).withPrefix(newClusterKey);
-		// 	store->set(KeyValueRef(key, new_val));
-		// }
 	}
 	wait(store->commit());
 	return Void();
+}
+
+
+Future<Void> coordChangeClusterKey(std::string dataFolder, KeyRef newClusterKey, KeyRef oldClusterKey) {
+	printf("*********** Fdb snapshot change description. *************\n");
+	std::string absDataFolder = abspath(dataFolder);
+	std::vector<std::string> returnList = platform::listDirectories(absDataFolder);
+	std::vector<Future<Void>> futures;
+	for (auto& dirEntry : returnList) {
+		if (dirEntry == "." || dirEntry == "..") {
+			continue;
+		}
+		std::string processDir = dataFolder + "/" + dirEntry;
+		printf("Checking process dir:%s\n", processDir.c_str());
+		std::vector<std::string> returnFiles = platform::listFiles(processDir, "");
+		bool isCoord = false;
+		for (const auto& fileEntry : returnFiles) {
+			if (fileEntry.rfind("coordination-", 0) == 0) {
+				isCoord = true;
+			}
+		}
+		if (!isCoord)
+			continue;
+		futures.push_back(changeClusterDescription(processDir, newClusterKey, oldClusterKey));
+	}
+	return waitForAll(futures);
 }

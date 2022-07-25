@@ -509,44 +509,6 @@ Future<Void> startSystemMonitor(std::string dataFolder,
 	return recurring(&systemMonitor, SERVER_KNOBS->SYSTEM_MONITOR_FREQUENCY, TaskPriority::FlushTrace);
 }
 
-ACTOR Future<Void> restoreChangeClusterDescriptionActor(std::string dataFolder,
-                                                        std::string newDescription,
-                                                        KeyRef oldClusterKey) {
-	printf("*********** Fdb snapshot change description. *************\n");
-	state Key newClusterKey =
-	    Key(newDescription).withSuffix(":"_sr).withSuffix(deterministicRandom()->randomAlphaNumeric(32));
-	printf("New cluster Key: %s\n", newClusterKey.toString().c_str());
-	std::string absDataFolder = abspath(dataFolder);
-	state std::vector<std::string> returnList = platform::listDirectories(absDataFolder);
-	std::vector<Future<Void>> futures;
-	for (auto& dirEntry : returnList) {
-		if (dirEntry == "." || dirEntry == "..") {
-			continue;
-		}
-		std::string processDir = dataFolder + "/" + dirEntry;
-		printf("Checking process dir:%s\n", processDir.c_str());
-		std::vector<std::string> returnFiles = platform::listFiles(processDir, "");
-		bool isCoord = false;
-		for (const auto& fileEntry : returnFiles) {
-			if (fileEntry.rfind("coordination-", 0) == 0) {
-				isCoord = true;
-			}
-		}
-		if (!isCoord)
-			continue;
-		if (newDescription == "debug") {
-			printf("Debug mode:\n");
-			wait(printAllKVsActor(processDir));
-		} else
-			wait(changeClusterDescription(processDir, newClusterKey, oldClusterKey));
-	}
-	return Void();
-}
-
-Future<Void> restoreChangeClusterDescription(std::string dataFolder, std::string newDescription, KeyRef oldClusterKey) {
-	return restoreChangeClusterDescriptionActor(dataFolder, newDescription, oldClusterKey);
-}
-
 void testIndexedSet();
 
 #ifdef _WIN32
@@ -2338,8 +2300,9 @@ int main(int argc, char* argv[]) {
 			f = stopAfter(KVFileDump(opts.kvFile));
 			g_network->run();
 		} else if (role == ServerRole::ChangeClusterKey) {
+			Key newClusterKey(opts.newClusterKey);
 			Key oldClusterKey = opts.connectionFile->getConnectionString().clusterKey();
-			f = stopAfter(restoreChangeClusterDescription(opts.dataFolder, opts.newClusterKey, oldClusterKey));
+			f = stopAfter(coordChangeClusterKey(opts.dataFolder, newClusterKey, oldClusterKey));
 			g_network->run();
 		}
 

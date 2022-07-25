@@ -236,12 +236,8 @@ Future<Void> coordinationServer(std::string const& dataFolder,
                                 Reference<ConfigNode> const&,
                                 ConfigBroadcastInterface const&);
 
-Future<Void> printAllKVsActor(std::string const& datafolder);
-
-Future<Void> changeClusterDescription(std::string const& datafolder, Key const& newClusterKey, Key const& oldClusterKey);
-
-Optional<Value> readCCS(ValueRef movableVal);
-
 Optional<Value> updateCCS(ValueRef movableVal, KeyRef oldClusterKey, KeyRef newClusterKey);
+
+Future<Void> coordChangeClusterKey(std::string dataFolder, KeyRef newClusterKey, KeyRef oldClusterKey);
 
 #endif

@@ -373,20 +373,13 @@ Future<Void> MovableCoordinatedState::move(ClusterConnectionString const& nc) {
 	return MovableCoordinatedStateImpl::move(impl.get(), nc);
 }
 
-Optional<Value> readCCS(ValueRef movableVal) {
-	MovableValue moveState = BinaryReader::fromStringRef<MovableValue>(
-	    movableVal, IncludeVersion(ProtocolVersion::withMovableCoordinatedStateV2()));
-	printf("Move state: %d\n", moveState.mode);
-	return moveState.other;
-}
-
 Optional<Value> updateCCS(ValueRef movableVal, KeyRef oldClusterKey, KeyRef newClusterKey) {
 	Optional<Value> result;
-	MovableValue moveState = BinaryReader::fromStringRef<MovableValue>(
+	MovableValue moveVal = BinaryReader::fromStringRef<MovableValue>(
 	    movableVal, IncludeVersion(ProtocolVersion::withMovableCoordinatedStateV2()));
-	if (moveState.other.present() && moveState.other.get() == oldClusterKey) {
-		moveState.other = newClusterKey;
-		result = BinaryWriter::toValue(moveState, IncludeVersion(ProtocolVersion::withMovableCoordinatedStateV2()));
+	if (moveVal.other.present() && moveVal.other.get() == oldClusterKey) {
+		moveVal.other = newClusterKey;
+		result = BinaryWriter::toValue(moveVal, IncludeVersion(ProtocolVersion::withMovableCoordinatedStateV2()));
 	}
 	return result;
 }
