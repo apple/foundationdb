@@ -47,7 +47,9 @@ class LivenessChecker {
 	ACTOR static Future<Void> checkStuck(LivenessChecker const* self) {
 		loop {
 			choose {
-				when(wait(delayUntil(self->lastTime.get() + self->threshold))) { return Void(); }
+				when(wait(delayUntil(self->lastTime.get() + self->threshold))) {
+					return Void();
+				}
 				when(wait(self->lastTime.onChange())) {}
 			}
 		}
@@ -275,7 +277,9 @@ ACTOR Future<Void> remoteMonitorLeader(int* clientCount,
 			when(wait(yieldedFuture(currentElectedLeaderOnChange))) {
 				currentElectedLeaderOnChange = currentElectedLeader->onChange();
 			}
-			when(wait(delayJittered(SERVER_KNOBS->CLIENT_REGISTER_INTERVAL))) { break; }
+			when(wait(delayJittered(SERVER_KNOBS->CLIENT_REGISTER_INTERVAL))) {
+				break;
+			}
 		}
 	}
 
@@ -775,4 +779,101 @@ ACTOR Future<Void> coordinationServer(std::string dataFolder,
 		TraceEvent("CoordinationServerError", myID).errorUnsuppressed(e);
 		throw;
 	}
+}
+
+ACTOR Future<Void> printAllKVsActor(std::string datafolder) {
+	state UID myID = deterministicRandom()->randomUniqueID();
+	state OnDemandStore store(datafolder, myID, "coordination-");
+	printf("Store exists: %s\n", store.exists() ? "True" : "False");
+	RangeResult res = wait(store->readRange(allKeys));
+	printf("Number of kvs: %d\n", res.size());
+	for (auto& [key, value] : res) {
+		printf(
+		    "Key(%d): %s, Value(%d): %s\n", key.size(), key.toString().c_str(), value.size(), value.toString().c_str());
+		if (!key.startsWith("\xff"_sr)) {
+			GenerationRegVal regVal = BinaryReader::fromStringRef<GenerationRegVal>(value, IncludeVersion());
+			if (regVal.val.present()) {
+				Optional<Value> ccs = readCCS(regVal.val.get());
+				if (ccs.present()) {
+					printf("Value contains ccs: %s\n", ccs.get().toString().c_str());
+				}
+			}
+		}
+	}
+	return Void();
+}
+
+ACTOR Future<Void> changeClusterDescription(std::string datafolder, Key newClusterKey, Key oldClusterKey) {
+	state UID myID = deterministicRandom()->randomUniqueID();
+	state OnDemandStore store(datafolder, myID, "coordination-");
+	RangeResult res = wait(store->readRange(allKeys));
+	// Context, in coordinators' kv-store
+	// cluster description and the random id are always appear together as the clusterKey
+	// The old cluster key, (call it oldCKey) below can appear in the following scenarios:
+	// 1. oldCKey is a key in the store: the value is a binary format of _GenerationRegVal_ which contains a different
+	// clusterKey(either movedFrom or moveTo)
+	// 2. oldCKey appears in a key for forwarding message:
+	// 		2.1: the prefix is _fwdKeys.begin_: the value is the new connection string
+	//		2.2: the prefix is _fwdTimeKeys.begin_: the value is the time
+	// 3. oldCKey does not appear in any keys but in a value:
+	// 		3.1: it's in the value of a forwarding message(see 2.1)
+	//		3.2: it's inside the value of _GenerationRegVal_ (see 1)
+	for (auto& [key, value] : res) {
+		if (key.startsWith(fwdKeys.begin)) {
+			if (key.removePrefix(fwdKeys.begin) == oldClusterKey) {
+				store->clear(singleKeyRange(key));
+				store->set(KeyValueRef(newClusterKey.withPrefix(fwdKeys.begin), value));
+			} else if (value.startsWith(oldClusterKey)) {
+				store->set(KeyValueRef(key, value.removePrefix(oldClusterKey).withPrefix(newClusterKey)));
+			}
+		} else if (key.startsWith(fwdTimeKeys.begin) && key.removePrefix(fwdTimeKeys.begin) == oldClusterKey) {
+			store->clear(singleKeyRange(key));
+			store->set(KeyValueRef(newClusterKey.withPrefix(fwdTimeKeys.begin), value));
+		} else if (key == oldClusterKey) {
+			store->clear(singleKeyRange(key));
+			store->set(KeyValueRef(newClusterKey, value));
+		} else {
+			// parse the value part
+			GenerationRegVal regVal = BinaryReader::fromStringRef<GenerationRegVal>(value, IncludeVersion());
+			if (regVal.val.present()) {
+				Optional<Value> newVal = updateCCS(regVal.val.get(), oldClusterKey, newClusterKey);
+				if (newVal.present()) {
+					regVal.val = newVal.get();
+					store->set(KeyValueRef(
+					    key, BinaryWriter::toValue(regVal, IncludeVersion(ProtocolVersion::withGenerationRegVal()))));
+				}
+			}
+		}
+		// check description existence
+		// auto iter = std::search(key.begin(), key.end(), oldClusterKey.begin(), oldClusterKey.end());
+		// auto iter2 = std::search(value.begin(), value.end(), oldClusterKey.begin(), oldClusterKey.end());
+		// // now it contains the old cluster key
+		// if (iter != key.end()) {
+		// 	printf(
+		// 	    "Key has the old cluster key; Key: %s, Value:%s\n", key.toString().c_str(), value.toString().c_str());
+		// 	if (key == oldClusterKey) {
+		// 		store->set(KeyValueRef(newClusterKey, value));
+		// 	} else if (key.startsWith(fwdKeys.begin)) {
+		// 		ASSERT(key.removePrefix(fwdKeys.begin) == oldClusterKey);
+		// 		store->set(KeyValueRef(newClusterKey.withPrefix(fwdKeys.begin), value));
+		// 	} else if (key.startsWith(fwdTimeKeys.begin)) {
+		// 		ASSERT(key.removePrefix(fwdTimeKeys.begin) == oldClusterKey);
+		// 		store->set(KeyValueRef(newClusterKey.withPrefix(fwdTimeKeys.begin), value));
+		// 	} else {
+		// 		ASSERT(false);
+		// 	}
+		// 	store->clear(singleKeyRange(key));
+		// }
+		// if (iter2 != value.end() && key.startsWith(fwdKeys.begin)) {
+		// 	printf("Value(%d) has the old cluster key; Key: %s, Value:%s\n",
+		// 	       value.size(),
+		// 	       key.toString().c_str(),
+		// 	       value.toString().c_str());
+		// 	ASSERT(value.startsWith(oldClusterKey));
+		// 	Value new_val = value.removePrefix(oldClusterKey).withPrefix(newClusterKey);
+		// 	store->set(KeyValueRef(key, new_val));
+		// }
+	}
+	wait(store->commit());
+	return Void();
 }

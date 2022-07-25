@@ -301,7 +301,9 @@ struct MovableCoordinatedStateImpl {
 		ASSERT(self->lastValue.present() && self->lastCSValue.present());
 		TraceEvent("StartMove").detail("ConnectionString", nc.toString());
 		choose {
-			when(wait(creationTimeout)) { throw new_coordinators_timed_out(); }
+			when(wait(creationTimeout)) {
+				throw new_coordinators_timed_out();
+			}
 			when(Value ncInitialValue = wait(nccs.read())) {
 				ASSERT(!ncInitialValue.size()); // The new coordinators must be uninitialized!
 			}
@@ -309,7 +311,9 @@ struct MovableCoordinatedStateImpl {
 		TraceEvent("FinishedRead").detail("ConnectionString", nc.toString());
 
 		choose {
-			when(wait(creationTimeout)) { throw new_coordinators_timed_out(); }
+			when(wait(creationTimeout)) {
+				throw new_coordinators_timed_out();
+			}
 			when(wait(nccs.setExclusive(
 			    BinaryWriter::toValue(MovableValue(self->lastValue.get(),
 			                                       MovableValue::MovingFrom,
@@ -367,4 +371,22 @@ Future<Void> MovableCoordinatedState::setExclusive(Value v) {
 }
 Future<Void> MovableCoordinatedState::move(ClusterConnectionString const& nc) {
 	return MovableCoordinatedStateImpl::move(impl.get(), nc);
+}
+
+Optional<Value> readCCS(ValueRef movableVal) {
+	MovableValue moveState = BinaryReader::fromStringRef<MovableValue>(
+	    movableVal, IncludeVersion(ProtocolVersion::withMovableCoordinatedStateV2()));
+	printf("Move state: %d\n", moveState.mode);
+	return moveState.other;
+}
+
+Optional<Value> updateCCS(ValueRef movableVal, KeyRef oldClusterKey, KeyRef newClusterKey) {
+	Optional<Value> result;
+	MovableValue moveState = BinaryReader::fromStringRef<MovableValue>(
+	    movableVal, IncludeVersion(ProtocolVersion::withMovableCoordinatedStateV2()));
+	if (moveState.other.present() && moveState.other.get() == oldClusterKey) {
+		moveState.other = newClusterKey;
+		result = BinaryWriter::toValue(moveState, IncludeVersion(ProtocolVersion::withMovableCoordinatedStateV2()));
+	}
+	return result;
 }
