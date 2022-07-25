@@ -287,16 +287,15 @@ public:
 	}
 
 	StorageServerShard toStorageServerShard() const {
-		StorageServerShard::ShardState st;
+		StorageServerShard::ShardState st = StorageServerShard::NotAssigned;
 		if (this->isReadable()) {
 			st = StorageServerShard::ReadWrite;
 		} else if (!this->assigned()) {
 			st = StorageServerShard::NotAssigned;
 		} else {
 			ASSERT(this->adding);
-			if (this->adding)
-				st = this->adding->phase == AddingShard::Waiting ? StorageServerShard::ReadWritePending
-				                                                 : StorageServerShard::MovingIn;
+			st = this->adding->phase == AddingShard::Waiting ? StorageServerShard::ReadWritePending
+			                                                 : StorageServerShard::MovingIn;
 		}
 		return StorageServerShard(this->keys, this->version, this->shardId, this->desiredShardId, st);
 	}
@@ -3015,7 +3014,7 @@ ACTOR Future<Void> getShardState_impl(StorageServer* data, GetShardStateRequest 
 		if (!onChange.size()) {
 			GetShardStateReply rep(data->version.get(), data->durableVersion.get());
 			if (req.includePhysicalShard) {
-				rep.shards = std::move(data->getStorageServerShards(req.keys));
+				rep.shards = data->getStorageServerShards(req.keys);
 			}
 			req.reply.send(rep);
 			return Void();
