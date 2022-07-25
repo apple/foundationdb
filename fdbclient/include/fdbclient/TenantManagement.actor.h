@@ -302,27 +302,34 @@ Future<Void> deleteTenantTransaction(Transaction tr,
 
 		if (clusterType == ClusterType::METACLUSTER_DATA) {
 			// In data clusters, we store a tombstone
-			state Future<Optional<int64_t>> lastIdFuture = TenantMetadata::lastTenantId.get(tr);
+			state Future<KeyBackedRangeResult<int64_t>> latestTombstoneFuture =
+			    TenantMetadata::tenantTombstones.getRange(tr, {}, {}, 1, Snapshot::False, Reverse::True);
 			state Optional<TenantTombstoneCleanupData> cleanupData = wait(TenantMetadata::tombstoneCleanupData.get(tr));
 			state Version transactionReadVersion = wait(safeThreadFutureToFuture(tr->getReadVersion()));
 
 			// If it has been long enough since we last cleaned up the tenant tombstones, we do that first
 			if (!cleanupData.present() || cleanupData.get().nextTombstoneEraseVersion <= transactionReadVersion) {
-				state int64_t deleteThroughId = cleanupData.present() ? cleanupData.get().tombstonesErasedThrough : -1;
+				state int64_t deleteThroughId = cleanupData.present() ? cleanupData.get().nextTombstoneEraseId : -1;
 				// Delete all tombstones up through the one currently marked in the cleanup data
-				if (deleteThroughId) {
+				if (deleteThroughId >= 0) {
 					TenantMetadata::tenantTombstones.erase(tr, 0, deleteThroughId + 1);
 				}
 
-				Optional<int64_t> lastId = wait(lastIdFuture);
+				KeyBackedRangeResult<int64_t> latestTombstone = wait(latestTombstoneFuture);
+				int64_t nextDeleteThroughId = std::max(deleteThroughId, tenantId.get());
+				if (!latestTombstone.results.empty()) {
+					nextDeleteThroughId = std::max(nextDeleteThroughId, latestTombstone.results[0]);
+				}
 
 				// The next cleanup will happen at or after TENANT_TOMBSTONE_CLEANUP_INTERVAL seconds have elapsed and
 				// will clean up tombstones through the most recently allocated ID.
 				TenantTombstoneCleanupData updatedCleanupData;
 				updatedCleanupData.tombstonesErasedThrough = deleteThroughId;
-				updatedCleanupData.nextTombstoneEraseId = lastId.orDefault(-1);
+				updatedCleanupData.nextTombstoneEraseId = nextDeleteThroughId;
 				updatedCleanupData.nextTombstoneEraseVersion =
-				    transactionReadVersion + CLIENT_KNOBS->TENANT_TOMBSTONE_CLEANUP_INTERVAL * CLIENT_KNOBS->VERSIONS_PER_SECOND;
+				    transactionReadVersion +
+				    CLIENT_KNOBS->TENANT_TOMBSTONE_CLEANUP_INTERVAL * CLIENT_KNOBS->VERSIONS_PER_SECOND;
+
 				TenantMetadata::tombstoneCleanupData.set(tr, updatedCleanupData);
 
 				// If the tenant being deleted is within the tombstone window, record the tombstone

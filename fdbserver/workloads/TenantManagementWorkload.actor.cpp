@@ -581,6 +581,9 @@ struct TenantManagementWorkload : TestWorkload {
 		// True if all of the tenants in the range are empty and can be deleted
 		state bool isEmpty = true;
 
+		// True if we expect that some tenant will be deleted
+		state bool anyExists = alreadyExists;
+
 		// Collect a list of all tenants that we expect should be deleted by this operation
 		state std::vector<TenantName> tenants;
 		if (!endTenant.present()) {
@@ -590,6 +593,7 @@ struct TenantManagementWorkload : TestWorkload {
 			     itr != self->createdTenants.end() && itr->first < endTenant.get();
 			     ++itr) {
 				tenants.push_back(itr->first);
+				anyExists = true;
 			}
 		}
 
@@ -634,16 +638,19 @@ struct TenantManagementWorkload : TestWorkload {
 			try {
 				// Attempt to delete the tenant(s)
 				state bool retried = false;
+				state double deleteStartTime = now();
 				loop {
 					try {
-						self->newestDeletionTime = now();
 						Optional<Void> result =
 						    wait(timeout(deleteImpl(tr, beginTenant, endTenant, tenants, operationType, self),
 						                 deterministicRandom()->randomInt(1, 30)));
 
 						if (result.present()) {
-							if (self->oldestDeletionTime == 0) {
-								self->oldestDeletionTime = now();
+							if (anyExists) {
+								if (self->oldestDeletionTime == 0) {
+									self->oldestDeletionTime = now();
+								}
+								self->newestDeletionTime = deleteStartTime;
 							}
 
 							// Database operations shouldn't get here if the tenant didn't exist
@@ -1426,7 +1433,6 @@ struct TenantManagementWorkload : TestWorkload {
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				state Optional<int64_t> lastId = wait(TenantMetadata::lastTenantId.get(tr));
 
 				state KeyBackedRangeResult<int64_t> tombstones =
 				    wait(TenantMetadata::tenantTombstones.getRange(tr, 0, {}, 1));
@@ -1437,7 +1443,6 @@ struct TenantManagementWorkload : TestWorkload {
 					ASSERT(tombstones.results.empty() && !tombstoneCleanupData.present());
 				} else {
 					if (self->oldestDeletionTime != 0 && tombstoneCleanupData.present()) {
-						ASSERT(tombstoneCleanupData.get().nextTombstoneEraseId <= lastId.orDefault(-1));
 						if (self->newestDeletionTime - self->oldestDeletionTime >
 						    CLIENT_KNOBS->TENANT_TOMBSTONE_CLEANUP_INTERVAL) {
 							ASSERT(tombstoneCleanupData.get().tombstonesErasedThrough >= 0);

@@ -305,4 +305,5 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<TenantManagementConcurrencyWorkload> TenantManagementConcurrencyWorkload("TenantManagementConcurrency");
+WorkloadFactory<TenantManagementConcurrencyWorkload> TenantManagementConcurrencyWorkloadFactory(
+    "TenantManagementConcurrency");
