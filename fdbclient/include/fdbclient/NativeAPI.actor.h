@@ -160,6 +160,7 @@ struct TransactionOptions {
 	bool useGrvCache : 1;
 	bool skipGrvCache : 1;
 	bool rawAccess : 1;
+	bool useSetTenant : 1; // internal option for using originally set tenant
 
 	TransactionPriority priority;
 
@@ -240,6 +241,7 @@ FDB_DECLARE_BOOLEAN_PARAM(AllowInvalidTenantID);
 struct TransactionState : ReferenceCounted<TransactionState> {
 	Database cx;
 	int64_t tenantId = TenantInfo::INVALID_TENANT;
+	Optional<Standalone<StringRef>> authToken;
 	Reference<TransactionLogInfo> trLogInfo;
 	TransactionOptions options;
 
@@ -277,12 +279,8 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 	Optional<TenantName> const& tenant();
 	bool hasTenant() const;
 
-	void setToken(Standalone<StringRef> token) { authToken_ = token; }
-	void clearToken() { authToken_.reset(); }
-
 private:
 	Optional<TenantName> tenant_;
-	Optional<Standalone<StringRef>> authToken_;
 	bool tenantSet;
 };
 

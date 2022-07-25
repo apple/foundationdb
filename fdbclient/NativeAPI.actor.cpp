@@ -710,6 +710,7 @@ ACTOR static Future<Void> delExcessClntTxnEntriesActor(Transaction* tr, int64_t 
 				tr->clear(KeyRangeRef(txEntries[0].key, strinc(endKey)));
 				TraceEvent(SevInfo, "DeletingExcessCntTxnEntries").detail("BytesToBeDeleted", numBytesToDel);
 				int64_t bytesDel = -numBytesToDel;
+
 				tr->atomicOp(clientLatencyAtomicCtr, StringRef((uint8_t*)&bytesDel, 8), MutationRef::AddValue);
 				wait(tr->commit());
 			}
@@ -3194,8 +3195,6 @@ Reference<TransactionState> TransactionState::cloneAndReset(Reference<Transactio
 	SpanContext newSpanContext = generateNewSpan ? generateSpanID(cx->transactionTracingSample) : spanContext;
 	Reference<TransactionState> newState =
 	    makeReference<TransactionState>(cx, tenant_, cx->taskID, newSpanContext, newTrLogInfo);
-	if (authToken_.present())
-		newState->setToken(authToken_.get());
 
 	if (!cx->apiVersionAtLeast(16)) {
 		newState->options = options;
@@ -3205,6 +3204,7 @@ Reference<TransactionState> TransactionState::cloneAndReset(Reference<Transactio
 	newState->startTime = startTime;
 	newState->committedVersion = committedVersion;
 	newState->conflictingKeys = conflictingKeys;
+	newState->authToken = authToken;
 	newState->tenantSet = tenantSet;
 
 	return newState;
@@ -3213,7 +3213,9 @@ Reference<TransactionState> TransactionState::cloneAndReset(Reference<Transactio
 TenantInfo TransactionState::getTenantInfo(AllowInvalidTenantID allowInvalidId /* = false */) {
 	Optional<TenantName> const& t = tenant();
 
-	if (options.rawAccess) {
+	if (options.useSetTenant) {
+		// go to end
+	} else if (options.rawAccess) {
 		return TenantInfo();
 	} else if (!cx->internal && cx->clientInfo->get().tenantMode == TenantMode::REQUIRED && !t.present()) {
 		throw tenant_name_required();
@@ -3224,7 +3226,7 @@ TenantInfo TransactionState::getTenantInfo(AllowInvalidTenantID allowInvalidId /
 	}
 
 	ASSERT(allowInvalidId || tenantId != TenantInfo::INVALID_TENANT);
-	return TenantInfo(t, authToken_, tenantId);
+	return TenantInfo(t, authToken, tenantId);
 }
 
 Optional<TenantName> const& TransactionState::tenant() {
@@ -5762,6 +5764,7 @@ void TransactionOptions::clear() {
 	useGrvCache = false;
 	skipGrvCache = false;
 	rawAccess = false;
+	useSetTenant = false;
 }
 
 TransactionOptions::TransactionOptions() {
@@ -5917,7 +5920,7 @@ ACTOR void checkWrites(Reference<TransactionState> trState,
 }
 
 ACTOR static Future<Void> commitDummyTransaction(Reference<TransactionState> trState, KeyRange range) {
-	state Transaction tr(trState->cx);
+	state Transaction tr(trState->cx, trState->tenant());
 	state int retries = 0;
 	state Span span("NAPI:dummyTransaction"_loc, trState->spanContext);
 	tr.span.setParent(span.context);
@@ -5926,7 +5929,10 @@ ACTOR static Future<Void> commitDummyTransaction(Reference<TransactionState> trS
 			TraceEvent("CommitDummyTransaction").detail("Key", range.begin).detail("Retries", retries);
 			tr.trState->options = trState->options;
 			tr.trState->taskID = trState->taskID;
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.trState->authToken = trState->authToken;
+			tr.trState->options.rawAccess = true;
+			tr.trState->options.useSetTenant =
+			    trState->hasTenant(); // don't let rawAccess remove set tenant during tenant resolution
 			tr.setOption(FDBTransactionOptions::CAUSAL_WRITE_RISKY);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.addReadConflictRange(range);
@@ -6088,6 +6094,7 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 	state double startTime = now();
 	state Span span("NAPI:tryCommit"_loc, trState->spanContext);
 	state Optional<UID> debugID = trState->debugID;
+	state Key tenantPrefix;
 	if (debugID.present()) {
 		TraceEvent(interval.begin()).detail("Parent", debugID.get());
 	}
@@ -6104,7 +6111,6 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 			wait(store(req.transaction.read_snapshot, readVersion));
 		}
 
-		state Key tenantPrefix;
 		if (trState->tenant().present()) {
 			KeyRangeLocationInfo locationInfo = wait(getKeyLocation(trState,
 			                                                        ""_sr,
@@ -6242,7 +6248,10 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 
 				TEST(true); // Waiting for dummy transaction to report commit_unknown_result
 
-				wait(commitDummyTransaction(trState, singleKeyRange(selfConflictingRange.begin)));
+				KeyRef conflictKeyRef = selfConflictingRange.begin;
+				if (conflictKeyRef.startsWith(tenantPrefix))
+					conflictKeyRef = conflictKeyRef.removePrefix(tenantPrefix);
+				wait(commitDummyTransaction(trState, singleKeyRange(conflictKeyRef)));
 			}
 
 			// The user needs to be informed that we aren't sure whether the commit happened.  Standard retry loops
@@ -6619,9 +6628,9 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 
 	case FDBTransactionOptions::AUTHORIZATION_TOKEN:
 		if (value.present())
-			trState->setToken(value.get());
+			trState->authToken = Standalone<StringRef>(value.get());
 		else
-			trState->clearToken();
+			trState->authToken.reset();
 		break;
 
 	default:
