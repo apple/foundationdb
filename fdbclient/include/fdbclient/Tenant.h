@@ -99,12 +99,13 @@ struct TenantMetadataSpecification {
 
 	KeyBackedObjectMap<TenantName, TenantMapEntry, decltype(IncludeVersion()), NullCodec> tenantMap;
 	KeyBackedProperty<int64_t> lastTenantId;
+	KeyBackedBinaryValue<int64_t> tenantCount;
 	KeyBackedSet<Tuple> tenantGroupTenantIndex;
 	KeyBackedObjectMap<TenantGroupName, TenantGroupEntry, decltype(IncludeVersion()), NullCodec> tenantGroupMap;
 
 	TenantMetadataSpecification(KeyRef subspace)
 	  : tenantMap(subspace.withSuffix("tenant/map/"_sr), IncludeVersion()),
-	    lastTenantId(subspace.withSuffix("tenant/lastId"_sr)),
+	    lastTenantId(subspace.withSuffix("tenant/lastId"_sr)), tenantCount(subspace.withSuffix("tenant/count"_sr)),
 	    tenantGroupTenantIndex(subspace.withSuffix("tenant/tenantGroup/tenantIndex/"_sr)),
 	    tenantGroupMap(subspace.withSuffix("tenant/tenantGroup/map/"_sr), IncludeVersion()) {}
 };
@@ -116,6 +117,7 @@ private:
 public:
 	static inline auto& tenantMap = instance.tenantMap;
 	static inline auto& lastTenantId = instance.lastTenantId;
+	static inline auto& tenantCount = instance.tenantCount;
 	static inline auto& tenantGroupTenantIndex = instance.tenantGroupTenantIndex;
 	static inline auto& tenantGroupMap = instance.tenantGroupMap;
 
