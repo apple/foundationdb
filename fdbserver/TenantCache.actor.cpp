@@ -182,7 +182,7 @@ std::string TenantCache::desc() const {
 			s += ", ";
 		}
 
-		s += "Name: " + tenant->name().toString() + " Prefix: " + tenantPrefix.printable();
+		s += "Name: " + tenant->name().toString() + " Prefix: " + tenantPrefix.toString();
 		count++;
 	}
 

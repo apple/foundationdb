@@ -1239,8 +1239,8 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
 
 			when(TenantCacheTenantCreated newTenant = waitNext(tenantCreationSignal.getFuture())) {
 				TraceEvent(SevInfo, "TenantCacheTenantCreated")
-				    .detail("Begin", newTenant.keys.begin.printable())
-				    .detail("End", newTenant.keys.end.printable());
+				    .detail("Begin", newTenant.keys.begin)
+				    .detail("End", newTenant.keys.end);
 				self.sizeChanges.add(tenantShardSplitter(&self, newTenant.keys));
 				newTenant.reply.send(true);
 			}
