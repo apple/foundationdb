@@ -482,7 +482,7 @@ private:
 
 std::string describeSplit(KeyRange keys, Standalone<VectorRef<KeyRef>>& splitKeys) {
 	std::string s;
-	s += "[" + keys.begin.printable() + ", " + keys.end.printable() + ") -> ";
+	s += "[" + keys.begin.toString() + ", " + keys.end.toString() + ") -> ";
 
 	for (auto& sk : splitKeys) {
 		s += sk.printable() + " ";
