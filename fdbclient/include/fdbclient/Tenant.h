@@ -33,6 +33,23 @@ typedef Standalone<TenantNameRef> TenantName;
 typedef StringRef TenantGroupNameRef;
 typedef Standalone<TenantGroupNameRef> TenantGroupName;
 
+// Represents the various states that a tenant could be in.
+// In a standalone cluster, a tenant should only ever be in the READY state.
+// In a metacluster, a tenant on the management cluster could be in the other states while changes are applied to the
+// data cluster.
+//
+// REGISTERING - the tenant has been created on the management cluster and is being created on the data cluster
+// READY - the tenant has been created on both clusters, is active, and is consistent between the two clusters
+// REMOVING - the tenant has been marked for removal and is being removed on the data cluster
+// UPDATING_CONFIGURATION - the tenant configuration has changed on the management cluster and is being applied to the
+//                          data cluster
+// ERROR - currently unused
+//
+// A tenant in any configuration is allowed to be removed. Only tenants in the READY or UPDATING_CONFIGURATION phases
+// can have their configuration updated. A tenant must not exist or be in the REGISTERING phase to be created.
+//
+// If an operation fails and the tenant is left in a non-ready state, re-running the same operation is legal. If
+// successful, the tenant will return to the READY state.
 enum class TenantState { REGISTERING, READY, REMOVING, UPDATING_CONFIGURATION, ERROR };
 
 struct TenantMapEntry {
