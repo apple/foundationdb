@@ -310,8 +310,11 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 					if (doPurging) {
 						wait(self->killBlobWorkers(cx, self));
 						if (BGV_DEBUG) {
-								fmt::print("BGV Reading post-purge [{0} - {1}) @ {2}\n", oldRead.range.begin.printable(), oldRead.range.end.printable(), prevPurgeVersion);
-							}
+							fmt::print("BGV Reading post-purge [{0} - {1}) @ {2}\n",
+							           oldRead.range.begin.printable(),
+							           oldRead.range.end.printable(),
+							           prevPurgeVersion);
+						}
 						// ensure purge version exactly is still readable
 						std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> versionRead1 =
 						    wait(readFromBlob(cx, self->bstore, oldRead.range, 0, prevPurgeVersion));
@@ -326,7 +329,10 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 								minSnapshotVersion = std::min(minSnapshotVersion, it.snapshotVersion);
 							}
 							if (BGV_DEBUG) {
-								fmt::print("BGV Reading post-purge again [{0} - {1}) @ {2}\n", oldRead.range.begin.printable(), oldRead.range.end.printable(), minSnapshotVersion - 1);
+								fmt::print("BGV Reading post-purge again [{0} - {1}) @ {2}\n",
+								           oldRead.range.begin.printable(),
+								           oldRead.range.end.printable(),
+								           minSnapshotVersion - 1);
 							}
 							std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> versionRead2 =
 							    wait(readFromBlob(cx, self->bstore, oldRead.range, 0, minSnapshotVersion - 1));
