@@ -1917,15 +1917,13 @@ ACTOR static Future<std::vector<std::pair<StorageServerInterface, EventMap>>> ge
 	state std::vector<std::pair<StorageServerInterface, EventMap>> results;
 	state std::vector<TraceEventFields> busiestWriteTags;
 	state std::vector<Optional<StorageMetadataType>> metadata;
-	wait(timeoutError(
-	    store(results,
-	          getServerMetrics(servers,
-	                           address_workers,
-	                           std::vector<std::string>{
-	                               "StorageMetrics", "ReadLatencyMetrics", "ReadLatencyBands", "BusiestReadTag" })) &&
-	        store(busiestWriteTags, getServerBusiestWriteTags(servers, address_workers, rkWorker)) &&
-	        store(metadata, getServerMetadata(servers, cx, true)),
-	    5.0));
+	wait(store(results,
+	           getServerMetrics(servers,
+	                            address_workers,
+	                            std::vector<std::string>{
+	                                "StorageMetrics", "ReadLatencyMetrics", "ReadLatencyBands", "BusiestReadTag" })) &&
+	     store(busiestWriteTags, getServerBusiestWriteTags(servers, address_workers, rkWorker)) &&
+	     store(metadata, timeoutError(getServerMetadata(servers, cx, true), 5.0)));
 
 	ASSERT(busiestWriteTags.size() == results.size() && metadata.size() == results.size());
 	for (int i = 0; i < results.size(); ++i) {
