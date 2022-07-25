@@ -5729,11 +5729,23 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			// Then dest SS waits its version catch up with this GRV version and write the data to disk.
 			// Note that dest SS waits outside the fetchKeysParallelismLock.
 			fetchVersion = std::max(shard->fetchVersion, data->version.get());
+			if (g_network->isSimulated() && BUGGIFY_WITH_PROB(0.01)) {
+				// Test using GRV version for fetchKey.
+				lastError = transaction_too_old();
+			}
 			if (lastError.code() == error_code_transaction_too_old) {
 				try {
 					Version grvVersion = wait(tr.getRawReadVersion());
+					if (g_network->isSimulated() && BUGGIFY_WITH_PROB(0.01)) {
+						// Test failed GRV request.
+						throw proxy_memory_limit_exceeded();
+					}
 					fetchVersion = std::max(grvVersion, fetchVersion);
 				} catch (Error& e) {
+					if (e.code() == error_code_actor_cancelled) {
+						throw e;
+					}
+
 					// Note that error in getting GRV doesn't affect any storage server state. Therefore, we catch all
 					// errors here without failing the storage server. When error happens, fetchVersion fall back to
 					// the above computed fetchVersion.
