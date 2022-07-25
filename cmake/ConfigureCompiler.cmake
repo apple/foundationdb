@@ -68,6 +68,7 @@ if(WIN32)
   add_definitions(-DBOOST_USE_WINDOWS_H)
   add_definitions(-DWIN32_LEAN_AND_MEAN)
   add_definitions(-D_ITERATOR_DEBUG_LEVEL=0)
+  add_definitions(-DNOGDI) # WinGDI.h defines macro ERROR
 endif()
 
 if (USE_CCACHE)
