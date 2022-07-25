@@ -853,6 +853,7 @@ public:
 	FlowLock serveFetchCheckpointParallelismLock;
 
 	PriorityMultiLock ssLock;
+	std::vector<int> readPriorityRanks;
 
 	int64_t instanceID;
 
@@ -1061,12 +1062,15 @@ public:
 	    fetchChangeFeedParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM),
 	    fetchKeysBytesBudget(SERVER_KNOBS->STORAGE_FETCH_BYTES), fetchKeysBudgetUsed(false),
 	    serveFetchCheckpointParallelismLock(SERVER_KNOBS->SERVE_FETCH_CHECKPOINT_PARALLELISM),
-	    ssLock(FLOW_KNOBS->MAX_OUTSTANDING, (int)ReadType::MAX, SERVER_KNOBS->STORAGESERVER_READ_PRIORITIES),
+	    ssLock(FLOW_KNOBS->MAX_OUTSTANDING,
+	           SERVER_KNOBS->STORAGESERVER_MAX_RANK,
+	           SERVER_KNOBS->STORAGESERVER_READ_PRIORITIES),
 	    instanceID(deterministicRandom()->randomUniqueID().first()), shuttingDown(false), behind(false),
 	    versionBehind(false), debug_inApplyUpdate(false), debug_lastValidateTime(0), lastBytesInputEBrake(0),
 	    lastDurableVersionEBrake(0), maxQueryQueue(0), transactionTagCounter(ssi.id()), counters(this),
 	    storageServerSourceTLogIDEventHolder(
 	        makeReference<EventCacheHolder>(ssi.id().toString() + "/StorageServerSourceTLogID")) {
+		readPriorityRanks = parseStringToVector<int>(SERVER_KNOBS->STORAGESERVER_READ_RANKS, ',');
 		version.initMetric(LiteralStringRef("StorageServer.Version"), counters.cc.id);
 		oldestVersion.initMetric(LiteralStringRef("StorageServer.OldestVersion"), counters.cc.id);
 		durableVersion.initMetric(LiteralStringRef("StorageServer.DurableVersion"), counters.cc.id);
@@ -1568,9 +1572,9 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 
 		// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 		// so we need to downgrade here
-		wait(delay(0));
-		state int readPriority = data->getQueryPriority();
-		wait(store(lock, data->ssLock.lock(readPriority)));
+		wait(delay(0, TaskPriority::DefaultEndpoint));
+		state int rankIndex = data->getQueryPriority();
+		wait(store(lock, data->ssLock.lock(data->readPriorityRanks[rankIndex])));
 
 		if (req.debugID.present())
 			g_traceBatch.addEvent("GetValueDebug",
@@ -3381,10 +3385,10 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 
 	// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 	// so we need to downgrade here
-	wait(delay(0));
-	state int readPriority =
+	wait(delay(0, TaskPriority::DefaultEndpoint));
+	state int rankIndex =
 	    (req.isFetchKeys && SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY) ? (int)ReadType::FETCH : data->getQueryPriority();
-	state PriorityMultiLock::Lock lock = wait(data->ssLock.lock(readPriority));
+	state PriorityMultiLock::Lock lock = wait(data->ssLock.lock(data->readPriorityRanks[rankIndex]));
 
 	try {
 		if (req.debugID.present())
@@ -4099,10 +4103,10 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 
 	// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 	// so we need to downgrade here
-	wait(delay(0));
-	state int readPriority =
+	wait(delay(0, TaskPriority::DefaultEndpoint));
+	state int rankIndex =
 	    (req.isFetchKeys && SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY) ? (int)ReadType::FETCH : data->getQueryPriority();
-	state PriorityMultiLock::Lock lock = wait(data->ssLock.lock(readPriority));
+	state PriorityMultiLock::Lock lock = wait(data->ssLock.lock(data->readPriorityRanks[rankIndex]));
 
 	try {
 		if (req.debugID.present())
@@ -4290,8 +4294,9 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 	state Span span("SS:getKeyValuesStream"_loc, req.spanContext);
 	state int64_t resultSize = 0;
 	state ReadType type = req.isFetchKeys ? ReadType::FETCH : ReadType::NORMAL;
-	state int readPriority =
+	state int rankIndex =
 	    (req.isFetchKeys && SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY) ? (int)ReadType::FETCH : (int)ReadType::NORMAL;
+	state int readPriority = data->readPriorityRanks[rankIndex];
 
 	if (req.tenantInfo.name.present()) {
 		span.addAttribute("tenant"_sr, req.tenantInfo.name.get());
@@ -4306,7 +4311,7 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 
 	// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 	// so we need to downgrade here
-	wait(delay(0));
+	wait(delay(0, TaskPriority::DefaultEndpoint));
 	state PriorityMultiLock::Lock lock = wait(data->ssLock.lock(readPriority));
 
 	try {
@@ -4464,6 +4469,9 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 					end = lastKey;
 				}
 
+				lock.release();
+				wait(store(lock, data->ssLock.lock(readPriority)));
+
 				data->transactionTagCounter.addRequest(req.tags, resultSize);
 			}
 		}
@@ -4499,9 +4507,9 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 
 	// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 	// so we need to downgrade here
-	wait(delay(0));
-	state int readPriority = data->getQueryPriority();
-	wait(store(lock, data->ssLock.lock(readPriority)));
+	wait(delay(0, TaskPriority::DefaultEndpoint));
+	state int rankIndex = data->getQueryPriority();
+	wait(store(lock, data->ssLock.lock(data->readPriorityRanks[rankIndex])));
 
 	try {
 		Version commitVersion = getLatestCommitVersion(req.ssLatestCommitVersions, data->tag);
@@ -8671,6 +8679,24 @@ ACTOR Future<Void> metricsCore(StorageServer* self, StorageServerInterface ssi) 
 	                               [self = self](TraceEvent& te) {
 		                               te.detail("StorageEngine", self->storage.getKeyValueStoreType().toString());
 		                               te.detail("Tag", self->tag.toString());
+		                               std::vector<int> rpr = self->readPriorityRanks;
+		                               te.detail("ActiveReads", self->ssLock.totalWorkers());
+		                               te.detail("AwaitReads", self->ssLock.totalWaiters());
+		                               int type = (int)ReadType::EAGER;
+		                               te.detail("ActiveEager", self->ssLock.numWorkers(rpr[type]));
+		                               te.detail("AwaitEager", self->ssLock.numWaiters(rpr[type]));
+		                               type = (int)ReadType::FETCH;
+		                               te.detail("ActiveFetch", self->ssLock.numWorkers(rpr[type]));
+		                               te.detail("AwaitFetch", self->ssLock.numWaiters(rpr[type]));
+		                               type = (int)ReadType::LOW;
+		                               te.detail("ActiveLow", self->ssLock.numWorkers(rpr[type]));
+		                               te.detail("AwaitLow", self->ssLock.numWaiters(rpr[type]));
+		                               type = (int)ReadType::NORMAL;
+		                               te.detail("ActiveNormal", self->ssLock.numWorkers(rpr[type]));
+		                               te.detail("AwaitNormal", self->ssLock.numWaiters(rpr[type]));
+		                               type = (int)ReadType::HIGH;
+		                               te.detail("ActiveHigh", self->ssLock.numWorkers(rpr[type]));
+		                               te.detail("AwaitHigh", self->ssLock.numWaiters(rpr[type]));
 		                               StorageBytes sb = self->storage.getStorageBytes();
 		                               te.detail("KvstoreBytesUsed", sb.used);
 		                               te.detail("KvstoreBytesFree", sb.free);
