@@ -71,7 +71,7 @@ void printMetaclusterConfigureOptionsUsage() {
 // metacluster create command
 ACTOR Future<bool> metaclusterCreateCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	if (tokens.size() != 3) {
-		fmt::print("Usage: metacluster create <NAME>\n\n");
+		fmt::print("Usage: metacluster create_experimental <NAME>\n\n");
 		fmt::print("Configures the cluster to be a management cluster in a metacluster.\n");
 		fmt::print("NAME is an identifier used to distinguish this metacluster from other metaclusters.\n");
 		return false;
@@ -324,7 +324,7 @@ Future<bool> metaclusterCommand(Reference<IDatabase> db, std::vector<StringRef> 
 	if (tokens.size() == 1) {
 		printUsage(tokens[0]);
 		return true;
-	} else if (tokencmp(tokens[1], "create")) {
+	} else if (tokencmp(tokens[1], "create_experimental")) {
 		return metaclusterCreateCommand(db, tokens);
 	} else if (tokencmp(tokens[1], "decommission")) {
 		return metaclusterDecommissionCommand(db, tokens);
