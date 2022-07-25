@@ -650,10 +650,11 @@ private:
 	}
 
 	void checkSetTenantMapPrefix(MutationRef m) {
-		if (m.param1.startsWith(tenantMapPrefix)) {
+		KeyRef prefix = TenantMetadata::tenantMap.subspace.begin;
+		if (m.param1.startsWith(prefix)) {
 			if (tenantMap) {
 				ASSERT(version != invalidVersion);
-				TenantName tenantName = m.param1.removePrefix(tenantMapPrefix);
+				TenantName tenantName = m.param1.removePrefix(prefix);
 				TenantMapEntry tenantEntry = TenantMapEntry::decode(m.param2);
 
 				TraceEvent("CommitProxyInsertTenant", dbgid).detail("Tenant", tenantName).detail("Version", version);
@@ -1028,13 +1029,14 @@ private:
 	}
 
 	void checkClearTenantMapPrefix(KeyRangeRef range) {
-		if (tenantMapKeys.intersects(range)) {
+		KeyRangeRef subspace = TenantMetadata::tenantMap.subspace;
+		if (subspace.intersects(range)) {
 			if (tenantMap) {
 				ASSERT(version != invalidVersion);
 
-				StringRef startTenant = std::max(range.begin, tenantMapPrefix).removePrefix(tenantMapPrefix);
-				StringRef endTenant = (range.end.startsWith(tenantMapPrefix) ? range.end : tenantMapKeys.end)
-				                          .removePrefix(tenantMapPrefix);
+				StringRef startTenant = std::max(range.begin, subspace.begin).removePrefix(subspace.begin);
+				StringRef endTenant =
+				    range.end.startsWith(subspace.begin) ? range.end.removePrefix(subspace.begin) : "\xff\xff"_sr;
 
 				TraceEvent("CommitProxyEraseTenants", dbgid)
 				    .detail("BeginTenant", startTenant)

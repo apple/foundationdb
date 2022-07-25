@@ -552,4 +552,32 @@ struct ExclusionSafetyCheckRequest {
 	}
 };
 
+struct GlobalConfigRefreshReply {
+	constexpr static FileIdentifier file_identifier = 12680327;
+	Arena arena;
+	RangeResultRef result;
+
+	GlobalConfigRefreshReply() {}
+	GlobalConfigRefreshReply(Arena const& arena, RangeResultRef result) : arena(arena), result(result) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, result, arena);
+	}
+};
+
+struct GlobalConfigRefreshRequest {
+	constexpr static FileIdentifier file_identifier = 2828131;
+	Version lastKnown;
+	ReplyPromise<GlobalConfigRefreshReply> reply;
+
+	GlobalConfigRefreshRequest() {}
+	explicit GlobalConfigRefreshRequest(Version lastKnown) : lastKnown(lastKnown) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, lastKnown, reply);
+	}
+};
+
 #endif
