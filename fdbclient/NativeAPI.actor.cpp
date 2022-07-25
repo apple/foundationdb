@@ -267,7 +267,7 @@ void DatabaseContext::getLatestCommitVersions(const Reference<LocationInfo>& loc
 				}
 			}
 		}
-		if (!updatedVersionMap) {
+		if (!updatedVersionMap && commitVersion != readVersion) {
 			// This can have a performance impact if vv is enabled, so provide some diags
 			TraceEvent(SevDebug, "CommitVersionNotFoundForSS")
 			    .detail("InSSIDMap", iter != ssidTagMapping.end() ? 1 : 0)
