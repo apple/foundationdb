@@ -22,7 +22,7 @@
 #include <utility>
 #include <vector>
 
-#include "contrib/fmt-8.1.1/include/fmt/format.h"
+#include "fmt/format.h"
 #include "fdbclient/BlobGranuleReader.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
@@ -68,7 +68,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 
 	DatabaseConfiguration config;
 
-	Reference<BackupContainerFileSystem> bstore;
+	Reference<BlobConnectionProvider> bstore;
 	AsyncVar<Standalone<VectorRef<KeyRangeRef>>> granuleRanges;
 
 	BlobGranuleVerifierWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
@@ -87,21 +87,12 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 			printf("Initializing Blob Granule Verifier s3 stuff\n");
 		}
 		try {
-			if (g_network->isSimulated()) {
-
-				if (BGV_DEBUG) {
-					printf("Blob Granule Verifier constructing simulated backup container\n");
-				}
-				bstore = BackupContainerFileSystem::openContainerFS("file://fdbblob/", {}, {});
-			} else {
-				if (BGV_DEBUG) {
-					printf("Blob Granule Verifier constructing backup container from %s\n",
-					       SERVER_KNOBS->BG_URL.c_str());
-				}
-				bstore = BackupContainerFileSystem::openContainerFS(SERVER_KNOBS->BG_URL, {}, {});
-				if (BGV_DEBUG) {
-					printf("Blob Granule Verifier constructed backup container\n");
-				}
+			if (BGV_DEBUG) {
+				printf("Blob Granule Verifier constructing backup container from %s\n", SERVER_KNOBS->BG_URL.c_str());
+			}
+			bstore = BlobConnectionProvider::newBlobConnectionProvider(SERVER_KNOBS->BG_URL);
+			if (BGV_DEBUG) {
+				printf("Blob Granule Verifier constructed backup container\n");
 			}
 		} catch (Error& e) {
 			if (BGV_DEBUG) {
@@ -263,7 +254,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 							if (prevPurgeVersion < maxPurgeVersion) {
 								newPurgeVersion = deterministicRandom()->randomInt64(prevPurgeVersion, maxPurgeVersion);
 								prevPurgeVersion = std::max(prevPurgeVersion, newPurgeVersion);
-								Key purgeKey = wait(cx->purgeBlobGranules(normalKeys, newPurgeVersion, false));
+								Key purgeKey = wait(cx->purgeBlobGranules(normalKeys, newPurgeVersion, {}, false));
 								wait(cx->waitPurgeGranulesComplete(purgeKey));
 								self->purges++;
 							} else {
@@ -300,6 +291,10 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 						if (e.code() == error_code_blob_granule_transaction_too_old) {
 							self->timeTravelTooOld++;
 							// TODO: add debugging info for when this is a failure
+							fmt::print("BGV ERROR: TTO [{0} - {1}) @ {2}\n",
+							           oldRead.range.begin.printable(),
+							           oldRead.range.end.printable(),
+							           oldRead.v);
 						}
 					}
 				}
@@ -456,7 +451,8 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		if (BGV_DEBUG && startReadVersion != readVersion) {
 			fmt::print("Availability check updated read version from {0} to {1}\n", startReadVersion, readVersion);
 		}
-		bool result = availabilityPassed && self->mismatches == 0 && (checks > 0) && (self->timeTravelTooOld == 0);
+		state bool result =
+		    availabilityPassed && self->mismatches == 0 && (checks > 0) && (self->timeTravelTooOld == 0);
 		fmt::print("Blob Granule Verifier {0} {1}:\n", self->clientId, result ? "passed" : "failed");
 		fmt::print("  {} successful final granule checks\n", checks);
 		fmt::print("  {} failed final granule checks\n", availabilityPassed ? 0 : 1);
@@ -474,6 +470,11 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 
 		// For some reason simulation is still passing when this fails?.. so assert for now
 		ASSERT(result);
+
+		if (self->clientId == 0 && SERVER_KNOBS->BG_ENABLE_MERGING && deterministicRandom()->random01() < 0.1) {
+			CODE_PROBE(true, "BGV clearing database and awaiting merge");
+			wait(clearAndAwaitMerge(cx, normalKeys));
+		}
 
 		return result;
 	}

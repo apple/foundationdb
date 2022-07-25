@@ -234,12 +234,30 @@ Note that :ref:`characters can be escaped <cli-escaping>` when specifying keys (
 gettenant
 ---------
 
-The ``gettenant`` command fetches metadata for a given tenant and displays it. Its syntax is ``gettenant <TENANT_NAME>``.
+The ``gettenant`` command fetches metadata for a given tenant and displays it. Its syntax is ``gettenant <TENANT_NAME> [JSON]``.
 
-Included in the output of this command are the ``id`` and ``prefix`` assigned to the tenant. If the tenant does not exist, ``fdbcli`` will report an error.
+Included in the output of this command are the ``id`` and ``prefix`` assigned to the tenant. If the tenant does not exist, ``fdbcli`` will report an error. If ``JSON`` is specified, then the output will be written as a JSON document::
 
-getversion
-----------
+    {
+        "tenant": {
+            "id": 0,
+            "prefix": {
+              "base64": "AAAAAAAAAAU=",
+              "printable": "\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x05",
+            }
+        },
+        "type": "success"
+    }
+
+In the event of an error, the output will include an error message::
+
+    {
+        "error": "...",
+        "type": "error"
+    }
+
+    getversion
+    ----------
 
 The ``getversion`` command fetches the current read version of the cluster or currently running transaction.
 
@@ -398,6 +416,13 @@ heap
 ``profile heap <PROCESS>``
 
 Enables heap profiling for the specified process.
+
+renametenant
+------------
+
+The ``renametenant`` command can rename an existing tenant to a new name. Its syntax is ``renametenant <OLD_NAME> <NEW_NAME>``.
+
+This command requires that ``OLD_NAME`` is a tenant that already exists on the cluster, and that ``NEW_NAME`` is not already a name of a tenant in the cluster.
 
 reset
 -----

@@ -112,7 +112,7 @@ public:
 				}
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				std::vector<std::pair<StorageServerInterface, ProcessClass>> results =
-				    wait(getServerListAndProcessClasses(&tr));
+				    wait(NativeAPI::getServerListAndProcessClasses(&tr));
 				self->lastSSListFetchedTimestamp = now();
 
 				std::map<UID, StorageServerInterface> newServers;
@@ -227,11 +227,6 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> monitorThrottlingChanges(Ratekeeper* self) {
-		wait(self->tagThrottler->monitorThrottlingChanges());
-		return Void();
-	}
-
 	ACTOR static Future<Void> run(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 		state Ratekeeper self(rkInterf.id(), openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True));
 		state Future<Void> timeout = Void();
@@ -330,7 +325,7 @@ public:
 						reply.throttledTags = self.tagThrottler->getClientRates();
 						bool returningTagsToProxy =
 						    reply.throttledTags.present() && reply.throttledTags.get().size() > 0;
-						TEST(returningTagsToProxy); // Returning tag throttles to a proxy
+						CODE_PROBE(returningTagsToProxy, "Returning tag throttles to a proxy");
 					}
 
 					reply.healthMetrics.update(self.healthMetrics, true, req.detailed);
@@ -408,7 +403,7 @@ Future<Void> Ratekeeper::trackTLogQueueInfo(TLogInterface tli) {
 }
 
 Future<Void> Ratekeeper::monitorThrottlingChanges() {
-	return RatekeeperImpl::monitorThrottlingChanges(this);
+	return tagThrottler->monitorThrottlingChanges();
 }
 
 Future<Void> Ratekeeper::run(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
@@ -436,7 +431,11 @@ Ratekeeper::Ratekeeper(UID id, Database db)
                 SERVER_KNOBS->SPRING_BYTES_TLOG_BATCH,
                 SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE_BATCH,
                 SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS_BATCH) {
-	tagThrottler = std::make_unique<TagThrottler>(db, id);
+	if (SERVER_KNOBS->GLOBAL_TAG_THROTTLING) {
+		tagThrottler = std::make_unique<GlobalTagThrottler>(db, id);
+	} else {
+		tagThrottler = std::make_unique<TagThrottler>(db, id);
+	}
 }
 
 void Ratekeeper::updateCommitCostEstimation(

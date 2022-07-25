@@ -18,16 +18,29 @@
  * limitations under the License.
  */
 
-#include "contrib/fmt-8.1.1/include/fmt/format.h"
-#include "fdbclient/SystemData.h"
+#include "fmt/format.h"
 #include "fdbclient/BlobGranuleCommon.h"
-#include "fdbserver/BlobGranuleServerCommon.actor.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/ReadYourWrites.h"
+#include "fdbclient/SystemData.h"
+#include "fdbserver/BlobGranuleServerCommon.actor.h"
+#include "fdbserver/Knobs.h"
 #include "flow/Arena.h"
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // has to be last include
+
+// serialize change feed key as UID bytes, to use 16 bytes on disk
+Key granuleIDToCFKey(UID granuleID) {
+	BinaryWriter wr(Unversioned());
+	wr << granuleID;
+	return wr.toValue();
+}
+
+// parse change feed key back to UID, to be human-readable
+UID cfKeyToGranuleID(Key cfKey) {
+	return BinaryReader::fromStringRef<UID>(cfKey, Unversioned());
+}
 
 // Gets the latest granule history node for range that was persisted
 ACTOR Future<Optional<GranuleHistory>> getLatestGranuleHistory(Transaction* tr, KeyRange range) {
@@ -61,13 +74,14 @@ ACTOR Future<Void> readGranuleFiles(Transaction* tr, Key* startKey, Key endKey, 
 			int64_t offset;
 			int64_t length;
 			int64_t fullFileLength;
+			Optional<BlobGranuleCipherKeysMeta> cipherKeysMeta;
 
 			std::tie(gid, version, fileType) = decodeBlobGranuleFileKey(it.key);
 			ASSERT(gid == granuleID);
 
-			std::tie(filename, offset, length, fullFileLength) = decodeBlobGranuleFileValue(it.value);
+			std::tie(filename, offset, length, fullFileLength, cipherKeysMeta) = decodeBlobGranuleFileValue(it.value);
 
-			BlobFileIndex idx(version, filename.toString(), offset, length, fullFileLength);
+			BlobFileIndex idx(version, filename.toString(), offset, length, fullFileLength, cipherKeysMeta);
 			if (fileType == 'S') {
 				ASSERT(files->snapshotFiles.empty() || files->snapshotFiles.back().version < idx.version);
 				files->snapshotFiles.push_back(idx);
@@ -169,8 +183,12 @@ void GranuleFiles::getFiles(Version beginVersion,
 	Version lastIncluded = invalidVersion;
 	if (snapshotF != snapshotFiles.end()) {
 		chunk.snapshotVersion = snapshotF->version;
-		chunk.snapshotFile = BlobFilePointerRef(
-		    replyArena, snapshotF->filename, snapshotF->offset, snapshotF->length, snapshotF->fullFileLength);
+		chunk.snapshotFile = BlobFilePointerRef(replyArena,
+		                                        snapshotF->filename,
+		                                        snapshotF->offset,
+		                                        snapshotF->length,
+		                                        snapshotF->fullFileLength,
+		                                        snapshotF->cipherKeysMeta);
 		lastIncluded = chunk.snapshotVersion;
 	} else {
 		chunk.snapshotVersion = invalidVersion;
@@ -356,4 +374,88 @@ TEST_CASE("/blobgranule/server/common/granulefiles") {
 	checkFiles(files, 351, 400, true, Optional<int>(), {});
 
 	return Void();
+}
+
+// FIXME: if credentials can expire, refresh periodically
+ACTOR Future<Void> loadBlobMetadataForTenants(BGTenantMap* self, std::vector<TenantMapEntry> tenantMapEntries) {
+	ASSERT(SERVER_KNOBS->BG_METADATA_SOURCE == "tenant");
+	ASSERT(!tenantMapEntries.empty());
+	state std::vector<BlobMetadataDomainId> domainIds;
+	for (auto& entry : tenantMapEntries) {
+		domainIds.push_back(entry.id);
+	}
+
+	// FIXME: if one tenant gets an error, don't kill whole process
+	// TODO: add latency metrics
+	loop {
+		Future<EKPGetLatestBlobMetadataReply> requestFuture;
+		if (self->dbInfo.isValid() && self->dbInfo->get().encryptKeyProxy.present()) {
+			EKPGetLatestBlobMetadataRequest req;
+			req.domainIds = domainIds;
+			requestFuture =
+			    brokenPromiseToNever(self->dbInfo->get().encryptKeyProxy.get().getLatestBlobMetadata.getReply(req));
+		} else {
+			requestFuture = Never();
+		}
+		choose {
+			when(EKPGetLatestBlobMetadataReply rep = wait(requestFuture)) {
+				ASSERT(rep.blobMetadataDetails.size() == domainIds.size());
+				// not guaranteed to be in same order in the request as the response
+				for (auto& metadata : rep.blobMetadataDetails) {
+					auto info = self->tenantInfoById.find(metadata.domainId);
+					if (info == self->tenantInfoById.end()) {
+						continue;
+					}
+					auto dataEntry = self->tenantData.rangeContaining(info->second.prefix);
+					ASSERT(dataEntry.begin() == info->second.prefix);
+					dataEntry.cvalue()->setBStore(BlobConnectionProvider::newBlobConnectionProvider(metadata));
+				}
+				return Void();
+			}
+			when(wait(self->dbInfo->onChange())) {}
+		}
+	}
+}
+
+// list of tenants that may or may not already exist
+void BGTenantMap::addTenants(std::vector<std::pair<TenantName, TenantMapEntry>> tenants) {
+	std::vector<TenantMapEntry> tenantsToLoad;
+	for (auto entry : tenants) {
+		if (tenantInfoById.insert({ entry.second.id, entry.second }).second) {
+			auto r = makeReference<GranuleTenantData>(entry.first, entry.second);
+			tenantData.insert(KeyRangeRef(entry.second.prefix, entry.second.prefix.withSuffix(normalKeys.end)), r);
+			if (SERVER_KNOBS->BG_METADATA_SOURCE != "tenant") {
+				r->bstoreLoaded.send(Void());
+			} else {
+				tenantsToLoad.push_back(entry.second);
+			}
+		}
+	}
+
+	if (!tenantsToLoad.empty()) {
+		addActor.send(loadBlobMetadataForTenants(this, tenantsToLoad));
+	}
+}
+
+// TODO: implement
+void BGTenantMap::removeTenants(std::vector<int64_t> tenantIds) {
+	throw not_implemented();
+}
+
+Optional<TenantMapEntry> BGTenantMap::getTenantById(int64_t id) {
+	auto tenant = tenantInfoById.find(id);
+	if (tenant == tenantInfoById.end()) {
+		return {};
+	} else {
+		return tenant->second;
+	}
+}
+
+// TODO: handle case where tenant isn't loaded yet
+Reference<GranuleTenantData> BGTenantMap::getDataForGranule(const KeyRangeRef& keyRange) {
+	auto tenant = tenantData.rangeContaining(keyRange.begin);
+	ASSERT(tenant.begin() <= keyRange.begin);
+	ASSERT(tenant.end() >= keyRange.end);
+
+	return tenant.cvalue();
 }

@@ -22,6 +22,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"path"
 	"regexp"
@@ -31,6 +32,8 @@ import (
 	"github.com/go-logr/zapr"
 	"github.com/spf13/pflag"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 var (
@@ -52,6 +55,8 @@ var (
 	currentContainerVersion string
 	additionalEnvFile       string
 	processCount            int
+	enablePprof             bool
+	listenAddress           string
 )
 
 type executionMode string
@@ -61,6 +66,25 @@ const (
 	executionModeInit     executionMode = "init"
 	executionModeSidecar  executionMode = "sidecar"
 )
+
+func initLogger(logPath string) *zap.Logger {
+	var logWriter io.Writer
+
+	if logPath != "" {
+		lumberjackLogger := &lumberjack.Logger{
+			Filename:   logPath,
+			MaxSize:    100,
+			MaxAge:     7,
+			MaxBackups: 2,
+			Compress:   false,
+		}
+		logWriter = io.MultiWriter(os.Stdout, lumberjackLogger)
+	} else {
+		logWriter = os.Stdout
+	}
+
+	return zap.New(zapcore.NewCore(zapcore.NewJSONEncoder(zap.NewProductionEncoderConfig()), zapcore.AddSync(logWriter), zapcore.InfoLevel))
+}
 
 func main() {
 	pflag.StringVar(&executionModeString, "mode", "launcher", "Execution mode. Valid options are launcher, sidecar, and init")
@@ -80,15 +104,16 @@ func main() {
 	pflag.StringVar(&mainContainerVersion, "main-container-version", "", "For sidecar mode, this specifies the version of the main container. If this is equal to the current container version, no files will be copied")
 	pflag.StringVar(&additionalEnvFile, "additional-env-file", "", "A file with additional environment variables to use when interpreting the monitor configuration")
 	pflag.IntVar(&processCount, "process-count", 1, "The number of processes to start")
+	pflag.BoolVar(&enablePprof, "enable-pprof", false, "Enables /debug/pprof endpoints on the listen address")
+	pflag.StringVar(&listenAddress, "listen-address", ":8081", "An address and port to listen on")
 	pflag.Parse()
 
-	zapConfig := zap.NewProductionConfig()
-	if logPath != "" {
-		zapConfig.OutputPaths = append(zapConfig.OutputPaths, logPath)
-	}
-	zapLogger, err := zapConfig.Build()
+	logger := zapr.NewLogger(initLogger(logPath))
+
+	copyDetails, requiredCopies, err := getCopyDetails()
 	if err != nil {
-		panic(err)
+		logger.Error(err, "Error getting list of files to copy")
+		os.Exit(1)
 	}
 
 	versionBytes, err := os.ReadFile(versionFilePath)
@@ -96,13 +121,6 @@ func main() {
 		panic(err)
 	}
 	currentContainerVersion = strings.TrimSpace(string(versionBytes))
-
-	logger := zapr.NewLogger(zapLogger)
-	copyDetails, requiredCopies, err := getCopyDetails()
-	if err != nil {
-		logger.Error(err, "Error getting list of files to copy")
-		os.Exit(1)
-	}
 
 	mode := executionMode(executionModeString)
 	switch mode {
@@ -112,7 +130,7 @@ func main() {
 			logger.Error(err, "Error loading additional environment")
 			os.Exit(1)
 		}
-		StartMonitor(logger, fmt.Sprintf("%s/%s", inputDir, monitorConfFile), customEnvironment, processCount)
+		StartMonitor(logger, fmt.Sprintf("%s/%s", inputDir, monitorConfFile), customEnvironment, processCount, listenAddress, enablePprof)
 	case executionModeInit:
 		err = CopyFiles(logger, outputDir, copyDetails, requiredCopies)
 		if err != nil {
@@ -165,6 +183,7 @@ func getCopyDetails() (map[string]string, map[string]bool, error) {
 		}
 		requiredCopyMap[fullFilePath] = true
 	}
+
 	return copyDetails, requiredCopyMap, nil
 }
 
@@ -176,6 +195,7 @@ func loadAdditionalEnvironment(logger logr.Logger) (map[string]string, error) {
 		if err != nil {
 			return nil, err
 		}
+		defer file.Close()
 
 		envScanner := bufio.NewScanner(file)
 		for envScanner.Scan() {
@@ -188,5 +208,6 @@ func loadAdditionalEnvironment(logger logr.Logger) (map[string]string, error) {
 			customEnvironment[matches[1]] = matches[2]
 		}
 	}
+
 	return customEnvironment, nil
 }

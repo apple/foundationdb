@@ -385,7 +385,7 @@ void DLTransaction::reset() {
 	api->transactionReset(tr);
 }
 
-VersionVector DLTransaction::getVersionVector() {
+ThreadFuture<VersionVector> DLTransaction::getVersionVector() {
 	return VersionVector(); // not implemented
 }
 
@@ -396,6 +396,38 @@ Reference<ITransaction> DLTenant::createTransaction() {
 	FdbCApi::FDBTransaction* tr;
 	api->tenantCreateTransaction(tenant, &tr);
 	return Reference<ITransaction>(new DLTransaction(api, tr));
+}
+
+ThreadFuture<Key> DLTenant::purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) {
+	if (!api->tenantPurgeBlobGranules) {
+		return unsupported_operation();
+	}
+	FdbCApi::FDBFuture* f = api->tenantPurgeBlobGranules(tenant,
+	                                                     keyRange.begin.begin(),
+	                                                     keyRange.begin.size(),
+	                                                     keyRange.end.begin(),
+	                                                     keyRange.end.size(),
+	                                                     purgeVersion,
+	                                                     force);
+
+	return toThreadFuture<Key>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+		const uint8_t* key;
+		int keyLength;
+		FdbCApi::fdb_error_t error = api->futureGetKey(f, &key, &keyLength);
+		ASSERT(!error);
+
+		// The memory for this is stored in the FDBFuture and is released when the future gets destroyed
+		return Key(KeyRef(key, keyLength), Arena());
+	});
+}
+
+ThreadFuture<Void> DLTenant::waitPurgeGranulesComplete(const KeyRef& purgeKey) {
+	if (!api->tenantWaitPurgeGranulesComplete) {
+		return unsupported_operation();
+	}
+
+	FdbCApi::FDBFuture* f = api->tenantWaitPurgeGranulesComplete(tenant, purgeKey.begin(), purgeKey.size());
+	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) { return Void(); });
 }
 
 // DLDatabase
@@ -520,16 +552,16 @@ ThreadFuture<ProtocolVersion> DLDatabase::getServerProtocol(Optional<ProtocolVer
 }
 
 ThreadFuture<Key> DLDatabase::purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) {
-	if (!api->purgeBlobGranules) {
+	if (!api->databasePurgeBlobGranules) {
 		return unsupported_operation();
 	}
-	FdbCApi::FDBFuture* f = api->purgeBlobGranules(db,
-	                                               keyRange.begin.begin(),
-	                                               keyRange.begin.size(),
-	                                               keyRange.end.begin(),
-	                                               keyRange.end.size(),
-	                                               purgeVersion,
-	                                               force);
+	FdbCApi::FDBFuture* f = api->databasePurgeBlobGranules(db,
+	                                                       keyRange.begin.begin(),
+	                                                       keyRange.begin.size(),
+	                                                       keyRange.end.begin(),
+	                                                       keyRange.end.size(),
+	                                                       purgeVersion,
+	                                                       force);
 
 	return toThreadFuture<Key>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
 		const uint8_t* key;
@@ -543,11 +575,11 @@ ThreadFuture<Key> DLDatabase::purgeBlobGranules(const KeyRangeRef& keyRange, Ver
 }
 
 ThreadFuture<Void> DLDatabase::waitPurgeGranulesComplete(const KeyRef& purgeKey) {
-	if (!api->waitPurgeGranulesComplete) {
+	if (!api->databaseWaitPurgeGranulesComplete) {
 		return unsupported_operation();
 	}
 
-	FdbCApi::FDBFuture* f = api->waitPurgeGranulesComplete(db, purgeKey.begin(), purgeKey.size());
+	FdbCApi::FDBFuture* f = api->databaseWaitPurgeGranulesComplete(db, purgeKey.begin(), purgeKey.size());
 	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) { return Void(); });
 }
 
@@ -599,6 +631,11 @@ void DLApi::init() {
 	loadClientFunction(&api->runNetwork, lib, fdbCPath, "fdb_run_network", headerVersion >= 0);
 	loadClientFunction(&api->stopNetwork, lib, fdbCPath, "fdb_stop_network", headerVersion >= 0);
 	loadClientFunction(&api->createDatabase, lib, fdbCPath, "fdb_create_database", headerVersion >= 610);
+	loadClientFunction(&api->createDatabaseFromConnectionString,
+	                   lib,
+	                   fdbCPath,
+	                   "fdb_create_database_from_connection_string",
+	                   headerVersion >= 720);
 
 	loadClientFunction(&api->databaseOpenTenant, lib, fdbCPath, "fdb_database_open_tenant", headerVersion >= 710);
 	loadClientFunction(
@@ -624,11 +661,9 @@ void DLApi::init() {
 	                   headerVersion >= 700);
 	loadClientFunction(
 	    &api->databaseCreateSnapshot, lib, fdbCPath, "fdb_database_create_snapshot", headerVersion >= 700);
-
 	loadClientFunction(
-	    &api->purgeBlobGranules, lib, fdbCPath, "fdb_database_purge_blob_granules", headerVersion >= 710);
-
-	loadClientFunction(&api->waitPurgeGranulesComplete,
+	    &api->databasePurgeBlobGranules, lib, fdbCPath, "fdb_database_purge_blob_granules", headerVersion >= 710);
+	loadClientFunction(&api->databaseWaitPurgeGranulesComplete,
 	                   lib,
 	                   fdbCPath,
 	                   "fdb_database_wait_purge_granules_complete",
@@ -636,6 +671,13 @@ void DLApi::init() {
 
 	loadClientFunction(
 	    &api->tenantCreateTransaction, lib, fdbCPath, "fdb_tenant_create_transaction", headerVersion >= 710);
+	loadClientFunction(
+	    &api->tenantPurgeBlobGranules, lib, fdbCPath, "fdb_tenant_purge_blob_granules", headerVersion >= 720);
+	loadClientFunction(&api->tenantWaitPurgeGranulesComplete,
+	                   lib,
+	                   fdbCPath,
+	                   "fdb_tenant_wait_purge_granules_complete",
+	                   headerVersion >= 720);
 	loadClientFunction(&api->tenantDestroy, lib, fdbCPath, "fdb_tenant_destroy", headerVersion >= 710);
 
 	loadClientFunction(&api->transactionSetOption, lib, fdbCPath, "fdb_transaction_set_option", headerVersion >= 0);
@@ -825,6 +867,16 @@ Reference<IDatabase> DLApi::createDatabase(const char* clusterFilePath) {
 	} else {
 		return DLApi::createDatabase609(clusterFilePath);
 	}
+}
+
+Reference<IDatabase> DLApi::createDatabaseFromConnectionString(const char* connectionString) {
+	if (api->createDatabaseFromConnectionString == nullptr) {
+		throw unsupported_operation();
+	}
+
+	FdbCApi::FDBDatabase* db;
+	throwIfError(api->createDatabaseFromConnectionString(connectionString, &db));
+	return Reference<IDatabase>(new DLDatabase(api, db));
 }
 
 void DLApi::addNetworkThreadCompletionHook(void (*hook)(void*), void* hookParameter) {
@@ -1099,7 +1151,7 @@ Version MultiVersionTransaction::getCommittedVersion() {
 	return invalidVersion;
 }
 
-VersionVector MultiVersionTransaction::getVersionVector() {
+ThreadFuture<VersionVector> MultiVersionTransaction::getVersionVector() {
 	auto tr = getTransaction();
 	if (tr.transaction) {
 		return tr.transaction->getVersionVector();
@@ -1108,7 +1160,7 @@ VersionVector MultiVersionTransaction::getVersionVector() {
 	return VersionVector();
 }
 
-SpanContext MultiVersionTransaction::getSpanContext() {
+ThreadFuture<SpanContext> MultiVersionTransaction::getSpanContext() {
 	auto tr = getTransaction();
 	if (tr.transaction) {
 		return tr.transaction->getSpanContext();
@@ -1303,7 +1355,7 @@ bool MultiVersionTransaction::isValid() {
 }
 
 // MultiVersionTenant
-MultiVersionTenant::MultiVersionTenant(Reference<MultiVersionDatabase> db, StringRef tenantName)
+MultiVersionTenant::MultiVersionTenant(Reference<MultiVersionDatabase> db, TenantNameRef tenantName)
   : tenantState(makeReference<TenantState>(db, tenantName)) {}
 
 MultiVersionTenant::~MultiVersionTenant() {
@@ -1316,7 +1368,17 @@ Reference<ITransaction> MultiVersionTenant::createTransaction() {
 	                                                           tenantState->db->dbState->transactionDefaultOptions));
 }
 
-MultiVersionTenant::TenantState::TenantState(Reference<MultiVersionDatabase> db, StringRef tenantName)
+ThreadFuture<Key> MultiVersionTenant::purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) {
+	auto f = tenantState->db ? tenantState->db->purgeBlobGranules(keyRange, purgeVersion, force)
+	                         : ThreadFuture<Key>(Never());
+	return abortableFuture(f, tenantState->db->dbState->dbVar->get().onChange);
+}
+ThreadFuture<Void> MultiVersionTenant::waitPurgeGranulesComplete(const KeyRef& purgeKey) {
+	auto f = tenantState->db ? tenantState->db->waitPurgeGranulesComplete(purgeKey) : ThreadFuture<Void>(Never());
+	return abortableFuture(f, tenantState->db->dbState->dbVar->get().onChange);
+}
+
+MultiVersionTenant::TenantState::TenantState(Reference<MultiVersionDatabase> db, TenantNameRef tenantName)
   : tenantVar(new ThreadSafeAsyncVar<Reference<ITenant>>(Reference<ITenant>(nullptr))), tenantName(tenantName), db(db),
     closed(false) {
 	updateTenant();
@@ -1359,11 +1421,11 @@ void MultiVersionTenant::TenantState::close() {
 // MultiVersionDatabase
 MultiVersionDatabase::MultiVersionDatabase(MultiVersionApi* api,
                                            int threadIdx,
-                                           std::string clusterFilePath,
+                                           ClusterConnectionRecord const& connectionRecord,
                                            Reference<IDatabase> db,
                                            Reference<IDatabase> versionMonitorDb,
                                            bool openConnectors)
-  : dbState(new DatabaseState(clusterFilePath, versionMonitorDb)) {
+  : dbState(new DatabaseState(connectionRecord, versionMonitorDb)) {
 	dbState->db = db;
 	dbState->dbVar->set(db);
 	if (openConnectors) {
@@ -1373,7 +1435,7 @@ MultiVersionDatabase::MultiVersionDatabase(MultiVersionApi* api,
 
 		api->runOnExternalClients(threadIdx, [this](Reference<ClientInfo> client) { dbState->addClient(client); });
 
-		api->runOnExternalClientsAllThreads([&clusterFilePath](Reference<ClientInfo> client) {
+		api->runOnExternalClientsAllThreads([&connectionRecord](Reference<ClientInfo> client) {
 			// This creates a database to initialize some client state on the external library.
 			// We only do this on 6.2+ clients to avoid some bugs associated with older versions.
 			// This deletes the new database immediately to discard its connections.
@@ -1383,7 +1445,7 @@ MultiVersionDatabase::MultiVersionDatabase(MultiVersionApi* api,
 			// to run this initialization in case the other fails, and it's safe to run them in parallel.
 			if (client->protocolVersion.hasCloseUnusedConnection() && !client->initialized) {
 				try {
-					Reference<IDatabase> newDb = client->api->createDatabase(clusterFilePath.c_str());
+					Reference<IDatabase> newDb = connectionRecord.createDatabase(client->api);
 					client->initialized = true;
 				} catch (Error& e) {
 					// This connection is not initialized. It is still possible to connect with it,
@@ -1392,30 +1454,29 @@ MultiVersionDatabase::MultiVersionDatabase(MultiVersionApi* api,
 					TraceEvent(SevWarnAlways, "FailedToInitializeExternalClient")
 					    .error(e)
 					    .detail("LibraryPath", client->libPath)
-					    .detail("ClusterFilePath", clusterFilePath);
+					    .detail("ConnectionRecord", connectionRecord);
 				}
 			}
 		});
 
 		// For clients older than 6.2 we create and maintain our database connection
-		api->runOnExternalClients(threadIdx, [this, &clusterFilePath](Reference<ClientInfo> client) {
+		api->runOnExternalClients(threadIdx, [this, &connectionRecord](Reference<ClientInfo> client) {
 			if (!client->protocolVersion.hasCloseUnusedConnection()) {
 				try {
 					dbState->legacyDatabaseConnections[client->protocolVersion] =
-					    client->api->createDatabase(clusterFilePath.c_str());
+					    connectionRecord.createDatabase(client->api);
 				} catch (Error& e) {
 					// This connection is discarded
 					TraceEvent(SevWarnAlways, "FailedToCreateLegacyDatabaseConnection")
 					    .error(e)
 					    .detail("LibraryPath", client->libPath)
-					    .detail("ClusterFilePath", clusterFilePath);
+					    .detail("ConnectionRecord", connectionRecord);
 				}
 			}
 		});
 
 		Reference<DatabaseState> dbStateRef = dbState;
-		onMainThreadVoid([dbStateRef]() { dbStateRef->protocolVersionMonitor = dbStateRef->monitorProtocolVersion(); },
-		                 nullptr);
+		onMainThreadVoid([dbStateRef]() { dbStateRef->protocolVersionMonitor = dbStateRef->monitorProtocolVersion(); });
 	}
 }
 
@@ -1426,7 +1487,8 @@ MultiVersionDatabase::~MultiVersionDatabase() {
 // Create a MultiVersionDatabase that wraps an already created IDatabase object
 // For internal use in testing
 Reference<IDatabase> MultiVersionDatabase::debugCreateFromExistingDatabase(Reference<IDatabase> db) {
-	return Reference<IDatabase>(new MultiVersionDatabase(MultiVersionApi::api, 0, "", db, db, false));
+	return Reference<IDatabase>(new MultiVersionDatabase(
+	    MultiVersionApi::api, 0, ClusterConnectionRecord::fromConnectionString(""), db, db, false));
 }
 
 Reference<ITenant> MultiVersionDatabase::openTenant(TenantNameRef tenantName) {
@@ -1524,9 +1586,10 @@ ThreadFuture<ProtocolVersion> MultiVersionDatabase::getServerProtocol(Optional<P
 	return dbState->versionMonitorDb->getServerProtocol(expectedVersion);
 }
 
-MultiVersionDatabase::DatabaseState::DatabaseState(std::string clusterFilePath, Reference<IDatabase> versionMonitorDb)
+MultiVersionDatabase::DatabaseState::DatabaseState(ClusterConnectionRecord const& connectionRecord,
+                                                   Reference<IDatabase> versionMonitorDb)
   : dbVar(new ThreadSafeAsyncVar<Reference<IDatabase>>(Reference<IDatabase>(nullptr))),
-    clusterFilePath(clusterFilePath), versionMonitorDb(versionMonitorDb), closed(false) {}
+    connectionRecord(connectionRecord), versionMonitorDb(versionMonitorDb), closed(false) {}
 
 // Adds a client (local or externally loaded) that can be used to connect to the cluster
 void MultiVersionDatabase::DatabaseState::addClient(Reference<ClientInfo> client) {
@@ -1582,7 +1645,7 @@ ThreadFuture<Void> MultiVersionDatabase::DatabaseState::monitorProtocolVersion()
 
 		ProtocolVersion clusterVersion =
 		    !cv.isError() ? cv.get() : self->dbProtocolVersion.orDefault(currentProtocolVersion);
-		onMainThreadVoid([self, clusterVersion]() { self->protocolVersionChanged(clusterVersion); }, nullptr);
+		onMainThreadVoid([self, clusterVersion]() { self->protocolVersionChanged(clusterVersion); });
 		return ErrorOr<Void>(Void());
 	});
 }
@@ -1612,7 +1675,7 @@ void MultiVersionDatabase::DatabaseState::protocolVersionChanged(ProtocolVersion
 		// When the protocol version changes, clear the corresponding entry in the shared state map
 		// so it can be re-initialized. Only do so if there was a valid previous protocol version.
 		if (dbProtocolVersion.present() && MultiVersionApi::apiVersionAtLeast(710)) {
-			MultiVersionApi::api->clearClusterSharedStateMapEntry(clusterFilePath, dbProtocolVersion.get());
+			MultiVersionApi::api->clearClusterSharedStateMapEntry(clusterId, dbProtocolVersion.get());
 		}
 
 		dbProtocolVersion = protocolVersion;
@@ -1627,13 +1690,13 @@ void MultiVersionDatabase::DatabaseState::protocolVersionChanged(ProtocolVersion
 
 			Reference<IDatabase> newDb;
 			try {
-				newDb = client->api->createDatabase(clusterFilePath.c_str());
+				newDb = connectionRecord.createDatabase(client->api);
 			} catch (Error& e) {
 				TraceEvent(SevWarnAlways, "MultiVersionClientFailedToCreateDatabase")
 				    .error(e)
 				    .detail("LibraryPath", client->libPath)
 				    .detail("External", client->external)
-				    .detail("ClusterFilePath", clusterFilePath);
+				    .detail("ConnectionRecord", connectionRecord);
 
 				// Put the client in a disconnected state until the version changes again
 				updateDatabase(Reference<IDatabase>(), Reference<ClientInfo>());
@@ -1646,10 +1709,10 @@ void MultiVersionDatabase::DatabaseState::protocolVersionChanged(ProtocolVersion
 				dbReady = mapThreadFuture<Void, Void>(
 				    newDb.castTo<DLDatabase>()->onReady(), [self, newDb, client](ErrorOr<Void> ready) {
 					    if (!ready.isError()) {
-						    onMainThreadVoid([self, newDb, client]() { self->updateDatabase(newDb, client); }, nullptr);
+						    onMainThreadVoid([self, newDb, client]() { self->updateDatabase(newDb, client); });
 					    } else {
-						    onMainThreadVoid([self, client]() { self->updateDatabase(Reference<IDatabase>(), client); },
-						                     nullptr);
+						    onMainThreadVoid(
+						        [self, client]() { self->updateDatabase(Reference<IDatabase>(), client); });
 					    }
 
 					    return ready;
@@ -1702,35 +1765,45 @@ void MultiVersionDatabase::DatabaseState::updateDatabase(Reference<IDatabase> ne
 		} else {
 			// For older clients that don't have an API to get the protocol version, we have to monitor it locally
 			try {
-				versionMonitorDb = MultiVersionApi::api->getLocalClient()->api->createDatabase(clusterFilePath.c_str());
+				versionMonitorDb = connectionRecord.createDatabase(MultiVersionApi::api->getLocalClient()->api);
 			} catch (Error& e) {
 				// We can't create a new database to monitor the cluster version. This means we will continue using the
 				// previous one, which should hopefully continue to work.
 				TraceEvent(SevWarnAlways, "FailedToCreateDatabaseForVersionMonitoring")
 				    .error(e)
-				    .detail("ClusterFilePath", clusterFilePath);
+				    .detail("ConnectionRecord", connectionRecord);
 			}
 		}
 	} else {
 		// We don't have a database connection, so use the local client to monitor the protocol version
 		db = Reference<IDatabase>();
 		try {
-			versionMonitorDb = MultiVersionApi::api->getLocalClient()->api->createDatabase(clusterFilePath.c_str());
+			versionMonitorDb = connectionRecord.createDatabase(MultiVersionApi::api->getLocalClient()->api);
 		} catch (Error& e) {
 			// We can't create a new database to monitor the cluster version. This means we will continue using the
 			// previous one, which should hopefully continue to work.
 			TraceEvent(SevWarnAlways, "FailedToCreateDatabaseForVersionMonitoring")
 			    .error(e)
-			    .detail("ClusterFilePath", clusterFilePath);
+			    .detail("ConnectionRecord", connectionRecord);
 		}
 	}
 	if (db.isValid() && dbProtocolVersion.present() && MultiVersionApi::apiVersionAtLeast(710)) {
-		auto updateResult =
-		    MultiVersionApi::api->updateClusterSharedStateMap(clusterFilePath, dbProtocolVersion.get(), db);
-		auto handler = mapThreadFuture<Void, Void>(updateResult, [this](ErrorOr<Void> result) {
-			TraceEvent("ClusterSharedStateUpdated").detail("ClusterFilePath", clusterFilePath);
+		Future<std::string> updateResult =
+		    MultiVersionApi::api->updateClusterSharedStateMap(connectionRecord, dbProtocolVersion.get(), db);
+		sharedStateUpdater = map(errorOr(updateResult), [this](ErrorOr<std::string> result) {
+			if (result.present()) {
+				clusterId = result.get();
+				TraceEvent("ClusterSharedStateUpdated")
+				    .detail("ClusterId", result.get())
+				    .detail("ProtocolVersion", dbProtocolVersion.get());
+			} else {
+				TraceEvent(SevWarnAlways, "ClusterSharedStateUpdateError")
+				    .error(result.getError())
+				    .detail("ConnectionRecord", connectionRecord)
+				    .detail("ProtocolVersion", dbProtocolVersion.get());
+			}
 			dbVar->set(db);
-			return ErrorOr<Void>(Void());
+			return Void();
 		});
 	} else {
 		dbVar->set(db);
@@ -1759,19 +1832,17 @@ void MultiVersionDatabase::DatabaseState::startLegacyVersionMonitors() {
 // Cleans up state for the legacy version monitors to break reference cycles
 void MultiVersionDatabase::DatabaseState::close() {
 	Reference<DatabaseState> self = Reference<DatabaseState>::addRef(this);
-	onMainThreadVoid(
-	    [self]() {
-		    self->closed = true;
-		    if (self->protocolVersionMonitor.isValid()) {
-			    self->protocolVersionMonitor.cancel();
-		    }
-		    for (auto monitor : self->legacyVersionMonitors) {
-			    monitor->close();
-		    }
+	onMainThreadVoid([self]() {
+		self->closed = true;
+		if (self->protocolVersionMonitor.isValid()) {
+			self->protocolVersionMonitor.cancel();
+		}
+		for (auto monitor : self->legacyVersionMonitors) {
+			monitor->close();
+		}
 
-		    self->legacyVersionMonitors.clear();
-	    },
-	    nullptr);
+		self->legacyVersionMonitors.clear();
+	});
 }
 
 // Starts the connection monitor by creating a database object at an old version.
@@ -1791,22 +1862,20 @@ void MultiVersionDatabase::LegacyVersionMonitor::startConnectionMonitor(
 		Reference<LegacyVersionMonitor> self = Reference<LegacyVersionMonitor>::addRef(this);
 		versionMonitor =
 		    mapThreadFuture<Void, Void>(db.castTo<DLDatabase>()->onReady(), [self, dbState](ErrorOr<Void> ready) {
-			    onMainThreadVoid(
-			        [self, ready, dbState]() {
-				        if (ready.isError()) {
-					        if (ready.getError().code() != error_code_operation_cancelled) {
-						        TraceEvent(SevError, "FailedToOpenDatabaseOnClient")
-						            .error(ready.getError())
-						            .detail("LibPath", self->client->libPath);
+			    onMainThreadVoid([self, ready, dbState]() {
+				    if (ready.isError()) {
+					    if (ready.getError().code() != error_code_operation_cancelled) {
+						    TraceEvent(SevError, "FailedToOpenDatabaseOnClient")
+						        .error(ready.getError())
+						        .detail("LibPath", self->client->libPath);
 
-						        self->client->failed = true;
-						        MultiVersionApi::api->updateSupportedVersions();
-					        }
-				        } else {
-					        self->runGrvProbe(dbState);
-				        }
-			        },
-			        nullptr);
+						    self->client->failed = true;
+						    MultiVersionApi::api->updateSupportedVersions();
+					    }
+				    } else {
+					    self->runGrvProbe(dbState);
+				    }
+			    });
 
 			    return ready;
 		    });
@@ -1821,12 +1890,10 @@ void MultiVersionDatabase::LegacyVersionMonitor::runGrvProbe(Reference<MultiVers
 	versionMonitor = mapThreadFuture<Version, Void>(tr->getReadVersion(), [self, dbState](ErrorOr<Version> v) {
 		// If the version attempt returns an error, we regard that as a connection (except operation_cancelled)
 		if (!v.isError() || v.getError().code() != error_code_operation_cancelled) {
-			onMainThreadVoid(
-			    [self, dbState]() {
-				    self->monitorRunning = false;
-				    dbState->protocolVersionChanged(self->client->protocolVersion);
-			    },
-			    nullptr);
+			onMainThreadVoid([self, dbState]() {
+				self->monitorRunning = false;
+				dbState->protocolVersionChanged(self->client->protocolVersion);
+			});
 		}
 
 		return v.map<Void>([](Version v) { return Void(); });
@@ -2076,11 +2143,9 @@ void MultiVersionApi::setSupportedClientVersions(Standalone<StringRef> versions)
 
 	// This option must be set on the main thread because it modifies structures that can be used concurrently by the
 	// main thread
-	onMainThreadVoid(
-	    [this, versions]() {
-		    localClient->api->setNetworkOption(FDBNetworkOptions::SUPPORTED_CLIENT_VERSIONS, versions);
-	    },
-	    nullptr);
+	onMainThreadVoid([this, versions]() {
+		localClient->api->setNetworkOption(FDBNetworkOptions::SUPPORTED_CLIENT_VERSIONS, versions);
+	});
 
 	if (!bypassMultiClientApi) {
 		runOnExternalClientsAllThreads([versions](Reference<ClientInfo> client) {
@@ -2338,14 +2403,12 @@ void MultiVersionApi::addNetworkThreadCompletionHook(void (*hook)(void*), void* 
 }
 
 // Creates an IDatabase object that represents a connection to the cluster
-Reference<IDatabase> MultiVersionApi::createDatabase(const char* clusterFilePath) {
+Reference<IDatabase> MultiVersionApi::createDatabase(ClusterConnectionRecord const& connectionRecord) {
 	lock.enter();
 	if (!networkSetup) {
 		lock.leave();
 		throw network_not_setup();
 	}
-	std::string clusterFile(clusterFilePath);
-
 	if (localClientDisabled) {
 		ASSERT(!bypassMultiClientApi);
 
@@ -2353,21 +2416,30 @@ Reference<IDatabase> MultiVersionApi::createDatabase(const char* clusterFilePath
 		nextThread = (nextThread + 1) % threadCount;
 		lock.leave();
 
-		Reference<IDatabase> localDb = localClient->api->createDatabase(clusterFilePath);
+		Reference<IDatabase> localDb = connectionRecord.createDatabase(localClient->api);
 		return Reference<IDatabase>(
-		    new MultiVersionDatabase(this, threadIdx, clusterFile, Reference<IDatabase>(), localDb));
+		    new MultiVersionDatabase(this, threadIdx, connectionRecord, Reference<IDatabase>(), localDb));
 	}
 
 	lock.leave();
 
 	ASSERT_LE(threadCount, 1);
 
-	Reference<IDatabase> localDb = localClient->api->createDatabase(clusterFilePath);
+	Reference<IDatabase> localDb = connectionRecord.createDatabase(localClient->api);
 	if (bypassMultiClientApi) {
 		return localDb;
 	} else {
-		return Reference<IDatabase>(new MultiVersionDatabase(this, 0, clusterFile, Reference<IDatabase>(), localDb));
+		return Reference<IDatabase>(
+		    new MultiVersionDatabase(this, 0, connectionRecord, Reference<IDatabase>(), localDb));
 	}
+}
+
+Reference<IDatabase> MultiVersionApi::createDatabase(const char* clusterFilePath) {
+	return createDatabase(ClusterConnectionRecord::fromFile(clusterFilePath));
+}
+
+Reference<IDatabase> MultiVersionApi::createDatabaseFromConnectionString(const char* connectionString) {
+	return createDatabase(ClusterConnectionRecord::fromConnectionString(connectionString));
 }
 
 void MultiVersionApi::updateSupportedVersions() {
@@ -2394,55 +2466,79 @@ void MultiVersionApi::updateSupportedVersions() {
 	}
 }
 
-ThreadFuture<Void> MultiVersionApi::updateClusterSharedStateMap(std::string clusterFilePath,
-                                                                ProtocolVersion dbProtocolVersion,
-                                                                Reference<IDatabase> db) {
-	MutexHolder holder(lock);
-	if (clusterSharedStateMap.find(clusterFilePath) == clusterSharedStateMap.end()) {
+// Must be called from the main thread
+ACTOR Future<std::string> updateClusterSharedStateMapImpl(MultiVersionApi* self,
+                                                          ClusterConnectionRecord connectionRecord,
+                                                          ProtocolVersion dbProtocolVersion,
+                                                          Reference<IDatabase> db) {
+	// The cluster ID will be the connection record string (either a filename or the connection string itself)
+	// in API versions before we could read the cluster ID.
+	state std::string clusterId = connectionRecord.toString();
+	if (MultiVersionApi::apiVersionAtLeast(720)) {
+		state Reference<ITransaction> tr = db->createTransaction();
+		loop {
+			try {
+				state ThreadFuture<Optional<Value>> clusterIdFuture = tr->get("\xff\xff/cluster_id"_sr);
+				Optional<Value> clusterIdVal = wait(safeThreadFutureToFuture(clusterIdFuture));
+				ASSERT(clusterIdVal.present());
+				clusterId = clusterIdVal.get().toString();
+				ASSERT(UID::fromString(clusterId).isValid());
+				break;
+			} catch (Error& e) {
+				wait(safeThreadFutureToFuture(tr->onError(e)));
+			}
+		}
+	}
+
+	if (self->clusterSharedStateMap.find(clusterId) == self->clusterSharedStateMap.end()) {
 		TraceEvent("CreatingClusterSharedState")
-		    .detail("ClusterFilePath", clusterFilePath)
+		    .detail("ClusterId", clusterId)
 		    .detail("ProtocolVersion", dbProtocolVersion);
-		clusterSharedStateMap[clusterFilePath] = { db->createSharedState(), dbProtocolVersion };
+		self->clusterSharedStateMap[clusterId] = { db->createSharedState(), dbProtocolVersion };
 	} else {
-		auto& sharedStateInfo = clusterSharedStateMap[clusterFilePath];
+		auto& sharedStateInfo = self->clusterSharedStateMap[clusterId];
 		if (sharedStateInfo.protocolVersion != dbProtocolVersion) {
 			// This situation should never happen, because we are connecting to the same cluster,
 			// so the protocol version must be the same
 			TraceEvent(SevError, "ClusterStateProtocolVersionMismatch")
-			    .detail("ClusterFilePath", clusterFilePath)
+			    .detail("ClusterId", clusterId)
 			    .detail("ProtocolVersionExpected", dbProtocolVersion)
 			    .detail("ProtocolVersionFound", sharedStateInfo.protocolVersion);
-			return Void();
+			return clusterId;
 		}
+
 		TraceEvent("SettingClusterSharedState")
-		    .detail("ClusterFilePath", clusterFilePath)
+		    .detail("ClusterId", clusterId)
 		    .detail("ProtocolVersion", dbProtocolVersion);
-		ThreadFuture<DatabaseSharedState*> entry = sharedStateInfo.sharedStateFuture;
-		return mapThreadFuture<DatabaseSharedState*, Void>(entry, [db](ErrorOr<DatabaseSharedState*> result) {
-			if (result.isError()) {
-				return ErrorOr<Void>(result.getError());
-			}
-			auto ssPtr = result.get();
-			db->setSharedState(ssPtr);
-			return ErrorOr<Void>(Void());
-		});
+
+		state ThreadFuture<DatabaseSharedState*> entry = sharedStateInfo.sharedStateFuture;
+		DatabaseSharedState* sharedState = wait(safeThreadFutureToFuture(entry));
+		db->setSharedState(sharedState);
 	}
-	return Void();
+
+	return clusterId;
 }
 
-void MultiVersionApi::clearClusterSharedStateMapEntry(std::string clusterFilePath, ProtocolVersion dbProtocolVersion) {
-	MutexHolder holder(lock);
-	auto mapEntry = clusterSharedStateMap.find(clusterFilePath);
-	// It can be that other database instances on the same cluster path are already upgraded and thus
+// Must be called from the main thread
+Future<std::string> MultiVersionApi::updateClusterSharedStateMap(ClusterConnectionRecord const& connectionRecord,
+                                                                 ProtocolVersion dbProtocolVersion,
+                                                                 Reference<IDatabase> db) {
+	return updateClusterSharedStateMapImpl(this, connectionRecord, dbProtocolVersion, db);
+}
+
+// Must be called from the main thread
+void MultiVersionApi::clearClusterSharedStateMapEntry(std::string clusterId, ProtocolVersion dbProtocolVersion) {
+	auto mapEntry = clusterSharedStateMap.find(clusterId);
+	// It can be that other database instances on the same cluster are already upgraded and thus
 	// have cleared or even created a new shared object entry
 	if (mapEntry == clusterSharedStateMap.end()) {
-		TraceEvent("ClusterSharedStateMapEntryNotFound").detail("ClusterFilePath", clusterFilePath);
+		TraceEvent("ClusterSharedStateMapEntryNotFound").detail("ClusterId", clusterId);
 		return;
 	}
 	auto sharedStateInfo = mapEntry->second;
 	if (sharedStateInfo.protocolVersion != dbProtocolVersion) {
 		TraceEvent("ClusterSharedStateClearSkipped")
-		    .detail("ClusterFilePath", clusterFilePath)
+		    .detail("ClusterId", clusterId)
 		    .detail("ProtocolVersionExpected", dbProtocolVersion)
 		    .detail("ProtocolVersionFound", sharedStateInfo.protocolVersion);
 		return;
@@ -2450,9 +2546,7 @@ void MultiVersionApi::clearClusterSharedStateMapEntry(std::string clusterFilePat
 	auto ssPtr = sharedStateInfo.sharedStateFuture.get();
 	ssPtr->delRef(ssPtr);
 	clusterSharedStateMap.erase(mapEntry);
-	TraceEvent("ClusterSharedStateCleared")
-	    .detail("ClusterFilePath", clusterFilePath)
-	    .detail("ProtocolVersion", dbProtocolVersion);
+	TraceEvent("ClusterSharedStateCleared").detail("ClusterId", clusterId).detail("ProtocolVersion", dbProtocolVersion);
 }
 
 std::vector<std::string> parseOptionValues(std::string valueStr) {
@@ -2849,7 +2943,7 @@ THREAD_FUNC runSingleAssignmentVarTest(void* arg) {
 			checkUndestroyed.blockUntilReady();
 		}
 
-		onMainThreadVoid([done]() { *done = true; }, nullptr);
+		onMainThreadVoid([done]() { *done = true; });
 	} catch (Error& e) {
 		printf("Caught error in test: %s\n", e.name());
 		*done = true;

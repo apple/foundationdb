@@ -110,7 +110,7 @@ struct Increment : TestWorkload {
 		}
 	}
 	bool incrementCheckData(const VectorRef<KeyValueRef>& data, Version v, Increment* self) {
-		TEST(self->transactions.getValue()); // incrementCheckData transaction has value
+		CODE_PROBE(self->transactions.getValue(), "incrementCheckData transaction has value");
 		if (self->transactions.getValue() && data.size() == 0) {
 			TraceEvent(SevError, "TestFailure")
 			    .detail("Reason", "No successful increments")

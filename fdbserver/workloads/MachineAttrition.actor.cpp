@@ -273,12 +273,11 @@ struct MachineAttritionWorkload : TestWorkload {
 	}
 
 	ACTOR static Future<Void> machineKillWorker(MachineAttritionWorkload* self, double meanDelay, Database cx) {
-		state int killedMachines = 0;
-		state double delayBeforeKill = deterministicRandom()->random01() * meanDelay;
-
 		ASSERT(g_network->isSimulated());
+		state double delayBeforeKill;
 
 		if (self->killDc) {
+			delayBeforeKill = deterministicRandom()->random01() * meanDelay;
 			wait(delay(delayBeforeKill));
 
 			// decide on a machine to kill
@@ -303,15 +302,29 @@ struct MachineAttritionWorkload : TestWorkload {
 			    .detail("KillType", kt);
 
 			g_simulator.killDataCenter(target, kt);
+		} else if (self->killDatahall) {
+			delayBeforeKill = deterministicRandom()->random01() * meanDelay;
+			wait(delay(delayBeforeKill));
+
+			// It only makes sense to kill a single data hall.
+			ASSERT(self->targetIds.size() == 1);
+			auto target = self->targetIds.front();
+
+			auto kt = ISimulator::KillInstantly;
+			TraceEvent("Assassination").detail("TargetDataHall", target).detail("KillType", kt);
+
+			g_simulator.killDataHall(target, kt);
 		} else {
+			state int killedMachines = 0;
 			while (killedMachines < self->machinesToKill && self->machines.size() > self->machinesToLeave) {
 				TraceEvent("WorkerKillBegin")
 				    .detail("KilledMachines", killedMachines)
 				    .detail("MachinesToKill", self->machinesToKill)
 				    .detail("MachinesToLeave", self->machinesToLeave)
 				    .detail("Machines", self->machines.size());
-				TEST(true); // Killing a machine
+				CODE_PROBE(true, "Killing a machine");
 
+				delayBeforeKill = deterministicRandom()->random01() * meanDelay;
 				wait(delay(delayBeforeKill));
 				TraceEvent("WorkerKillAfterDelay").log();
 
@@ -332,11 +345,11 @@ struct MachineAttritionWorkload : TestWorkload {
 				// decide on a machine to kill
 				state LocalityData targetMachine = self->machines.back();
 				if (BUGGIFY_WITH_PROB(0.01)) {
-					TEST(true); // Marked a zone for maintenance before killing it
+					CODE_PROBE(true, "Marked a zone for maintenance before killing it");
 					wait(success(
 					    setHealthyZone(cx, targetMachine.zoneId().get(), deterministicRandom()->random01() * 20)));
 				} else if (BUGGIFY_WITH_PROB(0.005)) {
-					TEST(true); // Disable DD for all storage server failures
+					CODE_PROBE(true, "Disable DD for all storage server failures");
 					self->ignoreSSFailures =
 					    uncancellable(ignoreSSFailuresForDuration(cx, deterministicRandom()->random01() * 5));
 				}
@@ -385,8 +398,12 @@ struct MachineAttritionWorkload : TestWorkload {
 				}
 
 				killedMachines++;
-				if (!self->replacement)
+				if (self->replacement) {
+					// Replace by reshuffling, since we always pick from the back.
+					deterministicRandom()->randomShuffle(self->machines);
+				} else {
 					self->machines.pop_back();
+				}
 
 				wait(delay(meanDelay - delayBeforeKill) && success(self->ignoreSSFailures));
 

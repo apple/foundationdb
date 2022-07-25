@@ -69,10 +69,11 @@ When a data distribution role is created, it recovers the states of the previous
 ### When to move keys?
 
 Keys can be moved from a server to another for several reasons:
-(1) DD moves keys from overutilized servers to underutilized servers, where a server’s utilization is defined as the server’s disk usage;
-(2) DD splits or merges shards in order to rebalance the disk usage of servers;
-(3) DD removes redundant teams when the team number is larger than the desired number;
-(4) DD repairs the replication factor by duplicate shards from a server to another when servers in a team fail.
+(1) DD moves keys from disk-overutilized servers to disk-underutilized servers, where a server’s disk-utilization is defined as the server’s disk space usage;
+(2) DD moves keys from read-busy servers to read-cold servers if read-aware data distribution is enabled;
+(3) DD splits or merges shards in order to rebalance the disk usage of servers;
+(4) DD removes redundant teams when the team number is larger than the desired number;
+(5) DD repairs the replication factor by duplicate shards from a server to another when servers in a team fail.
 
 Actors are created to monitor the reasons of key movement:
 (1) `MountainChopper` and `ValleyFiller` actors periodically measure a random server team’s utilization and rebalance the server’s keys among other servers;
@@ -93,3 +94,62 @@ The data movement from one server (called source server) to another (called dest
 (2) The destination server will issue transactions to read the shard range and write the key-value pairs back. The key-value will be routed to the destination server and saved in the server’s storage engine;
 (3) DD removes the source server from the shard’s ownership by modifying the system keyspace;
 (4) DD removes the shard’s information owned by the source server from the server’s team information (i.e., *shardsAffectedByTeamFailure*).
+
+# Read-aware Data Distribution
+
+## Motivation
+Before FDB 7.2, when the data distributor wants to rebalance shard, it only considers write bandwidth when choosing source and destination team, and the moved shard is chosen randomly. There are several cases where uneven read distribution from users causes a small subset of servers to be busy with read requests. This motivates the data distributor considering read busyness to minimize the read load unevenness.
+
+## When does read rebalance happen
+The data distributor will periodically check whether the read rebalance is needed. The conditions of rebalancing are 
+* the **worst CPU usage of source team >= 0.15** , which means the source team is somewhat busy;
+* the ongoing relocation is less than the parallelism budget. `queuedRelocation[ priority ] < countLimit (default 50)`;
+* the source team is not throttled to be a data movement source team. `( now() - The last time the source team was selected ) * time volumn (default 20) > read sample interval (2 min default)`;
+* the read load difference between source team and destination team is larger than 30% of the source team load;
+
+## Metrics definition
+* READ_LOAD = ceil(READ_BYTES_PER_KSECOND / PAGE_SIZE) 
+* READ_IMBALANCE = ( MAX READ_LOAD / AVG READ_LOAD )
+* MOVE_SCORE = READ_DENSITY = READ_BYTES_PER_KSECOND / SHARD_BYTE
+
+The aim for read-aware data distributor is to minimize the IMBALANCE while not harm the disk utilization balance.
+
+## Which shard to move
+Basically, the MountainChopper will handle read-hot shards distribution with following steps:
+1. The MountainChopper chooses **the source team** with the largest READ_LOAD while it satisfies HARD_CONSTRAINT, then check whether rebalance is needed; 
+    * Hard constraint:
+        * Team is healthy
+        * The last time this team was source team is larger than (READ_SAMPLE_INTERVAL / MOVEMENT_PER_SAMPLE)
+        * The worst CPU usage of source team >= 0.15
+2. Choose the destination team for moving
+    * Hard constraint:
+        * Team is healthy
+        * The team’s available space is larger than the median free space
+    * Goals
+        * The destination team has the least LOAD in a random team set while it satisfies HARD_CONSTRAINT;
+3. Select K shards on the source team of which 
+    a. `LOAD(shard) < (LOAD(src) - LOAD(dest)) * READ_REBALANCE_MAX_SHARD_FRAC `; 
+    b. `LOAD(shard) > AVG(SourceShardLoad)`; 
+    c. with the highest top-K `MOVE_SCORE`; 
+
+    We use 3.a and 3.b to set a eligible shard bandwidth for read rebalance moving. If the upper bound is too large, it’ll just make the hot shard shift to another team but not even the read load. If the upper bound is small, we’ll just move some cold shards to other servers, which is also not helpful. The default value of READ_REBALANCE_MAX_SHARD_FRAC is 0.2 (up to 0.5) which is decided based on skewed workload test.
+4. Issue relocation request to move a random shard in the top k set. If the maximum limit of read-balance movement is reached, give up this relocation.
+
+Note: The ValleyFiller chooses a source team from a random set with the largest LOAD, and a destination team with the least LOAD.
+
+## Performance Test and Summary
+### Metrics to measure
+1. StorageMetrics trace event report “FinishedQueries” which means the current storage server finishes how many read operations. The rate of FinishedQueries is what we measure first. The better the load balance is, the more similar the FinishedQueries rate across all storage servers.
+CPU utilization. This metric is in a positive relationship with “FinishedQueries rate”. A even “FinishedQueries” generally means even CPU utilization in the read-only scenario.
+2. Data movement size. We want to achieve load balance with as little movement as possible;
+3. StandardDeviation(FinishedQueries). It indicates how much difference read load each storage server has.
+
+### Typical Test Setup
+120GB data, key=32B, value=200B; Single replica; 8 SS (20%) serves 80% read; 8 SS servers 60% write; 4 servers are both read and write hot;  TPS=100000, 7 read/txn + 1 write/txn; 
+
+### Test Result Summary and Recommendation 
+* With intersected sets of read-hot and write-hot servers, read-aware DD even out the read + write load on the double-hot (be both read and write hot) server, which means the converged write load is similar to disk rebalance only algorithm.
+* Read-aware DD will balance the read workload under the read-skew scenario. Starting from an imbalance `STD(FinishedQueries per minute)=16k`,the best result it can achieve is `STD(FinishedQueries per minute) = 2k`.
+* The typical movement size under a read-skew scenario is 100M ~ 600M under default KNOB value `READ_REBALANCE_MAX_SHARD_FRAC=0.2, READ_REBALANCE_SRC_PARALLELISM = 20`. Increasing those knobs may accelerate the converge speed with the risk of data movement churn, which overwhelms the destination and over-cold the source.
+* The upper bound of `READ_REBALANCE_MAX_SHARD_FRAC` is 0.5. Any value larger than 0.5 can result in hot server switching.
+* When needing a deeper diagnosis of the read aware DD, `BgDDMountainChopper_New`, and `BgDDValleyFiller_New` trace events are where to go.

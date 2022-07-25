@@ -24,12 +24,14 @@
 #include <utility>
 #include <vector>
 
-#include "contrib/fmt-8.1.1/include/fmt/format.h"
+#include "fmt/format.h"
 #include "fdbclient/BlobGranuleReader.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/SystemData.h"
+#include "fdbclient/TenantManagement.actor.h"
+#include "fdbserver/BlobGranuleServerCommon.actor.h"
 #include "fdbserver/BlobGranuleValidation.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/TesterInterface.actor.h"
@@ -66,6 +68,7 @@ struct ThreadData : ReferenceCounted<ThreadData>, NonCopyable {
 	KeyRange directoryRange;
 	TenantName tenantName;
 	TenantMapEntry tenant;
+	Reference<BlobConnectionProvider> bstore;
 
 	// key + value gen data
 	// in vector for efficient random selection
@@ -146,11 +149,11 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 
 	// parameters global across all clients
 	int64_t targetByteRate;
+	bool doMergeCheckAtEnd;
 
 	std::vector<Reference<ThreadData>> directories;
 	std::vector<Future<Void>> clients;
 	DatabaseConfiguration config;
-	Reference<BackupContainerFileSystem> bstore;
 
 	BlobGranuleCorrectnessWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		doSetup = !clientId; // only do this on the "first" client
@@ -159,6 +162,9 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		// randomize global test settings based on shared parameter to get similar workload across tests, but then vary
 		// different parameters within those constraints
 		int64_t randomness = sharedRandomNumber;
+
+		doMergeCheckAtEnd = randomness % 10 == 0;
+		randomness /= 10;
 
 		// randomize between low and high directory count
 		int64_t targetDirectories = 1 + (randomness % 8);
@@ -205,30 +211,16 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		if (BGW_DEBUG) {
 			fmt::print("Setting up blob granule range for tenant {0}\n", name.printable());
 		}
-		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
-		loop {
-			try {
-				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
-				state Optional<TenantMapEntry> entry = wait(ManagementAPI::createTenantTransaction(tr, name));
-				if (!entry.present()) {
-					// if tenant already exists because of retry, load it
-					wait(store(entry, ManagementAPI::tryGetTenantTransaction(tr, name)));
-					ASSERT(entry.present());
-				}
+		Optional<TenantMapEntry> entry = wait(TenantAPI::createTenant(cx.getReference(), name));
+		ASSERT(entry.present());
 
-				wait(tr->commit());
-				if (BGW_DEBUG) {
-					fmt::print("Set up blob granule range for tenant {0}: {1}\n",
-					           name.printable(),
-					           entry.get().prefix.printable());
-				}
-				return entry.get();
-			} catch (Error& e) {
-				wait(tr->onError(e));
-			}
+		if (BGW_DEBUG) {
+			fmt::print(
+			    "Set up blob granule range for tenant {0}: {1}\n", name.printable(), entry.get().prefix.printable());
 		}
+
+		return entry.get();
 	}
 
 	std::string description() const override { return "BlobGranuleCorrectnessWorkload"; }
@@ -245,6 +237,8 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		}
 
 		state int directoryIdx = 0;
+		state std::vector<std::pair<TenantName, TenantMapEntry>> tenants;
+		state BGTenantMap tenantData(self->dbInfo);
 		for (; directoryIdx < self->directories.size(); directoryIdx++) {
 			// Set up the blob range first
 			TenantMapEntry tenantEntry = wait(self->setUpTenant(cx, self->directories[directoryIdx]->tenantName));
@@ -252,32 +246,18 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 			self->directories[directoryIdx]->tenant = tenantEntry;
 			self->directories[directoryIdx]->directoryRange =
 			    KeyRangeRef(tenantEntry.prefix, tenantEntry.prefix.withSuffix(normalKeys.end));
+			tenants.push_back({ self->directories[directoryIdx]->tenantName, tenantEntry });
 		}
+		tenantData.addTenants(tenants);
 
-		if (BGW_DEBUG) {
-			printf("Initializing Blob Granule Correctness s3 stuff\n");
-		}
-		try {
-			if (g_network->isSimulated()) {
-				if (BGW_DEBUG) {
-					printf("Blob Granule Correctness constructing simulated backup container\n");
-				}
-				self->bstore = BackupContainerFileSystem::openContainerFS("file://fdbblob/", {}, {});
-			} else {
-				if (BGW_DEBUG) {
-					printf("Blob Granule Correctness constructing backup container from %s\n",
-					       SERVER_KNOBS->BG_URL.c_str());
-				}
-				self->bstore = BackupContainerFileSystem::openContainerFS(SERVER_KNOBS->BG_URL, {}, {});
-				if (BGW_DEBUG) {
-					printf("Blob Granule Correctness constructed backup container\n");
-				}
-			}
-		} catch (Error& e) {
-			if (BGW_DEBUG) {
-				printf("Blob Granule Correctness got backup container init error %s\n", e.name());
-			}
-			throw e;
+		// wait for tenant data to be loaded
+
+		for (directoryIdx = 0; directoryIdx < self->directories.size(); directoryIdx++) {
+			state Reference<GranuleTenantData> data =
+			    tenantData.getDataForGranule(self->directories[directoryIdx]->directoryRange);
+			wait(data->bstoreLoaded.getFuture());
+			wait(delay(0));
+			self->directories[directoryIdx]->bstore = data->bstore;
 		}
 
 		return Void();
@@ -307,8 +287,13 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 			try {
 				Version rv = wait(self->doGrv(&tr));
 				state Version readVersion = rv;
-				std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> blob = wait(readFromBlob(
-				    cx, self->bstore, normalKeys /* tenant handles range */, 0, readVersion, threadData->tenantName));
+				std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> blob =
+				    wait(readFromBlob(cx,
+				                      threadData->bstore,
+				                      normalKeys /* tenant handles range */,
+				                      0,
+				                      readVersion,
+				                      threadData->tenantName));
 				fmt::print("Directory {0} got {1} RV {2}\n",
 				           threadData->directoryID,
 				           doSetup ? "initial" : "final",
@@ -473,10 +458,10 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 				}
 			}
 		}
-		TEST(beginCollapsed > 0); // BGCorrectness got collapsed request with beginVersion > 0
-		TEST(beginNotCollapsed > 0); // BGCorrectness got un-collapsed request with beginVersion > 0
-		TEST(beginCollapsed > 0 &&
-		     beginNotCollapsed > 0); // BGCorrectness got both collapsed and uncollapsed in the same request!
+		CODE_PROBE(beginCollapsed > 0, "BGCorrectness got collapsed request with beginVersion > 0");
+		CODE_PROBE(beginNotCollapsed > 0, "BGCorrectness got un-collapsed request with beginVersion > 0");
+		CODE_PROBE(beginCollapsed > 0 && beginNotCollapsed > 0,
+		           "BGCorrectness got both collapsed and uncollapsed in the same request!");
 
 		while (checkIt != threadData->keyData.end() && checkIt->first < endKeyExclusive) {
 			uint32_t key = checkIt->first;
@@ -629,20 +614,25 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 				auto endKeyIt = threadData->keyData.find(startKey);
 				ASSERT(endKeyIt != threadData->keyData.end());
 
-				int targetQueryBytes = (deterministicRandom()->randomInt(1, 20) * targetBytesReadPerQuery) / 10;
-				int estimatedQueryBytes = 0;
-				for (int i = 0; estimatedQueryBytes < targetQueryBytes && endKeyIt != threadData->keyData.end();
-				     i++, endKeyIt++) {
-					// iterate forward until end or target keys have passed
-					estimatedQueryBytes += (1 + endKeyIt->second.writes.size() - endKeyIt->second.nextClearIdx) *
-					                       threadData->targetValLength;
-				}
-
+				// sometimes force single key read, for edge case
 				state uint32_t endKey;
-				if (endKeyIt == threadData->keyData.end()) {
-					endKey = std::numeric_limits<uint32_t>::max();
+				if (deterministicRandom()->random01() < 0.01) {
+					endKey = startKey + 1;
 				} else {
-					endKey = endKeyIt->first;
+					int targetQueryBytes = (deterministicRandom()->randomInt(1, 20) * targetBytesReadPerQuery) / 10;
+					int estimatedQueryBytes = 0;
+					for (int i = 0; estimatedQueryBytes < targetQueryBytes && endKeyIt != threadData->keyData.end();
+					     i++, endKeyIt++) {
+						// iterate forward until end or target keys have passed
+						estimatedQueryBytes += (1 + endKeyIt->second.writes.size() - endKeyIt->second.nextClearIdx) *
+						                       threadData->targetValLength;
+					}
+
+					if (endKeyIt == threadData->keyData.end()) {
+						endKey = std::numeric_limits<uint32_t>::max();
+					} else {
+						endKey = endKeyIt->first;
+					}
 				}
 
 				range = KeyRangeRef(threadData->getKey(startKey, 0), threadData->getKey(endKey, 0));
@@ -681,8 +671,8 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 					beginVersion = threadData->writeVersions[beginVersionIdx];
 				}
 
-				std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> blob =
-				    wait(readFromBlob(cx, self->bstore, range, beginVersion, readVersion, threadData->tenantName));
+				std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> blob = wait(
+				    readFromBlob(cx, threadData->bstore, range, beginVersion, readVersion, threadData->tenantName));
 				self->validateResult(threadData, blob, startKey, endKey, beginVersion, readVersion);
 
 				int resultBytes = blob.first.expectedSize();
@@ -861,6 +851,29 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		return delay(testDuration);
 	}
 
+	ACTOR Future<Void> checkTenantRanges(BlobGranuleCorrectnessWorkload* self,
+	                                     Database cx,
+
+	                                     Reference<ThreadData> threadData) {
+		// check that reading ranges with tenant name gives valid result of ranges just for tenant, with no tenant
+		// prefix
+		loop {
+			state Transaction tr(cx, threadData->tenantName);
+			try {
+				Standalone<VectorRef<KeyRangeRef>> ranges = wait(tr.getBlobGranuleRanges(normalKeys));
+				ASSERT(ranges.size() >= 1);
+				ASSERT(ranges.front().begin == normalKeys.begin);
+				ASSERT(ranges.back().end == normalKeys.end);
+				for (int i = 0; i < ranges.size() - 1; i++) {
+					ASSERT(ranges[i].end == ranges[i + 1].begin);
+				}
+				return Void();
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+
 	ACTOR Future<bool> checkDirectory(Database cx,
 	                                  BlobGranuleCorrectnessWorkload* self,
 	                                  Reference<ThreadData> threadData) {
@@ -883,7 +896,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 				fmt::print("Directory {0} doing final data check @ {1}\n", threadData->directoryID, readVersion);
 			}
 			std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> blob = wait(readFromBlob(
-			    cx, self->bstore, normalKeys /*tenant handles range*/, 0, readVersion, threadData->tenantName));
+			    cx, threadData->bstore, normalKeys /*tenant handles range*/, 0, readVersion, threadData->tenantName));
 			result = self->validateResult(threadData, blob, 0, std::numeric_limits<uint32_t>::max(), 0, readVersion);
 			finalRowsValidated = blob.first.size();
 
@@ -897,8 +910,13 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 				wait(self->waitFirstSnapshot(self, cx, threadData, false));
 			}
 		}
+		// read granule ranges with tenant and validate
+		if (BGW_DEBUG) {
+			fmt::print("Directory {0} checking tenant ranges\n", threadData->directoryID);
+		}
+		wait(self->checkTenantRanges(self, cx, threadData));
 
-		bool initialCheck = result;
+		state bool initialCheck = result;
 		result &= threadData->mismatches == 0 && (threadData->timeTravelTooOld == 0);
 
 		fmt::print("Blob Granule Workload Directory {0} {1}:\n", threadData->directoryID, result ? "passed" : "failed");
@@ -920,6 +938,11 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 
 		// For some reason simulation is still passing when this fails?.. so assert for now
 		ASSERT(result);
+
+		if (self->clientId == 0 && SERVER_KNOBS->BG_ENABLE_MERGING && self->doMergeCheckAtEnd) {
+			CODE_PROBE(true, "BGCorrectness clearing database and awaiting merge");
+			wait(clearAndAwaitMerge(cx, threadData->directoryRange));
+		}
 
 		return result;
 	}

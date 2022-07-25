@@ -561,6 +561,7 @@ def profile(logger):
     assert output2 == default_profile_client_get_output
     # set rate and size limit
     run_fdbcli_command('profile', 'client', 'set', '0.5', '1GB')
+    time.sleep(1) # global config can take some time to sync
     output3 = run_fdbcli_command('profile', 'client', 'get')
     logger.debug(output3)
     output3_list = output3.split(' ')
@@ -569,6 +570,7 @@ def profile(logger):
     assert output3_list[-1] == '1000000000.'
     # change back to default value and check
     run_fdbcli_command('profile', 'client', 'set', 'default', 'default')
+    time.sleep(1) # global config can take some time to sync
     assert run_fdbcli_command('profile', 'client', 'get') == default_profile_client_get_output
 
 
@@ -616,9 +618,23 @@ def tenants(logger):
 
     output = run_fdbcli_command('gettenant tenant')
     lines = output.split('\n')
-    assert len(lines) == 2
+    assert len(lines) == 3
     assert lines[0].strip().startswith('id: ')
     assert lines[1].strip().startswith('prefix: ')
+    assert lines[2].strip() == 'tenant state: ready'
+
+    output = run_fdbcli_command('gettenant tenant JSON')
+    json_output = json.loads(output, strict=False)
+    assert(len(json_output) == 2)
+    assert('tenant' in json_output)
+    assert(json_output['type'] == 'success')
+    assert(len(json_output['tenant']) == 3)
+    assert('id' in json_output['tenant'])
+    assert('prefix' in json_output['tenant'])
+    assert(len(json_output['tenant']['prefix']) == 2)
+    assert('base64' in json_output['tenant']['prefix'])
+    assert('printable' in json_output['tenant']['prefix'])
+    assert(json_output['tenant']['tenant_state'] == 'ready')
 
     output = run_fdbcli_command('usetenant')
     assert output == 'Using the default tenant'
@@ -690,6 +706,15 @@ def tenants(logger):
 
     run_fdbcli_command('writemode on; clear tenant_test')
 
+def integer_options():
+    process = subprocess.Popen(command_template[:-1], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=fdbcli_env)
+    cmd_sequence = ['option on TIMEOUT 1000', 'writemode on', 'clear foo']
+    output, error_output = process.communicate(input='\n'.join(cmd_sequence).encode())
+
+    lines = output.decode().strip().split('\n')[-2:]
+    assert lines[0] == 'Option enabled for all transactions'
+    assert lines[1].startswith('Committed')
+    assert error_output == b''
 
 if __name__ == '__main__':
     parser = ArgumentParser(formatter_class=RawDescriptionHelpFormatter,
@@ -736,6 +761,7 @@ if __name__ == '__main__':
         triggerddteaminfolog()
         tenants()
         versionepoch()
+        integer_options()
     else:
         assert args.process_number > 1, "Process number should be positive"
         coordinators()

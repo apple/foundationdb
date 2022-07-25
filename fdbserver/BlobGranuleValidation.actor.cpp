@@ -61,7 +61,7 @@ ACTOR Future<std::pair<RangeResult, Version>> readFromFDB(Database cx, KeyRange 
 // FIXME: typedef this pair type and/or chunk list
 ACTOR Future<std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>>> readFromBlob(
     Database cx,
-    Reference<BackupContainerFileSystem> bstore,
+    Reference<BlobConnectionProvider> bstore,
     KeyRange range,
     Version beginVersion,
     Version readVersion,
@@ -105,7 +105,7 @@ bool compareFDBAndBlob(RangeResult fdb,
 		    .detail("BlobSize", blob.first.size());
 
 		if (debug) {
-			fmt::print("\nMismatch for [{0} - {1}) @ {2} ({3}). F({4}) B({5}):\n",
+			fmt::print("\nMismatch for [{0} - {1}) @ {2}. F({3}) B({4}):\n",
 			           range.begin.printable(),
 			           range.end.printable(),
 			           v,
@@ -165,4 +165,35 @@ bool compareFDBAndBlob(RangeResult fdb,
 		}
 	}
 	return correct;
+}
+
+ACTOR Future<Void> clearAndAwaitMerge(Database cx, KeyRange range) {
+	// clear key range and check whether it is merged or not, repeatedly
+	state Transaction tr(cx);
+	state int reClearCount = 1;
+	state int reClearInterval = 1; // do quadratic backoff on clear rate, b/c large keys can keep it not write-cold
+	loop {
+		try {
+			Standalone<VectorRef<KeyRangeRef>> ranges = wait(tr.getBlobGranuleRanges(range));
+			if (ranges.size() == 1) {
+				return Void();
+			}
+			CODE_PROBE(true, "ClearAndAwaitMerge doing clear");
+			reClearCount--;
+			if (reClearCount <= 0) {
+				tr.clear(range);
+				wait(tr.commit());
+				fmt::print("ClearAndAwaitMerge cleared [{0} - {1}) @ {2}\n",
+				           range.begin.printable(),
+				           range.end.printable(),
+				           tr.getCommittedVersion());
+				reClearCount = reClearInterval;
+				reClearInterval++;
+			}
+			wait(delay(30.0)); // sleep a bit before checking on merge again
+			tr.reset();
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
 }

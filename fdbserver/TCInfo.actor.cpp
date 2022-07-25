@@ -307,9 +307,9 @@ std::string TCMachineTeamInfo::getMachineIDsStr() const {
 	return std::move(ss).str();
 }
 
-TCTeamInfo::TCTeamInfo(std::vector<Reference<TCServerInfo>> const& servers)
-  : servers(servers), healthy(true), wrongConfiguration(false), priority(SERVER_KNOBS->PRIORITY_TEAM_HEALTHY),
-    id(deterministicRandom()->randomUniqueID()) {
+TCTeamInfo::TCTeamInfo(std::vector<Reference<TCServerInfo>> const& servers, Optional<Reference<TCTenantInfo>> tenant)
+  : servers(servers), tenant(tenant), healthy(true), wrongConfiguration(false),
+    priority(SERVER_KNOBS->PRIORITY_TEAM_HEALTHY), id(deterministicRandom()->randomUniqueID()) {
 	if (servers.empty()) {
 		TraceEvent(SevInfo, "ConstructTCTeamFromEmptyServers").log();
 	}
@@ -317,6 +317,21 @@ TCTeamInfo::TCTeamInfo(std::vector<Reference<TCServerInfo>> const& servers)
 	for (int i = 0; i < servers.size(); i++) {
 		serverIDs.push_back(servers[i]->getId());
 	}
+}
+
+// static
+std::string TCTeamInfo::serversToString(std::vector<UID> servers) {
+	if (servers.empty()) {
+		return "[unset]";
+	}
+
+	std::sort(servers.begin(), servers.end());
+	std::stringstream ss;
+	for (const auto& id : servers) {
+		ss << id.toString() << " ";
+	}
+
+	return ss.str();
 }
 
 std::vector<StorageServerInterface> TCTeamInfo::getLastKnownServerInterfaces() const {
@@ -329,16 +344,7 @@ std::vector<StorageServerInterface> TCTeamInfo::getLastKnownServerInterfaces() c
 }
 
 std::string TCTeamInfo::getServerIDsStr() const {
-	std::stringstream ss;
-
-	if (serverIDs.empty())
-		return "[unset]";
-
-	for (const auto& id : serverIDs) {
-		ss << id.toString() << " ";
-	}
-
-	return std::move(ss).str();
+	return serversToString(this->serverIDs);
 }
 
 void TCTeamInfo::addDataInFlightToTeam(int64_t delta) {

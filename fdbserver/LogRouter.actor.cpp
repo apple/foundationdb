@@ -573,7 +573,9 @@ Future<Void> logRouterPeekMessages(PromiseType replyPromise,
 	TLogPeekReply reply;
 	reply.maxKnownVersion = self->version.get();
 	reply.minKnownCommittedVersion = self->poppedVersion;
-	reply.messages = StringRef(reply.arena, messages.toValue());
+	auto messagesValue = messages.toValue();
+	reply.arena.dependsOn(messagesValue.arena());
+	reply.messages = messagesValue;
 	reply.popped = self->minPopped.get() >= self->startVersion ? self->minPopped.get() : 0;
 	reply.end = endVersion;
 	reply.onlySpilled = false;
@@ -590,7 +592,7 @@ Future<Void> logRouterPeekMessages(PromiseType replyPromise,
 		}
 		if (sequenceData.isSet()) {
 			if (sequenceData.getFuture().get().first != reply.end) {
-				TEST(true); // tlog peek second attempt ended at a different version
+				CODE_PROBE(true, "tlog peek second attempt ended at a different version");
 				replyPromise.sendError(operation_obsolete());
 				return Void();
 			}

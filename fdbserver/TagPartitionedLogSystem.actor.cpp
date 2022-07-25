@@ -2167,7 +2167,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 		}
 	}
 
-	TEST(true); // Master recovery from pre-existing database
+	CODE_PROBE(true, "Master recovery from pre-existing database");
 
 	// trackRejoins listens for rejoin requests from the tLogs that we are recovering from, to learn their
 	// TLogInterfaces
@@ -2228,7 +2228,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 			}
 			if (!lockedLocalities.count(log->locality)) {
 				TraceEvent("EpochEndLockExtra").detail("Locality", log->locality);
-				TEST(true); // locking old generations for version information
+				CODE_PROBE(true, "locking old generations for version information");
 				lockedLocalities.insert(log->locality);
 				LogLockInfo lockResult;
 				lockResult.epochEnd = old.epochEnd;
@@ -2312,7 +2312,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 			changes.push_back(TagPartitionedLogSystem::getDurableVersionChanged(lockResults[log], logFailed[log]));
 		}
 		if (maxEnd > 0 && (!lastEnd.present() || maxEnd < lastEnd.get())) {
-			TEST(lastEnd.present()); // Restarting recovery at an earlier point
+			CODE_PROBE(lastEnd.present(), "Restarting recovery at an earlier point");
 
 			auto logSystem = makeReference<TagPartitionedLogSystem>(dbgid, locality, prevState.recoveryCount);
 
@@ -2614,6 +2614,8 @@ ACTOR Future<Void> TagPartitionedLogSystem::newRemoteEpoch(TagPartitionedLogSyst
 		req.tLogLocalities = localities;
 		req.tLogPolicy = logSet->tLogPolicy;
 		req.locality = remoteLocality;
+		TraceEvent("RemoteTLogRouterReplies", self->dbgid)
+		    .detail("WorkerID", remoteWorkers.logRouters[i % remoteWorkers.logRouters.size()].id());
 		logRouterInitializationReplies.push_back(transformErrors(
 		    throwErrorOr(
 		        remoteWorkers.logRouters[i % remoteWorkers.logRouters.size()].logRouter.getReplyUnlessFailedFor(
@@ -2693,11 +2695,13 @@ ACTOR Future<Void> TagPartitionedLogSystem::newRemoteEpoch(TagPartitionedLogSyst
 	}
 
 	remoteTLogInitializationReplies.reserve(remoteWorkers.remoteTLogs.size());
-	for (int i = 0; i < remoteWorkers.remoteTLogs.size(); i++)
+	for (int i = 0; i < remoteWorkers.remoteTLogs.size(); i++) {
+		TraceEvent("RemoteTLogReplies", self->dbgid).detail("WorkerID", remoteWorkers.remoteTLogs[i].id());
 		remoteTLogInitializationReplies.push_back(transformErrors(
 		    throwErrorOr(remoteWorkers.remoteTLogs[i].tLog.getReplyUnlessFailedFor(
 		        remoteTLogReqs[i], SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
 		    cluster_recovery_failed()));
+	}
 
 	TraceEvent("RemoteLogRecruitment_InitializingRemoteLogs")
 	    .detail("StartVersion", logSet->startVersion)
@@ -2966,11 +2970,13 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 	}
 
 	initializationReplies.reserve(recr.tLogs.size());
-	for (int i = 0; i < recr.tLogs.size(); i++)
+	for (int i = 0; i < recr.tLogs.size(); i++) {
+		TraceEvent("PrimaryTLogReplies", logSystem->getDebugID()).detail("WorkerID", recr.tLogs[i].id());
 		initializationReplies.push_back(transformErrors(
 		    throwErrorOr(recr.tLogs[i].tLog.getReplyUnlessFailedFor(
 		        reqs[i], SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
 		    cluster_recovery_failed()));
+	}
 
 	state std::vector<Future<Void>> recoveryComplete;
 
@@ -3034,11 +3040,14 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 		}
 
 		satelliteInitializationReplies.reserve(recr.satelliteTLogs.size());
-		for (int i = 0; i < recr.satelliteTLogs.size(); i++)
+		for (int i = 0; i < recr.satelliteTLogs.size(); i++) {
+			TraceEvent("PrimarySatelliteTLogReplies", logSystem->getDebugID())
+			    .detail("WorkerID", recr.satelliteTLogs[i].id());
 			satelliteInitializationReplies.push_back(transformErrors(
 			    throwErrorOr(recr.satelliteTLogs[i].tLog.getReplyUnlessFailedFor(
 			        sreqs[i], SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
 			    cluster_recovery_failed()));
+		}
 
 		wait(waitForAll(satelliteInitializationReplies) || oldRouterRecruitment);
 

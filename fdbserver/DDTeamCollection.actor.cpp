@@ -48,6 +48,7 @@ FDB_DEFINE_BOOLEAN_PARAM(PreferLowerDiskUtil);
 FDB_DEFINE_BOOLEAN_PARAM(TeamMustHaveShards);
 FDB_DEFINE_BOOLEAN_PARAM(ForReadBalance);
 FDB_DEFINE_BOOLEAN_PARAM(PreferLowerReadUtil);
+FDB_DEFINE_BOOLEAN_PARAM(FindTeamByServers);
 
 class DDTeamCollectionImpl {
 	ACTOR static Future<Void> checkAndRemoveInvalidLocalityAddr(DDTeamCollection* self) {
@@ -156,6 +157,21 @@ public:
 		return Void();
 	}
 
+	// Find the team with the exact storage servers as req.src.
+	static void getTeamByServers(DDTeamCollection* self, GetTeamRequest req) {
+		const std::string servers = TCTeamInfo::serversToString(req.src);
+		Optional<Reference<IDataDistributionTeam>> res;
+		for (const auto& teamSet : self->m_teamSets) {
+			for (const auto& team : teamSet->teams()) {
+				if (team->getServerIDsStr() == servers) {
+					res = team;
+					break;
+				}
+			}
+		}
+		req.reply.send(std::make_pair(res, false));
+	}
+
 	// SOMEDAY: Make bestTeam better about deciding to leave a shard where it is (e.g. in PRIORITY_TEAM_HEALTHY case)
 	//		    use keys, src, dest, metrics, priority, system load, etc.. to decide...
 	ACTOR static Future<Void> getTeam(DDTeamCollection* self,
@@ -194,8 +210,8 @@ public:
 			}
 
 			bool foundSrc = false;
-			for (int i = 0; i < req.src.size(); i++) {
-				if (self->server_info.count(req.src[i])) {
+			for (const auto& id : req.src) {
+				if (self->server_info.count(id)) {
 					foundSrc = true;
 					break;
 				}
@@ -520,7 +536,7 @@ public:
 			}
 		}
 
-		for (auto& [serverID, server] : self->server_info) {
+		for (const auto& [serverID, server] : self->server_info) {
 			if (!self->server_status.get(serverID).isUnhealthy()) {
 				++serverCount;
 				LocalityData const& serverLocation = server->getLastKnownInterface().locality;
@@ -728,19 +744,19 @@ public:
 				bool recheck = !healthy && (lastReady != self->initialFailureReactionDelay.isReady() ||
 				                            (lastZeroHealthy && !self->zeroHealthyTeams->get()) || containsFailed);
 
-				//TraceEvent("TeamHealthChangeDetected", self->distributorId)
-				//    .detail("Team", team->getDesc())
-				//    .detail("ServersLeft", serversLeft)
-				//    .detail("LastServersLeft", lastServersLeft)
-				//    .detail("AnyUndesired", anyUndesired)
-				//    .detail("LastAnyUndesired", lastAnyUndesired)
-				//    .detail("AnyWrongConfiguration", anyWrongConfiguration)
-				//    .detail("LastWrongConfiguration", lastWrongConfiguration)
-				//    .detail("ContainsWigglingServer", anyWigglingServer)
-				//    .detail("Recheck", recheck)
-				//    .detail("BadTeam", badTeam)
-				//    .detail("LastZeroHealthy", lastZeroHealthy)
-				//    .detail("ZeroHealthyTeam", self->zeroHealthyTeams->get());
+				TraceEvent(SevVerbose, "TeamHealthChangeDetected", self->distributorId)
+				    .detail("Team", team->getDesc())
+				    .detail("ServersLeft", serversLeft)
+				    .detail("LastServersLeft", lastServersLeft)
+				    .detail("AnyUndesired", anyUndesired)
+				    .detail("LastAnyUndesired", lastAnyUndesired)
+				    .detail("AnyWrongConfiguration", anyWrongConfiguration)
+				    .detail("LastWrongConfiguration", lastWrongConfiguration)
+				    .detail("ContainsWigglingServer", anyWigglingServer)
+				    .detail("Recheck", recheck)
+				    .detail("BadTeam", badTeam)
+				    .detail("LastZeroHealthy", lastZeroHealthy)
+				    .detail("ZeroHealthyTeam", self->zeroHealthyTeams->get());
 
 				lastReady = self->initialFailureReactionDelay.isReady();
 				lastZeroHealthy = self->zeroHealthyTeams->get();
@@ -874,6 +890,11 @@ public:
 						std::vector<KeyRange> shards = self->shardsAffectedByTeamFailure->getShardsFor(
 						    ShardsAffectedByTeamFailure::Team(team->getServerIDs(), self->primary));
 
+						TraceEvent(SevVerbose, "ServerTeamRelocatingShards", self->distributorId)
+						    .detail("Info", team->getDesc())
+						    .detail("TeamID", team->getTeamID())
+						    .detail("Shards", shards.size());
+
 						for (int i = 0; i < shards.size(); i++) {
 							// Make it high priority to move keys off failed server or else RelocateShards may never be
 							// addressed
@@ -930,8 +951,9 @@ public:
 											                                : SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY);
 										}
 									} else {
-										TEST(true); // A removed server is still associated with a team in
-										            // ShardsAffectedByTeamFailure
+										CODE_PROBE(true,
+										           "A removed server is still associated with a team in "
+										           "ShardsAffectedByTeamFailure");
 									}
 								}
 							}
@@ -967,6 +989,7 @@ public:
 		} catch (Error& e) {
 			if (logTeamEvents) {
 				TraceEvent("TeamTrackerStopping", self->distributorId)
+				    .errorUnsuppressed(e)
 				    .detail("ServerPrimary", self->primary)
 				    .detail("Team", team->getDesc())
 				    .detail("Priority", team->getPriority());
@@ -1240,7 +1263,7 @@ public:
 
 						server->updateLastKnown(newInterface.first, newInterface.second);
 						if (localityChanged && !isTss) {
-							TEST(true); // Server locality changed
+							CODE_PROBE(true, "Server locality changed");
 
 							// The locality change of a server will affect machine teams related to the server if
 							// the server's machine locality is changed
@@ -1307,7 +1330,7 @@ public:
 								}
 							}
 							if (addedNewBadTeam && self->badTeamRemover.isReady()) {
-								TEST(true); // Server locality change created bad teams
+								CODE_PROBE(true, "Server locality change created bad teams");
 								self->doBuildTeams = true;
 								self->badTeamRemover = removeBadTeams(self);
 								self->addActor.send(self->badTeamRemover);
@@ -1615,10 +1638,10 @@ public:
 				// could cause us to not store the mutations sent to the short lived storage server.
 				if (ver > addedVersion + SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) {
 					bool canRemove = wait(canRemoveStorageServer(tr, serverID));
-					// TraceEvent("WaitForAllDataRemoved")
-					//     .detail("Server", serverID)
-					//     .detail("CanRemove", canRemove)
-					//     .detail("Shards", teams->shardsAffectedByTeamFailure->getNumberOfShards(serverID));
+					TraceEvent(SevVerbose, "WaitForAllDataRemoved")
+					    .detail("Server", serverID)
+					    .detail("CanRemove", canRemove)
+					    .detail("Shards", teams->shardsAffectedByTeamFailure->getNumberOfShards(serverID));
 					ASSERT_GE(teams->shardsAffectedByTeamFailure->getNumberOfShards(serverID), 0);
 					if (canRemove && teams->shardsAffectedByTeamFailure->getNumberOfShards(serverID) == 0) {
 						return Void();
@@ -1711,7 +1734,7 @@ public:
 					// in the serverTeams vector in the machine team.
 					--teamIndex;
 					self->addTeam(team->getServers(), IsInitialTeam::True, IsRedundantTeam::True);
-					TEST(true); // Removed machine team
+					CODE_PROBE(true, "Removed machine team");
 				}
 
 				self->doBuildTeams = true;
@@ -1796,7 +1819,7 @@ public:
 				bool foundTeam = self->removeTeam(st);
 				ASSERT(foundTeam);
 				self->addTeam(st->getServers(), IsInitialTeam::True, IsRedundantTeam::True);
-				TEST(true); // Marked team as a bad team
+				CODE_PROBE(true, "Marked team as a bad team");
 
 				self->doBuildTeams = true;
 
@@ -1964,13 +1987,15 @@ public:
 						takeRest =
 						    teamCollection->server_info.size() <= teamCollection->configuration.storageTeamSize ||
 						    teamCollection->machine_info.size() < teamCollection->configuration.storageTeamSize;
-						if (takeRest &&
-						    teamCollection->configuration.storageMigrationType == StorageMigrationType::GRADUAL) {
-							TraceEvent(SevWarn, "PerpetualWiggleSleep", teamCollection->distributorId)
-							    .suppressFor(SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY * 4)
-							    .detail("ServerSize", teamCollection->server_info.size())
-							    .detail("MachineSize", teamCollection->machine_info.size())
-							    .detail("StorageTeamSize", teamCollection->configuration.storageTeamSize);
+						if (takeRest) {
+							teamCollection->storageWiggler->setWiggleState(StorageWiggler::PAUSE);
+							if (teamCollection->configuration.storageMigrationType == StorageMigrationType::GRADUAL) {
+								TraceEvent(SevWarn, "PerpetualStorageWiggleSleep", teamCollection->distributorId)
+								    .suppressFor(SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY * 4)
+								    .detail("ServerSize", teamCollection->server_info.size())
+								    .detail("MachineSize", teamCollection->machine_info.size())
+								    .detail("StorageTeamSize", teamCollection->configuration.storageTeamSize);
+							}
 						}
 					}
 					wait(updateNextWigglingStorageID(teamCollection));
@@ -2038,9 +2063,10 @@ public:
 			if (self->wigglingId.present()) {
 				state UID id = self->wigglingId.get();
 				if (self->pauseWiggle->get()) {
-					TEST(true); // paused because cluster is unhealthy
+					CODE_PROBE(true, "paused because cluster is unhealthy");
 					moveFinishFuture = Never();
 					self->includeStorageServersForWiggle();
+					self->storageWiggler->setWiggleState(StorageWiggler::PAUSE);
 					TraceEvent(self->configuration.storageMigrationType == StorageMigrationType::AGGRESSIVE ? SevInfo
 					                                                                                        : SevWarn,
 					           "PerpetualStorageWigglePause",
@@ -2053,10 +2079,11 @@ public:
 				} else {
 					choose {
 						when(wait(self->waitUntilHealthy())) {
-							TEST(true); // start wiggling
+							CODE_PROBE(true, "start wiggling");
 							wait(self->storageWiggler->startWiggle());
 							auto fv = self->excludeStorageServersForWiggle(id);
 							moveFinishFuture = fv;
+							self->storageWiggler->setWiggleState(StorageWiggler::RUN);
 							TraceEvent("PerpetualStorageWiggleStart", self->distributorId)
 							    .detail("Primary", self->primary)
 							    .detail("ServerId", id)
@@ -2415,10 +2442,10 @@ public:
 		// SS and/or TSS recruitment failed at this point, update tssState
 		if (recruitTss && tssState->tssRecruitFailed()) {
 			tssState->markComplete();
-			TEST(true); // TSS recruitment failed for some reason
+			CODE_PROBE(true, "TSS recruitment failed for some reason");
 		}
 		if (!recruitTss && tssState->ssRecruitFailed()) {
-			TEST(true); // SS with pair TSS recruitment failed for some reason
+			CODE_PROBE(true, "SS with pair TSS recruitment failed for some reason");
 		}
 
 		self->recruitingStream.set(self->recruitingStream.get() - 1);
@@ -2559,7 +2586,7 @@ public:
 							    .detail("Addr", candidateSSAddr.toString())
 							    .detail("Locality", candidateWorker.worker.locality.toString());
 
-							TEST(true); // Starting TSS recruitment
+							CODE_PROBE(true, "Starting TSS recruitment");
 							self->isTssRecruiting = true;
 							tssState = makeReference<TSSPairState>(candidateWorker.worker.locality);
 
@@ -2569,7 +2596,7 @@ public:
 							checkTss = self->initialFailureReactionDelay;
 						} else {
 							if (tssState->active && tssState->inDataZone(candidateWorker.worker.locality)) {
-								TEST(true); // TSS recruits pair in same dc/datahall
+								CODE_PROBE(true, "TSS recruits pair in same dc/datahall");
 								self->isTssRecruiting = false;
 								TraceEvent("TSS_Recruit", self->distributorId)
 								    .detail("Stage", "PairSS")
@@ -2580,8 +2607,9 @@ public:
 								// successfully started recruitment of pair, reset tss recruitment state
 								tssState = makeReference<TSSPairState>();
 							} else {
-								TEST(tssState->active); // TSS recruitment skipped potential pair because it's in a
-								                        // different dc/datahall
+								CODE_PROBE(
+								    tssState->active,
+								    "TSS recruitment skipped potential pair because it's in a different dc/datahall");
 								self->addActor.send(initializeStorage(
 								    self, candidateWorker, ddEnabledState, false, makeReference<TSSPairState>()));
 							}
@@ -2601,8 +2629,9 @@ public:
 						int tssToKill = std::min((int)self->tss_info_by_pair.size(),
 						                         std::max(-tssToRecruit, self->zeroHealthyTeams->get() ? 1 : 0));
 						if (cancelTss) {
-							TEST(tssToRecruit < 0); // tss recruitment cancelled due to too many TSS
-							TEST(self->zeroHealthyTeams->get()); // tss recruitment cancelled due zero healthy teams
+							CODE_PROBE(tssToRecruit < 0, "tss recruitment cancelled due to too many TSS");
+							CODE_PROBE(self->zeroHealthyTeams->get(),
+							           "tss recruitment cancelled due zero healthy teams");
 
 							TraceEvent(SevWarn, "TSS_RecruitCancelled", self->distributorId)
 							    .detail("Reason", tssToRecruit <= 0 ? "TooMany" : "ZeroHealthyTeams");
@@ -2621,8 +2650,8 @@ public:
 								if (self->shouldHandleServer(tssi) && self->server_and_tss_info.count(tssId)) {
 									Promise<Void> killPromise = itr->second->killTss;
 									if (killPromise.canBeSet()) {
-										TEST(tssToRecruit < 0); // Killing TSS due to too many TSS
-										TEST(self->zeroHealthyTeams->get()); // Killing TSS due zero healthy teams
+										CODE_PROBE(tssToRecruit < 0, "Killing TSS due to too many TSS");
+										CODE_PROBE(self->zeroHealthyTeams->get(), "Killing TSS due zero healthy teams");
 										TraceEvent(SevWarn, "TSS_DDKill", self->distributorId)
 										    .detail("TSSID", tssId)
 										    .detail("Reason",
@@ -2656,7 +2685,7 @@ public:
 				if (e.code() != error_code_timed_out) {
 					throw;
 				}
-				TEST(true); // Storage recruitment timed out
+				CODE_PROBE(true, "Storage recruitment timed out");
 			}
 		}
 	}
@@ -2706,7 +2735,11 @@ public:
 	ACTOR static Future<Void> serverGetTeamRequests(DDTeamCollection* self, TeamCollectionInterface tci) {
 		loop {
 			GetTeamRequest req = waitNext(tci.getTeam.getFuture());
-			self->addActor.send(self->getTeam(req));
+			if (req.findTeamByServers) {
+				getTeamByServers(self, req);
+			} else {
+				self->addActor.send(self->getTeam(req));
+			}
 		}
 	}
 
@@ -2752,7 +2785,7 @@ public:
 					when(wait(checkSignal)) {
 						checkSignal = Never();
 						isFetchingResults = true;
-						serverListAndProcessClasses = getServerListAndProcessClasses(&tr);
+						serverListAndProcessClasses = NativeAPI::getServerListAndProcessClasses(&tr);
 					}
 					when(std::vector<std::pair<StorageServerInterface, ProcessClass>> results =
 					         wait(serverListAndProcessClasses)) {
@@ -2794,7 +2827,7 @@ public:
 					when(waitNext(serverRemoved)) {
 						if (isFetchingResults) {
 							tr = Transaction(self->cx);
-							serverListAndProcessClasses = getServerListAndProcessClasses(&tr);
+							serverListAndProcessClasses = NativeAPI::getServerListAndProcessClasses(&tr);
 						}
 					}
 				}
@@ -2972,14 +3005,14 @@ public:
 
 			loop choose {
 				when(UID removedServer = waitNext(self->removedServers.getFuture())) {
-					TEST(true); // Storage server removed from database
+					CODE_PROBE(true, "Storage server removed from database");
 					self->removeServer(removedServer);
 					serverRemoved.send(Void());
 
 					self->restartRecruiting.trigger();
 				}
 				when(UID removedTSS = waitNext(self->removedTSS.getFuture())) {
-					TEST(true); // TSS removed from database
+					CODE_PROBE(true, "TSS removed from database");
 					self->removeTSS(removedTSS);
 					serverRemoved.send(Void());
 
@@ -3009,8 +3042,8 @@ public:
 					    .trackLatest(self->primary ? "TotalDataInFlight"
 					                               : "TotalDataInFlightRemote"); // This trace event's trackLatest
 					                                                             // lifetime is controlled by
-					// DataDistributorData::totalDataInFlightEventHolder or
-					// DataDistributorData::totalDataInFlightRemoteEventHolder.
+					// DataDistributor::totalDataInFlightEventHolder or
+					// DataDistributor::totalDataInFlightRemoteEventHolder.
 					// The track latest key we use here must match the key used in
 					// the holder.
 
@@ -3139,12 +3172,19 @@ public:
 				    .detail("Primary", self->isPrimary());
 				for (i = 0; i < teamCount; i++) {
 					const auto& team = teams[i];
+
 					TraceEvent("ServerTeamInfo", self->getDistributorId())
 					    .detail("TeamIndex", i)
 					    .detail("Healthy", team->isHealthy())
 					    .detail("TeamSize", team->size())
 					    .detail("MemberIDs", team->getServerIDsStr())
-					    .detail("Primary", self->isPrimary());
+					    .detail("Primary", self->isPrimary())
+					    .detail("TeamID", team->getTeamID())
+					    .detail(
+					        "Shards",
+					        self->shardsAffectedByTeamFailure
+					            ->getShardsFor(ShardsAffectedByTeamFailure::Team(team->getServerIDs(), self->primary))
+					            .size());
 					if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
 						wait(yield());
 					}
@@ -3847,7 +3887,8 @@ void DDTeamCollection::addTeam(Reference<TCTeamSet> teamSet,
                                const std::vector<Reference<TCServerInfo>>& newTeamServers,
                                IsInitialTeam isInitialTeam,
                                IsRedundantTeam redundantTeam) {
-	auto teamInfo = makeReference<TCTeamInfo>(newTeamServers);
+	Optional<Reference<TCTenantInfo>> no_tenant = {};
+	auto teamInfo = makeReference<TCTeamInfo>(newTeamServers, no_tenant);
 
 	// Move satisfiesPolicy to the end for performance benefit
 	auto badTeam = IsBadTeam{ redundantTeam || teamInfo->size() != configuration.storageTeamSize ||
@@ -4842,7 +4883,7 @@ Reference<TCMachineInfo> DDTeamCollection::checkAndCreateMachine(Reference<TCSer
 	Reference<TCMachineInfo> machineInfo;
 	if (machine_info.find(machine_id) == machine_info.end()) {
 		// uid is the first storage server process on the machine
-		TEST(true); // First storage server in process on the machine
+		CODE_PROBE(true, "First storage server in process on the machine");
 		// For each machine, store the first server's localityEntry into machineInfo for later use.
 		LocalityEntry localityEntry = machineLocalityMap.add(locality, &server->getId());
 		machineInfo = makeReference<TCMachineInfo>(server, localityEntry);
@@ -5150,6 +5191,13 @@ bool DDTeamCollection::exclusionSafetyCheck(std::vector<UID>& excludeServerIDs) 
 	return true;
 }
 
+std::pair<StorageWiggler::State, double> DDTeamCollection::getStorageWigglerState() const {
+	if (storageWiggler) {
+		return { storageWiggler->getWiggleState(), storageWiggler->lastStateChangeTs };
+	}
+	return { StorageWiggler::INVALID, 0.0 };
+}
+
 Future<Void> DDTeamCollection::run(Reference<DDTeamCollection> teamCollection,
                                    Reference<InitialDataDistribution> initData,
                                    TeamCollectionInterface tci,
@@ -5360,8 +5408,8 @@ public:
 
 		ASSERT(result >= 8);
 
-		for (auto process = collection->server_info.begin(); process != collection->server_info.end(); process++) {
-			auto teamCount = process->second->getTeams().size();
+		for (const auto& [serverID, server] : collection->server_info) {
+			auto teamCount = server->getTeams().size();
 			ASSERT(teamCount >= 1);
 			// ASSERT(teamCount <= targetTeamsPerServer);
 		}
@@ -5398,8 +5446,8 @@ public:
 
 		// We need to guarantee a server always have at least a team so that the server can participate in data
 		// distribution
-		for (auto process = collection->server_info.begin(); process != collection->server_info.end(); process++) {
-			auto teamCount = process->second->getTeams().size();
+		for (const auto& [serverID, server] : collection->server_info) {
+			auto teamCount = server->getTeams().size();
 			ASSERT(teamCount >= 1);
 		}
 
@@ -5476,7 +5524,7 @@ public:
 
 		wait(collection->getTeam(req));
 
-		auto& [resTeam, srcTeamFound] = req.reply.getFuture().get();
+		const auto& [resTeam, srcFound] = req.reply.getFuture().get();
 
 		std::set<UID> expectedServers{ UID(1, 0), UID(2, 0), UID(3, 0) };
 		ASSERT(resTeam.present());
@@ -5532,7 +5580,7 @@ public:
 
 		wait(collection->getTeam(req));
 
-		auto& [resTeam, srcTeamFound] = req.reply.getFuture().get();
+		const auto& [resTeam, srcFound] = req.reply.getFuture().get();
 
 		std::set<UID> expectedServers{ UID(2, 0), UID(3, 0), UID(4, 0) };
 		ASSERT(resTeam.present());
@@ -5586,7 +5634,7 @@ public:
 
 		wait(collection->getTeam(req));
 
-		auto& [resTeam, srcTeamFound] = req.reply.getFuture().get();
+		const auto& [resTeam, srcFound] = req.reply.getFuture().get();
 
 		std::set<UID> expectedServers{ UID(2, 0), UID(3, 0), UID(4, 0) };
 		ASSERT(resTeam.present());
@@ -5639,7 +5687,7 @@ public:
 
 		wait(collection->getTeam(req));
 
-		auto& [resTeam, srcTeamFound] = req.reply.getFuture().get();
+		const auto& [resTeam, srcFound] = req.reply.getFuture().get();
 
 		std::set<UID> expectedServers{ UID(1, 0), UID(2, 0), UID(3, 0) };
 		ASSERT(resTeam.present());
@@ -5694,7 +5742,7 @@ public:
 
 		wait(collection->getTeam(req));
 
-		auto& [resTeam, srcTeamFound] = req.reply.getFuture().get();
+		const auto& [resTeam, srcFound] = req.reply.getFuture().get();
 
 		ASSERT(!resTeam.present());
 
@@ -5754,7 +5802,7 @@ public:
 
 		wait(collection->getTeam(req));
 
-		auto& [resTeam, srcTeamFound] = req.reply.getFuture().get();
+		const auto& [resTeam, srcTeamFound] = req.reply.getFuture().get();
 
 		ASSERT(!resTeam.present());
 
@@ -5879,7 +5927,7 @@ public:
 
 		wait(collection->getTeam(req));
 
-		auto& [resTeam, srcTeamFound] = req.reply.getFuture().get();
+		const auto& [resTeam, srcFound] = req.reply.getFuture().get();
 
 		std::set<UID> expectedServers{ UID(1, 0), UID(2, 0), UID(3, 0) };
 		ASSERT(resTeam.present());

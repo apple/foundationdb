@@ -239,7 +239,8 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 		// Stop the differential backup, if enabled
 		if (stopDifferentialDelay) {
-			TEST(!stopDifferentialFuture.isReady()); // Restore starts at specified time - stopDifferential not ready
+			CODE_PROBE(!stopDifferentialFuture.isReady(),
+			           "Restore starts at specified time - stopDifferential not ready");
 			wait(stopDifferentialFuture);
 			TraceEvent("BARW_DoBackupWaitToDiscontinue", randomID)
 			    .detail("Tag", printable(tag))
@@ -466,11 +467,11 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 			    .detail("AbortAndRestartAfter", self->abortAndRestartAfter);
 
 			state KeyBackedTag keyBackedTag = makeBackupTag(self->backupTag.toString());
-			UidAndAbortedFlagT uidFlag = wait(keyBackedTag.getOrThrow(cx));
+			UidAndAbortedFlagT uidFlag = wait(keyBackedTag.getOrThrow(cx.getReference()));
 			state UID logUid = uidFlag.first;
-			state Key destUidValue = wait(BackupConfig(logUid).destUidValue().getD(cx));
+			state Key destUidValue = wait(BackupConfig(logUid).destUidValue().getD(cx.getReference()));
 			state Reference<IBackupContainer> lastBackupContainer =
-			    wait(BackupConfig(logUid).backupContainer().getD(cx));
+			    wait(BackupConfig(logUid).backupContainer().getD(cx.getReference()));
 
 			// Occasionally start yet another backup that might still be running when we restore
 			if (!self->locked && BUGGIFY) {
@@ -496,7 +497,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				}
 			}
 
-			TEST(!startRestore.isReady()); // Restore starts at specified time
+			CODE_PROBE(!startRestore.isReady(), "Restore starts at specified time");
 			wait(startRestore);
 
 			if (lastBackupContainer && self->performRestore) {

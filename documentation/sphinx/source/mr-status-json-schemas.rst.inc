@@ -260,7 +260,8 @@
                "available_bytes":0, // an estimate of the process' fair share of the memory available to fdbservers
                "limit_bytes":0, // memory limit per process
                "unused_allocated_memory":0,
-               "used_bytes":0 // virtual memory size of the process
+               "used_bytes":0, // virtual memory size of the process
+               "rss_bytes":0 // resident memory size of the process
             },
             "messages":[
                {
@@ -522,7 +523,8 @@
                   "duplicate_mutation_streams",
                   "duplicate_mutation_fetch_timeout",
                   "primary_dc_missing",
-                  "fetch_primary_dc_timeout"
+                  "fetch_primary_dc_timeout",
+                  "fetch_storage_wiggler_stats_timeout"
                ]
             },
             "issues":[
