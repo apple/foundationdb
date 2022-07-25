@@ -2783,16 +2783,11 @@ ACTOR Future<JsonBuilderObject> storageWigglerStatsFetcher(DatabaseConfiguration
 		wait(success(wiggleMetricsFut));
 		auto [primaryV, remoteV] = wiggleMetricsFut.get();
 		if (primaryV.present()) {
-			auto obj = ObjectReader::fromStringRef<StorageWiggleMetrics>(primaryV.get(), IncludeVersion()).toJSON();
-			obj["last_state_change_timestamp"] = reply.lastStateChangePrimary;
-			obj["last_state_change_datetime"] = epochsToGMTString(reply.lastStateChangePrimary);
-			res["primary"] = obj;
+			res["primary"] =
+			    ObjectReader::fromStringRef<StorageWiggleMetrics>(primaryV.get(), IncludeVersion()).toJSON();
 		}
 		if (conf.regions.size() > 1 && remoteV.present()) {
-			auto obj = ObjectReader::fromStringRef<StorageWiggleMetrics>(remoteV.get(), IncludeVersion()).toJSON();
-			obj["last_state_change_timestamp"] = reply.lastStateChangeRemote;
-			obj["last_state_change_datetime"] = epochsToGMTString(reply.lastStateChangeRemote);
-			res["remote"] = obj;
+			res["remote"] = ObjectReader::fromStringRef<StorageWiggleMetrics>(remoteV.get(), IncludeVersion()).toJSON();
 		}
 		return res;
 	} catch (Error& e) {
