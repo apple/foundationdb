@@ -1917,13 +1917,15 @@ ACTOR static Future<std::vector<std::pair<StorageServerInterface, EventMap>>> ge
 	state std::vector<std::pair<StorageServerInterface, EventMap>> results;
 	state std::vector<TraceEventFields> busiestWriteTags;
 	state std::vector<Optional<StorageMetadataType>> metadata;
-	wait(store(results,
-	           getServerMetrics(servers,
-	                            address_workers,
-	                            std::vector<std::string>{
-	                                "StorageMetrics", "ReadLatencyMetrics", "ReadLatencyBands", "BusiestReadTag" })) &&
-	     store(busiestWriteTags, getServerBusiestWriteTags(servers, address_workers, rkWorker)) &&
-	     store(metadata, getServerMetadata(servers, cx, true)));
+	wait(timeoutError(
+	    store(results,
+	          getServerMetrics(servers,
+	                           address_workers,
+	                           std::vector<std::string>{
+	                               "StorageMetrics", "ReadLatencyMetrics", "ReadLatencyBands", "BusiestReadTag" })) &&
+	        store(busiestWriteTags, getServerBusiestWriteTags(servers, address_workers, rkWorker)) &&
+	        store(metadata, getServerMetadata(servers, cx, true)),
+	    5.0));
 
 	ASSERT(busiestWriteTags.size() == results.size() && metadata.size() == results.size());
 	for (int i = 0; i < results.size(); ++i) {
@@ -3034,9 +3036,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 				double timeout = g_network->isSimulated() && BUGGIFY_WITH_PROB(0.01) ? 0.0 : 2.0;
 				primaryWiggleValues = timeoutError(readStorageWiggleValues(cx, true, true), timeout);
 				remoteWiggleValues = timeoutError(readStorageWiggleValues(cx, false, true), timeout);
-				wait(store(
-				         storageWiggler,
-				         storageWigglerStatsFetcher(configuration.get(), cx, true, &messages)) &&
+				wait(store(storageWiggler, storageWigglerStatsFetcher(configuration.get(), cx, true, &messages)) &&
 				     ready(primaryWiggleValues) && ready(remoteWiggleValues));
 
 				if (primaryWiggleValues.canGet()) {
