@@ -309,20 +309,30 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 					// reading older than the purge version
 					if (doPurging) {
 						wait(self->killBlobWorkers(cx, self));
-						std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> versionRead =
+						if (BGV_DEBUG) {
+								fmt::print("BGV Reading post-purge [{0} - {1}) @ {2}\n", oldRead.range.begin.printable(), oldRead.range.end.printable(), prevPurgeVersion);
+							}
+						// ensure purge version exactly is still readable
+						std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> versionRead1 =
 						    wait(readFromBlob(cx, self->bstore, oldRead.range, 0, prevPurgeVersion));
+						if (BGV_DEBUG) {
+							fmt::print("BGV Post-purge first read:\n");
+							printGranuleChunks(versionRead1.second);
+						}
 						try {
+							// read at purgeVersion - 1, should NOT be readable
 							Version minSnapshotVersion = newPurgeVersion;
-							for (auto& it : versionRead.second) {
+							for (auto& it : versionRead1.second) {
 								minSnapshotVersion = std::min(minSnapshotVersion, it.snapshotVersion);
 							}
 							if (BGV_DEBUG) {
-								fmt::print("Reading post-purge @ {0}\n", minSnapshotVersion - 1);
+								fmt::print("BGV Reading post-purge again [{0} - {1}) @ {2}\n", oldRead.range.begin.printable(), oldRead.range.end.printable(), minSnapshotVersion - 1);
 							}
-							std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> versionRead =
+							std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> versionRead2 =
 							    wait(readFromBlob(cx, self->bstore, oldRead.range, 0, minSnapshotVersion - 1));
 							if (BGV_DEBUG) {
-								fmt::print("ERROR: data not purged! Read successful!!\n");
+								fmt::print("BGV ERROR: data not purged! Read successful!!\n");
+								printGranuleChunks(versionRead2.second);
 							}
 							ASSERT(false);
 						} catch (Error& e) {
@@ -506,6 +516,8 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 
 		// For some reason simulation is still passing when this fails?.. so assert for now
 		ASSERT(result);
+
+		// FIXME: if doPurging was set, possibly do one last purge here, and verify it succeeds with no errors
 
 		if (self->clientId == 0 && SERVER_KNOBS->BG_ENABLE_MERGING && deterministicRandom()->random01() < 0.1) {
 			CODE_PROBE(true, "BGV clearing database and awaiting merge");

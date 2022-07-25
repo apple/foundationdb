@@ -143,28 +143,32 @@ bool compareFDBAndBlob(RangeResult fdb,
 				}
 			}
 
-			printf("Chunks:\n");
-			for (auto& chunk : blob.second) {
-				printf("[%s - %s)\n", chunk.keyRange.begin.printable().c_str(), chunk.keyRange.end.printable().c_str());
-
-				printf("  SnapshotFile:\n    %s\n",
-				       chunk.snapshotFile.present() ? chunk.snapshotFile.get().toString().c_str() : "<none>");
-				printf("  DeltaFiles:\n");
-				for (auto& df : chunk.deltaFiles) {
-					printf("    %s\n", df.toString().c_str());
-				}
-				printf("  Deltas: (%d)", chunk.newDeltas.size());
-				if (chunk.newDeltas.size() > 0) {
-					fmt::print(" with version [{0} - {1}]",
-					           chunk.newDeltas[0].version,
-					           chunk.newDeltas[chunk.newDeltas.size() - 1].version);
-				}
-				fmt::print("  IncludedVersion: {}\n", chunk.includedVersion);
-			}
-			printf("\n");
+			printGranuleChunks(blob.second);
 		}
 	}
 	return correct;
+}
+
+void printGranuleChunks(const Standalone<VectorRef<BlobGranuleChunkRef>>& chunks) {
+	printf("Chunks:\n");
+	for (auto& chunk : chunks) {
+		printf("[%s - %s)\n", chunk.keyRange.begin.printable().c_str(), chunk.keyRange.end.printable().c_str());
+
+		printf("  SnapshotFile:\n    %s\n",
+		       chunk.snapshotFile.present() ? chunk.snapshotFile.get().toString().c_str() : "<none>");
+		printf("  DeltaFiles:\n");
+		for (auto& df : chunk.deltaFiles) {
+			printf("    %s\n", df.toString().c_str());
+		}
+		printf("  Deltas: (%d)", chunk.newDeltas.size());
+		if (chunk.newDeltas.size() > 0) {
+			fmt::print(" with version [{0} - {1}]",
+			           chunk.newDeltas[0].version,
+			           chunk.newDeltas[chunk.newDeltas.size() - 1].version);
+		}
+		fmt::print("  IncludedVersion: {}\n", chunk.includedVersion);
+	}
+	printf("\n");
 }
 
 ACTOR Future<Void> clearAndAwaitMerge(Database cx, KeyRange range) {
