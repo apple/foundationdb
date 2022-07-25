@@ -22,11 +22,12 @@
 #include "boost/lexical_cast.hpp"
 
 #include "flow/IRandom.h"
-#include "flow/Tracing.h"
+#include "fdbclient/Tracing.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
-#include "fdbrpc/IRateControl.h"
+#include "flow/IRateControl.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/StorageMetrics.h"
@@ -205,8 +206,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> runCheck(Database cx, ConsistencyCheckWorkload* self) {
-		TEST(self->performQuiescentChecks); // Quiescent consistency check
-		TEST(!self->performQuiescentChecks); // Non-quiescent consistency check
+		CODE_PROBE(self->performQuiescentChecks, "Quiescent consistency check");
+		CODE_PROBE(!self->performQuiescentChecks, "Non-quiescent consistency check");
 
 		if (self->firstClient || self->distributed) {
 			try {
@@ -273,7 +274,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 					// Check that nothing is in the storage server queues
 					try {
-						int64_t maxStorageServerQueueSize = wait(getMaxStorageServerQueueSize(cx, self->dbInfo));
+						int64_t maxStorageServerQueueSize =
+						    wait(getMaxStorageServerQueueSize(cx, self->dbInfo, invalidVersion));
 						if (maxStorageServerQueueSize > 0) {
 							TraceEvent("ConsistencyCheck_ExceedStorageServerQueueLimit")
 							    .detail("MaxQueueSize", maxStorageServerQueueSize);
@@ -1273,7 +1275,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				for (int i = 0; i < initialSize; i++) {
 					auto tssPair = tssMapping.find(storageServers[i]);
 					if (tssPair != tssMapping.end()) {
-						TEST(true); // TSS checked in consistency check
+						CODE_PROBE(true, "TSS checked in consistency check");
 						storageServers.push_back(tssPair->second.id());
 						storageServerInterfaces.push_back(tssPair->second);
 					}

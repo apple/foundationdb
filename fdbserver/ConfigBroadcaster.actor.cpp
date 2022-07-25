@@ -465,6 +465,7 @@ public:
 			                       [compactionVersion](const auto& va) { return va.version > compactionVersion; });
 			annotationHistory.erase(annotationHistory.begin(), it);
 		}
+		lastCompactedVersion = compactionVersion;
 	}
 
 	Future<Void> getError() const { return consumerFuture || actors.getResult(); }

@@ -18,9 +18,11 @@
  * limitations under the License.
  */
 
+#include "fdbclient/DatabaseContext.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/TransactionLineage.h"
+#include "fdbclient/Tuple.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/LogSystemDiskQueueAdapter.h"
 #include "fdbclient/CommitProxyInterface.h"
@@ -298,6 +300,127 @@ ACTOR Future<Void> healthMetricsRequestServer(GrvProxyInterface grvProxy,
 				else
 					req.reply.send(*healthMetricsReply);
 			}
+		}
+	}
+}
+
+// Older FDB versions used different keys for client profiling data. This
+// function performs a one-time migration of data in these keys to the new
+// global configuration key space.
+ACTOR Future<Void> globalConfigMigrate(GrvProxyData* grvProxyData) {
+	state Key migratedKey("\xff\x02/fdbClientInfo/migrated/"_sr);
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(grvProxyData->cx);
+	try {
+		loop {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+
+			try {
+				state Optional<Value> migrated = wait(tr->get(migratedKey));
+				if (migrated.present()) {
+					// Already performed migration.
+					break;
+				}
+
+				state Optional<Value> sampleRate =
+				    wait(tr->get(Key("\xff\x02/fdbClientInfo/client_txn_sample_rate/"_sr)));
+				state Optional<Value> sizeLimit =
+				    wait(tr->get(Key("\xff\x02/fdbClientInfo/client_txn_size_limit/"_sr)));
+
+				tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+				// The value doesn't matter too much, as long as the key is set.
+				tr->set(migratedKey.contents(), "1"_sr);
+				if (sampleRate.present()) {
+					const double sampleRateDbl =
+					    BinaryReader::fromStringRef<double>(sampleRate.get().contents(), Unversioned());
+					Tuple rate = Tuple::makeTuple(sampleRateDbl);
+					tr->set(GlobalConfig::prefixedKey(fdbClientInfoTxnSampleRate), rate.pack());
+				}
+				if (sizeLimit.present()) {
+					const int64_t sizeLimitInt =
+					    BinaryReader::fromStringRef<int64_t>(sizeLimit.get().contents(), Unversioned());
+					Tuple size = Tuple::makeTuple(sizeLimitInt);
+					tr->set(GlobalConfig::prefixedKey(fdbClientInfoTxnSizeLimit), size.pack());
+				}
+
+				wait(tr->commit());
+				break;
+			} catch (Error& e) {
+				// Multiple GRV proxies may attempt this migration at the same
+				// time, sometimes resulting in aborts due to conflicts.
+				TraceEvent(SevInfo, "GlobalConfigRetryableMigrationError").errorUnsuppressed(e).suppressFor(1.0);
+				wait(tr->onError(e));
+			}
+		}
+	} catch (Error& e) {
+		// Catch non-retryable errors (and do nothing).
+		TraceEvent(SevWarnAlways, "GlobalConfigMigrationError").error(e);
+	}
+	return Void();
+}
+
+// Periodically refresh local copy of global configuration.
+ACTOR Future<Void> globalConfigRefresh(GrvProxyData* grvProxyData, Version* cachedVersion, RangeResult* cachedData) {
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(grvProxyData->cx);
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			state Future<Optional<Value>> globalConfigVersionFuture = tr->get(globalConfigVersionKey);
+			state Future<RangeResult> tmpCachedDataFuture = tr->getRange(globalConfigDataKeys, CLIENT_KNOBS->TOO_MANY);
+			state Optional<Value> globalConfigVersion = wait(globalConfigVersionFuture);
+			RangeResult tmpCachedData = wait(tmpCachedDataFuture);
+			*cachedData = tmpCachedData;
+			if (globalConfigVersion.present()) {
+				Version parsedVersion;
+				memcpy(&parsedVersion, globalConfigVersion.get().begin(), sizeof(Version));
+				*cachedVersion = bigEndian64(parsedVersion);
+			}
+			return Void();
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+}
+
+// Handle common GlobalConfig transactions on the server side, because not all
+// clients are allowed to read system keys. Eventually, this could become its
+// own role.
+ACTOR Future<Void> globalConfigRequestServer(GrvProxyData* grvProxyData, GrvProxyInterface grvProxy) {
+	state ActorCollection actors(false);
+	state Future<Void> refreshFuture; // so there is only one running attempt
+	state Version cachedVersion = 0;
+	state RangeResult cachedData;
+
+	// Attempt to refresh the configuration database while the migration is
+	// ongoing. This is a small optimization to avoid waiting for the migration
+	// actor to complete.
+	refreshFuture = timeout(globalConfigRefresh(grvProxyData, &cachedVersion, &cachedData),
+	                        SERVER_KNOBS->GLOBAL_CONFIG_REFRESH_TIMEOUT,
+	                        Void()) &&
+	                delay(SERVER_KNOBS->GLOBAL_CONFIG_REFRESH_INTERVAL);
+
+	// Run one-time migration to support upgrades.
+	wait(success(timeout(globalConfigMigrate(grvProxyData), SERVER_KNOBS->GLOBAL_CONFIG_MIGRATE_TIMEOUT)));
+
+	loop {
+		choose {
+			when(GlobalConfigRefreshRequest refresh = waitNext(grvProxy.refreshGlobalConfig.getFuture())) {
+				// Must have an up to date copy of global configuration in
+				// order to serve it to the client (up to date from the clients
+				// point of view. The client learns the version through a
+				// ClientDBInfo update).
+				if (refresh.lastKnown <= cachedVersion) {
+					refresh.reply.send(GlobalConfigRefreshReply{ cachedData.arena(), cachedData });
+				} else {
+					refresh.reply.sendError(future_version());
+				}
+			}
+			when(wait(refreshFuture)) {
+				refreshFuture = timeout(globalConfigRefresh(grvProxyData, &cachedVersion, &cachedData),
+				                        SERVER_KNOBS->GLOBAL_CONFIG_REFRESH_TIMEOUT,
+				                        Void()) &&
+				                delay(SERVER_KNOBS->GLOBAL_CONFIG_REFRESH_INTERVAL);
+			}
+			when(wait(actors.getResult())) { ASSERT(false); }
 		}
 	}
 }
@@ -661,14 +784,14 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture,
 				if (tagItr != priorityThrottledTags.end()) {
 					if (tagItr->second.expiration > now()) {
 						if (tagItr->second.tpsRate == std::numeric_limits<double>::max()) {
-							TEST(true); // Auto TPS rate is unlimited
+							CODE_PROBE(true, "Auto TPS rate is unlimited");
 						} else {
-							TEST(true); // GRV proxy returning tag throttle
+							CODE_PROBE(true, "GRV proxy returning tag throttle");
 							reply.tagThrottleInfo[tag.first] = tagItr->second;
 						}
 					} else {
 						// This isn't required, but we might as well
-						TEST(true); // GRV proxy expiring tag throttle
+						CODE_PROBE(true, "GRV proxy expiring tag throttle");
 						priorityThrottledTags.erase(tagItr);
 					}
 				}
@@ -1012,6 +1135,7 @@ ACTOR Future<Void> grvProxyServerCore(GrvProxyInterface proxy,
 	addActor.send(transactionStarter(
 	    proxy, grvProxyData.db, addActor, &grvProxyData, &healthMetricsReply, &detailedHealthMetricsReply));
 	addActor.send(healthMetricsRequestServer(proxy, &healthMetricsReply, &detailedHealthMetricsReply));
+	addActor.send(globalConfigRequestServer(&grvProxyData, proxy));
 
 	if (SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION > 0) {
 		addActor.send(lastCommitUpdater(&grvProxyData, addActor));

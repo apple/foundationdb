@@ -113,7 +113,7 @@ struct LockDatabaseWorkload : TestWorkload {
 				self->ok = false;
 				return Void();
 			} catch (Error& e) {
-				TEST(e.code() == error_code_database_locked); // Database confirmed locked
+				CODE_PROBE(e.code() == error_code_database_locked, "Database confirmed locked");
 				wait(tr.onError(e));
 			}
 		}

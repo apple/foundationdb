@@ -54,29 +54,36 @@ constexpr int MaxIssuerNameLenPlus1 = 25;
 constexpr int MaxTenantNameLenPlus1 = 17;
 constexpr int MaxKeyNameLenPlus1 = 21;
 
-void trace(const char* type) {
-	auto te = TraceEvent(SevWarnAlways, type);
-	te.suppressFor(60);
-	if (auto err = ::ERR_get_error()) {
-		char buf[256]{
-			0,
-		};
-		::ERR_error_string_n(err, buf, sizeof(buf));
-		te.detail("OpenSSLError", static_cast<const char*>(buf));
-	}
-}
-
-[[noreturn]] void traceAndThrow(const char* type) {
-	trace(type);
-	throw digital_signature_ops_error();
-}
-
 StringRef genRandomAlphanumStringRef(Arena& arena, IRandom& rng, int maxLenPlusOne) {
 	const auto len = rng.randomInt(1, maxLenPlusOne);
 	auto strRaw = new (arena) uint8_t[len];
 	for (auto i = 0; i < len; i++)
 		strRaw[i] = (uint8_t)rng.randomAlphaNumeric();
 	return StringRef(strRaw, len);
+}
+
+bool checkVerifyAlgorithm(PKeyAlgorithm algo, PublicKey key) {
+	if (algo != key.algorithm()) {
+		TraceEvent(SevWarnAlways, "TokenVerifyAlgoMismatch")
+		    .suppressFor(10)
+		    .detail("Expected", pkeyAlgorithmName(algo))
+		    .detail("PublicKeyAlgorithm", key.algorithmName());
+		return false;
+	} else {
+		return true;
+	}
+}
+
+bool checkSignAlgorithm(PKeyAlgorithm algo, PrivateKey key) {
+	if (algo != key.algorithm()) {
+		TraceEvent(SevWarnAlways, "TokenSignAlgoMismatch")
+		    .suppressFor(10)
+		    .detail("Expected", pkeyAlgorithmName(algo))
+		    .detail("PublicKeyAlgorithm", key.algorithmName());
+		return false;
+	} else {
+		return true;
+	}
 }
 
 } // namespace
@@ -94,21 +101,13 @@ Algorithm algorithmFromString(StringRef s) noexcept {
 		return Algorithm::UNKNOWN;
 }
 
-StringRef signString(Arena& arena, StringRef string, PrivateKey privateKey, int keyAlgNid, MessageDigestMethod digest);
-
-bool verifyStringSignature(StringRef string,
-                           StringRef signature,
-                           PublicKey publicKey,
-                           int keyAlgNid,
-                           MessageDigestMethod digest);
-
-std::pair<int /*key algorithm nid*/, MessageDigestMethod> getMethod(Algorithm alg) {
+std::pair<PKeyAlgorithm, MessageDigestMethod> getMethod(Algorithm alg) {
 	if (alg == Algorithm::RS256) {
-		return { EVP_PKEY_RSA, ::EVP_sha256() };
+		return { PKeyAlgorithm::RSA, ::EVP_sha256() };
 	} else if (alg == Algorithm::ES256) {
-		return { EVP_PKEY_EC, ::EVP_sha256() };
+		return { PKeyAlgorithm::EC, ::EVP_sha256() };
 	} else {
-		return { NID_undef, nullptr };
+		return { PKeyAlgorithm::UNSUPPORTED, nullptr };
 	}
 }
 
@@ -121,71 +120,6 @@ std::string_view getAlgorithmName(Algorithm alg) {
 		UNREACHABLE();
 }
 
-StringRef signString(Arena& arena, StringRef string, PrivateKey privateKey, int keyAlgNid, MessageDigestMethod digest) {
-	ASSERT_NE(keyAlgNid, NID_undef);
-	auto key = privateKey.nativeHandle();
-	auto const privateKeyAlgNid = ::EVP_PKEY_base_id(key);
-	if (privateKeyAlgNid != keyAlgNid) {
-		TraceEvent(SevWarnAlways, "TokenSignAlgoMismatch")
-		    .suppressFor(10)
-		    .detail("ExpectedAlg", OBJ_nid2sn(keyAlgNid))
-		    .detail("PublicKeyAlg", OBJ_nid2sn(privateKeyAlgNid));
-		throw digital_signature_ops_error();
-	}
-	auto mdctx = ::EVP_MD_CTX_create();
-	if (!mdctx)
-		traceAndThrow("SignTokenInitFail");
-	auto mdctxGuard = ScopeExit([mdctx]() { ::EVP_MD_CTX_free(mdctx); });
-	if (1 != ::EVP_DigestSignInit(mdctx, nullptr, digest, nullptr, key))
-		traceAndThrow("SignTokenInitFail");
-	if (1 != ::EVP_DigestSignUpdate(mdctx, string.begin(), string.size()))
-		traceAndThrow("SignTokenUpdateFail");
-	auto sigLen = size_t{};
-	if (1 != ::EVP_DigestSignFinal(mdctx, nullptr, &sigLen)) // assess the length first
-		traceAndThrow("SignTokenGetSigLenFail");
-	auto sigBuf = new (arena) uint8_t[sigLen];
-	if (1 != ::EVP_DigestSignFinal(mdctx, sigBuf, &sigLen))
-		traceAndThrow("SignTokenFinalizeFail");
-	return StringRef(sigBuf, sigLen);
-}
-
-bool verifyStringSignature(StringRef string,
-                           StringRef signature,
-                           PublicKey publicKey,
-                           int keyAlgNid,
-                           MessageDigestMethod digest) {
-	ASSERT_NE(keyAlgNid, NID_undef);
-	auto key = publicKey.nativeHandle();
-	auto const publicKeyAlgNid = ::EVP_PKEY_base_id(key);
-	if (keyAlgNid != publicKeyAlgNid) {
-		TraceEvent(SevWarnAlways, "TokenVerifyAlgoMismatch")
-		    .suppressFor(10)
-		    .detail("ExpectedAlg", OBJ_nid2sn(keyAlgNid))
-		    .detail("PublicKeyAlg", OBJ_nid2sn(publicKeyAlgNid));
-		return false; // public key's algorithm doesn't match string's
-	}
-	auto mdctx = ::EVP_MD_CTX_create();
-	if (!mdctx) {
-		trace("VerifyTokenInitFail");
-		return false;
-	}
-	auto mdctxGuard = ScopeExit([mdctx]() { ::EVP_MD_CTX_free(mdctx); });
-	if (1 != ::EVP_DigestVerifyInit(mdctx, nullptr, digest, nullptr, key)) {
-		trace("VerifyTokenInitFail");
-		return false;
-	}
-	if (1 != ::EVP_DigestVerifyUpdate(mdctx, string.begin(), string.size())) {
-		trace("VerifyTokenUpdateFail");
-		return false;
-	}
-	if (1 != ::EVP_DigestVerifyFinal(mdctx, signature.begin(), signature.size())) {
-		auto te = TraceEvent(SevWarnAlways, "VerifyTokenFail");
-		te.suppressFor(5);
-		return false;
-	}
-	return true;
-}
-
 } // namespace authz
 
 namespace authz::flatbuffers {
@@ -195,8 +129,11 @@ SignedTokenRef signToken(Arena& arena, TokenRef token, StringRef keyName, Privat
 	auto writer = ObjectWriter([&arena](size_t len) { return new (arena) uint8_t[len]; }, IncludeVersion());
 	writer.serialize(token);
 	auto tokenStr = writer.toStringRef();
-	auto [keyAlgNid, digest] = getMethod(Algorithm::ES256);
-	auto sig = signString(arena, tokenStr, privateKey, keyAlgNid, digest);
+	auto [signAlgo, digest] = getMethod(Algorithm::ES256);
+	if (!checkSignAlgorithm(signAlgo, privateKey)) {
+		throw digital_signature_ops_error();
+	}
+	auto sig = privateKey.sign(arena, tokenStr, *digest);
 	ret.token = tokenStr;
 	ret.signature = sig;
 	ret.keyName = StringRef(arena, keyName);
@@ -204,8 +141,10 @@ SignedTokenRef signToken(Arena& arena, TokenRef token, StringRef keyName, Privat
 }
 
 bool verifyToken(SignedTokenRef signedToken, PublicKey publicKey) {
-	auto [keyAlgNid, digest] = getMethod(Algorithm::ES256);
-	return verifyStringSignature(signedToken.token, signedToken.signature, publicKey, keyAlgNid, digest);
+	auto [keyAlg, digest] = getMethod(Algorithm::ES256);
+	if (!checkVerifyAlgorithm(keyAlg, publicKey))
+		return false;
+	return publicKey.verify(signedToken.token, signedToken.signature, *digest);
 }
 
 TokenRef makeRandomTokenSpec(Arena& arena, IRandom& rng) {
@@ -281,15 +220,14 @@ StringRef makeTokenPart(Arena& arena, TokenRef tokenSpec) {
 	return StringRef(out, totalLen);
 }
 
-StringRef makePlainSignature(Arena& arena, Algorithm alg, StringRef tokenPart, PrivateKey privateKey) {
-	auto [keyAlgNid, digest] = getMethod(alg);
-	return signString(arena, tokenPart, privateKey, keyAlgNid, digest);
-}
-
 StringRef signToken(Arena& arena, TokenRef tokenSpec, PrivateKey privateKey) {
 	auto tmpArena = Arena();
 	auto tokenPart = makeTokenPart(tmpArena, tokenSpec);
-	auto plainSig = makePlainSignature(tmpArena, tokenSpec.algorithm, tokenPart, privateKey);
+	auto [signAlgo, digest] = getMethod(tokenSpec.algorithm);
+	if (!checkSignAlgorithm(signAlgo, privateKey)) {
+		throw digital_signature_ops_error();
+	}
+	auto plainSig = privateKey.sign(tmpArena, tokenPart, *digest);
 	auto const sigPartLen = base64url::encodedLength(plainSig.size());
 	auto const totalLen = tokenPart.size() + 1 + sigPartLen;
 	auto out = new (arena) uint8_t[totalLen];
@@ -304,9 +242,10 @@ StringRef signToken(Arena& arena, TokenRef tokenSpec, PrivateKey privateKey) {
 
 bool parseHeaderPart(TokenRef& token, StringRef b64urlHeader) {
 	auto tmpArena = Arena();
-	auto [header, valid] = base64url::decode(tmpArena, b64urlHeader);
-	if (!valid)
+	auto optHeader = base64url::decode(tmpArena, b64urlHeader);
+	if (!optHeader.present())
 		return false;
+	auto header = optHeader.get();
 	auto d = rapidjson::Document();
 	d.Parse(reinterpret_cast<const char*>(header.begin()), header.size());
 	if (d.HasParseError()) {
@@ -317,9 +256,11 @@ bool parseHeaderPart(TokenRef& token, StringRef b64urlHeader) {
 		    .detail("Offset", d.GetErrorOffset());
 		return false;
 	}
-	if (d.IsObject() && d.HasMember("alg") && d.HasMember("typ")) {
-		auto const& alg = d["alg"];
-		auto const& typ = d["typ"];
+	auto algItr = d.FindMember("alg");
+	auto typItr = d.FindMember("typ");
+	if (d.IsObject() && algItr != d.MemberEnd() && typItr != d.MemberEnd()) {
+		auto const& alg = algItr->value;
+		auto const& typ = typItr->value;
 		if (alg.IsString() && typ.IsString()) {
 			auto algValue = StringRef(reinterpret_cast<const uint8_t*>(alg.GetString()), alg.GetStringLength());
 			auto algType = algorithmFromString(algValue);
@@ -337,9 +278,10 @@ bool parseHeaderPart(TokenRef& token, StringRef b64urlHeader) {
 
 template <class FieldType>
 bool parseField(Arena& arena, Optional<FieldType>& out, const rapidjson::Document& d, const char* fieldName) {
-	if (!d.HasMember(fieldName))
+	auto fieldItr = d.FindMember(fieldName);
+	if (fieldItr == d.MemberEnd())
 		return true;
-	auto const& field = d[fieldName];
+	auto const& field = fieldItr->value;
 	static_assert(std::is_same_v<StringRef, FieldType> || std::is_same_v<FieldType, uint64_t> ||
 	              std::is_same_v<FieldType, VectorRef<StringRef>>);
 	if constexpr (std::is_same_v<FieldType, StringRef>) {
@@ -371,7 +313,10 @@ bool parseField(Arena& arena, Optional<FieldType>& out, const rapidjson::Documen
 
 bool parsePayloadPart(Arena& arena, TokenRef& token, StringRef b64urlPayload) {
 	auto tmpArena = Arena();
-	auto [payload, valid] = base64url::decode(tmpArena, b64urlPayload);
+	auto optPayload = base64url::decode(tmpArena, b64urlPayload);
+	if (!optPayload.present())
+		return false;
+	auto payload = optPayload.get();
 	auto d = rapidjson::Document();
 	d.Parse(reinterpret_cast<const char*>(payload.begin()), payload.size());
 	if (d.HasParseError()) {
@@ -406,10 +351,11 @@ bool parsePayloadPart(Arena& arena, TokenRef& token, StringRef b64urlPayload) {
 }
 
 bool parseSignaturePart(Arena& arena, TokenRef& token, StringRef b64urlSignature) {
-	auto [sig, valid] = base64url::decode(arena, b64urlSignature);
-	if (valid)
-		token.signature = sig;
-	return valid;
+	auto optSig = base64url::decode(arena, b64urlSignature);
+	if (!optSig.present())
+		return false;
+	token.signature = optSig.get();
+	return true;
 }
 
 bool parseToken(Arena& arena, TokenRef& token, StringRef signedToken) {
@@ -436,14 +382,17 @@ bool verifyToken(StringRef signedToken, PublicKey publicKey) {
 	if (b64urlHeader.empty() || b64urlPayload.empty() || b64urlSignature.empty())
 		return false;
 	auto b64urlTokenPart = fullToken.substr(0, b64urlHeader.size() + 1 + b64urlPayload.size());
-	auto [sig, valid] = base64url::decode(arena, b64urlSignature);
-	if (!valid)
+	auto optSig = base64url::decode(arena, b64urlSignature);
+	if (!optSig.present())
 		return false;
+	auto sig = optSig.get();
 	auto parsedToken = TokenRef();
 	if (!parseHeaderPart(parsedToken, b64urlHeader))
 		return false;
-	auto [keyAlgNid, digest] = getMethod(parsedToken.algorithm);
-	return verifyStringSignature(b64urlTokenPart, sig, publicKey, keyAlgNid, digest);
+	auto [verifyAlgo, digest] = getMethod(parsedToken.algorithm);
+	if (!checkVerifyAlgorithm(verifyAlgo, publicKey))
+		return false;
+	return publicKey.verify(b64urlTokenPart, sig, *digest);
 }
 
 TokenRef makeRandomTokenSpec(Arena& arena, IRandom& rng, Algorithm alg) {
@@ -485,14 +434,14 @@ TEST_CASE("/fdbrpc/TokenSign/FlatBuffer") {
 		auto tokenSpec = authz::flatbuffers::makeRandomTokenSpec(arena, rng);
 		auto keyName = genRandomAlphanumStringRef(arena, rng, MaxKeyNameLenPlus1);
 		auto signedToken = authz::flatbuffers::signToken(arena, tokenSpec, keyName, privateKey);
-		const auto verifyExpectOk = authz::flatbuffers::verifyToken(signedToken, privateKey.toPublicKey());
+		const auto verifyExpectOk = authz::flatbuffers::verifyToken(signedToken, privateKey.toPublic());
 		ASSERT(verifyExpectOk);
 		// try tampering with signed token by adding one more tenant
 		tokenSpec.tenants.push_back(arena, genRandomAlphanumStringRef(arena, rng, MaxTenantNameLenPlus1));
 		auto writer = ObjectWriter([&arena](size_t len) { return new (arena) uint8_t[len]; }, IncludeVersion());
 		writer.serialize(tokenSpec);
 		signedToken.token = writer.toStringRef();
-		const auto verifyExpectFail = authz::flatbuffers::verifyToken(signedToken, privateKey.toPublicKey());
+		const auto verifyExpectFail = authz::flatbuffers::verifyToken(signedToken, privateKey.toPublic());
 		ASSERT(!verifyExpectFail);
 	}
 	printf("%d runs OK\n", numIters);
@@ -507,7 +456,7 @@ TEST_CASE("/fdbrpc/TokenSign/JWT") {
 		auto& rng = *deterministicRandom();
 		auto tokenSpec = authz::jwt::makeRandomTokenSpec(arena, rng, authz::Algorithm::ES256);
 		auto signedToken = authz::jwt::signToken(arena, tokenSpec, privateKey);
-		const auto verifyExpectOk = authz::jwt::verifyToken(signedToken, privateKey.toPublicKey());
+		const auto verifyExpectOk = authz::jwt::verifyToken(signedToken, privateKey.toPublic());
 		ASSERT(verifyExpectOk);
 		auto signaturePart = signedToken;
 		signaturePart.eat("."_sr);
@@ -527,15 +476,15 @@ TEST_CASE("/fdbrpc/TokenSign/JWT") {
 			ASSERT_EQ(tokenSpec.expiresAtUnixTime.get(), parsedToken.expiresAtUnixTime.get());
 			ASSERT_EQ(tokenSpec.notBeforeUnixTime.get(), parsedToken.notBeforeUnixTime.get());
 			ASSERT(tokenSpec.tenants == parsedToken.tenants);
-			auto [sig, sigValid] = base64url::decode(tmpArena, signaturePart);
-			ASSERT(sigValid);
-			ASSERT(sig == parsedToken.signature);
+			auto optSig = base64url::decode(tmpArena, signaturePart);
+			ASSERT(optSig.present());
+			ASSERT(optSig.get() == parsedToken.signature);
 		}
 		// try tampering with signed token by adding one more tenant
 		tokenSpec.tenants.get().push_back(arena, genRandomAlphanumStringRef(arena, rng, MaxTenantNameLenPlus1));
 		auto tamperedTokenPart = makeTokenPart(arena, tokenSpec);
 		auto tamperedTokenString = fmt::format("{}.{}", tamperedTokenPart.toString(), signaturePart.toString());
-		const auto verifyExpectFail = authz::jwt::verifyToken(StringRef(tamperedTokenString), privateKey.toPublicKey());
+		const auto verifyExpectFail = authz::jwt::verifyToken(StringRef(tamperedTokenString), privateKey.toPublic());
 		ASSERT(!verifyExpectFail);
 	}
 	printf("%d runs OK\n", numIters);
@@ -543,13 +492,13 @@ TEST_CASE("/fdbrpc/TokenSign/JWT") {
 }
 
 TEST_CASE("/fdbrpc/TokenSign/bench") {
-	constexpr auto repeat = 10;
+	constexpr auto repeat = 5;
 	constexpr auto numSamples = 10000;
 	auto keys = std::vector<PrivateKey>(numSamples);
 	auto pubKeys = std::vector<PublicKey>(numSamples);
 	for (auto i = 0; i < numSamples; i++) {
 		keys[i] = mkcert::makeEcP256();
-		pubKeys[i] = keys[i].toPublicKey();
+		pubKeys[i] = keys[i].toPublic();
 	}
 	fmt::print("{} keys generated\n", numSamples);
 	auto& rng = *deterministicRandom();
@@ -581,7 +530,8 @@ TEST_CASE("/fdbrpc/TokenSign/bench") {
 	auto fbBegin = timer_monotonic();
 	for (auto rep = 0; rep < repeat; rep++) {
 		for (auto i = 0; i < numSamples; i++) {
-			auto signedToken = ObjectReader::fromStringRef<authz::flatbuffers::SignedTokenRef>(fbs[i], Unversioned());
+			auto signedToken =
+			    ObjectReader::fromStringRef<Standalone<authz::flatbuffers::SignedTokenRef>>(fbs[i], Unversioned());
 			auto verifyOk = authz::flatbuffers::verifyToken(signedToken, pubKeys[i]);
 			ASSERT(verifyOk);
 		}

@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "contrib/fmt-8.1.1/include/fmt/format.h"
+#include "fmt/format.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/DatabaseContext.h"
@@ -33,7 +33,7 @@
 #include <cinttypes>
 #include <ctime>
 #include <climits>
-#include "fdbrpc/IAsyncFile.h"
+#include "flow/IAsyncFile.h"
 #include "flow/genericactors.actor.h"
 #include "flow/Hash3.h"
 #include <numeric>
@@ -123,9 +123,9 @@ ACTOR Future<std::vector<KeyBackedTag>> TagUidMap::getAll_impl(TagUidMap* tagsMa
                                                                Reference<ReadYourWritesTransaction> tr,
                                                                Snapshot snapshot) {
 	state Key prefix = tagsMap->prefix; // Copying it here as tagsMap lifetime is not tied to this actor
-	TagMap::PairsType tagPairs = wait(tagsMap->getRange(tr, std::string(), {}, 1e6, snapshot));
+	TagMap::RangeResultType tagPairs = wait(tagsMap->getRange(tr, std::string(), {}, 1e6, snapshot));
 	std::vector<KeyBackedTag> results;
-	for (auto& p : tagPairs)
+	for (auto& p : tagPairs.results)
 		results.push_back(KeyBackedTag(p.first, prefix));
 	return results;
 }
@@ -200,13 +200,7 @@ public:
 		Version endVersion{ ::invalidVersion }; // not meaningful for range files
 
 		Tuple pack() const {
-			return Tuple()
-			    .append(version)
-			    .append(StringRef(fileName))
-			    .append(isRange)
-			    .append(fileSize)
-			    .append(blockSize)
-			    .append(endVersion);
+			return Tuple::makeTuple(version, fileName, (int)isRange, fileSize, blockSize, endVersion);
 		}
 		static RestoreFile unpack(Tuple const& t) {
 			RestoreFile r;
@@ -822,7 +816,7 @@ struct AbortFiveZeroBackupTask : TaskFuncBase {
 		state FileBackupAgent backupAgent;
 		state std::string tagName = task->params[BackupAgentBase::keyConfigBackupTag].toString();
 
-		TEST(true); // Canceling old backup task
+		CODE_PROBE(true, "Canceling old backup task");
 
 		TraceEvent(SevInfo, "FileBackupCancelOldTask")
 		    .detail("Task", task->params[Task::reservedTaskParamKeyType])
@@ -908,7 +902,7 @@ struct AbortFiveOneBackupTask : TaskFuncBase {
 		state BackupConfig config(task);
 		state std::string tagName = wait(config.tag().getOrThrow(tr));
 
-		TEST(true); // Canceling 5.1 backup task
+		CODE_PROBE(true, "Canceling 5.1 backup task");
 
 		TraceEvent(SevInfo, "FileBackupCancelFiveOneTask")
 		    .detail("Task", task->params[Task::reservedTaskParamKeyType])
@@ -1221,7 +1215,7 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 
 		// Don't need to check keepRunning(task) here because we will do that while finishing each output file, but if
 		// bc is false then clearly the backup is no longer in progress
-		state Reference<IBackupContainer> bc = wait(backup.backupContainer().getD(cx));
+		state Reference<IBackupContainer> bc = wait(backup.backupContainer().getD(cx.getReference()));
 		if (!bc) {
 			return Void();
 		}
@@ -1245,7 +1239,7 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 			// If we've seen a new read version OR hit the end of the stream, then if we were writing a file finish it.
 			if (values.second != outVersion || done) {
 				if (outFile) {
-					TEST(outVersion != invalidVersion); // Backup range task wrote multiple versions
+					CODE_PROBE(outVersion != invalidVersion, "Backup range task wrote multiple versions");
 					state Key nextKey = done ? endKey : keyAfter(lastKey);
 					wait(rangeFile.writeKey(nextKey));
 
@@ -1564,18 +1558,22 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-				state Future<std::vector<std::pair<Key, bool>>> bounds = config.snapshotRangeDispatchMap().getRange(
-				    tr, beginKey, keyAfter(normalKeys.end), CLIENT_KNOBS->TOO_MANY);
+				state Future<BackupConfig::RangeDispatchMapT::RangeResultType> bounds =
+				    config.snapshotRangeDispatchMap().getRange(
+				        tr, beginKey, keyAfter(normalKeys.end), CLIENT_KNOBS->TOO_MANY);
 				wait(success(bounds) && taskBucket->keepRunning(tr, task) &&
 				     store(recentReadVersion, tr->getReadVersion()));
 
-				if (bounds.get().empty())
+				if (!bounds.get().results.empty()) {
+					dispatchBoundaries.reserve(dispatchBoundaries.size() + bounds.get().results.size());
+					dispatchBoundaries.insert(
+					    dispatchBoundaries.end(), bounds.get().results.begin(), bounds.get().results.end());
+				}
+
+				if (!bounds.get().more)
 					break;
 
-				dispatchBoundaries.reserve(dispatchBoundaries.size() + bounds.get().size());
-				dispatchBoundaries.insert(dispatchBoundaries.end(), bounds.get().begin(), bounds.get().end());
-
-				beginKey = keyAfter(bounds.get().back().first);
+				beginKey = keyAfter(bounds.get().results.back().first);
 				tr->reset();
 			} catch (Error& e) {
 				wait(tr->onError(e));
@@ -2543,17 +2541,17 @@ struct BackupSnapshotManifest : BackupTaskFuncBase {
 					wait(store(bc, config.backupContainer().getOrThrow(tr)));
 				}
 
-				BackupConfig::RangeFileMapT::PairsType rangeresults =
+				BackupConfig::RangeFileMapT::RangeResultType rangeresults =
 				    wait(config.snapshotRangeFileMap().getRange(tr, startKey, {}, batchSize));
 
-				for (auto& p : rangeresults) {
+				for (auto& p : rangeresults.results) {
 					localmap.insert(p);
 				}
 
-				if (rangeresults.size() < batchSize)
+				if (!rangeresults.more)
 					break;
 
-				startKey = keyAfter(rangeresults.back().first);
+				startKey = keyAfter(rangeresults.results.back().first);
 				tr->reset();
 			} catch (Error& e) {
 				wait(tr->onError(e));
@@ -3617,8 +3615,8 @@ struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 		// Get a batch of files.  We're targeting batchSize blocks being dispatched so query for batchSize files (each
 		// of which is 0 or more blocks).
 		state int taskBatchSize = BUGGIFY ? 1 : CLIENT_KNOBS->RESTORE_DISPATCH_ADDTASK_SIZE;
-		state RestoreConfig::FileSetT::Values files =
-		    wait(restore.fileSet().getRange(tr, { beginVersion, beginFile }, {}, taskBatchSize));
+		state RestoreConfig::FileSetT::RangeResultType files = wait(restore.fileSet().getRange(
+		    tr, Optional<RestoreConfig::RestoreFile>({ beginVersion, beginFile }), {}, taskBatchSize));
 
 		// allPartsDone will be set once all block tasks in the current batch are finished.
 		state Reference<TaskFuture> allPartsDone;
@@ -3636,7 +3634,7 @@ struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 		}
 
 		// If there were no files to load then this batch is done and restore is almost done.
-		if (files.size() == 0) {
+		if (files.results.size() == 0) {
 			// If adding to existing batch then blocks could be in progress so create a new Dispatch task that waits for
 			// them to finish
 			if (addingToExistingBatch) {
@@ -3714,13 +3712,13 @@ struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 		// blocks per Dispatch task and target batchSize total per batch but a batch must end on a complete version
 		// boundary so exceed the limit if necessary to reach the end of a version of files.
 		state std::vector<Future<Key>> addTaskFutures;
-		state Version endVersion = files[0].version;
+		state Version endVersion = files.results[0].version;
 		state int blocksDispatched = 0;
 		state int64_t beginBlock = Params.beginBlock().getOrDefault(task);
 		state int i = 0;
 
-		for (; i < files.size(); ++i) {
-			RestoreConfig::RestoreFile& f = files[i];
+		for (; i < files.results.size(); ++i) {
+			RestoreConfig::RestoreFile& f = files.results[i];
 
 			// Here we are "between versions" (prior to adding the first block of the first file of a new version) so
 			// this is an opportunity to end the current dispatch batch (which must end on a version boundary) if the
@@ -4098,7 +4096,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 				    .detail("RestoreVersion", restoreVersion)
 				    .detail("Dest", destVersion);
 				if (destVersion <= restoreVersion) {
-					TEST(true); // Forcing restored cluster to higher version
+					CODE_PROBE(true, "Forcing restored cluster to higher version");
 					tr->set(minRequiredCommitVersionKey, BinaryWriter::toValue(restoreVersion + 1, Unversioned()));
 					wait(tr->commit());
 				} else {
@@ -5057,11 +5055,11 @@ public:
 						doc.setKey("CurrentSnapshot", snapshot);
 					}
 
-					KeyBackedMap<int64_t, std::pair<std::string, Version>>::PairsType errors =
+					KeyBackedMap<int64_t, std::pair<std::string, Version>>::RangeResultType errors =
 					    wait(config.lastErrorPerType().getRange(
 					        tr, 0, std::numeric_limits<int>::max(), CLIENT_KNOBS->TOO_MANY));
 					JsonBuilderArray errorList;
-					for (auto& e : errors) {
+					for (auto& e : errors.results) {
 						std::string msg = e.second.first;
 						Version ver = e.second.second;
 
@@ -5209,13 +5207,13 @@ public:
 
 					// Append the errors, if requested
 					if (showErrors) {
-						KeyBackedMap<int64_t, std::pair<std::string, Version>>::PairsType errors =
+						KeyBackedMap<int64_t, std::pair<std::string, Version>>::RangeResultType errors =
 						    wait(config.lastErrorPerType().getRange(
 						        tr, 0, std::numeric_limits<int>::max(), CLIENT_KNOBS->TOO_MANY));
 						std::string recentErrors;
 						std::string pastErrors;
 
-						for (auto& e : errors) {
+						for (auto& e : errors.results) {
 							Version v = e.second.second;
 							std::string msg = format(
 							    "%s ago : %s\n",
@@ -5434,7 +5432,7 @@ public:
 			try {
 				// We must get a commit version so add a conflict range that won't likely cause conflicts
 				// but will ensure that the transaction is actually submitted.
-				tr.addWriteConflictRange(backupConfig.snapshotRangeDispatchMap().space.range());
+				tr.addWriteConflictRange(backupConfig.snapshotRangeDispatchMap().subspace);
 				wait(lockDatabase(&tr, randomUid));
 				wait(tr.commit());
 				commitVersion = tr.getCommittedVersion();
@@ -5497,7 +5495,7 @@ public:
 			}
 		}
 
-		Reference<IBackupContainer> bc = wait(backupConfig.backupContainer().getOrThrow(cx));
+		Reference<IBackupContainer> bc = wait(backupConfig.backupContainer().getOrThrow(cx.getReference()));
 
 		if (fastRestore) {
 			TraceEvent("AtomicParallelRestoreStartRestore").log();

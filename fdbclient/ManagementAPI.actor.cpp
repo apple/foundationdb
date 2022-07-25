@@ -22,7 +22,8 @@
 #include <string>
 #include <vector>
 
-#include "contrib/fmt-8.1.1/include/fmt/format.h"
+#include "fdbclient/GenericManagementAPI.actor.h"
+#include "fmt/format.h"
 #include "fdbclient/Knobs.h"
 #include "flow/Arena.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
@@ -450,16 +451,21 @@ bool isCompleteConfiguration(std::map<std::string, std::string> const& options) 
 	       options.count(p + "storage_engine") == 1;
 }
 
+ACTOR Future<DatabaseConfiguration> getDatabaseConfiguration(Transaction* tr) {
+	tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+	RangeResult res = wait(tr->getRange(configKeys, CLIENT_KNOBS->TOO_MANY));
+	ASSERT(res.size() < CLIENT_KNOBS->TOO_MANY);
+	DatabaseConfiguration config;
+	config.fromKeyValues((VectorRef<KeyValueRef>)res);
+	return config;
+}
+
 ACTOR Future<DatabaseConfiguration> getDatabaseConfiguration(Database cx) {
 	state Transaction tr(cx);
 	loop {
 		try {
-			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			RangeResult res = wait(tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY));
-			ASSERT(res.size() < CLIENT_KNOBS->TOO_MANY);
-			DatabaseConfiguration config;
-			config.fromKeyValues((VectorRef<KeyValueRef>)res);
+			DatabaseConfiguration config = wait(getDatabaseConfiguration(&tr));
 			return config;
 		} catch (Error& e) {
 			wait(tr.onError(e));
@@ -798,23 +804,60 @@ ACTOR Future<Optional<ClusterConnectionString>> getConnectionString(Database cx)
 	}
 }
 
-ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
-                                                               ClusterConnectionString* conn,
-                                                               std::string newName) {
+namespace {
+
+ACTOR Future<Optional<ClusterConnectionString>> getClusterConnectionStringFromStorageServer(Transaction* tr) {
+
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::USE_PROVISIONAL_PROXIES);
 	tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-	Optional<Value> currentKey = wait(tr->get(coordinatorsKey));
 
-	if (!currentKey.present())
-		return CoordinatorsResult::BAD_DATABASE_STATE; // Someone deleted this key entirely?
+	state int retryTimes = 0;
+	loop {
+		if (retryTimes >= CLIENT_KNOBS->CHANGE_QUORUM_BAD_STATE_RETRY_TIMES) {
+			return Optional<ClusterConnectionString>();
+		}
 
-	state ClusterConnectionString old(currentKey.get().toString());
-	if (tr->getDatabase()->getConnectionRecord() &&
-	    old.clusterKeyName().toString() !=
-	        tr->getDatabase()->getConnectionRecord()->getConnectionString().clusterKeyName())
-		return CoordinatorsResult::BAD_DATABASE_STATE; // Someone changed the "name" of the database??
+		Version readVersion = wait(tr->getReadVersion());
+		state Optional<Value> currentKey = wait(tr->get(coordinatorsKey));
+
+		if (!currentKey.present()) {
+			// Someone deleted this key entirely?
+			++retryTimes;
+			wait(delay(CLIENT_KNOBS->CHANGE_QUORUM_BAD_STATE_RETRY_DELAY));
+			continue;
+		}
+
+		state ClusterConnectionString clusterConnectionString(currentKey.get().toString());
+		if (tr->getDatabase()->getConnectionRecord() &&
+		    clusterConnectionString.clusterKeyName().toString() !=
+		        tr->getDatabase()->getConnectionRecord()->getConnectionString().clusterKeyName()) {
+			// Someone changed the "name" of the database??
+			++retryTimes;
+			wait(delay(CLIENT_KNOBS->CHANGE_QUORUM_BAD_STATE_RETRY_DELAY));
+			continue;
+		}
+
+		return clusterConnectionString;
+	}
+}
+
+} // namespace
+
+ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
+                                                               ClusterConnectionString* conn,
+                                                               std::string newName) {
+
+	state Optional<ClusterConnectionString> clusterConnectionStringOptional =
+	    wait(getClusterConnectionStringFromStorageServer(tr));
+
+	if (!clusterConnectionStringOptional.present()) {
+		return CoordinatorsResult::BAD_DATABASE_STATE;
+	}
+
+	// The cluster connection string stored in the storage server
+	state ClusterConnectionString old = clusterConnectionStringOptional.get();
 
 	if (conn->hostnames.size() + conn->coords.size() == 0) {
 		conn->hostnames = old.hostnames;
@@ -896,28 +939,26 @@ ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChan
 
 	loop {
 		try {
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr.setOption(FDBTransactionOptions::USE_PROVISIONAL_PROXIES);
-			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			Optional<Value> currentKey = wait(tr.get(coordinatorsKey));
+			state Optional<ClusterConnectionString> clusterConnectionStringOptional =
+			    wait(getClusterConnectionStringFromStorageServer(&tr));
 
-			if (!currentKey.present())
-				return CoordinatorsResult::BAD_DATABASE_STATE; // Someone deleted this key entirely?
+			if (!clusterConnectionStringOptional.present()) {
+				return CoordinatorsResult::BAD_DATABASE_STATE;
+			}
 
-			state ClusterConnectionString old(currentKey.get().toString());
-			if (cx->getConnectionRecord() &&
-			    old.clusterKeyName().toString() != cx->getConnectionRecord()->getConnectionString().clusterKeyName())
-				return CoordinatorsResult::BAD_DATABASE_STATE; // Someone changed the "name" of the database??
+			// The cluster connection string stored in the storage server
+			state ClusterConnectionString oldClusterConnectionString = clusterConnectionStringOptional.get();
+			state Key oldClusterKeyName = oldClusterConnectionString.clusterKeyName();
 
-			state std::vector<NetworkAddress> oldCoordinators = wait(old.tryResolveHostnames());
+			state std::vector<NetworkAddress> oldCoordinators = wait(oldClusterConnectionString.tryResolveHostnames());
 			state CoordinatorsResult result = CoordinatorsResult::SUCCESS;
 			if (!desiredCoordinators.size()) {
-				std::vector<NetworkAddress> _desiredCoordinators = wait(change->getDesiredCoordinators(
-				    &tr,
-				    oldCoordinators,
-				    Reference<ClusterConnectionMemoryRecord>(new ClusterConnectionMemoryRecord(old)),
-				    result));
+				std::vector<NetworkAddress> _desiredCoordinators = wait(
+				    change->getDesiredCoordinators(&tr,
+				                                   oldCoordinators,
+				                                   Reference<ClusterConnectionMemoryRecord>(
+				                                       new ClusterConnectionMemoryRecord(oldClusterConnectionString)),
+				                                   result));
 				desiredCoordinators = _desiredCoordinators;
 			}
 
@@ -937,13 +978,14 @@ ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChan
 
 			std::string newName = change->getDesiredClusterKeyName();
 			if (newName.empty())
-				newName = old.clusterKeyName().toString();
+				newName = oldClusterKeyName.toString();
 
-			if (oldCoordinators == desiredCoordinators && old.clusterKeyName() == newName)
+			if (oldCoordinators == desiredCoordinators && oldClusterKeyName == newName)
 				return retries ? CoordinatorsResult::SUCCESS : CoordinatorsResult::SAME_NETWORK_ADDRESSES;
 
-			state ClusterConnectionString conn(
+			state ClusterConnectionString newClusterConnectionString(
 			    desiredCoordinators, StringRef(newName + ':' + deterministicRandom()->randomAlphaNumeric(32)));
+			state Key newClusterKeyName = newClusterConnectionString.clusterKeyName();
 
 			if (g_network->isSimulated()) {
 				for (int i = 0; i < (desiredCoordinators.size() / 2) + 1; i++) {
@@ -958,19 +1000,22 @@ ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChan
 				}
 			}
 
-			TraceEvent("AttemptingQuorumChange").detail("FromCS", old.toString()).detail("ToCS", conn.toString());
-			TEST(old.clusterKeyName() != conn.clusterKeyName()); // Quorum change with new name
-			TEST(old.clusterKeyName() == conn.clusterKeyName()); // Quorum change with unchanged name
+			TraceEvent("AttemptingQuorumChange")
+			    .detail("FromCS", oldClusterConnectionString.toString())
+			    .detail("ToCS", newClusterConnectionString.toString());
+			CODE_PROBE(oldClusterKeyName != newClusterKeyName, "Quorum change with new name");
+			CODE_PROBE(oldClusterKeyName == newClusterKeyName, "Quorum change with unchanged name");
 
 			state std::vector<Future<Optional<LeaderInfo>>> leaderServers;
-			state ClientCoordinators coord(
-			    Reference<ClusterConnectionMemoryRecord>(new ClusterConnectionMemoryRecord(conn)));
+			state ClientCoordinators coord(Reference<ClusterConnectionMemoryRecord>(
+			    new ClusterConnectionMemoryRecord(newClusterConnectionString)));
 			// check if allowed to modify the cluster descriptor
 			if (!change->getDesiredClusterKeyName().empty()) {
 				CheckDescriptorMutableReply mutabilityReply =
 				    wait(coord.clientLeaderServers[0].checkDescriptorMutable.getReply(CheckDescriptorMutableRequest()));
-				if (!mutabilityReply.isMutable)
+				if (!mutabilityReply.isMutable) {
 					return CoordinatorsResult::BAD_DATABASE_STATE;
+				}
 			}
 			leaderServers.reserve(coord.clientLeaderServers.size());
 			for (int i = 0; i < coord.clientLeaderServers.size(); i++)
@@ -982,7 +1027,7 @@ ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChan
 				when(wait(delay(5.0))) { return CoordinatorsResult::COORDINATOR_UNREACHABLE; }
 			}
 
-			tr.set(coordinatorsKey, conn.toString());
+			tr.set(coordinatorsKey, newClusterConnectionString.toString());
 
 			wait(tr.commit());
 			ASSERT(false); // commit should fail, but the value has changed
@@ -2128,13 +2173,14 @@ ACTOR Future<Void> updateChangeFeed(Transaction* tr, Key rangeID, ChangeFeedStat
 		}
 	} else if (status == ChangeFeedStatus::CHANGE_FEED_DESTROY) {
 		if (val.present()) {
+			if (g_network->isSimulated()) {
+				g_simulator.validationData.allDestroyedChangeFeedIDs.insert(rangeID.toString());
+			}
 			tr->set(rangeIDKey,
 			        changeFeedValue(std::get<0>(decodeChangeFeedValue(val.get())),
 			                        std::get<1>(decodeChangeFeedValue(val.get())),
 			                        status));
 			tr->clear(rangeIDKey);
-		} else {
-			throw unsupported_operation();
 		}
 	}
 	return Void();
@@ -2165,13 +2211,14 @@ ACTOR Future<Void> updateChangeFeed(Reference<ReadYourWritesTransaction> tr,
 		}
 	} else if (status == ChangeFeedStatus::CHANGE_FEED_DESTROY) {
 		if (val.present()) {
+			if (g_network->isSimulated()) {
+				g_simulator.validationData.allDestroyedChangeFeedIDs.insert(rangeID.toString());
+			}
 			tr->set(rangeIDKey,
 			        changeFeedValue(std::get<0>(decodeChangeFeedValue(val.get())),
 			                        std::get<1>(decodeChangeFeedValue(val.get())),
 			                        status));
 			tr->clear(rangeIDKey);
-		} else {
-			throw unsupported_operation();
 		}
 	}
 	return Void();
@@ -2413,6 +2460,21 @@ bool schemaMatch(json_spirit::mValue const& schemaValue,
 		    .detail("SchemaPath", schemaPath);
 		throw unknown_error();
 	}
+}
+
+void setStorageQuota(Transaction& tr, StringRef tenantName, uint64_t quota) {
+	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	auto key = storageQuotaKey(tenantName);
+	tr.set(key, BinaryWriter::toValue<uint64_t>(quota, Unversioned()));
+}
+
+ACTOR Future<Optional<uint64_t>> getStorageQuota(Transaction* tr, StringRef tenantName) {
+	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+	state Optional<Value> v = wait(tr->get(storageQuotaKey(tenantName)));
+	if (!v.present()) {
+		return Optional<uint64_t>();
+	}
+	return BinaryReader::fromStringRef<uint64_t>(v.get(), Unversioned());
 }
 
 std::string ManagementAPI::generateErrorMessage(const CoordinatorsResult& res) {

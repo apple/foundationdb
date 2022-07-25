@@ -166,8 +166,8 @@ ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators,
 					    .detail("StoredConnectionString", coordinators.ccr->getConnectionString().toString())
 					    .detail("CurrentConnectionString", leader.get().first.serializedInfo.toString());
 				}
-				coordinators.ccr->setAndPersistConnectionString(
-				    ClusterConnectionString(leader.get().first.serializedInfo.toString()));
+				wait(coordinators.ccr->setAndPersistConnectionString(
+				    ClusterConnectionString(leader.get().first.serializedInfo.toString())));
 				TraceEvent("LeaderForwarding")
 				    .detail("ConnStr", coordinators.ccr->getConnectionString().toString())
 				    .trackLatest("LeaderForwarding");
@@ -206,7 +206,7 @@ ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators,
 			choose {
 				when(wait(nomineeChange.onTrigger())) {}
 				when(wait(badCandidateTimeout.isValid() ? badCandidateTimeout : Never())) {
-					TEST(true); // Bad candidate timeout
+					CODE_PROBE(true, "Bad candidate timeout");
 					TraceEvent("LeaderBadCandidateTimeout", myInfo.changeID).log();
 					break;
 				}

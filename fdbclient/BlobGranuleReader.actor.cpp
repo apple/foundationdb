@@ -21,7 +21,7 @@
 #include <map>
 #include <vector>
 
-#include "contrib/fmt-8.1.1/include/fmt/format.h"
+#include "fmt/format.h"
 #include "fdbclient/AsyncFileS3BlobStore.actor.h"
 #include "fdbclient/BlobGranuleCommon.h"
 #include "fdbclient/BlobGranuleFiles.h"
@@ -38,11 +38,13 @@
 // TODO could refactor the file reading code from here and the delta file function into another actor,
 // then this part would also be testable? but meh
 
-ACTOR Future<Standalone<StringRef>> readFile(Reference<BackupContainerFileSystem> bstore, BlobFilePointerRef f) {
+ACTOR Future<Standalone<StringRef>> readFile(Reference<BlobConnectionProvider> bstoreProvider, BlobFilePointerRef f) {
 	try {
 		state Arena arena;
-		// printf("Starting read of snapshot file %s\n", filename.c_str());
-		state Reference<IAsyncFile> reader = wait(bstore->readFile(f.filename.toString()));
+		std::string fname = f.filename.toString();
+		state Reference<BackupContainerFileSystem> bstore = bstoreProvider->getForRead(fname);
+		// printf("Starting read of snapshot file %s\n", fname.c_str());
+		state Reference<IAsyncFile> reader = wait(bstore->readFile(fname));
 		// printf("Got snapshot file size %lld\n", size);
 		state uint8_t* data = new (arena) uint8_t[f.length];
 		// printf("Reading %lld bytes from snapshot file %s\n", size, filename.c_str());
@@ -66,7 +68,7 @@ ACTOR Future<RangeResult> readBlobGranule(BlobGranuleChunkRef chunk,
                                           KeyRangeRef keyRange,
                                           Version beginVersion,
                                           Version readVersion,
-                                          Reference<BackupContainerFileSystem> bstore,
+                                          Reference<BlobConnectionProvider> bstore,
                                           Optional<BlobWorkerStats*> stats) {
 
 	// TODO REMOVE with early replying
@@ -120,7 +122,7 @@ ACTOR Future<RangeResult> readBlobGranule(BlobGranuleChunkRef chunk,
 // TODO probably should add things like limit/bytelimit at some point?
 ACTOR Future<Void> readBlobGranules(BlobGranuleFileRequest request,
                                     BlobGranuleFileReply reply,
-                                    Reference<BackupContainerFileSystem> bstore,
+                                    Reference<BlobConnectionProvider> bstore,
                                     PromiseStream<RangeResult> results) {
 	// TODO for large amount of chunks, this should probably have some sort of buffer limit like ReplyPromiseStream.
 	// Maybe just use ReplyPromiseStream instead of PromiseStream?

@@ -26,7 +26,7 @@ import java.util.List;
 public class KeyArrayResult {
 	final List<byte[]> keys;
 
-	KeyArrayResult(byte[] keyBytes, int[] keyLengths) {
+	public KeyArrayResult(byte[] keyBytes, int[] keyLengths) {
 		int count = keyLengths.length;
 		keys = new ArrayList<byte[]>(count);
 

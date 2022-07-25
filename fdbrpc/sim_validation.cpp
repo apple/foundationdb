@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "sim_validation.h"
+#include "fdbrpc/sim_validation.h"
 #include "fdbrpc/TraceFileIO.h"
 #include "flow/network.h"
 #include "fdbrpc/simulator.h"

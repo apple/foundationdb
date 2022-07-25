@@ -55,8 +55,6 @@ static bool isAlphaNumeric(const std::string& key) {
 }
 } // namespace
 
-const KeyRangeRef TenantMapRangeImpl::submoduleRange = KeyRangeRef("tenant_map/"_sr, "tenant_map0"_sr);
-
 std::unordered_map<SpecialKeySpace::MODULE, KeyRange> SpecialKeySpace::moduleToBoundary = {
 	{ SpecialKeySpace::MODULE::TRANSACTION,
 	  KeyRangeRef(LiteralStringRef("\xff\xff/transaction/"), LiteralStringRef("\xff\xff/transaction0")) },
@@ -80,7 +78,8 @@ std::unordered_map<SpecialKeySpace::MODULE, KeyRange> SpecialKeySpace::moduleToB
 	  KeyRangeRef(LiteralStringRef("\xff\xff/actor_lineage/"), LiteralStringRef("\xff\xff/actor_lineage0")) },
 	{ SpecialKeySpace::MODULE::ACTOR_PROFILER_CONF,
 	  KeyRangeRef(LiteralStringRef("\xff\xff/actor_profiler_conf/"),
-	              LiteralStringRef("\xff\xff/actor_profiler_conf0")) }
+	              LiteralStringRef("\xff\xff/actor_profiler_conf0")) },
+	{ SpecialKeySpace::MODULE::CLUSTERID, singleKeyRange(LiteralStringRef("\xff\xff/cluster_id")) },
 };
 
 std::unordered_map<std::string, KeyRange> SpecialKeySpace::managementApiCommandToRange = {
@@ -117,7 +116,9 @@ std::unordered_map<std::string, KeyRange> SpecialKeySpace::managementApiCommandT
 	{ "datadistribution",
 	  KeyRangeRef(LiteralStringRef("data_distribution/"), LiteralStringRef("data_distribution0"))
 	      .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
-	{ "tenantmap", TenantMapRangeImpl::submoduleRange.withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) }
+	{ "tenant", KeyRangeRef("tenant/"_sr, "tenant0"_sr).withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
+	{ "tenantmap",
+	  KeyRangeRef("tenant_map/"_sr, "tenant_map0"_sr).withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) }
 };
 
 std::unordered_map<std::string, KeyRange> SpecialKeySpace::actorLineageApiCommandToRange = {
@@ -363,12 +364,12 @@ ACTOR Future<RangeResult> SpecialKeySpace::getRangeAggregationActor(SpecialKeySp
 	// Handle all corner cases like what RYW does
 	// return if range inverted
 	if (actualBeginOffset >= actualEndOffset && begin.getKey() >= end.getKey()) {
-		TEST(true); // inverted range
+		CODE_PROBE(true, "inverted range");
 		return RangeResultRef(false, false);
 	}
 	// If touches begin or end, return with readToBegin and readThroughEnd flags
 	if (begin.getKey() == moduleBoundary.end || end.getKey() == moduleBoundary.begin) {
-		TEST(true); // query touches begin or end
+		CODE_PROBE(true, "query touches begin or end");
 		return result;
 	}
 	state RangeMap<Key, SpecialKeyRangeReadImpl*, KeyRangeRef>::Ranges ranges =
@@ -452,7 +453,7 @@ Future<RangeResult> SpecialKeySpace::getRange(ReadYourWritesTransaction* ryw,
 	if (!limits.isValid())
 		return range_limits_invalid();
 	if (limits.isReached()) {
-		TEST(true); // read limit 0
+		CODE_PROBE(true, "read limit 0");
 		return RangeResult();
 	}
 	// make sure orEqual == false
@@ -460,7 +461,7 @@ Future<RangeResult> SpecialKeySpace::getRange(ReadYourWritesTransaction* ryw,
 	end.removeOrEqual(end.arena());
 
 	if (begin.offset >= end.offset && begin.getKey() >= end.getKey()) {
-		TEST(true); // range inverted
+		CODE_PROBE(true, "range inverted");
 		return RangeResult();
 	}
 
@@ -678,13 +679,14 @@ Future<RangeResult> ConflictingKeysImpl::getRange(ReadYourWritesTransaction* ryw
 	if (ryw->getTransactionState()->conflictingKeys) {
 		auto krMapPtr = ryw->getTransactionState()->conflictingKeys.get();
 		auto beginIter = krMapPtr->rangeContaining(kr.begin);
-		if (beginIter->begin() != kr.begin)
-			++beginIter;
 		auto endIter = krMapPtr->rangeContaining(kr.end);
+
+		if (!kr.contains(beginIter->begin()) && beginIter != endIter)
+			++beginIter;
 		for (auto it = beginIter; it != endIter; ++it) {
 			result.push_back_deep(result.arena(), KeyValueRef(it->begin(), it->value()));
 		}
-		if (endIter->begin() != kr.end)
+		if (kr.contains(endIter->begin()))
 			result.push_back_deep(result.arena(), KeyValueRef(endIter->begin(), endIter->value()));
 	}
 	return result;
@@ -2004,7 +2006,7 @@ Future<Optional<std::string>> ClientProfilingImpl::commit(ReadYourWritesTransact
 		} else {
 			try {
 				double sampleRate = boost::lexical_cast<double>(sampleRateStr);
-				Tuple rate = Tuple().appendDouble(sampleRate);
+				Tuple rate = Tuple::makeTuple(sampleRate);
 				insertions.push_back_deep(insertions.arena(), KeyValueRef(fdbClientInfoTxnSampleRate, rate.pack()));
 			} catch (boost::bad_lexical_cast& e) {
 				return Optional<std::string>(ManagementAPIError::toJsonString(
@@ -2023,7 +2025,7 @@ Future<Optional<std::string>> ClientProfilingImpl::commit(ReadYourWritesTransact
 		} else {
 			try {
 				int64_t sizeLimit = boost::lexical_cast<int64_t>(sizeLimitStr);
-				Tuple size = Tuple().append(sizeLimit);
+				Tuple size = Tuple::makeTuple(sizeLimit);
 				insertions.push_back_deep(insertions.arena(), KeyValueRef(fdbClientInfoTxnSizeLimit, size.pack()));
 			} catch (boost::bad_lexical_cast& e) {
 				return Optional<std::string>(ManagementAPIError::toJsonString(
@@ -2731,101 +2733,84 @@ Future<Optional<std::string>> FailedLocalitiesRangeImpl::commit(ReadYourWritesTr
 	return excludeLocalityCommitActor(ryw, true);
 }
 
-ACTOR Future<RangeResult> getTenantList(ReadYourWritesTransaction* ryw, KeyRangeRef kr, GetRangeLimits limitsHint) {
-	state KeyRef managementPrefix =
-	    kr.begin.substr(0,
-	                    SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin.size() +
-	                        TenantMapRangeImpl::submoduleRange.begin.size());
+ACTOR Future<Void> validateSpecialSubrangeRead(ReadYourWritesTransaction* ryw,
+                                               KeySelector begin,
+                                               KeySelector end,
+                                               GetRangeLimits limits,
+                                               Reverse reverse,
+                                               RangeResult result) {
+	if (!result.size()) {
+		RangeResult testResult = wait(ryw->getRange(begin, end, limits, Snapshot::True, reverse));
+		ASSERT(testResult == result);
+		return Void();
+	}
 
-	kr = kr.removePrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin);
-	TenantNameRef beginTenant = kr.begin.removePrefix(TenantMapRangeImpl::submoduleRange.begin);
-
-	TenantNameRef endTenant = kr.end;
-	if (endTenant.startsWith(TenantMapRangeImpl::submoduleRange.begin)) {
-		endTenant = endTenant.removePrefix(TenantMapRangeImpl::submoduleRange.begin);
+	if (reverse) {
+		ASSERT(std::is_sorted(result.begin(), result.end(), KeyValueRef::OrderByKeyBack{}));
 	} else {
-		endTenant = "\xff"_sr;
+		ASSERT(std::is_sorted(result.begin(), result.end(), KeyValueRef::OrderByKey{}));
 	}
 
-	std::map<TenantName, TenantMapEntry> tenants =
-	    wait(ManagementAPI::listTenantsTransaction(&ryw->getTransaction(), beginTenant, endTenant, limitsHint.rows));
-
-	RangeResult results;
-	for (auto tenant : tenants) {
-		json_spirit::mObject tenantEntry;
-		tenantEntry["id"] = tenant.second.id;
-		tenantEntry["prefix"] = tenant.second.prefix.toString();
-		std::string tenantEntryString = json_spirit::write_string(json_spirit::mValue(tenantEntry));
-		ValueRef tenantEntryBytes(results.arena(), tenantEntryString);
-		results.push_back(results.arena(),
-		                  KeyValueRef(tenant.first.withPrefix(managementPrefix, results.arena()), tenantEntryBytes));
-	}
-
-	return results;
-}
-
-TenantMapRangeImpl::TenantMapRangeImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
-
-Future<RangeResult> TenantMapRangeImpl::getRange(ReadYourWritesTransaction* ryw,
-                                                 KeyRangeRef kr,
-                                                 GetRangeLimits limitsHint) const {
-	return getTenantList(ryw, kr, limitsHint);
-}
-
-ACTOR Future<Void> deleteTenantRange(ReadYourWritesTransaction* ryw, TenantName beginTenant, TenantName endTenant) {
-	std::map<TenantName, TenantMapEntry> tenants = wait(
-	    ManagementAPI::listTenantsTransaction(&ryw->getTransaction(), beginTenant, endTenant, CLIENT_KNOBS->TOO_MANY));
-
-	if (tenants.size() == CLIENT_KNOBS->TOO_MANY) {
-		TraceEvent(SevWarn, "DeleteTenantRangeTooLange")
-		    .detail("BeginTenant", beginTenant)
-		    .detail("EndTenant", endTenant);
-		ryw->setSpecialKeySpaceErrorMsg("too many tenants to range delete");
-		throw special_keys_api_failure();
-	}
-
-	std::vector<Future<Void>> deleteFutures;
-	for (auto tenant : tenants) {
-		deleteFutures.push_back(ManagementAPI::deleteTenantTransaction(&ryw->getTransaction(), tenant.first));
-	}
-
-	wait(waitForAll(deleteFutures));
-	return Void();
-}
-
-Future<Optional<std::string>> TenantMapRangeImpl::commit(ReadYourWritesTransaction* ryw) {
-	auto ranges = ryw->getSpecialKeySpaceWriteMap().containedRanges(range);
-	std::vector<Future<Void>> tenantManagementFutures;
-	for (auto range : ranges) {
-		if (!range.value().first) {
-			continue;
+	// Generate a keyrange where we can determine the expected result based solely on the previous readrange, and whose
+	// boundaries may or may not be keys in result.
+	std::vector<Key> candidateKeys;
+	if (reverse) {
+		for (int i = result.size() - 1; i >= 0; --i) {
+			candidateKeys.emplace_back(result[i].key);
+			if (i - 1 >= 0) {
+				candidateKeys.emplace_back(keyBetween(KeyRangeRef(result[i].key, result[i - 1].key)));
+			}
 		}
-
-		TenantNameRef tenantName =
-		    range.begin()
-		        .removePrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)
-		        .removePrefix(TenantMapRangeImpl::submoduleRange.begin);
-
-		if (range.value().second.present()) {
-			tenantManagementFutures.push_back(
-			    success(ManagementAPI::createTenantTransaction(&ryw->getTransaction(), tenantName)));
-		} else {
-			// For a single key clear, just issue the delete
-			if (KeyRangeRef(range.begin(), range.end()).singleKeyRange()) {
-				tenantManagementFutures.push_back(
-				    ManagementAPI::deleteTenantTransaction(&ryw->getTransaction(), tenantName));
-			} else {
-				TenantNameRef endTenant = range.end().removePrefix(
-				    SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin);
-				if (endTenant.startsWith(submoduleRange.begin)) {
-					endTenant = endTenant.removePrefix(submoduleRange.begin);
-				} else {
-					endTenant = "\xff"_sr;
-				}
-				tenantManagementFutures.push_back(deleteTenantRange(ryw, tenantName, endTenant));
+	} else {
+		for (int i = 0; i < result.size(); ++i) {
+			candidateKeys.emplace_back(result[i].key);
+			if (i + 1 < result.size()) {
+				candidateKeys.emplace_back(keyBetween(KeyRangeRef(result[i].key, result[i + 1].key)));
 			}
 		}
 	}
+	std::sort(candidateKeys.begin(), candidateKeys.end());
+	int originalSize = candidateKeys.size();
+	// Add more candidate keys so that we might read a range between two adjacent result keys.
+	for (int i = 0; i < originalSize - 1; ++i) {
+		candidateKeys.emplace_back(keyBetween(KeyRangeRef(candidateKeys[i], candidateKeys[i + 1])));
+	}
+	std::vector<Key> keys;
+	keys = { deterministicRandom()->randomChoice(candidateKeys), deterministicRandom()->randomChoice(candidateKeys) };
+	std::sort(keys.begin(), keys.end());
+	state KeySelector testBegin = firstGreaterOrEqual(keys[0]);
+	state KeySelector testEnd = firstGreaterOrEqual(keys[1]);
 
-	return tag(waitForAll(tenantManagementFutures), Optional<std::string>());
+	// Generate expected result. Linear time is ok here since we're in simulation, and there's a benefit to keeping this
+	// simple (as we're using it as an test oracle)
+	state RangeResult expectedResult;
+	// The reverse parameter should be the same as for the original read, so if
+	// reverse is true then the results are _already_ in reverse order.
+	for (const auto& kr : result) {
+		if (kr.key >= keys[0] && kr.key < keys[1]) {
+			expectedResult.push_back(expectedResult.arena(), kr);
+		}
+	}
+
+	// Test
+	RangeResult testResult = wait(ryw->getRange(testBegin, testEnd, limits, Snapshot::True, reverse));
+	if (testResult != expectedResult) {
+		fmt::print("Reverse: {}\n", reverse);
+		fmt::print("Original range: [{}, {})\n", begin.toString(), end.toString());
+		fmt::print("Original result:\n");
+		for (const auto& kr : result) {
+			fmt::print("	{} -> {}\n", kr.key.printable(), kr.value.printable());
+		}
+		fmt::print("Test range: [{}, {})\n", testBegin.getKey().printable(), testEnd.getKey().printable());
+		fmt::print("Expected:\n");
+		for (const auto& kr : expectedResult) {
+			fmt::print("	{} -> {}\n", kr.key.printable(), kr.value.printable());
+		}
+		fmt::print("Got:\n");
+		for (const auto& kr : testResult) {
+			fmt::print("	{} -> {}\n", kr.key.printable(), kr.value.printable());
+		}
+		ASSERT(testResult == expectedResult);
+	}
+	return Void();
 }
