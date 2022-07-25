@@ -23,6 +23,7 @@
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/GenericManagementAPI.actor.h"
+#include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/MetaclusterManagement.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/RunTransaction.actor.h"
@@ -35,6 +36,7 @@
 #include "fdbserver/Knobs.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
+#include "flow/ThreadHelper.actor.h"
 #include "flow/flow.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -76,6 +78,9 @@ struct TenantManagementWorkload : TestWorkload {
 	double testDuration;
 	bool useMetacluster;
 
+	double oldestDeletionTime = 0.0;
+	double newestDeletionTime = 0.0;
+
 	Reference<IDatabase> mvDb;
 	Database dataDb;
 
@@ -105,7 +110,7 @@ struct TenantManagementWorkload : TestWorkload {
 	TenantManagementWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		maxTenants = std::min<int>(1e8 - 1, getOption(options, "maxTenants"_sr, 1000));
 		maxTenantGroups = std::min<int>(2 * maxTenants, getOption(options, "maxTenantGroups"_sr, 20));
-		testDuration = getOption(options, "testDuration"_sr, 60.0);
+		testDuration = getOption(options, "testDuration"_sr, 120.0);
 
 		localTenantNamePrefix = format("%stenant_%d_", tenantNamePrefix.toString().c_str(), clientId);
 		localTenantGroupNamePrefix = format("%stenantgroup_%d_", tenantNamePrefix.toString().c_str(), clientId);
@@ -631,11 +636,16 @@ struct TenantManagementWorkload : TestWorkload {
 				state bool retried = false;
 				loop {
 					try {
+						self->newestDeletionTime = now();
 						Optional<Void> result =
 						    wait(timeout(deleteImpl(tr, beginTenant, endTenant, tenants, operationType, self),
 						                 deterministicRandom()->randomInt(1, 30)));
 
 						if (result.present()) {
+							if (self->oldestDeletionTime == 0) {
+								self->oldestDeletionTime = now();
+							}
+
 							// Database operations shouldn't get here if the tenant didn't exist
 							ASSERT(operationType == OperationType::SPECIAL_KEYS ||
 							       operationType == OperationType::MANAGEMENT_TRANSACTION || alreadyExists);
@@ -1410,6 +1420,66 @@ struct TenantManagementWorkload : TestWorkload {
 		return Void();
 	}
 
+	// Check that the tenant tombstones are properly cleaned up and only present on a metacluster data cluster
+	ACTOR static Future<Void> checkTenantTombstones(TenantManagementWorkload* self) {
+		state Reference<ReadYourWritesTransaction> tr = self->dataDb->createTransaction();
+		loop {
+			try {
+				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				state Optional<int64_t> lastId = wait(TenantMetadata::lastTenantId.get(tr));
+
+				state KeyBackedRangeResult<int64_t> tombstones =
+				    wait(TenantMetadata::tenantTombstones.getRange(tr, 0, {}, 1));
+				Optional<TenantTombstoneCleanupData> tombstoneCleanupData =
+				    wait(TenantMetadata::tombstoneCleanupData.get(tr));
+
+				if (!self->useMetacluster) {
+					ASSERT(tombstones.results.empty() && !tombstoneCleanupData.present());
+				} else {
+					if (self->oldestDeletionTime != 0 && tombstoneCleanupData.present()) {
+						ASSERT(tombstoneCleanupData.get().nextTombstoneEraseId <= lastId.orDefault(-1));
+						if (self->newestDeletionTime - self->oldestDeletionTime >
+						    CLIENT_KNOBS->TENANT_TOMBSTONE_CLEANUP_INTERVAL) {
+							ASSERT(tombstoneCleanupData.get().tombstonesErasedThrough >= 0);
+						}
+					} else if (!tombstoneCleanupData.present()) {
+						ASSERT(tombstones.results.empty());
+					}
+
+					if (!tombstones.results.empty()) {
+						ASSERT(tombstoneCleanupData.present());
+						ASSERT(tombstones.results[0] > tombstoneCleanupData.get().tombstonesErasedThrough);
+					}
+				}
+				break;
+			} catch (Error& e) {
+				wait(tr->onError(e));
+			}
+		}
+
+		if (self->useMetacluster) {
+			// We don't store tombstones in the management cluster
+			state Reference<ITransaction> managementTr = self->mvDb->createTransaction();
+			loop {
+				try {
+					state KeyBackedRangeResult<int64_t> managementTombstones =
+					    wait(MetaclusterAPI::ManagementClusterMetadata::tenantMetadata.tenantTombstones.getRange(
+					        managementTr, 0, {}, 1));
+					Optional<TenantTombstoneCleanupData> managementTombstoneCleanupData =
+					    wait(MetaclusterAPI::ManagementClusterMetadata::tenantMetadata.tombstoneCleanupData.get(
+					        managementTr));
+
+					ASSERT(managementTombstones.results.empty() && !managementTombstoneCleanupData.present());
+					break;
+				} catch (Error& e) {
+					wait(safeThreadFutureToFuture(managementTr->onError(e)));
+				}
+			}
+		}
+
+		return Void();
+	}
+
 	Future<bool> check(Database const& cx) override { return _check(cx, this); }
 	ACTOR static Future<bool> _check(Database cx, TenantManagementWorkload* self) {
 		state Transaction tr(self->dataDb);
@@ -1428,7 +1498,7 @@ struct TenantManagementWorkload : TestWorkload {
 			}
 		}
 
-		wait(compareTenants(self) && compareTenantGroups(self));
+		wait(compareTenants(self) && compareTenantGroups(self) && checkTenantTombstones(self));
 		return true;
 	}
 

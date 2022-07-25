@@ -20,6 +20,7 @@
 
 #pragma once
 #include "flow/IRandom.h"
+#include "flow/ThreadHelper.actor.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_TENANT_MANAGEMENT_ACTOR_G_H)
 #define FDBCLIENT_TENANT_MANAGEMENT_ACTOR_G_H
 #include "fdbclient/TenantManagement.actor.g.h"
@@ -105,6 +106,23 @@ Future<Void> checkTenantMode(Transaction tr, ClusterType expectedClusterType) {
 
 TenantMode tenantModeForClusterType(ClusterType clusterType, TenantMode tenantMode);
 
+// Returns true if the specified ID has already been deleted and false if not. If the ID is old enough
+// that we no longer keep tombstones for it, an error is thrown.
+ACTOR template <class Transaction>
+Future<bool> checkTombstone(Transaction tr, int64_t id) {
+	state Future<bool> tombstoneFuture = TenantMetadata::tenantTombstones.exists(tr, id);
+
+	// If we are trying to create a tenant older than the oldest tombstones we still maintain, then we fail it
+	// with an error.
+	Optional<TenantTombstoneCleanupData> tombstoneCleanupData = wait(TenantMetadata::tombstoneCleanupData.get(tr));
+	if (tombstoneCleanupData.present() && tombstoneCleanupData.get().tombstonesErasedThrough >= id) {
+		throw tenant_creation_permanently_failed();
+	}
+
+	state bool hasTombstone = wait(tombstoneFuture);
+	return hasTombstone;
+}
+
 // Creates a tenant with the given name. If the tenant already exists, the boolean return parameter will be false
 // and the existing entry will be returned. If the tenant cannot be created, then the optional will be empty.
 ACTOR template <class Transaction>
@@ -128,7 +146,8 @@ Future<std::pair<Optional<TenantMapEntry>, bool>> createTenantTransaction(
 
 	state Future<Optional<TenantMapEntry>> existingEntryFuture = tryGetTenantTransaction(tr, name);
 	state Future<Void> tenantModeCheck = checkTenantMode(tr, clusterType);
-	state Future<bool> tombstoneFuture = TenantMetadata::tenantTombstones.exists(tr, tenantEntry.id);
+	state Future<bool> tombstoneFuture =
+	    (clusterType == ClusterType::STANDALONE) ? false : checkTombstone(tr, tenantEntry.id);
 	state Future<Optional<TenantGroupEntry>> existingTenantGroupEntryFuture;
 	if (tenantEntry.tenantGroup.present()) {
 		existingTenantGroupEntryFuture = TenantMetadata::tenantGroupMap.get(tr, tenantEntry.tenantGroup.get());
@@ -283,8 +302,37 @@ Future<Void> deleteTenantTransaction(Transaction tr,
 
 		if (clusterType == ClusterType::METACLUSTER_DATA) {
 			// In data clusters, we store a tombstone
-			// TODO: periodically clean up tombstones
-			TenantMetadata::tenantTombstones.insert(tr, tenantId.get());
+			state Future<Optional<int64_t>> lastIdFuture = TenantMetadata::lastTenantId.get(tr);
+			state Optional<TenantTombstoneCleanupData> cleanupData = wait(TenantMetadata::tombstoneCleanupData.get(tr));
+			state Version transactionReadVersion = wait(safeThreadFutureToFuture(tr->getReadVersion()));
+
+			// If it has been long enough since we last cleaned up the tenant tombstones, we do that first
+			if (!cleanupData.present() || cleanupData.get().nextTombstoneEraseVersion <= transactionReadVersion) {
+				state int64_t deleteThroughId = cleanupData.present() ? cleanupData.get().tombstonesErasedThrough : -1;
+				// Delete all tombstones up through the one currently marked in the cleanup data
+				if (deleteThroughId) {
+					TenantMetadata::tenantTombstones.erase(tr, 0, deleteThroughId + 1);
+				}
+
+				Optional<int64_t> lastId = wait(lastIdFuture);
+
+				// The next cleanup will happen at or after TENANT_TOMBSTONE_CLEANUP_INTERVAL seconds have elapsed and
+				// will clean up tombstones through the most recently allocated ID.
+				TenantTombstoneCleanupData updatedCleanupData;
+				updatedCleanupData.tombstonesErasedThrough = deleteThroughId;
+				updatedCleanupData.nextTombstoneEraseId = lastId.orDefault(-1);
+				updatedCleanupData.nextTombstoneEraseVersion =
+				    transactionReadVersion + CLIENT_KNOBS->TENANT_TOMBSTONE_CLEANUP_INTERVAL * CLIENT_KNOBS->VERSIONS_PER_SECOND;
+				TenantMetadata::tombstoneCleanupData.set(tr, updatedCleanupData);
+
+				// If the tenant being deleted is within the tombstone window, record the tombstone
+				if (tenantId.get() > updatedCleanupData.tombstonesErasedThrough) {
+					TenantMetadata::tenantTombstones.insert(tr, tenantId.get());
+				}
+			} else if (tenantId.get() > cleanupData.get().tombstonesErasedThrough) {
+				// If the tenant being deleted is within the tombstone window, record the tombstone
+				TenantMetadata::tenantTombstones.insert(tr, tenantId.get());
+			}
 		}
 	}
 

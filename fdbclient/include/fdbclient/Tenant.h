@@ -106,12 +106,32 @@ struct TenantGroupEntry {
 	}
 };
 
+struct TenantTombstoneCleanupData {
+	constexpr static FileIdentifier file_identifier = 3291339;
+
+	// All tombstones have been erased up to and including this id.
+	// We should not generate new tombstones at IDs equal to or older than this.
+	int64_t tombstonesErasedThrough = -1;
+
+	// The version at which we will next erase tombstones.
+	Version nextTombstoneEraseVersion = invalidVersion;
+
+	// When we reach the nextTombstoneEraseVersion, we will erase tombstones up through this ID.
+	int64_t nextTombstoneEraseId = -1;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, tombstonesErasedThrough, nextTombstoneEraseVersion, nextTombstoneEraseId);
+	}
+};
+
 struct TenantMetadataSpecification {
 	static KeyRef subspace;
 
 	KeyBackedObjectMap<TenantName, TenantMapEntry, decltype(IncludeVersion()), NullCodec> tenantMap;
 	KeyBackedProperty<int64_t> lastTenantId;
 	KeyBackedSet<int64_t> tenantTombstones;
+	KeyBackedObjectProperty<TenantTombstoneCleanupData, decltype(IncludeVersion())> tombstoneCleanupData;
 	KeyBackedSet<Tuple> tenantGroupTenantIndex;
 	KeyBackedObjectMap<TenantGroupName, TenantGroupEntry, decltype(IncludeVersion()), NullCodec> tenantGroupMap;
 
@@ -119,6 +139,8 @@ struct TenantMetadataSpecification {
 	  : tenantMap(subspace.withSuffix("tenant/map/"_sr), IncludeVersion(ProtocolVersion::withTenants())),
 	    lastTenantId(subspace.withSuffix("tenant/lastId"_sr)),
 	    tenantTombstones(subspace.withSuffix("tenant/tombstones/"_sr)),
+	    tombstoneCleanupData(subspace.withSuffix("tenant/tombstoneCleanup"_sr),
+	                         IncludeVersion(ProtocolVersion::withTenants())),
 	    tenantGroupTenantIndex(subspace.withSuffix("tenant/tenantGroup/tenantIndex/"_sr)),
 	    tenantGroupMap(subspace.withSuffix("tenant/tenantGroup/map/"_sr),
 	                   IncludeVersion(ProtocolVersion::withTenants())) {}
@@ -132,6 +154,7 @@ public:
 	static inline auto& tenantMap = instance.tenantMap;
 	static inline auto& lastTenantId = instance.lastTenantId;
 	static inline auto& tenantTombstones = instance.tenantTombstones;
+	static inline auto& tombstoneCleanupData = instance.tombstoneCleanupData;
 	static inline auto& tenantGroupTenantIndex = instance.tenantGroupTenantIndex;
 	static inline auto& tenantGroupMap = instance.tenantGroupMap;
 

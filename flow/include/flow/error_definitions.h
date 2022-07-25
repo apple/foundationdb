@@ -248,6 +248,7 @@ ERROR( cluster_already_registered, 2156, "Data cluster is already registered wit
 ERROR( metacluster_no_capacity, 2157, "Metacluster does not have capacity to create new tenants" )
 ERROR( management_cluster_invalid_access, 2158, "Standard transactions cannot be run against the management cluster" )
 ERROR( tenant_cannot_be_moved, 2159, "The tenant cannot be moved between clusters" )
+ERROR( tenant_creation_permanently_failed, 2160, "The tenant creation did not complete in a timely manner and has permanently failed" )
 
 // 2200 - errors from bindings and official APIs
 ERROR( api_version_unset, 2200, "API version is not set" )

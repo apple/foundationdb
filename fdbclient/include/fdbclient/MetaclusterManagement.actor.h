@@ -718,6 +718,7 @@ Future<Void> dataClusterRemove(Transaction tr, Optional<int64_t> lastTenantId, U
 
 	MetaclusterMetadata::metaclusterRegistration.clear(tr);
 	TenantMetadata::tenantTombstones.clear(tr);
+	TenantMetadata::tombstoneCleanupData.clear(tr);
 
 	// If we are force removing a cluster, then it will potentially contain tenants that have IDs
 	// larger than the next tenant ID to be allocated on the cluster. To avoid collisions, we advance
@@ -952,6 +953,9 @@ struct CreateTenantImpl {
 	// Parameters set in assignTenantAndStoreInManagementCluster
 	DataClusterMetadata clusterMetadata;
 
+	// Parameter set if tenant creation permanently fails on the data cluster
+	Optional<int64_t> replaceExistingTenantId;
+
 	CreateTenantImpl(Reference<DB> managementDb, TenantName tenantName, TenantMapEntry tenantEntry)
 	  : managementDb(managementDb), tenantName(tenantName), tenantEntry(tenantEntry) {}
 
@@ -1041,7 +1045,13 @@ struct CreateTenantImpl {
 
 		state Future<Optional<TenantMapEntry>> existingEntryFuture = tryGetTenantTransaction(tr, self->tenantName);
 		Optional<TenantMapEntry> existingEntry = wait(existingEntryFuture);
-		if (existingEntry.present()) {
+
+		// If we already have a tenant creation entry, then we don't need to update the map unless we are trying to
+		// replace the existing one. Only replace the existing one if its ID matches the ID we are trying to replace and
+		// it is in the REGISTERING phase.
+		if (existingEntry.present() && (!self->replaceExistingTenantId.present() ||
+		                                existingEntry.get().id != self->replaceExistingTenantId.get() ||
+		                                existingEntry.get().tenantState != TenantState::REGISTERING)) {
 			return std::make_pair(existingEntry.get(), false);
 		}
 
@@ -1147,12 +1157,25 @@ struct CreateTenantImpl {
 	}
 
 	ACTOR static Future<Void> run(CreateTenantImpl* self) {
-		wait(assignTenantAndStoreInManagementCluster(self));
-		bool tenantStored = wait(storeTenantInDataCluster(self));
-		if (tenantStored) {
-			wait(markTenantReady(self));
+		loop {
+			wait(assignTenantAndStoreInManagementCluster(self));
+			self->replaceExistingTenantId = {};
+			try {
+				bool tenantStored = wait(storeTenantInDataCluster(self));
+				if (tenantStored) {
+					wait(markTenantReady(self));
+				}
+				return Void();
+			} catch (Error& e) {
+				if (e.code() == error_code_tenant_creation_permanently_failed) {
+					// If the data cluster has permanently failed to create the tenant, then we can reassign it in the
+					// management cluster and start over
+					self->replaceExistingTenantId = self->tenantEntry.id;
+				} else {
+					throw;
+				}
+			}
 		}
-		return Void();
 	}
 	Future<Void> run() { return run(this); }
 };
