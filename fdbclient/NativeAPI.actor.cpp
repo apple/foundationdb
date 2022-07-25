@@ -1132,10 +1132,9 @@ ACTOR static Future<Void> handleTssMismatches(DatabaseContext* cx) {
 
 					for (const DetailedTSSMismatch& d : data.second) {
 						// <tssid, time, mismatchid> -> mismatch data
-						tssMismatchDB.set(
-						    tr,
-						    Tuple().append(data.first.toString()).append(d.timestamp).append(d.mismatchId.toString()),
-						    d.traceString);
+						tssMismatchDB.set(tr,
+						                  Tuple::makeTuple(data.first.toString(), d.timestamp, d.mismatchId.toString()),
+						                  d.traceString);
 					}
 
 					wait(tr->commit());
@@ -1476,7 +1475,11 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
     smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
     specialKeySpace(std::make_unique<SpecialKeySpace>(specialKeys.begin, specialKeys.end, /* test */ false)),
     connectToDatabaseEventCacheHolder(format("ConnectToDatabase/%s", dbId.toString().c_str())) {
+
 	dbId = deterministicRandom()->randomUniqueID();
+
+	TraceEvent("DatabaseContextCreated", dbId).backtrace();
+
 	connected = (clientInfo->get().commitProxies.size() && clientInfo->get().grvProxies.size())
 	                ? Void()
 	                : clientInfo->onChange();
@@ -1805,6 +1808,8 @@ DatabaseContext::~DatabaseContext() {
 		it->second->notifyContextDestroyed();
 	ASSERT_ABORT(server_interf.empty());
 	locationCache.insert(allKeys, Reference<LocationInfo>());
+
+	TraceEvent("DatabaseContextDestructed", dbId).backtrace();
 }
 
 Optional<KeyRangeLocationInfo> DatabaseContext::getCachedLocation(const Optional<TenantName>& tenantName,
@@ -7951,7 +7956,8 @@ ACTOR Future<std::vector<std::pair<UID, StorageWiggleValue>>> readStorageWiggleV
 	state KeyBackedObjectMap<UID, StorageWiggleValue, decltype(IncludeVersion())> metadataMap(readKey,
 	                                                                                          IncludeVersion());
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
-	state std::vector<std::pair<UID, StorageWiggleValue>> res;
+	state KeyBackedRangeResult<std::pair<UID, StorageWiggleValue>> res;
+
 	// read the wiggling pairs
 	loop {
 		try {
@@ -7967,7 +7973,7 @@ ACTOR Future<std::vector<std::pair<UID, StorageWiggleValue>>> readStorageWiggleV
 			wait(tr->onError(e));
 		}
 	}
-	return res;
+	return res.results;
 }
 
 ACTOR Future<Void> splitStorageMetricsStream(PromiseStream<Key> resultStream,
@@ -9676,7 +9682,7 @@ int64_t getMaxReadKeySize(KeyRef const& key) {
 }
 
 int64_t getMaxWriteKeySize(KeyRef const& key, bool hasRawAccess) {
-	int64_t tenantSize = hasRawAccess ? CLIENT_KNOBS->TENANT_PREFIX_SIZE_LIMIT : 0;
+	int64_t tenantSize = hasRawAccess ? TenantMapEntry::PREFIX_SIZE : 0;
 	return key.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT
 	                                        : CLIENT_KNOBS->KEY_SIZE_LIMIT + tenantSize;
 }

@@ -679,13 +679,6 @@ UID decodeBlobWorkerListKey(KeyRef const& key);
 const Value blobWorkerListValue(BlobWorkerInterface const& interface);
 BlobWorkerInterface decodeBlobWorkerListValue(ValueRef const& value);
 
-// State for the tenant map
-extern const KeyRangeRef tenantMapKeys;
-extern const KeyRef tenantMapPrefix;
-extern const KeyRef tenantMapPrivatePrefix;
-extern const KeyRef tenantLastIdKey;
-extern const KeyRef tenantDataPrefixKey;
-
 // Storage quota per tenant
 // "\xff/storageQuota/[[tenantName]]" := "[[quota]]"
 extern const KeyRangeRef storageQuotaKeys;

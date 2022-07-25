@@ -651,10 +651,7 @@ public:
 	                                     Reference<Task> task) {
 		taskBucket->setOptions(tr);
 
-		Tuple t;
-		t.append(task->timeoutVersion);
-		t.append(task->key);
-
+		Tuple t = Tuple::makeTuple(task->timeoutVersion, task->key);
 		RangeResult values = wait(tr->getRange(taskBucket->timeouts.range(t), 1));
 		if (values.size() > 0)
 			return false;
@@ -996,9 +993,7 @@ Future<bool> TaskBucket::isEmpty(Reference<ReadYourWritesTransaction> tr) {
 Future<Void> TaskBucket::finish(Reference<ReadYourWritesTransaction> tr, Reference<Task> task) {
 	setOptions(tr);
 
-	Tuple t;
-	t.append(task->timeoutVersion);
-	t.append(task->key);
+	Tuple t = Tuple::makeTuple(task->timeoutVersion, task->key);
 
 	tr->atomicOp(prefix.pack(LiteralStringRef("task_count")),
 	             LiteralStringRef("\xff\xff\xff\xff\xff\xff\xff\xff"),

@@ -36,6 +36,7 @@
 #include "flow/genericactors.actor.h"
 #include "flow/TLSConfig.actor.h"
 
+#include "fdbclient/DatabaseContext.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/Status.h"

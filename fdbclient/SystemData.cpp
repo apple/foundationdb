@@ -475,18 +475,21 @@ const Value serverKeysValue(const UID& id) {
 
 void decodeServerKeysValue(const ValueRef& value, bool& assigned, bool& emptyRange, UID& id) {
 	if (value.size() == 0) {
-		id = UID();
 		assigned = false;
 		emptyRange = false;
+		id = UID();
 	} else if (value == serverKeysTrue) {
 		assigned = true;
 		emptyRange = false;
+		id = anonymousShardId;
 	} else if (value == serverKeysTrueEmptyRange) {
 		assigned = true;
 		emptyRange = true;
+		id = anonymousShardId;
 	} else if (value == serverKeysFalse) {
 		assigned = false;
 		emptyRange = false;
+		id = UID();
 	} else {
 		BinaryReader rd(value, IncludeVersion());
 		ASSERT(rd.protocolVersion().hasShardEncodeLocationMetaData());
@@ -1624,11 +1627,10 @@ BlobWorkerInterface decodeBlobWorkerListValue(ValueRef const& value) {
 	return interf;
 }
 
-const KeyRangeRef tenantMapKeys("\xff/tenantMap/"_sr, "\xff/tenantMap0"_sr);
+const KeyRangeRef tenantMapKeys("\xff/tenant/map/"_sr, "\xff/tenant/map0"_sr);
 const KeyRef tenantMapPrefix = tenantMapKeys.begin;
-const KeyRef tenantMapPrivatePrefix = "\xff\xff/tenantMap/"_sr;
-const KeyRef tenantLastIdKey = "\xff/tenantLastId/"_sr;
-const KeyRef tenantDataPrefixKey = "\xff/tenantDataPrefix"_sr;
+const KeyRef tenantMapPrivatePrefix = "\xff\xff/tenant/map/"_sr;
+const KeyRef tenantLastIdKey = "\xff/tenant/lastId"_sr;
 
 const KeyRangeRef storageQuotaKeys(LiteralStringRef("\xff/storageQuota/"), LiteralStringRef("\xff/storageQuota0"));
 const KeyRef storageQuotaPrefix = storageQuotaKeys.begin;
