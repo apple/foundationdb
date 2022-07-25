@@ -47,9 +47,7 @@ class LivenessChecker {
 	ACTOR static Future<Void> checkStuck(LivenessChecker const* self) {
 		loop {
 			choose {
-				when(wait(delayUntil(self->lastTime.get() + self->threshold))) {
-					return Void();
-				}
+				when(wait(delayUntil(self->lastTime.get() + self->threshold))) { return Void(); }
 				when(wait(self->lastTime.onChange())) {}
 			}
 		}
@@ -277,9 +275,7 @@ ACTOR Future<Void> remoteMonitorLeader(int* clientCount,
 			when(wait(yieldedFuture(currentElectedLeaderOnChange))) {
 				currentElectedLeaderOnChange = currentElectedLeader->onChange();
 			}
-			when(wait(delayJittered(SERVER_KNOBS->CLIENT_REGISTER_INTERVAL))) {
-				break;
-			}
+			when(wait(delayJittered(SERVER_KNOBS->CLIENT_REGISTER_INTERVAL))) { break; }
 		}
 	}
 
@@ -795,7 +791,8 @@ ACTOR Future<Void> changeClusterDescription(std::string datafolder, KeyRef newCl
 	//		2.2: the prefix is _fwdTimeKeys.begin_: the value is the time
 	// 3. oldCKey does not appear in any keys but in a value:
 	// 		3.1: it's in the value of a forwarding message(see 2.1)
-	//		3.2: it's inside the value of _GenerationRegVal_ (see 1)
+	//		3.2: it's inside the value of _GenerationRegVal_ (see 1), which is a cluster connection string.
+	//			in particular, even we do not change it the cluster should still be good, but just to be safe here.
 	for (auto& [key, value] : res) {
 		if (key.startsWith(fwdKeys.begin)) {
 			if (key.removePrefix(fwdKeys.begin) == oldClusterKey) {
@@ -814,7 +811,7 @@ ACTOR Future<Void> changeClusterDescription(std::string datafolder, KeyRef newCl
 			// parse the value part
 			GenerationRegVal regVal = BinaryReader::fromStringRef<GenerationRegVal>(value, IncludeVersion());
 			if (regVal.val.present()) {
-				Optional<Value> newVal = updateCCS(regVal.val.get(), oldClusterKey, newClusterKey);
+				Optional<Value> newVal = UpdateCCSInMovableValue(regVal.val.get(), oldClusterKey, newClusterKey);
 				if (newVal.present()) {
 					regVal.val = newVal.get();
 					store->set(KeyValueRef(
@@ -827,9 +824,11 @@ ACTOR Future<Void> changeClusterDescription(std::string datafolder, KeyRef newCl
 	return Void();
 }
 
-
 Future<Void> coordChangeClusterKey(std::string dataFolder, KeyRef newClusterKey, KeyRef oldClusterKey) {
-	printf("*********** Fdb snapshot change description. *************\n");
+	TraceEvent(SevInfo, "CoordChangeClusterKey")
+	    .detail("DataFolder", dataFolder)
+	    .detail("NewClusterKey", newClusterKey)
+	    .detail("OldClusterKey", oldClusterKey);
 	std::string absDataFolder = abspath(dataFolder);
 	std::vector<std::string> returnList = platform::listDirectories(absDataFolder);
 	std::vector<Future<Void>> futures;
@@ -838,7 +837,7 @@ Future<Void> coordChangeClusterKey(std::string dataFolder, KeyRef newClusterKey,
 			continue;
 		}
 		std::string processDir = dataFolder + "/" + dirEntry;
-		printf("Checking process dir:%s\n", processDir.c_str());
+		TraceEvent(SevInfo, "UpdatingCoordDataForProcess").detail("ProcessDataDir", processDir);
 		std::vector<std::string> returnFiles = platform::listFiles(processDir, "");
 		bool isCoord = false;
 		for (const auto& fileEntry : returnFiles) {
