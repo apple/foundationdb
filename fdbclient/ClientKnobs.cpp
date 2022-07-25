@@ -83,7 +83,6 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( CHANGE_FEED_CACHE_SIZE,               100000 ); if( randomize && BUGGIFY ) CHANGE_FEED_CACHE_SIZE = 1;
 	init( CHANGE_FEED_POP_TIMEOUT,                 5.0 );
 	init( CHANGE_FEED_STREAM_MIN_BYTES,            1e4 ); if( randomize && BUGGIFY ) CHANGE_FEED_STREAM_MIN_BYTES = 1;
-	init( TENANT_PREFIX_SIZE_LIMIT,                 28 ); ASSERT(TENANT_PREFIX_SIZE_LIMIT >= TenantMapEntry::ROOT_PREFIX_SIZE); // includes 8-byte ID and optional tenant subspace
 
 	init( MAX_BATCH_SIZE,                         1000 ); if( randomize && BUGGIFY ) MAX_BATCH_SIZE = 1;
 	init( GRV_BATCH_TIMEOUT,                     0.005 ); if( randomize && BUGGIFY ) GRV_BATCH_TIMEOUT = 0.1;
@@ -111,6 +110,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( RANGESTREAM_BUFFERED_FRAGMENTS_LIMIT,     20 );
 	init( QUARANTINE_TSS_ON_MISMATCH,             true ); if( randomize && BUGGIFY ) QUARANTINE_TSS_ON_MISMATCH = false; // if true, a tss mismatch will put the offending tss in quarantine. If false, it will just be killed
 	init( CHANGE_FEED_EMPTY_BATCH_TIME,          0.005 );
+	init( SHARD_ENCODE_LOCATION_METADATA,        false ); if( randomize && BUGGIFY )  SHARD_ENCODE_LOCATION_METADATA = true;
 
 	//KeyRangeMap
 	init( KRM_GET_RANGE_LIMIT,                     1e5 ); if( randomize && BUGGIFY ) KRM_GET_RANGE_LIMIT = 10;
@@ -202,6 +202,10 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( DEFAULT_AUTO_LOGS,                         3 );
 	init( DEFAULT_COMMIT_GRV_PROXIES_RATIO,          3 );
 	init( DEFAULT_MAX_GRV_PROXIES,                   4 );
+
+	init( GLOBAL_CONFIG_REFRESH_BACKOFF,           0.5 );
+	init( GLOBAL_CONFIG_REFRESH_MAX_BACKOFF,      60.0 );
+	init( GLOBAL_CONFIG_REFRESH_TIMEOUT,          10.0 );
 
 	init( IS_ACCEPTABLE_DELAY,                     1.5 );
 

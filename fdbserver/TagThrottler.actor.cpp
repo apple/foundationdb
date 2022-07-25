@@ -21,6 +21,7 @@
 
 #include "fdbserver/TagThrottler.h"
 #include "fdbserver/RkTagThrottleCollection.h"
+#include "flow/actorcompiler.h" // must be last include
 
 class TagThrottlerImpl {
 	Database db;
@@ -53,20 +54,20 @@ class TagThrottlerImpl {
 
 					if (autoThrottlingEnabled.get().present() &&
 					    autoThrottlingEnabled.get().get() == LiteralStringRef("0")) {
-						TEST(true); // Auto-throttling disabled
+						CODE_PROBE(true, "Auto-throttling disabled");
 						if (self->autoThrottlingEnabled) {
 							TraceEvent("AutoTagThrottlingDisabled", self->id).log();
 						}
 						self->autoThrottlingEnabled = false;
 					} else if (autoThrottlingEnabled.get().present() &&
 					           autoThrottlingEnabled.get().get() == LiteralStringRef("1")) {
-						TEST(true); // Auto-throttling enabled
+						CODE_PROBE(true, "Auto-throttling enabled");
 						if (!self->autoThrottlingEnabled) {
 							TraceEvent("AutoTagThrottlingEnabled", self->id).log();
 						}
 						self->autoThrottlingEnabled = true;
 					} else {
-						TEST(true); // Auto-throttling unspecified
+						CODE_PROBE(true, "Auto-throttling unspecified");
 						if (autoThrottlingEnabled.get().present()) {
 							TraceEvent(SevWarnAlways, "InvalidAutoTagThrottlingValue", self->id)
 							    .detail("Value", autoThrottlingEnabled.get().get());
@@ -89,7 +90,7 @@ class TagThrottlerImpl {
 
 						if (tagValue.expirationTime == 0 ||
 						    tagValue.expirationTime > now() + tagValue.initialDuration) {
-							TEST(true); // Converting tag throttle duration to absolute time
+							CODE_PROBE(true, "Converting tag throttle duration to absolute time");
 							tagValue.expirationTime = now() + tagValue.initialDuration;
 							BinaryWriter wr(IncludeVersion(ProtocolVersion::withTagThrottleValueReason()));
 							wr << tagValue;
@@ -106,7 +107,7 @@ class TagThrottlerImpl {
 							if (tagKey.throttleType == TagThrottleType::AUTO) {
 								updatedTagThrottles.autoThrottleTag(
 								    self->id, tag, 0, tagValue.tpsRate, tagValue.expirationTime);
-								updatedTagThrottles.updateBusyTagCount(tagValue.reason);
+								updatedTagThrottles.incrementBusyTagCount(tagValue.reason);
 							} else {
 								updatedTagThrottles.manualThrottleTag(self->id,
 								                                      tag,
@@ -127,7 +128,7 @@ class TagThrottlerImpl {
 
 					wait(watchFuture);
 					TraceEvent("RatekeeperThrottleSignaled", self->id).log();
-					TEST(true); // Tag throttle changes detected
+					CODE_PROBE(true, "Tag throttle changes detected");
 					break;
 				} catch (Error& e) {
 					TraceEvent("RatekeeperMonitorThrottlingChangesError", self->id).error(e);
@@ -141,8 +142,9 @@ class TagThrottlerImpl {
 		// NOTE: before the comparison with MIN_TAG_COST, the busiest tag rate also compares with MIN_TAG_PAGES_RATE
 		// currently MIN_TAG_PAGES_RATE > MIN_TAG_COST in our default knobs.
 		if (busyness > SERVER_KNOBS->AUTO_THROTTLE_TARGET_TAG_BUSYNESS && rate > SERVER_KNOBS->MIN_TAG_COST) {
-			TEST(true); // Transaction tag auto-throttled
+			CODE_PROBE(true, "Transaction tag auto-throttled");
 			Optional<double> clientRate = throttledTags.autoThrottleTag(id, tag, busyness);
+			// TODO: Increment tag throttle counts here?
 			if (clientRate.present()) {
 				TagSet tags;
 				tags.addTag(tag);
@@ -185,23 +187,21 @@ public:
 		// the future
 		auto storageQueue = ss.getStorageQueueBytes();
 		auto storageDurabilityLag = ss.getDurabilityLag();
+		std::vector<Future<Void>> futures;
 		if (storageQueue > SERVER_KNOBS->AUTO_TAG_THROTTLE_STORAGE_QUEUE_BYTES ||
 		    storageDurabilityLag > SERVER_KNOBS->AUTO_TAG_THROTTLE_DURABILITY_LAG_VERSIONS) {
-			// TODO: Update once size is potentially > 1
-			ASSERT_WE_THINK(ss.busiestWriteTags.size() <= 1);
-			ASSERT_WE_THINK(ss.busiestReadTags.size() <= 1);
 			for (const auto& busyWriteTag : ss.busiestWriteTags) {
-				return tryUpdateAutoThrottling(busyWriteTag.tag,
-				                               busyWriteTag.rate,
-				                               busyWriteTag.fractionalBusyness,
-				                               TagThrottledReason::BUSY_WRITE);
+				futures.push_back(tryUpdateAutoThrottling(busyWriteTag.tag,
+				                                          busyWriteTag.rate,
+				                                          busyWriteTag.fractionalBusyness,
+				                                          TagThrottledReason::BUSY_WRITE));
 			}
 			for (const auto& busyReadTag : ss.busiestReadTags) {
-				return tryUpdateAutoThrottling(
-				    busyReadTag.tag, busyReadTag.rate, busyReadTag.fractionalBusyness, TagThrottledReason::BUSY_READ);
+				futures.push_back(tryUpdateAutoThrottling(
+				    busyReadTag.tag, busyReadTag.rate, busyReadTag.fractionalBusyness, TagThrottledReason::BUSY_READ));
 			}
 		}
-		return Void();
+		return waitForAll(futures);
 	}
 
 }; // class TagThrottlerImpl

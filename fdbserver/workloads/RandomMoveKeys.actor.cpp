@@ -143,6 +143,7 @@ struct MoveKeysWorkload : TestWorkload {
 			state Promise<Void> signal;
 			state DDEnabledState ddEnabledState;
 			wait(moveKeys(cx,
+			              deterministicRandom()->randomUniqueID(),
 			              keys,
 			              destinationTeamIDs,
 			              destinationTeamIDs,
@@ -152,7 +153,8 @@ struct MoveKeysWorkload : TestWorkload {
 			              &fl2,
 			              false,
 			              relocateShardInterval.pairID,
-			              &ddEnabledState));
+			              &ddEnabledState,
+			              CancelConflictingDataMoves::True));
 			TraceEvent(relocateShardInterval.end()).detail("Result", "Success");
 			return Void();
 		} catch (Error& e) {

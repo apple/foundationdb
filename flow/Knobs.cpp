@@ -154,6 +154,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	//AsyncFileKAIO
 	init( MAX_OUTSTANDING,                                      64 );
 	init( MIN_SUBMIT,                                           10 );
+	init( DISK_METRIC_LOGGING_INTERVAL,                        5.0 );
 
 	init( PAGE_WRITE_CHECKSUM_HISTORY,                           0 ); if( randomize && BUGGIFY ) PAGE_WRITE_CHECKSUM_HISTORY = 10000000;
 	init( DISABLE_POSIX_KERNEL_AIO,                              0 );
@@ -208,7 +209,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( ZERO_LENGTH_FILE_PAD,                                  1 );
 	init( TRACE_FLUSH_INTERVAL,                               0.25 );
 	init( TRACE_RETRY_OPEN_INTERVAL,						  1.00 );
-	init( MIN_TRACE_SEVERITY,                 isSimulated ? 1 : 10 ); // Related to the trace severity in Trace.h
+	init( MIN_TRACE_SEVERITY,                isSimulated ?  1 : 10 ); // Related to the trace severity in Trace.h
 	init( MAX_TRACE_SUPPRESSIONS,                              1e4 );
 	init( TRACE_DATETIME_ENABLED,                             true ); // trace time in human readable format (always real time)
 	init( TRACE_SYNC_ENABLED,                                    0 );

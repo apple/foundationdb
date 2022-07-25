@@ -29,6 +29,7 @@
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/ThreadHelper.actor.h"
+#include "flow/CodeProbe.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace fdb_cli {

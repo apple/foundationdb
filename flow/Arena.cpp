@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "Arena.h"
+#include "flow/Arena.h"
 
 #include "flow/UnitTest.h"
 
@@ -771,6 +771,48 @@ TEST_CASE("/flow/Arena/Size") {
 	fastSize = a.getSize(FastInaccurateEstimate::True);
 	slowSize = a.getSize();
 	ASSERT_EQ(fastSize, slowSize);
+
+	return Void();
+}
+
+TEST_CASE("flow/StringRef/eat") {
+	StringRef str = "test/case"_sr;
+	StringRef first = str.eat("/");
+	ASSERT(first == "test"_sr);
+	ASSERT(str == "case"_sr);
+
+	str = "test/case"_sr;
+	first = str.eat("/"_sr);
+	ASSERT(first == "test"_sr);
+	ASSERT(str == "case"_sr);
+
+	str = "testcase"_sr;
+	first = str.eat("/"_sr);
+	ASSERT(first == "testcase"_sr);
+	ASSERT(str == ""_sr);
+
+	str = "testcase/"_sr;
+	first = str.eat("/"_sr);
+	ASSERT(first == "testcase"_sr);
+	ASSERT(str == ""_sr);
+
+	str = "test/case/extra"_sr;
+	first = str.eat("/"_sr);
+	ASSERT(first == "test"_sr);
+	ASSERT(str == "case/extra"_sr);
+
+	bool hasSep;
+	str = "test/case"_sr;
+	first = str.eat("/"_sr, &hasSep);
+	ASSERT(hasSep);
+	ASSERT(first == "test"_sr);
+	ASSERT(str == "case"_sr);
+
+	str = "testcase"_sr;
+	first = str.eat("/", &hasSep);
+	ASSERT(!hasSep);
+	ASSERT(first == "testcase"_sr);
+	ASSERT(str == ""_sr);
 
 	return Void();
 }
