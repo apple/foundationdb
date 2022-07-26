@@ -3248,6 +3248,12 @@ TenantInfo TransactionState::getTenantInfo() {
 	return TenantInfo(t.get(), tenantId);
 }
 
+// Returns the tenant used in this transaction. If the tenant is unset and raw access isn't specified, then the default
+// tenant from DatabaseContext is applied to this transaction (note: the default tenant is typically unset, but in
+// simulation could be something different).
+//
+// This function should not be called in the transaction constructor or in the setOption function to allow a user the
+// opportunity to set raw access.
 Optional<TenantName> const& TransactionState::tenant() {
 	if (tenantSet) {
 		return tenant_;
@@ -3260,6 +3266,9 @@ Optional<TenantName> const& TransactionState::tenant() {
 	}
 }
 
+// Returns true if the tenant has been set, but does not cause default tenant resolution. This is useful in setOption
+// (where we do not want to call tenant()) if we want to enforce that an option not be set on a Tenant transaction (e.g.
+// for raw access).
 bool TransactionState::hasTenant() const {
 	return tenantSet && tenant_.present();
 }
