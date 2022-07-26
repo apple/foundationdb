@@ -549,8 +549,6 @@ ACTOR Future<Void> sendProxyConnectRequest(Reference<IConnection> conn,
 		if (!err.present() && r->code == 200) {
 			return Void();
 		}
-		if (r.isValid())
-			std::cerr << r->code << std::endl;
 
 		// All errors in err are potentially retryable as well as certain HTTP response codes...
 		bool retryable = err.present() || r->code == 500 || r->code == 502 || r->code == 503 || r->code == 429;
