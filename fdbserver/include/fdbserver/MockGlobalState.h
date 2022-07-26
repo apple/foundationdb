@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#ifndef FOUNDATIONDB_MOCKGLOBALSTATE_H_H
-#define FOUNDATIONDB_MOCKGLOBALSTATE_H_H
+#ifndef FOUNDATIONDB_MOCKGLOBALSTATE_H
+#define FOUNDATIONDB_MOCKGLOBALSTATE_H
 
 #include "StorageMetrics.h"
 #include "fdbclient/KeyRangeMap.h"
@@ -42,21 +42,40 @@ public:
 
 	MockStorageServer() = default;
 	MockStorageServer(const UID& id, uint64_t availableDiskSpace, uint64_t usedDiskSpace = 0)
-	  : usedDiskSpace(usedDiskSpace), availableDiskSpace(availableDiskSpace), id(id) {}
+	  : usedDiskSpace(usedDiskSpace), availableDiskSpace(availableDiskSpace), id(id) {
+		ssi.uniqueID = id;
+	}
 };
 
 class MockGlobalState {
 public:
-	KeyRangeMap<std::vector<UID>> keyServers; // a shard belongs to which servers
-	std::map<UID, MockStorageServer> servers; // all mock servers
+	// Index starting from 1. 0 indicates invalid index;
+	typedef uint32_t TeamIndex;
+	typedef uint64_t ServerIndex;
+	struct Team {
+		TeamIndex teamIdx;
+		std::vector<ServerIndex> serverIdx;
+
+		std::vector<UID> getServerIds() const;
+	};
+
+	struct ShardTeamValue {
+		TeamIndex srcIdx;
+		Optional<TeamIndex> destIdx;
+	};
+
+	std::map<Key, ShardTeamValue> keyServers; // a shard belongs to which teams, key is the beginning key of a shard
+	std::map<ServerIndex, MockStorageServer> servers; // all mock servers
+	std::map<TeamIndex, Team> teams;
 	DatabaseConfiguration configuration;
 
 	// user defined parameters for mock workload purpose
 	double emptyProb; // probability of doing an empty read
 	uint32_t minByteSize, maxByteSize; // the size band of a point data operation
 
+	static UID indexToUID(uint64_t a) { return UID(a, a); }
 	void initialAsEmptyDatabaseMGS(const DatabaseConfiguration& conf,
 	                               uint64_t defaultDiskSpace = 1000LL * 1024 * 1024 * 1024);
 };
 
-#endif // FOUNDATIONDB_MOCKGLOBALSTATE_H_H
+#endif // FOUNDATIONDB_MOCKGLOBALSTATE_H

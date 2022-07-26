@@ -431,3 +431,54 @@ Future<Reference<InitialDataDistribution>> DDTxnProcessor::getInitialDataDistrib
 Future<Void> DDTxnProcessor::waitForDataDistributionEnabled(const DDEnabledState* ddEnabledState) const {
 	return DDTxnProcessorImpl::waitForDataDistributionEnabled(cx, ddEnabledState);
 }
+
+Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>>
+DDMockTxnProcessor::getServerListAndProcessClasses() {
+	std::vector<std::pair<StorageServerInterface, ProcessClass>> res;
+	for (auto& [_, mss] : mgs->servers) {
+		res.emplace_back(mss.ssi, ProcessClass(ProcessClass::StorageClass, ProcessClass::DBSource));
+	}
+	return res;
+}
+
+std::set<std::vector<UID>> DDMockTxnProcessor::getPrimaryTeams() const {
+	std::set<std::vector<UID>> res;
+	for (auto& [idx, team] : mgs->teams) {
+		res.emplace(team.getServerIds());
+	}
+	return res;
+}
+
+std::vector<DDShardInfo> DDMockTxnProcessor::getDDShardInfos() const {
+	std::vector<DDShardInfo> res;
+	res.reserve(mgs->keyServers.size() - 1);
+	for (auto& [beginK, value] : mgs->keyServers) {
+		if (beginK == allKeys.end)
+			break;
+
+		// FIXME: now just use anonymousShardId
+		DDShardInfo info(beginK, anonymousShardId, anonymousShardId);
+		info.primarySrc = mgs->teams.at(value.srcIdx).getServerIds();
+		if (value.destIdx.present()) {
+			info.primaryDest = mgs->teams.at(value.destIdx.get()).getServerIds();
+			info.hasDest = true;
+		}
+	}
+	res.emplace_back(allKeys.end);
+}
+
+Future<Reference<InitialDataDistribution>> DDMockTxnProcessor::getInitialDataDistribution(
+    const UID& distributorId,
+    const MoveKeysLock& moveKeysLock,
+    const std::vector<Optional<Key>>& remoteDcIds,
+    const DDEnabledState* ddEnabledState) {
+
+	// FIXME: now we just ignore ddEnabledState and moveKeysLock, will fix it in the future
+	Reference<InitialDataDistribution> res = makeReference<InitialDataDistribution>();
+	res->mode = 1;
+	res->allServers = getServerListAndProcessClasses().get();
+	// TODO: consider remote region setting. For now assume all server is in primary dc
+	res->shards = getDDShardInfos();
+	res->primaryTeams = getPrimaryTeams();
+	return res;
+}

@@ -23,8 +23,10 @@
 
 #include "fdbserver/Knobs.h"
 #include "fdbserver/MoveKeys.actor.h"
+#include "fdbserver/MockGlobalState.h"
 
 struct InitialDataDistribution;
+struct DDShardInfo;
 
 /* Testability Contract:
  * a. The DataDistributor has to use this interface to interact with data-plane (aka. run transaction), because the
@@ -37,7 +39,7 @@ public:
 		std::vector<UID> srcServers, completeSources; // the same as RelocateData.src, RelocateData.completeSources;
 	};
 	// get the source server list and complete source server list for range
-	virtual Future<SourceServers> getSourceServersForRange(const KeyRangeRef range) = 0;
+	virtual Future<SourceServers> getSourceServersForRange(const KeyRangeRef range) { return SourceServers{}; };
 
 	// get the storage server list and Process class
 	virtual Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses() = 0;
@@ -60,7 +62,7 @@ public:
 		return Void();
 	}
 
-	virtual Future<Void> waitForDataDistributionEnabled(const DDEnabledState* ddEnabledState) const = 0;
+	virtual Future<Void> waitForDataDistributionEnabled(const DDEnabledState* ddEnabledState) const { return Void(); };
 };
 
 class DDTxnProcessorImpl;
@@ -99,6 +101,22 @@ public:
 // A mock transaction implementation for test usage.
 // Contract: every function involving mock transaction should return immediately to mimic the ACI property of real
 // transaction.
-class DDMockTxnProcessor : public IDDTxnProcessor {};
+class DDMockTxnProcessor : public IDDTxnProcessor {
+	std::shared_ptr<MockGlobalState> mgs;
+
+	std::vector<DDShardInfo> getDDShardInfos() const;
+	std::set<std::vector<UID>> getPrimaryTeams() const;
+
+public:
+	explicit DDMockTxnProcessor(std::shared_ptr<MockGlobalState> mgs = nullptr) : mgs(mgs){};
+
+	Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses() override;
+
+	Future<Reference<InitialDataDistribution>> getInitialDataDistribution(
+	    const UID& distributorId,
+	    const MoveKeysLock& moveKeysLock,
+	    const std::vector<Optional<Key>>& remoteDcIds,
+	    const DDEnabledState* ddEnabledState) override;
+};
 
 #endif // FOUNDATIONDB_DDTXNPROCESSOR_H
