@@ -67,12 +67,32 @@ enum class OpType { READ, WRITE };
 
 class GlobalTagThrottlerImpl {
 	template <class K, class V>
-	static Optional<V> get(std::unordered_map<K, V> const& m, K const& k) {
+	static Optional<V> tryGet(std::unordered_map<K, V> const& m, K const& k) {
 		auto it = m.find(k);
 		if (it == m.end()) {
 			return {};
 		} else {
 			return it->second;
+		}
+	}
+
+	static Optional<double> getMin(Optional<double> a, Optional<double> b) {
+		if (a.present() && b.present()) {
+			return std::min(a.get(), b.get());
+		} else if (a.present()) {
+			return a;
+		} else {
+			return b;
+		}
+	}
+
+	static Optional<double> getMax(Optional<double> a, Optional<double> b) {
+		if (a.present() && b.present()) {
+			return std::max(a.get(), b.get());
+		} else if (a.present()) {
+			return a;
+		} else {
+			return b;
 		}
 	}
 
@@ -85,16 +105,11 @@ class GlobalTagThrottlerImpl {
 		  : readCost(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_FOLDING_TIME),
 		    writeCost(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_FOLDING_TIME) {}
 
-		// Returns difference between new and current rates
-		double updateCost(double newCost, OpType opType) {
+		void updateCost(double newCost, OpType opType) {
 			if (opType == OpType::READ) {
-				auto const currentReadCost = readCost.getTotal();
 				readCost.setTotal(newCost);
-				return newCost - currentReadCost;
 			} else {
-				auto const currentWriteCost = writeCost.getTotal();
 				writeCost.setTotal(newCost);
-				return newCost - currentWriteCost;
 			}
 		}
 
@@ -152,11 +167,11 @@ class GlobalTagThrottlerImpl {
 
 	// Returns the cost rate for the given tag on the given storage server
 	Optional<double> getCurrentCost(UID storageServerId, TransactionTag tag, OpType opType) const {
-		auto const tagToThroughputCounters = get(throughput, storageServerId);
+		auto const tagToThroughputCounters = tryGet(throughput, storageServerId);
 		if (!tagToThroughputCounters.present()) {
 			return {};
 		}
-		auto const throughputCounter = get(tagToThroughputCounters.get(), tag);
+		auto const throughputCounter = tryGet(tagToThroughputCounters.get(), tag);
 		if (!throughputCounter.present()) {
 			return {};
 		}
@@ -165,7 +180,7 @@ class GlobalTagThrottlerImpl {
 
 	// Return the cost rate on the given storage server, summed across all tags
 	Optional<double> getCurrentCost(UID storageServerId, OpType opType) const {
-		auto tagToPerTagThroughput = get(throughput, storageServerId);
+		auto tagToPerTagThroughput = tryGet(throughput, storageServerId);
 		if (!tagToPerTagThroughput.present()) {
 			return {};
 		}
@@ -197,7 +212,7 @@ class GlobalTagThrottlerImpl {
 		if (!cost.present()) {
 			return {};
 		}
-		auto const stats = get(tagStatistics, tag);
+		auto const stats = tryGet(tagStatistics, tag);
 		if (!stats.present()) {
 			return {};
 		}
@@ -213,7 +228,7 @@ class GlobalTagThrottlerImpl {
 	// accross the cluster. The minimum cost is 1.
 	double getAverageTransactionCost(TransactionTag tag, OpType opType) const {
 		auto const cost = getCurrentCost(tag, opType);
-		auto const stats = get(tagStatistics, tag);
+		auto const stats = tryGet(tagStatistics, tag);
 		if (!stats.present()) {
 			return 1.0;
 		}
@@ -233,7 +248,7 @@ class GlobalTagThrottlerImpl {
 	// Returns the list of all tags performing meaningful work on the given storage server
 	std::vector<TransactionTag> getTagsAffectingStorageServer(UID storageServerId) const {
 		std::vector<TransactionTag> result;
-		auto const tagToThroughputCounters = get(throughput, storageServerId);
+		auto const tagToThroughputCounters = tryGet(throughput, storageServerId);
 		if (!tagToThroughputCounters.present()) {
 			return {};
 		} else {
@@ -246,7 +261,7 @@ class GlobalTagThrottlerImpl {
 	}
 
 	Optional<double> getQuota(TransactionTag tag, OpType opType, LimitType limitType) const {
-		auto const stats = get(tagStatistics, tag);
+		auto const stats = tryGet(tagStatistics, tag);
 		if (!stats.present()) {
 			return {};
 		}
@@ -284,7 +299,7 @@ class GlobalTagThrottlerImpl {
 	// Returns the desired cost for a storage server, based on its current
 	// cost and throttling ratio
 	Optional<double> getLimitingCost(UID storageServerId, OpType opType) const {
-		auto const throttlingRatio = get(throttlingRatios, storageServerId);
+		auto const throttlingRatio = tryGet(throttlingRatios, storageServerId);
 		auto const currentCost = getCurrentCost(storageServerId, opType);
 		if (!throttlingRatio.present() || !currentCost.present() || !throttlingRatio.get().present()) {
 			return {};
@@ -310,57 +325,20 @@ class GlobalTagThrottlerImpl {
 		Optional<double> result;
 		for (const auto& [id, _] : throttlingRatios) {
 			auto const targetTpsForSS = getLimitingTps(id, tag, opType);
-			if (result.present() && targetTpsForSS.present()) {
-				result = std::min(result.get(), targetTpsForSS.get());
-			} else if (targetTpsForSS.present()) {
-				result = targetTpsForSS;
-			}
+			result = getMin(result, targetTpsForSS);
 		}
 		return result;
 	}
 
-	Optional<double> getDesiredTps(TransactionTag tag, OpType opType, double averageTransactionCost) const {
-		auto const quota = getQuota(tag, opType, LimitType::TOTAL);
-		if (!quota.present()) {
-			return {};
-		}
-		return quota.get() / averageTransactionCost;
-	}
-
-	Optional<double> getDesiredTps(TransactionTag tag,
-	                               double averageTransactionReadCost,
-	                               double averageTransactionWriteCost) const {
-		auto const readDesiredTps = getDesiredTps(tag, OpType::READ, averageTransactionReadCost);
-		auto const writeDesiredTps = getDesiredTps(tag, OpType::WRITE, averageTransactionWriteCost);
-		if (readDesiredTps.present() && writeDesiredTps.present()) {
-			return std::min(readDesiredTps.get(), writeDesiredTps.get());
-		} else if (readDesiredTps.present()) {
-			return readDesiredTps;
-		} else {
-			return writeDesiredTps;
-		}
-	}
-
-	Optional<double> getReservedTps(TransactionTag tag, OpType opType, double averageTransactionCost) const {
-		auto const reservedCost = getQuota(tag, opType, LimitType::RESERVED);
-		if (!reservedCost.present()) {
+	Optional<double> getTps(TransactionTag tag,
+	                        OpType opType,
+	                        LimitType limitType,
+	                        double averageTransactionCost) const {
+		auto const cost = getQuota(tag, opType, limitType);
+		if (!cost.present()) {
 			return {};
 		} else {
-			return reservedCost.get() / averageTransactionCost;
-		}
-	}
-
-	Optional<double> getReservedTps(TransactionTag tag,
-	                                double averageTransactionReadCost,
-	                                double averageTransactionWriteCost) const {
-		auto const readReservedTps = getReservedTps(tag, OpType::READ, averageTransactionReadCost);
-		auto const writeReservedTps = getReservedTps(tag, OpType::WRITE, averageTransactionWriteCost);
-		if (readReservedTps.present() && writeReservedTps.present()) {
-			return std::max(readReservedTps.get(), writeReservedTps.get());
-		} else if (readReservedTps.present()) {
-			return readReservedTps;
-		} else {
-			return writeReservedTps;
+			return cost.get() / averageTransactionCost;
 		}
 	}
 
@@ -395,7 +373,6 @@ class GlobalTagThrottlerImpl {
 					++self->throttledTagChangeId;
 					wait(delay(5.0));
 					TraceEvent("GlobalTagThrottler_ChangeSignaled");
-					CODE_PROBE(true, "Global tag throttler detected quota changes");
 					break;
 				} catch (Error& e) {
 					TraceEvent("GlobalTagThrottler_MonitoringChangesError", self->id).error(e);
@@ -408,7 +385,9 @@ class GlobalTagThrottlerImpl {
 public:
 	GlobalTagThrottlerImpl(Database db, UID id) : db(db), id(id) {}
 	Future<Void> monitorThrottlingChanges() { return monitorThrottlingChanges(this); }
-	void addRequests(TransactionTag tag, int count) { tagStatistics[tag].addTransactions(count); }
+	void addRequests(TransactionTag tag, int count) {
+		tagStatistics[tag].addTransactions(static_cast<double>(count) / CLIENT_KNOBS->READ_TAG_SAMPLE_RATE);
+	}
 	uint64_t getThrottledTagChangeId() const { return throttledTagChangeId; }
 	PrioritizedTransactionTagMap<ClientTagThrottleLimits> getClientRates() {
 		PrioritizedTransactionTagMap<ClientTagThrottleLimits> result;
@@ -418,26 +397,14 @@ public:
 			auto const readLimitingTps = getLimitingTps(tag, OpType::READ);
 			auto const writeLimitingTps = getLimitingTps(tag, OpType::WRITE);
 			Optional<double> limitingTps;
-			if (readLimitingTps.present() && writeLimitingTps.present()) {
-				limitingTps = std::min(readLimitingTps.get(), writeLimitingTps.get());
-			} else if (readLimitingTps.present()) {
-				limitingTps = readLimitingTps;
-			} else {
-				limitingTps = writeLimitingTps;
-			}
+			limitingTps = getMin(readLimitingTps, writeLimitingTps);
 
 			auto const averageTransactionReadCost = getAverageTransactionCost(tag, OpType::READ);
 			auto const averageTransactionWriteCost = getAverageTransactionCost(tag, OpType::WRITE);
-			auto const readDesiredTps = getDesiredTps(tag, OpType::READ, averageTransactionReadCost);
-			auto const writeDesiredTps = getDesiredTps(tag, OpType::WRITE, averageTransactionWriteCost);
+			auto const readDesiredTps = getTps(tag, OpType::READ, LimitType::TOTAL, averageTransactionReadCost);
+			auto const writeDesiredTps = getTps(tag, OpType::WRITE, LimitType::TOTAL, averageTransactionWriteCost);
 			Optional<double> desiredTps;
-			if (readDesiredTps.present() && writeDesiredTps.present()) {
-				desiredTps = std::min(readDesiredTps.get(), writeDesiredTps.get());
-			} else if (readDesiredTps.present()) {
-				desiredTps = readDesiredTps;
-			} else {
-				desiredTps = writeDesiredTps;
-			}
+			desiredTps = getMin(readDesiredTps, writeDesiredTps);
 
 			if (!desiredTps.present()) {
 				continue;
@@ -450,16 +417,10 @@ public:
 				++lastBusyWriteTagCount;
 			}
 
-			auto const readReservedTps = getReservedTps(tag, OpType::READ, averageTransactionReadCost);
-			auto const writeReservedTps = getReservedTps(tag, OpType::WRITE, averageTransactionWriteCost);
+			auto const readReservedTps = getTps(tag, OpType::READ, LimitType::RESERVED, averageTransactionReadCost);
+			auto const writeReservedTps = getTps(tag, OpType::WRITE, LimitType::RESERVED, averageTransactionWriteCost);
 			Optional<double> reservedTps;
-			if (readReservedTps.present() && writeReservedTps.present()) {
-				reservedTps = std::max(readReservedTps.get(), writeReservedTps.get());
-			} else if (readReservedTps.present()) {
-				reservedTps = readReservedTps;
-			} else {
-				reservedTps = writeReservedTps;
-			}
+			reservedTps = getMax(readReservedTps, writeReservedTps);
 
 			auto targetTps = desiredTps.get();
 			if (limitingTps.present()) {
@@ -632,30 +593,24 @@ public:
 		}
 	}
 
-	void addReadCost(TransactionTag tag, double cost, std::vector<int> storageServerIndices) {
+	void addCost(TransactionTag tag, double cost, std::vector<int> const& storageServerIndices, OpType opType) {
 		if (storageServerIndices.empty()) {
 			auto const costPerSS = cost / storageServers.size();
 			for (auto& storageServer : storageServers) {
-				storageServer.addReadCost(tag, costPerSS);
+				if (opType == OpType::READ) {
+					storageServer.addReadCost(tag, costPerSS);
+				} else {
+					storageServer.addWriteCost(tag, costPerSS);
+				}
 			}
 		} else {
 			auto const costPerSS = cost / storageServerIndices.size();
 			for (auto i : storageServerIndices) {
-				storageServers[i].addReadCost(tag, costPerSS);
-			}
-		}
-	}
-
-	void addWriteCost(TransactionTag tag, double cost, std::vector<int> storageServerIndices) {
-		if (storageServerIndices.empty()) {
-			auto const costPerSS = cost / storageServers.size();
-			for (auto& storageServer : storageServers) {
-				storageServer.addWriteCost(tag, costPerSS);
-			}
-		} else {
-			auto const costPerSS = cost / storageServerIndices.size();
-			for (auto i : storageServerIndices) {
-				storageServers[i].addWriteCost(tag, costPerSS);
+				if (opType == OpType::READ) {
+					storageServers[i].addReadCost(tag, costPerSS);
+				} else {
+					storageServers[i].addWriteCost(tag, costPerSS);
+				}
 			}
 		}
 	}
@@ -681,11 +636,7 @@ ACTOR Future<Void> runClient(GlobalTagThrottler* globalTagThrottler,
 		auto tpsLimit = getTPSLimit(*globalTagThrottler, tag);
 		state double enforcedRate = tpsLimit.present() ? std::min<double>(tpsRate, tpsLimit.get()) : tpsRate;
 		wait(delay(1 / enforcedRate));
-		if (opType == OpType::WRITE) {
-			storageServers->addWriteCost(tag, costPerTransaction, storageServerIndices);
-		} else {
-			storageServers->addReadCost(tag, costPerTransaction, storageServerIndices);
-		}
+		storageServers->addCost(tag, costPerTransaction, storageServerIndices, opType);
 		globalTagThrottler->addRequests(tag, 1);
 	}
 }
