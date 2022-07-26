@@ -60,11 +60,6 @@
 // PerClient TPS: Because the target throughput must be shared across multiple clients, and all clients must
 //           be given the same limits, a per-client limit is calculated based on the current and target throughputs.
 
-namespace {
-enum class LimitType { RESERVED, TOTAL };
-enum class OpType { READ, WRITE };
-} // namespace
-
 class GlobalTagThrottlerImpl {
 	template <class K, class V>
 	static Optional<V> tryGet(std::unordered_map<K, V> const& m, K const& k) {
@@ -95,6 +90,9 @@ class GlobalTagThrottlerImpl {
 			return b;
 		}
 	}
+
+	enum class LimitType { RESERVED, TOTAL };
+	enum class OpType { READ, WRITE };
 
 	class ThroughputCounters {
 		Smoother readCost;
@@ -521,6 +519,11 @@ void GlobalTagThrottler::setQuota(TransactionTagRef tag, ThrottleApi::TagQuotaVa
 void GlobalTagThrottler::removeQuota(TransactionTagRef tag) {
 	return impl->removeQuota(tag);
 }
+
+namespace {
+enum class LimitType { RESERVED, TOTAL };
+enum class OpType { READ, WRITE };
+} // namespace
 
 namespace GlobalTagThrottlerTesting {
 
