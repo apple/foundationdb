@@ -5957,7 +5957,7 @@ ACTOR static Future<Void> commitDummyTransaction(Reference<TransactionState> trS
 			} else {
 				tr.trState->skipTenantPrefixAndIdResolution = true;
 				tr.trState->tenantId = trState->tenantId;
-				TEST(true); // Commit of a dummy transaction in tenant keyspace
+				CODE_PROBE(true, "Commit of a dummy transaction in tenant keyspace");
 			}
 			tr.setOption(FDBTransactionOptions::CAUSAL_WRITE_RISKY);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -6149,7 +6149,8 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 			applyTenantPrefix(req, locationInfo.tenantEntry.prefix);
 			tenantPrefix = locationInfo.tenantEntry.prefix;
 		}
-		TEST(trState->skipTenantPrefixAndIdResolution); // Tenant prefix/id resolution skipped for dummy transaction
+		CODE_PROBE(trState->skipTenantPrefixAndIdResolution,
+		           "Tenant prefix/id resolution skipped for dummy transaction");
 		req.tenantInfo = trState->getTenantInfo();
 		startTime = now();
 		state Optional<UID> commitID = Optional<UID>();

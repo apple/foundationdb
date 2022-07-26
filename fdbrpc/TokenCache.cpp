@@ -162,7 +162,7 @@ bool TokenCacheImpl::validateAndAdd(double currentTime, StringRef token, Network
 	Arena arena;
 	authz::jwt::TokenRef t;
 	if (!authz::jwt::parseToken(arena, t, token)) {
-		TEST(true); // Token can't be parsed
+		CODE_PROBE(true, "Token can't be parsed");
 		TraceEvent(SevWarn, "InvalidToken")
 		    .detail("From", peer)
 		    .detail("Reason", "ParseError")
@@ -171,31 +171,31 @@ bool TokenCacheImpl::validateAndAdd(double currentTime, StringRef token, Network
 	}
 	auto key = FlowTransport::transport().getPublicKeyByName(t.keyId);
 	if (!key.present()) {
-		TEST(true); // Token referencing non-existing key
+		CODE_PROBE(true, "Token referencing non-existing key");
 		TRACE_INVALID_PARSED_TOKEN("UnknownKey", t);
 		return false;
 	} else if (!t.expiresAtUnixTime.present()) {
-		TEST(true); // Token has no expiration time
+		CODE_PROBE(true, "Token has no expiration time");
 		TRACE_INVALID_PARSED_TOKEN("NoExpirationTime", t);
 		return false;
 	} else if (double(t.expiresAtUnixTime.get()) <= currentTime) {
-		TEST(true); // Expired token
+		CODE_PROBE(true, "Expired token");
 		TRACE_INVALID_PARSED_TOKEN("Expired", t);
 		return false;
 	} else if (!t.notBeforeUnixTime.present()) {
-		TEST(true); // Token has no not-before field
+		CODE_PROBE(true, "Token has no not-before field");
 		TRACE_INVALID_PARSED_TOKEN("NoNotBefore", t);
 		return false;
 	} else if (double(t.notBeforeUnixTime.get()) > currentTime) {
-		TEST(true); // Tokens not-before is in the future
+		CODE_PROBE(true, "Tokens not-before is in the future");
 		TRACE_INVALID_PARSED_TOKEN("TokenNotYetValid", t);
 		return false;
 	} else if (!t.tenants.present()) {
-		TEST(true); // Token with no tenants
+		CODE_PROBE(true, "Token with no tenants");
 		TRACE_INVALID_PARSED_TOKEN("NoTenants", t);
 		return false;
 	} else if (!authz::jwt::verifyToken(token, key.get())) {
-		TEST(true); // Token with invalid signature
+		CODE_PROBE(true, "Token with invalid signature");
 		TRACE_INVALID_PARSED_TOKEN("InvalidSignature", t);
 		return false;
 	} else {
@@ -227,7 +227,7 @@ bool TokenCacheImpl::validate(TenantNameRef name, StringRef token) {
 
 	auto& entry = cachedEntry.get();
 	if (entry->expirationTime < currentTime) {
-		TEST(true); // Read expired token from cache
+		CODE_PROBE(true, "Found expired token in cache");
 		TraceEvent(SevWarn, "InvalidToken").detail("From", peer).detail("Reason", "ExpiredInCache");
 		return false;
 	}
@@ -239,7 +239,7 @@ bool TokenCacheImpl::validate(TenantNameRef name, StringRef token) {
 		}
 	}
 	if (!tenantFound) {
-		TEST(true); // Valid token doesn't reference tenant
+		CODE_PROBE(true, "Valid token doesn't reference tenant");
 		TraceEvent(SevWarn, "TenantTokenMismatch").detail("From", peer).detail("Tenant", name.toString());
 		return false;
 	}

@@ -46,7 +46,8 @@ struct CreateTenantWorkload : TestWorkload {
 
 	ACTOR static Future<Void> _setup(CreateTenantWorkload* self, Database db) {
 		try {
-			TenantMapEntry entry = wait(TenantAPI::createTenant(db.getReference(), self->tenant));
+			Optional<TenantMapEntry> entry = wait(TenantAPI::createTenant(db.getReference(), self->tenant));
+			ASSERT(entry.present());
 		} catch (Error& e) {
 			TraceEvent(SevError, "TenantCreationFailed").error(e);
 			if (e.code() == error_code_actor_cancelled) {
