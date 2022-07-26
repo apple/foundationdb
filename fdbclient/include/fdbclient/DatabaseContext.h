@@ -638,14 +638,18 @@ private:
 
 // Similar to tr.onError(), but doesn't require a DatabaseContext.
 struct Backoff {
+	Backoff(double backoff = CLIENT_KNOBS->DEFAULT_BACKOFF, double maxBackoff = CLIENT_KNOBS->DEFAULT_MAX_BACKOFF)
+	  : backoff(backoff), maxBackoff(maxBackoff) {}
+
 	Future<Void> onError() {
 		double currentBackoff = backoff;
-		backoff = std::min(backoff * CLIENT_KNOBS->BACKOFF_GROWTH_RATE, CLIENT_KNOBS->DEFAULT_MAX_BACKOFF);
+		backoff = std::min(backoff * CLIENT_KNOBS->BACKOFF_GROWTH_RATE, maxBackoff);
 		return delay(currentBackoff * deterministicRandom()->random01());
 	}
 
 private:
-	double backoff = CLIENT_KNOBS->DEFAULT_BACKOFF;
+	double backoff;
+	double maxBackoff;
 };
 
 #endif

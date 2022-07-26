@@ -31,6 +31,7 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/SpecialKeySpace.actor.h"
 #include "fdbclient/TenantManagement.actor.h"
+#include "libb64/encode.h"
 #include "flow/Arena.h"
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -70,15 +71,12 @@ private:
 	                                        KeyRangeRef kr,
 	                                        RangeResult* results,
 	                                        GetRangeLimits limitsHint) {
-		std::map<TenantName, TenantMapEntry> tenants =
+		std::vector<std::pair<TenantName, TenantMapEntry>> tenants =
 		    wait(TenantAPI::listTenantsTransaction(&ryw->getTransaction(), kr.begin, kr.end, limitsHint.rows));
 
 		for (auto tenant : tenants) {
-			json_spirit::mObject tenantEntry;
-			tenantEntry["id"] = tenant.second.id;
-			tenantEntry["prefix"] = tenant.second.prefix.toString();
-			std::string tenantEntryString = json_spirit::write_string(json_spirit::mValue(tenantEntry));
-			ValueRef tenantEntryBytes(results->arena(), tenantEntryString);
+			std::string jsonString = tenant.second.toJson(ryw->getDatabase()->apiVersion);
+			ValueRef tenantEntryBytes(results->arena(), jsonString);
 			results->push_back(results->arena(),
 			                   KeyValueRef(withTenantMapPrefix(tenant.first, results->arena()), tenantEntryBytes));
 		}
@@ -108,16 +106,17 @@ private:
 	}
 
 	ACTOR static Future<Void> createTenants(ReadYourWritesTransaction* ryw, std::vector<TenantNameRef> tenants) {
-		Optional<Value> lastIdVal = wait(ryw->getTransaction().get(tenantLastIdKey));
-		int64_t previousId = lastIdVal.present() ? TenantMapEntry::prefixToId(lastIdVal.get()) : -1;
+		int64_t _nextId = wait(TenantAPI::getNextTenantId(&ryw->getTransaction()));
+		int64_t nextId = _nextId;
 
 		std::vector<Future<Void>> createFutures;
 		for (auto tenant : tenants) {
+			state TenantMapEntry tenantEntry(nextId++, TenantState::READY);
 			createFutures.push_back(
-			    success(TenantAPI::createTenantTransaction(&ryw->getTransaction(), tenant, ++previousId)));
+			    success(TenantAPI::createTenantTransaction(&ryw->getTransaction(), tenant, tenantEntry)));
 		}
 
-		ryw->getTransaction().set(tenantLastIdKey, TenantMapEntry::idToPrefix(previousId));
+		TenantMetadata::lastTenantId.set(&ryw->getTransaction(), nextId - 1);
 		wait(waitForAll(createFutures));
 		return Void();
 	}
@@ -125,7 +124,7 @@ private:
 	ACTOR static Future<Void> deleteTenantRange(ReadYourWritesTransaction* ryw,
 	                                            TenantName beginTenant,
 	                                            TenantName endTenant) {
-		state std::map<TenantName, TenantMapEntry> tenants = wait(
+		state std::vector<std::pair<TenantName, TenantMapEntry>> tenants = wait(
 		    TenantAPI::listTenantsTransaction(&ryw->getTransaction(), beginTenant, endTenant, CLIENT_KNOBS->TOO_MANY));
 
 		if (tenants.size() == CLIENT_KNOBS->TOO_MANY) {

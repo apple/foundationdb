@@ -1420,7 +1420,8 @@ private:
 			}
 			return Void();
 		} catch (...) {
-			TEST(true); // If we get cancelled here, we are holding the lock but the caller doesn't know, so release it
+			CODE_PROBE(true,
+			           "If we get cancelled here, we are holding the lock but the caller doesn't know, so release it");
 			lock->release(amount);
 			throw;
 		}
@@ -1977,22 +1978,25 @@ Future<decltype(std::declval<Fun>()(std::declval<T>()).getValue())> runAfter(Fut
 	return res;
 }
 
-ACTOR template <class T, class U>
-Future<U> runAfter(Future<T> lhs, Future<U> rhs) {
-	T val1 = wait(lhs);
-	U res = wait(rhs);
-	return res;
-}
-
 template <class T, class Fun>
 auto operator>>=(Future<T> lhs, Fun&& rhs) -> Future<decltype(rhs(std::declval<T>()))> {
 	return runAfter(lhs, std::forward<Fun>(rhs));
 }
 
+/*
+ * NOTE: This implementation can't guarantee the doesn't really enforce the ACTOR execution order. See issue #7708
+ACTOR template <class T, class U>
+Future<U> runAfter(Future<T> lhs, Future<U> rhs) {
+    T val1 = wait(lhs);
+    U res = wait(rhs);
+    return res;
+}
+
 template <class T, class U>
 Future<U> operator>>(Future<T> const& lhs, Future<U> const& rhs) {
-	return runAfter(lhs, rhs);
+    return runAfter(lhs, rhs);
 }
+ */
 
 /*
  * IAsyncListener is similar to AsyncVar, but it decouples the input and output, so the translation unit

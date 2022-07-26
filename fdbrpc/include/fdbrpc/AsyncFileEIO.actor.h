@@ -116,7 +116,7 @@ public:
 	static Future<Void> deleteFile(std::string filename, bool mustBeDurable) {
 		::deleteFile(filename);
 		if (mustBeDurable) {
-			TEST(true); // deleteFile and fsync parent dir
+			CODE_PROBE(true, "deleteFile and fsync parent dir");
 			return async_fsync_parent(filename);
 		} else
 			return Void();

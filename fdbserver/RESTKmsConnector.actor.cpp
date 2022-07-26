@@ -21,7 +21,7 @@
 #include "fdbserver/RESTKmsConnector.h"
 
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/HTTP.h"
+#include "fdbrpc/HTTP.h"
 #include "flow/IAsyncFile.h"
 #include "fdbserver/KmsConnectorInterface.h"
 #include "fdbserver/Knobs.h"

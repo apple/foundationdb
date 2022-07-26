@@ -24,6 +24,18 @@
 // This file contains functions for readers who want to materialize blob granules from the underlying files
 
 #include "fdbclient/BlobGranuleCommon.h"
+#include "flow/CompressionUtils.h"
+
+Value serializeChunkedSnapshot(Standalone<GranuleSnapshot> snapshot,
+                               int chunkSize,
+                               Optional<CompressionFilter> compressFilter,
+                               Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx = {});
+
+Value serializeChunkedDeltaFile(Standalone<GranuleDeltas> deltas,
+                                const KeyRangeRef& fileRange,
+                                int chunkSize,
+                                Optional<CompressionFilter> compressFilter,
+                                Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx = {});
 
 ErrorOr<RangeResult> loadAndMaterializeBlobGranules(const Standalone<VectorRef<BlobGranuleChunkRef>>& files,
                                                     const KeyRangeRef& keyRange,

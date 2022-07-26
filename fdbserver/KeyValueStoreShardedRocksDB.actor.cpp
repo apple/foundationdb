@@ -578,6 +578,28 @@ class ShardManager {
 public:
 	ShardManager(std::string path, UID logId) : path(path), logId(logId), dataShardMap(nullptr, specialKeys.end) {}
 
+	ACTOR static Future<Void> shardMetricsLogger(std::shared_ptr<ShardedRocksDBState> rState,
+	                                             Future<Void> openFuture,
+	                                             ShardManager* shardManager) {
+		try {
+			wait(openFuture);
+			loop {
+				wait(delay(SERVER_KNOBS->ROCKSDB_METRICS_DELAY));
+				if (rState->closing) {
+					break;
+				}
+				TraceEvent(SevInfo, "KVSPhysialShardMetrics")
+				    .detail("NumActiveShards", shardManager->numActiveShards())
+				    .detail("TotalPhysicalShards", shardManager->numPhysicalShards());
+			}
+		} catch (Error& e) {
+			if (e.code() != error_code_actor_cancelled) {
+				TraceEvent(SevError, "ShardMetricsLoggerError").errorUnsuppressed(e);
+			}
+		}
+		return Void();
+	}
+
 	rocksdb::Status init() {
 		// Open instance.
 		TraceEvent(SevVerbose, "ShardManagerInitBegin", this->logId).detail("DataPath", path);
@@ -629,7 +651,7 @@ public:
 				    .detail("Range", range)
 				    .detail("PhysicalShard", name);
 				auto it = physicalShards.find(name);
-				// Create missing shards.
+				// Raise error if physical shard is missing.
 				if (it == physicalShards.end()) {
 					TraceEvent(SevError, "ShardedRocksDB").detail("MissingShard", name);
 					return rocksdb::Status::NotFound();
@@ -637,6 +659,7 @@ public:
 				std::unique_ptr<DataShard> dataShard = std::make_unique<DataShard>(range, it->second.get());
 				dataShardMap.insert(range, dataShard.get());
 				it->second->dataShards[range.begin.toString()] = std::move(dataShard);
+				activePhysicalShardIds.emplace(name);
 			}
 			// TODO: remove unused column families.
 
@@ -665,7 +688,7 @@ public:
 				return status;
 			}
 			metadataShard->readIterPool->update();
-			TraceEvent(SevVerbose, "InitializeMetaDataShard", this->logId)
+			TraceEvent(SevInfo, "InitializeMetaDataShard", this->logId)
 			    .detail("MetadataShardCF", metadataShard->cf->GetID());
 		}
 		physicalShards["kvs-metadata"] = metadataShard;
@@ -719,6 +742,8 @@ public:
 		auto [it, inserted] = physicalShards.emplace(id, std::make_shared<PhysicalShard>(db, id));
 		std::shared_ptr<PhysicalShard>& shard = it->second;
 
+		activePhysicalShardIds.emplace(id);
+
 		auto dataShard = std::make_unique<DataShard>(range, shard.get());
 		dataShardMap.insert(range, dataShard.get());
 		shard->dataShards[range.begin.toString()] = std::move(dataShard);
@@ -767,6 +792,7 @@ public:
 				if (existingShard->dataShards.size() == 0) {
 					TraceEvent(SevDebug, "ShardedRocksDB").detail("EmptyShardId", existingShard->id);
 					shardIds.push_back(existingShard->id);
+					activePhysicalShardIds.erase(existingShard->id);
 				}
 				continue;
 			}
@@ -955,6 +981,10 @@ public:
 
 	std::unordered_map<uint32_t, rocksdb::ColumnFamilyHandle*>* getColumnFamilyMap() { return &columnFamilyMap; }
 
+	size_t numPhysicalShards() const { return physicalShards.size(); };
+
+	size_t numActiveShards() const { return activePhysicalShardIds.size(); };
+
 	std::vector<std::pair<KeyRange, std::string>> getDataMapping() {
 		std::vector<std::pair<KeyRange, std::string>> dataMap;
 		for (auto it : dataShardMap.ranges()) {
@@ -986,6 +1016,7 @@ private:
 	const UID logId;
 	rocksdb::DB* db = nullptr;
 	std::unordered_map<std::string, std::shared_ptr<PhysicalShard>> physicalShards;
+	std::unordered_set<std::string> activePhysicalShardIds;
 	// Stores mapping between cf id and cf handle, used during compaction.
 	std::unordered_map<uint32_t, rocksdb::ColumnFamilyHandle*> columnFamilyMap;
 	std::unique_ptr<rocksdb::WriteBatch> writeBatch;
@@ -2032,7 +2063,9 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			            ? true
 			            : false) {
 				for (const DataShard* shard : shards) {
-					shardRanges.emplace_back(shard->physicalShard, keys & shard->range);
+					if (shard != nullptr) {
+						shardRanges.emplace_back(shard->physicalShard, keys & shard->range);
+					}
 				}
 			}
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_RANGE_TIME_ESTIMATE; }
@@ -2074,7 +2107,12 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			int accumulatedBytes = 0;
 			int numShards = 0;
 			for (auto& [shard, range] : a.shardRanges) {
-				ASSERT(shard != nullptr && shard->initialized());
+				if (shard == nullptr || !shard->initialized()) {
+					TraceEvent(SevWarn, "ShardedRocksReadRangeShardNotReady", logId)
+					    .detail("Range", range)
+					    .detail("Reason", shard == nullptr ? "Not Exist" : "Not Initialized");
+					continue;
+				}
 				auto bytesRead = readRangeInDb(shard, range, rowLimit, byteLimit, &result);
 				if (bytesRead < 0) {
 					// Error reading an instance.
@@ -2179,6 +2217,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 	KeyValueStoreType getType() const override { return KeyValueStoreType(KeyValueStoreType::SSD_SHARDED_ROCKSDB); }
 
+	bool shardAware() const override { return true; }
+
 	Future<Void> init() override {
 		if (openFuture.isValid()) {
 			return openFuture;
@@ -2189,6 +2229,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			auto a = std::make_unique<Writer::OpenAction>(
 			    &shardManager, metrics, &readSemaphore, &fetchSemaphore, errorListener);
 			openFuture = a->done.getFuture();
+			this->metrics = ShardManager::shardMetricsLogger(this->rState, openFuture, &shardManager);
 			this->refreshHolder = refreshReadIteratorPools(this->rState, openFuture, shardManager.getAllShards());
 			writeThread->post(a.release());
 			return openFuture;
@@ -2261,7 +2302,9 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		auto* shard = shardManager.getDataShard(key);
 		if (shard == nullptr || !shard->physicalShard->initialized()) {
 			// TODO: read non-exist system key range should not cause an error.
-			TraceEvent(SevError, "ShardedRocksDB").detail("Detail", "Read non-exist key range").detail("ReadKey", key);
+			TraceEvent(SevWarnAlways, "ShardedRocksDB")
+			    .detail("Detail", "Read non-exist key range")
+			    .detail("ReadKey", key);
 			return Optional<Value>();
 		}
 
@@ -2334,12 +2377,6 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	                              IKeyValueStore::ReadType type) override {
 		TraceEvent(SevVerbose, "ShardedRocksReadRangeBegin", this->id).detail("Range", keys);
 		auto shards = shardManager.getDataShardsByRange(keys);
-
-		for (DataShard* shard : shards) {
-			if (shard == nullptr || !shard->physicalShard->initialized()) {
-				return RangeResult();
-			}
-		}
 
 		if (!shouldThrottle(type, keys.begin)) {
 			auto a = new Reader::ReadRangeAction(keys, shards, rowLimit, byteLimit);
@@ -2479,8 +2516,9 @@ TEST_CASE("noSim/ShardedRocksDB/RangeOps") {
 	addRangeFutures.push_back(kvStore->addRange(KeyRangeRef("0"_sr, "3"_sr), "shard-1"));
 	addRangeFutures.push_back(kvStore->addRange(KeyRangeRef("4"_sr, "7"_sr), "shard-2"));
 
-	kvStore->persistRangeMapping(KeyRangeRef("0"_sr, "7"_sr), true);
 	wait(waitForAll(addRangeFutures));
+
+	kvStore->persistRangeMapping(KeyRangeRef("0"_sr, "7"_sr), true);
 
 	// write to shard 1
 	state RangeResult expectedRows;
@@ -2669,6 +2707,7 @@ TEST_CASE("noSim/ShardedRocksDB/ShardOps") {
 	mapping.push_back(std::make_pair(KeyRange(KeyRangeRef("m"_sr, "n"_sr)), "shard-3"));
 	mapping.push_back(std::make_pair(KeyRange(KeyRangeRef("u"_sr, "v"_sr)), "shard-3"));
 	mapping.push_back(std::make_pair(KeyRange(KeyRangeRef("x"_sr, "z"_sr)), "shard-1"));
+	mapping.push_back(std::make_pair(specialKeys, "default"));
 
 	for (auto it = dataMap.begin(); it != dataMap.end(); ++it) {
 		std::cout << "Begin " << it->first.begin.toString() << ", End " << it->first.end.toString() << ", id "
@@ -2706,7 +2745,7 @@ TEST_CASE("noSim/ShardedRocksDB/ShardOps") {
 	wait(kvStore->cleanUpShardsIfNeeded(shardsToCleanUp));
 
 	auto dataMap = rocksdbStore->getDataMapping();
-	ASSERT_EQ(dataMap.size(), 1);
+	ASSERT_EQ(dataMap.size(), 2);
 	ASSERT(dataMap[0].second == "shard-2");
 
 	Future<Void> closed = kvStore->onClosed();

@@ -28,6 +28,11 @@
 #include "fdbclient/Versionstamp.h"
 
 struct Tuple {
+	struct UnicodeStr {
+		StringRef str;
+		explicit UnicodeStr(StringRef str) : str(str) {}
+	};
+
 	Tuple() {}
 
 	// Tuple parsing normally does not care of the final value is a numeric type and is incomplete.
@@ -41,14 +46,15 @@ struct Tuple {
 	// the str needs to be a Tuple encoded string.
 	Tuple& appendRaw(StringRef const& str);
 	Tuple& append(StringRef const& str, bool utf8 = false);
+	Tuple& append(UnicodeStr const& str);
+	Tuple& append(int32_t);
 	Tuple& append(int64_t);
-	// There are some ambiguous append calls in fdbclient, so to make it easier
-	// to add append for floats and doubles, name them differently for now.
-	Tuple& appendBool(bool);
-	Tuple& appendFloat(float);
-	Tuple& appendDouble(double);
+	Tuple& append(bool);
+	Tuple& append(float);
+	Tuple& append(double);
+	Tuple& append(std::nullptr_t);
 	Tuple& appendNull();
-	Tuple& appendVersionstamp(Versionstamp const&);
+	Tuple& append(Versionstamp const&);
 
 	StringRef pack() const { return StringRef(data.begin(), data.size()); }
 
@@ -83,6 +89,18 @@ struct Tuple {
 	// Return packed data with the arena it resides in
 	Standalone<VectorRef<uint8_t>> getData() { return data; }
 	Standalone<StringRef> getDataAsStandalone() { return Standalone<StringRef>(pack(), data.arena()); }
+
+	// Create a tuple from a parameter pack
+	template <class... Types>
+	static Tuple makeTuple(Types&&... args) {
+		Tuple t;
+
+		// Use a fold expression to append each argument using the << operator.
+		// https://en.cppreference.com/w/cpp/language/fold
+		(t << ... << std::forward<Types>(args));
+
+		return t;
+	}
 
 private:
 	Tuple(const StringRef& data, bool exclude_incomplete = false);
