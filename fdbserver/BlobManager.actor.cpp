@@ -285,9 +285,9 @@ struct BlobManagerStats {
 };
 
 enum MergeCandidateState {
+	MergeCandidateUnknown,
 	MergeCandidateCannotMerge,
 	MergeCandidateCanMerge,
-	MergeCandidateUnknown,
 	MergeCandidateMerging
 };
 
@@ -306,19 +306,20 @@ struct MergeCandidateInfo {
 	MergeCandidateState st;
 	UID granuleID;
 	Version startVersion;
-	bool mergeNow;
+	// This is if this candidate has been seen by the merge checker before.
+	bool seen;
 
-	MergeCandidateInfo() : st(MergeCandidateUnknown), startVersion(invalidVersion), mergeNow(false) {}
+	MergeCandidateInfo() : st(MergeCandidateUnknown), startVersion(invalidVersion), seen(false) {}
 
-	MergeCandidateInfo(MergeCandidateState st) : st(st), startVersion(invalidVersion), mergeNow(false) {
+	MergeCandidateInfo(MergeCandidateState st) : st(st), startVersion(invalidVersion), seen(false) {
 		ASSERT(st != MergeCandidateCanMerge);
 	}
 	MergeCandidateInfo(UID granuleID, Version startVersion)
-	  : st(MergeCandidateCanMerge), granuleID(granuleID), startVersion(startVersion), mergeNow(false) {}
+	  : st(MergeCandidateCanMerge), granuleID(granuleID), startVersion(startVersion), seen(false) {}
 
 	bool canMerge() const { return st == MergeCandidateCanMerge; }
 
-	bool canMergeNow() const { return st == MergeCandidateCanMerge && mergeNow; }
+	bool mergeEligible() const { return st == MergeCandidateCanMerge && seen; }
 };
 
 struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
@@ -419,10 +420,12 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 		}
 	}
 
-	void clearMergeCandidate(const KeyRangeRef& range, MergeCandidateState st) {
+	void setMergeCandidate(const KeyRangeRef& range, MergeCandidateState st) {
 		ASSERT(st != MergeCandidateCanMerge);
 		mergeCandidates.insert(range, MergeCandidateInfo(st));
 	}
+
+	void clearMergeCandidate(const KeyRangeRef& range) { setMergeCandidate(range, MergeCandidateCannotMerge); }
 };
 
 // Helper function for alignKeys().
@@ -1835,7 +1838,7 @@ ACTOR Future<Void> finishMergeGranules(Reference<BlobManagerData> bmData,
 
 	bmData->boundaryEvaluations.insert(mergeRange,
 	                                   BoundaryEvaluation(bmData->epoch, seqnoForEval, BoundaryEvalType::MERGE, 0, 0));
-	bmData->clearMergeCandidate(mergeRange, MergeCandidateMerging);
+	bmData->setMergeCandidate(mergeRange, MergeCandidateMerging);
 
 	return Void();
 }
@@ -1889,7 +1892,7 @@ static void attemptStartMerge(Reference<BlobManagerData> bmData,
 	// boundaryEvals because they're both updated before maybeSplitRange is called. This handles split/merge races.
 	auto reCheckMergeCandidates = bmData->mergeCandidates.intersectingRanges(mergeRange);
 	for (auto it : reCheckMergeCandidates) {
-		if (!it->cvalue().canMergeNow()) {
+		if (!it->cvalue().mergeEligible()) {
 			CODE_PROBE(true, " granule no longer merge candidate after checking metrics, aborting merge");
 			return;
 		}
@@ -1904,7 +1907,7 @@ static void attemptStartMerge(Reference<BlobManagerData> bmData,
 	}
 	CODE_PROBE(true, "Doing granule merge");
 	bmData->activeGranuleMerges.insert(mergeRange, 0);
-	bmData->clearMergeCandidate(mergeRange, MergeCandidateMerging);
+	bmData->setMergeCandidate(mergeRange, MergeCandidateMerging);
 	// Now, after setting activeGranuleMerges, we have committed to doing the merge, so any subsequent split eval for
 	// any of the ranges will be ignored. This handles merge/split races.
 	bmData->addActor.send(doMerge(bmData, mergeRange, toMerge));
@@ -2000,18 +2003,18 @@ ACTOR Future<Void> granuleMergeChecker(Reference<BlobManagerData> bmData) {
 		std::vector<std::tuple<UID, KeyRange, Version>> currentCandidates;
 
 		for (auto& it : allRanges) {
-			if (!it->cvalue().canMergeNow() || currentCandidates.size() == maxRangeSize) {
+			if (!it->cvalue().mergeEligible() || currentCandidates.size() == maxRangeSize) {
 				if (currentCandidates.size() >= 2) {
 					mergeChecks.push_back(attemptMerges(bmData, currentCandidates));
 				}
 				currentCandidates.clear();
 			}
 
-			if (it->cvalue().canMergeNow()) {
+			if (it->cvalue().mergeEligible()) {
 				currentCandidates.push_back(std::tuple(it->cvalue().granuleID, it->range(), it->cvalue().startVersion));
 			} else if (it->cvalue().canMerge()) {
 				// set flag so this can get merged on the next pass
-				it->value().mergeNow = true;
+				it->value().seen = true;
 			}
 		}
 		if (currentCandidates.size() >= 2) {
@@ -2349,7 +2352,7 @@ ACTOR Future<Void> monitorBlobWorkerStatus(Reference<BlobManagerData> bmData, Bl
 
 					// clear merge candidates for range, if not already merging
 					if (clearMergeCandidate) {
-						bmData->clearMergeCandidate(rep.granuleRange, MergeCandidateCannotMerge);
+						bmData->clearMergeCandidate(rep.granuleRange);
 					}
 				}
 				if (rep.mergeCandidate && !ignore) {
@@ -2634,7 +2637,7 @@ ACTOR Future<Void> resumeActiveMerges(Reference<BlobManagerData> bmData) {
 				                                          parentGranuleStartVersions));
 				bmData->boundaryEvaluations.insert(mergeRange, eval);
 				bmData->activeGranuleMerges.insert(mergeRange, mergeVersion);
-				bmData->clearMergeCandidate(mergeRange, MergeCandidateMerging);
+				bmData->setMergeCandidate(mergeRange, MergeCandidateMerging);
 			}
 
 			if (result.more) {
