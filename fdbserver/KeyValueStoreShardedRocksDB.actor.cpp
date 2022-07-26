@@ -110,9 +110,9 @@ class RocksDBErrorListener : public rocksdb::EventListener {
 public:
 	RocksDBErrorListener(){};
 	void OnBackgroundError(rocksdb::BackgroundErrorReason reason, rocksdb::Status* bg_error) override {
-		TraceEvent(SevError, "RocksDBBGError")
+		TraceEvent(SevError, "ShardedRocksDBBGError")
 		    .detail("Reason", getErrorReason(reason))
-		    .detail("RocksDBSeverity", bg_error->severity())
+		    .detail("ShardedRocksDBSeverity", bg_error->severity())
 		    .detail("Status", bg_error->ToString());
 		std::unique_lock<std::mutex> lock(mutex);
 		if (!errorPromise.isValid())
@@ -186,8 +186,8 @@ std::vector<std::pair<KeyRange, std::string>> decodeShardMapping(const RangeResu
 
 void logRocksDBError(const rocksdb::Status& status, const std::string& method) {
 	auto level = status.IsTimedOut() ? SevWarn : SevError;
-	TraceEvent e(level, "RocksDBError");
-	e.detail("Error", status.ToString()).detail("Method", method).detail("RocksDBSeverity", status.severity());
+	TraceEvent e(level, "ShardedRocksDBError");
+	e.detail("Error", status.ToString()).detail("Method", method).detail("ShardedRocksDBSeverity", status.severity());
 	if (status.IsIOError()) {
 		e.detail("SubCode", status.subcode());
 	}
@@ -219,7 +219,7 @@ const char* ShardOpToString(ShardOp op) {
 	}
 }
 void logShardEvent(StringRef name, ShardOp op, Severity severity = SevInfo, const std::string& message = "") {
-	TraceEvent e(severity, "KVSShardEvent");
+	TraceEvent e(severity, "ShardedRocksKVSShardEvent");
 	e.detail("Name", name).detail("Action", ShardOpToString(op));
 	if (!message.empty()) {
 		e.detail("Message", message);
@@ -230,7 +230,7 @@ void logShardEvent(StringRef name,
                    ShardOp op,
                    Severity severity = SevInfo,
                    const std::string& message = "") {
-	TraceEvent e(severity, "KVSShardEvent");
+	TraceEvent e(severity, "ShardedRocksKVSShardEvent");
 	e.detail("Name", name).detail("Action", ShardOpToString(op)).detail("Begin", range.begin).detail("End", range.end);
 	if (message != "") {
 		e.detail("Message", message);
@@ -343,7 +343,7 @@ public:
 		ASSERT(cf);
 		readRangeOptions.background_purge_on_iterator_cleanup = true;
 		readRangeOptions.auto_prefix_mode = (SERVER_KNOBS->ROCKSDB_PREFIX_LEN > 0);
-		TraceEvent(SevVerbose, "ReadIteratorPool")
+		TraceEvent(SevVerbose, "ShardedRocksReadIteratorPool")
 		    .detail("Path", path)
 		    .detail("KnobRocksDBReadRangeReuseIterators", SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_ITERATORS)
 		    .detail("KnobRocksDBPrefixLen", SERVER_KNOBS->ROCKSDB_PREFIX_LEN);
@@ -425,7 +425,7 @@ private:
 ACTOR Future<Void> flowLockLogger(const FlowLock* readLock, const FlowLock* fetchLock) {
 	loop {
 		wait(delay(SERVER_KNOBS->ROCKSDB_METRICS_DELAY));
-		TraceEvent e("RocksDBFlowLock");
+		TraceEvent e("ShardedRocksDBFlowLock");
 		e.detail("ReadAvailable", readLock->available());
 		e.detail("ReadActivePermits", readLock->activePermits());
 		e.detail("ReadWaiters", readLock->waiters());
@@ -588,13 +588,13 @@ public:
 				if (rState->closing) {
 					break;
 				}
-				TraceEvent(SevInfo, "KVSPhysialShardMetrics")
+				TraceEvent(SevInfo, "ShardedRocksKVSPhysialShardMetrics")
 				    .detail("NumActiveShards", shardManager->numActiveShards())
 				    .detail("TotalPhysicalShards", shardManager->numPhysicalShards());
 			}
 		} catch (Error& e) {
 			if (e.code() != error_code_actor_cancelled) {
-				TraceEvent(SevError, "ShardMetricsLoggerError").errorUnsuppressed(e);
+				TraceEvent(SevError, "ShardedRocksShardMetricsLoggerError").errorUnsuppressed(e);
 			}
 		}
 		return Void();
@@ -602,7 +602,7 @@ public:
 
 	rocksdb::Status init() {
 		// Open instance.
-		TraceEvent(SevInfo, "ShardManagerInitBegin", this->logId).detail("DataPath", path);
+		TraceEvent(SevInfo, "ShardedRocksShardManagerInitBegin", this->logId).detail("DataPath", path);
 		std::vector<std::string> columnFamilies;
 		rocksdb::Options options = getOptions();
 		rocksdb::Status status = rocksdb::DB::ListColumnFamilies(options, path, &columnFamilies);
@@ -691,7 +691,7 @@ public:
 				return status;
 			}
 			metadataShard->readIterPool->update();
-			TraceEvent(SevInfo, "InitializeMetaDataShard", this->logId)
+			TraceEvent(SevInfo, "ShardedRocksInitializeMetaDataShard", this->logId)
 			    .detail("MetadataShardCF", metadataShard->cf->GetID());
 		}
 		physicalShards["kvs-metadata"] = metadataShard;
@@ -699,7 +699,7 @@ public:
 		writeBatch = std::make_unique<rocksdb::WriteBatch>();
 		dirtyShards = std::make_unique<std::set<PhysicalShard*>>();
 
-		TraceEvent(SevInfo, "ShardManagerInitEnd", this->logId).detail("DataPath", path);
+		TraceEvent(SevInfo, "ShardedRocksShardManagerInitEnd", this->logId).detail("DataPath", path);
 		return status;
 	}
 
@@ -854,7 +854,7 @@ public:
 			TraceEvent(SevError, "ShardedRocksDB").detail("Error", "write to non-exist shard").detail("WriteKey", key);
 			return;
 		}
-		TraceEvent(SevVerbose, "ShardManagerPut", this->logId)
+		TraceEvent(SevVerbose, "ShardedRocksShardManagerPut", this->logId)
 		    .detail("WriteKey", key)
 		    .detail("Value", value)
 		    .detail("MapRange", it.range())
@@ -864,7 +864,7 @@ public:
 		ASSERT(dirtyShards != nullptr);
 		writeBatch->Put(it.value()->physicalShard->cf, toSlice(key), toSlice(value));
 		dirtyShards->insert(it.value()->physicalShard);
-		TraceEvent(SevVerbose, "ShardManagerPutEnd", this->logId).detail("WriteKey", key).detail("Value", value);
+		TraceEvent(SevVerbose, "ShardedRocksShardManagerPutEnd", this->logId).detail("WriteKey", key).detail("Value", value);
 	}
 
 	void clear(KeyRef key) {
@@ -977,7 +977,7 @@ public:
 		if (!s.ok()) {
 			logRocksDBError(s, "DestroyDB");
 		}
-		TraceEvent("RocksDB", this->logId).detail("Info", "DBDestroyed");
+		TraceEvent("ShardedRocksDB", this->logId).detail("Info", "DBDestroyed");
 	}
 
 	rocksdb::DB* getDb() const { return db; }
@@ -1002,9 +1002,9 @@ public:
 	}
 
 	void validate() {
-		TraceEvent(SevVerbose, "ValidateShardManager", this->logId);
+		TraceEvent(SevVerbose, "ShardedRocksValidateShardManager", this->logId);
 		for (auto s = dataShardMap.ranges().begin(); s != dataShardMap.ranges().end(); ++s) {
-			TraceEvent e(SevVerbose, "ValidateDataShardMap", this->logId);
+			TraceEvent e(SevVerbose, "ShardedRocksValidateDataShardMap", this->logId);
 			e.detail("Range", s->range());
 			const DataShard* shard = s->value();
 			e.detail("ShardAddress", reinterpret_cast<std::uintptr_t>(shard));
@@ -1350,7 +1350,7 @@ std::shared_ptr<rocksdb::Statistics> RocksDBMetrics::getStatsObjForRocksDB() {
 }
 
 void RocksDBMetrics::logStats(rocksdb::DB* db) {
-	TraceEvent e("RocksDBMetrics");
+	TraceEvent e("ShardedRocksDBMetrics");
 	uint64_t stat;
 	for (auto& [name, ticker, cumulation] : tickerStats) {
 		stat = stats->getTickerCount(ticker);
@@ -1373,7 +1373,7 @@ void RocksDBMetrics::logStats(rocksdb::DB* db) {
 }
 
 void RocksDBMetrics::logMemUsagePerShard(std::string shardName, rocksdb::DB* db) {
-	TraceEvent e("RocksDBShardMemMetrics");
+	TraceEvent e("ShardedRocksDBShardMemMetrics");
 	uint64_t stat;
 	ASSERT(db != nullptr);
 	ASSERT(db->GetIntProperty(rocksdb::DB::Properties::kBlockCacheUsage, &stat));
@@ -1399,7 +1399,7 @@ void RocksDBMetrics::setPerfContext(int index) {
 }
 
 void RocksDBMetrics::logPerfContext(bool ignoreZeroMetric) {
-	TraceEvent e("RocksDBPerfContextMetrics");
+	TraceEvent e("ShardedRocksDBPerfContextMetrics");
 	e.setMaxEventLength(20000);
 	for (auto& [name, metric, vals] : perfContextMetrics) {
 		uint64_t s = 0;
@@ -1662,7 +1662,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				return;
 			}
 
-			TraceEvent(SevInfo, "RocksDB").detail("Method", "Open");
+			TraceEvent(SevInfo, "ShardedRocksDB").detail("Method", "Open");
 			a.done.send(Void());
 		}
 
@@ -1853,7 +1853,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			} else {
 				a.shardManager->closeAllShards();
 			}
-			TraceEvent(SevInfo, "RocksDB").detail("Method", "Close");
+			TraceEvent(SevInfo, "ShardedRocksDB").detail("Method", "Close");
 			a.done.send(Void());
 		}
 	};
@@ -1920,7 +1920,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				traceBatch.get().addEvent("GetValueDebug", a.debugID.get().first(), "Reader.Before");
 			}
 			if (readBeginTime - a.startTime > readValueTimeout) {
-				TraceEvent(SevWarn, "RocksDBError")
+				TraceEvent(SevWarn, "ShardedRocksDBError")
 				    .detail("Error", "Read value request timedout")
 				    .detail("Method", "ReadValueAction")
 				    .detail("Timeout value", readValueTimeout);
@@ -2007,7 +2007,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				                          "Reader.Before"); //.detail("TaskID", g_network->getCurrentTask());
 			}
 			if (readBeginTime - a.startTime > readValuePrefixTimeout) {
-				TraceEvent(SevWarn, "RocksDBError")
+				TraceEvent(SevWarn, "ShardedRocksDBError")
 				    .detail("Error", "Read value prefix request timedout")
 				    .detail("Method", "ReadValuePrefixAction")
 				    .detail("Timeout value", readValuePrefixTimeout);
@@ -2092,7 +2092,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				rocksDBMetrics->getReadRangeQueueWaitHistogram(threadIndex)->sampleSeconds(readBeginTime - a.startTime);
 			}
 			if (readBeginTime - a.startTime > readRangeTimeout) {
-				TraceEvent(SevWarn, "KVSReadTimeout")
+				TraceEvent(SevWarn, "ShardedRocksKVSReadTimeout")
 				    .detail("Error", "Read range request timedout")
 				    .detail("Method", "ReadRangeAction")
 				    .detail("Timeout value", readRangeTimeout);
@@ -2192,7 +2192,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			readThreads = createGenericThreadPool();
 		}
 		writeThread->addThread(new Writer(id, 0, shardManager.getColumnFamilyMap(), rocksDBMetrics), "fdb-rocksdb-wr");
-		TraceEvent("RocksDBReadThreads", id)
+		TraceEvent("ShardedRocksDBReadThreads", id)
 		    .detail("KnobRocksDBReadParallelism", SERVER_KNOBS->ROCKSDB_READ_PARALLELISM);
 		for (unsigned i = 0; i < SERVER_KNOBS->ROCKSDB_READ_PARALLELISM; ++i) {
 			readThreads->addThread(new Reader(id, i, rocksDBMetrics), "fdb-rocksdb-re");
@@ -2461,7 +2461,7 @@ IKeyValueStore* keyValueStoreShardedRocksDB(std::string const& path,
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
 	return new ShardedRocksDBKeyValueStore(path, logID);
 #else
-	TraceEvent(SevError, "RocksDBEngineInitFailure").detail("Reason", "Built without RocksDB");
+	TraceEvent(SevError, "ShardedRocksDBEngineInitFailure").detail("Reason", "Built without RocksDB");
 	ASSERT(false);
 	return nullptr;
 #endif // SSD_ROCKSDB_EXPERIMENTAL
