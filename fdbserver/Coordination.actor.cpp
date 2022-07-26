@@ -776,3 +776,78 @@ ACTOR Future<Void> coordinationServer(std::string dataFolder,
 		throw;
 	}
 }
+
+ACTOR Future<Void> changeClusterDescription(std::string datafolder, KeyRef newClusterKey, KeyRef oldClusterKey) {
+	state UID myID = deterministicRandom()->randomUniqueID();
+	state OnDemandStore store(datafolder, myID, "coordination-");
+	RangeResult res = wait(store->readRange(allKeys));
+	// Context, in coordinators' kv-store
+	// cluster description and the random id are always appear together as the clusterKey
+	// The old cluster key, (call it oldCKey) below can appear in the following scenarios:
+	// 1. oldCKey is a key in the store: the value is a binary format of _GenerationRegVal_ which contains a different
+	// clusterKey(either movedFrom or moveTo)
+	// 2. oldCKey appears in a key for forwarding message:
+	// 		2.1: the prefix is _fwdKeys.begin_: the value is the new connection string
+	//		2.2: the prefix is _fwdTimeKeys.begin_: the value is the time
+	// 3. oldCKey does not appear in any keys but in a value:
+	// 		3.1: it's in the value of a forwarding message(see 2.1)
+	//		3.2: it's inside the value of _GenerationRegVal_ (see 1), which is a cluster connection string.
+	//		it seems that even we do not change it the cluster should still be good, but to be safe we still update it.
+	for (auto& [key, value] : res) {
+		if (key.startsWith(fwdKeys.begin)) {
+			if (key.removePrefix(fwdKeys.begin) == oldClusterKey) {
+				store->clear(singleKeyRange(key));
+				store->set(KeyValueRef(newClusterKey.withPrefix(fwdKeys.begin), value));
+			} else if (value.startsWith(oldClusterKey)) {
+				store->set(KeyValueRef(key, value.removePrefix(oldClusterKey).withPrefix(newClusterKey)));
+			}
+		} else if (key.startsWith(fwdTimeKeys.begin) && key.removePrefix(fwdTimeKeys.begin) == oldClusterKey) {
+			store->clear(singleKeyRange(key));
+			store->set(KeyValueRef(newClusterKey.withPrefix(fwdTimeKeys.begin), value));
+		} else if (key == oldClusterKey) {
+			store->clear(singleKeyRange(key));
+			store->set(KeyValueRef(newClusterKey, value));
+		} else {
+			// parse the value part
+			GenerationRegVal regVal = BinaryReader::fromStringRef<GenerationRegVal>(value, IncludeVersion());
+			if (regVal.val.present()) {
+				Optional<Value> newVal = updateCCSInMovableValue(regVal.val.get(), oldClusterKey, newClusterKey);
+				if (newVal.present()) {
+					regVal.val = newVal.get();
+					store->set(KeyValueRef(
+					    key, BinaryWriter::toValue(regVal, IncludeVersion(ProtocolVersion::withGenerationRegVal()))));
+				}
+			}
+		}
+	}
+	wait(store->commit());
+	return Void();
+}
+
+Future<Void> coordChangeClusterKey(std::string dataFolder, KeyRef newClusterKey, KeyRef oldClusterKey) {
+	TraceEvent(SevInfo, "CoordChangeClusterKey")
+	    .detail("DataFolder", dataFolder)
+	    .detail("NewClusterKey", newClusterKey)
+	    .detail("OldClusterKey", oldClusterKey);
+	std::string absDataFolder = abspath(dataFolder);
+	std::vector<std::string> returnList = platform::listDirectories(absDataFolder);
+	std::vector<Future<Void>> futures;
+	for (const auto& dirEntry : returnList) {
+		if (dirEntry == "." || dirEntry == "..") {
+			continue;
+		}
+		std::string processDir = dataFolder + "/" + dirEntry;
+		TraceEvent(SevInfo, "UpdatingCoordDataForProcess").detail("ProcessDataDir", processDir);
+		std::vector<std::string> returnFiles = platform::listFiles(processDir, "");
+		bool isCoord = false;
+		for (const auto& fileEntry : returnFiles) {
+			if (fileEntry.rfind("coordination-", 0) == 0) {
+				isCoord = true;
+			}
+		}
+		if (!isCoord)
+			continue;
+		futures.push_back(changeClusterDescription(processDir, newClusterKey, oldClusterKey));
+	}
+	return waitForAll(futures);
+}

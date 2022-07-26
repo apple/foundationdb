@@ -9,6 +9,14 @@ define_property(TARGET PROPERTY COVERAGE_FILTERS
 expression in this list will be ignored when the coverage.target.xml file is \
 generated. This property is set through the add_flow_target function.")
 
+if(WIN32)
+  set(compilation_unit_macro_default OFF)
+else()
+  set(compilation_unit_macro_default ON)
+endif()
+
+set(PASS_COMPILATION_UNIT "${compilation_unit_macro_default}" CACHE BOOL
+  "Pass path to compilation unit as macro to each compilation unit (useful for code probes)")
 
 function(generate_coverage_xml)
   if(NOT (${ARGC} EQUAL "1"))
@@ -189,7 +197,7 @@ endfunction()
 
 function(add_flow_target)
   set(options EXECUTABLE STATIC_LIBRARY
-    DYNAMIC_LIBRARY)
+    DYNAMIC_LIBRARY LINK_TEST)
   set(oneValueArgs NAME)
   set(multiValueArgs SRCS COVERAGE_FILTER_OUT DISABLE_ACTOR_DIAGNOSTICS ADDL_SRCS)
   cmake_parse_arguments(AFT "${options}" "${oneValueArgs}" "${multiValueArgs}" "${ARGN}")
@@ -259,6 +267,11 @@ function(add_flow_target)
         endif()
       endif()
     endforeach()
+    if(PASS_COMPILATION_UNIT)
+      foreach(s IN LISTS sources)
+        set_source_files_properties("${s}" PROPERTIES COMPILE_DEFINITIONS "COMPILATION_UNIT=${s}")
+      endforeach()
+    endif()
     if(AFT_EXECUTABLE)
       set(strip_target ON)
       set(target_type exec)
@@ -276,6 +289,12 @@ function(add_flow_target)
       endif()
       set(strip_target ON)
       add_library(${AFT_NAME} DYNAMIC ${sources} ${AFT_ADDL_SRCS})
+    endif()
+    if(AFT_LINK_TEST)
+      set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/linktest)
+      set(strip_target ON)
+      set(target_type exec)
+      add_executable(${AFT_NAME} ${sources} ${AFT_ADDL_SRCS})
     endif()
 
     foreach(src IN LISTS sources AFT_ADDL_SRCS)

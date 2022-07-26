@@ -85,7 +85,7 @@ Values must always be encoded according to the :ref:`api-python-tuple-layer`.
    const KeyRef myGlobalConfigKey = LiteralStringRef("config/key");
    
    // When you want to set the value..
-   Tuple value = Tuple().appendDouble(1.5);
+   Tuple value = Tuple::makeTuple((double)1.5);
    
    FDBTransaction* tr = ...;
    tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);

@@ -63,6 +63,8 @@ struct ClientLeaderRegInterface {
 //  - There is no address present more than once
 class ClusterConnectionString {
 public:
+	constexpr static FileIdentifier file_identifier = 13602011;
+
 	ClusterConnectionString() {}
 	ClusterConnectionString(const std::string& connectionString);
 	ClusterConnectionString(const std::vector<NetworkAddress>& coordinators, Key key);
@@ -84,9 +86,20 @@ public:
 	std::vector<NetworkAddress> coords;
 	std::vector<Hostname> hostnames;
 
+	bool operator==(const ClusterConnectionString& other) const noexcept {
+		return key == other.key && keyDesc == other.keyDesc && coords == other.coords && hostnames == other.hostnames;
+	}
+	bool operator!=(const ClusterConnectionString& other) const noexcept { return !(*this == other); }
+
 private:
 	void parseConnString();
 	Key key, keyDesc;
+
+public:
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, coords, hostnames, key, keyDesc);
+	}
 };
 
 FDB_DECLARE_BOOLEAN_PARAM(ConnectionStringNeedsPersisted);
@@ -155,6 +168,11 @@ private:
 	// A flag that indicates whether this connection record needs to be persisted when it succesfully establishes a
 	// connection.
 	bool connectionStringNeedsPersisted;
+};
+
+template <>
+struct Traceable<IClusterConnectionRecord> : std::true_type {
+	static std::string toString(IClusterConnectionRecord const& record) { return record.toString(); }
 };
 
 struct LeaderInfo {

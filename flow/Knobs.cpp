@@ -168,6 +168,13 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( LOW_PRIORITY_DELAY_COUNT,                              5 );
 	init( LOW_PRIORITY_MAX_DELAY,                              5.0 );
 
+	// HTTP
+	init( HTTP_READ_SIZE,                                 128*1024 );
+	init( HTTP_SEND_SIZE,                                  32*1024 );
+	init( HTTP_VERBOSE_LEVEL,                                    0 );
+	init( HTTP_REQUEST_ID_HEADER,                               "" );
+	init( HTTP_RESPONSE_SKIP_VERIFY_CHECKSUM_FOR_PARTIAL_CONTENT, false );
+
 	//IAsyncFile
 	init( INCREMENTAL_DELETE_TRUNCATE_AMOUNT,                  5e8 ); //500MB
 	init( INCREMENTAL_DELETE_INTERVAL,                         1.0 ); //every 1 second
@@ -209,7 +216,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( ZERO_LENGTH_FILE_PAD,                                  1 );
 	init( TRACE_FLUSH_INTERVAL,                               0.25 );
 	init( TRACE_RETRY_OPEN_INTERVAL,						  1.00 );
-	init( MIN_TRACE_SEVERITY,                 isSimulated ? 1 : 10 ); // Related to the trace severity in Trace.h
+	init( MIN_TRACE_SEVERITY,                isSimulated ?  1 : 10 ); // Related to the trace severity in Trace.h
 	init( MAX_TRACE_SUPPRESSIONS,                              1e4 );
 	init( TRACE_DATETIME_ENABLED,                             true ); // trace time in human readable format (always real time)
 	init( TRACE_SYNC_ENABLED,                                    0 );

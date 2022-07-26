@@ -23,6 +23,7 @@
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/PImpl.h"
 
 class CoordinatedState : NonCopyable {
 public:
@@ -53,10 +54,10 @@ public:
 	//   returned from read may or may not ever have been a valid state.  Probably there was a
 	//   call to read() or setExclusive() concurrently with this pair.
 
-	uint64_t getConflict();
+	uint64_t getConflict() const;
 
 private:
-	std::unique_ptr<struct CoordinatedStateImpl> impl;
+	PImpl<struct CoordinatedStateImpl> impl;
 };
 
 class MovableCoordinatedState : NonCopyable {
@@ -78,7 +79,7 @@ public:
 	// (and therefore the caller should die).
 
 private:
-	std::unique_ptr<struct MovableCoordinatedStateImpl> impl;
+	PImpl<struct MovableCoordinatedStateImpl> impl;
 };
 
 #endif

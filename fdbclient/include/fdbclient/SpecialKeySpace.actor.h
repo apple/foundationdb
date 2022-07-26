@@ -166,6 +166,7 @@ public:
 		ACTORLINEAGE, // Sampling data
 		ACTOR_PROFILER_CONF, // profiler configuration
 		CLUSTERFILEPATH,
+		CLUSTERID, // An immutable UID for a cluster
 		CONFIGURATION, // Configuration of the cluster
 		CONNECTIONSTRING,
 		ERRORMSG, // A single key space contains a json string which describes the last error in special-key-space
@@ -538,16 +539,15 @@ public:
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
 };
 
-class TenantMapRangeImpl : public SpecialKeyRangeRWImpl {
-public:
-	const static KeyRangeRef submoduleRange;
-
-	explicit TenantMapRangeImpl(KeyRangeRef kr);
-	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
-	                             KeyRangeRef kr,
-	                             GetRangeLimits limitsHint) const override;
-	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
-};
+// If the underlying set of key-value pairs of a key space is not changing, then we expect repeating a read to give the
+// same result. Additionally, we can generate the expected result of any read if that read is reading a subrange. This
+// actor performs a read of an arbitrary subrange of [begin, end) and validates the results.
+ACTOR Future<Void> validateSpecialSubrangeRead(ReadYourWritesTransaction* ryw,
+                                               KeySelector begin,
+                                               KeySelector end,
+                                               GetRangeLimits limits,
+                                               Reverse reverse,
+                                               RangeResult result);
 
 #include "flow/unactorcompiler.h"
 #endif

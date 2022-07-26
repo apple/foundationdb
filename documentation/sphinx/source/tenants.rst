@@ -31,7 +31,7 @@ FoundationDB clusters support the following tenant modes:
 Creating and deleting tenants
 =============================
 
-Tenants can be created and deleted using the ``\xff\xff/management/tenant_map/<tenant_name>`` :doc:`special key <special-keys>` range as well as by using APIs provided in some language bindings. 
+Tenants can be created and deleted using the ``\xff\xff/management/tenant/map/<tenant_name>`` :doc:`special key <special-keys>` range as well as by using APIs provided in some language bindings. 
 
 Tenants can be created with any byte-string name that does not begin with the ``\xff`` character. Once created, a tenant will be assigned an ID and a prefix where its data will reside.
 

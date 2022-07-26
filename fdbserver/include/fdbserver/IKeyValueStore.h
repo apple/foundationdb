@@ -61,6 +61,9 @@ public:
 class IKeyValueStore : public IClosable {
 public:
 	virtual KeyValueStoreType getType() const = 0;
+	// Returns true if the KV store supports shards, i.e., implements addRange(), removeRange(), and
+	// persistRangeMapping().
+	virtual bool shardAware() const { return false; }
 	virtual void set(KeyValueRef keyValue, const Arena* arena = nullptr) = 0;
 	virtual void clear(KeyRangeRef range, const Arena* arena = nullptr) = 0;
 	virtual Future<Void> canCommit() { return Void(); }
@@ -161,6 +164,11 @@ extern IKeyValueStore* keyValueStoreRocksDB(std::string const& path,
                                             KeyValueStoreType storeType,
                                             bool checkChecksums = false,
                                             bool checkIntegrity = false);
+extern IKeyValueStore* keyValueStoreShardedRocksDB(std::string const& path,
+                                                   UID logID,
+                                                   KeyValueStoreType storeType,
+                                                   bool checkChecksums = false,
+                                                   bool checkIntegrity = false);
 extern IKeyValueStore* keyValueStoreMemory(std::string const& basename,
                                            UID logID,
                                            int64_t memoryLimit,
@@ -204,7 +212,7 @@ inline IKeyValueStore* openKVStore(KeyValueStoreType storeType,
 	case KeyValueStoreType::SSD_ROCKSDB_V1:
 		return keyValueStoreRocksDB(filename, logID, storeType);
 	case KeyValueStoreType::SSD_SHARDED_ROCKSDB:
-		return keyValueStoreRocksDB(filename, logID, storeType); // TODO: to replace the KVS in the future
+		return keyValueStoreShardedRocksDB(filename, logID, storeType, checkChecksums, checkIntegrity);
 	case KeyValueStoreType::MEMORY_RADIXTREE:
 		return keyValueStoreMemory(filename,
 		                           logID,

@@ -101,7 +101,7 @@ void GlobalConfig::trigger(KeyRef key, std::function<void(std::optional<std::any
 }
 
 void GlobalConfig::insert(KeyRef key, ValueRef value) {
-	// TraceEvent(SevInfo, "GlobalConfig_Insert").detail("Key", key).detail("Value", value);
+	// TraceEvent(SevInfo, "GlobalConfigInsert").detail("Key", key).detail("Value", value);
 	data.erase(key);
 
 	Arena arena(key.expectedSize() + value.expectedSize());
@@ -139,7 +139,7 @@ void GlobalConfig::erase(Key key) {
 }
 
 void GlobalConfig::erase(KeyRangeRef range) {
-	// TraceEvent(SevInfo, "GlobalConfig_Erase").detail("Range", range);
+	// TraceEvent(SevInfo, "GlobalConfigErase").detail("Range", range);
 	auto it = data.begin();
 	while (it != data.end()) {
 		if (range.contains(it->first)) {
@@ -153,95 +153,29 @@ void GlobalConfig::erase(KeyRangeRef range) {
 	}
 }
 
-// Older FDB versions used different keys for client profiling data. This
-// function performs a one-time migration of data in these keys to the new
-// global configuration key space.
-ACTOR Future<Void> GlobalConfig::migrate(GlobalConfig* self) {
-	state Key migratedKey("\xff\x02/fdbClientInfo/migrated/"_sr);
-	state Reference<ReadYourWritesTransaction> tr;
-	try {
-		state Backoff backoff;
-		loop {
-			tr = makeReference<ReadYourWritesTransaction>(Database(Reference<DatabaseContext>::addRef(self->cx)));
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-
-			try {
-				state Optional<Value> migrated = wait(tr->get(migratedKey));
-				if (migrated.present()) {
-					// Already performed migration.
-					return Void();
-				}
-
-				state Optional<Value> sampleRate =
-				    wait(tr->get(Key("\xff\x02/fdbClientInfo/client_txn_sample_rate/"_sr)));
-				state Optional<Value> sizeLimit =
-				    wait(tr->get(Key("\xff\x02/fdbClientInfo/client_txn_size_limit/"_sr)));
-
-				tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-				// The value doesn't matter too much, as long as the key is set.
-				tr->set(migratedKey.contents(), "1"_sr);
-				if (sampleRate.present()) {
-					const double sampleRateDbl =
-					    BinaryReader::fromStringRef<double>(sampleRate.get().contents(), Unversioned());
-					Tuple rate = Tuple().appendDouble(sampleRateDbl);
-					tr->set(GlobalConfig::prefixedKey(fdbClientInfoTxnSampleRate), rate.pack());
-				}
-				if (sizeLimit.present()) {
-					const int64_t sizeLimitInt =
-					    BinaryReader::fromStringRef<int64_t>(sizeLimit.get().contents(), Unversioned());
-					Tuple size = Tuple().append(sizeLimitInt);
-					tr->set(GlobalConfig::prefixedKey(fdbClientInfoTxnSizeLimit), size.pack());
-				}
-
-				wait(tr->commit());
-				break;
-			} catch (Error& e) {
-				// If multiple fdbserver processes are started at once, they will all
-				// attempt this migration at the same time, sometimes resulting in
-				// aborts due to conflicts. Purposefully avoid retrying, making this
-				// migration best-effort.
-				TraceEvent(SevInfo, "GlobalConfig_RetryableMigrationError").errorUnsuppressed(e).suppressFor(1.0);
-				wait(tr->onError(e));
-				tr.clear();
-				// tr is cleared, so it won't backoff properly. Use custom backoff logic here.
-				wait(backoff.onError());
-			}
-		}
-	} catch (Error& e) {
-		// Catch non-retryable errors (and do nothing).
-		TraceEvent(SevWarnAlways, "GlobalConfig_MigrationError").error(e);
-	}
-	return Void();
-}
-
 // Updates local copy of global configuration by reading the entire key-range
-// from storage.
-ACTOR Future<Void> GlobalConfig::refresh(GlobalConfig* self) {
-	// TraceEvent trace(SevInfo, "GlobalConfig_Refresh");
+// from storage (proxied through the GrvProxies).
+ACTOR Future<Void> GlobalConfig::refresh(GlobalConfig* self, Version lastKnown) {
+	// TraceEvent trace(SevInfo, "GlobalConfigRefresh");
 	self->erase(KeyRangeRef(""_sr, "\xff"_sr));
 
-	state Backoff backoff;
-
-	state Reference<ReadYourWritesTransaction> tr;
+	state Backoff backoff(CLIENT_KNOBS->GLOBAL_CONFIG_REFRESH_BACKOFF, CLIENT_KNOBS->GLOBAL_CONFIG_REFRESH_MAX_BACKOFF);
 	loop {
 		try {
-			tr = makeReference<ReadYourWritesTransaction>(Database(Reference<DatabaseContext>::addRef(self->cx)));
-			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			RangeResult result = wait(tr->getRange(globalConfigDataKeys, CLIENT_KNOBS->TOO_MANY));
-			for (const auto& kv : result) {
+			GlobalConfigRefreshReply reply =
+			    wait(timeoutError(basicLoadBalance(self->cx->getGrvProxies(UseProvisionalProxies::False),
+			                                       &GrvProxyInterface::refreshGlobalConfig,
+			                                       GlobalConfigRefreshRequest{ lastKnown }),
+			                      CLIENT_KNOBS->GLOBAL_CONFIG_REFRESH_TIMEOUT));
+			for (const auto& kv : reply.result) {
 				KeyRef systemKey = kv.key.removePrefix(globalConfigKeysPrefix);
 				self->insert(systemKey, kv.value);
 			}
-			break;
+			return Void();
 		} catch (Error& e) {
-			TraceEvent("GlobalConfigRefreshError").errorUnsuppressed(e).suppressFor(1.0);
-			wait(tr->onError(e));
-			tr.clear();
-			// tr is cleared, so it won't backoff properly. Use custom backoff logic here.
 			wait(backoff.onError());
 		}
 	}
-	return Void();
 }
 
 // Applies updates to the local copy of the global configuration when this
@@ -251,9 +185,8 @@ ACTOR Future<Void> GlobalConfig::updater(GlobalConfig* self, const ClientDBInfo*
 		try {
 			if (self->initialized.canBeSet()) {
 				wait(self->cx->onConnected());
-				wait(self->migrate(self));
 
-				wait(self->refresh(self));
+				wait(self->refresh(self, -1));
 				self->initialized.send(Void());
 			}
 
@@ -270,7 +203,7 @@ ACTOR Future<Void> GlobalConfig::updater(GlobalConfig* self, const ClientDBInfo*
 						// This process missed too many global configuration
 						// history updates or the protocol version changed, so it
 						// must re-read the entire configuration range.
-						wait(self->refresh(self));
+						wait(self->refresh(self, history.back().version));
 						if (dbInfo->history.size() > 0) {
 							self->lastUpdate = dbInfo->history.back().version;
 						}

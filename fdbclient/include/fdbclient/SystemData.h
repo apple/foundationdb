@@ -25,6 +25,7 @@
 // Functions and constants documenting the organization of the reserved keyspace in the database beginning with "\xFF"
 
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/BlobGranuleCommon.h"
 #include "fdbclient/BlobWorkerInterface.h" // TODO move the functions that depend on this out of here and into BlobWorkerInterface.h to remove this depdendency
 #include "fdbclient/StorageServerInterface.h"
 #include "Tenant.h"
@@ -32,6 +33,9 @@
 // Don't warn on constants being defined in this file.
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wunused-variable"
+
+FDB_DECLARE_BOOLEAN_PARAM(AssignEmptyRange);
+FDB_DECLARE_BOOLEAN_PARAM(UnassignShard);
 
 struct RestoreLoaderInterface;
 struct RestoreApplierInterface;
@@ -49,14 +53,27 @@ extern const KeyRef afterAllKeys;
 //	An internal mapping of where shards are located in the database. [[begin]] is the start of the shard range
 //	and the result is a list of serverIDs or Tags where these shards are located. These values can be changed
 //	as data movement occurs.
+// With ShardEncodeLocationMetaData, the encoding format is:
+//    "\xff/keyServers/[[begin]]" := "[[std::vector<serverID>, std::vector<serverID>], srcID, destID]", where srcID
+//  and destID are the source and destination `shard id`, respectively.
 extern const KeyRangeRef keyServersKeys, keyServersKeyServersKeys;
 extern const KeyRef keyServersPrefix, keyServersEnd, keyServersKeyServersKey;
+
+// Used during the transition to the new location metadata format with shard IDs.
+// If `SHARD_ENCODE_LOCATION_METADATA` is enabled, any shard that doesn't have a shard ID will be assigned this
+// temporary ID, until a permanent ID is assigned to it.
+extern const UID anonymousShardId;
+extern const uint64_t assignedEmptyShardId;
 const Key keyServersKey(const KeyRef& k);
 const KeyRef keyServersKey(const KeyRef& k, Arena& arena);
 const Value keyServersValue(RangeResult result,
                             const std::vector<UID>& src,
                             const std::vector<UID>& dest = std::vector<UID>());
 const Value keyServersValue(const std::vector<Tag>& srcTag, const std::vector<Tag>& destTag = std::vector<Tag>());
+const Value keyServersValue(const std::vector<UID>& src,
+                            const std::vector<UID>& dest,
+                            const UID& srcID,
+                            const UID& destID);
 // `result` must be the full result of getting serverTagKeys
 void decodeKeyServersValue(RangeResult result,
                            const ValueRef& value,
@@ -67,6 +84,13 @@ void decodeKeyServersValue(std::map<Tag, UID> const& tag_uid,
                            const ValueRef& value,
                            std::vector<UID>& src,
                            std::vector<UID>& dest);
+void decodeKeyServersValue(RangeResult result,
+                           const ValueRef& value,
+                           std::vector<UID>& src,
+                           std::vector<UID>& dest,
+                           UID& srcID,
+                           UID& destID,
+                           bool missingIsError = true);
 
 extern const KeyRef clusterIdKey;
 
@@ -76,6 +100,13 @@ const Key checkpointKeyFor(UID checkpointID);
 const Value checkpointValue(const CheckpointMetaData& checkpoint);
 UID decodeCheckpointKey(const KeyRef& key);
 CheckpointMetaData decodeCheckpointValue(const ValueRef& value);
+
+// "\xff/dataMoves/[[UID]] := [[DataMoveMetaData]]"
+extern const KeyRangeRef dataMoveKeys;
+const Key dataMoveKeyFor(UID dataMoveId);
+const Value dataMoveValue(const DataMoveMetaData& dataMove);
+UID decodeDataMoveKey(const KeyRef& key);
+DataMoveMetaData decodeDataMoveValue(const ValueRef& value);
 
 // "\xff/storageCacheServer/[[UID]] := StorageServerInterface"
 // This will be added by the cache server on initialization and removed by DD
@@ -102,11 +133,16 @@ void decodeStorageCacheValue(const ValueRef& value, std::vector<uint16_t>& serve
 extern const KeyRangeRef serverKeysRange;
 extern const KeyRef serverKeysPrefix;
 extern const ValueRef serverKeysTrue, serverKeysTrueEmptyRange, serverKeysFalse;
+const UID newShardId(const uint64_t physicalShardId,
+                     AssignEmptyRange assignEmptyRange,
+                     UnassignShard unassignShard = UnassignShard::False);
 const Key serverKeysKey(UID serverID, const KeyRef& keys);
 const Key serverKeysPrefixFor(UID serverID);
 UID serverKeysDecodeServer(const KeyRef& key);
 std::pair<UID, Key> serverKeysDecodeServerBegin(const KeyRef& key);
 bool serverHasKey(ValueRef storedValue);
+const Value serverKeysValue(const UID& id);
+void decodeServerKeysValue(const ValueRef& value, bool& assigned, bool& emptyRange, UID& id);
 
 extern const KeyRangeRef conflictingKeysRange;
 extern const ValueRef conflictingKeysTrue, conflictingKeysFalse;
@@ -565,7 +601,6 @@ extern const uint8_t BG_FILE_TYPE_SNAPSHOT;
 // FIXME: flip order of {filetype, version}
 // \xff\x02/bgf/(granuleUID, {snapshot|delta}, fileVersion) = [[filename]]
 extern const KeyRangeRef blobGranuleFileKeys;
-
 // \xff\x02/bgm/[[beginKey]] = [[BlobWorkerUID]]
 extern const KeyRangeRef blobGranuleMappingKeys;
 
@@ -574,6 +609,9 @@ extern const KeyRangeRef blobGranuleLockKeys;
 
 // \xff\x02/bgs/(parentGranuleUID, granuleUID) = [[BlobGranuleSplitState]]
 extern const KeyRangeRef blobGranuleSplitKeys;
+
+// \xff\x02/bgmerge/mergeGranuleId = [[BlobGranuleMergeState]]
+extern const KeyRangeRef blobGranuleMergeKeys;
 
 // \xff\x02/bgh/(beginKey,endKey,startVersion) = { granuleUID, [parentGranuleHistoryKeys] }
 extern const KeyRangeRef blobGranuleHistoryKeys;
@@ -587,8 +625,14 @@ const Key blobGranuleFileKeyFor(UID granuleID, Version fileVersion, uint8_t file
 std::tuple<UID, Version, uint8_t> decodeBlobGranuleFileKey(KeyRef const& key);
 const KeyRange blobGranuleFileKeyRangeFor(UID granuleID);
 
-const Value blobGranuleFileValueFor(StringRef const& filename, int64_t offset, int64_t length, int64_t fullFileLength);
-std::tuple<Standalone<StringRef>, int64_t, int64_t, int64_t> decodeBlobGranuleFileValue(ValueRef const& value);
+const Value blobGranuleFileValueFor(
+    StringRef const& filename,
+    int64_t offset,
+    int64_t length,
+    int64_t fullFileLength,
+    Optional<BlobGranuleCipherKeysMeta> cipherKeysMeta = Optional<BlobGranuleCipherKeysMeta>());
+std::tuple<Standalone<StringRef>, int64_t, int64_t, int64_t, Optional<BlobGranuleCipherKeysMeta>>
+decodeBlobGranuleFileValue(ValueRef const& value);
 
 const Value blobGranulePurgeValueFor(Version version, KeyRange range, bool force);
 std::tuple<Version, KeyRange, bool> decodeBlobGranulePurgeValue(ValueRef const& value);
@@ -605,9 +649,20 @@ const Key blobGranuleSplitKeyFor(UID const& parentGranuleID, UID const& granuleI
 std::pair<UID, UID> decodeBlobGranuleSplitKey(KeyRef const& key);
 const KeyRange blobGranuleSplitKeyRangeFor(UID const& parentGranuleID);
 
+const Key blobGranuleMergeKeyFor(UID const& mergeGranuleID);
+UID decodeBlobGranuleMergeKey(KeyRef const& key);
+
 // these are versionstamped
 const Value blobGranuleSplitValueFor(BlobGranuleSplitState st);
 std::pair<BlobGranuleSplitState, Version> decodeBlobGranuleSplitValue(ValueRef const& value);
+
+const Value blobGranuleMergeValueFor(KeyRange mergeKeyRange,
+                                     std::vector<UID> parentGranuleIDs,
+                                     std::vector<Key> parentGranuleRanges,
+                                     std::vector<Version> parentGranuleStartVersions);
+// FIXME: probably just define object type for this?
+std::tuple<KeyRange, Version, std::vector<UID>, std::vector<Key>, std::vector<Version>> decodeBlobGranuleMergeValue(
+    ValueRef const& value);
 
 const Key blobGranuleHistoryKeyFor(KeyRangeRef const& range, Version version);
 std::pair<KeyRange, Version> decodeBlobGranuleHistoryKey(KeyRef const& key);
@@ -624,12 +679,11 @@ UID decodeBlobWorkerListKey(KeyRef const& key);
 const Value blobWorkerListValue(BlobWorkerInterface const& interface);
 BlobWorkerInterface decodeBlobWorkerListValue(ValueRef const& value);
 
-// State for the tenant map
-extern const KeyRangeRef tenantMapKeys;
-extern const KeyRef tenantMapPrefix;
-extern const KeyRef tenantMapPrivatePrefix;
-extern const KeyRef tenantLastIdKey;
-extern const KeyRef tenantDataPrefixKey;
+// Storage quota per tenant
+// "\xff/storageQuota/[[tenantName]]" := "[[quota]]"
+extern const KeyRangeRef storageQuotaKeys;
+extern const KeyRef storageQuotaPrefix;
+Key storageQuotaKey(StringRef tenantName);
 
 #pragma clang diagnostic pop
 

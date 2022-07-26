@@ -92,21 +92,15 @@ class FdbCShimTests:
         self.build_dir = Path(args.build_dir).resolve()
         assert self.build_dir.exists(), "{} does not exist".format(args.build_dir)
         assert self.build_dir.is_dir(), "{} is not a directory".format(args.build_dir)
-        self.source_dir = Path(args.source_dir).resolve()
-        assert self.source_dir.exists(), "{} does not exist".format(args.source_dir)
-        assert self.source_dir.is_dir(), "{} is not a directory".format(args.source_dir)
-        self.api_tester_bin = self.build_dir.joinpath(
-            "bin", "fdb_c_shim_api_tester")
-        assert self.api_tester_bin.exists(), "{} does not exist".format(self.api_tester_bin)
-        self.unit_tests_bin = self.build_dir.joinpath(
-            "bin", "fdb_c_shim_unit_tests")
+        self.unit_tests_bin = Path(args.unit_tests_bin).resolve()
         assert self.unit_tests_bin.exists(), "{} does not exist".format(self.unit_tests_bin)
-        self.shim_lib_tester_bin = self.build_dir.joinpath(
-            "bin", "fdb_c_shim_lib_tester")
+        self.api_tester_bin = Path(args.api_tester_bin).resolve()
+        assert self.api_tester_bin.exists(), "{} does not exist".format(self.api_tests_bin)
+        self.shim_lib_tester_bin = Path(args.shim_lib_tester_bin).resolve()
         assert self.shim_lib_tester_bin.exists(
         ), "{} does not exist".format(self.shim_lib_tester_bin)
-        self.api_test_dir = self.source_dir.joinpath(
-            "bindings", "c", "test", "apitester", "tests")
+        self.api_test_dir = Path(args.api_test_dir).resolve()
+        assert self.api_test_dir.exists(), "{} does not exist".format(self.api_test_dir)
         self.downloader = FdbBinaryDownloader(args.build_dir)
         # binary downloads are currently available only for x86_64
         self.platform = platform.machine()
@@ -291,12 +285,25 @@ if __name__ == "__main__":
         required=True,
     )
     parser.add_argument(
-        "--source-dir",
-        "-s",
-        metavar="SOURCE_DIRECTORY",
-        help="FDB source directory",
-        required=True,
-    )
+        '--unit-tests-bin',
+        type=str,
+        help='Path to the fdb_c_shim_unit_tests executable.',
+        required=True)
+    parser.add_argument(
+        '--api-tester-bin',
+        type=str,
+        help='Path to the fdb_c_shim_api_tester executable.',
+        required=True)
+    parser.add_argument(
+        '--shim-lib-tester-bin',
+        type=str,
+        help='Path to the fdb_c_shim_lib_tester executable.',
+        required=True)
+    parser.add_argument(
+        '--api-test-dir',
+        type=str,
+        help='Path to a directory with api test definitions.',
+        required=True)
     args = parser.parse_args()
     test = FdbCShimTests(args)
     test.run_tests()

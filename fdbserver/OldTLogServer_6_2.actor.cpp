@@ -156,7 +156,7 @@ private:
 			Standalone<StringRef> h = wait(self->queue->readNext(sizeof(uint32_t)));
 			if (h.size() != sizeof(uint32_t)) {
 				if (h.size()) {
-					TEST(true); // Zero fill within size field
+					CODE_PROBE(true, "Zero fill within size field");
 					int payloadSize = 0;
 					memcpy(&payloadSize, h.begin(), h.size());
 					zeroFillSize = sizeof(uint32_t) - h.size(); // zero fill the size itself
@@ -170,7 +170,7 @@ private:
 
 			Standalone<StringRef> e = wait(self->queue->readNext(payloadSize + 1));
 			if (e.size() != payloadSize + 1) {
-				TEST(true); // Zero fill within payload
+				CODE_PROBE(true, "Zero fill within payload");
 				zeroFillSize = payloadSize + 1 - e.size();
 				break;
 			}
@@ -186,7 +186,7 @@ private:
 			}
 		}
 		if (zeroFillSize) {
-			TEST(true); // Fixing a partial commit at the end of the tlog queue
+			CODE_PROBE(true, "Fixing a partial commit at the end of the tlog queue");
 			for (int i = 0; i < zeroFillSize; i++)
 				self->queue->push(StringRef((const uint8_t*)"", 1));
 		}
@@ -641,24 +641,6 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 		specialCounter(cc, "SharedBytesDurable", [tLogData]() { return tLogData->bytesDurable; });
 		specialCounter(cc, "SharedOverheadBytesInput", [tLogData]() { return tLogData->overheadBytesInput; });
 		specialCounter(cc, "SharedOverheadBytesDurable", [tLogData]() { return tLogData->overheadBytesDurable; });
-		specialCounter(
-		    cc, "KvstoreBytesUsed", [tLogData]() { return tLogData->persistentData->getStorageBytes().used; });
-		specialCounter(
-		    cc, "KvstoreBytesFree", [tLogData]() { return tLogData->persistentData->getStorageBytes().free; });
-		specialCounter(cc, "KvstoreBytesAvailable", [tLogData]() {
-			return tLogData->persistentData->getStorageBytes().available;
-		});
-		specialCounter(
-		    cc, "KvstoreBytesTotal", [tLogData]() { return tLogData->persistentData->getStorageBytes().total; });
-		specialCounter(
-		    cc, "QueueDiskBytesUsed", [tLogData]() { return tLogData->rawPersistentQueue->getStorageBytes().used; });
-		specialCounter(
-		    cc, "QueueDiskBytesFree", [tLogData]() { return tLogData->rawPersistentQueue->getStorageBytes().free; });
-		specialCounter(cc, "QueueDiskBytesAvailable", [tLogData]() {
-			return tLogData->rawPersistentQueue->getStorageBytes().available;
-		});
-		specialCounter(
-		    cc, "QueueDiskBytesTotal", [tLogData]() { return tLogData->rawPersistentQueue->getStorageBytes().total; });
 		specialCounter(cc, "PeekMemoryReserved", [tLogData]() { return tLogData->peekMemoryLimiter.activePermits(); });
 		specialCounter(cc, "PeekMemoryRequestsStalled", [tLogData]() { return tLogData->peekMemoryLimiter.waiters(); });
 		specialCounter(cc, "ActivePeekStreams", [tLogData]() { return tLogData->activePeekStreams; });
@@ -756,9 +738,9 @@ void TLogQueue::updateVersionSizes(const TLogQueueEntry& result,
 ACTOR Future<Void> tLogLock(TLogData* self, ReplyPromise<TLogLockResult> reply, Reference<LogData> logData) {
 	state Version stopVersion = logData->version.get();
 
-	TEST(true); // TLog stopped by recovering master
-	TEST(logData->stopped); // logData already stopped
-	TEST(!logData->stopped); // logData not yet stopped
+	CODE_PROBE(true, "TLog stopped by recovering master");
+	CODE_PROBE(logData->stopped, "logData already stopped");
+	CODE_PROBE(!logData->stopped, "logData not yet stopped");
 
 	TraceEvent("TLogStop", logData->logId)
 	    .detail("Ver", stopVersion)
@@ -1042,7 +1024,7 @@ ACTOR Future<Void> updatePersistentData(TLogData* self, Reference<LogData> logDa
 	// Now that the changes we made to persistentData are durable, erase the data we moved from memory and the queue,
 	// increase bytesDurable accordingly, and update persistentDataDurableVersion.
 
-	TEST(anyData); // TLog moved data to persistentData
+	CODE_PROBE(anyData, "TLog moved data to persistentData");
 	logData->persistentDataDurableVersion = newPersistentDataVersion;
 
 	for (tagLocality = 0; tagLocality < logData->tag_data.size(); tagLocality++) {
@@ -1680,7 +1662,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 			}
 			if (sequenceData.isSet()) {
 				if (sequenceData.getFuture().get().first != rep.end) {
-					TEST(true); // tlog peek second attempt ended at a different version
+					CODE_PROBE(true, "tlog peek second attempt ended at a different version");
 					replyPromise.sendError(operation_obsolete());
 					return Void();
 				}
@@ -1868,7 +1850,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 		if (sequenceData.isSet()) {
 			trackerData.duplicatePeeks++;
 			if (sequenceData.getFuture().get().first != reply.end) {
-				TEST(true); // tlog peek second attempt ended at a different version (2)
+				CODE_PROBE(true, "tlog peek second attempt ended at a different version (2)");
 				replyPromise.sendError(operation_obsolete());
 				return Void();
 			}
@@ -1930,7 +1912,7 @@ ACTOR Future<Void> watchDegraded(TLogData* self) {
 	wait(lowPriorityDelay(SERVER_KNOBS->TLOG_DEGRADED_DURATION));
 
 	TraceEvent(SevWarnAlways, "TLogDegraded", self->dbgid).log();
-	TEST(true); // TLog degraded
+	CODE_PROBE(true, "TLog degraded");
 	self->degraded->set(true);
 	return Void();
 }
@@ -1988,7 +1970,7 @@ ACTOR Future<Void> doQueueCommit(TLogData* self,
 		    .detail("LogId", logData->logId)
 		    .detail("Version", it->version.get())
 		    .detail("QueueVer", it->queueCommittedVersion.get());
-		TEST(true); // A TLog was replaced before having a chance to commit its queue
+		CODE_PROBE(true, "A TLog was replaced before having a chance to commit its queue");
 		it->queueCommittedVersion.set(it->version.get());
 	}
 	return Void();
@@ -2452,7 +2434,7 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 		when(TLogCommitRequest req = waitNext(tli.commit.getFuture())) {
 			//TraceEvent("TLogCommitReq", logData->logId).detail("Ver", req.version).detail("PrevVer", req.prevVersion).detail("LogVer", logData->version.get());
 			ASSERT(logData->isPrimary);
-			TEST(logData->stopped); // TLogCommitRequest while stopped
+			CODE_PROBE(logData->stopped, "TLogCommitRequest while stopped");
 			if (!logData->stopped)
 				logData->addActor.send(tLogCommit(self, req, logData, warningCollectorInput));
 			else
@@ -2701,7 +2683,23 @@ ACTOR Future<Void> tLogCore(TLogData* self,
 	                                     logData->logId,
 	                                     SERVER_KNOBS->STORAGE_LOGGING_DELAY,
 	                                     &logData->cc,
-	                                     logData->logId.toString() + "/TLogMetrics"));
+	                                     logData->logId.toString() + "/TLogMetrics",
+	                                     [self = self](TraceEvent& te) {
+		                                     StorageBytes sbTlog = self->persistentData->getStorageBytes();
+		                                     te.detail("KvstoreBytesUsed", sbTlog.used);
+		                                     te.detail("KvstoreBytesFree", sbTlog.free);
+		                                     te.detail("KvstoreBytesAvailable", sbTlog.available);
+		                                     te.detail("KvstoreBytesTotal", sbTlog.total);
+		                                     te.detail("KvstoreBytesTemp", sbTlog.temp);
+
+		                                     StorageBytes sbQueue = self->rawPersistentQueue->getStorageBytes();
+		                                     te.detail("QueueDiskBytesUsed", sbQueue.used);
+		                                     te.detail("QueueDiskBytesFree", sbQueue.free);
+		                                     te.detail("QueueDiskBytesAvailable", sbQueue.available);
+		                                     te.detail("QueueDiskBytesTotal", sbQueue.total);
+		                                     te.detail("QueueDiskBytesTemp", sbQueue.temp);
+	                                     }));
+
 	logData->addActor.send(serveTLogInterface(self, tli, logData, warningCollectorInput));
 	logData->addActor.send(cleanupPeekTrackers(logData.getPtr()));
 	logData->addActor.send(logPeekTrackers(logData.getPtr()));
@@ -2801,7 +2799,7 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 	if (!fFormat.get().present()) {
 		RangeResult v = wait(self->persistentData->readRange(KeyRangeRef(StringRef(), LiteralStringRef("\xff")), 1));
 		if (!v.size()) {
-			TEST(true); // The DB is completely empty, so it was never initialized.  Delete it.
+			CODE_PROBE(true, "The DB is completely empty, so it was never initialized.  Delete it.");
 			throw worker_removed();
 		} else {
 			// This should never happen
@@ -2949,7 +2947,7 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 			throw end_of_stream();
 		loop {
 			if (allRemoved.isReady()) {
-				TEST(true); // all tlogs removed during queue recovery
+				CODE_PROBE(true, "all tlogs removed during queue recovery");
 				throw worker_removed();
 			}
 			choose {
@@ -2980,7 +2978,7 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 							logData->queueCommittedVersion.set(qe.version);
 
 							while (self->bytesInput - self->bytesDurable >= recoverMemoryLimit) {
-								TEST(true); // Flush excess data during TLog queue recovery
+								CODE_PROBE(true, "Flush excess data during TLog queue recovery");
 								TraceEvent("FlushLargeQueueDuringRecovery", self->dbgid)
 								    .detail("LogId", logData->logId)
 								    .detail("BytesInput", self->bytesInput)
@@ -3010,7 +3008,7 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 	}
 
 	TraceEvent("TLogRestorePersistentStateDone", self->dbgid).detail("Took", now() - startt);
-	TEST(now() - startt >= 1.0); // TLog recovery took more than 1 second
+	CODE_PROBE(now() - startt >= 1.0, "TLog recovery took more than 1 second");
 
 	for (auto it : self->id_data) {
 		if (it.second->queueCommittedVersion.get() == 0) {
@@ -3261,8 +3259,10 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 	req.reply.send(recruited);
 
 	TraceEvent("TLogReady", logData->logId)
-	    .detail("AllTags", describe(req.allTags))
-	    .detail("Locality", logData->locality);
+	    .detail("Locality", logData->locality)
+	    .setMaxEventLength(11000)
+	    .setMaxFieldLength(10000)
+	    .detail("AllTags", describe(req.allTags));
 
 	updater = Void();
 	wait(tLogCore(self, logData, recruited, pulledRecoveryVersions));
