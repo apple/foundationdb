@@ -1171,14 +1171,13 @@ public:
 	// Normally the storage server prefers to serve read requests over making mutations
 	// durable to disk. However, when the storage server falls to far behind on
 	// making mutations durable, this function will change the priority to prefer writes.
-
-	int getQueryPriority() {
+	Future<Void> getQueryDelay() {
 		if ((version.get() - durableVersion.get() > SERVER_KNOBS->LOW_PRIORITY_DURABILITY_LAG) ||
 		    (queueSize() > SERVER_KNOBS->LOW_PRIORITY_STORAGE_QUEUE_BYTES)) {
 			++counters.lowPriorityQueries;
-			return (int)ReadType::LOW;
+			return delay(0, TaskPriority::LowPriorityRead);
 		}
-		return (int)ReadType::NORMAL;
+		return delay(0, TaskPriority::DefaultEndpoint);
 	}
 
 	template <class Reply>
@@ -1572,9 +1571,8 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 
 		// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 		// so we need to downgrade here
-		wait(delay(0, TaskPriority::DefaultEndpoint));
-		state int rankIndex = data->getQueryPriority();
-		wait(store(lock, data->ssLock.lock(data->readPriorityRanks[rankIndex])));
+		wait(data->getQueryDelay());
+		wait(store(lock, data->ssLock.lock(data->readPriorityRanks[(int)ReadType::NORMAL])));
 
 		if (req.debugID.present())
 			g_traceBatch.addEvent("GetValueDebug",
@@ -3369,7 +3367,7 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 {
 	state Span span("SS:getKeyValues"_loc, req.spanContext);
 	state int64_t resultSize = 0;
-	state ReadType type = req.isFetchKeys ? ReadType::FETCH : ReadType::NORMAL;
+	state ReadType type = req.readType;
 
 	if (req.tenantInfo.name.present()) {
 		span.addAttribute("tenant"_sr, req.tenantInfo.name.get());
@@ -3385,10 +3383,8 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 
 	// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 	// so we need to downgrade here
-	wait(delay(0, TaskPriority::DefaultEndpoint));
-	state int rankIndex =
-	    (req.isFetchKeys && SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY) ? (int)ReadType::FETCH : data->getQueryPriority();
-	state PriorityMultiLock::Lock lock = wait(data->ssLock.lock(data->readPriorityRanks[rankIndex]));
+	wait(data->getQueryDelay());
+	state PriorityMultiLock::Lock lock = wait(data->ssLock.lock(data->readPriorityRanks[(int)type]));
 
 	try {
 		if (req.debugID.present())
@@ -3574,7 +3570,7 @@ ACTOR Future<GetRangeReqAndResultRef> quickGetKeyValues(
 		// TODO: Use remainingLimit, remainingLimitBytes rather than separate knobs.
 		req.limit = SERVER_KNOBS->QUICK_GET_KEY_VALUES_LIMIT;
 		req.limitBytes = SERVER_KNOBS->QUICK_GET_KEY_VALUES_LIMIT_BYTES;
-		req.isFetchKeys = false;
+		req.readType = ReadType::NORMAL;
 		req.tags = pOriginalReq->tags;
 		req.ssLatestCommitVersions = VersionVector();
 		req.debugID = pOriginalReq->debugID;
@@ -4087,7 +4083,7 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 {
 	state Span span("SS:getMappedKeyValues"_loc, req.spanContext);
 	state int64_t resultSize = 0;
-	state ReadType type = req.isFetchKeys ? ReadType::FETCH : ReadType::NORMAL;
+	state ReadType type = req.readType;
 
 	if (req.tenantInfo.name.present()) {
 		span.addAttribute("tenant"_sr, req.tenantInfo.name.get());
@@ -4103,10 +4099,8 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 
 	// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 	// so we need to downgrade here
-	wait(delay(0, TaskPriority::DefaultEndpoint));
-	state int rankIndex =
-	    (req.isFetchKeys && SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY) ? (int)ReadType::FETCH : data->getQueryPriority();
-	state PriorityMultiLock::Lock lock = wait(data->ssLock.lock(data->readPriorityRanks[rankIndex]));
+	wait(data->getQueryDelay());
+	state PriorityMultiLock::Lock lock = wait(data->ssLock.lock(data->readPriorityRanks[(int)type]));
 
 	try {
 		if (req.debugID.present())
@@ -4293,10 +4287,8 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 {
 	state Span span("SS:getKeyValuesStream"_loc, req.spanContext);
 	state int64_t resultSize = 0;
-	state ReadType type = req.isFetchKeys ? ReadType::FETCH : ReadType::NORMAL;
-	state int rankIndex =
-	    (req.isFetchKeys && SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY) ? (int)ReadType::FETCH : (int)ReadType::NORMAL;
-	state int readPriority = data->readPriorityRanks[rankIndex];
+	state ReadType type = req.readType;
+	state int readPriority = data->readPriorityRanks[(int)type];
 
 	if (req.tenantInfo.name.present()) {
 		span.addAttribute("tenant"_sr, req.tenantInfo.name.get());
@@ -4507,9 +4499,8 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 
 	// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 	// so we need to downgrade here
-	wait(delay(0, TaskPriority::DefaultEndpoint));
-	state int rankIndex = data->getQueryPriority();
-	wait(store(lock, data->ssLock.lock(data->readPriorityRanks[rankIndex])));
+	wait(data->getQueryDelay());
+	wait(store(lock, data->ssLock.lock(data->readPriorityRanks[(int)ReadType::NORMAL])));
 
 	try {
 		Version commitVersion = getLatestCommitVersion(req.ssLatestCommitVersions, data->tag);

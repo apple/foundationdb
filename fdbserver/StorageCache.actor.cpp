@@ -735,7 +735,7 @@ ACTOR Future<Void> getKeyValues(StorageCacheData* data, GetKeyValuesRequest req)
 	// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 	// so we need to downgrade here
 	TaskPriority taskType = TaskPriority::DefaultEndpoint;
-	if (SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY && req.isFetchKeys) {
+	if (SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY && req.readType == ReadType::FETCH) {
 		taskType = TaskPriority::LowPriorityRead;
 		// } else if (false) {
 		// 	// Placeholder for up-prioritizing fetches for important requests

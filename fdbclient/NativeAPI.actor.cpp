@@ -4264,7 +4264,7 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 			req.arena.dependsOn(mapper.arena());
 			setMatchIndex<GetKeyValuesFamilyRequest>(req, matchIndex);
 			req.tenantInfo = useTenant ? trState->getTenantInfo() : TenantInfo();
-			req.isFetchKeys = (trState->readType == ReadType::FETCH);
+			req.readType = trState->readType;
 			req.version = readVersion;
 
 			trState->cx->getLatestCommitVersions(
@@ -4721,7 +4721,7 @@ ACTOR Future<Void> getRangeStreamFragment(Reference<TransactionState> trState,
 			req.limitBytes = std::numeric_limits<int>::max();
 			// it is used to inform the storage that the rangeRead is for Fetch
 			// req.isFetchKeys = (trState->readType == ReadType::FETCH);
-			req.isFetchKeys = false;
+			req.readType = trState->readType;
 			trState->cx->getLatestCommitVersions(
 			    locations[shard].locations, req.version, trState, req.ssLatestCommitVersions);
 

@@ -370,7 +370,7 @@ struct GetKeyValuesRequest : TimedRequest {
 	KeyRef mapper = KeyRef();
 	Version version; // or latestVersion
 	int limit, limitBytes;
-	bool isFetchKeys;
+	ReadType readType;
 	Optional<TagSet> tags;
 	Optional<UID> debugID;
 	ReplyPromise<GetKeyValuesReply> reply;
@@ -378,7 +378,7 @@ struct GetKeyValuesRequest : TimedRequest {
 	                                      // to this client, of all storage replicas that
 	                                      // serve the given key
 
-	GetKeyValuesRequest() : isFetchKeys(false) {}
+	GetKeyValuesRequest() : readType(ReadType::NORMAL) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -388,7 +388,7 @@ struct GetKeyValuesRequest : TimedRequest {
 		           version,
 		           limit,
 		           limitBytes,
-		           isFetchKeys,
+		           readType,
 		           tags,
 		           debugID,
 		           reply,
@@ -427,7 +427,7 @@ struct GetMappedKeyValuesRequest : TimedRequest {
 	Version version; // or latestVersion
 	int limit, limitBytes;
 	int matchIndex;
-	bool isFetchKeys;
+	ReadType readType;
 	Optional<TagSet> tags;
 	Optional<UID> debugID;
 	ReplyPromise<GetMappedKeyValuesReply> reply;
@@ -435,7 +435,7 @@ struct GetMappedKeyValuesRequest : TimedRequest {
 	                                      // to this client, of all storage replicas that
 	                                      // serve the given key range
 
-	GetMappedKeyValuesRequest() : isFetchKeys(false) {}
+	GetMappedKeyValuesRequest() : readType(ReadType::NORMAL) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar,
@@ -445,7 +445,7 @@ struct GetMappedKeyValuesRequest : TimedRequest {
 		           version,
 		           limit,
 		           limitBytes,
-		           isFetchKeys,
+		           readType,
 		           tags,
 		           debugID,
 		           reply,
@@ -492,7 +492,7 @@ struct GetKeyValuesStreamRequest {
 	KeySelectorRef begin, end;
 	Version version; // or latestVersion
 	int limit, limitBytes;
-	bool isFetchKeys;
+	ReadType readType;
 	Optional<TagSet> tags;
 	Optional<UID> debugID;
 	ReplyPromiseStream<GetKeyValuesStreamReply> reply;
@@ -500,7 +500,7 @@ struct GetKeyValuesStreamRequest {
 	                                      // to this client, of all storage replicas that
 	                                      // serve the given key range
 
-	GetKeyValuesStreamRequest() : isFetchKeys(false) {}
+	GetKeyValuesStreamRequest() : readType(ReadType::NORMAL) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -510,7 +510,7 @@ struct GetKeyValuesStreamRequest {
 		           version,
 		           limit,
 		           limitBytes,
-		           isFetchKeys,
+		           readType,
 		           tags,
 		           debugID,
 		           reply,
