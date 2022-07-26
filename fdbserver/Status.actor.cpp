@@ -2702,6 +2702,9 @@ ACTOR Future<JsonBuilderObject> lockedStatusFetcher(Reference<AsyncVar<ServerDBI
 			try {
 				wait(tr.onError(e));
 			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled)
+					throw;
+
 				incomplete_reasons->insert(format("Unable to determine if database is locked (%s).", e.what()));
 				break;
 			}
