@@ -5721,7 +5721,8 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 		} else {
 			changeFeedInfo = existingEntry->second;
 
-			CODE_PROBE(cfEntry.feedMetadataVersion > data->version.get(), "Change Feed fetched future metadata version");
+			CODE_PROBE(cfEntry.feedMetadataVersion > data->version.get(),
+			           "Change Feed fetched future metadata version");
 
 			auto fid = missingFeeds.find(cfEntry.feedId);
 			if (fid != missingFeeds.end()) {

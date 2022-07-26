@@ -1004,7 +1004,8 @@ struct OverlappingChangeFeedsReply {
 	Version feedMetadataVersion;
 
 	OverlappingChangeFeedsReply() : cached(false), feedMetadataVersion(invalidVersion) {}
-	explicit OverlappingChangeFeedsReply(VectorRef<OverlappingChangeFeedEntry> const& feeds, Version feedMetadataVersion)
+	explicit OverlappingChangeFeedsReply(VectorRef<OverlappingChangeFeedEntry> const& feeds,
+	                                     Version feedMetadataVersion)
 	  : feeds(feeds), cached(false), feedMetadataVersion(feedMetadataVersion) {}
 
 	template <class Ar>
