@@ -3570,7 +3570,7 @@ ACTOR Future<GetRangeReqAndResultRef> quickGetKeyValues(
 		// TODO: Use remainingLimit, remainingLimitBytes rather than separate knobs.
 		req.limit = SERVER_KNOBS->QUICK_GET_KEY_VALUES_LIMIT;
 		req.limitBytes = SERVER_KNOBS->QUICK_GET_KEY_VALUES_LIMIT_BYTES;
-		req.readType = ReadType::NORMAL;
+		req.readType = pOriginalReq->readType;
 		req.tags = pOriginalReq->tags;
 		req.ssLatestCommitVersions = VersionVector();
 		req.debugID = pOriginalReq->debugID;
