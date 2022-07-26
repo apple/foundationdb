@@ -971,6 +971,9 @@ public:
 
 	FlowLock durableVersionLock;
 	FlowLock fetchKeysParallelismLock;
+	// Extra lock that prevents too much post-initial-fetch work from building up, such as mutation applying and change
+	// feed tail fetching
+	FlowLock fetchKeysParallelismFullLock;
 	FlowLock fetchChangeFeedParallelismLock;
 	int64_t fetchKeysBytesBudget;
 	AsyncVar<bool> fetchKeysBudgetUsed;
@@ -1046,7 +1049,8 @@ public:
 		Counter sampledBytesCleared;
 		// The number of key-value pairs fetched by fetchKeys()
 		Counter kvFetched;
-		Counter mutations, setMutations, clearRangeMutations, atomicMutations;
+		Counter mutations, setMutations, clearRangeMutations, atomicMutations, changeFeedMutations,
+		    changeFeedMutationsDurable;
 		Counter updateBatches, updateVersions;
 		Counter loops;
 		Counter fetchWaitingMS, fetchWaitingCount, fetchExecutingMS, fetchExecutingCount;
@@ -1071,6 +1075,8 @@ public:
 		Counter kvScans;
 		// The count of commit operation to the storage engine.
 		Counter kvCommits;
+		// The count of change feed reads that hit disk
+		Counter changeFeedDiskReads;
 
 		LatencySample readLatencySample;
 		LatencyBands readLatencyBands;
@@ -1095,15 +1101,17 @@ public:
 		    feedBytesFetched("FeedBytesFetched", cc), sampledBytesCleared("SampledBytesCleared", cc),
 		    kvFetched("KVFetched", cc), mutations("Mutations", cc), setMutations("SetMutations", cc),
 		    clearRangeMutations("ClearRangeMutations", cc), atomicMutations("AtomicMutations", cc),
-		    updateBatches("UpdateBatches", cc), updateVersions("UpdateVersions", cc), loops("Loops", cc),
-		    fetchWaitingMS("FetchWaitingMS", cc), fetchWaitingCount("FetchWaitingCount", cc),
-		    fetchExecutingMS("FetchExecutingMS", cc), fetchExecutingCount("FetchExecutingCount", cc),
-		    readsRejected("ReadsRejected", cc), wrongShardServer("WrongShardServer", cc),
-		    fetchedVersions("FetchedVersions", cc), fetchesFromLogs("FetchesFromLogs", cc),
-		    quickGetValueHit("QuickGetValueHit", cc), quickGetValueMiss("QuickGetValueMiss", cc),
-		    quickGetKeyValuesHit("QuickGetKeyValuesHit", cc), quickGetKeyValuesMiss("QuickGetKeyValuesMiss", cc),
-		    kvScanBytes("KVScanBytes", cc), kvGetBytes("KVGetBytes", cc), eagerReadsKeys("EagerReadsKeys", cc),
-		    kvGets("KVGets", cc), kvScans("KVScans", cc), kvCommits("KVCommits", cc),
+		    changeFeedMutations("ChangeFeedMutations", cc),
+		    changeFeedMutationsDurable("ChangeFeedMutationsDurable", cc), updateBatches("UpdateBatches", cc),
+		    updateVersions("UpdateVersions", cc), loops("Loops", cc), fetchWaitingMS("FetchWaitingMS", cc),
+		    fetchWaitingCount("FetchWaitingCount", cc), fetchExecutingMS("FetchExecutingMS", cc),
+		    fetchExecutingCount("FetchExecutingCount", cc), readsRejected("ReadsRejected", cc),
+		    wrongShardServer("WrongShardServer", cc), fetchedVersions("FetchedVersions", cc),
+		    fetchesFromLogs("FetchesFromLogs", cc), quickGetValueHit("QuickGetValueHit", cc),
+		    quickGetValueMiss("QuickGetValueMiss", cc), quickGetKeyValuesHit("QuickGetKeyValuesHit", cc),
+		    quickGetKeyValuesMiss("QuickGetKeyValuesMiss", cc), kvScanBytes("KVScanBytes", cc),
+		    kvGetBytes("KVGetBytes", cc), eagerReadsKeys("EagerReadsKeys", cc), kvGets("KVGets", cc),
+		    kvScans("KVScans", cc), kvCommits("KVCommits", cc), changeFeedDiskReads("ChangeFeedDiskReads", cc),
 		    readLatencySample("ReadLatencyMetrics",
 		                      self->thisServerID,
 		                      SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
@@ -1133,6 +1141,11 @@ public:
 			specialCounter(
 			    cc, "FetchKeysFetchActive", [self]() { return self->fetchKeysParallelismLock.activePermits(); });
 			specialCounter(cc, "FetchKeysWaiting", [self]() { return self->fetchKeysParallelismLock.waiters(); });
+			specialCounter(cc, "FetchKeysFullFetchActive", [self]() {
+				return self->fetchKeysParallelismFullLock.activePermits();
+			});
+			specialCounter(
+			    cc, "FetchKeysFullFetchWaiting", [self]() { return self->fetchKeysParallelismFullLock.waiters(); });
 			specialCounter(cc, "FetchChangeFeedFetchActive", [self]() {
 				return self->fetchChangeFeedParallelismLock.activePermits();
 			});
@@ -1196,6 +1209,7 @@ public:
 	    byteSampleClears(false, LiteralStringRef("\xff\xff\xff")), durableInProgress(Void()), watchBytes(0),
 	    numWatches(0), noRecentUpdates(false), lastUpdate(now()), updateEagerReads(nullptr),
 	    fetchKeysParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM),
+	    fetchKeysParallelismFullLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM_FULL),
 	    fetchChangeFeedParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM),
 	    fetchKeysBytesBudget(SERVER_KNOBS->STORAGE_FETCH_BYTES), fetchKeysBudgetUsed(false),
 	    serveFetchCheckpointParallelismLock(SERVER_KNOBS->SERVE_FETCH_CHECKPOINT_PARALLELISM),
@@ -2498,6 +2512,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		                            remainingDurableBytes));
 
 		data->counters.kvScanBytes += res.logicalSize();
+		++data->counters.changeFeedDiskReads;
 
 		if (!inverted && !req.range.empty()) {
 			data->checkChangeCounter(changeCounter, req.range);
@@ -5073,6 +5088,8 @@ void applyChangeFeedMutation(StorageServer* self, MutationRef const& m, Version 
 				DEBUG_MUTATION("ChangeFeedWriteSet", version, m, self->thisServerID)
 				    .detail("Range", it->range)
 				    .detail("ChangeFeedID", it->id);
+
+				++self->counters.changeFeedMutations;
 			} else {
 				CODE_PROBE(version <= it->emptyVersion, "Skip CF write because version <= emptyVersion");
 				CODE_PROBE(it->removing, "Skip CF write because removing");
@@ -5098,6 +5115,7 @@ void applyChangeFeedMutation(StorageServer* self, MutationRef const& m, Version 
 					DEBUG_MUTATION("ChangeFeedWriteClear", version, m, self->thisServerID)
 					    .detail("Range", it->range)
 					    .detail("ChangeFeedID", it->id);
+					++self->counters.changeFeedMutations;
 				} else {
 					CODE_PROBE(version <= it->emptyVersion, "Skip CF clear because version <= emptyVersion");
 					CODE_PROBE(it->removing, "Skip CF clear because removing");
@@ -6145,6 +6163,9 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 
 		TraceEvent(SevDebug, "FetchKeysVersionSatisfied", data->thisServerID).detail("FKID", interval.pairID);
 
+		wait(data->fetchKeysParallelismFullLock.take(TaskPriority::DefaultYield));
+		state FlowLock::Releaser holdingFullFKPL(data->fetchKeysParallelismFullLock);
+
 		wait(data->fetchKeysParallelismLock.take(TaskPriority::DefaultYield));
 		state FlowLock::Releaser holdingFKPL(data->fetchKeysParallelismLock);
 
@@ -6518,6 +6539,9 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 
 		// Note that since it receives a pointer to FetchInjectionInfo, the thread does not leave this actor until this
 		// point.
+
+		// At this point change feed fetching and mutation injection is complete, so full fetch is finished.
+		holdingFullFKPL.release();
 
 		// Wait for the transferred version (and therefore the shard data) to be committed and durable.
 		wait(data->durableVersion.whenAtLeast(feedTransferredVersion));
@@ -8394,6 +8418,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 
 		state std::vector<Key> updatedChangeFeeds(modifiedChangeFeeds.begin(), modifiedChangeFeeds.end());
 		state int curFeed = 0;
+		state int64_t durableChangeFeedMutations = 0;
 		while (curFeed < updatedChangeFeeds.size()) {
 			auto info = data->uidChangeFeed.find(updatedChangeFeeds[curFeed]);
 			if (info != data->uidChangeFeed.end()) {
@@ -8412,6 +8437,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 					// in the stream. We should fix this assert to be strictly > and re-enable it
 					ASSERT(it.version >= info->second->storageVersion);
 					info->second->storageVersion = it.version;
+					durableChangeFeedMutations++;
 				}
 
 				if (info->second->fetchVersion != invalidVersion && !info->second->removing) {
@@ -8570,6 +8596,8 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 				cfCleanup++;
 			}
 		}
+
+		data->counters.changeFeedMutationsDurable += durableChangeFeedMutations;
 
 		durableInProgress.send(Void());
 		wait(delay(0, TaskPriority::UpdateStorage)); // Setting durableInProgess could cause the storage server to
