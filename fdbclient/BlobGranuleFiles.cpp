@@ -56,6 +56,78 @@ uint16_t MIN_SUPPORTED_BG_FORMAT_VERSION = 1;
 const uint8_t SNAPSHOT_FILE_TYPE = 'S';
 const uint8_t DELTA_FILE_TYPE = 'D';
 
+// Deltas in key order
+
+// For key-ordered delta files, the format for both sets and range clears is that you store boundaries ordered by key.
+// Each boundary has a corresponding key, zero or more versioned updates (ValueAndVersionRef), and optionally a clear
+// from keyAfter(key) to the next boundary, at a version.
+// A streaming merge is more efficient than applying deltas one by one to restore to a later version from the snapshot.
+// The concept of this versioned mutation boundaries is repurposed directly from a prior version of redwood, back when
+// it supported versioned data.
+struct ValueAndVersionRef {
+	Version version;
+	MutationRef::Type op; // only set/clear
+	ValueRef value; // only present for set
+
+	ValueAndVersionRef() {}
+	// create clear
+	explicit ValueAndVersionRef(Version version) : version(version), op(MutationRef::Type::ClearRange) {}
+	// create set
+	explicit ValueAndVersionRef(Version version, ValueRef value)
+	  : version(version), op(MutationRef::Type::SetValue), value(value) {}
+	ValueAndVersionRef(Arena& arena, const ValueAndVersionRef& copyFrom)
+	  : version(copyFrom.version), op(copyFrom.op), value(arena, copyFrom.value) {}
+
+	bool isSet() const { return op == MutationRef::SetValue; }
+	bool isClear() const { return op == MutationRef::ClearRange; }
+
+	int totalSize() const { return sizeof(ValueAndVersionRef) + value.size(); }
+	int expectedSize() const { return value.size(); }
+
+	struct OrderByVersion {
+		bool operator()(ValueAndVersionRef const& a, ValueAndVersionRef const& b) const {
+			return a.version < b.version;
+		}
+	};
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, version, op, value);
+	}
+};
+
+struct DeltaBoundaryRef {
+	// key
+	KeyRef key;
+	// updates to exactly this key
+	VectorRef<ValueAndVersionRef> values;
+	// clear version from keyAfter(key) up to the next boundary
+	Optional<Version> clearVersion;
+
+	DeltaBoundaryRef() {}
+	DeltaBoundaryRef(Arena& ar, const DeltaBoundaryRef& copyFrom)
+	  : key(ar, copyFrom.key), values(ar, copyFrom.values), clearVersion(copyFrom.clearVersion) {}
+
+	int totalSize() { return sizeof(DeltaBoundaryRef) + key.expectedSize() + values.expectedSize(); }
+	int expectedSize() const { return key.expectedSize() + values.expectedSize(); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, key, values, clearVersion);
+	}
+};
+
+struct GranuleSortedDeltas {
+	constexpr static FileIdentifier file_identifier = 8183903;
+
+	VectorRef<DeltaBoundaryRef> boundaries;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, boundaries);
+	}
+};
+
 struct ChildBlockPointerRef {
 	StringRef key;
 	uint32_t offset;
@@ -398,7 +470,7 @@ struct IndexBlobGranuleFileChunkRef {
 		}
 
 		if (chunkRef.compressionFilter.present()) {
-			CODE_PROBE(true, "reading encrypted file chunk");
+			CODE_PROBE(true, "reading compressed file chunk");
 			chunkRef.chunkBytes = IndexBlobGranuleFileChunkRef::decompress(chunkRef, arena);
 		} else if (!chunkRef.chunkBytes.present()) {
 			// 'Encryption' & 'Compression' aren't enabled.
@@ -694,10 +766,10 @@ static Arena loadSnapshotFile(const StringRef& snapshotData,
 	return rootArena;
 }
 
-typedef std::map<Key, Standalone<DeltaBoundaryRef>> MutationBufferT;
+typedef std::map<Key, Standalone<DeltaBoundaryRef>> SortedDeltasT;
 
 // FIXME: optimize all of this with common prefix comparison stuff
-MutationBufferT::iterator insertMutationBoundary(MutationBufferT& deltasByKey, const KeyRef& boundary) {
+SortedDeltasT::iterator insertMutationBoundary(SortedDeltasT& deltasByKey, const KeyRef& boundary) {
 	// Find the first split point in buffer that is >= key
 	auto it = deltasByKey.lower_bound(boundary);
 
@@ -755,9 +827,12 @@ void updateMutationBoundary(Standalone<DeltaBoundaryRef>& boundary, const ValueA
 	}
 }
 
+// TODO: investigate more cpu-efficient sorting methods. Potential options:
+// 1) Replace std::map with ART mutation buffer
+// 2) sort updates and clear endpoints by (key, version), and keep track of active clears.
 void sortDeltasByKey(const Standalone<GranuleDeltas>& deltasByVersion,
                      const KeyRangeRef& fileRange,
-                     MutationBufferT& deltasByKey) {
+                     SortedDeltasT& deltasByKey) {
 	if (deltasByVersion.empty()) {
 		return;
 	}
@@ -773,12 +848,12 @@ void sortDeltasByKey(const Standalone<GranuleDeltas>& deltasByVersion,
 				ASSERT(m.param2 <= fileRange.end);
 				// handle single key clear more efficiently
 				if (equalsKeyAfter(m.param1, m.param2)) {
-					MutationBufferT::iterator key = insertMutationBoundary(deltasByKey, m.param1);
+					SortedDeltasT::iterator key = insertMutationBoundary(deltasByKey, m.param1);
 					updateMutationBoundary(key->second, ValueAndVersionRef(it.version));
 				} else {
 					// Update each boundary in the cleared range
-					MutationBufferT::iterator begin = insertMutationBoundary(deltasByKey, m.param1);
-					MutationBufferT::iterator end = insertMutationBoundary(deltasByKey, m.param2);
+					SortedDeltasT::iterator begin = insertMutationBoundary(deltasByKey, m.param1);
+					SortedDeltasT::iterator end = insertMutationBoundary(deltasByKey, m.param2);
 					while (begin != end) {
 						// Set the rangeClearedVersion if not set
 						if (!begin->second.clearVersion.present()) {
@@ -816,7 +891,7 @@ Value serializeChunkedDeltaFile(Standalone<GranuleDeltas> deltas,
 	file.init(DELTA_FILE_TYPE, cipherKeysCtx);
 
 	// build in-memory version of boundaries - TODO separate functions
-	MutationBufferT boundaries;
+	SortedDeltasT boundaries;
 	sortDeltasByKey(deltas, fileRange, boundaries);
 
 	std::vector<Value> chunks;

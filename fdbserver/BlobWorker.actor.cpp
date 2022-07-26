@@ -614,9 +614,8 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 
 	Optional<CompressionFilter> compressFilter = getBlobFileCompressFilter();
 
-	// TODO KNOB
 	state Value serialized = serializeChunkedDeltaFile(
-	    deltasToWrite, keyRange, SERVER_KNOBS->BG_DELTA_FILE_TARGET_CHUNK_SIZE, compressFilter, cipherKeysCtx);
+	    deltasToWrite, keyRange, SERVER_KNOBS->BG_DELTA_FILE_TARGET_CHUNK_BYTES, compressFilter, cipherKeysCtx);
 	state size_t serializedSize = serialized.size();
 
 	// Free up deltasToWrite here to reduce memory
@@ -768,7 +767,7 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 
 	Optional<CompressionFilter> compressFilter = getBlobFileCompressFilter();
 	state Value serialized = serializeChunkedSnapshot(
-	    snapshot, SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_CHUNK_SIZE, compressFilter, cipherKeysCtx);
+	    snapshot, SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_CHUNK_BYTES, compressFilter, cipherKeysCtx);
 	state size_t serializedSize = serialized.size();
 
 	// free snapshot to reduce memory
