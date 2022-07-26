@@ -141,11 +141,10 @@ class GlobalTagThrottlerImpl {
 
 		double getTransactionRate() const { return transactionCounter.smoothRate(); }
 
-		ClientTagThrottleLimits updateAndGetPerClientLimit(Optional<double> targetTps) {
-			auto newPerClientRate =
-			    std::max(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_MIN_RATE,
-			             std::min(targetTps.get(),
-			                      (targetTps.get() / transactionCounter.smoothRate()) * perClientRate.smoothTotal()));
+		ClientTagThrottleLimits updateAndGetPerClientLimit(double targetTps) {
+			auto newPerClientRate = std::max(
+			    SERVER_KNOBS->GLOBAL_TAG_THROTTLING_MIN_RATE,
+			    std::min(targetTps, (targetTps / transactionCounter.smoothRate()) * perClientRate.smoothTotal()));
 			perClientRate.setTotal(newPerClientRate);
 			return ClientTagThrottleLimits(
 			    std::max(perClientRate.smoothTotal(), SERVER_KNOBS->GLOBAL_TAG_THROTTLING_MIN_RATE),
