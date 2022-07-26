@@ -3234,7 +3234,14 @@ TenantInfo TransactionState::getTenantInfo() {
 	} else if (!t.present()) {
 		return TenantInfo();
 	} else if (cx->clientInfo->get().tenantMode == TenantMode::DISABLED && t.present()) {
-		throw tenants_disabled();
+		// If we are running provisional proxies, we allow a tenant request to go through since we don't know the tenant
+		// mode. Such a transaction would not be allowed to commit without enabling provisional commits because either
+		// the commit proxies will be provisional or the read version will be too old.
+		if (!cx->clientInfo->get().grvProxies.empty() && !cx->clientInfo->get().grvProxies[0].provisional) {
+			throw tenants_disabled();
+		} else {
+			ASSERT(!useProvisionalProxies);
+		}
 	}
 
 	ASSERT(tenantId != TenantInfo::INVALID_TENANT);
@@ -6570,6 +6577,11 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 
 	case FDBTransactionOptions::USE_PROVISIONAL_PROXIES:
 		validateOptionValueNotPresent(value);
+		if (trState->hasTenant()) {
+			Error e = invalid_option();
+			TraceEvent(SevWarn, "TenantTransactionUseProvisionalProxies").error(e).detail("Tenant", trState->tenant());
+			throw e;
+		}
 		trState->options.getReadVersionFlags |= GetReadVersionRequest::FLAG_USE_PROVISIONAL_PROXIES;
 		trState->useProvisionalProxies = UseProvisionalProxies::True;
 		break;
