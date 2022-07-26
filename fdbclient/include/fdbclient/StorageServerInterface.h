@@ -970,11 +970,11 @@ struct OverlappingChangeFeedEntry {
 	KeyRangeRef range;
 	Version emptyVersion;
 	Version stopVersion;
-	Version metadataVersion;
+	Version feedMetadataVersion;
 
 	bool operator==(const OverlappingChangeFeedEntry& r) const {
 		return feedId == r.feedId && range == r.range && emptyVersion == r.emptyVersion &&
-		       stopVersion == r.stopVersion && metadataVersion == r.metadataVersion;
+		       stopVersion == r.stopVersion && feedMetadataVersion == r.feedMetadataVersion;
 	}
 
 	OverlappingChangeFeedEntry() {}
@@ -982,17 +982,17 @@ struct OverlappingChangeFeedEntry {
 	                           KeyRangeRef const& range,
 	                           Version emptyVersion,
 	                           Version stopVersion,
-	                           Version metadataVersion)
+	                           Version feedMetadataVersion)
 	  : feedId(feedId), range(range), emptyVersion(emptyVersion), stopVersion(stopVersion),
-	    metadataVersion(metadataVersion) {}
+	    feedMetadataVersion(feedMetadataVersion) {}
 
 	OverlappingChangeFeedEntry(Arena& arena, const OverlappingChangeFeedEntry& rhs)
 	  : feedId(arena, rhs.feedId), range(arena, rhs.range), emptyVersion(rhs.emptyVersion),
-	    stopVersion(rhs.stopVersion), metadataVersion(rhs.metadataVersion) {}
+	    stopVersion(rhs.stopVersion), feedMetadataVersion(rhs.feedMetadataVersion) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, feedId, range, emptyVersion, stopVersion, metadataVersion);
+		serializer(ar, feedId, range, emptyVersion, stopVersion, feedMetadataVersion);
 	}
 };
 
@@ -1001,15 +1001,15 @@ struct OverlappingChangeFeedsReply {
 	VectorRef<OverlappingChangeFeedEntry> feeds;
 	bool cached;
 	Arena arena;
-	Version metadataVersion;
+	Version feedMetadataVersion;
 
-	OverlappingChangeFeedsReply() : cached(false), metadataVersion(invalidVersion) {}
-	explicit OverlappingChangeFeedsReply(VectorRef<OverlappingChangeFeedEntry> const& feeds, Version metadataVersion)
-	  : feeds(feeds), cached(false), metadataVersion(metadataVersion) {}
+	OverlappingChangeFeedsReply() : cached(false), feedMetadataVersion(invalidVersion) {}
+	explicit OverlappingChangeFeedsReply(VectorRef<OverlappingChangeFeedEntry> const& feeds, Version feedMetadataVersion)
+	  : feeds(feeds), cached(false), feedMetadataVersion(feedMetadataVersion) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, feeds, arena, metadataVersion);
+		serializer(ar, feeds, arena, feedMetadataVersion);
 	}
 };
 

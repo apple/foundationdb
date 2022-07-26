@@ -9384,7 +9384,7 @@ Future<Void> DatabaseContext::getChangeFeedStream(Reference<ChangeFeedData> resu
 
 Version OverlappingChangeFeedsInfo::getFeedMetadataVersion(const KeyRangeRef& range) const {
 	Version v = invalidVersion;
-	for (auto& it : metadataVersions) {
+	for (auto& it : feedMetadataVersions) {
 		if (it.second > v && it.first.intersects(range)) {
 			v = it.second;
 		}
@@ -9454,13 +9454,13 @@ ACTOR Future<OverlappingChangeFeedsInfo> getOverlappingChangeFeedsActor(Referenc
 			for (int i = 0; i < locations.size(); i++) {
 				result.arena.dependsOn(allOverlappingRequests[i].get().arena);
 				result.arena.dependsOn(locations[i].range.arena());
-				result.metadataVersions.push_back(
-				    { locations[i].range, allOverlappingRequests[i].get().metadataVersion });
+				result.feedMetadataVersions.push_back(
+				    { locations[i].range, allOverlappingRequests[i].get().feedMetadataVersion });
 				for (auto& it : allOverlappingRequests[i].get().feeds) {
 					auto res = latestFeedMetadata.insert({ it.feedId, it });
 					if (!res.second) {
 						CODE_PROBE(true, "deduping fetched overlapping feed by higher metadata version");
-						if (res.first->second.metadataVersion < it.metadataVersion) {
+						if (res.first->second.feedMetadataVersion < it.feedMetadataVersion) {
 							res.first->second = it;
 						}
 					}

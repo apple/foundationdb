@@ -2101,7 +2101,7 @@ ACTOR Future<Void> overlappingChangeFeedsQ(StorageServer* data, OverlappingChang
 		}
 	}
 	state OverlappingChangeFeedsReply reply;
-	reply.metadataVersion = data->version.get();
+	reply.feedMetadataVersion = data->version.get();
 	for (auto& it : rangeIds) {
 		reply.feeds.push_back_deep(reply.arena,
 		                           OverlappingChangeFeedEntry(it.first,
@@ -2115,7 +2115,7 @@ ACTOR Future<Void> overlappingChangeFeedsQ(StorageServer* data, OverlappingChang
 		    .detail("Range", std::get<0>(it.second))
 		    .detail("EmptyVersion", std::get<1>(it.second))
 		    .detail("StopVersion", std::get<2>(it.second))
-		    .detail("MetadataVersion", std::get<3>(it.second));
+		    .detail("FeedMetadataVersion", std::get<3>(it.second));
 	}
 
 	// Make sure all of the metadata we are sending won't get rolled back
@@ -5690,7 +5690,7 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 		    .detail("FetchVersion", fetchVersion)
 		    .detail("EmptyVersion", cfEntry.emptyVersion)
 		    .detail("StopVersion", cfEntry.stopVersion)
-		    .detail("MetadataVersion", cfEntry.metadataVersion)
+		    .detail("FeedMetadataVersion", cfEntry.feedMetadataVersion)
 		    .detail("Existing", existing)
 		    .detail("ExistingMetadataVersion", existing ? existingEntry->second->metadataVersion : invalidVersion)
 		    .detail("CleanupPendingVersion", cleanupPending ? cleanupEntry->second : invalidVersion)
@@ -5721,7 +5721,7 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 		} else {
 			changeFeedInfo = existingEntry->second;
 
-			CODE_PROBE(cfEntry.metadataVersion > data->version.get(), "Change Feed fetched future metadata version");
+			CODE_PROBE(cfEntry.feedMetadataVersion > data->version.get(), "Change Feed fetched future metadata version");
 
 			auto fid = missingFeeds.find(cfEntry.feedId);
 			if (fid != missingFeeds.end()) {
@@ -5732,7 +5732,7 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 				    .detail("EmptyVersion", changeFeedInfo->emptyVersion)
 				    .detail("StopVersion", changeFeedInfo->stopVersion)
 				    .detail("PreviousMetadataVersion", changeFeedInfo->metadataVersion)
-				    .detail("NewMetadataVersion", cfEntry.metadataVersion)
+				    .detail("NewMetadataVersion", cfEntry.feedMetadataVersion)
 				    .detail("FKID", fetchKeysID);
 
 				missingFeeds.erase(fid);
@@ -5770,7 +5770,7 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 			}
 		}
 		feedIds.push_back(cfEntry.feedId);
-		addMutationToLog |= changeFeedInfo->updateMetadataVersion(cfEntry.metadataVersion);
+		addMutationToLog |= changeFeedInfo->updateMetadataVersion(cfEntry.feedMetadataVersion);
 		if (addMutationToLog) {
 			ASSERT(changeFeedInfo.isValid());
 			Version logV = data->data().getLatestVersion();

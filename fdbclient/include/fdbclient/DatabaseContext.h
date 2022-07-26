@@ -211,7 +211,7 @@ struct OverlappingChangeFeedsInfo {
 	Arena arena;
 	VectorRef<OverlappingChangeFeedEntry> feeds;
 	// would prefer to use key range map but it complicates copy/move constructors
-	std::vector<std::pair<KeyRangeRef, Version>> metadataVersions;
+	std::vector<std::pair<KeyRangeRef, Version>> feedMetadataVersions;
 
 	// for a feed that wasn't present, returns the metadata version it would have been fetched at.
 	Version getFeedMetadataVersion(const KeyRangeRef& feedRange) const;
