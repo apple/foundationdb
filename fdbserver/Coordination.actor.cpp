@@ -792,7 +792,7 @@ ACTOR Future<Void> changeClusterDescription(std::string datafolder, KeyRef newCl
 	// 3. oldCKey does not appear in any keys but in a value:
 	// 		3.1: it's in the value of a forwarding message(see 2.1)
 	//		3.2: it's inside the value of _GenerationRegVal_ (see 1), which is a cluster connection string.
-	//			in particular, even we do not change it the cluster should still be good, but just to be safe here.
+	//		it seems that even we do not change it the cluster should still be good, but to be safe we still update it.
 	for (auto& [key, value] : res) {
 		if (key.startsWith(fwdKeys.begin)) {
 			if (key.removePrefix(fwdKeys.begin) == oldClusterKey) {
@@ -811,7 +811,7 @@ ACTOR Future<Void> changeClusterDescription(std::string datafolder, KeyRef newCl
 			// parse the value part
 			GenerationRegVal regVal = BinaryReader::fromStringRef<GenerationRegVal>(value, IncludeVersion());
 			if (regVal.val.present()) {
-				Optional<Value> newVal = UpdateCCSInMovableValue(regVal.val.get(), oldClusterKey, newClusterKey);
+				Optional<Value> newVal = updateCCSInMovableValue(regVal.val.get(), oldClusterKey, newClusterKey);
 				if (newVal.present()) {
 					regVal.val = newVal.get();
 					store->set(KeyValueRef(
@@ -832,7 +832,7 @@ Future<Void> coordChangeClusterKey(std::string dataFolder, KeyRef newClusterKey,
 	std::string absDataFolder = abspath(dataFolder);
 	std::vector<std::string> returnList = platform::listDirectories(absDataFolder);
 	std::vector<Future<Void>> futures;
-	for (auto& dirEntry : returnList) {
+	for (const auto& dirEntry : returnList) {
 		if (dirEntry == "." || dirEntry == "..") {
 			continue;
 		}

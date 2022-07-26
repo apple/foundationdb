@@ -369,7 +369,7 @@ Future<Void> MovableCoordinatedState::move(ClusterConnectionString const& nc) {
 	return MovableCoordinatedStateImpl::move(impl.get(), nc);
 }
 
-Optional<Value> UpdateCCSInMovableValue(ValueRef movableVal, KeyRef oldClusterKey, KeyRef newClusterKey) {
+Optional<Value> updateCCSInMovableValue(ValueRef movableVal, KeyRef oldClusterKey, KeyRef newClusterKey) {
 	Optional<Value> result;
 	MovableValue moveVal = BinaryReader::fromStringRef<MovableValue>(
 	    movableVal, IncludeVersion(ProtocolVersion::withMovableCoordinatedStateV2()));
