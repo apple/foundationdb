@@ -160,7 +160,7 @@ struct TransactionOptions {
 	bool useGrvCache : 1;
 	bool skipGrvCache : 1;
 	bool rawAccess : 1;
-	bool useSetTenant : 1; // internal option for using originally set tenant
+	bool skipTenantPrefix : 1; // internal option to skip prepending tenant prefix for dummy transactions
 
 	TransactionPriority priority;
 

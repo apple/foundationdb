@@ -3213,9 +3213,7 @@ Reference<TransactionState> TransactionState::cloneAndReset(Reference<Transactio
 TenantInfo TransactionState::getTenantInfo(AllowInvalidTenantID allowInvalidId /* = false */) {
 	Optional<TenantName> const& t = tenant();
 
-	if (options.useSetTenant) {
-		// go to end
-	} else if (options.rawAccess) {
+	if (options.rawAccess) {
 		return TenantInfo();
 	} else if (!cx->internal && cx->clientInfo->get().tenantMode == TenantMode::REQUIRED && !t.present()) {
 		throw tenant_name_required();
@@ -5764,7 +5762,7 @@ void TransactionOptions::clear() {
 	useGrvCache = false;
 	skipGrvCache = false;
 	rawAccess = false;
-	useSetTenant = false;
+	skipTenantPrefix = false;
 }
 
 TransactionOptions::TransactionOptions() {
@@ -5930,9 +5928,12 @@ ACTOR static Future<Void> commitDummyTransaction(Reference<TransactionState> trS
 			tr.trState->options = trState->options;
 			tr.trState->taskID = trState->taskID;
 			tr.trState->authToken = trState->authToken;
-			tr.trState->options.rawAccess = true;
-			tr.trState->options.useSetTenant =
-			    trState->hasTenant(); // don't let rawAccess remove set tenant during tenant resolution
+			if (!trState->tenant().present()) {
+				tr.setOption(FDBTransactionOptions::RAW_ACCESS);
+			} else {
+				tr.trState->options.skipTenantPrefix = true;
+				tr.trState->tenantId = trState->tenantId;
+			}
 			tr.setOption(FDBTransactionOptions::CAUSAL_WRITE_RISKY);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.addReadConflictRange(range);
@@ -6111,7 +6112,7 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 			wait(store(req.transaction.read_snapshot, readVersion));
 		}
 
-		if (trState->tenant().present()) {
+		if (trState->tenant().present() && !trState->options.skipTenantPrefix) {
 			KeyRangeLocationInfo locationInfo = wait(getKeyLocation(trState,
 			                                                        ""_sr,
 			                                                        &StorageServerInterface::getValue,
@@ -6248,10 +6249,7 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 
 				TEST(true); // Waiting for dummy transaction to report commit_unknown_result
 
-				KeyRef conflictKeyRef = selfConflictingRange.begin;
-				if (conflictKeyRef.startsWith(tenantPrefix))
-					conflictKeyRef = conflictKeyRef.removePrefix(tenantPrefix);
-				wait(commitDummyTransaction(trState, singleKeyRange(conflictKeyRef)));
+				wait(commitDummyTransaction(trState, singleKeyRange(selfConflictingRange.begin)));
 			}
 
 			// The user needs to be informed that we aren't sure whether the commit happened.  Standard retry loops
