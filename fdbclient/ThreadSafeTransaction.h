@@ -178,7 +178,7 @@ public:
 	Optional<TenantName> getTenant() override;
 
 	// These are to permit use as state variables in actors:
-	ThreadSafeTransaction() : tr(nullptr) {}
+	ThreadSafeTransaction() : tr(nullptr), initialized(std::make_shared<std::atomic_bool>(false)) {}
 	void operator=(ThreadSafeTransaction&& r) noexcept;
 	ThreadSafeTransaction(ThreadSafeTransaction&& r) noexcept;
 
@@ -190,6 +190,7 @@ public:
 private:
 	ISingleThreadTransaction* tr;
 	const Optional<TenantName> tenantName;
+	std::shared_ptr<std::atomic_bool> initialized;
 };
 
 // An implementation of IClientApi that serializes operations onto the network thread and interacts with the lower-level
