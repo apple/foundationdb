@@ -1638,7 +1638,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 				entry.tenantGroup = "TestTenantGroup"_sr;
 			}
 			TraceEvent("CreatingTenant").detail("Tenant", tenant).detail("TenantGroup", entry.tenantGroup);
-			tenantFutures.push_back(success(TenantAPI::createTenant(cx.getReference(), tenant, entry)));
+			tenantFutures.push_back(success(TenantAPI::createTenant(cx.getReference(), tenant, false, entry)));
 		}
 
 		wait(waitForAll(tenantFutures));

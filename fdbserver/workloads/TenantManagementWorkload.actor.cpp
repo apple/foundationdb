@@ -38,10 +38,11 @@ struct TenantManagementWorkload : TestWorkload {
 		int64_t id;
 		Optional<TenantGroupName> tenantGroup;
 		bool empty;
+		bool encrypted;
 
 		TenantData() : id(-1), empty(true) {}
-		TenantData(int64_t id, Optional<TenantGroupName> tenantGroup, bool empty)
-		  : id(id), tenantGroup(tenantGroup), empty(empty) {}
+		TenantData(int64_t id, Optional<TenantGroupName> tenantGroup, bool empty, bool encrypted)
+		  : id(id), tenantGroup(tenantGroup), empty(empty), encrypted(encrypted) {}
 	};
 
 	struct TenantGroupData {
@@ -155,8 +156,10 @@ struct TenantManagementWorkload : TestWorkload {
 			wait(tr->commit());
 		} else if (operationType == OperationType::MANAGEMENT_DATABASE) {
 			ASSERT(tenantsToCreate.size() == 1);
-			wait(success(TenantAPI::createTenant(
-			    cx.getReference(), tenantsToCreate.begin()->first, tenantsToCreate.begin()->second)));
+			wait(success(TenantAPI::createTenant(cx.getReference(),
+			                                     tenantsToCreate.begin()->first,
+			                                     SERVER_KNOBS->ENABLE_ENCRYPTION,
+			                                     tenantsToCreate.begin()->second)));
 		} else if (operationType == OperationType::MANAGEMENT_TRANSACTION) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			int64_t _nextId = wait(TenantAPI::getNextTenantId(tr));
@@ -165,7 +168,8 @@ struct TenantManagementWorkload : TestWorkload {
 			std::vector<Future<Void>> createFutures;
 			for (auto [tenant, entry] : tenantsToCreate) {
 				entry.setId(nextId++);
-				createFutures.push_back(success(TenantAPI::createTenantTransaction(tr, tenant, entry)));
+				createFutures.push_back(
+				    success(TenantAPI::createTenantTransaction(tr, tenant, entry, SERVER_KNOBS->ENABLE_ENCRYPTION)));
 			}
 			TenantMetadata::lastTenantId.set(tr, nextId - 1);
 			wait(waitForAll(createFutures));
@@ -241,8 +245,8 @@ struct TenantManagementWorkload : TestWorkload {
 
 					// Update our local tenant state to include the newly created one
 					self->maxId = entry.get().id;
-					self->createdTenants[tenantItr->first] =
-					    TenantData(entry.get().id, tenantItr->second.tenantGroup, true);
+					self->createdTenants[tenantItr->first] = TenantData(
+					    entry.get().id, tenantItr->second.tenantGroup, true, SERVER_KNOBS->ENABLE_ENCRYPTION);
 
 					// If this tenant has a tenant group, create or update the entry for it
 					if (tenantItr->second.tenantGroup.present()) {
@@ -551,10 +555,12 @@ struct TenantManagementWorkload : TestWorkload {
 		std::string tenantStateStr;
 		std::string base64TenantGroup;
 		std::string printableTenantGroup;
+		bool encrypted;
 
 		jsonDoc.get("id", id);
 		jsonDoc.get("prefix.base64", base64Prefix);
 		jsonDoc.get("prefix.printable", printablePrefix);
+		jsonDoc.get("prefix.encrypted", encrypted);
 
 		prefix = base64::decoder::from_string(base64Prefix);
 		ASSERT(prefix == unprintable(printablePrefix));
@@ -569,7 +575,7 @@ struct TenantManagementWorkload : TestWorkload {
 			tenantGroup = TenantGroupNameRef(tenantGroupStr);
 		}
 
-		TenantMapEntry entry(id, TenantState::READY, tenantGroup);
+		TenantMapEntry entry(id, TenantState::READY, tenantGroup, encrypted);
 		ASSERT(entry.prefix == prefix);
 		return entry;
 	}
@@ -991,6 +997,7 @@ struct TenantManagementWorkload : TestWorkload {
 				ASSERT(localItr != self->createdTenants.end());
 				ASSERT(dataItr->first == localItr->first);
 				ASSERT(dataItr->second.tenantGroup == localItr->second.tenantGroup);
+				ASSERT(dataItr->second.encrypted == SERVER_KNOBS->ENABLE_ENCRYPTION);
 
 				checkTenants.push_back(checkTenantContents(cx, self, dataItr->first, localItr->second));
 				lastTenant = dataItr->first;

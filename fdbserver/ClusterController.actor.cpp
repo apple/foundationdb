@@ -248,6 +248,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 			dbInfo.latencyBandConfig = db->serverInfo->get().latencyBandConfig;
 			dbInfo.myLocality = db->serverInfo->get().myLocality;
 			dbInfo.client = ClientDBInfo();
+			dbInfo.client.isEncryptionEnabled = db->serverInfo->get().encryptKeyProxy.present();
 			dbInfo.client.tenantMode = db->config.tenantMode;
 			dbInfo.client.clusterId = db->serverInfo->get().client.clusterId;
 
@@ -1011,7 +1012,8 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 	// Construct the client information
 	if (db->clientInfo->get().commitProxies != req.commitProxies ||
 	    db->clientInfo->get().grvProxies != req.grvProxies ||
-	    db->clientInfo->get().tenantMode != db->config.tenantMode || db->clientInfo->get().clusterId != req.clusterId) {
+	    db->clientInfo->get().tenantMode != db->config.tenantMode || db->clientInfo->get().clusterId != req.clusterId ||
+	    db->clientInfo->get().isEncryptionEnabled != db->serverInfo->get().encryptKeyProxy.present()) {
 		TraceEvent("PublishNewClientInfo", self->id)
 		    .detail("Master", dbInfo.master.id())
 		    .detail("GrvProxies", db->clientInfo->get().grvProxies)
@@ -1021,11 +1023,13 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 		    .detail("TenantMode", db->clientInfo->get().tenantMode.toString())
 		    .detail("ReqTenantMode", db->config.tenantMode.toString())
 		    .detail("ClusterId", db->clientInfo->get().clusterId)
+		    .detail("EncryptionEnabled", db->serverInfo->get().encryptKeyProxy.present())
 		    .detail("ReqClusterId", req.clusterId);
 		isChanged = true;
 		// TODO why construct a new one and not just copy the old one and change proxies + id?
 		ClientDBInfo clientInfo;
 		clientInfo.id = deterministicRandom()->randomUniqueID();
+		clientInfo.isEncryptionEnabled = db->serverInfo->get().encryptKeyProxy.present();
 		clientInfo.commitProxies = req.commitProxies;
 		clientInfo.grvProxies = req.grvProxies;
 		clientInfo.tenantMode = db->config.tenantMode;

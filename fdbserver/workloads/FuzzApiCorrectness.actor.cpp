@@ -240,7 +240,8 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			if (i < self->numTenants) {
 				TenantMapEntry entry;
 				entry.tenantGroup = self->getTenantGroup(i);
-				tenantFutures.push_back(::success(TenantAPI::createTenant(cx.getReference(), tenantName, entry)));
+				tenantFutures.push_back(
+				    ::success(TenantAPI::createTenant(cx.getReference(), tenantName, false, entry)));
 				self->createdTenants.insert(tenantName);
 			}
 		}

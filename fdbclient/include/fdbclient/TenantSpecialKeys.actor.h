@@ -113,7 +113,8 @@ private:
 	    TenantNameRef tenantName,
 	    std::vector<std::pair<Standalone<StringRef>, Optional<Value>>> configMutations,
 	    int64_t tenantId,
-	    std::map<TenantGroupName, int>* tenantGroupNetTenantDelta) {
+	    std::map<TenantGroupName, int>* tenantGroupNetTenantDelta,
+	    bool encrypted) {
 		state TenantMapEntry tenantEntry;
 		tenantEntry.setId(tenantId);
 
@@ -126,7 +127,7 @@ private:
 		}
 
 		std::pair<Optional<TenantMapEntry>, bool> entry =
-		    wait(TenantAPI::createTenantTransaction(&ryw->getTransaction(), tenantName, tenantEntry));
+		    wait(TenantAPI::createTenantTransaction(&ryw->getTransaction(), tenantName, tenantEntry, encrypted));
 
 		return Void();
 	}
@@ -140,7 +141,13 @@ private:
 
 		std::vector<Future<Void>> createFutures;
 		for (auto const& [tenant, config] : tenants) {
-			createFutures.push_back(createTenant(ryw, tenant, config, nextId++, tenantGroupNetTenantDelta));
+			createFutures.push_back(
+			    createTenant(ryw,
+			                 tenant,
+			                 config,
+			                 nextId++,
+			                 tenantGroupNetTenantDelta,
+			                 ryw->getTransactionState()->cx->clientInfo->get().isEncryptionEnabled));
 		}
 
 		TenantMetadata::lastTenantId.set(&ryw->getTransaction(), nextId - 1);
