@@ -589,13 +589,19 @@ public:
 	}
 
 	// Removes bytes from begin up to and including the sep string, returns StringRef of the part before sep
-	StringRef eat(StringRef sep) {
+	StringRef eat(StringRef sep, bool* foundSep = nullptr) {
 		for (int i = 0, iend = size() - sep.size(); i <= iend; ++i) {
 			if (sep.compare(substr(i, sep.size())) == 0) {
+				if (foundSep) {
+					*foundSep = true;
+				}
 				StringRef token = substr(0, i);
 				*this = substr(i + sep.size());
 				return token;
 			}
+		}
+		if (foundSep) {
+			*foundSep = false;
 		}
 		return eat();
 	}
@@ -604,7 +610,9 @@ public:
 		*this = StringRef();
 		return r;
 	}
-	StringRef eat(const char* sep) { return eat(StringRef((const uint8_t*)sep, (int)strlen(sep))); }
+	StringRef eat(const char* sep, bool* foundSep = nullptr) {
+		return eat(StringRef((const uint8_t*)sep, (int)strlen(sep)), foundSep);
+	}
 	// Return StringRef of bytes from begin() up to but not including the first byte matching any byte in sep,
 	// and remove that sequence (including the sep byte) from *this
 	// Returns and removes all bytes from *this if no bytes within sep were found

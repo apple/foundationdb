@@ -658,11 +658,11 @@ std::pair<BlobGranuleSplitState, Version> decodeBlobGranuleSplitValue(ValueRef c
 
 const Value blobGranuleMergeValueFor(KeyRange mergeKeyRange,
                                      std::vector<UID> parentGranuleIDs,
-                                     std::vector<KeyRange> parentGranuleRanges,
+                                     std::vector<Key> parentGranuleRanges,
                                      std::vector<Version> parentGranuleStartVersions);
 // FIXME: probably just define object type for this?
-std::tuple<KeyRange, Version, std::vector<UID>, std::vector<KeyRange>, std::vector<Version>>
-decodeBlobGranuleMergeValue(ValueRef const& value);
+std::tuple<KeyRange, Version, std::vector<UID>, std::vector<Key>, std::vector<Version>> decodeBlobGranuleMergeValue(
+    ValueRef const& value);
 
 const Key blobGranuleHistoryKeyFor(KeyRangeRef const& range, Version version);
 std::pair<KeyRange, Version> decodeBlobGranuleHistoryKey(KeyRef const& key);
@@ -678,13 +678,6 @@ const Key blobWorkerListKeyFor(UID workerID);
 UID decodeBlobWorkerListKey(KeyRef const& key);
 const Value blobWorkerListValue(BlobWorkerInterface const& interface);
 BlobWorkerInterface decodeBlobWorkerListValue(ValueRef const& value);
-
-// State for the tenant map
-extern const KeyRangeRef tenantMapKeys;
-extern const KeyRef tenantMapPrefix;
-extern const KeyRef tenantMapPrivatePrefix;
-extern const KeyRef tenantLastIdKey;
-extern const KeyRef tenantDataPrefixKey;
 
 // Storage quota per tenant
 // "\xff/storageQuota/[[tenantName]]" := "[[quota]]"

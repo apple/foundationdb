@@ -1,8 +1,5 @@
 fdb_find_sources(FDBCLIENT_SRCS)
-list(APPEND FDBCLIENT_SRCS
-  sha1/SHA1.cpp
-  libb64/cdecode.c
-  libb64/cencode.c)
+list(APPEND FDBCLIENT_SRCS sha1/SHA1.cpp)
 
 message(STATUS "FDB version is ${FDB_VERSION}")
 message(STATUS "FDB package name is ${FDB_PACKAGE_NAME}")
@@ -69,13 +66,6 @@ endif()
 if(WITH_AWS_BACKUP)
   add_compile_definitions(BUILD_AWS_BACKUP)
   include(awssdk)
-endif()
-
-find_package(ZLIB)
-if(ZLIB_FOUND)
-  add_compile_definitions(ZLIB_LIB_SUPPORTED)
-else()
-  message(STATUS "ZLIB package not found")
 endif()
 
 add_flow_target(STATIC_LIBRARY NAME fdbclient SRCS ${FDBCLIENT_SRCS} ADDL_SRCS ${options_srcs})

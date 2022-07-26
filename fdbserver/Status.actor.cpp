@@ -742,6 +742,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
     std::vector<std::pair<GrvProxyInterface, EventMap>> grvProxies,
     std::vector<BlobWorkerInterface> blobWorkers,
     ServerCoordinators coordinators,
+    std::vector<NetworkAddress> coordinatorAddresses,
     Database cx,
     Optional<DatabaseConfiguration> configuration,
     Optional<Key> healthyZone,
@@ -839,8 +840,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 		}
 	}
 
-	std::vector<NetworkAddress> addressVec = wait(coordinators.ccr->getConnectionString().tryResolveHostnames());
-	for (const auto& coordinator : addressVec) {
+	for (const auto& coordinator : coordinatorAddresses) {
 		roles.addCoordinatorRole(coordinator);
 	}
 
@@ -2751,6 +2751,9 @@ ACTOR Future<JsonBuilderObject> lockedStatusFetcher(Reference<AsyncVar<ServerDBI
 			try {
 				wait(tr.onError(e));
 			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled)
+					throw;
+
 				incomplete_reasons->insert(format("Unable to determine if database is locked (%s).", e.what()));
 				break;
 			}
@@ -3041,6 +3044,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 		statusObj["machines"] = machineStatusFetcher(mMetrics, workers, configuration, &status_incomplete_reasons);
 
+		state std::vector<NetworkAddress> coordinatorAddresses;
 		if (configuration.present()) {
 			// Do the latency probe by itself to avoid interference from other status activities
 			state bool isAvailable = true;
@@ -3133,8 +3137,9 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			state std::vector<JsonBuilderObject> workerStatuses = wait(getAll(futures2));
 			wait(success(primaryDCFO));
 
-			std::vector<NetworkAddress> coordinatorAddresses =
-			    wait(coordinators.ccr->getConnectionString().tryResolveHostnames());
+			std::vector<NetworkAddress> addresses =
+			    wait(timeoutError(coordinators.ccr->getConnectionString().tryResolveHostnames(), 5.0));
+			coordinatorAddresses = std::move(addresses);
 
 			int logFaultTolerance = 100;
 			if (db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
@@ -3275,6 +3280,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		                              grvProxies,
 		                              blobWorkers,
 		                              coordinators,
+		                              coordinatorAddresses,
 		                              cx,
 		                              configuration,
 		                              loadResult.present() ? loadResult.get().healthyZone : Optional<Key>(),

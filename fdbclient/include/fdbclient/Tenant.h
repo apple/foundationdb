@@ -23,11 +23,14 @@
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/VersionedMap.h"
 #include "flow/flat_buffers.h"
 
 typedef StringRef TenantNameRef;
 typedef Standalone<TenantNameRef> TenantName;
+
+enum class TenantState { REGISTERING, READY, REMOVING, UPDATING_CONFIGURATION, ERROR };
 
 struct TenantMapEntry {
 	constexpr static FileIdentifier file_identifier = 12247338;
@@ -35,43 +38,63 @@ struct TenantMapEntry {
 	static Key idToPrefix(int64_t id);
 	static int64_t prefixToId(KeyRef prefix);
 
-	int64_t id;
+	static std::string tenantStateToString(TenantState tenantState);
+	static TenantState stringToTenantState(std::string stateStr);
+
+	int64_t id = -1;
 	Key prefix;
+	TenantState tenantState = TenantState::READY;
 
-	constexpr static int ROOT_PREFIX_SIZE = sizeof(id);
-
-private:
-	void initPrefix(KeyRef subspace);
+	constexpr static int PREFIX_SIZE = sizeof(id);
 
 public:
 	TenantMapEntry();
-	TenantMapEntry(int64_t id, KeyRef subspace);
+	TenantMapEntry(int64_t id, TenantState tenantState);
+
+	void setId(int64_t id);
+	std::string toJson(int apiVersion) const;
 
 	Value encode() const { return ObjectWriter::toValue(*this, IncludeVersion(ProtocolVersion::withTenants())); }
 
 	static TenantMapEntry decode(ValueRef const& value) {
 		TenantMapEntry entry;
-		ObjectReader reader(value.begin(), IncludeVersion(ProtocolVersion::withTenants()));
+		ObjectReader reader(value.begin(), IncludeVersion());
 		reader.deserialize(entry);
 		return entry;
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		KeyRef subspace;
-		if (ar.isDeserializing) {
-			serializer(ar, id, subspace);
+		serializer(ar, id, tenantState);
+		if constexpr (Ar::isDeserializing) {
 			if (id >= 0) {
-				initPrefix(subspace);
+				prefix = idToPrefix(id);
 			}
-		} else {
-			ASSERT(prefix.size() >= 8 || (prefix.empty() && id == -1));
-			if (!prefix.empty()) {
-				subspace = prefix.substr(0, prefix.size() - 8);
-			}
-			serializer(ar, id, subspace);
+			ASSERT(tenantState >= TenantState::REGISTERING && tenantState <= TenantState::ERROR);
 		}
 	}
+};
+
+struct TenantMetadataSpecification {
+	static KeyRef subspace;
+
+	KeyBackedObjectMap<TenantName, TenantMapEntry, decltype(IncludeVersion()), NullCodec> tenantMap;
+	KeyBackedProperty<int64_t> lastTenantId;
+
+	TenantMetadataSpecification(KeyRef subspace)
+	  : tenantMap(subspace.withSuffix("tenant/map/"_sr), IncludeVersion(ProtocolVersion::withTenants())),
+	    lastTenantId(subspace.withSuffix("tenant/lastId"_sr)) {}
+};
+
+struct TenantMetadata {
+private:
+	static inline TenantMetadataSpecification instance = TenantMetadataSpecification("\xff/"_sr);
+
+public:
+	static inline auto& tenantMap = instance.tenantMap;
+	static inline auto& lastTenantId = instance.lastTenantId;
+
+	static inline Key tenantMapPrivatePrefix = "\xff"_sr.withSuffix(tenantMap.subspace.begin);
 };
 
 typedef VersionedMap<TenantName, TenantMapEntry> TenantMap;

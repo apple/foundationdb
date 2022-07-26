@@ -31,7 +31,7 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/SpecialKeySpace.actor.h"
 #include "fdbclient/TenantManagement.actor.h"
-#include "fdbclient/libb64/encode.h"
+#include "libb64/encode.h"
 #include "flow/Arena.h"
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -71,27 +71,12 @@ private:
 	                                        KeyRangeRef kr,
 	                                        RangeResult* results,
 	                                        GetRangeLimits limitsHint) {
-		std::map<TenantName, TenantMapEntry> tenants =
+		std::vector<std::pair<TenantName, TenantMapEntry>> tenants =
 		    wait(TenantAPI::listTenantsTransaction(&ryw->getTransaction(), kr.begin, kr.end, limitsHint.rows));
 
 		for (auto tenant : tenants) {
-			json_spirit::mObject tenantEntry;
-			tenantEntry["id"] = tenant.second.id;
-			if (ryw->getDatabase()->apiVersionAtLeast(720)) {
-				json_spirit::mObject prefixObject;
-				std::string encodedPrefix = base64::encoder::from_string(tenant.second.prefix.toString());
-				// Remove trailing newline
-				encodedPrefix.resize(encodedPrefix.size() - 1);
-
-				prefixObject["base64"] = encodedPrefix;
-				prefixObject["printable"] = printable(tenant.second.prefix);
-				tenantEntry["prefix"] = prefixObject;
-			} else {
-				// This is not a standard encoding in JSON, and some libraries may not be able to easily decode it
-				tenantEntry["prefix"] = tenant.second.prefix.toString();
-			}
-			std::string tenantEntryString = json_spirit::write_string(json_spirit::mValue(tenantEntry));
-			ValueRef tenantEntryBytes(results->arena(), tenantEntryString);
+			std::string jsonString = tenant.second.toJson(ryw->getDatabase()->apiVersion);
+			ValueRef tenantEntryBytes(results->arena(), jsonString);
 			results->push_back(results->arena(),
 			                   KeyValueRef(withTenantMapPrefix(tenant.first, results->arena()), tenantEntryBytes));
 		}
@@ -126,11 +111,12 @@ private:
 
 		std::vector<Future<Void>> createFutures;
 		for (auto tenant : tenants) {
+			state TenantMapEntry tenantEntry(nextId++, TenantState::READY);
 			createFutures.push_back(
-			    success(TenantAPI::createTenantTransaction(&ryw->getTransaction(), tenant, nextId++)));
+			    success(TenantAPI::createTenantTransaction(&ryw->getTransaction(), tenant, tenantEntry)));
 		}
 
-		ryw->getTransaction().set(tenantLastIdKey, TenantMapEntry::idToPrefix(nextId - 1));
+		TenantMetadata::lastTenantId.set(&ryw->getTransaction(), nextId - 1);
 		wait(waitForAll(createFutures));
 		return Void();
 	}
@@ -138,7 +124,7 @@ private:
 	ACTOR static Future<Void> deleteTenantRange(ReadYourWritesTransaction* ryw,
 	                                            TenantName beginTenant,
 	                                            TenantName endTenant) {
-		state std::map<TenantName, TenantMapEntry> tenants = wait(
+		state std::vector<std::pair<TenantName, TenantMapEntry>> tenants = wait(
 		    TenantAPI::listTenantsTransaction(&ryw->getTransaction(), beginTenant, endTenant, CLIENT_KNOBS->TOO_MANY));
 
 		if (tenants.size() == CLIENT_KNOBS->TOO_MANY) {

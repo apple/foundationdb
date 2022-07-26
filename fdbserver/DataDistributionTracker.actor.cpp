@@ -524,12 +524,12 @@ ACTOR Future<Void> shardSplitter(DataDistributionTracker* self,
 		for (int i = 0; i < skipRange; i++) {
 			KeyRangeRef r(splitKeys[i], splitKeys[i + 1]);
 			self->shardsAffectedByTeamFailure->defineShard(r);
-			self->output.send(RelocateShard(r, SERVER_KNOBS->PRIORITY_SPLIT_SHARD, RelocateReason::OTHER));
+			self->output.send(RelocateShard(r, DataMovementReason::SPLIT_SHARD, RelocateReason::OTHER));
 		}
 		for (int i = numShards - 1; i > skipRange; i--) {
 			KeyRangeRef r(splitKeys[i], splitKeys[i + 1]);
 			self->shardsAffectedByTeamFailure->defineShard(r);
-			self->output.send(RelocateShard(r, SERVER_KNOBS->PRIORITY_SPLIT_SHARD, RelocateReason::OTHER));
+			self->output.send(RelocateShard(r, DataMovementReason::SPLIT_SHARD, RelocateReason::OTHER));
 		}
 
 		self->sizeChanges.add(changeSizes(self, keys, shardSize->get().get().metrics.bytes));
@@ -675,7 +675,7 @@ Future<Void> shardMerger(DataDistributionTracker* self,
 	}
 	restartShardTrackers(self, mergeRange, ShardMetrics(endingStats, lastLowBandwidthStartTime, shardCount));
 	self->shardsAffectedByTeamFailure->defineShard(mergeRange);
-	self->output.send(RelocateShard(mergeRange, SERVER_KNOBS->PRIORITY_MERGE_SHARD, RelocateReason::OTHER));
+	self->output.send(RelocateShard(mergeRange, DataMovementReason::MERGE_SHARD, RelocateReason::OTHER));
 
 	// We are about to be cancelled by the call to restartShardTrackers
 	return Void();
@@ -831,9 +831,8 @@ ACTOR Future<Void> trackInitialShards(DataDistributionTracker* self, Reference<I
 }
 
 ACTOR Future<Void> fetchTopKShardMetrics_impl(DataDistributionTracker* self, GetTopKMetricsRequest req) {
-	ASSERT(req.comparator);
 	state Future<Void> onChange;
-	state std::vector<StorageMetrics> returnMetrics;
+	state std::vector<GetTopKMetricsReply::KeyRangeStorageMetrics> returnMetrics;
 	// random pick a portion of shard
 	if (req.keys.size() > SERVER_KNOBS->DD_SHARD_COMPARE_LIMIT) {
 		deterministicRandom()->randomShuffle(req.keys, SERVER_KNOBS->DD_SHARD_COMPARE_LIMIT);
@@ -867,8 +866,7 @@ ACTOR Future<Void> fetchTopKShardMetrics_impl(DataDistributionTracker* self, Get
 					maxReadLoad = std::max(metrics.bytesReadPerKSecond, maxReadLoad);
 					if (req.minBytesReadPerKSecond <= metrics.bytesReadPerKSecond &&
 					    metrics.bytesReadPerKSecond <= req.maxBytesReadPerKSecond) {
-						metrics.keys = range;
-						returnMetrics.push_back(metrics);
+						returnMetrics.emplace_back(range, metrics);
 					}
 				}
 
@@ -882,11 +880,11 @@ ACTOR Future<Void> fetchTopKShardMetrics_impl(DataDistributionTracker* self, Get
 					std::nth_element(returnMetrics.begin(),
 					                 returnMetrics.begin() + req.topK - 1,
 					                 returnMetrics.end(),
-					                 req.comparator);
-					req.reply.send(GetTopKMetricsReply(
-					    std::vector<StorageMetrics>(returnMetrics.begin(), returnMetrics.begin() + req.topK),
-					    minReadLoad,
-					    maxReadLoad));
+					                 GetTopKMetricsRequest::compare);
+					req.reply.send(GetTopKMetricsReply(std::vector<GetTopKMetricsReply::KeyRangeStorageMetrics>(
+					                                       returnMetrics.begin(), returnMetrics.begin() + req.topK),
+					                                   minReadLoad,
+					                                   maxReadLoad));
 				}
 				return Void();
 			}
@@ -1191,8 +1189,14 @@ void ShardsAffectedByTeamFailure::finishMove(KeyRangeRef keys) {
 	}
 }
 
+void ShardsAffectedByTeamFailure::setCheckMode(CheckMode mode) {
+	checkMode = mode;
+}
+
 void ShardsAffectedByTeamFailure::check() const {
-	if (EXPENSIVE_VALIDATION) {
+	if (checkMode == CheckMode::ForceNoCheck)
+		return;
+	if (EXPENSIVE_VALIDATION || checkMode == CheckMode::ForceCheck) {
 		for (auto t = team_shards.begin(); t != team_shards.end(); ++t) {
 			auto i = shard_teams.rangeContaining(t->second.begin);
 			if (i->range() != t->second || !std::count(i->value().first.begin(), i->value().first.end(), t->first)) {
