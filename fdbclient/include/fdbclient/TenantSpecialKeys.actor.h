@@ -32,7 +32,6 @@
 #include "fdbclient/SpecialKeySpace.actor.h"
 #include "fdbclient/TenantManagement.actor.h"
 #include "fdbclient/Tuple.h"
-#include "fdbclient/libb64/encode.h"
 #include "flow/Arena.h"
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // This must be the last #include.

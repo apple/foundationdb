@@ -518,7 +518,8 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 
 	Deque<std::pair<Version, Standalone<VectorRef<uint8_t>>>> messageBlocks;
 	std::vector<std::vector<Reference<TagData>>> tag_data; // tag.locality | tag.id
-	int unpoppedRecoveredTags;
+	int unpoppedRecoveredTagCount;
+	std::set<Tag> unpoppedRecoveredTags;
 	std::map<Tag, Promise<Void>> waitingTags;
 
 	Reference<TagData> getTagData(Tag tag) {
@@ -642,7 +643,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	                 std::string context)
 	  : stopped(false), initialized(false), queueCommittingVersion(0), knownCommittedVersion(0),
 	    durableKnownCommittedVersion(0), minKnownCommittedVersion(0), queuePoppedVersion(0), minPoppedTagVersion(0),
-	    minPoppedTag(invalidTag), unpoppedRecoveredTags(0), cc("TLog", interf.id().toString()),
+	    minPoppedTag(invalidTag), unpoppedRecoveredTagCount(0), cc("TLog", interf.id().toString()),
 	    bytesInput("BytesInput", cc), bytesDurable("BytesDurable", cc), blockingPeeks("BlockingPeeks", cc),
 	    blockingPeekTimeouts("BlockingPeekTimeouts", cc), emptyPeeks("EmptyPeeks", cc),
 	    nonEmptyPeeks("NonEmptyPeeks", cc), logId(interf.id()), protocolVersion(protocolVersion),
@@ -1196,14 +1197,20 @@ ACTOR Future<Void> tLogPopCore(TLogData* self, Tag inputTag, Version to, Referen
 
 		if (tagData->unpoppedRecovered && upTo > logData->recoveredAt) {
 			tagData->unpoppedRecovered = false;
-			logData->unpoppedRecoveredTags--;
+			logData->unpoppedRecoveredTagCount--;
+			logData->unpoppedRecoveredTags.erase(tag);
 			TraceEvent("TLogPoppedTag", logData->logId)
-			    .detail("Tags", logData->unpoppedRecoveredTags)
+			    .detail("Tags", logData->unpoppedRecoveredTagCount)
 			    .detail("Tag", tag.toString())
 			    .detail("DurableKCVer", logData->durableKnownCommittedVersion)
-			    .detail("RecoveredAt", logData->recoveredAt);
-			if (logData->unpoppedRecoveredTags == 0 && logData->durableKnownCommittedVersion >= logData->recoveredAt &&
-			    logData->recoveryComplete.canBeSet()) {
+			    .detail("RecoveredAt", logData->recoveredAt)
+			    .detail("UnpoppedTags", describe(logData->unpoppedRecoveredTags));
+			if (logData->unpoppedRecoveredTagCount == 0 &&
+			    logData->durableKnownCommittedVersion >= logData->recoveredAt && logData->recoveryComplete.canBeSet()) {
+				TraceEvent("TLogRecoveryComplete", logData->logId)
+				    .detail("Tags", logData->unpoppedRecoveredTagCount)
+				    .detail("DurableKCVer", logData->durableKnownCommittedVersion)
+				    .detail("RecoveredAt", logData->recoveredAt);
 				logData->recoveryComplete.send(Void());
 			}
 		}
@@ -2153,10 +2160,10 @@ ACTOR Future<Void> doQueueCommit(TLogData* self,
 	ASSERT(ver > logData->queueCommittedVersion.get());
 
 	logData->durableKnownCommittedVersion = knownCommittedVersion;
-	if (logData->unpoppedRecoveredTags == 0 && knownCommittedVersion >= logData->recoveredAt &&
+	if (logData->unpoppedRecoveredTagCount == 0 && knownCommittedVersion >= logData->recoveredAt &&
 	    logData->recoveryComplete.canBeSet()) {
 		TraceEvent("TLogRecoveryComplete", logData->logId)
-		    .detail("Tags", logData->unpoppedRecoveredTags)
+		    .detail("Tags", logData->unpoppedRecoveredTagCount)
 		    .detail("DurableKCVer", logData->durableKnownCommittedVersion)
 		    .detail("RecoveredAt", logData->recoveredAt);
 		logData->recoveryComplete.send(Void());
@@ -3408,7 +3415,8 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 			logData->queueCommittedVersion.set(logData->unrecoveredBefore - 1);
 			logData->version.set(logData->unrecoveredBefore - 1);
 
-			logData->unpoppedRecoveredTags = req.allTags.size();
+			logData->unpoppedRecoveredTagCount = req.allTags.size();
+			logData->unpoppedRecoveredTags = std::set<Tag>(req.allTags.begin(), req.allTags.end());
 			wait(initPersistentState(self, logData) || logData->removed);
 
 			TraceEvent("TLogRecover", self->dbgid)

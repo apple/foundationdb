@@ -25,7 +25,7 @@
 #pragma once
 
 #include "fdbclient/JSONDoc.h"
-#include "fdbclient/HTTP.h"
+#include "fdbrpc/HTTP.h"
 #include "fdbclient/RESTUtils.h"
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
