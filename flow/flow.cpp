@@ -424,17 +424,21 @@ void bindDeterministicRandomToOpenssl() {
 #else // OPENSSL_IS_BORINGSSL
 	static const RAND_METHOD method = {
 		[](const void*, int) -> void {},
-		[](unsigned char* buf, int length) -> void {
+		[](unsigned char* buf, unsigned long length) -> int {
 		    if (g_network)
 			    ASSERT_ABORT(g_network->isSimulated());
+		    ASSERT(length <= std::numeric_limits<int>::max());
 		    deterministicRandom()->randomBytes(buf, length);
+		    return 1;
 		},
 		[]() -> void {},
 		[](const void*, int, double) -> void {},
-		[](unsigned char* buf, int length) -> void {
+		[](unsigned char* buf, unsigned long length) -> int {
 		    if (g_network)
 			    ASSERT_ABORT(g_network->isSimulated());
+		    ASSERT(length <= std::numeric_limits<int>::max());
 		    deterministicRandom()->randomBytes(buf, length);
+		    return 1;
 		},
 		[]() -> int { return 1; },
 	};
