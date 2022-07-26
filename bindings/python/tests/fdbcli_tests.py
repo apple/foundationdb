@@ -666,14 +666,6 @@ def tenants(logger):
     assert len(lines) == 4
     assert lines[3].strip() == 'tenant group: tenant_group1'
 
-    output = run_fdbcli_command('configuretenant tenant tenant_group=tenant_group1 tenant_group=tenant_group2')
-    assert output == 'The configuration for tenant `tenant\' has been updated'
-
-    output = run_fdbcli_command('gettenant tenant')
-    lines = output.split('\n')
-    assert len(lines) == 4
-    assert lines[3].strip() == 'tenant group: tenant_group2'
-
     output = run_fdbcli_command('configuretenant tenant unset tenant_group')
     assert output == 'The configuration for tenant `tenant\' has been updated'
 
@@ -681,63 +673,14 @@ def tenants(logger):
     lines = output.split('\n')
     assert len(lines) == 3
 
-    output = run_fdbcli_command_and_get_error('configuretenant tenant unset')
-    assert output == 'ERROR: `unset\' specified without a configuration parameter.'
-
-    output = run_fdbcli_command_and_get_error('configuretenant tenant unset tenant_group=tenant_group1')
-    assert output == 'ERROR: unrecognized configuration parameter `tenant_group=tenant_group1\''
-
-    output = run_fdbcli_command_and_get_error('configuretenant tenant tenant_group')
-    assert output == 'ERROR: invalid configuration string `tenant_group\'. String must specify a value using `=\'.'
-
-    output = run_fdbcli_command_and_get_error('configuretenant tenant3 tenant_group=tenant_group1')
-    assert output == 'ERROR: Tenant does not exist (2131)'
-
-    output = run_fdbcli_command('gettenant tenant2')
-    lines = output.split('\n')
-    assert len(lines) == 3
-    assert lines[0].strip().startswith('id: ')
-    assert lines[1].strip().startswith('prefix: ')
-    assert lines[2].strip() == 'tenant group: tenant_group2'
-
-    output = run_fdbcli_command('gettenant tenant2 JSON')
-    json_output = json.loads(output, strict=False)
-    assert(len(json_output) == 2)
-    assert('tenant' in json_output)
-    assert(json_output['type'] == 'success')
-    assert(len(json_output['tenant']) == 3)
-    assert('id' in json_output['tenant'])
-    assert('prefix' in json_output['tenant'])
-    assert(json_output['tenant']['tenant_group'] == 'tenant_group2')
-
-    output = run_fdbcli_command('configuretenant tenant tenant_group=tenant_group1')
-    assert output == 'The configuration for tenant `tenant\' has been updated'
-
-    output = run_fdbcli_command('gettenant tenant')
-    lines = output.split('\n')
-    assert len(lines) == 3
-    assert lines[2].strip() == 'tenant group: tenant_group1'
-
-    output = run_fdbcli_command('configuretenant tenant tenant_group=tenant_group1 tenant_group=tenant_group2')
-    assert output == 'The configuration for tenant `tenant\' has been updated'
-
-    output = run_fdbcli_command('gettenant tenant')
-    lines = output.split('\n')
-    assert len(lines) == 3
-    assert lines[2].strip() == 'tenant group: tenant_group2'
-
-    output = run_fdbcli_command('configuretenant tenant unset tenant_group')
-    assert output == 'The configuration for tenant `tenant\' has been updated'
-
-    output = run_fdbcli_command('gettenant tenant')
-    lines = output.split('\n')
-    assert len(lines) == 2
+    output = run_fdbcli_command_and_get_error('configuretenant tenant tenant_group=tenant_group1 tenant_group=tenant_group2')
+    assert output == 'ERROR: configuration parameter `tenant_group\' specified more than once.'
 
     output = run_fdbcli_command_and_get_error('configuretenant tenant unset')
     assert output == 'ERROR: `unset\' specified without a configuration parameter.'
 
     output = run_fdbcli_command_and_get_error('configuretenant tenant unset tenant_group=tenant_group1')
-    assert output == 'ERROR: unrecognized configuration parameter `tenant_group=tenant_group1\''
+    assert output == 'ERROR: unrecognized configuration parameter `tenant_group=tenant_group1\'.'
 
     output = run_fdbcli_command_and_get_error('configuretenant tenant tenant_group')
     assert output == 'ERROR: invalid configuration string `tenant_group\'. String must specify a value using `=\'.'

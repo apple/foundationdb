@@ -1954,13 +1954,6 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					continue;
 				}
 
-				if (tokencmp(tokens[0], "configuretenant")) {
-					bool _result = wait(makeInterruptable(configureTenantCommandActor(db, tokens)));
-					if (!_result)
-						is_error = true;
-					continue;
-				}
-
 				if (tokencmp(tokens[0], "renametenant")) {
 					if (opt.apiVersion < 720) {
 						fmt::print(stderr, "ERROR: tenants cannot be renamed before API version 720.\n");

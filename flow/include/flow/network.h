@@ -472,6 +472,8 @@ public:
 	// At present, implemented by Sim2Conn where we want to disable bits flip for connections between parent process and
 	// child process, also reduce latency for this kind of connection
 	virtual bool isStableConnection() const { throw unsupported_operation(); }
+
+	virtual boost::asio::ip::tcp::socket& getSocket() = 0;
 };
 
 class IListener {
@@ -688,9 +690,10 @@ public:
 
 	// Make an outgoing connection to the given address.  May return an error or block indefinitely in case of
 	// connection problems!
-	virtual Future<Reference<IConnection>> connect(NetworkAddress toAddr, const std::string& host = "") = 0;
+	virtual Future<Reference<IConnection>> connect(NetworkAddress toAddr,
+	                                               boost::asio::ip::tcp::socket* existingSocket = nullptr) = 0;
 
-	virtual Future<Reference<IConnection>> connectExternal(NetworkAddress toAddr, const std::string& host = "") = 0;
+	virtual Future<Reference<IConnection>> connectExternal(NetworkAddress toAddr) = 0;
 
 	// Make an outgoing udp connection and connect to the passed address.
 	virtual Future<Reference<IUDPSocket>> createUDPSocket(NetworkAddress toAddr) = 0;

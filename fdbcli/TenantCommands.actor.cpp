@@ -79,10 +79,16 @@ parseTenantConfiguration(std::vector<StringRef> const& tokens, int startIndex, b
 			value = token;
 		}
 
+		if (configParams.count(param)) {
+			fmt::print(
+			    stderr, "ERROR: configuration parameter `{}' specified more than once.\n", param.toString().c_str());
+			return {};
+		}
+
 		if (tokencmp(param, "tenant_group")) {
 			configParams[param] = value;
 		} else {
-			fmt::print(stderr, "ERROR: unrecognized configuration parameter `{}'\n", param.toString().c_str());
+			fmt::print(stderr, "ERROR: unrecognized configuration parameter `{}'.\n", param.toString().c_str());
 			return {};
 		}
 	}

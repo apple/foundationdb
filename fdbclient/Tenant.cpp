@@ -21,7 +21,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/Tenant.h"
-#include "fdbclient/libb64/encode.h"
+#include "libb64/encode.h"
 #include "flow/UnitTest.h"
 
 Key TenantMapEntry::idToPrefix(int64_t id) {
