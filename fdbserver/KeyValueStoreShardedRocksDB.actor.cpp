@@ -864,7 +864,9 @@ public:
 		ASSERT(dirtyShards != nullptr);
 		writeBatch->Put(it.value()->physicalShard->cf, toSlice(key), toSlice(value));
 		dirtyShards->insert(it.value()->physicalShard);
-		TraceEvent(SevVerbose, "ShardedRocksShardManagerPutEnd", this->logId).detail("WriteKey", key).detail("Value", value);
+		TraceEvent(SevVerbose, "ShardedRocksShardManagerPutEnd", this->logId)
+		    .detail("WriteKey", key)
+		    .detail("Value", value);
 	}
 
 	void clear(KeyRef key) {

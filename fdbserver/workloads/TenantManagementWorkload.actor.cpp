@@ -23,7 +23,7 @@
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/TenantManagement.actor.h"
 #include "fdbclient/TenantSpecialKeys.actor.h"
-#include "fdbclient/libb64/decode.h"
+#include "libb64/decode.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/Knobs.h"

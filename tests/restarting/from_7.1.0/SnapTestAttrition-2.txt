@@ -1,3 +1,5 @@
+storageEngineExcludeTypes=[4, 5]
+
 buggify=off
 
 ; verify all keys are even numbered

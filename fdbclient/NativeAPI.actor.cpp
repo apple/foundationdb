@@ -3234,13 +3234,26 @@ TenantInfo TransactionState::getTenantInfo() {
 	} else if (!t.present()) {
 		return TenantInfo();
 	} else if (cx->clientInfo->get().tenantMode == TenantMode::DISABLED && t.present()) {
-		throw tenants_disabled();
+		// If we are running provisional proxies, we allow a tenant request to go through since we don't know the tenant
+		// mode. Such a transaction would not be allowed to commit without enabling provisional commits because either
+		// the commit proxies will be provisional or the read version will be too old.
+		if (!cx->clientInfo->get().grvProxies.empty() && !cx->clientInfo->get().grvProxies[0].provisional) {
+			throw tenants_disabled();
+		} else {
+			ASSERT(!useProvisionalProxies);
+		}
 	}
 
 	ASSERT(tenantId != TenantInfo::INVALID_TENANT);
 	return TenantInfo(t.get(), tenantId);
 }
 
+// Returns the tenant used in this transaction. If the tenant is unset and raw access isn't specified, then the default
+// tenant from DatabaseContext is applied to this transaction (note: the default tenant is typically unset, but in
+// simulation could be something different).
+//
+// This function should not be called in the transaction constructor or in the setOption function to allow a user the
+// opportunity to set raw access.
 Optional<TenantName> const& TransactionState::tenant() {
 	if (tenantSet) {
 		return tenant_;
@@ -3253,6 +3266,9 @@ Optional<TenantName> const& TransactionState::tenant() {
 	}
 }
 
+// Returns true if the tenant has been set, but does not cause default tenant resolution. This is useful in setOption
+// (where we do not want to call tenant()) if we want to enforce that an option not be set on a Tenant transaction (e.g.
+// for raw access).
 bool TransactionState::hasTenant() const {
 	return tenantSet && tenant_.present();
 }
@@ -6570,6 +6586,11 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 
 	case FDBTransactionOptions::USE_PROVISIONAL_PROXIES:
 		validateOptionValueNotPresent(value);
+		if (trState->hasTenant()) {
+			Error e = invalid_option();
+			TraceEvent(SevWarn, "TenantTransactionUseProvisionalProxies").error(e).detail("Tenant", trState->tenant());
+			throw e;
+		}
 		trState->options.getReadVersionFlags |= GetReadVersionRequest::FLAG_USE_PROVISIONAL_PROXIES;
 		trState->useProvisionalProxies = UseProvisionalProxies::True;
 		break;
@@ -9589,7 +9610,7 @@ ACTOR Future<Key> purgeBlobGranulesActor(Reference<DatabaseContext> db,
 	state bool loadedTenantPrefix = false;
 
 	// FIXME: implement force
-	if (!force) {
+	if (force) {
 		throw unsupported_operation();
 	}
 
