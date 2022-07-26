@@ -206,7 +206,11 @@ struct TenantManagementWorkload : TestWorkload {
 
 			TenantMapEntry entry;
 			entry.tenantGroup = self->chooseTenantGroup(true);
-			entry.encrypted = SERVER_KNOBS->ENABLE_ENCRYPTION;
+			if (operationType == OperationType::SPECIAL_KEYS) {
+				entry.encrypted = SERVER_KNOBS->ENABLE_ENCRYPTION;
+			} else {
+				entry.encrypted = deterministicRandom()->coinflip();
+			}
 			tenantsToCreate[tenant] = entry;
 
 			alreadyExists = alreadyExists || self->createdTenants.count(tenant);
@@ -246,7 +250,7 @@ struct TenantManagementWorkload : TestWorkload {
 					// Update our local tenant state to include the newly created one
 					self->maxId = entry.get().id;
 					self->createdTenants[tenantItr->first] = TenantData(
-					    entry.get().id, tenantItr->second.tenantGroup, true, SERVER_KNOBS->ENABLE_ENCRYPTION);
+					    entry.get().id, tenantItr->second.tenantGroup, true, tenantItr->second.encrypted);
 
 					// If this tenant has a tenant group, create or update the entry for it
 					if (tenantItr->second.tenantGroup.present()) {
@@ -997,7 +1001,7 @@ struct TenantManagementWorkload : TestWorkload {
 				ASSERT(localItr != self->createdTenants.end());
 				ASSERT(dataItr->first == localItr->first);
 				ASSERT(dataItr->second.tenantGroup == localItr->second.tenantGroup);
-				ASSERT(dataItr->second.encrypted == SERVER_KNOBS->ENABLE_ENCRYPTION);
+				ASSERT(dataItr->second.encrypted == localItr->second.encrypted);
 
 				checkTenants.push_back(checkTenantContents(cx, self, dataItr->first, localItr->second));
 				lastTenant = dataItr->first;
