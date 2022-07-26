@@ -96,8 +96,7 @@ Future<Void> checkTenantMode(Transaction tr) {
 ACTOR template <class Transaction>
 Future<std::pair<Optional<TenantMapEntry>, bool>> createTenantTransaction(Transaction tr,
                                                                           TenantNameRef name,
-                                                                          TenantMapEntry tenantEntry,
-                                                                          bool encrypted) {
+                                                                          TenantMapEntry tenantEntry) {
 	ASSERT(tenantEntry.id >= 0);
 
 	if (name.startsWith("\xff"_sr)) {
@@ -130,7 +129,6 @@ Future<std::pair<Optional<TenantMapEntry>, bool>> createTenantTransaction(Transa
 	}
 
 	tenantEntry.tenantState = TenantState::READY;
-	tenantEntry.encrypted = encrypted;
 	TenantMetadata::tenantMap.set(tr, name, tenantEntry);
 	if (tenantEntry.tenantGroup.present()) {
 		TenantMetadata::tenantGroupTenantIndex.insert(tr, Tuple::makeTuple(tenantEntry.tenantGroup.get(), name));
@@ -158,7 +156,6 @@ Future<int64_t> getNextTenantId(Transaction tr) {
 ACTOR template <class DB>
 Future<Optional<TenantMapEntry>> createTenant(Reference<DB> db,
                                               TenantName name,
-                                              bool encrypted,
                                               TenantMapEntry tenantEntry = TenantMapEntry()) {
 	state Reference<typename DB::TransactionT> tr = db->createTransaction();
 
@@ -191,7 +188,7 @@ Future<Optional<TenantMapEntry>> createTenant(Reference<DB> db,
 			}
 
 			state std::pair<Optional<TenantMapEntry>, bool> newTenant =
-			    wait(createTenantTransaction(tr, name, tenantEntry, encrypted));
+			    wait(createTenantTransaction(tr, name, tenantEntry));
 
 			if (newTenant.second) {
 				ASSERT(newTenant.first.present());

@@ -158,7 +158,6 @@ struct TenantManagementWorkload : TestWorkload {
 			ASSERT(tenantsToCreate.size() == 1);
 			wait(success(TenantAPI::createTenant(cx.getReference(),
 			                                     tenantsToCreate.begin()->first,
-			                                     SERVER_KNOBS->ENABLE_ENCRYPTION,
 			                                     tenantsToCreate.begin()->second)));
 		} else if (operationType == OperationType::MANAGEMENT_TRANSACTION) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -169,7 +168,7 @@ struct TenantManagementWorkload : TestWorkload {
 			for (auto [tenant, entry] : tenantsToCreate) {
 				entry.setId(nextId++);
 				createFutures.push_back(
-				    success(TenantAPI::createTenantTransaction(tr, tenant, entry, SERVER_KNOBS->ENABLE_ENCRYPTION)));
+				    success(TenantAPI::createTenantTransaction(tr, tenant, entry)));
 			}
 			TenantMetadata::lastTenantId.set(tr, nextId - 1);
 			wait(waitForAll(createFutures));
@@ -207,6 +206,7 @@ struct TenantManagementWorkload : TestWorkload {
 
 			TenantMapEntry entry;
 			entry.tenantGroup = self->chooseTenantGroup(true);
+			entry.encrypted = SERVER_KNOBS->ENABLE_ENCRYPTION;
 			tenantsToCreate[tenant] = entry;
 
 			alreadyExists = alreadyExists || self->createdTenants.count(tenant);

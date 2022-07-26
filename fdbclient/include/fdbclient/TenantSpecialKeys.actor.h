@@ -117,6 +117,7 @@ private:
 	    bool encrypted) {
 		state TenantMapEntry tenantEntry;
 		tenantEntry.setId(tenantId);
+		tenantEntry.encrypted = encrypted;
 
 		for (auto const& [name, value] : configMutations) {
 			tenantEntry.configure(name, value);
@@ -127,7 +128,7 @@ private:
 		}
 
 		std::pair<Optional<TenantMapEntry>, bool> entry =
-		    wait(TenantAPI::createTenantTransaction(&ryw->getTransaction(), tenantName, tenantEntry, encrypted));
+		    wait(TenantAPI::createTenantTransaction(&ryw->getTransaction(), tenantName, tenantEntry));
 
 		return Void();
 	}
