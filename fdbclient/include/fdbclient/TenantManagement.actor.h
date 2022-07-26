@@ -443,7 +443,7 @@ Future<Void> renameTenant(Reference<DB> db, TenantName oldName, TenantName newNa
 				}
 			}
 			wait(renameTenantTransaction(tr, oldName, newName));
-			wait(safeThreadFutureToFuture(tr->commit()));
+			wait(buggifiedCommit(tr, BUGGIFY_WITH_PROB(0.1)));
 			TraceEvent("RenameTenantSuccess").detail("OldName", oldName).detail("NewName", newName);
 			return Void();
 		} catch (Error& e) {
