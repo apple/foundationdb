@@ -559,7 +559,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			state Reference<AsyncVar<bool>> processingUnhealthy(new AsyncVar<bool>(false));
 			state Reference<AsyncVar<bool>> processingWiggle(new AsyncVar<bool>(false));
 			state Promise<Void> readyToStart;
-      
+
 			state Optional<Reference<TenantCache>> ddTenantCache;
 			if (ddIsTenantAware) {
 				ddTenantCache = makeReference<TenantCache>(cx, self->ddId, tenantCreationSignal);
