@@ -834,17 +834,10 @@ struct TenantManagementWorkload : TestWorkload {
 			TenantName newTenant = self->chooseTenantName(false);
 			bool checkOverlap =
 			    oldTenant == newTenant || allTenantNames.count(oldTenant) || allTenantNames.count(newTenant);
+			// renameTenantTransaction does not handle rename collisions:
 			// reject the rename here if it has overlap and we are doing a transaction operation
 			// and then pick another combination
 			if (checkOverlap && operationType == OperationType::MANAGEMENT_TRANSACTION) {
-				// These types of overlap will also fail as tenantNotFound or tenantExists:
-				// A->A
-				// A->B + B->C
-				// These types of overlap:
-				// A->B + A->C (Old Name Overlap)
-				// A->C + B->C (New Name Overlap)
-				// cannot be detected since everything happens in one commit
-				// and will not observe each other's changes in time
 				--i;
 				continue;
 			}
