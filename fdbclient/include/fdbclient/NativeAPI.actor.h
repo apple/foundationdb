@@ -160,7 +160,6 @@ struct TransactionOptions {
 	bool useGrvCache : 1;
 	bool skipGrvCache : 1;
 	bool rawAccess : 1;
-	bool skipTenantPrefix : 1; // internal option to skip prepending tenant prefix for dummy transactions
 
 	TransactionPriority priority;
 
@@ -250,6 +249,12 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 	SpanContext spanContext;
 	UseProvisionalProxies useProvisionalProxies = UseProvisionalProxies::False;
 	bool readVersionObtainedFromGrvProxy;
+
+	// Special flag for skipping a) tenant prefix+ID lookup and b) prepend of tenant prefix to mutations and conflict
+	// ranges when a dummy, internal transaction gets commited. The sole purpose of commitDummyTransaction() is to
+	// resolve the state of earlier transaction that returned commit_unknown_result or request_maybe_delivered.
+	// Therefore, the dummy transaction can simply reuse the tenantId and one conflict range of the earlier commit.
+	bool skipTenantPrefixAndIdResolution;
 
 	int numErrors = 0;
 	double startTime = 0;

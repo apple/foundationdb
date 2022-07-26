@@ -3187,7 +3187,8 @@ TransactionState::TransactionState(Database cx,
                                    SpanContext spanContext,
                                    Reference<TransactionLogInfo> trLogInfo)
   : cx(cx), trLogInfo(trLogInfo), options(cx), taskID(taskID), spanContext(spanContext),
-    readVersionObtainedFromGrvProxy(true), tenant_(tenant), tenantSet(tenant.present()) {}
+    readVersionObtainedFromGrvProxy(true), skipTenantPrefixAndIdResolution(false), tenant_(tenant),
+    tenantSet(tenant.present()) {}
 
 Reference<TransactionState> TransactionState::cloneAndReset(Reference<TransactionLogInfo> newTrLogInfo,
                                                             bool generateNewSpan) const {
@@ -5762,7 +5763,6 @@ void TransactionOptions::clear() {
 	useGrvCache = false;
 	skipGrvCache = false;
 	rawAccess = false;
-	skipTenantPrefix = false;
 }
 
 TransactionOptions::TransactionOptions() {
@@ -5931,8 +5931,9 @@ ACTOR static Future<Void> commitDummyTransaction(Reference<TransactionState> trS
 			if (!trState->tenant().present()) {
 				tr.setOption(FDBTransactionOptions::RAW_ACCESS);
 			} else {
-				tr.trState->options.skipTenantPrefix = true;
+				tr.trState->skipTenantPrefixAndIdResolution = true;
 				tr.trState->tenantId = trState->tenantId;
+				TEST(true); // Commit of a dummy transaction in tenant keyspace
 			}
 			tr.setOption(FDBTransactionOptions::CAUSAL_WRITE_RISKY);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -6112,7 +6113,9 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 			wait(store(req.transaction.read_snapshot, readVersion));
 		}
 
-		if (trState->tenant().present() && !trState->options.skipTenantPrefix) {
+		// skipTenantPrefixAndIdResolution is set only in the context of a commitDummyTransaction() (see member
+		// declaration)
+		if (trState->tenant().present() && !trState->skipTenantPrefixAndIdResolution) {
 			KeyRangeLocationInfo locationInfo = wait(getKeyLocation(trState,
 			                                                        ""_sr,
 			                                                        &StorageServerInterface::getValue,
@@ -6122,7 +6125,7 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 			applyTenantPrefix(req, locationInfo.tenantEntry.prefix);
 			tenantPrefix = locationInfo.tenantEntry.prefix;
 		}
-
+		TEST(trState->skipTenantPrefixAndIdResolution); // Tenant prefix/id resolution skipped for dummy transaction
 		req.tenantInfo = trState->getTenantInfo();
 		startTime = now();
 		state Optional<UID> commitID = Optional<UID>();
