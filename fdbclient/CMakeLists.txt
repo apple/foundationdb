@@ -109,3 +109,5 @@ if(BUILD_AWS_BACKUP)
   target_link_libraries(fdbclient_sampling PUBLIC awssdk_target)
 endif()
 
+target_link_libraries(fdbclient PRIVATE fdb_rust2)
+

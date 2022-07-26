@@ -30,7 +30,7 @@
 #include "flow/IAsyncFile.h"
 #include "flow/TLSConfig.actor.h"
 
-#include "fdb_rust.h"
+#include "flow.rs.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -56,8 +56,8 @@ TEST_CASE("/flow/actorcompiler/lineNumbers") {
 }
 
 TEST_CASE("/flow/rust/hello_world") {
-	shared::Foo f = fdb_rust::new_foo();
-	fdb_rust::print_foo(f);
+	shared::Foo f = flow::new_foo();
+	flow::print_foo(f);
 	return Void();
 }
 

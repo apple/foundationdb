@@ -88,6 +88,8 @@
 #include "flow/network.h"
 #include "flow/serialize.h"
 
+#include "fdbclient.rs.h"
+
 #ifdef ADDRESS_SANITIZER
 #include <sanitizer/lsan_interface.h>
 #endif
@@ -9683,6 +9685,13 @@ int64_t getMaxWriteKeySize(KeyRef const& key, bool hasRawAccess) {
 
 int64_t getMaxClearKeySize(KeyRef const& key) {
 	return getMaxKeySize(key);
+}
+
+TEST_CASE("/fdbclient/rust/NotifiedVersion") {
+	NotifiedVersion v(12);
+	fdbclient::set_version_to_42(&v);
+	ASSERT(v.get() == 42);
+	return Void();
 }
 
 namespace NativeAPI {
