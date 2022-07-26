@@ -769,8 +769,7 @@ struct TenantManagementWorkload : TestWorkload {
 
 	ACTOR Future<Void> verifyTenantRenames(Database cx,
 	                                       TenantManagementWorkload* self,
-	                                       std::map<TenantName, TenantName> tenantRenames,
-	                                       int numTenants) {
+	                                       std::map<TenantName, TenantName> tenantRenames) {
 		state std::map<TenantName, TenantName> tenantRenamesCopy = tenantRenames;
 		state std::map<TenantName, TenantName>::iterator iter = tenantRenamesCopy.begin();
 		for (; iter != tenantRenamesCopy.end(); ++iter) {
@@ -783,7 +782,6 @@ struct TenantManagementWorkload : TestWorkload {
 	ACTOR static Future<Void> renameImpl(Database cx,
 	                                     Reference<ReadYourWritesTransaction> tr,
 	                                     OperationType operationType,
-	                                     int numTenants,
 	                                     std::map<TenantName, TenantName> tenantRenames,
 	                                     bool tenantNotFound,
 	                                     bool tenantExists,
@@ -862,16 +860,9 @@ struct TenantManagementWorkload : TestWorkload {
 
 		loop {
 			try {
-				wait(renameImpl(cx,
-				                tr,
-				                operationType,
-				                numTenants,
-				                tenantRenames,
-				                tenantNotFound,
-				                tenantExists,
-				                tenantOverlap,
-				                self));
-				wait(self->verifyTenantRenames(cx, self, tenantRenames, numTenants));
+				wait(renameImpl(
+				    cx, tr, operationType, tenantRenames, tenantNotFound, tenantExists, tenantOverlap, self));
+				wait(self->verifyTenantRenames(cx, self, tenantRenames));
 				return Void();
 			} catch (Error& e) {
 				if (e.code() == error_code_tenant_not_found) {
@@ -879,7 +870,7 @@ struct TenantManagementWorkload : TestWorkload {
 					    .detail("TenantRenames", describe(tenantRenames))
 					    .detail("CommitUnknownResult", unknownResult);
 					if (unknownResult) {
-						wait(self->verifyTenantRenames(cx, self, tenantRenames, numTenants));
+						wait(self->verifyTenantRenames(cx, self, tenantRenames));
 					} else {
 						ASSERT(tenantNotFound);
 					}
@@ -889,7 +880,7 @@ struct TenantManagementWorkload : TestWorkload {
 					    .detail("TenantRenames", describe(tenantRenames))
 					    .detail("CommitUnknownResult", unknownResult);
 					if (unknownResult) {
-						wait(self->verifyTenantRenames(cx, self, tenantRenames, numTenants));
+						wait(self->verifyTenantRenames(cx, self, tenantRenames));
 					} else {
 						ASSERT(tenantExists);
 					}
