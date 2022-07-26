@@ -866,7 +866,8 @@ ACTOR Future<Void> fetchTopKShardMetrics_impl(DataDistributionTracker* self, Get
 				}
 
 				if (metrics.bytesReadPerKSecond > 0) {
-					minReadLoad = std::min(metrics.bytesReadPerKSecond, std::max((decltype(minReadLoad))0, minReadLoad));
+					minReadLoad =
+					    std::min(metrics.bytesReadPerKSecond, std::max((decltype(minReadLoad))0, minReadLoad));
 					maxReadLoad = std::max(metrics.bytesReadPerKSecond, maxReadLoad);
 					if (req.minBytesReadPerKSecond <= metrics.bytesReadPerKSecond &&
 					    metrics.bytesReadPerKSecond <= req.maxBytesReadPerKSecond) {
@@ -1060,178 +1061,13 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
 	}
 }
 
-std::vector<KeyRange> ShardsAffectedByTeamFailure::getShardsFor(Team team) const {
-	std::vector<KeyRange> r;
-	for (auto it = team_shards.lower_bound(std::pair<Team, KeyRange>(team, KeyRangeRef()));
-	     it != team_shards.end() && it->first == team;
-	     ++it)
-		r.push_back(it->second);
-	return r;
-}
-
-bool ShardsAffectedByTeamFailure::hasShards(Team team) const {
-	auto it = team_shards.lower_bound(std::pair<Team, KeyRange>(team, KeyRangeRef()));
-	return it != team_shards.end() && it->first == team;
-}
-
-int ShardsAffectedByTeamFailure::getNumberOfShards(UID ssID) const {
-	auto it = storageServerShards.find(ssID);
-	return it == storageServerShards.end() ? 0 : it->second;
-}
-
-std::pair<std::vector<ShardsAffectedByTeamFailure::Team>, std::vector<ShardsAffectedByTeamFailure::Team>>
-ShardsAffectedByTeamFailure::getTeamsFor(KeyRangeRef keys) {
-	return shard_teams[keys.begin];
-}
-
-void ShardsAffectedByTeamFailure::erase(Team team, KeyRange const& range) {
-	if (team_shards.erase(std::pair<Team, KeyRange>(team, range)) > 0) {
-		for (auto uid = team.servers.begin(); uid != team.servers.end(); ++uid) {
-			// Safeguard against going negative after eraseServer() sets value to 0
-			if (storageServerShards[*uid] > 0) {
-				storageServerShards[*uid]--;
-			}
-		}
-	}
-}
-
-void ShardsAffectedByTeamFailure::insert(Team team, KeyRange const& range) {
-	if (team_shards.insert(std::pair<Team, KeyRange>(team, range)).second) {
-		for (auto uid = team.servers.begin(); uid != team.servers.end(); ++uid)
-			storageServerShards[*uid]++;
-	}
-}
-
-void ShardsAffectedByTeamFailure::defineShard(KeyRangeRef keys) {
-	std::vector<Team> teams;
-	std::vector<Team> prevTeams;
-	auto rs = shard_teams.intersectingRanges(keys);
-	for (auto it = rs.begin(); it != rs.end(); ++it) {
-		for (auto t = it->value().first.begin(); t != it->value().first.end(); ++t) {
-			teams.push_back(*t);
-			erase(*t, it->range());
-		}
-		for (auto t = it->value().second.begin(); t != it->value().second.end(); ++t) {
-			prevTeams.push_back(*t);
-		}
-	}
-	uniquify(teams);
-	uniquify(prevTeams);
-
-	/*TraceEvent("ShardsAffectedByTeamFailureDefine")
-	    .detail("KeyBegin", keys.begin)
-	    .detail("KeyEnd", keys.end)
-	    .detail("TeamCount", teams.size());*/
-
-	auto affectedRanges = shard_teams.getAffectedRangesAfterInsertion(keys);
-	shard_teams.insert(keys, std::make_pair(teams, prevTeams));
-
-	for (auto r = affectedRanges.begin(); r != affectedRanges.end(); ++r) {
-		auto& t = shard_teams[r->begin];
-		for (auto it = t.first.begin(); it != t.first.end(); ++it) {
-			insert(*it, *r);
-		}
-	}
-	check();
-}
-
-// Move keys to destinationTeams by updating shard_teams
-void ShardsAffectedByTeamFailure::moveShard(KeyRangeRef keys, std::vector<Team> destinationTeams) {
-	/*TraceEvent("ShardsAffectedByTeamFailureMove")
-	    .detail("KeyBegin", keys.begin)
-	    .detail("KeyEnd", keys.end)
-	    .detail("NewTeamSize", destinationTeam.size())
-	    .detail("NewTeam", describe(destinationTeam));*/
-
-	auto ranges = shard_teams.intersectingRanges(keys);
-	std::vector<std::pair<std::pair<std::vector<Team>, std::vector<Team>>, KeyRange>> modifiedShards;
-	for (auto it = ranges.begin(); it != ranges.end(); ++it) {
-		if (keys.contains(it->range())) {
-			// erase the many teams that were associated with this one shard
-			for (auto t = it->value().first.begin(); t != it->value().first.end(); ++t) {
-				erase(*t, it->range());
-			}
-
-			// save this modification for later insertion
-			std::vector<Team> prevTeams = it->value().second;
-			prevTeams.insert(prevTeams.end(), it->value().first.begin(), it->value().first.end());
-			uniquify(prevTeams);
-
-			modifiedShards.push_back(std::pair<std::pair<std::vector<Team>, std::vector<Team>>, KeyRange>(
-			    std::make_pair(destinationTeams, prevTeams), it->range()));
-		} else {
-			// for each range that touches this move, add our team as affecting this range
-			for (auto& team : destinationTeams) {
-				insert(team, it->range());
-			}
-
-			// if we are not in the list of teams associated with this shard, add us in
-			auto& teams = it->value();
-			teams.second.insert(teams.second.end(), teams.first.begin(), teams.first.end());
-			uniquify(teams.second);
-
-			teams.first.insert(teams.first.end(), destinationTeams.begin(), destinationTeams.end());
-			uniquify(teams.first);
-		}
-	}
-
-	// we cannot modify the KeyRangeMap while iterating through it, so add saved modifications now
-	for (int i = 0; i < modifiedShards.size(); i++) {
-		for (auto& t : modifiedShards[i].first.first) {
-			insert(t, modifiedShards[i].second);
-		}
-		shard_teams.insert(modifiedShards[i].second, modifiedShards[i].first);
-	}
-
-	check();
-}
-
-void ShardsAffectedByTeamFailure::finishMove(KeyRangeRef keys) {
-	auto ranges = shard_teams.containedRanges(keys);
-	for (auto it = ranges.begin(); it != ranges.end(); ++it) {
-		it.value().second.clear();
-	}
-}
-
-void ShardsAffectedByTeamFailure::check() const {
-	if (EXPENSIVE_VALIDATION) {
-		for (auto t = team_shards.begin(); t != team_shards.end(); ++t) {
-			auto i = shard_teams.rangeContaining(t->second.begin);
-			if (i->range() != t->second || !std::count(i->value().first.begin(), i->value().first.end(), t->first)) {
-				ASSERT(false);
-			}
-		}
-		auto rs = shard_teams.ranges();
-		for (auto i = rs.begin(); i != rs.end(); ++i) {
-			for (auto t = i->value().first.begin(); t != i->value().first.end(); ++t) {
-				if (!team_shards.count(std::make_pair(*t, i->range()))) {
-					std::string teamDesc, shards;
-					for (int k = 0; k < t->servers.size(); k++)
-						teamDesc += format("%llx ", t->servers[k].first());
-					for (auto x = team_shards.lower_bound(std::make_pair(*t, KeyRangeRef()));
-					     x != team_shards.end() && x->first == *t;
-					     ++x)
-						shards += printable(x->second.begin) + "-" + printable(x->second.end) + ",";
-					TraceEvent(SevError, "SATFInvariantError2")
-					    .detail("KB", i->begin())
-					    .detail("KE", i->end())
-					    .detail("Team", teamDesc)
-					    .detail("Shards", shards);
-					ASSERT(false);
-				}
-			}
-		}
-	}
-}
-
-namespace data_distribution_test {
-} // namespace data_distribution_test
+namespace data_distribution_test {} // namespace data_distribution_test
 TEST_CASE("/DataDistributor/Tracker/FetchTopK") {
 	state DataDistributionTracker self;
 	state GetTopKMetricsRequest req;
 	req.topK = 3;
-	for(int i = 1; i <= 10; i += 2) {
-		KeyRange keys(KeyRangeRef(doubleToTestKey(i), doubleToTestKey(i+2)));
+	for (int i = 1; i <= 10; i += 2) {
+		KeyRange keys(KeyRangeRef(doubleToTestKey(i), doubleToTestKey(i + 2)));
 		req.keys.push_back(keys);
 		// std::cout << "here: " << req.keys.back().begin.toString() << "\n";
 	}
@@ -1239,9 +1075,8 @@ TEST_CASE("/DataDistributor/Tracker/FetchTopK") {
 	req.minBytesReadPerKSecond = 10000;
 
 	self.shards = std::make_shared<KeyRangeMap<ShardTrackedData>>();
-	double targetDensities[10] = {2, 1, 3, 5, 4, 10, 6, 8, 7, 0};
-	for(int i = 0; i <= 5; ++ i) {
-
+	double targetDensities[10] = { 2, 1, 3, 5, 4, 10, 6, 8, 7, 0 };
+	for (int i = 0; i <= 5; ++i) {
 	}
 	wait(fetchTopKShardMetrics_impl(&self, req));
 	auto& reply = req.reply.getFuture().get();
