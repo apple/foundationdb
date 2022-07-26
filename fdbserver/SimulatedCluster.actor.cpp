@@ -280,6 +280,13 @@ class TestConfig {
 			if (attrib == "blobGranulesEnabled") {
 				blobGranulesEnabled = strcmp(value.c_str(), "true") == 0;
 			}
+			if (attrib == "injectSSTargetedRestart") {
+				injectTargetedSSRestart = strcmp(value.c_str(), "true") == 0;
+			}
+
+			if (attrib == "injectSSDelay") {
+				injectSSDelay = strcmp(value.c_str(), "true") == 0;
+			}
 		}
 
 		ifs.close();
@@ -327,6 +334,8 @@ public:
 
 	bool allowDefaultTenant = true;
 	bool allowDisablingTenants = true;
+	bool injectTargetedSSRestart = false;
+	bool injectSSDelay = false;
 
 	ConfigDBType getConfigDBType() const { return configDBType; }
 
@@ -384,7 +393,9 @@ public:
 		    .add("blobGranulesEnabled", &blobGranulesEnabled)
 		    .add("allowDefaultTenant", &allowDefaultTenant)
 		    .add("allowDisablingTenants", &allowDisablingTenants)
-		    .add("randomlyRenameZoneId", &randomlyRenameZoneId);
+		    .add("randomlyRenameZoneId", &randomlyRenameZoneId)
+		    .add("injectTargetedSSRestart", &injectTargetedSSRestart)
+		    .add("injectSSDelay", &injectSSDelay);
 		try {
 			auto file = toml::parse(testFile);
 			if (file.contains("configuration") && toml::find(file, "configuration").is_table()) {
@@ -2364,6 +2375,13 @@ ACTOR void setupAndRun(std::string dataFolder,
 	testConfig.readFromConfig(testFile);
 	g_simulator.hasDiffProtocolProcess = testConfig.startIncompatibleProcess;
 	g_simulator.setDiffProtocol = false;
+	if (testConfig.injectTargetedSSRestart && deterministicRandom()->random01() < 0.25) {
+		g_simulator.injectTargetedSSRestartTime = 60.0 + 340.0 * deterministicRandom()->random01();
+	}
+
+	if (testConfig.injectSSDelay && deterministicRandom()->random01() < 0.25) {
+		g_simulator.injectSSDelayTime = 60.0 + 240.0 * deterministicRandom()->random01();
+	}
 
 	// Build simulator allow list
 	allowList.addTrustedSubnet("0.0.0.0/2"sv);

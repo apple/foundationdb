@@ -9409,11 +9409,20 @@ Future<Void> DatabaseContext::getChangeFeedStream(Reference<ChangeFeedData> resu
 	    Reference<DatabaseContext>::addRef(this), results, rangeID, begin, end, range, replyBufferSize, canReadPopped);
 }
 
-ACTOR Future<std::vector<OverlappingChangeFeedEntry>> singleLocationOverlappingChangeFeeds(
-    Database cx,
-    Reference<LocationInfo> location,
-    KeyRangeRef range,
-    Version minVersion) {
+Version OverlappingChangeFeedsInfo::getFeedMetadataVersion(const KeyRangeRef& range) const {
+	Version v = invalidVersion;
+	for (auto& it : feedMetadataVersions) {
+		if (it.second > v && it.first.intersects(range)) {
+			v = it.second;
+		}
+	}
+	return v;
+}
+
+ACTOR Future<OverlappingChangeFeedsReply> singleLocationOverlappingChangeFeeds(Database cx,
+                                                                               Reference<LocationInfo> location,
+                                                                               KeyRangeRef range,
+                                                                               Version minVersion) {
 	state OverlappingChangeFeedsRequest req;
 	req.range = range;
 	req.minVersion = minVersion;
@@ -9425,16 +9434,16 @@ ACTOR Future<std::vector<OverlappingChangeFeedEntry>> singleLocationOverlappingC
 	                                                   TaskPriority::DefaultPromiseEndpoint,
 	                                                   AtMostOnce::False,
 	                                                   cx->enableLocalityLoadBalance ? &cx->queueModel : nullptr));
-	return rep.rangeIds;
+	return rep;
 }
 
 bool compareChangeFeedResult(const OverlappingChangeFeedEntry& i, const OverlappingChangeFeedEntry& j) {
-	return i.rangeId < j.rangeId;
+	return i.feedId < j.feedId;
 }
 
-ACTOR Future<std::vector<OverlappingChangeFeedEntry>> getOverlappingChangeFeedsActor(Reference<DatabaseContext> db,
-                                                                                     KeyRangeRef range,
-                                                                                     Version minVersion) {
+ACTOR Future<OverlappingChangeFeedsInfo> getOverlappingChangeFeedsActor(Reference<DatabaseContext> db,
+                                                                        KeyRangeRef range,
+                                                                        Version minVersion) {
 	state Database cx(db);
 	state Span span("NAPI:GetOverlappingChangeFeeds"_loc);
 
@@ -9460,19 +9469,33 @@ ACTOR Future<std::vector<OverlappingChangeFeedEntry>> getOverlappingChangeFeedsA
 				throw all_alternatives_failed();
 			}
 
-			state std::vector<Future<std::vector<OverlappingChangeFeedEntry>>> allOverlappingRequests;
+			state std::vector<Future<OverlappingChangeFeedsReply>> allOverlappingRequests;
 			for (auto& it : locations) {
 				allOverlappingRequests.push_back(
 				    singleLocationOverlappingChangeFeeds(cx, it.locations, it.range & range, minVersion));
 			}
 			wait(waitForAll(allOverlappingRequests));
 
-			std::vector<OverlappingChangeFeedEntry> result;
-			for (auto& it : allOverlappingRequests) {
-				result.insert(result.end(), it.get().begin(), it.get().end());
+			OverlappingChangeFeedsInfo result;
+			std::unordered_map<KeyRef, OverlappingChangeFeedEntry> latestFeedMetadata;
+			for (int i = 0; i < locations.size(); i++) {
+				result.arena.dependsOn(allOverlappingRequests[i].get().arena);
+				result.arena.dependsOn(locations[i].range.arena());
+				result.feedMetadataVersions.push_back(
+				    { locations[i].range, allOverlappingRequests[i].get().feedMetadataVersion });
+				for (auto& it : allOverlappingRequests[i].get().feeds) {
+					auto res = latestFeedMetadata.insert({ it.feedId, it });
+					if (!res.second) {
+						CODE_PROBE(true, "deduping fetched overlapping feed by higher metadata version");
+						if (res.first->second.feedMetadataVersion < it.feedMetadataVersion) {
+							res.first->second = it;
+						}
+					}
+				}
 			}
-			std::sort(result.begin(), result.end(), compareChangeFeedResult);
-			result.resize(std::unique(result.begin(), result.end()) - result.begin());
+			for (auto& it : latestFeedMetadata) {
+				result.feeds.push_back(result.arena, it.second);
+			}
 			return result;
 		} catch (Error& e) {
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {
@@ -9485,8 +9508,7 @@ ACTOR Future<std::vector<OverlappingChangeFeedEntry>> getOverlappingChangeFeedsA
 	}
 }
 
-Future<std::vector<OverlappingChangeFeedEntry>> DatabaseContext::getOverlappingChangeFeeds(KeyRangeRef range,
-                                                                                           Version minVersion) {
+Future<OverlappingChangeFeedsInfo> DatabaseContext::getOverlappingChangeFeeds(KeyRangeRef range, Version minVersion) {
 	return getOverlappingChangeFeedsActor(Reference<DatabaseContext>::addRef(this), range, minVersion);
 }
 
@@ -9610,7 +9632,7 @@ ACTOR Future<Key> purgeBlobGranulesActor(Reference<DatabaseContext> db,
 	state bool loadedTenantPrefix = false;
 
 	// FIXME: implement force
-	if (!force) {
+	if (force) {
 		throw unsupported_operation();
 	}
 
