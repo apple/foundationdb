@@ -763,30 +763,65 @@ struct TenantManagementWorkload : TestWorkload {
 					wait(insertTr.onError(e));
 				}
 			}
-		} else {
-			loop {
-				try {
-					insertTr.clear(KeyRangeRef(""_sr, "\xff"_sr));
-					wait(insertTr.commit());
-					break;
-				} catch (Error& e) {
-					wait(insertTr.onError(e));
-				}
-			}
 		}
 		return Void();
 	}
 
 	ACTOR Future<Void> verifyTenantRenames(Database cx,
 	                                       TenantManagementWorkload* self,
-	                                       std::vector<TenantName> oldTenantNames,
-	                                       std::vector<TenantName> newTenantNames,
+	                                       std::map<TenantName, TenantName> tenantRenames,
 	                                       int numTenants) {
-		state int tIndex = 0;
-		for (; tIndex != numTenants; ++tIndex) {
-			wait(self->verifyTenantRename(cx, self, oldTenantNames[tIndex], newTenantNames[tIndex]));
-			state TenantName newTenantName = newTenantNames[tIndex];
-			wait(self->checkTenantContents(cx, self, newTenantName, self->createdTenants[newTenantName]));
+		state std::map<TenantName, TenantName> tenantRenamesCopy = tenantRenames;
+		state std::map<TenantName, TenantName>::iterator iter = tenantRenamesCopy.begin();
+		for (; iter != tenantRenamesCopy.end(); ++iter) {
+			wait(self->verifyTenantRename(cx, self, iter->first, iter->second));
+			wait(self->checkTenantContents(cx, self, iter->second, self->createdTenants[iter->second]));
+		}
+		return Void();
+	}
+
+	ACTOR static Future<Void> renameImpl(Database cx,
+	                                     Reference<ReadYourWritesTransaction> tr,
+	                                     OperationType operationType,
+	                                     int numTenants,
+	                                     std::map<TenantName, TenantName> tenantRenames,
+	                                     bool tenantNotFound,
+	                                     bool tenantExists,
+	                                     bool tenantOverlap,
+	                                     TenantManagementWorkload* self) {
+		if (operationType == OperationType::SPECIAL_KEYS) {
+			tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+			// state std::map<TenantName, TenantName>::iterator iter = tenantRenames.begin();
+			for (auto& iter : tenantRenames) {
+				tr->set(self->specialKeysTenantRenamePrefix.withSuffix(iter.first), iter.second);
+			}
+			wait(tr->commit());
+		} else if (operationType == OperationType::MANAGEMENT_DATABASE) {
+			ASSERT(tenantRenames.size() == 1);
+			auto iter = tenantRenames.begin();
+			wait(TenantAPI::renameTenant(cx.getReference(), iter->first, iter->second));
+			ASSERT(!tenantNotFound && !tenantExists);
+		} else { // operationType == OperationType::MANAGEMENT_TRANSACTION
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			// These types of overlap will also fail as tenantNotFound or tenantExists:
+			// A->A
+			// A->B + B->C
+			// These types of overlap:
+			// A->B + A->C (Old Name Overlap)
+			// A->C + B->C (New Name Overlap)
+			// cannot be detected since everything happens in one commit
+			// and will not observe each other's changes in time
+			if (tenantOverlap) {
+				throw special_keys_api_failure();
+			}
+			std::vector<Future<Void>> renameFutures;
+			// state std::map<TenantName, TenantName>::iterator iter = tenantRenames.begin();
+			for (auto& iter : tenantRenames) {
+				renameFutures.push_back(success(TenantAPI::renameTenantTransaction(tr, iter.first, iter.second)));
+			}
+			wait(waitForAll(renameFutures));
+			wait(tr->commit());
+			ASSERT(!tenantNotFound && !tenantExists);
 		}
 		return Void();
 	}
@@ -800,8 +835,7 @@ struct TenantManagementWorkload : TestWorkload {
 			numTenants = deterministicRandom()->randomInt(1, 5);
 		}
 
-		state std::vector<TenantName> oldTenantNames;
-		state std::vector<TenantName> newTenantNames;
+		state std::map<TenantName, TenantName> tenantRenames;
 		state std::set<TenantName> allTenantNames;
 
 		// Tenant Error flags
@@ -815,8 +849,7 @@ struct TenantManagementWorkload : TestWorkload {
 			TenantName newTenant = self->chooseTenantName(false);
 			tenantOverlap = tenantOverlap || oldTenant == newTenant || allTenantNames.count(oldTenant) ||
 			                allTenantNames.count(newTenant);
-			oldTenantNames.push_back(oldTenant);
-			newTenantNames.push_back(newTenant);
+			tenantRenames[oldTenant] = newTenant;
 			allTenantNames.insert(oldTenant);
 			allTenantNames.insert(newTenant);
 			if (!self->createdTenants.count(oldTenant)) {
@@ -829,81 +862,40 @@ struct TenantManagementWorkload : TestWorkload {
 
 		loop {
 			try {
-				if (operationType == OperationType::SPECIAL_KEYS) {
-					tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-					// Some of the tenant error flags may be true, but it is possible for the commit not to
-					// throw an error. This is because if we get A->B + A->C
-					// the special keys uses RYW and only applies the latest op, while the violation
-					// may have been from one of the earlier ops, or overlapping on the same "old" key
-					for (int i = 0; i != numTenants; ++i) {
-						if (std::count(oldTenantNames.begin(), oldTenantNames.end(), oldTenantNames[i]) > 1) {
-							// Throw instead of committing to avoid mismatch in internal map and actual DB state.
-							ASSERT(tenantOverlap);
-							throw special_keys_api_failure();
-						}
-						tr->set(self->specialKeysTenantRenamePrefix.withSuffix(oldTenantNames[i]), newTenantNames[i]);
-					}
-					wait(tr->commit());
-				} else if (operationType == OperationType::MANAGEMENT_DATABASE) {
-					ASSERT(oldTenantNames.size() == 1 && newTenantNames.size() == 1);
-					wait(TenantAPI::renameTenant(cx.getReference(), oldTenantNames[0], newTenantNames[0]));
-					ASSERT(!tenantNotFound && !tenantExists);
-				} else { // operationType == OperationType::MANAGEMENT_TRANSACTION
-					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					// These types of overlap will also fail as tenantNotFound or tenantExists:
-					// A->A
-					// A->B + B->C
-					std::vector<Future<Void>> renameFutures;
-					for (int i = 0; i != numTenants; ++i) {
-						// These types of overlap:
-						// A->B + A->C (Old Name Overlap)
-						// A->C + B->C (New Name Overlap)
-						// cannot be detected since everything happens in one commit
-						// and will not observe each other's changes in time
-						if (std::count(oldTenantNames.begin(), oldTenantNames.end(), oldTenantNames[i]) > 1 ||
-						    std::count(newTenantNames.begin(), newTenantNames.end(), newTenantNames[i]) > 1) {
-							ASSERT(tenantOverlap);
-							throw special_keys_api_failure();
-						}
-						renameFutures.push_back(
-						    success(TenantAPI::renameTenantTransaction(tr, oldTenantNames[i], newTenantNames[i])));
-					}
-					wait(waitForAll(renameFutures));
-					wait(tr->commit());
-					ASSERT(!tenantNotFound && !tenantExists);
-				}
-				wait(self->verifyTenantRenames(cx, self, oldTenantNames, newTenantNames, numTenants));
+				wait(renameImpl(cx,
+				                tr,
+				                operationType,
+				                numTenants,
+				                tenantRenames,
+				                tenantNotFound,
+				                tenantExists,
+				                tenantOverlap,
+				                self));
+				wait(self->verifyTenantRenames(cx, self, tenantRenames, numTenants));
 				return Void();
 			} catch (Error& e) {
-				if (operationType == OperationType::MANAGEMENT_DATABASE) {
-					ASSERT(oldTenantNames.size() == 1 && newTenantNames.size() == 1);
-				}
 				if (e.code() == error_code_tenant_not_found) {
 					TraceEvent("RenameTenantOldTenantNotFound")
-					    .detail("OldTenantNames", describe(oldTenantNames))
-					    .detail("NewTenantNames", describe(newTenantNames))
+					    .detail("TenantRenames", describe(tenantRenames))
 					    .detail("CommitUnknownResult", unknownResult);
 					if (unknownResult) {
-						wait(self->verifyTenantRenames(cx, self, oldTenantNames, newTenantNames, numTenants));
+						wait(self->verifyTenantRenames(cx, self, tenantRenames, numTenants));
 					} else {
 						ASSERT(tenantNotFound);
 					}
 					return Void();
 				} else if (e.code() == error_code_tenant_already_exists) {
 					TraceEvent("RenameTenantNewTenantAlreadyExists")
-					    .detail("OldTenantNames", describe(oldTenantNames))
-					    .detail("NewTenantNames", describe(newTenantNames))
+					    .detail("TenantRenames", describe(tenantRenames))
 					    .detail("CommitUnknownResult", unknownResult);
 					if (unknownResult) {
-						wait(self->verifyTenantRenames(cx, self, oldTenantNames, newTenantNames, numTenants));
+						wait(self->verifyTenantRenames(cx, self, tenantRenames, numTenants));
 					} else {
 						ASSERT(tenantExists);
 					}
 					return Void();
 				} else if (e.code() == error_code_special_keys_api_failure) {
-					TraceEvent("RenameTenantNameConflict")
-					    .detail("OldTenantNames", describe(oldTenantNames))
-					    .detail("NewTenantNames", describe(newTenantNames));
+					TraceEvent("RenameTenantNameConflict").detail("TenantRenames", describe(tenantRenames));
 					ASSERT(tenantOverlap);
 					return Void();
 				} else {
@@ -913,14 +905,14 @@ struct TenantManagementWorkload : TestWorkload {
 						// already been moved, so account for that and update internal map as needed.
 						if (e.code() == error_code_commit_unknown_result) {
 							TraceEvent("RenameTenantCommitUnknownResult").error(e);
+							ASSERT(operationType != OperationType::MANAGEMENT_DATABASE);
 							unknownResult = true;
 						}
 						wait(tr->onError(e));
 					} catch (Error& e) {
 						TraceEvent(SevError, "RenameTenantFailure")
 						    .error(e)
-						    .detail("OldTenantNames", describe(oldTenantNames))
-						    .detail("NewTenantNames", describe(newTenantNames));
+						    .detail("TenantRenames", describe(tenantRenames));
 						return Void();
 					}
 				}

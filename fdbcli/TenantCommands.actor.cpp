@@ -446,15 +446,15 @@ int64_t getTenantId(Value metadata) {
 }
 
 // renametenant command
-ACTOR Future<bool> renameTenantCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
+ACTOR Future<bool> renameTenantCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens, int apiVersion) {
 	if (tokens.size() != 3) {
 		printUsage(tokens[0]);
 		return false;
 	}
 	state Reference<ITransaction> tr = db->createTransaction();
 	state Key tenantRenameKey = tenantRenameSpecialKeyRange.begin.withSuffix(tokens[1]);
-	state Key tenantOldNameKey = tenantMapSpecialKeyRange.begin.withSuffix(tokens[1]);
-	state Key tenantNewNameKey = tenantMapSpecialKeyRange.begin.withSuffix(tokens[2]);
+	state Key tenantOldNameKey = tenantMapSpecialKeyRange(apiVersion).begin.withSuffix(tokens[1]);
+	state Key tenantNewNameKey = tenantMapSpecialKeyRange(apiVersion).begin.withSuffix(tokens[2]);
 	state bool firstTry = true;
 	state int64_t id;
 	loop {
