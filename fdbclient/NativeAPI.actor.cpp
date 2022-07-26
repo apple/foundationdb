@@ -9610,7 +9610,7 @@ ACTOR Future<Key> purgeBlobGranulesActor(Reference<DatabaseContext> db,
 	state bool loadedTenantPrefix = false;
 
 	// FIXME: implement force
-	if (!force) {
+	if (force) {
 		throw unsupported_operation();
 	}
 
