@@ -789,7 +789,6 @@ struct TenantManagementWorkload : TestWorkload {
 	                                     TenantManagementWorkload* self) {
 		if (operationType == OperationType::SPECIAL_KEYS) {
 			tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-			// state std::map<TenantName, TenantName>::iterator iter = tenantRenames.begin();
 			for (auto& iter : tenantRenames) {
 				tr->set(self->specialKeysTenantRenamePrefix.withSuffix(iter.first), iter.second);
 			}
@@ -801,19 +800,7 @@ struct TenantManagementWorkload : TestWorkload {
 			ASSERT(!tenantNotFound && !tenantExists);
 		} else { // operationType == OperationType::MANAGEMENT_TRANSACTION
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			// These types of overlap will also fail as tenantNotFound or tenantExists:
-			// A->A
-			// A->B + B->C
-			// These types of overlap:
-			// A->B + A->C (Old Name Overlap)
-			// A->C + B->C (New Name Overlap)
-			// cannot be detected since everything happens in one commit
-			// and will not observe each other's changes in time
-			if (tenantOverlap) {
-				throw special_keys_api_failure();
-			}
 			std::vector<Future<Void>> renameFutures;
-			// state std::map<TenantName, TenantName>::iterator iter = tenantRenames.begin();
 			for (auto& iter : tenantRenames) {
 				renameFutures.push_back(success(TenantAPI::renameTenantTransaction(tr, iter.first, iter.second)));
 			}
@@ -845,8 +832,23 @@ struct TenantManagementWorkload : TestWorkload {
 		for (int i = 0; i < numTenants; ++i) {
 			TenantName oldTenant = self->chooseTenantName(false);
 			TenantName newTenant = self->chooseTenantName(false);
-			tenantOverlap = tenantOverlap || oldTenant == newTenant || allTenantNames.count(oldTenant) ||
-			                allTenantNames.count(newTenant);
+			bool checkOverlap =
+			    oldTenant == newTenant || allTenantNames.count(oldTenant) || allTenantNames.count(newTenant);
+			// reject the rename here if it has overlap and we are doing a transaction operation
+			// and then pick another combination
+			if (checkOverlap && operationType == OperationType::MANAGEMENT_TRANSACTION) {
+				// These types of overlap will also fail as tenantNotFound or tenantExists:
+				// A->A
+				// A->B + B->C
+				// These types of overlap:
+				// A->B + A->C (Old Name Overlap)
+				// A->C + B->C (New Name Overlap)
+				// cannot be detected since everything happens in one commit
+				// and will not observe each other's changes in time
+				--i;
+				continue;
+			}
+			tenantOverlap = tenantOverlap || checkOverlap;
 			tenantRenames[oldTenant] = newTenant;
 			allTenantNames.insert(oldTenant);
 			allTenantNames.insert(newTenant);
