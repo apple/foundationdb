@@ -346,6 +346,8 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 	KeyRangeMap<Version> activeGranuleMerges; // range map of active granule merges, because range in boundaryEval
 	                                          // doesn't correspond to merge range. invalidVersion is no merge,
 	                                          // 0 is no merge version determined yet
+	// TODO: consider switching to an iterator approach.
+	std::unordered_map<Key, bool> mergeHardBoundaries;
 
 	FlowLock concurrentMergeChecks;
 
@@ -1112,6 +1114,11 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 					ra.keyRange = range;
 					ra.revoke = RangeRevokeData(true); // dispose=true
 					handleRangeAssign(bmData, ra);
+
+					bmData->mergeHardBoundaries.erase(range.begin);
+					if (bmData->knownBlobRanges.containedRanges(singleKeyRange(range.end)).empty()) {
+						bmData->mergeHardBoundaries[range.end] = true;
+					}
 				}
 
 				state std::vector<Future<Standalone<VectorRef<KeyRef>>>> splitFutures;
@@ -1119,6 +1126,10 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 				for (KeyRangeRef range : rangesToAdd) {
 					TraceEvent("ClientBlobRangeAdded", bmData->id).detail("Range", range);
 					splitFutures.push_back(splitRange(bmData, range, false, true));
+
+					if (bmData->knownBlobRanges.containedRanges(singleKeyRange(range.begin)).empty()) {
+						bmData->mergeHardBoundaries[range.begin] = true;
+					}
 				}
 
 				for (auto f : splitFutures) {
@@ -1806,6 +1817,13 @@ ACTOR Future<Void> finishMergeGranules(Reference<BlobManagerData> bmData,
 	wait(bmData->doneRecovering.getFuture());
 	wait(delay(0));
 
+	// Assert that none of the subsequent granules are hard boundaries.
+	if (g_network->isSimulated()) {
+		for (int i = 1; i < parentGranuleRanges.size(); i++) {
+			ASSERT(!bmData->mergeHardBoundaries.count(parentGranuleRanges[i]));
+		}
+	}
+
 	// force granules to persist state up to mergeVersion
 	wait(forceGranuleFlush(bmData, mergeRange, mergeVersion));
 
@@ -2001,9 +2019,13 @@ ACTOR Future<Void> granuleMergeChecker(Reference<BlobManagerData> bmData) {
 		state std::vector<Future<Void>> mergeChecks;
 		auto allRanges = bmData->mergeCandidates.ranges();
 		std::vector<std::tuple<UID, KeyRange, Version>> currentCandidates;
-
 		for (auto& it : allRanges) {
-			if (!it->cvalue().mergeEligible() || currentCandidates.size() == maxRangeSize) {
+			// Conditions:
+			//   1. Next range is not eligible.
+			//   2. Hit the maximum in a merge evaluation window.
+			//   3. Hit a hard merge boundary meaning we should not merge across them.
+			if (!it->cvalue().mergeEligible() || currentCandidates.size() == maxRangeSize ||
+			    bmData->mergeHardBoundaries.count(it->range().begin)) {
 				if (currentCandidates.size() >= 2) {
 					mergeChecks.push_back(attemptMerges(bmData, currentCandidates));
 				}
