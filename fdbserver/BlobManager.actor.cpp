@@ -493,6 +493,7 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitRange(Reference<BlobManagerData
 			ASSERT(keys.size() >= 2);
 			ASSERT(keys.front() == range.begin);
 			ASSERT(keys.back() == range.end);
+
 			return keys;
 		} else {
 			CODE_PROBE(writeHot, "Not splitting write-hot because granules would be too small");
@@ -1122,6 +1123,190 @@ static void downsampleSplit(const Standalone<VectorRef<KeyRef>>& splits,
 		out.push_back(out.arena(), splits[mid]);
 		downsampleSplit(splits, out, mid + 1, endIdx, endCount);
 	}
+}
+
+ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobManagerData> bmData,
+                                          UID currentWorkerId,
+                                          KeyRange granuleRange,
+                                          UID granuleID,
+                                          int64_t epoch,
+                                          int64_t seqno) {
+	CODE_PROBE(true, "BM re-evaluating initial split too big");
+	if (BM_DEBUG) {
+		fmt::print("BM {0} re-evaluating initial split [{1} - {2}) too big from {3} @ ({4}, {5})\n",
+		           bmData->epoch,
+		           granuleRange.begin.printable(),
+		           granuleRange.end.printable(),
+		           currentWorkerId.toString().substr(0, 5),
+		           epoch,
+		           seqno);
+	}
+	TraceEvent("BMCheckInitialSplitTooBig", bmData->id).detail("Epoch", bmData->epoch).detail("Granule", granuleRange);
+	// calculate new split targets speculatively assuming split is too large and current worker still owns it
+	state Standalone<VectorRef<KeyRef>> newRanges;
+	wait(store(newRanges, splitRange(bmData, granuleRange, false, true)));
+	ASSERT(newRanges.size() >= 2);
+	if (newRanges.size() == 2) {
+		// try forcing smaller splits by setting write-hot
+		// likely due to injection to trigger this behavior, as this normally only triggers when range is at least 2x
+		// desired size
+		if (BM_DEBUG) {
+			fmt::print("BM {0} re-evaluating initial split [{1} - {2}) too big trying write-hot\n",
+			           bmData->epoch,
+			           granuleRange.begin.printable(),
+			           granuleRange.end.printable(),
+			           currentWorkerId.toString().substr(0, 5),
+			           epoch,
+			           seqno);
+		}
+		CODE_PROBE(true, "BM trying write-hot to force smaller splits on re-evaluate");
+		wait(store(newRanges, splitRange(bmData, granuleRange, true, true)));
+		ASSERT(newRanges.size() >= 2);
+	}
+
+	if (BM_DEBUG) {
+		fmt::print("BM {0} re-evaluating initial split [{1} - {2}) got {3} ranges\n",
+		           bmData->epoch,
+		           granuleRange.begin.printable(),
+		           granuleRange.end.printable(),
+		           newRanges.size() - 1);
+		for (auto& it : newRanges) {
+			fmt::print("  {0}\n", it.printable());
+		}
+	}
+
+	if (newRanges.size() == 2) {
+		// revoke and reassign this range to retry
+		// likely due to fault injection, as this normally only triggers when range is at least 2x desired size
+		CODE_PROBE(true, "no better way to split range, just revoke and re-assign");
+		RangeAssignment raRevoke;
+		raRevoke.isAssign = false;
+		raRevoke.keyRange = granuleRange;
+		raRevoke.revoke = RangeRevokeData(false); // not a dispose
+		handleRangeAssign(bmData, raRevoke);
+
+		RangeAssignment raAssign;
+		raAssign.isAssign = true;
+		raAssign.keyRange = granuleRange;
+		raAssign.assign = RangeAssignmentData();
+		// don't care who this range gets assigned to
+		handleRangeAssign(bmData, raAssign);
+
+		return Void();
+	}
+
+	// Check lock to see if lock is still the specified epoch and seqno, and there are no files for the granule.
+	// If either of these are false, some other worker now has the granule. if there are files, it already succeeded at
+	// a split. if not, and it fails too, it will retry and get back here
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
+	state Key lockKey = blobGranuleLockKeyFor(granuleRange);
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::Option::PRIORITY_SYSTEM_IMMEDIATE);
+			tr->setOption(FDBTransactionOptions::Option::ACCESS_SYSTEM_KEYS);
+			// make sure we're still manager when this transaction gets committed
+			wait(checkManagerLock(tr, bmData));
+
+			// this adds a read conflict range, so if another granule concurrently commits a file, we will retry and see
+			// that
+			KeyRange range = blobGranuleFileKeyRangeFor(granuleID);
+			RangeResult granuleFiles = wait(tr->getRange(range, 1));
+			if (!granuleFiles.empty()) {
+				CODE_PROBE(true, "split too big was eventually solved by another worker");
+				if (BM_DEBUG) {
+					fmt::print("BM {0} re-evaluating initial split [{1} - {2}) too big: solved by another worker\n",
+					           bmData->epoch,
+					           granuleRange.begin.printable(),
+					           granuleRange.end.printable());
+				}
+				return Void();
+			}
+
+			Optional<Value> prevLockValue = wait(tr->get(lockKey));
+			ASSERT(prevLockValue.present());
+			std::tuple<int64_t, int64_t, UID> prevOwner = decodeBlobGranuleLockValue(prevLockValue.get());
+			int64_t prevOwnerEpoch = std::get<0>(prevOwner);
+			int64_t prevOwnerSeqno = std::get<1>(prevOwner);
+			UID prevGranuleID = std::get<2>(prevOwner);
+			if (prevOwnerEpoch != epoch || prevOwnerSeqno != seqno || prevGranuleID != granuleID) {
+				CODE_PROBE(true, "split too big was since moved to another worker");
+				if (BM_DEBUG) {
+					fmt::print("BM {0} re-evaluating initial split [{1} - {2}) too big: moved to another worker\n",
+					           bmData->epoch,
+					           granuleRange.begin.printable(),
+					           granuleRange.end.printable());
+					fmt::print("Epoch: Prev {0}, Cur {1}\n", prevOwnerEpoch, epoch);
+					fmt::print("Seqno: Prev {0}, Cur {1}\n", prevOwnerSeqno, seqno);
+					fmt::print("GranuleID: Prev {0}, Cur {1}\n",
+					           prevGranuleID.toString().substr(0, 6),
+					           granuleID.toString().substr(0, 6));
+				}
+				return Void();
+			}
+
+			if (prevOwnerEpoch > bmData->epoch) {
+				if (BM_DEBUG) {
+					fmt::print("BM {0} found a higher epoch {1} for granule lock of [{2} - {3})\n",
+					           bmData->epoch,
+					           prevOwnerEpoch,
+					           granuleRange.begin.printable(),
+					           granuleRange.end.printable());
+				}
+
+				if (bmData->iAmReplaced.canBeSet()) {
+					bmData->iAmReplaced.send(Void());
+				}
+				return Void();
+			}
+
+			// Set lock to max value for this manager, so other reassignments can't race with this transaction
+			// and existing owner can't modify it further.
+			tr->set(lockKey, blobGranuleLockValueFor(bmData->epoch, std::numeric_limits<int64_t>::max(), granuleID));
+
+			// set new ranges
+			state int i;
+			for (i = 0; i < newRanges.size() - 1; i++) {
+				wait(krmSetRange(tr,
+				                 blobGranuleMappingKeys.begin,
+				                 KeyRangeRef(newRanges[i], newRanges[i + 1]),
+				                 blobGranuleMappingValueFor(UID())));
+			}
+
+			wait(tr->commit());
+			break;
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+
+	// transaction committed, send updated range assignments. Even if there is only one range still, we need to revoke
+	// it and re-assign it to cancel the old granule and retry
+	CODE_PROBE(newRanges.size() > 2, "BM successfully changed initial split too big");
+	RangeAssignment raRevoke;
+	raRevoke.isAssign = false;
+	raRevoke.keyRange = granuleRange;
+	raRevoke.revoke = RangeRevokeData(false); // not a dispose
+	handleRangeAssign(bmData, raRevoke);
+
+	for (int i = 0; i < newRanges.size() - 1; i++) {
+		// reassign new range and do handover of previous range
+		RangeAssignment raAssignSplit;
+		raAssignSplit.isAssign = true;
+		raAssignSplit.keyRange = KeyRangeRef(newRanges[i], newRanges[i + 1]);
+		raAssignSplit.assign = RangeAssignmentData();
+		// don't care who this range gets assigned to
+		handleRangeAssign(bmData, raAssignSplit);
+	}
+
+	if (BM_DEBUG) {
+		fmt::print("BM {0} Re-splitting initial range [{1} - {2}) into {3} granules done\n",
+		           bmData->epoch,
+		           granuleRange.begin.printable(),
+		           granuleRange.end.printable(),
+		           newRanges.size() - 1);
+	}
+
+	return Void();
 }
 
 ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
@@ -2086,7 +2271,9 @@ ACTOR Future<Void> monitorBlobWorkerStatus(Reference<BlobManagerData> bmData, Bl
 					           rep.continueSeqno,
 					           bwInterf.id().toString(),
 					           rep.doSplit ? "split" : (rep.mergeCandidate ? "merge" : ""),
-					           rep.mergeCandidate ? "" : (rep.writeHotSplit ? "hot" : "normal"));
+					           rep.mergeCandidate
+					               ? ""
+					               : (rep.writeHotSplit ? "hot" : (rep.initialSplitTooBig ? "toobig" : "normal")));
 				}
 
 				ASSERT(rep.doSplit || rep.mergeCandidate);
@@ -2252,14 +2439,23 @@ ACTOR Future<Void> monitorBlobWorkerStatus(Reference<BlobManagerData> bmData, Bl
 							           rep.granuleRange.end.printable().c_str(),
 							           newEval.toString());
 						}
-						newEval.inProgress = maybeSplitRange(bmData,
-						                                     bwInterf.id(),
-						                                     rep.granuleRange,
-						                                     rep.granuleID,
-						                                     rep.startVersion,
-						                                     rep.writeHotSplit,
-						                                     rep.originalEpoch,
-						                                     rep.originalSeqno);
+						if (rep.initialSplitTooBig) {
+							newEval.inProgress = reevaluateInitialSplit(bmData,
+							                                            bwInterf.id(),
+							                                            rep.granuleRange,
+							                                            rep.granuleID,
+							                                            rep.originalEpoch,
+							                                            rep.originalSeqno);
+						} else {
+							newEval.inProgress = maybeSplitRange(bmData,
+							                                     bwInterf.id(),
+							                                     rep.granuleRange,
+							                                     rep.granuleID,
+							                                     rep.startVersion,
+							                                     rep.writeHotSplit,
+							                                     rep.originalEpoch,
+							                                     rep.originalSeqno);
+						}
 						bmData->boundaryEvaluations.insert(rep.granuleRange, newEval);
 					}
 

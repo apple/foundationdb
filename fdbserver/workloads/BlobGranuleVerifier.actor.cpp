@@ -80,8 +80,8 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		sharedRandomNumber /= 2;
 		// randomly some tests write data first and then turn on blob granules later, to test conversion of existing DB
 		// TODO CHANGE to infrequent!
-		initAtEnd = !enablePurging;
-		// initAtEnd = !enablePurging && sharedRandomNumber % 10 == 0;
+		// initAtEnd = !enablePurging;
+		initAtEnd = !enablePurging && sharedRandomNumber % 10 == 0;
 		sharedRandomNumber /= 10;
 		ASSERT(threads >= 1);
 
