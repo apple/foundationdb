@@ -293,7 +293,7 @@ Future<Reference<IConnection>> INetworkConnections::connect(const std::string& h
 	                std::function<Future<Reference<IConnection>>(NetworkAddress const&)>,
 	                Reference<IConnection>>(
 	    pickEndpoint,
-	    [=](NetworkAddress const& addr) -> Future<Reference<IConnection>> { return connectExternal(addr, host); });
+	    [=](NetworkAddress const& addr) -> Future<Reference<IConnection>> { return connectExternal(addr); });
 }
 
 IUDPSocket::~IUDPSocket() {}
