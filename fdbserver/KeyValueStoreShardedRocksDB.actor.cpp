@@ -1045,8 +1045,6 @@ private:
 class RocksDBMetrics {
 public:
 	RocksDBMetrics();
-	// Statistics
-	std::shared_ptr<rocksdb::Statistics> getStatsObjForRocksDB();
 	void logStats(rocksdb::DB* db);
 	// PerfContext
 	void resetPerfContext();
@@ -1072,7 +1070,7 @@ public:
 	Reference<Histogram> getWriteHistogram();
 	Reference<Histogram> getDeleteCompactRangeHistogram();
 	// Stat for Memory Usage
-	void logMemUsagePerShard(std::string shardName, rocksdb::DB* db);
+	void logMemUsage(rocksdb::DB* db);
 
 private:
 	// Global Statistic Input to RocksDB DB instance
@@ -1346,14 +1344,6 @@ RocksDBMetrics::RocksDBMetrics() {
 	    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_DELETE_COMPACTRANGE_HISTOGRAM, Histogram::Unit::microseconds);
 }
 
-std::shared_ptr<rocksdb::Statistics> RocksDBMetrics::getStatsObjForRocksDB() {
-	// Zhe: reserved for statistic of RocksDBMetrics per shard
-	// ASSERT(shard != nullptr && shard->stats != nullptr);
-	// return shard->stats;
-	ASSERT(stats != nullptr);
-	return stats;
-}
-
 void RocksDBMetrics::logStats(rocksdb::DB* db) {
 	TraceEvent e("ShardedRocksDBMetrics");
 	uint64_t stat;
@@ -1367,18 +1357,10 @@ void RocksDBMetrics::logStats(rocksdb::DB* db) {
 		ASSERT(db->GetIntProperty(property, &stat));
 		e.detail(name, stat);
 	}
-	/*
-	stat = readIterPool->numReadIteratorsCreated();
-	e.detail("NumReadIteratorsCreated", stat - readIteratorPoolStats["NumReadIteratorsCreated"]);
-	readIteratorPoolStats["NumReadIteratorsCreated"] = stat;
-	stat = readIterPool->numTimesReadIteratorsReused();
-	e.detail("NumTimesReadIteratorsReused", stat - readIteratorPoolStats["NumTimesReadIteratorsReused"]);
-	readIteratorPoolStats["NumTimesReadIteratorsReused"] = stat;
-	*/
 }
 
-void RocksDBMetrics::logMemUsagePerShard(std::string shardName, rocksdb::DB* db) {
-	TraceEvent e("ShardedRocksDBShardMemMetrics");
+void RocksDBMetrics::logMemUsage(rocksdb::DB* db) {
+	TraceEvent e("RocksDBMemMetrics");
 	uint64_t stat;
 	ASSERT(db != nullptr);
 	ASSERT(db->GetIntProperty(rocksdb::DB::Properties::kBlockCacheUsage, &stat));
@@ -1389,7 +1371,6 @@ void RocksDBMetrics::logMemUsagePerShard(std::string shardName, rocksdb::DB* db)
 	e.detail("AllMemtablesBytes", stat);
 	ASSERT(db->GetIntProperty(rocksdb::DB::Properties::kBlockCachePinnedUsage, &stat));
 	e.detail("BlockCachePinnedUsage", stat);
-	e.detail("Name", shardName);
 }
 
 void RocksDBMetrics::resetPerfContext() {
@@ -1566,17 +1547,30 @@ uint64_t RocksDBMetrics::getRocksdbPerfcontextMetric(int metric) {
 	return 0;
 }
 
-ACTOR Future<Void> rocksDBAggregatedMetricsLogger(std::shared_ptr<RocksDBMetrics> rocksDBMetrics, rocksdb::DB* db) {
-	loop {
-		wait(delay(SERVER_KNOBS->ROCKSDB_METRICS_DELAY));
-		/*
-		if (SERVER_KNOBS->ROCKSDB_ENABLE_STATISTIC) {
-		    rocksDBMetrics->logStats(db);
+ACTOR Future<Void> rocksDBAggregatedMetricsLogger(std::shared_ptr<ShardedRocksDBState> rState,
+                                                  Future<Void> openFuture,
+                                                  std::shared_ptr<RocksDBMetrics> rocksDBMetrics,
+                                                  ShardManager* shardManager) {
+	try {
+		wait(openFuture);
+		state rocksdb::DB* db = shardManager->getDb();
+		loop {
+			wait(delay(SERVER_KNOBS->ROCKSDB_METRICS_DELAY));
+			if (rState->closing) {
+				break;
+			}
+			rocksDBMetrics->logStats(db);
+			rocksDBMetrics->logMemUsage(db);
+			if (SERVER_KNOBS->ROCKSDB_PERFCONTEXT_SAMPLE_RATE != 0) {
+				rocksDBMetrics->logPerfContext(true);
+			}
 		}
-		if (SERVER_KNOBS->ROCKSDB_PERFCONTEXT_SAMPLE_RATE != 0) {
-		    rocksDBMetrics->logPerfContext(true);
-		}*/
+	} catch (Error& e) {
+		if (e.code() != error_code_actor_cancelled) {
+			TraceEvent(SevError, "ShardedRocksDBMetricsError").errorUnsuppressed(e);
+		}
 	}
+	return Void();
 }
 
 struct ShardedRocksDBKeyValueStore : IKeyValueStore {
@@ -1661,6 +1655,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 		void action(OpenAction& a) {
 			auto status = a.shardManager->init();
+
 			if (!status.ok()) {
 				logRocksDBError(status, "Open");
 				a.done.sendError(statusToError(status));
@@ -2117,10 +2112,10 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				std::reverse(a.shardRanges.begin(), a.shardRanges.end());
 			}
 
-			// TODO: consider multi-thread reads. It's possible to read multiple shards in parallel. However, the number
-			// of rows to read needs to be calculated based on the previous read result. We may read more than we
-			// expected when parallel read is used when the previous result is not available. It's unlikely to get to
-			// performance improvement when the actual number of rows to read is very small.
+			// TODO: consider multi-thread reads. It's possible to read multiple shards in parallel. However, the
+			// number of rows to read needs to be calculated based on the previous read result. We may read more
+			// than we expected when parallel read is used when the previous result is not available. It's unlikely
+			// to get to performance improvement when the actual number of rows to read is very small.
 			int accumulatedBytes = 0;
 			int numShards = 0;
 			for (auto& [shard, range] : a.shardRanges) {
@@ -2179,16 +2174,17 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	    numFetchWaiters(SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_HARD_MAX - SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_SOFT_MAX),
 	    errorListener(std::make_shared<RocksDBErrorListener>()), errorFuture(errorListener->getFuture()),
 	    shardManager(path, id), rocksDBMetrics(new RocksDBMetrics()) {
-		// In simluation, run the reader/writer threads as Coro threads (i.e. in the network thread. The storage engine
-		// is still multi-threaded as background compaction threads are still present. Reads/writes to disk will also
-		// block the network thread in a way that would be unacceptable in production but is a necessary evil here. When
-		// performing the reads in background threads in simulation, the event loop thinks there is no work to do and
-		// advances time faster than 1 sec/sec. By the time the blocking read actually finishes, simulation has advanced
-		// time by more than 5 seconds, so every read fails with a transaction_too_old error. Doing blocking IO on the
-		// main thread solves this issue. There are almost certainly better fixes, but my goal was to get a less
-		// invasive change merged first and work on a more realistic version if/when we think that would provide
-		// substantially more confidence in the correctness.
-		// TODO: Adapt the simulation framework to not advance time quickly when background reads/writes are occurring.
+		// In simluation, run the reader/writer threads as Coro threads (i.e. in the network thread. The storage
+		// engine is still multi-threaded as background compaction threads are still present. Reads/writes to disk
+		// will also block the network thread in a way that would be unacceptable in production but is a necessary
+		// evil here. When performing the reads in background threads in simulation, the event loop thinks there is
+		// no work to do and advances time faster than 1 sec/sec. By the time the blocking read actually finishes,
+		// simulation has advanced time by more than 5 seconds, so every read fails with a transaction_too_old
+		// error. Doing blocking IO on the main thread solves this issue. There are almost certainly better fixes,
+		// but my goal was to get a less invasive change merged first and work on a more realistic version if/when
+		// we think that would provide substantially more confidence in the correctness.
+		// TODO: Adapt the simulation framework to not advance time quickly when background reads/writes are
+		// occurring.
 		if (g_network->isSimulated()) {
 			writeThread = CoroThreadPool::createThreadPool();
 			readThreads = CoroThreadPool::createThreadPool();
@@ -2236,14 +2232,15 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	Future<Void> init() override {
 		if (openFuture.isValid()) {
 			return openFuture;
-			// Restore durable state if KVS is open. KVS will be re-initialized during rollback. To avoid the cost of
-			// opening and closing multiple rocksdb instances, we reconcile the shard map using persist shard mapping
-			// data.
+			// Restore durable state if KVS is open. KVS will be re-initialized during rollback. To avoid the cost
+			// of opening and closing multiple rocksdb instances, we reconcile the shard map using persist shard
+			// mapping data.
 		} else {
 			auto a = std::make_unique<Writer::OpenAction>(
 			    &shardManager, metrics, &readSemaphore, &fetchSemaphore, errorListener);
 			openFuture = a->done.getFuture();
-			this->metrics = ShardManager::shardMetricsLogger(this->rState, openFuture, &shardManager);
+			this->metrics = ShardManager::shardMetricsLogger(this->rState, openFuture, &shardManager) &&
+			                rocksDBAggregatedMetricsLogger(this->rState, openFuture, rocksDBMetrics, &shardManager);
 			this->refreshHolder = refreshReadIteratorPools(this->rState, openFuture, shardManager.getAllShards());
 			writeThread->post(a.release());
 			return openFuture;
