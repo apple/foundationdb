@@ -25,6 +25,7 @@
 #include <vector>
 #include <unordered_map>
 
+#include "fdbrpc/simulator.h"
 #include "fmt/format.h"
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbclient/BlobGranuleCommon.h"
@@ -51,6 +52,7 @@
  */
 
 #define BM_DEBUG false
+#define BM_PURGE_DEBUG false
 
 void handleClientBlobRange(KeyRangeMap<bool>* knownBlobRanges,
                            Arena& ar,
@@ -281,6 +283,43 @@ struct BlobManagerStats {
 	}
 };
 
+enum MergeCandidateState {
+	MergeCandidateCannotMerge,
+	MergeCandidateCanMerge,
+	MergeCandidateUnknown,
+	MergeCandidateMerging
+};
+
+// The current merge algorithm, skipping just granules that will be merge-eligible on the next pass, but not
+// their neighbors, is optimal for guaranteeing merges to make progress where possible, with decently
+// optimal but not globally optimal merge behavior.
+// Alternative algorithms include not doing a two-pass consideration at all and immediately considering
+// all merge candidates, which guarantees the most progress but pretty much guarantees undesirably
+// suboptimal merge decisions, because of the time variance of granules becoming merge candidates. Or,
+// also skipping adjacent eligible granules in addition to the one that will be eligible next pass,
+// which ensures optimally large merges in a future pass, but adds decent delay to doing the merge. Or,
+// smarter considering of merge candidates adjacent to the one that will be eligible next pass
+// (depending on whether potential future merges with adjacent ones could include this candidate), which
+// would be the best of both worlds, but would add a decent amount of code complexity.
+struct MergeCandidateInfo {
+	MergeCandidateState st;
+	UID granuleID;
+	Version startVersion;
+	bool mergeNow;
+
+	MergeCandidateInfo() : st(MergeCandidateUnknown), startVersion(invalidVersion), mergeNow(false) {}
+
+	MergeCandidateInfo(MergeCandidateState st) : st(st), startVersion(invalidVersion), mergeNow(false) {
+		ASSERT(st != MergeCandidateCanMerge);
+	}
+	MergeCandidateInfo(UID granuleID, Version startVersion)
+	  : st(MergeCandidateCanMerge), granuleID(granuleID), startVersion(startVersion), mergeNow(false) {}
+
+	bool canMerge() const { return st == MergeCandidateCanMerge; }
+
+	bool canMergeNow() const { return st == MergeCandidateCanMerge && mergeNow; }
+};
+
 struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 	UID id;
 	Database db;
@@ -301,10 +340,12 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 	KeyRangeMap<BoundaryEvaluation> boundaryEvaluations;
 	KeyRangeMap<bool> knownBlobRanges;
 	BGTenantMap tenantData;
-	KeyRangeMap<Optional<std::pair<UID, Version>>> mergeCandidates; // granule range to granule id + start version.
+	KeyRangeMap<MergeCandidateInfo> mergeCandidates; // granule range to granule id + start version.
 	KeyRangeMap<Version> activeGranuleMerges; // range map of active granule merges, because range in boundaryEval
 	                                          // doesn't correspond to merge range. invalidVersion is no merge,
 	                                          // 0 is no merge version determined yet
+
+	FlowLock concurrentMergeChecks;
 
 	AsyncTrigger startRecruiting;
 	Debouncer restartRecruiting;
@@ -321,9 +362,10 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 	BlobManagerData(UID id, Reference<AsyncVar<ServerDBInfo> const> dbInfo, Database db, Optional<Key> dcId)
 	  : id(id), db(db), dcId(dcId), stats(id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &workersById),
 	    knownBlobRanges(false, normalKeys.end), tenantData(BGTenantMap(dbInfo)),
-	    mergeCandidates(Optional<std::pair<UID, Version>>(), normalKeys.end),
-	    activeGranuleMerges(invalidVersion, normalKeys.end), restartRecruiting(SERVER_KNOBS->DEBOUNCE_RECRUITING_DELAY),
-	    recruitingStream(0) {}
+	    mergeCandidates(MergeCandidateInfo(MergeCandidateUnknown), normalKeys.end),
+	    activeGranuleMerges(invalidVersion, normalKeys.end),
+	    concurrentMergeChecks(SERVER_KNOBS->BLOB_MANAGER_CONCURRENT_MERGE_CHECKS),
+	    restartRecruiting(SERVER_KNOBS->DEBOUNCE_RECRUITING_DELAY), recruitingStream(0) {}
 
 	// only initialize blob store if actually needed
 	void initBStore() {
@@ -347,6 +389,7 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 		}
 		return false;
 	}
+
 	Version activeMergeVersion(const KeyRangeRef& range) {
 		auto ranges = activeGranuleMerges.intersectingRanges(range);
 		Version v = invalidVersion;
@@ -354,6 +397,30 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 			v = std::max(v, it.cvalue());
 		}
 		return v;
+	}
+
+	void setMergeCandidate(const KeyRangeRef& range, UID granuleID, Version startVersion) {
+		// Want this to be idempotent. If a granule was already reported as merge-eligible, we want to use the existing
+		// merge and mergeNow state.
+		auto it = mergeCandidates.rangeContaining(range.begin);
+
+		if (it->begin() == range.begin && it.end() == range.end) {
+			if (it->cvalue().st != MergeCandidateCanMerge) {
+				// same range, just update
+				it->value() = MergeCandidateInfo(granuleID, startVersion);
+			} else {
+				// else no-op, but validate data
+				ASSERT(granuleID == it->cvalue().granuleID);
+				ASSERT(startVersion == it->cvalue().startVersion);
+			}
+		} else if (it->cvalue().st != MergeCandidateMerging) {
+			mergeCandidates.insert(range, MergeCandidateInfo(granuleID, startVersion));
+		}
+	}
+
+	void clearMergeCandidate(const KeyRangeRef& range, MergeCandidateState st) {
+		ASSERT(st != MergeCandidateCanMerge);
+		mergeCandidates.insert(range, MergeCandidateInfo(st));
 	}
 };
 
@@ -850,7 +917,7 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 	state std::unordered_map<int64_t, TenantMapEntry> knownTenantCache;
 
 	if (SERVER_KNOBS->BG_RANGE_SOURCE == "tenant") {
-		changeKey = tenantLastIdKey;
+		changeKey = TenantMetadata::lastTenantId.key;
 	} else if (SERVER_KNOBS->BG_RANGE_SOURCE == "blobRangeKeys") {
 		changeKey = blobRangeChangeKey;
 	} else {
@@ -898,13 +965,15 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 
 					ar.dependsOn(results.arena());
 				} else {
-					state RangeResult tenantResults;
-					wait(store(tenantResults, tr->getRange(tenantMapKeys, CLIENT_KNOBS->TOO_MANY)));
-					ASSERT_WE_THINK(!tenantResults.more && tenantResults.size() < CLIENT_KNOBS->TOO_MANY);
-					if (tenantResults.more || tenantResults.size() >= CLIENT_KNOBS->TOO_MANY) {
+					state KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>> tenantResults;
+					wait(store(tenantResults,
+					           TenantMetadata::tenantMap.getRange(
+					               tr, Optional<TenantName>(), Optional<TenantName>(), CLIENT_KNOBS->TOO_MANY)));
+					ASSERT_WE_THINK(!tenantResults.more && tenantResults.results.size() < CLIENT_KNOBS->TOO_MANY);
+					if (tenantResults.more || tenantResults.results.size() >= CLIENT_KNOBS->TOO_MANY) {
 						TraceEvent(SevError, "BlobManagerTooManyTenants", bmData->id)
 						    .detail("Epoch", bmData->epoch)
-						    .detail("TenantCount", tenantResults.size());
+						    .detail("TenantCount", tenantResults.results.size());
 						wait(delay(600));
 						if (bmData->iAmReplaced.canBeSet()) {
 							bmData->iAmReplaced.sendError(internal_error());
@@ -912,15 +981,11 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 						throw internal_error();
 					}
 
-					std::vector<std::pair<TenantName, TenantMapEntry>> tenants;
 					std::vector<Key> prefixes;
-					for (auto& it : tenantResults) {
-						TenantNameRef tenantName = it.key.removePrefix(tenantMapPrefix);
-						TenantMapEntry entry = TenantMapEntry::decode(it.value);
-						tenants.push_back(std::pair(tenantName, entry));
-						prefixes.push_back(entry.prefix);
+					for (auto& it : tenantResults.results) {
+						prefixes.push_back(it.second.prefix);
 					}
-					bmData->tenantData.addTenants(tenants);
+					bmData->tenantData.addTenants(tenantResults.results);
 
 					// make this look like knownBlobRanges
 					std::sort(prefixes.begin(), prefixes.end());
@@ -1272,8 +1337,9 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 
 				Standalone<BlobGranuleHistoryValue> historyValue;
 				historyValue.granuleID = newGranuleIDs[i];
-				historyValue.parentGranules.push_back(historyValue.arena(),
-				                                      std::pair(granuleRange, granuleStartVersion));
+				historyValue.parentBoundaries.push_back(historyValue.arena(), granuleRange.begin);
+				historyValue.parentBoundaries.push_back(historyValue.arena(), granuleRange.end);
+				historyValue.parentVersions.push_back(historyValue.arena(), granuleStartVersion);
 
 				tr->set(historyKey, blobGranuleHistoryValueFor(historyValue));
 
@@ -1451,7 +1517,8 @@ ACTOR Future<Void> forceGranuleFlush(Reference<BlobManagerData> bmData, KeyRange
 						break;
 					} else {
 						if (BM_DEBUG) {
-							fmt::print("ERROR: Error flushing range [{0} - {1}): {2}!\n",
+							fmt::print("ERROR: BM {0} Error flushing range [{1} - {2}): {3}!\n",
+							           bmData->epoch,
 							           blobGranuleMapping[j].key.printable(),
 							           blobGranuleMapping[j + 1].key.printable(),
 							           e.name());
@@ -1490,7 +1557,7 @@ ACTOR Future<Void> forceGranuleFlush(Reference<BlobManagerData> bmData, KeyRange
 ACTOR Future<std::pair<UID, Version>> persistMergeGranulesStart(Reference<BlobManagerData> bmData,
                                                                 KeyRange mergeRange,
                                                                 std::vector<UID> parentGranuleIDs,
-                                                                std::vector<KeyRange> parentGranuleRanges,
+                                                                std::vector<Key> parentGranuleRanges,
                                                                 std::vector<Version> parentGranuleStartVersions) {
 	state UID mergeGranuleID = deterministicRandom()->randomUniqueID();
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
@@ -1548,7 +1615,7 @@ ACTOR Future<Void> persistMergeGranulesDone(Reference<BlobManagerData> bmData,
                                             KeyRange mergeRange,
                                             Version mergeVersion,
                                             std::vector<UID> parentGranuleIDs,
-                                            std::vector<KeyRange> parentGranuleRanges,
+                                            std::vector<Key> parentGranuleRanges,
                                             std::vector<Version> parentGranuleStartVersions) {
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
 	// pick worker that has part of old range, it will soon get overridden anyway
@@ -1579,13 +1646,16 @@ ACTOR Future<Void> persistMergeGranulesDone(Reference<BlobManagerData> bmData,
 			state int parentIdx;
 			// TODO: could parallelize these
 			for (parentIdx = 0; parentIdx < parentGranuleIDs.size(); parentIdx++) {
-				state Key lockKey = blobGranuleLockKeyFor(parentGranuleRanges[parentIdx]);
+				KeyRange parentRange(KeyRangeRef(parentGranuleRanges[parentIdx], parentGranuleRanges[parentIdx + 1]));
+				state Key lockKey = blobGranuleLockKeyFor(parentRange);
 				state Future<Optional<Value>> oldLockFuture = tr->get(lockKey);
 
-				wait(updateChangeFeed(tr,
+				// This has to be
+				// TODO: fix this better! (privatize change feed key clear)
+				wait(updateChangeFeed(&tr->getTransaction(),
 				                      granuleIDToCFKey(parentGranuleIDs[parentIdx]),
 				                      ChangeFeedStatus::CHANGE_FEED_DESTROY,
-				                      parentGranuleRanges[parentIdx]));
+				                      parentRange));
 				if (BM_DEBUG) {
 					fmt::print("Granule merge destroying CF {0} ({1})!\n",
 					           parentGranuleIDs[parentIdx].shortString().substr(0, 6),
@@ -1614,10 +1684,10 @@ ACTOR Future<Void> persistMergeGranulesDone(Reference<BlobManagerData> bmData,
 			Standalone<BlobGranuleHistoryValue> historyValue;
 			historyValue.granuleID = mergeGranuleID;
 			for (parentIdx = 0; parentIdx < parentGranuleIDs.size(); parentIdx++) {
-				historyValue.parentGranules.push_back(
-				    historyValue.arena(),
-				    std::pair(parentGranuleRanges[parentIdx], parentGranuleStartVersions[parentIdx]));
+				historyValue.parentBoundaries.push_back(historyValue.arena(), parentGranuleRanges[parentIdx]);
+				historyValue.parentVersions.push_back(historyValue.arena(), parentGranuleStartVersions[parentIdx]);
 			}
+			historyValue.parentBoundaries.push_back(historyValue.arena(), parentGranuleRanges.back());
 
 			tr->set(historyKey, blobGranuleHistoryValueFor(historyValue));
 
@@ -1645,7 +1715,7 @@ ACTOR Future<Void> finishMergeGranules(Reference<BlobManagerData> bmData,
                                        KeyRange mergeRange,
                                        Version mergeVersion,
                                        std::vector<UID> parentGranuleIDs,
-                                       std::vector<KeyRange> parentGranuleRanges,
+                                       std::vector<Key> parentGranuleRanges,
                                        std::vector<Version> parentGranuleStartVersions) {
 
 	// wait for BM to be fully recovered before starting actual merges
@@ -1684,305 +1754,194 @@ ACTOR Future<Void> finishMergeGranules(Reference<BlobManagerData> bmData,
 
 	bmData->boundaryEvaluations.insert(mergeRange,
 	                                   BoundaryEvaluation(bmData->epoch, seqnoForEval, BoundaryEvalType::MERGE, 0, 0));
+	bmData->clearMergeCandidate(mergeRange, MergeCandidateMerging);
 
 	return Void();
 }
 
-// Make a decision on whether to merge this granule with surrounding ones.
-ACTOR Future<Void> maybeMergeRange(Reference<BlobManagerData> bmData,
-                                   UID granuleID,
-                                   KeyRange granuleRange,
-                                   Version granuleStartVersion) {
-	state std::deque<std::tuple<UID, KeyRange, Version>> beforeCandidates, afterCandidates;
+ACTOR Future<Void> doMerge(Reference<BlobManagerData> bmData,
+                           KeyRange mergeRange,
+                           std::vector<std::tuple<UID, KeyRange, Version>> toMerge) {
+	// switch to format persist merge wants
+	state std::vector<UID> ids;
+	state std::vector<Key> ranges;
+	state std::vector<Version> startVersions;
+	for (auto& it : toMerge) {
+		ids.push_back(std::get<0>(it));
+		ranges.push_back(std::get<1>(it).begin);
+		startVersions.push_back(std::get<2>(it));
+	}
+	ranges.push_back(std::get<1>(toMerge.back()).end);
+
+	try {
+		std::pair<UID, Version> persistMerge =
+		    wait(persistMergeGranulesStart(bmData, mergeRange, ids, ranges, startVersions));
+		wait(finishMergeGranules(
+		    bmData, persistMerge.first, mergeRange, persistMerge.second, ids, ranges, startVersions));
+		return Void();
+	} catch (Error& e) {
+		if (e.code() == error_code_operation_cancelled || e.code() == error_code_blob_manager_replaced) {
+			throw;
+		}
+		TraceEvent(SevError, "UnexpectedErrorGranuleMerge").error(e).detail("Range", mergeRange);
+		throw e;
+	}
+}
+
+// Needs to not be an actor to run synchronously for the race checking.
+// Technically this could just be the first part of doMerge, but this guarantees no waits happen for the checks before
+// the logic starts
+static void attemptStartMerge(Reference<BlobManagerData> bmData,
+                              const std::vector<std::tuple<UID, KeyRange, Version>>& toMerge) {
+	if (toMerge.size() < 2) {
+		return;
+	}
+	// TODO REMOVE validation eventually
+	for (int i = 0; i < toMerge.size() - 1; i++) {
+		ASSERT(std::get<1>(toMerge[i]).end == std::get<1>(toMerge[i + 1]).begin);
+	}
+	KeyRange mergeRange(KeyRangeRef(std::get<1>(toMerge.front()).begin, std::get<1>(toMerge.back()).end));
+	// merge/merge races should not be possible because granuleMergeChecker should only start attemptMerges() for
+	// disjoint ranges, and merge candidate is not updated if it is already in the state MergeCandidateMerging
+	ASSERT(!bmData->isMergeActive(mergeRange));
+	// Check to avoid races where a split eval came in while merge was evaluating. This also effectively checks
+	// boundaryEvals because they're both updated before maybeSplitRange is called. This handles split/merge races.
+	auto reCheckMergeCandidates = bmData->mergeCandidates.intersectingRanges(mergeRange);
+	for (auto it : reCheckMergeCandidates) {
+		if (!it->cvalue().canMergeNow()) {
+			CODE_PROBE(true, " granule no longer merge candidate after checking metrics, aborting merge");
+			return;
+		}
+	}
 
 	if (BM_DEBUG) {
-		fmt::print("BM {0} maybe merge [{1} - {2}): Start\n",
+		fmt::print("BM {0} Starting merge of [{1} - {2}) ({3})\n",
 		           bmData->epoch,
-		           granuleRange.begin.printable(),
-		           granuleRange.end.printable());
+		           mergeRange.begin.printable(),
+		           mergeRange.end.printable(),
+		           toMerge.size());
 	}
+	CODE_PROBE(true, "Doing granule merge");
+	bmData->activeGranuleMerges.insert(mergeRange, 0);
+	bmData->clearMergeCandidate(mergeRange, MergeCandidateMerging);
+	// Now, after setting activeGranuleMerges, we have committed to doing the merge, so any subsequent split eval for
+	// any of the ranges will be ignored. This handles merge/split races.
+	bmData->addActor.send(doMerge(bmData, mergeRange, toMerge));
+}
 
-	// look for candidates to the left
-	if (granuleRange.begin != normalKeys.begin) {
-		auto rangeBefore = bmData->mergeCandidates.rangeContainingKeyBefore(granuleRange.begin);
-		while (rangeBefore.cvalue().present() && beforeCandidates.size() < SERVER_KNOBS->BG_MAX_MERGE_FANIN - 1) {
-			// if it is a merge candidate, add it to the list
-			beforeCandidates.push_front(
-			    std::tuple(rangeBefore.cvalue().get().first, rangeBefore.range(), rangeBefore.cvalue().get().second));
+// Greedily merges any consecutive 2+ granules in a row that are mergeable
+ACTOR Future<Void> attemptMerges(Reference<BlobManagerData> bmData,
+                                 std::vector<std::tuple<UID, KeyRange, Version>> candidates) {
+	ASSERT(candidates.size() >= 2);
 
-			if (BM_DEBUG) {
-				fmt::print("BM {0} maybe merge [{1} - {2}):   Before candidate [{3} - {4})\n",
-				           bmData->epoch,
-				           granuleRange.begin.printable(),
-				           granuleRange.end.printable(),
-				           rangeBefore.begin().printable(),
-				           rangeBefore.end().printable());
-			}
-
-			ASSERT(rangeBefore.begin() >= normalKeys.begin);
-			if (rangeBefore.begin() == normalKeys.begin) {
-				break;
-			} else {
-				--rangeBefore;
-			}
-		}
+	// TODO REMOVE validation eventually
+	for (int i = 0; i < candidates.size() - 1; i++) {
+		ASSERT(std::get<1>(candidates[i]).end == std::get<1>(candidates[i + 1]).begin);
 	}
+	CODE_PROBE(true, "Candidate ranges to merge");
+	wait(bmData->concurrentMergeChecks.take());
+	state FlowLock::Releaser holdingDVL(bmData->concurrentMergeChecks);
 
-	// look for candidates to right
-	if (granuleRange.end != normalKeys.end) {
-		auto rangeAfter = bmData->mergeCandidates.rangeContaining(granuleRange.end);
-		while (rangeAfter.cvalue().present() && afterCandidates.size() < SERVER_KNOBS->BG_MAX_MERGE_FANIN - 1) {
-			// if it is a merge candidate, add it to the list
-			afterCandidates.push_back(
-			    std::tuple(rangeAfter.cvalue().get().first, rangeAfter.range(), rangeAfter.cvalue().get().second));
-			if (BM_DEBUG) {
-				fmt::print("BM {0} maybe merge [{1} - {2}):   After candidate [{3} - {4})\n",
-				           bmData->epoch,
-				           granuleRange.begin.printable(),
-				           granuleRange.end.printable(),
-				           rangeAfter.begin().printable(),
-				           rangeAfter.end().printable());
-			}
-			ASSERT(rangeAfter.end() <= normalKeys.end);
-			if (rangeAfter.end() == normalKeys.end) {
-				break;
-			} else {
-				++rangeAfter;
-			}
-		}
-	}
-
-	if (beforeCandidates.empty() && afterCandidates.empty()) {
-		CODE_PROBE(true, "no consecutive merge candidates");
-		if (BM_DEBUG) {
-			fmt::print("BM {0} maybe merge [{1} - {2}): No merge candidates\n",
-			           bmData->epoch,
-			           granuleRange.begin.printable(),
-			           granuleRange.end.printable());
-		}
-		return Void();
-	}
-
-	CODE_PROBE(true, "consecutive granule merge candidates");
-
-	if (BM_DEBUG) {
-		fmt::print("BM {0} maybe merge [{1} - {2}): Checking metrics for {3} candidates ({4} - {5})\n",
-		           bmData->epoch,
-		           granuleRange.begin.printable(),
-		           granuleRange.end.printable(),
-		           beforeCandidates.size() + afterCandidates.size() + 1,
-		           beforeCandidates.size(),
-		           afterCandidates.size());
-	}
-
-	// get metrics for current granule to see if it is still mergeable
-	StorageMetrics targetGranuleMetrics = wait(bmData->db->getStorageMetrics(granuleRange, CLIENT_KNOBS->TOO_MANY));
-	if (targetGranuleMetrics.bytesPerKSecond >= SERVER_KNOBS->SHARD_MIN_BYTES_PER_KSEC ||
-	    targetGranuleMetrics.bytes >= SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES) {
-		CODE_PROBE(true, "granule merge candidate no longer mergeable");
-		return Void();
-	}
-
-	// best set of granules to merge
-	state std::vector<UID> bestGranuleIDs;
-	state std::vector<KeyRange> bestGranuleRanges;
-	state std::vector<Version> bestGranuleStartVersions;
-	state KeyRange bestGranuleRange;
-
-	// current set of granules being evaluated
-	state std::deque<std::tuple<UID, KeyRange, Version, int64_t>> windowGranules;
-	state int64_t windowBytes = targetGranuleMetrics.bytes;
-	windowGranules.push_back(std::tuple(granuleID, granuleRange, granuleStartVersion, windowBytes));
-
-	// first walk backwards through before candidates until combined granule would be too large to merge, or we hit a
-	// granule that has too high bytesPerKSec and isn't mergeable
+	// start merging any set of 2+ consecutive granules that can be merged
+	state int64_t currentBytes = 0;
+	// large keys can cause a large number of granules in the merge to exceed the maximum value size
+	state int currentKeySumBytes = 0;
+	state std::vector<std::tuple<UID, KeyRange, Version>> currentCandidates;
 	state int i;
-	for (i = beforeCandidates.size() - 1; i >= 0; i--) {
-		if (BM_DEBUG) {
-			fmt::print("BM {0} maybe merge [{1} - {2}): Checking before candidate [{3} - {4})\n",
-			           bmData->epoch,
-			           granuleRange.begin.printable(),
-			           granuleRange.end.printable(),
-			           std::get<1>(beforeCandidates[i]).begin.printable(),
-			           std::get<1>(beforeCandidates[i]).end.printable());
+	for (i = 0; i < candidates.size(); i++) {
+		StorageMetrics metrics =
+		    wait(bmData->db->getStorageMetrics(std::get<1>(candidates[i]), CLIENT_KNOBS->TOO_MANY));
+
+		if (metrics.bytes >= SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES ||
+		    metrics.bytesPerKSecond >= SERVER_KNOBS->SHARD_MIN_BYTES_PER_KSEC) {
+			// This granule cannot be merged with any neighbors.
+			// If current candidates up to here can be merged, merge them and skip over this one
+			attemptStartMerge(bmData, currentCandidates);
+			currentCandidates.clear();
+			currentBytes = 0;
+			currentKeySumBytes = 0;
+			continue;
 		}
-		StorageMetrics beforeMetrics =
-		    wait(bmData->db->getStorageMetrics(std::get<1>(beforeCandidates[i]), CLIENT_KNOBS->TOO_MANY));
-		if (windowBytes + beforeMetrics.bytes >= SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES ||
-		    beforeMetrics.bytesPerKSecond >= SERVER_KNOBS->SHARD_MIN_BYTES_PER_KSEC) {
-			break;
+
+		// if the current window is already at the maximum merge size, or adding this granule would push the window over
+		// the edge, merge the existing candidates if possible
+		ASSERT(currentCandidates.size() <= SERVER_KNOBS->BG_MAX_MERGE_FANIN);
+		if (currentCandidates.size() == SERVER_KNOBS->BG_MAX_MERGE_FANIN ||
+		    currentBytes + metrics.bytes > SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES ||
+		    currentKeySumBytes >= CLIENT_KNOBS->VALUE_SIZE_LIMIT / 2) {
+			ASSERT(currentBytes <= SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES);
+			CODE_PROBE(currentKeySumBytes >= CLIENT_KNOBS->VALUE_SIZE_LIMIT / 2, "merge early because of key size");
+			attemptStartMerge(bmData, currentCandidates);
+			currentCandidates.clear();
+			currentBytes = 0;
+			currentKeySumBytes = 0;
 		}
-		if (BM_DEBUG) {
-			fmt::print("BM {0} maybe merge [{1} - {2}): Before Candidate [{3} - {4}): {5} bytes\n",
-			           bmData->epoch,
-			           granuleRange.begin.printable(),
-			           granuleRange.end.printable(),
-			           std::get<1>(beforeCandidates[i]).begin.printable(),
-			           std::get<1>(beforeCandidates[i]).end.printable(),
-			           beforeMetrics.bytes);
+
+		// add this granule to the window
+		if (currentCandidates.empty()) {
+			currentKeySumBytes += std::get<1>(candidates[i]).begin.size();
 		}
-		windowBytes += beforeMetrics.bytes;
-		windowGranules.push_front(std::tuple(std::get<0>(beforeCandidates[i]),
-		                                     std::get<1>(beforeCandidates[i]),
-		                                     std::get<2>(beforeCandidates[i]),
-		                                     beforeMetrics.bytes));
+		currentKeySumBytes += std::get<1>(candidates[i]).end.size();
+		currentCandidates.push_back(candidates[i]);
 	}
 
-	// set first window as the best range
-	bestGranuleRange = KeyRangeRef(std::get<1>(windowGranules.front()).begin, std::get<1>(windowGranules.back()).end);
-	for (auto& it : windowGranules) {
-		bestGranuleIDs.push_back(std::get<0>(it));
-		bestGranuleRanges.push_back(std::get<1>(it));
-		bestGranuleStartVersions.push_back(std::get<2>(it));
-	}
-
-	// Do moving window algorithm where we add the next afterCandidate to the merge window, and then remove the tail end
-	// of beforeCandidates until we are down to a mergeable granule
-	for (i = 0; i < afterCandidates.size(); i++) {
-		if (BM_DEBUG) {
-			fmt::print("BM {0} maybe merge [{1} - {2}): Checking after candidate [{3} - {4})\n",
-			           bmData->epoch,
-			           granuleRange.begin.printable(),
-			           granuleRange.end.printable(),
-			           std::get<1>(afterCandidates[i]).begin.printable(),
-			           std::get<1>(afterCandidates[i]).end.printable());
-		}
-		// include this granule in the window
-		StorageMetrics afterMetrics =
-		    wait(bmData->db->getStorageMetrics(std::get<1>(afterCandidates[i]), CLIENT_KNOBS->TOO_MANY));
-		if (afterMetrics.bytes >= SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES ||
-		    afterMetrics.bytesPerKSecond >= SERVER_KNOBS->SHARD_MIN_BYTES_PER_KSEC) {
-			break;
-		}
-		if (BM_DEBUG) {
-			fmt::print("BM {0} maybe merge [{1} - {2}): After Candidate [{3} - {4}): {5} bytes\n",
-			           bmData->epoch,
-			           granuleRange.begin.printable(),
-			           granuleRange.end.printable(),
-			           std::get<1>(afterCandidates[i]).begin.printable(),
-			           std::get<1>(afterCandidates[i]).end.printable(),
-			           afterMetrics.bytes);
-		}
-		windowBytes += afterMetrics.bytes;
-		windowGranules.push_back(std::tuple(std::get<0>(afterCandidates[i]),
-		                                    std::get<1>(afterCandidates[i]),
-		                                    std::get<2>(afterCandidates[i]),
-		                                    afterMetrics.bytes));
-
-		// slide the window forward back down to mergeable size
-		while (windowBytes >= SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES) {
-			if (BM_DEBUG) {
-				fmt::print("BM {0} maybe merge [{1} - {2}): window bytes {3} >= target {4}\n",
-				           bmData->epoch,
-				           granuleRange.begin.printable(),
-				           granuleRange.end.printable(),
-				           windowBytes,
-				           SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES);
-			}
-			ASSERT(!windowGranules.empty());
-			if (std::get<0>(windowGranules.front()) == granuleID) {
-				// merge must include target granule
-				break;
-			}
-			if (BM_DEBUG) {
-				fmt::print(
-				    "BM {0} maybe merge [{1} - {2}):   After Candidate [{3} - {4}) popping [{5} - {6}): {7} bytes\n",
-				    bmData->epoch,
-				    granuleRange.begin.printable(),
-				    granuleRange.end.printable(),
-				    std::get<1>(afterCandidates[i]).begin.printable(),
-				    std::get<1>(afterCandidates[i]).end.printable(),
-				    std::get<1>(windowGranules.front()).begin.printable(),
-				    std::get<1>(windowGranules.front()).end.printable(),
-				    std::get<3>(windowGranules.front()));
-			}
-			windowBytes -= std::get<3>(windowGranules.front());
-			windowGranules.pop_front();
-		}
-
-		// compare this candidate window to previous best
-		if (windowBytes >= SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES) {
-			break;
-		} else if (windowGranules.size() > bestGranuleIDs.size()) {
-			if (BM_DEBUG) {
-				fmt::print("BM {0} maybe merge [{1} - {2}): new best granules {3}\n",
-				           bmData->epoch,
-				           granuleRange.begin.printable(),
-				           granuleRange.end.printable(),
-				           windowGranules.size());
-			}
-			bestGranuleRange =
-			    KeyRangeRef(std::get<1>(windowGranules.front()).begin, std::get<1>(windowGranules.back()).end);
-			bestGranuleIDs.clear();
-			bestGranuleRanges.clear();
-			bestGranuleStartVersions.clear();
-			for (auto& it : windowGranules) {
-				bestGranuleIDs.push_back(std::get<0>(it));
-				bestGranuleRanges.push_back(std::get<1>(it));
-				bestGranuleStartVersions.push_back(std::get<2>(it));
-			}
-		}
-	}
-
-	CODE_PROBE(bestGranuleIDs.size() == 1, "Cannot combine merge candidates into mergeable granule");
-	CODE_PROBE(bestGranuleIDs.size() > 1, "Granule ready for merge!");
-
-	if (bestGranuleIDs.size() > 1) {
-		if (BM_DEBUG) {
-			fmt::print("BM {0} maybe merge [{1} - {2}): Found {3} consecutive granules in range [{4} - {5}):\n",
-			           bmData->epoch,
-			           granuleRange.begin.printable(),
-			           granuleRange.end.printable(),
-			           bestGranuleIDs.size(),
-			           bestGranuleRange.begin.printable(),
-			           bestGranuleRange.end.printable());
-		}
-		// This code block must execute withou a wait for the lock checks (isMergeActive, mergeCandidates) to not
-		// deadlock and to avoid merge-merge races.
-		if ((!g_network->isSimulated() || !g_simulator.speedUpSimulation) && !bmData->isMergeActive(bestGranuleRange)) {
-			// check to avoid races where a split eval came in while merge was evaluating
-			auto reCheckMergeCandidates = bmData->mergeCandidates.intersectingRanges(bestGranuleRange);
-			bool mergeStillOk = true;
-			for (auto it : reCheckMergeCandidates) {
-				if (!it->cvalue().present()) {
-					CODE_PROBE(true, "granule no longer merge candidate after checking metrics, because of split eval");
-					mergeStillOk = false;
-					break;
-				}
-			}
-
-			if (mergeStillOk) {
-				fmt::print("BM {0} maybe merge [{1} - {2}): Starting merge of [{3} - {4}) ({5})\n",
-				           bmData->epoch,
-				           granuleRange.begin.printable(),
-				           granuleRange.end.printable(),
-				           bestGranuleRange.begin.printable(),
-				           bestGranuleRange.end.printable(),
-				           bestGranuleIDs.size());
-				CODE_PROBE(true, "Doing granule merge!");
-				bmData->activeGranuleMerges.insert(bestGranuleRange, 0);
-				bmData->mergeCandidates.insert(bestGranuleRange, Optional<std::pair<UID, Version>>());
-				state std::pair<UID, Version> persistMerge = wait(persistMergeGranulesStart(
-				    bmData, bestGranuleRange, bestGranuleIDs, bestGranuleRanges, bestGranuleStartVersions));
-				wait(finishMergeGranules(bmData,
-				                         persistMerge.first,
-				                         bestGranuleRange,
-				                         persistMerge.second,
-				                         bestGranuleIDs,
-				                         bestGranuleRanges,
-				                         bestGranuleStartVersions));
-			}
-		}
-	} else {
-		if (BM_DEBUG) {
-			fmt::print("BM {0} maybe merge [{1} - {2}): No mergeable granules after checking metrics\n",
-			           bmData->epoch,
-			           granuleRange.begin.printable(),
-			           granuleRange.end.printable());
-		}
-	}
+	attemptStartMerge(bmData, currentCandidates);
 
 	return Void();
+}
+
+// Uses single-pass algorithm to identify mergeable sections of granules.
+// To ensure each granule waits to see whether all of its neighbors are merge-eligible before merging it, a newly
+// merge-eligible granule will be ignored on the first pass
+ACTOR Future<Void> granuleMergeChecker(Reference<BlobManagerData> bmData) {
+	// initial sleep
+	wait(delayJittered(SERVER_KNOBS->BG_MERGE_CANDIDATE_DELAY_SECONDS));
+	// TODO could optimize to not check if there are no new merge-eligible granules and none in merge pending state
+	loop {
+
+		double sleepTime = SERVER_KNOBS->BG_MERGE_CANDIDATE_DELAY_SECONDS;
+		// Check more frequently if speedUpSimulation is set. This may
+		if (g_network->isSimulated() && g_simulator.speedUpSimulation) {
+			sleepTime = std::min(5.0, sleepTime);
+		}
+		// start delay at the start of the loop, to account for time spend in calculation
+		state Future<Void> intervalDelay = delayJittered(sleepTime);
+
+		// go over granule states, and start a findMergeableGranules for each sub-range of mergeable granules
+		// FIXME: avoid SlowTask by breaking this up periodically
+
+		// Break it up into parallel chunks. This makes it possible to process large ranges, but does mean the merges
+		// can be slightly suboptimal at boundaries. Use relatively large chunks to minimize the impact of this.
+		int maxRangeSize = SERVER_KNOBS->BG_MAX_MERGE_FANIN * 10;
+
+		state std::vector<Future<Void>> mergeChecks;
+		auto allRanges = bmData->mergeCandidates.ranges();
+		std::vector<std::tuple<UID, KeyRange, Version>> currentCandidates;
+
+		for (auto& it : allRanges) {
+			if (!it->cvalue().canMergeNow() || currentCandidates.size() == maxRangeSize) {
+				if (currentCandidates.size() >= 2) {
+					mergeChecks.push_back(attemptMerges(bmData, currentCandidates));
+				}
+				currentCandidates.clear();
+			}
+
+			if (it->cvalue().canMergeNow()) {
+				currentCandidates.push_back(std::tuple(it->cvalue().granuleID, it->range(), it->cvalue().startVersion));
+			} else if (it->cvalue().canMerge()) {
+				// set flag so this can get merged on the next pass
+				it->value().mergeNow = true;
+			}
+		}
+		if (currentCandidates.size() >= 2) {
+			mergeChecks.push_back(attemptMerges(bmData, currentCandidates));
+		}
+
+		CODE_PROBE(mergeChecks.size() > 1, "parallel merge checks");
+		wait(waitForAll(mergeChecks));
+		// if the calculation took longer than the desired interval, still wait a bit
+		wait(intervalDelay && delay(5.0));
+	}
 }
 
 ACTOR Future<Void> deregisterBlobWorker(Reference<BlobManagerData> bmData, BlobWorkerInterface interf) {
@@ -2309,34 +2268,22 @@ ACTOR Future<Void> monitorBlobWorkerStatus(Reference<BlobManagerData> bmData, Bl
 
 					// clear merge candidates for range, if not already merging
 					if (clearMergeCandidate) {
-						bmData->mergeCandidates.insert(rep.granuleRange, Optional<std::pair<UID, Version>>());
+						bmData->clearMergeCandidate(rep.granuleRange, MergeCandidateCannotMerge);
 					}
 				}
 				if (rep.mergeCandidate && !ignore) {
+					// mark granule as merge candidate
 					ASSERT(!rep.doSplit);
-					// TODO: do we need any sort of validation that this is coming from the worker that currently owns
-					// the granule?
-					if (existingInProgress.present()) {
-						// TODO LOG?
-					} else {
-						if (BM_DEBUG) {
-							fmt::print("Manager {0} evaluating [{1} - {2}) {3}\n",
-							           bmData->epoch,
-							           rep.granuleRange.begin.printable().c_str(),
-							           rep.granuleRange.end.printable().c_str(),
-							           newEval.toString());
-						}
-						if (!bmData->isMergeActive(rep.granuleRange)) {
-							ASSERT(rep.mergeCandidate);
-							CODE_PROBE(true, "Granule merge candidate");
-							bmData->mergeCandidates.insert(rep.granuleRange,
-							                               std::pair(rep.granuleID, rep.startVersion));
-							newEval.inProgress =
-							    maybeMergeRange(bmData, rep.granuleID, rep.granuleRange, rep.startVersion);
-							// still update epoch/seqno even if not doing a merge eval
-							bmData->boundaryEvaluations.insert(rep.granuleRange, newEval);
-						}
+					CODE_PROBE(true, "Granule merge candidate");
+					if (BM_DEBUG) {
+						fmt::print("Manager {0} merge candidate granule [{1} - {2}) {3}\n",
+						           bmData->epoch,
+						           rep.granuleRange.begin.printable().c_str(),
+						           rep.granuleRange.end.printable().c_str(),
+						           newEval.toString());
 					}
+					bmData->boundaryEvaluations.insert(rep.granuleRange, newEval);
+					bmData->setMergeCandidate(rep.granuleRange, rep.granuleID, rep.startVersion);
 				}
 			}
 		} catch (Error& e) {
@@ -2579,7 +2526,7 @@ ACTOR Future<Void> resumeActiveMerges(Reference<BlobManagerData> bmData) {
 				UID mergeGranuleID = decodeBlobGranuleMergeKey(it.key);
 				KeyRange mergeRange;
 				std::vector<UID> parentGranuleIDs;
-				std::vector<KeyRange> parentGranuleRanges;
+				std::vector<Key> parentGranuleRanges;
 				std::vector<Version> parentGranuleStartVersions;
 				Version mergeVersion;
 				std::tie(mergeRange, mergeVersion, parentGranuleIDs, parentGranuleRanges, parentGranuleStartVersions) =
@@ -2597,15 +2544,16 @@ ACTOR Future<Void> resumeActiveMerges(Reference<BlobManagerData> bmData) {
 				// report updated status. Start with early (epoch, seqno) to guarantee lower than later status
 				BoundaryEvaluation eval(1, 0, BoundaryEvalType::MERGE, 1, 0);
 				ASSERT(!bmData->isMergeActive(mergeRange));
-				eval.inProgress = finishMergeGranules(bmData,
-				                                      mergeGranuleID,
-				                                      mergeRange,
-				                                      mergeVersion,
-				                                      parentGranuleIDs,
-				                                      parentGranuleRanges,
-				                                      parentGranuleStartVersions);
+				bmData->addActor.send(finishMergeGranules(bmData,
+				                                          mergeGranuleID,
+				                                          mergeRange,
+				                                          mergeVersion,
+				                                          parentGranuleIDs,
+				                                          parentGranuleRanges,
+				                                          parentGranuleStartVersions));
 				bmData->boundaryEvaluations.insert(mergeRange, eval);
 				bmData->activeGranuleMerges.insert(mergeRange, mergeVersion);
+				bmData->clearMergeCandidate(mergeRange, MergeCandidateMerging);
 			}
 
 			if (result.more) {
@@ -3223,8 +3171,8 @@ ACTOR Future<Void> fullyDeleteGranule(Reference<BlobManagerData> self,
                                       Key historyKey,
                                       Version purgeVersion,
                                       KeyRange granuleRange) {
-	if (BM_DEBUG) {
-		fmt::print("Fully deleting granule {0}: init\n", granuleId.toString());
+	if (BM_PURGE_DEBUG) {
+		fmt::print("BM {0} Fully deleting granule {1}: init\n", self->epoch, granuleId.toString());
 	}
 
 	// if granule is still splitting and files are needed for new sub-granules to re-snapshot, we can only partially
@@ -3250,8 +3198,11 @@ ACTOR Future<Void> fullyDeleteGranule(Reference<BlobManagerData> self,
 		filesToDelete.emplace_back(fname);
 	}
 
-	if (BM_DEBUG) {
-		fmt::print("Fully deleting granule {0}: deleting {1} files\n", granuleId.toString(), filesToDelete.size());
+	if (BM_PURGE_DEBUG) {
+		fmt::print("BM {0} Fully deleting granule {1}: deleting {2} files\n",
+		           self->epoch,
+		           granuleId.toString(),
+		           filesToDelete.size());
 		for (auto filename : filesToDelete) {
 			fmt::print(" - {}\n", filename.c_str());
 		}
@@ -3264,8 +3215,9 @@ ACTOR Future<Void> fullyDeleteGranule(Reference<BlobManagerData> self,
 	wait(waitForAll(deletions));
 
 	// delete metadata in FDB (history entry and file keys)
-	if (BM_DEBUG) {
-		fmt::print("Fully deleting granule {0}: deleting history and file keys\n", granuleId.toString());
+	if (BM_PURGE_DEBUG) {
+		fmt::print(
+		    "BM {0} Fully deleting granule {1}: deleting history and file keys\n", self->epoch, granuleId.toString());
 	}
 
 	state Transaction tr(self->db);
@@ -3284,8 +3236,8 @@ ACTOR Future<Void> fullyDeleteGranule(Reference<BlobManagerData> self,
 		}
 	}
 
-	if (BM_DEBUG) {
-		fmt::print("Fully deleting granule {0}: success\n", granuleId.toString());
+	if (BM_PURGE_DEBUG) {
+		fmt::print("BM {0} Fully deleting granule {1}: success\n", self->epoch, granuleId.toString());
 	}
 
 	TraceEvent("GranuleFullPurge", self->id)
@@ -3296,6 +3248,8 @@ ACTOR Future<Void> fullyDeleteGranule(Reference<BlobManagerData> self,
 
 	++self->stats.granulesFullyPurged;
 	self->stats.filesPurged += filesToDelete.size();
+
+	CODE_PROBE(true, "full granule purged");
 
 	return Void();
 }
@@ -3312,8 +3266,8 @@ ACTOR Future<Void> partiallyDeleteGranule(Reference<BlobManagerData> self,
                                           UID granuleId,
                                           Version purgeVersion,
                                           KeyRange granuleRange) {
-	if (BM_DEBUG) {
-		fmt::print("Partially deleting granule {0}: init\n", granuleId.toString());
+	if (BM_PURGE_DEBUG) {
+		fmt::print("BM {0} Partially deleting granule {1}: init\n", self->epoch, granuleId.toString());
 	}
 
 	state Reference<BlobConnectionProvider> bstore = wait(getBStoreForGranule(self, granuleRange));
@@ -3362,8 +3316,11 @@ ACTOR Future<Void> partiallyDeleteGranule(Reference<BlobManagerData> self,
 		filesToDelete.emplace_back(fname);
 	}
 
-	if (BM_DEBUG) {
-		fmt::print("Partially deleting granule {0}: deleting {1} files\n", granuleId.toString(), filesToDelete.size());
+	if (BM_PURGE_DEBUG) {
+		fmt::print("BM {0} Partially deleting granule {1}: deleting {2} files\n",
+		           self->epoch,
+		           granuleId.toString(),
+		           filesToDelete.size());
 		for (auto filename : filesToDelete) {
 			fmt::print(" - {0}\n", filename);
 		}
@@ -3380,8 +3337,8 @@ ACTOR Future<Void> partiallyDeleteGranule(Reference<BlobManagerData> self,
 	wait(waitForAll(deletions));
 
 	// delete metadata in FDB (deleted file keys)
-	if (BM_DEBUG) {
-		fmt::print("Partially deleting granule {0}: deleting file keys\n", granuleId.toString());
+	if (BM_PURGE_DEBUG) {
+		fmt::print("BM {0} Partially deleting granule {1}: deleting file keys\n", self->epoch, granuleId.toString());
 	}
 
 	state Transaction tr(self->db);
@@ -3400,8 +3357,8 @@ ACTOR Future<Void> partiallyDeleteGranule(Reference<BlobManagerData> self,
 		}
 	}
 
-	if (BM_DEBUG) {
-		fmt::print("Partially deleting granule {0}: success\n", granuleId.toString());
+	if (BM_PURGE_DEBUG) {
+		fmt::print("BM {0} Partially deleting granule {1}: success\n", self->epoch, granuleId.toString());
 	}
 	TraceEvent("GranulePartialPurge", self->id)
 	    .detail("Epoch", self->epoch)
@@ -3411,6 +3368,8 @@ ACTOR Future<Void> partiallyDeleteGranule(Reference<BlobManagerData> self,
 
 	++self->stats.granulesPartiallyPurged;
 	self->stats.filesPurged += filesToDelete.size();
+
+	CODE_PROBE(true, " partial granule purged");
 
 	return Void();
 }
@@ -3424,8 +3383,9 @@ ACTOR Future<Void> partiallyDeleteGranule(Reference<BlobManagerData> self,
  * processing this purge intent.
  */
 ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range, Version purgeVersion, bool force) {
-	if (BM_DEBUG) {
-		fmt::print("purgeRange starting for range [{0} - {1}) @ purgeVersion={2}, force={3}\n",
+	if (BM_PURGE_DEBUG) {
+		fmt::print("BM {0} purgeRange starting for range [{1} - {2}) @ purgeVersion={3}, force={4}\n",
+		           self->epoch,
 		           range.begin.printable(),
 		           range.end.printable(),
 		           purgeVersion,
@@ -3447,8 +3407,7 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 
 	// track which granules we have already added to traversal
 	// note: (startKey, startVersion) uniquely identifies a granule
-	state std::unordered_set<std::pair<const uint8_t*, Version>, boost::hash<std::pair<const uint8_t*, Version>>>
-	    visited;
+	state std::unordered_set<std::pair<std::string, Version>, boost::hash<std::pair<std::string, Version>>> visited;
 
 	// find all active granules (that comprise the range) and add to the queue
 	state KeyRangeMap<UID>::Ranges activeRanges = self->workerAssignments.intersectingRanges(range);
@@ -3459,8 +3418,9 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 
 	state KeyRangeMap<UID>::iterator activeRange;
 	for (activeRange = activeRanges.begin(); activeRange != activeRanges.end(); ++activeRange) {
-		if (BM_DEBUG) {
-			fmt::print("Checking if active range [{0} - {1}), owned by BW {2}, should be purged\n",
+		if (BM_PURGE_DEBUG) {
+			fmt::print("BM {0} Checking if active range [{1} - {2}), owned by BW {3}, should be purged\n",
+			           self->epoch,
 			           activeRange.begin().printable(),
 			           activeRange.end().printable(),
 			           activeRange.value().toString());
@@ -3468,6 +3428,10 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 
 		// assumption: purge boundaries must respect granule boundaries
 		if (activeRange.begin() < range.begin || activeRange.end() > range.end) {
+			TraceEvent(SevWarn, "GranulePurgeRangesUnaligned", self->id)
+			    .detail("Epoch", self->epoch)
+			    .detail("PurgeRange", range)
+			    .detail("GranuleRange", activeRange.range());
 			continue;
 		}
 
@@ -3477,20 +3441,29 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 
 		loop {
 			try {
-				if (BM_DEBUG) {
-					fmt::print("Fetching latest history entry for range [{0} - {1})\n",
+				if (BM_PURGE_DEBUG) {
+					fmt::print("BM {0} Fetching latest history entry for range [{1} - {2})\n",
+					           self->epoch,
 					           activeRange.begin().printable(),
 					           activeRange.end().printable());
 				}
+				// FIXME: doing this serially will likely be too slow for large purges
 				Optional<GranuleHistory> history = wait(getLatestGranuleHistory(&tr, activeRange.range()));
 				// TODO: can we tell from the krm that this range is not valid, so that we don't need to do a
 				// get
 				if (history.present()) {
-					if (BM_DEBUG) {
-						printf("Adding range to history queue\n");
+					if (BM_PURGE_DEBUG) {
+						fmt::print("BM {0}   Adding range to history queue: [{1} - {2}) @ {3} ({4})\n",
+						           self->epoch,
+						           activeRange.begin().printable(),
+						           activeRange.end().printable(),
+						           history.get().version,
+						           (void*)(activeRange.range().begin.begin()));
 					}
-					visited.insert({ activeRange.range().begin.begin(), history.get().version });
+					visited.insert({ activeRange.range().begin.toString(), history.get().version });
 					historyEntryQueue.push({ activeRange.range(), history.get().version, MAX_VERSION });
+				} else if (BM_PURGE_DEBUG) {
+					fmt::print("BM {0}   No history for range, ignoring\n", self->epoch);
 				}
 				break;
 			} catch (Error& e) {
@@ -3499,8 +3472,12 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 		}
 	}
 
-	if (BM_DEBUG) {
-		printf("Beginning BFS traversal of history\n");
+	if (BM_PURGE_DEBUG) {
+		fmt::print("BM {0} Beginning BFS traversal of {1} history items for range [{2} - {3}) \n",
+		           self->epoch,
+		           historyEntryQueue.size(),
+		           range.begin.printable(),
+		           range.end.printable());
 	}
 	while (!historyEntryQueue.empty()) {
 		// process the node at the front of the queue and remove it
@@ -3510,8 +3487,9 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 		std::tie(currRange, startVersion, endVersion) = historyEntryQueue.front();
 		historyEntryQueue.pop();
 
-		if (BM_DEBUG) {
-			fmt::print("Processing history node [{0} - {1}) with versions [{2}, {3})\n",
+		if (BM_PURGE_DEBUG) {
+			fmt::print("BM {0} Processing history node [{1} - {2}) with versions [{3}, {4})\n",
+			           self->epoch,
 			           currRange.begin.printable(),
 			           currRange.end.printable(),
 			           startVersion,
@@ -3536,11 +3514,15 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 		}
 
 		if (!foundHistory) {
+			if (BM_PURGE_DEBUG) {
+				fmt::print("BM {0}  No history for this node, skipping\n", self->epoch);
+			}
 			continue;
 		}
 
-		if (BM_DEBUG) {
-			fmt::print("Found history entry for this node. It's granuleID is {0}\n",
+		if (BM_PURGE_DEBUG) {
+			fmt::print("BM {0}  Found history entry for this node. It's granuleID is {1}\n",
+			           self->epoch,
 			           currHistoryNode.granuleID.toString());
 		}
 
@@ -3551,39 +3533,54 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 		//   and so this granule should be partially deleted
 		// - otherwise, this granule is active, so don't schedule it for deletion
 		if (force || endVersion <= purgeVersion) {
-			if (BM_DEBUG) {
-				fmt::print("Granule {0} will be FULLY deleted\n", currHistoryNode.granuleID.toString());
+			if (BM_PURGE_DEBUG) {
+				fmt::print(
+				    "BM {0}   Granule {1} will be FULLY deleted\n", self->epoch, currHistoryNode.granuleID.toString());
 			}
 			toFullyDelete.push_back({ currHistoryNode.granuleID, historyKey, currRange });
 		} else if (startVersion < purgeVersion) {
-			if (BM_DEBUG) {
-				fmt::print("Granule {0} will be partially deleted\n", currHistoryNode.granuleID.toString());
+			if (BM_PURGE_DEBUG) {
+				fmt::print("BM {0}   Granule {1} will be partially deleted\n",
+				           self->epoch,
+				           currHistoryNode.granuleID.toString());
 			}
 			toPartiallyDelete.push_back({ currHistoryNode.granuleID, currRange });
 		}
 
 		// add all of the node's parents to the queue
-		for (auto& parent : currHistoryNode.parentGranules) {
+		if (BM_PURGE_DEBUG) {
+			fmt::print("BM {0}   Checking {1} parents\n", self->epoch, currHistoryNode.parentVersions.size());
+		}
+		for (int i = 0; i < currHistoryNode.parentVersions.size(); i++) {
+			// for (auto& parent : currHistoryNode.parentVersions.size()) {
 			// if we already added this node to queue, skip it; otherwise, mark it as visited
-			if (visited.count({ parent.first.begin.begin(), parent.second })) {
-				if (BM_DEBUG) {
-					fmt::print("Already added {0} to queue, so skipping it\n", currHistoryNode.granuleID.toString());
+			KeyRangeRef parentRange(currHistoryNode.parentBoundaries[i], currHistoryNode.parentBoundaries[i + 1]);
+			Version parentVersion = currHistoryNode.parentVersions[i];
+			std::string beginStr = parentRange.begin.toString();
+			if (!visited.insert({ beginStr, parentVersion }).second) {
+				if (BM_PURGE_DEBUG) {
+					fmt::print("BM {0}     Already added [{1} - {2}) @ {3} - {4} to queue, so skipping it\n",
+					           self->epoch,
+					           parentRange.begin.printable(),
+					           parentRange.end.printable(),
+					           parentVersion,
+					           startVersion);
 				}
 				continue;
 			}
-			visited.insert({ parent.first.begin.begin(), parent.second });
 
-			if (BM_DEBUG) {
-				fmt::print("Adding parent [{0} - {1}) with versions [{2} - {3}) to queue\n",
-				           parent.first.begin.printable(),
-				           parent.first.end.printable(),
-				           parent.second,
+			if (BM_PURGE_DEBUG) {
+				fmt::print("BM {0}     Adding parent [{1} - {2}) @ {3} - {4} to queue\n",
+				           self->epoch,
+				           parentRange.begin.printable(),
+				           parentRange.end.printable(),
+				           parentVersion,
 				           startVersion);
 			}
 
 			// the parent's end version is this node's startVersion,
 			// since this node must have started where it's parent finished
-			historyEntryQueue.push({ parent.first, parent.second, startVersion });
+			historyEntryQueue.push({ parentRange, parentVersion, startVersion });
 		}
 	}
 
@@ -3602,10 +3599,19 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 	// we won't run into any issues with trying to "re-delete" a blob file since deleting
 	// a file that doesn't exist is considered successful
 
+	TraceEvent("PurgeGranulesTraversalComplete", self->id)
+	    .detail("Epoch", self->epoch)
+	    .detail("Range", range)
+	    .detail("PurgeVersion", purgeVersion)
+	    .detail("Force", force)
+	    .detail("VisitedCount", visited.size())
+	    .detail("DeletingFullyCount", toFullyDelete.size())
+	    .detail("DeletingPartiallyCount", toPartiallyDelete.size());
+
 	state std::vector<Future<Void>> partialDeletions;
 	state int i;
-	if (BM_DEBUG) {
-		fmt::print("{0} granules to fully delete\n", toFullyDelete.size());
+	if (BM_PURGE_DEBUG) {
+		fmt::print("BM {0}: {1} granules to fully delete\n", self->epoch, toFullyDelete.size());
 	}
 	for (i = toFullyDelete.size() - 1; i >= 0; --i) {
 		state UID granuleId;
@@ -3613,22 +3619,22 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 		KeyRange keyRange;
 		std::tie(granuleId, historyKey, keyRange) = toFullyDelete[i];
 		// FIXME: consider batching into a single txn (need to take care of txn size limit)
-		if (BM_DEBUG) {
-			fmt::print("About to fully delete granule {0}\n", granuleId.toString());
+		if (BM_PURGE_DEBUG) {
+			fmt::print("BM {0}: About to fully delete granule {1}\n", self->epoch, granuleId.toString());
 		}
 		wait(fullyDeleteGranule(self, granuleId, historyKey, purgeVersion, range));
 	}
 
-	if (BM_DEBUG) {
-		fmt::print("{0} granules to partially delete\n", toPartiallyDelete.size());
+	if (BM_PURGE_DEBUG) {
+		fmt::print("BM {0}: {1} granules to partially delete\n", self->epoch, toPartiallyDelete.size());
 	}
 
 	for (i = toPartiallyDelete.size() - 1; i >= 0; --i) {
 		UID granuleId;
 		KeyRange range;
 		std::tie(granuleId, range) = toPartiallyDelete[i];
-		if (BM_DEBUG) {
-			fmt::print("About to partially delete granule {0}\n", granuleId.toString());
+		if (BM_PURGE_DEBUG) {
+			fmt::print("BM {0}: About to partially delete granule {1}\n", self->epoch, granuleId.toString());
 		}
 		partialDeletions.emplace_back(partiallyDeleteGranule(self, granuleId, purgeVersion, range));
 	}
@@ -3640,8 +3646,9 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 	// another purgeIntent that got written for this table while we were processing this one.
 	// If that is the case, we should not clear the key. Otherwise, we can just clear the key.
 
-	if (BM_DEBUG) {
-		fmt::print("Successfully purged range [{0} - {1}) at purgeVersion={2}\n",
+	if (BM_PURGE_DEBUG) {
+		fmt::print("BM {0}: Successfully purged range [{1} - {2}) at purgeVersion={3}\n",
+		           self->epoch,
 		           range.begin.printable(),
 		           range.end.printable(),
 		           purgeVersion);
@@ -3652,6 +3659,8 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 	    .detail("Range", range)
 	    .detail("PurgeVersion", purgeVersion)
 	    .detail("Force", force);
+
+	CODE_PROBE(true, "range purge complete");
 
 	++self->stats.purgesProcessed;
 	return Void();
@@ -3703,6 +3712,7 @@ ACTOR Future<Void> monitorPurgeKeys(Reference<BlobManagerData> self) {
 				// TODO: replace 10000 with a knob
 				state RangeResult purgeIntents = wait(tr->getRange(blobGranulePurgeKeys, BUGGIFY ? 1 : 10000));
 				if (purgeIntents.size()) {
+					CODE_PROBE(true, "BM found purges to process");
 					int rangeIdx = 0;
 					for (; rangeIdx < purgeIntents.size(); ++rangeIdx) {
 						Version purgeVersion;
@@ -3724,8 +3734,9 @@ ACTOR Future<Void> monitorPurgeKeys(Reference<BlobManagerData> self) {
 						}
 						purgeMap.insert(range, std::make_pair(purgeVersion, force));
 
-						if (BM_DEBUG) {
-							fmt::print("about to purge range [{0} - {1}) @ {2}, force={3}\n",
+						if (BM_PURGE_DEBUG) {
+							fmt::print("BM {0} about to purge range [{1} - {2}) @ {3}, force={4}\n",
+							           self->epoch,
 							           range.begin.printable(),
 							           range.end.printable(),
 							           purgeVersion,
@@ -3777,9 +3788,11 @@ ACTOR Future<Void> monitorPurgeKeys(Reference<BlobManagerData> self) {
 			}
 		}
 
-		if (BM_DEBUG) {
-			printf("Done clearing current set of purge intents.\n");
+		if (BM_PURGE_DEBUG) {
+			fmt::print("BM {0} Done clearing current set of purge intents.\n", self->epoch);
 		}
+
+		CODE_PROBE(true, "BM finished processing purge intents");
 	}
 }
 
@@ -3982,6 +3995,9 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 	self->addActor.send(monitorPurgeKeys(self));
 	if (SERVER_KNOBS->BG_CONSISTENCY_CHECK_ENABLED) {
 		self->addActor.send(bgConsistencyCheck(self));
+	}
+	if (SERVER_KNOBS->BG_ENABLE_MERGING) {
+		self->addActor.send(granuleMergeChecker(self));
 	}
 
 	if (BUGGIFY) {

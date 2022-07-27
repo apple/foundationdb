@@ -25,6 +25,7 @@
 #include <ostream>
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/StorageCheckpoint.h"
+#include "fdbclient/StorageServerShard.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/QueueModel.h"
 #include "fdbrpc/fdbrpc.h"
@@ -572,12 +573,13 @@ struct GetShardStateReply {
 
 	Version first;
 	Version second;
+	std::vector<StorageServerShard> shards;
 	GetShardStateReply() = default;
 	GetShardStateReply(Version first, Version second) : first(first), second(second) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, first, second);
+		serializer(ar, first, second, shards);
 	}
 };
 
@@ -587,13 +589,16 @@ struct GetShardStateRequest {
 
 	KeyRange keys;
 	int32_t mode;
+	bool includePhysicalShard;
 	ReplyPromise<GetShardStateReply> reply;
-	GetShardStateRequest() {}
-	GetShardStateRequest(KeyRange const& keys, waitMode mode) : keys(keys), mode(mode) {}
+	GetShardStateRequest() = default;
+	GetShardStateRequest(KeyRange const& keys, waitMode mode, bool includePhysicalShard)
+	  : keys(keys), mode(mode), includePhysicalShard(includePhysicalShard) {}
+	GetShardStateRequest(KeyRange const& keys, waitMode mode) : keys(keys), mode(mode), includePhysicalShard(false) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keys, mode, reply);
+		serializer(ar, keys, mode, reply, includePhysicalShard);
 	}
 };
 
@@ -605,7 +610,6 @@ struct StorageMetrics {
 	int64_t bytesPerKSecond = 0; // network bandwidth (average over 10s)
 	int64_t iosPerKSecond = 0;
 	int64_t bytesReadPerKSecond = 0;
-	Optional<KeyRange> keys; // this metric belongs to which range
 
 	static const int64_t infinity = 1LL << 60;
 
@@ -966,39 +970,51 @@ struct FetchCheckpointKeyValuesRequest {
 };
 
 struct OverlappingChangeFeedEntry {
-	Key rangeId;
-	KeyRange range;
+	KeyRef feedId;
+	KeyRangeRef range;
 	Version emptyVersion;
 	Version stopVersion;
+	Version feedMetadataVersion;
 
 	bool operator==(const OverlappingChangeFeedEntry& r) const {
-		return rangeId == r.rangeId && range == r.range && emptyVersion == r.emptyVersion &&
-		       stopVersion == r.stopVersion;
+		return feedId == r.feedId && range == r.range && emptyVersion == r.emptyVersion &&
+		       stopVersion == r.stopVersion && feedMetadataVersion == r.feedMetadataVersion;
 	}
 
 	OverlappingChangeFeedEntry() {}
-	OverlappingChangeFeedEntry(Key const& rangeId, KeyRange const& range, Version emptyVersion, Version stopVersion)
-	  : rangeId(rangeId), range(range), emptyVersion(emptyVersion), stopVersion(stopVersion) {}
+	OverlappingChangeFeedEntry(KeyRef const& feedId,
+	                           KeyRangeRef const& range,
+	                           Version emptyVersion,
+	                           Version stopVersion,
+	                           Version feedMetadataVersion)
+	  : feedId(feedId), range(range), emptyVersion(emptyVersion), stopVersion(stopVersion),
+	    feedMetadataVersion(feedMetadataVersion) {}
+
+	OverlappingChangeFeedEntry(Arena& arena, const OverlappingChangeFeedEntry& rhs)
+	  : feedId(arena, rhs.feedId), range(arena, rhs.range), emptyVersion(rhs.emptyVersion),
+	    stopVersion(rhs.stopVersion), feedMetadataVersion(rhs.feedMetadataVersion) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, rangeId, range, emptyVersion, stopVersion);
+		serializer(ar, feedId, range, emptyVersion, stopVersion, feedMetadataVersion);
 	}
 };
 
 struct OverlappingChangeFeedsReply {
 	constexpr static FileIdentifier file_identifier = 11815134;
-	std::vector<OverlappingChangeFeedEntry> rangeIds;
+	VectorRef<OverlappingChangeFeedEntry> feeds;
 	bool cached;
 	Arena arena;
+	Version feedMetadataVersion;
 
-	OverlappingChangeFeedsReply() : cached(false) {}
-	explicit OverlappingChangeFeedsReply(std::vector<OverlappingChangeFeedEntry> const& rangeIds)
-	  : rangeIds(rangeIds), cached(false) {}
+	OverlappingChangeFeedsReply() : cached(false), feedMetadataVersion(invalidVersion) {}
+	explicit OverlappingChangeFeedsReply(VectorRef<OverlappingChangeFeedEntry> const& feeds,
+	                                     Version feedMetadataVersion)
+	  : feeds(feeds), cached(false), feedMetadataVersion(feedMetadataVersion) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, rangeIds, arena);
+		serializer(ar, feeds, arena, feedMetadataVersion);
 	}
 };
 

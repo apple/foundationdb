@@ -475,18 +475,21 @@ const Value serverKeysValue(const UID& id) {
 
 void decodeServerKeysValue(const ValueRef& value, bool& assigned, bool& emptyRange, UID& id) {
 	if (value.size() == 0) {
-		id = UID();
 		assigned = false;
 		emptyRange = false;
+		id = UID();
 	} else if (value == serverKeysTrue) {
 		assigned = true;
 		emptyRange = false;
+		id = anonymousShardId;
 	} else if (value == serverKeysTrueEmptyRange) {
 		assigned = true;
 		emptyRange = true;
+		id = anonymousShardId;
 	} else if (value == serverKeysFalse) {
 		assigned = false;
 		emptyRange = false;
+		id = UID();
 	} else {
 		BinaryReader rd(value, IncludeVersion());
 		ASSERT(rd.protocolVersion().hasShardEncodeLocationMetaData());
@@ -1524,9 +1527,9 @@ std::pair<BlobGranuleSplitState, Version> decodeBlobGranuleSplitValue(const Valu
 
 const Value blobGranuleMergeValueFor(KeyRange mergeKeyRange,
                                      std::vector<UID> parentGranuleIDs,
-                                     std::vector<KeyRange> parentGranuleRanges,
+                                     std::vector<Key> parentGranuleRanges,
                                      std::vector<Version> parentGranuleStartVersions) {
-	ASSERT(parentGranuleIDs.size() == parentGranuleRanges.size());
+	ASSERT(parentGranuleIDs.size() == parentGranuleRanges.size() - 1);
 	ASSERT(parentGranuleIDs.size() == parentGranuleStartVersions.size());
 
 	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBlobGranule()));
@@ -1536,12 +1539,12 @@ const Value blobGranuleMergeValueFor(KeyRange mergeKeyRange,
 	wr << parentGranuleStartVersions;
 	return addVersionStampAtEnd(wr.toValue());
 }
-std::tuple<KeyRange, Version, std::vector<UID>, std::vector<KeyRange>, std::vector<Version>>
-decodeBlobGranuleMergeValue(ValueRef const& value) {
+std::tuple<KeyRange, Version, std::vector<UID>, std::vector<Key>, std::vector<Version>> decodeBlobGranuleMergeValue(
+    ValueRef const& value) {
 	KeyRange range;
 	Version v;
 	std::vector<UID> parentGranuleIDs;
-	std::vector<KeyRange> parentGranuleRanges;
+	std::vector<Key> parentGranuleRanges;
 	std::vector<Version> parentGranuleStartVersions;
 
 	BinaryReader reader(value, IncludeVersion());
@@ -1551,7 +1554,7 @@ decodeBlobGranuleMergeValue(ValueRef const& value) {
 	reader >> parentGranuleStartVersions;
 	reader >> v;
 
-	ASSERT(parentGranuleIDs.size() == parentGranuleRanges.size());
+	ASSERT(parentGranuleIDs.size() == parentGranuleRanges.size() - 1);
 	ASSERT(parentGranuleIDs.size() == parentGranuleStartVersions.size());
 	ASSERT(bigEndian64(v) >= 0);
 
@@ -1581,6 +1584,8 @@ const KeyRange blobGranuleHistoryKeyRangeFor(KeyRangeRef const& range) {
 }
 
 const Value blobGranuleHistoryValueFor(Standalone<BlobGranuleHistoryValue> const& historyValue) {
+	ASSERT(historyValue.parentVersions.empty() ||
+	       historyValue.parentBoundaries.size() - 1 == historyValue.parentVersions.size());
 	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBlobGranule()));
 	wr << historyValue;
 	return wr.toValue();
@@ -1590,6 +1595,8 @@ Standalone<BlobGranuleHistoryValue> decodeBlobGranuleHistoryValue(const ValueRef
 	Standalone<BlobGranuleHistoryValue> historyValue;
 	BinaryReader reader(value, IncludeVersion());
 	reader >> historyValue;
+	ASSERT(historyValue.parentVersions.empty() ||
+	       historyValue.parentBoundaries.size() - 1 == historyValue.parentVersions.size());
 	return historyValue;
 }
 
@@ -1619,12 +1626,6 @@ BlobWorkerInterface decodeBlobWorkerListValue(ValueRef const& value) {
 	reader.deserialize(interf);
 	return interf;
 }
-
-const KeyRangeRef tenantMapKeys("\xff/tenantMap/"_sr, "\xff/tenantMap0"_sr);
-const KeyRef tenantMapPrefix = tenantMapKeys.begin;
-const KeyRef tenantMapPrivatePrefix = "\xff\xff/tenantMap/"_sr;
-const KeyRef tenantLastIdKey = "\xff/tenantLastId/"_sr;
-const KeyRef tenantDataPrefixKey = "\xff/tenantDataPrefix"_sr;
 
 const KeyRangeRef storageQuotaKeys(LiteralStringRef("\xff/storageQuota/"), LiteralStringRef("\xff/storageQuota0"));
 const KeyRef storageQuotaPrefix = storageQuotaKeys.begin;

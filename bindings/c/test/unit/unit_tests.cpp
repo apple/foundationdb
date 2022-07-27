@@ -941,13 +941,13 @@ static Value dataOfRecord(const int i) {
 	return Value(format("data-of-record-%08d", i));
 }
 static std::string indexEntryKey(const int i) {
-	return Tuple().append(StringRef(prefix)).append(INDEX).append(indexKey(i)).append(primaryKey(i)).pack().toString();
+	return Tuple::makeTuple(prefix, INDEX, indexKey(i), primaryKey(i)).pack().toString();
 }
 static std::string recordKey(const int i, const int split) {
-	return Tuple().append(prefix).append(RECORD).append(primaryKey(i)).append(split).pack().toString();
+	return Tuple::makeTuple(prefix, RECORD, primaryKey(i), split).pack().toString();
 }
 static std::string recordValue(const int i, const int split) {
-	return Tuple().append(dataOfRecord(i)).append(split).pack().toString();
+	return Tuple::makeTuple(dataOfRecord(i), split).pack().toString();
 }
 
 const static int SPLIT_SIZE = 3;
@@ -993,13 +993,8 @@ GetMappedRangeResult getMappedIndexEntries(int beginId,
                                            fdb::Transaction& tr,
                                            int matchIndex,
                                            bool allMissing) {
-	std::string mapper = Tuple()
-	                         .append(prefix)
-	                         .append(RECORD)
-	                         .append(allMissing ? "{K[2]}"_sr : "{K[3]}"_sr)
-	                         .append("{...}"_sr)
-	                         .pack()
-	                         .toString();
+	std::string mapper =
+	    Tuple::makeTuple(prefix, RECORD, (allMissing ? "{K[2]}"_sr : "{K[3]}"_sr), "{...}"_sr).pack().toString();
 	return getMappedIndexEntries(beginId, endId, tr, mapper, matchIndex);
 }
 
@@ -1037,7 +1032,7 @@ TEST_CASE("tuple_support_versionstamp") {
 	// a random 12 bytes long StringRef as a versionstamp
 	StringRef str = "\x01\x02\x03\x04\x05\x06\x07\x08\x09\x10\x11\x12"_sr;
 	Versionstamp vs(str);
-	const Tuple t = Tuple().append(prefix).append(RECORD).appendVersionstamp(vs).append("{K[3]}"_sr).append("{...}"_sr);
+	const Tuple t = Tuple::makeTuple(prefix, RECORD, vs, "{K[3]}"_sr, "{...}"_sr);
 	ASSERT(t.getVersionstamp(2) == vs);
 
 	// verify the round-way pack-unpack path for a Tuple containing a versionstamp
@@ -1181,7 +1176,7 @@ TEST_CASE("fdb_transaction_get_mapped_range_missing_all_secondary") {
 }
 
 TEST_CASE("fdb_transaction_get_mapped_range_restricted_to_serializable") {
-	std::string mapper = Tuple().append(prefix).append(RECORD).append("{K[3]}"_sr).pack().toString();
+	std::string mapper = Tuple::makeTuple(prefix, RECORD, "{K[3]}"_sr).pack().toString();
 	fdb::Transaction tr(db);
 	auto result = get_mapped_range(
 	    tr,
@@ -1200,7 +1195,7 @@ TEST_CASE("fdb_transaction_get_mapped_range_restricted_to_serializable") {
 }
 
 TEST_CASE("fdb_transaction_get_mapped_range_restricted_to_ryw_enable") {
-	std::string mapper = Tuple().append(prefix).append(RECORD).append("{K[3]}"_sr).pack().toString();
+	std::string mapper = Tuple::makeTuple(prefix, RECORD, "{K[3]}"_sr).pack().toString();
 	fdb::Transaction tr(db);
 	fdb_check(tr.set_option(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE, nullptr, 0)); // Not disable RYW
 	auto result = get_mapped_range(

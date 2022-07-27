@@ -1592,7 +1592,7 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 	state ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
 	state Span span("MP:reply"_loc, self->span.context);
 
-	const Optional<UID>& debugID = self->debugID;
+	state const Optional<UID>& debugID = self->debugID;
 
 	if (self->prevVersion && self->commitVersion - self->prevVersion < SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT / 2) {
 		//TraceEvent("CPAdvanceMinVersion", self->pProxyCommitData->dbgid).detail("PrvVersion", self->prevVersion).detail("CommitVersion", self->commitVersion).detail("Master", self->pProxyCommitData->master.id().toString()).detail("TxSize", self->trs.size());
@@ -1634,6 +1634,12 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 		                                     writtenTags),
 		    TaskPriority::ProxyMasterVersionReply));
 	}
+
+	if (debugID.present()) {
+		g_traceBatch.addEvent(
+		    "CommitDebug", debugID.get().first(), "CommitProxyServer.commitBatch.AfterReportRawCommittedVersion");
+	}
+
 	if (self->commitVersion > pProxyCommitData->committedVersion.get()) {
 		pProxyCommitData->locked = self->lockedAfter;
 		pProxyCommitData->metadataVersion = self->metadataVersionAfter;

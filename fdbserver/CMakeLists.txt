@@ -23,13 +23,6 @@ file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/workloads)
 
 add_flow_target(EXECUTABLE NAME fdbserver SRCS ${FDBSERVER_SRCS})
 
-find_package(ZLIB)
-if(ZLIB_FOUND)
-  add_compile_definitions(ZLIB_LIB_SUPPORTED)
-else()
-  message(STATUS "ZLIB package not found")
-endif()
-
 target_include_directories(fdbserver PRIVATE
   ${CMAKE_SOURCE_DIR}/bindings/c
   ${CMAKE_BINARY_DIR}/bindings/c

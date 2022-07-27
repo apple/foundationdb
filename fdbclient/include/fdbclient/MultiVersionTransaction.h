@@ -650,8 +650,6 @@ private:
 	void setDefaultOptions(UniqueOrderedOptionList<FDBTransactionOptions> options);
 
 	std::vector<std::pair<FDBTransactionOptions::Option, Optional<Standalone<StringRef>>>> persistentOptions;
-
-	const Optional<TenantName> tenantName;
 };
 
 struct ClientDesc {

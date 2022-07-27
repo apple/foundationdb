@@ -294,8 +294,8 @@ Future<Void> bulkSetup(Database cx,
 	// Here we wait for data in flight to go to 0 (this will not work on a database with other users)
 	if (postSetupWarming != 0) {
 		try {
-			wait(delay(5.0) >>
-			     waitForLowInFlight(cx, workload)); // Wait for the data distribution in a small test to start
+			wait(delay(5.0));
+			wait(waitForLowInFlight(cx, workload)); // Wait for the data distribution in a small test to start
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled)
 				throw;

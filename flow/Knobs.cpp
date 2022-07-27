@@ -168,6 +168,13 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( LOW_PRIORITY_DELAY_COUNT,                              5 );
 	init( LOW_PRIORITY_MAX_DELAY,                              5.0 );
 
+	// HTTP
+	init( HTTP_READ_SIZE,                                 128*1024 );
+	init( HTTP_SEND_SIZE,                                  32*1024 );
+	init( HTTP_VERBOSE_LEVEL,                                    0 );
+	init( HTTP_REQUEST_ID_HEADER,                               "" );
+	init( HTTP_RESPONSE_SKIP_VERIFY_CHECKSUM_FOR_PARTIAL_CONTENT, false );
+
 	//IAsyncFile
 	init( INCREMENTAL_DELETE_TRUNCATE_AMOUNT,                  5e8 ); //500MB
 	init( INCREMENTAL_DELETE_INTERVAL,                         1.0 ); //every 1 second

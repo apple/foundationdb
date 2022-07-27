@@ -236,4 +236,9 @@ Future<Void> coordinationServer(std::string const& dataFolder,
                                 Reference<ConfigNode> const&,
                                 ConfigBroadcastInterface const&);
 
+// Read a value of MovableValue and if old cluster key presents in it, update to the new key
+Optional<Value> updateCCSInMovableValue(ValueRef movableVal, KeyRef oldClusterKey, KeyRef newClusterKey);
+
+Future<Void> coordChangeClusterKey(std::string dataFolder, KeyRef newClusterKey, KeyRef oldClusterKey);
+
 #endif
