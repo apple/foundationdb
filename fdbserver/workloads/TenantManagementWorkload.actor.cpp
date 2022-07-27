@@ -212,7 +212,6 @@ struct TenantManagementWorkload : TestWorkload {
 			} else {
 				entry.encrypted = deterministicRandom()->coinflip();
 			}
-			tenantsToCreate[tenant] = entry;
 
 			if (self->createdTenants.count(tenant)) {
 				alreadyExists = true;
