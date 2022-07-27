@@ -1642,16 +1642,6 @@ TEST_CASE("/blobgranule/files/deltaAtVersion") {
 	return Void();
 }
 
-// picks a number between 2^minExp and 2^maxExp, but uniformly distributed over exponential buckets 2^n an 2^n+1
-int randomExp(int minExp, int maxExp) {
-	if (minExp == maxExp) { // N=2, case
-		return 1 << minExp;
-	}
-	int val = 1 << deterministicRandom()->randomInt(minExp, maxExp);
-	ASSERT(val > 0);
-	return deterministicRandom()->randomInt(val, val * 2);
-}
-
 void checkSnapshotEmpty(const Value& serialized, Key begin, Key end, Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx) {
 	std::map<KeyRef, ValueRef> result;
 	Arena ar = loadSnapshotFile(serialized, KeyRangeRef(begin, end), result, cipherKeysCtx);
@@ -1725,7 +1715,7 @@ struct KeyValueGen {
 		int sharedPrefixLen = deterministicRandom()->randomInt(0, uidSize);
 		targetKeyLength = deterministicRandom()->randomInt(4, uidSize);
 		sharedPrefix = sharedPrefix.substr(0, sharedPrefixLen) + "_";
-		targetValueLength = randomExp(0, 12);
+		targetValueLength = deterministicRandom()->randomExp(0, 12);
 		allRange = KeyRangeRef(StringRef(sharedPrefix), LiteralStringRef("\xff"));
 
 		if (deterministicRandom()->coinflip()) {
@@ -1748,13 +1738,13 @@ struct KeyValueGen {
 			minVersionIncrease = 1;
 			maxVersionIncrease = 2;
 		} else {
-			minVersionIncrease = randomExp(0, 25);
-			maxVersionIncrease = minVersionIncrease + randomExp(0, 25);
+			minVersionIncrease = deterministicRandom()->randomExp(0, 25);
+			maxVersionIncrease = minVersionIncrease + deterministicRandom()->randomExp(0, 25);
 		}
 		if (deterministicRandom()->coinflip()) {
 			targetMutationsPerDelta = 1;
 		} else {
-			targetMutationsPerDelta = randomExp(1, 5);
+			targetMutationsPerDelta = deterministicRandom()->randomExp(1, 5);
 		}
 
 		if (deterministicRandom()->coinflip()) {
@@ -1918,8 +1908,8 @@ TEST_CASE("/blobgranule/files/snapshotFormatUnitTest") {
 	// snapshot files are likely to have a non-trivial shared prefix since they're for a small contiguous key range
 	KeyValueGen kvGen;
 
-	int targetChunks = randomExp(0, 9);
-	int targetDataBytes = randomExp(0, 25);
+	int targetChunks = deterministicRandom()->randomExp(0, 9);
+	int targetDataBytes = deterministicRandom()->randomExp(0, 25);
 	int targetChunkSize = targetDataBytes / targetChunks;
 
 	Standalone<GranuleSnapshot> data = genSnapshot(kvGen, targetDataBytes);
@@ -1954,7 +1944,7 @@ TEST_CASE("/blobgranule/files/snapshotFormatUnitTest") {
 
 	if (data.size() > 1) {
 		for (int i = 0; i < std::min(100, data.size() * 2); i++) {
-			int width = randomExp(0, maxExp);
+			int width = deterministicRandom()->randomExp(0, maxExp);
 			ASSERT(width <= data.size());
 			int start = deterministicRandom()->randomInt(0, data.size() - width);
 			checkSnapshotRead(data, serialized, start, start + width, kvGen.cipherKeys);
@@ -2056,8 +2046,8 @@ Standalone<GranuleDeltas> genDeltas(KeyValueGen& kvGen, int targetBytes) {
 TEST_CASE("/blobgranule/files/deltaFormatUnitTest") {
 	KeyValueGen kvGen;
 
-	int targetChunks = randomExp(0, 8);
-	int targetDataBytes = randomExp(0, 21);
+	int targetChunks = deterministicRandom()->randomExp(0, 8);
+	int targetDataBytes = deterministicRandom()->randomExp(0, 21);
 
 	int targetChunkSize = targetDataBytes / targetChunks;
 
@@ -2161,9 +2151,9 @@ void checkGranuleRead(const KeyValueGen& kvGen,
 TEST_CASE("/blobgranule/files/granuleReadUnitTest") {
 	KeyValueGen kvGen;
 
-	int targetSnapshotChunks = randomExp(0, 9);
-	int targetDeltaChunks = randomExp(0, 8);
-	int targetDataBytes = randomExp(12, 25);
+	int targetSnapshotChunks = deterministicRandom()->randomExp(0, 9);
+	int targetDeltaChunks = deterministicRandom()->randomExp(0, 8);
+	int targetDataBytes = deterministicRandom()->randomExp(12, 25);
 	int targetSnapshotBytes = (int)(deterministicRandom()->randomInt(0, targetDataBytes));
 	int targetDeltaBytes = targetDataBytes - targetSnapshotBytes;
 
