@@ -80,7 +80,6 @@ struct DataDistributionTracker {
 	Future<Void> maxShardSizeUpdater;
 
 	// CapacityTracker
-	PromiseStream<RelocateShard> output;
 	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
 
 	Reference<AsyncVar<bool>> anyZeroHealthyTeams;
@@ -326,7 +325,7 @@ ACTOR Future<Void> trackShardMetrics(DataDistributionTracker::SafeAccessor self,
 		}
 	} catch (Error& e) {
 		if (e.code() != error_code_actor_cancelled && e.code() != error_code_dd_tracker_cancelled) {
-			self()->output.sendError(e); // Propagate failure to dataDistributionTracker
+			self()->queueInterface->relocationProducer.sendError(e); // Propagate failure to dataDistributionTracker
 		}
 		throw e;
 	}
@@ -357,7 +356,7 @@ ACTOR Future<Void> readHotDetector(DataDistributionTracker* self) {
 		}
 	} catch (Error& e) {
 		if (e.code() != error_code_actor_cancelled)
-			self->output.sendError(e); // Propagate failure to dataDistributionTracker
+			self->queueInterface->relocationProducer.sendError(e); // Propagate failure to dataDistributionTracker
 		throw e;
 	}
 }
@@ -527,12 +526,14 @@ ACTOR Future<Void> shardSplitter(DataDistributionTracker* self,
 		for (int i = 0; i < skipRange; i++) {
 			KeyRangeRef r(splitKeys[i], splitKeys[i + 1]);
 			self->shardsAffectedByTeamFailure->defineShard(r);
-			self->output.send(RelocateShard(r, DataMovementReason::SPLIT_SHARD, RelocateReason::OTHER));
+			self->queueInterface->relocationProducer.send(
+			    RelocateShard(r, DataMovementReason::SPLIT_SHARD, RelocateReason::OTHER));
 		}
 		for (int i = numShards - 1; i > skipRange; i--) {
 			KeyRangeRef r(splitKeys[i], splitKeys[i + 1]);
 			self->shardsAffectedByTeamFailure->defineShard(r);
-			self->output.send(RelocateShard(r, DataMovementReason::SPLIT_SHARD, RelocateReason::OTHER));
+			self->queueInterface->relocationProducer.send(
+			    RelocateShard(r, DataMovementReason::SPLIT_SHARD, RelocateReason::OTHER));
 		}
 
 		self->sizeChanges.add(changeSizes(self, keys, shardSize->get().get().metrics.bytes));
@@ -678,7 +679,8 @@ Future<Void> shardMerger(DataDistributionTracker* self,
 	}
 	restartShardTrackers(self, mergeRange, ShardMetrics(endingStats, lastLowBandwidthStartTime, shardCount));
 	self->shardsAffectedByTeamFailure->defineShard(mergeRange);
-	self->output.send(RelocateShard(mergeRange, DataMovementReason::MERGE_SHARD, RelocateReason::OTHER));
+	self->queueInterface->relocationProducer.send(
+	    RelocateShard(mergeRange, DataMovementReason::MERGE_SHARD, RelocateReason::OTHER));
 
 	// We are about to be cancelled by the call to restartShardTrackers
 	return Void();
@@ -741,9 +743,7 @@ ACTOR Future<Void> shardEvaluator(DataDistributionTracker* self,
 ACTOR Future<Void> shardTracker(DataDistributionTracker::SafeAccessor self,
                                 KeyRange keys,
                                 Reference<AsyncVar<Optional<ShardMetrics>>> shardSize) {
-	while (!self()->trackerInterface->readyToStart->get()) {
-		wait(yieldedFuture(self()->trackerInterface->readyToStart->onChange()));
-	}
+	wait(yieldedFuture(self()->trackerInterface->readyToStart.getFuture()));
 
 	if (!shardSize->get().present())
 		wait(shardSize->onChange());
@@ -776,7 +776,7 @@ ACTOR Future<Void> shardTracker(DataDistributionTracker::SafeAccessor self,
 		}
 	} catch (Error& e) {
 		if (e.code() != error_code_actor_cancelled && e.code() != error_code_dd_tracker_cancelled) {
-			self()->output.sendError(e); // Propagate failure to dataDistributionTracker
+			self()->queueInterface->relocationProducer.sendError(e); // Propagate failure to dataDistributionTracker
 		}
 		throw e;
 	}
@@ -788,7 +788,7 @@ void restartShardTrackers(DataDistributionTracker* self, KeyRangeRef keys, Optio
 		if (!ranges[i].value.trackShard.isValid() && ranges[i].begin != keys.begin) {
 			// When starting, key space will be full of "dummy" default contructed entries.
 			// This should happen when called from trackInitialShards()
-			ASSERT(!self->trackerInterface->readyToStart->get());
+			ASSERT(!self->trackerInterface->readyToStart.isSet());
 			continue;
 		}
 
@@ -828,7 +828,7 @@ ACTOR Future<Void> trackInitialShards(DataDistributionTracker* self, Reference<I
 	}
 
 	Future<Void> initialSize = changeSizes(self, KeyRangeRef(allKeys.begin, allKeys.end), 0);
-	self->trackerInterface->readyToStart->set(true);
+	self->trackerInterface->readyToStart.send(Void());
 	wait(initialSize);
 	self->maxShardSizeUpdater = updateMaxShardSize(self->dbSizeEstimate, self->maxShardSize);
 
@@ -995,9 +995,7 @@ ACTOR Future<Void> fetchShardMetricsList_impl(DataDistributionTracker* self, Get
 ACTOR Future<Void> fetchShardMetricsList(DataDistributionTracker* self, GetMetricsListRequest req) {
 	choose {
 		when(wait(fetchShardMetricsList_impl(self, req))) {}
-		when(wait(delay(SERVER_KNOBS->DD_SHARD_METRICS_TIMEOUT))) {
-			req.reply.sendError(timed_out());
-		}
+		when(wait(delay(SERVER_KNOBS->DD_SHARD_METRICS_TIMEOUT))) { req.reply.sendError(timed_out()); }
 	}
 	return Void();
 }

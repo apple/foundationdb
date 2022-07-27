@@ -575,7 +575,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self, const DDEna
 
 			self->queueInterface->processingUnhealthy = makeReference<AsyncVar<bool>>(false);
 			self->queueInterface->processingWiggle = makeReference<AsyncVar<bool>>(false);
-			self->trackerInterface->readyToStart = makeReference<AsyncVar<bool>>(false);
+			self->trackerInterface->readyToStart = Promise<Void>();
 
 			self->shardsAffectedByTeamFailure = makeReference<ShardsAffectedByTeamFailure>();
 			wait(self->resumeRelocations());
@@ -641,7 +641,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self, const DDEna
 			    self->configuration,
 			    self->primaryDcId,
 			    self->configuration.usableRegions > 1 ? self->remoteDcIds : std::vector<Optional<Key>>(),
-			    self->trackerInterface->readyToStart->onChange(),
+			    self->trackerInterface->readyToStart.getFuture(),
 			    zeroHealthyTeams[0],
 			    IsPrimary::True,
 			    self->queueInterface->processingUnhealthy,
@@ -662,7 +662,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self, const DDEna
 				    self->configuration,
 				    self->remoteDcIds,
 				    Optional<std::vector<Optional<Key>>>(),
-				    self->trackerInterface->readyToStart->onChange() && remoteRecovered(self->dbInfo),
+				    self->trackerInterface->readyToStart.getFuture() && remoteRecovered(self->dbInfo),
 				    zeroHealthyTeams[1],
 				    IsPrimary::False,
 				    self->queueInterface->processingUnhealthy,

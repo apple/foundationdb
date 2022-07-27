@@ -293,7 +293,7 @@ struct TeamCollectionInterface {
 
 // send request to DDTracker through interface
 struct DDTrackerInterface {
-	Reference<AsyncVar<bool>> readyToStart;
+	Promise<Void> readyToStart;
 
 	PromiseStream<GetMetricsRequest> getShardMetrics;
 	PromiseStream<KeyRange> restartShardTracker;
