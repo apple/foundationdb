@@ -436,7 +436,7 @@ if (OPEN_FOR_IDE)
     $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/foundationdb>)
 
   add_library(fdb_c_shim_lib_tester OBJECT test/shim_lib_tester.cpp)
-  target_link_libraries(fdb_c_shim_lib_tester PRIVATE fdb_c_shim SimpleOpt fdb_cpp dl)
+  target_link_libraries(fdb_c_shim_lib_tester PRIVATE fdb_c_shim SimpleOpt fdb_cpp Threads::Threads)
   target_include_directories(fdb_c_shim_lib_tester PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/ ${CMAKE_SOURCE_DIR}/flow/include)
 
 elseif(NOT WIN32 AND NOT APPLE AND NOT USE_UBSAN) # Linux Only, non-ubsan only
@@ -469,7 +469,7 @@ elseif(NOT WIN32 AND NOT APPLE AND NOT USE_UBSAN) # Linux Only, non-ubsan only
   target_link_libraries(fdb_c_shim_api_tester PRIVATE fdb_c_shim fdb_c_api_tester_impl)
 
   add_executable(fdb_c_shim_lib_tester test/shim_lib_tester.cpp)
-  target_link_libraries(fdb_c_shim_lib_tester PRIVATE fdb_c_shim SimpleOpt fdb_cpp dl)
+  target_link_libraries(fdb_c_shim_lib_tester PRIVATE fdb_c_shim SimpleOpt fdb_cpp Threads::Threads)
   target_include_directories(fdb_c_shim_lib_tester PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/ ${CMAKE_SOURCE_DIR}/flow/include)
 
   add_test(NAME fdb_c_shim_library_tests
