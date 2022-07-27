@@ -33,8 +33,8 @@ class TenantCacheImpl {
 
 		KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>> tenantList =
 		    wait(TenantMetadata::tenantMap.getRange(
-		        tr, Optional<TenantName>(), Optional<TenantName>(), CLIENT_KNOBS->TOO_MANY));
-		ASSERT(!tenantList.more && tenantList.results.size() < CLIENT_KNOBS->TOO_MANY);
+		        tr, Optional<TenantName>(), Optional<TenantName>(), CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1));
+		ASSERT(tenantList.results.size() <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER && !tenantList.more);
 
 		return tenantList.results;
 	}

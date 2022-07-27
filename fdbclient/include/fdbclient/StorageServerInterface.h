@@ -968,39 +968,51 @@ struct FetchCheckpointKeyValuesRequest {
 };
 
 struct OverlappingChangeFeedEntry {
-	Key rangeId;
-	KeyRange range;
+	KeyRef feedId;
+	KeyRangeRef range;
 	Version emptyVersion;
 	Version stopVersion;
+	Version feedMetadataVersion;
 
 	bool operator==(const OverlappingChangeFeedEntry& r) const {
-		return rangeId == r.rangeId && range == r.range && emptyVersion == r.emptyVersion &&
-		       stopVersion == r.stopVersion;
+		return feedId == r.feedId && range == r.range && emptyVersion == r.emptyVersion &&
+		       stopVersion == r.stopVersion && feedMetadataVersion == r.feedMetadataVersion;
 	}
 
 	OverlappingChangeFeedEntry() {}
-	OverlappingChangeFeedEntry(Key const& rangeId, KeyRange const& range, Version emptyVersion, Version stopVersion)
-	  : rangeId(rangeId), range(range), emptyVersion(emptyVersion), stopVersion(stopVersion) {}
+	OverlappingChangeFeedEntry(KeyRef const& feedId,
+	                           KeyRangeRef const& range,
+	                           Version emptyVersion,
+	                           Version stopVersion,
+	                           Version feedMetadataVersion)
+	  : feedId(feedId), range(range), emptyVersion(emptyVersion), stopVersion(stopVersion),
+	    feedMetadataVersion(feedMetadataVersion) {}
+
+	OverlappingChangeFeedEntry(Arena& arena, const OverlappingChangeFeedEntry& rhs)
+	  : feedId(arena, rhs.feedId), range(arena, rhs.range), emptyVersion(rhs.emptyVersion),
+	    stopVersion(rhs.stopVersion), feedMetadataVersion(rhs.feedMetadataVersion) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, rangeId, range, emptyVersion, stopVersion);
+		serializer(ar, feedId, range, emptyVersion, stopVersion, feedMetadataVersion);
 	}
 };
 
 struct OverlappingChangeFeedsReply {
 	constexpr static FileIdentifier file_identifier = 11815134;
-	std::vector<OverlappingChangeFeedEntry> rangeIds;
+	VectorRef<OverlappingChangeFeedEntry> feeds;
 	bool cached;
 	Arena arena;
+	Version feedMetadataVersion;
 
-	OverlappingChangeFeedsReply() : cached(false) {}
-	explicit OverlappingChangeFeedsReply(std::vector<OverlappingChangeFeedEntry> const& rangeIds)
-	  : rangeIds(rangeIds), cached(false) {}
+	OverlappingChangeFeedsReply() : cached(false), feedMetadataVersion(invalidVersion) {}
+	explicit OverlappingChangeFeedsReply(VectorRef<OverlappingChangeFeedEntry> const& feeds,
+	                                     Version feedMetadataVersion)
+	  : feeds(feeds), cached(false), feedMetadataVersion(feedMetadataVersion) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, rangeIds, arena);
+		serializer(ar, feeds, arena, feedMetadataVersion);
 	}
 };
 

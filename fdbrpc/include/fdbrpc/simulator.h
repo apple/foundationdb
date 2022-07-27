@@ -24,6 +24,7 @@
 #include <algorithm>
 #include <string>
 #include <random>
+#include <limits>
 
 #include "flow/flow.h"
 #include "flow/Histogram.h"
@@ -472,6 +473,8 @@ public:
 	bool setDiffProtocol; // true if a process with a different protocol version has been started
 
 	bool allowStorageMigrationTypeChange = false;
+	double injectTargetedSSRestartTime = std::numeric_limits<double>::max();
+	double injectSSDelayTime = std::numeric_limits<double>::max();
 
 	std::unordered_map<Standalone<StringRef>, PrivateKey> authKeys;
 

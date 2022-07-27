@@ -1627,11 +1627,6 @@ BlobWorkerInterface decodeBlobWorkerListValue(ValueRef const& value) {
 	return interf;
 }
 
-const KeyRangeRef tenantMapKeys("\xff/tenant/map/"_sr, "\xff/tenant/map0"_sr);
-const KeyRef tenantMapPrefix = tenantMapKeys.begin;
-const KeyRef tenantMapPrivatePrefix = "\xff\xff/tenant/map/"_sr;
-const KeyRef tenantLastIdKey = "\xff/tenant/lastId"_sr;
-
 const KeyRangeRef storageQuotaKeys(LiteralStringRef("\xff/storageQuota/"), LiteralStringRef("\xff/storageQuota0"));
 const KeyRef storageQuotaPrefix = storageQuotaKeys.begin;
 

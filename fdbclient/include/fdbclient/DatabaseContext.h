@@ -207,6 +207,16 @@ struct KeyRangeLocationInfo {
 	  : tenantEntry(tenantEntry), range(range), locations(locations) {}
 };
 
+struct OverlappingChangeFeedsInfo {
+	Arena arena;
+	VectorRef<OverlappingChangeFeedEntry> feeds;
+	// would prefer to use key range map but it complicates copy/move constructors
+	std::vector<std::pair<KeyRangeRef, Version>> feedMetadataVersions;
+
+	// for a feed that wasn't present, returns the metadata version it would have been fetched at.
+	Version getFeedMetadataVersion(const KeyRangeRef& feedRange) const;
+};
+
 class DatabaseContext : public ReferenceCounted<DatabaseContext>, public FastAllocated<DatabaseContext>, NonCopyable {
 public:
 	static DatabaseContext* allocateOnForeignThread() {
@@ -361,7 +371,7 @@ public:
 	                                 int replyBufferSize = -1,
 	                                 bool canReadPopped = true);
 
-	Future<std::vector<OverlappingChangeFeedEntry>> getOverlappingChangeFeeds(KeyRangeRef ranges, Version minVersion);
+	Future<OverlappingChangeFeedsInfo> getOverlappingChangeFeeds(KeyRangeRef ranges, Version minVersion);
 	Future<Void> popChangeFeedMutations(Key rangeID, Version version);
 
 	Future<Key> purgeBlobGranules(KeyRange keyRange,
