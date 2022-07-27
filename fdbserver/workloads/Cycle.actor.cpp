@@ -73,7 +73,8 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 			auto currentTime = uint64_t(lround(g_network->timer()));
 			this->token.algorithm = authz::Algorithm::ES256;
 			this->token.issuedAtUnixTime = currentTime;
-			this->token.expiresAtUnixTime = currentTime + uint64_t(std::lround(getCheckTimeout())) + uint64_t(100);
+			this->token.expiresAtUnixTime =
+			    currentTime + uint64_t(std::lround(getCheckTimeout())) + uint64_t(std::lround(testDuration)) + 100;
 			this->token.keyId = k->first;
 			this->token.notBeforeUnixTime = currentTime - 10;
 			VectorRef<StringRef> tenants;
