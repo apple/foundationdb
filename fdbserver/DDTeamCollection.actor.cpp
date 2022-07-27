@@ -2006,7 +2006,7 @@ public:
 			self->getUnhealthyRelocationCount.send(countp);
 			int count = wait(countp.getFuture());
 			// pause wiggle when
-			// a. DDQueueData is busy with unhealthy relocation request
+			// a. DDQueue is busy with unhealthy relocation request
 			// b. healthy teams are not enough
 			// c. the overall disk space is not enough
 			if (count >= SERVER_KNOBS->DD_STORAGE_WIGGLE_PAUSE_THRESHOLD || self->healthyTeamCount <= *extraTeamCount ||
