@@ -284,6 +284,13 @@ class TestConfig {
 			if (attrib == "blobGranulesEnabled") {
 				blobGranulesEnabled = strcmp(value.c_str(), "true") == 0;
 			}
+			if (attrib == "injectSSTargetedRestart") {
+				injectTargetedSSRestart = strcmp(value.c_str(), "true") == 0;
+			}
+
+			if (attrib == "injectSSDelay") {
+				injectSSDelay = strcmp(value.c_str(), "true") == 0;
+			}
 		}
 
 		ifs.close();
@@ -334,6 +341,8 @@ public:
 	bool allowDefaultTenant = true;
 	bool allowDisablingTenants = true;
 	bool allowCreatingTenants = true;
+	bool injectTargetedSSRestart = false;
+	bool injectSSDelay = false;
 
 	ConfigDBType getConfigDBType() const { return configDBType; }
 
@@ -394,7 +403,10 @@ public:
 		    .add("allowDefaultTenant", &allowDefaultTenant)
 		    .add("allowDisablingTenants", &allowDisablingTenants)
 		    .add("allowCreatingTenants", &allowCreatingTenants)
-		    .add("randomlyRenameZoneId", &randomlyRenameZoneId);
+		    .add("randomlyRenameZoneId", &randomlyRenameZoneId)
+		    .add("randomlyRenameZoneId", &randomlyRenameZoneId)
+		    .add("injectTargetedSSRestart", &injectTargetedSSRestart)
+		    .add("injectSSDelay", &injectSSDelay);
 		try {
 			auto file = toml::parse(testFile);
 			if (file.contains("configuration") && toml::find(file, "configuration").is_table()) {
@@ -1401,7 +1413,7 @@ void SimulationConfig::setDatacenters(const TestConfig& testConfig) {
 void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
 	// Using [0, 4) to disable the RocksDB storage engine.
 	// TODO: Figure out what is broken with the RocksDB engine in simulation.
-	int storage_engine_type = deterministicRandom()->randomInt(0, 4);
+	int storage_engine_type = deterministicRandom()->randomInt(0, 6);
 	if (testConfig.storageEngineType.present()) {
 		storage_engine_type = testConfig.storageEngineType.get();
 	} else {
@@ -1409,7 +1421,7 @@ void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
 		while (std::find(testConfig.storageEngineExcludeTypes.begin(),
 		                 testConfig.storageEngineExcludeTypes.end(),
 		                 storage_engine_type) != testConfig.storageEngineExcludeTypes.end()) {
-			storage_engine_type = deterministicRandom()->randomInt(0, 5);
+			storage_engine_type = deterministicRandom()->randomInt(0, 6);
 		}
 	}
 
@@ -1452,6 +1464,8 @@ void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
 		TraceEvent(SevWarnAlways, "RocksDBNonDeterminism")
 		    .detail("Explanation", "The Sharded RocksDB storage engine is threaded and non-deterministic");
 		noUnseed = true;
+		auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
+		g_knobs.setKnob("shard_encode_location_metadata", KnobValueRef::create(bool{ true }));
 		break;
 	}
 	default:
@@ -2393,6 +2407,13 @@ ACTOR void setupAndRun(std::string dataFolder,
 	testConfig.readFromConfig(testFile);
 	g_simulator.hasDiffProtocolProcess = testConfig.startIncompatibleProcess;
 	g_simulator.setDiffProtocol = false;
+	if (testConfig.injectTargetedSSRestart && deterministicRandom()->random01() < 0.25) {
+		g_simulator.injectTargetedSSRestartTime = 60.0 + 340.0 * deterministicRandom()->random01();
+	}
+
+	if (testConfig.injectSSDelay && deterministicRandom()->random01() < 0.25) {
+		g_simulator.injectSSDelayTime = 60.0 + 240.0 * deterministicRandom()->random01();
+	}
 
 	// Build simulator allow list
 	allowList.addTrustedSubnet("0.0.0.0/2"sv);
@@ -2406,6 +2427,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 	// https://github.com/apple/foundationdb/issues/5155
 	if (std::string_view(testFile).find("restarting") != std::string_view::npos) {
 		testConfig.storageEngineExcludeTypes.push_back(4);
+		testConfig.storageEngineExcludeTypes.push_back(5);
 
 		// Disable the default tenant in restarting tests for now
 		// TODO: persist the chosen default tenant in the restartInfo.ini file for the second test
@@ -2418,6 +2440,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 	// Re-enable the backup and restore related simulation tests when the tests are passing again.
 	if (std::string_view(testFile).find("Backup") != std::string_view::npos) {
 		testConfig.storageEngineExcludeTypes.push_back(4);
+		testConfig.storageEngineExcludeTypes.push_back(5);
 	}
 
 	// Disable the default tenant in backup and DR tests for now. This is because backup does not currently duplicate
@@ -2432,6 +2455,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 	// in the build.
 	if (!rocksDBEnabled) {
 		testConfig.storageEngineExcludeTypes.push_back(4);
+		testConfig.storageEngineExcludeTypes.push_back(5);
 	}
 
 	state ProtocolVersion protocolVersion = currentProtocolVersion;

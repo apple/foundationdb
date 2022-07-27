@@ -194,7 +194,7 @@ class BaseInfo(object):
         if protocol_version >= PROTOCOL_VERSION_6_3:
             self.dc_id = bb.get_bytes_with_length()
         if protocol_version >= PROTOCOL_VERSION_7_1:
-            if bb.get_bytes(1):
+            if bb.get_bool():
                 self.tenant = bb.get_bytes_with_length()
 
 class GetVersionInfo(BaseInfo):

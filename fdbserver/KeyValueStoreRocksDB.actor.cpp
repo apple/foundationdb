@@ -79,6 +79,10 @@ static_assert((ROCKSDB_MAJOR == 6 && ROCKSDB_MINOR == 27) ? ROCKSDB_PATCH >= 3 :
 namespace {
 using rocksdb::BackgroundErrorReason;
 
+struct SharedRocksDBState {
+	bool closing = false;
+};
+
 // Returns string representation of RocksDB background error reason.
 // Error reason code:
 // https://github.com/facebook/rocksdb/blob/12d798ac06bcce36be703b057d5f5f4dab3b270c/include/rocksdb/listener.h#L125
@@ -737,6 +741,7 @@ ACTOR Future<Void> flowLockLogger(UID id, const FlowLock* readLock, const FlowLo
 }
 
 ACTOR Future<Void> rocksDBMetricLogger(UID id,
+                                       std::shared_ptr<SharedRocksDBState> sharedState,
                                        std::shared_ptr<rocksdb::Statistics> statistics,
                                        std::shared_ptr<PerfContextMetrics> perfContextMetrics,
                                        rocksdb::DB* db,
@@ -780,6 +785,7 @@ ACTOR Future<Void> rocksDBMetricLogger(UID id,
 		{ "CountIterSkippedKeys", rocksdb::NUMBER_ITER_SKIP, 0 },
 
 	};
+
 	state std::vector<std::pair<const char*, std::string>> intPropertyStats = {
 		{ "NumImmutableMemtables", rocksdb::DB::Properties::kNumImmutableMemTable },
 		{ "NumImmutableMemtablesFlushed", rocksdb::DB::Properties::kNumImmutableMemTableFlushed },
@@ -823,6 +829,9 @@ ACTOR Future<Void> rocksDBMetricLogger(UID id,
 
 	loop {
 		wait(delay(SERVER_KNOBS->ROCKSDB_METRICS_DELAY));
+		if (sharedState->closing) {
+			break;
+		}
 		TraceEvent e("RocksDBMetrics", id);
 		uint64_t stat;
 		for (auto& [name, ticker, cum] : tickerStats) {
@@ -873,6 +882,8 @@ ACTOR Future<Void> rocksDBMetricLogger(UID id,
 			perfContextMetrics->log(true);
 		}
 	}
+
+	return Void();
 }
 
 void logRocksDBError(UID id,
@@ -921,6 +932,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 		DB& db;
 		CF& cf;
+		std::unordered_set<rocksdb::ColumnFamilyHandle*> cfHandles;
+
 		UID id;
 		std::shared_ptr<rocksdb::RateLimiter> rateLimiter;
 		std::shared_ptr<ReadIteratorPool> readIterPool;
@@ -954,15 +967,10 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 		}
 
-		~Writer() override {
-			if (db) {
-				delete db;
-			}
-		}
-
 		void init() override {}
 
 		struct OpenAction : TypedAction<Writer, OpenAction> {
+			std::shared_ptr<SharedRocksDBState> sharedState;
 			std::string path;
 			ThreadReturnPromise<Void> done;
 			Optional<Future<Void>>& metrics;
@@ -970,14 +978,15 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			const FlowLock* fetchLock;
 			std::shared_ptr<RocksDBErrorListener> errorListener;
 			Counters& counters;
-			OpenAction(std::string path,
+			OpenAction(std::shared_ptr<SharedRocksDBState> sharedState,
+			           std::string path,
 			           Optional<Future<Void>>& metrics,
 			           const FlowLock* readLock,
 			           const FlowLock* fetchLock,
 			           std::shared_ptr<RocksDBErrorListener> errorListener,
 			           Counters& counters)
-			  : path(std::move(path)), metrics(metrics), readLock(readLock), fetchLock(fetchLock),
-			    errorListener(errorListener), counters(counters) {}
+			  : sharedState(sharedState), path(std::move(path)), metrics(metrics), readLock(readLock),
+			    fetchLock(fetchLock), errorListener(errorListener), counters(counters) {}
 
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
@@ -1004,6 +1013,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 			std::vector<rocksdb::ColumnFamilyHandle*> handles;
 			status = rocksdb::DB::Open(options, a.path, descriptors, &handles, &db);
+			cfHandles.insert(handles.begin(), handles.end());
 
 			if (!status.ok()) {
 				logRocksDBError(id, status, "Open");
@@ -1020,6 +1030,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 			if (cf == nullptr) {
 				status = db->CreateColumnFamily(cfOptions, SERVER_KNOBS->DEFAULT_FDB_ROCKSDB_COLUMN_FAMILY, &cf);
+				cfHandles.insert(cf);
 				if (!status.ok()) {
 					logRocksDBError(id, status, "Open");
 					a.done.sendError(statusToError(status));
@@ -1037,13 +1048,20 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				// The current thread and main thread are same when the code runs in simulation.
 				// blockUntilReady() is getting the thread into deadlock state, so directly calling
 				// the metricsLogger.
-				a.metrics = rocksDBMetricLogger(
-				                id, options.statistics, perfContextMetrics, db, readIterPool, &a.counters, cf) &&
-				            flowLockLogger(id, a.readLock, a.fetchLock) && refreshReadIteratorPool(readIterPool);
+				a.metrics =
+				    rocksDBMetricLogger(
+				        id, a.sharedState, options.statistics, perfContextMetrics, db, readIterPool, &a.counters, cf) &&
+				    flowLockLogger(id, a.readLock, a.fetchLock) && refreshReadIteratorPool(readIterPool);
 			} else {
 				onMainThread([&] {
-					a.metrics = rocksDBMetricLogger(
-					                id, options.statistics, perfContextMetrics, db, readIterPool, &a.counters, cf) &&
+					a.metrics = rocksDBMetricLogger(id,
+					                                a.sharedState,
+					                                options.statistics,
+					                                perfContextMetrics,
+					                                db,
+					                                readIterPool,
+					                                &a.counters,
+					                                cf) &&
 					            flowLockLogger(id, a.readLock, a.fetchLock) && refreshReadIteratorPool(readIterPool);
 					return Future<bool>(true);
 				}).blockUntilReady();
@@ -1182,6 +1200,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				a.done.send(Void());
 				return;
 			}
+			for (rocksdb::ColumnFamilyHandle* handle : cfHandles) {
+				if (handle != nullptr) {
+					db->DestroyColumnFamilyHandle(handle);
+				}
+			}
+			cfHandles.clear();
 			auto s = db->Close();
 			if (!s.ok()) {
 				logRocksDBError(id, s, "Close");
@@ -1547,35 +1571,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		}
 	};
 
-	DB db = nullptr;
-	std::shared_ptr<PerfContextMetrics> perfContextMetrics;
-	std::string path;
-	rocksdb::ColumnFamilyHandle* defaultFdbCF = nullptr;
-	UID id;
-	Reference<IThreadPool> writeThread;
-	Reference<IThreadPool> readThreads;
-	std::shared_ptr<RocksDBErrorListener> errorListener;
-	Future<Void> errorFuture;
-	Promise<Void> closePromise;
-	Future<Void> openFuture;
-	std::unique_ptr<rocksdb::WriteBatch> writeBatch;
-	Optional<Future<Void>> metrics;
-	FlowLock readSemaphore;
-	int numReadWaiters;
-	FlowLock fetchSemaphore;
-	int numFetchWaiters;
-	std::shared_ptr<ReadIteratorPool> readIterPool;
-	std::vector<std::unique_ptr<ThreadReturnPromiseStream<std::pair<std::string, double>>>> metricPromiseStreams;
-	// ThreadReturnPromiseStream pair.first stores the histogram name and
-	// pair.second stores the corresponding measured latency (seconds)
-	Future<Void> actorErrorListener;
-	Future<Void> collection;
-	PromiseStream<Future<Void>> addActor;
-	Counters counters;
-
 	explicit RocksDBKeyValueStore(const std::string& path, UID id)
-	  : path(path), id(id), perfContextMetrics(new PerfContextMetrics()),
-	    readIterPool(new ReadIteratorPool(id, db, defaultFdbCF)),
+	  : sharedState(std::make_shared<SharedRocksDBState>()), path(path), id(id),
+	    perfContextMetrics(new PerfContextMetrics()), readIterPool(new ReadIteratorPool(id, db, defaultFdbCF)),
 	    readSemaphore(SERVER_KNOBS->ROCKSDB_READ_QUEUE_SOFT_MAX),
 	    fetchSemaphore(SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_SOFT_MAX),
 	    numReadWaiters(SERVER_KNOBS->ROCKSDB_READ_QUEUE_HARD_MAX - SERVER_KNOBS->ROCKSDB_READ_QUEUE_SOFT_MAX),
@@ -1730,6 +1728,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	Future<Void> getError() const override { return errorFuture; }
 
 	ACTOR static void doClose(RocksDBKeyValueStore* self, bool deleteOnClose) {
+		self->sharedState->closing = true;
+
 		// The metrics future retains a reference to the DB, so stop it before we delete it.
 		self->metrics.reset();
 
@@ -1740,8 +1740,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		self->writeThread->post(a);
 		wait(f);
 		wait(self->writeThread->stop());
-		if (self->closePromise.canBeSet())
+		if (self->closePromise.canBeSet()) {
 			self->closePromise.send(Void());
+		}
+		if (self->db != nullptr) {
+			delete self->db;
+		}
 		delete self;
 	}
 
@@ -1765,7 +1769,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			return openFuture;
 		}
 		auto a = std::make_unique<Writer::OpenAction>(
-		    path, metrics, &readSemaphore, &fetchSemaphore, errorListener, counters);
+		    this->sharedState, path, metrics, &readSemaphore, &fetchSemaphore, errorListener, counters);
 		openFuture = a->done.getFuture();
 		writeThread->post(a.release());
 		return openFuture;
@@ -1978,6 +1982,33 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		}
 		return Void();
 	}
+
+	DB db = nullptr;
+	std::shared_ptr<SharedRocksDBState> sharedState;
+	std::shared_ptr<PerfContextMetrics> perfContextMetrics;
+	std::string path;
+	rocksdb::ColumnFamilyHandle* defaultFdbCF = nullptr;
+	UID id;
+	Reference<IThreadPool> writeThread;
+	Reference<IThreadPool> readThreads;
+	std::shared_ptr<RocksDBErrorListener> errorListener;
+	Future<Void> errorFuture;
+	Promise<Void> closePromise;
+	Future<Void> openFuture;
+	std::unique_ptr<rocksdb::WriteBatch> writeBatch;
+	Optional<Future<Void>> metrics;
+	FlowLock readSemaphore;
+	int numReadWaiters;
+	FlowLock fetchSemaphore;
+	int numFetchWaiters;
+	std::shared_ptr<ReadIteratorPool> readIterPool;
+	std::vector<std::unique_ptr<ThreadReturnPromiseStream<std::pair<std::string, double>>>> metricPromiseStreams;
+	// ThreadReturnPromiseStream pair.first stores the histogram name and
+	// pair.second stores the corresponding measured latency (seconds)
+	Future<Void> actorErrorListener;
+	Future<Void> collection;
+	PromiseStream<Future<Void>> addActor;
+	Counters counters;
 };
 
 void RocksDBKeyValueStore::Writer::action(CheckpointAction& a) {
@@ -1987,7 +2018,7 @@ void RocksDBKeyValueStore::Writer::action(CheckpointAction& a) {
 	    .detail("Format", static_cast<int>(a.request.format))
 	    .detail("CheckpointDir", a.request.checkpointDir);
 
-	rocksdb::Checkpoint* checkpoint;
+	rocksdb::Checkpoint* checkpoint = nullptr;
 	rocksdb::Status s = rocksdb::Checkpoint::Create(db, &checkpoint);
 	if (!s.ok()) {
 		logRocksDBError(id, s, "Checkpoint");
@@ -2051,9 +2082,15 @@ void RocksDBKeyValueStore::Writer::action(CheckpointAction& a) {
 		    .detail("RocksSequenceNumber", debugCheckpointSeq)
 		    .detail("CheckpointDir", checkpointDir);
 	} else {
+		if (checkpoint != nullptr) {
+			delete checkpoint;
+		}
 		throw not_implemented();
 	}
 
+	if (checkpoint != nullptr) {
+		delete checkpoint;
+	}
 	res.setState(CheckpointMetaData::Complete);
 	a.reply.send(res);
 }
@@ -2081,6 +2118,8 @@ void RocksDBKeyValueStore::Writer::action(RestoreAction& a) {
 
 		if (cf != nullptr) {
 			ASSERT(db->DropColumnFamily(cf).ok());
+			db->DestroyColumnFamilyHandle(cf);
+			cfHandles.erase(cf);
 		}
 
 		rocksdb::ExportImportFilesMetaData metaData = getMetaData(a.checkpoints[0]);
@@ -2088,6 +2127,7 @@ void RocksDBKeyValueStore::Writer::action(RestoreAction& a) {
 		importOptions.move_files = true;
 		status = db->CreateColumnFamilyWithImport(
 		    getCFOptions(), SERVER_KNOBS->DEFAULT_FDB_ROCKSDB_COLUMN_FAMILY, importOptions, metaData, &cf);
+		cfHandles.insert(cf);
 
 		if (!status.ok()) {
 			logRocksDBError(id, status, "Restore");
@@ -2101,6 +2141,7 @@ void RocksDBKeyValueStore::Writer::action(RestoreAction& a) {
 	} else if (format == RocksDB) {
 		if (cf == nullptr) {
 			status = db->CreateColumnFamily(getCFOptions(), SERVER_KNOBS->DEFAULT_FDB_ROCKSDB_COLUMN_FAMILY, &cf);
+			cfHandles.insert(cf);
 			TraceEvent("RocksDBServeRestoreRange", id)
 			    .detail("Path", a.path)
 			    .detail("Checkpoint", describe(a.checkpoints));
@@ -2217,7 +2258,7 @@ TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/RocksDBBasic") {
 	}
 
 	Future<Void> closed = kvStore->onClosed();
-	kvStore->close();
+	kvStore->dispose();
 	wait(closed);
 
 	platform::eraseDirectoryRecursive(rocksDBTestDir);
@@ -2250,7 +2291,7 @@ TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/RocksDBReopen") {
 	ASSERT(Optional<Value>(LiteralStringRef("bar")) == val);
 
 	Future<Void> closed = kvStore->onClosed();
-	kvStore->close();
+	kvStore->dispose();
 	wait(closed);
 
 	platform::eraseDirectoryRecursive(rocksDBTestDir);
@@ -2295,8 +2336,8 @@ TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/CheckpointRestoreColumnFamily") 
 	std::vector<Future<Void>> closes;
 	closes.push_back(kvStore->onClosed());
 	closes.push_back(kvStoreCopy->onClosed());
-	kvStore->close();
-	kvStoreCopy->close();
+	kvStore->dispose();
+	kvStoreCopy->dispose();
 	wait(waitForAll(closes));
 
 	platform::eraseDirectoryRecursive(rocksDBTestDir);
@@ -2346,7 +2387,7 @@ TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/CheckpointRestoreKeyValues") {
 	std::vector<Future<Void>> closes;
 	closes.push_back(cpReader->close());
 	closes.push_back(kvStore->onClosed());
-	kvStore->close();
+	kvStore->dispose();
 	wait(waitForAll(closes));
 
 	platform::eraseDirectoryRecursive(rocksDBTestDir);

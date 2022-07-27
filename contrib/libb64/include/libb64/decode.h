@@ -9,7 +9,7 @@ For details, see http://sourceforge.net/projects/libb64
 #define BASE64_DECODE_H
 
 #include <iostream>
-#include "fdbclient/libb64/encode.h"
+#include "libb64/encode.h"
 
 namespace base64 {
 extern "C" {

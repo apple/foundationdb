@@ -80,13 +80,9 @@ struct TenantMapEntry {
 	bool matchesConfiguration(TenantMapEntry const& other) const;
 	void configure(Standalone<StringRef> parameter, Optional<Value> value);
 
-	Value encode() const { return ObjectWriter::toValue(*this, IncludeVersion(ProtocolVersion::withTenants())); }
-
+	Value encode() const { return ObjectWriter::toValue(*this, IncludeVersion()); }
 	static TenantMapEntry decode(ValueRef const& value) {
-		TenantMapEntry entry;
-		ObjectReader reader(value.begin(), IncludeVersion());
-		reader.deserialize(entry);
-		return entry;
+		return ObjectReader::fromStringRef<TenantMapEntry>(value, IncludeVersion());
 	}
 
 	template <class Ar>
@@ -109,7 +105,7 @@ struct TenantGroupEntry {
 	TenantGroupEntry() = default;
 	TenantGroupEntry(Optional<ClusterName> assignedCluster) : assignedCluster(assignedCluster) {}
 
-	Value encode() { return ObjectWriter::toValue(*this, IncludeVersion(ProtocolVersion::withTenants())); }
+	Value encode() { return ObjectWriter::toValue(*this, IncludeVersion()); }
 	static TenantGroupEntry decode(ValueRef const& value) {
 		TenantGroupEntry entry;
 		ObjectReader reader(value.begin(), IncludeVersion());
@@ -153,14 +149,12 @@ struct TenantMetadataSpecification {
 	KeyBackedObjectMap<TenantGroupName, TenantGroupEntry, decltype(IncludeVersion()), NullCodec> tenantGroupMap;
 
 	TenantMetadataSpecification(KeyRef subspace)
-	  : tenantMap(subspace.withSuffix("tenant/map/"_sr), IncludeVersion(ProtocolVersion::withTenants())),
+	  : tenantMap(subspace.withSuffix("tenant/map/"_sr), IncludeVersion()),
 	    lastTenantId(subspace.withSuffix("tenant/lastId"_sr)),
 	    tenantTombstones(subspace.withSuffix("tenant/tombstones/"_sr)),
-	    tombstoneCleanupData(subspace.withSuffix("tenant/tombstoneCleanup"_sr),
-	                         IncludeVersion(ProtocolVersion::withTenants())),
+	    tombstoneCleanupData(subspace.withSuffix("tenant/tombstoneCleanup"_sr), IncludeVersion()),
 	    tenantGroupTenantIndex(subspace.withSuffix("tenant/tenantGroup/tenantIndex/"_sr)),
-	    tenantGroupMap(subspace.withSuffix("tenant/tenantGroup/map/"_sr),
-	                   IncludeVersion(ProtocolVersion::withTenants())) {}
+	    tenantGroupMap(subspace.withSuffix("tenant/tenantGroup/map/"_sr), IncludeVersion()) {}
 };
 
 struct TenantMetadata {

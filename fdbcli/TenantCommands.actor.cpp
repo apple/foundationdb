@@ -36,11 +36,21 @@
 
 namespace fdb_cli {
 
-// TODO: API version
-const KeyRangeRef tenantMapSpecialKeyRange(LiteralStringRef("\xff\xff/management/tenant/map/"),
-                                           LiteralStringRef("\xff\xff/management/tenant/map0"));
-const KeyRangeRef tenantConfigSpecialKeyRange(LiteralStringRef("\xff\xff/management/tenant/configure/"),
-                                              LiteralStringRef("\xff\xff/management/tenant/configure0"));
+const KeyRangeRef tenantMapSpecialKeyRange720("\xff\xff/management/tenant/map/"_sr,
+                                              "\xff\xff/management/tenant/map0"_sr);
+const KeyRangeRef tenantConfigSpecialKeyRange("\xff\xff/management/tenant/configure/"_sr,
+                                              "\xff\xff/management/tenant/configure0"_sr);
+
+const KeyRangeRef tenantMapSpecialKeyRange710("\xff\xff/management/tenant_map/"_sr,
+                                              "\xff\xff/management/tenant_map0"_sr);
+
+KeyRangeRef const& tenantMapSpecialKeyRange(int apiVersion) {
+	if (apiVersion >= 720) {
+		return tenantMapSpecialKeyRange720;
+	} else {
+		return tenantMapSpecialKeyRange710;
+	}
+}
 
 Optional<std::map<Standalone<StringRef>, Optional<Value>>>
 parseTenantConfiguration(std::vector<StringRef> const& tokens, int startIndex, bool allowUnset) {
@@ -68,10 +78,16 @@ parseTenantConfiguration(std::vector<StringRef> const& tokens, int startIndex, b
 			value = token;
 		}
 
+		if (configParams.count(param)) {
+			fmt::print(
+			    stderr, "ERROR: configuration parameter `{}' specified more than once.\n", param.toString().c_str());
+			return {};
+		}
+
 		if (tokencmp(param, "tenant_group")) {
 			configParams[param] = value;
 		} else {
-			fmt::print(stderr, "ERROR: unrecognized configuration parameter `{}'\n", param.toString().c_str());
+			fmt::print(stderr, "ERROR: unrecognized configuration parameter `{}'.\n", param.toString().c_str());
 			return {};
 		}
 	}
@@ -96,13 +112,13 @@ void applyConfigurationToSpecialKeys(Reference<ITransaction> tr,
 }
 
 // createtenant command
-ACTOR Future<bool> createTenantCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
+ACTOR Future<bool> createTenantCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens, int apiVersion) {
 	if (tokens.size() < 2 || tokens.size() > 3) {
 		printUsage(tokens[0]);
 		return false;
 	}
 
-	state Key tenantNameKey = tenantMapSpecialKeyRange.begin.withSuffix(tokens[1]);
+	state Key tenantNameKey = tenantMapSpecialKeyRange(apiVersion).begin.withSuffix(tokens[1]);
 	state Reference<ITransaction> tr = db->createTransaction();
 	state bool doneExistenceCheck = false;
 
@@ -110,6 +126,11 @@ ACTOR Future<bool> createTenantCommandActor(Reference<IDatabase> db, std::vector
 	    parseTenantConfiguration(tokens, 2, false);
 
 	if (!configuration.present()) {
+		return false;
+	}
+
+	if (apiVersion < 720 && !configuration.get().empty()) {
+		fmt::print(stderr, "ERROR: tenants do not accept configuration options before API version 720.\n");
 		return false;
 	}
 
@@ -164,13 +185,13 @@ CommandFactory createTenantFactory(
                 "that will require this tenant to be placed on the same cluster as other tenants in the same group."));
 
 // deletetenant command
-ACTOR Future<bool> deleteTenantCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
+ACTOR Future<bool> deleteTenantCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens, int apiVersion) {
 	if (tokens.size() != 2) {
 		printUsage(tokens[0]);
 		return false;
 	}
 
-	state Key tenantNameKey = tenantMapSpecialKeyRange.begin.withSuffix(tokens[1]);
+	state Key tenantNameKey = tenantMapSpecialKeyRange(apiVersion).begin.withSuffix(tokens[1]);
 	state Reference<ITransaction> tr = db->createTransaction();
 	state bool doneExistenceCheck = false;
 
@@ -220,7 +241,7 @@ CommandFactory deleteTenantFactory(
         "Deletes a tenant from the cluster. Deletion will be allowed only if the specified tenant contains no data."));
 
 // listtenants command
-ACTOR Future<bool> listTenantsCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
+ACTOR Future<bool> listTenantsCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens, int apiVersion) {
 	if (tokens.size() > 4) {
 		printUsage(tokens[0]);
 		return false;
@@ -248,8 +269,8 @@ ACTOR Future<bool> listTenantsCommandActor(Reference<IDatabase> db, std::vector<
 		}
 	}
 
-	state Key beginTenantKey = tenantMapSpecialKeyRange.begin.withSuffix(beginTenant);
-	state Key endTenantKey = tenantMapSpecialKeyRange.begin.withSuffix(endTenant);
+	state Key beginTenantKey = tenantMapSpecialKeyRange(apiVersion).begin.withSuffix(beginTenant);
+	state Key endTenantKey = tenantMapSpecialKeyRange(apiVersion).begin.withSuffix(endTenant);
 	state Reference<ITransaction> tr = db->createTransaction();
 
 	loop {
@@ -269,7 +290,7 @@ ACTOR Future<bool> listTenantsCommandActor(Reference<IDatabase> db, std::vector<
 				    tr->getRange(firstGreaterOrEqual(beginTenantKey), firstGreaterOrEqual(endTenantKey), limit);
 				RangeResult tenants = wait(safeThreadFutureToFuture(kvsFuture));
 				for (auto tenant : tenants) {
-					tenantNames.push_back(tenant.key.removePrefix(tenantMapSpecialKeyRange.begin));
+					tenantNames.push_back(tenant.key.removePrefix(tenantMapSpecialKeyRange(apiVersion).begin));
 				}
 			}
 
@@ -314,7 +335,7 @@ ACTOR Future<bool> getTenantCommandActor(Reference<IDatabase> db, std::vector<St
 	}
 
 	state bool useJson = tokens.size() == 3;
-	state Key tenantNameKey = tenantMapSpecialKeyRange.begin.withSuffix(tokens[1]);
+	state Key tenantNameKey = tenantMapSpecialKeyRange(apiVersion).begin.withSuffix(tokens[1]);
 	state Reference<ITransaction> tr = db->createTransaction();
 
 	loop {

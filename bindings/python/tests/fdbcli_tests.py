@@ -666,14 +666,6 @@ def tenants(logger):
     assert len(lines) == 4
     assert lines[3].strip() == 'tenant group: tenant_group1'
 
-    output = run_fdbcli_command('configuretenant tenant tenant_group=tenant_group1 tenant_group=tenant_group2')
-    assert output == 'The configuration for tenant `tenant\' has been updated'
-
-    output = run_fdbcli_command('gettenant tenant')
-    lines = output.split('\n')
-    assert len(lines) == 4
-    assert lines[3].strip() == 'tenant group: tenant_group2'
-
     output = run_fdbcli_command('configuretenant tenant unset tenant_group')
     assert output == 'The configuration for tenant `tenant\' has been updated'
 

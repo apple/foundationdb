@@ -21,7 +21,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/Tenant.h"
-#include "fdbclient/libb64/encode.h"
+#include "libb64/encode.h"
 #include "flow/UnitTest.h"
 
 Key TenantMapEntry::idToPrefix(int64_t id) {
@@ -107,6 +107,17 @@ std::string TenantMapEntry::toJson(int apiVersion) const {
 	if (assignedCluster.present()) {
 		tenantEntry["assigned_cluster"] = assignedCluster.get().toString();
 	}
+	if (tenantGroup.present()) {
+		json_spirit::mObject tenantGroupObject;
+		std::string encodedTenantGroup = base64::encoder::from_string(tenantGroup.get().toString());
+		// Remove trailing newline
+		encodedTenantGroup.resize(encodedTenantGroup.size() - 1);
+
+		tenantGroupObject["base64"] = encodedTenantGroup;
+		tenantGroupObject["printable"] = printable(tenantGroup.get());
+		tenantEntry["tenant_group"] = tenantGroupObject;
+	}
+
 	if (tenantGroup.present()) {
 		json_spirit::mObject tenantGroupObject;
 		std::string encodedTenantGroup = base64::encoder::from_string(tenantGroup.get().toString());

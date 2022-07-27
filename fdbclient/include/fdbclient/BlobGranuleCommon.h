@@ -46,6 +46,7 @@ struct GranuleSnapshot : VectorRef<KeyValueRef> {
 	}
 };
 
+// Deltas in version order
 struct GranuleDeltas : VectorRef<MutationsAndVersionRef> {
 	constexpr static FileIdentifier file_identifier = 8563013;
 

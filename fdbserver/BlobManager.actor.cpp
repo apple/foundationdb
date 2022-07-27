@@ -52,6 +52,7 @@
  */
 
 #define BM_DEBUG false
+#define BM_PURGE_DEBUG false
 
 void handleClientBlobRange(KeyRangeMap<bool>* knownBlobRanges,
                            Arena& ar,
@@ -1652,7 +1653,9 @@ ACTOR Future<Void> persistMergeGranulesDone(Reference<BlobManagerData> bmData,
 				state Key lockKey = blobGranuleLockKeyFor(parentRange);
 				state Future<Optional<Value>> oldLockFuture = tr->get(lockKey);
 
-				wait(updateChangeFeed(tr,
+				// This has to be
+				// TODO: fix this better! (privatize change feed key clear)
+				wait(updateChangeFeed(&tr->getTransaction(),
 				                      granuleIDToCFKey(parentGranuleIDs[parentIdx]),
 				                      ChangeFeedStatus::CHANGE_FEED_DESTROY,
 				                      parentRange));
@@ -3171,8 +3174,8 @@ ACTOR Future<Void> fullyDeleteGranule(Reference<BlobManagerData> self,
                                       Key historyKey,
                                       Version purgeVersion,
                                       KeyRange granuleRange) {
-	if (BM_DEBUG) {
-		fmt::print("Fully deleting granule {0}: init\n", granuleId.toString());
+	if (BM_PURGE_DEBUG) {
+		fmt::print("BM {0} Fully deleting granule {1}: init\n", self->epoch, granuleId.toString());
 	}
 
 	// if granule is still splitting and files are needed for new sub-granules to re-snapshot, we can only partially
@@ -3198,8 +3201,11 @@ ACTOR Future<Void> fullyDeleteGranule(Reference<BlobManagerData> self,
 		filesToDelete.emplace_back(fname);
 	}
 
-	if (BM_DEBUG) {
-		fmt::print("Fully deleting granule {0}: deleting {1} files\n", granuleId.toString(), filesToDelete.size());
+	if (BM_PURGE_DEBUG) {
+		fmt::print("BM {0} Fully deleting granule {1}: deleting {2} files\n",
+		           self->epoch,
+		           granuleId.toString(),
+		           filesToDelete.size());
 		for (auto filename : filesToDelete) {
 			fmt::print(" - {}\n", filename.c_str());
 		}
@@ -3212,8 +3218,9 @@ ACTOR Future<Void> fullyDeleteGranule(Reference<BlobManagerData> self,
 	wait(waitForAll(deletions));
 
 	// delete metadata in FDB (history entry and file keys)
-	if (BM_DEBUG) {
-		fmt::print("Fully deleting granule {0}: deleting history and file keys\n", granuleId.toString());
+	if (BM_PURGE_DEBUG) {
+		fmt::print(
+		    "BM {0} Fully deleting granule {1}: deleting history and file keys\n", self->epoch, granuleId.toString());
 	}
 
 	state Transaction tr(self->db);
@@ -3232,8 +3239,8 @@ ACTOR Future<Void> fullyDeleteGranule(Reference<BlobManagerData> self,
 		}
 	}
 
-	if (BM_DEBUG) {
-		fmt::print("Fully deleting granule {0}: success\n", granuleId.toString());
+	if (BM_PURGE_DEBUG) {
+		fmt::print("BM {0} Fully deleting granule {1}: success\n", self->epoch, granuleId.toString());
 	}
 
 	TraceEvent("GranuleFullPurge", self->id)
@@ -3244,6 +3251,8 @@ ACTOR Future<Void> fullyDeleteGranule(Reference<BlobManagerData> self,
 
 	++self->stats.granulesFullyPurged;
 	self->stats.filesPurged += filesToDelete.size();
+
+	CODE_PROBE(true, "full granule purged");
 
 	return Void();
 }
@@ -3260,8 +3269,8 @@ ACTOR Future<Void> partiallyDeleteGranule(Reference<BlobManagerData> self,
                                           UID granuleId,
                                           Version purgeVersion,
                                           KeyRange granuleRange) {
-	if (BM_DEBUG) {
-		fmt::print("Partially deleting granule {0}: init\n", granuleId.toString());
+	if (BM_PURGE_DEBUG) {
+		fmt::print("BM {0} Partially deleting granule {1}: init\n", self->epoch, granuleId.toString());
 	}
 
 	state Reference<BlobConnectionProvider> bstore = wait(getBStoreForGranule(self, granuleRange));
@@ -3310,8 +3319,11 @@ ACTOR Future<Void> partiallyDeleteGranule(Reference<BlobManagerData> self,
 		filesToDelete.emplace_back(fname);
 	}
 
-	if (BM_DEBUG) {
-		fmt::print("Partially deleting granule {0}: deleting {1} files\n", granuleId.toString(), filesToDelete.size());
+	if (BM_PURGE_DEBUG) {
+		fmt::print("BM {0} Partially deleting granule {1}: deleting {2} files\n",
+		           self->epoch,
+		           granuleId.toString(),
+		           filesToDelete.size());
 		for (auto filename : filesToDelete) {
 			fmt::print(" - {0}\n", filename);
 		}
@@ -3328,8 +3340,8 @@ ACTOR Future<Void> partiallyDeleteGranule(Reference<BlobManagerData> self,
 	wait(waitForAll(deletions));
 
 	// delete metadata in FDB (deleted file keys)
-	if (BM_DEBUG) {
-		fmt::print("Partially deleting granule {0}: deleting file keys\n", granuleId.toString());
+	if (BM_PURGE_DEBUG) {
+		fmt::print("BM {0} Partially deleting granule {1}: deleting file keys\n", self->epoch, granuleId.toString());
 	}
 
 	state Transaction tr(self->db);
@@ -3348,8 +3360,8 @@ ACTOR Future<Void> partiallyDeleteGranule(Reference<BlobManagerData> self,
 		}
 	}
 
-	if (BM_DEBUG) {
-		fmt::print("Partially deleting granule {0}: success\n", granuleId.toString());
+	if (BM_PURGE_DEBUG) {
+		fmt::print("BM {0} Partially deleting granule {1}: success\n", self->epoch, granuleId.toString());
 	}
 	TraceEvent("GranulePartialPurge", self->id)
 	    .detail("Epoch", self->epoch)
@@ -3359,6 +3371,8 @@ ACTOR Future<Void> partiallyDeleteGranule(Reference<BlobManagerData> self,
 
 	++self->stats.granulesPartiallyPurged;
 	self->stats.filesPurged += filesToDelete.size();
+
+	CODE_PROBE(true, " partial granule purged");
 
 	return Void();
 }
@@ -3372,8 +3386,9 @@ ACTOR Future<Void> partiallyDeleteGranule(Reference<BlobManagerData> self,
  * processing this purge intent.
  */
 ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range, Version purgeVersion, bool force) {
-	if (BM_DEBUG) {
-		fmt::print("purgeRange starting for range [{0} - {1}) @ purgeVersion={2}, force={3}\n",
+	if (BM_PURGE_DEBUG) {
+		fmt::print("BM {0} purgeRange starting for range [{1} - {2}) @ purgeVersion={3}, force={4}\n",
+		           self->epoch,
 		           range.begin.printable(),
 		           range.end.printable(),
 		           purgeVersion,
@@ -3395,8 +3410,7 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 
 	// track which granules we have already added to traversal
 	// note: (startKey, startVersion) uniquely identifies a granule
-	state std::unordered_set<std::pair<const uint8_t*, Version>, boost::hash<std::pair<const uint8_t*, Version>>>
-	    visited;
+	state std::unordered_set<std::pair<std::string, Version>, boost::hash<std::pair<std::string, Version>>> visited;
 
 	// find all active granules (that comprise the range) and add to the queue
 	state KeyRangeMap<UID>::Ranges activeRanges = self->workerAssignments.intersectingRanges(range);
@@ -3407,8 +3421,9 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 
 	state KeyRangeMap<UID>::iterator activeRange;
 	for (activeRange = activeRanges.begin(); activeRange != activeRanges.end(); ++activeRange) {
-		if (BM_DEBUG) {
-			fmt::print("Checking if active range [{0} - {1}), owned by BW {2}, should be purged\n",
+		if (BM_PURGE_DEBUG) {
+			fmt::print("BM {0} Checking if active range [{1} - {2}), owned by BW {3}, should be purged\n",
+			           self->epoch,
 			           activeRange.begin().printable(),
 			           activeRange.end().printable(),
 			           activeRange.value().toString());
@@ -3416,6 +3431,10 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 
 		// assumption: purge boundaries must respect granule boundaries
 		if (activeRange.begin() < range.begin || activeRange.end() > range.end) {
+			TraceEvent(SevWarn, "GranulePurgeRangesUnaligned", self->id)
+			    .detail("Epoch", self->epoch)
+			    .detail("PurgeRange", range)
+			    .detail("GranuleRange", activeRange.range());
 			continue;
 		}
 
@@ -3425,20 +3444,29 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 
 		loop {
 			try {
-				if (BM_DEBUG) {
-					fmt::print("Fetching latest history entry for range [{0} - {1})\n",
+				if (BM_PURGE_DEBUG) {
+					fmt::print("BM {0} Fetching latest history entry for range [{1} - {2})\n",
+					           self->epoch,
 					           activeRange.begin().printable(),
 					           activeRange.end().printable());
 				}
+				// FIXME: doing this serially will likely be too slow for large purges
 				Optional<GranuleHistory> history = wait(getLatestGranuleHistory(&tr, activeRange.range()));
 				// TODO: can we tell from the krm that this range is not valid, so that we don't need to do a
 				// get
 				if (history.present()) {
-					if (BM_DEBUG) {
-						printf("Adding range to history queue\n");
+					if (BM_PURGE_DEBUG) {
+						fmt::print("BM {0}   Adding range to history queue: [{1} - {2}) @ {3} ({4})\n",
+						           self->epoch,
+						           activeRange.begin().printable(),
+						           activeRange.end().printable(),
+						           history.get().version,
+						           (void*)(activeRange.range().begin.begin()));
 					}
-					visited.insert({ activeRange.range().begin.begin(), history.get().version });
+					visited.insert({ activeRange.range().begin.toString(), history.get().version });
 					historyEntryQueue.push({ activeRange.range(), history.get().version, MAX_VERSION });
+				} else if (BM_PURGE_DEBUG) {
+					fmt::print("BM {0}   No history for range, ignoring\n", self->epoch);
 				}
 				break;
 			} catch (Error& e) {
@@ -3447,8 +3475,12 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 		}
 	}
 
-	if (BM_DEBUG) {
-		printf("Beginning BFS traversal of history\n");
+	if (BM_PURGE_DEBUG) {
+		fmt::print("BM {0} Beginning BFS traversal of {1} history items for range [{2} - {3}) \n",
+		           self->epoch,
+		           historyEntryQueue.size(),
+		           range.begin.printable(),
+		           range.end.printable());
 	}
 	while (!historyEntryQueue.empty()) {
 		// process the node at the front of the queue and remove it
@@ -3458,8 +3490,9 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 		std::tie(currRange, startVersion, endVersion) = historyEntryQueue.front();
 		historyEntryQueue.pop();
 
-		if (BM_DEBUG) {
-			fmt::print("Processing history node [{0} - {1}) with versions [{2}, {3})\n",
+		if (BM_PURGE_DEBUG) {
+			fmt::print("BM {0} Processing history node [{1} - {2}) with versions [{3}, {4})\n",
+			           self->epoch,
 			           currRange.begin.printable(),
 			           currRange.end.printable(),
 			           startVersion,
@@ -3484,11 +3517,15 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 		}
 
 		if (!foundHistory) {
+			if (BM_PURGE_DEBUG) {
+				fmt::print("BM {0}  No history for this node, skipping\n", self->epoch);
+			}
 			continue;
 		}
 
-		if (BM_DEBUG) {
-			fmt::print("Found history entry for this node. It's granuleID is {0}\n",
+		if (BM_PURGE_DEBUG) {
+			fmt::print("BM {0}  Found history entry for this node. It's granuleID is {1}\n",
+			           self->epoch,
 			           currHistoryNode.granuleID.toString());
 		}
 
@@ -3499,33 +3536,45 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 		//   and so this granule should be partially deleted
 		// - otherwise, this granule is active, so don't schedule it for deletion
 		if (force || endVersion <= purgeVersion) {
-			if (BM_DEBUG) {
-				fmt::print("Granule {0} will be FULLY deleted\n", currHistoryNode.granuleID.toString());
+			if (BM_PURGE_DEBUG) {
+				fmt::print(
+				    "BM {0}   Granule {1} will be FULLY deleted\n", self->epoch, currHistoryNode.granuleID.toString());
 			}
 			toFullyDelete.push_back({ currHistoryNode.granuleID, historyKey, currRange });
 		} else if (startVersion < purgeVersion) {
-			if (BM_DEBUG) {
-				fmt::print("Granule {0} will be partially deleted\n", currHistoryNode.granuleID.toString());
+			if (BM_PURGE_DEBUG) {
+				fmt::print("BM {0}   Granule {1} will be partially deleted\n",
+				           self->epoch,
+				           currHistoryNode.granuleID.toString());
 			}
 			toPartiallyDelete.push_back({ currHistoryNode.granuleID, currRange });
 		}
 
 		// add all of the node's parents to the queue
+		if (BM_PURGE_DEBUG) {
+			fmt::print("BM {0}   Checking {1} parents\n", self->epoch, currHistoryNode.parentVersions.size());
+		}
 		for (int i = 0; i < currHistoryNode.parentVersions.size(); i++) {
 			// for (auto& parent : currHistoryNode.parentVersions.size()) {
 			// if we already added this node to queue, skip it; otherwise, mark it as visited
 			KeyRangeRef parentRange(currHistoryNode.parentBoundaries[i], currHistoryNode.parentBoundaries[i + 1]);
 			Version parentVersion = currHistoryNode.parentVersions[i];
-			if (visited.count({ parentRange.begin.begin(), parentVersion })) {
-				if (BM_DEBUG) {
-					fmt::print("Already added {0} to queue, so skipping it\n", currHistoryNode.granuleID.toString());
+			std::string beginStr = parentRange.begin.toString();
+			if (!visited.insert({ beginStr, parentVersion }).second) {
+				if (BM_PURGE_DEBUG) {
+					fmt::print("BM {0}     Already added [{1} - {2}) @ {3} - {4} to queue, so skipping it\n",
+					           self->epoch,
+					           parentRange.begin.printable(),
+					           parentRange.end.printable(),
+					           parentVersion,
+					           startVersion);
 				}
 				continue;
 			}
-			visited.insert({ parentRange.begin.begin(), parentVersion });
 
-			if (BM_DEBUG) {
-				fmt::print("Adding parent [{0} - {1}) with versions [{2} - {3}) to queue\n",
+			if (BM_PURGE_DEBUG) {
+				fmt::print("BM {0}     Adding parent [{1} - {2}) @ {3} - {4} to queue\n",
+				           self->epoch,
 				           parentRange.begin.printable(),
 				           parentRange.end.printable(),
 				           parentVersion,
@@ -3553,10 +3602,19 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 	// we won't run into any issues with trying to "re-delete" a blob file since deleting
 	// a file that doesn't exist is considered successful
 
+	TraceEvent("PurgeGranulesTraversalComplete", self->id)
+	    .detail("Epoch", self->epoch)
+	    .detail("Range", range)
+	    .detail("PurgeVersion", purgeVersion)
+	    .detail("Force", force)
+	    .detail("VisitedCount", visited.size())
+	    .detail("DeletingFullyCount", toFullyDelete.size())
+	    .detail("DeletingPartiallyCount", toPartiallyDelete.size());
+
 	state std::vector<Future<Void>> partialDeletions;
 	state int i;
-	if (BM_DEBUG) {
-		fmt::print("{0} granules to fully delete\n", toFullyDelete.size());
+	if (BM_PURGE_DEBUG) {
+		fmt::print("BM {0}: {1} granules to fully delete\n", self->epoch, toFullyDelete.size());
 	}
 	for (i = toFullyDelete.size() - 1; i >= 0; --i) {
 		state UID granuleId;
@@ -3564,22 +3622,22 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 		KeyRange keyRange;
 		std::tie(granuleId, historyKey, keyRange) = toFullyDelete[i];
 		// FIXME: consider batching into a single txn (need to take care of txn size limit)
-		if (BM_DEBUG) {
-			fmt::print("About to fully delete granule {0}\n", granuleId.toString());
+		if (BM_PURGE_DEBUG) {
+			fmt::print("BM {0}: About to fully delete granule {1}\n", self->epoch, granuleId.toString());
 		}
 		wait(fullyDeleteGranule(self, granuleId, historyKey, purgeVersion, range));
 	}
 
-	if (BM_DEBUG) {
-		fmt::print("{0} granules to partially delete\n", toPartiallyDelete.size());
+	if (BM_PURGE_DEBUG) {
+		fmt::print("BM {0}: {1} granules to partially delete\n", self->epoch, toPartiallyDelete.size());
 	}
 
 	for (i = toPartiallyDelete.size() - 1; i >= 0; --i) {
 		UID granuleId;
 		KeyRange range;
 		std::tie(granuleId, range) = toPartiallyDelete[i];
-		if (BM_DEBUG) {
-			fmt::print("About to partially delete granule {0}\n", granuleId.toString());
+		if (BM_PURGE_DEBUG) {
+			fmt::print("BM {0}: About to partially delete granule {1}\n", self->epoch, granuleId.toString());
 		}
 		partialDeletions.emplace_back(partiallyDeleteGranule(self, granuleId, purgeVersion, range));
 	}
@@ -3591,8 +3649,9 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 	// another purgeIntent that got written for this table while we were processing this one.
 	// If that is the case, we should not clear the key. Otherwise, we can just clear the key.
 
-	if (BM_DEBUG) {
-		fmt::print("Successfully purged range [{0} - {1}) at purgeVersion={2}\n",
+	if (BM_PURGE_DEBUG) {
+		fmt::print("BM {0}: Successfully purged range [{1} - {2}) at purgeVersion={3}\n",
+		           self->epoch,
 		           range.begin.printable(),
 		           range.end.printable(),
 		           purgeVersion);
@@ -3603,6 +3662,8 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 	    .detail("Range", range)
 	    .detail("PurgeVersion", purgeVersion)
 	    .detail("Force", force);
+
+	CODE_PROBE(true, "range purge complete");
 
 	++self->stats.purgesProcessed;
 	return Void();
@@ -3654,6 +3715,7 @@ ACTOR Future<Void> monitorPurgeKeys(Reference<BlobManagerData> self) {
 				// TODO: replace 10000 with a knob
 				state RangeResult purgeIntents = wait(tr->getRange(blobGranulePurgeKeys, BUGGIFY ? 1 : 10000));
 				if (purgeIntents.size()) {
+					CODE_PROBE(true, "BM found purges to process");
 					int rangeIdx = 0;
 					for (; rangeIdx < purgeIntents.size(); ++rangeIdx) {
 						Version purgeVersion;
@@ -3675,8 +3737,9 @@ ACTOR Future<Void> monitorPurgeKeys(Reference<BlobManagerData> self) {
 						}
 						purgeMap.insert(range, std::make_pair(purgeVersion, force));
 
-						if (BM_DEBUG) {
-							fmt::print("about to purge range [{0} - {1}) @ {2}, force={3}\n",
+						if (BM_PURGE_DEBUG) {
+							fmt::print("BM {0} about to purge range [{1} - {2}) @ {3}, force={4}\n",
+							           self->epoch,
 							           range.begin.printable(),
 							           range.end.printable(),
 							           purgeVersion,
@@ -3728,9 +3791,11 @@ ACTOR Future<Void> monitorPurgeKeys(Reference<BlobManagerData> self) {
 			}
 		}
 
-		if (BM_DEBUG) {
-			printf("Done clearing current set of purge intents.\n");
+		if (BM_PURGE_DEBUG) {
+			fmt::print("BM {0} Done clearing current set of purge intents.\n", self->epoch);
 		}
+
+		CODE_PROBE(true, "BM finished processing purge intents");
 	}
 }
 

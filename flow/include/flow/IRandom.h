@@ -173,6 +173,19 @@ public:
 	}
 
 	bool coinflip() { return (this->random01() < 0.5); }
+
+	// Picks a number between 2^minExp and 2^maxExp, but uniformly distributed over exponential buckets 2^n - 2^n+1
+	// For example, randomExp(0, 4) would have a 25% chance of returning 1, a 25% chance of returning 2-3, a 25% chance
+	// of returning 4-7, and a 25% chance of returning 8-15
+	// Similar in Expected Value to doing 1 << randomInt(minExp, maxExp+1), except numbers returned aren't just powers
+	// of 2
+	int randomExp(int minExp, int maxExp) {
+		if (minExp == maxExp) { // N=2, case
+			return 1 << minExp;
+		}
+		int val = 1 << this->randomInt(minExp, maxExp);
+		return this->randomInt(val, val * 2);
+	}
 };
 
 extern FILE* randLog;

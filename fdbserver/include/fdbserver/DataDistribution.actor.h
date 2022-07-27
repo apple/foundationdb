@@ -39,6 +39,7 @@ enum class RelocateReason { INVALID = -1, OTHER, REBALANCE_DISK, REBALANCE_READ 
 
 // One-to-one relationship to the priority knobs
 enum class DataMovementReason {
+	INVALID,
 	RECOVER_MOVE,
 	REBALANCE_UNDERUTILIZED_TEAM,
 	REBALANCE_OVERUTILIZED_TEAM,
@@ -59,6 +60,8 @@ enum class DataMovementReason {
 };
 
 struct DDShardInfo;
+
+extern int dataMovementPriority(DataMovementReason moveReason);
 
 // Represents a data move in DD.
 struct DataMove {
@@ -89,9 +92,14 @@ struct RelocateShard {
 	std::shared_ptr<DataMove> dataMove; // Not null if this is a restored data move.
 	UID dataMoveId;
 	RelocateReason reason;
-	RelocateShard() : priority(0), cancelled(false), dataMoveId(anonymousShardId), reason(RelocateReason::INVALID) {}
-	RelocateShard(KeyRange const& keys, int priority, RelocateReason reason)
-	  : keys(keys), priority(priority), cancelled(false), dataMoveId(anonymousShardId), reason(reason) {}
+	DataMovementReason moveReason;
+	RelocateShard()
+	  : priority(0), cancelled(false), dataMoveId(anonymousShardId), reason(RelocateReason::INVALID),
+	    moveReason(DataMovementReason::INVALID) {}
+	RelocateShard(KeyRange const& keys, DataMovementReason moveReason, RelocateReason reason)
+	  : keys(keys), cancelled(false), dataMoveId(anonymousShardId), reason(reason), moveReason(moveReason) {
+		priority = dataMovementPriority(moveReason);
+	}
 
 	bool isRestore() const { return this->dataMove != nullptr; }
 };
@@ -286,6 +294,7 @@ class ShardsAffectedByTeamFailure : public ReferenceCounted<ShardsAffectedByTeam
 public:
 	ShardsAffectedByTeamFailure() {}
 
+	enum class CheckMode { Normal = 0, ForceCheck, ForceNoCheck };
 	struct Team {
 		std::vector<UID> servers; // sorted
 		bool primary;
@@ -335,6 +344,8 @@ public:
 	void finishMove(KeyRangeRef keys);
 	void check() const;
 
+	void setCheckMode(CheckMode);
+
 	PromiseStream<KeyRange> restartShardTracker;
 
 private:
@@ -348,6 +359,7 @@ private:
 		}
 	};
 
+	CheckMode checkMode = CheckMode::Normal;
 	KeyRangeMap<std::pair<std::vector<Team>, std::vector<Team>>>
 	    shard_teams; // A shard can be affected by the failure of multiple teams if it is a queued merge, or when
 	                 // usable_regions > 1
