@@ -922,7 +922,8 @@ ACTOR Future<Void> resetPreviousCoordinatorsKey(Database cx) {
 
 ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
                                                                ClusterConnectionString* conn,
-                                                               std::string newName) {
+                                                               std::string newName,
+                                                               bool disableConfigDB) {
 	TraceEvent("ChangeQuorumCheckerStart").detail("NewConnectionString", conn->toString());
 	state Optional<ClusterConnectionString> clusterConnectionStringOptional =
 	    wait(getClusterConnectionStringFromStorageServer(tr));
@@ -955,7 +956,9 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 	std::sort(old.coords.begin(), old.coords.end());
 	if (conn->hostnames == old.hostnames && conn->coords == old.coords && old.clusterKeyName() == newName) {
 		connectionStrings.clear();
-		wait(verifyConfigurationDatabaseAlive(tr->getDatabase()));
+		if (!disableConfigDB) {
+			wait(verifyConfigurationDatabaseAlive(tr->getDatabase()));
+		}
 		wait(resetPreviousCoordinatorsKey(tr->getDatabase()));
 		return CoordinatorsResult::SAME_NETWORK_ADDRESSES;
 	}
