@@ -199,7 +199,7 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 					                                 firstGreaterOrEqual(ckr.begin),
 					                                 firstGreaterOrEqual(ckr.end),
 					                                 GetRangeLimits(),
-					                                 Reverse::False,
+					                                 false,
 					                                 conflictingKeyRangesFuture.get()));
 
 					tr2 = makeReference<ReadYourWritesTransaction>(cx);

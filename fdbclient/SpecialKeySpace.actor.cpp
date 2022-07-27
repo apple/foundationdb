@@ -2289,10 +2289,10 @@ ACTOR Future<Void> validateSpecialSubrangeRead(ReadYourWritesTransaction* ryw,
                                                KeySelector begin,
                                                KeySelector end,
                                                GetRangeLimits limits,
-                                               Reverse reverse,
+                                               bool reverse,
                                                RangeResult result) {
 	if (!result.size()) {
-		RangeResult testResult = wait(ryw->getRange(begin, end, limits, Snapshot::True, reverse));
+		RangeResult testResult = wait(ryw->getRange(begin, end, limits, true, reverse));
 		ASSERT(testResult == result);
 		return Void();
 	}
@@ -2345,24 +2345,7 @@ ACTOR Future<Void> validateSpecialSubrangeRead(ReadYourWritesTransaction* ryw,
 	}
 
 	// Test
-	RangeResult testResult = wait(ryw->getRange(testBegin, testEnd, limits, Snapshot::True, reverse));
-	if (testResult != expectedResult) {
-		fmt::print("Reverse: {}\n", reverse);
-		fmt::print("Original range: [{}, {})\n", begin.toString(), end.toString());
-		fmt::print("Original result:\n");
-		for (const auto& kr : result) {
-			fmt::print("	{} -> {}\n", kr.key.printable(), kr.value.printable());
-		}
-		fmt::print("Test range: [{}, {})\n", testBegin.getKey().printable(), testEnd.getKey().printable());
-		fmt::print("Expected:\n");
-		for (const auto& kr : expectedResult) {
-			fmt::print("	{} -> {}\n", kr.key.printable(), kr.value.printable());
-		}
-		fmt::print("Got:\n");
-		for (const auto& kr : testResult) {
-			fmt::print("	{} -> {}\n", kr.key.printable(), kr.value.printable());
-		}
-		ASSERT(testResult == expectedResult);
-	}
+	RangeResult testResult = wait(ryw->getRange(testBegin, testEnd, limits, true, reverse));
+	ASSERT(testResult == expectedResult);
 	return Void();
 }

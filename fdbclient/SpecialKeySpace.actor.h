@@ -428,7 +428,7 @@ ACTOR Future<Void> validateSpecialSubrangeRead(ReadYourWritesTransaction* ryw,
                                                KeySelector begin,
                                                KeySelector end,
                                                GetRangeLimits limits,
-                                               Reverse reverse,
+                                               bool reverse,
                                                RangeResult result);
 
 #include "flow/unactorcompiler.h"
