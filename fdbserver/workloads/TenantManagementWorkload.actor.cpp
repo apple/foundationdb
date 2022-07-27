@@ -156,9 +156,8 @@ struct TenantManagementWorkload : TestWorkload {
 			wait(tr->commit());
 		} else if (operationType == OperationType::MANAGEMENT_DATABASE) {
 			ASSERT(tenantsToCreate.size() == 1);
-			wait(success(TenantAPI::createTenant(cx.getReference(),
-			                                     tenantsToCreate.begin()->first,
-			                                     tenantsToCreate.begin()->second)));
+			wait(success(TenantAPI::createTenant(
+			    cx.getReference(), tenantsToCreate.begin()->first, tenantsToCreate.begin()->second)));
 		} else if (operationType == OperationType::MANAGEMENT_TRANSACTION) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			int64_t _nextId = wait(TenantAPI::getNextTenantId(tr));
@@ -167,8 +166,7 @@ struct TenantManagementWorkload : TestWorkload {
 			std::vector<Future<Void>> createFutures;
 			for (auto [tenant, entry] : tenantsToCreate) {
 				entry.setId(nextId++);
-				createFutures.push_back(
-				    success(TenantAPI::createTenantTransaction(tr, tenant, entry)));
+				createFutures.push_back(success(TenantAPI::createTenantTransaction(tr, tenant, entry)));
 			}
 			TenantMetadata::lastTenantId.set(tr, nextId - 1);
 			wait(waitForAll(createFutures));
@@ -249,8 +247,8 @@ struct TenantManagementWorkload : TestWorkload {
 
 					// Update our local tenant state to include the newly created one
 					self->maxId = entry.get().id;
-					self->createdTenants[tenantItr->first] = TenantData(
-					    entry.get().id, tenantItr->second.tenantGroup, true, tenantItr->second.encrypted);
+					self->createdTenants[tenantItr->first] =
+					    TenantData(entry.get().id, tenantItr->second.tenantGroup, true, tenantItr->second.encrypted);
 
 					// If this tenant has a tenant group, create or update the entry for it
 					if (tenantItr->second.tenantGroup.present()) {
