@@ -361,8 +361,8 @@ public:
 	}
 
 	// Initialize the required internal states of DataDistributor. It's necessary before DataDistributor start working.
-	// Doesn't include initialization of optional components, like TenantCache, DDQueueData, Tracker, TeamCollection.
-	// The components should call its own ::init methods.
+	// Doesn't include initialization of optional components, like TenantCache, DDQueue, Tracker, TeamCollection. The
+	// components should call its own ::init methods.
 	ACTOR static Future<Void> init(Reference<DataDistributor> self, const DDEnabledState* ddEnabledState) {
 		loop {
 			TraceEvent("DDInitTakingMoveKeysLock", self->ddId).log();
@@ -627,7 +627,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self, const DDEna
 			                                                          storageTeamSize,
 			                                                          self->configuration.storageTeamSize,
 			                                                          ddEnabledState),
-			                                    "DDQueueData",
+			                                    "DDQueue",
 			                                    self->ddId,
 			                                    &normalDDQueueErrors()));
 
