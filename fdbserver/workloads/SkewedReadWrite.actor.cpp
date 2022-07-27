@@ -215,7 +215,8 @@ struct SkewedReadWriteWorkload : ReadWriteCommon {
 			self->startReadWriteClients(cx, clients);
 			wait(timeout(waitForAll(clients), self->testDuration / self->skewRound, Void()));
 			clients.clear();
-			wait(delay(5.0) >> updateServerShards(cx, self));
+			wait(delay(5.0));
+			wait(updateServerShards(cx, self));
 		}
 
 		return Void();

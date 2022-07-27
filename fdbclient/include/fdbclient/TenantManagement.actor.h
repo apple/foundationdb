@@ -19,6 +19,7 @@
  */
 
 #pragma once
+#include "fdbclient/ClientBooleanParams.h"
 #include "flow/IRandom.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_TENANT_MANAGEMENT_ACTOR_G_H)
 #define FDBCLIENT_TENANT_MANAGEMENT_ACTOR_G_H
@@ -140,6 +141,16 @@ Future<std::pair<Optional<TenantMapEntry>, bool>> createTenantTransaction(Transa
 		}
 	}
 
+	// This is idempotent because we only add an entry to the tenant map if it isn't already there
+	TenantMetadata::tenantCount.atomicOp(tr, 1, MutationRef::AddValue);
+
+	// Read the tenant count after incrementing the counter so that simultaneous attempts to create
+	// tenants in the same transaction are properly reflected.
+	int64_t tenantCount = wait(TenantMetadata::tenantCount.getD(tr, Snapshot::False, 0));
+	if (tenantCount > CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER) {
+		throw cluster_no_capacity();
+	}
+
 	return std::make_pair(tenantEntry, true);
 }
 
@@ -232,7 +243,10 @@ Future<Void> deleteTenantTransaction(Transaction tr,
 			throw tenant_not_empty();
 		}
 
+		// This is idempotent because we only erase an entry from the tenant map if it is present
 		TenantMetadata::tenantMap.erase(tr, name);
+		TenantMetadata::tenantCount.atomicOp(tr, -1, MutationRef::AddValue);
+
 		if (tenantEntry.get().tenantGroup.present()) {
 			TenantMetadata::tenantGroupTenantIndex.erase(tr,
 			                                             Tuple::makeTuple(tenantEntry.get().tenantGroup.get(), name));

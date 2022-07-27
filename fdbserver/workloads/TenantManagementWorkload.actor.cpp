@@ -20,7 +20,9 @@
 
 #include <cstdint>
 #include <limits>
+#include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/FDBOptions.g.h"
+#include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/RunTransaction.actor.h"
 #include "fdbclient/TenantManagement.actor.h"
 #include "fdbclient/TenantSpecialKeys.actor.h"
@@ -197,6 +199,7 @@ struct TenantManagementWorkload : TestWorkload {
 		// True if any tenant group name starts with \xff
 		state bool hasSystemTenantGroup = false;
 
+		state int newTenants = 0;
 		state std::map<TenantName, TenantMapEntry> tenantsToCreate;
 		for (int i = 0; i < numTenants; ++i) {
 			TenantName tenant = self->chooseTenantName(true);
@@ -206,21 +209,39 @@ struct TenantManagementWorkload : TestWorkload {
 
 			TenantMapEntry entry;
 			entry.tenantGroup = self->chooseTenantGroup(true);
-			tenantsToCreate[tenant] = entry;
 
-			alreadyExists = alreadyExists || self->createdTenants.count(tenant);
+			if (self->createdTenants.count(tenant)) {
+				alreadyExists = true;
+			} else if (!tenantsToCreate.count(tenant)) {
+				++newTenants;
+			}
+
+			tenantsToCreate[tenant] = entry;
 			hasSystemTenant = hasSystemTenant || tenant.startsWith("\xff"_sr);
 			hasSystemTenantGroup = hasSystemTenantGroup || entry.tenantGroup.orDefault(""_sr).startsWith("\xff"_sr);
 		}
 
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+		state int64_t minTenantCount = std::numeric_limits<int64_t>::max();
+		state int64_t finalTenantCount = 0;
 
 		loop {
 			try {
+				if (operationType != OperationType::MANAGEMENT_DATABASE) {
+					tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+					wait(store(finalTenantCount, TenantMetadata::tenantCount.getD(tr, Snapshot::False, 0)));
+					minTenantCount = std::min(finalTenantCount, minTenantCount);
+				}
+
 				wait(createImpl(cx, tr, tenantsToCreate, operationType, self));
 
 				if (operationType == OperationType::MANAGEMENT_DATABASE) {
 					ASSERT(!alreadyExists);
+				} else {
+					// Make sure that we had capacity to create the tenants. This cannot be validated for database
+					// operations because we cannot determine the tenant count in the same transaction that the tenant
+					// is created
+					ASSERT(minTenantCount + newTenants <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER);
 				}
 
 				// It is not legal to create a tenant or tenant group starting with \xff
@@ -296,6 +317,13 @@ struct TenantManagementWorkload : TestWorkload {
 					return Void();
 				} else if (e.code() == error_code_invalid_tenant_group_name) {
 					ASSERT(hasSystemTenantGroup);
+					return Void();
+				} else if (e.code() == error_code_cluster_no_capacity) {
+					// Confirm that we overshot our capacity. This check cannot be done for database operations
+					// because we cannot transactionally get the tenant count with the creation.
+					if (operationType != OperationType::MANAGEMENT_DATABASE) {
+						ASSERT(finalTenantCount + newTenants > CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER);
+					}
 					return Void();
 				}
 
@@ -1060,6 +1088,26 @@ struct TenantManagementWorkload : TestWorkload {
 		return Void();
 	}
 
+	// Verify that the tenant count matches the actual number of tenants in the cluster and that we haven't created too
+	// many
+	ACTOR static Future<Void> checkTenantCount(Database cx) {
+		state Reference<ReadYourWritesTransaction> tr = cx->createTransaction();
+		loop {
+			try {
+				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				state int64_t tenantCount = wait(TenantMetadata::tenantCount.getD(tr, Snapshot::False, 0));
+				KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>> tenants =
+				    wait(TenantMetadata::tenantMap.getRange(tr, {}, {}, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1));
+
+				ASSERT(tenants.results.size() == tenantCount && !tenants.more);
+				ASSERT(tenantCount <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER);
+				return Void();
+			} catch (Error& e) {
+				wait(tr->onError(e));
+			}
+		}
+	}
+
 	// Verify that the set of tenants in the database matches our local state
 	ACTOR static Future<Void> compareTenants(Database cx, TenantManagementWorkload* self) {
 		state std::map<TenantName, TenantData>::iterator localItr = self->createdTenants.begin();
@@ -1180,6 +1228,10 @@ struct TenantManagementWorkload : TestWorkload {
 			} catch (Error& e) {
 				wait(tr.onError(e));
 			}
+		}
+
+		if (self->clientId == 0) {
+			wait(checkTenantCount(cx));
 		}
 
 		wait(compareTenants(cx, self) && compareTenantGroups(cx, self));
