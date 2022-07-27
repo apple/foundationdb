@@ -286,8 +286,29 @@ struct GetMetricsListRequest {
 	GetMetricsListRequest(KeyRange const& keys, const int shardLimit) : keys(keys), shardLimit(shardLimit) {}
 };
 
+// send request to TeamCollection through interface
 struct TeamCollectionInterface {
 	PromiseStream<GetTeamRequest> getTeam;
+};
+
+// send request to DDTracker through interface
+struct DDTrackerInterface {
+	Reference<AsyncVar<bool>> readyToStart;
+
+	PromiseStream<GetMetricsRequest> getShardMetrics;
+	PromiseStream<KeyRange> restartShardTracker;
+	PromiseStream<GetTopKMetricsRequest> getTopKMetrics;
+	PromiseStream<GetMetricsListRequest> getShardMetricsList;
+	PromiseStream<Promise<int64_t>> getAverageShardBytes;
+};
+
+// send request to DDQueue through interface
+struct DDQueueInterface {
+	Reference<AsyncVar<bool>> readyToStart;
+
+	PromiseStream<RelocateShard> relocationProducer;
+	PromiseStream<Promise<int>> getUnhealthyRelocationCount;
+	Reference<AsyncVar<bool>> processingUnhealthy, processingWiggle;
 };
 
 class ShardsAffectedByTeamFailure : public ReferenceCounted<ShardsAffectedByTeamFailure> {
@@ -345,8 +366,6 @@ public:
 	void check() const;
 
 	void setCheckMode(CheckMode);
-
-	PromiseStream<KeyRange> restartShardTracker;
 
 private:
 	struct OrderByTeamKey {
@@ -421,30 +440,20 @@ struct ShardTrackedData {
 
 ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> initData,
                                            Database cx,
-                                           PromiseStream<RelocateShard> output,
                                            Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
-                                           PromiseStream<GetMetricsRequest> getShardMetrics,
-                                           FutureStream<GetTopKMetricsRequest> getTopKMetrics,
-                                           PromiseStream<GetMetricsListRequest> getShardMetricsList,
-                                           FutureStream<Promise<int64_t>> getAverageShardBytes,
-                                           Promise<Void> readyToStart,
+                                           std::shared_ptr<DDTrackerInterface> trackerInterface,
+                                           std::shared_ptr<DDQueueInterface> queueInterface,
                                            Reference<AsyncVar<bool>> zeroHealthyTeams,
                                            UID distributorId,
                                            KeyRangeMap<ShardTrackedData>* shards,
                                            bool* trackerCancelled);
 
 ACTOR Future<Void> dataDistributionQueue(Database cx,
-                                         PromiseStream<RelocateShard> output,
-                                         FutureStream<RelocateShard> input,
-                                         PromiseStream<GetMetricsRequest> getShardMetrics,
-                                         PromiseStream<GetTopKMetricsRequest> getTopKMetrics,
-                                         Reference<AsyncVar<bool>> processingUnhealthy,
-                                         Reference<AsyncVar<bool>> processingWiggle,
+                                         std::shared_ptr<DDTrackerInterface> trackerInterface,
+                                         std::shared_ptr<DDQueueInterface> queueInterface,
                                          std::vector<TeamCollectionInterface> teamCollection,
                                          Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
                                          MoveKeysLock lock,
-                                         PromiseStream<Promise<int64_t>> getAverageShardBytes,
-                                         FutureStream<Promise<int>> getUnhealthyRelocationCount,
                                          UID distributorId,
                                          int teamSize,
                                          int singleRegionTeamSize,

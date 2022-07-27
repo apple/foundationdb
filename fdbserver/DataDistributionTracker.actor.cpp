@@ -83,7 +83,6 @@ struct DataDistributionTracker {
 	PromiseStream<RelocateShard> output;
 	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
 
-	Promise<Void> readyToStart;
 	Reference<AsyncVar<bool>> anyZeroHealthyTeams;
 
 	// Read hot detection
@@ -117,18 +116,22 @@ struct DataDistributionTracker {
 		}
 	};
 
+	// component interfaces
+	std::shared_ptr<DDTrackerInterface> trackerInterface;
+	std::shared_ptr<DDQueueInterface> queueInterface;
+
 	DataDistributionTracker(Database cx,
 	                        UID distributorId,
-	                        Promise<Void> const& readyToStart,
-	                        PromiseStream<RelocateShard> const& output,
 	                        Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
 	                        Reference<AsyncVar<bool>> anyZeroHealthyTeams,
 	                        KeyRangeMap<ShardTrackedData>& shards,
-	                        bool& trackerCancelled)
+	                        bool& trackerCancelled,
+	                        std::shared_ptr<DDTrackerInterface> trackerInterface = nullptr,
+	                        std::shared_ptr<DDQueueInterface> queueInterface = nullptr)
 	  : cx(cx), distributorId(distributorId), shards(shards), sizeChanges(false), systemSizeEstimate(0),
-	    dbSizeEstimate(new AsyncVar<int64_t>()), maxShardSize(new AsyncVar<Optional<int64_t>>()), output(output),
-	    shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), readyToStart(readyToStart),
-	    anyZeroHealthyTeams(anyZeroHealthyTeams), trackerCancelled(trackerCancelled) {}
+	    dbSizeEstimate(new AsyncVar<int64_t>()), maxShardSize(new AsyncVar<Optional<int64_t>>()),
+	    shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), anyZeroHealthyTeams(anyZeroHealthyTeams),
+	    trackerCancelled(trackerCancelled), trackerInterface(trackerInterface), queueInterface(queueInterface) {}
 
 	~DataDistributionTracker() {
 		trackerCancelled = true;
@@ -738,7 +741,9 @@ ACTOR Future<Void> shardEvaluator(DataDistributionTracker* self,
 ACTOR Future<Void> shardTracker(DataDistributionTracker::SafeAccessor self,
                                 KeyRange keys,
                                 Reference<AsyncVar<Optional<ShardMetrics>>> shardSize) {
-	wait(yieldedFuture(self()->readyToStart.getFuture()));
+	while (!self()->trackerInterface->readyToStart->get()) {
+		wait(yieldedFuture(self()->trackerInterface->readyToStart->onChange()));
+	}
 
 	if (!shardSize->get().present())
 		wait(shardSize->onChange());
@@ -783,7 +788,7 @@ void restartShardTrackers(DataDistributionTracker* self, KeyRangeRef keys, Optio
 		if (!ranges[i].value.trackShard.isValid() && ranges[i].begin != keys.begin) {
 			// When starting, key space will be full of "dummy" default contructed entries.
 			// This should happen when called from trackInitialShards()
-			ASSERT(!self->readyToStart.isSet());
+			ASSERT(!self->trackerInterface->readyToStart->get());
 			continue;
 		}
 
@@ -823,7 +828,7 @@ ACTOR Future<Void> trackInitialShards(DataDistributionTracker* self, Reference<I
 	}
 
 	Future<Void> initialSize = changeSizes(self, KeyRangeRef(allKeys.begin, allKeys.end), 0);
-	self->readyToStart.send(Void());
+	self->trackerInterface->readyToStart->set(true);
 	wait(initialSize);
 	self->maxShardSizeUpdater = updateMaxShardSize(self->dbSizeEstimate, self->maxShardSize);
 
@@ -990,65 +995,69 @@ ACTOR Future<Void> fetchShardMetricsList_impl(DataDistributionTracker* self, Get
 ACTOR Future<Void> fetchShardMetricsList(DataDistributionTracker* self, GetMetricsListRequest req) {
 	choose {
 		when(wait(fetchShardMetricsList_impl(self, req))) {}
-		when(wait(delay(SERVER_KNOBS->DD_SHARD_METRICS_TIMEOUT))) { req.reply.sendError(timed_out()); }
+		when(wait(delay(SERVER_KNOBS->DD_SHARD_METRICS_TIMEOUT))) {
+			req.reply.sendError(timed_out());
+		}
 	}
 	return Void();
 }
 
+ACTOR Future<Void> serveDDTrackerInterface(DataDistributionTracker* self) {
+	loop choose {
+		when(Promise<int64_t> req = waitNext(self->trackerInterface->getAverageShardBytes.getFuture())) {
+			req.send(self->maxShardSize->get().get() / 2);
+		}
+		when(GetMetricsRequest req = waitNext(self->trackerInterface->getShardMetrics.getFuture())) {
+			self->sizeChanges.add(fetchShardMetrics(self, req));
+		}
+		when(GetTopKMetricsRequest req = waitNext(self->trackerInterface->getTopKMetrics.getFuture())) {
+			self->sizeChanges.add(fetchTopKShardMetrics(self, req));
+		}
+		when(GetMetricsListRequest req = waitNext(self->trackerInterface->getShardMetricsList.getFuture())) {
+			self->sizeChanges.add(fetchShardMetricsList(self, req));
+		}
+		when(KeyRange req = waitNext(self->trackerInterface->restartShardTracker.getFuture())) {
+			restartShardTrackers(self, req);
+		}
+	}
+}
+
 ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> initData,
                                            Database cx,
-                                           PromiseStream<RelocateShard> output,
                                            Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
-                                           PromiseStream<GetMetricsRequest> getShardMetrics,
-                                           FutureStream<GetTopKMetricsRequest> getTopKMetrics,
-                                           PromiseStream<GetMetricsListRequest> getShardMetricsList,
-                                           FutureStream<Promise<int64_t>> getAverageShardBytes,
-                                           Promise<Void> readyToStart,
+                                           std::shared_ptr<DDTrackerInterface> trackerInterface,
+                                           std::shared_ptr<DDQueueInterface> queueInterface,
                                            Reference<AsyncVar<bool>> anyZeroHealthyTeams,
                                            UID distributorId,
                                            KeyRangeMap<ShardTrackedData>* shards,
                                            bool* trackerCancelled) {
 	state DataDistributionTracker self(cx,
 	                                   distributorId,
-	                                   readyToStart,
-	                                   output,
 	                                   shardsAffectedByTeamFailure,
 	                                   anyZeroHealthyTeams,
 	                                   *shards,
-	                                   *trackerCancelled);
+	                                   *trackerCancelled,
+	                                   trackerInterface,
+	                                   queueInterface);
 	state Future<Void> loggingTrigger = Void();
 	state Future<Void> readHotDetect = readHotDetector(&self);
 	state Reference<EventCacheHolder> ddTrackerStatsEventHolder = makeReference<EventCacheHolder>("DDTrackerStats");
 	try {
 		wait(trackInitialShards(&self, initData));
 		initData = Reference<InitialDataDistribution>();
+		state Future<Void> interfaceServer = serveDDTrackerInterface(&self);
 
 		loop choose {
-			when(Promise<int64_t> req = waitNext(getAverageShardBytes)) {
-				req.send(self.maxShardSize->get().get() / 2);
-			}
 			when(wait(loggingTrigger)) {
 				TraceEvent("DDTrackerStats", self.distributorId)
 				    .detail("Shards", self.shards.size())
 				    .detail("TotalSizeBytes", self.dbSizeEstimate->get())
 				    .detail("SystemSizeBytes", self.systemSizeEstimate)
 				    .trackLatest(ddTrackerStatsEventHolder->trackingKey);
-
 				loggingTrigger = delay(SERVER_KNOBS->DATA_DISTRIBUTION_LOGGING_INTERVAL, TaskPriority::FlushTrace);
 			}
-			when(GetMetricsRequest req = waitNext(getShardMetrics.getFuture())) {
-				self.sizeChanges.add(fetchShardMetrics(&self, req));
-			}
-			when(GetTopKMetricsRequest req = waitNext(getTopKMetrics)) {
-				self.sizeChanges.add(fetchTopKShardMetrics(&self, req));
-			}
-			when(GetMetricsListRequest req = waitNext(getShardMetricsList.getFuture())) {
-				self.sizeChanges.add(fetchShardMetricsList(&self, req));
-			}
 			when(wait(self.sizeChanges.getResult())) {}
-			when(KeyRange req = waitNext(self.shardsAffectedByTeamFailure->restartShardTracker.getFuture())) {
-				restartShardTrackers(&self, req);
-			}
+			when(wait(interfaceServer)) {}
 		}
 	} catch (Error& e) {
 		TraceEvent(SevError, "DataDistributionTrackerError", self.distributorId).error(e);

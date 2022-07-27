@@ -313,16 +313,17 @@ public:
 	// fully-functional.
 	DDTeamCollection* teamCollection;
 	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
-	// consumer is a yield stream from producer. The RelocateShard is pushed into relocationProducer and popped from
-	// relocationConsumer (by DDQueue)
-	PromiseStream<RelocateShard> relocationProducer, relocationConsumer;
+
+	// component interfaces
+	std::shared_ptr<DDTrackerInterface> trackerInterface;
+	std::shared_ptr<DDQueueInterface> queueInterface;
 
 	DataDistributor(Reference<AsyncVar<ServerDBInfo> const> const& db, UID id)
 	  : dbInfo(db), ddId(id), txnProcessor(nullptr), initialDDEventHolder(makeReference<EventCacheHolder>("InitialDD")),
 	    movingDataEventHolder(makeReference<EventCacheHolder>("MovingData")),
 	    totalDataInFlightEventHolder(makeReference<EventCacheHolder>("TotalDataInFlight")),
 	    totalDataInFlightRemoteEventHolder(makeReference<EventCacheHolder>("TotalDataInFlightRemote")),
-	    teamCollection(nullptr) {}
+	    teamCollection(nullptr), trackerInterface(new DDTrackerInterface), queueInterface(new DDQueueInterface) {}
 
 	// bootstrap steps
 
@@ -472,7 +473,7 @@ public:
 				if (!unhealthy && self->configuration.usableRegions > 1) {
 					unhealthy = iShard.remoteSrc.size() != self->configuration.storageTeamSize;
 				}
-				self->relocationProducer.send(
+				self->queueInterface->relocationProducer.send(
 				    RelocateShard(keys,
 				                  unhealthy ? DataMovementReason::TEAM_UNHEALTHY : DataMovementReason::RECOVER_MOVE,
 				                  RelocateReason::OTHER));
@@ -495,7 +496,7 @@ public:
 				RelocateShard rs(meta.range, DataMovementReason::RECOVER_MOVE, RelocateReason::OTHER);
 				rs.dataMoveId = meta.id;
 				rs.cancelled = true;
-				self->relocationProducer.send(rs);
+				self->queueInterface.relocationProducer.send(rs);
 				TraceEvent("DDInitScheduledCancelDataMove", self->ddId).detail("DataMove", meta.toString());
 			} else if (it.value()->valid) {
 				TraceEvent(SevDebug, "DDInitFoundDataMove", self->ddId).detail("DataMove", meta.toString());
@@ -512,13 +513,13 @@ public:
 
 				// Since a DataMove could cover more than one keyrange, e.g., during merge, we need to define
 				// the target shard and restart the shard tracker.
-				self->shardsAffectedByTeamFailure->restartShardTracker.send(rs.keys);
+				self->trackerInterface->restartShardTracker.send(rs.keys);
 				self->shardsAffectedByTeamFailure->defineShard(rs.keys);
 
 				// When restoring a DataMove, the destination team is determined, and hence we need to register
 				// the data move now, so that team failures can be captured.
 				self->shardsAffectedByTeamFailure->moveShard(rs.keys, teams);
-				self->relocationProducer.send(rs);
+				self->queueInterface->relocationProducer.send(rs);
 				wait(yield(TaskPriority::DataDistribution));
 			}
 		}
@@ -537,9 +538,7 @@ public:
 };
 
 // Runs the data distribution algorithm for FDB, including the DD Queue, DD tracker, and DD team collection
-ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
-                                    PromiseStream<GetMetricsListRequest> getShardMetricsList,
-                                    const DDEnabledState* ddEnabledState) {
+ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self, const DDEnabledState* ddEnabledState) {
 	state Database cx = openDBOnServer(self->dbInfo, TaskPriority::DataDistributionLaunch, LockAware::True);
 	cx->locationCacheSize = SERVER_KNOBS->DD_LOCATION_CACHE_SIZE;
 	self->txnProcessor = std::shared_ptr<IDDTxnProcessor>(new DDTxnProcessor(cx));
@@ -574,13 +573,10 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			// When/If this assertion fails, Evan owes Ben a pat on the back for his foresight
 			ASSERT(self->configuration.storageTeamSize > 0);
 
-			state PromiseStream<Promise<int64_t>> getAverageShardBytes;
-			state PromiseStream<Promise<int>> getUnhealthyRelocationCount;
-			state PromiseStream<GetMetricsRequest> getShardMetrics;
-			state PromiseStream<GetTopKMetricsRequest> getTopKShardMetrics;
-			state Reference<AsyncVar<bool>> processingUnhealthy(new AsyncVar<bool>(false));
-			state Reference<AsyncVar<bool>> processingWiggle(new AsyncVar<bool>(false));
-			state Promise<Void> readyToStart;
+			self->queueInterface->processingUnhealthy = makeReference<AsyncVar<bool>>(false);
+			self->queueInterface->processingWiggle = makeReference<AsyncVar<bool>>(false);
+			self->queueInterface->readyToStart = makeReference<AsyncVar<bool>>(false);
+			self->trackerInterface->readyToStart = self->queueInterface->readyToStart;
 
 			self->shardsAffectedByTeamFailure = makeReference<ShardsAffectedByTeamFailure>();
 			wait(self->resumeRelocations());
@@ -612,13 +608,9 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			actors.push_back(pollMoveKeysLock(cx, self->lock, ddEnabledState));
 			actors.push_back(reportErrorsExcept(dataDistributionTracker(self->initData,
 			                                                            cx,
-			                                                            self->relocationProducer,
 			                                                            self->shardsAffectedByTeamFailure,
-			                                                            getShardMetrics,
-			                                                            getTopKShardMetrics.getFuture(),
-			                                                            getShardMetricsList,
-			                                                            getAverageShardBytes.getFuture(),
-			                                                            readyToStart,
+			                                                            self->trackerInterface,
+			                                                            self->queueInterface,
 			                                                            anyZeroHealthyTeams,
 			                                                            self->ddId,
 			                                                            &shards,
@@ -627,17 +619,11 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			                                    self->ddId,
 			                                    &normalDDQueueErrors()));
 			actors.push_back(reportErrorsExcept(dataDistributionQueue(cx,
-			                                                          self->relocationProducer,
-			                                                          self->relocationConsumer.getFuture(),
-			                                                          getShardMetrics,
-			                                                          getTopKShardMetrics,
-			                                                          processingUnhealthy,
-			                                                          processingWiggle,
+			                                                          self->trackerInterface,
+			                                                          self->queueInterface,
 			                                                          tcis,
 			                                                          self->shardsAffectedByTeamFailure,
 			                                                          self->lock,
-			                                                          getAverageShardBytes,
-			                                                          getUnhealthyRelocationCount.getFuture(),
 			                                                          self->ddId,
 			                                                          storageTeamSize,
 			                                                          self->configuration.storageTeamSize,
@@ -1310,7 +1296,6 @@ ACTOR Future<Void> ddGetMetrics(GetDataDistributorMetricsRequest req,
 ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncVar<ServerDBInfo> const> db) {
 	state Reference<DataDistributor> self(new DataDistributor(db, di.id()));
 	state Future<Void> collection = actorCollection(self->addActor.getFuture());
-	state PromiseStream<GetMetricsListRequest> getShardMetricsList;
 	state Database cx = openDBOnServer(db, TaskPriority::DefaultDelay, LockAware::True);
 	state ActorCollection actors(false);
 	state DDEnabledState ddEnabledState;
@@ -1323,11 +1308,8 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 		TraceEvent("DataDistributorRunning", di.id());
 		self->addActor.send(waitFailureServer(di.waitFailure.getFuture()));
 		self->addActor.send(cacheServerWatcher(&cx));
-		state Future<Void> distributor =
-		    reportErrorsExcept(dataDistribution(self, getShardMetricsList, &ddEnabledState),
-		                       "DataDistribution",
-		                       di.id(),
-		                       &normalDataDistributorErrors());
+		state Future<Void> distributor = reportErrorsExcept(
+		    dataDistribution(self, &ddEnabledState), "DataDistribution", di.id(), &normalDataDistributorErrors());
 
 		loop choose {
 			when(wait(distributor || collection)) {
@@ -1340,7 +1322,7 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 				break;
 			}
 			when(GetDataDistributorMetricsRequest req = waitNext(di.dataDistributorMetrics.getFuture())) {
-				actors.add(ddGetMetrics(req, getShardMetricsList));
+				actors.add(ddGetMetrics(req, self->trackerInterface->getShardMetricsList));
 			}
 			when(DistributorSnapRequest snapReq = waitNext(di.distributorSnapReq.getFuture())) {
 				auto& snapUID = snapReq.snapUID;
@@ -1473,6 +1455,8 @@ TEST_CASE("/DataDistributor/Initialization/ResumeFromShard") {
 	state Reference<AsyncVar<ServerDBInfo> const> dbInfo;
 	state Reference<DataDistributor> self(new DataDistributor(dbInfo, UID()));
 
+	self->trackerInterface = std::shared_ptr<DDTrackerInterface>(new DDTrackerInterface);
+	self->queueInterface = std::shared_ptr<DDQueueInterface>(new DDQueueInterface);
 	self->shardsAffectedByTeamFailure = makeReference<ShardsAffectedByTeamFailure>();
 	self->initData = makeReference<InitialDataDistribution>();
 	self->configuration.usableRegions = 1;
@@ -1493,7 +1477,7 @@ TEST_CASE("/DataDistributor/Initialization/ResumeFromShard") {
 	std::cout << "Start resuming...\n";
 	wait(DataDistributor::resumeFromShards(self, false));
 	std::cout << "Start validation...\n";
-	auto relocateFuture = self->relocationProducer.getFuture();
+	auto relocateFuture = self->queueInterface->relocationProducer.getFuture();
 	for (int i = 0; i < SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM; ++i) {
 		ASSERT(relocateFuture.isReady());
 		auto rs = relocateFuture.pop();
