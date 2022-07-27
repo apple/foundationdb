@@ -430,7 +430,10 @@ if (OPEN_FOR_IDE)
 
   add_library(fdb_c_shim OBJECT foundationdb/fdb_c_shim.h fdb_c_shim.cpp)
   target_link_libraries(fdb_c_shim PUBLIC dl)
-  target_include_directories(fdb_c_shim PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/foundationdb/ ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/)
+  target_include_directories(fdb_c_shim PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/foundationdb>)
 
   add_library(fdb_c_shim_lib_tester OBJECT test/shim_lib_tester.cpp)
   target_link_libraries(fdb_c_shim_lib_tester PRIVATE fdb_c_shim SimpleOpt fdb_cpp dl)
@@ -454,7 +457,10 @@ elseif(NOT WIN32 AND NOT APPLE AND NOT USE_UBSAN) # Linux Only, non-ubsan only
   add_library(fdb_c_shim SHARED ${SHIM_LIB_GEN_SRC} foundationdb/fdb_c_shim.h fdb_c_shim.cpp)
   target_link_options(fdb_c_shim PRIVATE "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/fdb_c.map,-z,nodelete,-z,noexecstack")
   target_link_libraries(fdb_c_shim PUBLIC dl)
-  target_include_directories(fdb_c_shim PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/foundationdb/ ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/)
+  target_include_directories(fdb_c_shim PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/foundationdb>)
 
   add_executable(fdb_c_shim_unit_tests)
   target_link_libraries(fdb_c_shim_unit_tests PRIVATE fdb_c_shim fdb_c_unit_tests_impl)
@@ -519,3 +525,19 @@ fdb_install(
   DESTINATION lib
   DESTINATION_SUFFIX "/cmake/${targets_export_name}"
   COMPONENT clients)
+
+if(NOT WIN32 AND NOT APPLE AND NOT USE_UBSAN) # Linux Only, non-ubsan only
+
+fdb_install(
+  FILES foundationdb/fdb_c_shim.h
+  DESTINATION include
+  DESTINATION_SUFFIX /foundationdb
+  COMPONENT clients)
+
+fdb_install(
+  TARGETS fdb_c_shim
+  EXPORT ${targets_export_name}
+  DESTINATION lib
+  COMPONENT clients)
+
+endif() # End Linux only, non-ubsan only
