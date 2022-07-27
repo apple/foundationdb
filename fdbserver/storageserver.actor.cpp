@@ -4963,11 +4963,8 @@ bool changeDurableVersion(StorageServer* data, Version desiredDurableVersion) {
 	                                    data->getMutationLog().upper_bound(nextDurableVersion));
 	data->freeable.erase(data->freeable.begin(), data->freeable.lower_bound(nextDurableVersion));
 
-	Future<Void> checkFatalError = data->otherError.getFuture();
 	data->durableVersion.set(nextDurableVersion);
 	setDataDurableVersion(data->thisServerID, data->durableVersion.get());
-	if (checkFatalError.isReady())
-		checkFatalError.get();
 
 	// TraceEvent("ForgotVersionsBefore", data->thisServerID).detail("Version", nextDurableVersion);
 	validate(data);
@@ -7360,9 +7357,6 @@ public:
 
 			splitMutation(data, data->shards, m, ver, fromFetch);
 		}
-
-		if (data->otherError.getFuture().isReady())
-			data->otherError.getFuture().get();
 	}
 
 	Version currentVersion;
@@ -8193,8 +8187,6 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			// DEBUG_KEY_RANGE("SSUpdate", ver, KeyRangeRef());
 
 			data->mutableData().createNewVersion(ver);
-			if (data->otherError.getFuture().isReady())
-				data->otherError.getFuture().get();
 
 			data->counters.fetchedVersions += (ver - data->version.get());
 			++data->counters.fetchesFromLogs;
@@ -8223,8 +8215,6 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			}
 
 			setDataVersion(data->thisServerID, data->version.get());
-			if (data->otherError.getFuture().isReady())
-				data->otherError.getFuture().get();
 
 			Version maxVersionsInMemory =
 			    (g_network->isSimulated() && g_simulator.speedUpSimulation)
