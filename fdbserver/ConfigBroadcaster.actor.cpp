@@ -528,11 +528,12 @@ public:
 
 			coordinatorsHash = std::hash<std::string>()(coordinators.ccr->getConnectionString().toString());
 
-			TraceEvent(SevDebug, "ConfigBroadcasterStartingConsumer", id)
+			TraceEvent(SevInfo, "ConfigBroadcasterStartingConsumer", id)
 			    .detail("Consumer", consumer->getID())
 			    .detail("UsingSimpleConsumer", configDBType == ConfigDBType::SIMPLE)
 			    .detail("CoordinatorsCount", this->coordinators)
-			    .detail("CoordinatorsHash", coordinatorsHash);
+			    .detail("CoordinatorsHash", coordinatorsHash)
+			    .detail("CompactionInterval", SERVER_KNOBS->COMPACTION_INTERVAL);
 		}
 	}
 
@@ -695,6 +696,10 @@ void ConfigBroadcaster::compact(Version compactionVersion) {
 }
 
 ACTOR static Future<Void> lockConfigNodesImpl(ServerCoordinators coordinators) {
+	if (coordinators.configServers.empty()) {
+		return Void();
+	}
+
 	size_t coordinatorsHash = std::hash<std::string>()(coordinators.ccr->getConnectionString().toString());
 
 	std::vector<Future<Void>> lockRequests;

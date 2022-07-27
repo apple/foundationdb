@@ -97,17 +97,22 @@ LeaderElectionRegInterface::LeaderElectionRegInterface(INetwork* local) : Client
 	forward.makeWellKnownEndpoint(WLTOKEN_LEADERELECTIONREG_FORWARD, TaskPriority::Coordination);
 }
 
-ServerCoordinators::ServerCoordinators(Reference<IClusterConnectionRecord> ccr) : ClientCoordinators(ccr) {
+ServerCoordinators::ServerCoordinators(Reference<IClusterConnectionRecord> ccr, ConfigDBType configDBType)
+  : ClientCoordinators(ccr) {
 	ClusterConnectionString cs = ccr->getConnectionString();
 	for (auto h : cs.hostnames) {
 		leaderElectionServers.emplace_back(h);
 		stateServers.emplace_back(h);
-		configServers.emplace_back(h);
+		if (configDBType != ConfigDBType::DISABLED) {
+			configServers.emplace_back(h);
+		}
 	}
 	for (auto s : cs.coords) {
 		leaderElectionServers.emplace_back(s);
 		stateServers.emplace_back(s);
-		configServers.emplace_back(s);
+		if (configDBType != ConfigDBType::DISABLED) {
+			configServers.emplace_back(s);
+		}
 	}
 }
 
