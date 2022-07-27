@@ -602,7 +602,20 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 
 	state std::string fileName = randomBGFilename(bwData->id, granuleID, currentDeltaVersion, ".delta");
 
-	state Value serialized = ObjectWriter::toValue(deltasToWrite, Unversioned());
+	state Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx;
+	state Optional<BlobGranuleCipherKeysMeta> cipherKeysMeta;
+	state Arena arena;
+	// TODO support encryption, figure out proper state stuff
+	/*if (isBlobFileEncryptionSupported()) {
+	    BlobGranuleCipherKeysCtx ciphKeysCtx = wait(getLatestGranuleCipherKeys(bwData, keyRange, &arena));
+	    cipherKeysCtx = ciphKeysCtx;
+	    cipherKeysMeta = BlobGranuleCipherKeysCtx::toCipherKeysMeta(cipherKeysCtx.get());
+	}*/
+
+	Optional<CompressionFilter> compressFilter = getBlobFileCompressFilter();
+
+	state Value serialized = serializeChunkedDeltaFile(
+	    deltasToWrite, keyRange, SERVER_KNOBS->BG_DELTA_FILE_TARGET_CHUNK_BYTES, compressFilter, cipherKeysCtx);
 	state size_t serializedSize = serialized.size();
 
 	// Free up deltasToWrite here to reduce memory
@@ -640,7 +653,7 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 
 				Key dfKey = blobGranuleFileKeyFor(granuleID, currentDeltaVersion, 'D');
 				// TODO change once we support file multiplexing
-				Value dfValue = blobGranuleFileValueFor(fname, 0, serializedSize, serializedSize);
+				Value dfValue = blobGranuleFileValueFor(fname, 0, serializedSize, serializedSize, cipherKeysMeta);
 				tr->set(dfKey, dfValue);
 
 				if (oldGranuleComplete.present()) {
@@ -668,7 +681,7 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 					wait(delay(deterministicRandom()->random01()));
 				}
 				// FIXME: change when we implement multiplexing
-				return BlobFileIndex(currentDeltaVersion, fname, 0, serializedSize, serializedSize);
+				return BlobFileIndex(currentDeltaVersion, fname, 0, serializedSize, serializedSize, cipherKeysMeta);
 			} catch (Error& e) {
 				wait(tr->onError(e));
 			}
@@ -753,8 +766,8 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 	}
 
 	Optional<CompressionFilter> compressFilter = getBlobFileCompressFilter();
-	state Value serialized =
-	    serializeChunkedSnapshot(snapshot, SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_CHUNKS, compressFilter, cipherKeysCtx);
+	state Value serialized = serializeChunkedSnapshot(
+	    snapshot, SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_CHUNK_BYTES, compressFilter, cipherKeysCtx);
 	state size_t serializedSize = serialized.size();
 
 	// free snapshot to reduce memory
@@ -970,6 +983,7 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 		                                        snapshotF.cipherKeysMeta);
 
 		// TODO: optimization - batch 'encryption-key' lookup given the GranuleFile set is known
+		// FIXME: get cipher keys for delta as well!
 		if (chunk.snapshotFile.get().cipherKeysMetaRef.present()) {
 			ASSERT(isBlobFileEncryptionSupported());
 			BlobGranuleCipherKeysCtx cipherKeysCtx =
@@ -3187,6 +3201,8 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 					    getGranuleCipherKeys(bwData, chunk.snapshotFile.get().cipherKeysMetaRef.get(), &rep.arena);
 				}
 
+				// FIXME: get cipher keys for delta files too!
+
 				// new deltas (if version is larger than version of last delta file)
 				// FIXME: do trivial key bounds here if key range is not fully contained in request key
 				// range
@@ -3981,12 +3997,14 @@ ACTOR Future<Void> monitorTenants(Reference<BlobWorkerData> bwData) {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				state RangeResult tenantResults;
-				wait(store(tenantResults, tr->getRange(tenantMapKeys, CLIENT_KNOBS->TOO_MANY)));
-				ASSERT_WE_THINK(!tenantResults.more && tenantResults.size() < CLIENT_KNOBS->TOO_MANY);
-				if (tenantResults.more || tenantResults.size() >= CLIENT_KNOBS->TOO_MANY) {
+				state KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>> tenantResults;
+				wait(store(tenantResults,
+				           TenantMetadata::tenantMap.getRange(
+				               tr, Optional<TenantName>(), Optional<TenantName>(), CLIENT_KNOBS->TOO_MANY)));
+				ASSERT_WE_THINK(!tenantResults.more && tenantResults.results.size() < CLIENT_KNOBS->TOO_MANY);
+				if (tenantResults.more || tenantResults.results.size() >= CLIENT_KNOBS->TOO_MANY) {
 					TraceEvent(SevError, "BlobWorkerTooManyTenants", bwData->id)
-					    .detail("TenantCount", tenantResults.size());
+					    .detail("TenantCount", tenantResults.results.size());
 					wait(delay(600));
 					if (bwData->fatalError.canBeSet()) {
 						bwData->fatalError.sendError(internal_error());
@@ -3995,15 +4013,13 @@ ACTOR Future<Void> monitorTenants(Reference<BlobWorkerData> bwData) {
 				}
 
 				std::vector<std::pair<TenantName, TenantMapEntry>> tenants;
-				for (auto& it : tenantResults) {
+				for (auto& it : tenantResults.results) {
 					// FIXME: handle removing/moving tenants!
-					TenantNameRef tenantName = it.key.removePrefix(tenantMapPrefix);
-					TenantMapEntry entry = TenantMapEntry::decode(it.value);
-					tenants.push_back(std::pair(tenantName, entry));
+					tenants.push_back(std::pair(it.first, it.second));
 				}
 				bwData->tenantData.addTenants(tenants);
 
-				state Future<Void> watchChange = tr->watch(tenantLastIdKey);
+				state Future<Void> watchChange = tr->watch(TenantMetadata::lastTenantId.key);
 				wait(tr->commit());
 				wait(watchChange);
 				tr->reset();

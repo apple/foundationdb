@@ -212,13 +212,15 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 			fmt::print("Setting up blob granule range for tenant {0}\n", name.printable());
 		}
 
-		TenantMapEntry entry = wait(TenantAPI::createTenant(cx.getReference(), name));
+		Optional<TenantMapEntry> entry = wait(TenantAPI::createTenant(cx.getReference(), name));
+		ASSERT(entry.present());
 
 		if (BGW_DEBUG) {
-			fmt::print("Set up blob granule range for tenant {0}: {1}\n", name.printable(), entry.prefix.printable());
+			fmt::print(
+			    "Set up blob granule range for tenant {0}: {1}\n", name.printable(), entry.get().prefix.printable());
 		}
 
-		return entry;
+		return entry.get();
 	}
 
 	std::string description() const override { return "BlobGranuleCorrectnessWorkload"; }
