@@ -967,19 +967,12 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 				} else {
 					state KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>> tenantResults;
 					wait(store(tenantResults,
-					           TenantMetadata::tenantMap.getRange(
-					               tr, Optional<TenantName>(), Optional<TenantName>(), CLIENT_KNOBS->TOO_MANY)));
-					ASSERT_WE_THINK(!tenantResults.more && tenantResults.results.size() < CLIENT_KNOBS->TOO_MANY);
-					if (tenantResults.more || tenantResults.results.size() >= CLIENT_KNOBS->TOO_MANY) {
-						TraceEvent(SevError, "BlobManagerTooManyTenants", bmData->id)
-						    .detail("Epoch", bmData->epoch)
-						    .detail("TenantCount", tenantResults.results.size());
-						wait(delay(600));
-						if (bmData->iAmReplaced.canBeSet()) {
-							bmData->iAmReplaced.sendError(internal_error());
-						}
-						throw internal_error();
-					}
+					           TenantMetadata::tenantMap.getRange(tr,
+					                                              Optional<TenantName>(),
+					                                              Optional<TenantName>(),
+					                                              CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1)));
+					ASSERT(tenantResults.results.size() <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER &&
+					       !tenantResults.more);
 
 					std::vector<Key> prefixes;
 					for (auto& it : tenantResults.results) {

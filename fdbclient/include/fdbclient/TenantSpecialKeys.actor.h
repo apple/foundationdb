@@ -107,7 +107,8 @@ private:
 		return results;
 	}
 
-	ACTOR static Future<Void> createTenant(
+	// Returns true if the tenant was created, false if it already existed
+	ACTOR static Future<bool> createTenant(
 	    ReadYourWritesTransaction* ryw,
 	    TenantNameRef tenantName,
 	    std::vector<std::pair<Standalone<StringRef>, Optional<Value>>> configMutations,
@@ -127,23 +128,39 @@ private:
 		std::pair<Optional<TenantMapEntry>, bool> entry =
 		    wait(TenantAPI::createTenantTransaction(&ryw->getTransaction(), tenantName, tenantEntry));
 
-		return Void();
+		return entry.second;
 	}
 
 	ACTOR static Future<Void> createTenants(
 	    ReadYourWritesTransaction* ryw,
 	    std::map<TenantName, std::vector<std::pair<Standalone<StringRef>, Optional<Value>>>> tenants,
 	    std::map<TenantGroupName, int>* tenantGroupNetTenantDelta) {
+		state Future<int64_t> tenantCountFuture =
+		    TenantMetadata::tenantCount.getD(&ryw->getTransaction(), Snapshot::False, 0);
 		int64_t _nextId = wait(TenantAPI::getNextTenantId(&ryw->getTransaction()));
-		int64_t nextId = _nextId;
+		state int64_t nextId = _nextId;
 
-		std::vector<Future<Void>> createFutures;
+		state std::vector<Future<bool>> createFutures;
 		for (auto const& [tenant, config] : tenants) {
 			createFutures.push_back(createTenant(ryw, tenant, config, nextId++, tenantGroupNetTenantDelta));
 		}
 
 		TenantMetadata::lastTenantId.set(&ryw->getTransaction(), nextId - 1);
 		wait(waitForAll(createFutures));
+
+		state int numCreatedTenants = 0;
+		for (auto f : createFutures) {
+			if (f.get()) {
+				++numCreatedTenants;
+			}
+		}
+
+		// Check the tenant count here rather than rely on the createTenantTransaction check because we don't have RYW
+		int64_t tenantCount = wait(tenantCountFuture);
+		if (tenantCount + numCreatedTenants > CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER) {
+			throw cluster_no_capacity();
+		}
+
 		return Void();
 	}
 

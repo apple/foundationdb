@@ -284,6 +284,9 @@ public:
 	int CHANGE_QUORUM_BAD_STATE_RETRY_TIMES;
 	double CHANGE_QUORUM_BAD_STATE_RETRY_DELAY;
 
+	// Tenants and Metacluster
+	int MAX_TENANTS_PER_CLUSTER;
+
 	ClientKnobs(Randomize randomize);
 	void initialize(Randomize randomize);
 };
