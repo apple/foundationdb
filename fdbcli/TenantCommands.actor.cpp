@@ -39,6 +39,8 @@ const KeyRangeRef tenantMapSpecialKeyRange720("\xff\xff/management/tenant/map/"_
                                               "\xff\xff/management/tenant/map0"_sr);
 const KeyRangeRef tenantConfigSpecialKeyRange("\xff\xff/management/tenant/configure/"_sr,
                                               "\xff\xff/management/tenant/configure0"_sr);
+const KeyRangeRef tenantRenameSpecialKeyRange("\xff\xff/management/tenant/rename/"_sr,
+                                              "\xff\xff/management/tenant/rename0"_sr);
 
 const KeyRangeRef tenantMapSpecialKeyRange710("\xff\xff/management/tenant_map/"_sr,
                                               "\xff\xff/management/tenant_map0"_sr);
@@ -433,13 +435,82 @@ CommandFactory configureTenantFactory(
                 "Updates the configuration for a tenant. Use `tenant_group=<GROUP_NAME>' to change the tenant group "
                 "that a tenant is assigned to or `unset tenant_group' to remove a tenant from its tenant group."));
 
+// Helper function to extract tenant ID from json metadata string
+int64_t getTenantId(Value metadata) {
+	json_spirit::mValue jsonObject;
+	json_spirit::read_string(metadata.toString(), jsonObject);
+	JSONDoc doc(jsonObject);
+	int64_t id;
+	doc.get("id", id);
+	return id;
+}
+
 // renametenant command
-ACTOR Future<bool> renameTenantCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
+ACTOR Future<bool> renameTenantCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens, int apiVersion) {
 	if (tokens.size() != 3) {
 		printUsage(tokens[0]);
 		return false;
 	}
-	wait(safeThreadFutureToFuture(TenantAPI::renameTenant(db, tokens[1], tokens[2])));
+	state Reference<ITransaction> tr = db->createTransaction();
+	state Key tenantRenameKey = tenantRenameSpecialKeyRange.begin.withSuffix(tokens[1]);
+	state Key tenantOldNameKey = tenantMapSpecialKeyRange(apiVersion).begin.withSuffix(tokens[1]);
+	state Key tenantNewNameKey = tenantMapSpecialKeyRange(apiVersion).begin.withSuffix(tokens[2]);
+	state bool firstTry = true;
+	state int64_t id;
+	loop {
+		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+		try {
+			// Hold the reference to the standalone's memory
+			state ThreadFuture<Optional<Value>> oldEntryFuture = tr->get(tenantOldNameKey);
+			state ThreadFuture<Optional<Value>> newEntryFuture = tr->get(tenantNewNameKey);
+			state Optional<Value> oldEntry = wait(safeThreadFutureToFuture(oldEntryFuture));
+			state Optional<Value> newEntry = wait(safeThreadFutureToFuture(newEntryFuture));
+			if (firstTry) {
+				if (!oldEntry.present()) {
+					throw tenant_not_found();
+				}
+				if (newEntry.present()) {
+					throw tenant_already_exists();
+				}
+				// Store the id we see when first reading this key
+				id = getTenantId(oldEntry.get());
+
+				firstTry = false;
+			} else {
+				// If we got commit_unknown_result, the rename may have already occurred.
+				if (newEntry.present()) {
+					int64_t checkId = getTenantId(newEntry.get());
+					if (id == checkId) {
+						ASSERT(!oldEntry.present() || getTenantId(oldEntry.get()) != id);
+						return true;
+					}
+					// If the new entry is present but does not match, then
+					// the rename should fail, so we throw an error.
+					throw tenant_already_exists();
+				}
+				if (!oldEntry.present()) {
+					throw tenant_not_found();
+				}
+				int64_t checkId = getTenantId(oldEntry.get());
+				// If the id has changed since we made our first attempt,
+				// then it's possible we've already moved the tenant. Don't move it again.
+				if (id != checkId) {
+					throw tenant_not_found();
+				}
+			}
+			tr->set(tenantRenameKey, tokens[2]);
+			wait(safeThreadFutureToFuture(tr->commit()));
+			break;
+		} catch (Error& e) {
+			state Error err(e);
+			if (e.code() == error_code_special_keys_api_failure) {
+				std::string errorMsgStr = wait(getSpecialKeysFailureErrorMessage(tr));
+				fmt::print(stderr, "ERROR: {}\n", errorMsgStr.c_str());
+				return false;
+			}
+			wait(safeThreadFutureToFuture(tr->onError(err)));
+		}
+	}
 
 	fmt::print(
 	    "The tenant `{}' has been renamed to `{}'\n", printable(tokens[1]).c_str(), printable(tokens[2]).c_str());

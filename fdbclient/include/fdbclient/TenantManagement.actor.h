@@ -383,6 +383,31 @@ Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listTenants(Reference
 	}
 }
 
+ACTOR template <class Transaction>
+Future<Void> renameTenantTransaction(Transaction tr, TenantNameRef oldName, TenantNameRef newName) {
+	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
+	state Optional<TenantMapEntry> oldEntry;
+	state Optional<TenantMapEntry> newEntry;
+	wait(store(oldEntry, tryGetTenantTransaction(tr, oldName)) &&
+	     store(newEntry, tryGetTenantTransaction(tr, newName)));
+	if (!oldEntry.present()) {
+		throw tenant_not_found();
+	}
+	if (newEntry.present()) {
+		throw tenant_already_exists();
+	}
+	TenantMetadata::tenantMap.erase(tr, oldName);
+	TenantMetadata::tenantMap.set(tr, newName, oldEntry.get());
+
+	// Update the tenant group index to reflect the new tenant name
+	if (oldEntry.get().tenantGroup.present()) {
+		TenantMetadata::tenantGroupTenantIndex.erase(tr, Tuple::makeTuple(oldEntry.get().tenantGroup.get(), oldName));
+		TenantMetadata::tenantGroupTenantIndex.insert(tr, Tuple::makeTuple(oldEntry.get().tenantGroup.get(), newName));
+	}
+
+	return Void();
+}
+
 ACTOR template <class DB>
 Future<Void> renameTenant(Reference<DB> db, TenantName oldName, TenantName newName) {
 	state Reference<typename DB::TransactionT> tr = db->createTransaction();
@@ -429,19 +454,8 @@ Future<Void> renameTenant(Reference<DB> db, TenantName oldName, TenantName newNa
 					throw tenant_not_found();
 				}
 			}
-
-			TenantMetadata::tenantMap.erase(tr, oldName);
-			TenantMetadata::tenantMap.set(tr, newName, oldEntry.get());
-
-			// Update the tenant group index to reflect the new tenant name
-			if (oldEntry.get().tenantGroup.present()) {
-				TenantMetadata::tenantGroupTenantIndex.erase(
-				    tr, Tuple::makeTuple(oldEntry.get().tenantGroup.get(), oldName));
-				TenantMetadata::tenantGroupTenantIndex.insert(
-				    tr, Tuple::makeTuple(oldEntry.get().tenantGroup.get(), newName));
-			}
-
-			wait(safeThreadFutureToFuture(tr->commit()));
+			wait(renameTenantTransaction(tr, oldName, newName));
+			wait(buggifiedCommit(tr, BUGGIFY_WITH_PROB(0.1)));
 			TraceEvent("RenameTenantSuccess").detail("OldName", oldName).detail("NewName", newName);
 			return Void();
 		} catch (Error& e) {
