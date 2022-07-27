@@ -401,10 +401,8 @@ Future<Void> renameTenantTransaction(Transaction tr, TenantNameRef oldName, Tena
 
 	// Update the tenant group index to reflect the new tenant name
 	if (oldEntry.get().tenantGroup.present()) {
-		TenantMetadata::tenantGroupTenantIndex.erase(
-			tr, Tuple::makeTuple(oldEntry.get().tenantGroup.get(), oldName));
-		TenantMetadata::tenantGroupTenantIndex.insert(
-			tr, Tuple::makeTuple(oldEntry.get().tenantGroup.get(), newName));
+		TenantMetadata::tenantGroupTenantIndex.erase(tr, Tuple::makeTuple(oldEntry.get().tenantGroup.get(), oldName));
+		TenantMetadata::tenantGroupTenantIndex.insert(tr, Tuple::makeTuple(oldEntry.get().tenantGroup.get(), newName));
 	}
 
 	return Void();
