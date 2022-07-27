@@ -235,7 +235,7 @@ StringRef makeTokenPart(Arena& arena, TokenRef tokenSpec) {
 	header.String(algo.data(), algo.size());
 	auto kid = tokenSpec.keyId.toStringView();
 	header.Key("kid");
-	header.String(kid.begin(), kid.size());
+	header.String(kid.data(), kid.size());
 	header.EndObject();
 	payload.StartObject();
 	putField(tokenSpec.issuer, payload, "iss");
