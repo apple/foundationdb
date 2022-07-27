@@ -3328,16 +3328,11 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 		configNode = makeReference<ConfigNode>(dataFolder);
 	}
 
-	// FIXME: Initializing here causes simulation issues, these must be fixed
-	// if (configDBType != ConfigDBType::DISABLED) {
-	//     wait(localConfig->initialize());
-	// }
-
 	actors.push_back(serveProtocolInfo());
 	actors.push_back(serveProcess());
 
 	try {
-		ServerCoordinators coordinators(connRecord);
+		ServerCoordinators coordinators(connRecord, configDBType);
 		if (g_network->isSimulated()) {
 			whitelistBinPaths = ",, random_path,  /bin/snap_create.sh,,";
 		}
@@ -3364,6 +3359,10 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 		// Only one process can execute on a dataFolder from this point onwards
 
 		wait(testAndUpdateSoftwareVersionCompatibility(dataFolder, processIDUid));
+
+		if (configDBType != ConfigDBType::DISABLED) {
+			wait(localConfig->initialize());
+		}
 
 		std::string fitnessFilePath = joinPath(dataFolder, "fitness");
 		auto cc = makeReference<AsyncVar<Optional<ClusterControllerFullInterface>>>();
