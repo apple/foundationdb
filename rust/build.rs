@@ -63,6 +63,7 @@ fn main() -> Result<()> {
     // the same source of truth as cmake uses.
     build_package("flow", &[])?;
     build_package("fdbclient", &["flow", "contrib/fmt-8.1.1"])?;
+    build_package("fdbserver", &["fdbrpc", "fdbclient", "flow", "contrib/fmt-8.1.1"])?;
     println!("cargo:rerun-if-changed=src/lib.rs");
     Ok(())
 }
