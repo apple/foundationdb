@@ -46,6 +46,8 @@ public:
 	virtual int64_t manualThrottleCount() const = 0;
 	virtual bool isAutoThrottlingEnabled() const = 0;
 
+	virtual GlobalTagThrottlerStatusReply getGlobalTagThrottlerStatusReply() const = 0;
+
 	// Based on the busiest read and write tags in the provided storage queue info, update
 	// tag throttling limits.
 	virtual Future<Void> tryUpdateAutoThrottling(StorageQueueInfo const&) = 0;
@@ -68,6 +70,7 @@ public:
 	int64_t manualThrottleCount() const override;
 	bool isAutoThrottlingEnabled() const override;
 	Future<Void> tryUpdateAutoThrottling(StorageQueueInfo const&) override;
+	GlobalTagThrottlerStatusReply getGlobalTagThrottlerStatusReply() const override { return {}; }
 };
 
 class GlobalTagThrottler : public ITagThrottler {
@@ -89,6 +92,8 @@ public:
 
 	Future<Void> tryUpdateAutoThrottling(StorageQueueInfo const&) override;
 	PrioritizedTransactionTagMap<ClientTagThrottleLimits> getClientRates() override;
+
+	GlobalTagThrottlerStatusReply getGlobalTagThrottlerStatusReply() const override;
 
 	// Testing only:
 public:
