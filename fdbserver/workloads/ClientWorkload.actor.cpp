@@ -207,7 +207,7 @@ struct WorkloadProcess {
 			res = r;
 		} catch (Error& e) {
 			// if we're getting cancelled, we could run in the scope of the parent process, but we're not allowed to
-			// cancel `fun` in any other process than the child process. So we're going to pass the future to an
+			// cancel `fut` in any other process than the child process. So we're going to pass the future to an
 			// uncancellable actor (it has to be uncancellable because if we got cancelled here we can't wait on
 			// anything) which will then destroy the future on the child process.
 			cancelChild(self->childProcess(), fut);
