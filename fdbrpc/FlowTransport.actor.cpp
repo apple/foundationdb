@@ -1026,6 +1026,8 @@ ACTOR static void deliver(TransportData* self,
 			return;
 		}
 		try {
+			ASSERT(g_currentDeliveryPeerAddress == NetworkAddressList());
+			ASSERT(!g_currentDeliverPeerAddressTrusted);
 			g_currentDeliveryPeerAddress = destination.addresses;
 			g_currentDeliverPeerAddressTrusted = isTrustedPeer;
 			g_currentDeliveryPeerDisconnect = disconnect;
@@ -1033,11 +1035,11 @@ ACTOR static void deliver(TransportData* self,
 			ASSERT(data.size() > 8);
 			ArenaObjectReader objReader(reader.arena(), reader.arenaReadAll(), AssumeVersion(reader.protocolVersion()));
 			receiver->receive(objReader);
-			g_currentDeliveryPeerAddress = { NetworkAddress() };
+			g_currentDeliveryPeerAddress = NetworkAddressList();
 			g_currentDeliverPeerAddressTrusted = false;
 			g_currentDeliveryPeerDisconnect = Future<Void>();
 		} catch (Error& e) {
-			g_currentDeliveryPeerAddress = { NetworkAddress() };
+			g_currentDeliveryPeerAddress = NetworkAddressList();
 			g_currentDeliverPeerAddressTrusted = false;
 			g_currentDeliveryPeerDisconnect = Future<Void>();
 			TraceEvent(SevError, "ReceiverError")
