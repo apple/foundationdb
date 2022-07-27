@@ -537,16 +537,13 @@ struct DDQueueData {
 		Future<Void> cancel;
 	};
 
-	ActorCollectionNoErrors noErrorActors; // has to be the last one to be destroyed because other Actors may use it.
+	ActorCollection actors; // has to be the last one to be destroyed because other Actors may use it.
 	UID distributorId;
 	MoveKeysLock lock;
 	Database cx;
 	std::shared_ptr<IDDTxnProcessor> txnProcessor;
 
-	std::vector<TeamCollectionInterface> teamCollections;
 	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
-	PromiseStream<Promise<int64_t>> getAverageShardBytes;
-
 	FlowLock startMoveKeysParallelismLock;
 	FlowLock finishMoveKeysParallelismLock;
 	FlowLock cleanUpDataMoveParallelismLock;
@@ -583,8 +580,6 @@ struct DDQueueData {
 
 	PromiseStream<RelocateShard> output;
 	FutureStream<RelocateShard> input;
-	PromiseStream<GetMetricsRequest> getShardMetrics;
-	PromiseStream<GetTopKMetricsRequest> getTopKMetrics;
 
 	double lastInterval;
 	int suppressIntervals;
@@ -597,6 +592,10 @@ struct DDQueueData {
 	int unhealthyRelocations;
 
 	Reference<EventCacheHolder> movedKeyServersEventHolder;
+	// component interfaces
+	std::vector<TeamCollectionInterface> teamCollections;
+	std::shared_ptr<DDTrackerInterface> trackerInterface;
+	std::shared_ptr<DDQueueInterface> queueInterface;
 
 	void startRelocation(int priority, int healthPriority) {
 		// Although PRIORITY_TEAM_REDUNDANT has lower priority than split and merge shard movement,
@@ -642,24 +641,26 @@ struct DDQueueData {
 	            Database cx,
 	            std::vector<TeamCollectionInterface> teamCollections,
 	            Reference<ShardsAffectedByTeamFailure> sABTF,
-	            PromiseStream<Promise<int64_t>> getAverageShardBytes,
 	            int teamSize,
 	            int singleRegionTeamSize,
-	            PromiseStream<RelocateShard> output,
-	            FutureStream<RelocateShard> input,
-	            PromiseStream<GetMetricsRequest> getShardMetrics,
-	            PromiseStream<GetTopKMetricsRequest> getTopKMetrics)
-	  : distributorId(mid), lock(lock), cx(cx), txnProcessor(new DDTxnProcessor(cx)), teamCollections(teamCollections),
-	    shardsAffectedByTeamFailure(sABTF), getAverageShardBytes(getAverageShardBytes),
-	    startMoveKeysParallelismLock(SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM),
+	            std::shared_ptr<DDTrackerInterface> trackerInterface = nullptr,
+	            std::shared_ptr<DDQueueInterface> queueInterface = nullptr)
+	  : actors(true), distributorId(mid), lock(lock), cx(cx), txnProcessor(new DDTxnProcessor(cx)),
+	    shardsAffectedByTeamFailure(sABTF), startMoveKeysParallelismLock(SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM),
 	    finishMoveKeysParallelismLock(SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM),
 	    cleanUpDataMoveParallelismLock(SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM),
 	    fetchSourceLock(new FlowLock(SERVER_KNOBS->DD_FETCH_SOURCE_PARALLELISM)), activeRelocations(0),
 	    queuedRelocations(0), bytesWritten(0), teamSize(teamSize), singleRegionTeamSize(singleRegionTeamSize),
-	    output(output), input(input), getShardMetrics(getShardMetrics), getTopKMetrics(getTopKMetrics), lastInterval(0),
-	    suppressIntervals(0), rawProcessingUnhealthy(new AsyncVar<bool>(false)),
+	    lastInterval(0), suppressIntervals(0), rawProcessingUnhealthy(new AsyncVar<bool>(false)),
 	    rawProcessingWiggle(new AsyncVar<bool>(false)), unhealthyRelocations(0),
-	    movedKeyServersEventHolder(makeReference<EventCacheHolder>("MovedKeyServers")) {}
+	    movedKeyServersEventHolder(makeReference<EventCacheHolder>("MovedKeyServers")),
+	    teamCollections(teamCollections), trackerInterface(trackerInterface), queueInterface(queueInterface) {
+
+		if (queueInterface) {
+			actors.add(yieldPromiseStream(queueInterface->relocationProducer.getFuture(), output));
+			input = output.getFuture();
+		}
+	}
 
 	void validate() {
 		if (EXPENSIVE_VALIDATION) {
@@ -1208,6 +1209,10 @@ struct DDQueueData {
 		    .detail("DataMoveID", dataMoveId)
 		    .detail("Range", range);
 	}
+
+	void startBalanceActors();
+
+	void forwardProcessingStats();
 };
 
 ACTOR Future<Void> cancelDataMove(struct DDQueueData* self, KeyRange range, const DDEnabledState* ddEnabledState) {
@@ -1314,7 +1319,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 		}
 
 		state StorageMetrics metrics =
-		    wait(brokenPromiseToNever(self->getShardMetrics.getReply(GetMetricsRequest(rd.keys))));
+		    wait(brokenPromiseToNever(self->trackerInterface->getShardMetrics.getReply(GetMetricsRequest(rd.keys))));
 
 		ASSERT(rd.src.size());
 		loop {
@@ -1636,7 +1641,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 				// variable is actually a member variable, I can’t write trigger([healthyDestinations, readLoad]
 				// directly.
 				auto& destinationRef = healthyDestinations;
-				self->noErrorActors.add(
+				self->actors.add(
 				    trigger([destinationRef, readLoad]() mutable { destinationRef.addReadInFlightToTeam(-readLoad); },
 				            delay(SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL)));
 
@@ -1674,7 +1679,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 				healthyDestinations.addDataInFlightToTeam(-metrics.bytes);
 				auto readLoad = metrics.bytesReadPerKSecond;
 				auto& destinationRef = healthyDestinations;
-				self->noErrorActors.add(
+				self->actors.add(
 				    trigger([destinationRef, readLoad]() mutable { destinationRef.addReadInFlightToTeam(-readLoad); },
 				            delay(SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL)));
 
@@ -1774,7 +1779,7 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
 	state Future<HealthMetrics> healthMetrics = self->cx->getHealthMetrics(true);
 	state GetTopKMetricsRequest req(
 	    shards, topK, (srcLoad - destLoad) * SERVER_KNOBS->READ_REBALANCE_MAX_SHARD_FRAC, srcLoad / shards.size());
-	state GetTopKMetricsReply reply = wait(brokenPromiseToNever(self->getTopKMetrics.getReply(req)));
+	state GetTopKMetricsReply reply = wait(brokenPromiseToNever(self->trackerInterface->getTopKMetrics.getReply(req)));
 	wait(ready(healthMetrics));
 	auto cpu = getWorstCpu(healthMetrics.get(), sourceTeam->getServerIDs());
 	if (cpu < SERVER_KNOBS->READ_REBALANCE_CPU_THRESHOLD) { // 15.0 +- (0.3 * 15) < 20.0
@@ -1821,7 +1826,7 @@ ACTOR static Future<bool> rebalanceTeams(DDQueueData* self,
 	}
 
 	Promise<int64_t> req;
-	self->getAverageShardBytes.send(req);
+	self->trackerInterface->getAverageShardBytes.send(req);
 
 	state int64_t averageShardBytes = wait(req.getFuture());
 	state std::vector<KeyRange> shards = self->shardsAffectedByTeamFailure->getShardsFor(
@@ -1840,7 +1845,7 @@ ACTOR static Future<bool> rebalanceTeams(DDQueueData* self,
 	while (retries < SERVER_KNOBS->REBALANCE_MAX_RETRIES) {
 		state KeyRange testShard = deterministicRandom()->randomChoice(shards);
 		StorageMetrics testMetrics =
-		    wait(brokenPromiseToNever(self->getShardMetrics.getReply(GetMetricsRequest(testShard))));
+		    wait(brokenPromiseToNever(self->trackerInterface->getShardMetrics.getReply(GetMetricsRequest(testShard))));
 		if (testMetrics.bytes > metrics.bytes) {
 			moveShard = testShard;
 			metrics = testMetrics;
@@ -1929,7 +1934,7 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueueData* self, int teamCollectionIndex,
 		    .detail("Rebalance", readRebalance ? "Read" : "Disk");
 
 		try {
-			// NOTE: the DD throttling relies on DDQueue
+			// NOTE: the DD throttling relies on DDQueueData
 			delayF = delay(SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL, TaskPriority::DataDistributionLaunch);
 			if ((now() - lastRead) > SERVER_KNOBS->BG_REBALANCE_SWITCH_CHECK_INTERVAL) {
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -2219,18 +2224,39 @@ ACTOR Future<Void> BgDDValleyFiller(DDQueueData* self, int teamCollectionIndex) 
 	}
 }
 
+void DDQueueData::startBalanceActors() {
+	for (int i = 0; i < teamCollections.size(); i++) {
+		// FIXME: Use BgDDLoadBalance for disk rebalance too after DD simulation test proof.
+		// actors.add(BgDDLoadRebalance(this, i, DataMovementReason::REBALANCE_OVERUTILIZED_TEAM));
+		// actors.add(BgDDLoadRebalance(this, i, DataMovementReason::REBALANCE_UNDERUTILIZED_TEAM));
+		if (SERVER_KNOBS->READ_SAMPLING_ENABLED) {
+			actors.add(BgDDLoadRebalance(this, i, DataMovementReason::REBALANCE_READ_OVERUTIL_TEAM));
+			actors.add(BgDDLoadRebalance(this, i, DataMovementReason::REBALANCE_READ_UNDERUTIL_TEAM));
+		}
+		actors.add(BgDDMountainChopper(this, i));
+		actors.add(BgDDValleyFiller(this, i));
+	}
+}
+
+void DDQueueData::forwardProcessingStats() {
+	actors.add(delayedAsyncVar(rawProcessingUnhealthy, queueInterface->processingUnhealthy, 0));
+	actors.add(delayedAsyncVar(rawProcessingWiggle, queueInterface->processingWiggle, 0));
+}
+ACTOR Future<Void> serverDDQueueInterface(DDQueueData* self) {
+	self->forwardProcessingStats();
+	loop choose {
+		when(Promise<int> r = waitNext(self->queueInterface->getUnhealthyRelocationCount.getFuture())) {
+			r.send(self->unhealthyRelocations);
+		}
+	}
+}
+
 ACTOR Future<Void> dataDistributionQueue(Database cx,
-                                         PromiseStream<RelocateShard> output,
-                                         FutureStream<RelocateShard> input,
-                                         PromiseStream<GetMetricsRequest> getShardMetrics,
-                                         PromiseStream<GetTopKMetricsRequest> getTopKMetrics,
-                                         Reference<AsyncVar<bool>> processingUnhealthy,
-                                         Reference<AsyncVar<bool>> processingWiggle,
+                                         std::shared_ptr<DDTrackerInterface> trackerInterface,
+                                         std::shared_ptr<DDQueueInterface> queueInterface,
                                          std::vector<TeamCollectionInterface> teamCollections,
                                          Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
                                          MoveKeysLock lock,
-                                         PromiseStream<Promise<int64_t>> getAverageShardBytes,
-                                         FutureStream<Promise<int>> getUnhealthyRelocationCount,
                                          UID distributorId,
                                          int teamSize,
                                          int singleRegionTeamSize,
@@ -2240,38 +2266,19 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 	                       cx,
 	                       teamCollections,
 	                       shardsAffectedByTeamFailure,
-	                       getAverageShardBytes,
 	                       teamSize,
 	                       singleRegionTeamSize,
-	                       output,
-	                       input,
-	                       getShardMetrics,
-	                       getTopKMetrics);
+	                       trackerInterface,
+	                       queueInterface);
 	state std::set<UID> serversToLaunchFrom;
 	state KeyRange keysToLaunchFrom;
 	state RelocateData launchData;
 	state Future<Void> recordMetrics = delay(SERVER_KNOBS->DD_QUEUE_LOGGING_INTERVAL);
-
-	state std::vector<Future<Void>> balancingFutures;
-
 	state PromiseStream<KeyRange> rangesComplete;
 	state Future<Void> launchQueuedWorkTimeout = Never();
-
-	for (int i = 0; i < teamCollections.size(); i++) {
-		// FIXME: Use BgDDLoadBalance for disk rebalance too after DD simulation test proof.
-		// balancingFutures.push_back(BgDDLoadRebalance(&self, i, DataMovementReason::REBALANCE_OVERUTILIZED_TEAM));
-		// balancingFutures.push_back(BgDDLoadRebalance(&self, i, DataMovementReason::REBALANCE_UNDERUTILIZED_TEAM));
-		if (SERVER_KNOBS->READ_SAMPLING_ENABLED) {
-			balancingFutures.push_back(BgDDLoadRebalance(&self, i, DataMovementReason::REBALANCE_READ_OVERUTIL_TEAM));
-			balancingFutures.push_back(BgDDLoadRebalance(&self, i, DataMovementReason::REBALANCE_READ_UNDERUTIL_TEAM));
-		}
-		balancingFutures.push_back(BgDDMountainChopper(&self, i));
-		balancingFutures.push_back(BgDDValleyFiller(&self, i));
-	}
-	balancingFutures.push_back(delayedAsyncVar(self.rawProcessingUnhealthy, processingUnhealthy, 0));
-	balancingFutures.push_back(delayedAsyncVar(self.rawProcessingWiggle, processingWiggle, 0));
-
+	self.startBalanceActors();
 	try {
+		state Future<Void> serveInterface = serverDDQueueInterface(&self);
 		loop {
 			self.validate();
 
@@ -2328,8 +2335,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 					self.finishRelocation(done.priority, done.healthPriority);
 					self.fetchKeysComplete.erase(done);
 					// self.logRelocation( done, "ShardRelocatorDone" );
-					self.noErrorActors.add(
-					    tag(delay(0, TaskPriority::DataDistributionLaunch), done.keys, rangesComplete));
+					self.actors.add(tag(delay(0, TaskPriority::DataDistributionLaunch), done.keys, rangesComplete));
 					if (g_network->isSimulated() && debug_isCheckRelocationDuration() && now() - done.startTime > 60) {
 						TraceEvent(SevWarnAlways, "RelocationDurationTooLong")
 						    .detail("Duration", now() - done.startTime);
@@ -2339,7 +2345,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 				when(KeyRange done = waitNext(rangesComplete.getFuture())) { keysToLaunchFrom = done; }
 				when(wait(recordMetrics)) {
 					Promise<int64_t> req;
-					getAverageShardBytes.send(req);
+					self.trackerInterface->getAverageShardBytes.send(req);
 
 					recordMetrics = delay(SERVER_KNOBS->DD_QUEUE_LOGGING_INTERVAL, TaskPriority::FlushTrace);
 
@@ -2382,8 +2388,8 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 					                                // key we use here must match the key used in the holder.
 				}
 				when(wait(self.error.getFuture())) {} // Propagate errors from dataDistributionRelocator
-				when(wait(waitForAll(balancingFutures))) {}
-				when(Promise<int> r = waitNext(getUnhealthyRelocationCount)) { r.send(self.unhealthyRelocations); }
+				when(wait(self.actors.getResult())) {}
+				when(wait(serveInterface)) {}
 			}
 		}
 	} catch (Error& e) {

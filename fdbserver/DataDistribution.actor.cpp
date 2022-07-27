@@ -361,8 +361,8 @@ public:
 	}
 
 	// Initialize the required internal states of DataDistributor. It's necessary before DataDistributor start working.
-	// Doesn't include initialization of optional components, like TenantCache, DDQueue, Tracker, TeamCollection. The
-	// components should call its own ::init methods.
+	// Doesn't include initialization of optional components, like TenantCache, DDQueueData, Tracker, TeamCollection.
+	// The components should call its own ::init methods.
 	ACTOR static Future<Void> init(Reference<DataDistributor> self, const DDEnabledState* ddEnabledState) {
 		loop {
 			TraceEvent("DDInitTakingMoveKeysLock", self->ddId).log();
@@ -496,7 +496,7 @@ public:
 				RelocateShard rs(meta.range, DataMovementReason::RECOVER_MOVE, RelocateReason::OTHER);
 				rs.dataMoveId = meta.id;
 				rs.cancelled = true;
-				self->queueInterface.relocationProducer.send(rs);
+				self->queueInterface->relocationProducer.send(rs);
 				TraceEvent("DDInitScheduledCancelDataMove", self->ddId).detail("DataMove", meta.toString());
 			} else if (it.value()->valid) {
 				TraceEvent(SevDebug, "DDInitFoundDataMove", self->ddId).detail("DataMove", meta.toString());
@@ -575,8 +575,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self, const DDEna
 
 			self->queueInterface->processingUnhealthy = makeReference<AsyncVar<bool>>(false);
 			self->queueInterface->processingWiggle = makeReference<AsyncVar<bool>>(false);
-			self->queueInterface->readyToStart = makeReference<AsyncVar<bool>>(false);
-			self->trackerInterface->readyToStart = self->queueInterface->readyToStart;
+			self->trackerInterface->readyToStart = makeReference<AsyncVar<bool>>(false);
 
 			self->shardsAffectedByTeamFailure = makeReference<ShardsAffectedByTeamFailure>();
 			wait(self->resumeRelocations());
@@ -628,7 +627,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self, const DDEna
 			                                                          storageTeamSize,
 			                                                          self->configuration.storageTeamSize,
 			                                                          ddEnabledState),
-			                                    "DDQueue",
+			                                    "DDQueueData",
 			                                    self->ddId,
 			                                    &normalDDQueueErrors()));
 
@@ -637,40 +636,40 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self, const DDEna
 			    cx,
 			    self->ddId,
 			    self->lock,
-			    self->relocationProducer,
+			    self->queueInterface->relocationProducer,
 			    self->shardsAffectedByTeamFailure,
 			    self->configuration,
 			    self->primaryDcId,
 			    self->configuration.usableRegions > 1 ? self->remoteDcIds : std::vector<Optional<Key>>(),
-			    readyToStart.getFuture(),
+			    self->trackerInterface->readyToStart->onChange(),
 			    zeroHealthyTeams[0],
 			    IsPrimary::True,
-			    processingUnhealthy,
-			    processingWiggle,
-			    getShardMetrics,
+			    self->queueInterface->processingUnhealthy,
+			    self->queueInterface->processingWiggle,
+			    self->trackerInterface->getShardMetrics,
 			    removeFailedServer,
-			    getUnhealthyRelocationCount);
+			    self->queueInterface->getUnhealthyRelocationCount);
 			teamCollectionsPtrs.push_back(primaryTeamCollection.getPtr());
 			auto recruitStorage = IAsyncListener<RequestStream<RecruitStorageRequest>>::create(
 			    self->dbInfo, [](auto const& info) { return info.clusterInterface.recruitStorage; });
 			if (self->configuration.usableRegions > 1) {
-				remoteTeamCollection =
-				    makeReference<DDTeamCollection>(cx,
-				                                    self->ddId,
-				                                    self->lock,
-				                                    self->relocationProducer,
-				                                    self->shardsAffectedByTeamFailure,
-				                                    self->configuration,
-				                                    self->remoteDcIds,
-				                                    Optional<std::vector<Optional<Key>>>(),
-				                                    readyToStart.getFuture() && remoteRecovered(self->dbInfo),
-				                                    zeroHealthyTeams[1],
-				                                    IsPrimary::False,
-				                                    processingUnhealthy,
-				                                    processingWiggle,
-				                                    getShardMetrics,
-				                                    removeFailedServer,
-				                                    getUnhealthyRelocationCount);
+				remoteTeamCollection = makeReference<DDTeamCollection>(
+				    cx,
+				    self->ddId,
+				    self->lock,
+				    self->queueInterface->relocationProducer,
+				    self->shardsAffectedByTeamFailure,
+				    self->configuration,
+				    self->remoteDcIds,
+				    Optional<std::vector<Optional<Key>>>(),
+				    self->trackerInterface->readyToStart->onChange() && remoteRecovered(self->dbInfo),
+				    zeroHealthyTeams[1],
+				    IsPrimary::False,
+				    self->queueInterface->processingUnhealthy,
+				    self->queueInterface->processingWiggle,
+				    self->trackerInterface->getShardMetrics,
+				    removeFailedServer,
+				    self->queueInterface->getUnhealthyRelocationCount);
 				teamCollectionsPtrs.push_back(remoteTeamCollection.getPtr());
 				remoteTeamCollection->teamCollections = teamCollectionsPtrs;
 				actors.push_back(reportErrorsExcept(
@@ -690,7 +689,6 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self, const DDEna
 			    &normalDDQueueErrors()));
 
 			actors.push_back(DDTeamCollection::printSnapshotTeamsInfo(primaryTeamCollection));
-			actors.push_back(yieldPromiseStream(self->relocationProducer.getFuture(), self->relocationConsumer));
 
 			wait(waitForAll(actors));
 			return Void();

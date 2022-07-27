@@ -302,10 +302,8 @@ struct DDTrackerInterface {
 	PromiseStream<Promise<int64_t>> getAverageShardBytes;
 };
 
-// send request to DDQueue through interface
+// send request to DDQueueData through interface
 struct DDQueueInterface {
-	Reference<AsyncVar<bool>> readyToStart;
-
 	PromiseStream<RelocateShard> relocationProducer;
 	PromiseStream<Promise<int>> getUnhealthyRelocationCount;
 	Reference<AsyncVar<bool>> processingUnhealthy, processingWiggle;
