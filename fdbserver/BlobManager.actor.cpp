@@ -322,6 +322,10 @@ struct MergeCandidateInfo {
 	bool mergeEligible() const { return st == MergeCandidateCanMerge && seen; }
 };
 
+struct BlobGranuleSplitPoints {
+	Standalone<VectorRef<KeyRef>> keys;
+};
+
 struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 	UID id;
 	Database db;
@@ -435,12 +439,13 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 static void alignKeyBoundary(Reference<GranuleTenantData> tenantData,
                              KeyRef key,
                              int offset,
-                             Standalone<VectorRef<KeyRef>>& alignedKeys) {
+                             BlobGranuleSplitPoints& splitPoints) {
+	Standalone<VectorRef<KeyRef>>& keys = splitPoints.keys;
 	KeyRef alignedKey = key;
 	Tuple t, t2;
 
 	if (!offset) {
-		alignedKeys.push_back_deep(alignedKeys.arena(), alignedKey);
+		keys.push_back_deep(keys.arena(), alignedKey);
 		return;
 	}
 
@@ -460,25 +465,27 @@ static void alignKeyBoundary(Reference<GranuleTenantData> tenantData,
 		}
 	}
 	if (tenantData.isValid()) {
-		alignedKey = alignedKey.withPrefix(tenantData->entry.prefix, alignedKeys.arena());
+		alignedKey = alignedKey.withPrefix(tenantData->entry.prefix, keys.arena());
 	}
 
 	// Only add the alignedKey if it's larger than the last key. If it's the same, drop the split.
-	if (alignedKey > alignedKeys.back()) {
-		alignedKeys.push_back_deep(alignedKeys.arena(), alignedKey);
+	if (alignedKey > keys.back()) {
+		keys.push_back_deep(keys.arena(), alignedKey);
 	}
 }
 
-ACTOR Future<Standalone<VectorRef<KeyRef>>> alignKeys(Reference<BlobManagerData> bmData,
-                                                      KeyRange granuleRange,
-                                                      Standalone<VectorRef<KeyRef>> splits) {
-	state Standalone<VectorRef<KeyRef>> alignedKeys;
-	alignedKeys.push_back_deep(alignedKeys.arena(), splits.front());
+ACTOR Future<BlobGranuleSplitPoints> alignKeys(Reference<BlobManagerData> bmData,
+                                               KeyRange granuleRange,
+                                               Standalone<VectorRef<KeyRef>> splits) {
+	state BlobGranuleSplitPoints splitPoints;
 
 	state int offset = SERVER_KNOBS->BG_KEY_TUPLE_TRUNCATE_OFFSET;
 	if (offset <= 0) {
-		return splits;
+		splitPoints.keys = splits;
+		return splitPoints;
 	}
+
+	splitPoints.keys.push_back_deep(splitPoints.keys.arena(), splits.front());
 
 	state Transaction tr = Transaction(bmData->db);
 	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
@@ -494,7 +501,7 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> alignKeys(Reference<BlobManagerData>
 				}
 
 				Reference<GranuleTenantData> tenantData = bmData->tenantData.getDataForGranule(granuleRange);
-				alignKeyBoundary(tenantData, nextKeyRes[0].key, offset, alignedKeys);
+				alignKeyBoundary(tenantData, nextKeyRes[0].key, offset, splitPoints);
 				break;
 			} catch (Error& e) {
 				wait(tr.onError(e));
@@ -502,15 +509,16 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> alignKeys(Reference<BlobManagerData>
 		}
 	}
 
-	alignedKeys.push_back_deep(alignedKeys.arena(), splits.back());
+	splitPoints.keys.push_back_deep(splitPoints.keys.arena(), splits.back());
 
-	return alignedKeys;
+	return splitPoints;
 }
 
-ACTOR Future<Standalone<VectorRef<KeyRef>>> splitRange(Reference<BlobManagerData> bmData,
-                                                       KeyRange range,
-                                                       bool writeHot,
-                                                       bool initialSplit) {
+ACTOR Future<BlobGranuleSplitPoints> splitRange(Reference<BlobManagerData> bmData,
+                                                KeyRange range,
+                                                bool writeHot,
+                                                bool initialSplit) {
+	state BlobGranuleSplitPoints splitPoints;
 	try {
 		if (BM_DEBUG) {
 			fmt::print("Splitting new range [{0} - {1}): {2}\n",
@@ -576,23 +584,24 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitRange(Reference<BlobManagerData
 
 			// We only need to align the keys if there is a proposed split.
 			if (keys.size() > 2) {
-				Standalone<VectorRef<KeyRef>> _keys = wait(alignKeys(bmData, range, keys));
-				keys = _keys;
+				BlobGranuleSplitPoints _splitPoints = wait(alignKeys(bmData, range, keys));
+				splitPoints = _splitPoints;
+			} else {
+				splitPoints.keys = keys;
 			}
 
-			ASSERT(keys.size() >= 2);
-			ASSERT(keys.front() == range.begin);
-			ASSERT(keys.back() == range.end);
-			return keys;
+			ASSERT(splitPoints.keys.size() >= 2);
+			ASSERT(splitPoints.keys.front() == range.begin);
+			ASSERT(splitPoints.keys.back() == range.end);
+			return splitPoints;
 		} else {
 			CODE_PROBE(writeHot, "Not splitting write-hot because granules would be too small");
 			if (BM_DEBUG) {
 				printf("Not splitting range\n");
 			}
-			Standalone<VectorRef<KeyRef>> keys;
-			keys.push_back_deep(keys.arena(), range.begin);
-			keys.push_back_deep(keys.arena(), range.end);
-			return keys;
+			splitPoints.keys.push_back_deep(splitPoints.keys.arena(), range.begin);
+			splitPoints.keys.push_back_deep(splitPoints.keys.arena(), range.end);
+			return splitPoints;
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_operation_cancelled) {
@@ -963,13 +972,12 @@ ACTOR Future<Void> checkManagerLock(Reference<ReadYourWritesTransaction> tr, Ref
 	return Void();
 }
 
-ACTOR Future<Void> writeInitialGranuleMapping(Reference<BlobManagerData> bmData,
-                                              Standalone<VectorRef<KeyRef>> boundaries) {
+ACTOR Future<Void> writeInitialGranuleMapping(Reference<BlobManagerData> bmData, BlobGranuleSplitPoints splitPoints) {
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
 	// don't do too many in one transaction
 	state int i = 0;
 	state int transactionChunkSize = BUGGIFY ? deterministicRandom()->randomInt(2, 5) : 1000;
-	while (i < boundaries.size() - 1) {
+	while (i < splitPoints.keys.size() - 1) {
 		CODE_PROBE(i > 0, "multiple transactions for large granule split");
 		tr->reset();
 		state int j = 0;
@@ -978,11 +986,11 @@ ACTOR Future<Void> writeInitialGranuleMapping(Reference<BlobManagerData> bmData,
 				tr->setOption(FDBTransactionOptions::Option::PRIORITY_SYSTEM_IMMEDIATE);
 				tr->setOption(FDBTransactionOptions::Option::ACCESS_SYSTEM_KEYS);
 				wait(checkManagerLock(tr, bmData));
-				while (i + j < boundaries.size() - 1 && j < transactionChunkSize) {
+				while (i + j < splitPoints.keys.size() - 1 && j < transactionChunkSize) {
 					// set to empty UID - no worker assigned yet
 					wait(krmSetRange(tr,
 					                 blobGranuleMappingKeys.begin,
-					                 KeyRangeRef(boundaries[i + j], boundaries[i + j + 1]),
+					                 KeyRangeRef(splitPoints.keys[i + j], splitPoints.keys[i + j + 1]),
 					                 blobGranuleMappingValueFor(UID())));
 					j++;
 				}
@@ -1121,7 +1129,7 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 					}
 				}
 
-				state std::vector<Future<Standalone<VectorRef<KeyRef>>>> splitFutures;
+				state std::vector<Future<BlobGranuleSplitPoints>> splitFutures;
 				// Divide new ranges up into equal chunks by using SS byte sample
 				for (KeyRangeRef range : rangesToAdd) {
 					TraceEvent("ClientBlobRangeAdded", bmData->id).detail("Range", range);
@@ -1133,20 +1141,20 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 				}
 
 				for (auto f : splitFutures) {
-					state Standalone<VectorRef<KeyRef>> splits = wait(f);
+					state BlobGranuleSplitPoints splitPoints = wait(f);
 					if (BM_DEBUG) {
 						fmt::print("Split client range [{0} - {1}) into {2} ranges:\n",
-						           splits[0].printable(),
-						           splits[splits.size() - 1].printable(),
-						           splits.size() - 1);
+						           splitPoints.keys[0].printable(),
+						           splitPoints.keys[splitPoints.keys.size() - 1].printable(),
+						           splitPoints.keys.size() - 1);
 					}
 
 					// Write to DB BEFORE sending assign requests, so that if manager dies before/during, new manager
 					// picks up the same ranges
-					wait(writeInitialGranuleMapping(bmData, splits));
+					wait(writeInitialGranuleMapping(bmData, splitPoints));
 
-					for (int i = 0; i < splits.size() - 1; i++) {
-						KeyRange range = KeyRange(KeyRangeRef(splits[i], splits[i + 1]));
+					for (int i = 0; i < splitPoints.keys.size() - 1; i++) {
+						KeyRange range = KeyRange(KeyRangeRef(splitPoints.keys[i], splitPoints.keys[i + 1]));
 						// only add the client range if this is the first BM or it's not already assigned
 						if (BM_DEBUG) {
 							fmt::print(
@@ -1231,12 +1239,10 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
 
 	// first get ranges to split
-	state Standalone<VectorRef<KeyRef>> newRanges;
-	Standalone<VectorRef<KeyRef>> _newRanges = wait(splitRange(bmData, granuleRange, writeHot, false));
-	newRanges = _newRanges;
+	state BlobGranuleSplitPoints splitPoints = wait(splitRange(bmData, granuleRange, writeHot, false));
 
-	ASSERT(newRanges.size() >= 2);
-	if (newRanges.size() == 2) {
+	ASSERT(splitPoints.keys.size() >= 2);
+	if (splitPoints.keys.size() == 2) {
 		// not large enough to split, just reassign back to worker
 		if (BM_DEBUG) {
 			fmt::print("Not splitting existing range [{0} - {1}). Continuing assignment to {2}\n",
@@ -1268,38 +1274,39 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 	}
 
 	// Enforce max split fanout for performance reasons. This mainly happens when a blob worker is behind.
-	if (newRanges.size() >=
+	if (splitPoints.keys.size() >=
 	    SERVER_KNOBS->BG_MAX_SPLIT_FANOUT + 2) { // +2 because this is boundaries, so N keys would have N+1 bounaries.
 		CODE_PROBE(true, "downsampling granule split because fanout too high");
 		Standalone<VectorRef<KeyRef>> coalescedRanges;
-		coalescedRanges.arena().dependsOn(newRanges.arena());
-		coalescedRanges.push_back(coalescedRanges.arena(), newRanges.front());
+		coalescedRanges.arena().dependsOn(splitPoints.keys.arena());
+		coalescedRanges.push_back(coalescedRanges.arena(), splitPoints.keys.front());
 
 		// since we include start + end boundaries here, only need maxSplitFanout-1 split boundaries to produce
 		// maxSplitFanout granules
-		downsampleSplit(newRanges, coalescedRanges, 1, newRanges.size() - 1, SERVER_KNOBS->BG_MAX_SPLIT_FANOUT - 1);
+		downsampleSplit(
+		    splitPoints.keys, coalescedRanges, 1, splitPoints.keys.size() - 1, SERVER_KNOBS->BG_MAX_SPLIT_FANOUT - 1);
 
-		coalescedRanges.push_back(coalescedRanges.arena(), newRanges.back());
+		coalescedRanges.push_back(coalescedRanges.arena(), splitPoints.keys.back());
 		ASSERT(coalescedRanges.size() == SERVER_KNOBS->BG_MAX_SPLIT_FANOUT + 1);
 		if (BM_DEBUG) {
 			fmt::print("Downsampled split from {0} -> {1} granules\n",
-			           newRanges.size() - 1,
+			           splitPoints.keys.size() - 1,
 			           SERVER_KNOBS->BG_MAX_SPLIT_FANOUT);
 		}
 
-		newRanges = coalescedRanges;
-		ASSERT(newRanges.size() <= SERVER_KNOBS->BG_MAX_SPLIT_FANOUT + 1);
+		splitPoints.keys = coalescedRanges;
+		ASSERT(splitPoints.keys.size() <= SERVER_KNOBS->BG_MAX_SPLIT_FANOUT + 1);
 	}
 
-	ASSERT(granuleRange.begin == newRanges.front());
-	ASSERT(granuleRange.end == newRanges.back());
+	ASSERT(granuleRange.begin == splitPoints.keys.front());
+	ASSERT(granuleRange.end == splitPoints.keys.back());
 
 	// Have to make set of granule ids deterministic across retries to not end up with extra UIDs in the split
 	// state, which could cause recovery to fail and resources to not be cleaned up.
 	// This entire transaction must be idempotent across retries for all splitting state
 	state std::vector<UID> newGranuleIDs;
-	newGranuleIDs.reserve(newRanges.size() - 1);
-	for (int i = 0; i < newRanges.size() - 1; i++) {
+	newGranuleIDs.reserve(splitPoints.keys.size() - 1);
+	for (int i = 0; i < splitPoints.keys.size() - 1; i++) {
 		newGranuleIDs.push_back(deterministicRandom()->randomUniqueID());
 	}
 
@@ -1307,11 +1314,11 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 		fmt::print("Splitting range [{0} - {1}) into {2} granules:\n",
 		           granuleRange.begin.printable(),
 		           granuleRange.end.printable(),
-		           newRanges.size() - 1);
-		for (int i = 0; i < newRanges.size(); i++) {
+		           splitPoints.keys.size() - 1);
+		for (int i = 0; i < splitPoints.keys.size(); i++) {
 			fmt::print("    {}:{}\n",
 			           (i < newGranuleIDs.size() ? newGranuleIDs[i] : UID()).toString().substr(0, 6).c_str(),
-			           newRanges[i].printable());
+			           splitPoints.keys[i].printable());
 		}
 	}
 
@@ -1324,7 +1331,7 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 			tr->reset();
 			tr->setOption(FDBTransactionOptions::Option::PRIORITY_SYSTEM_IMMEDIATE);
 			tr->setOption(FDBTransactionOptions::Option::ACCESS_SYSTEM_KEYS);
-			ASSERT(newRanges.size() > 2);
+			ASSERT(splitPoints.keys.size() > 2);
 
 			// make sure we're still manager when this transaction gets committed
 			wait(checkManagerLock(tr, bmData));
@@ -1352,20 +1359,21 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 				// +2 because this is boundaries and existingState was granules, and to ensure it doesn't set more
 				ASSERT(!existingBoundaries.more);
 				ASSERT(existingBoundaries.size() == existingState.size() + 1);
-				newRanges.clear();
-				newRanges.arena().dependsOn(existingBoundaries.arena());
+				splitPoints.keys.clear();
+				splitPoints.keys.arena().dependsOn(existingBoundaries.arena());
 				for (auto& it : existingBoundaries) {
-					newRanges.push_back(newRanges.arena(), it.key.removePrefix(blobGranuleMappingKeys.begin));
+					splitPoints.keys.push_back(splitPoints.keys.arena(),
+					                           it.key.removePrefix(blobGranuleMappingKeys.begin));
 				}
-				ASSERT(newRanges.front() == granuleRange.begin);
-				ASSERT(newRanges.back() == granuleRange.end);
+				ASSERT(splitPoints.keys.front() == granuleRange.begin);
+				ASSERT(splitPoints.keys.back() == granuleRange.end);
 				if (BM_DEBUG) {
 					fmt::print("Replaced old range splits for [{0} - {1}) with {2}:\n",
 					           granuleRange.begin.printable(),
 					           granuleRange.end.printable(),
-					           newRanges.size() - 1);
-					for (int i = 0; i < newRanges.size(); i++) {
-						fmt::print("    {}\n", newRanges[i].printable());
+					           splitPoints.keys.size() - 1);
+					for (int i = 0; i < splitPoints.keys.size(); i++) {
+						fmt::print("    {}\n", splitPoints.keys[i].printable());
 					}
 				}
 				break;
@@ -1420,14 +1428,17 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 
 			// set up splits in granule mapping, but point each part to the old owner (until they get reassigned)
 			state int i;
-			for (i = 0; i < newRanges.size() - 1; i++) {
+			for (i = 0; i < splitPoints.keys.size() - 1; i++) {
+				KeyRangeRef splitRange(splitPoints.keys[i], splitPoints.keys[i + 1]);
+
+				// Record split state.
 				Key splitKey = blobGranuleSplitKeyFor(granuleID, newGranuleIDs[i]);
 
 				tr->atomicOp(splitKey,
 				             blobGranuleSplitValueFor(BlobGranuleSplitState::Initialized),
 				             MutationRef::SetVersionstampedValue);
 
-				KeyRangeRef splitRange(newRanges[i], newRanges[i + 1]);
+				// History.
 				Key historyKey = blobGranuleHistoryKeyFor(splitRange, splitVersion);
 
 				Standalone<BlobGranuleHistoryValue> historyValue;
@@ -1443,7 +1454,7 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 				// restarts
 				wait(krmSetRange(tr,
 				                 blobGranuleMappingKeys.begin,
-				                 KeyRangeRef(newRanges[i], newRanges[i + 1]),
+				                 KeyRangeRef(splitPoints.keys[i], splitPoints.keys[i + 1]),
 				                 blobGranuleMappingValueFor(currentWorkerId)));
 			}
 
@@ -1470,7 +1481,7 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 		fmt::print("Splitting range [{0} - {1}) into {2} granules @ {3} done, sending assignments:\n",
 		           granuleRange.begin.printable(),
 		           granuleRange.end.printable(),
-		           newRanges.size() - 1,
+		           splitPoints.keys.size() - 1,
 		           splitVersion);
 	}
 
@@ -1489,11 +1500,11 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 	raRevoke.revoke = RangeRevokeData(false); // not a dispose
 	handleRangeAssign(bmData, raRevoke);
 
-	for (int i = 0; i < newRanges.size() - 1; i++) {
+	for (int i = 0; i < splitPoints.keys.size() - 1; i++) {
 		// reassign new range and do handover of previous range
 		RangeAssignment raAssignSplit;
 		raAssignSplit.isAssign = true;
-		raAssignSplit.keyRange = KeyRangeRef(newRanges[i], newRanges[i + 1]);
+		raAssignSplit.keyRange = KeyRangeRef(splitPoints.keys[i], splitPoints.keys[i + 1]);
 		raAssignSplit.assign = RangeAssignmentData();
 		// don't care who this range gets assigned to
 		handleRangeAssign(bmData, raAssignSplit);
@@ -1503,7 +1514,7 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 		fmt::print("Splitting range [{0} - {1}) into {2} granules @ {3} got assignments processed\n",
 		           granuleRange.begin.printable(),
 		           granuleRange.end.printable(),
-		           newRanges.size() - 1,
+		           splitPoints.keys.size() - 1,
 		           splitVersion);
 	}
 
