@@ -21,6 +21,7 @@ from local_cluster import LocalCluster, random_secret_string
 SUPPORTED_PLATFORMS = ["x86_64"]
 SUPPORTED_VERSIONS = [
     "7.2.0",
+    "7.1.4",
     "7.1.3",
     "7.1.2",
     "7.1.1",
@@ -70,7 +71,7 @@ SUPPORTED_VERSIONS = [
 CLUSTER_ACTIONS = ["wiggle"]
 FDB_DOWNLOAD_ROOT = "https://github.com/apple/foundationdb/releases/download/"
 LOCAL_OLD_BINARY_REPO = "/opt/foundationdb/old/"
-CURRENT_VERSION = "7.1.3"
+CURRENT_VERSION = "7.1.4"
 HEALTH_CHECK_TIMEOUT_SEC = 5
 PROGRESS_CHECK_TIMEOUT_SEC = 30
 TRANSACTION_RETRY_LIMIT = 100
