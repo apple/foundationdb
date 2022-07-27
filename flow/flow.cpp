@@ -414,9 +414,10 @@ void bindDeterministicRandomToOpenssl() {
 		if (ec) {
 			::ERR_error_string_n(ec, msg, sizeof(msg));
 		}
-		printf("ERROR: Failed to bind DeterministicRandom to OpenSSL RNG\n"
-		       "       OpenSSL error message: '%s'\n",
-		       msg);
+		fprintf(stderr,
+		        "ERROR: Failed to bind DeterministicRandom to OpenSSL RNG\n"
+		        "       OpenSSL error message: '%s'\n",
+		        msg);
 		throw internal_error();
 	} else {
 		printf("DeterministicRandom successfully bound to OpenSSL RNG\n");
