@@ -369,7 +369,6 @@ class GlobalTagThrottlerImpl {
 					self->removeUnseenQuotas(tagsWithQuota);
 					++self->throttledTagChangeId;
 					wait(delay(5.0));
-					TraceEvent("GlobalTagThrottler_ChangeSignaled");
 					break;
 				} catch (Error& e) {
 					TraceEvent("GlobalTagThrottler_MonitoringChangesError", self->id).error(e);
