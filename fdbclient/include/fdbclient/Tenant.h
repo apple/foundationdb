@@ -29,6 +29,8 @@
 
 typedef StringRef TenantNameRef;
 typedef Standalone<TenantNameRef> TenantName;
+typedef StringRef TenantGroupNameRef;
+typedef Standalone<TenantGroupNameRef> TenantGroupName;
 
 enum class TenantState { REGISTERING, READY, REMOVING, UPDATING_CONFIGURATION, ERROR };
 
@@ -44,28 +46,29 @@ struct TenantMapEntry {
 	int64_t id = -1;
 	Key prefix;
 	TenantState tenantState = TenantState::READY;
+	Optional<TenantGroupName> tenantGroup;
 
 	constexpr static int PREFIX_SIZE = sizeof(id);
 
 public:
 	TenantMapEntry();
 	TenantMapEntry(int64_t id, TenantState tenantState);
+	TenantMapEntry(int64_t id, TenantState tenantState, Optional<TenantGroupName> tenantGroup);
 
 	void setId(int64_t id);
 	std::string toJson(int apiVersion) const;
 
-	Value encode() const { return ObjectWriter::toValue(*this, IncludeVersion(ProtocolVersion::withTenants())); }
+	bool matchesConfiguration(TenantMapEntry const& other) const;
+	void configure(Standalone<StringRef> parameter, Optional<Value> value);
 
+	Value encode() const { return ObjectWriter::toValue(*this, IncludeVersion()); }
 	static TenantMapEntry decode(ValueRef const& value) {
-		TenantMapEntry entry;
-		ObjectReader reader(value.begin(), IncludeVersion());
-		reader.deserialize(entry);
-		return entry;
+		return ObjectReader::fromStringRef<TenantMapEntry>(value, IncludeVersion());
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, id, tenantState);
+		serializer(ar, id, tenantState, tenantGroup);
 		if constexpr (Ar::isDeserializing) {
 			if (id >= 0) {
 				prefix = idToPrefix(id);
@@ -75,15 +78,36 @@ public:
 	}
 };
 
+struct TenantGroupEntry {
+	constexpr static FileIdentifier file_identifier = 10764222;
+
+	TenantGroupEntry() = default;
+
+	Value encode() { return ObjectWriter::toValue(*this, IncludeVersion()); }
+	static TenantGroupEntry decode(ValueRef const& value) {
+		return ObjectReader::fromStringRef<TenantGroupEntry>(value, IncludeVersion());
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar);
+	}
+};
+
 struct TenantMetadataSpecification {
 	static KeyRef subspace;
 
 	KeyBackedObjectMap<TenantName, TenantMapEntry, decltype(IncludeVersion()), NullCodec> tenantMap;
 	KeyBackedProperty<int64_t> lastTenantId;
+	KeyBackedBinaryValue<int64_t> tenantCount;
+	KeyBackedSet<Tuple> tenantGroupTenantIndex;
+	KeyBackedObjectMap<TenantGroupName, TenantGroupEntry, decltype(IncludeVersion()), NullCodec> tenantGroupMap;
 
 	TenantMetadataSpecification(KeyRef subspace)
-	  : tenantMap(subspace.withSuffix("tenant/map/"_sr), IncludeVersion(ProtocolVersion::withTenants())),
-	    lastTenantId(subspace.withSuffix("tenant/lastId"_sr)) {}
+	  : tenantMap(subspace.withSuffix("tenant/map/"_sr), IncludeVersion()),
+	    lastTenantId(subspace.withSuffix("tenant/lastId"_sr)), tenantCount(subspace.withSuffix("tenant/count"_sr)),
+	    tenantGroupTenantIndex(subspace.withSuffix("tenant/tenantGroup/tenantIndex/"_sr)),
+	    tenantGroupMap(subspace.withSuffix("tenant/tenantGroup/map/"_sr), IncludeVersion()) {}
 };
 
 struct TenantMetadata {
@@ -93,6 +117,9 @@ private:
 public:
 	static inline auto& tenantMap = instance.tenantMap;
 	static inline auto& lastTenantId = instance.lastTenantId;
+	static inline auto& tenantCount = instance.tenantCount;
+	static inline auto& tenantGroupTenantIndex = instance.tenantGroupTenantIndex;
+	static inline auto& tenantGroupMap = instance.tenantGroupMap;
 
 	static inline Key tenantMapPrivatePrefix = "\xff"_sr.withSuffix(tenantMap.subspace.begin);
 };

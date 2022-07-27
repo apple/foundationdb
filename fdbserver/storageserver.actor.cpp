@@ -2420,11 +2420,9 @@ static std::deque<Standalone<MutationsAndVersionRef>>::const_iterator searchChan
 				break;
 			}
 			lastEnd = currentEnd + 1;
+			jump = std::min((int)(currentEnd - mutations.begin()), jump);
 			currentEnd -= jump;
 			jump <<= 1;
-		}
-		if (currentEnd < mutations.begin()) {
-			currentEnd = mutations.begin();
 		}
 		auto ret = std::lower_bound(currentEnd, lastEnd, searchKey, MutationsAndVersionRef::OrderByVersion());
 		// TODO REMOVE: for validation
@@ -10129,7 +10127,8 @@ ACTOR Future<Void> initTenantMap(StorageServer* self) {
 			// when SSs store only the local tenants
 			KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>> entries =
 			    wait(TenantMetadata::tenantMap.getRange(
-			        tr, Optional<TenantName>(), Optional<TenantName>(), CLIENT_KNOBS->TOO_MANY));
+			        tr, Optional<TenantName>(), Optional<TenantName>(), CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1));
+			ASSERT(entries.results.size() <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER && !entries.more);
 
 			TraceEvent("InitTenantMap", self->thisServerID)
 			    .detail("Version", version)
