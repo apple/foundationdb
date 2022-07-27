@@ -3193,8 +3193,7 @@ TransactionState::TransactionState(Database cx,
                                    SpanContext spanContext,
                                    Reference<TransactionLogInfo> trLogInfo)
   : cx(cx), trLogInfo(trLogInfo), options(cx), taskID(taskID), spanContext(spanContext),
-    readVersionObtainedFromGrvProxy(true), skipTenantPrefixAndIdResolution(false), tenant_(tenant),
-    tenantSet(tenant.present()) {}
+    readVersionObtainedFromGrvProxy(true), tenant_(tenant), tenantSet(tenant.present()) {}
 
 Reference<TransactionState> TransactionState::cloneAndReset(Reference<TransactionLogInfo> newTrLogInfo,
                                                             bool generateNewSpan) const {
@@ -5941,7 +5940,11 @@ ACTOR void checkWrites(Reference<TransactionState> trState,
 	}
 }
 
-ACTOR static Future<Void> commitDummyTransaction(Reference<TransactionState> trState, KeyRange range) {
+FDB_BOOLEAN_PARAM(TenantPrefixPrepended);
+
+ACTOR static Future<Void> commitDummyTransaction(Reference<TransactionState> trState,
+                                                 KeyRange range,
+                                                 TenantPrefixPrepended tenantPrefixPrepended) {
 	state Transaction tr(trState->cx, trState->tenant());
 	state int retries = 0;
 	state Span span("NAPI:dummyTransaction"_loc, trState->spanContext);
@@ -5952,11 +5955,10 @@ ACTOR static Future<Void> commitDummyTransaction(Reference<TransactionState> trS
 			tr.trState->options = trState->options;
 			tr.trState->taskID = trState->taskID;
 			tr.trState->authToken = trState->authToken;
-			if (!trState->tenant().present()) {
+			if (!trState->hasTenant()) {
 				tr.setOption(FDBTransactionOptions::RAW_ACCESS);
 			} else {
-				tr.trState->skipTenantPrefixAndIdResolution = true;
-				tr.trState->tenantId = trState->tenantId;
+				tr.trState->skipApplyTenantPrefix = tenantPrefixPrepended;
 				CODE_PROBE(true, "Commit of a dummy transaction in tenant keyspace");
 			}
 			tr.setOption(FDBTransactionOptions::CAUSAL_WRITE_RISKY);
@@ -6120,7 +6122,7 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 	state double startTime = now();
 	state Span span("NAPI:tryCommit"_loc, trState->spanContext);
 	state Optional<UID> debugID = trState->debugID;
-	state Key tenantPrefix;
+	state TenantPrefixPrepended tenantPrefixPrepended = TenantPrefixPrepended::False;
 	if (debugID.present()) {
 		TraceEvent(interval.begin()).detail("Parent", debugID.get());
 	}
@@ -6137,20 +6139,23 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 			wait(store(req.transaction.read_snapshot, readVersion));
 		}
 
-		// skipTenantPrefixAndIdResolution is set only in the context of a commitDummyTransaction() (see member
-		// declaration)
-		if (trState->tenant().present() && !trState->skipTenantPrefixAndIdResolution) {
+		state Key tenantPrefix;
+		if (trState->tenant().present()) {
 			KeyRangeLocationInfo locationInfo = wait(getKeyLocation(trState,
 			                                                        ""_sr,
 			                                                        &StorageServerInterface::getValue,
 			                                                        Reverse::False,
 			                                                        UseTenant::True,
 			                                                        req.transaction.read_snapshot));
-			applyTenantPrefix(req, locationInfo.tenantEntry.prefix);
+			// skipApplyTenantPrefix is set only in the context of a commitDummyTransaction()
+			// (see member declaration)
+			if (!trState->skipApplyTenantPrefix) {
+				applyTenantPrefix(req, locationInfo.tenantEntry.prefix);
+				tenantPrefixPrepended = TenantPrefixPrepended::True;
+			}
 			tenantPrefix = locationInfo.tenantEntry.prefix;
 		}
-		CODE_PROBE(trState->skipTenantPrefixAndIdResolution,
-		           "Tenant prefix/id resolution skipped for dummy transaction");
+		CODE_PROBE(trState->skipApplyTenantPrefix, "Tenant prefix prepend skipped for dummy transaction");
 		req.tenantInfo = trState->getTenantInfo();
 		startTime = now();
 		state Optional<UID> commitID = Optional<UID>();
@@ -6277,7 +6282,8 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 
 				CODE_PROBE(true, "Waiting for dummy transaction to report commit_unknown_result");
 
-				wait(commitDummyTransaction(trState, singleKeyRange(selfConflictingRange.begin)));
+				wait(
+				    commitDummyTransaction(trState, singleKeyRange(selfConflictingRange.begin), tenantPrefixPrepended));
 			}
 
 			// The user needs to be informed that we aren't sure whether the commit happened.  Standard retry loops

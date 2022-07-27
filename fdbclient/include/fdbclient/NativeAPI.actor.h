@@ -250,11 +250,12 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 	UseProvisionalProxies useProvisionalProxies = UseProvisionalProxies::False;
 	bool readVersionObtainedFromGrvProxy;
 
-	// Special flag for skipping a) tenant prefix+ID lookup and b) prepend of tenant prefix to mutations and conflict
-	// ranges when a dummy, internal transaction gets commited. The sole purpose of commitDummyTransaction() is to
+	// Special flag to skip prepending tenant prefix to mutations and conflict ranges
+	// when a dummy, internal transaction gets commited. The sole purpose of commitDummyTransaction() is to
 	// resolve the state of earlier transaction that returned commit_unknown_result or request_maybe_delivered.
-	// Therefore, the dummy transaction can simply reuse the tenantId and one conflict range of the earlier commit.
-	bool skipTenantPrefixAndIdResolution;
+	// Therefore, the dummy transaction can simply reuse one conflict range of the earlier commit, if it already has
+	// been prefixed.
+	bool skipApplyTenantPrefix = false;
 
 	int numErrors = 0;
 	double startTime = 0;
