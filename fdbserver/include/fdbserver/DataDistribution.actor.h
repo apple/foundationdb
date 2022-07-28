@@ -286,12 +286,12 @@ struct GetMetricsListRequest {
 	GetMetricsListRequest(KeyRange const& keys, const int shardLimit) : keys(keys), shardLimit(shardLimit) {}
 };
 
-// send request to TeamCollection through interface
+// send request/signal to TeamCollection through interface
 struct TeamCollectionInterface {
 	PromiseStream<GetTeamRequest> getTeam;
 };
 
-// send request to DDTracker through interface
+// send request/signal to DDTracker through interface
 struct DDTrackerInterface {
 	Promise<Void> readyToStart;
 
@@ -302,11 +302,10 @@ struct DDTrackerInterface {
 	PromiseStream<Promise<int64_t>> getAverageShardBytes;
 };
 
-// send request to DDQueueData through interface
+// send request/signal to DDQueueData through interface
 struct DDQueueInterface {
 	PromiseStream<RelocateShard> relocationProducer;
 	PromiseStream<Promise<int>> getUnhealthyRelocationCount;
-	Reference<AsyncVar<bool>> processingUnhealthy, processingWiggle;
 };
 
 class ShardsAffectedByTeamFailure : public ReferenceCounted<ShardsAffectedByTeamFailure> {
@@ -385,6 +384,62 @@ private:
 
 	void erase(Team team, KeyRange const& range);
 	void insert(Team team, KeyRange const& range);
+};
+
+// The common info shared by all DD components. Normally the DD components should share the reference to the same
+// context.
+struct DDContext : public ReferenceCounted<DDContext> {
+private:
+	ActorCollection contextActors{ false };
+	Reference<DDEnabledState> ddEnabledState; // Note: don't operate directly because it's shared with snapshot server
+
+public:
+	UID ddId;
+	MoveKeysLock lock;
+	bool trackerCancelled = false;
+	DatabaseConfiguration configuration;
+
+	DDTrackerInterface trackerInterface;
+	DDQueueInterface queueInterface;
+	std::vector<TeamCollectionInterface> teamCollectionInterfaces; // primary and remote region interface
+
+	// Optional components that can be set after DD bootstrap. They're optional when test, but required for DD being
+	// fully-functional.
+	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
+	Reference<AsyncVar<bool>> processingUnhealthy, processingWiggle;
+
+	std::vector<Reference<AsyncVar<bool>>> zeroHealthyTeams; // primary and remote
+	Reference<AsyncVar<bool>> anyZeroHealthyTeams; // true if primary or remote has zero healthy team
+
+	DDContext() = default;
+	DDContext(UID id, Reference<DDEnabledState> enabledState)
+	  : ddEnabledState(enabledState), ddId(id), shardsAffectedByTeamFailure(new ShardsAffectedByTeamFailure),
+	    processingUnhealthy(new AsyncVar<bool>(false)), processingWiggle(new AsyncVar<bool>(false)) {}
+	Reference<DDEnabledState> getDDEnableState() { return ddEnabledState; }
+	void initTeamCollectionStates();
+};
+
+// provide common behavior to manage shared state. Beware of expose too much details
+class DDComponent {
+protected:
+	Reference<DDContext> context;
+
+public:
+	DDComponent() : context(makeReference<DDContext>()) {}
+	explicit DDComponent(Reference<DDContext> context) : context(context) {}
+	UID Id() const { return context->ddId; }
+	void markTrackerCancelled() { context->trackerCancelled = true; }
+	bool isTrackerCancelled() const { return context->trackerCancelled; }
+
+	// reset context to uninitialized state
+	void resetContext() {
+		auto enabledState = getDDEnableState();
+		auto id = Id();
+		context = makeReference<DDContext>(id, enabledState);
+	}
+	bool isDDEnabled() const { return context->getDDEnableState()->isDDEnabled(); };
+	Reference<DDEnabledState> getDDEnableState() { return context->getDDEnableState(); }
+	Future<Standalone<VectorRef<DDMetricsRef>>> getDDMetricsList(const GetMetricsListRequest& req);
 };
 
 // DDShardInfo is so named to avoid link-time name collision with ShardInfo within the StorageServer

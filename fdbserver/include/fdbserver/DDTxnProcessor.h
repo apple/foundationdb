@@ -46,7 +46,7 @@ public:
 	    const UID& distributorId,
 	    const MoveKeysLock& moveKeysLock,
 	    const std::vector<Optional<Key>>& remoteDcIds,
-	    const DDEnabledState* ddEnabledState) = 0;
+	    Reference<DDEnabledState> ddEnabledState) = 0;
 
 	virtual ~IDDTxnProcessor() = default;
 
@@ -60,7 +60,7 @@ public:
 		return Void();
 	}
 
-	virtual Future<Void> waitForDataDistributionEnabled(const DDEnabledState* ddEnabledState) const = 0;
+	virtual Future<Void> waitForDataDistributionEnabled(Reference<DDEnabledState> ddEnabledState) const = 0;
 };
 
 class DDTxnProcessorImpl;
@@ -83,7 +83,7 @@ public:
 	    const UID& distributorId,
 	    const MoveKeysLock& moveKeysLock,
 	    const std::vector<Optional<Key>>& remoteDcIds,
-	    const DDEnabledState* ddEnabledState) override;
+	    Reference<DDEnabledState> ddEnabledState) override;
 
 	Future<MoveKeysLock> takeMoveKeysLock(UID ddId) const override;
 
@@ -93,7 +93,7 @@ public:
 	                               const std::vector<Optional<Key>>& remoteIds,
 	                               const DatabaseConfiguration& configuration) const override;
 
-	Future<Void> waitForDataDistributionEnabled(const DDEnabledState* ddEnabledState) const override;
+	Future<Void> waitForDataDistributionEnabled(Reference<DDEnabledState> ddEnabledState) const override;
 };
 
 // A mock transaction implementation for test usage.

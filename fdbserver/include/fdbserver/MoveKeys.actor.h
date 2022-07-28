@@ -42,7 +42,7 @@ struct MoveKeysLock {
 	}
 };
 
-class DDEnabledState {
+class DDEnabledState : public ReferenceCounted<DDEnabledState> {
 	// in-memory flag to disable DD
 	bool ddEnabled = true;
 	UID ddEnabledStatusUID;

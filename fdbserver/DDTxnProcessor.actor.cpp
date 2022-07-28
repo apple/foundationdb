@@ -424,10 +424,10 @@ Future<Reference<InitialDataDistribution>> DDTxnProcessor::getInitialDataDistrib
     const UID& distributorId,
     const MoveKeysLock& moveKeysLock,
     const std::vector<Optional<Key>>& remoteDcIds,
-    const DDEnabledState* ddEnabledState) {
+    Reference<DDEnabledState> ddEnabledState) {
 	return DDTxnProcessorImpl::getInitialDataDistribution(cx, distributorId, moveKeysLock, remoteDcIds, ddEnabledState);
 }
 
-Future<Void> DDTxnProcessor::waitForDataDistributionEnabled(const DDEnabledState* ddEnabledState) const {
+Future<Void> DDTxnProcessor::waitForDataDistributionEnabled(Reference<DDEnabledState> ddEnabledState) const {
 	return DDTxnProcessorImpl::waitForDataDistributionEnabled(cx, ddEnabledState);
 }
