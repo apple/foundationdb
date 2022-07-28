@@ -19,6 +19,7 @@
  */
 
 #pragma once
+#include "fdbclient/ClientBooleanParams.h"
 #include "flow/IRandom.h"
 #include "flow/ThreadHelper.actor.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_TENANT_MANAGEMENT_ACTOR_G_H)
@@ -186,6 +187,16 @@ Future<std::pair<Optional<TenantMapEntry>, bool>> createTenantTransaction(
 		}
 	}
 
+	// This is idempotent because we only add an entry to the tenant map if it isn't already there
+	TenantMetadata::tenantCount.atomicOp(tr, 1, MutationRef::AddValue);
+
+	// Read the tenant count after incrementing the counter so that simultaneous attempts to create
+	// tenants in the same transaction are properly reflected.
+	int64_t tenantCount = wait(TenantMetadata::tenantCount.getD(tr, Snapshot::False, 0));
+	if (tenantCount > CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER) {
+		throw cluster_no_capacity();
+	}
+
 	return std::make_pair(tenantEntry, true);
 }
 
@@ -285,7 +296,10 @@ Future<Void> deleteTenantTransaction(Transaction tr,
 			throw tenant_not_empty();
 		}
 
+		// This is idempotent because we only erase an entry from the tenant map if it is present
 		TenantMetadata::tenantMap.erase(tr, name);
+		TenantMetadata::tenantCount.atomicOp(tr, -1, MutationRef::AddValue);
+
 		if (tenantEntry.get().tenantGroup.present()) {
 			TenantMetadata::tenantGroupTenantIndex.erase(tr,
 			                                             Tuple::makeTuple(tenantEntry.get().tenantGroup.get(), name));
@@ -467,6 +481,31 @@ Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listTenants(Reference
 	}
 }
 
+ACTOR template <class Transaction>
+Future<Void> renameTenantTransaction(Transaction tr, TenantNameRef oldName, TenantNameRef newName) {
+	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
+	state Optional<TenantMapEntry> oldEntry;
+	state Optional<TenantMapEntry> newEntry;
+	wait(store(oldEntry, tryGetTenantTransaction(tr, oldName)) &&
+	     store(newEntry, tryGetTenantTransaction(tr, newName)));
+	if (!oldEntry.present()) {
+		throw tenant_not_found();
+	}
+	if (newEntry.present()) {
+		throw tenant_already_exists();
+	}
+	TenantMetadata::tenantMap.erase(tr, oldName);
+	TenantMetadata::tenantMap.set(tr, newName, oldEntry.get());
+
+	// Update the tenant group index to reflect the new tenant name
+	if (oldEntry.get().tenantGroup.present()) {
+		TenantMetadata::tenantGroupTenantIndex.erase(tr, Tuple::makeTuple(oldEntry.get().tenantGroup.get(), oldName));
+		TenantMetadata::tenantGroupTenantIndex.insert(tr, Tuple::makeTuple(oldEntry.get().tenantGroup.get(), newName));
+	}
+
+	return Void();
+}
+
 ACTOR template <class DB>
 Future<Void> renameTenant(Reference<DB> db, TenantName oldName, TenantName newName) {
 	state Reference<typename DB::TransactionT> tr = db->createTransaction();
@@ -513,19 +552,8 @@ Future<Void> renameTenant(Reference<DB> db, TenantName oldName, TenantName newNa
 					throw tenant_not_found();
 				}
 			}
-
-			TenantMetadata::tenantMap.erase(tr, oldName);
-			TenantMetadata::tenantMap.set(tr, newName, oldEntry.get());
-
-			// Update the tenant group index to reflect the new tenant name
-			if (oldEntry.get().tenantGroup.present()) {
-				TenantMetadata::tenantGroupTenantIndex.erase(
-				    tr, Tuple::makeTuple(oldEntry.get().tenantGroup.get(), oldName));
-				TenantMetadata::tenantGroupTenantIndex.insert(
-				    tr, Tuple::makeTuple(oldEntry.get().tenantGroup.get(), newName));
-			}
-
-			wait(safeThreadFutureToFuture(tr->commit()));
+			wait(renameTenantTransaction(tr, oldName, newName));
+			wait(buggifiedCommit(tr, BUGGIFY_WITH_PROB(0.1)));
 			TraceEvent("RenameTenantSuccess").detail("OldName", oldName).detail("NewName", newName);
 			return Void();
 		} catch (Error& e) {

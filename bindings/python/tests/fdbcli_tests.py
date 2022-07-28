@@ -673,11 +673,14 @@ def tenants(logger):
     lines = output.split('\n')
     assert len(lines) == 3
 
+    output = run_fdbcli_command_and_get_error('configuretenant tenant tenant_group=tenant_group1 tenant_group=tenant_group2')
+    assert output == 'ERROR: configuration parameter `tenant_group\' specified more than once.'
+
     output = run_fdbcli_command_and_get_error('configuretenant tenant unset')
     assert output == 'ERROR: `unset\' specified without a configuration parameter.'
 
     output = run_fdbcli_command_and_get_error('configuretenant tenant unset tenant_group=tenant_group1')
-    assert output == 'ERROR: unrecognized configuration parameter `tenant_group=tenant_group1\''
+    assert output == 'ERROR: unrecognized configuration parameter `tenant_group=tenant_group1\'.'
 
     output = run_fdbcli_command_and_get_error('configuretenant tenant tenant_group')
     assert output == 'ERROR: invalid configuration string `tenant_group\'. String must specify a value using `=\'.'

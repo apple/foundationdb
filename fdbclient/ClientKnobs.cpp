@@ -22,6 +22,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/Tenant.h"
+#include "flow/IRandom.h"
 #include "flow/UnitTest.h"
 
 #define init(...) KNOB_FN(__VA_ARGS__, INIT_ATOMIC_KNOB, INIT_KNOB)(__VA_ARGS__)
@@ -290,7 +291,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( CHANGE_QUORUM_BAD_STATE_RETRY_DELAY,      2.0 );
 
 	// Tenants and Metacluster
-	init( MAX_TENANTS_PER_CLUSTER,                  1e6 );
+	init( MAX_TENANTS_PER_CLUSTER,                  1e6 ); if ( randomize && BUGGIFY ) MAX_TENANTS_PER_CLUSTER = deterministicRandom()->randomInt(20, 100);
 	init( TENANT_TOMBSTONE_CLEANUP_INTERVAL,         60 ); if ( randomize && BUGGIFY ) TENANT_TOMBSTONE_CLEANUP_INTERVAL = deterministicRandom()->random01() * 30;
 	init( MAX_DATA_CLUSTERS,                        1e5 );
 	init( REMOVE_CLUSTER_TENANT_BATCH_SIZE,         1e4 ); if ( randomize && BUGGIFY ) REMOVE_CLUSTER_TENANT_BATCH_SIZE = 1;

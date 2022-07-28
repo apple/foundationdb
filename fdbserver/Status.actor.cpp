@@ -487,6 +487,11 @@ struct RolesInfo {
 		double dataLagSeconds = -1.0;
 		obj["id"] = iface.id().shortString();
 		obj["role"] = role;
+		if (iface.metadata.present()) {
+			obj["storage_metadata"] = iface.metadata.get().toJSON();
+			// printf("%s\n", metadataObj.getJson().c_str());
+		}
+
 		try {
 			TraceEventFields const& storageMetrics = metrics.at("StorageMetrics");
 
@@ -594,14 +599,12 @@ struct RolesInfo {
 				}
 			}
 
-			if (iface.metadata.present()) {
-				obj["storage_metadata"] = iface.metadata.get().toJSON();
-				// printf("%s\n", metadataObj.getJson().c_str());
-			}
-
 		} catch (Error& e) {
 			if (e.code() != error_code_attribute_not_found)
 				throw e;
+			else {
+				TraceEvent(SevWarnAlways, "StorageServerStatusJson").error(e);
+			}
 		}
 
 		if (pDataLagSeconds) {

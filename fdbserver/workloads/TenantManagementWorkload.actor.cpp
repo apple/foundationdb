@@ -20,6 +20,7 @@
 
 #include <cstdint>
 #include <limits>
+#include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/GenericManagementAPI.actor.h"
@@ -72,6 +73,9 @@ struct TenantManagementWorkload : TestWorkload {
 	const Key specialKeysTenantConfigPrefix = SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT)
 	                                              .begin.withSuffix(TenantRangeImpl<true>::submoduleRange.begin)
 	                                              .withSuffix(TenantRangeImpl<true>::configureSubRange.begin);
+	const Key specialKeysTenantRenamePrefix = SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT)
+	                                              .begin.withSuffix(TenantRangeImpl<true>::submoduleRange.begin)
+	                                              .withSuffix(TenantRangeImpl<true>::renameSubRange.begin);
 
 	int maxTenants;
 	int maxTenantGroups;
@@ -316,6 +320,7 @@ struct TenantManagementWorkload : TestWorkload {
 		// True if any tenant group name starts with \xff
 		state bool hasSystemTenantGroup = false;
 
+		state int newTenants = 0;
 		state std::map<TenantName, TenantMapEntry> tenantsToCreate;
 		for (int i = 0; i < numTenants; ++i) {
 			TenantName tenant = self->chooseTenantName(true);
@@ -325,9 +330,14 @@ struct TenantManagementWorkload : TestWorkload {
 
 			TenantMapEntry entry;
 			entry.tenantGroup = self->chooseTenantGroup(true);
-			tenantsToCreate[tenant] = entry;
 
-			alreadyExists = alreadyExists || self->createdTenants.count(tenant);
+			if (self->createdTenants.count(tenant)) {
+				alreadyExists = true;
+			} else if (!tenantsToCreate.count(tenant)) {
+				++newTenants;
+			}
+
+			tenantsToCreate[tenant] = entry;
 			hasSystemTenant = hasSystemTenant || tenant.startsWith("\xff"_sr);
 			hasSystemTenantGroup = hasSystemTenantGroup || entry.tenantGroup.orDefault(""_sr).startsWith("\xff"_sr);
 		}
@@ -337,20 +347,37 @@ struct TenantManagementWorkload : TestWorkload {
 		state bool existedAtStart = alreadyExists;
 
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->dataDb);
+		state int64_t minTenantCount = std::numeric_limits<int64_t>::max();
+		state int64_t finalTenantCount = 0;
 
 		loop {
 			try {
 				// First, attempt to create the tenants
 				state bool retried = false;
 				loop {
+					if (operationType == OperationType::MANAGEMENT_TRANSACTION ||
+					    operationType == OperationType::SPECIAL_KEYS) {
+						tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+						wait(store(finalTenantCount, TenantMetadata::tenantCount.getD(tr, Snapshot::False, 0)));
+						minTenantCount = std::min(finalTenantCount, minTenantCount);
+					}
+
 					try {
 						Optional<Void> result = wait(timeout(createImpl(tr, tenantsToCreate, operationType, self),
 						                                     deterministicRandom()->randomInt(1, 30)));
 
 						if (result.present()) {
-							// Database operations shouldn't get here if the tenant already exists
-							ASSERT(operationType == OperationType::SPECIAL_KEYS ||
-							       operationType == OperationType::MANAGEMENT_TRANSACTION || !alreadyExists);
+							// Make sure that we had capacity to create the tenants. This cannot be validated for
+							// database operations because we cannot determine the tenant count in the same transaction
+							// that the tenant is created
+							if (operationType == OperationType::SPECIAL_KEYS ||
+							    operationType == OperationType::MANAGEMENT_TRANSACTION) {
+								ASSERT(minTenantCount + newTenants <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER);
+							} else {
+								// Database operations shouldn't get here if the tenant already exists
+								ASSERT(!alreadyExists);
+							}
+
 							break;
 						}
 
@@ -482,6 +509,14 @@ struct TenantManagementWorkload : TestWorkload {
 					return Void();
 				} else if (e.code() == error_code_invalid_metacluster_operation) {
 					ASSERT(operationType == OperationType::METACLUSTER != self->useMetacluster);
+					return Void();
+				} else if (e.code() == error_code_cluster_no_capacity) {
+					// Confirm that we overshot our capacity. This check cannot be done for database operations
+					// because we cannot transactionally get the tenant count with the creation.
+					if (operationType == OperationType::MANAGEMENT_TRANSACTION ||
+					    operationType == OperationType::SPECIAL_KEYS) {
+						ASSERT(finalTenantCount + newTenants > CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER);
+					}
 					return Void();
 				}
 
@@ -1030,20 +1065,115 @@ struct TenantManagementWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR static Future<Void> renameTenant(TenantManagementWorkload* self) {
-		// Currently only supporting MANAGEMENT_DATABASE op, so numTenants should always be 1
-		// state OperationType operationType = TenantManagementWorkload::randomOperationType();
-		int numTenants = 1;
+	// Helper function that checks tenant keyspace and updates internal Tenant Map after a rename operation
+	ACTOR static Future<Void> verifyTenantRename(TenantManagementWorkload* self,
+	                                             TenantName oldTenantName,
+	                                             TenantName newTenantName) {
+		state Optional<TenantMapEntry> oldTenantEntry =
+		    wait(TenantAPI::tryGetTenant(self->dataDb.getReference(), oldTenantName));
+		state Optional<TenantMapEntry> newTenantEntry =
+		    wait(TenantAPI::tryGetTenant(self->dataDb.getReference(), newTenantName));
+		ASSERT(!oldTenantEntry.present());
+		ASSERT(newTenantEntry.present());
+		TenantData tData = self->createdTenants[oldTenantName];
+		self->createdTenants[newTenantName] = tData;
+		self->createdTenants.erase(oldTenantName);
+		state Transaction insertTr(self->dataDb, newTenantName);
+		if (!tData.empty) {
+			loop {
+				try {
+					insertTr.set(self->keyName, newTenantName);
+					wait(insertTr.commit());
+					break;
+				} catch (Error& e) {
+					wait(insertTr.onError(e));
+				}
+			}
+		}
+		return Void();
+	}
 
-		state std::vector<TenantName> oldTenantNames;
-		state std::vector<TenantName> newTenantNames;
+	ACTOR static Future<Void> verifyTenantRenames(TenantManagementWorkload* self,
+	                                              std::map<TenantName, TenantName> tenantRenames) {
+		state std::map<TenantName, TenantName> tenantRenamesCopy = tenantRenames;
+		state std::map<TenantName, TenantName>::iterator iter = tenantRenamesCopy.begin();
+		for (; iter != tenantRenamesCopy.end(); ++iter) {
+			wait(verifyTenantRename(self, iter->first, iter->second));
+			wait(checkTenantContents(self, iter->second, self->createdTenants[iter->second]));
+		}
+		return Void();
+	}
+
+	ACTOR static Future<Void> renameImpl(Reference<ReadYourWritesTransaction> tr,
+	                                     OperationType operationType,
+	                                     std::map<TenantName, TenantName> tenantRenames,
+	                                     bool tenantNotFound,
+	                                     bool tenantExists,
+	                                     bool tenantOverlap,
+	                                     TenantManagementWorkload* self) {
+		if (operationType == OperationType::SPECIAL_KEYS) {
+			tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+			for (auto& iter : tenantRenames) {
+				tr->set(self->specialKeysTenantRenamePrefix.withSuffix(iter.first), iter.second);
+			}
+			wait(tr->commit());
+		} else if (operationType == OperationType::MANAGEMENT_DATABASE) {
+			ASSERT(tenantRenames.size() == 1);
+			auto iter = tenantRenames.begin();
+			wait(TenantAPI::renameTenant(self->dataDb.getReference(), iter->first, iter->second));
+			ASSERT(!tenantNotFound && !tenantExists);
+		} else { // operationType == OperationType::MANAGEMENT_TRANSACTION
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			std::vector<Future<Void>> renameFutures;
+			for (auto& iter : tenantRenames) {
+				renameFutures.push_back(success(TenantAPI::renameTenantTransaction(tr, iter.first, iter.second)));
+			}
+			wait(waitForAll(renameFutures));
+			wait(tr->commit());
+			ASSERT(!tenantNotFound && !tenantExists);
+		}
+		return Void();
+	}
+
+	ACTOR static Future<Void> renameTenant(TenantManagementWorkload* self) {
+		state OperationType operationType = self->randomOperationType();
+		state int numTenants = 1;
+		state Reference<ReadYourWritesTransaction> tr = self->dataDb->createTransaction();
+
+		if (operationType == OperationType::SPECIAL_KEYS || operationType == OperationType::MANAGEMENT_TRANSACTION) {
+			numTenants = deterministicRandom()->randomInt(1, 5);
+		}
+
+		// TODO: remove this when we have metacluster support for renames
+		if (operationType == OperationType::METACLUSTER) {
+			operationType = OperationType::MANAGEMENT_DATABASE;
+		}
+
+		state std::map<TenantName, TenantName> tenantRenames;
+		state std::set<TenantName> allTenantNames;
+
+		// Tenant Error flags
 		state bool tenantExists = false;
 		state bool tenantNotFound = false;
+		state bool tenantOverlap = false;
+		state bool unknownResult = false;
+
 		for (int i = 0; i < numTenants; ++i) {
 			TenantName oldTenant = self->chooseTenantName(false);
 			TenantName newTenant = self->chooseTenantName(false);
-			newTenantNames.push_back(newTenant);
-			oldTenantNames.push_back(oldTenant);
+			bool checkOverlap =
+			    oldTenant == newTenant || allTenantNames.count(oldTenant) || allTenantNames.count(newTenant);
+			// renameTenantTransaction does not handle rename collisions:
+			// reject the rename here if it has overlap and we are doing a transaction operation
+			// and then pick another combination
+			if (checkOverlap && operationType == OperationType::MANAGEMENT_TRANSACTION) {
+				--i;
+				continue;
+			}
+			tenantOverlap = tenantOverlap || checkOverlap;
+			tenantRenames[oldTenant] = newTenant;
+			allTenantNames.insert(oldTenant);
+			allTenantNames.insert(newTenant);
 			if (!self->createdTenants.count(oldTenant)) {
 				tenantNotFound = true;
 			}
@@ -1054,59 +1184,52 @@ struct TenantManagementWorkload : TestWorkload {
 
 		loop {
 			try {
-				ASSERT(oldTenantNames.size() == 1);
-				state int tenantIndex = 0;
-				for (; tenantIndex != oldTenantNames.size(); ++tenantIndex) {
-					state TenantName oldTenantName = oldTenantNames[tenantIndex];
-					state TenantName newTenantName = newTenantNames[tenantIndex];
-					// Perform rename, then check against the DB for the new results
-					wait(TenantAPI::renameTenant(self->dataDb.getReference(), oldTenantName, newTenantName));
-					ASSERT(!tenantNotFound && !tenantExists);
-					state Optional<TenantMapEntry> oldTenantEntry =
-					    wait(self->tryGetTenant(oldTenantName, OperationType::SPECIAL_KEYS));
-					state Optional<TenantMapEntry> newTenantEntry =
-					    wait(self->tryGetTenant(newTenantName, OperationType::SPECIAL_KEYS));
-					ASSERT(!oldTenantEntry.present());
-					ASSERT(newTenantEntry.present());
-
-					// Update Internal Tenant Map and check for correctness
-					TenantData tData = self->createdTenants[oldTenantName];
-					self->createdTenants[newTenantName] = tData;
-					self->createdTenants.erase(oldTenantName);
-					if (!tData.empty) {
-						state Transaction insertTr(self->dataDb, newTenantName);
-						loop {
-							try {
-								insertTr.set(self->keyName, newTenantName);
-								wait(insertTr.commit());
-								break;
-							} catch (Error& e) {
-								wait(insertTr.onError(e));
-							}
-						}
-					}
-					wait(checkTenantContents(self, newTenantName, self->createdTenants[newTenantName]));
-				}
+				wait(renameImpl(tr, operationType, tenantRenames, tenantNotFound, tenantExists, tenantOverlap, self));
+				wait(verifyTenantRenames(self, tenantRenames));
 				return Void();
 			} catch (Error& e) {
-				ASSERT(oldTenantNames.size() == 1);
 				if (e.code() == error_code_tenant_not_found) {
 					TraceEvent("RenameTenantOldTenantNotFound")
-					    .detail("OldTenantName", oldTenantNames[0])
-					    .detail("NewTenantName", newTenantNames[0]);
-					ASSERT(tenantNotFound);
+					    .detail("TenantRenames", describe(tenantRenames))
+					    .detail("CommitUnknownResult", unknownResult);
+					if (unknownResult) {
+						wait(verifyTenantRenames(self, tenantRenames));
+					} else {
+						ASSERT(tenantNotFound);
+					}
+					return Void();
 				} else if (e.code() == error_code_tenant_already_exists) {
 					TraceEvent("RenameTenantNewTenantAlreadyExists")
-					    .detail("OldTenantName", oldTenantNames[0])
-					    .detail("NewTenantName", newTenantNames[0]);
-					ASSERT(tenantExists);
+					    .detail("TenantRenames", describe(tenantRenames))
+					    .detail("CommitUnknownResult", unknownResult);
+					if (unknownResult) {
+						wait(verifyTenantRenames(self, tenantRenames));
+					} else {
+						ASSERT(tenantExists);
+					}
+					return Void();
+				} else if (e.code() == error_code_special_keys_api_failure) {
+					TraceEvent("RenameTenantNameConflict").detail("TenantRenames", describe(tenantRenames));
+					ASSERT(tenantOverlap);
+					return Void();
 				} else {
-					TraceEvent(SevError, "RenameTenantFailure")
-					    .error(e)
-					    .detail("OldTenantName", oldTenantNames[0])
-					    .detail("NewTenantName", newTenantNames[0]);
+					try {
+						// In the case of commit_unknown_result, assume we continue retrying
+						// until it's successful. Next loop around may throw error because it's
+						// already been moved, so account for that and update internal map as needed.
+						if (e.code() == error_code_commit_unknown_result) {
+							TraceEvent("RenameTenantCommitUnknownResult").error(e);
+							ASSERT(operationType != OperationType::MANAGEMENT_DATABASE);
+							unknownResult = true;
+						}
+						wait(tr->onError(e));
+					} catch (Error& e) {
+						TraceEvent(SevError, "RenameTenantFailure")
+						    .error(e)
+						    .detail("TenantRenames", describe(tenantRenames));
+						return Void();
+					}
 				}
-				return Void();
 			}
 		}
 	}
@@ -1270,6 +1393,26 @@ struct TenantManagementWorkload : TestWorkload {
 		}
 
 		return Void();
+	}
+
+	// Verify that the tenant count matches the actual number of tenants in the cluster and that we haven't created too
+	// many
+	ACTOR static Future<Void> checkTenantCount(Database cx) {
+		state Reference<ReadYourWritesTransaction> tr = cx->createTransaction();
+		loop {
+			try {
+				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				state int64_t tenantCount = wait(TenantMetadata::tenantCount.getD(tr, Snapshot::False, 0));
+				KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>> tenants =
+				    wait(TenantMetadata::tenantMap.getRange(tr, {}, {}, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1));
+
+				ASSERT(tenants.results.size() == tenantCount && !tenants.more);
+				ASSERT(tenantCount <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER);
+				return Void();
+			} catch (Error& e) {
+				wait(tr->onError(e));
+			}
+		}
 	}
 
 	// Verify that the set of tenants in the database matches our local state
@@ -1501,6 +1644,10 @@ struct TenantManagementWorkload : TestWorkload {
 			} catch (Error& e) {
 				wait(tr.onError(e));
 			}
+		}
+
+		if (self->clientId == 0) {
+			wait(checkTenantCount(cx));
 		}
 
 		wait(compareTenants(self) && compareTenantGroups(self) && checkTenantTombstones(self));

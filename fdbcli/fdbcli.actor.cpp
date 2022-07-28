@@ -1961,7 +1961,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						continue;
 					}
 
-					bool _result = wait(makeInterruptable(renameTenantCommandActor(db, tokens)));
+					bool _result = wait(makeInterruptable(renameTenantCommandActor(db, tokens, opt.apiVersion)));
 					if (!_result)
 						is_error = true;
 					continue;

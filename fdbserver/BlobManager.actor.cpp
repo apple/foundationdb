@@ -971,18 +971,8 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 					                                              Optional<TenantName>(),
 					                                              Optional<TenantName>(),
 					                                              CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1)));
-					ASSERT_WE_THINK(!tenantResults.more &&
-					                tenantResults.results.size() <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER);
-					if (tenantResults.more || tenantResults.results.size() > CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER) {
-						TraceEvent(SevError, "BlobManagerTooManyTenants", bmData->id)
-						    .detail("Epoch", bmData->epoch)
-						    .detail("TenantCount", tenantResults.results.size());
-						wait(delay(600));
-						if (bmData->iAmReplaced.canBeSet()) {
-							bmData->iAmReplaced.sendError(internal_error());
-						}
-						throw internal_error();
-					}
+					ASSERT(tenantResults.results.size() <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER &&
+					       !tenantResults.more);
 
 					std::vector<Key> prefixes;
 					for (auto& it : tenantResults.results) {

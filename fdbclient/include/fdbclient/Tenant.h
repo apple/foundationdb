@@ -107,10 +107,7 @@ struct TenantGroupEntry {
 
 	Value encode() { return ObjectWriter::toValue(*this, IncludeVersion()); }
 	static TenantGroupEntry decode(ValueRef const& value) {
-		TenantGroupEntry entry;
-		ObjectReader reader(value.begin(), IncludeVersion());
-		reader.deserialize(entry);
-		return entry;
+		return ObjectReader::fromStringRef<TenantGroupEntry>(value, IncludeVersion());
 	}
 
 	template <class Ar>
@@ -143,6 +140,7 @@ struct TenantMetadataSpecification {
 
 	KeyBackedObjectMap<TenantName, TenantMapEntry, decltype(IncludeVersion()), NullCodec> tenantMap;
 	KeyBackedProperty<int64_t> lastTenantId;
+	KeyBackedBinaryValue<int64_t> tenantCount;
 	KeyBackedSet<int64_t> tenantTombstones;
 	KeyBackedObjectProperty<TenantTombstoneCleanupData, decltype(IncludeVersion())> tombstoneCleanupData;
 	KeyBackedSet<Tuple> tenantGroupTenantIndex;
@@ -150,7 +148,7 @@ struct TenantMetadataSpecification {
 
 	TenantMetadataSpecification(KeyRef subspace)
 	  : tenantMap(subspace.withSuffix("tenant/map/"_sr), IncludeVersion()),
-	    lastTenantId(subspace.withSuffix("tenant/lastId"_sr)),
+	    lastTenantId(subspace.withSuffix("tenant/lastId"_sr)), tenantCount(subspace.withSuffix("tenant/count"_sr)),
 	    tenantTombstones(subspace.withSuffix("tenant/tombstones/"_sr)),
 	    tombstoneCleanupData(subspace.withSuffix("tenant/tombstoneCleanup"_sr), IncludeVersion()),
 	    tenantGroupTenantIndex(subspace.withSuffix("tenant/tenantGroup/tenantIndex/"_sr)),
@@ -164,6 +162,7 @@ private:
 public:
 	static inline auto& tenantMap = instance.tenantMap;
 	static inline auto& lastTenantId = instance.lastTenantId;
+	static inline auto& tenantCount = instance.tenantCount;
 	static inline auto& tenantTombstones = instance.tenantTombstones;
 	static inline auto& tombstoneCleanupData = instance.tombstoneCleanupData;
 	static inline auto& tenantGroupTenantIndex = instance.tenantGroupTenantIndex;
