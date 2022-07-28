@@ -27,11 +27,15 @@
 #include "flow/CompressionUtils.h"
 
 Value serializeChunkedSnapshot(Standalone<GranuleSnapshot> snapshot,
-                               int chunks,
+                               int chunkSize,
                                Optional<CompressionFilter> compressFilter,
-                               Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx = Optional<BlobGranuleCipherKeysCtx>());
+                               Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx = {});
 
-// FIXME: support sorted and chunked delta files
+Value serializeChunkedDeltaFile(Standalone<GranuleDeltas> deltas,
+                                const KeyRangeRef& fileRange,
+                                int chunkSize,
+                                Optional<CompressionFilter> compressFilter,
+                                Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx = {});
 
 ErrorOr<RangeResult> loadAndMaterializeBlobGranules(const Standalone<VectorRef<BlobGranuleChunkRef>>& files,
                                                     const KeyRangeRef& keyRange,

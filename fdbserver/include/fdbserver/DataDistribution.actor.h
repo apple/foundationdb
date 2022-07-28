@@ -39,6 +39,7 @@ enum class RelocateReason { INVALID = -1, OTHER, REBALANCE_DISK, REBALANCE_READ 
 
 // One-to-one relationship to the priority knobs
 enum class DataMovementReason {
+	INVALID,
 	RECOVER_MOVE,
 	REBALANCE_UNDERUTILIZED_TEAM,
 	REBALANCE_OVERUTILIZED_TEAM,
@@ -59,6 +60,8 @@ enum class DataMovementReason {
 };
 
 struct DDShardInfo;
+
+extern int dataMovementPriority(DataMovementReason moveReason);
 
 // Represents a data move in DD.
 struct DataMove {
@@ -89,9 +92,14 @@ struct RelocateShard {
 	std::shared_ptr<DataMove> dataMove; // Not null if this is a restored data move.
 	UID dataMoveId;
 	RelocateReason reason;
-	RelocateShard() : priority(0), cancelled(false), dataMoveId(anonymousShardId), reason(RelocateReason::INVALID) {}
-	RelocateShard(KeyRange const& keys, int priority, RelocateReason reason)
-	  : keys(keys), priority(priority), cancelled(false), dataMoveId(anonymousShardId), reason(reason) {}
+	DataMovementReason moveReason;
+	RelocateShard()
+	  : priority(0), cancelled(false), dataMoveId(anonymousShardId), reason(RelocateReason::INVALID),
+	    moveReason(DataMovementReason::INVALID) {}
+	RelocateShard(KeyRange const& keys, DataMovementReason moveReason, RelocateReason reason)
+	  : keys(keys), cancelled(false), dataMoveId(anonymousShardId), reason(reason), moveReason(moveReason) {
+		priority = dataMovementPriority(moveReason);
+	}
 
 	bool isRestore() const { return this->dataMove != nullptr; }
 };
@@ -228,17 +236,20 @@ struct GetMetricsRequest {
 };
 
 struct GetTopKMetricsReply {
-	std::vector<StorageMetrics> metrics;
+	struct KeyRangeStorageMetrics {
+		KeyRange range;
+		StorageMetrics metrics;
+		KeyRangeStorageMetrics() = default;
+		KeyRangeStorageMetrics(const KeyRange& range, const StorageMetrics& s) : range(range), metrics(s) {}
+	};
+	std::vector<KeyRangeStorageMetrics> shardMetrics;
 	double minReadLoad = -1, maxReadLoad = -1;
 	GetTopKMetricsReply() {}
-	GetTopKMetricsReply(std::vector<StorageMetrics> const& m, double minReadLoad, double maxReadLoad)
-	  : metrics(m), minReadLoad(minReadLoad), maxReadLoad(maxReadLoad) {}
+	GetTopKMetricsReply(std::vector<KeyRangeStorageMetrics> const& m, double minReadLoad, double maxReadLoad)
+	  : shardMetrics(m), minReadLoad(minReadLoad), maxReadLoad(maxReadLoad) {}
 };
 struct GetTopKMetricsRequest {
-	// whether a > b
-	typedef std::function<bool(const StorageMetrics& a, const StorageMetrics& b)> MetricsComparator;
-	int topK = 1; // default only return the top 1 shard based on the comparator
-	MetricsComparator comparator; // Return true if a.score > b.score, return the largest topK in keys
+	int topK = 1; // default only return the top 1 shard based on the GetTopKMetricsRequest::compare function
 	std::vector<KeyRange> keys;
 	Promise<GetTopKMetricsReply> reply; // topK storage metrics
 	double maxBytesReadPerKSecond = 0, minBytesReadPerKSecond = 0; // all returned shards won't exceed this read load
@@ -250,6 +261,20 @@ struct GetTopKMetricsRequest {
 	                      double minBytesReadPerKSecond = 0)
 	  : topK(topK), keys(keys), maxBytesReadPerKSecond(maxBytesReadPerKSecond),
 	    minBytesReadPerKSecond(minBytesReadPerKSecond) {}
+
+	// Return true if a.score > b.score, return the largest topK in keys
+	static bool compare(const GetTopKMetricsReply::KeyRangeStorageMetrics& a,
+	                    const GetTopKMetricsReply::KeyRangeStorageMetrics& b) {
+		return compareByReadDensity(a, b);
+	}
+
+private:
+	// larger read density means higher score
+	static bool compareByReadDensity(const GetTopKMetricsReply::KeyRangeStorageMetrics& a,
+	                                 const GetTopKMetricsReply::KeyRangeStorageMetrics& b) {
+		return a.metrics.bytesReadPerKSecond / std::max(a.metrics.bytes * 1.0, 1.0) >
+		       b.metrics.bytesReadPerKSecond / std::max(b.metrics.bytes * 1.0, 1.0);
+	}
 };
 
 struct GetMetricsListRequest {
@@ -269,6 +294,7 @@ class ShardsAffectedByTeamFailure : public ReferenceCounted<ShardsAffectedByTeam
 public:
 	ShardsAffectedByTeamFailure() {}
 
+	enum class CheckMode { Normal = 0, ForceCheck, ForceNoCheck };
 	struct Team {
 		std::vector<UID> servers; // sorted
 		bool primary;
@@ -318,6 +344,8 @@ public:
 	void finishMove(KeyRangeRef keys);
 	void check() const;
 
+	void setCheckMode(CheckMode);
+
 	PromiseStream<KeyRange> restartShardTracker;
 
 private:
@@ -331,6 +359,7 @@ private:
 		}
 	};
 
+	CheckMode checkMode = CheckMode::Normal;
 	KeyRangeMap<std::pair<std::vector<Team>, std::vector<Team>>>
 	    shard_teams; // A shard can be affected by the failure of multiple teams if it is a queued merge, or when
 	                 // usable_regions > 1

@@ -38,7 +38,10 @@ function(compile_boost)
   set(BOOST_LINK_FLAGS "")
   if(APPLE OR CLANG OR ICX OR USE_LIBCXX)
     list(APPEND BOOST_COMPILER_FLAGS -stdlib=libc++ -nostdlib++)
-    list(APPEND BOOST_LINK_FLAGS -static-libgcc -lc++ -lc++abi)
+    list(APPEND BOOST_LINK_FLAGS -lc++ -lc++abi)
+    if (NOT APPLE)
+      list(APPEND BOOST_LINK_FLAGS -static-libgcc)
+    endif()
   endif()
 
   # Update the user-config.jam
@@ -46,9 +49,9 @@ function(compile_boost)
   foreach(flag IN LISTS BOOST_COMPILER_FLAGS COMPILE_BOOST_CXXFLAGS)
     string(APPEND BOOST_ADDITIONAL_COMPILE_OPTIONS "<cxxflags>${flag} ")
   endforeach()
-  #foreach(flag IN LISTS BOOST_LINK_FLAGS COMPILE_BOOST_LDFLAGS)
-  # string(APPEND BOOST_ADDITIONAL_COMPILE_OPTIONS "<linkflags>${flag} ")
-  #endforeach()
+  foreach(flag IN LISTS BOOST_LINK_FLAGS COMPILE_BOOST_LDFLAGS)
+    string(APPEND BOOST_ADDITIONAL_COMPILE_OPTIONS "<linkflags>${flag} ")
+  endforeach()
   configure_file(${CMAKE_SOURCE_DIR}/cmake/user-config.jam.cmake ${CMAKE_BINARY_DIR}/user-config.jam)
   set(USER_CONFIG_FLAG --user-config=${CMAKE_BINARY_DIR}/user-config.jam)
 
@@ -92,10 +95,10 @@ if(USE_SANITIZER)
   endif()
   message(STATUS "A sanitizer is enabled, need to build boost from source")
   if (USE_VALGRIND)
-    compile_boost(TARGET boost_asan BUILD_ARGS valgrind=on
+    compile_boost(TARGET boost_target BUILD_ARGS valgrind=on
       CXXFLAGS ${SANITIZER_COMPILE_OPTIONS} LDFLAGS ${SANITIZER_LINK_OPTIONS})
   else()
-    compile_boost(TARGET boost_asan BUILD_ARGS context-impl=ucontext
+    compile_boost(TARGET boost_target BUILD_ARGS context-impl=ucontext
       CXXFLAGS ${SANITIZER_COMPILE_OPTIONS} LDFLAGS ${SANITIZER_LINK_OPTIONS})
   endif()
   return()
