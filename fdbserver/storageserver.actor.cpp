@@ -3854,7 +3854,7 @@ ACTOR Future<GetRangeReqAndResultRef> quickGetKeyValues(
 			if (pOriginalReq->debugID.present())
 				g_traceBatch.addEvent("TransactionDebug",
 				                      pOriginalReq->debugID.get().first(),
-				                      "storageserver.getMappedKeyValues.AfterLocalFetch");
+				                      "storageserver.quickGetKeyValues.AfterLocalFetch");
 			return getRange;
 		}
 		// Otherwise fallback.
@@ -3879,7 +3879,7 @@ ACTOR Future<GetRangeReqAndResultRef> quickGetKeyValues(
 		if (pOriginalReq->debugID.present())
 			g_traceBatch.addEvent("TransactionDebug",
 			                      pOriginalReq->debugID.get().first(),
-			                      "storageserver.getMappedKeyValues.AfterRemoteFetch");
+			                      "storageserver.quickGetKeyValues.AfterRemoteFetch");
 		return getRange;
 	} else {
 		throw quick_get_key_values_miss();
@@ -4225,10 +4225,10 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 			                                 kvm,
 			                                 mappedKey));
 		}
+		wait(waitForAll(subqueries));
 		if (pOriginalReq->debugID.present())
 			g_traceBatch.addEvent(
 			    "TransactionDebug", pOriginalReq->debugID.get().first(), "storageserver.mapKeyValues.AfterBatch");
-		wait(waitForAll(subqueries));
 		subqueries.clear();
 		for (int i = 0; i + offset < sz && i < SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE; i++) {
 			result.data.push_back(result.arena, kvms[i]);
