@@ -3999,18 +3999,11 @@ ACTOR Future<Void> monitorTenants(Reference<BlobWorkerData> bwData) {
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				state KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>> tenantResults;
 				wait(store(tenantResults,
-				           TenantMetadata::tenantMap.getRange(
-				               tr, Optional<TenantName>(), Optional<TenantName>(), CLIENT_KNOBS->TOO_MANY)));
-				ASSERT_WE_THINK(!tenantResults.more && tenantResults.results.size() < CLIENT_KNOBS->TOO_MANY);
-				if (tenantResults.more || tenantResults.results.size() >= CLIENT_KNOBS->TOO_MANY) {
-					TraceEvent(SevError, "BlobWorkerTooManyTenants", bwData->id)
-					    .detail("TenantCount", tenantResults.results.size());
-					wait(delay(600));
-					if (bwData->fatalError.canBeSet()) {
-						bwData->fatalError.sendError(internal_error());
-					}
-					throw internal_error();
-				}
+				           TenantMetadata::tenantMap.getRange(tr,
+				                                              Optional<TenantName>(),
+				                                              Optional<TenantName>(),
+				                                              CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1)));
+				ASSERT(tenantResults.results.size() <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER && !tenantResults.more);
 
 				std::vector<std::pair<TenantName, TenantMapEntry>> tenants;
 				for (auto& it : tenantResults.results) {

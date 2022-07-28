@@ -235,6 +235,7 @@ ERROR( unknown_tenant, 2137, "Tenant is not available from this server" )
 ERROR( illegal_tenant_access, 2138, "Illegal tenant access" )
 ERROR( invalid_tenant_group_name, 2139, "Tenant group name cannot begin with \\xff" )
 ERROR( invalid_tenant_configuration, 2140, "Tenant configuration is invalid" )
+ERROR( cluster_no_capacity, 2141, "Cluster does not have capacity to perform the specified operation" )
 
 // 2200 - errors from bindings and official APIs
 ERROR( api_version_unset, 2200, "API version is not set" )
