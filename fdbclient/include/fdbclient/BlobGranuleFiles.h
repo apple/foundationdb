@@ -26,12 +26,14 @@
 #include "fdbclient/BlobGranuleCommon.h"
 #include "flow/CompressionUtils.h"
 
-Value serializeChunkedSnapshot(Standalone<GranuleSnapshot> snapshot,
+Value serializeChunkedSnapshot(const Standalone<StringRef>& fileNameRef,
+                               Standalone<GranuleSnapshot> snapshot,
                                int chunkSize,
                                Optional<CompressionFilter> compressFilter,
                                Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx = {});
 
-Value serializeChunkedDeltaFile(Standalone<GranuleDeltas> deltas,
+Value serializeChunkedDeltaFile(const Standalone<StringRef>& fileNameRef,
+                                Standalone<GranuleDeltas> deltas,
                                 const KeyRangeRef& fileRange,
                                 int chunkSize,
                                 Optional<CompressionFilter> compressFilter,

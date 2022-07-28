@@ -352,29 +352,27 @@ ACTOR Future<BlobGranuleCipherKey> lookupCipherKey(Reference<BlobWorkerData> bwD
 	return BlobGranuleCipherKey::fromBlobCipherKey(cipherKeyMapItr->second, *arena);
 }
 
-ACTOR Future<BlobGranuleCipherKeysCtx> getGranuleCipherKeys(Reference<BlobWorkerData> bwData,
-                                                            BlobGranuleCipherKeysMetaRef cipherKeysMetaRef,
-                                                            Arena* arena) {
+ACTOR Future<BlobGranuleCipherKeysCtx> getGranuleCipherKeysImpl(Reference<BlobWorkerData> bwData,
+                                                                BlobCipherDetails textCipherDetails,
+                                                                BlobCipherDetails headerCipherDetails,
+                                                                StringRef ivRef,
+                                                                Arena* arena) {
 	state BlobGranuleCipherKeysCtx cipherKeysCtx;
 
 	// Fetch 'textCipher' key
-	state BlobCipherDetails textCipherDetails(
-	    cipherKeysMetaRef.textDomainId, cipherKeysMetaRef.textBaseCipherId, cipherKeysMetaRef.textSalt);
 	BlobGranuleCipherKey textCipherKey = wait(lookupCipherKey(bwData, textCipherDetails, arena));
 	cipherKeysCtx.textCipherKey = textCipherKey;
 
 	// Fetch 'headerCipher' key
-	state BlobCipherDetails headerCipherDetails(
-	    cipherKeysMetaRef.headerDomainId, cipherKeysMetaRef.headerBaseCipherId, cipherKeysMetaRef.headerSalt);
 	BlobGranuleCipherKey headerCipherKey = wait(lookupCipherKey(bwData, headerCipherDetails, arena));
 	cipherKeysCtx.headerCipherKey = headerCipherKey;
 
 	// Populate 'Intialization Vector'
-	ASSERT_EQ(cipherKeysMetaRef.ivRef.size(), AES_256_IV_LENGTH);
-	cipherKeysCtx.ivRef = StringRef(*arena, cipherKeysMetaRef.ivRef);
+	ASSERT_EQ(ivRef.size(), AES_256_IV_LENGTH);
+	cipherKeysCtx.ivRef = StringRef(*arena, ivRef);
 
 	if (BG_ENCRYPT_COMPRESS_DEBUG) {
-		TraceEvent("GetGranuleCipherKey")
+		TraceEvent(SevDebug, "GetGranuleCipherKey")
 		    .detail("TextDomainId", cipherKeysCtx.textCipherKey.encryptDomainId)
 		    .detail("TextBaseCipherId", cipherKeysCtx.textCipherKey.baseCipherId)
 		    .detail("TextSalt", cipherKeysCtx.textCipherKey.salt)
@@ -385,6 +383,32 @@ ACTOR Future<BlobGranuleCipherKeysCtx> getGranuleCipherKeys(Reference<BlobWorker
 	}
 
 	return cipherKeysCtx;
+}
+
+Future<BlobGranuleCipherKeysCtx> getGranuleCipherKeysFromKeysMeta(Reference<BlobWorkerData> bwData,
+                                                                  BlobGranuleCipherKeysMeta cipherKeysMeta,
+                                                                  Arena* arena) {
+	BlobCipherDetails textCipherDetails(
+	    cipherKeysMeta.textDomainId, cipherKeysMeta.textBaseCipherId, cipherKeysMeta.textSalt);
+
+	BlobCipherDetails headerCipherDetails(
+	    cipherKeysMeta.headerDomainId, cipherKeysMeta.headerBaseCipherId, cipherKeysMeta.headerSalt);
+
+	StringRef ivRef = StringRef(*arena, cipherKeysMeta.ivStr);
+
+	return getGranuleCipherKeysImpl(bwData, textCipherDetails, headerCipherDetails, ivRef, arena);
+}
+
+Future<BlobGranuleCipherKeysCtx> getGranuleCipherKeysFromKeysMetaRef(Reference<BlobWorkerData> bwData,
+                                                                     BlobGranuleCipherKeysMetaRef cipherKeysMetaRef,
+                                                                     Arena* arena) {
+	BlobCipherDetails textCipherDetails(
+	    cipherKeysMetaRef.textDomainId, cipherKeysMetaRef.textBaseCipherId, cipherKeysMetaRef.textSalt);
+
+	BlobCipherDetails headerCipherDetails(
+	    cipherKeysMetaRef.headerDomainId, cipherKeysMetaRef.headerBaseCipherId, cipherKeysMetaRef.headerSalt);
+
+	return getGranuleCipherKeysImpl(bwData, textCipherDetails, headerCipherDetails, cipherKeysMetaRef.ivRef, arena);
 }
 
 ACTOR Future<Void> readAndCheckGranuleLock(Reference<ReadYourWritesTransaction> tr,
@@ -605,17 +629,20 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 	state Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx;
 	state Optional<BlobGranuleCipherKeysMeta> cipherKeysMeta;
 	state Arena arena;
-	// TODO support encryption, figure out proper state stuff
-	/*if (isBlobFileEncryptionSupported()) {
-	    BlobGranuleCipherKeysCtx ciphKeysCtx = wait(getLatestGranuleCipherKeys(bwData, keyRange, &arena));
-	    cipherKeysCtx = ciphKeysCtx;
-	    cipherKeysMeta = BlobGranuleCipherKeysCtx::toCipherKeysMeta(cipherKeysCtx.get());
-	}*/
 
-	Optional<CompressionFilter> compressFilter = getBlobFileCompressFilter();
+	if (isBlobFileEncryptionSupported()) {
+		BlobGranuleCipherKeysCtx ciphKeysCtx = wait(getLatestGranuleCipherKeys(bwData, keyRange, &arena));
+		cipherKeysCtx = std::move(ciphKeysCtx);
+		cipherKeysMeta = BlobGranuleCipherKeysCtx::toCipherKeysMeta(cipherKeysCtx.get());
+	}
 
-	state Value serialized = serializeChunkedDeltaFile(
-	    deltasToWrite, keyRange, SERVER_KNOBS->BG_DELTA_FILE_TARGET_CHUNK_BYTES, compressFilter, cipherKeysCtx);
+	state Optional<CompressionFilter> compressFilter = getBlobFileCompressFilter();
+	state Value serialized = serializeChunkedDeltaFile(StringRef(fileName),
+	                                                   deltasToWrite,
+	                                                   keyRange,
+	                                                   SERVER_KNOBS->BG_DELTA_FILE_TARGET_CHUNK_BYTES,
+	                                                   compressFilter,
+	                                                   cipherKeysCtx);
 	state size_t serializedSize = serialized.size();
 
 	// Free up deltasToWrite here to reduce memory
@@ -680,6 +707,14 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 				if (BUGGIFY_WITH_PROB(0.01)) {
 					wait(delay(deterministicRandom()->random01()));
 				}
+
+				if (BW_DEBUG) {
+					TraceEvent(SevDebug, "DeltaFileWritten")
+					    .detail("FileName", fname)
+					    .detail("Encrypted", cipherKeysCtx.present())
+					    .detail("Compressed", compressFilter.present());
+				}
+
 				// FIXME: change when we implement multiplexing
 				return BlobFileIndex(currentDeltaVersion, fname, 0, serializedSize, serializedSize, cipherKeysMeta);
 			} catch (Error& e) {
@@ -759,15 +794,19 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 	state Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx;
 	state Optional<BlobGranuleCipherKeysMeta> cipherKeysMeta;
 	state Arena arena;
+
 	if (isBlobFileEncryptionSupported()) {
 		BlobGranuleCipherKeysCtx ciphKeysCtx = wait(getLatestGranuleCipherKeys(bwData, keyRange, &arena));
-		cipherKeysCtx = ciphKeysCtx;
+		cipherKeysCtx = std::move(ciphKeysCtx);
 		cipherKeysMeta = BlobGranuleCipherKeysCtx::toCipherKeysMeta(cipherKeysCtx.get());
 	}
 
-	Optional<CompressionFilter> compressFilter = getBlobFileCompressFilter();
-	state Value serialized = serializeChunkedSnapshot(
-	    snapshot, SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_CHUNK_BYTES, compressFilter, cipherKeysCtx);
+	state Optional<CompressionFilter> compressFilter = getBlobFileCompressFilter();
+	state Value serialized = serializeChunkedSnapshot(StringRef(fileName),
+	                                                  snapshot,
+	                                                  SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_CHUNK_BYTES,
+	                                                  compressFilter,
+	                                                  cipherKeysCtx);
 	state size_t serializedSize = serialized.size();
 
 	// free snapshot to reduce memory
@@ -846,6 +885,13 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 
 	if (BUGGIFY_WITH_PROB(0.1)) {
 		wait(delay(deterministicRandom()->random01()));
+	}
+
+	if (BW_DEBUG) {
+		TraceEvent(SevDebug, "SnapshotFileWritten")
+		    .detail("FileName", fileName)
+		    .detail("Encrypted", cipherKeysCtx.present())
+		    .detail("Compressed", compressFilter.present());
 	}
 
 	// FIXME: change when we implement multiplexing
@@ -975,33 +1021,51 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 		}
 		ASSERT(snapshotVersion < version);
 
+		// TODO: optimization - batch 'encryption-key' lookup given the GranuleFile set is known
+		// FIXME: get cipher keys for delta as well!
+		state Optional<BlobGranuleCipherKeysCtx> snapCipherKeysCtx;
+		if (snapshotF.cipherKeysMeta.present()) {
+			ASSERT(isBlobFileEncryptionSupported());
+
+			BlobGranuleCipherKeysCtx keysCtx =
+			    wait(getGranuleCipherKeysFromKeysMeta(bwData, snapshotF.cipherKeysMeta.get(), &filenameArena));
+			snapCipherKeysCtx = std::move(keysCtx);
+		}
+
 		chunk.snapshotFile = BlobFilePointerRef(filenameArena,
 		                                        snapshotF.filename,
 		                                        snapshotF.offset,
 		                                        snapshotF.length,
 		                                        snapshotF.fullFileLength,
-		                                        snapshotF.cipherKeysMeta);
-
-		// TODO: optimization - batch 'encryption-key' lookup given the GranuleFile set is known
-		// FIXME: get cipher keys for delta as well!
-		if (chunk.snapshotFile.get().cipherKeysMetaRef.present()) {
-			ASSERT(isBlobFileEncryptionSupported());
-			BlobGranuleCipherKeysCtx cipherKeysCtx =
-			    wait(getGranuleCipherKeys(bwData, chunk.snapshotFile.get().cipherKeysMetaRef.get(), &filenameArena));
-			chunk.cipherKeysCtx = cipherKeysCtx;
-		}
+		                                        snapCipherKeysCtx);
 
 		compactBytesRead += snapshotF.length;
-		int deltaIdx = files.deltaFiles.size() - 1;
+		state int deltaIdx = files.deltaFiles.size() - 1;
 		while (deltaIdx >= 0 && files.deltaFiles[deltaIdx].version > snapshotVersion) {
 			deltaIdx--;
 		}
 		deltaIdx++;
-		Version lastDeltaVersion = snapshotVersion;
+		state Version lastDeltaVersion = snapshotVersion;
+		state BlobFileIndex deltaF;
 		while (deltaIdx < files.deltaFiles.size() && lastDeltaVersion < version) {
-			BlobFileIndex deltaF = files.deltaFiles[deltaIdx];
-			chunk.deltaFiles.emplace_back_deep(
-			    filenameArena, deltaF.filename, deltaF.offset, deltaF.length, deltaF.fullFileLength);
+			state Optional<BlobGranuleCipherKeysCtx> deltaCipherKeysCtx;
+
+			deltaF = files.deltaFiles[deltaIdx];
+
+			if (deltaF.cipherKeysMeta.present()) {
+				ASSERT(isBlobFileEncryptionSupported());
+
+				BlobGranuleCipherKeysCtx keysCtx =
+				    wait(getGranuleCipherKeysFromKeysMeta(bwData, deltaF.cipherKeysMeta.get(), &filenameArena));
+				deltaCipherKeysCtx = std::move(keysCtx);
+			}
+
+			chunk.deltaFiles.emplace_back_deep(filenameArena,
+			                                   deltaF.filename,
+			                                   deltaF.offset,
+			                                   deltaF.length,
+			                                   deltaF.fullFileLength,
+			                                   deltaCipherKeysCtx);
 			compactBytesRead += deltaF.length;
 			lastDeltaVersion = files.deltaFiles[deltaIdx].version;
 			deltaIdx++;
@@ -1118,9 +1182,13 @@ ACTOR Future<BlobFileIndex> checkSplitAndReSnapshot(Reference<BlobWorkerData> bw
 				// wait for manager stream to become ready, and send a message
 				loop {
 					choose {
-						when(wait(bwData->currentManagerStatusStream.get().onReady())) { break; }
+						when(wait(bwData->currentManagerStatusStream.get().onReady())) {
+							break;
+						}
 						when(wait(bwData->currentManagerStatusStream.onChange())) {}
-						when(wait(metadata->resumeSnapshot.getFuture())) { break; }
+						when(wait(metadata->resumeSnapshot.getFuture())) {
+							break;
+						}
 					}
 				}
 				if (metadata->resumeSnapshot.isSet()) {
@@ -1158,7 +1226,9 @@ ACTOR Future<BlobFileIndex> checkSplitAndReSnapshot(Reference<BlobWorkerData> bw
 		// manager change/no response
 		choose {
 			when(wait(bwData->currentManagerStatusStream.onChange())) {}
-			when(wait(metadata->resumeSnapshot.getFuture())) { break; }
+			when(wait(metadata->resumeSnapshot.getFuture())) {
+				break;
+			}
 			when(wait(delay(1.0))) {}
 		}
 
@@ -1232,8 +1302,12 @@ ACTOR Future<Void> granuleCheckMergeCandidate(Reference<BlobWorkerData> bwData,
 				// wait for manager stream to become ready, and send a message
 				loop {
 					choose {
-						when(wait(delay(std::max(0.0, sendTimeGiveUp - now())))) { break; }
-						when(wait(bwData->currentManagerStatusStream.get().onReady())) { break; }
+						when(wait(delay(std::max(0.0, sendTimeGiveUp - now())))) {
+							break;
+						}
+						when(wait(bwData->currentManagerStatusStream.get().onReady())) {
+							break;
+						}
 						when(wait(bwData->currentManagerStatusStream.onChange())) {}
 					}
 				}
@@ -1515,7 +1589,9 @@ ACTOR Future<Void> waitOnCFVersion(Reference<GranuleMetadata> metadata, Version 
 			                                 ? metadata->activeCFData.get()->whenAtLeast(waitVersion)
 			                                 : Never();
 			choose {
-				when(wait(atLeast)) { break; }
+				when(wait(atLeast)) {
+					break;
+				}
 				when(wait(metadata->activeCFData.onChange())) {}
 			}
 		} catch (Error& e) {
@@ -3061,7 +3137,9 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 
 			choose {
 				when(wait(metadata->readable.getFuture())) {}
-				when(wait(metadata->cancelled.getFuture())) { throw wrong_shard_server(); }
+				when(wait(metadata->cancelled.getFuture())) {
+					throw wrong_shard_server();
+				}
 			}
 
 			// in case both readable and cancelled are ready, check cancelled
@@ -3077,7 +3155,9 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 				if (metadata->historyLoaded.canBeSet()) {
 					choose {
 						when(wait(metadata->historyLoaded.getFuture())) {}
-						when(wait(metadata->cancelled.getFuture())) { throw wrong_shard_server(); }
+						when(wait(metadata->cancelled.getFuture())) {
+							throw wrong_shard_server();
+						}
 					}
 				}
 
@@ -3089,7 +3169,9 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 						when(GranuleFiles f = wait(finalChunks[chunkIdx].second)) {
 							rangeGranulePair.push_back(std::pair(finalChunks[chunkIdx].first, f));
 						}
-						when(wait(metadata->cancelled.getFuture())) { throw wrong_shard_server(); }
+						when(wait(metadata->cancelled.getFuture())) {
+							throw wrong_shard_server();
+						}
 					}
 
 					if (rangeGranulePair.back().second.snapshotFiles.empty()) {
@@ -3126,9 +3208,13 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 					// version on rollback
 					try {
 						choose {
-							when(wait(waitForVersionFuture)) { break; }
+							when(wait(waitForVersionFuture)) {
+								break;
+							}
 							when(wait(metadata->activeCFData.onChange())) {}
-							when(wait(metadata->cancelled.getFuture())) { throw wrong_shard_server(); }
+							when(wait(metadata->cancelled.getFuture())) {
+								throw wrong_shard_server();
+							}
 						}
 					} catch (Error& e) {
 						// We can get change feed cancelled from whenAtLeast. This means the change feed may
@@ -3193,12 +3279,44 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 					didCollapse = true;
 				}
 
-				// TODO: optimization - batch 'encryption-key' lookup given the GranuleFile set is known
-				state Future<BlobGranuleCipherKeysCtx> cipherKeysCtx;
-				if (chunk.snapshotFile.present() && chunk.snapshotFile.get().cipherKeysMetaRef.present()) {
-					ASSERT(isBlobFileEncryptionSupported());
-					cipherKeysCtx =
-					    getGranuleCipherKeys(bwData, chunk.snapshotFile.get().cipherKeysMetaRef.get(), &rep.arena);
+				// Invoke calls to populate 'EncryptionKeysCtx' for snapshot and/or deltaFiles asynchronously
+				state Optional<Future<BlobGranuleCipherKeysCtx>> snapCipherKeysCtx;
+				if (chunk.snapshotFile.present()) {
+					const bool encrypted = chunk.snapshotFile.get().cipherKeysMetaRef.present();
+
+					if (BW_DEBUG) {
+						TraceEvent("DoBlobGranuleFileRequestDelta_KeysCtxPrepare")
+						    .detail("FileName", chunk.snapshotFile.get().filename.toString())
+						    .detail("Encrypted", encrypted);
+					}
+
+					if (encrypted) {
+						ASSERT(isBlobFileEncryptionSupported());
+						ASSERT(!chunk.snapshotFile.get().cipherKeysCtx.present());
+
+						snapCipherKeysCtx = getGranuleCipherKeysFromKeysMetaRef(
+						    bwData, chunk.snapshotFile.get().cipherKeysMetaRef.get(), &rep.arena);
+					}
+				}
+				state std::unordered_map<int, Future<BlobGranuleCipherKeysCtx>> deltaCipherKeysCtxs;
+				for (int deltaIdx = 0; deltaIdx < chunk.deltaFiles.size(); deltaIdx++) {
+					const bool encrypted = chunk.deltaFiles[deltaIdx].cipherKeysMetaRef.present();
+
+					if (BW_DEBUG) {
+						TraceEvent("DoBlobGranuleFileRequestDelta_KeysCtxPrepare")
+						    .detail("FileName", chunk.deltaFiles[deltaIdx].filename.toString())
+						    .detail("Encrypted", encrypted);
+					}
+
+					if (encrypted) {
+						ASSERT(isBlobFileEncryptionSupported());
+						ASSERT(!chunk.deltaFiles[deltaIdx].cipherKeysCtx.present());
+
+						deltaCipherKeysCtxs.emplace(
+						    deltaIdx,
+						    getGranuleCipherKeysFromKeysMetaRef(
+						        bwData, chunk.deltaFiles[deltaIdx].cipherKeysMetaRef.get(), &rep.arena));
+					}
 				}
 
 				// FIXME: get cipher keys for delta files too!
@@ -3245,9 +3363,37 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 					}
 				}
 
-				if (chunk.snapshotFile.present() && chunk.snapshotFile.get().cipherKeysMetaRef.present()) {
-					BlobGranuleCipherKeysCtx ctx = wait(cipherKeysCtx);
-					chunk.cipherKeysCtx = std::move(ctx);
+				// Update EncryptionKeysCtx information for the chunk->snapshotFile
+				if (chunk.snapshotFile.present() && snapCipherKeysCtx.present()) {
+					ASSERT(chunk.snapshotFile.get().cipherKeysMetaRef.present());
+
+					BlobGranuleCipherKeysCtx keysCtx = wait(snapCipherKeysCtx.get());
+					chunk.snapshotFile.get().cipherKeysCtx = std::move(keysCtx);
+					// reclaim memory from non-serializable field
+					chunk.snapshotFile.get().cipherKeysMetaRef.reset();
+
+					if (BW_DEBUG) {
+						TraceEvent("DoBlobGranuleFileRequestSnap_KeysCtxDone")
+						    .detail("FileName", chunk.snapshotFile.get().filename.toString());
+					}
+				}
+
+				// Update EncryptionKeysCtx information for the chunk->deltaFiles
+				if (!deltaCipherKeysCtxs.empty()) {
+					ASSERT(!chunk.deltaFiles.empty());
+
+					state std::unordered_map<int, Future<BlobGranuleCipherKeysCtx>>::const_iterator itr;
+					for (itr = deltaCipherKeysCtxs.begin(); itr != deltaCipherKeysCtxs.end(); itr++) {
+						BlobGranuleCipherKeysCtx keysCtx = wait(itr->second);
+						chunk.deltaFiles[itr->first].cipherKeysCtx = std::move(keysCtx);
+						// reclaim memory from non-serializable field
+						chunk.deltaFiles[itr->first].cipherKeysMetaRef.reset();
+
+						if (BW_DEBUG) {
+							TraceEvent("DoBlobGranuleFileRequestDelta_KeysCtxDone")
+							    .detail("FileName", chunk.deltaFiles[itr->first].filename.toString());
+						}
+					}
 				}
 
 				rep.chunks.push_back(rep.arena, chunk);
