@@ -199,8 +199,7 @@ struct MetaclusterOperationContext {
 	Optional<DataClusterMetadata> dataClusterMetadata;
 
 	MetaclusterOperationContext(Reference<DB> managementDb, Optional<ClusterName> clusterName = {})
-	  : managementDb(managementDb), clusterName(clusterName) {
-	}
+	  : managementDb(managementDb), clusterName(clusterName) {}
 
 	// Run a transaction on the management cluster. This verifies that the cluster is a management cluster and matches
 	// the same metacluster that we've run any previous transactions on. If a clusterName is set, it also verifies that

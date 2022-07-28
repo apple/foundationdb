@@ -1393,7 +1393,7 @@ const EncryptCipherRandomSalt encryptSalt = deterministicRandom()->randomUInt64(
 
 Standalone<StringRef> getBaseCipher() {
 	Standalone<StringRef> baseCipher = makeString(AES_256_KEY_LENGTH);
-	generateRandomData(mutateString(baseCipher), baseCipher.size());
+	deterministicRandom()->randomBytes(mutateString(baseCipher), baseCipher.size());
 	return baseCipher;
 }
 
@@ -1413,7 +1413,7 @@ BlobGranuleCipherKeysCtx getCipherKeysCtx(Arena& arena) {
 	cipherKeysCtx.headerCipherKey.baseCipher = StringRef(arena, encryptBaseCipher);
 
 	cipherKeysCtx.ivRef = makeString(AES_256_IV_LENGTH, arena);
-	generateRandomData(mutateString(cipherKeysCtx.ivRef), AES_256_IV_LENGTH);
+	deterministicRandom()->randomBytes(mutateString(cipherKeysCtx.ivRef), AES_256_IV_LENGTH);
 
 	return cipherKeysCtx;
 }

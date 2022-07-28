@@ -34,6 +34,7 @@
 #include <algorithm>
 #include <boost/functional/hash.hpp>
 #include <stdint.h>
+#include <string_view>
 #include <string>
 #include <cstring>
 #include <limits>
@@ -532,7 +533,9 @@ public:
 		return substr(0, size() - s.size());
 	}
 
-	std::string toString() const { return std::string((const char*)data, length); }
+	std::string toString() const { return std::string(reinterpret_cast<const char*>(data), length); }
+
+	std::string_view toStringView() const { return std::string_view(reinterpret_cast<const char*>(data), length); }
 
 	static bool isPrintable(char c) { return c > 32 && c < 127; }
 	inline std::string printable() const;

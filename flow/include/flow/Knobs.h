@@ -195,6 +195,8 @@ public:
 	int NETWORK_TEST_REQUEST_SIZE;
 	bool NETWORK_TEST_SCRIPT_MODE;
 
+	int MAX_CACHED_EXPIRED_TOKENS;
+
 	// AsyncFileCached
 	int64_t PAGE_CACHE_4K;
 	int64_t PAGE_CACHE_64K;
@@ -353,6 +355,9 @@ public:
 	// Encryption
 	int64_t ENCRYPT_CIPHER_KEY_CACHE_TTL;
 	int64_t ENCRYPT_KEY_REFRESH_INTERVAL;
+
+	// Authorization
+	int TOKEN_CACHE_SIZE;
 
 	// RESTClient
 	int RESTCLIENT_MAX_CONNECTIONPOOL_SIZE;

@@ -314,7 +314,7 @@ ACTOR Future<BlobGranuleCipherKeysCtx> getLatestGranuleCipherKeys(Reference<Blob
 	cipherKeysCtx.headerCipherKey = BlobGranuleCipherKey::fromBlobCipherKey(systemCipherKeys.cipherHeaderKey, *arena);
 
 	cipherKeysCtx.ivRef = makeString(AES_256_IV_LENGTH, *arena);
-	generateRandomData(mutateString(cipherKeysCtx.ivRef), AES_256_IV_LENGTH);
+	deterministicRandom()->randomBytes(mutateString(cipherKeysCtx.ivRef), AES_256_IV_LENGTH);
 
 	if (BG_ENCRYPT_COMPRESS_DEBUG) {
 		TraceEvent(SevDebug, "GetLatestGranuleCipherKey")

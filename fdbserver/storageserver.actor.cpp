@@ -3222,7 +3222,7 @@ ACTOR Future<GetValueReqAndResultRef> quickGetValue(StorageServer* data,
 
 	++data->counters.quickGetValueMiss;
 	if (SERVER_KNOBS->QUICK_GET_VALUE_FALLBACK) {
-		state Transaction tr(data->cx, pOriginalReq->tenantInfo.name);
+		state Transaction tr(data->cx, pOriginalReq->tenantInfo.name.castTo<TenantName>());
 		tr.setVersion(version);
 		// TODO: is DefaultPromiseEndpoint the best priority for this?
 		tr.trState->taskID = TaskPriority::DefaultPromiseEndpoint;
@@ -3857,7 +3857,7 @@ ACTOR Future<GetRangeReqAndResultRef> quickGetKeyValues(
 
 	++data->counters.quickGetKeyValuesMiss;
 	if (SERVER_KNOBS->QUICK_GET_KEY_VALUES_FALLBACK) {
-		state Transaction tr(data->cx, pOriginalReq->tenantInfo.name);
+		state Transaction tr(data->cx, pOriginalReq->tenantInfo.name.castTo<TenantName>());
 		tr.setVersion(version);
 		// TODO: is DefaultPromiseEndpoint the best priority for this?
 		tr.trState->taskID = TaskPriority::DefaultPromiseEndpoint;
@@ -7084,6 +7084,10 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 	for (int i = 0; i < ranges.size(); i++) {
 		const Reference<ShardInfo> currentShard = ranges[i].value;
 		const KeyRangeRef currentRange = static_cast<KeyRangeRef>(ranges[i]);
+		if (currentShard.isValid()) {
+			TraceEvent(SevVerbose, "OverlappingPhysicalShard", data->thisServerID)
+			    .detail("PhysicalShard", currentShard->toStorageServerShard().toString());
+		}
 		if (!currentShard.isValid()) {
 			ASSERT(currentRange == keys); // there shouldn't be any nulls except for the range being inserted
 		} else if (currentShard->notAssigned()) {
@@ -7105,7 +7109,7 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 			    .detail("NowAssigned", nowAssigned)
 			    .detail("Version", cVer)
 			    .detail("ResultingShard", newShard.toString());
-		} else if (ranges[i].value->adding) {
+		} else if (currentShard->adding) {
 			ASSERT(!nowAssigned);
 			StorageServerShard newShard = currentShard->toStorageServerShard();
 			newShard.range = currentRange;

@@ -143,6 +143,7 @@ public:
 	virtual UID randomUniqueID() = 0;
 	virtual char randomAlphaNumeric() = 0;
 	virtual std::string randomAlphaNumeric(int length) = 0;
+	virtual void randomBytes(uint8_t* buf, int length) = 0;
 	virtual uint32_t randomSkewedUInt32(uint32_t min, uint32_t maxPlusOne) = 0;
 	virtual uint64_t peek() const = 0; // returns something that is probably different for different random states.
 	                                   // Deterministic (and idempotent) for a deterministic generator.
@@ -208,8 +209,5 @@ Reference<IRandom> nondeterministicRandom();
 // determinism of the simulator. This is useful for things like generating random UIDs for debug transactions.
 // WARNING: This is not thread safe and must not be called from any other thread than the network thread!
 Reference<IRandom> debugRandom();
-
-// Populates a buffer with a random sequence of bytes
-void generateRandomData(uint8_t* buffer, int length);
 
 #endif
