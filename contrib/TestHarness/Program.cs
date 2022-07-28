@@ -902,12 +902,17 @@ namespace SummarizeTest
                             if (ev.Type == "CodeCoverage" && !willRestart)
                             {
                                 bool covered = true;
-                                if(ev.DDetails.ContainsKey("Covered"))
+                                if (ev.DDetails.ContainsKey("Covered"))
                                 {
                                     covered = int.Parse(ev.Details.Covered) != 0;
                                 }
 
-                                var key = new Tuple<string, string, string>(ev.Details.File, ev.Details.Line, ev.Details.Comment);
+                                var comment = "";
+                                if (ev.DDetails.ContainsKey("Comment"))
+                                {
+                                    comment = ev.Details.Comment;
+                                }
+                                var key = new Tuple<string, string, string>(ev.Details.File, ev.Details.Line, comment);
                                 if (covered || !codeCoverage.ContainsKey(key))
                                 {
                                     codeCoverage[key] = covered;
