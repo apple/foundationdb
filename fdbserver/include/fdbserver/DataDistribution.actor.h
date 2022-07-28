@@ -441,6 +441,10 @@ public:
 	bool isDDEnabled() const { return context->getDDEnableState()->isDDEnabled(); };
 	Reference<DDEnabledState> getDDEnableState() { return context->getDDEnableState(); }
 	Future<Standalone<VectorRef<DDMetricsRef>>> getDDMetricsList(const GetMetricsListRequest& req);
+
+	// test use only
+	// FIXME: better encapsulation?
+	Reference<DDContext> rawContext() { return context; }
 };
 
 // DDShardInfo is so named to avoid link-time name collision with ShardInfo within the StorageServer

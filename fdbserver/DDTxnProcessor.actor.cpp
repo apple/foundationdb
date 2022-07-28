@@ -132,7 +132,7 @@ class DDTxnProcessorImpl {
 	    UID distributorId,
 	    MoveKeysLock moveKeysLock,
 	    std::vector<Optional<Key>> remoteDcIds,
-	    const DDEnabledState* ddEnabledState) {
+	    Reference<DDEnabledState> ddEnabledState) {
 		state Reference<InitialDataDistribution> result = makeReference<InitialDataDistribution>();
 		state Key beginKey = allKeys.begin;
 
@@ -255,7 +255,7 @@ class DDTxnProcessorImpl {
 				succeeded = false;
 				try {
 					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-					wait(checkMoveKeysLockReadOnly(&tr, moveKeysLock, ddEnabledState));
+					wait(checkMoveKeysLockReadOnly(&tr, moveKeysLock, ddEnabledState.getPtr()));
 					state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
 					ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
 					RangeResult keyServers = wait(krmGetRanges(&tr,
@@ -365,7 +365,7 @@ class DDTxnProcessorImpl {
 		return result;
 	}
 
-	ACTOR static Future<Void> waitForDataDistributionEnabled(Database cx, const DDEnabledState* ddEnabledState) {
+	ACTOR static Future<Void> waitForDataDistributionEnabled(Database cx, Reference<DDEnabledState> ddEnabledState) {
 		state Transaction tr(cx);
 		loop {
 			wait(delay(SERVER_KNOBS->DD_ENABLED_CHECK_DELAY, TaskPriority::DataDistribution));
@@ -392,6 +392,23 @@ class DDTxnProcessorImpl {
 				tr.reset();
 			} catch (Error& e) {
 				wait(tr.onError(e));
+			}
+		}
+	}
+
+	ACTOR static Future<Void> pollMoveKeysLock(Database cx,
+	                                           MoveKeysLock lock,
+	                                           Reference<DDEnabledState> ddEnabledState) {
+		loop {
+			wait(delay(SERVER_KNOBS->MOVEKEYS_LOCK_POLLING_DELAY));
+			state Transaction tr(cx);
+			loop {
+				try {
+					wait(checkMoveKeysLockReadOnly(&tr, lock, ddEnabledState.getPtr()));
+					break;
+				} catch (Error& e) {
+					wait(tr.onError(e));
+				}
 			}
 		}
 	}
@@ -430,4 +447,8 @@ Future<Reference<InitialDataDistribution>> DDTxnProcessor::getInitialDataDistrib
 
 Future<Void> DDTxnProcessor::waitForDataDistributionEnabled(Reference<DDEnabledState> ddEnabledState) const {
 	return DDTxnProcessorImpl::waitForDataDistributionEnabled(cx, ddEnabledState);
+}
+
+Future<Void> DDTxnProcessor::pollMoveKeysLock(MoveKeysLock lock, Reference<DDEnabledState> ddEnabledState) const {
+	return DDTxnProcessorImpl::pollMoveKeysLock(cx, lock, ddEnabledState);
 }
