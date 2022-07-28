@@ -324,6 +324,7 @@ struct MergeCandidateInfo {
 
 struct BlobGranuleSplitPoints {
 	Standalone<VectorRef<KeyRef>> keys;
+	std::unordered_map<Key, BlobGranuleMergeBoundary> boundaries;
 };
 
 struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
@@ -352,6 +353,7 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 	                                          // 0 is no merge version determined yet
 	// TODO: consider switching to an iterator approach.
 	std::unordered_map<Key, bool> mergeHardBoundaries;
+	std::unordered_map<Key, BlobGranuleMergeBoundary> mergeBoundaries;
 
 	FlowLock concurrentMergeChecks;
 
@@ -435,12 +437,14 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 };
 
 // Helper function for alignKeys().
-// This attempts to do truncation and compares with the last key in alignedKeys.
-static void alignKeyBoundary(Reference<GranuleTenantData> tenantData,
+// This attempts to do truncation and compares with the last key in splitPoints.keys.
+static void alignKeyBoundary(Reference<BlobManagerData> bmData,
+                             Reference<GranuleTenantData> tenantData,
                              KeyRef key,
                              int offset,
                              BlobGranuleSplitPoints& splitPoints) {
 	Standalone<VectorRef<KeyRef>>& keys = splitPoints.keys;
+	std::unordered_map<Key, BlobGranuleMergeBoundary>& boundaries = splitPoints.boundaries;
 	KeyRef alignedKey = key;
 	Tuple t, t2;
 
@@ -469,7 +473,12 @@ static void alignKeyBoundary(Reference<GranuleTenantData> tenantData,
 	}
 
 	// Only add the alignedKey if it's larger than the last key. If it's the same, drop the split.
-	if (alignedKey > keys.back()) {
+	if (alignedKey <= keys.back()) {
+		// Set split boundary.
+		BlobGranuleMergeBoundary boundary = { /*buddy=*/true };
+		boundaries[key] = boundary;
+		keys.push_back_deep(keys.arena(), key);
+	} else {
 		keys.push_back_deep(keys.arena(), alignedKey);
 	}
 }
@@ -501,7 +510,7 @@ ACTOR Future<BlobGranuleSplitPoints> alignKeys(Reference<BlobManagerData> bmData
 				}
 
 				Reference<GranuleTenantData> tenantData = bmData->tenantData.getDataForGranule(granuleRange);
-				alignKeyBoundary(tenantData, nextKeyRes[0].key, offset, splitPoints);
+				alignKeyBoundary(bmData, tenantData, nextKeyRes[0].key, offset, splitPoints);
 				break;
 			} catch (Error& e) {
 				wait(tr.onError(e));
@@ -987,14 +996,31 @@ ACTOR Future<Void> writeInitialGranuleMapping(Reference<BlobManagerData> bmData,
 				tr->setOption(FDBTransactionOptions::Option::ACCESS_SYSTEM_KEYS);
 				wait(checkManagerLock(tr, bmData));
 				while (i + j < splitPoints.keys.size() - 1 && j < transactionChunkSize) {
+					state KeyRangeRef splitRange = KeyRangeRef(splitPoints.keys[i + j], splitPoints.keys[i + j + 1]);
+
 					// set to empty UID - no worker assigned yet
 					wait(krmSetRange(tr,
 					                 blobGranuleMappingKeys.begin,
 					                 KeyRangeRef(splitPoints.keys[i + j], splitPoints.keys[i + j + 1]),
 					                 blobGranuleMappingValueFor(UID())));
+
+					// Update BlobGranuleMergeBoundary.
+					if (splitPoints.boundaries.count(splitRange.begin)) {
+						tr->set(blobGranuleMergeBoundaryKeyFor(splitRange.begin),
+						        blobGranuleMergeBoundaryValueFor(splitPoints.boundaries[splitRange.begin]));
+					}
+
 					j++;
 				}
 				wait(tr->commit());
+
+				// Update BlobGranuleMergeBoundary in-memory state.
+				for (int k = i; k < i + j; k++) {
+					KeyRef beginKey = splitPoints.keys[k];
+					if (splitPoints.boundaries.count(beginKey)) {
+						bmData->mergeBoundaries[beginKey] = splitPoints.boundaries[beginKey];
+					}
+				}
 				break;
 			} catch (Error& e) {
 				wait(tr->onError(e));
@@ -1365,6 +1391,8 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 					splitPoints.keys.push_back(splitPoints.keys.arena(),
 					                           it.key.removePrefix(blobGranuleMappingKeys.begin));
 				}
+				// We don't care about splitPoints.boundaries as they are already persisted.
+				splitPoints.boundaries.clear();
 				ASSERT(splitPoints.keys.front() == granuleRange.begin);
 				ASSERT(splitPoints.keys.back() == granuleRange.end);
 				if (BM_DEBUG) {
@@ -1438,6 +1466,12 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 				             blobGranuleSplitValueFor(BlobGranuleSplitState::Initialized),
 				             MutationRef::SetVersionstampedValue);
 
+				// Update BlobGranuleMergeBoundary.
+				if (splitPoints.boundaries.count(splitRange.begin)) {
+					tr->set(blobGranuleMergeBoundaryKeyFor(splitRange.begin),
+					        blobGranuleMergeBoundaryValueFor(splitPoints.boundaries[splitRange.begin]));
+				}
+
 				// History.
 				Key historyKey = blobGranuleHistoryKeyFor(splitRange, splitVersion);
 
@@ -1459,6 +1493,11 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 			}
 
 			wait(tr->commit());
+
+			// Update BlobGranuleMergeBoundary in-memory state.
+			for (auto it = splitPoints.boundaries.begin(); it != splitPoints.boundaries.end(); it++) {
+				bmData->mergeBoundaries[it->first] = it->second;
+			}
 			break;
 		} catch (Error& e) {
 			if (e.code() == error_code_operation_cancelled) {
@@ -1756,6 +1795,9 @@ ACTOR Future<Void> persistMergeGranulesDone(Reference<BlobManagerData> bmData,
 				state Key lockKey = blobGranuleLockKeyFor(parentRange);
 				state Future<Optional<Value>> oldLockFuture = tr->get(lockKey);
 
+				// Clear existing merge boundaries.
+				tr->clear(blobGranuleMergeBoundaryKeyFor(parentRange.begin));
+
 				// This has to be
 				// TODO: fix this better! (privatize change feed key clear)
 				wait(updateChangeFeed(&tr->getTransaction(),
@@ -1780,6 +1822,9 @@ ACTOR Future<Void> persistMergeGranulesDone(Reference<BlobManagerData> bmData,
 				    blobGranuleLockValueFor(bmData->epoch, std::numeric_limits<int64_t>::max(), std::get<2>(prevLock)));
 			}
 
+			tr->clear(KeyRangeRef(keyAfter(blobGranuleMergeBoundaryKeyFor(mergeRange.begin)),
+			                      blobGranuleMergeBoundaryKeyFor(mergeRange.end)));
+
 			// either set initial lock value, or re-set it if it was set to (epoch, <max>) in a previous split
 			int64_t seqNo = bmData->seqNo++;
 			tr->set(blobGranuleLockKeyFor(mergeRange), blobGranuleLockValueFor(bmData->epoch, seqNo, mergeGranuleID));
@@ -1799,6 +1844,12 @@ ACTOR Future<Void> persistMergeGranulesDone(Reference<BlobManagerData> bmData,
 
 			wait(krmSetRange(tr, blobGranuleMappingKeys.begin, mergeRange, blobGranuleMappingValueFor(tmpWorkerId)));
 			wait(tr->commit());
+
+			// Update in-memory mergeBoundaries map.
+			for (parentIdx = 1; parentIdx < parentGranuleIDs.size(); parentIdx++) {
+				bmData->mergeBoundaries.erase(parentGranuleRanges[parentIdx]);
+			}
+
 			if (BM_DEBUG) {
 				fmt::print("Granule merge intent cleared [{0} - {1}): {2} @ {3} (cv={4})\n",
 				           mergeRange.begin.printable(),
@@ -1830,7 +1881,7 @@ ACTOR Future<Void> finishMergeGranules(Reference<BlobManagerData> bmData,
 
 	// Assert that none of the subsequent granules are hard boundaries.
 	if (g_network->isSimulated()) {
-		for (int i = 1; i < parentGranuleRanges.size(); i++) {
+		for (int i = 1; i < parentGranuleRanges.size() - 1; i++) {
 			ASSERT(!bmData->mergeHardBoundaries.count(parentGranuleRanges[i]));
 		}
 	}
@@ -2030,6 +2081,7 @@ ACTOR Future<Void> granuleMergeChecker(Reference<BlobManagerData> bmData) {
 		state std::vector<Future<Void>> mergeChecks;
 		auto allRanges = bmData->mergeCandidates.ranges();
 		std::vector<std::tuple<UID, KeyRange, Version>> currentCandidates;
+		auto& mergeBoundaries = bmData->mergeBoundaries;
 		for (auto& it : allRanges) {
 			// Conditions:
 			//   1. Next range is not eligible.
@@ -2041,6 +2093,24 @@ ACTOR Future<Void> granuleMergeChecker(Reference<BlobManagerData> bmData) {
 					mergeChecks.push_back(attemptMerges(bmData, currentCandidates));
 				}
 				currentCandidates.clear();
+			}
+
+			// Soft boundaries.
+			// We scan all ranges including non-eligible ranges which trigger non-consecutive merge flushes.
+			if (!currentCandidates.empty()) {
+				KeyRangeRef lastRange = std::get<1>(currentCandidates.back());
+				KeyRangeRef curRange = it->range();
+				ASSERT(lastRange.end == curRange.begin);
+				// Conditions:
+				//   1. Start a new soft merge range.
+				//   2. End a soft merge range.
+				if ((!mergeBoundaries.count(curRange.begin) && mergeBoundaries.count(curRange.end)) ||
+				    (mergeBoundaries.count(lastRange.begin) && !mergeBoundaries.count(lastRange.end))) {
+					if (currentCandidates.size() >= 2) {
+						mergeChecks.push_back(attemptMerges(bmData, currentCandidates));
+					}
+					currentCandidates.clear();
+				}
 			}
 
 			if (it->cvalue().mergeEligible()) {
@@ -2684,6 +2754,42 @@ ACTOR Future<Void> resumeActiveMerges(Reference<BlobManagerData> bmData) {
 	}
 }
 
+ACTOR Future<Void> loadBlobGranuleMergeBoundaries(Reference<BlobManagerData> bmData) {
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
+	state int rowLimit = BUGGIFY ? deterministicRandom()->randomInt(2, 10) : 10000;
+	state Key beginKey = blobGranuleMergeBoundaryKeys.begin;
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
+			KeyRange nextRange(KeyRangeRef(beginKey, blobGranuleMergeBoundaryKeys.end));
+			// using the krm functions can produce incorrect behavior here as it does weird stuff with beginKey
+			state GetRangeLimits limits(rowLimit, GetRangeLimits::BYTE_LIMIT_UNLIMITED);
+			RangeResult results = wait(tr->getRange(nextRange, limits));
+
+			// Add the mappings to our in memory key range map
+			for (int i = 0; i < results.size() - 1; i++) {
+				bmData->mergeBoundaries[results[i].key] = decodeBlobGranuleMergeBoundaryValue(results[i].value);
+			}
+
+			if (!results.more) {
+				break;
+			}
+			beginKey = keyAfter(results.back().key);
+		} catch (Error& e) {
+			if (BM_DEBUG) {
+				fmt::print("BM {0} got error reading granule merge boundaries during recovery: {1}\n",
+				           bmData->epoch,
+				           e.name());
+			}
+			wait(tr->onError(e));
+		}
+	}
+
+	return Void();
+}
+
 ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 	state double recoveryStartTime = now();
 	state Promise<Void> workerListReady;
@@ -2955,6 +3061,8 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 			wait(tr->onError(e));
 		}
 	}
+
+	wait(loadBlobGranuleMergeBoundaries(bmData));
 
 	TraceEvent("BlobManagerRecovered", bmData->id)
 	    .detail("Epoch", bmData->epoch)

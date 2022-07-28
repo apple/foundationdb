@@ -128,7 +128,7 @@ struct ThreadData : ReferenceCounted<ThreadData>, NonCopyable {
 	// TODO could make keys variable length?
 	Key getKey(uint32_t key, uint32_t id) { return Tuple().append((int64_t)key).append((int64_t)id).pack(); }
 
-	void validateGranuleBoundary(Key k, Key e) {
+	void validateGranuleBoundary(Key k, Key e, Key lastKey) {
 		if (k == allKeys.begin || k == allKeys.end) {
 			return;
 		}
@@ -137,7 +137,15 @@ struct ThreadData : ReferenceCounted<ThreadData>, NonCopyable {
 		// sub-tuple of the inserted key.
 		Tuple t = Tuple::unpack(k, true);
 		if (SERVER_KNOBS->BG_KEY_TUPLE_TRUNCATE_OFFSET) {
-			ASSERT(t.size() <= BGW_TUPLE_KEY_SIZE - SERVER_KNOBS->BG_KEY_TUPLE_TRUNCATE_OFFSET);
+			Tuple t2;
+			try {
+				t2 = Tuple::unpack(lastKey);
+			} catch (Error& e) {
+				// Ignore being unable to parse lastKey as it may be a dummy key.
+			}
+			if (t2.size() > 0 && t.getInt(0) != t2.getInt(0)) {
+				ASSERT(t.size() <= BGW_TUPLE_KEY_SIZE - SERVER_KNOBS->BG_KEY_TUPLE_TRUNCATE_OFFSET);
+			}
 		}
 	}
 };
@@ -452,6 +460,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		beginVersionByChunk.insert(normalKeys, 0);
 		int beginCollapsed = 0;
 		int beginNotCollapsed = 0;
+		Key lastBeginKey = LiteralStringRef("");
 		for (auto& chunk : blob.second) {
 			KeyRange beginVersionRange;
 			if (chunk.tenantPrefix.present()) {
@@ -474,7 +483,9 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 				}
 			}
 
-			threadData->validateGranuleBoundary(beginVersionRange.begin, beginVersionRange.end);
+			// Validate boundary alignment.
+			threadData->validateGranuleBoundary(beginVersionRange.begin, beginVersionRange.end, lastBeginKey);
+			lastBeginKey = beginVersionRange.begin;
 		}
 		CODE_PROBE(beginCollapsed > 0, "BGCorrectness got collapsed request with beginVersion > 0");
 		CODE_PROBE(beginNotCollapsed > 0, "BGCorrectness got un-collapsed request with beginVersion > 0");
