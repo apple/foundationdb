@@ -34,6 +34,7 @@
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/HealthMonitor.h"
+#include "fdbrpc/JsonWebKeySet.h"
 #include "fdbrpc/genericactors.actor.h"
 #include "fdbrpc/IPAllowList.h"
 #include "fdbrpc/TokenCache.h"
@@ -46,6 +47,7 @@
 #include "flow/ObjectSerializer.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/UnitTest.h"
+#include "flow/WatchFile.actor.h"
 #define XXH_INLINE_ALL
 #include "flow/xxhash.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -341,6 +343,7 @@ public:
 
 	Future<Void> multiVersionCleanup;
 	Future<Void> pingLogger;
+	Future<Void> publicKeyFileWatch;
 
 	std::unordered_map<Standalone<StringRef>, PublicKey> publicKeys;
 };
@@ -1965,4 +1968,58 @@ void FlowTransport::removePublicKey(StringRef name) {
 
 void FlowTransport::removeAllPublicKeys() {
 	self->publicKeys.clear();
+}
+
+ACTOR static Future<Void> watchPublicKeyJwksFile(std::string filePath, TransportData* self) {
+	state AsyncTrigger fileChanged;
+	state Future<Void> fileWatch;
+	state unsigned errorCount = 0; // error since watch start or last successful refresh
+	loop {
+		if (IAsyncFileSystem::filesystem())
+			break;
+		wait(delay(1.0));
+	}
+	const int& intervalSeconds = FLOW_KNOBS->PUBLIC_KEY_FILE_REFRESH_INTERVAL_SECONDS;
+	fileWatch = watchFileForChanges(filePath, &fileChanged, &intervalSeconds, "AuthzPublicKeySetRefreshStatError");
+	loop {
+		try {
+			wait(fileChanged.onTrigger());
+			state Reference<IAsyncFile> file = wait(IAsyncFileSystem::filesystem()->open(
+			    filePath, IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED, 0));
+			state int64_t filesize = wait(file->size());
+			state std::string json(filesize, '\0');
+			if (filesize > FLOW_KNOBS->PUBLIC_KEY_FILE_MAX_SIZE)
+				throw file_too_large();
+			wait(success(file->read(&json[0], filesize, 0)));
+			auto jwks = JsonWebKeySet::parse(StringRef(json), {});
+			if (!jwks.present())
+				throw pkey_decode_error();
+			const auto& keySet = jwks.get().keys;
+			self->publicKeys.clear();
+			int numPrivateKeys = 0;
+			for (auto [keyName, key] : keySet) {
+				// ignore private keys
+				if (key.isPublic()) {
+					self->publicKeys[keyName] = key.getPublic();
+				} else {
+					numPrivateKeys++;
+				}
+			}
+			TraceEvent(SevInfo, "AuthzPublicKeySetRefreshSuccess")
+			    .detail("NumPublicKeys", self->publicKeys.size())
+			    .detail("NumSkippedPrivateKeys", numPrivateKeys);
+			errorCount = 0;
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+			// parse/read error
+			errorCount++;
+			TraceEvent(SevWarn, "AuthzPublicKeySetRefreshError").error(e).detail("ErrorCount", errorCount);
+		}
+	}
+}
+
+void FlowTransport::watchPublicKeyFile(const std::string& publicKeyFilePath) {
+	self->publicKeyFileWatch = watchPublicKeyJwksFile(publicKeyFilePath, self);
 }

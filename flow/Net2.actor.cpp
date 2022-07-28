@@ -50,6 +50,7 @@
 #include "flow/ProtocolVersion.h"
 #include "flow/SendBufferIterator.h"
 #include "flow/TLSConfig.actor.h"
+#include "flow/WatchFile.actor.h"
 #include "flow/genericactors.actor.h"
 #include "flow/Util.h"
 
@@ -1263,41 +1264,6 @@ Net2::Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics)
 	updateNow();
 }
 
-ACTOR static Future<Void> watchFileForChanges(std::string filename, AsyncTrigger* fileChanged) {
-	if (filename == "") {
-		return Never();
-	}
-	state bool firstRun = true;
-	state bool statError = false;
-	state std::time_t lastModTime = 0;
-	loop {
-		try {
-			std::time_t modtime = wait(IAsyncFileSystem::filesystem()->lastWriteTime(filename));
-			if (firstRun) {
-				lastModTime = modtime;
-				firstRun = false;
-			}
-			if (lastModTime != modtime || statError) {
-				lastModTime = modtime;
-				statError = false;
-				fileChanged->trigger();
-			}
-		} catch (Error& e) {
-			if (e.code() == error_code_io_error) {
-				// EACCES, ELOOP, ENOENT all come out as io_error(), but are more of a system
-				// configuration issue than an FDB problem.  If we managed to load valid
-				// certificates, then there's no point in crashing, but we should complain
-				// loudly.  IAsyncFile will log the error, but not necessarily as a warning.
-				TraceEvent(SevWarnAlways, "TLSCertificateRefreshStatError").detail("File", filename);
-				statError = true;
-			} else {
-				throw;
-			}
-		}
-		wait(delay(FLOW_KNOBS->TLS_CERT_REFRESH_DELAY_SECONDS));
-	}
-}
-
 ACTOR static Future<Void> reloadCertificatesOnChange(
     TLSConfig config,
     std::function<void()> onPolicyFailure,
@@ -1316,9 +1282,13 @@ ACTOR static Future<Void> reloadCertificatesOnChange(
 	state int mismatches = 0;
 	state AsyncTrigger fileChanged;
 	state std::vector<Future<Void>> lifetimes;
-	lifetimes.push_back(watchFileForChanges(config.getCertificatePathSync(), &fileChanged));
-	lifetimes.push_back(watchFileForChanges(config.getKeyPathSync(), &fileChanged));
-	lifetimes.push_back(watchFileForChanges(config.getCAPathSync(), &fileChanged));
+	const int& intervalSeconds = FLOW_KNOBS->TLS_CERT_REFRESH_DELAY_SECONDS;
+	lifetimes.push_back(watchFileForChanges(
+	    config.getCertificatePathSync(), &fileChanged, &intervalSeconds, "TLSCertificateRefreshStatError"));
+	lifetimes.push_back(
+	    watchFileForChanges(config.getKeyPathSync(), &fileChanged, &intervalSeconds, "TLSKeyRefreshStatError"));
+	lifetimes.push_back(
+	    watchFileForChanges(config.getCAPathSync(), &fileChanged, &intervalSeconds, "TLSCARefreshStatError"));
 	loop {
 		wait(fileChanged.onTrigger());
 		TraceEvent("TLSCertificateRefreshBegin").log();
