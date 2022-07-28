@@ -7084,6 +7084,10 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 	for (int i = 0; i < ranges.size(); i++) {
 		const Reference<ShardInfo> currentShard = ranges[i].value;
 		const KeyRangeRef currentRange = static_cast<KeyRangeRef>(ranges[i]);
+		if (currentShard.isValid()) {
+			TraceEvent(SevVerbose, "OverlappingPhysicalShard", data->thisServerID)
+			    .detail("PhysicalShard", currentShard->toStorageServerShard().toString());
+		}
 		if (!currentShard.isValid()) {
 			ASSERT(currentRange == keys); // there shouldn't be any nulls except for the range being inserted
 		} else if (currentShard->notAssigned()) {
@@ -7105,7 +7109,7 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 			    .detail("NowAssigned", nowAssigned)
 			    .detail("Version", cVer)
 			    .detail("ResultingShard", newShard.toString());
-		} else if (ranges[i].value->adding) {
+		} else if (currentShard->adding) {
 			ASSERT(!nowAssigned);
 			StorageServerShard newShard = currentShard->toStorageServerShard();
 			newShard.range = currentRange;

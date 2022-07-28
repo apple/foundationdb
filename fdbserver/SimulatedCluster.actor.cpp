@@ -1450,8 +1450,6 @@ void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
 		TraceEvent(SevWarnAlways, "RocksDBNonDeterminism")
 		    .detail("Explanation", "The Sharded RocksDB storage engine is threaded and non-deterministic");
 		noUnseed = true;
-		auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
-		g_knobs.setKnob("shard_encode_location_metadata", KnobValueRef::create(bool{ true }));
 		break;
 	}
 	default:
@@ -2395,6 +2393,10 @@ ACTOR void setupAndRun(std::string dataFolder,
 	state bool allowDefaultTenant = testConfig.allowDefaultTenant;
 	state bool allowDisablingTenants = testConfig.allowDisablingTenants;
 	state bool allowCreatingTenants = true;
+
+	if (!CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+		testConfig.storageEngineExcludeTypes.push_back(5);
+	}
 
 	// The RocksDB storage engine does not support the restarting tests because you cannot consistently get a clean
 	// snapshot of the storage engine without a snapshotting file system.
