@@ -18,6 +18,7 @@ from local_cluster import LocalCluster, random_secret_string
 LAST_RELEASE_VERSION = "7.1.5"
 TESTER_STATS_INTERVAL_SEC = 5
 DEFAULT_TEST_FILE = "CApiCorrectnessMultiThr.toml"
+IMPLIBSO_ERROR_CODE = -6  # SIGABORT
 
 
 def version_from_str(ver_str):
@@ -238,20 +239,20 @@ class FdbCShimTests:
 
             # Test setting an invalid client library path over an API call
             self.run_c_shim_lib_tester(
-                CURRENT_VERSION, test_env, call_set_path=True, invalid_lib_path=True, expected_ret_code=1)
+                CURRENT_VERSION, test_env, call_set_path=True, invalid_lib_path=True, expected_ret_code=IMPLIBSO_ERROR_CODE)
 
             # Test setting an invalid client library path over an environment variable
             self.run_c_shim_lib_tester(
-                CURRENT_VERSION, test_env, set_env_path=True, invalid_lib_path=True, expected_ret_code=1)
+                CURRENT_VERSION, test_env, set_env_path=True, invalid_lib_path=True, expected_ret_code=IMPLIBSO_ERROR_CODE)
 
             # Test calling a function that exists in the loaded library, but not for the selected API version
             self.run_c_shim_lib_tester(
                 CURRENT_VERSION, test_env, call_set_path=True, api_version=700)
 
         # binary downloads are currently available only for x86_64
-        if (self.platform == "x86_64"):
+        if self.platform == "x86_64":
             # Test the API workload with the release version
-            #self.run_c_api_test(LAST_RELEASE_VERSION, DEFAULT_TEST_FILE)
+            self.run_c_api_test(LAST_RELEASE_VERSION, DEFAULT_TEST_FILE)
 
             with TestEnv(self.build_dir, self.downloader, LAST_RELEASE_VERSION) as test_env:
                 # Test using the loaded client library as the local client
@@ -264,7 +265,7 @@ class FdbCShimTests:
 
                 # Test calling a function that does not exist in the loaded library
                 self.run_c_shim_lib_tester(
-                    "7.0.0", test_env, call_set_path=True, api_version=700, expected_ret_code=-11)
+                    "7.0.0", test_env, call_set_path=True, api_version=700, expected_ret_code=IMPLIBSO_ERROR_CODE)
 
 
 if __name__ == "__main__":
