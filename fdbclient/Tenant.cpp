@@ -118,17 +118,6 @@ std::string TenantMapEntry::toJson(int apiVersion) const {
 		tenantEntry["tenant_group"] = tenantGroupObject;
 	}
 
-	if (tenantGroup.present()) {
-		json_spirit::mObject tenantGroupObject;
-		std::string encodedTenantGroup = base64::encoder::from_string(tenantGroup.get().toString());
-		// Remove trailing newline
-		encodedTenantGroup.resize(encodedTenantGroup.size() - 1);
-
-		tenantGroupObject["base64"] = encodedTenantGroup;
-		tenantGroupObject["printable"] = printable(tenantGroup.get());
-		tenantEntry["tenant_group"] = tenantGroupObject;
-	}
-
 	return json_spirit::write_string(json_spirit::mValue(tenantEntry));
 }
 
