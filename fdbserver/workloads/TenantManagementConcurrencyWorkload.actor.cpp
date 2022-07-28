@@ -263,7 +263,6 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 		                                self->tenantNamePrefix.withSuffix("\xff"_sr),
 		                                self->maxTenants + 1));
 
-
 		state std::vector<std::pair<TenantName, TenantMapEntry>> metaclusterMap;
 
 		if (self->useMetacluster) {
