@@ -193,7 +193,7 @@ ACTOR Future<Void> remoteRecovered(Reference<AsyncVar<ServerDBInfo> const> db) {
 	return Void();
 }
 
-ACTOR Future<bool> isDataDistributionEnabled(Database cx, const DDEnabledState* ddEnabledState) {
+ACTOR Future<bool> isDataDistributionEnabled(Database cx, Reference<DDEnabledState> ddEnabledState) {
 	state Transaction tr(cx);
 	loop {
 		try {
@@ -275,13 +275,13 @@ static std::set<int> const& normalDDQueueErrors() {
 	return s;
 }
 
-ACTOR Future<Void> pollMoveKeysLock(Database cx, MoveKeysLock lock, const DDEnabledState* ddEnabledState) {
+ACTOR Future<Void> pollMoveKeysLock(Database cx, MoveKeysLock lock, Reference<DDEnabledState> ddEnabledState) {
 	loop {
 		wait(delay(SERVER_KNOBS->MOVEKEYS_LOCK_POLLING_DELAY));
 		state Transaction tr(cx);
 		loop {
 			try {
-				wait(checkMoveKeysLockReadOnly(&tr, lock, ddEnabledState));
+				wait(checkMoveKeysLockReadOnly(&tr, lock, ddEnabledState.getPtr()));
 				break;
 			} catch (Error& e) {
 				wait(tr.onError(e));
@@ -459,7 +459,7 @@ public:
 	}
 
 	ACTOR static Future<Void> resumeFromShards(Reference<DataDistributor> self, bool traceShard) {
-		state Reference<DDContext> context = self->getContext();
+		state Reference<DDContext> context = self->context;
 		state int shard = 0;
 		for (; shard < self->initData->shards.size() - 1; shard++) {
 			const DDShardInfo& iShard = self->initData->shards[shard];
@@ -504,7 +504,7 @@ public:
 
 	// TODO: unit test needed
 	ACTOR static Future<Void> resumeFromDataMoves(Reference<DataDistributor> self, Future<Void> readyToStart) {
-		state Reference<DDContext> context = self->getContext();
+		state Reference<DDContext> context = self->context;
 		state KeyRangeMap<std::shared_ptr<DataMove>>::iterator it = self->initData->dataMoveMap.ranges().begin();
 
 		wait(readyToStart);
@@ -683,7 +683,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self) {
 			wait(waitForAll(actors));
 			return Void();
 		} catch (Error& e) {
-			self->setTrackerCancelled(true);
+			self->markTrackerCancelled();
 			state Error err = e;
 			TraceEvent("DataDistributorDestroyTeamCollections").error(e);
 			state std::vector<UID> teamForDroppedRange;
@@ -692,7 +692,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self) {
 				const UID serverID = removeFailedServer.getFuture().get();
 				std::vector<UID> pTeam = primaryTeamCollection->getRandomHealthyTeam(serverID);
 				teamForDroppedRange.insert(teamForDroppedRange.end(), pTeam.begin(), pTeam.end());
-				if (self->configuration.usableRegions > 1) {
+				if (self->usableRegions() > 1) {
 					std::vector<UID> rTeam = remoteTeamCollection->getRandomHealthyTeam(serverID);
 					teamForDroppedRange.insert(teamForDroppedRange.end(), rTeam.begin(), rTeam.end());
 				}

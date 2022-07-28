@@ -390,7 +390,7 @@ private:
 // context.
 struct DDContext : public ReferenceCounted<DDContext> {
 private:
-	ActorCollection contextActors{ false };
+	ActorCollectionNoErrors contextActors; // has to be no error actors because we don't wait on it
 	Reference<DDEnabledState> ddEnabledState; // Note: don't operate directly because it's shared with snapshot server
 
 public:
@@ -437,6 +437,7 @@ public:
 		auto id = Id();
 		context = makeReference<DDContext>(id, enabledState);
 	}
+	decltype(auto) usableRegions() { return context->configuration.usableRegions; }
 	bool isDDEnabled() const { return context->getDDEnableState()->isDDEnabled(); };
 	Reference<DDEnabledState> getDDEnableState() { return context->getDDEnableState(); }
 	Future<Standalone<VectorRef<DDMetricsRef>>> getDDMetricsList(const GetMetricsListRequest& req);
