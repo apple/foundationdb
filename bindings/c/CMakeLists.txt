@@ -447,12 +447,23 @@ elseif(NOT WIN32 AND NOT APPLE AND NOT USE_UBSAN) # Linux Only, non-ubsan only
     ${SHIM_LIB_OUTPUT_DIR}/libfdb_c.so.init.c
     ${SHIM_LIB_OUTPUT_DIR}/libfdb_c.so.tramp.S)
 
+  set(IMPLIBSO_SRC_DIR ${CMAKE_SOURCE_DIR}/contrib/Implib.so)
+  set(IMPLIBSO_SRC
+    ${IMPLIBSO_SRC_DIR}/implib-gen.py
+    ${IMPLIBSO_SRC_DIR}/arch/common/init.c.tpl
+    ${IMPLIBSO_SRC_DIR}/arch/${CMAKE_SYSTEM_PROCESSOR}/config.ini
+    ${IMPLIBSO_SRC_DIR}/arch/${CMAKE_SYSTEM_PROCESSOR}/table.S.tpl
+    ${IMPLIBSO_SRC_DIR}/arch/${CMAKE_SYSTEM_PROCESSOR}/trampoline.S.tpl
+    )
+
   add_custom_command(OUTPUT ${SHIM_LIB_GEN_SRC}
-  COMMAND $<TARGET_FILE:Python::Interpreter> ${CMAKE_SOURCE_DIR}/contrib/Implib.so/implib-gen.py
+    COMMAND $<TARGET_FILE:Python::Interpreter> ${IMPLIBSO_SRC_DIR}/implib-gen.py
       --target ${CMAKE_SYSTEM_PROCESSOR}
       --outdir ${SHIM_LIB_OUTPUT_DIR}
       --dlopen-callback=fdb_shim_dlopen_callback
-      $<TARGET_FILE:fdb_c>)
+      $<TARGET_FILE:fdb_c>
+    DEPENDS ${IMPLIBSO_SRC}
+    COMMENT "Generating source code for C shim library")
 
   add_library(fdb_c_shim SHARED ${SHIM_LIB_GEN_SRC} foundationdb/fdb_c_shim.h fdb_c_shim.cpp)
   target_link_options(fdb_c_shim PRIVATE "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/fdb_c.map,-z,nodelete,-z,noexecstack")
