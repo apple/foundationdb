@@ -958,7 +958,7 @@ void Peer::onIncomingConnection(Reference<Peer> self, Reference<IConnection> con
 		    .detail("FromAddr", conn->getPeerAddress())
 		    .detail("CanonicalAddr", destination)
 		    .detail("IsPublic", destination.isPublic())
-		    .detail("Trusted", self->transport->allowList(conn->getPeerAddress().ip));
+		    .detail("Trusted", self->transport->allowList(conn->getPeerAddress().ip) && conn->hasTrustedPeer());
 
 		connect.cancel();
 		prependConnectPacket();
@@ -1257,7 +1257,7 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 	state bool incompatiblePeerCounted = false;
 	state NetworkAddress peerAddress;
 	state ProtocolVersion peerProtocolVersion;
-	state bool trusted = transport->allowList(conn->getPeerAddress().ip);
+	state bool trusted = transport->allowList(conn->getPeerAddress().ip) && conn->hasTrustedPeer();
 	peerAddress = conn->getPeerAddress();
 
 	if (!peer) {
