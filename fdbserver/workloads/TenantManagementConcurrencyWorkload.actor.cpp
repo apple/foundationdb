@@ -195,7 +195,7 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 
 			return Void();
 		} catch (Error& e) {
-			if (e.code() != error_code_tenant_already_exists) {
+			if (e.code() != error_code_tenant_already_exists && e.code() != error_code_cluster_no_capacity) {
 				TraceEvent(SevError, "CreateTenantFailure").error(e).detail("TenantName", tenant);
 			}
 

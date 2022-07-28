@@ -29,4 +29,3 @@ json_spirit::mObject ClusterUsage::toJson() const {
 	obj["num_tenant_groups"] = numTenantGroups;
 	return obj;
 }
-

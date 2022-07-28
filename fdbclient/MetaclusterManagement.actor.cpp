@@ -51,6 +51,8 @@ KeyBackedMap<ClusterName,
     ManagementClusterMetadata::dataClusterConnectionRecords("metacluster/dataCluster/connectionString/"_sr);
 
 KeyBackedSet<Tuple> ManagementClusterMetadata::clusterCapacityIndex("metacluster/clusterCapacityIndex/"_sr);
+KeyBackedMap<ClusterName, int64_t, TupleCodec<ClusterName>, BinaryCodec<int64_t>>
+    ManagementClusterMetadata::clusterTenantCount("metacluster/clusterTenantCount/"_sr);
 KeyBackedSet<Tuple> ManagementClusterMetadata::clusterTenantIndex("metacluster/dataCluster/tenantMap/"_sr);
 KeyBackedSet<Tuple> ManagementClusterMetadata::clusterTenantGroupIndex("metacluster/dataCluster/tenantGroupMap/"_sr);
 

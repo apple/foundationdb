@@ -64,6 +64,7 @@ struct TenantManagementWorkload : TestWorkload {
 	const Key testParametersKey = "test_parameters"_sr;
 	const Value noTenantValue = "no_tenant"_sr;
 	const TenantName tenantNamePrefix = "tenant_management_workload_"_sr;
+	const ClusterName dataClusterName = "cluster1"_sr;
 	TenantName localTenantNamePrefix;
 	TenantName localTenantGroupNamePrefix;
 
@@ -165,7 +166,8 @@ struct TenantManagementWorkload : TestWorkload {
 
 			DataClusterEntry entry;
 			entry.capacity.numTenantGroups = 1e9;
-			wait(MetaclusterAPI::registerCluster(self->mvDb, "cluster1"_sr, g_simulator.extraDatabases[0], entry));
+			wait(MetaclusterAPI::registerCluster(
+			    self->mvDb, self->dataClusterName, g_simulator.extraDatabases[0], entry));
 		}
 
 		state Transaction tr(cx);
@@ -1397,20 +1399,40 @@ struct TenantManagementWorkload : TestWorkload {
 
 	// Verify that the tenant count matches the actual number of tenants in the cluster and that we haven't created too
 	// many
-	ACTOR static Future<Void> checkTenantCount(Database cx) {
-		state Reference<ReadYourWritesTransaction> tr = cx->createTransaction();
+	ACTOR template <bool UseMetacluster, class DB>
+	static Future<Void> checkTenantCount(TenantManagementWorkload* self, Reference<DB> db) {
+		state Reference<typename DB::TransactionT> tr = db->createTransaction();
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				state int64_t tenantCount = wait(TenantMetadata::tenantCount.getD(tr, Snapshot::False, 0));
-				KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>> tenants =
-				    wait(TenantMetadata::tenantMap.getRange(tr, {}, {}, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1));
+				state int64_t tenantCount;
+				state KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>> tenants;
+
+				if (UseMetacluster) {
+					wait(store(tenantCount,
+					           MetaclusterAPI::ManagementClusterMetadata::tenantMetadata.tenantCount.getD(
+					               tr, Snapshot::False, 0)));
+					wait(store(tenants,
+					           MetaclusterAPI::ManagementClusterMetadata::tenantMetadata.tenantMap.getRange(
+					               tr, {}, {}, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1)));
+
+					int64_t clusterTenantCount =
+					    wait(MetaclusterAPI::ManagementClusterMetadata::clusterTenantCount.getD(
+					        tr, self->dataClusterName, Snapshot::False, 0));
+
+					ASSERT(clusterTenantCount == tenantCount);
+				} else {
+					wait(store(tenantCount, TenantMetadata::tenantCount.getD(tr, Snapshot::False, 0)));
+					wait(store(
+					    tenants,
+					    TenantMetadata::tenantMap.getRange(tr, {}, {}, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1)));
+					ASSERT(tenantCount <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER);
+				}
 
 				ASSERT(tenants.results.size() == tenantCount && !tenants.more);
-				ASSERT(tenantCount <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER);
 				return Void();
 			} catch (Error& e) {
-				wait(tr->onError(e));
+				wait(safeThreadFutureToFuture(tr->onError(e)));
 			}
 		}
 	}
@@ -1647,7 +1669,10 @@ struct TenantManagementWorkload : TestWorkload {
 		}
 
 		if (self->clientId == 0) {
-			wait(checkTenantCount(cx));
+			if (self->useMetacluster) {
+				wait(checkTenantCount<true>(self, self->mvDb));
+			}
+			wait(checkTenantCount<false>(self, self->dataDb.getReference()));
 		}
 
 		wait(compareTenants(self) && compareTenantGroups(self) && checkTenantTombstones(self));

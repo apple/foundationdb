@@ -106,6 +106,9 @@ struct ManagementClusterMetadata {
 	// A set of non-full clusters where the key is the tuple (num tenant groups allocated, cluster name).
 	static KeyBackedSet<Tuple> clusterCapacityIndex;
 
+	// A map from cluster name to a count of tenants
+	static KeyBackedMap<ClusterName, int64_t, TupleCodec<ClusterName>, BinaryCodec<int64_t>> clusterTenantCount;
+
 	// A set of cluster/tenant pairings ordered by cluster
 	static KeyBackedSet<Tuple> clusterTenantIndex;
 
@@ -634,6 +637,11 @@ Future<Void> managementClusterPurgeDataCluster(Reference<DB> db, ClusterNameRef 
 				ManagementClusterMetadata::tenantMetadata.tenantMap.erase(tr, entry.getString(1));
 			}
 
+			ManagementClusterMetadata::tenantMetadata.tenantCount.atomicOp(
+			    tr, -tenantEntries.results.size(), MutationRef::AddValue);
+			ManagementClusterMetadata::clusterTenantCount.atomicOp(
+			    tr, name, -tenantEntries.results.size(), MutationRef::AddValue);
+
 			// Erase all of the tenants processed in this transaction from the cluster tenant index
 			ManagementClusterMetadata::clusterTenantIndex.erase(
 			    tr,
@@ -1042,7 +1050,6 @@ struct CreateTenantImpl {
 		if (self->tenantName.startsWith("\xff"_sr)) {
 			throw invalid_tenant_name();
 		}
-
 		state Future<Optional<TenantMapEntry>> existingEntryFuture = tryGetTenantTransaction(tr, self->tenantName);
 		Optional<TenantMapEntry> existingEntry = wait(existingEntryFuture);
 
@@ -1057,6 +1064,19 @@ struct CreateTenantImpl {
 
 		self->tenantEntry.tenantState = TenantState::REGISTERING;
 		ManagementClusterMetadata::tenantMetadata.tenantMap.set(tr, self->tenantName, self->tenantEntry);
+
+		if (!existingEntry.present()) {
+			ManagementClusterMetadata::tenantMetadata.tenantCount.atomicOp(tr, 1, MutationRef::AddValue);
+			ManagementClusterMetadata::clusterTenantCount.atomicOp(
+			    tr, self->tenantEntry.assignedCluster.get(), 1, MutationRef::AddValue);
+
+			int64_t clusterTenantCount = wait(ManagementClusterMetadata::clusterTenantCount.getD(
+			    tr, self->tenantEntry.assignedCluster.get(), Snapshot::False, 0));
+
+			if (clusterTenantCount > CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER) {
+				throw cluster_no_capacity();
+			}
+		}
 
 		return std::make_pair(self->tenantEntry, true);
 	}
@@ -1212,6 +1232,11 @@ struct DeleteTenantImpl {
 	                                                            TenantMapEntry tenantEntry) {
 		// Erase the tenant entry itself
 		ManagementClusterMetadata::tenantMetadata.tenantMap.erase(tr, tenantName);
+
+		// This is idempotent because this function is only called if the tenant is in the map
+		ManagementClusterMetadata::tenantMetadata.tenantCount.atomicOp(tr, -1, MutationRef::AddValue);
+		ManagementClusterMetadata::clusterTenantCount.atomicOp(
+		    tr, tenantEntry.assignedCluster.get(), -1, MutationRef::AddValue);
 
 		// Clean up cluster based tenant indices and remove the tenant group if it is empty
 		state DataClusterMetadata clusterMetadata = wait(getClusterTransaction(tr, tenantEntry.assignedCluster.get()));
