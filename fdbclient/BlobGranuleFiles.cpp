@@ -39,6 +39,8 @@
 
 #include <cstring>
 #include <vector>
+// for perf microbenchmark
+#include <fstream>
 
 #define BG_READ_DEBUG false
 
@@ -55,6 +57,19 @@ uint16_t MIN_SUPPORTED_BG_FORMAT_VERSION = 1;
 
 const uint8_t SNAPSHOT_FILE_TYPE = 'S';
 const uint8_t DELTA_FILE_TYPE = 'D';
+
+static int getDefaultCompressionLevel(CompressionFilter filter) {
+	if (filter == CompressionFilter::NONE) {
+		return -1;
+	} else if (filter == CompressionFilter::GZIP) {
+		// opt for high speed compression, larger levels have a high cpu cost and not much compression ratio
+		// improvement, according to benchmarks
+		return 1;
+	} else {
+		ASSERT(false);
+		return -1;
+	}
+}
 
 // Deltas in key order
 
@@ -284,7 +299,6 @@ struct IndexBlockRef {
 			TraceEvent(SevDebug, "IndexBlockEncrypt_After").detail("Chksum", chksum);
 		}
 
-		// TODO: Add version?
 		ObjectReader dataReader(decrypted.begin(), IncludeVersion());
 		dataReader.deserialize(FileIdentifierFor<IndexBlock>::value, idxRef.block, arena);
 	}
@@ -297,7 +311,6 @@ struct IndexBlockRef {
 		} else {
 			TraceEvent("IndexBlockSize").detail("Sz", buffer.size());
 
-			// TODO: Add version?
 			ObjectReader dataReader(buffer.begin(), IncludeVersion());
 			dataReader.deserialize(FileIdentifierFor<IndexBlock>::value, block, arena);
 		}
@@ -409,7 +422,8 @@ struct IndexBlobGranuleFileChunkRef {
 	                     const CompressionFilter compFilter,
 	                     Arena& arena) {
 		chunkRef.compressionFilter = compFilter;
-		chunkRef.buffer = CompressionUtils::compress(chunkRef.compressionFilter.get(), chunk.contents(), arena);
+		chunkRef.buffer = CompressionUtils::compress(
+		    chunkRef.compressionFilter.get(), chunk.contents(), getDefaultCompressionLevel(compFilter), arena);
 
 		if (BG_ENCRYPT_COMPRESS_DEBUG) {
 			XXH64_hash_t chunkChksum = XXH3_64bits(chunk.contents().begin(), chunk.contents().size());
@@ -656,7 +670,7 @@ Value serializeFileFromChunks(Standalone<IndexedBlobGranuleFile>& file,
 // TODO: this should probably be in actor file with yields? - move writing logic to separate actor file in server?
 // TODO: optimize memory copying
 // TODO: sanity check no oversized files
-Value serializeChunkedSnapshot(Standalone<GranuleSnapshot> snapshot,
+Value serializeChunkedSnapshot(const Standalone<GranuleSnapshot>& snapshot,
                                int targetChunkBytes,
                                Optional<CompressionFilter> compressFilter,
                                Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx) {
@@ -879,7 +893,7 @@ void sortDeltasByKey(const Standalone<GranuleDeltas>& deltasByVersion,
 }
 
 // FIXME: Could maybe reduce duplicated code between this and chunkedSnapshot for chunking
-Value serializeChunkedDeltaFile(Standalone<GranuleDeltas> deltas,
+Value serializeChunkedDeltaFile(const Standalone<GranuleDeltas>& deltas,
                                 const KeyRangeRef& fileRange,
                                 int chunkSize,
                                 Optional<CompressionFilter> compressFilter,
@@ -1914,6 +1928,78 @@ Standalone<GranuleSnapshot> genSnapshot(KeyValueGen& kvGen, int targetDataBytes)
 	return data;
 }
 
+Standalone<GranuleDeltas> genDeltas(KeyValueGen& kvGen, int targetBytes) {
+	Standalone<GranuleDeltas> data;
+	int totalDataBytes = 0;
+	while (totalDataBytes < targetBytes) {
+		data.push_back(data.arena(), kvGen.newDelta());
+		totalDataBytes += data.back().expectedSize();
+	}
+	return data;
+}
+
+TEST_CASE("/blobgranule/files/validateEncryptionCompression") {
+	KeyValueGen kvGen;
+
+	int targetSnapshotChunks = randomExp(0, 9);
+	int targetDeltaChunks = randomExp(0, 8);
+	int targetDataBytes = randomExp(12, 25);
+	int targetSnapshotBytes = (int)(deterministicRandom()->randomInt(0, targetDataBytes));
+	int targetDeltaBytes = targetDataBytes - targetSnapshotBytes;
+
+	int targetSnapshotChunkSize = targetSnapshotBytes / targetSnapshotChunks;
+	int targetDeltaChunkSize = targetDeltaBytes / targetDeltaChunks;
+
+	Standalone<GranuleSnapshot> snapshotData = genSnapshot(kvGen, targetSnapshotBytes);
+	Standalone<GranuleDeltas> deltaData = genDeltas(kvGen, targetDeltaBytes);
+	fmt::print("{0} snapshot rows and {1} deltas\n", snapshotData.size(), deltaData.size());
+
+	Arena ar;
+	BlobGranuleCipherKeysCtx cipherKeys = getCipherKeysCtx(ar);
+	std::vector<bool> encryptionModes = { false, true };
+	std::vector<Optional<CompressionFilter>> compressionModes;
+	compressionModes.push_back({});
+#ifdef ZLIB_LIB_SUPPORTED
+	compressionModes.push_back(CompressionFilter::GZIP);
+#endif
+
+	std::vector<Value> snapshotValues;
+	for (bool encryptionMode : encryptionModes) {
+		Optional<BlobGranuleCipherKeysCtx> keys = encryptionMode ? cipherKeys : Optional<BlobGranuleCipherKeysCtx>();
+		for (auto& compressionMode : compressionModes) {
+			Value v = serializeChunkedSnapshot(snapshotData, targetSnapshotChunkSize, compressionMode, keys);
+			fmt::print("snapshot({0}, {1}): {2}\n",
+			           encryptionMode,
+			           compressionMode.present() ? CompressionUtils::toString(compressionMode.get()) : "",
+			           v.size());
+			for (auto& v2 : snapshotValues) {
+				ASSERT(v != v2);
+			}
+			snapshotValues.push_back(v);
+		}
+	}
+	fmt::print("Validated {0} encryption/compression combos for snapshot\n", snapshotValues.size());
+
+	std::vector<Value> deltaValues;
+	for (bool encryptionMode : encryptionModes) {
+		Optional<BlobGranuleCipherKeysCtx> keys = encryptionMode ? cipherKeys : Optional<BlobGranuleCipherKeysCtx>();
+		for (auto& compressionMode : compressionModes) {
+			Value v = serializeChunkedDeltaFile(deltaData, kvGen.allRange, targetDeltaChunkSize, compressionMode, keys);
+			fmt::print("delta({0}, {1}): {2}\n",
+			           encryptionMode,
+			           compressionMode.present() ? CompressionUtils::toString(compressionMode.get()) : "",
+			           v.size());
+			for (auto& v2 : deltaValues) {
+				ASSERT(v != v2);
+			}
+			deltaValues.push_back(v);
+		}
+	}
+	fmt::print("Validated {0} encryption/compression combos for delta\n", deltaValues.size());
+
+	return Void();
+}
+
 TEST_CASE("/blobgranule/files/snapshotFormatUnitTest") {
 	// snapshot files are likely to have a non-trivial shared prefix since they're for a small contiguous key range
 	KeyValueGen kvGen;
@@ -2041,16 +2127,6 @@ static std::tuple<KeyRange, Version, Version> randomizeKeyAndVersions(const KeyV
 
 	// TODO randomize begin and read version to sometimes +/- 1 and readRange begin and end to keyAfter sometimes
 	return { readRange, beginVersion, readVersion };
-}
-
-Standalone<GranuleDeltas> genDeltas(KeyValueGen& kvGen, int targetBytes) {
-	Standalone<GranuleDeltas> data;
-	int totalDataBytes = 0;
-	while (totalDataBytes < targetBytes) {
-		data.push_back(data.arena(), kvGen.newDelta());
-		totalDataBytes += data.back().expectedSize();
-	}
-	return data;
 }
 
 TEST_CASE("/blobgranule/files/deltaFormatUnitTest") {
@@ -2230,6 +2306,372 @@ TEST_CASE("/blobgranule/files/granuleReadUnitTest") {
 		                 serializedDeltaFiles,
 		                 inMemoryDeltas);
 	}
+
+	return Void();
+}
+
+// performance micro-benchmarks
+
+struct FileSet {
+	std::tuple<std::string, Version, Value, Standalone<GranuleSnapshot>> snapshotFile;
+	std::vector<std::tuple<std::string, Version, Value, Standalone<GranuleDeltas>>> deltaFiles;
+};
+
+std::pair<std::string, Version> parseFilename(const std::string& fname) {
+	auto dotPos = fname.find(".");
+	ASSERT(dotPos > 0);
+	std::string type = fname.substr(dotPos + 1);
+	ASSERT(type == "snapshot" || type == "delta");
+	auto lastUnderscorePos = fname.rfind("_");
+	ASSERT('V' == fname[lastUnderscorePos + 1]);
+	std::string versionString = fname.substr(lastUnderscorePos + 2, dotPos);
+	Version version = std::stoll(versionString);
+	return { type, version };
+}
+
+Value loadFileData(std::string filename) {
+	std::ifstream input(filename, std::ios::binary);
+	ASSERT(input.good());
+
+	// copies all data into buffer
+	std::vector<uint8_t> buffer(std::istreambuf_iterator<char>(input), {});
+	Value v(StringRef(&buffer[0], buffer.size()));
+	fmt::print("Loaded {0} file bytes from {1}\n", v.size(), filename);
+
+	input.close();
+	return v;
+}
+
+FileSet loadFileSet(std::string basePath, const std::vector<std::string>& filenames) {
+	FileSet files;
+	for (int i = 0; i < filenames.size(); i++) {
+		auto parts = parseFilename(filenames[i]);
+		std::string type = parts.first;
+		Version version = parts.second;
+		if (type == "snapshot") {
+			std::string fpath = basePath + filenames[i];
+			Value data = loadFileData(fpath);
+
+			Arena arena;
+			GranuleSnapshot file;
+			ObjectReader dataReader(data.begin(), Unversioned());
+			dataReader.deserialize(FileIdentifierFor<GranuleSnapshot>::value, file, arena);
+			Standalone<GranuleSnapshot> parsed(file, arena);
+
+			fmt::print("Loaded {0} rows from snapshot file\n", parsed.size());
+			files.snapshotFile = { filenames[i], version, data, parsed };
+		} else {
+			std::string fpath = basePath + filenames[i];
+			Value data = loadFileData(fpath);
+
+			Arena arena;
+			GranuleDeltas file;
+			ObjectReader dataReader(data.begin(), Unversioned());
+			dataReader.deserialize(FileIdentifierFor<GranuleDeltas>::value, file, arena);
+			Standalone<GranuleDeltas> parsed(file, arena);
+
+			fmt::print("Loaded {0} deltas from delta file\n", parsed.size());
+			files.deltaFiles.push_back({ filenames[i], version, data, parsed });
+		}
+	}
+
+	return files;
+}
+
+int WRITE_RUNS = 5;
+
+std::pair<int64_t, double> doSnapshotWriteBench(const Standalone<GranuleSnapshot>& data,
+                                                bool chunked,
+                                                Optional<BlobGranuleCipherKeysCtx> cipherKeys,
+                                                Optional<CompressionFilter> compressionFilter) {
+	int64_t serializedBytes = 0;
+	double elapsed = -timer_monotonic();
+	for (int runI = 0; runI < WRITE_RUNS; runI++) {
+		if (!chunked) {
+			serializedBytes = ObjectWriter::toValue(data, Unversioned()).size();
+		} else {
+			serializedBytes = serializeChunkedSnapshot(data, 64 * 1024, compressionFilter, cipherKeys).size();
+		}
+	}
+	elapsed += timer_monotonic();
+	elapsed /= WRITE_RUNS;
+	return { serializedBytes, elapsed };
+}
+
+std::pair<int64_t, double> doDeltaWriteBench(const Standalone<GranuleDeltas>& data,
+                                             bool chunked,
+                                             Optional<BlobGranuleCipherKeysCtx> cipherKeys,
+                                             Optional<CompressionFilter> compressionFilter) {
+	int64_t serializedBytes = 0;
+	double elapsed = -timer_monotonic();
+	for (int runI = 0; runI < WRITE_RUNS; runI++) {
+		if (!chunked) {
+			serializedBytes = ObjectWriter::toValue(data, Unversioned()).size();
+		} else {
+			serializedBytes =
+			    serializeChunkedDeltaFile(data, normalKeys, 32 * 1024, compressionFilter, cipherKeys).size();
+		}
+	}
+	elapsed += timer_monotonic();
+	elapsed /= WRITE_RUNS;
+	return { serializedBytes, elapsed };
+}
+
+FileSet rewriteChunkedFileSet(const FileSet& fileSet,
+                              Optional<BlobGranuleCipherKeysCtx> keys,
+                              Optional<CompressionFilter> compressionFilter) {
+	FileSet newFiles;
+	newFiles.snapshotFile = fileSet.snapshotFile;
+	newFiles.deltaFiles = fileSet.deltaFiles;
+
+	std::get<2>(newFiles.snapshotFile) =
+	    serializeChunkedSnapshot(std::get<3>(newFiles.snapshotFile), 64 * 1024, compressionFilter, keys);
+	for (auto& deltaFile : newFiles.deltaFiles) {
+		std::get<2>(deltaFile) =
+		    serializeChunkedDeltaFile(std::get<3>(deltaFile), normalKeys, 32 * 1024, compressionFilter, keys);
+	}
+
+	return newFiles;
+}
+
+int READ_RUNS = 20;
+std::pair<int64_t, double> doReadBench(const FileSet& fileSet,
+                                       bool chunked,
+                                       Optional<BlobGranuleCipherKeysCtx> keys,
+                                       Optional<CompressionFilter> compressionFilter) {
+	Version readVersion = std::get<1>(fileSet.deltaFiles.back());
+
+	Standalone<BlobGranuleChunkRef> chunk;
+	StringRef deltaPtrs[fileSet.deltaFiles.size()];
+	if (chunked) {
+		size_t snapshotSize = std::get<3>(fileSet.snapshotFile).size();
+		chunk.snapshotFile =
+		    BlobFilePointerRef(chunk.arena(), std::get<0>(fileSet.snapshotFile), 0, snapshotSize, snapshotSize);
+
+		for (int i = 0; i < fileSet.deltaFiles.size(); i++) {
+			size_t deltaSize = std::get<3>(fileSet.deltaFiles[i]).size();
+			chunk.deltaFiles.emplace_back_deep(
+			    chunk.arena(), std::get<0>(fileSet.deltaFiles[i]), 0, deltaSize, deltaSize);
+			deltaPtrs[i] = std::get<2>(fileSet.deltaFiles[i]);
+		}
+
+		chunk.cipherKeysCtx = keys;
+		chunk.keyRange = normalKeys;
+		chunk.includedVersion = readVersion;
+		chunk.snapshotVersion = std::get<1>(fileSet.snapshotFile);
+	}
+
+	int64_t serializedBytes = 0;
+	double elapsed = -timer_monotonic();
+	for (int runI = 0; runI < READ_RUNS; runI++) {
+		if (!chunked) {
+			std::map<KeyRef, ValueRef> data;
+			for (auto& it : std::get<3>(fileSet.snapshotFile)) {
+				data.insert({ it.key, it.value });
+			}
+			Version lastFileEndVersion = 0;
+			for (auto& deltaFile : fileSet.deltaFiles) {
+				applyDeltasByVersion(std::get<3>(deltaFile), normalKeys, 0, readVersion, lastFileEndVersion, data);
+			}
+			RangeResult actualData;
+			for (auto& it : data) {
+				actualData.push_back_deep(actualData.arena(), KeyValueRef(it.first, it.second));
+			}
+			serializedBytes += actualData.expectedSize();
+		} else {
+			RangeResult actualData =
+			    materializeBlobGranule(chunk, normalKeys, 0, readVersion, std::get<2>(fileSet.snapshotFile), deltaPtrs);
+			serializedBytes += actualData.expectedSize();
+		}
+	}
+	elapsed += timer_monotonic();
+	elapsed /= READ_RUNS;
+	serializedBytes /= READ_RUNS;
+	return { serializedBytes, elapsed };
+}
+
+void printMetrics(int64_t diskBytes, double elapsed, int64_t processesBytes, int64_t logicalSize) {
+	double storageAmp = (1.0 * diskBytes) / logicalSize;
+
+	double MBperCPUsec = (elapsed == 0.0) ? 0.0 : (processesBytes / 1024.0 / 1024.0) / elapsed;
+	fmt::print("{}", fmt::format(" {:.6} {:.6}", storageAmp, MBperCPUsec));
+}
+
+TEST_CASE("!/blobgranule/files/benchFromFiles") {
+	std::string basePath = "SET_ME";
+	std::vector<std::vector<std::string>> fileSetNames = { { "SET_ME" } };
+	Arena ar;
+	BlobGranuleCipherKeysCtx cipherKeys = getCipherKeysCtx(ar);
+	std::vector<bool> chunkModes = { false, true };
+	std::vector<bool> encryptionModes = { false, true };
+	std::vector<Optional<CompressionFilter>> compressionModes;
+	compressionModes.push_back({});
+#ifdef ZLIB_LIB_SUPPORTED
+	compressionModes.push_back(CompressionFilter::GZIP);
+#endif
+
+	std::vector<std::string> runNames = { "logical" };
+	std::vector<std::pair<int64_t, double>> snapshotMetrics;
+	std::vector<std::pair<int64_t, double>> deltaMetrics;
+
+	std::vector<FileSet> fileSets;
+	int64_t logicalSnapshotSize = 0;
+	int64_t logicalDeltaSize = 0;
+	for (auto& it : fileSetNames) {
+		FileSet fileSet = loadFileSet(basePath, it);
+		fileSets.push_back(fileSet);
+		logicalSnapshotSize += std::get<3>(fileSet.snapshotFile).expectedSize();
+		for (auto& deltaFile : fileSet.deltaFiles) {
+			logicalDeltaSize += std::get<3>(deltaFile).expectedSize();
+		}
+	}
+	snapshotMetrics.push_back({ logicalSnapshotSize, 0.0 });
+	deltaMetrics.push_back({ logicalDeltaSize, 0.0 });
+
+	for (bool chunk : chunkModes) {
+		for (bool encrypt : encryptionModes) {
+			if (!chunk && encrypt) {
+				continue;
+			}
+			Optional<BlobGranuleCipherKeysCtx> keys = encrypt ? cipherKeys : Optional<BlobGranuleCipherKeysCtx>();
+			for (auto& compressionFilter : compressionModes) {
+				if (!chunk && compressionFilter.present()) {
+					continue;
+				}
+				std::string name;
+				if (!chunk) {
+					name = "old";
+				} else {
+					if (encrypt) {
+						name += "ENC";
+					}
+					if (compressionFilter.present()) {
+						name += "CMP";
+					}
+					if (name.empty()) {
+						name = "chunked";
+					}
+				}
+				runNames.push_back(name);
+				int64_t snapshotTotalBytes = 0;
+				double snapshotTotalElapsed = 0.0;
+				for (auto& fileSet : fileSets) {
+					auto res = doSnapshotWriteBench(std::get<3>(fileSet.snapshotFile), chunk, keys, compressionFilter);
+					snapshotTotalBytes += res.first;
+					snapshotTotalElapsed += res.second;
+				}
+				snapshotMetrics.push_back({ snapshotTotalBytes, snapshotTotalElapsed });
+
+				int64_t deltaTotalBytes = 0;
+				double deltaTotalElapsed = 0.0;
+				for (auto& fileSet : fileSets) {
+					for (auto& deltaFile : fileSet.deltaFiles) {
+						auto res = doDeltaWriteBench(std::get<3>(deltaFile), chunk, keys, compressionFilter);
+						deltaTotalBytes += res.first;
+						deltaTotalElapsed += res.second;
+					}
+				}
+				deltaMetrics.push_back({ deltaTotalBytes, deltaTotalElapsed });
+			}
+		}
+	}
+
+	fmt::print("\n\n\n\nWrite Results:\n");
+
+	ASSERT(runNames.size() == snapshotMetrics.size());
+	ASSERT(runNames.size() == deltaMetrics.size());
+	for (int i = 0; i < runNames.size(); i++) {
+		fmt::print("{0}", runNames[i]);
+
+		printMetrics(
+		    snapshotMetrics[i].first, snapshotMetrics[i].second, snapshotMetrics[i].first, snapshotMetrics[0].first);
+		printMetrics(deltaMetrics[i].first, deltaMetrics[i].second, deltaMetrics[i].first, deltaMetrics[0].first);
+
+		// TODO also need to factor in re-reading whole thing!!
+		int64_t logicalTotalBytes = snapshotMetrics[0].first + deltaMetrics[0].first;
+		int64_t totalBytes = deltaMetrics[i].first + snapshotMetrics[i].first;
+		double logicalTotalElapsed = (snapshotMetrics[i].second == 0.0 || deltaMetrics[i].second == 0.0)
+		                                 ? 0.0
+		                                 : snapshotMetrics[i].second + deltaMetrics[i].second;
+		printMetrics(totalBytes, logicalTotalElapsed, deltaMetrics[i].first, logicalTotalBytes);
+
+		fmt::print("\n");
+	}
+
+	std::vector<std::string> readRunNames = {};
+	std::vector<std::pair<int64_t, double>> readMetrics;
+
+	fmt::print("Benchmark complete!\n");
+	for (bool chunk : chunkModes) {
+		for (bool encrypt : encryptionModes) {
+			if (!chunk && encrypt) {
+				continue;
+			}
+			Optional<BlobGranuleCipherKeysCtx> keys = encrypt ? cipherKeys : Optional<BlobGranuleCipherKeysCtx>();
+			for (auto& compressionFilter : compressionModes) {
+				if (!chunk && compressionFilter.present()) {
+					continue;
+				}
+				std::string name;
+				if (!chunk) {
+					name = "old";
+				} else {
+					if (encrypt) {
+						name += "ENC";
+					}
+					if (compressionFilter.present()) {
+						name += "CMP";
+					}
+					if (name.empty()) {
+						name = "chunked";
+					}
+				}
+				readRunNames.push_back(name);
+
+				int64_t totalBytesRead = 0;
+				double totalElapsed = 0.0;
+				for (auto& fileSet : fileSets) {
+					FileSet newFileSet;
+					if (!chunk) {
+						newFileSet = fileSet;
+					} else {
+						newFileSet = rewriteChunkedFileSet(fileSet, keys, compressionFilter);
+					}
+
+					auto res = doReadBench(newFileSet, chunk, keys, compressionFilter);
+					totalBytesRead += res.first;
+					totalElapsed += res.second;
+				}
+				readMetrics.push_back({ totalBytesRead, totalElapsed });
+			}
+		}
+	}
+
+	fmt::print("\n\nRead Results:\n");
+
+	ASSERT(readRunNames.size() == readMetrics.size());
+	for (int i = 0; i < readRunNames.size(); i++) {
+		fmt::print("{0}", readRunNames[i]);
+
+		double MBperCPUsec = (readMetrics[i].first / 1024.0 / 1024.0) / readMetrics[i].second;
+		fmt::print(" {:.6}", MBperCPUsec);
+
+		fmt::print("\n");
+	}
+
+	fmt::print("\n\nCombined Results:\n");
+	ASSERT(readRunNames.size() == runNames.size() - 1);
+	for (int i = 0; i < readRunNames.size(); i++) {
+		fmt::print("{0}", readRunNames[i]);
+		int64_t logicalBytes = deltaMetrics[i + 1].first;
+		double totalElapsed = snapshotMetrics[i + 1].second + deltaMetrics[i + 1].second + readMetrics[i].second;
+		double MBperCPUsec = (logicalBytes / 1024.0 / 1024.0) / totalElapsed;
+		fmt::print(" {:.6}", MBperCPUsec);
+
+		fmt::print("\n");
+	}
+
+	fmt::print("\n\n");
 
 	return Void();
 }
