@@ -72,7 +72,7 @@ DLLEXPORT fdb_bool_t fdb_error_predicate(int predicate_test, fdb_error_t code);
 
 /*
  * A variant of fdb_select_api_version that caps the header API version by the maximum API version
- * supported by the client library. It is indended mainly for use in combination with the shim
+ * supported by the client library. It is intended mainly for use in combination with the shim
  * layer, which loads the client library dynamically.
  */
 #define /* fdb_error_t */ fdb_select_api_version_capped(v)                                                             \
