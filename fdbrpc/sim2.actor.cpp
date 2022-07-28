@@ -208,7 +208,7 @@ SimClogging g_clogging;
 
 struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 	Sim2Conn(ISimulator::ProcessInfo* process)
-	  : opened(false), closedByCaller(false), stableConnection(false), process(process),
+	  : opened(false), closedByCaller(false), stableConnection(false), trustedPeer(true), process(process),
 	    dbgid(deterministicRandom()->randomUniqueID()), stopReceive(Never()) {
 		pipes = sender(this) && receiver(this);
 	}
@@ -258,6 +258,8 @@ struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 	Future<Void> onReadable() override { return whenReadable(this); }
 
 	bool isPeerGone() const { return !peer || peerProcess->failed; }
+
+	bool hasTrustedPeer() const override { return trustedPeer; }
 
 	bool isStableConnection() const override { return stableConnection; }
 
@@ -327,7 +329,7 @@ struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 
 	boost::asio::ip::tcp::socket& getSocket() override { throw operation_failed(); }
 
-	bool opened, closedByCaller, stableConnection;
+	bool opened, closedByCaller, stableConnection, trustedPeer;
 
 private:
 	ISimulator::ProcessInfo *process, *peerProcess;

@@ -316,7 +316,7 @@ std::string readFileBytes(std::string const& filename, int maxSize);
 
 // Read a file into memory supplied by the caller
 // If 'len' is greater than file size, then read the filesize bytes.
-void readFileBytes(std::string const& filename, uint8_t* buff, int64_t len);
+size_t readFileBytes(std::string const& filename, uint8_t* buff, int64_t len);
 
 // Write data buffer into file
 void writeFileBytes(std::string const& filename, const char* data, size_t count);
