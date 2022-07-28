@@ -1,5 +1,5 @@
 /*
- * GlobalData.cpp
+ * TokenCache.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,27 +18,20 @@
  * limitations under the License.
  */
 
-#include "fdbclient/FDBTypes.h"
-#include "flow/IRandom.h"
+#ifndef TOKENCACHE_H_
+#define TOKENCACHE_H_
+#include "fdbrpc/TenantName.h"
+#include "flow/Arena.h"
 
-static constexpr size_t globalDataSize = 1 << 20;
-static uint8_t* globalData = nullptr;
+class TokenCache : NonCopyable {
+	struct TokenCacheImpl* impl;
+	TokenCache();
 
-static inline void initGlobalData() {
-	if (!globalData) {
-		globalData = static_cast<uint8_t*>(allocateFast(globalDataSize));
-	}
-	deterministicRandom()->randomBytes(globalData, globalDataSize);
-}
+public:
+	~TokenCache();
+	static void createInstance();
+	static TokenCache& instance();
+	bool validate(TenantNameRef tenant, StringRef token);
+};
 
-KeyValueRef getKV(size_t keySize, size_t valueSize) {
-	initGlobalData();
-	ASSERT(keySize + valueSize <= globalDataSize);
-	return KeyValueRef(KeyRef(globalData, keySize), ValueRef(globalData + keySize, valueSize));
-}
-
-KeyRef getKey(size_t keySize) {
-	initGlobalData();
-	ASSERT(keySize);
-	return KeyRef(globalData, keySize);
-}
+#endif // TOKENCACHE_H_

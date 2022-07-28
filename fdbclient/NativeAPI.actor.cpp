@@ -710,6 +710,7 @@ ACTOR static Future<Void> delExcessClntTxnEntriesActor(Transaction* tr, int64_t 
 				tr->clear(KeyRangeRef(txEntries[0].key, strinc(endKey)));
 				TraceEvent(SevInfo, "DeletingExcessCntTxnEntries").detail("BytesToBeDeleted", numBytesToDel);
 				int64_t bytesDel = -numBytesToDel;
+
 				tr->atomicOp(clientLatencyAtomicCtr, StringRef((uint8_t*)&bytesDel, 8), MutationRef::AddValue);
 				wait(tr->commit());
 			}
@@ -1812,7 +1813,7 @@ DatabaseContext::~DatabaseContext() {
 	TraceEvent("DatabaseContextDestructed", dbId).backtrace();
 }
 
-Optional<KeyRangeLocationInfo> DatabaseContext::getCachedLocation(const Optional<TenantName>& tenantName,
+Optional<KeyRangeLocationInfo> DatabaseContext::getCachedLocation(const Optional<TenantNameRef>& tenantName,
                                                                   const KeyRef& key,
                                                                   Reverse isBackward) {
 	TenantMapEntry tenantEntry;
@@ -1838,7 +1839,7 @@ Optional<KeyRangeLocationInfo> DatabaseContext::getCachedLocation(const Optional
 	return Optional<KeyRangeLocationInfo>();
 }
 
-bool DatabaseContext::getCachedLocations(const Optional<TenantName>& tenantName,
+bool DatabaseContext::getCachedLocations(const Optional<TenantNameRef>& tenantName,
                                          const KeyRangeRef& range,
                                          std::vector<KeyRangeLocationInfo>& result,
                                          int limit,
@@ -1895,7 +1896,7 @@ void DatabaseContext::cacheTenant(const TenantName& tenant, const TenantMapEntry
 	}
 }
 
-Reference<LocationInfo> DatabaseContext::setCachedLocation(const Optional<TenantName>& tenant,
+Reference<LocationInfo> DatabaseContext::setCachedLocation(const Optional<TenantNameRef>& tenant,
                                                            const TenantMapEntry& tenantEntry,
                                                            const KeyRangeRef& absoluteKeys,
                                                            const std::vector<StorageServerInterface>& servers) {
@@ -2836,7 +2837,7 @@ void updateTagMappings(Database cx, const GetKeyServerLocationsReply& reply) {
 // If isBackward == true, returns the shard containing the key before 'key' (an infinitely long, inexpressible key).
 // Otherwise returns the shard containing key
 ACTOR Future<KeyRangeLocationInfo> getKeyLocation_internal(Database cx,
-                                                           Optional<TenantName> tenant,
+                                                           TenantInfo tenant,
                                                            Key key,
                                                            SpanContext spanContext,
                                                            Optional<UID> debugID,
@@ -2859,26 +2860,20 @@ ACTOR Future<KeyRangeLocationInfo> getKeyLocation_internal(Database cx,
 			++cx->transactionKeyServerLocationRequests;
 			choose {
 				when(wait(cx->onProxiesChanged())) {}
-				when(GetKeyServerLocationsReply rep =
-				         wait(basicLoadBalance(cx->getCommitProxies(useProvisionalProxies),
-				                               &CommitProxyInterface::getKeyServersLocations,
-				                               GetKeyServerLocationsRequest(span.context,
-				                                                            tenant.castTo<TenantNameRef>(),
-				                                                            key,
-				                                                            Optional<KeyRef>(),
-				                                                            100,
-				                                                            isBackward,
-				                                                            version,
-				                                                            key.arena()),
-				                               TaskPriority::DefaultPromiseEndpoint))) {
+				when(GetKeyServerLocationsReply rep = wait(basicLoadBalance(
+				         cx->getCommitProxies(useProvisionalProxies),
+				         &CommitProxyInterface::getKeyServersLocations,
+				         GetKeyServerLocationsRequest(
+				             span.context, tenant, key, Optional<KeyRef>(), 100, isBackward, version, key.arena()),
+				         TaskPriority::DefaultPromiseEndpoint))) {
 					++cx->transactionKeyServerLocationRequestsCompleted;
 					if (debugID.present())
 						g_traceBatch.addEvent(
 						    "TransactionDebug", debugID.get().first(), "NativeAPI.getKeyLocation.After");
 					ASSERT(rep.results.size() == 1);
 
-					auto locationInfo =
-					    cx->setCachedLocation(tenant, rep.tenantEntry, rep.results[0].first, rep.results[0].second);
+					auto locationInfo = cx->setCachedLocation(
+					    tenant.name, rep.tenantEntry, rep.results[0].first, rep.results[0].second);
 					updateTssMappings(cx, rep);
 					updateTagMappings(cx, rep);
 
@@ -2891,8 +2886,8 @@ ACTOR Future<KeyRangeLocationInfo> getKeyLocation_internal(Database cx,
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_tenant_not_found) {
-			ASSERT(tenant.present());
-			cx->invalidateCachedTenant(tenant.get());
+			ASSERT(tenant.name.present());
+			cx->invalidateCachedTenant(tenant.name.get());
 		}
 
 		throw;
@@ -2930,7 +2925,7 @@ bool checkOnlyEndpointFailed(const Database& cx, const Endpoint& endpoint) {
 
 template <class F>
 Future<KeyRangeLocationInfo> getKeyLocation(Database const& cx,
-                                            Optional<TenantName> const& tenant,
+                                            TenantInfo const& tenant,
                                             Key const& key,
                                             F StorageServerInterface::*member,
                                             SpanContext spanContext,
@@ -2939,7 +2934,7 @@ Future<KeyRangeLocationInfo> getKeyLocation(Database const& cx,
                                             Reverse isBackward,
                                             Version version) {
 	// we first check whether this range is cached
-	Optional<KeyRangeLocationInfo> locationInfo = cx->getCachedLocation(tenant, key, isBackward);
+	Optional<KeyRangeLocationInfo> locationInfo = cx->getCachedLocation(tenant.name, key, isBackward);
 	if (!locationInfo.present()) {
 		return getKeyLocation_internal(
 		    cx, tenant, key, spanContext, debugID, useProvisionalProxies, isBackward, version);
@@ -2971,7 +2966,7 @@ Future<KeyRangeLocationInfo> getKeyLocation(Reference<TransactionState> trState,
                                             UseTenant useTenant,
                                             Version version) {
 	auto f = getKeyLocation(trState->cx,
-	                        useTenant ? trState->tenant() : Optional<TenantName>(),
+	                        useTenant ? trState->getTenantInfo(AllowInvalidTenantID::True) : TenantInfo(),
 	                        key,
 	                        member,
 	                        trState->spanContext,
@@ -2992,7 +2987,7 @@ Future<KeyRangeLocationInfo> getKeyLocation(Reference<TransactionState> trState,
 
 ACTOR Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations_internal(
     Database cx,
-    Optional<TenantName> tenant,
+    TenantInfo tenant,
     KeyRange keys,
     int limit,
     Reverse reverse,
@@ -3009,18 +3004,12 @@ ACTOR Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations_internal(
 			++cx->transactionKeyServerLocationRequests;
 			choose {
 				when(wait(cx->onProxiesChanged())) {}
-				when(GetKeyServerLocationsReply _rep =
-				         wait(basicLoadBalance(cx->getCommitProxies(useProvisionalProxies),
-				                               &CommitProxyInterface::getKeyServersLocations,
-				                               GetKeyServerLocationsRequest(span.context,
-				                                                            tenant.castTo<TenantNameRef>(),
-				                                                            keys.begin,
-				                                                            keys.end,
-				                                                            limit,
-				                                                            reverse,
-				                                                            version,
-				                                                            keys.arena()),
-				                               TaskPriority::DefaultPromiseEndpoint))) {
+				when(GetKeyServerLocationsReply _rep = wait(basicLoadBalance(
+				         cx->getCommitProxies(useProvisionalProxies),
+				         &CommitProxyInterface::getKeyServersLocations,
+				         GetKeyServerLocationsRequest(
+				             span.context, tenant, keys.begin, keys.end, limit, reverse, version, keys.arena()),
+				         TaskPriority::DefaultPromiseEndpoint))) {
 					++cx->transactionKeyServerLocationRequestsCompleted;
 					state GetKeyServerLocationsReply rep = _rep;
 					if (debugID.present())
@@ -3037,7 +3026,7 @@ ACTOR Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations_internal(
 						    rep.tenantEntry,
 						    (toRelativeRange(rep.results[shard].first, rep.tenantEntry.prefix) & keys),
 						    cx->setCachedLocation(
-						        tenant, rep.tenantEntry, rep.results[shard].first, rep.results[shard].second));
+						        tenant.name, rep.tenantEntry, rep.results[shard].first, rep.results[shard].second));
 						wait(yield());
 					}
 					updateTssMappings(cx, rep);
@@ -3049,8 +3038,8 @@ ACTOR Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations_internal(
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_tenant_not_found) {
-			ASSERT(tenant.present());
-			cx->invalidateCachedTenant(tenant.get());
+			ASSERT(tenant.name.present());
+			cx->invalidateCachedTenant(tenant.name.get());
 		}
 
 		throw;
@@ -3065,7 +3054,7 @@ ACTOR Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations_internal(
 // [([a, b1), locationInfo), ([b1, c), locationInfo), ([c, d1), locationInfo)].
 template <class F>
 Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations(Database const& cx,
-                                                               Optional<TenantName> tenant,
+                                                               TenantInfo const& tenant,
                                                                KeyRange const& keys,
                                                                int limit,
                                                                Reverse reverse,
@@ -3078,7 +3067,7 @@ Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations(Database const& c
 	ASSERT(!keys.empty());
 
 	std::vector<KeyRangeLocationInfo> locations;
-	if (!cx->getCachedLocations(tenant, keys, locations, limit, reverse)) {
+	if (!cx->getCachedLocations(tenant.name, keys, locations, limit, reverse)) {
 		return getKeyRangeLocations_internal(
 		    cx, tenant, keys, limit, reverse, spanContext, debugID, useProvisionalProxies, version);
 	}
@@ -3116,7 +3105,7 @@ Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations(Reference<Transac
                                                                UseTenant useTenant,
                                                                Version version) {
 	auto f = getKeyRangeLocations(trState->cx,
-	                              useTenant ? trState->tenant() : Optional<TenantName>(),
+	                              useTenant ? trState->getTenantInfo(AllowInvalidTenantID::True) : TenantInfo(),
 	                              keys,
 	                              limit,
 	                              reverse,
@@ -3146,7 +3135,7 @@ ACTOR Future<Void> warmRange_impl(Reference<TransactionState> trState, KeyRange 
 	loop {
 		std::vector<KeyRangeLocationInfo> locations =
 		    wait(getKeyRangeLocations_internal(trState->cx,
-		                                       trState->tenant(),
+		                                       trState->getTenantInfo(),
 		                                       keys,
 		                                       CLIENT_KNOBS->WARM_RANGE_SHARD_LIMIT,
 		                                       Reverse::False,
@@ -3196,6 +3185,8 @@ SpanContext generateSpanID(bool transactionTracingSample, SpanContext parentCont
 	    deterministicRandom()->randomUniqueID(), deterministicRandom()->randomUInt64(), TraceFlags::unsampled);
 }
 
+FDB_DEFINE_BOOLEAN_PARAM(AllowInvalidTenantID);
+
 TransactionState::TransactionState(Database cx,
                                    Optional<TenantName> tenant,
                                    TaskPriority taskID,
@@ -3219,12 +3210,13 @@ Reference<TransactionState> TransactionState::cloneAndReset(Reference<Transactio
 	newState->startTime = startTime;
 	newState->committedVersion = committedVersion;
 	newState->conflictingKeys = conflictingKeys;
+	newState->authToken = authToken;
 	newState->tenantSet = tenantSet;
 
 	return newState;
 }
 
-TenantInfo TransactionState::getTenantInfo() {
+TenantInfo TransactionState::getTenantInfo(AllowInvalidTenantID allowInvalidId /* = false */) {
 	Optional<TenantName> const& t = tenant();
 
 	if (options.rawAccess) {
@@ -3244,8 +3236,8 @@ TenantInfo TransactionState::getTenantInfo() {
 		}
 	}
 
-	ASSERT(tenantId != TenantInfo::INVALID_TENANT);
-	return TenantInfo(t.get(), tenantId);
+	ASSERT(allowInvalidId || tenantId != TenantInfo::INVALID_TENANT);
+	return TenantInfo(t, authToken, tenantId);
 }
 
 // Returns the tenant used in this transaction. If the tenant is unset and raw access isn't specified, then the default
@@ -3588,7 +3580,7 @@ ACTOR Future<Version> watchValue(Database cx, Reference<const WatchParameters> p
 
 	loop {
 		state KeyRangeLocationInfo locationInfo = wait(getKeyLocation(cx,
-		                                                              parameters->tenant.name,
+		                                                              parameters->tenant,
 		                                                              parameters->key,
 		                                                              &StorageServerInterface::watchValue,
 		                                                              parameters->spanContext,
@@ -3719,7 +3711,7 @@ ACTOR Future<Void> watchStorageServerResp(int64_t tenantId, Key key, Database cx
 }
 
 ACTOR Future<Void> sameVersionDiffValue(Database cx, Reference<WatchParameters> parameters) {
-	state ReadYourWritesTransaction tr(cx, parameters->tenant.name);
+	state ReadYourWritesTransaction tr(cx, parameters->tenant.name.castTo<TenantName>());
 	loop {
 		try {
 			if (!parameters->tenant.name.present()) {
@@ -5948,8 +5940,12 @@ ACTOR void checkWrites(Reference<TransactionState> trState,
 	}
 }
 
-ACTOR static Future<Void> commitDummyTransaction(Reference<TransactionState> trState, KeyRange range) {
-	state Transaction tr(trState->cx);
+FDB_BOOLEAN_PARAM(TenantPrefixPrepended);
+
+ACTOR static Future<Void> commitDummyTransaction(Reference<TransactionState> trState,
+                                                 KeyRange range,
+                                                 TenantPrefixPrepended tenantPrefixPrepended) {
+	state Transaction tr(trState->cx, trState->tenant());
 	state int retries = 0;
 	state Span span("NAPI:dummyTransaction"_loc, trState->spanContext);
 	tr.span.setParent(span.context);
@@ -5958,7 +5954,13 @@ ACTOR static Future<Void> commitDummyTransaction(Reference<TransactionState> trS
 			TraceEvent("CommitDummyTransaction").detail("Key", range.begin).detail("Retries", retries);
 			tr.trState->options = trState->options;
 			tr.trState->taskID = trState->taskID;
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.trState->authToken = trState->authToken;
+			if (!trState->hasTenant()) {
+				tr.setOption(FDBTransactionOptions::RAW_ACCESS);
+			} else {
+				tr.trState->skipApplyTenantPrefix = tenantPrefixPrepended;
+				CODE_PROBE(true, "Commit of a dummy transaction in tenant keyspace");
+			}
 			tr.setOption(FDBTransactionOptions::CAUSAL_WRITE_RISKY);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.addReadConflictRange(range);
@@ -6120,6 +6122,7 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 	state double startTime = now();
 	state Span span("NAPI:tryCommit"_loc, trState->spanContext);
 	state Optional<UID> debugID = trState->debugID;
+	state TenantPrefixPrepended tenantPrefixPrepended = TenantPrefixPrepended::False;
 	if (debugID.present()) {
 		TraceEvent(interval.begin()).detail("Parent", debugID.get());
 	}
@@ -6144,12 +6147,16 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 			                                                        Reverse::False,
 			                                                        UseTenant::True,
 			                                                        req.transaction.read_snapshot));
-			applyTenantPrefix(req, locationInfo.tenantEntry.prefix);
+			// skipApplyTenantPrefix is set only in the context of a commitDummyTransaction()
+			// (see member declaration)
+			if (!trState->skipApplyTenantPrefix) {
+				applyTenantPrefix(req, locationInfo.tenantEntry.prefix);
+				tenantPrefixPrepended = TenantPrefixPrepended::True;
+			}
 			tenantPrefix = locationInfo.tenantEntry.prefix;
 		}
-
+		CODE_PROBE(trState->skipApplyTenantPrefix, "Tenant prefix prepend skipped for dummy transaction");
 		req.tenantInfo = trState->getTenantInfo();
-
 		startTime = now();
 		state Optional<UID> commitID = Optional<UID>();
 
@@ -6275,7 +6282,8 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 
 				CODE_PROBE(true, "Waiting for dummy transaction to report commit_unknown_result");
 
-				wait(commitDummyTransaction(trState, singleKeyRange(selfConflictingRange.begin)));
+				wait(
+				    commitDummyTransaction(trState, singleKeyRange(selfConflictingRange.begin), tenantPrefixPrepended));
 			}
 
 			// The user needs to be informed that we aren't sure whether the commit happened.  Standard retry loops
@@ -6653,6 +6661,13 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 			throw e;
 		}
 		trState->options.rawAccess = true;
+		break;
+
+	case FDBTransactionOptions::AUTHORIZATION_TOKEN:
+		if (value.present())
+			trState->authToken = Standalone<StringRef>(value.get());
+		else
+			trState->authToken.reset();
 		break;
 
 	default:
@@ -7234,7 +7249,7 @@ ACTOR Future<StorageMetrics> doGetStorageMetrics(Database cx, KeyRange keys, Ref
 ACTOR Future<StorageMetrics> getStorageMetricsLargeKeyRange(Database cx, KeyRange keys) {
 	state Span span("NAPI:GetStorageMetricsLargeKeyRange"_loc);
 	std::vector<KeyRangeLocationInfo> locations = wait(getKeyRangeLocations(cx,
-	                                                                        Optional<TenantName>(),
+	                                                                        TenantInfo(),
 	                                                                        keys,
 	                                                                        std::numeric_limits<int>::max(),
 	                                                                        Reverse::False,
@@ -7336,7 +7351,7 @@ ACTOR Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> getReadHotRanges(Da
 		                          // to find the read-hot sub ranges within a read-hot shard.
 		std::vector<KeyRangeLocationInfo> locations =
 		    wait(getKeyRangeLocations(cx,
-		                              Optional<TenantName>(),
+		                              TenantInfo(),
 		                              keys,
 		                              shardLimit,
 		                              Reverse::False,
@@ -7407,7 +7422,7 @@ ACTOR Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(Databa
 	state Span span("NAPI:WaitStorageMetrics"_loc, generateSpanID(cx->transactionTracingSample));
 	loop {
 		std::vector<KeyRangeLocationInfo> locations = wait(getKeyRangeLocations(cx,
-		                                                                        Optional<TenantName>(),
+		                                                                        TenantInfo(),
 		                                                                        keys,
 		                                                                        shardLimit,
 		                                                                        Reverse::False,
@@ -7582,7 +7597,7 @@ ACTOR Future<TenantMapEntry> blobGranuleGetTenantEntry(Transaction* self, Key ra
 	    self->trState->cx->getCachedLocation(self->getTenant().get(), rangeStartKey, Reverse::False);
 	if (!cachedLocationInfo.present()) {
 		KeyRangeLocationInfo l = wait(getKeyLocation_internal(self->trState->cx,
-		                                                      self->getTenant().get(),
+		                                                      self->trState->getTenantInfo(AllowInvalidTenantID::True),
 		                                                      rangeStartKey,
 		                                                      self->trState->spanContext,
 		                                                      self->trState->debugID,
@@ -8012,7 +8027,7 @@ ACTOR Future<Void> splitStorageMetricsStream(PromiseStream<Key> resultStream,
 	loop {
 		state std::vector<KeyRangeLocationInfo> locations =
 		    wait(getKeyRangeLocations(cx,
-		                              Optional<TenantName>(),
+		                              TenantInfo(),
 		                              KeyRangeRef(beginKey, keys.end),
 		                              CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT,
 		                              Reverse::False,
@@ -8112,7 +8127,7 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(Database cx,
 	loop {
 		state std::vector<KeyRangeLocationInfo> locations =
 		    wait(getKeyRangeLocations(cx,
-		                              Optional<TenantName>(),
+		                              TenantInfo(),
 		                              keys,
 		                              CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT,
 		                              Reverse::False,
@@ -8357,7 +8372,7 @@ ACTOR Future<std::vector<CheckpointMetaData>> getCheckpointMetaData(Database cx,
 		try {
 			state std::vector<KeyRangeLocationInfo> locations =
 			    wait(getKeyRangeLocations(cx,
-			                              Optional<TenantName>(),
+			                              TenantInfo(),
 			                              keys,
 			                              CLIENT_KNOBS->TOO_MANY,
 			                              Reverse::False,
@@ -9272,7 +9287,7 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 			keys = fullRange & range;
 			state std::vector<KeyRangeLocationInfo> locations =
 			    wait(getKeyRangeLocations(cx,
-			                              Optional<TenantName>(),
+			                              TenantInfo(),
 			                              keys,
 			                              CLIENT_KNOBS->CHANGE_FEED_LOCATION_LIMIT,
 			                              Reverse::False,
@@ -9451,7 +9466,7 @@ ACTOR Future<OverlappingChangeFeedsInfo> getOverlappingChangeFeedsActor(Referenc
 		try {
 			state std::vector<KeyRangeLocationInfo> locations =
 			    wait(getKeyRangeLocations(cx,
-			                              Optional<TenantName>(),
+			                              TenantInfo(),
 			                              range,
 			                              CLIENT_KNOBS->CHANGE_FEED_LOCATION_LIMIT,
 			                              Reverse::False,
@@ -9553,7 +9568,7 @@ ACTOR Future<Void> popChangeFeedMutationsActor(Reference<DatabaseContext> db, Ke
 
 	state std::vector<KeyRangeLocationInfo> locations =
 	    wait(getKeyRangeLocations(cx,
-	                              Optional<TenantName>(),
+	                              TenantInfo(),
 	                              keys,
 	                              3,
 	                              Reverse::False,

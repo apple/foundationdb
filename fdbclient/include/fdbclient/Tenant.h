@@ -25,6 +25,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/VersionedMap.h"
+#include "fdbrpc/TenantInfo.h"
 #include "flow/flat_buffers.h"
 
 typedef StringRef TenantNameRef;

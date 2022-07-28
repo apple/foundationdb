@@ -1857,8 +1857,10 @@ int main(int argc, char* argv[]) {
 		auto opts = CLIOptions::parseArgs(argc, argv);
 		const auto role = opts.role;
 
-		if (role == ServerRole::Simulation)
+		if (role == ServerRole::Simulation) {
 			printf("Random seed is %u...\n", opts.randomSeed);
+			bindDeterministicRandomToOpenssl();
+		}
 
 		if (opts.zoneId.present())
 			printf("ZoneId set to %s, dcId to %s\n", printable(opts.zoneId).c_str(), printable(opts.dcId).c_str());

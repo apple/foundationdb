@@ -19,6 +19,7 @@
  */
 
 #include "fmt/format.h"
+#include "flow/Arena.h"
 #include "flow/DeterministicRandom.h"
 
 #include <cstring>
@@ -124,6 +125,23 @@ std::string DeterministicRandom::randomAlphaNumeric(int length) {
 	return s;
 }
 
+void DeterministicRandom::randomBytes(uint8_t* buf, int length) {
+	constexpr const int unitLen = sizeof(decltype(gen64()));
+	for (int i = 0; i < length; i += unitLen) {
+		auto val = gen64();
+		memcpy(buf + i, &val, std::min(unitLen, length - i));
+	}
+	if (randLog && useRandLog) {
+		constexpr const int cutOff = 32;
+		bool tooLong = length > cutOff;
+		fmt::print(randLog,
+		           "Rbytes[{}] {}{}\n",
+		           length,
+		           StringRef(buf, std::min(cutOff, length)).printable(),
+		           tooLong ? "..." : "");
+	}
+}
+
 uint64_t DeterministicRandom::peek() const {
 	return next;
 }
@@ -133,11 +151,4 @@ void DeterministicRandom::addref() {
 }
 void DeterministicRandom::delref() {
 	ReferenceCounted<DeterministicRandom>::delref();
-}
-
-void generateRandomData(uint8_t* buffer, int length) {
-	for (int i = 0; i < length; i += sizeof(uint32_t)) {
-		uint32_t val = deterministicRandom()->randomUInt32();
-		memcpy(&buffer[i], &val, std::min(length - i, (int)sizeof(uint32_t)));
-	}
 }

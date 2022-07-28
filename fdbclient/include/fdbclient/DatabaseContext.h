@@ -255,16 +255,16 @@ public:
 		return cx;
 	}
 
-	Optional<KeyRangeLocationInfo> getCachedLocation(const Optional<TenantName>& tenant,
+	Optional<KeyRangeLocationInfo> getCachedLocation(const Optional<TenantNameRef>& tenant,
 	                                                 const KeyRef&,
 	                                                 Reverse isBackward = Reverse::False);
-	bool getCachedLocations(const Optional<TenantName>& tenant,
+	bool getCachedLocations(const Optional<TenantNameRef>& tenant,
 	                        const KeyRangeRef&,
 	                        std::vector<KeyRangeLocationInfo>&,
 	                        int limit,
 	                        Reverse reverse);
 	void cacheTenant(const TenantName& tenant, const TenantMapEntry& tenantEntry);
-	Reference<LocationInfo> setCachedLocation(const Optional<TenantName>& tenant,
+	Reference<LocationInfo> setCachedLocation(const Optional<TenantNameRef>& tenant,
 	                                          const TenantMapEntry& tenantEntry,
 	                                          const KeyRangeRef&,
 	                                          const std::vector<struct StorageServerInterface>&);

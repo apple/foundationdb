@@ -117,7 +117,7 @@ void TenantCache::insert(TenantName& tenantName, TenantMapEntry& tenant) {
 	KeyRef tenantPrefix(tenant.prefix.begin(), tenant.prefix.size());
 	ASSERT(tenantCache.find(tenantPrefix) == tenantCache.end());
 
-	TenantInfo tenantInfo(tenantName, tenant.id);
+	TenantInfo tenantInfo(tenantName, Optional<Standalone<StringRef>>(), tenant.id);
 	tenantCache[tenantPrefix] = makeReference<TCTenantInfo>(tenantInfo, tenant.prefix);
 	tenantCache[tenantPrefix]->updateCacheGeneration(generation);
 }
