@@ -120,7 +120,31 @@ struct MetaclusterRegistrationEntry {
 		ASSERT(metaclusterName != name && metaclusterId != id);
 	}
 
-	Value encode() { return ObjectWriter::toValue(*this, IncludeVersion()); }
+	// Returns true if this entry is associated with the same cluster as the passed in entry. If one entry is from the
+	// management cluster and the other is from a data cluster, this checks whether they are part of the same
+	// metacluster.
+	bool matches(MetaclusterRegistrationEntry const& other) const {
+		if (metaclusterName != other.metaclusterName || metaclusterId != other.metaclusterId) {
+			return false;
+		} else if (clusterType == ClusterType::METACLUSTER_DATA && other.clusterType == ClusterType::METACLUSTER_DATA &&
+		           (name != other.name || id != other.id)) {
+			return false;
+		}
+
+		return true;
+	}
+
+	MetaclusterRegistrationEntry toManagementClusterRegistration() const {
+		ASSERT(clusterType == ClusterType::METACLUSTER_DATA);
+		return MetaclusterRegistrationEntry(metaclusterName, metaclusterId);
+	}
+
+	MetaclusterRegistrationEntry toDataClusterRegistration(ClusterName name, UID id) const {
+		ASSERT(clusterType == ClusterType::METACLUSTER_MANAGEMENT);
+		return MetaclusterRegistrationEntry(metaclusterName, name, metaclusterId, id);
+	}
+
+	Value encode() const { return ObjectWriter::toValue(*this, IncludeVersion()); }
 	static MetaclusterRegistrationEntry decode(ValueRef const& value) {
 		MetaclusterRegistrationEntry entry;
 		ObjectReader reader(value.begin(), IncludeVersion());
@@ -132,10 +156,28 @@ struct MetaclusterRegistrationEntry {
 		    [](ValueRef const& v) { return MetaclusterRegistrationEntry::decode(v); });
 	}
 
+	std::string toString() const {
+		if (clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
+			return fmt::format(
+			    "metacluster name: {}, metacluster id: {}\n", printable(metaclusterName), metaclusterId.shortString());
+		} else {
+			return fmt::format("metacluster name: {}, metacluster id: {}, data cluster name: {}, data cluster id: {}\n",
+			                   printable(metaclusterName),
+			                   metaclusterId.shortString(),
+			                   printable(name),
+			                   id.shortString());
+		}
+	}
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, clusterType, metaclusterName, name, metaclusterId, id);
 	}
+};
+
+template <>
+struct Traceable<MetaclusterRegistrationEntry> : std::true_type {
+	static std::string toString(MetaclusterRegistrationEntry const& entry) { return entry.toString(); }
 };
 
 struct MetaclusterMetadata {

@@ -169,34 +169,22 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 
 		try {
 			loop {
-				try {
-					Future<Void> createFuture =
-					    self->useMetacluster
-					        ? MetaclusterAPI::createTenant(self->mvDb, tenant, entry)
-					        : success(TenantAPI::createTenant(self->dataDb.getReference(), tenant, entry));
-					Optional<Void> result = wait(timeout(createFuture, 30));
-					if (result.present()) {
-						break;
-					}
-				} catch (Error& e) {
-					// If we retried the creation after our initial attempt succeeded, then we proceed with the rest
-					// of the creation steps normally. Otherwise, the creation happened elsewhere and we failed
-					// here, so we can rethrow the error.
-					if (e.code() == error_code_tenant_already_exists) {
-						break;
-					} else if (e.code() == error_code_tenant_removed) {
-						ASSERT(self->useMetacluster);
-						break;
-					} else {
-						throw;
-					}
+				Future<Void> createFuture =
+				    self->useMetacluster ? MetaclusterAPI::createTenant(self->mvDb, tenant, entry)
+				                         : success(TenantAPI::createTenant(self->dataDb.getReference(), tenant, entry));
+				Optional<Void> result = wait(timeout(createFuture, 30));
+				if (result.present()) {
+					break;
 				}
 			}
 
 			return Void();
 		} catch (Error& e) {
-			if (e.code() != error_code_tenant_already_exists && e.code() != error_code_cluster_no_capacity) {
+			if (e.code() == error_code_tenant_removed) {
+				ASSERT(self->useMetacluster);
+			} else if (e.code() != error_code_tenant_already_exists && e.code() != error_code_cluster_no_capacity) {
 				TraceEvent(SevError, "CreateTenantFailure").error(e).detail("TenantName", tenant);
+				ASSERT(false);
 			}
 
 			return Void();
@@ -208,24 +196,13 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 
 		try {
 			loop {
-				try {
-					Future<Void> deleteFuture = self->useMetacluster
-					                                ? MetaclusterAPI::deleteTenant(self->mvDb, tenant)
-					                                : TenantAPI::deleteTenant(self->dataDb.getReference(), tenant);
-					Optional<Void> result = wait(timeout(deleteFuture, 30));
+				Future<Void> deleteFuture = self->useMetacluster
+				                                ? MetaclusterAPI::deleteTenant(self->mvDb, tenant)
+				                                : TenantAPI::deleteTenant(self->dataDb.getReference(), tenant);
+				Optional<Void> result = wait(timeout(deleteFuture, 30));
 
-					if (result.present()) {
-						break;
-					}
-				} catch (Error& e) {
-					// If we retried the deletion after our initial attempt succeeded, then we proceed with the
-					// rest of the deletion steps normally. Otherwise, the deletion happened elsewhere and we
-					// failed here, so we can rethrow the error.
-					if (e.code() == error_code_tenant_not_found) {
-						break;
-					} else {
-						throw;
-					}
+				if (result.present()) {
+					break;
 				}
 			}
 

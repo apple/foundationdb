@@ -250,6 +250,7 @@ ERROR( metacluster_no_capacity, 2157, "Metacluster does not have capacity to cre
 ERROR( management_cluster_invalid_access, 2158, "Standard transactions cannot be run against the management cluster" )
 ERROR( tenant_cannot_be_moved, 2159, "The tenant cannot be moved between clusters" )
 ERROR( tenant_creation_permanently_failed, 2160, "The tenant creation did not complete in a timely manner and has permanently failed" )
+ERROR( cluster_locked, 2161, "The cluster has been locked" )
 
 // 2200 - errors from bindings and official APIs
 ERROR( api_version_unset, 2200, "API version is not set" )
