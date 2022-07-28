@@ -76,7 +76,7 @@ struct DataClusterEntry {
 
 	bool hasCapacity() const { return allocated < capacity; }
 
-	Value encode() const { return ObjectWriter::toValue(*this, IncludeVersion(ProtocolVersion::withMetacluster())); }
+	Value encode() const { return ObjectWriter::toValue(*this, IncludeVersion()); }
 	static DataClusterEntry decode(ValueRef const& value) {
 		DataClusterEntry entry;
 		ObjectReader reader(value.begin(), IncludeVersion());
@@ -120,7 +120,7 @@ struct MetaclusterRegistrationEntry {
 		ASSERT(metaclusterName != name && metaclusterId != id);
 	}
 
-	Value encode() { return ObjectWriter::toValue(*this, IncludeVersion(ProtocolVersion::withMetacluster())); }
+	Value encode() { return ObjectWriter::toValue(*this, IncludeVersion()); }
 	static MetaclusterRegistrationEntry decode(ValueRef const& value) {
 		MetaclusterRegistrationEntry entry;
 		ObjectReader reader(value.begin(), IncludeVersion());
@@ -140,7 +140,10 @@ struct MetaclusterRegistrationEntry {
 
 struct MetaclusterMetadata {
 	// Registration information for a metacluster, stored on both management and data clusters
-	static KeyBackedObjectProperty<MetaclusterRegistrationEntry, decltype(IncludeVersion())> metaclusterRegistration;
+	static inline KeyBackedObjectProperty<MetaclusterRegistrationEntry, decltype(IncludeVersion())>
+	    metaclusterRegistration = KeyBackedObjectProperty<MetaclusterRegistrationEntry, decltype(IncludeVersion())>(
+	        "\xff/metacluster/clusterRegistration"_sr,
+	        IncludeVersion());
 };
 
 #endif

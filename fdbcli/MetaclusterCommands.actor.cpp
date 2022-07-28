@@ -38,24 +38,37 @@ parseClusterConfiguration(std::vector<StringRef> const& tokens, DataClusterEntry
 	Optional<DataClusterEntry> entry;
 	Optional<ClusterConnectionString> connectionString;
 
+	std::set<std::string> usedParams;
 	for (int tokenNum = startIndex; tokenNum < tokens.size(); ++tokenNum) {
 		StringRef token = tokens[tokenNum];
-		StringRef param = token.eat("=");
+		bool foundEquals;
+		StringRef param = token.eat("=", &foundEquals);
+		if (!foundEquals) {
+			fmt::print(stderr,
+			           "ERROR: invalid configuration string `{}'. String must specify a value using `='.\n",
+			           param.toString().c_str());
+			return {};
+		}
 		std::string value = token.toString();
+		if (!usedParams.insert(value).second) {
+			fmt::print(
+			    stderr, "ERROR: configuration parameter `{}' specified more than once.\n", param.toString().c_str());
+			return {};
+		}
 		if (tokencmp(param, "max_tenant_groups")) {
 			entry = defaults;
 
 			int n;
 			if (sscanf(value.c_str(), "%d%n", &entry.get().capacity.numTenantGroups, &n) != 1 || n != value.size() ||
 			    entry.get().capacity.numTenantGroups < 0) {
-				fmt::print(stderr, "ERROR: invalid number of tenant groups {}\n", value.c_str());
-				return Optional<std::pair<Optional<ClusterConnectionString>, Optional<DataClusterEntry>>>();
+				fmt::print(stderr, "ERROR: invalid number of tenant groups `{}'.\n", value.c_str());
+				return {};
 			}
 		} else if (tokencmp(param, "connection_string")) {
 			connectionString = ClusterConnectionString(value);
 		} else {
-			fmt::print(stderr, "ERROR: unrecognized configuration parameter {}\n", param.toString().c_str());
-			return Optional<std::pair<Optional<ClusterConnectionString>, Optional<DataClusterEntry>>>();
+			fmt::print(stderr, "ERROR: unrecognized configuration parameter `{}'.\n", param.toString().c_str());
+			return {};
 		}
 	}
 
@@ -104,9 +117,9 @@ ACTOR Future<bool> metaclusterDecommissionCommand(Reference<IDatabase> db, std::
 // metacluster register command
 ACTOR Future<bool> metaclusterRegisterCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	if (tokens.size() < 4) {
-		fmt::print("Usage: metacluster register <NAME> <max_tenant_groups=<NUM_GROUPS>|\n"
-		           "connection_string=<CONNECTION_STRING>> ...\n\n");
-		fmt::print("Adds a data cluster with the given connection string to a metacluster.\n");
+		fmt::print("Usage: metacluster register <NAME> connection_string=<CONNECTION_STRING>\n"
+		           "[max_tenant_groups=<NUM_GROUPS>]\n\n");
+		fmt::print("Adds a data cluster to a metacluster.\n");
 		fmt::print("NAME is used to identify the cluster in future commands.\n");
 		printMetaclusterConfigureOptionsUsage();
 		return false;
@@ -186,7 +199,7 @@ ACTOR Future<bool> metaclusterConfigureCommand(Reference<IDatabase> db, std::vec
 
 // metacluster list command
 ACTOR Future<bool> metaclusterListCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
-	if (tokens.size() > 6) {
+	if (tokens.size() > 5) {
 		fmt::print("Usage: metacluster list [BEGIN] [END] [LIMIT]\n\n");
 		fmt::print("Lists the data clusters in a metacluster.\n");
 		fmt::print("Only cluster names in the range BEGIN - END will be printed.\n");
@@ -351,8 +364,9 @@ void metaclusterGenerator(const char* text,
                           std::vector<std::string>& lc,
                           std::vector<StringRef> const& tokens) {
 	if (tokens.size() == 1) {
-		const char* opts[] = { "create", "decommission", "register", "remove", "configure",
-			                   "list",   "get",          "status",   nullptr };
+		const char* opts[] = {
+			"create_experimental", "decommission", "register", "remove", "configure", "list", "get", "status", nullptr
+		};
 		arrayGenerator(text, line, opts, lc);
 	} else if (tokens.size() > 1 && (tokencmp(tokens[1], "register") || tokencmp(tokens[1], "configure"))) {
 		const char* opts[] = { "max_tenant_groups=", "connection_string=", nullptr };
@@ -366,8 +380,8 @@ void metaclusterGenerator(const char* text,
 
 std::vector<const char*> metaclusterHintGenerator(std::vector<StringRef> const& tokens, bool inArgument) {
 	if (tokens.size() == 1) {
-		return { "<create|decommission|register|remove|configure|list|get|status>", "[ARGS]" };
-	} else if (tokencmp(tokens[1], "create")) {
+		return { "<create_experimental|decommission|register|remove|configure|list|get|status>", "[ARGS]" };
+	} else if (tokencmp(tokens[1], "create_experimental")) {
 		return { "<NAME>" };
 	} else if (tokencmp(tokens[1], "decommission")) {
 		return {};
@@ -406,9 +420,9 @@ std::vector<const char*> metaclusterHintGenerator(std::vector<StringRef> const& 
 
 CommandFactory metaclusterRegisterFactory(
     "metacluster",
-    CommandHelp("metacluster <create|decommission|register|remove|configure|list|get|status> [ARGS]",
+    CommandHelp("metacluster <create_experimental|decommission|register|remove|configure|list|get|status> [ARGS]",
                 "view and manage a metacluster",
-                "`create' and `decommission' set up or deconfigure a metacluster.\n"
+                "`create_experimental' and `decommission' set up or deconfigure a metacluster.\n"
                 "`register' and `remove' add and remove data clusters from the metacluster.\n"
                 "`configure' updates the configuration of a data cluster.\n"
                 "`list' prints a list of data clusters in the metacluster.\n"

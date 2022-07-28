@@ -30,6 +30,3 @@ json_spirit::mObject ClusterUsage::toJson() const {
 	return obj;
 }
 
-KeyBackedObjectProperty<MetaclusterRegistrationEntry, decltype(IncludeVersion())>
-    MetaclusterMetadata::metaclusterRegistration("\xff/metacluster/clusterRegistration"_sr,
-                                                 IncludeVersion(ProtocolVersion::withMetacluster()));

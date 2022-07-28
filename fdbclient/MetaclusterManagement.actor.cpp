@@ -42,7 +42,7 @@ ACTOR Future<Reference<IDatabase>> openDatabase(ClusterConnectionString connecti
 
 KeyBackedObjectMap<ClusterName, DataClusterEntry, decltype(IncludeVersion())> ManagementClusterMetadata::dataClusters(
     "metacluster/dataCluster/metadata/"_sr,
-    IncludeVersion(ProtocolVersion::withMetacluster()));
+    IncludeVersion());
 
 KeyBackedMap<ClusterName,
              ClusterConnectionString,

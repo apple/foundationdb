@@ -59,7 +59,7 @@ struct DataClusterMetadata {
 		return entry.matchesConfiguration(other.entry) && connectionString == other.connectionString;
 	}
 
-	Value encode() const { return ObjectWriter::toValue(*this, IncludeVersion(ProtocolVersion::withMetacluster())); }
+	Value encode() const { return ObjectWriter::toValue(*this, IncludeVersion()); }
 	static DataClusterMetadata decode(ValueRef const& value) {
 		DataClusterMetadata metadata;
 		ObjectReader reader(value.begin(), IncludeVersion());
