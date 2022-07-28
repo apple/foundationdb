@@ -47,7 +47,7 @@ struct TenantMapEntry {
 	Key prefix;
 	TenantState tenantState = TenantState::READY;
 	Optional<TenantGroupName> tenantGroup;
-	bool encrypted;
+	bool encrypted = false;
 
 	constexpr static int PREFIX_SIZE = sizeof(id);
 

@@ -800,8 +800,6 @@ ACTOR Future<Void> monitorLeaderAndGetClientInfo(Key clusterKey,
 		if (leader.present()) {
 			if (leader.get().first.forward) {
 				ClientDBInfo outInfo;
-				// TODO: change?
-				outInfo.isEncryptionEnabled = false;
 				outInfo.id = deterministicRandom()->randomUniqueID();
 				outInfo.forward = leader.get().first.serializedInfo;
 				clientData->clientInfo->set(CachedSerialization<ClientDBInfo>(outInfo));
