@@ -269,13 +269,16 @@ void DatabaseContext::getLatestCommitVersions(const Reference<LocationInfo>& loc
 				}
 			}
 		}
+		// commitVersion == readVersion is common, do not log.
 		if (!updatedVersionMap && commitVersion != readVersion) {
 			TraceEvent(SevDebug, "CommitVersionNotFoundForSS")
 			    .detail("InSSIDMap", iter != ssidTagMapping.end() ? 1 : 0)
 			    .detail("Tag", tag)
 			    .detail("CommitVersion", commitVersion)
 			    .detail("ReadVersion", readVersion)
-			    .detail("VersionVector", ssVersionVectorCache.toString());
+			    .detail("VersionVector", ssVersionVectorCache.toString())
+			    .setMaxEventLength(11000)
+			    .setMaxFieldLength(10000);
 			++transactionCommitVersionNotFoundForSS;
 		}
 	}
