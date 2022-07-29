@@ -1964,7 +1964,7 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueueData* self, int teamCollectionIndex,
 			traceEvent.detail("QueuedRelocations", self->priority_relocations[ddPriority]);
 
 			if (self->priority_relocations[ddPriority] < SERVER_KNOBS->DD_REBALANCE_PARALLELISM) {
-				auto mcMove = isDataMovementForMountainChopper(reason);
+				bool mcMove = isDataMovementForMountainChopper(reason);
 				srcReq = GetTeamRequest(WantNewServers::True,
 				                        WantTrueBest(mcMove),
 				                        PreferLowerDiskUtil::False,
