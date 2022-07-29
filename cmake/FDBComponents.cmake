@@ -56,7 +56,7 @@ endif()
 # Python Bindings
 ################################################################################
 
-find_package(Python COMPONENTS Interpreter)
+find_package(Python3 COMPONENTS Interpreter)
 if(Python_Interpreter_FOUND)
   set(WITH_PYTHON ON)
 else()
