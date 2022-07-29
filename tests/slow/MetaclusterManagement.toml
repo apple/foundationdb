@@ -1,16 +1,17 @@
 [configuration]
 allowDefaultTenant = false
 allowDisablingTenants = false
-allowCreatingTenants = false
 extraDatabaseMode = 'Single'
+#extraDatabaseCount = 1 
 
 [[test]]
-testTitle = 'TenantManagementTest'
+testTitle = 'MetaclusterManagementTest'
 clearAfterTest = true
 timeout = 2100
 runSetup = true
 
     [[test.workload]]
-    testName = 'TenantManagement'
-    maxTenants = 1000
-    testDuration = 120
+    testName = 'MetaclusterManagement'
+	maxTenants = 1000
+	maxTenantGroups = 20
+	testDuration = 60

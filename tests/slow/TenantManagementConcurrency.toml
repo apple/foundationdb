@@ -13,4 +13,4 @@ runSetup = true
     [[test.workload]]
     testName = 'TenantManagementConcurrency'
     maxTenants = 100
-    testDuration = 60
+    testDuration = 120

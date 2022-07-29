@@ -144,12 +144,8 @@ struct TenantManagementWorkload : TestWorkload {
 		}
 
 		Value encode() const { return ObjectWriter::toValue(*this, Unversioned()); }
-
 		static TestParameters decode(ValueRef const& value) {
-			TestParameters params;
-			ObjectReader reader(value.begin(), Unversioned());
-			reader.deserialize(params);
-			return params;
+			return ObjectReader::fromStringRef<TestParameters>(value, Unversioned());
 		}
 	};
 

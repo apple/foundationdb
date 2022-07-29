@@ -63,10 +63,7 @@ struct DataClusterMetadata {
 
 	Value encode() const { return ObjectWriter::toValue(*this, IncludeVersion()); }
 	static DataClusterMetadata decode(ValueRef const& value) {
-		DataClusterMetadata metadata;
-		ObjectReader reader(value.begin(), IncludeVersion());
-		reader.deserialize(metadata);
-		return metadata;
+		return ObjectReader::fromStringRef<DataClusterMetadata>(value, IncludeVersion());
 	}
 
 	json_spirit::mValue toJson() const {
@@ -1526,7 +1523,7 @@ struct ConfigureTenantImpl {
 
 		// We don't currently support movement between groups on different clusters
 		else {
-			throw tenant_cannot_be_moved();
+			throw cluster_no_capacity();
 		}
 	}
 

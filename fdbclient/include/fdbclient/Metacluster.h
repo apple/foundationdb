@@ -60,7 +60,7 @@ struct DataClusterEntry {
 	ClusterUsage capacity;
 	ClusterUsage allocated;
 
-	// If true, then tenants cannot be assigned to this cluster. This is used when a cluster is being forcefully
+	// If true, then tenant groups cannot be assigned to this cluster. This is used when a cluster is being forcefully
 	// removed.
 	bool locked = false;
 
@@ -78,10 +78,7 @@ struct DataClusterEntry {
 
 	Value encode() const { return ObjectWriter::toValue(*this, IncludeVersion()); }
 	static DataClusterEntry decode(ValueRef const& value) {
-		DataClusterEntry entry;
-		ObjectReader reader(value.begin(), IncludeVersion());
-		reader.deserialize(entry);
-		return entry;
+		return ObjectReader::fromStringRef<DataClusterEntry>(value, IncludeVersion());
 	}
 
 	json_spirit::mObject toJson() const {
@@ -146,10 +143,7 @@ struct MetaclusterRegistrationEntry {
 
 	Value encode() const { return ObjectWriter::toValue(*this, IncludeVersion()); }
 	static MetaclusterRegistrationEntry decode(ValueRef const& value) {
-		MetaclusterRegistrationEntry entry;
-		ObjectReader reader(value.begin(), IncludeVersion());
-		reader.deserialize(entry);
-		return entry;
+		return ObjectReader::fromStringRef<MetaclusterRegistrationEntry>(value, IncludeVersion());
 	}
 	static Optional<MetaclusterRegistrationEntry> decode(Optional<Value> value) {
 		return value.map<MetaclusterRegistrationEntry>(

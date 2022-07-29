@@ -76,17 +76,13 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 		}
 
 		Value encode() const { return ObjectWriter::toValue(*this, Unversioned()); }
-
 		static TestParameters decode(ValueRef const& value) {
-			TestParameters params;
-			ObjectReader reader(value.begin(), Unversioned());
-			reader.deserialize(params);
-			return params;
+			return ObjectReader::fromStringRef<TestParameters>(value, Unversioned());
 		}
 	};
 
 	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
-	ACTOR Future<Void> _setup(Database cx, TenantManagementConcurrencyWorkload* self) {
+	ACTOR static Future<Void> _setup(Database cx, TenantManagementConcurrencyWorkload* self) {
 		state ClusterConnectionString connectionString(g_simulator.extraDatabases[0]);
 		Reference<IDatabase> threadSafeHandle =
 		    wait(unsafeThreadFutureToFuture(ThreadSafeDatabase::createFromExistingDatabase(cx)));
@@ -163,9 +159,10 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 		return tenantGroup;
 	}
 
-	ACTOR Future<Void> createTenant(Database cx, TenantManagementConcurrencyWorkload* self) {
+	ACTOR static Future<Void> createTenant(TenantManagementConcurrencyWorkload* self) {
 		state TenantName tenant = self->chooseTenantName();
 		state TenantMapEntry entry;
+		entry.tenantGroup = self->chooseTenantGroup();
 
 		try {
 			loop {
@@ -191,7 +188,7 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR Future<Void> deleteTenant(Database cx, TenantManagementConcurrencyWorkload* self) {
+	ACTOR static Future<Void> deleteTenant(TenantManagementConcurrencyWorkload* self) {
 		state TenantName tenant = self->chooseTenantName();
 
 		try {
@@ -215,17 +212,70 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 		}
 	}
 
+	ACTOR static Future<Void> configureImpl(TenantManagementConcurrencyWorkload* self,
+	                                        TenantName tenant,
+	                                        std::map<Standalone<StringRef>, Optional<Value>> configParams) {
+		if (self->useMetacluster) {
+			wait(MetaclusterAPI::configureTenant(self->mvDb, tenant, configParams));
+		} else {
+			Reference<ReadYourWritesTransaction> tr = self->dataDb->createTransaction();
+			loop {
+				try {
+					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					TenantMapEntry entry = wait(TenantAPI::getTenantTransaction(tr, tenant));
+					TenantMapEntry updatedEntry = entry;
+					for (auto param : configParams) {
+						updatedEntry.configure(param.first, param.second);
+					}
+					TenantAPI::configureTenantTransaction(tr, tenant, entry, updatedEntry);
+					wait(buggifiedCommit(tr, BUGGIFY_WITH_PROB(0.1)));
+					break;
+				} catch (Error& e) {
+					wait(tr->onError(e));
+				}
+			}
+		}
+
+		return Void();
+	}
+
+	ACTOR static Future<Void> configureTenant(TenantManagementConcurrencyWorkload* self) {
+		state TenantName tenant = self->chooseTenantName();
+		state std::map<Standalone<StringRef>, Optional<Value>> configParams;
+		configParams["tenant_group"_sr] = self->chooseTenantGroup();
+
+		try {
+			loop {
+				Optional<Void> result = wait(timeout(configureImpl(self, tenant, configParams), 30));
+
+				if (result.present()) {
+					fmt::print("Delete tenant success: {}\n", printable(tenant));
+					break;
+				}
+			}
+
+			return Void();
+		} catch (Error& e) {
+			if (e.code() != error_code_tenant_not_found) {
+				TraceEvent(SevError, "ConfigureTenantFailure").error(e).detail("TenantName", tenant);
+			}
+			return Void();
+		}
+	}
+
 	Future<Void> start(Database const& cx) override { return _start(cx, this); }
-	ACTOR Future<Void> _start(Database cx, TenantManagementConcurrencyWorkload* self) {
+	ACTOR static Future<Void> _start(Database cx, TenantManagementConcurrencyWorkload* self) {
 		state double start = now();
 
 		// Run a random sequence of tenant management operations for the duration of the test
 		while (now() < start + self->testDuration) {
 			state int operation = deterministicRandom()->randomInt(0, 2);
 			if (operation == 0) {
-				wait(self->createTenant(cx, self));
+				wait(createTenant(self));
 			} else if (operation == 1) {
-				wait(self->deleteTenant(cx, self));
+				wait(deleteTenant(self));
+			} else if (operation == 2) {
+				wait(configureTenant(self));
 			}
 		}
 
@@ -233,7 +283,7 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 	}
 
 	Future<bool> check(Database const& cx) override { return _check(cx, this); }
-	ACTOR Future<bool> _check(Database cx, TenantManagementConcurrencyWorkload* self) {
+	ACTOR static Future<bool> _check(Database cx, TenantManagementConcurrencyWorkload* self) {
 		state std::vector<std::pair<TenantName, TenantMapEntry>> dataClusterMap =
 		    wait(TenantAPI::listTenants(self->dataDb.getReference(),
 		                                self->tenantNamePrefix,
