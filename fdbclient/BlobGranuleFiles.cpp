@@ -111,6 +111,39 @@ struct ValueAndVersionRef {
 	}
 };
 
+// Effectively the single DeltaBoundaryRef reduced to one update, but also with the key and clear after information.
+// Sometimes at a given version, the boundary may only be necessary to represent a clear version after this key, or just
+// an update/clear to this key, or both.
+struct ParsedDeltaBoundaryRef {
+	KeyRef key;
+	MutationRef::Type op; // SetValue, ClearRange, or NoOp
+	ValueRef value; // null unless op == SetValue
+	bool clearAfter;
+
+	// op constructor
+	ParsedDeltaBoundaryRef() {}
+	explicit ParsedDeltaBoundaryRef(KeyRef key, bool clearAfter, const ValueAndVersionRef& valueAndVersion)
+	  : key(key), op(valueAndVersion.op), value(valueAndVersion.value), clearAfter(clearAfter) {}
+	// noop constructor
+	explicit ParsedDeltaBoundaryRef(KeyRef key, bool clearAfter)
+	  : key(key), op(MutationRef::Type::NoOp), clearAfter(clearAfter) {}
+	// from snapshot set constructor
+	explicit ParsedDeltaBoundaryRef(const KeyValueRef& kv)
+	  : key(kv.key), op(MutationRef::Type::SetValue), value(kv.value), clearAfter(false) {}
+
+	ParsedDeltaBoundaryRef(Arena& arena, const ParsedDeltaBoundaryRef& copyFrom)
+	  : key(arena, copyFrom.key), op(copyFrom.op), clearAfter(copyFrom.clearAfter) {
+		if (copyFrom.isSet()) {
+			value = StringRef(arena, copyFrom.value);
+		}
+	}
+
+	bool isSet() const { return op == MutationRef::SetValue; }
+	bool isClear() const { return op == MutationRef::ClearRange; }
+	bool isNoOp() const { return op == MutationRef::NoOp; }
+	bool redundant(bool prevClearAfter) const { return op == MutationRef::Type::NoOp && clearAfter == prevClearAfter; }
+};
+
 struct DeltaBoundaryRef {
 	// key
 	KeyRef key;
@@ -731,11 +764,11 @@ Value serializeChunkedSnapshot(const Standalone<GranuleSnapshot>& snapshot,
 }
 
 // TODO: use redwood prefix trick to optimize cpu comparison
-static Arena loadSnapshotFile(const StringRef& snapshotData,
-                              const KeyRangeRef& keyRange,
-                              std::map<KeyRef, ValueRef>& dataMap,
-                              Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx) {
-	Arena rootArena;
+static Standalone<VectorRef<ParsedDeltaBoundaryRef>> loadSnapshotFile(
+    const StringRef& snapshotData,
+    const KeyRangeRef& keyRange,
+    Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx) {
+	Standalone<VectorRef<ParsedDeltaBoundaryRef>> results;
 
 	Standalone<IndexedBlobGranuleFile> file = IndexedBlobGranuleFile::fromFileBytes(snapshotData, cipherKeysCtx);
 
@@ -744,7 +777,7 @@ static Arena loadSnapshotFile(const StringRef& snapshotData,
 
 	// empty snapshot file
 	if (file.indexBlockRef.block.children.empty()) {
-		return rootArena;
+		return results;
 	}
 
 	ASSERT(file.indexBlockRef.block.children.size() >= 2);
@@ -767,17 +800,17 @@ static Arena loadSnapshotFile(const StringRef& snapshotData,
 		bool anyRows = false;
 		for (auto& entry : dataBlock) {
 			if (entry.key >= keyRange.begin && entry.key < keyRange.end) {
-				dataMap.insert({ entry.key, entry.value });
+				results.emplace_back(results.arena(), entry);
 				anyRows = true;
 			}
 		}
 		if (anyRows) {
-			rootArena.dependsOn(dataBlock.arena());
+			results.arena().dependsOn(dataBlock.arena());
 		}
 		currentBlock++;
 	}
 
-	return rootArena;
+	return results;
 }
 
 typedef std::map<Key, Standalone<DeltaBoundaryRef>> SortedDeltasT;
@@ -970,35 +1003,6 @@ Value serializeChunkedDeltaFile(const Standalone<GranuleDeltas>& deltas,
 	return serializeFileFromChunks(file, cipherKeysCtx, chunks, previousChunkBytes);
 }
 
-// Effectively the single DeltaBoundaryRef reduced to one update, but also with the key and clear after information.
-// Sometimes at a given version, the boundary may only be necessary to represent a clear version after this key, or just
-// an update/clear to this key, or both.
-struct ParsedDeltaBoundaryRef {
-	KeyRef key;
-	MutationRef::Type op; // SetValue, ClearRange, or NoOp
-	ValueRef value; // null unless op == SetValue
-	bool clearAfter;
-
-	// op constructor
-	ParsedDeltaBoundaryRef() {}
-	explicit ParsedDeltaBoundaryRef(KeyRef key, bool clearAfter, const ValueAndVersionRef& valueAndVersion)
-	  : key(key), op(valueAndVersion.op), value(valueAndVersion.value), clearAfter(clearAfter) {}
-	// noop constructor
-	explicit ParsedDeltaBoundaryRef(KeyRef key, bool clearAfter)
-	  : key(key), op(MutationRef::Type::NoOp), clearAfter(clearAfter) {}
-	ParsedDeltaBoundaryRef(Arena& arena, const ParsedDeltaBoundaryRef& copyFrom)
-	  : key(arena, copyFrom.key), op(copyFrom.op), clearAfter(copyFrom.clearAfter) {
-		if (copyFrom.isSet()) {
-			value = StringRef(arena, copyFrom.value);
-		}
-	}
-
-	bool isSet() const { return op == MutationRef::SetValue; }
-	bool isClear() const { return op == MutationRef::ClearRange; }
-	bool redundant(bool prevClearAfter) const { return op == MutationRef::Type::NoOp && clearAfter == prevClearAfter; }
-};
-
-// TODO could move ParsedDeltaBoundaryRef struct type up to granule common and make this a member of DeltaBoundaryRef?
 ParsedDeltaBoundaryRef deltaAtVersion(const DeltaBoundaryRef& delta, Version beginVersion, Version readVersion) {
 	bool clearAfter = delta.clearVersion.present() && readVersion >= delta.clearVersion.get() &&
 	                  beginVersion <= delta.clearVersion.get();
@@ -1087,21 +1091,24 @@ void applyDeltasSorted(const Standalone<VectorRef<ParsedDeltaBoundaryRef>>& sort
 
 // The arena owns the BoundaryDeltaRef struct data but the StringRef pointers point to data in deltaData, to avoid extra
 // copying
-Arena loadChunkedDeltaFile(const StringRef& deltaData,
-                           const KeyRangeRef& keyRange,
-                           Version beginVersion,
-                           Version readVersion,
-                           std::map<KeyRef, ValueRef>& dataMap,
-                           Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx) {
+Standalone<VectorRef<ParsedDeltaBoundaryRef>> loadChunkedDeltaFile(const StringRef& deltaData,
+                                                                   const KeyRangeRef& keyRange,
+                                                                   Version beginVersion,
+                                                                   Version readVersion,
+                                                                   Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx,
+                                                                   bool& startClear) {
 	Standalone<VectorRef<ParsedDeltaBoundaryRef>> deltas;
 	Standalone<IndexedBlobGranuleFile> file = IndexedBlobGranuleFile::fromFileBytes(deltaData, cipherKeysCtx);
+
+	// TODO REMOVE
+	// fmt::print("Loading delta file. startClear={0}\n", startClear ? "T" : "F");
 
 	ASSERT(file.fileType == DELTA_FILE_TYPE);
 	ASSERT(file.chunkStartOffset > 0);
 
 	// empty delta file
 	if (file.indexBlockRef.block.children.empty()) {
-		return deltas.arena();
+		return deltas;
 	}
 
 	ASSERT(file.indexBlockRef.block.children.size() >= 2);
@@ -1114,7 +1121,6 @@ Arena loadChunkedDeltaFile(const StringRef& deltaData,
 	ChildBlockPointerRef* currentBlock = file.findStartBlock(keyRange.begin);
 
 	// TODO cpu optimize (key check per block, prefixes, optimize start of first block)
-	bool startClear = false;
 	bool prevClearAfter = false;
 	while (currentBlock != (file.indexBlockRef.block.children.end() - 1) && keyRange.end > currentBlock->key) {
 		Standalone<GranuleSortedDeltas> deltaBlock =
@@ -1125,16 +1131,25 @@ Arena loadChunkedDeltaFile(const StringRef& deltaData,
 		// TODO refactor this into function to share with memory deltas
 		bool blockMemoryUsed = false;
 
+		// TODO REMOVE!
+		// fmt::print("Block {0}\n", currentBlock->key.printable());
 		for (auto& entry : deltaBlock.boundaries) {
 			ParsedDeltaBoundaryRef boundary = deltaAtVersion(entry, beginVersion, readVersion);
 			if (entry.key < keyRange.begin) {
 				startClear = boundary.clearAfter;
 				prevClearAfter = boundary.clearAfter;
+				// fmt::print("  Start {0}: clearAfter={1}\n", entry.key.printable(), startClear);
 			} else if (entry.key < keyRange.end) {
 				if (!boundary.redundant(prevClearAfter)) {
+					// TODO REMOVE
+					// fmt::print("  {0} {1} {2}\n", boundary.key.printable(), boundary.isSet() ? "=" :
+					// (boundary.isClear() ? "X" : "."), boundary.clearAfter ? "Clear+" : "");
 					deltas.push_back(deltas.arena(), boundary);
 					blockMemoryUsed = true;
 					prevClearAfter = boundary.clearAfter;
+				} else {
+					// fmt::print("  {0} {1} {2} - ignoring (REDUNDANT)\n", boundary.key.printable(), boundary.isSet() ?
+					// "=" : (boundary.isClear() ? "X" : "."), boundary.clearAfter ? "Clear+" : "");
 				}
 			} else {
 				break;
@@ -1151,9 +1166,9 @@ Arena loadChunkedDeltaFile(const StringRef& deltaData,
 		ASSERT(deltas[i].key < deltas[i + 1].key);
 	}
 
-	applyDeltasSorted(deltas, startClear, dataMap);
+	// applyDeltasSorted(deltas, startClear, dataMap);
 
-	return deltas.arena();
+	return deltas;
 }
 
 static void applyDelta(const KeyRangeRef& keyRange, const MutationRef& m, std::map<KeyRef, ValueRef>& dataMap) {
@@ -1235,12 +1250,11 @@ static void applyDeltasByVersion(const GranuleDeltas& deltas,
 
 // TODO: could optimize this slightly to avoid tracking multiple updates for the same key at all since it's always then
 // collapsed to the last one
-Arena sortAndApplyMemoryDeltas(const GranuleDeltas& memoryDeltas,
-                               const KeyRangeRef& granuleRange,
-                               const KeyRangeRef& readRange,
-                               Version beginVersion,
-                               Version readVersion,
-                               std::map<KeyRef, ValueRef>& dataMap) {
+Standalone<VectorRef<ParsedDeltaBoundaryRef>> sortMemoryDeltas(const GranuleDeltas& memoryDeltas,
+                                                               const KeyRangeRef& granuleRange,
+                                                               const KeyRangeRef& readRange,
+                                                               Version beginVersion,
+                                                               Version readVersion) {
 	ASSERT(!memoryDeltas.empty());
 
 	// filter by request range first
@@ -1287,6 +1301,7 @@ Arena sortAndApplyMemoryDeltas(const GranuleDeltas& memoryDeltas,
 		itBegin->second.key = itBegin->first;
 		ParsedDeltaBoundaryRef boundary = deltaAtVersion(itBegin->second, beginVersion, readVersion);
 		if (!boundary.redundant(prevClearAfter)) {
+			// TODO remove
 			/*fmt::print("  {0} ", boundary.key.printable());
 			if (boundary.isSet()) {
 			    fmt::print("=");
@@ -1304,8 +1319,136 @@ Arena sortAndApplyMemoryDeltas(const GranuleDeltas& memoryDeltas,
 		++itBegin;
 	}
 
-	applyDeltasSorted(deltas, false, dataMap);
-	return deltas.arena();
+	return deltas;
+}
+
+// does a sorted merge of the delta streams.
+// In terms of write precedence, streams[i] < streams[i+1]
+// Handles range clears by tracking the active clears when they start
+struct MergeStreamNext {
+	KeyRef key;
+	int16_t streamIdx;
+	int dataIdx;
+
+	// the sort order is logically lower by key, and then higher by streamIdx
+	// because a priority queue is backwards, we invert that
+	struct OrderForPriorityQueue {
+		bool operator()(MergeStreamNext const& a, MergeStreamNext const& b) const {
+			int keyCmp = a.key.compare(b.key);
+			if (keyCmp != 0) {
+				return keyCmp > 0; // reverse
+			}
+			return a.streamIdx < b.streamIdx;
+		}
+	};
+};
+
+// TODO: clean up verbose debugging!
+static RangeResult mergeDeltaStreams(const BlobGranuleChunkRef& chunk,
+                                     const std::vector<Standalone<VectorRef<ParsedDeltaBoundaryRef>>>& streams,
+                                     const std::vector<bool> startClears) {
+	ASSERT(streams.size() < std::numeric_limits<int16_t>::max());
+	ASSERT(startClears.size() == streams.size());
+
+	// next element for each stream
+	std::priority_queue<MergeStreamNext, std::vector<MergeStreamNext>, MergeStreamNext::OrderForPriorityQueue> next;
+
+	// efficiently find the highest stream's active clear
+	std::set<int16_t, std::greater<int16_t>> activeClears;
+	int16_t maxActiveClear = -1;
+
+	// check if a given stream is actively clearing
+	bool clearActive[streams.size()];
+	for (int16_t i = 0; i < streams.size(); i++) {
+		// fmt::print("Stream {0} ({1}) {2}\n", i, streams[i].size(), startClears[i] ? "StartClear-" : "");
+		clearActive[i] = startClears[i];
+		if (startClears[i]) {
+			activeClears.insert(i);
+			maxActiveClear = i;
+		}
+		if (streams[i].empty()) {
+			// single clear that entirely encases partial read bounds
+			ASSERT(clearActive[i]);
+		} else {
+			MergeStreamNext item;
+			item.key = streams[i][0].key;
+			item.streamIdx = i;
+			item.dataIdx = 0;
+			next.push(item);
+			// fmt::print("  ({0}, {1}): {2}\n", i, 0, item.key.printable());
+		}
+	}
+
+	RangeResult result;
+	std::vector<MergeStreamNext> cur;
+	cur.reserve(streams.size());
+	while (!next.empty()) {
+		cur.clear();
+		cur.push_back(next.top());
+		next.pop();
+
+		// fmt::print("  {0})\n", cur.front().key.printable());
+
+		while (!next.empty() && next.top().key == cur.front().key) {
+			cur.push_back(next.top());
+			next.pop();
+		}
+
+		// un-set clears and find latest value for key (if present)
+		bool foundValue = false;
+		// fmt::print("   Pass 1:\n");
+		for (auto& it : cur) {
+			auto& v = streams[it.streamIdx][it.dataIdx];
+			// fmt::print("    ({0} {1}): {2} {3}\n", it.streamIdx, it.dataIdx, v.isSet() ? "=" : (v.isClear() ? "X" :
+			// "."), v.clearAfter ? "Clear+" : ""); un-set previous active clear, if this stream was clearing
+			if (clearActive[it.streamIdx]) {
+				// fmt::print("      un-clear\n");
+				clearActive[it.streamIdx] = false;
+				activeClears.erase(it.streamIdx);
+				if (it.streamIdx == maxActiveClear) {
+					// re-get max active clear
+					maxActiveClear = activeClears.empty() ? -1 : *activeClears.begin();
+					// fmt::print("        maxClear={0}\n", maxActiveClear);
+				}
+			}
+
+			// find value for this key (if any)
+			if (!foundValue && !v.isNoOp()) {
+				foundValue = true;
+				// if it's a clear, or maxActiveClear is higher, no value for this key
+				if (v.isSet() && maxActiveClear < it.streamIdx) {
+					KeyRef finalKey =
+					    chunk.tenantPrefix.present() ? v.key.removePrefix(chunk.tenantPrefix.get()) : v.key;
+					result.push_back_deep(result.arena(), KeyValueRef(finalKey, v.value));
+					// fmt::print("      =({0})\n", it.streamIdx);
+				} else {
+					// fmt::print("      ignoring (found={0}, maxClear={1})\n", foundValue, maxActiveClear);
+				}
+			}
+		}
+
+		// advance streams and start clearAfter
+		// fmt::print("   Pass 2:\n");
+		for (auto& it : cur) {
+			// fmt::print("    ({0} {1})\n", it.streamIdx, it.dataIdx);
+			if (streams[it.streamIdx][it.dataIdx].clearAfter) {
+				clearActive[it.streamIdx] = true;
+				activeClears.insert(it.streamIdx);
+				maxActiveClear = std::max(maxActiveClear, it.streamIdx);
+				// fmt::print("      clearAfter\n");
+			}
+			// TODO: implement skipping if large clear!!
+			// if (maxClearIdx > it.streamIdx) - skip
+			it.dataIdx++;
+			if (it.dataIdx < streams[it.streamIdx].size()) {
+				it.key = streams[it.streamIdx][it.dataIdx].key;
+				next.push(it);
+				// fmt::print("      Next: ({0}, {1}): {2}\n", it.streamIdx, it.dataIdx, it.key.printable());
+			}
+		}
+	}
+
+	return result;
 }
 
 RangeResult materializeBlobGranule(const BlobGranuleChunkRef& chunk,
@@ -1323,7 +1466,6 @@ RangeResult materializeBlobGranule(const BlobGranuleChunkRef& chunk,
 	// FIXME: probably some threshold of a small percentage of the data is actually changed, where it makes sense to
 	// just to dependsOn instead of copy, to use a little extra memory footprint to help cpu?
 	Arena arena;
-	std::map<KeyRef, ValueRef> dataMap;
 	KeyRange requestRange;
 	if (chunk.tenantPrefix.present()) {
 		requestRange = keyRange.withPrefix(chunk.tenantPrefix.get());
@@ -1331,18 +1473,35 @@ RangeResult materializeBlobGranule(const BlobGranuleChunkRef& chunk,
 		requestRange = keyRange;
 	}
 
+	std::vector<Standalone<VectorRef<ParsedDeltaBoundaryRef>>> streams;
+	std::vector<bool> startClears;
+	// +1 for possible snapshot, +1 for possible memory deltas
+	streams.reserve(chunk.deltaFiles.size() + 2);
+
 	if (snapshotData.present()) {
-		Arena snapshotArena = loadSnapshotFile(snapshotData.get(), requestRange, dataMap, chunk.cipherKeysCtx);
-		arena.dependsOn(snapshotArena);
+		Standalone<VectorRef<ParsedDeltaBoundaryRef>> snapshotRows =
+		    loadSnapshotFile(snapshotData.get(), requestRange, chunk.cipherKeysCtx);
+		if (!snapshotRows.empty()) {
+			// TODO - std::move?
+			streams.push_back(snapshotRows);
+			startClears.push_back(false);
+			arena.dependsOn(streams.back().arena());
+		}
 	}
 
 	if (BG_READ_DEBUG) {
 		fmt::print("Applying {} delta files\n", chunk.deltaFiles.size());
 	}
 	for (int deltaIdx = 0; deltaIdx < chunk.deltaFiles.size(); deltaIdx++) {
-		Arena deltaArena = loadChunkedDeltaFile(
-		    deltaFileData[deltaIdx], requestRange, beginVersion, readVersion, dataMap, chunk.cipherKeysCtx);
-		arena.dependsOn(deltaArena);
+		bool startClear = false;
+		auto deltaRows = loadChunkedDeltaFile(
+		    deltaFileData[deltaIdx], requestRange, beginVersion, readVersion, chunk.cipherKeysCtx, startClear);
+		if (startClear || !deltaRows.empty()) {
+			streams.push_back(deltaRows);
+			startClears.push_back(startClear);
+			arena.dependsOn(streams.back().arena());
+		}
+		arena.dependsOn(deltaRows.arena());
 	}
 	if (BG_READ_DEBUG) {
 		fmt::print("Applying {} memory deltas\n", chunk.newDeltas.size());
@@ -1351,20 +1510,15 @@ RangeResult materializeBlobGranule(const BlobGranuleChunkRef& chunk,
 		// TODO REMOVE validation
 		ASSERT(beginVersion <= chunk.newDeltas.front().version);
 		ASSERT(readVersion >= chunk.newDeltas.back().version);
-		Arena memoryDeltaArena =
-		    sortAndApplyMemoryDeltas(chunk.newDeltas, chunk.keyRange, requestRange, beginVersion, readVersion, dataMap);
-		arena.dependsOn(memoryDeltaArena);
+		auto memoryRows = sortMemoryDeltas(chunk.newDeltas, chunk.keyRange, requestRange, beginVersion, readVersion);
+		if (!memoryRows.empty()) {
+			streams.push_back(memoryRows);
+			startClears.push_back(false);
+			arena.dependsOn(streams.back().arena());
+		}
 	}
 
-	RangeResult ret;
-	for (auto& it : dataMap) {
-		ret.push_back_deep(
-		    ret.arena(),
-		    KeyValueRef(chunk.tenantPrefix.present() ? it.first.removePrefix(chunk.tenantPrefix.get()) : it.first,
-		                it.second));
-	}
-
-	return ret;
+	return mergeDeltaStreams(chunk, streams, startClears);
 }
 
 struct GranuleLoadIds {
@@ -1754,8 +1908,8 @@ int randomExp(int minExp, int maxExp) {
 }
 
 void checkSnapshotEmpty(const Value& serialized, Key begin, Key end, Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx) {
-	std::map<KeyRef, ValueRef> result;
-	Arena ar = loadSnapshotFile(serialized, KeyRangeRef(begin, end), result, cipherKeysCtx);
+	Standalone<VectorRef<ParsedDeltaBoundaryRef>> result =
+	    loadSnapshotFile(serialized, KeyRangeRef(begin, end), cipherKeysCtx);
 	ASSERT(result.empty());
 }
 
@@ -1767,29 +1921,30 @@ void checkSnapshotRead(const Standalone<GranuleSnapshot>& snapshot,
                        Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx) {
 	ASSERT(beginIdx < endIdx);
 	ASSERT(endIdx <= snapshot.size());
-	std::map<KeyRef, ValueRef> result;
 	KeyRef beginKey = snapshot[beginIdx].key;
 	Key endKey = endIdx == snapshot.size() ? keyAfter(snapshot.back().key) : snapshot[endIdx].key;
 	KeyRangeRef range(beginKey, endKey);
 
-	Arena ar = loadSnapshotFile(serialized, range, result, cipherKeysCtx);
+	Standalone<VectorRef<ParsedDeltaBoundaryRef>> result = loadSnapshotFile(serialized, range, cipherKeysCtx);
 
-	if (result.size() != endIdx - beginIdx) {
-		fmt::print("Read {0} rows != {1}\n", result.size(), endIdx - beginIdx);
-	}
+	// TODO re-comment
+	/*if (result.size() != endIdx - beginIdx) {
+	    fmt::print("Read {0} rows != {1}\n", result.size(), endIdx - beginIdx);
+	}*/
 	ASSERT(result.size() == endIdx - beginIdx);
 	for (auto& it : result) {
-		if (it.first != snapshot[beginIdx].key) {
-			fmt::print("Key {0} != {1}\n", it.first.printable(), snapshot[beginIdx].key.printable());
-		}
-		ASSERT(it.first == snapshot[beginIdx].key);
-		if (it.first != snapshot[beginIdx].key) {
-			fmt::print("Value {0} != {1} for Key {2}\n",
-			           it.second.printable(),
-			           snapshot[beginIdx].value.printable(),
-			           it.first.printable());
-		}
-		ASSERT(it.second == snapshot[beginIdx].value);
+		ASSERT(it.isSet());
+		/*if (it.key != snapshot[beginIdx].key) {
+		    fmt::print("Key {0} != {1}\n", it.key.printable(), snapshot[beginIdx].key.printable());
+		}*/
+		ASSERT(it.key == snapshot[beginIdx].key);
+		/*if (it.key != snapshot[beginIdx].key) {
+		    fmt::print("Value {0} != {1} for Key {2}\n",
+		               it.value.printable(),
+		               snapshot[beginIdx].value.printable(),
+		               it.key.printable());
+		}*/
+		ASSERT(it.key == snapshot[beginIdx].value);
 		beginIdx++;
 	}
 }
@@ -2312,11 +2467,11 @@ void checkGranuleRead(const KeyValueGen& kvGen,
 	}
 	RangeResult actualData = materializeBlobGranule(chunk, range, beginVersion, readVersion, snapshotPtr, deltaPtrs);
 
-	/*if (expectedData.size() != actualData.size()) {
-	    fmt::print("Expected Size {0} != Actual Size {1}\n", expectedData.size(), actualData.size());
-
+	// TODO re-comment
+	if (expectedData.size() != actualData.size()) {
+		fmt::print("Expected Size {0} != Actual Size {1}\n", expectedData.size(), actualData.size());
 	}
-	fmt::print("Expected Data {0}:\n", expectedData.size());
+	/*fmt::print("Expected Data {0}:\n", expectedData.size());
 	for (auto& it : expectedData) {
 	    fmt::print("  {0}=\n", it.first.printable());
 	}
@@ -2345,6 +2500,12 @@ TEST_CASE("/blobgranule/files/granuleReadUnitTest") {
 	int targetDataBytes = randomExp(12, 25);
 	int targetSnapshotBytes = (int)(deterministicRandom()->randomInt(0, targetDataBytes));
 	int targetDeltaBytes = targetDataBytes - targetSnapshotBytes;
+
+	fmt::print("Snapshot Chunks: {0}\nDelta Chunks: {1}\nSnapshot Bytes: {2}\nDelta Bytes: {3}\n",
+	           targetSnapshotChunks,
+	           targetDeltaChunks,
+	           targetSnapshotBytes,
+	           targetDeltaBytes);
 
 	int targetSnapshotChunkSize = targetSnapshotBytes / targetSnapshotChunks;
 	int targetDeltaChunkSize = targetDeltaBytes / targetDeltaChunks;
@@ -2387,8 +2548,10 @@ TEST_CASE("/blobgranule/files/granuleReadUnitTest") {
 		if (!fileData.empty()) {
 			if (j == deltaData.size() && deterministicRandom()->coinflip()) {
 				// if it's the last set of deltas, sometimes make them the memory deltas instead
+				fmt::print("Memory Deltas {0} - {1}\n", fileData.front().version, fileData.back().version);
 				inMemoryDeltas = fileData;
 			} else {
+				fmt::print("Delta file {0} - {1}\n", fileData.front().version, fileData.back().version);
 				Value serializedDelta = serializeChunkedDeltaFile(
 				    fileData, kvGen.allRange, targetDeltaChunkSize, kvGen.compressFilter, kvGen.cipherKeys);
 				serializedDeltaFiles.emplace_back(fileData.back().version, serializedDelta);
