@@ -20,29 +20,28 @@
 
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
 
+#include <rocksdb/c.h>
 #include <rocksdb/cache.h>
+#include <rocksdb/convenience.h>
 #include <rocksdb/db.h>
+#include <rocksdb/env.h>
 #include <rocksdb/filter_policy.h>
 #include <rocksdb/listener.h>
-#include <rocksdb/options.h>
 #include <rocksdb/metadata.h>
+#include <rocksdb/options.h>
+#include <rocksdb/perf_context.h>
+#include <rocksdb/rate_limiter.h>
+#include <rocksdb/slice.h>
 #include <rocksdb/slice_transform.h>
 #include <rocksdb/sst_file_reader.h>
 #include <rocksdb/sst_file_writer.h>
-#include <rocksdb/slice.h>
-#include <rocksdb/env.h>
-#include <rocksdb/options.h>
 #include <rocksdb/statistics.h>
 #include <rocksdb/table.h>
-#include <rocksdb/version.h>
 #include <rocksdb/types.h>
 #include <rocksdb/utilities/checkpoint.h>
 #include <rocksdb/utilities/table_properties_collectors.h>
 #include <rocksdb/version.h>
 
-#include <rocksdb/rate_limiter.h>
-#include <rocksdb/perf_context.h>
-#include <rocksdb/c.h>
 #if defined __has_include
 #if __has_include(<liburing.h>)
 #include <liburing.h>
@@ -80,8 +79,105 @@ namespace {
 using rocksdb::BackgroundErrorReason;
 
 struct SharedRocksDBState {
+	SharedRocksDBState();
+
 	bool closing = false;
+	rocksdb::ColumnFamilyOptions cfOptions;
+	rocksdb::DBOptions dbOptions;
+	std::shared_ptr<rocksdb::Cache> rocksDbBlockCache;
+
+private:
+	rocksdb::ColumnFamilyOptions initialCfOptions();
+	rocksdb::DBOptions initialDbOptions();
 };
+
+SharedRocksDBState::SharedRocksDBState()
+  : closing(false), cfOptions(initialCfOptions()), dbOptions(initialDbOptions()) {}
+
+rocksdb::ColumnFamilyOptions SharedRocksDBState::initialCfOptions() {
+	rocksdb::ColumnFamilyOptions options;
+	options.level_compaction_dynamic_level_bytes = true;
+	options.OptimizeLevelStyleCompaction(SERVER_KNOBS->ROCKSDB_MEMTABLE_BYTES);
+
+	if (SERVER_KNOBS->ROCKSDB_PERIODIC_COMPACTION_SECONDS > 0) {
+		options.periodic_compaction_seconds = SERVER_KNOBS->ROCKSDB_PERIODIC_COMPACTION_SECONDS;
+	}
+
+	if (SERVER_KNOBS->ROCKSDB_SOFT_PENDING_COMPACT_BYTES_LIMIT > 0) {
+		options.soft_pending_compaction_bytes_limit = SERVER_KNOBS->ROCKSDB_SOFT_PENDING_COMPACT_BYTES_LIMIT;
+	}
+
+	if (SERVER_KNOBS->ROCKSDB_HARD_PENDING_COMPACT_BYTES_LIMIT > 0) {
+		options.hard_pending_compaction_bytes_limit = SERVER_KNOBS->ROCKSDB_HARD_PENDING_COMPACT_BYTES_LIMIT;
+	}
+
+	// Compact sstables when there's too much deleted stuff.
+	options.table_properties_collector_factories = { rocksdb::NewCompactOnDeletionCollectorFactory(128, 1) };
+
+	rocksdb::BlockBasedTableOptions bbOpts;
+	// TODO: Add a knob for the block cache size. (Default is 8 MB)
+	if (SERVER_KNOBS->ROCKSDB_PREFIX_LEN > 0) {
+		// Prefix blooms are used during Seek.
+		options.prefix_extractor.reset(rocksdb::NewFixedPrefixTransform(SERVER_KNOBS->ROCKSDB_PREFIX_LEN));
+
+		// Also turn on bloom filters in the memtable.
+		// TODO: Make a knob for this as well.
+		options.memtable_prefix_bloom_size_ratio = 0.1;
+
+		// 5 -- Can be read by RocksDB's versions since 6.6.0. Full and partitioned
+		// filters use a generally faster and more accurate Bloom filter
+		// implementation, with a different schema.
+		// https://github.com/facebook/rocksdb/blob/b77569f18bfc77fb1d8a0b3218f6ecf571bc4988/include/rocksdb/table.h#L391
+		bbOpts.format_version = 5;
+
+		// Create and apply a bloom filter using the 10 bits
+		// which should yield a ~1% false positive rate:
+		// https://github.com/facebook/rocksdb/wiki/RocksDB-Bloom-Filter#full-filters-new-format
+		bbOpts.filter_policy.reset(rocksdb::NewBloomFilterPolicy(10));
+
+		// The whole key blooms are only used for point lookups.
+		// https://github.com/facebook/rocksdb/wiki/RocksDB-Bloom-Filter#prefix-vs-whole-key
+		bbOpts.whole_key_filtering = false;
+	}
+
+	if (SERVER_KNOBS->ROCKSDB_BLOCK_CACHE_SIZE > 0) {
+		if (this->rocksDbBlockCache == nullptr) {
+			this->rocksDbBlockCache = rocksdb::NewLRUCache(SERVER_KNOBS->ROCKSDB_BLOCK_CACHE_SIZE);
+		}
+		bbOpts.block_cache = this->rocksDbBlockCache;
+	}
+	if (SERVER_KNOBS->ROCKSDB_BLOCK_SIZE > 0) {
+		bbOpts.block_size = SERVER_KNOBS->ROCKSDB_BLOCK_SIZE;
+	}
+
+	options.table_factory.reset(rocksdb::NewBlockBasedTableFactory(bbOpts));
+
+	return options;
+}
+
+rocksdb::DBOptions SharedRocksDBState::initialDbOptions() {
+	rocksdb::DBOptions options;
+	options.avoid_unnecessary_blocking_io = true;
+	options.create_if_missing = true;
+
+	if (SERVER_KNOBS->ROCKSDB_BACKGROUND_PARALLELISM > 0) {
+		options.IncreaseParallelism(SERVER_KNOBS->ROCKSDB_BACKGROUND_PARALLELISM);
+	}
+
+	if (SERVER_KNOBS->ROCKSDB_MAX_SUBCOMPACTIONS > 0) {
+		options.max_subcompactions = SERVER_KNOBS->ROCKSDB_MAX_SUBCOMPACTIONS;
+	}
+
+	if (SERVER_KNOBS->ROCKSDB_COMPACTION_READAHEAD_SIZE > 0) {
+		options.compaction_readahead_size = SERVER_KNOBS->ROCKSDB_COMPACTION_READAHEAD_SIZE;
+	}
+
+	// options.statistics = rocksdb::CreateDBStatistics();
+	// options.statistics->set_stats_level(rocksdb::kExceptHistogramOrTimers);
+
+	options.db_log_dir = SERVER_KNOBS->LOG_DIRECTORY;
+	return options;
+}
 
 // Returns string representation of RocksDB background error reason.
 // Error reason code:
@@ -153,7 +249,6 @@ private:
 };
 using DB = rocksdb::DB*;
 using CF = rocksdb::ColumnFamilyHandle*;
-std::shared_ptr<rocksdb::Cache> rocksdb_block_cache = nullptr;
 
 #define PERSIST_PREFIX "\xff\xff"
 const KeyRef persistVersion = LiteralStringRef(PERSIST_PREFIX "Version");
@@ -250,84 +345,6 @@ rocksdb::Slice toSlice(StringRef s) {
 
 StringRef toStringRef(rocksdb::Slice s) {
 	return StringRef(reinterpret_cast<const uint8_t*>(s.data()), s.size());
-}
-
-rocksdb::ColumnFamilyOptions getCFOptions() {
-	rocksdb::ColumnFamilyOptions options;
-	options.level_compaction_dynamic_level_bytes = true;
-	options.OptimizeLevelStyleCompaction(SERVER_KNOBS->ROCKSDB_MEMTABLE_BYTES);
-	if (SERVER_KNOBS->ROCKSDB_PERIODIC_COMPACTION_SECONDS > 0) {
-		options.periodic_compaction_seconds = SERVER_KNOBS->ROCKSDB_PERIODIC_COMPACTION_SECONDS;
-	}
-	if (SERVER_KNOBS->ROCKSDB_SOFT_PENDING_COMPACT_BYTES_LIMIT > 0) {
-		options.soft_pending_compaction_bytes_limit = SERVER_KNOBS->ROCKSDB_SOFT_PENDING_COMPACT_BYTES_LIMIT;
-	}
-	if (SERVER_KNOBS->ROCKSDB_HARD_PENDING_COMPACT_BYTES_LIMIT > 0) {
-		options.hard_pending_compaction_bytes_limit = SERVER_KNOBS->ROCKSDB_HARD_PENDING_COMPACT_BYTES_LIMIT;
-	}
-	// Compact sstables when there's too much deleted stuff.
-	options.table_properties_collector_factories = { rocksdb::NewCompactOnDeletionCollectorFactory(128, 1) };
-
-	rocksdb::BlockBasedTableOptions bbOpts;
-	// TODO: Add a knob for the block cache size. (Default is 8 MB)
-	if (SERVER_KNOBS->ROCKSDB_PREFIX_LEN > 0) {
-		// Prefix blooms are used during Seek.
-		options.prefix_extractor.reset(rocksdb::NewFixedPrefixTransform(SERVER_KNOBS->ROCKSDB_PREFIX_LEN));
-
-		// Also turn on bloom filters in the memtable.
-		// TODO: Make a knob for this as well.
-		options.memtable_prefix_bloom_size_ratio = 0.1;
-
-		// 5 -- Can be read by RocksDB's versions since 6.6.0. Full and partitioned
-		// filters use a generally faster and more accurate Bloom filter
-		// implementation, with a different schema.
-		// https://github.com/facebook/rocksdb/blob/b77569f18bfc77fb1d8a0b3218f6ecf571bc4988/include/rocksdb/table.h#L391
-		bbOpts.format_version = 5;
-
-		// Create and apply a bloom filter using the 10 bits
-		// which should yield a ~1% false positive rate:
-		// https://github.com/facebook/rocksdb/wiki/RocksDB-Bloom-Filter#full-filters-new-format
-		bbOpts.filter_policy.reset(rocksdb::NewBloomFilterPolicy(10));
-
-		// The whole key blooms are only used for point lookups.
-		// https://github.com/facebook/rocksdb/wiki/RocksDB-Bloom-Filter#prefix-vs-whole-key
-		bbOpts.whole_key_filtering = false;
-	}
-
-	if (SERVER_KNOBS->ROCKSDB_BLOCK_CACHE_SIZE > 0) {
-		if (rocksdb_block_cache == nullptr) {
-			rocksdb_block_cache = rocksdb::NewLRUCache(SERVER_KNOBS->ROCKSDB_BLOCK_CACHE_SIZE);
-		}
-		bbOpts.block_cache = rocksdb_block_cache;
-	}
-	if (SERVER_KNOBS->ROCKSDB_BLOCK_SIZE > 0) {
-		bbOpts.block_size = SERVER_KNOBS->ROCKSDB_BLOCK_SIZE;
-	}
-
-	options.table_factory.reset(rocksdb::NewBlockBasedTableFactory(bbOpts));
-
-	return options;
-}
-
-rocksdb::Options getOptions() {
-	rocksdb::Options options({}, getCFOptions());
-	options.avoid_unnecessary_blocking_io = true;
-	options.create_if_missing = true;
-	if (SERVER_KNOBS->ROCKSDB_BACKGROUND_PARALLELISM > 0) {
-		options.IncreaseParallelism(SERVER_KNOBS->ROCKSDB_BACKGROUND_PARALLELISM);
-	}
-	if (SERVER_KNOBS->ROCKSDB_MAX_SUBCOMPACTIONS > 0) {
-		options.max_subcompactions = SERVER_KNOBS->ROCKSDB_MAX_SUBCOMPACTIONS;
-	}
-	if (SERVER_KNOBS->ROCKSDB_COMPACTION_READAHEAD_SIZE > 0) {
-		options.compaction_readahead_size = SERVER_KNOBS->ROCKSDB_COMPACTION_READAHEAD_SIZE;
-	}
-
-	options.statistics = rocksdb::CreateDBStatistics();
-	options.statistics->set_stats_level(rocksdb::kExceptHistogramOrTimers);
-
-	options.db_log_dir = SERVER_KNOBS->LOG_DIRECTORY;
-	return options;
 }
 
 // Set some useful defaults desired for all reads.
@@ -930,27 +947,15 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			ThreadReturnPromise<Void> done;
 		};
 
-		DB& db;
-		CF& cf;
-		std::unordered_set<rocksdb::ColumnFamilyHandle*> cfHandles;
-
-		UID id;
-		std::shared_ptr<rocksdb::RateLimiter> rateLimiter;
-		std::shared_ptr<ReadIteratorPool> readIterPool;
-		std::shared_ptr<PerfContextMetrics> perfContextMetrics;
-		int threadIndex;
-		ThreadReturnPromiseStream<std::pair<std::string, double>>* metricPromiseStream;
-		// ThreadReturnPromiseStream pair.first stores the histogram name and
-		// pair.second stores the corresponding measured latency (seconds)
-
 		explicit Writer(DB& db,
 		                CF& cf,
+						std::shared_ptr<SharedRocksDBState> sharedState,
 		                UID id,
 		                std::shared_ptr<ReadIteratorPool> readIterPool,
 		                std::shared_ptr<PerfContextMetrics> perfContextMetrics,
 		                int threadIndex,
 		                ThreadReturnPromiseStream<std::pair<std::string, double>>* metricPromiseStream)
-		  : db(db), cf(cf), id(id), readIterPool(readIterPool), perfContextMetrics(perfContextMetrics),
+		  : db(db), cf(cf), sharedState(sharedState), id(id), readIterPool(readIterPool), perfContextMetrics(perfContextMetrics),
 		    threadIndex(threadIndex), metricPromiseStream(metricPromiseStream),
 		    rateLimiter(SERVER_KNOBS->ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC > 0
 		                    ? rocksdb::NewGenericRateLimiter(
@@ -990,29 +995,28 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
+
 		void action(OpenAction& a) {
 			ASSERT(cf == nullptr);
 
 			std::vector<std::string> columnFamilies;
-			rocksdb::Options options = getOptions();
-			rocksdb::Status status = rocksdb::DB::ListColumnFamilies(options, a.path, &columnFamilies);
+			rocksdb::Status status = rocksdb::DB::ListColumnFamilies(sharedState->dbOptions, a.path, &columnFamilies);
 			if (std::find(columnFamilies.begin(), columnFamilies.end(), "default") == columnFamilies.end()) {
 				columnFamilies.push_back("default");
 			}
 
-			rocksdb::ColumnFamilyOptions cfOptions = getCFOptions();
 			std::vector<rocksdb::ColumnFamilyDescriptor> descriptors;
 			for (const std::string& name : columnFamilies) {
-				descriptors.push_back(rocksdb::ColumnFamilyDescriptor{ name, cfOptions });
+				descriptors.push_back(rocksdb::ColumnFamilyDescriptor{ name, sharedState->cfOptions});
 			}
 
-			options.listeners.push_back(a.errorListener);
+			sharedState->dbOptions.listeners.push_back(a.errorListener);
 			if (SERVER_KNOBS->ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC > 0) {
-				options.rate_limiter = rateLimiter;
+				sharedState->dbOptions.rate_limiter = rateLimiter;
 			}
 
 			std::vector<rocksdb::ColumnFamilyHandle*> handles;
-			status = rocksdb::DB::Open(options, a.path, descriptors, &handles, &db);
+			status = rocksdb::DB::Open(sharedState->dbOptions, a.path, descriptors, &handles, &db);
 			cfHandles.insert(handles.begin(), handles.end());
 
 			if (!status.ok()) {
@@ -1029,7 +1033,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 
 			if (cf == nullptr) {
-				status = db->CreateColumnFamily(cfOptions, SERVER_KNOBS->DEFAULT_FDB_ROCKSDB_COLUMN_FAMILY, &cf);
+				status = db->CreateColumnFamily(sharedState->cfOptions, SERVER_KNOBS->DEFAULT_FDB_ROCKSDB_COLUMN_FAMILY, &cf);
 				cfHandles.insert(cf);
 				if (!status.ok()) {
 					logRocksDBError(id, status, "Open");
@@ -1048,15 +1052,17 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				// The current thread and main thread are same when the code runs in simulation.
 				// blockUntilReady() is getting the thread into deadlock state, so directly calling
 				// the metricsLogger.
-				a.metrics =
-				    rocksDBMetricLogger(
-				        id, a.sharedState, options.statistics, perfContextMetrics, db, readIterPool, &a.counters, cf) &&
-				    flowLockLogger(id, a.readLock, a.fetchLock) && refreshReadIteratorPool(readIterPool);
+				// a.metrics =
+				//     rocksDBMetricLogger(
+				//         id, a.sharedState,sharedState->dbOptions.statistics, perfContextMetrics, db, readIterPool, &a.counters, cf)
+				//         &&
+				//     flowLockLogger(id, a.readLock, a.fetchLock) && refreshReadIteratorPool(readIterPool);
+				a.metrics = flowLockLogger(id, a.readLock, a.fetchLock) && refreshReadIteratorPool(readIterPool);
 			} else {
 				onMainThread([&] {
 					a.metrics = rocksDBMetricLogger(id,
 					                                a.sharedState,
-					                                options.statistics,
+					                                sharedState->dbOptions.statistics,
 					                                perfContextMetrics,
 					                                db,
 					                                readIterPool,
@@ -1119,6 +1125,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				}
 			}
 		};
+
 		void action(CommitAction& a) {
 			bool doPerfContextMetrics =
 			    SERVER_KNOBS->ROCKSDB_PERFCONTEXT_ENABLE &&
@@ -1194,6 +1201,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			CloseAction(std::string path, bool deleteOnClose) : path(path), deleteOnClose(deleteOnClose) {}
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
+
 		void action(CloseAction& a) {
 			readIterPool.reset();
 			if (db == nullptr) {
@@ -1206,6 +1214,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				}
 			}
 			cfHandles.clear();
+			CancelAllBackgroundWork(db, true);
 			auto s = db->Close();
 			if (!s.ok()) {
 				logRocksDBError(id, s, "Close");
@@ -1215,9 +1224,10 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				columnFamilies.insert(SERVER_KNOBS->DEFAULT_FDB_ROCKSDB_COLUMN_FAMILY);
 				std::vector<rocksdb::ColumnFamilyDescriptor> descriptors;
 				for (const std::string name : columnFamilies) {
-					descriptors.push_back(rocksdb::ColumnFamilyDescriptor{ name, getCFOptions() });
+					descriptors.push_back(rocksdb::ColumnFamilyDescriptor{ name, sharedState->cfOptions });
 				}
-				s = rocksdb::DestroyDB(a.path, getOptions(), descriptors);
+				rocksdb::Options options(sharedState->dbOptions,sharedState->cfOptions);
+				s = rocksdb::DestroyDB(a.path, options, descriptors);
 				if (!s.ok()) {
 					logRocksDBError(id, s, "Destroy");
 				} else {
@@ -1231,6 +1241,20 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		void action(CheckpointAction& a);
 
 		void action(RestoreAction& a);
+
+		DB& db;
+		CF& cf;
+		std::unordered_set<rocksdb::ColumnFamilyHandle*> cfHandles;
+		std::shared_ptr<SharedRocksDBState> sharedState;
+		UID id;
+		std::shared_ptr<rocksdb::RateLimiter> rateLimiter;
+		std::shared_ptr<ReadIteratorPool> readIterPool;
+		std::shared_ptr<PerfContextMetrics> perfContextMetrics;
+		int threadIndex;
+		ThreadReturnPromiseStream<std::pair<std::string, double>>* metricPromiseStream;
+		// ThreadReturnPromiseStream pair.first stores the histogram name and
+		// pair.second stores the corresponding measured latency (seconds)
+
 	};
 
 	struct Reader : IThreadPoolReceiver {
@@ -1610,6 +1634,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		// threadIndex is used for metricPromiseStreams and perfContextMetrics
 		writeThread->addThread(new Writer(db,
 		                                  defaultFdbCF,
+										  sharedState,
 		                                  id,
 		                                  readIterPool,
 		                                  perfContextMetrics,
@@ -1740,10 +1765,22 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		self->writeThread->post(a);
 		wait(f);
 		wait(self->writeThread->stop());
+		self->db->GetEnv()->WaitForJoin();
 		if (self->closePromise.canBeSet()) {
 			self->closePromise.send(Void());
 		}
 		if (self->db != nullptr) {
+			state std::vector<rocksdb::Env::Priority> priorities = {
+				rocksdb::Env::BOTTOM, rocksdb::Env::LOW, rocksdb::Env::HIGH, rocksdb::Env::USER
+			};
+			state int i = 0;
+			for (i = 0; i < priorities.size(); ++i) {
+				while (self->db->GetEnv()->GetBackgroundThreads(priorities[i]) > 0) {
+					std::cout << "Active Threads: " << self->db->GetEnv()->GetBackgroundThreads(priorities[i])
+					          << std::endl;
+					wait(delay(30));
+				}
+			}
 			delete self->db;
 		}
 		delete self;
@@ -2126,7 +2163,7 @@ void RocksDBKeyValueStore::Writer::action(RestoreAction& a) {
 		rocksdb::ImportColumnFamilyOptions importOptions;
 		importOptions.move_files = true;
 		status = db->CreateColumnFamilyWithImport(
-		    getCFOptions(), SERVER_KNOBS->DEFAULT_FDB_ROCKSDB_COLUMN_FAMILY, importOptions, metaData, &cf);
+		    sharedState->cfOptions, SERVER_KNOBS->DEFAULT_FDB_ROCKSDB_COLUMN_FAMILY, importOptions, metaData, &cf);
 		cfHandles.insert(cf);
 
 		if (!status.ok()) {
@@ -2140,7 +2177,7 @@ void RocksDBKeyValueStore::Writer::action(RestoreAction& a) {
 		}
 	} else if (format == RocksDB) {
 		if (cf == nullptr) {
-			status = db->CreateColumnFamily(getCFOptions(), SERVER_KNOBS->DEFAULT_FDB_ROCKSDB_COLUMN_FAMILY, &cf);
+			status = db->CreateColumnFamily(sharedState->cfOptions, SERVER_KNOBS->DEFAULT_FDB_ROCKSDB_COLUMN_FAMILY, &cf);
 			cfHandles.insert(cf);
 			TraceEvent("RocksDBServeRestoreRange", id)
 			    .detail("Path", a.path)
