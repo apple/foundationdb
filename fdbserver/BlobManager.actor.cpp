@@ -3082,7 +3082,7 @@ ACTOR Future<GranuleFiles> loadHistoryFiles(Reference<BlobManagerData> bmData, U
 	}
 }
 
-ACTOR Future<Void> canDeleteFullGranule(Reference<BlobManagerData> self, UID granuleId) {
+ACTOR Future<bool> canDeleteFullGranule(Reference<BlobManagerData> self, UID granuleId) {
 	state Transaction tr(self->db);
 	state KeyRange splitRange = blobGranuleSplitKeyRangeFor(granuleId);
 
@@ -3092,6 +3092,9 @@ ACTOR Future<Void> canDeleteFullGranule(Reference<BlobManagerData> self, UID gra
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 			state RangeResult splitState = wait(tr.getRange(splitRange, SERVER_KNOBS->BG_MAX_SPLIT_FANOUT));
+			if (splitState.empty() && !splitState.more) {
+				return true;
+			}
 			state int i = 0;
 			state bool retry = false;
 			for (; i < splitState.size(); i++) {
@@ -3134,7 +3137,7 @@ ACTOR Future<Void> canDeleteFullGranule(Reference<BlobManagerData> self, UID gra
 			wait(tr.onError(e));
 		}
 	}
-	return Void();
+	return false;
 }
 
 static Future<Void> deleteFile(Reference<BlobConnectionProvider> bstoreProvider, std::string filePath) {
@@ -3175,7 +3178,8 @@ ACTOR Future<Void> fullyDeleteGranule(Reference<BlobManagerData> self,
 
 	// if granule is still splitting and files are needed for new sub-granules to re-snapshot, we can only partially
 	// delete the granule, since we need to keep the last snapshot and deltas for splitting
-	wait(canDeleteFullGranule(self, granuleId));
+	// Or, if the granule isn't finalized (still needs the history entry for the old change feed id, because all data from the old change feed hasn't yet been persisted in blob), we can delete the files but need to keep the granule history entry.
+	state bool canDeleteHistoryKey = wait(canDeleteFullGranule(self, granuleId));
 	state Reference<BlobConnectionProvider> bstore = wait(getBStoreForGranule(self, granuleRange));
 
 	// get files
@@ -3225,7 +3229,9 @@ ACTOR Future<Void> fullyDeleteGranule(Reference<BlobManagerData> self,
 	loop {
 		try {
 			KeyRange fileRangeKey = blobGranuleFileKeyRangeFor(granuleId);
+			if (canDeleteHistoryKey) {
 			tr.clear(historyKey);
+			}
 			tr.clear(fileRangeKey);
 			wait(tr.commit());
 			break;
@@ -3235,7 +3241,7 @@ ACTOR Future<Void> fullyDeleteGranule(Reference<BlobManagerData> self,
 	}
 
 	if (BM_PURGE_DEBUG) {
-		fmt::print("BM {0} Fully deleting granule {1}: success\n", self->epoch, granuleId.toString());
+		fmt::print("BM {0} Fully deleting granule {1}: success {2}\n", self->epoch, granuleId.toString(), canDeleteHistoryKey ? "" : " ignoring history key!");
 	}
 
 	TraceEvent("GranuleFullPurge", self->id)
