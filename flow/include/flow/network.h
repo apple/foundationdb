@@ -736,6 +736,19 @@ public:
 		return static_cast<INetworkConnections*>((void*)g_network->global(INetwork::enNetworkConnections));
 	}
 
+	static NetworkAddress pickOneAddress(const std::vector<NetworkAddress>& addresses) {
+		std::vector<NetworkAddress> ipV6Addresses;
+		for (const NetworkAddress& addr : addresses) {
+			if (addr.isV6()) {
+				ipV6Addresses.push_back(addr);
+			}
+		}
+		if (ipV6Addresses.size() > 0) {
+			return ipV6Addresses[deterministicRandom()->randomInt(0, ipV6Addresses.size())];
+		}
+		return addresses[deterministicRandom()->randomInt(0, addresses.size())];
+	}
+
 	void removeCachedDNS(const std::string& host, const std::string& service) { dnsCache.remove(host, service); }
 
 	DNSCache dnsCache;
