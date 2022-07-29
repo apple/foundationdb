@@ -487,7 +487,7 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	// caller
 	Future<Void> updateStorageMetadata(TCServerInfo* server, bool isTss);
 
-	Future<Void> serverGetTeamRequests(TeamCollectionInterface tci);
+	Future<Void> serverGetTeamRequests(ITeamCollection tci);
 
 	Future<Void> removeBadTeams();
 
@@ -672,7 +672,7 @@ public:
 	// Keep track of servers and teams -- serves requests for getRandomTeam
 	static Future<Void> run(Reference<DDTeamCollection> teamCollection,
 	                        Reference<InitialDataDistribution> initData,
-	                        TeamCollectionInterface tci,
+	                        ITeamCollection tci,
 	                        Reference<IAsyncListener<RequestStream<RecruitStorageRequest>>> recruitStorage,
 	                        DDEnabledState const& ddEnabledState);
 

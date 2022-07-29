@@ -287,25 +287,32 @@ struct GetMetricsListRequest {
 };
 
 // send request/signal to TeamCollection through interface
-struct TeamCollectionInterface {
+// call method from components outside DDTeamCollection
+struct ITeamCollection {
 	PromiseStream<GetTeamRequest> getTeam;
 };
 
 // send request/signal to DDTracker through interface
-struct DDTrackerInterface {
+// call method from components outside DDTracker
+struct IDDTracker {
 	Promise<Void> readyToStart;
 
 	PromiseStream<GetMetricsRequest> getShardMetrics;
-	PromiseStream<KeyRange> restartShardTracker;
 	PromiseStream<GetTopKMetricsRequest> getTopKMetrics;
 	PromiseStream<GetMetricsListRequest> getShardMetricsList;
-	PromiseStream<Promise<int64_t>> getAverageShardBytes;
+
+	virtual double getAverageShardBytes() = 0;
+	virtual void restartShardTrackers(KeyRangeRef keys) = 0;
+	virtual ~IDDTracker() = 0;
 };
 
-// send request/signal to DDQueueData through interface
-struct DDQueueInterface {
+// send request/signal to DDQueue through interface
+// call method from components outside DDQueue
+struct IDDQueue {
 	PromiseStream<RelocateShard> relocationProducer;
-	PromiseStream<Promise<int>> getUnhealthyRelocationCount;
+	// PromiseStream<Promise<int>> getUnhealthyRelocationCount;
+
+	virtual int getUnhealthyRelocationCount() = 0;
 };
 
 class ShardsAffectedByTeamFailure : public ReferenceCounted<ShardsAffectedByTeamFailure> {
@@ -390,7 +397,6 @@ private:
 // context.
 struct DDContext : public ReferenceCounted<DDContext> {
 private:
-	ActorCollectionNoErrors contextActors; // has to be no error actors because we don't wait on it
 	Reference<DDEnabledState> ddEnabledState; // Note: don't operate directly because it's shared with snapshot server
 
 public:
@@ -399,17 +405,15 @@ public:
 	bool trackerCancelled = false;
 	DatabaseConfiguration configuration;
 
-	DDTrackerInterface trackerInterface;
-	DDQueueInterface queueInterface;
-	std::vector<TeamCollectionInterface> teamCollectionInterfaces; // primary and remote region interface
+	std::unique_ptr<IDDTracker> tracker;
+	std::unique_ptr<IDDQueue> queue;
+	std::vector<std::unique_ptr<ITeamCollection>> teamCollections; // primary and remote region interface
 
 	// Optional components that can be set after DD bootstrap. They're optional when test, but required for DD being
 	// fully-functional.
 	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
 	Reference<AsyncVar<bool>> processingUnhealthy, processingWiggle;
-
 	std::vector<Reference<AsyncVar<bool>>> zeroHealthyTeams; // primary and remote
-	Reference<AsyncVar<bool>> anyZeroHealthyTeams; // true if primary or remote has zero healthy team
 
 	DDContext() = default;
 	DDContext(UID id, Reference<DDEnabledState> enabledState)
@@ -442,7 +446,6 @@ public:
 	Reference<DDEnabledState> getDDEnableState() { return context->getDDEnableState(); }
 	Future<Standalone<VectorRef<DDMetricsRef>>> getDDMetricsList(const GetMetricsListRequest& req);
 
-	// test use only
 	// FIXME: better encapsulation?
 	Reference<DDContext> rawContext() { return context; }
 };
@@ -496,26 +499,12 @@ struct ShardTrackedData {
 	Reference<AsyncVar<Optional<ShardMetrics>>> stats;
 };
 
-ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> initData,
+ACTOR Future<Void> dataDistributionTracker(Reference<DDContext> context,
+                                           Reference<InitialDataDistribution> initData,
                                            Database cx,
-                                           Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
-                                           std::shared_ptr<DDTrackerInterface> trackerInterface,
-                                           std::shared_ptr<DDQueueInterface> queueInterface,
-                                           Reference<AsyncVar<bool>> zeroHealthyTeams,
-                                           UID distributorId,
-                                           KeyRangeMap<ShardTrackedData>* shards,
-                                           bool* trackerCancelled);
+                                           KeyRangeMap<ShardTrackedData>* shards);
 
-ACTOR Future<Void> dataDistributionQueue(Database cx,
-                                         std::shared_ptr<DDTrackerInterface> trackerInterface,
-                                         std::shared_ptr<DDQueueInterface> queueInterface,
-                                         std::vector<TeamCollectionInterface> teamCollection,
-                                         Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
-                                         MoveKeysLock lock,
-                                         UID distributorId,
-                                         int teamSize,
-                                         int singleRegionTeamSize,
-                                         const DDEnabledState* ddEnabledState);
+ACTOR Future<Void> dataDistributionQueue(Reference<DDContext> context, Database cx);
 
 // Holds the permitted size and IO Bounds for a shard
 struct ShardSizeBounds {

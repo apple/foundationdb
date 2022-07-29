@@ -2722,7 +2722,7 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> serverGetTeamRequests(DDTeamCollection* self, TeamCollectionInterface tci) {
+	ACTOR static Future<Void> serverGetTeamRequests(DDTeamCollection* self, ITeamCollection tci) {
 		loop {
 			GetTeamRequest req = waitNext(tci.getTeam.getFuture());
 			if (req.findTeamByServers) {
@@ -2943,7 +2943,7 @@ public:
 
 	ACTOR static Future<Void> run(Reference<DDTeamCollection> teamCollection,
 	                              Reference<InitialDataDistribution> initData,
-	                              TeamCollectionInterface tci,
+	                              ITeamCollection tci,
 	                              Reference<IAsyncListener<RequestStream<RecruitStorageRequest>>> recruitStorage,
 	                              DDEnabledState const* ddEnabledState) {
 		state DDTeamCollection* self = teamCollection.getPtr();
@@ -3525,7 +3525,7 @@ Future<Void> DDTeamCollection::updateReplicasKey(Optional<Key> dcId) {
 	return DDTeamCollectionImpl::updateReplicasKey(this, dcId);
 }
 
-Future<Void> DDTeamCollection::serverGetTeamRequests(TeamCollectionInterface tci) {
+Future<Void> DDTeamCollection::serverGetTeamRequests(ITeamCollection tci) {
 	return DDTeamCollectionImpl::serverGetTeamRequests(this, tci);
 }
 
@@ -5123,7 +5123,7 @@ std::pair<StorageWiggler::State, double> DDTeamCollection::getStorageWigglerStat
 
 Future<Void> DDTeamCollection::run(Reference<DDTeamCollection> teamCollection,
                                    Reference<InitialDataDistribution> initData,
-                                   TeamCollectionInterface tci,
+                                   ITeamCollection tci,
                                    Reference<IAsyncListener<RequestStream<RecruitStorageRequest>>> recruitStorage,
                                    DDEnabledState const& ddEnabledState) {
 	return DDTeamCollectionImpl::run(teamCollection, initData, tci, recruitStorage, &ddEnabledState);

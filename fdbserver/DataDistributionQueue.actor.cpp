@@ -593,9 +593,9 @@ struct DDQueueData {
 
 	Reference<EventCacheHolder> movedKeyServersEventHolder;
 	// component interfaces
-	std::vector<TeamCollectionInterface> teamCollections;
-	std::shared_ptr<DDTrackerInterface> trackerInterface;
-	std::shared_ptr<DDQueueInterface> queueInterface;
+	std::vector<ITeamCollection> teamCollections;
+	std::shared_ptr<IDDTracker> trackerInterface;
+	std::shared_ptr<IDDQueue> queueInterface;
 
 	void startRelocation(int priority, int healthPriority) {
 		// Although PRIORITY_TEAM_REDUNDANT has lower priority than split and merge shard movement,
@@ -639,12 +639,12 @@ struct DDQueueData {
 	DDQueueData(UID mid,
 	            MoveKeysLock lock,
 	            Database cx,
-	            std::vector<TeamCollectionInterface> teamCollections,
+	            std::vector<ITeamCollection> teamCollections,
 	            Reference<ShardsAffectedByTeamFailure> sABTF,
 	            int teamSize,
 	            int singleRegionTeamSize,
-	            std::shared_ptr<DDTrackerInterface> trackerInterface = nullptr,
-	            std::shared_ptr<DDQueueInterface> queueInterface = nullptr)
+	            std::shared_ptr<IDDTracker> trackerInterface = nullptr,
+	            std::shared_ptr<IDDQueue> queueInterface = nullptr)
 	  : actors(true), distributorId(mid), lock(lock), cx(cx), txnProcessor(new DDTxnProcessor(cx)),
 	    shardsAffectedByTeamFailure(sABTF), startMoveKeysParallelismLock(SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM),
 	    finishMoveKeysParallelismLock(SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM),
@@ -2252,9 +2252,9 @@ ACTOR Future<Void> serverDDQueueInterface(DDQueueData* self) {
 }
 
 ACTOR Future<Void> dataDistributionQueue(Database cx,
-                                         std::shared_ptr<DDTrackerInterface> trackerInterface,
-                                         std::shared_ptr<DDQueueInterface> queueInterface,
-                                         std::vector<TeamCollectionInterface> teamCollections,
+                                         std::shared_ptr<IDDTracker> trackerInterface,
+                                         std::shared_ptr<IDDQueue> queueInterface,
+                                         std::vector<ITeamCollection> teamCollections,
                                          Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
                                          MoveKeysLock lock,
                                          UID distributorId,

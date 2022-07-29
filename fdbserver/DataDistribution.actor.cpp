@@ -276,20 +276,21 @@ static std::set<int> const& normalDDQueueErrors() {
 }
 
 void DDContext::initTeamCollectionStates() {
-	teamCollectionInterfaces.emplace_back();
+	// teamCollections.emplace_back();
 	zeroHealthyTeams.push_back(makeReference<AsyncVar<bool>>(true));
-	int storageTeamSize = configuration.storageTeamSize;
+	// int storageTeamSize = configuration.storageTeamSize;
 
 	if (configuration.usableRegions > 1) {
-		teamCollectionInterfaces.emplace_back();
-		storageTeamSize = 2 * configuration.storageTeamSize;
+		// teamCollections.emplace_back();
+		// storageTeamSize = 2 * configuration.storageTeamSize;
 
 		zeroHealthyTeams.push_back(makeReference<AsyncVar<bool>>(true));
-		anyZeroHealthyTeams = makeReference<AsyncVar<bool>>(true);
-		contextActors.add(anyTrue(zeroHealthyTeams, anyZeroHealthyTeams));
-	} else {
-		anyZeroHealthyTeams = zeroHealthyTeams[0];
+		// anyZeroHealthyTeams = makeReference<AsyncVar<bool>>(true);
+		// contextActors.add(anyTrue(zeroHealthyTeams, anyZeroHealthyTeams));
 	}
+	// else {
+	// 	anyZeroHealthyTeams = zeroHealthyTeams[0];
+	//}
 };
 
 struct DataDistributor : NonCopyable, ReferenceCounted<DataDistributor>, public DDComponent {
@@ -543,6 +544,12 @@ public:
 	Future<Void> pollMoveKeysLock() {
 		return txnProcessor->pollMoveKeysLock(context->lock, context->getDDEnableState());
 	}
+
+	Future<Void> startDDTracker(Database cx, KeyRangeMap<ShardTrackedData>* shards) {
+		return dataDistributionTracker(context, initData, cx, shards);
+	}
+
+	Future<Void> startDDQueue(Database cx) { return dataDistributionQueue(context, cx); }
 };
 
 // Runs the data distribution algorithm for FDB, including the DD Queue, DD tracker, and DD team collection
@@ -584,31 +591,10 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self) {
 			}
 
 			actors.push_back(self->pollMoveKeysLock());
-			actors.push_back(reportErrorsExcept(dataDistributionTracker(self->initData,
-			                                                            cx,
-			                                                            self->shardsAffectedByTeamFailure,
-			                                                            self->trackerInterface,
-			                                                            self->queueInterface,
-			                                                            anyZeroHealthyTeams,
-			                                                            self->ddId,
-			                                                            &shards,
-			                                                            &trackerCancelled),
-			                                    "DDTracker",
-			                                    self->Id(),
-			                                    &normalDDQueueErrors()));
-			actors.push_back(reportErrorsExcept(dataDistributionQueue(cx,
-			                                                          self->trackerInterface,
-			                                                          self->queueInterface,
-			                                                          tcis,
-			                                                          self->shardsAffectedByTeamFailure,
-			                                                          self->lock,
-			                                                          self->ddId,
-			                                                          storageTeamSize,
-			                                                          self->configuration.storageTeamSize,
-			                                                          ddEnabledState),
-			                                    "DDQueueData",
-			                                    self->Id(),
-			                                    &normalDDQueueErrors()));
+			actors.push_back(
+			    reportErrorsExcept(self->startDDTracker(cx, &shards), "DDTracker", self->Id(), &normalDDQueueErrors()));
+			actors.push_back(
+			    reportErrorsExcept(self->startDDQueue(cx), "DDQueueData", self->Id(), &normalDDQueueErrors()));
 
 			std::vector<DDTeamCollection*> teamCollectionsPtrs;
 			primaryTeamCollection = makeReference<DDTeamCollection>(
@@ -631,7 +617,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self) {
 			teamCollectionsPtrs.push_back(primaryTeamCollection.getPtr());
 			auto recruitStorage = IAsyncListener<RequestStream<RecruitStorageRequest>>::create(
 			    self->dbInfo, [](auto const& info) { return info.clusterInterface.recruitStorage; });
-			if (self->configuration.usableRegions > 1) {
+			if (self->usableRegions() > 1) {
 				remoteTeamCollection = makeReference<DDTeamCollection>(
 				    cx,
 				    self->ddId,
@@ -1453,7 +1439,7 @@ TEST_CASE("/DataDistributor/Initialization/ResumeFromShard") {
 	std::cout << "Start resuming...\n";
 	wait(DataDistributor::resumeFromShards(self, false));
 	std::cout << "Start validation...\n";
-	auto relocateFuture = context->queueInterface->relocationProducer.getFuture();
+	auto relocateFuture = context->queueInterface.relocationProducer.getFuture();
 	for (int i = 0; i < SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM; ++i) {
 		ASSERT(relocateFuture.isReady());
 		auto rs = relocateFuture.pop();
