@@ -3088,7 +3088,7 @@ void handleBlobVersionRequest(Reference<BlobWorkerData> bwData, MinBlobVersionRe
 	auto allRanges = bwData->granuleMetadata.intersectingRanges(normalKeys);
 	for (auto& it : allRanges) {
 		if (it.value().activeMetadata.isValid()) {
-			minVer = std::min(minVer, it.value().activeMetadata->bufferedDeltaVersion);
+			minVer = std::min(minVer, it.value().activeMetadata->activeCFData.get()->getVersion());
 		}
 	}
 	rep.version = minVer;

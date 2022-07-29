@@ -250,15 +250,25 @@ public:
 	ACTOR static Future<Void> monitorBlobWorkers(Ratekeeper* self) {
 		state std::vector<BlobWorkerInterface> blobWorkers;
 		state int workerFetchCount = 0;
+		state double lastStartTime = 0;
+		state double startTime = 0;
+		state bool blobWorkerDead = false;
+		state double lastLoggedTime = 0;
+
 		loop {
 			while (!self->configuration.blobGranulesEnabled) {
 				wait(delay(SERVER_KNOBS->SERVER_LIST_DELAY));
 			}
 
-			state double startTime = now();
+			state double grvTime = now();
+
 			state Version grv;
-			state Future<Void> blobWorkerDelay = delay(SERVER_KNOBS->METRIC_UPDATE_RATE);
-			if (workerFetchCount++ % 10 == 0) {
+			state Future<Void> blobWorkerDelay =
+			    delay(SERVER_KNOBS->METRIC_UPDATE_RATE * FLOW_KNOBS->DELAY_JITTER_OFFSET);
+			int fetchAmount = SERVER_KNOBS->BW_FETCH_WORKERS_INTERVAL /
+			                  (SERVER_KNOBS->METRIC_UPDATE_RATE * FLOW_KNOBS->DELAY_JITTER_OFFSET);
+			if (++workerFetchCount == fetchAmount || blobWorkerDead) {
+				workerFetchCount = 0;
 				std::vector<BlobWorkerInterface> _blobWorkers = wait(getBlobWorkers(self->db, true, &grv));
 				blobWorkers = _blobWorkers;
 			} else {
@@ -266,6 +276,11 @@ public:
 				grv = v;
 			}
 			self->minBlobWorkerGRV = grv;
+			self->minBlobWorkerTime = grvTime;
+
+			lastStartTime = startTime;
+			startTime = now();
+
 			if (blobWorkers.size() > 0) {
 				state std::vector<Future<Optional<MinBlobVersionReply>>> aliveVersions;
 				aliveVersions.reserve(blobWorkers.size());
@@ -276,19 +291,31 @@ public:
 				}
 				wait(waitForAll(aliveVersions));
 				Version minVer = grv;
-				for (auto& it : aliveVersions) {
-					if (it.get().present()) {
-						minVer = std::min(minVer, it.get().get().version);
+				blobWorkerDead = false;
+				int minIdx = 0;
+				for (int i = 0; i < blobWorkers.size(); i++) {
+					if (aliveVersions[i].get().present()) {
+						if (minVer < aliveVersions[i].get().get().version) {
+							minVer = aliveVersions[i].get().get().version;
+							minIdx = i;
+						}
 					} else {
+						blobWorkerDead = true;
 						minVer = 0;
 						break;
 					}
 				}
 				if (minVer > 0) {
-					self->minBlobWorkerRate =
-					    (minVer - self->minBlobWorkerVersion) / (startTime - self->minBlobWorkerTime);
+					self->minBlobWorkerRate = (minVer - self->minBlobWorkerVersion) / (startTime - lastStartTime);
 					self->minBlobWorkerVersion = minVer;
-					self->minBlobWorkerTime = startTime;
+					if (now() - lastLoggedTime > SERVER_KNOBS->BW_RW_LOGGING_INTERVAL) {
+						lastLoggedTime = now();
+						TraceEvent("RkMinBlobWorkerVersion")
+						    .detail("BWVersion", self->minBlobWorkerVersion)
+						    .detail("GRV", self->minBlobWorkerGRV)
+						    .detail("MinId", blobWorkers[minIdx].id())
+						    .detail("MinRate", self->minBlobWorkerRate);
+					}
 				}
 			}
 			wait(blobWorkerDelay);

@@ -605,6 +605,8 @@ public:
 	double BW_LAG_REDUCTION_RATE;
 	double BW_LAG_INCREASE_RATE;
 	double BW_LAG_DELAY;
+	double BW_FETCH_WORKERS_INTERVAL;
+	double BW_RW_LOGGING_INTERVAL;
 
 	// disk snapshot
 	int64_t MAX_FORKED_PROCESS_OUTPUT;
