@@ -46,10 +46,11 @@ struct TenantManagementWorkload : TestWorkload {
 		int64_t id;
 		Optional<TenantGroupName> tenantGroup;
 		bool empty;
+		bool encrypted;
 
 		TenantData() : id(-1), empty(true) {}
-		TenantData(int64_t id, Optional<TenantGroupName> tenantGroup, bool empty)
-		  : id(id), tenantGroup(tenantGroup), empty(empty) {}
+		TenantData(int64_t id, Optional<TenantGroupName> tenantGroup, bool empty, bool encrypted)
+		  : id(id), tenantGroup(tenantGroup), empty(empty), encrypted(encrypted) {}
 	};
 
 	struct TenantGroupData {
@@ -328,6 +329,11 @@ struct TenantManagementWorkload : TestWorkload {
 
 			TenantMapEntry entry;
 			entry.tenantGroup = self->chooseTenantGroup(true);
+			if (operationType == OperationType::SPECIAL_KEYS) {
+				entry.encrypted = SERVER_KNOBS->ENABLE_ENCRYPTION;
+			} else {
+				entry.encrypted = deterministicRandom()->coinflip();
+			}
 
 			if (self->createdTenants.count(tenant)) {
 				alreadyExists = true;
@@ -453,7 +459,7 @@ struct TenantManagementWorkload : TestWorkload {
 					// Update our local tenant state to include the newly created one
 					self->maxId = entry.get().id;
 					self->createdTenants[tenantItr->first] =
-					    TenantData(entry.get().id, tenantItr->second.tenantGroup, true);
+					    TenantData(entry.get().id, tenantItr->second.tenantGroup, true, tenantItr->second.encrypted);
 
 					// If this tenant has a tenant group, create or update the entry for it
 					if (tenantItr->second.tenantGroup.present()) {
@@ -854,11 +860,13 @@ struct TenantManagementWorkload : TestWorkload {
 		std::string tenantStateStr;
 		std::string base64TenantGroup;
 		std::string printableTenantGroup;
+		bool encrypted;
 		std::string assignedClusterStr;
 
 		jsonDoc.get("id", id);
 		jsonDoc.get("prefix.base64", base64Prefix);
 		jsonDoc.get("prefix.printable", printablePrefix);
+		jsonDoc.get("prefix.encrypted", encrypted);
 
 		prefix = base64::decoder::from_string(base64Prefix);
 		ASSERT(prefix == unprintable(printablePrefix));
@@ -878,7 +886,7 @@ struct TenantManagementWorkload : TestWorkload {
 			assignedCluster = ClusterNameRef(assignedClusterStr);
 		}
 
-		TenantMapEntry entry(id, TenantMapEntry::stringToTenantState(tenantStateStr), tenantGroup);
+		TenantMapEntry entry(id, TenantMapEntry::stringToTenantState(tenantStateStr), tenantGroup, encrypted);
 		ASSERT(entry.prefix == prefix);
 		return entry;
 	}
@@ -1461,6 +1469,7 @@ struct TenantManagementWorkload : TestWorkload {
 				ASSERT(localItr != self->createdTenants.end());
 				ASSERT(dataItr->first == localItr->first);
 				ASSERT(dataItr->second.tenantGroup == localItr->second.tenantGroup);
+				ASSERT(dataItr->second.encrypted == localItr->second.encrypted);
 
 				checkTenants.push_back(checkTenantContents(self, dataItr->first, localItr->second));
 				lastTenant = dataItr->first;
