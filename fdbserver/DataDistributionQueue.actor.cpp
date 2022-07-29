@@ -1964,33 +1964,19 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueueData* self, int teamCollectionIndex,
 			traceEvent.detail("QueuedRelocations", self->priority_relocations[ddPriority]);
 
 			if (self->priority_relocations[ddPriority] < SERVER_KNOBS->DD_REBALANCE_PARALLELISM) {
-				if (isDataMovementForMountainChopper(reason)) {
-					srcReq = GetTeamRequest(WantNewServers::True,
-					                        WantTrueBest::True,
-					                        PreferLowerDiskUtil::False,
-					                        TeamMustHaveShards::True,
-					                        ForReadBalance(readRebalance),
-					                        PreferLowerReadUtil::False);
-					destReq = GetTeamRequest(WantNewServers::True,
-					                         WantTrueBest::False,
-					                         PreferLowerDiskUtil::True,
-					                         TeamMustHaveShards::False,
-					                         ForReadBalance(readRebalance),
-					                         PreferLowerReadUtil::True);
-				} else {
-					srcReq = GetTeamRequest(WantNewServers::True,
-					                        WantTrueBest::False,
-					                        PreferLowerDiskUtil::False,
-					                        TeamMustHaveShards::True,
-					                        ForReadBalance(readRebalance),
-					                        PreferLowerReadUtil::False);
-					destReq = GetTeamRequest(WantNewServers::True,
-					                         WantTrueBest::True,
-					                         PreferLowerDiskUtil::True,
-					                         TeamMustHaveShards::False,
-					                         ForReadBalance(readRebalance),
-					                         PreferLowerReadUtil::True);
-				}
+				bool mcMove = isDataMovementForMountainChopper(reason);
+				srcReq = GetTeamRequest(WantNewServers::True,
+				                        WantTrueBest(mcMove),
+				                        PreferLowerDiskUtil::False,
+				                        TeamMustHaveShards::True,
+				                        ForReadBalance(readRebalance),
+				                        PreferLowerReadUtil::False);
+				destReq = GetTeamRequest(WantNewServers::True,
+				                         WantTrueBest(!mcMove),
+				                         PreferLowerDiskUtil::True,
+				                         TeamMustHaveShards::False,
+				                         ForReadBalance(readRebalance),
+				                         PreferLowerReadUtil::True);
 				state Future<SrcDestTeamPair> getTeamFuture =
 				    getSrcDestTeams(self, teamCollectionIndex, srcReq, destReq, ddPriority, &traceEvent);
 				wait(ready(getTeamFuture));
