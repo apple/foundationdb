@@ -218,7 +218,7 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 		if (self->useMetacluster) {
 			wait(MetaclusterAPI::configureTenant(self->mvDb, tenant, configParams));
 		} else {
-			Reference<ReadYourWritesTransaction> tr = self->dataDb->createTransaction();
+			state Reference<ReadYourWritesTransaction> tr = self->dataDb->createTransaction();
 			loop {
 				try {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -227,7 +227,7 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 					for (auto param : configParams) {
 						updatedEntry.configure(param.first, param.second);
 					}
-					TenantAPI::configureTenantTransaction(tr, tenant, entry, updatedEntry);
+					wait(TenantAPI::configureTenantTransaction(tr, tenant, entry, updatedEntry));
 					wait(buggifiedCommit(tr, BUGGIFY_WITH_PROB(0.1)));
 					break;
 				} catch (Error& e) {
