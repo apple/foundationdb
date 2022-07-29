@@ -735,6 +735,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
     std::vector<std::pair<GrvProxyInterface, EventMap>> grvProxies,
     std::vector<BlobWorkerInterface> blobWorkers,
     ServerCoordinators coordinators,
+    std::vector<NetworkAddress> coordinatorAddresses,
     Database cx,
     Optional<DatabaseConfiguration> configuration,
     Optional<Key> healthyZone,
@@ -832,8 +833,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 		}
 	}
 
-	std::vector<NetworkAddress> addressVec = wait(coordinators.ccr->getConnectionString().tryResolveHostnames());
-	for (const auto& coordinator : addressVec) {
+	for (const auto& coordinator : coordinatorAddresses) {
 		roles.addCoordinatorRole(coordinator);
 	}
 
@@ -1928,7 +1928,7 @@ ACTOR static Future<std::vector<std::pair<StorageServerInterface, EventMap>>> ge
 	                            std::vector<std::string>{
 	                                "StorageMetrics", "ReadLatencyMetrics", "ReadLatencyBands", "BusiestReadTag" })) &&
 	     store(busiestWriteTags, getServerBusiestWriteTags(servers, address_workers, rkWorker)) &&
-	     store(metadata, getServerMetadata(servers, cx, true)));
+	     store(metadata, timeoutError(getServerMetadata(servers, cx, true), 5.0)));
 
 	ASSERT(busiestWriteTags.size() == results.size() && metadata.size() == results.size());
 	for (int i = 0; i < results.size(); ++i) {
@@ -2708,6 +2708,9 @@ ACTOR Future<JsonBuilderObject> lockedStatusFetcher(Reference<AsyncVar<ServerDBI
 			try {
 				wait(tr.onError(e));
 			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled)
+					throw;
+
 				incomplete_reasons->insert(format("Unable to determine if database is locked (%s).", e.what()));
 				break;
 			}
@@ -2757,18 +2760,29 @@ ACTOR Future<JsonBuilderObject> storageWigglerStatsFetcher(DatabaseConfiguration
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	state Optional<Value> primaryV;
 	state Optional<Value> remoteV;
-	loop {
-		try {
-			if (use_system_priority) {
-				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+	state Future<Void> readTimeout = delay(5); // avoid looping forever
+	try {
+		loop {
+			try {
+				if (readTimeout.isReady()) {
+					throw timed_out();
+				}
+
+				if (use_system_priority) {
+					tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				}
+				int64_t timeout_ms = 5000;
+				tr->setOption(FDBTransactionOptions::TIMEOUT, StringRef((uint8_t*)&timeout_ms, sizeof(int64_t)));
+				wait(store(primaryV, StorageWiggleMetrics::runGetTransaction(tr, true)) &&
+				     store(remoteV, StorageWiggleMetrics::runGetTransaction(tr, false)));
+				wait(tr->commit());
+				break;
+			} catch (Error& e) {
+				wait(tr->onError(e));
 			}
-			wait(store(primaryV, StorageWiggleMetrics::runGetTransaction(tr, true)) &&
-			     store(remoteV, StorageWiggleMetrics::runGetTransaction(tr, false)));
-			wait(tr->commit());
-			break;
-		} catch (Error& e) {
-			wait(tr->onError(e));
 		}
+	} catch (Error& e) {
+		TraceEvent(SevWarn, "StorageWigglerStatsError").error(e);
 	}
 
 	JsonBuilderObject res;
@@ -2952,6 +2966,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 		statusObj["machines"] = machineStatusFetcher(mMetrics, workers, configuration, &status_incomplete_reasons);
 
+		state std::vector<NetworkAddress> coordinatorAddresses;
 		if (configuration.present()) {
 			// Do the latency probe by itself to avoid interference from other status activities
 			state bool isAvailable = true;
@@ -3009,23 +3024,36 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			if (configuration.get().perpetualStorageWiggleSpeed > 0) {
 				state Future<std::vector<std::pair<UID, StorageWiggleValue>>> primaryWiggleValues;
 				state Future<std::vector<std::pair<UID, StorageWiggleValue>>> remoteWiggleValues;
+				double timeout = g_network->isSimulated() && BUGGIFY_WITH_PROB(0.01) ? 0.0 : 2.0;
 
-				primaryWiggleValues = readStorageWiggleValues(cx, true, true);
-				remoteWiggleValues = readStorageWiggleValues(cx, false, true);
-				wait(store(storageWiggler, storageWigglerStatsFetcher(configuration.get(), cx, true)) &&
-				     success(primaryWiggleValues) && success(remoteWiggleValues));
+				try {
+					primaryWiggleValues = timeoutError(readStorageWiggleValues(cx, true, true), timeout);
+					remoteWiggleValues = timeoutError(readStorageWiggleValues(cx, false, true), timeout);
+					wait(store(storageWiggler, storageWigglerStatsFetcher(configuration.get(), cx, true)) &&
+					     success(primaryWiggleValues) && success(remoteWiggleValues));
 
-				for (auto& p : primaryWiggleValues.get())
-					wiggleServers.insert(p.first);
-				for (auto& p : remoteWiggleValues.get())
-					wiggleServers.insert(p.first);
+					for (auto& p : primaryWiggleValues.get())
+						wiggleServers.insert(p.first);
+					for (auto& p : remoteWiggleValues.get())
+						wiggleServers.insert(p.first);
+				} catch (Error& e) {
+					if (!primaryWiggleValues.canGet())
+						messages.push_back(
+						    JsonString::makeMessage("fetch_storage_wiggler_stats_timeout",
+						                            "Fetching wiggling servers in the primary region timed out."));
+					if (!remoteWiggleValues.canGet())
+						messages.push_back(
+						    JsonString::makeMessage("fetch_storage_wiggler_stats_timeout",
+						                            "Fetching wiggling servers in the remote region timed out."));
+				}
 			}
 
 			state std::vector<JsonBuilderObject> workerStatuses = wait(getAll(futures2));
 			wait(success(primaryDCFO));
 
-			std::vector<NetworkAddress> coordinatorAddresses =
-			    wait(coordinators.ccr->getConnectionString().tryResolveHostnames());
+			std::vector<NetworkAddress> addresses =
+			    wait(timeoutError(coordinators.ccr->getConnectionString().tryResolveHostnames(), 5.0));
+			coordinatorAddresses = std::move(addresses);
 
 			int logFaultTolerance = 100;
 			if (db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
@@ -3166,6 +3194,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		                              grvProxies,
 		                              blobWorkers,
 		                              coordinators,
+		                              coordinatorAddresses,
 		                              cx,
 		                              configuration,
 		                              loadResult.present() ? loadResult.get().healthyZone : Optional<Key>(),
