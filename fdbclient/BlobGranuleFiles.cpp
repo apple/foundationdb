@@ -789,9 +789,17 @@ static Standalone<VectorRef<ParsedDeltaBoundaryRef>> loadSnapshotFile(
 	// find range of blocks needed to read
 	ChildBlockPointerRef* currentBlock = file.findStartBlock(keyRange.begin);
 
-	// FIXME: optimize cpu comparisons here in first/last partial blocks, doing entire blocks at once based on
-	// comparison, and using shared prefix for key comparison
-	while (currentBlock != (file.indexBlockRef.block.children.end() - 1) && keyRange.end > currentBlock->key) {
+	if (currentBlock == (file.indexBlockRef.block.children.end() - 1) || keyRange.end <= currentBlock->key) {
+		return results;
+	}
+
+	bool lastBlock = false;
+
+	// FIXME: shared prefix for key comparison
+	while (!lastBlock) {
+		auto nextBlock = currentBlock;
+		nextBlock++;
+		lastBlock = (nextBlock == (file.indexBlockRef.block.children.end() - 1)) || (keyRange.end <= nextBlock->key);
 		Standalone<GranuleSnapshot> dataBlock =
 		    file.getChild<GranuleSnapshot>(currentBlock, cipherKeysCtx, file.chunkStartOffset);
 		ASSERT(!dataBlock.empty());
@@ -799,10 +807,26 @@ static Standalone<VectorRef<ParsedDeltaBoundaryRef>> loadSnapshotFile(
 
 		bool anyRows = false;
 		for (auto& entry : dataBlock) {
-			if (entry.key >= keyRange.begin && entry.key < keyRange.end) {
+			/*fmt::print("  Checking {0}. (rempty={1}, lastBlock={2}, keyLarger={3}, keySmaller={4})\n",
+			    entry.key.printable(), results.empty() ? "T" : "F", lastBlock ? "T" : "F",
+			    entry.key >= keyRange.begin ? "T" : "F", entry.key < keyRange.end ? "T" : "F");*/
+			if (!results.empty() && !lastBlock) {
+				// fmt::print("    Adding (fast path)\n");
+				// no key comparisons needed
 				results.emplace_back(results.arena(), entry);
 				anyRows = true;
+			} else if ((!results.empty() || entry.key >= keyRange.begin) && (!lastBlock || entry.key < keyRange.end)) {
+				// fmt::print("    Adding (slow path)\n");
+				results.emplace_back(results.arena(), entry);
+				anyRows = true;
+			} else if (!results.empty() && lastBlock) {
+				// fmt::print("    Done\n");
+				break;
 			}
+			// TODO REMOVE else block and print!
+			/*else {
+			    fmt::print("  Ignoring (not last block)\n");
+			}*/
 		}
 		if (anyRows) {
 			results.arena().dependsOn(dataBlock.arena());
@@ -1100,9 +1124,6 @@ Standalone<VectorRef<ParsedDeltaBoundaryRef>> loadChunkedDeltaFile(const StringR
 	Standalone<VectorRef<ParsedDeltaBoundaryRef>> deltas;
 	Standalone<IndexedBlobGranuleFile> file = IndexedBlobGranuleFile::fromFileBytes(deltaData, cipherKeysCtx);
 
-	// TODO REMOVE
-	// fmt::print("Loading delta file. startClear={0}\n", startClear ? "T" : "F");
-
 	ASSERT(file.fileType == DELTA_FILE_TYPE);
 	ASSERT(file.chunkStartOffset > 0);
 
@@ -1120,9 +1141,19 @@ Standalone<VectorRef<ParsedDeltaBoundaryRef>> loadChunkedDeltaFile(const StringR
 	// find range of blocks needed to read
 	ChildBlockPointerRef* currentBlock = file.findStartBlock(keyRange.begin);
 
-	// TODO cpu optimize (key check per block, prefixes, optimize start of first block)
+	if (currentBlock == (file.indexBlockRef.block.children.end() - 1) || keyRange.end <= currentBlock->key) {
+		// empty, done
+		return deltas;
+	}
+
+	// TODO: could cpu optimize first block a bit more by seeking right to start
+	bool lastBlock = false;
 	bool prevClearAfter = false;
-	while (currentBlock != (file.indexBlockRef.block.children.end() - 1) && keyRange.end > currentBlock->key) {
+	while (!lastBlock) {
+		auto nextBlock = currentBlock;
+		nextBlock++;
+		lastBlock = (nextBlock == file.indexBlockRef.block.children.end() - 1) || keyRange.end <= nextBlock->key;
+
 		Standalone<GranuleSortedDeltas> deltaBlock =
 		    file.getChild<GranuleSortedDeltas>(currentBlock, cipherKeysCtx, file.chunkStartOffset);
 		ASSERT(!deltaBlock.boundaries.empty());
@@ -1131,27 +1162,20 @@ Standalone<VectorRef<ParsedDeltaBoundaryRef>> loadChunkedDeltaFile(const StringR
 		// TODO refactor this into function to share with memory deltas
 		bool blockMemoryUsed = false;
 
-		// TODO REMOVE!
-		// fmt::print("Block {0}\n", currentBlock->key.printable());
 		for (auto& entry : deltaBlock.boundaries) {
 			ParsedDeltaBoundaryRef boundary = deltaAtVersion(entry, beginVersion, readVersion);
-			if (entry.key < keyRange.begin) {
+			if (deltas.empty() && entry.key < keyRange.begin) {
 				startClear = boundary.clearAfter;
 				prevClearAfter = boundary.clearAfter;
-				// fmt::print("  Start {0}: clearAfter={1}\n", entry.key.printable(), startClear);
-			} else if (entry.key < keyRange.end) {
+			} else if (!lastBlock || entry.key < keyRange.end) {
 				if (!boundary.redundant(prevClearAfter)) {
-					// TODO REMOVE
-					// fmt::print("  {0} {1} {2}\n", boundary.key.printable(), boundary.isSet() ? "=" :
-					// (boundary.isClear() ? "X" : "."), boundary.clearAfter ? "Clear+" : "");
 					deltas.push_back(deltas.arena(), boundary);
 					blockMemoryUsed = true;
 					prevClearAfter = boundary.clearAfter;
-				} else {
-					// fmt::print("  {0} {1} {2} - ignoring (REDUNDANT)\n", boundary.key.printable(), boundary.isSet() ?
-					// "=" : (boundary.isClear() ? "X" : "."), boundary.clearAfter ? "Clear+" : "");
 				}
 			} else {
+				// TODO REMOVE validation
+				ASSERT(lastBlock);
 				break;
 			}
 		}
@@ -1165,8 +1189,6 @@ Standalone<VectorRef<ParsedDeltaBoundaryRef>> loadChunkedDeltaFile(const StringR
 	for (int i = 0; i < deltas.size() - 1; i++) {
 		ASSERT(deltas[i].key < deltas[i + 1].key);
 	}
-
-	// applyDeltasSorted(deltas, startClear, dataMap);
 
 	return deltas;
 }
@@ -1360,7 +1382,6 @@ static RangeResult mergeDeltaStreams(const BlobGranuleChunkRef& chunk,
 	// check if a given stream is actively clearing
 	bool clearActive[streams.size()];
 	for (int16_t i = 0; i < streams.size(); i++) {
-		// fmt::print("Stream {0} ({1}) {2}\n", i, streams[i].size(), startClears[i] ? "StartClear-" : "");
 		clearActive[i] = startClears[i];
 		if (startClears[i]) {
 			activeClears.insert(i);
@@ -1375,7 +1396,6 @@ static RangeResult mergeDeltaStreams(const BlobGranuleChunkRef& chunk,
 			item.streamIdx = i;
 			item.dataIdx = 0;
 			next.push(item);
-			// fmt::print("  ({0}, {1}): {2}\n", i, 0, item.key.printable());
 		}
 	}
 
@@ -1387,8 +1407,6 @@ static RangeResult mergeDeltaStreams(const BlobGranuleChunkRef& chunk,
 		cur.push_back(next.top());
 		next.pop();
 
-		// fmt::print("  {0})\n", cur.front().key.printable());
-
 		while (!next.empty() && next.top().key == cur.front().key) {
 			cur.push_back(next.top());
 			next.pop();
@@ -1396,19 +1414,14 @@ static RangeResult mergeDeltaStreams(const BlobGranuleChunkRef& chunk,
 
 		// un-set clears and find latest value for key (if present)
 		bool foundValue = false;
-		// fmt::print("   Pass 1:\n");
 		for (auto& it : cur) {
 			auto& v = streams[it.streamIdx][it.dataIdx];
-			// fmt::print("    ({0} {1}): {2} {3}\n", it.streamIdx, it.dataIdx, v.isSet() ? "=" : (v.isClear() ? "X" :
-			// "."), v.clearAfter ? "Clear+" : ""); un-set previous active clear, if this stream was clearing
 			if (clearActive[it.streamIdx]) {
-				// fmt::print("      un-clear\n");
 				clearActive[it.streamIdx] = false;
 				activeClears.erase(it.streamIdx);
 				if (it.streamIdx == maxActiveClear) {
 					// re-get max active clear
 					maxActiveClear = activeClears.empty() ? -1 : *activeClears.begin();
-					// fmt::print("        maxClear={0}\n", maxActiveClear);
 				}
 			}
 
@@ -1420,22 +1433,16 @@ static RangeResult mergeDeltaStreams(const BlobGranuleChunkRef& chunk,
 					KeyRef finalKey =
 					    chunk.tenantPrefix.present() ? v.key.removePrefix(chunk.tenantPrefix.get()) : v.key;
 					result.push_back_deep(result.arena(), KeyValueRef(finalKey, v.value));
-					// fmt::print("      =({0})\n", it.streamIdx);
-				} else {
-					// fmt::print("      ignoring (found={0}, maxClear={1})\n", foundValue, maxActiveClear);
 				}
 			}
 		}
 
 		// advance streams and start clearAfter
-		// fmt::print("   Pass 2:\n");
 		for (auto& it : cur) {
-			// fmt::print("    ({0} {1})\n", it.streamIdx, it.dataIdx);
 			if (streams[it.streamIdx][it.dataIdx].clearAfter) {
 				clearActive[it.streamIdx] = true;
 				activeClears.insert(it.streamIdx);
 				maxActiveClear = std::max(maxActiveClear, it.streamIdx);
-				// fmt::print("      clearAfter\n");
 			}
 			// TODO: implement skipping if large clear!!
 			// if (maxClearIdx > it.streamIdx) - skip
@@ -1443,7 +1450,6 @@ static RangeResult mergeDeltaStreams(const BlobGranuleChunkRef& chunk,
 			if (it.dataIdx < streams[it.streamIdx].size()) {
 				it.key = streams[it.streamIdx][it.dataIdx].key;
 				next.push(it);
-				// fmt::print("      Next: ({0}, {1}): {2}\n", it.streamIdx, it.dataIdx, it.key.printable());
 			}
 		}
 	}
@@ -1925,26 +1931,38 @@ void checkSnapshotRead(const Standalone<GranuleSnapshot>& snapshot,
 	Key endKey = endIdx == snapshot.size() ? keyAfter(snapshot.back().key) : snapshot[endIdx].key;
 	KeyRangeRef range(beginKey, endKey);
 
+	fmt::print("Reading [{0} - {1})\n", beginKey.printable(), endKey.printable());
+
 	Standalone<VectorRef<ParsedDeltaBoundaryRef>> result = loadSnapshotFile(serialized, range, cipherKeysCtx);
 
-	// TODO re-comment
-	/*if (result.size() != endIdx - beginIdx) {
-	    fmt::print("Read {0} rows != {1}\n", result.size(), endIdx - beginIdx);
+	if (result.size() != endIdx - beginIdx) {
+		fmt::print("Read {0} rows != {1}\n", result.size(), endIdx - beginIdx);
+	}
+
+	// TODO remove
+	/*fmt::print("Expected Data {0}:\n", result.size());
+	for (auto& it : result) {
+	    fmt::print("  {0}=\n", it.key.printable());
+	}
+	fmt::print("Actual Data {0}:\n", endIdx - beginIdx);
+	for (int i = beginIdx; i < endIdx; i++) {
+	    fmt::print("  {0}=\n", snapshot[i].key.printable());
 	}*/
+
 	ASSERT(result.size() == endIdx - beginIdx);
 	for (auto& it : result) {
 		ASSERT(it.isSet());
-		/*if (it.key != snapshot[beginIdx].key) {
-		    fmt::print("Key {0} != {1}\n", it.key.printable(), snapshot[beginIdx].key.printable());
-		}*/
+		if (it.key != snapshot[beginIdx].key) {
+			fmt::print("Key {0} != {1}\n", it.key.printable(), snapshot[beginIdx].key.printable());
+		}
 		ASSERT(it.key == snapshot[beginIdx].key);
-		/*if (it.key != snapshot[beginIdx].key) {
-		    fmt::print("Value {0} != {1} for Key {2}\n",
-		               it.value.printable(),
-		               snapshot[beginIdx].value.printable(),
-		               it.key.printable());
-		}*/
-		ASSERT(it.key == snapshot[beginIdx].value);
+		if (it.key != snapshot[beginIdx].key) {
+			fmt::print("Value {0} != {1} for Key {2}\n",
+			           it.value.printable(),
+			           snapshot[beginIdx].value.printable(),
+			           it.key.printable());
+		}
+		ASSERT(it.value == snapshot[beginIdx].value);
 		beginIdx++;
 	}
 }
@@ -2315,6 +2333,12 @@ void checkDeltaRead(const KeyValueGen& kvGen,
 	std::map<KeyRef, ValueRef> expectedData;
 	Version lastFileEndVersion = 0;
 
+	fmt::print("Delta Read [{0} - {1}) @ {2} - {3}\n",
+	           range.begin.printable(),
+	           range.end.printable(),
+	           beginVersion,
+	           readVersion);
+
 	applyDeltasByVersion(data, range, beginVersion, readVersion, lastFileEndVersion, expectedData);
 
 	// actual answer
@@ -2329,6 +2353,18 @@ void checkDeltaRead(const KeyValueGen& kvGen,
 	chunk.snapshotVersion = invalidVersion;
 
 	RangeResult actualData = materializeBlobGranule(chunk, range, beginVersion, readVersion, {}, serialized);
+
+	if (expectedData.size() != actualData.size()) {
+		// TODO remove
+		fmt::print("Expected Data {0}:\n", expectedData.size());
+		/*for (auto& it : expectedData) {
+		    fmt::print("  {0}=\n", it.first.printable());
+		}*/
+		fmt::print("Actual Data {0}:\n", actualData.size());
+		/*for (auto& it : actualData) {
+		    fmt::print("  {0}=\n", it.key.printable());
+		}*/
+	}
 
 	ASSERT(expectedData.size() == actualData.size());
 	int i = 0;
@@ -2376,12 +2412,22 @@ TEST_CASE("/blobgranule/files/deltaFormatUnitTest") {
 
 	int targetChunks = randomExp(0, 8);
 	int targetDataBytes = randomExp(0, 21);
-
 	int targetChunkSize = targetDataBytes / targetChunks;
 
 	Standalone<GranuleDeltas> data = genDeltas(kvGen, targetDataBytes);
 
 	fmt::print("Deltas ({0})\n", data.size());
+	// TODO REMOVE
+	/*for (auto& it : data) {
+	    fmt::print("  {0}) ({1})\n", it.version, it.mutations.size());
+	    for (auto& it2 : it.mutations) {
+	        if (it2.type == MutationRef::Type::SetValue) {
+	            fmt::print("    {0}=\n", it2.param1.printable());
+	        } else {
+	            fmt::print("    {0} - {1}\n", it2.param1.printable(), it2.param2.printable());
+	        }
+	    }
+	}*/
 	Value serialized =
 	    serializeChunkedDeltaFile(data, kvGen.allRange, targetChunkSize, kvGen.compressFilter, kvGen.cipherKeys);
 
@@ -2467,7 +2513,6 @@ void checkGranuleRead(const KeyValueGen& kvGen,
 	}
 	RangeResult actualData = materializeBlobGranule(chunk, range, beginVersion, readVersion, snapshotPtr, deltaPtrs);
 
-	// TODO re-comment
 	if (expectedData.size() != actualData.size()) {
 		fmt::print("Expected Size {0} != Actual Size {1}\n", expectedData.size(), actualData.size());
 	}
@@ -2888,7 +2933,6 @@ TEST_CASE("!/blobgranule/files/benchFromFiles") {
 		    snapshotMetrics[i].first, snapshotMetrics[i].second, snapshotMetrics[i].first, snapshotMetrics[0].first);
 		printMetrics(deltaMetrics[i].first, deltaMetrics[i].second, deltaMetrics[i].first, deltaMetrics[0].first);
 
-		// TODO also need to factor in re-reading whole thing!!
 		int64_t logicalTotalBytes = snapshotMetrics[0].first + deltaMetrics[0].first;
 		int64_t totalBytes = deltaMetrics[i].first + snapshotMetrics[i].first;
 		double logicalTotalElapsed = (snapshotMetrics[i].second == 0.0 || deltaMetrics[i].second == 0.0)
