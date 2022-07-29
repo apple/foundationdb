@@ -290,6 +290,7 @@ struct GetMetricsListRequest {
 // call method from components outside DDTeamCollection
 struct ITeamCollection {
 	PromiseStream<GetTeamRequest> getTeam;
+	virtual ~ITeamCollection() {}
 };
 
 // send request/signal to DDTracker through interface
@@ -313,6 +314,7 @@ struct IDDQueue {
 	// PromiseStream<Promise<int>> getUnhealthyRelocationCount;
 
 	virtual int getUnhealthyRelocationCount() = 0;
+	virtual ~IDDQueue() = 0;
 };
 
 class ShardsAffectedByTeamFailure : public ReferenceCounted<ShardsAffectedByTeamFailure> {
