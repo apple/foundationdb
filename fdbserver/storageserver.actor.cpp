@@ -3435,6 +3435,9 @@ ACTOR Future<GetRangeReqAndResultRef> quickGetKeyValues(
 	state double getValuesStart = g_network->timer();
 	getRange.begin = firstGreaterOrEqual(KeyRef(*a, prefix));
 	getRange.end = firstGreaterOrEqual(strinc(prefix, *a));
+	if (pOriginalReq->debugID.present())
+		g_traceBatch.addEvent(
+		    "TransactionDebug", pOriginalReq->debugID.get().first(), "storageserver.quickGetKeyValues.Before");
 	try {
 		// TODO: Use a lower level API may be better? Or tweak priorities?
 		GetKeyValuesRequest req;
@@ -3465,6 +3468,10 @@ ACTOR Future<GetRangeReqAndResultRef> quickGetKeyValues(
 			getRange.result = RangeResultRef(reply.data, reply.more);
 			const double duration = g_network->timer() - getValuesStart;
 			data->counters.mappedRangeLocalSample.addMeasurement(duration);
+			if (pOriginalReq->debugID.present())
+				g_traceBatch.addEvent("TransactionDebug",
+				                      pOriginalReq->debugID.get().first(),
+				                      "storageserver.quickGetKeyValues.AfterLocalFetch");
 			return getRange;
 		}
 		// Otherwise fallback.
@@ -3486,6 +3493,10 @@ ACTOR Future<GetRangeReqAndResultRef> quickGetKeyValues(
 		getRange.result = rangeResult;
 		const double duration = g_network->timer() - getValuesStart;
 		data->counters.mappedRangeRemoteSample.addMeasurement(duration);
+		if (pOriginalReq->debugID.present())
+			g_traceBatch.addEvent("TransactionDebug",
+			                      pOriginalReq->debugID.get().first(),
+			                      "storageserver.quickGetKeyValues.AfterRemoteFetch");
 		return getRange;
 	} else {
 		throw quick_get_key_values_miss();
@@ -3772,7 +3783,9 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 	result.arena.dependsOn(input.arena);
 
 	result.data.reserve(result.arena, input.data.size());
-
+	if (pOriginalReq->debugID.present())
+		g_traceBatch.addEvent(
+		    "TransactionDebug", pOriginalReq->debugID.get().first(), "storageserver.mapKeyValues.Start");
 	state Tuple mappedKeyFormatTuple;
 	state Tuple mappedKeyTuple;
 
@@ -3791,6 +3804,9 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 	state std::vector<MappedKeyValueRef> kvms(k);
 	state std::vector<Future<Void>> subqueries;
 	state int offset = 0;
+	if (pOriginalReq->debugID.present())
+		g_traceBatch.addEvent(
+		    "TransactionDebug", pOriginalReq->debugID.get().first(), "storageserver.mapKeyValues.BeforeLoop");
 	for (; offset < sz; offset += SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE) {
 		// Divide into batches of MAX_PARALLEL_QUICK_GET_VALUE subqueries
 		for (int i = 0; i + offset < sz && i < SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE; i++) {
@@ -3810,11 +3826,17 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 			    mapSubquery(data, input.version, pOriginalReq, &result.arena, isRangeQuery, it, kvm, mappedKey));
 		}
 		wait(waitForAll(subqueries));
+		if (pOriginalReq->debugID.present())
+			g_traceBatch.addEvent(
+			    "TransactionDebug", pOriginalReq->debugID.get().first(), "storageserver.mapKeyValues.AfterBatch");
 		subqueries.clear();
 		for (int i = 0; i + offset < sz && i < SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE; i++) {
 			result.data.push_back(result.arena, kvms[i]);
 		}
 	}
+	if (pOriginalReq->debugID.present())
+		g_traceBatch.addEvent(
+		    "TransactionDebug", pOriginalReq->debugID.get().first(), "storageserver.mapKeyValues.AfterAll");
 	return result;
 }
 
