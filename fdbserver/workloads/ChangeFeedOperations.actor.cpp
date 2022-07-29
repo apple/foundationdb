@@ -248,7 +248,7 @@ ACTOR Future<Void> liveReader(Database cx, Reference<FeedTestData> data, Version
 						buffered.pop_front();
 					}
 					if (buffered.empty()) {
-						if (data->poppingVersion < data->pendingCheck.front().first) {
+						if (data->poppingVersion < data->pendingCheck.front().first && !data->destroying) {
 							fmt::print("DBG) {0} Buffered empty after ready for check, and data not popped! popped "
 							           "{1}, popping {2}, check {3}\n",
 							           data->key.printable(),
@@ -256,7 +256,7 @@ ACTOR Future<Void> liveReader(Database cx, Reference<FeedTestData> data, Version
 							           data->poppingVersion,
 							           data->pendingCheck.front().first);
 						}
-						ASSERT(data->poppingVersion >= data->pendingCheck.front().first);
+						ASSERT(data->poppingVersion >= data->pendingCheck.front().first || data->destroying);
 						data->pendingCheck.pop_front();
 					} else {
 						Version v = buffered.front().version;
