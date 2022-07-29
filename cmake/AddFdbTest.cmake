@@ -125,7 +125,7 @@ function(add_fdb_test)
   list(TRANSFORM ADD_FDB_TEST_TEST_FILES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
   if (ENABLE_SIMULATION_TESTS)
     add_test(NAME ${test_name}
-      COMMAND $<TARGET_FILE:Python::Interpreter> ${TestRunner}
+      COMMAND $<TARGET_FILE:Python3::Interpreter> ${TestRunner}
       -n ${test_name}
       -b ${PROJECT_BINARY_DIR}
       -t ${test_type}
