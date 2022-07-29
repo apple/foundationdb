@@ -440,7 +440,7 @@ function(add_fdbclient_test)
   message(STATUS "Adding Client test ${T_NAME}")
   add_test(NAME "${T_NAME}"
     WORKING_DIRECTORY ${T_WORKING_DIRECTORY}
-    COMMAND ${Python_EXECUTABLE} ${TMP_CLUSTER_CMD}
+    COMMAND ${Python3_EXECUTABLE} ${TMP_CLUSTER_CMD}
             --
             ${T_COMMAND})
   if (T_TEST_TIMEOUT)
@@ -473,7 +473,7 @@ function(add_unavailable_fdbclient_test)
   endif()
   message(STATUS "Adding unavailable client test ${T_NAME}")
   add_test(NAME "${T_NAME}"
-  COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/TestRunner/fake_cluster.py
+  COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/TestRunner/fake_cluster.py
           --output-dir ${CMAKE_BINARY_DIR}
           --
           ${T_COMMAND})
@@ -508,7 +508,7 @@ function(add_multi_fdbclient_test)
   endif()
   message(STATUS "Adding Client test ${T_NAME}")
   add_test(NAME "${T_NAME}"
-    COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/TestRunner/tmp_multi_cluster.py
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/TestRunner/tmp_multi_cluster.py
             --build-dir ${CMAKE_BINARY_DIR}
             --clusters 3
             --
