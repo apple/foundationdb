@@ -899,7 +899,14 @@ struct RemoveClusterImpl {
 			}
 
 			// This runs multiple transactions, so the run transaction calls are inside the function
-			wait(managementClusterPurgeDataCluster(self));
+			try {
+				wait(managementClusterPurgeDataCluster(self));
+			} catch (Error& e) {
+				// If this transaction gets retried, the cluster may have already been deleted.
+				if (e.code() != error_code_cluster_not_found) {
+					throw;
+				}
+			}
 		}
 
 		return Void();

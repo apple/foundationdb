@@ -159,9 +159,9 @@ struct MetaclusterRegistrationEntry {
 	std::string toString() const {
 		if (clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
 			return fmt::format(
-			    "metacluster name: {}, metacluster id: {}\n", printable(metaclusterName), metaclusterId.shortString());
+			    "metacluster name: {}, metacluster id: {}", printable(metaclusterName), metaclusterId.shortString());
 		} else {
-			return fmt::format("metacluster name: {}, metacluster id: {}, data cluster name: {}, data cluster id: {}\n",
+			return fmt::format("metacluster name: {}, metacluster id: {}, data cluster name: {}, data cluster id: {}",
 			                   printable(metaclusterName),
 			                   metaclusterId.shortString(),
 			                   printable(name),
