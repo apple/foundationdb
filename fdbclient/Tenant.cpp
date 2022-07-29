@@ -43,6 +43,10 @@ std::string TenantMapEntry::tenantStateToString(TenantState tenantState) {
 		return "registering";
 	case TenantState::READY:
 		return "ready";
+	case TenantState::RENAMING_FROM:
+		return "renaming from";
+	case TenantState::RENAMING_TO:
+		return "renaming to";
 	case TenantState::REMOVING:
 		return "removing";
 	case TenantState::UPDATING_CONFIGURATION:
@@ -59,12 +63,41 @@ TenantState TenantMapEntry::stringToTenantState(std::string stateStr) {
 		return TenantState::REGISTERING;
 	} else if (stateStr == "ready") {
 		return TenantState::READY;
+	} else if (stateStr == "renaming from") {
+		return TenantState::RENAMING_FROM;
+	} else if (stateStr == "renaming to") {
+		return TenantState::RENAMING_TO;
 	} else if (stateStr == "removing") {
 		return TenantState::REMOVING;
 	} else if (stateStr == "updating configuration") {
 		return TenantState::UPDATING_CONFIGURATION;
 	} else if (stateStr == "error") {
 		return TenantState::ERROR;
+	}
+
+	UNREACHABLE();
+}
+
+std::string TenantMapEntry::tenantLockStateToString(TenantLockState tenantState) {
+	switch (tenantState) {
+	case TenantLockState::UNLOCKED:
+		return "unlocked";
+	case TenantLockState::READ_ONLY:
+		return "read only";
+	case TenantLockState::LOCKED:
+		return "locked";
+	default:
+		UNREACHABLE();
+	}
+}
+
+TenantLockState TenantMapEntry::stringToTenantLockState(std::string stateStr) {
+	if (stateStr == "unlocked") {
+		return TenantLockState::UNLOCKED;
+	} else if (stateStr == "read only") {
+		return TenantLockState::READ_ONLY;
+	} else if (stateStr == "locked") {
+		return TenantLockState::LOCKED;
 	}
 
 	UNREACHABLE();

@@ -482,7 +482,13 @@ Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listTenants(Reference
 }
 
 ACTOR template <class Transaction>
-Future<Void> renameTenantTransaction(Transaction tr, TenantNameRef oldName, TenantNameRef newName) {
+Future<Void> renameTenantTransaction(Transaction tr,
+                                     TenantName oldName,
+                                     TenantName newName,
+                                     Optional<int64_t> tenantId = Optional<int64_t>(),
+                                     ClusterType clusterType = ClusterType::STANDALONE) {
+	ASSERT(clusterType == ClusterType::STANDALONE || tenantId.present());
+	ASSERT(clusterType != ClusterType::METACLUSTER_MANAGEMENT);
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 	state Optional<TenantMapEntry> oldEntry;
 	state Optional<TenantMapEntry> newEntry;
@@ -507,7 +513,11 @@ Future<Void> renameTenantTransaction(Transaction tr, TenantNameRef oldName, Tena
 }
 
 ACTOR template <class DB>
-Future<Void> renameTenant(Reference<DB> db, TenantName oldName, TenantName newName) {
+Future<Void> renameTenant(Reference<DB> db,
+                          TenantName oldName,
+                          TenantName newName,
+                          Optional<int64_t> tenantId = Optional<int64_t>(),
+                          ClusterType clusterType = ClusterType::STANDALONE) {
 	state Reference<typename DB::TransactionT> tr = db->createTransaction();
 
 	state bool firstTry = true;
@@ -552,7 +562,7 @@ Future<Void> renameTenant(Reference<DB> db, TenantName oldName, TenantName newNa
 					throw tenant_not_found();
 				}
 			}
-			wait(renameTenantTransaction(tr, oldName, newName));
+			wait(renameTenantTransaction(tr, oldName, newName, tenantId, clusterType));
 			wait(buggifiedCommit(tr, BUGGIFY_WITH_PROB(0.1)));
 			TraceEvent("RenameTenantSuccess").detail("OldName", oldName).detail("NewName", newName);
 			return Void();

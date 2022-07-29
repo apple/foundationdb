@@ -51,7 +51,12 @@ typedef Standalone<TenantGroupNameRef> TenantGroupName;
 //
 // If an operation fails and the tenant is left in a non-ready state, re-running the same operation is legal. If
 // successful, the tenant will return to the READY state.
-enum class TenantState { REGISTERING, READY, REMOVING, UPDATING_CONFIGURATION, ERROR };
+enum class TenantState { REGISTERING, READY, RENAMING_FROM, RENAMING_TO, REMOVING, UPDATING_CONFIGURATION, ERROR };
+
+// Represents the lock state the tenant could be in.
+// Can be used in conjunction with the other tenant states above.
+// A field will be present in the map entry but is currently unused.
+enum class TenantLockState { UNLOCKED, READ_ONLY, LOCKED };
 
 struct TenantMapEntry {
 	constexpr static FileIdentifier file_identifier = 12247338;
@@ -62,12 +67,17 @@ struct TenantMapEntry {
 	static std::string tenantStateToString(TenantState tenantState);
 	static TenantState stringToTenantState(std::string stateStr);
 
+	static std::string tenantLockStateToString(TenantLockState tenantState);
+	static TenantLockState stringToTenantLockState(std::string stateStr);
+
 	int64_t id = -1;
 	Key prefix;
 	TenantState tenantState = TenantState::READY;
+	TenantLockState tenantLockState = TenantLockState::UNLOCKED;
 	Optional<TenantGroupName> tenantGroup;
 	bool encrypted = false;
 	Optional<ClusterName> assignedCluster;
+	Optional<TenantName> renamePair;
 	int64_t configurationSequenceNum = 0;
 
 	constexpr static int PREFIX_SIZE = sizeof(id);
