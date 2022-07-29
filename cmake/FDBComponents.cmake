@@ -57,7 +57,7 @@ endif()
 ################################################################################
 
 find_package(Python3 COMPONENTS Interpreter)
-if(Python_Interpreter_FOUND)
+if(Python3_Interpreter_FOUND)
   set(WITH_PYTHON ON)
 else()
   message(WARNING "Could not found a suitable python interpreter")
