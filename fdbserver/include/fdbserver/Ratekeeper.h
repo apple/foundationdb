@@ -68,7 +68,8 @@ public:
 	std::vector<StorageQueuingMetricsReply::TagInfo> busiestReadTags, busiestWriteTags;
 
 	StorageQueueInfo(UID id, LocalityData locality);
-	void refreshCommitCost(double elapsed);
+	// Summarizes up the commit cost per storage server. Returns the UpdateCommitCostRequest for corresponding SS.
+	UpdateCommitCostRequest refreshCommitCost(double elapsed);
 	int64_t getStorageQueueBytes() const { return lastReply.bytesInput - smoothDurableBytes.smoothTotal(); }
 	int64_t getDurabilityLag() const { return smoothLatestVersion.smoothTotal() - smoothDurableVersion.smoothTotal(); }
 	void update(StorageQueuingMetricsReply const&, Smoother& smoothTotalDurableBytes);
@@ -149,6 +150,9 @@ class Ratekeeper {
 	double lastSSListFetchedTimestamp;
 
 	std::unique_ptr<class ITagThrottler> tagThrottler;
+
+	// Maps storage server ID to storage server interface
+	std::unordered_map<UID, StorageServerInterface> storageServerInterfaces;
 
 	RatekeeperLimits normalLimits;
 	RatekeeperLimits batchLimits;

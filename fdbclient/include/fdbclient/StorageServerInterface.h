@@ -22,7 +22,6 @@
 #define FDBCLIENT_STORAGESERVERINTERFACE_H
 #pragma once
 
-#include <ostream>
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/StorageCheckpoint.h"
 #include "fdbclient/StorageServerShard.h"
@@ -52,6 +51,28 @@ struct VersionReply {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, version);
+	}
+};
+
+// This struct is used by RK to forward the commit cost to SS, see discussion in #7258
+struct UpdateCommitCostRequest {
+	constexpr static FileIdentifier file_identifier = 4159439;
+
+	double elapsed;
+	TransactionTag busiestTag;
+
+	// Properties that are defined in TransactionCommitCostEstimation
+	int opsSum;
+	uint64_t costSum;
+
+	uint64_t totalWriteCosts;
+	bool reported;
+
+	ReplyPromise<Void> reply;
+
+	template <typename Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, elapsed, busiestTag, opsSum, costSum, totalWriteCosts, reported, reply);
 	}
 };
 
@@ -93,6 +114,8 @@ struct StorageServerInterface {
 	RequestStream<struct GetCheckpointRequest> checkpoint;
 	RequestStream<struct FetchCheckpointRequest> fetchCheckpoint;
 	RequestStream<struct FetchCheckpointKeyValuesRequest> fetchCheckpointKeyValues;
+
+	RequestStream<struct UpdateCommitCostRequest> updateCommitCostRequest;
 
 private:
 	bool acceptingRequests;
@@ -163,6 +186,8 @@ public:
 				    RequestStream<struct FetchCheckpointRequest>(getValue.getEndpoint().getAdjustedEndpoint(20));
 				fetchCheckpointKeyValues = RequestStream<struct FetchCheckpointKeyValuesRequest>(
 				    getValue.getEndpoint().getAdjustedEndpoint(21));
+				updateCommitCostRequest =
+				    RequestStream<struct UpdateCommitCostRequest>(getValue.getEndpoint().getAdjustedEndpoint(22));
 			}
 		} else {
 			ASSERT(Ar::isDeserializing);
@@ -213,6 +238,7 @@ public:
 		streams.push_back(checkpoint.getReceiver());
 		streams.push_back(fetchCheckpoint.getReceiver());
 		streams.push_back(fetchCheckpointKeyValues.getReceiver());
+		streams.push_back(updateCommitCostRequest.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };

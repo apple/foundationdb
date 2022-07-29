@@ -69,6 +69,7 @@
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/MutationTracking.h"
 #include "fdbserver/OTELSpanContextMessage.h"
+#include "fdbserver/Ratekeeper.h"
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/RocksDBCheckpointUtils.actor.h"
 #include "fdbserver/ServerCheckpoint.actor.h"
@@ -10064,6 +10065,18 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 			}
 			when(FetchCheckpointRequest req = waitNext(ssi.fetchCheckpoint.getFuture())) {
 				self->actors.add(fetchCheckpointQ(self, req));
+			}
+			when(UpdateCommitCostRequest req = waitNext(ssi.updateCommitCostRequest.getFuture())) {
+				TraceEvent("BusiestWriteTag", self->thisServerID)
+				    .detail("Elapsed", req.elapsed)
+				    .detail("Tag", printable(req.busiestTag))
+				    .detail("TagOps", req.opsSum)
+				    .detail("TagCost", req.costSum)
+				    .detail("TotalCost", req.totalWriteCosts)
+				    .detail("Reported", req.reported)
+				    .trackLatest(self->transactionTagCounter.getBusiestWriteTagTrackingKey());
+
+				req.reply.send(Void());
 			}
 			when(FetchCheckpointKeyValuesRequest req = waitNext(ssi.fetchCheckpointKeyValues.getFuture())) {
 				self->actors.add(fetchCheckpointKeyValuesQ(self, req));

@@ -39,4 +39,7 @@ public:
 
 	// Returns the set of busiest tags as of the end of the last interval
 	std::vector<StorageQueuingMetricsReply::TagInfo> const& getBusiestTags() const;
+
+	// Returns the busiest write tag tracking key
+	const std::string& getBusiestWriteTagTrackingKey() const { return impl->busiestWriteTagTrackingKey; }
 };

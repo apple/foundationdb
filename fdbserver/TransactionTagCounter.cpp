@@ -21,9 +21,6 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/TransactionTagCounter.h"
 #include "flow/Trace.h"
-
-namespace {
-
 class TopKTags {
 public:
 	struct TagAndCount {
@@ -90,12 +87,17 @@ class TransactionTagCounterImpl {
 	std::vector<StorageQueuingMetricsReply::TagInfo> previousBusiestTags;
 	Reference<EventCacheHolder> busiestReadTagEventHolder;
 
+	const std::string busiestWriteTagTrackingKey;
+	Reference<EventCacheHolder> busiestWriteTagEventHolder;
+
 	static int64_t costFunction(int64_t bytes) { return bytes / SERVER_KNOBS->READ_COST_BYTE_FACTOR + 1; }
 
 public:
 	TransactionTagCounterImpl(UID thisServerID)
 	  : thisServerID(thisServerID), topTags(SERVER_KNOBS->SS_THROTTLE_TAGS_TRACKED),
-	    busiestReadTagEventHolder(makeReference<EventCacheHolder>(thisServerID.toString() + "/BusiestReadTag")) {}
+	    busiestReadTagEventHolder(makeReference<EventCacheHolder>(thisServerID.toString() + "/BusiestReadTag")),
+	    busiestWriteTagTrackingKey(thisServerID.toString() + "/BusiestWriteTag"),
+	    busiestWriteTagEventHolder(makeReference<EventCacheHolder>(busiestWriteTagTrackingKey)) {}
 
 	void addRequest(Optional<TagSet> const& tags, int64_t bytes) {
 		if (tags.present()) {
@@ -110,6 +112,8 @@ public:
 			intervalTotalSampledCount += cost;
 		}
 	}
+
+	const std::string& getBusiestWritingTagTrackingKey() const { return busiestWriteTagTrackingKey; }
 
 	void startNewInterval() {
 		double elapsed = now() - intervalStart;

@@ -214,14 +214,20 @@ public:
 		loop choose {
 			when(state std::pair<UID, Optional<StorageServerInterface>> change = waitNext(serverChanges)) {
 				wait(delay(0)); // prevent storageServerTracker from getting cancelled while on the call stack
+
+				const UID& id = change.first;
 				if (change.second.present()) {
 					if (!change.second.get().isTss()) {
 						auto& a = actors[change.first];
 						a = Future<Void>();
 						a = splitError(trackStorageServerQueueInfo(self, change.second.get()), err);
+
+						self->storageServerInterfaces[id] = change.second.get();
 					}
-				} else
-					actors.erase(change.first);
+				} else {
+					self->storageServerInterfaces.erase(id);
+					actors.erase(id);
+				}
 			}
 			when(wait(err.getFuture())) {}
 		}
@@ -367,17 +373,27 @@ public:
 
 	ACTOR static Future<Void> refreshStorageServerCommitCosts(Ratekeeper* self) {
 		state double lastBusiestCommitTagPick;
+		state std::vector<Future<Void>> replies;
 		loop {
 			lastBusiestCommitTagPick = now();
 			wait(delay(SERVER_KNOBS->TAG_MEASUREMENT_INTERVAL));
+
+			replies.clear();
+
 			double elapsed = now() - lastBusiestCommitTagPick;
 			// for each SS, select the busiest commit tag from ssTrTagCommitCost
 			for (auto& [ssId, ssQueueInfo] : self->storageQueueInfo) {
-				ssQueueInfo.refreshCommitCost(elapsed);
+				// NOTE: In some cases, for unknown reason SS will not respond to the updateCommitCostRequest. Since the
+				// information is not time-sensitive, place a timeout to avoid stucking RK.
+				replies.push_back(timeout(self->storageServerInterfaces[ssId].updateCommitCostRequest.getReply(
+				                              ssQueueInfo.refreshCommitCost(elapsed)),
+				                          SERVER_KNOBS->TAG_MEASUREMENT_INTERVAL,
+				                          Void()));
 			}
+
+			wait(waitForAll(replies));
 		}
 	}
-
 }; // class RatekeeperImpl
 
 Future<Void> Ratekeeper::configurationMonitor() {
@@ -983,7 +999,7 @@ void StorageQueueInfo::update(StorageQueuingMetricsReply const& reply, Smoother&
 	busiestReadTags = reply.busiestTags;
 }
 
-void StorageQueueInfo::refreshCommitCost(double elapsed) {
+UpdateCommitCostRequest StorageQueueInfo::refreshCommitCost(double elapsed) {
 	busiestWriteTags.clear();
 	TransactionTag busiestTag;
 	TransactionCommitCostEstimation maxCost;
@@ -1003,19 +1019,20 @@ void StorageQueueInfo::refreshCommitCost(double elapsed) {
 		busiestWriteTags.emplace_back(busiestTag, maxRate, maxBusyness);
 	}
 
-	TraceEvent("BusiestWriteTag", id)
-	    .detail("Elapsed", elapsed)
-	    .detail("Tag", printable(busiestTag))
-	    .detail("TagOps", maxCost.getOpsSum())
-	    .detail("TagCost", maxCost.getCostSum())
-	    .detail("TotalCost", totalWriteCosts)
-	    .detail("Reported", !busiestWriteTags.empty())
-	    .trackLatest(busiestWriteTagEventHolder->trackingKey);
+	UpdateCommitCostRequest updateCommitCostRequest;
+	updateCommitCostRequest.elapsed = elapsed;
+	updateCommitCostRequest.busiestTag = busiestTag;
+	updateCommitCostRequest.opsSum = maxCost.getOpsSum();
+	updateCommitCostRequest.costSum = maxCost.getCostSum();
+	updateCommitCostRequest.totalWriteCosts = totalWriteCosts;
+	updateCommitCostRequest.reported = !busiestWriteTags.empty();
 
 	// reset statistics
 	tagCostEst.clear();
 	totalWriteOps = 0;
 	totalWriteCosts = 0;
+
+	return updateCommitCostRequest;
 }
 
 TLogQueueInfo::TLogQueueInfo(UID id)
