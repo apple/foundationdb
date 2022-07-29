@@ -807,26 +807,16 @@ static Standalone<VectorRef<ParsedDeltaBoundaryRef>> loadSnapshotFile(
 
 		bool anyRows = false;
 		for (auto& entry : dataBlock) {
-			/*fmt::print("  Checking {0}. (rempty={1}, lastBlock={2}, keyLarger={3}, keySmaller={4})\n",
-			    entry.key.printable(), results.empty() ? "T" : "F", lastBlock ? "T" : "F",
-			    entry.key >= keyRange.begin ? "T" : "F", entry.key < keyRange.end ? "T" : "F");*/
 			if (!results.empty() && !lastBlock) {
-				// fmt::print("    Adding (fast path)\n");
 				// no key comparisons needed
 				results.emplace_back(results.arena(), entry);
 				anyRows = true;
 			} else if ((!results.empty() || entry.key >= keyRange.begin) && (!lastBlock || entry.key < keyRange.end)) {
-				// fmt::print("    Adding (slow path)\n");
 				results.emplace_back(results.arena(), entry);
 				anyRows = true;
 			} else if (!results.empty() && lastBlock) {
-				// fmt::print("    Done\n");
 				break;
 			}
-			// TODO REMOVE else block and print!
-			/*else {
-			    fmt::print("  Ignoring (not last block)\n");
-			}*/
 		}
 		if (anyRows) {
 			results.arena().dependsOn(dataBlock.arena());
@@ -1323,18 +1313,6 @@ Standalone<VectorRef<ParsedDeltaBoundaryRef>> sortMemoryDeltas(const GranuleDelt
 		itBegin->second.key = itBegin->first;
 		ParsedDeltaBoundaryRef boundary = deltaAtVersion(itBegin->second, beginVersion, readVersion);
 		if (!boundary.redundant(prevClearAfter)) {
-			// TODO remove
-			/*fmt::print("  {0} ", boundary.key.printable());
-			if (boundary.isSet()) {
-			    fmt::print("=");
-			} else if (boundary.isClear()) {
-			    fmt::print("X");
-			}
-			if (boundary.clearAfter) {
-			    fmt::print("    Clear+");
-			}
-			fmt::print("\n");*/
-
 			deltas.push_back_deep(deltas.arena(), boundary);
 			prevClearAfter = boundary.clearAfter;
 		}
@@ -1351,29 +1329,35 @@ struct MergeStreamNext {
 	KeyRef key;
 	int16_t streamIdx;
 	int dataIdx;
-
-	// the sort order is logically lower by key, and then higher by streamIdx
-	// because a priority queue is backwards, we invert that
-	struct OrderForPriorityQueue {
-		bool operator()(MergeStreamNext const& a, MergeStreamNext const& b) const {
-			int keyCmp = a.key.compare(b.key);
-			if (keyCmp != 0) {
-				return keyCmp > 0; // reverse
-			}
-			return a.streamIdx < b.streamIdx;
-		}
-	};
 };
 
-// TODO: clean up verbose debugging!
+// the sort order is logically lower by key, and then higher by streamIdx
+// because a priority queue is backwards, we invert that
+struct OrderForPriorityQueue {
+	int commonPrefixLen;
+	OrderForPriorityQueue(int commonPrefixLen) : commonPrefixLen(commonPrefixLen) {}
+
+	bool operator()(MergeStreamNext const& a, MergeStreamNext const& b) const {
+		int keyCmp = a.key.compareSuffix(b.key, commonPrefixLen);
+		if (keyCmp != 0) {
+			return keyCmp > 0; // reverse
+		}
+		return a.streamIdx < b.streamIdx;
+	}
+};
+
+typedef std::priority_queue<MergeStreamNext, std::vector<MergeStreamNext>, OrderForPriorityQueue> MergePQ;
+
 static RangeResult mergeDeltaStreams(const BlobGranuleChunkRef& chunk,
                                      const std::vector<Standalone<VectorRef<ParsedDeltaBoundaryRef>>>& streams,
                                      const std::vector<bool> startClears) {
 	ASSERT(streams.size() < std::numeric_limits<int16_t>::max());
 	ASSERT(startClears.size() == streams.size());
 
+	int prefixLen = commonPrefixLength(chunk.keyRange.begin, chunk.keyRange.end);
+
 	// next element for each stream
-	std::priority_queue<MergeStreamNext, std::vector<MergeStreamNext>, MergeStreamNext::OrderForPriorityQueue> next;
+	MergePQ next = MergePQ(OrderForPriorityQueue(prefixLen));
 
 	// efficiently find the highest stream's active clear
 	std::set<int16_t, std::greater<int16_t>> activeClears;
@@ -1407,7 +1391,8 @@ static RangeResult mergeDeltaStreams(const BlobGranuleChunkRef& chunk,
 		cur.push_back(next.top());
 		next.pop();
 
-		while (!next.empty() && next.top().key == cur.front().key) {
+		// next.top().key == cur.front().key but with suffix comparison
+		while (!next.empty() && cur.front().key.compareSuffix(next.top().key, prefixLen) == 0) {
 			cur.push_back(next.top());
 			next.pop();
 		}
@@ -1488,7 +1473,6 @@ RangeResult materializeBlobGranule(const BlobGranuleChunkRef& chunk,
 		Standalone<VectorRef<ParsedDeltaBoundaryRef>> snapshotRows =
 		    loadSnapshotFile(snapshotData.get(), requestRange, chunk.cipherKeysCtx);
 		if (!snapshotRows.empty()) {
-			// TODO - std::move?
 			streams.push_back(snapshotRows);
 			startClears.push_back(false);
 			arena.dependsOn(streams.back().arena());
@@ -1939,7 +1923,6 @@ void checkSnapshotRead(const Standalone<GranuleSnapshot>& snapshot,
 		fmt::print("Read {0} rows != {1}\n", result.size(), endIdx - beginIdx);
 	}
 
-	// TODO remove
 	/*fmt::print("Expected Data {0}:\n", result.size());
 	for (auto& it : result) {
 	    fmt::print("  {0}=\n", it.key.printable());
@@ -2000,7 +1983,8 @@ struct KeyValueGen {
 		targetKeyLength = deterministicRandom()->randomInt(4, uidSize);
 		sharedPrefix = sharedPrefix.substr(0, sharedPrefixLen) + "_";
 		targetValueLength = randomExp(0, 12);
-		allRange = KeyRangeRef(StringRef(sharedPrefix), LiteralStringRef("\xff"));
+		allRange = KeyRangeRef(StringRef(sharedPrefix),
+		                       sharedPrefix.size() == 0 ? LiteralStringRef("\xff") : strinc(StringRef(sharedPrefix)));
 
 		if (deterministicRandom()->coinflip()) {
 			clearFrequency = 0.0;
@@ -2355,7 +2339,6 @@ void checkDeltaRead(const KeyValueGen& kvGen,
 	RangeResult actualData = materializeBlobGranule(chunk, range, beginVersion, readVersion, {}, serialized);
 
 	if (expectedData.size() != actualData.size()) {
-		// TODO remove
 		fmt::print("Expected Data {0}:\n", expectedData.size());
 		/*for (auto& it : expectedData) {
 		    fmt::print("  {0}=\n", it.first.printable());
@@ -2417,7 +2400,6 @@ TEST_CASE("/blobgranule/files/deltaFormatUnitTest") {
 	Standalone<GranuleDeltas> data = genDeltas(kvGen, targetDataBytes);
 
 	fmt::print("Deltas ({0})\n", data.size());
-	// TODO REMOVE
 	/*for (auto& it : data) {
 	    fmt::print("  {0}) ({1})\n", it.version, it.mutations.size());
 	    for (auto& it2 : it.mutations) {
@@ -2642,6 +2624,8 @@ TEST_CASE("/blobgranule/files/granuleReadUnitTest") {
 struct FileSet {
 	std::tuple<std::string, Version, Value, Standalone<GranuleSnapshot>> snapshotFile;
 	std::vector<std::tuple<std::string, Version, Value, Standalone<GranuleDeltas>>> deltaFiles;
+	Key commonPrefix;
+	KeyRange range;
 };
 
 std::pair<std::string, Version> parseFilename(const std::string& fname) {
@@ -2669,8 +2653,44 @@ Value loadFileData(std::string filename) {
 	return v;
 }
 
+struct CommonPrefixStats {
+	// for computing common prefix details and stats
+	Key key;
+	int len = -1;
+	int64_t totalKeySize = 0;
+	int totalKeys = 0;
+	int minKeySize = 1000000000;
+	int maxKeySize = 0;
+
+	void addKey(const KeyRef& k) {
+		if (len == -1) {
+			key = k;
+			len = k.size();
+		} else {
+			len = std::min(len, commonPrefixLength(k, key));
+		}
+		totalKeys++;
+		totalKeySize += k.size();
+		minKeySize = std::min(minKeySize, k.size());
+		maxKeySize = std::max(maxKeySize, k.size());
+	}
+
+	Key done() {
+		ASSERT(len >= 0);
+		fmt::print("Common prefix: {0}\nCommon Prefix Length: {1}\nAverage Key Size: {2}\nMin Key Size: {3}, Max Key "
+		           "Size: {4}\n",
+		           key.substr(0, len).printable(),
+		           len,
+		           totalKeySize / totalKeys,
+		           minKeySize,
+		           maxKeySize);
+		return key.substr(0, len);
+	}
+};
+
 FileSet loadFileSet(std::string basePath, const std::vector<std::string>& filenames) {
 	FileSet files;
+	CommonPrefixStats stats;
 	for (int i = 0; i < filenames.size(); i++) {
 		auto parts = parseFilename(filenames[i]);
 		std::string type = parts.first;
@@ -2687,6 +2707,10 @@ FileSet loadFileSet(std::string basePath, const std::vector<std::string>& filena
 
 			fmt::print("Loaded {0} rows from snapshot file\n", parsed.size());
 			files.snapshotFile = { filenames[i], version, data, parsed };
+
+			for (auto& it : parsed) {
+				stats.addKey(it.key);
+			}
 		} else {
 			std::string fpath = basePath + filenames[i];
 			Value data = loadFileData(fpath);
@@ -2699,8 +2723,25 @@ FileSet loadFileSet(std::string basePath, const std::vector<std::string>& filena
 
 			fmt::print("Loaded {0} deltas from delta file\n", parsed.size());
 			files.deltaFiles.push_back({ filenames[i], version, data, parsed });
+
+			for (auto& it : parsed) {
+				for (auto& it2 : it.mutations) {
+					stats.addKey(it2.param1);
+					if (it2.type == MutationRef::Type::ClearRange) {
+						stats.addKey(it2.param2);
+					}
+				}
+			}
 		}
 	}
+
+	files.commonPrefix = stats.done();
+	if (files.commonPrefix.size() == 0) {
+		files.range = normalKeys;
+	} else {
+		files.range = KeyRangeRef(files.commonPrefix, strinc(files.commonPrefix));
+	}
+	fmt::print("Range: [{0} - {1})\n", files.range.begin.printable(), files.range.end.printable());
 
 	return files;
 }
@@ -2726,6 +2767,7 @@ std::pair<int64_t, double> doSnapshotWriteBench(const Standalone<GranuleSnapshot
 }
 
 std::pair<int64_t, double> doDeltaWriteBench(const Standalone<GranuleDeltas>& data,
+                                             const KeyRangeRef& fileRange,
                                              bool chunked,
                                              Optional<BlobGranuleCipherKeysCtx> cipherKeys,
                                              Optional<CompressionFilter> compressionFilter) {
@@ -2736,7 +2778,7 @@ std::pair<int64_t, double> doDeltaWriteBench(const Standalone<GranuleDeltas>& da
 			serializedBytes = ObjectWriter::toValue(data, Unversioned()).size();
 		} else {
 			serializedBytes =
-			    serializeChunkedDeltaFile(data, normalKeys, 32 * 1024, compressionFilter, cipherKeys).size();
+			    serializeChunkedDeltaFile(data, fileRange, 32 * 1024, compressionFilter, cipherKeys).size();
 		}
 	}
 	elapsed += timer_monotonic();
@@ -2750,12 +2792,14 @@ FileSet rewriteChunkedFileSet(const FileSet& fileSet,
 	FileSet newFiles;
 	newFiles.snapshotFile = fileSet.snapshotFile;
 	newFiles.deltaFiles = fileSet.deltaFiles;
+	newFiles.commonPrefix = fileSet.commonPrefix;
+	newFiles.range = fileSet.range;
 
 	std::get<2>(newFiles.snapshotFile) =
 	    serializeChunkedSnapshot(std::get<3>(newFiles.snapshotFile), 64 * 1024, compressionFilter, keys);
 	for (auto& deltaFile : newFiles.deltaFiles) {
 		std::get<2>(deltaFile) =
-		    serializeChunkedDeltaFile(std::get<3>(deltaFile), normalKeys, 32 * 1024, compressionFilter, keys);
+		    serializeChunkedDeltaFile(std::get<3>(deltaFile), fileSet.range, 32 * 1024, compressionFilter, keys);
 	}
 
 	return newFiles;
@@ -2799,7 +2843,7 @@ std::pair<int64_t, double> doReadBench(const FileSet& fileSet,
 		}
 
 		chunk.cipherKeysCtx = keys;
-		chunk.keyRange = normalKeys;
+		chunk.keyRange = fileSet.range;
 		chunk.includedVersion = readVersion;
 		chunk.snapshotVersion = std::get<1>(fileSet.snapshotFile);
 	}
@@ -2912,7 +2956,8 @@ TEST_CASE("!/blobgranule/files/benchFromFiles") {
 				double deltaTotalElapsed = 0.0;
 				for (auto& fileSet : fileSets) {
 					for (auto& deltaFile : fileSet.deltaFiles) {
-						auto res = doDeltaWriteBench(std::get<3>(deltaFile), chunk, keys, compressionFilter);
+						auto res =
+						    doDeltaWriteBench(std::get<3>(deltaFile), fileSet.range, chunk, keys, compressionFilter);
 						deltaTotalBytes += res.first;
 						deltaTotalElapsed += res.second;
 					}
@@ -2988,13 +3033,13 @@ TEST_CASE("!/blobgranule/files/benchFromFiles") {
 						newFileSet = rewriteChunkedFileSet(fileSet, keys, compressionFilter);
 					}
 
-					auto res = doReadBench(newFileSet, chunk, normalKeys, false, keys, compressionFilter);
+					auto res = doReadBench(newFileSet, chunk, fileSet.range, false, keys, compressionFilter);
 					totalBytesRead += res.first;
 					totalElapsed += res.second;
 
 					if (doEdgeCaseReadTests) {
 						totalElapsedClearAll +=
-						    doReadBench(newFileSet, chunk, normalKeys, true, keys, compressionFilter).second;
+						    doReadBench(newFileSet, chunk, fileSet.range, true, keys, compressionFilter).second;
 						Key k = std::get<3>(fileSet.snapshotFile).front().key;
 						KeyRange singleKeyRange(KeyRangeRef(k, keyAfter(k)));
 						totalElapsedSingleKey +=
