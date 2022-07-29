@@ -603,6 +603,7 @@ struct RegisterClusterImpl {
 						throw cluster_already_registered();
 					} else {
 						// We already successfully registered the cluster with these details, so there's nothing to do
+						self->clusterEntry.id = existingRegistration.get().id;
 						return Void();
 					}
 				}
