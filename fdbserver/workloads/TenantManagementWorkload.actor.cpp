@@ -84,8 +84,8 @@ struct TenantManagementWorkload : TestWorkload {
 	double testDuration;
 	bool useMetacluster;
 
-	double oldestDeletionTime = 0.0;
-	double newestDeletionTime = 0.0;
+	Version oldestDeletionVersion = 0;
+	Version newestDeletionVersion = 0;
 
 	Reference<IDatabase> mvDb;
 	Database dataDb;
@@ -677,19 +677,21 @@ struct TenantManagementWorkload : TestWorkload {
 			try {
 				// Attempt to delete the tenant(s)
 				state bool retried = false;
-				state double deleteStartTime = now();
 				loop {
 					try {
+						state Version beforeVersion = wait(tr->getReadVersion());
 						Optional<Void> result =
 						    wait(timeout(deleteImpl(tr, beginTenant, endTenant, tenants, operationType, self),
 						                 deterministicRandom()->randomInt(1, 30)));
 
 						if (result.present()) {
 							if (anyExists) {
-								if (self->oldestDeletionTime == 0) {
-									self->oldestDeletionTime = now();
+								if (self->oldestDeletionVersion == 0) {
+									tr->reset();
+									Version afterVersion = wait(tr->getReadVersion());
+									self->oldestDeletionVersion = afterVersion;
 								}
-								self->newestDeletionTime = deleteStartTime;
+								self->newestDeletionVersion = beforeVersion;
 							}
 
 							// Database operations shouldn't get here if the tenant didn't exist
@@ -1612,9 +1614,9 @@ struct TenantManagementWorkload : TestWorkload {
 				if (!self->useMetacluster) {
 					ASSERT(tombstones.results.empty() && !tombstoneCleanupData.present());
 				} else {
-					if (self->oldestDeletionTime != 0 && tombstoneCleanupData.present()) {
-						if (self->newestDeletionTime - self->oldestDeletionTime >
-						    CLIENT_KNOBS->TENANT_TOMBSTONE_CLEANUP_INTERVAL) {
+					if (self->oldestDeletionVersion != 0 && tombstoneCleanupData.present()) {
+						if (self->newestDeletionVersion - self->oldestDeletionVersion >
+						    CLIENT_KNOBS->TENANT_TOMBSTONE_CLEANUP_INTERVAL * CLIENT_KNOBS->VERSIONS_PER_SECOND) {
 							ASSERT(tombstoneCleanupData.get().tombstonesErasedThrough >= 0);
 						}
 					} else if (!tombstoneCleanupData.present()) {
