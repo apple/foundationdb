@@ -1092,7 +1092,21 @@ struct CreateTenantImpl {
 				wait(self->ctx.setCluster(tr, existingEntry.get().assignedCluster.get()));
 				return true;
 			} else {
-				// The previous creation is permanently failed, so create it again from scratch
+				// The previous creation is permanently failed, so cleanup the tenant and create it again from scratch
+				// We don't need to remove it from the tenant map because we will overwrite the existing entry later in
+				// this transaction.
+				ManagementClusterMetadata::tenantMetadata.tenantCount.atomicOp(tr, -1, MutationRef::AddValue);
+				ManagementClusterMetadata::clusterTenantCount.atomicOp(
+				    tr, existingEntry.get().assignedCluster.get(), -1, MutationRef::AddValue);
+
+				ManagementClusterMetadata::clusterTenantIndex.erase(
+				    tr, Tuple::makeTuple(existingEntry.get().assignedCluster.get(), self->tenantName));
+
+				DataClusterMetadata previousAssignedClusterMetadata =
+				    wait(getClusterTransaction(tr, existingEntry.get().assignedCluster.get()));
+
+				wait(managementClusterRemoveTenantFromGroup(
+				    tr, self->tenantName, existingEntry.get(), previousAssignedClusterMetadata));
 			}
 		}
 
