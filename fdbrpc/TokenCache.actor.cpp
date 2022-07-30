@@ -265,7 +265,7 @@ TEST_CASE("/fdbrpc/authz/TokenCache/BadTokens") {
 		},
 		{
 		    [](Arena&, IRandom& rng, authz::jwt::TokenRef& token) {
-		        token.expiresAtUnixTime = uint64_t(g_network->timer() - 10 - rng.random01() * 50);
+		        token.expiresAtUnixTime = uint64_t(std::max<double>(g_network->timer() - 10 - rng.random01() * 50, 0));
 		    },
 		    "ExpiredToken",
 		},
