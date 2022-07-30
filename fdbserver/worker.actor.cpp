@@ -589,20 +589,20 @@ ACTOR Future<Void> registrationClient(
 			incorrectTime = Optional<double>();
 		}
 
-		RegisterWorkerRequest request(interf,
-		                              initialClass,
-		                              processClass,
-		                              asyncPriorityInfo->get(),
-		                              requestGeneration++,
-		                              ddInterf->get(),
-		                              rkInterf->get(),
-		                              bmInterf->get().present() ? bmInterf->get().get().second
-		                                                        : Optional<BlobManagerInterface>(),
-		                              ekpInterf->get(),
-		                              degraded->get(),
-		                              localConfig->lastSeenVersion(),
-		                              localConfig->configClassSet(),
-		                              recoveredDiskFiles.isSet());
+		RegisterWorkerRequest request(
+		    interf,
+		    initialClass,
+		    processClass,
+		    asyncPriorityInfo->get(),
+		    requestGeneration++,
+		    ddInterf->get(),
+		    rkInterf->get(),
+		    bmInterf->get().present() ? bmInterf->get().get().second : Optional<BlobManagerInterface>(),
+		    ekpInterf->get(),
+		    degraded->get(),
+		    localConfig.isValid() ? localConfig->lastSeenVersion() : Optional<Version>(),
+		    localConfig.isValid() ? localConfig->configClassSet() : Optional<ConfigClassSet>(),
+		    recoveredDiskFiles.isSet());
 
 		for (auto const& i : issues->get()) {
 			request.issues.push_back_deep(request.issues.arena(), i);
@@ -3319,8 +3319,11 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 	state std::vector<Future<Void>> actors;
 	state Promise<Void> recoveredDiskFiles;
 	state Reference<ConfigNode> configNode;
-	state Reference<LocalConfiguration> localConfig = makeReference<LocalConfiguration>(
-	    dataFolder, configPath, manualKnobOverrides, g_network->isSimulated() ? IsTest::True : IsTest::False);
+	state Reference<LocalConfiguration> localConfig;
+	if (configDBType != ConfigDBType::DISABLED) {
+		localConfig = makeReference<LocalConfiguration>(
+		    dataFolder, configPath, manualKnobOverrides, g_network->isSimulated() ? IsTest::True : IsTest::False);
+	}
 	// setupStackSignal();
 	getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::Worker;
 
@@ -3341,7 +3344,8 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 		    .detail("MachineId", localities.machineId())
 		    .detail("DiskPath", dataFolder)
 		    .detail("CoordPath", coordFolder)
-		    .detail("WhiteListBinPath", whitelistBinPaths);
+		    .detail("WhiteListBinPath", whitelistBinPaths)
+		    .detail("ConfigDBType", configDBType);
 
 		state ConfigBroadcastInterface configBroadcastInterface;
 		// SOMEDAY: start the services on the machine in a staggered fashion in simulation?

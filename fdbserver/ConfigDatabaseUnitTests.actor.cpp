@@ -269,8 +269,8 @@ class BroadcasterToLocalConfigEnvironment {
 		wait(self->readFrom.setup());
 		self->cbi = makeReference<AsyncVar<ConfigBroadcastInterface>>();
 		self->readFrom.connectToBroadcaster(self->cbi);
-		self->broadcastServer = self->broadcaster.registerNode(
-		    WorkerInterface(), 0, configClassSet, self->workerFailure.getFuture(), self->cbi->get(), true);
+		self->broadcastServer =
+		    self->broadcaster.registerNode(self->cbi->get(), 0, configClassSet, self->workerFailure.getFuture(), true);
 		return Void();
 	}
 
@@ -305,12 +305,8 @@ public:
 		broadcastServer.cancel();
 		cbi->set(ConfigBroadcastInterface{});
 		readFrom.connectToBroadcaster(cbi);
-		broadcastServer = broadcaster.registerNode(WorkerInterface(),
-		                                           readFrom.lastSeenVersion(),
-		                                           readFrom.configClassSet(),
-		                                           workerFailure.getFuture(),
-		                                           cbi->get(),
-		                                           true);
+		broadcastServer = broadcaster.registerNode(
+		    cbi->get(), readFrom.lastSeenVersion(), readFrom.configClassSet(), workerFailure.getFuture(), true);
 	}
 
 	Future<Void> restartLocalConfig(std::string const& newConfigPath) {
@@ -442,8 +438,8 @@ class TransactionToLocalConfigEnvironment {
 		wait(self->readFrom.setup());
 		self->cbi = makeReference<AsyncVar<ConfigBroadcastInterface>>();
 		self->readFrom.connectToBroadcaster(self->cbi);
-		self->broadcastServer = self->broadcaster.registerNode(
-		    WorkerInterface(), 0, configClassSet, self->workerFailure.getFuture(), self->cbi->get(), true);
+		self->broadcastServer =
+		    self->broadcaster.registerNode(self->cbi->get(), 0, configClassSet, self->workerFailure.getFuture(), true);
 		return Void();
 	}
 
@@ -462,12 +458,8 @@ public:
 		broadcastServer.cancel();
 		cbi->set(ConfigBroadcastInterface{});
 		readFrom.connectToBroadcaster(cbi);
-		broadcastServer = broadcaster.registerNode(WorkerInterface(),
-		                                           readFrom.lastSeenVersion(),
-		                                           readFrom.configClassSet(),
-		                                           workerFailure.getFuture(),
-		                                           cbi->get(),
-		                                           true);
+		broadcastServer = broadcaster.registerNode(
+		    cbi->get(), readFrom.lastSeenVersion(), readFrom.configClassSet(), workerFailure.getFuture(), true);
 	}
 
 	Future<Void> restartLocalConfig(std::string const& newConfigPath) {

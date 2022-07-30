@@ -521,7 +521,6 @@ ACTOR Future<Void> changeCoordinators(Reference<ClusterRecoveryData> self) {
 	loop {
 		ChangeCoordinatorsRequest req = waitNext(self->clusterController.changeCoordinators.getFuture());
 		TraceEvent("ChangeCoordinators", self->dbgid).log();
-
 		++self->changeCoordinatorsRequests;
 		state ChangeCoordinatorsRequest changeCoordinatorsRequest = req;
 		if (self->masterInterface.id() != changeCoordinatorsRequest.masterId) {

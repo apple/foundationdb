@@ -135,18 +135,23 @@ class ConfigNodeImpl {
 	Counter getGenerationRequests;
 	Future<Void> logger;
 
-	ACTOR static Future<Optional<size_t>> getCoordinatorsHash(ConfigNodeImpl* self) {
+	ACTOR static Future<size_t> getCoordinatorsHash(ConfigNodeImpl* self) {
+		state size_t coordinatorsHash = 0;
 		Optional<Value> value = wait(self->kvStore->readValue(coordinatorsHashKey));
-		if (!value.present()) {
-			return Optional<size_t>();
+		if (value.present()) {
+			coordinatorsHash = BinaryReader::fromStringRef<size_t>(value.get(), IncludeVersion());
+		} else {
+			self->kvStore->set(
+			    KeyValueRef(coordinatorsHashKey, BinaryWriter::toValue(coordinatorsHash, IncludeVersion())));
+			wait(self->kvStore->commit());
 		}
-		return BinaryReader::fromStringRef<size_t>(value.get(), IncludeVersion());
+		return coordinatorsHash;
 	}
 
 	ACTOR static Future<Optional<size_t>> getLocked(ConfigNodeImpl* self) {
 		Optional<Value> value = wait(self->kvStore->readValue(lockedKey));
 		if (!value.present()) {
-			return false;
+			return Optional<size_t>();
 		}
 		return BinaryReader::fromStringRef<Optional<size_t>>(value.get(), IncludeVersion());
 	}
@@ -247,9 +252,8 @@ class ConfigNodeImpl {
 	// New transactions increment the database's current live version. This effectively serves as a lock, providing
 	// serializability
 	ACTOR static Future<Void> getNewGeneration(ConfigNodeImpl* self, ConfigTransactionGetGenerationRequest req) {
-		state Optional<size_t> coordinatorsHash = wait(getCoordinatorsHash(self));
-		ASSERT(coordinatorsHash.present());
-		if (req.coordinatorsHash != coordinatorsHash.get()) {
+		state size_t coordinatorsHash = wait(getCoordinatorsHash(self));
+		if (req.coordinatorsHash != coordinatorsHash) {
 			req.reply.sendError(coordinators_changed());
 			return Void();
 		}
@@ -273,9 +277,8 @@ class ConfigNodeImpl {
 			req.reply.sendError(coordinators_changed());
 			return Void();
 		}
-		state Optional<size_t> coordinatorsHash = wait(getCoordinatorsHash(self));
-		ASSERT(coordinatorsHash.present());
-		if (req.coordinatorsHash != coordinatorsHash.get()) {
+		state size_t coordinatorsHash = wait(getCoordinatorsHash(self));
+		if (req.coordinatorsHash != coordinatorsHash) {
 			req.reply.sendError(coordinators_changed());
 			return Void();
 		}
@@ -317,7 +320,11 @@ class ConfigNodeImpl {
 			req.reply.sendError(coordinators_changed());
 			return Void();
 		}
-
+		state size_t coordinatorsHash = wait(getCoordinatorsHash(self));
+		if (req.coordinatorsHash != coordinatorsHash) {
+			req.reply.sendError(coordinators_changed());
+			return Void();
+		}
 		ConfigGeneration currentGeneration = wait(getGeneration(self));
 		if (req.generation != currentGeneration) {
 			req.reply.sendError(transaction_too_old());
@@ -354,6 +361,11 @@ class ConfigNodeImpl {
 		state Optional<size_t> locked = wait(getLocked(self));
 		if (locked.present()) {
 			CODE_PROBE(true, "attempting to read knobs from locked ConfigNode");
+			req.reply.sendError(coordinators_changed());
+			return Void();
+		}
+		state size_t coordinatorsHash = wait(getCoordinatorsHash(self));
+		if (req.coordinatorsHash != coordinatorsHash) {
 			req.reply.sendError(coordinators_changed());
 			return Void();
 		}
@@ -441,9 +453,8 @@ class ConfigNodeImpl {
 			req.reply.sendError(coordinators_changed());
 			return Void();
 		}
-		state Optional<size_t> coordinatorsHash = wait(getCoordinatorsHash(self));
-		ASSERT(coordinatorsHash.present());
-		if (req.coordinatorsHash != coordinatorsHash.get()) {
+		state size_t coordinatorsHash = wait(getCoordinatorsHash(self));
+		if (req.coordinatorsHash != coordinatorsHash) {
 			req.reply.sendError(coordinators_changed());
 			return Void();
 		}
@@ -747,8 +758,8 @@ class ConfigNodeImpl {
 				}
 				when(state ConfigFollowerLockRequest req = waitNext(cfi->lock.getFuture())) {
 					++self->lockRequests;
-					Optional<size_t> coordinatorsHash = wait(getCoordinatorsHash(self));
-					if (!coordinatorsHash.present() || coordinatorsHash.get() == req.coordinatorsHash) {
+					size_t coordinatorsHash = wait(getCoordinatorsHash(self));
+					if (coordinatorsHash == 0 || coordinatorsHash == req.coordinatorsHash) {
 						TraceEvent("ConfigNodeLocking", self->id).log();
 						self->kvStore->set(KeyValueRef(registeredKey, BinaryWriter::toValue(false, IncludeVersion())));
 						self->kvStore->set(KeyValueRef(
@@ -803,6 +814,8 @@ public:
 		return serve(this, &cbi, &cti, &cfi);
 	}
 
+	Future<Void> serve(ConfigBroadcastInterface const& cbi) { return serve(this, &cbi, true); }
+
 	Future<Void> serve(ConfigTransactionInterface const& cti) { return serve(this, &cti); }
 
 	Future<Void> serve(ConfigFollowerInterface const& cfi) {
@@ -822,6 +835,10 @@ Future<Void> ConfigNode::serve(ConfigBroadcastInterface const& cbi,
                                ConfigTransactionInterface const& cti,
                                ConfigFollowerInterface const& cfi) {
 	return impl->serve(cbi, cti, cfi);
+}
+
+Future<Void> ConfigNode::serve(ConfigBroadcastInterface const& cbi) {
+	return impl->serve(cbi);
 }
 
 Future<Void> ConfigNode::serve(ConfigTransactionInterface const& cti) {

@@ -44,11 +44,10 @@ public:
 	ConfigBroadcaster(ConfigBroadcaster&&);
 	ConfigBroadcaster& operator=(ConfigBroadcaster&&);
 	~ConfigBroadcaster();
-	Future<Void> registerNode(WorkerInterface const& w,
+	Future<Void> registerNode(ConfigBroadcastInterface const& broadcastInterface,
 	                          Version lastSeenVersion,
 	                          ConfigClassSet const& configClassSet,
 	                          Future<Void> watcher,
-	                          ConfigBroadcastInterface const& worker,
 	                          bool isCoordinator);
 	void applyChanges(Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
 	                  Version mostRecentVersion,
