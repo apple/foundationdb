@@ -914,7 +914,11 @@ public:
 	bool REST_KMS_CONNECTOR_REFRESH_KMS_URLS;
 	double REST_KMS_CONNECTOR_REFRESH_KMS_URLS_INTERVAL_SEC;
 	std::string REST_KMS_CONNECTOR_GET_ENCRYPTION_KEYS_ENDPOINT;
+
+	// DYNAMIC REPLICATION
 	bool DYNAMIC_REPLICATION_ENABLED;
+	// Dynamic replication happens when shard's bandwidth > srcLoad * BANDWIDTH_FRAC
+	double DYNAMIC_REPLICATION_SHARD_BANDWIDTH_FRAC;
 
 	ServerKnobs(Randomize, ClientKnobs*, IsSimulated);
 	void initialize(Randomize, ClientKnobs*, IsSimulated);

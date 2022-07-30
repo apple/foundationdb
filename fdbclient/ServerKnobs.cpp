@@ -949,7 +949,9 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// acceptable format: "<token_name1>#<absolute_file_path1>,<token_name2>#<absolute_file_path2>,.."
 	// NOTE: 'token-name" can NOT contain '#' character
 	init( REST_KMS_CONNECTOR_VALIDATION_TOKEN_DETAILS,             "");
-	init( DYNAMIC_REPLICATION_ENABLED,							 true);
+
+	init( DYNAMIC_REPLICATION_ENABLED,                           true);
+	init( DYNAMIC_REPLICATION_SHARD_BANDWIDTH_FRAC,               0.2);
 
 	// clang-format on
 

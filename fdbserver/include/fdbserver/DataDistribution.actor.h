@@ -37,6 +37,8 @@
 
 enum class RelocateReason { INVALID = -1, OTHER, REBALANCE_DISK, REBALANCE_READ };
 
+enum class RelocateOperation { INVALID = -1, MOVE, MULTIPLY_REPLICAS, REDUCE_REPLICAS };
+
 // One-to-one relationship to the priority knobs
 enum class DataMovementReason {
 	INVALID = -1,
@@ -56,8 +58,7 @@ enum class DataMovementReason {
 	TEAM_1_LEFT,
 	TEAM_FAILED,
 	TEAM_0_LEFT,
-	SPLIT_SHARD,
-	DYNAMIC_REPLICATION
+	SPLIT_SHARD
 };
 
 struct DDShardInfo;
@@ -91,17 +92,17 @@ struct RelocateShard {
 	std::shared_ptr<DataMove> dataMove; // Not null if this is a restored data move.
 	UID dataMoveId;
 	RelocateReason reason;
-	DataMovementReason moveReason_;
+	RelocateOperation operation_;
 
 	RelocateShard()
 	  : priority(0), cancelled(false), dataMoveId(anonymousShardId), reason(RelocateReason::INVALID),
-	    moveReason_(DataMovementReason::INVALID) {}
-	RelocateShard(KeyRange const& keys, int priority, RelocateReason reason)
+	    operation_(RelocateOperation::INVALID) {}
+	RelocateShard(KeyRange const& keys,
+	              int priority,
+	              RelocateReason reason,
+	              RelocateOperation operation = RelocateOperation::MOVE)
 	  : keys(keys), priority(priority), cancelled(false), dataMoveId(anonymousShardId), reason(reason),
-	    moveReason_(DataMovementReason::INVALID) {}
-	RelocateShard(KeyRange const& keys, int priority, RelocateReason reason, DataMovementReason moveReason)
-	  : keys(keys), priority(priority), cancelled(false), dataMoveId(anonymousShardId), reason(reason),
-	    moveReason_(moveReason) {}
+	    operation_(operation) {}
 
 	bool isRestore() const { return this->dataMove != nullptr; }
 };
