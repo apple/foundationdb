@@ -956,6 +956,9 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 	std::sort(old.coords.begin(), old.coords.end());
 	if (conn->hostnames == old.hostnames && conn->coords == old.coords && old.clusterKeyName() == newName) {
 		connectionStrings.clear();
+		if (g_network->isSimulated() && g_simulator.configDBType == ConfigDBType::DISABLED) {
+			disableConfigDB = true;
+		}
 		if (!disableConfigDB) {
 			wait(verifyConfigurationDatabaseAlive(tr->getDatabase()));
 		}

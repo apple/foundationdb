@@ -245,17 +245,18 @@ class ConfigBroadcasterImpl {
 	// date.
 	ACTOR static Future<Void> registerNodeInternal(ConfigBroadcaster* broadcaster,
 	                                               ConfigBroadcasterImpl* self,
-	                                               WorkerInterface w) {
+	                                               ConfigBroadcastInterface configBroadcastInterface) {
 		if (self->configDBType == ConfigDBType::SIMPLE) {
-			wait(success(
-			    brokenPromiseToNever(w.configBroadcastInterface.ready.getReply(ConfigBroadcastReadyRequest{}))));
+			self->consumerFuture = self->consumer->consume(*broadcaster);
+			wait(success(brokenPromiseToNever(
+			    configBroadcastInterface.ready.getReply(ConfigBroadcastReadyRequest{ 0, {}, -1, -1 }))));
 			return Void();
 		}
 
-		state NetworkAddress address = w.address();
+		state NetworkAddress address = configBroadcastInterface.address();
 		// Ask the registering ConfigNode whether it has registered in the past.
 		state ConfigBroadcastRegisteredReply reply = wait(
-		    brokenPromiseToNever(w.configBroadcastInterface.registered.getReply(ConfigBroadcastRegisteredRequest{})));
+		    brokenPromiseToNever(configBroadcastInterface.registered.getReply(ConfigBroadcastRegisteredRequest{})));
 		self->maxLastSeenVersion = std::max(self->maxLastSeenVersion, reply.lastSeenVersion);
 		state bool registered = reply.registered;
 		TraceEvent("ConfigBroadcasterRegisterNodeReceivedRegistrationReply", self->id)
@@ -373,10 +374,10 @@ class ConfigBroadcasterImpl {
 		    .detail("LargestLiveVersion", self->largestLiveVersion);
 		if (sendSnapshot) {
 			Version liveVersion = std::max(self->largestLiveVersion, self->mostRecentVersion);
-			wait(success(brokenPromiseToNever(w.configBroadcastInterface.ready.getReply(ConfigBroadcastReadyRequest{
+			wait(success(brokenPromiseToNever(configBroadcastInterface.ready.getReply(ConfigBroadcastReadyRequest{
 			    self->coordinatorsHash, self->snapshot, self->mostRecentVersion, liveVersion }))));
 		} else {
-			wait(success(brokenPromiseToNever(w.configBroadcastInterface.ready.getReply(
+			wait(success(brokenPromiseToNever(configBroadcastInterface.ready.getReply(
 			    ConfigBroadcastReadyRequest{ self->coordinatorsHash, {}, -1, -1 }))));
 		}
 
@@ -392,11 +393,10 @@ class ConfigBroadcasterImpl {
 
 	ACTOR static Future<Void> registerNode(ConfigBroadcaster* self,
 	                                       ConfigBroadcasterImpl* impl,
-	                                       WorkerInterface w,
+	                                       ConfigBroadcastInterface broadcastInterface,
 	                                       Version lastSeenVersion,
 	                                       ConfigClassSet configClassSet,
 	                                       Future<Void> watcher,
-	                                       ConfigBroadcastInterface broadcastInterface,
 	                                       bool isCoordinator) {
 		state BroadcastClientDetails client(
 		    watcher, std::move(configClassSet), lastSeenVersion, std::move(broadcastInterface));
@@ -412,27 +412,25 @@ class ConfigBroadcasterImpl {
 		    .detail("IsCoordinator", isCoordinator);
 
 		if (isCoordinator) {
-			impl->actors.add(registerNodeInternal(self, impl, w));
+			impl->actors.add(registerNodeInternal(self, impl, broadcastInterface));
 		}
 
 		// Push full snapshot to worker if it isn't up to date.
 		wait(impl->pushSnapshot(impl->mostRecentVersion, client));
 		impl->clients[broadcastInterface.id()] = client;
 		impl->clientFailures[broadcastInterface.id()] =
-		    waitForFailure(impl, watcher, broadcastInterface.id(), w.address(), isCoordinator);
+		    waitForFailure(impl, watcher, broadcastInterface.id(), broadcastInterface.address(), isCoordinator);
 		return Void();
 	}
 
 public:
 	Future<Void> registerNode(ConfigBroadcaster& self,
-	                          WorkerInterface const& w,
+	                          ConfigBroadcastInterface const& broadcastInterface,
 	                          Version lastSeenVersion,
 	                          ConfigClassSet configClassSet,
 	                          Future<Void> watcher,
-	                          ConfigBroadcastInterface const& broadcastInterface,
 	                          bool isCoordinator) {
-		return registerNode(
-		    &self, this, w, lastSeenVersion, configClassSet, watcher, broadcastInterface, isCoordinator);
+		return registerNode(&self, this, broadcastInterface, lastSeenVersion, configClassSet, watcher, isCoordinator);
 	}
 
 	// Updates the broadcasters knowledge of which replicas are fully up to
@@ -621,13 +619,12 @@ ConfigBroadcaster& ConfigBroadcaster::operator=(ConfigBroadcaster&&) = default;
 
 ConfigBroadcaster::~ConfigBroadcaster() = default;
 
-Future<Void> ConfigBroadcaster::registerNode(WorkerInterface const& w,
+Future<Void> ConfigBroadcaster::registerNode(ConfigBroadcastInterface const& broadcastInterface,
                                              Version lastSeenVersion,
                                              ConfigClassSet const& configClassSet,
                                              Future<Void> watcher,
-                                             ConfigBroadcastInterface const& broadcastInterface,
                                              bool isCoordinator) {
-	return impl->registerNode(*this, w, lastSeenVersion, configClassSet, watcher, broadcastInterface, isCoordinator);
+	return impl->registerNode(*this, broadcastInterface, lastSeenVersion, configClassSet, watcher, isCoordinator);
 }
 
 void ConfigBroadcaster::applyChanges(Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,

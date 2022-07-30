@@ -434,8 +434,8 @@ struct RegisterWorkerRequest {
 	std::vector<NetworkAddress> incompatiblePeers;
 	ReplyPromise<RegisterWorkerReply> reply;
 	bool degraded;
-	Version lastSeenKnobVersion;
-	ConfigClassSet knobConfigClassSet;
+	Optional<Version> lastSeenKnobVersion;
+	Optional<ConfigClassSet> knobConfigClassSet;
 	bool requestDbInfo;
 	bool recoveredDiskFiles;
 
@@ -451,8 +451,8 @@ struct RegisterWorkerRequest {
 	                      Optional<BlobManagerInterface> bmInterf,
 	                      Optional<EncryptKeyProxyInterface> ekpInterf,
 	                      bool degraded,
-	                      Version lastSeenKnobVersion,
-	                      ConfigClassSet knobConfigClassSet,
+	                      Optional<Version> lastSeenKnobVersion,
+	                      Optional<ConfigClassSet> knobConfigClassSet,
 	                      bool recoveredDiskFiles)
 	  : wi(wi), initialClass(initialClass), processClass(processClass), priorityInfo(priorityInfo),
 	    generation(generation), distributorInterf(ddInterf), ratekeeperInterf(rkInterf), blobManagerInterf(bmInterf),

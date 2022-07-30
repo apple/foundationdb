@@ -150,15 +150,17 @@ struct ConfigTransactionGetConfigClassesReply {
 
 struct ConfigTransactionGetConfigClassesRequest {
 	static constexpr FileIdentifier file_identifier = 7163400;
+	size_t coordinatorsHash;
 	ConfigGeneration generation;
 	ReplyPromise<ConfigTransactionGetConfigClassesReply> reply;
 
 	ConfigTransactionGetConfigClassesRequest() = default;
-	explicit ConfigTransactionGetConfigClassesRequest(ConfigGeneration generation) : generation(generation) {}
+	explicit ConfigTransactionGetConfigClassesRequest(size_t coordinatorsHash, ConfigGeneration generation)
+	  : coordinatorsHash(coordinatorsHash), generation(generation) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, generation);
+		serializer(ar, coordinatorsHash, generation);
 	}
 };
 
@@ -177,17 +179,20 @@ struct ConfigTransactionGetKnobsReply {
 
 struct ConfigTransactionGetKnobsRequest {
 	static constexpr FileIdentifier file_identifier = 987410;
+	size_t coordinatorsHash;
 	ConfigGeneration generation;
 	Optional<Key> configClass;
 	ReplyPromise<ConfigTransactionGetKnobsReply> reply;
 
 	ConfigTransactionGetKnobsRequest() = default;
-	explicit ConfigTransactionGetKnobsRequest(ConfigGeneration generation, Optional<Key> configClass)
-	  : generation(generation), configClass(configClass) {}
+	explicit ConfigTransactionGetKnobsRequest(size_t coordinatorsHash,
+	                                          ConfigGeneration generation,
+	                                          Optional<Key> configClass)
+	  : coordinatorsHash(coordinatorsHash), generation(generation), configClass(configClass) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, generation, configClass, reply);
+		serializer(ar, coordinatorsHash, generation, configClass, reply);
 	}
 };
 

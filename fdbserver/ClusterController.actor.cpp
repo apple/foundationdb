@@ -1223,13 +1223,12 @@ ACTOR Future<Void> registerWorker(RegisterWorkerRequest req,
 		    w.locality.processId() == self->db.serverInfo->get().master.locality.processId()) {
 			self->masterProcessId = w.locality.processId();
 		}
-		if (configBroadcaster != nullptr) {
+		if (configBroadcaster != nullptr && req.lastSeenKnobVersion.present() && req.knobConfigClassSet.present()) {
 			self->addActor.send(configBroadcaster->registerNode(
-			    w,
-			    req.lastSeenKnobVersion,
-			    req.knobConfigClassSet,
-			    self->id_worker[w.locality.processId()].watcher,
 			    self->id_worker[w.locality.processId()].details.interf.configBroadcastInterface,
+			    req.lastSeenKnobVersion.get(),
+			    req.knobConfigClassSet.get(),
+			    self->id_worker[w.locality.processId()].watcher,
 			    isCoordinator));
 		}
 		self->updateDBInfoEndpoints.insert(w.updateServerDBInfo.getEndpoint());
@@ -1261,12 +1260,11 @@ ACTOR Future<Void> registerWorker(RegisterWorkerRequest req,
 			self->updateDBInfoEndpoints.insert(w.updateServerDBInfo.getEndpoint());
 			self->updateDBInfo.trigger();
 		}
-		if (configBroadcaster != nullptr) {
-			self->addActor.send(configBroadcaster->registerNode(w,
-			                                                    req.lastSeenKnobVersion,
-			                                                    req.knobConfigClassSet,
+		if (configBroadcaster != nullptr && req.lastSeenKnobVersion.present() && req.knobConfigClassSet.present()) {
+			self->addActor.send(configBroadcaster->registerNode(info->second.details.interf.configBroadcastInterface,
+			                                                    req.lastSeenKnobVersion.get(),
+			                                                    req.knobConfigClassSet.get(),
 			                                                    info->second.watcher,
-			                                                    info->second.details.interf.configBroadcastInterface,
 			                                                    isCoordinator));
 		}
 		checkOutstandingRequests(self);

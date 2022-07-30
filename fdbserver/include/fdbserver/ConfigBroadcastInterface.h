@@ -192,6 +192,7 @@ public:
 	bool operator==(ConfigBroadcastInterface const& rhs) const { return (_id == rhs._id); }
 	bool operator!=(ConfigBroadcastInterface const& rhs) const { return !(*this == rhs); }
 	UID id() const { return _id; }
+	NetworkAddress address() const { return snapshot.getEndpoint().getPrimaryAddress(); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {

@@ -327,10 +327,10 @@ class PaxosConfigTransactionImpl {
 				}
 				wait(waitForAll(fs));
 				state Reference<ConfigTransactionInfo> configNodes(new ConfigTransactionInfo(readReplicas));
-				ConfigTransactionGetConfigClassesReply reply =
-				    wait(basicLoadBalance(configNodes,
-				                          &ConfigTransactionInterface::getClasses,
-				                          ConfigTransactionGetConfigClassesRequest{ generation }));
+				ConfigTransactionGetConfigClassesReply reply = wait(
+				    basicLoadBalance(configNodes,
+				                     &ConfigTransactionInterface::getClasses,
+				                     ConfigTransactionGetConfigClassesRequest{ self->coordinatorsHash, generation }));
 				RangeResult result;
 				result.reserve(result.arena(), reply.configClasses.size());
 				for (const auto& configClass : reply.configClasses) {
@@ -361,10 +361,10 @@ class PaxosConfigTransactionImpl {
 				}
 				wait(waitForAll(fs));
 				state Reference<ConfigTransactionInfo> configNodes(new ConfigTransactionInfo(readReplicas));
-				ConfigTransactionGetKnobsReply reply =
-				    wait(basicLoadBalance(configNodes,
-				                          &ConfigTransactionInterface::getKnobs,
-				                          ConfigTransactionGetKnobsRequest{ generation, configClass }));
+				ConfigTransactionGetKnobsReply reply = wait(basicLoadBalance(
+				    configNodes,
+				    &ConfigTransactionInterface::getKnobs,
+				    ConfigTransactionGetKnobsRequest{ self->coordinatorsHash, generation, configClass }));
 				RangeResult result;
 				result.reserve(result.arena(), reply.knobNames.size());
 				for (const auto& knobName : reply.knobNames) {
