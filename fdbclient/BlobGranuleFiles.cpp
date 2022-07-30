@@ -61,10 +61,12 @@ const uint8_t DELTA_FILE_TYPE = 'D';
 static int getDefaultCompressionLevel(CompressionFilter filter) {
 	if (filter == CompressionFilter::NONE) {
 		return -1;
+#ifdef ZLIB_LIB_SUPPORTED
 	} else if (filter == CompressionFilter::GZIP) {
 		// opt for high speed compression, larger levels have a high cpu cost and not much compression ratio
 		// improvement, according to benchmarks
 		return 1;
+#endif
 	} else {
 		ASSERT(false);
 		return -1;
