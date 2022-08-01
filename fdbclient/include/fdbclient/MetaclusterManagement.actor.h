@@ -1616,201 +1616,185 @@ Future<Void> configureTenant(Reference<DB> db,
 
 template <class DB>
 struct RenameTenantImpl {
+	MetaclusterOperationContext<DB> ctx;
+
 	// Initialization parameters
-	Reference<DB> managementDb;
 	TenantName oldName;
 	TenantName newName;
 
 	// Parameters set in getAssignedLocation
 	int64_t tenantId;
-	Reference<IDatabase> dataClusterDb;
 
 	RenameTenantImpl(Reference<DB> managementDb, TenantName oldName, TenantName newName)
-	  : managementDb(managementDb), oldName(oldName), newName(newName) {}
+	  : ctx(managementDb), oldName(oldName), newName(newName) {}
 
-	// Taken from DeleteTenantImpl. Used when finishing a rename to erase the old entry
-	ACTOR static Future<Void> managementClusterEraseTenantEntry(Reference<typename DB::TransactionT> tr,
-	                                                            TenantName tenantName,
-	                                                            TenantMapEntry tenantEntry) {
+	// Delete the tenant and related metadata on the management cluster
+	ACTOR static Future<Void> deleteTenantFromManagementCluster(RenameTenantImpl* self,
+	                                                            Reference<typename DB::TransactionT> tr) {
+		state Optional<TenantMapEntry> tenantEntry = wait(tryGetTenantTransaction(tr, self->oldName));
+
+		if (!tenantEntry.present() || tenantEntry.get().id != self->tenantId) {
+			return Void();
+		}
+
 		// Erase the tenant entry itself
-		ManagementClusterMetadata::tenantMetadata.tenantMap.erase(tr, tenantName);
+		ManagementClusterMetadata::tenantMetadata.tenantMap.erase(tr, self->oldName);
+
+		// Unlike DeleteTenantImpl, we do not decrement the tenant count because a rename should
+		// preserve the total number of tenants.
 
 		// Clean up cluster based tenant indices and remove the tenant group if it is empty
-		state DataClusterMetadata clusterMetadata = wait(getClusterTransaction(tr, tenantEntry.assignedCluster.get()));
+		state DataClusterMetadata clusterMetadata =
+		    wait(getClusterTransaction(tr, tenantEntry.get().assignedCluster.get()));
 
 		// Remove the tenant from the cluster -> tenant index
 		ManagementClusterMetadata::clusterTenantIndex.erase(
-		    tr, Tuple::makeTuple(tenantEntry.assignedCluster.get(), tenantName));
+		    tr, Tuple::makeTuple(tenantEntry.get().assignedCluster.get(), self->oldName));
 
 		// Remove the tenant from its tenant group
-		wait(managementClusterRemoveTenantFromGroup(tr, tenantName, tenantEntry, clusterMetadata));
+		wait(managementClusterRemoveTenantFromGroup(tr, self->oldName, tenantEntry.get(), clusterMetadata));
 
 		return Void();
 	}
 
 	// Returns true if the rename can continue
-	ACTOR static Future<bool> getAssignedLocation(RenameTenantImpl* self) {
-		state Reference<typename DB::TransactionT> tr = self->managementDb->createTransaction();
-		loop {
-			try {
-				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				state Future<Void> tenantModeCheck =
-				    TenantAPI::checkTenantMode(tr, ClusterType::METACLUSTER_MANAGEMENT);
-				state Optional<TenantMapEntry> oldTenantEntry;
-				state Optional<TenantMapEntry> newTenantEntry;
-				wait(store(oldTenantEntry, tryGetTenantTransaction(tr, self->oldName)) &&
-				     store(newTenantEntry, tryGetTenantTransaction(tr, self->newName)) && tenantModeCheck);
+	ACTOR static Future<bool> getAssignedLocation(RenameTenantImpl* self, Reference<typename DB::TransactionT> tr) {
+		state Optional<TenantMapEntry> oldTenantEntry;
+		state Optional<TenantMapEntry> newTenantEntry;
+		wait(store(oldTenantEntry, tryGetTenantTransaction(tr, self->oldName)) &&
+		     store(newTenantEntry, tryGetTenantTransaction(tr, self->newName)));
 
-				if (!oldTenantEntry.present()) {
-					throw tenant_not_found();
-				}
-
-				// If the new entry is present, we can only continue if this a retry of the same rename
-				// To check this, verify both entries are in the correct state
-				// and have each other as pairs
-				if (newTenantEntry.present()) {
-					return (newTenantEntry.get().tenantState == TenantState::RENAMING_TO &&
-					        oldTenantEntry.get().tenantState == TenantState::RENAMING_FROM &&
-					        newTenantEntry.get().renamePair.present() &&
-					        newTenantEntry.get().renamePair.get() == self->oldName &&
-					        oldTenantEntry.get().renamePair.present() &&
-					        oldTenantEntry.get().renamePair.get() == self->newName);
-				}
-
-				self->tenantId = oldTenantEntry.get().id;
-
-				DataClusterMetadata clusterMetadata =
-				    wait(getClusterTransaction(tr, oldTenantEntry.get().assignedCluster.get()));
-
-				Reference<IDatabase> dataClusterDb = wait(openDatabase(clusterMetadata.connectionString));
-				self->dataClusterDb = dataClusterDb;
-
-				return oldTenantEntry.get().tenantState == TenantState::READY;
-			} catch (Error& e) {
-				wait(safeThreadFutureToFuture(tr->onError(e)));
-			}
+		if (!oldTenantEntry.present()) {
+			throw tenant_not_found();
 		}
+
+		// If the new entry is present, we can only continue if this a retry of the same rename
+		// To check this, verify both entries are in the correct state
+		// and have each other as pairs
+		if (newTenantEntry.present()) {
+			return (
+			    newTenantEntry.get().tenantState == TenantState::RENAMING_TO &&
+			    oldTenantEntry.get().tenantState == TenantState::RENAMING_FROM &&
+			    newTenantEntry.get().renamePair.present() && newTenantEntry.get().renamePair.get() == self->oldName &&
+			    oldTenantEntry.get().renamePair.present() && oldTenantEntry.get().renamePair.get() == self->newName);
+		}
+
+		self->tenantId = oldTenantEntry.get().id;
+
+		wait(self->ctx.setCluster(tr, oldTenantEntry.get().assignedCluster.get()));
+
+		return oldTenantEntry.get().tenantState == TenantState::READY;
 	}
 
-	ACTOR static Future<Void> markTenantsInRenamingState(RenameTenantImpl* self) {
-		state Reference<typename DB::TransactionT> tr = self->managementDb->createTransaction();
-		loop {
-			try {
-				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				state Future<Void> tenantModeCheck =
-				    TenantAPI::checkTenantMode(tr, ClusterType::METACLUSTER_MANAGEMENT);
-				state Optional<TenantMapEntry> oldTenantEntry;
-				state Optional<TenantMapEntry> newTenantEntry;
-				wait(store(oldTenantEntry, tryGetTenantTransaction(tr, self->oldName)) &&
-				     store(newTenantEntry, tryGetTenantTransaction(tr, self->newName)) && tenantModeCheck);
+	ACTOR static Future<Void> markTenantsInRenamingState(RenameTenantImpl* self,
+	                                                     Reference<typename DB::TransactionT> tr) {
+		state Optional<TenantMapEntry> oldTenantEntry;
+		state Optional<TenantMapEntry> newTenantEntry;
+		wait(store(oldTenantEntry, tryGetTenantTransaction(tr, self->oldName)) &&
+		     store(newTenantEntry, tryGetTenantTransaction(tr, self->newName)));
 
-				if (!oldTenantEntry.present() || oldTenantEntry.get().id != self->tenantId) {
-					// The tenant must have been removed simultaneously
-					throw tenant_not_found();
-				}
-
-				// If marked for deletion, abort the rename
-				if (oldTenantEntry.get().tenantState == TenantState::REMOVING) {
-					throw tenant_not_found();
-				}
-
-				// If the new entry is present, we must have already marked both these entries.
-				// To check this, verify both entries are in the correct state
-				// and have each other as pairs. Otherwise, this needs to fail.
-				if (newTenantEntry.present()) {
-					// Edge case where rename was set for rename but then immediately marked for deletion
-					if (newTenantEntry.get().tenantState == TenantState::REMOVING) {
-						throw tenant_not_found();
-					}
-					ASSERT((newTenantEntry.get().tenantState == TenantState::RENAMING_TO &&
-					        oldTenantEntry.get().tenantState == TenantState::RENAMING_FROM &&
-					        newTenantEntry.get().renamePair.present() &&
-					        newTenantEntry.get().renamePair.get() == self->oldName &&
-					        oldTenantEntry.get().renamePair.present() &&
-					        oldTenantEntry.get().renamePair.get() == self->newName));
-					return Void();
-				}
-
-				TenantMapEntry updatedOldEntry = oldTenantEntry.get();
-				TenantMapEntry updatedNewEntry(updatedOldEntry);
-				updatedOldEntry.tenantState = TenantState::RENAMING_FROM;
-				updatedNewEntry.tenantState = TenantState::RENAMING_TO;
-				updatedOldEntry.renamePair = self->newName;
-				updatedNewEntry.renamePair = self->oldName;
-
-				ManagementClusterMetadata::tenantMetadata.tenantMap.set(tr, self->oldName, updatedOldEntry);
-				ManagementClusterMetadata::tenantMetadata.tenantMap.set(tr, self->newName, updatedNewEntry);
-				wait(buggifiedCommit(tr, BUGGIFY));
-
-				return Void();
-			} catch (Error& e) {
-				wait(safeThreadFutureToFuture(tr->onError(e)));
-			}
+		if (!oldTenantEntry.present() || oldTenantEntry.get().id != self->tenantId) {
+			// The tenant must have been removed simultaneously
+			throw tenant_not_found();
 		}
+
+		// If marked for deletion, abort the rename
+		if (oldTenantEntry.get().tenantState == TenantState::REMOVING) {
+			throw tenant_not_found();
+		}
+
+		// If the new entry is present, we must have already marked both these entries.
+		// To check this, verify both entries are in the correct state
+		// and have each other as pairs. Otherwise, this needs to fail.
+		if (newTenantEntry.present()) {
+			// Edge case where entry was set for rename but then immediately marked for deletion
+			if (newTenantEntry.get().tenantState == TenantState::REMOVING) {
+				throw tenant_not_found();
+			}
+			ASSERT(
+			    (newTenantEntry.get().tenantState == TenantState::RENAMING_TO &&
+			     oldTenantEntry.get().tenantState == TenantState::RENAMING_FROM &&
+			     newTenantEntry.get().renamePair.present() && newTenantEntry.get().renamePair.get() == self->oldName &&
+			     oldTenantEntry.get().renamePair.present() && oldTenantEntry.get().renamePair.get() == self->newName));
+			return Void();
+		}
+
+		TenantMapEntry updatedOldEntry = oldTenantEntry.get();
+		TenantMapEntry updatedNewEntry(updatedOldEntry);
+		updatedOldEntry.tenantState = TenantState::RENAMING_FROM;
+		updatedNewEntry.tenantState = TenantState::RENAMING_TO;
+		updatedOldEntry.renamePair = self->newName;
+		updatedNewEntry.renamePair = self->oldName;
+
+		ManagementClusterMetadata::tenantMetadata.tenantMap.set(tr, self->oldName, updatedOldEntry);
+		ManagementClusterMetadata::tenantMetadata.tenantMap.set(tr, self->newName, updatedNewEntry);
+		wait(buggifiedCommit(tr, BUGGIFY));
+
+		return Void();
 	}
 
-	ACTOR static Future<Void> finishRenameFromManagementCluster(RenameTenantImpl* self) {
-		state Reference<typename DB::TransactionT> tr = self->managementDb->createTransaction();
-		loop {
-			try {
-				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				state Future<Void> tenantModeCheck =
-				    TenantAPI::checkTenantMode(tr, ClusterType::METACLUSTER_MANAGEMENT);
-				state Optional<TenantMapEntry> oldTenantEntry;
-				state Optional<TenantMapEntry> newTenantEntry;
-				wait(store(oldTenantEntry, tryGetTenantTransaction(tr, self->oldName)) &&
-				     store(newTenantEntry, tryGetTenantTransaction(tr, self->newName)) && tenantModeCheck);
+	ACTOR static Future<Void> finishRenameFromManagementCluster(RenameTenantImpl* self,
+	                                                            Reference<typename DB::TransactionT> tr) {
+		state Optional<TenantMapEntry> oldTenantEntry;
+		state Optional<TenantMapEntry> newTenantEntry;
+		wait(store(oldTenantEntry, tryGetTenantTransaction(tr, self->oldName)) &&
+		     store(newTenantEntry, tryGetTenantTransaction(tr, self->newName)));
 
-				// Another (or several other) operations have already removed/changed the old entry
-				// Possible for the new entry to also have been tampered with,
-				// so it may or may not be present with or without the same id, which are all
-				// legal states. Assume the rename completed properly in this case
-				if (!oldTenantEntry.present() || oldTenantEntry.get().id != self->tenantId ||
-				    !newTenantEntry.present() || newTenantEntry.get().id != self->tenantId) {
-					return Void();
-				}
-
-				TenantMapEntry updatedOldEntry = oldTenantEntry.get();
-				TenantMapEntry updatedNewEntry = newTenantEntry.get();
-
-				// If marked as removing, we will not update the new entry
-				if (updatedNewEntry.tenantState != TenantState::REMOVING) {
-					updatedNewEntry.tenantState = TenantState::READY;
-					updatedNewEntry.renamePair.reset();
-					ManagementClusterMetadata::tenantMetadata.tenantMap.set(tr, self->newName, updatedNewEntry);
-				}
-
-				// We will remove the old entry from the management cluster
-				// This should still be the same old entry since the tenantId matches from the check above.
-				// If already marked as removing, abort this erase and allow the DeleteImpl take care of the deletion
-				if (updatedOldEntry.tenantState == TenantState::REMOVING) {
-					throw tenant_removed();
-				}
-				wait(managementClusterEraseTenantEntry(tr, self->oldName, updatedOldEntry));
-
-				wait(buggifiedCommit(tr, BUGGIFY));
-
-				return Void();
-			} catch (Error& e) {
-				wait(safeThreadFutureToFuture(tr->onError(e)));
-			}
+		// Another (or several other) operations have already removed/changed the old entry
+		// Possible for the new entry to also have been tampered with,
+		// so it may or may not be present with or without the same id, which are all
+		// legal states. Assume the rename completed properly in this case
+		if (!oldTenantEntry.present() || oldTenantEntry.get().id != self->tenantId || !newTenantEntry.present() ||
+		    newTenantEntry.get().id != self->tenantId) {
+			return Void();
 		}
+
+		TenantMapEntry updatedOldEntry = oldTenantEntry.get();
+		TenantMapEntry updatedNewEntry = newTenantEntry.get();
+
+		// If marked as removing, we will not update the new entry
+		if (updatedNewEntry.tenantState != TenantState::REMOVING) {
+			updatedNewEntry.tenantState = TenantState::READY;
+			updatedNewEntry.renamePair.reset();
+			ManagementClusterMetadata::tenantMetadata.tenantMap.set(tr, self->newName, updatedNewEntry);
+			// Updated indexes to include the new tenant
+			ManagementClusterMetadata::clusterTenantIndex.insert(
+			    tr, Tuple::makeTuple(updatedNewEntry.assignedCluster.get(), self->newName));
+
+			// Add new name to tenant group. It should already exist since the old name was part of it.
+			managementClusterAddTenantToGroup(
+			    tr, self->newName, updatedNewEntry, self->ctx.dataClusterMetadata.get(), true);
+		}
+
+		// We will remove the old entry from the management cluster
+		// This should still be the same old entry since the tenantId matches from the check above.
+		wait(deleteTenantFromManagementCluster(self, tr));
+
+		wait(buggifiedCommit(tr, BUGGIFY));
+
+		return Void();
 	}
 
 	ACTOR static Future<Void> run(RenameTenantImpl* self) {
 		// Get information about tenant's current state
 		// If not in READY state, reject the rename
-		bool canRename = wait(getAssignedLocation(self));
+		bool canRename = wait(self->ctx.runManagementTransaction(
+		    [self = self](Reference<typename DB::TransactionT> tr) { return getAssignedLocation(self, tr); }));
 		if (!canRename) {
 			return Void();
 		}
-		wait(markTenantsInRenamingState(self));
+		wait(self->ctx.runManagementTransaction(
+		    [self = self](Reference<typename DB::TransactionT> tr) { return markTenantsInRenamingState(self, tr); }));
 
 		// Rename tenant on the data cluster
-		wait(TenantAPI::renameTenant(
-		    self->dataClusterDb, self->oldName, self->newName, self->tenantId, ClusterType::METACLUSTER_DATA));
+		wait(self->ctx.runDataClusterTransaction([self = self](Reference<ITransaction> tr) {
+			return TenantAPI::renameTenantTransaction(
+			    tr, self->oldName, self->newName, self->tenantId, ClusterType::METACLUSTER_DATA);
+		}));
 
-		wait(finishRenameFromManagementCluster(self));
+		wait(self->ctx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
+			return finishRenameFromManagementCluster(self, tr);
+		}));
 
 		return Void();
 	}
