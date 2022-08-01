@@ -25,6 +25,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbserver/ApplyMetadataMutation.h"
 #include "fdbserver/EncryptedMutationMessage.h"
+#include "fdbserver/EncryptionUtil.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/LogProtocolMessage.h"
 #include "fdbserver/LogSystem.h"
@@ -58,9 +59,10 @@ public:
 	                           const UID& dbgid_,
 	                           Arena& arena_,
 	                           const VectorRef<MutationRef>& mutations_,
-	                           IKeyValueStore* txnStateStore_)
+	                           IKeyValueStore* txnStateStore_,
+	                           Reference<AsyncVar<ServerDBInfo> const> db)
 	  : spanContext(spanContext_), dbgid(dbgid_), arena(arena_), mutations(mutations_), txnStateStore(txnStateStore_),
-	    confChange(dummyConfChange) {}
+	    confChange(dummyConfChange), dbInfo(db) {}
 
 	ApplyMetadataMutationsImpl(const SpanContext& spanContext_,
 	                           Arena& arena_,
@@ -81,17 +83,18 @@ public:
 	    uid_applyMutationsData(proxyCommitData_.firstProxy ? &proxyCommitData_.uid_applyMutationsData : nullptr),
 	    commit(proxyCommitData_.commit), cx(proxyCommitData_.cx), committedVersion(&proxyCommitData_.committedVersion),
 	    storageCache(&proxyCommitData_.storageCache), tag_popped(&proxyCommitData_.tag_popped),
-	    tssMapping(&proxyCommitData_.tssMapping), tenantMap(&proxyCommitData_.tenantMap),
-	    initialCommit(initialCommit_) {}
+	    tssMapping(&proxyCommitData_.tssMapping), tenantMap(&proxyCommitData_.tenantMap), initialCommit(initialCommit_),
+	    dbInfo(proxyCommitData_.db) {}
 
 	ApplyMetadataMutationsImpl(const SpanContext& spanContext_,
 	                           ResolverData& resolverData_,
-	                           const VectorRef<MutationRef>& mutations_)
+	                           const VectorRef<MutationRef>& mutations_,
+	                           Reference<AsyncVar<ServerDBInfo> const> db)
 	  : spanContext(spanContext_), dbgid(resolverData_.dbgid), arena(resolverData_.arena), mutations(mutations_),
 	    txnStateStore(resolverData_.txnStateStore), toCommit(resolverData_.toCommit),
 	    confChange(resolverData_.confChanges), logSystem(resolverData_.logSystem), popVersion(resolverData_.popVersion),
 	    keyInfo(resolverData_.keyInfo), storageCache(resolverData_.storageCache),
-	    initialCommit(resolverData_.initialCommit), forResolver(true) {}
+	    initialCommit(resolverData_.initialCommit), forResolver(true), dbInfo(db) {}
 
 private:
 	// The following variables are incoming parameters
@@ -138,6 +141,8 @@ private:
 	// true if called from Resolver
 	bool forResolver = false;
 
+	Reference<AsyncVar<ServerDBInfo> const> dbInfo;
+
 private:
 	// The following variables are used internally
 
@@ -158,7 +163,8 @@ private:
 
 private:
 	void writeMutation(const MutationRef& m) {
-		if (forResolver || !SERVER_KNOBS->ENABLE_TLOG_ENCRYPTION) {
+		if (forResolver ||
+		    !isEncryptionEnabled(EncryptOperationType::TLOG_ENCRYPTION, dbInfo->get().client.isEncryptionEnabled)) {
 			toCommit->writeTypedMessage(m);
 		} else {
 			ASSERT(cipherKeys != nullptr);
@@ -1245,7 +1251,6 @@ void applyMetadataMutations(SpanContext const& spanContext,
                             Version version,
                             Version popVersion,
                             bool initialCommit) {
-
 	ApplyMetadataMutationsImpl(spanContext,
 	                           arena,
 	                           mutations,
@@ -1262,14 +1267,16 @@ void applyMetadataMutations(SpanContext const& spanContext,
 
 void applyMetadataMutations(SpanContext const& spanContext,
                             ResolverData& resolverData,
-                            const VectorRef<MutationRef>& mutations) {
-	ApplyMetadataMutationsImpl(spanContext, resolverData, mutations).apply();
+                            const VectorRef<MutationRef>& mutations,
+                            Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+	ApplyMetadataMutationsImpl(spanContext, resolverData, mutations, dbInfo).apply();
 }
 
 void applyMetadataMutations(SpanContext const& spanContext,
                             const UID& dbgid,
                             Arena& arena,
                             const VectorRef<MutationRef>& mutations,
-                            IKeyValueStore* txnStateStore) {
-	ApplyMetadataMutationsImpl(spanContext, dbgid, arena, mutations, txnStateStore).apply();
+                            IKeyValueStore* txnStateStore,
+                            Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+	ApplyMetadataMutationsImpl(spanContext, dbgid, arena, mutations, txnStateStore, dbInfo).apply();
 }

@@ -22,6 +22,7 @@
 #include "fdbserver/ApplyMetadataMutation.h"
 #include "fdbserver/BackupProgress.actor.h"
 #include "fdbserver/ClusterRecovery.actor.h"
+#include "fdbserver/EncryptionUtil.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/WaitFailure.h"
 
@@ -1057,14 +1058,15 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 	if (self->txnStateStore)
 		self->txnStateStore->close();
 	self->txnStateLogAdapter = openDiskQueueAdapter(oldLogSystem, myLocality, txsPoppedVersion);
-	self->txnStateStore = keyValueStoreLogSystem(self->txnStateLogAdapter,
-	                                             self->dbInfo,
-	                                             self->dbgid,
-	                                             self->memoryLimit,
-	                                             false,
-	                                             false,
-	                                             true,
-	                                             SERVER_KNOBS->ENABLE_TLOG_ENCRYPTION);
+	self->txnStateStore = keyValueStoreLogSystem(
+	    self->txnStateLogAdapter,
+	    self->dbInfo,
+	    self->dbgid,
+	    self->memoryLimit,
+	    false,
+	    false,
+	    true,
+	    isEncryptionEnabled(EncryptOperationType::TLOG_ENCRYPTION, self->dbInfo->get().client.isEncryptionEnabled));
 
 	// Version 0 occurs at the version epoch. The version epoch is the number
 	// of microseconds since the Unix epoch. It can be set through fdbcli.
@@ -1649,7 +1651,8 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	                       self->dbgid,
 	                       recoveryCommitRequest.arena,
 	                       tr.mutations.slice(mmApplied, tr.mutations.size()),
-	                       self->txnStateStore);
+	                       self->txnStateStore,
+	                       self->dbInfo);
 	mmApplied = tr.mutations.size();
 
 	tr.read_snapshot = self->recoveryTransactionVersion; // lastEpochEnd would make more sense, but isn't in the initial

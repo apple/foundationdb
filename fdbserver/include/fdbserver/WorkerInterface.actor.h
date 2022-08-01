@@ -1081,7 +1081,8 @@ ACTOR Future<Void> clusterController(Reference<IClusterConnectionRecord> ccr,
                                      Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
                                      Future<Void> recoveredDiskFiles,
                                      LocalityData locality,
-                                     ConfigDBType configDBType);
+                                     ConfigDBType configDBType,
+									 Reference<AsyncVar<ServerDBInfo> const> db);
 
 ACTOR Future<Void> blobWorker(BlobWorkerInterface bwi,
                               ReplyPromise<InitializeBlobWorkerReply> blobWorkerReady,

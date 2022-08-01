@@ -3192,7 +3192,7 @@ ACTOR Future<Void> monitorLeaderWithDelayedCandidacy(
 			when(wait(timeout.isValid() ? timeout : Never())) {
 				monitor.cancel();
 				wait(clusterController(
-				    connRecord, currentCC, asyncPriorityInfo, recoveredDiskFiles, locality, configDBType));
+				    connRecord, currentCC, asyncPriorityInfo, recoveredDiskFiles, locality, configDBType, dbInfo));
 				return Void();
 			}
 		}
@@ -3311,7 +3311,9 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 		auto ci = makeReference<AsyncVar<Optional<ClusterInterface>>>();
 		auto asyncPriorityInfo =
 		    makeReference<AsyncVar<ClusterControllerPriorityInfo>>(getCCPriorityInfo(fitnessFilePath, processClass));
-		auto dbInfo = makeReference<AsyncVar<ServerDBInfo>>();
+		auto serverDBInfo = ServerDBInfo();
+		serverDBInfo.client.isEncryptionEnabled = SERVER_KNOBS->ENABLE_ENCRYPTION;
+		auto dbInfo = makeReference<AsyncVar<ServerDBInfo>>(serverDBInfo);
 
 		actors.push_back(reportErrors(monitorAndWriteCCPriorityInfo(fitnessFilePath, asyncPriorityInfo),
 		                              "MonitorAndWriteCCPriorityInfo"));
@@ -3330,7 +3332,7 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 		} else {
 			actors.push_back(reportErrors(
 			    clusterController(
-			        connRecord, cc, asyncPriorityInfo, recoveredDiskFiles.getFuture(), localities, configDBType),
+			        connRecord, cc, asyncPriorityInfo, recoveredDiskFiles.getFuture(), localities, configDBType, dbInfo),
 			    "ClusterController"));
 		}
 		actors.push_back(reportErrors(extractClusterInterface(cc, ci), "ExtractClusterInterface"));

@@ -36,9 +36,11 @@
 #include "fdbclient/Notified.h"
 
 #include "fdbserver/BlobGranuleServerCommon.actor.h"
+#include "fdbserver/EncryptionUtil.h"
 #include "fdbserver/GetEncryptCipherKeys.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/MutationTracking.h"
+#include "fdbserver/ServerDBInfo.actor.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/WaitFailure.h"
 
@@ -234,8 +236,10 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 };
 
 namespace {
-bool isBlobFileEncryptionSupported() {
-	bool supported = SERVER_KNOBS->ENABLE_BLOB_GRANULE_ENCRYPTION && SERVER_KNOBS->BG_RANGE_SOURCE == "tenant";
+bool isBlobFileEncryptionSupported(Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+	bool supported =
+	    isEncryptionEnabled(EncryptOperationType::BLOB_GRANULE_ENCRYPTION, dbInfo->get().client.isEncryptionEnabled) &&
+	    SERVER_KNOBS->BG_RANGE_SOURCE == "tenant";
 	ASSERT((supported && SERVER_KNOBS->ENABLE_ENCRYPTION) || !supported);
 	return supported;
 }
@@ -759,7 +763,7 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 	state Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx;
 	state Optional<BlobGranuleCipherKeysMeta> cipherKeysMeta;
 	state Arena arena;
-	if (isBlobFileEncryptionSupported()) {
+	if (isBlobFileEncryptionSupported(bwData->dbInfo)) {
 		BlobGranuleCipherKeysCtx ciphKeysCtx = wait(getLatestGranuleCipherKeys(bwData, keyRange, &arena));
 		cipherKeysCtx = ciphKeysCtx;
 		cipherKeysMeta = BlobGranuleCipherKeysCtx::toCipherKeysMeta(cipherKeysCtx.get());
@@ -985,7 +989,7 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 		// TODO: optimization - batch 'encryption-key' lookup given the GranuleFile set is known
 		// FIXME: get cipher keys for delta as well!
 		if (chunk.snapshotFile.get().cipherKeysMetaRef.present()) {
-			ASSERT(isBlobFileEncryptionSupported());
+			ASSERT(isBlobFileEncryptionSupported(bwData->dbInfo));
 			BlobGranuleCipherKeysCtx cipherKeysCtx =
 			    wait(getGranuleCipherKeys(bwData, chunk.snapshotFile.get().cipherKeysMetaRef.get(), &filenameArena));
 			chunk.cipherKeysCtx = cipherKeysCtx;
@@ -3196,7 +3200,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 				// TODO: optimization - batch 'encryption-key' lookup given the GranuleFile set is known
 				state Future<BlobGranuleCipherKeysCtx> cipherKeysCtx;
 				if (chunk.snapshotFile.present() && chunk.snapshotFile.get().cipherKeysMetaRef.present()) {
-					ASSERT(isBlobFileEncryptionSupported());
+					ASSERT(isBlobFileEncryptionSupported(bwData->dbInfo));
 					cipherKeysCtx =
 					    getGranuleCipherKeys(bwData, chunk.snapshotFile.get().cipherKeysMetaRef.get(), &rep.arena);
 				}

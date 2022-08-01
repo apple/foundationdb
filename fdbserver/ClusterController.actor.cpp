@@ -2715,7 +2715,8 @@ ACTOR Future<Void> clusterController(Reference<IClusterConnectionRecord> connRec
                                      Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
                                      Future<Void> recoveredDiskFiles,
                                      LocalityData locality,
-                                     ConfigDBType configDBType) {
+                                     ConfigDBType configDBType,
+									 Reference<AsyncVar<ServerDBInfo> const> db) {
 
 	// Defer this wait optimization of cluster configuration has 'Encryption data at-rest' enabled.
 	// Encryption depends on available of EncryptKeyProxy (EKP) FDB role to enable fetch/refresh of encryption keys
