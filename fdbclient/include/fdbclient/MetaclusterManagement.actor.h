@@ -1291,6 +1291,7 @@ struct DeleteTenantImpl {
 
 	// Parameters set in getAssignedLocation
 	int64_t tenantId;
+	Optional<TenantName> pairName;
 
 	DeleteTenantImpl(Reference<DB> managementDb, TenantName tenantName) : ctx(managementDb), tenantName(tenantName) {}
 
@@ -1304,6 +1305,9 @@ struct DeleteTenantImpl {
 		}
 
 		self->tenantId = tenantEntry.get().id;
+		if (tenantEntry.get().renamePair.present()) {
+			self->pairName = tenantEntry.get().renamePair.get();
+		}
 
 		wait(self->ctx.setCluster(tr, tenantEntry.get().assignedCluster.get()));
 		return tenantEntry.get().tenantState == TenantState::REMOVING;
@@ -1344,6 +1348,16 @@ struct DeleteTenantImpl {
 			TenantMapEntry updatedEntry = tenantEntry.get();
 			updatedEntry.tenantState = TenantState::REMOVING;
 			ManagementClusterMetadata::tenantMetadata.tenantMap.set(tr, self->tenantName, updatedEntry);
+			// If this has a rename pair, also mark the other entry for deletion
+			if (self->pairName.present()) {
+				state Optional<TenantMapEntry> pairEntry = wait(tryGetTenantTransaction(tr, self->pairName.get()));
+				TenantMapEntry updatedPairEntry = pairEntry.get();
+				// Sanity check that our pair has us named as their partner
+				ASSERT(updatedPairEntry.renamePair.present());
+				ASSERT(updatedPairEntry.renamePair.get() == self->tenantName);
+				updatedPairEntry.tenantState = TenantState::REMOVING;
+				ManagementClusterMetadata::tenantMetadata.tenantMap.set(tr, self->pairName.get(), updatedPairEntry);
+			}
 			Optional<TenantMapEntry> entryCheck =
 			    wait(ManagementClusterMetadata::tenantMetadata.tenantMap.get(tr, self->tenantName));
 		}
@@ -1353,8 +1367,10 @@ struct DeleteTenantImpl {
 
 	// Delete the tenant and related metadata on the management cluster
 	ACTOR static Future<Void> deleteTenantFromManagementCluster(DeleteTenantImpl* self,
-	                                                            Reference<typename DB::TransactionT> tr) {
-		state Optional<TenantMapEntry> tenantEntry = wait(tryGetTenantTransaction(tr, self->tenantName));
+	                                                            Reference<typename DB::TransactionT> tr,
+	                                                            bool pairDelete = false) {
+		state TenantName tenantName = pairDelete ? self->pairName.get() : self->tenantName;
+		state Optional<TenantMapEntry> tenantEntry = wait(tryGetTenantTransaction(tr, tenantName));
 
 		if (!tenantEntry.present() || tenantEntry.get().id != self->tenantId) {
 			return Void();
@@ -1363,12 +1379,15 @@ struct DeleteTenantImpl {
 		ASSERT(tenantEntry.get().tenantState == TenantState::REMOVING);
 
 		// Erase the tenant entry itself
-		ManagementClusterMetadata::tenantMetadata.tenantMap.erase(tr, self->tenantName);
+		ManagementClusterMetadata::tenantMetadata.tenantMap.erase(tr, tenantName);
 
 		// This is idempotent because this function is only called if the tenant is in the map
-		ManagementClusterMetadata::tenantMetadata.tenantCount.atomicOp(tr, -1, MutationRef::AddValue);
-		ManagementClusterMetadata::clusterTenantCount.atomicOp(
-		    tr, tenantEntry.get().assignedCluster.get(), -1, MutationRef::AddValue);
+		// Do not double decrement in the case a paired tenant is present
+		if (!pairDelete) {
+			ManagementClusterMetadata::tenantMetadata.tenantCount.atomicOp(tr, -1, MutationRef::AddValue);
+			ManagementClusterMetadata::clusterTenantCount.atomicOp(
+			    tr, tenantEntry.get().assignedCluster.get(), -1, MutationRef::AddValue);
+		}
 
 		// Clean up cluster based tenant indices and remove the tenant group if it is empty
 		state DataClusterMetadata clusterMetadata =
@@ -1376,10 +1395,17 @@ struct DeleteTenantImpl {
 
 		// Remove the tenant from the cluster -> tenant index
 		ManagementClusterMetadata::clusterTenantIndex.erase(
-		    tr, Tuple::makeTuple(tenantEntry.get().assignedCluster.get(), self->tenantName));
+		    tr, Tuple::makeTuple(tenantEntry.get().assignedCluster.get(), tenantName));
 
 		// Remove the tenant from its tenant group
-		wait(managementClusterRemoveTenantFromGroup(tr, self->tenantName, tenantEntry.get(), clusterMetadata));
+		wait(managementClusterRemoveTenantFromGroup(tr, tenantName, tenantEntry.get(), clusterMetadata));
+
+		// If pair is present, and this is not already a pair delete, call this function recursively
+		if (!pairDelete && self->pairName.present()) {
+			wait(self->ctx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
+				return deleteTenantFromManagementCluster(self, tr, true);
+			}));
+		}
 
 		return Void();
 	}
@@ -1403,6 +1429,21 @@ struct DeleteTenantImpl {
 			return TenantAPI::deleteTenantTransaction(
 			    tr, self->tenantName, self->tenantId, ClusterType::METACLUSTER_DATA);
 		}));
+
+		// Call delete on pair if it exists. This is necessary with the following sequence:
+		// 1. Rename marked on management cluster (RENAMING_FROM & RENAMING_TO, foo & bar)
+		// 2. Rename on data cluster (foo->bar)
+		// 3. Delete marked on management cluster (delete foo, foo & bar now in REMOVING state)
+		// 4. Delete foo (above) on data cluster should have no effect. Delete bar here.
+		// In all cases, only one of delete foo or delete bar should have any effect because
+		// of the existence check in deleteTenantTransaction.
+		// However, this may cause duplication of tombstone code. Is that going to behave properly?
+		if (self->pairName.present()) {
+			wait(self->ctx.runDataClusterTransaction([self = self](Reference<ITransaction> tr) {
+				return TenantAPI::deleteTenantTransaction(
+				    tr, self->pairName.get(), self->tenantId, ClusterType::METACLUSTER_DATA);
+			}));
+		}
 
 		wait(self->ctx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
 			return deleteTenantFromManagementCluster(self, tr);
