@@ -521,6 +521,19 @@ ACTOR Future<Void> changeCoordinators(Reference<ClusterRecoveryData> self) {
 		TraceEvent("ChangeCoordinators", self->dbgid).log();
 		++self->changeCoordinatorsRequests;
 		state ChangeCoordinatorsRequest changeCoordinatorsRequest = req;
+		if (self->masterInterface.id() != changeCoordinatorsRequest.masterId) {
+			// Make sure the request is coming from a proxy from the same
+			// generation. If not, throw coordinators_changed - this is OK
+			// because the client will still receive commit_unknown_result, and
+			// will retry the request. This check is necessary because
+			// otherwise in rare circumstances where a recovery occurs between
+			// the change coordinators request from the client and the cstate
+			// actually being moved, the client may think the change
+			// coordinators command failed when it is still in progress. So we
+			// preempt the issue here and force failure if the generations
+			// don't match.
+			throw coordinators_changed();
+		}
 
 		// Kill cluster controller to facilitate coordinator registration update
 		if (self->controllerData->shouldCommitSuicide) {

@@ -228,11 +228,14 @@ ERROR( tenant_name_required, 2130, "Tenant name must be specified to access data
 ERROR( tenant_not_found, 2131, "Tenant does not exist" )
 ERROR( tenant_already_exists, 2132, "A tenant with the given name already exists" )
 ERROR( tenant_not_empty, 2133, "Cannot delete a non-empty tenant" )
-ERROR( invalid_tenant_name, 2134, "Tenant name cannot begin with \\xff");
-ERROR( tenant_prefix_allocator_conflict, 2135, "The database already has keys stored at the prefix allocated for the tenant");
-ERROR( tenants_disabled, 2136, "Tenants have been disabled in the cluster");
-ERROR( unknown_tenant, 2137, "Tenant is not available from this server")
-ERROR( illegal_tenant_access, 2138, "Illegal tenant access")
+ERROR( invalid_tenant_name, 2134, "Tenant name cannot begin with \\xff" )
+ERROR( tenant_prefix_allocator_conflict, 2135, "The database already has keys stored at the prefix allocated for the tenant" )
+ERROR( tenants_disabled, 2136, "Tenants have been disabled in the cluster" )
+ERROR( unknown_tenant, 2137, "Tenant is not available from this server" )
+ERROR( illegal_tenant_access, 2138, "Illegal tenant access" )
+ERROR( invalid_tenant_group_name, 2139, "Tenant group name cannot begin with \\xff" )
+ERROR( invalid_tenant_configuration, 2140, "Tenant configuration is invalid" )
+ERROR( cluster_no_capacity, 2141, "Cluster does not have capacity to perform the specified operation" )
 
 // 2200 - errors from bindings and official APIs
 ERROR( api_version_unset, 2200, "API version is not set" )

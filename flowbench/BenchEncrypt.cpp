@@ -25,7 +25,7 @@
 
 static StreamCipher::IV getRandomIV() {
 	StreamCipher::IV iv;
-	generateRandomData(iv.data(), iv.size());
+	deterministicRandom()->randomBytes(iv.data(), iv.size());
 	return iv;
 }
 

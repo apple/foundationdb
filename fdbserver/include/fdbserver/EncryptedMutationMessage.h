@@ -66,7 +66,7 @@ struct EncryptedMutationMessage {
 		ASSERT(textCipherItr != cipherKeys.end() && textCipherItr->second.isValid());
 		ASSERT(headerCipherItr != cipherKeys.end() && headerCipherItr->second.isValid());
 		uint8_t iv[AES_256_IV_LENGTH];
-		generateRandomData(iv, AES_256_IV_LENGTH);
+		deterministicRandom()->randomBytes(iv, AES_256_IV_LENGTH);
 		BinaryWriter bw(AssumeVersion(g_network->protocolVersion()));
 		bw << mutation;
 		EncryptedMutationMessage encrypted_mutation;

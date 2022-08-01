@@ -41,6 +41,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/versions.h"
+#include "flow/MkCert.h"
 #include "fdbrpc/WellKnownEndpoints.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/network.h"
@@ -280,6 +281,13 @@ class TestConfig {
 			if (attrib == "blobGranulesEnabled") {
 				blobGranulesEnabled = strcmp(value.c_str(), "true") == 0;
 			}
+			if (attrib == "injectSSTargetedRestart") {
+				injectTargetedSSRestart = strcmp(value.c_str(), "true") == 0;
+			}
+
+			if (attrib == "injectSSDelay") {
+				injectSSDelay = strcmp(value.c_str(), "true") == 0;
+			}
 		}
 
 		ifs.close();
@@ -327,6 +335,8 @@ public:
 
 	bool allowDefaultTenant = true;
 	bool allowDisablingTenants = true;
+	bool injectTargetedSSRestart = false;
+	bool injectSSDelay = false;
 
 	ConfigDBType getConfigDBType() const { return configDBType; }
 
@@ -384,7 +394,9 @@ public:
 		    .add("blobGranulesEnabled", &blobGranulesEnabled)
 		    .add("allowDefaultTenant", &allowDefaultTenant)
 		    .add("allowDisablingTenants", &allowDisablingTenants)
-		    .add("randomlyRenameZoneId", &randomlyRenameZoneId);
+		    .add("randomlyRenameZoneId", &randomlyRenameZoneId)
+		    .add("injectTargetedSSRestart", &injectTargetedSSRestart)
+		    .add("injectSSDelay", &injectSSDelay);
 		try {
 			auto file = toml::parse(testFile);
 			if (file.contains("configuration") && toml::find(file, "configuration").is_table()) {
@@ -587,6 +599,9 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 				                              1,
 				                              WLTOKEN_RESERVED_COUNT,
 				                              &allowList);
+				for (const auto& p : g_simulator.authKeys) {
+					FlowTransport::transport().addPublicKey(p.first, p.second.toPublic());
+				}
 				Sim2FileSystem::newFileSystem();
 
 				std::vector<Future<Void>> futures;
@@ -1384,7 +1399,7 @@ void SimulationConfig::setDatacenters(const TestConfig& testConfig) {
 void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
 	// Using [0, 4) to disable the RocksDB storage engine.
 	// TODO: Figure out what is broken with the RocksDB engine in simulation.
-	int storage_engine_type = deterministicRandom()->randomInt(0, 4);
+	int storage_engine_type = deterministicRandom()->randomInt(0, 6);
 	if (testConfig.storageEngineType.present()) {
 		storage_engine_type = testConfig.storageEngineType.get();
 	} else {
@@ -1392,7 +1407,7 @@ void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
 		while (std::find(testConfig.storageEngineExcludeTypes.begin(),
 		                 testConfig.storageEngineExcludeTypes.end(),
 		                 storage_engine_type) != testConfig.storageEngineExcludeTypes.end()) {
-			storage_engine_type = deterministicRandom()->randomInt(0, 5);
+			storage_engine_type = deterministicRandom()->randomInt(0, 6);
 		}
 	}
 
@@ -2364,6 +2379,13 @@ ACTOR void setupAndRun(std::string dataFolder,
 	testConfig.readFromConfig(testFile);
 	g_simulator.hasDiffProtocolProcess = testConfig.startIncompatibleProcess;
 	g_simulator.setDiffProtocol = false;
+	if (testConfig.injectTargetedSSRestart && deterministicRandom()->random01() < 0.25) {
+		g_simulator.injectTargetedSSRestartTime = 60.0 + 340.0 * deterministicRandom()->random01();
+	}
+
+	if (testConfig.injectSSDelay && deterministicRandom()->random01() < 0.25) {
+		g_simulator.injectSSDelayTime = 60.0 + 240.0 * deterministicRandom()->random01();
+	}
 
 	// Build simulator allow list
 	allowList.addTrustedSubnet("0.0.0.0/2"sv);
@@ -2372,11 +2394,16 @@ ACTOR void setupAndRun(std::string dataFolder,
 	state bool allowDisablingTenants = testConfig.allowDisablingTenants;
 	state bool allowCreatingTenants = true;
 
+	if (!CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+		testConfig.storageEngineExcludeTypes.push_back(5);
+	}
+
 	// The RocksDB storage engine does not support the restarting tests because you cannot consistently get a clean
 	// snapshot of the storage engine without a snapshotting file system.
 	// https://github.com/apple/foundationdb/issues/5155
 	if (std::string_view(testFile).find("restarting") != std::string_view::npos) {
 		testConfig.storageEngineExcludeTypes.push_back(4);
+		testConfig.storageEngineExcludeTypes.push_back(5);
 
 		// Disable the default tenant in restarting tests for now
 		// TODO: persist the chosen default tenant in the restartInfo.ini file for the second test
@@ -2389,6 +2416,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 	// Re-enable the backup and restore related simulation tests when the tests are passing again.
 	if (std::string_view(testFile).find("Backup") != std::string_view::npos) {
 		testConfig.storageEngineExcludeTypes.push_back(4);
+		testConfig.storageEngineExcludeTypes.push_back(5);
 	}
 
 	// Disable the default tenant in backup and DR tests for now. This is because backup does not currently duplicate
@@ -2402,6 +2430,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 	// in the build.
 	if (!rocksDBEnabled) {
 		testConfig.storageEngineExcludeTypes.push_back(4);
+		testConfig.storageEngineExcludeTypes.push_back(5);
 	}
 
 	state ProtocolVersion protocolVersion = currentProtocolVersion;

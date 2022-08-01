@@ -41,12 +41,6 @@
 typedef Reference<IDataDistributionTeam> ITeamRef;
 typedef std::pair<ITeamRef, ITeamRef> SrcDestTeamPair;
 
-// FIXME: Always use DataMovementReason to invoke these functions.
-inline bool isDiskRebalancePriority(int priority) {
-	return priority == SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM ||
-	       priority == SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM;
-}
-
 inline bool isDataMovementForDiskBalancing(DataMovementReason reason) {
 	return reason == DataMovementReason::REBALANCE_UNDERUTILIZED_TEAM ||
 	       reason == DataMovementReason::REBALANCE_OVERUTILIZED_TEAM;
@@ -57,16 +51,12 @@ inline bool isDataMovementForReadBalancing(DataMovementReason reason) {
 	       reason == DataMovementReason::REBALANCE_READ_UNDERUTIL_TEAM;
 }
 
-inline bool isMountainChopperPriority(int priority) {
-	return priority == SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM ||
-	       priority == SERVER_KNOBS->PRIORITY_REBALANCE_READ_OVERUTIL_TEAM;
-}
-
 inline bool isDataMovementForMountainChopper(DataMovementReason reason) {
 	return reason == DataMovementReason::REBALANCE_OVERUTILIZED_TEAM ||
 	       reason == DataMovementReason::REBALANCE_READ_OVERUTIL_TEAM;
 }
 
+// FIXME: Always use DataMovementReason to invoke these functions.
 inline bool isValleyFillerPriority(int priority) {
 	return priority == SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM ||
 	       priority == SERVER_KNOBS->PRIORITY_REBALANCE_READ_UNDERUTIL_TEAM;
@@ -80,6 +70,9 @@ inline bool isDataMovementForValleyFiller(DataMovementReason reason) {
 int dataMovementPriority(DataMovementReason reason) {
 	int priority;
 	switch (reason) {
+	case DataMovementReason::INVALID:
+		priority = -1;
+		break;
 	case DataMovementReason::RECOVER_MOVE:
 		priority = SERVER_KNOBS->PRIORITY_RECOVER_MOVE;
 		break;
@@ -162,9 +155,9 @@ struct RelocateData {
 	  : keys(rs.keys), priority(rs.priority), boundaryPriority(isBoundaryPriority(rs.priority) ? rs.priority : -1),
 	    healthPriority(isHealthPriority(rs.priority) ? rs.priority : -1), reason(rs.reason), startTime(now()),
 	    randomId(deterministicRandom()->randomUniqueID()), dataMoveId(rs.dataMoveId), workFactor(0),
-	    wantsNewServers(isMountainChopperPriority(rs.priority) || isValleyFillerPriority(rs.priority) ||
-	                    rs.priority == SERVER_KNOBS->PRIORITY_SPLIT_SHARD ||
-	                    rs.priority == SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT),
+	    wantsNewServers(
+	        isDataMovementForMountainChopper(rs.moveReason) || isDataMovementForValleyFiller(rs.moveReason) ||
+	        rs.moveReason == DataMovementReason::SPLIT_SHARD || rs.moveReason == DataMovementReason::TEAM_REDUNDANT),
 	    cancellable(true), interval("QueuedRelocation"), dataMove(rs.dataMove) {
 		if (dataMove != nullptr) {
 			this->src.insert(this->src.end(), dataMove->meta.src.begin(), dataMove->meta.src.end());
@@ -813,7 +806,6 @@ struct DDQueueData {
 	}
 
 	ACTOR static Future<Void> getSourceServersForRange(DDQueueData* self,
-	                                                   Database cx,
 	                                                   RelocateData input,
 	                                                   PromiseStream<RelocateData> output,
 	                                                   Reference<FlowLock> fetchLock) {
@@ -929,7 +921,7 @@ struct DDQueueData {
 
 				fetchingSourcesQueue.insert(rrs);
 				getSourceActors.insert(
-				    rrs.keys, getSourceServersForRange(this, cx, rrs, fetchSourceServersComplete, fetchSourceLock));
+				    rrs.keys, getSourceServersForRange(this, rrs, fetchSourceServersComplete, fetchSourceLock));
 			} else {
 				RelocateData newData(rrs);
 				newData.keys = affectedQueuedItems[r];
@@ -1739,7 +1731,7 @@ inline double getWorstCpu(const HealthMetrics& metrics, const std::vector<UID>& 
 // Move the shard with the top K highest read density of sourceTeam's to destTeam if sourceTeam has much more read load
 // than destTeam
 ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
-                                     int priority,
+                                     DataMovementReason moveReason,
                                      Reference<IDataDistributionTeam> sourceTeam,
                                      Reference<IDataDistributionTeam> destTeam,
                                      bool primary,
@@ -1807,7 +1799,7 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
 	    ShardsAffectedByTeamFailure::Team(sourceTeam->getServerIDs(), primary));
 	for (int i = 0; i < shards.size(); i++) {
 		if (shard == shards[i]) {
-			self->output.send(RelocateShard(shard, priority, RelocateReason::REBALANCE_READ));
+			self->output.send(RelocateShard(shard, moveReason, RelocateReason::REBALANCE_READ));
 			self->updateLastAsSource(sourceTeam->getServerIDs());
 			return true;
 		}
@@ -1818,7 +1810,7 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
 
 // Move a random shard from sourceTeam if sourceTeam has much more data than provided destTeam
 ACTOR static Future<bool> rebalanceTeams(DDQueueData* self,
-                                         int priority,
+                                         DataMovementReason moveReason,
                                          Reference<IDataDistributionTeam const> sourceTeam,
                                          Reference<IDataDistributionTeam const> destTeam,
                                          bool primary,
@@ -1879,7 +1871,7 @@ ACTOR static Future<bool> rebalanceTeams(DDQueueData* self,
 	    ShardsAffectedByTeamFailure::Team(sourceTeam->getServerIDs(), primary));
 	for (int i = 0; i < shards.size(); i++) {
 		if (moveShard == shards[i]) {
-			self->output.send(RelocateShard(moveShard, priority, RelocateReason::REBALANCE_DISK));
+			self->output.send(RelocateShard(moveShard, moveReason, RelocateReason::REBALANCE_DISK));
 			return true;
 		}
 	}
@@ -1972,33 +1964,19 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueueData* self, int teamCollectionIndex,
 			traceEvent.detail("QueuedRelocations", self->priority_relocations[ddPriority]);
 
 			if (self->priority_relocations[ddPriority] < SERVER_KNOBS->DD_REBALANCE_PARALLELISM) {
-				if (isDataMovementForMountainChopper(reason)) {
-					srcReq = GetTeamRequest(WantNewServers::True,
-					                        WantTrueBest::True,
-					                        PreferLowerDiskUtil::False,
-					                        TeamMustHaveShards::True,
-					                        ForReadBalance(readRebalance),
-					                        PreferLowerReadUtil::False);
-					destReq = GetTeamRequest(WantNewServers::True,
-					                         WantTrueBest::False,
-					                         PreferLowerDiskUtil::True,
-					                         TeamMustHaveShards::False,
-					                         ForReadBalance(readRebalance),
-					                         PreferLowerReadUtil::True);
-				} else {
-					srcReq = GetTeamRequest(WantNewServers::True,
-					                        WantTrueBest::False,
-					                        PreferLowerDiskUtil::False,
-					                        TeamMustHaveShards::True,
-					                        ForReadBalance(readRebalance),
-					                        PreferLowerReadUtil::False);
-					destReq = GetTeamRequest(WantNewServers::True,
-					                         WantTrueBest::True,
-					                         PreferLowerDiskUtil::True,
-					                         TeamMustHaveShards::False,
-					                         ForReadBalance(readRebalance),
-					                         PreferLowerReadUtil::True);
-				}
+				bool mcMove = isDataMovementForMountainChopper(reason);
+				srcReq = GetTeamRequest(WantNewServers::True,
+				                        WantTrueBest(mcMove),
+				                        PreferLowerDiskUtil::False,
+				                        TeamMustHaveShards::True,
+				                        ForReadBalance(readRebalance),
+				                        PreferLowerReadUtil::False);
+				destReq = GetTeamRequest(WantNewServers::True,
+				                         WantTrueBest(!mcMove),
+				                         PreferLowerDiskUtil::True,
+				                         TeamMustHaveShards::False,
+				                         ForReadBalance(readRebalance),
+				                         PreferLowerReadUtil::True);
 				state Future<SrcDestTeamPair> getTeamFuture =
 				    getSrcDestTeams(self, teamCollectionIndex, srcReq, destReq, ddPriority, &traceEvent);
 				wait(ready(getTeamFuture));
@@ -2008,9 +1986,9 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueueData* self, int teamCollectionIndex,
 				// clang-format off
 				if (sourceTeam.isValid() && destTeam.isValid()) {
 					if (readRebalance) {
-						wait(store(moved,rebalanceReadLoad(self, ddPriority, sourceTeam, destTeam, teamCollectionIndex == 0, &traceEvent)));
+						wait(store(moved,rebalanceReadLoad(self, reason, sourceTeam, destTeam, teamCollectionIndex == 0, &traceEvent)));
 					} else {
-						wait(store(moved,rebalanceTeams(self, ddPriority, sourceTeam, destTeam, teamCollectionIndex == 0, &traceEvent)));
+						wait(store(moved,rebalanceTeams(self, reason, sourceTeam, destTeam, teamCollectionIndex == 0, &traceEvent)));
 					}
 				}
 				// clang-format on
@@ -2106,7 +2084,7 @@ ACTOR Future<Void> BgDDMountainChopper(DDQueueData* self, int teamCollectionInde
 
 					if (loadedTeam.first.present()) {
 						bool _moved = wait(rebalanceTeams(self,
-						                                  SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM,
+						                                  DataMovementReason::REBALANCE_OVERUTILIZED_TEAM,
 						                                  loadedTeam.first.get(),
 						                                  randomTeam.first.get(),
 						                                  teamCollectionIndex == 0,
@@ -2205,7 +2183,7 @@ ACTOR Future<Void> BgDDValleyFiller(DDQueueData* self, int teamCollectionIndex) 
 
 					if (unloadedTeam.first.present()) {
 						bool _moved = wait(rebalanceTeams(self,
-						                                  SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM,
+						                                  DataMovementReason::REBALANCE_UNDERUTILIZED_TEAM,
 						                                  randomTeam.first.get(),
 						                                  unloadedTeam.first.get(),
 						                                  teamCollectionIndex == 0,
@@ -2267,8 +2245,8 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 
 	for (int i = 0; i < teamCollections.size(); i++) {
 		// FIXME: Use BgDDLoadBalance for disk rebalance too after DD simulation test proof.
-		// balancingFutures.push_back(BgDDLoadRebalance(&self, i, SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM));
-		// balancingFutures.push_back(BgDDLoadRebalance(&self, i, SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM));
+		// balancingFutures.push_back(BgDDLoadRebalance(&self, i, DataMovementReason::REBALANCE_OVERUTILIZED_TEAM));
+		// balancingFutures.push_back(BgDDLoadRebalance(&self, i, DataMovementReason::REBALANCE_UNDERUTILIZED_TEAM));
 		if (SERVER_KNOBS->READ_SAMPLING_ENABLED) {
 			balancingFutures.push_back(BgDDLoadRebalance(&self, i, DataMovementReason::REBALANCE_READ_OVERUTIL_TEAM));
 			balancingFutures.push_back(BgDDLoadRebalance(&self, i, DataMovementReason::REBALANCE_READ_UNDERUTIL_TEAM));
