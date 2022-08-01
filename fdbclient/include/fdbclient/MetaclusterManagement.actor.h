@@ -1800,9 +1800,6 @@ struct RenameTenantImpl {
 
 		ManagementClusterMetadata::tenantMetadata.tenantMap.set(tr, self->oldName, updatedOldEntry);
 		ManagementClusterMetadata::tenantMetadata.tenantMap.set(tr, self->newName, updatedNewEntry);
-		wait(buggifiedCommit(tr, BUGGIFY));
-		CODE_PROBE(true, "Metacluster marked tenants in renaming state");
-
 		return Void();
 	}
 
@@ -1843,10 +1840,6 @@ struct RenameTenantImpl {
 		// We will remove the old entry from the management cluster
 		// This should still be the same old entry since the tenantId matches from the check above.
 		wait(deleteTenantFromManagementCluster(self, tr));
-
-		wait(buggifiedCommit(tr, BUGGIFY));
-		CODE_PROBE(true, "Metacluster finished renaming tenants in management cluster");
-
 		return Void();
 	}
 
@@ -1861,6 +1854,7 @@ struct RenameTenantImpl {
 		}
 		wait(self->ctx.runManagementTransaction(
 		    [self = self](Reference<typename DB::TransactionT> tr) { return markTenantsInRenamingState(self, tr); }));
+		CODE_PROBE(true, "Metacluster marked tenants in renaming state");
 
 		// Rename tenant on the data cluster
 		wait(self->ctx.runDataClusterTransaction([self = self](Reference<ITransaction> tr) {
@@ -1872,6 +1866,7 @@ struct RenameTenantImpl {
 		wait(self->ctx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
 			return finishRenameFromManagementCluster(self, tr);
 		}));
+		CODE_PROBE(true, "Metacluster finished renaming tenants in management cluster");
 
 		return Void();
 	}

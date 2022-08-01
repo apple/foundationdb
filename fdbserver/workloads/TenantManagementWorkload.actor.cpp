@@ -1195,6 +1195,7 @@ struct TenantManagementWorkload : TestWorkload {
 				wait(verifyTenantRenames(self, tenantRenames));
 				// Check that using the wrong deletion type fails depending on whether we are using a metacluster
 				ASSERT(self->useMetacluster == (operationType == OperationType::METACLUSTER));
+				TraceEvent("RenameTenantSuccessful").detail("TenantRenames", describe(tenantRenames));
 				return Void();
 			} catch (Error& e) {
 				if (e.code() == error_code_tenant_not_found) {
