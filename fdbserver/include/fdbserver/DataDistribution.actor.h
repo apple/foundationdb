@@ -369,8 +369,39 @@ int64_t getMaxShardSize(double dbSizeEstimate);
 #endif
 class DDTeamCollection;
 
-struct TeamCollectionInterface {
-	PromiseStream<GetTeamRequest> getTeam;
+// send request/signal to TeamCollection through interface
+// call synchronous method from components outside DDTeamCollection
+struct ITeamCollection {
+	struct Interface {
+		PromiseStream<GetTeamRequest> getTeam;
+	};
+	virtual ~ITeamCollection() {}
+};
+
+// send request/signal to DDTracker through interface
+// call synchronous method from components outside DDTracker
+struct IDDTracker {
+	struct Interface {
+		Promise<Void> readyToStart;
+		PromiseStream<GetMetricsRequest> getShardMetrics;
+		PromiseStream<GetTopKMetricsRequest> getTopKMetrics;
+		PromiseStream<GetMetricsListRequest> getShardMetricsList;
+		PromiseStream<KeyRange> restartShardTracker;
+		PromiseStream<Promise<int64_t>> getAverageShardBytes; // FIXME(xwang): change it to a synchronous call
+	};
+	virtual double getAverageShardBytes() = 0;
+	virtual ~IDDTracker() = 0;
+};
+
+// send request/signal to DDQueue through interface
+// call synchronous method from components outside DDQueue
+struct IDDQueue {
+	struct Interface {
+		PromiseStream<RelocateShard> relocationProducer, relocationConsumer;
+		PromiseStream<Promise<int>> getUnhealthyRelocationCount; // FIXME(xwang): change it to a synchronous call
+	};
+	virtual int getUnhealthyRelocationCount() = 0;
+	virtual ~IDDQueue() = 0;
 };
 
 #ifndef __INTEL_COMPILER
@@ -382,6 +413,11 @@ struct TeamCollectionInterface {
 #ifndef __INTEL_COMPILER
 #pragma region Old DD Actors
 #endif
+
+struct TeamCollectionInterface {
+	PromiseStream<GetTeamRequest> getTeam;
+};
+
 ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> initData,
                                            Database cx,
                                            PromiseStream<RelocateShard> output,
