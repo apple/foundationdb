@@ -3085,18 +3085,35 @@ ACTOR Future<GranuleFiles> loadHistoryFiles(Reference<BlobManagerData> bmData, U
 ACTOR Future<bool> canDeleteFullGranule(Reference<BlobManagerData> self, UID granuleId) {
 	state Transaction tr(self->db);
 	state KeyRange splitRange = blobGranuleSplitKeyRangeFor(granuleId);
+	state KeyRange checkRange = splitRange;
+	state bool retry = false;
+
+	if (BM_PURGE_DEBUG) {
+		fmt::print("BM {0} Fully delete granule check {1}\n", self->epoch, granuleId.toString());
+	}
 
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
-			state RangeResult splitState = wait(tr.getRange(splitRange, SERVER_KNOBS->BG_MAX_SPLIT_FANOUT));
-			if (splitState.empty() && !splitState.more) {
+			int lim = SERVER_KNOBS->BG_MAX_SPLIT_FANOUT;
+			if (BUGGIFY_WITH_PROB(0.1)) {
+				deterministicRandom()->randomInt(1, std::max(2, SERVER_KNOBS->BG_MAX_SPLIT_FANOUT));
+			}
+			state RangeResult splitState = wait(tr.getRange(checkRange, lim));
+			// if first try and empty, splitting state is fully cleaned up
+			if (!retry && checkRange == splitRange && !splitState.empty() && !splitState.more) {
+				if (BM_PURGE_DEBUG) {
+					fmt::print("BM {0} Proceed with full deletion, no split state for {1}\n", self->epoch, granuleId.toString());
+				}
 				return true;
 			}
+			if (BM_PURGE_DEBUG) {
+				fmt::print("BM {0} Full delete check found {1} split states for {2}\n", self->epoch, splitState.size(), granuleId.toString());
+			}
 			state int i = 0;
-			state bool retry = false;
+			
 			for (; i < splitState.size(); i++) {
 				UID parent, child;
 				BlobGranuleSplitState st;
@@ -3105,10 +3122,14 @@ ACTOR Future<bool> canDeleteFullGranule(Reference<BlobManagerData> self, UID gra
 				std::tie(st, v) = decodeBlobGranuleSplitValue(splitState[i].value);
 				// if split state is done, this granule has definitely persisted a snapshot
 				if (st >= BlobGranuleSplitState::Done) {
+					if (BM_PURGE_DEBUG) {
+					fmt::print("  Done\n");
+				}
 					continue;
 				}
 				// if split state isn't even assigned, this granule has definitely not persisted a snapshot
 				if (st <= BlobGranuleSplitState::Initialized) {
+					fmt::print("  Init\n");
 					retry = true;
 					break;
 				}
@@ -3119,6 +3140,7 @@ ACTOR Future<bool> canDeleteFullGranule(Reference<BlobManagerData> self, UID gra
 				// granule
 				KeyRange granuleFileRange = blobGranuleFileKeyRangeFor(child);
 				RangeResult files = wait(tr.getRange(granuleFileRange, 1));
+				fmt::print("  Assigned. FilesEmpty={0}\n", files.empty() ? "T" : "F");
 				if (files.empty()) {
 					retry = true;
 					break;
@@ -3127,16 +3149,21 @@ ACTOR Future<bool> canDeleteFullGranule(Reference<BlobManagerData> self, UID gra
 			if (retry) {
 				tr.reset();
 				wait(delay(1.0));
+				retry = false;
+				checkRange = splitRange;
 			} else {
 				if (splitState.empty() || !splitState.more) {
 					break;
 				}
-				splitRange = KeyRangeRef(keyAfter(splitState.back().key), splitRange.end);
+				checkRange = KeyRangeRef(keyAfter(splitState.back().key), checkRange.end);
 			}
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}
 	}
+	if (BM_PURGE_DEBUG) {
+			fmt::print("BM {0} Full delete check {1} done. Not deleting history key\n", self->epoch, granuleId.toString());
+		}
 	return false;
 }
 

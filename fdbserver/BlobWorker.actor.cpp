@@ -2413,7 +2413,7 @@ ACTOR Future<Void> blobGranuleLoadHistory(Reference<BlobWorkerData> bwData,
 				}
 
 				auto prev = bwData->granuleHistory.intersectingRanges(curHistory.range);
-				bool allLess = true;
+				bool allLess = true; // if the version is less than all existing granules
 				for (auto& it : prev) {
 					if (it.cvalue().isValid() && curHistory.version >= it.cvalue()->endVersion) {
 						allLess = false;
@@ -2450,7 +2450,9 @@ ACTOR Future<Void> blobGranuleLoadHistory(Reference<BlobWorkerData> bwData,
 				}
 
 				state int pIdx = 0;
-				state bool noParentsPresent = true;
+				state bool anyParentsMissing = curHistory.value.parentVersions.empty();
+				state std::vector<GranuleHistory> nexts;
+				nexts.reserve(curHistory.value.parentVersions.size());
 				// FIXME: parallelize this for all parents/all entries in queue?
 				loop {
 					if (pIdx >= curHistory.value.parentVersions.size()) {
@@ -2473,7 +2475,7 @@ ACTOR Future<Void> blobGranuleLoadHistory(Reference<BlobWorkerData> bwData,
 								// curHistory.version]
 								inserted.first->second.entry = makeReference<GranuleHistoryEntry>(
 								    next.range, next.value.granuleID, next.version, curHistory.version);
-								queue.push_back(next);
+								nexts.push_back(next);
 								if (BW_HISTORY_DEBUG) {
 									fmt::print("HL {0} {1}) [{2} - {3}) @ {4}: loaded parent [{5} - {6}) @ {7}\n",
 									           bwData->id.shortString().substr(0, 5),
@@ -2501,7 +2503,8 @@ ACTOR Future<Void> blobGranuleLoadHistory(Reference<BlobWorkerData> bwData,
 								}
 								ASSERT(inserted.first->second.entry->endVersion == curHistory.version);
 							}
-							noParentsPresent = false;
+						} else {
+							anyParentsMissing = true;
 						}
 
 						pIdx++;
@@ -2510,16 +2513,21 @@ ACTOR Future<Void> blobGranuleLoadHistory(Reference<BlobWorkerData> bwData,
 					}
 				}
 
-				if (noParentsPresent) {
+				if (anyParentsMissing) {
 					if (BW_HISTORY_DEBUG) {
-						fmt::print("HL {0} {1}) [{2} - {3}) @ {4}: root b/c no parents\n",
+						fmt::print("HL {0} {1}) [{2} - {3}) @ {4}: root b/c parents missing\n",
 						           bwData->id.shortString().substr(0, 5),
 						           loadId,
 						           curHistory.range.begin.printable(),
 						           curHistory.range.end.printable(),
 						           curHistory.version);
 					}
+					
 					rootGranules.push(OrderedHistoryKey(curHistory.version, curHistory.value.granuleID));
+				} else {
+					for (auto& it : nexts) {
+						queue.push_back(it);
+					}
 				}
 			}
 
@@ -2732,17 +2740,20 @@ std::vector<std::pair<KeyRange, Future<GranuleFiles>>> loadHistoryChunks(Referen
 		if (!it.cvalue().isValid()) {
 			throw blob_granule_transaction_too_old();
 		}
-		if (expectedEndVersion != it.cvalue()->endVersion) {
-			fmt::print("live granule history version {0} for [{1} - {2}) != history end version {3} for "
-			           "[{4} - {5})\n",
+		if (expectedEndVersion > it.cvalue()->endVersion) {
+			if (BW_DEBUG) {
+				// history must have been pruned up to live granule, but BW still has previous history cached.
+				fmt::print("live granule history version {0} for [{1} - {2}) != history end version {3} for "
+			           "[{4} - {5}) on BW {6}\n",
 			           expectedEndVersion,
 			           keyRange.begin.printable(),
 			           keyRange.end.printable(),
 			           it.cvalue()->endVersion,
 			           it.begin().printable(),
-			           it.end().printable());
+			           it.end().printable(), bwData->id.toString().substr(0, 5));
+			}
+			throw blob_granule_transaction_too_old();
 		}
-		ASSERT(expectedEndVersion == it.cvalue()->endVersion);
 		visited.insert(it.cvalue()->granuleID);
 		queue.push_back(it.cvalue());
 
