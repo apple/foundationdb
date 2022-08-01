@@ -299,16 +299,10 @@ struct MetaclusterManagementWorkload : TestWorkload {
 
 	ACTOR static Future<Optional<DataClusterEntry>> configureImpl(MetaclusterManagementWorkload* self,
 	                                                              ClusterName clusterName,
-	                                                              DataClusterData* dataDb) {
+	                                                              DataClusterData* dataDb,
+	                                                              Optional<int64_t> numTenantGroups,
+	                                                              Optional<ClusterConnectionString> connectionString) {
 		state Reference<ITransaction> tr = self->managementDb->createTransaction();
-		state Optional<int64_t> newNumTenantGroups;
-		state Optional<ClusterConnectionString> connectionString;
-		if (deterministicRandom()->coinflip()) {
-			newNumTenantGroups = deterministicRandom()->randomInt(0, 4);
-		}
-		if (deterministicRandom()->coinflip()) {
-			connectionString = dataDb->db->getConnectionRecord()->getConnectionString();
-		}
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -317,10 +311,9 @@ struct MetaclusterManagementWorkload : TestWorkload {
 				state Optional<DataClusterEntry> entry;
 
 				if (clusterMetadata.present()) {
-
-					if (newNumTenantGroups.present()) {
+					if (numTenantGroups.present()) {
 						entry = clusterMetadata.get().entry;
-						entry.get().capacity.numTenantGroups = newNumTenantGroups.get();
+						entry.get().capacity.numTenantGroups = numTenantGroups.get();
 					}
 					MetaclusterAPI::updateClusterMetadata(
 					    tr, clusterName, clusterMetadata.get(), connectionString, entry);
@@ -340,10 +333,20 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		state DataClusterData* dataDb = &self->dataDbs[clusterName];
 		state Optional<DataClusterEntry> updatedEntry;
 
+		state Optional<int64_t> newNumTenantGroups;
+		state Optional<ClusterConnectionString> connectionString;
+		if (deterministicRandom()->coinflip()) {
+			newNumTenantGroups = deterministicRandom()->randomInt(0, 4);
+		}
+		if (deterministicRandom()->coinflip()) {
+			connectionString = dataDb->db->getConnectionRecord()->getConnectionString();
+		}
+
 		try {
 			loop {
 				Optional<Optional<DataClusterEntry>> result =
-				    wait(timeout(configureImpl(self, clusterName, dataDb), deterministicRandom()->randomInt(1, 30)));
+				    wait(timeout(configureImpl(self, clusterName, dataDb, newNumTenantGroups, connectionString),
+				                 deterministicRandom()->randomInt(1, 30)));
 				if (result.present()) {
 					updatedEntry = result.get();
 					break;

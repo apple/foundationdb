@@ -415,18 +415,12 @@ Future<TenantMapEntry> getTenant(Reference<DB> db, TenantName name) {
 ACTOR template <class Transaction>
 Future<Void> managementClusterCheckEmpty(Transaction tr) {
 	state Future<KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>>> tenantsFuture =
-	    ManagementClusterMetadata::tenantMetadata.tenantMap.getRange(tr, {}, {}, 1);
-	state Future<KeyBackedRangeResult<std::pair<ClusterName, DataClusterEntry>>> dataClustersFuture =
-	    ManagementClusterMetadata::dataClusters.getRange(tr, {}, {}, 1);
+	    TenantMetadata::tenantMap.getRange(tr, {}, {}, 1);
 	state typename transaction_future_type<Transaction, RangeResult>::type dbContentsFuture =
 	    tr->getRange(normalKeys, 1);
 
 	KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>> tenants = wait(tenantsFuture);
 	if (!tenants.results.empty()) {
-		throw cluster_not_empty();
-	}
-	KeyBackedRangeResult<std::pair<ClusterName, DataClusterEntry>> dataClusters = wait(dataClustersFuture);
-	if (!dataClusters.results.empty()) {
 		throw cluster_not_empty();
 	}
 
@@ -472,7 +466,7 @@ Future<Optional<std::string>> createMetacluster(Reference<DB> db, ClusterName na
 			MetaclusterMetadata::metaclusterRegistration.set(tr,
 			                                                 MetaclusterRegistrationEntry(name, metaclusterUid.get()));
 
-			wait(buggifiedCommit(tr, BUGGIFY));
+			wait(buggifiedCommit(tr, BUGGIFY_WITH_PROB(0.1)));
 			break;
 		} catch (Error& e) {
 			wait(safeThreadFutureToFuture(tr->onError(e)));
@@ -506,7 +500,7 @@ Future<Void> decommissionMetacluster(Reference<DB> db) {
 			MetaclusterMetadata::metaclusterRegistration.clear(tr);
 
 			firstTry = false;
-			wait(buggifiedCommit(tr, BUGGIFY));
+			wait(buggifiedCommit(tr, BUGGIFY_WITH_PROB(0.1)));
 			break;
 		} catch (Error& e) {
 			wait(safeThreadFutureToFuture(tr->onError(e)));
@@ -625,7 +619,7 @@ struct RegisterClusterImpl {
 				    self->ctx.metaclusterRegistration.get().toDataClusterRegistration(self->clusterName,
 				                                                                      self->clusterEntry.id));
 
-				wait(buggifiedCommit(tr, BUGGIFY));
+				wait(buggifiedCommit(tr, BUGGIFY_WITH_PROB(0.1)));
 
 				TraceEvent("ConfiguredDataCluster")
 				    .detail("ClusterName", self->clusterName)
@@ -843,6 +837,10 @@ struct RemoveClusterImpl {
 		if (!tenantGroupEntries.more) {
 			ManagementClusterMetadata::dataClusters.erase(tr, self->ctx.clusterName.get());
 			ManagementClusterMetadata::dataClusterConnectionRecords.erase(tr, self->ctx.clusterName.get());
+			ManagementClusterMetadata::clusterCapacityIndex.erase(
+			    tr,
+			    Tuple::makeTuple(self->ctx.dataClusterMetadata.get().entry.allocated.numTenantGroups,
+			                     self->ctx.clusterName.get()));
 		}
 
 		return !tenantGroupEntries.more;
@@ -1098,7 +1096,21 @@ struct CreateTenantImpl {
 				wait(self->ctx.setCluster(tr, existingEntry.get().assignedCluster.get()));
 				return true;
 			} else {
-				// The previous creation is permanently failed, so create it again from scratch
+				// The previous creation is permanently failed, so cleanup the tenant and create it again from scratch
+				// We don't need to remove it from the tenant map because we will overwrite the existing entry later in
+				// this transaction.
+				ManagementClusterMetadata::tenantMetadata.tenantCount.atomicOp(tr, -1, MutationRef::AddValue);
+				ManagementClusterMetadata::clusterTenantCount.atomicOp(
+				    tr, existingEntry.get().assignedCluster.get(), -1, MutationRef::AddValue);
+
+				ManagementClusterMetadata::clusterTenantIndex.erase(
+				    tr, Tuple::makeTuple(existingEntry.get().assignedCluster.get(), self->tenantName));
+
+				DataClusterMetadata previousAssignedClusterMetadata =
+				    wait(getClusterTransaction(tr, existingEntry.get().assignedCluster.get()));
+
+				wait(managementClusterRemoveTenantFromGroup(
+				    tr, self->tenantName, existingEntry.get(), previousAssignedClusterMetadata));
 			}
 		}
 
@@ -1209,18 +1221,29 @@ struct CreateTenantImpl {
 
 		wait(setClusterFuture);
 
+		// If we are part of a tenant group that is assigned to a cluster being removed from the metacluster,
+		// then we fail with an error.
+		if (self->ctx.dataClusterMetadata.get().entry.locked) {
+			throw cluster_locked();
+		}
+
 		managementClusterAddTenantToGroup(
 		    tr, self->tenantName, self->tenantEntry, self->ctx.dataClusterMetadata.get(), assignment.second);
 
 		return Void();
 	}
 
-	// Returns true if the tenant creation should continue
-	ACTOR static Future<bool> storeTenantInDataCluster(CreateTenantImpl* self, Reference<ITransaction> tr) {
+	ACTOR static Future<Void> storeTenantInDataCluster(CreateTenantImpl* self, Reference<ITransaction> tr) {
 		std::pair<Optional<TenantMapEntry>, bool> dataClusterTenant = wait(
 		    TenantAPI::createTenantTransaction(tr, self->tenantName, self->tenantEntry, ClusterType::METACLUSTER_DATA));
 
-		return dataClusterTenant.first.present();
+		// If the tenant map entry is empty, then we encountered a tombstone indicating that the tenant was
+		// simultaneously removed.
+		if (!dataClusterTenant.first.present()) {
+			throw tenant_removed();
+		}
+
+		return Void();
 	}
 
 	ACTOR static Future<Void> markTenantReady(CreateTenantImpl* self, Reference<typename DB::TransactionT> tr) {
@@ -1252,13 +1275,12 @@ struct CreateTenantImpl {
 
 			self->replaceExistingTenantId = {};
 			try {
-				bool tenantStored = wait(self->ctx.runDataClusterTransaction(
+				wait(self->ctx.runDataClusterTransaction(
 				    [self = self](Reference<ITransaction> tr) { return storeTenantInDataCluster(self, tr); }));
 
-				if (tenantStored) {
-					wait(self->ctx.runManagementTransaction(
-					    [self = self](Reference<typename DB::TransactionT> tr) { return markTenantReady(self, tr); }));
-				}
+				wait(self->ctx.runManagementTransaction(
+				    [self = self](Reference<typename DB::TransactionT> tr) { return markTenantReady(self, tr); }));
+
 				return Void();
 			} catch (Error& e) {
 				if (e.code() == error_code_tenant_creation_permanently_failed) {
@@ -1389,17 +1411,14 @@ struct DeleteTenantImpl {
 			    tr, tenantEntry.get().assignedCluster.get(), -1, MutationRef::AddValue);
 		}
 
-		// Clean up cluster based tenant indices and remove the tenant group if it is empty
-		state DataClusterMetadata clusterMetadata =
-		    wait(getClusterTransaction(tr, tenantEntry.get().assignedCluster.get()));
-
 		// Remove the tenant from the cluster -> tenant index
 		ManagementClusterMetadata::clusterTenantIndex.erase(
 		    tr, Tuple::makeTuple(tenantEntry.get().assignedCluster.get(), tenantName));
 
 		// Remove the tenant from its tenant group
-		wait(managementClusterRemoveTenantFromGroup(tr, tenantName, tenantEntry.get(), clusterMetadata));
-
+		wait(managementClusterRemoveTenantFromGroup(
+		    tr, self->tenantName, tenantEntry.get(), self->ctx.dataClusterMetadata.get()));
+		
 		// If pair is present, and this is not already a pair delete, call this function recursively
 		if (!pairDelete && self->pairName.present()) {
 			wait(self->ctx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
