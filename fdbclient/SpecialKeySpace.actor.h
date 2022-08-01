@@ -208,5 +208,15 @@ public:
 	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
 };
 
+// If the underlying set of key-value pairs of a key space is not changing, then we expect repeating a read to give the
+// same result. Additionally, we can generate the expected result of any read if that read is reading a subrange. This
+// actor performs a read of an arbitrary subrange of [begin, end) and validates the results.
+ACTOR Future<Void> validateSpecialSubrangeRead(ReadYourWritesTransaction* ryw,
+                                               KeySelector begin,
+                                               KeySelector end,
+                                               GetRangeLimits limits,
+                                               bool reverse,
+                                               Standalone<RangeResultRef> result);
+
 #include "flow/unactorcompiler.h"
 #endif
