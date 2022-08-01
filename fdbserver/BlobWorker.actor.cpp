@@ -1217,9 +1217,6 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobWorkerData> bwData,
                                           int64_t epoch,
                                           int64_t seqno,
                                           Key proposedSplitKey) {
-	state GranuleStatusReply reply(
-	    keyRange, true, false, true, epoch, seqno, granuleID, invalidVersion, invalidVersion, false, epoch, seqno);
-	reply.proposedSplitKey = proposedSplitKey;
 	loop {
 		try {
 			// wait for manager stream to become ready, and send a message
@@ -1230,6 +1227,9 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobWorkerData> bwData,
 				}
 			}
 
+			GranuleStatusReply reply(
+	    keyRange, true, false, true, epoch, seqno, granuleID, invalidVersion, invalidVersion, false, epoch, seqno);
+reply.proposedSplitKey = proposedSplitKey;
 			bwData->currentManagerStatusStream.get().send(reply);
 			// if a new manager appears, also tell it about this granule being mergeable, or retry after a certain
 			// amount of time of not hearing back
