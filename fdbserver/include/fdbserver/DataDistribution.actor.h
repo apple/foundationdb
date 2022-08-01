@@ -415,7 +415,9 @@ struct DDContext : public ReferenceCounted<DDContext> {
 	// public:
 	UID ddId;
 	MoveKeysLock lock;
+	bool trackerCancelled = false;
 	DatabaseConfiguration configuration;
+
 	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
 	Reference<AsyncVar<bool>> processingUnhealthy, processingWiggle;
 
@@ -431,6 +433,46 @@ struct DDContext : public ReferenceCounted<DDContext> {
 
 	void restartShardTrackerAsync(KeyRange keys) const { return trackerInterface.restartShardTracker.send(keys); }
 };
+
+// provide common behavior to manage shared state. Beware of expose too much details
+class DDComponent {
+protected:
+	Reference<DDContext> context;
+
+public:
+	DDComponent() : context(makeReference<DDContext>()) {}
+	explicit DDComponent(Reference<DDContext> context) : context(context) {}
+
+	// reset context to uninitialized state
+	void resetContext() {
+		auto enabledState = context->ddEnabledState;
+		auto id = Id();
+		context = makeReference<DDContext>(id, enabledState);
+	}
+
+	UID Id() const { return context->ddId; }
+
+	void markTrackerCancelled() { context->trackerCancelled = true; }
+
+	bool isTrackerCancelled() const { return context->trackerCancelled; }
+
+	decltype(auto) usableRegions() { return context->configuration.usableRegions; }
+
+	bool isDDEnabled() const { return context->ddEnabledState->isDDEnabled(); };
+
+	std::shared_ptr<DDEnabledState> getDDEnableState() { return context->ddEnabledState; }
+
+	Future<Standalone<VectorRef<DDMetricsRef>>> getDDMetricsList(const GetMetricsListRequest& req);
+
+	Reference<DDContext> rawContext() { return context; }
+};
+
+ACTOR Future<Void> dataDistributionTracker(Reference<DDContext> context,
+                                           Reference<InitialDataDistribution> initData,
+                                           Database cx,
+                                           KeyRangeMap<ShardTrackedData>* shards);
+
+ACTOR Future<Void> dataDistributionQueue(Reference<DDContext> context, Database cx);
 
 #ifndef __INTEL_COMPILER
 #pragma endregion
