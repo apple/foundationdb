@@ -2992,9 +2992,11 @@ Future<KeyRangeLocationInfo> getKeyLocation(Reference<TransactionState> trState,
 	                        isBackward,
 	                        version);
 
-	if (trState->tenant().present() && useTenant) {
+	if (trState->tenant().present() && useTenant && trState->tenantId == TenantInfo::INVALID_TENANT) {
 		return map(f, [trState](const KeyRangeLocationInfo& locationInfo) {
-			trState->tenantId = locationInfo.tenantEntry.id;
+			if (trState->tenantId == TenantInfo::INVALID_TENANT) {
+				trState->tenantId = locationInfo.tenantEntry.id;
+			}
 			return locationInfo;
 		});
 	} else {
@@ -3132,10 +3134,12 @@ Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations(Reference<Transac
 	                              trState->useProvisionalProxies,
 	                              version);
 
-	if (trState->tenant().present() && useTenant) {
+	if (trState->tenant().present() && useTenant && trState->tenantId == TenantInfo::INVALID_TENANT) {
 		return map(f, [trState](const std::vector<KeyRangeLocationInfo>& locationInfo) {
 			ASSERT(!locationInfo.empty());
-			trState->tenantId = locationInfo[0].tenantEntry.id;
+			if (trState->tenantId == TenantInfo::INVALID_TENANT) {
+				trState->tenantId = locationInfo[0].tenantEntry.id;
+			}
 			return locationInfo;
 		});
 	} else {
@@ -5974,6 +5978,7 @@ ACTOR static Future<Void> commitDummyTransaction(Reference<TransactionState> trS
 			tr.trState->options = trState->options;
 			tr.trState->taskID = trState->taskID;
 			tr.trState->authToken = trState->authToken;
+			tr.trState->tenantId = trState->tenantId;
 			if (!trState->hasTenant()) {
 				tr.setOption(FDBTransactionOptions::RAW_ACCESS);
 			} else {
@@ -5987,6 +5992,10 @@ ACTOR static Future<Void> commitDummyTransaction(Reference<TransactionState> trS
 			wait(tr.commit());
 			return Void();
 		} catch (Error& e) {
+			// If the tenant is gone, then our original transaction won't be able to commit
+			if (e.code() == error_code_unknown_tenant) {
+				return Void();
+			}
 			TraceEvent("CommitDummyTransactionError")
 			    .errorUnsuppressed(e)
 			    .detail("Key", range.begin)
@@ -6159,19 +6168,17 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 		}
 
 		state Key tenantPrefix;
-		if (trState->tenant().present()) {
+		// skipApplyTenantPrefix is set only in the context of a commitDummyTransaction()
+		// (see member declaration)
+		if (trState->tenant().present() && !trState->skipApplyTenantPrefix) {
 			KeyRangeLocationInfo locationInfo = wait(getKeyLocation(trState,
 			                                                        ""_sr,
 			                                                        &StorageServerInterface::getValue,
 			                                                        Reverse::False,
 			                                                        UseTenant::True,
 			                                                        req.transaction.read_snapshot));
-			// skipApplyTenantPrefix is set only in the context of a commitDummyTransaction()
-			// (see member declaration)
-			if (!trState->skipApplyTenantPrefix) {
-				applyTenantPrefix(req, locationInfo.tenantEntry.prefix);
-				tenantPrefixPrepended = TenantPrefixPrepended::True;
-			}
+			applyTenantPrefix(req, locationInfo.tenantEntry.prefix);
+			tenantPrefixPrepended = TenantPrefixPrepended::True;
 			tenantPrefix = locationInfo.tenantEntry.prefix;
 		}
 		CODE_PROBE(trState->skipApplyTenantPrefix, "Tenant prefix prepend skipped for dummy transaction");
@@ -7623,10 +7630,14 @@ ACTOR Future<TenantMapEntry> blobGranuleGetTenantEntry(Transaction* self, Key ra
 		                                                      self->trState->useProvisionalProxies,
 		                                                      Reverse::False,
 		                                                      latestVersion));
-		self->trState->tenantId = l.tenantEntry.id;
+		if (self->trState->tenantId == TenantInfo::INVALID_TENANT) {
+			self->trState->tenantId = l.tenantEntry.id;
+		}
 		return l.tenantEntry;
 	} else {
-		self->trState->tenantId = cachedLocationInfo.get().tenantEntry.id;
+		if (self->trState->tenantId == TenantInfo::INVALID_TENANT) {
+			self->trState->tenantId = cachedLocationInfo.get().tenantEntry.id;
+		}
 		return cachedLocationInfo.get().tenantEntry;
 	}
 }

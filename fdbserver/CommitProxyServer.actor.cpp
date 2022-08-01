@@ -283,16 +283,20 @@ bool verifyTenantPrefix(ProxyCommitData* const commitData, const CommitTransacti
 				if (!m.param1.startsWith(tenantPrefix)) {
 					TraceEvent(SevWarnAlways, "TenantPrefixMismatch")
 					    .suppressFor(60)
-					    .detail("Prefix", tenantPrefix.toHexString())
-					    .detail("Key", m.param1.toHexString());
+					    .detail("Tenant", req.tenantInfo.name)
+					    .detail("TenantID", req.tenantInfo.tenantId)
+					    .detail("Prefix", tenantPrefix)
+					    .detail("Key", m.param1);
 					return false;
 				}
 
 				if (m.type == MutationRef::ClearRange && !m.param2.startsWith(tenantPrefix)) {
 					TraceEvent(SevWarnAlways, "TenantClearRangePrefixMismatch")
 					    .suppressFor(60)
-					    .detail("Prefix", tenantPrefix.toHexString())
-					    .detail("Key", m.param2.toHexString());
+					    .detail("Tenant", req.tenantInfo.name)
+					    .detail("TenantID", req.tenantInfo.tenantId)
+					    .detail("Prefix", tenantPrefix)
+					    .detail("Key", m.param2);
 					return false;
 				} else if (m.type == MutationRef::SetVersionstampedKey) {
 					ASSERT(m.param1.size() >= 4);
@@ -301,8 +305,10 @@ bool verifyTenantPrefix(ProxyCommitData* const commitData, const CommitTransacti
 					if (*offset < tenantPrefix.size()) {
 						TraceEvent(SevWarnAlways, "TenantVersionstampInvalidOffset")
 						    .suppressFor(60)
-						    .detail("Prefix", tenantPrefix.toHexString())
-						    .detail("Key", m.param1.toHexString())
+						    .detail("Tenant", req.tenantInfo.name)
+						    .detail("TenantID", req.tenantInfo.tenantId)
+						    .detail("Prefix", tenantPrefix)
+						    .detail("Key", m.param1)
 						    .detail("Offset", *offset);
 						return false;
 					}
@@ -315,9 +321,11 @@ bool verifyTenantPrefix(ProxyCommitData* const commitData, const CommitTransacti
 			    (!rc.begin.startsWith(tenantPrefix) || !rc.end.startsWith(tenantPrefix))) {
 				TraceEvent(SevWarnAlways, "TenantReadConflictPrefixMismatch")
 				    .suppressFor(60)
-				    .detail("Prefix", tenantPrefix.toHexString())
-				    .detail("BeginKey", rc.begin.toHexString())
-				    .detail("EndKey", rc.end.toHexString());
+				    .detail("Tenant", req.tenantInfo.name)
+				    .detail("TenantID", req.tenantInfo.tenantId)
+				    .detail("Prefix", tenantPrefix)
+				    .detail("BeginKey", rc.begin)
+				    .detail("EndKey", rc.end);
 				return false;
 			}
 		}
@@ -327,9 +335,11 @@ bool verifyTenantPrefix(ProxyCommitData* const commitData, const CommitTransacti
 			    (!wc.begin.startsWith(tenantPrefix) || !wc.end.startsWith(tenantPrefix))) {
 				TraceEvent(SevWarnAlways, "TenantWriteConflictPrefixMismatch")
 				    .suppressFor(60)
-				    .detail("Prefix", tenantPrefix.toHexString())
-				    .detail("BeginKey", wc.begin.toHexString())
-				    .detail("EndKey", wc.end.toHexString());
+				    .detail("Tenant", req.tenantInfo.name)
+				    .detail("TenantID", req.tenantInfo.tenantId)
+				    .detail("Prefix", tenantPrefix)
+				    .detail("BeginKey", wc.begin)
+				    .detail("EndKey", wc.end);
 				return false;
 			}
 		}
