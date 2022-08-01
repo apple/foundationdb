@@ -181,6 +181,7 @@ struct GranuleStatusReply : public ReplyPromiseStreamReply {
 	bool mergeCandidate;
 	int64_t originalEpoch;
 	int64_t originalSeqno;
+	Optional<Key> proposedSplitKey;
 
 	GranuleStatusReply() {}
 	explicit GranuleStatusReply(KeyRange range,
@@ -200,7 +201,10 @@ struct GranuleStatusReply : public ReplyPromiseStreamReply {
 	    blockedVersion(blockedVersion), mergeCandidate(mergeCandidate), originalEpoch(originalEpoch),
 	    originalSeqno(originalSeqno) {}
 
-	int expectedSize() const { return sizeof(GranuleStatusReply) + granuleRange.expectedSize(); }
+	int expectedSize() const {
+		return sizeof(GranuleStatusReply) + granuleRange.expectedSize() +
+		       (proposedSplitKey.present() ? proposedSplitKey.get().expectedSize() : 0);
+	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -218,7 +222,8 @@ struct GranuleStatusReply : public ReplyPromiseStreamReply {
 		           blockedVersion,
 		           mergeCandidate,
 		           originalEpoch,
-		           originalSeqno);
+		           originalSeqno,
+		           proposedSplitKey);
 	}
 };
 

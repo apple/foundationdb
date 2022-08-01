@@ -1130,7 +1130,8 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobManagerData> bmData,
                                           KeyRange granuleRange,
                                           UID granuleID,
                                           int64_t epoch,
-                                          int64_t seqno) {
+                                          int64_t seqno,
+                                          Key proposedSplitKey) {
 	CODE_PROBE(true, "BM re-evaluating initial split too big");
 	if (BM_DEBUG) {
 		fmt::print("BM {0} re-evaluating initial split [{1} - {2}) too big from {3} @ ({4}, {5})\n",
@@ -1141,59 +1142,18 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobManagerData> bmData,
 		           epoch,
 		           seqno);
 	}
-	TraceEvent("BMCheckInitialSplitTooBig", bmData->id).detail("Epoch", bmData->epoch).detail("Granule", granuleRange);
+	TraceEvent("BMCheckInitialSplitTooBig", bmData->id)
+	    .detail("Epoch", bmData->epoch)
+	    .detail("Granule", granuleRange)
+	    .detail("ProposedSplitKey", proposedSplitKey);
 	// calculate new split targets speculatively assuming split is too large and current worker still owns it
+	ASSERT(granuleRange.begin < proposedSplitKey);
+	ASSERT(proposedSplitKey < granuleRange.end);
 	state Standalone<VectorRef<KeyRef>> newRanges;
-	wait(store(newRanges, splitRange(bmData, granuleRange, false, true)));
-	ASSERT(newRanges.size() >= 2);
-	if (newRanges.size() == 2) {
-		// try forcing smaller splits by setting write-hot
-		// likely due to injection to trigger this behavior, as this normally only triggers when range is at least 2x
-		// desired size
-		if (BM_DEBUG) {
-			fmt::print("BM {0} re-evaluating initial split [{1} - {2}) too big trying write-hot\n",
-			           bmData->epoch,
-			           granuleRange.begin.printable(),
-			           granuleRange.end.printable(),
-			           currentWorkerId.toString().substr(0, 5),
-			           epoch,
-			           seqno);
-		}
-		CODE_PROBE(true, "BM trying write-hot to force smaller splits on re-evaluate");
-		wait(store(newRanges, splitRange(bmData, granuleRange, true, true)));
-		ASSERT(newRanges.size() >= 2);
-	}
-
-	if (BM_DEBUG) {
-		fmt::print("BM {0} re-evaluating initial split [{1} - {2}) got {3} ranges\n",
-		           bmData->epoch,
-		           granuleRange.begin.printable(),
-		           granuleRange.end.printable(),
-		           newRanges.size() - 1);
-		for (auto& it : newRanges) {
-			fmt::print("  {0}\n", it.printable());
-		}
-	}
-
-	if (newRanges.size() == 2) {
-		// revoke and reassign this range to retry
-		// likely due to fault injection, as this normally only triggers when range is at least 2x desired size
-		CODE_PROBE(true, "no better way to split range, just revoke and re-assign");
-		RangeAssignment raRevoke;
-		raRevoke.isAssign = false;
-		raRevoke.keyRange = granuleRange;
-		raRevoke.revoke = RangeRevokeData(false); // not a dispose
-		handleRangeAssign(bmData, raRevoke);
-
-		RangeAssignment raAssign;
-		raAssign.isAssign = true;
-		raAssign.keyRange = granuleRange;
-		raAssign.assign = RangeAssignmentData();
-		// don't care who this range gets assigned to
-		handleRangeAssign(bmData, raAssign);
-
-		return Void();
-	}
+	newRanges.push_back(newRanges.arena(), granuleRange.begin);
+	// FIXME: need to align proposedSplitKey once that's merged
+	newRanges.push_back(newRanges.arena(), proposedSplitKey);
+	newRanges.push_back(newRanges.arena(), granuleRange.end);
 
 	// Check lock to see if lock is still the specified epoch and seqno, and there are no files for the granule.
 	// If either of these are false, some other worker now has the granule. if there are files, it already succeeded at
@@ -2440,12 +2400,14 @@ ACTOR Future<Void> monitorBlobWorkerStatus(Reference<BlobManagerData> bmData, Bl
 							           newEval.toString());
 						}
 						if (rep.initialSplitTooBig) {
+							ASSERT(rep.proposedSplitKey.present());
 							newEval.inProgress = reevaluateInitialSplit(bmData,
 							                                            bwInterf.id(),
 							                                            rep.granuleRange,
 							                                            rep.granuleID,
 							                                            rep.originalEpoch,
-							                                            rep.originalSeqno);
+							                                            rep.originalSeqno,
+							                                            rep.proposedSplitKey.get());
 						} else {
 							newEval.inProgress = maybeSplitRange(bmData,
 							                                     bwInterf.id(),

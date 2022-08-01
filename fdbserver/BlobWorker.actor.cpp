@@ -695,7 +695,8 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobWorkerData> bwData,
                                           UID granuleID,
                                           KeyRange keyRange,
                                           int64_t epoch,
-                                          int64_t seqno);
+                                          int64_t seqno,
+                                          Key proposedSplitKey);
 
 ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
                                           Reference<BlobConnectionProvider> bstore,
@@ -715,7 +716,8 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 
 	loop {
 		try {
-			if (injectTooBig || (initialSnapshot && bytesRead >= 3 * SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES)) {
+			if (initialSnapshot && snapshot.size() > 1 &&
+			    (injectTooBig || bytesRead >= 3 * SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES)) {
 				// throw transaction too old either on injection for simulation, or if snapshot would be too large now
 				throw transaction_too_old();
 			}
@@ -728,11 +730,20 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 			if (e.code() == error_code_end_of_stream) {
 				break;
 			}
-			// if we got transaction_too_old naturally, have lower threshold for re-evaluating (2*limit)
-			if (initialSnapshot && e.code() == error_code_transaction_too_old &&
+			// if we got transaction_too_old naturally, have lower threshold for re-evaluating (2xlimit)
+			if (initialSnapshot && snapshot.size() > 1 && e.code() == error_code_transaction_too_old &&
 			    (injectTooBig || bytesRead >= 2 * SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES)) {
 				// idle this actor, while we tell the manager this is too big and to re-evaluate granules and revoke us
-				wait(reevaluateInitialSplit(bwData, granuleID, keyRange, epoch, seqno));
+				if (BW_DEBUG) {
+					fmt::print("Granule [{0} - {1}) re-evaluating snapshot after {2} bytes ({3} limit) {4}\n",
+					           keyRange.begin.printable(),
+					           keyRange.end.printable(),
+					           bytesRead,
+					           SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES,
+					           injectTooBig ? "(injected)" : "");
+				}
+				wait(reevaluateInitialSplit(
+				    bwData, granuleID, keyRange, epoch, seqno, snapshot[snapshot.size() / 2].key));
 				ASSERT(false);
 			} else {
 				throw e;
@@ -914,7 +925,7 @@ ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(Reference<BlobWorkerData>
 				throw e;
 			}
 			if (BW_DEBUG) {
-				fmt::print("Dumping snapshot {0} from FDB for [{1} - {2}) got error {3} after {4} bytes\n",
+				fmt::print("Dumping snapshot {0} from FDB for [{1} - {2}) got error {3}\n",
 				           retries + 1,
 				           metadata->keyRange.begin.printable(),
 				           metadata->keyRange.end.printable(),
@@ -1204,7 +1215,11 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobWorkerData> bwData,
                                           UID granuleID,
                                           KeyRange keyRange,
                                           int64_t epoch,
-                                          int64_t seqno) {
+                                          int64_t seqno,
+                                          Key proposedSplitKey) {
+	state GranuleStatusReply reply(
+	    keyRange, true, false, true, epoch, seqno, granuleID, invalidVersion, invalidVersion, false, epoch, seqno);
+	reply.proposedSplitKey = proposedSplitKey;
 	loop {
 		try {
 			// wait for manager stream to become ready, and send a message
@@ -1215,18 +1230,7 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobWorkerData> bwData,
 				}
 			}
 
-			bwData->currentManagerStatusStream.get().send(GranuleStatusReply(keyRange,
-			                                                                 true,
-			                                                                 false,
-			                                                                 true,
-			                                                                 epoch,
-			                                                                 seqno,
-			                                                                 granuleID,
-			                                                                 invalidVersion,
-			                                                                 invalidVersion,
-			                                                                 false,
-			                                                                 epoch,
-			                                                                 seqno));
+			bwData->currentManagerStatusStream.get().send(reply);
 			// if a new manager appears, also tell it about this granule being mergeable, or retry after a certain
 			// amount of time of not hearing back
 			wait(success(timeout(bwData->currentManagerStatusStream.onChange(), 10.0)));
