@@ -3451,28 +3451,35 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 	state std::unordered_set<std::pair<std::string, Version>, boost::hash<std::pair<std::string, Version>>> visited;
 
 	// find all active granules (that comprise the range) and add to the queue
-	state KeyRangeMap<UID>::Ranges activeRanges = self->workerAssignments.intersectingRanges(range);
 
 	state Transaction tr(self->db);
 	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
-	state KeyRangeMap<UID>::iterator activeRange;
-	for (activeRange = activeRanges.begin(); activeRange != activeRanges.end(); ++activeRange) {
+	auto ranges = self->workerAssignments.intersectingRanges(range);
+	state std::vector<KeyRange> activeRanges;
+
+	// copy into state variable before waits
+	for (auto& it : ranges) {
+		activeRanges.push_back(it.range());
+	}
+
+	state int rangeIdx;
+	for (rangeIdx = 0; rangeIdx < activeRanges.size(); rangeIdx++) {
+		state KeyRange activeRange = activeRanges[rangeIdx];
 		if (BM_PURGE_DEBUG) {
-			fmt::print("BM {0} Checking if active range [{1} - {2}), owned by BW {3}, should be purged\n",
+			fmt::print("BM {0} Checking if active range [{1} - {2}) should be purged\n",
 			           self->epoch,
-			           activeRange.begin().printable(),
-			           activeRange.end().printable(),
-			           activeRange.value().toString());
+			           activeRange.begin.printable(),
+			           activeRange.end.printable());
 		}
 
 		// assumption: purge boundaries must respect granule boundaries
-		if (activeRange.begin() < range.begin || activeRange.end() > range.end) {
+		if (activeRange.begin < range.begin || activeRange.end > range.end) {
 			TraceEvent(SevWarn, "GranulePurgeRangesUnaligned", self->id)
 			    .detail("Epoch", self->epoch)
 			    .detail("PurgeRange", range)
-			    .detail("GranuleRange", activeRange.range());
+			    .detail("GranuleRange", activeRange);
 			continue;
 		}
 
@@ -3485,24 +3492,23 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 				if (BM_PURGE_DEBUG) {
 					fmt::print("BM {0} Fetching latest history entry for range [{1} - {2})\n",
 					           self->epoch,
-					           activeRange.begin().printable(),
-					           activeRange.end().printable());
+					           activeRange.begin.printable(),
+					           activeRange.end.printable());
 				}
 				// FIXME: doing this serially will likely be too slow for large purges
-				Optional<GranuleHistory> history = wait(getLatestGranuleHistory(&tr, activeRange.range()));
+				Optional<GranuleHistory> history = wait(getLatestGranuleHistory(&tr, activeRange));
 				// TODO: can we tell from the krm that this range is not valid, so that we don't need to do a
 				// get
 				if (history.present()) {
 					if (BM_PURGE_DEBUG) {
 						fmt::print("BM {0}   Adding range to history queue: [{1} - {2}) @ {3} ({4})\n",
 						           self->epoch,
-						           activeRange.begin().printable(),
-						           activeRange.end().printable(),
-						           history.get().version,
-						           (void*)(activeRange.range().begin.begin()));
+						           activeRange.begin.printable(),
+						           activeRange.end.printable(),
+						           history.get().version);
 					}
-					visited.insert({ activeRange.range().begin.toString(), history.get().version });
-					historyEntryQueue.push({ activeRange.range(), history.get().version, MAX_VERSION });
+					visited.insert({ activeRange.begin.toString(), history.get().version });
+					historyEntryQueue.push({ activeRange, history.get().version, MAX_VERSION });
 				} else if (BM_PURGE_DEBUG) {
 					fmt::print("BM {0}   No history for range, ignoring\n", self->epoch);
 				}
