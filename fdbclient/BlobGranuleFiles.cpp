@@ -1277,13 +1277,13 @@ RangeResult materializeBlobGranule(const BlobGranuleChunkRef& chunk,
 	}
 
 	if (snapshotData.present()) {
-		Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx;
-		// Should this be an assert?
-		if (chunk.snapshotFile.present()) {
-			cipherKeysCtx = chunk.snapshotFile.get().cipherKeysCtx;
-		}
-		Arena snapshotArena = loadSnapshotFile(
-		    chunk.snapshotFile.get().filename, snapshotData.get(), requestRange, dataMap, cipherKeysCtx);
+		ASSERT(chunk.snapshotFile.present());
+
+		Arena snapshotArena = loadSnapshotFile(chunk.snapshotFile.get().filename,
+		                                       snapshotData.get(),
+		                                       requestRange,
+		                                       dataMap,
+		                                       chunk.snapshotFile.get().cipherKeysCtx);
 		arena.dependsOn(snapshotArena);
 	}
 
@@ -1839,9 +1839,7 @@ struct KeyValueGen {
 		return StringRef(ar, value);
 	}
 
-	KeyRef randomUsedKey() const {
-		return usedKeysList[deterministicRandom()->randomInt(0, usedKeysList.size())];
-	}
+	KeyRef randomUsedKey() const { return usedKeysList[deterministicRandom()->randomInt(0, usedKeysList.size())]; }
 
 	KeyRange randomKeyRange() const {
 		ASSERT(!usedKeysList.empty());
@@ -1966,7 +1964,7 @@ TEST_CASE("/blobgranule/files/snapshotFormatUnitTest") {
 	int targetChunks = deterministicRandom()->randomExp(0, 9);
 	int targetDataBytes = deterministicRandom()->randomExp(0, 25);
 	int targetChunkSize = targetDataBytes / targetChunks;
-	Standalone<StringRef> fnameRef = StringRef("test");
+	Standalone<StringRef> fnameRef = StringRef(std::string("test"));
 
 	Standalone<GranuleSnapshot> data = genSnapshot(kvGen, targetDataBytes);
 
@@ -2102,7 +2100,7 @@ Standalone<GranuleDeltas> genDeltas(KeyValueGen& kvGen, int targetBytes) {
 
 TEST_CASE("/blobgranule/files/deltaFormatUnitTest") {
 	KeyValueGen kvGen;
-	Standalone<StringRef> fileNameRef = StringRef("test");
+	Standalone<StringRef> fileNameRef = StringRef(std::string("test"));
 
 	int targetChunks = deterministicRandom()->randomExp(0, 8);
 	int targetDataBytes = deterministicRandom()->randomExp(0, 21);
@@ -2206,7 +2204,7 @@ void checkGranuleRead(const KeyValueGen& kvGen,
 
 TEST_CASE("/blobgranule/files/granuleReadUnitTest") {
 	KeyValueGen kvGen;
-	Standalone<StringRef> fileNameRef = StringRef("testSnap");
+	Standalone<StringRef> fileNameRef = StringRef(std::string("testSnap"));
 
 	int targetSnapshotChunks = deterministicRandom()->randomExp(0, 9);
 	int targetDeltaChunks = deterministicRandom()->randomExp(0, 8);
