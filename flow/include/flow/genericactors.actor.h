@@ -1420,7 +1420,8 @@ private:
 			}
 			return Void();
 		} catch (...) {
-			TEST(true); // If we get cancelled here, we are holding the lock but the caller doesn't know, so release it
+			CODE_PROBE(true,
+			           "If we get cancelled here, we are holding the lock but the caller doesn't know, so release it");
 			lock->release(amount);
 			throw;
 		}
@@ -1921,6 +1922,47 @@ Future<T> forward(Future<T> from, Promise<T> to) {
 	}
 }
 
+ACTOR template <class Transaction>
+Future<Void> buggifiedCommit(Transaction tr, bool buggify, int maxDelayDuration = 60.0) {
+	state int buggifyUnknownResultPoint = 0;
+	state int buggifyDelayPoint = 0;
+
+	if (buggify) {
+		int choice = deterministicRandom()->randomInt(1, 9);
+		buggifyUnknownResultPoint = choice / 3;
+		buggifyDelayPoint = choice % 3;
+	}
+
+	// Simulate a delay before commit that could potentially trigger a timeout
+	if (buggifyDelayPoint == 1) {
+		wait(delay(deterministicRandom()->random01() * maxDelayDuration));
+	}
+
+	// Simulate an unknown result that didn't commit
+	if (buggifyUnknownResultPoint == 1) {
+		// The delay avoids a no-wait commit.
+		if (!BUGGIFY) {
+			wait(delay(0));
+		}
+
+		throw commit_unknown_result();
+	}
+
+	wait(safeThreadFutureToFuture(tr->commit()));
+
+	// Simulate a long delay after commit that could potentially trigger a timeout
+	if (buggifyDelayPoint == 2) {
+		wait(delay(deterministicRandom()->random01() * maxDelayDuration));
+	}
+
+	// Simulate an unknown result that did commit
+	if (buggifyUnknownResultPoint == 2) {
+		throw commit_unknown_result();
+	}
+
+	return Void();
+}
+
 // Monad
 
 ACTOR template <class Fun, class T>
@@ -1936,22 +1978,25 @@ Future<decltype(std::declval<Fun>()(std::declval<T>()).getValue())> runAfter(Fut
 	return res;
 }
 
-ACTOR template <class T, class U>
-Future<U> runAfter(Future<T> lhs, Future<U> rhs) {
-	T val1 = wait(lhs);
-	U res = wait(rhs);
-	return res;
-}
-
 template <class T, class Fun>
 auto operator>>=(Future<T> lhs, Fun&& rhs) -> Future<decltype(rhs(std::declval<T>()))> {
 	return runAfter(lhs, std::forward<Fun>(rhs));
 }
 
+/*
+ * NOTE: This implementation can't guarantee the doesn't really enforce the ACTOR execution order. See issue #7708
+ACTOR template <class T, class U>
+Future<U> runAfter(Future<T> lhs, Future<U> rhs) {
+    T val1 = wait(lhs);
+    U res = wait(rhs);
+    return res;
+}
+
 template <class T, class U>
 Future<U> operator>>(Future<T> const& lhs, Future<U> const& rhs) {
-	return runAfter(lhs, rhs);
+    return runAfter(lhs, rhs);
 }
+ */
 
 /*
  * IAsyncListener is similar to AsyncVar, but it decouples the input and output, so the translation unit

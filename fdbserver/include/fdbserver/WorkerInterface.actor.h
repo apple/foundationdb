@@ -138,10 +138,11 @@ struct WorkerDetails {
 	WorkerInterface interf;
 	ProcessClass processClass;
 	bool degraded;
+	bool recoveredDiskFiles;
 
 	WorkerDetails() : degraded(false) {}
-	WorkerDetails(const WorkerInterface& interf, ProcessClass processClass, bool degraded)
-	  : interf(interf), processClass(processClass), degraded(degraded) {}
+	WorkerDetails(const WorkerInterface& interf, ProcessClass processClass, bool degraded, bool recoveredDiskFiles)
+	  : interf(interf), processClass(processClass), degraded(degraded), recoveredDiskFiles(recoveredDiskFiles) {}
 
 	bool operator<(const WorkerDetails& r) const { return interf.id() < r.interf.id(); }
 
@@ -436,6 +437,7 @@ struct RegisterWorkerRequest {
 	Version lastSeenKnobVersion;
 	ConfigClassSet knobConfigClassSet;
 	bool requestDbInfo;
+	bool recoveredDiskFiles;
 
 	RegisterWorkerRequest()
 	  : priorityInfo(ProcessClass::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown), degraded(false) {}
@@ -450,11 +452,12 @@ struct RegisterWorkerRequest {
 	                      Optional<EncryptKeyProxyInterface> ekpInterf,
 	                      bool degraded,
 	                      Version lastSeenKnobVersion,
-	                      ConfigClassSet knobConfigClassSet)
+	                      ConfigClassSet knobConfigClassSet,
+	                      bool recoveredDiskFiles)
 	  : wi(wi), initialClass(initialClass), processClass(processClass), priorityInfo(priorityInfo),
 	    generation(generation), distributorInterf(ddInterf), ratekeeperInterf(rkInterf), blobManagerInterf(bmInterf),
 	    encryptKeyProxyInterf(ekpInterf), degraded(degraded), lastSeenKnobVersion(lastSeenKnobVersion),
-	    knobConfigClassSet(knobConfigClassSet), requestDbInfo(false) {}
+	    knobConfigClassSet(knobConfigClassSet), requestDbInfo(false), recoveredDiskFiles(recoveredDiskFiles) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -474,7 +477,8 @@ struct RegisterWorkerRequest {
 		           degraded,
 		           lastSeenKnobVersion,
 		           knobConfigClassSet,
-		           requestDbInfo);
+		           requestDbInfo,
+		           recoveredDiskFiles);
 	}
 };
 
@@ -1238,7 +1242,7 @@ Future<T> ioDegradedOrTimeoutError(Future<T> what,
 		choose {
 			when(T t = wait(what)) { return t; }
 			when(wait(degradedEnd)) {
-				TEST(true); // TLog degraded
+				CODE_PROBE(true, "TLog degraded", probe::func::deduplicate);
 				TraceEvent(SevWarnAlways, "IoDegraded").log();
 				degraded->set(true);
 			}

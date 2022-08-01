@@ -592,7 +592,7 @@ Future<Void> logRouterPeekMessages(PromiseType replyPromise,
 		}
 		if (sequenceData.isSet()) {
 			if (sequenceData.getFuture().get().first != reply.end) {
-				TEST(true); // tlog peek second attempt ended at a different version
+				CODE_PROBE(true, "tlog peek second attempt ended at a different version");
 				replyPromise.sendError(operation_obsolete());
 				return Void();
 			}

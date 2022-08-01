@@ -143,6 +143,7 @@ public:
 	virtual UID randomUniqueID() = 0;
 	virtual char randomAlphaNumeric() = 0;
 	virtual std::string randomAlphaNumeric(int length) = 0;
+	virtual void randomBytes(uint8_t* buf, int length) = 0;
 	virtual uint32_t randomSkewedUInt32(uint32_t min, uint32_t maxPlusOne) = 0;
 	virtual uint64_t peek() const = 0; // returns something that is probably different for different random states.
 	                                   // Deterministic (and idempotent) for a deterministic generator.
@@ -173,6 +174,19 @@ public:
 	}
 
 	bool coinflip() { return (this->random01() < 0.5); }
+
+	// Picks a number between 2^minExp and 2^maxExp, but uniformly distributed over exponential buckets 2^n - 2^n+1
+	// For example, randomExp(0, 4) would have a 25% chance of returning 1, a 25% chance of returning 2-3, a 25% chance
+	// of returning 4-7, and a 25% chance of returning 8-15
+	// Similar in Expected Value to doing 1 << randomInt(minExp, maxExp+1), except numbers returned aren't just powers
+	// of 2
+	int randomExp(int minExp, int maxExp) {
+		if (minExp == maxExp) { // N=2, case
+			return 1 << minExp;
+		}
+		int val = 1 << this->randomInt(minExp, maxExp);
+		return this->randomInt(val, val * 2);
+	}
 };
 
 extern FILE* randLog;
@@ -195,8 +209,5 @@ Reference<IRandom> nondeterministicRandom();
 // determinism of the simulator. This is useful for things like generating random UIDs for debug transactions.
 // WARNING: This is not thread safe and must not be called from any other thread than the network thread!
 Reference<IRandom> debugRandom();
-
-// Populates a buffer with a random sequence of bytes
-void generateRandomData(uint8_t* buffer, int length);
 
 #endif

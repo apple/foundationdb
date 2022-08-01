@@ -215,7 +215,6 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 	state Reference<ClusterRecoveryData> recoveryData;
 	state PromiseStream<Future<Void>> addActor;
 	state Future<Void> recoveryCore;
-	state bool recoveredDisk = false;
 
 	// SOMEDAY: If there is already a non-failed master referenced by zkMasterInfo, use that one until it fails
 	// When this someday is implemented, make sure forced failures still cause the master to be recruited again
@@ -249,25 +248,15 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 			dbInfo.latencyBandConfig = db->serverInfo->get().latencyBandConfig;
 			dbInfo.myLocality = db->serverInfo->get().myLocality;
 			dbInfo.client = ClientDBInfo();
+			dbInfo.client.isEncryptionEnabled = SERVER_KNOBS->ENABLE_ENCRYPTION;
 			dbInfo.client.tenantMode = db->config.tenantMode;
+			dbInfo.client.clusterId = db->serverInfo->get().client.clusterId;
 
 			TraceEvent("CCWDB", cluster->id)
 			    .detail("NewMaster", dbInfo.master.id().toString())
 			    .detail("Lifetime", dbInfo.masterLifetime.toString())
 			    .detail("ChangeID", dbInfo.id);
 			db->serverInfo->set(dbInfo);
-
-			if (SERVER_KNOBS->ENABLE_ENCRYPTION && !recoveredDisk) {
-				// EKP singleton recruitment waits for 'Master/Sequencer' recruitment, execute wait for
-				// 'recoveredDiskFiles' optimization once EKP recruitment is unblocked to avoid circular dependencies
-				// with StorageServer initialization. The waiting for recoveredDiskFiles is to make sure the worker
-				// server on the same process has been registered with the new CC before recruitment.
-
-				wait(recoveredDiskFiles);
-				TraceEvent("CCWDB_RecoveredDiskFiles", cluster->id).log();
-				// Need to be done for the first once in the lifetime of ClusterController
-				recoveredDisk = true;
-			}
 
 			state Future<Void> spinDelay = delay(
 			    SERVER_KNOBS
@@ -328,7 +317,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 
 			wait(spinDelay);
 
-			TEST(true); // clusterWatchDatabase() master failed
+			CODE_PROBE(true, "clusterWatchDatabase() master failed");
 			TraceEvent(SevWarn, "DetectedFailedRecovery", cluster->id).detail("OldMaster", iMaster.id());
 		} catch (Error& e) {
 			state Error err = e;
@@ -340,13 +329,14 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 			wait(cleanupRecoveryActorCollection(recoveryData, true /* exThrown */));
 			ASSERT(addActor.isEmpty());
 
-			TEST(err.code() == error_code_tlog_failed); // Terminated due to tLog failure
-			TEST(err.code() == error_code_commit_proxy_failed); // Terminated due to commit proxy failure
-			TEST(err.code() == error_code_grv_proxy_failed); // Terminated due to GRV proxy failure
-			TEST(err.code() == error_code_resolver_failed); // Terminated due to resolver failure
-			TEST(err.code() == error_code_backup_worker_failed); // Terminated due to backup worker failure
-			TEST(err.code() == error_code_operation_failed); // Terminated due to failed operation
-			TEST(err.code() == error_code_restart_cluster_controller); // Terminated due to cluster-controller restart.
+			CODE_PROBE(err.code() == error_code_tlog_failed, "Terminated due to tLog failure");
+			CODE_PROBE(err.code() == error_code_commit_proxy_failed, "Terminated due to commit proxy failure");
+			CODE_PROBE(err.code() == error_code_grv_proxy_failed, "Terminated due to GRV proxy failure");
+			CODE_PROBE(err.code() == error_code_resolver_failed, "Terminated due to resolver failure");
+			CODE_PROBE(err.code() == error_code_backup_worker_failed, "Terminated due to backup worker failure");
+			CODE_PROBE(err.code() == error_code_operation_failed, "Terminated due to failed operation");
+			CODE_PROBE(err.code() == error_code_restart_cluster_controller,
+			           "Terminated due to cluster-controller restart.");
 
 			if (cluster->shouldCommitSuicide || err.code() == error_code_coordinators_changed) {
 				TraceEvent("ClusterControllerTerminate", cluster->id).errorUnsuppressed(err);
@@ -634,7 +624,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	}
 
 	WorkerDetails newEKPWorker;
-	if (SERVER_KNOBS->ENABLE_ENCRYPTION || g_network->isSimulated()) {
+	if (SERVER_KNOBS->ENABLE_ENCRYPTION) {
 		newEKPWorker = findNewProcessForSingleton(self, ProcessClass::EncryptKeyProxy, id_used);
 	}
 
@@ -648,7 +638,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	}
 
 	ProcessClass::Fitness bestFitnessForEKP;
-	if (SERVER_KNOBS->ENABLE_ENCRYPTION || g_network->isSimulated()) {
+	if (SERVER_KNOBS->ENABLE_ENCRYPTION) {
 		bestFitnessForEKP = findBestFitnessForSingleton(self, newEKPWorker, ProcessClass::EncryptKeyProxy);
 	}
 
@@ -673,7 +663,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	}
 
 	bool ekpHealthy = true;
-	if (SERVER_KNOBS->ENABLE_ENCRYPTION || g_network->isSimulated()) {
+	if (SERVER_KNOBS->ENABLE_ENCRYPTION) {
 		ekpHealthy = isHealthySingleton<EncryptKeyProxyInterface>(
 		    self, newEKPWorker, ekpSingleton, bestFitnessForEKP, self->recruitingEncryptKeyProxyID);
 	}
@@ -697,7 +687,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	}
 
 	Optional<Standalone<StringRef>> currEKPProcessId, newEKPProcessId;
-	if (SERVER_KNOBS->ENABLE_ENCRYPTION || g_network->isSimulated()) {
+	if (SERVER_KNOBS->ENABLE_ENCRYPTION) {
 		currEKPProcessId = ekpSingleton.interface.get().locality.processId();
 		newEKPProcessId = newEKPWorker.interf.locality.processId();
 	}
@@ -709,7 +699,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 		newPids.emplace_back(newBMProcessId);
 	}
 
-	if (SERVER_KNOBS->ENABLE_ENCRYPTION || g_network->isSimulated()) {
+	if (SERVER_KNOBS->ENABLE_ENCRYPTION) {
 		currPids.emplace_back(currEKPProcessId);
 		newPids.emplace_back(newEKPProcessId);
 	}
@@ -724,7 +714,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	}
 
 	// if the knob is disabled, the EKP coloc counts should have no affect on the coloc counts check below
-	if (!SERVER_KNOBS->ENABLE_ENCRYPTION && !g_network->isSimulated()) {
+	if (!SERVER_KNOBS->ENABLE_ENCRYPTION) {
 		ASSERT(currColocMap[currEKPProcessId] == 0);
 		ASSERT(newColocMap[newEKPProcessId] == 0);
 	}
@@ -1022,7 +1012,8 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 	// Construct the client information
 	if (db->clientInfo->get().commitProxies != req.commitProxies ||
 	    db->clientInfo->get().grvProxies != req.grvProxies ||
-	    db->clientInfo->get().tenantMode != db->config.tenantMode) {
+	    db->clientInfo->get().tenantMode != db->config.tenantMode || db->clientInfo->get().clusterId != req.clusterId ||
+	    db->clientInfo->get().isEncryptionEnabled != SERVER_KNOBS->ENABLE_ENCRYPTION) {
 		TraceEvent("PublishNewClientInfo", self->id)
 		    .detail("Master", dbInfo.master.id())
 		    .detail("GrvProxies", db->clientInfo->get().grvProxies)
@@ -1030,14 +1021,19 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 		    .detail("CommitProxies", db->clientInfo->get().commitProxies)
 		    .detail("ReqCPs", req.commitProxies)
 		    .detail("TenantMode", db->clientInfo->get().tenantMode.toString())
-		    .detail("ReqTenantMode", db->config.tenantMode.toString());
+		    .detail("ReqTenantMode", db->config.tenantMode.toString())
+		    .detail("ClusterId", db->clientInfo->get().clusterId)
+		    .detail("EncryptionEnabled", SERVER_KNOBS->ENABLE_ENCRYPTION)
+		    .detail("ReqClusterId", req.clusterId);
 		isChanged = true;
 		// TODO why construct a new one and not just copy the old one and change proxies + id?
 		ClientDBInfo clientInfo;
 		clientInfo.id = deterministicRandom()->randomUniqueID();
+		clientInfo.isEncryptionEnabled = SERVER_KNOBS->ENABLE_ENCRYPTION;
 		clientInfo.commitProxies = req.commitProxies;
 		clientInfo.grvProxies = req.grvProxies;
 		clientInfo.tenantMode = db->config.tenantMode;
+		clientInfo.clusterId = req.clusterId;
 		db->clientInfo->set(clientInfo);
 		dbInfo.client = db->clientInfo->get();
 	}
@@ -1055,11 +1051,6 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 	if (dbInfo.recoveryCount != req.recoveryCount) {
 		isChanged = true;
 		dbInfo.recoveryCount = req.recoveryCount;
-	}
-
-	if (dbInfo.clusterId != req.clusterId) {
-		isChanged = true;
-		dbInfo.clusterId = req.clusterId;
 	}
 
 	if (isChanged) {
@@ -1143,7 +1134,8 @@ ACTOR Future<Void> registerWorker(RegisterWorkerRequest req,
 		    .detail("ZoneId", w.locality.zoneId())
 		    .detail("DataHall", w.locality.dataHallId())
 		    .detail("PClass", req.processClass.toString())
-		    .detail("Workers", self->id_worker.size());
+		    .detail("Workers", self->id_worker.size())
+		    .detail("RecoveredDiskFiles", req.recoveredDiskFiles);
 		self->goodRecruitmentTime = lowPriorityDelay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY);
 		self->goodRemoteRecruitmentTime = lowPriorityDelay(SERVER_KNOBS->WAIT_FOR_GOOD_REMOTE_RECRUITMENT_DELAY);
 	} else {
@@ -1155,7 +1147,8 @@ ACTOR Future<Void> registerWorker(RegisterWorkerRequest req,
 		    .detail("DataHall", w.locality.dataHallId())
 		    .detail("PClass", req.processClass.toString())
 		    .detail("Workers", self->id_worker.size())
-		    .detail("Degraded", req.degraded);
+		    .detail("Degraded", req.degraded)
+		    .detail("RecoveredDiskFiles", req.recoveredDiskFiles);
 	}
 	if (w.address() == g_network->getLocalAddress()) {
 		if (self->changingDcIds.get().first) {
@@ -1208,6 +1201,7 @@ ACTOR Future<Void> registerWorker(RegisterWorkerRequest req,
 		                                                     newProcessClass,
 		                                                     newPriorityInfo,
 		                                                     req.degraded,
+		                                                     req.recoveredDiskFiles,
 		                                                     req.issues);
 		if (!self->masterProcessId.present() &&
 		    w.locality.processId() == self->db.serverInfo->get().master.locality.processId()) {
@@ -1233,6 +1227,7 @@ ACTOR Future<Void> registerWorker(RegisterWorkerRequest req,
 		info->second.priorityInfo = newPriorityInfo;
 		info->second.initialClass = req.initialClass;
 		info->second.details.degraded = req.degraded;
+		info->second.details.recoveredDiskFiles = req.recoveredDiskFiles;
 		info->second.gen = req.generation;
 		info->second.issues = req.issues;
 
@@ -1254,7 +1249,7 @@ ACTOR Future<Void> registerWorker(RegisterWorkerRequest req,
 		}
 		checkOutstandingRequests(self);
 	} else {
-		TEST(true); // Received an old worker registration request.
+		CODE_PROBE(true, "Received an old worker registration request.");
 	}
 
 	// For each singleton
@@ -1281,7 +1276,7 @@ ACTOR Future<Void> registerWorker(RegisterWorkerRequest req,
 		    self, w, currSingleton, registeringSingleton, self->recruitingBlobManagerID);
 	}
 
-	if ((SERVER_KNOBS->ENABLE_ENCRYPTION || g_network->isSimulated()) && req.encryptKeyProxyInterf.present()) {
+	if (SERVER_KNOBS->ENABLE_ENCRYPTION && req.encryptKeyProxyInterf.present()) {
 		auto currSingleton = EncryptKeyProxySingleton(self->db.serverInfo->get().encryptKeyProxy);
 		auto registeringSingleton = EncryptKeyProxySingleton(req.encryptKeyProxyInterf);
 		haltRegisteringOrCurrentSingleton<EncryptKeyProxyInterface>(
@@ -2535,7 +2530,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	state Future<ErrorOr<Void>> error = errorOr(actorCollection(self.addActor.getFuture()));
 
 	// EncryptKeyProxy is necessary for TLog recovery, recruit it as the first process
-	if (SERVER_KNOBS->ENABLE_ENCRYPTION || g_network->isSimulated()) {
+	if (SERVER_KNOBS->ENABLE_ENCRYPTION) {
 		self.addActor.send(monitorEncryptKeyProxy(&self));
 	}
 	self.addActor.send(clusterWatchDatabase(

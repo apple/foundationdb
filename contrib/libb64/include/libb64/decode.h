@@ -9,6 +9,7 @@ For details, see http://sourceforge.net/projects/libb64
 #define BASE64_DECODE_H
 
 #include <iostream>
+#include "libb64/encode.h"
 
 namespace base64 {
 extern "C" {
@@ -47,6 +48,14 @@ struct decoder {
 
 		delete[] code;
 		delete[] plaintext;
+	}
+
+	static std::string from_string(std::string s) {
+		std::stringstream in(s);
+		std::stringstream out;
+		decoder dec;
+		dec.decode(in, out);
+		return out.str();
 	}
 };
 

@@ -79,13 +79,13 @@ struct CoordinatedStateImpl {
 
 	CoordinatedStateImpl(ServerCoordinators const& c)
 	  : coordinators(c), stage(0), conflictGen(0), doomed(false), ac(false), initial(false) {}
-	uint64_t getConflict() { return conflictGen; }
+	uint64_t getConflict() const { return conflictGen; }
 
-	bool isDoomed(GenerationRegReadReply const& rep) {
-		return rep.gen > gen // setExclusive is doomed, because there was a write at least started at a higher
-		                     // generation, which means a read completed at that higher generation
-		                     // || rep.rgen > gen // setExclusive isn't absolutely doomed, but it may/probably will fail
-		    ;
+	bool isDoomed(GenerationRegReadReply const& rep) const {
+		return rep.gen > gen;
+		// setExclusive is doomed, because there was a write at least started at a higher
+		// generation, which means a read completed at that higher generation
+		// || rep.rgen > gen // setExclusive isn't absolutely doomed, but it may/probably will fail
 	}
 
 	ACTOR static Future<Value> read(CoordinatedStateImpl* self) {
@@ -216,7 +216,7 @@ struct CoordinatedStateImpl {
 };
 
 CoordinatedState::CoordinatedState(ServerCoordinators const& coord)
-  : impl(std::make_unique<CoordinatedStateImpl>(coord)) {}
+  : impl(PImpl<CoordinatedStateImpl>::create(coord)) {}
 CoordinatedState::~CoordinatedState() = default;
 Future<Value> CoordinatedState::read() {
 	return CoordinatedStateImpl::read(impl.get());
@@ -227,7 +227,7 @@ Future<Void> CoordinatedState::onConflict() {
 Future<Void> CoordinatedState::setExclusive(Value v) {
 	return CoordinatedStateImpl::setExclusive(impl.get(), v);
 }
-uint64_t CoordinatedState::getConflict() {
+uint64_t CoordinatedState::getConflict() const {
 	return impl->getConflict();
 }
 
@@ -273,7 +273,7 @@ struct MovableCoordinatedStateImpl {
 		// SOMEDAY: If moveState.mode == MovingFrom, read (without locking) old state and assert that it corresponds
 		// with our state and is ReallyTo(coordinators)
 		if (moveState.mode == MovableValue::MaybeTo) {
-			TEST(true); // Maybe moveto state
+			CODE_PROBE(true, "Maybe moveto state");
 			ASSERT(moveState.other.present());
 			wait(self->moveTo(
 			    self, &self->cs, ClusterConnectionString(moveState.other.get().toString()), moveState.value));
@@ -322,7 +322,7 @@ struct MovableCoordinatedStateImpl {
 
 		Value oldQuorumState = wait(cs.read());
 		if (oldQuorumState != self->lastCSValue.get()) {
-			TEST(true); // Quorum change aborted by concurrent write to old coordination state
+			CODE_PROBE(true, "Quorum change aborted by concurrent write to old coordination state");
 			TraceEvent("QuorumChangeAbortedByConcurrency").log();
 			throw coordinated_state_conflict();
 		}
@@ -354,7 +354,7 @@ struct MovableCoordinatedStateImpl {
 
 MovableCoordinatedState& MovableCoordinatedState::operator=(MovableCoordinatedState&&) = default;
 MovableCoordinatedState::MovableCoordinatedState(class ServerCoordinators const& coord)
-  : impl(std::make_unique<MovableCoordinatedStateImpl>(coord)) {}
+  : impl(PImpl<MovableCoordinatedStateImpl>::create(coord)) {}
 MovableCoordinatedState::~MovableCoordinatedState() = default;
 Future<Value> MovableCoordinatedState::read() {
 	return MovableCoordinatedStateImpl::read(impl.get());
@@ -367,4 +367,16 @@ Future<Void> MovableCoordinatedState::setExclusive(Value v) {
 }
 Future<Void> MovableCoordinatedState::move(ClusterConnectionString const& nc) {
 	return MovableCoordinatedStateImpl::move(impl.get(), nc);
+}
+
+Optional<Value> updateCCSInMovableValue(ValueRef movableVal, KeyRef oldClusterKey, KeyRef newClusterKey) {
+	Optional<Value> result;
+	MovableValue moveVal = BinaryReader::fromStringRef<MovableValue>(
+	    movableVal, IncludeVersion(ProtocolVersion::withMovableCoordinatedStateV2()));
+	if (moveVal.other.present() && moveVal.other.get().startsWith(oldClusterKey)) {
+		TraceEvent(SevDebug, "UpdateCCSInMovableValue").detail("OldConnectionString", moveVal.other.get());
+		moveVal.other = moveVal.other.get().removePrefix(oldClusterKey).withPrefix(newClusterKey);
+		result = BinaryWriter::toValue(moveVal, IncludeVersion(ProtocolVersion::withMovableCoordinatedStateV2()));
+	}
+	return result;
 }

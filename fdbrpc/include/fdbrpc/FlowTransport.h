@@ -20,25 +20,21 @@
 
 #ifndef FLOW_TRANSPORT_H
 #define FLOW_TRANSPORT_H
-#include "flow/Arena.h"
 #pragma once
 
 #include <algorithm>
+
+#include "fdbrpc/ContinuousSample.h"
 #include "fdbrpc/HealthMonitor.h"
 #include "flow/genericactors.actor.h"
 #include "flow/network.h"
 #include "flow/FileIdentifier.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/Net2Packet.h"
-#include "fdbrpc/ContinuousSample.h"
+#include "flow/Arena.h"
+#include "flow/PKey.h"
 
-enum {
-	WLTOKEN_ENDPOINT_NOT_FOUND = 0,
-	WLTOKEN_PING_PACKET,
-	WLTOKEN_AUTH_TENANT,
-	WLTOKEN_UNAUTHORIZED_ENDPOINT,
-	WLTOKEN_FIRST_AVAILABLE
-};
+enum { WLTOKEN_ENDPOINT_NOT_FOUND = 0, WLTOKEN_PING_PACKET, WLTOKEN_UNAUTHORIZED_ENDPOINT, WLTOKEN_FIRST_AVAILABLE };
 
 #pragma pack(push, 4)
 class Endpoint {
@@ -191,7 +187,7 @@ struct Peer : public ReferenceCounted<Peer> {
 
 class IPAllowList;
 
-class FlowTransport {
+class FlowTransport : NonCopyable {
 public:
 	FlowTransport(uint64_t transportId, int maxWellKnownEndpoints, IPAllowList const* allowList);
 	~FlowTransport();
@@ -292,6 +288,15 @@ public:
 	Future<Void> loadedDisconnect();
 
 	HealthMonitor* healthMonitor();
+
+	bool currentDeliveryPeerIsTrusted() const;
+	NetworkAddress currentDeliveryPeerAddress() const;
+
+	Optional<PublicKey> getPublicKeyByName(StringRef name) const;
+	// Adds or replaces a public key
+	void addPublicKey(StringRef name, PublicKey key);
+	void removePublicKey(StringRef name);
+	void removeAllPublicKeys();
 
 private:
 	class TransportData* self;

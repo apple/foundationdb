@@ -25,12 +25,14 @@
 #include <ostream>
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/StorageCheckpoint.h"
+#include "fdbclient/StorageServerShard.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/QueueModel.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/LoadBalance.actor.h"
 #include "fdbrpc/Stats.h"
 #include "fdbrpc/TimedRequest.h"
+#include "fdbrpc/TenantInfo.h"
 #include "fdbrpc/TSSComparison.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/TagThrottle.actor.h"
@@ -84,13 +86,13 @@ struct StorageServerInterface {
 	RequestStream<struct ReadHotSubRangeRequest> getReadHotRanges;
 	RequestStream<struct SplitRangeRequest> getRangeSplitPoints;
 	PublicRequestStream<struct GetKeyValuesStreamRequest> getKeyValuesStream;
-	PublicRequestStream<struct ChangeFeedStreamRequest> changeFeedStream;
-	PublicRequestStream<struct OverlappingChangeFeedsRequest> overlappingChangeFeeds;
-	PublicRequestStream<struct ChangeFeedPopRequest> changeFeedPop;
-	PublicRequestStream<struct ChangeFeedVersionUpdateRequest> changeFeedVersionUpdate;
-	PublicRequestStream<struct GetCheckpointRequest> checkpoint;
-	PublicRequestStream<struct FetchCheckpointRequest> fetchCheckpoint;
-	PublicRequestStream<struct FetchCheckpointKeyValuesRequest> fetchCheckpointKeyValues;
+	RequestStream<struct ChangeFeedStreamRequest> changeFeedStream;
+	RequestStream<struct OverlappingChangeFeedsRequest> overlappingChangeFeeds;
+	RequestStream<struct ChangeFeedPopRequest> changeFeedPop;
+	RequestStream<struct ChangeFeedVersionUpdateRequest> changeFeedVersionUpdate;
+	RequestStream<struct GetCheckpointRequest> checkpoint;
+	RequestStream<struct FetchCheckpointRequest> fetchCheckpoint;
+	RequestStream<struct FetchCheckpointKeyValuesRequest> fetchCheckpointKeyValues;
 
 private:
 	bool acceptingRequests;
@@ -149,18 +151,17 @@ public:
 				getMappedKeyValues = PublicRequestStream<struct GetMappedKeyValuesRequest>(
 				    getValue.getEndpoint().getAdjustedEndpoint(14));
 				changeFeedStream =
-				    PublicRequestStream<struct ChangeFeedStreamRequest>(getValue.getEndpoint().getAdjustedEndpoint(15));
-				overlappingChangeFeeds = PublicRequestStream<struct OverlappingChangeFeedsRequest>(
-				    getValue.getEndpoint().getAdjustedEndpoint(16));
+				    RequestStream<struct ChangeFeedStreamRequest>(getValue.getEndpoint().getAdjustedEndpoint(15));
+				overlappingChangeFeeds =
+				    RequestStream<struct OverlappingChangeFeedsRequest>(getValue.getEndpoint().getAdjustedEndpoint(16));
 				changeFeedPop =
-				    PublicRequestStream<struct ChangeFeedPopRequest>(getValue.getEndpoint().getAdjustedEndpoint(17));
-				changeFeedVersionUpdate = PublicRequestStream<struct ChangeFeedVersionUpdateRequest>(
+				    RequestStream<struct ChangeFeedPopRequest>(getValue.getEndpoint().getAdjustedEndpoint(17));
+				changeFeedVersionUpdate = RequestStream<struct ChangeFeedVersionUpdateRequest>(
 				    getValue.getEndpoint().getAdjustedEndpoint(18));
-				checkpoint =
-				    PublicRequestStream<struct GetCheckpointRequest>(getValue.getEndpoint().getAdjustedEndpoint(19));
+				checkpoint = RequestStream<struct GetCheckpointRequest>(getValue.getEndpoint().getAdjustedEndpoint(19));
 				fetchCheckpoint =
-				    PublicRequestStream<struct FetchCheckpointRequest>(getValue.getEndpoint().getAdjustedEndpoint(20));
-				fetchCheckpointKeyValues = PublicRequestStream<struct FetchCheckpointKeyValuesRequest>(
+				    RequestStream<struct FetchCheckpointRequest>(getValue.getEndpoint().getAdjustedEndpoint(20));
+				fetchCheckpointKeyValues = RequestStream<struct FetchCheckpointKeyValuesRequest>(
 				    getValue.getEndpoint().getAdjustedEndpoint(21));
 			}
 		} else {
@@ -241,21 +242,6 @@ struct ServerCacheInfo {
 	}
 };
 
-struct TenantInfo {
-	static const int64_t INVALID_TENANT = -1;
-
-	Optional<TenantName> name;
-	int64_t tenantId;
-
-	TenantInfo() : tenantId(INVALID_TENANT) {}
-	TenantInfo(TenantName name, int64_t tenantId) : name(name), tenantId(tenantId) {}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, name, tenantId);
-	}
-};
-
 struct GetValueReply : public LoadBalancedReply {
 	constexpr static FileIdentifier file_identifier = 1378929;
 	Optional<Value> value;
@@ -282,6 +268,8 @@ struct GetValueRequest : TimedRequest {
 	VersionVector ssLatestCommitVersions; // includes the latest commit versions, as known
 	                                      // to this client, of all storage replicas that
 	                                      // serve the given key
+
+	bool verify() const { return tenantInfo.isAuthorized(); }
 
 	GetValueRequest() {}
 	GetValueRequest(SpanContext spanContext,
@@ -337,6 +325,8 @@ struct WatchValueRequest {
 	  : spanContext(spanContext), tenantInfo(tenantInfo), key(key), value(value), version(ver), tags(tags),
 	    debugID(debugID) {}
 
+	bool verify() const { return tenantInfo.isAuthorized(); }
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, key, value, version, tags, debugID, reply, spanContext, tenantInfo);
@@ -379,6 +369,8 @@ struct GetKeyValuesRequest : TimedRequest {
 	                                      // serve the given key
 
 	GetKeyValuesRequest() : isFetchKeys(false) {}
+
+	bool verify() const { return tenantInfo.isAuthorized(); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -436,6 +428,9 @@ struct GetMappedKeyValuesRequest : TimedRequest {
 	                                      // serve the given key range
 
 	GetMappedKeyValuesRequest() : isFetchKeys(false) {}
+
+	bool verify() const { return tenantInfo.isAuthorized(); }
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar,
@@ -502,6 +497,8 @@ struct GetKeyValuesStreamRequest {
 
 	GetKeyValuesStreamRequest() : isFetchKeys(false) {}
 
+	bool verify() const { return tenantInfo.isAuthorized(); }
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar,
@@ -549,6 +546,8 @@ struct GetKeyRequest : TimedRequest {
 	                                      // to this client, of all storage replicas that
 	                                      // serve the given key
 
+	bool verify() const { return tenantInfo.isAuthorized(); }
+
 	GetKeyRequest() {}
 
 	GetKeyRequest(SpanContext spanContext,
@@ -572,12 +571,13 @@ struct GetShardStateReply {
 
 	Version first;
 	Version second;
+	std::vector<StorageServerShard> shards;
 	GetShardStateReply() = default;
 	GetShardStateReply(Version first, Version second) : first(first), second(second) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, first, second);
+		serializer(ar, first, second, shards);
 	}
 };
 
@@ -587,13 +587,16 @@ struct GetShardStateRequest {
 
 	KeyRange keys;
 	int32_t mode;
+	bool includePhysicalShard;
 	ReplyPromise<GetShardStateReply> reply;
-	GetShardStateRequest() {}
-	GetShardStateRequest(KeyRange const& keys, waitMode mode) : keys(keys), mode(mode) {}
+	GetShardStateRequest() = default;
+	GetShardStateRequest(KeyRange const& keys, waitMode mode, bool includePhysicalShard)
+	  : keys(keys), mode(mode), includePhysicalShard(includePhysicalShard) {}
+	GetShardStateRequest(KeyRange const& keys, waitMode mode) : keys(keys), mode(mode), includePhysicalShard(false) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keys, mode, reply);
+		serializer(ar, keys, mode, reply, includePhysicalShard);
 	}
 };
 
@@ -605,7 +608,6 @@ struct StorageMetrics {
 	int64_t bytesPerKSecond = 0; // network bandwidth (average over 10s)
 	int64_t iosPerKSecond = 0;
 	int64_t bytesReadPerKSecond = 0;
-	Optional<KeyRange> keys; // this metric belongs to which range
 
 	static const int64_t infinity = 1LL << 60;
 
@@ -966,39 +968,51 @@ struct FetchCheckpointKeyValuesRequest {
 };
 
 struct OverlappingChangeFeedEntry {
-	Key rangeId;
-	KeyRange range;
+	KeyRef feedId;
+	KeyRangeRef range;
 	Version emptyVersion;
 	Version stopVersion;
+	Version feedMetadataVersion;
 
 	bool operator==(const OverlappingChangeFeedEntry& r) const {
-		return rangeId == r.rangeId && range == r.range && emptyVersion == r.emptyVersion &&
-		       stopVersion == r.stopVersion;
+		return feedId == r.feedId && range == r.range && emptyVersion == r.emptyVersion &&
+		       stopVersion == r.stopVersion && feedMetadataVersion == r.feedMetadataVersion;
 	}
 
 	OverlappingChangeFeedEntry() {}
-	OverlappingChangeFeedEntry(Key const& rangeId, KeyRange const& range, Version emptyVersion, Version stopVersion)
-	  : rangeId(rangeId), range(range), emptyVersion(emptyVersion), stopVersion(stopVersion) {}
+	OverlappingChangeFeedEntry(KeyRef const& feedId,
+	                           KeyRangeRef const& range,
+	                           Version emptyVersion,
+	                           Version stopVersion,
+	                           Version feedMetadataVersion)
+	  : feedId(feedId), range(range), emptyVersion(emptyVersion), stopVersion(stopVersion),
+	    feedMetadataVersion(feedMetadataVersion) {}
+
+	OverlappingChangeFeedEntry(Arena& arena, const OverlappingChangeFeedEntry& rhs)
+	  : feedId(arena, rhs.feedId), range(arena, rhs.range), emptyVersion(rhs.emptyVersion),
+	    stopVersion(rhs.stopVersion), feedMetadataVersion(rhs.feedMetadataVersion) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, rangeId, range, emptyVersion, stopVersion);
+		serializer(ar, feedId, range, emptyVersion, stopVersion, feedMetadataVersion);
 	}
 };
 
 struct OverlappingChangeFeedsReply {
 	constexpr static FileIdentifier file_identifier = 11815134;
-	std::vector<OverlappingChangeFeedEntry> rangeIds;
+	VectorRef<OverlappingChangeFeedEntry> feeds;
 	bool cached;
 	Arena arena;
+	Version feedMetadataVersion;
 
-	OverlappingChangeFeedsReply() : cached(false) {}
-	explicit OverlappingChangeFeedsReply(std::vector<OverlappingChangeFeedEntry> const& rangeIds)
-	  : rangeIds(rangeIds), cached(false) {}
+	OverlappingChangeFeedsReply() : cached(false), feedMetadataVersion(invalidVersion) {}
+	explicit OverlappingChangeFeedsReply(VectorRef<OverlappingChangeFeedEntry> const& feeds,
+	                                     Version feedMetadataVersion)
+	  : feeds(feeds), cached(false), feedMetadataVersion(feedMetadataVersion) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, rangeIds, arena);
+		serializer(ar, feeds, arena, feedMetadataVersion);
 	}
 };
 

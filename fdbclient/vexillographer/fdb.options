@@ -302,6 +302,10 @@ description is not currently required but encouraged.
     <Option name="skip_grv_cache" code="1102"
             description="Specifically instruct this transaction to NOT use cached GRV. Primarily used for the read version cache's background updater to avoid attempting to read a cached entry in specific situations."
             hidden="true"/>
+    <Option name="authorization_token" code="2000"
+            description="Add a given authorization token to the network thread so that future requests are authorized"
+            paramType="String" paramDescription="A signed token serialized using flatbuffers"
+            hidden="true" />
   </Scope>
 
   <!-- The enumeration values matter - do not change them without

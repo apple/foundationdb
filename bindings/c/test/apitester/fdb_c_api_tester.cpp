@@ -278,7 +278,7 @@ void fdb_check(fdb::Error e) {
 }
 
 void applyNetworkOptions(TesterOptions& options) {
-	if (!options.tmpDir.empty()) {
+	if (!options.tmpDir.empty() && options.apiVersion >= 720) {
 		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_CLIENT_TMP_DIR, options.tmpDir);
 	}
 	if (!options.externalClientLibrary.empty()) {
@@ -348,11 +348,9 @@ bool runWorkloads(TesterOptions& options) {
 		txExecOptions.databasePerTransaction = options.testSpec.databasePerTransaction;
 		txExecOptions.transactionRetryLimit = options.transactionRetryLimit;
 
-		std::unique_ptr<IScheduler> scheduler = createScheduler(options.numClientThreads);
-		std::unique_ptr<ITransactionExecutor> txExecutor = createTransactionExecutor(txExecOptions);
-		txExecutor->init(scheduler.get(), options.clusterFile.c_str(), options.bgBasePath);
-
-		WorkloadManager workloadMgr(txExecutor.get(), scheduler.get());
+		std::vector<std::shared_ptr<IWorkload>> workloads;
+		workloads.reserve(options.testSpec.workloads.size() * options.numClients);
+		int maxSelfBlockingFutures = 0;
 		for (const auto& workloadSpec : options.testSpec.workloads) {
 			for (int i = 0; i < options.numClients; i++) {
 				WorkloadConfig config;
@@ -365,9 +363,32 @@ bool runWorkloads(TesterOptions& options) {
 				if (!workload) {
 					throw TesterError(fmt::format("Unknown workload '{}'", workloadSpec.name));
 				}
-				workloadMgr.add(workload);
+				maxSelfBlockingFutures += workload->getMaxSelfBlockingFutures();
+				workloads.emplace_back(std::move(workload));
 			}
 		}
+
+		int numClientThreads = options.numClientThreads;
+		if (txExecOptions.blockOnFutures) {
+			// If futures block a thread, we must ensure that we have enough threads for self-blocking futures to avoid
+			// a deadlock.
+			int minClientThreads = maxSelfBlockingFutures + 1;
+			if (numClientThreads < minClientThreads) {
+				fmt::print(
+				    stderr, "WARNING: Adjusting minClientThreads from {} to {}\n", numClientThreads, minClientThreads);
+				numClientThreads = minClientThreads;
+			}
+		}
+
+		std::unique_ptr<IScheduler> scheduler = createScheduler(numClientThreads);
+		std::unique_ptr<ITransactionExecutor> txExecutor = createTransactionExecutor(txExecOptions);
+		txExecutor->init(scheduler.get(), options.clusterFile.c_str(), options.bgBasePath);
+
+		WorkloadManager workloadMgr(txExecutor.get(), scheduler.get());
+		for (const auto& workload : workloads) {
+			workloadMgr.add(workload);
+		}
+
 		if (!options.inputPipeName.empty() || !options.outputPipeName.empty()) {
 			workloadMgr.openControlPipes(options.inputPipeName, options.outputPipeName);
 		}
@@ -398,7 +419,7 @@ int main(int argc, char** argv) {
 		}
 		randomizeOptions(options);
 
-		fdb::selectApiVersion(options.apiVersion);
+		fdb::selectApiVersionCapped(options.apiVersion);
 		applyNetworkOptions(options);
 		fdb::network::setup();
 

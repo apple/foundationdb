@@ -333,7 +333,10 @@ Future<Void> BackupContainerAzureBlobStore::create() {
 	TraceEvent(SevDebug, "BCAzureBlobStoreCreateContainer").detail("ContainerName", containerName);
 	Future<Void> createContainerFuture =
 	    asyncTaskThread.execAsync([containerName = this->containerName, client = this->client] {
-		    waitAzureFuture(client->create_container(containerName), "create_container");
+		    auto outcome = client->get_container_properties(containerName).get();
+		    if (!outcome.success()) {
+			    waitAzureFuture(client->create_container(containerName), "create_container");
+		    }
 		    return Void();
 	    });
 	Future<Void> encryptionSetupFuture = usesEncryption() ? encryptionSetupComplete() : Void();

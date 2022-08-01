@@ -83,13 +83,15 @@ struct ChangeCoordinatorsRequest {
 	constexpr static FileIdentifier file_identifier = 13605416;
 	Standalone<StringRef> newConnectionString;
 	ReplyPromise<Void> reply; // normally throws even on success!
+	UID masterId;
 
 	ChangeCoordinatorsRequest() {}
-	ChangeCoordinatorsRequest(Standalone<StringRef> newConnectionString) : newConnectionString(newConnectionString) {}
+	ChangeCoordinatorsRequest(Standalone<StringRef> newConnectionString, UID masterId)
+	  : newConnectionString(newConnectionString), masterId(masterId) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, newConnectionString, reply);
+		serializer(ar, newConnectionString, reply, masterId);
 	}
 };
 
@@ -170,19 +172,29 @@ struct UpdateRecoveryDataRequest {
 	std::vector<ResolverInterface> resolvers;
 	Optional<int64_t> versionEpoch;
 	ReplyPromise<Void> reply;
+	int8_t primaryLocality;
 
 	UpdateRecoveryDataRequest() = default;
 	UpdateRecoveryDataRequest(Version recoveryTransactionVersion,
 	                          Version lastEpochEnd,
 	                          const std::vector<CommitProxyInterface>& commitProxies,
 	                          const std::vector<ResolverInterface>& resolvers,
-	                          Optional<int64_t> versionEpoch)
+	                          Optional<int64_t> versionEpoch,
+	                          int8_t primaryLocality)
 	  : recoveryTransactionVersion(recoveryTransactionVersion), lastEpochEnd(lastEpochEnd),
-	    commitProxies(commitProxies), resolvers(resolvers), versionEpoch(versionEpoch) {}
+	    commitProxies(commitProxies), resolvers(resolvers), versionEpoch(versionEpoch),
+	    primaryLocality(primaryLocality) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, recoveryTransactionVersion, lastEpochEnd, commitProxies, resolvers, versionEpoch, reply);
+		serializer(ar,
+		           recoveryTransactionVersion,
+		           lastEpochEnd,
+		           commitProxies,
+		           resolvers,
+		           versionEpoch,
+		           reply,
+		           primaryLocality);
 	}
 };
 

@@ -39,4 +39,6 @@ public:
 	T const& operator*() const { return *impl; }
 	T* operator->() { return impl.get(); }
 	T const* operator->() const { return impl.get(); }
+	T* get() { return impl.get(); }
+	T const* get() const { return impl.get(); }
 };

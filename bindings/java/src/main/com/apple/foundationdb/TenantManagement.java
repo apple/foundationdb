@@ -40,8 +40,8 @@ import com.apple.foundationdb.tuple.Tuple;
  * The FoundationDB API includes function to manage the set of tenants in a cluster.
  */
 public class TenantManagement {
-	static final byte[] TENANT_MAP_PREFIX = ByteArrayUtil.join(new byte[] { (byte)255, (byte)255 },
-	                                                           "/management/tenant_map/".getBytes());
+	static byte[] TENANT_MAP_PREFIX = ByteArrayUtil.join(new byte[] { (byte)255, (byte)255 },
+	                                                     "/management/tenant/map/".getBytes());
 
 	/**
 	 * Creates a new tenant in the cluster. If the tenant already exists, this operation will complete

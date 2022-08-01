@@ -624,7 +624,7 @@ private:
 		if (!initialCommit)
 			txnStateStore->set(KeyValueRef(m.param1, m.param2));
 		confChange = true;
-		TEST(true); // Recovering at a higher version.
+		CODE_PROBE(true, "Recovering at a higher version.");
 	}
 
 	void checkSetVersionEpochKey(MutationRef m) {
@@ -636,7 +636,7 @@ private:
 		if (!initialCommit)
 			txnStateStore->set(KeyValueRef(m.param1, m.param2));
 		confChange = true;
-		TEST(true); // Setting version epoch
+		CODE_PROBE(true, "Setting version epoch");
 	}
 
 	void checkSetWriteRecoverKey(MutationRef m) {
@@ -646,14 +646,15 @@ private:
 		TraceEvent("WriteRecoveryKeySet", dbgid).log();
 		if (!initialCommit)
 			txnStateStore->set(KeyValueRef(m.param1, m.param2));
-		TEST(true); // Snapshot created, setting writeRecoveryKey in txnStateStore
+		CODE_PROBE(true, "Snapshot created, setting writeRecoveryKey in txnStateStore");
 	}
 
 	void checkSetTenantMapPrefix(MutationRef m) {
-		if (m.param1.startsWith(tenantMapPrefix)) {
+		KeyRef prefix = TenantMetadata::tenantMap.subspace.begin;
+		if (m.param1.startsWith(prefix)) {
 			if (tenantMap) {
 				ASSERT(version != invalidVersion);
-				TenantName tenantName = m.param1.removePrefix(tenantMapPrefix);
+				TenantName tenantName = m.param1.removePrefix(prefix);
 				TenantMapEntry tenantEntry = TenantMapEntry::decode(m.param2);
 
 				TraceEvent("CommitProxyInsertTenant", dbgid).detail("Tenant", tenantName).detail("Version", version);
@@ -680,7 +681,7 @@ private:
 				writeMutation(privatized);
 			}
 
-			TEST(true); // Tenant added to map
+			CODE_PROBE(true, "Tenant added to map");
 		}
 	}
 
@@ -1028,13 +1029,14 @@ private:
 	}
 
 	void checkClearTenantMapPrefix(KeyRangeRef range) {
-		if (tenantMapKeys.intersects(range)) {
+		KeyRangeRef subspace = TenantMetadata::tenantMap.subspace;
+		if (subspace.intersects(range)) {
 			if (tenantMap) {
 				ASSERT(version != invalidVersion);
 
-				StringRef startTenant = std::max(range.begin, tenantMapPrefix).removePrefix(tenantMapPrefix);
-				StringRef endTenant = (range.end.startsWith(tenantMapPrefix) ? range.end : tenantMapKeys.end)
-				                          .removePrefix(tenantMapPrefix);
+				StringRef startTenant = std::max(range.begin, subspace.begin).removePrefix(subspace.begin);
+				StringRef endTenant =
+				    range.end.startsWith(subspace.begin) ? range.end.removePrefix(subspace.begin) : "\xff\xff"_sr;
 
 				TraceEvent("CommitProxyEraseTenants", dbgid)
 				    .detail("BeginTenant", startTenant)
@@ -1068,7 +1070,7 @@ private:
 				writeMutation(privatized);
 			}
 
-			TEST(true); // Tenant cleared from map
+			CODE_PROBE(true, "Tenant cleared from map");
 		}
 	}
 
