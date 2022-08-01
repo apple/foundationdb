@@ -138,7 +138,7 @@ struct TenantTombstoneCleanupData {
 };
 
 struct TenantMetadataSpecification {
-	static KeyRef subspace;
+	Key subspace;
 
 	KeyBackedObjectMap<TenantName, TenantMapEntry, decltype(IncludeVersion()), NullCodec> tenantMap;
 	KeyBackedProperty<int64_t> lastTenantId;
@@ -148,20 +148,19 @@ struct TenantMetadataSpecification {
 	KeyBackedSet<Tuple> tenantGroupTenantIndex;
 	KeyBackedObjectMap<TenantGroupName, TenantGroupEntry, decltype(IncludeVersion()), NullCodec> tenantGroupMap;
 
-	TenantMetadataSpecification(KeyRef subspace)
-	  : tenantMap(subspace.withSuffix("tenant/map/"_sr), IncludeVersion()),
-	    lastTenantId(subspace.withSuffix("tenant/lastId"_sr)), tenantCount(subspace.withSuffix("tenant/count"_sr)),
-	    tenantTombstones(subspace.withSuffix("tenant/tombstones/"_sr)),
-	    tombstoneCleanupData(subspace.withSuffix("tenant/tombstoneCleanup"_sr), IncludeVersion()),
-	    tenantGroupTenantIndex(subspace.withSuffix("tenant/tenantGroup/tenantIndex/"_sr)),
-	    tenantGroupMap(subspace.withSuffix("tenant/tenantGroup/map/"_sr), IncludeVersion()) {}
+	TenantMetadataSpecification(KeyRef prefix)
+	  : subspace(prefix.withSuffix("tenant/"_sr)), tenantMap(subspace.withSuffix("map/"_sr), IncludeVersion()),
+	    lastTenantId(subspace.withSuffix("lastId"_sr)), tenantCount(subspace.withSuffix("count"_sr)),
+	    tenantTombstones(subspace.withSuffix("tombstones/"_sr)),
+	    tombstoneCleanupData(subspace.withSuffix("tombstoneCleanup"_sr), IncludeVersion()),
+	    tenantGroupTenantIndex(subspace.withSuffix("tenantGroup/tenantIndex/"_sr)),
+	    tenantGroupMap(subspace.withSuffix("tenantGroup/map/"_sr), IncludeVersion()) {}
 };
 
 struct TenantMetadata {
-private:
 	static inline TenantMetadataSpecification instance = TenantMetadataSpecification("\xff/"_sr);
 
-public:
+	static inline auto& subspace = instance.subspace;
 	static inline auto& tenantMap = instance.tenantMap;
 	static inline auto& lastTenantId = instance.lastTenantId;
 	static inline auto& tenantCount = instance.tenantCount;
