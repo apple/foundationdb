@@ -3083,15 +3083,10 @@ ACTOR Future<Void> handleRangeRevoke(Reference<BlobWorkerData> bwData, RevokeBlo
 }
 
 void handleBlobVersionRequest(Reference<BlobWorkerData> bwData, MinBlobVersionRequest req) {
+	bwData->db->setDesiredChangeFeedVersion(
+	    std::max<Version>(0, req.grv - SERVER_KNOBS->TARGET_BW_LAG_VERSIONS_UPDATE));
 	MinBlobVersionReply rep;
-	Version minVer = std::numeric_limits<Version>::max();
-	auto allRanges = bwData->granuleMetadata.intersectingRanges(normalKeys);
-	for (auto& it : allRanges) {
-		if (it.value().activeMetadata.isValid()) {
-			minVer = std::min(minVer, it.value().activeMetadata->activeCFData.get()->getVersion());
-		}
-	}
-	rep.version = minVer;
+	rep.version = bwData->db->getMinimumChangeFeedVersion();
 	req.reply.send(rep);
 }
 

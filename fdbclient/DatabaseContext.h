@@ -474,6 +474,8 @@ public:
 	std::unordered_map<UID, Reference<ChangeFeedStorageData>> changeFeedUpdaters;
 
 	Reference<ChangeFeedStorageData> getStorageData(StorageServerInterface interf);
+	Version getMinimumChangeFeedVersion();
+	void setDesiredChangeFeedVersion(Version v);
 
 	// map from ssid -> ss tag
 	// @note this map allows the client to identify the latest commit versions

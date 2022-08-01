@@ -23,6 +23,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <iterator>
+#include <limits>
 #include <memory>
 #include <regex>
 #include <unordered_set>
@@ -8530,6 +8531,22 @@ Reference<ChangeFeedStorageData> DatabaseContext::getStorageData(StorageServerIn
 		return newStorageUpdater;
 	}
 	return it->second;
+}
+
+Version DatabaseContext::getMinimumChangeFeedVersion() {
+	Version minVersion = std::numeric_limits<Version>::max();
+	for (auto& it : changeFeedUpdaters) {
+		minVersion = std::min(minVersion, it.second->version.get());
+	}
+	return minVersion;
+}
+
+void DatabaseContext::setDesiredChangeFeedVersion(Version v) {
+	for (auto& it : changeFeedUpdaters) {
+		if (it.second->version.get() < v) {
+			it.second->desired.set(v);
+		}
+	}
 }
 
 Version ChangeFeedData::getVersion() {

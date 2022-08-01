@@ -286,6 +286,7 @@ public:
 				aliveVersions.reserve(blobWorkers.size());
 				for (auto& it : blobWorkers) {
 					MinBlobVersionRequest req;
+					req.grv = grv;
 					aliveVersions.push_back(timeout(brokenPromiseToNever(it.minBlobVersionRequest.getReply(req)),
 					                                SERVER_KNOBS->BLOB_WORKER_TIMEOUT));
 				}

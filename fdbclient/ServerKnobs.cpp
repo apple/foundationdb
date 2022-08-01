@@ -651,6 +651,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( STORAGE_SERVER_LIST_FETCH_TIMEOUT,                    20.0 );
 	init( TARGET_BW_LAG_VERSIONS,                               60e6 );
 	init( TARGET_BW_LAG_VERSIONS_BATCH,                         30e6 );
+	init( TARGET_BW_LAG_VERSIONS_UPDATE,                        15e6 );
 	init( BW_LAG_UNLIMITED_THRESHOLD,                           15e6 );
 	init( INITIAL_BW_LAG_MULTIPLIER,                            1.02 );
 	init( BW_LAG_REDUCTION_RATE,                               0.999 );

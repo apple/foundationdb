@@ -149,13 +149,14 @@ struct MinBlobVersionReply {
 
 struct MinBlobVersionRequest {
 	constexpr static FileIdentifier file_identifier = 4833278;
+	Version grv;
 	ReplyPromise<MinBlobVersionReply> reply;
 
 	MinBlobVersionRequest() {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, reply);
+		serializer(ar, grv, reply);
 	}
 };
 /*
