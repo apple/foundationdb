@@ -28,6 +28,7 @@
 #include "fdbclient/TenantManagement.actor.h"
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "fdbrpc/simulator.h"
+#include "fdbserver/workloads/MetaclusterConsistency.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/Knobs.h"
 #include "flow/Error.h"
@@ -323,6 +324,12 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 
 				++metaclusterItr;
 			}
+		}
+
+		if (self->useMetacluster) {
+			state MetaclusterConsistencyCheck<IDatabase> metaclusterConsistencyCheck(
+			    self->mvDb, AllowPartialMetaclusterOperations::True);
+			wait(metaclusterConsistencyCheck.run());
 		}
 
 		return true;

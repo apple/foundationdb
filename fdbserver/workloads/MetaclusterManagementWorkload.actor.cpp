@@ -23,19 +23,24 @@
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/GenericManagementAPI.actor.h"
+#include "fdbclient/Metacluster.h"
 #include "fdbclient/MetaclusterManagement.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/RunTransaction.actor.h"
 #include "fdbclient/TenantManagement.actor.h"
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "fdbrpc/simulator.h"
+#include "fdbserver/workloads/MetaclusterConsistency.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/Knobs.h"
+#include "flow/BooleanParam.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
 #include "flow/ThreadHelper.actor.h"
 #include "flow/flow.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
+
+FDB_DEFINE_BOOLEAN_PARAM(AllowPartialMetaclusterOperations);
 
 struct MetaclusterManagementWorkload : TestWorkload {
 
@@ -518,15 +523,73 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		return Void();
 	}
 
+	// Checks that the data cluster state matches our local state
+	ACTOR static Future<Void> checkDataCluster(MetaclusterManagementWorkload* self,
+	                                           ClusterName clusterName,
+	                                           DataClusterData clusterData) {
+		state Optional<MetaclusterRegistrationEntry> metaclusterRegistration;
+		state std::vector<std::pair<TenantName, TenantMapEntry>> tenants;
+		state Reference<ReadYourWritesTransaction> tr = clusterData.db->createTransaction();
+
+		loop {
+			try {
+				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				wait(
+				    store(metaclusterRegistration,
+				          MetaclusterMetadata::metaclusterRegistration.get(clusterData.db.getReference())) &&
+				    store(tenants,
+				          TenantAPI::listTenantsTransaction(tr, ""_sr, "\xff\xff"_sr, clusterData.tenants.size() + 1)));
+				break;
+			} catch (Error& e) {
+				wait(safeThreadFutureToFuture(tr->onError(e)));
+			}
+		}
+
+		if (clusterData.registered) {
+			ASSERT(metaclusterRegistration.present() &&
+			       metaclusterRegistration.get().clusterType == ClusterType::METACLUSTER_DATA);
+		} else {
+			ASSERT(!metaclusterRegistration.present());
+		}
+
+		ASSERT(tenants.size() == clusterData.tenants.size());
+		for (auto [tenantName, tenantEntry] : tenants) {
+			ASSERT(clusterData.tenants.count(tenantName));
+			ASSERT(self->createdTenants[tenantName].cluster == clusterName);
+		}
+
+		return Void();
+	}
+
 	Future<bool> check(Database const& cx) override {
 		if (clientId == 0) {
-			return _check(cx, this);
+			return _check(this);
 		} else {
 			return true;
 		}
 	}
-	ACTOR static Future<bool> _check(Database cx, MetaclusterManagementWorkload* self) {
-		wait(delay(0));
+	ACTOR static Future<bool> _check(MetaclusterManagementWorkload* self) {
+		state MetaclusterConsistencyCheck<IDatabase> metaclusterConsistencyCheck(
+		    self->managementDb, AllowPartialMetaclusterOperations::False);
+		wait(metaclusterConsistencyCheck.run());
+
+		std::map<ClusterName, DataClusterMetadata> dataClusters = wait(MetaclusterAPI::listClusters(
+		    self->managementDb, ""_sr, "\xff\xff"_sr, CLIENT_KNOBS->MAX_DATA_CLUSTERS + 1));
+
+		std::vector<Future<Void>> dataClusterChecks;
+		for (auto [clusterName, dataClusterData] : self->dataDbs) {
+			auto dataClusterItr = dataClusters.find(clusterName);
+			if (dataClusterData.registered) {
+				ASSERT(dataClusterItr != dataClusters.end());
+				ASSERT(dataClusterItr->second.entry.capacity.numTenantGroups == dataClusterData.tenantGroupCapacity);
+			} else {
+				ASSERT(dataClusterItr == dataClusters.end());
+			}
+
+			dataClusterChecks.push_back(checkDataCluster(self, clusterName, dataClusterData));
+		}
+		wait(waitForAll(dataClusterChecks));
+
 		return true;
 	}
 

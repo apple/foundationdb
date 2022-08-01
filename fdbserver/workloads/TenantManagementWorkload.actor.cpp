@@ -32,6 +32,7 @@
 #include "fdbclient/TenantSpecialKeys.actor.h"
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "fdbrpc/simulator.h"
+#include "fdbserver/workloads/MetaclusterConsistency.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/Knobs.h"
 #include "flow/Error.h"
@@ -83,6 +84,7 @@ struct TenantManagementWorkload : TestWorkload {
 	int maxTenantGroups;
 	double testDuration;
 	bool useMetacluster;
+	bool singleClient;
 
 	Version oldestDeletionVersion = 0;
 	Version newestDeletionVersion = 0;
@@ -117,6 +119,7 @@ struct TenantManagementWorkload : TestWorkload {
 		maxTenants = std::min<int>(1e8 - 1, getOption(options, "maxTenants"_sr, 1000));
 		maxTenantGroups = std::min<int>(2 * maxTenants, getOption(options, "maxTenantGroups"_sr, 20));
 		testDuration = getOption(options, "testDuration"_sr, 120.0);
+		singleClient = getOption(options, "singleClient"_sr, false);
 
 		localTenantNamePrefix = format("%stenant_%d_", tenantNamePrefix.toString().c_str(), clientId);
 		localTenantGroupNamePrefix = format("%stenantgroup_%d_", tenantNamePrefix.toString().c_str(), clientId);
@@ -150,7 +153,14 @@ struct TenantManagementWorkload : TestWorkload {
 		}
 	};
 
-	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
+	Future<Void> setup(Database const& cx) override {
+		if (clientId == 0 || !singleClient) {
+			return _setup(cx, this);
+		} else {
+			return Void();
+		}
+	}
+
 	ACTOR Future<Void> _setup(Database cx, TenantManagementWorkload* self) {
 		Reference<IDatabase> threadSafeHandle =
 		    wait(unsafeThreadFutureToFuture(ThreadSafeDatabase::createFromExistingDatabase(cx)));
@@ -1377,7 +1387,14 @@ struct TenantManagementWorkload : TestWorkload {
 		}
 	}
 
-	Future<Void> start(Database const& cx) override { return _start(cx, this); }
+	Future<Void> start(Database const& cx) override {
+		if (clientId == 0 || !singleClient) {
+			return _start(cx, this);
+		} else {
+			return Void();
+		}
+	}
+
 	ACTOR Future<Void> _start(Database cx, TenantManagementWorkload* self) {
 		state double start = now();
 
@@ -1657,7 +1674,14 @@ struct TenantManagementWorkload : TestWorkload {
 		return Void();
 	}
 
-	Future<bool> check(Database const& cx) override { return _check(cx, this); }
+	Future<bool> check(Database const& cx) override {
+		if (clientId == 0 || !singleClient) {
+			return _check(cx, this);
+		} else {
+			return true;
+		}
+	}
+
 	ACTOR static Future<bool> _check(Database cx, TenantManagementWorkload* self) {
 		state Transaction tr(self->dataDb);
 
@@ -1683,6 +1707,13 @@ struct TenantManagementWorkload : TestWorkload {
 		}
 
 		wait(compareTenants(self) && compareTenantGroups(self) && checkTenantTombstones(self));
+
+		if (self->useMetacluster) {
+			state MetaclusterConsistencyCheck<IDatabase> metaclusterConsistencyCheck(
+			    self->mvDb, AllowPartialMetaclusterOperations::False);
+			wait(metaclusterConsistencyCheck.run());
+		}
+
 		return true;
 	}
 
