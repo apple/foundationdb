@@ -1160,6 +1160,7 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobManagerData> bmData,
 	// a split. if not, and it fails too, it will retry and get back here
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
 	state Key lockKey = blobGranuleLockKeyFor(granuleRange);
+	state bool retried = false;
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::Option::PRIORITY_SYSTEM_IMMEDIATE);
@@ -1189,6 +1190,11 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobManagerData> bmData,
 			int64_t prevOwnerSeqno = std::get<1>(prevOwner);
 			UID prevGranuleID = std::get<2>(prevOwner);
 			if (prevOwnerEpoch != epoch || prevOwnerSeqno != seqno || prevGranuleID != granuleID) {
+				if (retried && prevOwnerEpoch == epoch && prevGranuleID == granuleID && prevOwnerSeqno == std::numeric_limits<int64_t>::max()) {
+					// owner didn't change, last iteration of this transaction just succeeded but threw an error.
+					CODE_PROBE(true, "split too big adjustment succeeded after retry");
+					break;
+				}
 				CODE_PROBE(true, "split too big was since moved to another worker");
 				if (BM_DEBUG) {
 					fmt::print("BM {0} re-evaluating initial split [{1} - {2}) too big: moved to another worker\n",
@@ -1232,6 +1238,7 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobManagerData> bmData,
 				                 blobGranuleMappingValueFor(UID())));
 			}
 
+			retried = true;
 			wait(tr->commit());
 			break;
 		} catch (Error& e) {
