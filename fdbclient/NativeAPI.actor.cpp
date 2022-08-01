@@ -8543,7 +8543,7 @@ Version DatabaseContext::getMinimumChangeFeedVersion() {
 
 void DatabaseContext::setDesiredChangeFeedVersion(Version v) {
 	for (auto& it : changeFeedUpdaters) {
-		if (it.second->version.get() < v) {
+		if (it.second->version.get() < v && it.second->desired.get() < v) {
 			it.second->desired.set(v);
 		}
 	}
